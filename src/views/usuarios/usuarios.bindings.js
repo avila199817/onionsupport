@@ -2,174 +2,273 @@
    Onion SPA - Usuarios Bindings
    Archivo: src/views/usuarios/usuarios.bindings.js
 
-   Responsabilidades:
+   FINAL PRO SYSTEM · DOM BINDINGS · ADMIN USERS · 10/10
+
+   RESPONSABILIDADES:
    - bind DOM robusto
    - refresh / retry
    - export CSV
+   - create usuario
    - open user modal
    - copy id
+   - paginación
+   - page-size compatible aunque la vista quede fijada a 5
    - rebind limpio tras rerender
    - cleanup sólido por scope
+   - compatibilidad data-usuarios-action + data-action
 
-   FIX CRÍTICO:
+   HARDENING PRO:
    - evita doble click handlers
    - soporta botones dinámicos
    - delegación premium
+   - fallback si AppCore.cleanup no existe
+   - no rompe si se usa con UsuariosView moderno
+   - no rompe si se usa en legacy externo
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
-const DEFAULT_SCOPE =
-  "view:usuarios";
+const DEFAULT_SCOPE = "view:usuarios";
 
 /* =========================================================
-   HELPERS
+   LOCAL CLEANUP FALLBACK
 ========================================================= */
 
-function safeText(
-  value,
-  fallback = ""
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+const localCleanups = new Map();
+
+/* =========================================================
+   SAFE HELPERS
+========================================================= */
+
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
+  const text = String(value).trim();
 
   return text || fallback;
 }
 
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function safeObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function first(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    return value;
+  }
+
+  return null;
+}
+
 function safeWarn(...args) {
   try {
-    AppCore?.utils?.warn?.(
-      "[UsuariosBindings]",
-      ...args
-    );
+    AppCore?.utils?.warn?.("[UsuariosBindings]", ...args);
   } catch {}
 }
 
-function resolveScopeName(
-  scope = DEFAULT_SCOPE
-) {
-  return safeText(
-    scope,
-    DEFAULT_SCOPE
-  );
+function resolveScopeName(scope = DEFAULT_SCOPE) {
+  return safeText(scope, DEFAULT_SCOPE);
 }
 
-function getScope(
-  scopeName = DEFAULT_SCOPE
-) {
-  const finalScope =
-    resolveScopeName(
-      scopeName
-    );
-
-  try {
-    AppCore?.cleanup?.run?.(
-      finalScope
-    );
-  } catch {}
-
-  try {
-    return (
-      AppCore?.cleanup?.scope?.(
-        finalScope
-      ) || finalScope
-    );
-  } catch {
-    return finalScope;
-  }
-}
-
-function getContainer() {
+function getContainer(customRoot = null) {
   return (
-    AppCore?.dom
-      ?.viewContainer ||
-    document.getElementById(
-      "view-container"
-    ) ||
+    customRoot ||
+    AppCore?.dom?.viewContainer ||
+    document.getElementById("view-container") ||
     document
   );
 }
 
-function getUserId(
-  element
-) {
-  return safeText(
-    element?.dataset
-      ?.userId ||
-      element?.dataset
-      ?.usuarioId ||
-      element?.dataset
-      ?.id ||
-      element?.getAttribute?.(
-        "data-user-id"
-      ) ||
-      element?.getAttribute?.(
-        "data-usuario-id"
-      ) ||
-      element?.getAttribute?.(
-        "data-id"
-      ),
-    ""
-  );
+/* =========================================================
+   CLEANUP
+========================================================= */
+
+function runLocalCleanup(scopeName = DEFAULT_SCOPE) {
+  const finalScope = resolveScopeName(scopeName);
+  const cleanups = localCleanups.get(finalScope) || [];
+
+  for (const cleanup of cleanups) {
+    try {
+      cleanup?.();
+    } catch {}
+  }
+
+  localCleanups.delete(finalScope);
 }
 
-function getUsername(
-  element
-) {
-  return safeText(
-    element?.dataset
-      ?.username ||
-      element?.dataset
-      ?.userName ||
-      element?.dataset
-      ?.usuarioName ||
-      element?.getAttribute?.(
-        "data-username"
-      ) ||
-      element?.getAttribute?.(
-        "data-user-name"
-      ) ||
-      element?.getAttribute?.(
-        "data-usuario-name"
-      ),
-    ""
-  );
+function pushLocalCleanup(scopeName = DEFAULT_SCOPE, cleanup = null) {
+  if (typeof cleanup !== "function") return;
+
+  const finalScope = resolveScopeName(scopeName);
+  const cleanups = localCleanups.get(finalScope) || [];
+
+  cleanups.push(cleanup);
+  localCleanups.set(finalScope, cleanups);
 }
 
-async function safeReload(
-  reload,
-  loadUsuarios
-) {
+function cleanupScope(scopeName = DEFAULT_SCOPE) {
+  const finalScope = resolveScopeName(scopeName);
+
   try {
-    if (
-      typeof reload ===
-      "function"
-    ) {
-      await reload();
-      return;
+    AppCore?.cleanup?.run?.(finalScope);
+  } catch {}
+
+  runLocalCleanup(finalScope);
+}
+
+function bindEvent(scopeName, target, eventName, handler, options = undefined) {
+  const finalScope = resolveScopeName(scopeName);
+
+  if (!target || typeof target.addEventListener !== "function") {
+    return () => {};
+  }
+
+  try {
+    if (typeof AppCore?.cleanup?.on === "function") {
+      AppCore.cleanup.on(finalScope, target, eventName, handler, options);
+      return () => {
+        try {
+          target.removeEventListener(eventName, handler, options);
+        } catch {}
+      };
+    }
+  } catch {}
+
+  try {
+    target.addEventListener(eventName, handler, options);
+
+    const cleanup = () => {
+      try {
+        target.removeEventListener(eventName, handler, options);
+      } catch {}
+    };
+
+    pushLocalCleanup(finalScope, cleanup);
+
+    return cleanup;
+  } catch {
+    return () => {};
+  }
+}
+
+/* =========================================================
+   ACTION / DATA HELPERS
+========================================================= */
+
+function getActionTarget(event, actions = []) {
+  const selectors = actions
+    .map((action) => {
+      return [
+        `[data-usuarios-action="${action}"]`,
+        `[data-action="${action}"]`,
+      ].join(",");
+    })
+    .join(",");
+
+  if (!selectors) return null;
+
+  return event.target?.closest?.(selectors) || null;
+}
+
+function getUserId(element = null) {
+  return safeText(
+    first(
+      element?.dataset?.userId,
+      element?.dataset?.usuarioId,
+      element?.dataset?.id,
+      element?.dataset?.username,
+      element?.dataset?.userName,
+
+      element?.getAttribute?.("data-user-id"),
+      element?.getAttribute?.("data-usuario-id"),
+      element?.getAttribute?.("data-id"),
+      element?.getAttribute?.("data-username"),
+      element?.getAttribute?.("data-user-name")
+    ),
+    ""
+  );
+}
+
+function getUsername(element = null) {
+  return safeText(
+    first(
+      element?.dataset?.username,
+      element?.dataset?.userName,
+      element?.dataset?.usuarioName,
+
+      element?.getAttribute?.("data-username"),
+      element?.getAttribute?.("data-user-name"),
+      element?.getAttribute?.("data-usuario-name")
+    ),
+    ""
+  );
+}
+
+function getPage(element = null, fallback = 1) {
+  return Math.max(
+    1,
+    safeNumber(
+      first(
+        element?.dataset?.page,
+        element?.getAttribute?.("data-page")
+      ),
+      fallback
+    )
+  );
+}
+
+async function safeReload({
+  reload,
+  loadUsuarios,
+  force = true,
+  asRefresh = true,
+  silent = false,
+} = {}) {
+  try {
+    if (typeof reload === "function") {
+      await reload({
+        force,
+        asRefresh,
+        silent,
+      });
+      return true;
     }
 
-    if (
-      typeof loadUsuarios ===
-      "function"
-    ) {
+    if (typeof loadUsuarios === "function") {
       await loadUsuarios({
-        force: true,
+        force,
+        silent,
       });
+      return true;
     }
   } catch (error) {
-    safeWarn(
-      "reload falló",
-      error
-    );
+    safeWarn("reload falló", error);
   }
+
+  return false;
+}
+
+async function callMaybeAsync(fn, args = [], label = "acción") {
+  try {
+    if (typeof fn === "function") {
+      return await fn(...args);
+    }
+  } catch (error) {
+    safeWarn(`${label} falló`, error);
+  }
+
+  return undefined;
 }
 
 /* =========================================================
@@ -177,191 +276,297 @@ async function safeReload(
 ========================================================= */
 
 export function bindUsuariosEvents({
+  root = null,
+
   loadUsuarios,
   openUsuario,
+  createUsuario,
+  copyUsuarioId,
   copyUsuarioIdAction,
+  exportCsv,
   exportUsuariosCsvAction,
   reload,
+
+  goToPage,
+  goPrevPage,
+  goNextPage,
+  changePageSize,
+
   scope = DEFAULT_SCOPE,
 } = {}) {
-  const scopeRef =
-    getScope(scope);
+  const scopeName = resolveScopeName(scope);
 
-  const root =
-    getContainer();
+  /*
+    Limpieza antes de volver a bindear.
+    Evita doble handler tras rerender.
+  */
+  cleanupScope(scopeName);
 
-  const refreshBtn =
-    document.getElementById(
-      "usuarios-refresh-btn"
-    );
+  const container = getContainer(root);
 
-  const retryBtn =
-    document.getElementById(
-      "usuarios-retry-btn"
-    );
-
-  const exportBtn =
-    document.getElementById(
-      "usuarios-export-btn"
-    );
-
-  /* =========================================
-     DIRECT BUTTONS
-  ========================================= */
-
-  if (refreshBtn) {
-    AppCore.cleanup.on(
-      scopeRef,
-      refreshBtn,
-      "click",
-      async (event) => {
-        event.preventDefault();
-
-        await safeReload(
-          reload,
-          loadUsuarios
-        );
-      }
-    );
+  if (!container) {
+    safeWarn("No hay contenedor para bindUsuariosEvents.");
+    return () => cleanupScope(scopeName);
   }
 
-  if (retryBtn) {
-    AppCore.cleanup.on(
-      scopeRef,
-      retryBtn,
-      "click",
-      async (event) => {
-        event.preventDefault();
+  const handleRefresh = async ({ asRefresh = true } = {}) => {
+    await safeReload({
+      reload,
+      loadUsuarios,
+      force: true,
+      asRefresh,
+      silent: false,
+    });
+  };
 
-        await safeReload(
-          reload,
-          loadUsuarios
-        );
-      }
-    );
-  }
+  const onClick = async (event) => {
+    const target = event.target;
 
-  if (exportBtn) {
-    AppCore.cleanup.on(
-      scopeRef,
-      exportBtn,
-      "click",
-      async (event) => {
-        event.preventDefault();
+    if (!target) return;
 
-        try {
-          await exportUsuariosCsvAction?.();
-        } catch (error) {
-          safeWarn(
-            "export falló",
-            error
-          );
-        }
-      }
-    );
-  }
+    /* =========================================
+       OPEN DETAIL
+    ========================================= */
 
-  /* =========================================
-     DELEGATED ACTIONS
-  ========================================= */
+    const openBtn =
+      getActionTarget(event, [
+        "detail",
+        "open",
+        "open-user",
+        "open-usuario",
+        "view-user",
+        "view-usuario",
+      ]);
 
-  AppCore.cleanup.on(
-    scopeRef,
-    root,
-    "click",
-    async (event) => {
-      const openBtn =
-        event.target?.closest?.(
-          '[data-action="open-user"]'
-        ) ||
-        event.target?.closest?.(
-          '[data-action="open-usuario"]'
-        );
+    if (openBtn) {
+      event.preventDefault();
+      event.stopPropagation();
 
-      if (openBtn) {
-        event.preventDefault();
-        event.stopPropagation();
+      const userId = getUserId(openBtn);
 
-        const userId =
-          getUserId(
-            openBtn
-          );
-
-        if (!userId) {
-          safeWarn(
-            "open-user sin id"
-          );
-          return;
-        }
-
-        try {
-          await openUsuario?.(
-            userId
-          );
-        } catch (error) {
-          safeWarn(
-            "openUsuario falló",
-            error
-          );
-        }
-
+      if (!userId) {
+        safeWarn("open-user sin id");
         return;
       }
 
-      const copyBtn =
-        event.target?.closest?.(
-          '[data-action="copy-user-id"]'
-        ) ||
-        event.target?.closest?.(
-          '[data-action="copy-usuario-id"]'
-        );
+      await callMaybeAsync(openUsuario, [userId], "openUsuario");
+      return;
+    }
 
-      if (copyBtn) {
-        event.preventDefault();
-        event.stopPropagation();
+    /* =========================================
+       COPY ID
+    ========================================= */
 
-        const userId =
-          getUserId(
-            copyBtn
-          );
+    const copyBtn =
+      getActionTarget(event, [
+        "copy",
+        "copy-id",
+        "copy-user-id",
+        "copy-usuario-id",
+      ]);
 
-        const username =
-          getUsername(
-            copyBtn
-          );
+    if (copyBtn) {
+      event.preventDefault();
+      event.stopPropagation();
 
-        try {
-          await copyUsuarioIdAction?.({
+      const userId = getUserId(copyBtn);
+      const username = getUsername(copyBtn);
+
+      const fn = copyUsuarioIdAction || copyUsuarioId;
+
+      await callMaybeAsync(
+        fn,
+        [
+          {
             userId,
             username,
-          });
-        } catch (error) {
-          safeWarn(
-            "copyUsuarioIdAction falló",
-            error
-          );
-        }
+            silent: false,
+          },
+        ],
+        "copyUsuarioId"
+      );
 
-        return;
-      }
+      return;
     }
-  );
 
-  /* =========================================
-     CLEANUP
-  ========================================= */
+    /* =========================================
+       PAGINATION
+    ========================================= */
+
+    const pageBtn =
+      getActionTarget(event, [
+        "page",
+        "go-page",
+      ]);
+
+    if (pageBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const page = getPage(pageBtn, 1);
+
+      await callMaybeAsync(goToPage, [page], "goToPage");
+      return;
+    }
+
+    const prevBtn =
+      getActionTarget(event, [
+        "prev-page",
+        "pagination-prev",
+      ]);
+
+    if (prevBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      await callMaybeAsync(goPrevPage, [], "goPrevPage");
+      return;
+    }
+
+    const nextBtn =
+      getActionTarget(event, [
+        "next-page",
+        "pagination-next",
+      ]);
+
+    if (nextBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      await callMaybeAsync(goNextPage, [], "goNextPage");
+      return;
+    }
+
+    /* =========================================
+       EXPORT
+    ========================================= */
+
+    const exportBtn =
+      getActionTarget(event, [
+        "export",
+        "export-csv",
+      ]) ||
+      target.closest?.("#usuarios-export-btn");
+
+    if (exportBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const fn = exportUsuariosCsvAction || exportCsv;
+
+      await callMaybeAsync(
+        fn,
+        [
+          {
+            silent: false,
+          },
+        ],
+        "exportUsuariosCsv"
+      );
+
+      return;
+    }
+
+    /* =========================================
+       CREATE
+    ========================================= */
+
+    const createBtn =
+      getActionTarget(event, [
+        "create",
+        "new",
+        "new-user",
+        "new-usuario",
+        "create-user",
+        "create-usuario",
+      ]) ||
+      target.closest?.("#usuarios-create-btn") ||
+      target.closest?.("#usuarios-create-empty-btn");
+
+    if (createBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      await callMaybeAsync(createUsuario, [], "createUsuario");
+      return;
+    }
+
+    /* =========================================
+       RETRY
+    ========================================= */
+
+    const retryBtn =
+      getActionTarget(event, [
+        "retry",
+      ]) ||
+      target.closest?.("#usuarios-retry-btn");
+
+    if (retryBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      await handleRefresh({
+        asRefresh: false,
+      });
+
+      return;
+    }
+
+    /* =========================================
+       REFRESH
+    ========================================= */
+
+    const refreshBtn =
+      getActionTarget(event, [
+        "refresh",
+        "reload",
+      ]) ||
+      target.closest?.("#usuarios-refresh-btn");
+
+    if (refreshBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      await handleRefresh({
+        asRefresh: true,
+      });
+    }
+  };
+
+  const onChange = async (event) => {
+    const field =
+      event.target?.closest?.("[data-usuarios-field='page-size']") ||
+      event.target?.closest?.("[data-field='page-size']");
+
+    if (!field) return;
+
+    event.preventDefault();
+
+    const value = safeNumber(field.value, 5);
+
+    await callMaybeAsync(changePageSize, [value], "changePageSize");
+  };
+
+  bindEvent(scopeName, container, "click", onClick);
+  bindEvent(scopeName, container, "change", onChange);
 
   return () => {
-    try {
-      AppCore?.cleanup?.run?.(
-        resolveScopeName(
-          scope
-        )
-      );
-    } catch {}
+    cleanupScope(scopeName);
   };
+}
+
+/* =========================================================
+   LEGACY ALIASES
+========================================================= */
+
+export const bind = bindUsuariosEvents;
+
+export function unbindUsuariosEvents(scope = DEFAULT_SCOPE) {
+  cleanupScope(scope);
 }
 
 export default {
   bindUsuariosEvents,
+  bind,
+  unbindUsuariosEvents,
 };

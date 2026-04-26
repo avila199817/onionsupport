@@ -11,16 +11,21 @@
    - event bus
    - cleanup scopes
    - módulos
+   - hooks
    - request/api client
    - init idempotente real
    - wrappers seguros de session/ui
+   - bridge global Toast
+   - snapshots de diagnóstico
 
    HARDENING EXTREMO:
    - cero undefined setters
    - estado siempre vivo
    - boot serializado
-   - compat total con router/auth
+   - compat total con router/auth/app bootstrap
    - sync auth derivada robusta
+   - fallback si factories parciales fallan
+   - no ReferenceError server-side
    - API congelada estable
 ========================================================= */
 
@@ -106,48 +111,13 @@ export const AppCore = (() => {
 
   let initPromise = null;
   let initialized = false;
+  let initCycle = 0;
+  let networkEventsBound = false;
+  let showToastBridge = null;
 
-  /* =========================================================
-     ROOT STATE
-  ========================================================= */
-
-  const state =
-    createInitialState({
-      config,
-    }) || {};
-
-  const dom =
-    createDomCache() || {};
-
-  const registry = {
-    modules: new Map(),
-    scopes: new Map(),
-    hooks: {
-      beforeInit: [],
-      afterInit: [],
-      beforeRequest: [],
-      afterResponse: [],
-      onRequestError: [],
-    },
-  };
-
-  const events =
-    createEvents();
-
-  const modules =
-    createModules({
-      registry,
-      events,
-    });
-
-  const hooks =
-    createHooks({
-      registry,
-    });
-
-  /* =========================================================
-     BASICS
-  ========================================================= */
+  /* =======================================================
+     BASIC SAFE HELPERS
+  ======================================================= */
 
   function isBrowser() {
     return (
@@ -156,30 +126,924 @@ export const AppCore = (() => {
     );
   }
 
-  function safeLog(...args) {
-    if (!config.debug) return;
+  function isObject(value) {
+    return (
+      value !== null &&
+      typeof value === "object"
+    );
+  }
 
-    console.log(
-      `[${config.appName}]`,
+  function ensureObject(value) {
+    return isObject(value)
+      ? value
+      : {};
+  }
+
+  function isFunction(value) {
+    return typeof value === "function";
+  }
+
+  function safeText(value, fallback = "") {
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      return fallback;
+    }
+
+    const text =
+      String(value).trim();
+
+    return text || fallback;
+  }
+
+  function safeBool(value, fallback = false) {
+    if (value === true) {
+      return true;
+    }
+
+    if (value === false) {
+      return false;
+    }
+
+    return Boolean(fallback);
+  }
+
+  function safeArray(value) {
+    return Array.isArray(value)
+      ? value
+      : [];
+  }
+
+  function safeNow() {
+    return Date.now();
+  }
+
+  function safeIsoDate(ms = safeNow()) {
+    try {
+      return new Date(ms).toISOString();
+    } catch {
+      return "";
+    }
+  }
+
+  function safeInvoke(fn, thisArg = null, args = []) {
+    try {
+      if (isFunction(fn)) {
+        return fn.apply(
+          thisArg,
+          safeArray(args)
+        );
+      }
+    } catch {}
+
+    return undefined;
+  }
+
+  function safeFactory(factory, fallback, ...args) {
+    try {
+      if (isFunction(factory)) {
+        const value =
+          factory(...args);
+
+        if (value) {
+          return value;
+        }
+      }
+    } catch {}
+
+    return isFunction(fallback)
+      ? fallback()
+      : fallback;
+  }
+
+  function getDebugEnabled() {
+    try {
+      return Boolean(config?.debug);
+    } catch {
+      return false;
+    }
+  }
+
+  function getAppName() {
+    return (
+      safeText(config?.appName, "") ||
+      safeText(config?.name, "") ||
+      "Onion SPA"
+    );
+  }
+
+  function safeConsole(method = "log", ...args) {
+    try {
+      const fn =
+        console?.[method] ||
+        console?.log;
+
+      fn?.(
+        `[${getAppName()}]`,
+        ...args
+      );
+    } catch {}
+  }
+
+  function safeLog(...args) {
+    if (!getDebugEnabled()) {
+      return;
+    }
+
+    safeConsole(
+      "log",
       ...args
     );
   }
 
   function safeWarn(...args) {
-    if (!config.debug) return;
+    if (!getDebugEnabled()) {
+      return;
+    }
 
-    console.warn(
-      `[${config.appName}]`,
+    safeConsole(
+      "warn",
       ...args
     );
   }
 
   function safeError(...args) {
-    console.error(
-      `[${config.appName}]`,
+    safeConsole(
+      "error",
       ...args
     );
   }
+
+  /* =======================================================
+     FALLBACK EVENTS
+  ======================================================= */
+
+  function createFallbackEvents() {
+    const listeners =
+      new Map();
+
+    function getSet(name) {
+      const key =
+        safeText(name, "");
+
+      if (!key) {
+        return null;
+      }
+
+      if (!listeners.has(key)) {
+        listeners.set(
+          key,
+          new Set()
+        );
+      }
+
+      return listeners.get(key);
+    }
+
+    function on(name, handler) {
+      if (
+        !name ||
+        !isFunction(handler)
+      ) {
+        return () => {};
+      }
+
+      const set =
+        getSet(name);
+
+      if (!set) {
+        return () => {};
+      }
+
+      set.add(handler);
+
+      return () =>
+        off(
+          name,
+          handler
+        );
+    }
+
+    function once(name, handler) {
+      if (
+        !name ||
+        !isFunction(handler)
+      ) {
+        return () => {};
+      }
+
+      const dispose =
+        on(
+          name,
+          (...args) => {
+            dispose();
+
+            handler(...args);
+          }
+        );
+
+      return dispose;
+    }
+
+    function off(name, handler) {
+      try {
+        listeners
+          .get(name)
+          ?.delete(handler);
+      } catch {}
+
+      return true;
+    }
+
+    function emit(name, payload = {}) {
+      const set =
+        listeners.get(name);
+
+      if (!set) {
+        return false;
+      }
+
+      for (const handler of Array.from(set)) {
+        try {
+          handler(payload);
+        } catch (error) {
+          safeWarn(
+            "Fallback event handler error:",
+            name,
+            error
+          );
+        }
+      }
+
+      return true;
+    }
+
+    function clear(name = "") {
+      if (name) {
+        listeners.delete(name);
+        return true;
+      }
+
+      listeners.clear();
+      return true;
+    }
+
+    return {
+      on,
+      once,
+      off,
+      emit,
+      clear,
+    };
+  }
+
+  /* =======================================================
+     ROOT REGISTRY / STATE
+  ======================================================= */
+
+  const registry = {
+    modules:
+      new Map(),
+
+    scopes:
+      new Map(),
+
+    hooks: {
+      beforeInit:
+        [],
+
+      afterInit:
+        [],
+
+      beforeRequest:
+        [],
+
+      afterResponse:
+        [],
+
+      onRequestError:
+        [],
+    },
+  };
+
+  const events =
+    safeFactory(
+      createEvents,
+      createFallbackEvents
+    );
+
+  const state =
+    safeFactory(
+      createInitialState,
+      () => ({}),
+      {
+        config,
+      }
+    ) || {};
+
+  const dom =
+    safeFactory(
+      createDomCache,
+      () => ({})
+    ) || {};
+
+  /* =======================================================
+     UTILS
+  ======================================================= */
+
+  const utils = {
+    qs(selector, scope = null) {
+      if (!isBrowser()) {
+        return null;
+      }
+
+      const root =
+        scope ||
+        document;
+
+      try {
+        return (
+          root?.querySelector?.(
+            selector
+          ) || null
+        );
+      } catch {
+        return null;
+      }
+    },
+
+    qsa(selector, scope = null) {
+      if (!isBrowser()) {
+        return [];
+      }
+
+      const root =
+        scope ||
+        document;
+
+      try {
+        return Array.from(
+          root?.querySelectorAll?.(
+            selector
+          ) || []
+        );
+      } catch {
+        return [];
+      }
+    },
+
+    byId(id = "") {
+      if (!isBrowser()) {
+        return null;
+      }
+
+      try {
+        return document.getElementById(
+          id
+        );
+      } catch {
+        return null;
+      }
+    },
+
+    on(target, ev, fn, opts = false) {
+      if (
+        !target ||
+        !ev ||
+        !isFunction(fn)
+      ) {
+        return () => {};
+      }
+
+      try {
+        target.addEventListener(
+          ev,
+          fn,
+          opts
+        );
+
+        return () => {
+          try {
+            target.removeEventListener(
+              ev,
+              fn,
+              opts
+            );
+          } catch {}
+        };
+      } catch {
+        return () => {};
+      }
+    },
+
+    off(target, ev, fn, opts = false) {
+      try {
+        target?.removeEventListener?.(
+          ev,
+          fn,
+          opts
+        );
+      } catch {}
+    },
+
+    sleep(ms = 0) {
+      return new Promise((resolve) =>
+        setTimeout(
+          resolve,
+          Number.isFinite(Number(ms))
+            ? Number(ms)
+            : 0
+        )
+      );
+    },
+
+    nextTick(fn) {
+      return Promise.resolve()
+        .then(() => {
+          if (isFunction(fn)) {
+            return fn();
+          }
+
+          return undefined;
+        });
+    },
+
+    afterPaint(fn) {
+      if (!isBrowser()) {
+        if (isFunction(fn)) {
+          try {
+            fn();
+          } catch {}
+        }
+
+        return;
+      }
+
+      try {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            try {
+              fn?.();
+            } catch {}
+          });
+        });
+
+        return;
+      } catch {}
+
+      setTimeout(() => {
+        try {
+          fn?.();
+        } catch {}
+      }, 0);
+    },
+
+    log:
+      safeLog,
+
+    warn:
+      safeWarn,
+
+    error:
+      safeError,
+
+    safeClone,
+    cloneError,
+
+    joinUrl,
+    buildUrl,
+
+    normalizePath,
+    normalizeCanonicalPath,
+    stripUsernamePrefix,
+
+    sanitizeUsername,
+    slugify,
+
+    normalizeUser,
+    getUserUsername,
+    getUserDisplayName,
+    getUserAvatarUrl,
+    hasValidToken,
+    getInitials,
+    isPublicApiPath,
+  };
+
+  /* =======================================================
+     FALLBACK CLEANUP
+  ======================================================= */
+
+  function createFallbackCleanup() {
+    function ensureScope(name = "global") {
+      const scopeName =
+        safeText(name, "global");
+
+      if (!registry.scopes.has(scopeName)) {
+        registry.scopes.set(
+          scopeName,
+          new Set()
+        );
+      }
+
+      return {
+        name:
+          scopeName,
+      };
+    }
+
+    function add(scopeName, disposer) {
+      if (!isFunction(disposer)) {
+        return false;
+      }
+
+      const scope =
+        ensureScope(scopeName).name;
+
+      registry.scopes
+        .get(scope)
+        .add(disposer);
+
+      return true;
+    }
+
+    function event(scopeName, targetOrName, eventNameOrHandler, handlerOrOptions, maybeOptions) {
+      const scope =
+        ensureScope(scopeName).name;
+
+      let target =
+        null;
+
+      let eventName =
+        "";
+
+      let handler =
+        null;
+
+      let options =
+        false;
+
+      if (
+        targetOrName &&
+        isFunction(targetOrName.addEventListener)
+      ) {
+        target =
+          targetOrName;
+
+        eventName =
+          safeText(
+            eventNameOrHandler,
+            ""
+          );
+
+        handler =
+          handlerOrOptions;
+
+        options =
+          maybeOptions || false;
+      } else {
+        target =
+          isBrowser()
+            ? window
+            : null;
+
+        eventName =
+          safeText(
+            targetOrName,
+            ""
+          );
+
+        handler =
+          eventNameOrHandler;
+
+        options =
+          handlerOrOptions || false;
+      }
+
+      if (
+        !target ||
+        !eventName ||
+        !isFunction(handler)
+      ) {
+        return false;
+      }
+
+      try {
+        target.addEventListener(
+          eventName,
+          handler,
+          options
+        );
+
+        add(scope, () => {
+          try {
+            target.removeEventListener(
+              eventName,
+              handler,
+              options
+            );
+          } catch {}
+        });
+
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    function run(scopeName = "global") {
+      const scope =
+        safeText(scopeName, "global");
+
+      const disposers =
+        registry.scopes.get(scope);
+
+      if (!disposers) {
+        return true;
+      }
+
+      for (const dispose of Array.from(disposers)) {
+        try {
+          dispose();
+        } catch {}
+      }
+
+      disposers.clear();
+
+      return true;
+    }
+
+    function clear(scopeName = "") {
+      if (scopeName) {
+        return run(scopeName);
+      }
+
+      for (const key of Array.from(registry.scopes.keys())) {
+        run(key);
+      }
+
+      registry.scopes.clear();
+
+      return true;
+    }
+
+    return {
+      scope:
+        ensureScope,
+
+      ensureScope,
+
+      add,
+      event,
+      run,
+      clear,
+      dispose:
+        run,
+    };
+  }
+
+  /* =======================================================
+     FALLBACK STORAGE
+  ======================================================= */
+
+  function createFallbackStorage() {
+    const memory =
+      new Map();
+
+    const prefix =
+      safeText(
+        config?.storagePrefix ||
+          config?.appKey ||
+          "onion",
+        "onion"
+      );
+
+    function key(name = "") {
+      return `${prefix}:${safeText(name, "")}`;
+    }
+
+    function get(name, fallback = null) {
+      const finalKey =
+        key(name);
+
+      try {
+        if (isBrowser()) {
+          const raw =
+            window.localStorage?.getItem?.(
+              finalKey
+            );
+
+          if (raw !== null && raw !== undefined) {
+            try {
+              return JSON.parse(raw);
+            } catch {
+              return raw;
+            }
+          }
+        }
+      } catch {}
+
+      return memory.has(finalKey)
+        ? memory.get(finalKey)
+        : fallback;
+    }
+
+    function set(name, value) {
+      const finalKey =
+        key(name);
+
+      memory.set(
+        finalKey,
+        value
+      );
+
+      try {
+        if (isBrowser()) {
+          window.localStorage?.setItem?.(
+            finalKey,
+            JSON.stringify(value)
+          );
+        }
+      } catch {}
+
+      return true;
+    }
+
+    function remove(name) {
+      const finalKey =
+        key(name);
+
+      memory.delete(finalKey);
+
+      try {
+        if (isBrowser()) {
+          window.localStorage?.removeItem?.(
+            finalKey
+          );
+        }
+      } catch {}
+
+      return true;
+    }
+
+    return {
+      key,
+      get,
+      set,
+      remove,
+      del:
+        remove,
+      delete:
+        remove,
+    };
+  }
+
+  /* =======================================================
+     FACTORIES
+  ======================================================= */
+
+  const cleanup =
+    safeFactory(
+      createCleanup,
+      createFallbackCleanup,
+      {
+        registry,
+        events,
+        utils,
+      }
+    );
+
+  const storage =
+    safeFactory(
+      createStorage,
+      createFallbackStorage,
+      utils
+    );
+
+  function createFallbackModules() {
+    return {
+      has(name) {
+        return registry.modules.has(
+          safeText(name, "")
+        );
+      },
+
+      get(name) {
+        return registry.modules.get(
+          safeText(name, "")
+        );
+      },
+
+      register(name, moduleRef) {
+        const key =
+          safeText(name, "");
+
+        if (
+          !key ||
+          !moduleRef
+        ) {
+          return false;
+        }
+
+        if (!registry.modules.has(key)) {
+          registry.modules.set(
+            key,
+            moduleRef
+          );
+
+          try {
+            events.emit(
+              "app:module:registered",
+              {
+                name:
+                  key,
+              }
+            );
+          } catch {}
+        }
+
+        return true;
+      },
+
+      set(name, moduleRef) {
+        return this.register(
+          name,
+          moduleRef
+        );
+      },
+
+      list() {
+        return Array.from(
+          registry.modules.keys()
+        );
+      },
+    };
+  }
+
+  function createFallbackHooks() {
+    function add(name, handler) {
+      const key =
+        safeText(name, "");
+
+      if (
+        !key ||
+        !isFunction(handler)
+      ) {
+        return () => {};
+      }
+
+      if (!Array.isArray(registry.hooks[key])) {
+        registry.hooks[key] = [];
+      }
+
+      registry.hooks[key].push(handler);
+
+      return () => {
+        registry.hooks[key] =
+          registry.hooks[key].filter((item) =>
+            item !== handler
+          );
+      };
+    }
+
+    return {
+      add,
+      on:
+        add,
+
+      use:
+        add,
+
+      get(name) {
+        return registry.hooks[
+          safeText(name, "")
+        ] || [];
+      },
+    };
+  }
+
+  const modules =
+    safeFactory(
+      createModules,
+      createFallbackModules,
+      {
+        registry,
+        events,
+      }
+    );
+
+  const hooks =
+    safeFactory(
+      createHooks,
+      createFallbackHooks,
+      {
+        registry,
+      }
+    );
+
+  /* =======================================================
+     STATE HELPERS
+  ======================================================= */
 
   function ensureState() {
     if (
@@ -192,34 +1056,137 @@ export const AppCore = (() => {
     return state;
   }
 
-  function syncDerivedAuthState() {
+  function hasTokenValue(token) {
+    try {
+      return Boolean(
+        hasValidToken(token)
+      );
+    } catch {}
+
+    return Boolean(
+      safeText(token, "")
+    );
+  }
+
+  function hasUserValue(user) {
+    if (!user || !isObject(user)) {
+      return false;
+    }
+
+    return Boolean(
+      safeText(user.id, "") ||
+      safeText(user.userId, "") ||
+      safeText(user.username, "") ||
+      safeText(user.email, "") ||
+      safeText(user.name, "")
+    );
+  }
+
+  function normalizeRoleValue(user = null, explicitRole = "") {
+    return safeText(
+      explicitRole ||
+        user?.role ||
+        user?.rol ||
+        user?.profile?.role ||
+        "",
+      ""
+    )
+      .toLowerCase();
+  }
+
+  function syncDerivedAuthState(options = {}) {
     const root =
       ensureState();
 
+    const opts =
+      ensureObject(options);
+
+    const tokenValid =
+      hasTokenValue(root.token);
+
+    const userPresent =
+      hasUserValue(root.user);
+
+    const explicitAuthenticated =
+      root.authenticated === true;
+
+    const forceUnauthenticated =
+      opts.forceUnauthenticated === true;
+
+    const allowExplicitAuthenticated =
+      opts.allowExplicitAuthenticated !== false;
+
+    const authenticated =
+      forceUnauthenticated
+        ? false
+        : Boolean(
+            tokenValid ||
+              (
+                allowExplicitAuthenticated &&
+                explicitAuthenticated &&
+                userPresent
+              )
+          );
+
     root.authenticated =
-      Boolean(
-        root.token &&
-        String(root.token).trim()
-      );
+      authenticated;
+
+    root.hasToken =
+      tokenValid;
 
     root.role =
-      root.authenticated
-        ? String(
-            root.user?.role ||
-              root.user?.rol ||
-              ""
+      authenticated
+        ? normalizeRoleValue(
+            root.user,
+            root.role
           )
-            .trim()
-            .toLowerCase()
+        : "";
+
+    root.username =
+      authenticated
+        ? safeText(
+            root.user?.username ||
+              root.user?.email ||
+              root.user?.name,
+            ""
+          )
         : "";
 
     return root;
   }
 
-  async function runInitHooks(
-    type,
-    payload = {}
-  ) {
+  function clonePublicState() {
+    try {
+      return cloneState(
+        ensureState()
+      );
+    } catch {}
+
+    try {
+      return safeClone(
+        ensureState()
+      );
+    } catch {}
+
+    return {
+      ...ensureState(),
+    };
+  }
+
+  function safeEmit(name, payload = {}) {
+    try {
+      events?.emit?.(
+        name,
+        payload
+      );
+
+      return true;
+    } catch {}
+
+    return false;
+  }
+
+  async function runInitHooks(type, payload = {}) {
     const list =
       registry?.hooks?.[type];
 
@@ -230,13 +1197,11 @@ export const AppCore = (() => {
       return payload;
     }
 
-    let current = payload;
+    let current =
+      payload;
 
     for (const hook of list) {
-      if (
-        typeof hook !==
-        "function"
-      ) {
+      if (!isFunction(hook)) {
         continue;
       }
 
@@ -246,10 +1211,10 @@ export const AppCore = (() => {
 
         if (
           next &&
-          typeof next ===
-            "object"
+          typeof next === "object"
         ) {
-          current = next;
+          current =
+            next;
         }
       } catch (error) {
         safeWarn(
@@ -263,141 +1228,58 @@ export const AppCore = (() => {
     return current;
   }
 
-  /* =========================================================
-     UTILS
-  ========================================================= */
-
-  const utils = {
-    qs(selector, scope = document) {
-      if (!isBrowser()) {
-        return null;
-      }
-
-      return (
-        scope?.querySelector?.(
-          selector
-        ) || null
-      );
-    },
-
-    qsa(selector, scope = document) {
-      if (!isBrowser()) {
-        return [];
-      }
-
-      return Array.from(
-        scope?.querySelectorAll?.(
-          selector
-        ) || []
-      );
-    },
-
-    on(
-      target,
-      ev,
-      fn,
-      opts = false
-    ) {
-      if (
-        !target ||
-        !ev ||
-        !fn
-      ) {
-        return () => {};
-      }
-
-      target.addEventListener(
-        ev,
-        fn,
-        opts
-      );
-
-      return () =>
-        target.removeEventListener(
-          ev,
-          fn,
-          opts
-        );
-    },
-
-    off(
-      target,
-      ev,
-      fn,
-      opts = false
-    ) {
-      target?.removeEventListener?.(
-        ev,
-        fn,
-        opts
-      );
-    },
-
-    sleep(ms = 0) {
-      return new Promise(
-        (resolve) =>
-          setTimeout(
-            resolve,
-            ms
-          )
-      );
-    },
-
-    log: safeLog,
-    warn: safeWarn,
-    error: safeError,
-
-    safeClone,
-    cloneError,
-    joinUrl,
-    buildUrl,
-    normalizePath,
-    normalizeCanonicalPath,
-    stripUsernamePrefix,
-    sanitizeUsername,
-    slugify,
-    normalizeUser,
-    getUserUsername,
-    getUserDisplayName,
-    getUserAvatarUrl,
-    hasValidToken,
-    getInitials,
-    isPublicApiPath,
-  };
-
-  const cleanup =
-    createCleanup({
-      registry,
-      events,
-      utils,
-    });
-
-  const storage =
-    createStorage(utils);
-
-  /* =========================================================
+  /* =======================================================
      STATE API
-  ========================================================= */
+  ======================================================= */
 
-  function setState(
-    patch = {}
-  ) {
+  function setState(patch = {}, options = {}) {
     const root =
       ensureState();
 
-    const next =
-      setStateBase({
-        state: root,
-        events,
-        patch:
-          patch &&
-          typeof patch ===
-            "object"
-            ? patch
-            : {},
-      });
+    const cleanPatch =
+      patch &&
+      typeof patch === "object"
+        ? patch
+        : {};
 
-    syncDerivedAuthState();
+    let next =
+      root;
+
+    try {
+      next =
+        setStateBase({
+          state:
+            root,
+
+          events,
+
+          patch:
+            cleanPatch,
+        }) || root;
+    } catch (error) {
+      try {
+        Object.assign(
+          root,
+          cleanPatch
+        );
+      } catch {}
+
+      next =
+        root;
+
+      safeWarn(
+        "setStateBase falló; aplicado fallback.",
+        error
+      );
+    }
+
+    syncDerivedAuthState({
+      allowExplicitAuthenticated:
+        options.allowExplicitAuthenticated !== false,
+
+      forceUnauthenticated:
+        options.forceUnauthenticated === true,
+    });
 
     return next;
   }
@@ -405,261 +1287,938 @@ export const AppCore = (() => {
   function getState() {
     syncDerivedAuthState();
 
-    return getStateBase(
-      ensureState()
+    try {
+      return getStateBase(
+        ensureState()
+      );
+    } catch {
+      return clonePublicState();
+    }
+  }
+
+  function patchState(patch = {}, options = {}) {
+    return setState(
+      patch,
+      options
     );
   }
 
-  /* =========================================================
+  /* =======================================================
      UI API
-  ========================================================= */
+  ======================================================= */
 
-  function setDocumentTitle(
-    title = config.appName
-  ) {
-    return setDocumentTitleBase({
-      dom,
-      events,
-      title,
-    });
+  function setDocumentTitle(title = config.appName) {
+    try {
+      return setDocumentTitleBase({
+        dom,
+        events,
+        title:
+          safeText(
+            title,
+            getAppName()
+          ),
+      });
+    } catch {
+      if (isBrowser()) {
+        try {
+          document.title =
+            safeText(
+              title,
+              getAppName()
+            );
+
+          return true;
+        } catch {}
+      }
+    }
+
+    return false;
   }
 
   function clearDynamicContainers() {
-    return clearDynamicContainersBase({
-      dom,
-      events,
-    });
+    try {
+      return clearDynamicContainersBase({
+        dom,
+        events,
+      });
+    } catch {}
+
+    return false;
   }
 
   function syncUserUI() {
-    return syncUserUIBase({
-      state,
-      dom,
-      events,
-    });
+    try {
+      return syncUserUIBase({
+        state,
+        dom,
+        events,
+      });
+    } catch (error) {
+      safeWarn(
+        "syncUserUIBase falló.",
+        error
+      );
+
+      return false;
+    }
   }
 
-  /* =========================================================
+  function setShowToast(fn) {
+    if (!isFunction(fn)) {
+      return false;
+    }
+
+    showToastBridge =
+      fn;
+
+    return true;
+  }
+
+  function showToast(message = "", type = "info", options = {}) {
+    if (!isFunction(showToastBridge)) {
+      return null;
+    }
+
+    try {
+      return showToastBridge(
+        message,
+        type,
+        options
+      );
+    } catch (error) {
+      safeWarn(
+        "showToast bridge falló.",
+        error
+      );
+
+      return null;
+    }
+  }
+
+  /* =======================================================
      SESSION API
-  ========================================================= */
+  ======================================================= */
 
-  function setRoute(
-    route = "/"
-  ) {
-    return setRouteBase({
-      state,
-      setState,
-      events,
-      route,
-    });
-  }
-
-  function setPublicPath(
-    path = "/"
-  ) {
-    /* FIX CRÍTICO:
-       siempre pasar state */
-    return setPublicPathBase({
-      state,
-      storage,
-      setState,
-      events,
-      path,
-    });
-  }
-
-  function setUser(
-    user = null
-  ) {
-    const result =
-      setUserBase({
+  function setRoute(route = "/") {
+    try {
+      return setRouteBase({
         state,
+        setState,
+        events,
+        route,
+      });
+    } catch (error) {
+      const cleanRoute =
+        normalizeCanonicalPath(
+          route || "/"
+        );
+
+      setState({
+        route:
+          cleanRoute,
+      });
+
+      safeWarn(
+        "setRouteBase falló; aplicado fallback.",
+        error
+      );
+
+      return cleanRoute;
+    }
+  }
+
+  function setPublicPath(path = "/") {
+    try {
+      return setPublicPathBase({
+        state,
+        storage,
+        setState,
+        events,
+        path,
+      });
+    } catch (error) {
+      const cleanPath =
+        normalizePath(
+          path || "/"
+        );
+
+      setState({
+        publicPath:
+          cleanPath,
+      });
+
+      safeWarn(
+        "setPublicPathBase falló; aplicado fallback.",
+        error
+      );
+
+      return cleanPath;
+    }
+  }
+
+  function setUser(user = null) {
+    let result =
+      null;
+
+    try {
+      result =
+        setUserBase({
+          state,
+          storage,
+          events,
+          setState,
+          syncUserUI,
+          user,
+        });
+    } catch (error) {
+      setState({
+        user:
+          user
+            ? normalizeUser(user)
+            : null,
+      });
+
+      safeWarn(
+        "setUserBase falló; aplicado fallback.",
+        error
+      );
+
+      result =
+        state.user;
+    }
+
+    syncDerivedAuthState({
+      allowExplicitAuthenticated:
+        true,
+    });
+
+    return result;
+  }
+
+  function setToken(token = null) {
+    let result =
+      null;
+
+    try {
+      result =
+        setTokenBase({
+          state,
+          storage,
+          events,
+          setState,
+          token,
+        });
+    } catch (error) {
+      setState(
+        {
+          token:
+            token || null,
+        },
+        {
+          forceUnauthenticated:
+            !token,
+        }
+      );
+
+      safeWarn(
+        "setTokenBase falló; aplicado fallback.",
+        error
+      );
+
+      result =
+        state.token;
+    }
+
+    syncDerivedAuthState({
+      forceUnauthenticated:
+        !token,
+      allowExplicitAuthenticated:
+        Boolean(token),
+    });
+
+    return result;
+  }
+
+  function applySession(session = {}) {
+    const payload =
+      ensureObject(session);
+
+    const token =
+      Object.prototype.hasOwnProperty.call(payload, "token")
+        ? payload.token
+        : undefined;
+
+    const user =
+      Object.prototype.hasOwnProperty.call(payload, "user")
+        ? payload.user
+        : undefined;
+
+    let result =
+      null;
+
+    try {
+      result =
+        applySessionBase({
+          state,
+          events,
+
+          setUser:
+            ({ user: nextUser }) =>
+              setUser(nextUser),
+
+          setToken:
+            ({ token: nextToken }) =>
+              setToken(nextToken),
+
+          token,
+          user,
+        });
+    } catch (error) {
+      if (token !== undefined) {
+        setToken(token);
+      }
+
+      if (user !== undefined) {
+        setUser(user);
+      }
+
+      safeWarn(
+        "applySessionBase falló; aplicado fallback.",
+        error
+      );
+
+      result =
+        {
+          token:
+            state.token,
+
+          user:
+            state.user,
+        };
+    }
+
+    syncDerivedAuthState({
+      allowExplicitAuthenticated:
+        true,
+    });
+
+    safeEmit(
+      "app:session:applied",
+      {
+        authenticated:
+          Boolean(state.authenticated),
+
+        hasToken:
+          Boolean(state.hasToken),
+
+        username:
+          state.username || "",
+      }
+    );
+
+    return result;
+  }
+
+  function clearSession(options = {}) {
+    let result =
+      null;
+
+    try {
+      result =
+        clearSessionBase({
+          state,
+          storage,
+          events,
+          setState,
+          syncUserUI,
+          utils,
+          options:
+            ensureObject(options),
+        });
+    } catch (error) {
+      setState(
+        {
+          token:
+            null,
+
+          user:
+            null,
+
+          authenticated:
+            false,
+
+          role:
+            "",
+
+          username:
+            "",
+        },
+        {
+          forceUnauthenticated:
+            true,
+        }
+      );
+
+      safeWarn(
+        "clearSessionBase falló; aplicado fallback.",
+        error
+      );
+
+      result =
+        true;
+    }
+
+    syncDerivedAuthState({
+      forceUnauthenticated:
+        true,
+    });
+
+    safeEmit(
+      "app:session:cleared",
+      {
+        silent:
+          Boolean(options?.silent),
+      }
+    );
+
+    return result;
+  }
+
+  function setTheme(theme) {
+    try {
+      return setThemeBase({
+        dom,
         storage,
         events,
         setState,
-        syncUserUI,
-        user,
+        theme,
       });
-
-    syncDerivedAuthState();
-
-    return result;
+    } catch {
+      return setState({
+        theme:
+          safeText(
+            theme,
+            "dark"
+          ),
+      });
+    }
   }
 
-  function setToken(
-    token = null
-  ) {
-    const result =
-      setTokenBase({
-        state,
+  function setLang(lang) {
+    try {
+      return setLangBase({
+        dom,
         storage,
         events,
         setState,
-        token,
+        lang,
+      });
+    } catch {
+      const cleanLang =
+        safeText(
+          lang,
+          "es"
+        ).toLowerCase();
+
+      setState({
+        lang:
+          cleanLang,
       });
 
-    syncDerivedAuthState();
+      try {
+        if (isBrowser()) {
+          document.documentElement.lang =
+            cleanLang;
+        }
+      } catch {}
 
-    return result;
+      safeEmit(
+        "app:lang:change",
+        {
+          lang:
+            cleanLang,
+        }
+      );
+
+      return cleanLang;
+    }
   }
 
-  function applySession({
-    token = undefined,
-    user = undefined,
-  } = {}) {
-    const result =
-      applySessionBase({
-        state,
-        events,
-        setUser:
-          ({ user }) =>
-            setUser(user),
-        setToken:
-          ({ token }) =>
-            setToken(token),
-        token,
-        user,
-      });
-
-    syncDerivedAuthState();
-
-    return result;
-  }
-
-  function clearSession() {
-    const result =
-      clearSessionBase({
-        state,
+  function setSidebarOpen(value) {
+    try {
+      return setSidebarOpenBase({
+        dom,
         storage,
         events,
         setState,
-        syncUserUI,
-        utils,
+        value,
       });
-
-    syncDerivedAuthState();
-
-    return result;
+    } catch {
+      return setState({
+        sidebarOpen:
+          Boolean(value),
+      });
+    }
   }
 
-  function setTheme(
-    theme
-  ) {
-    return setThemeBase({
-      dom,
-      storage,
-      events,
-      setState,
-      theme,
-    });
+  function setLoading(value) {
+    try {
+      return setLoadingBase({
+        dom,
+        events,
+        setState,
+        value,
+      });
+    } catch {
+      return setState({
+        loading:
+          Boolean(value),
+      });
+    }
   }
 
-  function setLang(
-    lang
-  ) {
-    return setLangBase({
-      dom,
-      storage,
-      events,
-      setState,
-      lang,
-    });
+  function setError(error = null) {
+    try {
+      return setErrorBase({
+        events,
+        setState,
+        cloneError,
+        error,
+      });
+    } catch {
+      const normalized =
+        error
+          ? cloneError(error)
+          : null;
+
+      return setState({
+        error:
+          normalized,
+
+        hasError:
+          Boolean(normalized),
+      });
+    }
   }
 
-  function setSidebarOpen(
-    value
-  ) {
-    return setSidebarOpenBase({
-      dom,
-      storage,
-      events,
-      setState,
-      value,
-    });
-  }
-
-  function setLoading(
-    value
-  ) {
-    return setLoadingBase({
-      dom,
-      events,
-      setState,
-      value,
-    });
-  }
-
-  function setError(
-    error = null
-  ) {
-    return setErrorBase({
-      events,
-      setState,
-      cloneError,
-      error,
-    });
-  }
-
-  /* =========================================================
+  /* =======================================================
      REQUEST
-  ========================================================= */
+  ======================================================= */
+
+  function createFallbackRequest() {
+    return async function fallbackRequest(url, options = {}) {
+      if (!isBrowser() || !isFunction(fetch)) {
+        throw new Error(
+          "Fetch API no disponible."
+        );
+      }
+
+      const response =
+        await fetch(
+          url,
+          options
+        );
+
+      if (!response.ok) {
+        const error =
+          new Error(
+            response.statusText ||
+              `HTTP ${response.status}`
+          );
+
+        error.status =
+          response.status;
+
+        throw error;
+      }
+
+      const contentType =
+        response.headers?.get?.("content-type") || "";
+
+      if (contentType.includes("application/json")) {
+        return response.json();
+      }
+
+      return response.text();
+    };
+  }
 
   const request =
-    createRequest({
-      state,
-      events,
-      setError,
-      utils,
-      registry,
-    });
+    safeFactory(
+      createRequest,
+      createFallbackRequest,
+      {
+        state,
+        events,
+        setError,
+        utils,
+        registry,
+      }
+    );
+
+  function createFallbackApiClient(req) {
+    const call =
+      isFunction(req)
+        ? req
+        : createFallbackRequest();
+
+    return {
+      request:
+        call,
+
+      get(url, options = {}) {
+        return call(
+          url,
+          {
+            ...options,
+            method:
+              "GET",
+          }
+        );
+      },
+
+      post(url, body = undefined, options = {}) {
+        return call(
+          url,
+          {
+            ...options,
+            method:
+              "POST",
+            body:
+              body === undefined
+                ? undefined
+                : JSON.stringify(body),
+            headers: {
+              "Content-Type":
+                "application/json",
+              ...(options.headers || {}),
+            },
+          }
+        );
+      },
+
+      put(url, body = undefined, options = {}) {
+        return call(
+          url,
+          {
+            ...options,
+            method:
+              "PUT",
+            body:
+              body === undefined
+                ? undefined
+                : JSON.stringify(body),
+            headers: {
+              "Content-Type":
+                "application/json",
+              ...(options.headers || {}),
+            },
+          }
+        );
+      },
+
+      patch(url, body = undefined, options = {}) {
+        return call(
+          url,
+          {
+            ...options,
+            method:
+              "PATCH",
+            body:
+              body === undefined
+                ? undefined
+                : JSON.stringify(body),
+            headers: {
+              "Content-Type":
+                "application/json",
+              ...(options.headers || {}),
+            },
+          }
+        );
+      },
+
+      delete(url, options = {}) {
+        return call(
+          url,
+          {
+            ...options,
+            method:
+              "DELETE",
+          }
+        );
+      },
+    };
+  }
 
   const apiClient =
-    createApiClient(
+    safeFactory(
+      createApiClient,
+      () => createFallbackApiClient(request),
       request
     );
 
-  /* =========================================================
+  /* =======================================================
      READY
-  ========================================================= */
+  ======================================================= */
 
   function ready(fn) {
     if (
-      typeof fn !==
-        "function" ||
+      !isFunction(fn) ||
       !isBrowser()
     ) {
-      return;
+      return () => {};
     }
 
-    if (
-      !isDocumentReady()
-    ) {
-      document.addEventListener(
-        "DOMContentLoaded",
-        fn,
-        { once: true }
+    if (!isDocumentReady()) {
+      try {
+        document.addEventListener(
+          "DOMContentLoaded",
+          fn,
+          {
+            once:
+              true,
+          }
+        );
+
+        return () => {
+          try {
+            document.removeEventListener(
+              "DOMContentLoaded",
+              fn
+            );
+          } catch {}
+        };
+      } catch {
+        return () => {};
+      }
+    }
+
+    try {
+      fn();
+    } catch (error) {
+      safeError(
+        "ready() callback error:",
+        error
       );
-
-      return;
     }
 
-    fn();
+    return () => {};
   }
 
-  /* =========================================================
+  /* =======================================================
+     INIT HELPERS
+  ======================================================= */
+
+  function markCoreBooting(cycleId) {
+    setState({
+      booting:
+        true,
+
+      ready:
+        false,
+
+      initialized:
+        false,
+
+      coreInitializing:
+        true,
+
+      coreInitCycle:
+        cycleId,
+    });
+  }
+
+  function markCoreReady(cycleId) {
+    setState({
+      initialized:
+        true,
+
+      booting:
+        false,
+
+      ready:
+        true,
+
+      coreInitializing:
+        false,
+
+      coreReady:
+        true,
+
+      coreInitCycle:
+        cycleId,
+
+      coreReadyAt:
+        safeIsoDate(),
+    });
+  }
+
+  function markCoreError(error, cycleId) {
+    setState({
+      initialized:
+        false,
+
+      ready:
+        false,
+
+      booting:
+        false,
+
+      coreInitializing:
+        false,
+
+      coreReady:
+        false,
+
+      coreInitCycle:
+        cycleId,
+
+      coreErrorAt:
+        safeIsoDate(),
+    });
+
+    setError(error);
+  }
+
+  function safeCacheDom() {
+    try {
+      cacheDom({
+        dom,
+        utils,
+      });
+
+      return true;
+    } catch (error) {
+      safeWarn(
+        "cacheDom() falló.",
+        error
+      );
+
+      return false;
+    }
+  }
+
+  function safeValidateRequiredDom() {
+    try {
+      validateRequiredDom({
+        dom,
+        utils,
+      });
+
+      return true;
+    } catch (error) {
+      safeWarn(
+        "validateRequiredDom() falló.",
+        error
+      );
+
+      return false;
+    }
+  }
+
+  function safeLoadPreferences() {
+    try {
+      loadPreferences({
+        state,
+        storage,
+        dom,
+      });
+
+      return true;
+    } catch (error) {
+      safeWarn(
+        "loadPreferences() falló.",
+        error
+      );
+
+      return false;
+    }
+  }
+
+  function safeLoadSession() {
+    try {
+      loadSession({
+        state,
+        storage,
+        dom,
+      });
+
+      return true;
+    } catch (error) {
+      safeWarn(
+        "loadSession() falló.",
+        error
+      );
+
+      return false;
+    }
+  }
+
+  function safeSyncBaseUI() {
+    try {
+      syncBaseUI({
+        setDocumentTitle,
+        syncUserUI,
+      });
+
+      return true;
+    } catch (error) {
+      safeWarn(
+        "syncBaseUI() falló.",
+        error
+      );
+
+      return false;
+    }
+  }
+
+  function safeBindNetworkEvents() {
+    if (networkEventsBound) {
+      return true;
+    }
+
+    try {
+      bindNetworkEvents({
+        state,
+        events,
+        cleanup,
+        utils,
+      });
+
+      networkEventsBound =
+        true;
+
+      return true;
+    } catch (error) {
+      safeWarn(
+        "bindNetworkEvents() falló.",
+        error
+      );
+
+      return false;
+    }
+  }
+
+  /* =======================================================
      INIT
-  ========================================================= */
+  ======================================================= */
 
   async function doInit() {
-    try {
-      state.booting = true;
-      state.ready = false;
+    const cycleId =
+      ++initCycle;
 
-      events.emit(
+    try {
+      markCoreBooting(
+        cycleId
+      );
+
+      safeEmit(
         "app:core:init:start",
         {
+          cycleId,
+
           state:
-            cloneState(state),
+            clonePublicState(),
         }
       );
 
@@ -671,50 +2230,34 @@ export const AppCore = (() => {
           config,
           events,
           utils,
+          storage,
+          cleanup,
+          modules,
+          hooks,
+          cycleId,
         }
       );
 
-      cacheDom({
-        dom,
-        utils,
+      safeCacheDom();
+      safeValidateRequiredDom();
+
+      safeLoadPreferences();
+      safeLoadSession();
+
+      syncDerivedAuthState({
+        allowExplicitAuthenticated:
+          true,
       });
 
-      validateRequiredDom({
-        dom,
-        utils,
-      });
+      safeSyncBaseUI();
+      safeBindNetworkEvents();
 
-      loadPreferences({
-        state,
-        storage,
-        dom,
-      });
+      initialized =
+        true;
 
-      loadSession({
-        state,
-        storage,
-        dom,
-      });
-
-      syncDerivedAuthState();
-
-      syncBaseUI({
-        setDocumentTitle,
-        syncUserUI,
-      });
-
-      bindNetworkEvents({
-        state,
-        events,
-        cleanup,
-        utils,
-      });
-
-      state.initialized = true;
-      state.booting = false;
-      state.ready = true;
-
-      initialized = true;
+      markCoreReady(
+        cycleId
+      );
 
       await runInitHooks(
         "afterInit",
@@ -724,32 +2267,58 @@ export const AppCore = (() => {
           config,
           events,
           utils,
+          storage,
+          cleanup,
+          modules,
+          hooks,
+          cycleId,
         }
       );
 
-      events.emit(
+      safeEmit(
         "app:core:ready",
         {
+          cycleId,
+
           state:
-            cloneState(state),
+            clonePublicState(),
         }
       );
 
       safeLog(
-        "Core ready."
+        "Core ready.",
+        {
+          cycleId,
+          authenticated:
+            Boolean(state.authenticated),
+          hasToken:
+            Boolean(state.hasToken),
+          route:
+            state.route || "/",
+          publicPath:
+            state.publicPath || "/",
+          lang:
+            state.lang || "es",
+          theme:
+            state.theme || "dark",
+        }
       );
 
       return api;
     } catch (error) {
-      state.initialized = false;
-      state.ready = false;
-      state.booting = false;
+      initialized =
+        false;
 
-      setError(error);
+      markCoreError(
+        error,
+        cycleId
+      );
 
-      events.emit(
+      safeEmit(
         "app:core:init:error",
         {
+          cycleId,
+
           error:
             cloneError(error),
         }
@@ -757,15 +2326,27 @@ export const AppCore = (() => {
 
       throw error;
     } finally {
-      initPromise = null;
+      initPromise =
+        null;
     }
   }
 
-  async function init() {
+  async function init(options = {}) {
+    const opts =
+      ensureObject(options);
+
     if (
-      initialized ||
-      state.initialized
+      !opts.force &&
+      (
+        initialized ||
+        state.initialized
+      )
     ) {
+      syncDerivedAuthState({
+        allowExplicitAuthenticated:
+          true,
+      });
+
       return api;
     }
 
@@ -779,14 +2360,176 @@ export const AppCore = (() => {
     return initPromise;
   }
 
-  /* =========================================================
+  function rebootCore() {
+    initialized =
+      false;
+
+    initPromise =
+      null;
+
+    networkEventsBound =
+      false;
+
+    setState(
+      {
+        initialized:
+          false,
+
+        ready:
+          false,
+
+        booting:
+          false,
+
+        coreReady:
+          false,
+
+        coreInitializing:
+          false,
+      },
+      {
+        allowExplicitAuthenticated:
+          true,
+      }
+    );
+
+    return init({
+      force:
+        true,
+    });
+  }
+
+  /* =======================================================
+     SNAPSHOT
+  ======================================================= */
+
+  function getSnapshot() {
+    syncDerivedAuthState({
+      allowExplicitAuthenticated:
+        true,
+      });
+
+    return {
+      appName:
+        getAppName(),
+
+      debug:
+        getDebugEnabled(),
+
+      initialized:
+        Boolean(initialized || state.initialized),
+
+      initInFlight:
+        Boolean(initPromise),
+
+      initCycle,
+
+      networkEventsBound:
+        Boolean(networkEventsBound),
+
+      state: {
+        initialized:
+          Boolean(state.initialized),
+
+        ready:
+          Boolean(state.ready),
+
+        booting:
+          Boolean(state.booting),
+
+        loading:
+          Boolean(state.loading),
+
+        authenticated:
+          Boolean(state.authenticated),
+
+        hasToken:
+          Boolean(state.hasToken),
+
+        role:
+          state.role || "",
+
+        username:
+          state.username || "",
+
+        route:
+          state.route || "/",
+
+        publicPath:
+          state.publicPath || "/",
+
+        theme:
+          state.theme || "dark",
+
+        lang:
+          state.lang || "es",
+
+        hasError:
+          Boolean(state.error || state.hasError),
+      },
+
+      dom: {
+        hasViewContainer:
+          Boolean(dom.viewContainer),
+
+        hasSidebar:
+          Boolean(dom.sidebar),
+
+        hasTopbar:
+          Boolean(dom.topbar),
+
+        hasLoader:
+          Boolean(dom.loader),
+
+        hasShell:
+          Boolean(dom.appShell || dom.shell),
+      },
+
+      registry: {
+        moduleCount:
+          registry.modules?.size || 0,
+
+        modules:
+          Array.from(
+            registry.modules?.keys?.() || []
+          ),
+
+        scopeCount:
+          registry.scopes?.size || 0,
+
+        hookCounts:
+          Object.fromEntries(
+            Object.entries(registry.hooks || {}).map(
+              ([key, value]) => [
+                key,
+                Array.isArray(value)
+                  ? value.length
+                  : 0,
+              ]
+            )
+          ),
+      },
+
+      bridges: {
+        toast:
+          Boolean(showToastBridge),
+      },
+
+      at:
+        safeIsoDate(),
+    };
+  }
+
+  /* =======================================================
      PUBLIC API
-  ========================================================= */
+  ======================================================= */
 
   const api = Object.freeze({
     config,
     state,
     dom,
+
+    registry,
 
     utils,
     storage,
@@ -799,13 +2542,16 @@ export const AppCore = (() => {
     apiClient,
 
     init,
+    rebootCore,
     ready,
 
     getState,
     setState,
+    patchState,
 
     setRoute,
     setPublicPath,
+
     setUser,
     setToken,
     applySession,
@@ -820,6 +2566,13 @@ export const AppCore = (() => {
     setDocumentTitle,
     clearDynamicContainers,
     syncUserUI,
+
+    setShowToast,
+    showToast,
+
+    getSnapshot,
+    getDebugSnapshot:
+      getSnapshot,
 
     getUserDisplayName,
     getUserUsername,

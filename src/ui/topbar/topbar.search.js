@@ -2,6 +2,8 @@
    Onion SPA - Topbar Search
    Archivo: src/ui/topbar.search.js
 
+   FULL PRO SAAS PANEL · SEARCH GOD MODE · HARDENED 10/10
+
    Responsabilidades:
    - gestionar cache de búsqueda
    - construir índice local
@@ -11,6 +13,7 @@
    - renderizar resultados del buscador
    - gestionar navegación / apertura a resultados
    - abrir ficha de usuario desde search
+   - abrir cliente desde search
    - abrir modal de incidencia desde search
    - abrir factura desde search
    - actualizar estados visuales del panel search
@@ -19,10 +22,16 @@
 
    HARDENING:
    - bridges flexibles por window / AppCore.modules / event bus
+   - soporte AppCore.modules.get(...)
    - fallback seguro a rutas cuando no existe modal/ficha montada
    - dynamic import SOLO para modal de incidencias
    - normalización tolerante a backend heterogéneo
    - no rompe resultados locales
+   - factura bridge corregido:
+     · Facturas.openFactura recibe facturaId string
+     · modales/fichas reciben payload enriquecido
+     · fallback /facturas?id=...
+     · reintento post navegación/render SPA
 ========================================================= */
 
 import {
@@ -41,11 +50,7 @@ import {
 } from "./topbar.helpers.js";
 
 /* =========================================================
-   SEARCH FOCUS OVERLAY (JS)
-   - SOLO cubre el área de contenido
-   - NO tapa sidebar
-   - NO tapa topbar
-   - NO tapa toda la página
+   SEARCH FOCUS OVERLAY
 ========================================================= */
 
 const SEARCH_GLASS_ID = "topbar-search-glass-overlay";
@@ -56,7 +61,7 @@ const searchGlassRuntime = {
 };
 
 /* =========================================================
-   ACTIONS
+   ACTIONS / TYPES
 ========================================================= */
 
 const SEARCH_ACTIONS = Object.freeze({
@@ -82,14 +87,18 @@ const TYPE_ALIASES = Object.freeze({
   routes: ENTITY_TYPES.NAV,
   ruta: ENTITY_TYPES.NAV,
   rutas: ENTITY_TYPES.NAV,
+  navigation: ENTITY_TYPES.NAV,
+  navegacion: ENTITY_TYPES.NAV,
 
   user: ENTITY_TYPES.USUARIO,
   users: ENTITY_TYPES.USUARIO,
   usuario: ENTITY_TYPES.USUARIO,
   usuarios: ENTITY_TYPES.USUARIO,
   account: ENTITY_TYPES.USUARIO,
+  accounts: ENTITY_TYPES.USUARIO,
   profile: ENTITY_TYPES.USUARIO,
   perfil: ENTITY_TYPES.USUARIO,
+  cuenta: ENTITY_TYPES.USUARIO,
 
   client: ENTITY_TYPES.CLIENTE,
   clients: ENTITY_TYPES.CLIENTE,
@@ -105,6 +114,7 @@ const TYPE_ALIASES = Object.freeze({
   issue: ENTITY_TYPES.INCIDENCIA,
   issues: ENTITY_TYPES.INCIDENCIA,
   support: ENTITY_TYPES.INCIDENCIA,
+  soporte: ENTITY_TYPES.INCIDENCIA,
 
   factura: ENTITY_TYPES.FACTURA,
   facturas: ENTITY_TYPES.FACTURA,
@@ -112,6 +122,8 @@ const TYPE_ALIASES = Object.freeze({
   invoices: ENTITY_TYPES.FACTURA,
   bill: ENTITY_TYPES.FACTURA,
   billing: ENTITY_TYPES.FACTURA,
+  recibo: ENTITY_TYPES.FACTURA,
+  recibos: ENTITY_TYPES.FACTURA,
 });
 
 /* =========================================================
@@ -138,19 +150,109 @@ function safeArray(value) {
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
-
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
-
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
     return value;
   }
 
   return null;
 }
 
+function sleep(ms = 0) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 function encodePathSegment(value = "") {
   return encodeURIComponent(safeText(value, ""));
+}
+
+function hasOwnKeys(value = {}) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length
+  );
+}
+
+function normalizeSearchType(value = "") {
+  const raw = safeText(value, "general").toLowerCase();
+  const compact = normalizeText(raw).replace(/[^a-z0-9_-]/gi, "");
+
+  return TYPE_ALIASES[compact] || compact || ENTITY_TYPES.GENERAL;
+}
+
+function coerceDisplayText(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+
+  if (typeof value === "string" || typeof value === "number") {
+    return safeText(value, fallback);
+  }
+
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return safeText(
+      first(
+        value.title,
+        value.name,
+        value.nombre,
+        value.nombreFiscal,
+        value.razonSocial,
+        value.nombreComercial,
+        value.nombreContacto,
+        value.displayName,
+        value.email,
+        value.id,
+        value.clienteId,
+        value.userId,
+        value.facturaId,
+        value.ticketId
+      ),
+      fallback
+    );
+  }
+
+  return safeText(value, fallback);
+}
+
+function isUnsafeHref(value = "") {
+  const href = safeText(value, "").toLowerCase();
+
+  return (
+    href.startsWith("javascript:") ||
+    href.startsWith("data:") ||
+    href.startsWith("vbscript:") ||
+    href.startsWith("file:")
+  );
+}
+
+function normalizeResultUrl(AppCore, value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw || isUnsafeHref(raw)) {
+    return null;
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw);
+      if (url.origin !== window.location.origin) return null;
+
+      return safeNormalizePath(
+        AppCore,
+        `${url.pathname || "/"}${url.search || ""}${url.hash || ""}`
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  if (!raw.startsWith("/")) {
+    return safeNormalizePath(AppCore, `/${raw}`);
+  }
+
+  return safeNormalizePath(AppCore, raw);
 }
 
 function getCssNumberVar(name = "", fallback = 0) {
@@ -160,6 +262,7 @@ function getCssNumberVar(name = "", fallback = 0) {
       .getPropertyValue(name);
 
     const parsed = Number.parseInt(String(value || "").trim(), 10);
+
     return Number.isFinite(parsed) ? parsed : fallback;
   } catch {
     return fallback;
@@ -180,13 +283,17 @@ function showToast(AppCore, message = "", type = "info") {
   } catch {}
 
   try {
-    AppCore?.toast?.show?.(text, level);
-    return true;
+    if (typeof AppCore?.toast?.show === "function") {
+      AppCore.toast.show(text, level);
+      return true;
+    }
   } catch {}
 
   try {
-    AppCore?.ui?.toast?.[level]?.(text);
-    return true;
+    if (typeof AppCore?.ui?.toast?.[level] === "function") {
+      AppCore.ui.toast[level](text);
+      return true;
+    }
   } catch {}
 
   return false;
@@ -203,126 +310,61 @@ function warn(AppCore, ...args) {
   } catch {}
 }
 
-function normalizeSearchType(value = "") {
-  const raw = safeText(value, "general").toLowerCase();
-  const compact = normalizeText(raw).replace(/[^a-z0-9_-]/gi, "");
+/* =========================================================
+   MODULE RESOLUTION
+========================================================= */
 
-  return TYPE_ALIASES[compact] || compact || ENTITY_TYPES.GENERAL;
+function getModuleCandidate(AppCore, name = "") {
+  const key = safeText(name, "");
+  if (!key) return null;
+
+  try {
+    if (typeof AppCore?.modules?.get === "function") {
+      const found = AppCore.modules.get(key);
+      if (found) return found;
+    }
+  } catch {}
+
+  try {
+    if (AppCore?.modules && typeof AppCore.modules === "object") {
+      if (AppCore.modules[key]) return AppCore.modules[key];
+    }
+  } catch {}
+
+  try {
+    if (AppCore?.[key]) return AppCore[key];
+  } catch {}
+
+  try {
+    if (window?.[key]) return window[key];
+  } catch {}
+
+  return null;
 }
 
-function isUsuarioType(type = "") {
-  return normalizeSearchType(type) === ENTITY_TYPES.USUARIO;
-}
-
-function isClienteType(type = "") {
-  return normalizeSearchType(type) === ENTITY_TYPES.CLIENTE;
-}
-
-function isIncidenciaType(type = "") {
-  return normalizeSearchType(type) === ENTITY_TYPES.INCIDENCIA;
-}
-
-function isFacturaType(type = "") {
-  return normalizeSearchType(type) === ENTITY_TYPES.FACTURA;
-}
-
-function isNavType(type = "") {
-  return normalizeSearchType(type) === ENTITY_TYPES.NAV;
-}
-
-function getEntityIdByType(type = "", raw = {}, fallback = "") {
-  const item = safeObject(raw);
-  const normalizedType = normalizeSearchType(type);
-
-  if (normalizedType === ENTITY_TYPES.USUARIO) {
-    return safeText(
-      first(
-        item.userId,
-        item.usuarioId,
-        item.uid,
-        item.username,
-        item.email,
-        item.id,
-        item._id,
-        item.uuid,
-        item.key,
-        fallback
-      ),
-      ""
-    );
+function getFirstModule(AppCore, names = []) {
+  for (const name of safeArray(names)) {
+    const found = getModuleCandidate(AppCore, name);
+    if (found) return found;
   }
 
-  if (normalizedType === ENTITY_TYPES.CLIENTE) {
-    return safeText(
-      first(
-        item.clienteId,
-        item.clientId,
-        item.customerId,
-        item.cif,
-        item.nif,
-        item.email,
-        item.id,
-        item._id,
-        item.uuid,
-        item.key,
-        fallback
-      ),
-      ""
-    );
-  }
-
-  if (normalizedType === ENTITY_TYPES.INCIDENCIA) {
-    return safeText(
-      first(
-        item.ticketId,
-        item.ticketCode,
-        item.incidenciaId,
-        item.issueId,
-        item.code,
-        item.codigo,
-        item.numero,
-        item.id,
-        item._id,
-        item.uuid,
-        item.key,
-        fallback
-      ),
-      ""
-    );
-  }
-
-  if (normalizedType === ENTITY_TYPES.FACTURA) {
-    return safeText(
-      first(
-        item.facturaId,
-        item.invoiceId,
-        item.invoiceCode,
-        item.numero,
-        item.number,
-        item.code,
-        item.codigo,
-        item.id,
-        item._id,
-        item.uuid,
-        item.key,
-        fallback
-      ),
-      ""
-    );
-  }
-
-  return safeText(
-    first(
-      item.entityId,
-      item.id,
-      item._id,
-      item.uuid,
-      item.key,
-      fallback
-    ),
-    ""
-  );
+  return null;
 }
+
+function getFacturasModule(AppCore) {
+  return getFirstModule(AppCore, [
+    "Facturas",
+    "FacturasView",
+    "OnionFacturas",
+    "OnionFacturasView",
+    "facturas",
+    "facturasView",
+  ]);
+}
+
+/* =========================================================
+   RAW EXTRACTION
+========================================================= */
 
 function getRawType(raw = {}) {
   const item = safeObject(raw);
@@ -336,6 +378,7 @@ function getRawType(raw = {}) {
     item.collection,
     item.module,
     item.resource,
+    item.scope,
     ENTITY_TYPES.GENERAL
   );
 }
@@ -343,7 +386,7 @@ function getRawType(raw = {}) {
 function getRawTitle(raw = {}) {
   const item = safeObject(raw);
 
-  return safeText(
+  return coerceDisplayText(
     first(
       item.title,
       item.name,
@@ -355,7 +398,21 @@ function getRawTitle(raw = {}) {
       item.email,
       item.subject,
       item.asunto,
+
+      item.numeroFacturaLegal,
+      item.numeroFacturaSistema,
+      item.numeroFactura,
+      item.facturaId,
+      item.invoiceId,
+      item.invoiceNumber,
+
+      item.ticketId,
+      item.incidenciaId,
+      item.clienteId,
+      item.userId,
+
       item.numero,
+      item.number,
       item.code,
       item.codigo,
       item.id,
@@ -369,15 +426,27 @@ function getRawTitle(raw = {}) {
 function getRawSubtitle(raw = {}) {
   const item = safeObject(raw);
 
-  return safeText(
+  const clienteText = coerceDisplayText(
+    first(
+      item.cliente,
+      item.client,
+      item.customer,
+      item.clienteNombre,
+      item.clientName,
+      item.customerName
+    ),
+    ""
+  );
+
+  return coerceDisplayText(
     first(
       item.subtitle,
       item.description,
       item.descripcion,
       item.preview,
-      item.cliente,
-      item.clientName,
-      item.customerName,
+
+      clienteText,
+
       item.email,
       item.role,
       item.rol,
@@ -385,6 +454,8 @@ function getRawSubtitle(raw = {}) {
       item.status,
       item.priority,
       item.prioridad,
+      item.numeroFacturaLegal,
+      item.numeroFactura,
       item.numero,
       item.code,
       item.codigo,
@@ -415,13 +486,118 @@ function getRawUrl(raw = {}) {
   );
 }
 
+function getEntityIdByType(type = "", raw = {}, fallback = "") {
+  const item = safeObject(raw);
+  const normalizedType = normalizeSearchType(type);
+
+  if (normalizedType === ENTITY_TYPES.USUARIO) {
+    return safeText(
+      first(
+        item.userId,
+        item.usuarioId,
+        item.uid,
+        item.id,
+        item._id,
+        item.uuid,
+        item.username,
+        item.email,
+        item.key,
+        fallback
+      ),
+      ""
+    );
+  }
+
+  if (normalizedType === ENTITY_TYPES.CLIENTE) {
+    return safeText(
+      first(
+        item.clienteId,
+        item.clientId,
+        item.customerId,
+        item.id,
+        item._id,
+        item.uuid,
+        item.cif,
+        item.nif,
+        item.email,
+        item.key,
+        fallback
+      ),
+      ""
+    );
+  }
+
+  if (normalizedType === ENTITY_TYPES.INCIDENCIA) {
+    return safeText(
+      first(
+        item.ticketId,
+        item.incidenciaId,
+        item.issueId,
+        item.id,
+        item._id,
+        item.uuid,
+        item.ticketCode,
+        item.code,
+        item.codigo,
+        item.numero,
+        item.key,
+        fallback
+      ),
+      ""
+    );
+  }
+
+  if (normalizedType === ENTITY_TYPES.FACTURA) {
+    return safeText(
+      first(
+        item.facturaId,
+        item.invoiceId,
+        item.id,
+        item._id,
+        item.uuid,
+
+        item.numeroFacturaLegal,
+        item.numeroFacturaSistema,
+        item.numeroFactura,
+        item.invoiceNumber,
+        item.invoiceCode,
+        item.numero,
+        item.number,
+        item.code,
+        item.codigo,
+        item.key,
+
+        fallback
+      ),
+      ""
+    );
+  }
+
+  return safeText(
+    first(
+      item.entityId,
+      item.id,
+      item._id,
+      item.uuid,
+      item.key,
+      fallback
+    ),
+    ""
+  );
+}
+
+/* =========================================================
+   FALLBACK URLS
+========================================================= */
+
 function getFallbackUrlForEntity(AppCore, type = "", entityId = "", raw = {}) {
   const normalizedType = normalizeSearchType(type);
   const id = safeText(entityId, "");
   const rawUrl = getRawUrl(raw);
+  const normalizedRawUrl = normalizeResultUrl(AppCore, rawUrl);
 
-  if (rawUrl) {
-    return safeNormalizePath(AppCore, rawUrl);
+  if (normalizedRawUrl) {
+    return normalizedRawUrl;
   }
 
   if (!id) return null;
@@ -429,23 +605,27 @@ function getFallbackUrlForEntity(AppCore, type = "", entityId = "", raw = {}) {
   const encoded = encodePathSegment(id);
 
   if (normalizedType === ENTITY_TYPES.USUARIO) {
-    return safeNormalizePath(AppCore, `/usuarios?usuario=${encoded}`);
+    return safeNormalizePath(AppCore, `/usuarios?id=${encoded}`);
   }
 
   if (normalizedType === ENTITY_TYPES.CLIENTE) {
-    return safeNormalizePath(AppCore, `/clientes?cliente=${encoded}`);
+    return safeNormalizePath(AppCore, `/clientes?id=${encoded}`);
   }
 
   if (normalizedType === ENTITY_TYPES.INCIDENCIA) {
-    return safeNormalizePath(AppCore, `/incidencias?ticket=${encoded}`);
+    return safeNormalizePath(AppCore, `/incidencias?id=${encoded}`);
   }
 
   if (normalizedType === ENTITY_TYPES.FACTURA) {
-    return safeNormalizePath(AppCore, `/facturas?factura=${encoded}`);
+    return safeNormalizePath(AppCore, `/facturas?id=${encoded}`);
   }
 
   return null;
 }
+
+/* =========================================================
+   ACTION RESOLUTION
+========================================================= */
 
 function getActionForType(type = "", raw = {}) {
   const item = safeObject(raw);
@@ -506,6 +686,8 @@ function getActionForType(type = "", raw = {}) {
         "open_invoice",
         "open_factura_modal",
         "open_invoice_modal",
+        "open_factura_detail",
+        "open_invoice_detail",
       ].includes(explicit)
     ) {
       return SEARCH_ACTIONS.OPEN_FACTURA;
@@ -518,21 +700,10 @@ function getActionForType(type = "", raw = {}) {
 
   const normalizedType = normalizeSearchType(type);
 
-  if (normalizedType === ENTITY_TYPES.USUARIO) {
-    return SEARCH_ACTIONS.OPEN_USUARIO;
-  }
-
-  if (normalizedType === ENTITY_TYPES.CLIENTE) {
-    return SEARCH_ACTIONS.OPEN_CLIENTE;
-  }
-
-  if (normalizedType === ENTITY_TYPES.INCIDENCIA) {
-    return SEARCH_ACTIONS.OPEN_INCIDENCIA;
-  }
-
-  if (normalizedType === ENTITY_TYPES.FACTURA) {
-    return SEARCH_ACTIONS.OPEN_FACTURA;
-  }
+  if (normalizedType === ENTITY_TYPES.USUARIO) return SEARCH_ACTIONS.OPEN_USUARIO;
+  if (normalizedType === ENTITY_TYPES.CLIENTE) return SEARCH_ACTIONS.OPEN_CLIENTE;
+  if (normalizedType === ENTITY_TYPES.INCIDENCIA) return SEARCH_ACTIONS.OPEN_INCIDENCIA;
+  if (normalizedType === ENTITY_TYPES.FACTURA) return SEARCH_ACTIONS.OPEN_FACTURA;
 
   return SEARCH_ACTIONS.NAVIGATE;
 }
@@ -547,6 +718,10 @@ function getActionLabel(item = {}) {
 
   return "";
 }
+
+/* =========================================================
+   PAYLOAD BUILDERS
+========================================================= */
 
 function buildSearchPayload(item = {}, detail = null) {
   const raw = safeObject(item.raw);
@@ -568,6 +743,7 @@ function buildSearchPayload(item = {}, detail = null) {
     raw: {
       ...raw,
       ...safeObject(detailObject.raw || detailObject),
+
       searchItem: {
         id: item.id,
         type: item.type,
@@ -626,11 +802,76 @@ function buildSearchPayload(item = {}, detail = null) {
       raw.id,
       entityId
     );
+
     mergedDetail.invoiceId = mergedDetail.facturaId;
+
+    mergedDetail.numeroFacturaLegal = first(
+      detailObject.numeroFacturaLegal,
+      raw.numeroFacturaLegal,
+      detailObject.numeroFactura,
+      raw.numeroFactura,
+      detailObject.numero,
+      raw.numero,
+      detailObject.invoiceNumber,
+      raw.invoiceNumber
+    );
   }
 
   return mergedDetail;
 }
+
+function buildEntityOpenPayload({
+  item = {},
+  detail = {},
+  entityId = "",
+  type = "",
+} = {}) {
+  const normalizedType = normalizeSearchType(type || item.type);
+  const id = safeText(entityId, "");
+
+  const payload = {
+    source: "topbar-search",
+    item,
+    detail,
+    entityId: id,
+    id,
+    type: normalizedType,
+  };
+
+  if (normalizedType === ENTITY_TYPES.USUARIO) {
+    payload.user = detail;
+    payload.usuario = detail;
+    payload.userId = id;
+    payload.usuarioId = id;
+  }
+
+  if (normalizedType === ENTITY_TYPES.CLIENTE) {
+    payload.client = detail;
+    payload.cliente = detail;
+    payload.clientId = id;
+    payload.clienteId = id;
+  }
+
+  if (normalizedType === ENTITY_TYPES.INCIDENCIA) {
+    payload.ticket = detail;
+    payload.incidencia = detail;
+    payload.ticketId = id;
+    payload.incidenciaId = id;
+  }
+
+  if (normalizedType === ENTITY_TYPES.FACTURA) {
+    payload.factura = detail;
+    payload.invoice = detail;
+    payload.facturaId = id;
+    payload.invoiceId = id;
+  }
+
+  return payload;
+}
+
+/* =========================================================
+   API DETAIL
+========================================================= */
 
 function pickEntityPayloadFromResponse(response = null, type = "") {
   const obj = safeObject(response);
@@ -645,8 +886,20 @@ function pickEntityPayloadFromResponse(response = null, type = "") {
       obj.incidencia,
       obj.issue,
       obj.item,
+      obj.data?.detail,
+      obj.data?.ticket,
+      obj.data?.incidencia,
+      obj.data?.item,
       obj.data,
+      obj.result?.detail,
+      obj.result?.ticket,
+      obj.result?.incidencia,
+      obj.result?.item,
       obj.result,
+      obj.payload?.detail,
+      obj.payload?.ticket,
+      obj.payload?.incidencia,
+      obj.payload?.item,
       obj.payload,
       obj
     );
@@ -659,6 +912,10 @@ function pickEntityPayloadFromResponse(response = null, type = "") {
       obj.usuario,
       obj.profile,
       obj.item,
+      obj.data?.detail,
+      obj.data?.user,
+      obj.data?.usuario,
+      obj.data?.item,
       obj.data,
       obj.result,
       obj.payload,
@@ -673,6 +930,10 @@ function pickEntityPayloadFromResponse(response = null, type = "") {
       obj.cliente,
       obj.customer,
       obj.item,
+      obj.data?.detail,
+      obj.data?.cliente,
+      obj.data?.client,
+      obj.data?.item,
       obj.data,
       obj.result,
       obj.payload,
@@ -686,8 +947,20 @@ function pickEntityPayloadFromResponse(response = null, type = "") {
       obj.factura,
       obj.invoice,
       obj.item,
+      obj.data?.detail,
+      obj.data?.factura,
+      obj.data?.invoice,
+      obj.data?.item,
       obj.data,
+      obj.result?.detail,
+      obj.result?.factura,
+      obj.result?.invoice,
+      obj.result?.item,
       obj.result,
+      obj.payload?.detail,
+      obj.payload?.factura,
+      obj.payload?.invoice,
+      obj.payload?.item,
       obj.payload,
       obj
     );
@@ -763,7 +1036,14 @@ async function fetchEntityDetail(AppCore, item = {}) {
     } catch (error) {
       lastError = error;
 
-      const status = Number(error?.status || error?.statusCode || 0);
+      const status = Number(
+        first(
+          error?.status,
+          error?.statusCode,
+          error?.response?.status,
+          error?.data?.status
+        ) || 0
+      );
 
       if (status && ![404, 405].includes(status)) {
         break;
@@ -815,36 +1095,75 @@ function emitSearchEvents(AppCore, eventNames = [], payload = {}) {
   });
 }
 
-function addMethodCall(calls = [], target = null, method = "", arg = null) {
-  if (!target || typeof target?.[method] !== "function") return;
-
-  calls.push(() => target[method](arg));
-}
-
-function addFunctionCall(calls = [], fn = null, arg = null) {
+function addBridgeCall(calls = [], fn = null, options = {}) {
   if (typeof fn !== "function") return;
 
-  calls.push(() => fn(arg));
+  calls.push({
+    fn,
+    accept:
+      typeof options.accept === "function"
+        ? options.accept
+        : (result) => result !== false,
+    label: safeText(options.label, ""),
+  });
+}
+
+function addMethodCall(calls = [], target = null, method = "", arg = null, options = {}) {
+  if (!target || typeof target?.[method] !== "function") return;
+
+  addBridgeCall(
+    calls,
+    () => target[method](arg),
+    {
+      ...options,
+      label: options.label || method,
+    }
+  );
+}
+
+function addMethodCallArgs(calls = [], target = null, method = "", args = [], options = {}) {
+  if (!target || typeof target?.[method] !== "function") return;
+
+  addBridgeCall(
+    calls,
+    () => target[method](...safeArray(args)),
+    {
+      ...options,
+      label: options.label || method,
+    }
+  );
+}
+
+function addFunctionCall(calls = [], fn = null, arg = null, options = {}) {
+  if (typeof fn !== "function") return;
+
+  addBridgeCall(
+    calls,
+    () => fn(arg),
+    options
+  );
 }
 
 async function callFirstBridge(calls = []) {
   for (const call of safeArray(calls)) {
-    if (typeof call !== "function") continue;
+    if (!call || typeof call.fn !== "function") continue;
 
     try {
-      const result = await call();
+      const result = await call.fn();
 
-      if (result !== false) {
+      if (call.accept(result)) {
         return true;
       }
-    } catch {}
+    } catch {
+      /* try next bridge */
+    }
   }
 
   return false;
 }
 
 async function navigateToPath(AppCore, Router, path = "", options = {}) {
-  const target = safeNormalizePath(AppCore, path || "/");
+  const target = normalizeResultUrl(AppCore, path || "/");
 
   if (!target) return false;
 
@@ -874,7 +1193,9 @@ async function navigateFallbackAndEmit({
   payload = {},
 }) {
   const target = safeText(
-    fallbackUrl || item.url || getFallbackUrlForEntity(AppCore, item.type, item.entityId, item.raw),
+    fallbackUrl ||
+      item.url ||
+      getFallbackUrlForEntity(AppCore, item.type, item.entityId, item.raw),
     ""
   );
 
@@ -897,9 +1218,9 @@ async function getIncidenciasModalBridge(AppCore) {
   const candidates = [
     window?.OnionIncidenciasModal,
     window?.IncidenciasModal,
-    AppCore?.modules?.OnionIncidenciasModal,
-    AppCore?.modules?.IncidenciasModal,
-    AppCore?.modules?.Incidencias,
+    getModuleCandidate(AppCore, "OnionIncidenciasModal"),
+    getModuleCandidate(AppCore, "IncidenciasModal"),
+    getModuleCandidate(AppCore, "Incidencias"),
   ];
 
   for (const candidate of candidates) {
@@ -941,13 +1262,12 @@ async function openIncidenciaFromSearch({
     ""
   );
 
-  const payload = {
-    source: "topbar-search",
+  const payload = buildEntityOpenPayload({
     item,
     detail,
-    ticketId,
-    incidenciaId: ticketId,
-  };
+    entityId: ticketId,
+    type: ENTITY_TYPES.INCIDENCIA,
+  });
 
   const modal = await getIncidenciasModalBridge(AppCore);
 
@@ -984,7 +1304,7 @@ async function openIncidenciaFromSearch({
 }
 
 /* =========================================================
-   USUARIOS / CLIENTES / FACTURAS BRIDGES
+   USUARIOS / CLIENTES BRIDGES
 ========================================================= */
 
 async function openUsuarioFromSearch({
@@ -1000,15 +1320,12 @@ async function openUsuarioFromSearch({
     ""
   );
 
-  const payload = {
-    source: "topbar-search",
+  const payload = buildEntityOpenPayload({
     item,
     detail,
-    user: detail,
-    usuario: detail,
-    userId,
-    usuarioId: userId,
-  };
+    entityId: userId,
+    type: ENTITY_TYPES.USUARIO,
+  });
 
   const calls = [];
 
@@ -1021,12 +1338,12 @@ async function openUsuarioFromSearch({
   addFunctionCall(calls, window?.openUsuarioFicha, detail);
   addFunctionCall(calls, window?.renderUsuarioFichaModal, detail);
 
-  addMethodCall(calls, AppCore?.modules?.OnionUsuariosFicha, "open", detail);
-  addMethodCall(calls, AppCore?.modules?.OnionUsuarioFicha, "open", detail);
-  addMethodCall(calls, AppCore?.modules?.UsuariosFicha, "open", detail);
-  addMethodCall(calls, AppCore?.modules?.UsuariosModal, "open", detail);
-  addMethodCall(calls, AppCore?.modules?.Usuarios, "openFicha", detail);
-  addMethodCall(calls, AppCore?.modules?.Usuarios, "openDetail", detail);
+  addMethodCall(calls, getModuleCandidate(AppCore, "OnionUsuariosFicha"), "open", detail);
+  addMethodCall(calls, getModuleCandidate(AppCore, "OnionUsuarioFicha"), "open", detail);
+  addMethodCall(calls, getModuleCandidate(AppCore, "UsuariosFicha"), "open", detail);
+  addMethodCall(calls, getModuleCandidate(AppCore, "UsuariosModal"), "open", detail);
+  addMethodCall(calls, getModuleCandidate(AppCore, "Usuarios"), "openFicha", detail);
+  addMethodCall(calls, getModuleCandidate(AppCore, "Usuarios"), "openDetail", detail);
 
   if (await callFirstBridge(calls)) {
     emitSearchEvents(
@@ -1072,15 +1389,12 @@ async function openClienteFromSearch({
     ""
   );
 
-  const payload = {
-    source: "topbar-search",
+  const payload = buildEntityOpenPayload({
     item,
     detail,
-    client: detail,
-    cliente: detail,
-    clienteId,
-    clientId: clienteId,
-  };
+    entityId: clienteId,
+    type: ENTITY_TYPES.CLIENTE,
+  });
 
   const calls = [];
 
@@ -1093,12 +1407,12 @@ async function openClienteFromSearch({
   addFunctionCall(calls, window?.openClienteFicha, detail);
   addFunctionCall(calls, window?.renderClienteFichaModal, detail);
 
-  addMethodCall(calls, AppCore?.modules?.OnionClientesFicha, "open", detail);
-  addMethodCall(calls, AppCore?.modules?.OnionClienteFicha, "open", detail);
-  addMethodCall(calls, AppCore?.modules?.ClientesFicha, "open", detail);
-  addMethodCall(calls, AppCore?.modules?.ClientesModal, "open", detail);
-  addMethodCall(calls, AppCore?.modules?.Clientes, "openFicha", detail);
-  addMethodCall(calls, AppCore?.modules?.Clientes, "openDetail", detail);
+  addMethodCall(calls, getModuleCandidate(AppCore, "OnionClientesFicha"), "open", detail);
+  addMethodCall(calls, getModuleCandidate(AppCore, "OnionClienteFicha"), "open", detail);
+  addMethodCall(calls, getModuleCandidate(AppCore, "ClientesFicha"), "open", detail);
+  addMethodCall(calls, getModuleCandidate(AppCore, "ClientesModal"), "open", detail);
+  addMethodCall(calls, getModuleCandidate(AppCore, "Clientes"), "openFicha", detail);
+  addMethodCall(calls, getModuleCandidate(AppCore, "Clientes"), "openDetail", detail);
 
   if (await callFirstBridge(calls)) {
     emitSearchEvents(
@@ -1131,6 +1445,170 @@ async function openClienteFromSearch({
   });
 }
 
+/* =========================================================
+   FACTURAS BRIDGE 10/10
+========================================================= */
+
+function getFacturaIdFromDetail(detail = {}, item = {}) {
+  return safeText(
+    first(
+      detail.facturaId,
+      detail.invoiceId,
+      detail.id,
+      detail._id,
+
+      detail.raw?.facturaId,
+      detail.raw?.invoiceId,
+      detail.raw?.id,
+      detail.raw?._id,
+
+      item.entityId,
+      item.raw?.facturaId,
+      item.raw?.invoiceId,
+      item.raw?.id,
+      item.raw?._id
+    ),
+    ""
+  );
+}
+
+function getFacturaFallbackUrl(AppCore, item = {}, facturaId = "") {
+  const fromItem = normalizeResultUrl(AppCore, item.url || "");
+  if (fromItem) return fromItem;
+
+  return getFallbackUrlForEntity(
+    AppCore,
+    ENTITY_TYPES.FACTURA,
+    facturaId,
+    item.raw
+  );
+}
+
+function addFacturasModuleCalls({
+  calls,
+  facturasModule,
+  payload,
+  detail,
+  facturaId,
+}) {
+  if (!facturasModule) return;
+
+  const acceptDetailResult = (result) => result !== false && result !== null;
+
+  addMethodCall(calls, facturasModule, "openFacturaFromExternalRequest", payload, {
+    accept: acceptDetailResult,
+  });
+
+  addMethodCall(calls, facturasModule, "openFromSearch", payload, {
+    accept: acceptDetailResult,
+  });
+
+  addMethodCall(calls, facturasModule, "openSearchResult", payload, {
+    accept: acceptDetailResult,
+  });
+
+  addMethodCall(calls, facturasModule, "openDetail", payload, {
+    accept: acceptDetailResult,
+  });
+
+  addMethodCall(calls, facturasModule, "open", payload, {
+    accept: acceptDetailResult,
+  });
+
+  if (facturaId) {
+    addMethodCall(calls, facturasModule, "openFactura", facturaId, {
+      accept: acceptDetailResult,
+    });
+
+    addMethodCall(calls, facturasModule, "loadFacturaDetail", facturaId, {
+      accept: acceptDetailResult,
+    });
+
+    addMethodCallArgs(calls, facturasModule, "openFactura", [facturaId, payload], {
+      accept: acceptDetailResult,
+    });
+  }
+
+  addMethodCall(calls, facturasModule, "openDetail", detail, {
+    accept: acceptDetailResult,
+  });
+}
+
+async function tryOpenFacturaBridge({
+  AppCore,
+  payload,
+  detail,
+  facturaId,
+}) {
+  const calls = [];
+
+  addMethodCall(calls, window?.OnionFacturasModal, "open", payload);
+  addMethodCall(calls, window?.OnionFacturaModal, "open", payload);
+  addMethodCall(calls, window?.OnionFacturasFicha, "open", payload);
+  addMethodCall(calls, window?.OnionFacturaFicha, "open", payload);
+  addMethodCall(calls, window?.FacturasModal, "open", payload);
+  addMethodCall(calls, window?.FacturaModal, "open", payload);
+  addMethodCall(calls, window?.FacturasFicha, "open", payload);
+
+  addFunctionCall(calls, window?.openFacturaModal, payload);
+  addFunctionCall(calls, window?.renderFacturaModal, payload);
+  addFunctionCall(calls, window?.openFacturaFicha, payload);
+
+  addMethodCall(calls, getModuleCandidate(AppCore, "OnionFacturasModal"), "open", payload);
+  addMethodCall(calls, getModuleCandidate(AppCore, "OnionFacturaModal"), "open", payload);
+  addMethodCall(calls, getModuleCandidate(AppCore, "FacturasModal"), "open", payload);
+  addMethodCall(calls, getModuleCandidate(AppCore, "FacturaModal"), "open", payload);
+  addMethodCall(calls, getModuleCandidate(AppCore, "FacturasFicha"), "open", payload);
+
+  addFacturasModuleCalls({
+    calls,
+    facturasModule: getFacturasModule(AppCore),
+    payload,
+    detail,
+    facturaId,
+  });
+
+  return callFirstBridge(calls);
+}
+
+async function retryOpenFacturaAfterNavigation({
+  AppCore,
+  payload,
+  detail,
+  facturaId,
+}) {
+  const delays = [0, 80, 180, 360, 700];
+
+  for (const delay of delays) {
+    await sleep(delay);
+
+    const opened = await tryOpenFacturaBridge({
+      AppCore,
+      payload,
+      detail,
+      facturaId,
+    });
+
+    if (opened) {
+      return true;
+    }
+
+    emitSearchEvents(
+      AppCore,
+      [
+        "facturas:modal:open",
+        "factura:modal:open",
+        "facturas:detail:open",
+        "factura:ficha:open",
+        "invoice:detail:open",
+      ],
+      payload
+    );
+  }
+
+  return false;
+}
+
 async function openFacturaFromSearch({
   AppCore,
   Router,
@@ -1139,43 +1617,28 @@ async function openFacturaFromSearch({
   const detailResponse = await fetchEntityDetail(AppCore, item);
   const detail = buildSearchPayload(item, detailResponse);
 
-  const facturaId = safeText(
-    first(detail.facturaId, detail.invoiceId, detail.id, item.entityId),
-    ""
-  );
+  const facturaId = getFacturaIdFromDetail(detail, item);
 
-  const payload = {
-    source: "topbar-search",
+  const payload = buildEntityOpenPayload({
     item,
     detail,
-    factura: detail,
-    invoice: detail,
+    entityId: facturaId,
+    type: ENTITY_TYPES.FACTURA,
+  });
+
+  payload.facturaId = facturaId;
+  payload.invoiceId = facturaId;
+  payload.factura = detail;
+  payload.invoice = detail;
+
+  const openedDirect = await tryOpenFacturaBridge({
+    AppCore,
+    payload,
+    detail,
     facturaId,
-    invoiceId: facturaId,
-  };
+  });
 
-  const calls = [];
-
-  addMethodCall(calls, window?.OnionFacturasModal, "open", detail);
-  addMethodCall(calls, window?.OnionFacturaModal, "open", detail);
-  addMethodCall(calls, window?.OnionFacturasFicha, "open", detail);
-  addMethodCall(calls, window?.OnionFacturaFicha, "open", detail);
-  addMethodCall(calls, window?.FacturasModal, "open", detail);
-  addMethodCall(calls, window?.FacturaModal, "open", detail);
-  addMethodCall(calls, window?.FacturasFicha, "open", detail);
-  addFunctionCall(calls, window?.openFacturaModal, detail);
-  addFunctionCall(calls, window?.renderFacturaModal, detail);
-  addFunctionCall(calls, window?.openFacturaFicha, detail);
-
-  addMethodCall(calls, AppCore?.modules?.OnionFacturasModal, "open", detail);
-  addMethodCall(calls, AppCore?.modules?.OnionFacturaModal, "open", detail);
-  addMethodCall(calls, AppCore?.modules?.FacturasModal, "open", detail);
-  addMethodCall(calls, AppCore?.modules?.FacturaModal, "open", detail);
-  addMethodCall(calls, AppCore?.modules?.FacturasFicha, "open", detail);
-  addMethodCall(calls, AppCore?.modules?.Facturas, "openFactura", detail);
-  addMethodCall(calls, AppCore?.modules?.Facturas, "openDetail", detail);
-
-  if (await callFirstBridge(calls)) {
+  if (openedDirect) {
     emitSearchEvents(
       AppCore,
       [
@@ -1188,14 +1651,39 @@ async function openFacturaFromSearch({
     return true;
   }
 
-  return navigateFallbackAndEmit({
+  const fallbackUrl = getFacturaFallbackUrl(AppCore, item, facturaId);
+
+  if (fallbackUrl) {
+    await navigateToPath(AppCore, Router, fallbackUrl, {
+      force: true,
+    });
+
+    emitSearchEvents(
+      AppCore,
+      [
+        "topbar:search:open-factura",
+        "facturas:modal:open",
+        "factura:modal:open",
+        "facturas:detail:open",
+        "factura:ficha:open",
+        "invoice:detail:open",
+      ],
+      payload
+    );
+
+    const openedAfterNavigation = await retryOpenFacturaAfterNavigation({
+      AppCore,
+      payload,
+      detail,
+      facturaId,
+    });
+
+    return Boolean(openedAfterNavigation || fallbackUrl);
+  }
+
+  emitSearchEvents(
     AppCore,
-    Router,
-    item,
-    fallbackUrl:
-      item.url ||
-      getFallbackUrlForEntity(AppCore, ENTITY_TYPES.FACTURA, facturaId, item.raw),
-    eventNames: [
+    [
       "topbar:search:open-factura",
       "facturas:modal:open",
       "factura:modal:open",
@@ -1203,8 +1691,10 @@ async function openFacturaFromSearch({
       "factura:ficha:open",
       "invoice:detail:open",
     ],
-    payload,
-  });
+    payload
+  );
+
+  return true;
 }
 
 /* =========================================================
@@ -1376,7 +1866,8 @@ function muteNode(node) {
 
   node.style.opacity = ".34";
   node.style.pointerEvents = "none";
-  node.style.transition = "opacity var(--duration-fast, .16s) var(--ease-standard, cubic-bezier(.2,.8,.2,1))";
+  node.style.transition =
+    "opacity var(--duration-fast, .16s) var(--ease-standard, cubic-bezier(.2,.8,.2,1))";
 }
 
 function unmuteNode(node) {
@@ -1630,7 +2121,7 @@ export function normalizeApiItem(AppCore, raw, index = 0) {
   const action = getActionForType(type, raw);
 
   const url = rawUrl
-    ? safeNormalizePath(AppCore, rawUrl)
+    ? normalizeResultUrl(AppCore, rawUrl)
     : getFallbackUrlForEntity(AppCore, type, entityId, raw);
 
   const id = safeText(
@@ -1825,6 +2316,10 @@ export function hideResultsContainer(runtime, getDom) {
     searchResults.innerHTML = "";
   }
 
+  if (searchInput) {
+    searchInput.removeAttribute("aria-activedescendant");
+  }
+
   runtime.activeIndex = -1;
   runtime.currentItems = [];
 
@@ -1900,16 +2395,25 @@ export function updateActiveItem(runtime, items = []) {
 }
 
 export function updateActiveVisuals(runtime, getDom) {
-  const { searchResults } = getDom();
+  const { searchResults, searchInput } = getDom();
   if (!searchResults) return;
 
   const items = Array.from(searchResults.querySelectorAll(".search-result"));
 
   items.forEach((el, index) => {
     const isActive = index === runtime.activeIndex;
+
     el.classList.toggle("active", isActive);
     el.setAttribute("aria-selected", String(isActive));
+
+    if (isActive && searchInput && el.id) {
+      searchInput.setAttribute("aria-activedescendant", el.id);
+    }
   });
+
+  if (runtime.activeIndex < 0 && searchInput) {
+    searchInput.removeAttribute("aria-activedescendant");
+  }
 
   if (runtime.activeIndex >= 0 && items[runtime.activeIndex]) {
     items[runtime.activeIndex].scrollIntoView({
@@ -1985,7 +2489,8 @@ export async function goToResult({
     }
 
     const target = safeText(
-      item.url || getFallbackUrlForEntity(AppCore, item.type, item.entityId, item.raw),
+      item.url ||
+        getFallbackUrlForEntity(AppCore, item.type, item.entityId, item.raw),
       ""
     );
 
@@ -2007,7 +2512,8 @@ export async function goToResult({
     );
 
     const fallback = safeText(
-      item.url || getFallbackUrlForEntity(AppCore, item.type, item.entityId, item.raw),
+      item.url ||
+        getFallbackUrlForEntity(AppCore, item.type, item.entityId, item.raw),
       ""
     );
 
@@ -2094,14 +2600,17 @@ export function renderResults({
     items
       .slice(0, TOPBAR_SEARCH_CONFIG.maxResultsPerGroup)
       .forEach((item) => {
+        const index = runtime.currentItems.length;
+
         const resultEl = document.createElement("button");
         resultEl.type = "button";
+        resultEl.id = `topbar-search-result-${index}`;
         resultEl.className = "search-result";
         resultEl.dataset.type = item.type || ENTITY_TYPES.GENERAL;
         resultEl.dataset.url = item.url || "";
         resultEl.dataset.action = item.action || SEARCH_ACTIONS.NAVIGATE;
         resultEl.dataset.entityId = item.entityId || "";
-        resultEl.dataset.index = String(runtime.currentItems.length);
+        resultEl.dataset.index = String(index);
         resultEl.setAttribute("role", "option");
         resultEl.setAttribute("aria-selected", "false");
         resultEl.setAttribute(
@@ -2221,7 +2730,7 @@ export async function runSearch({
       results: merged,
       query: q,
     });
-  } catch (error) {
+  } catch {
     if (runtime.currentQuery !== q) {
       return;
     }

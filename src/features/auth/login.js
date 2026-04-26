@@ -13,6 +13,7 @@
    - navegación SPA consistente tras login
    - anti race conditions concurrentes
    - cero estados auth fantasma
+   - evitar doble navegación / doble render post-login
 
    HARDENING EXTREMO:
    - mutex real de login concurrente
@@ -22,6 +23,9 @@
    - tolerancia total backend legacy
    - eventos enterprise completos
    - errores normalizados
+   - fallback post-login siempre a home "/"
+   - sin home por rol
+   - navegación deduplicada
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -87,6 +91,14 @@ function safeBool(value) {
   return value === true;
 }
 
+function safeObject(value) {
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? value
+    : {};
+}
+
 function safeEmit(
   eventName,
   payload = {}
@@ -113,53 +125,6 @@ function safeSyncUserUI() {
   } catch {}
 }
 
-function safeNavigate(
-  path = "/"
-) {
-  try {
-    if (
-      AppCore?.Router &&
-      typeof AppCore.Router.navigate ===
-        "function"
-    ) {
-      AppCore.Router.navigate(
-        path,
-        {
-          replaceState: true,
-          force: true,
-        }
-      );
-
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (
-      isBrowser() &&
-      typeof window.history
-        ?.replaceState ===
-        "function"
-    ) {
-      window.history.replaceState(
-        {},
-        "",
-        path
-      );
-
-      window.dispatchEvent(
-        new PopStateEvent(
-          "popstate"
-        )
-      );
-
-      return true;
-    }
-  } catch {}
-
-  return false;
-}
-
 function getApiClient() {
   return (
     AppCore?.apiClient ||
@@ -177,6 +142,196 @@ function resolveLoginEndpoint() {
     ) ||
     "/api/auth/login"
   );
+}
+
+function getHomeRoute() {
+  return (
+    configLikeRoute(
+      AppCore?.config?.routes?.home ||
+        "/"
+    ) || "/"
+  );
+}
+
+function getLoginRoute() {
+  return (
+    configLikeRoute(
+      AppCore?.config?.routes?.login ||
+        "/login"
+    ) || "/login"
+  );
+}
+
+function getBrowserPath() {
+  if (!isBrowser()) {
+    return "/";
+  }
+
+  try {
+    const pathname =
+      window.location.pathname || "/";
+
+    const search =
+      window.location.search || "";
+
+    const hash =
+      window.location.hash || "";
+
+    return normalizePath(
+      `${pathname}${search}${hash}`
+    );
+  } catch {
+    return "/";
+  }
+}
+
+function getBrowserCanonicalPath() {
+  try {
+    return configLikeRoute(
+      getCurrentCanonicalPath() ||
+        getBrowserPath() ||
+        "/"
+    );
+  } catch {
+    return configLikeRoute(
+      getBrowserPath() || "/"
+    );
+  }
+}
+
+function sameCanonicalPath(
+  a = "/",
+  b = "/"
+) {
+  try {
+    return (
+      configLikeRoute(
+        normalizePath(a)
+      ) ===
+      configLikeRoute(
+        normalizePath(b)
+      )
+    );
+  } catch {
+    return String(a || "/") === String(b || "/");
+  }
+}
+
+function shouldNavigateAfterLogin(options = {}) {
+  if (
+    options?.navigate === false ||
+    options?.skipNavigate === true ||
+    options?.manualNavigate === true
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function buildPopStateEvent() {
+  try {
+    return new PopStateEvent(
+      "popstate"
+    );
+  } catch {
+    return new Event(
+      "popstate"
+    );
+  }
+}
+
+function safeNavigate(
+  path = "/",
+  options = {}
+) {
+  const target =
+    normalizePath(
+      safeText(path, getHomeRoute())
+    ) || getHomeRoute();
+
+  const current =
+    getBrowserCanonicalPath();
+
+  const targetCanonical =
+    configLikeRoute(
+      target
+    );
+
+  /*
+    Deduplicación:
+    Si ya estamos en destino, no forzamos render.
+    Esto elimina parte del parpadeo post-login.
+  */
+  if (
+    isBrowser() &&
+    sameCanonicalPath(
+      current,
+      targetCanonical
+    )
+  ) {
+    return true;
+  }
+
+  try {
+    const router =
+      AppCore?.Router ||
+      AppCore?.router ||
+      AppCore?.modules?.Router ||
+      null;
+
+    if (
+      router &&
+      typeof router.navigate === "function"
+    ) {
+      router.navigate(
+        target,
+        {
+          replaceState:
+            options.replaceState !== false,
+          force:
+            options.force === true,
+        }
+      );
+
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (
+      isBrowser() &&
+      typeof window.history
+        ?.replaceState ===
+        "function"
+    ) {
+      window.history.replaceState(
+        {
+          path: target,
+          publicPath: target,
+          canonicalPath:
+            configLikeRoute(target),
+        },
+        "",
+        target
+      );
+
+      window.dispatchEvent(
+        buildPopStateEvent()
+      );
+
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (isBrowser()) {
+      window.location.assign(target);
+      return true;
+    }
+  } catch {}
+
+  return false;
 }
 
 function looksLikeEmail(
@@ -325,15 +480,73 @@ export function buildLoginRequestBody(
    REDIRECTS
 ========================================================= */
 
+function normalizeRedirectCandidate(value = "") {
+  const candidate =
+    normalizePath(
+      safeText(value, "")
+    );
+
+  if (!candidate) {
+    return "";
+  }
+
+  if (
+    !isSafeRelativePath(
+      candidate
+    )
+  ) {
+    return "";
+  }
+
+  if (
+    isAuthRoute(
+      candidate
+    )
+  ) {
+    return "";
+  }
+
+  return candidate;
+}
+
+function getRedirectFromUrl() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  try {
+    const redirect =
+      new URLSearchParams(
+        window.location.search
+      ).get(
+        "redirect"
+      );
+
+    return normalizeRedirectCandidate(
+      redirect
+    );
+  } catch {
+    return "";
+  }
+}
+
+function getRedirectFromOptions(options = {}) {
+  const opts =
+    safeObject(options);
+
+  return normalizeRedirectCandidate(
+    opts.redirectTo ||
+      opts.redirect ||
+      opts.target ||
+      ""
+  );
+}
+
 export function buildLoginRedirectPath(
   targetPath = null
 ) {
   const loginPath =
-    configLikeRoute(
-      AppCore?.config
-        ?.routes?.login ||
-        "/login"
-    );
+    getLoginRoute();
 
   const target =
     configLikeRoute(
@@ -351,6 +564,14 @@ export function buildLoginRedirectPath(
 
   if (
     !isSafeRelativePath(
+      target
+    )
+  ) {
+    return loginPath;
+  }
+
+  if (
+    isAuthRoute(
       target
     )
   ) {
@@ -377,79 +598,40 @@ export function buildLoginRedirectPath(
   return `${url.pathname}${url.search}`;
 }
 
+/**
+ * Destino post-login.
+ *
+ * Prioridad:
+ * 1. options.redirectTo / options.redirect / options.target
+ * 2. ?redirect=...
+ * 3. Home configurado
+ *
+ * Importante:
+ * - ya NO manda admin a /usuarios
+ * - ya NO manda user a /@slug
+ * - el fallback universal es /
+ */
 export function getPostLoginTarget(
-  user = AppCore?.state?.user
+  user = AppCore?.state?.user,
+  options = {}
 ) {
-  if (isBrowser()) {
-    try {
-      const redirect =
-        new URLSearchParams(
-          window.location.search
-        ).get(
-          "redirect"
-        );
+  const fromOptions =
+    getRedirectFromOptions(
+      options
+    );
 
-      if (redirect) {
-        const candidate =
-          normalizePath(
-            redirect
-          );
-
-        if (
-          isSafeRelativePath(
-            candidate
-          ) &&
-          !isAuthRoute(
-            candidate
-          )
-        ) {
-          return candidate;
-        }
-      }
-    } catch {}
+  if (fromOptions) {
+    return fromOptions;
   }
 
-  const role =
-    safeText(
-      user?.role ??
-        user?.rol
-    ).toLowerCase();
+  const fromUrl =
+    getRedirectFromUrl();
 
-  if (role === "admin") {
-    return "/usuarios";
+  if (fromUrl) {
+    return fromUrl;
   }
 
-  if (
-    role === "billing"
-  ) {
-    return "/facturas";
-  }
-
-  if (
-    role === "support"
-  ) {
-    return "/incidencias";
-  }
-
-  const slug =
-    user?.slug ||
-    AppCore?.utils?.slugify?.(
-      user?.username ||
-        user?.name ||
-        user?.nombre ||
-        ""
-    ) ||
-    "";
-
-  if (slug) {
-    return `/@${slug}`;
-  }
-
-  return (
-    AppCore?.config
-      ?.routes?.home ||
-    "/"
-  );
+  return getHomeRoute();
 }
 
 /* =========================================================
@@ -458,7 +640,8 @@ export function getPostLoginTarget(
 
 async function executeLogin(
   credentials = {},
-  sequence = 0
+  sequence = 0,
+  options = {}
 ) {
   const payload =
     normalizeLoginPayload(
@@ -557,6 +740,20 @@ async function executeLogin(
       result
     );
 
+    if (
+      shouldNavigateAfterLogin(
+        options
+      )
+    ) {
+      safeNavigate(
+        result.redirectTo,
+        {
+          replaceState: true,
+          force: false,
+        }
+      );
+    }
+
     return result;
   }
 
@@ -597,7 +794,8 @@ async function executeLogin(
 
   const redirectTo =
     getPostLoginTarget(
-      snapshot.user
+      snapshot.user,
+      options
     );
 
   const result = {
@@ -616,9 +814,19 @@ async function executeLogin(
     result
   );
 
-  safeNavigate(
-    redirectTo
-  );
+  if (
+    shouldNavigateAfterLogin(
+      options
+    )
+  ) {
+    safeNavigate(
+      redirectTo,
+      {
+        replaceState: true,
+        force: false,
+      }
+    );
+  }
 
   return result;
 }
@@ -628,7 +836,8 @@ async function executeLogin(
 ========================================================= */
 
 export async function login(
-  credentials = {}
+  credentials = {},
+  options = {}
 ) {
   if (loginPromise) {
     return loginPromise;
@@ -646,7 +855,8 @@ export async function login(
 
         return await executeLogin(
           credentials,
-          sequence
+          sequence,
+          options
         );
       } catch (error) {
         clearSessionLocal({
@@ -735,7 +945,8 @@ export async function handleLoginFormSubmit(
 
   const result =
     await login(
-      credentials
+      credentials,
+      options
     );
 
   if (

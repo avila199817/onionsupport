@@ -28,6 +28,13 @@
    - repara/rebindea SidebarUI y TopbarUI antes de app:ready
    - repara/rebindea SidebarUI y TopbarUI en router:rendered
    - corrige casos donde collapse/dropdown solo funcionan tras refrescar
+
+   FIX BOOT LOADER:
+   - toma control del loader estático de index.html desde el inicio
+   - mantiene loader activo durante restore/render/finalize
+   - usa failsafe anti-loader infinito
+   - evita flash/parpadeo en refresh del navegador
+   - no muestra shell inestable antes de app:ready
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -49,7 +56,10 @@ import {
 import {
   showLoader,
   hideLoader,
+  prepareBootLoader,
+  armBootFailsafeLoader,
   clearBootFailsafeTimer,
+  getLoaderSnapshot,
 } from "./loader.js";
 
 import {
@@ -729,7 +739,7 @@ let BOOT_URL_CONTEXT =
 export const App = (() => {
   "use strict";
 
-  const MIN_BOOT_LOADER_MS = 350;
+  const MIN_BOOT_LOADER_MS = 500;
 
   const state = {
     booted: false,
@@ -772,6 +782,16 @@ export const App = (() => {
         name,
         payload
       );
+    } catch {}
+
+    try {
+      if (isBrowser()) {
+        window.dispatchEvent(
+          new CustomEvent(name, {
+            detail: payload,
+          })
+        );
+      }
     } catch {}
   }
 
@@ -818,7 +838,7 @@ export const App = (() => {
 
   function getSidebarSnapshot() {
     try {
-      return SidebarUI?.getState?.() || {};
+      return SidebarUI?.getState?.() || SidebarUI?.getSnapshot?.() || {};
     } catch {
       return {};
     }
@@ -826,7 +846,15 @@ export const App = (() => {
 
   function getTopbarSnapshot() {
     try {
-      return TopbarUI?.getState?.() || {};
+      return TopbarUI?.getState?.() || TopbarUI?.getSnapshot?.() || {};
+    } catch {
+      return {};
+    }
+  }
+
+  function getBootLoaderSnapshot() {
+    try {
+      return getLoaderSnapshot?.(AppCore, state) || {};
     } catch {
       return {};
     }
@@ -841,13 +869,18 @@ export const App = (() => {
     });
   }
 
-  function safeCallUIMethod(target, names = [], ...args) {
+  function safeCallUIMethod(target, names = [], reason = "unknown", context = {}) {
     for (const name of names) {
       try {
         const fn = target?.[name];
 
         if (typeof fn === "function") {
-          fn.apply(target, args);
+          fn.call(
+            target,
+            reason,
+            context
+          );
+
           return true;
         }
       } catch (error) {
@@ -862,19 +895,18 @@ export const App = (() => {
   }
 
   function repairUISystems(reason = "unknown") {
-    /*
-      Este bloque corrige un race típico:
+    const cleanReason =
+      safeText(reason, "unknown");
 
-      1. El shell/sidebar se monta durante boot.
-      2. restore/session/router/syncUserUI pueden repintar sidebar/topbar.
-      3. Los listeners de collapse, dropdown, logout o menú quedan perdidos.
-      4. Al refrescar funciona porque el DOM ya arranca estable.
-
-      Solución:
-      - ejecutar syncUserUI en puntos críticos;
-      - llamar APIs flexibles del componente sin asumir nombre único;
-      - forzar una segunda fase bind/rebind/bindEvents.
-    */
+    const context = {
+      AppCore,
+      Auth,
+      Router,
+      Store,
+      Toast,
+      I18n,
+      reason: cleanReason,
+    };
 
     try {
       syncUserUI?.({
@@ -889,7 +921,7 @@ export const App = (() => {
       safeWarn(
         "syncUserUI repair falló.",
         {
-          reason,
+          reason: cleanReason,
           error,
         }
       );
@@ -907,15 +939,8 @@ export const App = (() => {
         "rebind",
         "bindEvents",
       ],
-      {
-        AppCore,
-        Auth,
-        Router,
-        Store,
-        Toast,
-        I18n,
-        reason,
-      }
+      cleanReason,
+      context
     );
 
     safeCallUIMethod(
@@ -925,15 +950,8 @@ export const App = (() => {
         "rebind",
         "bindEvents",
       ],
-      {
-        AppCore,
-        Auth,
-        Router,
-        Store,
-        Toast,
-        I18n,
-        reason,
-      }
+      cleanReason,
+      context
     );
 
     safeCallUIMethod(
@@ -948,15 +966,8 @@ export const App = (() => {
         "rebind",
         "bindEvents",
       ],
-      {
-        AppCore,
-        Auth,
-        Router,
-        Store,
-        Toast,
-        I18n,
-        reason,
-      }
+      cleanReason,
+      context
     );
 
     safeCallUIMethod(
@@ -966,19 +977,12 @@ export const App = (() => {
         "rebind",
         "bindEvents",
       ],
-      {
-        AppCore,
-        Auth,
-        Router,
-        Store,
-        Toast,
-        I18n,
-        reason,
-      }
+      cleanReason,
+      context
     );
 
     safeEmit("app:ui:repair", {
-      reason,
+      reason: cleanReason,
       sidebarSnapshot:
         getSidebarSnapshot(),
       topbarSnapshot:
@@ -1149,6 +1153,8 @@ export const App = (() => {
   }
 
   function markBooting(cycleId) {
+    state.booting = true;
+
     try {
       markAppBootState?.(AppCore, {
         booting: true,
@@ -1174,7 +1180,7 @@ export const App = (() => {
      LOADER
   ======================================================= */
 
-  function showBootLoader() {
+  function showBootLoader(reason = "boot") {
     if (state.loaderVisible) {
       return;
     }
@@ -1183,11 +1189,37 @@ export const App = (() => {
     state.loaderShownAt = Date.now();
 
     try {
-      showLoader(AppCore);
+      prepareBootLoader?.(
+        AppCore,
+        state
+      );
+    } catch {
+      try {
+        showLoader(
+          AppCore,
+          {
+            booting: true,
+            reason,
+          }
+        );
+      } catch {}
+    }
+
+    try {
+      armBootFailsafeLoader?.({
+        AppCore,
+        state,
+      });
     } catch {}
+
+    safeEmit("app:boot:loader:show", {
+      reason,
+      loaderSnapshot:
+        getBootLoaderSnapshot(),
+    });
   }
 
-  function hideBootLoader() {
+  function hideBootLoader(reason = "boot-complete") {
     if (!state.loaderVisible) {
       return;
     }
@@ -1195,8 +1227,41 @@ export const App = (() => {
     state.loaderVisible = false;
 
     try {
-      hideLoader(AppCore);
+      hideLoader(
+        AppCore,
+        {
+          reason,
+          minVisibleMs:
+            MIN_BOOT_LOADER_MS,
+        }
+      );
     } catch {}
+
+    safeEmit("app:boot:loader:hide", {
+      reason,
+      loaderSnapshot:
+        getBootLoaderSnapshot(),
+    });
+  }
+
+  function forceHideBootLoader(reason = "force-hide") {
+    state.loaderVisible = false;
+
+    try {
+      hideLoader(
+        AppCore,
+        {
+          reason,
+          minVisibleMs: 0,
+        }
+      );
+    } catch {}
+
+    safeEmit("app:boot:loader:force-hide", {
+      reason,
+      loaderSnapshot:
+        getBootLoaderSnapshot(),
+    });
   }
 
   /* =======================================================
@@ -1298,14 +1363,6 @@ export const App = (() => {
       return;
     }
 
-    /*
-      CRÍTICO:
-      Aquí SOLO se configura.
-      NO llamar bindRouter() aquí.
-
-      renderInitialRoute() ya se encarga de hacer bind después
-      de capturar el path inicial protegido.
-    */
     try {
       configureRouter();
     } catch (error) {
@@ -1477,7 +1534,7 @@ export const App = (() => {
       await wait(remaining);
     }
 
-    hideBootLoader();
+    hideBootLoader("finalize-boot");
 
     if (!state.readyEmitted) {
       state.readyEmitted = true;
@@ -1487,6 +1544,8 @@ export const App = (() => {
           getSidebarSnapshot(),
         topbarSnapshot:
           getTopbarSnapshot(),
+        loaderSnapshot:
+          getBootLoaderSnapshot(),
       });
     }
   }
@@ -1503,8 +1562,14 @@ export const App = (() => {
       markBooting(cycleId);
 
       /*
-        Captura temprana antes de cualquier init real.
+        MUY IMPORTANTE:
+        El loader se toma aquí, al principio real del boot.
+
+        Si index.html ya trae #app-loader visible, aquí JS toma control.
+        Si index.html no lo trae, loader.js crea uno fallback.
       */
+      showBootLoader("boot-start");
+
       refreshBootUrlContext();
 
       bindGlobalHandlersBlock();
@@ -1522,27 +1587,10 @@ export const App = (() => {
       initStoreBlock();
       initI18nBlock();
 
-      /*
-        Solo configureRouter().
-        El bind real queda delegado a renderInitialRoute().
-      */
       initRouterBlock();
 
       initUIBlock();
 
-      showBootLoader();
-
-      /*
-        CASO CRÍTICO:
-        Si entramos desde una ruta pública con token:
-        - /activate-account?token=...
-        - /activate-account/<token>
-        - /reset-password/confirm?token=...
-        - /reset-password/confirm/<token>
-
-        renderizamos primero para que la vista capture el token
-        antes de que restore/session/auth/history puedan tocar navegación.
-      */
       if (
         bootContext.isPublicTokenRoute &&
         bootContext.hasPublicToken
@@ -1570,13 +1618,6 @@ export const App = (() => {
             skipPostRestoreNavigation: false,
           });
 
-        /*
-          Si restoreSessionInBackground() ya navegó, por ejemplo:
-          /login con sesión previa -> /
-          NO hacemos renderInitialRoute() otra vez.
-
-          Esto evita doble render y parpadeo.
-        */
         if (
           state.bootNavigationHandled === true
         ) {
@@ -1609,7 +1650,7 @@ export const App = (() => {
     } catch (error) {
       state.booting = false;
 
-      hideBootLoader();
+      clearBootFailsafeTimer(state);
 
       safeError(
         "Boot error.",
@@ -1618,6 +1659,10 @@ export const App = (() => {
 
       try {
         repairUISystems("boot-error");
+      } catch {}
+
+      try {
+        forceHideBootLoader("boot-error");
       } catch {}
 
       try {
@@ -1669,10 +1714,14 @@ export const App = (() => {
     resetCycleRuntimeState();
 
     try {
+      clearBootFailsafeTimer(state);
+    } catch {}
+
+    try {
       clearScope(AppCore);
     } catch {}
 
-    hideBootLoader();
+    forceHideBootLoader("reboot-reset");
 
     return boot();
   }
@@ -1701,6 +1750,15 @@ export const App = (() => {
 
       publicPath:
         AppCore?.state?.publicPath || "/",
+
+      sidebarSnapshot:
+        getSidebarSnapshot(),
+
+      topbarSnapshot:
+        getTopbarSnapshot(),
+
+      loaderSnapshot:
+        getBootLoaderSnapshot(),
     };
   }
 
@@ -1711,6 +1769,15 @@ export const App = (() => {
 
     repairUI:
       repairUISystems,
+
+    showLoader:
+      showBootLoader,
+
+    hideLoader:
+      hideBootLoader,
+
+    getLoaderSnapshot:
+      getBootLoaderSnapshot,
   };
 
   return api;

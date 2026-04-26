@@ -12,6 +12,8 @@
    - ocultar shell mientras la app está booting/loading
    - mostrar shell solo cuando la app está ready
    - soporte dark / light theme
+   - dark theme  -> favicon_white.png
+   - light theme -> favicon_black.png
    - soporte markup nuevo app-loader__
    - soporte markup legacy loader-*
    - CSP clean: sin inline CSS requerido
@@ -379,6 +381,7 @@ html[data-theme="light"] .app-loader .app-loader__brand {
   content: "";
   position: absolute;
   inset: -35%;
+  z-index: 0;
 
   background:
     conic-gradient(
@@ -399,16 +402,22 @@ html[data-theme="light"] .app-loader .app-loader__brand {
   content: "";
   position: absolute;
   inset: 2px;
+  z-index: 1;
 
   border-radius: calc(var(--loader-brand-radius) - 2px);
 
   background: var(--loader-surface-strong);
 }
 
+#app-loader .app-loader__brand > *,
+.app-loader .app-loader__brand > * {
+  grid-area: 1 / 1;
+}
+
 #app-loader .app-loader__logo,
 .app-loader .app-loader__logo {
   position: relative;
-  z-index: 2;
+  z-index: 3;
 
   width: var(--loader-logo-size);
   height: var(--loader-logo-size);
@@ -421,15 +430,52 @@ html[data-theme="light"] .app-loader .app-loader__brand {
     drop-shadow(0 8px 18px rgba(0, 0, 0, .24));
 }
 
+
+/* =========================================================
+   LOADER LOGO THEME SWITCH
+   dark  -> favicon_white.png
+   light -> favicon_black.png
+========================================================= */
+
+#app-loader .app-loader__logo--light,
+.app-loader .app-loader__logo--light {
+  display: none;
+}
+
+#app-loader .app-loader__logo--dark,
+.app-loader .app-loader__logo--dark {
+  display: block;
+}
+
+html[data-theme="light"] #app-loader .app-loader__logo--dark,
+html[data-theme="light"] .app-loader .app-loader__logo--dark {
+  display: none;
+}
+
+html[data-theme="light"] #app-loader .app-loader__logo--light,
+html[data-theme="light"] .app-loader .app-loader__logo--light {
+  display: block;
+}
+
+html[data-theme="dark"] #app-loader .app-loader__logo--light,
+html[data-theme="dark"] .app-loader .app-loader__logo--light {
+  display: none;
+}
+
+html[data-theme="dark"] #app-loader .app-loader__logo--dark,
+html[data-theme="dark"] .app-loader .app-loader__logo--dark {
+  display: block;
+}
+
 #app-loader .app-loader__logo-fallback,
 .app-loader .app-loader__logo-fallback {
-  position: absolute;
-  z-index: 1;
+  position: relative;
+  z-index: 2;
 
   width: var(--loader-logo-size);
   height: var(--loader-logo-size);
 
-  display: grid;
+  display: none;
   place-items: center;
 
   border-radius: 18px;

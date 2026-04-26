@@ -266,11 +266,39 @@ function syncUserAndRoles({
 function shouldIgnoreHiddenTarget(target = null) {
   if (!isElement(target)) return false;
 
-  const hidden = target.closest(
-    "[hidden], [aria-hidden='true'], [inert], [data-sidebar-visible='false']"
+  const hardHidden = target.closest(
+    "[hidden], [inert], [data-sidebar-visible='false']"
   );
 
-  return Boolean(hidden);
+  if (hardHidden) {
+    return true;
+  }
+
+  const ariaHidden = target.closest(
+    "[aria-hidden='true']"
+  );
+
+  if (!ariaHidden) {
+    return false;
+  }
+
+  /*
+    Caso común del menú:
+    <a data-spa> <span aria-hidden="true">[icono]</span> Texto </a>
+    Si bloqueamos aquí, el click en el icono NO navega.
+  */
+  const interactiveParent = target.closest(
+    "a[data-spa], button, [role='button']"
+  );
+
+  if (
+    interactiveParent &&
+    interactiveParent.contains(ariaHidden)
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 function preventHiddenTargetClick(event) {

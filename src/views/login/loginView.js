@@ -38,6 +38,13 @@
    - navegación segura post-login
    - sync de sesión estable e idempotente
    - cleanup completo de la vista
+
+   FIX 10/10:
+   - no aceptar como login correcto respuestas sin token + usuario
+   - no reutilizar AppCore.state.user como fallback tras login
+   - limpiar sesión vieja si Auth.login falla o devuelve payload inválido
+   - impedir dashboard/avatar cacheado después de un 401
+   - cortar navegación si el resultado de login no es una sesión válida
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -124,6 +131,36 @@ export const LoginView = (() => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
       String(value || "").trim()
     );
+  }
+
+  function isPlainObject(value) {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    );
+  }
+
+  function pickFirstText(...values) {
+    for (const value of values) {
+      const text = safeText(value, "");
+
+      if (text) {
+        return text;
+      }
+    }
+
+    return "";
+  }
+
+  function pickFirstObject(...values) {
+    for (const value of values) {
+      if (isPlainObject(value)) {
+        return value;
+      }
+    }
+
+    return null;
   }
 
   function normalizePath(path = DEFAULT_POST_LOGIN_PATH) {
@@ -418,6 +455,38 @@ export const LoginView = (() => {
     }, safeDelay);
   }
 
+  function navigateBackToLoginAfterFailedLogin() {
+    if (!isBrowser()) {
+      return;
+    }
+
+    if (isStillOnLoginRoute()) {
+      return;
+    }
+
+    setAuthScreen(true);
+    hideToast();
+    forceHideGlobalLoader();
+
+    if (typeof Router?.navigate === "function") {
+      Router.navigate(LOGIN_ROUTE_PREFIX, {
+        replaceState: true,
+        force: true,
+      });
+      return;
+    }
+
+    try {
+      window.history.replaceState(
+        window.history.state || {},
+        "",
+        LOGIN_ROUTE_PREFIX
+      );
+    } catch {}
+
+    window.location.assign(LOGIN_ROUTE_PREFIX);
+  }
+
   /* =========================================================
      GLOBAL LOADER / SHELL
   ========================================================= */
@@ -559,9 +628,391 @@ export const LoginView = (() => {
       case "MISSING_CREDENTIALS":
         return "Introduce usuario/email y contraseña.";
 
+      case "INVALID_LOGIN_SESSION":
+        return "Login inválido: el servidor no devolvió una sesión válida.";
+
       default:
         return "No se pudo iniciar sesión.";
     }
+  }
+
+  /* =========================================================
+     AUTH HARDENING
+  ========================================================= */
+
+  function hasUsableUser(user = {}) {
+    if (!user || typeof user !== "object") {
+      return false;
+    }
+
+    return Boolean(
+      safeText(user.id, "") ||
+      safeText(user.userId, "") ||
+      safeText(user._id, "") ||
+      safeText(user.username, "") ||
+      safeText(user.email, "") ||
+      safeText(user.phone, "") ||
+      safeText(user.telefono, "")
+    );
+  }
+
+  function hasUsableToken(token = "") {
+    return Boolean(safeText(token, ""));
+  }
+
+  function extractDirectAuthPayload(payload = {}) {
+    const root =
+      isPlainObject(payload)
+        ? payload
+        : {};
+
+    const data =
+      isPlainObject(root.data)
+        ? root.data
+        : {};
+
+    const auth =
+      pickFirstObject(
+        root.auth,
+        root.session,
+        data.auth,
+        data.session
+      ) || {};
+
+    const nestedData =
+      isPlainObject(auth.data)
+        ? auth.data
+        : {};
+
+    const token =
+      pickFirstText(
+        root.token,
+        root.accessToken,
+        root.access_token,
+        root.jwt,
+        root.idToken,
+        root.id_token,
+
+        data.token,
+        data.accessToken,
+        data.access_token,
+        data.jwt,
+        data.idToken,
+        data.id_token,
+
+        auth.token,
+        auth.accessToken,
+        auth.access_token,
+        auth.jwt,
+        auth.idToken,
+        auth.id_token,
+
+        nestedData.token,
+        nestedData.accessToken,
+        nestedData.access_token,
+        nestedData.jwt
+      );
+
+    const refreshToken =
+      pickFirstText(
+        root.refreshToken,
+        root.refresh_token,
+        data.refreshToken,
+        data.refresh_token,
+        auth.refreshToken,
+        auth.refresh_token,
+        nestedData.refreshToken,
+        nestedData.refresh_token
+      );
+
+    const tempToken =
+      pickFirstText(
+        root.tempToken,
+        root.temp_token,
+        root.twoFactorToken,
+        root.two_factor_token,
+        data.tempToken,
+        data.temp_token,
+        data.twoFactorToken,
+        data.two_factor_token,
+        auth.tempToken,
+        auth.temp_token,
+        auth.twoFactorToken,
+        auth.two_factor_token
+      );
+
+    const user =
+      pickFirstObject(
+        root.user,
+        root.usuario,
+        root.account,
+        root.profile,
+
+        data.user,
+        data.usuario,
+        data.account,
+        data.profile,
+
+        auth.user,
+        auth.usuario,
+        auth.account,
+        auth.profile,
+
+        nestedData.user,
+        nestedData.usuario,
+        nestedData.account,
+        nestedData.profile
+      );
+
+    const redirectTo =
+      pickFirstText(
+        root.redirectTo,
+        root.redirect_to,
+        root.redirect,
+        data.redirectTo,
+        data.redirect_to,
+        data.redirect,
+        auth.redirectTo,
+        auth.redirect_to,
+        auth.redirect
+      );
+
+    const requires2FA = Boolean(
+      root.requires2FA ||
+      root.requiresTwoFactor ||
+      root.twoFactorRequired ||
+      root.require2FA ||
+      root.mfaRequired ||
+      root.requiresMfa ||
+
+      data.requires2FA ||
+      data.requiresTwoFactor ||
+      data.twoFactorRequired ||
+      data.require2FA ||
+      data.mfaRequired ||
+      data.requiresMfa ||
+
+      auth.requires2FA ||
+      auth.requiresTwoFactor ||
+      auth.twoFactorRequired ||
+      auth.require2FA ||
+      auth.mfaRequired ||
+      auth.requiresMfa
+    );
+
+    return {
+      token,
+      refreshToken,
+      tempToken,
+      user,
+      redirectTo,
+      requires2FA,
+    };
+  }
+
+  function isExplicitAuthFailure(payload = {}) {
+    const root =
+      isPlainObject(payload)
+        ? payload
+        : {};
+
+    const data =
+      isPlainObject(root.data)
+        ? root.data
+        : {};
+
+    const response =
+      isPlainObject(root.response)
+        ? root.response
+        : {};
+
+    const responseData =
+      isPlainObject(response.data)
+        ? response.data
+        : {};
+
+    const status = Number(
+      root.status ||
+      root.statusCode ||
+      data.status ||
+      data.statusCode ||
+      response.status ||
+      response.statusCode ||
+      responseData.status ||
+      responseData.statusCode ||
+      0
+    );
+
+    if (status >= 400) {
+      return true;
+    }
+
+    if (root.ok === false) {
+      return true;
+    }
+
+    if (root.success === false) {
+      return true;
+    }
+
+    if (data.ok === false) {
+      return true;
+    }
+
+    if (data.success === false) {
+      return true;
+    }
+
+    return false;
+  }
+
+  function createInvalidLoginSessionError() {
+    const error = new Error(
+      "Login inválido: el servidor no devolvió una sesión válida."
+    );
+
+    error.status = 401;
+    error.data = {
+      code: "INVALID_LOGIN_SESSION",
+      message:
+        "Login inválido: el servidor no devolvió una sesión válida.",
+    };
+
+    return error;
+  }
+
+  function assertValidLoginResult(result = {}) {
+    const direct =
+      extractDirectAuthPayload(result);
+
+    const auth =
+      normalizeAuthResult(result);
+
+    const requires2FA = Boolean(
+      direct?.requires2FA ||
+      auth?.requires2FA
+    );
+
+    if (requires2FA) {
+      return {
+        ...auth,
+        requires2FA: true,
+        tempToken:
+          direct.tempToken ||
+          auth?.tempToken ||
+          "",
+        redirectTo:
+          direct.redirectTo ||
+          auth?.redirectTo ||
+          DEFAULT_2FA_PATH,
+      };
+    }
+
+    if (isExplicitAuthFailure(result)) {
+      throw createInvalidLoginSessionError();
+    }
+
+    if (
+      !hasUsableToken(direct?.token) ||
+      !hasUsableUser(direct?.user)
+    ) {
+      throw createInvalidLoginSessionError();
+    }
+
+    return {
+      ...auth,
+      token: direct.token,
+      refreshToken:
+        direct.refreshToken ||
+        auth?.refreshToken ||
+        "",
+      user: direct.user,
+      redirectTo:
+        direct.redirectTo ||
+        auth?.redirectTo ||
+        "",
+    };
+  }
+
+  function clearKnownAuthStorageKeys() {
+    if (!isBrowser()) {
+      return;
+    }
+
+    const keys = [
+      "onion_token",
+      "onion_access_token",
+      "onion_refresh_token",
+      "onion_temp_token",
+      "onion_session_id",
+      "onion_session_user_id",
+      "onion_user_id",
+      "onion_user_name",
+      "onion_role",
+      "auth_token",
+      "access_token",
+      "refresh_token",
+      "token",
+      "user",
+      "session",
+    ];
+
+    keys.forEach((key) => {
+      try {
+        localStorage.removeItem(key);
+      } catch {}
+
+      try {
+        sessionStorage.removeItem(key);
+      } catch {}
+    });
+  }
+
+  function clearFailedLoginState(reason = "login_failed") {
+    try {
+      Auth?.clearSessionLocal?.();
+    } catch {}
+
+    try {
+      Auth?.clearSession?.();
+    } catch {}
+
+    try {
+      AppCore?.clearSession?.();
+    } catch {}
+
+    try {
+      AppCore?.session?.clear?.();
+    } catch {}
+
+    try {
+      AppCore?.setState?.({
+        authenticated: false,
+        user: null,
+        role: null,
+        token: null,
+        session: null,
+        sessionId: null,
+      });
+    } catch {
+      try {
+        if (AppCore?.state) {
+          AppCore.state.authenticated = false;
+          AppCore.state.user = null;
+          AppCore.state.role = null;
+          AppCore.state.token = null;
+          AppCore.state.session = null;
+          AppCore.state.sessionId = null;
+        }
+      } catch {}
+    }
+
+    clearKnownAuthStorageKeys();
+
+    safeEmit("auth:login:rejected", {
+      reason,
+      source: "LoginView",
+    });
   }
 
   /* =========================================================
@@ -939,22 +1390,27 @@ export const LoginView = (() => {
       const auth =
         normalizeAuthResult(result);
 
-      const user =
-        auth?.user ||
-        AppCore?.state?.user ||
-        {};
-
-      if (auth?.token) {
-        localStorage.setItem(
-          "onion_token",
-          String(auth.token)
-        );
+      if (
+        !hasUsableToken(auth?.token) ||
+        !hasUsableUser(auth?.user)
+      ) {
+        return;
       }
+
+      const user =
+        auth.user;
+
+      localStorage.setItem(
+        "onion_token",
+        String(auth.token)
+      );
 
       localStorage.setItem(
         "onion_user_name",
         user?.name ||
           user?.nombre ||
+          user?.username ||
+          user?.email ||
           ""
       );
 
@@ -984,8 +1440,21 @@ export const LoginView = (() => {
       };
     }
 
+    if (
+      !hasUsableToken(auth?.token) ||
+      !hasUsableUser(auth?.user)
+    ) {
+      clearFailedLoginState("invalid_login_session");
+      throw createInvalidLoginSessionError();
+    }
+
     const session =
       syncSession(auth);
+
+    if (!session?.authenticated) {
+      clearFailedLoginState("session_sync_failed");
+      throw createInvalidLoginSessionError();
+    }
 
     safeEmit("login:success", {
       user: session.user,
@@ -1025,7 +1494,7 @@ export const LoginView = (() => {
       setAuthScreen(false);
       hideToast();
       forceHideGlobalLoader();
-      return;
+      return session;
     }
 
     const shouldNavigate =
@@ -1038,7 +1507,7 @@ export const LoginView = (() => {
       setAuthScreen(false);
       hideToast();
       forceHideGlobalLoader();
-      return;
+      return session;
     }
 
     navigateTo(redirectTo || DEFAULT_POST_LOGIN_PATH);
@@ -1329,7 +1798,7 @@ export const LoginView = (() => {
             });
 
           const result =
-            normalizeAuthResult(rawResult);
+            assertValidLoginResult(rawResult);
 
           /*
             Microtask:
@@ -1352,24 +1821,13 @@ export const LoginView = (() => {
             refs
           );
         } catch (error) {
-          const message =
-            getErrorMessage(error);
+          clearFailedLoginState("login_error");
+          hideToast();
 
           safeErrorLog(
             "Login error",
             error
           );
-
-          setGlobalLoginError(
-            refs,
-            message
-          );
-
-          showErrorState({
-            refs,
-            cardEl: card,
-            message,
-          });
 
           setLoginLoading(
             refs,
@@ -1382,6 +1840,30 @@ export const LoginView = (() => {
 
           isSubmitting = false;
           isNavigatingAway = false;
+
+          /*
+            Protección extra:
+            si Auth.login hubiera navegado internamente antes de fallar
+            o antes de devolver un payload inválido, volvemos a /login.
+          */
+          if (!isStillOnLoginRoute()) {
+            navigateBackToLoginAfterFailedLogin();
+            return;
+          }
+
+          const message =
+            getErrorMessage(error);
+
+          setGlobalLoginError(
+            refs,
+            message
+          );
+
+          showErrorState({
+            refs,
+            cardEl: card,
+            message,
+          });
         }
       });
 
@@ -1392,6 +1874,8 @@ export const LoginView = (() => {
         if (isNavigatingAway) {
           return;
         }
+
+        clearFailedLoginState("auth_login_error_event");
 
         setLoginLoading(
           refs,

@@ -33,6 +33,8 @@
    - compatibilidad con template nuevo data-usuarios-action
    - template controlado por state real
    - límite fijo de 5 usuarios por hoja
+   - acceso admin robusto sin sticky forbidden
+   - una sola pantalla de acceso restringido
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -77,15 +79,20 @@ export const UsuariosView = (() => {
   ========================================================= */
 
   const SCOPE = "view:usuarios";
-
-  /*
-    Requisito de vista:
-    - 5 usuarios por hoja.
-    - No dependemos de que el modelo venga con otro DEFAULT_PAGE_SIZE.
-  */
   const PAGE_SIZE = 5;
   const FALLBACK_MODEL_PAGE_SIZE = Number(MODEL_DEFAULT_PAGE_SIZE || 5) || 5;
   const CREATE_CLICK_THROTTLE_MS = 450;
+
+  const ADMIN_ROLE_KEYS = new Set([
+    "admin",
+    "administrator",
+    "administrador",
+    "super_admin",
+    "superadmin",
+    "super_administrador",
+    "owner",
+    "root",
+  ]);
 
   /* =========================================================
      LOCAL RUNTIME
@@ -99,6 +106,7 @@ export const UsuariosView = (() => {
   let renderToken = 0;
   let pendingCreateRequest = false;
   let lastCreateClickAt = 0;
+  let accessSyncTimer = null;
 
   /* =========================================================
      SAFE HELPERS
@@ -120,21 +128,25 @@ export const UsuariosView = (() => {
     const eventName = safeText(event, "");
     if (!eventName) return false;
 
+    let emitted = false;
+
     try {
       AppCore?.events?.emit?.(eventName, payload);
-      return true;
+      emitted = true;
     } catch {}
 
     try {
-      window.dispatchEvent(
-        new CustomEvent(eventName, {
-          detail: payload,
-        })
-      );
-      return true;
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent(eventName, {
+            detail: payload,
+          })
+        );
+        emitted = true;
+      }
     } catch {}
 
-    return false;
+    return emitted;
   }
 
   function safeText(value, fallback = "") {
@@ -158,6 +170,12 @@ export const UsuariosView = (() => {
     return value && typeof value === "object" && !Array.isArray(value)
       ? value
       : {};
+  }
+
+  function toArray(value) {
+    if (Array.isArray(value)) return value;
+    if (value === null || value === undefined) return [];
+    return [value];
   }
 
   function first(...values) {
@@ -188,7 +206,32 @@ export const UsuariosView = (() => {
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[\s-]+/g, "_")
+      .replace(/[^a-z0-9_:.]/g, "")
       .trim();
+  }
+
+  function splitRoles(value = "") {
+    return safeText(value, "")
+      .split(/[,\s|]+/)
+      .map(normalizeKey)
+      .filter(Boolean);
+  }
+
+  function normalizeRoles(value) {
+    if (typeof value === "string") {
+      return splitRoles(value);
+    }
+
+    return toArray(value)
+      .flat(Infinity)
+      .flatMap((item) => {
+        if (typeof item === "string") {
+          return splitRoles(item);
+        }
+
+        return [normalizeKey(item)];
+      })
+      .filter(Boolean);
   }
 
   function waitForPaint() {
@@ -270,17 +313,7 @@ export const UsuariosView = (() => {
   ========================================================= */
 
   function isAdminRole(value = "") {
-    const key = normalizeKey(value);
-
-    return [
-      "admin",
-      "administrator",
-      "administrador",
-      "super_admin",
-      "superadmin",
-      "owner",
-      "root",
-    ].includes(key);
+    return ADMIN_ROLE_KEYS.has(normalizeKey(value));
   }
 
   function getCurrentUser() {
@@ -290,6 +323,8 @@ export const UsuariosView = (() => {
         AppCore?.state?.currentUser,
         AppCore?.state?.sessionUser,
         AppCore?.state?.authUser,
+        AppCore?.state?.session?.user,
+
         usuariosState?.user,
         usuariosState?.currentUser,
         usuariosState?.sessionUser,
@@ -298,80 +333,372 @@ export const UsuariosView = (() => {
     );
   }
 
-  function isAdminAccessAllowed() {
+  function collectRoleCandidates() {
     const user = getCurrentUser();
+    const raw = safeObject(user?.raw);
+    const profile = safeObject(user?.profile);
+    const rawProfile = safeObject(raw?.profile);
+    const session = safeObject(AppCore?.state?.session);
 
-    if (
-      usuariosState?.forbidden === true ||
-      usuariosState?.accessDenied === true
-    ) {
-      return false;
-    }
+    const roleValues = [
+      AppCore?.state?.role,
+      AppCore?.state?.rol,
+      AppCore?.state?.userRole,
+      AppCore?.state?.type,
 
-    const explicitAdmin = first(
+      session?.role,
+      session?.rol,
+      session?.userRole,
+
+      usuariosState?.role,
+      usuariosState?.rol,
+      usuariosState?.userRole,
+
+      user?.role,
+      user?.rol,
+      user?.userRole,
+      user?.type,
+      user?.userType,
+      user?.perfil,
+
+      profile?.role,
+      profile?.rol,
+      profile?.userRole,
+      profile?.type,
+      profile?.perfil,
+
+      raw?.role,
+      raw?.rol,
+      raw?.userRole,
+      raw?.type,
+      raw?.userType,
+      raw?.perfil,
+
+      rawProfile?.role,
+      rawProfile?.rol,
+      rawProfile?.userRole,
+      rawProfile?.type,
+      rawProfile?.perfil,
+    ];
+
+    const roleArrays = [
+      AppCore?.state?.roles,
+      AppCore?.state?.permissions,
+      AppCore?.state?.scopes,
+      AppCore?.state?.groups,
+
+      session?.roles,
+      session?.permissions,
+      session?.scopes,
+      session?.groups,
+
+      usuariosState?.roles,
+      usuariosState?.permissions,
+      usuariosState?.scopes,
+      usuariosState?.groups,
+
+      user?.roles,
+      user?.permissions,
+      user?.scopes,
+      user?.groups,
+      user?.authorities,
+
+      profile?.roles,
+      profile?.permissions,
+      profile?.scopes,
+      profile?.groups,
+
+      raw?.roles,
+      raw?.permissions,
+      raw?.scopes,
+      raw?.groups,
+      raw?.authorities,
+
+      rawProfile?.roles,
+      rawProfile?.permissions,
+      rawProfile?.scopes,
+      rawProfile?.groups,
+    ];
+
+    return [
+      ...roleValues,
+      ...roleArrays.flatMap((value) => toArray(value)),
+    ]
+      .flat(Infinity)
+      .flatMap((value) => normalizeRoles(value))
+      .filter(Boolean);
+  }
+
+  function hasPositiveAdminFlag() {
+    const user = getCurrentUser();
+    const raw = safeObject(user?.raw);
+    const profile = safeObject(user?.profile);
+    const rawProfile = safeObject(raw?.profile);
+    const session = safeObject(AppCore?.state?.session);
+
+    return [
+      AppCore?.state?.isAdmin,
+      AppCore?.state?.admin,
+      AppCore?.state?.isSuperAdmin,
+      AppCore?.state?.superAdmin,
+      AppCore?.state?.canManageUsers,
+      AppCore?.state?.canAccessUsers,
+
+      session?.isAdmin,
+      session?.admin,
+      session?.isSuperAdmin,
+      session?.superAdmin,
+      session?.canManageUsers,
+      session?.canAccessUsers,
+
       usuariosState?.isAdmin,
       usuariosState?.admin,
       usuariosState?.canManageUsers,
       usuariosState?.canAccessUsers,
-      AppCore?.state?.isAdmin,
-      AppCore?.state?.admin,
-      AppCore?.state?.canManageUsers,
-      AppCore?.state?.canAccessUsers,
+
       user?.isAdmin,
       user?.admin,
+      user?.isSuperAdmin,
+      user?.superAdmin,
       user?.canManageUsers,
-      user?.canAccessUsers
+      user?.canAccessUsers,
+
+      profile?.isAdmin,
+      profile?.admin,
+      profile?.isSuperAdmin,
+      profile?.superAdmin,
+      profile?.canManageUsers,
+      profile?.canAccessUsers,
+
+      raw?.isAdmin,
+      raw?.admin,
+      raw?.isSuperAdmin,
+      raw?.superAdmin,
+      raw?.canManageUsers,
+      raw?.canAccessUsers,
+
+      rawProfile?.isAdmin,
+      rawProfile?.admin,
+      rawProfile?.isSuperAdmin,
+      rawProfile?.superAdmin,
+      rawProfile?.canManageUsers,
+      rawProfile?.canAccessUsers,
+    ].some((value) => value === true || value === "true" || value === 1 || value === "1");
+  }
+
+  function isAuthPending() {
+    const state = safeObject(AppCore?.state);
+    const user = getCurrentUser();
+
+    const hasKnownAuthFlag =
+      typeof state.authenticated === "boolean" ||
+      typeof state.ready === "boolean" ||
+      typeof state.bootCompleted === "boolean" ||
+      typeof state.appReady === "boolean";
+
+    const hasToken = Boolean(
+      safeText(
+        first(
+          state.token,
+          state.accessToken,
+          state.session?.token,
+          state.session?.accessToken
+        ),
+        ""
+      )
     );
 
-    if (typeof explicitAdmin === "boolean") {
-      return explicitAdmin;
-    }
-
-    const role = first(
-      usuariosState?.role,
-      usuariosState?.rol,
-      usuariosState?.userRole,
-      AppCore?.state?.role,
-      AppCore?.state?.rol,
-      AppCore?.state?.userRole,
-      user?.role,
-      user?.rol,
-      user?.type,
-      user?.userType
-    );
-
-    if (role) {
-      return isAdminRole(role);
-    }
-
-    const roles = first(
-      usuariosState?.roles,
-      usuariosState?.permissions,
-      AppCore?.state?.roles,
-      AppCore?.state?.permissions,
-      user?.roles,
-      user?.permissions
-    );
-
-    if (Array.isArray(roles) && roles.length) {
-      return roles.some((item) => isAdminRole(item));
-    }
+    const hasUser = Boolean(Object.keys(user).length);
 
     /*
-      Fail-open visual:
-      - El bloqueo real debe vivir en router/guards.
-      - Aquí solo bloqueamos si el estado indica claramente que NO hay acceso.
+      Pending solo si no sabemos nada aún.
+      Evita pintar "Acceso restringido" durante restore.
     */
-    return true;
+    return !hasKnownAuthFlag && !hasToken && !hasUser;
+  }
+
+  function getAdminAccessSnapshot() {
+    const roles = collectRoleCandidates();
+    const hasAdminRole = roles.some(isAdminRole);
+    const hasAdminFlag = hasPositiveAdminFlag();
+
+    const authenticated = Boolean(AppCore?.state?.authenticated);
+    const hasToken = Boolean(
+      safeText(
+        first(
+          AppCore?.state?.token,
+          AppCore?.state?.accessToken,
+          AppCore?.state?.session?.token,
+          AppCore?.state?.session?.accessToken
+        ),
+        ""
+      )
+    );
+
+    const pending = isAuthPending();
+
+    const allowed = Boolean(hasAdminRole || hasAdminFlag);
+
+    /*
+      No usamos usuariosState.forbidden como fuente de verdad.
+      Ese era el bug: se quedaba sticky y bloqueaba para siempre.
+    */
+    const denied = !pending && !allowed;
+
+    return {
+      allowed,
+      denied,
+      pending,
+      roles,
+      hasAdminRole,
+      hasAdminFlag,
+      authenticated,
+      hasToken,
+      user: getCurrentUser(),
+    };
+  }
+
+  function isAdminAccessAllowed() {
+    return getAdminAccessSnapshot().allowed;
   }
 
   function requireAdminAction() {
-    if (isAdminAccessAllowed()) {
+    const access = getAdminAccessSnapshot();
+
+    if (access.allowed) {
       return true;
+    }
+
+    if (access.pending) {
+      showToast("Validando permisos de administrador...", "info");
+      return false;
     }
 
     showToast("La vista de usuarios está reservada para administradores.", "error");
     return false;
+  }
+
+  /* =========================================================
+     ACCESS STATES UI
+  ========================================================= */
+
+  function renderAccessStyles() {
+    return `
+      <style>
+        .usuarios-access-state{
+          min-height:280px;
+          display:grid;
+          place-items:center;
+          border-radius:24px;
+          border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
+          background:
+            linear-gradient(180deg, rgba(255,255,255,.72), rgba(255,255,255,.48)),
+            color-mix(in srgb, var(--panel-bg, #ffffff) 94%, transparent);
+          box-shadow:
+            0 10px 30px rgba(15,23,42,.04),
+            0 1px 0 rgba(255,255,255,.5) inset;
+          padding:28px;
+          text-align:center;
+        }
+
+        .usuarios-access-card{
+          display:grid;
+          gap:10px;
+          max-width:560px;
+          justify-items:center;
+        }
+
+        .usuarios-access-title{
+          margin:0;
+          color:var(--text-strong, #111827);
+          font-size:24px;
+          line-height:1.1;
+          letter-spacing:-.035em;
+          font-weight:780;
+        }
+
+        .usuarios-access-text{
+          margin:0;
+          color:var(--text-dim, #7b8494);
+          font-size:15px;
+          line-height:1.55;
+        }
+
+        .usuarios-access-debug{
+          margin-top:8px;
+          display:inline-flex;
+          align-items:center;
+          justify-content:center;
+          min-height:28px;
+          padding:0 10px;
+          border-radius:999px;
+          border:1px solid rgba(15,23,42,.06);
+          background:rgba(255,255,255,.54);
+          color:#8a93a3;
+          font-size:11px;
+          font-weight:720;
+          letter-spacing:.04em;
+          text-transform:uppercase;
+        }
+
+        [data-theme="dark"] .usuarios-access-state{
+          background:
+            radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 7%, transparent), transparent 34%),
+            linear-gradient(180deg, var(--surface-2, #171922), var(--surface-1, #10121a));
+          border-color:var(--border-soft, rgba(255,255,255,.08));
+        }
+
+        [data-theme="dark"] .usuarios-access-title{
+          color:var(--text-strong, #f8fafc);
+        }
+
+        [data-theme="dark"] .usuarios-access-text{
+          color:var(--text-dim, #94a3b8);
+        }
+
+        [data-theme="dark"] .usuarios-access-debug{
+          border-color:rgba(255,255,255,.08);
+          background:rgba(255,255,255,.06);
+          color:var(--text-soft, #cbd5e1);
+        }
+      </style>
+    `;
+  }
+
+  function renderAccessPendingHtml() {
+    return `
+      ${renderAccessStyles()}
+
+      <section class="usuarios-access-state" data-usuarios-access-state="pending">
+        <div class="usuarios-access-card">
+          <h1 class="usuarios-access-title">Validando permisos</h1>
+          <p class="usuarios-access-text">
+            Estamos comprobando tu sesión antes de cargar la administración de usuarios.
+          </p>
+          <span class="usuarios-access-debug">auth pending</span>
+        </div>
+      </section>
+    `;
+  }
+
+  function renderRestrictedHtml() {
+    const access = getAdminAccessSnapshot();
+
+    return `
+      ${renderAccessStyles()}
+
+      <section class="usuarios-access-state" data-usuarios-access-state="restricted">
+        <div class="usuarios-access-card">
+          <h1 class="usuarios-access-title">Acceso restringido</h1>
+          <p class="usuarios-access-text">
+            La vista de usuarios está reservada para administradores.
+          </p>
+          <span class="usuarios-access-debug">
+            ${safeText(access.roles.join(" · "), "sin rol admin")}
+          </span>
+        </div>
+      </section>
+    `;
   }
 
   /* =========================================================
@@ -390,6 +717,16 @@ export const UsuariosView = (() => {
     } catch {}
   }
 
+  function clearAccessSyncTimer() {
+    try {
+      if (accessSyncTimer) {
+        clearTimeout(accessSyncTimer);
+      }
+    } catch {}
+
+    accessSyncTimer = null;
+  }
+
   /* =========================================================
      STATE HELPERS
   ========================================================= */
@@ -404,11 +741,29 @@ export const UsuariosView = (() => {
     return usuariosState;
   }
 
+  function syncAccessState() {
+    const access = getAdminAccessSnapshot();
+
+    setState({
+      pageSize: PAGE_SIZE,
+      isAdmin: access.allowed,
+      canManageUsers: access.allowed,
+      canAccessUsers: access.allowed,
+
+      /*
+        Informativo para template/debug.
+        Nunca vuelve a alimentar isAdminAccessAllowed().
+      */
+      forbidden: access.denied,
+      accessDenied: access.denied,
+      accessPending: access.pending,
+      accessRoles: access.roles,
+    });
+
+    return access;
+  }
+
   function ensureBaseState() {
-    /*
-      Fijo a 5 por requisito.
-      Aunque el modelo exporte otro DEFAULT_PAGE_SIZE, la vista manda.
-    */
     usuariosState.pageSize = PAGE_SIZE;
 
     if (!Number.isFinite(Number(usuariosState.page))) {
@@ -444,7 +799,7 @@ export const UsuariosView = (() => {
       safeNumber(usuariosState.remoteCount, 0)
     );
 
-    usuariosState.isAdmin = isAdminAccessAllowed();
+    syncAccessState();
 
     return usuariosState;
   }
@@ -462,6 +817,8 @@ export const UsuariosView = (() => {
       safeNumber(usuariosState.remoteCount, safeArray(items).length)
     );
 
+    const access = syncAccessState();
+
     setState({
       remoteCount: total,
       loaded: true,
@@ -469,7 +826,8 @@ export const UsuariosView = (() => {
       error: "",
       loading: false,
       refreshing: false,
-      isAdmin: isAdminAccessAllowed(),
+      pageSize: PAGE_SIZE,
+      isAdmin: access.allowed,
     });
 
     try {
@@ -846,43 +1204,64 @@ export const UsuariosView = (() => {
   function buildHtml() {
     const allItems = getItems();
     const pagination = clampPageAgainstItems(allItems);
+    const access = syncAccessState();
 
     const remoteCount = Math.max(
       allItems.length,
       safeNumber(usuariosState.remoteCount, allItems.length)
     );
 
-    const adminAllowed = isAdminAccessAllowed();
+    let innerHtml = "";
 
-    setState({
-      pageSize: PAGE_SIZE,
-      isAdmin: adminAllowed,
-      canManageUsers: adminAllowed,
-      canAccessUsers: adminAllowed,
-      forbidden: adminAllowed ? false : true,
-    });
+    if (access.pending) {
+      innerHtml = renderAccessPendingHtml();
+    } else if (!access.allowed) {
+      innerHtml = renderRestrictedHtml();
+    } else {
+      innerHtml = renderUsuariosTableTemplate({
+        items: allItems,
+        totalCount: remoteCount,
+        remoteCount,
+        page: pagination.page,
+        pageSize: PAGE_SIZE,
+        totalPages: pagination.totalPages,
+        lastUpdatedAt: usuariosState.lastSyncAt || "",
+        title: "Usuarios y accesos",
+        subtitle:
+          "Consulta usuarios registrados, revisa su estado, ubicación y última conexión desde una vista clara, compacta y alineada con el sistema.",
+
+        /*
+          Siempre false aquí para evitar que el template pinte
+          restricciones duplicadas en header + table.
+          El bloqueo visual lo controla esta view.
+        */
+        forbidden: false,
+        accessDenied: false,
+        accessPending: false,
+
+        isAdmin: true,
+        canManageUsers: true,
+        canAccessUsers: true,
+
+        user: getCurrentUser(),
+
+        state: {
+          ...usuariosState,
+          pageSize: PAGE_SIZE,
+          forbidden: false,
+          accessDenied: false,
+          accessPending: false,
+          isAdmin: true,
+          canManageUsers: true,
+          canAccessUsers: true,
+        },
+      });
+    }
 
     return `
       <section class="panel-content dashboard ready" data-view="usuarios">
         <div class="content-wrapper" style="display:grid;gap:var(--space-lg);">
-          ${renderUsuariosTableTemplate({
-            items: allItems,
-            totalCount: remoteCount,
-            remoteCount,
-            page: pagination.page,
-            pageSize: PAGE_SIZE,
-            totalPages: pagination.totalPages,
-            lastUpdatedAt: usuariosState.lastSyncAt || "",
-            title: "Usuarios y accesos",
-            subtitle:
-              "Consulta usuarios registrados, revisa su estado, ubicación y última conexión desde una vista clara, compacta y alineada con el sistema.",
-            isAdmin: adminAllowed,
-            canManageUsers: adminAllowed,
-            canAccessUsers: adminAllowed,
-            forbidden: adminAllowed ? false : true,
-            user: getCurrentUser(),
-            state: usuariosState,
-          })}
+          ${innerHtml}
         </div>
       </section>
     `;
@@ -943,6 +1322,20 @@ export const UsuariosView = (() => {
   } = {}) {
     if (destroyed) return getItems();
 
+    const access = syncAccessState();
+
+    if (!access.allowed) {
+      setState({
+        loading: false,
+        refreshing: false,
+        pageSize: PAGE_SIZE,
+      });
+
+      render();
+
+      return getItems();
+    }
+
     const itemsBefore = getItems();
     const hasVisibleData = itemsBefore.length > 0;
 
@@ -951,19 +1344,9 @@ export const UsuariosView = (() => {
       loading: !hasVisibleData && !silent,
       refreshing: hasVisibleData && asRefresh,
       pageSize: PAGE_SIZE,
-      isAdmin: isAdminAccessAllowed(),
     });
 
-    /*
-      Listener en contenedor:
-      aunque hacemos innerHTML, el listener sigue porque se re-bindea después.
-    */
     render();
-
-    if (!isAdminAccessAllowed()) {
-      markIdle();
-      return getItems();
-    }
 
     try {
       await loadUsuarios({
@@ -1019,13 +1402,6 @@ export const UsuariosView = (() => {
     hydrateBestEffort();
     ensureBaseState();
 
-    /*
-      FIX CRÍTICO DE CARRERA:
-      1. Pintamos pantalla.
-      2. Bindeamos inmediatamente el contenedor.
-      3. Después cargamos datos.
-      Así el usuario no pierde clicks si pulsa crear/refresh durante boot.
-    */
     render();
 
     if (!destroyed) {
@@ -1056,10 +1432,42 @@ export const UsuariosView = (() => {
   }
 
   /* =========================================================
+     ACCESS SYNC
+  ========================================================= */
+
+  function scheduleAccessSync({ maybeLoad = true } = {}) {
+    clearAccessSyncTimer();
+
+    accessSyncTimer = setTimeout(async () => {
+      if (destroyed) return;
+
+      const beforeAllowed = Boolean(usuariosState.isAdmin);
+      const access = syncAccessState();
+
+      rerender();
+
+      if (
+        maybeLoad &&
+        access.allowed &&
+        !beforeAllowed &&
+        !usuariosState.loading
+      ) {
+        await reload({
+          force: false,
+          asRefresh: false,
+          silent: true,
+        });
+      }
+    }, 0);
+  }
+
+  /* =========================================================
      PAGE ACTIONS
   ========================================================= */
 
   function goToPage(page = 1) {
+    if (!requireAdminAction()) return usuariosState.page || 1;
+
     if (usuariosState.loading || usuariosState.refreshing) {
       return usuariosState.page || 1;
     }
@@ -1091,10 +1499,6 @@ export const UsuariosView = (() => {
   }
 
   function changePageSize() {
-    /*
-      La vista queda bloqueada a 5 por requisito.
-      Se conserva el método por compatibilidad pública.
-    */
     setState({
       pageSize: PAGE_SIZE,
       page: 1,
@@ -1522,6 +1926,11 @@ export const UsuariosView = (() => {
 
     const onReady = () => {
       flushPendingCreate();
+      scheduleAccessSync({ maybeLoad: true });
+    };
+
+    const onAuthChanged = () => {
+      scheduleAccessSync({ maybeLoad: true });
     };
 
     try {
@@ -1541,6 +1950,17 @@ export const UsuariosView = (() => {
       bus.on("app:boot:ready", onReady);
       bus.on("app:boot:complete", onReady);
       bus.on("router:rendered", onReady);
+
+      bus.on("app:user:change", onAuthChanged);
+      bus.on("app:user:updated", onAuthChanged);
+      bus.on("app:user-ui:sync", onAuthChanged);
+      bus.on("app:session:restored", onAuthChanged);
+      bus.on("auth:session:applied", onAuthChanged);
+      bus.on("auth:session:restored", onAuthChanged);
+      bus.on("app:auth:change", onAuthChanged);
+      bus.on("auth:change", onAuthChanged);
+      bus.on("login:success", onAuthChanged);
+      bus.on("auth:login:success", onAuthChanged);
     } catch {}
 
     return () => {
@@ -1560,6 +1980,17 @@ export const UsuariosView = (() => {
       try { bus.off("app:boot:ready", onReady); } catch {}
       try { bus.off("app:boot:complete", onReady); } catch {}
       try { bus.off("router:rendered", onReady); } catch {}
+
+      try { bus.off("app:user:change", onAuthChanged); } catch {}
+      try { bus.off("app:user:updated", onAuthChanged); } catch {}
+      try { bus.off("app:user-ui:sync", onAuthChanged); } catch {}
+      try { bus.off("app:session:restored", onAuthChanged); } catch {}
+      try { bus.off("auth:session:applied", onAuthChanged); } catch {}
+      try { bus.off("auth:session:restored", onAuthChanged); } catch {}
+      try { bus.off("app:auth:change", onAuthChanged); } catch {}
+      try { bus.off("auth:change", onAuthChanged); } catch {}
+      try { bus.off("login:success", onAuthChanged); } catch {}
+      try { bus.off("auth:login:success", onAuthChanged); } catch {}
     };
   }
 
@@ -1574,6 +2005,11 @@ export const UsuariosView = (() => {
 
     const onReady = () => {
       flushPendingCreate();
+      scheduleAccessSync({ maybeLoad: true });
+    };
+
+    const onAuthChanged = () => {
+      scheduleAccessSync({ maybeLoad: true });
     };
 
     try {
@@ -1590,6 +2026,17 @@ export const UsuariosView = (() => {
       window.addEventListener("app:boot:ready", onReady);
       window.addEventListener("app:boot:complete", onReady);
       window.addEventListener("router:rendered", onReady);
+
+      window.addEventListener("app:user:change", onAuthChanged);
+      window.addEventListener("app:user:updated", onAuthChanged);
+      window.addEventListener("app:user-ui:sync", onAuthChanged);
+      window.addEventListener("app:session:restored", onAuthChanged);
+      window.addEventListener("auth:session:applied", onAuthChanged);
+      window.addEventListener("auth:session:restored", onAuthChanged);
+      window.addEventListener("app:auth:change", onAuthChanged);
+      window.addEventListener("auth:change", onAuthChanged);
+      window.addEventListener("login:success", onAuthChanged);
+      window.addEventListener("auth:login:success", onAuthChanged);
     } catch {}
 
     return () => {
@@ -1607,6 +2054,17 @@ export const UsuariosView = (() => {
         window.removeEventListener("app:boot:ready", onReady);
         window.removeEventListener("app:boot:complete", onReady);
         window.removeEventListener("router:rendered", onReady);
+
+        window.removeEventListener("app:user:change", onAuthChanged);
+        window.removeEventListener("app:user:updated", onAuthChanged);
+        window.removeEventListener("app:user-ui:sync", onAuthChanged);
+        window.removeEventListener("app:session:restored", onAuthChanged);
+        window.removeEventListener("auth:session:applied", onAuthChanged);
+        window.removeEventListener("auth:session:restored", onAuthChanged);
+        window.removeEventListener("app:auth:change", onAuthChanged);
+        window.removeEventListener("auth:change", onAuthChanged);
+        window.removeEventListener("login:success", onAuthChanged);
+        window.removeEventListener("auth:login:success", onAuthChanged);
       } catch {}
     };
   }
@@ -1715,6 +2173,7 @@ export const UsuariosView = (() => {
 
     nextRenderToken();
     cleanupBindings();
+    clearAccessSyncTimer();
 
     setState({
       openingUserId: "",
@@ -1757,6 +2216,7 @@ export const UsuariosView = (() => {
       findUsuarioById(getItems(), userId),
 
     isAdmin: () => isAdminAccessAllowed(),
+    getAccess: () => getAdminAccessSnapshot(),
 
     getState: () => ({
       ...usuariosState,
@@ -1766,6 +2226,7 @@ export const UsuariosView = (() => {
       hasInflightReload: Boolean(inflightReload),
       pendingCreateRequest,
       pageSize: PAGE_SIZE,
+      access: getAdminAccessSnapshot(),
       isAdmin: isAdminAccessAllowed(),
     }),
 

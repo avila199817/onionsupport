@@ -26,6 +26,14 @@
       "rewrite": "/index.html"
     },
     {
+      "route": "/activate-account",
+      "rewrite": "/index.html"
+    },
+    {
+      "route": "/activate-account/*",
+      "rewrite": "/index.html"
+    },
+    {
       "route": "/@*",
       "rewrite": "/index.html"
     }

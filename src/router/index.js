@@ -14,12 +14,15 @@
    - navegación serializada real
    - cancelación lógica de renders obsoletos
    - anti burst navigation
+   - anti doble render post-login
    - popstate robusto
    - destroy seguro de vistas
    - preserva username contextualizado
    - no degrada /@slug
    - preserva query/hash públicos
    - no destruye /activate-account?token=...
+   - no destruye /activate-account/<token>
+   - no destruye /reset-password/confirm/<token>
    - respeta skipHistory / preservePath / protectedInitialUrl
    - eventos ricos
    - cero throws accidentales
@@ -89,16 +92,20 @@ export const Router = (() => {
   const immutableRoutes =
     getImmutableRoutes();
 
-  const PUBLIC_AUTH_PATHS =
-    new Set([
-      "/login",
-      "/activate-account",
-      "/reset-password",
-      "/reset-password/confirm",
-      "/forgot-password",
-      "/recover-password",
-      "/password-reset",
-    ]);
+  const PUBLIC_AUTH_PATHS = new Set([
+    "/login",
+    "/activate-account",
+    "/reset-password",
+    "/reset-password/confirm",
+    "/forgot-password",
+    "/recover-password",
+    "/password-reset",
+  ]);
+
+  const PUBLIC_AUTH_PREFIXES = [
+    "/activate-account/",
+    "/reset-password/confirm/",
+  ];
 
   let bound = false;
 
@@ -114,7 +121,7 @@ export const Router = (() => {
   let lastNavAt = 0;
   let lastNavKey = "";
 
-  const NAV_BURST_MS = 140;
+  const NAV_BURST_MS = 160;
 
   /* =====================================================
      SAFE HELPERS
@@ -153,10 +160,7 @@ export const Router = (() => {
     }
   }
 
-  function safeEmit(
-    eventName,
-    payload = {}
-  ) {
+  function safeEmit(eventName, payload = {}) {
     try {
       AppCore?.events?.emit?.(
         eventName,
@@ -182,10 +186,7 @@ export const Router = (() => {
     return Date.now();
   }
 
-  function safeText(
-    value,
-    fallback = ""
-  ) {
+  function safeText(value, fallback = "") {
     if (
       value === null ||
       value === undefined
@@ -249,6 +250,82 @@ export const Router = (() => {
       };
     } catch {
       return () => {};
+    }
+  }
+
+  function stripSearchAndHash(path = "/") {
+    const raw =
+      safeText(path, "/") || "/";
+
+    let value =
+      raw.split("?")[0].split("#")[0] || "/";
+
+    value = value
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
+    }
+
+    if (value.length > 1) {
+      value =
+        value.replace(/\/+$/g, "") || "/";
+    }
+
+    return value;
+  }
+
+  function isPublicAuthPath(path = "/") {
+    const clean =
+      stripSearchAndHash(path);
+
+    if (PUBLIC_AUTH_PATHS.has(clean)) {
+      return true;
+    }
+
+    return PUBLIC_AUTH_PREFIXES.some((prefix) => {
+      return clean.startsWith(prefix);
+    });
+  }
+
+  function isAuthenticated() {
+    try {
+      if (
+        typeof Auth?.isAuthenticated === "function"
+      ) {
+        return Boolean(Auth.isAuthenticated());
+      }
+    } catch {}
+
+    return Boolean(
+      AppCore?.state?.authenticated ||
+        AppCore?.state?.isAuthenticated ||
+        AppCore?.state?.token ||
+        AppCore?.state?.accessToken ||
+        AppCore?.state?.user
+    );
+  }
+
+  function getBrowserPath() {
+    if (!isBrowser()) {
+      return "/";
+    }
+
+    try {
+      const pathname =
+        window.location.pathname || "/";
+
+      const search =
+        window.location.search || "";
+
+      const hash =
+        window.location.hash || "";
+
+      return `${pathname}${search}${hash}`;
+    } catch {
+      return "/";
     }
   }
 
@@ -329,6 +406,63 @@ export const Router = (() => {
     };
   }
 
+  function setTransientFlag(name, value) {
+    try {
+      if (
+        AppCore?.state &&
+        typeof AppCore.state === "object"
+      ) {
+        AppCore.state[name] = Boolean(value);
+      }
+    } catch {}
+
+    try {
+      AppCore?.setState?.({
+        [name]: Boolean(value),
+      });
+    } catch {}
+  }
+
+  function markLoginNavigation(value = true) {
+    setTransientFlag(
+      "loginNavigationHandled",
+      value
+    );
+  }
+
+  function isSameRenderedPath(data = {}) {
+    const current =
+      getCurrentComparable();
+
+    return (
+      current.canonical === data.canonicalPath &&
+      current.publicPath === data.publicPath
+    );
+  }
+
+  function resolveNoopNavigation(reason, data = {}) {
+    safeLog(
+      "[Router] navigation skipped",
+      {
+        reason,
+        canonicalPath:
+          data.canonicalPath,
+        publicPath:
+          data.publicPath,
+      }
+    );
+
+    return Promise.resolve({
+      ok: true,
+      skipped: true,
+      reason,
+      canonicalPath:
+        data.canonicalPath || null,
+      publicPath:
+        data.publicPath || null,
+    });
+  }
+
   /* =====================================================
      ROUTE HELPERS
   ===================================================== */
@@ -380,7 +514,7 @@ export const Router = (() => {
     }
 
     if (
-      PUBLIC_AUTH_PATHS.has(routePath)
+      isPublicAuthPath(routePath)
     ) {
       return false;
     }
@@ -528,6 +662,42 @@ export const Router = (() => {
     );
   }
 
+  function resolveSafeRedirect(value = "") {
+    const raw =
+      safeText(value, "");
+
+    if (!raw) {
+      return "";
+    }
+
+    if (
+      isUnsafeHref(raw) ||
+      isExternalHref(raw)
+    ) {
+      return "";
+    }
+
+    const resolved =
+      safePath(
+        resolveSpaHref(
+          AppCore,
+          raw
+        ) || raw
+      );
+
+    const canonical =
+      getCanonical(resolved);
+
+    if (
+      canonical === "/login" ||
+      isPublicAuthPath(canonical)
+    ) {
+      return "";
+    }
+
+    return resolved;
+  }
+
   /* =====================================================
      VIEW LIFECYCLE
   ===================================================== */
@@ -645,11 +815,20 @@ export const Router = (() => {
     ) {
       destroyActiveView();
 
+      const loginPublicPath =
+        safePath(
+          access.redirectTo ||
+            "/login"
+        );
+
       await renderLoginRedirect({
         AppCore,
         getRoute,
         updateHistory,
         canonicalPath,
+        publicPath,
+        redirectTo:
+          loginPublicPath,
         clearDynamicContainers:
           () =>
             clearDynamicContainers(
@@ -679,7 +858,7 @@ export const Router = (() => {
         canonicalPath:
           "/login",
         publicPath:
-          "/login",
+          loginPublicPath,
         username:
           null,
       });
@@ -691,12 +870,27 @@ export const Router = (() => {
       access.reason ===
       "already-authenticated"
     ) {
+      const target =
+        safePath(
+          access.redirectTo ||
+            getDefaultHome()
+        );
+
+      if (
+        isSameRenderedPath(
+          getRequestedData(target)
+        )
+      ) {
+        return true;
+      }
+
       await navigate(
-        access.redirectTo ||
-          getDefaultHome(),
+        target,
         {
           replaceState: true,
-          force: true,
+          force: false,
+          source:
+            "guard:already-authenticated",
         }
       );
 
@@ -708,6 +902,10 @@ export const Router = (() => {
       "insufficient-role"
     ) {
       destroyActiveView();
+
+      clearDynamicContainers(
+        AppCore
+      );
 
       renderRouteForbidden({
         AppCore,
@@ -793,15 +991,6 @@ export const Router = (() => {
       }
     );
 
-    clearDynamicContainers(
-      AppCore
-    );
-
-    setActiveMenu(
-      AppCore,
-      canonicalPath
-    );
-
     if (
       token !== renderToken
     ) {
@@ -812,6 +1001,15 @@ export const Router = (() => {
 
     if (!route) {
       destroyActiveView();
+
+      clearDynamicContainers(
+        AppCore
+      );
+
+      setActiveMenu(
+        AppCore,
+        canonicalPath
+      );
 
       renderRouteNotFound({
         AppCore,
@@ -890,6 +1088,23 @@ export const Router = (() => {
       }
     }
 
+    if (
+      token !== renderToken
+    ) {
+      return;
+    }
+
+    /* UI PREP */
+
+    clearDynamicContainers(
+      AppCore
+    );
+
+    setActiveMenu(
+      AppCore,
+      canonicalPath
+    );
+
     /* HISTORY */
 
     if (
@@ -955,6 +1170,12 @@ export const Router = (() => {
           publicPath,
           username,
         });
+
+      if (
+        canonicalPath !== "/login"
+      ) {
+        markLoginNavigation(false);
+      }
 
       safeEmit(
         "router:rendered",
@@ -1052,30 +1273,75 @@ export const Router = (() => {
     const key =
       `${data.publicPath}|${data.canonicalPath}`;
 
+    const current =
+      getCurrentComparable();
+
+    const sameAsCurrent =
+      current.canonical === data.canonicalPath &&
+      current.publicPath === data.publicPath;
+
+    /*
+      Anti doble render:
+      - Si ya estamos en la misma ruta y no se pide forceRender,
+        no volvemos a pintar.
+      - forceRender queda como escape hatch real.
+    */
     if (
-      isBurst(key) &&
-      !options.force
+      activeView &&
+      sameAsCurrent &&
+      options.forceRender !== true
     ) {
-      return renderChain;
+      if (
+        options.force === true &&
+        isBurst(key)
+      ) {
+        return resolveNoopNavigation(
+          "duplicate-force-burst",
+          data
+        );
+      }
+
+      if (
+        options.force !== true
+      ) {
+        return resolveNoopNavigation(
+          "same-route",
+          data
+        );
+      }
+    }
+
+    /*
+      Anti burst incluso con force=true salvo forceRender explícito.
+      Esto evita:
+        Auth.login navega
+        LoginView navega otra vez
+        restore/session intenta navegar otra vez
+    */
+    if (
+      activeView &&
+      isBurst(key) &&
+      options.forceRender !== true
+    ) {
+      return resolveNoopNavigation(
+        "burst",
+        data
+      );
     }
 
     rememberNav(key);
 
-    const current =
-      getCurrentComparable();
+    const fromLogin =
+      current.canonical === "/login" &&
+      data.canonicalPath !== "/login" &&
+      isAuthenticated();
 
     if (
-      current.canonical === data.canonicalPath &&
-      current.publicPath === data.publicPath &&
-      !options.force
+      fromLogin ||
+      options.source === "login" ||
+      options.fromLogin === true
     ) {
-      return render(
-        data.publicPath,
-        {
-          ...options,
-          skipHistory: true,
-        }
-      );
+      markLoginNavigation(true);
     }
 
     return render(
@@ -1112,13 +1378,23 @@ export const Router = (() => {
         );
     } catch {}
 
+    const resolvedRedirect =
+      resolveSafeRedirect(
+        redirect || ""
+      );
+
+    const target =
+      resolvedRedirect ||
+      fallback ||
+      getDefaultHome();
+
     return navigate(
-      redirect ||
-        fallback ||
-        getDefaultHome(),
+      target,
       {
         replaceState: true,
-        force: true,
+        force: false,
+        source: "login",
+        fromLogin: true,
       }
     );
   }
@@ -1209,14 +1485,7 @@ export const Router = (() => {
 
   function onPopstate() {
     const path =
-      getCurrentPublicPath(
-        AppCore
-      ) ||
-      getCurrentPath(
-        AppCore
-      ) ||
-      window.location.pathname ||
-      "/";
+      getBrowserPath();
 
     render(
       path,
@@ -1224,6 +1493,7 @@ export const Router = (() => {
         skipHistory: true,
         replaceState: true,
         force: true,
+        source: "popstate",
       }
     );
   }
@@ -1341,6 +1611,10 @@ export const Router = (() => {
         AppCore?.state?.publicPath || "/",
       lastNavKey,
       lastNavAt,
+      loginNavigationHandled:
+        Boolean(
+          AppCore?.state?.loginNavigationHandled
+        ),
     };
   }
 

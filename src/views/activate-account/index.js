@@ -12,7 +12,7 @@
    - pedir contraseña nueva y confirmación antes de activar
    - reutilizar bindings compartidos de password-field
    - renderizar template premium alineado con login/reset-password
-   - ejecutar activación contra backend
+   - ejecutar activación contra backend real
    - manejar estados idle/loading/success/error/expired/invalid
    - soportar navegación SPA de vuelta a login
    - limpiar listeners al destruir la vista
@@ -28,6 +28,9 @@
    - sin token real en inputs hidden
    - navegación login robusta
    - activación pública con fetch directo, sin AppCore.http
+   - API base preferente: AppCore.config.apiBase / window.ONION_API_BASE_URL
+   - fallback producción: https://api.onionit.net
+   - evita llamadas erróneas a onionsupport.com/api/...
 ========================================================= */
 
 import {
@@ -61,6 +64,17 @@ export const ActivateAccountView = (() => {
   const SCOPE = "view:activate-account";
   const DEFAULT_APP_NAME = "Onion Support";
   const DEFAULT_LOGIN_PATH = "/login";
+
+  /*
+    API real de producción.
+
+    Importante:
+    - El frontend vive en onionsupport.com.
+    - La API vive en api.onionit.net.
+    - Nunca debe resolver /api/auth/activate-account contra onionsupport.com
+      si existe API base configurada o fallback.
+  */
+  const DEFAULT_API_BASE_URL = "https://api.onionit.net";
 
   const DEFAULT_ACTIVATION_ENDPOINT =
     AUTH_ENDPOINTS?.activateAccount ||
@@ -139,6 +153,14 @@ export const ActivateAccountView = (() => {
     return value && typeof value === "object" && !Array.isArray(value)
       ? value
       : {};
+  }
+
+  function stripTrailingSlashes(value = "") {
+    return safeText(value, "").replace(/\/+$/g, "");
+  }
+
+  function stripLeadingSlashes(value = "") {
+    return safeText(value, "").replace(/^\/+/g, "");
   }
 
   function redactActivationTokenInText(value = "") {
@@ -253,14 +275,36 @@ export const ActivateAccountView = (() => {
     );
   }
 
-  function getApiBase() {
+  function getWindowApiBase() {
+    if (!isBrowser()) {
+      return "";
+    }
+
     return safeText(
+      window.ONION_API_BASE_URL ||
+        window.ONION_API_BASE ||
+        window.API_BASE_URL ||
+        window.API_BASE ||
+        "",
+      ""
+    );
+  }
+
+  function getApiBase() {
+    /*
+      Orden:
+      1. Config runtime del core.
+      2. Variables globales de window.
+      3. Fallback producción real.
+    */
+    return stripTrailingSlashes(
       AppCore?.config?.apiBase ||
         AppCore?.config?.apiBaseUrl ||
         AppCore?.config?.baseApiUrl ||
+        AppCore?.config?.backendUrl ||
         AppCore?.state?.config?.apiBase ||
-        "",
-      ""
+        getWindowApiBase() ||
+        DEFAULT_API_BASE_URL
     );
   }
 
@@ -281,11 +325,11 @@ export const ActivateAccountView = (() => {
   }
 
   function joinUrl(base = "", path = "") {
-    const left = safeText(base, "").replace(/\/+$/g, "");
-    const right = safeText(path, "").replace(/^\/+/g, "");
+    const left = stripTrailingSlashes(base);
+    const right = stripLeadingSlashes(path);
 
     if (!left) {
-      return `/${right}`;
+      return right ? `/${right}` : "/";
     }
 
     if (!right) {
@@ -296,23 +340,59 @@ export const ActivateAccountView = (() => {
   }
 
   function buildApiUrl(endpoint = "") {
-    const value = safeText(endpoint, DEFAULT_ACTIVATION_ENDPOINT);
+    const rawEndpoint = safeText(endpoint, DEFAULT_ACTIVATION_ENDPOINT);
 
-    if (/^https?:\/\//i.test(value)) {
-      return value;
-    }
-
-    if (value.startsWith("/api/")) {
-      return value;
+    /*
+      Si ya viene absoluto, respetamos el valor exacto.
+    */
+    if (/^https?:\/\//i.test(rawEndpoint)) {
+      return rawEndpoint;
     }
 
     const apiBase = getApiBase();
+    const cleanBase = stripTrailingSlashes(apiBase);
+    const endpointWithSlash = rawEndpoint.startsWith("/")
+      ? rawEndpoint
+      : `/${rawEndpoint}`;
 
-    if (apiBase) {
-      return joinUrl(apiBase, value);
+    /*
+      Caso normal producción:
+      base:     https://api.onionit.net
+      endpoint: /api/auth/activate-account
+      result:   https://api.onionit.net/api/auth/activate-account
+    */
+    if (cleanBase) {
+      /*
+        Evita duplicar /api:
+
+        base:     https://api.onionit.net/api
+        endpoint: /api/auth/activate-account
+        result:   https://api.onionit.net/api/auth/activate-account
+      */
+      if (
+        cleanBase.endsWith("/api") &&
+        endpointWithSlash.startsWith("/api/")
+      ) {
+        return `${cleanBase}${endpointWithSlash.replace(/^\/api/i, "")}`;
+      }
+
+      /*
+        También soporta:
+
+        base:     https://api.onionit.net/api
+        endpoint: /auth/activate-account
+        result:   https://api.onionit.net/api/auth/activate-account
+      */
+      return `${cleanBase}${endpointWithSlash}`;
     }
 
-    return joinUrl("/api", value);
+    /*
+      Último fallback. En práctica no debería usarse porque getApiBase()
+      ya devuelve DEFAULT_API_BASE_URL.
+    */
+    return endpointWithSlash.startsWith("/api/")
+      ? endpointWithSlash
+      : joinUrl("/api", endpointWithSlash);
   }
 
   /* =========================================================
@@ -916,9 +996,12 @@ export const ActivateAccountView = (() => {
   function resolveErrorMessage(error = null) {
     const statusCode = Number(error?.status || 0);
     const code = normalizeBackendErrorCode(error);
+    const endpoint = safeText(error?.endpoint, "");
 
     if (statusCode === 405 || code === "HTTP_405") {
-      return "El backend no acepta POST en /api/auth/activate-account. Revisa el router auth desplegado.";
+      return endpoint
+        ? `La API no acepta POST en ${endpoint}. Revisa el router auth desplegado.`
+        : "La API no acepta POST en el endpoint de activación. Revisa el router auth desplegado.";
     }
 
     return safeText(
@@ -1383,7 +1466,7 @@ export const ActivateAccountView = (() => {
 
       safeError("Activation failed:", {
         method: error?.method || "POST",
-        endpoint: error?.endpoint || getActivationEndpoint(),
+        endpoint: error?.endpoint || buildApiUrl(getActivationEndpoint()),
         code: error?.code || error?.error || "",
         status: error?.status || "",
         statusText: error?.statusText || "",
@@ -1542,6 +1625,9 @@ export const ActivateAccountView = (() => {
       hasToken: Boolean(state.token),
       urlScrubbed,
       context: state.lastContext,
+      apiBase: getApiBase(),
+      activationEndpoint: getActivationEndpoint(),
+      activationUrl: buildApiUrl(getActivationEndpoint()),
     });
 
     render();
@@ -1584,6 +1670,9 @@ export const ActivateAccountView = (() => {
       token: state.token ? "***" : "",
       hasToken: Boolean(state.token),
       lastContext: state.lastContext,
+      apiBase: getApiBase(),
+      activationEndpoint: getActivationEndpoint(),
+      activationUrl: buildApiUrl(getActivationEndpoint()),
     }),
 
     get mounted() {

@@ -6,16 +6,21 @@
    - arrancar la SPA de forma ordenada
    - capturar URL inicial antes de Router/History
    - preservar /activate-account?token=... durante el boot
+   - preservar /activate-account/<token> durante el boot
+   - preservar /reset-password/confirm?token=... durante el boot
+   - preservar /reset-password/confirm/<token> durante el boot
    - configurar servicios, store, i18n, UI y router
    - restaurar sesión sin romper rutas públicas técnicas
    - render inicial robusto
+   - evitar doble render si restore ya navegó
    - loader boot controlado
    - emitir app:ready una sola vez
 
    FIX CRÍTICO:
    - NO hacer bindRouter() antes de renderInitialRoute()
-   - renderizar /activate-account antes de restoreSession si hay token
+   - renderizar rutas públicas con token antes de restoreSession
    - no permitir que restore/auth/history limpien el token antes de la vista
+   - si restoreSession navega post-login, NO ejecutar renderInitialRoute() otra vez
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -86,6 +91,7 @@ import {
 ========================================================= */
 
 const ACTIVATION_PATH = "/activate-account";
+const RESET_CONFIRM_PATH = "/reset-password/confirm";
 
 const ACTIVATION_TOKEN_PARAM_NAMES = [
   "token",
@@ -94,6 +100,36 @@ const ACTIVATION_TOKEN_PARAM_NAMES = [
   "code",
   "t",
 ];
+
+const RESET_TOKEN_PARAM_NAMES = [
+  "token",
+  "resetToken",
+  "passwordResetToken",
+  "code",
+  "t",
+];
+
+const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
+  Object.freeze({
+    key: "activation",
+    path: ACTIVATION_PATH,
+    windowKey: "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+    statePrefix: "Activation",
+    tokenParamNames: ACTIVATION_TOKEN_PARAM_NAMES,
+  }),
+
+  Object.freeze({
+    key: "resetConfirm",
+    path: RESET_CONFIRM_PATH,
+    windowKey: "__ONION_RESET_CONFIRM_INITIAL_URL__",
+    statePrefix: "ResetConfirm",
+    tokenParamNames: RESET_TOKEN_PARAM_NAMES,
+  }),
+]);
+
+/* =========================================================
+   BASICS
+========================================================= */
 
 function isBrowser() {
   return (
@@ -115,6 +151,14 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
+function safeObject(value) {
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? value
+    : {};
+}
+
 function getBaseOrigin() {
   if (
     isBrowser() &&
@@ -127,8 +171,7 @@ function getBaseOrigin() {
 }
 
 function isHashRouterPath(value = "") {
-  const raw =
-    String(value || "").trim();
+  const raw = String(value || "").trim();
 
   return (
     raw.startsWith("#/") ||
@@ -137,8 +180,7 @@ function isHashRouterPath(value = "") {
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw =
-    String(value || "").trim();
+  const raw = String(value || "").trim();
 
   if (!raw) {
     return "/";
@@ -177,9 +219,16 @@ function normalizePathnameOnly(pathname = "/") {
   return value;
 }
 
+function stripSearchAndHash(path = "/") {
+  const raw = safeText(path, "/");
+
+  return normalizePathnameOnly(
+    raw.split("?")[0].split("#")[0] || "/"
+  );
+}
+
 function pathFromUrlLike(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "");
 
   if (!raw) {
     return "";
@@ -190,28 +239,23 @@ function pathFromUrlLike(value = "") {
   }
 
   try {
-    const parsed =
-      new URL(raw, getBaseOrigin());
+    const parsed = new URL(raw, getBaseOrigin());
 
     if (
       parsed.hash &&
       isHashRouterPath(parsed.hash)
     ) {
-      return normalizeHashRouterPath(
-        parsed.hash
-      );
+      return normalizeHashRouterPath(parsed.hash);
     }
 
     return `${normalizePathnameOnly(
       parsed.pathname || "/"
     )}${parsed.search || ""}${parsed.hash || ""}`;
   } catch {
-    const hashIndex =
-      raw.indexOf("#");
+    const hashIndex = raw.indexOf("#");
 
     if (hashIndex >= 0) {
-      const hash =
-        raw.slice(hashIndex);
+      const hash = raw.slice(hashIndex);
 
       if (isHashRouterPath(hash)) {
         return normalizeHashRouterPath(hash);
@@ -224,52 +268,106 @@ function pathFromUrlLike(value = "") {
   }
 }
 
-function isActivationPath(pathOrUrl = "") {
-  const path =
-    pathFromUrlLike(pathOrUrl);
+function getBrowserHref() {
+  if (!isBrowser()) {
+    return "";
+  }
 
-  const cleanPath =
-    path.split("?")[0].split("#")[0];
+  try {
+    return safeText(window.location.href, "");
+  } catch {
+    return "";
+  }
+}
+
+/* =========================================================
+   PROTECTED PUBLIC TOKEN ROUTES
+========================================================= */
+
+function matchesRouteConfig(config, pathOrUrl = "") {
+  const path = pathFromUrlLike(pathOrUrl);
+  const clean = stripSearchAndHash(path);
 
   return (
-    cleanPath === ACTIVATION_PATH ||
-    cleanPath.startsWith(`${ACTIVATION_PATH}/`)
+    clean === config.path ||
+    clean.startsWith(`${config.path}/`)
   );
 }
 
-function hasTokenInSearch(search = "") {
-  try {
-    const params =
-      new URLSearchParams(search || "");
+function getRouteConfigFromValue(value = "") {
+  return (
+    PROTECTED_PUBLIC_TOKEN_ROUTES.find((config) =>
+      matchesRouteConfig(config, value)
+    ) || null
+  );
+}
 
-    return ACTIVATION_TOKEN_PARAM_NAMES.some(
-      (name) =>
-        Boolean(
-          safeText(
-            params.get(name),
-            ""
-          )
+function getPathToken(config, value = "") {
+  if (!config) {
+    return "";
+  }
+
+  const path = pathFromUrlLike(value);
+  const clean = stripSearchAndHash(path);
+
+  if (!clean.startsWith(`${config.path}/`)) {
+    return "";
+  }
+
+  const token = clean
+    .slice(`${config.path}/`.length)
+    .split("/")[0];
+
+  try {
+    return safeText(
+      decodeURIComponent(token || ""),
+      ""
+    );
+  } catch {
+    return safeText(token, "");
+  }
+}
+
+function hasTokenInSearch(search = "", names = []) {
+  try {
+    const params = new URLSearchParams(search || "");
+
+    return names.some((name) =>
+      Boolean(
+        safeText(
+          params.get(name),
+          ""
         )
+      )
     );
   } catch {
     return false;
   }
 }
 
-function hasActivationToken(value = "") {
-  const raw =
-    safeText(value, "");
+function hasRouteToken(config, value = "") {
+  if (!config) {
+    return false;
+  }
+
+  const raw = safeText(value, "");
 
   if (!raw) {
     return false;
   }
 
+  if (getPathToken(config, raw)) {
+    return true;
+  }
+
   try {
-    const parsed =
-      new URL(raw, getBaseOrigin());
+    const parsed = new URL(raw, getBaseOrigin());
 
     if (
-      hasTokenInSearch(parsed.search)
+      hasTokenInSearch(
+        parsed.search,
+        config.tokenParamNames
+      )
     ) {
       return true;
     }
@@ -278,21 +376,27 @@ function hasActivationToken(value = "") {
       parsed.hash &&
       parsed.hash.includes("?")
     ) {
-      const query =
-        parsed.hash.split("?").slice(1).join("?");
+      const query = parsed.hash.split("?").slice(1).join("?");
 
       return hasTokenInSearch(
-        query ? `?${query}` : ""
+        query ? `?${query}` : "",
+        config.tokenParamNames
       );
     }
+
+    return false;
   } catch {
     if (raw.includes("?")) {
-      const query =
-        raw.split("?").slice(1).join("?").split("#")[0];
+      const query = raw
+        .split("?")
+        .slice(1)
+        .join("?")
+        .split("#")[0];
 
       if (
         hasTokenInSearch(
-          query ? `?${query}` : ""
+          query ? `?${query}` : "",
+          config.tokenParamNames
         )
       ) {
         return true;
@@ -303,87 +407,308 @@ function hasActivationToken(value = "") {
       raw.includes("#") &&
       raw.includes("?")
     ) {
-      const query =
-        raw.split("?").slice(1).join("?");
+      const query = raw.split("?").slice(1).join("?");
 
       if (
         hasTokenInSearch(
-          query ? `?${query}` : ""
+          query ? `?${query}` : "",
+          config.tokenParamNames
         )
       ) {
         return true;
       }
     }
+
+    return false;
+  }
+}
+
+function hasAnyProtectedToken(value = "") {
+  const config = getRouteConfigFromValue(value);
+
+  if (!config) {
+    return false;
   }
 
-  return false;
+  return hasRouteToken(config, value);
+}
+
+function getStoredInitialUrl(config) {
+  if (!isBrowser() || !config?.windowKey) {
+    return "";
+  }
+
+  try {
+    return safeText(window[config.windowKey], "");
+  } catch {
+    return "";
+  }
+}
+
+function setStoredInitialUrl(config, value = "") {
+  if (!isBrowser() || !config?.windowKey) {
+    return false;
+  }
+
+  try {
+    window[config.windowKey] = value;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getInitialUrl() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  try {
+    return safeText(window.__ONION_INITIAL_URL__, "");
+  } catch {
+    return "";
+  }
+}
+
+function setInitialUrl(value = "") {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    if (!window.__ONION_INITIAL_URL__) {
+      window.__ONION_INITIAL_URL__ = value;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveProtectedInitialContext(href = "") {
+  const candidates = [
+    href,
+    getInitialUrl(),
+    ...PROTECTED_PUBLIC_TOKEN_ROUTES.map((config) =>
+      getStoredInitialUrl(config)
+    ),
+  ]
+    .map((value) => safeText(value, ""))
+    .filter(Boolean);
+
+  for (const candidate of candidates) {
+    const config = getRouteConfigFromValue(candidate);
+
+    if (!config) {
+      continue;
+    }
+
+    if (!hasRouteToken(config, candidate)) {
+      continue;
+    }
+
+    return {
+      config,
+      url: candidate,
+      path: pathFromUrlLike(candidate),
+      hasToken: true,
+    };
+  }
+
+  return {
+    config: null,
+    url: "",
+    path: "",
+    hasToken: false,
+  };
+}
+
+function redactTokenInText(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  let output = raw;
+
+  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+    const escapedPath = config.path.replace(/\//g, "\\/");
+
+    output = output.replace(
+      new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
+      "$1/***"
+    );
+
+    for (const name of config.tokenParamNames) {
+      output = output.replace(
+        new RegExp(`([?&]${name}=)([^&#\\s]+)`, "gi"),
+        "$1***"
+      );
+    }
+  }
+
+  return output;
+}
+
+function sanitizeBootContextForLog(context = {}) {
+  const ctx = safeObject(context);
+
+  return {
+    initialUrl: redactTokenInText(ctx.initialUrl),
+    protectedInitialUrl: redactTokenInText(ctx.protectedInitialUrl),
+
+    activationInitialUrl: redactTokenInText(ctx.activationInitialUrl),
+    activationInitialPath: redactTokenInText(ctx.activationInitialPath),
+
+    resetConfirmInitialUrl: redactTokenInText(ctx.resetConfirmInitialUrl),
+    resetConfirmInitialPath: redactTokenInText(ctx.resetConfirmInitialPath),
+
+    protectedInitialPath: redactTokenInText(ctx.protectedInitialPath),
+
+    isActivation: Boolean(ctx.isActivation),
+    hasActivationToken: Boolean(ctx.hasActivationToken),
+
+    isResetConfirm: Boolean(ctx.isResetConfirm),
+    hasResetToken: Boolean(ctx.hasResetToken),
+
+    isPublicTokenRoute: Boolean(ctx.isPublicTokenRoute),
+    hasPublicToken: Boolean(ctx.hasPublicToken),
+    protectedRouteKey: safeText(ctx.protectedRouteKey, ""),
+  };
 }
 
 function captureInitialUrl() {
   if (!isBrowser()) {
     return {
       initialUrl: "",
+      protectedInitialUrl: "",
+      protectedInitialPath: "",
+
       activationInitialUrl: "",
       activationInitialPath: "",
       isActivation: false,
       hasActivationToken: false,
+
+      resetConfirmInitialUrl: "",
+      resetConfirmInitialPath: "",
+      isResetConfirm: false,
+      hasResetToken: false,
+
+      isPublicTokenRoute: false,
+      hasPublicToken: false,
+      protectedRouteKey: "",
     };
   }
 
-  let href = "";
-
-  try {
-    href = window.location.href;
-  } catch {
-    href = "";
-  }
+  const href = getBrowserHref();
 
   if (href) {
-    try {
-      if (!window.__ONION_INITIAL_URL__) {
-        window.__ONION_INITIAL_URL__ = href;
-      }
-    } catch {}
+    setInitialUrl(href);
 
-    try {
-      if (
-        isActivationPath(href) &&
-        !window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__
-      ) {
-        window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__ = href;
-      }
-    } catch {}
+    for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+      try {
+        if (
+          matchesRouteConfig(config, href) &&
+          hasRouteToken(config, href) &&
+          !getStoredInitialUrl(config)
+        ) {
+          setStoredInitialUrl(config, href);
+        }
+      } catch {}
+    }
   }
 
-  const initialUrl =
-    safeText(
-      window.__ONION_INITIAL_URL__,
-      href
+  const initialUrl = safeText(
+    getInitialUrl(),
+    href
+  );
+
+  const protectedContext =
+    resolveProtectedInitialContext(href);
+
+  const activationInitialUrl = safeText(
+    getStoredInitialUrl(
+      PROTECTED_PUBLIC_TOKEN_ROUTES[0]
+    ),
+    ""
+  );
+
+  const resetConfirmInitialUrl = safeText(
+    getStoredInitialUrl(
+      PROTECTED_PUBLIC_TOKEN_ROUTES[1]
+    ),
+    ""
+  );
+
+  const activationInitialPath = activationInitialUrl
+    ? pathFromUrlLike(activationInitialUrl)
+    : "";
+
+  const resetConfirmInitialPath = resetConfirmInitialUrl
+    ? pathFromUrlLike(resetConfirmInitialUrl)
+    : "";
+
+  const activationConfig =
+    PROTECTED_PUBLIC_TOKEN_ROUTES[0];
+
+  const resetConfig =
+    PROTECTED_PUBLIC_TOKEN_ROUTES[1];
+
+  const isActivation =
+    matchesRouteConfig(
+      activationConfig,
+      protectedContext.url || activationInitialUrl || initialUrl || href
     );
 
-  const activationInitialUrl =
-    safeText(
-      window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__,
-      ""
+  const isResetConfirm =
+    matchesRouteConfig(
+      resetConfig,
+      protectedContext.url || resetConfirmInitialUrl || initialUrl || href
     );
 
-  const activationInitialPath =
-    activationInitialUrl
-      ? pathFromUrlLike(activationInitialUrl)
-      : "";
+  const hasActivationToken =
+    hasRouteToken(
+      activationConfig,
+      activationInitialUrl || initialUrl || href
+    );
+
+  const hasResetToken =
+    hasRouteToken(
+      resetConfig,
+      resetConfirmInitialUrl || initialUrl || href
+    );
+
+  const isPublicTokenRoute =
+    Boolean(protectedContext.config);
+
+  const hasPublicToken =
+    Boolean(protectedContext.hasToken);
 
   return {
     initialUrl,
+
+    protectedInitialUrl:
+      protectedContext.url || "",
+
+    protectedInitialPath:
+      protectedContext.path || "",
+
     activationInitialUrl,
     activationInitialPath,
-    isActivation:
-      isActivationPath(
-        activationInitialUrl || initialUrl || href
-      ),
-    hasActivationToken:
-      hasActivationToken(
-        activationInitialUrl || initialUrl || href
-      ),
+    isActivation,
+    hasActivationToken,
+
+    resetConfirmInitialUrl,
+    resetConfirmInitialPath,
+    isResetConfirm,
+    hasResetToken,
+
+    isPublicTokenRoute,
+    hasPublicToken,
+    protectedRouteKey:
+      protectedContext.config?.key || "",
   };
 }
 
@@ -397,7 +722,7 @@ let BOOT_URL_CONTEXT =
 export const App = (() => {
   "use strict";
 
-  const MIN_BOOT_LOADER_MS = 1000;
+  const MIN_BOOT_LOADER_MS = 350;
 
   const state = {
     booted: false,
@@ -424,6 +749,9 @@ export const App = (() => {
     loaderShownAt: 0,
 
     bootFailsafeTimer: null,
+
+    bootNavigationHandled: false,
+    initialRouteRendered: false,
   };
 
   /* =======================================================
@@ -512,6 +840,16 @@ export const App = (() => {
     return BOOT_URL_CONTEXT;
   }
 
+  function isPublicTokenBoot() {
+    const context =
+      refreshBootUrlContext();
+
+    return Boolean(
+      context.isPublicTokenRoute &&
+      context.hasPublicToken
+    );
+  }
+
   function isActivationBoot() {
     const context =
       refreshBootUrlContext();
@@ -519,6 +857,16 @@ export const App = (() => {
     return Boolean(
       context.isActivation &&
       context.hasActivationToken
+    );
+  }
+
+  function isResetConfirmBoot() {
+    const context =
+      refreshBootUrlContext();
+
+    return Boolean(
+      context.isResetConfirm &&
+      context.hasResetToken
     );
   }
 
@@ -530,14 +878,45 @@ export const App = (() => {
       AppCore?.setState?.({
         bootInitialUrl:
           context.initialUrl,
+
+        bootProtectedInitialUrl:
+          context.protectedInitialUrl,
+
+        bootProtectedInitialPath:
+          context.protectedInitialPath,
+
+        bootIsPublicTokenRoute:
+          context.isPublicTokenRoute,
+
+        bootHasPublicToken:
+          context.hasPublicToken,
+
+        bootProtectedRouteKey:
+          context.protectedRouteKey,
+
         bootActivationInitialUrl:
           context.activationInitialUrl,
+
         bootActivationInitialPath:
           context.activationInitialPath,
+
         bootIsActivation:
           context.isActivation,
+
         bootHasActivationToken:
           context.hasActivationToken,
+
+        bootResetConfirmInitialUrl:
+          context.resetConfirmInitialUrl,
+
+        bootResetConfirmInitialPath:
+          context.resetConfirmInitialPath,
+
+        bootIsResetConfirm:
+          context.isResetConfirm,
+
+        bootHasResetToken:
+          context.hasResetToken,
       });
     } catch {}
 
@@ -555,6 +934,11 @@ export const App = (() => {
 
   function isStale(id) {
     return id !== state.bootCycleId;
+  }
+
+  function resetCycleRuntimeState() {
+    state.bootNavigationHandled = false;
+    state.initialRouteRendered = false;
   }
 
   function markBooting(cycleId) {
@@ -743,9 +1127,39 @@ export const App = (() => {
     safeEmitUIReady();
   }
 
+  async function renderInitialRouteBlock({
+    cycleId,
+    reason = "initial",
+  } = {}) {
+    if (isStale(cycleId)) {
+      return null;
+    }
+
+    if (state.initialRouteRendered) {
+      safeLog(
+        "renderInitialRoute omitido: ya renderizado.",
+        {
+          reason,
+        }
+      );
+
+      return null;
+    }
+
+    const result =
+      await renderInitialRoute();
+
+    if (!isStale(cycleId)) {
+      state.initialRouteRendered = true;
+    }
+
+    return result;
+  }
+
   async function restoreSessionBlock({
     cycleId,
     nonBlocking = false,
+    skipPostRestoreNavigation = false,
   } = {}) {
     if (isStale(cycleId)) {
       return null;
@@ -763,6 +1177,7 @@ export const App = (() => {
         state,
         syncUserUI,
         warmup,
+        skipPostRestoreNavigation,
       });
 
     try {
@@ -853,6 +1268,7 @@ export const App = (() => {
     try {
       state.booting = true;
 
+      resetCycleRuntimeState();
       markBooting(cycleId);
 
       /*
@@ -887,32 +1303,69 @@ export const App = (() => {
 
       /*
         CASO CRÍTICO:
-        Si entramos desde /activate-account?token=...
-        renderizamos primero para que ActivateAccountView capture el token
-        antes de que restore/session/auth puedan tocar navegación o history.
+        Si entramos desde una ruta pública con token:
+        - /activate-account?token=...
+        - /activate-account/<token>
+        - /reset-password/confirm?token=...
+        - /reset-password/confirm/<token>
+
+        renderizamos primero para que la vista capture el token
+        antes de que restore/session/auth/history puedan tocar navegación.
       */
       if (
-        bootContext.isActivation &&
-        bootContext.hasActivationToken
+        bootContext.isPublicTokenRoute &&
+        bootContext.hasPublicToken
       ) {
         safeLog(
-          "Boot activation-first.",
-          bootContext
+          "Boot public-token-first.",
+          sanitizeBootContextForLog(bootContext)
         );
 
-        await renderInitialRoute();
+        await renderInitialRouteBlock({
+          cycleId,
+          reason: "public-token-first",
+        });
 
         await restoreSessionBlock({
           cycleId,
           nonBlocking: true,
+          skipPostRestoreNavigation: true,
         });
       } else {
-        await restoreSessionBlock({
-          cycleId,
-          nonBlocking: false,
-        });
+        const restoreResult =
+          await restoreSessionBlock({
+            cycleId,
+            nonBlocking: false,
+            skipPostRestoreNavigation: false,
+          });
 
-        await renderInitialRoute();
+        /*
+          Si restoreSessionInBackground() ya navegó, por ejemplo:
+          /login con sesión previa -> /
+          NO hacemos renderInitialRoute() otra vez.
+
+          Esto evita doble render y parpadeo.
+        */
+        if (
+          state.bootNavigationHandled === true
+        ) {
+          safeLog(
+            "renderInitialRoute omitido: restore ya resolvió navegación.",
+            {
+              ok:
+                Boolean(restoreResult?.ok),
+              route:
+                AppCore?.state?.route || "/",
+              publicPath:
+                AppCore?.state?.publicPath || "/",
+            }
+          );
+        } else {
+          await renderInitialRouteBlock({
+            cycleId,
+            reason: "after-restore",
+          });
+        }
       }
 
       await finalizeBoot(cycleId);
@@ -973,6 +1426,8 @@ export const App = (() => {
     state.restorePromise = null;
     state.bootPromise = null;
 
+    resetCycleRuntimeState();
+
     try {
       clearScope(AppCore);
     } catch {}
@@ -988,10 +1443,22 @@ export const App = (() => {
 
     return {
       ...state,
+
       bootUrlContext:
-        context,
+        sanitizeBootContextForLog(context),
+
+      isActivationBoot:
+        isActivationBoot(),
+
+      isResetConfirmBoot:
+        isResetConfirmBoot(),
+
+      isPublicTokenBoot:
+        isPublicTokenBoot(),
+
       route:
         AppCore?.state?.route || "/",
+
       publicPath:
         AppCore?.state?.publicPath || "/",
     };

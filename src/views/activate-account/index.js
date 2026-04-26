@@ -27,6 +27,7 @@
    - sin recuperación manual de token en UI
    - sin token real en inputs hidden
    - navegación login robusta
+   - activación pública con fetch directo, sin AppCore.http
 ========================================================= */
 
 import {
@@ -515,12 +516,6 @@ export const ActivateAccountView = (() => {
       urls.push(window.__ONION_INITIAL_URL__);
     } catch {}
 
-    /*
-      Fallback defensivo:
-      si hubo una redirección previa antes de montar la SPA,
-      en algunos navegadores el referrer puede conservar
-      la URL original con query/hash.
-    */
     try {
       urls.push(document.referrer);
     } catch {}
@@ -566,9 +561,12 @@ export const ActivateAccountView = (() => {
 
       if (
         window.__ONION_INITIAL_URL__ &&
-        isActivationPathname(new URL(window.__ONION_INITIAL_URL__, getBaseOrigin()).pathname)
+        isActivationPathname(
+          new URL(window.__ONION_INITIAL_URL__, getBaseOrigin()).pathname
+        )
       ) {
-        window.__ONION_INITIAL_URL__ = `${window.location.origin}${CLEAN_ACTIVATION_PUBLIC_PATH}`;
+        window.__ONION_INITIAL_URL__ =
+          `${window.location.origin}${CLEAN_ACTIVATION_PUBLIC_PATH}`;
       }
 
       return true;
@@ -916,6 +914,13 @@ export const ActivateAccountView = (() => {
   }
 
   function resolveErrorMessage(error = null) {
+    const statusCode = Number(error?.status || 0);
+    const code = normalizeBackendErrorCode(error);
+
+    if (statusCode === 405 || code === "HTTP_405") {
+      return "El backend no acepta POST en /api/auth/activate-account. Revisa el router auth desplegado.";
+    }
+
     return safeText(
       error?.message ||
         error?.data?.message ||
@@ -1016,68 +1021,50 @@ export const ActivateAccountView = (() => {
      API REQUEST
   ========================================================= */
 
-  async function requestWithAppHttp(endpoint = "", payload = {}) {
-    const http =
-      AppCore?.http ||
-      AppCore?.Http ||
-      AppCore?.services?.http ||
-      AppCore?.modules?.Http ||
-      null;
-
-    if (!http) {
-      return null;
-    }
-
-    if (typeof http.post === "function") {
-      return await http.post(endpoint, payload, {
-        auth: false,
-        public: true,
-      });
-    }
-
-    if (typeof http.request === "function") {
-      return await http.request(endpoint, {
-        method: "POST",
-        auth: false,
-        public: true,
-        body: payload,
-      });
-    }
-
-    if (typeof http.apiClient === "function") {
-      return await http.apiClient(endpoint, {
-        method: "POST",
-        auth: false,
-        public: true,
-        body: payload,
-      });
-    }
-
-    return null;
-  }
-
   async function requestWithFetch(endpoint = "", payload = {}) {
     const url = buildApiUrl(endpoint);
+
+    safeLog("activation request", {
+      method: "POST",
+      url,
+      hasToken: Boolean(payload?.token),
+      hasPassword: Boolean(payload?.password),
+    });
 
     const response = await fetch(url, {
       method: "POST",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
+        "X-Onion-Public-Action": "activate-account",
       },
       credentials: "include",
+      cache: "no-store",
+      redirect: "follow",
       body: JSON.stringify(payload),
     });
 
     let data = null;
+    let rawText = "";
 
     try {
-      data = await response.json();
+      rawText = await response.text();
+    } catch {
+      rawText = "";
+    }
+
+    try {
+      data = rawText ? JSON.parse(rawText) : null;
     } catch {
       data = null;
     }
 
     if (!response.ok || data?.ok === false) {
+      const code =
+        data?.code ||
+        data?.error ||
+        `HTTP_${response.status}`;
+
       const err = new Error(
         safeText(
           data?.message ||
@@ -1088,8 +1075,11 @@ export const ActivateAccountView = (() => {
       );
 
       err.status = response.status;
-      err.code = data?.code || data?.error || `HTTP_${response.status}`;
+      err.statusText = response.statusText || "";
+      err.code = code;
       err.data = data;
+      err.endpoint = url;
+      err.method = "POST";
 
       throw err;
     }
@@ -1143,30 +1133,12 @@ export const ActivateAccountView = (() => {
       passwordConfirm: cleanConfirmPassword,
     };
 
-    try {
-      const httpResponse = await requestWithAppHttp(endpoint, payload);
-
-      if (httpResponse) {
-        if (httpResponse?.ok === false) {
-          const err = new Error(
-            safeText(
-              httpResponse?.message || httpResponse?.error,
-              "No se pudo activar la cuenta."
-            )
-          );
-
-          err.code = httpResponse?.code || httpResponse?.error;
-          err.data = httpResponse;
-
-          throw err;
-        }
-
-        return httpResponse;
-      }
-    } catch (error) {
-      throw error;
-    }
-
+    /*
+      Importante:
+      Esta ruta pública NO usa AppCore.http.
+      Se usa fetch directo para evitar interceptores, auth headers,
+      transformaciones de body o fallback de método.
+    */
     return await requestWithFetch(endpoint, payload);
   }
 
@@ -1410,8 +1382,11 @@ export const ActivateAccountView = (() => {
       }
 
       safeError("Activation failed:", {
+        method: error?.method || "POST",
+        endpoint: error?.endpoint || getActivationEndpoint(),
         code: error?.code || error?.error || "",
         status: error?.status || "",
+        statusText: error?.statusText || "",
         message: error?.message || "",
       });
 

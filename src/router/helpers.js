@@ -16,11 +16,13 @@
    - soporte hash-router /#/activate-account?token=...
    - soporte URL inicial capturada antes del boot SPA
    - soporte directo para /activate-account/<token>
+   - soporte directo para /reset-password/confirm/<token>
 
    HARDENING EXTREMO 10/10:
    - canonical determinista sin query/hash
    - publicPath preserva query/hash
    - publicPath preserva /activate-account/<token>
+   - publicPath preserva /reset-password/confirm/<token>
    - slug estricto enterprise
    - redirect interno seguro
    - soporte href relativo real
@@ -34,15 +36,29 @@ export const ROUTER_CONFIG = Object.freeze({
   maxUsernameLength: 64,
 });
 
-const ACTIVATION_PATH = "/activate-account";
+/* =========================================================
+   PUBLIC TOKEN ROUTES
+========================================================= */
 
-const ACTIVATION_TOKEN_PARAM_NAMES = [
+const ACTIVATION_PATH = "/activate-account";
+const RESET_CONFIRM_PATH = "/reset-password/confirm";
+
+const ACTIVATION_TOKEN_PARAM_NAMES = Object.freeze([
   "token",
   "activationToken",
   "activateToken",
   "code",
   "t",
-];
+]);
+
+const RESET_TOKEN_PARAM_NAMES = Object.freeze([
+  "token",
+  "resetToken",
+  "passwordResetToken",
+  "confirmToken",
+  "code",
+  "t",
+]);
 
 const PUBLIC_AUTH_PATHS = new Set([
   "/login",
@@ -344,6 +360,7 @@ function normalizePathnameWithCore(AppCore, pathname = "/") {
  * - delega solo el pathname
  * - así evita que helpers externos borren ?token=...
  * - también preserva /activate-account/<token>
+ * - también preserva /reset-password/confirm/<token>
  */
 export function normalizePath(AppCore, path = "/") {
   const raw =
@@ -436,10 +453,10 @@ function pathFromUrlLike(value = "") {
 }
 
 /* =========================================================
-   ACTIVATION TOKEN PROTECTION
+   PUBLIC TOKEN HELPERS
 ========================================================= */
 
-function isActivationPath(path = "") {
+function isPathOrChild(path = "", basePath = "/") {
   const normalized =
     normalizePath(null, path);
 
@@ -447,35 +464,19 @@ function isActivationPath(path = "") {
     stripSearchAndHash(normalized);
 
   return (
-    pathname === ACTIVATION_PATH ||
-    pathname.startsWith(`${ACTIVATION_PATH}/`)
+    pathname === basePath ||
+    pathname.startsWith(`${basePath}/`)
   );
 }
 
-function hasTokenInSearch(search = "") {
-  try {
-    const params =
-      new URLSearchParams(search || "");
-
-    return ACTIVATION_TOKEN_PARAM_NAMES.some(
-      (name) =>
-        Boolean(
-          safeText(
-            params.get(name),
-            ""
-          )
-        )
-    );
-  } catch {
-    return false;
-  }
-}
-
-function getActivationTokenFromPath(pathOrUrl = "") {
+function getTokenFromPathByBase(pathOrUrl = "", basePath = "") {
   const raw =
     safeText(pathOrUrl, "");
 
-  if (!raw) {
+  const base =
+    normalizePathnameOnly(basePath);
+
+  if (!raw || !base) {
     return "";
   }
 
@@ -488,10 +489,16 @@ function getActivationTokenFromPath(pathOrUrl = "") {
         parts.pathname || "/"
       );
 
+    const escapedBase =
+      base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const pattern = new RegExp(
+      `^${escapedBase}/([^/?#]+)$`,
+      "i"
+    );
+
     const match =
-      pathname.match(
-        /^\/activate-account\/([^/?#]+)$/i
-      );
+      pathname.match(pattern);
 
     if (!match?.[1]) {
       return "";
@@ -506,13 +513,30 @@ function getActivationTokenFromPath(pathOrUrl = "") {
   }
 }
 
-function hasTokenInActivationPath(pathOrUrl = "") {
-  return Boolean(
-    getActivationTokenFromPath(pathOrUrl)
-  );
+function hasTokenInSearch(search = "", tokenParamNames = []) {
+  try {
+    const params =
+      new URLSearchParams(search || "");
+
+    return tokenParamNames.some(
+      (name) =>
+        Boolean(
+          safeText(
+            params.get(name),
+            ""
+          )
+        )
+    );
+  } catch {
+    return false;
+  }
 }
 
-function hasActivationToken(pathOrUrl = "") {
+function hasPublicToken({
+  pathOrUrl = "",
+  basePath = "",
+  tokenParamNames = [],
+} = {}) {
   const raw =
     safeText(pathOrUrl, "");
 
@@ -521,10 +545,15 @@ function hasActivationToken(pathOrUrl = "") {
   }
 
   /*
-    Nuevo formato backend:
-    /activate-account/<token>
+    Formato path-token:
+    /base/path/<token>
   */
-  if (hasTokenInActivationPath(raw)) {
+  if (
+    getTokenFromPathByBase(
+      raw,
+      basePath
+    )
+  ) {
     return true;
   }
 
@@ -538,12 +567,20 @@ function hasActivationToken(pathOrUrl = "") {
     const parsedPath =
       `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`;
 
-    if (hasTokenInActivationPath(parsedPath)) {
+    if (
+      getTokenFromPathByBase(
+        parsedPath,
+        basePath
+      )
+    ) {
       return true;
     }
 
     if (
-      hasTokenInSearch(parsed.search)
+      hasTokenInSearch(
+        parsed.search,
+        tokenParamNames
+      )
     ) {
       return true;
     }
@@ -556,7 +593,8 @@ function hasActivationToken(pathOrUrl = "") {
         parsed.hash.split("?").slice(1).join("?");
 
       return hasTokenInSearch(
-        query ? `?${query}` : ""
+        query ? `?${query}` : "",
+        tokenParamNames
       );
     }
 
@@ -568,12 +606,20 @@ function hasActivationToken(pathOrUrl = "") {
     const localPath =
       `${parts.pathname || "/"}${parts.search || ""}${parts.hash || ""}`;
 
-    if (hasTokenInActivationPath(localPath)) {
+    if (
+      getTokenFromPathByBase(
+        localPath,
+        basePath
+      )
+    ) {
       return true;
     }
 
     if (
-      hasTokenInSearch(parts.search)
+      hasTokenInSearch(
+        parts.search,
+        tokenParamNames
+      )
     ) {
       return true;
     }
@@ -586,12 +632,45 @@ function hasActivationToken(pathOrUrl = "") {
         parts.hash.split("?").slice(1).join("?");
 
       return hasTokenInSearch(
-        query ? `?${query}` : ""
+        query ? `?${query}` : "",
+        tokenParamNames
       );
     }
 
     return false;
   }
+}
+
+/* =========================================================
+   ACTIVATION TOKEN PROTECTION
+========================================================= */
+
+function isActivationPath(path = "") {
+  return isPathOrChild(
+    path,
+    ACTIVATION_PATH
+  );
+}
+
+function getActivationTokenFromPath(pathOrUrl = "") {
+  return getTokenFromPathByBase(
+    pathOrUrl,
+    ACTIVATION_PATH
+  );
+}
+
+function hasTokenInActivationPath(pathOrUrl = "") {
+  return Boolean(
+    getActivationTokenFromPath(pathOrUrl)
+  );
+}
+
+function hasActivationToken(pathOrUrl = "") {
+  return hasPublicToken({
+    pathOrUrl,
+    basePath: ACTIVATION_PATH,
+    tokenParamNames: ACTIVATION_TOKEN_PARAM_NAMES,
+  });
 }
 
 function isActivationTokenScrubbed() {
@@ -607,6 +686,57 @@ function isActivationTokenScrubbed() {
     return false;
   }
 }
+
+/* =========================================================
+   RESET TOKEN PROTECTION
+========================================================= */
+
+function isResetConfirmPath(path = "") {
+  return isPathOrChild(
+    path,
+    RESET_CONFIRM_PATH
+  );
+}
+
+function getResetConfirmTokenFromPath(pathOrUrl = "") {
+  return getTokenFromPathByBase(
+    pathOrUrl,
+    RESET_CONFIRM_PATH
+  );
+}
+
+function hasTokenInResetConfirmPath(pathOrUrl = "") {
+  return Boolean(
+    getResetConfirmTokenFromPath(pathOrUrl)
+  );
+}
+
+function hasResetConfirmToken(pathOrUrl = "") {
+  return hasPublicToken({
+    pathOrUrl,
+    basePath: RESET_CONFIRM_PATH,
+    tokenParamNames: RESET_TOKEN_PARAM_NAMES,
+  });
+}
+
+function isResetConfirmTokenScrubbed() {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    return Boolean(
+      window.history?.state?.scrubbedResetToken ||
+        window.history?.state?.scrubbedResetPasswordToken
+    );
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   INITIAL URL CAPTURE
+========================================================= */
 
 function captureInitialUrl() {
   if (!isBrowser()) {
@@ -629,6 +759,13 @@ function captureInitialUrl() {
       !window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__
     ) {
       window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__ = href;
+    }
+
+    if (
+      isResetConfirmPath(path) &&
+      !window.__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__
+    ) {
+      window.__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__ = href;
     }
 
     return true;
@@ -655,6 +792,17 @@ function getActivationInitialUrl() {
 
   return safeText(
     window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__,
+    ""
+  );
+}
+
+function getResetConfirmInitialUrl() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  return safeText(
+    window.__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__,
     ""
   );
 }
@@ -703,6 +851,58 @@ function getProtectedActivationPath() {
     if (
       isActivationPath(browserPath) &&
       hasActivationToken(browserPath)
+    ) {
+      return browserPath;
+    }
+  }
+
+  return "";
+}
+
+function getProtectedResetConfirmPath() {
+  if (isResetConfirmTokenScrubbed()) {
+    return "";
+  }
+
+  captureInitialUrl();
+
+  const resetInitialUrl =
+    getResetConfirmInitialUrl();
+
+  if (
+    resetInitialUrl &&
+    isResetConfirmPath(
+      pathFromUrlLike(resetInitialUrl)
+    ) &&
+    hasResetConfirmToken(resetInitialUrl)
+  ) {
+    return pathFromUrlLike(
+      resetInitialUrl
+    );
+  }
+
+  const initialUrl =
+    getInitialUrl();
+
+  if (
+    initialUrl &&
+    isResetConfirmPath(
+      pathFromUrlLike(initialUrl)
+    ) &&
+    hasResetConfirmToken(initialUrl)
+  ) {
+    return pathFromUrlLike(
+      initialUrl
+    );
+  }
+
+  if (isBrowser()) {
+    const browserPath =
+      getBrowserPath();
+
+    if (
+      isResetConfirmPath(browserPath) &&
+      hasResetConfirmToken(browserPath)
     ) {
       return browserPath;
     }
@@ -859,6 +1059,7 @@ export function stripUsernamePrefix(AppCore, path = "/") {
  * - NO devuelve hash
  * - NO devuelve /@username
  * - /activate-account/<token> resuelve a /activate-account
+ * - /reset-password/confirm/<token> resuelve a /reset-password/confirm
  *
  * Ejemplo:
  *   /@pepe/activate-account?token=abc
@@ -867,6 +1068,10 @@ export function stripUsernamePrefix(AppCore, path = "/") {
  * Ejemplo:
  *   /activate-account/uuid
  *   -> /activate-account
+ *
+ * Ejemplo:
+ *   /reset-password/confirm/abc
+ *   -> /reset-password/confirm
  */
 export function normalizeCanonicalPath(AppCore, path = "/") {
   const stripped =
@@ -890,16 +1095,29 @@ export function normalizeCanonicalPath(AppCore, path = "/") {
     - /activate-account
     - /activate-account/<token>
 
-    Ambas deben resolver contra la misma ruta registrada:
+    Ambas resuelven contra:
     /activate-account
-
-    El token sigue disponible en publicPath/window.location.pathname.
   */
   if (
     cleanPathname === ACTIVATION_PATH ||
     cleanPathname.startsWith(`${ACTIVATION_PATH}/`)
   ) {
     return ACTIVATION_PATH;
+  }
+
+  /*
+    Reset password confirm:
+    - /reset-password/confirm
+    - /reset-password/confirm/<token>
+
+    Ambas resuelven contra:
+    /reset-password/confirm
+  */
+  if (
+    cleanPathname === RESET_CONFIRM_PATH ||
+    cleanPathname.startsWith(`${RESET_CONFIRM_PATH}/`)
+  ) {
+    return RESET_CONFIRM_PATH;
   }
 
   return cleanPathname;
@@ -973,8 +1191,9 @@ export function getCurrentUrl() {
  *
  * Prioridad:
  * 1. token protegido de activation inicial
- * 2. navegador real
- * 3. estado
+ * 2. token protegido de reset confirm inicial
+ * 3. navegador real
+ * 4. estado
  */
 export function getCurrentPath(AppCore) {
   const protectedActivationPath =
@@ -984,6 +1203,16 @@ export function getCurrentPath(AppCore) {
     return normalizePath(
       AppCore,
       protectedActivationPath
+    );
+  }
+
+  const protectedResetConfirmPath =
+    getProtectedResetConfirmPath();
+
+  if (protectedResetConfirmPath) {
+    return normalizePath(
+      AppCore,
+      protectedResetConfirmPath
     );
   }
 
@@ -1012,6 +1241,10 @@ export function getCurrentPath(AppCore) {
  * Ejemplo:
  *   /activate-account/xxx
  *   -> /activate-account
+ *
+ * Ejemplo:
+ *   /reset-password/confirm/xxx
+ *   -> /reset-password/confirm
  */
 export function getCurrentCanonicalPath(AppCore) {
   return normalizeCanonicalPath(
@@ -1025,8 +1258,9 @@ export function getCurrentCanonicalPath(AppCore) {
  *
  * Prioridad:
  * 1. token protegido de activation inicial
- * 2. navegador real
- * 3. estado de app
+ * 2. token protegido de reset confirm inicial
+ * 3. navegador real
+ * 4. estado de app
  */
 export function getCurrentPublicPath(AppCore) {
   const protectedActivationPath =
@@ -1036,6 +1270,16 @@ export function getCurrentPublicPath(AppCore) {
     return normalizePath(
       AppCore,
       protectedActivationPath
+    );
+  }
+
+  const protectedResetConfirmPath =
+    getProtectedResetConfirmPath();
+
+  if (protectedResetConfirmPath) {
+    return normalizePath(
+      AppCore,
+      protectedResetConfirmPath
     );
   }
 
@@ -1059,6 +1303,13 @@ export function getResolvedPublicPath(fallback = "/") {
 
   if (protectedActivationPath) {
     return protectedActivationPath;
+  }
+
+  const protectedResetConfirmPath =
+    getProtectedResetConfirmPath();
+
+  if (protectedResetConfirmPath) {
+    return protectedResetConfirmPath;
   }
 
   if (!isBrowser()) {
@@ -1266,6 +1517,12 @@ export function resolveSpaHref(AppCore, href = "/") {
  * Salida:
  *   /activate-account/abc
  *
+ * Entrada:
+ *   /reset-password/confirm/abc
+ *
+ * Salida:
+ *   /reset-password/confirm/abc
+ *
  * Salida con slug permitido:
  *   /@user/facturas?page=2
  */
@@ -1287,13 +1544,27 @@ export function buildPublicPath(
     );
 
   /*
-    Si estamos en activación con token, preservamos la URL pública completa.
-    No la convertimos prematuramente en /activate-account.
-    La propia vista de activación podrá limpiar la URL después de capturar el token.
+    Activación con token:
+    preservamos la URL pública completa.
   */
   if (
     isActivationPath(source) &&
     hasActivationToken(source)
+  ) {
+    return normalizePath(
+      AppCore,
+      source
+    );
+  }
+
+  /*
+    Reset password confirm con token:
+    preservamos la URL pública completa para que la vista
+    pueda leer /reset-password/confirm/<token>.
+  */
+  if (
+    isResetConfirmPath(source) &&
+    hasResetConfirmToken(source)
   ) {
     return normalizePath(
       AppCore,
@@ -1492,6 +1763,12 @@ export function buildLoginUrl(AppCore, redirectPath = null) {
  *   /activate-account/abc
  * en:
  *   /activate-account
+ *
+ * Tampoco debe convertir:
+ *   /reset-password/confirm/abc
+ * en:
+ *   /reset-password/confirm
+ *
  * antes de que la vista haya capturado el token.
  */
 export function buildHistoryUrl(
@@ -1635,10 +1912,19 @@ export function getRouterHelpersSnapshot(AppCore) {
     activationInitialUrl:
       getActivationInitialUrl(),
 
+    resetConfirmInitialUrl:
+      getResetConfirmInitialUrl(),
+
     protectedActivationPath:
       getProtectedActivationPath(),
 
+    protectedResetConfirmPath:
+      getProtectedResetConfirmPath(),
+
     activationTokenScrubbed:
       isActivationTokenScrubbed(),
+
+    resetConfirmTokenScrubbed:
+      isResetConfirmTokenScrubbed(),
   };
 }

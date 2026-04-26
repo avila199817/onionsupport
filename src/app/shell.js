@@ -2,14 +2,28 @@
    Onion SPA - App Shell
    Archivo: src/app/shell.js
 
-   STABLE VERSION · NO FLICKER · NO SHELL RE-TOGGLE
+   STABLE VERSION · NO FLICKER · BOOT LOADER ALIGNED · FINAL 10/10
 
-   FIX:
-   - setShellVisibility idempotente
-   - no reemitir router:shell:change si no cambia nada
-   - no tocar hidden/clases del shell en cada render
-   - snapshot robusto
-   - loader anti-stuck
+   RESPONSABILIDADES:
+   - resolver elementos principales del shell
+   - controlar visibilidad de sidebar/topbar/tablehead por ruta
+   - no ocultar el shell principal de login/reset
+   - mantener app-shell estable durante boot
+   - sincronizar aria-busy / aria-hidden / data-shell
+   - no esconder loader global antes de finalizeBoot
+   - evitar re-toggle visual innecesario
+   - snapshot robusto para debug
+
+   ALINEADO CON:
+   - src/app/index.js
+   - src/app/loader.js
+   - src/css/core/loader.css
+   - index.html con #app-loader estático
+
+   REGLA:
+   - loader global lo decide App Bootstrap.
+   - shell.js puede pedir hideLoader solo cuando NO hay boot activo.
+   - durante boot, el CSS app-booting/app-loading mantiene #app-shell oculto.
 ========================================================= */
 
 import {
@@ -32,6 +46,16 @@ function safeEmit(AppCore, name, payload = {}) {
   try {
     AppCore?.events?.emit?.(name, payload);
   } catch {}
+
+  try {
+    if (isBrowser()) {
+      window.dispatchEvent(
+        new CustomEvent(name, {
+          detail: payload,
+        })
+      );
+    }
+  } catch {}
 }
 
 function safeText(value, fallback = "") {
@@ -40,7 +64,16 @@ function safeText(value, fallback = "") {
   }
 
   const text = String(value).trim();
+
   return text || fallback;
+}
+
+function safeObject(value) {
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? value
+    : {};
 }
 
 function normalizePath(AppCore, path = "/") {
@@ -56,9 +89,50 @@ function normalizePath(AppCore, path = "/") {
     raw = `/${raw}`;
   }
 
-  raw = raw.replace(/\/{2,}/g, "/").replace(/\/+$/g, "");
+  raw = raw
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
-  return raw || "/";
+  const hashIndex = raw.indexOf("#");
+  const queryIndex = raw.indexOf("?");
+
+  let cutIndex = -1;
+
+  if (queryIndex >= 0 && hashIndex >= 0) {
+    cutIndex = Math.min(queryIndex, hashIndex);
+  } else if (queryIndex >= 0) {
+    cutIndex = queryIndex;
+  } else if (hashIndex >= 0) {
+    cutIndex = hashIndex;
+  }
+
+  const suffix =
+    cutIndex >= 0
+      ? raw.slice(cutIndex)
+      : "";
+
+  let pathname =
+    cutIndex >= 0
+      ? raw.slice(0, cutIndex)
+      : raw;
+
+  pathname =
+    pathname.replace(/\/+$/g, "") ||
+    "/";
+
+  return `${pathname}${suffix}`;
+}
+
+function pathnameOnly(AppCore, path = "/") {
+  const normalized = normalizePath(AppCore, path);
+
+  return (
+    normalized
+      .split("?")[0]
+      .split("#")[0]
+      .replace(/\/+$/g, "") ||
+    "/"
+  );
 }
 
 function setDataset(el, key, value) {
@@ -74,6 +148,27 @@ function setDataset(el, key, value) {
   } catch {}
 }
 
+function toggleClass(el, name, force) {
+  if (!el || !name) return;
+
+  try {
+    el.classList.toggle(name, Boolean(force));
+  } catch {}
+}
+
+function setAttribute(el, name, value) {
+  if (!el || !name) return;
+
+  try {
+    if (value === null || value === undefined) {
+      el.removeAttribute(name);
+      return;
+    }
+
+    el.setAttribute(name, String(value));
+  } catch {}
+}
+
 /* =========================================================
    ELEMENTS
 ========================================================= */
@@ -81,35 +176,100 @@ function setDataset(el, key, value) {
 export function getShellElements(AppCore) {
   if (!isBrowser()) {
     return {
+      appShell: null,
+      mainContent: null,
+      appContent: null,
+      viewContainer: null,
+
       sidebar: null,
       topbar: null,
+
       tablehead: null,
       tableheadContainer: null,
+
+      loader: null,
+
       body: null,
       html: null,
     };
   }
 
+  const appShell =
+    document.getElementById("app-shell") ||
+    document.querySelector("[data-app-shell='true']") ||
+    null;
+
+  const mainContent =
+    document.getElementById("main-content") ||
+    document.querySelector("main.main-content") ||
+    null;
+
+  const appContent =
+    document.getElementById("app-content") ||
+    document.querySelector("[data-app-content]") ||
+    null;
+
+  const viewContainer =
+    AppCore?.dom?.viewContainer ||
+    document.getElementById("view-container") ||
+    document.querySelector("[data-view-root]") ||
+    null;
+
+  const sidebar =
+    AppCore?.dom?.sidebar ||
+    document.querySelector(".sidebar") ||
+    document.querySelector("[data-sidebar-root]") ||
+    null;
+
+  const topbar =
+    AppCore?.dom?.topbar ||
+    document.querySelector(".topbar") ||
+    document.querySelector("[data-topbar-root]") ||
+    null;
+
+  const tablehead =
+    document.getElementById("table-head") ||
+    document.querySelector(".table-head") ||
+    null;
+
+  const tableheadContainer =
+    AppCore?.dom?.tableheadContainer ||
+    document.getElementById("tablehead-container") ||
+    document.querySelector("[data-tablehead-container]") ||
+    null;
+
+  const loader =
+    AppCore?.dom?.loader ||
+    document.getElementById("app-loader") ||
+    document.querySelector("[data-app-loader='true']") ||
+    null;
+
+  try {
+    if (AppCore?.dom) {
+      AppCore.dom.appShell = appShell;
+      AppCore.dom.mainContent = mainContent;
+      AppCore.dom.appContent = appContent;
+      AppCore.dom.viewContainer = viewContainer;
+      AppCore.dom.sidebar = sidebar;
+      AppCore.dom.topbar = topbar;
+      AppCore.dom.tableheadContainer = tableheadContainer;
+      AppCore.dom.loader = loader;
+    }
+  } catch {}
+
   return {
-    sidebar:
-      AppCore?.dom?.sidebar ||
-      document.querySelector(".sidebar") ||
-      null,
+    appShell,
+    mainContent,
+    appContent,
+    viewContainer,
 
-    topbar:
-      AppCore?.dom?.topbar ||
-      document.querySelector(".topbar") ||
-      null,
+    sidebar,
+    topbar,
 
-    tablehead:
-      document.getElementById("table-head") ||
-      document.querySelector(".table-head") ||
-      null,
+    tablehead,
+    tableheadContainer,
 
-    tableheadContainer:
-      AppCore?.dom?.tableheadContainer ||
-      document.getElementById("tablehead-container") ||
-      null,
+    loader,
 
     body: document.body || null,
     html: document.documentElement || null,
@@ -119,38 +279,189 @@ export function getShellElements(AppCore) {
 export function getViewContainer(AppCore) {
   if (!isBrowser()) return null;
 
-  return (
+  const el =
     AppCore?.dom?.viewContainer ||
     document.getElementById("view-container") ||
-    null
-  );
+    document.querySelector("[data-view-root]") ||
+    null;
+
+  try {
+    if (el && AppCore?.dom) {
+      AppCore.dom.viewContainer = el;
+    }
+  } catch {}
+
+  return el;
 }
 
 /* =========================================================
-   HELPERS
+   STATE HELPERS
+========================================================= */
+
+function getCoreState(AppCore) {
+  try {
+    return safeObject(AppCore?.state);
+  } catch {
+    return {};
+  }
+}
+
+function isBootingOrLoading(AppCore) {
+  const state = getCoreState(AppCore);
+
+  return Boolean(
+    state.booting ||
+      state.loading ||
+      state.appBooting ||
+      state.bootInProgress
+  );
+}
+
+function hasBodyBootClass() {
+  if (!isBrowser()) return false;
+
+  try {
+    return Boolean(
+      document.body?.classList?.contains("app-booting") ||
+        document.body?.classList?.contains("app-loading") ||
+        document.documentElement?.classList?.contains("app-booting") ||
+        document.documentElement?.classList?.contains("app-loading")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isLoaderVisible(AppCore) {
+  const { loader } = getShellElements(AppCore);
+
+  if (!loader) {
+    return false;
+  }
+
+  try {
+    return Boolean(
+      !loader.hidden &&
+        loader.getAttribute("aria-hidden") !== "true" &&
+        !loader.classList.contains("is-hidden") &&
+        !loader.classList.contains("has-hidden")
+    );
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   DOM MUTATORS
 ========================================================= */
 
 function applyHidden(el, hidden = false) {
   if (!el) return;
 
-  el.hidden = Boolean(hidden);
-  el.setAttribute(
+  const next = Boolean(hidden);
+
+  try {
+    el.hidden = next;
+  } catch {}
+
+  setAttribute(
+    el,
     "aria-hidden",
-    hidden ? "true" : "false"
+    next ? "true" : "false"
   );
 }
 
-function toggleClass(el, name, force) {
+function applyBusy(el, busy = false) {
   if (!el) return;
 
-  try {
-    el.classList.toggle(name, force);
-  } catch {}
+  const next = Boolean(busy);
+
+  setAttribute(
+    el,
+    "aria-busy",
+    next ? "true" : "false"
+  );
+}
+
+function setAppShellBusy(AppCore, busy = false) {
+  const {
+    appShell,
+    mainContent,
+    viewContainer,
+  } = getShellElements(AppCore);
+
+  applyBusy(appShell, busy);
+  applyBusy(mainContent, busy);
+  applyBusy(viewContainer, busy);
+
+  return Boolean(busy);
+}
+
+function markShellDomState(AppCore, {
+  shellVisible = true,
+  authLike = false,
+  busy = false,
+} = {}) {
+  const {
+    appShell,
+    mainContent,
+    appContent,
+    viewContainer,
+    body,
+    html,
+  } = getShellElements(AppCore);
+
+  const visible = Boolean(shellVisible);
+  const isAuth = Boolean(authLike);
+  const isBusy = Boolean(busy);
+
+  /*
+    Importante:
+    app-shell NO se oculta aquí para auth routes.
+    Solo se ocultan sidebar/topbar. Login/reset necesitan main visible.
+    Durante boot lo oculta CSS con app-booting/app-loading.
+  */
+
+  toggleClass(body, "route-auth", isAuth);
+  toggleClass(body, "route-app", !isAuth);
+  toggleClass(html, "route-auth", isAuth);
+  toggleClass(html, "route-app", !isAuth);
+
+  toggleClass(body, "route-shell-hidden", !visible);
+  toggleClass(body, "route-shell-visible", visible);
+
+  toggleClass(html, "route-shell-hidden", !visible);
+  toggleClass(html, "route-shell-visible", visible);
+
+  setDataset(body, "shell", visible ? "visible" : "hidden");
+  setDataset(html, "shell", visible ? "visible" : "hidden");
+
+  setDataset(body, "routeMode", isAuth ? "auth" : "app");
+  setDataset(html, "routeMode", isAuth ? "auth" : "app");
+
+  setDataset(appShell, "shell", visible ? "visible" : "hidden");
+  setDataset(appShell, "routeMode", isAuth ? "auth" : "app");
+
+  setDataset(mainContent, "routeMode", isAuth ? "auth" : "app");
+  setDataset(appContent, "routeMode", isAuth ? "auth" : "app");
+  setDataset(viewContainer, "routeMode", isAuth ? "auth" : "app");
+
+  setAppShellBusy(AppCore, isBusy);
+
+  return {
+    visible,
+    authLike: isAuth,
+    busy: isBusy,
+  };
 }
 
 function readShellVisibility(AppCore) {
-  const { body, html, sidebar, topbar } =
-    getShellElements(AppCore);
+  const {
+    body,
+    html,
+    sidebar,
+    topbar,
+  } = getShellElements(AppCore);
 
   if (typeof AppCore?.state?.shellVisible === "boolean") {
     return AppCore.state.shellVisible;
@@ -164,7 +475,10 @@ function readShellVisibility(AppCore) {
   if (htmlShell === "visible") return true;
   if (htmlShell === "hidden") return false;
 
-  if (body?.classList?.contains("route-shell-hidden")) {
+  if (
+    body?.classList?.contains("route-shell-hidden") ||
+    html?.classList?.contains("route-shell-hidden")
+  ) {
     return false;
   }
 
@@ -184,49 +498,68 @@ export function setShellVisibility(
   visible = true,
   options = {}
 ) {
+  const opts = safeObject(options);
+
   const nextVisible = Boolean(visible);
-  const force = Boolean(options?.force);
-  const emit = options?.emit !== false;
+  const force = Boolean(opts.force);
+  const emit = opts.emit !== false;
 
   const prevVisible = readShellVisibility(AppCore);
-
-  if (!force && prevVisible === nextVisible) {
-    try {
-      AppCore.state.shellVisible = nextVisible;
-    } catch {}
-
-    return nextVisible;
-  }
-
-  const hidden = !nextVisible;
 
   const {
     sidebar,
     topbar,
     tablehead,
     tableheadContainer,
-    body,
-    html,
   } = getShellElements(AppCore);
 
+  const hidden = !nextVisible;
+  const authLike = Boolean(opts.authLike);
+
+  const busy =
+    opts.busy !== undefined
+      ? Boolean(opts.busy)
+      : isBootingOrLoading(AppCore);
+
+  if (!force && prevVisible === nextVisible) {
+    try {
+      AppCore.state.shellVisible = nextVisible;
+    } catch {}
+
+    markShellDomState(AppCore, {
+      shellVisible: nextVisible,
+      authLike,
+      busy,
+    });
+
+    return nextVisible;
+  }
+
+  /*
+    Solo ocultamos cromado de shell:
+    - sidebar
+    - topbar
+    - tablehead
+
+    No ocultamos #app-shell completo porque contiene login/reset.
+  */
   applyHidden(sidebar, hidden);
   applyHidden(topbar, hidden);
   applyHidden(tablehead, hidden);
 
-  /* el container no necesita hidden duro,
-     pero sí aria coherente si existe */
   if (tableheadContainer) {
-    tableheadContainer.setAttribute(
+    setAttribute(
+      tableheadContainer,
       "aria-hidden",
       hidden ? "true" : "false"
     );
   }
 
-  toggleClass(body, "route-shell-hidden", hidden);
-  toggleClass(body, "route-shell-visible", !hidden);
-
-  setDataset(body, "shell", hidden ? "hidden" : "visible");
-  setDataset(html, "shell", hidden ? "hidden" : "visible");
+  markShellDomState(AppCore, {
+    shellVisible: nextVisible,
+    authLike,
+    busy,
+  });
 
   try {
     AppCore.state.shellVisible = nextVisible;
@@ -251,15 +584,21 @@ export function setShellVisibility(
 ========================================================= */
 
 export function isLoginPath(AppCore, path = "") {
-  const p = normalizePath(AppCore, path);
-  return p === "/login" || p.startsWith("/login?");
+  const p = pathnameOnly(AppCore, path);
+
+  return (
+    p === "/login" ||
+    p === "/signin" ||
+    p === "/sign-in"
+  );
 }
 
 export function isResetPasswordPath(AppCore, path = "") {
-  const p = normalizePath(AppCore, path);
+  const p = pathnameOnly(AppCore, path);
+
   return (
     p === "/reset-password" ||
-    p.startsWith("/reset-password?")
+    p === "/forgot-password"
   );
 }
 
@@ -267,11 +606,23 @@ export function isResetPasswordConfirmPath(
   AppCore,
   path = ""
 ) {
-  const p = normalizePath(AppCore, path);
+  const p = pathnameOnly(AppCore, path);
 
   return (
     p === "/reset-password/confirm" ||
-    p.startsWith("/reset-password/confirm?")
+    p.startsWith("/reset-password/confirm/")
+  );
+}
+
+export function isActivateAccountPath(
+  AppCore,
+  path = ""
+) {
+  const p = pathnameOnly(AppCore, path);
+
+  return (
+    p === "/activate-account" ||
+    p.startsWith("/activate-account/")
   );
 }
 
@@ -290,7 +641,8 @@ export function isAuthLikeRoute(AppCore, Router) {
     (path) =>
       isLoginPath(AppCore, path) ||
       isResetPasswordPath(AppCore, path) ||
-      isResetPasswordConfirmPath(AppCore, path)
+      isResetPasswordConfirmPath(AppCore, path) ||
+      isActivateAccountPath(AppCore, path)
   );
 }
 
@@ -304,7 +656,10 @@ export function updateShellVisibilityByRoute(
   return setShellVisibility(
     AppCore,
     !authLike,
-    options
+    {
+      ...safeObject(options),
+      authLike,
+    }
   );
 }
 
@@ -312,25 +667,66 @@ export function updateShellVisibilityByRoute(
    LOADER
 ========================================================= */
 
-function hideLoaderSafe(AppCore, hideLoader) {
+function hideLoaderSafe(AppCore, hideLoader, options = {}) {
+  const opts = safeObject(options);
+
+  /*
+    Regla anti-flicker:
+    Durante boot/loading real NO escondemos loader desde shell.js
+    salvo force explícito.
+
+    El loader global debe ocultarse en finalizeBoot().
+  */
+  const bootBusy =
+    isBootingOrLoading(AppCore) ||
+    hasBodyBootClass();
+
+  if (bootBusy && opts.force !== true) {
+    return false;
+  }
+
   try {
     if (typeof hideLoader === "function") {
-      hideLoader(AppCore);
+      hideLoader(AppCore, {
+        reason:
+          opts.reason ||
+          "shell-post-render",
+        minVisibleMs:
+          opts.minVisibleMs,
+      });
+
       return true;
     }
   } catch {}
 
-  const loader =
-    AppCore?.dom?.loader ||
-    document.getElementById("app-loader");
+  const { loader } = getShellElements(AppCore);
 
   if (!loader) return false;
 
-  loader.hidden = true;
-  loader.classList.add("is-hidden");
-  loader.setAttribute("aria-hidden", "true");
+  try {
+    loader.hidden = true;
 
-  return true;
+    loader.classList.add(
+      "is-hidden",
+      "has-hidden"
+    );
+
+    loader.classList.remove(
+      "is-visible",
+      "is-leaving"
+    );
+
+    loader.setAttribute(
+      "aria-hidden",
+      "true"
+    );
+
+    loader.dataset.loaderVisible = "false";
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -341,6 +737,9 @@ export function applyPostRenderLoaderPolicy({
   AppCore,
   Router,
   hideLoader,
+  forceHideLoader = false,
+  hideLoaderOnPostRender = true,
+  minVisibleMs = undefined,
 } = {}) {
   const view = getViewContainer(AppCore);
 
@@ -352,13 +751,47 @@ export function applyPostRenderLoaderPolicy({
 
   const shellVisible = updateShellVisibilityByRoute(
     AppCore,
-    Router
+    Router,
+    {
+      authLike,
+      busy:
+        !hasViewContent ||
+        isBootingOrLoading(AppCore),
+    }
   );
 
+  /*
+    Solo se intenta ocultar loader si:
+    - hay contenido o ruta auth;
+    - el caller no lo desactiva;
+    - no estamos en boot/loading, salvo force.
+
+    Esto evita que router/post-render mate el loader antes
+    de que App.finalizeBoot() haya reparado UI y emitido app:ready.
+  */
+  const shouldConsiderHide =
+    hideLoaderOnPostRender !== false &&
+    (authLike || hasViewContent);
+
   const loaderHidden =
-    authLike || hasViewContent
-      ? hideLoaderSafe(AppCore, hideLoader)
+    shouldConsiderHide
+      ? hideLoaderSafe(
+          AppCore,
+          hideLoader,
+          {
+            force: forceHideLoader,
+            reason: "post-render",
+            minVisibleMs,
+          }
+        )
       : false;
+
+  if (hasViewContent) {
+    setAppShellBusy(
+      AppCore,
+      isBootingOrLoading(AppCore)
+    );
+  }
 
   const shellSnapshot = getShellSnapshot(
     AppCore,
@@ -370,10 +803,67 @@ export function applyPostRenderLoaderPolicy({
     hasViewContent,
     shellVisible,
     loaderHidden,
+    loaderVisible:
+      isLoaderVisible(AppCore),
+    bootBusy:
+      isBootingOrLoading(AppCore) ||
+      hasBodyBootClass(),
     snapshot: shellSnapshot,
   });
 
   return shellSnapshot;
+}
+
+/* =========================================================
+   APP READY / BUSY HELPERS
+========================================================= */
+
+export function markShellReady(AppCore, options = {}) {
+  const opts = safeObject(options);
+
+  const authLike =
+    opts.authLike !== undefined
+      ? Boolean(opts.authLike)
+      : false;
+
+  setAppShellBusy(AppCore, false);
+
+  markShellDomState(AppCore, {
+    shellVisible:
+      opts.shellVisible !== undefined
+        ? Boolean(opts.shellVisible)
+        : readShellVisibility(AppCore),
+    authLike,
+    busy: false,
+  });
+
+  safeEmit(AppCore, "app:shell:ready", {
+    snapshot: getShellSnapshot(AppCore),
+  });
+
+  return true;
+}
+
+export function markShellBusy(AppCore, options = {}) {
+  const opts = safeObject(options);
+
+  setAppShellBusy(AppCore, true);
+
+  markShellDomState(AppCore, {
+    shellVisible:
+      opts.shellVisible !== undefined
+        ? Boolean(opts.shellVisible)
+        : readShellVisibility(AppCore),
+    authLike:
+      Boolean(opts.authLike),
+    busy: true,
+  });
+
+  safeEmit(AppCore, "app:shell:busy", {
+    snapshot: getShellSnapshot(AppCore),
+  });
+
+  return true;
 }
 
 /* =========================================================
@@ -384,15 +874,41 @@ export function getShellSnapshot(
   AppCore,
   Router = null
 ) {
-  const view = getViewContainer(AppCore);
+  const {
+    appShell,
+    mainContent,
+    appContent,
+    viewContainer,
+    sidebar,
+    topbar,
+    tablehead,
+    tableheadContainer,
+    loader,
+    body,
+    html,
+  } = getShellElements(AppCore);
+
+  const state = getCoreState(AppCore);
+
+  let bodyClasses = [];
+  let htmlClasses = [];
+
+  try {
+    bodyClasses =
+      Array.from(body?.classList || []);
+  } catch {}
+
+  try {
+    htmlClasses =
+      Array.from(html?.classList || []);
+  } catch {}
 
   return {
-    shellVisible: readShellVisibility(AppCore),
+    shellVisible:
+      readShellVisibility(AppCore),
 
-    authLike: isAuthLikeRoute(
-      AppCore,
-      Router
-    ),
+    authLike:
+      isAuthLikeRoute(AppCore, Router),
 
     canonical:
       getCurrentCanonicalPath(AppCore, Router),
@@ -400,11 +916,85 @@ export function getShellSnapshot(
     publicPath:
       getCurrentPublicPath(AppCore),
 
-    hasView: Boolean(view),
+    booting:
+      Boolean(state.booting),
 
-    hasViewContent: Boolean(
-      safeText(view?.innerHTML, "").trim()
-    ),
+    loading:
+      Boolean(state.loading),
+
+    bodyBootClass:
+      hasBodyBootClass(),
+
+    loaderVisible:
+      isLoaderVisible(AppCore),
+
+    appShellExists:
+      Boolean(appShell),
+
+    appShellHidden:
+      Boolean(appShell?.hidden),
+
+    appShellBusy:
+      safeText(
+        appShell?.getAttribute?.("aria-busy"),
+        ""
+      ),
+
+    mainContentExists:
+      Boolean(mainContent),
+
+    appContentExists:
+      Boolean(appContent),
+
+    hasView:
+      Boolean(viewContainer),
+
+    hasViewContent:
+      Boolean(
+        safeText(viewContainer?.innerHTML, "").trim()
+      ),
+
+    sidebarExists:
+      Boolean(sidebar),
+
+    sidebarHidden:
+      Boolean(sidebar?.hidden),
+
+    topbarExists:
+      Boolean(topbar),
+
+    topbarHidden:
+      Boolean(topbar?.hidden),
+
+    tableheadExists:
+      Boolean(tablehead),
+
+    tableheadHidden:
+      Boolean(tablehead?.hidden),
+
+    tableheadContainerExists:
+      Boolean(tableheadContainer),
+
+    loaderExists:
+      Boolean(loader),
+
+    loaderHidden:
+      Boolean(loader?.hidden),
+
+    bodyShell:
+      safeText(body?.dataset?.shell, ""),
+
+    htmlShell:
+      safeText(html?.dataset?.shell, ""),
+
+    bodyRouteMode:
+      safeText(body?.dataset?.routeMode, ""),
+
+    htmlRouteMode:
+      safeText(html?.dataset?.routeMode, ""),
+
+    bodyClasses,
+    htmlClasses,
   };
 }
 
@@ -415,12 +1005,20 @@ export function getShellSnapshot(
 export default {
   getShellElements,
   getViewContainer,
+
   setShellVisibility,
+
   isLoginPath,
   isResetPasswordPath,
   isResetPasswordConfirmPath,
+  isActivateAccountPath,
   isAuthLikeRoute,
+
   updateShellVisibilityByRoute,
   applyPostRenderLoaderPolicy,
+
+  markShellReady,
+  markShellBusy,
+
   getShellSnapshot,
 };

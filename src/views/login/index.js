@@ -7,12 +7,21 @@
    - renderizar template auth pro
    - conectar dom, auth, core y toast
    - gestionar submit y feedback visual
-   - sincronizar sesión y redirigir
+   - delegar sesión/navegación principal en Auth.login
+   - evitar doble navegación post-login
+   - evitar doble sync de sesión post-login
+   - reducir parpadeos al salir de /login
    - activar / limpiar modo auth-screen del body
    - mantener cleanup de listeners
    - exponer compatibilidad default + named export
    - soportar login con usuario o email
    - conectar password-field compartido para eye / caps lock
+
+   FIX CRÍTICO:
+   - Auth.login ya aplica sesión y navega.
+   - Esta vista NO debe volver a llamar navigateTo() cuando usa Auth.login.
+   - Esta vista NO debe volver a llamar syncSession() cuando usa Auth.login.
+   - El auth-screen se limpia en destroy / evento de ruta, no antes de navegar.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -55,10 +64,28 @@ import {
    HELPERS
 ========================================================= */
 
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
+
+function safeObject(value) {
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? value
+    : {};
+}
+
 function resolveToastApi(deps = {}) {
   const customToast = deps.toast;
 
-  if (customToast && typeof customToast === "object") {
+  if (
+    customToast &&
+    typeof customToast === "object"
+  ) {
     return customToast;
   }
 
@@ -84,6 +111,14 @@ function resolveLoginExecutor(deps = {}) {
   return null;
 }
 
+function isAuthLoginExecutor(executor) {
+  return (
+    typeof executor === "function" &&
+    typeof Auth?.login === "function" &&
+    executor === Auth.login
+  );
+}
+
 function resolveAppName() {
   return (
     safeText(
@@ -103,32 +138,56 @@ function resolveForgotPasswordHref(deps = {}) {
 }
 
 function navigateTo(path = "/") {
-  const finalPath = safeText(path, "/") || "/";
+  const finalPath =
+    safeText(path, "/") || "/";
 
   try {
-    if (typeof AppCore?.navigate === "function") {
+    if (
+      typeof AppCore?.Router?.navigate === "function"
+    ) {
+      AppCore.Router.navigate(
+        finalPath,
+        {
+          replaceState: true,
+          force: false,
+        }
+      );
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (
+      typeof AppCore?.router?.navigate === "function"
+    ) {
+      AppCore.router.navigate(
+        finalPath,
+        {
+          replaceState: true,
+          force: false,
+        }
+      );
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (
+      typeof AppCore?.navigate === "function"
+    ) {
       AppCore.navigate(finalPath);
-      return;
+      return true;
     }
   } catch {}
 
   try {
-    if (typeof AppCore?.router?.navigate === "function") {
-      AppCore.router.navigate(finalPath);
-      return;
+    if (isBrowser()) {
+      window.location.assign(finalPath);
+      return true;
     }
   } catch {}
 
-  try {
-    if (typeof AppCore?.Router?.navigate === "function") {
-      AppCore.Router.navigate(finalPath);
-      return;
-    }
-  } catch {}
-
-  try {
-    window.location.assign(finalPath);
-  } catch {}
+  return false;
 }
 
 function toggleTheme() {
@@ -161,7 +220,9 @@ function toggleTheme() {
 
 function safeToastCall(toast, method, ...args) {
   try {
-    if (typeof toast?.[method] === "function") {
+    if (
+      typeof toast?.[method] === "function"
+    ) {
       return toast[method](...args);
     }
   } catch {}
@@ -171,38 +232,73 @@ function safeToastCall(toast, method, ...args) {
 
 function safeLog(...args) {
   try {
-    AppCore?.utils?.log?.("[LoginView]", ...args);
+    AppCore?.utils?.log?.(
+      "[LoginView]",
+      ...args
+    );
   } catch {}
 }
 
 function safeWarn(...args) {
   try {
-    AppCore?.utils?.warn?.("[LoginView]", ...args);
+    AppCore?.utils?.warn?.(
+      "[LoginView]",
+      ...args
+    );
+  } catch {}
+}
+
+function safeError(...args) {
+  try {
+    AppCore?.utils?.error?.(
+      "[LoginView]",
+      ...args
+    );
+  } catch {}
+
+  try {
+    console.error(
+      "[LoginView]",
+      ...args
+    );
   } catch {}
 }
 
 function emitRouteRendered() {
   try {
-    AppCore?.events?.emit?.("app:route:rendered", {
-      route: "/login",
-      view: "login",
-    });
+    AppCore?.events?.emit?.(
+      "app:route:rendered",
+      {
+        route: "/login",
+        view: "login",
+      }
+    );
   } catch {}
 }
 
 function enableAuthScreenMode() {
+  if (!isBrowser()) {
+    return;
+  }
+
   try {
     document.body.classList.add("auth-screen");
     document.body.classList.add("login-no-scroll");
     document.body.classList.add("route-auth");
+    document.body.classList.add("route-shell-hidden");
   } catch {}
 }
 
 function disableAuthScreenMode() {
+  if (!isBrowser()) {
+    return;
+  }
+
   try {
     document.body.classList.remove("auth-screen");
     document.body.classList.remove("login-no-scroll");
     document.body.classList.remove("route-auth");
+    document.body.classList.remove("route-shell-hidden");
   } catch {}
 }
 
@@ -216,18 +312,159 @@ function safeUnbind(unbind) {
 
 function bindSharedPasswordFields(container = document) {
   try {
-    const bindings = bindPasswordFieldsInScope(container);
+    const bindings =
+      bindPasswordFieldsInScope(container);
 
     safeLog(
       "password fields bound:",
-      Array.isArray(bindings) ? bindings.length : 0
+      Array.isArray(bindings)
+        ? bindings.length
+        : 0
     );
 
     return bindings;
   } catch (error) {
-    safeWarn("password-field bind error", error);
+    safeWarn(
+      "password-field bind error",
+      error
+    );
+
     return [];
   }
+}
+
+function onAppEventOnce(eventName, handler) {
+  let done = false;
+
+  const wrapped = (...args) => {
+    if (done) {
+      return;
+    }
+
+    done = true;
+
+    try {
+      off?.();
+    } catch {}
+
+    handler(...args);
+  };
+
+  let off = null;
+
+  try {
+    if (
+      typeof AppCore?.events?.once === "function"
+    ) {
+      AppCore.events.once(
+        eventName,
+        wrapped
+      );
+
+      off = () => {};
+      return off;
+    }
+  } catch {}
+
+  try {
+    if (
+      typeof AppCore?.events?.on === "function" &&
+      typeof AppCore?.events?.off === "function"
+    ) {
+      AppCore.events.on(
+        eventName,
+        wrapped
+      );
+
+      off = () => {
+        try {
+          AppCore.events.off(
+            eventName,
+            wrapped
+          );
+        } catch {}
+      };
+
+      return off;
+    }
+  } catch {}
+
+  return () => {};
+}
+
+function scheduleAuthScreenCleanupAfterNavigation() {
+  if (!isBrowser()) {
+    return () => {};
+  }
+
+  let cleared = false;
+  let timerId = null;
+
+  const cleanup = () => {
+    if (cleared) {
+      return;
+    }
+
+    cleared = true;
+
+    try {
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
+    } catch {}
+
+    disableAuthScreenMode();
+  };
+
+  const offRouterRendered =
+    onAppEventOnce(
+      "router:rendered",
+      cleanup
+    );
+
+  const offAppRendered =
+    onAppEventOnce(
+      "app:route:rendered",
+      cleanup
+    );
+
+  try {
+    timerId = window.setTimeout(
+      cleanup,
+      1200
+    );
+  } catch {}
+
+  return () => {
+    try {
+      offRouterRendered?.();
+    } catch {}
+
+    try {
+      offAppRendered?.();
+    } catch {}
+
+    cleanup();
+  };
+}
+
+function isAuthenticatedResult(auth = {}) {
+  return (
+    auth?.ok !== false &&
+    (
+      auth?.status === "authenticated" ||
+      auth?.success === true ||
+      auth?.token ||
+      auth?.user
+    )
+  );
+}
+
+function isTwoFaResult(auth = {}) {
+  return (
+    auth?.requires2FA === true ||
+    auth?.status === "2fa_required"
+  );
 }
 
 /* =========================================================
@@ -236,21 +473,34 @@ function bindSharedPasswordFields(container = document) {
 
 function renderLoginView(container, deps = {}) {
   if (!container) {
-    throw new Error("[LoginView] container es obligatorio.");
+    throw new Error(
+      "[LoginView] container es obligatorio."
+    );
   }
+
+  let mounted = true;
+  let isSubmitting = false;
+  let isLeavingLogin = false;
+  let cleanupAfterNavigation = null;
 
   enableAuthScreenMode();
 
-  const rememberedIdentifier = loadRememberedIdentifier();
-  const appName = resolveAppName();
-  const forgotPasswordHref = resolveForgotPasswordHref(deps);
+  const rememberedIdentifier =
+    loadRememberedIdentifier();
 
-  container.innerHTML = getLoginTemplate({
-    appName,
-    identifier: rememberedIdentifier,
-    forgotPasswordHref,
-    ...deps,
-  });
+  const appName =
+    resolveAppName();
+
+  const forgotPasswordHref =
+    resolveForgotPasswordHref(deps);
+
+  container.innerHTML =
+    getLoginTemplate({
+      appName,
+      identifier: rememberedIdentifier,
+      forgotPasswordHref,
+      ...deps,
+    });
 
   /*
     CRÍTICO:
@@ -260,21 +510,43 @@ function renderLoginView(container, deps = {}) {
   */
   bindSharedPasswordFields(container);
 
-  const refs = getLoginRefs(container);
-  const toast = resolveToastApi(deps);
-  const executeLogin = resolveLoginExecutor(deps);
+  const refs =
+    getLoginRefs(container);
 
-  safeToastCall(toast, "init");
+  const toast =
+    resolveToastApi(deps);
+
+  const executeLogin =
+    resolveLoginExecutor(deps);
+
+  const executorIsAuthLogin =
+    isAuthLoginExecutor(executeLogin);
+
+  safeToastCall(
+    toast,
+    "init"
+  );
 
   if (!executeLogin) {
-    const message = "No se encontró un executor de login.";
+    const message =
+      "No se encontró un executor de login.";
 
-    setGlobalLoginError(refs, message);
-    safeToastCall(toast, "error", message);
+    setGlobalLoginError(
+      refs,
+      message
+    );
+
+    safeToastCall(
+      toast,
+      "error",
+      message
+    );
+
     emitRouteRendered();
 
     return {
       destroy() {
+        mounted = false;
         disableAuthScreenMode();
       },
     };
@@ -297,7 +569,8 @@ function renderLoginView(container, deps = {}) {
   };
 
   const onThemeToggle = () => {
-    const next = toggleTheme();
+    const next =
+      toggleTheme();
 
     safeToastCall(
       toast,
@@ -309,67 +582,197 @@ function renderLoginView(container, deps = {}) {
   const onSubmit = async (event) => {
     event.preventDefault();
 
+    if (
+      isSubmitting ||
+      isLeavingLogin
+    ) {
+      return;
+    }
+
     clearLoginErrors(refs);
 
-    const formState = readLoginFormState(refs);
-    const payload = createLoginPayload(formState);
-    const errors = validateLoginPayload(payload);
+    const formState =
+      readLoginFormState(refs);
 
-    if (Object.keys(errors).length > 0) {
-      applyLoginErrors(refs, errors);
+    const payload =
+      createLoginPayload(formState);
+
+    const errors =
+      validateLoginPayload(payload);
+
+    if (
+      Object.keys(errors).length > 0
+    ) {
+      applyLoginErrors(
+        refs,
+        errors
+      );
 
       safeToastCall(
         toast,
         "error",
-        getFirstLoginError(errors) || "Revisa el formulario."
+        getFirstLoginError(errors) ||
+          "Revisa el formulario."
       );
 
       return;
     }
 
-    persistRememberedIdentifier(payload);
+    persistRememberedIdentifier(
+      payload
+    );
 
     let loadingToastId = null;
 
     try {
-      setLoginLoading(refs, true, {
-        submitLabel,
-        loadingLabel,
-      });
+      isSubmitting = true;
 
-      loadingToastId = safeToastCall(
-        toast,
-        "loading",
-        "Validando credenciales...",
+      setLoginLoading(
+        refs,
+        true,
         {
-          persist: true,
+          submitLabel,
+          loadingLabel,
         }
       );
 
-      const rawResult = await executeLogin(payload);
-      const auth = normalizeAuthResult(rawResult);
+      loadingToastId =
+        safeToastCall(
+          toast,
+          "loading",
+          "Validando credenciales...",
+          {
+            persist: true,
+          }
+        );
 
-      syncSession(auth);
+      /*
+        Importante:
+        - Si executor es Auth.login, él aplica sesión y navega.
+        - Le pasamos navigate=true explícito.
+        - La vista NO vuelve a syncSession ni navigateTo.
+      */
+      const rawResult =
+        await executeLogin(
+          payload,
+          {
+            navigate:
+              deps.navigate !== false,
 
-      safeToastCall(toast, "dismiss", loadingToastId);
+            redirectTo:
+              deps.redirectTo,
+
+            redirect:
+              deps.redirect,
+
+            target:
+              deps.target,
+          }
+        );
+
+      const auth =
+        normalizeAuthResult(
+          rawResult
+        );
+
+      if (!mounted) {
+        return;
+      }
+
+      safeToastCall(
+        toast,
+        "dismiss",
+        loadingToastId
+      );
+
+      if (
+        isTwoFaResult(auth)
+      ) {
+        safeToastCall(
+          toast,
+          "success",
+          auth.message ||
+            "Verificación adicional requerida."
+        );
+
+        /*
+          Auth.login ya navega a /2fa.
+          Si el executor es custom, hacemos fallback manual.
+        */
+        if (!executorIsAuthLogin) {
+          const redirectTo =
+            resolveLoginRedirect(
+              auth,
+              deps
+            );
+
+          isLeavingLogin = true;
+          cleanupAfterNavigation =
+            scheduleAuthScreenCleanupAfterNavigation();
+
+          navigateTo(redirectTo);
+        } else {
+          isLeavingLogin = true;
+          cleanupAfterNavigation =
+            scheduleAuthScreenCleanupAfterNavigation();
+        }
+
+        return;
+      }
+
+      if (
+        !isAuthenticatedResult(auth)
+      ) {
+        throw rawResult;
+      }
+
+      /*
+        Solo para executors custom.
+        Auth.login ya hizo applySession().
+      */
+      if (!executorIsAuthLogin) {
+        syncSession(auth);
+      }
 
       safeToastCall(
         toast,
         "success",
-        auth.message || "Sesión iniciada correctamente."
+        auth.message ||
+          "Sesión iniciada correctamente."
       );
 
-      disableAuthScreenMode();
+      isLeavingLogin = true;
 
-      const redirectTo = resolveLoginRedirect(auth, deps);
+      cleanupAfterNavigation =
+        scheduleAuthScreenCleanupAfterNavigation();
 
-      navigateTo(redirectTo);
+      /*
+        Solo para executors custom.
+        Auth.login ya hizo safeNavigate(redirectTo).
+      */
+      if (!executorIsAuthLogin) {
+        const redirectTo =
+          resolveLoginRedirect(
+            auth,
+            deps
+          );
+
+        navigateTo(redirectTo);
+      }
     } catch (error) {
-      safeToastCall(toast, "dismiss", loadingToastId);
+      safeToastCall(
+        toast,
+        "dismiss",
+        loadingToastId
+      );
 
-      const message = resolveAuthErrorMessage(error);
+      const message =
+        resolveAuthErrorMessage(error);
 
-      setGlobalLoginError(refs, message);
+      setGlobalLoginError(
+        refs,
+        message
+      );
 
       safeToastCall(
         toast,
@@ -378,49 +781,77 @@ function renderLoginView(container, deps = {}) {
       );
 
       try {
-        AppCore?.events?.emit?.("auth:login:error", {
-          message,
-          error,
-        });
+        AppCore?.events?.emit?.(
+          "auth:login:error",
+          {
+            message,
+            error,
+          }
+        );
       } catch {}
 
-      try {
-        AppCore?.utils?.error?.("[LoginView] login error", error);
-      } catch {}
+      safeError(
+        "login error",
+        error
+      );
     } finally {
-      setLoginLoading(refs, false, {
-        submitLabel,
-        loadingLabel,
-      });
+      if (!isLeavingLogin) {
+        isSubmitting = false;
+
+        if (mounted) {
+          setLoginLoading(
+            refs,
+            false,
+            {
+              submitLabel,
+              loadingLabel,
+            }
+          );
+        }
+      }
     }
   };
 
-  const unbindInputs = bindLoginInputClearers(
-    refs,
-    onClearErrors
-  );
+  const unbindInputs =
+    bindLoginInputClearers(
+      refs,
+      onClearErrors
+    );
 
-  const unbindTheme = bindThemeToggle(
-    refs,
-    onThemeToggle
-  );
+  const unbindTheme =
+    bindThemeToggle(
+      refs,
+      onThemeToggle
+    );
 
-  const unbindSubmit = bindLoginSubmit(
-    refs,
-    onSubmit
-  );
+  const unbindSubmit =
+    bindLoginSubmit(
+      refs,
+      onSubmit
+    );
 
-  focusLoginPrimaryField(refs, {
-    rememberedIdentifier,
-  });
+  focusLoginPrimaryField(
+    refs,
+    {
+      rememberedIdentifier,
+    }
+  );
 
   emitRouteRendered();
 
   return {
     destroy() {
+      mounted = false;
+      isSubmitting = false;
+      isLeavingLogin = false;
+
       safeUnbind(unbindInputs);
       safeUnbind(unbindTheme);
       safeUnbind(unbindSubmit);
+
+      try {
+        cleanupAfterNavigation?.();
+      } catch {}
 
       disableAuthScreenMode();
     },

@@ -7,18 +7,20 @@
 <head>
   <!-- =========================================================
        ONION SUPPORT — INDEX / SPA SHELL
-       PRO SAAS PANEL · BOOT LOADER READY · CSP CLEAN
+       PRO SAAS PANEL · BOOT LOADER READY · CSP CLEAN · FINAL
 
        OBJETIVOS:
        - CSP clean
        - cero scripts inline
        - cero CSS inline
        - loader estático inicial para refresh sin parpadeos
+       - logo del loader dependiente del tema
+       - dark theme  -> favicon_white.png
+       - light theme -> favicon_black.png
        - theme preboot externo
        - shell SPA limpio
        - sidebar / topbar montados por JS
-       - preparado para dark / light
-       - preparado para sesión restaurada sin flash visual
+       - sesión restaurada sin flash visual
        - base sólida enterprise
   ========================================================= -->
 
@@ -73,16 +75,26 @@
 
   <!-- =========================
        ICONS
+       dark  -> white icon
+       light -> black icon
   ========================= -->
   <link
     rel="icon"
-    href="/favicon.ico"
-    sizes="any"
+    href="/src/media/img/favicon_white.png"
+    type="image/png"
+    media="(prefers-color-scheme: dark)"
+  >
+
+  <link
+    rel="icon"
+    href="/src/media/img/favicon_black.png"
+    type="image/png"
+    media="(prefers-color-scheme: light)"
   >
 
   <link
     rel="shortcut icon"
-    href="/favicon.ico"
+    href="/src/media/img/Logo_Intro.ico"
   >
 
   <!-- =========================
@@ -101,9 +113,16 @@
 
   <link
     rel="preload"
-    href="/assets/logo.svg"
+    href="/src/media/img/favicon_white.png"
     as="image"
-    type="image/svg+xml"
+    type="image/png"
+  >
+
+  <link
+    rel="preload"
+    href="/src/media/img/favicon_black.png"
+    as="image"
+    type="image/png"
   >
 
   <!-- =========================
@@ -207,6 +226,7 @@
        - Visible desde refresh antes de que cargue JS
        - Controlado después por src/app/loader.js
        - No usa inline script ni inline style
+       - Logo dependiente de html[data-theme]
   ========================================================= -->
   <div
     id="app-loader"
@@ -230,11 +250,24 @@
         aria-hidden="true"
       >
         <img
-          class="app-loader__logo"
-          src="/assets/logo.svg"
+          class="app-loader__logo app-loader__logo--dark"
+          src="/src/media/img/favicon_white.png"
           alt=""
           width="64"
           height="64"
+          loading="eager"
+          decoding="async"
+          fetchpriority="high"
+          draggable="false"
+        >
+
+        <img
+          class="app-loader__logo app-loader__logo--light"
+          src="/src/media/img/favicon_black.png"
+          alt=""
+          width="64"
+          height="64"
+          loading="eager"
           decoding="async"
           fetchpriority="high"
           draggable="false"

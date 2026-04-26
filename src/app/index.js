@@ -21,6 +21,7 @@
    - renderizar rutas públicas con token antes de restoreSession
    - no permitir que restore/auth/history limpien el token antes de la vista
    - si restoreSession navega post-login, NO ejecutar renderInitialRoute() otra vez
+   - bindRouter() ocurre después del primer render/navegación resuelta
 
    FIX UI LIFECYCLE:
    - repara/rebindea SidebarUI y TopbarUI después de restore
@@ -85,6 +86,7 @@ import {
 
 import {
   configureRouter,
+  bindRouter,
   renderInitialRoute,
 } from "./router.js";
 
@@ -163,7 +165,8 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value).trim();
 
   return text || fallback;
 }
@@ -174,6 +177,10 @@ function safeObject(value) {
     !Array.isArray(value)
     ? value
     : {};
+}
+
+function isFunction(value) {
+  return typeof value === "function";
 }
 
 function getBaseOrigin() {
@@ -188,7 +195,8 @@ function getBaseOrigin() {
 }
 
 function isHashRouterPath(value = "") {
-  const raw = String(value || "").trim();
+  const raw =
+    String(value || "").trim();
 
   return (
     raw.startsWith("#/") ||
@@ -197,7 +205,8 @@ function isHashRouterPath(value = "") {
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw = String(value || "").trim();
+  const raw =
+    String(value || "").trim();
 
   if (!raw) {
     return "/";
@@ -211,10 +220,11 @@ function normalizeHashRouterPath(value = "") {
 }
 
 function normalizePathnameOnly(pathname = "/") {
-  let value = String(pathname || "/")
-    .trim()
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
+  let value =
+    String(pathname || "/")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
 
   if (!value) {
     value = "/";
@@ -237,7 +247,8 @@ function normalizePathnameOnly(pathname = "/") {
 }
 
 function stripSearchAndHash(path = "/") {
-  const raw = safeText(path, "/");
+  const raw =
+    safeText(path, "/");
 
   return normalizePathnameOnly(
     raw.split("?")[0].split("#")[0] || "/"
@@ -245,7 +256,8 @@ function stripSearchAndHash(path = "/") {
 }
 
 function pathFromUrlLike(value = "") {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return "";
@@ -256,7 +268,8 @@ function pathFromUrlLike(value = "") {
   }
 
   try {
-    const parsed = new URL(raw, getBaseOrigin());
+    const parsed =
+      new URL(raw, getBaseOrigin());
 
     if (
       parsed.hash &&
@@ -269,10 +282,12 @@ function pathFromUrlLike(value = "") {
       parsed.pathname || "/"
     )}${parsed.search || ""}${parsed.hash || ""}`;
   } catch {
-    const hashIndex = raw.indexOf("#");
+    const hashIndex =
+      raw.indexOf("#");
 
     if (hashIndex >= 0) {
-      const hash = raw.slice(hashIndex);
+      const hash =
+        raw.slice(hashIndex);
 
       if (isHashRouterPath(hash)) {
         return normalizeHashRouterPath(hash);
@@ -291,10 +306,75 @@ function getBrowserHref() {
   }
 
   try {
-    return safeText(window.location.href, "");
+    return safeText(
+      window.location.href,
+      ""
+    );
   } catch {
     return "";
   }
+}
+
+function getBrowserPublicPath() {
+  if (!isBrowser()) {
+    return "/";
+  }
+
+  try {
+    const pathname =
+      window.location.pathname || "/";
+
+    const search =
+      window.location.search || "";
+
+    const hash =
+      window.location.hash || "";
+
+    if (
+      hash &&
+      isHashRouterPath(hash)
+    ) {
+      return normalizeHashRouterPath(hash);
+    }
+
+    return `${pathname}${search}${hash}`;
+  } catch {
+    return "/";
+  }
+}
+
+function afterPaint(callback) {
+  if (!isFunction(callback)) {
+    return;
+  }
+
+  if (!isBrowser()) {
+    try {
+      callback();
+    } catch {}
+
+    return;
+  }
+
+  try {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        try {
+          callback();
+        } catch {}
+      });
+    });
+
+    return;
+  } catch {}
+
+  try {
+    window.setTimeout(() => {
+      try {
+        callback();
+      } catch {}
+    }, 0);
+  } catch {}
 }
 
 /* =========================================================
@@ -302,8 +382,11 @@ function getBrowserHref() {
 ========================================================= */
 
 function matchesRouteConfig(config, pathOrUrl = "") {
-  const path = pathFromUrlLike(pathOrUrl);
-  const clean = stripSearchAndHash(path);
+  const path =
+    pathFromUrlLike(pathOrUrl);
+
+  const clean =
+    stripSearchAndHash(path);
 
   return (
     clean === config.path ||
@@ -324,16 +407,20 @@ function getPathToken(config, value = "") {
     return "";
   }
 
-  const path = pathFromUrlLike(value);
-  const clean = stripSearchAndHash(path);
+  const path =
+    pathFromUrlLike(value);
+
+  const clean =
+    stripSearchAndHash(path);
 
   if (!clean.startsWith(`${config.path}/`)) {
     return "";
   }
 
-  const token = clean
-    .slice(`${config.path}/`.length)
-    .split("/")[0];
+  const token =
+    clean
+      .slice(`${config.path}/`.length)
+      .split("/")[0];
 
   try {
     return safeText(
@@ -347,7 +434,8 @@ function getPathToken(config, value = "") {
 
 function hasTokenInSearch(search = "", names = []) {
   try {
-    const params = new URLSearchParams(search || "");
+    const params =
+      new URLSearchParams(search || "");
 
     return names.some((name) =>
       Boolean(
@@ -367,7 +455,8 @@ function hasRouteToken(config, value = "") {
     return false;
   }
 
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return false;
@@ -378,7 +467,8 @@ function hasRouteToken(config, value = "") {
   }
 
   try {
-    const parsed = new URL(raw, getBaseOrigin());
+    const parsed =
+      new URL(raw, getBaseOrigin());
 
     if (
       hasTokenInSearch(
@@ -393,7 +483,11 @@ function hasRouteToken(config, value = "") {
       parsed.hash &&
       parsed.hash.includes("?")
     ) {
-      const query = parsed.hash.split("?").slice(1).join("?");
+      const query =
+        parsed.hash
+          .split("?")
+          .slice(1)
+          .join("?");
 
       return hasTokenInSearch(
         query ? `?${query}` : "",
@@ -404,11 +498,12 @@ function hasRouteToken(config, value = "") {
     return false;
   } catch {
     if (raw.includes("?")) {
-      const query = raw
-        .split("?")
-        .slice(1)
-        .join("?")
-        .split("#")[0];
+      const query =
+        raw
+          .split("?")
+          .slice(1)
+          .join("?")
+          .split("#")[0];
 
       if (
         hasTokenInSearch(
@@ -424,7 +519,11 @@ function hasRouteToken(config, value = "") {
       raw.includes("#") &&
       raw.includes("?")
     ) {
-      const query = raw.split("?").slice(1).join("?");
+      const query =
+        raw
+          .split("?")
+          .slice(1)
+          .join("?");
 
       if (
         hasTokenInSearch(
@@ -440,23 +539,16 @@ function hasRouteToken(config, value = "") {
   }
 }
 
-function hasAnyProtectedToken(value = "") {
-  const config = getRouteConfigFromValue(value);
-
-  if (!config) {
-    return false;
-  }
-
-  return hasRouteToken(config, value);
-}
-
 function getStoredInitialUrl(config) {
   if (!isBrowser() || !config?.windowKey) {
     return "";
   }
 
   try {
-    return safeText(window[config.windowKey], "");
+    return safeText(
+      window[config.windowKey],
+      ""
+    );
   } catch {
     return "";
   }
@@ -481,7 +573,10 @@ function getInitialUrl() {
   }
 
   try {
-    return safeText(window.__ONION_INITIAL_URL__, "");
+    return safeText(
+      window.__ONION_INITIAL_URL__,
+      ""
+    );
   } catch {
     return "";
   }
@@ -515,7 +610,8 @@ function resolveProtectedInitialContext(href = "") {
     .filter(Boolean);
 
   for (const candidate of candidates) {
-    const config = getRouteConfigFromValue(candidate);
+    const config =
+      getRouteConfigFromValue(candidate);
 
     if (!config) {
       continue;
@@ -542,16 +638,19 @@ function resolveProtectedInitialContext(href = "") {
 }
 
 function redactTokenInText(value = "") {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return "";
   }
 
-  let output = raw;
+  let output =
+    raw;
 
   for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
-    const escapedPath = config.path.replace(/\//g, "\\/");
+    const escapedPath =
+      config.path.replace(/\//g, "\\/");
 
     output = output.replace(
       new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
@@ -570,29 +669,51 @@ function redactTokenInText(value = "") {
 }
 
 function sanitizeBootContextForLog(context = {}) {
-  const ctx = safeObject(context);
+  const ctx =
+    safeObject(context);
 
   return {
-    initialUrl: redactTokenInText(ctx.initialUrl),
-    protectedInitialUrl: redactTokenInText(ctx.protectedInitialUrl),
+    initialUrl:
+      redactTokenInText(ctx.initialUrl),
 
-    activationInitialUrl: redactTokenInText(ctx.activationInitialUrl),
-    activationInitialPath: redactTokenInText(ctx.activationInitialPath),
+    protectedInitialUrl:
+      redactTokenInText(ctx.protectedInitialUrl),
 
-    resetConfirmInitialUrl: redactTokenInText(ctx.resetConfirmInitialUrl),
-    resetConfirmInitialPath: redactTokenInText(ctx.resetConfirmInitialPath),
+    activationInitialUrl:
+      redactTokenInText(ctx.activationInitialUrl),
 
-    protectedInitialPath: redactTokenInText(ctx.protectedInitialPath),
+    activationInitialPath:
+      redactTokenInText(ctx.activationInitialPath),
 
-    isActivation: Boolean(ctx.isActivation),
-    hasActivationToken: Boolean(ctx.hasActivationToken),
+    resetConfirmInitialUrl:
+      redactTokenInText(ctx.resetConfirmInitialUrl),
 
-    isResetConfirm: Boolean(ctx.isResetConfirm),
-    hasResetToken: Boolean(ctx.hasResetToken),
+    resetConfirmInitialPath:
+      redactTokenInText(ctx.resetConfirmInitialPath),
 
-    isPublicTokenRoute: Boolean(ctx.isPublicTokenRoute),
-    hasPublicToken: Boolean(ctx.hasPublicToken),
-    protectedRouteKey: safeText(ctx.protectedRouteKey, ""),
+    protectedInitialPath:
+      redactTokenInText(ctx.protectedInitialPath),
+
+    isActivation:
+      Boolean(ctx.isActivation),
+
+    hasActivationToken:
+      Boolean(ctx.hasActivationToken),
+
+    isResetConfirm:
+      Boolean(ctx.isResetConfirm),
+
+    hasResetToken:
+      Boolean(ctx.hasResetToken),
+
+    isPublicTokenRoute:
+      Boolean(ctx.isPublicTokenRoute),
+
+    hasPublicToken:
+      Boolean(ctx.hasPublicToken),
+
+    protectedRouteKey:
+      safeText(ctx.protectedRouteKey, ""),
   };
 }
 
@@ -619,7 +740,8 @@ function captureInitialUrl() {
     };
   }
 
-  const href = getBrowserHref();
+  const href =
+    getBrowserHref();
 
   if (href) {
     setInitialUrl(href);
@@ -637,35 +759,14 @@ function captureInitialUrl() {
     }
   }
 
-  const initialUrl = safeText(
-    getInitialUrl(),
-    href
-  );
+  const initialUrl =
+    safeText(
+      getInitialUrl(),
+      href
+    );
 
   const protectedContext =
     resolveProtectedInitialContext(href);
-
-  const activationInitialUrl = safeText(
-    getStoredInitialUrl(
-      PROTECTED_PUBLIC_TOKEN_ROUTES[0]
-    ),
-    ""
-  );
-
-  const resetConfirmInitialUrl = safeText(
-    getStoredInitialUrl(
-      PROTECTED_PUBLIC_TOKEN_ROUTES[1]
-    ),
-    ""
-  );
-
-  const activationInitialPath = activationInitialUrl
-    ? pathFromUrlLike(activationInitialUrl)
-    : "";
-
-  const resetConfirmInitialPath = resetConfirmInitialUrl
-    ? pathFromUrlLike(resetConfirmInitialUrl)
-    : "";
 
   const activationConfig =
     PROTECTED_PUBLIC_TOKEN_ROUTES[0];
@@ -673,16 +774,50 @@ function captureInitialUrl() {
   const resetConfig =
     PROTECTED_PUBLIC_TOKEN_ROUTES[1];
 
+  const activationInitialUrl =
+    safeText(
+      getStoredInitialUrl(activationConfig),
+      ""
+    );
+
+  const resetConfirmInitialUrl =
+    safeText(
+      getStoredInitialUrl(resetConfig),
+      ""
+    );
+
+  const activationInitialPath =
+    activationInitialUrl
+      ? pathFromUrlLike(activationInitialUrl)
+      : "";
+
+  const resetConfirmInitialPath =
+    resetConfirmInitialUrl
+      ? pathFromUrlLike(resetConfirmInitialUrl)
+      : "";
+
+  const activationCandidate =
+    protectedContext.url ||
+    activationInitialUrl ||
+    initialUrl ||
+    href;
+
+  const resetCandidate =
+    protectedContext.url ||
+    resetConfirmInitialUrl ||
+    initialUrl ||
+    href;
+
   const isActivation =
     matchesRouteConfig(
       activationConfig,
-      protectedContext.url || activationInitialUrl || initialUrl || href
+      activationCandidate
     );
 
   const isResetConfirm =
     matchesRouteConfig(
       resetConfig,
-      protectedContext.url || resetConfirmInitialUrl || initialUrl || href
+      resetCandidate
     );
 
   const hasActivationToken =
@@ -747,7 +882,8 @@ export const App = (() => {
 
     servicesReady: false,
     storeReady: false,
-    routerReady: false,
+    routerConfigured: false,
+    routerBound: false,
     uiReady: false,
 
     uiMounted: false,
@@ -836,9 +972,34 @@ export const App = (() => {
     );
   }
 
+  function safeWindowOn(eventName, handler) {
+    if (
+      !isBrowser() ||
+      !eventName ||
+      !isFunction(handler)
+    ) {
+      return false;
+    }
+
+    try {
+      window.addEventListener(
+        eventName,
+        handler
+      );
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function getSidebarSnapshot() {
     try {
-      return SidebarUI?.getState?.() || SidebarUI?.getSnapshot?.() || {};
+      return (
+        SidebarUI?.getState?.() ||
+        SidebarUI?.getSnapshot?.() ||
+        {}
+      );
     } catch {
       return {};
     }
@@ -846,7 +1007,11 @@ export const App = (() => {
 
   function getTopbarSnapshot() {
     try {
-      return TopbarUI?.getState?.() || TopbarUI?.getSnapshot?.() || {};
+      return (
+        TopbarUI?.getState?.() ||
+        TopbarUI?.getSnapshot?.() ||
+        {}
+      );
     } catch {
       return {};
     }
@@ -854,10 +1019,31 @@ export const App = (() => {
 
   function getBootLoaderSnapshot() {
     try {
-      return getLoaderSnapshot?.(AppCore, state) || {};
+      return (
+        getLoaderSnapshot?.(
+          AppCore,
+          state
+        ) || {}
+      );
     } catch {
       return {};
     }
+  }
+
+  function getCurrentRouteSnapshot() {
+    return {
+      route:
+        AppCore?.state?.route ||
+        Router?.getCurrentCanonicalPath?.() ||
+        stripSearchAndHash(getBrowserPublicPath()) ||
+        "/",
+
+      publicPath:
+        AppCore?.state?.publicPath ||
+        Router?.getCurrentPublicPath?.() ||
+        getBrowserPublicPath() ||
+        "/",
+    };
   }
 
   function safeEmitUIReady() {
@@ -869,20 +1055,82 @@ export const App = (() => {
     });
   }
 
+  function callSyncUserUI(reason = "sync-user-ui") {
+    let ok = false;
+
+    try {
+      if (isFunction(syncUserUI)) {
+        syncUserUI(AppCore);
+        ok = true;
+      }
+    } catch (error) {
+      safeWarn(
+        "syncUserUI(AppCore) falló.",
+        {
+          reason,
+          error,
+        }
+      );
+    }
+
+    /*
+      Compatibilidad con implementaciones nuevas que acepten objeto.
+      Se llama después y de forma segura; si el módulo usa firma legacy,
+      normalmente ignorará el objeto o lanzará sin romper boot.
+    */
+    try {
+      if (isFunction(syncUserUI)) {
+        syncUserUI({
+          AppCore,
+          Auth,
+          SidebarUI,
+          TopbarUI,
+          Toast,
+          I18n,
+          reason,
+        });
+
+        ok = true;
+      }
+    } catch {}
+
+    return ok;
+  }
+
   function safeCallUIMethod(target, names = [], reason = "unknown", context = {}) {
+    let called = false;
+
     for (const name of names) {
       try {
-        const fn = target?.[name];
+        const fn =
+          target?.[name];
 
-        if (typeof fn === "function") {
-          fn.call(
-            target,
-            reason,
-            context
-          );
-
-          return true;
+        if (!isFunction(fn)) {
+          continue;
         }
+
+        /*
+          Orden compatible:
+          1. objeto contexto
+          2. reason + contexto
+          3. sin argumentos
+        */
+        try {
+          fn.call(target, context);
+          called = true;
+          continue;
+        } catch {}
+
+        try {
+          fn.call(target, reason, context);
+          called = true;
+          continue;
+        } catch {}
+
+        try {
+          fn.call(target);
+          called = true;
+        } catch {}
       } catch (error) {
         safeWarn(
           `UI method falló: ${name}`,
@@ -891,12 +1139,46 @@ export const App = (() => {
       }
     }
 
-    return false;
+    return called;
+  }
+
+  function repairShell(reason = "unknown") {
+    const routeSnapshot =
+      getCurrentRouteSnapshot();
+
+    try {
+      updateShellVisibilityByRoute(
+        AppCore,
+        Router
+      );
+    } catch {}
+
+    try {
+      Router?.repairShell?.({
+        route:
+          Router?.getRoute?.(
+            routeSnapshot.route
+          ) || null,
+        canonicalPath:
+          routeSnapshot.route,
+        publicPath:
+          routeSnapshot.publicPath,
+        phase:
+          `app:${reason}`,
+        hideLoading:
+          false,
+      });
+    } catch {}
+
+    return routeSnapshot;
   }
 
   function repairUISystems(reason = "unknown") {
     const cleanReason =
       safeText(reason, "unknown");
+
+    const routeSnapshot =
+      repairShell(cleanReason);
 
     const context = {
       AppCore,
@@ -906,26 +1188,13 @@ export const App = (() => {
       Toast,
       I18n,
       reason: cleanReason,
+      route:
+        routeSnapshot.route,
+      publicPath:
+        routeSnapshot.publicPath,
     };
 
-    try {
-      syncUserUI?.({
-        AppCore,
-        Auth,
-        SidebarUI,
-        TopbarUI,
-        Toast,
-        I18n,
-      });
-    } catch (error) {
-      safeWarn(
-        "syncUserUI repair falló.",
-        {
-          reason: cleanReason,
-          error,
-        }
-      );
-    }
+    callSyncUserUI(cleanReason);
 
     safeCallUIMethod(
       SidebarUI,
@@ -933,22 +1202,13 @@ export const App = (() => {
         "repair",
         "refresh",
         "sync",
+        "syncUser",
+        "refreshUser",
+        "updateUser",
         "render",
-        "mount",
-        "bind",
         "rebind",
         "bindEvents",
-      ],
-      cleanReason,
-      context
-    );
-
-    safeCallUIMethod(
-      SidebarUI,
-      [
         "bind",
-        "rebind",
-        "bindEvents",
       ],
       cleanReason,
       context
@@ -960,22 +1220,13 @@ export const App = (() => {
         "repair",
         "refresh",
         "sync",
+        "syncUser",
+        "refreshUser",
+        "updateUser",
         "render",
-        "mount",
-        "bind",
         "rebind",
         "bindEvents",
-      ],
-      cleanReason,
-      context
-    );
-
-    safeCallUIMethod(
-      TopbarUI,
-      [
         "bind",
-        "rebind",
-        "bindEvents",
       ],
       cleanReason,
       context
@@ -983,10 +1234,46 @@ export const App = (() => {
 
     safeEmit("app:ui:repair", {
       reason: cleanReason,
+      route:
+        routeSnapshot.route,
+      publicPath:
+        routeSnapshot.publicPath,
       sidebarSnapshot:
         getSidebarSnapshot(),
       topbarSnapshot:
         getTopbarSnapshot(),
+    });
+
+    afterPaint(() => {
+      callSyncUserUI(`${cleanReason}:after-paint`);
+
+      safeCallUIMethod(
+        SidebarUI,
+        [
+          "sync",
+          "syncUser",
+          "refreshUser",
+          "updateUser",
+          "rebind",
+          "bindEvents",
+        ],
+        `${cleanReason}:after-paint`,
+        context
+      );
+
+      safeCallUIMethod(
+        TopbarUI,
+        [
+          "sync",
+          "syncUser",
+          "refreshUser",
+          "updateUser",
+          "rebind",
+          "bindEvents",
+        ],
+        `${cleanReason}:after-paint`,
+        context
+      );
     });
   }
 
@@ -995,22 +1282,18 @@ export const App = (() => {
       return;
     }
 
-    const bus = AppCore?.events;
-
-    if (!bus?.on) {
-      return;
-    }
-
     const onRepair = (payload = {}) => {
-      const data = safeObject(
-        payload?.detail ||
-          payload?.payload ||
-          payload
-      );
+      const data =
+        safeObject(
+          payload?.detail ||
+            payload?.payload ||
+            payload
+        );
 
       const reason =
         safeText(
           data.reason ||
+            data.phase ||
             data.type ||
             data.event ||
             "event"
@@ -1019,29 +1302,40 @@ export const App = (() => {
       repairUISystems(reason);
     };
 
-    try {
-      bus.on("router:rendered", onRepair);
-      bus.on("router:render:async-complete", onRepair);
+    const bus =
+      AppCore?.events;
 
-      bus.on("app:ready", onRepair);
-      bus.on("app:ui:ready", onRepair);
-      bus.on("app:route:change", onRepair);
+    if (bus?.on) {
+      try {
+        bus.on("router:rendered", onRepair);
+        bus.on("router:render:async-complete", onRepair);
+        bus.on("router:shell:state", onRepair);
 
-      bus.on("app:session:restored", onRepair);
-      bus.on("auth:session:restored", onRepair);
-      bus.on("auth:login:success", onRepair);
-      bus.on("auth:logout", onRepair);
+        bus.on("app:ready", onRepair);
+        bus.on("app:ui:ready", onRepair);
+        bus.on("app:ui:repair-request", onRepair);
+        bus.on("app:route:change", onRepair);
 
-      bus.on("app:user:change", onRepair);
-      bus.on("app:lang:change", onRepair);
+        bus.on("app:session:restored", onRepair);
+        bus.on("auth:session:restored", onRepair);
+        bus.on("auth:login:success", onRepair);
+        bus.on("auth:logout", onRepair);
 
-      state.uiRepairEventsBound = true;
-    } catch (error) {
-      safeWarn(
-        "No se pudieron bindear eventos de reparación UI.",
-        error
-      );
+        bus.on("app:user:change", onRepair);
+        bus.on("app:lang:change", onRepair);
+      } catch (error) {
+        safeWarn(
+          "No se pudieron bindear eventos UI sobre AppCore.events.",
+          error
+        );
+      }
     }
+
+    safeWindowOn("app:ui:repair-request", onRepair);
+    safeWindowOn("app:ready", onRepair);
+    safeWindowOn("app:lang:change", onRepair);
+
+    state.uiRepairEventsBound = true;
   }
 
   function refreshBootUrlContext() {
@@ -1079,6 +1373,23 @@ export const App = (() => {
       context.isResetConfirm &&
       context.hasResetToken
     );
+  }
+
+  function exposeRouterToCore() {
+    try {
+      AppCore.Router = Router;
+    } catch {}
+
+    try {
+      AppCore.router = Router;
+    } catch {}
+
+    try {
+      AppCore.modules =
+        AppCore.modules || {};
+
+      AppCore.modules.Router = Router;
+    } catch {}
   }
 
   function exposeBootUrlContextToCore() {
@@ -1358,13 +1669,16 @@ export const App = (() => {
     } catch {}
   }
 
-  function initRouterBlock() {
-    if (state.routerReady) {
+  function configureRouterBlock() {
+    if (state.routerConfigured) {
+      exposeRouterToCore();
       return;
     }
 
+    exposeRouterToCore();
+
     try {
-      configureRouter();
+      configureRouter?.();
     } catch (error) {
       safeWarn(
         "No se pudo configurar Router.",
@@ -1372,7 +1686,36 @@ export const App = (() => {
       );
     }
 
-    state.routerReady = true;
+    exposeRouterToCore();
+
+    state.routerConfigured = true;
+  }
+
+  function bindRouterBlock(reason = "bind-router") {
+    if (state.routerBound) {
+      return;
+    }
+
+    try {
+      bindRouter?.();
+    } catch (error) {
+      safeWarn(
+        "bindRouter() falló. Intentando Router.bind().",
+        error
+      );
+
+      try {
+        Router?.bind?.();
+      } catch {}
+    }
+
+    exposeRouterToCore();
+
+    state.routerBound = true;
+
+    safeEmit("app:router:bound", {
+      reason,
+    });
   }
 
   function initUIBlock() {
@@ -1449,7 +1792,24 @@ export const App = (() => {
         Auth,
         Router,
         state,
-        syncUserUI,
+        syncUserUI:
+          (coreArg) => {
+            try {
+              syncUserUI?.(coreArg || AppCore);
+            } catch {}
+
+            try {
+              syncUserUI?.({
+                AppCore,
+                Auth,
+                SidebarUI,
+                TopbarUI,
+                Toast,
+                I18n,
+                reason: "restore-session",
+              });
+            } catch {}
+          },
         warmup,
         skipPostRestoreNavigation,
       });
@@ -1514,14 +1874,13 @@ export const App = (() => {
 
     markBooted(cycleId);
 
-    try {
-      updateShellVisibilityByRoute(
-        AppCore,
-        Router
-      );
-    } catch {}
+    repairShell("finalize-boot:pre-ui");
 
     repairUISystems("finalize-boot");
+
+    afterPaint(() => {
+      repairUISystems("finalize-boot:after-paint");
+    });
 
     const remaining =
       Math.max(
@@ -1581,13 +1940,15 @@ export const App = (() => {
       const bootContext =
         exposeBootUrlContextToCore();
 
+      exposeRouterToCore();
+
       bindAppEventsBlock();
 
       initServices();
       initStoreBlock();
       initI18nBlock();
 
-      initRouterBlock();
+      configureRouterBlock();
 
       initUIBlock();
 
@@ -1604,6 +1965,12 @@ export const App = (() => {
           cycleId,
           reason: "public-token-first",
         });
+
+        /*
+          Bind después del primer render.
+          Así no se pisa la URL pública con token durante boot.
+        */
+        bindRouterBlock("public-token-first");
 
         await restoreSessionBlock({
           cycleId,
@@ -1633,6 +2000,8 @@ export const App = (() => {
             }
           );
 
+          state.initialRouteRendered = true;
+
           repairUISystems(
             "restore-navigation-handled"
           );
@@ -1642,7 +2011,16 @@ export const App = (() => {
             reason: "after-restore",
           });
         }
+
+        /*
+          Bind después de:
+          - restore con navegación, o
+          - render inicial normal.
+        */
+        bindRouterBlock("after-initial-route");
       }
+
+      repairUISystems("before-finalize");
 
       await finalizeBoot(cycleId);
 
@@ -1705,11 +2083,18 @@ export const App = (() => {
 
     state.booted = false;
     state.booting = false;
+
     state.uiMounted = false;
     state.readyEmitted = false;
+
     state.finalizedCycleId = 0;
     state.restorePromise = null;
     state.bootPromise = null;
+
+    /*
+      No reseteamos routerConfigured/routerBound aquí de forma agresiva.
+      Router.bind suele ser idempotente. Evitamos doble binding accidental.
+    */
 
     resetCycleRuntimeState();
 
@@ -1751,6 +2136,9 @@ export const App = (() => {
       publicPath:
         AppCore?.state?.publicPath || "/",
 
+      browserPublicPath:
+        getBrowserPublicPath(),
+
       sidebarSnapshot:
         getSidebarSnapshot(),
 
@@ -1759,6 +2147,9 @@ export const App = (() => {
 
       loaderSnapshot:
         getBootLoaderSnapshot(),
+
+      routerSnapshot:
+        Router?.getSnapshot?.() || null,
     };
   }
 
@@ -1769,6 +2160,8 @@ export const App = (() => {
 
     repairUI:
       repairUISystems,
+
+    repairShell,
 
     showLoader:
       showBootLoader,

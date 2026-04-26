@@ -17,6 +17,7 @@
    - exponer ids estables para dom.js / activateAccountView.js
    - mantener compatibilidad total con flujo SPA público
    - evitar botones duplicados de retorno
+   - sin recuperación manual de token en UI
 ========================================================= */
 
 import { renderPasswordField } from "../../shared/password-field/index.js";
@@ -141,6 +142,14 @@ function shouldRenderPasswordFields(status, hasToken) {
   );
 }
 
+function isTerminalStatus(status = "") {
+  return (
+    status === ACTIVATE_ACCOUNT_STATUS.SUCCESS ||
+    status === ACTIVATE_ACCOUNT_STATUS.EXPIRED ||
+    status === ACTIVATE_ACCOUNT_STATUS.INVALID
+  );
+}
+
 function resolveStatusCopy(status = ACTIVATE_ACCOUNT_STATUS.IDLE, options = {}) {
   const appName = safeText(options?.appName, "Onion Support");
 
@@ -216,7 +225,7 @@ function resolveStatusCopy(status = ACTIVATE_ACCOUNT_STATUS.IDLE, options = {}) 
       subtitle:
         "No hemos podido encontrar un token de activación válido en esta URL.",
       body:
-        "Revisa que hayas abierto el enlace completo recibido por correo. También puedes volver al acceso y solicitar ayuda.",
+        "Abre el enlace completo recibido por correo. El enlace debe incluir el token de activación en la URL.",
       button: "Volver al acceso",
       badge: "No válido",
       footer:
@@ -992,41 +1001,6 @@ function renderActivationPasswordFields({
   `;
 }
 
-function renderTokenRecoveryField() {
-  return `
-    <div
-      class="activate-account-password-fields"
-      id="activateAccountTokenRecoveryWrap"
-      data-activate-token-recovery="true"
-    >
-      <label
-        class="login-field"
-        for="activateAccountTokenRecovery"
-      >
-        <span class="sr-only">Enlace o token de activación</span>
-        <input
-          class="input-text"
-          id="activateAccountTokenRecovery"
-          name="tokenRecovery"
-          type="text"
-          inputmode="text"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="Pega aquí el enlace completo o el token"
-          aria-label="Enlace o token de activación"
-        />
-      </label>
-
-      <p
-        class="activate-account-password-help"
-        id="activateAccountTokenRecoveryHelp"
-      >
-        Si tu correo abrió /activate-account sin token, pega aquí el enlace completo que recibiste.
-      </p>
-    </div>
-  `;
-}
-
 function renderFormClean({
   appName = "Onion Support",
   status = ACTIVATE_ACCOUNT_STATUS.IDLE,
@@ -1044,38 +1018,26 @@ function renderFormClean({
   const isLoading =
     status === ACTIVATE_ACCOUNT_STATUS.LOADING;
 
-  const isSuccess =
-    status === ACTIVATE_ACCOUNT_STATUS.SUCCESS;
-
-  const isInvalid =
-    status === ACTIVATE_ACCOUNT_STATUS.INVALID ||
-    status === ACTIVATE_ACCOUNT_STATUS.EXPIRED;
-
   const renderPasswords =
     shouldRenderPasswordFields(status, hasToken);
-  const allowTokenRecovery =
-    hasToken !== true &&
-    isInvalid === true;
+
+  const terminal =
+    isTerminalStatus(status);
 
   const effectiveAutoSubmit =
-    renderPasswords ? false : autoSubmit;
+    hasToken === true &&
+    terminal === false &&
+    renderPasswords === false &&
+    autoSubmit === true;
 
   const finalButtonLabel =
-    isSuccess
+    terminal
       ? backLabel
-      : allowTokenRecovery
-        ? "Usar enlace de activación"
-        : isInvalid
-          ? backLabel
       : copy.button;
 
   const buttonAction =
-    isSuccess
+    terminal
       ? "go-login"
-      : allowTokenRecovery
-        ? "recover-token"
-        : isInvalid
-          ? "go-login"
       : "activate-account";
 
   return `
@@ -1146,8 +1108,6 @@ function renderFormClean({
                     confirmPasswordPlaceholder,
                     passwordHelp,
                   })
-                : allowTokenRecovery
-                  ? renderTokenRecoveryField()
                 : ""
             }
 
@@ -1220,7 +1180,9 @@ export function getActivateAccountTemplate(options = {}) {
 
   const backLabel = safeText(
     options?.backLabel,
-    "Volver al acceso"
+    computedStatus === ACTIVATE_ACCOUNT_STATUS.SUCCESS
+      ? "Ir al acceso"
+      : "Volver al acceso"
   );
 
   return `

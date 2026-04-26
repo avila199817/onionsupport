@@ -12,6 +12,9 @@
    - evitar estados auth fantasma
    - preservar route/publicPath en rutas públicas técnicas
    - no romper /activate-account?token=... durante restore/clear
+   - no romper /activate-account/<token> durante restore/clear
+   - no romper /reset-password/confirm?token=... durante restore/clear
+   - no romper /reset-password/confirm/<token> durante restore/clear
    - normalizar roles admin/superadmin/owner/root para guards/sidebar/vistas
 
    HARDENING EXTREMO:
@@ -29,8 +32,8 @@
    FIX 10/10:
    - authenticated sólo puede ser true con token usable + user usable
    - applySession no reutiliza usuario viejo si se pasa user:null
-   - applySession no marca sesión válida sólo por token
-   - clearSessionLocal limpia token/user/role/session/accessToken
+   - applySession no marca sesión válida sólo por token explícito
+   - clearSessionLocal limpia token/user/role/session/accessToken/currentUser
    - clearSessionLocal limpia storage legacy adicional
    - evita avatar/dashboard cacheado tras login fallido
 ========================================================= */
@@ -60,7 +63,13 @@ import {
    CONSTANTS
 ========================================================= */
 
-const PUBLIC_TECHNICAL_ROUTES = new Set([
+const ACTIVATION_PATH =
+  "/activate-account";
+
+const RESET_CONFIRM_PATH =
+  "/reset-password/confirm";
+
+const PUBLIC_TECHNICAL_ROUTES = Object.freeze([
   "/activate-account",
   "/reset-password",
   "/reset-password/confirm",
@@ -97,7 +106,7 @@ const MANAGER_ROLE_KEYS = new Set([
   "lead",
 ]);
 
-const LEGACY_AUTH_STORAGE_KEYS = [
+const LEGACY_AUTH_STORAGE_KEYS = Object.freeze([
   "onion_token",
   "onion_access_token",
   "onion_refresh_token",
@@ -111,10 +120,14 @@ const LEGACY_AUTH_STORAGE_KEYS = [
   "auth_token",
   "access_token",
   "refresh_token",
+  "temp_token",
+  "temporary_token",
+  "two_factor_token",
+  "mfa_token",
   "token",
   "session",
   "user",
-];
+]);
 
 /* =========================================================
    BASICS
@@ -128,23 +141,22 @@ function isBrowser() {
 }
 
 function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value).trim();
 
   return text || fallback;
 }
 
 function safeBool(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-
-  if (typeof value === "string") {
-    const key = value.trim().toLowerCase();
-
-    if (["true", "1", "yes", "si", "sí"].includes(key)) return true;
-    if (["false", "0", "no"].includes(key)) return false;
+  if (typeof value === "boolean") {
+    return value;
   }
 
   if (typeof value === "number") {
@@ -152,15 +164,51 @@ function safeBool(value, fallback = false) {
     if (value === 0) return false;
   }
 
-  return fallback;
+  if (typeof value === "string") {
+    const key =
+      value.trim().toLowerCase();
+
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "si",
+        "sí",
+        "ok",
+        "on",
+      ].includes(key)
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "off",
+      ].includes(key)
+    ) {
+      return false;
+    }
+  }
+
+  return Boolean(fallback);
 }
 
 function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
+  return (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  )
     ? value
     : {};
 }
@@ -174,17 +222,42 @@ function isPlainObject(value) {
 }
 
 function toArray(value) {
-  if (Array.isArray(value)) return value;
-  if (value === null || value === undefined) return [];
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return [];
+  }
 
   return [value];
 }
 
 function first(...values) {
   for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
-    if (Array.isArray(value) && value.length === 0) continue;
+    if (
+      value === undefined ||
+      value === null
+    ) {
+      continue;
+    }
+
+    if (
+      typeof value === "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+    if (
+      Array.isArray(value) &&
+      value.length === 0
+    ) {
+      continue;
+    }
 
     return value;
   }
@@ -197,13 +270,20 @@ function nowMs() {
 }
 
 function safeEmit(eventName, payload = {}) {
-  const name = safeText(eventName, "");
-  if (!name) return false;
+  const name =
+    safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
 
   let emitted = false;
 
   try {
-    AppCore?.events?.emit?.(name, payload);
+    AppCore?.events?.emit?.(
+      name,
+      payload
+    );
     emitted = true;
   } catch {}
 
@@ -223,37 +303,63 @@ function safeEmit(eventName, payload = {}) {
 
 function safeWarn(...args) {
   try {
-    AppCore?.utils?.warn?.("[AuthSession]", ...args);
+    AppCore?.utils?.warn?.(
+      "[AuthSession]",
+      ...args
+    );
   } catch {}
 
   try {
-    console.warn("[AuthSession]", ...args);
+    console.warn(
+      "[AuthSession]",
+      ...args
+    );
   } catch {}
 }
 
 function ensureCoreState() {
-  if (!AppCore.state || typeof AppCore.state !== "object") {
-    AppCore.state = {};
-  }
+  try {
+    if (
+      AppCore?.state &&
+      typeof AppCore.state === "object"
+    ) {
+      return AppCore.state;
+    }
+  } catch {}
 
-  return AppCore.state;
+  return {};
 }
 
 function safeSetState(patch = {}) {
+  const safePatch =
+    isPlainObject(patch)
+      ? patch
+      : {};
+
   try {
-    AppCore?.setState?.(patch);
+    AppCore?.setState?.(
+      safePatch
+    );
   } catch {}
 
   try {
-    Object.assign(ensureCoreState(), patch);
+    Object.assign(
+      ensureCoreState(),
+      safePatch
+    );
   } catch {}
+
+  return ensureCoreState();
 }
 
 function hasOwn(obj, key) {
   return Boolean(
     obj &&
       typeof obj === "object" &&
-      Object.prototype.hasOwnProperty.call(obj, key)
+      Object.prototype.hasOwnProperty.call(
+        obj,
+        key
+      )
   );
 }
 
@@ -262,7 +368,9 @@ function hasOwn(obj, key) {
 ========================================================= */
 
 function hasUsableToken(token = "") {
-  return Boolean(safeText(token, ""));
+  return Boolean(
+    safeText(token, "")
+  );
 }
 
 function hasUsableUser(user = {}) {
@@ -272,15 +380,18 @@ function hasUsableUser(user = {}) {
 
   return Boolean(
     safeText(user.id, "") ||
-    safeText(user.userId, "") ||
-    safeText(user.user_id, "") ||
-    safeText(user._id, "") ||
-    safeText(user.uid, "") ||
-    safeText(user.username, "") ||
-    safeText(user.userName, "") ||
-    safeText(user.email, "") ||
-    safeText(user.phone, "") ||
-    safeText(user.telefono, "")
+      safeText(user.userId, "") ||
+      safeText(user.user_id, "") ||
+      safeText(user._id, "") ||
+      safeText(user.uid, "") ||
+      safeText(user.username, "") ||
+      safeText(user.userName, "") ||
+      safeText(user.user_name, "") ||
+      safeText(user.email, "") ||
+      safeText(user.mail, "") ||
+      safeText(user.phone, "") ||
+      safeText(user.telefono, "") ||
+      safeText(user.mobile, "")
   );
 }
 
@@ -296,10 +407,13 @@ function getUserIdentity(user = {}) {
     safeText(user._id, "") ||
     safeText(user.uid, "") ||
     safeText(user.email, "") ||
+    safeText(user.mail, "") ||
     safeText(user.username, "") ||
     safeText(user.userName, "") ||
+    safeText(user.user_name, "") ||
     safeText(user.phone, "") ||
-    safeText(user.telefono, "")
+    safeText(user.telefono, "") ||
+    safeText(user.mobile, "")
   );
 }
 
@@ -318,27 +432,54 @@ function normalizeRole(value = "") {
 }
 
 function normalizeRoles(value) {
+  if (typeof value === "string") {
+    return value
+      .split(/[,\s|]+/g)
+      .map(normalizeRole)
+      .filter(Boolean);
+  }
+
   return toArray(value)
     .flat(Infinity)
+    .flatMap((item) =>
+      typeof item === "string"
+        ? item.split(/[,\s|]+/g)
+        : [item]
+    )
     .map(normalizeRole)
     .filter(Boolean);
 }
 
 function isAdminRole(value = "") {
-  return ADMIN_ROLE_KEYS.has(normalizeRole(value));
+  return ADMIN_ROLE_KEYS.has(
+    normalizeRole(value)
+  );
 }
 
 function isSupportRole(value = "") {
-  return SUPPORT_ROLE_KEYS.has(normalizeRole(value));
+  return SUPPORT_ROLE_KEYS.has(
+    normalizeRole(value)
+  );
 }
 
 function isManagerRole(value = "") {
-  return MANAGER_ROLE_KEYS.has(normalizeRole(value));
+  return MANAGER_ROLE_KEYS.has(
+    normalizeRole(value)
+  );
+}
+
+function unique(values = []) {
+  return Array.from(
+    new Set(values.filter(Boolean))
+  );
 }
 
 function expandRoleAliases(roles = []) {
-  const normalized = normalizeRoles(roles);
-  const result = new Set(normalized);
+  const normalized =
+    normalizeRoles(roles);
+
+  const result =
+    new Set(normalized);
 
   if (normalized.some(isAdminRole)) {
     for (const role of ADMIN_ROLE_KEYS) {
@@ -364,61 +505,105 @@ function expandRoleAliases(roles = []) {
     result.add("manager");
   }
 
-  return Array.from(result).filter(Boolean);
+  return unique(
+    Array.from(result)
+  );
 }
 
 function resolveCanonicalRole(roles = []) {
-  const expanded = expandRoleAliases(roles);
+  const expanded =
+    expandRoleAliases(roles);
 
-  if (expanded.some(isAdminRole)) return "admin";
-  if (expanded.some(isSupportRole)) return "support";
-  if (expanded.some(isManagerRole)) return "manager";
+  if (expanded.some(isAdminRole)) {
+    return "admin";
+  }
+
+  if (expanded.some(isSupportRole)) {
+    return "support";
+  }
+
+  if (expanded.some(isManagerRole)) {
+    return "manager";
+  }
 
   return expanded[0] || "";
 }
 
 function collectRoleCandidatesFromUser(user = null) {
-  const current = safeObject(user);
-  const raw = safeObject(current.raw);
-  const profile = safeObject(current.profile);
-  const permissions = safeObject(current.permissions);
-  const meta = safeObject(current.meta);
-  const claims = safeObject(current.claims);
+  const current =
+    safeObject(user);
+
+  const raw =
+    safeObject(current.raw);
+
+  const profile =
+    safeObject(current.profile);
+
+  const permissions =
+    safeObject(current.permissions);
+
+  const meta =
+    safeObject(current.meta);
+
+  const claims =
+    safeObject(current.claims);
+
+  const account =
+    safeObject(current.account);
 
   const roleCandidates = [
     current.role,
     current.rol,
     current.userRole,
+    current.user_role,
     current.type,
     current.userType,
+    current.user_type,
     current.perfil,
 
     profile.role,
     profile.rol,
     profile.userRole,
+    profile.user_role,
     profile.type,
     profile.perfil,
+
+    account.role,
+    account.rol,
+    account.userRole,
+    account.user_role,
+    account.type,
 
     raw.role,
     raw.rol,
     raw.userRole,
+    raw.user_role,
     raw.type,
     raw.userType,
+    raw.user_type,
     raw.perfil,
 
     raw?.profile?.role,
     raw?.profile?.rol,
     raw?.profile?.userRole,
+    raw?.profile?.user_role,
     raw?.profile?.type,
     raw?.profile?.perfil,
+
+    raw?.account?.role,
+    raw?.account?.rol,
+    raw?.account?.userRole,
+    raw?.account?.type,
 
     meta.role,
     meta.rol,
     meta.userRole,
+    meta.user_role,
 
     claims.role,
     claims.rol,
     claims.userRole,
+    claims.user_role,
     claims["custom:role"],
     claims["https://onion/role"],
   ];
@@ -426,6 +611,7 @@ function collectRoleCandidatesFromUser(user = null) {
   const roleArrays = [
     current.roles,
     current.roleList,
+    current.role_list,
     current.permissions,
     current.scopes,
     current.groups,
@@ -435,9 +621,16 @@ function collectRoleCandidatesFromUser(user = null) {
     profile.permissions,
     profile.scopes,
     profile.groups,
+    profile.authorities,
+
+    account.roles,
+    account.permissions,
+    account.scopes,
+    account.groups,
 
     raw.roles,
     raw.roleList,
+    raw.role_list,
     raw.permissions,
     raw.scopes,
     raw.groups,
@@ -448,13 +641,19 @@ function collectRoleCandidatesFromUser(user = null) {
     raw?.profile?.scopes,
     raw?.profile?.groups,
 
+    raw?.account?.roles,
+    raw?.account?.permissions,
+    raw?.account?.scopes,
+
     permissions.roles,
     permissions.scopes,
     permissions.items,
+    permissions.list,
 
     meta.roles,
     meta.permissions,
     meta.scopes,
+    meta.groups,
 
     claims.roles,
     claims.permissions,
@@ -464,16 +663,22 @@ function collectRoleCandidatesFromUser(user = null) {
 
   const roles = [
     ...roleCandidates,
-    ...roleArrays.flatMap((value) => toArray(value)),
+    ...roleArrays.flatMap((value) =>
+      toArray(value)
+    ),
   ];
 
   const adminFlag = [
     current.isAdmin,
     current.admin,
+    current.is_admin,
     current.isSuperAdmin,
     current.superAdmin,
+    current.is_super_admin,
     current.canManageUsers,
+    current.can_manage_users,
     current.canAccessUsers,
+    current.can_access_users,
 
     profile.isAdmin,
     profile.admin,
@@ -482,12 +687,21 @@ function collectRoleCandidatesFromUser(user = null) {
     profile.canManageUsers,
     profile.canAccessUsers,
 
+    account.isAdmin,
+    account.admin,
+    account.isSuperAdmin,
+    account.superAdmin,
+
     raw.isAdmin,
     raw.admin,
+    raw.is_admin,
     raw.isSuperAdmin,
     raw.superAdmin,
+    raw.is_super_admin,
     raw.canManageUsers,
+    raw.can_manage_users,
     raw.canAccessUsers,
+    raw.can_access_users,
 
     raw?.profile?.isAdmin,
     raw?.profile?.admin,
@@ -495,6 +709,11 @@ function collectRoleCandidatesFromUser(user = null) {
     raw?.profile?.superAdmin,
     raw?.profile?.canManageUsers,
     raw?.profile?.canAccessUsers,
+
+    raw?.account?.isAdmin,
+    raw?.account?.admin,
+    raw?.account?.isSuperAdmin,
+    raw?.account?.superAdmin,
 
     meta.isAdmin,
     meta.admin,
@@ -509,7 +728,9 @@ function collectRoleCandidatesFromUser(user = null) {
     claims.superAdmin,
     claims.canManageUsers,
     claims.canAccessUsers,
-  ].some((value) => safeBool(value, false));
+  ].some((value) =>
+    safeBool(value, false)
+  );
 
   if (adminFlag) {
     roles.push("admin");
@@ -519,12 +740,10 @@ function collectRoleCandidatesFromUser(user = null) {
 }
 
 function resolveRoleFromUser(user = null, explicitRole = "") {
-  const roles = [
+  return resolveCanonicalRole([
     explicitRole,
     ...collectRoleCandidatesFromUser(user),
-  ];
-
-  return resolveCanonicalRole(roles);
+  ]);
 }
 
 function resolveRolesFromUser(user = null, explicitRole = "") {
@@ -539,10 +758,11 @@ function resolveRolesFromUser(user = null, explicitRole = "") {
 ========================================================= */
 
 function normalizePathnameOnly(pathname = "/") {
-  let value = String(pathname || "/")
-    .trim()
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
+  let value =
+    String(pathname || "/")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
 
   if (!value) {
     value = "/";
@@ -552,19 +772,49 @@ function normalizePathnameOnly(pathname = "/") {
     value = `/${value}`;
   }
 
-  if (value.length > 1 && value.endsWith("/")) {
-    value = value.replace(/\/+$/g, "") || "/";
+  if (
+    value.length > 1 &&
+    value.endsWith("/")
+  ) {
+    value =
+      value.replace(/\/+$/g, "") || "/";
   }
 
   return value;
 }
 
 function stripSearchAndHash(path = "/") {
-  const raw = safeText(path, "/");
+  const raw =
+    safeText(path, "/");
 
   return normalizePathnameOnly(
     raw.split("?")[0].split("#")[0] || "/"
   );
+}
+
+function isHashRouterPath(value = "") {
+  const raw =
+    String(value || "").trim();
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw =
+    String(value || "").trim();
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/");
+  }
+
+  return raw.replace(/^#\/?/, "/");
 }
 
 function getBrowserPublicPath() {
@@ -573,16 +823,20 @@ function getBrowserPublicPath() {
   }
 
   try {
-    const pathname = window.location.pathname || "/";
-    const search = window.location.search || "";
-    const hash = window.location.hash || "";
+    const pathname =
+      window.location.pathname || "/";
 
-    if (hash && (hash.startsWith("#/") || hash.startsWith("#!"))) {
-      if (hash.startsWith("#!")) {
-        return normalizePathnameOnly(hash.replace(/^#!\/?/, "/"));
-      }
+    const search =
+      window.location.search || "";
 
-      return hash.replace(/^#\/?/, "/");
+    const hash =
+      window.location.hash || "";
+
+    if (
+      hash &&
+      isHashRouterPath(hash)
+    ) {
+      return normalizeHashRouterPath(hash);
     }
 
     return `${pathname}${search}${hash}`;
@@ -592,45 +846,74 @@ function getBrowserPublicPath() {
 }
 
 function isPublicTechnicalRoute(path = "/") {
-  return PUBLIC_TECHNICAL_ROUTES.has(
-    stripSearchAndHash(path)
+  const clean =
+    stripSearchAndHash(path);
+
+  return PUBLIC_TECHNICAL_ROUTES.some((candidate) => {
+    if (clean === candidate) {
+      return true;
+    }
+
+    return clean.startsWith(`${candidate}/`);
+  });
+}
+
+function isProtectedPublicTokenRoute(path = "/") {
+  const clean =
+    stripSearchAndHash(path);
+
+  return (
+    clean === ACTIVATION_PATH ||
+    clean.startsWith(`${ACTIVATION_PATH}/`) ||
+    clean === RESET_CONFIRM_PATH ||
+    clean.startsWith(`${RESET_CONFIRM_PATH}/`)
   );
 }
 
 function shouldPreserveRoute(options = {}) {
   if (
     options.preserveRoute === true ||
-    options.preserveCurrentRoute === true
+    options.preserveCurrentRoute === true ||
+    options.publicRoute === true ||
+    options.activationBoot === true ||
+    options.resetConfirmBoot === true
   ) {
     return true;
   }
 
-  const state = ensureCoreState();
+  const state =
+    ensureCoreState();
 
-  const publicPath = safeText(
-    options.publicPath ||
-      state.publicPath ||
-      getBrowserPublicPath(),
-    ""
-  );
+  const publicPath =
+    safeText(
+      options.publicPath ||
+        state.publicPath ||
+        getBrowserPublicPath(),
+      ""
+    );
 
-  const route = safeText(
-    options.route ||
-      state.route ||
-      stripSearchAndHash(publicPath),
-    ""
-  );
+  const route =
+    safeText(
+      options.route ||
+        state.route ||
+        stripSearchAndHash(publicPath),
+      ""
+    );
 
   return (
     isPublicTechnicalRoute(route) ||
-    isPublicTechnicalRoute(publicPath)
+    isPublicTechnicalRoute(publicPath) ||
+    isProtectedPublicTokenRoute(route) ||
+    isProtectedPublicTokenRoute(publicPath)
   );
 }
 
 function captureRouteContext(options = {}) {
-  const state = ensureCoreState();
+  const state =
+    ensureCoreState();
 
-  const browserPath = getBrowserPublicPath();
+  const browserPath =
+    getBrowserPublicPath();
 
   const publicPath =
     safeText(options.publicPath, "") ||
@@ -645,16 +928,31 @@ function captureRouteContext(options = {}) {
     "/";
 
   return {
-    preserve: shouldPreserveRoute({
-      ...options,
-      route,
-      publicPath,
-    }),
+    preserve:
+      shouldPreserveRoute({
+        ...options,
+        route,
+        publicPath,
+      }),
 
-    route: stripSearchAndHash(route || publicPath || "/"),
-    publicPath: publicPath || route || "/",
-    lastRoute: safeText(state.lastRoute, ""),
+    route:
+      stripSearchAndHash(
+        route || publicPath || "/"
+      ),
+
+    publicPath:
+      publicPath || route || "/",
+
+    lastRoute:
+      safeText(state.lastRoute, ""),
+
     browserPath,
+
+    activationBoot:
+      Boolean(options.activationBoot),
+
+    resetConfirmBoot:
+      Boolean(options.resetConfirmBoot),
   };
 }
 
@@ -663,32 +961,138 @@ function restoreRouteContext(context = {}) {
     return false;
   }
 
-  const route = stripSearchAndHash(
-    context.route ||
-      context.publicPath ||
-      "/"
-  );
+  const route =
+    stripSearchAndHash(
+      context.route ||
+        context.publicPath ||
+        "/"
+    );
 
-  const publicPath = safeText(
-    context.publicPath,
-    route
-  );
+  const publicPath =
+    safeText(
+      context.publicPath,
+      route
+    );
 
   try {
-    AppCore?.setRoute?.(route);
+    AppCore?.setRoute?.(
+      route
+    );
   } catch {}
 
   try {
-    AppCore?.setPublicPath?.(publicPath);
+    AppCore?.setPublicPath?.(
+      publicPath
+    );
   } catch {}
 
   safeSetState({
     route,
     publicPath,
-    lastRoute: context.lastRoute || route,
+    lastRoute:
+      context.lastRoute || route,
+
+    bootIsActivation:
+      Boolean(
+        context.activationBoot ||
+          ensureCoreState().bootIsActivation
+      ),
+
+    bootHasActivationToken:
+      Boolean(
+        context.activationBoot ||
+          ensureCoreState().bootHasActivationToken
+      ),
+
+    bootIsResetConfirm:
+      Boolean(
+        context.resetConfirmBoot ||
+          ensureCoreState().bootIsResetConfirm
+      ),
+
+    bootHasResetToken:
+      Boolean(
+        context.resetConfirmBoot ||
+          ensureCoreState().bootHasResetToken
+      ),
   });
 
   return true;
+}
+
+/* =========================================================
+   CORE STORAGE WRITES
+========================================================= */
+
+function getCoreStorageKey(name = "") {
+  return safeText(
+    AppCore?.config?.storageKeys?.[name],
+    name
+  );
+}
+
+function writeCoreToken(token = null) {
+  const cleanToken =
+    safeText(token, "") || null;
+
+  const tokenKey =
+    getCoreStorageKey("token");
+
+  try {
+    if (cleanToken) {
+      AppCore?.storage?.set?.(
+        tokenKey,
+        cleanToken
+      );
+    } else {
+      AppCore?.storage?.remove?.(
+        tokenKey
+      );
+    }
+  } catch {}
+
+  safeSetState({
+    token:
+      cleanToken,
+    accessToken:
+      cleanToken,
+  });
+
+  return cleanToken;
+}
+
+function writeCoreUser(user = null) {
+  const finalUser =
+    user || null;
+
+  const userKey =
+    getCoreStorageKey("user");
+
+  try {
+    if (finalUser) {
+      AppCore?.storage?.set?.(
+        userKey,
+        finalUser
+      );
+    } else {
+      AppCore?.storage?.remove?.(
+        userKey
+      );
+    }
+  } catch {}
+
+  safeSetState({
+    user:
+      finalUser,
+    currentUser:
+      finalUser,
+    authUser:
+      finalUser,
+    sessionUser:
+      finalUser,
+  });
+
+  return finalUser;
 }
 
 /* =========================================================
@@ -696,25 +1100,28 @@ function restoreRouteContext(context = {}) {
 ========================================================= */
 
 function resolveAuthenticated(state) {
-  const token = safeText(
-    first(
-      state?.token,
-      state?.accessToken,
-      state?.session?.token,
-      state?.session?.accessToken
-    ),
-    ""
-  );
+  const token =
+    safeText(
+      first(
+        state?.token,
+        state?.accessToken,
+        state?.session?.token,
+        state?.session?.accessToken
+      ),
+      ""
+    );
 
   const user =
     state?.user ||
+    state?.currentUser ||
+    state?.authUser ||
     state?.session?.user ||
     null;
 
   /*
     Regla dura:
     token sin usuario NO es sesión autenticada.
-    Esto evita avatar/dashboard fantasma.
+    Evita avatar/dashboard fantasma.
   */
   return (
     hasUsableToken(token) &&
@@ -725,53 +1132,82 @@ function resolveAuthenticated(state) {
 function buildDerivedAuthState(state = ensureCoreState()) {
   const user =
     state.user ||
+    state.currentUser ||
+    state.authUser ||
     state?.session?.user ||
     null;
 
-  const authenticated = resolveAuthenticated(state);
+  const authenticated =
+    resolveAuthenticated(state);
 
   const explicitRole =
     state.role ||
+    state.userRole ||
     state?.session?.role ||
     "";
 
-  const roles = authenticated
-    ? resolveRolesFromUser(user, explicitRole)
-    : [];
+  const roles =
+    authenticated
+      ? resolveRolesFromUser(user, explicitRole)
+      : [];
 
-  const role = authenticated
-    ? resolveCanonicalRole(roles)
-    : "";
+  const role =
+    authenticated
+      ? resolveCanonicalRole(roles)
+      : "";
 
   return {
     authenticated,
     role,
     roles,
-    isAdmin: roles.some(isAdminRole),
-    isSupport: roles.some(isSupportRole),
-    isManager: roles.some(isManagerRole),
+
+    isAdmin:
+      roles.some(isAdminRole),
+
+    isSupport:
+      roles.some(isSupportRole),
+
+    isManager:
+      roles.some(isManagerRole),
   };
 }
 
 function syncDerivedState() {
-  const state = ensureCoreState();
-  const derived = buildDerivedAuthState(state);
+  const state =
+    ensureCoreState();
 
-  state.authenticated = derived.authenticated;
-  state.role = derived.role;
-  state.roles = derived.roles;
+  const derived =
+    buildDerivedAuthState(state);
 
-  state.isAdmin = derived.isAdmin;
-  state.isSupport = derived.isSupport;
-  state.isManager = derived.isManager;
+  state.authenticated =
+    derived.authenticated;
 
-  if (!derived.authenticated) {
-    state.role = "";
-    state.roles = [];
-    state.isAdmin = false;
-    state.isSupport = false;
-    state.isManager = false;
-  }
+  state.role =
+    derived.authenticated
+      ? derived.role
+      : "";
+
+  state.userRole =
+    derived.authenticated
+      ? derived.role
+      : "";
+
+  state.roles =
+    derived.authenticated
+      ? derived.roles
+      : [];
+
+  state.isAdmin =
+    derived.authenticated &&
+    derived.isAdmin;
+
+  state.isSupport =
+    derived.authenticated &&
+    derived.isSupport;
+
+  state.isManager =
+    derived.authenticated &&
+    derived.isManager;
 
   return state;
 }
@@ -782,53 +1218,31 @@ function safeSyncUserUI() {
   } catch {}
 }
 
-function safeSetToken(token = null) {
-  const cleanToken = safeText(token, "") || null;
-
-  if (typeof AppCore?.setToken === "function") {
-    try {
-      AppCore.setToken(cleanToken);
-    } catch {}
-  }
-
-  safeSetState({
-    token: cleanToken,
-    accessToken: cleanToken,
-  });
-}
-
-function safeSetUser(user = null) {
-  const finalUser = user || null;
-
-  if (typeof AppCore?.setUser === "function") {
-    try {
-      AppCore.setUser(finalUser);
-    } catch {}
-  }
-
-  safeSetState({
-    user: finalUser,
-  });
-}
-
 function resolveThemeFromUser(user = null) {
-  if (!user || typeof user !== "object") {
+  if (
+    !user ||
+    typeof user !== "object"
+  ) {
     return null;
   }
 
-  const explicitTheme = String(
-    user.theme ??
-      user?.preferences?.theme ??
-      user?.settings?.theme ??
-      user?.raw?.theme ??
-      user?.raw?.preferences?.theme ??
-      user?.raw?.settings?.theme ??
-      ""
-  )
-    .trim()
-    .toLowerCase();
+  const explicitTheme =
+    String(
+      user.theme ??
+        user?.preferences?.theme ??
+        user?.settings?.theme ??
+        user?.raw?.theme ??
+        user?.raw?.preferences?.theme ??
+        user?.raw?.settings?.theme ??
+        ""
+    )
+      .trim()
+      .toLowerCase();
 
-  if (explicitTheme === "light" || explicitTheme === "dark") {
+  if (
+    explicitTheme === "light" ||
+    explicitTheme === "dark"
+  ) {
     return explicitTheme;
   }
 
@@ -842,26 +1256,41 @@ function resolveThemeFromUser(user = null) {
     hasOwn(user?.raw?.preferences, "darkMode") ||
     hasOwn(user?.raw?.settings, "darkMode");
 
-  if (hasExplicitDarkMode && typeof user.darkMode === "boolean") {
-    return user.darkMode ? "dark" : "light";
+  if (
+    hasExplicitDarkMode &&
+    typeof user.darkMode === "boolean"
+  ) {
+    return user.darkMode
+      ? "dark"
+      : "light";
   }
 
   return null;
 }
 
 function applyThemeFromUser(user = null) {
-  const theme = resolveThemeFromUser(user);
+  const theme =
+    resolveThemeFromUser(user);
 
-  if (theme !== "light" && theme !== "dark") {
+  if (
+    theme !== "light" &&
+    theme !== "dark"
+  ) {
     return null;
   }
 
   try {
-    AppCore?.setTheme?.(theme);
+    AppCore?.setTheme?.(
+      theme
+    );
   } catch {}
 
   return theme;
 }
+
+/* =========================================================
+   STORAGE CLEAR
+========================================================= */
 
 function clearLegacyAuthStorage() {
   if (!isBrowser()) {
@@ -870,93 +1299,202 @@ function clearLegacyAuthStorage() {
 
   LEGACY_AUTH_STORAGE_KEYS.forEach((key) => {
     try {
-      window.localStorage?.removeItem?.(key);
+      window.localStorage?.removeItem?.(
+        key
+      );
     } catch {}
 
     try {
-      window.sessionStorage?.removeItem?.(key);
+      window.sessionStorage?.removeItem?.(
+        key
+      );
     } catch {}
   });
+}
+
+function clearCoreAuthStorage() {
+  try {
+    AppCore?.storage?.remove?.(
+      getCoreStorageKey("token")
+    );
+  } catch {}
+
+  try {
+    AppCore?.storage?.remove?.(
+      getCoreStorageKey("user")
+    );
+  } catch {}
 }
 
 function clearAuthStatePatch() {
   return {
     token: null,
     accessToken: null,
+
     user: null,
+    currentUser: null,
+    authUser: null,
+    sessionUser: null,
+
     role: "",
+    userRole: "",
     roles: [],
+
     authenticated: false,
+
     isAdmin: false,
     isSupport: false,
     isManager: false,
+
     session: null,
     sessionId: null,
     sessionUserId: null,
+
+    currentResolvedUsername: null,
   };
 }
 
 function safeClearSession(context = {}) {
-  if (typeof AppCore?.clearSession === "function") {
-    try {
+  try {
+    if (typeof AppCore?.clearSession === "function") {
       AppCore.clearSession();
+
       restoreRouteContext(context);
-      safeSetState(clearAuthStatePatch());
-      return;
-    } catch (error) {
-      safeWarn("AppCore.clearSession() falló.", error);
+
+      safeSetState(
+        clearAuthStatePatch()
+      );
+
+      return true;
     }
+  } catch (error) {
+    safeWarn(
+      "AppCore.clearSession() falló.",
+      error
+    );
   }
 
-  safeSetState(clearAuthStatePatch());
+  safeSetState(
+    clearAuthStatePatch()
+  );
 
   restoreRouteContext(context);
+
+  return true;
 }
 
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
 function getCurrentStateSnapshotBase() {
-  const state = ensureCoreState();
+  const state =
+    ensureCoreState();
 
   syncDerivedState();
 
+  const user =
+    state.user ||
+    state.currentUser ||
+    state.authUser ||
+    state.session?.user ||
+    null;
+
+  const token =
+    state.token ||
+    state.accessToken ||
+    state.session?.token ||
+    state.session?.accessToken ||
+    null;
+
   return {
-    authenticated: Boolean(state.authenticated),
+    authenticated:
+      Boolean(state.authenticated),
 
-    token: state.token || state.accessToken || null,
-    accessToken: state.accessToken || state.token || null,
+    token,
+    accessToken:
+      state.accessToken || token,
 
-    user: state.user || state?.session?.user || null,
+    user,
 
-    role: state.role || null,
-    roles: safeArray(state.roles),
+    role:
+      state.role || null,
 
-    isAdmin: Boolean(state.isAdmin),
-    isSupport: Boolean(state.isSupport),
-    isManager: Boolean(state.isManager),
+    roles:
+      normalizeRoles(state.roles),
 
-    route: state.route || "/",
-    publicPath: state.publicPath || "/",
+    isAdmin:
+      Boolean(state.isAdmin),
+
+    isSupport:
+      Boolean(state.isSupport),
+
+    isManager:
+      Boolean(state.isManager),
+
+    route:
+      state.route || "/",
+
+    publicPath:
+      state.publicPath || "/",
+  };
+}
+
+export function buildSessionSnapshot(extra = {}) {
+  const base =
+    getCurrentStateSnapshotBase();
+
+  return {
+    ...base,
+
+    refreshToken:
+      getStoredRefreshToken() || null,
+
+    sessionId:
+      getStoredSessionId() || null,
+
+    sessionUserId:
+      getStoredSessionUserId() || null,
+
+    ...extra,
   };
 }
 
 /* =========================================================
-   FINGERPRINT
+   FINGERPRINT / EVENTS
 ========================================================= */
 
 function buildSessionFingerprint(snapshot = {}) {
-  const user = snapshot?.user || {};
+  const user =
+    snapshot?.user || {};
 
   return JSON.stringify({
-    authenticated: Boolean(snapshot.authenticated),
+    authenticated:
+      Boolean(snapshot.authenticated),
 
-    token: safeText(snapshot.token),
-    role: safeText(snapshot.role),
-    roles: safeArray(snapshot.roles).join("|"),
+    hasToken:
+      Boolean(snapshot.token),
 
-    isAdmin: Boolean(snapshot.isAdmin),
+    tokenLength:
+      safeText(snapshot.token).length,
 
-    refreshToken: safeText(snapshot.refreshToken),
-    sessionId: safeText(snapshot.sessionId),
-    sessionUserId: safeText(snapshot.sessionUserId),
+    role:
+      safeText(snapshot.role),
+
+    roles:
+      normalizeRoles(snapshot.roles).join("|"),
+
+    isAdmin:
+      Boolean(snapshot.isAdmin),
+
+    hasRefreshToken:
+      Boolean(snapshot.refreshToken),
+
+    sessionId:
+      safeText(snapshot.sessionId),
+
+    sessionUserId:
+      safeText(snapshot.sessionUserId),
 
     userId:
       user.id ||
@@ -969,6 +1507,7 @@ function buildSessionFingerprint(snapshot = {}) {
     username:
       user.username ||
       user.userName ||
+      user.user_name ||
       user.email ||
       user.phone ||
       null,
@@ -989,8 +1528,10 @@ function emitSessionState({
       buildSessionFingerprint(before) !==
       buildSessionFingerprint(after),
     durationMs,
-    timestamp: nowMs(),
-    at: new Date().toISOString(),
+    timestamp:
+      nowMs(),
+    at:
+      new Date().toISOString(),
   });
 }
 
@@ -1025,21 +1566,40 @@ function emitSessionClearedEvents(after = {}) {
 }
 
 /* =========================================================
-   SNAPSHOT
+   SAFE PERSIST HELPERS
 ========================================================= */
 
-export function buildSessionSnapshot(extra = {}) {
-  const base = getCurrentStateSnapshotBase();
+function safePersistRefreshToken(value) {
+  try {
+    persistRefreshToken(
+      value || null
+    );
+  } catch {}
+}
 
-  return {
-    ...base,
+function safePersistTempToken(value) {
+  try {
+    persistTempToken(
+      value || null
+    );
+  } catch {}
+}
 
-    refreshToken: getStoredRefreshToken() || null,
-    sessionId: getStoredSessionId() || null,
-    sessionUserId: getStoredSessionUserId() || null,
+function safePersistSessionContext(sessionData, user) {
+  try {
+    persistSessionContext(
+      sessionData || null,
+      user || null
+    );
+  } catch {}
+}
 
-    ...extra,
-  };
+function safePersistAuxSessionData(user) {
+  try {
+    persistAuxSessionData(
+      user || null
+    );
+  } catch {}
 }
 
 /* =========================================================
@@ -1055,11 +1615,31 @@ export function applySession({
   tempToken = undefined,
   sessionData = undefined,
   authenticated = undefined,
-} = {}) {
-  const startedAt = nowMs();
-  const before = buildSessionSnapshot();
 
-  const state = ensureCoreState();
+  /*
+    Por defecto NO reutilizamos usuario antiguo cuando llega token explícito
+    sin user explícito. Esto evita sesión fantasma.
+  */
+  preserveExistingUser = false,
+
+  silent = false,
+  source = "auth.session",
+} = {}) {
+  const startedAt =
+    nowMs();
+
+  const before =
+    buildSessionSnapshot();
+
+  const state =
+    ensureCoreState();
+
+  const tokenProvided =
+    token !== undefined ||
+    accessToken !== undefined;
+
+  const userProvided =
+    user !== undefined;
 
   const incomingToken =
     token !== undefined
@@ -1069,50 +1649,66 @@ export function applySession({
         : undefined;
 
   const normalizedUser =
-    user === undefined
-      ? undefined
-      : user
-        ? normalizeUser(user)
-        : null;
+    userProvided
+      ? (
+          user
+            ? normalizeUser(user)
+            : null
+        )
+      : undefined;
 
-  /*
-    Si llega token explícito, se actualiza.
-    Si llega user explícito null, se elimina.
-    Si llega token sin user, sólo se conserva el user actual si es usable.
-  */
-  if (incomingToken !== undefined) {
-    safeSetToken(incomingToken || null);
+  if (tokenProvided) {
+    writeCoreToken(
+      incomingToken || null
+    );
   }
 
-  if (user !== undefined) {
-    safeSetUser(normalizedUser || null);
+  if (userProvided) {
+    writeCoreUser(
+      normalizedUser || null
+    );
   }
 
-  const currentStateAfterBasePatch =
+  const currentState =
     ensureCoreState();
 
   const effectiveToken =
     safeText(
       first(
-        incomingToken,
-        currentStateAfterBasePatch.token,
-        currentStateAfterBasePatch.accessToken,
-        currentStateAfterBasePatch.session?.token,
-        currentStateAfterBasePatch.session?.accessToken
+        tokenProvided
+          ? incomingToken
+          : undefined,
+        currentState.token,
+        currentState.accessToken,
+        currentState.session?.token,
+        currentState.session?.accessToken
       ),
       ""
     );
 
-  const effectiveUser =
-    normalizedUser !== undefined
-      ? normalizedUser
-      : (
-          hasUsableUser(currentStateAfterBasePatch.user)
-            ? currentStateAfterBasePatch.user
-            : hasUsableUser(currentStateAfterBasePatch.session?.user)
-              ? currentStateAfterBasePatch.session.user
-              : null
-        );
+  let effectiveUser = null;
+
+  if (userProvided) {
+    effectiveUser =
+      normalizedUser || null;
+  } else if (
+    tokenProvided &&
+    preserveExistingUser !== true
+  ) {
+    effectiveUser =
+      null;
+  } else {
+    effectiveUser =
+      hasUsableUser(currentState.user)
+        ? currentState.user
+        : hasUsableUser(currentState.currentUser)
+          ? currentState.currentUser
+          : hasUsableUser(currentState.authUser)
+            ? currentState.authUser
+            : hasUsableUser(currentState.session?.user)
+              ? currentState.session.user
+              : null;
+  }
 
   const usableToken =
     hasUsableToken(effectiveToken);
@@ -1130,7 +1726,10 @@ export function applySession({
 
   const nextRoles =
     nextAuthenticated
-      ? resolveRolesFromUser(effectiveUser, explicitRole)
+      ? resolveRolesFromUser(
+          effectiveUser,
+          explicitRole
+        )
       : [];
 
   const nextRole =
@@ -1139,71 +1738,159 @@ export function applySession({
       : "";
 
   if (refreshToken !== undefined) {
-    persistRefreshToken(refreshToken || null);
+    safePersistRefreshToken(
+      refreshToken || null
+    );
   }
 
   if (tempToken !== undefined) {
-    persistTempToken(tempToken || null);
+    safePersistTempToken(
+      tempToken || null
+    );
   }
 
   if (sessionData !== undefined) {
-    persistSessionContext(
+    safePersistSessionContext(
       sessionData || null,
       effectiveUser
     );
   }
 
   if (nextAuthenticated) {
-    persistAuxSessionData(effectiveUser);
-    applyThemeFromUser(effectiveUser);
+    safePersistAuxSessionData(
+      effectiveUser
+    );
+
+    applyThemeFromUser(
+      effectiveUser
+    );
   }
 
-  safeSetState({
-    token: usableToken ? effectiveToken : null,
-    accessToken: usableToken ? effectiveToken : null,
-    user: usableUser ? effectiveUser : null,
+  const nextPatch = {
+    token:
+      usableToken
+        ? effectiveToken
+        : null,
 
-    role: nextRole,
-    roles: nextRoles,
+    accessToken:
+      usableToken
+        ? effectiveToken
+        : null,
 
-    authenticated: nextAuthenticated,
+    user:
+      usableUser
+        ? effectiveUser
+        : null,
 
-    isAdmin: nextRoles.some(isAdminRole),
-    isSupport: nextRoles.some(isSupportRole),
-    isManager: nextRoles.some(isManagerRole),
+    currentUser:
+      usableUser
+        ? effectiveUser
+        : null,
 
-    session: nextAuthenticated
-      ? {
-          ...(isPlainObject(state.session) ? state.session : {}),
-          token: effectiveToken,
-          accessToken: effectiveToken,
-          refreshToken: refreshToken || getStoredRefreshToken() || "",
-          user: effectiveUser,
-          role: nextRole,
-          roles: nextRoles,
-          authenticated: true,
-          data: sessionData || state.session?.data || null,
-        }
-      : null,
-  });
+    authUser:
+      usableUser
+        ? effectiveUser
+        : null,
+
+    sessionUser:
+      usableUser
+        ? effectiveUser
+        : null,
+
+    role:
+      nextRole,
+
+    userRole:
+      nextRole,
+
+    roles:
+      nextRoles,
+
+    authenticated:
+      nextAuthenticated,
+
+    isAdmin:
+      nextRoles.some(isAdminRole),
+
+    isSupport:
+      nextRoles.some(isSupportRole),
+
+    isManager:
+      nextRoles.some(isManagerRole),
+
+    session:
+      nextAuthenticated
+        ? {
+            ...(isPlainObject(state.session)
+              ? state.session
+              : {}),
+
+            token:
+              effectiveToken,
+
+            accessToken:
+              effectiveToken,
+
+            refreshToken:
+              refreshToken ||
+              getStoredRefreshToken() ||
+              "",
+
+            user:
+              effectiveUser,
+
+            role:
+              nextRole,
+
+            roles:
+              nextRoles,
+
+            authenticated:
+              true,
+
+            data:
+              sessionData ||
+              state.session?.data ||
+              null,
+
+            source,
+          }
+        : null,
+  };
+
+  safeSetState(nextPatch);
 
   syncDerivedState();
 
   safeSyncUserUI();
 
-  const after = buildSessionSnapshot();
+  const after =
+    buildSessionSnapshot({
+      source,
+    });
 
-  emitSessionState({
-    reason: "apply",
-    before,
-    after,
-    durationMs: nowMs() - startedAt,
-  });
+  if (!silent) {
+    emitSessionState({
+      reason:
+        nextAuthenticated
+          ? "apply"
+          : "apply:unauthenticated",
+      before,
+      after,
+      durationMs:
+        nowMs() - startedAt,
+    });
 
-  if (after.authenticated) {
-    emitSessionAppliedEvents(after, before);
-  } else {
-    emitSessionClearedEvents(after);
+    if (after.authenticated) {
+      emitSessionAppliedEvents(
+        after,
+        before
+      );
+    } else {
+      emitSessionClearedEvents(
+        after
+      );
+    }
   }
 
   return after;
@@ -1218,13 +1905,16 @@ export function clearSessionLocal(options = {}) {
     silent = false,
   } = options;
 
-  const startedAt = nowMs();
+  const startedAt =
+    nowMs();
 
-  const routeContext = captureRouteContext(options);
+  const routeContext =
+    captureRouteContext(options);
 
-  const before = buildSessionSnapshot({
-    routeContext,
-  });
+  const before =
+    buildSessionSnapshot({
+      routeContext,
+    });
 
   const hadData =
     Boolean(before.token) ||
@@ -1233,49 +1923,61 @@ export function clearSessionLocal(options = {}) {
     Boolean(before.sessionId) ||
     Boolean(before.sessionUserId);
 
-  safeClearSession(routeContext);
+  safeClearSession(
+    routeContext
+  );
 
   try {
     clearAuthStorage();
   } catch (error) {
-    safeWarn("clearAuthStorage() falló.", error);
+    safeWarn(
+      "clearAuthStorage() falló.",
+      error
+    );
   }
 
+  clearCoreAuthStorage();
   clearLegacyAuthStorage();
 
-  try {
-    persistRefreshToken(null);
-  } catch {}
+  safePersistRefreshToken(null);
+  safePersistTempToken(null);
+  safePersistSessionContext(null, null);
 
-  try {
-    persistTempToken(null);
-  } catch {}
+  safeSetState(
+    clearAuthStatePatch()
+  );
 
-  try {
-    persistSessionContext(null, null);
-  } catch {}
-
-  safeSetState(clearAuthStatePatch());
-
-  restoreRouteContext(routeContext);
+  restoreRouteContext(
+    routeContext
+  );
 
   syncDerivedState();
 
   safeSyncUserUI();
 
-  const after = buildSessionSnapshot({
-    routeContext,
-  });
+  const after =
+    buildSessionSnapshot({
+      routeContext,
+    });
 
-  if (!safeBool(silent, false) && hadData) {
-    emitSessionClearedEvents(after);
+  if (
+    !safeBool(silent, false) &&
+    hadData
+  ) {
+    emitSessionClearedEvents(
+      after
+    );
   }
 
   emitSessionState({
-    reason: safeBool(silent, false) ? "clear:silent" : "clear",
+    reason:
+      safeBool(silent, false)
+        ? "clear:silent"
+        : "clear",
     before,
     after,
-    durationMs: nowMs() - startedAt,
+    durationMs:
+      nowMs() - startedAt,
   });
 
   return true;
@@ -1286,33 +1988,51 @@ export function clearSessionLocal(options = {}) {
 ========================================================= */
 
 export function isAuthenticated() {
-  const state = ensureCoreState();
+  const state =
+    ensureCoreState();
 
   syncDerivedState();
 
   return Boolean(
     state.authenticated &&
-      hasUsableToken(first(state.token, state.accessToken)) &&
-      hasUsableUser(state.user || state.session?.user)
+      hasUsableToken(
+        first(
+          state.token,
+          state.accessToken
+        )
+      ) &&
+      hasUsableUser(
+        state.user ||
+        state.currentUser ||
+        state.authUser ||
+        state.session?.user
+      )
   );
 }
 
 export function getCurrentRole() {
   syncDerivedState();
 
-  return safeText(ensureCoreState().role).toLowerCase();
+  return safeText(
+    ensureCoreState().role,
+    ""
+  ).toLowerCase();
 }
 
 export function getCurrentRoles() {
   syncDerivedState();
 
-  return safeArray(ensureCoreState().roles);
+  return normalizeRoles(
+    ensureCoreState().roles
+  );
 }
 
 export function isCurrentUserAdmin() {
   syncDerivedState();
 
-  return Boolean(ensureCoreState().isAdmin);
+  return Boolean(
+    ensureCoreState().isAdmin
+  );
 }
 
 export function hasRole(...roles) {
@@ -1320,16 +2040,25 @@ export function hasRole(...roles) {
     return true;
   }
 
-  const allowedRoles = expandRoleAliases(roles.flat());
+  const allowedRoles =
+    expandRoleAliases(
+      roles.flat(Infinity)
+    );
+
   if (!allowedRoles.length) {
     return true;
   }
 
-  const currentRoles = new Set(
-    expandRoleAliases(getCurrentRoles())
-  );
+  const currentRoles =
+    new Set(
+      expandRoleAliases(
+        getCurrentRoles()
+      )
+    );
 
-  return allowedRoles.some((role) => currentRoles.has(role));
+  return allowedRoles.some((roleName) =>
+    currentRoles.has(roleName)
+  );
 }
 
 export function requireRole(...roles) {
@@ -1348,12 +2077,19 @@ export function getAuthHeader() {
     return {};
   }
 
-  const token = safeText(
-    first(
-      ensureCoreState().token,
-      ensureCoreState().accessToken
-    )
-  );
+  const state =
+    ensureCoreState();
+
+  const token =
+    safeText(
+      first(
+        state.token,
+        state.accessToken,
+        state.session?.token,
+        state.session?.accessToken
+      ),
+      ""
+    );
 
   if (!token) {
     return {};
@@ -1369,21 +2105,32 @@ export function getAuthHeader() {
 ========================================================= */
 
 export function getSessionDebugSnapshot() {
-  const snapshot = buildSessionSnapshot();
+  const snapshot =
+    buildSessionSnapshot();
 
   return {
-    authenticated: Boolean(snapshot.authenticated),
+    authenticated:
+      Boolean(snapshot.authenticated),
 
-    role: snapshot.role || null,
-    roles: safeArray(snapshot.roles),
+    role:
+      snapshot.role || null,
 
-    isAdmin: Boolean(snapshot.isAdmin),
-    isSupport: Boolean(snapshot.isSupport),
-    isManager: Boolean(snapshot.isManager),
+    roles:
+      normalizeRoles(snapshot.roles),
+
+    isAdmin:
+      Boolean(snapshot.isAdmin),
+
+    isSupport:
+      Boolean(snapshot.isSupport),
+
+    isManager:
+      Boolean(snapshot.isManager),
 
     username:
       snapshot.user?.username ||
       snapshot.user?.userName ||
+      snapshot.user?.user_name ||
       snapshot.user?.email ||
       snapshot.user?.name ||
       snapshot.user?.nombre ||
@@ -1393,30 +2140,46 @@ export function getSessionDebugSnapshot() {
     userIdentity:
       getUserIdentity(snapshot.user),
 
-    hasToken: Boolean(snapshot.token),
-    hasUser: hasUsableUser(snapshot.user),
-    hasRefreshToken: Boolean(snapshot.refreshToken),
+    hasToken:
+      Boolean(snapshot.token),
 
-    sessionId: snapshot.sessionId || null,
-    sessionUserId: snapshot.sessionUserId || null,
+    hasUser:
+      hasUsableUser(snapshot.user),
 
-    route: snapshot.route || "/",
-    publicPath: snapshot.publicPath || "/",
+    hasRefreshToken:
+      Boolean(snapshot.refreshToken),
 
-    isPublicTechnicalRoute: isPublicTechnicalRoute(
-      snapshot.route ||
+    sessionId:
+      snapshot.sessionId || null,
+
+    sessionUserId:
+      snapshot.sessionUserId || null,
+
+    route:
+      snapshot.route || "/",
+
+    publicPath:
+      snapshot.publicPath || "/",
+
+    isPublicTechnicalRoute:
+      isPublicTechnicalRoute(
+        snapshot.route ||
         snapshot.publicPath ||
         "/"
-    ),
+      ),
 
-    rawUserRoleCandidates: collectRoleCandidatesFromUser(snapshot.user),
+    rawUserRoleCandidates:
+      collectRoleCandidatesFromUser(
+        snapshot.user
+      ),
   };
 }
 
 export function buildAuthErrorPayload(error) {
   return {
     error,
-    message: extractMessage(error),
+    message:
+      extractMessage(error),
   };
 }
 

@@ -17,9 +17,15 @@
    - json/text/blob/arrayBuffer auto
    - dedupe GET/HEAD
    - retry enterprise con backoff+jitter
+   - retry HTTP real para 408/429/5xx
    - protección hooks
    - cleanup total de inflight map
    - errores consistentes
+
+   NOTA IMPORTANTE:
+   - este módulo NO decide qué endpoints existen.
+   - si aparecen 404 en /facturas, /users, /clients, etc.,
+     el origen está en el caller/vista/servicio que invoca esos paths.
 ========================================================= */
 
 import { config } from "./config.js";
@@ -47,6 +53,7 @@ function safeNumber(
   fallback = 0
 ) {
   const n = Number(value);
+
   return Number.isFinite(n)
     ? n
     : fallback;
@@ -69,6 +76,40 @@ function safeText(
   return text || fallback;
 }
 
+function safeBoolean(
+  value,
+  fallback = false
+) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  return fallback;
+}
+
+function safeArray(
+  value
+) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
+function safeObject(
+  value,
+  fallback = {}
+) {
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    return value;
+  }
+
+  return fallback;
+}
+
 function safeEmit(
   events,
   eventName,
@@ -87,10 +128,15 @@ async function safeRunHooks(
   payload
 ) {
   try {
-    return await runHookSeries(
-      hooks,
-      payload
-    );
+    const result =
+      await runHookSeries(
+        hooks,
+        payload
+      );
+
+    return result === undefined
+      ? payload
+      : result;
   } catch {
     return payload;
   }
@@ -106,6 +152,89 @@ function sleep(ms = 0) {
           safeNumber(ms, 0)
         )
       )
+  );
+}
+
+function getHeader(
+  headers,
+  name
+) {
+  const target =
+    safeText(name).toLowerCase();
+
+  if (!target) {
+    return undefined;
+  }
+
+  const source =
+    safeObject(headers);
+
+  const key =
+    Object.keys(source).find(
+      (item) =>
+        safeText(item)
+          .toLowerCase() ===
+        target
+    );
+
+  return key
+    ? source[key]
+    : undefined;
+}
+
+function hasHeader(
+  headers,
+  name
+) {
+  return getHeader(
+    headers,
+    name
+  ) !== undefined;
+}
+
+function setHeader(
+  headers,
+  name,
+  value
+) {
+  if (!headers || !name) {
+    return headers;
+  }
+
+  const target =
+    safeText(name).toLowerCase();
+
+  const existingKey =
+    Object.keys(headers).find(
+      (item) =>
+        safeText(item)
+          .toLowerCase() ===
+        target
+    );
+
+  headers[
+    existingKey || name
+  ] = value;
+
+  return headers;
+}
+
+function isExpectedStatus(
+  status,
+  expectedStatuses
+) {
+  const list =
+    safeArray(expectedStatuses)
+      .map((item) =>
+        safeNumber(item, -1)
+      )
+      .filter((item) =>
+        item >= 100 &&
+        item <= 599
+      );
+
+  return list.includes(
+    safeNumber(status, 0)
   );
 }
 
@@ -215,11 +344,18 @@ export function buildRequestError({
           : "Network Error"
     );
 
-  const message =
-    safeText(
-      data?.message ||
+  const dataMessage =
+    typeof data === "string"
+      ? data
+      : data?.message ||
         data?.error ||
         data?.detail ||
+        data?.title ||
+        "";
+
+  const message =
+    safeText(
+      dataMessage ||
         raw,
       statusText
     );
@@ -522,7 +658,7 @@ export function createRequest({
     const requestId =
       `req_${++requestSequence}`;
 
-    let requestConfig = {
+    const baseConfig = {
       method: "GET",
       headers: {},
       body: null,
@@ -543,16 +679,28 @@ export function createRequest({
       retryDelay: 300,
       retryMaxDelay: 4000,
       dedupe: true,
-      ...options,
+      silent: false,
+      emitEvents: true,
+      storeError: true,
+      expectedStatuses: [],
+      ...safeObject(options),
       path,
     };
 
-    requestConfig =
+    let requestConfig =
       await safeRunHooks(
         registry?.hooks
           ?.beforeRequest,
-        requestConfig
+        baseConfig
       );
+
+    requestConfig = {
+      ...baseConfig,
+      ...safeObject(
+        requestConfig,
+        baseConfig
+      ),
+    };
 
     const method =
       safeText(
@@ -569,7 +717,9 @@ export function createRequest({
       normalizeHeaders({
         Accept:
           "application/json",
-        ...requestConfig.headers,
+        ...safeObject(
+          requestConfig.headers
+        ),
       });
 
     if (
@@ -578,8 +728,11 @@ export function createRequest({
         state?.token
       )
     ) {
-      finalHeaders.Authorization =
-        `${config.auth.bearerPrefix} ${state.token}`;
+      setHeader(
+        finalHeaders,
+        "Authorization",
+        `${config.auth.bearerPrefix} ${state.token}`
+      );
     }
 
     const isFormData =
@@ -598,15 +751,26 @@ export function createRequest({
       requestConfig.body !==
         null &&
       !isFormData &&
-      !finalHeaders[
+      !hasHeader(
+        finalHeaders,
         "Content-Type"
-      ]
+      )
     ) {
-      finalHeaders[
-        "Content-Type"
-      ] =
-        "application/json";
+      setHeader(
+        finalHeaders,
+        "Content-Type",
+        "application/json"
+      );
     }
+
+    const contentType =
+      safeText(
+        getHeader(
+          finalHeaders,
+          "Content-Type"
+        ),
+        ""
+      ).toLowerCase();
 
     const payload =
       !bodyAllowed
@@ -616,13 +780,9 @@ export function createRequest({
           ? null
           : isFormData
             ? requestConfig.body
-            : String(
-                finalHeaders[
-                  "Content-Type"
-                ]
-              ).includes(
-                  "application/json"
-                )
+            : contentType.includes(
+                "application/json"
+              )
               ? JSON.stringify(
                   requestConfig.body
                 )
@@ -654,31 +814,41 @@ export function createRequest({
         dedupeKey
       )
     ) {
-      safeEmit(
-        events,
-        "app:request:deduped",
-        {
-          requestId,
-          url,
-          method,
-          dedupeKey,
-        }
-      );
+      if (
+        requestConfig.emitEvents !==
+        false
+      ) {
+        safeEmit(
+          events,
+          "app:request:deduped",
+          {
+            requestId,
+            url,
+            method,
+            dedupeKey,
+          }
+        );
+      }
 
       return inFlightRequests.get(
         dedupeKey
       );
     }
 
-    safeEmit(
-      events,
-      "app:request:start",
-      {
-        requestId,
-        url,
-        method,
-      }
-    );
+    if (
+      requestConfig.emitEvents !==
+      false
+    ) {
+      safeEmit(
+        events,
+        "app:request:start",
+        {
+          requestId,
+          url,
+          method,
+        }
+      );
+    }
 
     const promise =
       (async () => {
@@ -717,19 +887,50 @@ export function createRequest({
                   );
 
                 try {
-                  return await fetch(
-                    url,
-                    {
+                  const currentResponse =
+                    await fetch(
+                      url,
+                      {
+                        method,
+                        headers:
+                          finalHeaders,
+                        body:
+                          payload,
+                        credentials:
+                          requestConfig.credentials,
+                        signal,
+                      }
+                    );
+
+                  const allowedStatus =
+                    isExpectedStatus(
+                      currentResponse.status,
+                      requestConfig.expectedStatuses
+                    );
+
+                  if (
+                    requestConfig.raw !==
+                      true &&
+                    !currentResponse.ok &&
+                    !allowedStatus
+                  ) {
+                    const errorData =
+                      await parseResponseBody(
+                        currentResponse,
+                        requestConfig.responseType
+                      );
+
+                    throw buildRequestError({
+                      response:
+                        currentResponse,
+                      data:
+                        errorData,
+                      url,
                       method,
-                      headers:
-                        finalHeaders,
-                      body:
-                        payload,
-                      credentials:
-                        requestConfig.credentials,
-                      signal,
-                    }
-                  );
+                    });
+                  }
+
+                  return currentResponse;
                 } finally {
                   clearTimeout(
                     timeoutId
@@ -742,7 +943,14 @@ export function createRequest({
                 onRetry:
                   (
                     retryMeta
-                  ) =>
+                  ) => {
+                    if (
+                      requestConfig.emitEvents ===
+                      false
+                    ) {
+                      return;
+                    }
+
                     safeEmit(
                       events,
                       "app:request:retry",
@@ -752,7 +960,8 @@ export function createRequest({
                         method,
                         ...retryMeta,
                       }
-                    ),
+                    );
+                  },
               },
               utils
             );
@@ -761,21 +970,26 @@ export function createRequest({
             requestConfig.raw ===
             true
           ) {
-            safeEmit(
-              events,
-              "app:request:success",
-              {
-                requestId,
-                url,
-                method,
-                status:
-                  response.status,
-                attempts,
-                durationMs:
-                  Date.now() -
-                  startedAt,
-              }
-            );
+            if (
+              requestConfig.emitEvents !==
+              false
+            ) {
+              safeEmit(
+                events,
+                "app:request:success",
+                {
+                  requestId,
+                  url,
+                  method,
+                  status:
+                    response.status,
+                  attempts,
+                  durationMs:
+                    Date.now() -
+                    startedAt,
+                }
+              );
+            }
 
             return response;
           }
@@ -786,8 +1000,15 @@ export function createRequest({
               requestConfig.responseType
             );
 
+          const allowedStatus =
+            isExpectedStatus(
+              response.status,
+              requestConfig.expectedStatuses
+            );
+
           if (
-            !response.ok
+            !response.ok &&
+            !allowedStatus
           ) {
             throw buildRequestError({
               response,
@@ -804,21 +1025,26 @@ export function createRequest({
               data
             );
 
-          safeEmit(
-            events,
-            "app:request:success",
-            {
-              requestId,
-              url,
-              method,
-              status:
-                response.status,
-              attempts,
-              durationMs:
-                Date.now() -
-                startedAt,
-            }
-          );
+          if (
+            requestConfig.emitEvents !==
+            false
+          ) {
+            safeEmit(
+              events,
+              "app:request:success",
+              {
+                requestId,
+                url,
+                method,
+                status:
+                  response.status,
+                attempts,
+                durationMs:
+                  Date.now() -
+                  startedAt,
+              }
+            );
+          }
 
           return finalData;
         } catch (error) {
@@ -855,23 +1081,43 @@ export function createRequest({
               requestConfig
             );
 
-          try {
-            setError?.(
+          const silent =
+            safeBoolean(
+              requestConfig.silent,
+              false
+            );
+
+          if (
+            !silent &&
+            requestConfig.storeError !==
+            false
+          ) {
+            try {
+              setError?.(
+                normalized
+              );
+            } catch {}
+          }
+
+          if (!silent) {
+            await safeRunHooks(
+              registry?.hooks
+                ?.onRequestError,
               normalized
             );
-          } catch {}
+          }
 
-          await safeRunHooks(
-            registry?.hooks
-              ?.onRequestError,
-            normalized
-          );
-
-          safeEmit(
-            events,
-            "app:request:error",
-            normalized
-          );
+          if (
+            !silent &&
+            requestConfig.emitEvents !==
+            false
+          ) {
+            safeEmit(
+              events,
+              "app:request:error",
+              normalized
+            );
+          }
 
           throw normalized;
         }

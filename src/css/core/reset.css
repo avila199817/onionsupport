@@ -3,17 +3,22 @@
    PRO SAAS PANEL / CLEAN FOUNDATION / EXTREME LEVEL
    Archivo: src/css/core/reset.css
 
-   REFINADO PRO:
+   REFINADO PRO 10/10:
    - reset base limpio y no invasivo
    - foundation robusta para SPA enterprise
-   - menos decisiones visuales en esta capa
-   - mejor convivencia con core.css + layout.css + tokens
+   - cero decisiones visuales fuertes en esta capa
+   - mejor convivencia con variables.css + core.css + layout.css
+   - base segura para loader, shell, sidebar, topbar y vistas
+   - forms normalizados sin romper estilos posteriores
+   - media/table/dialog/autofill hardened
+   - accesibilidad y reducción de movimiento controladas
 ========================================================= */
 
 
-/* =========================
+/* =========================================================
    BOX SIZING
-========================= */
+========================================================= */
+
 *,
 *::before,
 *::after{
@@ -21,42 +26,70 @@
 }
 
 
-/* =========================
+/* =========================================================
    ROOT DEFAULTS
-========================= */
+========================================================= */
+
 html{
+  inline-size:100%;
+  min-inline-size:320px;
+  min-block-size:100%;
+
   line-height:1.15;
+
   -webkit-text-size-adjust:100%;
   text-size-adjust:100%;
+
   tab-size:4;
+
+  scroll-behavior:smooth;
 }
 
-html,
 body{
   inline-size:100%;
   min-inline-size:320px;
   min-block-size:100%;
-}
 
-body{
   margin:0;
-  min-block-size:100%;
-}
 
-
-/* =========================
-   DOCUMENT ROOT
-========================= */
-body{
   text-rendering:optimizeLegibility;
   -webkit-font-smoothing:antialiased;
   -moz-osx-font-smoothing:grayscale;
 }
 
+body,
+button,
+input,
+textarea,
+select{
+  font-family:inherit;
+}
 
-/* =========================
+
+/* =========================================================
+   DOCUMENT / APP ROOT SAFETY
+========================================================= */
+
+#app,
+#app-shell,
+#app-content,
+#view-container,
+#main-content{
+  min-inline-size:0;
+}
+
+#app-shell,
+#main-content,
+#app-content,
+#view-container{
+  position:relative;
+}
+
+
+/* =========================================================
    TYPOGRAPHY RESET
-========================= */
+========================================================= */
+
 h1,
 h2,
 h3,
@@ -90,10 +123,50 @@ small{
   font-size:80%;
 }
 
+address{
+  font-style:normal;
+}
 
-/* =========================
-   TEXT HELPERS / INLINE
-========================= */
+blockquote,
+q{
+  quotes:none;
+}
+
+blockquote::before,
+blockquote::after,
+q::before,
+q::after{
+  content:"";
+}
+
+p,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+li,
+figcaption,
+blockquote,
+dd{
+  overflow-wrap:break-word;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6{
+  text-wrap:balance;
+}
+
+
+/* =========================================================
+   INLINE / TEXT HELPERS
+========================================================= */
+
 abbr[title]{
   text-decoration:underline dotted;
   text-decoration-skip-ink:auto;
@@ -104,20 +177,36 @@ mark{
   background-color:transparent;
 }
 
+del,
+s{
+  text-decoration-thickness:from-font;
+}
 
-/* =========================
+ins{
+  text-decoration-thickness:from-font;
+  text-underline-offset:.14em;
+}
+
+
+/* =========================================================
    LINKS
-========================= */
+========================================================= */
+
 a{
   color:inherit;
   text-decoration:none;
   background-color:transparent;
 }
 
+a:not([href]){
+  cursor:default;
+}
 
-/* =========================
+
+/* =========================================================
    MEDIA
-========================= */
+========================================================= */
+
 img,
 picture,
 video,
@@ -138,6 +227,10 @@ img{
   border-style:none;
 }
 
+svg{
+  overflow:visible;
+}
+
 audio,
 video{
   display:block;
@@ -148,14 +241,28 @@ audio:not([controls]){
   block-size:0;
 }
 
+object,
+embed,
+iframe{
+  display:block;
+  max-inline-size:100%;
+}
 
-/* =========================
+iframe{
+  border:0;
+}
+
+
+/* =========================================================
    TABLES
-========================= */
+========================================================= */
+
 table{
   inline-size:100%;
+
   border-collapse:collapse;
   border-spacing:0;
+
   text-indent:0;
 }
 
@@ -163,24 +270,30 @@ caption{
   text-align:start;
 }
 
+th{
+  text-align:inherit;
+  font-weight:inherit;
+}
 
-/* =========================
+td,
+th{
+  padding:0;
+}
+
+
+/* =========================================================
    FORM ELEMENTS
-========================= */
+========================================================= */
+
 input,
 button,
 textarea,
 select{
+  margin:0;
+
   font:inherit;
   color:inherit;
   letter-spacing:inherit;
-}
-
-button,
-input,
-select,
-textarea{
-  margin:0;
 }
 
 button,
@@ -200,17 +313,30 @@ button{
   padding:0;
   border:0;
   background:none;
+  color:inherit;
+}
+
+button,
+[type="button"],
+[type="reset"],
+[type="submit"],
+[role="button"]{
+  cursor:pointer;
+}
+
+input,
+textarea,
+select{
+  border-radius:0;
+  background:transparent;
 }
 
 textarea{
   resize:vertical;
 }
 
-input,
-textarea,
 select{
-  background:transparent;
-  border-radius:0;
+  cursor:pointer;
 }
 
 fieldset{
@@ -221,10 +347,13 @@ fieldset{
 }
 
 legend{
-  padding:0;
-  color:inherit;
   display:table;
+
   max-inline-size:100%;
+  padding:0;
+
+  color:inherit;
+
   white-space:normal;
 }
 
@@ -236,22 +365,29 @@ progress{
   vertical-align:baseline;
 }
 
-
-/* =========================
-   PLACEHOLDER
-========================= */
-::placeholder{
-  opacity:1;
-  color:inherit;
+meter{
+  vertical-align:baseline;
 }
 
 
-/* =========================
-   SEARCH
-========================= */
+/* =========================================================
+   PLACEHOLDER
+========================================================= */
+
+::placeholder{
+  color:inherit;
+  opacity:1;
+}
+
+
+/* =========================================================
+   SEARCH INPUT
+========================================================= */
+
 [type="search"]{
   -webkit-appearance:textfield;
   appearance:textfield;
+
   outline-offset:-2px;
 }
 
@@ -263,18 +399,20 @@ progress{
 }
 
 
-/* =========================
-   NUMBER
-========================= */
+/* =========================================================
+   NUMBER INPUT
+========================================================= */
+
 [type="number"]::-webkit-outer-spin-button,
 [type="number"]::-webkit-inner-spin-button{
   height:auto;
 }
 
 
-/* =========================
+/* =========================================================
    FILE INPUT
-========================= */
+========================================================= */
+
 ::-webkit-file-upload-button{
   -webkit-appearance:button;
   font:inherit;
@@ -285,30 +423,51 @@ progress{
 }
 
 
-/* =========================
+/* =========================================================
    CHECKBOX / RADIO
-========================= */
+========================================================= */
+
 [type="checkbox"],
 [type="radio"]{
   padding:0;
 }
 
 
-/* =========================
+/* =========================================================
+   DISABLED / READONLY
+========================================================= */
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled,
+[aria-disabled="true"]{
+  cursor:not-allowed;
+}
+
+[aria-disabled="true"]{
+  user-select:none;
+}
+
+
+/* =========================================================
    DETAILS / SUMMARY
-========================= */
+========================================================= */
+
 details{
   display:block;
 }
 
 summary{
+  display:list-item;
   cursor:pointer;
 }
 
 
-/* =========================
+/* =========================================================
    HIDDEN / TEMPLATE
-========================= */
+========================================================= */
+
 [hidden]{
   display:none !important;
 }
@@ -318,22 +477,28 @@ template{
 }
 
 
-/* =========================
+/* =========================================================
    HR
-========================= */
+========================================================= */
+
 hr{
   block-size:0;
+
+  margin:0;
+
   color:inherit;
+
   border:0;
   border-block-start:1px solid currentColor;
+
   opacity:.12;
-  margin:0;
 }
 
 
-/* =========================
-   MONOSPACE
-========================= */
+/* =========================================================
+   MONOSPACE / CODE
+========================================================= */
+
 code,
 kbd,
 samp,
@@ -347,22 +512,27 @@ pre{
     "Liberation Mono",
     "Courier New",
     monospace;
+
   font-size:1em;
 }
 
 pre{
+  margin:0;
   overflow:auto;
 }
 
 
-/* =========================
+/* =========================================================
    SUB / SUP
-========================= */
+========================================================= */
+
 sub,
 sup{
   position:relative;
+
   font-size:75%;
   line-height:0;
+
   vertical-align:baseline;
 }
 
@@ -375,28 +545,20 @@ sup{
 }
 
 
-/* =========================
-   EMBEDDED CONTENT
-========================= */
-iframe{
-  border:0;
-}
-
-object,
-embed{
-  display:block;
-  max-inline-size:100%;
-}
-
-
-/* =========================
+/* =========================================================
    DIALOG
-========================= */
+========================================================= */
+
 dialog{
   padding:0;
+
   border:0;
   background:transparent;
   color:inherit;
+}
+
+dialog:not([open]){
+  display:none;
 }
 
 dialog::backdrop{
@@ -404,28 +566,18 @@ dialog::backdrop{
 }
 
 
-/* =========================
+/* =========================================================
    INTERACTIVE CONSISTENCY
-========================= */
+========================================================= */
+
 [role="button"]{
   cursor:pointer;
-}
-
-button:disabled,
-input:disabled,
-select:disabled,
-textarea:disabled{
-  cursor:not-allowed;
 }
 
 [aria-busy="true"]{
   cursor:progress;
 }
 
-
-/* =========================
-   TOUCH / TAP
-========================= */
 button,
 a,
 [role="button"],
@@ -435,67 +587,105 @@ select,
 textarea,
 summary{
   -webkit-tap-highlight-color:transparent;
+}
+
+button,
+a,
+[role="button"],
+summary{
   touch-action:manipulation;
 }
 
 
-/* =========================
+/* =========================================================
+   FOCUS BASE
+   Nota:
+   - core.css define el focus visual real.
+   - aquí solo evitamos comportamientos inconsistentes.
+========================================================= */
+
+:focus{
+  outline-offset:2px;
+}
+
+:focus:not(:focus-visible){
+  outline:none;
+}
+
+
+/* =========================================================
    SELECTION
-========================= */
+========================================================= */
+
 ::selection{
   background:var(--selection-bg, rgba(113,113,122,.28));
   color:var(--selection-text, inherit);
 }
 
 
-/* =========================
-   WORD SAFETY
-========================= */
-p,
-h1,
-h2,
-h3,
-h4,
-h5,
-h6,
-li,
-figcaption{
-  overflow-wrap:break-word;
-}
-
-
-/* =========================
-   ROOT APP NODES
-========================= */
-#app,
-#app-shell,
-#app-content,
-#view-container,
-#main-content{
-  min-inline-size:0;
-}
-
-
-/* =========================
+/* =========================================================
    FLEX / GRID CHILD SAFETY
-   Foundation mínima
-========================= */
+========================================================= */
+
 :where(
   .layout,
+  .app-shell,
   .main-content,
   .panel-content,
   .content-wrapper,
   .container,
   .container-fluid,
-  .container-narrow
+  .container-narrow,
+  .grid,
+  .section,
+  .page-header,
+  .section-header
 ) > *{
   min-inline-size:0;
 }
 
 
-/* =========================
+/* =========================================================
+   SCROLLBAR BASE
+   Nota:
+   - layout.css/core.css pueden especializar .main-content,
+     .table-container, etc.
+========================================================= */
+
+*{
+  scrollbar-width:thin;
+  scrollbar-color:
+    var(--scrollbar-thumb, rgba(255,255,255,.12))
+    var(--scrollbar-track, transparent);
+}
+
+::-webkit-scrollbar{
+  inline-size:var(--scrollbar-size, 10px);
+  block-size:var(--scrollbar-size, 10px);
+}
+
+::-webkit-scrollbar-track{
+  background:var(--scrollbar-track, transparent);
+}
+
+::-webkit-scrollbar-thumb{
+  border:2px solid transparent;
+  border-radius:999px;
+
+  background:var(--scrollbar-thumb, rgba(255,255,255,.12));
+  background-clip:padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover{
+  background:var(--scrollbar-thumb-hover, rgba(255,255,255,.18));
+  background-clip:padding-box;
+}
+
+
+/* =========================================================
    FORM AUTOFILL NORMALIZE
-========================= */
+========================================================= */
+
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
@@ -506,15 +696,36 @@ select:-webkit-autofill,
 select:-webkit-autofill:hover,
 select:-webkit-autofill:focus{
   -webkit-text-fill-color:inherit;
-  transition:background-color 9999s ease-in-out 0s;
+
+  box-shadow:0 0 0 1000px transparent inset;
+
+  transition:
+    background-color 9999s ease-in-out 0s,
+    color 9999s ease-in-out 0s;
+
   font:inherit;
 }
 
 
-/* =========================
+/* =========================================================
+   MOBILE TEXT SIZE / TAP POLISH
+========================================================= */
+
+@media (hover:none) and (pointer:coarse){
+  input,
+  textarea,
+  select,
+  button{
+    font-size:max(16px, 1em);
+  }
+}
+
+
+/* =========================================================
    REDUCED MOTION BASE
-========================= */
-@media (prefers-reduced-motion: reduce){
+========================================================= */
+
+@media (prefers-reduced-motion:reduce){
   html,
   html:focus-within{
     scroll-behavior:auto;
@@ -527,5 +738,51 @@ select:-webkit-autofill:focus{
     animation-iteration-count:1 !important;
     transition-duration:.01ms !important;
     scroll-behavior:auto !important;
+  }
+}
+
+
+/* =========================================================
+   PRINT BASE
+========================================================= */
+
+@media print{
+  *,
+  *::before,
+  *::after{
+    background:transparent !important;
+    box-shadow:none !important;
+    text-shadow:none !important;
+  }
+
+  html,
+  body{
+    block-size:auto;
+    min-block-size:0;
+    overflow:visible;
+  }
+
+  a,
+  a:visited{
+    text-decoration:underline;
+  }
+
+  img,
+  svg{
+    break-inside:avoid;
+  }
+
+  p,
+  h1,
+  h2,
+  h3{
+    orphans:3;
+    widows:3;
+  }
+
+  h1,
+  h2,
+  h3{
+    break-after:avoid;
   }
 }

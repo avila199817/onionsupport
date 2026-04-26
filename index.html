@@ -2,22 +2,23 @@
 <html
   lang="es"
   data-theme="dark"
+  class="app-booting app-loading"
 >
 <head>
   <!-- =========================================================
        ONION SUPPORT — INDEX / SPA SHELL
-       FULL PRO CSP CLEAN V5 PLUS MAX
+       PRO SAAS PANEL · BOOT LOADER READY · CSP CLEAN
 
        OBJETIVOS:
        - CSP clean
        - cero scripts inline
-       - cero loader hardcodeado
-       - cero flash dark forzado
+       - cero CSS inline
+       - loader estático inicial para refresh sin parpadeos
        - theme preboot externo
        - shell SPA limpio
        - sidebar / topbar montados por JS
        - preparado para dark / light
-       - preparado para loader montado por JS
+       - preparado para sesión restaurada sin flash visual
        - base sólida enterprise
   ========================================================= -->
 
@@ -25,6 +26,7 @@
        META BASE
   ========================= -->
   <meta charset="UTF-8">
+
   <meta
     http-equiv="X-UA-Compatible"
     content="IE=edge"
@@ -54,7 +56,14 @@
 
   <meta
     name="theme-color"
-    content="#1f1f1f"
+    content="#0f172a"
+    media="(prefers-color-scheme: dark)"
+  >
+
+  <meta
+    name="theme-color"
+    content="#f8fafc"
+    media="(prefers-color-scheme: light)"
   >
 
   <!-- =========================
@@ -90,6 +99,13 @@
     crossorigin
   >
 
+  <link
+    rel="preload"
+    href="/assets/logo.svg"
+    as="image"
+    type="image/svg+xml"
+  >
+
   <!-- =========================
        FONTS
   ========================= -->
@@ -117,6 +133,7 @@
     rel="stylesheet"
     href="/src/css/tokens/variables.css"
   >
+
   <link
     rel="stylesheet"
     href="/src/css/tokens/light.css"
@@ -127,14 +144,17 @@
     rel="stylesheet"
     href="/src/css/core/reset.css"
   >
+
   <link
     rel="stylesheet"
     href="/src/css/core/layout.css"
   >
+
   <link
     rel="stylesheet"
     href="/src/css/core/core.css"
   >
+
   <link
     rel="stylesheet"
     href="/src/css/core/loader.css"
@@ -145,6 +165,7 @@
     rel="stylesheet"
     href="/src/css/layout/sidebar.css"
   >
+
   <link
     rel="stylesheet"
     href="/src/css/layout/topbar.css"
@@ -176,31 +197,97 @@
 </head>
 
 <body
+  class="app-booting app-loading"
   data-app="onion"
   data-density="default"
+  data-app-loading="true"
 >
+  <!-- =========================================================
+       BOOT LOADER ESTÁTICO
+       - Visible desde refresh antes de que cargue JS
+       - Controlado después por src/app/loader.js
+       - No usa inline script ni inline style
+  ========================================================= -->
+  <div
+    id="app-loader"
+    class="app-loader is-visible"
+    data-app-loader="true"
+    data-loader-visible="true"
+    role="status"
+    aria-live="polite"
+    aria-busy="true"
+    aria-hidden="false"
+  >
+    <div
+      class="app-loader__backdrop"
+      data-loader-backdrop="true"
+      aria-hidden="true"
+    ></div>
+
+    <div class="app-loader__card">
+      <div
+        class="app-loader__brand"
+        aria-hidden="true"
+      >
+        <img
+          class="app-loader__logo"
+          src="/assets/logo.svg"
+          alt=""
+          width="64"
+          height="64"
+          decoding="async"
+          fetchpriority="high"
+          draggable="false"
+        >
+
+        <div class="app-loader__logo-fallback">
+          O
+        </div>
+      </div>
+
+      <div class="app-loader__copy">
+        <strong class="app-loader__title">
+          Onion Support
+        </strong>
+
+        <span class="app-loader__text">
+          Cargando sesión...
+        </span>
+
+        <small class="app-loader__subtext">
+          Preparando panel seguro
+        </small>
+      </div>
+
+      <div
+        class="app-loader__bar"
+        aria-hidden="true"
+      >
+        <span class="app-loader__bar-fill"></span>
+      </div>
+    </div>
+  </div>
+
   <!-- =========================================================
        NOSCRIPT FALLBACK
   ========================================================= -->
   <noscript>
-    <div class="layout">
+    <div class="layout noscript-layout">
       <main
         class="main-content"
         role="main"
         aria-label="Contenido principal"
       >
-        <div id="app-content">
-          <div id="view-container">
-            <section class="noscript-box">
-              <h1>JavaScript es necesario</h1>
+        <div id="noscript-content">
+          <section class="noscript-box">
+            <h1>JavaScript es necesario</h1>
 
-              <p>
-                Onion Support necesita JavaScript
-                para cargar la navegación SPA,
-                el panel, las vistas y la autenticación.
-              </p>
-            </section>
-          </div>
+            <p>
+              Onion Support necesita JavaScript
+              para cargar la navegación SPA,
+              el panel, las vistas y la autenticación.
+            </p>
+          </section>
         </div>
       </main>
     </div>
@@ -210,15 +297,25 @@
        APP LAYOUT
        - Sidebar montado por JS
        - Topbar montado por JS
-       - Loader montado por JS
+       - Loader inicial ya existe y lo controla src/app/loader.js
   ========================================================= -->
   <div
-    class="layout"
+    class="layout app-shell"
     id="app-shell"
+    data-app-shell="true"
+    aria-busy="true"
   >
     <!-- SIDEBAR MOUNT -->
+    <div
+      id="sidebar-mount"
+      data-sidebar-mount
+    ></div>
 
     <!-- TOPBAR MOUNT -->
+    <div
+      id="topbar-mount"
+      data-topbar-mount
+    ></div>
 
     <!-- MAIN CONTENT -->
     <main
@@ -226,12 +323,17 @@
       id="main-content"
       role="main"
       aria-label="Contenido principal"
+      tabindex="-1"
     >
-      <div id="app-content">
+      <div
+        id="app-content"
+        data-app-content
+      >
         <div
           id="view-container"
           data-view-root
           aria-live="polite"
+          aria-busy="true"
         ></div>
       </div>
     </main>

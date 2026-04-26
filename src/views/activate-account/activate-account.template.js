@@ -19,6 +19,7 @@
    - evitar botones duplicados de retorno
    - sin recuperación manual de token en UI
    - ajuste responsive anti-corte de card/botón/footer
+   - modo desktop compacto sin scroll
 ========================================================= */
 
 import { renderPasswordField } from "../../shared/password-field/index.js";
@@ -555,11 +556,20 @@ function renderScopedPasswordFieldStyle() {
 function renderActivateAccountScopedStyle() {
   return `
     <style>
+      /* =====================================================
+         ACTIVATE ACCOUNT · COMPACT FIT MODE
+         - sin scroll en desktop
+         - card más compacta
+         - sin recuadro exterior visible
+         - botón visible dentro del viewport
+      ===================================================== */
+
       .activate-account-view{
+        width:100%;
+        height:100svh;
         min-height:100svh;
-        overflow-x:hidden;
-        overflow-y:auto;
-        overscroll-behavior:contain;
+        overflow:hidden;
+        overscroll-behavior:none;
       }
 
       .activate-account-view,
@@ -568,105 +578,164 @@ function renderActivateAccountScopedStyle() {
       }
 
       .activate-account-view .login-scene{
+        width:100%;
+        height:100svh;
         min-height:100svh;
-        height:auto;
-        padding-top:max(22px, env(safe-area-inset-top));
-        padding-bottom:max(34px, env(safe-area-inset-bottom));
-        overflow:visible;
+        overflow:hidden;
+        padding:18px clamp(22px, 3vw, 44px);
+        display:flex;
+        align-items:center;
+        justify-content:center;
       }
 
       .activate-account-view .login-grid{
-        min-height:calc(100svh - 56px);
-        height:auto;
+        width:100%;
+        height:calc(100svh - 36px);
+        min-height:0;
+        display:grid;
         align-items:center;
+        overflow:visible;
       }
 
       .activate-account-view .login-stage,
       .activate-account-view .login-stage--right,
       .activate-account-view .login-card-shell,
       .activate-account-view .login-card-shell--right{
-        min-height:0;
+        min-height:0 !important;
+        height:auto !important;
+        max-height:none !important;
+        overflow:visible !important;
+        background:transparent !important;
+        border:0 !important;
+        box-shadow:none !important;
+        outline:0 !important;
+      }
+
+      .activate-account-view .login-card-shell,
+      .activate-account-view .login-card-shell--right{
+        padding:0 !important;
       }
 
       .activate-account-view .login-card.login-card--clean{
-        max-height:calc(100svh - 54px);
-        overflow-x:hidden;
-        overflow-y:auto;
-        overscroll-behavior:contain;
-        scrollbar-width:none;
-        padding-bottom:clamp(30px, 4vh, 44px);
-      }
+        width:min(100%, 590px);
+        max-width:590px;
+        max-height:none;
+        overflow:visible !important;
 
-      .activate-account-view .login-card.login-card--clean::-webkit-scrollbar{
-        width:0;
-        height:0;
+        padding:
+          clamp(24px, 3vh, 34px)
+          clamp(24px, 3vw, 36px)
+          clamp(22px, 2.6vh, 30px) !important;
+
+        border-radius:28px;
       }
 
       .activate-account-view .login-card{
-        overflow:hidden;
+        overflow:visible !important;
       }
 
+      /* =========================
+         HEADER COMPACTO
+      ========================= */
+
       .activate-account-view .login-header{
-        margin-bottom:18px;
+        margin-bottom:14px !important;
+        display:grid;
+        justify-items:center;
+        gap:8px;
+      }
+
+      .activate-account-view .logo-fade{
+        width:74px !important;
+        height:74px !important;
+        margin-bottom:0 !important;
+      }
+
+      .activate-account-view .login-logo-theme,
+      .activate-account-view .login-logo-theme img{
+        width:40px;
+        height:40px;
       }
 
       .activate-account-view .login-header h2{
-        max-width:440px;
+        max-width:460px;
+        margin:0;
+        font-size:clamp(30px, 4.1vh, 44px);
+        line-height:.98;
+        letter-spacing:-.055em;
       }
 
+      .activate-account-view .login-subtitle{
+        max-width:390px;
+        margin:0;
+        font-size:clamp(13px, 1.65vh, 15px);
+        line-height:1.35;
+      }
+
+      /* =========================
+         FORM COMPACTO
+      ========================= */
+
       .activate-account-view .login-form{
-        gap:16px;
-        padding-bottom:4px;
+        gap:12px !important;
+        padding-bottom:0 !important;
       }
 
       .activate-account-view .activate-account-status-box{
-        margin:6px 0 0;
+        margin:4px 0 0;
         display:grid;
-        gap:14px;
+        gap:10px;
       }
 
       .activate-account-view .activate-account-status-card{
         position:relative;
         overflow:hidden;
-        border-radius:22px;
-        border:1px solid rgba(148,163,184,.24);
+        border-radius:20px;
+        border:1px solid rgba(148,163,184,.22);
         background:
           radial-gradient(circle at top left, rgba(124,92,255,.12), transparent 34%),
-          linear-gradient(180deg, rgba(255,255,255,.82), rgba(248,250,252,.64));
-        padding:18px;
+          linear-gradient(180deg, rgba(255,255,255,.80), rgba(248,250,252,.58));
+
+        padding:15px;
         display:grid;
-        grid-template-columns:46px minmax(0, 1fr);
-        gap:15px;
+        grid-template-columns:42px minmax(0, 1fr);
+        gap:13px;
         align-items:start;
+
         box-shadow:
-          0 18px 44px rgba(15,23,42,.055),
-          inset 0 1px 0 rgba(255,255,255,.64);
+          0 14px 34px rgba(15,23,42,.05),
+          inset 0 1px 0 rgba(255,255,255,.58);
       }
 
       .activate-account-view .activate-account-status-card::after{
         content:"";
         position:absolute;
-        inset:auto 18px 0 18px;
+        inset:auto 16px 0 16px;
         height:1px;
         background:linear-gradient(
           90deg,
           transparent,
-          rgba(124,92,255,.22),
+          rgba(124,92,255,.18),
           transparent
         );
-        opacity:.9;
+        opacity:.85;
       }
 
       .activate-account-view .activate-account-status-icon{
-        width:46px;
-        height:46px;
-        border-radius:17px;
+        width:42px;
+        height:42px;
+        border-radius:16px;
         display:grid;
         place-items:center;
         color:#6d53d7;
         background:rgba(124,92,255,.11);
         border:1px solid rgba(124,92,255,.18);
-        box-shadow:inset 0 1px 0 rgba(255,255,255,.48);
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.44);
+      }
+
+      .activate-account-view .activate-account-status-icon svg{
+        width:20px;
+        height:20px;
       }
 
       .activate-account-view[data-status="success"] .activate-account-status-icon{
@@ -686,39 +755,39 @@ function renderActivateAccountScopedStyle() {
       .activate-account-view .activate-account-status-copy{
         min-width:0;
         display:grid;
-        gap:6px;
+        gap:4px;
       }
 
       .activate-account-view .activate-account-status-eyebrow{
-        font-size:11px;
+        font-size:10.5px;
         line-height:1.1;
         font-weight:780;
-        letter-spacing:.09em;
+        letter-spacing:.085em;
         text-transform:uppercase;
         color:#7b8494;
       }
 
       .activate-account-view .activate-account-status-title{
         margin:0;
-        font-size:18px;
-        line-height:1.2;
+        font-size:clamp(17px, 2.1vh, 21px);
+        line-height:1.12;
         font-weight:790;
-        letter-spacing:-.03em;
+        letter-spacing:-.035em;
         color:var(--text-strong, #111827);
       }
 
       .activate-account-view .activate-account-status-text{
         margin:0;
-        max-width:420px;
-        font-size:13px;
-        line-height:1.58;
+        max-width:410px;
+        font-size:12.5px;
+        line-height:1.45;
         color:var(--text-dim, #6b7280);
       }
 
       .activate-account-view .activate-account-badge{
         width:max-content;
-        min-height:28px;
-        padding:0 11px;
+        min-height:24px;
+        padding:0 10px;
         border-radius:999px;
         border:1px solid rgba(124,92,255,.2);
         background:rgba(124,92,255,.09);
@@ -726,9 +795,9 @@ function renderActivateAccountScopedStyle() {
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        font-size:11px;
+        font-size:10.5px;
         font-weight:780;
-        letter-spacing:.06em;
+        letter-spacing:.055em;
         text-transform:uppercase;
       }
 
@@ -746,21 +815,34 @@ function renderActivateAccountScopedStyle() {
         color:#c24141;
       }
 
+      /* =========================
+         PASSWORDS COMPACTOS
+      ========================= */
+
       .activate-account-view .activate-account-password-fields{
         display:grid;
-        gap:13px;
-        margin-top:2px;
+        gap:10px;
+        margin-top:0;
+      }
+
+      .activate-account-view .login-field,
+      .activate-account-view .input-text{
+        min-height:52px !important;
+      }
+
+      .activate-account-view .input-text{
+        font-size:14px;
       }
 
       .activate-account-view .activate-account-password-help{
-        margin:1px 0 0;
-        padding:12px 13px;
-        border-radius:16px;
-        border:1px solid rgba(148,163,184,.18);
-        background:rgba(248,250,252,.72);
+        margin:0;
+        padding:10px 12px;
+        border-radius:15px;
+        border:1px solid rgba(148,163,184,.17);
+        background:rgba(248,250,252,.68);
         color:var(--text-dim, #6b7280);
         font-size:12px;
-        line-height:1.55;
+        line-height:1.4;
       }
 
       .activate-account-view .login-error{
@@ -770,14 +852,42 @@ function renderActivateAccountScopedStyle() {
       .activate-account-view .login-button,
       .activate-account-view #activateAccountButton{
         margin-top:2px;
-        margin-bottom:2px;
-        min-height:54px;
+        margin-bottom:0;
+        min-height:54px !important;
         flex:0 0 auto;
       }
 
       .activate-account-view .login-footer{
-        margin-top:12px;
-        padding-bottom:2px;
+        margin-top:8px !important;
+        padding-bottom:0 !important;
+        font-size:12px;
+        line-height:1.35;
+      }
+
+      /* =========================
+         LEFT PANEL COMPACTO
+      ========================= */
+
+      .activate-account-view .login-side-panel--status{
+        max-width:520px;
+        padding:clamp(24px, 3vw, 34px) !important;
+        border-radius:26px;
+      }
+
+      .activate-account-view .login-side-panel--status h3{
+        font-size:clamp(32px, 4.3vh, 48px);
+        line-height:.98;
+        letter-spacing:-.055em;
+        margin-bottom:24px;
+      }
+
+      .activate-account-view .login-signal-list{
+        gap:12px;
+      }
+
+      .activate-account-view .login-signal-item{
+        min-height:54px;
+        padding:0 18px;
       }
 
       .activate-account-view .activate-account-status-spinner{
@@ -795,13 +905,17 @@ function renderActivateAccountScopedStyle() {
         pointer-events:none;
       }
 
+      /* =========================
+         DARK
+      ========================= */
+
       [data-theme="dark"] .activate-account-view .activate-account-status-card{
         border-color:rgba(255,255,255,.085);
         background:
           radial-gradient(circle at top left, rgba(124,92,255,.14), transparent 38%),
           linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.035));
         box-shadow:
-          0 18px 44px rgba(0,0,0,.18),
+          0 14px 34px rgba(0,0,0,.16),
           inset 0 1px 0 rgba(255,255,255,.05);
       }
 
@@ -819,110 +933,217 @@ function renderActivateAccountScopedStyle() {
         background:rgba(255,255,255,.045);
       }
 
+      /* =========================
+         HEIGHT COMPRESSION
+      ========================= */
+
       @media (max-height: 820px){
         .activate-account-view .login-scene{
-          padding-top:18px;
-          padding-bottom:28px;
+          padding-top:14px;
+          padding-bottom:14px;
         }
 
         .activate-account-view .login-grid{
-          min-height:calc(100svh - 46px);
+          height:calc(100svh - 28px);
         }
 
         .activate-account-view .login-card.login-card--clean{
-          max-height:calc(100svh - 38px);
-          padding-bottom:34px;
+          width:min(100%, 560px);
+          max-width:560px;
+          padding:22px 28px 20px !important;
+          border-radius:26px;
         }
 
         .activate-account-view .login-header{
-          margin-bottom:14px;
+          margin-bottom:12px !important;
+          gap:6px;
+        }
+
+        .activate-account-view .logo-fade{
+          width:66px !important;
+          height:66px !important;
+        }
+
+        .activate-account-view .login-header h2{
+          font-size:clamp(28px, 4vh, 38px);
+        }
+
+        .activate-account-view .login-subtitle{
+          font-size:13px;
+          line-height:1.3;
         }
 
         .activate-account-view .login-form{
-          gap:13px;
+          gap:10px !important;
         }
 
         .activate-account-view .activate-account-status-card{
-          padding:16px;
-          gap:13px;
-          border-radius:20px;
+          padding:13px;
+          gap:11px;
+          grid-template-columns:40px minmax(0, 1fr);
+          border-radius:18px;
+        }
+
+        .activate-account-view .activate-account-status-icon{
+          width:40px;
+          height:40px;
+          border-radius:15px;
+        }
+
+        .activate-account-view .activate-account-status-text{
+          font-size:12px;
+          line-height:1.38;
         }
 
         .activate-account-view .activate-account-password-fields{
-          gap:11px;
+          gap:9px;
+        }
+
+        .activate-account-view .login-field,
+        .activate-account-view .input-text{
+          min-height:48px !important;
         }
 
         .activate-account-view .activate-account-password-help{
-          padding:10px 12px;
+          padding:9px 11px;
+          font-size:11.5px;
+        }
+
+        .activate-account-view .login-button,
+        .activate-account-view #activateAccountButton{
+          min-height:50px !important;
         }
 
         .activate-account-view .login-footer{
-          margin-top:10px;
+          margin-top:6px !important;
+        }
+
+        .activate-account-view .login-side-panel--status{
+          padding:28px !important;
+        }
+
+        .activate-account-view .login-side-panel--status h3{
+          font-size:clamp(30px, 4vh, 42px);
+          margin-bottom:20px;
+        }
+
+        .activate-account-view .login-signal-item{
+          min-height:50px;
         }
       }
 
       @media (max-height: 720px){
         .activate-account-view .login-scene{
-          align-items:flex-start;
-          padding-top:16px;
-          padding-bottom:24px;
+          padding-top:10px;
+          padding-bottom:10px;
         }
 
         .activate-account-view .login-grid{
-          align-items:flex-start;
+          height:calc(100svh - 20px);
         }
 
         .activate-account-view .login-card.login-card--clean{
-          max-height:none;
-          overflow:visible;
+          width:min(100%, 530px);
+          max-width:530px;
+          padding:18px 24px 17px !important;
+          border-radius:24px;
         }
 
-        .activate-account-view .login-header{
-          margin-bottom:12px;
+        .activate-account-view .logo-fade{
+          width:58px !important;
+          height:58px !important;
+        }
+
+        .activate-account-view .login-logo-theme,
+        .activate-account-view .login-logo-theme img{
+          width:34px;
+          height:34px;
         }
 
         .activate-account-view .login-header h2{
-          font-size:clamp(30px, 4.4vh, 42px);
+          font-size:clamp(26px, 4.2vh, 34px);
+        }
+
+        .activate-account-view .login-subtitle{
+          font-size:12.5px;
         }
 
         .activate-account-view .activate-account-status-card{
-          padding:15px;
+          padding:12px;
+        }
+
+        .activate-account-view .activate-account-status-title{
+          font-size:17px;
+        }
+
+        .activate-account-view .activate-account-status-eyebrow{
+          font-size:10px;
+        }
+
+        .activate-account-view .activate-account-badge{
+          min-height:22px;
+          font-size:10px;
         }
 
         .activate-account-view .activate-account-status-text{
-          line-height:1.5;
+          font-size:11.7px;
+          line-height:1.34;
+        }
+
+        .activate-account-view .login-field,
+        .activate-account-view .input-text{
+          min-height:45px !important;
         }
 
         .activate-account-view .login-button,
         .activate-account-view #activateAccountButton{
-          min-height:52px;
+          min-height:47px !important;
+        }
+
+        .activate-account-view .activate-account-password-help{
+          padding:8px 10px;
         }
       }
 
+      /* =========================
+         MOBILE
+      ========================= */
+
       @media (max-width: 720px){
+        .activate-account-view{
+          height:auto;
+          min-height:100svh;
+          overflow-y:auto;
+        }
+
         .activate-account-view .login-scene{
-          padding-top:18px;
-          padding-bottom:28px;
+          height:auto;
+          min-height:100svh;
+          overflow:visible;
+          padding:18px 16px 26px;
         }
 
         .activate-account-view .login-grid{
+          height:auto;
           min-height:auto;
+          overflow:visible;
         }
 
         .activate-account-view .login-card.login-card--clean{
-          max-height:none;
-          overflow:visible;
-          padding-bottom:30px;
+          width:100%;
+          max-width:100%;
+          overflow:visible !important;
+          padding:24px 20px 22px !important;
         }
 
         .activate-account-view .activate-account-status-card{
           grid-template-columns:1fr;
-          gap:13px;
+          gap:12px;
         }
 
         .activate-account-view .activate-account-status-icon{
-          width:44px;
-          height:44px;
+          width:42px;
+          height:42px;
         }
       }
 

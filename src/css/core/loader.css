@@ -1,312 +1,721 @@
 /* =========================================================
    Onion SPA — Loader CSS
-   Archivo: src/styles/loader.css
+   Archivo: src/css/core/loader.css
 
-   REFINADO PRO:
-   - loader global premium y sobrio
-   - overlay de arranque más enterprise
+   BOOT LOADER · REFRESH SAFE · PRO SAAS · FINAL 10/10
+
+   RESPONSABILIDADES:
+   - loader global visible desde refresh del navegador
+   - compatibilidad con loader estático de index.html
+   - compatibilidad con loader.js fallback
    - anti flicker visual
-   - animaciones suaves y menos invasivas
+   - ocultar shell mientras la app está booting/loading
+   - mostrar shell solo cuando la app está ready
    - soporte dark / light theme
-   - alineado con loader.js y con el sistema de tokens actual
+   - soporte markup nuevo app-loader__
+   - soporte markup legacy loader-*
+   - CSP clean: sin inline CSS requerido
+
+   CLASES CONTROLADAS POR index.html / loader.js:
+   - html.app-booting
+   - html.app-loading
+   - html.app-ready
+   - body.app-booting
+   - body.app-loading
+   - body.app-ready
+   - body.loading
 
    REQUIERE:
-   #app-loader en DOM
-
-   ALINEADO CON loader.js:
-   - hidden / aria-hidden
-   - body.loading
-   - show / hide por inline style
-   - transición limpia
+   - #app-loader en DOM para cero flash real
 ========================================================= */
 
 
 /* =========================================================
    TOKENS LOADER
-   Fallbacks conectados al sistema real
 ========================================================= */
-:root{
-  --loader-z: var(--z-loader, 9999);
 
-  --loader-bg: rgba(31,31,31,.94);
+:root {
+  --loader-z: var(--z-loader, 2147483000);
+
+  --loader-bg:
+    radial-gradient(circle at 18% 14%, rgba(99, 102, 241, .15), transparent 28%),
+    radial-gradient(circle at 82% 20%, rgba(14, 165, 233, .10), transparent 26%),
+    radial-gradient(circle at 50% 100%, rgba(168, 85, 247, .08), transparent 28%),
+    linear-gradient(180deg, rgba(2, 6, 23, .975), rgba(3, 7, 18, .985));
+
   --loader-surface:
-    linear-gradient(180deg, rgba(255,255,255,.022), rgba(255,255,255,.008)),
-    rgba(39,39,42,.92);
+    linear-gradient(180deg, rgba(255, 255, 255, .085), rgba(255, 255, 255, .035)),
+    rgba(15, 23, 42, .72);
 
-  --loader-border: var(--border-default, rgba(255,255,255,.08));
-  --loader-text: var(--text, #f5f5f5);
-  --loader-muted: var(--text-dim, rgba(245,245,245,.50));
+  --loader-surface-strong:
+    linear-gradient(180deg, rgba(255, 255, 255, .11), rgba(255, 255, 255, .045)),
+    rgba(15, 23, 42, .82);
 
-  --loader-accent: var(--accent, #3f3f46);
-  --loader-accent-2: var(--accent-3, #6b7280);
+  --loader-border: rgba(148, 163, 184, .20);
+  --loader-border-strong: rgba(255, 255, 255, .14);
+
+  --loader-text: var(--text, #f8fafc);
+  --loader-muted: var(--text-dim, rgba(226, 232, 240, .72));
+  --loader-soft: rgba(148, 163, 184, .72);
+
+  --loader-accent: var(--accent, #6366f1);
+  --loader-accent-2: var(--accent-3, #0ea5e9);
+  --loader-accent-3: #a855f7;
 
   --loader-shadow:
-    0 24px 60px rgba(0,0,0,.34),
-    0 0 0 1px rgba(255,255,255,.02) inset;
+    0 32px 90px rgba(0, 0, 0, .50),
+    0 14px 42px rgba(15, 23, 42, .40),
+    inset 0 1px 0 rgba(255, 255, 255, .10);
 
-  --loader-blur: 18px;
-  --loader-radius: 24px;
+  --loader-brand-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, .12),
+    0 18px 42px rgba(0, 0, 0, .30);
 
-  --loader-size: 72px;
+  --loader-blur: 20px;
+  --loader-card-blur: 18px;
+  --loader-radius: 28px;
+  --loader-brand-radius: 24px;
+
+  --loader-size: 74px;
+  --loader-logo-size: 52px;
   --loader-ring: 4px;
 
   --loader-speed: 1s;
   --loader-pulse-speed: 1.6s;
-  --loader-fade: .22s;
-  --loader-card-width: 320px;
-  --loader-progress-height: 5px;
+  --loader-bar-speed: 1.08s;
+  --loader-fade: 220ms;
+
+  --loader-card-width: 360px;
+  --loader-progress-height: 7px;
 }
+
 
 /* =========================================================
    LIGHT THEME
 ========================================================= */
-html[data-theme="light"]{
-  --loader-bg: rgba(243,246,250,.92);
+
+html[data-theme="light"] {
+  --loader-bg:
+    radial-gradient(circle at 18% 14%, rgba(99, 102, 241, .12), transparent 28%),
+    radial-gradient(circle at 82% 20%, rgba(14, 165, 233, .09), transparent 26%),
+    radial-gradient(circle at 50% 100%, rgba(168, 85, 247, .07), transparent 28%),
+    linear-gradient(180deg, rgba(248, 250, 252, .96), rgba(241, 245, 249, .98));
 
   --loader-surface:
-    linear-gradient(180deg, rgba(255,255,255,.88), rgba(248,250,252,.96)),
-    rgba(255,255,255,.90);
+    linear-gradient(180deg, rgba(255, 255, 255, .96), rgba(248, 250, 252, .92)),
+    rgba(255, 255, 255, .90);
 
-  --loader-border: rgba(23,32,51,.08);
-  --loader-text: var(--text, #172033);
-  --loader-muted: var(--text-dim, rgba(23,32,51,.52));
+  --loader-surface-strong:
+    linear-gradient(180deg, rgba(255, 255, 255, .98), rgba(248, 250, 252, .96)),
+    rgba(255, 255, 255, .94);
 
-  --loader-accent: var(--accent, #6f59d9);
-  --loader-accent-2: var(--accent-3, #3b82a6);
+  --loader-border: rgba(15, 23, 42, .10);
+  --loader-border-strong: rgba(15, 23, 42, .08);
+
+  --loader-text: var(--text, #0f172a);
+  --loader-muted: var(--text-dim, rgba(51, 65, 85, .72));
+  --loader-soft: rgba(100, 116, 139, .76);
 
   --loader-shadow:
-    0 20px 48px rgba(15,23,42,.10),
-    0 0 0 1px rgba(255,255,255,.42) inset;
+    0 26px 72px rgba(15, 23, 42, .14),
+    0 10px 32px rgba(15, 23, 42, .08),
+    inset 0 1px 0 rgba(255, 255, 255, .70);
+
+  --loader-brand-shadow:
+    inset 0 0 0 1px rgba(15, 23, 42, .08),
+    0 16px 38px rgba(15, 23, 42, .12);
 }
 
+
 /* =========================================================
-   BODY LOCK
+   DOCUMENT BOOT STATES
 ========================================================= */
-body.loading{
-  overflow:hidden;
-  overscroll-behavior:none;
+
+html.app-booting,
+html.app-loading,
+body.app-booting,
+body.app-loading,
+body.loading {
+  min-height: 100%;
+}
+
+body.app-booting,
+body.app-loading,
+body.loading {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+html.app-ready,
+body.app-ready {
+  min-height: 100%;
+}
+
+
+/* =========================================================
+   SHELL ANTI FLICKER
+========================================================= */
+
+html.app-booting #app-shell,
+html.app-loading #app-shell,
+body.app-booting #app-shell,
+body.app-loading #app-shell {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+html.app-ready #app-shell,
+body.app-ready #app-shell {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+#app-shell {
+  transition:
+    opacity 180ms ease,
+    visibility 180ms ease;
 }
 
 
 /* =========================================================
    ROOT OVERLAY
 ========================================================= */
-#app-loader{
-  position:fixed;
-  inset:0;
-  z-index:var(--loader-z);
 
-  display:grid;
-  place-items:center;
+#app-loader,
+.app-loader {
+  position: fixed;
+  inset: 0;
+  z-index: var(--loader-z);
 
-  padding:24px;
+  display: grid;
+  place-items: center;
 
-  background:
-    radial-gradient(circle at 20% 16%, rgba(255,255,255,.020), transparent 26%),
-    radial-gradient(circle at 80% 24%, rgba(255,255,255,.014), transparent 24%),
-    radial-gradient(circle at 50% 100%, rgba(255,255,255,.010), transparent 24%),
-    var(--loader-bg);
+  min-height: 100dvh;
+  padding: 24px;
 
-  backdrop-filter:blur(var(--loader-blur));
-  -webkit-backdrop-filter:blur(var(--loader-blur));
+  background: var(--loader-bg);
 
-  opacity:1;
-  visibility:visible;
+  backdrop-filter: blur(var(--loader-blur));
+  -webkit-backdrop-filter: blur(var(--loader-blur));
+
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
 
   transition:
-    opacity var(--loader-fade) var(--ease-standard, ease),
-    visibility var(--loader-fade) var(--ease-standard, ease);
+    opacity var(--loader-fade) ease,
+    visibility var(--loader-fade) ease;
+
+  isolation: isolate;
 }
 
-/* hidden compatible con JS */
+#app-loader.is-visible,
+.app-loader.is-visible,
+html.app-booting #app-loader,
+html.app-loading #app-loader,
+body.app-booting #app-loader,
+body.app-loading #app-loader {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
 #app-loader[hidden],
-#app-loader[aria-hidden="true"]{
-  opacity:0;
-  visibility:hidden;
-  pointer-events:none;
+#app-loader[aria-hidden="true"],
+#app-loader.is-hidden,
+#app-loader.has-hidden,
+.app-loader[hidden],
+.app-loader[aria-hidden="true"],
+.app-loader.is-hidden,
+.app-loader.has-hidden,
+html.app-ready #app-loader.is-hidden,
+body.app-ready #app-loader.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+#app-loader.has-hidden,
+.app-loader.has-hidden {
+  display: none;
+}
+
+#app-loader.is-leaving,
+.app-loader.is-leaving {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 
 /* =========================================================
-   PANEL
+   BACKDROP LAYER
 ========================================================= */
-#app-loader .loader-card{
-  position:relative;
 
-  inline-size:min(100%, var(--loader-card-width));
-  min-inline-size:min(92vw, 280px);
-  max-inline-size:var(--loader-card-width);
+.app-loader__backdrop,
+#app-loader .app-loader__backdrop,
+#app-loader [data-loader-backdrop="true"] {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
 
-  padding:24px 22px 20px;
-
-  border:1px solid var(--loader-border);
-  border-radius:var(--loader-radius);
-
-  background:var(--loader-surface);
-  box-shadow:var(--loader-shadow);
-
-  text-align:center;
-  overflow:hidden;
-}
-
-#app-loader .loader-card::before{
-  content:"";
-  position:absolute;
-  inset:0;
-  pointer-events:none;
-  background:linear-gradient(180deg, rgba(255,255,255,.032), transparent 34%);
-  opacity:.72;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(99, 102, 241, .16), transparent 38%),
+    radial-gradient(circle at 18% 18%, rgba(14, 165, 233, .08), transparent 30%),
+    radial-gradient(circle at 82% 28%, rgba(168, 85, 247, .08), transparent 32%);
 }
 
 
 /* =========================================================
-   SPINNER CORE
+   PANEL NUEVO + LEGACY
 ========================================================= */
-#app-loader .loader-spinner{
-  position:relative;
-  inline-size:var(--loader-size);
-  block-size:var(--loader-size);
-  margin:0 auto 18px;
+
+#app-loader .app-loader__card,
+#app-loader .loader-card,
+.app-loader .app-loader__card,
+.app-loader .loader-card {
+  position: relative;
+  z-index: 1;
+
+  width: min(100%, var(--loader-card-width));
+  min-width: min(92vw, 280px);
+  max-width: var(--loader-card-width);
+
+  display: grid;
+  gap: 18px;
+  justify-items: center;
+
+  padding: 28px 26px 24px;
+
+  border: 1px solid var(--loader-border);
+  border-radius: var(--loader-radius);
+
+  background: var(--loader-surface);
+  box-shadow: var(--loader-shadow);
+
+  color: var(--loader-text);
+  text-align: center;
+
+  overflow: hidden;
+
+  backdrop-filter: blur(var(--loader-card-blur));
+  -webkit-backdrop-filter: blur(var(--loader-card-blur));
+}
+
+#app-loader .app-loader__card::before,
+#app-loader .loader-card::before,
+.app-loader .app-loader__card::before,
+.app-loader .loader-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+
+  pointer-events: none;
+
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .10), transparent 42%),
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, .10), transparent 34%);
+
+  opacity: .72;
+}
+
+#app-loader .app-loader__card::after,
+#app-loader .loader-card::after,
+.app-loader .app-loader__card::after,
+.app-loader .loader-card::after {
+  content: "";
+  position: absolute;
+  inset: auto 18px 0;
+
+  height: 1px;
+
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--loader-accent), transparent 36%),
+    transparent
+  );
+
+  opacity: .75;
+}
+
+
+/* =========================================================
+   BRAND / LOGO
+========================================================= */
+
+#app-loader .app-loader__brand,
+.app-loader .app-loader__brand {
+  position: relative;
+
+  width: var(--loader-size);
+  height: var(--loader-size);
+
+  display: grid;
+  place-items: center;
+
+  border-radius: var(--loader-brand-radius);
+
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .10), rgba(255, 255, 255, .035)),
+    rgba(255, 255, 255, .065);
+
+  box-shadow: var(--loader-brand-shadow);
+
+  overflow: hidden;
+}
+
+html[data-theme="light"] #app-loader .app-loader__brand,
+html[data-theme="light"] .app-loader .app-loader__brand {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .94), rgba(248, 250, 252, .72)),
+    rgba(255, 255, 255, .86);
+}
+
+#app-loader .app-loader__brand::before,
+.app-loader .app-loader__brand::before {
+  content: "";
+  position: absolute;
+  inset: -35%;
+
+  background:
+    conic-gradient(
+      from 180deg,
+      transparent,
+      color-mix(in srgb, var(--loader-accent), transparent 48%),
+      color-mix(in srgb, var(--loader-accent-2), transparent 54%),
+      transparent
+    );
+
+  opacity: .55;
+
+  animation: loaderSpin 2.2s linear infinite;
+}
+
+#app-loader .app-loader__brand::after,
+.app-loader .app-loader__brand::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+
+  border-radius: calc(var(--loader-brand-radius) - 2px);
+
+  background: var(--loader-surface-strong);
+}
+
+#app-loader .app-loader__logo,
+.app-loader .app-loader__logo {
+  position: relative;
+  z-index: 2;
+
+  width: var(--loader-logo-size);
+  height: var(--loader-logo-size);
+
+  display: block;
+
+  object-fit: contain;
+
+  filter:
+    drop-shadow(0 8px 18px rgba(0, 0, 0, .24));
+}
+
+#app-loader .app-loader__logo-fallback,
+.app-loader .app-loader__logo-fallback {
+  position: absolute;
+  z-index: 1;
+
+  width: var(--loader-logo-size);
+  height: var(--loader-logo-size);
+
+  display: grid;
+  place-items: center;
+
+  border-radius: 18px;
+
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -.05em;
+
+  color: #f8fafc;
+
+  background:
+    linear-gradient(135deg, var(--loader-accent), var(--loader-accent-2));
+
+  opacity: .92;
+}
+
+
+/* =========================================================
+   LEGACY SPINNER SUPPORT
+========================================================= */
+
+#app-loader .loader-spinner,
+.app-loader .loader-spinner {
+  position: relative;
+
+  width: var(--loader-size);
+  height: var(--loader-size);
+
+  margin: 0 auto 18px;
 }
 
 #app-loader .loader-spinner::before,
-#app-loader .loader-spinner::after{
-  content:"";
-  position:absolute;
-  inset:0;
-  border-radius:50%;
+#app-loader .loader-spinner::after,
+.app-loader .loader-spinner::before,
+.app-loader .loader-spinner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+
+  border-radius: 50%;
 }
 
-#app-loader .loader-spinner::before{
-  border:var(--loader-ring) solid rgba(255,255,255,.08);
+#app-loader .loader-spinner::before,
+.app-loader .loader-spinner::before {
+  border: var(--loader-ring) solid rgba(255, 255, 255, .10);
 }
 
-html[data-theme="light"] #app-loader .loader-spinner::before{
-  border-color:rgba(23,32,51,.08);
+html[data-theme="light"] #app-loader .loader-spinner::before,
+html[data-theme="light"] .app-loader .loader-spinner::before {
+  border-color: rgba(15, 23, 42, .10);
 }
 
-#app-loader .loader-spinner::after{
-  border:var(--loader-ring) solid transparent;
-  border-top-color:var(--loader-accent);
-  border-right-color:var(--loader-accent-2);
-  animation:loaderSpin var(--loader-speed) linear infinite;
+#app-loader .loader-spinner::after,
+.app-loader .loader-spinner::after {
+  border: var(--loader-ring) solid transparent;
+  border-top-color: var(--loader-accent);
+  border-right-color: var(--loader-accent-2);
+
+  animation: loaderSpin var(--loader-speed) linear infinite;
 }
 
-#app-loader .loader-core{
-  position:absolute;
-  inset:20%;
-  border-radius:50%;
+#app-loader .loader-core,
+.app-loader .loader-core {
+  position: absolute;
+  inset: 20%;
+
+  border-radius: 50%;
 
   background:
-    radial-gradient(circle, rgba(255,255,255,.18), transparent 62%),
+    radial-gradient(circle, rgba(255, 255, 255, .22), transparent 62%),
     linear-gradient(135deg, var(--loader-accent), var(--loader-accent-2));
 
   box-shadow:
-    0 0 22px rgba(255,255,255,.04),
+    0 0 22px rgba(255, 255, 255, .06),
     0 0 28px color-mix(in srgb, var(--loader-accent), transparent 74%);
 
-  animation:loaderPulse var(--loader-pulse-speed) ease-in-out infinite;
+  animation: loaderPulse var(--loader-pulse-speed) ease-in-out infinite;
 }
 
 
 /* =========================================================
-   BRAND / TEXT
+   COPY / TEXT
 ========================================================= */
-#app-loader .loader-title{
-  margin:0;
-  font-size:var(--font-sm, 12px);
-  font-weight:var(--weight-bold, 700);
-  letter-spacing:.14em;
-  text-transform:uppercase;
-  color:var(--loader-text);
+
+#app-loader .app-loader__copy,
+.app-loader .app-loader__copy {
+  position: relative;
+  z-index: 2;
+
+  display: grid;
+  gap: 5px;
+
+  max-width: 100%;
 }
 
-#app-loader .loader-subtitle{
-  margin:8px 0 0;
-  font-size:var(--font-md, 13px);
-  line-height:1.4;
-  font-weight:var(--weight-medium, 500);
-  color:var(--loader-muted);
+#app-loader .app-loader__title,
+#app-loader .loader-title,
+.app-loader .app-loader__title,
+.app-loader .loader-title {
+  margin: 0;
+
+  font-size: 18px;
+  line-height: 1.15;
+  font-weight: 800;
+  letter-spacing: -.035em;
+
+  color: var(--loader-text);
 }
 
-#app-loader .loader-dots::after{
-  content:"";
-  display:inline-block;
-  inline-size:1.2em;
-  text-align:start;
-  animation:loaderDots 1.4s steps(4, end) infinite;
+#app-loader .loader-title {
+  font-size: var(--font-sm, 12px);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+#app-loader .app-loader__text,
+#app-loader .loader-subtitle,
+.app-loader .app-loader__text,
+.app-loader .loader-subtitle {
+  margin: 0;
+
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 500;
+
+  color: var(--loader-muted);
+}
+
+#app-loader .app-loader__subtext,
+.app-loader .app-loader__subtext {
+  margin: 0;
+
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 500;
+
+  color: var(--loader-soft);
+}
+
+#app-loader .loader-dots::after,
+.app-loader .loader-dots::after {
+  content: "";
+  display: inline-block;
+
+  width: 1.2em;
+
+  text-align: start;
+
+  animation: loaderDots 1.4s steps(4, end) infinite;
 }
 
 
 /* =========================================================
-   PROGRESS BAR (opcional)
+   PROGRESS BAR NUEVA + LEGACY
 ========================================================= */
-#app-loader .loader-progress{
-  position:relative;
-  margin-block-start:16px;
-  block-size:var(--loader-progress-height);
-  border-radius:999px;
-  overflow:hidden;
 
-  background:rgba(255,255,255,.08);
+#app-loader .app-loader__bar,
+#app-loader .loader-progress,
+.app-loader .app-loader__bar,
+.app-loader .loader-progress {
+  position: relative;
+  z-index: 2;
+
+  width: 100%;
+  height: var(--loader-progress-height);
+
+  margin-top: 2px;
+
+  border-radius: 999px;
+
+  overflow: hidden;
+
+  background: rgba(148, 163, 184, .18);
 }
 
-html[data-theme="light"] #app-loader .loader-progress{
-  background:rgba(23,32,51,.08);
+html[data-theme="light"] #app-loader .app-loader__bar,
+html[data-theme="light"] #app-loader .loader-progress,
+html[data-theme="light"] .app-loader .app-loader__bar,
+html[data-theme="light"] .app-loader .loader-progress {
+  background: rgba(15, 23, 42, .10);
 }
 
-#app-loader .loader-progress > span{
-  display:block;
-  inline-size:38%;
-  block-size:100%;
-  border-radius:inherit;
+#app-loader .app-loader__bar-fill,
+#app-loader .loader-progress > span,
+.app-loader .app-loader__bar-fill,
+.app-loader .loader-progress > span {
+  display: block;
 
-  background:linear-gradient(
-    90deg,
-    var(--loader-accent),
-    var(--loader-accent-2)
-  );
+  width: 42%;
+  height: 100%;
 
-  animation:loaderBar 1.3s ease-in-out infinite;
+  border-radius: inherit;
+
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--loader-accent), transparent 82%),
+      var(--loader-accent),
+      var(--loader-accent-2)
+    );
+
+  box-shadow:
+    0 0 18px color-mix(in srgb, var(--loader-accent), transparent 65%);
+
+  animation: loaderBar var(--loader-bar-speed) ease-in-out infinite;
+}
+
+
+/* =========================================================
+   ACCESSIBILITY / BUSY STATES
+========================================================= */
+
+#app-loader[aria-busy="true"],
+.app-loader[aria-busy="true"] {
+  cursor: wait;
+}
+
+#view-container[aria-busy="true"],
+#main-content[aria-busy="true"],
+#app-shell[aria-busy="true"] {
+  cursor: wait;
+}
+
+html.app-ready #view-container,
+body.app-ready #view-container,
+html.app-ready #main-content,
+body.app-ready #main-content,
+html.app-ready #app-shell,
+body.app-ready #app-shell {
+  cursor: auto;
 }
 
 
 /* =========================================================
    ANIMATIONS
 ========================================================= */
-@keyframes loaderSpin{
-  to{
-    transform:rotate(360deg);
+
+@keyframes loaderSpin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
-@keyframes loaderPulse{
-  0%,100%{
-    transform:scale(.92);
-    opacity:.82;
+@keyframes loaderPulse {
+  0%,
+  100% {
+    transform: scale(.92);
+    opacity: .82;
   }
 
-  50%{
-    transform:scale(1);
-    opacity:1;
+  50% {
+    transform: scale(1);
+    opacity: 1;
   }
 }
 
-@keyframes loaderDots{
-  0%   { content:""; }
-  25%  { content:"."; }
-  50%  { content:".."; }
-  75%  { content:"..."; }
-  100% { content:""; }
-}
-
-@keyframes loaderBar{
-  0%{
-    transform:translateX(-120%);
+@keyframes loaderDots {
+  0% {
+    content: "";
   }
 
-  100%{
-    transform:translateX(320%);
+  25% {
+    content: ".";
+  }
+
+  50% {
+    content: "..";
+  }
+
+  75% {
+    content: "...";
+  }
+
+  100% {
+    content: "";
+  }
+}
+
+@keyframes loaderBar {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(255%);
   }
 }
 
@@ -314,16 +723,32 @@ html[data-theme="light"] #app-loader .loader-progress{
 /* =========================================================
    REDUCED MOTION
 ========================================================= */
-@media (prefers-reduced-motion: reduce){
+
+@media (prefers-reduced-motion: reduce) {
   #app-loader,
-  #app-loader *{
-    animation:none !important;
-    transition:none !important;
+  #app-loader *,
+  .app-loader,
+  .app-loader * {
+    animation: none !important;
+    transition: none !important;
   }
 
-  #app-loader .loader-core{
-    opacity:1;
-    transform:none;
+  #app-loader .loader-core,
+  .app-loader .loader-core {
+    opacity: 1;
+    transform: none;
+  }
+
+  #app-loader .app-loader__brand::before,
+  .app-loader .app-loader__brand::before {
+    opacity: .20;
+  }
+
+  #app-loader .app-loader__bar-fill,
+  #app-loader .loader-progress > span,
+  .app-loader .app-loader__bar-fill,
+  .app-loader .loader-progress > span {
+    transform: translateX(70%);
   }
 }
 
@@ -331,27 +756,61 @@ html[data-theme="light"] #app-loader .loader-progress{
 /* =========================================================
    MOBILE
 ========================================================= */
-@media (max-width: 640px){
-  :root{
-    --loader-size: 64px;
-    --loader-radius: 20px;
-    --loader-card-width: 296px;
+
+@media (max-width: 640px) {
+  :root {
+    --loader-size: 66px;
+    --loader-logo-size: 48px;
+    --loader-radius: 22px;
+    --loader-brand-radius: 21px;
+    --loader-card-width: 304px;
   }
 
-  #app-loader{
-    padding:16px;
+  #app-loader,
+  .app-loader {
+    padding: 16px;
   }
 
-  #app-loader .loader-card{
-    padding:20px 16px 18px;
-    min-inline-size:min(92vw, 272px);
+  #app-loader .app-loader__card,
+  #app-loader .loader-card,
+  .app-loader .app-loader__card,
+  .app-loader .loader-card {
+    min-width: min(92vw, 272px);
+    padding: 24px 18px 20px;
   }
 
-  #app-loader .loader-title{
-    font-size:11px;
+  #app-loader .app-loader__title,
+  .app-loader .app-loader__title {
+    font-size: 17px;
   }
 
-  #app-loader .loader-subtitle{
-    font-size:12px;
+  #app-loader .loader-title,
+  .app-loader .loader-title {
+    font-size: 11px;
+  }
+
+  #app-loader .app-loader__text,
+  #app-loader .loader-subtitle,
+  .app-loader .app-loader__text,
+  .app-loader .loader-subtitle {
+    font-size: 12px;
+  }
+}
+
+
+/* =========================================================
+   PRINT
+========================================================= */
+
+@media print {
+  #app-loader,
+  .app-loader {
+    display: none !important;
+  }
+
+  #app-shell {
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
   }
 }

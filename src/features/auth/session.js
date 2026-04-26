@@ -25,6 +25,14 @@
    - token/user desacoplados sin corrupción
    - clearSessionLocal compatible con preserveRoute
    - AppCore.state.role + AppCore.state.roles coherentes
+
+   FIX 10/10:
+   - authenticated sólo puede ser true con token usable + user usable
+   - applySession no reutiliza usuario viejo si se pasa user:null
+   - applySession no marca sesión válida sólo por token
+   - clearSessionLocal limpia token/user/role/session/accessToken
+   - clearSessionLocal limpia storage legacy adicional
+   - evita avatar/dashboard cacheado tras login fallido
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -89,6 +97,25 @@ const MANAGER_ROLE_KEYS = new Set([
   "lead",
 ]);
 
+const LEGACY_AUTH_STORAGE_KEYS = [
+  "onion_token",
+  "onion_access_token",
+  "onion_refresh_token",
+  "onion_temp_token",
+  "onion_session_id",
+  "onion_session_user_id",
+  "onion_user_id",
+  "onion_user_name",
+  "onion_role",
+
+  "auth_token",
+  "access_token",
+  "refresh_token",
+  "token",
+  "session",
+  "user",
+];
+
 /* =========================================================
    BASICS
 ========================================================= */
@@ -136,6 +163,14 @@ function safeObject(value) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
+}
+
+function isPlainObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
 }
 
 function toArray(value) {
@@ -219,6 +254,52 @@ function hasOwn(obj, key) {
     obj &&
       typeof obj === "object" &&
       Object.prototype.hasOwnProperty.call(obj, key)
+  );
+}
+
+/* =========================================================
+   USER / TOKEN VALIDATION
+========================================================= */
+
+function hasUsableToken(token = "") {
+  return Boolean(safeText(token, ""));
+}
+
+function hasUsableUser(user = {}) {
+  if (!isPlainObject(user)) {
+    return false;
+  }
+
+  return Boolean(
+    safeText(user.id, "") ||
+    safeText(user.userId, "") ||
+    safeText(user.user_id, "") ||
+    safeText(user._id, "") ||
+    safeText(user.uid, "") ||
+    safeText(user.username, "") ||
+    safeText(user.userName, "") ||
+    safeText(user.email, "") ||
+    safeText(user.phone, "") ||
+    safeText(user.telefono, "")
+  );
+}
+
+function getUserIdentity(user = {}) {
+  if (!isPlainObject(user)) {
+    return "";
+  }
+
+  return (
+    safeText(user.userId, "") ||
+    safeText(user.user_id, "") ||
+    safeText(user.id, "") ||
+    safeText(user._id, "") ||
+    safeText(user.uid, "") ||
+    safeText(user.email, "") ||
+    safeText(user.username, "") ||
+    safeText(user.userName, "") ||
+    safeText(user.phone, "") ||
+    safeText(user.telefono, "")
   );
 }
 
@@ -437,16 +518,20 @@ function collectRoleCandidatesFromUser(user = null) {
   return expandRoleAliases(roles);
 }
 
-function resolveRoleFromUser(user = null) {
-  return resolveCanonicalRole(
-    collectRoleCandidatesFromUser(user)
-  );
+function resolveRoleFromUser(user = null, explicitRole = "") {
+  const roles = [
+    explicitRole,
+    ...collectRoleCandidatesFromUser(user),
+  ];
+
+  return resolveCanonicalRole(roles);
 }
 
-function resolveRolesFromUser(user = null) {
-  return expandRoleAliases(
-    collectRoleCandidatesFromUser(user)
-  );
+function resolveRolesFromUser(user = null, explicitRole = "") {
+  return expandRoleAliases([
+    explicitRole,
+    ...collectRoleCandidatesFromUser(user),
+  ]);
 }
 
 /* =========================================================
@@ -611,24 +696,47 @@ function restoreRouteContext(context = {}) {
 ========================================================= */
 
 function resolveAuthenticated(state) {
-  return Boolean(
-    safeText(
-      first(
-        state?.token,
-        state?.accessToken,
-        state?.session?.token,
-        state?.session?.accessToken
-      )
-    )
+  const token = safeText(
+    first(
+      state?.token,
+      state?.accessToken,
+      state?.session?.token,
+      state?.session?.accessToken
+    ),
+    ""
+  );
+
+  const user =
+    state?.user ||
+    state?.session?.user ||
+    null;
+
+  /*
+    Regla dura:
+    token sin usuario NO es sesión autenticada.
+    Esto evita avatar/dashboard fantasma.
+  */
+  return (
+    hasUsableToken(token) &&
+    hasUsableUser(user)
   );
 }
 
 function buildDerivedAuthState(state = ensureCoreState()) {
-  const user = state.user || null;
+  const user =
+    state.user ||
+    state?.session?.user ||
+    null;
+
   const authenticated = resolveAuthenticated(state);
 
+  const explicitRole =
+    state.role ||
+    state?.session?.role ||
+    "";
+
   const roles = authenticated
-    ? resolveRolesFromUser(user)
+    ? resolveRolesFromUser(user, explicitRole)
     : [];
 
   const role = authenticated
@@ -657,6 +765,14 @@ function syncDerivedState() {
   state.isSupport = derived.isSupport;
   state.isManager = derived.isManager;
 
+  if (!derived.authenticated) {
+    state.role = "";
+    state.roles = [];
+    state.isAdmin = false;
+    state.isSupport = false;
+    state.isManager = false;
+  }
+
   return state;
 }
 
@@ -667,7 +783,7 @@ function safeSyncUserUI() {
 }
 
 function safeSetToken(token = null) {
-  const cleanToken = token || null;
+  const cleanToken = safeText(token, "") || null;
 
   if (typeof AppCore?.setToken === "function") {
     try {
@@ -682,14 +798,16 @@ function safeSetToken(token = null) {
 }
 
 function safeSetUser(user = null) {
+  const finalUser = user || null;
+
   if (typeof AppCore?.setUser === "function") {
     try {
-      AppCore.setUser(user || null);
+      AppCore.setUser(finalUser);
     } catch {}
   }
 
   safeSetState({
-    user: user || null,
+    user: finalUser,
   });
 }
 
@@ -745,31 +863,24 @@ function applyThemeFromUser(user = null) {
   return theme;
 }
 
-function safeClearSession(context = {}) {
-  if (typeof AppCore?.clearSession === "function") {
-    try {
-      AppCore.clearSession();
-      restoreRouteContext(context);
-
-      safeSetState({
-        token: null,
-        accessToken: null,
-        user: null,
-        role: "",
-        roles: [],
-        authenticated: false,
-        isAdmin: false,
-        isSupport: false,
-        isManager: false,
-      });
-
-      return;
-    } catch (error) {
-      safeWarn("AppCore.clearSession() falló.", error);
-    }
+function clearLegacyAuthStorage() {
+  if (!isBrowser()) {
+    return;
   }
 
-  safeSetState({
+  LEGACY_AUTH_STORAGE_KEYS.forEach((key) => {
+    try {
+      window.localStorage?.removeItem?.(key);
+    } catch {}
+
+    try {
+      window.sessionStorage?.removeItem?.(key);
+    } catch {}
+  });
+}
+
+function clearAuthStatePatch() {
+  return {
     token: null,
     accessToken: null,
     user: null,
@@ -779,7 +890,25 @@ function safeClearSession(context = {}) {
     isAdmin: false,
     isSupport: false,
     isManager: false,
-  });
+    session: null,
+    sessionId: null,
+    sessionUserId: null,
+  };
+}
+
+function safeClearSession(context = {}) {
+  if (typeof AppCore?.clearSession === "function") {
+    try {
+      AppCore.clearSession();
+      restoreRouteContext(context);
+      safeSetState(clearAuthStatePatch());
+      return;
+    } catch (error) {
+      safeWarn("AppCore.clearSession() falló.", error);
+    }
+  }
+
+  safeSetState(clearAuthStatePatch());
 
   restoreRouteContext(context);
 }
@@ -795,7 +924,7 @@ function getCurrentStateSnapshotBase() {
     token: state.token || state.accessToken || null,
     accessToken: state.accessToken || state.token || null,
 
-    user: state.user || null,
+    user: state.user || state?.session?.user || null,
 
     role: state.role || null,
     roles: safeArray(state.roles),
@@ -833,12 +962,15 @@ function buildSessionFingerprint(snapshot = {}) {
       user.id ||
       user.userId ||
       user.user_id ||
+      user._id ||
+      user.uid ||
       null,
 
     username:
       user.username ||
       user.userName ||
       user.email ||
+      user.phone ||
       null,
   });
 }
@@ -916,26 +1048,95 @@ export function buildSessionSnapshot(extra = {}) {
 
 export function applySession({
   token = undefined,
+  accessToken = undefined,
   user = undefined,
+  role = undefined,
   refreshToken = undefined,
   tempToken = undefined,
   sessionData = undefined,
+  authenticated = undefined,
 } = {}) {
   const startedAt = nowMs();
   const before = buildSessionSnapshot();
 
+  const state = ensureCoreState();
+
+  const incomingToken =
+    token !== undefined
+      ? token
+      : accessToken !== undefined
+        ? accessToken
+        : undefined;
+
   const normalizedUser =
     user === undefined
       ? undefined
-      : normalizeUser(user);
+      : user
+        ? normalizeUser(user)
+        : null;
 
-  if (token !== undefined) {
-    safeSetToken(token || null);
+  /*
+    Si llega token explícito, se actualiza.
+    Si llega user explícito null, se elimina.
+    Si llega token sin user, sólo se conserva el user actual si es usable.
+  */
+  if (incomingToken !== undefined) {
+    safeSetToken(incomingToken || null);
   }
 
   if (user !== undefined) {
     safeSetUser(normalizedUser || null);
   }
+
+  const currentStateAfterBasePatch =
+    ensureCoreState();
+
+  const effectiveToken =
+    safeText(
+      first(
+        incomingToken,
+        currentStateAfterBasePatch.token,
+        currentStateAfterBasePatch.accessToken,
+        currentStateAfterBasePatch.session?.token,
+        currentStateAfterBasePatch.session?.accessToken
+      ),
+      ""
+    );
+
+  const effectiveUser =
+    normalizedUser !== undefined
+      ? normalizedUser
+      : (
+          hasUsableUser(currentStateAfterBasePatch.user)
+            ? currentStateAfterBasePatch.user
+            : hasUsableUser(currentStateAfterBasePatch.session?.user)
+              ? currentStateAfterBasePatch.session.user
+              : null
+        );
+
+  const usableToken =
+    hasUsableToken(effectiveToken);
+
+  const usableUser =
+    hasUsableUser(effectiveUser);
+
+  const nextAuthenticated =
+    authenticated === false
+      ? false
+      : usableToken && usableUser;
+
+  const explicitRole =
+    safeText(role, "");
+
+  const nextRoles =
+    nextAuthenticated
+      ? resolveRolesFromUser(effectiveUser, explicitRole)
+      : [];
+
+  const nextRole =
+    nextAuthenticated
+      ? resolveCanonicalRole(nextRoles)
+      : "";
 
   if (refreshToken !== undefined) {
     persistRefreshToken(refreshToken || null);
@@ -945,11 +1146,6 @@ export function applySession({
     persistTempToken(tempToken || null);
   }
 
-  const effectiveUser =
-    normalizedUser === undefined
-      ? ensureCoreState().user || null
-      : normalizedUser;
-
   if (sessionData !== undefined) {
     persistSessionContext(
       sessionData || null,
@@ -957,28 +1153,41 @@ export function applySession({
     );
   }
 
-  persistAuxSessionData(effectiveUser);
+  if (nextAuthenticated) {
+    persistAuxSessionData(effectiveUser);
+    applyThemeFromUser(effectiveUser);
+  }
 
-  applyThemeFromUser(effectiveUser);
-
-  const state = syncDerivedState();
-
-  /*
-    Punto crítico:
-    garantizamos que el rol normalizado quede visible para:
-    - router/guards.js
-    - sidebar/index.js
-    - sidebar/visibility.js
-    - usuariosView.js
-  */
   safeSetState({
-    authenticated: Boolean(state.authenticated),
-    role: state.role || "",
-    roles: safeArray(state.roles),
-    isAdmin: Boolean(state.isAdmin),
-    isSupport: Boolean(state.isSupport),
-    isManager: Boolean(state.isManager),
+    token: usableToken ? effectiveToken : null,
+    accessToken: usableToken ? effectiveToken : null,
+    user: usableUser ? effectiveUser : null,
+
+    role: nextRole,
+    roles: nextRoles,
+
+    authenticated: nextAuthenticated,
+
+    isAdmin: nextRoles.some(isAdminRole),
+    isSupport: nextRoles.some(isSupportRole),
+    isManager: nextRoles.some(isManagerRole),
+
+    session: nextAuthenticated
+      ? {
+          ...(isPlainObject(state.session) ? state.session : {}),
+          token: effectiveToken,
+          accessToken: effectiveToken,
+          refreshToken: refreshToken || getStoredRefreshToken() || "",
+          user: effectiveUser,
+          role: nextRole,
+          roles: nextRoles,
+          authenticated: true,
+          data: sessionData || state.session?.data || null,
+        }
+      : null,
   });
+
+  syncDerivedState();
 
   safeSyncUserUI();
 
@@ -991,7 +1200,11 @@ export function applySession({
     durationMs: nowMs() - startedAt,
   });
 
-  emitSessionAppliedEvents(after, before);
+  if (after.authenticated) {
+    emitSessionAppliedEvents(after, before);
+  } else {
+    emitSessionClearedEvents(after);
+  }
 
   return after;
 }
@@ -1028,20 +1241,25 @@ export function clearSessionLocal(options = {}) {
     safeWarn("clearAuthStorage() falló.", error);
   }
 
+  clearLegacyAuthStorage();
+
+  try {
+    persistRefreshToken(null);
+  } catch {}
+
+  try {
+    persistTempToken(null);
+  } catch {}
+
+  try {
+    persistSessionContext(null, null);
+  } catch {}
+
+  safeSetState(clearAuthStatePatch());
+
   restoreRouteContext(routeContext);
 
   syncDerivedState();
-
-  safeSetState({
-    authenticated: false,
-    role: "",
-    roles: [],
-    isAdmin: false,
-    isSupport: false,
-    isManager: false,
-  });
-
-  restoreRouteContext(routeContext);
 
   safeSyncUserUI();
 
@@ -1074,7 +1292,8 @@ export function isAuthenticated() {
 
   return Boolean(
     state.authenticated &&
-      safeText(first(state.token, state.accessToken))
+      hasUsableToken(first(state.token, state.accessToken)) &&
+      hasUsableUser(state.user || state.session?.user)
   );
 }
 
@@ -1125,6 +1344,10 @@ export function requireRole(...roles) {
 ========================================================= */
 
 export function getAuthHeader() {
+  if (!isAuthenticated()) {
+    return {};
+  }
+
   const token = safeText(
     first(
       ensureCoreState().token,
@@ -1160,12 +1383,18 @@ export function getSessionDebugSnapshot() {
 
     username:
       snapshot.user?.username ||
+      snapshot.user?.userName ||
       snapshot.user?.email ||
       snapshot.user?.name ||
       snapshot.user?.nombre ||
+      snapshot.user?.phone ||
       null,
 
+    userIdentity:
+      getUserIdentity(snapshot.user),
+
     hasToken: Boolean(snapshot.token),
+    hasUser: hasUsableUser(snapshot.user),
     hasRefreshToken: Boolean(snapshot.refreshToken),
 
     sessionId: snapshot.sessionId || null,

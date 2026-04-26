@@ -15,10 +15,12 @@
    - no destruir tokens públicos en rutas tipo /activate-account?token=...
    - soporte hash-router /#/activate-account?token=...
    - soporte URL inicial capturada antes del boot SPA
+   - soporte directo para /activate-account/<token>
 
    HARDENING EXTREMO 10/10:
    - canonical determinista sin query/hash
    - publicPath preserva query/hash
+   - publicPath preserva /activate-account/<token>
    - slug estricto enterprise
    - redirect interno seguro
    - soporte href relativo real
@@ -341,6 +343,7 @@ function normalizePathnameWithCore(AppCore, pathname = "/") {
  * - NO delega la URL completa a AppCore.utils.normalizePath
  * - delega solo el pathname
  * - así evita que helpers externos borren ?token=...
+ * - también preserva /activate-account/<token>
  */
 export function normalizePath(AppCore, path = "/") {
   const raw =
@@ -468,6 +471,47 @@ function hasTokenInSearch(search = "") {
   }
 }
 
+function getActivationTokenFromPath(pathOrUrl = "") {
+  const raw =
+    safeText(pathOrUrl, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    const parts =
+      splitRawPath(raw);
+
+    const pathname =
+      normalizePathnameOnly(
+        parts.pathname || "/"
+      );
+
+    const match =
+      pathname.match(
+        /^\/activate-account\/([^/?#]+)$/i
+      );
+
+    if (!match?.[1]) {
+      return "";
+    }
+
+    return safeText(
+      decodeURIComponent(match[1]),
+      ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+function hasTokenInActivationPath(pathOrUrl = "") {
+  return Boolean(
+    getActivationTokenFromPath(pathOrUrl)
+  );
+}
+
 function hasActivationToken(pathOrUrl = "") {
   const raw =
     safeText(pathOrUrl, "");
@@ -476,12 +520,27 @@ function hasActivationToken(pathOrUrl = "") {
     return false;
   }
 
+  /*
+    Nuevo formato backend:
+    /activate-account/<token>
+  */
+  if (hasTokenInActivationPath(raw)) {
+    return true;
+  }
+
   try {
     const parsed =
       new URL(
         raw,
         getBaseOrigin()
       );
+
+    const parsedPath =
+      `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`;
+
+    if (hasTokenInActivationPath(parsedPath)) {
+      return true;
+    }
 
     if (
       hasTokenInSearch(parsed.search)
@@ -505,6 +564,13 @@ function hasActivationToken(pathOrUrl = "") {
   } catch {
     const parts =
       splitRawPath(raw);
+
+    const localPath =
+      `${parts.pathname || "/"}${parts.search || ""}${parts.hash || ""}`;
+
+    if (hasTokenInActivationPath(localPath)) {
+      return true;
+    }
 
     if (
       hasTokenInSearch(parts.search)
@@ -792,9 +858,14 @@ export function stripUsernamePrefix(AppCore, path = "/") {
  * - NO devuelve query
  * - NO devuelve hash
  * - NO devuelve /@username
+ * - /activate-account/<token> resuelve a /activate-account
  *
  * Ejemplo:
  *   /@pepe/activate-account?token=abc
+ *   -> /activate-account
+ *
+ * Ejemplo:
+ *   /activate-account/uuid
  *   -> /activate-account
  */
 export function normalizeCanonicalPath(AppCore, path = "/") {
@@ -809,9 +880,29 @@ export function normalizeCanonicalPath(AppCore, path = "/") {
       stripped
     );
 
-  return normalizePathnameOnly(
-    pathname
-  );
+  const cleanPathname =
+    normalizePathnameOnly(
+      pathname
+    );
+
+  /*
+    Activación pública:
+    - /activate-account
+    - /activate-account/<token>
+
+    Ambas deben resolver contra la misma ruta registrada:
+    /activate-account
+
+    El token sigue disponible en publicPath/window.location.pathname.
+  */
+  if (
+    cleanPathname === ACTIVATION_PATH ||
+    cleanPathname.startsWith(`${ACTIVATION_PATH}/`)
+  ) {
+    return ACTIVATION_PATH;
+  }
+
+  return cleanPathname;
 }
 
 export function isSameCanonicalPath(AppCore, a = "/", b = "/") {
@@ -916,6 +1007,10 @@ export function getCurrentPath(AppCore) {
  *
  * Ejemplo:
  *   /activate-account?token=xxx
+ *   -> /activate-account
+ *
+ * Ejemplo:
+ *   /activate-account/xxx
  *   -> /activate-account
  */
 export function getCurrentCanonicalPath(AppCore) {
@@ -1165,6 +1260,12 @@ export function resolveSpaHref(AppCore, href = "/") {
  * Salida si no hay slug:
  *   /activate-account?token=abc
  *
+ * Entrada:
+ *   /activate-account/abc
+ *
+ * Salida:
+ *   /activate-account/abc
+ *
  * Salida con slug permitido:
  *   /@user/facturas?page=2
  */
@@ -1184,6 +1285,21 @@ export function buildPublicPath(
         options.publicPath ||
         canonicalPath
     );
+
+  /*
+    Si estamos en activación con token, preservamos la URL pública completa.
+    No la convertimos prematuramente en /activate-account.
+    La propia vista de activación podrá limpiar la URL después de capturar el token.
+  */
+  if (
+    isActivationPath(source) &&
+    hasActivationToken(source)
+  ) {
+    return normalizePath(
+      AppCore,
+      source
+    );
+  }
 
   const clean =
     normalizeCanonicalPath(
@@ -1371,6 +1487,12 @@ export function buildLoginUrl(AppCore, redirectPath = null) {
  *   /activate-account?token=abc
  * en:
  *   /activate-account
+ *
+ * Tampoco debe convertir:
+ *   /activate-account/abc
+ * en:
+ *   /activate-account
+ * antes de que la vista haya capturado el token.
  */
 export function buildHistoryUrl(
   AppCore,

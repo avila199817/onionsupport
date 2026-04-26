@@ -10,7 +10,8 @@
    - soportar Home para user y admin con la misma lógica
    - reutilizar incidencias como fuente principal de actividad
    - cargar incidencias reales con store/api/model existente
-   - carga best-effort de facturas/clientes/usuarios si existen endpoints
+   - carga opcional de facturas/clientes/usuarios SOLO si están configurados
+   - evitar escaneo ciego de endpoints inexistentes
    - paginación visual fija a 5 incidencias por vista
    - render inicial inmediato
    - bind inmediato tras primer render para evitar pérdida de clicks
@@ -22,6 +23,13 @@
    - evitar doble bind de listeners
    - soportar destroy limpio del router
    - permitir reload con rerender seguro
+
+   FIX CRÍTICO:
+   - eliminado fallback bruto contra:
+     /facturas, /invoices, /billing/invoices,
+     /users, /usuarios, /clients, /clientes, /customers.
+   - la Home ya no debe llenar consola con 404.
+   - los endpoints opcionales se leen únicamente desde AppCore.config.
 
    HARDENING PRO:
    - estado local autocontenido
@@ -76,31 +84,105 @@ export const HomeView = (() => {
   const HOME_CACHE_KEY = "onion.home.cache.v1";
   const HOME_CACHE_TTL_MS = 1000 * 60 * 10;
 
-  const OPTIONAL_ENDPOINTS = {
+  /*
+    IMPORTANTE:
+    No declarar aquí endpoints por defecto.
+
+    Antes existía un escaneo bruto:
+      /facturas
+      /invoices
+      /billing/invoices
+      /users
+      /usuarios
+      /clientes
+      /clients
+      /customers
+
+    Eso provoca 404 si el backend no tiene esas rutas montadas.
+
+    Para activar opcionales, configura explícitamente en AppCore.config:
+
+      homeOptionalEndpoints: {
+        invoices: ["/ruta-real-facturas"],
+        users: ["/ruta-real-usuarios"],
+        clients: ["/ruta-real-clientes"],
+      }
+
+    También soporta:
+      homeEndpoints
+      dashboardEndpoints
+      optionalEndpoints
+      endpoints
+      apiEndpoints
+  */
+
+  const OPTIONAL_ENDPOINT_ALIASES = {
     invoices: [
-      "/facturas",
-      "/invoices",
-      "/billing/invoices",
-      "/api/facturas",
-      "/api/invoices",
+      "invoices",
+      "invoice",
+      "facturas",
+      "factura",
+      "billingInvoices",
+      "billing_invoices",
+      "billing",
     ],
 
     users: [
-      "/users",
-      "/usuarios",
-      "/api/users",
-      "/api/usuarios",
+      "users",
+      "user",
+      "usuarios",
+      "usuario",
     ],
 
     clients: [
-      "/clientes",
-      "/clients",
-      "/customers",
-      "/api/clientes",
-      "/api/clients",
-      "/api/customers",
+      "clients",
+      "client",
+      "clientes",
+      "cliente",
+      "customers",
+      "customer",
     ],
   };
+
+  const OPTIONAL_DIRECT_CONFIG_KEYS = {
+    invoices: [
+      "homeInvoicesEndpoint",
+      "homeInvoicesUrl",
+      "invoicesEndpoint",
+      "invoicesUrl",
+      "facturasEndpoint",
+      "facturasUrl",
+    ],
+
+    users: [
+      "homeUsersEndpoint",
+      "homeUsersUrl",
+      "usersEndpoint",
+      "usersUrl",
+      "usuariosEndpoint",
+      "usuariosUrl",
+    ],
+
+    clients: [
+      "homeClientsEndpoint",
+      "homeClientsUrl",
+      "clientsEndpoint",
+      "clientsUrl",
+      "clientesEndpoint",
+      "clientesUrl",
+      "customersEndpoint",
+      "customersUrl",
+    ],
+  };
+
+  const OPTIONAL_CONFIG_BUCKETS = [
+    "homeOptionalEndpoints",
+    "homeEndpoints",
+    "dashboardEndpoints",
+    "optionalEndpoints",
+    "endpoints",
+    "apiEndpoints",
+  ];
 
   /* =========================================================
      LOCAL RUNTIME
@@ -560,6 +642,7 @@ export const HomeView = (() => {
         data.usuarios,
         data.clients,
         data.clientes,
+        data.customers,
         []
       )
     );
@@ -878,6 +961,156 @@ export const HomeView = (() => {
   }
 
   /* =========================================================
+     OPTIONAL ENDPOINT CONFIG
+  ========================================================= */
+
+  function normalizeEndpointPath(value = "") {
+    const text = safeText(value, "");
+    if (!text) return "";
+
+    if (/^https?:\/\//i.test(text)) {
+      return text;
+    }
+
+    return text.startsWith("/")
+      ? text
+      : `/${text}`;
+  }
+
+  function normalizeEndpointValue(value = null) {
+    if (!value) {
+      return [];
+    }
+
+    if (typeof value === "string") {
+      const endpoint = normalizeEndpointPath(value);
+      return endpoint ? [endpoint] : [];
+    }
+
+    if (Array.isArray(value)) {
+      const output = [];
+
+      for (const item of value) {
+        output.push(...normalizeEndpointValue(item));
+      }
+
+      return output;
+    }
+
+    if (
+      value &&
+      typeof value === "object"
+    ) {
+      const output = [];
+
+      const preferred = [
+        value.list,
+        value.index,
+        value.all,
+        value.get,
+        value.path,
+        value.url,
+        value.endpoint,
+        value.href,
+      ];
+
+      for (const item of preferred) {
+        output.push(...normalizeEndpointValue(item));
+      }
+
+      return output;
+    }
+
+    return [];
+  }
+
+  function uniqueEndpoints(values = []) {
+    const output = [];
+    const seen = new Set();
+
+    for (const value of safeArray(values)) {
+      const endpoint = normalizeEndpointPath(value);
+      const key = endpoint.toLowerCase();
+
+      if (!endpoint || seen.has(key)) {
+        continue;
+      }
+
+      seen.add(key);
+      output.push(endpoint);
+    }
+
+    return output;
+  }
+
+  function getOptionalEndpointCandidates(kind = "") {
+    const key = safeText(kind, "");
+    if (!key) return [];
+
+    const aliases = safeArray(OPTIONAL_ENDPOINT_ALIASES[key]);
+    const directKeys = safeArray(OPTIONAL_DIRECT_CONFIG_KEYS[key]);
+    const cfg = safeObject(AppCore?.config);
+    const collected = [];
+
+    for (const directKey of directKeys) {
+      collected.push(...normalizeEndpointValue(cfg?.[directKey]));
+    }
+
+    for (const bucketName of OPTIONAL_CONFIG_BUCKETS) {
+      const bucket = safeObject(cfg?.[bucketName]);
+
+      if (!hasOwnKeys(bucket)) {
+        continue;
+      }
+
+      for (const alias of aliases) {
+        collected.push(...normalizeEndpointValue(bucket?.[alias]));
+      }
+    }
+
+    return uniqueEndpoints(collected);
+  }
+
+  function getCurrentOptionalCollection(kind = "") {
+    const key = safeText(kind, "");
+
+    if (key === "invoices") {
+      return {
+        items: safeArray(homeState.invoices),
+        total: Math.max(
+          safeArray(homeState.invoices).length,
+          safeNumber(homeState.invoicesRemoteCount, 0)
+        ),
+      };
+    }
+
+    if (key === "users") {
+      return {
+        items: safeArray(homeState.users),
+        total: Math.max(
+          safeArray(homeState.users).length,
+          safeNumber(homeState.usersRemoteCount, 0)
+        ),
+      };
+    }
+
+    if (key === "clients") {
+      return {
+        items: safeArray(homeState.clients),
+        total: Math.max(
+          safeArray(homeState.clients).length,
+          safeNumber(homeState.clientsRemoteCount, 0)
+        ),
+      };
+    }
+
+    return {
+      items: [],
+      total: 0,
+    };
+  }
+
+  /* =========================================================
      REQUEST HELPERS
   ========================================================= */
 
@@ -934,28 +1167,92 @@ export const HomeView = (() => {
     const path = safeText(endpoint, "");
     if (!path) return null;
 
-    const candidates = [
-      AppCore?.api?.get,
-      AppCore?.http?.get,
-      AppCore?.request?.get,
-      AppCore?.apiClient?.get,
-    ].filter((fn) => typeof fn === "function");
+    const requestOptions = {
+      silent: true,
+      emitEvents: false,
+      storeError: false,
+      expectedStatuses: [404],
+      dedupe: true,
+    };
 
-    for (const fn of candidates) {
+    const candidates = [
+      {
+        context: AppCore?.api,
+        fn: AppCore?.api?.get,
+      },
+      {
+        context: AppCore?.http,
+        fn: AppCore?.http?.get,
+      },
+      {
+        context: AppCore?.request,
+        fn: AppCore?.request?.get,
+      },
+      {
+        context: AppCore?.apiClient,
+        fn: AppCore?.apiClient?.get,
+      },
+    ].filter((item) => typeof item.fn === "function");
+
+    for (const candidate of candidates) {
       try {
-        return await fn.call(null, path);
+        const response = await candidate.fn.call(
+          candidate.context,
+          path,
+          requestOptions
+        );
+
+        if (
+          response &&
+          typeof response === "object" &&
+          safeNumber(response.status, 0) >= 400
+        ) {
+          continue;
+        }
+
+        return response;
       } catch {}
     }
 
     try {
       if (typeof AppCore?.request === "function") {
-        return await AppCore.request(path, {
+        const response = await AppCore.request(path, {
           method: "GET",
+          ...requestOptions,
         });
+
+        if (
+          response &&
+          typeof response === "object" &&
+          safeNumber(response.status, 0) >= 400
+        ) {
+          return null;
+        }
+
+        return response;
       }
     } catch {}
 
     return null;
+  }
+
+  async function parseFetchJsonResponse(response = null) {
+    if (!response) return null;
+
+    if (!response.ok) {
+      return null;
+    }
+
+    try {
+      return await response.json();
+    } catch {
+      try {
+        const text = await response.text();
+        return text ? JSON.parse(text) : null;
+      } catch {
+        return null;
+      }
+    }
   }
 
   async function fetchJsonBestEffort(endpoint = "") {
@@ -989,28 +1286,28 @@ export const HomeView = (() => {
         credentials: "include",
       });
 
-      if (!response.ok) {
-        return null;
-      }
-
-      return await response.json();
+      return await parseFetchJsonResponse(response);
     } catch {
       return null;
     }
   }
 
-  async function loadOptionalCollection(kind = "", endpoints = []) {
+  async function loadOptionalCollection(kind = "") {
     const key = safeText(kind, "");
-    const paths = safeArray(endpoints);
+    const endpoints = getOptionalEndpointCandidates(key);
 
-    if (!key || !paths.length) {
+    if (!key) {
       return {
         items: [],
         total: 0,
       };
     }
 
-    for (const endpoint of paths) {
+    if (!endpoints.length) {
+      return getCurrentOptionalCollection(key);
+    }
+
+    for (const endpoint of endpoints) {
       const payload = await fetchJsonBestEffort(endpoint);
       const normalized = normalizeCollectionPayload(payload);
 
@@ -1019,10 +1316,7 @@ export const HomeView = (() => {
       }
     }
 
-    return {
-      items: [],
-      total: 0,
-    };
+    return getCurrentOptionalCollection(key);
   }
 
   /* =========================================================
@@ -1424,6 +1718,28 @@ export const HomeView = (() => {
      DATA
   ========================================================= */
 
+  async function loadOptionalDashboardCollections(admin = false) {
+    const invoicesPayload = await loadOptionalCollection("invoices");
+
+    homeState.invoices = invoicesPayload.items;
+    homeState.invoicesRemoteCount = invoicesPayload.total;
+
+    if (!admin) {
+      return;
+    }
+
+    const [usersPayload, clientsPayload] = await Promise.all([
+      loadOptionalCollection("users"),
+      loadOptionalCollection("clients"),
+    ]);
+
+    homeState.users = usersPayload.items;
+    homeState.usersRemoteCount = usersPayload.total;
+
+    homeState.clients = clientsPayload.items;
+    homeState.clientsRemoteCount = clientsPayload.total;
+  }
+
   async function loadData({
     force = false,
     silent = false,
@@ -1468,26 +1784,7 @@ export const HomeView = (() => {
       const role = getCurrentRole();
       const admin = isAdminRole(role);
 
-      const invoicesPayload = await loadOptionalCollection(
-        "invoices",
-        OPTIONAL_ENDPOINTS.invoices
-      );
-
-      homeState.invoices = invoicesPayload.items;
-      homeState.invoicesRemoteCount = invoicesPayload.total;
-
-      if (admin) {
-        const [usersPayload, clientsPayload] = await Promise.all([
-          loadOptionalCollection("users", OPTIONAL_ENDPOINTS.users),
-          loadOptionalCollection("clients", OPTIONAL_ENDPOINTS.clients),
-        ]);
-
-        homeState.users = usersPayload.items;
-        homeState.usersRemoteCount = usersPayload.total;
-
-        homeState.clients = clientsPayload.items;
-        homeState.clientsRemoteCount = clientsPayload.total;
-      }
+      await loadOptionalDashboardCollections(admin);
 
       homeState.activity = buildActivityFromData();
       homeState.lastSyncAt = nowIso();
@@ -2358,6 +2655,8 @@ export const HomeView = (() => {
     getTicketById: (ticketId = "") =>
       findIncidenciaById(getTickets(), ticketId),
 
+    getOptionalEndpointCandidates,
+
     getState: () => ({
       ...homeState,
       user: getCurrentUser(),
@@ -2367,6 +2666,11 @@ export const HomeView = (() => {
       hasInflightInit: Boolean(inflightInit),
       hasInflightReload: Boolean(inflightReload),
       pendingCreateRequest,
+      optionalEndpoints: {
+        invoices: getOptionalEndpointCandidates("invoices"),
+        users: getOptionalEndpointCandidates("users"),
+        clients: getOptionalEndpointCandidates("clients"),
+      },
     }),
 
     get initialized() {

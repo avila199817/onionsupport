@@ -30,6 +30,13 @@
    - corrige botones muertos hasta refrescar página
    - evita duplicar navegación si Router ya interceptó el click
    - cierra sidebar móvil después de navegación aunque Router haya prevenido default
+
+   FIX CRÍTICO DROPDOWN:
+   - evita doble toggle entre bindDomEvents() y fallback delegado
+   - añade bind directo en capture sobre userToggle
+   - stopImmediatePropagation defensivo solo para userToggle
+   - fallback no vuelve a ejecutar acciones si el evento ya fue prevenido
+   - conserva post-router cleanup para navegación SPA
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -136,12 +143,6 @@ export const SidebarUI = (() => {
     return typeof value === "function";
   }
 
-  function toArray(value) {
-    if (Array.isArray(value)) return value;
-    if (value === null || value === undefined) return [];
-    return [value];
-  }
-
   function first(...values) {
     for (const value of values) {
       if (value === undefined || value === null) continue;
@@ -217,6 +218,24 @@ export const SidebarUI = (() => {
     } catch {}
 
     return emitted;
+  }
+
+  function preventDefault(event) {
+    try {
+      event?.preventDefault?.();
+    } catch {}
+  }
+
+  function stopPropagation(event) {
+    try {
+      event?.stopPropagation?.();
+    } catch {}
+  }
+
+  function stopImmediatePropagation(event) {
+    try {
+      event?.stopImmediatePropagation?.();
+    } catch {}
   }
 
   function containsElement(parent, child) {
@@ -316,6 +335,17 @@ export const SidebarUI = (() => {
     } catch {
       return true;
     }
+  }
+
+  function markSidebarEventHandled(event, reason = "") {
+    try {
+      event.__onionSidebarHandled = true;
+      event.__onionSidebarReason = safeText(reason, "");
+    } catch {}
+  }
+
+  function wasSidebarEventHandled(event) {
+    return Boolean(event?.__onionSidebarHandled);
   }
 
   /* ======================================================
@@ -899,15 +929,20 @@ export const SidebarUI = (() => {
       avatarEl.removeAttribute("data-tooltip");
     }
 
-    userToggle?.setAttribute(
-      "aria-label",
-      `Abrir menú de usuario de ${displayName}`
-    );
+    if (userToggle) {
+      userToggle.setAttribute(
+        "aria-label",
+        `Abrir menú de usuario de ${displayName}`
+      );
 
-    userToggle?.removeAttribute("title");
-    userToggle?.removeAttribute("data-tooltip");
-    userDropdown?.removeAttribute("title");
-    userDropdown?.removeAttribute("data-tooltip");
+      userToggle.removeAttribute("title");
+      userToggle.removeAttribute("data-tooltip");
+    }
+
+    if (userDropdown) {
+      userDropdown.removeAttribute("title");
+      userDropdown.removeAttribute("data-tooltip");
+    }
 
     sanitizeFooterTooltipState(AppCore);
 
@@ -926,6 +961,8 @@ export const SidebarUI = (() => {
   ====================================================== */
 
   function closeDropdown() {
+    refreshSidebarDomRefs();
+
     return closeDropdownBase(AppCore, state);
   }
 
@@ -1049,6 +1086,15 @@ export const SidebarUI = (() => {
         hasUserDropdown: Boolean(elements.userDropdown),
         hasLogout: Boolean(elements.logoutBtn),
       },
+
+      dropdownDom: {
+        userToggleId: elements.userToggle?.id || "",
+        userToggleAriaExpanded: elements.userToggle?.getAttribute?.("aria-expanded") || "",
+        userDropdownId: elements.userDropdown?.id || "",
+        userDropdownHidden: Boolean(elements.userDropdown?.hidden),
+        userDropdownAriaHidden: elements.userDropdown?.getAttribute?.("aria-hidden") || "",
+        userDropdownClassName: elements.userDropdown?.className || "",
+      },
     };
   }
 
@@ -1107,12 +1153,13 @@ export const SidebarUI = (() => {
   ====================================================== */
 
   function getCleanupScope() {
-    try {
-      if (typeof AppCore?.cleanup?.scope === "function") {
-        return AppCore.cleanup.scope(SCOPE);
-      }
-    } catch {}
-
+    /*
+      Importante:
+      events.js normaliza scope con String(scope).
+      Si aquí devolvemos AppCore.cleanup.scope(SCOPE) y eso es un objeto,
+      los listeners acaban en "[object Object]".
+      Por eso este módulo usa siempre el nombre estable SCOPE.
+    */
     return SCOPE;
   }
 
@@ -1286,7 +1333,7 @@ export const SidebarUI = (() => {
       return false;
     }
 
-    event?.preventDefault?.();
+    preventDefault(event);
 
     closeDropdown();
 
@@ -1405,6 +1452,8 @@ export const SidebarUI = (() => {
           "sidebar-user-toggle",
           "user-toggle",
           "sidebar-user-menu-toggle",
+          "sidebarUserToggle",
+          "userToggle",
         ].includes(id)
     );
   }
@@ -1492,6 +1541,113 @@ export const SidebarUI = (() => {
     return false;
   }
 
+  function bindDirectUserToggleGuard(reason = "bind-direct-user-toggle") {
+    const {
+      userToggle,
+    } = getElements(AppCore);
+
+    if (!userToggle) {
+      return () => {};
+    }
+
+    const onUserToggleClick = (event) => {
+      if (!initialized && !hasSidebarShell(AppCore)) {
+        return;
+      }
+
+      if (!containsElement(userToggle, event?.target)) {
+        return;
+      }
+
+      /*
+        Este listener va en capture sobre el botón real.
+        Evita que el click llegue al document listener de events.js
+        y al fallback delegado a la vez.
+      */
+      markSidebarEventHandled(event, "direct-user-toggle");
+
+      preventDefault(event);
+      stopPropagation(event);
+      stopImmediatePropagation(event);
+
+      refreshSidebarDomRefs();
+
+      toggleDropdown();
+
+      safeEmit("sidebar:user-toggle:direct", {
+        reason,
+        snapshot: getSidebarSnapshot(),
+      });
+    };
+
+    const onUserToggleKeydown = (event) => {
+      if (!containsElement(userToggle, event?.target)) {
+        return;
+      }
+
+      if (
+        event?.key !== "Enter" &&
+        event?.key !== " " &&
+        event?.key !== "ArrowDown" &&
+        event?.key !== "Escape"
+      ) {
+        return;
+      }
+
+      markSidebarEventHandled(event, "direct-user-toggle-keydown");
+
+      preventDefault(event);
+      stopPropagation(event);
+      stopImmediatePropagation(event);
+
+      if (event.key === "Escape") {
+        closeDropdown();
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        openDropdown();
+        return;
+      }
+
+      toggleDropdown();
+    };
+
+    try {
+      userToggle.addEventListener(
+        "click",
+        onUserToggleClick,
+        true
+      );
+
+      userToggle.addEventListener(
+        "keydown",
+        onUserToggleKeydown,
+        true
+      );
+    } catch {
+      return () => {};
+    }
+
+    return () => {
+      try {
+        userToggle.removeEventListener(
+          "click",
+          onUserToggleClick,
+          true
+        );
+      } catch {}
+
+      try {
+        userToggle.removeEventListener(
+          "keydown",
+          onUserToggleKeydown,
+          true
+        );
+      } catch {}
+    };
+  }
+
   function bindFallbackDomEvents(reason = "bind-fallback") {
     if (!isBrowser()) {
       return false;
@@ -1499,7 +1655,14 @@ export const SidebarUI = (() => {
 
     cleanupFallbackDomEvents();
 
+    const directUserToggleCleanup =
+      bindDirectUserToggleGuard(reason);
+
     const onDocumentClick = async (event) => {
+      if (wasSidebarEventHandled(event)) {
+        return;
+      }
+
       if (!initialized && !hasSidebarShell(AppCore)) {
         return;
       }
@@ -1519,19 +1682,35 @@ export const SidebarUI = (() => {
       }
 
       /*
-        No salimos por event.defaultPrevented de forma global.
-        Motivo:
-        - Router puede haber interceptado a[data-spa] antes.
-        - Aun así necesitamos cerrar dropdown/sidebar móvil.
+        Importante:
+        Si otro handler ya ha prevenido el evento, NO re-ejecutamos
+        acciones de control como toggle/dropdown/logout.
+
+        Antes esto producía:
+          1) bindDomEvents abre dropdown
+          2) fallback lo vuelve a cerrar en el mismo click
+
+        Para navegación sí mantenemos cleanup post-router.
       */
       const defaultWasPrevented = Boolean(event.defaultPrevented);
 
-      if (isToggleSidebarElement(actionElement)) {
-        if (!defaultWasPrevented) {
-          event.preventDefault();
-        }
+      if (
+        defaultWasPrevented &&
+        (
+          isToggleSidebarElement(actionElement) ||
+          isUserDropdownElement(actionElement) ||
+          isLogoutElement(actionElement)
+        )
+      ) {
+        markSidebarEventHandled(event, "fallback-skip-default-prevented-control");
+        return;
+      }
 
-        event.stopPropagation();
+      if (isToggleSidebarElement(actionElement)) {
+        markSidebarEventHandled(event, "fallback-toggle-sidebar");
+
+        preventDefault(event);
+        stopPropagation(event);
 
         toggleSidebar();
 
@@ -1544,28 +1723,27 @@ export const SidebarUI = (() => {
       }
 
       if (isUserDropdownElement(actionElement)) {
-        if (!defaultWasPrevented) {
-          event.preventDefault();
-        }
+        markSidebarEventHandled(event, "fallback-toggle-dropdown");
 
-        event.stopPropagation();
+        preventDefault(event);
+        stopPropagation(event);
 
         toggleDropdown();
 
         safeEmit("sidebar:fallback:action", {
           action: "toggle-dropdown",
           reason,
+          snapshot: getSidebarSnapshot(),
         });
 
         return;
       }
 
       if (isLogoutElement(actionElement)) {
-        if (!defaultWasPrevented) {
-          event.preventDefault();
-        }
+        markSidebarEventHandled(event, "fallback-logout");
 
-        event.stopPropagation();
+        preventDefault(event);
+        stopPropagation(event);
 
         await handleLogout();
 
@@ -1588,6 +1766,8 @@ export const SidebarUI = (() => {
           );
 
         if (handled) {
+          markSidebarEventHandled(event, "fallback-navigation");
+
           safeEmit("sidebar:fallback:action", {
             action: defaultWasPrevented
               ? "navigate-post-router"
@@ -1600,6 +1780,10 @@ export const SidebarUI = (() => {
     };
 
     const onDocumentKeydown = (event) => {
+      if (wasSidebarEventHandled(event)) {
+        return;
+      }
+
       if (event?.key === "Escape" && state.dropdownOpen) {
         closeDropdown();
       }
@@ -1618,6 +1802,10 @@ export const SidebarUI = (() => {
     );
 
     fallbackDomCleanup = () => {
+      try {
+        directUserToggleCleanup?.();
+      } catch {}
+
       try {
         document.removeEventListener(
           "click",
@@ -1887,6 +2075,52 @@ export const SidebarUI = (() => {
   }
 
   /* ======================================================
+     DEBUG
+  ====================================================== */
+
+  function debugDropdown() {
+    refreshSidebarDomRefs();
+
+    const {
+      userToggle,
+      userDropdown,
+    } = getElements(AppCore);
+
+    const snapshot = {
+      stateDropdownOpen: Boolean(state.dropdownOpen),
+
+      hasUserToggle: Boolean(userToggle),
+      hasUserDropdown: Boolean(userDropdown),
+
+      userToggleId: userToggle?.id || "",
+      userToggleClassName: userToggle?.className || "",
+      userToggleAriaExpanded: userToggle?.getAttribute?.("aria-expanded") || "",
+      userToggleHidden: Boolean(userToggle?.hidden),
+      userToggleInert: Boolean(userToggle?.hasAttribute?.("inert")),
+      userToggleParentHidden: Boolean(
+        userToggle?.closest?.("[hidden],[inert],[aria-hidden='true']")
+      ),
+
+      userDropdownId: userDropdown?.id || "",
+      userDropdownClassName: userDropdown?.className || "",
+      userDropdownHidden: Boolean(userDropdown?.hidden),
+      userDropdownAriaHidden: userDropdown?.getAttribute?.("aria-hidden") || "",
+      userDropdownInert: Boolean(userDropdown?.hasAttribute?.("inert")),
+      userDropdownParentHidden: Boolean(
+        userDropdown?.closest?.("[hidden],[inert],[aria-hidden='true']")
+      ),
+
+      sidebarSnapshot: getSidebarSnapshot(),
+    };
+
+    try {
+      console.log("[SidebarUI:dropdown]", snapshot);
+    } catch {}
+
+    return snapshot;
+  }
+
+  /* ======================================================
      API
   ====================================================== */
 
@@ -1923,6 +2157,8 @@ export const SidebarUI = (() => {
     handleLogout,
 
     isAdmin,
+
+    debugDropdown,
 
     getSnapshot: getSidebarSnapshot,
     getState: getSidebarSnapshot,

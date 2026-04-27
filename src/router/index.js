@@ -23,10 +23,13 @@
    - redirects internos del guard NO llaman navigate() dentro del renderChain
    - elimina deadlock de already-authenticated -> navigate()
    - Router ignora sus propios app:ui:repair-request
-   - safeEventOn usa window para CustomEvent fallback
+   - safeEventOn usa window solo como fallback real
+   - safeEmit NO duplica AppCore.events + window
    - reparación de shell reentrante protegida
    - navegación same-route/burst más controlada
    - reparación post-render no pisa navegación nueva
+   - Router NO escucha app:user-ui:sync ni app:ui:repair para evitar bucles
+   - repairShellForRoute no emite app:ui:repair-request por defecto
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -123,6 +126,9 @@ export const Router = (() => {
 
   const NAV_BURST_MS = 160;
   const POST_RENDER_REPAIR_DELAY = 0;
+  const EXTERNAL_REPAIR_THROTTLE_MS = 140;
+  const AUTH_READY_THROTTLE_MS = 180;
+
   const SELF_REPAIR_SOURCE = "router.index";
 
   let bound = false;
@@ -147,6 +153,12 @@ export const Router = (() => {
 
   let shellRepairDepth = 0;
   let externalRepairInFlight = false;
+
+  let lastExternalRepairKey = "";
+  let lastExternalRepairAt = 0;
+
+  let authReadyInFlight = false;
+  let lastAuthReadyAt = 0;
 
   /* =====================================================
      SAFE HELPERS
@@ -241,7 +253,7 @@ export const Router = (() => {
     }
   }
 
-  function safeEmit(eventName, payload = {}) {
+  function safeEmit(eventName, payload = {}, options = {}) {
     const name =
       safeText(eventName, "");
 
@@ -249,30 +261,47 @@ export const Router = (() => {
       return false;
     }
 
-    let emitted = false;
+    const opts =
+      safeObject(options);
+
+    let busAvailable = false;
+    let busEmitted = false;
 
     try {
-      AppCore?.events?.emit?.(
-        name,
-        payload
-      );
+      if (isFn(AppCore?.events?.emit)) {
+        busAvailable = true;
 
-      emitted = true;
+        AppCore.events.emit(
+          name,
+          payload
+        );
+
+        busEmitted = true;
+      }
     } catch {}
 
-    try {
-      if (isBrowser()) {
+    /*
+      Clave:
+      No emitir siempre también por window.
+      Si AppCore.events existe, ya hay un bus principal.
+      Duplicar a window provoca doble router:rendered / doble repair.
+    */
+    if (
+      opts.window === true ||
+      (!busAvailable && isBrowser())
+    ) {
+      try {
         window.dispatchEvent(
           new CustomEvent(name, {
             detail: payload,
           })
         );
 
-        emitted = true;
-      }
-    } catch {}
+        return true;
+      } catch {}
+    }
 
-    return emitted;
+    return busEmitted;
   }
 
   function safeOn(
@@ -362,10 +391,8 @@ export const Router = (() => {
     }
 
     /*
-      Importante:
-      safeEmit() emite CustomEvent sobre window.
-      Si no hay AppCore.events, el fallback debe escuchar window,
-      no document.
+      Fallback real:
+      solo si no existe AppCore.events.
     */
     return safeOn(
       window,
@@ -417,6 +444,13 @@ export const Router = (() => {
     }
 
     if (
+      eventOrPayload?.payload &&
+      typeof eventOrPayload.payload === "object"
+    ) {
+      return eventOrPayload.payload;
+    }
+
+    if (
       eventOrPayload &&
       typeof eventOrPayload === "object"
     ) {
@@ -424,6 +458,17 @@ export const Router = (() => {
     }
 
     return {};
+  }
+
+  function getEventType(eventOrPayload = {}) {
+    return safeText(
+      eventOrPayload?.type ||
+        eventOrPayload?.event ||
+        eventOrPayload?.detail?.event ||
+        eventOrPayload?.payload?.event ||
+        "",
+      ""
+    );
   }
 
   function isLatestRenderToken(token) {
@@ -485,41 +530,6 @@ export const Router = (() => {
     }
 
     return value;
-  }
-
-  function getSearchAndHash(path = "/") {
-    const raw =
-      safeText(path, "");
-
-    if (!raw) {
-      return "";
-    }
-
-    const queryIndex =
-      raw.indexOf("?");
-
-    const hashIndex =
-      raw.indexOf("#");
-
-    let index = -1;
-
-    if (
-      queryIndex >= 0 &&
-      hashIndex >= 0
-    ) {
-      index = Math.min(
-        queryIndex,
-        hashIndex
-      );
-    } else if (queryIndex >= 0) {
-      index = queryIndex;
-    } else if (hashIndex >= 0) {
-      index = hashIndex;
-    }
-
-    return index >= 0
-      ? raw.slice(index)
-      : "";
   }
 
   function isPublicAuthPath(path = "/") {
@@ -786,6 +796,10 @@ export const Router = (() => {
 
     const state =
       safeObject(AppCore?.state);
+
+    if (state.authenticated === true) {
+      return true;
+    }
 
     const token =
       state.token ||
@@ -1175,7 +1189,7 @@ export const Router = (() => {
     safeEmit(
       "app:ui:repair-request",
       {
-        ...payload,
+        ...safeObject(payload),
         source: SELF_REPAIR_SOURCE,
       }
     );
@@ -1187,9 +1201,23 @@ export const Router = (() => {
     publicPath = "/",
     phase = "router",
     hideLoading = false,
-    emitRepair = true,
+    emitRepair = false,
   } = {}) {
     if (!isBrowser()) {
+      return false;
+    }
+
+    if (shellRepairDepth > 4) {
+      safeWarn(
+        "repairShellForRoute bloqueado por profundidad.",
+        {
+          phase,
+          canonicalPath,
+          publicPath,
+          shellRepairDepth,
+        }
+      );
+
       return false;
     }
 
@@ -1436,6 +1464,7 @@ export const Router = (() => {
         phase:
           `${payload.phase || "post-render"}:after-paint`,
         hideLoading: true,
+        emitRepair: false,
       });
     });
   }
@@ -1456,6 +1485,7 @@ export const Router = (() => {
         data.publicPath,
       phase,
       hideLoading: true,
+      emitRepair: false,
     });
   }
 
@@ -2699,6 +2729,13 @@ export const Router = (() => {
       return;
     }
 
+    if (
+      event.__onionSidebarHandled ||
+      event.__onionSidebarEventsHandled
+    ) {
+      return;
+    }
+
     const link =
       event.target?.closest?.(
         "a[data-spa]"
@@ -2772,15 +2809,76 @@ export const Router = (() => {
     );
   }
 
+  function shouldSkipExternalRepair(detail = {}, eventType = "") {
+    const source =
+      safeText(detail?.source, "");
+
+    if (
+      source === SELF_REPAIR_SOURCE ||
+      source === "router" ||
+      source === "router.index" ||
+      source === "router.render"
+    ) {
+      return true;
+    }
+
+    if (
+      shellRepairDepth > 0 ||
+      externalRepairInFlight
+    ) {
+      return true;
+    }
+
+    const phase =
+      safeText(
+        detail?.reason ||
+          detail?.phase ||
+          eventType ||
+          "external-repair",
+        "external-repair"
+      );
+
+    const current =
+      getCurrentComparable();
+
+    const key = [
+      phase,
+      current.canonical,
+      current.publicPath,
+      source,
+    ].join("|");
+
+    const now =
+      Date.now();
+
+    if (
+      key === lastExternalRepairKey &&
+      now - lastExternalRepairAt < EXTERNAL_REPAIR_THROTTLE_MS
+    ) {
+      return true;
+    }
+
+    lastExternalRepairKey =
+      key;
+
+    lastExternalRepairAt =
+      now;
+
+    return false;
+  }
+
   function onExternalRepair(event = null) {
     const detail =
       getEventDetail(event);
 
+    const eventType =
+      getEventType(event);
+
     if (
-      detail?.source === SELF_REPAIR_SOURCE ||
-      detail?.source === "router" ||
-      shellRepairDepth > 0 ||
-      externalRepairInFlight
+      shouldSkipExternalRepair(
+        detail,
+        eventType
+      )
     ) {
       return;
     }
@@ -2791,7 +2889,7 @@ export const Router = (() => {
       const reason =
         detail?.reason ||
         detail?.phase ||
-        event?.type ||
+        eventType ||
         "external-repair";
 
       repairCurrentRoute(reason);
@@ -2801,19 +2899,40 @@ export const Router = (() => {
   }
 
   function onAuthSessionReady(event = null) {
-    const current =
-      getCurrentComparable();
-
-    repairCurrentRoute(
-      event?.type ||
-        "auth-session-ready"
-    );
+    const now =
+      Date.now();
 
     if (
-      current.canonical === "/login" &&
-      isAuthenticated()
+      authReadyInFlight ||
+      now - lastAuthReadyAt < AUTH_READY_THROTTLE_MS
     ) {
-      goAfterLogin("/");
+      return;
+    }
+
+    authReadyInFlight =
+      true;
+
+    lastAuthReadyAt =
+      now;
+
+    try {
+      const current =
+        getCurrentComparable();
+
+      repairCurrentRoute(
+        event?.type ||
+          "auth-session-ready"
+      );
+
+      if (
+        current.canonical === "/login" &&
+        isAuthenticated()
+      ) {
+        goAfterLogin("/");
+      }
+    } finally {
+      authReadyInFlight =
+        false;
     }
   }
 
@@ -2909,10 +3028,16 @@ export const Router = (() => {
         );
       });
 
+      /*
+        No escuchar:
+        - app:user-ui:sync
+        - app:ui:repair
+
+        Son eventos derivados de UI repair/sync y pueden cerrar el bucle:
+          router repair -> app repair request -> user UI sync -> router repair
+      */
       [
-        "app:ui:repair",
         "app:user:change",
-        "app:user-ui:sync",
         "auth:logout:success",
         "app:session:cleared",
       ].forEach((eventName) => {
@@ -2925,8 +3050,8 @@ export const Router = (() => {
       });
 
       /*
-        Este evento lo emite también repairShellForRoute().
-        Lo escuchamos con guard estricto para no crear bucles.
+        Permitido solo para requests externas.
+        Las emitidas por este Router se ignoran por source.
       */
       disposers.push(
         safeEventOn(
@@ -3044,6 +3169,12 @@ export const Router = (() => {
 
       shellRepairDepth,
       externalRepairInFlight,
+
+      lastExternalRepairKey,
+      lastExternalRepairAt,
+
+      authReadyInFlight,
+      lastAuthReadyAt,
 
       loginNavigationHandled:
         Boolean(

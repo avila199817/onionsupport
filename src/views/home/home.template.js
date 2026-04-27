@@ -2,17 +2,17 @@
    Onion SPA - Home Dashboard Template
    Archivo: src/views/home/home.template.js
 
-   FINAL PRODUCTION TEMPLATE · HOME VIEW · USER + ADMIN · SOFT APPLE MODE
+   FINAL EXTREME PRODUCTION TEMPLATE · HOME VIEW · USER + ADMIN · APPLE SAAS MODE · 10/10
 
    RESPONSABILIDADES:
    - render del home/dashboard para usuarios y administradores
    - una única plantilla role-aware: user/admin
-   - misma lógica defensiva que incidencias.table.template.js
-   - no depende de imports externos
-   - tolera payload heterogéneo
-   - soporta state + props directas
-   - stats, acciones rápidas, actividad reciente y tabla compacta
+   - consumir datos normalizados desde home.api.js / HomeView.js
+   - soportar dashboard/summary/widgets como fuente principal
+   - soportar colecciones heterogéneas como fallback
+   - stats, widgets, acciones rápidas, actividad reciente y tabla compacta
    - loading visual en refresh / crear incidencia / navegación
+   - paginación visual estable
    - responsive robusto
    - estilos encapsulados
    - compatible con HomeView.js o render directo desde Router
@@ -20,10 +20,13 @@
    - CSP friendly: sin handlers inline tipo onerror
    - rutas alineadas con src/router/routes.js
 
-   USO ESPERADO:
+   CONTRATO SOPORTADO:
    renderHomeTemplate({
      user,
      role,
+     dashboard,
+     summary,
+     widgets,
      tickets,
      incidencias,
      facturas,
@@ -33,11 +36,13 @@
      clients,
      clientes,
      activity,
+     recentActivity,
      state: {
        loading,
        refreshing,
        creating,
        navigatingAction,
+       openingTicketId,
        role,
        user
      }
@@ -79,10 +84,18 @@ function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
-function safeObject(value) {
+function safeObject(value, fallback = {}) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
-    : {};
+    : fallback;
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isNonEmptyObject(value) {
+  return Boolean(isObject(value) && Object.keys(value).length);
 }
 
 function first(...values) {
@@ -94,6 +107,10 @@ function first(...values) {
     }
 
     if (Array.isArray(value) && value.length === 0) {
+      continue;
+    }
+
+    if (isObject(value) && Object.keys(value).length === 0) {
       continue;
     }
 
@@ -124,6 +141,27 @@ function normalizeKey(value = "") {
     .replace(/[\s-]+/g, "_")
     .replace(/[^a-z0-9_:.]/g, "")
     .trim();
+}
+
+function clampNumber(value = 0, min = 0, max = Number.POSITIVE_INFINITY) {
+  const n = safeNumber(value, min);
+  return Math.min(Math.max(n, min), max);
+}
+
+function formatNumber(value = 0) {
+  const amount = Number(value);
+
+  if (!Number.isFinite(amount)) {
+    return "0";
+  }
+
+  try {
+    return new Intl.NumberFormat("es-ES", {
+      maximumFractionDigits: 0,
+    }).format(amount);
+  } catch {
+    return String(Math.round(amount));
+  }
 }
 
 function formatMoney(value = 0, currency = "EUR") {
@@ -215,10 +253,194 @@ function formatLastUpdate(value = null) {
   return formatDateTime(value);
 }
 
+function normalizeRoute(route = "") {
+  const raw = safeText(route, "");
+
+  if (!raw) return "";
+
+  const lowered = raw.toLowerCase();
+
+  if (
+    lowered.startsWith("javascript:") ||
+    lowered.startsWith("mailto:") ||
+    lowered.startsWith("tel:")
+  ) {
+    return "";
+  }
+
+  if (/^https?:\/\//i.test(raw)) {
+    return raw;
+  }
+
+  return raw.startsWith("/") ? raw : `/${raw}`;
+}
+
+/* =========================================================
+   DASHBOARD / SUMMARY
+========================================================= */
+
+function getDashboard(input = {}) {
+  const data = safeObject(input);
+  const state = safeObject(data.state);
+
+  return safeObject(
+    first(
+      data.dashboard,
+      state.dashboard,
+      data.raw?.dashboard,
+      data.payload?.dashboard,
+      {}
+    )
+  );
+}
+
+function getSummary(input = {}) {
+  const data = safeObject(input);
+  const state = safeObject(data.state);
+  const dashboard = getDashboard(data);
+
+  return safeObject(
+    first(
+      data.summary,
+      data.stats,
+      data.metrics,
+      data.totals,
+      state.summary,
+      state.stats,
+      dashboard.summary,
+      dashboard.stats,
+      dashboard.metrics,
+      dashboard.totals,
+      data.payload?.summary,
+      data.payload?.stats,
+      {}
+    )
+  );
+}
+
+function getSummaryValue(input = {}, keys = [], fallback = null) {
+  const summary = getSummary(input);
+  const dashboard = getDashboard(input);
+  const state = safeObject(input.state);
+
+  const candidates = [];
+
+  for (const key of safeArray(keys)) {
+    candidates.push(summary?.[key]);
+    candidates.push(dashboard?.[key]);
+    candidates.push(state?.[key]);
+    candidates.push(input?.[key]);
+  }
+
+  return first(...candidates, fallback);
+}
+
+function getWidgets(input = {}) {
+  const data = safeObject(input);
+  const state = safeObject(data.state);
+  const dashboard = getDashboard(data);
+
+  return normalizeCollection(
+    first(
+      data.widgets,
+      data.cards,
+      data.kpis,
+      state.widgets,
+      state.cards,
+      state.kpis,
+      dashboard.widgets,
+      dashboard.cards,
+      dashboard.kpis,
+      dashboard.blocks,
+      data.payload?.widgets,
+      []
+    )
+  );
+}
+
+/* =========================================================
+   COLLECTION NORMALIZATION
+========================================================= */
+
+function unwrapCollectionPayload(value = null, depth = 0) {
+  if (value === null || value === undefined) {
+    return {};
+  }
+
+  if (depth > 8) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return {
+      items: value,
+      total: value.length,
+      count: value.length,
+    };
+  }
+
+  const object = safeObject(value, null);
+
+  if (!object) {
+    return {};
+  }
+
+  if (
+    Array.isArray(object.items) ||
+    Array.isArray(object.rows) ||
+    Array.isArray(object.data) ||
+    Array.isArray(object.results) ||
+    Array.isArray(object.records) ||
+    Array.isArray(object.value) ||
+    Array.isArray(object.docs) ||
+    Array.isArray(object.collection)
+  ) {
+    return object;
+  }
+
+  const directArray = first(
+    object.tickets,
+    object.incidencias,
+    object.facturas,
+    object.invoices,
+    object.users,
+    object.usuarios,
+    object.clients,
+    object.clientes,
+    object.customers,
+    object.activity,
+    object.activities,
+    object.recent,
+    object.recentActivity
+  );
+
+  if (Array.isArray(directArray)) {
+    return {
+      ...object,
+      items: directArray,
+      total: first(object.total, object.count, object.remoteCount, directArray.length),
+    };
+  }
+
+  const nested = first(
+    object.payload,
+    object.result,
+    object.response,
+    object.body,
+    object.data
+  );
+
+  if (isObject(nested) || Array.isArray(nested)) {
+    return unwrapCollectionPayload(nested, depth + 1);
+  }
+
+  return object;
+}
+
 function normalizeCollection(value) {
   if (Array.isArray(value)) return value;
 
-  const object = safeObject(value);
+  const object = safeObject(unwrapCollectionPayload(value));
 
   return safeArray(
     first(
@@ -226,15 +448,17 @@ function normalizeCollection(value) {
       object.rows,
       object.data,
       object.results,
+      object.records,
       object.value,
       object.docs,
+      object.collection,
       []
     )
   );
 }
 
 function getRemoteCountFromCollection(value, fallback = 0) {
-  const object = safeObject(value);
+  const object = safeObject(unwrapCollectionPayload(value));
 
   return Math.max(
     fallback,
@@ -244,8 +468,13 @@ function getRemoteCountFromCollection(value, fallback = 0) {
         object.remoteCount,
         object.total,
         object.count,
+        object.length,
         object.meta?.total,
+        object.meta?.count,
         object.pagination?.total,
+        object.pagination?.count,
+        object.page?.total,
+        object.pageInfo?.total,
         fallback
       ),
       fallback
@@ -260,6 +489,7 @@ function getRemoteCountFromCollection(value, fallback = 0) {
 function getUser(input = {}) {
   const data = safeObject(input);
   const state = safeObject(data.state);
+  const dashboard = getDashboard(data);
 
   return safeObject(
     first(
@@ -269,8 +499,11 @@ function getUser(input = {}) {
       state.user,
       state.currentUser,
       state.profile,
+      dashboard.user,
+      dashboard.currentUser,
       data.raw?.user,
-      data.raw?.currentUser
+      data.raw?.currentUser,
+      {}
     )
   );
 }
@@ -279,6 +512,7 @@ function getRole(input = {}) {
   const data = safeObject(input);
   const state = safeObject(data.state);
   const user = getUser(data);
+  const dashboard = getDashboard(data);
 
   return normalizeKey(
     first(
@@ -286,6 +520,7 @@ function getRole(input = {}) {
       data.currentRole,
       state.role,
       state.currentRole,
+      dashboard.role,
       user.role,
       user.rol,
       user.type,
@@ -307,9 +542,10 @@ function isAdminRole(role = "") {
     "superadmin",
     "super_admin",
     "super_administrador",
-    "super_administrador",
     "owner",
     "root",
+    "staff",
+    "support",
   ].includes(key);
 }
 
@@ -375,6 +611,7 @@ function getInitials(value = "") {
 function getCollections(input = {}) {
   const data = safeObject(input);
   const state = safeObject(data.state);
+  const dashboard = getDashboard(data);
 
   const ticketsSource = first(
     data.tickets,
@@ -385,6 +622,8 @@ function getCollections(input = {}) {
     state.incidencias,
     state.items,
     state.rows,
+    dashboard.tickets,
+    dashboard.incidencias,
     data.payload?.tickets,
     data.payload?.incidencias,
     []
@@ -397,6 +636,8 @@ function getCollections(input = {}) {
     state.facturas,
     state.invoices,
     state.bills,
+    dashboard.facturas,
+    dashboard.invoices,
     data.payload?.facturas,
     data.payload?.invoices,
     []
@@ -407,6 +648,8 @@ function getCollections(input = {}) {
     data.usuarios,
     state.users,
     state.usuarios,
+    dashboard.users,
+    dashboard.usuarios,
     data.payload?.users,
     data.payload?.usuarios,
     []
@@ -419,6 +662,9 @@ function getCollections(input = {}) {
     state.clients,
     state.clientes,
     state.customers,
+    dashboard.clients,
+    dashboard.clientes,
+    dashboard.customers,
     data.payload?.clients,
     data.payload?.clientes,
     []
@@ -428,11 +674,18 @@ function getCollections(input = {}) {
     data.activity,
     data.activities,
     data.recentActivity,
+    data.recent,
     data.logs,
     state.activity,
     state.activities,
     state.recentActivity,
+    state.recent,
     state.logs,
+    dashboard.activity,
+    dashboard.activities,
+    dashboard.recentActivity,
+    dashboard.recent,
+    dashboard.timeline,
     data.payload?.activity,
     []
   );
@@ -443,6 +696,8 @@ function getCollections(input = {}) {
   const clients = normalizeCollection(clientsSource);
   const activity = normalizeCollection(activitySource);
 
+  const summary = getSummary(data);
+
   return {
     tickets,
     invoices,
@@ -450,17 +705,63 @@ function getCollections(input = {}) {
     clients,
     activity,
 
-    ticketsRemoteCount:
-      getRemoteCountFromCollection(ticketsSource, tickets.length),
+    ticketsRemoteCount: Math.max(
+      tickets.length,
+      safeNumber(
+        first(
+          summary.totalTickets,
+          summary.ticketsTotal,
+          summary.incidenciasTotal,
+          dashboard.ticketsTotal,
+          dashboard.incidenciasTotal,
+          getRemoteCountFromCollection(ticketsSource, tickets.length)
+        ),
+        tickets.length
+      )
+    ),
 
-    invoicesRemoteCount:
-      getRemoteCountFromCollection(invoicesSource, invoices.length),
+    invoicesRemoteCount: Math.max(
+      invoices.length,
+      safeNumber(
+        first(
+          summary.totalInvoices,
+          summary.invoicesTotal,
+          summary.facturasTotal,
+          dashboard.invoicesTotal,
+          dashboard.facturasTotal,
+          getRemoteCountFromCollection(invoicesSource, invoices.length)
+        ),
+        invoices.length
+      )
+    ),
 
-    usersRemoteCount:
-      getRemoteCountFromCollection(usersSource, users.length),
+    usersRemoteCount: Math.max(
+      users.length,
+      safeNumber(
+        first(
+          summary.usersCount,
+          summary.usuariosCount,
+          dashboard.usersTotal,
+          dashboard.usuariosTotal,
+          getRemoteCountFromCollection(usersSource, users.length)
+        ),
+        users.length
+      )
+    ),
 
-    clientsRemoteCount:
-      getRemoteCountFromCollection(clientsSource, clients.length),
+    clientsRemoteCount: Math.max(
+      clients.length,
+      safeNumber(
+        first(
+          summary.clientsCount,
+          summary.clientesCount,
+          dashboard.clientsTotal,
+          dashboard.clientesTotal,
+          getRemoteCountFromCollection(clientsSource, clients.length)
+        ),
+        clients.length
+      )
+    ),
   };
 }
 
@@ -472,12 +773,14 @@ function getTicketId(item = {}) {
   return safeText(
     first(
       item.ticketId,
+      item.incidenciaId,
       item.code,
       item.numero,
       item.ticketCode,
       item.id,
       item._id,
       item.raw?.ticketId,
+      item.raw?.incidenciaId,
       item.raw?.code,
       item.raw?.numero,
       item.raw?.ticketCode,
@@ -526,25 +829,35 @@ function getTicketOwnerName(item = {}) {
   return safeText(
     first(
       item.clientName,
+      item.clienteNombre,
+      item.customerName,
       item.userName,
       item.createdByName,
+      item.ownerName,
       item.name,
       item.cliente?.nombre,
       item.cliente?.name,
       item.client?.name,
+      item.client?.nombre,
       item.customer?.name,
       item.createdBy?.name,
       item.user?.name,
+      item.owner?.name,
       item.raw?.clientName,
+      item.raw?.clienteNombre,
+      item.raw?.customerName,
       item.raw?.userName,
       item.raw?.createdByName,
+      item.raw?.ownerName,
       item.raw?.name,
       item.raw?.cliente?.nombre,
       item.raw?.cliente?.name,
       item.raw?.client?.name,
+      item.raw?.client?.nombre,
       item.raw?.customer?.name,
       item.raw?.createdBy?.name,
-      item.raw?.user?.name
+      item.raw?.user?.name,
+      item.raw?.owner?.name
     ),
     getTicketSubject(item)
   );
@@ -559,6 +872,7 @@ function getTicketAvatarUrl(item = {}) {
       item.avatar_url,
       item.userAvatar,
       item.createdByAvatar,
+      item.ownerAvatar,
       item.cliente?.avatar,
       item.cliente?.avatarUrl,
       item.client?.avatar,
@@ -569,20 +883,27 @@ function getTicketAvatarUrl(item = {}) {
       item.createdBy?.avatarUrl,
       item.user?.avatar,
       item.user?.avatarUrl,
+      item.owner?.avatar,
+      item.owner?.avatarUrl,
       item.raw?.clientAvatar,
       item.raw?.avatar,
       item.raw?.avatarUrl,
       item.raw?.avatar_url,
       item.raw?.userAvatar,
       item.raw?.createdByAvatar,
+      item.raw?.ownerAvatar,
       item.raw?.cliente?.avatar,
       item.raw?.cliente?.avatarUrl,
       item.raw?.client?.avatar,
       item.raw?.client?.avatarUrl,
+      item.raw?.customer?.avatar,
+      item.raw?.customer?.avatarUrl,
       item.raw?.createdBy?.avatar,
       item.raw?.createdBy?.avatarUrl,
       item.raw?.user?.avatar,
-      item.raw?.user?.avatarUrl
+      item.raw?.user?.avatarUrl,
+      item.raw?.owner?.avatar,
+      item.raw?.owner?.avatarUrl
     ),
     ""
   );
@@ -592,7 +913,7 @@ function getTicketStatusKey(value = "") {
   const key = normalizeKey(value);
 
   if (["pending", "pendiente"].includes(key)) return "pending";
-  if (["open", "abierta", "abierto"].includes(key)) return "open";
+  if (["open", "abierta", "abierto", "new", "nueva", "nuevo"].includes(key)) return "open";
 
   if (
     [
@@ -603,12 +924,15 @@ function getTicketStatusKey(value = "") {
       "proceso",
       "working",
       "trabajando",
+      "assigned",
+      "asignada",
+      "asignado",
     ].includes(key)
   ) {
     return "progress";
   }
 
-  if (["resolved", "resuelta", "resuelto"].includes(key)) return "resolved";
+  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
   if (["closed", "cerrada", "cerrado"].includes(key)) return "closed";
 
   if (["cancelled", "cancelada", "cancelado"].includes(key)) {
@@ -647,17 +971,27 @@ function getTicketPriorityKey(item = {}) {
     first(
       item.priority,
       item.prioridad,
+      item.severity,
       item.raw?.priority,
       item.raw?.prioridad,
+      item.raw?.severity,
       "medium"
     )
   );
 }
 
 function isTicketUrgent(item = {}) {
-  return ["urgent", "urgente", "critical", "critica", "high", "alta"].includes(
-    getTicketPriorityKey(item)
-  );
+  return [
+    "urgent",
+    "urgente",
+    "critical",
+    "critica",
+    "crítica",
+    "high",
+    "alta",
+    "p1",
+    "p0",
+  ].includes(getTicketPriorityKey(item));
 }
 
 function isTicketClosedLike(item = {}) {
@@ -676,10 +1010,12 @@ function getTicketCreatedAt(item = {}) {
     item.fechaCreacion,
     item.createdAtES,
     item.date,
+    item.fecha,
     item.raw?.createdAt,
     item.raw?.fechaCreacion,
     item.raw?.createdAtES,
-    item.raw?.date
+    item.raw?.date,
+    item.raw?.fecha
   );
 }
 
@@ -705,9 +1041,11 @@ function getTicketAttachmentsCount(item = {}) {
     item.attachments,
     item.files,
     item.adjuntos,
+    item.documents,
     item.raw?.attachments,
     item.raw?.files,
-    item.raw?.adjuntos
+    item.raw?.adjuntos,
+    item.raw?.documents
   );
 
   if (Array.isArray(attachments)) return attachments.length;
@@ -716,8 +1054,12 @@ function getTicketAttachmentsCount(item = {}) {
     first(
       item.attachmentsCount,
       item.filesCount,
+      item.adjuntosCount,
+      item.documentsCount,
       item.raw?.attachmentsCount,
       item.raw?.filesCount,
+      item.raw?.adjuntosCount,
+      item.raw?.documentsCount,
       0
     ),
     0
@@ -737,12 +1079,14 @@ function getInvoiceId(item = {}) {
       item.numero,
       item.code,
       item.id,
+      item._id,
       item.raw?.invoiceId,
       item.raw?.facturaId,
       item.raw?.number,
       item.raw?.numero,
       item.raw?.code,
-      item.raw?.id
+      item.raw?.id,
+      item.raw?._id
     ),
     "FAC-SIN-ID"
   );
@@ -839,12 +1183,12 @@ function computeHomeStats(input = {}) {
   const tickets = collections.tickets;
   const invoices = collections.invoices;
 
-  const openTickets = tickets.filter((item) => isTicketOpenLike(item)).length;
-  const closedTickets = tickets.filter((item) => isTicketClosedLike(item)).length;
-  const urgentTickets = tickets.filter((item) => isTicketUrgent(item)).length;
-  const pendingInvoices = invoices.filter((item) => isInvoicePendingLike(item)).length;
+  const computedOpenTickets = tickets.filter((item) => isTicketOpenLike(item)).length;
+  const computedClosedTickets = tickets.filter((item) => isTicketClosedLike(item)).length;
+  const computedUrgentTickets = tickets.filter((item) => isTicketUrgent(item)).length;
+  const computedPendingInvoices = invoices.filter((item) => isInvoicePendingLike(item)).length;
 
-  const invoiceAmount = invoices.reduce(
+  const computedInvoiceAmount = invoices.reduce(
     (sum, item) => sum + getInvoiceAmount(item),
     0
   );
@@ -856,29 +1200,118 @@ function computeHomeStats(input = {}) {
 
   const lastTicketUpdate = getLatestDateFromTickets(tickets);
 
+  const totalTickets = safeNumber(
+    getSummaryValue(
+      input,
+      ["totalTickets", "ticketsTotal", "incidenciasTotal", "totalIncidencias"],
+      collections.ticketsRemoteCount
+    ),
+    collections.ticketsRemoteCount
+  );
+
+  const openTickets = safeNumber(
+    getSummaryValue(
+      input,
+      ["openTickets", "pendingTickets", "openIncidencias", "pendingIncidencias"],
+      computedOpenTickets
+    ),
+    computedOpenTickets
+  );
+
+  const closedTickets = safeNumber(
+    getSummaryValue(
+      input,
+      ["closedTickets", "resolvedTickets", "closedIncidencias", "resolvedIncidencias"],
+      computedClosedTickets
+    ),
+    computedClosedTickets
+  );
+
+  const urgentTickets = safeNumber(
+    getSummaryValue(
+      input,
+      ["urgentTickets", "urgentIncidencias", "highPriorityTickets"],
+      computedUrgentTickets
+    ),
+    computedUrgentTickets
+  );
+
+  const totalInvoices = safeNumber(
+    getSummaryValue(
+      input,
+      ["totalInvoices", "invoicesTotal", "facturasTotal", "totalFacturas"],
+      collections.invoicesRemoteCount
+    ),
+    collections.invoicesRemoteCount
+  );
+
+  const pendingInvoices = safeNumber(
+    getSummaryValue(
+      input,
+      ["pendingInvoices", "pendingFacturas", "facturasPendientes", "invoicesPending"],
+      computedPendingInvoices
+    ),
+    computedPendingInvoices
+  );
+
+  const invoiceAmount = safeNumber(
+    getSummaryValue(
+      input,
+      ["invoiceAmount", "billingTotal", "totalBilling", "totalFacturado", "importeFacturas"],
+      computedInvoiceAmount
+    ),
+    computedInvoiceAmount
+  );
+
+  const usersCount = safeNumber(
+    getSummaryValue(
+      input,
+      ["usersCount", "usuariosCount", "totalUsers", "totalUsuarios"],
+      collections.usersRemoteCount
+    ),
+    collections.usersRemoteCount
+  );
+
+  const clientsCount = safeNumber(
+    getSummaryValue(
+      input,
+      ["clientsCount", "clientesCount", "customersCount", "totalClients", "totalClientes"],
+      collections.clientsRemoteCount
+    ),
+    collections.clientsRemoteCount
+  );
+
   return {
     role,
     admin,
-    totalTickets: collections.ticketsRemoteCount,
+
+    totalTickets,
     visibleTickets: tickets.length,
     openTickets,
     closedTickets,
     urgentTickets,
-    totalInvoices: collections.invoicesRemoteCount,
+
+    totalInvoices,
     visibleInvoices: invoices.length,
     pendingInvoices,
     invoiceAmount,
-    usersCount: collections.usersRemoteCount,
-    clientsCount: collections.clientsRemoteCount,
+
+    usersCount,
+    clientsCount,
+
     attachmentsCount,
     lastTicketUpdate,
+
+    healthRatio: totalTickets
+      ? clampNumber(((totalTickets - openTickets) / totalTickets) * 100, 0, 100)
+      : 100,
   };
 }
 
 function buildSyntheticActivity(input = {}) {
   const collections = getCollections(input);
 
-  const ticketActivity = collections.tickets.slice(0, 4).map((item) => ({
+  const ticketActivity = collections.tickets.slice(0, 5).map((item) => ({
     type: "ticket",
     title: getTicketSubject(item),
     text: `Incidencia ${getTicketId(item)} · ${getTicketStatusLabel(
@@ -890,11 +1323,19 @@ function buildSyntheticActivity(input = {}) {
     entityId: getTicketId(item),
   }));
 
-  const invoiceActivity = collections.invoices.slice(0, 2).map((item) => ({
+  const invoiceActivity = collections.invoices.slice(0, 3).map((item) => ({
     type: "invoice",
     title: `Factura ${getInvoiceId(item)}`,
     text: `${formatMoney(getInvoiceAmount(item), getInvoiceCurrency(item))}`,
-    date: first(item.updatedAt, item.createdAt, item.date, item.raw?.updatedAt),
+    date: first(
+      item.updatedAt,
+      item.modifiedAt,
+      item.createdAt,
+      item.date,
+      item.raw?.updatedAt,
+      item.raw?.createdAt,
+      item.raw?.date
+    ),
     route: HOME_ROUTES.FACTURAS,
     action: "open-invoice",
     entityId: getInvoiceId(item),
@@ -968,7 +1409,7 @@ function getActivityDate(item = {}) {
 }
 
 function getActivityType(item = {}) {
-  return normalizeKey(
+  const key = normalizeKey(
     first(
       item.type,
       item.kind,
@@ -979,6 +1420,13 @@ function getActivityType(item = {}) {
       "activity"
     )
   );
+
+  if (["factura", "invoice", "billing"].includes(key)) return "invoice";
+  if (["ticket", "incidencia", "support"].includes(key)) return "ticket";
+  if (["cliente", "client", "customer"].includes(key)) return "client";
+  if (["usuario", "user"].includes(key)) return "user";
+
+  return key || "activity";
 }
 
 function getPagination(items = [], input = {}) {
@@ -1060,6 +1508,94 @@ function getPagination(items = [], input = {}) {
 }
 
 /* =========================================================
+   WIDGETS
+========================================================= */
+
+function getWidgetId(widget = {}) {
+  return safeText(
+    first(
+      widget.widgetId,
+      widget.widgetKey,
+      widget.id,
+      widget.key,
+      widget.slug,
+      widget.code
+    ),
+    ""
+  );
+}
+
+function getWidgetTitle(widget = {}) {
+  return safeText(
+    first(
+      widget.title,
+      widget.name,
+      widget.label,
+      widget.heading
+    ),
+    "Bloque"
+  );
+}
+
+function getWidgetText(widget = {}) {
+  return safeText(
+    first(
+      widget.description,
+      widget.descripcion,
+      widget.subtitle,
+      widget.text,
+      widget.summary
+    ),
+    ""
+  );
+}
+
+function getWidgetValue(widget = {}) {
+  return first(
+    widget.value,
+    widget.total,
+    widget.amount,
+    widget.count,
+    widget.metric,
+    "—"
+  );
+}
+
+function getWidgetTrend(widget = {}) {
+  return first(
+    widget.trend,
+    widget.delta,
+    widget.change,
+    widget.variation,
+    ""
+  );
+}
+
+function getWidgetType(widget = {}) {
+  return normalizeKey(
+    first(
+      widget.type,
+      widget.kind,
+      widget.variant,
+      widget.category,
+      "widget"
+    )
+  );
+}
+
+function getWidgetRoute(widget = {}) {
+  return normalizeRoute(
+    first(
+      widget.route,
+      widget.href,
+      widget.link,
+      widget.to,
+      ""
+    )
+  );
+}
+
+/* =========================================================
    UI PARTIALS
 ========================================================= */
 
@@ -1077,37 +1613,30 @@ function renderUserAvatar(input = {}) {
   const initials = getInitials(fullName);
   const avatarUrl = getAvatarUrl(input);
 
-  if (avatarUrl) {
-    return `
-      <div
-        class="home-user-avatar"
-        aria-label="${escapeHtml(fullName)}"
-        data-tooltip="${escapeHtml(fullName)}"
-        data-avatar-root="true"
-      >
-        <img
-          class="home-user-avatar-img"
-          src="${escapeHtml(avatarUrl)}"
-          alt="${escapeHtml(fullName)}"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          draggable="false"
-          data-avatar-image="true"
-        >
-        <span class="home-user-avatar-fallback">${escapeHtml(initials)}</span>
-      </div>
-    `;
-  }
-
   return `
     <div
-      class="home-user-avatar home-user-avatar--fallback"
+      class="home-user-avatar${avatarUrl ? "" : " home-user-avatar--fallback"}"
       aria-label="${escapeHtml(fullName)}"
       data-tooltip="${escapeHtml(fullName)}"
       data-avatar-root="true"
-      data-fallback="true"
+      ${avatarUrl ? "" : 'data-fallback="true"'}
     >
       <span class="home-user-avatar-fallback">${escapeHtml(initials)}</span>
+      ${
+        avatarUrl
+          ? `
+            <img
+              class="home-user-avatar-img"
+              src="${escapeHtml(avatarUrl)}"
+              alt="${escapeHtml(fullName)}"
+              loading="lazy"
+              referrerpolicy="no-referrer"
+              draggable="false"
+              data-avatar-image="true"
+            >
+          `
+          : ""
+      }
     </div>
   `;
 }
@@ -1117,37 +1646,30 @@ function renderTicketAvatar(item = {}) {
   const initials = getInitials(fullName);
   const avatarUrl = getTicketAvatarUrl(item);
 
-  if (avatarUrl) {
-    return `
-      <div
-        class="home-ticket-avatar"
-        aria-label="${escapeHtml(fullName)}"
-        data-tooltip="${escapeHtml(fullName)}"
-        data-avatar-root="true"
-      >
-        <img
-          class="home-ticket-avatar-img"
-          src="${escapeHtml(avatarUrl)}"
-          alt="${escapeHtml(fullName)}"
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          draggable="false"
-          data-avatar-image="true"
-        >
-        <span class="home-ticket-avatar-fallback">${escapeHtml(initials)}</span>
-      </div>
-    `;
-  }
-
   return `
     <div
-      class="home-ticket-avatar home-ticket-avatar--fallback"
+      class="home-ticket-avatar${avatarUrl ? "" : " home-ticket-avatar--fallback"}"
       aria-label="${escapeHtml(fullName)}"
       data-tooltip="${escapeHtml(fullName)}"
       data-avatar-root="true"
-      data-fallback="true"
+      ${avatarUrl ? "" : 'data-fallback="true"'}
     >
       <span class="home-ticket-avatar-fallback">${escapeHtml(initials)}</span>
+      ${
+        avatarUrl
+          ? `
+            <img
+              class="home-ticket-avatar-img"
+              src="${escapeHtml(avatarUrl)}"
+              alt="${escapeHtml(fullName)}"
+              loading="lazy"
+              referrerpolicy="no-referrer"
+              draggable="false"
+              data-avatar-image="true"
+            >
+          `
+          : ""
+      }
     </div>
   `;
 }
@@ -1165,10 +1687,20 @@ function renderStatusChip(item = {}) {
 }
 
 function renderStatCard(card = {}) {
+  const value = safeText(card.value, "0");
+
   return `
     <article class="home-stat-card${card.modifier ? ` home-stat-card--${escapeHtml(card.modifier)}` : ""}">
-      <div class="home-stat-label">${escapeHtml(card.label)}</div>
-      <div class="home-stat-value">${escapeHtml(card.value)}</div>
+      <div class="home-stat-topline">
+        <div class="home-stat-label">${escapeHtml(card.label)}</div>
+        ${
+          card.badge
+            ? `<span class="home-stat-badge">${escapeHtml(card.badge)}</span>`
+            : ""
+        }
+      </div>
+
+      <div class="home-stat-value" title="${escapeHtml(value)}">${escapeHtml(value)}</div>
       <div class="home-stat-text">${escapeHtml(card.text)}</div>
     </article>
   `;
@@ -1181,25 +1713,26 @@ function getStatCards(input = {}) {
     return [
       {
         label: "Incidencias abiertas",
-        value: String(stats.openTickets),
-        text: `${stats.totalTickets} solicitudes totales registradas.`,
+        value: formatNumber(stats.openTickets),
+        text: `${formatNumber(stats.totalTickets)} solicitudes totales registradas.`,
         modifier: "open",
+        badge: stats.urgentTickets ? `${formatNumber(stats.urgentTickets)} urg.` : "",
       },
       {
         label: "Facturación visible",
         value: formatMoney(stats.invoiceAmount, "EUR"),
-        text: `${stats.pendingInvoices} facturas pendientes o vencidas.`,
+        text: `${formatNumber(stats.pendingInvoices)} facturas pendientes o vencidas.`,
         modifier: "billing",
       },
       {
         label: "Clientes",
-        value: String(stats.clientsCount),
+        value: formatNumber(stats.clientsCount),
         text: "Cuentas de cliente detectadas en el panel.",
         modifier: "clients",
       },
       {
         label: "Usuarios",
-        value: String(stats.usersCount),
+        value: formatNumber(stats.usersCount),
         text: "Usuarios activos o sincronizados en el sistema.",
         modifier: "users",
       },
@@ -1209,19 +1742,20 @@ function getStatCards(input = {}) {
   return [
     {
       label: "Mis incidencias",
-      value: String(stats.totalTickets),
-      text: `${stats.openTickets} solicitudes abiertas o en seguimiento.`,
+      value: formatNumber(stats.totalTickets),
+      text: `${formatNumber(stats.openTickets)} solicitudes abiertas o en seguimiento.`,
       modifier: "open",
+      badge: stats.urgentTickets ? `${formatNumber(stats.urgentTickets)} urg.` : "",
     },
     {
       label: "Facturas pendientes",
-      value: String(stats.pendingInvoices),
+      value: formatNumber(stats.pendingInvoices),
       text: `${formatMoney(stats.invoiceAmount, "EUR")} en facturación visible.`,
       modifier: "billing",
     },
     {
       label: "Adjuntos",
-      value: String(stats.attachmentsCount),
+      value: formatNumber(stats.attachmentsCount),
       text: "Documentos vinculados a tu historial.",
       modifier: "files",
     },
@@ -1341,6 +1875,44 @@ function renderQuickAction(action = {}, state = {}) {
   `;
 }
 
+function renderWidgetCard(widget = {}, index = 0) {
+  const id = getWidgetId(widget) || `widget-${index + 1}`;
+  const type = getWidgetType(widget);
+  const title = getWidgetTitle(widget);
+  const text = getWidgetText(widget);
+  const value = getWidgetValue(widget);
+  const trend = getWidgetTrend(widget);
+  const route = getWidgetRoute(widget);
+  const status = safeText(first(widget.status, widget.estado, widget.state), "active");
+
+  return `
+    <button
+      type="button"
+      class="home-widget-card home-widget-card--${escapeHtml(type || "widget")}"
+      data-home-action="${route ? "navigate-home" : "open-widget"}"
+      data-action="${route ? "navigate-home" : "open-widget"}"
+      data-widget-id="${escapeHtml(id)}"
+      data-route="${escapeHtml(route)}"
+      data-status="${escapeHtml(status)}"
+      ${route ? "" : 'aria-disabled="true"'}
+    >
+      <span class="home-widget-kicker">${escapeHtml(type || "widget")}</span>
+      <strong class="home-widget-value">${escapeHtml(String(value ?? "—"))}</strong>
+      <span class="home-widget-title">${escapeHtml(title)}</span>
+      ${
+        text
+          ? `<span class="home-widget-text">${escapeHtml(text)}</span>`
+          : ""
+      }
+      ${
+        trend
+          ? `<span class="home-widget-trend">${escapeHtml(String(trend))}</span>`
+          : ""
+      }
+    </button>
+  `;
+}
+
 function renderTicketRow(item = {}, state = {}) {
   const ticketId = getTicketId(item);
   const subject = getTicketSubject(item);
@@ -1394,6 +1966,7 @@ function renderTicketRow(item = {}, state = {}) {
           data-home-action="open-ticket"
           data-action="open-ticket"
           data-ticket-id="${escapeHtml(ticketId)}"
+          data-entity-id="${escapeHtml(ticketId)}"
           data-route="${escapeHtml(HOME_ROUTES.INCIDENCIAS)}"
           ${isOpening ? 'disabled aria-busy="true"' : ""}
         >
@@ -1413,9 +1986,25 @@ function renderActivityItem(item = {}) {
   const title = getActivityTitle(item);
   const text = getActivityText(item);
   const date = getActivityDate(item);
-  const route = safeText(first(item.route, item.href, item.raw?.route), "");
+  const route = normalizeRoute(first(item.route, item.href, item.link, item.raw?.route, ""));
   const action = safeText(first(item.action, item.raw?.action, "open-activity"), "open-activity");
-  const entityId = safeText(first(item.entityId, item.id, item.ticketId, item.raw?.entityId), "");
+
+  const entityId = safeText(
+    first(
+      item.entityId,
+      item.id,
+      item.ticketId,
+      item.incidenciaId,
+      item.facturaId,
+      item.invoiceId,
+      item.raw?.entityId,
+      item.raw?.ticketId,
+      item.raw?.incidenciaId,
+      item.raw?.facturaId,
+      item.raw?.invoiceId
+    ),
+    ""
+  );
 
   return `
     <button
@@ -1527,24 +2116,39 @@ function renderStyles() {
       .home-view-root{
         display:grid;
         gap:18px;
+        isolation:isolate;
       }
 
       .home-hero{
         position:relative;
         overflow:hidden;
-        border-radius:24px;
+        border-radius:26px;
         border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
         background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 9%, transparent), transparent 36%),
-          linear-gradient(180deg, rgba(255,255,255,.62), rgba(255,255,255,.38)),
+          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent 38%),
+          radial-gradient(circle at 84% 12%, rgba(56,189,248,.10), transparent 32%),
+          linear-gradient(180deg, rgba(255,255,255,.68), rgba(255,255,255,.40)),
           color-mix(in srgb, var(--panel-bg, #ffffff) 92%, transparent);
         box-shadow:
-          0 10px 30px rgba(15,23,42,.04),
-          0 1px 0 rgba(255,255,255,.55) inset;
-        padding:22px 24px 22px;
+          0 16px 40px rgba(15,23,42,.055),
+          0 1px 0 rgba(255,255,255,.60) inset;
+        padding:22px 24px;
+      }
+
+      .home-hero::after{
+        content:"";
+        position:absolute;
+        inset:auto -18% -56% 44%;
+        height:220px;
+        border-radius:999px;
+        pointer-events:none;
+        background:radial-gradient(circle, rgba(124,92,255,.10), transparent 64%);
+        filter:blur(4px);
       }
 
       .home-hero-top{
+        position:relative;
+        z-index:1;
         display:grid;
         grid-template-columns:minmax(0, 1fr) auto;
         gap:18px;
@@ -1554,23 +2158,31 @@ function renderStyles() {
       .home-hero-main{
         min-width:0;
         display:grid;
-        grid-template-columns:56px minmax(0, 1fr);
+        grid-template-columns:58px minmax(0, 1fr);
         gap:14px;
         align-items:center;
       }
 
       .home-user-avatar{
         position:relative;
-        width:56px;
-        height:56px;
-        border-radius:18px;
+        width:58px;
+        height:58px;
+        border-radius:19px;
         overflow:hidden;
-        flex:0 0 56px;
-        background:linear-gradient(135deg, rgba(124,92,255,.18), rgba(139,92,246,.30));
-        box-shadow:0 10px 24px rgba(124,92,255,.10);
+        flex:0 0 58px;
+        background:
+          linear-gradient(135deg, rgba(124,92,255,.22), rgba(56,189,248,.20)),
+          color-mix(in srgb, var(--accent, #7c5cff) 24%, #111827);
+        box-shadow:
+          0 12px 28px rgba(124,92,255,.12),
+          0 0 0 1px rgba(255,255,255,.38) inset;
       }
 
-      .home-user-avatar img{
+      .home-user-avatar img,
+      .home-ticket-avatar img{
+        position:absolute;
+        inset:0;
+        z-index:2;
         display:block;
         width:100%;
         height:100%;
@@ -1581,7 +2193,8 @@ function renderStyles() {
       .home-ticket-avatar-fallback{
         position:absolute;
         inset:0;
-        display:none;
+        z-index:1;
+        display:flex;
         align-items:center;
         justify-content:center;
         color:#fff;
@@ -1590,24 +2203,12 @@ function renderStyles() {
 
       .home-user-avatar-fallback{
         font-size:20px;
-        font-weight:800;
+        font-weight:820;
       }
 
       .home-ticket-avatar-fallback{
-        font-size:18px;
-        font-weight:780;
-      }
-
-      .home-user-avatar[data-fallback="true"] .home-user-avatar-fallback,
-      .home-ticket-avatar[data-fallback="true"] .home-ticket-avatar-fallback,
-      .home-user-avatar--fallback .home-user-avatar-fallback,
-      .home-ticket-avatar--fallback .home-ticket-avatar-fallback{
-        display:flex;
-      }
-
-      .home-user-avatar[data-fallback="true"] img,
-      .home-ticket-avatar[data-fallback="true"] img{
-        display:none !important;
+        font-size:17px;
+        font-weight:800;
       }
 
       .home-hero-copy{
@@ -1623,11 +2224,11 @@ function renderStyles() {
         padding:0 11px;
         border-radius:999px;
         border:1px solid rgba(15,23,42,.06);
-        background:rgba(255,255,255,.54);
+        background:rgba(255,255,255,.58);
         color:#7a8392;
         font-size:11px;
-        font-weight:780;
-        letter-spacing:.07em;
+        font-weight:800;
+        letter-spacing:.075em;
         text-transform:uppercase;
         display:inline-flex;
         align-items:center;
@@ -1637,10 +2238,10 @@ function renderStyles() {
       .home-page-title{
         margin:0;
         max-width:100%;
-        font-size:clamp(28px, 3vw, 46px);
+        font-size:clamp(29px, 3.2vw, 48px);
         line-height:.98;
-        letter-spacing:-.055em;
-        font-weight:800;
+        letter-spacing:-.06em;
+        font-weight:830;
         color:var(--text-strong, #0f172a);
       }
 
@@ -1648,7 +2249,7 @@ function renderStyles() {
         margin:0;
         max-width:900px;
         font-size:15px;
-        line-height:1.58;
+        line-height:1.6;
         color:var(--text-dim, #6b7280);
       }
 
@@ -1668,7 +2269,7 @@ function renderStyles() {
         background:rgba(255,255,255,.72);
         color:var(--text-strong, #111827);
         font-size:13px;
-        font-weight:700;
+        font-weight:740;
         line-height:1;
         cursor:pointer;
         display:inline-flex;
@@ -1676,7 +2277,7 @@ function renderStyles() {
         justify-content:center;
         text-decoration:none;
         white-space:nowrap;
-        box-shadow:0 4px 14px rgba(15,23,42,.04);
+        box-shadow:0 5px 16px rgba(15,23,42,.045);
         transition:
           transform .16s ease,
           box-shadow .16s ease,
@@ -1687,18 +2288,18 @@ function renderStyles() {
 
       .home-btn:hover{
         transform:translateY(-1px);
-        box-shadow:0 8px 18px rgba(15,23,42,.06);
+        box-shadow:0 10px 22px rgba(15,23,42,.07);
       }
 
       .home-btn--primary{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 18%, rgba(15,23,42,.06));
         background:linear-gradient(
           180deg,
-          color-mix(in srgb, var(--accent, #7c5cff) 86%, white 14%),
+          color-mix(in srgb, var(--accent, #7c5cff) 88%, white 12%),
           color-mix(in srgb, var(--accent, #7c5cff) 92%, black 8%)
         );
         color:#fff;
-        box-shadow:0 8px 20px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
+        box-shadow:0 10px 24px color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent);
       }
 
       .home-btn.is-loading,
@@ -1716,6 +2317,8 @@ function renderStyles() {
       }
 
       .home-hero-meta{
+        position:relative;
+        z-index:1;
         margin-top:16px;
         display:flex;
         align-items:center;
@@ -1728,10 +2331,10 @@ function renderStyles() {
         padding:0 12px;
         border-radius:999px;
         border:1px solid rgba(15,23,42,.06);
-        background:rgba(255,255,255,.52);
+        background:rgba(255,255,255,.54);
         color:#7a8392;
         font-size:11px;
-        font-weight:760;
+        font-weight:780;
         letter-spacing:.045em;
         text-transform:uppercase;
         display:inline-flex;
@@ -1740,6 +2343,8 @@ function renderStyles() {
       }
 
       .home-stats{
+        position:relative;
+        z-index:1;
         margin-top:16px;
         display:grid;
         grid-template-columns:repeat(4, minmax(0, 1fr));
@@ -1749,56 +2354,179 @@ function renderStyles() {
       .home-stat-card{
         display:grid;
         gap:8px;
-        min-height:122px;
+        min-height:124px;
         padding:16px 18px;
-        border-radius:20px;
+        border-radius:21px;
         border:1px solid rgba(15,23,42,.06);
         background:
-          linear-gradient(180deg, rgba(255,255,255,.58), rgba(255,255,255,.22)),
-          rgba(255,255,255,.46);
-        box-shadow:0 6px 20px rgba(15,23,42,.03);
+          linear-gradient(180deg, rgba(255,255,255,.62), rgba(255,255,255,.28)),
+          rgba(255,255,255,.48);
+        box-shadow:0 7px 22px rgba(15,23,42,.035);
+      }
+
+      .home-stat-topline{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:8px;
+        min-width:0;
       }
 
       .home-stat-card--open{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 17%, rgba(15,23,42,.06));
       }
 
       .home-stat-card--billing{
-        border-color:color-mix(in srgb, var(--warning-strong, #ffbc42) 20%, rgba(15,23,42,.06));
+        border-color:color-mix(in srgb, var(--warning-strong, #ffbc42) 22%, rgba(15,23,42,.06));
       }
 
       .home-stat-card--clients,
       .home-stat-card--users{
-        border-color:color-mix(in srgb, var(--success-strong, #36c690) 18%, rgba(15,23,42,.06));
+        border-color:color-mix(in srgb, var(--success-strong, #36c690) 19%, rgba(15,23,42,.06));
       }
 
       .home-stat-card--files,
       .home-stat-card--activity{
-        border-color:color-mix(in srgb, var(--info-strong, #38bdf8) 18%, rgba(15,23,42,.06));
+        border-color:color-mix(in srgb, var(--info-strong, #38bdf8) 19%, rgba(15,23,42,.06));
       }
 
       .home-stat-label{
+        min-width:0;
         font-size:11px;
-        font-weight:760;
+        font-weight:800;
         letter-spacing:.08em;
         text-transform:uppercase;
         color:#7b8494;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .home-stat-badge{
+        min-height:22px;
+        padding:0 8px;
+        border-radius:999px;
+        background:rgba(255,107,107,.10);
+        color:#d94d4d;
+        font-size:10px;
+        font-weight:820;
+        letter-spacing:.04em;
+        text-transform:uppercase;
+        display:inline-flex;
+        align-items:center;
+        white-space:nowrap;
       }
 
       .home-stat-value{
         font-size:38px;
         line-height:.94;
-        letter-spacing:-.045em;
-        font-weight:800;
+        letter-spacing:-.05em;
+        font-weight:840;
         color:var(--text-strong, #111827);
         overflow:hidden;
         text-overflow:ellipsis;
+        white-space:nowrap;
       }
 
       .home-stat-text{
         font-size:13px;
         line-height:1.45;
         color:var(--text-dim, #6b7280);
+      }
+
+      .home-widgets{
+        display:grid;
+        grid-template-columns:repeat(4, minmax(0, 1fr));
+        gap:12px;
+      }
+
+      .home-widget-card{
+        min-height:118px;
+        padding:15px 16px;
+        border-radius:20px;
+        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 90%, transparent);
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.58), rgba(255,255,255,.28)),
+          color-mix(in srgb, var(--panel-bg, #ffffff) 94%, transparent);
+        color:inherit;
+        cursor:pointer;
+        text-align:left;
+        display:grid;
+        align-content:start;
+        gap:6px;
+        box-shadow:0 8px 24px rgba(15,23,42,.035);
+        transition:
+          transform .16s ease,
+          box-shadow .16s ease,
+          border-color .16s ease,
+          background .16s ease,
+          opacity .16s ease;
+      }
+
+      .home-widget-card:hover{
+        transform:translateY(-2px);
+        box-shadow:0 14px 30px rgba(15,23,42,.07);
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.08));
+      }
+
+      .home-widget-card[aria-disabled="true"]{
+        cursor:default;
+      }
+
+      .home-widget-card[aria-disabled="true"]:hover{
+        transform:none;
+      }
+
+      .home-widget-kicker{
+        font-size:10px;
+        font-weight:820;
+        letter-spacing:.085em;
+        text-transform:uppercase;
+        color:#98a2b3;
+      }
+
+      .home-widget-value{
+        font-size:28px;
+        line-height:1;
+        font-weight:840;
+        letter-spacing:-.045em;
+        color:var(--text-strong, #111827);
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .home-widget-title{
+        font-size:13px;
+        line-height:1.22;
+        font-weight:760;
+        color:var(--text-strong, #111827);
+      }
+
+      .home-widget-text{
+        font-size:12px;
+        line-height:1.35;
+        color:var(--text-dim, #6b7280);
+        overflow:hidden;
+        display:-webkit-box;
+        -webkit-line-clamp:2;
+        -webkit-box-orient:vertical;
+      }
+
+      .home-widget-trend{
+        width:max-content;
+        max-width:100%;
+        min-height:22px;
+        padding:0 8px;
+        border-radius:999px;
+        background:rgba(124,92,255,.08);
+        color:#6d53d7;
+        font-size:10px;
+        font-weight:800;
+        letter-spacing:.035em;
+        display:inline-flex;
+        align-items:center;
+        white-space:nowrap;
       }
 
       .home-grid{
@@ -1815,11 +2543,11 @@ function renderStyles() {
         border-radius:24px;
         border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
         background:
-          linear-gradient(180deg, rgba(255,255,255,.6), rgba(255,255,255,.4)),
+          linear-gradient(180deg, rgba(255,255,255,.62), rgba(255,255,255,.42)),
           color-mix(in srgb, var(--panel-bg, #ffffff) 94%, transparent);
         box-shadow:
-          0 10px 30px rgba(15,23,42,.04),
-          0 1px 0 rgba(255,255,255,.5) inset;
+          0 12px 32px rgba(15,23,42,.045),
+          0 1px 0 rgba(255,255,255,.52) inset;
       }
 
       .home-panel-head{
@@ -1841,7 +2569,7 @@ function renderStyles() {
         margin:0;
         font-size:16px;
         line-height:1.2;
-        font-weight:780;
+        font-weight:800;
         color:var(--text-strong, #111827);
       }
 
@@ -1865,15 +2593,15 @@ function renderStyles() {
         border-radius:20px;
         border:1px solid rgba(15,23,42,.06);
         background:
-          linear-gradient(180deg, rgba(255,255,255,.68), rgba(255,255,255,.34)),
-          rgba(255,255,255,.42);
+          linear-gradient(180deg, rgba(255,255,255,.70), rgba(255,255,255,.36)),
+          rgba(255,255,255,.44);
         color:var(--text-strong, #111827);
         cursor:pointer;
         text-align:left;
         display:grid;
         align-content:start;
         gap:8px;
-        box-shadow:0 5px 18px rgba(15,23,42,.025);
+        box-shadow:0 6px 20px rgba(15,23,42,.028);
         transition:
           transform .16s ease,
           box-shadow .16s ease,
@@ -1884,26 +2612,26 @@ function renderStyles() {
 
       .home-action-card:hover{
         transform:translateY(-2px);
-        box-shadow:0 12px 26px rgba(15,23,42,.06);
+        box-shadow:0 13px 28px rgba(15,23,42,.065);
         border-color:rgba(15,23,42,.10);
       }
 
       .home-action-card--primary{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 18%, rgba(15,23,42,.06));
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 20%, rgba(15,23,42,.06));
       }
 
       .home-action-card--billing{
-        border-color:color-mix(in srgb, var(--warning-strong, #ffbc42) 18%, rgba(15,23,42,.06));
+        border-color:color-mix(in srgb, var(--warning-strong, #ffbc42) 19%, rgba(15,23,42,.06));
       }
 
       .home-action-card--clients,
       .home-action-card--users{
-        border-color:color-mix(in srgb, var(--success-strong, #36c690) 16%, rgba(15,23,42,.06));
+        border-color:color-mix(in srgb, var(--success-strong, #36c690) 17%, rgba(15,23,42,.06));
       }
 
       .home-action-card-kicker{
         font-size:10px;
-        font-weight:800;
+        font-weight:830;
         letter-spacing:.085em;
         text-transform:uppercase;
         color:#98a2b3;
@@ -1912,8 +2640,8 @@ function renderStyles() {
       .home-action-card-title{
         font-size:16px;
         line-height:1.15;
-        font-weight:790;
-        letter-spacing:-.025em;
+        font-weight:810;
+        letter-spacing:-.028em;
         color:var(--text-strong, #111827);
       }
 
@@ -1932,7 +2660,7 @@ function renderStyles() {
       .home-activity-item{
         width:100%;
         min-height:68px;
-        padding:10px 10px;
+        padding:10px;
         border:0;
         border-radius:16px;
         background:transparent;
@@ -1949,7 +2677,7 @@ function renderStyles() {
       }
 
       .home-activity-item:hover{
-        background:rgba(124,92,255,.04);
+        background:rgba(124,92,255,.045);
         transform:translateY(-1px);
       }
 
@@ -1966,6 +2694,12 @@ function renderStyles() {
         box-shadow:0 0 0 4px rgba(255,188,66,.14);
       }
 
+      .home-activity-item--client .home-activity-dot,
+      .home-activity-item--user .home-activity-dot{
+        background:#36c690;
+        box-shadow:0 0 0 4px rgba(54,198,144,.14);
+      }
+
       .home-activity-copy{
         min-width:0;
         display:grid;
@@ -1975,7 +2709,7 @@ function renderStyles() {
       .home-activity-title{
         font-size:13px;
         line-height:1.15;
-        font-weight:760;
+        font-weight:780;
         color:var(--text-strong, #111827);
         overflow:hidden;
         text-overflow:ellipsis;
@@ -1993,7 +2727,7 @@ function renderStyles() {
 
       .home-activity-time{
         font-size:11px;
-        font-weight:720;
+        font-weight:740;
         color:#98a2b3;
         white-space:nowrap;
       }
@@ -2009,10 +2743,10 @@ function renderStyles() {
         padding:0 14px;
         border-radius:13px;
         border:1px solid rgba(15,23,42,.06);
-        background:rgba(255,255,255,.66);
+        background:rgba(255,255,255,.68);
         color:#273142;
         font-size:12px;
-        font-weight:700;
+        font-weight:740;
         cursor:pointer;
         display:inline-flex;
         align-items:center;
@@ -2025,7 +2759,7 @@ function renderStyles() {
       }
 
       .home-pagination-btn:hover{
-        background:rgba(255,255,255,.9);
+        background:rgba(255,255,255,.92);
         border-color:rgba(15,23,42,.10);
       }
 
@@ -2073,11 +2807,11 @@ function renderStyles() {
         padding:12px 18px;
         text-align:left;
         font-size:11px;
-        font-weight:760;
+        font-weight:800;
         letter-spacing:.08em;
         text-transform:uppercase;
         color:#97a0af;
-        background:rgba(248,250,252,.62);
+        background:rgba(248,250,252,.66);
         border-bottom:1px solid rgba(15,23,42,.06);
         white-space:nowrap;
       }
@@ -2097,7 +2831,7 @@ function renderStyles() {
       }
 
       .home-ticket-row:hover{
-        background:rgba(124,92,255,.018);
+        background:rgba(124,92,255,.020);
       }
 
       .home-ticket-main{
@@ -2115,14 +2849,9 @@ function renderStyles() {
         border-radius:999px;
         overflow:hidden;
         flex:0 0 44px;
-        background:linear-gradient(135deg, rgba(124,92,255,.12), rgba(139,92,246,.24));
-      }
-
-      .home-ticket-avatar img{
-        display:block;
-        width:100%;
-        height:100%;
-        object-fit:cover;
+        background:
+          linear-gradient(135deg, rgba(124,92,255,.14), rgba(56,189,248,.16)),
+          color-mix(in srgb, var(--accent, #7c5cff) 20%, #111827);
       }
 
       .home-ticket-copy{
@@ -2134,7 +2863,7 @@ function renderStyles() {
       .home-ticket-id{
         font-size:12px;
         line-height:1.15;
-        font-weight:760;
+        font-weight:790;
         letter-spacing:.055em;
         color:#667084;
         text-transform:uppercase;
@@ -2143,8 +2872,8 @@ function renderStyles() {
       .home-ticket-subject{
         font-size:15px;
         line-height:1.14;
-        font-weight:760;
-        letter-spacing:-.025em;
+        font-weight:790;
+        letter-spacing:-.026em;
         color:var(--text-strong, #111827);
         overflow:hidden;
         text-overflow:ellipsis;
@@ -2167,7 +2896,7 @@ function renderStyles() {
         max-width:180px;
         font-size:13px;
         line-height:1.2;
-        font-weight:680;
+        font-weight:700;
         color:#344054;
         overflow:hidden;
         text-overflow:ellipsis;
@@ -2182,7 +2911,7 @@ function renderStyles() {
         align-items:center;
         justify-content:center;
         font-size:11px;
-        font-weight:760;
+        font-weight:800;
         letter-spacing:.045em;
         text-transform:uppercase;
         white-space:nowrap;
@@ -2219,7 +2948,7 @@ function renderStyles() {
         white-space:nowrap;
         font-size:13px;
         line-height:1.2;
-        font-weight:650;
+        font-weight:680;
         font-variant-numeric:tabular-nums;
         color:#344054;
       }
@@ -2233,7 +2962,7 @@ function renderStyles() {
         padding:0 12px;
         border-radius:999px;
         font-size:11px;
-        font-weight:760;
+        font-weight:800;
         white-space:nowrap;
         color:#64748b;
         background:rgba(15,23,42,.035);
@@ -2252,10 +2981,10 @@ function renderStyles() {
         padding:0 12px;
         border-radius:12px;
         border:1px solid rgba(15,23,42,.07);
-        background:rgba(255,255,255,.68);
+        background:rgba(255,255,255,.70);
         color:#1f2937;
         font-size:13px;
-        font-weight:700;
+        font-weight:740;
         line-height:1;
         cursor:pointer;
         display:inline-flex;
@@ -2271,8 +3000,8 @@ function renderStyles() {
       }
 
       .home-detail-btn:hover{
-        border-color:rgba(15,23,42,.11);
-        background:rgba(255,255,255,.9);
+        border-color:rgba(15,23,42,.12);
+        background:rgba(255,255,255,.92);
         transform:translateY(-1px);
       }
 
@@ -2307,7 +3036,7 @@ function renderStyles() {
         display:grid;
         place-items:center;
         pointer-events:none;
-        background:linear-gradient(180deg, rgba(255,255,255,.24), rgba(255,255,255,.12));
+        background:linear-gradient(180deg, rgba(255,255,255,.25), rgba(255,255,255,.12));
         backdrop-filter:blur(2px);
       }
 
@@ -2319,10 +3048,10 @@ function renderStyles() {
         padding:0 16px;
         border-radius:14px;
         border:1px solid rgba(15,23,42,.07);
-        background:rgba(255,255,255,.82);
+        background:rgba(255,255,255,.86);
         color:#344054;
         font-size:13px;
-        font-weight:720;
+        font-weight:740;
         box-shadow:0 10px 26px rgba(15,23,42,.08);
       }
 
@@ -2356,7 +3085,7 @@ function renderStyles() {
         padding:16px;
         border-radius:20px;
         border:1px solid rgba(15,23,42,.06);
-        background:rgba(255,255,255,.42);
+        background:rgba(255,255,255,.44);
         display:grid;
         align-content:start;
         gap:10px;
@@ -2377,7 +3106,7 @@ function renderStyles() {
         background:linear-gradient(
           90deg,
           transparent,
-          rgba(255,255,255,.55),
+          rgba(255,255,255,.58),
           transparent
         );
         animation:homeSkeleton 1.2s ease-in-out infinite;
@@ -2435,7 +3164,7 @@ function renderStyles() {
       .home-empty-title{
         margin:0;
         font-size:18px;
-        font-weight:760;
+        font-weight:790;
         color:var(--text-strong, #111827);
       }
 
@@ -2455,29 +3184,49 @@ function renderStyles() {
         to{ transform:translateX(100%); }
       }
 
+      @media (prefers-reduced-motion: reduce){
+        .home-btn,
+        .home-action-card,
+        .home-widget-card,
+        .home-detail-btn,
+        .home-activity-item,
+        .home-ticket-row,
+        .home-table-shell,
+        .home-table-wrap.is-refreshing .home-table-shell{
+          transition:none !important;
+        }
+
+        .home-inline-spinner,
+        .home-skeleton::after{
+          animation:none !important;
+        }
+      }
+
       [data-theme="light"] .home-hero,
       [data-theme="light"] .home-panel,
-      [data-theme="light"] .home-tickets{
+      [data-theme="light"] .home-tickets,
+      [data-theme="light"] .home-widget-card{
         background:
-          linear-gradient(180deg, rgba(255,255,255,.82), rgba(248,250,252,.74)),
-          rgba(255,255,255,.82);
+          linear-gradient(180deg, rgba(255,255,255,.84), rgba(248,250,252,.74)),
+          rgba(255,255,255,.84);
         box-shadow:
-          0 12px 28px rgba(15,23,42,.035),
+          0 12px 28px rgba(15,23,42,.038),
           0 0 0 1px rgba(255,255,255,.72) inset;
       }
 
       [data-theme="light"] .home-stat-card,
       [data-theme="light"] .home-action-card{
         background:
-          linear-gradient(180deg, rgba(255,255,255,.78), rgba(255,255,255,.48)),
-          rgba(255,255,255,.56);
+          linear-gradient(180deg, rgba(255,255,255,.80), rgba(255,255,255,.50)),
+          rgba(255,255,255,.58);
       }
 
       [data-theme="dark"] .home-hero,
       [data-theme="dark"] .home-panel,
-      [data-theme="dark"] .home-tickets{
+      [data-theme="dark"] .home-tickets,
+      [data-theme="dark"] .home-widget-card{
         background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 7%, transparent), transparent 34%),
+          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 35%),
           linear-gradient(180deg, var(--surface-2, #171922), var(--surface-1, #10121a));
         border-color:var(--border-soft, rgba(255,255,255,.08));
       }
@@ -2488,7 +3237,9 @@ function renderStyles() {
       [data-theme="dark"] .home-action-card-title,
       [data-theme="dark"] .home-activity-title,
       [data-theme="dark"] .home-ticket-subject,
-      [data-theme="dark"] .home-empty-title{
+      [data-theme="dark"] .home-empty-title,
+      [data-theme="dark"] .home-widget-value,
+      [data-theme="dark"] .home-widget-title{
         color:var(--text-strong, #f8fafc);
       }
 
@@ -2498,7 +3249,8 @@ function renderStyles() {
       [data-theme="dark"] .home-action-card-text,
       [data-theme="dark"] .home-activity-text,
       [data-theme="dark"] .home-ticket-description,
-      [data-theme="dark"] .home-empty-text{
+      [data-theme="dark"] .home-empty-text,
+      [data-theme="dark"] .home-widget-text{
         color:var(--text-dim, #94a3b8);
       }
 
@@ -2538,7 +3290,8 @@ function renderStyles() {
       }
 
       @media (max-width: 1240px){
-        .home-stats{
+        .home-stats,
+        .home-widgets{
           grid-template-columns:repeat(2, minmax(0, 1fr));
         }
 
@@ -2614,12 +3367,21 @@ function renderStyles() {
           flex:1 1 auto;
         }
 
-        .home-stats{
+        .home-stats,
+        .home-widgets{
           grid-template-columns:1fr;
         }
 
         .home-pagination{
           justify-content:flex-start;
+        }
+
+        .home-activity-item{
+          grid-template-columns:10px minmax(0, 1fr);
+        }
+
+        .home-activity-time{
+          grid-column:2;
         }
       }
     </style>
@@ -2668,6 +3430,8 @@ export function renderHomeHeader(input = {}) {
     data.lastUpdatedAt,
     state.lastUpdatedAt,
     state.lastSyncAt,
+    getDashboard(data).updatedAt,
+    getDashboard(data).generatedAt,
     stats.lastTicketUpdate
   );
 
@@ -2743,11 +3507,15 @@ export function renderHomeHeader(input = {}) {
 
       <div class="home-hero-meta">
         <span class="home-meta-pill">
-          ${escapeHtml(`${stats.totalTickets} incidencias registradas`)}
+          ${escapeHtml(`${formatNumber(stats.totalTickets)} incidencias registradas`)}
         </span>
 
         <span class="home-meta-pill">
-          ${escapeHtml(`${stats.pendingInvoices} facturas pendientes`)}
+          ${escapeHtml(`${formatNumber(stats.pendingInvoices)} facturas pendientes`)}
+        </span>
+
+        <span class="home-meta-pill">
+          ${escapeHtml(`Salud operativa · ${Math.round(stats.healthRatio)}%`)}
         </span>
 
         <span class="home-meta-pill">
@@ -2762,6 +3530,31 @@ export function renderHomeHeader(input = {}) {
       <div class="home-stats">
         ${getStatCards(data).map((card) => renderStatCard(card)).join("")}
       </div>
+    </section>
+  `;
+}
+
+/* =========================================================
+   WIDGETS
+========================================================= */
+
+export function renderHomeWidgets(input = {}) {
+  const data = safeObject(input);
+  const state = safeObject(data.state);
+  const loading = Boolean(state.loading);
+  const widgets = getWidgets(data).slice(0, 4);
+
+  if (!loading && !widgets.length) {
+    return "";
+  }
+
+  return `
+    <section class="home-widgets" aria-label="Widgets del dashboard">
+      ${
+        loading && !widgets.length
+          ? renderCardLoading(4)
+          : widgets.map((widget, index) => renderWidgetCard(widget, index)).join("")
+      }
     </section>
   `;
 }
@@ -2824,7 +3617,7 @@ export function renderHomeActivity(input = {}) {
             ${
               loading
                 ? "Cargando actividad..."
-                : escapeHtml(`${activity.length} movimientos recientes detectados`)
+                : escapeHtml(`${formatNumber(activity.length)} movimientos recientes detectados`)
             }
           </p>
         </div>
@@ -2886,7 +3679,9 @@ export function renderHomeTicketsTable(input = {}) {
               showInitialLoading
                 ? "Cargando incidencias..."
                 : escapeHtml(
-                    `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`
+                    pagination.totalCount
+                      ? `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`
+                      : "Sin incidencias visibles"
                   )
             }
           </p>
@@ -2985,6 +3780,7 @@ export function renderHomeTemplate(input = {}) {
   return `
     <section class="home-view-root">
       ${renderHomeHeader(data)}
+      ${renderHomeWidgets(data)}
 
       <section class="home-grid">
         ${renderHomeQuickActions(data)}

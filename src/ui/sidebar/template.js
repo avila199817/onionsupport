@@ -2,6 +2,8 @@
    Onion SPA - Sidebar Template
    Archivo: src/ui/sidebar/template.js
 
+   FINAL PRO SYSTEM · SIDEBAR TEMPLATE · EXTREME HARDENED · 10/10
+
    RESPONSABILIDADES:
    - generar el HTML base del sidebar
    - centralizar el marcado del módulo
@@ -17,7 +19,19 @@
    - no pintar tooltip nativo en avatar/footer
    - marcar rutas admin para filtrado visual posterior
    - incluir data-sidebar-action para fallback delegado
+   - incluir data-action para compatibilidad con delegación genérica
    - incluir data-route para navegación robusta
+   - dropdown de usuario con button real, data-user-toggle y data-user-dropdown
+   - estructura DOM compatible con dom.js / events.js / dropdown.js / index.js
+
+   HARDENING:
+   - IDs alineados con constants.js
+   - selectores fallback estables
+   - aria-controls / aria-expanded / aria-hidden coherentes
+   - dropdown nace cerrado pero desbloqueable por JS
+   - evita aria-hidden en contenedores interactivos principales
+   - SVGs preservados
+   - sin title nativo en footer/logo/avatar
 ========================================================= */
 
 import { I18n } from "../../i18n/index.js";
@@ -34,20 +48,43 @@ import {
 } from "./constants.js";
 
 /* =========================================================
+   LOCAL CONSTANTS
+========================================================= */
+
+const SIDEBAR_LOGO_ID = "homeLink";
+const SIDEBAR_TOGGLE_ID = "toggleSidebar";
+const SIDEBAR_MOBILE_TOGGLE_ID = "toggleSidebarMobile";
+const SIDEBAR_AVATAR_IMAGE_ID = "sidebarAvatarImage";
+const SIDEBAR_AVATAR_FALLBACK_ID = "sidebarAvatarFallback";
+const SIDEBAR_USER_PLAN_ID = "sidebarUserPlan";
+
+/* =========================================================
    I18N
 ========================================================= */
 
 function t(key, fallback = "", params = {}) {
   try {
-    return I18n.t(key, params, fallback);
-  } catch {
-    return fallback || key;
-  }
+    if (typeof I18n?.t === "function") {
+      return I18n.t(key, params, fallback);
+    }
+  } catch {}
+
+  return fallback || key;
 }
 
 /* =========================================================
    SAFE HTML
 ========================================================= */
+
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
+  const text = String(value).trim();
+
+  return text || fallback;
+}
 
 function escapeHtml(value = "") {
   return String(value ?? "")
@@ -58,66 +95,271 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#39;");
 }
 
-/* =========================================================
-   MENU ITEM
-========================================================= */
+function escapeAttr(value = "") {
+  return escapeHtml(value);
+}
 
-function renderMenuItem({
-  href = "/",
-  label = "",
-  i18nKey = "",
-  icon = "",
-  extraAttrs = "",
-} = {}) {
-  const cleanHref = escapeHtml(href);
-  const cleanLabel = escapeHtml(label);
-  const cleanI18nKey = escapeHtml(i18nKey);
+function normalizeRoute(value = "/") {
+  const text = safeText(value, "/");
 
-  return `
-        <a
-          href="${cleanHref}"
-          data-spa
-          data-route="${cleanHref}"
-          data-sidebar-nav="true"
-          class="menu-item"
-          data-tooltip="${cleanLabel}"
-          ${
-            i18nKey
-              ? `data-i18n-data-tooltip="${cleanI18nKey}"`
-              : ""
-          }
-          aria-label="${cleanLabel}"
-          ${
-            i18nKey
-              ? `data-i18n-aria-label="${cleanI18nKey}"`
-              : ""
-          }
-          ${extraAttrs}
-        >
-          <span
-            class="menu-item-icon"
-            aria-hidden="true"
-          >
-            ${icon}
-          </span>
+  if (/^https?:\/\//i.test(text)) {
+    return text;
+  }
 
-          <span
-            class="menu-item-label"
-            ${
-              i18nKey
-                ? `data-i18n="${cleanI18nKey}"`
-                : ""
-            }
-          >${cleanLabel}</span>
-        </a>`;
+  if (text.startsWith("#")) {
+    return text;
+  }
+
+  return text.startsWith("/")
+    ? text
+    : `/${text}`;
+}
+
+function normalizeKey(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9:_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function joinAttrs(...attrs) {
+  return attrs
+    .map((item) => safeText(item, ""))
+    .filter(Boolean)
+    .join("\n");
+}
+
+function boolAttr(name = "", enabled = false) {
+  return enabled ? safeText(name, "") : "";
 }
 
 /* =========================================================
-   TEMPLATE
+   ICONS
 ========================================================= */
 
-export function getSidebarTemplate() {
-  const labels = {
+const Icons = Object.freeze({
+  home: `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" focusable="false" aria-hidden="true">
+              <path
+                d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1v-9.5Z"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linejoin="round"
+              />
+            </svg>
+  `,
+
+  tickets: `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" focusable="false" aria-hidden="true">
+              <circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="1.8"/>
+              <path
+                d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3
+                1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2
+                0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0
+                1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0A1.7 1.7 0 0 0 10
+                3.1V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h0a1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7
+                1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+  `,
+
+  invoices: `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" focusable="false" aria-hidden="true">
+              <path d="M6 2h9l5 5v15H6z" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M14 2v6h6" stroke="currentColor" stroke-width="1.6"/>
+            </svg>
+  `,
+
+  users: `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" focusable="false" aria-hidden="true">
+              <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" stroke-width="1.6"/>
+            </svg>
+  `,
+
+  clients: `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" focusable="false" aria-hidden="true">
+              <circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.6"/>
+              <circle cx="6.5" cy="10" r="2.5" stroke="currentColor" stroke-width="1.4" opacity="0.6"/>
+              <circle cx="17.5" cy="10" r="2.5" stroke="currentColor" stroke-width="1.4" opacity="0.6"/>
+              <path d="M4 20c0-3.5 3.5-5.5 8-5.5s8 2 8 5.5" stroke="currentColor" stroke-width="1.6"/>
+            </svg>
+  `,
+
+  account: `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" focusable="false" aria-hidden="true">
+              <circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M5.5 21a6.5 6.5 0 0 1 13 0" stroke="currentColor" stroke-width="1.6"/>
+            </svg>
+  `,
+
+  settings: `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" focusable="false" aria-hidden="true">
+              <path d="M4 6h10" stroke="currentColor" stroke-width="1.6"/>
+              <circle cx="16" cy="6" r="2" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M4 12h6" stroke="currentColor" stroke-width="1.6"/>
+              <circle cx="12" cy="12" r="2" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M4 18h12" stroke="currentColor" stroke-width="1.6"/>
+              <circle cx="18" cy="18" r="2" stroke="currentColor" stroke-width="1.6"/>
+            </svg>
+  `,
+
+  server: `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" focusable="false" aria-hidden="true">
+              <rect
+                x="4"
+                y="5"
+                width="16"
+                height="5"
+                rx="1.5"
+                stroke="currentColor"
+                stroke-width="1.6"
+              />
+              <rect
+                x="4"
+                y="14"
+                width="16"
+                height="5"
+                rx="1.5"
+                stroke="currentColor"
+                stroke-width="1.6"
+              />
+              <circle cx="8" cy="7.5" r="1" fill="currentColor" />
+              <circle cx="8" cy="16.5" r="1" fill="currentColor" />
+              <path
+                d="M11 7.5h5"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+              />
+              <path
+                d="M11 16.5h5"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+              />
+            </svg>
+  `,
+
+  plus: `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" focusable="false" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.6"/>
+            </svg>
+  `,
+
+  upgrade: `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" focusable="false" aria-hidden="true">
+              <path d="M12 4v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              <path d="M8 8l4-4 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M5 20h14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+  `,
+
+  help: `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" focusable="false" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M12 16v-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <circle cx="12" cy="8" r="1" fill="currentColor"/>
+            </svg>
+  `,
+
+  logout: `
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" focusable="false" aria-hidden="true">
+              <path d="M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M4 4h5v16H4z" stroke="currentColor" stroke-width="1.6"/>
+            </svg>
+  `,
+
+  chevron: `
+            <svg
+              class="user-chevron"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              focusable="false"
+              aria-hidden="true"
+            >
+              <path
+                d="M9 6l6 6-6 6"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+  `,
+
+  desktopToggle: `
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            focusable="false"
+            aria-hidden="true"
+          >
+            <rect
+              x="3"
+              y="4"
+              width="18"
+              height="16"
+              rx="3"
+              stroke="currentColor"
+              stroke-width="1.6"
+            />
+            <path
+              d="M9 4v16"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+            />
+          </svg>
+  `,
+
+  mobileToggle: `
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            focusable="false"
+            aria-hidden="true"
+          >
+            <path
+              d="M4 7h16"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+            />
+            <path
+              d="M4 12h16"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+            />
+            <path
+              d="M4 17h16"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+            />
+          </svg>
+  `,
+});
+
+/* =========================================================
+   LABELS
+========================================================= */
+
+function getSidebarLabels() {
+  return {
     sidebarAria: t(
       "sidebar.aria.main",
       "Barra lateral principal"
@@ -258,33 +500,150 @@ export function getSidebarTemplate() {
       "Cerrar sesión"
     ),
   };
+}
+
+/* =========================================================
+   MENU ITEM
+========================================================= */
+
+function renderMenuItem({
+  href = "/",
+  label = "",
+  i18nKey = "",
+  icon = "",
+  key = "",
+  adminOnly = false,
+  extraAttrs = "",
+} = {}) {
+  const route = normalizeRoute(href);
+  const cleanHref = escapeAttr(route);
+  const cleanLabel = escapeAttr(label);
+  const cleanI18nKey = escapeAttr(i18nKey);
+  const itemKey = escapeAttr(normalizeKey(key || label || route));
+
+  const roleAttrs = adminOnly
+    ? `
+          data-role="admin"
+          data-admin-only="true"
+          data-requires-role="admin"
+          data-sidebar-visible="true"
+          data-admin-visible="true"
+        `
+    : "";
 
   return `
-    <aside
-      class="sidebar"
-      id="${SIDEBAR_ROOT_ID}"
-      aria-label="${escapeHtml(labels.sidebarAria)}"
-      data-i18n-aria-label="sidebar.aria.main"
-      data-sidebar-root="true"
-      data-open="true"
-      data-collapsed="false"
-      data-mode="desktop"
-    >
-      <div class="sidebar-top">
+        <a
+          href="${cleanHref}"
+          data-spa
+          data-route="${cleanHref}"
+          data-href="${cleanHref}"
+          data-to="${cleanHref}"
+          data-sidebar-nav="true"
+          data-sidebar-item="true"
+          data-sidebar-item-key="${itemKey}"
+          data-action="navigate"
+          data-sidebar-action="navigate"
+          class="menu-item"
+          data-tooltip="${cleanLabel}"
+          ${
+            i18nKey
+              ? `data-i18n-data-tooltip="${cleanI18nKey}"`
+              : ""
+          }
+          aria-label="${cleanLabel}"
+          ${
+            i18nKey
+              ? `data-i18n-aria-label="${cleanI18nKey}"`
+              : ""
+          }
+          aria-current="false"
+          ${roleAttrs}
+          ${extraAttrs}
+        >
+          <span
+            class="menu-item-icon"
+            aria-hidden="true"
+          >
+${icon}
+          </span>
+
+          <span
+            class="menu-item-label"
+            ${
+              i18nKey
+                ? `data-i18n="${cleanI18nKey}"`
+                : ""
+            }
+          >${cleanLabel}</span>
+        </a>`;
+}
+
+/* =========================================================
+   USER DROPDOWN ITEM
+========================================================= */
+
+function renderDropdownButton({
+  id = "",
+  label = "",
+  i18nKey = "",
+  action = "",
+  route = "",
+  icon = "",
+  danger = false,
+  disabled = false,
+} = {}) {
+  const cleanId = safeText(id, "");
+  const cleanLabel = escapeHtml(label);
+  const cleanI18nKey = escapeAttr(i18nKey);
+  const cleanAction = escapeAttr(action);
+  const cleanRoute = escapeAttr(route ? normalizeRoute(route) : "");
+
+  return `
+          <button
+            ${cleanId ? `id="${escapeAttr(cleanId)}"` : ""}
+            type="button"
+            class="dropdown-item${danger ? " dropdown-item-danger" : ""}"
+            role="menuitem"
+            tabindex="-1"
+            data-sidebar-action="${cleanAction}"
+            data-action="${cleanAction}"
+            ${cleanRoute ? `data-route="${cleanRoute}" data-href="${cleanRoute}" data-to="${cleanRoute}"` : ""}
+            ${boolAttr("disabled", disabled)}
+            ${disabled ? `aria-disabled="true"` : ""}
+          >
+            ${icon}
+            <span
+              ${i18nKey ? `data-i18n="${cleanI18nKey}"` : ""}
+            >${cleanLabel}</span>
+          </button>`;
+}
+
+/* =========================================================
+   TEMPLATE PARTIALS
+========================================================= */
+
+function renderLogo(labels) {
+  return `
         <a
           href="/"
           data-spa
           data-route="/"
+          data-href="/"
+          data-to="/"
+          data-sidebar-logo="true"
+          data-sidebar-action="navigate"
+          data-action="navigate"
           class="logo"
-          id="homeLink"
-          aria-label="${escapeHtml(labels.logoLink)}"
+          id="${SIDEBAR_LOGO_ID}"
+          aria-label="${escapeAttr(labels.logoLink)}"
           data-i18n-aria-label="sidebar.logo.ariaLabel"
+          aria-current="false"
         >
           <img
             class="logo-dark"
             draggable="false"
             src="/src/media/img/favicon_white.png"
-            alt="${escapeHtml(labels.logoAlt)}"
+            alt="${escapeAttr(labels.logoAlt)}"
             data-i18n-alt="sidebar.logo.alt"
             width="36"
             height="36"
@@ -295,298 +654,187 @@ export function getSidebarTemplate() {
             class="logo-light"
             draggable="false"
             src="/src/media/img/favicon_black.png"
-            alt="${escapeHtml(labels.logoAlt)}"
+            alt="${escapeAttr(labels.logoAlt)}"
             data-i18n-alt="sidebar.logo.alt"
             width="36"
             height="36"
             decoding="async"
           >
         </a>
+  `;
+}
 
+function renderDesktopToggle(labels) {
+  return `
         <button
           type="button"
           class="sidebar-toggle"
-          id="toggleSidebar"
+          id="${SIDEBAR_TOGGLE_ID}"
+          data-sidebar-toggle="true"
           data-sidebar-action="toggle-sidebar"
-          data-tooltip="${escapeHtml(labels.collapseSidebar)}"
+          data-action="toggle-sidebar"
+          data-tooltip="${escapeAttr(labels.collapseSidebar)}"
           data-i18n-data-tooltip="sidebar.toggle.collapse"
-          aria-label="${escapeHtml(labels.collapseSidebar)}"
+          aria-label="${escapeAttr(labels.collapseSidebar)}"
           data-i18n-aria-label="sidebar.toggle.collapse"
-          aria-controls="${SIDEBAR_MENU_ID}"
+          aria-controls="${SIDEBAR_ROOT_ID} ${SIDEBAR_MENU_ID}"
           aria-expanded="true"
+          data-state="open"
         >
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            aria-hidden="true"
-          >
-            <rect
-              x="3"
-              y="4"
-              width="18"
-              height="16"
-              rx="3"
-              stroke="currentColor"
-              stroke-width="1.6"
-            />
-            <path
-              d="M9 4v16"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-            />
-          </svg>
+${Icons.desktopToggle}
         </button>
+  `;
+}
 
+function renderMobileToggle(labels) {
+  return `
         <button
           type="button"
           class="sidebar-mobile-toggle"
-          id="toggleSidebarMobile"
+          id="${SIDEBAR_MOBILE_TOGGLE_ID}"
+          data-sidebar-mobile-toggle="true"
           data-sidebar-action="mobile-sidebar-toggle"
-          data-tooltip="${escapeHtml(labels.openSidebar)}"
+          data-action="mobile-sidebar-toggle"
+          data-tooltip="${escapeAttr(labels.openSidebar)}"
           data-i18n-data-tooltip="sidebar.toggle.open"
-          aria-label="${escapeHtml(labels.openSidebar)}"
+          aria-label="${escapeAttr(labels.openSidebar)}"
           data-i18n-aria-label="sidebar.toggle.open"
-          aria-controls="${SIDEBAR_MENU_ID}"
+          aria-controls="${SIDEBAR_ROOT_ID} ${SIDEBAR_MENU_ID}"
           aria-expanded="false"
+          data-state="closed"
         >
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            aria-hidden="true"
-          >
-            <path
-              d="M4 7h16"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-            />
-            <path
-              d="M4 12h16"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-            />
-            <path
-              d="M4 17h16"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-            />
-          </svg>
+${Icons.mobileToggle}
         </button>
-      </div>
+  `;
+}
 
+function renderMainMenu(labels) {
+  return `
       <nav
         class="sidebar-menu"
         id="${SIDEBAR_MENU_ID}"
-        aria-label="${escapeHtml(labels.navAria)}"
+        aria-label="${escapeAttr(labels.navAria)}"
         data-i18n-aria-label="sidebar.aria.navigation"
+        data-sidebar-menu="true"
+        data-nav-area="sidebar"
       >
 ${renderMenuItem({
   href: "/",
   label: labels.home,
   i18nKey: "sidebar.menu.home",
-  icon: `
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1v-9.5Z"
-                stroke="currentColor"
-                stroke-width="1.6"
-                stroke-linejoin="round"
-              />
-            </svg>
-  `,
+  key: "home",
+  icon: Icons.home,
 })}
 
 ${renderMenuItem({
   href: "/incidencias",
   label: labels.tickets,
   i18nKey: "sidebar.menu.tickets",
-  icon: `
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="1.8"/>
-              <path
-                d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3
-                1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2
-                0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0
-                1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0A1.7 1.7 0 0 0 10
-                3.1V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h0a1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7
-                1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"
-                stroke="currentColor"
-                stroke-width="1.6"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-  `,
+  key: "tickets",
+  icon: Icons.tickets,
 })}
 
 ${renderMenuItem({
   href: "/facturas",
   label: labels.invoices,
   i18nKey: "sidebar.menu.invoices",
-  icon: `
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <path d="M6 2h9l5 5v15H6z" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M14 2v6h6" stroke="currentColor" stroke-width="1.6"/>
-            </svg>
-  `,
+  key: "invoices",
+  icon: Icons.invoices,
 })}
 
 ${renderMenuItem({
   href: "/usuarios",
   label: labels.users,
   i18nKey: "sidebar.menu.users",
-  extraAttrs: `
-          data-role="admin"
-          data-admin-only="true"
-          data-sidebar-visible="true"
-        `,
-  icon: `
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" stroke-width="1.6"/>
-            </svg>
-  `,
+  key: "users",
+  adminOnly: true,
+  icon: Icons.users,
 })}
 
 ${renderMenuItem({
   href: "/clientes",
   label: labels.clients,
   i18nKey: "sidebar.menu.clients",
-  extraAttrs: `
-          data-role="admin"
-          data-admin-only="true"
-          data-sidebar-visible="true"
-        `,
-  icon: `
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.6"/>
-              <circle cx="6.5" cy="10" r="2.5" stroke="currentColor" stroke-width="1.4" opacity="0.6"/>
-              <circle cx="17.5" cy="10" r="2.5" stroke="currentColor" stroke-width="1.4" opacity="0.6"/>
-              <path d="M4 20c0-3.5 3.5-5.5 8-5.5s8 2 8 5.5" stroke="currentColor" stroke-width="1.6"/>
-            </svg>
-  `,
+  key: "clients",
+  adminOnly: true,
+  icon: Icons.clients,
 })}
 
 ${renderMenuItem({
   href: "/cuenta",
   label: labels.account,
   i18nKey: "sidebar.menu.account",
-  icon: `
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M5.5 21a6.5 6.5 0 0 1 13 0" stroke="currentColor" stroke-width="1.6"/>
-            </svg>
-  `,
+  key: "account",
+  icon: Icons.account,
 })}
 
 ${renderMenuItem({
   href: "/ajustes",
   label: labels.settings,
   i18nKey: "sidebar.menu.settings",
-  icon: `
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <path d="M4 6h10" stroke="currentColor" stroke-width="1.6"/>
-              <circle cx="16" cy="6" r="2" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M4 12h6" stroke="currentColor" stroke-width="1.6"/>
-              <circle cx="12" cy="12" r="2" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M4 18h12" stroke="currentColor" stroke-width="1.6"/>
-              <circle cx="18" cy="18" r="2" stroke="currentColor" stroke-width="1.6"/>
-            </svg>
-  `,
+  key: "settings",
+  icon: Icons.settings,
 })}
 
 ${renderMenuItem({
   href: "/servidor",
   label: labels.server,
   i18nKey: "sidebar.menu.server",
-  extraAttrs: `
-          data-role="admin"
-          data-admin-only="true"
-          data-sidebar-visible="true"
-        `,
-  icon: `
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <rect
-                x="4"
-                y="5"
-                width="16"
-                height="5"
-                rx="1.5"
-                stroke="currentColor"
-                stroke-width="1.6"
-              />
-              <rect
-                x="4"
-                y="14"
-                width="16"
-                height="5"
-                rx="1.5"
-                stroke="currentColor"
-                stroke-width="1.6"
-              />
-              <circle cx="8" cy="7.5" r="1" fill="currentColor" />
-              <circle cx="8" cy="16.5" r="1" fill="currentColor" />
-              <path
-                d="M11 7.5h5"
-                stroke="currentColor"
-                stroke-width="1.4"
-                stroke-linecap="round"
-              />
-              <path
-                d="M11 16.5h5"
-                stroke="currentColor"
-                stroke-width="1.4"
-                stroke-linecap="round"
-              />
-            </svg>
-  `,
+  key: "server",
+  adminOnly: true,
+  icon: Icons.server,
 })}
       </nav>
+  `;
+}
 
+function renderRecents(labels) {
+  return `
       <section
         class="sidebar-section"
         id="${SIDEBAR_RECENTS_ID}"
-        aria-label="${escapeHtml(labels.recentsAria)}"
+        aria-label="${escapeAttr(labels.recentsAria)}"
         data-i18n-aria-label="sidebar.recents.ariaLabel"
+        data-sidebar-recents="true"
       >
         <span
           class="section-title"
           data-i18n="sidebar.recents.title"
         >${escapeHtml(labels.recentsTitle)}</span>
       </section>
+  `;
+}
 
-      <div class="sidebar-footer">
-        <div
+function renderUserToggle(labels) {
+  return `
+        <button
+          type="button"
           class="user"
           id="${USER_TOGGLE_ID}"
-          role="button"
-          tabindex="0"
+          data-user-toggle="true"
+          data-sidebar-user-toggle="true"
           data-sidebar-action="toggle-user-dropdown"
+          data-action="toggle-user-dropdown"
           aria-haspopup="menu"
           aria-expanded="false"
           aria-controls="${USER_DROPDOWN_ID}"
-          aria-label="${escapeHtml(labels.userToggle)}"
+          aria-label="${escapeAttr(labels.userToggle)}"
           data-i18n-aria-label="sidebar.user.toggleAriaLabel"
+          data-state="closed"
         >
-          <div
+          <span
             class="avatar"
             id="${SIDEBAR_AVATAR_ID}"
-            aria-label="${escapeHtml(labels.userAvatar)}"
+            aria-label="${escapeAttr(labels.userAvatar)}"
             data-default-avatar="ON"
             data-avatar-root="true"
+            data-sidebar-avatar="true"
           >
             <img
               class="avatar-image"
-              id="sidebarAvatarImage"
+              id="${SIDEBAR_AVATAR_IMAGE_ID}"
               src=""
-              alt="${escapeHtml(labels.userDefaultName)}"
+              alt="${escapeAttr(labels.userDefaultName)}"
               draggable="false"
               decoding="async"
               hidden
@@ -594,148 +842,158 @@ ${renderMenuItem({
 
             <span
               class="avatar-fallback"
-              id="sidebarAvatarFallback"
+              id="${SIDEBAR_AVATAR_FALLBACK_ID}"
               aria-hidden="true"
             >
               ON
             </span>
-          </div>
+          </span>
 
-          <div class="user-info">
+          <span class="user-info">
             <span
               class="name"
               id="${SIDEBAR_NAME_ID}"
+              data-sidebar-name="true"
               data-default-i18n="sidebar.user.defaultName"
-              data-default-name="${escapeHtml(labels.userDefaultName)}"
+              data-default-name="${escapeAttr(labels.userDefaultName)}"
             >${escapeHtml(labels.userDefaultName)}</span>
 
             <span
               class="plan"
-              id="sidebarUserPlan"
+              id="${SIDEBAR_USER_PLAN_ID}"
               data-static="true"
             >Go Plan</span>
-          </div>
+          </span>
 
-          <svg
-            class="user-chevron"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            aria-hidden="true"
-          >
-            <path
-              d="M9 6l6 6-6 6"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
-        </div>
+${Icons.chevron}
+        </button>
+  `;
+}
 
+function renderUserDropdown(labels) {
+  return `
         <div
           class="user-dropdown"
           id="${USER_DROPDOWN_ID}"
           role="menu"
-          aria-label="${escapeHtml(labels.userMenu)}"
+          aria-label="${escapeAttr(labels.userMenu)}"
           data-i18n-aria-label="sidebar.user.dropdownAriaLabel"
+          data-user-dropdown="true"
+          data-sidebar-dropdown="user"
+          data-state="closed"
           aria-hidden="true"
           hidden
         >
-          <button
-            type="button"
-            class="dropdown-item"
-            role="menuitem"
-            tabindex="-1"
-            data-sidebar-action="add-account"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.6"/>
-            </svg>
-            <span data-i18n="sidebar.user.addAccount">${escapeHtml(labels.addAccount)}</span>
-          </button>
+${renderDropdownButton({
+  label: labels.addAccount,
+  i18nKey: "sidebar.user.addAccount",
+  action: "add-account",
+  icon: Icons.plus,
+})}
 
           <div class="dropdown-divider" role="separator"></div>
 
-          <button
-            type="button"
-            class="dropdown-item"
-            role="menuitem"
-            tabindex="-1"
-            data-sidebar-action="change-plan"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M12 4v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-              <path d="M8 8l4-4 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M5 20h14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-            </svg>
-            <span data-i18n="sidebar.user.changePlan">${escapeHtml(labels.changePlan)}</span>
-          </button>
+${renderDropdownButton({
+  label: labels.changePlan,
+  i18nKey: "sidebar.user.changePlan",
+  action: "change-plan",
+  icon: Icons.upgrade,
+})}
 
-          <button
-            type="button"
-            class="dropdown-item"
-            role="menuitem"
-            tabindex="-1"
-            data-sidebar-action="profile"
-            data-route="/cuenta"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" stroke-width="1.6" fill="none"/>
-            </svg>
-            <span data-i18n="sidebar.user.profile">${escapeHtml(labels.profile)}</span>
-          </button>
+${renderDropdownButton({
+  label: labels.profile,
+  i18nKey: "sidebar.user.profile",
+  action: "profile",
+  route: "/cuenta",
+  icon: Icons.account,
+})}
 
-          <button
-            type="button"
-            class="dropdown-item"
-            role="menuitem"
-            tabindex="-1"
-            data-sidebar-action="settings"
-            data-route="/ajustes"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M4 12h16" stroke="currentColor" stroke-width="1.6"/>
-              <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.6"/>
-            </svg>
-            <span data-i18n="sidebar.user.settings">${escapeHtml(labels.userSettings)}</span>
-          </button>
+${renderDropdownButton({
+  label: labels.userSettings,
+  i18nKey: "sidebar.user.settings",
+  action: "settings",
+  route: "/ajustes",
+  icon: Icons.settings,
+})}
 
           <div class="dropdown-divider" role="separator"></div>
 
-          <button
-            type="button"
-            class="dropdown-item"
-            role="menuitem"
-            tabindex="-1"
-            data-sidebar-action="help"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M12 16v-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <circle cx="12" cy="8" r="1" fill="currentColor"/>
-            </svg>
-            <span data-i18n="sidebar.user.help">${escapeHtml(labels.help)}</span>
-          </button>
+${renderDropdownButton({
+  label: labels.help,
+  i18nKey: "sidebar.user.help",
+  action: "help",
+  icon: Icons.help,
+})}
 
-          <button
-            type="button"
-            class="dropdown-item dropdown-item-danger"
-            id="${LOGOUT_BUTTON_ID}"
-            role="menuitem"
-            tabindex="-1"
-            data-sidebar-action="logout"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M4 4h5v16H4z" stroke="currentColor" stroke-width="1.6"/>
-            </svg>
-            <span data-i18n="sidebar.user.logout">${escapeHtml(labels.logout)}</span>
-          </button>
+${renderDropdownButton({
+  id: LOGOUT_BUTTON_ID,
+  label: labels.logout,
+  i18nKey: "sidebar.user.logout",
+  action: "logout",
+  icon: Icons.logout,
+  danger: true,
+})}
         </div>
+  `;
+}
+
+function renderFooter(labels) {
+  return `
+      <div
+        class="sidebar-footer"
+        data-sidebar-footer="true"
+      >
+${renderUserToggle(labels)}
+
+${renderUserDropdown(labels)}
       </div>
+  `;
+}
+
+/* =========================================================
+   TEMPLATE
+========================================================= */
+
+export function getSidebarTemplate() {
+  const labels = getSidebarLabels();
+
+  return `
+    <aside
+      class="sidebar"
+      id="${SIDEBAR_ROOT_ID}"
+      aria-label="${escapeAttr(labels.sidebarAria)}"
+      data-i18n-aria-label="sidebar.aria.main"
+      data-sidebar-root="true"
+      data-sidebar="true"
+      data-component="sidebar"
+      data-open="true"
+      data-collapsed="false"
+      data-mode="desktop"
+      data-dropdown-open="false"
+      data-ready="false"
+    >
+      <div
+        class="sidebar-top"
+        data-sidebar-top="true"
+      >
+${renderLogo(labels)}
+
+${renderDesktopToggle(labels)}
+
+${renderMobileToggle(labels)}
+      </div>
+
+${renderMainMenu(labels)}
+
+${renderRecents(labels)}
+
+${renderFooter(labels)}
     </aside>
   `;
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default getSidebarTemplate;

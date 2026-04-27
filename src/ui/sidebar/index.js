@@ -2,7 +2,7 @@
    Onion SPA - Sidebar UI
    Archivo: src/ui/sidebar/index.js
 
-   FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · DROPDOWN SAFE · 10/10
+   FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · DROPDOWN SAFE · BIND DEDUPE · 10/10
 
    RESPONSABILIDADES:
    - montar sidebar
@@ -22,6 +22,8 @@
    - soportar rutas públicas con /@username sin romper active item
    - no escribir variables CSS del indicador desde index.js
    - no gestionar transición visual propia desde index.js
+   - cortar tormentas de bindEvents / cleanup / repair / init
+   - evitar AppCore.cleanup.run(SCOPE) agresivo en cada rebind
 
    REGLAS:
    - state.js es el único dueño de:
@@ -32,6 +34,9 @@
    - events.js escucha core/router/auth y pide commits visuales
    - index.js monta, coordina API pública y delega
    - index.js no emite eventos que causen doble transición
+   - init() repetido NO hace repair + rebind
+   - repair() NO rebindea si ya hay eventos vivos
+   - rebind() explícito sí fuerza limpieza/rebind controlado
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -70,7 +75,6 @@ import {
   setSidebarOpen as setSidebarOpenBase,
   repairSidebarState as repairSidebarStateBase,
   syncActiveMenuItem,
-  syncActiveMenuIndicator,
   scheduleActiveMenuIndicator,
 } from "./state.js";
 
@@ -105,12 +109,20 @@ export const SidebarUI = (() => {
   let eventsBound = false;
 
   let fallbackDomCleanup = null;
+  let domEventsCleanup = null;
+  let coreEventsCleanup = null;
+
   let activeCleanupScope = null;
   let lastBindReason = "";
   let bindGeneration = 0;
 
+  let bindingEvents = false;
+  let lastBindAt = 0;
+
   let visualSyncTimer = null;
   let hoverFlushTimer = null;
+
+  const BIND_DEDUP_WINDOW_MS = 250;
 
   const VISUAL_SYNC_DEFAULT_DELAY = 24;
   const VISUAL_SYNC_AFTER_NAV_DELAY = 80;
@@ -130,6 +142,14 @@ export const SidebarUI = (() => {
       typeof window !== "undefined" &&
       typeof document !== "undefined"
     );
+  }
+
+  function nowTs() {
+    try {
+      return Date.now();
+    } catch {
+      return 0;
+    }
   }
 
   function safeText(value, fallback = "") {
@@ -1409,11 +1429,6 @@ export const SidebarUI = (() => {
     );
   }
 
-  function getMenuItems() {
-    return getAllMenuItems()
-      .filter((item) => !isElementHiddenOrDisabled(item));
-  }
-
   function getMenuItemRoute(element = null) {
     return normalizeRoutePath(
       getRouteFromElement(element)
@@ -1471,7 +1486,7 @@ export const SidebarUI = (() => {
 
       /*
         Fuerza al navegador a soltar :hover real.
-        Mata hover colgado después de navegación.
+        Solo debe durar unos ms; si esto queda vivo, mata clicks.
       */
       sidebarMenu.style.pointerEvents = "none";
 
@@ -1743,13 +1758,10 @@ export const SidebarUI = (() => {
   function syncSidebarState() {
     refreshSidebarDomRefs();
 
-    const result =
-      syncSidebarStateBase(
-        AppCore,
-        closeDropdown
-      );
-
-    return result;
+    return syncSidebarStateBase(
+      AppCore,
+      closeDropdown
+    );
   }
 
   function repairSidebarState(reason = "repair-sidebar-state") {
@@ -1889,6 +1901,8 @@ export const SidebarUI = (() => {
       logoutInFlight,
       lastBindReason,
       bindGeneration,
+      bindingEvents,
+      lastBindAt,
 
       isAdmin:
         isAdmin(),
@@ -2058,11 +2072,6 @@ export const SidebarUI = (() => {
   ====================================================== */
 
   function getCleanupScope() {
-    /*
-      Importante:
-      events.js normaliza scope con String(scope).
-      Aquí usamos siempre el nombre estable SCOPE.
-    */
     return SCOPE;
   }
 
@@ -2079,26 +2088,28 @@ export const SidebarUI = (() => {
     clearVisualSyncTimer();
     clearHoverFlushTimer();
 
+    /*
+      Importante:
+      NO usamos AppCore.cleanup.run(SCOPE) en cada rebind.
+      Eso dispara cleanup:disposed y puede activar el firebreak del bus.
+      events.js ya devuelve cleanups locales y limpia sus scopes internos.
+    */
+
     try {
-      if (
-        activeCleanupScope &&
-        typeof AppCore?.cleanup?.run === "function"
-      ) {
-        AppCore.cleanup.run(activeCleanupScope);
-      }
+      domEventsCleanup?.();
     } catch {}
 
     try {
-      if (
-        activeCleanupScope !== SCOPE &&
-        typeof AppCore?.cleanup?.run === "function"
-      ) {
-        AppCore.cleanup.run(SCOPE);
-      }
+      coreEventsCleanup?.();
     } catch {}
+
+    domEventsCleanup = null;
+    coreEventsCleanup = null;
 
     activeCleanupScope = null;
     eventsBound = false;
+
+    return true;
   }
 
   function cleanup() {
@@ -2816,17 +2827,21 @@ export const SidebarUI = (() => {
       });
     };
 
-    document.addEventListener(
-      "click",
-      onDocumentClick,
-      false
-    );
+    try {
+      document.addEventListener(
+        "click",
+        onDocumentClick,
+        false
+      );
 
-    document.addEventListener(
-      "keydown",
-      onDocumentKeydown,
-      false
-    );
+      document.addEventListener(
+        "keydown",
+        onDocumentKeydown,
+        false
+      );
+    } catch {
+      return false;
+    }
 
     try {
       window.addEventListener(
@@ -2897,7 +2912,9 @@ export const SidebarUI = (() => {
      EVENT BINDING
   ====================================================== */
 
-  function bindEvents(reason = "bind") {
+  function bindEvents(reason = "bind", options = {}) {
+    const opts = safeObject(options);
+
     lastBindReason = safeText(reason, "bind");
 
     const mounted = mountAndRefresh();
@@ -2910,88 +2927,155 @@ export const SidebarUI = (() => {
       return api;
     }
 
+    const ts = nowTs();
+
     /*
-      Primero invalidamos generación vieja.
-      Luego limpiamos listeners antiguos.
+      Dedupe fuerte:
+      Si ya está bindeado, no volvemos a limpiar/bindear salvo rebind explícito.
+      Esto corta la tormenta:
+        init -> repair -> bind -> event -> repair -> bind...
     */
-    bindGeneration += 1;
-
-    cleanupBoundEvents();
-
-    const scope = getCleanupScope();
-
-    activeCleanupScope = scope;
-
-    try {
-      bindDomEvents({
-        AppCore,
-        Router,
-        Auth,
-        state: runtimeState,
-        scope,
-        api,
-        handleLogout,
-        toggleSidebar,
-        toggleDropdown,
-        openDropdown,
-        closeDropdown,
-        closeSidebar,
-        closeSidebarOnMobileAfterNavigation,
-        syncSidebarState,
-        getElements: () => getElements(AppCore),
-        isMobileViewport: () =>
-          isMobileViewport(MOBILE_BREAKPOINT),
-        getDesiredSidebarOpenState: () =>
-          getDesiredSidebarOpenState(AppCore),
+    if (
+      eventsBound &&
+      opts.force !== true
+    ) {
+      scheduleSidebarVisualSync(`bind-events:skip:${lastBindReason}`, {
+        delayMs: 48,
+        force: true,
+        flushHover: false,
+        generation: bindGeneration,
       });
-    } catch (error) {
-      safeWarn("bindDomEvents falló.", error);
+
+      safeEmit("sidebar:events:bind-skipped", {
+        source: "SidebarUI",
+        reason: lastBindReason,
+        generation: bindGeneration,
+        sinceLastBindMs: ts - lastBindAt,
+        snapshot: getSidebarSnapshot(),
+      });
+
+      return api;
     }
 
-    try {
-      bindCoreEvents({
-        AppCore,
-        Router,
-        Auth,
-        state: runtimeState,
-        scope,
-        api,
-        renderUser,
-        applyRoleVisibility,
-        syncSidebarState,
-        closeDropdown,
-        closeSidebarOnMobileAfterNavigation,
-        getSidebarSnapshot,
-        restoreSidebarState,
-        getElements: () => getElements(AppCore),
+    if (bindingEvents) {
+      safeEmit("sidebar:events:bind-ignored", {
+        source: "SidebarUI",
+        reason: lastBindReason,
+        cause: "binding-in-progress",
+        generation: bindGeneration,
       });
-    } catch (error) {
-      safeWarn("bindCoreEvents falló.", error);
+
+      return api;
     }
 
-    bindFallbackDomEvents(lastBindReason);
+    if (
+      ts - lastBindAt < BIND_DEDUP_WINDOW_MS &&
+      opts.force !== true
+    ) {
+      safeEmit("sidebar:events:bind-ignored", {
+        source: "SidebarUI",
+        reason: lastBindReason,
+        cause: "dedupe-window",
+        sinceLastBindMs: ts - lastBindAt,
+        generation: bindGeneration,
+      });
 
-    eventsBound = true;
+      return api;
+    }
 
-    scheduleSidebarVisualSync(`bind-events:${lastBindReason}`, {
-      delayMs: 64,
-      force: true,
-      flushHover: false,
-      generation: bindGeneration,
-    });
+    bindingEvents = true;
 
-    safeEmit("sidebar:events:bound", {
-      source: "SidebarUI",
-      reason: lastBindReason,
-      generation: bindGeneration,
-      snapshot: getSidebarSnapshot(),
-    });
+    try {
+      /*
+        Primero invalidamos generación vieja.
+        Luego limpiamos listeners antiguos.
+      */
+      bindGeneration += 1;
 
-    return api;
+      cleanupBoundEvents();
+
+      const scope = getCleanupScope();
+
+      activeCleanupScope = scope;
+
+      try {
+        domEventsCleanup =
+          bindDomEvents({
+            AppCore,
+            Router,
+            Auth,
+            state: runtimeState,
+            scope,
+            api,
+            handleLogout,
+            toggleSidebar,
+            toggleDropdown,
+            openDropdown,
+            closeDropdown,
+            closeSidebar,
+            closeSidebarOnMobileAfterNavigation,
+            syncSidebarState,
+            getElements: () => getElements(AppCore),
+            isMobileViewport: () =>
+              isMobileViewport(MOBILE_BREAKPOINT),
+            getDesiredSidebarOpenState: () =>
+              getDesiredSidebarOpenState(AppCore),
+          }) || null;
+      } catch (error) {
+        safeWarn("bindDomEvents falló.", error);
+      }
+
+      try {
+        coreEventsCleanup =
+          bindCoreEvents({
+            AppCore,
+            Router,
+            Auth,
+            state: runtimeState,
+            scope,
+            api,
+            renderUser,
+            applyRoleVisibility,
+            syncSidebarState,
+            closeDropdown,
+            closeSidebarOnMobileAfterNavigation,
+            getSidebarSnapshot,
+            restoreSidebarState,
+            getElements: () => getElements(AppCore),
+          }) || null;
+      } catch (error) {
+        safeWarn("bindCoreEvents falló.", error);
+      }
+
+      bindFallbackDomEvents(lastBindReason);
+
+      eventsBound = true;
+      lastBindAt = nowTs();
+
+      scheduleSidebarVisualSync(`bind-events:${lastBindReason}`, {
+        delayMs: 64,
+        force: true,
+        flushHover: false,
+        generation: bindGeneration,
+      });
+
+      safeEmit("sidebar:events:bound", {
+        source: "SidebarUI",
+        reason: lastBindReason,
+        generation: bindGeneration,
+        snapshot: getSidebarSnapshot(),
+      });
+
+      return api;
+    } finally {
+      bindingEvents = false;
+    }
   }
 
   function rebindEvents(reason = "rebind") {
-    return bindEvents(reason);
+    return bindEvents(reason, {
+      force: true,
+    });
   }
 
   /* ======================================================
@@ -3045,7 +3129,19 @@ export const SidebarUI = (() => {
     renderUser();
     applyRoleVisibility();
 
-    bindEvents(reason);
+    /*
+      Repair no debe rebindeaer siempre.
+      Si ya hay eventos vivos, solo resincroniza visualmente.
+    */
+    if (!eventsBound) {
+      bindEvents(reason);
+    } else {
+      scheduleSidebarVisualSync(`repair:${reason}:events-already-bound`, {
+        delayMs: 48,
+        force: true,
+        flushHover: true,
+      });
+    }
 
     initialized = true;
 
@@ -3132,7 +3228,12 @@ export const SidebarUI = (() => {
 
   function init() {
     if (initialized) {
-      return repair("init-already-initialized");
+      /*
+        Idempotente:
+        init() repetido NO debe hacer repair + rebind.
+        Solo refresca visual/usuario/roles.
+      */
+      return refresh("init-already-initialized");
     }
 
     const mounted = mountAndRefresh();
@@ -3196,6 +3297,8 @@ export const SidebarUI = (() => {
     logoutInFlight = false;
     runtimeState.dropdownOpen = false;
     lastBindReason = "";
+    bindingEvents = false;
+    lastBindAt = 0;
     bindGeneration += 1;
 
     safeEmit("sidebar:destroyed", {

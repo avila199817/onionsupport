@@ -17,6 +17,14 @@
    - métricas de sesión, router, shell y loader
    - redacción estricta de tokens en URL/logs
    - compatible con warmup(AppCore) y warmup({ AppCore, ... })
+
+   FIX FALSE WARNINGS:
+   - resuelve Router desde deps, AppCore.Router, AppCore.router o AppCore.modules
+   - no exige Router.render si existe navigate/go/push/rerender/getSnapshot
+   - resuelve I18n desde deps, AppCore.I18n, AppCore.i18n o AppCore.modules
+   - no avisa I18N_MISSING si state.lang/document.lang/i18nInitialized existen
+   - safeEmit no duplica AppCore.events + window
+   - warnings solo para problemas accionables reales
 ========================================================= */
 
 /* =========================================================
@@ -88,6 +96,68 @@ const DOM_IDS =
       "app-topbar",
   });
 
+const DOM_SELECTORS =
+  Object.freeze({
+    app:
+      [
+        "#app",
+        "[data-app]",
+        "[data-app-root]",
+      ],
+
+    root:
+      [
+        "#app-root",
+        "#root",
+        "[data-root]",
+        "[data-app-root]",
+      ],
+
+    shell:
+      [
+        "#app-shell",
+        ".app-shell",
+        "[data-shell]",
+        "[data-app-shell]",
+      ],
+
+    loader:
+      [
+        "#app-loader",
+        "#boot-loader",
+        ".app-loader",
+        "[data-loader]",
+        "[data-app-loader]",
+      ],
+
+    viewContainer:
+      [
+        "#view-container",
+        "#app-view",
+        "#router-view",
+        "[data-view-container]",
+        "[data-router-view]",
+      ],
+
+    sidebar:
+      [
+        "#app-sidebar",
+        "#sidebar",
+        ".sidebar",
+        "[data-sidebar]",
+        "[data-sidebar-root]",
+      ],
+
+    topbar:
+      [
+        "#app-topbar",
+        "#topbar",
+        ".topbar",
+        "[data-topbar]",
+        "[data-topbar-root]",
+      ],
+  });
+
 /* =========================================================
    BASICS
 ========================================================= */
@@ -130,10 +200,6 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
-function safeBool(value) {
-  return value === true;
-}
-
 function safeNumber(value, fallback = 0) {
   const number =
     Number(value);
@@ -149,6 +215,22 @@ function safeIsoDate(ms = Date.now()) {
   } catch {
     return "";
   }
+}
+
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
+function safeCall(fn, fallback = null) {
+  try {
+    if (isFunction(fn)) {
+      return fn();
+    }
+  } catch {}
+
+  return fallback;
 }
 
 function normalizeDeps(first = {}, second = {}) {
@@ -178,6 +260,165 @@ function normalizeDeps(first = {}, second = {}) {
 }
 
 /* =========================================================
+   MODULE RESOLUTION
+========================================================= */
+
+function getModuleFromRegistry(AppCore, names = []) {
+  const modules =
+    AppCore?.modules;
+
+  if (!modules) {
+    return null;
+  }
+
+  const keys =
+    safeArray(names)
+      .map((name) => safeText(name, ""))
+      .filter(Boolean);
+
+  for (const key of keys) {
+    try {
+      if (
+        isFunction(modules.get) &&
+        modules.get(key)
+      ) {
+        return modules.get(key);
+      }
+    } catch {}
+
+    try {
+      if (
+        isFunction(modules.has) &&
+        modules.has(key)
+      ) {
+        if (isFunction(modules.get)) {
+          return modules.get(key);
+        }
+      }
+    } catch {}
+
+    try {
+      if (modules[key]) {
+        return modules[key];
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
+function resolveRuntimeDeps(first = {}, second = {}) {
+  const deps =
+    normalizeDeps(
+      first,
+      second
+    );
+
+  const AppCore =
+    deps.AppCore || null;
+
+  const Router =
+    deps.Router ||
+    AppCore?.Router ||
+    AppCore?.router ||
+    getModuleFromRegistry(
+      AppCore,
+      [
+        "Router",
+        "router",
+        "AppRouter",
+        "appRouter",
+      ]
+    );
+
+  const I18n =
+    deps.I18n ||
+    AppCore?.I18n ||
+    AppCore?.i18n ||
+    getModuleFromRegistry(
+      AppCore,
+      [
+        "I18n",
+        "i18n",
+        "Lang",
+        "lang",
+      ]
+    );
+
+  const Store =
+    deps.Store ||
+    AppCore?.Store ||
+    AppCore?.store ||
+    getModuleFromRegistry(
+      AppCore,
+      [
+        "Store",
+        "store",
+      ]
+    );
+
+  const Auth =
+    deps.Auth ||
+    AppCore?.Auth ||
+    AppCore?.auth ||
+    getModuleFromRegistry(
+      AppCore,
+      [
+        "Auth",
+        "auth",
+      ]
+    );
+
+  const SidebarUI =
+    deps.SidebarUI ||
+    AppCore?.SidebarUI ||
+    AppCore?.sidebar ||
+    getModuleFromRegistry(
+      AppCore,
+      [
+        "SidebarUI",
+        "sidebar",
+      ]
+    );
+
+  const TopbarUI =
+    deps.TopbarUI ||
+    AppCore?.TopbarUI ||
+    AppCore?.topbar ||
+    getModuleFromRegistry(
+      AppCore,
+      [
+        "TopbarUI",
+        "topbar",
+      ]
+    );
+
+  const Toast =
+    deps.Toast ||
+    AppCore?.Toast ||
+    AppCore?.toast ||
+    getModuleFromRegistry(
+      AppCore,
+      [
+        "Toast",
+        "toast",
+      ]
+    );
+
+  return {
+    ...deps,
+    AppCore,
+    Auth,
+    Router,
+    Store,
+    SidebarUI,
+    TopbarUI,
+    Toast,
+    I18n,
+  };
+}
+
+/* =========================================================
    SAFE LOGGING
 ========================================================= */
 
@@ -187,15 +428,28 @@ function getLogger(AppCore, level = "log") {
       AppCore?.utils
     );
 
-  const fn =
+  const candidate =
     utils?.[level] ||
     utils?.log ||
     console?.[level] ||
     console?.log;
 
-  return isFunction(fn)
-    ? fn
-    : null;
+  if (!isFunction(candidate)) {
+    return null;
+  }
+
+  try {
+    if (
+      candidate === console?.log ||
+      candidate === console?.warn ||
+      candidate === console?.error ||
+      candidate === console?.info
+    ) {
+      return candidate.bind(console);
+    }
+  } catch {}
+
+  return candidate;
 }
 
 function safeLog(AppCore, ...args) {
@@ -228,36 +482,57 @@ function safeWarn(AppCore, ...args) {
   } catch {}
 }
 
-function safeEmit(AppCore, eventName, payload = {}) {
-  if (!eventName) {
+function safeEmit(AppCore, eventName, payload = {}, options = {}) {
+  const name =
+    safeText(eventName, "");
+
+  if (!name) {
     return false;
   }
 
-  let emitted = false;
+  const opts =
+    ensureObject(options);
+
+  let busAvailable =
+    false;
+
+  let busEmitted =
+    false;
 
   try {
-    AppCore?.events?.emit?.(
-      eventName,
-      payload
-    );
+    if (isFunction(AppCore?.events?.emit)) {
+      busAvailable = true;
 
-    emitted = true;
+      AppCore.events.emit(
+        name,
+        payload
+      );
+
+      busEmitted = true;
+    }
   } catch {}
 
-  try {
-    if (isBrowser()) {
+  /*
+    No duplicar bus + window.
+    Si existe AppCore.events, ese bus es la fuente principal.
+  */
+  if (
+    opts.window === true ||
+    (!busAvailable && isBrowser())
+  ) {
+    try {
       window.dispatchEvent(
-        new CustomEvent(eventName, {
+        new CustomEvent(name, {
           detail:
             payload,
         })
       );
 
-      emitted = true;
-    }
-  } catch {}
+      return true;
+    } catch {}
+  }
 
-  return emitted;
+  return busEmitted;
 }
 
 /* =========================================================
@@ -484,6 +759,18 @@ function getNavigatorSnapshot() {
    STORAGE SNAPSHOT
 ========================================================= */
 
+function getStorage(type = "localStorage") {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    return window[type] || null;
+  } catch {
+    return null;
+  }
+}
+
 function hasStorageKey(storage, key = "") {
   try {
     return Boolean(
@@ -508,6 +795,12 @@ function getStorageTokenHints() {
     };
   }
 
+  const localStorageRef =
+    getStorage("localStorage");
+
+  const sessionStorageRef =
+    getStorage("sessionStorage");
+
   const foundKeys = [];
 
   let localHasToken =
@@ -519,7 +812,7 @@ function getStorageTokenHints() {
   for (const key of KNOWN_TOKEN_STORAGE_KEYS) {
     if (
       hasStorageKey(
-        window.localStorage,
+        localStorageRef,
         key
       )
     ) {
@@ -533,7 +826,7 @@ function getStorageTokenHints() {
 
     if (
       hasStorageKey(
-        window.sessionStorage,
+        sessionStorageRef,
         key
       )
     ) {
@@ -562,27 +855,60 @@ function getStorageTokenHints() {
    DOM / SHELL SNAPSHOT
 ========================================================= */
 
-function getDomElementSnapshot(id = "") {
-  if (
-    !isBrowser() ||
-    !id
-  ) {
+function queryFirst(selectors = []) {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  for (const selector of safeArray(selectors)) {
+    const clean =
+      safeText(selector, "");
+
+    if (!clean) {
+      continue;
+    }
+
+    try {
+      const element =
+        document.querySelector(clean);
+
+      if (element) {
+        return element;
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
+function getDomElementSnapshot(id = "", selectors = []) {
+  if (!isBrowser()) {
     return {
       exists:
         false,
-      id,
+      id:
+        safeText(id, ""),
     };
   }
 
   try {
+    const cleanId =
+      safeText(id, "");
+
     const element =
-      document.getElementById(id);
+      (
+        cleanId
+          ? document.getElementById(cleanId)
+          : null
+      ) ||
+      queryFirst(selectors);
 
     if (!element) {
       return {
         exists:
           false,
-        id,
+        id:
+          cleanId,
       };
     }
 
@@ -590,7 +916,8 @@ function getDomElementSnapshot(id = "") {
       exists:
         true,
 
-      id,
+      id:
+        element.id || cleanId,
 
       tag:
         element.tagName?.toLowerCase?.() || "",
@@ -599,10 +926,14 @@ function getDomElementSnapshot(id = "") {
         Boolean(element.hidden),
 
       ariaHidden:
-        element.getAttribute("aria-hidden"),
+        element.getAttribute?.("aria-hidden") || null,
 
       className:
-        safeText(element.className, ""),
+        safeText(
+          element.className?.baseVal ||
+          element.className,
+          ""
+        ),
 
       childCount:
         safeNumber(
@@ -622,7 +953,8 @@ function getDomElementSnapshot(id = "") {
     return {
       exists:
         false,
-      id,
+      id:
+        safeText(id, ""),
     };
   }
 }
@@ -659,25 +991,46 @@ function getShellSnapshot(AppCore) {
 
     elements: {
       app:
-        getDomElementSnapshot(DOM_IDS.app),
+        getDomElementSnapshot(
+          DOM_IDS.app,
+          DOM_SELECTORS.app
+        ),
 
       root:
-        getDomElementSnapshot(DOM_IDS.root),
+        getDomElementSnapshot(
+          DOM_IDS.root,
+          DOM_SELECTORS.root
+        ),
 
       shell:
-        getDomElementSnapshot(DOM_IDS.shell),
+        getDomElementSnapshot(
+          DOM_IDS.shell,
+          DOM_SELECTORS.shell
+        ),
 
       loader:
-        getDomElementSnapshot(DOM_IDS.loader),
+        getDomElementSnapshot(
+          DOM_IDS.loader,
+          DOM_SELECTORS.loader
+        ),
 
       viewContainer:
-        getDomElementSnapshot(DOM_IDS.viewContainer),
+        getDomElementSnapshot(
+          DOM_IDS.viewContainer,
+          DOM_SELECTORS.viewContainer
+        ),
 
       sidebar:
-        getDomElementSnapshot(DOM_IDS.sidebar),
+        getDomElementSnapshot(
+          DOM_IDS.sidebar,
+          DOM_SELECTORS.sidebar
+        ),
 
       topbar:
-        getDomElementSnapshot(DOM_IDS.topbar),
+        getDomElementSnapshot(
+          DOM_IDS.topbar,
+          DOM_SELECTORS.topbar
+        ),
     },
   };
 }
@@ -693,21 +1046,21 @@ function getUserSnapshot(AppCore, Auth = null) {
     );
 
   const authUser =
-    (() => {
-      try {
-        return (
-          Auth?.getUser?.() ||
-          Auth?.getCurrentUser?.() ||
-          Auth?.user ||
-          null
-        );
-      } catch {
-        return null;
-      }
-    })();
+    safeCall(
+      () =>
+        Auth?.getUser?.() ||
+        Auth?.getCurrentUser?.() ||
+        Auth?.user ||
+        null,
+      null
+    );
 
   const user =
     state.user ||
+    state.currentUser ||
+    state.sessionUser ||
+    state.authUser ||
+    state.session?.user ||
     authUser ||
     null;
 
@@ -734,7 +1087,11 @@ function getUserSnapshot(AppCore, Auth = null) {
 
     role:
       state.role ||
+      state.rol ||
+      state.userRole ||
+      state.session?.role ||
       user?.role ||
+      user?.rol ||
       Auth?.role ||
       null,
 
@@ -748,42 +1105,56 @@ function getUserSnapshot(AppCore, Auth = null) {
   };
 }
 
+function getAuthHeaderAvailable(Auth = null) {
+  try {
+    if (isFunction(Auth?.getAuthHeader)) {
+      return Boolean(
+        Auth.getAuthHeader()
+      );
+    }
+  } catch {}
+
+  return false;
+}
+
+function getAuthIsAuthenticated(Auth = null) {
+  try {
+    if (isFunction(Auth?.isAuthenticated)) {
+      return Boolean(
+        Auth.isAuthenticated()
+      );
+    }
+  } catch {}
+
+  return Boolean(
+    Auth?.authenticated
+  );
+}
+
 function getAuthSnapshot(AppCore, Auth = null) {
   const state =
     ensureObject(
       AppCore?.state
     );
 
-  let authIsAuthenticated =
-    false;
-
-  try {
-    if (isFunction(Auth?.isAuthenticated)) {
-      authIsAuthenticated =
-        Boolean(
-          Auth.isAuthenticated()
-        );
-    }
-  } catch {}
-
   return {
     authenticated:
       Boolean(
         state.authenticated ||
-        authIsAuthenticated ||
-        Auth?.authenticated
+        state.isAuthenticated ||
+        getAuthIsAuthenticated(Auth)
       ),
 
     hasStateToken:
       Boolean(state.token),
 
     hasAuthHeader:
-      Boolean(
-        Auth?.getAuthHeader?.()
-      ),
+      getAuthHeaderAvailable(Auth),
 
     role:
       state.role ||
+      state.rol ||
+      state.userRole ||
       Auth?.role ||
       null,
 
@@ -793,6 +1164,26 @@ function getAuthSnapshot(AppCore, Auth = null) {
         Auth
       ),
   };
+}
+
+function getRouterCurrentCanonicalPath(Router = null) {
+  return safeText(
+    safeCall(
+      () => Router?.getCurrentCanonicalPath?.(),
+      ""
+    ),
+    ""
+  );
+}
+
+function getRouterCurrentPublicPath(Router = null) {
+  return safeText(
+    safeCall(
+      () => Router?.getCurrentPublicPath?.(),
+      ""
+    ),
+    ""
+  );
 }
 
 function getRouterSnapshot(AppCore, Router = null) {
@@ -807,37 +1198,83 @@ function getRouterSnapshot(AppCore, Router = null) {
   try {
     routerSnapshot =
       Router?.getSnapshot?.() ||
+      Router?.getDebugSnapshot?.() ||
       null;
   } catch {}
 
+  const hasRender =
+    isFunction(Router?.render);
+
+  const hasNavigate =
+    isFunction(Router?.navigate);
+
+  const hasGo =
+    isFunction(Router?.go);
+
+  const hasPush =
+    isFunction(Router?.push);
+
+  const hasBind =
+    isFunction(Router?.bind);
+
+  const hasRerender =
+    Boolean(
+      isFunction(Router?.rerenderCurrentRoute) ||
+      isFunction(Router?.renderCurrentRoute)
+    );
+
+  const hasRouteResolver =
+    Boolean(
+      isFunction(Router?.getRoute) ||
+      isFunction(Router?.resolve) ||
+      isFunction(Router?.resolveRoute)
+    );
+
+  const present =
+    Boolean(Router);
+
+  const canRenderOrNavigate =
+    Boolean(
+      hasRender ||
+      hasNavigate ||
+      hasGo ||
+      hasPush ||
+      hasRerender ||
+      routerSnapshot?.initialRenderDone ||
+      routerSnapshot?.ready ||
+      routerSnapshot?.configured
+    );
+
   return {
+    present,
+
     configured:
       Boolean(
-        Router?.configure ||
-        Router?.render ||
-        Router?.navigate
+        present &&
+        (
+          Router?.configured ||
+          Router?.isConfigured ||
+          hasRouteResolver ||
+          canRenderOrNavigate ||
+          routerSnapshot?.configured
+        )
       ),
 
-    hasRender:
-      isFunction(Router?.render),
+    hasRender,
+    hasNavigate,
+    hasGo,
+    hasPush,
+    hasBind,
+    hasRerender,
+    hasRouteResolver,
 
-    hasNavigate:
-      isFunction(Router?.navigate),
-
-    hasBind:
-      isFunction(Router?.bind),
+    canRenderOrNavigate,
 
     currentCanonicalPath:
-      safeText(
-        Router?.getCurrentCanonicalPath?.(),
-        ""
-      ),
+      getRouterCurrentCanonicalPath(Router),
 
     currentPublicPath:
-      safeText(
-        Router?.getCurrentPublicPath?.(),
-        ""
-      ),
+      getRouterCurrentPublicPath(Router),
 
     stateRoute:
       state.route || DEFAULT_ROUTE,
@@ -923,45 +1360,105 @@ function getUiModuleSnapshot(moduleRef = null) {
   };
 }
 
+function getI18nAvailable(I18n = null) {
+  try {
+    const available =
+      I18n?.getAvailable?.() ||
+      I18n?.getAvailableLangs?.() ||
+      I18n?.available ||
+      I18n?.langs ||
+      [];
+
+    return Array.isArray(available)
+      ? available
+      : [];
+  } catch {}
+
+  return [];
+}
+
+function getI18nLang(AppCore, I18n = null) {
+  const state =
+    ensureObject(
+      AppCore?.state
+    );
+
+  const documentLang =
+    isBrowser()
+      ? safeText(
+          document.documentElement?.lang ||
+          document.documentElement?.getAttribute?.("lang"),
+          ""
+        )
+      : "";
+
+  return safeText(
+    safeCall(
+      () => I18n?.getLang?.(),
+      ""
+    ) ||
+      I18n?.lang ||
+      state.lang ||
+      documentLang ||
+      DEFAULT_LANG,
+    DEFAULT_LANG
+  );
+}
+
 function getI18nSnapshot(AppCore, I18n = null) {
   const state =
     ensureObject(
       AppCore?.state
     );
 
-  let available =
-    [];
+  const available =
+    getI18nAvailable(I18n);
 
-  try {
-    available =
-      I18n?.getAvailable?.() ||
-      I18n?.getAvailableLangs?.() ||
-      [];
-  } catch {}
+  const lang =
+    getI18nLang(
+      AppCore,
+      I18n
+    );
+
+  const modulePresent =
+    Boolean(I18n);
+
+  const runtimePresent =
+    Boolean(
+      modulePresent ||
+      state.i18nInitialized ||
+      state.lang ||
+      lang
+    );
 
   return {
     present:
-      Boolean(I18n),
+      runtimePresent,
 
-    lang:
-      safeText(
-        I18n?.getLang?.(),
-        state.lang || DEFAULT_LANG
+    modulePresent,
+
+    initialized:
+      Boolean(
+        state.i18nInitialized ||
+        modulePresent ||
+        lang
       ),
+
+    lang,
 
     stateLang:
       state.lang || DEFAULT_LANG,
 
-    available:
-      Array.isArray(available)
-        ? available
-        : [],
+    available,
 
     hasTranslate:
       isFunction(I18n?.t),
 
     hasBoot:
-      isFunction(I18n?.boot),
+      Boolean(
+        isFunction(I18n?.boot) ||
+        isFunction(I18n?.init)
+      ),
   };
 }
 
@@ -1001,7 +1498,10 @@ function getAppStateSnapshot(AppCore) {
       Boolean(state.token),
 
     role:
-      state.role || null,
+      state.role ||
+      state.rol ||
+      state.userRole ||
+      null,
 
     route:
       state.route || DEFAULT_ROUTE,
@@ -1090,13 +1590,36 @@ function buildWarmupWarnings(snapshot = {}) {
     });
   }
 
-  if (!snapshot.router?.hasRender) {
+  /*
+    No exigimos Router.render estrictamente.
+    En esta SPA puede existir navegación/render por Router.navigate,
+    Router.go, Router.push, render inicial modular o snapshot listo.
+  */
+  if (
+    !snapshot.router?.present &&
+    !snapshot.router?.stateRoute &&
+    !snapshot.router?.statePublicPath
+  ) {
     warnings.push({
       code:
-        "ROUTER_RENDER_MISSING",
+        "ROUTER_UNAVAILABLE",
 
       message:
-        "Router.render no disponible.",
+        "Router no detectable en deps/AppCore.",
+    });
+  }
+
+  if (
+    snapshot.router?.present &&
+    !snapshot.router?.canRenderOrNavigate &&
+    !snapshot.router?.configured
+  ) {
+    warnings.push({
+      code:
+        "ROUTER_NOT_READY",
+
+      message:
+        "Router detectado pero sin capacidad de navegación/render aparente.",
     });
   }
 
@@ -1110,13 +1633,24 @@ function buildWarmupWarnings(snapshot = {}) {
     });
   }
 
-  if (!snapshot.i18n?.present) {
+  /*
+    No avisamos I18N_MISSING si:
+    - AppCore.state.lang existe
+    - state.i18nInitialized está activo
+    - documentElement.lang existe
+    - I18n se resuelve desde AppCore/modules
+  */
+  if (
+    !snapshot.i18n?.present &&
+    !snapshot.app?.lang &&
+    !snapshot.document?.lang
+  ) {
     warnings.push({
       code:
-        "I18N_MISSING",
+        "I18N_UNAVAILABLE",
 
       message:
-        "Módulo I18n no disponible.",
+        "No se detecta idioma runtime ni módulo I18n.",
     });
   }
 
@@ -1128,6 +1662,12 @@ function buildWarmupWarnings(snapshot = {}) {
 ========================================================= */
 
 export function createWarmupSnapshot(first = {}, second = {}) {
+  const deps =
+    resolveRuntimeDeps(
+      first,
+      second
+    );
+
   const {
     AppCore,
     Auth,
@@ -1138,10 +1678,7 @@ export function createWarmupSnapshot(first = {}, second = {}) {
     Toast,
     I18n,
     reason = "warmup",
-  } = normalizeDeps(
-    first,
-    second
-  );
+  } = deps;
 
   const startedAt =
     Date.now();
@@ -1228,7 +1765,7 @@ export function createWarmupSnapshot(first = {}, second = {}) {
 
 export async function warmup(first = {}, second = {}) {
   const deps =
-    normalizeDeps(
+    resolveRuntimeDeps(
       first,
       second
     );
@@ -1240,10 +1777,7 @@ export async function warmup(first = {}, second = {}) {
   } = deps;
 
   if (!AppCore) {
-    const snapshot =
-      createWarmupSnapshot(deps);
-
-    return snapshot;
+    return createWarmupSnapshot(deps);
   }
 
   const startedAt =
@@ -1360,6 +1894,21 @@ export function getWarmupSummary(snapshot = {}) {
 
     loading:
       Boolean(data.app?.loading),
+
+    routerPresent:
+      Boolean(data.router?.present),
+
+    routerConfigured:
+      Boolean(data.router?.configured),
+
+    routerCanRenderOrNavigate:
+      Boolean(data.router?.canRenderOrNavigate),
+
+    i18nPresent:
+      Boolean(data.i18n?.present),
+
+    i18nModulePresent:
+      Boolean(data.i18n?.modulePresent),
 
     hasViewContainer:
       Boolean(

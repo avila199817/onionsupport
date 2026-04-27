@@ -1,20 +1,35 @@
 /* =========================================================
    ONION SUPPORT — LAYOUT SYSTEM
-   PRO SAAS PANEL / HIGH LEVEL / FINAL PRO SYSTEM
+   PRO SAAS PANEL / HIGH LEVEL / FINAL EXTREME SYSTEM
    Archivo: src/css/core/layout.css
 
-   REFINADO 10/10 FINAL:
-   - shell compacto, robusto y operativo
+   FIX CRÍTICO STACKING:
+   - #sidebar-mount tiene capa propia por encima del main
+   - #topbar-mount tiene capa propia
+   - .main-content queda por debajo del sidebar/topbar
+   - los tooltips del sidebar ya no quedan debajo del hero/view
+   - se elimina el problema de .layout > * { z-index:1 } plano
+   - sin clipping agresivo del contenido
    - scroll principal real en .main-content
    - offsets sólidos para sidebar / topbar / table-head
-   - sin clipping agresivo del contenido
-   - sin scroll fantasma ligado al sidebar
-   - sin compresión rara del hero / tablas / vistas
-   - responsive consistente
    - auth mode limpio
    - loader / boot ready
-   - superficies integradas con el sistema de tokens
 ========================================================= */
+
+
+/* =========================================================
+   LAYOUT STACK TOKENS
+========================================================= */
+
+:root{
+  --layout-bg-z: 0;
+  --layout-main-z: 1;
+  --layout-tablehead-z: calc(var(--z-topbar) - 2);
+  --layout-topbar-mount-z: var(--z-topbar);
+  --layout-sidebar-mount-z: var(--z-sidebar);
+  --layout-sidebar-tooltip-safe-z: calc(var(--z-tooltip) + 20);
+  --layout-loader-z: var(--z-loader);
+}
 
 
 /* =========================================================
@@ -146,7 +161,7 @@ a{
   content:"";
   position:absolute;
   inset:0;
-  z-index:0;
+  z-index:var(--layout-bg-z);
 
   pointer-events:none;
 
@@ -171,10 +186,114 @@ a{
   opacity:.16;
 }
 
+/*
+   IMPORTANTE:
+   Antes todos los hijos del shell tenían z-index:1.
+   Eso hacía que main-content pudiera pintar por encima del sidebar.
+   Ahora solo se da capa base y luego cada mount tiene su capa real.
+*/
 .layout > *,
 .app-shell > *{
   position:relative;
-  z-index:1;
+  z-index:var(--layout-main-z);
+}
+
+
+/* =========================================================
+   MOUNT LAYERS — FIX REAL TOOLTIP / DROPDOWN / TOPBAR
+========================================================= */
+
+/*
+   Sidebar mount:
+   - crea una capa superior al main
+   - no captura clicks por sí mismo
+   - deja que la sidebar real capture eventos
+   - evita que el hero/view tape tooltips del sidebar
+*/
+#sidebar-mount,
+[data-sidebar-mount]{
+  position:fixed;
+  inset-block:0;
+  inset-inline-start:0;
+
+  inline-size:0;
+  block-size:0;
+
+  z-index:var(--layout-sidebar-mount-z);
+
+  pointer-events:none;
+
+  overflow:visible;
+  contain:none;
+  isolation:isolate;
+}
+
+#sidebar-mount > *,
+[data-sidebar-mount] > *{
+  pointer-events:auto;
+}
+
+#sidebar-mount .sidebar,
+[data-sidebar-mount] .sidebar{
+  z-index:var(--z-sidebar);
+}
+
+#sidebar-mount .sidebar [data-tooltip]::before,
+#sidebar-mount .sidebar [data-tooltip]::after,
+[data-sidebar-mount] .sidebar [data-tooltip]::before,
+[data-sidebar-mount] .sidebar [data-tooltip]::after{
+  z-index:var(--layout-sidebar-tooltip-safe-z);
+}
+
+/*
+   Topbar mount:
+   - superior al main
+   - inferior al tooltip/dropdown global si procede
+*/
+#topbar-mount,
+[data-topbar-mount]{
+  position:fixed;
+  inset-block-start:0;
+  inset-inline-start:var(--app-sidebar-current-width);
+  inset-inline-end:0;
+
+  inline-size:auto;
+  block-size:0;
+
+  z-index:var(--layout-topbar-mount-z);
+
+  pointer-events:none;
+
+  overflow:visible;
+  contain:none;
+  isolation:isolate;
+
+  transition:
+    inset-inline-start var(--duration-slow) var(--ease-emphasis);
+}
+
+#topbar-mount > *,
+[data-topbar-mount] > *{
+  pointer-events:auto;
+}
+
+body.sidebar-collapsed #topbar-mount,
+body.sidebar-collapsed [data-topbar-mount]{
+  inset-inline-start:var(--sidebar-collapsed);
+}
+
+body.sidebar-open #topbar-mount,
+body.sidebar-open [data-topbar-mount]{
+  inset-inline-start:var(--sidebar-width);
+}
+
+body.route-shell-hidden #topbar-mount,
+body.route-shell-hidden [data-topbar-mount],
+html[data-route-mode="auth"] #topbar-mount,
+html[data-route-mode="auth"] [data-topbar-mount],
+body[data-route-mode="auth"] #topbar-mount,
+body[data-route-mode="auth"] [data-topbar-mount]{
+  inset-inline-start:0;
 }
 
 
@@ -276,7 +395,7 @@ body[data-route-mode="auth"] #app-content{
 
 .main-content{
   position:relative;
-  z-index:var(--z-base);
+  z-index:var(--layout-main-z);
 
   display:flex;
   flex-direction:column;
@@ -429,7 +548,7 @@ body.sidebar-open{
   backdrop-filter:var(--blur-md);
   -webkit-backdrop-filter:var(--blur-md);
 
-  z-index:calc(var(--z-topbar) - 2);
+  z-index:var(--layout-tablehead-z);
 
   transition:
     inset-inline-start var(--duration-slow) var(--ease-emphasis),
@@ -498,7 +617,7 @@ body.sidebar-open{
 
 #view-container{
   position:relative;
-  isolation:isolate;
+  isolation:auto;
 
   display:block;
 
@@ -1087,6 +1206,13 @@ body.auth-screen #tablehead-container{
   display:none !important;
 }
 
+body.auth-screen #sidebar-mount,
+body.auth-screen [data-sidebar-mount],
+body.auth-screen #topbar-mount,
+body.auth-screen [data-topbar-mount]{
+  display:none !important;
+}
+
 body.auth-screen #view-container{
   inline-size:100%;
 
@@ -1190,6 +1316,15 @@ body.auth-screen .content-wrapper{
   body.sidebar-collapsed,
   body.sidebar-open{
     --app-sidebar-current-width:0px;
+  }
+
+  #topbar-mount,
+  [data-topbar-mount],
+  body.sidebar-collapsed #topbar-mount,
+  body.sidebar-collapsed [data-topbar-mount],
+  body.sidebar-open #topbar-mount,
+  body.sidebar-open [data-topbar-mount]{
+    inset-inline-start:0;
   }
 
   .main-content,
@@ -1336,7 +1471,11 @@ body.auth-screen .content-wrapper{
   .sidebar,
   .topbar,
   .panel-surface,
-  .card-surface{
+  .card-surface,
+  #sidebar-mount,
+  [data-sidebar-mount],
+  #topbar-mount,
+  [data-topbar-mount]{
     transition:none !important;
   }
 
@@ -1382,6 +1521,10 @@ body.auth-screen .content-wrapper{
     color:#000000 !important;
   }
 
+  #sidebar-mount,
+  [data-sidebar-mount],
+  #topbar-mount,
+  [data-topbar-mount],
   .sidebar,
   .topbar,
   .table-head,

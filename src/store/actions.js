@@ -8,6 +8,19 @@
    - centralizar operaciones sobre colecciones
    - hidratar slices desde AppCore
    - validaciones defensivas
+   - evitar estados session fantasma
+   - normalizar theme/lang/route antes de guardar
+   - mantener Store sincronizable con AppCore sin romper si AppCore es parcial
+
+   HARDENING EXTREMO:
+   - authenticated sólo true con token + user usable
+   - token/accessToken coherentes
+   - role/roles normalizados
+   - hydrateFromCore tolerante a AppCore parcial
+   - acciones devuelven resultado estable
+   - colecciones siempre normalizadas
+   - flags saneados
+   - cero throws accidentales salvo uso incorrecto real
 ========================================================= */
 
 import {
@@ -26,6 +39,455 @@ import {
   safeTopbarTitle,
 } from "./state.js";
 
+/* =========================================================
+   BASICS
+========================================================= */
+
+function safeText(
+  value,
+  fallback = ""
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text =
+    String(value).trim();
+
+  return text || fallback;
+}
+
+function safeObject(
+  value
+) {
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function safeArray(
+  value
+) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
+function cloneIfAny(
+  value
+) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return null;
+  }
+
+  return deepClone(value);
+}
+
+function first(
+  ...values
+) {
+  for (const value of values) {
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      continue;
+    }
+
+    if (
+      typeof value === "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+    if (
+      Array.isArray(value) &&
+      value.length === 0
+    ) {
+      continue;
+    }
+
+    return value;
+  }
+
+  return null;
+}
+
+function toArray(
+  value
+) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return [];
+  }
+
+  return [value];
+}
+
+/* =========================================================
+   APPCORE SAFE
+========================================================= */
+
+function getCoreState(
+  AppCore
+) {
+  return safeObject(
+    AppCore?.state
+  );
+}
+
+function getConfig(
+  AppCore
+) {
+  return safeObject(
+    AppCore?.config
+  );
+}
+
+function getAppName(
+  AppCore
+) {
+  return safeText(
+    getConfig(AppCore).appName,
+    "Onion Support"
+  );
+}
+
+function getDefaultTheme(
+  AppCore
+) {
+  return normalizeTheme(
+    first(
+      getConfig(AppCore).defaultTheme,
+      getCoreState(AppCore).theme,
+      "system"
+    )
+  );
+}
+
+function getDefaultLang(
+  AppCore
+) {
+  return normalizeLang(
+    first(
+      getConfig(AppCore).defaultLang,
+      getCoreState(AppCore).lang,
+      "es"
+    )
+  );
+}
+
+function safeResolveTitle(
+  AppCore
+) {
+  try {
+    return safeText(
+      safeTitle(AppCore),
+      getAppName(AppCore)
+    );
+  } catch {
+    return getAppName(AppCore);
+  }
+}
+
+function safeResolveTopbarTitle(
+  AppCore
+) {
+  try {
+    return safeText(
+      safeTopbarTitle(AppCore),
+      safeResolveTitle(AppCore)
+    );
+  } catch {
+    return safeResolveTitle(AppCore);
+  }
+}
+
+/* =========================================================
+   NORMALIZERS
+========================================================= */
+
+function normalizePathValue(
+  value = "/"
+) {
+  let path =
+    safeText(value, "/");
+
+  path = path
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!path.startsWith("/")) {
+    path = `/${path}`;
+  }
+
+  return path || "/";
+}
+
+function normalizeTheme(
+  theme = "system"
+) {
+  const value =
+    safeText(theme, "system")
+      .toLowerCase();
+
+  if (value === "dark") {
+    return "dark";
+  }
+
+  if (value === "light") {
+    return "light";
+  }
+
+  if (
+    value === "system" ||
+    value === "auto" ||
+    value === "browser" ||
+    value === "os"
+  ) {
+    return "system";
+  }
+
+  return "system";
+}
+
+function normalizeLang(
+  lang = "es"
+) {
+  const value =
+    safeText(lang, "es")
+      .toLowerCase()
+      .replace("_", "-");
+
+  if (!value) {
+    return "es";
+  }
+
+  return value.split("-")[0] || "es";
+}
+
+function normalizeRole(
+  value = ""
+) {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_:.]/g, "")
+    .trim();
+}
+
+function normalizeRoles(
+  value
+) {
+  return toArray(value)
+    .flat(Infinity)
+    .map(normalizeRole)
+    .filter(Boolean);
+}
+
+function resolveRoleFromUser(
+  user = null,
+  explicitRole = null
+) {
+  const cleanUser =
+    safeObject(user);
+
+  const roles =
+    normalizeRoles(
+      first(
+        explicitRole,
+        cleanUser.role,
+        cleanUser.rol,
+        cleanUser.userRole,
+        cleanUser.roles,
+        cleanUser.permissions,
+        cleanUser.scopes
+      )
+    );
+
+  return (
+    normalizeRole(
+      first(
+        explicitRole,
+        cleanUser.role,
+        cleanUser.rol,
+        roles[0],
+        ""
+      )
+    ) || null
+  );
+}
+
+function hasUsableToken(
+  token = ""
+) {
+  return Boolean(
+    safeText(token, "")
+  );
+}
+
+function hasUsableUser(
+  user = null
+) {
+  const value =
+    safeObject(user);
+
+  return Boolean(
+    safeText(value.id, "") ||
+    safeText(value.userId, "") ||
+    safeText(value.user_id, "") ||
+    safeText(value._id, "") ||
+    safeText(value.uid, "") ||
+    safeText(value.username, "") ||
+    safeText(value.userName, "") ||
+    safeText(value.email, "") ||
+    safeText(value.phone, "") ||
+    safeText(value.telefono, "")
+  );
+}
+
+function normalizeSessionPatch({
+  state,
+  authenticated = undefined,
+  token = undefined,
+  accessToken = undefined,
+  user = undefined,
+  role = undefined,
+  roles = undefined,
+  refreshToken = undefined,
+  sessionId = undefined,
+  sessionUserId = undefined,
+} = {}) {
+  const currentSession =
+    safeObject(state?.session);
+
+  const incomingToken =
+    token !== undefined
+      ? token
+      : accessToken !== undefined
+        ? accessToken
+        : first(
+            currentSession.token,
+            currentSession.accessToken,
+            null
+          );
+
+  const finalToken =
+    safeText(incomingToken, "") || null;
+
+  const finalUser =
+    user !== undefined
+      ? cloneIfAny(user)
+      : cloneIfAny(currentSession.user);
+
+  const usableToken =
+    hasUsableToken(finalToken);
+
+  const usableUser =
+    hasUsableUser(finalUser);
+
+  const finalAuthenticated =
+    authenticated === false
+      ? false
+      : usableToken && usableUser;
+
+  const finalRole =
+    finalAuthenticated
+      ? resolveRoleFromUser(
+          finalUser,
+          first(
+            role,
+            currentSession.role,
+            null
+          )
+        )
+      : null;
+
+  const finalRoles =
+    finalAuthenticated
+      ? normalizeRoles(
+          first(
+            roles,
+            finalUser?.roles,
+            finalUser?.permissions,
+            finalRole
+          )
+        )
+      : [];
+
+  return {
+    authenticated:
+      finalAuthenticated,
+
+    token:
+      usableToken ? finalToken : null,
+
+    accessToken:
+      usableToken ? finalToken : null,
+
+    refreshToken:
+      refreshToken !== undefined
+        ? safeText(refreshToken, "") || null
+        : currentSession.refreshToken || null,
+
+    user:
+      usableUser ? finalUser : null,
+
+    role:
+      finalRole,
+
+    roles:
+      finalRoles,
+
+    sessionId:
+      sessionId !== undefined
+        ? safeText(sessionId, "") || null
+        : currentSession.sessionId || null,
+
+    sessionUserId:
+      sessionUserId !== undefined
+        ? safeText(sessionUserId, "") || null
+        : currentSession.sessionUserId || null,
+  };
+}
+
+function normalizeFlagKey(
+  flag = ""
+) {
+  const value =
+    safeText(flag, "");
+
+  if (!value) {
+    return "";
+  }
+
+  return value
+    .replace(/^\.+|\.+$/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/[^a-zA-Z0-9_.:-]/g, "");
+}
+
+/* =========================================================
+   FACTORY
+========================================================= */
+
 export function createActions({
   AppCore,
   state,
@@ -33,40 +495,86 @@ export function createActions({
   patch,
   update,
 }) {
-  function cloneIfAny(
-    value
+  /* =========================================================
+     APP HELPERS
+  ========================================================= */
+
+  function setAppPatch(
+    value = {}
   ) {
-    return value
-      ? deepClone(value)
-      : null;
+    return patch({
+      app: {
+        ...value,
+      },
+    });
+  }
+
+  function setSessionPatch(
+    value = {}
+  ) {
+    const sessionPatch =
+      normalizeSessionPatch({
+        state,
+        ...value,
+      });
+
+    return patch({
+      session: sessionPatch,
+    });
+  }
+
+  function getCurrentToken() {
+    return first(
+      state?.session?.token,
+      state?.session?.accessToken,
+      null
+    );
+  }
+
+  function getCurrentUser() {
+    return first(
+      state?.session?.user,
+      null
+    );
   }
 
   return {
     /* =========================================================
        APP
     ========================================================= */
+
     markReady(
       value = true
     ) {
-      set(
-        "app.ready",
-        Boolean(value)
-      );
+      const ready =
+        Boolean(value);
+
+      return setAppPatch({
+        ready,
+        loading:
+          ready ? false : state.app?.loading,
+        booting:
+          ready ? false : state.app?.booting,
+      });
     },
 
     markBooted(
       value = true
     ) {
-      set(
-        "app.booted",
-        Boolean(value)
-      );
+      const booted =
+        Boolean(value);
+
+      return setAppPatch({
+        booted,
+        booting:
+          booted ? false : state.app?.booting,
+      });
     },
 
     setInitialized(
       value = true
     ) {
-      set(
+      return set(
         "app.initialized",
         Boolean(value)
       );
@@ -75,34 +583,38 @@ export function createActions({
     setBooting(
       value = false
     ) {
-      set(
-        "app.booting",
-        Boolean(value)
-      );
+      const booting =
+        Boolean(value);
+
+      return setAppPatch({
+        booting,
+        loading:
+          booting ? true : state.app?.loading,
+      });
     },
 
     setRoute(
       route = "/"
     ) {
-      set(
+      return set(
         "app.route",
-        route || "/"
+        normalizePathValue(route)
       );
     },
 
     setPublicPath(
       publicPath = "/"
     ) {
-      set(
+      return set(
         "app.publicPath",
-        publicPath || "/"
+        normalizePathValue(publicPath)
       );
     },
 
     setLoading(
-      value
+      value = false
     ) {
-      set(
+      return set(
         "app.loading",
         Boolean(value)
       );
@@ -111,14 +623,14 @@ export function createActions({
     setError(
       error = null
     ) {
-      set(
+      return set(
         "app.lastError",
         error || null
       );
     },
 
     clearError() {
-      set(
+      return set(
         "app.lastError",
         null
       );
@@ -127,40 +639,43 @@ export function createActions({
     /* =========================================================
        SESSION
     ========================================================= */
+
     setSession({
-      authenticated,
-      token,
-      user,
-      role,
+      authenticated = undefined,
+      token = undefined,
+      accessToken = undefined,
+      refreshToken = undefined,
+      user = undefined,
+      role = undefined,
+      roles = undefined,
+      sessionId = undefined,
+      sessionUserId = undefined,
     } = {}) {
-      patch({
-        session: {
-          authenticated:
-            Boolean(
-              authenticated
-            ),
-          token:
-            token ?? null,
-          user:
-            cloneIfAny(
-              user
-            ),
-          role:
-            role ??
-            user?.role ??
-            null,
-        },
+      return setSessionPatch({
+        authenticated,
+        token,
+        accessToken,
+        refreshToken,
+        user,
+        role,
+        roles,
+        sessionId,
+        sessionUserId,
       });
     },
 
     clearSession() {
-      patch({
+      return patch({
         session: {
-          authenticated:
-            false,
+          authenticated: false,
           token: null,
+          accessToken: null,
+          refreshToken: null,
           user: null,
           role: null,
+          roles: [],
+          sessionId: null,
+          sessionUserId: null,
         },
       });
     },
@@ -168,89 +683,134 @@ export function createActions({
     setAuthenticated(
       value = false
     ) {
-      set(
-        "session.authenticated",
-        Boolean(value)
-      );
+      if (!value) {
+        return setSessionPatch({
+          authenticated: false,
+        });
+      }
+
+      return setSessionPatch({
+        authenticated: true,
+        token:
+          getCurrentToken(),
+        user:
+          getCurrentUser(),
+      });
     },
 
     setToken(
       token = null
     ) {
-      set(
-        "session.token",
-        token ?? null
+      return setSessionPatch({
+        token,
+        accessToken: token,
+        user:
+          getCurrentUser(),
+      });
+    },
+
+    setAccessToken(
+      token = null
+    ) {
+      return setSessionPatch({
+        token,
+        accessToken: token,
+        user:
+          getCurrentUser(),
+      });
+    },
+
+    setRefreshToken(
+      refreshToken = null
+    ) {
+      return set(
+        "session.refreshToken",
+        safeText(refreshToken, "") || null
       );
     },
 
     setUser(
       user = null
     ) {
-      patch({
-        session: {
-          user:
-            cloneIfAny(
-              user
-            ),
-          role:
-            user?.role ??
-            state.session
-              ?.role ??
-            null,
-        },
+      return setSessionPatch({
+        token:
+          getCurrentToken(),
+        user,
+        role:
+          user?.role ??
+          user?.rol ??
+          state.session?.role ??
+          null,
       });
     },
 
     setRole(
       role = null
     ) {
-      set(
-        "session.role",
-        role ?? null
-      );
+      return setSessionPatch({
+        token:
+          getCurrentToken(),
+        user:
+          getCurrentUser(),
+        role:
+          normalizeRole(role) || null,
+      });
+    },
+
+    setRoles(
+      roles = []
+    ) {
+      return setSessionPatch({
+        token:
+          getCurrentToken(),
+        user:
+          getCurrentUser(),
+        roles:
+          normalizeRoles(roles),
+      });
     },
 
     /* =========================================================
        UI
     ========================================================= */
+
     setTheme(
-      theme = "dark"
+      theme = getDefaultTheme(AppCore)
     ) {
-      set(
+      return set(
         "ui.theme",
-        theme
+        normalizeTheme(theme)
       );
     },
 
     setLang(
-      lang = "es"
+      lang = getDefaultLang(AppCore)
     ) {
-      set(
+      return set(
         "ui.lang",
-        lang
+        normalizeLang(lang)
       );
     },
 
     setSidebarOpen(
-      value
+      value = false
     ) {
-      set(
+      return set(
         "ui.sidebarOpen",
         Boolean(value)
       );
     },
 
     setPageTitle(
-      title =
-        AppCore.config
-          .appName
+      title = getAppName(AppCore)
     ) {
       const finalTitle =
-        title ||
-        AppCore.config
-          .appName;
+        safeText(
+          title,
+          getAppName(AppCore)
+        );
 
-      patch({
+      return patch({
         ui: {
           pageTitle:
             finalTitle,
@@ -261,40 +821,103 @@ export function createActions({
     },
 
     setTopbarTitle(
-      title =
-        AppCore.config
-          .appName
+      title = getAppName(AppCore)
     ) {
-      set(
+      return set(
         "ui.topbarTitle",
-        title ||
-          AppCore.config
-            .appName
+        safeText(
+          title,
+          getAppName(AppCore)
+        )
       );
+    },
+
+    resetTitles() {
+      const title =
+        getAppName(AppCore);
+
+      return patch({
+        ui: {
+          pageTitle:
+            title,
+          topbarTitle:
+            title,
+        },
+      });
     },
 
     /* =========================================================
        FLAGS
     ========================================================= */
+
     setFlag(
       flag,
       value
     ) {
-      if (!flag) {
+      const key =
+        normalizeFlagKey(flag);
+
+      if (!key) {
         throw new Error(
-          "actions.setFlag(flag, value) requiere flag"
+          "actions.setFlag(flag, value) requiere flag válido"
         );
       }
 
-      set(
-        `flags.${flag}`,
+      return set(
+        `flags.${key}`,
         Boolean(value)
       );
+    },
+
+    clearFlag(
+      flag
+    ) {
+      const key =
+        normalizeFlagKey(flag);
+
+      if (!key) {
+        throw new Error(
+          "actions.clearFlag(flag) requiere flag válido"
+        );
+      }
+
+      return set(
+        `flags.${key}`,
+        false
+      );
+    },
+
+    setFlags(
+      flags = {}
+    ) {
+      const source =
+        safeObject(flags);
+
+      const next = {};
+
+      Object.entries(source).forEach(
+        ([key, value]) => {
+          const flagKey =
+            normalizeFlagKey(key);
+
+          if (!flagKey) {
+            return;
+          }
+
+          next[flagKey] =
+            Boolean(value);
+        }
+      );
+
+      return patch({
+        flags: next,
+      });
     },
 
     /* =========================================================
        COLLECTIONS
     ========================================================= */
+
     setCollection(
       key,
       items = []
@@ -304,11 +927,9 @@ export function createActions({
         key
       );
 
-      set(
+      return set(
         `entities.${key}`,
-        normalizeCollection(
-          items
-        )
+        normalizeCollection(items)
       );
     },
 
@@ -321,19 +942,19 @@ export function createActions({
         key
       );
 
-      update(
+      return update(
         `entities.${key}`,
         (list = []) => {
           const next =
-            Array.isArray(
-              list
-            )
+            Array.isArray(list)
               ? [...list]
               : [];
 
-          next.push(item);
+          next.push(
+            deepClone(item)
+          );
 
-          return next;
+          return normalizeCollection(next);
         }
       );
     },
@@ -347,21 +968,19 @@ export function createActions({
         key
       );
 
-      update(
+      return update(
         `entities.${key}`,
         (list = []) => {
           const next =
-            Array.isArray(
-              list
-            )
+            Array.isArray(list)
               ? [...list]
               : [];
 
           next.unshift(
-            item
+            deepClone(item)
           );
 
-          return next;
+          return normalizeCollection(next);
         }
       );
     },
@@ -377,26 +996,21 @@ export function createActions({
       );
 
       const match =
-        normalizeMatcher(
-          matcher
-        );
+        normalizeMatcher(matcher);
 
-      update(
+      return update(
         `entities.${key}`,
         (list = []) => {
-          if (
-            !Array.isArray(
-              list
-            )
-          ) {
+          if (!Array.isArray(list)) {
             return [];
           }
 
-          return list.map(
-            (item) =>
+          return normalizeCollection(
+            list.map((item) =>
               match(item)
-                ? nextItem
+                ? deepClone(nextItem)
                 : item
+            )
           );
         }
       );
@@ -412,46 +1026,32 @@ export function createActions({
         key
       );
 
-      if (
-        !isFunction(
-          updater
-        )
-      ) {
+      if (!isFunction(updater)) {
         throw new Error(
-          "updateCollectionItem requiere updater function"
+          "actions.updateCollectionItem requiere updater function"
         );
       }
 
       const match =
-        normalizeMatcher(
-          matcher
-        );
+        normalizeMatcher(matcher);
 
-      update(
+      return update(
         `entities.${key}`,
         (list = []) => {
-          if (
-            !Array.isArray(
-              list
-            )
-          ) {
+          if (!Array.isArray(list)) {
             return [];
           }
 
-          return list.map(
-            (item) => {
-              if (
-                !match(item)
-              ) {
+          return normalizeCollection(
+            list.map((item) => {
+              if (!match(item)) {
                 return item;
               }
 
               return updater(
-                deepClone(
-                  item
-                )
+                deepClone(item)
               );
-            }
+            })
           );
         }
       );
@@ -467,47 +1067,53 @@ export function createActions({
         key
       );
 
-      update(
+      return update(
         `entities.${key}`,
         (list = []) => {
           const next =
-            Array.isArray(
-              list
-            )
+            Array.isArray(list)
               ? [...list]
               : [];
 
+          const cleanItem =
+            deepClone(item);
+
           const match =
             matcher
-              ? normalizeMatcher(
-                  matcher
-                )
-              : (
-                  current
-                ) =>
-                  current?.id ===
-                  item?.id;
+              ? normalizeMatcher(matcher)
+              : (current) =>
+                  first(
+                    current?.id,
+                    current?._id,
+                    current?.uuid,
+                    current?.ticketId,
+                    current?.clienteId,
+                    current?.facturaId
+                  ) ===
+                  first(
+                    cleanItem?.id,
+                    cleanItem?._id,
+                    cleanItem?.uuid,
+                    cleanItem?.ticketId,
+                    cleanItem?.clienteId,
+                    cleanItem?.facturaId
+                  );
 
           const index =
-            next.findIndex(
-              (current) =>
-                match(
-                  current
-                )
+            next.findIndex((current) =>
+              match(current)
             );
 
-          if (
-            index >= 0
-          ) {
+          if (index >= 0) {
             next[index] =
-              item;
+              cleanItem;
           } else {
             next.push(
-              item
+              cleanItem
             );
           }
 
-          return next;
+          return normalizeCollection(next);
         }
       );
     },
@@ -522,26 +1128,19 @@ export function createActions({
       );
 
       const match =
-        normalizeMatcher(
-          matcher
-        );
+        normalizeMatcher(matcher);
 
-      update(
+      return update(
         `entities.${key}`,
         (list = []) => {
-          if (
-            !Array.isArray(
-              list
-            )
-          ) {
+          if (!Array.isArray(list)) {
             return [];
           }
 
-          return list.filter(
-            (item) =>
-              !match(
-                item
-              )
+          return normalizeCollection(
+            list.filter((item) =>
+              !match(item)
+            )
           );
         }
       );
@@ -555,85 +1154,211 @@ export function createActions({
         key
       );
 
-      set(
+      return set(
         `entities.${key}`,
         []
       );
     },
 
+    clearCollections() {
+      return patch({
+        entities: {},
+      });
+    },
+
     /* =========================================================
        HYDRATE
     ========================================================= */
+
     hydrateFromCore() {
-      patch({
+      const coreState =
+        getCoreState(AppCore);
+
+      const token =
+        first(
+          coreState.token,
+          coreState.accessToken,
+          coreState.session?.token,
+          coreState.session?.accessToken,
+          null
+        );
+
+      const user =
+        first(
+          coreState.user,
+          coreState.currentUser,
+          coreState.sessionUser,
+          coreState.authUser,
+          coreState.session?.user,
+          null
+        );
+
+      const sessionPatch =
+        normalizeSessionPatch({
+          state,
+          authenticated:
+            first(
+              coreState.authenticated,
+              coreState.session?.authenticated,
+              false
+            ),
+          token,
+          accessToken:
+            token,
+          refreshToken:
+            coreState.refreshToken ??
+            coreState.session?.refreshToken ??
+            state.session?.refreshToken ??
+            null,
+          user,
+          role:
+            first(
+              coreState.role,
+              coreState.rol,
+              coreState.userRole,
+              coreState.session?.role,
+              user?.role,
+              user?.rol,
+              null
+            ),
+          roles:
+            first(
+              coreState.roles,
+              coreState.session?.roles,
+              user?.roles,
+              []
+            ),
+          sessionId:
+            first(
+              coreState.sessionId,
+              coreState.session?.sessionId,
+              state.session?.sessionId,
+              null
+            ),
+          sessionUserId:
+            first(
+              coreState.sessionUserId,
+              coreState.session?.sessionUserId,
+              state.session?.sessionUserId,
+              null
+            ),
+        });
+
+      return patch({
         app: {
           ready:
-            state.app
-              .ready,
+            Boolean(
+              first(
+                coreState.ready,
+                state.app?.ready,
+                false
+              )
+            ),
+
           booted:
-            state.app
-              .booted,
+            Boolean(
+              first(
+                coreState.booted,
+                state.app?.booted,
+                false
+              )
+            ),
+
           route:
-            AppCore.state
-              .route,
+            normalizePathValue(
+              first(
+                coreState.route,
+                state.app?.route,
+                "/"
+              )
+            ),
+
           publicPath:
-            AppCore.state
-              .publicPath,
+            normalizePathValue(
+              first(
+                coreState.publicPath,
+                state.app?.publicPath,
+                coreState.route,
+                "/"
+              )
+            ),
+
           loading:
-            AppCore.state
-              .loading,
+            Boolean(
+              first(
+                coreState.loading,
+                state.app?.loading,
+                false
+              )
+            ),
+
           initialized:
-            AppCore.state
-              .initialized,
+            Boolean(
+              first(
+                coreState.initialized,
+                state.app?.initialized,
+                false
+              )
+            ),
+
           booting:
-            AppCore.state
-              .booting,
+            Boolean(
+              first(
+                coreState.booting,
+                state.app?.booting,
+                false
+              )
+            ),
+
           lastError:
-            AppCore.state
-              .lastError,
+            first(
+              coreState.lastError,
+              state.app?.lastError,
+              null
+            ),
         },
 
-        session: {
-          authenticated:
-            AppCore.state
-              .authenticated,
-          token:
-            AppCore.state
-              .token,
-          user:
-            cloneIfAny(
-              AppCore.state
-                .user
-            ),
-          role:
-            AppCore.state
-              .role,
-        },
+        session:
+          sessionPatch,
 
         ui: {
           theme:
-            AppCore.state
-              .theme,
+            normalizeTheme(
+              first(
+                coreState.theme,
+                state.ui?.theme,
+                getDefaultTheme(AppCore)
+              )
+            ),
+
           lang:
-            AppCore.state
-              .lang,
+            normalizeLang(
+              first(
+                coreState.lang,
+                state.ui?.lang,
+                getDefaultLang(AppCore)
+              )
+            ),
+
           sidebarOpen:
-            AppCore.state
-              .sidebarOpen,
+            Boolean(
+              first(
+                coreState.sidebarOpen,
+                state.ui?.sidebarOpen,
+                false
+              )
+            ),
+
           pageTitle:
-            safeTitle(
-              AppCore
-            ),
+            safeResolveTitle(AppCore),
+
           topbarTitle:
-            safeTopbarTitle(
-              AppCore
-            ),
+            safeResolveTopbarTitle(AppCore),
         },
 
         meta: {
           hydrated: true,
-          updatedAt:
-            Date.now(),
+          updatedAt: Date.now(),
         },
       });
     },

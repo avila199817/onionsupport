@@ -18,9 +18,16 @@
    - initUISystems() inicializa módulos una sola vez
    - safeEmit() NO duplica AppCore.events + window
    - rebind queda reservado solo para petición explícita
+   - hardRepair queda reservado solo para petición explícita
    - sync ligero por módulo:
      SidebarUI: renderUser/applyRoleVisibility/syncRouteAndIndicator
      TopbarUI: renderUser/refreshUser/updateUser/syncUser/refresh/sync
+
+   REGLA DE ORO:
+   - initUISystems() puede llamar init() una vez
+   - syncUserUI() solo sincroniza datos/rol/ruta
+   - repairUISystems() por defecto solo hace syncUserUI() ligero
+   - rebind/hardRepair solo si se pasa { rebind: true } / { hardRepair: true }
 ========================================================= */
 
 import {
@@ -110,6 +117,15 @@ const UI_INIT_METHODS =
     "start",
   ]);
 
+/*
+  OJO:
+  No meter aquí:
+  - repair
+  - render
+  - rebind
+  - bindEvents
+  - bind
+*/
 const SIDEBAR_USER_LIGHT_METHODS =
   Object.freeze([
     "renderUser",
@@ -288,6 +304,26 @@ function safeIsoDate(ms = Date.now()) {
   }
 }
 
+function safeSetTimeout(callback, ms = 0) {
+  if (!isFunction(callback)) {
+    return null;
+  }
+
+  try {
+    return setTimeout(() => {
+      try {
+        callback();
+      } catch {}
+    }, Math.max(0, Number(ms) || 0));
+  } catch {
+    try {
+      callback();
+    } catch {}
+
+    return null;
+  }
+}
+
 function isExtensibleObject(value) {
   try {
     return (
@@ -442,6 +478,10 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
     if (isFunction(AppCore?.events?.emit)) {
       busAvailable = true;
 
+      /*
+        No usamos el return del bus.
+        Algunos event bus devuelven undefined aunque emitan bien.
+      */
       AppCore.events.emit(
         eventName,
         payload
@@ -452,10 +492,9 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   } catch {}
 
   /*
-    Importante:
-    No emitir siempre también por window.
-    Si AppCore.events existe, varios módulos ya escuchan el bus.
-    Duplicar a window provoca doble commit visual y dobles repairs.
+    Clave anti-event storm:
+    Si existe AppCore.events, NO duplicamos también por window.
+    Window solo queda como fallback si no hay bus o si se fuerza explícitamente.
   */
   if (
     opts.window === true ||
@@ -553,12 +592,17 @@ function getUserSnapshot(AppCore, Auth = null) {
       AppCore?.state
     );
 
+  const session =
+    ensureObject(
+      state.session
+    );
+
   const user =
     state.user ||
     state.currentUser ||
     state.sessionUser ||
     state.authUser ||
-    state.session?.user ||
+    session.user ||
     getAuthUser(Auth) ||
     null;
 
@@ -566,9 +610,13 @@ function getUserSnapshot(AppCore, Auth = null) {
     state.role ||
     state.rol ||
     state.userRole ||
-    state.session?.role ||
+    session.role ||
+    session.rol ||
+    session.userRole ||
     user?.role ||
     user?.rol ||
+    user?.userRole ||
+    user?.user_role ||
     getAuthRole(Auth) ||
     null;
 
@@ -781,10 +829,27 @@ function callModuleMethod(moduleRef, methodName, context = {}) {
     return false;
   }
 
+  const ctx =
+    ensureObject(context);
+
+  const reason =
+    safeText(
+      ctx.reason,
+      methodName
+    );
+
+  /*
+    Orden compatible:
+    - métodos tipo method(reason, context)
+    - métodos tipo method(context)
+    - métodos tipo method()
+    - métodos legacy method(AppCore, context)
+  */
   try {
     fn.call(
       moduleRef,
-      context.reason || context
+      reason,
+      ctx
     );
 
     return true;
@@ -793,8 +858,7 @@ function callModuleMethod(moduleRef, methodName, context = {}) {
   try {
     fn.call(
       moduleRef,
-      context.reason || "",
-      context
+      ctx
     );
 
     return true;
@@ -803,17 +867,8 @@ function callModuleMethod(moduleRef, methodName, context = {}) {
   try {
     fn.call(
       moduleRef,
-      context
-    );
-
-    return true;
-  } catch {}
-
-  try {
-    fn.call(
-      moduleRef,
-      context.AppCore,
-      context
+      ctx.AppCore,
+      ctx
     );
 
     return true;
@@ -998,7 +1053,7 @@ function syncSidebarLight(SidebarUI, context = {}) {
 
   /*
     Solo usamos refresh/sync si el módulo no expone métodos ligeros.
-    No llamamos repair/rebind/render.
+    No llamamos repair/render/rebind/bindEvents/bind.
   */
   if (
     !userResult.called &&
@@ -1277,7 +1332,7 @@ export function syncUserUI(first = {}, second = {}) {
 
     /*
       Rebind solo explícito.
-      Nunca por defecto durante auth/router/lang.
+      Nunca por defecto durante auth/router/lang/theme.
     */
     if (rebind === true) {
       sidebarRebind =
@@ -1339,6 +1394,8 @@ export function syncUserUI(first = {}, second = {}) {
           topbarResult,
         rebind:
           Boolean(rebind),
+        hardRepair:
+          Boolean(hardRepair),
         sidebarRebind:
           sidebarRebind.method,
         topbarRebind:
@@ -1364,6 +1421,8 @@ export function syncUserUI(first = {}, second = {}) {
           topbarResult,
         rebind:
           Boolean(rebind),
+        hardRepair:
+          Boolean(hardRepair),
       }
     );
 
@@ -1402,7 +1461,7 @@ export function syncUserUI(first = {}, second = {}) {
     if (syncQueued) {
       syncQueued = false;
 
-      setTimeout(() => {
+      safeSetTimeout(() => {
         syncUserUI({
           ...deps,
           reason:
@@ -1438,21 +1497,31 @@ function bindEvent(AppCore, scope, eventName, handler) {
   try {
     if (isFunction(AppCore?.cleanup?.event)) {
       try {
-        AppCore.cleanup.event(
-          scope,
-          eventName,
-          handler
-        );
+        const off =
+          AppCore.cleanup.event(
+            scope,
+            eventName,
+            handler
+          );
+
+        if (isFunction(off)) {
+          rememberDisposer(off);
+        }
 
         return true;
       } catch {
         if (isBrowser()) {
-          AppCore.cleanup.event(
-            scope,
-            window,
-            eventName,
-            handler
-          );
+          const off =
+            AppCore.cleanup.event(
+              scope,
+              window,
+              eventName,
+              handler
+            );
+
+          if (isFunction(off)) {
+            rememberDisposer(off);
+          }
 
           return true;
         }
@@ -1544,7 +1613,7 @@ export function bindAppLanguageSync(first = {}, second = {}) {
       Cambio clave:
       NO rebind en cambio de idioma.
       El i18n live debe actualizar data-i18n.
-      El sidebar/topbar solo sincronizan usuario/activo/visibilidad.
+      Aquí solo se sincronizan usuario/rol/ruta/visibilidad.
     */
     syncUserUI({
       AppCore,

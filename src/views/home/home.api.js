@@ -19,6 +19,10 @@
    - soporta { ok, data, payload, result, summary, dashboard }
    - soporta nested envelopes
    - fallback AppCore.apiClient -> AppCore.request -> Http -> fetch
+   - no reintenta con otro adapter si el backend respondió error real
+   - browser guards para window/localStorage/sessionStorage/fetch
+   - Authorization robusto
+   - params soportados en fetch fallback
    - persistencia coherente en store/state
    - contrato alineado con /api/dashboard/summary
 ========================================================= */
@@ -53,47 +57,150 @@ import {
 const HOME_DASHBOARD_ENDPOINT = "/api/dashboard/summary";
 const HOME_DASHBOARD_LEGACY_ENDPOINT = "/api/dashboard";
 const HOME_DASHBOARD_PING_ENDPOINT = "/api/dashboard/ping";
+
 const HOME_TIMEOUT = 15000;
 
 let lastLoadToken = 0;
 
 /* =========================================================
-   SAFE
+   SAFE HELPERS
 ========================================================= */
 
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
+
 function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
   const text = String(value).trim();
+
   return text || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
   const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+
+  return Number.isFinite(n)
+    ? n
+    : fallback;
 }
 
 function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
     ? value
     : {};
 }
 
+function isFn(value) {
+  return typeof value === "function";
+}
+
 function first(...values) {
   for (const value of values) {
-    if (
-      value !== undefined &&
-      value !== null &&
-      String(value).trim() !== ""
-    ) {
-      return value;
+    if (value === undefined || value === null) {
+      continue;
     }
+
+    if (
+      typeof value === "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+    if (
+      Array.isArray(value) &&
+      value.length === 0
+    ) {
+      continue;
+    }
+
+    return value;
   }
 
   return null;
+}
+
+function safeEmit(eventName = "", payload = {}) {
+  const name = safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  try {
+    AppCore?.events?.emit?.(name, payload);
+    return true;
+  } catch {}
+
+  try {
+    if (isBrowser()) {
+      window.dispatchEvent(
+        new CustomEvent(name, {
+          detail: payload,
+        })
+      );
+
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function safeError(...args) {
+  try {
+    AppCore?.utils?.error?.("[HomeAPI]", ...args);
+  } catch {}
+
+  try {
+    console.error("[HomeAPI]", ...args);
+  } catch {}
+}
+
+function createUnavailableError(code = "ADAPTER_UNAVAILABLE") {
+  const error = new Error(code);
+
+  error.code = code;
+  error.adapterUnavailable = true;
+
+  return error;
+}
+
+function isAdapterUnavailable(error = null) {
+  return Boolean(
+    error?.adapterUnavailable === true ||
+      [
+        "HOME_API_CLIENT_UNAVAILABLE",
+        "HOME_API_CLIENT_METHOD_UNAVAILABLE",
+        "APP_CORE_REQUEST_UNAVAILABLE",
+        "HTTP_MODULE_UNAVAILABLE",
+        "HTTP_MODULE_METHOD_UNAVAILABLE",
+        "FETCH_UNAVAILABLE",
+      ].includes(error?.code) ||
+      [
+        "HOME_API_CLIENT_UNAVAILABLE",
+        "HOME_API_CLIENT_METHOD_UNAVAILABLE",
+        "APP_CORE_REQUEST_UNAVAILABLE",
+        "HTTP_MODULE_UNAVAILABLE",
+        "HTTP_MODULE_METHOD_UNAVAILABLE",
+        "FETCH_UNAVAILABLE",
+      ].includes(error?.message)
+  );
 }
 
 function nextLoadToken() {
@@ -110,39 +217,162 @@ function isActiveLoadToken(token) {
 ========================================================= */
 
 function getApiBase() {
-  const apiBase = safeText(AppCore?.config?.apiBase, "");
-  return apiBase.replace(/\/+$/, "");
+  return safeText(
+    AppCore?.config?.apiBase,
+    ""
+  ).replace(/\/+$/g, "");
+}
+
+function getBrowserOrigin() {
+  if (!isBrowser()) {
+    return "http://localhost";
+  }
+
+  try {
+    return window.location.origin || "http://localhost";
+  } catch {
+    return "http://localhost";
+  }
 }
 
 function buildAbsoluteUrl(path = "") {
-  const cleanPath = String(path || "").trim();
+  const cleanPath = safeText(path, "");
 
-  if (!cleanPath) return getApiBase();
-  if (/^https?:\/\//i.test(cleanPath)) return cleanPath;
+  if (!cleanPath) {
+    return getApiBase() || "/";
+  }
 
-  return `${getApiBase()}${cleanPath}`;
+  if (/^https?:\/\//i.test(cleanPath)) {
+    return cleanPath;
+  }
+
+  const apiBase = getApiBase();
+
+  if (apiBase) {
+    return `${apiBase}${cleanPath.startsWith("/") ? cleanPath : `/${cleanPath}`}`;
+  }
+
+  return cleanPath.startsWith("/")
+    ? cleanPath
+    : `/${cleanPath}`;
+}
+
+function appendParamsToUrl(url = "", params = null) {
+  const entries = Object.entries(safeObject(params));
+
+  if (!entries.length) {
+    return url;
+  }
+
+  try {
+    const absoluteInput = /^https?:\/\//i.test(url);
+    const parsed = new URL(url, getBrowserOrigin());
+
+    entries.forEach(([key, value]) => {
+      if (value === undefined || value === null || value === "") {
+        return;
+      }
+
+      if (Array.isArray(value)) {
+        value.forEach((item) => {
+          if (item !== undefined && item !== null && item !== "") {
+            parsed.searchParams.append(key, String(item));
+          }
+        });
+
+        return;
+      }
+
+      parsed.searchParams.set(key, String(value));
+    });
+
+    if (absoluteInput) {
+      return parsed.toString();
+    }
+
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return url;
+  }
+}
+
+function readWebStorageValue(storageName = "localStorage", key = "") {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  try {
+    const storage = window?.[storageName];
+
+    if (!storage) {
+      return "";
+    }
+
+    return safeText(storage.getItem(key), "");
+  } catch {
+    return "";
+  }
+}
+
+function readAppStorageValue(key = "") {
+  const cleanKey = safeText(key, "");
+
+  if (!cleanKey) {
+    return "";
+  }
+
+  try {
+    if (isFn(AppCore?.storage?.get)) {
+      return safeText(AppCore.storage.get(cleanKey), "");
+    }
+  } catch {}
+
+  return "";
 }
 
 function getAuthToken() {
-  return safeText(
-    first(
-      AppCore?.state?.token,
-      AppCore?.state?.accessToken,
-      AppCore?.auth?.getToken?.(),
-      AppCore?.Auth?.getToken?.(),
-      localStorage.getItem("token"),
-      sessionStorage.getItem("token")
-    ),
-    ""
-  );
+  const candidates = [
+    AppCore?.state?.token,
+    AppCore?.state?.accessToken,
+    AppCore?.state?.session?.token,
+    AppCore?.state?.session?.accessToken,
+
+    AppCore?.auth?.getToken?.(),
+    AppCore?.Auth?.getToken?.(),
+    AppCore?.modules?.Auth?.getToken?.(),
+
+    readAppStorageValue("token"),
+    readAppStorageValue("auth.token"),
+    readAppStorageValue("auth.accessToken"),
+    readAppStorageValue("accessToken"),
+
+    readWebStorageValue("localStorage", "token"),
+    readWebStorageValue("localStorage", "accessToken"),
+    readWebStorageValue("localStorage", "auth.token"),
+    readWebStorageValue("localStorage", "auth.accessToken"),
+    readWebStorageValue("localStorage", "onion:token"),
+    readWebStorageValue("localStorage", "onion:auth.token"),
+    readWebStorageValue("localStorage", "onion:auth.accessToken"),
+
+    readWebStorageValue("sessionStorage", "token"),
+    readWebStorageValue("sessionStorage", "accessToken"),
+    readWebStorageValue("sessionStorage", "auth.token"),
+    readWebStorageValue("sessionStorage", "auth.accessToken"),
+    readWebStorageValue("sessionStorage", "onion:token"),
+    readWebStorageValue("sessionStorage", "onion:auth.token"),
+    readWebStorageValue("sessionStorage", "onion:auth.accessToken"),
+  ];
+
+  return safeText(first(...candidates), "");
 }
 
 function getRequestHeaders(extraHeaders = {}) {
   const token = getAuthToken();
 
   return {
+    Accept: "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...extraHeaders,
+    ...safeObject(extraHeaders),
   };
 }
 
@@ -151,10 +381,22 @@ function getApiClient() {
 }
 
 function getHttpModule() {
+  try {
+    if (isFn(AppCore?.modules?.get)) {
+      return (
+        AppCore.modules.get("Http") ||
+        AppCore.modules.get("http") ||
+        null
+      );
+    }
+  } catch {}
+
   return (
     AppCore?.modules?.Http ||
+    AppCore?.modules?.http ||
     AppCore?.Http ||
-    window?.Http ||
+    AppCore?.http ||
+    (typeof window !== "undefined" ? window.Http : null) ||
     null
   );
 }
@@ -164,25 +406,12 @@ function getHttpModule() {
 ========================================================= */
 
 function normalizeErrorMessage(error = null, fallback = "Error de API.") {
-  const message = safeText(
-    first(
-      error?.message,
-      error?.response?.message,
-      error?.response?.data?.message,
-      error?.response?.error,
-      error?.data?.message,
-      error?.data?.error,
-      error?.error,
-      fallback
-    ),
-    fallback
-  );
-
   const status = Number(
     first(
       error?.status,
       error?.response?.status,
-      error?.response?.data?.status
+      error?.response?.data?.status,
+      error?.data?.status
     )
   );
 
@@ -191,7 +420,8 @@ function normalizeErrorMessage(error = null, fallback = "Error de API.") {
       error?.code,
       error?.response?.error,
       error?.response?.data?.error,
-      error?.data?.error
+      error?.data?.error,
+      error?.error
     ),
     ""
   );
@@ -212,7 +442,19 @@ function normalizeErrorMessage(error = null, fallback = "Error de API.") {
     return "El dashboard devolvió un error interno.";
   }
 
-  return message;
+  return safeText(
+    first(
+      error?.message,
+      error?.response?.message,
+      error?.response?.data?.message,
+      error?.response?.error,
+      error?.data?.message,
+      error?.data?.error,
+      error?.error,
+      fallback
+    ),
+    fallback
+  );
 }
 
 /* =========================================================
@@ -226,9 +468,11 @@ function looksLikeDashboard(value = null) {
     obj.summary ||
       obj.stats ||
       obj.metrics ||
+      obj.totals ||
       obj.widgets ||
       obj.cards ||
       obj.kpis ||
+      obj.items ||
       obj.recent ||
       obj.recentActivity ||
       obj.activity ||
@@ -247,16 +491,28 @@ function looksLikeWidget(value = null) {
       obj.code ||
       obj.title ||
       obj.name ||
-      obj.label
+      obj.label ||
+      obj.heading
   );
 }
 
-function unwrapResponseEnvelope(payload = null) {
+function unwrapResponseEnvelope(payload = null, depth = 0) {
   if (payload === null || payload === undefined) {
     return null;
   }
 
+  if (depth > 8) {
+    return payload;
+  }
+
   if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (
+    looksLikeDashboard(payload) ||
+    looksLikeWidget(payload)
+  ) {
     return payload;
   }
 
@@ -266,17 +522,31 @@ function unwrapResponseEnvelope(payload = null) {
     return payload;
   }
 
-  if (obj.dashboard) return unwrapResponseEnvelope(obj.dashboard);
-  if (
-    obj.summary &&
-    typeof obj.summary === "object" &&
-    !Array.isArray(obj.summary)
-  ) {
-    return obj;
+  const candidates = [
+    obj.dashboard,
+    obj.widget,
+    obj.item,
+    obj.data,
+    obj.result,
+    obj.payload,
+    obj.body,
+    obj.response,
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate === undefined || candidate === null) {
+      continue;
+    }
+
+    const unwrapped = unwrapResponseEnvelope(candidate, depth + 1);
+
+    if (
+      unwrapped !== undefined &&
+      unwrapped !== null
+    ) {
+      return unwrapped;
+    }
   }
-  if (obj.payload) return unwrapResponseEnvelope(obj.payload);
-  if (obj.result) return unwrapResponseEnvelope(obj.result);
-  if (obj.data) return unwrapResponseEnvelope(obj.data);
 
   return obj;
 }
@@ -290,27 +560,41 @@ function pickDashboard(payload = null) {
     return payload;
   }
 
+  const unwrapped = unwrapResponseEnvelope(payload);
+
+  if (looksLikeDashboard(unwrapped)) {
+    return unwrapped;
+  }
+
   const obj = safeObject(payload);
 
-  if (looksLikeDashboard(obj.dashboard)) return obj.dashboard;
-  if (looksLikeDashboard(obj.data)) return obj.data;
-  if (looksLikeDashboard(obj.result)) return obj.result;
-  if (looksLikeDashboard(obj.payload)) return obj.payload;
-  if (looksLikeDashboard(obj.summary)) return obj;
+  const candidates = [
+    obj.dashboard,
+    obj.data,
+    obj.result,
+    obj.payload,
+    obj.body,
+    obj.response,
+    obj?.data?.dashboard,
+    obj?.data?.result,
+    obj?.data?.payload,
+    obj?.payload?.dashboard,
+    obj?.result?.dashboard,
+  ];
 
-  if (obj.data && typeof obj.data === "object") {
-    return pickDashboard(obj.data);
+  for (const candidate of candidates) {
+    if (looksLikeDashboard(candidate)) {
+      return candidate;
+    }
+
+    const nested = unwrapResponseEnvelope(candidate);
+
+    if (looksLikeDashboard(nested)) {
+      return nested;
+    }
   }
 
-  if (obj.payload && typeof obj.payload === "object") {
-    return pickDashboard(obj.payload);
-  }
-
-  if (obj.result && typeof obj.result === "object") {
-    return pickDashboard(obj.result);
-  }
-
-  return Object.keys(obj).length ? obj : null;
+  return null;
 }
 
 function getRequestIdFromPayload(payload = null) {
@@ -319,145 +603,173 @@ function getRequestIdFromPayload(payload = null) {
   return safeText(
     first(
       obj.requestId,
+      obj.correlationId,
+      obj.traceId,
       obj.data?.requestId,
       obj.payload?.requestId,
-      obj.meta?.requestId
+      obj.result?.requestId,
+      obj.meta?.requestId,
+      obj.headers?.["x-request-id"]
     ),
     ""
   );
 }
 
 function getDashboardSummaryBlock(dashboard = {}) {
+  const raw = safeObject(dashboard);
+
   return safeObject(
     first(
-      dashboard.summary,
-      dashboard.stats,
-      dashboard.metrics,
-      dashboard.totals
+      raw.summary,
+      raw.stats,
+      raw.metrics,
+      raw.totals
     )
   );
 }
 
 function getDashboardWidgetsBlock(dashboard = {}) {
+  const raw = safeObject(dashboard);
+
   return safeArray(
     first(
-      dashboard.widgets,
-      dashboard.cards,
-      dashboard.kpis,
-      dashboard.items
+      raw.widgets,
+      raw.cards,
+      raw.kpis,
+      raw.items
     )
   );
 }
 
 function getDashboardRecentBlock(dashboard = {}) {
+  const raw = safeObject(dashboard);
+
   return safeArray(
     first(
-      dashboard.recent,
-      dashboard.recentActivity,
-      dashboard.activity,
-      dashboard.timeline
+      raw.recent,
+      raw.recentActivity,
+      raw.activity,
+      raw.timeline
     )
   );
 }
 
 function getWidgetId(item = {}) {
+  const raw = safeObject(item);
+
   return safeText(
     first(
-      item.widgetId,
-      item.id,
-      item.key,
-      item.slug,
-      item.code
+      raw.widgetId,
+      raw.id,
+      raw.key,
+      raw.slug,
+      raw.code
     ),
     ""
   );
 }
 
 function getWidgetTitle(item = {}) {
+  const raw = safeObject(item);
+
   return safeText(
     first(
-      item.title,
-      item.name,
-      item.label,
-      item.heading
+      raw.title,
+      raw.name,
+      raw.label,
+      raw.heading
     ),
     "Bloque"
   );
 }
 
 function getWidgetDescription(item = {}) {
+  const raw = safeObject(item);
+
   return safeText(
     first(
-      item.description,
-      item.descripcion,
-      item.subtitle,
-      item.summary,
-      item.text
+      raw.description,
+      raw.descripcion,
+      raw.subtitle,
+      raw.summary,
+      raw.text
     ),
     ""
   );
 }
 
 function getWidgetType(item = {}) {
+  const raw = safeObject(item);
+
   return safeText(
     first(
-      item.type,
-      item.kind,
-      item.variant,
-      item.category
+      raw.type,
+      raw.kind,
+      raw.variant,
+      raw.category
     ),
     "widget"
   );
 }
 
 function getWidgetValue(item = {}) {
+  const raw = safeObject(item);
+
   return first(
-    item.value,
-    item.total,
-    item.amount,
-    item.count,
-    item.metric
+    raw.value,
+    raw.total,
+    raw.amount,
+    raw.count,
+    raw.metric
   );
 }
 
 function getWidgetTrend(item = {}) {
+  const raw = safeObject(item);
+
   return first(
-    item.trend,
-    item.delta,
-    item.change,
-    item.variation
+    raw.trend,
+    raw.delta,
+    raw.change,
+    raw.variation
   );
 }
 
 function getWidgetStatus(item = {}) {
+  const raw = safeObject(item);
+
   return safeText(
     first(
-      item.status,
-      item.estado,
-      item.state
+      raw.status,
+      raw.estado,
+      raw.state
     ),
     "active"
   );
 }
 
 function getWidgetRoute(item = {}) {
+  const raw = safeObject(item);
+
   return safeText(
     first(
-      item.route,
-      item.href,
-      item.link,
-      item.to
+      raw.route,
+      raw.href,
+      raw.link,
+      raw.to
     ),
     ""
   );
 }
 
 function getWidgetUpdatedAt(item = {}) {
+  const raw = safeObject(item);
+
   return first(
-    item.updatedAt,
-    item.lastUpdate,
-    item.modifiedAt,
-    item.createdAt
+    raw.updatedAt,
+    raw.lastUpdate,
+    raw.modifiedAt,
+    raw.createdAt
   );
 }
 
@@ -466,6 +778,7 @@ function normalizeWidget(item = {}) {
 
   return {
     ...raw,
+
     widgetId: getWidgetId(raw),
     title: getWidgetTitle(raw),
     description: getWidgetDescription(raw),
@@ -479,21 +792,25 @@ function normalizeWidget(item = {}) {
 }
 
 function normalizeDashboard(payload = null) {
-  const raw = safeObject(pickDashboard(payload));
+  const picked = pickDashboard(payload);
+  const raw = safeObject(picked);
 
   const summary = getDashboardSummaryBlock(raw);
-  const widgets = getDashboardWidgetsBlock(raw).map((item) =>
-    normalizeWidget(item)
-  );
-  const recent = getDashboardRecentBlock(raw).map((item) =>
-    safeObject(item)
-  );
+
+  const widgets = getDashboardWidgetsBlock(raw)
+    .map((item) => normalizeWidget(item))
+    .filter((item) => looksLikeWidget(item));
+
+  const recent = getDashboardRecentBlock(raw)
+    .map((item) => safeObject(item));
 
   return {
     ...raw,
+
     summary,
     widgets,
     recent,
+
     updatedAt: first(
       raw.updatedAt,
       raw.lastUpdate,
@@ -510,12 +827,52 @@ function findWidgetInCollection(items = [], widgetId = "") {
     return null;
   }
 
+  const targetLower = target.toLowerCase();
+
   return (
     safeArray(items).find((item) => {
       const currentId = getWidgetId(item);
-      return currentId === target;
+      return (
+        currentId === target ||
+        currentId.toLowerCase() === targetLower
+      );
     }) || null
   );
+}
+
+/* =========================================================
+   REQUEST BODY
+========================================================= */
+
+function hasRequestBody(body) {
+  return body !== undefined && body !== null;
+}
+
+function isFormDataBody(body) {
+  try {
+    return (
+      typeof FormData !== "undefined" &&
+      body instanceof FormData
+    );
+  } catch {
+    return false;
+  }
+}
+
+function buildRequestBody(body) {
+  if (!hasRequestBody(body)) {
+    return undefined;
+  }
+
+  if (
+    typeof body === "string" ||
+    isFormDataBody(body) ||
+    body instanceof Blob
+  ) {
+    return body;
+  }
+
+  return JSON.stringify(body);
 }
 
 /* =========================================================
@@ -526,13 +883,13 @@ async function requestViaApiClient(method = "GET", path = "", options = {}) {
   const client = getApiClient();
 
   if (!client) {
-    throw new Error("HOME_API_CLIENT_UNAVAILABLE");
+    throw createUnavailableError("HOME_API_CLIENT_UNAVAILABLE");
   }
 
   const verb = String(method || "GET").toLowerCase();
   const timeout = safeNumber(options.timeout, HOME_TIMEOUT);
 
-  if (verb === "get" && typeof client.get === "function") {
+  if (verb === "get" && isFn(client.get)) {
     return client.get(path, {
       timeout,
       auth: true,
@@ -541,7 +898,7 @@ async function requestViaApiClient(method = "GET", path = "", options = {}) {
     });
   }
 
-  if (verb === "post" && typeof client.post === "function") {
+  if (verb === "post" && isFn(client.post)) {
     return client.post(path, options.body, {
       timeout,
       auth: true,
@@ -550,7 +907,7 @@ async function requestViaApiClient(method = "GET", path = "", options = {}) {
     });
   }
 
-  if (typeof client.request === "function") {
+  if (isFn(client.request)) {
     return client.request(path, {
       method: method.toUpperCase(),
       timeout,
@@ -561,22 +918,21 @@ async function requestViaApiClient(method = "GET", path = "", options = {}) {
     });
   }
 
-  throw new Error("HOME_API_CLIENT_METHOD_UNAVAILABLE");
+  throw createUnavailableError("HOME_API_CLIENT_METHOD_UNAVAILABLE");
 }
 
 async function requestViaAppCoreRequest(method = "GET", path = "", options = {}) {
-  if (typeof AppCore?.request !== "function") {
-    throw new Error("APP_CORE_REQUEST_UNAVAILABLE");
+  if (!isFn(AppCore?.request)) {
+    throw createUnavailableError("APP_CORE_REQUEST_UNAVAILABLE");
   }
 
   return AppCore.request(path, {
     method: method.toUpperCase(),
     headers: options.headers,
     params: options.params,
-    body:
-      options.body && typeof options.body !== "string"
-        ? JSON.stringify(options.body)
-        : options.body,
+    body: buildRequestBody(options.body),
+    timeout: options.timeout,
+    auth: true,
   });
 }
 
@@ -584,44 +940,57 @@ async function requestViaHttpModule(method = "GET", path = "", options = {}) {
   const Http = getHttpModule();
 
   if (!Http) {
-    throw new Error("HTTP_MODULE_UNAVAILABLE");
+    throw createUnavailableError("HTTP_MODULE_UNAVAILABLE");
   }
 
   const verb = String(method || "GET").toLowerCase();
 
-  if (verb === "get" && typeof Http.get === "function") {
+  if (verb === "get" && isFn(Http.get)) {
     return Http.get(path, {
       headers: options.headers,
       params: options.params,
       timeout: options.timeout,
+      auth: true,
     });
   }
 
-  if (verb === "post" && typeof Http.post === "function") {
+  if (verb === "post" && isFn(Http.post)) {
     return Http.post(path, options.body, {
       headers: options.headers,
       params: options.params,
       timeout: options.timeout,
+      auth: true,
     });
   }
 
-  if (typeof Http.request === "function") {
+  if (isFn(Http.request)) {
     return Http.request(path, {
       method: method.toUpperCase(),
       headers: options.headers,
       params: options.params,
       timeout: options.timeout,
       body: options.body,
+      auth: true,
     });
   }
 
-  throw new Error("HTTP_MODULE_METHOD_UNAVAILABLE");
+  throw createUnavailableError("HTTP_MODULE_METHOD_UNAVAILABLE");
 }
 
 async function requestViaFetch(method = "GET", path = "", options = {}) {
-  const url = buildAbsoluteUrl(path);
-  const controller = new AbortController();
+  if (typeof fetch !== "function") {
+    throw createUnavailableError("FETCH_UNAVAILABLE");
+  }
+
+  const methodName = method.toUpperCase();
   const timeout = safeNumber(options.timeout, HOME_TIMEOUT);
+
+  const url = appendParamsToUrl(
+    buildAbsoluteUrl(path),
+    options.params
+  );
+
+  const controller = new AbortController();
 
   const timeoutId = setTimeout(() => {
     try {
@@ -630,23 +999,53 @@ async function requestViaFetch(method = "GET", path = "", options = {}) {
   }, timeout);
 
   try {
+    const headers = {
+      ...safeObject(options.headers),
+    };
+
+    if (
+      hasRequestBody(options.body) &&
+      !isFormDataBody(options.body) &&
+      !headers["Content-Type"] &&
+      !headers["content-type"]
+    ) {
+      headers["Content-Type"] = "application/json";
+    }
+
     const response = await fetch(url, {
-      method: method.toUpperCase(),
-      headers: options.headers,
+      method: methodName,
+      headers,
       body:
-        options.body === undefined || options.body === null
+        methodName === "GET" || methodName === "HEAD"
           ? undefined
-          : JSON.stringify(options.body),
+          : buildRequestBody(options.body),
       signal: controller.signal,
+      credentials: "same-origin",
     });
 
+    const contentType = safeText(
+      response.headers?.get?.("content-type"),
+      ""
+    );
+
     const text = await response.text();
+
     let data = null;
 
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = { raw: text };
+    if (text) {
+      if (contentType.includes("application/json")) {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { raw: text };
+        }
+      } else {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { raw: text };
+        }
+      }
     }
 
     if (!response.ok) {
@@ -656,7 +1055,7 @@ async function requestViaFetch(method = "GET", path = "", options = {}) {
             ...safeObject(data),
             status: response.status,
           },
-          `HTTP ${response.status} en ${method.toUpperCase()} ${path}`
+          `HTTP ${response.status} en ${methodName} ${path}`
         )
       );
 
@@ -673,14 +1072,17 @@ async function requestViaFetch(method = "GET", path = "", options = {}) {
 }
 
 async function request(method = "GET", path = "", options = {}) {
+  const hasBody = hasRequestBody(options.body);
+
+  const headers = getRequestHeaders({
+    ...(safeObject(options.headers)),
+  });
+
   const requestOptions = {
     timeout: safeNumber(options.timeout, HOME_TIMEOUT),
     params: options.params,
     body: options.body,
-    headers: getRequestHeaders({
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(safeObject(options.headers)),
-    }),
+    headers,
   };
 
   const adapters = [
@@ -690,17 +1092,22 @@ async function request(method = "GET", path = "", options = {}) {
     requestViaFetch,
   ];
 
-  let lastError = null;
+  let lastUnavailableError = null;
 
   for (const adapter of adapters) {
     try {
       return await adapter(method, path, requestOptions);
     } catch (error) {
-      lastError = error;
+      if (isAdapterUnavailable(error)) {
+        lastUnavailableError = error;
+        continue;
+      }
+
+      throw error;
     }
   }
 
-  throw lastError || new Error("HOME_REQUEST_FAILED");
+  throw lastUnavailableError || new Error("HOME_REQUEST_FAILED");
 }
 
 /* =========================================================
@@ -739,7 +1146,9 @@ export async function fetchHomeHealthRequest() {
 
 export async function getHomeDashboardRequest(options = {}) {
   const response = await fetchHomeDashboardRequest(options);
-  return normalizeDashboard(response);
+  const dashboard = normalizeDashboard(response);
+
+  return dashboard;
 }
 
 export async function getHomeWidgetByIdRequest(
@@ -766,18 +1175,25 @@ export function hydrateHomeFromCache() {
   try {
     const currentDashboard = safeObject(homeState?.dashboard);
     const currentWidgets = safeArray(homeState?.widgets);
+    const currentSummary = safeObject(homeState?.summary);
+    const currentRecent = safeArray(homeState?.recent);
+    const currentRequestId = safeText(homeState?.requestId, "");
+    const currentLastSyncAt = first(homeState?.lastSyncAt, null);
 
-    if (
-      Object.keys(currentDashboard).length ||
-      currentWidgets.length
-    ) {
+    const hasCache =
+      Object.keys(currentDashboard).length > 0 ||
+      currentWidgets.length > 0 ||
+      Object.keys(currentSummary).length > 0 ||
+      currentRecent.length > 0;
+
+    if (hasCache) {
       replaceHomeStore({
         dashboard: currentDashboard,
         widgets: currentWidgets,
-        summary: safeObject(homeState?.summary),
-        recent: safeArray(homeState?.recent),
-        requestId: safeText(homeState?.requestId, ""),
-        lastSyncAt: first(homeState?.lastSyncAt, null),
+        summary: currentSummary,
+        recent: currentRecent,
+        requestId: currentRequestId,
+        lastSyncAt: currentLastSyncAt,
       });
 
       setHydrated?.(true);
@@ -786,8 +1202,11 @@ export function hydrateHomeFromCache() {
     return {
       dashboard: currentDashboard,
       widgets: currentWidgets,
-      summary: safeObject(homeState?.summary),
-      recent: safeArray(homeState?.recent),
+      summary: currentSummary,
+      recent: currentRecent,
+      requestId: currentRequestId,
+      lastSyncAt: currentLastSyncAt,
+      hydrated: hasCache,
     };
   } catch {
     return {
@@ -795,6 +1214,9 @@ export function hydrateHomeFromCache() {
       widgets: [],
       summary: {},
       recent: [],
+      requestId: "",
+      lastSyncAt: null,
+      hydrated: false,
     };
   }
 }
@@ -808,8 +1230,19 @@ export async function loadHomeDashboard({
   allowLegacyFallback = true,
 } = {}) {
   const loadToken = nextLoadToken();
-  const firstLoad = !Boolean(homeState?.hydrated);
+
+  const firstLoad = !Boolean(
+    homeState?.hydrated ||
+      homeState?.loaded ||
+      Object.keys(safeObject(homeState?.dashboard)).length
+  );
+
   const shouldShowLoading = firstLoad && !force;
+
+  safeEmit("home:dashboard:load:start", {
+    force: Boolean(force),
+    firstLoad,
+  });
 
   try {
     setError(null);
@@ -826,11 +1259,21 @@ export async function loadHomeDashboard({
 
     const requestId = getRequestIdFromPayload(rawResponse);
     const dashboard = normalizeDashboard(rawResponse);
+
+    if (!looksLikeDashboard(dashboard)) {
+      throw new Error("EMPTY_HOME_DASHBOARD");
+    }
+
     const widgets = safeArray(dashboard?.widgets);
     const summary = safeObject(dashboard?.summary);
     const recent = safeArray(dashboard?.recent);
+    const syncedAt = Date.now();
 
     if (!isActiveLoadToken(loadToken)) {
+      safeEmit("home:dashboard:load:stale", {
+        requestId,
+      });
+
       return safeObject(homeState?.dashboard);
     }
 
@@ -840,12 +1283,14 @@ export async function loadHomeDashboard({
       summary,
       recent,
       requestId,
-      lastSyncAt: Date.now(),
+      lastSyncAt: syncedAt,
     });
 
     widgets.forEach((item) => {
       if (looksLikeWidget(item)) {
-        upsertHomeWidgetStore?.(item);
+        try {
+          upsertHomeWidgetStore?.(item);
+        } catch {}
       }
     });
 
@@ -854,10 +1299,17 @@ export async function loadHomeDashboard({
     setSummary(summary);
     setRecent(recent);
     setRequestId(requestId);
-    setLastSyncAt(Date.now());
+    setLastSyncAt(syncedAt);
     setLoaded(true);
     setHydrated?.(true);
     setError(null);
+
+    safeEmit("home:dashboard:load:success", {
+      requestId,
+      widgetsCount: widgets.length,
+      recentCount: recent.length,
+      syncedAt,
+    });
 
     return dashboard;
   } catch (error) {
@@ -867,13 +1319,22 @@ export async function loadHomeDashboard({
     );
 
     if (!isActiveLoadToken(loadToken)) {
+      safeEmit("home:dashboard:load:error:stale", {
+        message,
+      });
+
       return safeObject(homeState?.dashboard);
     }
 
-    console.error("❌ HOME DASHBOARD LOAD:", error);
+    safeError("HOME DASHBOARD LOAD:", error);
 
     setError(message);
     setLoaded(true);
+
+    safeEmit("home:dashboard:load:error", {
+      message,
+      error,
+    });
 
     throw error;
   } finally {
@@ -893,12 +1354,23 @@ export async function loadHomeHealth({
 } = {}) {
   try {
     const health = await fetchHomeHealthRequest();
+    const normalizedHealth = safeObject(
+      unwrapResponseEnvelope(health)
+    );
 
-    setHealth?.(safeObject(health));
+    setHealth?.(normalizedHealth);
 
-    return safeObject(health);
+    safeEmit("home:health:success", {
+      health: normalizedHealth,
+    });
+
+    return normalizedHealth;
   } catch (error) {
-    console.error("❌ HOME DASHBOARD PING:", error);
+    safeError("HOME DASHBOARD PING:", error);
+
+    safeEmit("home:health:error", {
+      error,
+    });
 
     if (!silent) {
       throw error;
@@ -920,16 +1392,56 @@ export async function refreshHomeDashboard(options = {}) {
 }
 
 /* =========================================================
+   DEBUG
+========================================================= */
+
+export function getHomeApiSnapshot() {
+  return {
+    endpoints: {
+      dashboard: HOME_DASHBOARD_ENDPOINT,
+      legacyDashboard: HOME_DASHBOARD_LEGACY_ENDPOINT,
+      health: HOME_DASHBOARD_PING_ENDPOINT,
+    },
+
+    apiBase: getApiBase(),
+    hasApiClient: Boolean(getApiClient()),
+    hasAppCoreRequest: isFn(AppCore?.request),
+    hasHttpModule: Boolean(getHttpModule()),
+    hasFetch: typeof fetch === "function",
+    hasToken: Boolean(getAuthToken()),
+
+    lastLoadToken,
+
+    state: {
+      loading: Boolean(homeState?.loading),
+      refreshing: Boolean(homeState?.refreshing),
+      loaded: Boolean(homeState?.loaded),
+      hydrated: Boolean(homeState?.hydrated),
+      requestId: safeText(homeState?.requestId, ""),
+      widgetsCount: safeArray(homeState?.widgets).length,
+      recentCount: safeArray(homeState?.recent).length,
+      lastSyncAt: homeState?.lastSyncAt || null,
+      error: homeState?.error || null,
+    },
+  };
+}
+
+/* =========================================================
    DEFAULT EXPORT
 ========================================================= */
 
 export default {
   fetchHomeDashboardRequest,
   fetchHomeHealthRequest,
+
   getHomeDashboardRequest,
   getHomeWidgetByIdRequest,
+
   hydrateHomeFromCache,
+
   loadHomeDashboard,
   loadHomeHealth,
   refreshHomeDashboard,
+
+  getHomeApiSnapshot,
 };

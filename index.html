@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html
   lang="es"
-  data-theme="system"
-  data-theme-source="system"
-  class="app-booting app-loading"
+  data-theme="dark"
+  data-theme-mode="system"
+  data-theme-source="initial"
+  class="app-booting app-loading theme-dark"
 >
 <head>
   <!-- =========================================================
@@ -21,13 +22,18 @@
        - NO preload del favicon real para evitar warning Chrome
        - loader estático inicial para refresh sin parpadeos
        - logo del loader dependiente del tema resuelto por preboot
-       - theme preboot externo antes del CSS
+       - theme preboot externo antes del CSS final
        - shell SPA limpio
        - sidebar / topbar montados por JS
        - slot tablehead preparado
        - sesión restaurada sin flash visual
-       - rutas públicas técnicas protegidas por main/router
+       - rutas SPA resueltas por router/staticwebapp.config.json
        - base sólida enterprise
+
+       IMPORTANTE:
+       - /src/preboot/theme.js NO debe contener <script>
+       - /src/preboot/theme.js NO debe contener HTML
+       - index.html debe empezar siempre por <!DOCTYPE html>
   ========================================================= -->
 
   <!-- =========================
@@ -74,14 +80,8 @@
 
   <meta
     name="theme-color"
-    content="#0f172a"
-    media="(prefers-color-scheme: dark)"
-  >
-
-  <meta
-    name="theme-color"
-    content="#f8fafc"
-    media="(prefers-color-scheme: light)"
+    content="#0a0c11"
+    data-onion-theme-color="true"
   >
 
   <meta
@@ -184,16 +184,14 @@
   <!-- =========================
        PREBOOT THEME FIX
        CSP CLEAN:
-       - sin inline script
-       - debe ejecutarse antes del CSS final
-       - debe resolver:
-           data-theme="dark"  si system dark
-           data-theme="light" si system light
-       - source inicial esperado: system
+       - externo
+       - síncrono
+       - antes del CSS final
+       - resuelve data-theme real:
+           dark  si system dark
+           light si system light
   ========================= -->
-  <script
-    src="/src/preboot/theme.js"
-  ></script>
+  <script src="/src/preboot/theme.js"></script>
 
   <!-- =========================
        CSS ORDER
@@ -268,10 +266,13 @@
 </head>
 
 <body
-  class="app-booting app-loading"
+  class="app-booting app-loading theme-dark"
   data-app="onion"
   data-density="default"
   data-app-loading="true"
+  data-theme="dark"
+  data-theme-mode="system"
+  data-theme-source="initial"
 >
   <!-- =========================================================
        BOOT LOADER ESTÁTICO

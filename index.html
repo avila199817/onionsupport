@@ -13,14 +13,15 @@
        - CSP clean
        - cero scripts inline
        - cero CSS inline
+       - favicon real de pestaña: favicon_black_circle.png
        - loader estático inicial para refresh sin parpadeos
        - logo del loader dependiente del tema
-       - dark theme  -> favicon_white.png
-       - light theme -> favicon_black.png
-       - theme preboot externo
+       - theme preboot externo antes del CSS
        - shell SPA limpio
        - sidebar / topbar montados por JS
+       - slot tablehead preparado
        - sesión restaurada sin flash visual
+       - rutas públicas técnicas protegidas por main/router
        - base sólida enterprise
   ========================================================= -->
 
@@ -42,6 +43,11 @@
   <title>Onion Support</title>
 
   <meta
+    name="application-name"
+    content="Onion Support"
+  >
+
+  <meta
     name="description"
     content="Onion Support · Panel SaaS de soporte, incidencias, facturación y gestión interna."
   >
@@ -49,6 +55,11 @@
   <meta
     name="robots"
     content="noindex, nofollow"
+  >
+
+  <meta
+    name="referrer"
+    content="strict-origin-when-cross-origin"
   >
 
   <meta
@@ -68,33 +79,54 @@
     media="(prefers-color-scheme: light)"
   >
 
+  <meta
+    name="mobile-web-app-capable"
+    content="yes"
+  >
+
+  <meta
+    name="apple-mobile-web-app-capable"
+    content="yes"
+  >
+
+  <meta
+    name="apple-mobile-web-app-title"
+    content="Onion Support"
+  >
+
+  <meta
+    name="apple-mobile-web-app-status-bar-style"
+    content="black-translucent"
+  >
+
+  <meta
+    name="format-detection"
+    content="telephone=no"
+  >
+
   <!-- =========================
        BASE SPA
   ========================= -->
   <base href="/">
 
   <!-- =========================
-       ICONS
-       dark  -> white icon
-       light -> black icon
+       FAVICON REAL DE PESTAÑA
   ========================= -->
   <link
     rel="icon"
-    href="/src/media/img/favicon_white.png"
+    href="/src/media/img/favicon_black_circle.png"
     type="image/png"
-    media="(prefers-color-scheme: dark)"
-  >
-
-  <link
-    rel="icon"
-    href="/src/media/img/favicon_black.png"
-    type="image/png"
-    media="(prefers-color-scheme: light)"
   >
 
   <link
     rel="shortcut icon"
-    href="/src/media/img/Logo_Intro.ico"
+    href="/src/media/img/favicon_black_circle.png"
+    type="image/png"
+  >
+
+  <link
+    rel="apple-touch-icon"
+    href="/src/media/img/favicon_black_circle.png"
   >
 
   <!-- =========================
@@ -113,6 +145,13 @@
 
   <link
     rel="preload"
+    href="/src/media/img/favicon_black_circle.png"
+    as="image"
+    type="image/png"
+  >
+
+  <link
+    rel="preload"
     href="/src/media/img/favicon_white.png"
     as="image"
     type="image/png"
@@ -123,6 +162,11 @@
     href="/src/media/img/favicon_black.png"
     as="image"
     type="image/png"
+  >
+
+  <link
+    rel="modulepreload"
+    href="/src/main.js"
   >
 
   <!-- =========================
@@ -137,7 +181,7 @@
        PREBOOT THEME FIX
        CSP CLEAN:
        - sin inline script
-       - se ejecuta antes del CSS final
+       - debe ejecutarse antes del CSS final
   ========================= -->
   <script
     src="/src/preboot/theme.js"
@@ -223,10 +267,11 @@
 >
   <!-- =========================================================
        BOOT LOADER ESTÁTICO
-       - Visible desde refresh antes de que cargue JS
-       - Controlado después por src/app/loader.js
-       - No usa inline script ni inline style
-       - Logo dependiente de html[data-theme]
+       - visible desde refresh antes de que cargue JS
+       - controlado después por src/app/loader.js / src/main.js
+       - sin inline script
+       - sin inline style
+       - logo dependiente de html[data-theme]
   ========================================================= -->
   <div
     id="app-loader"
@@ -330,7 +375,8 @@
        APP LAYOUT
        - Sidebar montado por JS
        - Topbar montado por JS
-       - Loader inicial ya existe y lo controla src/app/loader.js
+       - Tablehead dinámico preparado
+       - Loader inicial ya existe y lo controla JS
   ========================================================= -->
   <div
     class="layout app-shell"
@@ -357,7 +403,23 @@
       role="main"
       aria-label="Contenido principal"
       tabindex="-1"
+      aria-busy="true"
     >
+      <!-- TABLEHEAD DYNAMIC SLOT -->
+      <div
+        id="table-head"
+        class="table-head"
+        data-tablehead
+        hidden
+        aria-hidden="true"
+      >
+        <div
+          id="tablehead-container"
+          data-tablehead-container
+        ></div>
+      </div>
+
+      <!-- VIEW ROOT -->
       <div
         id="app-content"
         data-app-content

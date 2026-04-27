@@ -23,6 +23,12 @@
    - rate-limit: 429 / retryAfter / cooldownSeconds
    - errores normalizados sin throws hacia la UI pública
    - confirm password estricto
+
+   FIX CRÍTICO:
+   - eliminado conflicto SyntaxError:
+       Identifier 'response' has already been declared
+   - getNode() expone responseNode en lugar de response
+   - todos los resolvers usan responseNode
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -33,6 +39,13 @@ import {
   getRequestPasswordResetEndpoint as getRequestPasswordResetEndpointFromConstants,
   getConfirmPasswordResetEndpoint as getConfirmPasswordResetEndpointFromConstants,
 } from "./constants.js";
+
+/* =========================================================
+   VERSION / DEBUG MARKER
+========================================================= */
+
+export const PASSWORD_RESET_MODULE_VERSION =
+  "password-reset.2026-04-27.response-node-fix";
 
 /* =========================================================
    BASICS
@@ -139,9 +152,9 @@ function pickFirstText(...values) {
   );
 }
 
-function getNode(response = {}) {
+function getNode(input = {}) {
   const root =
-    safeObject(response);
+    safeObject(input);
 
   const data =
     safeObject(root.data);
@@ -167,8 +180,7 @@ function getNode(response = {}) {
     payload,
     result,
     body,
-    response:
-      responseNode,
+    responseNode,
     responseData,
   };
 }
@@ -329,17 +341,6 @@ export function getConfirmResetPasswordEndpoint() {
 /* =========================================================
    REDIRECT SAFETY
 ========================================================= */
-
-function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
-    return window.location.origin;
-  }
-
-  return "http://localhost";
-}
 
 function normalizeRelativePath(path = "") {
   let value =
@@ -611,15 +612,16 @@ export function buildConfirmResetPasswordBody(payload = {}) {
    RESPONSE NORMALIZATION
 ========================================================= */
 
-function resolveExplicitOk(response = {}) {
+function resolveExplicitOk(input = {}) {
   const {
     root,
     data,
     payload,
     result,
     body,
+    responseNode,
     responseData,
-  } = getNode(response);
+  } = getNode(input);
 
   const values = [
     root.ok,
@@ -647,6 +649,11 @@ function resolveExplicitOk(response = {}) {
     body.valid,
     body.accepted,
 
+    responseNode.ok,
+    responseNode.success,
+    responseNode.valid,
+    responseNode.accepted,
+
     responseData.ok,
     responseData.success,
     responseData.valid,
@@ -662,16 +669,16 @@ function resolveExplicitOk(response = {}) {
   return null;
 }
 
-function resolveStatus(response = {}) {
+function resolveStatus(input = {}) {
   const {
     root,
     data,
     payload,
     result,
     body,
-    response: responseNode,
+    responseNode,
     responseData,
-  } = getNode(response);
+  } = getNode(input);
 
   return safeNumber(
     pickFirst(
@@ -707,15 +714,16 @@ function resolveStatus(response = {}) {
   );
 }
 
-function resolveRetryAfter(response = {}) {
+function resolveRetryAfter(input = {}) {
   const {
     root,
     data,
     payload,
     result,
     body,
+    responseNode,
     responseData,
-  } = getNode(response);
+  } = getNode(input);
 
   return Math.max(
     0,
@@ -746,6 +754,11 @@ function resolveRetryAfter(response = {}) {
         body.cooldownSeconds,
         body.cooldown_seconds,
 
+        responseNode.retryAfter,
+        responseNode.retry_after,
+        responseNode.cooldownSeconds,
+        responseNode.cooldown_seconds,
+
         responseData.retryAfter,
         responseData.retry_after,
         responseData.cooldownSeconds,
@@ -756,15 +769,16 @@ function resolveRetryAfter(response = {}) {
   );
 }
 
-function resolveMessage(response = {}, fallback = "") {
+function resolveMessage(input = {}, fallback = "") {
   const {
     root,
     data,
     payload,
     result,
     body,
+    responseNode,
     responseData,
-  } = getNode(response);
+  } = getNode(input);
 
   return pickFirstText(
     root.message,
@@ -792,6 +806,11 @@ function resolveMessage(response = {}, fallback = "") {
     body.detail,
     body.error,
 
+    responseNode.message,
+    responseNode.mensaje,
+    responseNode.detail,
+    responseNode.error,
+
     responseData.message,
     responseData.mensaje,
     responseData.detail,
@@ -801,15 +820,16 @@ function resolveMessage(response = {}, fallback = "") {
   );
 }
 
-function resolveRedirectTo(response = {}, fallback = "") {
+function resolveRedirectTo(input = {}, fallback = "") {
   const {
     root,
     data,
     payload,
     result,
     body,
+    responseNode,
     responseData,
-  } = getNode(response);
+  } = getNode(input);
 
   return sanitizeRedirect(
     pickFirstText(
@@ -833,6 +853,10 @@ function resolveRedirectTo(response = {}, fallback = "") {
       body.redirect_to,
       body.redirect,
 
+      responseNode.redirectTo,
+      responseNode.redirect_to,
+      responseNode.redirect,
+
       responseData.redirectTo,
       responseData.redirect_to,
       responseData.redirect,
@@ -842,15 +866,16 @@ function resolveRedirectTo(response = {}, fallback = "") {
   );
 }
 
-function resolveEmailMasked(response = {}) {
+function resolveEmailMasked(input = {}) {
   const {
     root,
     data,
     payload,
     result,
     body,
+    responseNode,
     responseData,
-  } = getNode(response);
+  } = getNode(input);
 
   return pickFirstText(
     root.emailMasked,
@@ -873,18 +898,22 @@ function resolveEmailMasked(response = {}) {
     body.maskedEmail,
     body.masked_email,
 
+    responseNode.emailMasked,
+    responseNode.maskedEmail,
+    responseNode.masked_email,
+
     responseData.emailMasked,
     responseData.maskedEmail,
     responseData.masked_email
   );
 }
 
-function isCooldownResponse(response = {}) {
+function isCooldownResponse(input = {}) {
   const status =
-    resolveStatus(response);
+    resolveStatus(input);
 
   const retryAfter =
-    resolveRetryAfter(response);
+    resolveRetryAfter(input);
 
   const {
     root,
@@ -892,8 +921,9 @@ function isCooldownResponse(response = {}) {
     payload,
     result,
     body,
+    responseNode,
     responseData,
-  } = getNode(response);
+  } = getNode(input);
 
   return Boolean(
     status === 429 ||
@@ -903,22 +933,23 @@ function isCooldownResponse(response = {}) {
       payload.cooldown === true ||
       result.cooldown === true ||
       body.cooldown === true ||
+      responseNode.cooldown === true ||
       responseData.cooldown === true
   );
 }
 
-export function normalizeResetPasswordResponse(response = {}) {
+export function normalizeResetPasswordResponse(input = {}) {
   const explicitOk =
-    resolveExplicitOk(response);
+    resolveExplicitOk(input);
 
   const status =
-    resolveStatus(response);
+    resolveStatus(input);
 
   const retryAfter =
-    resolveRetryAfter(response);
+    resolveRetryAfter(input);
 
   const cooldown =
-    isCooldownResponse(response);
+    isCooldownResponse(input);
 
   /*
     Regla estricta:
@@ -931,7 +962,7 @@ export function normalizeResetPasswordResponse(response = {}) {
 
   const message =
     resolveMessage(
-      response,
+      input,
       ok
         ? getDefaultSuccessMessage()
         : cooldown
@@ -941,7 +972,7 @@ export function normalizeResetPasswordResponse(response = {}) {
 
   return {
     raw:
-      response,
+      input,
 
     ok,
     success:
@@ -961,25 +992,25 @@ export function normalizeResetPasswordResponse(response = {}) {
     message,
 
     redirectTo:
-      resolveRedirectTo(response, ""),
+      resolveRedirectTo(input, ""),
 
     emailMasked:
-      resolveEmailMasked(response),
+      resolveEmailMasked(input),
   };
 }
 
-export function normalizeConfirmResetPasswordResponse(response = {}) {
+export function normalizeConfirmResetPasswordResponse(input = {}) {
   const explicitOk =
-    resolveExplicitOk(response);
+    resolveExplicitOk(input);
 
   const status =
-    resolveStatus(response);
+    resolveStatus(input);
 
   const retryAfter =
-    resolveRetryAfter(response);
+    resolveRetryAfter(input);
 
   const cooldown =
-    isCooldownResponse(response);
+    isCooldownResponse(input);
 
   const ok =
     explicitOk === null
@@ -988,7 +1019,7 @@ export function normalizeConfirmResetPasswordResponse(response = {}) {
 
   const message =
     resolveMessage(
-      response,
+      input,
       ok
         ? getDefaultConfirmSuccessMessage()
         : cooldown
@@ -998,7 +1029,7 @@ export function normalizeConfirmResetPasswordResponse(response = {}) {
 
   return {
     raw:
-      response,
+      input,
 
     ok,
     success:
@@ -1018,7 +1049,7 @@ export function normalizeConfirmResetPasswordResponse(response = {}) {
     message,
 
     redirectTo:
-      resolveRedirectTo(response, "/login") || "/login",
+      resolveRedirectTo(input, "/login") || "/login",
   };
 }
 
@@ -1057,12 +1088,16 @@ function buildFinalUrl(endpoint = "") {
    ERROR NORMALIZATION
 ========================================================= */
 
-function normalizeTransportError(error = null, fallbackMessage = getDefaultErrorMessage()) {
+function normalizeTransportError(
+  error = null,
+  fallbackMessage = getDefaultErrorMessage()
+) {
   const status =
     safeNumber(
       error?.status ??
         error?.response?.status ??
         error?.data?.status ??
+        error?.response?.data?.status ??
         0,
       0
     );
@@ -1073,12 +1108,33 @@ function normalizeTransportError(error = null, fallbackMessage = getDefaultError
       safeNumber(
         error?.retryAfter ??
           error?.retry_after ??
+          error?.cooldownSeconds ??
+          error?.cooldown_seconds ??
           error?.data?.retryAfter ??
           error?.data?.retry_after ??
           error?.data?.cooldownSeconds ??
+          error?.data?.cooldown_seconds ??
+          error?.response?.data?.retryAfter ??
+          error?.response?.data?.retry_after ??
+          error?.response?.data?.cooldownSeconds ??
+          error?.response?.data?.cooldown_seconds ??
           0,
         0
       )
+    );
+
+  const message =
+    safeText(
+      error?.data?.message ??
+        error?.data?.mensaje ??
+        error?.data?.error ??
+        error?.response?.data?.message ??
+        error?.response?.data?.mensaje ??
+        error?.response?.data?.error ??
+        error?.message,
+      status === 429 || retryAfter > 0
+        ? getRateLimitMessage()
+        : fallbackMessage
     );
 
   return {
@@ -1098,19 +1154,12 @@ function normalizeTransportError(error = null, fallbackMessage = getDefaultError
     cooldown:
       status === 429 || retryAfter > 0,
 
-    message:
-      safeText(
-        error?.data?.message ??
-          error?.data?.mensaje ??
-          error?.data?.error ??
-          error?.message,
-        status === 429 || retryAfter > 0
-          ? getRateLimitMessage()
-          : fallbackMessage
-      ),
+    message,
 
     data:
-      error?.data || null,
+      error?.data ||
+      error?.response?.data ||
+      null,
 
     raw:
       error || null,
@@ -1121,7 +1170,11 @@ function normalizeTransportError(error = null, fallbackMessage = getDefaultError
    FETCH WITH TIMEOUT
 ========================================================= */
 
-async function fetchJsonWithTimeout(url, body, timeoutMs = getRequestTimeout()) {
+async function fetchJsonWithTimeout(
+  url,
+  body,
+  timeoutMs = getRequestTimeout()
+) {
   const controller =
     typeof AbortController !== "undefined"
       ? new AbortController()
@@ -1133,13 +1186,15 @@ async function fetchJsonWithTimeout(url, body, timeoutMs = getRequestTimeout()) 
           try {
             controller.abort("password-reset-timeout");
           } catch {
-            controller.abort();
+            try {
+              controller.abort();
+            } catch {}
           }
         }, timeoutMs)
       : null;
 
   try {
-    const response =
+    const httpResponse =
       await fetch(url, {
         method:
           "POST",
@@ -1161,7 +1216,7 @@ async function fetchJsonWithTimeout(url, body, timeoutMs = getRequestTimeout()) 
 
     try {
       data =
-        await response.json();
+        await httpResponse.json();
     } catch {
       data = null;
     }
@@ -1171,19 +1226,19 @@ async function fetchJsonWithTimeout(url, body, timeoutMs = getRequestTimeout()) 
         ? data
         : {};
 
-    if (!response.ok) {
+    if (!httpResponse.ok) {
       const error =
         new Error(
           resolveMessage(
             payload,
-            response.statusText || getDefaultErrorMessage()
+            httpResponse.statusText || getDefaultErrorMessage()
           )
         );
 
       error.status =
-        response.status;
+        httpResponse.status;
       error.statusText =
-        response.statusText;
+        httpResponse.statusText;
       error.data =
         payload;
       error.retryAfter =
@@ -1196,10 +1251,10 @@ async function fetchJsonWithTimeout(url, body, timeoutMs = getRequestTimeout()) 
       ...payload,
       status:
         payload.status ??
-        response.status,
+        httpResponse.status,
       statusCode:
         payload.statusCode ??
-        response.status,
+        httpResponse.status,
     };
   } finally {
     if (timer) {
@@ -1695,6 +1750,9 @@ export async function confirmPasswordReset(payload = {}, options = {}) {
 
 export function getPasswordResetSnapshot() {
   return {
+    version:
+      PASSWORD_RESET_MODULE_VERSION,
+
     requestEndpoint:
       getRequestPasswordResetEndpoint(),
 

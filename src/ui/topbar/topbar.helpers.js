@@ -2,17 +2,27 @@
    Onion SPA - Topbar Helpers
    Archivo: src/ui/topbar/topbar.helpers.js
 
-   EXTREME MODE · FULL PRO SAAS PANEL
+   FINAL PRO SYSTEM · TOPBAR HELPERS · PATH SAFE · SEARCH SAFE · 10/10
 
    Responsabilidades:
    - constantes base del topbar
    - helpers de texto y escape
    - normalización robusta de paths
+   - soporte hash-router /#/ruta y #!/ruta
+   - soporte rutas públicas con /@usuario
    - normalización de tipos de búsqueda
    - helpers de búsqueda, tokens y scoring
    - highlight seguro tolerante a acentos
    - agrupación profesional de resultados
    - utilidades puras de resultados
+
+   FIXES:
+   - isHashOnlyHref ya no confunde #/ruta con ancla
+   - getCurrentPublicPath soporta hash-router
+   - safeNormalizeCanonicalPath elimina query/hash y prefijo /@usuario
+   - safeNormalizePath no rompe URLs absolutas del mismo origen
+   - normalizeResultType tolera aliases backend heterogéneos
+   - highlight marca múltiples apariciones de forma segura
 ========================================================= */
 
 /* =========================================================
@@ -61,6 +71,8 @@ const TYPE_ALIASES = Object.freeze({
   soporte: TOPBAR_RESULT_TYPES.INCIDENCIA,
   averia: TOPBAR_RESULT_TYPES.INCIDENCIA,
   averias: TOPBAR_RESULT_TYPES.INCIDENCIA,
+  incidenciaid: TOPBAR_RESULT_TYPES.INCIDENCIA,
+  ticketid: TOPBAR_RESULT_TYPES.INCIDENCIA,
 
   factura: TOPBAR_RESULT_TYPES.FACTURA,
   facturas: TOPBAR_RESULT_TYPES.FACTURA,
@@ -70,6 +82,8 @@ const TYPE_ALIASES = Object.freeze({
   billing: TOPBAR_RESULT_TYPES.FACTURA,
   recibo: TOPBAR_RESULT_TYPES.FACTURA,
   recibos: TOPBAR_RESULT_TYPES.FACTURA,
+  facturaid: TOPBAR_RESULT_TYPES.FACTURA,
+  invoiceid: TOPBAR_RESULT_TYPES.FACTURA,
 
   cliente: TOPBAR_RESULT_TYPES.CLIENTE,
   clientes: TOPBAR_RESULT_TYPES.CLIENTE,
@@ -79,6 +93,9 @@ const TYPE_ALIASES = Object.freeze({
   customers: TOPBAR_RESULT_TYPES.CLIENTE,
   empresa: TOPBAR_RESULT_TYPES.CLIENTE,
   empresas: TOPBAR_RESULT_TYPES.CLIENTE,
+  clienteid: TOPBAR_RESULT_TYPES.CLIENTE,
+  clientid: TOPBAR_RESULT_TYPES.CLIENTE,
+  customerid: TOPBAR_RESULT_TYPES.CLIENTE,
 
   user: TOPBAR_RESULT_TYPES.USUARIO,
   users: TOPBAR_RESULT_TYPES.USUARIO,
@@ -88,6 +105,8 @@ const TYPE_ALIASES = Object.freeze({
   perfil: TOPBAR_RESULT_TYPES.USUARIO,
   account: TOPBAR_RESULT_TYPES.USUARIO,
   cuenta: TOPBAR_RESULT_TYPES.USUARIO,
+  userid: TOPBAR_RESULT_TYPES.USUARIO,
+  usuarioid: TOPBAR_RESULT_TYPES.USUARIO,
 
   nav: TOPBAR_RESULT_TYPES.NAV,
   route: TOPBAR_RESULT_TYPES.NAV,
@@ -96,6 +115,8 @@ const TYPE_ALIASES = Object.freeze({
   rutas: TOPBAR_RESULT_TYPES.NAV,
   navegacion: TOPBAR_RESULT_TYPES.NAV,
   navigation: TOPBAR_RESULT_TYPES.NAV,
+  page: TOPBAR_RESULT_TYPES.NAV,
+  pagina: TOPBAR_RESULT_TYPES.NAV,
 
   settings: TOPBAR_RESULT_TYPES.SETTINGS,
   setting: TOPBAR_RESULT_TYPES.SETTINGS,
@@ -110,6 +131,8 @@ const TYPE_ALIASES = Object.freeze({
   recent: TOPBAR_RESULT_TYPES.RECENT,
   recientes: TOPBAR_RESULT_TYPES.RECENT,
   recents: TOPBAR_RESULT_TYPES.RECENT,
+  history: TOPBAR_RESULT_TYPES.RECENT,
+  historial: TOPBAR_RESULT_TYPES.RECENT,
 
   general: TOPBAR_RESULT_TYPES.GENERAL,
   result: TOPBAR_RESULT_TYPES.GENERAL,
@@ -198,28 +221,61 @@ const STOP_WORDS = new Set([
    BASIC HELPERS
 ========================================================= */
 
-export function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
 
-  const text = String(value).trim();
+export function safeText(value, fallback = "") {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text =
+    String(value).trim();
+
   return text || fallback;
 }
 
 export function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 export function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
     ? value
     : {};
 }
 
 export function first(...values) {
   for (const value of values) {
-    if (value === null || value === undefined) continue;
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      continue;
+    }
 
-    if (typeof value === "string" && value.trim() === "") {
+    if (
+      typeof value === "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+    if (
+      Array.isArray(value) &&
+      value.length === 0
+    ) {
       continue;
     }
 
@@ -230,13 +286,11 @@ export function first(...values) {
 }
 
 export function escapeHtml(AppCore, value = "") {
-  if (AppCore?.utils?.escapeHtml) {
-    try {
+  try {
+    if (typeof AppCore?.utils?.escapeHtml === "function") {
       return AppCore.utils.escapeHtml(String(value ?? ""));
-    } catch {
-      /* fallback below */
     }
-  }
+  } catch {}
 
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -263,7 +317,8 @@ export function normalizeLooseText(value = "") {
 }
 
 export function normalizeCompactText(value = "") {
-  return normalizeLooseText(value).replace(/[^a-z0-9@._\-/#]/gi, "");
+  return normalizeLooseText(value)
+    .replace(/[^\p{L}\p{N}@._\-/#]/gu, "");
 }
 
 export function normalizeQuery(value = "") {
@@ -274,7 +329,8 @@ export function normalizeQuery(value = "") {
 }
 
 export function tokenize(value = "", options = {}) {
-  const includeStopWords = Boolean(options.includeStopWords);
+  const includeStopWords =
+    Boolean(options.includeStopWords);
 
   return normalizeLooseText(value)
     .split(/\s+/)
@@ -293,7 +349,9 @@ export function uniqBy(items = [], keyGetter) {
         ? safeText(keyGetter(item), "")
         : "";
 
-    if (!key || seen.has(key)) continue;
+    if (!key || seen.has(key)) {
+      continue;
+    }
 
     seen.add(key);
     result.push(item);
@@ -307,8 +365,14 @@ export function uniqBy(items = [], keyGetter) {
 ========================================================= */
 
 export function normalizeResultType(type = "general") {
-  const raw = normalizeCompactText(type || "general");
-  return TYPE_ALIASES[raw] || raw || TOPBAR_RESULT_TYPES.GENERAL;
+  const raw =
+    normalizeCompactText(type || "general");
+
+  return (
+    TYPE_ALIASES[raw] ||
+    raw ||
+    TOPBAR_RESULT_TYPES.GENERAL
+  );
 }
 
 export function isResultType(type = "", expected = "") {
@@ -316,53 +380,219 @@ export function isResultType(type = "", expected = "") {
 }
 
 export function getTypeLabel(type = "general") {
-  const normalized = normalizeResultType(type);
-  return TYPE_LABELS[normalized] || TYPE_LABELS[TOPBAR_RESULT_TYPES.GENERAL];
+  const normalized =
+    normalizeResultType(type);
+
+  return (
+    TYPE_LABELS[normalized] ||
+    TYPE_LABELS[TOPBAR_RESULT_TYPES.GENERAL]
+  );
 }
 
 export function getTypeIcon(type = "general") {
-  const normalized = normalizeResultType(type);
-  return TYPE_ICONS[normalized] || TYPE_ICONS[TOPBAR_RESULT_TYPES.GENERAL];
+  const normalized =
+    normalizeResultType(type);
+
+  return (
+    TYPE_ICONS[normalized] ||
+    TYPE_ICONS[TOPBAR_RESULT_TYPES.GENERAL]
+  );
 }
 
 export function getTypeGroupOrder(type = "general") {
-  const normalized = normalizeResultType(type);
-  const index = TYPE_GROUP_ORDER.indexOf(normalized);
+  const normalized =
+    normalizeResultType(type);
 
-  return index === -1 ? TYPE_GROUP_ORDER.length : index;
+  const index =
+    TYPE_GROUP_ORDER.indexOf(normalized);
+
+  return index === -1
+    ? TYPE_GROUP_ORDER.length
+    : index;
 }
 
 /* =========================================================
    PATH HELPERS
 ========================================================= */
 
-export function isExternalHref(value = "") {
-  const raw = safeText(value, "");
+function getBaseOrigin() {
+  if (
+    isBrowser() &&
+    window.location?.origin
+  ) {
+    return window.location.origin;
+  }
 
-  if (!raw) return false;
+  return "http://localhost";
+}
 
-  return /^[a-z][a-z0-9+.-]*:\/\//i.test(raw);
+function hasAbsoluteScheme(value = "") {
+  return /^[a-z][a-z0-9+.-]*:/i.test(
+    safeText(value, "")
+  );
 }
 
 export function isUnsafeHref(value = "") {
-  const raw = safeText(value, "").toLowerCase();
+  const raw =
+    safeText(value, "").toLowerCase();
 
   return (
     raw.startsWith("javascript:") ||
     raw.startsWith("data:") ||
-    raw.startsWith("vbscript:")
+    raw.startsWith("vbscript:") ||
+    raw.startsWith("file:")
   );
 }
 
+export function isHashRouterPath(value = "") {
+  const raw =
+    safeText(value, "");
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+export function normalizeHashRouterPath(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/") || "/";
+  }
+
+  return raw.replace(/^#\/?/, "/") || "/";
+}
+
 export function isHashOnlyHref(value = "") {
-  return safeText(value, "").startsWith("#");
+  const raw =
+    safeText(value, "");
+
+  return Boolean(
+    raw.startsWith("#") &&
+      !isHashRouterPath(raw)
+  );
+}
+
+export function isExternalHref(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return false;
+  }
+
+  if (isUnsafeHref(raw)) {
+    return false;
+  }
+
+  if (raw.startsWith("//")) {
+    try {
+      const url =
+        new URL(raw, getBaseOrigin());
+
+      return url.origin !== getBaseOrigin();
+    } catch {
+      return true;
+    }
+  }
+
+  if (!hasAbsoluteScheme(raw)) {
+    return false;
+  }
+
+  try {
+    const url =
+      new URL(raw, getBaseOrigin());
+
+    if (
+      url.protocol === "http:" ||
+      url.protocol === "https:"
+    ) {
+      return url.origin !== getBaseOrigin();
+    }
+
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function stripSearchAndHash(path = "/") {
+  const raw =
+    safeText(path, "/");
+
+  const queryIndex =
+    raw.indexOf("?");
+
+  const hashIndex =
+    raw.indexOf("#");
+
+  let cutIndex = -1;
+
+  if (
+    queryIndex >= 0 &&
+    hashIndex >= 0
+  ) {
+    cutIndex = Math.min(queryIndex, hashIndex);
+  } else if (queryIndex >= 0) {
+    cutIndex = queryIndex;
+  } else if (hashIndex >= 0) {
+    cutIndex = hashIndex;
+  }
+
+  return cutIndex >= 0
+    ? raw.slice(0, cutIndex) || "/"
+    : raw || "/";
+}
+
+function stripUsernamePrefix(pathname = "/") {
+  return (
+    safeText(pathname, "/")
+      .replace(/^\/@[^/]+(?=\/|$)/i, "") ||
+    "/"
+  );
+}
+
+function normalizePathname(pathname = "/") {
+  let value =
+    safeText(pathname, "/")
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+  if (!value) {
+    value = "/";
+  }
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
 }
 
 export function safeNormalizePath(AppCore, path = "/") {
-  const raw = safeText(path, "/");
+  const raw =
+    safeText(path, "/");
 
   if (!raw || isUnsafeHref(raw)) {
     return "/";
+  }
+
+  if (isHashRouterPath(raw)) {
+    return safeNormalizePath(
+      AppCore,
+      normalizeHashRouterPath(raw)
+    );
   }
 
   if (isHashOnlyHref(raw)) {
@@ -370,24 +600,45 @@ export function safeNormalizePath(AppCore, path = "/") {
   }
 
   try {
-    if (typeof AppCore?.utils?.normalizePath === "function") {
-      const normalized = AppCore.utils.normalizePath(raw || "/");
+    if (
+      typeof AppCore?.utils?.normalizePath === "function" &&
+      !hasAbsoluteScheme(raw) &&
+      !raw.startsWith("//")
+    ) {
+      const normalized =
+        AppCore.utils.normalizePath(raw || "/");
+
       return safeText(normalized, "/");
     }
-  } catch {
-    /* fallback below */
-  }
+  } catch {}
 
   try {
-    /*
-      Si llega URL absoluta del mismo origen, se convierte a path SPA.
-      Si es externa, se mantiene como URL externa para fallback clásico.
-    */
-    if (isExternalHref(raw)) {
-      const url = new URL(raw, window.location.origin);
+    if (
+      hasAbsoluteScheme(raw) ||
+      raw.startsWith("//")
+    ) {
+      const url =
+        new URL(raw, getBaseOrigin());
 
-      if (url.origin === window.location.origin) {
-        return `${url.pathname || "/"}${url.search || ""}${url.hash || ""}`;
+      if (
+        url.protocol === "http:" ||
+        url.protocol === "https:"
+      ) {
+        if (url.origin !== getBaseOrigin()) {
+          return raw;
+        }
+
+        if (
+          url.hash &&
+          isHashRouterPath(url.hash)
+        ) {
+          return safeNormalizePath(
+            AppCore,
+            normalizeHashRouterPath(url.hash)
+          );
+        }
+
+        return `${normalizePathname(url.pathname || "/")}${url.search || ""}${url.hash || ""}`;
       }
 
       return raw;
@@ -396,41 +647,88 @@ export function safeNormalizePath(AppCore, path = "/") {
     return "/";
   }
 
-  const [pathAndSearch = "/", hashPart = ""] = raw.split("#");
-  const [pathnameRaw = "/", searchPart = ""] = pathAndSearch.split("?");
+  try {
+    const url =
+      new URL(
+        raw.startsWith("/")
+          ? raw
+          : `/${raw}`,
+        getBaseOrigin()
+      );
 
-  let pathname = safeText(pathnameRaw, "/");
+    if (
+      url.hash &&
+      isHashRouterPath(url.hash)
+    ) {
+      return safeNormalizePath(
+        AppCore,
+        normalizeHashRouterPath(url.hash)
+      );
+    }
 
-  if (!pathname.startsWith("/")) {
-    pathname = `/${pathname}`;
-  }
+    return `${normalizePathname(url.pathname || "/")}${url.search || ""}${url.hash || ""}`;
+  } catch {}
 
-  pathname = pathname.replace(/\/{2,}/g, "/");
+  const [pathAndSearch = "/", hashPart = ""] =
+    raw.split("#");
 
-  if (pathname.length > 1) {
-    pathname = pathname.replace(/\/+$/, "");
-  }
+  const [pathnameRaw = "/", searchPart = ""] =
+    pathAndSearch.split("?");
 
-  const search = searchPart ? `?${searchPart}` : "";
-  const hash = hashPart ? `#${hashPart}` : "";
+  const pathname =
+    normalizePathname(pathnameRaw || "/");
 
-  return `${pathname || "/"}${search}${hash}`;
+  const search =
+    searchPart ? `?${searchPart}` : "";
+
+  const hash =
+    hashPart ? `#${hashPart}` : "";
+
+  return `${pathname}${search}${hash}`;
 }
 
 export function safeNormalizeCanonicalPath(AppCore, path = "/") {
+  const raw =
+    safeText(path, "/");
+
+  let normalized = "";
+
   try {
     if (typeof AppCore?.utils?.normalizeCanonicalPath === "function") {
-      return AppCore.utils.normalizeCanonicalPath(path || "/");
+      normalized =
+        AppCore.utils.normalizeCanonicalPath(raw || "/");
     }
+  } catch {}
 
-    return safeNormalizePath(AppCore, path);
-  } catch {
-    return "/";
+  if (!normalized) {
+    normalized =
+      safeNormalizePath(AppCore, raw);
   }
+
+  const clean =
+    stripUsernamePrefix(
+      stripSearchAndHash(normalized)
+    );
+
+  return normalizePathname(clean || "/");
 }
 
 export function getCurrentPublicPath(AppCore) {
+  if (!isBrowser()) {
+    return "/";
+  }
+
   try {
+    const hash =
+      window.location.hash || "";
+
+    if (hash && isHashRouterPath(hash)) {
+      return safeNormalizePath(
+        AppCore,
+        normalizeHashRouterPath(hash)
+      );
+    }
+
     return safeNormalizePath(
       AppCore,
       `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
@@ -444,7 +742,9 @@ export function isMobileViewport(
   mobileBreakpoint = TOPBAR_SEARCH_CONFIG.mobileBreakpoint
 ) {
   try {
-    return window.matchMedia(`(max-width: ${mobileBreakpoint}px)`).matches;
+    return window.matchMedia(
+      `(max-width: ${mobileBreakpoint}px)`
+    ).matches;
   } catch {
     return false;
   }
@@ -455,21 +755,36 @@ export function isMobileViewport(
 ========================================================= */
 
 function boundedLevenshtein(a = "", b = "", maxDistance = 2) {
-  const x = normalizeCompactText(a);
-  const y = normalizeCompactText(b);
+  const x =
+    normalizeCompactText(a);
 
-  if (!x && !y) return 0;
-  if (!x || !y) return maxDistance + 1;
-  if (x === y) return 0;
+  const y =
+    normalizeCompactText(b);
 
-  const diff = Math.abs(x.length - y.length);
+  if (!x && !y) {
+    return 0;
+  }
+
+  if (!x || !y) {
+    return maxDistance + 1;
+  }
+
+  if (x === y) {
+    return 0;
+  }
+
+  const diff =
+    Math.abs(x.length - y.length);
 
   if (diff > maxDistance) {
     return maxDistance + 1;
   }
 
-  const previous = new Array(y.length + 1);
-  const current = new Array(y.length + 1);
+  const previous =
+    new Array(y.length + 1);
+
+  const current =
+    new Array(y.length + 1);
 
   for (let j = 0; j <= y.length; j += 1) {
     previous[j] = j;
@@ -478,18 +793,24 @@ function boundedLevenshtein(a = "", b = "", maxDistance = 2) {
   for (let i = 1; i <= x.length; i += 1) {
     current[0] = i;
 
-    let rowMin = current[0];
+    let rowMin =
+      current[0];
 
     for (let j = 1; j <= y.length; j += 1) {
-      const cost = x[i - 1] === y[j - 1] ? 0 : 1;
+      const cost =
+        x[i - 1] === y[j - 1]
+          ? 0
+          : 1;
 
-      current[j] = Math.min(
-        previous[j] + 1,
-        current[j - 1] + 1,
-        previous[j - 1] + cost
-      );
+      current[j] =
+        Math.min(
+          previous[j] + 1,
+          current[j - 1] + 1,
+          previous[j - 1] + cost
+        );
 
-      rowMin = Math.min(rowMin, current[j]);
+      rowMin =
+        Math.min(rowMin, current[j]);
     }
 
     if (rowMin > maxDistance) {
@@ -505,56 +826,122 @@ function boundedLevenshtein(a = "", b = "", maxDistance = 2) {
 }
 
 function scoreTokenMatch(fieldToken = "", queryToken = "") {
-  const field = normalizeLooseText(fieldToken);
-  const query = normalizeLooseText(queryToken);
+  const field =
+    normalizeLooseText(fieldToken);
 
-  if (!field || !query) return 0;
+  const query =
+    normalizeLooseText(queryToken);
 
-  if (field === query) return 120;
-  if (field.startsWith(query)) return 82;
-  if (query.startsWith(field) && field.length >= 3) return 54;
-  if (field.includes(query)) return 42;
+  if (!field || !query) {
+    return 0;
+  }
 
-  if (field.length >= 3 && query.length >= 3) {
-    const distance = boundedLevenshtein(field, query, 2);
+  if (field === query) {
+    return 120;
+  }
 
-    if (distance === 1) return 24;
-    if (distance === 2) return 10;
+  if (field.startsWith(query)) {
+    return 82;
+  }
+
+  if (
+    query.startsWith(field) &&
+    field.length >= 3
+  ) {
+    return 54;
+  }
+
+  if (field.includes(query)) {
+    return 42;
+  }
+
+  if (
+    field.length >= 3 &&
+    query.length >= 3
+  ) {
+    const distance =
+      boundedLevenshtein(field, query, 2);
+
+    if (distance === 1) {
+      return 24;
+    }
+
+    if (distance === 2) {
+      return 10;
+    }
   }
 
   return 0;
 }
 
 export function scoreTextMatch(text = "", query = "") {
-  const t = normalizeLooseText(text);
-  const q = normalizeLooseText(query);
+  const t =
+    normalizeLooseText(text);
 
-  if (!t || !q) return 0;
+  const q =
+    normalizeLooseText(query);
+
+  if (!t || !q) {
+    return 0;
+  }
 
   let score = 0;
 
-  if (t === q) score += 260;
-  if (t.startsWith(q)) score += 150;
-  if (t.includes(` ${q}`)) score += 104;
-  if (t.includes(q)) score += 86;
-
-  const compactText = normalizeCompactText(t);
-  const compactQuery = normalizeCompactText(q);
-
-  if (compactText && compactQuery) {
-    if (compactText === compactQuery) score += 190;
-    if (compactText.startsWith(compactQuery)) score += 92;
-    if (compactText.includes(compactQuery)) score += 48;
+  if (t === q) {
+    score += 260;
   }
 
-  const textTokens = tokenize(t, { includeStopWords: true });
-  const queryTokens = tokenize(q, { includeStopWords: true });
+  if (t.startsWith(q)) {
+    score += 150;
+  }
+
+  if (t.includes(` ${q}`)) {
+    score += 104;
+  }
+
+  if (t.includes(q)) {
+    score += 86;
+  }
+
+  const compactText =
+    normalizeCompactText(t);
+
+  const compactQuery =
+    normalizeCompactText(q);
+
+  if (compactText && compactQuery) {
+    if (compactText === compactQuery) {
+      score += 190;
+    }
+
+    if (compactText.startsWith(compactQuery)) {
+      score += 92;
+    }
+
+    if (compactText.includes(compactQuery)) {
+      score += 48;
+    }
+  }
+
+  const textTokens =
+    tokenize(t, {
+      includeStopWords: true,
+    });
+
+  const queryTokens =
+    tokenize(q, {
+      includeStopWords: true,
+    });
 
   for (const qToken of queryTokens) {
     let bestTokenScore = 0;
 
     for (const tToken of textTokens) {
-      bestTokenScore = Math.max(bestTokenScore, scoreTokenMatch(tToken, qToken));
+      bestTokenScore =
+        Math.max(
+          bestTokenScore,
+          scoreTokenMatch(tToken, qToken)
+        );
     }
 
     score += bestTokenScore;
@@ -564,7 +951,8 @@ export function scoreTextMatch(text = "", query = "") {
 }
 
 function extractSearchableValues(item = {}) {
-  const raw = safeObject(item.raw);
+  const raw =
+    safeObject(item.raw);
 
   return [
     item.id,
@@ -581,6 +969,8 @@ function extractSearchableValues(item = {}) {
     raw._id,
     raw.uuid,
     raw.entityId,
+    raw.searchId,
+    raw.resultId,
 
     raw.userId,
     raw.usuarioId,
@@ -588,6 +978,8 @@ function extractSearchableValues(item = {}) {
     raw.email,
     raw.role,
     raw.rol,
+    raw.displayName,
+    raw.fullName,
 
     raw.clienteId,
     raw.clientId,
@@ -617,22 +1009,38 @@ function extractSearchableValues(item = {}) {
     raw.numero,
     raw.numeroFactura,
     raw.numeroFacturaLegal,
+    raw.numeroFacturaSistema,
     raw.invoiceCode,
+    raw.invoiceNumber,
     raw.total,
     raw.amount,
 
     ...safeArray(item.keywords),
     ...safeArray(raw.keywords),
-  ].filter((value) => value !== null && value !== undefined && value !== "");
+  ].filter((value) => {
+    return (
+      value !== null &&
+      value !== undefined &&
+      String(value).trim() !== ""
+    );
+  });
 }
 
 function getQueryIntentTypes(query = "") {
-  const q = normalizeLooseText(query);
-  const tokens = tokenize(q, { includeStopWords: true });
-  const types = new Set();
+  const q =
+    normalizeLooseText(query);
+
+  const tokens =
+    tokenize(q, {
+      includeStopWords: true,
+    });
+
+  const types =
+    new Set();
 
   for (const token of tokens) {
-    const mapped = normalizeResultType(token);
+    const mapped =
+      normalizeResultType(token);
 
     if (
       [
@@ -653,23 +1061,23 @@ function getQueryIntentTypes(query = "") {
     types.add(TOPBAR_RESULT_TYPES.CLIENTE);
   }
 
-  if (/\b(ticket|incidencia|soporte|averia|averias)\b/.test(q)) {
+  if (/\b(ticket|tickets|incidencia|incidencias|soporte|averia|averias|issue|issues)\b/.test(q)) {
     types.add(TOPBAR_RESULT_TYPES.INCIDENCIA);
   }
 
-  if (/\b(factura|facturas|invoice|billing|recibo)\b/.test(q)) {
+  if (/\b(factura|facturas|invoice|invoices|billing|recibo|recibos)\b/.test(q)) {
     types.add(TOPBAR_RESULT_TYPES.FACTURA);
   }
 
-  if (/\b(cliente|clientes|empresa|empresas)\b/.test(q)) {
+  if (/\b(cliente|clientes|client|clients|empresa|empresas|customer|customers)\b/.test(q)) {
     types.add(TOPBAR_RESULT_TYPES.CLIENTE);
   }
 
-  if (/\b(usuario|usuarios|user|users|perfil|cuenta)\b/.test(q)) {
+  if (/\b(usuario|usuarios|user|users|perfil|profile|cuenta|account)\b/.test(q)) {
     types.add(TOPBAR_RESULT_TYPES.USUARIO);
   }
 
-  if (/\b(ajustes|settings|configuracion|preferencias)\b/.test(q)) {
+  if (/\b(ajustes|settings|configuracion|config|preferencias|preferences)\b/.test(q)) {
     types.add(TOPBAR_RESULT_TYPES.SETTINGS);
   }
 
@@ -677,24 +1085,37 @@ function getQueryIntentTypes(query = "") {
 }
 
 function getTypeBoost(item = {}, query = "") {
-  const type = normalizeResultType(item.type);
-  const intentTypes = getQueryIntentTypes(query);
+  const type =
+    normalizeResultType(item.type);
 
-  let boost = TYPE_BASE_BOOST[type] || TYPE_BASE_BOOST[TOPBAR_RESULT_TYPES.GENERAL];
+  const intentTypes =
+    getQueryIntentTypes(query);
+
+  let boost =
+    TYPE_BASE_BOOST[type] ||
+    TYPE_BASE_BOOST[TOPBAR_RESULT_TYPES.GENERAL];
 
   if (intentTypes.includes(type)) {
     boost += 52;
   }
 
-  if (intentTypes.length && !intentTypes.includes(type)) {
-    boost -= type === TOPBAR_RESULT_TYPES.NAV ? 14 : 6;
+  if (
+    intentTypes.length &&
+    !intentTypes.includes(type)
+  ) {
+    boost -= type === TOPBAR_RESULT_TYPES.NAV
+      ? 14
+      : 6;
   }
 
   if (item.source === "api") {
     boost += 10;
   }
 
-  if (item.source === "local" && type === TOPBAR_RESULT_TYPES.NAV) {
+  if (
+    item.source === "local" &&
+    type === TOPBAR_RESULT_TYPES.NAV
+  ) {
     boost += 2;
   }
 
@@ -702,47 +1123,77 @@ function getTypeBoost(item = {}, query = "") {
 }
 
 function getHeuristicBoost(item = {}, query = "") {
-  const type = normalizeResultType(item.type);
-  const q = normalizeLooseText(query);
-  const compactQuery = normalizeCompactText(q);
+  const type =
+    normalizeResultType(item.type);
 
-  if (!q || !compactQuery) return 0;
+  const q =
+    normalizeLooseText(query);
 
-  const raw = safeObject(item.raw);
-  const entityId = normalizeCompactText(
-    first(
-      item.entityId,
-      raw.entityId,
-      raw.id,
-      raw._id,
-      raw.userId,
-      raw.usuarioId,
-      raw.clienteId,
-      raw.clientId,
-      raw.ticketId,
-      raw.incidenciaId,
-      raw.facturaId,
-      raw.invoiceId
-    ) || ""
-  );
+  const compactQuery =
+    normalizeCompactText(q);
+
+  if (!q || !compactQuery) {
+    return 0;
+  }
+
+  const raw =
+    safeObject(item.raw);
+
+  const entityId =
+    normalizeCompactText(
+      first(
+        item.entityId,
+        raw.entityId,
+        raw.id,
+        raw._id,
+        raw.userId,
+        raw.usuarioId,
+        raw.clienteId,
+        raw.clientId,
+        raw.ticketId,
+        raw.incidenciaId,
+        raw.facturaId,
+        raw.invoiceId
+      ) || ""
+    );
 
   let boost = 0;
 
   if (entityId) {
-    if (entityId === compactQuery) boost += 240;
-    if (entityId.startsWith(compactQuery)) boost += 120;
-    if (entityId.includes(compactQuery)) boost += 68;
+    if (entityId === compactQuery) {
+      boost += 240;
+    }
+
+    if (entityId.startsWith(compactQuery)) {
+      boost += 120;
+    }
+
+    if (entityId.includes(compactQuery)) {
+      boost += 68;
+    }
   }
 
-  if (/@/.test(q) && [TOPBAR_RESULT_TYPES.USUARIO, TOPBAR_RESULT_TYPES.CLIENTE].includes(type)) {
+  if (
+    /@/.test(q) &&
+    [
+      TOPBAR_RESULT_TYPES.USUARIO,
+      TOPBAR_RESULT_TYPES.CLIENTE,
+    ].includes(type)
+  ) {
     boost += 42;
   }
 
-  if (/^\d+$/.test(compactQuery) && type === TOPBAR_RESULT_TYPES.FACTURA) {
+  if (
+    /^\d+$/.test(compactQuery) &&
+    type === TOPBAR_RESULT_TYPES.FACTURA
+  ) {
     boost += 42;
   }
 
-  if (/^\d+$/.test(compactQuery) && type === TOPBAR_RESULT_TYPES.INCIDENCIA) {
+  if (
+    /^\d+$/.test(compactQuery) &&
+    type === TOPBAR_RESULT_TYPES.INCIDENCIA
+  ) {
     boost += 34;
   }
 
@@ -758,19 +1209,32 @@ function getHeuristicBoost(item = {}, query = "") {
 }
 
 export function scoreResult(item, query = "") {
-  const q = normalizeQuery(query);
+  const q =
+    normalizeQuery(query);
 
   if (!q) {
-    return normalizeResultType(item?.type) === TOPBAR_RESULT_TYPES.NAV ? 10 : 1;
+    return normalizeResultType(item?.type) === TOPBAR_RESULT_TYPES.NAV
+      ? 10
+      : 1;
   }
 
-  const type = normalizeResultType(item?.type);
-  const values = extractSearchableValues(item);
+  const type =
+    normalizeResultType(item?.type);
 
-  const titleScore = scoreTextMatch(item?.title, q) * 3.2;
-  const subtitleScore = scoreTextMatch(item?.subtitle, q) * 1.45;
-  const urlScore = scoreTextMatch(item?.url, q) * 0.7;
-  const entityScore = scoreTextMatch(item?.entityId, q) * 2.6;
+  const values =
+    extractSearchableValues(item);
+
+  const titleScore =
+    scoreTextMatch(item?.title, q) * 3.2;
+
+  const subtitleScore =
+    scoreTextMatch(item?.subtitle, q) * 1.45;
+
+  const urlScore =
+    scoreTextMatch(item?.url, q) * 0.7;
+
+  const entityScore =
+    scoreTextMatch(item?.entityId, q) * 2.6;
 
   let keywordScore = 0;
 
@@ -778,10 +1242,6 @@ export function scoreResult(item, query = "") {
     keywordScore += scoreTextMatch(value, q) * 0.24;
   }
 
-  /*
-    Penalización ligera para navegación cuando hay entidad real con match fuerte.
-    Evita que "factura 123" saque antes "/facturas" que la factura real.
-  */
   let navPenalty = 0;
 
   if (
@@ -808,7 +1268,9 @@ export function scoreResult(item, query = "") {
     getHeuristicBoost(item, q) -
     navPenalty;
 
-  return Math.round(Math.max(0, finalScore));
+  return Math.round(
+    Math.max(0, finalScore)
+  );
 }
 
 /* =========================================================
@@ -816,16 +1278,22 @@ export function scoreResult(item, query = "") {
 ========================================================= */
 
 function buildNormalizedIndexMap(value = "") {
-  const source = String(value ?? "");
+  const source =
+    String(value ?? "");
+
   let normalized = "";
+
   const map = [];
 
   for (let i = 0; i < source.length; i += 1) {
-    const originalChar = source[i];
-    const normalizedChar = originalChar
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase();
+    const originalChar =
+      source[i];
+
+    const normalizedChar =
+      originalChar
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
 
     for (let j = 0; j < normalizedChar.length; j += 1) {
       normalized += normalizedChar[j];
@@ -839,41 +1307,156 @@ function buildNormalizedIndexMap(value = "") {
   };
 }
 
+function addHighlightRanges(ranges = [], normalized = "", map = [], needle = "") {
+  const cleanNeedle =
+    normalizeText(needle);
+
+  if (!cleanNeedle) {
+    return ranges;
+  }
+
+  let startAt = 0;
+
+  while (startAt < normalized.length) {
+    const foundAt =
+      normalized.indexOf(cleanNeedle, startAt);
+
+    if (foundAt === -1) {
+      break;
+    }
+
+    const originalStart =
+      map[foundAt] ?? 0;
+
+    const originalLast =
+      map[foundAt + cleanNeedle.length - 1] ?? originalStart;
+
+    ranges.push([
+      originalStart,
+      originalLast + 1,
+    ]);
+
+    startAt =
+      foundAt + Math.max(1, cleanNeedle.length);
+  }
+
+  return ranges;
+}
+
+function mergeRanges(ranges = []) {
+  const sorted =
+    safeArray(ranges)
+      .filter((range) => {
+        return (
+          Array.isArray(range) &&
+          Number.isFinite(range[0]) &&
+          Number.isFinite(range[1]) &&
+          range[1] > range[0]
+        );
+      })
+      .sort((a, b) => a[0] - b[0]);
+
+  const merged = [];
+
+  for (const range of sorted) {
+    const last =
+      merged[merged.length - 1];
+
+    if (
+      last &&
+      range[0] <= last[1]
+    ) {
+      last[1] = Math.max(last[1], range[1]);
+      continue;
+    }
+
+    merged.push([...range]);
+  }
+
+  return merged;
+}
+
 export function highlight(AppCore, text = "", query = "") {
-  const source = String(text ?? "");
-  const needle = normalizeQuery(query);
+  const source =
+    String(text ?? "");
+
+  const needle =
+    normalizeQuery(query);
 
   if (!source || !needle) {
     return escapeHtml(AppCore, source);
   }
 
-  const { normalized, map } = buildNormalizedIndexMap(source);
-  const normalizedNeedle = normalizeText(needle);
+  const {
+    normalized,
+    map,
+  } = buildNormalizedIndexMap(source);
 
-  if (!normalizedNeedle) {
+  const normalizedNeedle =
+    normalizeText(needle);
+
+  if (!normalized || !normalizedNeedle) {
     return escapeHtml(AppCore, source);
   }
 
-  const foundAt = normalized.indexOf(normalizedNeedle);
+  const ranges = [];
 
-  if (foundAt === -1) {
+  addHighlightRanges(
+    ranges,
+    normalized,
+    map,
+    normalizedNeedle
+  );
+
+  const queryTokens =
+    tokenize(needle, {
+      includeStopWords: false,
+    }).filter((token) => token.length >= 2);
+
+  if (
+    ranges.length === 0 &&
+    queryTokens.length > 1
+  ) {
+    for (const token of queryTokens) {
+      addHighlightRanges(
+        ranges,
+        normalized,
+        map,
+        token
+      );
+    }
+  }
+
+  const merged =
+    mergeRanges(ranges);
+
+  if (!merged.length) {
     return escapeHtml(AppCore, source);
   }
 
-  const originalStart = map[foundAt] ?? 0;
-  const originalLast =
-    map[foundAt + normalizedNeedle.length - 1] ?? originalStart;
+  let output = "";
+  let cursor = 0;
 
-  const originalEnd = originalLast + 1;
+  for (const [start, end] of merged) {
+    output += escapeHtml(
+      AppCore,
+      source.slice(cursor, start)
+    );
 
-  const start = source.slice(0, originalStart);
-  const middle = source.slice(originalStart, originalEnd);
-  const end = source.slice(originalEnd);
+    output += `<mark>${escapeHtml(
+      AppCore,
+      source.slice(start, end)
+    )}</mark>`;
 
-  return `${escapeHtml(AppCore, start)}<mark>${escapeHtml(
+    cursor = end;
+  }
+
+  output += escapeHtml(
     AppCore,
-    middle
-  )}</mark>${escapeHtml(AppCore, end)}`;
+    source.slice(cursor)
+  );
+
+  return output;
 }
 
 /* =========================================================
@@ -884,7 +1467,11 @@ export function groupResults(results = []) {
   const groups = new Map();
 
   safeArray(results).forEach((item) => {
-    const key = normalizeResultType(item?.type || TOPBAR_RESULT_TYPES.GENERAL);
+    const key =
+      normalizeResultType(
+        item?.type ||
+          TOPBAR_RESULT_TYPES.GENERAL
+      );
 
     if (!groups.has(key)) {
       groups.set(key, []);
@@ -898,26 +1485,90 @@ export function groupResults(results = []) {
 
   return Array.from(groups.entries())
     .sort(([typeA], [typeB]) => {
-      const orderA = getTypeGroupOrder(typeA);
-      const orderB = getTypeGroupOrder(typeB);
+      const orderA =
+        getTypeGroupOrder(typeA);
 
-      if (orderA !== orderB) return orderA - orderB;
+      const orderB =
+        getTypeGroupOrder(typeB);
 
-      return String(typeA).localeCompare(String(typeB), "es", {
-        sensitivity: "base",
-      });
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+
+      return String(typeA).localeCompare(
+        String(typeB),
+        "es",
+        {
+          sensitivity: "base",
+        }
+      );
     })
     .map(([type, items]) => [
       type,
       [...items].sort((a, b) => {
-        const scoreA = Number(a?.score || 0);
-        const scoreB = Number(b?.score || 0);
+        const scoreA =
+          Number(a?.score || 0);
 
-        if (scoreB !== scoreA) return scoreB - scoreA;
+        const scoreB =
+          Number(b?.score || 0);
 
-        return String(a?.title || "").localeCompare(String(b?.title || ""), "es", {
-          sensitivity: "base",
-        });
+        if (scoreB !== scoreA) {
+          return scoreB - scoreA;
+        }
+
+        return String(a?.title || "").localeCompare(
+          String(b?.title || ""),
+          "es",
+          {
+            sensitivity: "base",
+          }
+        );
       }),
     ]);
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default {
+  TOPBAR_SCOPE,
+  TOPBAR_SEARCH_SCOPE,
+  TOPBAR_SEARCH_CONFIG,
+  TOPBAR_RESULT_TYPES,
+
+  safeText,
+  safeArray,
+  safeObject,
+  first,
+  escapeHtml,
+
+  normalizeText,
+  normalizeLooseText,
+  normalizeCompactText,
+  normalizeQuery,
+  tokenize,
+  uniqBy,
+
+  normalizeResultType,
+  isResultType,
+  getTypeLabel,
+  getTypeIcon,
+  getTypeGroupOrder,
+
+  isExternalHref,
+  isUnsafeHref,
+  isHashRouterPath,
+  normalizeHashRouterPath,
+  isHashOnlyHref,
+  safeNormalizePath,
+  safeNormalizeCanonicalPath,
+  getCurrentPublicPath,
+  isMobileViewport,
+
+  scoreTextMatch,
+  scoreResult,
+
+  highlight,
+  groupResults,
+};

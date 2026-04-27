@@ -2,7 +2,7 @@
    Onion SPA - Home View
    Archivo: src/views/home/homeView.js
 
-   HOME EXPERIENCE MODE · USER + ADMIN · HARDENED · FINAL 10/10
+   HOME EXPERIENCE MODE · USER + ADMIN · HARDENED · FINAL PRO 10/10
 
    RESPONSABILIDADES:
    - punto de entrada real de la vista Home
@@ -25,11 +25,13 @@
    - permitir reload con rerender seguro
 
    FIX CRÍTICO:
-   - eliminado fallback bruto contra:
-     /facturas, /invoices, /billing/invoices,
-     /users, /usuarios, /clients, /clientes, /customers.
-   - la Home ya no debe llenar consola con 404.
-   - los endpoints opcionales se leen únicamente desde AppCore.config.
+   - eliminado fallback bruto contra endpoints no garantizados
+   - los endpoints opcionales se leen únicamente desde AppCore.config
+   - normalización de rutas legacy del template:
+     /users -> /usuarios
+     /clients -> /clientes
+     /account -> /cuenta
+     /settings -> /ajustes
 
    HARDENING PRO:
    - estado local autocontenido
@@ -57,7 +59,6 @@ import {
 } from "../incidencias/incidencias.store.js";
 
 import {
-  DEFAULT_PAGE_SIZE as MODEL_DEFAULT_PAGE_SIZE,
   normalizeIncidenciasCollection,
   sortIncidenciasByUpdatedDesc,
   paginateIncidencias,
@@ -79,33 +80,41 @@ export const HomeView = (() => {
   ========================================================= */
 
   const SCOPE = "view:home";
-  const PAGE_SIZE = Number(MODEL_DEFAULT_PAGE_SIZE || 5) || 5;
+
+  /*
+    Requisito de UX:
+    Home muestra 5 incidencias por página.
+    No depende del DEFAULT_PAGE_SIZE del modelo.
+  */
+  const PAGE_SIZE = 5;
+
   const CREATE_CLICK_THROTTLE_MS = 450;
+
   const HOME_CACHE_KEY = "onion.home.cache.v1";
   const HOME_CACHE_TTL_MS = 1000 * 60 * 10;
+
+  const ROUTE_ALIASES = Object.freeze({
+    "/users": "/usuarios",
+    "/user": "/usuarios",
+    "/clients": "/clientes",
+    "/client": "/clientes",
+    "/customers": "/clientes",
+    "/customer": "/clientes",
+    "/account": "/cuenta",
+    "/profile": "/cuenta",
+    "/settings": "/ajustes",
+  });
 
   /*
     IMPORTANTE:
     No declarar aquí endpoints por defecto.
 
-    Antes existía un escaneo bruto:
-      /facturas
-      /invoices
-      /billing/invoices
-      /users
-      /usuarios
-      /clientes
-      /clients
-      /customers
-
-    Eso provoca 404 si el backend no tiene esas rutas montadas.
-
     Para activar opcionales, configura explícitamente en AppCore.config:
 
       homeOptionalEndpoints: {
-        invoices: ["/ruta-real-facturas"],
-        users: ["/ruta-real-usuarios"],
-        clients: ["/ruta-real-clientes"],
+        invoices: ["/api/facturas"],
+        users: ["/api/usuarios"],
+        clients: ["/api/clientes"]
       }
 
     También soporta:
@@ -116,7 +125,7 @@ export const HomeView = (() => {
       apiEndpoints
   */
 
-  const OPTIONAL_ENDPOINT_ALIASES = {
+  const OPTIONAL_ENDPOINT_ALIASES = Object.freeze({
     invoices: [
       "invoices",
       "invoice",
@@ -142,9 +151,9 @@ export const HomeView = (() => {
       "customers",
       "customer",
     ],
-  };
+  });
 
-  const OPTIONAL_DIRECT_CONFIG_KEYS = {
+  const OPTIONAL_DIRECT_CONFIG_KEYS = Object.freeze({
     invoices: [
       "homeInvoicesEndpoint",
       "homeInvoicesUrl",
@@ -173,16 +182,16 @@ export const HomeView = (() => {
       "customersEndpoint",
       "customersUrl",
     ],
-  };
+  });
 
-  const OPTIONAL_CONFIG_BUCKETS = [
+  const OPTIONAL_CONFIG_BUCKETS = Object.freeze([
     "homeOptionalEndpoints",
     "homeEndpoints",
     "dashboardEndpoints",
     "optionalEndpoints",
     "endpoints",
     "apiEndpoints",
-  ];
+  ]);
 
   /* =========================================================
      LOCAL RUNTIME
@@ -232,41 +241,32 @@ export const HomeView = (() => {
      SAFE HELPERS
   ========================================================= */
 
-  function safeLog(...args) {
-    try {
-      AppCore?.utils?.log?.("[HomeView]", ...args);
-    } catch {}
+  function isBrowser() {
+    return (
+      typeof window !== "undefined" &&
+      typeof document !== "undefined"
+    );
   }
 
-  function safeWarn(...args) {
-    try {
-      AppCore?.utils?.warn?.("[HomeView]", ...args);
-    } catch {}
+  function isObject(value) {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    );
   }
 
-  function safeEmit(event = "", payload = {}) {
-    const eventName = safeText(event, "");
-    if (!eventName) return false;
-
-    try {
-      AppCore?.events?.emit?.(eventName, payload);
-      return true;
-    } catch {}
-
-    try {
-      window.dispatchEvent(
-        new CustomEvent(eventName, {
-          detail: payload,
-        })
-      );
-      return true;
-    } catch {}
-
-    return false;
+  function isFunction(value) {
+    return typeof value === "function";
   }
 
   function safeText(value, fallback = "") {
-    if (value === null || value === undefined) return fallback;
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      return fallback;
+    }
 
     const text = String(value).trim();
 
@@ -283,20 +283,36 @@ export const HomeView = (() => {
   }
 
   function safeObject(value) {
-    return value && typeof value === "object" && !Array.isArray(value)
-      ? value
-      : {};
+    return isObject(value) ? value : {};
   }
 
   function first(...values) {
     for (const value of values) {
-      if (value === undefined || value === null) continue;
-
-      if (typeof value === "string" && value.trim() === "") {
+      if (
+        value === undefined ||
+        value === null
+      ) {
         continue;
       }
 
-      if (Array.isArray(value) && value.length === 0) {
+      if (
+        typeof value === "string" &&
+        value.trim() === ""
+      ) {
+        continue;
+      }
+
+      if (
+        Array.isArray(value) &&
+        value.length === 0
+      ) {
+        continue;
+      }
+
+      if (
+        isObject(value) &&
+        Object.keys(value).length === 0
+      ) {
         continue;
       }
 
@@ -312,27 +328,69 @@ export const HomeView = (() => {
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[\s-]+/g, "_")
+      .replace(/[^a-z0-9_:.]/g, "")
       .trim();
   }
 
   function hasOwnKeys(value = {}) {
     return Boolean(
-      value &&
-        typeof value === "object" &&
-        !Array.isArray(value) &&
+      isObject(value) &&
         Object.keys(value).length
     );
+  }
+
+  function safeLog(...args) {
+    try {
+      AppCore?.utils?.log?.("[HomeView]", ...args);
+    } catch {}
+  }
+
+  function safeWarn(...args) {
+    try {
+      AppCore?.utils?.warn?.("[HomeView]", ...args);
+    } catch {}
+
+    try {
+      console.warn("[HomeView]", ...args);
+    } catch {}
+  }
+
+  function safeEmit(event = "", payload = {}) {
+    const eventName = safeText(event, "");
+    if (!eventName) return false;
+
+    try {
+      AppCore?.events?.emit?.(eventName, payload);
+      return true;
+    } catch {}
+
+    try {
+      if (isBrowser()) {
+        window.dispatchEvent(
+          new CustomEvent(eventName, {
+            detail: payload,
+          })
+        );
+
+        return true;
+      }
+    } catch {}
+
+    return false;
   }
 
   function waitForPaint() {
     return new Promise((resolve) => {
       try {
-        if (typeof window === "undefined") {
+        if (!isBrowser()) {
           resolve();
           return;
         }
 
-        if (typeof window.requestAnimationFrame !== "function") {
+        if (
+          typeof window.requestAnimationFrame !==
+          "function"
+        ) {
           window.setTimeout(resolve, 0);
           return;
         }
@@ -355,6 +413,10 @@ export const HomeView = (() => {
   }
 
   function getContainer() {
+    if (!isBrowser()) {
+      return null;
+    }
+
     return (
       AppCore?.dom?.viewContainer ||
       document.getElementById("view-container") ||
@@ -369,27 +431,6 @@ export const HomeView = (() => {
 
   function isActiveToken(token) {
     return !destroyed && token === renderToken;
-  }
-
-  function showToast(message = "", type = "info") {
-    const text = safeText(message, "");
-    if (!text) return;
-
-    try {
-      if (typeof AppCore?.toast?.[type] === "function") {
-        AppCore.toast[type](text);
-        return;
-      }
-    } catch {}
-
-    try {
-      AppCore?.toast?.show?.(text, type);
-      return;
-    } catch {}
-
-    try {
-      AppCore?.ui?.toast?.[type]?.(text);
-    } catch {}
   }
 
   function safeErrorMessage(error = null) {
@@ -417,6 +458,121 @@ export const HomeView = (() => {
   }
 
   /* =========================================================
+     TOAST BRIDGE
+  ========================================================= */
+
+  function normalizeToastType(type = "info") {
+    const key = normalizeKey(type);
+
+    if (key === "warn") {
+      return "warning";
+    }
+
+    if (
+      [
+        "success",
+        "error",
+        "warning",
+        "info",
+        "loading",
+      ].includes(key)
+    ) {
+      return key;
+    }
+
+    return "info";
+  }
+
+  function getToastCandidates() {
+    const candidates = [];
+
+    try {
+      if (isFunction(AppCore?.modules?.get)) {
+        candidates.push(AppCore.modules.get("toast"));
+      }
+    } catch {}
+
+    try {
+      if (AppCore?.toast) {
+        candidates.push(AppCore.toast);
+      }
+    } catch {}
+
+    try {
+      if (AppCore?.ui?.toast) {
+        candidates.push(AppCore.ui.toast);
+      }
+    } catch {}
+
+    try {
+      if (isBrowser() && window.Toast) {
+        candidates.push(window.Toast);
+      }
+    } catch {}
+
+    try {
+      if (isBrowser() && window.OnionToast) {
+        candidates.push(window.OnionToast);
+      }
+    } catch {}
+
+    return candidates.filter(Boolean);
+  }
+
+  function showToast(message = "", type = "info", options = {}) {
+    const text = safeText(message, "");
+    if (!text) return false;
+
+    const toastType = normalizeToastType(type);
+    const opts = safeObject(options);
+
+    const payload = {
+      ...opts,
+      type: toastType,
+      message: text,
+    };
+
+    for (const toast of getToastCandidates()) {
+      try {
+        const directMethod =
+          toastType === "warning"
+            ? toast.warning || toast.warn
+            : toast?.[toastType];
+
+        if (isFunction(directMethod)) {
+          directMethod.call(toast, text, opts);
+          return true;
+        }
+      } catch {}
+
+      try {
+        if (isFunction(toast?.show)) {
+          toast.show(payload);
+          return true;
+        }
+      } catch {}
+    }
+
+    try {
+      safeEmit(`toast:${toastType}`, payload);
+      return true;
+    } catch {}
+
+    try {
+      const logger =
+        toastType === "error"
+          ? console.error
+          : toastType === "warning"
+            ? console.warn
+            : console.log;
+
+      logger(`[HomeToast:${toastType}]`, text);
+    } catch {}
+
+    return false;
+  }
+
+  /* =========================================================
      APP / USER / ROLE
   ========================================================= */
 
@@ -426,6 +582,7 @@ export const HomeView = (() => {
         AppCore?.state?.user,
         AppCore?.state?.currentUser,
         AppCore?.state?.profile,
+        AppCore?.state?.session?.user,
         AppCore?.session?.user,
         AppCore?.auth?.user,
         {}
@@ -441,6 +598,7 @@ export const HomeView = (() => {
         AppCore?.state?.role,
         AppCore?.state?.currentRole,
         AppCore?.state?.userRole,
+        AppCore?.state?.session?.role,
         user.role,
         user.rol,
         user.type,
@@ -469,7 +627,7 @@ export const HomeView = (() => {
 
   function isDomReady() {
     return Boolean(
-      typeof document !== "undefined" &&
+      isBrowser() &&
         document.body &&
         document.readyState !== "loading"
     );
@@ -478,25 +636,76 @@ export const HomeView = (() => {
   function isAppReady() {
     return Boolean(
       AppCore?.state?.ready ||
+        AppCore?.state?.booted ||
+        AppCore?.state?.initialized ||
         AppCore?.state?.bootCompleted ||
-        AppCore?.state?.appReady ||
-        AppCore?.state?.authenticated !== undefined
+        AppCore?.state?.appReady
     );
   }
 
   function canInteract() {
-    return !destroyed && isDomReady() && isAppReady();
+    return (
+      !destroyed &&
+      isDomReady() &&
+      isAppReady()
+    );
   }
 
   function throttleCreateClick() {
-    const now = Date.now();
+    const current = Date.now();
 
-    if (now - lastCreateClickAt < CREATE_CLICK_THROTTLE_MS) {
+    if (
+      current - lastCreateClickAt <
+      CREATE_CLICK_THROTTLE_MS
+    ) {
       return false;
     }
 
-    lastCreateClickAt = now;
+    lastCreateClickAt = current;
     return true;
+  }
+
+  /* =========================================================
+     ROUTES
+  ========================================================= */
+
+  function normalizeRoute(route = "") {
+    const raw = safeText(route, "");
+
+    if (!raw) return "";
+
+    if (
+      raw.startsWith("javascript:") ||
+      raw.startsWith("mailto:") ||
+      raw.startsWith("tel:")
+    ) {
+      return "";
+    }
+
+    if (/^https?:\/\//i.test(raw)) {
+      try {
+        if (
+          isBrowser() &&
+          new URL(raw).origin !== window.location.origin
+        ) {
+          return raw;
+        }
+
+        return new URL(raw).pathname || "/";
+      } catch {
+        return raw;
+      }
+    }
+
+    const normalized =
+      raw.startsWith("/")
+        ? raw
+        : `/${raw}`;
+
+    const clean =
+      normalized.replace(/\/{2,}/g, "/");
+
+    return ROUTE_ALIASES[clean] || clean;
   }
 
   /* =========================================================
@@ -504,6 +713,10 @@ export const HomeView = (() => {
   ========================================================= */
 
   function readCachePayload() {
+    if (!isBrowser()) {
+      return null;
+    }
+
     try {
       const raw = window.localStorage.getItem(HOME_CACHE_KEY);
       if (!raw) return null;
@@ -511,7 +724,10 @@ export const HomeView = (() => {
       const payload = JSON.parse(raw);
       const savedAt = safeNumber(payload?.savedAt, 0);
 
-      if (!savedAt || Date.now() - savedAt > HOME_CACHE_TTL_MS) {
+      if (
+        !savedAt ||
+        Date.now() - savedAt > HOME_CACHE_TTL_MS
+      ) {
         return null;
       }
 
@@ -522,6 +738,10 @@ export const HomeView = (() => {
   }
 
   function writeCachePayload() {
+    if (!isBrowser()) {
+      return false;
+    }
+
     try {
       const payload = {
         savedAt: Date.now(),
@@ -542,7 +762,11 @@ export const HomeView = (() => {
         },
       };
 
-      window.localStorage.setItem(HOME_CACHE_KEY, JSON.stringify(payload));
+      window.localStorage.setItem(
+        HOME_CACHE_KEY,
+        JSON.stringify(payload)
+      );
+
       return true;
     } catch {
       return false;
@@ -563,15 +787,38 @@ export const HomeView = (() => {
     homeState.clients = safeArray(state.clients);
     homeState.activity = safeArray(state.activity);
 
-    homeState.remoteCount = safeNumber(state.remoteCount, homeState.tickets.length);
-    homeState.ticketsRemoteCount = safeNumber(state.ticketsRemoteCount, homeState.tickets.length);
-    homeState.invoicesRemoteCount = safeNumber(state.invoicesRemoteCount, homeState.invoices.length);
-    homeState.usersRemoteCount = safeNumber(state.usersRemoteCount, homeState.users.length);
-    homeState.clientsRemoteCount = safeNumber(state.clientsRemoteCount, homeState.clients.length);
+    homeState.remoteCount = safeNumber(
+      state.remoteCount,
+      homeState.tickets.length
+    );
 
-    homeState.lastSyncAt = safeText(state.lastSyncAt, "");
+    homeState.ticketsRemoteCount = safeNumber(
+      state.ticketsRemoteCount,
+      homeState.tickets.length
+    );
+
+    homeState.invoicesRemoteCount = safeNumber(
+      state.invoicesRemoteCount,
+      homeState.invoices.length
+    );
+
+    homeState.usersRemoteCount = safeNumber(
+      state.usersRemoteCount,
+      homeState.users.length
+    );
+
+    homeState.clientsRemoteCount = safeNumber(
+      state.clientsRemoteCount,
+      homeState.clients.length
+    );
+
+    homeState.lastSyncAt = safeText(
+      state.lastSyncAt,
+      ""
+    );
 
     homeState.hydrated = true;
+
     homeState.loaded = Boolean(
       homeState.tickets.length ||
         homeState.invoices.length ||
@@ -600,13 +847,20 @@ export const HomeView = (() => {
 
       if (tickets.length) {
         homeState.tickets = tickets;
+
         homeState.ticketsRemoteCount = Math.max(
           homeState.ticketsRemoteCount,
           tickets.length
         );
-        homeState.remoteCount = Math.max(homeState.remoteCount, tickets.length);
+
+        homeState.remoteCount = Math.max(
+          homeState.remoteCount,
+          tickets.length
+        );
+
         homeState.hydrated = true;
         homeState.loaded = true;
+
         hydrated = true;
       }
     } catch {}
@@ -618,31 +872,78 @@ export const HomeView = (() => {
      DATA NORMALIZATION
   ========================================================= */
 
-  function normalizeCollectionPayload(payload = null) {
+  function unwrapCollectionPayload(payload = null) {
+    if (!payload) {
+      return {};
+    }
+
     if (Array.isArray(payload)) {
       return {
         items: payload,
-        total: payload.length,
       };
     }
 
     const data = safeObject(payload);
 
+    if (
+      Array.isArray(data.items) ||
+      Array.isArray(data.rows) ||
+      Array.isArray(data.results) ||
+      Array.isArray(data.value) ||
+      Array.isArray(data.docs) ||
+      Array.isArray(data.facturas) ||
+      Array.isArray(data.invoices) ||
+      Array.isArray(data.users) ||
+      Array.isArray(data.usuarios) ||
+      Array.isArray(data.clients) ||
+      Array.isArray(data.clientes) ||
+      Array.isArray(data.customers)
+    ) {
+      return data;
+    }
+
+    if (isObject(data.data)) {
+      return unwrapCollectionPayload(data.data);
+    }
+
+    if (isObject(data.payload)) {
+      return unwrapCollectionPayload(data.payload);
+    }
+
+    if (isObject(data.result)) {
+      return unwrapCollectionPayload(data.result);
+    }
+
+    return data;
+  }
+
+  function normalizeCollectionPayload(payload = null) {
+    const data = unwrapCollectionPayload(payload);
+
+    if (Array.isArray(data)) {
+      return {
+        items: data,
+        total: data.length,
+      };
+    }
+
+    const object = safeObject(data);
+
     const items = safeArray(
       first(
-        data.items,
-        data.rows,
-        data.data,
-        data.results,
-        data.value,
-        data.docs,
-        data.facturas,
-        data.invoices,
-        data.users,
-        data.usuarios,
-        data.clients,
-        data.clientes,
-        data.customers,
+        object.items,
+        object.rows,
+        object.data,
+        object.results,
+        object.value,
+        object.docs,
+        object.facturas,
+        object.invoices,
+        object.users,
+        object.usuarios,
+        object.clients,
+        object.clientes,
+        object.customers,
         []
       )
     );
@@ -651,13 +952,13 @@ export const HomeView = (() => {
       items.length,
       safeNumber(
         first(
-          data.totalCount,
-          data.remoteCount,
-          data.total,
-          data.count,
-          data.meta?.total,
-          data.pagination?.total,
-          data.page?.total,
+          object.totalCount,
+          object.remoteCount,
+          object.total,
+          object.count,
+          object.meta?.total,
+          object.pagination?.total,
+          object.page?.total,
           items.length
         ),
         items.length
@@ -750,10 +1051,16 @@ export const HomeView = (() => {
   }
 
   function getTicketStatusLabel(item = {}) {
-    const key = normalizeKey(getTicketStatus(item));
+    const key =
+      normalizeKey(getTicketStatus(item));
 
-    if (["open", "abierta", "abierto"].includes(key)) return "Abierta";
-    if (["pending", "pendiente"].includes(key)) return "Pendiente";
+    if (["open", "abierta", "abierto"].includes(key)) {
+      return "Abierta";
+    }
+
+    if (["pending", "pendiente"].includes(key)) {
+      return "Pendiente";
+    }
 
     if (
       [
@@ -769,11 +1076,22 @@ export const HomeView = (() => {
       return "En proceso";
     }
 
-    if (["resolved", "resuelta", "resuelto"].includes(key)) return "Resuelta";
-    if (["closed", "cerrada", "cerrado"].includes(key)) return "Cerrada";
-    if (["cancelled", "cancelada", "cancelado"].includes(key)) return "Cerrada";
+    if (["resolved", "resuelta", "resuelto"].includes(key)) {
+      return "Resuelta";
+    }
 
-    return safeText(getTicketStatus(item), "Pendiente");
+    if (["closed", "cerrada", "cerrado"].includes(key)) {
+      return "Cerrada";
+    }
+
+    if (["cancelled", "cancelada", "cancelado"].includes(key)) {
+      return "Cerrada";
+    }
+
+    return safeText(
+      getTicketStatus(item),
+      "Pendiente"
+    );
   }
 
   function getInvoiceId(item = {}) {
@@ -871,18 +1189,78 @@ export const HomeView = (() => {
     return safeArray(homeState.tickets);
   }
 
+  function normalizePaginationResult(result = {}, sourceItems = []) {
+    const rows = safeArray(sourceItems);
+    const data = safeObject(result);
+
+    const items = safeArray(
+      first(
+        data.items,
+        data.pageItems,
+        data.rows,
+        data.data,
+        []
+      )
+    );
+
+    const page = Math.max(
+      1,
+      safeNumber(
+        first(data.page, data.currentPage),
+        homeState.page || 1
+      )
+    );
+
+    const pageSize = Math.max(
+      1,
+      safeNumber(
+        first(data.pageSize, data.limit),
+        homeState.pageSize || PAGE_SIZE
+      )
+    );
+
+    const total = Math.max(
+      rows.length,
+      safeNumber(
+        first(data.total, data.totalCount),
+        rows.length
+      )
+    );
+
+    const totalPages = Math.max(
+      1,
+      safeNumber(
+        first(data.totalPages, data.pages),
+        Math.ceil((total || 1) / pageSize)
+      )
+    );
+
+    return {
+      ...data,
+      items,
+      page: Math.min(page, totalPages),
+      pageSize,
+      total,
+      totalPages,
+      hasPrev: page > 1,
+      hasNext: page < totalPages,
+    };
+  }
+
   function getPaginationMeta(items = []) {
+    const rows = safeArray(items);
     const page = safeNumber(homeState.page, 1);
     const pageSize = safeNumber(homeState.pageSize, PAGE_SIZE);
 
     try {
-      return paginateIncidencias(
-        safeArray(items),
+      const result = paginateIncidencias(
+        rows,
         page,
         pageSize || PAGE_SIZE
       );
+
+      return normalizePaginationResult(result, rows);
     } catch {
-      const rows = safeArray(items);
       const size = Math.max(1, pageSize || PAGE_SIZE);
       const totalPages = Math.max(1, Math.ceil((rows.length || 1) / size));
       const nextPage = Math.min(Math.max(1, page), totalPages);
@@ -894,6 +1272,8 @@ export const HomeView = (() => {
         pageSize: size,
         totalPages,
         total: rows.length,
+        hasPrev: nextPage > 1,
+        hasNext: nextPage < totalPages,
       };
     }
   }
@@ -901,7 +1281,10 @@ export const HomeView = (() => {
   function clampPageAgainstItems(items = []) {
     const pagination = getPaginationMeta(items);
 
-    if (safeNumber(homeState.page, 1) !== pagination.page) {
+    if (
+      safeNumber(homeState.page, 1) !==
+      pagination.page
+    ) {
       homeState.page = pagination.page;
     }
 
@@ -997,10 +1380,7 @@ export const HomeView = (() => {
       return output;
     }
 
-    if (
-      value &&
-      typeof value === "object"
-    ) {
+    if (isObject(value)) {
       const output = [];
 
       const preferred = [
@@ -1146,14 +1526,18 @@ export const HomeView = (() => {
         AppCore?.session?.token,
         (() => {
           try {
-            return window.localStorage.getItem("accessToken");
+            return isBrowser()
+              ? window.localStorage.getItem("accessToken")
+              : "";
           } catch {
             return "";
           }
         })(),
         (() => {
           try {
-            return window.localStorage.getItem("token");
+            return isBrowser()
+              ? window.localStorage.getItem("token")
+              : "";
           } catch {
             return "";
           }
@@ -1192,7 +1576,7 @@ export const HomeView = (() => {
         context: AppCore?.apiClient,
         fn: AppCore?.apiClient?.get,
       },
-    ].filter((item) => typeof item.fn === "function");
+    ].filter((item) => isFunction(item.fn));
 
     for (const candidate of candidates) {
       try {
@@ -1215,7 +1599,7 @@ export const HomeView = (() => {
     }
 
     try {
-      if (typeof AppCore?.request === "function") {
+      if (isFunction(AppCore?.request)) {
         const response = await AppCore.request(path, {
           method: "GET",
           ...requestOptions,
@@ -1239,19 +1623,26 @@ export const HomeView = (() => {
   async function parseFetchJsonResponse(response = null) {
     if (!response) return null;
 
+    let text = "";
+
+    try {
+      text = await response.text();
+    } catch {
+      text = "";
+    }
+
     if (!response.ok) {
       return null;
     }
 
+    if (!text) {
+      return null;
+    }
+
     try {
-      return await response.json();
+      return JSON.parse(text);
     } catch {
-      try {
-        const text = await response.text();
-        return text ? JSON.parse(text) : null;
-      } catch {
-        return null;
-      }
+      return null;
     }
   }
 
@@ -1261,15 +1652,22 @@ export const HomeView = (() => {
 
     const clientResponse = await callPossibleClientGet(path);
 
-    if (clientResponse !== null && clientResponse !== undefined) {
+    if (
+      clientResponse !== null &&
+      clientResponse !== undefined
+    ) {
       return clientResponse?.data ?? clientResponse;
     }
 
-    if (typeof window === "undefined" || typeof window.fetch !== "function") {
+    if (
+      !isBrowser() ||
+      typeof window.fetch !== "function"
+    ) {
       return null;
     }
 
     const apiBase = getApiBase();
+
     const url = /^https?:\/\//i.test(path)
       ? path
       : joinUrl(apiBase, path);
@@ -1311,7 +1709,10 @@ export const HomeView = (() => {
       const payload = await fetchJsonBestEffort(endpoint);
       const normalized = normalizeCollectionPayload(payload);
 
-      if (normalized.items.length || normalized.total > 0) {
+      if (
+        normalized.items.length ||
+        normalized.total > 0
+      ) {
         return normalized;
       }
     }
@@ -1324,8 +1725,15 @@ export const HomeView = (() => {
   ========================================================= */
 
   function ensureBaseState() {
-    homeState.page = Math.max(1, safeNumber(homeState.page, 1));
-    homeState.pageSize = Math.max(1, safeNumber(homeState.pageSize, PAGE_SIZE));
+    homeState.page = Math.max(
+      1,
+      safeNumber(homeState.page, 1)
+    );
+
+    homeState.pageSize = Math.max(
+      1,
+      safeNumber(homeState.pageSize, PAGE_SIZE)
+    );
 
     homeState.loading = Boolean(homeState.loading);
     homeState.refreshing = Boolean(homeState.refreshing);
@@ -1341,11 +1749,30 @@ export const HomeView = (() => {
     homeState.clients = safeArray(homeState.clients);
     homeState.activity = safeArray(homeState.activity);
 
-    homeState.remoteCount = Math.max(0, safeNumber(homeState.remoteCount, 0));
-    homeState.ticketsRemoteCount = Math.max(0, safeNumber(homeState.ticketsRemoteCount, homeState.tickets.length));
-    homeState.invoicesRemoteCount = Math.max(0, safeNumber(homeState.invoicesRemoteCount, homeState.invoices.length));
-    homeState.usersRemoteCount = Math.max(0, safeNumber(homeState.usersRemoteCount, homeState.users.length));
-    homeState.clientsRemoteCount = Math.max(0, safeNumber(homeState.clientsRemoteCount, homeState.clients.length));
+    homeState.remoteCount = Math.max(
+      0,
+      safeNumber(homeState.remoteCount, 0)
+    );
+
+    homeState.ticketsRemoteCount = Math.max(
+      0,
+      safeNumber(homeState.ticketsRemoteCount, homeState.tickets.length)
+    );
+
+    homeState.invoicesRemoteCount = Math.max(
+      0,
+      safeNumber(homeState.invoicesRemoteCount, homeState.invoices.length)
+    );
+
+    homeState.usersRemoteCount = Math.max(
+      0,
+      safeNumber(homeState.usersRemoteCount, homeState.users.length)
+    );
+
+    homeState.clientsRemoteCount = Math.max(
+      0,
+      safeNumber(homeState.clientsRemoteCount, homeState.clients.length)
+    );
 
     return homeState;
   }
@@ -1359,8 +1786,16 @@ export const HomeView = (() => {
     const tickets = getTickets();
 
     homeState.tickets = tickets;
-    homeState.remoteCount = Math.max(homeState.remoteCount, tickets.length);
-    homeState.ticketsRemoteCount = Math.max(homeState.ticketsRemoteCount, tickets.length);
+
+    homeState.remoteCount = Math.max(
+      homeState.remoteCount,
+      tickets.length
+    );
+
+    homeState.ticketsRemoteCount = Math.max(
+      homeState.ticketsRemoteCount,
+      tickets.length
+    );
 
     homeState.loaded = true;
     homeState.hydrated = true;
@@ -1396,40 +1831,51 @@ export const HomeView = (() => {
   ========================================================= */
 
   function getRouterCandidate() {
-    return (
-      AppCore?.router ||
-      AppCore?.Router ||
-      AppCore?.modules?.router ||
-      window?.Router ||
-      window?.OnionRouter ||
-      null
-    );
+    try {
+      if (isFunction(AppCore?.modules?.get)) {
+        const routerModule = AppCore.modules.get("router");
+        if (routerModule) return routerModule;
+      }
+    } catch {}
+
+    try {
+      return (
+        AppCore?.router ||
+        AppCore?.Router ||
+        AppCore?.modules?.router ||
+        (isBrowser() ? window.Router : null) ||
+        (isBrowser() ? window.OnionRouter : null) ||
+        null
+      );
+    } catch {
+      return null;
+    }
   }
 
   async function navigateTo(route = "", options = {}) {
-    const target = safeText(route, "");
+    const target = normalizeRoute(route);
     if (!target) return false;
 
     const opts = safeObject(options);
     const router = getRouterCandidate();
 
     try {
-      if (typeof router?.navigate === "function") {
+      if (isFunction(router?.navigate)) {
         router.navigate(target, opts);
         return true;
       }
 
-      if (typeof router?.go === "function") {
+      if (isFunction(router?.go)) {
         router.go(target, opts);
         return true;
       }
 
-      if (typeof router?.push === "function") {
+      if (isFunction(router?.push)) {
         router.push(target, opts);
         return true;
       }
 
-      if (typeof AppCore?.navigate === "function") {
+      if (isFunction(AppCore?.navigate)) {
         AppCore.navigate(target, opts);
         return true;
       }
@@ -1438,14 +1884,18 @@ export const HomeView = (() => {
     }
 
     try {
-      window.history.pushState({}, "", target);
-      window.dispatchEvent(new PopStateEvent("popstate"));
-      return true;
+      if (isBrowser()) {
+        window.history.pushState({}, "", target);
+        window.dispatchEvent(new PopStateEvent("popstate"));
+        return true;
+      }
     } catch {}
 
     try {
-      window.location.assign(target);
-      return true;
+      if (isBrowser()) {
+        window.location.assign(target);
+        return true;
+      }
     } catch {}
 
     return false;
@@ -1455,66 +1905,89 @@ export const HomeView = (() => {
     if (!detail) return false;
 
     try {
-      const modal = window?.OnionIncidenciasModal;
+      if (isBrowser()) {
+        const modal = window.OnionIncidenciasModal;
 
-      if (modal?.getState?.()?.isOpen && typeof modal.update === "function") {
-        modal.update(detail);
-        return true;
-      }
+        if (
+          modal?.getState?.()?.isOpen &&
+          isFunction(modal.update)
+        ) {
+          modal.update(detail);
+          return true;
+        }
 
-      if (typeof modal?.open === "function") {
-        modal.open(detail);
-        return true;
+        if (isFunction(modal?.open)) {
+          modal.open(detail);
+          return true;
+        }
       }
     } catch (error) {
       safeWarn("OnionIncidenciasModal hook falló:", error);
     }
 
     try {
-      const hook =
-        window?.renderIncidenciaTicketModal ||
-        window?.renderTicketModal;
+      if (isBrowser()) {
+        const hook =
+          window.renderIncidenciaTicketModal ||
+          window.renderTicketModal;
 
-      if (typeof hook === "function") {
-        hook(detail);
-        return true;
+        if (isFunction(hook)) {
+          hook(detail);
+          return true;
+        }
       }
     } catch (error) {
       safeWarn("ticket modal hook falló:", error);
     }
 
-    safeEmit("incidencias:modal:open", { detail });
+    safeEmit("incidencias:modal:open", {
+      detail,
+    });
 
     return true;
   }
 
   function openCreateModalBridge(draft = {}) {
     try {
-      const modal = window?.OnionIncidenciasCreateModal;
+      if (isBrowser()) {
+        const modal = window.OnionIncidenciasCreateModal;
 
-      if (typeof modal?.open === "function") {
-        modal.open(draft);
-        return true;
+        if (isFunction(modal?.open)) {
+          modal.open(draft);
+          return true;
+        }
       }
     } catch (error) {
       safeWarn("OnionIncidenciasCreateModal hook falló:", error);
     }
 
     try {
-      const hook =
-        window?.renderIncidenciasCreateModal ||
-        window?.renderIncidenciaCreateModal ||
-        IncidenciasCreateView?.open;
+      if (isBrowser()) {
+        const hook =
+          window.renderIncidenciasCreateModal ||
+          window.renderIncidenciaCreateModal;
 
-      if (typeof hook === "function") {
-        hook(draft);
+        if (isFunction(hook)) {
+          hook(draft);
+          return true;
+        }
+      }
+    } catch (error) {
+      safeWarn("create modal global hook falló:", error);
+    }
+
+    try {
+      if (isFunction(IncidenciasCreateView?.open)) {
+        IncidenciasCreateView.open(draft);
         return true;
       }
     } catch (error) {
-      safeWarn("create modal hook falló:", error);
+      safeWarn("IncidenciasCreateView.open falló:", error);
     }
 
-    safeEmit("incidencias:create-modal:open", { draft });
+    safeEmit("incidencias:create-modal:open", {
+      draft,
+    });
 
     return true;
   }
@@ -1728,7 +2201,10 @@ export const HomeView = (() => {
       return;
     }
 
-    const [usersPayload, clientsPayload] = await Promise.all([
+    const [
+      usersPayload,
+      clientsPayload,
+    ] = await Promise.all([
       loadOptionalCollection("users"),
       loadOptionalCollection("clients"),
     ]);
@@ -1748,6 +2224,7 @@ export const HomeView = (() => {
     if (destroyed) return getTickets();
 
     const ticketsBefore = getTickets();
+
     const hasVisibleData =
       ticketsBefore.length ||
       homeState.invoices.length ||
@@ -1778,8 +2255,16 @@ export const HomeView = (() => {
       const tickets = getTicketsFromStore();
 
       homeState.tickets = tickets;
-      homeState.ticketsRemoteCount = Math.max(tickets.length, homeState.ticketsRemoteCount);
-      homeState.remoteCount = Math.max(tickets.length, homeState.remoteCount);
+
+      homeState.ticketsRemoteCount = Math.max(
+        tickets.length,
+        homeState.ticketsRemoteCount
+      );
+
+      homeState.remoteCount = Math.max(
+        tickets.length,
+        homeState.remoteCount
+      );
 
       const role = getCurrentRole();
       const admin = isAdminRole(role);
@@ -1823,10 +2308,11 @@ export const HomeView = (() => {
     ensureBaseState();
 
     /*
-      Igual que en incidencias:
-      1. Pintamos pantalla.
-      2. Bindeamos contenedor inmediatamente.
-      3. Después cargamos datos.
+      Flujo correcto:
+      1. Pintar pantalla inmediata.
+      2. Bindear contenedor inmediatamente.
+      3. Cargar datos.
+      4. Rerender final.
     */
     render();
 
@@ -1869,7 +2355,10 @@ export const HomeView = (() => {
     const items = getTickets();
 
     const pagination = getPaginationMeta(items);
-    const totalPages = Math.max(1, safeNumber(pagination.totalPages, 1));
+    const totalPages = Math.max(
+      1,
+      safeNumber(pagination.totalPages, 1)
+    );
 
     homeState.page = Math.min(
       Math.max(1, safeNumber(page, homeState.page || 1)),
@@ -1890,7 +2379,10 @@ export const HomeView = (() => {
   }
 
   function changePageSize(value = PAGE_SIZE) {
-    const nextSize = Math.max(1, safeNumber(value, PAGE_SIZE));
+    const nextSize = Math.max(
+      1,
+      safeNumber(value, PAGE_SIZE)
+    );
 
     homeState.pageSize = nextSize;
     homeState.page = 1;
@@ -2005,7 +2497,7 @@ export const HomeView = (() => {
 
   async function handleNavigateAction(action = "", route = "") {
     const actionName = safeText(action, "navigate");
-    const target = safeText(route, "");
+    const target = normalizeRoute(route);
 
     if (!target) return false;
 
@@ -2121,14 +2613,14 @@ export const HomeView = (() => {
   function getRouteFromElement(element = null) {
     if (!element) return "";
 
-    return safeText(
+    return normalizeRoute(
       first(
         element.dataset?.route,
         element.dataset?.href,
         element.getAttribute?.("data-route"),
+        element.getAttribute?.("data-href"),
         element.getAttribute?.("href")
-      ),
-      ""
+      )
     );
   }
 
@@ -2295,6 +2787,7 @@ export const HomeView = (() => {
         event.preventDefault();
 
         const route = getRouteFromElement(navBtn);
+
         const action = safeText(
           first(
             navBtn.dataset?.homeAction,
@@ -2409,6 +2902,7 @@ export const HomeView = (() => {
       bus.on("facturas:update:success", onMutated);
       bus.on("clientes:update:success", onMutated);
       bus.on("users:update:success", onMutated);
+      bus.on("usuarios:update:success", onMutated);
 
       bus.on("home:ticket:open", onRefreshTicket);
 
@@ -2431,6 +2925,7 @@ export const HomeView = (() => {
       try { bus.off("facturas:update:success", onMutated); } catch {}
       try { bus.off("clientes:update:success", onMutated); } catch {}
       try { bus.off("users:update:success", onMutated); } catch {}
+      try { bus.off("usuarios:update:success", onMutated); } catch {}
 
       try { bus.off("home:ticket:open", onRefreshTicket); } catch {}
 
@@ -2442,6 +2937,10 @@ export const HomeView = (() => {
   }
 
   function bindWindowEvents() {
+    if (!isBrowser()) {
+      return () => {};
+    }
+
     const onMutated = async () => {
       await reload({
         force: true,
@@ -2478,6 +2977,7 @@ export const HomeView = (() => {
       window.addEventListener("facturas:update:success", onMutated);
       window.addEventListener("clientes:update:success", onMutated);
       window.addEventListener("users:update:success", onMutated);
+      window.addEventListener("usuarios:update:success", onMutated);
 
       window.addEventListener("home:ticket:open", onOpenTicket);
 
@@ -2501,6 +3001,7 @@ export const HomeView = (() => {
         window.removeEventListener("facturas:update:success", onMutated);
         window.removeEventListener("clientes:update:success", onMutated);
         window.removeEventListener("users:update:success", onMutated);
+        window.removeEventListener("usuarios:update:success", onMutated);
 
         window.removeEventListener("home:ticket:open", onOpenTicket);
 
@@ -2617,6 +3118,7 @@ export const HomeView = (() => {
     clearTransientState();
 
     pendingCreateRequest = false;
+    inflightInit = null;
     inflightReload = null;
 
     safeLog("destroy");
@@ -2631,6 +3133,8 @@ export const HomeView = (() => {
     render: rerender,
     reload,
     destroy,
+
+    bind,
 
     openTicket: handleOpenTicket,
     copyTicketId: handleCopyTicketId,
@@ -2652,6 +3156,7 @@ export const HomeView = (() => {
 
     getPageItems: () => getPaginationMeta(getTickets()).items,
     getPagination: () => getPaginationMeta(getTickets()),
+
     getTicketById: (ticketId = "") =>
       findIncidenciaById(getTickets(), ticketId),
 
@@ -2681,6 +3186,12 @@ export const HomeView = (() => {
       return destroyed;
     },
   };
+
+  try {
+    if (isBrowser()) {
+      window.OnionHomeView = api;
+    }
+  } catch {}
 
   return api;
 })();

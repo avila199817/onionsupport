@@ -2,6 +2,8 @@
    Onion SPA - Core Events
    Archivo: src/core/events.js
 
+   FINAL PRO SYSTEM · EVENT BUS / FIREBREAK SAFE · 10/10
+
    Responsabilidades:
    - centralizar el event bus del core
    - emitir eventos CustomEvent sobre document/window/custom target
@@ -23,6 +25,14 @@
    - wrapper defensivo de listeners DOM
    - protección contra recursión / tormentas de eventos
    - no congela la SPA si un módulo emite en bucle
+
+   FIX FIREBREAK:
+   - separa eventos críticos / normales / low-priority UI
+   - eventos UI tipo sidebar:* ya no consumen el contador global normal
+   - sidebar:user:rendered no queda bloqueado por max-total-rate
+   - mantiene límites propios para eventos ruidosos
+   - evita spam de consola durante drops repetidos
+   - captura errores async de handlers con .catch()
 ========================================================= */
 
 import {
@@ -36,20 +46,92 @@ import {
 
 const DEFAULT_TARGET = "document";
 
-const MAX_RECENT_EVENTS = 60;
+const MAX_RECENT_EVENTS = 80;
 
-const EVENTS_VERSION = "10.1.0";
+const EVENTS_VERSION = "10.2.0";
 
 /*
   Firebreaks.
-  Valores altos para no molestar flujo normal,
-  pero suficientes para cortar bucles tipo:
-    app:user-ui:sync -> render -> emit -> sync -> emit...
+
+  Regla:
+  - eventos críticos: no se bloquean por rate normal, solo por recursión
+  - eventos normales: rate normal
+  - eventos low-priority UI: rate separado más generoso
 */
 const MAX_SYNC_EMIT_DEPTH = 12;
+
 const RATE_WINDOW_MS = 1000;
-const MAX_EMITS_PER_WINDOW = 500;
-const MAX_EMITS_PER_EVENT_PER_WINDOW = 120;
+
+const MAX_EMITS_PER_WINDOW = 900;
+const MAX_EMITS_PER_EVENT_PER_WINDOW = 180;
+
+const MAX_LOW_PRIORITY_EMITS_PER_WINDOW = 1800;
+const MAX_LOW_PRIORITY_EMITS_PER_EVENT_PER_WINDOW = 360;
+
+const MAX_ABSOLUTE_EMITS_PER_WINDOW = 5000;
+
+const DROP_WARNING_INTERVAL_MS = 1200;
+const NOISY_RECENT_SAMPLE_MS = 160;
+
+/*
+  Eventos críticos del lifecycle. No deben quedarse bloqueados por ruido UI.
+*/
+const CRITICAL_EVENT_NAMES = new Set([
+  "app:ready",
+  "app:boot:ready",
+  "app:boot:complete",
+  "app:boot:error",
+
+  "app:route:change",
+
+  "router:before-render",
+  "router:rendered",
+  "router:render:async-complete",
+  "router:navigation:complete",
+  "router:bound",
+
+  "auth:login:success",
+  "auth:logout",
+  "auth:logout:success",
+  "auth:session:restored",
+  "auth:session:cleared",
+
+  "app:session:restored",
+  "app:session:cleared",
+  "app:auth:change",
+
+  "app:lang:change",
+  "app:theme:change",
+]);
+
+/*
+  Eventos UI/telemetría que pueden repetirse durante boot/render.
+  Tienen rate propio, no consumen max-total-rate normal.
+*/
+const LOW_PRIORITY_EVENT_PREFIXES = Object.freeze([
+  "sidebar:",
+  "topbar:",
+  "toast:",
+  "app:user-ui:",
+  "app:ui:module:",
+  "app:ui:toast-bridge:",
+  "app:boot:loader:",
+]);
+
+const LOW_PRIORITY_EVENT_NAMES = new Set([
+  "app:ui:ready",
+  "app:ui:repair",
+  "app:ui:repair-request",
+  "app:ui:init:start",
+  "app:ui:init:success",
+  "app:ui:init:error",
+]);
+
+const SILENT_DROP_PREFIXES = Object.freeze([
+  "sidebar:indicator:",
+  "sidebar:active:",
+  "sidebar:visual:",
+]);
 
 /* =========================================================
    BASICS
@@ -102,7 +184,11 @@ function safeNumber(value, fallback = 0) {
 }
 
 function safeNow() {
-  return Date.now();
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
 }
 
 function safeIsoDate(ms = safeNow()) {
@@ -196,7 +282,7 @@ function normalizeDomOptions(options = false) {
 
   /*
     No pasamos once aquí.
-    El once se controla manualmente para poder limpiar activeListeners.
+    once se controla manualmente para poder limpiar activeListeners.
     target tampoco pertenece a addEventListener.
   */
   return {
@@ -227,6 +313,15 @@ function withoutOnce(options = false) {
   } = normalized;
 
   return rest;
+}
+
+function wantsFirebreakBypass(options = false) {
+  const normalized = normalizeOptions(options);
+
+  return Boolean(
+    isObject(normalized) &&
+    normalized.bypassFirebreak === true
+  );
 }
 
 function isEventTargetLike(target) {
@@ -308,6 +403,59 @@ function createCustomEvent(name, detail = {}) {
       return null;
     }
   }
+}
+
+/* =========================================================
+   EVENT CLASSIFICATION
+========================================================= */
+
+function startsWithAny(value = "", prefixes = []) {
+  const text = safeText(value, "");
+
+  return prefixes.some((prefix) =>
+    text.startsWith(prefix)
+  );
+}
+
+function isCriticalEvent(name = "") {
+  return CRITICAL_EVENT_NAMES.has(
+    normalizeEventName(name)
+  );
+}
+
+function isLowPriorityEvent(name = "") {
+  const eventName =
+    normalizeEventName(name);
+
+  return Boolean(
+    LOW_PRIORITY_EVENT_NAMES.has(eventName) ||
+    startsWithAny(
+      eventName,
+      LOW_PRIORITY_EVENT_PREFIXES
+    )
+  );
+}
+
+function isSilentDropEvent(name = "") {
+  return startsWithAny(
+    normalizeEventName(name),
+    SILENT_DROP_PREFIXES
+  );
+}
+
+function getEventClass(name = "") {
+  const eventName =
+    normalizeEventName(name);
+
+  if (isCriticalEvent(eventName)) {
+    return "critical";
+  }
+
+  if (isLowPriorityEvent(eventName)) {
+    return "low-priority";
+  }
+
+  return "normal";
 }
 
 /* =========================================================
@@ -453,6 +601,24 @@ function safePreview(value, depth = 0) {
   }
 }
 
+function mergePreviewWithReason(reason = "", detail = {}) {
+  const preview =
+    safePreview(detail);
+
+  if (isObject(preview)) {
+    return {
+      reason,
+      ...preview,
+    };
+  }
+
+  return {
+    reason,
+    detail:
+      preview,
+  };
+}
+
 /* =========================================================
    FACTORY
 ========================================================= */
@@ -461,9 +627,17 @@ export function createEvents({
   target = DEFAULT_TARGET,
   mirrorToWindow = false,
   maxRecentEvents = MAX_RECENT_EVENTS,
+
   maxSyncEmitDepth = MAX_SYNC_EMIT_DEPTH,
+
   maxEmitsPerWindow = MAX_EMITS_PER_WINDOW,
   maxEmitsPerEventPerWindow = MAX_EMITS_PER_EVENT_PER_WINDOW,
+
+  maxLowPriorityEmitsPerWindow = MAX_LOW_PRIORITY_EMITS_PER_WINDOW,
+  maxLowPriorityEmitsPerEventPerWindow = MAX_LOW_PRIORITY_EMITS_PER_EVENT_PER_WINDOW,
+
+  maxAbsoluteEmitsPerWindow = MAX_ABSOLUTE_EMITS_PER_WINDOW,
+
   rateWindowMs = RATE_WINDOW_MS,
 } = {}) {
   const memoryListeners = new Map();
@@ -473,8 +647,15 @@ export function createEvents({
   const emitDepthByName = new Map();
   const eventRateMap = new Map();
 
+  const recentSampleMap = new Map();
+
   let rateWindowStartedAt = safeNow();
-  let totalEmitsInWindow = 0;
+
+  let normalEmitsInWindow = 0;
+  let lowPriorityEmitsInWindow = 0;
+  let criticalEmitsInWindow = 0;
+  let absoluteEmitsInWindow = 0;
+
   let lastDropWarningAt = 0;
 
   const state = {
@@ -496,12 +677,54 @@ export function createEvents({
     lastDroppedEvent: null,
   };
 
+  function shouldSampleRecent(type = "event", name = "") {
+    const eventName =
+      normalizeEventName(name);
+
+    if (type !== "emit") {
+      return true;
+    }
+
+    if (
+      isCriticalEvent(eventName) ||
+      !isLowPriorityEvent(eventName)
+    ) {
+      return true;
+    }
+
+    const now =
+      safeNow();
+
+    const last =
+      safeNumber(
+        recentSampleMap.get(eventName),
+        0
+      );
+
+    if (now - last < NOISY_RECENT_SAMPLE_MS) {
+      return false;
+    }
+
+    recentSampleMap.set(
+      eventName,
+      now
+    );
+
+    return true;
+  }
+
   function pushRecentEvent(type = "event", name = "", detail = {}) {
+    if (!shouldSampleRecent(type, name)) {
+      return;
+    }
+
     const atMs = safeNow();
 
     recentEvents.unshift({
       type: safeText(type, "event"),
       name: safeText(name, ""),
+      className:
+        getEventClass(name),
       detail: safePreview(detail),
       at: safeIsoDate(atMs),
       atMs,
@@ -536,7 +759,8 @@ export function createEvents({
       name,
       {
         source,
-        message: state.lastError.message,
+        message:
+          state.lastError.message,
       }
     );
 
@@ -556,30 +780,41 @@ export function createEvents({
     state.lastDroppedEvent = {
       name: safeText(name, ""),
       reason: safeText(reason, ""),
+      className:
+        getEventClass(name),
       at: safeIsoDate(),
     };
 
     pushRecentEvent(
       "drop",
       name,
-      {
+      mergePreviewWithReason(
         reason,
-        ...safePreview(detail),
-      }
+        detail
+      )
     );
 
     const now = safeNow();
 
+    if (
+      isSilentDropEvent(name) &&
+      now - lastDropWarningAt < DROP_WARNING_INTERVAL_MS * 4
+    ) {
+      return;
+    }
+
     /*
       No spamear consola si precisamente estamos cortando una tormenta.
     */
-    if (now - lastDropWarningAt > 1000) {
+    if (now - lastDropWarningAt > DROP_WARNING_INTERVAL_MS) {
       lastDropWarningAt = now;
 
       safeWarn(
         `Evento bloqueado por firebreak: ${name}`,
         {
           reason,
+          className:
+            getEventClass(name),
           detail,
         }
       );
@@ -588,32 +823,52 @@ export function createEvents({
 
   function resetRateWindowIfNeeded() {
     const now = safeNow();
-    const windowMs = Math.max(100, safeNumber(rateWindowMs, RATE_WINDOW_MS));
+
+    const windowMs = Math.max(
+      100,
+      safeNumber(rateWindowMs, RATE_WINDOW_MS)
+    );
 
     if (now - rateWindowStartedAt <= windowMs) {
       return;
     }
 
     rateWindowStartedAt = now;
-    totalEmitsInWindow = 0;
+
+    normalEmitsInWindow = 0;
+    lowPriorityEmitsInWindow = 0;
+    criticalEmitsInWindow = 0;
+    absoluteEmitsInWindow = 0;
+
     eventRateMap.clear();
+    recentSampleMap.clear();
   }
 
-  function shouldAllowEmit(eventName = "") {
+  function shouldAllowEmit(eventName = "", options = {}) {
     const name = normalizeEventName(eventName);
 
     if (!name) {
       return false;
     }
 
+    if (wantsFirebreakBypass(options)) {
+      return true;
+    }
+
     resetRateWindowIfNeeded();
+
+    const eventClass =
+      getEventClass(name);
 
     const currentDepth = safeNumber(
       emitDepthByName.get(name),
       0
     );
 
-    if (currentDepth >= safeNumber(maxSyncEmitDepth, MAX_SYNC_EMIT_DEPTH)) {
+    if (
+      currentDepth >=
+      safeNumber(maxSyncEmitDepth, MAX_SYNC_EMIT_DEPTH)
+    ) {
       recordDrop(
         name,
         "max-sync-depth",
@@ -626,15 +881,18 @@ export function createEvents({
       return false;
     }
 
-    totalEmitsInWindow += 1;
+    absoluteEmitsInWindow += 1;
 
-    if (totalEmitsInWindow > safeNumber(maxEmitsPerWindow, MAX_EMITS_PER_WINDOW)) {
+    if (
+      absoluteEmitsInWindow >
+      safeNumber(maxAbsoluteEmitsPerWindow, MAX_ABSOLUTE_EMITS_PER_WINDOW)
+    ) {
       recordDrop(
         name,
-        "max-total-rate",
+        "max-absolute-rate",
         {
-          totalEmitsInWindow,
-          maxEmitsPerWindow,
+          absoluteEmitsInWindow,
+          maxAbsoluteEmitsPerWindow,
         }
       );
 
@@ -651,9 +909,79 @@ export function createEvents({
       currentEventCount
     );
 
+    if (eventClass === "critical") {
+      criticalEmitsInWindow += 1;
+      return true;
+    }
+
+    if (eventClass === "low-priority") {
+      lowPriorityEmitsInWindow += 1;
+
+      if (
+        lowPriorityEmitsInWindow >
+        safeNumber(
+          maxLowPriorityEmitsPerWindow,
+          MAX_LOW_PRIORITY_EMITS_PER_WINDOW
+        )
+      ) {
+        recordDrop(
+          name,
+          "max-low-priority-rate",
+          {
+            lowPriorityEmitsInWindow,
+            maxLowPriorityEmitsPerWindow,
+          }
+        );
+
+        return false;
+      }
+
+      if (
+        currentEventCount >
+        safeNumber(
+          maxLowPriorityEmitsPerEventPerWindow,
+          MAX_LOW_PRIORITY_EMITS_PER_EVENT_PER_WINDOW
+        )
+      ) {
+        recordDrop(
+          name,
+          "max-low-priority-event-rate",
+          {
+            currentEventCount,
+            maxLowPriorityEmitsPerEventPerWindow,
+          }
+        );
+
+        return false;
+      }
+
+      return true;
+    }
+
+    normalEmitsInWindow += 1;
+
+    if (
+      normalEmitsInWindow >
+      safeNumber(maxEmitsPerWindow, MAX_EMITS_PER_WINDOW)
+    ) {
+      recordDrop(
+        name,
+        "max-total-rate",
+        {
+          normalEmitsInWindow,
+          maxEmitsPerWindow,
+        }
+      );
+
+      return false;
+    }
+
     if (
       currentEventCount >
-      safeNumber(maxEmitsPerEventPerWindow, MAX_EMITS_PER_EVENT_PER_WINDOW)
+      safeNumber(
+        maxEmitsPerEventPerWindow,
+        MAX_EMITS_PER_EVENT_PER_WINDOW
+      )
     ) {
       recordDrop(
         name,
@@ -672,6 +1000,7 @@ export function createEvents({
 
   function beginEmit(eventName = "") {
     const name = normalizeEventName(eventName);
+
     const currentDepth = safeNumber(
       emitDepthByName.get(name),
       0
@@ -685,6 +1014,7 @@ export function createEvents({
 
   function endEmit(eventName = "") {
     const name = normalizeEventName(eventName);
+
     const currentDepth = safeNumber(
       emitDepthByName.get(name),
       0
@@ -747,7 +1077,23 @@ export function createEvents({
     }
 
     try {
-      handler(event);
+      const result =
+        handler(event);
+
+      if (
+        result &&
+        typeof result === "object" &&
+        isFunction(result.catch)
+      ) {
+        result.catch((error) => {
+          recordError(
+            `${source}:async`,
+            error,
+            eventName
+          );
+        });
+      }
+
       return true;
     } catch (error) {
       recordError(
@@ -776,10 +1122,14 @@ export function createEvents({
 
     for (const record of Array.from(set)) {
       callHandlerSafely({
-        handler: record.wrappedHandler || record.handler,
-        event: eventLike,
+        handler:
+          record.wrappedHandler ||
+          record.handler,
+        event:
+          eventLike,
         eventName,
-        source: "memory-handler",
+        source:
+          "memory-handler",
       });
     }
 
@@ -810,10 +1160,9 @@ export function createEvents({
       }
 
       /*
-        Importante:
         Las excepciones de listeners DOM nativos no siempre se propagan
-        al try/catch de dispatchEvent. Por eso nuestros listeners se
-        registran SIEMPRE envueltos en makeSafeDomHandler().
+        al try/catch de dispatchEvent. Por eso los listeners de este bus
+        se registran envueltos.
       */
       return Boolean(
         domTarget.dispatchEvent(event)
@@ -836,7 +1185,7 @@ export function createEvents({
       return false;
     }
 
-    if (!shouldAllowEmit(eventName)) {
+    if (!shouldAllowEmit(eventName, options)) {
       return false;
     }
 
@@ -859,6 +1208,7 @@ export function createEvents({
 
     try {
       const optionsTarget = getOptionsTarget(options);
+
       const domTarget = resolveTarget(
         optionsTarget || target
       );
@@ -873,7 +1223,8 @@ export function createEvents({
           eventName,
           payload,
           domTarget,
-          source: "dom-dispatch",
+          source:
+            "dom-dispatch",
         });
 
         if (
@@ -883,8 +1234,10 @@ export function createEvents({
           dispatchDomEvent({
             eventName,
             payload,
-            domTarget: getWindowTarget(),
-            source: "window-mirror",
+            domTarget:
+              getWindowTarget(),
+            source:
+              "window-mirror",
           });
         }
       } else {
@@ -906,7 +1259,8 @@ export function createEvents({
         handler,
         event,
         eventName,
-        source: "dom-handler",
+        source:
+          "dom-handler",
       });
     };
   }
@@ -917,7 +1271,8 @@ export function createEvents({
         handler,
         event,
         eventName,
-        source: "memory-handler",
+        source:
+          "memory-handler",
       });
     };
   }
@@ -1033,7 +1388,8 @@ export function createEvents({
 
       const memoryRecord = {
         key,
-        name: eventName,
+        name:
+          eventName,
         handler,
         wrappedHandler,
       };
@@ -1069,18 +1425,23 @@ export function createEvents({
       key,
       {
         key,
-        name: eventName,
+        name:
+          eventName,
         handler,
         wrappedHandler,
-        options: finalOptions,
-        once: false,
-        target: getTargetKey(targetRef),
+        options:
+          finalOptions,
+        once:
+          false,
+        target:
+          getTargetKey(targetRef),
         targetName:
           typeof targetRef === "string"
             ? targetRef
             : "custom",
         off,
-        createdAt: safeIsoDate(),
+        createdAt:
+          safeIsoDate(),
       }
     );
 
@@ -1110,9 +1471,11 @@ export function createEvents({
     const targetRef = optionsTarget || target;
 
     const key = makeListenerKey({
-      name: eventName,
+      name:
+        eventName,
       handler,
-      options: finalOptions,
+      options:
+        finalOptions,
       targetRef,
     });
 
@@ -1198,7 +1561,8 @@ export function createEvents({
         handler,
         event,
         eventName,
-        source: "once-handler",
+        source:
+          "once-handler",
       });
     };
 
@@ -1298,49 +1662,117 @@ export function createEvents({
 
   function getSnapshot() {
     return {
-      version: state.version,
-      target: state.target,
-      browser: localIsBrowser(),
+      version:
+        state.version,
 
-      emitCount: state.emitCount,
-      onCount: state.onCount,
-      offCount: state.offCount,
-      onceCount: state.onceCount,
-      clearCount: state.clearCount,
-      errorCount: state.errorCount,
-      dropCount: state.dropCount,
+      target:
+        state.target,
 
-      lastEvent: state.lastEvent,
-      lastEventAt: state.lastEventAt,
+      browser:
+        localIsBrowser(),
+
+      emitCount:
+        state.emitCount,
+
+      onCount:
+        state.onCount,
+
+      offCount:
+        state.offCount,
+
+      onceCount:
+        state.onceCount,
+
+      clearCount:
+        state.clearCount,
+
+      errorCount:
+        state.errorCount,
+
+      dropCount:
+        state.dropCount,
+
+      lastEvent:
+        state.lastEvent,
+
+      lastEventAt:
+        state.lastEventAt,
+
       lastEventAtIso:
         state.lastEventAt
           ? safeIsoDate(state.lastEventAt)
           : "",
 
-      lastError: state.lastError,
-      lastDroppedEvent: state.lastDroppedEvent,
+      lastError:
+        state.lastError,
 
-      listenerCount: listenerCount(),
-      eventNames: names(),
+      lastDroppedEvent:
+        state.lastDroppedEvent,
+
+      listenerCount:
+        listenerCount(),
+
+      eventNames:
+        names(),
 
       firebreaks: {
         maxSyncEmitDepth,
+
         rateWindowMs,
+
         maxEmitsPerWindow,
         maxEmitsPerEventPerWindow,
-        currentTotalEmitsInWindow: totalEmitsInWindow,
-        currentEventRates: Object.fromEntries(eventRateMap.entries()),
-        currentEmitDepth: Object.fromEntries(emitDepthByName.entries()),
+
+        maxLowPriorityEmitsPerWindow,
+        maxLowPriorityEmitsPerEventPerWindow,
+
+        maxAbsoluteEmitsPerWindow,
+
+        currentNormalEmitsInWindow:
+          normalEmitsInWindow,
+
+        currentLowPriorityEmitsInWindow:
+          lowPriorityEmitsInWindow,
+
+        currentCriticalEmitsInWindow:
+          criticalEmitsInWindow,
+
+        currentAbsoluteEmitsInWindow:
+          absoluteEmitsInWindow,
+
+        currentEventRates:
+          Object.fromEntries(
+            eventRateMap.entries()
+          ),
+
+        currentEmitDepth:
+          Object.fromEntries(
+            emitDepthByName.entries()
+          ),
       },
 
       listeners:
         Array.from(activeListeners.values()).map((record) => ({
-          key: record.key,
-          name: record.name,
-          once: Boolean(record.once),
-          target: record.target,
-          targetName: record.targetName,
-          createdAt: record.createdAt,
+          key:
+            record.key,
+
+          name:
+            record.name,
+
+          className:
+            getEventClass(record.name),
+
+          once:
+            Boolean(record.once),
+
+          target:
+            record.target,
+
+          targetName:
+            record.targetName,
+
+          createdAt:
+            record.createdAt,
         })),
 
       recent:
@@ -1359,9 +1791,15 @@ export function createEvents({
 
     emitDepthByName.clear();
     eventRateMap.clear();
+    recentSampleMap.clear();
 
     rateWindowStartedAt = safeNow();
-    totalEmitsInWindow = 0;
+
+    normalEmitsInWindow = 0;
+    lowPriorityEmitsInWindow = 0;
+    criticalEmitsInWindow = 0;
+    absoluteEmitsInWindow = 0;
+
     lastDropWarningAt = 0;
 
     state.emitCount = 0;
@@ -1393,7 +1831,8 @@ export function createEvents({
     names,
 
     getSnapshot,
-    getDebugSnapshot: getSnapshot,
+    getDebugSnapshot:
+      getSnapshot,
 
     reset,
   };

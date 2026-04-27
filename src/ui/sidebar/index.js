@@ -2,7 +2,7 @@
    Onion SPA - Sidebar UI
    Archivo: src/ui/sidebar/index.js
 
-   FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · DROPDOWN SAFE · APPLE INDICATOR · 10/10
+   FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · DROPDOWN SAFE · 10/10
 
    RESPONSABILIDADES:
    - montar sidebar
@@ -14,21 +14,24 @@
    - aplicar visibilidad por rol/admin
    - reparar eventos tras login/restore/router render
    - registrar módulo en AppCore.modules
-   - sincronizar item activo del menú
-   - delegar indicador activo tipo Apple en state.js
+   - sincronizar item activo del menú delegando en state.js
+   - sincronizar indicador activo tipo Apple delegando en state.js
    - evitar doble toggle entre events.js y fallback delegado
    - evitar carreras tras router render / auth restore / rebind
    - neutralizar hover/focus fantasma al cambiar de vista
    - soportar rutas públicas con /@username sin romper active item
+   - no escribir variables CSS del indicador desde index.js
+   - no gestionar transición visual propia desde index.js
 
    REGLAS:
-   - SidebarUI NO escribe variables CSS del indicador.
-   - SidebarUI solo marca active/aria-current y pide recálculo.
-   - state.js escribe variables:
+   - state.js es el único dueño de:
      --sidebar-indicator-x/y/w/h/opacity
-   - events.js centraliza commits visuales post-evento.
-   - index.js no debe emitir eventos que causen doble transición.
-   - El matching visual de menú debe normalizar /@slug.
+     .sidebar-transitioning
+     .is-transitioning
+     transición collapse/expand
+   - events.js escucha core/router/auth y pide commits visuales
+   - index.js monta, coordina API pública y delega
+   - index.js no emite eventos que causen doble transición
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -66,6 +69,7 @@ import {
   getDesiredSidebarOpenState,
   setSidebarOpen as setSidebarOpenBase,
   repairSidebarState as repairSidebarStateBase,
+  syncActiveMenuItem,
   syncActiveMenuIndicator,
   scheduleActiveMenuIndicator,
 } from "./state.js";
@@ -216,16 +220,22 @@ export const SidebarUI = (() => {
     } catch {}
   }
 
+  /*
+    No emitimos por AppCore.events Y window a la vez.
+    events.js suele escuchar el bus; doble dispatch = doble commit visual.
+  */
   function safeEmit(eventName = "", payload = {}) {
     const name = safeText(eventName, "");
     if (!name) return false;
 
-    let emitted = false;
-
     try {
-      AppCore?.events?.emit?.(name, payload);
-      emitted = true;
-    } catch {}
+      if (isFunction(AppCore?.events?.emit)) {
+        AppCore.events.emit(name, payload);
+        return true;
+      }
+    } catch (error) {
+      safeWarn(`AppCore.events.emit("${name}") falló.`, error);
+    }
 
     try {
       if (isBrowser()) {
@@ -235,11 +245,11 @@ export const SidebarUI = (() => {
           })
         );
 
-        emitted = true;
+        return true;
       }
     } catch {}
 
-    return emitted;
+    return false;
   }
 
   function preventDefault(event) {
@@ -344,7 +354,7 @@ export const SidebarUI = (() => {
         try {
           callback();
         } catch {}
-      }, ms);
+      }, Math.max(0, Number(ms) || 0));
     } catch {
       try {
         callback();
@@ -862,7 +872,6 @@ export const SidebarUI = (() => {
       rawProfile.groups,
 
       rawMeta.roles,
-      rawMeta.permissions,
       rawMeta.scopes,
 
       rawClaims.roles,
@@ -1057,10 +1066,6 @@ export const SidebarUI = (() => {
         AppCore.state = {};
       }
 
-      /*
-        No pisamos el estado desktop guardado.
-        getDesiredSidebarOpenState() ya lee storage y normaliza memoria.
-      */
       const desiredOpen = getDesiredSidebarOpenState(AppCore);
 
       if (typeof AppCore.state.sidebarDesktopOpen !== "boolean") {
@@ -1197,6 +1202,7 @@ export const SidebarUI = (() => {
     } catch {}
 
     safeEmit("sidebar:user:rendered", {
+      source: "SidebarUI",
       user,
       displayName,
       username,
@@ -1414,123 +1420,6 @@ export const SidebarUI = (() => {
     );
   }
 
-  function routeMatches(currentPath = "/", itemPath = "/") {
-    const current = normalizeRoutePath(currentPath);
-    const item = normalizeRoutePath(itemPath);
-
-    if (!item) {
-      return false;
-    }
-
-    if (item === "/") {
-      return current === "/";
-    }
-
-    return (
-      current === item ||
-      current.startsWith(`${item}/`)
-    );
-  }
-
-  function resolveActiveMenuItem(route = "") {
-    const currentPath =
-      normalizeRoutePath(route || getCurrentRoutePath());
-
-    const items = getMenuItems();
-
-    if (!items.length) {
-      return null;
-    }
-
-    let exact = null;
-    let partial = null;
-    let partialLength = -1;
-
-    for (const item of items) {
-      const itemPath =
-        getMenuItemRoute(item);
-
-      if (!itemPath) {
-        continue;
-      }
-
-      if (currentPath === itemPath) {
-        exact = item;
-        break;
-      }
-
-      if (
-        itemPath !== "/" &&
-        routeMatches(currentPath, itemPath) &&
-        itemPath.length > partialLength
-      ) {
-        partial = item;
-        partialLength = itemPath.length;
-      }
-    }
-
-    return exact || partial || null;
-  }
-
-  function clearAllActiveRouteMarkers() {
-    const allItems = getAllMenuItems();
-
-    for (const item of allItems) {
-      try {
-        item.classList.remove(
-          "active",
-          "is-active",
-          "router-active"
-        );
-
-        item.removeAttribute("aria-current");
-
-        delete item.dataset.active;
-      } catch {}
-    }
-
-    return allItems.length;
-  }
-
-  function syncActiveRouteMarkers(route = "") {
-    refreshSidebarDomRefs();
-
-    const currentPath =
-      normalizeRoutePath(route || getCurrentRoutePath());
-
-    const activeItem =
-      resolveActiveMenuItem(currentPath);
-
-    clearAllActiveRouteMarkers();
-
-    if (activeItem && !isElementHiddenOrDisabled(activeItem)) {
-      try {
-        activeItem.classList.add(
-          "active",
-          "is-active"
-        );
-
-        activeItem.setAttribute(
-          "aria-current",
-          "page"
-        );
-
-        activeItem.dataset.active = "true";
-      } catch {}
-    }
-
-    safeEmit("sidebar:active-route:synced", {
-      route: currentPath,
-      hasActiveItem: Boolean(activeItem),
-      activeRoute:
-        activeItem
-          ? getMenuItemRoute(activeItem)
-          : "",
-    });
-
-    return activeItem;
-  }
-
   function clearVisualSyncTimer() {
     if (visualSyncTimer) {
       safeClearTimeout(visualSyncTimer);
@@ -1581,8 +1470,8 @@ export const SidebarUI = (() => {
       }
 
       /*
-        Esto fuerza al navegador a soltar :hover real.
-        Es la pieza que mata el “hover colgado” después de navegación.
+        Fuerza al navegador a soltar :hover real.
+        Mata hover colgado después de navegación.
       */
       sidebarMenu.style.pointerEvents = "none";
 
@@ -1625,6 +1514,42 @@ export const SidebarUI = (() => {
     return true;
   }
 
+  function syncActiveRouteMarkers(route = "", options = {}) {
+    refreshSidebarDomRefs();
+
+    const currentPath =
+      normalizeRoutePath(route || getCurrentRoutePath());
+
+    const activeItem =
+      syncActiveMenuItem(
+        AppCore,
+        {
+          ...safeObject(options),
+          route: currentPath,
+          publicPath: currentPath,
+          path: currentPath,
+          reason:
+            safeText(
+              options?.reason,
+              "sidebar-ui:active-route"
+            ),
+          mutate: true,
+        }
+      );
+
+    safeEmit("sidebar:active-route:synced", {
+      source: "SidebarUI",
+      route: currentPath,
+      hasActiveItem: Boolean(activeItem),
+      activeRoute:
+        activeItem
+          ? getMenuItemRoute(activeItem)
+          : "",
+    });
+
+    return activeItem;
+  }
+
   function scheduleSidebarVisualSync(reason = "visual-sync", options = {}) {
     const opts = safeObject(options);
     const delayMs = clampNumber(
@@ -1646,7 +1571,7 @@ export const SidebarUI = (() => {
 
     clearVisualSyncTimer();
 
-    if (opts.flushHover !== false) {
+    if (opts.flushHover === true) {
       flushMenuHoverState(
         reason,
         opts.hoverFlushMs || HOVER_FLUSH_MS
@@ -1674,26 +1599,23 @@ export const SidebarUI = (() => {
         refreshSidebarDomRefs();
 
         const activeItem =
-          syncActiveRouteMarkers(route);
-
-        try {
-          scheduleActiveMenuIndicator(AppCore, {
-            reason,
-            delayMs: 0,
-            reveal: opts.reveal !== false,
-            force: opts.force === true,
-            activeItem,
-          });
-        } catch {
-          try {
-            syncActiveMenuIndicator(AppCore, {
+          syncActiveRouteMarkers(
+            route,
+            {
               reason,
-              reveal: opts.reveal !== false,
-              force: opts.force === true,
-              activeItem,
-            });
-          } catch {}
-        }
+            }
+          );
+
+        scheduleActiveMenuIndicator(AppCore, {
+          ...opts,
+          reason,
+          route,
+          publicPath: route,
+          activeItem,
+          delayMs: 0,
+          reveal: opts.reveal !== false,
+          force: opts.force === true,
+        });
       });
     }, delayMs);
 
@@ -1702,17 +1624,27 @@ export const SidebarUI = (() => {
 
   function syncRouteAndIndicator(reason = "route-sync", options = {}) {
     const opts = safeObject(options);
+
     const route =
       normalizeRoutePath(
         resolvePreferredRouteFromOptions(opts) ||
-          ""
+          getCurrentRoutePath()
       );
 
-    syncActiveRouteMarkers(route);
+    const activeItem =
+      syncActiveRouteMarkers(
+        route,
+        {
+          reason,
+        }
+      );
 
-    scheduleSidebarVisualSync(reason, {
+    scheduleActiveMenuIndicator(AppCore, {
       ...opts,
       route,
+      publicPath: route,
+      activeItem,
+      reason,
       delayMs:
         typeof opts.delayMs === "number"
           ? opts.delayMs
@@ -1737,6 +1669,7 @@ export const SidebarUI = (() => {
     scheduleSidebarVisualSync("close-dropdown", {
       delayMs: 24,
       flushHover: false,
+      force: false,
     });
 
     return result;
@@ -1776,6 +1709,7 @@ export const SidebarUI = (() => {
     scheduleSidebarVisualSync("open-dropdown", {
       delayMs: 32,
       flushHover: false,
+      force: false,
     });
 
     return result;
@@ -1796,6 +1730,7 @@ export const SidebarUI = (() => {
     scheduleSidebarVisualSync("toggle-dropdown", {
       delayMs: 32,
       flushHover: false,
+      force: false,
     });
 
     return result;
@@ -1814,8 +1749,6 @@ export const SidebarUI = (() => {
         closeDropdown
       );
 
-    syncActiveRouteMarkers();
-
     return result;
   }
 
@@ -1831,6 +1764,7 @@ export const SidebarUI = (() => {
     scheduleSidebarVisualSync(reason, {
       delayMs: 48,
       force: true,
+      flushHover: true,
     });
 
     return result;
@@ -1859,15 +1793,15 @@ export const SidebarUI = (() => {
       );
 
     /*
-      No emitimos sidebar:open:set.
-      events.js ya escucha sidebar:state:change desde state.js.
-      Emitir ambos provocaba doble transición / indicador flotante.
+      Evento informativo solo UI.
+      No emitir sidebar:open:set para no reactivar transición paralela.
     */
     safeEmit("sidebar:ui:open:set", {
+      source: "SidebarUI",
       open: nextOpen,
       previousOpen,
       changed: previousOpen !== nextOpen,
-      source: opts.source || "SidebarUI",
+      requestedBy: opts.source || "SidebarUI",
       snapshot: getSidebarSnapshot(),
     });
 
@@ -1911,6 +1845,27 @@ export const SidebarUI = (() => {
     const mobile = isMobileViewport(MOBILE_BREAKPOINT);
     const open = getDesiredSidebarOpenState(AppCore);
     const elements = getElements(AppCore);
+
+    const activeItems =
+      getAllMenuItems()
+        .filter((item) => {
+          return Boolean(
+            item.classList?.contains?.("active") ||
+              item.classList?.contains?.("is-active") ||
+              item.getAttribute?.("aria-current") === "page" ||
+              item.dataset?.active === "true"
+          );
+        })
+        .map((item) => ({
+          route:
+            getMenuItemRoute(item),
+
+          text:
+            safeText(item.textContent, ""),
+
+          hidden:
+            isElementHiddenOrDisabled(item),
+        }));
 
     return {
       mobile,
@@ -1997,25 +1952,7 @@ export const SidebarUI = (() => {
         currentRoute:
           getCurrentRoutePath(),
 
-        activeItems:
-          getAllMenuItems()
-            .filter((item) => {
-              return Boolean(
-                item.classList?.contains?.("active") ||
-                  item.classList?.contains?.("is-active") ||
-                  item.getAttribute?.("aria-current") === "page"
-              );
-            })
-            .map((item) => ({
-              route:
-                getMenuItemRoute(item),
-
-              text:
-                safeText(item.textContent, ""),
-
-              hidden:
-                isElementHiddenOrDisabled(item),
-            })),
+        activeItems,
       },
 
       indicatorDom: {
@@ -2076,6 +2013,7 @@ export const SidebarUI = (() => {
       scheduleSidebarVisualSync("restore-sidebar-state:same", {
         delayMs: 48,
         force: true,
+        flushHover: true,
       });
 
       return true;
@@ -2106,11 +2044,10 @@ export const SidebarUI = (() => {
         isAdmin
       );
 
-    syncActiveRouteMarkers();
-
     scheduleSidebarVisualSync("apply-role-visibility", {
       delayMs: 32,
       force: true,
+      flushHover: false,
     });
 
     return result;
@@ -2196,6 +2133,7 @@ export const SidebarUI = (() => {
     scheduleSidebarVisualSync("logout", {
       delayMs: 80,
       force: true,
+      flushHover: true,
     });
 
     return result;
@@ -2217,6 +2155,7 @@ export const SidebarUI = (() => {
           route: target,
           delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
           force: true,
+          flushHover: true,
         });
 
         return true;
@@ -2231,6 +2170,7 @@ export const SidebarUI = (() => {
           route: target,
           delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
           force: true,
+          flushHover: true,
         });
 
         return true;
@@ -2245,6 +2185,7 @@ export const SidebarUI = (() => {
           route: target,
           delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
           force: true,
+          flushHover: true,
         });
 
         return true;
@@ -2259,6 +2200,7 @@ export const SidebarUI = (() => {
           route: target,
           delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
           force: true,
+          flushHover: true,
         });
 
         return true;
@@ -2273,6 +2215,7 @@ export const SidebarUI = (() => {
           route: target,
           delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
           force: true,
+          flushHover: true,
         });
 
         return true;
@@ -2293,6 +2236,7 @@ export const SidebarUI = (() => {
         route: target,
         delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
         force: true,
+        flushHover: true,
       });
 
       return true;
@@ -2331,12 +2275,28 @@ export const SidebarUI = (() => {
 
     closeDropdown();
 
-    syncActiveRouteMarkers(route);
+    const activeItem =
+      syncActiveRouteMarkers(
+        route,
+        {
+          reason: "navigation:pre",
+        }
+      );
 
     flushMenuHoverState(
       "navigation",
       HOVER_FLUSH_MS
     );
+
+    scheduleActiveMenuIndicator(AppCore, {
+      reason: "navigation:pre",
+      route,
+      publicPath: route,
+      activeItem,
+      delayMs: 0,
+      force: true,
+      reveal: true,
+    });
 
     if (!skipNavigation) {
       await navigateTo(route, {
@@ -2348,6 +2308,7 @@ export const SidebarUI = (() => {
         route,
         delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
         force: true,
+        flushHover: true,
       });
     }
 
@@ -2588,6 +2549,7 @@ export const SidebarUI = (() => {
       toggleDropdown();
 
       safeEmit("sidebar:user-toggle:direct", {
+        source: "SidebarUI",
         reason,
         snapshot: getSidebarSnapshot(),
       });
@@ -2709,7 +2671,7 @@ export const SidebarUI = (() => {
 
       /*
         Si events.js ya procesó un control, no repetimos acción.
-        Esto mata el bug de abrir/cerrar dropdown en el mismo click.
+        Mata abrir/cerrar dropdown en el mismo click.
       */
       if (
         defaultWasPrevented &&
@@ -2736,6 +2698,7 @@ export const SidebarUI = (() => {
         toggleSidebar();
 
         safeEmit("sidebar:fallback:action", {
+          source: "SidebarUI",
           action: "toggle-sidebar",
           reason,
         });
@@ -2752,6 +2715,7 @@ export const SidebarUI = (() => {
         toggleDropdown();
 
         safeEmit("sidebar:fallback:action", {
+          source: "SidebarUI",
           action: "toggle-dropdown",
           reason,
           snapshot: getSidebarSnapshot(),
@@ -2769,6 +2733,7 @@ export const SidebarUI = (() => {
         await handleLogout();
 
         safeEmit("sidebar:fallback:action", {
+          source: "SidebarUI",
           action: "logout",
           reason,
         });
@@ -2790,6 +2755,7 @@ export const SidebarUI = (() => {
           markSidebarEventHandled(event, "fallback-navigation");
 
           safeEmit("sidebar:fallback:action", {
+            source: "SidebarUI",
             action: defaultWasPrevented
               ? "navigate-post-router"
               : "navigate",
@@ -3015,6 +2981,7 @@ export const SidebarUI = (() => {
     });
 
     safeEmit("sidebar:events:bound", {
+      source: "SidebarUI",
       reason: lastBindReason,
       generation: bindGeneration,
       snapshot: getSidebarSnapshot(),
@@ -3049,6 +3016,7 @@ export const SidebarUI = (() => {
     });
 
     safeEmit("sidebar:refreshed", {
+      source: "SidebarUI",
       reason,
       snapshot: getSidebarSnapshot(),
     });
@@ -3094,6 +3062,7 @@ export const SidebarUI = (() => {
     });
 
     safeEmit("sidebar:repaired", {
+      source: "SidebarUI",
       reason,
       snapshot: getSidebarSnapshot(),
       isAdmin: isAdmin(),
@@ -3209,6 +3178,7 @@ export const SidebarUI = (() => {
     });
 
     safeEmit("sidebar:ready", {
+      source: "SidebarUI",
       initialized: true,
       isAdmin: isAdmin(),
       snapshot: getSidebarSnapshot(),
@@ -3229,6 +3199,7 @@ export const SidebarUI = (() => {
     bindGeneration += 1;
 
     safeEmit("sidebar:destroyed", {
+      source: "SidebarUI",
       initialized: false,
     });
 
@@ -3316,7 +3287,13 @@ export const SidebarUI = (() => {
     } = getElements(AppCore);
 
     const activeItem =
-      resolveActiveMenuItem();
+      syncActiveMenuItem(
+        AppCore,
+        {
+          reason: "debug-indicator",
+          mutate: false,
+        }
+      );
 
     const snapshot = {
       route:
@@ -3394,7 +3371,8 @@ export const SidebarUI = (() => {
           active:
             item.classList?.contains?.("active") ||
             item.classList?.contains?.("is-active") ||
-            item.getAttribute?.("aria-current") === "page",
+            item.getAttribute?.("aria-current") === "page" ||
+            item.dataset?.active === "true",
         })),
     };
 
@@ -3446,6 +3424,7 @@ export const SidebarUI = (() => {
         scheduleSidebarVisualSync(reason, {
           delayMs: 0,
           force: true,
+          flushHover: false,
         }),
 
     syncRouteAndIndicator,

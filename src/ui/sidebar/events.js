@@ -4,6 +4,18 @@
 
    FINAL STABLE SYSTEM · MANUAL SIDEBAR ONLY · ROLE EVENTS HARDENED
 
+   Responsabilidades:
+   - bind de eventos DOM del sidebar
+   - bind de eventos core/auth/router
+   - sidebar manual: nunca abrir/cerrar por navegación
+   - cerrar dropdown en navegación
+   - recalcular usuario / roles tras login/logout/restore/session/user change
+   - bloquear clicks sobre elementos hidden/inert/admin ocultos
+   - fallback local si AppCore.cleanup no existe
+   - cleanup idempotente por scope
+   - tolerar DOM re-renderizado
+   - cero throws accidentales
+
    FIX REAL:
    - sin snapshot/restore en navegación desktop
    - sin routeTransition lock
@@ -13,6 +25,14 @@
    - role visibility se recalcula tras login/logout/restore/session/user change
    - fallback si AppCore.cleanup no existe
    - bloqueo defensivo de clicks sobre elementos hidden/inert/admin ocultos
+
+   HARDENING 10/10:
+   - browser guard total
+   - cleanup local robusto
+   - usa off() devuelto por AppCore.events.on si existe
+   - no rompe si document/window no existen
+   - no bloquea clicks sobre iconos aria-hidden dentro de enlaces válidos
+   - router rendered no fuerza open/close del sidebar
 ========================================================= */
 
 import {
@@ -28,8 +48,23 @@ import {
 const localCleanups = new Map();
 
 /* ======================================================
-   HELPERS
+   BASICS
 ====================================================== */
+
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
+
+function hasDocument() {
+  return typeof document !== "undefined";
+}
+
+function hasWindow() {
+  return typeof window !== "undefined";
+}
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) {
@@ -41,6 +76,18 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
+function safeObject(value) {
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function isFn(value) {
+  return typeof value === "function";
+}
+
 function resolveScope(scope = "ui:sidebar") {
   return safeText(scope, "ui:sidebar");
 }
@@ -49,20 +96,63 @@ function safeWarn(AppCore, ...args) {
   try {
     AppCore?.utils?.warn?.("[SidebarEvents]", ...args);
   } catch {}
+
+  try {
+    console.warn("[SidebarEvents]", ...args);
+  } catch {}
+}
+
+function safeEmit(AppCore, eventName = "", payload = {}) {
+  const name = safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  try {
+    AppCore?.events?.emit?.(name, payload);
+    return true;
+  } catch {}
+
+  try {
+    if (isBrowser()) {
+      window.dispatchEvent(
+        new CustomEvent(name, {
+          detail: payload,
+        })
+      );
+
+      return true;
+    }
+  } catch {}
+
+  return false;
 }
 
 function safeWindowTimeout(fn, ms = 0) {
-  try {
-    window.setTimeout(fn, ms);
-  } catch {
-    try {
-      fn?.();
-    } catch {}
+  if (!isFn(fn)) {
+    return;
   }
+
+  try {
+    if (hasWindow()) {
+      window.setTimeout(() => {
+        try {
+          fn();
+        } catch {}
+      }, ms);
+
+      return;
+    }
+  } catch {}
+
+  try {
+    fn();
+  } catch {}
 }
 
 function resolveElements(AppCore, resolver) {
-  if (typeof resolver === "function") {
+  if (isFn(resolver)) {
     try {
       return resolver() || getElements(AppCore);
     } catch {
@@ -74,6 +164,10 @@ function resolveElements(AppCore, resolver) {
 }
 
 function isNode(value = null) {
+  if (!value) {
+    return false;
+  }
+
   try {
     return typeof Node !== "undefined" && value instanceof Node;
   } catch {
@@ -82,6 +176,10 @@ function isNode(value = null) {
 }
 
 function isElement(value = null) {
+  if (!value) {
+    return false;
+  }
+
   try {
     return typeof Element !== "undefined" && value instanceof Element;
   } catch {
@@ -90,15 +188,31 @@ function isElement(value = null) {
 }
 
 function getEventDetail(eventOrPayload = {}) {
-  if (eventOrPayload?.detail && typeof eventOrPayload.detail === "object") {
+  if (
+    eventOrPayload?.detail &&
+    typeof eventOrPayload.detail === "object"
+  ) {
     return eventOrPayload.detail;
   }
 
-  if (eventOrPayload && typeof eventOrPayload === "object") {
+  if (
+    eventOrPayload &&
+    typeof eventOrPayload === "object"
+  ) {
     return eventOrPayload;
   }
 
   return {};
+}
+
+function preventDefaultAndStop(event) {
+  try {
+    event?.preventDefault?.();
+  } catch {}
+
+  try {
+    event?.stopPropagation?.();
+  } catch {}
 }
 
 /* ======================================================
@@ -106,7 +220,9 @@ function getEventDetail(eventOrPayload = {}) {
 ====================================================== */
 
 function pushLocalCleanup(scope, cleanup) {
-  if (typeof cleanup !== "function") return;
+  if (!isFn(cleanup)) {
+    return;
+  }
 
   const scopeName = resolveScope(scope);
   const cleanups = localCleanups.get(scopeName) || [];
@@ -126,33 +242,65 @@ function runLocalCleanups(scope) {
   }
 
   localCleanups.delete(scopeName);
+
+  return true;
 }
 
-function bindDom(AppCore, scope, target, eventName, handler, options = undefined) {
+function bindDom(
+  AppCore,
+  scope,
+  target,
+  eventName,
+  handler,
+  options = undefined
+) {
   const scopeName = resolveScope(scope);
 
-  if (!target || typeof target.addEventListener !== "function") {
+  if (
+    !target ||
+    !eventName ||
+    !isFn(handler) ||
+    !isFn(target.addEventListener)
+  ) {
     return () => {};
   }
 
   try {
-    if (typeof AppCore?.cleanup?.on === "function") {
-      AppCore.cleanup.on(scopeName, target, eventName, handler, options);
+    if (isFn(AppCore?.cleanup?.on)) {
+      AppCore.cleanup.on(
+        scopeName,
+        target,
+        eventName,
+        handler,
+        options
+      );
 
       return () => {
         try {
-          target.removeEventListener(eventName, handler, options);
+          target.removeEventListener(
+            eventName,
+            handler,
+            options
+          );
         } catch {}
       };
     }
   } catch {}
 
   try {
-    target.addEventListener(eventName, handler, options);
+    target.addEventListener(
+      eventName,
+      handler,
+      options
+    );
 
     const cleanup = () => {
       try {
-        target.removeEventListener(eventName, handler, options);
+        target.removeEventListener(
+          eventName,
+          handler,
+          options
+        );
       } catch {}
     };
 
@@ -164,26 +312,52 @@ function bindDom(AppCore, scope, target, eventName, handler, options = undefined
   }
 }
 
-function bindCoreEvent(AppCore, scope, eventName, handler) {
+function bindCoreEvent(
+  AppCore,
+  scope,
+  eventName,
+  handler
+) {
   const scopeName = resolveScope(scope);
 
-  if (!eventName || typeof handler !== "function") {
+  if (!eventName || !isFn(handler)) {
     return () => {};
   }
 
   try {
-    if (typeof AppCore?.cleanup?.event === "function") {
-      AppCore.cleanup.event(scopeName, eventName, handler);
+    if (isFn(AppCore?.cleanup?.event)) {
+      AppCore.cleanup.event(
+        scopeName,
+        eventName,
+        handler
+      );
+
       return () => {};
     }
   } catch {}
 
-  let busBound = false;
+  let busOff = null;
 
   try {
-    if (typeof AppCore?.events?.on === "function") {
-      AppCore.events.on(eventName, handler);
-      busBound = true;
+    if (isFn(AppCore?.events?.on)) {
+      const maybeOff =
+        AppCore.events.on(
+          eventName,
+          handler
+        );
+
+      if (isFn(maybeOff)) {
+        busOff = maybeOff;
+      } else {
+        busOff = () => {
+          try {
+            AppCore?.events?.off?.(
+              eventName,
+              handler
+            );
+          } catch {}
+        };
+      }
     }
   } catch {}
 
@@ -193,23 +367,37 @@ function bindCoreEvent(AppCore, scope, eventName, handler) {
     } catch {}
   };
 
+  let windowBound = false;
+
   try {
-    window.addEventListener(eventName, windowHandler);
+    if (hasWindow()) {
+      window.addEventListener(
+        eventName,
+        windowHandler
+      );
+
+      windowBound = true;
+    }
   } catch {}
 
   const cleanup = () => {
-    if (busBound) {
+    try {
+      busOff?.();
+    } catch {}
+
+    if (windowBound) {
       try {
-        AppCore?.events?.off?.(eventName, handler);
+        window.removeEventListener(
+          eventName,
+          windowHandler
+        );
       } catch {}
     }
-
-    try {
-      window.removeEventListener(eventName, windowHandler);
-    } catch {}
   };
 
-  pushLocalCleanup(scopeName, cleanup);
+  if (busOff || windowBound) {
+    pushLocalCleanup(scopeName, cleanup);
+  }
 
   return cleanup;
 }
@@ -253,6 +441,11 @@ function syncUserAndRoles({
       } catch {}
     }
 
+    /*
+      Importante:
+      syncSidebarState solo sincroniza clases/aria.
+      No debe forzar open/close manual.
+    */
     if (syncState && !isShellHidden(AppCore)) {
       try {
         syncSidebarState?.();
@@ -264,31 +457,50 @@ function syncUserAndRoles({
 }
 
 function shouldIgnoreHiddenTarget(target = null) {
-  if (!isElement(target)) return false;
+  if (!isElement(target)) {
+    return false;
+  }
 
   const hardHidden = target.closest(
-    "[hidden], [inert], [data-sidebar-visible='false']"
+    [
+      "[hidden]",
+      "[inert]",
+      "[data-sidebar-visible='false']",
+      "[data-role-visible='false']",
+      "[data-admin-visible='false']",
+    ].join(",")
   );
 
   if (hardHidden) {
     return true;
   }
 
-  const ariaHidden = target.closest(
-    "[aria-hidden='true']"
-  );
+  const ariaHidden = target.closest("[aria-hidden='true']");
 
   if (!ariaHidden) {
     return false;
   }
 
   /*
-    Caso común del menú:
-    <a data-spa> <span aria-hidden="true">[icono]</span> Texto </a>
-    Si bloqueamos aquí, el click en el icono NO navega.
+    Caso correcto:
+      <a data-spa>
+        <span aria-hidden="true">icono</span>
+        Texto
+      </a>
+
+    No bloqueamos el click si aria-hidden está en un hijo decorativo
+    dentro de un control interactivo válido.
   */
   const interactiveParent = target.closest(
-    "a[data-spa], button, [role='button']"
+    [
+      "a[data-spa]",
+      "a[href]",
+      "button",
+      "[role='button']",
+      "[data-route]",
+      "[data-action]",
+      "[data-sidebar-action]",
+    ].join(",")
   );
 
   if (
@@ -296,8 +508,8 @@ function shouldIgnoreHiddenTarget(target = null) {
     interactiveParent.contains(ariaHidden)
   ) {
     /*
-      Si el propio control interactivo está aria-hidden,
-      NO debemos dejar pasar el click.
+      Si el propio control interactivo está oculto por aria-hidden,
+      entonces sí se bloquea.
     */
     if (ariaHidden === interactiveParent) {
       return true;
@@ -312,14 +524,15 @@ function shouldIgnoreHiddenTarget(target = null) {
 function preventHiddenTargetClick(event) {
   const target = event?.target;
 
-  if (!isElement(target)) return false;
+  if (!isElement(target)) {
+    return false;
+  }
 
   if (!shouldIgnoreHiddenTarget(target)) {
     return false;
   }
 
-  event.preventDefault?.();
-  event.stopPropagation?.();
+  preventDefaultAndStop(event);
 
   return true;
 }
@@ -347,41 +560,39 @@ export function handleDocumentClick({
 
   const target = event?.target;
 
-  if (!isNode(target)) return;
+  if (!isNode(target)) {
+    return;
+  }
 
   if (preventHiddenTargetClick(event)) {
     return;
   }
 
-  if (toggleBtn?.contains(target)) {
-    event.preventDefault();
-    event.stopPropagation();
+  if (toggleBtn?.contains?.(target)) {
+    preventDefaultAndStop(event);
     toggleSidebar?.();
     return;
   }
 
-  if (mobileToggleBtn?.contains(target)) {
-    event.preventDefault();
-    event.stopPropagation();
+  if (mobileToggleBtn?.contains?.(target)) {
+    preventDefaultAndStop(event);
     toggleSidebar?.();
     return;
   }
 
-  if (userToggle?.contains(target)) {
-    event.preventDefault();
-    event.stopPropagation();
+  if (userToggle?.contains?.(target)) {
+    preventDefaultAndStop(event);
     toggleDropdown?.();
     return;
   }
 
-  if (logoutBtn?.contains(target)) {
-    event.preventDefault();
-    event.stopPropagation();
-    handleLogout?.();
+  if (logoutBtn?.contains?.(target)) {
+    preventDefaultAndStop(event);
+    void handleLogout?.();
     return;
   }
 
-  if (userDropdown?.contains(target)) {
+  if (userDropdown?.contains?.(target)) {
     return;
   }
 
@@ -394,13 +605,19 @@ export function handleSidebarMenuClick({
   closeDropdown,
   getElements: resolver,
 }) {
-  const { sidebarMenu } = resolveElements(AppCore, resolver);
+  const {
+    sidebarMenu,
+  } = resolveElements(AppCore, resolver);
 
-  if (!sidebarMenu) return;
+  if (!sidebarMenu) {
+    return;
+  }
 
   const target = event?.target;
 
-  if (!isElement(target)) return;
+  if (!isElement(target)) {
+    return;
+  }
 
   if (preventHiddenTargetClick(event)) {
     return;
@@ -408,12 +625,18 @@ export function handleSidebarMenuClick({
 
   const link = target.closest("a[data-spa]");
 
-  if (!link) return;
-  if (!sidebarMenu.contains(link)) return;
+  if (!link) {
+    return;
+  }
+
+  if (!sidebarMenu.contains(link)) {
+    return;
+  }
 
   /*
     No tocamos estado open/close del sidebar.
     Solo cerramos dropdown footer si estaba abierto.
+    El Router global ya gestiona la navegación SPA.
   */
   closeDropdown?.();
 }
@@ -426,26 +649,38 @@ export function handleUserToggleKeydown({
   openDropdown,
   getElements: resolver,
 }) {
-  const { userToggle } = resolveElements(AppCore, resolver);
+  const {
+    userToggle,
+  } = resolveElements(AppCore, resolver);
 
-  if (!userToggle) return;
-  if (event?.target !== userToggle) return;
+  if (!userToggle) {
+    return;
+  }
 
-  if (event.key === "Enter" || event.key === " ") {
-    event.preventDefault();
+  if (event?.target !== userToggle) {
+    return;
+  }
+
+  if (
+    event.key === "Enter" ||
+    event.key === " "
+  ) {
+    event.preventDefault?.();
     toggleDropdown?.();
     return;
   }
 
   if (event.key === "Escape") {
-    event.preventDefault();
+    event.preventDefault?.();
     closeDropdown?.();
     return;
   }
 
   if (event.key === "ArrowDown") {
-    event.preventDefault();
-    openDropdown?.();
+    event.preventDefault?.();
+    openDropdown?.({
+      focusFirst: true,
+    });
   }
 }
 
@@ -463,11 +698,18 @@ export function handleResize({
   closeDropdown,
 }) {
   /*
-    Resize solo resincroniza clases y cierra dropdown.
-    No fuerza open/close manual.
+    Resize:
+    - resincroniza clases/aria
+    - cierra dropdown
+    - NO fuerza open/close manual
   */
-  syncSidebarState?.();
-  closeDropdown?.();
+  try {
+    syncSidebarState?.();
+  } catch {}
+
+  try {
+    closeDropdown?.();
+  } catch {}
 }
 
 /* ======================================================
@@ -486,6 +728,10 @@ export function bindDomEvents(ctx = {}) {
     syncSidebarState,
     getElements: resolver,
   } = ctx;
+
+  if (!isBrowser()) {
+    return () => {};
+  }
 
   const scopeName = resolveScope(scope);
 
@@ -519,7 +765,7 @@ export function bindDomEvents(ctx = {}) {
   );
 
   const resizeHandler =
-    typeof AppCore?.utils?.debounce === "function"
+    isFn(AppCore?.utils?.debounce)
       ? AppCore.utils.debounce(
           () =>
             handleResize({
@@ -580,6 +826,10 @@ export function bindDomEvents(ctx = {}) {
         })
     );
   }
+
+  safeEmit(AppCore, "sidebar:dom-events:bound", {
+    scope: scopeName,
+  });
 
   return () => {
     runLocalCleanups(scopeName);
@@ -643,8 +893,8 @@ export function bindCoreEvents(ctx = {}) {
 
   /*
     User/session/auth changes.
-    Estos son los eventos importantes para que Usuarios/Clientes/Servidor
-    se oculten o aparezcan sin recargar página.
+    Estos eventos son críticos para que Usuarios/Clientes/Servidor
+    aparezcan/desaparezcan sin refresh.
   */
   [
     "app:user:change",
@@ -657,6 +907,8 @@ export function bindCoreEvents(ctx = {}) {
     "auth:updated",
     "auth:restore:success",
     "auth:session:restored",
+    "auth:session:applied",
+    "app:session:restored",
   ].forEach((eventName) => {
     bindCoreEvent(
       AppCore,
@@ -687,6 +939,7 @@ export function bindCoreEvents(ctx = {}) {
   */
   [
     "app:session:cleared",
+    "auth:session:cleared",
     "auth:logout",
     "auth:logout:success",
     "logout:success",
@@ -707,22 +960,27 @@ export function bindCoreEvents(ctx = {}) {
     scopeName,
     "app:sidebar:change",
     () => {
-      syncSidebarState?.();
+      try {
+        syncSidebarState?.();
+      } catch {}
     }
   );
 
   /*
-    En navegación NO restauramos snapshot,
-    NO forzamos open/close,
-    NO bloqueamos con sidebarRouteTransition.
-    Solo cerramos dropdown.
+    Navegación:
+    - NO restauramos snapshot
+    - NO forzamos open/close
+    - NO bloqueamos con routeTransition
+    - solo cerramos dropdown
   */
   bindCoreEvent(
     AppCore,
     scopeName,
     "router:before-render",
     () => {
-      closeDropdown?.();
+      try {
+        closeDropdown?.();
+      } catch {}
     }
   );
 
@@ -732,16 +990,26 @@ export function bindCoreEvents(ctx = {}) {
     "router:rendered",
     () => {
       safeWindowTimeout(() => {
-        renderUser?.();
-        applyRoleVisibility?.();
-        closeDropdown?.();
+        try {
+          renderUser?.();
+        } catch {}
+
+        try {
+          applyRoleVisibility?.();
+        } catch {}
+
+        try {
+          closeDropdown?.();
+        } catch {}
 
         /*
-          Solo resincronizamos clases visuales,
-          sin tocar el estado manual del usuario.
+          Solo resincronización visual.
+          No debe cambiar la intención manual del usuario.
         */
         if (!isShellHidden(AppCore)) {
-          syncSidebarState?.();
+          try {
+            syncSidebarState?.();
+          } catch {}
         }
 
         try {
@@ -756,14 +1024,20 @@ export function bindCoreEvents(ctx = {}) {
     scopeName,
     "router:shell:change",
     (eventOrPayload = {}) => {
-      const detail = getEventDetail(eventOrPayload);
+      const detail = safeObject(
+        getEventDetail(eventOrPayload)
+      );
 
-      if (detail?.hidden) {
-        closeDropdown?.();
+      if (detail.hidden) {
+        try {
+          closeDropdown?.();
+        } catch {}
       }
 
       safeWindowTimeout(() => {
-        syncSidebarState?.();
+        try {
+          syncSidebarState?.();
+        } catch {}
 
         try {
           sanitizeFooterTooltipState(AppCore);
@@ -773,7 +1047,21 @@ export function bindCoreEvents(ctx = {}) {
   );
 
   /*
-    Boot/app ready: necesario si el sidebar se monta antes de restaurar sesión.
+    Repair request desde Router/App bootstrap.
+    Útil cuando se monta tarde sidebar/topbar o se repara shell tras login.
+  */
+  bindCoreEvent(
+    AppCore,
+    scopeName,
+    "app:ui:repair-request",
+    () => {
+      syncIdentityAndState();
+    }
+  );
+
+  /*
+    Boot/app ready.
+    Necesario si el sidebar se monta antes de restaurar sesión.
   */
   [
     "app:ready",
@@ -787,6 +1075,10 @@ export function bindCoreEvents(ctx = {}) {
       eventName,
       syncIdentityAndState
     );
+  });
+
+  safeEmit(AppCore, "sidebar:core-events:bound", {
+    scope: scopeName,
   });
 
   return () => {

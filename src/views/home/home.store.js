@@ -6,20 +6,23 @@
 
    RESPONSABILIDADES:
    - encapsular Store global
+   - crear entities.home si no existe
    - leer / escribir snapshot dashboard home
-   - helpers para API / View / Actions
-   - búsquedas robustas por widgetId
-   - replace / append / update / upsert widgets
+   - helpers para API / View / Actions / Modal
+   - búsquedas robustas por widgetId/id/key/slug/code/uuid/_id
+   - replace / append / prepend / update / patch / upsert widgets
    - deduplicación segura
+   - ordenación consistente por updatedAt
    - persistencia estable para modal / dashboard
    - exponer summary / recent / dashboard de forma consistente
 
    HARDENING PRO:
-   - añadido upsertHomeWidgetStore
-   - normalización de ids
+   - no depende de Store.actions.setCollection("home")
    - evita duplicados
    - no muta colecciones originales
-   - ordenación consistente por updatedAt
+   - getters devuelven clones
+   - tolera Store no inicializado
+   - tolera entities.home ausente
 ========================================================= */
 
 import { Store } from "../../store/index.js";
@@ -28,31 +31,59 @@ import { Store } from "../../store/index.js";
    CONSTANTS
 ========================================================= */
 
+const STORE_HOME_ROOT_PATH = "entities.home";
+
 const STORE_WIDGETS_PATH = "entities.home.widgets";
 const STORE_DASHBOARD_PATH = "entities.home.dashboard";
 const STORE_SUMMARY_PATH = "entities.home.summary";
 const STORE_RECENT_PATH = "entities.home.recent";
 const STORE_META_PATH = "entities.home.meta";
 
-const STORE_COLLECTION_KEY = "home";
+const DEFAULT_HOME_ROOT = Object.freeze({
+  dashboard: {},
+  widgets: [],
+  summary: {},
+  recent: [],
+  meta: {
+    requestId: "",
+    lastSyncAt: 0,
+  },
+});
 
 /* =========================================================
    SAFE
 ========================================================= */
 
+function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
 function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
+  return isObject(value)
     ? value
     : {};
 }
 
 function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
   const text = String(value).trim();
+
   return text || fallback;
 }
 
@@ -60,8 +91,39 @@ function safeId(value) {
   return safeText(value, "");
 }
 
+function safeClone(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  try {
+    if (
+      typeof structuredClone === "function"
+    ) {
+      return structuredClone(value);
+    }
+  } catch {}
+
+  try {
+    return JSON.parse(
+      JSON.stringify(value)
+    );
+  } catch {
+    return value;
+  }
+}
+
 function safeTimestamp(value, fallback = 0) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return fallback;
+  }
+
   const n = Number(value);
+
   if (Number.isFinite(n)) {
     return n;
   }
@@ -69,7 +131,182 @@ function safeTimestamp(value, fallback = 0) {
   const date = new Date(value);
   const ts = date.getTime();
 
-  return Number.isFinite(ts) ? ts : fallback;
+  return Number.isFinite(ts)
+    ? ts
+    : fallback;
+}
+
+function hasKeys(value) {
+  return (
+    isObject(value) &&
+    Object.keys(value).length > 0
+  );
+}
+
+function now() {
+  return Date.now();
+}
+
+/* =========================================================
+   STORE ACCESS
+========================================================= */
+
+function canUseStore() {
+  return Boolean(
+    Store &&
+      typeof Store.get === "function" &&
+      typeof Store.set === "function"
+  );
+}
+
+function rawStoreGet(path, fallback = undefined) {
+  try {
+    if (typeof Store?.get === "function") {
+      const value = Store.get(path);
+
+      return value === undefined
+        ? fallback
+        : value;
+    }
+  } catch {}
+
+  return fallback;
+}
+
+function rawStoreSet(path, value) {
+  try {
+    if (typeof Store?.set === "function") {
+      Store.set(path, safeClone(value));
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+/* =========================================================
+   HOME ROOT
+========================================================= */
+
+function normalizeHomeMeta(meta = {}) {
+  const item = safeObject(meta);
+
+  return {
+    requestId: safeText(item.requestId, ""),
+    lastSyncAt: safeTimestamp(item.lastSyncAt, 0),
+  };
+}
+
+function normalizeHomeRoot(root = {}) {
+  const item = safeObject(root);
+
+  return {
+    dashboard: safeClone(
+      safeObject(item.dashboard)
+    ),
+
+    widgets: normalizeWidgetsCollection(
+      item.widgets
+    ),
+
+    summary: safeClone(
+      safeObject(item.summary)
+    ),
+
+    recent: safeArray(item.recent).map(
+      (row) => safeClone(row)
+    ),
+
+    meta: normalizeHomeMeta(item.meta),
+  };
+}
+
+function ensureHomeRoot() {
+  if (!canUseStore()) {
+    return false;
+  }
+
+  const current = rawStoreGet(
+    STORE_HOME_ROOT_PATH,
+    null
+  );
+
+  const valid =
+    isObject(current) &&
+    "dashboard" in current &&
+    "widgets" in current &&
+    "summary" in current &&
+    "recent" in current &&
+    "meta" in current;
+
+  if (valid) {
+    return true;
+  }
+
+  const next = normalizeHomeRoot({
+    ...DEFAULT_HOME_ROOT,
+    ...safeObject(current),
+  });
+
+  return rawStoreSet(
+    STORE_HOME_ROOT_PATH,
+    next
+  );
+}
+
+function getHomeRoot() {
+  ensureHomeRoot();
+
+  return normalizeHomeRoot(
+    rawStoreGet(
+      STORE_HOME_ROOT_PATH,
+      DEFAULT_HOME_ROOT
+    )
+  );
+}
+
+function writeHomeRoot(root = {}) {
+  const current = getHomeRoot();
+
+  const next = normalizeHomeRoot({
+    ...current,
+    ...safeObject(root),
+  });
+
+  rawStoreSet(
+    STORE_HOME_ROOT_PATH,
+    next
+  );
+
+  return getHomeRoot();
+}
+
+function readStoreValue(path, fallback = null) {
+  ensureHomeRoot();
+
+  const value = rawStoreGet(path, fallback);
+
+  if (Array.isArray(fallback)) {
+    return safeArray(value).map(
+      (item) => safeClone(item)
+    );
+  }
+
+  if (isObject(fallback)) {
+    return safeClone(
+      safeObject(value)
+    );
+  }
+
+  return value ?? fallback;
+}
+
+function writeStoreValue(path, value) {
+  ensureHomeRoot();
+
+  rawStoreSet(path, value);
+
+  return safeClone(value);
 }
 
 /* =========================================================
@@ -84,24 +321,31 @@ export function getWidgetId(item = {}) {
       row.id ||
       row.key ||
       row.slug ||
-      row.code
+      row.code ||
+      row.uuid ||
+      row._id ||
+      row.raw?.widgetId ||
+      row.raw?.id ||
+      row.raw?.key ||
+      row.raw?.slug ||
+      row.raw?.code ||
+      row.raw?.uuid ||
+      row.raw?._id
   );
 }
 
+function normalizeWidgetId(value = "") {
+  return safeId(value);
+}
+
 function isSameWidgetId(item = {}, id = "") {
-  const target = safeId(id);
-  if (!target) return false;
+  const target = normalizeWidgetId(id);
 
-  const row = safeObject(item);
+  if (!target) {
+    return false;
+  }
 
-  return (
-    getWidgetId(row) === target ||
-    safeId(row.id) === target ||
-    safeId(row.widgetId) === target ||
-    safeId(row.key) === target ||
-    safeId(row.slug) === target ||
-    safeId(row.code) === target
-  );
+  return getWidgetId(item) === target;
 }
 
 /* =========================================================
@@ -120,73 +364,67 @@ function getUpdatedTimestamp(item = {}) {
       row.lastUpdate ??
       row.modifiedAt ??
       row.createdAt ??
+      row.raw?.updatedAt ??
+      row.raw?.lastUpdate ??
+      0,
+    0
+  );
+}
+
+function getCreatedTimestamp(item = {}) {
+  const row = safeObject(item);
+
+  return safeTimestamp(
+    row.createdAtMs ??
+      row.createdAtTs ??
+      row.createdAt ??
+      row.raw?.createdAt ??
       0,
     0
   );
 }
 
 /* =========================================================
-   LOW LEVEL STORE ACCESS
+   NORMALIZE WIDGETS
 ========================================================= */
 
-function readStoreValue(path, fallback = null) {
-  try {
-    if (typeof Store?.get === "function") {
-      const value = Store.get(path);
+function normalizeWidget(item = {}) {
+  const row = safeClone(
+    safeObject(item)
+  );
 
-      if (fallback && typeof fallback === "object" && !Array.isArray(fallback)) {
-        return safeObject(value);
-      }
+  const widgetId = getWidgetId(row);
 
-      if (Array.isArray(fallback)) {
-        return safeArray(value);
-      }
-
-      return value ?? fallback;
-    }
-  } catch {}
-
-  return fallback;
+  return {
+    ...row,
+    widgetId:
+      safeText(row.widgetId, "") ||
+      widgetId,
+  };
 }
-
-function writeStoreValue(path, value) {
-  try {
-    if (typeof Store?.set === "function") {
-      Store.set(path, value);
-      return value;
-    }
-  } catch {}
-
-  return value;
-}
-
-/* =========================================================
-   LEGACY / COLLECTION WRITE
-========================================================= */
-
-function writeHomeWidgetsCollection(items = []) {
-  const list = safeArray(items);
-
-  try {
-    if (Store?.actions?.setCollection) {
-      Store.actions.setCollection(STORE_COLLECTION_KEY, list);
-    }
-  } catch {}
-
-  writeStoreValue(STORE_WIDGETS_PATH, list);
-
-  return list;
-}
-
-/* =========================================================
-   NORMALIZE COLLECTION
-========================================================= */
 
 function mergeHomeWidget(base = {}, patch = {}) {
-  return {
-    ...safeObject(base),
-    ...safeObject(patch),
-  };
+  const current = normalizeWidget(base);
+  const incoming = normalizeWidget(patch);
+
+  const currentTs = getUpdatedTimestamp(current);
+  const incomingTs = getUpdatedTimestamp(incoming);
+
+  /*
+    Si el incoming es más nuevo, sus campos mandan.
+    Si el actual parece más nuevo, preservamos el actual.
+  */
+  if (incomingTs >= currentTs) {
+    return normalizeWidget({
+      ...current,
+      ...incoming,
+    });
+  }
+
+  return normalizeWidget({
+    ...incoming,
+    ...current,
+  });
 }
 
 function dedupeHomeWidgets(items = []) {
@@ -195,11 +433,14 @@ function dedupeHomeWidgets(items = []) {
   const anonymous = [];
 
   for (const rawItem of list) {
-    const item = safeObject(rawItem);
+    const item = normalizeWidget(rawItem);
     const id = getWidgetId(item);
 
     if (!id) {
-      anonymous.push(item);
+      if (hasKeys(item)) {
+        anonymous.push(item);
+      }
+
       continue;
     }
 
@@ -208,39 +449,176 @@ function dedupeHomeWidgets(items = []) {
       continue;
     }
 
-    const current = map.get(id);
-    map.set(id, mergeHomeWidget(current, item));
+    map.set(
+      id,
+      mergeHomeWidget(
+        map.get(id),
+        item
+      )
+    );
   }
 
-  return [...map.values(), ...anonymous];
+  return [
+    ...map.values(),
+    ...anonymous,
+  ];
 }
 
 function normalizeWidgetsCollection(items = []) {
-  return dedupeHomeWidgets(safeArray(items));
+  return sortHomeWidgetsByUpdatedDesc(
+    dedupeHomeWidgets(items)
+  );
 }
 
 /* =========================================================
    DASHBOARD SNAPSHOT
 ========================================================= */
 
-function normalizeDashboardSnapshot(snapshot = {}) {
+function getDashboardWidgets(snapshot = {}) {
   const data = safeObject(snapshot);
+
+  return normalizeWidgetsCollection(
+    data.widgets ||
+      data.cards ||
+      data.kpis ||
+      data.items ||
+      []
+  );
+}
+
+function getDashboardSummary(snapshot = {}) {
+  const data = safeObject(snapshot);
+
+  return safeObject(
+    data.summary ||
+      data.stats ||
+      data.metrics ||
+      data.totals ||
+      {}
+  );
+}
+
+function getDashboardRecent(snapshot = {}) {
+  const data = safeObject(snapshot);
+
+  return safeArray(
+    data.recent ||
+      data.recentActivity ||
+      data.activity ||
+      data.timeline ||
+      []
+  ).map((item) => safeClone(item));
+}
+
+function normalizeDashboardSnapshot(snapshot = {}) {
+  const data = safeClone(
+    safeObject(snapshot)
+  );
+
+  const summary = getDashboardSummary(data);
+  const widgets = getDashboardWidgets(data);
+  const recent = getDashboardRecent(data);
 
   return {
     ...data,
-    summary: safeObject(data.summary),
-    widgets: normalizeWidgetsCollection(data.widgets),
-    recent: safeArray(data.recent),
+    summary,
+    widgets,
+    recent,
+
+    requestId: safeText(
+      data.requestId ||
+        data.meta?.requestId ||
+        "",
+      ""
+    ),
+
+    lastSyncAt: safeTimestamp(
+      data.lastSyncAt ||
+        data.meta?.lastSyncAt ||
+        data.updatedAt ||
+        data.generatedAt ||
+        0,
+      0
+    ),
   };
 }
 
-function normalizeMeta(meta = {}) {
-  const item = safeObject(meta);
+function buildSnapshot({
+  dashboard = {},
+  widgets = null,
+  summary = null,
+  recent = null,
+  requestId = "",
+  lastSyncAt = 0,
+} = {}) {
+  const normalizedDashboard =
+    normalizeDashboardSnapshot(dashboard);
+
+  const finalWidgets =
+    Array.isArray(widgets)
+      ? normalizeWidgetsCollection(widgets)
+      : normalizeWidgetsCollection(
+          normalizedDashboard.widgets
+        );
+
+  const finalSummary =
+    summary && hasKeys(summary)
+      ? safeClone(safeObject(summary))
+      : safeClone(
+          safeObject(normalizedDashboard.summary)
+        );
+
+  const finalRecent =
+    Array.isArray(recent)
+      ? safeArray(recent).map((item) =>
+          safeClone(item)
+        )
+      : safeArray(normalizedDashboard.recent).map(
+          (item) => safeClone(item)
+        );
+
+  const finalRequestId = safeText(
+    requestId ||
+      normalizedDashboard.requestId,
+    ""
+  );
+
+  const finalLastSyncAt = safeTimestamp(
+    lastSyncAt ||
+      normalizedDashboard.lastSyncAt ||
+      now(),
+    now()
+  );
+
+  const finalDashboard = normalizeDashboardSnapshot({
+    ...normalizedDashboard,
+    summary: finalSummary,
+    widgets: finalWidgets,
+    recent: finalRecent,
+    requestId: finalRequestId,
+    lastSyncAt: finalLastSyncAt,
+  });
+
+  const meta = normalizeHomeMeta({
+    requestId: finalRequestId,
+    lastSyncAt: finalLastSyncAt,
+  });
 
   return {
-    requestId: safeText(item.requestId, ""),
-    lastSyncAt: safeTimestamp(item.lastSyncAt, 0),
+    dashboard: finalDashboard,
+    widgets: finalWidgets,
+    summary: finalSummary,
+    recent: finalRecent,
+    meta,
   };
+}
+
+function writeSnapshot(snapshot = {}) {
+  const normalized = buildSnapshot(snapshot);
+
+  writeHomeRoot(normalized);
+
+  return getHomeDashboardStore();
 }
 
 /* =========================================================
@@ -248,63 +626,124 @@ function normalizeMeta(meta = {}) {
 ========================================================= */
 
 export function getHomeDashboardStore() {
+  const root = getHomeRoot();
+
   const dashboard = normalizeDashboardSnapshot(
-    readStoreValue(STORE_DASHBOARD_PATH, {})
+    readStoreValue(
+      STORE_DASHBOARD_PATH,
+      root.dashboard
+    )
   );
 
   const widgets = normalizeWidgetsCollection(
-    readStoreValue(STORE_WIDGETS_PATH, [])
+    readStoreValue(
+      STORE_WIDGETS_PATH,
+      root.widgets
+    )
   );
 
   const summary = safeObject(
-    readStoreValue(STORE_SUMMARY_PATH, {})
+    readStoreValue(
+      STORE_SUMMARY_PATH,
+      root.summary
+    )
   );
 
   const recent = safeArray(
-    readStoreValue(STORE_RECENT_PATH, [])
+    readStoreValue(
+      STORE_RECENT_PATH,
+      root.recent
+    )
   );
 
-  const meta = normalizeMeta(
-    readStoreValue(STORE_META_PATH, {})
+  const meta = normalizeHomeMeta(
+    readStoreValue(
+      STORE_META_PATH,
+      root.meta
+    )
   );
 
-  return {
-    ...dashboard,
-    summary: Object.keys(summary).length
-      ? summary
-      : safeObject(dashboard.summary),
-    widgets: widgets.length
+  const finalWidgets =
+    widgets.length
       ? widgets
-      : normalizeWidgetsCollection(dashboard.widgets),
-    recent: recent.length
+      : normalizeWidgetsCollection(
+          dashboard.widgets
+        );
+
+  const finalSummary =
+    hasKeys(summary)
+      ? summary
+      : safeObject(dashboard.summary);
+
+  const finalRecent =
+    recent.length
       ? recent
-      : safeArray(dashboard.recent),
+      : safeArray(dashboard.recent);
+
+  return normalizeDashboardSnapshot({
+    ...dashboard,
+    summary: finalSummary,
+    widgets: finalWidgets,
+    recent: finalRecent,
+
     requestId: safeText(
-      dashboard.requestId || meta.requestId,
+      dashboard.requestId ||
+        meta.requestId,
       ""
     ),
+
     lastSyncAt: safeTimestamp(
-      dashboard.lastSyncAt || meta.lastSyncAt,
+      dashboard.lastSyncAt ||
+        meta.lastSyncAt,
       0
     ),
-  };
+  });
 }
 
 export function getHomeSummaryStore() {
-  return safeObject(
-    readStoreValue(STORE_SUMMARY_PATH, {})
+  const summary = safeObject(
+    readStoreValue(
+      STORE_SUMMARY_PATH,
+      {}
+    )
+  );
+
+  if (hasKeys(summary)) {
+    return safeClone(summary);
+  }
+
+  return safeClone(
+    safeObject(
+      getHomeDashboardStore().summary
+    )
   );
 }
 
 export function getHomeRecentStore() {
-  return safeArray(
-    readStoreValue(STORE_RECENT_PATH, [])
+  const recent = safeArray(
+    readStoreValue(
+      STORE_RECENT_PATH,
+      []
+    )
   );
+
+  if (recent.length) {
+    return recent.map((item) =>
+      safeClone(item)
+    );
+  }
+
+  return safeArray(
+    getHomeDashboardStore().recent
+  ).map((item) => safeClone(item));
 }
 
 export function getHomeMetaStore() {
-  return normalizeMeta(
-    readStoreValue(STORE_META_PATH, {})
+  return normalizeHomeMeta(
+    readStoreValue(
+      STORE_META_PATH,
+      {}
+    )
   );
 }
 
@@ -313,13 +752,26 @@ export function getHomeMetaStore() {
 ========================================================= */
 
 export function getHomeWidgets() {
+  const widgets = normalizeWidgetsCollection(
+    readStoreValue(
+      STORE_WIDGETS_PATH,
+      []
+    )
+  );
+
+  if (widgets.length) {
+    return widgets;
+  }
+
   return normalizeWidgetsCollection(
-    readStoreValue(STORE_WIDGETS_PATH, [])
+    getHomeDashboardStore().widgets
   );
 }
 
 export function getSortedHomeWidgetsStore() {
-  return sortHomeWidgetsByUpdatedDesc(getHomeWidgets());
+  return sortHomeWidgetsByUpdatedDesc(
+    getHomeWidgets()
+  );
 }
 
 export function getHomeSortedCollectionStore() {
@@ -327,15 +779,20 @@ export function getHomeSortedCollectionStore() {
 }
 
 export function getHomeWidgetById(id = "") {
-  const target = safeId(id);
+  const target = normalizeWidgetId(id);
 
   if (!target) {
     return null;
   }
 
-  const items = getHomeWidgets();
+  const item =
+    getHomeWidgets().find((row) =>
+      isSameWidgetId(row, target)
+    ) || null;
 
-  return items.find((item) => isSameWidgetId(item, target)) || null;
+  return item
+    ? safeClone(item)
+    : null;
 }
 
 export function getHomeWidgetByIdStore(id = "") {
@@ -355,21 +812,9 @@ export function getHomeWidgetsCount() {
 ========================================================= */
 
 export function setHomeDashboardStore(snapshot = {}) {
-  const normalized = normalizeDashboardSnapshot(snapshot);
-
-  writeStoreValue(STORE_DASHBOARD_PATH, normalized);
-  writeHomeWidgetsCollection(normalized.widgets || []);
-  writeStoreValue(STORE_SUMMARY_PATH, safeObject(normalized.summary));
-  writeStoreValue(STORE_RECENT_PATH, safeArray(normalized.recent));
-
-  const meta = normalizeMeta({
-    requestId: normalized.requestId,
-    lastSyncAt: normalized.lastSyncAt,
+  return writeSnapshot({
+    dashboard: snapshot,
   });
-
-  writeStoreValue(STORE_META_PATH, meta);
-
-  return getHomeDashboardStore();
 }
 
 export function replaceHomeStore({
@@ -380,93 +825,83 @@ export function replaceHomeStore({
   requestId = "",
   lastSyncAt = 0,
 } = {}) {
-  const normalizedWidgets = normalizeWidgetsCollection(widgets);
-  const normalizedSummary = safeObject(summary);
-  const normalizedRecent = safeArray(recent);
-  const normalizedDashboard = normalizeDashboardSnapshot({
-    ...safeObject(dashboard),
-    summary: normalizedSummary,
-    widgets: normalizedWidgets,
-    recent: normalizedRecent,
-    requestId: safeText(requestId, safeObject(dashboard).requestId || ""),
-    lastSyncAt: safeTimestamp(
-      lastSyncAt,
-      safeObject(dashboard).lastSyncAt || 0
-    ),
+  return writeSnapshot({
+    dashboard,
+    widgets,
+    summary,
+    recent,
+    requestId,
+    lastSyncAt,
   });
-
-  writeStoreValue(STORE_DASHBOARD_PATH, normalizedDashboard);
-  writeHomeWidgetsCollection(normalizedWidgets);
-  writeStoreValue(STORE_SUMMARY_PATH, normalizedSummary);
-  writeStoreValue(STORE_RECENT_PATH, normalizedRecent);
-  writeStoreValue(
-    STORE_META_PATH,
-    normalizeMeta({
-      requestId: requestId,
-      lastSyncAt: lastSyncAt,
-    })
-  );
-
-  return getHomeDashboardStore();
 }
 
 export function clearHomeDashboardStore() {
-  writeStoreValue(STORE_DASHBOARD_PATH, {});
-  writeStoreValue(STORE_SUMMARY_PATH, {});
-  writeStoreValue(STORE_RECENT_PATH, []);
-  writeStoreValue(STORE_META_PATH, {});
-  writeHomeWidgetsCollection([]);
+  writeHomeRoot({
+    dashboard: {},
+    widgets: [],
+    summary: {},
+    recent: [],
+    meta: {
+      requestId: "",
+      lastSyncAt: 0,
+    },
+  });
 
   return getHomeDashboardStore();
 }
 
 export function setHomeSummaryStore(summary = {}) {
-  const next = safeObject(summary);
-  writeStoreValue(STORE_SUMMARY_PATH, next);
-
-  const currentDashboard = safeObject(
-    readStoreValue(STORE_DASHBOARD_PATH, {})
+  const root = getHomeRoot();
+  const nextSummary = safeClone(
+    safeObject(summary)
   );
 
-  writeStoreValue(STORE_DASHBOARD_PATH, {
-    ...currentDashboard,
-    summary: next,
+  writeHomeRoot({
+    ...root,
+    summary: nextSummary,
+    dashboard: normalizeDashboardSnapshot({
+      ...root.dashboard,
+      summary: nextSummary,
+    }),
   });
 
-  return next;
+  return getHomeSummaryStore();
 }
 
 export function setHomeRecentStore(items = []) {
-  const next = safeArray(items);
-  writeStoreValue(STORE_RECENT_PATH, next);
+  const root = getHomeRoot();
 
-  const currentDashboard = safeObject(
-    readStoreValue(STORE_DASHBOARD_PATH, {})
+  const nextRecent = safeArray(items).map(
+    (item) => safeClone(item)
   );
 
-  writeStoreValue(STORE_DASHBOARD_PATH, {
-    ...currentDashboard,
-    recent: next,
+  writeHomeRoot({
+    ...root,
+    recent: nextRecent,
+    dashboard: normalizeDashboardSnapshot({
+      ...root.dashboard,
+      recent: nextRecent,
+    }),
   });
 
-  return next;
+  return getHomeRecentStore();
 }
 
 export function setHomeMetaStore(meta = {}) {
-  const next = normalizeMeta(meta);
-  writeStoreValue(STORE_META_PATH, next);
+  const root = getHomeRoot();
+  const nextMeta = normalizeHomeMeta(meta);
 
-  const currentDashboard = safeObject(
-    readStoreValue(STORE_DASHBOARD_PATH, {})
-  );
-
-  writeStoreValue(STORE_DASHBOARD_PATH, {
-    ...currentDashboard,
-    requestId: next.requestId,
-    lastSyncAt: next.lastSyncAt,
+  writeHomeRoot({
+    ...root,
+    meta: nextMeta,
+    dashboard: normalizeDashboardSnapshot({
+      ...root.dashboard,
+      requestId: nextMeta.requestId,
+      lastSyncAt: nextMeta.lastSyncAt,
+    }),
   });
 
-  return next;
+  return getHomeMetaStore();
 }
 
 /* =========================================================
@@ -474,20 +909,21 @@ export function setHomeMetaStore(meta = {}) {
 ========================================================= */
 
 export function setHomeWidgets(items = []) {
-  const next = normalizeWidgetsCollection(items);
+  const root = getHomeRoot();
 
-  writeHomeWidgetsCollection(next);
+  const nextWidgets =
+    normalizeWidgetsCollection(items);
 
-  const currentDashboard = safeObject(
-    readStoreValue(STORE_DASHBOARD_PATH, {})
-  );
-
-  writeStoreValue(STORE_DASHBOARD_PATH, {
-    ...currentDashboard,
-    widgets: next,
+  writeHomeRoot({
+    ...root,
+    widgets: nextWidgets,
+    dashboard: normalizeDashboardSnapshot({
+      ...root.dashboard,
+      widgets: nextWidgets,
+    }),
   });
 
-  return next;
+  return getHomeWidgets();
 }
 
 export function replaceHomeWidgetsStore(items = []) {
@@ -503,28 +939,25 @@ export function appendHomeWidgetStore(item = null) {
     return getHomeWidgets();
   }
 
-  const current = getHomeWidgets();
-  const next = normalizeWidgetsCollection([
-    ...current,
-    safeObject(item),
+  return setHomeWidgets([
+    ...getHomeWidgets(),
+    normalizeWidget(item),
   ]);
+}
 
-  writeHomeWidgetsCollection(next);
+export function prependHomeWidgetStore(item = null) {
+  if (!item) {
+    return getHomeWidgets();
+  }
 
-  const currentDashboard = safeObject(
-    readStoreValue(STORE_DASHBOARD_PATH, {})
-  );
-
-  writeStoreValue(STORE_DASHBOARD_PATH, {
-    ...currentDashboard,
-    widgets: next,
-  });
-
-  return next;
+  return setHomeWidgets([
+    normalizeWidget(item),
+    ...getHomeWidgets(),
+  ]);
 }
 
 export function updateHomeWidgetStore(id = "", patch = {}) {
-  const target = safeId(id);
+  const target = normalizeWidgetId(id);
 
   if (!target) {
     return getHomeWidgets();
@@ -538,18 +971,11 @@ export function updateHomeWidgetStore(id = "", patch = {}) {
       : item
   );
 
-  writeHomeWidgetsCollection(next);
+  return setHomeWidgets(next);
+}
 
-  const currentDashboard = safeObject(
-    readStoreValue(STORE_DASHBOARD_PATH, {})
-  );
-
-  writeStoreValue(STORE_DASHBOARD_PATH, {
-    ...currentDashboard,
-    widgets: next,
-  });
-
-  return next;
+export function patchHomeWidgetStore(id = "", patch = {}) {
+  return updateHomeWidgetStore(id, patch);
 }
 
 /* =========================================================
@@ -561,52 +987,36 @@ export function upsertHomeWidgetStore(item = null) {
     return getHomeWidgets();
   }
 
-  const incoming = safeObject(item);
+  const incoming = normalizeWidget(item);
   const targetId = getWidgetId(incoming);
   const current = getHomeWidgets();
 
   if (!targetId) {
-    const next = normalizeWidgetsCollection([incoming, ...current]);
-    writeHomeWidgetsCollection(next);
-
-    const currentDashboard = safeObject(
-      readStoreValue(STORE_DASHBOARD_PATH, {})
-    );
-
-    writeStoreValue(STORE_DASHBOARD_PATH, {
-      ...currentDashboard,
-      widgets: next,
-    });
-
-    return next;
+    return setHomeWidgets([
+      incoming,
+      ...current,
+    ]);
   }
 
-  const index = current.findIndex(
-    (row) => getWidgetId(row) === targetId
+  const index = current.findIndex((row) =>
+    isSameWidgetId(row, targetId)
   );
-
-  let next = [];
 
   if (index === -1) {
-    next = normalizeWidgetsCollection([incoming, ...current]);
-  } else {
-    next = [...current];
-    next[index] = mergeHomeWidget(next[index], incoming);
-    next = normalizeWidgetsCollection(next);
+    return setHomeWidgets([
+      incoming,
+      ...current,
+    ]);
   }
 
-  writeHomeWidgetsCollection(next);
+  const next = [...current];
 
-  const currentDashboard = safeObject(
-    readStoreValue(STORE_DASHBOARD_PATH, {})
+  next[index] = mergeHomeWidget(
+    next[index],
+    incoming
   );
 
-  writeStoreValue(STORE_DASHBOARD_PATH, {
-    ...currentDashboard,
-    widgets: next,
-  });
-
-  return next;
+  return setHomeWidgets(next);
 }
 
 /* =========================================================
@@ -614,7 +1024,7 @@ export function upsertHomeWidgetStore(item = null) {
 ========================================================= */
 
 export function removeHomeWidgetStore(id = "") {
-  const target = safeId(id);
+  const target = normalizeWidgetId(id);
 
   if (!target) {
     return getHomeWidgets();
@@ -624,22 +1034,11 @@ export function removeHomeWidgetStore(id = "") {
     (item) => !isSameWidgetId(item, target)
   );
 
-  writeHomeWidgetsCollection(next);
-
-  const currentDashboard = safeObject(
-    readStoreValue(STORE_DASHBOARD_PATH, {})
-  );
-
-  writeStoreValue(STORE_DASHBOARD_PATH, {
-    ...currentDashboard,
-    widgets: next,
-  });
-
-  return next;
+  return setHomeWidgets(next);
 }
 
 /* =========================================================
-   HELPERS
+   SORT HELPERS
 ========================================================= */
 
 export function sortHomeWidgetsByUpdatedDesc(items = []) {
@@ -647,28 +1046,90 @@ export function sortHomeWidgetsByUpdatedDesc(items = []) {
     const aTime = getUpdatedTimestamp(a);
     const bTime = getUpdatedTimestamp(b);
 
-    return bTime - aTime;
+    if (bTime !== aTime) {
+      return bTime - aTime;
+    }
+
+    return getCreatedTimestamp(b) - getCreatedTimestamp(a);
   });
 }
 
 export function sortHomeWidgetsByCreatedDesc(items = []) {
   return [...safeArray(items)].sort((a, b) => {
-    const aTime = safeTimestamp(
-      safeObject(a).createdAt ??
-        safeObject(a).createdAtMs ??
-        0,
-      0
-    );
-
-    const bTime = safeTimestamp(
-      safeObject(b).createdAt ??
-        safeObject(b).createdAtMs ??
-        0,
-      0
-    );
+    const aTime = getCreatedTimestamp(a);
+    const bTime = getCreatedTimestamp(b);
 
     return bTime - aTime;
   });
+}
+
+/* =========================================================
+   BULK HELPERS
+========================================================= */
+
+export function hydrateHomeStoreFromSnapshot(snapshot = {}) {
+  return setHomeDashboardStore(snapshot);
+}
+
+export function getHomeStoreSnapshot() {
+  const dashboard = getHomeDashboardStore();
+  const widgets = getHomeWidgets();
+  const summary = getHomeSummaryStore();
+  const recent = getHomeRecentStore();
+  const meta = getHomeMetaStore();
+
+  return {
+    dashboard,
+    widgets,
+    summary,
+    recent,
+    meta,
+
+    hasDashboard:
+      Object.keys(safeObject(dashboard)).length > 0,
+
+    widgetsCount:
+      widgets.length,
+
+    recentCount:
+      recent.length,
+
+    summaryKeys:
+      Object.keys(summary).length,
+
+    requestId:
+      meta.requestId,
+
+    lastSyncAt:
+      meta.lastSyncAt,
+  };
+}
+
+/* =========================================================
+   DEBUG
+========================================================= */
+
+export function getHomeStoreDebugSnapshot() {
+  return {
+    rootPath: STORE_HOME_ROOT_PATH,
+
+    paths: {
+      widgets: STORE_WIDGETS_PATH,
+      dashboard: STORE_DASHBOARD_PATH,
+      summary: STORE_SUMMARY_PATH,
+      recent: STORE_RECENT_PATH,
+      meta: STORE_META_PATH,
+    },
+
+    canUseStore:
+      canUseStore(),
+
+    root:
+      getHomeRoot(),
+
+    snapshot:
+      getHomeStoreSnapshot(),
+  };
 }
 
 /* =========================================================
@@ -700,10 +1161,16 @@ export default {
   setHomeWidgets,
   replaceHomeWidgetsStore,
   appendHomeWidgetStore,
+  prependHomeWidgetStore,
   updateHomeWidgetStore,
+  patchHomeWidgetStore,
   upsertHomeWidgetStore,
   removeHomeWidgetStore,
   clearHomeWidgets,
+
+  hydrateHomeStoreFromSnapshot,
+  getHomeStoreSnapshot,
+  getHomeStoreDebugSnapshot,
 
   sortHomeWidgetsByUpdatedDesc,
   sortHomeWidgetsByCreatedDesc,

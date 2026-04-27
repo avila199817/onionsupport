@@ -2,69 +2,82 @@
    Onion SPA - Home Utils
    Archivo: src/views/home/home.utils.js
 
-   EXTREME MODE · 10/10
+   EXTREME MODE · FINAL PRO · 10/10
 
    Responsabilidades:
-   - helpers puros reutilizables
+   - helpers puros reutilizables del módulo Home
    - sanitización robusta
    - fechas seguras
-   - números
-   - texto
-   - normalización
+   - números / dinero / porcentajes
+   - texto / slug / normalización
+   - colecciones / dedupe / ordenación
+   - clipboard / descarga CSV
+   - toast bridge tolerante
    - cero dependencias frágiles
    - compatibilidad total con template / actions / api / view
+
+   HARDENING:
+   - tolera AppCore incompleto
+   - tolera Toast global / módulo registrado / ui.toast / AppCore.toast
+   - soporta fechas futuras en relative date
+   - evita fallos con objetos en first()
+   - CSP clean: sin HTML/eventos inline
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
 /* =========================================================
-   BASE
+   RUNTIME
 ========================================================= */
 
-/**
- * FIX CRÍTICO:
- * Fallback interno si AppCore.utils.escapeHtml no existe.
- * Evita textos invisibles o rotos en widgets.
- */
-export function escapeHtml(value = "") {
-  const text = String(value ?? "");
+export function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
 
-  try {
-    const coreEscape =
-      AppCore?.utils?.escapeHtml;
+export function now() {
+  return Date.now();
+}
 
-    if (
-      typeof coreEscape ===
-      "function"
-    ) {
-      const result =
-        coreEscape(text);
+export function noop() {}
 
-      if (
-        result !== undefined &&
-        result !== null
-      ) {
-        return String(result);
-      }
-    }
-  } catch {}
+/* =========================================================
+   BASE SAFE HELPERS
+========================================================= */
 
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+export function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+export function isFunction(value) {
+  return typeof value === "function";
+}
+
+export function isEmptyString(value) {
+  return (
+    typeof value === "string" &&
+    value.trim() === ""
+  );
+}
+
+export function isNil(value) {
+  return (
+    value === null ||
+    value === undefined
+  );
 }
 
 export function safeString(
   value,
   fallback = ""
 ) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
+  if (isNil(value)) {
     return fallback;
   }
 
@@ -88,9 +101,26 @@ export function safeArray(
   value,
   fallback = []
 ) {
-  return Array.isArray(value)
-    ? value
-    : fallback;
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  return Array.isArray(fallback)
+    ? fallback
+    : [];
+}
+
+export function safeObject(
+  value,
+  fallback = {}
+) {
+  if (isObject(value)) {
+    return value;
+  }
+
+  return isObject(fallback)
+    ? fallback
+    : {};
 }
 
 export function safeNumber(
@@ -104,139 +134,206 @@ export function safeNumber(
     : fallback;
 }
 
-export function safeObject(
+export function safeInteger(
   value,
-  fallback = {}
+  fallback = 0
 ) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-    ? value
+  const n = Number.parseInt(
+    value,
+    10
+  );
+
+  return Number.isFinite(n)
+    ? n
     : fallback;
+}
+
+export function safeBoolean(
+  value,
+  fallback = false
+) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === "string") {
+    const key = value
+      .trim()
+      .toLowerCase();
+
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "y",
+        "si",
+        "sí",
+        "on",
+      ].includes(key)
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "n",
+        "off",
+      ].includes(key)
+    ) {
+      return false;
+    }
+  }
+
+  return fallback;
 }
 
 export function first(...values) {
   for (const value of values) {
-    if (
-      value !== undefined &&
-      value !== null &&
-      String(value).trim() !== ""
-    ) {
+    if (isNil(value)) {
+      continue;
+    }
+
+    if (typeof value === "string") {
+      if (value.trim() === "") {
+        continue;
+      }
+
       return value;
     }
+
+    if (Array.isArray(value)) {
+      if (!value.length) {
+        continue;
+      }
+
+      return value;
+    }
+
+    if (isObject(value)) {
+      if (!Object.keys(value).length) {
+        continue;
+      }
+
+      return value;
+    }
+
+    return value;
   }
 
   return null;
 }
 
+export function clamp(
+  value,
+  min = 0,
+  max = 100
+) {
+  const n =
+    safeNumber(value, min);
+
+  return Math.min(
+    Math.max(n, min),
+    max
+  );
+}
+
 /* =========================================================
-   UI
+   CLONE / JSON
 ========================================================= */
 
-export function showToast(
-  message = "",
-  type = "info",
-  options = {}
-) {
-  const text =
-    safeText(message, "");
-
-  if (!text) {
-    return false;
+export function deepClone(value) {
+  if (value === undefined) {
+    return undefined;
   }
 
   try {
     if (
-      typeof AppCore?.modules?.get ===
+      typeof structuredClone ===
       "function"
     ) {
-      const toastModule =
-        AppCore.modules.get(
-          "toast"
-        );
+      return structuredClone(value);
+    }
+  } catch {}
 
-      if (
-        typeof toastModule?.show ===
-        "function"
-      ) {
-        toastModule.show({
-          message: text,
-          type,
-          ...options,
-        });
+  try {
+    return JSON.parse(
+      JSON.stringify(value)
+    );
+  } catch {
+    return value;
+  }
+}
 
-        return true;
+export function parseJson(
+  value,
+  fallback = null
+) {
+  if (isObject(value) || Array.isArray(value)) {
+    return value;
+  }
+
+  const text =
+    safeText(value, "");
+
+  if (!text) {
+    return fallback;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+}
+
+export function stringifyJson(
+  value,
+  fallback = "{}"
+) {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return fallback;
+  }
+}
+
+/* =========================================================
+   HTML / TEXT SANITIZE
+========================================================= */
+
+export function escapeHtml(value = "") {
+  const text = String(value ?? "");
+
+  try {
+    const coreEscape =
+      AppCore?.utils?.escapeHtml;
+
+    if (isFunction(coreEscape)) {
+      const result =
+        coreEscape(text);
+
+      if (!isNil(result)) {
+        return String(result);
       }
     }
   } catch {}
 
-  try {
-    if (
-      typeof AppCore?.ui?.toast?.show ===
-      "function"
-    ) {
-      AppCore.ui.toast.show({
-        message: text,
-        type,
-        ...options,
-      });
-
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (
-      typeof AppCore?.toast?.show ===
-      "function"
-    ) {
-      AppCore.toast.show({
-        message: text,
-        type,
-        ...options,
-      });
-
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (
-      typeof window !==
-        "undefined" &&
-      typeof window.Toast?.show ===
-        "function"
-    ) {
-      window.Toast.show({
-        message: text,
-        type,
-        ...options,
-      });
-
-      return true;
-    }
-  } catch {}
-
-  try {
-    const logger =
-      type === "error"
-        ? console.error
-        : type === "warning"
-          ? console.warn
-          : console.log;
-
-    logger(
-      `[HomeToast:${type}]`,
-      text
-    );
-  } catch {}
-
-  return false;
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
-
-/* =========================================================
-   TEXT
-========================================================= */
 
 export function normalizeText(
   value = ""
@@ -251,6 +348,32 @@ export function normalizeText(
     .trim();
 }
 
+export function normalizeKey(
+  value = ""
+) {
+  return normalizeText(value)
+    .replace(
+      /[\s-]+/g,
+      "_"
+    )
+    .replace(
+      /[^a-z0-9_:.]/g,
+      ""
+    )
+    .replace(
+      /^_+|_+$/g,
+      ""
+    );
+}
+
+export function normalizeWhitespace(
+  value = ""
+) {
+  return safeText(value, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function truncate(
   value = "",
   max = 160
@@ -259,7 +382,10 @@ export function truncate(
     safeString(value, "");
 
   const limit =
-    safeNumber(max, 160);
+    Math.max(
+      1,
+      safeInteger(max, 160)
+    );
 
   if (!text) {
     return "";
@@ -275,13 +401,14 @@ export function truncate(
 }
 
 export function getInitials(
-  value = ""
+  value = "",
+  fallback = "ON"
 ) {
   const text =
-    safeString(value, "");
+    normalizeWhitespace(value);
 
   if (!text) {
-    return "ON";
+    return fallback;
   }
 
   const initials = text
@@ -296,7 +423,7 @@ export function getInitials(
     .join("")
     .slice(0, 2);
 
-  return initials || "ON";
+  return initials || fallback;
 }
 
 export function slugify(
@@ -319,14 +446,16 @@ export function slugify(
 
 export function formatNumber(
   value,
-  locale = "es-ES"
+  locale = "es-ES",
+  options = {}
 ) {
   const n =
     safeNumber(value, 0);
 
   try {
     return new Intl.NumberFormat(
-      locale
+      safeText(locale, "es-ES"),
+      safeObject(options)
     ).format(n);
   } catch {
     return String(n);
@@ -341,19 +470,21 @@ export function formatMoney(
   const amount =
     safeNumber(value, 0);
 
+  const code =
+    safeText(currency, "EUR")
+      .toUpperCase();
+
   try {
     return new Intl.NumberFormat(
-      locale,
+      safeText(locale, "es-ES"),
       {
         style: "currency",
-        currency,
+        currency: code,
         maximumFractionDigits: 2,
       }
     ).format(amount);
   } catch {
-    return `${amount.toFixed(
-      2
-    )} ${currency}`;
+    return `${amount.toFixed(2)} ${code}`;
   }
 }
 
@@ -364,83 +495,118 @@ export function percent(
   const n =
     safeNumber(value, 0);
 
-  return `${n.toFixed(
-    digits
-  )}%`;
+  const precision =
+    clamp(
+      safeInteger(digits, 0),
+      0,
+      6
+    );
+
+  return `${n.toFixed(precision)}%`;
+}
+
+export function isPositiveTrend(
+  value
+) {
+  return safeNumber(value, 0) > 0;
+}
+
+export function isNegativeTrend(
+  value
+) {
+  return safeNumber(value, 0) < 0;
 }
 
 /* =========================================================
    DATE
 ========================================================= */
 
-export function toMs(value) {
+export function toDate(value) {
   if (!value) {
-    return 0;
+    return null;
   }
 
-  const ms =
-    new Date(value).getTime();
+  const date =
+    value instanceof Date
+      ? value
+      : new Date(value);
 
-  return Number.isFinite(ms)
-    ? ms
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return null;
+  }
+
+  return date;
+}
+
+export function toMs(value) {
+  const date =
+    toDate(value);
+
+  return date
+    ? date.getTime()
     : 0;
 }
 
 export function formatDate(
-  value
+  value,
+  {
+    locale = "es-ES",
+    fallback = "—",
+    withTime = true,
+  } = {}
 ) {
-  if (!value) {
-    return "—";
-  }
-
   const date =
-    new Date(value);
+    toDate(value);
 
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
-    return "—";
+  if (!date) {
+    return fallback;
   }
 
   try {
     return new Intl.DateTimeFormat(
-      "es-ES",
-      {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }
+      safeText(locale, "es-ES"),
+      withTime
+        ? {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          }
+        : {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+          }
     ).format(date);
   } catch {
-    return "—";
+    return fallback;
   }
 }
 
 export function formatRelativeDate(
-  value
+  value,
+  {
+    fallback = "—",
+    nowMs = Date.now(),
+  } = {}
 ) {
-  if (!value) {
-    return "—";
-  }
-
   const date =
-    new Date(value);
+    toDate(value);
 
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
-    return "—";
+  if (!date) {
+    return fallback;
   }
 
   const diff =
-    Date.now() -
-    date.getTime();
+    date.getTime() - nowMs;
+
+  const abs =
+    Math.abs(diff);
 
   const minute =
     60 * 1000;
@@ -451,34 +617,98 @@ export function formatRelativeDate(
   const day =
     24 * hour;
 
-  if (diff < minute) {
-    return "Hace un momento";
+  const future =
+    diff > 0;
+
+  if (abs < minute) {
+    return future
+      ? "En un momento"
+      : "Hace un momento";
   }
 
-  if (diff < hour) {
-    return `Hace ${Math.floor(
-      diff / minute
-    )} min`;
+  if (abs < hour) {
+    const valueMin =
+      Math.floor(abs / minute);
+
+    return future
+      ? `En ${valueMin} min`
+      : `Hace ${valueMin} min`;
   }
 
-  if (diff < day) {
-    return `Hace ${Math.floor(
-      diff / hour
-    )} h`;
+  if (abs < day) {
+    const valueHour =
+      Math.floor(abs / hour);
+
+    return future
+      ? `En ${valueHour} h`
+      : `Hace ${valueHour} h`;
   }
 
-  if (diff < day * 7) {
-    return `Hace ${Math.floor(
-      diff / day
-    )} d`;
+  if (abs < day * 7) {
+    const valueDay =
+      Math.floor(abs / day);
+
+    return future
+      ? `En ${valueDay} d`
+      : `Hace ${valueDay} d`;
   }
 
   return formatDate(value);
 }
 
+export function formatDateTime(
+  value
+) {
+  return formatDate(
+    value,
+    {
+      withTime: true,
+    }
+  );
+}
+
+export function formatDateOnly(
+  value
+) {
+  return formatDate(
+    value,
+    {
+      withTime: false,
+    }
+  );
+}
+
 /* =========================================================
    COLLECTION
 ========================================================= */
+
+export function normalizeCollection(
+  value,
+  fallback = []
+) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  const object =
+    safeObject(value, null);
+
+  if (!object) {
+    return safeArray(fallback);
+  }
+
+  return safeArray(
+    first(
+      object.items,
+      object.rows,
+      object.data,
+      object.results,
+      object.value,
+      object.docs,
+      fallback
+    )
+  );
+}
 
 export function sortByUpdatedDesc(
   items = []
@@ -489,11 +719,35 @@ export function sortByUpdatedDesc(
       (a, b) =>
         toMs(
           b?.updatedAt ||
+            b?.lastUpdate ||
+            b?.modifiedAt ||
             b?.createdAt
         ) -
         toMs(
           a?.updatedAt ||
+            a?.lastUpdate ||
+            a?.modifiedAt ||
             a?.createdAt
+        )
+    );
+}
+
+export function sortByCreatedDesc(
+  items = []
+) {
+  return safeArray(items)
+    .slice()
+    .sort(
+      (a, b) =>
+        toMs(
+          b?.createdAt ||
+            b?.date ||
+            b?.timestamp
+        ) -
+        toMs(
+          a?.createdAt ||
+            a?.date ||
+            a?.timestamp
         )
     );
 }
@@ -505,18 +759,25 @@ export function uniqueBy(
   const map =
     new Map();
 
-  for (const item of safeArray(
-    items
-  )) {
-    const id = safeText(
-      item?.[key],
-      ""
-    );
+  for (const item of safeArray(items)) {
+    const row =
+      safeObject(item, null);
 
-    if (!id) continue;
+    if (!row) {
+      continue;
+    }
+
+    const id =
+      isFunction(key)
+        ? safeText(key(row), "")
+        : safeText(row?.[key], "");
+
+    if (!id) {
+      continue;
+    }
 
     if (!map.has(id)) {
-      map.set(id, item);
+      map.set(id, row);
     }
   }
 
@@ -525,24 +786,514 @@ export function uniqueBy(
   );
 }
 
+export function uniqueById(
+  items = []
+) {
+  return uniqueBy(
+    items,
+    (item) =>
+      first(
+        item?.id,
+        item?._id,
+        item?.widgetId,
+        item?.ticketId,
+        item?.invoiceId,
+        item?.code,
+        item?.slug
+      )
+  );
+}
+
+export function paginate(
+  items = [],
+  page = 1,
+  pageSize = 10
+) {
+  const list =
+    safeArray(items);
+
+  const size =
+    Math.max(
+      1,
+      safeInteger(pageSize, 10)
+    );
+
+  const total =
+    list.length;
+
+  const totalPages =
+    Math.max(
+      1,
+      Math.ceil(total / size)
+    );
+
+  const currentPage =
+    clamp(
+      safeInteger(page, 1),
+      1,
+      totalPages
+    );
+
+  const start =
+    (currentPage - 1) * size;
+
+  const end =
+    start + size;
+
+  return {
+    page: currentPage,
+    pageSize: size,
+    total,
+    totalPages,
+    items: list.slice(start, end),
+    from: total ? start + 1 : 0,
+    to: Math.min(end, total),
+    hasPrev: currentPage > 1,
+    hasNext: currentPage < totalPages,
+  };
+}
+
 /* =========================================================
-   STATUS
+   DOM / FILE HELPERS
 ========================================================= */
 
-export function isPositiveTrend(
-  value
+export async function copyTextToClipboard(
+  value = ""
 ) {
-  const n =
-    safeNumber(value, 0);
+  const text =
+    safeText(value, "");
 
-  return n > 0;
+  if (!text || !isBrowser()) {
+    return false;
+  }
+
+  try {
+    if (
+      navigator?.clipboard?.writeText
+    ) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {}
+
+  try {
+    const textarea =
+      document.createElement("textarea");
+
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+
+    document.body.appendChild(textarea);
+
+    textarea.focus();
+    textarea.select();
+
+    const ok =
+      document.execCommand("copy");
+
+    textarea.remove();
+
+    return Boolean(ok);
+  } catch {
+    return false;
+  }
 }
 
-export function isNegativeTrend(
-  value
-) {
-  const n =
-    safeNumber(value, 0);
+export function downloadTextFile({
+  filename = "download.txt",
+  content = "",
+  mimeType = "text/plain;charset=utf-8;",
+} = {}) {
+  if (!isBrowser()) {
+    return false;
+  }
 
-  return n < 0;
+  try {
+    const blob =
+      new Blob(
+        [String(content ?? "")],
+        {
+          type: safeText(
+            mimeType,
+            "text/plain;charset=utf-8;"
+          ),
+        }
+      );
+
+    const url =
+      URL.createObjectURL(blob);
+
+    const anchor =
+      document.createElement("a");
+
+    anchor.href = url;
+    anchor.download =
+      safeText(filename, "download.txt");
+
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+
+    URL.revokeObjectURL(url);
+
+    return true;
+  } catch {
+    return false;
+  }
 }
+
+/* =========================================================
+   CSV
+========================================================= */
+
+export function escapeCsvCell(value = "") {
+  const text =
+    isNil(value)
+      ? ""
+      : String(value);
+
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+export function buildCsv(
+  rows = []
+) {
+  return safeArray(rows)
+    .map((row) =>
+      safeArray(row)
+        .map(escapeCsvCell)
+        .join(",")
+    )
+    .join("\n");
+}
+
+/* =========================================================
+   TOAST BRIDGE
+========================================================= */
+
+function normalizeToastType(
+  type = "info"
+) {
+  const key =
+    normalizeKey(type);
+
+  if (
+    [
+      "success",
+      "error",
+      "warning",
+      "warn",
+      "info",
+      "loading",
+    ].includes(key)
+  ) {
+    return key === "warn"
+      ? "warning"
+      : key;
+  }
+
+  return "info";
+}
+
+function getToastCandidates() {
+  const candidates = [];
+
+  try {
+    if (
+      isFunction(AppCore?.modules?.get)
+    ) {
+      candidates.push(
+        AppCore.modules.get("toast")
+      );
+    }
+  } catch {}
+
+  try {
+    if (AppCore?.toast) {
+      candidates.push(AppCore.toast);
+    }
+  } catch {}
+
+  try {
+    if (AppCore?.ui?.toast) {
+      candidates.push(AppCore.ui.toast);
+    }
+  } catch {}
+
+  try {
+    if (isBrowser() && window.Toast) {
+      candidates.push(window.Toast);
+    }
+  } catch {}
+
+  try {
+    if (isBrowser() && window.OnionToast) {
+      candidates.push(window.OnionToast);
+    }
+  } catch {}
+
+  return candidates.filter(Boolean);
+}
+
+export function showToast(
+  message = "",
+  type = "info",
+  options = {}
+) {
+  const text =
+    safeText(message, "");
+
+  if (!text) {
+    return false;
+  }
+
+  const toastType =
+    normalizeToastType(type);
+
+  const opts =
+    safeObject(options);
+
+  const payload = {
+    ...opts,
+    type: toastType,
+    message: text,
+  };
+
+  const candidates =
+    getToastCandidates();
+
+  for (const toast of candidates) {
+    try {
+      const directMethod =
+        toastType === "warning"
+          ? toast.warning || toast.warn
+          : toast?.[toastType];
+
+      if (isFunction(directMethod)) {
+        const result =
+          directMethod.call(
+            toast,
+            text,
+            opts
+          );
+
+        return result || true;
+      }
+    } catch {}
+
+    try {
+      if (isFunction(toast?.show)) {
+        const result =
+          toast.show(payload);
+
+        return result || true;
+      }
+    } catch {}
+  }
+
+  try {
+    AppCore?.events?.emit?.(
+      `toast:${toastType}`,
+      payload
+    );
+
+    return true;
+  } catch {}
+
+  try {
+    const logger =
+      toastType === "error"
+        ? console.error
+        : toastType === "warning"
+          ? console.warn
+          : console.log;
+
+    logger(
+      `[HomeToast:${toastType}]`,
+      text
+    );
+  } catch {}
+
+  return false;
+}
+
+/* =========================================================
+   ASYNC / TIMING
+========================================================= */
+
+export function sleep(ms = 0) {
+  return new Promise((resolve) => {
+    try {
+      window.setTimeout(
+        resolve,
+        Math.max(0, safeNumber(ms, 0))
+      );
+    } catch {
+      setTimeout(
+        resolve,
+        Math.max(0, safeNumber(ms, 0))
+      );
+    }
+  });
+}
+
+export function nextFrame() {
+  return new Promise((resolve) => {
+    try {
+      if (
+        isBrowser() &&
+        isFunction(window.requestAnimationFrame)
+      ) {
+        window.requestAnimationFrame(
+          () => resolve()
+        );
+
+        return;
+      }
+    } catch {}
+
+    try {
+      setTimeout(resolve, 0);
+    } catch {
+      resolve();
+    }
+  });
+}
+
+export function debounce(
+  fn,
+  wait = 120
+) {
+  let timer = null;
+
+  return (...args) => {
+    try {
+      if (timer) {
+        clearTimeout(timer);
+      }
+
+      timer = setTimeout(
+        () => {
+          timer = null;
+          fn?.(...args);
+        },
+        Math.max(0, safeNumber(wait, 120))
+      );
+    } catch {
+      fn?.(...args);
+    }
+  };
+}
+
+export function throttle(
+  fn,
+  wait = 120
+) {
+  let last = 0;
+  let timer = null;
+
+  return (...args) => {
+    const current =
+      Date.now();
+
+    const delay =
+      Math.max(0, safeNumber(wait, 120));
+
+    const remaining =
+      delay - (current - last);
+
+    if (remaining <= 0) {
+      last = current;
+      fn?.(...args);
+      return;
+    }
+
+    if (timer) {
+      return;
+    }
+
+    timer = setTimeout(
+      () => {
+        timer = null;
+        last = Date.now();
+        fn?.(...args);
+      },
+      remaining
+    );
+  };
+}
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default {
+  isBrowser,
+  now,
+  noop,
+
+  isObject,
+  isFunction,
+  isEmptyString,
+  isNil,
+
+  safeString,
+  safeText,
+  safeArray,
+  safeObject,
+  safeNumber,
+  safeInteger,
+  safeBoolean,
+  first,
+  clamp,
+
+  deepClone,
+  parseJson,
+  stringifyJson,
+
+  escapeHtml,
+  normalizeText,
+  normalizeKey,
+  normalizeWhitespace,
+  truncate,
+  getInitials,
+  slugify,
+
+  formatNumber,
+  formatMoney,
+  percent,
+  isPositiveTrend,
+  isNegativeTrend,
+
+  toDate,
+  toMs,
+  formatDate,
+  formatDateTime,
+  formatDateOnly,
+  formatRelativeDate,
+
+  normalizeCollection,
+  sortByUpdatedDesc,
+  sortByCreatedDesc,
+  uniqueBy,
+  uniqueById,
+  paginate,
+
+  copyTextToClipboard,
+  downloadTextFile,
+
+  escapeCsvCell,
+  buildCsv,
+
+  showToast,
+
+  sleep,
+  nextFrame,
+  debounce,
+  throttle,
+};

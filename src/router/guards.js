@@ -28,6 +28,8 @@
    - fallback seguro si Auth falla
    - bypass seguro para rutas públicas técnicas
    - preserva redirect al mandar a login
+   - cero auth fantasma: token sin user no autentica
+   - redirect interno seguro anti open-redirect
 ========================================================= */
 
 import {
@@ -56,6 +58,16 @@ const PUBLIC_TECHNICAL_PREFIXES = [
   "/activate-account/",
   "/reset-password/confirm/",
 ];
+
+const AUTH_ROUTE_PATHS = new Set([
+  "/login",
+  "/signin",
+  "/sign-in",
+  "/auth",
+  "/auth/login",
+  "/2fa",
+  "/otp",
+]);
 
 const ADMIN_ROLE_KEYS = new Set([
   "admin",
@@ -137,8 +149,13 @@ function safeBoolean(value, fallback = false) {
   if (typeof value === "string") {
     const key = value.trim().toLowerCase();
 
-    if (["true", "1", "yes", "si", "sí"].includes(key)) return true;
-    if (["false", "0", "no"].includes(key)) return false;
+    if (["true", "1", "yes", "si", "sí", "ok", "on"].includes(key)) {
+      return true;
+    }
+
+    if (["false", "0", "no", "off"].includes(key)) {
+      return false;
+    }
   }
 
   if (typeof value === "number") {
@@ -184,6 +201,62 @@ function sameCanonicalPath(a = "/", b = "/") {
   return stripSearchAndHash(a) === stripSearchAndHash(b);
 }
 
+function safeCanonicalPath(AppCore = null, path = "/") {
+  try {
+    return normalizeCanonicalPath(AppCore, path);
+  } catch {
+    return stripSearchAndHash(path);
+  }
+}
+
+function hasUsableToken(token = "") {
+  return Boolean(safeText(token, ""));
+}
+
+function hasUsableUser(user = null) {
+  if (!user || typeof user !== "object" || Array.isArray(user)) {
+    return false;
+  }
+
+  return Boolean(
+    safeText(user.id, "") ||
+      safeText(user.userId, "") ||
+      safeText(user.user_id, "") ||
+      safeText(user._id, "") ||
+      safeText(user.uid, "") ||
+      safeText(user.username, "") ||
+      safeText(user.userName, "") ||
+      safeText(user.user_name, "") ||
+      safeText(user.email, "") ||
+      safeText(user.mail, "") ||
+      safeText(user.phone, "") ||
+      safeText(user.telefono, "") ||
+      safeText(user.mobile, "")
+  );
+}
+
+function isSafeRelativePath(path = "") {
+  const raw = safeText(path, "");
+
+  if (!raw) return false;
+  if (!raw.startsWith("/")) return false;
+  if (raw.startsWith("//")) return false;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return false;
+  if (/[\r\n\t]/.test(raw)) return false;
+
+  return true;
+}
+
+function sanitizeRedirectTarget(path = "", fallback = "/") {
+  const raw = normalizePublicPath(path || fallback);
+
+  if (!isSafeRelativePath(raw)) {
+    return fallback;
+  }
+
+  return raw;
+}
+
 /* =========================================================
    RUNTIME FLAGS
 ========================================================= */
@@ -203,12 +276,14 @@ function getRuntimeFlags(AppCore = null) {
         state.authLoginNavigationHandled
     ),
 
-    bootNavigationHandled: Boolean(
-      state.bootNavigationHandled
-    ),
+    bootNavigationHandled: Boolean(state.bootNavigationHandled),
 
-    initialRouteRendered: Boolean(
-      state.initialRouteRendered
+    initialRouteRendered: Boolean(state.initialRouteRendered),
+
+    restoring: Boolean(
+      state.restoring ||
+        state.authRestoring ||
+        state.sessionRestoring
     ),
   };
 }
@@ -236,10 +311,33 @@ function normalizeRole(value) {
     .trim();
 }
 
+function normalizeRoleToken(value) {
+  if (value && typeof value === "object") {
+    return normalizeRole(
+      value.role ||
+        value.rol ||
+        value.name ||
+        value.key ||
+        value.id ||
+        value.value ||
+        ""
+    );
+  }
+
+  return normalizeRole(value);
+}
+
 function normalizeRoles(value) {
+  if (typeof value === "string") {
+    return value
+      .split(/[,\s|]+/)
+      .map(normalizeRole)
+      .filter(Boolean);
+  }
+
   return toArray(value)
     .flat(Infinity)
-    .map(normalizeRole)
+    .map(normalizeRoleToken)
     .filter(Boolean);
 }
 
@@ -296,6 +394,15 @@ function routeMeta(route) {
     : {};
 }
 
+function getRoutePath(route) {
+  return stripSearchAndHash(
+    route?.path ||
+      route?.canonicalPath ||
+      route?.name ||
+      "/"
+  );
+}
+
 function isRouteExplicitlyPublic(route) {
   const meta = routeMeta(route);
 
@@ -310,20 +417,7 @@ function isRouteExplicitlyPublic(route) {
   return false;
 }
 
-function getRouteRoles(route) {
-  const meta = routeMeta(route);
-
-  return expandRoleAliases(
-    route?.roles ??
-      route?.allowRoles ??
-      meta.roles ??
-      meta.allowRoles ??
-      meta.requireRoles ??
-      []
-  );
-}
-
-function routeRequiresAuth(route) {
+function isRouteExplicitlyPrivate(route) {
   const meta = routeMeta(route);
 
   if (typeof route?.requiresAuth === "boolean") {
@@ -342,6 +436,78 @@ function routeRequiresAuth(route) {
     return meta.private;
   }
 
+  return false;
+}
+
+function getRouteRoles(route) {
+  const meta = routeMeta(route);
+
+  const roleCandidates = [
+    route?.role,
+    route?.requiredRole,
+    route?.requireRole,
+    route?.allowedRole,
+
+    meta.role,
+    meta.requiredRole,
+    meta.requireRole,
+    meta.allowedRole,
+  ];
+
+  const roleArrays = [
+    route?.roles,
+    route?.allowRoles,
+    route?.allowedRoles,
+    route?.requiredRoles,
+    route?.requireRoles,
+
+    meta.roles,
+    meta.allowRoles,
+    meta.allowedRoles,
+    meta.requiredRoles,
+    meta.requireRoles,
+  ];
+
+  const roles = [
+    ...roleCandidates,
+    ...roleArrays.flatMap((value) => toArray(value)),
+  ];
+
+  if (
+    safeBoolean(route?.admin, false) ||
+    safeBoolean(route?.requiresAdmin, false) ||
+    safeBoolean(meta.admin, false) ||
+    safeBoolean(meta.requiresAdmin, false)
+  ) {
+    roles.push("admin");
+  }
+
+  if (
+    safeBoolean(route?.support, false) ||
+    safeBoolean(route?.requiresSupport, false) ||
+    safeBoolean(meta.support, false) ||
+    safeBoolean(meta.requiresSupport, false)
+  ) {
+    roles.push("support");
+  }
+
+  if (
+    safeBoolean(route?.manager, false) ||
+    safeBoolean(route?.requiresManager, false) ||
+    safeBoolean(meta.manager, false) ||
+    safeBoolean(meta.requiresManager, false)
+  ) {
+    roles.push("manager");
+  }
+
+  return expandRoleAliases(roles);
+}
+
+function routeRequiresAuth(route) {
+  if (isRouteExplicitlyPrivate(route)) {
+    return true;
+  }
+
   if (getRouteRoles(route).length > 0) {
     return true;
   }
@@ -350,11 +516,25 @@ function routeRequiresAuth(route) {
     return false;
   }
 
+  /*
+    Política actual:
+    rutas públicas por defecto.
+    Si quieres private-by-default, cambia este return a true.
+  */
   return false;
 }
 
-function routeGuestOnly(route) {
+function routeGuestOnly(route, canonicalPath = "/") {
   const meta = routeMeta(route);
+  const routePath = getRoutePath(route);
+  const cleanCanonical = stripSearchAndHash(canonicalPath);
+
+  if (
+    AUTH_ROUTE_PATHS.has(routePath) ||
+    AUTH_ROUTE_PATHS.has(cleanCanonical)
+  ) {
+    return true;
+  }
 
   return Boolean(
     route?.guestOnly ??
@@ -372,28 +552,24 @@ function isPublicTechnicalPath(path = "/") {
     return true;
   }
 
-  return PUBLIC_TECHNICAL_PREFIXES.some((prefix) => {
-    return clean.startsWith(prefix);
-  });
+  return PUBLIC_TECHNICAL_PREFIXES.some((prefix) =>
+    clean.startsWith(prefix)
+  );
 }
 
 function isPublicTechnicalRoute(route, canonicalPath = "/", publicPath = null) {
   const canonical = stripSearchAndHash(canonicalPath);
   const visible = stripSearchAndHash(publicPath || canonicalPath);
+  const routePath = getRoutePath(route);
 
   if (
     isPublicTechnicalPath(canonical) ||
-    isPublicTechnicalPath(visible)
+    isPublicTechnicalPath(visible) ||
+    isPublicTechnicalPath(routePath)
   ) {
     return true;
   }
 
-  /*
-    Fallback adicional:
-    Si la tabla de rutas declara explícitamente pública una ruta técnica,
-    también se permite. Pero ya no dependemos de route.public para proteger
-    activation/reset.
-  */
   if (
     route &&
     isRouteExplicitlyPublic(route) &&
@@ -431,6 +607,12 @@ function getAuthUser(Auth = null) {
     }
   } catch {}
 
+  try {
+    if (Auth?.session?.user) {
+      return safeObject(Auth.session.user);
+    }
+  } catch {}
+
   return {};
 }
 
@@ -444,6 +626,18 @@ function getCurrentUser(AppCore = null, Auth = null) {
       AppCore?.state?.session?.user,
       getAuthUser(Auth)
     )
+  );
+}
+
+function getCurrentToken(AppCore = null) {
+  return safeText(
+    first(
+      AppCore?.state?.token,
+      AppCore?.state?.accessToken,
+      AppCore?.state?.session?.token,
+      AppCore?.state?.session?.accessToken
+    ),
+    ""
   );
 }
 
@@ -463,8 +657,18 @@ function getUserRoleCandidates(AppCore = null, Auth = null) {
     user?.role,
     user?.rol,
     user?.userRole,
+    user?.user_role,
     user?.type,
     user?.userType,
+    user?.user_type,
+    user?.perfil,
+
+    user?.raw?.role,
+    user?.raw?.rol,
+    user?.raw?.userRole,
+    user?.raw?.type,
+    user?.raw?.userType,
+    user?.raw?.perfil,
 
     Auth?.role,
     Auth?.userRole,
@@ -486,14 +690,28 @@ function getUserRoleCandidates(AppCore = null, Auth = null) {
     AppCore?.state?.roles,
     AppCore?.state?.permissions,
     AppCore?.state?.scopes,
+    AppCore?.state?.groups,
 
     AppCore?.state?.session?.roles,
     AppCore?.state?.session?.permissions,
     AppCore?.state?.session?.scopes,
+    AppCore?.state?.session?.groups,
 
     user?.roles,
+    user?.roleList,
+    user?.role_list,
     user?.permissions,
     user?.scopes,
+    user?.groups,
+    user?.authorities,
+
+    user?.raw?.roles,
+    user?.raw?.roleList,
+    user?.raw?.role_list,
+    user?.raw?.permissions,
+    user?.raw?.scopes,
+    user?.raw?.groups,
+    user?.raw?.authorities,
 
     Auth?.roles,
     Auth?.permissions,
@@ -519,6 +737,13 @@ function getUserRoleCandidates(AppCore = null, Auth = null) {
     user?.superAdmin,
     user?.canManageUsers,
     user?.canAccessUsers,
+
+    user?.raw?.isAdmin,
+    user?.raw?.admin,
+    user?.raw?.isSuperAdmin,
+    user?.raw?.superAdmin,
+    user?.raw?.canManageUsers,
+    user?.raw?.canAccessUsers,
   ].some((value) => safeBoolean(value, false));
 
   if (adminFlag) {
@@ -529,7 +754,13 @@ function getUserRoleCandidates(AppCore = null, Auth = null) {
 }
 
 function getUserRole(AppCore = null, Auth = null) {
-  return getUserRoleCandidates(AppCore, Auth)[0] || "";
+  const roles = getUserRoleCandidates(AppCore, Auth);
+
+  if (roles.some(isAdminRole)) return "admin";
+  if (roles.some(isSupportRole)) return "support";
+  if (roles.some(isManagerRole)) return "manager";
+
+  return roles[0] || "";
 }
 
 function hasAnyAllowedRole(AppCore = null, Auth = null, allowedRoles = []) {
@@ -540,36 +771,34 @@ function hasAnyAllowedRole(AppCore = null, Auth = null, allowedRoles = []) {
   }
 
   const userRoles = new Set(
-    getUserRoleCandidates(AppCore, Auth)
+    expandRoleAliases(getUserRoleCandidates(AppCore, Auth))
   );
 
   return allowed.some((role) => userRoles.has(role));
 }
 
 function isAuthenticated(AppCore, Auth) {
+  /*
+    Primero usamos Auth.isAuthenticated() porque tu módulo Auth Session
+    ya está endurecido y exige token + user.
+  */
   if (typeof Auth?.isAuthenticated === "function") {
     try {
       return Boolean(Auth.isAuthenticated());
     } catch {}
   }
 
-  const stateAuthenticated = first(
-    AppCore?.state?.authenticated,
-    AppCore?.state?.isAuthenticated,
-    AppCore?.state?.session?.authenticated
-  );
-
-  if (typeof stateAuthenticated === "boolean") {
-    return stateAuthenticated;
-  }
+  /*
+    Fallback duro:
+    token solo NO autentica.
+    user solo NO autentica.
+  */
+  const token = getCurrentToken(AppCore);
+  const user = getCurrentUser(AppCore, Auth);
 
   return Boolean(
-    AppCore?.state?.token ||
-      AppCore?.state?.accessToken ||
-      AppCore?.state?.session?.token ||
-      AppCore?.state?.session?.accessToken ||
-      AppCore?.state?.user ||
-      AppCore?.state?.session?.user
+    hasUsableToken(token) &&
+      hasUsableUser(user)
   );
 }
 
@@ -588,10 +817,17 @@ function getAuthenticatedRedirectTarget(AppCore, route, getRoute) {
   );
 
   if (explicit) {
-    return explicit;
+    const sanitized = sanitizeRedirectTarget(explicit, "/");
+
+    if (
+      !sameCanonicalPath(sanitized, LOGIN_PATH) &&
+      !isPublicTechnicalPath(sanitized)
+    ) {
+      return sanitized;
+    }
   }
 
-  return getDefaultHomeTarget(AppCore, getRoute);
+  return getDefaultHomeTarget(AppCore, getRoute) || "/";
 }
 
 function buildLoginRedirectTarget(AppCore, routeNames, publicPath = "/") {
@@ -605,10 +841,14 @@ function buildLoginRedirectTarget(AppCore, routeNames, publicPath = "/") {
     return loginPath;
   }
 
+  if (!isSafeRelativePath(cleanPublicPath)) {
+    return loginPath;
+  }
+
   try {
     return buildLoginUrl(AppCore, cleanPublicPath);
   } catch {
-    return loginPath;
+    return `${loginPath}?redirect=${encodeURIComponent(cleanPublicPath)}`;
   }
 }
 
@@ -664,7 +904,7 @@ export function shouldAllowRoute({
 } = {}) {
   const routeNames = getRouteNames(AppCore);
 
-  const canonicalPath = normalizeCanonicalPath(
+  const canonicalPath = safeCanonicalPath(
     AppCore,
     requestedCanonicalPath
   );
@@ -720,14 +960,14 @@ export function shouldAllowRoute({
   const currentRole = getUserRole(AppCore, Auth);
   const userRoles = getUserRoleCandidates(AppCore, Auth);
 
-  const guestOnly = routeGuestOnly(route);
+  const guestOnly = routeGuestOnly(route, canonicalPath);
   const allowedRoles = getRouteRoles(route);
   const requiresAuth = routeRequiresAuth(route);
 
   /*
     Guest-only:
     normalmente /login.
-    
+
     Durante transición de login no forzamos un redirect extra desde el guard.
     Auth.login / LoginView ya están gestionando la navegación.
   */
@@ -742,6 +982,8 @@ export function shouldAllowRoute({
           guestOnly,
           logged,
           loginTransitionActive: true,
+          currentRole,
+          userRoles,
         },
       });
     }
@@ -751,7 +993,8 @@ export function shouldAllowRoute({
       route,
       redirectTo:
         getAuthenticatedRedirectTarget(AppCore, route, getRoute) ||
-        routeNames.HOME,
+        routeNames.HOME ||
+        "/",
       canonicalPath,
       publicPath,
       details: {
@@ -803,7 +1046,8 @@ export function shouldAllowRoute({
 
   /*
     Roles y logueado.
-    Candado real para /usuarios admin.
+    Candado real para /usuarios admin, aunque venga:
+      admin / administrator / superadmin / owner / root
   */
   if (allowedRoles.length > 0 && logged) {
     const hasAllowedRole = hasAnyAllowedRole(
@@ -813,13 +1057,17 @@ export function shouldAllowRoute({
     );
 
     if (!hasAllowedRole) {
+      const forbiddenRedirect = sanitizeRedirectTarget(
+        route.redirectForbidden ||
+          route.meta?.redirectForbidden ||
+          "",
+        ""
+      );
+
       return buildDenyResult({
         reason: "insufficient-role",
         route,
-        redirectTo:
-          route.redirectForbidden ||
-          route.meta?.redirectForbidden ||
-          null,
+        redirectTo: forbiddenRedirect || null,
         canonicalPath,
         publicPath,
         details: {

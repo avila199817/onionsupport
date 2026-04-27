@@ -2,7 +2,7 @@
    Onion SPA - Sidebar Dropdown
    Archivo: src/ui/sidebar/dropdown.js
 
-   FINAL PRO SYSTEM · USER DROPDOWN · 10/10
+   FINAL PRO SYSTEM · USER DROPDOWN · 10/10 HARDENED
 
    Responsabilidades:
    - gestionar apertura / cierre del dropdown de usuario
@@ -21,6 +21,11 @@
    - role/menu consistente
    - data-state coherente
    - soporte focus opcional tras abrir
+   - sincroniza clases en sidebar/footer/toggle/dropdown
+   - elimina inert accidental al abrir
+   - fuerza pointer-events al abrir
+   - soporta CSS legacy: open / active / is-open / is-visible / show / visible / expanded
+   - snapshot debug ampliado
 ========================================================= */
 
 import {
@@ -30,6 +35,35 @@ import {
   sanitizeFooterTooltipState,
   isShellHidden,
 } from "./dom.js";
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const DROPDOWN_ID_FALLBACK = "userDropdown";
+
+const OPEN_CLASSNAMES = Object.freeze([
+  "open",
+  "active",
+  "is-open",
+  "is-visible",
+  "show",
+  "visible",
+  "expanded",
+]);
+
+const TOGGLE_OPEN_CLASSNAMES = Object.freeze([
+  "active",
+  "is-active",
+  "is-open",
+  "is-expanded",
+]);
+
+const CONTAINER_OPEN_CLASSNAMES = Object.freeze([
+  "user-dropdown-open",
+  "has-user-dropdown-open",
+  "is-user-menu-open",
+]);
 
 /* =========================================================
    SAFE HELPERS
@@ -52,6 +86,16 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
+function safeObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
 function safeEmit(AppCore, eventName = "", payload = {}) {
   const name = safeText(eventName, "");
 
@@ -59,9 +103,11 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
     return false;
   }
 
+  let emitted = false;
+
   try {
     AppCore?.events?.emit?.(name, payload);
-    return true;
+    emitted = true;
   } catch {}
 
   try {
@@ -72,15 +118,15 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
         })
       );
 
-      return true;
+      emitted = true;
     }
   } catch {}
 
-  return false;
+  return emitted;
 }
 
 function afterPaint(callback) {
-  if (typeof callback !== "function") {
+  if (!isFunction(callback)) {
     return;
   }
 
@@ -94,9 +140,11 @@ function afterPaint(callback) {
 
   try {
     window.requestAnimationFrame(() => {
-      try {
-        callback();
-      } catch {}
+      window.requestAnimationFrame(() => {
+        try {
+          callback();
+        } catch {}
+      });
     });
 
     return;
@@ -137,18 +185,43 @@ function removeAttr(element, name) {
   }
 }
 
+function toggleAttr(element, name, enabled = false) {
+  if (!element || !name) {
+    return false;
+  }
+
+  try {
+    element.toggleAttribute(name, Boolean(enabled));
+    return true;
+  } catch {
+    if (enabled) {
+      return setAttr(element, name, "");
+    }
+
+    return removeAttr(element, name);
+  }
+}
+
 function setHidden(element, hidden = false) {
   if (!element) {
     return false;
   }
 
+  const shouldHide = Boolean(hidden);
+
   try {
-    element.hidden = Boolean(hidden);
+    element.hidden = shouldHide;
   } catch {}
 
   try {
-    element.toggleAttribute("hidden", Boolean(hidden));
-  } catch {}
+    element.toggleAttribute("hidden", shouldHide);
+  } catch {
+    if (shouldHide) {
+      setAttr(element, "hidden", "");
+    } else {
+      removeAttr(element, "hidden");
+    }
+  }
 
   return true;
 }
@@ -160,6 +233,36 @@ function toggleClass(element, className, enabled) {
 
   try {
     element.classList.toggle(className, Boolean(enabled));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function toggleClasses(element, classNames = [], enabled = false) {
+  if (!element) {
+    return false;
+  }
+
+  for (const className of classNames) {
+    toggleClass(element, className, enabled);
+  }
+
+  return true;
+}
+
+function setStyleProperty(element, name, value = "") {
+  if (!element || !name) {
+    return false;
+  }
+
+  try {
+    if (value === null || value === undefined || value === "") {
+      element.style.removeProperty(name);
+    } else {
+      element.style.setProperty(name, String(value));
+    }
+
     return true;
   } catch {
     return false;
@@ -190,61 +293,52 @@ function ensureDropdownId(userDropdown = null) {
     return existingId;
   }
 
-  const generatedId = "userDropdown";
-
   try {
-    userDropdown.id = generatedId;
+    userDropdown.id = DROPDOWN_ID_FALLBACK;
   } catch {}
 
-  return safeText(userDropdown.id, generatedId);
+  return safeText(userDropdown.id, DROPDOWN_ID_FALLBACK);
 }
 
 function normalizeOpen(value) {
   return Boolean(value);
 }
 
-/* =========================================================
-   A11Y
-========================================================= */
+function getSidebarFooter(userToggle = null, userDropdown = null, sidebar = null) {
+  try {
+    return (
+      userToggle?.closest?.(".sidebar-footer,[data-sidebar-footer]") ||
+      userDropdown?.closest?.(".sidebar-footer,[data-sidebar-footer]") ||
+      sidebar?.querySelector?.(".sidebar-footer,[data-sidebar-footer]") ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
 
-export function syncDropdownA11y(AppCore, open = false) {
-  const isOpen = normalizeOpen(open);
-
-  const {
-    userToggle,
-    userDropdown,
-  } = getElements(AppCore);
-
-  const dropdownId = ensureDropdownId(userDropdown);
-
-  if (userToggle) {
-    setAttr(userToggle, "aria-haspopup", "menu");
-    setAttr(userToggle, "aria-expanded", String(isOpen));
-
-    if (dropdownId) {
-      setAttr(userToggle, "aria-controls", dropdownId);
-    }
-
-    setAttr(userToggle, "data-state", isOpen ? "open" : "closed");
-
-    removeTooltipAttributes(userToggle);
+function getActiveElement() {
+  if (!isBrowser()) {
+    return null;
   }
 
-  if (userDropdown) {
-    setAttr(userDropdown, "role", "menu");
-    setAttr(userDropdown, "aria-hidden", String(!isOpen));
-    setAttr(userDropdown, "data-state", isOpen ? "open" : "closed");
+  try {
+    return document.activeElement || null;
+  } catch {
+    return null;
+  }
+}
 
-    removeTooltipAttributes(userDropdown);
+function elementContains(parent = null, child = null) {
+  if (!parent || !child) {
+    return false;
   }
 
-  sanitizeFooterTooltipState(AppCore);
-
-  return {
-    open: isOpen,
-    hasToggle: Boolean(userToggle),
-    hasDropdown: Boolean(userDropdown),
-  };
+  try {
+    return parent === child || parent.contains(child);
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -283,7 +377,130 @@ function closeFocusedNodeBeforeHide(userDropdown = null) {
   return blurIfInside(userDropdown);
 }
 
+function removeInertForOpen(userDropdown = null) {
+  if (!userDropdown) {
+    return false;
+  }
+
+  removeAttr(userDropdown, "inert");
+
+  try {
+    userDropdown.inert = false;
+  } catch {}
+
+  return true;
+}
+
+function applyDropdownVisibilityStyles(userDropdown = null, open = false) {
+  if (!userDropdown) {
+    return false;
+  }
+
+  const isOpen = normalizeOpen(open);
+
+  /*
+    No forzamos display:block en cerrado para no romper CSS.
+    En abierto sí neutralizamos estados que pueden dejarlo muerto.
+  */
+  if (isOpen) {
+    setStyleProperty(userDropdown, "pointer-events", "auto");
+    setStyleProperty(userDropdown, "visibility", "visible");
+    setStyleProperty(userDropdown, "opacity", "1");
+  } else {
+    setStyleProperty(userDropdown, "pointer-events", "");
+    setStyleProperty(userDropdown, "visibility", "");
+    setStyleProperty(userDropdown, "opacity", "");
+  }
+
+  return true;
+}
+
+/* =========================================================
+   A11Y
+========================================================= */
+
+export function syncDropdownA11y(AppCore, open = false) {
+  const isOpen = normalizeOpen(open);
+
+  const {
+    sidebar,
+    userToggle,
+    userDropdown,
+  } = getElements(AppCore);
+
+  const dropdownId = ensureDropdownId(userDropdown);
+
+  if (userToggle) {
+    setAttr(userToggle, "aria-haspopup", "menu");
+    setAttr(userToggle, "aria-expanded", String(isOpen));
+
+    if (dropdownId) {
+      setAttr(userToggle, "aria-controls", dropdownId);
+    }
+
+    setAttr(userToggle, "data-state", isOpen ? "open" : "closed");
+    setAttr(userToggle, "data-dropdown-open", String(isOpen));
+
+    removeTooltipAttributes(userToggle);
+  }
+
+  if (userDropdown) {
+    setAttr(userDropdown, "role", "menu");
+    setAttr(userDropdown, "aria-hidden", String(!isOpen));
+    setAttr(userDropdown, "data-state", isOpen ? "open" : "closed");
+    setAttr(userDropdown, "data-open", String(isOpen));
+
+    removeTooltipAttributes(userDropdown);
+  }
+
+  if (sidebar) {
+    setAttr(sidebar, "data-user-dropdown-open", String(isOpen));
+  }
+
+  sanitizeFooterTooltipState(AppCore);
+
+  return {
+    open: isOpen,
+    hasToggle: Boolean(userToggle),
+    hasDropdown: Boolean(userDropdown),
+  };
+}
+
+/* =========================================================
+   DOM SYNC
+========================================================= */
+
+function syncDropdownContainers(AppCore, open = false) {
+  const isOpen = normalizeOpen(open);
+
+  const {
+    sidebar,
+    userToggle,
+    userDropdown,
+  } = getElements(AppCore);
+
+  const footer = getSidebarFooter(userToggle, userDropdown, sidebar);
+
+  toggleClasses(sidebar, CONTAINER_OPEN_CLASSNAMES, isOpen);
+  toggleClasses(footer, CONTAINER_OPEN_CLASSNAMES, isOpen);
+
+  if (sidebar) {
+    setAttr(sidebar, "data-user-dropdown-open", String(isOpen));
+  }
+
+  if (footer) {
+    setAttr(footer, "data-user-dropdown-open", String(isOpen));
+    setAttr(footer, "data-state", isOpen ? "open" : "closed");
+  }
+
+  return {
+    hasSidebar: Boolean(sidebar),
+    hasFooter: Boolean(footer),
+  };
+}
+
 function syncDropdownDom(AppCore, localState, open = false) {
+  const state = ensureLocalState(localState);
   const isOpen = normalizeOpen(open);
 
   const {
@@ -293,45 +510,68 @@ function syncDropdownDom(AppCore, localState, open = false) {
 
   if (!userDropdown) {
     syncDropdownA11y(AppCore, isOpen);
+    syncDropdownContainers(AppCore, isOpen);
+
     return {
       open: isOpen,
       hasDropdown: false,
       hasToggle: Boolean(userToggle),
+      state,
     };
   }
 
-  if (!isOpen) {
+  if (isOpen) {
+    removeInertForOpen(userDropdown);
+  } else {
     closeFocusedNodeBeforeHide(userDropdown);
   }
 
-  toggleClass(userDropdown, "open", isOpen);
-  toggleClass(userDropdown, "active", isOpen);
-  toggleClass(userDropdown, "is-open", isOpen);
-  toggleClass(userDropdown, "is-visible", isOpen);
-
+  toggleClasses(userDropdown, OPEN_CLASSNAMES, isOpen);
   setHidden(userDropdown, !isOpen);
 
   setAttr(userDropdown, "aria-hidden", String(!isOpen));
   setAttr(userDropdown, "data-state", isOpen ? "open" : "closed");
+  setAttr(userDropdown, "data-open", String(isOpen));
 
+  /*
+    Cerrar:
+    - aria-hidden true
+    - hidden true
+    - sin inert por defecto para evitar comportamientos raros en re-render.
+    Si algún CSS o módulo quiere inert, que lo gestione fuera.
+  */
+  if (!isOpen) {
+    removeAttr(userDropdown, "inert");
+
+    try {
+      userDropdown.inert = false;
+    } catch {}
+  }
+
+  applyDropdownVisibilityStyles(userDropdown, isOpen);
   removeTooltipAttributes(userDropdown);
 
   if (userToggle) {
-    toggleClass(userToggle, "active", isOpen);
-    toggleClass(userToggle, "is-active", isOpen);
+    toggleClasses(userToggle, TOGGLE_OPEN_CLASSNAMES, isOpen);
 
     setAttr(userToggle, "aria-expanded", String(isOpen));
     setAttr(userToggle, "data-state", isOpen ? "open" : "closed");
+    setAttr(userToggle, "data-dropdown-open", String(isOpen));
 
     removeTooltipAttributes(userToggle);
   }
 
-  syncDropdownA11y(AppCore, isOpen);
+  const a11y = syncDropdownA11y(AppCore, isOpen);
+  const containers = syncDropdownContainers(AppCore, isOpen);
 
   return {
     open: isOpen,
     hasDropdown: true,
     hasToggle: Boolean(userToggle),
+    hasSidebar: containers.hasSidebar,
+    hasFooter: containers.hasFooter,
+    a11y,
+    state,
   };
 }
 
@@ -341,6 +581,7 @@ function syncDropdownDom(AppCore, localState, open = false) {
 
 export function setDropdownOpen(AppCore, localState, value, options = {}) {
   const state = ensureLocalState(localState);
+  const opts = safeObject(options);
 
   const nextOpen = normalizeOpen(value);
   const previousOpen = Boolean(state.dropdownOpen);
@@ -355,7 +596,7 @@ export function setDropdownOpen(AppCore, localState, value, options = {}) {
 
   if (
     nextOpen &&
-    options.focusFirst === true
+    opts.focusFirst === true
   ) {
     afterPaint(() => {
       const { userDropdown } = getElements(AppCore);
@@ -376,6 +617,8 @@ export function setDropdownOpen(AppCore, localState, value, options = {}) {
     changed: previousOpen !== nextOpen,
     hasDropdown: result.hasDropdown,
     hasToggle: result.hasToggle,
+    hasSidebar: result.hasSidebar,
+    hasFooter: result.hasFooter,
   });
 
   return nextOpen;
@@ -392,13 +635,20 @@ export function openDropdown(
   options = {}
 ) {
   const state = ensureLocalState(localState);
+  const opts = safeObject(options);
 
   if (isShellHidden(AppCore)) {
     setDropdownOpen(AppCore, state, false);
+
+    safeEmit(AppCore, "sidebar:dropdown:blocked", {
+      reason: "shell-hidden",
+      snapshot: getDropdownSnapshot(AppCore, state),
+    });
+
     return false;
   }
 
-  if (typeof ensureSidebarOpenForUserMenu === "function") {
+  if (isFunction(ensureSidebarOpenForUserMenu)) {
     try {
       ensureSidebarOpenForUserMenu();
     } catch {}
@@ -409,16 +659,17 @@ export function openDropdown(
     state,
     true,
     {
-      focusFirst: options.focusFirst === true,
+      focusFirst: opts.focusFirst === true,
     }
   );
 }
 
 export function closeDropdown(AppCore, localState, options = {}) {
   const state = ensureLocalState(localState);
+  const opts = safeObject(options);
 
   if (
-    options.force !== true &&
+    opts.force !== true &&
     !getDropdownOpen(state)
   ) {
     syncDropdownDom(AppCore, state, false);
@@ -439,10 +690,16 @@ export function toggleDropdown(
   options = {}
 ) {
   const state = ensureLocalState(localState);
+  const opts = safeObject(options);
 
   if (isShellHidden(AppCore)) {
     closeDropdown(AppCore, state, {
       force: true,
+    });
+
+    safeEmit(AppCore, "sidebar:dropdown:blocked", {
+      reason: "shell-hidden",
+      snapshot: getDropdownSnapshot(AppCore, state),
     });
 
     return false;
@@ -456,7 +713,7 @@ export function toggleDropdown(
 
   let sidebarWasForcedOpen = false;
 
-  if (typeof ensureSidebarOpenForUserMenu === "function") {
+  if (isFunction(ensureSidebarOpenForUserMenu)) {
     try {
       sidebarWasForcedOpen = Boolean(
         ensureSidebarOpenForUserMenu()
@@ -472,9 +729,23 @@ export function toggleDropdown(
     true,
     {
       focusFirst:
-        options.focusFirst === true ||
+        opts.focusFirst === true ||
         sidebarWasForcedOpen === true,
     }
+  );
+}
+
+/* =========================================================
+   REPAIR
+========================================================= */
+
+export function repairDropdown(AppCore, localState = {}) {
+  const state = ensureLocalState(localState);
+
+  return syncDropdownDom(
+    AppCore,
+    state,
+    Boolean(state.dropdownOpen)
   );
 }
 
@@ -484,9 +755,13 @@ export function toggleDropdown(
 
 export function getDropdownSnapshot(AppCore, localState = {}) {
   const {
+    sidebar,
     userToggle,
     userDropdown,
   } = getElements(AppCore);
+
+  const footer = getSidebarFooter(userToggle, userDropdown, sidebar);
+  const activeElement = getActiveElement();
 
   return {
     open: getDropdownOpen(localState),
@@ -494,20 +769,56 @@ export function getDropdownSnapshot(AppCore, localState = {}) {
 
     hasToggle: Boolean(userToggle),
     hasDropdown: Boolean(userDropdown),
+    hasSidebar: Boolean(sidebar),
+    hasFooter: Boolean(footer),
 
-    toggleExpanded:
-      userToggle?.getAttribute?.("aria-expanded") || null,
+    activeInsideDropdown: elementContains(userDropdown, activeElement),
+    activeInsideToggle: elementContains(userToggle, activeElement),
 
-    dropdownHidden:
-      Boolean(userDropdown?.hidden),
+    toggle: {
+      id: userToggle?.id || "",
+      className: userToggle?.className || "",
+      expanded: userToggle?.getAttribute?.("aria-expanded") || null,
+      controls: userToggle?.getAttribute?.("aria-controls") || null,
+      dataState: userToggle?.dataset?.state || null,
+      dataDropdownOpen: userToggle?.dataset?.dropdownOpen || null,
+      hidden: Boolean(userToggle?.hidden),
+      ariaHidden: userToggle?.getAttribute?.("aria-hidden") || null,
+      inert: Boolean(userToggle?.hasAttribute?.("inert")),
+    },
 
-    dropdownAriaHidden:
-      userDropdown?.getAttribute?.("aria-hidden") || null,
+    dropdown: {
+      id: userDropdown?.id || "",
+      className: userDropdown?.className || "",
+      hidden: Boolean(userDropdown?.hidden),
+      ariaHidden: userDropdown?.getAttribute?.("aria-hidden") || null,
+      dataState: userDropdown?.dataset?.state || null,
+      dataOpen: userDropdown?.dataset?.open || null,
+      role: userDropdown?.getAttribute?.("role") || null,
+      inert: Boolean(userDropdown?.hasAttribute?.("inert")),
+      inlinePointerEvents: userDropdown?.style?.pointerEvents || "",
+      inlineVisibility: userDropdown?.style?.visibility || "",
+      inlineOpacity: userDropdown?.style?.opacity || "",
+    },
 
-    dropdownState:
-      userDropdown?.dataset?.state || null,
+    footer: {
+      className: footer?.className || "",
+      dataState: footer?.dataset?.state || null,
+      dataUserDropdownOpen: footer?.dataset?.userDropdownOpen || null,
+    },
+
+    sidebar: {
+      className: sidebar?.className || "",
+      dataUserDropdownOpen: sidebar?.dataset?.userDropdownOpen || null,
+      hidden: Boolean(sidebar?.hidden),
+      ariaHidden: sidebar?.getAttribute?.("aria-hidden") || null,
+    },
   };
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   syncDropdownA11y,
@@ -517,5 +828,6 @@ export default {
   closeDropdown,
   toggleDropdown,
 
+  repairDropdown,
   getDropdownSnapshot,
 };

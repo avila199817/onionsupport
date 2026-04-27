@@ -2,7 +2,7 @@
    Onion SPA - Router Render
    Archivo: src/router/render.js
 
-   FINAL EXTREME SYSTEM · RENDER HOST ISOLATED · RACE SAFE · 10/10
+   FINAL EXTREME SYSTEM · RENDER HOST ISOLATED · RACE SAFE · EVENT SAFE · 10/10
 
    RESPONSABILIDADES:
    - renderizar vistas internas del router
@@ -56,9 +56,12 @@
    - repara shell antes y después del render
    - evita panel privado desplazado bajo sidebar tras login
 
-   FIX ROUTER LOGIN:
-   - renderLoginRedirect respeta args.redirectTo ya construido por guards
-   - history se actualiza en redirect a login cuando updateHistory está disponible
+   FIX EVENT STORM:
+   - safeEmit() NO duplica AppCore.events + window
+   - safeEmit() NO emite también por window.AppCore.events
+   - router:shell:repair se deduplica por firma
+   - app:ui:repair-request NO se emite automáticamente desde cada shell repair
+   - render.js no fuerza repair UI global en cada fase interna
 ========================================================= */
 
 import {
@@ -87,6 +90,8 @@ const RESET_CONFIRM_PATH = "/reset-password/confirm";
 const RENDER_HOST_ATTR = "data-router-view-host";
 const RENDER_HOST_CLASS = "router-view-host";
 const RENDER_FALLBACK_CLASS = "router-fallback-view";
+
+const SHELL_REPAIR_EMIT_DEDUPE_MS = 24;
 
 const ACTIVATION_TOKEN_PARAM_NAMES = Object.freeze([
   "token",
@@ -208,6 +213,14 @@ function nowMs() {
   return Date.now();
 }
 
+function nowEpochMs() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
 function safeText(value, fallback = "") {
   if (
     value === null ||
@@ -265,6 +278,14 @@ function stripPublicUsernamePrefix(pathname = "/") {
   return (
     normalizePathnameOnly(pathname).replace(/^\/@[^/]+(?=\/|$)/i, "") ||
     "/"
+  );
+}
+
+function hasPublicUsernamePrefix(path = "") {
+  return /^\/@[^/]+(?=\/|$)/i.test(
+    normalizePathnameOnly(
+      safeText(path, "/").split("?")[0].split("#")[0] || "/"
+    )
   );
 }
 
@@ -338,46 +359,53 @@ function microtask(callback) {
    SAFE OPS
 ========================================================= */
 
-function safeEmit(AppCore, eventName, payload = {}) {
+function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   const name = safeText(eventName, "");
 
   if (!name) {
     return false;
   }
 
-  let emitted = false;
+  const opts = safeObject(options);
+
+  let busAvailable = false;
+  let busEmitted = false;
 
   try {
-    AppCore?.events?.emit?.(
-      name,
-      payload
-    );
+    if (isFunction(AppCore?.events?.emit)) {
+      busAvailable = true;
 
-    emitted = true;
+      AppCore.events.emit(
+        name,
+        payload
+      );
+
+      busEmitted = true;
+    }
   } catch {}
 
-  try {
-    window?.AppCore?.events?.emit?.(
-      name,
-      payload
-    );
-
-    emitted = true;
-  } catch {}
-
-  try {
-    if (isBrowser()) {
+  /*
+    Clave:
+    - Si existe AppCore.events, NO duplicamos sobre window.
+    - No usamos window.AppCore.events como segunda vía.
+    - window solo es fallback real o emisión forzada.
+  */
+  if (
+    opts.window === true ||
+    (!busAvailable && isBrowser())
+  ) {
+    try {
       window.dispatchEvent(
         new CustomEvent(name, {
           detail: payload,
         })
       );
 
-      emitted = true;
-    }
-  } catch {}
+      return true;
+    } catch {}
+  }
 
-  return emitted;
+  return busEmitted;
 }
 
 function safeWarn(AppCore, ...args) {
@@ -546,6 +574,9 @@ function createAbortControllerSafe() {
 
 let successRenderSequence = 0;
 let activeRenderController = null;
+
+let lastShellRepairEmitKey = "";
+let lastShellRepairEmitAt = 0;
 
 function abortPreviousSuccessRender(reason = "new-render") {
   try {
@@ -1279,6 +1310,49 @@ function preservePublicContextForSameRoute(AppCore, candidatePath = "/") {
   return candidate;
 }
 
+function preferRequestedPublicPathIfCompatible(
+  AppCore,
+  requestedPath = "",
+  builtPublicPath = "",
+  canonicalPath = "/"
+) {
+  const requested =
+    preservePublicContextForSameRoute(
+      AppCore,
+      requestedPath || ""
+    );
+
+  const built =
+    preservePublicContextForSameRoute(
+      AppCore,
+      builtPublicPath || ""
+    );
+
+  const canonical =
+    normalizeCanonicalPath(
+      AppCore,
+      canonicalPath || built || requested || "/"
+    );
+
+  if (
+    requested &&
+    hasPublicUsernamePrefix(requested) &&
+    sameCanonicalRoute(AppCore, requested, canonical)
+  ) {
+    return requested;
+  }
+
+  if (
+    requested &&
+    getSearchAndHash(requested) &&
+    sameCanonicalRoute(AppCore, requested, canonical)
+  ) {
+    return requested;
+  }
+
+  return built || requested || canonical || "/";
+}
+
 function buildCanonicalSourceWithSuffix(
   AppCore,
   canonicalPath = "/",
@@ -1577,6 +1651,35 @@ function hideLoaderSafe(AppCore, reason = "router-render") {
   return true;
 }
 
+function emitShellRepair(AppCore, payload = {}) {
+  const key = [
+    safeText(payload.phase, ""),
+    payload.shellHidden ? "hidden" : "visible",
+    safeText(payload.canonicalPath, ""),
+    safeText(payload.publicPath, ""),
+    payload.hasSidebar ? "sidebar" : "no-sidebar",
+    payload.hasTopbar ? "topbar" : "no-topbar",
+  ].join("|");
+
+  const now = nowEpochMs();
+
+  if (
+    key === lastShellRepairEmitKey &&
+    now - lastShellRepairEmitAt < SHELL_REPAIR_EMIT_DEDUPE_MS
+  ) {
+    return false;
+  }
+
+  lastShellRepairEmitKey = key;
+  lastShellRepairEmitAt = now;
+
+  return safeEmit(
+    AppCore,
+    "router:shell:repair",
+    payload
+  );
+}
+
 function applyRenderShellRepair({
   AppCore,
   route = null,
@@ -1584,6 +1687,8 @@ function applyRenderShellRepair({
   publicPath = "/",
   phase = "render",
   hideLoader = false,
+  emitRepair = true,
+  emitUiRepairRequest = false,
 } = {}) {
   if (!isBrowser()) {
     return {
@@ -1600,9 +1705,12 @@ function applyRenderShellRepair({
     );
 
   const publicRoute =
-    normalizePath(
+    preservePublicContextForSameRoute(
       AppCore,
-      publicPath || canonical || "/"
+      normalizePath(
+        AppCore,
+        publicPath || canonical || "/"
+      )
     );
 
   const shellHidden =
@@ -1805,33 +1913,38 @@ function applyRenderShellRepair({
     );
   }
 
-  safeEmit(
-    AppCore,
-    "router:shell:repair",
-    {
-      phase,
-      shellHidden,
-      useAuthScreen,
-      canonicalPath: canonical,
-      publicPath: publicRoute,
-      hasSidebar: Boolean(sidebar),
-      hasTopbar: Boolean(topbar),
-      hasShell: Boolean(shell),
-      source: "router.render",
-    }
-  );
+  const repairPayload = {
+    phase,
+    shellHidden,
+    useAuthScreen,
+    canonicalPath: canonical,
+    publicPath: publicRoute,
+    hasSidebar: Boolean(sidebar),
+    hasTopbar: Boolean(topbar),
+    hasShell: Boolean(shell),
+    source: "router.render",
+  };
 
-  safeEmit(
-    AppCore,
-    "app:ui:repair-request",
-    {
-      phase,
-      shellHidden,
-      canonicalPath: canonical,
-      publicPath: publicRoute,
-      source: "router.render",
-    }
-  );
+  if (emitRepair !== false) {
+    emitShellRepair(
+      AppCore,
+      repairPayload
+    );
+  }
+
+  /*
+    Importante:
+    No emitimos app:ui:repair-request por defecto.
+    AppEvents/AppBootstrap ya reaccionan a router:rendered y router async.
+    Emitir repair-request desde cada fase de shell repair produce doble trabajo.
+  */
+  if (emitUiRepairRequest === true) {
+    safeEmit(
+      AppCore,
+      "app:ui:repair-request",
+      repairPayload
+    );
+  }
 
   return {
     applied: true,
@@ -1899,9 +2012,21 @@ function resolvePublicPathForRoute({
     }
   );
 
+  const preferredPublic =
+    preferRequestedPublicPathIfCompatible(
+      AppCore,
+      requestedPath,
+      built ||
+        sourceForPublic ||
+        requestedPath ||
+        finalCanonical,
+      finalCanonical
+    );
+
   const finalPublic = preservePublicContextForSameRoute(
     AppCore,
-    built ||
+    preferredPublic ||
+      built ||
       sourceForPublic ||
       requestedPath ||
       finalCanonical
@@ -2081,11 +2206,21 @@ export function applyResolvedRouteState(
   canonicalPath,
   fallbackPublicPath
 ) {
-  const protectedPublicPath = getProtectedPublicPath(AppCore);
+  const protectedPublicPath =
+    getProtectedPublicPath(AppCore);
+
+  const resolvedFallback =
+    getResolvedPublicPath(fallbackPublicPath) ||
+    fallbackPublicPath ||
+    canonicalPath ||
+    "/";
 
   const publicPath =
     protectedPublicPath ||
-    getResolvedPublicPath(fallbackPublicPath);
+    preservePublicContextForSameRoute(
+      AppCore,
+      resolvedFallback
+    );
 
   return syncRouteState(
     AppCore,
@@ -3285,6 +3420,9 @@ export function getRenderSnapshot(AppCore) {
 
     activeRenderAborted:
       Boolean(activeRenderController?.signal?.aborted),
+
+    lastShellRepairEmitKey,
+    lastShellRepairEmitAt,
 
     dom: {
       bodyClasses:

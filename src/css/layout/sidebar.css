@@ -1105,13 +1105,20 @@ body.sidebar-collapsed .sidebar .user > svg{
 .user-info{
   display:flex;
   flex-direction:column;
+  align-items:flex-start;
+  justify-content:center;
 
   min-inline-size:0;
 
   flex:1 1 auto;
+
+  text-align:left;
 }
 
 .user-info .name{
+  display:block;
+
+  inline-size:100%;
   min-inline-size:0;
 
   overflow:hidden;
@@ -1123,9 +1130,16 @@ body.sidebar-collapsed .sidebar .user > svg{
   font-size:var(--font-base);
   line-height:1.15;
   font-weight:var(--weight-semibold);
+
+  text-align:left;
 }
 
 .user-info .plan{
+  display:block;
+
+  inline-size:100%;
+  min-inline-size:0;
+
   margin-block-start:2px;
 
   color:var(--text-dim);
@@ -1133,8 +1147,9 @@ body.sidebar-collapsed .sidebar .user > svg{
   font-size:11px;
   line-height:1;
   font-weight:var(--weight-medium);
-}
 
+  text-align:left;
+}
 
 /* =========================================================
    AVATAR

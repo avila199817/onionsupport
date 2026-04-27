@@ -42,9 +42,14 @@
    - evita recursión app:app:app:...:event
    - no escucha router:shell:state como disparador de repair
    - repairUISystems tiene lock, throttle y normalización de reason
-   - syncUserUI se llama una sola vez por ciclo
+   - syncUserUI global NO llama SidebarUI.repair/rebind desde aquí
    - safeEmit no duplica window event si AppCore.events existe
    - bindUIRepairEvents usa window solo como fallback si no hay bus
+
+   REGLA DE ORO:
+   - SidebarUI.init() se ejecuta en initUISystems()
+   - SidebarUI.repair()/rebind()/bindEvents() NO se ejecutan en cada evento
+   - Los eventos de ruta/render/auth solo hacen sync visual ligero
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -89,7 +94,6 @@ import {
 } from "./i18n.js";
 
 import {
-  syncUserUI,
   initUISystems,
 } from "./ui.js";
 
@@ -885,8 +889,8 @@ export const App = (() => {
 
   const MIN_BOOT_LOADER_MS = 500;
 
-  const UI_REPAIR_THROTTLE_MS = 120;
-  const UI_SYNC_THROTTLE_MS = 90;
+  const UI_REPAIR_THROTTLE_MS = 140;
+  const UI_SYNC_THROTTLE_MS = 100;
   const UI_REASON_MAX_LENGTH = 160;
 
   const state = {
@@ -962,10 +966,8 @@ export const App = (() => {
     } catch {}
 
     /*
-      Clave:
-      No uses Boolean(AppCore.events.emit(...)).
-      Muchos buses devuelven undefined aunque hayan emitido correctamente.
-      Si interpretamos undefined como false, duplicamos el evento en window.
+      No duplicar bus + window.
+      Muchos buses devuelven undefined aunque emitan correctamente.
     */
     if (
       opts.window === true ||
@@ -1100,6 +1102,66 @@ export const App = (() => {
     };
   }
 
+  function getUserSnapshot() {
+    const user =
+      AppCore?.state?.user ||
+      AppCore?.state?.currentUser ||
+      AppCore?.state?.sessionUser ||
+      AppCore?.state?.authUser ||
+      null;
+
+    const route =
+      getCurrentRouteSnapshot();
+
+    return {
+      user,
+      authenticated:
+        Boolean(AppCore?.state?.authenticated),
+
+      username:
+        safeText(
+          user?.username ||
+            user?.email ||
+            user?.name ||
+            AppCore?.state?.username ||
+            "",
+          ""
+        ),
+
+      displayName:
+        safeText(
+          user?.displayName ||
+            user?.name ||
+            user?.username ||
+            user?.email ||
+            "",
+          ""
+        ),
+
+      role:
+        safeText(
+          AppCore?.state?.role ||
+            user?.role ||
+            user?.rol ||
+            "",
+          ""
+        ),
+
+      lang:
+        safeText(
+          AppCore?.state?.lang ||
+            "",
+          ""
+        ),
+
+      route:
+        route.route,
+
+      publicPath:
+        route.publicPath,
+    };
+  }
+
   function safeEmitUIReady() {
     safeEmit("app:ui:ready", {
       source: "app:index",
@@ -1209,111 +1271,85 @@ export const App = (() => {
     return false;
   }
 
-  function callSyncUserUI(reason = "sync-user-ui") {
-    const cleanReason =
-      normalizeRepairReason(reason);
-
-    if (shouldSkipUserSync(cleanReason)) {
+  function callUIMethod(target, methodName = "", reason = "unknown", context = {}) {
+    if (
+      !target ||
+      !methodName ||
+      !isFunction(target?.[methodName])
+    ) {
       return false;
     }
 
-    if (!isFunction(syncUserUI)) {
-      return false;
-    }
-
-    uiSyncRunning = true;
+    const fn =
+      target[methodName];
 
     try {
-      syncUserUI({
-        AppCore,
-        Auth,
-        SidebarUI,
-        TopbarUI,
-        Toast,
-        I18n,
-        reason: cleanReason,
-      });
+      fn.call(
+        target,
+        reason,
+        context
+      );
 
       return true;
-    } catch (error) {
-      try {
-        syncUserUI(AppCore);
-        return true;
-      } catch (legacyError) {
-        safeWarn(
-          "syncUserUI falló.",
-          {
-            reason: cleanReason,
-            error,
-            legacyError,
-          }
-        );
+    } catch {}
 
-        return false;
-      }
-    } finally {
-      uiSyncRunning = false;
-    }
+    try {
+      fn.call(
+        target,
+        context
+      );
+
+      return true;
+    } catch {}
+
+    try {
+      fn.call(target);
+      return true;
+    } catch {}
+
+    return false;
   }
 
-  function callFirstUIMethod(target, names = [], reason = "unknown", context = {}) {
-    if (!target) {
-      return {
-        called: false,
-        method: "",
-      };
-    }
+  function callManyUIMethods(target, methodNames = [], reason = "unknown", context = {}) {
+    const called = [];
 
-    for (const name of names) {
-      const fn =
-        target?.[name];
-
-      if (!isFunction(fn)) {
-        continue;
-      }
-
-      try {
-        fn.call(
+    for (const methodName of methodNames) {
+      if (
+        callUIMethod(
           target,
+          methodName,
           reason,
           context
-        );
+        )
+      ) {
+        called.push(methodName);
+      }
+    }
 
+    return {
+      called:
+        called.length > 0,
+      methods:
+        called,
+      method:
+        called[0] || "",
+    };
+  }
+
+  function callFirstUIMethod(target, methodNames = [], reason = "unknown", context = {}) {
+    for (const methodName of methodNames) {
+      if (
+        callUIMethod(
+          target,
+          methodName,
+          reason,
+          context
+        )
+      ) {
         return {
           called: true,
-          method: name,
+          method: methodName,
         };
-      } catch (errorA) {
-        try {
-          fn.call(
-            target,
-            context
-          );
-
-          return {
-            called: true,
-            method: name,
-          };
-        } catch (errorB) {
-          try {
-            fn.call(target);
-
-            return {
-              called: true,
-              method: name,
-            };
-          } catch (errorC) {
-            safeWarn(
-              `UI method falló: ${name}`,
-              {
-                reason,
-                errorA,
-                errorB,
-                errorC,
-              }
-            );
-          }
-        }
       }
     }
 
@@ -1323,45 +1359,152 @@ export const App = (() => {
     };
   }
 
-  function syncSidebarLight(reason = "ui-sync", context = {}) {
+  function syncSidebarIdentity(reason = "sidebar-identity", context = {}) {
     /*
-      Ligero:
-      NO repair()
-      NO rebind()
-      NO bindEvents()
-      Esos métodos son los que estaban multiplicando SidebarEvents.
+      Identidad ligera.
+      Prohibido aquí: repair / rebind / bindEvents.
     */
-    return callFirstUIMethod(
+    return callManyUIMethods(
       SidebarUI,
       [
-        "refresh",
-        "sync",
-        "syncRouteAndIndicator",
-        "syncIndicator",
         "renderUser",
-        "updateUser",
+        "applyRoleVisibility",
       ],
       reason,
       context
     );
   }
 
-  function syncTopbarLight(reason = "ui-sync", context = {}) {
+  function syncSidebarVisual(reason = "sidebar-visual", context = {}) {
+    /*
+      Sync visual ligero.
+      Prohibido aquí: repair / rebind / bindEvents.
+    */
+    return callManyUIMethods(
+      SidebarUI,
+      [
+        "syncRouteAndIndicator",
+        "syncIndicator",
+      ],
+      reason,
+      context
+    );
+  }
+
+  function syncTopbarIdentity(reason = "topbar-identity", context = {}) {
     return callFirstUIMethod(
       TopbarUI,
       [
-        "refresh",
-        "sync",
         "renderUser",
         "refreshUser",
         "updateUser",
+        "syncUser",
+        "sync",
+        "refresh",
       ],
       reason,
       context
     );
   }
 
+  function syncTopbarVisual(reason = "topbar-visual", context = {}) {
+    return callFirstUIMethod(
+      TopbarUI,
+      [
+        "sync",
+        "refresh",
+        "syncRoute",
+        "updateRoute",
+      ],
+      reason,
+      context
+    );
+  }
+
+  function callSyncUserUI(reason = "sync-user-ui") {
+    const cleanReason =
+      normalizeRepairReason(reason);
+
+    if (shouldSkipUserSync(cleanReason)) {
+      return false;
+    }
+
+    uiSyncRunning = true;
+
+    try {
+      const routeSnapshot =
+        getCurrentRouteSnapshot();
+
+      const context = {
+        AppCore,
+        Auth,
+        Router,
+        Store,
+        Toast,
+        I18n,
+        SidebarUI,
+        TopbarUI,
+
+        reason:
+          cleanReason,
+
+        source:
+          "app:index",
+
+        route:
+          routeSnapshot.route,
+
+        publicPath:
+          routeSnapshot.publicPath,
+
+        snapshot:
+          getUserSnapshot(),
+      };
+
+      syncSidebarIdentity(
+        cleanReason,
+        context
+      );
+
+      syncTopbarIdentity(
+        cleanReason,
+        context
+      );
+
+      /*
+        Emitimos señal semántica una sola vez.
+        events.js puede escuchar esto para commit visual, pero NO rebindea.
+      */
+      safeEmit("app:user-ui:sync", {
+        source:
+          "app:index",
+        reason:
+          cleanReason,
+        ...context.snapshot,
+      });
+
+      return true;
+    } catch (error) {
+      safeWarn(
+        "callSyncUserUI() falló.",
+        {
+          reason:
+            cleanReason,
+          error,
+        }
+      );
+
+      return false;
+    } finally {
+      uiSyncRunning = false;
+    }
+  }
+
   function hardRepairSidebar(reason = "ui-hard-repair", context = {}) {
+    /*
+      Uso excepcional.
+      repair() puede rebinder eventos internamente.
+    */
     return callFirstUIMethod(
       SidebarUI,
       [
@@ -1388,11 +1531,15 @@ export const App = (() => {
   }
 
   function rebindSidebar(reason = "ui-rebind", context = {}) {
+    /*
+      Uso excepcional.
+      No llamar desde router/auth/render normal.
+    */
     return callFirstUIMethod(
       SidebarUI,
       [
-        "rebind",
         "rebindEvents",
+        "rebind",
         "bindEvents",
         "bind",
       ],
@@ -1405,8 +1552,8 @@ export const App = (() => {
     return callFirstUIMethod(
       TopbarUI,
       [
-        "rebind",
         "rebindEvents",
+        "rebind",
         "bindEvents",
         "bind",
       ],
@@ -1463,17 +1610,15 @@ export const App = (() => {
         options?.syncUser !== false,
 
       /*
-        CAMBIO CLAVE:
-        Antes rebind default true.
-        Eso era veneno: cada router/auth/render podía rebinder sidebar.
+        Por defecto, NO.
+        Cada rebind crea riesgo de duplicar SidebarEvents.
       */
       rebind:
         options?.rebind === true,
 
       /*
-        CAMBIO CLAVE:
-        repair() solo bajo petición explícita.
-        Para navegación/render/auth usamos refresh/sync.
+        Por defecto, NO.
+        SidebarUI.repair() puede llamar bindEvents().
       */
       hardRepair:
         options?.hardRepair === true,
@@ -1507,14 +1652,23 @@ export const App = (() => {
         Store,
         Toast,
         I18n,
+        SidebarUI,
+        TopbarUI,
+
         reason:
           cleanReason,
+
         source:
           opts.source,
+
         route:
           routeSnapshot.route,
+
         publicPath:
           routeSnapshot.publicPath,
+
+        snapshot:
+          getUserSnapshot(),
       };
 
       if (opts.syncUser) {
@@ -1524,11 +1678,13 @@ export const App = (() => {
       let sidebarResult = {
         called: false,
         method: "",
+        methods: [],
       };
 
       let topbarResult = {
         called: false,
         method: "",
+        methods: [],
       };
 
       if (opts.hardRepair) {
@@ -1545,19 +1701,25 @@ export const App = (() => {
           );
       } else {
         sidebarResult =
-          syncSidebarLight(
+          syncSidebarVisual(
             cleanReason,
             context
           );
 
         topbarResult =
-          syncTopbarLight(
+          syncTopbarVisual(
             cleanReason,
             context
           );
       }
 
-      if (opts.rebind) {
+      /*
+        Si hardRepair ya ha llamado repair(), no hacemos rebind adicional.
+      */
+      if (
+        opts.rebind &&
+        !opts.hardRepair
+      ) {
         rebindSidebar(
           cleanReason,
           context
@@ -1585,8 +1747,12 @@ export const App = (() => {
             opts.rebind,
           sidebarMethod:
             sidebarResult.method,
+          sidebarMethods:
+            sidebarResult.methods || [],
           topbarMethod:
             topbarResult.method,
+          topbarMethods:
+            topbarResult.methods || [],
           sidebarSnapshot:
             getSidebarSnapshot(),
           topbarSnapshot:
@@ -1631,24 +1797,30 @@ export const App = (() => {
 
     uiRepairScheduled = true;
 
-    try {
-      window.setTimeout(() => {
-        uiRepairScheduled = false;
-
-        repairUISystems(
-          cleanReason,
-          options
-        );
-      }, 0);
-
-      return true;
-    } catch {
+    const run = () => {
       uiRepairScheduled = false;
 
-      return repairUISystems(
+      repairUISystems(
         cleanReason,
         options
       );
+    };
+
+    if (!isBrowser()) {
+      run();
+      return true;
+    }
+
+    try {
+      window.setTimeout(
+        run,
+        0
+      );
+
+      return true;
+    } catch {
+      run();
+      return true;
     }
   }
 
@@ -1695,11 +1867,8 @@ export const App = (() => {
 
     if (hasBus) {
       /*
-        Importante:
         NO escuchar router:shell:state aquí.
-        Ese evento puede salir de Router.repairShell(), y si lo usamos como
-        trigger de repair crea el bucle:
-          shell state -> repairUISystems -> repairShell -> shell state -> ...
+        Ese evento puede salir de Router.repairShell().
       */
 
       bindBus("router:rendered", (payload) => {
@@ -1728,25 +1897,6 @@ export const App = (() => {
         );
       });
 
-      bindBus("app:ui:repair-request", (payload) => {
-        const data =
-          getPayload(payload);
-
-        scheduleUIRepair(
-          getReason(payload, "app:ui:repair-request"),
-          {
-            repairShell:
-              data.repairShell !== false,
-            hardRepair:
-              data.hardRepair === true,
-            rebind:
-              data.rebind === true,
-            afterPaint: false,
-            source: "app:ui:repair-request",
-          }
-        );
-      });
-
       bindBus("app:route:change", (payload) => {
         scheduleUIRepair(
           getReason(payload, "app:route:change"),
@@ -1760,13 +1910,36 @@ export const App = (() => {
         );
       });
 
+      bindBus("app:ui:repair-request", (payload) => {
+        const data =
+          getPayload(payload);
+
+        scheduleUIRepair(
+          getReason(payload, "app:ui:repair-request"),
+          {
+            repairShell:
+              data.repairShell !== false,
+            hardRepair:
+              data.hardRepair === true,
+            rebind:
+              data.rebind === true,
+            afterPaint:
+              data.afterPaint === true,
+            source: "app:ui:repair-request",
+          }
+        );
+      });
+
       [
         "app:session:restored",
         "auth:session:restored",
         "auth:login:success",
         "auth:logout",
+        "auth:logout:success",
         "app:user:change",
         "app:lang:change",
+        "app:theme:change",
+        "theme:change",
       ].forEach((eventName) => {
         bindBus(eventName, (payload) => {
           scheduleUIRepair(
@@ -1783,8 +1956,7 @@ export const App = (() => {
       });
     } else {
       /*
-        Window solo como fallback real si no hay AppCore.events.
-        Antes escuchábamos bus + window y eso duplicaba reparaciones.
+        Window solo como fallback real si no existe AppCore.events.
       */
       safeWindowOn("app:ui:repair-request", (payload) => {
         const data =
@@ -1799,7 +1971,8 @@ export const App = (() => {
               data.hardRepair === true,
             rebind:
               data.rebind === true,
-            afterPaint: false,
+            afterPaint:
+              data.afterPaint === true,
             source: "window:app:ui:repair-request",
           }
         );
@@ -2208,6 +2381,7 @@ export const App = (() => {
         "init-ui-already-ready",
         {
           repairShell: false,
+          syncUser: true,
           hardRepair: false,
           rebind: false,
           afterPaint: false,
@@ -2218,6 +2392,10 @@ export const App = (() => {
       return;
     }
 
+    /*
+      Este es el único punto normal donde SidebarUI.init() debe ocurrir.
+      initUISystems() registra/monta una vez.
+    */
     initUISystems({
       AppCore,
       Toast,
@@ -2230,14 +2408,14 @@ export const App = (() => {
     state.uiMounted = true;
 
     /*
-      Después de initUISystems() no hacemos repair/rebind.
-      initUISystems ya debe llamar init() una vez.
-      Aquí solo sincronizamos visual/usuario/shell.
+      Después de initUISystems(), solo sincronización ligera.
+      No repair/rebind.
     */
     repairUISystems(
       "init-ui",
       {
         repairShell: true,
+        syncUser: true,
         hardRepair: false,
         rebind: false,
         afterPaint: false,
@@ -2277,6 +2455,7 @@ export const App = (() => {
         `render-initial-route:${reason}`,
         {
           repairShell: false,
+          syncUser: true,
           hardRepair: false,
           rebind: false,
           afterPaint: false,
@@ -2324,6 +2503,7 @@ export const App = (() => {
           "restore-session",
           {
             repairShell: false,
+            syncUser: true,
             hardRepair: false,
             rebind: false,
             afterPaint: false,
@@ -2345,6 +2525,7 @@ export const App = (() => {
             "restore-session-error-non-blocking",
             {
               repairShell: false,
+              syncUser: true,
               hardRepair: false,
               rebind: false,
               afterPaint: false,
@@ -2399,6 +2580,7 @@ export const App = (() => {
       "finalize-boot",
       {
         repairShell: false,
+        syncUser: true,
         hardRepair: false,
         rebind: false,
         afterPaint: false,
@@ -2411,6 +2593,7 @@ export const App = (() => {
         "finalize-boot:after-paint",
         {
           repairShell: false,
+          syncUser: false,
           hardRepair: false,
           rebind: false,
           afterPaint: false,
@@ -2534,6 +2717,7 @@ export const App = (() => {
             "restore-navigation-handled",
             {
               repairShell: false,
+              syncUser: true,
               hardRepair: false,
               rebind: false,
               afterPaint: false,
@@ -2554,6 +2738,7 @@ export const App = (() => {
         "before-finalize",
         {
           repairShell: false,
+          syncUser: true,
           hardRepair: false,
           rebind: false,
           afterPaint: false,
@@ -2579,6 +2764,7 @@ export const App = (() => {
           "boot-error",
           {
             repairShell: false,
+            syncUser: true,
             hardRepair: false,
             rebind: false,
             afterPaint: false,
@@ -2613,6 +2799,7 @@ export const App = (() => {
         "boot-already-booted",
         {
           repairShell: false,
+          syncUser: true,
           hardRepair: false,
           rebind: false,
           afterPaint: false,

@@ -2,7 +2,7 @@
    ONION SUPPORT — SIDEBAR
    Archivo: src/css/layout/sidebar.css
 
-   FINAL EXTREME SYSTEM · SIDEBAR / DROPDOWN SAFE · 10/10
+   FINAL EXTREME SYSTEM · SIDEBAR / DROPDOWN SAFE · APPLE INDICATOR READY · 10/10
 
    Objetivos:
    - sidebar premium limpio, compacto y operativo
@@ -14,17 +14,11 @@
    - dropdown robusto por clase, aria-hidden y data-state
    - dropdown visible en collapsed desktop sin clipping
    - footer de usuario sólido
-   - tooltips sin clipping
+   - tooltips sin clipping y con z-index saneado
+   - selector activo tipo burbuja premium
+   - preparado para indicador deslizante tipo Apple con JS mínimo
    - light mode fino
    - menos ruido visual en navegación SPA
-
-   FIX CRÍTICO DROPDOWN:
-   - .user-dropdown[hidden] no lo mata visualmente
-   - .user-dropdown[data-state="open"] fuerza apertura
-   - .user[aria-expanded="true"] + .user-dropdown abre
-   - overflow visible en cadena sidebar/footer
-   - z-index fuerte dentro del stacking context del sidebar
-   - collapsed positioning saneado
 ========================================================= */
 
 
@@ -48,6 +42,30 @@
 
   --sidebar-dropdown-width-collapsed: 224px;
   --sidebar-dropdown-offset-collapsed: 12px;
+
+  --sidebar-active-pill-bg:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong), transparent 96%),
+      color-mix(in srgb, var(--text-strong), transparent 98%)
+    ),
+    var(--sidebar-active);
+
+  --sidebar-active-pill-border: var(--sidebar-active-border);
+
+  --sidebar-active-pill-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 95%),
+    0 8px 18px rgba(0,0,0,.12);
+
+  --sidebar-active-pill-shadow-collapsed:
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 95%),
+    0 8px 18px rgba(0,0,0,.10);
+
+  --sidebar-indicator-x: var(--sidebar-inline-padding, 9px);
+  --sidebar-indicator-y: 0px;
+  --sidebar-indicator-w: calc(100% - (var(--sidebar-inline-padding, 9px) * 2));
+  --sidebar-indicator-h: var(--sidebar-item-height, 40px);
+  --sidebar-indicator-opacity: 0;
 
   --sidebar-mobile-shadow:
     0 24px 80px rgba(0,0,0,.34),
@@ -165,6 +183,25 @@
 .sidebar > *{
   position:relative;
   z-index:1;
+}
+
+
+/* =========================================================
+   SIDEBAR TEMPORARY HIGH STACK FOR TOOLTIPS
+========================================================= */
+
+.sidebar.sidebar-tooltips-active,
+body.sidebar-tooltips-active .sidebar,
+body.sidebar-collapsed .sidebar{
+  z-index:calc(var(--z-tooltip, 70) + 1);
+}
+
+@supports selector(:has(*)){
+  .sidebar:has(.menu-item[data-tooltip]:hover),
+  .sidebar:has(.sidebar-toggle[data-tooltip]:hover),
+  .sidebar:has(.logo[data-tooltip]:hover){
+    z-index:calc(var(--z-tooltip, 70) + 1);
+  }
 }
 
 
@@ -423,7 +460,7 @@ body.sidebar-collapsed .sidebar .sidebar-toggle{
   inset-block-start:calc(100% + 10px);
   inset-inline-start:0;
 
-  z-index:var(--sidebar-tooltip-z);
+  z-index:calc(var(--sidebar-tooltip-z) + 2);
 
   padding:9px 12px;
 
@@ -475,7 +512,7 @@ body.sidebar-collapsed .sidebar .sidebar-toggle{
   inset-block-start:calc(100% + 5px);
   inset-inline-start:14px;
 
-  z-index:calc(var(--sidebar-tooltip-z) - 1);
+  z-index:calc(var(--sidebar-tooltip-z) + 1);
 
   inline-size:10px;
   block-size:10px;
@@ -520,7 +557,7 @@ body.sidebar-collapsed .sidebar .sidebar-toggle{
   inset-block-start:50%;
   inset-inline-start:calc(100% + var(--sidebar-tooltip-offset));
 
-  z-index:var(--sidebar-tooltip-z);
+  z-index:calc(var(--sidebar-tooltip-z) + 2);
 
   padding:9px 12px;
 
@@ -608,6 +645,8 @@ body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::a
 ========================================================= */
 
 .sidebar-menu{
+  position:relative;
+
   display:flex;
   flex-direction:column;
 
@@ -624,6 +663,75 @@ body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::a
 
   z-index:2;
 }
+
+
+/* =========================================================
+   APPLE-LIKE MOVING INDICATOR HOOK
+   Requiere JS mínimo:
+   - data-indicator-ready="true"
+   - --sidebar-indicator-y
+   - --sidebar-indicator-h
+   - --sidebar-indicator-x
+   - --sidebar-indicator-w
+   - --sidebar-indicator-opacity: 1
+========================================================= */
+
+.sidebar-menu[data-indicator-ready="true"]::before{
+  content:"";
+
+  position:absolute;
+
+  inset-inline-start:var(--sidebar-indicator-x);
+  inset-block-start:0;
+
+  inline-size:var(--sidebar-indicator-w);
+  block-size:var(--sidebar-indicator-h);
+
+  z-index:0;
+
+  border:1px solid var(--sidebar-active-pill-border);
+  border-radius:var(--radius-md);
+
+  background:var(--sidebar-active-pill-bg);
+
+  box-shadow:var(--sidebar-active-pill-shadow);
+
+  opacity:var(--sidebar-indicator-opacity);
+
+  pointer-events:none;
+
+  transform:
+    translateY(var(--sidebar-indicator-y))
+    translateZ(0);
+
+  transition:
+    transform .34s var(--ease-emphasis),
+    block-size .26s var(--ease-emphasis),
+    inline-size .26s var(--ease-emphasis),
+    inset-inline-start .26s var(--ease-emphasis),
+    opacity var(--duration-normal) var(--ease-standard),
+    border-color var(--duration-normal) var(--ease-standard),
+    background var(--duration-normal) var(--ease-standard),
+    box-shadow var(--duration-normal) var(--ease-standard);
+}
+
+.sidebar.collapsed .sidebar-menu,
+.sidebar.is-collapsed .sidebar-menu,
+body.sidebar-collapsed .sidebar .sidebar-menu{
+  --sidebar-indicator-x: calc((100% - var(--sidebar-menu-item-collapsed)) / 2);
+  --sidebar-indicator-w: var(--sidebar-menu-item-collapsed);
+}
+
+.sidebar.collapsed .sidebar-menu[data-indicator-ready="true"]::before,
+.sidebar.is-collapsed .sidebar-menu[data-indicator-ready="true"]::before,
+body.sidebar-collapsed .sidebar .sidebar-menu[data-indicator-ready="true"]::before{
+  box-shadow:var(--sidebar-active-pill-shadow-collapsed);
+}
+
+
+/* =========================================================
+   MENU ITEM
+========================================================= */
 
 .menu-item{
   position:relative;
@@ -643,6 +751,8 @@ body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::a
   border:1px solid transparent;
   border-radius:var(--radius-md);
 
+  background:transparent;
+
   color:var(--sidebar-text);
   text-decoration:none;
 
@@ -654,6 +764,8 @@ body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::a
   user-select:none;
   -webkit-tap-highlight-color:transparent;
 
+  z-index:1;
+
   transition:
     background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard),
@@ -661,6 +773,40 @@ body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::a
     transform var(--duration-fast) var(--ease-out),
     box-shadow var(--duration-fast) var(--ease-standard),
     opacity var(--duration-fast) var(--ease-standard);
+}
+
+.menu-item::before{
+  content:"";
+
+  position:absolute;
+  inset:0;
+
+  z-index:0;
+
+  border:1px solid transparent;
+  border-radius:inherit;
+
+  background:transparent;
+
+  box-shadow:none;
+
+  opacity:0;
+
+  pointer-events:none;
+
+  transform:scale(.985);
+
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-emphasis),
+    background var(--duration-normal) var(--ease-standard),
+    border-color var(--duration-normal) var(--ease-standard),
+    box-shadow var(--duration-normal) var(--ease-standard);
+}
+
+.menu-item > *{
+  position:relative;
+  z-index:1;
 }
 
 .menu-item span:first-child,
@@ -727,15 +873,29 @@ body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-i
 
 .menu-item.active,
 .menu-item[aria-current="page"]{
-  z-index:2;
-
-  background:var(--sidebar-active);
-  border-color:var(--sidebar-active-border);
   color:var(--sidebar-text-active);
+}
 
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 98%),
-    0 6px 16px rgba(0,0,0,.10);
+.menu-item.active::before,
+.menu-item[aria-current="page"]::before{
+  border-color:var(--sidebar-active-pill-border);
+
+  background:var(--sidebar-active-pill-bg);
+
+  box-shadow:var(--sidebar-active-pill-shadow);
+
+  opacity:1;
+
+  transform:scale(1);
+
+  animation:sidebarActiveBubbleIn .22s var(--ease-emphasis);
+}
+
+.sidebar-menu[data-indicator-ready="true"] .menu-item.active::before,
+.sidebar-menu[data-indicator-ready="true"] .menu-item[aria-current="page"]::before{
+  opacity:0;
+  transform:scale(.985);
+  animation:none;
 }
 
 .menu-item.active svg,
@@ -743,39 +903,23 @@ body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-i
   color:var(--sidebar-icon-active);
 }
 
-.menu-item.active > *,
-.menu-item[aria-current="page"] > *{
-  position:relative;
-  z-index:1;
-}
-
-.menu-item.active::before,
-.menu-item[aria-current="page"]::before{
-  content:"";
-
-  position:absolute;
-  inset-inline-start:0;
-  inset-block-start:50%;
-
-  z-index:1;
-
-  inline-size:3px;
-  block-size:54%;
-
-  border-radius:0 3px 3px 0;
-
-  background:var(--accent);
-
-  box-shadow:0 0 8px color-mix(in srgb, var(--accent), transparent 72%);
-
-  transform:translateY(-50%);
-}
-
 .menu-item[aria-disabled="true"],
 .menu-item.is-disabled{
   opacity:.48;
   cursor:not-allowed;
   pointer-events:none;
+}
+
+@keyframes sidebarActiveBubbleIn{
+  from{
+    opacity:0;
+    transform:scale(.94) translateY(2px);
+  }
+
+  to{
+    opacity:1;
+    transform:scale(1) translateY(0);
+  }
 }
 
 
@@ -851,15 +995,6 @@ body.sidebar-collapsed .sidebar .menu-item svg{
   margin:0;
 }
 
-.sidebar.collapsed .menu-item.active::before,
-.sidebar.collapsed .menu-item[aria-current="page"]::before,
-.sidebar.is-collapsed .menu-item.active::before,
-.sidebar.is-collapsed .menu-item[aria-current="page"]::before,
-body.sidebar-collapsed .sidebar .menu-item.active::before,
-body.sidebar-collapsed .sidebar .menu-item[aria-current="page"]::before{
-  display:none;
-}
-
 .sidebar.collapsed .menu-item:hover,
 .sidebar.is-collapsed .menu-item:hover,
 body.sidebar-collapsed .sidebar .menu-item:hover{
@@ -876,6 +1011,15 @@ body.sidebar-collapsed .sidebar .menu-item:hover{
 body.sidebar-collapsed .sidebar .menu-item.active,
 body.sidebar-collapsed .sidebar .menu-item[aria-current="page"]{
   transform:none;
+}
+
+.sidebar.collapsed .menu-item.active::before,
+.sidebar.collapsed .menu-item[aria-current="page"]::before,
+.sidebar.is-collapsed .menu-item.active::before,
+.sidebar.is-collapsed .menu-item[aria-current="page"]::before,
+body.sidebar-collapsed .sidebar .menu-item.active::before,
+body.sidebar-collapsed .sidebar .menu-item[aria-current="page"]::before{
+  box-shadow:var(--sidebar-active-pill-shadow-collapsed);
 }
 
 
@@ -1097,6 +1241,24 @@ body.sidebar-collapsed .sidebar .user > svg{
   display:none;
 }
 
+.user-chevron{
+  flex:0 0 auto;
+
+  margin-inline-start:auto;
+
+  color:var(--text-dim);
+
+  transition:
+    color var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-emphasis);
+}
+
+.user[aria-expanded="true"] .user-chevron,
+.user[data-state="open"] .user-chevron{
+  color:var(--text-strong);
+  transform:rotate(90deg);
+}
+
 
 /* =========================================================
    USER INFO
@@ -1150,6 +1312,7 @@ body.sidebar-collapsed .sidebar .user > svg{
 
   text-align:left;
 }
+
 
 /* =========================================================
    AVATAR
@@ -1264,18 +1427,6 @@ body.sidebar-collapsed .sidebar .avatar{
     transform var(--duration-fast) var(--ease-out);
 }
 
-/*
-   Reset.css suele traer:
-   [hidden]{ display:none !important; }
-
-   Aquí lo anulamos para que el estado visual lo controle:
-   - .open
-   - .active
-   - .is-open
-   - .is-visible
-   - [data-state="open"]
-   - [aria-hidden="false"]
-*/
 .user-dropdown[hidden]{
   display:block !important;
 }
@@ -1322,11 +1473,6 @@ body.sidebar-collapsed .sidebar .user-dropdown{
   transform-origin:bottom left;
 }
 
-/*
-   Seguridad extra:
-   si el dropdown está abierto en collapsed, nunca debe quedar debajo
-   de menú, footer o topbar interno.
-*/
 .sidebar.collapsed .user-dropdown.open,
 .sidebar.collapsed .user-dropdown.active,
 .sidebar.collapsed .user-dropdown.is-open,
@@ -1536,6 +1682,24 @@ body.sidebar-open [data-sidebar-overlay]{
    LIGHT MODE
 ========================================================= */
 
+[data-theme="light"]{
+  --sidebar-active-pill-bg:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #ffffff, transparent 4%),
+      color-mix(in srgb, #ffffff, transparent 0%)
+    ),
+    var(--sidebar-active);
+
+  --sidebar-active-pill-shadow:
+    inset 0 1px 0 rgba(255,255,255,.78),
+    0 8px 18px rgba(15,23,42,.06);
+
+  --sidebar-active-pill-shadow-collapsed:
+    inset 0 1px 0 rgba(255,255,255,.78),
+    0 8px 18px rgba(15,23,42,.05);
+}
+
 [data-theme="light"] .sidebar{
   box-shadow:
     inset -1px 0 0 color-mix(in srgb, var(--surface-2), transparent 74%),
@@ -1569,11 +1733,9 @@ body.sidebar-open [data-sidebar-overlay]{
   border-color:color-mix(in srgb, var(--text), transparent 95%);
 }
 
-[data-theme="light"] .menu-item.active,
-[data-theme="light"] .menu-item[aria-current="page"]{
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--surface-2), transparent 45%),
-    0 8px 16px rgba(15,23,42,.045);
+[data-theme="light"] .menu-item.active::before,
+[data-theme="light"] .menu-item[aria-current="page"]::before{
+  box-shadow:var(--sidebar-active-pill-shadow);
 }
 
 [data-theme="light"] .user:hover,
@@ -1734,11 +1896,6 @@ body.sidebar-open [data-sidebar-overlay]{
     margin:0;
   }
 
-  .sidebar .menu-item.active::before,
-  .sidebar .menu-item[aria-current="page"]::before{
-    display:block;
-  }
-
   .sidebar .sidebar-section{
     display:flex !important;
 
@@ -1757,7 +1914,8 @@ body.sidebar-open [data-sidebar-overlay]{
     display:flex !important;
   }
 
-  .sidebar .user > svg{
+  .sidebar .user > svg,
+  .sidebar .user-chevron{
     display:block !important;
   }
 
@@ -1818,6 +1976,19 @@ body.sidebar-open [data-sidebar-overlay]{
 
 
 /* =========================================================
+   HARDEN CONTENT STACKING AGAINST TOOLTIP CLIPPING
+========================================================= */
+
+.main-content,
+#main-content,
+#app-content,
+#view-container{
+  position:relative;
+  z-index:var(--z-base, 1);
+}
+
+
+/* =========================================================
    REDUCED MOTION
 ========================================================= */
 
@@ -1826,13 +1997,17 @@ body.sidebar-open [data-sidebar-overlay]{
   .logo,
   .sidebar-toggle,
   .menu-item,
+  .menu-item::before,
   .chat-item,
   .user,
+  .user-chevron,
   .user-dropdown,
   .dropdown-item,
   .sidebar-overlay,
-  [data-sidebar-overlay]{
+  [data-sidebar-overlay],
+  .sidebar-menu[data-indicator-ready="true"]::before{
     transition:none !important;
+    animation:none !important;
   }
 
   .menu-item:hover,

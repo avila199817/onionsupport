@@ -8,15 +8,14 @@
    - bind de eventos DOM del sidebar
    - bind de eventos core/auth/router
    - sidebar manual: nunca abrir/cerrar por navegación
-   - cerrar dropdown en navegación
+   - cerrar dropdown en navegación/render
    - recalcular usuario / roles tras login/logout/restore/session/user change
    - bloquear clicks sobre elementos hidden/inert/admin ocultos
-   - fallback local si AppCore.events no existe
-   - cleanup idempotente por scope
+   - cleanup local idempotente por scope
    - tolerar DOM re-renderizado
    - cero throws accidentales
-   - sincronizar item activo del menú
-   - sincronizar indicador visual tipo Apple
+   - sincronizar item activo del menú delegando en state.js
+   - sincronizar indicador visual tipo Apple delegando en state.js
    - evitar indicador colgado al colapsar/expandir
    - centralizar commit visual post-router/post-resize/post-auth
    - evitar tormentas AppCore.cleanup.run / cleanup:disposed / firebreak
@@ -29,10 +28,14 @@
    - Usa AppCore.events como fuente principal para eventos core.
    - Solo usa window.addEventListener como fallback si no existe AppCore.events.
    - safeEmit NO emite por AppCore.events y window a la vez.
+   - NO escucha sidebar:refreshed/sidebar:repaired/sidebar:state:synced.
+   - NO escucha app:user-ui:sync para evitar bucles de sync visual.
+   - NO escucha router:shell:state para evitar loops con repairShell().
    - router rendered NO fuerza open/close del sidebar.
    - active item se recalcula tras router:rendered/app:route:change.
    - indicador se recalcula después del layout final.
    - durante transición se oculta el indicador para evitar burbuja flotante.
+   - handlers viejos quedan invalidados por epoch aunque el bus no permita off().
 ========================================================= */
 
 import {
@@ -41,11 +44,18 @@ import {
   sanitizeFooterTooltipState,
 } from "./dom.js";
 
+import {
+  syncActiveMenuItem as syncActiveMenuItemBase,
+  syncActiveMenuIndicator as syncActiveMenuIndicatorBase,
+  scheduleActiveMenuIndicator as scheduleActiveMenuIndicatorBase,
+} from "./state.js";
+
 /* ======================================================
-   LOCAL CLEANUP FALLBACK
+   LOCAL CLEANUP / EPOCHS
 ====================================================== */
 
 const localCleanups = new Map();
+const scopeEpochs = new Map();
 
 /* ======================================================
    CONSTANTS
@@ -58,8 +68,6 @@ const INDICATOR_TRANSITION_MS = 380;
 
 const HANDLED_FLAG = "__onionSidebarHandled";
 const LOCAL_HANDLED_FLAG = "__onionSidebarEventsHandled";
-
-const ROUTE_CURRENT_ATTR = "page";
 
 /* ======================================================
    BASICS
@@ -126,7 +134,6 @@ function safeLog(AppCore, ...args) {
   Importante:
   No emitimos por AppCore.events Y window a la vez.
   Si el bus existe, usamos el bus. Si no existe, fallback a window.
-  Esto evita dobles commits visuales.
 */
 function safeEmit(AppCore, eventName = "", payload = {}) {
   const name = safeText(eventName, "");
@@ -161,46 +168,6 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
   } catch {}
 
   return false;
-}
-
-function makeSafeHandler(
-  AppCore,
-  label = "handler",
-  handler
-) {
-  if (!isFn(handler)) {
-    return () => {};
-  }
-
-  return function safeBoundHandler(...args) {
-    try {
-      const result = handler(...args);
-
-      if (
-        result &&
-        typeof result === "object" &&
-        isFn(result.catch)
-      ) {
-        result.catch((error) => {
-          safeWarn(
-            AppCore,
-            `${label} falló async`,
-            error
-          );
-        });
-      }
-
-      return result;
-    } catch (error) {
-      safeWarn(
-        AppCore,
-        `${label} falló`,
-        error
-      );
-
-      return undefined;
-    }
-  };
 }
 
 function safeWindowTimeout(fn, ms = 0) {
@@ -391,8 +358,27 @@ function wasSidebarEventHandled(event) {
 }
 
 /* ======================================================
-   CLEANUP
+   SCOPE EPOCH / CLEANUP
 ====================================================== */
+
+function getScopeEpoch(scope) {
+  const scopeName = resolveScope(scope);
+
+  return Number(scopeEpochs.get(scopeName) || 0);
+}
+
+function bumpScopeEpoch(scope) {
+  const scopeName = resolveScope(scope);
+  const next = getScopeEpoch(scopeName) + 1;
+
+  scopeEpochs.set(scopeName, next);
+
+  return next;
+}
+
+function isCurrentScopeEpoch(scope, epoch) {
+  return getScopeEpoch(scope) === epoch;
+}
 
 function pushLocalCleanup(scope, cleanup) {
   if (!isFn(cleanup)) {
@@ -421,6 +407,72 @@ function runLocalCleanups(scope) {
   return true;
 }
 
+function resetLocalScope(scope) {
+  const scopeName = resolveScope(scope);
+  const epoch = bumpScopeEpoch(scopeName);
+
+  runLocalCleanups(scopeName);
+
+  return epoch;
+}
+
+function disposeLocalScope(scope) {
+  const scopeName = resolveScope(scope);
+
+  bumpScopeEpoch(scopeName);
+  runLocalCleanups(scopeName);
+
+  return true;
+}
+
+function makeSafeHandler(
+  AppCore,
+  scope,
+  epoch,
+  label = "handler",
+  handler
+) {
+  if (!isFn(handler)) {
+    return () => {};
+  }
+
+  const scopeName = resolveScope(scope);
+
+  return function safeBoundHandler(...args) {
+    if (!isCurrentScopeEpoch(scopeName, epoch)) {
+      return undefined;
+    }
+
+    try {
+      const result = handler(...args);
+
+      if (
+        result &&
+        typeof result === "object" &&
+        isFn(result.catch)
+      ) {
+        result.catch((error) => {
+          safeWarn(
+            AppCore,
+            `${label} falló async`,
+            error
+          );
+        });
+      }
+
+      return result;
+    } catch (error) {
+      safeWarn(
+        AppCore,
+        `${label} falló`,
+        error
+      );
+
+      return undefined;
+    }
+  };
+}
+
 /* ======================================================
    DOM BIND LOW LEVEL
 ====================================================== */
@@ -428,6 +480,7 @@ function runLocalCleanups(scope) {
 function bindDom(
   AppCore,
   scope,
+  epoch,
   target,
   eventName,
   handler,
@@ -446,6 +499,8 @@ function bindDom(
 
   const safeHandler = makeSafeHandler(
     AppCore,
+    scopeName,
+    epoch,
     `DOM "${eventName}"`,
     handler
   );
@@ -461,10 +516,8 @@ function bindDom(
   };
 
   /*
-    Importante:
     No usamos AppCore.cleanup.on aquí.
-    El sidebar ya tiene cleanup local propio por scope.
-    Usar ambos provoca cleanup:disposed masivo y dispara firebreak.
+    El sidebar tiene cleanup local propio.
   */
   try {
     target.addEventListener(
@@ -494,6 +547,7 @@ function bindDom(
 function bindCoreEvent(
   AppCore,
   scope,
+  epoch,
   eventName,
   handler
 ) {
@@ -506,6 +560,8 @@ function bindCoreEvent(
 
   const safeHandler = makeSafeHandler(
     AppCore,
+    scopeName,
+    epoch,
     `Core event "${cleanEventName}"`,
     handler
   );
@@ -514,10 +570,8 @@ function bindCoreEvent(
   let boundToBus = false;
 
   /*
-    Importante:
     Preferimos AppCore.events.
     NO nos suscribimos también a window si el bus existe.
-    Doble suscripción = doble commit visual = tormenta.
   */
   try {
     if (isFn(AppCore?.events?.on)) {
@@ -607,413 +661,31 @@ function bindCoreEvent(
 }
 
 /* ======================================================
-   PATH / ROUTE HELPERS
+   ACTIVE MENU / INDICATOR BRIDGE TO state.js
 ====================================================== */
-
-function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
-    return window.location.origin;
-  }
-
-  return "http://localhost";
-}
-
-function isHashRouterPath(value = "") {
-  const raw = safeText(value, "");
-
-  return (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  );
-}
-
-function normalizeHashRouterPath(value = "") {
-  const raw = safeText(value, "");
-
-  if (!raw) {
-    return "/";
-  }
-
-  if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/");
-  }
-
-  return raw.replace(/^#\/?/, "/");
-}
-
-function stripUsernamePrefix(path = "/") {
-  return (
-    safeText(path, "/")
-      .replace(/^\/@[^/]+(?=\/|$)/i, "") ||
-    "/"
-  );
-}
-
-function normalizePathname(path = "/") {
-  let value = safeText(path, "/");
-
-  if (isHashRouterPath(value)) {
-    value = normalizeHashRouterPath(value);
-  }
-
-  try {
-    const parsed = new URL(value, getBaseOrigin());
-
-    if (
-      parsed.hash &&
-      isHashRouterPath(parsed.hash)
-    ) {
-      value = normalizeHashRouterPath(parsed.hash);
-    } else {
-      value = parsed.pathname || "/";
-    }
-  } catch {
-    value = value
-      .split("?")[0]
-      .split("#")[0];
-  }
-
-  value = safeText(value, "/")
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
-  }
-
-  if (
-    value.length > 1 &&
-    value.endsWith("/")
-  ) {
-    value = value.replace(/\/+$/g, "") || "/";
-  }
-
-  value = stripUsernamePrefix(value);
-
-  return value || "/";
-}
-
-function getBrowserPath() {
-  if (!isBrowser()) {
-    return "/";
-  }
-
-  try {
-    const hash = window.location.hash || "";
-
-    if (hash && isHashRouterPath(hash)) {
-      return normalizePathname(
-        normalizeHashRouterPath(hash)
-      );
-    }
-
-    return normalizePathname(
-      window.location.pathname || "/"
-    );
-  } catch {
-    return "/";
-  }
-}
-
-function readMaybeFunction(fn, fallback = "") {
-  try {
-    if (isFn(fn)) {
-      return fn();
-    }
-  } catch {}
-
-  return fallback;
-}
-
-function getRouteFromObject(value = null) {
-  if (!value || typeof value !== "object") {
-    return "";
-  }
-
-  return safeText(
-    value.path ||
-      value.route ||
-      value.canonicalPath ||
-      value.publicPath ||
-      "",
-    ""
-  );
-}
-
-function getRouteFromElement(element = null) {
-  if (!element) {
-    return "";
-  }
-
-  const href = safeText(
-    element.getAttribute?.("href"),
-    ""
-  );
-
-  return safeText(
-    element.dataset?.route ||
-      element.dataset?.href ||
-      element.dataset?.to ||
-      element.getAttribute?.("data-route") ||
-      element.getAttribute?.("data-href") ||
-      element.getAttribute?.("data-to") ||
-      href,
-    ""
-  );
-}
-
-function getCurrentPathCandidates(ctx = {}, payload = {}) {
-  const AppCore = ctx.AppCore;
-  const Router =
-    ctx.Router ||
-    AppCore?.Router ||
-    AppCore?.router;
-
-  const detail = safeObject(payload);
-
-  const values = [
-    detail.publicPath,
-    detail.path,
-    getRouteFromObject(detail.route),
-    detail.canonicalPath,
-    detail.to,
-    detail.url,
-
-    AppCore?.state?.publicPath,
-    AppCore?.state?.route,
-    AppCore?.state?.canonicalPath,
-    AppCore?.state?.lastRoute,
-
-    readMaybeFunction(() => Router?.getCurrentPublicPath?.(), ""),
-    readMaybeFunction(() => Router?.getCurrentCanonicalPath?.(), ""),
-    readMaybeFunction(() => Router?.getCurrentPath?.(), ""),
-
-    getBrowserPath(),
-  ];
-
-  const output = [];
-
-  for (const value of values) {
-    const normalized = normalizePathname(value || "");
-
-    if (
-      normalized &&
-      !output.includes(normalized)
-    ) {
-      output.push(normalized);
-    }
-  }
-
-  return output.length ? output : ["/"];
-}
-
-function isRouteMatch(route = "", current = "") {
-  const cleanRoute = normalizePathname(route);
-  const cleanCurrent = normalizePathname(current);
-
-  if (!cleanRoute || !cleanCurrent) {
-    return false;
-  }
-
-  if (cleanRoute === "/") {
-    return cleanCurrent === "/";
-  }
-
-  return (
-    cleanCurrent === cleanRoute ||
-    cleanCurrent.startsWith(`${cleanRoute}/`)
-  );
-}
-
-function isHiddenOrInertElement(element = null) {
-  if (!isElement(element)) {
-    return true;
-  }
-
-  try {
-    return Boolean(
-      element.closest(
-        [
-          "[hidden]",
-          "[inert]",
-          "[data-sidebar-visible='false']",
-          "[data-role-visible='false']",
-          "[data-admin-visible='false']",
-        ].join(",")
-      )
-    );
-  } catch {
-    return false;
-  }
-}
-
-function hasLayoutBox(element = null) {
-  if (!isElement(element)) {
-    return false;
-  }
-
-  try {
-    const rect = element.getBoundingClientRect();
-
-    return Boolean(
-      rect.width > 0 &&
-      rect.height > 0
-    );
-  } catch {
-    return false;
-  }
-}
-
-function getSidebarMenuItems(sidebarMenu = null) {
-  if (!sidebarMenu) {
-    return [];
-  }
-
-  try {
-    return Array.from(
-      sidebarMenu.querySelectorAll(
-        [
-          "a[data-route]",
-          "a[data-spa]",
-          ".menu-item[data-route]",
-          ".menu-item[href]",
-        ].join(",")
-      )
-    );
-  } catch {
-    return [];
-  }
-}
-
-/* ======================================================
-   ACTIVE MENU + APPLE-LIKE INDICATOR
-====================================================== */
-
-function hideActiveMenuIndicator(ctx = {}, reason = "hide") {
-  const AppCore = ctx.AppCore;
-
-  const {
-    sidebarMenu,
-  } = resolveElements(
-    AppCore,
-    ctx.getElements
-  );
-
-  if (!sidebarMenu) {
-    return false;
-  }
-
-  try {
-    sidebarMenu.dataset.indicatorReady = "false";
-    sidebarMenu.style.setProperty("--sidebar-indicator-opacity", "0");
-  } catch {}
-
-  safeEmit(AppCore, "sidebar:indicator:hidden", {
-    reason,
-  });
-
-  return true;
-}
 
 function syncActiveMenuItem(ctx = {}, payload = {}) {
   const AppCore = ctx.AppCore;
 
-  const {
-    sidebarMenu,
-  } = resolveElements(
-    AppCore,
-    ctx.getElements
-  );
-
-  if (!sidebarMenu) {
-    return null;
-  }
-
-  const items = getSidebarMenuItems(sidebarMenu);
-  const currentPaths = getCurrentPathCandidates(ctx, payload);
-
-  let bestItem = null;
-  let bestScore = -1;
-  let bestRoute = "";
-
-  for (const item of items) {
-    if (
-      isHiddenOrInertElement(item) ||
-      !hasLayoutBox(item)
-    ) {
-      continue;
-    }
-
-    const route = normalizePathname(
-      getRouteFromElement(item)
-    );
-
-    if (!route) {
-      continue;
-    }
-
-    for (const current of currentPaths) {
-      if (!isRouteMatch(route, current)) {
-        continue;
-      }
-
-      const score = route.length;
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestItem = item;
-        bestRoute = route;
-      }
-    }
-  }
-
-  for (const item of items) {
-    try {
-      item.classList.remove("active", "is-active");
-      item.removeAttribute("aria-current");
-      delete item.dataset.active;
-    } catch {}
-  }
-
-  if (bestItem) {
-    try {
-      bestItem.classList.add("active", "is-active");
-      bestItem.setAttribute("aria-current", ROUTE_CURRENT_ATTR);
-      bestItem.dataset.active = "true";
-    } catch {}
-  }
-
-  safeEmit(AppCore, "sidebar:active:sync", {
-    route: bestRoute,
-    matched: Boolean(bestItem),
-    currentPaths,
-  });
-
-  return bestItem || null;
-}
-
-function getActiveMenuItem(ctx = {}) {
-  const AppCore = ctx.AppCore;
-
-  const {
-    sidebarMenu,
-  } = resolveElements(
-    AppCore,
-    ctx.getElements
-  );
-
-  if (!sidebarMenu) {
-    return null;
-  }
-
   try {
-    return sidebarMenu.querySelector(
-      ".menu-item.active, .menu-item.is-active, .menu-item[aria-current='page'], .menu-item[data-active='true']"
+    return syncActiveMenuItemBase(AppCore, {
+      reason:
+        safeText(
+          payload?.reason ||
+            payload?.type ||
+            payload?.event ||
+            "sidebar-events:active-sync",
+          "sidebar-events:active-sync"
+        ),
+      mutate: true,
+    });
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      "syncActiveMenuItemBase falló",
+      error
     );
-  } catch {
+
     return null;
   }
 }
@@ -1021,134 +693,88 @@ function getActiveMenuItem(ctx = {}) {
 function syncActiveMenuIndicator(ctx = {}, options = {}) {
   const AppCore = ctx.AppCore;
 
-  const {
-    sidebar,
-    sidebarMenu,
-  } = resolveElements(
-    AppCore,
-    ctx.getElements
-  );
-
-  if (!sidebar || !sidebarMenu) {
-    return false;
-  }
-
-  if (safeIsShellHidden(AppCore)) {
-    return hideActiveMenuIndicator(ctx, "shell-hidden");
-  }
-
-  const activeItem =
-    options.activeItem ||
-    getActiveMenuItem(ctx) ||
-    syncActiveMenuItem(ctx, options.payload || {});
-
-  if (
-    !activeItem ||
-    isHiddenOrInertElement(activeItem) ||
-    !hasLayoutBox(activeItem)
-  ) {
-    return hideActiveMenuIndicator(
-      ctx,
-      options.reason || "no-active-item"
-    );
-  }
-
   try {
-    const menuRect = sidebarMenu.getBoundingClientRect();
-    const itemRect = activeItem.getBoundingClientRect();
-
-    const x = Math.max(
-      0,
-      itemRect.left - menuRect.left
-    );
-
-    const y = Math.max(
-      0,
-      itemRect.top - menuRect.top
-    );
-
-    const width = Math.max(0, itemRect.width);
-    const height = Math.max(0, itemRect.height);
-
-    if (
-      !Number.isFinite(x) ||
-      !Number.isFinite(y) ||
-      width <= 0 ||
-      height <= 0
-    ) {
-      return hideActiveMenuIndicator(
-        ctx,
-        options.reason || "invalid-rect"
-      );
-    }
-
-    sidebarMenu.style.setProperty(
-      "--sidebar-indicator-x",
-      `${Math.round(x)}px`
-    );
-
-    sidebarMenu.style.setProperty(
-      "--sidebar-indicator-y",
-      `${Math.round(y)}px`
-    );
-
-    sidebarMenu.style.setProperty(
-      "--sidebar-indicator-w",
-      `${Math.round(width)}px`
-    );
-
-    sidebarMenu.style.setProperty(
-      "--sidebar-indicator-h",
-      `${Math.round(height)}px`
-    );
-
-    sidebarMenu.style.setProperty(
-      "--sidebar-indicator-opacity",
-      options.reveal === false ? "0" : "1"
-    );
-
-    sidebarMenu.dataset.indicatorReady = "true";
-
-    safeEmit(AppCore, "sidebar:indicator:sync", {
-      reason: safeText(options.reason, "sync"),
-      x,
-      y,
-      width,
-      height,
-      route:
-        activeItem.dataset?.route ||
-        activeItem.getAttribute?.("href") ||
-        "",
+    return syncActiveMenuIndicatorBase(AppCore, {
+      reason:
+        safeText(
+          options.reason,
+          "sidebar-events:indicator-sync"
+        ),
+      reveal:
+        options.reveal !== false,
+      force:
+        options.force === true,
     });
-
-    return true;
   } catch (error) {
     safeWarn(
       AppCore,
-      "syncActiveMenuIndicator falló",
+      "syncActiveMenuIndicatorBase falló",
       error
     );
 
-    return hideActiveMenuIndicator(
-      ctx,
-      options.reason || "error"
-    );
+    return false;
   }
 }
 
 function scheduleActiveMenuIndicator(ctx = {}, options = {}) {
-  const delayMs =
-    Number.isFinite(Number(options.delayMs))
-      ? Number(options.delayMs)
-      : INDICATOR_DEFAULT_DELAY;
+  const AppCore = ctx.AppCore;
 
-  safeWindowTimeout(() => {
-    afterFrames(() => {
-      syncActiveMenuIndicator(ctx, options);
-    }, Number(options.frames) || 2);
-  }, delayMs);
+  try {
+    return scheduleActiveMenuIndicatorBase(AppCore, {
+      reason:
+        safeText(
+          options.reason,
+          "sidebar-events:indicator-scheduled"
+        ),
+      delayMs:
+        Number.isFinite(Number(options.delayMs))
+          ? Number(options.delayMs)
+          : INDICATOR_DEFAULT_DELAY,
+      reveal:
+        options.reveal !== false,
+      force:
+        options.force === true,
+    });
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      "scheduleActiveMenuIndicatorBase falló",
+      error
+    );
 
-  return true;
+    return false;
+  }
+}
+
+function hideActiveMenuIndicator(ctx = {}, reason = "hide") {
+  const AppCore = ctx.AppCore;
+
+  try {
+    return syncActiveMenuIndicatorBase(AppCore, {
+      reason:
+        safeText(reason, "hide"),
+      reveal: false,
+      force: true,
+    });
+  } catch {
+    const {
+      sidebarMenu,
+    } = resolveElements(
+      AppCore,
+      ctx.getElements
+    );
+
+    if (!sidebarMenu) {
+      return false;
+    }
+
+    try {
+      sidebarMenu.dataset.indicatorReady = "false";
+      sidebarMenu.style.setProperty("--sidebar-indicator-opacity", "0");
+    } catch {}
+
+    return true;
+  }
 }
 
 function beginSidebarLayoutTransition(ctx = {}, reason = "transition") {
@@ -1196,20 +822,19 @@ function endSidebarLayoutTransition(ctx = {}, reason = "transition") {
     sidebarMenu?.classList?.remove?.("is-transitioning");
   } catch {}
 
-  const activeItem = syncActiveMenuItem(ctx, {
+  syncActiveMenuItem(ctx, {
     reason: `${reason}:end`,
   });
 
   scheduleActiveMenuIndicator(ctx, {
     reason: `${reason}:end`,
-    activeItem,
     delayMs: 24,
     reveal: true,
+    force: true,
   });
 
   safeEmit(AppCore, "sidebar:transition:end", {
     reason,
-    hasActiveItem: Boolean(activeItem),
   });
 
   return true;
@@ -1252,7 +877,19 @@ function createSidebarVisualCommitter(ctx = {}) {
     lastReason = reason;
 
     try {
-      if (options.renderIdentity !== false) {
+      if (options.closeDropdown === true) {
+        try {
+          ctx.closeDropdown?.();
+        } catch (error) {
+          safeWarn(
+            AppCore,
+            `closeDropdown falló en ${reason}`,
+            error
+          );
+        }
+      }
+
+      if (options.renderIdentity === true) {
         try {
           ctx.renderUser?.();
         } catch (error) {
@@ -1274,18 +911,10 @@ function createSidebarVisualCommitter(ctx = {}) {
         }
       }
 
-      if (options.closeDropdown === true) {
-        try {
-          ctx.closeDropdown?.();
-        } catch (error) {
-          safeWarn(
-            AppCore,
-            `closeDropdown falló en ${reason}`,
-            error
-          );
-        }
-      }
-
+      /*
+        syncState solo se usa en arranque/estado explícito.
+        No se usa en navegación normal para evitar bucles con state events.
+      */
       if (
         options.syncState === true &&
         !safeIsShellHidden(AppCore)
@@ -1313,28 +942,27 @@ function createSidebarVisualCommitter(ctx = {}) {
         }
       }
 
-      const activeItem =
-        syncActiveMenuItem(ctx, options.payload || {});
+      syncActiveMenuItem(ctx, {
+        ...(options.payload || {}),
+        reason,
+      });
 
       if (options.indicator !== false) {
         scheduleActiveMenuIndicator(ctx, {
           reason,
-          activeItem,
           delayMs:
             options.indicatorDelayMs ??
             INDICATOR_DEFAULT_DELAY,
-          frames:
-            options.indicatorFrames || 2,
-          reveal: true,
-          payload:
-            options.payload || {},
+          reveal:
+            options.reveal !== false,
+          force:
+            options.force === true,
         });
       }
 
       safeEmit(AppCore, "sidebar:visual:committed", {
         reason,
         lastReason,
-        hasActiveItem: Boolean(activeItem),
       });
 
       return true;
@@ -1418,63 +1046,6 @@ function createSidebarVisualCommitter(ctx = {}) {
     getLastReason:
       () => lastReason,
   };
-}
-
-/* ======================================================
-   UI SYNC HELPERS
-====================================================== */
-
-function syncUserAndRoles({
-  AppCore,
-  renderUser,
-  applyRoleVisibility,
-  syncSidebarState,
-  closeDropdown,
-  sanitize = true,
-  syncState = false,
-  close = false,
-} = {}) {
-  safeWindowTimeout(() => {
-    try {
-      renderUser?.();
-    } catch (error) {
-      safeWarn(AppCore, "renderUser falló", error);
-    }
-
-    try {
-      applyRoleVisibility?.();
-    } catch (error) {
-      safeWarn(AppCore, "applyRoleVisibility falló", error);
-    }
-
-    if (sanitize) {
-      try {
-        sanitizeFooterTooltipState(AppCore);
-      } catch (error) {
-        safeWarn(
-          AppCore,
-          "sanitizeFooterTooltipState falló",
-          error
-        );
-      }
-    }
-
-    if (close) {
-      try {
-        closeDropdown?.();
-      } catch (error) {
-        safeWarn(AppCore, "closeDropdown falló", error);
-      }
-    }
-
-    if (syncState && !safeIsShellHidden(AppCore)) {
-      try {
-        syncSidebarState?.();
-      } catch (error) {
-        safeWarn(AppCore, "syncSidebarState falló", error);
-      }
-    }
-  }, 0);
 }
 
 /* ======================================================
@@ -1766,6 +1337,7 @@ export function handleResize({
     reason: "resize",
     delayMs: 96,
     reveal: true,
+    force: true,
   });
 }
 
@@ -1793,12 +1365,12 @@ export function bindDomEvents(ctx = {}) {
 
   const scopeName = resolveScope(scope);
   const localScope = resolveLocalScope(scopeName, "dom");
-
-  runLocalCleanups(localScope);
+  const epoch = resetLocalScope(localScope);
 
   bindDom(
     AppCore,
     localScope,
+    epoch,
     document,
     "click",
     (event) =>
@@ -1816,6 +1388,7 @@ export function bindDomEvents(ctx = {}) {
   bindDom(
     AppCore,
     localScope,
+    epoch,
     document,
     "keydown",
     (event) =>
@@ -1850,6 +1423,7 @@ export function bindDomEvents(ctx = {}) {
   bindDom(
     AppCore,
     localScope,
+    epoch,
     window,
     "resize",
     resizeHandler
@@ -1858,6 +1432,7 @@ export function bindDomEvents(ctx = {}) {
   bindDom(
     AppCore,
     localScope,
+    epoch,
     document,
     "transitionend",
     (event) => {
@@ -1915,6 +1490,7 @@ export function bindDomEvents(ctx = {}) {
     bindDom(
       AppCore,
       localScope,
+      epoch,
       userToggle,
       "keydown",
       (event) =>
@@ -1933,6 +1509,7 @@ export function bindDomEvents(ctx = {}) {
     bindDom(
       AppCore,
       localScope,
+      epoch,
       sidebarMenu,
       "click",
       (event) =>
@@ -1948,10 +1525,11 @@ export function bindDomEvents(ctx = {}) {
   safeEmit(AppCore, "sidebar:dom-events:bound", {
     scope: scopeName,
     localScope,
+    epoch,
   });
 
   return () => {
-    runLocalCleanups(localScope);
+    disposeLocalScope(localScope);
   };
 }
 
@@ -1973,8 +1551,7 @@ export function bindCoreEvents(ctx = {}) {
 
   const scopeName = resolveScope(scope);
   const localScope = resolveLocalScope(scopeName, "core");
-
-  runLocalCleanups(localScope);
+  const epoch = resetLocalScope(localScope);
 
   const visualCtx = {
     ...ctx,
@@ -1993,162 +1570,227 @@ export function bindCoreEvents(ctx = {}) {
   const visualCommitter =
     createSidebarVisualCommitter(visualCtx);
 
-  const syncIdentity = () => {
-    syncUserAndRoles({
-      AppCore,
-      renderUser,
-      applyRoleVisibility,
-      syncSidebarState,
-      closeDropdown,
-      sanitize: true,
-      syncState: false,
-      close: false,
+  const bindMany = (eventNames = [], handler) => {
+    eventNames.forEach((eventName) => {
+      bindCoreEvent(
+        AppCore,
+        localScope,
+        epoch,
+        eventName,
+        handler
+      );
     });
+  };
+
+  const commitIdentity = (eventOrPayload = {}) => {
+    const detail = getEventDetail(eventOrPayload);
 
     visualCommitter.schedule({
       key: "identity",
-      reason: "identity",
-      renderIdentity: false,
+      reason:
+        safeText(
+          detail.reason ||
+            detail.type ||
+            detail.event ||
+            "identity",
+          "identity"
+        ),
+      payload: detail,
+      renderIdentity: true,
       syncState: false,
+      closeDropdown: false,
+      delayMs: 16,
+      frames: 1,
       indicatorDelayMs: 48,
     });
   };
 
-  const syncIdentityAndState = () => {
+  const commitIdentityAndState = (eventOrPayload = {}) => {
+    const detail = getEventDetail(eventOrPayload);
+
     visualCommitter.schedule({
       key: "identity-state",
-      reason: "identity-and-state",
+      reason:
+        safeText(
+          detail.reason ||
+            detail.type ||
+            detail.event ||
+            "identity-state",
+          "identity-state"
+        ),
+      payload: detail,
       renderIdentity: true,
       syncState: true,
+      closeDropdown: false,
+      delayMs: 24,
+      frames: 1,
       indicatorDelayMs: 56,
     });
   };
 
-  const syncAfterSessionCleared = () => {
+  const commitSessionCleared = (eventOrPayload = {}) => {
+    const detail = getEventDetail(eventOrPayload);
+
     visualCommitter.schedule({
       key: "session-cleared",
-      reason: "session-cleared",
+      reason:
+        safeText(
+          detail.reason ||
+            detail.type ||
+            detail.event ||
+            "session-cleared",
+          "session-cleared"
+        ),
+      payload: detail,
       renderIdentity: true,
       syncState: true,
       closeDropdown: true,
+      delayMs: 24,
+      frames: 1,
       indicatorDelayMs: 56,
     });
   };
 
-  [
-    "app:user:change",
-    "app:user:updated",
-    "app:user-ui:sync",
-    "app:session:change",
-    "app:session:restored",
-    "app:auth:change",
-    "auth:change",
-    "auth:updated",
-    "auth:restore:success",
-    "auth:session:restored",
-    "auth:session:applied",
-  ].forEach((eventName) => {
-    bindCoreEvent(
-      AppCore,
-      localScope,
-      eventName,
-      syncIdentity
-    );
-  });
+  const commitRoute = (eventName) => {
+    return (eventOrPayload = {}) => {
+      const detail = getEventDetail(eventOrPayload);
 
-  [
-    "login:success",
-    "auth:login:success",
-    "app:login:success",
-  ].forEach((eventName) => {
-    bindCoreEvent(
-      AppCore,
-      localScope,
-      eventName,
-      syncIdentityAndState
-    );
-  });
+      visualCommitter.schedule({
+        key: "route",
+        reason: eventName,
+        payload: detail,
+        renderIdentity: false,
+        syncState: false,
+        closeDropdown: false,
+        delayMs: 24,
+        frames: 2,
+        indicatorDelayMs: 32,
+        force: true,
+      });
+    };
+  };
 
-  [
-    "app:session:cleared",
-    "auth:session:cleared",
-    "auth:logout",
-    "auth:logout:success",
-    "logout:success",
-  ].forEach((eventName) => {
-    bindCoreEvent(
-      AppCore,
-      localScope,
-      eventName,
-      syncAfterSessionCleared
-    );
-  });
+  const commitRouterRendered = (eventOrPayload = {}) => {
+    const detail = getEventDetail(eventOrPayload);
 
-  [
-    "app:sidebar:change",
-    "sidebar:state:change",
-    "sidebar:open:set",
-  ].forEach((eventName) => {
-    bindCoreEvent(
-      AppCore,
-      localScope,
-      eventName,
-      (eventOrPayload = {}) => {
-        const detail = getEventDetail(eventOrPayload);
+    visualCommitter.schedule({
+      key: "router-rendered",
+      reason: "router:rendered",
+      payload: detail,
+      renderIdentity: false,
+      syncState: false,
+      closeDropdown: true,
+      delayMs: 0,
+      frames: 2,
+      indicatorDelayMs: 48,
+      force: true,
+    });
 
-        visualCommitter.beginTransition(eventName);
+    visualCommitter.schedule({
+      key: "router-rendered-settled",
+      reason: "router:rendered:settled",
+      payload: detail,
+      renderIdentity: false,
+      syncState: false,
+      closeDropdown: false,
+      delayMs: 140,
+      frames: 2,
+      indicatorDelayMs: 0,
+      force: true,
+    });
+  };
 
-        visualCommitter.schedule({
-          key: "sidebar-transition-live",
-          reason: eventName,
-          payload: detail,
-          renderIdentity: false,
-          syncState: false,
-          delayMs: 48,
-          indicatorDelayMs: 80,
-        });
+  const commitSidebarTransition = (eventName) => {
+    return (eventOrPayload = {}) => {
+      const detail = getEventDetail(eventOrPayload);
 
-        visualCommitter.schedule({
-          key: "sidebar-transition-settled",
-          reason: `${eventName}:settled`,
-          payload: detail,
-          renderIdentity: false,
-          syncState: false,
-          delayMs: INDICATOR_TRANSITION_MS,
-          indicatorDelayMs: 24,
-        });
-      }
-    );
-  });
+      visualCommitter.beginTransition(eventName);
 
-  [
-    "sidebar:state:synced",
-    "sidebar:refreshed",
-    "sidebar:repaired",
-  ].forEach((eventName) => {
-    bindCoreEvent(
-      AppCore,
-      localScope,
-      eventName,
-      (eventOrPayload = {}) => {
-        const detail = getEventDetail(eventOrPayload);
+      visualCommitter.schedule({
+        key: "sidebar-transition-live",
+        reason: eventName,
+        payload: detail,
+        renderIdentity: false,
+        syncState: false,
+        closeDropdown: false,
+        delayMs: 48,
+        indicatorDelayMs: 80,
+        force: true,
+      });
 
-        visualCommitter.schedule({
-          key: "sidebar-state-sync",
-          reason: eventName,
-          payload: detail,
-          renderIdentity: false,
-          syncState: false,
-          delayMs: 16,
-          indicatorDelayMs: 32,
-        });
-      }
-    );
-  });
+      visualCommitter.schedule({
+        key: "sidebar-transition-settled",
+        reason: `${eventName}:settled`,
+        payload: detail,
+        renderIdentity: false,
+        syncState: false,
+        closeDropdown: false,
+        delayMs: INDICATOR_TRANSITION_MS,
+        indicatorDelayMs: 24,
+        force: true,
+      });
+    };
+  };
+
+  /*
+    Identidad / sesión.
+    NO escuchamos app:user-ui:sync para evitar bucle:
+      syncUserUI -> event -> SidebarEvents -> renderUser/applyRole -> syncUserUI...
+  */
+  bindMany(
+    [
+      "app:user:change",
+      "app:user:updated",
+      "app:session:change",
+      "app:session:restored",
+      "app:auth:change",
+
+      "auth:change",
+      "auth:updated",
+      "auth:restore:success",
+      "auth:session:restored",
+      "auth:session:applied",
+    ],
+    commitIdentity
+  );
+
+  bindMany(
+    [
+      "login:success",
+      "auth:login:success",
+      "app:login:success",
+    ],
+    commitIdentityAndState
+  );
+
+  bindMany(
+    [
+      "app:session:cleared",
+      "auth:session:cleared",
+      "auth:logout",
+      "auth:logout:success",
+      "logout:success",
+    ],
+    commitSessionCleared
+  );
+
+  /*
+    Cambios manuales del sidebar.
+    NO escuchamos sidebar:state:synced / sidebar:refreshed / sidebar:repaired,
+    porque esos pueden salir de los propios commits visuales.
+  */
+  bindMany(
+    [
+      "app:sidebar:change",
+      "sidebar:state:change",
+    ],
+    commitSidebarTransition("sidebar:state:change")
+  );
 
   bindCoreEvent(
     AppCore,
     localScope,
+    epoch,
     "router:before-render",
     () => {
       try {
@@ -2162,33 +1804,9 @@ export function bindCoreEvents(ctx = {}) {
   bindCoreEvent(
     AppCore,
     localScope,
+    epoch,
     "router:rendered",
-    (eventOrPayload = {}) => {
-      const detail = getEventDetail(eventOrPayload);
-
-      visualCommitter.schedule({
-        key: "router-rendered",
-        reason: "router:rendered",
-        payload: detail,
-        renderIdentity: true,
-        syncState: true,
-        closeDropdown: true,
-        delayMs: 0,
-        frames: 2,
-        indicatorDelayMs: 48,
-      });
-
-      visualCommitter.schedule({
-        key: "router-rendered-settled",
-        reason: "router:rendered:settled",
-        payload: detail,
-        renderIdentity: false,
-        syncState: false,
-        delayMs: 140,
-        frames: 2,
-        indicatorDelayMs: 0,
-      });
-    }
+    commitRouterRendered
   );
 
   [
@@ -2200,149 +1818,128 @@ export function bindCoreEvents(ctx = {}) {
     bindCoreEvent(
       AppCore,
       localScope,
+      epoch,
       eventName,
-      (eventOrPayload = {}) => {
-        const detail = getEventDetail(eventOrPayload);
-
-        visualCommitter.schedule({
-          key: "route-change",
-          reason: eventName,
-          payload: detail,
-          renderIdentity: false,
-          syncState: false,
-          closeDropdown: false,
-          delayMs: 16,
-          frames: 2,
-          indicatorDelayMs: 32,
-        });
-      }
+      commitRoute(eventName)
     );
   });
 
-  [
-    "router:shell:change",
-    "router:shell:state",
-    "router:shell:repair",
-  ].forEach((eventName) => {
-    bindCoreEvent(
-      AppCore,
-      localScope,
-      eventName,
-      (eventOrPayload = {}) => {
-        const detail = safeObject(
-          getEventDetail(eventOrPayload)
-        );
+  /*
+    NO escuchamos:
+      - router:shell:state
+      - router:shell:repair
+      - router:shell:change
 
-        if (detail.hidden || detail.shellHidden) {
-          try {
-            closeDropdown?.();
-          } catch {}
-
-          visualCommitter.hideIndicator(`${eventName}:hidden`);
-        }
-
-        visualCommitter.schedule({
-          key: "shell-change",
-          reason: eventName,
-          payload: detail,
-          renderIdentity: true,
-          syncState: true,
-          closeDropdown: Boolean(detail.hidden || detail.shellHidden),
-          delayMs: 32,
-          frames: 2,
-          indicatorDelayMs: 56,
-        });
-      }
-    );
-  });
+    El shell lo gestiona App/Shell/Router.
+    Escucharlo aquí creaba bucles con repairShell().
+  */
 
   bindCoreEvent(
     AppCore,
     localScope,
+    epoch,
     "app:ui:repair-request",
     (eventOrPayload = {}) => {
       const detail = getEventDetail(eventOrPayload);
 
+      /*
+        Solo commit visual local.
+        No repair(), no rebind(), no hard sync.
+      */
       visualCommitter.schedule({
-        key: "ui-repair",
+        key: "ui-repair-request",
         reason: "app:ui:repair-request",
         payload: detail,
         renderIdentity: true,
-        syncState: true,
-        delayMs: 16,
+        syncState: detail.syncState === true,
+        closeDropdown: false,
+        delayMs: 32,
         frames: 2,
         indicatorDelayMs: 56,
+        force: true,
       });
     }
   );
 
-  [
-    "app:ready",
-    "app:boot:ready",
-    "app:boot:complete",
-    "router:bound",
-  ].forEach((eventName) => {
-    bindCoreEvent(
-      AppCore,
-      localScope,
-      eventName,
-      (eventOrPayload = {}) => {
-        const detail = getEventDetail(eventOrPayload);
+  bindMany(
+    [
+      "app:ready",
+      "app:boot:ready",
+      "app:boot:complete",
+      "router:bound",
+    ],
+    (eventOrPayload = {}) => {
+      const detail = getEventDetail(eventOrPayload);
 
-        visualCommitter.schedule({
-          key: "app-ready",
-          reason: eventName,
-          payload: detail,
-          renderIdentity: true,
-          syncState: true,
-          delayMs: 64,
-          frames: 2,
-          indicatorDelayMs: 56,
-        });
-      }
-    );
-  });
+      visualCommitter.schedule({
+        key: "app-ready",
+        reason:
+          safeText(
+            detail.reason ||
+              detail.type ||
+              detail.event ||
+              "app-ready",
+            "app-ready"
+          ),
+        payload: detail,
+        renderIdentity: true,
+        syncState: false,
+        closeDropdown: false,
+        delayMs: 64,
+        frames: 2,
+        indicatorDelayMs: 56,
+        force: true,
+      });
+    }
+  );
 
-  [
-    "app:lang:change",
-    "i18n:change",
-    "theme:change",
-    "app:theme:change",
-  ].forEach((eventName) => {
-    bindCoreEvent(
-      AppCore,
-      localScope,
-      eventName,
-      (eventOrPayload = {}) => {
-        const detail = getEventDetail(eventOrPayload);
+  bindMany(
+    [
+      "app:lang:change",
+      "i18n:change",
+      "theme:change",
+      "app:theme:change",
+    ],
+    (eventOrPayload = {}) => {
+      const detail = getEventDetail(eventOrPayload);
 
-        visualCommitter.schedule({
-          key: "visual-env-change",
-          reason: eventName,
-          payload: detail,
-          renderIdentity: true,
-          syncState: false,
-          delayMs: 32,
-          frames: 2,
-          indicatorDelayMs: 56,
-        });
-      }
-    );
-  });
+      visualCommitter.schedule({
+        key: "visual-env-change",
+        reason:
+          safeText(
+            detail.reason ||
+              detail.type ||
+              detail.event ||
+              "visual-env-change",
+            "visual-env-change"
+          ),
+        payload: detail,
+        renderIdentity: true,
+        syncState: false,
+        closeDropdown: false,
+        delayMs: 48,
+        frames: 2,
+        indicatorDelayMs: 56,
+        force: true,
+      });
+    }
+  );
 
   safeEmit(AppCore, "sidebar:core-events:bound", {
     scope: scopeName,
     localScope,
+    epoch,
   });
 
   safeLog(AppCore, "core events bound", {
     scope: scopeName,
     localScope,
+    epoch,
   });
 
   return () => {
     visualCommitter.cancelAll();
-    runLocalCleanups(localScope);
+    disposeLocalScope(localScope);
   };
 }
 

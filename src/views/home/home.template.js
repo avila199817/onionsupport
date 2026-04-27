@@ -17,6 +17,8 @@
    - estilos encapsulados
    - compatible con HomeView.js o render directo desde Router
    - acciones compatibles con data-home-action y data-action
+   - CSP friendly: sin handlers inline tipo onerror
+   - rutas alineadas con src/router/routes.js
 
    USO ESPERADO:
    renderHomeTemplate({
@@ -41,6 +43,20 @@
      }
    })
 ========================================================= */
+
+/* =========================================================
+   ROUTES
+========================================================= */
+
+const HOME_ROUTES = Object.freeze({
+  HOME: "/",
+  INCIDENCIAS: "/incidencias",
+  FACTURAS: "/facturas",
+  USUARIOS: "/usuarios",
+  CLIENTES: "/clientes",
+  CUENTA: "/cuenta",
+  AJUSTES: "/ajustes",
+});
 
 /* =========================================================
    HELPERS
@@ -106,6 +122,7 @@ function normalizeKey(value = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_:.]/g, "")
     .trim();
 }
 
@@ -159,13 +176,17 @@ function formatRelativeDate(value = null) {
   if (absMin < 1) return "Ahora mismo";
 
   if (absMin < 60) {
-    return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
+    return diffMin > 0
+      ? `En ${absMin} min`
+      : `Hace ${absMin} min`;
   }
 
   const diffHours = Math.round(absMin / 60);
 
   if (diffHours < 24) {
-    return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
+    return diffMin > 0
+      ? `En ${diffHours} h`
+      : `Hace ${diffHours} h`;
   }
 
   const diffDays = Math.round(diffHours / 24);
@@ -285,10 +306,10 @@ function isAdminRole(role = "") {
     "administrador",
     "superadmin",
     "super_admin",
+    "super_administrador",
+    "super_administrador",
     "owner",
     "root",
-    "staff",
-    "support",
   ].includes(key);
 }
 
@@ -317,10 +338,14 @@ function getAvatarUrl(input = {}) {
     first(
       user.avatar,
       user.avatarUrl,
+      user.avatar_url,
       user.photo,
+      user.photoUrl,
       user.photoURL,
       user.picture,
+      user.pictureUrl,
       user.image,
+      user.imageUrl,
       user.profileImage,
       input.avatar,
       input.avatarUrl
@@ -424,10 +449,18 @@ function getCollections(input = {}) {
     users,
     clients,
     activity,
-    ticketsRemoteCount: getRemoteCountFromCollection(ticketsSource, tickets.length),
-    invoicesRemoteCount: getRemoteCountFromCollection(invoicesSource, invoices.length),
-    usersRemoteCount: getRemoteCountFromCollection(usersSource, users.length),
-    clientsRemoteCount: getRemoteCountFromCollection(clientsSource, clients.length),
+
+    ticketsRemoteCount:
+      getRemoteCountFromCollection(ticketsSource, tickets.length),
+
+    invoicesRemoteCount:
+      getRemoteCountFromCollection(invoicesSource, invoices.length),
+
+    usersRemoteCount:
+      getRemoteCountFromCollection(usersSource, users.length),
+
+    clientsRemoteCount:
+      getRemoteCountFromCollection(clientsSource, clients.length),
   };
 }
 
@@ -523,6 +556,7 @@ function getTicketAvatarUrl(item = {}) {
       item.clientAvatar,
       item.avatar,
       item.avatarUrl,
+      item.avatar_url,
       item.userAvatar,
       item.createdByAvatar,
       item.cliente?.avatar,
@@ -538,6 +572,7 @@ function getTicketAvatarUrl(item = {}) {
       item.raw?.clientAvatar,
       item.raw?.avatar,
       item.raw?.avatarUrl,
+      item.raw?.avatar_url,
       item.raw?.userAvatar,
       item.raw?.createdByAvatar,
       item.raw?.cliente?.avatar,
@@ -778,6 +813,24 @@ function isInvoicePendingLike(item = {}) {
    STATS / ACTIVITY / PAGINATION
 ========================================================= */
 
+function getLatestDateFromTickets(tickets = []) {
+  const timestamps = safeArray(tickets)
+    .map((item) => {
+      const value = getTicketUpdatedAt(item) || getTicketCreatedAt(item);
+      const date = new Date(value || 0);
+      const ts = date.getTime();
+
+      return Number.isFinite(ts) ? ts : 0;
+    })
+    .filter(Boolean);
+
+  if (!timestamps.length) {
+    return null;
+  }
+
+  return new Date(Math.max(...timestamps)).toISOString();
+}
+
 function computeHomeStats(input = {}) {
   const collections = getCollections(input);
   const role = getRole(input);
@@ -801,10 +854,7 @@ function computeHomeStats(input = {}) {
     0
   );
 
-  const lastTicketUpdate = first(
-    ...tickets.map((item) => getTicketUpdatedAt(item)),
-    ...tickets.map((item) => getTicketCreatedAt(item))
-  );
+  const lastTicketUpdate = getLatestDateFromTickets(tickets);
 
   return {
     role,
@@ -835,7 +885,7 @@ function buildSyntheticActivity(input = {}) {
       getTicketStatus(item)
     )}`,
     date: getTicketUpdatedAt(item) || getTicketCreatedAt(item),
-    route: "/incidencias",
+    route: HOME_ROUTES.INCIDENCIAS,
     action: "open-ticket",
     entityId: getTicketId(item),
   }));
@@ -845,7 +895,7 @@ function buildSyntheticActivity(input = {}) {
     title: `Factura ${getInvoiceId(item)}`,
     text: `${formatMoney(getInvoiceAmount(item), getInvoiceCurrency(item))}`,
     date: first(item.updatedAt, item.createdAt, item.date, item.raw?.updatedAt),
-    route: "/facturas",
+    route: HOME_ROUTES.FACTURAS,
     action: "open-invoice",
     entityId: getInvoiceId(item),
   }));
@@ -1031,17 +1081,19 @@ function renderUserAvatar(input = {}) {
     return `
       <div
         class="home-user-avatar"
-        title="${escapeHtml(fullName)}"
         aria-label="${escapeHtml(fullName)}"
         data-tooltip="${escapeHtml(fullName)}"
+        data-avatar-root="true"
       >
         <img
+          class="home-user-avatar-img"
           src="${escapeHtml(avatarUrl)}"
           alt="${escapeHtml(fullName)}"
           loading="lazy"
           referrerpolicy="no-referrer"
-          onerror="this.style.display='none'; this.parentNode.setAttribute('data-fallback','true');"
-        />
+          draggable="false"
+          data-avatar-image="true"
+        >
         <span class="home-user-avatar-fallback">${escapeHtml(initials)}</span>
       </div>
     `;
@@ -1050,9 +1102,10 @@ function renderUserAvatar(input = {}) {
   return `
     <div
       class="home-user-avatar home-user-avatar--fallback"
-      title="${escapeHtml(fullName)}"
       aria-label="${escapeHtml(fullName)}"
       data-tooltip="${escapeHtml(fullName)}"
+      data-avatar-root="true"
+      data-fallback="true"
     >
       <span class="home-user-avatar-fallback">${escapeHtml(initials)}</span>
     </div>
@@ -1068,17 +1121,19 @@ function renderTicketAvatar(item = {}) {
     return `
       <div
         class="home-ticket-avatar"
-        title="${escapeHtml(fullName)}"
         aria-label="${escapeHtml(fullName)}"
         data-tooltip="${escapeHtml(fullName)}"
+        data-avatar-root="true"
       >
         <img
+          class="home-ticket-avatar-img"
           src="${escapeHtml(avatarUrl)}"
           alt="${escapeHtml(fullName)}"
           loading="lazy"
           referrerpolicy="no-referrer"
-          onerror="this.style.display='none'; this.parentNode.setAttribute('data-fallback','true');"
-        />
+          draggable="false"
+          data-avatar-image="true"
+        >
         <span class="home-ticket-avatar-fallback">${escapeHtml(initials)}</span>
       </div>
     `;
@@ -1087,9 +1142,10 @@ function renderTicketAvatar(item = {}) {
   return `
     <div
       class="home-ticket-avatar home-ticket-avatar--fallback"
-      title="${escapeHtml(fullName)}"
       aria-label="${escapeHtml(fullName)}"
       data-tooltip="${escapeHtml(fullName)}"
+      data-avatar-root="true"
+      data-fallback="true"
     >
       <span class="home-ticket-avatar-fallback">${escapeHtml(initials)}</span>
     </div>
@@ -1105,15 +1161,6 @@ function renderStatusChip(item = {}) {
     <span class="home-chip home-chip--${escapeHtml(key)}">
       ${escapeHtml(label)}
     </span>
-  `;
-}
-
-function renderMiniMetric(label = "", value = "", modifier = "") {
-  return `
-    <div class="home-mini-metric${modifier ? ` home-mini-metric--${escapeHtml(modifier)}` : ""}">
-      <span class="home-mini-metric-label">${escapeHtml(label)}</span>
-      <strong class="home-mini-metric-value">${escapeHtml(value)}</strong>
-    </div>
   `;
 }
 
@@ -1180,7 +1227,9 @@ function getStatCards(input = {}) {
     },
     {
       label: "Última actividad",
-      value: stats.lastTicketUpdate ? formatRelativeDate(stats.lastTicketUpdate) : "Sin fecha",
+      value: stats.lastTicketUpdate
+        ? formatRelativeDate(stats.lastTicketUpdate)
+        : "Sin fecha",
       text: "Movimiento más reciente en tus solicitudes.",
       modifier: "activity",
     },
@@ -1197,32 +1246,32 @@ function getQuickActions(input = {}) {
         title: "Centro de incidencias",
         text: "Revisar solicitudes, estados y prioridades operativas.",
         action: "go-incidencias",
-        dataAction: "navigate",
-        route: "/incidencias",
+        dataAction: "navigate-home",
+        route: HOME_ROUTES.INCIDENCIAS,
         modifier: "primary",
       },
       {
         title: "Facturación",
         text: "Consultar importes, estados de pago y vencimientos.",
         action: "go-facturas",
-        dataAction: "navigate",
-        route: "/facturas",
+        dataAction: "navigate-home",
+        route: HOME_ROUTES.FACTURAS,
         modifier: "billing",
       },
       {
         title: "Clientes",
         text: "Abrir el listado de clientes y su información comercial.",
         action: "go-clientes",
-        dataAction: "navigate",
-        route: "/clientes",
+        dataAction: "navigate-home",
+        route: HOME_ROUTES.CLIENTES,
         modifier: "clients",
       },
       {
         title: "Usuarios",
         text: "Gestionar usuarios, roles y acceso al panel.",
-        action: "go-users",
-        dataAction: "navigate",
-        route: "/users",
+        action: "go-usuarios",
+        dataAction: "navigate-home",
+        route: HOME_ROUTES.USUARIOS,
         modifier: "users",
       },
     ];
@@ -1233,32 +1282,32 @@ function getQuickActions(input = {}) {
       title: "Crear nueva incidencia",
       text: "Abre una solicitud para que soporte pueda revisarla.",
       action: "create-incidencia",
-      dataAction: "create-incidencia",
-      route: "/incidencias/nueva",
+      dataAction: "navigate-home",
+      route: HOME_ROUTES.INCIDENCIAS,
       modifier: "primary",
     },
     {
       title: "Mis incidencias",
       text: "Consulta el estado y las últimas novedades.",
       action: "go-incidencias",
-      dataAction: "navigate",
-      route: "/incidencias",
+      dataAction: "navigate-home",
+      route: HOME_ROUTES.INCIDENCIAS,
       modifier: "tickets",
     },
     {
       title: "Mis facturas",
       text: "Revisa facturas, importes y estados de pago.",
       action: "go-facturas",
-      dataAction: "navigate",
-      route: "/facturas",
+      dataAction: "navigate-home",
+      route: HOME_ROUTES.FACTURAS,
       modifier: "billing",
     },
     {
       title: "Mi cuenta",
       text: "Actualiza tus datos y preferencias de perfil.",
-      action: "go-account",
-      dataAction: "navigate",
-      route: "/account",
+      action: "go-cuenta",
+      dataAction: "navigate-home",
+      route: HOME_ROUTES.CUENTA,
       modifier: "account",
     },
   ];
@@ -1345,6 +1394,7 @@ function renderTicketRow(item = {}, state = {}) {
           data-home-action="open-ticket"
           data-action="open-ticket"
           data-ticket-id="${escapeHtml(ticketId)}"
+          data-route="${escapeHtml(HOME_ROUTES.INCIDENCIAS)}"
           ${isOpening ? 'disabled aria-busy="true"' : ""}
         >
           ${
@@ -1527,28 +1577,37 @@ function renderStyles() {
         object-fit:cover;
       }
 
-      .home-user-avatar-fallback{
+      .home-user-avatar-fallback,
+      .home-ticket-avatar-fallback{
         position:absolute;
         inset:0;
         display:none;
         align-items:center;
         justify-content:center;
-        font-size:20px;
-        font-weight:800;
         color:#fff;
         letter-spacing:-.035em;
       }
 
-      .home-user-avatar[data-fallback="true"] .home-user-avatar-fallback{
+      .home-user-avatar-fallback{
+        font-size:20px;
+        font-weight:800;
+      }
+
+      .home-ticket-avatar-fallback{
+        font-size:18px;
+        font-weight:780;
+      }
+
+      .home-user-avatar[data-fallback="true"] .home-user-avatar-fallback,
+      .home-ticket-avatar[data-fallback="true"] .home-ticket-avatar-fallback,
+      .home-user-avatar--fallback .home-user-avatar-fallback,
+      .home-ticket-avatar--fallback .home-ticket-avatar-fallback{
         display:flex;
       }
 
-      .home-user-avatar[data-fallback="true"] img{
+      .home-user-avatar[data-fallback="true"] img,
+      .home-ticket-avatar[data-fallback="true"] img{
         display:none !important;
-      }
-
-      .home-user-avatar--fallback .home-user-avatar-fallback{
-        display:flex;
       }
 
       .home-hero-copy{
@@ -1749,7 +1808,8 @@ function renderStyles() {
         align-items:start;
       }
 
-      .home-panel{
+      .home-panel,
+      .home-tickets{
         position:relative;
         overflow:hidden;
         border-radius:24px;
@@ -1906,10 +1966,6 @@ function renderStyles() {
         box-shadow:0 0 0 4px rgba(255,188,66,.14);
       }
 
-      .home-activity-item--ticket .home-activity-dot{
-        background:var(--accent, #7c5cff);
-      }
-
       .home-activity-copy{
         min-width:0;
         display:grid;
@@ -1940,18 +1996,6 @@ function renderStyles() {
         font-weight:720;
         color:#98a2b3;
         white-space:nowrap;
-      }
-
-      .home-tickets{
-        overflow:hidden;
-        border-radius:24px;
-        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
-        background:
-          linear-gradient(180deg, rgba(255,255,255,.6), rgba(255,255,255,.4)),
-          color-mix(in srgb, var(--panel-bg, #ffffff) 94%, transparent);
-        box-shadow:
-          0 10px 30px rgba(15,23,42,.04),
-          0 1px 0 rgba(255,255,255,.5) inset;
       }
 
       .home-pagination{
@@ -2017,6 +2061,14 @@ function renderStyles() {
         min-width:1120px;
       }
 
+      .home-table-col-main{ width:34%; }
+      .home-table-col-owner{ width:14%; }
+      .home-table-col-status{ width:11%; }
+      .home-table-col-created{ width:15%; }
+      .home-table-col-updated{ width:15%; }
+      .home-table-col-attachments{ width:4%; }
+      .home-table-col-actions{ width:7%; }
+
       .home-table thead th{
         padding:12px 18px;
         text-align:left;
@@ -2071,30 +2123,6 @@ function renderStyles() {
         width:100%;
         height:100%;
         object-fit:cover;
-      }
-
-      .home-ticket-avatar-fallback{
-        position:absolute;
-        inset:0;
-        display:none;
-        align-items:center;
-        justify-content:center;
-        font-size:18px;
-        font-weight:780;
-        color:#fff;
-        letter-spacing:-.03em;
-      }
-
-      .home-ticket-avatar[data-fallback="true"] .home-ticket-avatar-fallback{
-        display:flex;
-      }
-
-      .home-ticket-avatar[data-fallback="true"] img{
-        display:none !important;
-      }
-
-      .home-ticket-avatar--fallback .home-ticket-avatar-fallback{
-        display:flex;
       }
 
       .home-ticket-copy{
@@ -2684,9 +2712,9 @@ export function renderHomeHeader(input = {}) {
                   type="button"
                   id="home-admin-users-btn"
                   class="home-btn"
-                  data-home-action="go-users"
-                  data-action="navigate"
-                  data-route="/users"
+                  data-home-action="go-usuarios"
+                  data-action="navigate-home"
+                  data-route="${HOME_ROUTES.USUARIOS}"
                   ${loading || refreshing ? "disabled" : ""}
                 >
                   <span class="home-btn-text">Gestionar usuarios</span>
@@ -2698,8 +2726,8 @@ export function renderHomeHeader(input = {}) {
                   id="home-create-ticket-btn"
                   class="home-btn home-btn--primary${creating ? " is-loading" : ""}"
                   data-home-action="create-incidencia"
-                  data-action="create-incidencia"
-                  data-route="/incidencias/nueva"
+                  data-action="navigate-home"
+                  data-route="${HOME_ROUTES.INCIDENCIAS}"
                   ${creating ? 'disabled aria-busy="true"' : ""}
                 >
                   ${
@@ -2902,13 +2930,13 @@ export function renderHomeTicketsTable(input = {}) {
                     <div class="home-table-shell">
                       <table class="home-table" role="table" aria-label="Resumen de incidencias del home">
                         <colgroup>
-                          <col style="width:34%;">
-                          <col style="width:14%;">
-                          <col style="width:11%;">
-                          <col style="width:15%;">
-                          <col style="width:15%;">
-                          <col style="width:4%;">
-                          <col style="width:7%;">
+                          <col class="home-table-col-main">
+                          <col class="home-table-col-owner">
+                          <col class="home-table-col-status">
+                          <col class="home-table-col-created">
+                          <col class="home-table-col-updated">
+                          <col class="home-table-col-attachments">
+                          <col class="home-table-col-actions">
                         </colgroup>
 
                         <thead>

@@ -2,17 +2,28 @@
    Onion SPA - Topbar DOM
    Archivo: src/ui/topbar/topbar.dom.js
 
-   FULL PRO SAAS PANEL · EXTREME MODE
+   FINAL PRO SYSTEM · TOPBAR DOM · STABLE MOUNT · NO DUPES · 10/10
 
    Responsabilidades:
    - construir el template HTML del topbar
    - resolver el shell root del layout
    - montar el topbar en el DOM
    - evitar duplicados de topbar
-   - resolver referencias DOM del topbar
+   - resolver referencias DOM del topbar sin coger IDs fuera del root
    - sincronizar cache DOM en AppCore
    - preparar ARIA base del buscador
    - mantener compatibilidad con topbar.events.js / topbar.search.js
+   - no resetear estado dinámico del buscador/sidebar en cada sync
+   - tolerar DOM parcial, boot tardío y AppCore incompleto
+
+   FIXES:
+   - guards browser completos
+   - cache no reutiliza nodos desconectados
+   - removeDuplicateTopbars conserva un único topbar conectado
+   - prepareTopbarDom busca primero dentro del root para evitar IDs duplicados
+   - no fuerza aria-expanded del mobile toggle en cada prepare
+   - no oculta searchResults si está activo
+   - syncTopbarDomCache añade aliases útiles sin romper legacy
 ========================================================= */
 
 /* =========================================================
@@ -21,6 +32,7 @@
 
 export const TOPBAR_IDS = Object.freeze({
   root: "topbar",
+  legacyRoot: "app-topbar",
   title: "topbar-title",
   mobileToggle: "toggleSidebarMobile",
   searchInput: "topbar-search",
@@ -30,62 +42,145 @@ export const TOPBAR_IDS = Object.freeze({
 
 export const TOPBAR_SELECTORS = Object.freeze({
   layout: ".layout",
-  topbar: ".topbar",
+  appShell: "#app-shell, [data-app-shell='true'], [data-app-shell], .app-shell",
+  topbar: ".topbar, #topbar, #app-topbar, [data-topbar='root']",
   topbarLeft: ".topbar-left",
   topbarRight: ".topbar-right",
-  mobileToggle: ".topbar-mobile-toggle",
-  title: ".topbar-title",
-  searchWrap: ".topbar-search-wrap",
-  searchIcon: ".topbar-search-icon",
-  searchInput: ".topbar-search",
-  searchResults: ".topbar-search-results",
-  sidebar: ".sidebar",
-  mainContent: ".main-content",
+  mobileToggle: ".topbar-mobile-toggle, #toggleSidebarMobile, [data-topbar-action='toggle-sidebar']",
+  title: ".topbar-title, #topbar-title, [data-topbar='title']",
+  searchWrap: ".topbar-search-wrap, [data-topbar='search-wrap']",
+  searchIcon: ".topbar-search-icon, [data-topbar='search-icon']",
+  searchInput: ".topbar-search, #topbar-search, [data-topbar='search-input']",
+  searchResults: ".topbar-search-results, #topbar-search-results, [data-topbar='search-results']",
+  searchLabel: "#topbar-search-label",
+  sidebar: ".sidebar, #sidebar, #app-sidebar, [data-sidebar-root], [data-sidebar='true']",
+  mainContent: ".main-content, #main-content, #app-main, main.main-content, main[role='main'], main",
+  appContent: "#app-content, [data-app-content], .app-content",
 });
+
+/* =========================================================
+   FALLBACK DOM CACHE
+========================================================= */
+
+const fallbackDomCache = {};
 
 /* =========================================================
    SAFE HELPERS
 ========================================================= */
 
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
+
+function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function isElement(value) {
+  return Boolean(
+    value &&
+    value.nodeType === 1
+  );
+}
+
 function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
 
   const text = String(value).trim();
+
   return text || fallback;
 }
 
-function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : {};
-}
-
 function getAppDom(AppCore) {
-  const core = safeObject(AppCore);
+  if (!isObject(AppCore)) {
+    return fallbackDomCache;
+  }
 
-  if (!core.dom || typeof core.dom !== "object") {
+  if (
+    !AppCore.dom ||
+    typeof AppCore.dom !== "object"
+  ) {
     try {
-      core.dom = {};
+      AppCore.dom = {};
     } catch {
-      return {};
+      return fallbackDomCache;
     }
   }
 
-  return core.dom;
+  return AppCore.dom;
 }
 
-function qs(selector = "", root = document) {
-  if (!selector || !root?.querySelector) return null;
+function getRoot(root = null) {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  return root || document;
+}
+
+function qs(selector = "", root = null) {
+  if (
+    !isBrowser() ||
+    !selector
+  ) {
+    return null;
+  }
+
+  const scope =
+    getRoot(root);
+
+  if (!scope?.querySelector) {
+    return null;
+  }
 
   try {
-    return root.querySelector(selector);
+    return scope.querySelector(selector);
   } catch {
     return null;
   }
 }
 
+function qsa(selector = "", root = null) {
+  if (
+    !isBrowser() ||
+    !selector
+  ) {
+    return [];
+  }
+
+  const scope =
+    getRoot(root);
+
+  if (!scope?.querySelectorAll) {
+    return [];
+  }
+
+  try {
+    return Array.from(scope.querySelectorAll(selector));
+  } catch {
+    return [];
+  }
+}
+
 function byId(id = "") {
-  if (!id) return null;
+  if (
+    !isBrowser() ||
+    !id
+  ) {
+    return null;
+  }
 
   try {
     return document.getElementById(id);
@@ -94,15 +189,83 @@ function byId(id = "") {
   }
 }
 
-function isElement(value) {
-  return Boolean(value && value.nodeType === 1);
+function contains(root = null, node = null) {
+  if (
+    !isElement(root) ||
+    !isElement(node)
+  ) {
+    return false;
+  }
+
+  try {
+    return root === node || root.contains(node);
+  } catch {
+    return false;
+  }
+}
+
+function isConnectedNode(node = null) {
+  if (!node) {
+    return false;
+  }
+
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    return Boolean(node.isConnected);
+  } catch {}
+
+  try {
+    return document.contains(node);
+  } catch {}
+
+  return false;
+}
+
+function connectedOrNull(node = null) {
+  return isElement(node) && isConnectedNode(node)
+    ? node
+    : null;
 }
 
 function setAttr(el, name = "", value = "") {
-  if (!el || !name) return false;
+  if (
+    !isElement(el) ||
+    !name
+  ) {
+    return false;
+  }
 
   try {
-    el.setAttribute(name, String(value));
+    el.setAttribute(
+      name,
+      String(value)
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setAttrIfMissing(el, name = "", value = "") {
+  if (
+    !isElement(el) ||
+    !name
+  ) {
+    return false;
+  }
+
+  try {
+    if (!el.hasAttribute(name)) {
+      el.setAttribute(
+        name,
+        String(value)
+      );
+    }
+
     return true;
   } catch {
     return false;
@@ -110,7 +273,12 @@ function setAttr(el, name = "", value = "") {
 }
 
 function removeAttr(el, name = "") {
-  if (!el || !name) return false;
+  if (
+    !isElement(el) ||
+    !name
+  ) {
+    return false;
+  }
 
   try {
     el.removeAttribute(name);
@@ -121,15 +289,23 @@ function removeAttr(el, name = "") {
 }
 
 function ensureId(el, id = "") {
-  if (!el) return "";
+  if (!isElement(el)) {
+    return "";
+  }
 
-  const existing = safeText(el.id, "");
+  const existing =
+    safeText(el.id, "");
 
-  if (existing) return existing;
+  if (existing) {
+    return existing;
+  }
 
-  const nextId = safeText(id, "");
+  const nextId =
+    safeText(id, "");
 
-  if (!nextId) return "";
+  if (!nextId) {
+    return "";
+  }
 
   try {
     el.id = nextId;
@@ -139,29 +315,149 @@ function ensureId(el, id = "") {
   }
 }
 
-function removeDuplicateTopbars(keep = null) {
-  const nodes = Array.from(document.querySelectorAll(`#${TOPBAR_IDS.root}, ${TOPBAR_SELECTORS.topbar}`));
-
-  let kept = keep || null;
+function uniqueElements(nodes = []) {
+  const seen = new Set();
+  const output = [];
 
   for (const node of nodes) {
-    if (!isElement(node)) continue;
-
-    if (!kept) {
-      kept = node;
+    if (!isElement(node)) {
       continue;
     }
 
-    if (node === kept) continue;
+    if (seen.has(node)) {
+      continue;
+    }
+
+    seen.add(node);
+    output.push(node);
+  }
+
+  return output;
+}
+
+function isTopbarRoot(node = null) {
+  if (!isElement(node)) {
+    return false;
+  }
+
+  const id =
+    safeText(node.id, "");
+
+  return Boolean(
+    id === TOPBAR_IDS.root ||
+      id === TOPBAR_IDS.legacyRoot ||
+      node.classList?.contains?.("topbar") ||
+      node.getAttribute?.("data-topbar") === "root"
+  );
+}
+
+function findInsideRoot(root = null, id = "", selector = "") {
+  if (!isElement(root)) {
+    return null;
+  }
+
+  const bySelector =
+    selector
+      ? qs(selector, root)
+      : null;
+
+  if (bySelector) {
+    return bySelector;
+  }
+
+  const byIdNode =
+    id ? byId(id) : null;
+
+  if (
+    byIdNode &&
+    contains(root, byIdNode)
+  ) {
+    return byIdNode;
+  }
+
+  return null;
+}
+
+function getTopbarCandidates() {
+  if (!isBrowser()) {
+    return [];
+  }
+
+  return uniqueElements([
+    ...qsa(`#${TOPBAR_IDS.root}`),
+    ...qsa(`#${TOPBAR_IDS.legacyRoot}`),
+    ...qsa("[data-topbar='root']"),
+    ...qsa(".topbar"),
+  ]).filter(isTopbarRoot);
+}
+
+function removeDuplicateTopbars(keep = null) {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  const candidates =
+    getTopbarCandidates();
+
+  let kept =
+    connectedOrNull(keep);
+
+  if (!kept) {
+    kept =
+      candidates.find((node) => {
+        return isConnectedNode(node);
+      }) || null;
+  }
+
+  for (const node of candidates) {
+    if (!isElement(node)) {
+      continue;
+    }
+
+    if (kept && node === kept) {
+      continue;
+    }
 
     try {
       node.remove();
-    } catch {
-      /* noop */
-    }
+    } catch {}
   }
 
   return kept;
+}
+
+function resolveExistingTopbar(AppCore) {
+  const dom =
+    getAppDom(AppCore);
+
+  const cached =
+    connectedOrNull(
+      dom.topbar ||
+        dom.appTopbar ||
+        dom.topbarRoot
+    );
+
+  if (
+    cached &&
+    isTopbarRoot(cached)
+  ) {
+    return removeDuplicateTopbars(cached);
+  }
+
+  const direct =
+    connectedOrNull(byId(TOPBAR_IDS.root)) ||
+    connectedOrNull(byId(TOPBAR_IDS.legacyRoot)) ||
+    connectedOrNull(qs("[data-topbar='root']")) ||
+    connectedOrNull(qs(".topbar"));
+
+  if (
+    direct &&
+    isTopbarRoot(direct)
+  ) {
+    return removeDuplicateTopbars(direct);
+  }
+
+  return removeDuplicateTopbars(null);
 }
 
 /* =========================================================
@@ -301,49 +597,106 @@ export function getTopbarTemplate() {
   `;
 }
 
+function createTopbarElement() {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    const template =
+      document.createElement("template");
+
+    template.innerHTML =
+      getTopbarTemplate().trim();
+
+    return template.content.firstElementChild || null;
+  } catch {
+    try {
+      const wrapper =
+        document.createElement("div");
+
+      wrapper.innerHTML =
+        getTopbarTemplate().trim();
+
+      return wrapper.firstElementChild || null;
+    } catch {
+      return null;
+    }
+  }
+}
+
 /* =========================================================
    ROOT RESOLVERS
 ========================================================= */
 
 export function getShellRootEl(AppCore) {
-  const dom = getAppDom(AppCore);
+  if (!isBrowser()) {
+    return null;
+  }
+
+  const dom =
+    getAppDom(AppCore);
 
   return (
-    dom.appShell ||
-    dom.layout ||
-    byId("app-shell") ||
-    qs(TOPBAR_SELECTORS.layout) ||
-    document.body
+    connectedOrNull(dom.appShell) ||
+    connectedOrNull(dom.shell) ||
+    connectedOrNull(dom.layout) ||
+    connectedOrNull(byId("app-shell")) ||
+    connectedOrNull(qs(TOPBAR_SELECTORS.appShell)) ||
+    connectedOrNull(byId("app-layout")) ||
+    connectedOrNull(qs(TOPBAR_SELECTORS.layout)) ||
+    connectedOrNull(byId("app")) ||
+    connectedOrNull(byId("app-root")) ||
+    document.body ||
+    null
   );
 }
 
 export function getMainContentEl(AppCore) {
-  const dom = getAppDom(AppCore);
+  if (!isBrowser()) {
+    return null;
+  }
+
+  const dom =
+    getAppDom(AppCore);
 
   return (
-    dom.mainContent ||
-    byId("main-content") ||
-    qs(TOPBAR_SELECTORS.mainContent)
+    connectedOrNull(dom.mainContent) ||
+    connectedOrNull(dom.main) ||
+    connectedOrNull(byId("main-content")) ||
+    connectedOrNull(byId("app-main")) ||
+    connectedOrNull(qs(TOPBAR_SELECTORS.mainContent))
   );
 }
 
 export function getAppContentEl(AppCore) {
-  const dom = getAppDom(AppCore);
+  if (!isBrowser()) {
+    return null;
+  }
+
+  const dom =
+    getAppDom(AppCore);
 
   return (
-    dom.appContent ||
-    byId("app-content") ||
-    qs("#app-content")
+    connectedOrNull(dom.appContent) ||
+    connectedOrNull(byId("app-content")) ||
+    connectedOrNull(qs(TOPBAR_SELECTORS.appContent))
   );
 }
 
 export function getSidebarEl(AppCore) {
-  const dom = getAppDom(AppCore);
+  if (!isBrowser()) {
+    return null;
+  }
+
+  const dom =
+    getAppDom(AppCore);
 
   return (
-    dom.sidebar ||
-    byId("sidebar") ||
-    qs(TOPBAR_SELECTORS.sidebar)
+    connectedOrNull(dom.sidebar) ||
+    connectedOrNull(byId("sidebar")) ||
+    connectedOrNull(byId("app-sidebar")) ||
+    connectedOrNull(qs(TOPBAR_SELECTORS.sidebar))
   );
 }
 
@@ -351,88 +704,236 @@ export function getSidebarEl(AppCore) {
    MOUNT
 ========================================================= */
 
-export function mountTopbar(AppCore) {
-  const dom = getAppDom(AppCore);
-
-  let topbar =
-    dom.topbar ||
-    byId(TOPBAR_IDS.root) ||
-    qs(TOPBAR_SELECTORS.topbar);
-
-  if (topbar) {
-    removeDuplicateTopbars(topbar);
-    prepareTopbarDom(topbar);
-    syncTopbarDomCache(AppCore);
-    return topbar;
+function insertTopbar({
+  topbar,
+  shellRoot,
+  sidebar,
+  mainContent,
+} = {}) {
+  if (
+    !isElement(topbar) ||
+    !isElement(shellRoot)
+  ) {
+    return false;
   }
 
-  const shellRoot = getShellRootEl(AppCore);
+  try {
+    if (
+      isElement(sidebar) &&
+      sidebar.parentNode === shellRoot
+    ) {
+      sidebar.insertAdjacentElement(
+        "afterend",
+        topbar
+      );
 
-  if (!shellRoot) return null;
-
-  const sidebar = getSidebarEl(AppCore);
+      return true;
+    }
+  } catch {}
 
   try {
-    if (sidebar && sidebar.parentNode === shellRoot) {
-      sidebar.insertAdjacentHTML("afterend", getTopbarTemplate());
-    } else {
-      shellRoot.insertAdjacentHTML("afterbegin", getTopbarTemplate());
+    if (
+      isElement(mainContent) &&
+      mainContent.parentNode === shellRoot
+    ) {
+      shellRoot.insertBefore(
+        topbar,
+        mainContent
+      );
+
+      return true;
     }
-  } catch {
+  } catch {}
+
+  try {
+    shellRoot.prepend(topbar);
+    return true;
+  } catch {}
+
+  try {
+    shellRoot.insertBefore(
+      topbar,
+      shellRoot.firstChild || null
+    );
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+export function mountTopbar(AppCore) {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  const existing =
+    resolveExistingTopbar(AppCore);
+
+  if (existing) {
+    prepareTopbarDom(existing);
+    syncTopbarDomCache(AppCore);
+    return existing;
+  }
+
+  const shellRoot =
+    getShellRootEl(AppCore);
+
+  if (!shellRoot) {
+    return null;
+  }
+
+  const topbar =
+    createTopbarElement();
+
+  if (!topbar) {
+    return null;
+  }
+
+  const inserted =
+    insertTopbar({
+      topbar,
+      shellRoot,
+      sidebar:
+        getSidebarEl(AppCore),
+      mainContent:
+        getMainContentEl(AppCore),
+    });
+
+  if (!inserted) {
     try {
-      document.body.insertAdjacentHTML("afterbegin", getTopbarTemplate());
+      document.body?.insertAdjacentElement?.(
+        "afterbegin",
+        topbar
+      );
     } catch {
       return null;
     }
   }
 
-  topbar =
-    byId(TOPBAR_IDS.root) ||
-    qs(TOPBAR_SELECTORS.topbar);
+  const mounted =
+    connectedOrNull(byId(TOPBAR_IDS.root)) ||
+    connectedOrNull(topbar) ||
+    connectedOrNull(qs(TOPBAR_SELECTORS.topbar));
 
-  if (!topbar) return null;
+  if (!mounted) {
+    return null;
+  }
 
-  removeDuplicateTopbars(topbar);
-  prepareTopbarDom(topbar);
+  removeDuplicateTopbars(mounted);
+  prepareTopbarDom(mounted);
   syncTopbarDomCache(AppCore);
 
-  return topbar;
+  return mounted;
 }
 
 /* =========================================================
    DOM PREP
 ========================================================= */
 
-export function prepareTopbarDom(topbar = null) {
-  const root =
-    topbar ||
-    byId(TOPBAR_IDS.root) ||
-    qs(TOPBAR_SELECTORS.topbar);
+function ensureMinimalStructure(root = null) {
+  if (!isElement(root)) {
+    return false;
+  }
 
-  if (!root) return false;
+  const hasLeft =
+    Boolean(qs(TOPBAR_SELECTORS.topbarLeft, root));
+
+  const hasRight =
+    Boolean(qs(TOPBAR_SELECTORS.topbarRight, root));
+
+  /*
+    Solo reconstruimos si el root está vacío o no tiene estructura básica.
+    No pisamos topbars custom parcialmente válidos.
+  */
+  if (
+    root.children.length === 0 ||
+    (!hasLeft && !hasRight)
+  ) {
+    const fresh =
+      createTopbarElement();
+
+    if (!fresh) {
+      return false;
+    }
+
+    try {
+      root.innerHTML = fresh.innerHTML;
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export function prepareTopbarDom(topbar = null) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  const root =
+    connectedOrNull(topbar) ||
+    connectedOrNull(byId(TOPBAR_IDS.root)) ||
+    connectedOrNull(byId(TOPBAR_IDS.legacyRoot)) ||
+    connectedOrNull(qs(TOPBAR_SELECTORS.topbar));
+
+  if (!root) {
+    return false;
+  }
+
+  ensureMinimalStructure(root);
+
+  try {
+    root.classList.add("topbar");
+  } catch {}
+
+  const topbarLeft =
+    qs(TOPBAR_SELECTORS.topbarLeft, root);
+
+  const topbarRight =
+    qs(TOPBAR_SELECTORS.topbarRight, root);
 
   const title =
-    byId(TOPBAR_IDS.title) ||
-    qs(TOPBAR_SELECTORS.title, root);
+    findInsideRoot(
+      root,
+      TOPBAR_IDS.title,
+      TOPBAR_SELECTORS.title
+    );
 
   const mobileToggle =
-    byId(TOPBAR_IDS.mobileToggle) ||
-    qs(TOPBAR_SELECTORS.mobileToggle, root);
+    findInsideRoot(
+      root,
+      TOPBAR_IDS.mobileToggle,
+      TOPBAR_SELECTORS.mobileToggle
+    );
 
   const searchWrap =
     qs(TOPBAR_SELECTORS.searchWrap, root);
 
+  const searchIcon =
+    qs(TOPBAR_SELECTORS.searchIcon, root);
+
   const searchInput =
-    byId(TOPBAR_IDS.searchInput) ||
-    qs(TOPBAR_SELECTORS.searchInput, root);
+    findInsideRoot(
+      root,
+      TOPBAR_IDS.searchInput,
+      TOPBAR_SELECTORS.searchInput
+    );
 
   const searchResults =
-    byId(TOPBAR_IDS.searchResults) ||
-    qs(TOPBAR_SELECTORS.searchResults, root);
+    findInsideRoot(
+      root,
+      TOPBAR_IDS.searchResults,
+      TOPBAR_SELECTORS.searchResults
+    );
 
   const searchLabel =
-    byId(TOPBAR_IDS.searchLabel) ||
-    qs(`#${TOPBAR_IDS.searchLabel}`, root);
+    findInsideRoot(
+      root,
+      TOPBAR_IDS.searchLabel,
+      TOPBAR_SELECTORS.searchLabel
+    );
 
   ensureId(root, TOPBAR_IDS.root);
   ensureId(title, TOPBAR_IDS.title);
@@ -444,30 +945,85 @@ export function prepareTopbarDom(topbar = null) {
   setAttr(root, "data-topbar", "root");
   setAttr(root, "role", "banner");
 
+  if (topbarLeft) {
+    try {
+      topbarLeft.classList.add("topbar-left");
+    } catch {}
+
+    setAttrIfMissing(topbarLeft, "data-topbar", "left");
+  }
+
+  if (topbarRight) {
+    try {
+      topbarRight.classList.add("topbar-right");
+    } catch {}
+
+    setAttrIfMissing(topbarRight, "data-topbar", "right");
+  }
+
+  if (title) {
+    try {
+      title.classList.add("topbar-title");
+    } catch {}
+
+    setAttr(title, "data-topbar", "title");
+  }
+
   if (mobileToggle) {
+    try {
+      mobileToggle.classList.add("topbar-mobile-toggle");
+    } catch {}
+
     setAttr(mobileToggle, "type", "button");
     setAttr(mobileToggle, "data-topbar-action", "toggle-sidebar");
-    setAttr(mobileToggle, "aria-label", "Abrir navegación");
     setAttr(mobileToggle, "aria-controls", "sidebar");
-    setAttr(
-      mobileToggle,
-      "aria-expanded",
-      String(document.body?.classList?.contains?.("sidebar-open") || false)
-    );
 
     /*
-      Evita tooltips nativos del navegador.
-      El sistema usa data-tooltip.
+      No forzamos aria-expanded en cada prepare.
+      Lo gobierna topbar.sidebar.js mediante setMobileToggleState().
     */
+    setAttrIfMissing(mobileToggle, "aria-expanded", "false");
+    setAttrIfMissing(mobileToggle, "aria-label", "Abrir navegación");
+    setAttrIfMissing(mobileToggle, "data-tooltip", "Abrir navegación");
+
     removeAttr(mobileToggle, "title");
   }
 
   if (searchWrap) {
+    try {
+      searchWrap.classList.add("topbar-search-wrap");
+    } catch {}
+
     setAttr(searchWrap, "data-topbar", "search-wrap");
   }
 
+  if (searchIcon) {
+    try {
+      searchIcon.classList.add("topbar-search-icon");
+    } catch {}
+
+    setAttr(searchIcon, "data-topbar", "search-icon");
+    setAttr(searchIcon, "aria-hidden", "true");
+    setAttr(searchIcon, "focusable", "false");
+  }
+
+  const resultsOpen =
+    Boolean(
+      searchResults &&
+        (
+          searchResults.classList?.contains?.("active") ||
+          searchResults.hidden === false ||
+          searchResults.getAttribute?.("aria-hidden") === "false"
+        )
+    );
+
   if (searchInput) {
+    try {
+      searchInput.classList.add("topbar-search");
+    } catch {}
+
     setAttr(searchInput, "type", "search");
+    setAttr(searchInput, "data-topbar", "search-input");
     setAttr(searchInput, "role", "combobox");
     setAttr(searchInput, "autocomplete", "off");
     setAttr(searchInput, "autocapitalize", "off");
@@ -475,7 +1031,7 @@ export function prepareTopbarDom(topbar = null) {
     setAttr(searchInput, "inputmode", "search");
     setAttr(searchInput, "aria-label", "Buscar en la aplicación");
     setAttr(searchInput, "aria-controls", TOPBAR_IDS.searchResults);
-    setAttr(searchInput, "aria-expanded", "false");
+    setAttr(searchInput, "aria-expanded", String(resultsOpen));
     setAttr(searchInput, "aria-autocomplete", "list");
     setAttr(searchInput, "aria-haspopup", "listbox");
 
@@ -487,17 +1043,30 @@ export function prepareTopbarDom(topbar = null) {
   }
 
   if (searchResults) {
+    try {
+      searchResults.classList.add("topbar-search-results");
+    } catch {}
+
+    setAttr(searchResults, "data-topbar", "search-results");
     setAttr(searchResults, "role", "listbox");
-    setAttr(searchResults, "aria-hidden", "true");
+    setAttr(searchResults, "aria-hidden", resultsOpen ? "false" : "true");
     setAttr(searchResults, "aria-live", "polite");
 
     if (searchLabel) {
       setAttr(searchResults, "aria-labelledby", TOPBAR_IDS.searchLabel);
     }
 
-    if (!searchResults.classList.contains("active")) {
-      searchResults.hidden = true;
+    if (!resultsOpen) {
+      try {
+        searchResults.hidden = true;
+      } catch {}
     }
+  }
+
+  if (searchLabel) {
+    try {
+      searchLabel.classList.add("visually-hidden");
+    } catch {}
   }
 
   return true;
@@ -508,56 +1077,108 @@ export function prepareTopbarDom(topbar = null) {
 ========================================================= */
 
 export function getTopbarDom(AppCore) {
-  const dom = getAppDom(AppCore);
+  if (!isBrowser()) {
+    return {
+      topbar: null,
+      title: null,
+      mobileToggle: null,
+      sidebar: null,
+
+      topbarLeft: null,
+      topbarRight: null,
+
+      searchWrap: null,
+      searchIcon: null,
+      searchInput: null,
+      searchResults: null,
+      searchLabel: null,
+
+      mainContent: null,
+      appContent: null,
+    };
+  }
+
+  const dom =
+    getAppDom(AppCore);
 
   const topbar =
-    dom.topbar ||
-    byId(TOPBAR_IDS.root) ||
-    qs(TOPBAR_SELECTORS.topbar);
+    connectedOrNull(dom.topbar) ||
+    connectedOrNull(dom.appTopbar) ||
+    connectedOrNull(dom.topbarRoot) ||
+    connectedOrNull(byId(TOPBAR_IDS.root)) ||
+    connectedOrNull(byId(TOPBAR_IDS.legacyRoot)) ||
+    connectedOrNull(qs(TOPBAR_SELECTORS.topbar));
 
   const title =
-    dom.topbarTitle ||
-    byId(TOPBAR_IDS.title) ||
-    qs(TOPBAR_SELECTORS.title, topbar || document);
+    connectedOrNull(dom.topbarTitle) ||
+    findInsideRoot(
+      topbar,
+      TOPBAR_IDS.title,
+      TOPBAR_SELECTORS.title
+    );
 
   const mobileToggle =
-    dom.mobileSidebarToggle ||
-    dom.toggleSidebarMobile ||
-    byId(TOPBAR_IDS.mobileToggle) ||
-    qs(TOPBAR_SELECTORS.mobileToggle, topbar || document);
+    connectedOrNull(dom.mobileSidebarToggle) ||
+    connectedOrNull(dom.toggleSidebarMobile) ||
+    findInsideRoot(
+      topbar,
+      TOPBAR_IDS.mobileToggle,
+      TOPBAR_SELECTORS.mobileToggle
+    );
 
-  const sidebar = getSidebarEl(AppCore);
+  const sidebar =
+    getSidebarEl(AppCore);
 
   const topbarLeft =
-    dom.topbarLeft ||
-    qs(TOPBAR_SELECTORS.topbarLeft, topbar || document);
+    connectedOrNull(dom.topbarLeft) ||
+    qs(TOPBAR_SELECTORS.topbarLeft, topbar);
 
   const topbarRight =
-    dom.topbarRight ||
-    qs(TOPBAR_SELECTORS.topbarRight, topbar || document);
+    connectedOrNull(dom.topbarRight) ||
+    qs(TOPBAR_SELECTORS.topbarRight, topbar);
 
   const searchInput =
-    dom.searchInput ||
-    byId(TOPBAR_IDS.searchInput) ||
-    qs(TOPBAR_SELECTORS.searchInput, topbar || document);
+    connectedOrNull(dom.searchInput) ||
+    findInsideRoot(
+      topbar,
+      TOPBAR_IDS.searchInput,
+      TOPBAR_SELECTORS.searchInput
+    );
 
   const searchResults =
-    dom.searchResults ||
-    byId(TOPBAR_IDS.searchResults) ||
-    qs(TOPBAR_SELECTORS.searchResults, topbar || document);
+    connectedOrNull(dom.searchResults) ||
+    findInsideRoot(
+      topbar,
+      TOPBAR_IDS.searchResults,
+      TOPBAR_SELECTORS.searchResults
+    );
 
   const searchWrap =
-    dom.searchWrap ||
-    searchInput?.closest?.(TOPBAR_SELECTORS.searchWrap) ||
-    searchResults?.closest?.(TOPBAR_SELECTORS.searchWrap) ||
-    qs(TOPBAR_SELECTORS.searchWrap, topbar || document);
+    connectedOrNull(dom.searchWrap) ||
+    connectedOrNull(searchInput?.closest?.(TOPBAR_SELECTORS.searchWrap)) ||
+    connectedOrNull(searchResults?.closest?.(TOPBAR_SELECTORS.searchWrap)) ||
+    qs(TOPBAR_SELECTORS.searchWrap, topbar);
 
   const searchIcon =
-    dom.searchIcon ||
-    qs(TOPBAR_SELECTORS.searchIcon, searchWrap || topbar || document);
+    connectedOrNull(dom.searchIcon) ||
+    qs(
+      TOPBAR_SELECTORS.searchIcon,
+      searchWrap || topbar
+    );
 
-  const mainContent = getMainContentEl(AppCore);
-  const appContent = getAppContentEl(AppCore);
+  const searchLabel =
+    connectedOrNull(dom.searchLabel) ||
+    findInsideRoot(
+      topbar,
+      TOPBAR_IDS.searchLabel,
+      TOPBAR_SELECTORS.searchLabel
+    );
+
+  const mainContent =
+    getMainContentEl(AppCore);
+
+  const appContent =
+    getAppContentEl(AppCore);
 
   return {
     topbar,
@@ -572,6 +1193,7 @@ export function getTopbarDom(AppCore) {
     searchIcon,
     searchInput,
     searchResults,
+    searchLabel,
 
     mainContent,
     appContent,
@@ -583,33 +1205,73 @@ export function getTopbarDom(AppCore) {
 ========================================================= */
 
 export function syncTopbarDomCache(AppCore) {
-  const domCache = getAppDom(AppCore);
-  const dom = getTopbarDom(AppCore);
+  const domCache =
+    getAppDom(AppCore);
 
-  domCache.topbar = dom.topbar || null;
-  domCache.topbarTitle = dom.title || null;
-
-  domCache.mobileSidebarToggle = dom.mobileToggle || null;
-  domCache.toggleSidebarMobile = dom.mobileToggle || null;
-
-  domCache.sidebar = dom.sidebar || domCache.sidebar || null;
-
-  domCache.topbarLeft = dom.topbarLeft || null;
-  domCache.topbarRight = dom.topbarRight || null;
-
-  domCache.searchWrap = dom.searchWrap || null;
-  domCache.searchIcon = dom.searchIcon || null;
-  domCache.searchInput = dom.searchInput || null;
-  domCache.searchResults = dom.searchResults || null;
-
-  domCache.mainContent = dom.mainContent || domCache.mainContent || null;
-  domCache.appContent = dom.appContent || domCache.appContent || null;
+  const dom =
+    getTopbarDom(AppCore);
 
   if (dom.topbar) {
     prepareTopbarDom(dom.topbar);
   }
 
-  return dom;
+  domCache.topbar =
+    dom.topbar || null;
+
+  domCache.appTopbar =
+    dom.topbar || null;
+
+  domCache.topbarRoot =
+    dom.topbar || null;
+
+  domCache.topbarTitle =
+    dom.title || null;
+
+  domCache.mobileSidebarToggle =
+    dom.mobileToggle || null;
+
+  domCache.toggleSidebarMobile =
+    dom.mobileToggle || null;
+
+  domCache.sidebar =
+    dom.sidebar ||
+    connectedOrNull(domCache.sidebar) ||
+    null;
+
+  domCache.topbarLeft =
+    dom.topbarLeft || null;
+
+  domCache.topbarRight =
+    dom.topbarRight || null;
+
+  domCache.searchWrap =
+    dom.searchWrap || null;
+
+  domCache.searchIcon =
+    dom.searchIcon || null;
+
+  domCache.searchInput =
+    dom.searchInput || null;
+
+  domCache.searchResults =
+    dom.searchResults || null;
+
+  domCache.searchLabel =
+    dom.searchLabel || null;
+
+  domCache.mainContent =
+    dom.mainContent ||
+    connectedOrNull(domCache.mainContent) ||
+    null;
+
+  domCache.appContent =
+    dom.appContent ||
+    connectedOrNull(domCache.appContent) ||
+    null;
+
+  return {
+    ...dom,
+  };
 }
 
 /* =========================================================
@@ -617,21 +1279,29 @@ export function syncTopbarDomCache(AppCore) {
 ========================================================= */
 
 export function isTopbarMounted(AppCore) {
-  const dom = getTopbarDom(AppCore);
-  return Boolean(dom.topbar?.isConnected);
+  const dom =
+    getTopbarDom(AppCore);
+
+  return Boolean(
+    dom.topbar &&
+      isConnectedNode(dom.topbar)
+  );
 }
 
 export function unmountTopbar(AppCore) {
-  const domCache = getAppDom(AppCore);
-  const dom = getTopbarDom(AppCore);
+  const domCache =
+    getAppDom(AppCore);
+
+  const dom =
+    getTopbarDom(AppCore);
 
   try {
     dom.topbar?.remove?.();
-  } catch {
-    /* noop */
-  }
+  } catch {}
 
   domCache.topbar = null;
+  domCache.appTopbar = null;
+  domCache.topbarRoot = null;
   domCache.topbarTitle = null;
   domCache.mobileSidebarToggle = null;
   domCache.toggleSidebarMobile = null;
@@ -641,6 +1311,32 @@ export function unmountTopbar(AppCore) {
   domCache.searchIcon = null;
   domCache.searchInput = null;
   domCache.searchResults = null;
+  domCache.searchLabel = null;
 
   return true;
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default {
+  TOPBAR_IDS,
+  TOPBAR_SELECTORS,
+
+  getTopbarTemplate,
+
+  getShellRootEl,
+  getMainContentEl,
+  getAppContentEl,
+  getSidebarEl,
+
+  mountTopbar,
+  prepareTopbarDom,
+
+  getTopbarDom,
+  syncTopbarDomCache,
+
+  isTopbarMounted,
+  unmountTopbar,
+};

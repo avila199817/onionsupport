@@ -2,9 +2,20 @@
    Onion SPA - Sidebar UI
    Archivo: src/ui/sidebar/index.js
 
-   FINAL PRO FIX · DESKTOP STABLE MODE · ADMIN VISIBILITY HARDENED
+   FINAL PRO SYSTEM · DESKTOP STABLE MODE · ADMIN VISIBILITY HARDENED · 10/10
 
-   FIX:
+   RESPONSABILIDADES:
+   - montar sidebar
+   - mantener desktop/mobile separados
+   - sincronizar estado visual del sidebar
+   - renderizar usuario/avatar
+   - controlar dropdown de usuario
+   - controlar logout
+   - aplicar visibilidad por rol/admin
+   - reparar eventos tras login/restore/router render
+   - registrar módulo en AppCore.modules
+
+   FIXES:
    - desktop y mobile separados
    - sin auto-collapse fantasma al cambiar de ruta
    - restore robusto del estado
@@ -12,14 +23,13 @@
    - detección admin robusta para ocultar/mostrar items admin
    - soporte roles alias: admin / superadmin / administrator / owner / root
    - soporte flags: isAdmin / admin / canManageUsers / canAccessUsers
+   - soporte permisos admin-like: users.manage / manage_users / admin:*
    - cleanup scope defensivo
-
-   FIX CRÍTICO LIFECYCLE:
-   - init() ya no deja el sidebar sin eventos cuando initialized === true
-   - añade repair / refresh / bind / rebind / bindEvents para App Bootstrap
    - rebind idempotente de DOM + Core events
    - fallback delegado para collapse, dropdown, logout y navegación SPA
    - corrige botones muertos hasta refrescar página
+   - evita duplicar navegación si Router ya interceptó el click
+   - cierra sidebar móvil después de navegación aunque Router haya prevenido default
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -79,10 +89,16 @@ import {
 export const SidebarUI = (() => {
   "use strict";
 
+  /* ======================================================
+     INTERNAL STATE
+  ====================================================== */
+
   let initialized = false;
   let logoutInFlight = false;
   let eventsBound = false;
+
   let fallbackDomCleanup = null;
+  let activeCleanupScope = null;
   let lastBindReason = "";
 
   const state = {
@@ -116,6 +132,10 @@ export const SidebarUI = (() => {
       : {};
   }
 
+  function isFunction(value) {
+    return typeof value === "function";
+  }
+
   function toArray(value) {
     if (Array.isArray(value)) return value;
     if (value === null || value === undefined) return [];
@@ -140,8 +160,13 @@ export const SidebarUI = (() => {
     if (typeof value === "string") {
       const key = value.trim().toLowerCase();
 
-      if (["true", "1", "yes", "si", "sí"].includes(key)) return true;
-      if (["false", "0", "no"].includes(key)) return false;
+      if (["true", "1", "yes", "si", "sí", "ok", "on"].includes(key)) {
+        return true;
+      }
+
+      if (["false", "0", "no", "off"].includes(key)) {
+        return false;
+      }
     }
 
     if (typeof value === "number") {
@@ -172,9 +197,11 @@ export const SidebarUI = (() => {
     const name = safeText(eventName, "");
     if (!name) return false;
 
+    let emitted = false;
+
     try {
       AppCore?.events?.emit?.(name, payload);
-      return true;
+      emitted = true;
     } catch {}
 
     try {
@@ -184,28 +211,12 @@ export const SidebarUI = (() => {
             detail: payload,
           })
         );
-        return true;
+
+        emitted = true;
       }
     } catch {}
 
-    return false;
-  }
-
-  function normalizeRole(value = "") {
-    return safeText(value, "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[\s-]+/g, "_")
-      .replace(/[^a-z0-9_:.]/g, "")
-      .trim();
-  }
-
-  function normalizeRoles(value) {
-    return toArray(value)
-      .flat(Infinity)
-      .map(normalizeRole)
-      .filter(Boolean);
+    return emitted;
   }
 
   function containsElement(parent, child) {
@@ -277,9 +288,11 @@ export const SidebarUI = (() => {
     return (
       !value ||
       value === "#" ||
-      value.startsWith("javascript:") ||
-      value.startsWith("mailto:") ||
-      value.startsWith("tel:")
+      /^javascript:/i.test(value) ||
+      /^data:/i.test(value) ||
+      /^vbscript:/i.test(value) ||
+      /^mailto:/i.test(value) ||
+      /^tel:/i.test(value)
     );
   }
 
@@ -294,8 +307,12 @@ export const SidebarUI = (() => {
       return false;
     }
 
+    if (!isBrowser()) {
+      return true;
+    }
+
     try {
-      return new URL(value).origin !== window.location.origin;
+      return new URL(value, window.location.origin).origin !== window.location.origin;
     } catch {
       return true;
     }
@@ -315,6 +332,127 @@ export const SidebarUI = (() => {
     "owner",
     "root",
   ]);
+
+  const ADMIN_PERMISSION_KEYS = new Set([
+    "admin:*",
+    "admin.all",
+    "admin.full",
+    "admin.manage",
+
+    "users.manage",
+    "users:manage",
+    "users.write",
+    "users:write",
+    "users.admin",
+
+    "usuarios.manage",
+    "usuarios:manage",
+    "usuarios.write",
+    "usuarios:write",
+    "usuarios.admin",
+
+    "manage_users",
+    "can_manage_users",
+    "access_users",
+    "can_access_users",
+  ]);
+
+  function normalizeRole(value = "") {
+    return safeText(value, "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[\s-]+/g, "_")
+      .replace(/[^a-z0-9_:.]/g, "")
+      .trim();
+  }
+
+  function flattenRoleValue(value) {
+    if (value === null || value === undefined) {
+      return [];
+    }
+
+    if (Array.isArray(value)) {
+      return value.flatMap(flattenRoleValue);
+    }
+
+    if (typeof value === "string") {
+      return value
+        .split(/[,\s|]+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+
+    if (typeof value === "number" || typeof value === "boolean") {
+      return [value];
+    }
+
+    if (typeof value === "object") {
+      const entries = Object.entries(value);
+
+      const truthyKeys = entries
+        .filter(([, entryValue]) => safeBoolean(entryValue, false))
+        .map(([key]) => key);
+
+      return [
+        value.role,
+        value.rol,
+        value.name,
+        value.key,
+        value.value,
+        value.id,
+        value.code,
+        value.slug,
+        value.type,
+        value.scope,
+        value.permission,
+
+        value.roles,
+        value.roleList,
+        value.role_list,
+        value.permissions,
+        value.scopes,
+        value.groups,
+        value.authorities,
+        value.items,
+        value.list,
+
+        ...truthyKeys,
+      ].flatMap(flattenRoleValue);
+    }
+
+    return [];
+  }
+
+  function normalizeRoles(value) {
+    return flattenRoleValue(value)
+      .flat(Infinity)
+      .map(normalizeRole)
+      .filter(Boolean);
+  }
+
+  function isAdminRole(value = "") {
+    return ADMIN_ROLE_KEYS.has(normalizeRole(value));
+  }
+
+  function isAdminPermission(value = "") {
+    const key = normalizeRole(value);
+
+    if (!key) {
+      return false;
+    }
+
+    if (ADMIN_PERMISSION_KEYS.has(key)) {
+      return true;
+    }
+
+    return (
+      key.startsWith("admin:") ||
+      key.startsWith("admin.") ||
+      key.includes(":admin") ||
+      key.includes(".admin")
+    );
+  }
 
   function getAuthUser() {
     try {
@@ -353,6 +491,15 @@ export const SidebarUI = (() => {
 
   function getRoleCandidates() {
     const user = getCurrentUser();
+    const raw = safeObject(user?.raw);
+    const profile = safeObject(user?.profile);
+    const account = safeObject(user?.account);
+    const meta = safeObject(user?.meta);
+    const claims = safeObject(user?.claims);
+
+    const rawProfile = safeObject(raw?.profile);
+    const rawMeta = safeObject(raw?.meta);
+    const rawClaims = safeObject(raw?.claims);
 
     const roleCandidates = [
       AppCore?.state?.role,
@@ -367,8 +514,59 @@ export const SidebarUI = (() => {
       user?.role,
       user?.rol,
       user?.userRole,
+      user?.user_role,
       user?.type,
       user?.userType,
+      user?.user_type,
+      user?.perfil,
+
+      profile.role,
+      profile.rol,
+      profile.userRole,
+      profile.user_role,
+      profile.type,
+      profile.perfil,
+
+      account.role,
+      account.rol,
+      account.userRole,
+      account.type,
+
+      meta.role,
+      meta.rol,
+      meta.userRole,
+
+      claims.role,
+      claims.rol,
+      claims.userRole,
+      claims["custom:role"],
+      claims["https://onion/role"],
+
+      raw.role,
+      raw.rol,
+      raw.userRole,
+      raw.user_role,
+      raw.type,
+      raw.userType,
+      raw.user_type,
+      raw.perfil,
+
+      rawProfile.role,
+      rawProfile.rol,
+      rawProfile.userRole,
+      rawProfile.user_role,
+      rawProfile.type,
+      rawProfile.perfil,
+
+      rawMeta.role,
+      rawMeta.rol,
+      rawMeta.userRole,
+
+      rawClaims.role,
+      rawClaims.rol,
+      rawClaims.userRole,
+      rawClaims["custom:role"],
+      rawClaims["https://onion/role"],
 
       Auth?.role,
       Auth?.userRole,
@@ -396,8 +594,55 @@ export const SidebarUI = (() => {
       AppCore?.state?.session?.scopes,
 
       user?.roles,
+      user?.roleList,
+      user?.role_list,
       user?.permissions,
       user?.scopes,
+      user?.groups,
+      user?.authorities,
+
+      profile.roles,
+      profile.permissions,
+      profile.scopes,
+      profile.groups,
+      profile.authorities,
+
+      account.roles,
+      account.permissions,
+      account.scopes,
+      account.groups,
+
+      meta.roles,
+      meta.permissions,
+      meta.scopes,
+      meta.groups,
+
+      claims.roles,
+      claims.permissions,
+      claims.scopes,
+      claims.groups,
+
+      raw.roles,
+      raw.roleList,
+      raw.role_list,
+      raw.permissions,
+      raw.scopes,
+      raw.groups,
+      raw.authorities,
+
+      rawProfile.roles,
+      rawProfile.permissions,
+      rawProfile.scopes,
+      rawProfile.groups,
+
+      rawMeta.roles,
+      rawMeta.permissions,
+      rawMeta.scopes,
+
+      rawClaims.roles,
+      rawClaims.permissions,
+      rawClaims.scopes,
+      rawClaims.groups,
 
       Auth?.roles,
       Auth?.permissions,
@@ -406,12 +651,17 @@ export const SidebarUI = (() => {
 
     return [
       ...roleCandidates,
-      ...roleArrays.flatMap((value) => toArray(value)),
+      ...roleArrays,
     ];
   }
 
   function hasAdminFlag() {
     const user = getCurrentUser();
+    const raw = safeObject(user?.raw);
+    const profile = safeObject(user?.profile);
+    const account = safeObject(user?.account);
+    const meta = safeObject(user?.meta);
+    const claims = safeObject(user?.claims);
 
     return [
       AppCore?.state?.isAdmin,
@@ -434,11 +684,44 @@ export const SidebarUI = (() => {
       user?.superAdmin,
       user?.canManageUsers,
       user?.canAccessUsers,
-    ].some((value) => safeBoolean(value, false));
-  }
 
-  function isAdminRole(value = "") {
-    return ADMIN_ROLE_KEYS.has(normalizeRole(value));
+      profile.isAdmin,
+      profile.admin,
+      profile.isSuperAdmin,
+      profile.superAdmin,
+      profile.canManageUsers,
+      profile.canAccessUsers,
+
+      account.isAdmin,
+      account.admin,
+      account.isSuperAdmin,
+      account.superAdmin,
+
+      meta.isAdmin,
+      meta.admin,
+      meta.isSuperAdmin,
+      meta.superAdmin,
+      meta.canManageUsers,
+      meta.canAccessUsers,
+
+      claims.isAdmin,
+      claims.admin,
+      claims.isSuperAdmin,
+      claims.superAdmin,
+      claims.canManageUsers,
+      claims.canAccessUsers,
+
+      raw.isAdmin,
+      raw.admin,
+      raw.is_admin,
+      raw.isSuperAdmin,
+      raw.superAdmin,
+      raw.is_super_admin,
+      raw.canManageUsers,
+      raw.can_manage_users,
+      raw.canAccessUsers,
+      raw.can_access_users,
+    ].some((value) => safeBoolean(value, false));
   }
 
   function isAdmin() {
@@ -446,9 +729,34 @@ export const SidebarUI = (() => {
       return true;
     }
 
+    try {
+      if (typeof Auth?.isCurrentUserAdmin === "function" && Auth.isCurrentUserAdmin()) {
+        return true;
+      }
+    } catch {}
+
+    try {
+      if (
+        typeof Auth?.hasRole === "function" &&
+        Auth.hasRole(
+          "admin",
+          "administrator",
+          "administrador",
+          "superadmin",
+          "super_admin",
+          "owner",
+          "root"
+        )
+      ) {
+        return true;
+      }
+    } catch {}
+
     const roles = normalizeRoles(getRoleCandidates());
 
-    return roles.some(isAdminRole);
+    return roles.some((role) => {
+      return isAdminRole(role) || isAdminPermission(role);
+    });
   }
 
   /* ======================================================
@@ -470,23 +778,28 @@ export const SidebarUI = (() => {
   function syncSidebarDomIntoAppCore() {
     const el = getElements(AppCore);
 
-    if (!AppCore.dom || typeof AppCore.dom !== "object") {
-      AppCore.dom = {};
-    }
+    try {
+      if (!AppCore.dom || typeof AppCore.dom !== "object") {
+        AppCore.dom = {};
+      }
 
-    AppCore.dom.sidebar = el.sidebar || null;
-    AppCore.dom.sidebarMenu = el.sidebarMenu || null;
-    AppCore.dom.sidebarAvatar = el.avatarEl || null;
-    AppCore.dom.sidebarName = el.nameEl || null;
-    AppCore.dom.userToggle = el.userToggle || null;
-    AppCore.dom.userDropdown = el.userDropdown || null;
-    AppCore.dom.logoutBtn = el.logoutBtn || null;
-    AppCore.dom.sidebarToggle = el.toggleBtn || null;
-    AppCore.dom.sidebarMobileToggle = el.mobileToggleBtn || null;
+      AppCore.dom.sidebar = el.sidebar || null;
+      AppCore.dom.sidebarMenu = el.sidebarMenu || null;
+      AppCore.dom.sidebarAvatar = el.avatarEl || null;
+      AppCore.dom.sidebarName = el.nameEl || null;
+      AppCore.dom.userToggle = el.userToggle || null;
+      AppCore.dom.userDropdown = el.userDropdown || null;
+      AppCore.dom.logoutBtn = el.logoutBtn || null;
+      AppCore.dom.sidebarToggle = el.toggleBtn || null;
+      AppCore.dom.sidebarMobileToggle = el.mobileToggleBtn || null;
+    } catch {}
   }
 
   function refreshSidebarDomRefs() {
-    cacheDomRefs(AppCore);
+    try {
+      cacheDomRefs(AppCore);
+    } catch {}
+
     syncSidebarDomIntoAppCore();
   }
 
@@ -506,23 +819,27 @@ export const SidebarUI = (() => {
     const mobile = isMobileViewport(MOBILE_BREAKPOINT);
     const desktopOpen = true;
 
-    if (!AppCore.state || typeof AppCore.state !== "object") {
-      AppCore.state = {};
-    }
+    try {
+      if (!AppCore.state || typeof AppCore.state !== "object") {
+        AppCore.state = {};
+      }
 
-    if (typeof AppCore.state.sidebarDesktopOpen !== "boolean") {
-      AppCore.state.sidebarDesktopOpen = desktopOpen;
-    }
+      if (typeof AppCore.state.sidebarDesktopOpen !== "boolean") {
+        AppCore.state.sidebarDesktopOpen = desktopOpen;
+      }
 
-    if (typeof AppCore.state.sidebarOpen !== "boolean") {
-      AppCore.state.sidebarOpen = mobile
-        ? false
-        : AppCore.state.sidebarDesktopOpen;
-    } else if (!mobile) {
-      AppCore.state.sidebarOpen = AppCore.state.sidebarDesktopOpen;
-    }
+      if (typeof AppCore.state.sidebarOpen !== "boolean") {
+        AppCore.state.sidebarOpen = mobile
+          ? false
+          : AppCore.state.sidebarDesktopOpen;
+      } else if (!mobile) {
+        AppCore.state.sidebarOpen = AppCore.state.sidebarDesktopOpen;
+      }
 
-    return AppCore.state;
+      return AppCore.state;
+    } catch {
+      return {};
+    }
   }
 
   /* ======================================================
@@ -578,9 +895,6 @@ export const SidebarUI = (() => {
         delete avatarEl.dataset.username;
       }
 
-      /*
-        Evita tooltip nativo/custom en avatar footer.
-      */
       avatarEl.removeAttribute("title");
       avatarEl.removeAttribute("data-tooltip");
     }
@@ -603,6 +917,8 @@ export const SidebarUI = (() => {
       username,
       isAdmin: isAdmin(),
     });
+
+    return true;
   }
 
   /* ======================================================
@@ -623,7 +939,7 @@ export const SidebarUI = (() => {
   }
 
   function openDropdown() {
-    if (isShellHidden(AppCore)) return;
+    if (isShellHidden(AppCore)) return false;
 
     refreshSidebarDomRefs();
 
@@ -635,6 +951,8 @@ export const SidebarUI = (() => {
   }
 
   function toggleDropdown() {
+    if (isShellHidden(AppCore)) return false;
+
     refreshSidebarDomRefs();
 
     return toggleDropdownBase(
@@ -665,19 +983,26 @@ export const SidebarUI = (() => {
     );
 
     syncSidebarState();
+
+    safeEmit("sidebar:open:set", {
+      open: Boolean(open),
+      snapshot: getSidebarSnapshot(),
+    });
+
+    return true;
   }
 
   function openSidebar() {
-    if (isShellHidden(AppCore)) return;
-    setSidebarOpen(true);
+    if (isShellHidden(AppCore)) return false;
+    return setSidebarOpen(true);
   }
 
   function closeSidebar() {
-    setSidebarOpen(false);
+    return setSidebarOpen(false);
   }
 
   function toggleSidebar() {
-    if (isShellHidden(AppCore)) return;
+    if (isShellHidden(AppCore)) return false;
 
     const nextOpen = !getDesiredSidebarOpenState(AppCore);
 
@@ -686,11 +1011,14 @@ export const SidebarUI = (() => {
     if (!nextOpen) {
       closeDropdown();
     }
+
+    return true;
   }
 
   function getSidebarSnapshot() {
     const mobile = isMobileViewport(MOBILE_BREAKPOINT);
     const open = getDesiredSidebarOpenState(AppCore);
+    const elements = getElements(AppCore);
 
     return {
       mobile,
@@ -699,18 +1027,39 @@ export const SidebarUI = (() => {
         typeof AppCore?.state?.sidebarDesktopOpen === "boolean"
           ? Boolean(AppCore.state.sidebarDesktopOpen)
           : open,
+
       dropdownOpen: Boolean(state.dropdownOpen),
+
       initialized,
       eventsBound,
+      logoutInFlight,
       lastBindReason,
+
+      isAdmin: isAdmin(),
+
+      shellHidden: isShellHidden(AppCore),
+      hasShell: hasSidebarShell(AppCore),
+
+      dom: {
+        hasSidebar: Boolean(elements.sidebar),
+        hasSidebarMenu: Boolean(elements.sidebarMenu),
+        hasToggle: Boolean(elements.toggleBtn),
+        hasMobileToggle: Boolean(elements.mobileToggleBtn),
+        hasUserToggle: Boolean(elements.userToggle),
+        hasUserDropdown: Boolean(elements.userDropdown),
+        hasLogout: Boolean(elements.logoutBtn),
+      },
     };
   }
 
   function restoreSidebarState(snapshot) {
-    if (!snapshot) return;
+    if (!snapshot) return false;
 
     const mobileNow = isMobileViewport(MOBILE_BREAKPOINT);
-    if (mobileNow) return;
+
+    if (mobileNow) {
+      return false;
+    }
 
     const desiredOpen = Boolean(
       typeof snapshot.desktopOpen === "boolean"
@@ -718,17 +1067,21 @@ export const SidebarUI = (() => {
         : snapshot.open
     );
 
-    if (AppCore?.state && typeof AppCore.state === "object") {
-      AppCore.state.sidebarDesktopOpen = desiredOpen;
-      AppCore.state.sidebarOpen = desiredOpen;
-    }
+    try {
+      if (AppCore?.state && typeof AppCore.state === "object") {
+        AppCore.state.sidebarDesktopOpen = desiredOpen;
+        AppCore.state.sidebarOpen = desiredOpen;
+      }
+    } catch {}
 
     if (getDesiredSidebarOpenState(AppCore) === desiredOpen) {
       syncSidebarState();
-      return;
+      return true;
     }
 
     setSidebarOpen(desiredOpen);
+
+    return true;
   }
 
   function closeSidebarOnMobileAfterNavigation() {
@@ -775,15 +1128,32 @@ export const SidebarUI = (() => {
     cleanupFallbackDomEvents();
 
     try {
-      AppCore?.cleanup?.run?.(SCOPE);
+      if (
+        activeCleanupScope &&
+        typeof AppCore?.cleanup?.run === "function"
+      ) {
+        AppCore.cleanup.run(activeCleanupScope);
+      }
     } catch {}
 
+    try {
+      if (
+        activeCleanupScope !== SCOPE &&
+        typeof AppCore?.cleanup?.run === "function"
+      ) {
+        AppCore.cleanup.run(SCOPE);
+      }
+    } catch {}
+
+    activeCleanupScope = null;
     eventsBound = false;
   }
 
   function cleanup() {
     cleanupBoundEvents();
     closeDropdown();
+
+    return true;
   }
 
   /* ======================================================
@@ -813,31 +1183,50 @@ export const SidebarUI = (() => {
 
     try {
       if (typeof Router?.navigate === "function") {
-        Router.navigate(target, opts);
+        await Promise.resolve(
+          Router.navigate(target, opts)
+        );
+
         return true;
       }
 
       if (typeof Router?.go === "function") {
-        Router.go(target, opts);
+        await Promise.resolve(
+          Router.go(target, opts)
+        );
+
         return true;
       }
 
       if (typeof Router?.push === "function") {
-        Router.push(target, opts);
+        await Promise.resolve(
+          Router.push(target, opts)
+        );
+
         return true;
       }
 
       if (typeof AppCore?.router?.navigate === "function") {
-        AppCore.router.navigate(target, opts);
+        await Promise.resolve(
+          AppCore.router.navigate(target, opts)
+        );
+
         return true;
       }
 
       if (typeof AppCore?.navigate === "function") {
-        AppCore.navigate(target, opts);
+        await Promise.resolve(
+          AppCore.navigate(target, opts)
+        );
+
         return true;
       }
     } catch (error) {
       safeWarn("Navegación sidebar vía Router falló.", error);
+    }
+
+    if (!isBrowser()) {
+      return false;
     }
 
     try {
@@ -876,7 +1265,13 @@ export const SidebarUI = (() => {
     );
   }
 
-  async function handleNavigationElement(element = null, event = null) {
+  async function handleNavigationElement(
+    element = null,
+    event = null,
+    {
+      skipNavigation = false,
+    } = {}
+  ) {
     if (!element || isModifiedClick(event)) {
       return false;
     }
@@ -895,10 +1290,12 @@ export const SidebarUI = (() => {
 
     closeDropdown();
 
-    await navigateTo(route, {
-      source: "sidebar",
-      replaceState: false,
-    });
+    if (!skipNavigation) {
+      await navigateTo(route, {
+        source: "sidebar",
+        replaceState: false,
+      });
+    }
 
     if (closeSidebarOnMobileAfterNavigation()) {
       closeSidebar();
@@ -978,6 +1375,8 @@ export const SidebarUI = (() => {
           "sidebar-collapse",
           "sidebar-mobile-toggle",
           "mobile-sidebar-toggle",
+          "toggleSidebar",
+          "toggleSidebarMobile",
         ].includes(id)
     );
   }
@@ -1028,6 +1427,7 @@ export const SidebarUI = (() => {
           "sign-out",
           "log-out",
           "close-session",
+          "cerrar-sesion",
         ]) ||
         [
           "logout-btn",
@@ -1071,6 +1471,27 @@ export const SidebarUI = (() => {
     );
   }
 
+  function handleOutsideDropdownClick(event = null) {
+    if (!state.dropdownOpen) {
+      return false;
+    }
+
+    const {
+      userDropdown,
+      userToggle,
+    } = getElements(AppCore);
+
+    if (
+      !containsElement(userDropdown, event?.target) &&
+      !containsElement(userToggle, event?.target)
+    ) {
+      closeDropdown();
+      return true;
+    }
+
+    return false;
+  }
+
   function bindFallbackDomEvents(reason = "bind-fallback") {
     if (!isBrowser()) {
       return false;
@@ -1083,37 +1504,33 @@ export const SidebarUI = (() => {
         return;
       }
 
-      if (event.defaultPrevented) {
-        return;
-      }
-
       refreshSidebarDomRefs();
 
       const actionElement = getActionElementFromEvent(event);
 
       if (!actionElement) {
-        const {
-          userDropdown,
-          userToggle,
-        } = getElements(AppCore);
-
-        if (
-          state.dropdownOpen &&
-          !containsElement(userDropdown, event.target) &&
-          !containsElement(userToggle, event.target)
-        ) {
-          closeDropdown();
-        }
-
+        handleOutsideDropdownClick(event);
         return;
       }
 
       if (!isInsideSidebarShell(actionElement)) {
+        handleOutsideDropdownClick(event);
         return;
       }
 
+      /*
+        No salimos por event.defaultPrevented de forma global.
+        Motivo:
+        - Router puede haber interceptado a[data-spa] antes.
+        - Aun así necesitamos cerrar dropdown/sidebar móvil.
+      */
+      const defaultWasPrevented = Boolean(event.defaultPrevented);
+
       if (isToggleSidebarElement(actionElement)) {
-        event.preventDefault();
+        if (!defaultWasPrevented) {
+          event.preventDefault();
+        }
+
         event.stopPropagation();
 
         toggleSidebar();
@@ -1127,7 +1544,10 @@ export const SidebarUI = (() => {
       }
 
       if (isUserDropdownElement(actionElement)) {
-        event.preventDefault();
+        if (!defaultWasPrevented) {
+          event.preventDefault();
+        }
+
         event.stopPropagation();
 
         toggleDropdown();
@@ -1141,7 +1561,10 @@ export const SidebarUI = (() => {
       }
 
       if (isLogoutElement(actionElement)) {
-        event.preventDefault();
+        if (!defaultWasPrevented) {
+          event.preventDefault();
+        }
+
         event.stopPropagation();
 
         await handleLogout();
@@ -1158,12 +1581,17 @@ export const SidebarUI = (() => {
         const handled =
           await handleNavigationElement(
             actionElement,
-            event
+            event,
+            {
+              skipNavigation: defaultWasPrevented,
+            }
           );
 
         if (handled) {
           safeEmit("sidebar:fallback:action", {
-            action: "navigate",
+            action: defaultWasPrevented
+              ? "navigate-post-router"
+              : "navigate",
             route: getRouteFromElement(actionElement),
             reason,
           });
@@ -1223,12 +1651,15 @@ export const SidebarUI = (() => {
       safeWarn("No se pudo bindear sidebar: shell ausente.", {
         reason: lastBindReason,
       });
+
       return api;
     }
 
     cleanupBoundEvents();
 
     const scope = getCleanupScope();
+
+    activeCleanupScope = scope;
 
     try {
       bindDomEvents({
@@ -1315,22 +1746,13 @@ export const SidebarUI = (() => {
   }
 
   function repair(reason = "repair") {
-    /*
-      Reparación idempotente.
-
-      Corrige:
-      - sidebar pintado pero sin listeners
-      - collapse muerto hasta refrescar
-      - dropdown muerto hasta refrescar
-      - DOM repintado por restore/router/syncUserUI
-    */
-
     const mounted = mountAndRefresh();
 
     if (!mounted) {
       safeWarn("No se pudo reparar sidebar: shell ausente.", {
         reason,
       });
+
       return api;
     }
 
@@ -1360,15 +1782,47 @@ export const SidebarUI = (() => {
 
   function registerModule() {
     try {
-      if (!AppCore.modules.has("sidebar")) {
-        AppCore.modules.register("sidebar", api);
-        return;
+      if (
+        AppCore?.modules &&
+        typeof AppCore.modules.has === "function" &&
+        typeof AppCore.modules.register === "function"
+      ) {
+        if (!AppCore.modules.has("sidebar")) {
+          AppCore.modules.register("sidebar", api);
+        }
+
+        return true;
       }
     } catch {}
 
     try {
-      AppCore.modules.register("sidebar", api);
+      if (
+        AppCore?.modules &&
+        typeof AppCore.modules.register === "function"
+      ) {
+        AppCore.modules.register("sidebar", api);
+        return true;
+      }
     } catch {}
+
+    try {
+      if (
+        AppCore?.modules &&
+        typeof AppCore.modules.set === "function"
+      ) {
+        AppCore.modules.set("sidebar", api);
+        return true;
+      }
+    } catch {}
+
+    try {
+      AppCore.modules = AppCore.modules || {};
+      AppCore.modules.sidebar = api;
+      AppCore.modules.SidebarUI = api;
+      return true;
+    } catch {}
+
+    return false;
   }
 
   /* ======================================================

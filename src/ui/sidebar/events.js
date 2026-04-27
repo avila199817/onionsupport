@@ -33,6 +33,9 @@
    - no rompe si document/window no existen
    - no bloquea clicks sobre iconos aria-hidden dentro de enlaces válidos
    - router rendered no fuerza open/close del sidebar
+   - todos los handlers van envueltos en safeHandler
+   - captura errores sync y async/rejected promise
+   - AppCore.cleanup.event ya NO registra handlers crudos
 ========================================================= */
 
 import {
@@ -56,10 +59,6 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
-}
-
-function hasDocument() {
-  return typeof document !== "undefined";
 }
 
 function hasWindow() {
@@ -129,26 +128,78 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
   return false;
 }
 
+function makeSafeHandler(
+  AppCore,
+  label = "handler",
+  handler
+) {
+  if (!isFn(handler)) {
+    return () => {};
+  }
+
+  return function safeBoundHandler(...args) {
+    try {
+      const result = handler(...args);
+
+      /*
+        Captura promesas rechazadas.
+        Sin esto, un async handler puede terminar como
+        Uncaught / Unhandled Promise Rejection.
+      */
+      if (
+        result &&
+        typeof result === "object" &&
+        isFn(result.catch)
+      ) {
+        result.catch((error) => {
+          safeWarn(
+            AppCore,
+            `${label} falló async`,
+            error
+          );
+        });
+      }
+
+      return result;
+    } catch (error) {
+      safeWarn(
+        AppCore,
+        `${label} falló`,
+        error
+      );
+
+      return undefined;
+    }
+  };
+}
+
 function safeWindowTimeout(fn, ms = 0) {
   if (!isFn(fn)) {
     return;
   }
 
+  const safeFn = () => {
+    try {
+      fn();
+    } catch {}
+  };
+
   try {
     if (hasWindow()) {
-      window.setTimeout(() => {
-        try {
-          fn();
-        } catch {}
-      }, ms);
-
+      window.setTimeout(safeFn, ms);
       return;
     }
   } catch {}
 
+  safeFn();
+}
+
+function safeIsShellHidden(AppCore) {
   try {
-    fn();
-  } catch {}
+    return Boolean(isShellHidden(AppCore));
+  } catch {
+    return false;
+  }
 }
 
 function resolveElements(AppCore, resolver) {
@@ -246,6 +297,10 @@ function runLocalCleanups(scope) {
   return true;
 }
 
+/* ======================================================
+   DOM BIND LOW LEVEL
+====================================================== */
+
 function bindDom(
   AppCore,
   scope,
@@ -265,13 +320,19 @@ function bindDom(
     return () => {};
   }
 
+  const safeHandler = makeSafeHandler(
+    AppCore,
+    `DOM "${eventName}"`,
+    handler
+  );
+
   try {
     if (isFn(AppCore?.cleanup?.on)) {
       AppCore.cleanup.on(
         scopeName,
         target,
         eventName,
-        handler,
+        safeHandler,
         options
       );
 
@@ -279,18 +340,24 @@ function bindDom(
         try {
           target.removeEventListener(
             eventName,
-            handler,
+            safeHandler,
             options
           );
         } catch {}
       };
     }
-  } catch {}
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      `cleanup.on falló para DOM "${eventName}"`,
+      error
+    );
+  }
 
   try {
     target.addEventListener(
       eventName,
-      handler,
+      safeHandler,
       options
     );
 
@@ -298,7 +365,7 @@ function bindDom(
       try {
         target.removeEventListener(
           eventName,
-          handler,
+          safeHandler,
           options
         );
       } catch {}
@@ -307,10 +374,20 @@ function bindDom(
     pushLocalCleanup(scopeName, cleanup);
 
     return cleanup;
-  } catch {
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      `addEventListener falló para DOM "${eventName}"`,
+      error
+    );
+
     return () => {};
   }
 }
+
+/* ======================================================
+   CORE EVENT BIND LOW LEVEL
+====================================================== */
 
 function bindCoreEvent(
   AppCore,
@@ -319,32 +396,66 @@ function bindCoreEvent(
   handler
 ) {
   const scopeName = resolveScope(scope);
+  const cleanEventName = safeText(eventName, "");
 
-  if (!eventName || !isFn(handler)) {
+  if (!cleanEventName || !isFn(handler)) {
     return () => {};
   }
 
+  const safeHandler = makeSafeHandler(
+    AppCore,
+    `Core event "${cleanEventName}"`,
+    handler
+  );
+
+  /*
+    Caso principal:
+    AppCore.cleanup.event registra en el event bus y después
+    AppCore.cleanup.run(scope) limpia.
+
+    CRÍTICO:
+    Aquí antes se registraba handler crudo.
+    Ahora se registra safeHandler, así que ningún evento core puede
+    sacar Uncaught desde events.js.
+  */
   try {
     if (isFn(AppCore?.cleanup?.event)) {
-      AppCore.cleanup.event(
+      const maybeCleanup = AppCore.cleanup.event(
         scopeName,
-        eventName,
-        handler
+        cleanEventName,
+        safeHandler
       );
 
-      return () => {};
+      if (isFn(maybeCleanup)) {
+        pushLocalCleanup(scopeName, maybeCleanup);
+        return maybeCleanup;
+      }
+
+      return () => {
+        try {
+          AppCore?.events?.off?.(
+            cleanEventName,
+            safeHandler
+          );
+        } catch {}
+      };
     }
-  } catch {}
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      `cleanup.event falló para "${cleanEventName}"`,
+      error
+    );
+  }
 
   let busOff = null;
 
   try {
     if (isFn(AppCore?.events?.on)) {
-      const maybeOff =
-        AppCore.events.on(
-          eventName,
-          handler
-        );
+      const maybeOff = AppCore.events.on(
+        cleanEventName,
+        safeHandler
+      );
 
       if (isFn(maybeOff)) {
         busOff = maybeOff;
@@ -352,19 +463,23 @@ function bindCoreEvent(
         busOff = () => {
           try {
             AppCore?.events?.off?.(
-              eventName,
-              handler
+              cleanEventName,
+              safeHandler
             );
           } catch {}
         };
       }
     }
-  } catch {}
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      `AppCore.events.on falló para "${cleanEventName}"`,
+      error
+    );
+  }
 
   const windowHandler = (event) => {
-    try {
-      handler(event);
-    } catch {}
+    safeHandler(event);
   };
 
   let windowBound = false;
@@ -372,13 +487,19 @@ function bindCoreEvent(
   try {
     if (hasWindow()) {
       window.addEventListener(
-        eventName,
+        cleanEventName,
         windowHandler
       );
 
       windowBound = true;
     }
-  } catch {}
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      `window.addEventListener falló para "${cleanEventName}"`,
+      error
+    );
+  }
 
   const cleanup = () => {
     try {
@@ -388,7 +509,7 @@ function bindCoreEvent(
     if (windowBound) {
       try {
         window.removeEventListener(
-          eventName,
+          cleanEventName,
           windowHandler
         );
       } catch {}
@@ -432,13 +553,21 @@ function syncUserAndRoles({
     if (sanitize) {
       try {
         sanitizeFooterTooltipState(AppCore);
-      } catch {}
+      } catch (error) {
+        safeWarn(
+          AppCore,
+          "sanitizeFooterTooltipState falló",
+          error
+        );
+      }
     }
 
     if (close) {
       try {
         closeDropdown?.();
-      } catch {}
+      } catch (error) {
+        safeWarn(AppCore, "closeDropdown falló", error);
+      }
     }
 
     /*
@@ -446,7 +575,7 @@ function syncUserAndRoles({
       syncSidebarState solo sincroniza clases/aria.
       No debe forzar open/close manual.
     */
-    if (syncState && !isShellHidden(AppCore)) {
+    if (syncState && !safeIsShellHidden(AppCore)) {
       try {
         syncSidebarState?.();
       } catch (error) {
@@ -455,6 +584,10 @@ function syncUserAndRoles({
     }
   }, 0);
 }
+
+/* ======================================================
+   HIDDEN / INERT CLICK GUARD
+====================================================== */
 
 function shouldIgnoreHiddenTarget(target = null) {
   if (!isElement(target)) {
@@ -678,6 +811,11 @@ export function handleUserToggleKeydown({
 
   if (event.key === "ArrowDown") {
     event.preventDefault?.();
+
+    /*
+      openDropdown del SidebarUI actual no necesita argumentos.
+      Si alguna versión futura acepta opciones, no rompe.
+    */
     openDropdown?.({
       focusFirst: true,
     });
@@ -908,7 +1046,6 @@ export function bindCoreEvents(ctx = {}) {
     "auth:restore:success",
     "auth:session:restored",
     "auth:session:applied",
-    "app:session:restored",
   ].forEach((eventName) => {
     bindCoreEvent(
       AppCore,
@@ -960,9 +1097,7 @@ export function bindCoreEvents(ctx = {}) {
     scopeName,
     "app:sidebar:change",
     () => {
-      try {
-        syncSidebarState?.();
-      } catch {}
+      syncSidebarState?.();
     }
   );
 
@@ -978,9 +1113,7 @@ export function bindCoreEvents(ctx = {}) {
     scopeName,
     "router:before-render",
     () => {
-      try {
-        closeDropdown?.();
-      } catch {}
+      closeDropdown?.();
     }
   );
 
@@ -992,11 +1125,15 @@ export function bindCoreEvents(ctx = {}) {
       safeWindowTimeout(() => {
         try {
           renderUser?.();
-        } catch {}
+        } catch (error) {
+          safeWarn(AppCore, "renderUser tras router:rendered falló", error);
+        }
 
         try {
           applyRoleVisibility?.();
-        } catch {}
+        } catch (error) {
+          safeWarn(AppCore, "applyRoleVisibility tras router:rendered falló", error);
+        }
 
         try {
           closeDropdown?.();
@@ -1006,10 +1143,12 @@ export function bindCoreEvents(ctx = {}) {
           Solo resincronización visual.
           No debe cambiar la intención manual del usuario.
         */
-        if (!isShellHidden(AppCore)) {
+        if (!safeIsShellHidden(AppCore)) {
           try {
             syncSidebarState?.();
-          } catch {}
+          } catch (error) {
+            safeWarn(AppCore, "syncSidebarState tras router:rendered falló", error);
+          }
         }
 
         try {

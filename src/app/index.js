@@ -24,11 +24,12 @@
    - bindRouter() ocurre después del primer render/navegación resuelta
 
    FIX UI LIFECYCLE:
-   - repara/rebindea SidebarUI y TopbarUI después de restore
-   - repara/rebindea SidebarUI y TopbarUI después del primer render
-   - repara/rebindea SidebarUI y TopbarUI antes de app:ready
-   - repara/rebindea SidebarUI y TopbarUI en router:rendered
-   - corrige casos donde collapse/dropdown solo funcionan tras refrescar
+   - initUISystems() monta SidebarUI/TopbarUI una vez
+   - repairUISystems() por defecto NO rebindea ni llama repair()
+   - refresh/sync ligero tras restore/render/router/auth/lang/theme
+   - repair/rebind solo bajo petición explícita hardRepair/rebind
+   - evita tormenta de SidebarEvents core events bound
+   - evita cleanup:disposed/firebreak por rebindeos repetidos
 
    FIX BOOT LOADER:
    - toma control del loader estático de index.html desde el inicio
@@ -43,6 +44,7 @@
    - repairUISystems tiene lock, throttle y normalización de reason
    - syncUserUI se llama una sola vez por ciclo
    - safeEmit no duplica window event si AppCore.events existe
+   - bindUIRepairEvents usa window solo como fallback si no hay bus
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -883,7 +885,7 @@ export const App = (() => {
 
   const MIN_BOOT_LOADER_MS = 500;
 
-  const UI_REPAIR_THROTTLE_MS = 90;
+  const UI_REPAIR_THROTTLE_MS = 120;
   const UI_SYNC_THROTTLE_MS = 90;
   const UI_REASON_MAX_LENGTH = 160;
 
@@ -943,30 +945,31 @@ export const App = (() => {
     const opts =
       safeObject(options);
 
+    let busAvailable = false;
     let busEmitted = false;
 
     try {
-      if (AppCore?.events?.emit) {
-        busEmitted = Boolean(
-          AppCore.events.emit(
-            eventName,
-            payload
-          )
+      if (isFunction(AppCore?.events?.emit)) {
+        busAvailable = true;
+
+        AppCore.events.emit(
+          eventName,
+          payload
         );
+
+        busEmitted = true;
       }
     } catch {}
 
     /*
-      Importante:
-      Antes emitíamos SIEMPRE también sobre window.
-      Eso duplicaba listeners porque varios módulos escuchan AppCore.events
-      y window a la vez.
-
-      Ahora window solo se usa como fallback si no hay bus, o si se fuerza.
+      Clave:
+      No uses Boolean(AppCore.events.emit(...)).
+      Muchos buses devuelven undefined aunque hayan emitido correctamente.
+      Si interpretamos undefined como false, duplicamos el evento en window.
     */
     if (
       opts.window === true ||
-      (!busEmitted && isBrowser())
+      (!busAvailable && isBrowser())
     ) {
       try {
         window.dispatchEvent(
@@ -1121,13 +1124,6 @@ export const App = (() => {
       text = "unknown";
     }
 
-    /*
-      Síntoma visto en consola:
-        app:app:app:app:app:...:event
-
-      Eso viene de reparar shell con una phase ya prefijada y escuchar
-      de nuevo el estado de shell como trigger de repair.
-    */
     const appPrefixCount =
       (text.match(/app:/g) || []).length;
 
@@ -1168,6 +1164,8 @@ export const App = (() => {
       routeSnapshot.route,
       routeSnapshot.publicPath,
       Boolean(options?.repairShell),
+      Boolean(options?.hardRepair),
+      Boolean(options?.rebind),
     ].join("|");
 
     if (
@@ -1226,11 +1224,6 @@ export const App = (() => {
     uiSyncRunning = true;
 
     try {
-      /*
-        Firma moderna: syncUserUI({ AppCore, Auth, ... reason })
-        No llamamos también a syncUserUI(AppCore), porque eso duplicaba
-        sincronización y podía disparar eventos en cascada.
-      */
       syncUserUI({
         AppCore,
         Auth,
@@ -1243,9 +1236,6 @@ export const App = (() => {
 
       return true;
     } catch (error) {
-      /*
-        Fallback legacy: solo si la firma moderna falla de verdad.
-      */
       try {
         syncUserUI(AppCore);
         return true;
@@ -1266,43 +1256,163 @@ export const App = (() => {
     }
   }
 
-  function safeCallUIMethod(target, names = [], reason = "unknown", context = {}) {
-    let called = false;
+  function callFirstUIMethod(target, names = [], reason = "unknown", context = {}) {
+    if (!target) {
+      return {
+        called: false,
+        method: "",
+      };
+    }
 
     for (const name of names) {
+      const fn =
+        target?.[name];
+
+      if (!isFunction(fn)) {
+        continue;
+      }
+
       try {
-        const fn =
-          target?.[name];
-
-        if (!isFunction(fn)) {
-          continue;
-        }
-
-        try {
-          fn.call(target, context);
-          called = true;
-          continue;
-        } catch {}
-
-        try {
-          fn.call(target, reason, context);
-          called = true;
-          continue;
-        } catch {}
-
-        try {
-          fn.call(target);
-          called = true;
-        } catch {}
-      } catch (error) {
-        safeWarn(
-          `UI method falló: ${name}`,
-          error
+        fn.call(
+          target,
+          reason,
+          context
         );
+
+        return {
+          called: true,
+          method: name,
+        };
+      } catch (errorA) {
+        try {
+          fn.call(
+            target,
+            context
+          );
+
+          return {
+            called: true,
+            method: name,
+          };
+        } catch (errorB) {
+          try {
+            fn.call(target);
+
+            return {
+              called: true,
+              method: name,
+            };
+          } catch (errorC) {
+            safeWarn(
+              `UI method falló: ${name}`,
+              {
+                reason,
+                errorA,
+                errorB,
+                errorC,
+              }
+            );
+          }
+        }
       }
     }
 
-    return called;
+    return {
+      called: false,
+      method: "",
+    };
+  }
+
+  function syncSidebarLight(reason = "ui-sync", context = {}) {
+    /*
+      Ligero:
+      NO repair()
+      NO rebind()
+      NO bindEvents()
+      Esos métodos son los que estaban multiplicando SidebarEvents.
+    */
+    return callFirstUIMethod(
+      SidebarUI,
+      [
+        "refresh",
+        "sync",
+        "syncRouteAndIndicator",
+        "syncIndicator",
+        "renderUser",
+        "updateUser",
+      ],
+      reason,
+      context
+    );
+  }
+
+  function syncTopbarLight(reason = "ui-sync", context = {}) {
+    return callFirstUIMethod(
+      TopbarUI,
+      [
+        "refresh",
+        "sync",
+        "renderUser",
+        "refreshUser",
+        "updateUser",
+      ],
+      reason,
+      context
+    );
+  }
+
+  function hardRepairSidebar(reason = "ui-hard-repair", context = {}) {
+    return callFirstUIMethod(
+      SidebarUI,
+      [
+        "repair",
+        "refresh",
+        "sync",
+      ],
+      reason,
+      context
+    );
+  }
+
+  function hardRepairTopbar(reason = "ui-hard-repair", context = {}) {
+    return callFirstUIMethod(
+      TopbarUI,
+      [
+        "repair",
+        "refresh",
+        "sync",
+      ],
+      reason,
+      context
+    );
+  }
+
+  function rebindSidebar(reason = "ui-rebind", context = {}) {
+    return callFirstUIMethod(
+      SidebarUI,
+      [
+        "rebind",
+        "rebindEvents",
+        "bindEvents",
+        "bind",
+      ],
+      reason,
+      context
+    );
+  }
+
+  function rebindTopbar(reason = "ui-rebind", context = {}) {
+    return callFirstUIMethod(
+      TopbarUI,
+      [
+        "rebind",
+        "rebindEvents",
+        "bindEvents",
+        "bind",
+      ],
+      reason,
+      context
+    );
   }
 
   function repairShell(reason = "unknown") {
@@ -1319,11 +1429,6 @@ export const App = (() => {
       );
     } catch {}
 
-    /*
-      Este método puede emitir estado de shell. Por eso:
-      - NO se llama desde eventos router:shell:state.
-      - repairUISystems permite repairShell:false para eventos de router.
-    */
     try {
       Router?.repairShell?.({
         route:
@@ -1357,8 +1462,21 @@ export const App = (() => {
       syncUser:
         options?.syncUser !== false,
 
+      /*
+        CAMBIO CLAVE:
+        Antes rebind default true.
+        Eso era veneno: cada router/auth/render podía rebinder sidebar.
+      */
       rebind:
-        options?.rebind !== false,
+        options?.rebind === true,
+
+      /*
+        CAMBIO CLAVE:
+        repair() solo bajo petición explícita.
+        Para navegación/render/auth usamos refresh/sync.
+      */
+      hardRepair:
+        options?.hardRepair === true,
 
       emit:
         options?.emit !== false,
@@ -1403,42 +1521,53 @@ export const App = (() => {
         callSyncUserUI(cleanReason);
       }
 
-      /*
-        No llamamos render() aquí.
-        Render/re-render de Sidebar/Topbar desde cada evento puede crear
-        bucles de DOM/bind/eventos. repair/refresh/sync/rebind son suficientes.
-      */
-      safeCallUIMethod(
-        SidebarUI,
-        [
-          "repair",
-          "refresh",
-          "sync",
-          "syncUser",
-          "refreshUser",
-          "updateUser",
-          "rebind",
-          "bindEvents",
-        ],
-        cleanReason,
-        context
-      );
+      let sidebarResult = {
+        called: false,
+        method: "",
+      };
 
-      safeCallUIMethod(
-        TopbarUI,
-        [
-          "repair",
-          "refresh",
-          "sync",
-          "syncUser",
-          "refreshUser",
-          "updateUser",
-          "rebind",
-          "bindEvents",
-        ],
-        cleanReason,
-        context
-      );
+      let topbarResult = {
+        called: false,
+        method: "",
+      };
+
+      if (opts.hardRepair) {
+        sidebarResult =
+          hardRepairSidebar(
+            cleanReason,
+            context
+          );
+
+        topbarResult =
+          hardRepairTopbar(
+            cleanReason,
+            context
+          );
+      } else {
+        sidebarResult =
+          syncSidebarLight(
+            cleanReason,
+            context
+          );
+
+        topbarResult =
+          syncTopbarLight(
+            cleanReason,
+            context
+          );
+      }
+
+      if (opts.rebind) {
+        rebindSidebar(
+          cleanReason,
+          context
+        );
+
+        rebindTopbar(
+          cleanReason,
+          context
+        );
+      }
 
       if (opts.emit) {
         safeEmit("app:ui:repair", {
@@ -1450,6 +1579,14 @@ export const App = (() => {
             routeSnapshot.route,
           publicPath:
             routeSnapshot.publicPath,
+          hardRepair:
+            opts.hardRepair,
+          rebind:
+            opts.rebind,
+          sidebarMethod:
+            sidebarResult.method,
+          topbarMethod:
+            topbarResult.method,
           sidebarSnapshot:
             getSidebarSnapshot(),
           topbarSnapshot:
@@ -1464,6 +1601,8 @@ export const App = (() => {
             {
               ...opts,
               repairShell: false,
+              hardRepair: false,
+              rebind: false,
               emit: false,
               afterPaint: false,
               source: `${opts.source}:after-paint`,
@@ -1551,7 +1690,10 @@ export const App = (() => {
     const bus =
       AppCore?.events;
 
-    if (bus?.on) {
+    const hasBus =
+      isFunction(bus?.on);
+
+    if (hasBus) {
       /*
         Importante:
         NO escuchar router:shell:state aquí.
@@ -1565,6 +1707,8 @@ export const App = (() => {
           getReason(payload, "router:rendered"),
           {
             repairShell: false,
+            hardRepair: false,
+            rebind: false,
             afterPaint: false,
             source: "router:rendered",
           }
@@ -1576,6 +1720,8 @@ export const App = (() => {
           getReason(payload, "router:render:async-complete"),
           {
             repairShell: false,
+            hardRepair: false,
+            rebind: false,
             afterPaint: false,
             source: "router:render:async-complete",
           }
@@ -1583,10 +1729,18 @@ export const App = (() => {
       });
 
       bindBus("app:ui:repair-request", (payload) => {
+        const data =
+          getPayload(payload);
+
         scheduleUIRepair(
           getReason(payload, "app:ui:repair-request"),
           {
-            repairShell: true,
+            repairShell:
+              data.repairShell !== false,
+            hardRepair:
+              data.hardRepair === true,
+            rebind:
+              data.rebind === true,
             afterPaint: false,
             source: "app:ui:repair-request",
           }
@@ -1598,6 +1752,8 @@ export const App = (() => {
           getReason(payload, "app:route:change"),
           {
             repairShell: false,
+            hardRepair: false,
+            rebind: false,
             afterPaint: false,
             source: "app:route:change",
           }
@@ -1617,40 +1773,51 @@ export const App = (() => {
             getReason(payload, eventName),
             {
               repairShell: false,
+              hardRepair: false,
+              rebind: false,
               afterPaint: false,
               source: eventName,
             }
           );
         });
       });
+    } else {
+      /*
+        Window solo como fallback real si no hay AppCore.events.
+        Antes escuchábamos bus + window y eso duplicaba reparaciones.
+      */
+      safeWindowOn("app:ui:repair-request", (payload) => {
+        const data =
+          getPayload(payload);
+
+        scheduleUIRepair(
+          getReason(payload, "window:app:ui:repair-request"),
+          {
+            repairShell:
+              data.repairShell !== false,
+            hardRepair:
+              data.hardRepair === true,
+            rebind:
+              data.rebind === true,
+            afterPaint: false,
+            source: "window:app:ui:repair-request",
+          }
+        );
+      });
+
+      safeWindowOn("app:lang:change", (payload) => {
+        scheduleUIRepair(
+          getReason(payload, "window:app:lang:change"),
+          {
+            repairShell: false,
+            hardRepair: false,
+            rebind: false,
+            afterPaint: false,
+            source: "window:app:lang:change",
+          }
+        );
+      });
     }
-
-    /*
-      Window solo para eventos externos reales.
-      No añadimos app:ready ni app:ui:ready aquí para evitar doble reparación
-      durante finalizeBoot.
-    */
-    safeWindowOn("app:ui:repair-request", (payload) => {
-      scheduleUIRepair(
-        getReason(payload, "window:app:ui:repair-request"),
-        {
-          repairShell: true,
-          afterPaint: false,
-          source: "window:app:ui:repair-request",
-        }
-      );
-    });
-
-    safeWindowOn("app:lang:change", (payload) => {
-      scheduleUIRepair(
-        getReason(payload, "window:app:lang:change"),
-        {
-          repairShell: false,
-          afterPaint: false,
-          source: "window:app:lang:change",
-        }
-      );
-    });
 
     state.uiRepairEventsBound = true;
   }
@@ -2041,6 +2208,8 @@ export const App = (() => {
         "init-ui-already-ready",
         {
           repairShell: false,
+          hardRepair: false,
+          rebind: false,
           afterPaint: false,
           source: "init-ui-already-ready",
         }
@@ -2060,10 +2229,17 @@ export const App = (() => {
     state.uiReady = true;
     state.uiMounted = true;
 
+    /*
+      Después de initUISystems() no hacemos repair/rebind.
+      initUISystems ya debe llamar init() una vez.
+      Aquí solo sincronizamos visual/usuario/shell.
+    */
     repairUISystems(
       "init-ui",
       {
         repairShell: true,
+        hardRepair: false,
+        rebind: false,
         afterPaint: false,
         source: "init-ui",
       }
@@ -2101,6 +2277,8 @@ export const App = (() => {
         `render-initial-route:${reason}`,
         {
           repairShell: false,
+          hardRepair: false,
+          rebind: false,
           afterPaint: false,
           source: "render-initial-route",
         }
@@ -2146,6 +2324,8 @@ export const App = (() => {
           "restore-session",
           {
             repairShell: false,
+            hardRepair: false,
+            rebind: false,
             afterPaint: false,
             source: "restore-session",
           }
@@ -2165,6 +2345,8 @@ export const App = (() => {
             "restore-session-error-non-blocking",
             {
               repairShell: false,
+              hardRepair: false,
+              rebind: false,
               afterPaint: false,
               source: "restore-session-error",
             }
@@ -2217,6 +2399,8 @@ export const App = (() => {
       "finalize-boot",
       {
         repairShell: false,
+        hardRepair: false,
+        rebind: false,
         afterPaint: false,
         source: "finalize-boot",
       }
@@ -2227,6 +2411,8 @@ export const App = (() => {
         "finalize-boot:after-paint",
         {
           repairShell: false,
+          hardRepair: false,
+          rebind: false,
           afterPaint: false,
           emit: false,
           source: "finalize-boot:after-paint",
@@ -2348,6 +2534,8 @@ export const App = (() => {
             "restore-navigation-handled",
             {
               repairShell: false,
+              hardRepair: false,
+              rebind: false,
               afterPaint: false,
               source: "restore-navigation-handled",
             }
@@ -2366,6 +2554,8 @@ export const App = (() => {
         "before-finalize",
         {
           repairShell: false,
+          hardRepair: false,
+          rebind: false,
           afterPaint: false,
           source: "before-finalize",
         }
@@ -2389,6 +2579,8 @@ export const App = (() => {
           "boot-error",
           {
             repairShell: false,
+            hardRepair: false,
+            rebind: false,
             afterPaint: false,
             source: "boot-error",
           }
@@ -2421,6 +2613,8 @@ export const App = (() => {
         "boot-already-booted",
         {
           repairShell: false,
+          hardRepair: false,
+          rebind: false,
           afterPaint: false,
           source: "boot-already-booted",
         }
@@ -2448,6 +2642,7 @@ export const App = (() => {
     state.booted = false;
     state.booting = false;
 
+    state.uiReady = false;
     state.uiMounted = false;
     state.readyEmitted = false;
 

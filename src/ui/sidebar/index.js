@@ -2,7 +2,7 @@
    Onion SPA - Sidebar UI
    Archivo: src/ui/sidebar/index.js
 
-   FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · DROPDOWN SAFE · BIND DEDUPE · 10/10
+   FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · DROPDOWN SAFE · BIND DEDUPE · CLICK SAFE · 10/10
 
    RESPONSABILIDADES:
    - montar sidebar
@@ -25,19 +25,13 @@
    - cortar tormentas de bindEvents / cleanup / repair / init
    - evitar AppCore.cleanup.run(SCOPE) agresivo en cada rebind
    - evitar pointer-events:none colgado en .sidebar-menu
+   - NO matar clicks del menú durante sync visual
 
-   REGLAS:
-   - state.js es el único dueño de:
-     --sidebar-indicator-x/y/w/h/opacity
-     .sidebar-transitioning
-     .is-transitioning
-     transición collapse/expand
-   - events.js escucha core/router/auth y pide commits visuales
-   - index.js monta, coordina API pública y delega
-   - index.js no emite eventos que causen doble transición
-   - init() repetido NO hace repair + rebind
-   - repair() NO rebindea si ya hay eventos vivos
-   - rebind() explícito sí fuerza limpieza/rebind controlado
+   FIX CRÍTICO:
+   - flushMenuHoverState() ya NO pone pointer-events:none
+   - restoreMenuHoverState() nunca restaura pointer-events:none
+   - ensureMenuInteractive() repara un menú muerto si quedó legacy
+   - mount/repair/bind/navegación aseguran interacción del menú
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -1082,6 +1076,13 @@ export const SidebarUI = (() => {
 
     refreshSidebarDomRefs();
 
+    /*
+      FIX:
+      Si un build anterior dejó .sidebar-menu con pointer-events:none,
+      lo reparamos al montar/refrescar.
+    */
+    ensureMenuInteractive("mount-and-refresh");
+
     return hasSidebarShell(AppCore);
   }
 
@@ -1465,13 +1466,22 @@ export const SidebarUI = (() => {
       delete sidebarMenu.dataset.visualSyncing;
       delete sidebarMenu.dataset.visualSyncReason;
 
+      /*
+        FIX CRÍTICO:
+        Nunca restauramos "none".
+        Si quedó "none", el menú muere y solo funciona el dropdown.
+      */
       const previous =
-        sidebarMenu.dataset.previousPointerEvents;
+        safeText(sidebarMenu.dataset.previousPointerEvents, "");
 
-      if (!previous || previous === "__empty__") {
-        sidebarMenu.style.pointerEvents = "";
-      } else {
+      if (
+        previous &&
+        previous !== "__empty__" &&
+        previous !== "none"
+      ) {
         sidebarMenu.style.pointerEvents = previous;
+      } else {
+        sidebarMenu.style.pointerEvents = "";
       }
 
       delete sidebarMenu.dataset.previousPointerEvents;
@@ -1533,18 +1543,17 @@ export const SidebarUI = (() => {
       sidebarMenu.dataset.visualSyncing = "true";
       sidebarMenu.dataset.visualSyncReason = reason;
 
+      /*
+        FIX CRÍTICO:
+        NO usamos pointer-events:none.
+        Eso bloqueaba todos los enlaces de .sidebar-menu si una carrera impedía restaurarlo.
+      */
       if (!sidebarMenu.dataset.previousPointerEventsSet) {
         sidebarMenu.dataset.previousPointerEvents =
           sidebarMenu.style.pointerEvents || "__empty__";
 
         sidebarMenu.dataset.previousPointerEventsSet = "true";
       }
-
-      /*
-        Fuerza al navegador a soltar :hover real.
-        Debe restaurarse SIEMPRE. Si queda vivo, mata clicks del menú.
-      */
-      sidebarMenu.style.pointerEvents = "none";
 
       const active = document.activeElement;
 
@@ -1565,8 +1574,50 @@ export const SidebarUI = (() => {
     return true;
   }
 
+  function ensureMenuInteractive(reason = "ensure-menu-interactive") {
+    if (!isBrowser()) {
+      return false;
+    }
+
+    const {
+      sidebarMenu,
+    } = getElements(AppCore);
+
+    if (!sidebarMenu) {
+      return false;
+    }
+
+    let repaired = false;
+
+    try {
+      if (sidebarMenu.style.pointerEvents === "none") {
+        sidebarMenu.style.pointerEvents = "";
+        repaired = true;
+      }
+
+      if (
+        sidebarMenu.dataset.visualSyncing === "true" &&
+        !hoverFlushTimer
+      ) {
+        restoreMenuHoverState();
+        repaired = true;
+      }
+    } catch {}
+
+    if (repaired) {
+      safeEmit("sidebar:menu:interaction-restored", {
+        source: "SidebarUI",
+        reason,
+        snapshot: getSidebarSnapshot(),
+      });
+    }
+
+    return repaired;
+  }
+
   function syncActiveRouteMarkers(route = "", options = {}) {
     refreshSidebarDomRefs();
+    ensureMenuInteractive("sync-active-route-markers");
 
     const currentPath =
       normalizeRoutePath(route || getCurrentRoutePath());
@@ -1624,6 +1675,8 @@ export const SidebarUI = (() => {
 
     clearVisualSyncTimer();
 
+    ensureMenuInteractive(`schedule:${reason}:before`);
+
     if (opts.flushHover === true) {
       flushMenuHoverState(
         reason,
@@ -1650,6 +1703,7 @@ export const SidebarUI = (() => {
         }
 
         refreshSidebarDomRefs();
+        ensureMenuInteractive(`schedule:${reason}:paint`);
 
         const resolvedRoute =
           route || getCurrentRoutePath();
@@ -1680,6 +1734,8 @@ export const SidebarUI = (() => {
 
   function syncRouteAndIndicator(reason = "route-sync", options = {}) {
     const opts = safeObject(options);
+
+    ensureMenuInteractive(`sync-route-and-indicator:${reason}`);
 
     const route =
       normalizeRoutePath(
@@ -1718,6 +1774,7 @@ export const SidebarUI = (() => {
 
   function closeDropdown() {
     refreshSidebarDomRefs();
+    ensureMenuInteractive("close-dropdown");
 
     const result =
       closeDropdownBase(AppCore, runtimeState);
@@ -1754,6 +1811,7 @@ export const SidebarUI = (() => {
     if (isShellBlocked()) return false;
 
     refreshSidebarDomRefs();
+    ensureMenuInteractive("open-dropdown");
 
     const result =
       openDropdownBase(
@@ -1775,6 +1833,7 @@ export const SidebarUI = (() => {
     if (isShellBlocked()) return false;
 
     refreshSidebarDomRefs();
+    ensureMenuInteractive("toggle-dropdown");
 
     const result =
       toggleDropdownBase(
@@ -1798,6 +1857,7 @@ export const SidebarUI = (() => {
 
   function syncSidebarState() {
     refreshSidebarDomRefs();
+    ensureMenuInteractive("sync-sidebar-state");
 
     return syncSidebarStateBase(
       AppCore,
@@ -1807,6 +1867,7 @@ export const SidebarUI = (() => {
 
   function repairSidebarState(reason = "repair-sidebar-state") {
     refreshSidebarDomRefs();
+    ensureMenuInteractive(reason);
 
     const result =
       repairSidebarStateBase(
@@ -1827,6 +1888,8 @@ export const SidebarUI = (() => {
     if (isShellBlocked()) {
       return false;
     }
+
+    ensureMenuInteractive("set-sidebar-open");
 
     const opts = safeObject(options);
     const nextOpen = Boolean(open);
@@ -2097,6 +2160,7 @@ export const SidebarUI = (() => {
 
   function applyRoleVisibility() {
     refreshSidebarDomRefs();
+    ensureMenuInteractive("apply-role-visibility");
 
     const result =
       applyRoleVisibilityBase(
@@ -2158,6 +2222,8 @@ export const SidebarUI = (() => {
     activeCleanupScope = null;
     eventsBound = false;
 
+    ensureMenuInteractive("cleanup-bound-events");
+
     return true;
   }
 
@@ -2167,6 +2233,8 @@ export const SidebarUI = (() => {
     try {
       closeDropdown();
     } catch {}
+
+    ensureMenuInteractive("cleanup");
 
     return true;
   }
@@ -2321,6 +2389,12 @@ export const SidebarUI = (() => {
       return false;
     }
 
+    /*
+      FIX:
+      Garantiza que el menú no esté bloqueado por un estado visual anterior.
+    */
+    ensureMenuInteractive("before-navigation");
+
     const route = getRouteFromElement(element);
 
     if (
@@ -2382,6 +2456,8 @@ export const SidebarUI = (() => {
     if (closeSidebarOnMobileAfterNavigation()) {
       closeSidebar();
     }
+
+    ensureMenuInteractive("after-navigation");
 
     return true;
   }
@@ -2610,6 +2686,7 @@ export const SidebarUI = (() => {
       preventAndStop(event);
 
       refreshSidebarDomRefs();
+      ensureMenuInteractive("direct-user-toggle");
 
       toggleDropdown();
 
@@ -2641,6 +2718,8 @@ export const SidebarUI = (() => {
       markSidebarEventHandled(event, "direct-user-toggle-keydown");
 
       preventAndStop(event);
+
+      ensureMenuInteractive("direct-user-toggle-keydown");
 
       if (event.key === "Escape") {
         closeDropdown();
@@ -2707,6 +2786,13 @@ export const SidebarUI = (() => {
       if (generation !== bindGeneration) {
         return;
       }
+
+      /*
+        Primer guard de reparación:
+        Si la primera pulsación llega con el menú bloqueado por legacy,
+        al menos lo deja operativo para la siguiente.
+      */
+      ensureMenuInteractive("fallback-document-click");
 
       if (wasSidebarEventHandled(event)) {
         return;
@@ -2829,6 +2915,8 @@ export const SidebarUI = (() => {
         return;
       }
 
+      ensureMenuInteractive("fallback-document-keydown");
+
       if (wasSidebarEventHandled(event)) {
         return;
       }
@@ -2843,6 +2931,8 @@ export const SidebarUI = (() => {
         return;
       }
 
+      ensureMenuInteractive("window-resize");
+
       scheduleSidebarVisualSync("window-resize", {
         delayMs: 120,
         force: true,
@@ -2855,6 +2945,8 @@ export const SidebarUI = (() => {
         return;
       }
 
+      ensureMenuInteractive("window-popstate");
+
       scheduleSidebarVisualSync("window-popstate", {
         delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
         force: true,
@@ -2866,6 +2958,8 @@ export const SidebarUI = (() => {
       if (generation !== bindGeneration) {
         return;
       }
+
+      ensureMenuInteractive("window-hashchange");
 
       scheduleSidebarVisualSync("window-hashchange", {
         delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
@@ -2973,6 +3067,8 @@ export const SidebarUI = (() => {
 
       return api;
     }
+
+    ensureMenuInteractive(`bind-events:${lastBindReason}`);
 
     const ts = nowTs();
 
@@ -3099,6 +3195,8 @@ export const SidebarUI = (() => {
       eventsBound = true;
       lastBindAt = nowTs();
 
+      ensureMenuInteractive(`bind-events:${lastBindReason}:after`);
+
       scheduleSidebarVisualSync(`bind-events:${lastBindReason}`, {
         delayMs: 64,
         force: true,
@@ -3132,6 +3230,7 @@ export const SidebarUI = (() => {
   function refresh(reason = "refresh") {
     mountAndRefresh();
     ensureRuntimeStateDefaults();
+    ensureMenuInteractive(`refresh:${reason}`);
 
     try {
       sanitizeFooterTooltipState(AppCore);
@@ -3173,6 +3272,7 @@ export const SidebarUI = (() => {
     }
 
     ensureRuntimeStateDefaults();
+    ensureMenuInteractive(`repair:${cleanReason}:before`);
 
     try {
       sanitizeFooterTooltipState(AppCore);
@@ -3209,6 +3309,8 @@ export const SidebarUI = (() => {
     });
 
     afterPaint(() => {
+      ensureMenuInteractive(`repair:${cleanReason}:after-paint`);
+
       syncRouteAndIndicator(`repair:${cleanReason}:after-paint`, {
         delayMs: 0,
         force: true,
@@ -3302,6 +3404,7 @@ export const SidebarUI = (() => {
     }
 
     ensureRuntimeStateDefaults();
+    ensureMenuInteractive("init");
 
     try {
       sanitizeFooterTooltipState(AppCore);
@@ -3331,6 +3434,8 @@ export const SidebarUI = (() => {
     });
 
     afterPaint(() => {
+      ensureMenuInteractive("init:after-paint");
+
       syncRouteAndIndicator("init:after-paint", {
         delayMs: 0,
         force: true,
@@ -3362,6 +3467,7 @@ export const SidebarUI = (() => {
     bindGeneration += 1;
 
     restoreMenuHoverState();
+    ensureMenuInteractive("destroy");
 
     safeEmit("sidebar:destroyed", {
       source: "SidebarUI",
@@ -3377,6 +3483,7 @@ export const SidebarUI = (() => {
 
   function debugDropdown() {
     refreshSidebarDomRefs();
+    ensureMenuInteractive("debug-dropdown");
 
     const {
       userToggle,
@@ -3446,6 +3553,7 @@ export const SidebarUI = (() => {
 
   function debugIndicator() {
     refreshSidebarDomRefs();
+    ensureMenuInteractive("debug-indicator");
 
     const {
       sidebarMenu,
@@ -3605,6 +3713,8 @@ export const SidebarUI = (() => {
 
     restoreHover:
       restoreMenuHoverState,
+
+    ensureMenuInteractive,
 
     handleLogout,
 

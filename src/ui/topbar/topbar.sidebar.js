@@ -2,7 +2,7 @@
    Onion SPA - Topbar Sidebar Bridge
    Archivo: src/ui/topbar/topbar.sidebar.js
 
-   FINAL PRO SYSTEM · TOPBAR SIDEBAR BRIDGE · NO STORM · 10/10
+   FINAL PRO SYSTEM · TOPBAR SIDEBAR BRIDGE · DESKTOP SAFE · NO STORM · 10/10
 
    Responsabilidades:
    - integrar TopbarUI con SidebarUI
@@ -14,13 +14,16 @@
    - tolerar varias APIs de SidebarUI
    - emitir eventos de sincronización sin duplicar tormentas
 
-   FIX CRÍTICO:
+   FIX CRÍTICO REAL:
+   - en desktop NO se pone aria-hidden="true" al sidebar
+   - en desktop solo se limpian residuos mobile
+   - en desktop NO se toca sidebar-collapsed
+   - en desktop NO se bloquean clicks del menú lateral
+   - mobile closed sí puede usar aria-hidden="true"
    - no emite AppCore.events + window a la vez
    - si SidebarUI gestiona la acción, no duplicamos sidebar:state:synced
    - toggle mobile prioriza métodos mobile antes que toggleSidebar desktop
    - guards browser completos para SSR / boot parcial
-   - no toca sidebar-collapsed en desktop
-   - cleanup visual mobile forzado al pasar a desktop
 ========================================================= */
 
 import {
@@ -38,16 +41,21 @@ const BODY_SIDEBAR_OPEN_CLASS =
 const BODY_SIDEBAR_CLOSING_CLASS =
   "sidebar-closing";
 
-const SIDEBAR_OPEN_CLASSES = Object.freeze([
-  "open",
-  "is-open",
-  "sidebar-open",
-]);
+const BODY_ROUTE_SHELL_HIDDEN_CLASS =
+  "route-shell-hidden";
 
-const SIDEBAR_MOBILE_CLASSES = Object.freeze([
-  "is-mobile",
-  "mobile-open",
-]);
+const SIDEBAR_OPEN_CLASSES =
+  Object.freeze([
+    "open",
+    "is-open",
+    "sidebar-open",
+  ]);
+
+const SIDEBAR_MOBILE_CLASSES =
+  Object.freeze([
+    "is-mobile",
+    "mobile-open",
+  ]);
 
 const MOBILE_TOGGLE_ACTIVE_CLASS =
   "is-active";
@@ -74,13 +82,6 @@ function isBrowser() {
 
 function isFunction(value) {
   return typeof value === "function";
-}
-
-function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object"
-  );
 }
 
 function safeCall(fn, ...args) {
@@ -126,6 +127,14 @@ function getBody() {
     document.documentElement ||
     null
   );
+}
+
+function getHtml() {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  return document.documentElement || null;
 }
 
 function nextFrame(fn) {
@@ -215,21 +224,12 @@ function emitMobileSync(AppCore, payload = {}, options = {}) {
     ...payload,
   };
 
-  /*
-    Evento específico del topbar: siempre seguro.
-    No debería participar en loops de SidebarUI.
-  */
   emitSidebarEvent(
     AppCore,
     TOPBAR_SYNC_EVENT_NAME,
     finalPayload
   );
 
-  /*
-    Evento legacy compartido:
-    solo cuando el topbar ha aplicado fallback visual.
-    Si SidebarUI ejecutó la acción, SidebarUI debe emitir su propio evento.
-  */
   if (options.legacy === true) {
     emitSidebarEvent(
       AppCore,
@@ -320,9 +320,10 @@ function callSidebarAction(sidebarModule, action = "", payload = {}) {
   }
 
   /*
-    Importante:
-    - mobile primero.
-    - toggleSidebar suele ser desktop collapse en muchos sidebars.
+    Orden intencionado:
+    - primero APIs mobile
+    - después aliases genéricos
+    - toggleSidebar suele ser collapse desktop; por eso queda al final
   */
   const actionMap = {
     open: [
@@ -378,7 +379,7 @@ function callSidebarAction(sidebarModule, action = "", payload = {}) {
 
       /*
         false explícito = no gestionado.
-        undefined suele ser éxito en APIs DOM/UI.
+        undefined suele ser éxito en APIs UI.
       */
       return result !== false;
     } catch {}
@@ -409,6 +410,10 @@ function isMobileOnlyContext() {
   } catch {
     return false;
   }
+}
+
+function isDesktopContext() {
+  return !isMobileOnlyContext();
 }
 
 /* =========================================================
@@ -447,6 +452,21 @@ function getSidebarId(sidebar) {
   }
 }
 
+function isRouteShellHidden() {
+  const body =
+    getBody();
+
+  const html =
+    getHtml();
+
+  return Boolean(
+    body?.classList?.contains?.(BODY_ROUTE_SHELL_HIDDEN_CLASS) ||
+    html?.classList?.contains?.(BODY_ROUTE_SHELL_HIDDEN_CLASS) ||
+    body?.dataset?.shell === "hidden" ||
+    html?.dataset?.shell === "hidden"
+  );
+}
+
 /* =========================================================
    OFFSET CLEANUP
 ========================================================= */
@@ -460,14 +480,6 @@ export function syncFixedTopbarOffset(getDom) {
     return false;
   }
 
-  /*
-    El layout lo gobierna CSS:
-    - variables globales
-    - app-shell
-    - sidebar width
-
-    Aquí solo limpiamos residuos inline legacy.
-  */
   try {
     topbar.style.left = "";
     topbar.style.right = "";
@@ -482,10 +494,202 @@ export function syncFixedTopbarOffset(getDom) {
 }
 
 /* =========================================================
+   DESKTOP / MOBILE VISUAL STATE
+========================================================= */
+
+function restoreDesktopSidebarAccessibility(sidebar) {
+  if (!isElement(sidebar)) {
+    return false;
+  }
+
+  /*
+    Clave:
+    En desktop el sidebar visible NO puede quedar con aria-hidden="true",
+    porque sidebar/events.js bloquea clicks en padres [aria-hidden='true'].
+  */
+  if (
+    !isRouteShellHidden() &&
+    sidebar.hidden !== true
+  ) {
+    try {
+      sidebar.setAttribute(
+        "aria-hidden",
+        "false"
+      );
+    } catch {}
+
+    try {
+      sidebar.removeAttribute("inert");
+    } catch {}
+  }
+
+  try {
+    sidebar.dataset.mode =
+      "desktop";
+
+    sidebar.dataset.mobileOpen =
+      "false";
+
+    /*
+      No tocamos data-collapsed ni body.sidebar-collapsed.
+      Solo declaramos que el sidebar de desktop existe/está disponible.
+    */
+    if (!isRouteShellHidden()) {
+      sidebar.dataset.open =
+        "true";
+    }
+
+    if (
+      safeText(sidebar.dataset.state, "") === "closed" ||
+      safeText(sidebar.dataset.state, "") === "open"
+    ) {
+      sidebar.dataset.state =
+        "desktop";
+    }
+  } catch {}
+
+  return true;
+}
+
+function clearMobileSidebarResidue(sidebar) {
+  const body =
+    getBody();
+
+  try {
+    body?.classList?.remove?.(
+      BODY_SIDEBAR_OPEN_CLASS,
+      BODY_SIDEBAR_CLOSING_CLASS
+    );
+  } catch {}
+
+  if (!isElement(sidebar)) {
+    return false;
+  }
+
+  try {
+    SIDEBAR_MOBILE_CLASSES.forEach((className) => {
+      sidebar.classList.remove(className);
+    });
+
+    /*
+      Estas clases representan apertura mobile en este bridge.
+      No tocamos sidebar-collapsed.
+    */
+    SIDEBAR_OPEN_CLASSES.forEach((className) => {
+      sidebar.classList.remove(className);
+    });
+  } catch {}
+
+  restoreDesktopSidebarAccessibility(sidebar);
+
+  return true;
+}
+
+function applySidebarVisualState(sidebar, open = false) {
+  const body =
+    getBody();
+
+  const nextOpen =
+    Boolean(open);
+
+  /*
+    En desktop nunca usamos este método para "cerrar" el sidebar.
+    Cerrar mobile en desktop = limpiar residuos mobile + restaurar accesibilidad.
+  */
+  if (isDesktopContext()) {
+    clearMobileSidebarResidue(sidebar);
+    return true;
+  }
+
+  if (isElement(sidebar)) {
+    try {
+      SIDEBAR_OPEN_CLASSES.forEach((className) => {
+        sidebar.classList.toggle(
+          className,
+          nextOpen
+        );
+      });
+
+      SIDEBAR_MOBILE_CLASSES.forEach((className) => {
+        sidebar.classList.toggle(
+          className,
+          nextOpen
+        );
+      });
+    } catch {}
+
+    try {
+      sidebar.dataset.mode =
+        "mobile";
+
+      sidebar.dataset.state =
+        nextOpen ? "open" : "closed";
+
+      sidebar.dataset.open =
+        String(nextOpen);
+
+      sidebar.dataset.mobileOpen =
+        String(nextOpen);
+
+      sidebar.setAttribute(
+        "aria-hidden",
+        String(!nextOpen)
+      );
+
+      if (nextOpen) {
+        sidebar.removeAttribute("inert");
+      }
+    } catch {}
+  }
+
+  try {
+    body?.classList?.toggle?.(
+      BODY_SIDEBAR_OPEN_CLASS,
+      nextOpen
+    );
+
+    if (!nextOpen) {
+      body?.classList?.remove?.(
+        BODY_SIDEBAR_CLOSING_CLASS
+      );
+    }
+  } catch {}
+
+  return true;
+}
+
+function forceCloseSidebarVisualState(getDom) {
+  const {
+    sidebar,
+  } = safeGetDom(getDom);
+
+  /*
+    FIX:
+    Antes esto hacía applySidebarVisualState(sidebar, false),
+    dejando aria-hidden="true" en desktop.
+  */
+  clearMobileSidebarResidue(sidebar);
+
+  setMobileToggleState(getDom);
+  syncFixedTopbarOffset(getDom);
+
+  return true;
+}
+
+/* =========================================================
    STATE DETECTION
 ========================================================= */
 
 export function getSidebarMobileOpenState(sidebar) {
+  /*
+    En desktop no existe estado mobile abierto.
+    Esto evita que data-state/open legacy haga creer al topbar
+    que el sidebar mobile está abierto.
+  */
+  if (isDesktopContext()) {
+    return false;
+  }
+
   const body =
     getBody();
 
@@ -527,6 +731,15 @@ export function getSidebarMobileOpenState(sidebar) {
       )
     );
 
+  const dataMobileOpen =
+    Boolean(
+      isElement(sidebar) &&
+      safeText(
+        sidebar.dataset?.mobileOpen,
+        ""
+      ).toLowerCase() === "true"
+    );
+
   const ariaOpen =
     Boolean(
       isElement(sidebar) &&
@@ -535,7 +748,8 @@ export function getSidebarMobileOpenState(sidebar) {
         bodyOpen ||
         sidebarOpen ||
         mobileClassOpen ||
-        dataOpen
+        dataOpen ||
+        dataMobileOpen
       )
     );
 
@@ -544,85 +758,9 @@ export function getSidebarMobileOpenState(sidebar) {
     sidebarOpen ||
     mobileClassOpen ||
     dataOpen ||
+    dataMobileOpen ||
     ariaOpen
   );
-}
-
-/* =========================================================
-   RAW VISUAL STATE
-========================================================= */
-
-function applySidebarVisualState(sidebar, open = false) {
-  const body =
-    getBody();
-
-  const nextOpen =
-    Boolean(open);
-
-  if (isElement(sidebar)) {
-    try {
-      SIDEBAR_OPEN_CLASSES.forEach((className) => {
-        sidebar.classList.toggle(
-          className,
-          nextOpen
-        );
-      });
-
-      if (isMobileOnlyContext()) {
-        SIDEBAR_MOBILE_CLASSES.forEach((className) => {
-          sidebar.classList.toggle(
-            className,
-            nextOpen
-          );
-        });
-      } else {
-        SIDEBAR_MOBILE_CLASSES.forEach((className) => {
-          sidebar.classList.remove(className);
-        });
-      }
-    } catch {}
-
-    try {
-      sidebar.dataset.state =
-        nextOpen ? "open" : "closed";
-
-      sidebar.setAttribute(
-        "aria-hidden",
-        String(!nextOpen)
-      );
-    } catch {}
-  }
-
-  try {
-    body?.classList?.toggle?.(
-      BODY_SIDEBAR_OPEN_CLASS,
-      nextOpen
-    );
-
-    if (!nextOpen) {
-      body?.classList?.remove?.(
-        BODY_SIDEBAR_CLOSING_CLASS
-      );
-    }
-  } catch {}
-
-  return true;
-}
-
-function forceCloseSidebarVisualState(getDom) {
-  const {
-    sidebar,
-  } = safeGetDom(getDom);
-
-  applySidebarVisualState(
-    sidebar,
-    false
-  );
-
-  setMobileToggleState(getDom);
-  syncFixedTopbarOffset(getDom);
-
-  return true;
 }
 
 /* =========================================================
@@ -640,7 +778,7 @@ export function setMobileToggleState(getDom) {
   }
 
   const isDesktop =
-    !isMobileOnlyContext();
+    isDesktopContext();
 
   const isOpen =
     !isDesktop &&
@@ -675,11 +813,6 @@ export function setMobileToggleState(getDom) {
       isOpen
     );
 
-    /*
-      Mejor hidden que display inline:
-      - CSS sigue mandando.
-      - en desktop desaparece del árbol interactivo.
-    */
     mobileToggle.hidden =
       isDesktop;
 
@@ -734,10 +867,6 @@ function postMobileActionSync({
         reason,
       },
       {
-        /*
-          Si SidebarUI ha gestionado la acción, no duplicamos su evento legacy.
-          Si hemos aplicado fallback visual desde Topbar, sí emitimos legacy.
-        */
         legacy:
           !handledByModule,
       }
@@ -755,7 +884,7 @@ export function openSidebarMobile({
   AppCore,
   getDom,
 } = {}) {
-  if (!isMobileOnlyContext()) {
+  if (isDesktopContext()) {
     forceCloseSidebarVisualState(getDom);
     return false;
   }
@@ -817,7 +946,7 @@ export function closeSidebarMobile({
   AppCore,
   getDom,
 } = {}) {
-  if (!isMobileOnlyContext()) {
+  if (isDesktopContext()) {
     forceCloseSidebarVisualState(getDom);
     return false;
   }
@@ -879,7 +1008,7 @@ export function toggleSidebarMobile({
   AppCore,
   getDom,
 } = {}) {
-  if (!isMobileOnlyContext()) {
+  if (isDesktopContext()) {
     forceCloseSidebarVisualState(getDom);
     return false;
   }
@@ -897,10 +1026,6 @@ export function toggleSidebarMobile({
   const sidebarModule =
     getSidebarModule(AppCore);
 
-  /*
-    Preferimos open/close explícito.
-    toggle genérico puede ser collapse desktop.
-  */
   const handledByExplicitMethod =
     callSidebarAction(
       sidebarModule,
@@ -953,23 +1078,22 @@ export function toggleSidebarMobile({
 ========================================================= */
 
 export function handleViewportResize(getDom, closeSidebarMobileFn) {
-  const desktop =
-    !isMobileOnlyContext();
-
-  if (desktop) {
+  if (isDesktopContext()) {
     /*
-      Al pasar a desktop:
-      - cerramos residuos mobile
-      - NO tocamos sidebar-collapsed
-      - NO invocamos closeSidebarMobileFn porque puede depender de mobile
+      Desktop:
+      - limpia residuos mobile
+      - restaura aria-hidden="false"
+      - NO toca sidebar-collapsed
+      - NO invoca closeSidebarMobileFn
     */
     forceCloseSidebarVisualState(getDom);
     return true;
   }
 
   /*
-    En mobile no cerramos automáticamente.
-    Solo sincronizamos ARIA/offset.
+    Mobile:
+    - no cerramos automáticamente
+    - solo sincronizamos botón/offset
   */
   void closeSidebarMobileFn;
 

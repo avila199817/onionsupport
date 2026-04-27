@@ -18,8 +18,14 @@
    - fallback avatar/icon -> iniciales
    - modal singleton
    - escape / overlay close
+   - focus trap básico
+   - restore focus al cerrar
+   - body scroll lock reversible
    - render incremental seguro
    - estado visual interno de refresh
+   - timeout defensivo de refresh
+   - navegación interna saneada
+   - listeners idempotentes
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -30,6 +36,16 @@ import { AppCore } from "../../core/index.js";
 
 const MODAL_ID = "home-detail-modal-root";
 const PANEL_ID = "home-detail-modal-panel";
+const REFRESH_TIMEOUT_MS = 12000;
+
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "textarea:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])",
+].join(",");
 
 /* =========================================================
    LOCAL STATE
@@ -39,60 +55,66 @@ const modalState = {
   detail: null,
   isOpen: false,
   isRefreshing: false,
+
   bindingsAttached: false,
+  busAttached: false,
+
   lastActiveElement: null,
+  previousBodyOverflow: "",
+  previousBodyPaddingRight: "",
+
   escHandler: null,
+  focusTrapHandler: null,
+  clickHandler: null,
+  refreshTimeoutId: null,
 };
 
 /* =========================================================
-   HELPERS CORE
+   SAFE HELPERS
 ========================================================= */
 
-function safeEmit(event = "", payload = {}) {
-  try {
-    AppCore?.events?.emit?.(event, payload);
-  } catch {}
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
 }
 
-function safeOn(event = "", handler = null) {
-  if (!event || typeof handler !== "function") return false;
-
-  try {
-    AppCore?.events?.on?.(event, handler);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function safeOff(event = "", handler = null) {
-  if (!event || typeof handler !== "function") return false;
-
-  try {
-    AppCore?.events?.off?.(event, handler);
-    return true;
-  } catch {
-    return false;
-  }
+function isFn(value) {
+  return typeof value === "function";
 }
 
 function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
   const text = String(value).trim();
+
   return text || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
   const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+
+  return Number.isFinite(n)
+    ? n
+    : fallback;
 }
 
 function safeArray(value) {
-  return Array.isArray(value) ? value : [];
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
     ? value
     : {};
 }
@@ -100,12 +122,27 @@ function safeObject(value) {
 function first(...values) {
   for (const value of values) {
     if (
-      value !== undefined &&
-      value !== null &&
-      String(value).trim() !== ""
+      value === undefined ||
+      value === null
     ) {
-      return value;
+      continue;
     }
+
+    if (
+      typeof value === "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+    if (
+      Array.isArray(value) &&
+      value.length === 0
+    ) {
+      continue;
+    }
+
+    return value;
   }
 
   return null;
@@ -120,22 +157,142 @@ function escapeHtml(value = "") {
     .replace(/'/g, "&#39;");
 }
 
-function showToast(message = "", type = "info") {
+function safeEmit(eventName = "", payload = {}) {
+  const name = safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
   try {
-    if (typeof AppCore?.toast?.[type] === "function") {
-      AppCore.toast[type](message);
-      return;
+    AppCore?.events?.emit?.(
+      name,
+      payload
+    );
+
+    return true;
+  } catch {}
+
+  try {
+    if (isBrowser()) {
+      window.dispatchEvent(
+        new CustomEvent(name, {
+          detail: payload,
+        })
+      );
+
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function safeOn(eventName = "", handler = null) {
+  const name = safeText(eventName, "");
+
+  if (
+    !name ||
+    !isFn(handler)
+  ) {
+    return false;
+  }
+
+  try {
+    AppCore?.events?.on?.(
+      name,
+      handler
+    );
+
+    return true;
+  } catch {}
+
+  try {
+    if (isBrowser()) {
+      window.addEventListener(
+        name,
+        handler
+      );
+
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function safeOff(eventName = "", handler = null) {
+  const name = safeText(eventName, "");
+
+  if (
+    !name ||
+    !isFn(handler)
+  ) {
+    return false;
+  }
+
+  try {
+    AppCore?.events?.off?.(
+      name,
+      handler
+    );
+  } catch {}
+
+  try {
+    if (isBrowser()) {
+      window.removeEventListener(
+        name,
+        handler
+      );
+    }
+  } catch {}
+
+  return true;
+}
+
+function showToast(message = "", type = "info") {
+  const text = safeText(message, "");
+  const kind = safeText(type, "info");
+
+  if (!text) {
+    return false;
+  }
+
+  try {
+    if (isFn(AppCore?.toast?.[kind])) {
+      AppCore.toast[kind](text);
+      return true;
     }
   } catch {}
 
   try {
-    AppCore?.toast?.show?.(message, type);
-    return;
+    if (isFn(AppCore?.toast?.show)) {
+      AppCore.toast.show({
+        type: kind,
+        message: text,
+      });
+
+      return true;
+    }
   } catch {}
 
   try {
-    AppCore?.ui?.toast?.[type]?.(message);
+    if (isFn(AppCore?.ui?.toast?.[kind])) {
+      AppCore.ui.toast[kind](text);
+      return true;
+    }
   } catch {}
+
+  try {
+    safeEmit(`toast:${kind}`, {
+      message: text,
+      type: kind,
+    });
+
+    return true;
+  } catch {}
+
+  return false;
 }
 
 /* =========================================================
@@ -143,10 +300,15 @@ function showToast(message = "", type = "info") {
 ========================================================= */
 
 function formatDate(value = null) {
-  if (!value) return "—";
+  if (!value) {
+    return "—";
+  }
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
+
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
 
   try {
     return new Intl.DateTimeFormat("es-ES", {
@@ -162,16 +324,23 @@ function formatDate(value = null) {
 }
 
 function formatRelativeDate(value = null) {
-  if (!value) return "Sin fecha";
+  if (!value) {
+    return "Sin fecha";
+  }
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Sin fecha";
+
+  if (Number.isNaN(date.getTime())) {
+    return "Sin fecha";
+  }
 
   const diffMs = date.getTime() - Date.now();
   const diffMin = Math.round(diffMs / 60000);
   const absMin = Math.abs(diffMin);
 
-  if (absMin < 1) return "Ahora mismo";
+  if (absMin < 1) {
+    return "Ahora mismo";
+  }
 
   if (absMin < 60) {
     return diffMin > 0
@@ -369,6 +538,93 @@ function normalizeHomeDetail(detail = {}) {
 }
 
 /* =========================================================
+   ROUTE / CLIPBOARD
+========================================================= */
+
+function isUnsafeRoute(route = "") {
+  return /^(javascript:|data:|vbscript:)/i.test(
+    safeText(route, "")
+  );
+}
+
+function isExternalRoute(route = "") {
+  const value = safeText(route, "");
+
+  if (!/^https?:\/\//i.test(value)) {
+    return false;
+  }
+
+  try {
+    return isBrowser()
+      ? new URL(value).origin !== window.location.origin
+      : true;
+  } catch {
+    return true;
+  }
+}
+
+function normalizeInternalRoute(route = "") {
+  const value = safeText(route, "");
+
+  if (
+    !value ||
+    isUnsafeRoute(value) ||
+    isExternalRoute(value)
+  ) {
+    return "";
+  }
+
+  if (
+    value.startsWith("/") ||
+    value.startsWith("?") ||
+    value.startsWith("#")
+  ) {
+    return value;
+  }
+
+  return `/${value}`;
+}
+
+async function writeClipboardText(text = "") {
+  const value = safeText(text, "");
+
+  if (!value || !isBrowser()) {
+    return false;
+  }
+
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {}
+
+  try {
+    const textarea = document.createElement("textarea");
+
+    textarea.value = value;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+    textarea.style.left = "-9999px";
+
+    document.body.appendChild(textarea);
+
+    textarea.focus();
+    textarea.select();
+
+    const ok = document.execCommand("copy");
+
+    textarea.remove();
+
+    return Boolean(ok);
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
    VISUAL HELPERS
 ========================================================= */
 
@@ -468,38 +724,23 @@ function getInitials(value = "") {
   const parts = text.split(/\s+/).filter(Boolean);
 
   if (parts.length >= 2) {
-    return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
+    return `${parts[0][0] || ""}${parts[1][0] || ""}`
+      .toUpperCase()
+      .slice(0, 2);
   }
 
-  return text.slice(0, 2).toUpperCase();
+  return text
+    .slice(0, 2)
+    .toUpperCase();
 }
 
 function renderAvatar(detail = {}) {
   const icon = safeText(detail.icon, "");
-  const initials = getInitials(detail.title || detail.widgetId || "ON");
-
-  if (icon) {
-    return `
-      <div
-        style="
-          position:relative;
-          flex:0 0 68px;
-          width:68px;
-          height:68px;
-          border-radius:20px;
-          display:grid;
-          place-items:center;
-          background:linear-gradient(135deg, rgba(124,92,255,.28), rgba(88,72,200,.12));
-          border:1px solid rgba(124,92,255,.28);
-          color:#efeaff;
-          font-size:28px;
-          box-shadow:0 12px 28px rgba(124,92,255,.22);
-        "
-      >
-        ${escapeHtml(icon)}
-      </div>
-    `;
-  }
+  const initials = getInitials(
+    detail.title ||
+      detail.widgetId ||
+      "ON"
+  );
 
   return `
     <div
@@ -514,13 +755,13 @@ function renderAvatar(detail = {}) {
         background:linear-gradient(135deg, rgba(124,92,255,.28), rgba(88,72,200,.12));
         border:1px solid rgba(124,92,255,.28);
         color:#efeaff;
-        font-size:22px;
+        font-size:${icon ? "28px" : "22px"};
         font-weight:var(--weight-black, 800);
         letter-spacing:.03em;
         box-shadow:0 12px 28px rgba(124,92,255,.22);
       "
     >
-      ${escapeHtml(initials)}
+      ${escapeHtml(icon || initials)}
     </div>
   `;
 }
@@ -592,26 +833,24 @@ function renderTags(detail = {}) {
       "
     >
       ${tags
-        .map(
-          (tag) => `
-            <span
-              style="
-                display:inline-flex;
-                align-items:center;
-                min-height:28px;
-                padding:0 10px;
-                border-radius:999px;
-                border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft));
-                background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-                color:var(--text-soft);
-                font-size:12px;
-                font-weight:var(--weight-bold, 700);
-              "
-            >
-              ${escapeHtml(tag)}
-            </span>
-          `
-        )
+        .map((tag) => `
+          <span
+            style="
+              display:inline-flex;
+              align-items:center;
+              min-height:28px;
+              padding:0 10px;
+              border-radius:999px;
+              border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft));
+              background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+              color:var(--text-soft);
+              font-size:12px;
+              font-weight:var(--weight-bold, 700);
+            "
+          >
+            ${escapeHtml(tag)}
+          </span>
+        `)
         .join("")}
     </div>
   `;
@@ -647,6 +886,7 @@ function renderItems(detail = {}) {
         .slice(0, 12)
         .map((entry, index) => {
           const item = safeObject(entry);
+
           const title = safeText(
             first(
               item.title,
@@ -797,6 +1037,7 @@ function renderLoadingOverlay() {
 
 function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
   const item = normalizeHomeDetail(detail);
+
   const widgetId = getWidgetId(item);
   const title = getWidgetTitle(item);
   const description = getWidgetDescription(item);
@@ -935,7 +1176,7 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
               type="button"
               data-modal-action="refresh"
               data-widget-id="${escapeHtml(widgetId)}"
-              ${isRefreshing ? "disabled" : ""}
+              ${isRefreshing ? "disabled aria-disabled=\"true\"" : ""}
               style="
                 min-height:44px;
                 padding:0 16px;
@@ -1058,12 +1299,7 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
             ${renderMetaField("Items", String(safeArray(item.items).length))}
           </div>
 
-          <section
-            style="
-              display:grid;
-              gap:10px;
-            "
-          >
+          <section style="display:grid; gap:10px;">
             <div
               style="
                 display:flex;
@@ -1110,12 +1346,7 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
             </div>
           </section>
 
-          <section
-            style="
-              display:grid;
-              gap:10px;
-            "
-          >
+          <section style="display:grid; gap:10px;">
             <h3
               style="
                 margin:0;
@@ -1138,12 +1369,7 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
             "
             class="home-modal-lower-grid"
           >
-            <section
-              style="
-                display:grid;
-                gap:10px;
-              "
-            >
+            <section style="display:grid; gap:10px;">
               <h3
                 style="
                   margin:0;
@@ -1158,12 +1384,7 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
               ${renderItems(item)}
             </section>
 
-            <section
-              style="
-                display:grid;
-                gap:10px;
-              "
-            >
+            <section style="display:grid; gap:10px;">
               <h3
                 style="
                   margin:0;
@@ -1231,10 +1452,18 @@ function renderModalInner(detail = {}, { isRefreshing = false } = {}) {
 ========================================================= */
 
 function getRoot() {
+  if (!isBrowser()) {
+    return null;
+  }
+
   return document.getElementById(MODAL_ID);
 }
 
 function ensureRoot() {
+  if (!isBrowser()) {
+    return null;
+  }
+
   let root = getRoot();
 
   if (root) {
@@ -1243,28 +1472,50 @@ function ensureRoot() {
 
   root = document.createElement("div");
   root.id = MODAL_ID;
+  root.dataset.homeModalRoot = "true";
+
   document.body.appendChild(root);
 
   return root;
 }
 
 function lockBody() {
-  try {
-    document.body.classList.add("modal-open");
-  } catch {}
+  if (!isBrowser()) {
+    return;
+  }
 
   try {
+    modalState.previousBodyOverflow =
+      document.body.style.overflow || "";
+
+    modalState.previousBodyPaddingRight =
+      document.body.style.paddingRight || "";
+
+    const scrollbarWidth =
+      window.innerWidth -
+      document.documentElement.clientWidth;
+
+    document.body.classList.add("modal-open");
     document.body.style.overflow = "hidden";
+
+    if (scrollbarWidth > 0) {
+      document.body.style.paddingRight = `${scrollbarWidth}px`;
+    }
   } catch {}
 }
 
 function unlockBody() {
-  try {
-    document.body.classList.remove("modal-open");
-  } catch {}
+  if (!isBrowser()) {
+    return;
+  }
 
   try {
-    document.body.style.overflow = "";
+    document.body.classList.remove("modal-open");
+    document.body.style.overflow =
+      modalState.previousBodyOverflow || "";
+
+    document.body.style.paddingRight =
+      modalState.previousBodyPaddingRight || "";
   } catch {}
 }
 
@@ -1275,32 +1526,191 @@ function restoreFocus() {
 }
 
 /* =========================================================
-   ESC HANDLER
+   TIMER
 ========================================================= */
 
-function detachEscHandler() {
-  if (!modalState.escHandler) {
+function clearRefreshTimeout() {
+  if (!modalState.refreshTimeoutId) {
     return;
   }
 
   try {
-    document.removeEventListener("keydown", modalState.escHandler);
+    window.clearTimeout(
+      modalState.refreshTimeoutId
+    );
+  } catch {}
+
+  modalState.refreshTimeoutId = null;
+}
+
+function startRefreshTimeout(widgetId = "") {
+  clearRefreshTimeout();
+
+  if (!isBrowser()) {
+    return;
+  }
+
+  try {
+    modalState.refreshTimeoutId = window.setTimeout(() => {
+      if (!modalState.isOpen || !modalState.isRefreshing) {
+        return;
+      }
+
+      modalState.isRefreshing = false;
+      renderModal();
+      attachRootBindings();
+
+      showToast(
+        "No se recibió respuesta de actualización.",
+        "warning"
+      );
+
+      safeEmit("home:modal:refresh:timeout", {
+        widgetId,
+      });
+    }, REFRESH_TIMEOUT_MS);
+  } catch {}
+}
+
+/* =========================================================
+   FOCUS / ESC
+========================================================= */
+
+function getPanel() {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  return document.getElementById(PANEL_ID);
+}
+
+function focusPanel() {
+  try {
+    getPanel()?.focus?.();
+  } catch {}
+}
+
+function getFocusableElements() {
+  const panel = getPanel();
+
+  if (!panel) {
+    return [];
+  }
+
+  try {
+    return Array.from(
+      panel.querySelectorAll(FOCUSABLE_SELECTOR)
+    ).filter((element) => {
+      return (
+        !element.disabled &&
+        element.getAttribute("aria-hidden") !== "true" &&
+        !element.hidden
+      );
+    });
+  } catch {
+    return [];
+  }
+}
+
+function detachEscHandler() {
+  if (!modalState.escHandler || !isBrowser()) {
+    return;
+  }
+
+  try {
+    document.removeEventListener(
+      "keydown",
+      modalState.escHandler
+    );
   } catch {}
 
   modalState.escHandler = null;
 }
 
 function attachEscHandler() {
+  if (!isBrowser()) {
+    return;
+  }
+
   detachEscHandler();
 
   modalState.escHandler = (event) => {
     if (event.key === "Escape") {
+      event.preventDefault();
       closeHomeModal();
     }
   };
 
   try {
-    document.addEventListener("keydown", modalState.escHandler);
+    document.addEventListener(
+      "keydown",
+      modalState.escHandler
+    );
+  } catch {}
+}
+
+function detachFocusTrap() {
+  if (!modalState.focusTrapHandler || !isBrowser()) {
+    return;
+  }
+
+  try {
+    document.removeEventListener(
+      "keydown",
+      modalState.focusTrapHandler,
+      true
+    );
+  } catch {}
+
+  modalState.focusTrapHandler = null;
+}
+
+function attachFocusTrap() {
+  if (!isBrowser()) {
+    return;
+  }
+
+  detachFocusTrap();
+
+  modalState.focusTrapHandler = (event) => {
+    if (
+      event.key !== "Tab" ||
+      !modalState.isOpen
+    ) {
+      return;
+    }
+
+    const focusable =
+      getFocusableElements();
+
+    if (!focusable.length) {
+      event.preventDefault();
+      focusPanel();
+      return;
+    }
+
+    const firstEl = focusable[0];
+    const lastEl = focusable[focusable.length - 1];
+    const activeEl = document.activeElement;
+
+    if (event.shiftKey && activeEl === firstEl) {
+      event.preventDefault();
+      lastEl.focus();
+      return;
+    }
+
+    if (!event.shiftKey && activeEl === lastEl) {
+      event.preventDefault();
+      firstEl.focus();
+    }
+  };
+
+  try {
+    document.addEventListener(
+      "keydown",
+      modalState.focusTrapHandler,
+      true
+    );
   } catch {}
 }
 
@@ -1311,38 +1721,50 @@ function attachEscHandler() {
 function renderModal() {
   const root = ensureRoot();
 
+  if (!root) {
+    return null;
+  }
+
   if (!modalState.detail) {
     root.innerHTML = "";
     return root;
   }
 
-  root.innerHTML = renderModalInner(modalState.detail, {
-    isRefreshing: modalState.isRefreshing,
-  });
+  root.innerHTML = renderModalInner(
+    modalState.detail,
+    {
+      isRefreshing:
+        modalState.isRefreshing,
+    }
+  );
 
   return root;
 }
 
-function focusPanel() {
-  try {
-    const panel = document.getElementById(PANEL_ID);
-    panel?.focus?.();
-  } catch {}
-}
-
 /* =========================================================
-   OPEN / CLOSE
+   OPEN / CLOSE / UPDATE
 ========================================================= */
 
 export function openHomeModal(detail = {}) {
-  modalState.lastActiveElement = document.activeElement || null;
-  modalState.detail = normalizeHomeDetail(detail);
+  if (!isBrowser()) {
+    return false;
+  }
+
+  modalState.lastActiveElement =
+    document.activeElement || null;
+
+  modalState.detail =
+    normalizeHomeDetail(detail);
+
   modalState.isOpen = true;
   modalState.isRefreshing = false;
+
+  clearRefreshTimeout();
 
   renderModal();
   lockBody();
   attachEscHandler();
+  attachFocusTrap();
   attachRootBindings();
   focusPanel();
 
@@ -1355,18 +1777,26 @@ export function openHomeModal(detail = {}) {
 }
 
 export function closeHomeModal() {
+  if (!isBrowser()) {
+    return false;
+  }
+
   const root = getRoot();
 
   modalState.isOpen = false;
   modalState.isRefreshing = false;
   modalState.detail = null;
 
+  clearRefreshTimeout();
+
   if (root) {
     root.innerHTML = "";
   }
 
-  unlockBody();
+  detachRootBindings();
   detachEscHandler();
+  detachFocusTrap();
+  unlockBody();
   restoreFocus();
 
   safeEmit("home:modal:closed", {});
@@ -1375,12 +1805,44 @@ export function closeHomeModal() {
 }
 
 export function updateHomeModal(detail = {}) {
+  if (!isBrowser()) {
+    return false;
+  }
+
   if (!modalState.isOpen) {
     return openHomeModal(detail);
   }
 
-  modalState.detail = normalizeHomeDetail(detail);
+  modalState.detail =
+    normalizeHomeDetail(detail);
+
   modalState.isRefreshing = false;
+
+  clearRefreshTimeout();
+
+  renderModal();
+  attachRootBindings();
+  focusPanel();
+
+  safeEmit("home:modal:updated", {
+    detail: modalState.detail,
+    widgetId: getWidgetId(modalState.detail),
+  });
+
+  return true;
+}
+
+export function setHomeModalRefreshing(value = false) {
+  if (!modalState.isOpen) {
+    return false;
+  }
+
+  modalState.isRefreshing =
+    Boolean(value);
+
+  if (!modalState.isRefreshing) {
+    clearRefreshTimeout();
+  }
 
   renderModal();
   attachRootBindings();
@@ -1392,51 +1854,27 @@ export function updateHomeModal(detail = {}) {
    ACTIONS
 ========================================================= */
 
-async function writeClipboardText(text = "") {
-  const value = safeText(text, "");
-
-  if (!value) return false;
-
-  try {
-    if (navigator?.clipboard?.writeText) {
-      await navigator.clipboard.writeText(value);
-      return true;
-    }
-  } catch {}
-
-  try {
-    const textarea = document.createElement("textarea");
-    textarea.value = value;
-    textarea.setAttribute("readonly", "true");
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
-    textarea.style.pointerEvents = "none";
-    document.body.appendChild(textarea);
-    textarea.focus();
-    textarea.select();
-
-    const ok = document.execCommand("copy");
-
-    textarea.remove();
-
-    return Boolean(ok);
-  } catch {
-    return false;
-  }
-}
-
 async function handleCopy(widgetId = "") {
   const id = safeText(widgetId, "");
 
-  if (!id) {
-    showToast("No hay ID para copiar.", "error");
+  if (!id || id === "—") {
+    showToast(
+      "No hay ID para copiar.",
+      "error"
+    );
+
     return false;
   }
 
-  const copied = await writeClipboardText(id);
+  const copied =
+    await writeClipboardText(id);
 
   if (!copied) {
-    showToast("No se pudo copiar el ID.", "error");
+    showToast(
+      "No se pudo copiar el ID.",
+      "error"
+    );
+
     return false;
   }
 
@@ -1444,7 +1882,10 @@ async function handleCopy(widgetId = "") {
     widgetId: id,
   });
 
-  showToast("ID copiado", "success");
+  showToast(
+    "ID copiado",
+    "success"
+  );
 
   return true;
 }
@@ -1452,26 +1893,43 @@ async function handleCopy(widgetId = "") {
 async function handleRefresh(widgetId = "") {
   const id = safeText(widgetId, "");
 
-  if (!id || modalState.isRefreshing) {
+  if (
+    !id ||
+    id === "—" ||
+    modalState.isRefreshing
+  ) {
     return false;
   }
 
   modalState.isRefreshing = true;
+
   renderModal();
   attachRootBindings();
+  startRefreshTimeout(id);
 
   safeEmit("home:modal:refresh", {
     widgetId: id,
+    detail: modalState.detail,
   });
 
+  /*
+    Este modal no importa home.actions.js para evitar ciclos.
+    homeView/home.actions debe escuchar "home:modal:refresh"
+    y emitir "home:widget:open:success" con el detalle actualizado.
+  */
   return true;
 }
 
 async function handleNavigate(route = "") {
-  const targetRoute = safeText(route, "");
+  const targetRoute =
+    normalizeInternalRoute(route);
 
   if (!targetRoute) {
-    showToast("No hay ruta disponible.", "error");
+    showToast(
+      "No hay ruta disponible.",
+      "error"
+    );
+
     return false;
   }
 
@@ -1480,19 +1938,40 @@ async function handleNavigate(route = "") {
   });
 
   try {
-    if (AppCore?.router?.navigate) {
+    if (isFn(AppCore?.router?.navigate)) {
       await AppCore.router.navigate(targetRoute);
+      closeHomeModal();
       return true;
     }
 
-    if (AppCore?.Router?.navigate) {
+    if (isFn(AppCore?.Router?.navigate)) {
       await AppCore.Router.navigate(targetRoute);
+      closeHomeModal();
       return true;
     }
 
-    return true;
+    if (isBrowser()) {
+      window.history.pushState(
+        {},
+        "",
+        targetRoute
+      );
+
+      window.dispatchEvent(
+        new PopStateEvent("popstate")
+      );
+
+      closeHomeModal();
+      return true;
+    }
+
+    return false;
   } catch {
-    showToast("No se pudo abrir la ruta.", "error");
+    showToast(
+      "No se pudo abrir la ruta.",
+      "error"
+    );
+
     return false;
   }
 }
@@ -1502,76 +1981,165 @@ async function handleNavigate(route = "") {
 ========================================================= */
 
 function attachRootBindings() {
-  if (modalState.bindingsAttached) {
-    return;
+  if (!isBrowser()) {
+    return false;
   }
 
   const root = ensureRoot();
 
+  if (!root) {
+    return false;
+  }
+
+  if (
+    modalState.bindingsAttached &&
+    modalState.clickHandler
+  ) {
+    return true;
+  }
+
   const onClick = async (event) => {
-    const closeBtn = event.target.closest("[data-modal-close='true']");
+    const target = event.target;
+
+    const closeBtn =
+      target?.closest?.("[data-modal-close='true']");
+
     if (closeBtn) {
       event.preventDefault();
+      event.stopPropagation();
+
       closeHomeModal();
       return;
     }
 
-    const refreshBtn = event.target.closest('[data-modal-action="refresh"]');
+    const refreshBtn =
+      target?.closest?.('[data-modal-action="refresh"]');
+
     if (refreshBtn) {
       event.preventDefault();
-      await handleRefresh(refreshBtn.dataset.widgetId || "");
+      event.stopPropagation();
+
+      await handleRefresh(
+        refreshBtn.dataset.widgetId || ""
+      );
+
       return;
     }
 
-    const copyBtn = event.target.closest('[data-modal-action="copy"]');
+    const copyBtn =
+      target?.closest?.('[data-modal-action="copy"]');
+
     if (copyBtn) {
       event.preventDefault();
-      await handleCopy(copyBtn.dataset.widgetId || "");
+      event.stopPropagation();
+
+      await handleCopy(
+        copyBtn.dataset.widgetId || ""
+      );
+
       return;
     }
 
-    const navigateBtn = event.target.closest('[data-modal-action="navigate"]');
+    const navigateBtn =
+      target?.closest?.('[data-modal-action="navigate"]');
+
     if (navigateBtn) {
       event.preventDefault();
-      await handleNavigate(navigateBtn.dataset.route || "");
+      event.stopPropagation();
+
+      await handleNavigate(
+        navigateBtn.dataset.route || ""
+      );
+
       return;
     }
 
-    const overlay = event.target.closest("[data-home-modal-overlay='true']");
-    const panel = event.target.closest("[data-home-modal-panel='true']");
+    const overlay =
+      target?.closest?.("[data-home-modal-overlay='true']");
 
-    if (overlay && !panel && event.target === overlay) {
+    const panel =
+      target?.closest?.("[data-home-modal-panel='true']");
+
+    if (
+      overlay &&
+      !panel &&
+      target === overlay
+    ) {
       closeHomeModal();
     }
   };
 
-  root.__homeModalClickHandler = onClick;
-  root.addEventListener("click", onClick);
+  modalState.clickHandler = onClick;
 
-  modalState.bindingsAttached = true;
+  try {
+    root.addEventListener(
+      "click",
+      onClick
+    );
+
+    modalState.bindingsAttached = true;
+    return true;
+  } catch {
+    modalState.clickHandler = null;
+    modalState.bindingsAttached = false;
+    return false;
+  }
 }
 
 function detachRootBindings() {
-  const root = getRoot();
-  if (!root) return;
-
-  if (root.__homeModalClickHandler) {
-    try {
-      root.removeEventListener("click", root.__homeModalClickHandler);
-    } catch {}
-    delete root.__homeModalClickHandler;
+  if (!isBrowser()) {
+    return false;
   }
 
+  const root = getRoot();
+
+  if (
+    root &&
+    modalState.clickHandler
+  ) {
+    try {
+      root.removeEventListener(
+        "click",
+        modalState.clickHandler
+      );
+    } catch {}
+  }
+
+  modalState.clickHandler = null;
   modalState.bindingsAttached = false;
+
+  return true;
 }
 
 /* =========================================================
    EVENT BUS BRIDGE
 ========================================================= */
 
-function handleOpenEvent(event) {
-  const detail = event?.detail?.detail || event?.detail || event || null;
-  if (!detail) return;
+function resolveEventDetail(eventOrPayload = null) {
+  if (!eventOrPayload) {
+    return null;
+  }
+
+  const detail =
+    eventOrPayload?.detail?.detail ||
+    eventOrPayload?.detail ||
+    eventOrPayload;
+
+  if (!detail) {
+    return null;
+  }
+
+  return detail;
+}
+
+function handleOpenEvent(eventOrPayload) {
+  const detail =
+    resolveEventDetail(eventOrPayload);
+
+  if (!detail) {
+    return;
+  }
+
   openHomeModal(detail);
 }
 
@@ -1579,35 +2147,108 @@ function handleCloseEvent() {
   closeHomeModal();
 }
 
-function handleOpenedDetailEvent(event) {
-  const detail = event?.detail?.detail || event?.detail || event || null;
-  if (!detail) return;
+function handleOpenedDetailEvent(eventOrPayload) {
+  const payload =
+    resolveEventDetail(eventOrPayload);
+
+  const detail =
+    payload?.detail ||
+    payload?.widget ||
+    payload?.item ||
+    payload;
+
+  if (!detail) {
+    return;
+  }
 
   if (modalState.isOpen) {
     updateHomeModal(detail);
   }
 }
 
-let busAttached = false;
+function handleRefreshStartEvent(eventOrPayload) {
+  const payload =
+    resolveEventDetail(eventOrPayload);
+
+  const widgetId =
+    safeText(
+      payload?.widgetId ||
+        payload?.id ||
+        "",
+      ""
+    );
+
+  if (!modalState.isOpen) {
+    return;
+  }
+
+  modalState.isRefreshing = true;
+  renderModal();
+  attachRootBindings();
+
+  if (widgetId) {
+    startRefreshTimeout(widgetId);
+  }
+}
+
+function handleRefreshEndEvent(eventOrPayload) {
+  const payload =
+    resolveEventDetail(eventOrPayload);
+
+  const detail =
+    payload?.detail ||
+    payload?.widget ||
+    payload?.item ||
+    payload;
+
+  if (!modalState.isOpen) {
+    return;
+  }
+
+  if (detail && typeof detail === "object") {
+    updateHomeModal(detail);
+    return;
+  }
+
+  setHomeModalRefreshing(false);
+}
 
 function attachBus() {
-  if (busAttached) return;
+  if (modalState.busAttached) {
+    return true;
+  }
 
   safeOn("home:modal:open", handleOpenEvent);
   safeOn("home:modal:close", handleCloseEvent);
-  safeOn("home:widget:open:success", handleOpenedDetailEvent);
 
-  busAttached = true;
+  safeOn("home:widget:open:success", handleOpenedDetailEvent);
+  safeOn("home:widget:detail:success", handleOpenedDetailEvent);
+  safeOn("home:modal:refresh:start", handleRefreshStartEvent);
+  safeOn("home:modal:refresh:success", handleRefreshEndEvent);
+  safeOn("home:modal:refresh:end", handleRefreshEndEvent);
+
+  modalState.busAttached = true;
+
+  return true;
 }
 
 function detachBus() {
-  if (!busAttached) return;
+  if (!modalState.busAttached) {
+    return false;
+  }
 
   safeOff("home:modal:open", handleOpenEvent);
   safeOff("home:modal:close", handleCloseEvent);
-  safeOff("home:widget:open:success", handleOpenedDetailEvent);
 
-  busAttached = false;
+  safeOff("home:widget:open:success", handleOpenedDetailEvent);
+  safeOff("home:widget:detail:success", handleOpenedDetailEvent);
+  safeOff("home:modal:refresh:start", handleRefreshStartEvent);
+  safeOff("home:modal:refresh:success", handleRefreshEndEvent);
+  safeOff("home:modal:refresh:end", handleRefreshEndEvent);
+
+  modalState.busAttached = false;
+
+  return true;
 }
 
 /* =========================================================
@@ -1627,20 +2268,33 @@ export const OnionHomeModal = {
     return updateHomeModal(detail);
   },
 
+  setRefreshing(value = false) {
+    return setHomeModalRefreshing(value);
+  },
+
   getState() {
     return {
-      ...modalState,
-      detail: modalState.detail ? { ...modalState.detail } : null,
+      isOpen: modalState.isOpen,
+      isRefreshing: modalState.isRefreshing,
+      bindingsAttached: modalState.bindingsAttached,
+      busAttached: modalState.busAttached,
+      detail: modalState.detail
+        ? { ...modalState.detail }
+        : null,
     };
   },
 
   destroy() {
     closeHomeModal();
+
     detachEscHandler();
+    detachFocusTrap();
     detachRootBindings();
     detachBus();
+    clearRefreshTimeout();
 
     const root = getRoot();
+
     try {
       root?.remove?.();
     } catch {}
@@ -1650,8 +2304,10 @@ export const OnionHomeModal = {
 };
 
 try {
-  window.OnionHomeModal = OnionHomeModal;
-  window.renderHomeWidgetModal = OnionHomeModal.open;
+  if (isBrowser()) {
+    window.OnionHomeModal = OnionHomeModal;
+    window.renderHomeWidgetModal = OnionHomeModal.open;
+  }
 } catch {}
 
 /* =========================================================

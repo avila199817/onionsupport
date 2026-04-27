@@ -8,6 +8,7 @@
    - actualizar título del documento
    - activar menú SPA según ruta actual
    - mostrar u ocultar shell por ruta
+   - reparar clases residuales de auth/login tras navegación privada
 
    HARDENING:
    - guards de browser
@@ -17,6 +18,8 @@
    - no toca history
    - no modifica query/hash
    - no destruye /activate-account?token=...
+   - no destruye /activate-account/<token>
+   - no destruye /reset-password/confirm?token=...
 ========================================================= */
 
 import {
@@ -48,11 +51,44 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
+function isFn(value) {
+  return typeof value === "function";
+}
+
+function safeObject(value) {
+  return value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+    ? value
+    : {};
+}
+
 function safeToggleHidden(element, hidden) {
   if (!element) return false;
 
   try {
     element.hidden = Boolean(hidden);
+  } catch {}
+
+  try {
+    element.setAttribute(
+      "aria-hidden",
+      hidden ? "true" : "false"
+    );
+  } catch {}
+
+  return true;
+}
+
+function safeSetBusy(element, busy = false) {
+  if (!element) return false;
+
+  try {
+    element.setAttribute(
+      "aria-busy",
+      busy ? "true" : "false"
+    );
+
     return true;
   } catch {
     return false;
@@ -67,6 +103,7 @@ function safeSetAttribute(element, name, value) {
       name,
       String(value)
     );
+
     return true;
   } catch {
     return false;
@@ -92,6 +129,41 @@ function safeClassToggle(element, className, enabled) {
       className,
       Boolean(enabled)
     );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeClassRemove(element, ...classes) {
+  if (!element || !classes.length) return false;
+
+  try {
+    element.classList.remove(
+      ...classes.filter(Boolean)
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function safeDataset(element, key, value) {
+  if (!element || !key) return false;
+
+  try {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ""
+    ) {
+      delete element.dataset[key];
+      return true;
+    }
+
+    element.dataset[key] = String(value);
     return true;
   } catch {
     return false;
@@ -108,6 +180,7 @@ function safeEmit(
       eventName,
       payload
     );
+
     return true;
   } catch {
     return false;
@@ -120,9 +193,85 @@ function safeWarn(
 ) {
   try {
     AppCore?.utils?.warn?.(
+      "[Router Shell]",
       ...args
     );
   } catch {}
+
+  try {
+    console.warn(
+      "[Router Shell]",
+      ...args
+    );
+  } catch {}
+}
+
+function resolveDomElement(AppCore, key, selectors = []) {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    const fromCore =
+      AppCore?.dom?.[key];
+
+    if (
+      fromCore &&
+      document.contains(fromCore)
+    ) {
+      return fromCore;
+    }
+  } catch {}
+
+  for (const selector of selectors) {
+    try {
+      const found =
+        selector.startsWith("#")
+          ? document.getElementById(selector.slice(1))
+          : document.querySelector(selector);
+
+      if (found) {
+        try {
+          if (AppCore?.dom && key) {
+            AppCore.dom[key] = found;
+          }
+        } catch {}
+
+        return found;
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
+function routeRequestsHiddenShell(route = null) {
+  const meta =
+    safeObject(route?.meta);
+
+  return Boolean(
+    route?.hideShell === true ||
+      route?.shell === false ||
+      route?.showShell === false ||
+      route?.layout === "auth" ||
+      route?.layout === "public" ||
+      meta.hideShell === true ||
+      meta.shell === false ||
+      meta.showShell === false ||
+      meta.layout === "auth" ||
+      meta.layout === "public"
+  );
+}
+
+function routeRequestsAuthScreen(route = null) {
+  const meta =
+    safeObject(route?.meta);
+
+  return Boolean(
+    routeRequestsHiddenShell(route) ||
+      route?.authScreen === true ||
+      meta.authScreen === true
+  );
 }
 
 /* =========================================================
@@ -132,15 +281,25 @@ function safeWarn(
 export function getShellElements(AppCore) {
   if (!isBrowser()) {
     return {
+      html: null,
+      body: null,
+
+      shell: null,
+      main: null,
+      appContent: null,
+      viewContainer: null,
+
       sidebar: null,
       topbar: null,
+      tablehead: null,
       tableheadContainer: null,
-      body: null,
       mobileToggle: null,
-      shell: null,
-      viewContainer: null,
+      loader: null,
     };
   }
+
+  const html =
+    document.documentElement || null;
 
   const body =
     AppCore?.dom?.body ||
@@ -148,43 +307,115 @@ export function getShellElements(AppCore) {
     null;
 
   return {
-    sidebar:
-      AppCore?.dom?.sidebar ||
-      document.querySelector(".sidebar") ||
-      document.getElementById("sidebar") ||
-      null,
-
-    topbar:
-      AppCore?.dom?.topbar ||
-      document.querySelector(".topbar") ||
-      document.getElementById("topbar") ||
-      null,
-
-    tableheadContainer:
-      AppCore?.dom?.tableheadContainer ||
-      document.getElementById("tablehead-container") ||
-      document.querySelector("[data-tablehead-container]") ||
-      null,
-
+    html,
     body,
 
-    mobileToggle:
-      AppCore?.dom?.sidebarMobileToggle ||
-      AppCore?.dom?.mobileSidebarToggle ||
-      document.getElementById("toggleSidebarMobile") ||
-      document.querySelector("[data-sidebar-mobile-toggle]") ||
-      null,
-
     shell:
-      AppCore?.dom?.shell ||
-      document.getElementById("app-shell") ||
-      document.querySelector("[data-app-shell]") ||
-      null,
+      resolveDomElement(
+        AppCore,
+        "shell",
+        [
+          "#app-shell",
+          "[data-app-shell]",
+          "[data-app-shell='true']",
+        ]
+      ),
+
+    main:
+      resolveDomElement(
+        AppCore,
+        "main",
+        [
+          "#main-content",
+          ".main-content",
+          "[data-main-content]",
+        ]
+      ),
+
+    appContent:
+      resolveDomElement(
+        AppCore,
+        "appContent",
+        [
+          "#app-content",
+          "[data-app-content]",
+        ]
+      ),
 
     viewContainer:
-      AppCore?.dom?.viewContainer ||
-      document.getElementById("view-container") ||
-      null,
+      resolveDomElement(
+        AppCore,
+        "viewContainer",
+        [
+          "#view-container",
+          "[data-view-root]",
+        ]
+      ),
+
+    sidebar:
+      resolveDomElement(
+        AppCore,
+        "sidebar",
+        [
+          ".sidebar",
+          "#sidebar",
+          "[data-sidebar]",
+        ]
+      ),
+
+    topbar:
+      resolveDomElement(
+        AppCore,
+        "topbar",
+        [
+          ".topbar",
+          "#topbar",
+          "[data-topbar]",
+        ]
+      ),
+
+    tablehead:
+      resolveDomElement(
+        AppCore,
+        "tablehead",
+        [
+          "#table-head",
+          ".table-head",
+          "[data-tablehead]",
+        ]
+      ),
+
+    tableheadContainer:
+      resolveDomElement(
+        AppCore,
+        "tableheadContainer",
+        [
+          "#tablehead-container",
+          "[data-tablehead-container]",
+        ]
+      ),
+
+    mobileToggle:
+      resolveDomElement(
+        AppCore,
+        "sidebarMobileToggle",
+        [
+          "#toggleSidebarMobile",
+          "[data-sidebar-mobile-toggle]",
+          "[data-mobile-sidebar-toggle]",
+        ]
+      ),
+
+    loader:
+      resolveDomElement(
+        AppCore,
+        "loader",
+        [
+          "#app-loader",
+          ".app-loader",
+          "[data-app-loader]",
+        ]
+      ),
   };
 }
 
@@ -203,7 +434,7 @@ export function clearDynamicContainers(AppCore) {
   } catch (error) {
     safeWarn(
       AppCore,
-      "[Router Shell] clearDynamicContainers failed",
+      "clearDynamicContainers failed",
       error
     );
   }
@@ -214,12 +445,40 @@ export function clearDynamicContainers(AppCore) {
 
   try {
     const {
+      tablehead,
       tableheadContainer,
     } = getShellElements(AppCore);
 
     if (tableheadContainer) {
       tableheadContainer.innerHTML = "";
     }
+
+    if (tablehead) {
+      safeToggleHidden(tablehead, true);
+    }
+
+    document
+      .querySelectorAll("[data-router-dynamic], [data-dynamic-slot]")
+      .forEach((node) => {
+        try {
+          if (
+            node.id === "view-container" ||
+            node.matches?.("#view-container, [data-view-root]")
+          ) {
+            return;
+          }
+
+          node.innerHTML = "";
+        } catch {}
+      });
+
+    safeEmit(
+      AppCore,
+      "router:shell:dynamic-cleared",
+      {
+        source: "router.shell",
+      }
+    );
 
     return true;
   } catch {
@@ -237,23 +496,28 @@ export function setDocumentTitle(
       "Onion Support"
     );
 
-  const finalTitle =
+  const cleanTitle =
     safeText(
       title,
       appName
     );
 
+  const finalTitle =
+    cleanTitle === appName
+      ? appName
+      : `${cleanTitle} · ${appName}`;
+
   try {
     if (
       typeof AppCore?.setDocumentTitle === "function"
     ) {
-      AppCore.setDocumentTitle(finalTitle);
+      AppCore.setDocumentTitle(cleanTitle);
       return true;
     }
   } catch (error) {
     safeWarn(
       AppCore,
-      "[Router Shell] setDocumentTitle failed",
+      "setDocumentTitle failed",
       error
     );
   }
@@ -263,11 +527,7 @@ export function setDocumentTitle(
   }
 
   try {
-    document.title =
-      finalTitle === appName
-        ? appName
-        : `${finalTitle} · ${appName}`;
-
+    document.title = finalTitle;
     return true;
   } catch {
     return false;
@@ -303,6 +563,30 @@ function getSpaLinks(AppCore) {
   }
 }
 
+function resolveLinkCanonical(AppCore, link) {
+  try {
+    const href =
+      link?.getAttribute?.("href") || "";
+
+    if (!href) {
+      return "";
+    }
+
+    const resolvedHref =
+      resolveSpaHref(
+        AppCore,
+        href
+      );
+
+    return normalizeCanonicalPath(
+      AppCore,
+      resolvedHref
+    );
+  } catch {
+    return "";
+  }
+}
+
 export function setActiveMenu(
   AppCore,
   pathname = "/"
@@ -329,33 +613,33 @@ export function setActiveMenu(
   links.forEach((link) => {
     if (!link) return;
 
-    let active = false;
+    const hrefCanonical =
+      resolveLinkCanonical(
+        AppCore,
+        link
+      );
 
-    try {
-      const href =
-        link.getAttribute("href") || "/";
-
-      const resolvedHref =
-        resolveSpaHref(
-          AppCore,
-          href
-        );
-
-      const hrefCanonical =
-        normalizeCanonicalPath(
-          AppCore,
-          resolvedHref
-        );
-
-      active =
-        hrefCanonical === currentCanonical;
-    } catch {
-      active = false;
-    }
+    const active =
+      Boolean(
+        hrefCanonical &&
+          hrefCanonical === currentCanonical
+      );
 
     safeClassToggle(
       link,
       "active",
+      active
+    );
+
+    safeClassToggle(
+      link,
+      "is-active",
+      active
+    );
+
+    safeClassToggle(
+      link,
+      "router-active",
       active
     );
 
@@ -373,6 +657,15 @@ export function setActiveMenu(
     }
   });
 
+  safeEmit(
+    AppCore,
+    "router:shell:active-menu",
+    {
+      canonicalPath: currentCanonical,
+      count: links.length,
+    }
+  );
+
   return true;
 }
 
@@ -380,27 +673,139 @@ export function setActiveMenu(
    SHELL MODE
 ========================================================= */
 
+function syncShellState(
+  AppCore,
+  {
+    hidden = false,
+    routePath = null,
+    mode = "shell",
+  } = {}
+) {
+  try {
+    AppCore?.setState?.({
+      shellVisible: !hidden,
+      shellHidden: hidden,
+      routeMode: mode,
+    });
+  } catch {
+    try {
+      if (AppCore?.state) {
+        AppCore.state.shellVisible = !hidden;
+        AppCore.state.shellHidden = hidden;
+        AppCore.state.routeMode = mode;
+      }
+    } catch {}
+  }
+
+  try {
+    if (isFn(AppCore?.setShellVisibility)) {
+      AppCore.setShellVisibility(!hidden);
+    }
+  } catch {}
+
+  return {
+    hidden,
+    visible: !hidden,
+    route: routePath,
+    mode,
+  };
+}
+
+function hideLoaderIfNeeded(AppCore, hideShell = false) {
+  if (!hideShell) {
+    return false;
+  }
+
+  const {
+    loader,
+    body,
+    html,
+  } = getShellElements(AppCore);
+
+  try {
+    html?.classList?.remove?.("app-loading");
+    body?.classList?.remove?.("app-loading", "loading");
+  } catch {}
+
+  if (!loader) {
+    return false;
+  }
+
+  try {
+    loader.classList.remove(
+      "is-visible",
+      "app-loader--visible"
+    );
+
+    loader.classList.add(
+      "is-hidden",
+      "has-hidden"
+    );
+
+    loader.setAttribute(
+      "aria-hidden",
+      "true"
+    );
+
+    loader.setAttribute(
+      "aria-busy",
+      "false"
+    );
+
+    loader.dataset.loaderVisible = "false";
+    loader.hidden = true;
+  } catch {}
+
+  return true;
+}
+
 export function setShellMode(
   AppCore,
   route = null
 ) {
   const hideShell =
-    Boolean(route?.hideShell);
+    routeRequestsHiddenShell(route);
+
+  const authScreen =
+    routeRequestsAuthScreen(route);
 
   const routePath =
     safeText(
       route?.path,
-      null
-    );
+      ""
+    ) || null;
+
+  const mode =
+    hideShell ? "auth" : "shell";
 
   const {
+    html,
+    body,
     sidebar,
     topbar,
+    tablehead,
     tableheadContainer,
-    body,
     mobileToggle,
     shell,
+    main,
+    appContent,
+    viewContainer,
   } = getShellElements(AppCore);
+
+  /*
+    El shell raíz se mantiene disponible.
+    Lo que se oculta son las piezas laterales/superiores.
+    Esto evita layouts partidos si #app-shell contiene #view-container.
+  */
+  safeToggleHidden(shell, false);
+  safeToggleHidden(main, false);
+  safeToggleHidden(appContent, false);
+  safeToggleHidden(viewContainer, false);
+
+  safeSetBusy(shell, false);
+  safeSetBusy(main, false);
+  safeSetBusy(appContent, false);
+  safeSetBusy(viewContainer, false);
 
   safeToggleHidden(
     sidebar,
@@ -412,14 +817,23 @@ export function setShellMode(
     hideShell
   );
 
+  const hasTableheadContent =
+    Boolean(
+      tableheadContainer &&
+        safeText(
+          tableheadContainer.innerHTML,
+          ""
+        )
+    );
+
   safeToggleHidden(
-    tableheadContainer,
-    hideShell
+    tablehead,
+    hideShell || !hasTableheadContent
   );
 
   safeToggleHidden(
-    shell,
-    false
+    tableheadContainer,
+    hideShell
   );
 
   if (mobileToggle) {
@@ -431,17 +845,68 @@ export function setShellMode(
     safeSetAttribute(
       mobileToggle,
       "aria-expanded",
-      String(!hideShell)
+      hideShell ? "false" : "true"
     );
 
     safeSetAttribute(
       mobileToggle,
       "aria-hidden",
-      String(hideShell)
+      hideShell ? "true" : "false"
+    );
+  }
+
+  if (html) {
+    safeClassRemove(
+      html,
+      "app-booting",
+      "app-loading"
+    );
+
+    safeClassToggle(
+      html,
+      "app-ready",
+      true
+    );
+
+    safeClassToggle(
+      html,
+      "route-shell-hidden",
+      hideShell
+    );
+
+    safeClassToggle(
+      html,
+      "route-shell-visible",
+      !hideShell
+    );
+
+    safeDataset(
+      html,
+      "shell",
+      hideShell ? "hidden" : "visible"
+    );
+
+    safeDataset(
+      html,
+      "routeMode",
+      mode
     );
   }
 
   if (body) {
+    safeClassRemove(
+      body,
+      "app-booting",
+      "app-loading",
+      "loading"
+    );
+
+    safeClassToggle(
+      body,
+      "app-ready",
+      true
+    );
+
     safeClassToggle(
       body,
       "route-auth",
@@ -456,8 +921,14 @@ export function setShellMode(
 
     safeClassToggle(
       body,
+      "route-shell-visible",
+      !hideShell
+    );
+
+    safeClassToggle(
+      body,
       "auth-screen",
-      hideShell
+      authScreen
     );
 
     safeClassToggle(
@@ -472,33 +943,170 @@ export function setShellMode(
       hideShell
     );
 
-    try {
-      body.dataset.shellHidden =
-        hideShell ? "true" : "false";
+    if (!hideShell) {
+      safeClassRemove(
+        body,
+        "login-no-scroll"
+      );
+    }
 
-      body.dataset.routeMode =
-        hideShell ? "auth" : "shell";
+    safeDataset(
+      body,
+      "shell",
+      hideShell ? "hidden" : "visible"
+    );
 
-      if (routePath) {
-        body.dataset.currentRoute =
-          routePath;
-      } else {
-        delete body.dataset.currentRoute;
-      }
-    } catch {}
+    safeDataset(
+      body,
+      "shellHidden",
+      hideShell ? "true" : "false"
+    );
+
+    safeDataset(
+      body,
+      "routeMode",
+      mode
+    );
+
+    safeDataset(
+      body,
+      "currentRoute",
+      routePath
+    );
   }
+
+  hideLoaderIfNeeded(
+    AppCore,
+    hideShell
+  );
+
+  const state =
+    syncShellState(
+      AppCore,
+      {
+        hidden: hideShell,
+        routePath,
+        mode,
+      }
+    );
 
   safeEmit(
     AppCore,
     "router:shell:change",
     {
-      hidden: hideShell,
+      ...state,
+      authScreen,
       route: routePath,
+      hasSidebar: Boolean(sidebar),
+      hasTopbar: Boolean(topbar),
+      hasTablehead: Boolean(tablehead),
+      hasShell: Boolean(shell),
+      source: "router.shell",
     }
   );
 
+  return state;
+}
+
+/* =========================================================
+   DEBUG
+========================================================= */
+
+export function getShellSnapshot(AppCore) {
+  const elements =
+    getShellElements(AppCore);
+
   return {
-    hidden: hideShell,
-    route: routePath,
+    route:
+      AppCore?.state?.route || null,
+
+    publicPath:
+      AppCore?.state?.publicPath || null,
+
+    shellVisible:
+      AppCore?.state?.shellVisible ?? null,
+
+    shellHidden:
+      AppCore?.state?.shellHidden ?? null,
+
+    routeMode:
+      AppCore?.state?.routeMode || null,
+
+    dom: {
+      bodyClasses:
+        elements.body?.className || "",
+
+      htmlClasses:
+        elements.html?.className || "",
+
+      bodyShell:
+        elements.body?.dataset?.shell || null,
+
+      htmlShell:
+        elements.html?.dataset?.shell || null,
+
+      hasShell:
+        Boolean(elements.shell),
+
+      hasMain:
+        Boolean(elements.main),
+
+      hasAppContent:
+        Boolean(elements.appContent),
+
+      hasViewContainer:
+        Boolean(elements.viewContainer),
+
+      hasSidebar:
+        Boolean(elements.sidebar),
+
+      hasTopbar:
+        Boolean(elements.topbar),
+
+      hasTablehead:
+        Boolean(elements.tablehead),
+
+      hasTableheadContainer:
+        Boolean(elements.tableheadContainer),
+
+      hasMobileToggle:
+        Boolean(elements.mobileToggle),
+
+      hasLoader:
+        Boolean(elements.loader),
+
+      sidebarHidden:
+        Boolean(elements.sidebar?.hidden),
+
+      topbarHidden:
+        Boolean(elements.topbar?.hidden),
+
+      tableheadHidden:
+        Boolean(elements.tablehead?.hidden),
+
+      tableheadContainerHidden:
+        Boolean(elements.tableheadContainer?.hidden),
+
+      shellHidden:
+        Boolean(elements.shell?.hidden),
+
+      viewHidden:
+        Boolean(elements.viewContainer?.hidden),
+    },
   };
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default {
+  getShellElements,
+
+  clearDynamicContainers,
+  setDocumentTitle,
+  setActiveMenu,
+  setShellMode,
+
+  getShellSnapshot,
+};

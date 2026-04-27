@@ -25,6 +25,8 @@
    - rebind recibido desde TopbarUI se llama solo como soft-rebind si falta DOM
    - listeners app usan cleanup/event bus con fallback sin duplicar intencionadamente
    - sin cleanup.run() desde este archivo
+   - resize/orientationchange quedan centralizados en DOM events, no duplicados
+   - fallback local cleanup si AppCore.cleanup no existe
 ========================================================= */
 
 import {
@@ -47,20 +49,59 @@ import {
    CONSTANTS
 ========================================================= */
 
-const VISUAL_SYNC_DELAY_MS =
-  0;
+const VISUAL_SYNC_DELAY_MS = 0;
+const VISUAL_SYNC_SETTLED_MS = 48;
+const RESIZE_SYNC_DELAY_MS = 80;
+const SIDEBAR_SYNC_DELAY_MS = 32;
+const SOFT_REBIND_IF_DOM_MISSING_MS = 24;
 
-const VISUAL_SYNC_SETTLED_MS =
-  48;
+const LOCAL_SCOPE_DOM_SUFFIX = "dom";
+const LOCAL_SCOPE_SEARCH_SUFFIX = "search";
+const LOCAL_SCOPE_APP_SUFFIX = "app";
 
-const RESIZE_SYNC_DELAY_MS =
-  80;
+/* =========================================================
+   LOCAL FALLBACK CLEANUP
+========================================================= */
 
-const SIDEBAR_SYNC_DELAY_MS =
-  32;
+const localCleanups = new Map();
 
-const SOFT_REBIND_IF_DOM_MISSING_MS =
-  24;
+function resolveLocalScope(scope = "", type = "") {
+  return `${safeText(scope, "ui:topbar")}:${safeText(type, "local")}`;
+}
+
+function pushLocalCleanup(scope = "", cleanup) {
+  if (!isFunction(cleanup)) {
+    return false;
+  }
+
+  const key = safeText(scope, "ui:topbar:local");
+  const list = localCleanups.get(key) || [];
+
+  list.push(cleanup);
+  localCleanups.set(key, list);
+
+  return true;
+}
+
+function runLocalCleanups(scope = "") {
+  const key = safeText(scope, "");
+
+  if (!key) {
+    return false;
+  }
+
+  const list = localCleanups.get(key) || [];
+
+  for (const cleanup of list) {
+    try {
+      cleanup?.();
+    } catch {}
+  }
+
+  localCleanups.delete(key);
+
+  return true;
+}
 
 /* =========================================================
    HELPERS
@@ -97,8 +138,7 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
+  const text = String(value).trim();
 
   return text || fallback;
 }
@@ -115,13 +155,6 @@ function safeObject(value) {
     !Array.isArray(value)
     ? value
     : {};
-}
-
-function isElement(value) {
-  return Boolean(
-    value &&
-    value.nodeType === 1
-  );
 }
 
 function isConnected(node) {
@@ -154,14 +187,11 @@ function safeSetTimeout(callback, ms = 0) {
   }
 
   try {
-    return window.setTimeout(
-      () => {
-        try {
-          callback();
-        } catch {}
-      },
-      Math.max(0, Number(ms) || 0)
-    );
+    return window.setTimeout(() => {
+      try {
+        callback();
+      } catch {}
+    }, Math.max(0, Number(ms) || 0));
   } catch {
     try {
       callback();
@@ -189,9 +219,7 @@ function isEditableTarget(target) {
     return false;
   }
 
-  const tag =
-    safeText(target.tagName, "")
-      .toLowerCase();
+  const tag = safeText(target.tagName, "").toLowerCase();
 
   if (
     tag === "input" ||
@@ -248,8 +276,7 @@ function ensureId(node, fallback = "") {
     return "";
   }
 
-  const existing =
-    safeText(node.id, "");
+  const existing = safeText(node.id, "");
 
   if (existing) {
     return existing;
@@ -269,9 +296,7 @@ function ensureId(node, fallback = "") {
 }
 
 function getSearchValue(getDom) {
-  const {
-    searchInput,
-  } = getDom();
+  const { searchInput } = getDom();
 
   return normalizeQuery(
     searchInput?.value || ""
@@ -279,9 +304,7 @@ function getSearchValue(getDom) {
 }
 
 function getSearchItems(getDom) {
-  const {
-    searchResults,
-  } = getDom();
+  const { searchResults } = getDom();
 
   if (!searchResults) {
     return [];
@@ -297,9 +320,7 @@ function getSearchItems(getDom) {
 }
 
 function isResultsOpen(getDom) {
-  const {
-    searchResults,
-  } = getDom();
+  const { searchResults } = getDom();
 
   if (!searchResults) {
     return false;
@@ -313,8 +334,7 @@ function isResultsOpen(getDom) {
 }
 
 function isInsideSearch(event, getDom) {
-  const target =
-    event?.target;
+  const target = event?.target;
 
   if (!target) {
     return false;
@@ -346,8 +366,7 @@ function isSearchInteractionActive(getDom) {
     searchWrap,
   } = getDom();
 
-  const active =
-    document.activeElement;
+  const active = document.activeElement;
 
   if (!active) {
     return false;
@@ -379,59 +398,39 @@ function clampActiveIndex(runtime, items = []) {
 }
 
 function setActiveIndex(runtime, getDom, nextIndex = -1) {
-  const items =
-    getSearchItems(getDom);
+  const items = getSearchItems(getDom);
 
   if (!items.length) {
     runtime.activeIndex = -1;
-
-    updateActiveVisuals(
-      runtime,
-      getDom
-    );
-
+    updateActiveVisuals(runtime, getDom);
     return -1;
   }
 
-  const max =
-    items.length - 1;
+  const max = items.length - 1;
 
-  runtime.activeIndex =
-    Math.max(
-      0,
-      Math.min(nextIndex, max)
-    );
-
-  updateActiveItem(
-    runtime,
-    items
+  runtime.activeIndex = Math.max(
+    0,
+    Math.min(nextIndex, max)
   );
 
-  updateActiveVisuals(
-    runtime,
-    getDom
-  );
+  updateActiveItem(runtime, items);
+  updateActiveVisuals(runtime, getDom);
 
   return runtime.activeIndex;
 }
 
 function moveActiveIndex(runtime, getDom, direction = 1) {
-  const items =
-    getSearchItems(getDom);
+  const items = getSearchItems(getDom);
 
   if (!items.length) {
     runtime.activeIndex = -1;
     return -1;
   }
 
-  const max =
-    items.length - 1;
+  const max = items.length - 1;
 
   if (runtime.activeIndex < 0) {
-    runtime.activeIndex =
-      direction > 0
-        ? 0
-        : max;
+    runtime.activeIndex = direction > 0 ? 0 : max;
   } else {
     runtime.activeIndex += direction;
 
@@ -444,23 +443,14 @@ function moveActiveIndex(runtime, getDom, direction = 1) {
     }
   }
 
-  updateActiveItem(
-    runtime,
-    items
-  );
-
-  updateActiveVisuals(
-    runtime,
-    getDom
-  );
+  updateActiveItem(runtime, items);
+  updateActiveVisuals(runtime, getDom);
 
   return runtime.activeIndex;
 }
 
 function clearSearchInput(getDom) {
-  const {
-    searchInput,
-  } = getDom();
+  const { searchInput } = getDom();
 
   if (!searchInput) {
     return false;
@@ -475,9 +465,7 @@ function clearSearchInput(getDom) {
 }
 
 function blurSearchInput(getDom) {
-  const {
-    searchInput,
-  } = getDom();
+  const { searchInput } = getDom();
 
   try {
     searchInput?.blur?.();
@@ -485,9 +473,7 @@ function blurSearchInput(getDom) {
 }
 
 function focusSearchInput(getDom, options = {}) {
-  const {
-    searchInput,
-  } = getDom();
+  const { searchInput } = getDom();
 
   if (!searchInput) {
     return false;
@@ -495,8 +481,7 @@ function focusSearchInput(getDom, options = {}) {
 
   try {
     searchInput.focus({
-      preventScroll:
-        options.preventScroll !== false,
+      preventScroll: options.preventScroll !== false,
     });
 
     if (options.select) {
@@ -518,10 +503,7 @@ function hideSearch(runtime, getDom, options = {}) {
   clearSearchDebounce(runtime);
   abortSearch(runtime);
 
-  hideResultsContainer(
-    runtime,
-    getDom
-  );
+  hideResultsContainer(runtime, getDom);
 
   if (options.blur) {
     blurSearchInput(getDom);
@@ -543,8 +525,7 @@ function scheduleSearch({
   query = "",
   immediate = false,
 }) {
-  const value =
-    normalizeQuery(query);
+  const value = normalizeQuery(query);
 
   clearSearchDebounce(runtime);
 
@@ -552,11 +533,7 @@ function scheduleSearch({
     !value ||
     value.length < TOPBAR_SEARCH_CONFIG.minQueryLength
   ) {
-    hideResultsContainer(
-      runtime,
-      getDom
-    );
-
+    hideResultsContainer(runtime, getDom);
     return false;
   }
 
@@ -571,8 +548,7 @@ function scheduleSearch({
       runtime,
       getDom,
       closeSidebarMobile,
-      query:
-        value,
+      query: value,
     });
   };
 
@@ -581,11 +557,10 @@ function scheduleSearch({
     return true;
   }
 
-  runtime.searchDebounceTimer =
-    safeSetTimeout(
-      execute,
-      TOPBAR_SEARCH_CONFIG.debounceMs
-    );
+  runtime.searchDebounceTimer = safeSetTimeout(
+    execute,
+    TOPBAR_SEARCH_CONFIG.debounceMs
+  );
 
   return true;
 }
@@ -605,8 +580,7 @@ async function openSearchItem({
     return false;
   }
 
-  runtime.openingSearchResult =
-    true;
+  runtime.openingSearchResult = true;
 
   try {
     await goToResult({
@@ -620,8 +594,7 @@ async function openSearchItem({
 
     return true;
   } finally {
-    runtime.openingSearchResult =
-      false;
+    runtime.openingSearchResult = false;
   }
 }
 
@@ -638,17 +611,15 @@ function setSearchAria(getDom) {
     return false;
   }
 
-  const inputId =
-    ensureId(
-      searchInput,
-      "topbar-search-input"
-    );
+  const inputId = ensureId(
+    searchInput,
+    "topbar-search-input"
+  );
 
-  const resultsId =
-    ensureId(
-      searchResults,
-      "topbar-search-results"
-    );
+  const resultsId = ensureId(
+    searchResults,
+    "topbar-search-results"
+  );
 
   try {
     searchResults.setAttribute("role", "listbox");
@@ -677,8 +648,7 @@ function closeSidebarIfOpen(closeSidebarMobile) {
     return false;
   }
 
-  const body =
-    document.body;
+  const body = document.body;
 
   if (
     !body?.classList?.contains?.("sidebar-open")
@@ -692,8 +662,7 @@ function closeSidebarIfOpen(closeSidebarMobile) {
 }
 
 function isInsideSidebarOrToggle(event) {
-  const target =
-    event?.target;
+  const target = event?.target;
 
   if (!target) {
     return false;
@@ -727,10 +696,7 @@ function safeWarn(AppCore, ...args) {
 
   try {
     if (AppCore?.config?.debug) {
-      console.warn(
-        "[TopbarEvents]",
-        ...args
-      );
+      console.warn("[TopbarEvents]", ...args);
     }
   } catch {}
 }
@@ -745,7 +711,8 @@ function bindCleanupDomEvent(
   target,
   eventName,
   handler,
-  options = false
+  options = false,
+  localScope = scope
 ) {
   if (
     !target ||
@@ -787,6 +754,16 @@ function bindCleanupDomEvent(
       options
     );
 
+    pushLocalCleanup(localScope, () => {
+      try {
+        target.removeEventListener(
+          eventName,
+          handler,
+          options
+        );
+      } catch {}
+    });
+
     return true;
   } catch {
     return false;
@@ -797,7 +774,8 @@ function bindCleanupAppEvent(
   AppCore,
   scope,
   eventName,
-  handler
+  handler,
+  localScope = scope
 ) {
   if (
     !eventName ||
@@ -807,9 +785,9 @@ function bindCleanupAppEvent(
   }
 
   /*
-    Usamos cleanup.event si existe para que TopbarUI.unbind()/destroy()
-    pueda limpiar. Como TopbarUI ya no llama cleanup.run() en cada render,
-    esto no debe disparar tormenta.
+    Preferimos cleanup.event si existe porque TopbarUI.unbind()
+    limpia ese scope. Si no existe, usamos bus. Si tampoco existe,
+    window fallback. No duplicamos bus + window.
   */
   try {
     if (isFunction(AppCore?.cleanup?.event)) {
@@ -825,10 +803,23 @@ function bindCleanupAppEvent(
 
   try {
     if (isFunction(AppCore?.events?.on)) {
-      AppCore.events.on(
+      const maybeOff = AppCore.events.on(
         eventName,
         handler
       );
+
+      if (isFunction(maybeOff)) {
+        pushLocalCleanup(localScope, maybeOff);
+      } else if (isFunction(AppCore?.events?.off)) {
+        pushLocalCleanup(localScope, () => {
+          try {
+            AppCore.events.off(
+              eventName,
+              handler
+            );
+          } catch {}
+        });
+      }
 
       return true;
     }
@@ -840,6 +831,15 @@ function bindCleanupAppEvent(
         eventName,
         handler
       );
+
+      pushLocalCleanup(localScope, () => {
+        try {
+          window.removeEventListener(
+            eventName,
+            handler
+          );
+        } catch {}
+      });
 
       return true;
     }
@@ -868,9 +868,7 @@ function createVisualScheduler({
 
   function hasTopbarDom() {
     try {
-      const {
-        topbar,
-      } = getDom();
+      const { topbar } = getDom();
 
       return Boolean(
         topbar &&
@@ -886,31 +884,28 @@ function createVisualScheduler({
       return false;
     }
 
+    safeWarn(
+      AppCore,
+      "Topbar DOM ausente. Solicitando soft rebind.",
+      {
+        reason,
+      }
+    );
+
     /*
-      rebind viene de TopbarUI.queueRebind.
-      Con el index corregido es soft-refresh por defecto.
+      En TopbarUI se pasa queueRebind(delay).
+      No pasamos objeto extra para no romper firmas.
     */
     safeCall(
       rebind,
-      SOFT_REBIND_IF_DOM_MISSING_MS,
-      {
-        reason:
-          `topbar-events:${reason}`,
-        force:
-          false,
-        hard:
-          false,
-        explicit:
-          false,
-      }
+      SOFT_REBIND_IF_DOM_MISSING_MS
     );
 
     return true;
   }
 
   function syncNow(options = {}) {
-    const detail =
-      safeObject(options);
+    const detail = safeObject(options);
 
     softRebindIfMissing(
       detail.reason || "sync-now"
@@ -940,40 +935,48 @@ function createVisualScheduler({
   }
 
   function schedule(options = {}) {
-    const detail =
-      safeObject(options);
+    const detail = safeObject(options);
+
+    /*
+      Acciones de cierre se hacen inmediatas para que otro evento posterior
+      no las pise antes del timer.
+    */
+    if (detail.hideResults === true) {
+      safeCall(hideResults);
+    }
+
+    if (detail.closeSidebarMobile === true) {
+      safeCall(closeSidebarMobile);
+    }
 
     safeClearTimeout(timer);
 
-    timer =
-      safeSetTimeout(
-        () => {
-          timer = null;
-          syncNow(detail);
-        },
-        Number.isFinite(Number(detail.delayMs))
-          ? Number(detail.delayMs)
-          : VISUAL_SYNC_DELAY_MS
-      );
+    timer = safeSetTimeout(
+      () => {
+        timer = null;
+        syncNow(detail);
+      },
+      Number.isFinite(Number(detail.delayMs))
+        ? Number(detail.delayMs)
+        : VISUAL_SYNC_DELAY_MS
+    );
 
     if (detail.settled !== false) {
       safeClearTimeout(settledTimer);
 
-      settledTimer =
-        safeSetTimeout(
-          () => {
-            settledTimer = null;
+      settledTimer = safeSetTimeout(
+        () => {
+          settledTimer = null;
 
-            syncNow({
-              ...detail,
-              reason:
-                `${safeText(detail.reason, "visual-sync")}:settled`,
-            });
-          },
-          Number.isFinite(Number(detail.settledMs))
-            ? Number(detail.settledMs)
-            : VISUAL_SYNC_SETTLED_MS
-        );
+          syncNow({
+            ...detail,
+            reason: `${safeText(detail.reason, "visual-sync")}:settled`,
+          });
+        },
+        Number.isFinite(Number(detail.settledMs))
+          ? Number(detail.settledMs)
+          : VISUAL_SYNC_SETTLED_MS
+      );
     }
 
     return true;
@@ -1013,6 +1016,8 @@ export function createTopbarEventHandlers({
   toggleSidebarMobile,
   syncDomCache,
 }) {
+  let resizeTimer = null;
+
   function handleMobileToggleClick(event) {
     try {
       event?.preventDefault?.();
@@ -1033,33 +1038,37 @@ export function createTopbarEventHandlers({
       return;
     }
 
-    closeSidebarIfOpen(
-      closeSidebarMobile
-    );
+    closeSidebarIfOpen(closeSidebarMobile);
   }
 
-  function handleViewportResize() {
+  function runViewportResizeSync() {
     safeCall(syncDomCache);
     safeCall(setMobileToggleState);
     safeCall(syncFixedTopbarOffset);
 
     if (isResultsOpen(getDom)) {
-      updateActiveVisuals(
-        runtime,
-        getDom
-      );
+      updateActiveVisuals(runtime, getDom);
     }
   }
 
+  function handleViewportResize() {
+    safeClearTimeout(resizeTimer);
+
+    resizeTimer = safeSetTimeout(
+      () => {
+        resizeTimer = null;
+        runViewportResizeSync();
+      },
+      RESIZE_SYNC_DELAY_MS
+    );
+  }
+
   function handleSearchCompositionStart() {
-    runtime.isComposingSearch =
-      true;
+    runtime.isComposingSearch = true;
   }
 
   function handleSearchCompositionEnd() {
-    runtime.isComposingSearch =
-      false;
-
+    runtime.isComposingSearch = false;
     handleSearchInput();
   }
 
@@ -1068,8 +1077,7 @@ export function createTopbarEventHandlers({
       return;
     }
 
-    const value =
-      getSearchValue(getDom);
+    const value = getSearchValue(getDom);
 
     scheduleSearch({
       AppCore,
@@ -1077,16 +1085,13 @@ export function createTopbarEventHandlers({
       runtime,
       getDom,
       closeSidebarMobile,
-      query:
-        value,
-      immediate:
-        false,
+      query: value,
+      immediate: false,
     });
   }
 
   function handleSearchFocus() {
-    const value =
-      getSearchValue(getDom);
+    const value = getSearchValue(getDom);
 
     if (
       value.length >=
@@ -1098,19 +1103,14 @@ export function createTopbarEventHandlers({
         runtime,
         getDom,
         closeSidebarMobile,
-        query:
-          value,
-        immediate:
-          true,
+        query: value,
+        immediate: true,
       });
 
       return;
     }
 
-    hideResultsContainer(
-      runtime,
-      getDom
-    );
+    hideResultsContainer(runtime, getDom);
   }
 
   function handleSearchPointerDown(event) {
@@ -1118,10 +1118,6 @@ export function createTopbarEventHandlers({
       return;
     }
 
-    /*
-      Evita que el input pierda foco antes de que el click del resultado
-      pueda ejecutar goToResult correctamente.
-    */
     const result =
       event.target?.closest?.(".search-result");
 
@@ -1133,38 +1129,24 @@ export function createTopbarEventHandlers({
   }
 
   async function handleSearchKeydown(event) {
-    const {
-      searchInput,
-    } = getDom();
+    const { searchInput } = getDom();
 
     if (!searchInput) {
       return;
     }
 
-    const key =
-      event.key;
+    const key = safeText(event.key, "");
+    const active = isSearchInteractionActive(getDom);
 
-    const active =
-      isSearchInteractionActive(getDom);
-
-    /*
-      Atajos globales:
-      - Ctrl/Cmd + K: foco en search
-      - "/" fuera de inputs: foco en search
-    */
     if (
       (event.ctrlKey || event.metaKey) &&
       key.toLowerCase() === "k"
     ) {
       event.preventDefault();
 
-      focusSearchInput(
-        getDom,
-        {
-          select:
-            true,
-        }
-      );
+      focusSearchInput(getDom, {
+        select: true,
+      });
 
       return;
     }
@@ -1175,9 +1157,7 @@ export function createTopbarEventHandlers({
       !isEditableTarget(event.target)
     ) {
       event.preventDefault();
-
       focusSearchInput(getDom);
-
       return;
     }
 
@@ -1185,15 +1165,13 @@ export function createTopbarEventHandlers({
       return;
     }
 
-    const items =
-      getSearchItems(getDom);
+    const items = getSearchItems(getDom);
 
     if (key === "ArrowDown") {
       event.preventDefault();
 
       if (!items.length) {
-        const value =
-          getSearchValue(getDom);
+        const value = getSearchValue(getDom);
 
         scheduleSearch({
           AppCore,
@@ -1201,21 +1179,14 @@ export function createTopbarEventHandlers({
           runtime,
           getDom,
           closeSidebarMobile,
-          query:
-            value,
-          immediate:
-            true,
+          query: value,
+          immediate: true,
         });
 
         return;
       }
 
-      moveActiveIndex(
-        runtime,
-        getDom,
-        1
-      );
-
+      moveActiveIndex(runtime, getDom, 1);
       return;
     }
 
@@ -1226,12 +1197,7 @@ export function createTopbarEventHandlers({
         return;
       }
 
-      moveActiveIndex(
-        runtime,
-        getDom,
-        -1
-      );
-
+      moveActiveIndex(runtime, getDom, -1);
       return;
     }
 
@@ -1240,13 +1206,7 @@ export function createTopbarEventHandlers({
       items.length
     ) {
       event.preventDefault();
-
-      setActiveIndex(
-        runtime,
-        getDom,
-        0
-      );
-
+      setActiveIndex(runtime, getDom, 0);
       return;
     }
 
@@ -1255,13 +1215,7 @@ export function createTopbarEventHandlers({
       items.length
     ) {
       event.preventDefault();
-
-      setActiveIndex(
-        runtime,
-        getDom,
-        items.length - 1
-      );
-
+      setActiveIndex(runtime, getDom, items.length - 1);
       return;
     }
 
@@ -1279,13 +1233,9 @@ export function createTopbarEventHandlers({
       const index =
         runtime.activeIndex >= 0
           ? runtime.activeIndex
-          : clampActiveIndex(
-              runtime,
-              items
-            );
+          : clampActiveIndex(runtime, items);
 
-      const item =
-        runtime.currentItems[index];
+      const item = runtime.currentItems[index];
 
       if (!item) {
         return;
@@ -1306,30 +1256,19 @@ export function createTopbarEventHandlers({
     if (key === "Escape") {
       event.preventDefault();
 
-      hideSearch(
-        runtime,
-        getDom,
-        {
-          blur:
-            true,
-        }
-      );
+      hideSearch(runtime, getDom, {
+        blur: true,
+      });
 
       return;
     }
 
     if (key === "Tab") {
-      safeSetTimeout(
-        () => {
-          if (!isSearchInteractionActive(getDom)) {
-            hideResultsContainer(
-              runtime,
-              getDom
-            );
-          }
-        },
-        0
-      );
+      safeSetTimeout(() => {
+        if (!isSearchInteractionActive(getDom)) {
+          hideResultsContainer(runtime, getDom);
+        }
+      }, 0);
     }
   }
 
@@ -1342,10 +1281,7 @@ export function createTopbarEventHandlers({
       return;
     }
 
-    hideResultsContainer(
-      runtime,
-      getDom
-    );
+    hideResultsContainer(runtime, getDom);
   }
 
   function handleSearchResultsMouseMove(event) {
@@ -1356,8 +1292,7 @@ export function createTopbarEventHandlers({
       return;
     }
 
-    const idx =
-      Number(result.dataset.index);
+    const idx = Number(result.dataset.index);
 
     if (!Number.isFinite(idx)) {
       return;
@@ -1367,20 +1302,11 @@ export function createTopbarEventHandlers({
       return;
     }
 
-    runtime.activeIndex =
-      idx;
-
-    updateActiveVisuals(
-      runtime,
-      getDom
-    );
+    runtime.activeIndex = idx;
+    updateActiveVisuals(runtime, getDom);
   }
 
   function handleSearchResultsClick(event) {
-    /*
-      El click principal del resultado ya lo registra renderResults().
-      Este handler solo evita propagaciones raras hacia document/click.
-    */
     const result =
       event.target?.closest?.(".search-result");
 
@@ -1394,8 +1320,7 @@ export function createTopbarEventHandlers({
   }
 
   function handleRouteVisualSync(payload = {}) {
-    const detail =
-      getEventDetail(payload);
+    const detail = getEventDetail(payload);
 
     safeCall(syncDomCache);
 
@@ -1412,37 +1337,22 @@ export function createTopbarEventHandlers({
   }
 
   function handleSearchCloseEvent() {
-    hideSearch(
-      runtime,
-      getDom,
-      {
-        blur:
-          true,
-      }
-    );
+    hideSearch(runtime, getDom, {
+      blur: true,
+    });
   }
 
   function handleSearchFocusEvent() {
-    focusSearchInput(
-      getDom,
-      {
-        select:
-          true,
-      }
-    );
+    focusSearchInput(getDom, {
+      select: true,
+    });
   }
 
   function handleSearchClearEvent() {
-    hideSearch(
-      runtime,
-      getDom,
-      {
-        blur:
-          true,
-        clearInput:
-          true,
-      }
-    );
+    hideSearch(runtime, getDom, {
+      blur: true,
+      clearInput: true,
+    });
   }
 
   return {
@@ -1478,9 +1388,16 @@ export function bindTopbarDomEvents({
   getDom,
   handlers,
 }) {
-  const {
-    mobileToggle,
-  } = getDom();
+  if (!isBrowser()) {
+    return false;
+  }
+
+  const localScope =
+    resolveLocalScope(scope, LOCAL_SCOPE_DOM_SUFFIX);
+
+  runLocalCleanups(localScope);
+
+  const { mobileToggle } = getDom();
 
   if (mobileToggle) {
     bindCleanupDomEvent(
@@ -1488,14 +1405,13 @@ export function bindTopbarDomEvents({
       scope,
       mobileToggle,
       "click",
-      handlers.handleMobileToggleClick
+      handlers.handleMobileToggleClick,
+      false,
+      localScope
     );
 
     try {
-      mobileToggle.setAttribute(
-        "aria-controls",
-        "sidebar"
-      );
+      mobileToggle.setAttribute("aria-controls", "sidebar");
 
       mobileToggle.setAttribute(
         "aria-expanded",
@@ -1512,7 +1428,9 @@ export function bindTopbarDomEvents({
     scope,
     document,
     "click",
-    handlers.handleOutsideSidebarClick
+    handlers.handleOutsideSidebarClick,
+    false,
+    localScope
   );
 
   bindCleanupDomEvent(
@@ -1522,9 +1440,9 @@ export function bindTopbarDomEvents({
     "resize",
     handlers.handleViewportResize,
     {
-      passive:
-        true,
-    }
+      passive: true,
+    },
+    localScope
   );
 
   bindCleanupDomEvent(
@@ -1534,9 +1452,9 @@ export function bindTopbarDomEvents({
     "orientationchange",
     handlers.handleViewportResize,
     {
-      passive:
-        true,
-    }
+      passive: true,
+    },
+    localScope
   );
 
   return true;
@@ -1552,6 +1470,15 @@ export function bindSearchDomEvents({
   getDom,
   handlers,
 }) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  const localScope =
+    resolveLocalScope(scope, LOCAL_SCOPE_SEARCH_SUFFIX);
+
+  runLocalCleanups(localScope);
+
   const {
     searchInput,
     searchResults,
@@ -1571,7 +1498,9 @@ export function bindSearchDomEvents({
     scope,
     searchInput,
     "compositionstart",
-    handlers.handleSearchCompositionStart
+    handlers.handleSearchCompositionStart,
+    false,
+    localScope
   );
 
   bindCleanupDomEvent(
@@ -1579,7 +1508,9 @@ export function bindSearchDomEvents({
     scope,
     searchInput,
     "compositionend",
-    handlers.handleSearchCompositionEnd
+    handlers.handleSearchCompositionEnd,
+    false,
+    localScope
   );
 
   bindCleanupDomEvent(
@@ -1587,7 +1518,9 @@ export function bindSearchDomEvents({
     scope,
     searchInput,
     "input",
-    handlers.handleSearchInput
+    handlers.handleSearchInput,
+    false,
+    localScope
   );
 
   bindCleanupDomEvent(
@@ -1595,7 +1528,9 @@ export function bindSearchDomEvents({
     scope,
     searchInput,
     "focus",
-    handlers.handleSearchFocus
+    handlers.handleSearchFocus,
+    false,
+    localScope
   );
 
   bindCleanupDomEvent(
@@ -1603,7 +1538,9 @@ export function bindSearchDomEvents({
     scope,
     searchResults,
     "pointerdown",
-    handlers.handleSearchPointerDown
+    handlers.handleSearchPointerDown,
+    false,
+    localScope
   );
 
   bindCleanupDomEvent(
@@ -1611,7 +1548,9 @@ export function bindSearchDomEvents({
     scope,
     searchResults,
     "mousedown",
-    handlers.handleSearchPointerDown
+    handlers.handleSearchPointerDown,
+    false,
+    localScope
   );
 
   bindCleanupDomEvent(
@@ -1619,7 +1558,9 @@ export function bindSearchDomEvents({
     scope,
     searchResults,
     "mousemove",
-    handlers.handleSearchResultsMouseMove
+    handlers.handleSearchResultsMouseMove,
+    false,
+    localScope
   );
 
   bindCleanupDomEvent(
@@ -1627,7 +1568,9 @@ export function bindSearchDomEvents({
     scope,
     searchResults,
     "click",
-    handlers.handleSearchResultsClick
+    handlers.handleSearchResultsClick,
+    false,
+    localScope
   );
 
   bindCleanupDomEvent(
@@ -1635,7 +1578,9 @@ export function bindSearchDomEvents({
     scope,
     document,
     "keydown",
-    handlers.handleSearchKeydown
+    handlers.handleSearchKeydown,
+    false,
+    localScope
   );
 
   bindCleanupDomEvent(
@@ -1643,7 +1588,9 @@ export function bindSearchDomEvents({
     scope,
     document,
     "click",
-    handlers.handleSearchOutsideClick
+    handlers.handleSearchOutsideClick,
+    false,
+    localScope
   );
 
   return true;
@@ -1666,6 +1613,11 @@ export function bindTopbarAppEvents({
   syncDomCache,
   rebind,
 }) {
+  const localScope =
+    resolveLocalScope(scope, LOCAL_SCOPE_APP_SUFFIX);
+
+  runLocalCleanups(localScope);
+
   const visual =
     createVisualScheduler({
       AppCore,
@@ -1684,30 +1636,22 @@ export function bindTopbarAppEvents({
     scope,
     "router:before-render",
     (payload) => {
-      const detail =
-        getEventDetail(payload);
-
-      const nextPath =
-        detail?.path ||
-        detail?.publicPath ||
-        detail?.canonicalPath ||
-        getCurrentPublicPath(AppCore);
+      const detail = getEventDetail(payload);
 
       visual.schedule({
-        reason:
-          "router:before-render",
+        reason: "router:before-render",
         path:
-          nextPath,
-        hideResults:
-          false,
-        closeSidebarMobile:
-          false,
-        settled:
-          false,
-        delayMs:
-          0,
+          detail?.path ||
+          detail?.publicPath ||
+          detail?.canonicalPath ||
+          getCurrentPublicPath(AppCore),
+        hideResults: true,
+        closeSidebarMobile: false,
+        settled: false,
+        delayMs: 0,
       });
-    }
+    },
+    localScope
   );
 
   bindCleanupAppEvent(
@@ -1715,31 +1659,22 @@ export function bindTopbarAppEvents({
     scope,
     "router:rendered",
     (payload) => {
-      const detail =
-        getEventDetail(payload);
+      const detail = getEventDetail(payload);
 
-      /*
-        NO rebind aquí.
-        Solo sync visual ligero.
-      */
       visual.schedule({
-        reason:
-          "router:rendered",
+        reason: "router:rendered",
         path:
           detail?.publicPath ||
           detail?.path ||
           detail?.canonicalPath ||
           getCurrentPublicPath(AppCore),
-        hideResults:
-          true,
-        closeSidebarMobile:
-          false,
-        delayMs:
-          VISUAL_SYNC_DELAY_MS,
-        settledMs:
-          VISUAL_SYNC_SETTLED_MS,
+        hideResults: true,
+        closeSidebarMobile: false,
+        delayMs: VISUAL_SYNC_DELAY_MS,
+        settledMs: VISUAL_SYNC_SETTLED_MS,
       });
-    }
+    },
+    localScope
   );
 
   bindCleanupAppEvent(
@@ -1747,30 +1682,22 @@ export function bindTopbarAppEvents({
     scope,
     "app:route:rendered",
     (payload) => {
-      const detail =
-        getEventDetail(payload);
+      const detail = getEventDetail(payload);
 
-      /*
-        NO rebind aquí.
-      */
       visual.schedule({
-        reason:
-          "app:route:rendered",
+        reason: "app:route:rendered",
         path:
           detail?.publicPath ||
           detail?.path ||
           detail?.route ||
           getCurrentPublicPath(AppCore),
-        hideResults:
-          true,
-        closeSidebarMobile:
-          false,
-        delayMs:
-          VISUAL_SYNC_DELAY_MS,
-        settledMs:
-          VISUAL_SYNC_SETTLED_MS,
+        hideResults: true,
+        closeSidebarMobile: false,
+        delayMs: VISUAL_SYNC_DELAY_MS,
+        settledMs: VISUAL_SYNC_SETTLED_MS,
       });
-    }
+    },
+    localScope
   );
 
   bindCleanupAppEvent(
@@ -1778,27 +1705,22 @@ export function bindTopbarAppEvents({
     scope,
     "app:route:change",
     (payload) => {
-      const detail =
-        getEventDetail(payload);
+      const detail = getEventDetail(payload);
 
       visual.schedule({
-        reason:
-          "app:route:change",
+        reason: "app:route:change",
         path:
           detail?.publicPath ||
           detail?.path ||
           detail?.route ||
           getCurrentPublicPath(AppCore),
-        hideResults:
-          true,
-        closeSidebarMobile:
-          true,
-        delayMs:
-          VISUAL_SYNC_DELAY_MS,
-        settledMs:
-          VISUAL_SYNC_SETTLED_MS,
+        hideResults: true,
+        closeSidebarMobile: true,
+        delayMs: VISUAL_SYNC_DELAY_MS,
+        settledMs: VISUAL_SYNC_SETTLED_MS,
       });
-    }
+    },
+    localScope
   );
 
   bindCleanupAppEvent(
@@ -1806,184 +1728,88 @@ export function bindTopbarAppEvents({
     scope,
     "app:public-path:change",
     (payload) => {
-      const detail =
-        getEventDetail(payload);
+      const detail = getEventDetail(payload);
 
       visual.schedule({
-        reason:
-          "app:public-path:change",
+        reason: "app:public-path:change",
         path:
           detail?.publicPath ||
           detail?.path ||
           getCurrentPublicPath(AppCore),
-        hideResults:
-          true,
-        closeSidebarMobile:
-          false,
-        delayMs:
-          VISUAL_SYNC_DELAY_MS,
-        settledMs:
-          VISUAL_SYNC_SETTLED_MS,
+        hideResults: true,
+        closeSidebarMobile: false,
+        delayMs: VISUAL_SYNC_DELAY_MS,
+        settledMs: VISUAL_SYNC_SETTLED_MS,
       });
-    }
+    },
+    localScope
   );
 
-  bindCleanupAppEvent(
-    AppCore,
-    scope,
+  [
     "router:shell:change",
-    (payload) => {
-      const detail =
-        getEventDetail(payload);
-
-      visual.schedule({
-        reason:
-          "router:shell:change",
-        path:
-          detail?.publicPath ||
-          detail?.path ||
-          getCurrentPublicPath(AppCore),
-        hideResults:
-          false,
-        closeSidebarMobile:
-          false,
-        delayMs:
-          VISUAL_SYNC_DELAY_MS,
-        settledMs:
-          VISUAL_SYNC_SETTLED_MS,
-      });
-    }
-  );
-
-  bindCleanupAppEvent(
-    AppCore,
-    scope,
     "router:shell:state",
-    (payload) => {
-      const detail =
-        getEventDetail(payload);
-
-      visual.schedule({
-        reason:
-          "router:shell:state",
-        path:
-          detail?.publicPath ||
-          detail?.path ||
-          getCurrentPublicPath(AppCore),
-        hideResults:
-          false,
-        closeSidebarMobile:
-          false,
-        delayMs:
-          VISUAL_SYNC_DELAY_MS,
-        settledMs:
-          VISUAL_SYNC_SETTLED_MS,
-      });
-    }
-  );
-
-  bindCleanupAppEvent(
-    AppCore,
-    scope,
     "router:shell:repair",
-    (payload) => {
-      const detail =
-        getEventDetail(payload);
-
-      visual.schedule({
-        reason:
-          "router:shell:repair",
-        path:
-          detail?.publicPath ||
-          detail?.path ||
-          getCurrentPublicPath(AppCore),
-        hideResults:
-          false,
-        closeSidebarMobile:
-          false,
-        delayMs:
-          VISUAL_SYNC_DELAY_MS,
-        settledMs:
-          VISUAL_SYNC_SETTLED_MS,
-      });
-    }
-  );
-
-  bindCleanupAppEvent(
-    AppCore,
-    scope,
     "router:render:async-complete",
-    (payload) => {
-      const detail =
-        getEventDetail(payload);
+  ].forEach((eventName) => {
+    bindCleanupAppEvent(
+      AppCore,
+      scope,
+      eventName,
+      (payload) => {
+        const detail = getEventDetail(payload);
 
-      visual.schedule({
-        reason:
-          "router:render:async-complete",
-        path:
-          detail?.publicPath ||
-          detail?.path ||
-          detail?.canonicalPath ||
-          getCurrentPublicPath(AppCore),
-        hideResults:
-          false,
-        closeSidebarMobile:
-          false,
-        delayMs:
-          VISUAL_SYNC_DELAY_MS,
-        settledMs:
-          VISUAL_SYNC_SETTLED_MS,
-      });
-    }
-  );
+        visual.schedule({
+          reason: eventName,
+          path:
+            detail?.publicPath ||
+            detail?.path ||
+            detail?.canonicalPath ||
+            getCurrentPublicPath(AppCore),
+          hideResults: false,
+          closeSidebarMobile: false,
+          delayMs: VISUAL_SYNC_DELAY_MS,
+          settledMs: VISUAL_SYNC_SETTLED_MS,
+        });
+      },
+      localScope
+    );
+  });
 
   bindCleanupAppEvent(
     AppCore,
     scope,
     "app:user-ui:sync",
     () => {
-      /*
-        NO rebind aquí.
-        El avatar/usuario es del sidebar. El topbar solo reajusta estado visual.
-      */
       visual.schedule({
-        reason:
-          "app:user-ui:sync",
-        hideResults:
-          false,
-        closeSidebarMobile:
-          false,
-        delayMs:
-          VISUAL_SYNC_DELAY_MS,
-        settled:
-          false,
+        reason: "app:user-ui:sync",
+        hideResults: false,
+        closeSidebarMobile: false,
+        delayMs: VISUAL_SYNC_DELAY_MS,
+        settled: false,
       });
-    }
+    },
+    localScope
   );
 
-  bindCleanupAppEvent(
-    AppCore,
-    scope,
+  [
     "sidebar:state:synced",
-    () => {
-      visual.schedule({
-        reason:
-          "sidebar:state:synced",
-        hideResults:
-          false,
-        closeSidebarMobile:
-          false,
-        delayMs:
-          SIDEBAR_SYNC_DELAY_MS,
-        settledMs:
-          VISUAL_SYNC_SETTLED_MS,
-      });
+    "sidebar:ui:open:set",
+  ].forEach((eventName) => {
+    bindCleanupAppEvent(
+      AppCore,
+      scope,
+      eventName,
+      () => {
+        visual.schedule({
+          reason: eventName,
+          hideResults: false,
+          closeSidebarMobile: false,
+          delayMs: SIDEBAR_SYNC_DELAY_MS,
+          settledMs: VISUAL_SYNC_SETTLED_MS,
+        });
 
-      safeSetTimeout(
-        () => {
-          const {
-            mobileToggle,
-          } = getDom();
+        safeSetTimeout(() => {
+          const { mobileToggle } = getDom();
 
           try {
             mobileToggle?.setAttribute(
@@ -1994,127 +1820,61 @@ export function bindTopbarAppEvents({
               )
             );
           } catch {}
-        },
-        SIDEBAR_SYNC_DELAY_MS
-      );
-    }
-  );
+        }, SIDEBAR_SYNC_DELAY_MS);
+      },
+      localScope
+    );
+  });
 
-  bindCleanupAppEvent(
-    AppCore,
-    scope,
-    "sidebar:ui:open:set",
-    () => {
-      visual.schedule({
-        reason:
-          "sidebar:ui:open:set",
-        hideResults:
-          false,
-        closeSidebarMobile:
-          false,
-        delayMs:
-          SIDEBAR_SYNC_DELAY_MS,
-        settledMs:
-          VISUAL_SYNC_SETTLED_MS,
-      });
-    }
-  );
-
-  bindCleanupAppEvent(
-    AppCore,
-    scope,
+  [
     "app:theme:change",
-    () => {
-      visual.schedule({
-        reason:
-          "app:theme:change",
-        hideResults:
-          false,
-        closeSidebarMobile:
-          false,
-        delayMs:
-          VISUAL_SYNC_DELAY_MS,
-        settledMs:
-          VISUAL_SYNC_SETTLED_MS,
-      });
-    }
-  );
-
-  bindCleanupAppEvent(
-    AppCore,
-    scope,
     "theme:change",
-    () => {
-      visual.schedule({
-        reason:
-          "theme:change",
-        hideResults:
-          false,
-        closeSidebarMobile:
-          false,
-        delayMs:
-          VISUAL_SYNC_DELAY_MS,
-        settledMs:
-          VISUAL_SYNC_SETTLED_MS,
-      });
-    }
-  );
+  ].forEach((eventName) => {
+    bindCleanupAppEvent(
+      AppCore,
+      scope,
+      eventName,
+      () => {
+        visual.schedule({
+          reason: eventName,
+          hideResults: false,
+          closeSidebarMobile: false,
+          delayMs: VISUAL_SYNC_DELAY_MS,
+          settledMs: VISUAL_SYNC_SETTLED_MS,
+        });
+      },
+      localScope
+    );
+  });
 
-  bindCleanupAppEvent(
-    AppCore,
-    scope,
+  [
     "app:lang:change",
-    () => {
-      /*
-        NO rebind aquí.
-        i18n live y syncTitle bastan.
-      */
-      visual.schedule({
-        reason:
-          "app:lang:change",
-        path:
-          getCurrentPublicPath(AppCore),
-        hideResults:
-          false,
-        closeSidebarMobile:
-          false,
-        delayMs:
-          VISUAL_SYNC_DELAY_MS,
-        settledMs:
-          VISUAL_SYNC_SETTLED_MS,
-      });
-    }
-  );
-
-  bindCleanupAppEvent(
-    AppCore,
-    scope,
     "i18n:change",
-    () => {
-      visual.schedule({
-        reason:
-          "i18n:change",
-        path:
-          getCurrentPublicPath(AppCore),
-        hideResults:
-          false,
-        closeSidebarMobile:
-          false,
-        delayMs:
-          VISUAL_SYNC_DELAY_MS,
-        settledMs:
-          VISUAL_SYNC_SETTLED_MS,
-      });
-    }
-  );
+  ].forEach((eventName) => {
+    bindCleanupAppEvent(
+      AppCore,
+      scope,
+      eventName,
+      () => {
+        visual.schedule({
+          reason: eventName,
+          path: getCurrentPublicPath(AppCore),
+          hideResults: false,
+          closeSidebarMobile: false,
+          delayMs: VISUAL_SYNC_DELAY_MS,
+          settledMs: VISUAL_SYNC_SETTLED_MS,
+        });
+      },
+      localScope
+    );
+  });
 
   bindCleanupAppEvent(
     AppCore,
     scope,
     "topbar:visual:sync",
     (payload) => {
-      const detail =
-        getEventDetail(payload);
+      const detail = getEventDetail(payload);
 
       visual.schedule({
         reason:
@@ -2137,53 +1897,32 @@ export function bindTopbarAppEvents({
             ? Number(detail.settledMs)
             : VISUAL_SYNC_SETTLED_MS,
       });
-    }
+    },
+    localScope
   );
 
   bindCleanupAppEvent(
     AppCore,
     scope,
     "topbar:search:close",
-    handlers.handleSearchCloseEvent
+    handlers.handleSearchCloseEvent,
+    localScope
   );
 
   bindCleanupAppEvent(
     AppCore,
     scope,
     "topbar:search:focus",
-    handlers.handleSearchFocusEvent
+    handlers.handleSearchFocusEvent,
+    localScope
   );
 
   bindCleanupAppEvent(
     AppCore,
     scope,
     "topbar:search:clear",
-    handlers.handleSearchClearEvent
-  );
-
-  bindCleanupDomEvent(
-    AppCore,
-    scope,
-    window,
-    "resize",
-    () => {
-      visual.schedule({
-        reason:
-          "window:resize",
-        hideResults:
-          false,
-        closeSidebarMobile:
-          false,
-        delayMs:
-          RESIZE_SYNC_DELAY_MS,
-        settledMs:
-          VISUAL_SYNC_SETTLED_MS,
-      });
-    },
-    {
-      passive:
-        true,
-    }
+    handlers.handleSearchClearEvent,
+    localScope
   );
 
   safeLog(

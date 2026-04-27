@@ -2,7 +2,7 @@
    Onion SPA - Sidebar Template
    Archivo: src/ui/sidebar/template.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - generar el HTML base del sidebar
    - centralizar el marcado del módulo
    - consumir constantes del sidebar
@@ -14,7 +14,10 @@
    - incluir la vista Servidor en el menú lateral
    - mantener compatibilidad total con AppCore.syncUserUI()
    - no pintar tooltip en el logo
+   - no pintar tooltip nativo en avatar/footer
    - marcar rutas admin para filtrado visual posterior
+   - incluir data-sidebar-action para fallback delegado
+   - incluir data-route para navegación robusta
 ========================================================= */
 
 import { I18n } from "../../i18n/index.js";
@@ -30,6 +33,10 @@ import {
   SIDEBAR_NAME_ID,
 } from "./constants.js";
 
+/* =========================================================
+   I18N
+========================================================= */
+
 function t(key, fallback = "", params = {}) {
   try {
     return I18n.t(key, params, fallback);
@@ -37,6 +44,10 @@ function t(key, fallback = "", params = {}) {
     return fallback || key;
   }
 }
+
+/* =========================================================
+   SAFE HTML
+========================================================= */
 
 function escapeHtml(value = "") {
   return String(value ?? "")
@@ -47,6 +58,10 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#39;");
 }
 
+/* =========================================================
+   MENU ITEM
+========================================================= */
+
 function renderMenuItem({
   href = "/",
   label = "",
@@ -54,37 +69,52 @@ function renderMenuItem({
   icon = "",
   extraAttrs = "",
 } = {}) {
-  return `
-    <a
-      href="${escapeHtml(href)}"
-      data-spa
-      class="menu-item"
-      data-tooltip="${escapeHtml(label)}"
-      ${
-        i18nKey
-          ? `data-i18n-data-tooltip="${escapeHtml(i18nKey)}"`
-          : ""
-      }
-      aria-label="${escapeHtml(label)}"
-      ${
-        i18nKey
-          ? `data-i18n-aria-label="${escapeHtml(i18nKey)}"`
-          : ""
-      }
-      ${extraAttrs}
-    >
-      <span aria-hidden="true">
-        ${icon}
-      </span>
+  const cleanHref = escapeHtml(href);
+  const cleanLabel = escapeHtml(label);
+  const cleanI18nKey = escapeHtml(i18nKey);
 
-      <span ${
-        i18nKey
-          ? `data-i18n="${escapeHtml(i18nKey)}"`
-          : ""
-      }>${escapeHtml(label)}</span>
-    </a>
-  `;
+  return `
+        <a
+          href="${cleanHref}"
+          data-spa
+          data-route="${cleanHref}"
+          data-sidebar-nav="true"
+          class="menu-item"
+          data-tooltip="${cleanLabel}"
+          ${
+            i18nKey
+              ? `data-i18n-data-tooltip="${cleanI18nKey}"`
+              : ""
+          }
+          aria-label="${cleanLabel}"
+          ${
+            i18nKey
+              ? `data-i18n-aria-label="${cleanI18nKey}"`
+              : ""
+          }
+          ${extraAttrs}
+        >
+          <span
+            class="menu-item-icon"
+            aria-hidden="true"
+          >
+            ${icon}
+          </span>
+
+          <span
+            class="menu-item-label"
+            ${
+              i18nKey
+                ? `data-i18n="${cleanI18nKey}"`
+                : ""
+            }
+          >${cleanLabel}</span>
+        </a>`;
 }
+
+/* =========================================================
+   TEMPLATE
+========================================================= */
 
 export function getSidebarTemplate() {
   const labels = {
@@ -111,6 +141,21 @@ export function getSidebarTemplate() {
     collapseSidebar: t(
       "sidebar.toggle.collapse",
       "Contraer barra lateral"
+    ),
+
+    expandSidebar: t(
+      "sidebar.toggle.expand",
+      "Expandir barra lateral"
+    ),
+
+    openSidebar: t(
+      "sidebar.toggle.open",
+      "Abrir navegación"
+    ),
+
+    closeSidebar: t(
+      "sidebar.toggle.close",
+      "Cerrar navegación"
     ),
 
     home: t(
@@ -220,11 +265,16 @@ export function getSidebarTemplate() {
       id="${SIDEBAR_ROOT_ID}"
       aria-label="${escapeHtml(labels.sidebarAria)}"
       data-i18n-aria-label="sidebar.aria.main"
+      data-sidebar-root="true"
+      data-open="true"
+      data-collapsed="false"
+      data-mode="desktop"
     >
       <div class="sidebar-top">
         <a
           href="/"
           data-spa
+          data-route="/"
           class="logo"
           id="homeLink"
           aria-label="${escapeHtml(labels.logoLink)}"
@@ -257,6 +307,7 @@ export function getSidebarTemplate() {
           type="button"
           class="sidebar-toggle"
           id="toggleSidebar"
+          data-sidebar-action="toggle-sidebar"
           data-tooltip="${escapeHtml(labels.collapseSidebar)}"
           data-i18n-data-tooltip="sidebar.toggle.collapse"
           aria-label="${escapeHtml(labels.collapseSidebar)}"
@@ -288,6 +339,46 @@ export function getSidebarTemplate() {
             />
           </svg>
         </button>
+
+        <button
+          type="button"
+          class="sidebar-mobile-toggle"
+          id="toggleSidebarMobile"
+          data-sidebar-action="mobile-sidebar-toggle"
+          data-tooltip="${escapeHtml(labels.openSidebar)}"
+          data-i18n-data-tooltip="sidebar.toggle.open"
+          aria-label="${escapeHtml(labels.openSidebar)}"
+          data-i18n-aria-label="sidebar.toggle.open"
+          aria-controls="${SIDEBAR_MENU_ID}"
+          aria-expanded="false"
+        >
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M4 7h16"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+            />
+            <path
+              d="M4 12h16"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+            />
+            <path
+              d="M4 17h16"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+            />
+          </svg>
+        </button>
       </div>
 
       <nav
@@ -296,11 +387,11 @@ export function getSidebarTemplate() {
         aria-label="${escapeHtml(labels.navAria)}"
         data-i18n-aria-label="sidebar.aria.navigation"
       >
-        ${renderMenuItem({
-          href: "/",
-          label: labels.home,
-          i18nKey: "sidebar.menu.home",
-          icon: `
+${renderMenuItem({
+  href: "/",
+  label: labels.home,
+  i18nKey: "sidebar.menu.home",
+  icon: `
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
               <path
                 d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1v-9.5Z"
@@ -309,14 +400,14 @@ export function getSidebarTemplate() {
                 stroke-linejoin="round"
               />
             </svg>
-          `,
-        })}
+  `,
+})}
 
-        ${renderMenuItem({
-          href: "/incidencias",
-          label: labels.tickets,
-          i18nKey: "sidebar.menu.tickets",
-          icon: `
+${renderMenuItem({
+  href: "/incidencias",
+  label: labels.tickets,
+  i18nKey: "sidebar.menu.tickets",
+  icon: `
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="1.8"/>
               <path
@@ -332,66 +423,74 @@ export function getSidebarTemplate() {
                 stroke-linejoin="round"
               />
             </svg>
-          `,
-        })}
+  `,
+})}
 
-        ${renderMenuItem({
-          href: "/facturas",
-          label: labels.invoices,
-          i18nKey: "sidebar.menu.invoices",
-          icon: `
+${renderMenuItem({
+  href: "/facturas",
+  label: labels.invoices,
+  i18nKey: "sidebar.menu.invoices",
+  icon: `
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
               <path d="M6 2h9l5 5v15H6z" stroke="currentColor" stroke-width="1.6"/>
               <path d="M14 2v6h6" stroke="currentColor" stroke-width="1.6"/>
             </svg>
-          `,
-        })}
+  `,
+})}
 
-        ${renderMenuItem({
-          href: "/usuarios",
-          label: labels.users,
-          i18nKey: "sidebar.menu.users",
-          extraAttrs: `data-role="admin" data-admin-only="true"`,
-          icon: `
+${renderMenuItem({
+  href: "/usuarios",
+  label: labels.users,
+  i18nKey: "sidebar.menu.users",
+  extraAttrs: `
+          data-role="admin"
+          data-admin-only="true"
+          data-sidebar-visible="true"
+        `,
+  icon: `
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.6"/>
               <path d="M4 20c0-4 4-6 8-6s8 2 8 6" stroke="currentColor" stroke-width="1.6"/>
             </svg>
-          `,
-        })}
+  `,
+})}
 
-        ${renderMenuItem({
-          href: "/clientes",
-          label: labels.clients,
-          i18nKey: "sidebar.menu.clients",
-          extraAttrs: `data-role="admin" data-admin-only="true"`,
-          icon: `
+${renderMenuItem({
+  href: "/clientes",
+  label: labels.clients,
+  i18nKey: "sidebar.menu.clients",
+  extraAttrs: `
+          data-role="admin"
+          data-admin-only="true"
+          data-sidebar-visible="true"
+        `,
+  icon: `
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.6"/>
               <circle cx="6.5" cy="10" r="2.5" stroke="currentColor" stroke-width="1.4" opacity="0.6"/>
               <circle cx="17.5" cy="10" r="2.5" stroke="currentColor" stroke-width="1.4" opacity="0.6"/>
               <path d="M4 20c0-3.5 3.5-5.5 8-5.5s8 2 8 5.5" stroke="currentColor" stroke-width="1.6"/>
             </svg>
-          `,
-        })}
+  `,
+})}
 
-        ${renderMenuItem({
-          href: "/cuenta",
-          label: labels.account,
-          i18nKey: "sidebar.menu.account",
-          icon: `
+${renderMenuItem({
+  href: "/cuenta",
+  label: labels.account,
+  i18nKey: "sidebar.menu.account",
+  icon: `
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="7" r="4" stroke="currentColor" stroke-width="1.6"/>
               <path d="M5.5 21a6.5 6.5 0 0 1 13 0" stroke="currentColor" stroke-width="1.6"/>
             </svg>
-          `,
-        })}
+  `,
+})}
 
-        ${renderMenuItem({
-          href: "/ajustes",
-          label: labels.settings,
-          i18nKey: "sidebar.menu.settings",
-          icon: `
+${renderMenuItem({
+  href: "/ajustes",
+  label: labels.settings,
+  i18nKey: "sidebar.menu.settings",
+  icon: `
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
               <path d="M4 6h10" stroke="currentColor" stroke-width="1.6"/>
               <circle cx="16" cy="6" r="2" stroke="currentColor" stroke-width="1.6"/>
@@ -400,15 +499,19 @@ export function getSidebarTemplate() {
               <path d="M4 18h12" stroke="currentColor" stroke-width="1.6"/>
               <circle cx="18" cy="18" r="2" stroke="currentColor" stroke-width="1.6"/>
             </svg>
-          `,
-        })}
+  `,
+})}
 
-        ${renderMenuItem({
-          href: "/servidor",
-          label: labels.server,
-          i18nKey: "sidebar.menu.server",
-          extraAttrs: `data-role="admin" data-admin-only="true"`,
-          icon: `
+${renderMenuItem({
+  href: "/servidor",
+  label: labels.server,
+  i18nKey: "sidebar.menu.server",
+  extraAttrs: `
+          data-role="admin"
+          data-admin-only="true"
+          data-sidebar-visible="true"
+        `,
+  icon: `
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
               <rect
                 x="4"
@@ -443,8 +546,8 @@ export function getSidebarTemplate() {
                 stroke-linecap="round"
               />
             </svg>
-          `,
-        })}
+  `,
+})}
       </nav>
 
       <section
@@ -465,6 +568,7 @@ export function getSidebarTemplate() {
           id="${USER_TOGGLE_ID}"
           role="button"
           tabindex="0"
+          data-sidebar-action="toggle-user-dropdown"
           aria-haspopup="menu"
           aria-expanded="false"
           aria-controls="${USER_DROPDOWN_ID}"
@@ -475,8 +579,6 @@ export function getSidebarTemplate() {
             class="avatar"
             id="${SIDEBAR_AVATAR_ID}"
             aria-label="${escapeHtml(labels.userAvatar)}"
-            data-i18n-aria-label="sidebar.user.avatarAriaLabel"
-            title="${escapeHtml(labels.userDefaultName)}"
             data-default-avatar="ON"
             data-avatar-root="true"
           >
@@ -503,7 +605,7 @@ export function getSidebarTemplate() {
             <span
               class="name"
               id="${SIDEBAR_NAME_ID}"
-              data-default-i18n="${escapeHtml(labels.userDefaultName)}"
+              data-default-i18n="sidebar.user.defaultName"
               data-default-name="${escapeHtml(labels.userDefaultName)}"
             >${escapeHtml(labels.userDefaultName)}</span>
 
@@ -515,6 +617,7 @@ export function getSidebarTemplate() {
           </div>
 
           <svg
+            class="user-chevron"
             width="16"
             height="16"
             viewBox="0 0 24 24"
@@ -545,6 +648,7 @@ export function getSidebarTemplate() {
             class="dropdown-item"
             role="menuitem"
             tabindex="-1"
+            data-sidebar-action="add-account"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.6"/>
@@ -559,6 +663,7 @@ export function getSidebarTemplate() {
             class="dropdown-item"
             role="menuitem"
             tabindex="-1"
+            data-sidebar-action="change-plan"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M12 4v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
@@ -573,6 +678,8 @@ export function getSidebarTemplate() {
             class="dropdown-item"
             role="menuitem"
             tabindex="-1"
+            data-sidebar-action="profile"
+            data-route="/cuenta"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.6"/>
@@ -586,6 +693,8 @@ export function getSidebarTemplate() {
             class="dropdown-item"
             role="menuitem"
             tabindex="-1"
+            data-sidebar-action="settings"
+            data-route="/ajustes"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M4 12h16" stroke="currentColor" stroke-width="1.6"/>
@@ -601,6 +710,7 @@ export function getSidebarTemplate() {
             class="dropdown-item"
             role="menuitem"
             tabindex="-1"
+            data-sidebar-action="help"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/>
@@ -616,6 +726,7 @@ export function getSidebarTemplate() {
             id="${LOGOUT_BUTTON_ID}"
             role="menuitem"
             tabindex="-1"
+            data-sidebar-action="logout"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.6"/>

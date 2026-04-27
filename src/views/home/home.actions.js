@@ -17,7 +17,11 @@
    - soporte envelope backend
    - export seguro con escape CSV
    - clipboard robusto con fallback legacy
+   - navegación SPA con fallback seguro
+   - browser guards para clipboard/download
    - eventos opcionales vía AppCore.events
+   - normalización estable de dashboard/widgets
+   - default export completo
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -35,7 +39,6 @@ import {
 
 import {
   safeText,
-  safeNumber,
   safeArray,
   safeObject,
   showToast,
@@ -47,39 +50,116 @@ import {
 
 const CSV_FILENAME = "home-export.csv";
 
+const CSV_MIME_TYPE = "text/csv;charset=utf-8;";
+
 /* =========================================================
-   HELPERS
+   BASIC HELPERS
 ========================================================= */
 
-function safeEmit(event = "", payload = {}) {
-  try {
-    AppCore?.events?.emit?.(event, payload);
-  } catch {}
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
+
+function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function isFn(value) {
+  return typeof value === "function";
 }
 
 function first(...values) {
   for (const value of values) {
-    if (
-      value !== undefined &&
-      value !== null &&
-      String(value).trim() !== ""
-    ) {
-      return value;
+    if (value === undefined || value === null) {
+      continue;
     }
+
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
+    }
+
+    if (Array.isArray(value) && value.length === 0) {
+      continue;
+    }
+
+    return value;
   }
+
   return null;
 }
 
-function isObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value);
+function safeEmit(eventName = "", payload = {}) {
+  const name = safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  try {
+    AppCore?.events?.emit?.(name, payload);
+    return true;
+  } catch {}
+
+  try {
+    if (isBrowser()) {
+      window.dispatchEvent(
+        new CustomEvent(name, {
+          detail: payload,
+        })
+      );
+
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function safeWarn(...args) {
+  try {
+    AppCore?.utils?.warn?.("[HomeActions]", ...args);
+  } catch {}
+
+  try {
+    console.warn("[HomeActions]", ...args);
+  } catch {}
 }
 
 function normalizeWidgetId(value = "") {
   return safeText(value, "");
 }
 
+function normalizeFilename(value = "", fallback = CSV_FILENAME) {
+  const name = safeText(value, fallback)
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .trim();
+
+  if (!name) {
+    return fallback;
+  }
+
+  return name.toLowerCase().endsWith(".csv")
+    ? name
+    : `${name}.csv`;
+}
+
+/* =========================================================
+   PAYLOAD DETECTION
+========================================================= */
+
 function isLikelyWidget(value) {
-  if (!isObject(value)) return false;
+  if (!isObject(value)) {
+    return false;
+  }
 
   return Boolean(
     value.widgetId ||
@@ -89,12 +169,15 @@ function isLikelyWidget(value) {
       value.code ||
       value.title ||
       value.name ||
-      value.label
+      value.label ||
+      value.heading
   );
 }
 
 function isLikelyDashboard(value) {
-  if (!isObject(value)) return false;
+  if (!isObject(value)) {
+    return false;
+  }
 
   return Boolean(
     Array.isArray(value.widgets) ||
@@ -102,9 +185,13 @@ function isLikelyDashboard(value) {
       Array.isArray(value.kpis) ||
       Array.isArray(value.items) ||
       Array.isArray(value.recent) ||
-      value.summary ||
-      value.stats ||
-      value.metrics
+      Array.isArray(value.recentActivity) ||
+      Array.isArray(value.activity) ||
+      Array.isArray(value.timeline) ||
+      isObject(value.summary) ||
+      isObject(value.stats) ||
+      isObject(value.metrics) ||
+      isObject(value.totals)
   );
 }
 
@@ -112,17 +199,21 @@ function looksLikeEnvelope(value) {
   const obj = safeObject(value);
 
   return Boolean(
-    obj.dashboard ||
-      obj.widget ||
-      obj.item ||
-      obj.data ||
-      obj.result ||
-      obj.payload
+    obj.dashboard !== undefined ||
+      obj.widget !== undefined ||
+      obj.item !== undefined ||
+      obj.data !== undefined ||
+      obj.result !== undefined ||
+      obj.payload !== undefined ||
+      obj.body !== undefined ||
+      obj.response !== undefined
   );
 }
 
 function pickDashboard(payload = null) {
-  if (!payload) return null;
+  if (!payload) {
+    return null;
+  }
 
   if (isLikelyDashboard(payload)) {
     return payload;
@@ -130,31 +221,43 @@ function pickDashboard(payload = null) {
 
   const obj = safeObject(payload);
 
-  if (isLikelyDashboard(obj.dashboard)) {
-    return obj.dashboard;
+  const candidates = [
+    obj.dashboard,
+    obj.data,
+    obj.result,
+    obj.payload,
+    obj.body,
+    obj.response,
+    obj?.data?.dashboard,
+    obj?.data?.result,
+    obj?.data?.payload,
+    obj?.payload?.dashboard,
+    obj?.result?.dashboard,
+  ];
+
+  for (const candidate of candidates) {
+    if (isLikelyDashboard(candidate)) {
+      return candidate;
+    }
   }
 
-  if (isLikelyDashboard(obj.data)) {
-    return obj.data;
-  }
+  for (const candidate of candidates) {
+    if (looksLikeEnvelope(candidate)) {
+      const nested = pickDashboard(candidate);
 
-  if (isLikelyDashboard(obj.result)) {
-    return obj.result;
-  }
-
-  if (isLikelyDashboard(obj.payload)) {
-    return obj.payload;
-  }
-
-  if (looksLikeEnvelope(obj.data)) {
-    return pickDashboard(obj.data);
+      if (nested) {
+        return nested;
+      }
+    }
   }
 
   return null;
 }
 
 function pickWidget(payload = null) {
-  if (!payload) return null;
+  if (!payload) {
+    return null;
+  }
 
   if (isLikelyWidget(payload)) {
     return payload;
@@ -162,184 +265,185 @@ function pickWidget(payload = null) {
 
   const obj = safeObject(payload);
 
-  if (isLikelyWidget(obj.widget)) {
-    return obj.widget;
+  const candidates = [
+    obj.widget,
+    obj.item,
+    obj.data,
+    obj.result,
+    obj.payload,
+    obj.body,
+    obj.response,
+    obj?.data?.widget,
+    obj?.data?.item,
+    obj?.data?.result,
+    obj?.data?.payload,
+    obj?.payload?.widget,
+    obj?.result?.widget,
+  ];
+
+  for (const candidate of candidates) {
+    if (isLikelyWidget(candidate)) {
+      return candidate;
+    }
   }
 
-  if (isLikelyWidget(obj.item)) {
-    return obj.item;
-  }
+  for (const candidate of candidates) {
+    if (looksLikeEnvelope(candidate)) {
+      const nested = pickWidget(candidate);
 
-  if (isLikelyWidget(obj.result)) {
-    return obj.result;
-  }
-
-  if (isLikelyWidget(obj.payload)) {
-    return obj.payload;
-  }
-
-  if (isLikelyWidget(obj.data)) {
-    return obj.data;
-  }
-
-  if (looksLikeEnvelope(obj.data)) {
-    return pickWidget(obj.data);
+      if (nested) {
+        return nested;
+      }
+    }
   }
 
   return null;
 }
 
+/* =========================================================
+   WIDGET NORMALIZATION
+========================================================= */
+
 function getWidgetId(item = {}) {
+  const raw = safeObject(item);
+
   return safeText(
     first(
-      item.widgetId,
-      item.id,
-      item.key,
-      item.slug,
-      item.code
+      raw.widgetId,
+      raw.id,
+      raw.key,
+      raw.slug,
+      raw.code
     ),
     ""
   );
 }
 
 function getWidgetTitle(item = {}) {
+  const raw = safeObject(item);
+
   return safeText(
     first(
-      item.title,
-      item.name,
-      item.label,
-      item.heading
+      raw.title,
+      raw.name,
+      raw.label,
+      raw.heading
     ),
     "Bloque"
   );
 }
 
 function getWidgetDescription(item = {}) {
+  const raw = safeObject(item);
+
   return safeText(
     first(
-      item.description,
-      item.descripcion,
-      item.subtitle,
-      item.summary,
-      item.text
+      raw.description,
+      raw.descripcion,
+      raw.subtitle,
+      raw.summary,
+      raw.text
     ),
     "Sin descripción."
   );
 }
 
 function getWidgetType(item = {}) {
+  const raw = safeObject(item);
+
   return safeText(
     first(
-      item.type,
-      item.kind,
-      item.variant,
-      item.category
+      raw.type,
+      raw.kind,
+      raw.variant,
+      raw.category
     ),
     "widget"
   );
 }
 
 function getWidgetValue(item = {}) {
+  const raw = safeObject(item);
+
   return first(
-    item.value,
-    item.total,
-    item.amount,
-    item.count,
-    item.metric
+    raw.value,
+    raw.total,
+    raw.amount,
+    raw.count,
+    raw.metric
   );
 }
 
 function getWidgetTrend(item = {}) {
+  const raw = safeObject(item);
+
   return first(
-    item.trend,
-    item.delta,
-    item.change,
-    item.variation
+    raw.trend,
+    raw.delta,
+    raw.change,
+    raw.variation
   );
 }
 
 function getWidgetStatus(item = {}) {
+  const raw = safeObject(item);
+
   return safeText(
     first(
-      item.status,
-      item.estado,
-      item.state
+      raw.status,
+      raw.estado,
+      raw.state
     ),
     "active"
   );
 }
 
 function getWidgetRoute(item = {}) {
+  const raw = safeObject(item);
+
   return safeText(
     first(
-      item.route,
-      item.href,
-      item.link,
-      item.to
+      raw.route,
+      raw.href,
+      raw.link,
+      raw.to
     ),
     ""
   );
 }
 
 function getWidgetCreatedAt(item = {}) {
+  const raw = safeObject(item);
+
   return first(
-    item.createdAt,
-    item.fechaCreacion,
-    item.date
+    raw.createdAt,
+    raw.fechaCreacion,
+    raw.date
   );
 }
 
 function getWidgetUpdatedAt(item = {}) {
+  const raw = safeObject(item);
+
   return first(
-    item.updatedAt,
-    item.lastUpdate,
-    item.modifiedAt,
-    item.createdAt
+    raw.updatedAt,
+    raw.lastUpdate,
+    raw.modifiedAt,
+    raw.createdAt
   );
 }
 
 function getWidgetItems(item = {}) {
+  const raw = safeObject(item);
+
   return safeArray(
     first(
-      item.items,
-      item.rows,
-      item.list,
-      item.data
+      raw.items,
+      raw.rows,
+      raw.list,
+      raw.data
     )
   ).map((entry) => safeObject(entry));
-}
-
-function getDashboardWidgets(dashboard = {}) {
-  return safeArray(
-    first(
-      dashboard.widgets,
-      dashboard.cards,
-      dashboard.kpis,
-      dashboard.items
-    )
-  ).map((item) => normalizeWidgetDetail(item));
-}
-
-function getDashboardRecent(dashboard = {}) {
-  return safeArray(
-    first(
-      dashboard.recent,
-      dashboard.recentActivity,
-      dashboard.activity,
-      dashboard.timeline
-    )
-  ).map((item) => safeObject(item));
-}
-
-function getDashboardSummary(dashboard = {}) {
-  return safeObject(
-    first(
-      dashboard.summary,
-      dashboard.stats,
-      dashboard.metrics,
-      dashboard.totals
-    )
-  );
 }
 
 function normalizeWidgetDetail(detail = {}) {
@@ -347,6 +451,7 @@ function normalizeWidgetDetail(detail = {}) {
 
   return {
     ...raw,
+
     widgetId: getWidgetId(raw),
     title: getWidgetTitle(raw),
     description: getWidgetDescription(raw),
@@ -361,14 +466,62 @@ function normalizeWidgetDetail(detail = {}) {
   };
 }
 
+/* =========================================================
+   DASHBOARD NORMALIZATION
+========================================================= */
+
+function getDashboardSummary(dashboard = {}) {
+  const raw = safeObject(dashboard);
+
+  return safeObject(
+    first(
+      raw.summary,
+      raw.stats,
+      raw.metrics,
+      raw.totals
+    )
+  );
+}
+
+function getDashboardWidgets(dashboard = {}) {
+  const raw = safeObject(dashboard);
+
+  return safeArray(
+    first(
+      raw.widgets,
+      raw.cards,
+      raw.kpis,
+      raw.items
+    )
+  )
+    .map((item) => safeObject(item))
+    .filter((item) => isLikelyWidget(item))
+    .map((item) => normalizeWidgetDetail(item));
+}
+
+function getDashboardRecent(dashboard = {}) {
+  const raw = safeObject(dashboard);
+
+  return safeArray(
+    first(
+      raw.recent,
+      raw.recentActivity,
+      raw.activity,
+      raw.timeline
+    )
+  ).map((item) => safeObject(item));
+}
+
 function normalizeDashboardSnapshot(snapshot = {}) {
   const raw = safeObject(snapshot);
 
   return {
     ...raw,
+
     summary: getDashboardSummary(raw),
     widgets: getDashboardWidgets(raw),
     recent: getDashboardRecent(raw),
+
     updatedAt: first(
       raw.updatedAt,
       raw.lastUpdate,
@@ -377,6 +530,10 @@ function normalizeDashboardSnapshot(snapshot = {}) {
     ),
   };
 }
+
+/* =========================================================
+   CSV
+========================================================= */
 
 function escapeCsvCell(value = "") {
   const text =
@@ -401,18 +558,21 @@ function buildCsvRows(items = []) {
     "updatedAt",
   ];
 
-  const rows = safeArray(items).map((item) => [
-    getWidgetId(item),
-    getWidgetTitle(item),
-    getWidgetDescription(item),
-    getWidgetType(item),
-    getWidgetValue(item) ?? "",
-    getWidgetTrend(item) ?? "",
-    getWidgetStatus(item),
-    getWidgetRoute(item),
-    getWidgetCreatedAt(item) || "",
-    getWidgetUpdatedAt(item) || "",
-  ]);
+  const rows = safeArray(items)
+    .map((item) => safeObject(item))
+    .filter((item) => isLikelyWidget(item))
+    .map((item) => [
+      getWidgetId(item),
+      getWidgetTitle(item),
+      getWidgetDescription(item),
+      getWidgetType(item),
+      getWidgetValue(item) ?? "",
+      getWidgetTrend(item) ?? "",
+      getWidgetStatus(item),
+      getWidgetRoute(item),
+      getWidgetCreatedAt(item) || "",
+      getWidgetUpdatedAt(item) || "",
+    ]);
 
   return [
     header.map(escapeCsvCell).join(","),
@@ -420,10 +580,64 @@ function buildCsvRows(items = []) {
   ].join("\n");
 }
 
+function downloadTextFile({
+  filename = CSV_FILENAME,
+  content = "",
+  mimeType = "text/plain;charset=utf-8;",
+} = {}) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  let url = "";
+
+  try {
+    const blob = new Blob([String(content || "")], {
+      type: mimeType,
+    });
+
+    url = URL.createObjectURL(blob);
+
+    const anchor = document.createElement("a");
+
+    anchor.href = url;
+    anchor.download = normalizeFilename(filename, CSV_FILENAME);
+    anchor.rel = "noopener";
+
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+
+    window.setTimeout(() => {
+      try {
+        URL.revokeObjectURL(url);
+      } catch {}
+    }, 0);
+
+    return true;
+  } catch (error) {
+    try {
+      if (url) {
+        URL.revokeObjectURL(url);
+      }
+    } catch {}
+
+    safeWarn("downloadTextFile falló.", error);
+
+    return false;
+  }
+}
+
+/* =========================================================
+   CLIPBOARD
+========================================================= */
+
 async function writeClipboardText(text = "") {
   const value = safeText(text, "");
 
-  if (!value) return false;
+  if (!value || !isBrowser()) {
+    return false;
+  }
 
   try {
     if (navigator?.clipboard?.writeText) {
@@ -434,12 +648,19 @@ async function writeClipboardText(text = "") {
 
   try {
     const textarea = document.createElement("textarea");
+
     textarea.value = value;
     textarea.setAttribute("readonly", "true");
+    textarea.setAttribute("aria-hidden", "true");
+
     textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
     textarea.style.opacity = "0";
     textarea.style.pointerEvents = "none";
+
     document.body.appendChild(textarea);
+
     textarea.focus();
     textarea.select();
 
@@ -453,28 +674,30 @@ async function writeClipboardText(text = "") {
   }
 }
 
-function downloadTextFile({
-  filename = CSV_FILENAME,
-  content = "",
-  mimeType = "text/plain;charset=utf-8;",
-} = {}) {
-  const blob = new Blob([String(content || "")], {
-    type: mimeType,
-  });
+/* =========================================================
+   TOAST BRIDGE
+========================================================= */
 
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
+function notify(message = "", type = "info", options = {}) {
+  const text = safeText(message, "");
 
-  anchor.href = url;
-  anchor.download = filename;
+  if (!text) {
+    return null;
+  }
 
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
+  try {
+    return showToast(text, type, options);
+  } catch {}
 
-  URL.revokeObjectURL(url);
+  try {
+    return showToast({
+      message: text,
+      type,
+      ...safeObject(options),
+    });
+  } catch {}
 
-  return true;
+  return null;
 }
 
 /* =========================================================
@@ -486,7 +709,9 @@ export function getHomeDashboardFromStoreAction() {
     const snapshot = getHomeDashboardStore();
     const picked = pickDashboard(snapshot);
 
-    if (!picked) return null;
+    if (!picked) {
+      return null;
+    }
 
     return normalizeDashboardSnapshot(picked);
   } catch {
@@ -518,14 +743,14 @@ export async function getHomeDashboardAction({
         safeEmit("home:dashboard:fallback", {
           source: "store",
         });
+
         return fallbackStoreSnapshot;
       }
 
       throw new Error("EMPTY_HOME_DASHBOARD");
     }
 
-    const normalized =
-      normalizeDashboardSnapshot(snapshot);
+    const normalized = normalizeDashboardSnapshot(snapshot);
 
     safeEmit("home:dashboard:success", {
       source: "backend",
@@ -548,7 +773,7 @@ export async function getHomeDashboardAction({
     });
 
     if (!silent) {
-      showToast(
+      notify(
         "No se pudo cargar el dashboard de inicio.",
         "error"
       );
@@ -576,13 +801,17 @@ export function getHomeWidgetDetailFromStoreAction({
 } = {}) {
   const id = normalizeWidgetId(widgetId);
 
-  if (!id) return null;
+  if (!id) {
+    return null;
+  }
 
   try {
     const detail = getHomeWidgetByIdStore(id);
     const picked = pickWidget(detail);
 
-    if (!picked) return null;
+    if (!picked) {
+      return null;
+    }
 
     return normalizeWidgetDetail(picked);
   } catch {
@@ -599,8 +828,9 @@ export async function getHomeWidgetDetailAction({
 
   if (!id) {
     if (!silent) {
-      showToast("No se pudo resolver el bloque.", "error");
+      notify("No se pudo resolver el bloque.", "error");
     }
+
     return null;
   }
 
@@ -619,9 +849,7 @@ export async function getHomeWidgetDetailAction({
       source: "backend",
     });
 
-    const response =
-      await getHomeWidgetByIdRequest(id);
-
+    const response = await getHomeWidgetByIdRequest(id);
     const detail = pickWidget(response);
 
     if (!detail) {
@@ -630,6 +858,7 @@ export async function getHomeWidgetDetailAction({
           widgetId: id,
           source: "store",
         });
+
         return fallbackStoreDetail;
       }
 
@@ -662,7 +891,7 @@ export async function getHomeWidgetDetailAction({
     });
 
     if (!silent) {
-      showToast(
+      notify(
         "No se pudo cargar el detalle del bloque.",
         "error"
       );
@@ -681,8 +910,9 @@ export async function openHomeWidgetAction({
 
   if (!id) {
     if (!silent) {
-      showToast("Bloque inválido.", "error");
+      notify("Bloque inválido.", "error");
     }
+
     return null;
   }
 
@@ -731,8 +961,9 @@ export async function copyHomeWidgetIdAction({
 
   if (!id) {
     if (!silent) {
-      showToast("No hay ID para copiar.", "error");
+      notify("No hay ID para copiar.", "error");
     }
+
     return false;
   }
 
@@ -740,8 +971,9 @@ export async function copyHomeWidgetIdAction({
 
   if (!copied) {
     if (!silent) {
-      showToast("No se pudo copiar el ID.", "error");
+      notify("No se pudo copiar el ID.", "error");
     }
+
     return false;
   }
 
@@ -750,7 +982,7 @@ export async function copyHomeWidgetIdAction({
   });
 
   if (!silent) {
-    showToast("ID copiado", "success");
+    notify("ID copiado", "success");
   }
 
   return true;
@@ -769,31 +1001,40 @@ export function exportHomeCsvAction({
     ? items
     : getHomeSortedCollectionStore();
 
-  const list = safeArray(sourceItems);
+  const list = safeArray(sourceItems)
+    .map((item) => safeObject(item))
+    .filter((item) => isLikelyWidget(item));
 
   if (!list.length) {
     if (!silent) {
-      showToast("No hay datos para exportar.", "info");
+      notify("No hay datos para exportar.", "info");
     }
+
     return false;
   }
 
   try {
+    const finalFilename = normalizeFilename(filename, CSV_FILENAME);
+
     const csv = buildCsvRows(list);
 
-    downloadTextFile({
-      filename: safeText(filename, CSV_FILENAME),
+    const downloaded = downloadTextFile({
+      filename: finalFilename,
       content: csv,
-      mimeType: "text/csv;charset=utf-8;",
+      mimeType: CSV_MIME_TYPE,
     });
+
+    if (!downloaded) {
+      throw new Error("CSV_DOWNLOAD_FAILED");
+    }
 
     safeEmit("home:export:csv", {
       total: list.length,
-      filename: safeText(filename, CSV_FILENAME),
+      filename: finalFilename,
     });
 
     if (!silent) {
-      showToast("CSV exportado", "success");
+      notify("CSV exportado", "success");
     }
 
     return true;
@@ -804,7 +1045,7 @@ export function exportHomeCsvAction({
     });
 
     if (!silent) {
-      showToast("No se pudo exportar el CSV.", "error");
+      notify("No se pudo exportar el CSV.", "error");
     }
 
     return false;
@@ -812,34 +1053,101 @@ export function exportHomeCsvAction({
 }
 
 /* =========================================================
-   QUICK ACTIONS / NAVIGATION
+   NAVIGATION
 ========================================================= */
+
+async function navigateSpa(targetRoute = "/", options = {}) {
+  const route = safeText(targetRoute, "/") || "/";
+
+  const routerCandidates = [
+    AppCore?.router,
+    AppCore?.Router,
+    AppCore?.modules?.Router,
+    AppCore?.modules?.router,
+  ];
+
+  for (const router of routerCandidates) {
+    try {
+      if (isFn(router?.navigate)) {
+        await router.navigate(route, options);
+        return true;
+      }
+
+      if (isFn(router?.replace) && options.replaceState === true) {
+        await router.replace(route, options);
+        return true;
+      }
+
+      if (isFn(router?.go)) {
+        await router.go(route, options);
+        return true;
+      }
+
+      if (isFn(router?.push)) {
+        await router.push(route, options);
+        return true;
+      }
+    } catch (error) {
+      safeWarn("Router navigation candidate falló.", error);
+    }
+  }
+
+  try {
+    if (isFn(AppCore?.navigate)) {
+      await AppCore.navigate(route, options);
+      return true;
+    }
+  } catch {}
+
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    window.history.pushState({}, "", route);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    return true;
+  } catch {}
+
+  try {
+    window.location.assign(route);
+    return true;
+  } catch {}
+
+  return false;
+}
 
 export async function navigateFromHomeAction({
   route = "/",
   silent = false,
+  replaceState = false,
 } = {}) {
-  const targetRoute = safeText(route, "/");
+  const targetRoute = safeText(route, "/") || "/";
 
   try {
     safeEmit("home:navigate", {
       route: targetRoute,
+      replaceState: Boolean(replaceState),
     });
 
-    if (AppCore?.router?.navigate) {
-      await AppCore.router.navigate(targetRoute);
-      return true;
-    }
+    const ok = await navigateSpa(targetRoute, {
+      source: "home",
+      replaceState: Boolean(replaceState),
+    });
 
-    if (AppCore?.Router?.navigate) {
-      await AppCore.Router.navigate(targetRoute);
-      return true;
+    if (!ok) {
+      throw new Error("HOME_NAVIGATION_FAILED");
     }
 
     return true;
   } catch (error) {
+    safeEmit("home:navigate:error", {
+      route: targetRoute,
+      error,
+    });
+
     if (!silent) {
-      showToast(
+      notify(
         "No se pudo navegar desde Home.",
         "error"
       );
@@ -848,6 +1156,10 @@ export async function navigateFromHomeAction({
     return false;
   }
 }
+
+/* =========================================================
+   QUICK ACTIONS
+========================================================= */
 
 export async function runHomeQuickAction({
   action = "",
@@ -860,8 +1172,9 @@ export async function runHomeQuickAction({
 
   if (!actionName && !targetRoute) {
     if (!silent) {
-      showToast("Acción inválida.", "error");
+      notify("Acción inválida.", "error");
     }
+
     return false;
   }
 
@@ -881,8 +1194,14 @@ export async function runHomeQuickAction({
 
     return true;
   } catch (error) {
+    safeEmit("home:quick-action:error", {
+      action: actionName,
+      route: targetRoute,
+      error,
+    });
+
     if (!silent) {
-      showToast(
+      notify(
         "No se pudo ejecutar la acción rápida.",
         "error"
       );
@@ -908,20 +1227,18 @@ export async function createFromHomeAction({
       route: targetRoute,
     });
 
-    if (AppCore?.router?.navigate) {
-      await AppCore.router.navigate(targetRoute);
-      return true;
-    }
-
-    if (AppCore?.Router?.navigate) {
-      await AppCore.Router.navigate(targetRoute);
-      return true;
-    }
-
-    return true;
+    return await navigateFromHomeAction({
+      route: targetRoute,
+      silent,
+    });
   } catch (error) {
+    safeEmit("home:create:error", {
+      route: targetRoute,
+      error,
+    });
+
     if (!silent) {
-      showToast(
+      notify(
         "No se pudo abrir el flujo de creación.",
         "error"
       );
@@ -949,4 +1266,41 @@ export {
   getWidgetItems as getHomeWidgetItemsAction,
   normalizeWidgetDetail as normalizeHomeWidgetDetailAction,
   normalizeDashboardSnapshot as normalizeHomeDashboardAction,
+};
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default {
+  getHomeDashboardFromStoreAction,
+  getHomeDashboardAction,
+  refreshHomeDashboardAction,
+
+  getHomeWidgetDetailFromStoreAction,
+  getHomeWidgetDetailAction,
+  openHomeWidgetAction,
+  refreshHomeWidgetDetailAction,
+
+  copyHomeWidgetIdAction,
+  exportHomeCsvAction,
+
+  navigateFromHomeAction,
+  runHomeQuickAction,
+  createFromHomeAction,
+
+  getHomeWidgetIdAction: getWidgetId,
+  getHomeWidgetTitleAction: getWidgetTitle,
+  getHomeWidgetDescriptionAction: getWidgetDescription,
+  getHomeWidgetTypeAction: getWidgetType,
+  getHomeWidgetValueAction: getWidgetValue,
+  getHomeWidgetTrendAction: getWidgetTrend,
+  getHomeWidgetStatusAction: getWidgetStatus,
+  getHomeWidgetRouteAction: getWidgetRoute,
+  getHomeWidgetCreatedAtAction: getWidgetCreatedAt,
+  getHomeWidgetUpdatedAtAction: getWidgetUpdatedAt,
+  getHomeWidgetItemsAction: getWidgetItems,
+
+  normalizeHomeWidgetDetailAction: normalizeWidgetDetail,
+  normalizeHomeDashboardAction: normalizeDashboardSnapshot,
 };

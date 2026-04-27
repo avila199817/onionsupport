@@ -9,10 +9,115 @@
    - progress animation
    - clear timers
    - endurecer race conditions / updates / hover spam
+   - tolerar SSR/tests sin window/document
+   - evitar timeouts obsoletos tras update/re-render
 ========================================================= */
 
 import { dismissToast } from "./api.js";
-import { prefersReducedMotion } from "./helpers.js";
+
+import {
+  prefersReducedMotion,
+} from "./helpers.js";
+
+/* =========================================================
+   RUNTIME
+========================================================= */
+
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
+
+function nowMs() {
+  try {
+    if (
+      typeof performance !== "undefined" &&
+      typeof performance.now === "function"
+    ) {
+      return performance.now();
+    }
+  } catch {}
+
+  return Date.now();
+}
+
+function safeSetTimeout(fn, delay = 0) {
+  if (typeof fn !== "function") {
+    return null;
+  }
+
+  const ms =
+    Math.max(
+      0,
+      Number(delay) || 0
+    );
+
+  try {
+    if (
+      typeof window !== "undefined" &&
+      typeof window.setTimeout === "function"
+    ) {
+      return window.setTimeout(fn, ms);
+    }
+  } catch {}
+
+  try {
+    return setTimeout(fn, ms);
+  } catch {
+    return null;
+  }
+}
+
+function safeClearTimeout(id = null) {
+  if (
+    id === null ||
+    id === undefined
+  ) {
+    return false;
+  }
+
+  try {
+    if (
+      typeof window !== "undefined" &&
+      typeof window.clearTimeout === "function"
+    ) {
+      window.clearTimeout(id);
+      return true;
+    }
+  } catch {}
+
+  try {
+    clearTimeout(id);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function nextFrame(callback) {
+  if (typeof callback !== "function") {
+    return;
+  }
+
+  try {
+    if (
+      isBrowser() &&
+      typeof window.requestAnimationFrame === "function"
+    ) {
+      window.requestAnimationFrame(() => {
+        try {
+          callback();
+        } catch {}
+      });
+
+      return;
+    }
+  } catch {}
+
+  safeSetTimeout(callback, 0);
+}
 
 /* =========================================================
    HELPERS
@@ -28,13 +133,17 @@ function getSafeDuration(
   value,
   fallback = 0
 ) {
-  const n = Number(value);
+  const n =
+    Number(value);
 
   if (!Number.isFinite(n)) {
     return fallback;
   }
 
-  return Math.max(0, n);
+  return Math.max(
+    0,
+    Math.round(n)
+  );
 }
 
 function isPersistent(item) {
@@ -44,6 +153,21 @@ function isPersistent(item) {
       item.duration,
       0
     ) <= 0
+  );
+}
+
+function isLoadingToast(item) {
+  return (
+    String(item?.type || "")
+      .trim()
+      .toLowerCase() === "loading"
+  );
+}
+
+function isDismissed(item) {
+  return Boolean(
+    !item ||
+      item.dismissed === true
   );
 }
 
@@ -58,100 +182,158 @@ function getRemaining(item) {
   );
 }
 
+function ensureTimerToken(item) {
+  if (!item) {
+    return "";
+  }
+
+  const token =
+    `${item.id || "toast"}:${Date.now()}:${Math.random()
+      .toString(36)
+      .slice(2)}`;
+
+  item.timerToken = token;
+
+  return token;
+}
+
+function isSameTimerToken(item, token = "") {
+  return Boolean(
+    item &&
+      token &&
+      item.timerToken === token
+  );
+}
+
+function getProgressElement(item) {
+  return item?.progressEl || null;
+}
+
+function canUseProgress(item) {
+  const el =
+    getProgressElement(item);
+
+  return Boolean(
+    el &&
+      isBrowser()
+  );
+}
+
 /* =========================================================
    TIMER
 ========================================================= */
 
-export function clearToastTimer(
-  item
-) {
+export function clearToastTimer(item) {
   if (!item) {
     return false;
   }
 
-  if (item.timeoutId) {
-    window.clearTimeout(
+  const hadTimer =
+    item.timeoutId !== null &&
+    item.timeoutId !== undefined;
+
+  if (hadTimer) {
+    safeClearTimeout(
       item.timeoutId
     );
   }
 
   item.timeoutId = null;
+  item.startedAt = 0;
 
-  return true;
+  /*
+    Invalidamos cualquier callback viejo pendiente.
+  */
+  item.timerToken = "";
+
+  return hadTimer;
 }
 
 /* =========================================================
    PROGRESS
 ========================================================= */
 
-export function freezeToastProgress(
-  item
-) {
-  const el =
-    item?.progressEl;
-
-  if (!el) {
+export function freezeToastProgress(item) {
+  if (!canUseProgress(item)) {
     return false;
   }
 
-  const computed =
-    window.getComputedStyle(
-      el
-    ).transform;
+  const el =
+    getProgressElement(item);
 
-  el.style.animation =
-    "none";
+  try {
+    const computed =
+      window.getComputedStyle?.(el);
 
-  el.style.transform =
-    computed === "none"
-      ? "scaleX(1)"
-      : computed;
+    const transform =
+      computed?.transform || "";
 
-  return true;
+    el.style.animation = "none";
+
+    el.style.transform =
+      transform && transform !== "none"
+        ? transform
+        : el.style.transform || "scaleX(1)";
+
+    el.style.transformOrigin =
+      "left center";
+
+    return true;
+  } catch {
+    try {
+      el.style.animation = "none";
+      el.style.transform =
+        el.style.transform || "scaleX(1)";
+      el.style.transformOrigin =
+        "left center";
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
-export function resetToastProgress(
-  item
-) {
+export function resetToastProgress(item) {
   const el =
-    item?.progressEl;
+    getProgressElement(item);
 
   if (!el) {
     return false;
   }
 
-  el.style.animation =
-    "none";
+  try {
+    el.style.display = "";
+    el.style.opacity = "";
+    el.style.animation = "none";
+    el.style.transform = "scaleX(1)";
+    el.style.transformOrigin = "left center";
 
-  el.style.transform =
-    "scaleX(1)";
-
-  el.style.opacity = "";
-  el.style.display = "";
-
-  return true;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-export function hideToastProgress(
-  item
-) {
+export function hideToastProgress(item) {
   const el =
-    item?.progressEl;
+    getProgressElement(item);
 
   if (!el) {
     return false;
   }
 
-  el.style.display =
-    "none";
+  try {
+    el.style.display = "none";
+    el.style.opacity = "0";
+    el.style.animation = "none";
+    el.style.transform = "scaleX(1)";
+    el.style.transformOrigin = "left center";
 
-  el.style.animation =
-    "none";
-
-  el.style.transform =
-    "scaleX(1)";
-
-  return true;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function runToastProgress(
@@ -159,7 +341,7 @@ export function runToastProgress(
   duration
 ) {
   const el =
-    item?.progressEl;
+    getProgressElement(item);
 
   if (!el) {
     return false;
@@ -173,25 +355,22 @@ export function runToastProgress(
 
   if (
     safeDuration <= 0 ||
-    item?.type ===
-      "loading"
+    isPersistent(item) ||
+    isLoadingToast(item)
   ) {
-    hideToastProgress(
-      item
-    );
-
+    hideToastProgress(item);
     return true;
   }
 
-  el.style.display = "";
-  el.style.animation =
-    "none";
-
-  el.style.transform =
-    "scaleX(1)";
-
-  el.style.transformOrigin =
-    "left center";
+  try {
+    el.style.display = "";
+    el.style.opacity = "";
+    el.style.animation = "none";
+    el.style.transform = "scaleX(1)";
+    el.style.transformOrigin = "left center";
+  } catch {
+    return false;
+  }
 
   if (
     prefersReducedMotion()
@@ -199,10 +378,25 @@ export function runToastProgress(
     return true;
   }
 
-  void el.offsetWidth;
+  nextFrame(() => {
+    if (
+      isDismissed(item) ||
+      !item.progressEl ||
+      item.progressEl !== el
+    ) {
+      return;
+    }
 
-  el.style.animation =
-    `toastProgress ${safeDuration}ms linear forwards`;
+    try {
+      /*
+        Fuerza reflow para reiniciar animación.
+      */
+      void el.offsetWidth;
+
+      el.style.animation =
+        `toastProgress ${safeDuration}ms linear forwards`;
+    } catch {}
+  });
 
   return true;
 }
@@ -211,9 +405,7 @@ export function runToastProgress(
    START
 ========================================================= */
 
-export function startToastTimer(
-  item
-) {
+export function startToastTimer(item) {
   if (
     !item ||
     item.dismissed
@@ -221,24 +413,20 @@ export function startToastTimer(
     return false;
   }
 
+  clearToastTimer(item);
+
   if (
-    isPersistent(item)
+    isPersistent(item) ||
+    isLoadingToast(item)
   ) {
-    clearToastTimer(
-      item
-    );
+    hideToastProgress(item);
 
-    hideToastProgress(
-      item
-    );
-
-    item.startedAt = 0;
     item.remaining = 0;
+    item.startedAt = 0;
+    item.timeoutId = null;
 
     return false;
   }
-
-  clearToastTimer(item);
 
   const remaining =
     Math.max(
@@ -246,48 +434,54 @@ export function startToastTimer(
       getRemaining(item)
     );
 
-  if (
-    remaining <= 0
-  ) {
-    dismissToast(
-      item.id
-    );
-
+  if (remaining <= 0) {
+    dismissToast(item.id);
     return false;
   }
+
+  const currentId =
+    String(item.id || "");
+
+  if (!currentId) {
+    return false;
+  }
+
+  const token =
+    ensureTimerToken(item);
 
   item.remaining =
     remaining;
 
   item.startedAt =
-    Date.now();
-
-  const currentId =
-    item.id;
+    nowMs();
 
   item.timeoutId =
-    window.setTimeout(
-      () => {
-        /*
-          Blindaje:
-          si el toast cambió de id,
-          fue dismiss,
-          o mutó raro, no actuamos.
-        */
-        if (
-          item.dismissed ||
-          item.id !==
-            currentId
-        ) {
-          return;
-        }
+    safeSetTimeout(() => {
+      /*
+        Blindaje:
+        - si se pausó/reanudó/updateó, token cambia
+        - si se hizo dismiss, no actúa
+        - si el id mutó, no actúa
+      */
+      if (
+        isDismissed(item) ||
+        item.id !== currentId ||
+        !isSameTimerToken(item, token)
+      ) {
+        return;
+      }
 
-        dismissToast(
-          currentId
-        );
-      },
-      remaining
-    );
+      item.timeoutId = null;
+      item.startedAt = 0;
+      item.remaining = 0;
+      item.timerToken = "";
+
+      dismissToast(currentId);
+    }, remaining);
+
+  if (!item.timeoutId) {
+    return false;
+  }
 
   runToastProgress(
     item,
@@ -301,22 +495,19 @@ export function startToastTimer(
    PAUSE
 ========================================================= */
 
-export function pauseToastTimer(
-  item
-) {
+export function pauseToastTimer(item) {
   if (
     !item ||
     item.dismissed ||
-    isPersistent(item)
+    isPersistent(item) ||
+    isLoadingToast(item)
   ) {
     return false;
   }
 
   if (
-    !isFiniteNumber(
-      item.startedAt
-    ) ||
-    item.startedAt <= 0
+    !isFiniteNumber(item.startedAt) ||
+    Number(item.startedAt) <= 0
   ) {
     return false;
   }
@@ -324,29 +515,28 @@ export function pauseToastTimer(
   const elapsed =
     Math.max(
       0,
-      Date.now() -
-        item.startedAt
+      nowMs() - Number(item.startedAt)
     );
+
+  const previousRemaining =
+    getRemaining(item);
 
   const remaining =
     Math.max(
       0,
-      getRemaining(item) -
-        elapsed
+      previousRemaining - elapsed
     );
 
-  item.remaining =
-    remaining;
+  safeClearTimeout(
+    item.timeoutId
+  );
 
+  item.timeoutId = null;
   item.startedAt = 0;
+  item.remaining = remaining;
+  item.timerToken = "";
 
-  clearToastTimer(
-    item
-  );
-
-  freezeToastProgress(
-    item
-  );
+  freezeToastProgress(item);
 
   return true;
 }
@@ -355,31 +545,112 @@ export function pauseToastTimer(
    RESUME
 ========================================================= */
 
-export function resumeToastTimer(
-  item
-) {
+export function resumeToastTimer(item) {
   if (
     !item ||
     item.dismissed ||
-    isPersistent(item)
+    isPersistent(item) ||
+    isLoadingToast(item)
   ) {
     return false;
+  }
+
+  /*
+    Si ya está corriendo, no duplicamos timer.
+  */
+  if (
+    item.timeoutId &&
+    isFiniteNumber(item.startedAt) &&
+    Number(item.startedAt) > 0
+  ) {
+    return true;
   }
 
   const remaining =
     getRemaining(item);
 
-  if (
-    remaining <= 0
-  ) {
-    dismissToast(
-      item.id
-    );
-
+  if (remaining <= 0) {
+    dismissToast(item.id);
     return false;
   }
 
-  return startToastTimer(
-    item
-  );
+  item.remaining =
+    remaining;
+
+  return startToastTimer(item);
 }
+
+/* =========================================================
+   DEBUG
+========================================================= */
+
+export function getToastTimerSnapshot(item) {
+  if (!item) {
+    return {
+      exists: false,
+    };
+  }
+
+  return {
+    exists: true,
+
+    id:
+      item.id || null,
+
+    type:
+      item.type || null,
+
+    dismissed:
+      Boolean(item.dismissed),
+
+    persistent:
+      isPersistent(item),
+
+    loading:
+      isLoadingToast(item),
+
+    duration:
+      getSafeDuration(
+        item.duration,
+        0
+      ),
+
+    remaining:
+      getRemaining(item),
+
+    startedAt:
+      Number(item.startedAt || 0),
+
+    hasTimer:
+      item.timeoutId !== null &&
+      item.timeoutId !== undefined,
+
+    hasTimerToken:
+      Boolean(item.timerToken),
+
+    hasProgress:
+      Boolean(item.progressEl),
+
+    progressConnected:
+      Boolean(item.progressEl?.isConnected),
+  };
+}
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
+export default {
+  clearToastTimer,
+
+  freezeToastProgress,
+  resetToastProgress,
+  hideToastProgress,
+  runToastProgress,
+
+  startToastTimer,
+  pauseToastTimer,
+  resumeToastTimer,
+
+  getToastTimerSnapshot,
+};

@@ -1,0 +1,77 @@
+# =====================================================
+# ONION SUPPORT · ROBOTS.TXT
+# Producción · Azure Static Web Apps · SPA Ready
+# =====================================================
+
+User-agent: *
+
+# =====================================================
+# PERMITIR RECURSOS PÚBLICOS NECESARIOS
+# =====================================================
+Allow: /
+Allow: /robots.txt
+Allow: /sitemap.xml
+Allow: /BingSiteAuth.xml
+Allow: /manifest.json
+Allow: /site.webmanifest
+Allow: /favicon.ico
+Allow: /src/media/img/
+
+# =====================================================
+# BLOQUEAR API / ZONAS TÉCNICAS
+# =====================================================
+Disallow: /api/
+Disallow: /.auth/
+Disallow: /.github/
+Disallow: /staticwebapp.config.json
+
+# =====================================================
+# BLOQUEAR RUTAS AUTH / SESIÓN
+# =====================================================
+Disallow: /login
+Disallow: /signin
+Disallow: /auth
+Disallow: /2fa
+Disallow: /otp
+
+# =====================================================
+# BLOQUEAR ACTIVACIÓN / RESET PASSWORD
+# =====================================================
+Disallow: /activate-account
+Disallow: /activate-account/
+Disallow: /forgot-password
+Disallow: /recover-password
+Disallow: /password-reset
+Disallow: /reset-password
+Disallow: /reset-password/
+Disallow: /reset-password/confirm
+Disallow: /reset-password/confirm/
+
+# =====================================================
+# BLOQUEAR PANEL PRIVADO SPA
+# =====================================================
+Disallow: /incidencias
+Disallow: /incidencias/
+Disallow: /facturas
+Disallow: /facturas/
+Disallow: /usuarios
+Disallow: /usuarios/
+Disallow: /clientes
+Disallow: /clientes/
+Disallow: /cuenta
+Disallow: /cuenta/
+Disallow: /ajustes
+Disallow: /ajustes/
+Disallow: /servidor
+Disallow: /servidor/
+
+# =====================================================
+# BLOQUEAR RUTAS CONTEXTUALES DE USUARIO
+# Ejemplo: /@cristian/facturas
+# =====================================================
+Disallow: /@*/
+
+# =====================================================
+# SITEMAP
+# =====================================================
+Sitemap: https://onionsupport.com/sitemap.xml

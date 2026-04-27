@@ -12,7 +12,7 @@
 
    HARDENING EXTREMO:
    - lazy title getter
-   - safe render wrappers
+   - safe render wrappers sin convertir renders sync en async
    - validación extendida
    - metadata estable
    - soporte para vistas tipo objeto y vistas tipo función
@@ -22,6 +22,7 @@
    - meta auth consistente con guards
    - soporte público para activación de cuenta
    - soporte público para reset password
+   - aliases públicos forgot/recover/password-reset
    - rutas sin query/hash por definición
    - no toca history
    - no modifica search/hash
@@ -55,7 +56,7 @@ import { AjustesView } from "../views/ajustes/index.js";
 
 const ROUTE_SOURCE = "router:routes";
 
-const ROUTE_PATHS = Object.freeze({
+export const ROUTE_PATHS = Object.freeze({
   HOME: "/",
   INCIDENCIAS: "/incidencias",
   FACTURAS: "/facturas",
@@ -86,7 +87,7 @@ const PUBLIC_AUTH_ROUTES = Object.freeze([
 
 const PUBLIC_AUTH_ROUTE_SET = new Set(PUBLIC_AUTH_ROUTES);
 
-const ADMIN_ROLES = Object.freeze([
+export const ADMIN_ROLES = Object.freeze([
   "admin",
   "administrator",
   "administrador",
@@ -131,6 +132,17 @@ function safeError(...args) {
   } catch {}
 }
 
+function isPromiseLike(value) {
+  return Boolean(
+    value &&
+      (
+        typeof value === "object" ||
+        typeof value === "function"
+      ) &&
+      typeof value.then === "function"
+  );
+}
+
 function toArray(value) {
   if (Array.isArray(value)) {
     return value;
@@ -141,6 +153,20 @@ function toArray(value) {
   }
 
   return [value];
+}
+
+function unique(values = []) {
+  return Array.from(
+    new Set(
+      values.filter(Boolean)
+    )
+  );
+}
+
+function freezeArray(values = []) {
+  return Object.freeze(
+    unique(values)
+  );
 }
 
 function normalizeRoleKey(role = "") {
@@ -155,10 +181,12 @@ function normalizeRoleKey(role = "") {
 }
 
 function normalizeRoles(roles) {
-  return toArray(roles)
-    .flat(Infinity)
-    .map(normalizeRoleKey)
-    .filter(Boolean);
+  return unique(
+    toArray(roles)
+      .flat(Infinity)
+      .map(normalizeRoleKey)
+      .filter(Boolean)
+  );
 }
 
 function stripQueryAndHash(path = "/") {
@@ -217,13 +245,22 @@ function buildRouteId({ path = "/", name = "route" } = {}) {
 ========================================================= */
 
 function safeRun(fn) {
-  return async function wrappedRouteRender(...args) {
+  return function wrappedRouteRender(...args) {
     try {
       if (typeof fn !== "function") {
         return null;
       }
 
-      return await Promise.resolve(fn(...args));
+      const result = fn(...args);
+
+      if (isPromiseLike(result)) {
+        return result.catch((error) => {
+          safeError("[Router Route Error]", error);
+          throw error;
+        });
+      }
+
+      return result;
     } catch (error) {
       safeError("[Router Route Error]", error);
       throw error;
@@ -238,9 +275,8 @@ function resolveViewRenderer(view) {
 
   /*
     IMPORTANTE:
-    Priorizamos init() antes que render()
-    porque vistas auth y otras vistas complejas
-    pueden necesitar preparar estado antes del paint.
+    Priorizamos init() antes que render().
+    Vistas auth complejas suelen preparar listeners/estado en init().
   */
   if (view && typeof view.init === "function") {
     return view.init.bind(view);
@@ -274,7 +310,28 @@ function normalizeMeta(definition = {}) {
   const isLoginRoute = normalizedPath === ROUTE_PATHS.LOGIN;
   const isPublicAuthRoute = PUBLIC_AUTH_ROUTE_SET.has(normalizedPath);
 
+  const roles = freezeArray(
+    normalizeRoles(definition.roles)
+  );
+
   const hideShell = definition.hideShell === true;
+
+  const layout =
+    safeText(
+      definition.layout,
+      hideShell ? "auth" : "app"
+    );
+
+  const shell =
+    hideShell ? false : true;
+
+  const authScreen =
+    definition.authScreen === true ||
+    (
+      publicRoute === true &&
+      hideShell === true &&
+      isPublicAuthRoute
+    );
 
   const guestOnly =
     definition.guestOnly === true ||
@@ -284,13 +341,12 @@ function normalizeMeta(definition = {}) {
       isLoginRoute === true
     );
 
-  const roles = normalizeRoles(definition.roles);
-
   /*
     Regla central:
-    - public true  => no requiere auth
+    - public true => no requiere auth
     - public false => requiere auth
-    - roles        => requiere auth sí o sí
+    - roles => requiere auth sí o sí, salvo definición inválida public+roles,
+      que se bloqueará en validateRoutesTable().
   */
   const requiresAuth =
     publicRoute === true
@@ -300,19 +356,29 @@ function normalizeMeta(definition = {}) {
   return Object.freeze({
     order: Number(definition.order || 0),
 
-    source: definition.source || ROUTE_SOURCE,
+    source:
+      definition.source || ROUTE_SOURCE,
 
     requiresAuth,
     private: requiresAuth,
 
     public: publicRoute,
-    publicAuth: publicRoute && isPublicAuthRoute,
+    publicAuth:
+      publicRoute && isPublicAuthRoute,
 
     guestOnly,
     publicOnly: guestOnly,
 
     roles,
     allowRoles: roles,
+    requireRoles: roles,
+
+    hideShell,
+    shell,
+    showShell: !hideShell,
+
+    layout,
+    authScreen,
   });
 }
 
@@ -334,7 +400,10 @@ function resolveRouteTitle(route) {
 function createRoute(definition = {}) {
   const normalizedPath = normalizeRoutePath(definition.path || "/");
   const normalizedName = normalizeRouteName(definition.name || "route");
-  const normalizedRoles = normalizeRoles(definition.roles);
+
+  const normalizedRoles = freezeArray(
+    normalizeRoles(definition.roles)
+  );
 
   const publicRoute = definition.public === true;
   const hideShell = definition.hideShell === true;
@@ -354,6 +423,7 @@ function createRoute(definition = {}) {
     }),
 
     path: normalizedPath,
+    canonicalPath: normalizedPath,
     name: normalizedName,
 
     titleKey: safeText(definition.titleKey, ""),
@@ -361,19 +431,49 @@ function createRoute(definition = {}) {
 
     public: publicRoute,
     requiresAuth: meta.requiresAuth,
+    private: meta.private,
+
     guestOnly: meta.guestOnly,
+    publicOnly: meta.publicOnly,
 
     roles: normalizedRoles,
+    allowRoles: normalizedRoles,
 
     hideShell,
+    shell: meta.shell,
+    showShell: meta.showShell,
+    layout: meta.layout,
+    authScreen: meta.authScreen,
 
     order: meta.order,
 
     redirectAuthenticated:
       safeText(definition.redirectAuthenticated, ""),
 
+    redirectIfAuth:
+      safeText(
+        definition.redirectIfAuth ||
+          definition.redirectAuthenticated,
+        ""
+      ),
+
     redirectForbidden:
       safeText(definition.redirectForbidden, ""),
+
+    renderMode:
+      safeText(definition.renderMode, ""),
+
+    awaitRender:
+      definition.awaitRender === true
+        ? true
+        : definition.awaitRender === false
+          ? false
+          : undefined,
+
+    transitionView:
+      definition.transitionView === false
+        ? false
+        : true,
 
     render: safeRun(definition.render || (() => null)),
 
@@ -411,161 +511,180 @@ const renderResetPasswordView = createViewAdapter(ResetPasswordView);
 const renderConfirmResetPasswordView = createViewAdapter(ConfirmResetPasswordView);
 
 /* =========================================================
+   ROUTE DEFINITIONS
+========================================================= */
+
+function privateRoute(definition = {}) {
+  return createRoute({
+    public: false,
+    roles: [],
+    hideShell: false,
+    layout: "app",
+    ...definition,
+  });
+}
+
+function adminRoute(definition = {}) {
+  return privateRoute({
+    roles: ADMIN_ROLES,
+    redirectForbidden: ROUTE_PATHS.HOME,
+    ...definition,
+  });
+}
+
+function publicAuthRoute(definition = {}) {
+  return createRoute({
+    public: true,
+    roles: [],
+    hideShell: true,
+    layout: "auth",
+    authScreen: true,
+    guestOnly: false,
+    ...definition,
+  });
+}
+
+/* =========================================================
    ROUTES FACTORY
 ========================================================= */
 
 export function createRoutes() {
   return [
-    createRoute({
+    privateRoute({
       path: ROUTE_PATHS.HOME,
       name: "home",
       titleKey: "routes.home",
       titleFallback: "Inicio",
-      public: false,
-      roles: [],
-      hideShell: false,
       order: 10,
       render: renderHomeView,
     }),
 
-    createRoute({
+    privateRoute({
       path: ROUTE_PATHS.INCIDENCIAS,
       name: "incidencias",
       titleKey: "routes.incidencias",
       titleFallback: "Incidencias",
-      public: false,
-      roles: [],
-      hideShell: false,
       order: 20,
       render: renderIncidenciasView,
     }),
 
-    createRoute({
+    privateRoute({
       path: ROUTE_PATHS.FACTURAS,
       name: "facturas",
       titleKey: "routes.facturas",
       titleFallback: "Facturas",
-      public: false,
-      roles: [],
-      hideShell: false,
       order: 30,
       render: renderFacturasView,
     }),
 
-    createRoute({
+    adminRoute({
       path: ROUTE_PATHS.USUARIOS,
       name: "usuarios",
       titleKey: "routes.usuarios",
       titleFallback: "Usuarios",
-      public: false,
-      roles: ADMIN_ROLES,
-      hideShell: false,
-      redirectForbidden: ROUTE_PATHS.HOME,
       order: 40,
       render: renderUsuariosView,
     }),
 
-    createRoute({
+    adminRoute({
       path: ROUTE_PATHS.CLIENTES,
       name: "clientes",
       titleKey: "routes.clientes",
       titleFallback: "Clientes",
-      public: false,
-      roles: ADMIN_ROLES,
-      hideShell: false,
-      redirectForbidden: ROUTE_PATHS.HOME,
       order: 50,
       render: renderClientesView,
     }),
 
-    createRoute({
+    privateRoute({
       path: ROUTE_PATHS.CUENTA,
       name: "cuenta",
       titleKey: "routes.cuenta",
       titleFallback: "Cuenta",
-      public: false,
-      roles: [],
-      hideShell: false,
       order: 60,
       render: renderCuentaView,
     }),
 
-    createRoute({
+    privateRoute({
       path: ROUTE_PATHS.AJUSTES,
       name: "ajustes",
       titleKey: "routes.ajustes",
       titleFallback: "Ajustes",
-      public: false,
-      roles: [],
-      hideShell: false,
       order: 70,
       render: renderAjustesView,
     }),
 
-    createRoute({
+    adminRoute({
       path: ROUTE_PATHS.SERVIDOR,
       name: "servidor",
       titleKey: "routes.servidor",
       titleFallback: "Servidor",
-      public: false,
-      roles: ADMIN_ROLES,
-      hideShell: false,
-      redirectForbidden: ROUTE_PATHS.HOME,
       order: 80,
       render: renderServidorView,
     }),
 
-    createRoute({
+    publicAuthRoute({
       path: ROUTE_PATHS.LOGIN,
       name: "login",
       titleKey: "routes.login",
       titleFallback: "Acceso",
-      public: true,
-      roles: [],
-      hideShell: true,
       guestOnly: true,
       redirectAuthenticated: ROUTE_PATHS.HOME,
       order: 1000,
       render: renderLoginView,
     }),
 
-    createRoute({
+    publicAuthRoute({
       path: ROUTE_PATHS.ACTIVATE_ACCOUNT,
       name: "activate-account",
       titleKey: "routes.activateAccount",
       titleFallback: "Activar cuenta",
-      public: true,
-      roles: [],
-      hideShell: true,
-      guestOnly: false,
       order: 1005,
       render: renderActivateAccountView,
     }),
 
-    createRoute({
+    publicAuthRoute({
       path: ROUTE_PATHS.RESET_PASSWORD,
       name: "reset-password",
       titleKey: "routes.resetPassword",
       titleFallback: "Recuperar acceso",
-      public: true,
-      roles: [],
-      hideShell: true,
-      guestOnly: false,
       order: 1010,
       render: renderResetPasswordView,
     }),
 
-    createRoute({
+    publicAuthRoute({
       path: ROUTE_PATHS.RESET_PASSWORD_CONFIRM,
       name: "reset-password-confirm",
       titleKey: "routes.resetPasswordConfirm",
       titleFallback: "Nueva contraseña",
-      public: true,
-      roles: [],
-      hideShell: true,
-      guestOnly: false,
       order: 1020,
       render: renderConfirmResetPasswordView,
+    }),
+
+    publicAuthRoute({
+      path: ROUTE_PATHS.FORGOT_PASSWORD,
+      name: "forgot-password",
+      titleKey: "routes.forgotPassword",
+      titleFallback: "Recuperar acceso",
+      order: 1030,
+      render: renderResetPasswordView,
+    }),
+
+    publicAuthRoute({
+      path: ROUTE_PATHS.RECOVER_PASSWORD,
+      name: "recover-password",
+      titleKey: "routes.recoverPassword",
+      titleFallback: "Recuperar acceso",
+      order: 1040,
+      render: renderResetPasswordView,
+    }),
+
+    publicAuthRoute({
+      path: ROUTE_PATHS.PASSWORD_RESET,
+      name: "password-reset",
+      titleKey: "routes.passwordReset",
+      titleFallback: "Recuperar acceso",
+      order: 1050,
+      render: renderResetPasswordView,
     }),
   ];
 }
@@ -606,6 +725,12 @@ function assertValidPath(route, normalizedPath) {
       `Router: la ruta "${route.path}" no debe incluir query/hash.`
     );
   }
+
+  if (route.path !== normalizedPath) {
+    throw new Error(
+      `Router: path no normalizado "${route.path}". Esperado "${normalizedPath}".`
+    );
+  }
 }
 
 function assertValidName(route, normalizedPath) {
@@ -640,6 +765,14 @@ function assertValidRoles(route, normalizedPath) {
       `Router: la ruta "${normalizedPath}" tiene roles vacíos o inválidos.`
     );
   }
+
+  const normalized = normalizeRoles(route.roles);
+
+  if (normalized.length !== route.roles.length) {
+    throw new Error(
+      `Router: la ruta "${normalizedPath}" tiene roles duplicados o inválidos.`
+    );
+  }
 }
 
 function assertValidFlags(route, normalizedPath) {
@@ -664,6 +797,18 @@ function assertValidFlags(route, normalizedPath) {
   if (typeof route.guestOnly !== "boolean") {
     throw new Error(
       `Router: la ruta "${normalizedPath}" tiene guestOnly inválido.`
+    );
+  }
+
+  if (typeof route.shell !== "boolean") {
+    throw new Error(
+      `Router: la ruta "${normalizedPath}" tiene shell inválido.`
+    );
+  }
+
+  if (typeof route.showShell !== "boolean") {
+    throw new Error(
+      `Router: la ruta "${normalizedPath}" tiene showShell inválido.`
     );
   }
 
@@ -700,6 +845,18 @@ function assertValidFlags(route, normalizedPath) {
       `Router: la ruta privada "${normalizedPath}" debe requerir auth.`
     );
   }
+
+  if (route.hideShell === true && route.shell !== false) {
+    throw new Error(
+      `Router: shell inconsistente en "${normalizedPath}".`
+    );
+  }
+
+  if (route.hideShell === false && route.shell !== true) {
+    throw new Error(
+      `Router: shell inconsistente en "${normalizedPath}".`
+    );
+  }
 }
 
 function assertValidMeta(route, normalizedPath) {
@@ -727,6 +884,18 @@ function assertValidMeta(route, normalizedPath) {
     );
   }
 
+  if (route.meta.hideShell !== route.hideShell) {
+    throw new Error(
+      `Router: meta.hideShell inconsistente en "${normalizedPath}".`
+    );
+  }
+
+  if (route.meta.shell !== route.shell) {
+    throw new Error(
+      `Router: meta.shell inconsistente en "${normalizedPath}".`
+    );
+  }
+
   if (!Array.isArray(route.meta.roles)) {
     throw new Error(
       `Router: meta.roles inválido en "${normalizedPath}".`
@@ -736,6 +905,18 @@ function assertValidMeta(route, normalizedPath) {
   if (!Array.isArray(route.meta.allowRoles)) {
     throw new Error(
       `Router: meta.allowRoles inválido en "${normalizedPath}".`
+    );
+  }
+
+  if (route.meta.roles.length !== route.roles.length) {
+    throw new Error(
+      `Router: meta.roles inconsistente en "${normalizedPath}".`
+    );
+  }
+
+  if (route.meta.allowRoles.length !== route.roles.length) {
+    throw new Error(
+      `Router: meta.allowRoles inconsistente en "${normalizedPath}".`
     );
   }
 }
@@ -753,6 +934,28 @@ function assertHomeRoute(routes) {
 
   if (home.public !== false || home.requiresAuth !== true) {
     throw new Error("Router: Home debe ser privada y requerir auth.");
+  }
+
+  if (home.hideShell !== false || home.shell !== true) {
+    throw new Error("Router: Home debe usar shell visible.");
+  }
+}
+
+function assertPublicAuthRoutes(routes) {
+  for (const path of PUBLIC_AUTH_ROUTES) {
+    const route = routes.find((item) => item.path === path);
+
+    if (!route) {
+      throw new Error(`Router: falta ruta pública auth "${path}".`);
+    }
+
+    if (route.public !== true || route.requiresAuth !== false) {
+      throw new Error(`Router: ruta pública auth inválida "${path}".`);
+    }
+
+    if (route.hideShell !== true || route.shell !== false) {
+      throw new Error(`Router: ruta pública auth debe ocultar shell "${path}".`);
+    }
   }
 }
 
@@ -795,6 +998,7 @@ export function validateRoutesTable(AppCore, routes, normalizeCanonicalPath) {
   });
 
   assertHomeRoute(routes);
+  assertPublicAuthRoutes(routes);
 
   return true;
 }
@@ -807,14 +1011,22 @@ export function getRoutesSnapshot() {
   return getImmutableRoutes().map((route) => ({
     id: route.id,
     path: route.path,
+    canonicalPath: route.canonicalPath,
     name: route.name,
     title: route.title,
     public: route.public,
     requiresAuth: route.requiresAuth,
     guestOnly: route.guestOnly,
+    publicOnly: route.publicOnly,
     hideShell: route.hideShell,
+    shell: route.shell,
+    layout: route.layout,
+    authScreen: route.authScreen,
     roles: route.roles,
+    redirectAuthenticated: route.redirectAuthenticated || null,
+    redirectForbidden: route.redirectForbidden || null,
     order: route.order,
+    meta: route.meta,
   }));
 }
 
@@ -824,6 +1036,7 @@ export function getRoutesSnapshot() {
 
 export default {
   ROUTE_PATHS,
+  ADMIN_ROLES,
 
   createRoutes,
   getImmutableRoutes,

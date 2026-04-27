@@ -2,7 +2,7 @@
    Onion SPA - Sidebar UI
    Archivo: src/ui/sidebar/index.js
 
-   FINAL PRO SYSTEM · DESKTOP STABLE MODE · ADMIN VISIBILITY HARDENED · 10/10
+   FINAL EXTREME SYSTEM · DESKTOP STABLE MODE · ADMIN VISIBILITY HARDENED · APPLE INDICATOR · 10/10
 
    RESPONSABILIDADES:
    - montar sidebar
@@ -14,6 +14,8 @@
    - aplicar visibilidad por rol/admin
    - reparar eventos tras login/restore/router render
    - registrar módulo en AppCore.modules
+   - sincronizar item activo del menú
+   - mover indicador activo tipo Apple mediante CSS variables
 
    FIXES:
    - desktop y mobile separados
@@ -37,6 +39,18 @@
    - stopImmediatePropagation defensivo solo para userToggle
    - fallback no vuelve a ejecutar acciones si el evento ya fue prevenido
    - conserva post-router cleanup para navegación SPA
+
+   APPLE INDICATOR:
+   - calcula item activo por ruta actual
+   - sincroniza aria-current / .active
+   - escribe variables CSS sobre .sidebar-menu:
+     --sidebar-indicator-x
+     --sidebar-indicator-y
+     --sidebar-indicator-w
+     --sidebar-indicator-h
+     --sidebar-indicator-opacity
+   - activa data-indicator-ready="true"
+   - se resincroniza en route/render/resize/repair/refresh/navigation
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -107,6 +121,9 @@ export const SidebarUI = (() => {
   let fallbackDomCleanup = null;
   let activeCleanupScope = null;
   let lastBindReason = "";
+
+  let indicatorFrame = 0;
+  let indicatorLastRoute = "";
 
   const state = {
     dropdownOpen: false,
@@ -258,6 +275,65 @@ export const SidebarUI = (() => {
     }
   }
 
+  function queryAll(root = null, selector = "") {
+    if (!root || !selector) {
+      return [];
+    }
+
+    try {
+      return Array.from(root.querySelectorAll(selector));
+    } catch {
+      return [];
+    }
+  }
+
+  function afterPaint(callback) {
+    if (!isFunction(callback)) {
+      return;
+    }
+
+    if (!isBrowser()) {
+      try {
+        callback();
+      } catch {}
+
+      return;
+    }
+
+    try {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          try {
+            callback();
+          } catch {}
+        });
+      });
+
+      return;
+    } catch {}
+
+    try {
+      window.setTimeout(() => {
+        try {
+          callback();
+        } catch {}
+      }, 0);
+    } catch {}
+  }
+
+  function cancelIndicatorFrame() {
+    if (!indicatorFrame || !isBrowser()) {
+      indicatorFrame = 0;
+      return;
+    }
+
+    try {
+      window.cancelAnimationFrame(indicatorFrame);
+    } catch {}
+
+    indicatorFrame = 0;
+  }
+
   function getDatasetAction(element = null) {
     if (!element) return "";
 
@@ -346,6 +422,66 @@ export const SidebarUI = (() => {
 
   function wasSidebarEventHandled(event) {
     return Boolean(event?.__onionSidebarHandled);
+  }
+
+  function isElementHiddenOrDisabled(element = null) {
+    if (!element) {
+      return true;
+    }
+
+    try {
+      if (element.hidden === true) {
+        return true;
+      }
+
+      if (element.disabled === true) {
+        return true;
+      }
+
+      if (element.getAttribute?.("aria-disabled") === "true") {
+        return true;
+      }
+
+      if (element.dataset?.sidebarVisible === "false") {
+        return true;
+      }
+
+      if (element.dataset?.roleVisible === "false") {
+        return true;
+      }
+
+      if (element.dataset?.adminVisible === "false") {
+        return true;
+      }
+
+      if (
+        element.closest?.(
+          [
+            "[hidden]",
+            "[inert]",
+            "[data-sidebar-visible='false']",
+            "[data-role-visible='false']",
+            "[data-admin-visible='false']",
+          ].join(",")
+        )
+      ) {
+        return true;
+      }
+
+      const rect = element.getBoundingClientRect?.();
+
+      if (
+        rect &&
+        (
+          rect.width <= 0 ||
+          rect.height <= 0
+        )
+      ) {
+        return true;
+      }
+    } catch {}
+
+    return false;
   }
 
   /* ======================================================
@@ -957,6 +1093,420 @@ export const SidebarUI = (() => {
   }
 
   /* ======================================================
+     ROUTE / ACTIVE MENU / APPLE INDICATOR
+  ====================================================== */
+
+  function getBrowserPath() {
+    if (!isBrowser()) {
+      return "/";
+    }
+
+    try {
+      const pathname = window.location.pathname || "/";
+      const search = window.location.search || "";
+      const hash = window.location.hash || "";
+
+      if (
+        hash.startsWith("#/") ||
+        hash.startsWith("#!")
+      ) {
+        return hash
+          .replace(/^#!/, "")
+          .replace(/^#/, "") || "/";
+      }
+
+      return `${pathname}${search}`;
+    } catch {
+      return "/";
+    }
+  }
+
+  function stripSearchHash(path = "/") {
+    const raw = safeText(path, "/");
+
+    return raw
+      .split("?")[0]
+      .split("#")[0] || "/";
+  }
+
+  function normalizeRoutePath(path = "/") {
+    let value = safeText(path, "/");
+
+    if (!value) {
+      value = "/";
+    }
+
+    try {
+      if (/^https?:\/\//i.test(value) && isBrowser()) {
+        const parsed = new URL(value, window.location.origin);
+        value = `${parsed.pathname || "/"}${parsed.search || ""}`;
+      }
+    } catch {}
+
+    value = stripSearchHash(value)
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
+    }
+
+    if (
+      value.length > 1 &&
+      value.endsWith("/")
+    ) {
+      value = value.replace(/\/+$/g, "") || "/";
+    }
+
+    return value || "/";
+  }
+
+  function getCurrentRoutePath() {
+    const candidates = [
+      AppCore?.state?.publicPath,
+      AppCore?.state?.route,
+      Router?.getCurrentPublicPath?.(),
+      Router?.getCurrentCanonicalPath?.(),
+      Router?.getPath?.(),
+      Router?.currentPath,
+      getBrowserPath(),
+    ];
+
+    for (const candidate of candidates) {
+      const value = normalizeRoutePath(candidate || "");
+
+      if (value) {
+        return value;
+      }
+    }
+
+    return "/";
+  }
+
+  function getMenuItems() {
+    const {
+      sidebarMenu,
+    } = getElements(AppCore);
+
+    if (!sidebarMenu) {
+      return [];
+    }
+
+    return queryAll(
+      sidebarMenu,
+      [
+        "a[data-sidebar-nav='true']",
+        "a.menu-item",
+        "a[data-spa]",
+        "a[data-route]",
+        ".menu-item[data-route]",
+      ].join(",")
+    ).filter((item) => !isElementHiddenOrDisabled(item));
+  }
+
+  function getRouteFromElement(element = null) {
+    if (!element) return "";
+
+    const href = safeText(
+      element.getAttribute?.("href"),
+      ""
+    );
+
+    return safeText(
+      first(
+        element.dataset?.route,
+        element.dataset?.href,
+        element.dataset?.to,
+        element.getAttribute?.("data-route"),
+        element.getAttribute?.("data-href"),
+        element.getAttribute?.("data-to"),
+        href
+      ),
+      ""
+    );
+  }
+
+  function getMenuItemRoute(element = null) {
+    return normalizeRoutePath(
+      getRouteFromElement(element)
+    );
+  }
+
+  function routeMatches(currentPath = "/", itemPath = "/") {
+    const current = normalizeRoutePath(currentPath);
+    const item = normalizeRoutePath(itemPath);
+
+    if (!item) {
+      return false;
+    }
+
+    if (item === "/") {
+      return current === "/";
+    }
+
+    return (
+      current === item ||
+      current.startsWith(`${item}/`)
+    );
+  }
+
+  function resolveActiveMenuItem(route = "") {
+    const currentPath =
+      normalizeRoutePath(route || getCurrentRoutePath());
+
+    const items = getMenuItems();
+
+    if (!items.length) {
+      return null;
+    }
+
+    let exact = null;
+    let partial = null;
+    let partialLength = -1;
+
+    for (const item of items) {
+      const itemPath =
+        getMenuItemRoute(item);
+
+      if (!itemPath) {
+        continue;
+      }
+
+      if (currentPath === itemPath) {
+        exact = item;
+        break;
+      }
+
+      if (
+        itemPath !== "/" &&
+        routeMatches(currentPath, itemPath) &&
+        itemPath.length > partialLength
+      ) {
+        partial = item;
+        partialLength = itemPath.length;
+      }
+    }
+
+    return exact || partial || null;
+  }
+
+  function syncActiveRouteMarkers(route = "") {
+    const currentPath =
+      normalizeRoutePath(route || getCurrentRoutePath());
+
+    const items = getMenuItems();
+
+    const activeItem =
+      resolveActiveMenuItem(currentPath);
+
+    for (const item of items) {
+      const isActive =
+        item === activeItem;
+
+      try {
+        item.classList.toggle(
+          "active",
+          isActive
+        );
+
+        item.classList.toggle(
+          "is-active",
+          isActive
+        );
+      } catch {}
+
+      try {
+        if (isActive) {
+          item.setAttribute(
+            "aria-current",
+            "page"
+          );
+        } else {
+          item.removeAttribute(
+            "aria-current"
+          );
+        }
+      } catch {}
+    }
+
+    indicatorLastRoute = currentPath;
+
+    safeEmit("sidebar:active-route:synced", {
+      route: currentPath,
+      hasActiveItem: Boolean(activeItem),
+      activeRoute:
+        activeItem
+          ? getMenuItemRoute(activeItem)
+          : "",
+    });
+
+    return activeItem;
+  }
+
+  function setIndicatorVisible(sidebarMenu, visible = false) {
+    if (!sidebarMenu) {
+      return false;
+    }
+
+    try {
+      sidebarMenu.style.setProperty(
+        "--sidebar-indicator-opacity",
+        visible ? "1" : "0"
+      );
+
+      if (visible) {
+        sidebarMenu.dataset.indicatorReady = "true";
+      } else {
+        sidebarMenu.dataset.indicatorReady = "false";
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function syncSlidingIndicator(reason = "sync-indicator") {
+    refreshSidebarDomRefs();
+
+    const {
+      sidebarMenu,
+    } = getElements(AppCore);
+
+    if (!sidebarMenu || isShellHidden(AppCore)) {
+      setIndicatorVisible(sidebarMenu, false);
+      return false;
+    }
+
+    const route =
+      getCurrentRoutePath();
+
+    const activeItem =
+      syncActiveRouteMarkers(route);
+
+    if (!activeItem) {
+      setIndicatorVisible(sidebarMenu, false);
+
+      safeEmit("sidebar:indicator:synced", {
+        ok: false,
+        reason,
+        route,
+        hasActiveItem: false,
+      });
+
+      return false;
+    }
+
+    try {
+      const menuRect =
+        sidebarMenu.getBoundingClientRect();
+
+      const itemRect =
+        activeItem.getBoundingClientRect();
+
+      if (
+        !menuRect ||
+        !itemRect ||
+        itemRect.width <= 0 ||
+        itemRect.height <= 0
+      ) {
+        setIndicatorVisible(sidebarMenu, false);
+        return false;
+      }
+
+      const x =
+        Math.round(itemRect.left - menuRect.left);
+
+      const y =
+        Math.round(itemRect.top - menuRect.top);
+
+      const width =
+        Math.round(itemRect.width);
+
+      const height =
+        Math.round(itemRect.height);
+
+      sidebarMenu.style.setProperty(
+        "--sidebar-indicator-x",
+        `${x}px`
+      );
+
+      sidebarMenu.style.setProperty(
+        "--sidebar-indicator-y",
+        `${y}px`
+      );
+
+      sidebarMenu.style.setProperty(
+        "--sidebar-indicator-w",
+        `${width}px`
+      );
+
+      sidebarMenu.style.setProperty(
+        "--sidebar-indicator-h",
+        `${height}px`
+      );
+
+      setIndicatorVisible(sidebarMenu, true);
+
+      safeEmit("sidebar:indicator:synced", {
+        ok: true,
+        reason,
+        route,
+        activeRoute:
+          getMenuItemRoute(activeItem),
+        x,
+        y,
+        width,
+        height,
+      });
+
+      return true;
+    } catch (error) {
+      safeWarn(
+        "syncSlidingIndicator falló.",
+        error
+      );
+
+      setIndicatorVisible(sidebarMenu, false);
+
+      return false;
+    }
+  }
+
+  function scheduleSlidingIndicatorSync(reason = "schedule-indicator") {
+    if (!isBrowser()) {
+      return syncSlidingIndicator(reason);
+    }
+
+    cancelIndicatorFrame();
+
+    try {
+      indicatorFrame = window.requestAnimationFrame(() => {
+        indicatorFrame = 0;
+
+        try {
+          syncSlidingIndicator(reason);
+        } catch {}
+      });
+
+      return true;
+    } catch {
+      afterPaint(() => {
+        syncSlidingIndicator(reason);
+      });
+
+      return true;
+    }
+  }
+
+  function syncRouteAndIndicator(reason = "route-sync") {
+    syncActiveRouteMarkers();
+    scheduleSlidingIndicatorSync(reason);
+
+    return true;
+  }
+
+  /* ======================================================
      DROPDOWN
   ====================================================== */
 
@@ -980,11 +1530,16 @@ export const SidebarUI = (() => {
 
     refreshSidebarDomRefs();
 
-    return openDropdownBase(
-      AppCore,
-      state,
-      ensureSidebarOpenForUserMenu
-    );
+    const result =
+      openDropdownBase(
+        AppCore,
+        state,
+        ensureSidebarOpenForUserMenu
+      );
+
+    scheduleSlidingIndicatorSync("open-dropdown");
+
+    return result;
   }
 
   function toggleDropdown() {
@@ -992,11 +1547,16 @@ export const SidebarUI = (() => {
 
     refreshSidebarDomRefs();
 
-    return toggleDropdownBase(
-      AppCore,
-      state,
-      ensureSidebarOpenForUserMenu
-    );
+    const result =
+      toggleDropdownBase(
+        AppCore,
+        state,
+        ensureSidebarOpenForUserMenu
+      );
+
+    scheduleSlidingIndicatorSync("toggle-dropdown");
+
+    return result;
   }
 
   /* ======================================================
@@ -1006,10 +1566,15 @@ export const SidebarUI = (() => {
   function syncSidebarState() {
     refreshSidebarDomRefs();
 
-    return syncSidebarStateBase(
-      AppCore,
-      closeDropdown
-    );
+    const result =
+      syncSidebarStateBase(
+        AppCore,
+        closeDropdown
+      );
+
+    scheduleSlidingIndicatorSync("sync-sidebar-state");
+
+    return result;
   }
 
   function setSidebarOpen(open) {
@@ -1025,6 +1590,8 @@ export const SidebarUI = (() => {
       open: Boolean(open),
       snapshot: getSidebarSnapshot(),
     });
+
+    scheduleSlidingIndicatorSync("set-sidebar-open");
 
     return true;
   }
@@ -1048,6 +1615,8 @@ export const SidebarUI = (() => {
     if (!nextOpen) {
       closeDropdown();
     }
+
+    scheduleSlidingIndicatorSync("toggle-sidebar");
 
     return true;
   }
@@ -1077,6 +1646,11 @@ export const SidebarUI = (() => {
       shellHidden: isShellHidden(AppCore),
       hasShell: hasSidebarShell(AppCore),
 
+      route:
+        getCurrentRoutePath(),
+
+      indicatorLastRoute,
+
       dom: {
         hasSidebar: Boolean(elements.sidebar),
         hasSidebarMenu: Boolean(elements.sidebarMenu),
@@ -1094,6 +1668,21 @@ export const SidebarUI = (() => {
         userDropdownHidden: Boolean(elements.userDropdown?.hidden),
         userDropdownAriaHidden: elements.userDropdown?.getAttribute?.("aria-hidden") || "",
         userDropdownClassName: elements.userDropdown?.className || "",
+      },
+
+      indicatorDom: {
+        ready:
+          elements.sidebarMenu?.dataset?.indicatorReady || "",
+        opacity:
+          elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-opacity") || "",
+        x:
+          elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
+        y:
+          elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-y") || "",
+        w:
+          elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-w") || "",
+        h:
+          elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-h") || "",
       },
     };
   }
@@ -1122,10 +1711,12 @@ export const SidebarUI = (() => {
 
     if (getDesiredSidebarOpenState(AppCore) === desiredOpen) {
       syncSidebarState();
+      scheduleSlidingIndicatorSync("restore-sidebar-state:same");
       return true;
     }
 
     setSidebarOpen(desiredOpen);
+    scheduleSlidingIndicatorSync("restore-sidebar-state:set");
 
     return true;
   }
@@ -1141,11 +1732,16 @@ export const SidebarUI = (() => {
   function applyRoleVisibility() {
     refreshSidebarDomRefs();
 
-    return applyRoleVisibilityBase(
-      AppCore,
-      null,
-      isAdmin
-    );
+    const result =
+      applyRoleVisibilityBase(
+        AppCore,
+        null,
+        isAdmin
+      );
+
+    scheduleSlidingIndicatorSync("apply-role-visibility");
+
+    return result;
   }
 
   /* ======================================================
@@ -1173,6 +1769,7 @@ export const SidebarUI = (() => {
 
   function cleanupBoundEvents() {
     cleanupFallbackDomEvents();
+    cancelIndicatorFrame();
 
     try {
       if (
@@ -1208,18 +1805,23 @@ export const SidebarUI = (() => {
   ====================================================== */
 
   async function handleLogout() {
-    return handleLogoutBase({
-      AppCore,
-      Auth,
-      Router,
-      closeDropdown,
-      renderUser,
-      applyRoleVisibility,
-      closeSidebarOnMobileAfterNavigation,
-      getElements: () => getElements(AppCore),
-      setLogoutInFlight,
-      isLogoutInFlight,
-    });
+    const result =
+      await handleLogoutBase({
+        AppCore,
+        Auth,
+        Router,
+        closeDropdown,
+        renderUser,
+        applyRoleVisibility,
+        closeSidebarOnMobileAfterNavigation,
+        getElements: () => getElements(AppCore),
+        setLogoutInFlight,
+        isLogoutInFlight,
+      });
+
+    scheduleSlidingIndicatorSync("logout");
+
+    return result;
   }
 
   async function navigateTo(route = "", options = {}) {
@@ -1234,6 +1836,7 @@ export const SidebarUI = (() => {
           Router.navigate(target, opts)
         );
 
+        scheduleSlidingIndicatorSync("navigate:router.navigate");
         return true;
       }
 
@@ -1242,6 +1845,7 @@ export const SidebarUI = (() => {
           Router.go(target, opts)
         );
 
+        scheduleSlidingIndicatorSync("navigate:router.go");
         return true;
       }
 
@@ -1250,6 +1854,7 @@ export const SidebarUI = (() => {
           Router.push(target, opts)
         );
 
+        scheduleSlidingIndicatorSync("navigate:router.push");
         return true;
       }
 
@@ -1258,6 +1863,7 @@ export const SidebarUI = (() => {
           AppCore.router.navigate(target, opts)
         );
 
+        scheduleSlidingIndicatorSync("navigate:appcore.router.navigate");
         return true;
       }
 
@@ -1266,6 +1872,7 @@ export const SidebarUI = (() => {
           AppCore.navigate(target, opts)
         );
 
+        scheduleSlidingIndicatorSync("navigate:appcore.navigate");
         return true;
       }
     } catch (error) {
@@ -1279,6 +1886,7 @@ export const SidebarUI = (() => {
     try {
       window.history.pushState({}, "", target);
       window.dispatchEvent(new PopStateEvent("popstate"));
+      scheduleSlidingIndicatorSync("navigate:history");
       return true;
     } catch {}
 
@@ -1288,28 +1896,6 @@ export const SidebarUI = (() => {
     } catch {}
 
     return false;
-  }
-
-  function getRouteFromElement(element = null) {
-    if (!element) return "";
-
-    const href = safeText(
-      element.getAttribute?.("href"),
-      ""
-    );
-
-    return safeText(
-      first(
-        element.dataset?.route,
-        element.dataset?.href,
-        element.dataset?.to,
-        element.getAttribute?.("data-route"),
-        element.getAttribute?.("data-href"),
-        element.getAttribute?.("data-to"),
-        href
-      ),
-      ""
-    );
   }
 
   async function handleNavigationElement(
@@ -1342,6 +1928,8 @@ export const SidebarUI = (() => {
         source: "sidebar",
         replaceState: false,
       });
+    } else {
+      scheduleSlidingIndicatorSync("navigation-post-router");
     }
 
     if (closeSidebarOnMobileAfterNavigation()) {
@@ -1789,6 +2377,18 @@ export const SidebarUI = (() => {
       }
     };
 
+    const onWindowResize = () => {
+      scheduleSlidingIndicatorSync("window-resize");
+    };
+
+    const onWindowPopState = () => {
+      scheduleSlidingIndicatorSync("window-popstate");
+    };
+
+    const onHashChange = () => {
+      scheduleSlidingIndicatorSync("window-hashchange");
+    };
+
     document.addEventListener(
       "click",
       onDocumentClick,
@@ -1800,6 +2400,26 @@ export const SidebarUI = (() => {
       onDocumentKeydown,
       false
     );
+
+    try {
+      window.addEventListener(
+        "resize",
+        onWindowResize,
+        false
+      );
+
+      window.addEventListener(
+        "popstate",
+        onWindowPopState,
+        false
+      );
+
+      window.addEventListener(
+        "hashchange",
+        onHashChange,
+        false
+      );
+    } catch {}
 
     fallbackDomCleanup = () => {
       try {
@@ -1818,6 +2438,26 @@ export const SidebarUI = (() => {
         document.removeEventListener(
           "keydown",
           onDocumentKeydown,
+          false
+        );
+      } catch {}
+
+      try {
+        window.removeEventListener(
+          "resize",
+          onWindowResize,
+          false
+        );
+
+        window.removeEventListener(
+          "popstate",
+          onWindowPopState,
+          false
+        );
+
+        window.removeEventListener(
+          "hashchange",
+          onHashChange,
           false
         );
       } catch {}
@@ -1900,6 +2540,8 @@ export const SidebarUI = (() => {
 
     eventsBound = true;
 
+    scheduleSlidingIndicatorSync(`bind-events:${lastBindReason}`);
+
     safeEmit("sidebar:events:bound", {
       reason: lastBindReason,
       snapshot: getSidebarSnapshot(),
@@ -1924,6 +2566,7 @@ export const SidebarUI = (() => {
     syncSidebarState();
     renderUser();
     applyRoleVisibility();
+    syncRouteAndIndicator(`refresh:${reason}`);
 
     safeEmit("sidebar:refreshed", {
       reason,
@@ -1954,6 +2597,12 @@ export const SidebarUI = (() => {
     bindEvents(reason);
 
     initialized = true;
+
+    syncRouteAndIndicator(`repair:${reason}`);
+
+    afterPaint(() => {
+      syncRouteAndIndicator(`repair:${reason}:after-paint`);
+    });
 
     safeEmit("sidebar:repaired", {
       reason,
@@ -2048,6 +2697,12 @@ export const SidebarUI = (() => {
 
     registerModule();
 
+    syncRouteAndIndicator("init");
+
+    afterPaint(() => {
+      syncRouteAndIndicator("init:after-paint");
+    });
+
     safeEmit("sidebar:ready", {
       initialized: true,
       isAdmin: isAdmin(),
@@ -2066,6 +2721,7 @@ export const SidebarUI = (() => {
     logoutInFlight = false;
     state.dropdownOpen = false;
     lastBindReason = "";
+    indicatorLastRoute = "";
 
     safeEmit("sidebar:destroyed", {
       initialized: false,
@@ -2120,6 +2776,71 @@ export const SidebarUI = (() => {
     return snapshot;
   }
 
+  function debugIndicator() {
+    refreshSidebarDomRefs();
+
+    const {
+      sidebarMenu,
+    } = getElements(AppCore);
+
+    const activeItem =
+      resolveActiveMenuItem();
+
+    const snapshot = {
+      route:
+        getCurrentRoutePath(),
+
+      indicatorLastRoute,
+
+      hasSidebarMenu:
+        Boolean(sidebarMenu),
+
+      hasActiveItem:
+        Boolean(activeItem),
+
+      activeRoute:
+        activeItem
+          ? getMenuItemRoute(activeItem)
+          : "",
+
+      activeText:
+        safeText(activeItem?.textContent, ""),
+
+      indicatorReady:
+        sidebarMenu?.dataset?.indicatorReady || "",
+
+      variables: {
+        x:
+          sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
+        y:
+          sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-y") || "",
+        w:
+          sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-w") || "",
+        h:
+          sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-h") || "",
+        opacity:
+          sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-opacity") || "",
+      },
+
+      menuItems:
+        getMenuItems().map((item) => ({
+          route:
+            getMenuItemRoute(item),
+          text:
+            safeText(item.textContent, ""),
+          active:
+            item.classList?.contains?.("active") ||
+            item.getAttribute?.("aria-current") === "page",
+        })),
+    };
+
+    try {
+      console.log("[SidebarUI:indicator]", snapshot);
+    } catch {}
+
+    return snapshot;
+  }
+
   /* ======================================================
      API
   ====================================================== */
@@ -2154,11 +2875,20 @@ export const SidebarUI = (() => {
     updateToggleLabel: () =>
       updateToggleLabel(AppCore),
 
+    syncIndicator:
+      syncSlidingIndicator,
+
+    syncRouteAndIndicator,
+
+    scheduleIndicatorSync:
+      scheduleSlidingIndicatorSync,
+
     handleLogout,
 
     isAdmin,
 
     debugDropdown,
+    debugIndicator,
 
     getSnapshot: getSidebarSnapshot,
     getState: getSidebarSnapshot,

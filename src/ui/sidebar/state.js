@@ -2,7 +2,7 @@
    Onion SPA - Sidebar State
    Archivo: src/ui/sidebar/state.js
 
-   FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · DROPDOWN SAFE
+   FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · APPLE INDICATOR · 10/10
 
    Responsabilidades:
    - resolver estado visual del sidebar
@@ -14,8 +14,11 @@
    - evitar auto-collapse fantasma al navegar
    - soportar fallback DOM / storage seguro
    - no alterar estado si el shell real está oculto
-   - evitar que sidebar.hidden deje el sidebar bloqueado
+   - evitar que sidebar.hidden stale deje el sidebar bloqueado
    - emitir eventos de sincronización
+   - activar indicador activo deslizante tipo Apple
+   - recalcular indicador al cambiar vista / colapsar / expandir / reparar
+   - ocultar indicador durante transición para evitar burbuja flotante
 
    REGLAS:
    - Desktop:
@@ -33,6 +36,10 @@
    - Dropdown:
      - syncSidebarState no cierra dropdown salvo shell real oculto
      - sidebar.hidden stale no debe bloquear apertura posterior
+   - Indicador:
+     - se posiciona con CSS vars sobre .sidebar-menu
+     - usa .menu-item.active / [aria-current="page"] / ruta actual
+     - se desactiva si no hay item activo visible
 ========================================================= */
 
 import {
@@ -47,6 +54,18 @@ import {
 } from "./dom.js";
 
 const LEGACY_SIDEBAR_OPEN_STORAGE_KEY = "sidebarOpen";
+
+const SIDEBAR_TRANSITION_MS = 360;
+const INDICATOR_RECALC_DELAY_MS = 24;
+
+/* =========================================================
+   MODULE RUNTIME
+========================================================= */
+
+let sidebarTransitionTimer = null;
+let sidebarTransitionEndCleanup = null;
+let indicatorRaf = 0;
+let indicatorTimer = null;
 
 /* =========================================================
    SAFE HELPERS
@@ -100,6 +119,15 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(n)
     ? n
     : fallback;
+}
+
+function clampNumber(value, min = 0, max = Number.POSITIVE_INFINITY) {
+  const n = safeNumber(value, min);
+
+  return Math.min(
+    Math.max(n, min),
+    max
+  );
 }
 
 function ensureStateBag(AppCore) {
@@ -304,6 +332,32 @@ function setDataset(el, key = "", value = "") {
   }
 }
 
+function setStyleVar(el, name = "", value = "") {
+  if (!el || !name) {
+    return false;
+  }
+
+  try {
+    el.style.setProperty(name, String(value));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeStyleVar(el, name = "") {
+  if (!el || !name) {
+    return false;
+  }
+
+  try {
+    el.style.removeProperty(name);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function getHtmlElement() {
   if (!isBrowser()) return null;
 
@@ -311,6 +365,86 @@ function getHtmlElement() {
     return document.documentElement || null;
   } catch {
     return null;
+  }
+}
+
+function getBodyElement() {
+  if (!isBrowser()) return null;
+
+  try {
+    return document.body || null;
+  } catch {
+    return null;
+  }
+}
+
+function safeRequestAnimationFrame(callback) {
+  if (typeof callback !== "function") {
+    return 0;
+  }
+
+  if (!isBrowser()) {
+    try {
+      callback();
+    } catch {}
+
+    return 0;
+  }
+
+  try {
+    return window.requestAnimationFrame(() => {
+      try {
+        callback();
+      } catch {}
+    });
+  } catch {}
+
+  try {
+    window.setTimeout(() => {
+      try {
+        callback();
+      } catch {}
+    }, 0);
+  } catch {}
+
+  return 0;
+}
+
+function safeCancelAnimationFrame(id = 0) {
+  if (!id || !isBrowser()) {
+    return false;
+  }
+
+  try {
+    window.cancelAnimationFrame(id);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function afterNextPaint(callback) {
+  if (typeof callback !== "function") {
+    return;
+  }
+
+  safeRequestAnimationFrame(() => {
+    safeRequestAnimationFrame(callback);
+  });
+}
+
+function clearIndicatorSchedule() {
+  if (indicatorRaf) {
+    safeCancelAnimationFrame(indicatorRaf);
+    indicatorRaf = 0;
+  }
+
+  if (indicatorTimer) {
+    try {
+      clearTimeout(indicatorTimer);
+    } catch {}
+
+    indicatorTimer = null;
   }
 }
 
@@ -689,6 +823,658 @@ export function isSidebarCollapsedDesktop(AppCore) {
 }
 
 /* =========================================================
+   ACTIVE ROUTE / MENU INDICATOR
+========================================================= */
+
+function normalizePathLike(path = "/") {
+  let value =
+    safeText(path, "/")
+      .replace(/\\/g, "/")
+      .trim();
+
+  if (!value) {
+    return "/";
+  }
+
+  try {
+    const url = new URL(
+      value,
+      isBrowser()
+        ? window.location.origin
+        : "http://localhost"
+    );
+
+    value = `${url.pathname || "/"}${url.search || ""}`;
+  } catch {
+    value = value.split("#")[0] || "/";
+  }
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  value = value.replace(/\/{2,}/g, "/");
+
+  if (
+    value.length > 1 &&
+    value.endsWith("/")
+  ) {
+    value = value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
+}
+
+function stripQuery(path = "/") {
+  return normalizePathLike(path).split("?")[0] || "/";
+}
+
+function getCurrentPublicPath(AppCore) {
+  const fromState =
+    safeText(
+      AppCore?.state?.publicPath ||
+        AppCore?.state?.route ||
+        "",
+      ""
+    );
+
+  if (fromState) {
+    return normalizePathLike(fromState);
+  }
+
+  if (!isBrowser()) {
+    return "/";
+  }
+
+  try {
+    const hash = safeText(window.location.hash, "");
+
+    if (
+      hash.startsWith("#/") ||
+      hash.startsWith("#!")
+    ) {
+      return normalizePathLike(
+        hash
+          .replace(/^#!\/?/, "/")
+          .replace(/^#\/?/, "/")
+      );
+    }
+
+    return normalizePathLike(
+      `${window.location.pathname || "/"}${window.location.search || ""}`
+    );
+  } catch {
+    return "/";
+  }
+}
+
+function getMenuItemRoute(item = null) {
+  if (!item) {
+    return "";
+  }
+
+  return safeText(
+    item.dataset?.route ||
+      item.dataset?.href ||
+      item.dataset?.to ||
+      item.getAttribute?.("data-route") ||
+      item.getAttribute?.("data-href") ||
+      item.getAttribute?.("data-to") ||
+      item.getAttribute?.("href") ||
+      "",
+    ""
+  );
+}
+
+function isElementVisible(element = null) {
+  if (!element) {
+    return false;
+  }
+
+  try {
+    if (element.hidden) {
+      return false;
+    }
+
+    if (
+      element.closest?.(
+        [
+          "[hidden]",
+          "[inert]",
+          "[aria-hidden='true']",
+          "[data-role-visible='false']",
+          "[data-admin-visible='false']",
+          "[data-sidebar-visible='false']",
+        ].join(",")
+      )
+    ) {
+      return false;
+    }
+
+    const style = window.getComputedStyle(element);
+
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      safeNumber(style.opacity, 1) === 0
+    ) {
+      return false;
+    }
+
+    const rect = element.getBoundingClientRect();
+
+    return (
+      rect.width > 0 &&
+      rect.height > 0
+    );
+  } catch {
+    return true;
+  }
+}
+
+function getMenuItems(sidebarMenu = null) {
+  if (!sidebarMenu) {
+    return [];
+  }
+
+  try {
+    return Array.from(
+      sidebarMenu.querySelectorAll(
+        [
+          ".menu-item",
+          "a[data-spa]",
+          "a[data-route]",
+          "[data-sidebar-nav='true']",
+        ].join(",")
+      )
+    ).filter((item, index, array) => {
+      return (
+        item &&
+        array.indexOf(item) === index
+      );
+    });
+  } catch {
+    return [];
+  }
+}
+
+function resolveActiveMenuItem(AppCore, sidebarMenu = null) {
+  if (!sidebarMenu) {
+    return null;
+  }
+
+  const directSelectors = [
+    ".menu-item[aria-current='page']",
+    ".menu-item.active",
+    ".menu-item.is-active",
+    ".menu-item[data-active='true']",
+    "[data-sidebar-nav='true'][aria-current='page']",
+    "[data-sidebar-nav='true'].active",
+    "[data-sidebar-nav='true'].is-active",
+  ];
+
+  for (const selector of directSelectors) {
+    try {
+      const candidate = sidebarMenu.querySelector(selector);
+
+      if (candidate && isElementVisible(candidate)) {
+        return candidate;
+      }
+    } catch {}
+  }
+
+  const currentPath = getCurrentPublicPath(AppCore);
+  const currentClean = stripQuery(currentPath);
+
+  const items = getMenuItems(sidebarMenu);
+
+  let best = null;
+  let bestScore = -1;
+
+  for (const item of items) {
+    if (!isElementVisible(item)) {
+      continue;
+    }
+
+    const route = getMenuItemRoute(item);
+
+    if (!route) {
+      continue;
+    }
+
+    const routePath = normalizePathLike(route);
+    const routeClean = stripQuery(routePath);
+
+    let score = -1;
+
+    if (routePath === currentPath) {
+      score = 1000 + routePath.length;
+    } else if (routeClean === currentClean) {
+      score = 900 + routeClean.length;
+    } else if (
+      routeClean !== "/" &&
+      currentClean.startsWith(`${routeClean}/`)
+    ) {
+      score = 500 + routeClean.length;
+    } else if (
+      routeClean === "/" &&
+      currentClean === "/"
+    ) {
+      score = 100;
+    }
+
+    if (score > bestScore) {
+      best = item;
+      bestScore = score;
+    }
+  }
+
+  return bestScore >= 0
+    ? best
+    : null;
+}
+
+function disableActiveMenuIndicator(AppCore, reason = "disabled") {
+  const {
+    sidebarMenu,
+  } = getElements(AppCore);
+
+  if (!sidebarMenu) {
+    return false;
+  }
+
+  setDataset(sidebarMenu, "indicatorReady", "false");
+  setStyleVar(sidebarMenu, "--sidebar-indicator-opacity", "0");
+
+  safeEmit(AppCore, "sidebar:indicator:disabled", {
+    reason,
+  });
+
+  return true;
+}
+
+function clearActiveMenuIndicator(AppCore, reason = "clear") {
+  clearIndicatorSchedule();
+
+  const {
+    sidebarMenu,
+  } = getElements(AppCore);
+
+  if (!sidebarMenu) {
+    return false;
+  }
+
+  setDataset(sidebarMenu, "indicatorReady", "");
+  removeStyleVar(sidebarMenu, "--sidebar-indicator-x");
+  removeStyleVar(sidebarMenu, "--sidebar-indicator-y");
+  removeStyleVar(sidebarMenu, "--sidebar-indicator-w");
+  removeStyleVar(sidebarMenu, "--sidebar-indicator-h");
+  removeStyleVar(sidebarMenu, "--sidebar-indicator-opacity");
+
+  safeEmit(AppCore, "sidebar:indicator:cleared", {
+    reason,
+  });
+
+  return true;
+}
+
+export function syncActiveMenuIndicator(AppCore, options = {}) {
+  const opts =
+    options && typeof options === "object"
+      ? options
+      : {};
+
+  const reason =
+    safeText(opts.reason, "sync");
+
+  const reveal =
+    opts.reveal !== false;
+
+  const {
+    sidebar,
+    sidebarMenu,
+  } = getElements(AppCore);
+
+  if (
+    !isBrowser() ||
+    !sidebar ||
+    !sidebarMenu ||
+    isRealShellHidden(AppCore)
+  ) {
+    return clearActiveMenuIndicator(
+      AppCore,
+      `${reason}:unavailable`
+    );
+  }
+
+  const activeItem =
+    resolveActiveMenuItem(
+      AppCore,
+      sidebarMenu
+    );
+
+  if (!activeItem) {
+    return disableActiveMenuIndicator(
+      AppCore,
+      `${reason}:no-active-item`
+    );
+  }
+
+  try {
+    const menuRect =
+      sidebarMenu.getBoundingClientRect();
+
+    const itemRect =
+      activeItem.getBoundingClientRect();
+
+    if (
+      !menuRect ||
+      !itemRect ||
+      itemRect.width <= 0 ||
+      itemRect.height <= 0
+    ) {
+      return disableActiveMenuIndicator(
+        AppCore,
+        `${reason}:bad-rect`
+      );
+    }
+
+    const menuWidth =
+      clampNumber(menuRect.width, 0, 10000);
+
+    const x =
+      clampNumber(
+        itemRect.left - menuRect.left,
+        0,
+        menuWidth
+      );
+
+    const y =
+      clampNumber(
+        itemRect.top - menuRect.top,
+        0,
+        100000
+      );
+
+    const width =
+      clampNumber(
+        itemRect.width,
+        1,
+        Math.max(menuWidth, itemRect.width)
+      );
+
+    const height =
+      clampNumber(
+        itemRect.height,
+        1,
+        1000
+      );
+
+    setStyleVar(sidebarMenu, "--sidebar-indicator-x", `${Math.round(x)}px`);
+    setStyleVar(sidebarMenu, "--sidebar-indicator-y", `${Math.round(y)}px`);
+    setStyleVar(sidebarMenu, "--sidebar-indicator-w", `${Math.round(width)}px`);
+    setStyleVar(sidebarMenu, "--sidebar-indicator-h", `${Math.round(height)}px`);
+    setStyleVar(sidebarMenu, "--sidebar-indicator-opacity", reveal ? "1" : "0");
+
+    setDataset(sidebarMenu, "indicatorReady", "true");
+    setDataset(sidebarMenu, "indicatorRoute", getMenuItemRoute(activeItem) || "");
+    setDataset(sidebarMenu, "indicatorReason", reason);
+
+    safeEmit(AppCore, "sidebar:indicator:synced", {
+      reason,
+      route:
+        getMenuItemRoute(activeItem),
+      x:
+        Math.round(x),
+      y:
+        Math.round(y),
+      width:
+        Math.round(width),
+      height:
+        Math.round(height),
+      reveal:
+        Boolean(reveal),
+    });
+
+    return true;
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      "No se pudo sincronizar indicador activo.",
+      error
+    );
+
+    return disableActiveMenuIndicator(
+      AppCore,
+      `${reason}:error`
+    );
+  }
+}
+
+export function scheduleActiveMenuIndicator(AppCore, options = {}) {
+  const opts =
+    options && typeof options === "object"
+      ? options
+      : {};
+
+  const reason =
+    safeText(opts.reason, "scheduled");
+
+  const delay =
+    clampNumber(
+      opts.delayMs,
+      0,
+      5000
+    );
+
+  const reveal =
+    opts.reveal !== false;
+
+  clearIndicatorSchedule();
+
+  if (delay > 0) {
+    indicatorTimer = setTimeout(() => {
+      indicatorTimer = null;
+
+      indicatorRaf = safeRequestAnimationFrame(() => {
+        indicatorRaf = 0;
+
+        syncActiveMenuIndicator(AppCore, {
+          reason,
+          reveal,
+        });
+      });
+    }, delay);
+
+    return true;
+  }
+
+  indicatorRaf = safeRequestAnimationFrame(() => {
+    indicatorRaf = 0;
+
+    syncActiveMenuIndicator(AppCore, {
+      reason,
+      reveal,
+    });
+  });
+
+  return true;
+}
+
+/* =========================================================
+   SIDEBAR TRANSITION GUARD
+========================================================= */
+
+function cleanupSidebarTransitionListener() {
+  try {
+    sidebarTransitionEndCleanup?.();
+  } catch {}
+
+  sidebarTransitionEndCleanup = null;
+}
+
+function clearSidebarTransitionTimer() {
+  if (sidebarTransitionTimer) {
+    try {
+      clearTimeout(sidebarTransitionTimer);
+    } catch {}
+
+    sidebarTransitionTimer = null;
+  }
+}
+
+function setSidebarTransitioning(AppCore, enabled = false, reason = "") {
+  const {
+    sidebar,
+    body,
+  } = getElements(AppCore);
+
+  const html =
+    getHtmlElement();
+
+  toggleClass(
+    sidebar,
+    "is-transitioning",
+    enabled
+  );
+
+  toggleClass(
+    body,
+    "sidebar-transitioning",
+    enabled
+  );
+
+  toggleClass(
+    html,
+    "sidebar-transitioning",
+    enabled
+  );
+
+  setDataset(
+    sidebar,
+    "transitioning",
+    enabled ? "true" : ""
+  );
+
+  setDataset(
+    body,
+    "sidebarTransitioning",
+    enabled ? "true" : ""
+  );
+
+  if (enabled) {
+    disableActiveMenuIndicator(
+      AppCore,
+      `${reason || "transition"}:start`
+    );
+  }
+
+  return true;
+}
+
+function finishSidebarTransition(AppCore, reason = "finish") {
+  clearSidebarTransitionTimer();
+  cleanupSidebarTransitionListener();
+
+  setSidebarTransitioning(
+    AppCore,
+    false,
+    reason
+  );
+
+  scheduleActiveMenuIndicator(AppCore, {
+    reason:
+      `${reason}:indicator-final`,
+    delayMs:
+      INDICATOR_RECALC_DELAY_MS,
+    reveal:
+      true,
+  });
+
+  safeEmit(AppCore, "sidebar:transition:finish", {
+    reason,
+  });
+
+  return true;
+}
+
+function beginSidebarTransition(AppCore, reason = "state-change", durationMs = SIDEBAR_TRANSITION_MS) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  const {
+    sidebar,
+  } = getElements(AppCore);
+
+  if (!sidebar) {
+    return false;
+  }
+
+  clearSidebarTransitionTimer();
+  cleanupSidebarTransitionListener();
+
+  setSidebarTransitioning(
+    AppCore,
+    true,
+    reason
+  );
+
+  const finish = () => {
+    finishSidebarTransition(
+      AppCore,
+      reason
+    );
+  };
+
+  const onTransitionEnd = (event) => {
+    if (
+      event?.target !== sidebar ||
+      ![
+        "inline-size",
+        "width",
+        "transform",
+      ].includes(event?.propertyName)
+    ) {
+      return;
+    }
+
+    finish();
+  };
+
+  try {
+    sidebar.addEventListener(
+      "transitionend",
+      onTransitionEnd
+    );
+
+    sidebarTransitionEndCleanup = () => {
+      try {
+        sidebar.removeEventListener(
+          "transitionend",
+          onTransitionEnd
+        );
+      } catch {}
+    };
+  } catch {
+    sidebarTransitionEndCleanup = null;
+  }
+
+  sidebarTransitionTimer = setTimeout(
+    finish,
+    clampNumber(durationMs, 80, 2000)
+  );
+
+  safeEmit(AppCore, "sidebar:transition:start", {
+    reason,
+    durationMs:
+      clampNumber(durationMs, 80, 2000),
+  });
+
+  return true;
+}
+
+/* =========================================================
    TOOLTIPS
 ========================================================= */
 
@@ -832,6 +1618,10 @@ function syncHiddenShellState(AppCore, closeDropdown) {
     return false;
   }
 
+  clearSidebarTransitionTimer();
+  cleanupSidebarTransitionListener();
+  setSidebarTransitioning(AppCore, false, "hidden-shell");
+
   try {
     sidebar.hidden = true;
     sidebar.setAttribute("aria-hidden", "true");
@@ -843,14 +1633,16 @@ function syncHiddenShellState(AppCore, closeDropdown) {
     "is-open",
     "collapsed",
     "is-collapsed",
-    "sidebar-tooltips-active"
+    "sidebar-tooltips-active",
+    "is-transitioning"
   );
 
   removeClass(
     body,
     "sidebar-open",
     "sidebar-collapsed",
-    "sidebar-tooltips-active"
+    "sidebar-tooltips-active",
+    "sidebar-transitioning"
   );
 
   setDataset(sidebar, "open", "false");
@@ -861,6 +1653,11 @@ function syncHiddenShellState(AppCore, closeDropdown) {
   try {
     closeDropdown?.();
   } catch {}
+
+  clearActiveMenuIndicator(
+    AppCore,
+    "hidden-shell"
+  );
 
   syncTooltipMode(AppCore, true);
   updateToggleLabel(AppCore, false);
@@ -977,6 +1774,15 @@ export function syncSidebarState(AppCore, closeDropdown) {
     open,
   });
 
+  scheduleActiveMenuIndicator(AppCore, {
+    reason:
+      "sync-sidebar-state",
+    delayMs:
+      INDICATOR_RECALC_DELAY_MS,
+    reveal:
+      true,
+  });
+
   safeEmit(AppCore, "sidebar:state:synced", {
     open,
     mobile,
@@ -996,6 +1802,8 @@ export function syncSidebarState(AppCore, closeDropdown) {
 export function setSidebarOpen(AppCore, open, closeDropdown) {
   const nextOpen = Boolean(open);
   const mobile = isMobileViewport();
+  const previousOpen = getDesiredSidebarOpenState(AppCore);
+  const changed = previousOpen !== nextOpen;
 
   /*
     Si la shell real está oculta, no persistimos ni mezclamos estado.
@@ -1007,10 +1815,21 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
     safeEmit(AppCore, "sidebar:state:change:blocked", {
       reason: "shell-hidden",
       requestedOpen: nextOpen,
+      previousOpen,
       mobile,
     });
 
     return false;
+  }
+
+  if (changed) {
+    beginSidebarTransition(
+      AppCore,
+      mobile
+        ? "mobile-open-change"
+        : "desktop-collapse-change",
+      SIDEBAR_TRANSITION_MS
+    );
   }
 
   if (mobile) {
@@ -1030,8 +1849,32 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
     closeDropdown
   );
 
+  if (changed) {
+    afterNextPaint(() => {
+      scheduleActiveMenuIndicator(AppCore, {
+        reason:
+          "set-sidebar-open:after-paint",
+        delayMs:
+          SIDEBAR_TRANSITION_MS,
+        reveal:
+          true,
+      });
+    });
+  } else {
+    scheduleActiveMenuIndicator(AppCore, {
+      reason:
+        "set-sidebar-open:no-change",
+      delayMs:
+        INDICATOR_RECALC_DELAY_MS,
+      reveal:
+        true,
+    });
+  }
+
   safeEmit(AppCore, "sidebar:state:change", {
     open: nextOpen,
+    previousOpen,
+    changed,
     mobile,
     collapsed: !nextOpen && !mobile,
   });
@@ -1075,7 +1918,19 @@ export function repairSidebarState(AppCore, closeDropdown) {
     state.sidebarLastMode = "desktop";
   }
 
-  return syncSidebarState(AppCore, closeDropdown);
+  const synced =
+    syncSidebarState(AppCore, closeDropdown);
+
+  scheduleActiveMenuIndicator(AppCore, {
+    reason:
+      "repair-sidebar-state",
+    delayMs:
+      SIDEBAR_TRANSITION_MS,
+    reveal:
+      true,
+  });
+
+  return synced;
 }
 
 /* =========================================================
@@ -1085,6 +1940,7 @@ export function repairSidebarState(AppCore, closeDropdown) {
 export function getSidebarStateSnapshot(AppCore) {
   const {
     sidebar,
+    sidebarMenu,
     body,
     appShell,
     shell,
@@ -1093,6 +1949,11 @@ export function getSidebarStateSnapshot(AppCore) {
 
   const mobile = isMobileViewport();
   const open = getDesiredSidebarOpenState(AppCore);
+
+  const activeItem =
+    sidebarMenu
+      ? resolveActiveMenuItem(AppCore, sidebarMenu)
+      : null;
 
   return {
     mobile,
@@ -1140,6 +2001,9 @@ export function getSidebarStateSnapshot(AppCore) {
       hasSidebar:
         Boolean(sidebar),
 
+      hasSidebarMenu:
+        Boolean(sidebarMenu),
+
       sidebarHidden:
         Boolean(sidebar?.hidden),
 
@@ -1173,6 +2037,38 @@ export function getSidebarStateSnapshot(AppCore) {
       bodySidebarMode:
         body?.dataset?.sidebarMode || null,
     },
+
+    indicator: {
+      ready:
+        sidebarMenu?.dataset?.indicatorReady || null,
+
+      reason:
+        sidebarMenu?.dataset?.indicatorReason || null,
+
+      route:
+        sidebarMenu?.dataset?.indicatorRoute || null,
+
+      activeRoute:
+        getMenuItemRoute(activeItem),
+
+      currentPublicPath:
+        getCurrentPublicPath(AppCore),
+
+      x:
+        sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
+
+      y:
+        sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-y") || "",
+
+      width:
+        sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-w") || "",
+
+      height:
+        sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-h") || "",
+
+      opacity:
+        sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-opacity") || "",
+    },
   };
 }
 
@@ -1193,6 +2089,10 @@ export default {
 
   syncTooltipMode,
   updateToggleLabel,
+
+  syncActiveMenuIndicator,
+  scheduleActiveMenuIndicator,
+
   syncSidebarState,
   setSidebarOpen,
   repairSidebarState,

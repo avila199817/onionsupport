@@ -2,7 +2,7 @@
    ONION SUPPORT — SIDEBAR
    Archivo: src/css/layout/sidebar.css
 
-   FINAL EXTREME SYSTEM · SIDEBAR / DROPDOWN SAFE · APPLE INDICATOR · CLOSED
+   FINAL EXTREME SYSTEM · SIDEBAR / DROPDOWN SAFE · APPLE INDICATOR · CLOSED 10/10
 
    Objetivos:
    - sidebar premium limpio, compacto y operativo
@@ -17,9 +17,16 @@
    - tooltips sin clipping y con z-index saneado
    - selector activo tipo burbuja premium
    - indicador deslizante tipo Apple preparado para JS
-   - mata hover/tooltips/indicador durante collapse/expand
+   - mata hover/tooltips/indicador durante collapse/expand/navegación SPA
+   - evita active/hover colgado por clases stale
    - light mode fino
    - menos ruido visual en navegación SPA
+
+   NOTA CLAVE:
+   - El estado visual activo fiable es:
+     [aria-current="page"] o [data-active="true"]
+   - .active / .is-active se conservan por compatibilidad,
+     pero se neutralizan si aria-current="false" o data-active="false".
 ========================================================= */
 
 
@@ -67,6 +74,8 @@
   --sidebar-indicator-w:calc(100% - (var(--sidebar-inline-padding, 9px) * 2));
   --sidebar-indicator-h:var(--sidebar-item-height, 40px);
   --sidebar-indicator-opacity:0;
+
+  --sidebar-hover-kill-ms:180ms;
 
   --sidebar-mobile-shadow:
     0 24px 80px rgba(0,0,0,.34),
@@ -220,41 +229,110 @@ body.sidebar-collapsed .sidebar{
 
 
 /* =========================================================
-   TRANSITION GUARD
+   TRANSITION / VISUAL SYNC GUARD
    JS recomendado:
    - body.sidebar-transitioning
+   - body.sidebar-visual-syncing
+   - body.router-rendering
+   - body.app-navigating
    - .sidebar.is-transitioning
    - .sidebar-menu.is-transitioning
+   - .sidebar-menu.is-visual-syncing
 ========================================================= */
 
 body.sidebar-transitioning .sidebar,
+body.sidebar-visual-syncing .sidebar,
+body.router-rendering .sidebar,
+body.app-navigating .sidebar,
 .sidebar.is-transitioning{
   pointer-events:none;
 }
 
 body.sidebar-transitioning .sidebar .menu-item,
+body.sidebar-visual-syncing .sidebar .menu-item,
+body.router-rendering .sidebar .menu-item,
+body.app-navigating .sidebar .menu-item,
 .sidebar.is-transitioning .menu-item,
-body.sidebar-transitioning .sidebar .user,
-.sidebar.is-transitioning .user,
-body.sidebar-transitioning .sidebar .sidebar-toggle,
-.sidebar.is-transitioning .sidebar-toggle{
+.sidebar-menu.is-transitioning .menu-item,
+.sidebar-menu.is-visual-syncing .menu-item{
   transform:none !important;
 }
 
 body.sidebar-transitioning .sidebar .menu-item:hover,
-.sidebar.is-transitioning .menu-item:hover{
+body.sidebar-visual-syncing .sidebar .menu-item:hover,
+body.router-rendering .sidebar .menu-item:hover,
+body.app-navigating .sidebar .menu-item:hover,
+.sidebar.is-transitioning .menu-item:hover,
+.sidebar-menu.is-transitioning .menu-item:hover,
+.sidebar-menu.is-visual-syncing .menu-item:hover{
   background:transparent !important;
   border-color:transparent !important;
   box-shadow:none !important;
+  outline:none !important;
+  transform:none !important;
+}
+
+body.sidebar-transitioning .sidebar .menu-item:hover svg,
+body.sidebar-visual-syncing .sidebar .menu-item:hover svg,
+body.router-rendering .sidebar .menu-item:hover svg,
+body.app-navigating .sidebar .menu-item:hover svg,
+.sidebar.is-transitioning .menu-item:hover svg,
+.sidebar-menu.is-transitioning .menu-item:hover svg,
+.sidebar-menu.is-visual-syncing .menu-item:hover svg{
+  color:var(--sidebar-icon) !important;
+}
+
+body.sidebar-transitioning .sidebar .menu-item::before,
+body.sidebar-visual-syncing .sidebar .menu-item::before,
+body.router-rendering .sidebar .menu-item::before,
+body.app-navigating .sidebar .menu-item::before,
+.sidebar.is-transitioning .menu-item::before,
+.sidebar-menu.is-transitioning .menu-item::before,
+.sidebar-menu.is-visual-syncing .menu-item::before{
+  transition:none !important;
+}
+
+body.sidebar-transitioning .sidebar .menu-item:hover::before,
+body.sidebar-transitioning .sidebar .menu-item:hover::after,
+body.sidebar-transitioning .sidebar .menu-item:focus::before,
+body.sidebar-transitioning .sidebar .menu-item:focus::after,
+body.sidebar-transitioning .sidebar .menu-item:focus-visible::before,
+body.sidebar-transitioning .sidebar .menu-item:focus-visible::after,
+body.sidebar-visual-syncing .sidebar .menu-item:hover::before,
+body.sidebar-visual-syncing .sidebar .menu-item:hover::after,
+body.sidebar-visual-syncing .sidebar .menu-item:focus::before,
+body.sidebar-visual-syncing .sidebar .menu-item:focus::after,
+body.sidebar-visual-syncing .sidebar .menu-item:focus-visible::before,
+body.sidebar-visual-syncing .sidebar .menu-item:focus-visible::after,
+body.router-rendering .sidebar .menu-item:hover::before,
+body.router-rendering .sidebar .menu-item:hover::after,
+body.app-navigating .sidebar .menu-item:hover::before,
+body.app-navigating .sidebar .menu-item:hover::after,
+.sidebar.is-transitioning .menu-item:hover::before,
+.sidebar.is-transitioning .menu-item:hover::after,
+.sidebar-menu.is-transitioning .menu-item:hover::before,
+.sidebar-menu.is-transitioning .menu-item:hover::after,
+.sidebar-menu.is-visual-syncing .menu-item:hover::before,
+.sidebar-menu.is-visual-syncing .menu-item:hover::after{
+  opacity:0 !important;
+  visibility:hidden !important;
   transform:none !important;
 }
 
 body.sidebar-transitioning .sidebar [data-tooltip]::before,
 body.sidebar-transitioning .sidebar [data-tooltip]::after,
+body.sidebar-visual-syncing .sidebar [data-tooltip]::before,
+body.sidebar-visual-syncing .sidebar [data-tooltip]::after,
+body.router-rendering .sidebar [data-tooltip]::before,
+body.router-rendering .sidebar [data-tooltip]::after,
+body.app-navigating .sidebar [data-tooltip]::before,
+body.app-navigating .sidebar [data-tooltip]::after,
 .sidebar.is-transitioning [data-tooltip]::before,
 .sidebar.is-transitioning [data-tooltip]::after,
 .sidebar-menu.is-transitioning [data-tooltip]::before,
-.sidebar-menu.is-transitioning [data-tooltip]::after{
+.sidebar-menu.is-transitioning [data-tooltip]::after,
+.sidebar-menu.is-visual-syncing [data-tooltip]::before,
+.sidebar-menu.is-visual-syncing [data-tooltip]::after{
   opacity:0 !important;
   visibility:hidden !important;
   display:none !important;
@@ -262,8 +340,12 @@ body.sidebar-transitioning .sidebar [data-tooltip]::after,
 }
 
 body.sidebar-transitioning .sidebar-menu[data-indicator-ready="true"]::before,
+body.sidebar-visual-syncing .sidebar-menu[data-indicator-ready="true"]::before,
+body.router-rendering .sidebar-menu[data-indicator-ready="true"]::before,
+body.app-navigating .sidebar-menu[data-indicator-ready="true"]::before,
 .sidebar.is-transitioning .sidebar-menu[data-indicator-ready="true"]::before,
-.sidebar-menu.is-transitioning[data-indicator-ready="true"]::before{
+.sidebar-menu.is-transitioning[data-indicator-ready="true"]::before,
+.sidebar-menu.is-visual-syncing[data-indicator-ready="true"]::before{
   opacity:0 !important;
   transition:none !important;
 }
@@ -673,11 +755,8 @@ body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-i
   display:none !important;
 }
 
-.sidebar.collapsed .menu-item.active[data-tooltip]::after,
 .sidebar.collapsed .menu-item[aria-current="page"][data-tooltip]::after,
-.sidebar.is-collapsed .menu-item.active[data-tooltip]::after,
 .sidebar.is-collapsed .menu-item[aria-current="page"][data-tooltip]::after,
-body.sidebar-collapsed .sidebar .menu-item.active[data-tooltip]::after,
 body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::after{
   opacity:0 !important;
   visibility:hidden !important;
@@ -769,7 +848,8 @@ body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::a
     box-shadow var(--duration-normal) var(--ease-standard);
 }
 
-.sidebar-menu[data-indicator-ready="false"]::before{
+.sidebar-menu[data-indicator-ready="false"]::before,
+.sidebar-menu:not([data-indicator-ready])::before{
   opacity:0 !important;
   visibility:hidden !important;
 }
@@ -930,15 +1010,28 @@ body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-i
   box-shadow:var(--focus-ring);
 }
 
-.menu-item.active,
-.menu-item.is-active,
-.menu-item[aria-current="page"]{
+
+/* =========================================================
+   ACTIVE STATE — CANONICAL SOURCE
+   Fuente fuerte:
+   - aria-current="page"
+   - data-active="true"
+
+   Compat:
+   - .active / .is-active solo pintan si NO están negadas.
+========================================================= */
+
+.menu-item[aria-current="page"],
+.menu-item[data-active="true"],
+.menu-item.active:not([aria-current="false"]):not([data-active="false"]),
+.menu-item.is-active:not([aria-current="false"]):not([data-active="false"]){
   color:var(--sidebar-text-active);
 }
 
-.menu-item.active::before,
-.menu-item.is-active::before,
-.menu-item[aria-current="page"]::before{
+.menu-item[aria-current="page"]::before,
+.menu-item[data-active="true"]::before,
+.menu-item.active:not([aria-current="false"]):not([data-active="false"])::before,
+.menu-item.is-active:not([aria-current="false"]):not([data-active="false"])::before{
   border-color:var(--sidebar-active-pill-border);
 
   background:var(--sidebar-active-pill-bg);
@@ -952,17 +1045,54 @@ body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-i
   animation:sidebarActiveBubbleIn .22s var(--ease-emphasis);
 }
 
-.sidebar-menu[data-indicator-ready="true"] .menu-item.active::before,
-.sidebar-menu[data-indicator-ready="true"] .menu-item.is-active::before,
-.sidebar-menu[data-indicator-ready="true"] .menu-item[aria-current="page"]::before{
+/*
+  Neutraliza clases stale:
+  Si el JS dejó .active pero marcó aria-current=false o data-active=false,
+  NO se pinta como activo.
+*/
+.menu-item.active[aria-current="false"],
+.menu-item.is-active[aria-current="false"],
+.menu-item.active[data-active="false"],
+.menu-item.is-active[data-active="false"]{
+  color:var(--sidebar-text) !important;
+}
+
+.menu-item.active[aria-current="false"]::before,
+.menu-item.is-active[aria-current="false"]::before,
+.menu-item.active[data-active="false"]::before,
+.menu-item.is-active[data-active="false"]::before{
+  border-color:transparent !important;
+  background:transparent !important;
+  box-shadow:none !important;
+  opacity:0 !important;
+  transform:scale(.985) !important;
+  animation:none !important;
+}
+
+.menu-item.active[aria-current="false"] svg,
+.menu-item.is-active[aria-current="false"] svg,
+.menu-item.active[data-active="false"] svg,
+.menu-item.is-active[data-active="false"] svg{
+  color:var(--sidebar-icon) !important;
+}
+
+/*
+  Cuando el indicador Apple está activo, se oculta la burbuja local.
+  La burbuja única pasa a ser ::before de .sidebar-menu.
+*/
+.sidebar-menu[data-indicator-ready="true"] .menu-item[aria-current="page"]::before,
+.sidebar-menu[data-indicator-ready="true"] .menu-item[data-active="true"]::before,
+.sidebar-menu[data-indicator-ready="true"] .menu-item.active:not([aria-current="false"]):not([data-active="false"])::before,
+.sidebar-menu[data-indicator-ready="true"] .menu-item.is-active:not([aria-current="false"]):not([data-active="false"])::before{
   opacity:0;
   transform:scale(.985);
   animation:none;
 }
 
-.menu-item.active svg,
-.menu-item.is-active svg,
-.menu-item[aria-current="page"] svg{
+.menu-item[aria-current="page"] svg,
+.menu-item[data-active="true"] svg,
+.menu-item.active:not([aria-current="false"]):not([data-active="false"]) svg,
+.menu-item.is-active:not([aria-current="false"]):not([data-active="false"]) svg{
   color:var(--sidebar-icon-active);
 }
 
@@ -1044,6 +1174,8 @@ body.sidebar-collapsed .sidebar .menu-item .menu-item-icon{
 .sidebar.is-collapsed .menu-item .menu-label,
 .sidebar.is-collapsed .menu-item .menu-item-label,
 body.sidebar-collapsed .sidebar .menu-item > span:last-child,
+body.sidebar-collapsed .sidebar .menu-label,
+body.sidebar-collapsed .sidebar .menu-item-label,
 body.sidebar-collapsed .sidebar .menu-item .menu-label,
 body.sidebar-collapsed .sidebar .menu-item .menu-item-label{
   display:none;
@@ -1067,27 +1199,21 @@ body.sidebar-collapsed .sidebar .menu-item:hover{
   transform:none !important;
 }
 
-.sidebar.collapsed .menu-item.active,
-.sidebar.collapsed .menu-item.is-active,
 .sidebar.collapsed .menu-item[aria-current="page"],
-.sidebar.is-collapsed .menu-item.active,
-.sidebar.is-collapsed .menu-item.is-active,
+.sidebar.collapsed .menu-item[data-active="true"],
 .sidebar.is-collapsed .menu-item[aria-current="page"],
-body.sidebar-collapsed .sidebar .menu-item.active,
-body.sidebar-collapsed .sidebar .menu-item.is-active,
-body.sidebar-collapsed .sidebar .menu-item[aria-current="page"]{
+.sidebar.is-collapsed .menu-item[data-active="true"],
+body.sidebar-collapsed .sidebar .menu-item[aria-current="page"],
+body.sidebar-collapsed .sidebar .menu-item[data-active="true"]{
   transform:none !important;
 }
 
-.sidebar.collapsed .menu-item.active::before,
-.sidebar.collapsed .menu-item.is-active::before,
 .sidebar.collapsed .menu-item[aria-current="page"]::before,
-.sidebar.is-collapsed .menu-item.active::before,
-.sidebar.is-collapsed .menu-item.is-active::before,
+.sidebar.collapsed .menu-item[data-active="true"]::before,
 .sidebar.is-collapsed .menu-item[aria-current="page"]::before,
-body.sidebar-collapsed .sidebar .menu-item.active::before,
-body.sidebar-collapsed .sidebar .menu-item.is-active::before,
-body.sidebar-collapsed .sidebar .menu-item[aria-current="page"]::before{
+.sidebar.is-collapsed .menu-item[data-active="true"]::before,
+body.sidebar-collapsed .sidebar .menu-item[aria-current="page"]::before,
+body.sidebar-collapsed .sidebar .menu-item[data-active="true"]::before{
   box-shadow:var(--sidebar-active-pill-shadow-collapsed);
 }
 
@@ -1802,9 +1928,10 @@ body.sidebar-open [data-sidebar-overlay]{
   border-color:color-mix(in srgb, var(--text), transparent 95%);
 }
 
-[data-theme="light"] .menu-item.active::before,
-[data-theme="light"] .menu-item.is-active::before,
-[data-theme="light"] .menu-item[aria-current="page"]::before{
+[data-theme="light"] .menu-item[aria-current="page"]::before,
+[data-theme="light"] .menu-item[data-active="true"]::before,
+[data-theme="light"] .menu-item.active:not([aria-current="false"]):not([data-active="false"])::before,
+[data-theme="light"] .menu-item.is-active:not([aria-current="false"]):not([data-active="false"])::before{
   box-shadow:var(--sidebar-active-pill-shadow);
 }
 
@@ -2060,6 +2187,89 @@ body.sidebar-open [data-sidebar-overlay]{
 #view-container{
   position:relative;
   z-index:var(--z-base, 1);
+}
+
+
+/* =========================================================
+   FINAL HOVER / FOCUS STALE KILLER
+   Este bloque debe quedar AL FINAL antes de reduced-motion/print.
+========================================================= */
+
+body.sidebar-visual-syncing .sidebar-menu,
+body.router-rendering .sidebar-menu,
+body.app-navigating .sidebar-menu,
+.sidebar-menu.is-visual-syncing{
+  pointer-events:none !important;
+}
+
+body.sidebar-visual-syncing .sidebar-menu .menu-item:hover,
+body.sidebar-visual-syncing .sidebar-menu .menu-item:focus,
+body.sidebar-visual-syncing .sidebar-menu .menu-item:focus-visible,
+body.router-rendering .sidebar-menu .menu-item:hover,
+body.router-rendering .sidebar-menu .menu-item:focus,
+body.router-rendering .sidebar-menu .menu-item:focus-visible,
+body.app-navigating .sidebar-menu .menu-item:hover,
+body.app-navigating .sidebar-menu .menu-item:focus,
+body.app-navigating .sidebar-menu .menu-item:focus-visible,
+.sidebar-menu.is-visual-syncing .menu-item:hover,
+.sidebar-menu.is-visual-syncing .menu-item:focus,
+.sidebar-menu.is-visual-syncing .menu-item:focus-visible{
+  background:transparent !important;
+  border-color:transparent !important;
+  box-shadow:none !important;
+  outline:none !important;
+  transform:none !important;
+}
+
+body.sidebar-visual-syncing .sidebar-menu .menu-item:hover svg,
+body.router-rendering .sidebar-menu .menu-item:hover svg,
+body.app-navigating .sidebar-menu .menu-item:hover svg,
+.sidebar-menu.is-visual-syncing .menu-item:hover svg{
+  color:var(--sidebar-icon) !important;
+}
+
+body.sidebar-visual-syncing .sidebar-menu .menu-item:hover::before,
+body.sidebar-visual-syncing .sidebar-menu .menu-item:hover::after,
+body.sidebar-visual-syncing .sidebar-menu .menu-item:focus::before,
+body.sidebar-visual-syncing .sidebar-menu .menu-item:focus::after,
+body.sidebar-visual-syncing .sidebar-menu .menu-item:focus-visible::before,
+body.sidebar-visual-syncing .sidebar-menu .menu-item:focus-visible::after,
+body.router-rendering .sidebar-menu .menu-item:hover::before,
+body.router-rendering .sidebar-menu .menu-item:hover::after,
+body.app-navigating .sidebar-menu .menu-item:hover::before,
+body.app-navigating .sidebar-menu .menu-item:hover::after,
+.sidebar-menu.is-visual-syncing .menu-item:hover::before,
+.sidebar-menu.is-visual-syncing .menu-item:hover::after,
+.sidebar-menu.is-visual-syncing .menu-item:focus::before,
+.sidebar-menu.is-visual-syncing .menu-item:focus::after,
+.sidebar-menu.is-visual-syncing .menu-item:focus-visible::before,
+.sidebar-menu.is-visual-syncing .menu-item:focus-visible::after{
+  opacity:0 !important;
+  visibility:hidden !important;
+  transform:none !important;
+  animation:none !important;
+}
+
+/*
+  Pero el activo canónico sí puede mantener color de texto durante sync.
+  La burbuja/indicador se recoloca por JS después del paint.
+*/
+body.sidebar-visual-syncing .sidebar-menu .menu-item[aria-current="page"],
+body.sidebar-visual-syncing .sidebar-menu .menu-item[data-active="true"],
+body.router-rendering .sidebar-menu .menu-item[aria-current="page"],
+body.router-rendering .sidebar-menu .menu-item[data-active="true"],
+body.app-navigating .sidebar-menu .menu-item[aria-current="page"],
+body.app-navigating .sidebar-menu .menu-item[data-active="true"],
+.sidebar-menu.is-visual-syncing .menu-item[aria-current="page"],
+.sidebar-menu.is-visual-syncing .menu-item[data-active="true"]{
+  color:var(--sidebar-text-active) !important;
+}
+
+body.sidebar-visual-syncing .sidebar-menu::before,
+body.router-rendering .sidebar-menu::before,
+body.app-navigating .sidebar-menu::before,
+.sidebar-menu.is-visual-syncing::before{
+  opacity:0 !important;
 }
 
 

@@ -55,8 +55,9 @@ import {
 
 const LEGACY_SIDEBAR_OPEN_STORAGE_KEY = "sidebarOpen";
 
-const SIDEBAR_TRANSITION_MS = 360;
-const INDICATOR_RECALC_DELAY_MS = 24;
+const SIDEBAR_TRANSITION_MS = 380;
+const INDICATOR_RECALC_DELAY_MS = 32;
+const INDICATOR_SETTLED_DELAY_MS = SIDEBAR_TRANSITION_MS + 28;
 
 /* =========================================================
    MODULE RUNTIME
@@ -433,6 +434,39 @@ function afterNextPaint(callback) {
   });
 }
 
+function safeSetTimeout(callback, ms = 0) {
+  if (typeof callback !== "function") {
+    return null;
+  }
+
+  try {
+    return setTimeout(() => {
+      try {
+        callback();
+      } catch {}
+    }, ms);
+  } catch {
+    try {
+      callback();
+    } catch {}
+
+    return null;
+  }
+}
+
+function safeClearTimeout(timer) {
+  if (!timer) {
+    return false;
+  }
+
+  try {
+    clearTimeout(timer);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function clearIndicatorSchedule() {
   if (indicatorRaf) {
     safeCancelAnimationFrame(indicatorRaf);
@@ -440,10 +474,7 @@ function clearIndicatorSchedule() {
   }
 
   if (indicatorTimer) {
-    try {
-      clearTimeout(indicatorTimer);
-    } catch {}
-
+    safeClearTimeout(indicatorTimer);
     indicatorTimer = null;
   }
 }
@@ -826,6 +857,14 @@ export function isSidebarCollapsedDesktop(AppCore) {
    ACTIVE ROUTE / MENU INDICATOR
 ========================================================= */
 
+function stripPublicUsernamePrefix(pathname = "/") {
+  const value =
+    safeText(pathname, "/")
+      .replace(/^\/@[^/]+(?=\/|$)/i, "");
+
+  return value || "/";
+}
+
 function normalizePathLike(path = "/") {
   let value =
     safeText(path, "/")
@@ -844,9 +883,30 @@ function normalizePathLike(path = "/") {
         : "http://localhost"
     );
 
-    value = `${url.pathname || "/"}${url.search || ""}`;
+    if (
+      url.hash &&
+      (
+        url.hash.startsWith("#/") ||
+        url.hash.startsWith("#!")
+      )
+    ) {
+      value = url.hash
+        .replace(/^#!\/?/, "/")
+        .replace(/^#\/?/, "/");
+    } else {
+      value = `${url.pathname || "/"}${url.search || ""}`;
+    }
   } catch {
-    value = value.split("#")[0] || "/";
+    if (
+      value.startsWith("#/") ||
+      value.startsWith("#!")
+    ) {
+      value = value
+        .replace(/^#!\/?/, "/")
+        .replace(/^#\/?/, "/");
+    } else {
+      value = value.split("#")[0] || "/";
+    }
   }
 
   if (!value.startsWith("/")) {
@@ -855,14 +915,20 @@ function normalizePathLike(path = "/") {
 
   value = value.replace(/\/{2,}/g, "/");
 
+  const [pathname, query = ""] = value.split("?");
+
+  let cleanPathname = stripPublicUsernamePrefix(pathname || "/");
+
   if (
-    value.length > 1 &&
-    value.endsWith("/")
+    cleanPathname.length > 1 &&
+    cleanPathname.endsWith("/")
   ) {
-    value = value.replace(/\/+$/g, "") || "/";
+    cleanPathname = cleanPathname.replace(/\/+$/g, "") || "/";
   }
 
-  return value;
+  return query
+    ? `${cleanPathname}?${query}`
+    : cleanPathname;
 }
 
 function stripQuery(path = "/") {
@@ -874,6 +940,7 @@ function getCurrentPublicPath(AppCore) {
     safeText(
       AppCore?.state?.publicPath ||
         AppCore?.state?.route ||
+        AppCore?.state?.canonicalPath ||
         "",
       ""
     );
@@ -927,7 +994,7 @@ function getMenuItemRoute(item = null) {
 }
 
 function isElementVisible(element = null) {
-  if (!element) {
+  if (!element || !isBrowser()) {
     return false;
   }
 
@@ -998,29 +1065,38 @@ function getMenuItems(sidebarMenu = null) {
   }
 }
 
-function resolveActiveMenuItem(AppCore, sidebarMenu = null) {
-  if (!sidebarMenu) {
-    return null;
+function clearActiveItemClasses(sidebarMenu = null) {
+  const items = getMenuItems(sidebarMenu);
+
+  for (const item of items) {
+    try {
+      item.classList.remove("active", "is-active");
+      item.removeAttribute("aria-current");
+      delete item.dataset.active;
+    } catch {}
   }
 
-  const directSelectors = [
-    ".menu-item[aria-current='page']",
-    ".menu-item.active",
-    ".menu-item.is-active",
-    ".menu-item[data-active='true']",
-    "[data-sidebar-nav='true'][aria-current='page']",
-    "[data-sidebar-nav='true'].active",
-    "[data-sidebar-nav='true'].is-active",
-  ];
+  return true;
+}
 
-  for (const selector of directSelectors) {
-    try {
-      const candidate = sidebarMenu.querySelector(selector);
+function setActiveItemClasses(item = null) {
+  if (!item) {
+    return false;
+  }
 
-      if (candidate && isElementVisible(candidate)) {
-        return candidate;
-      }
-    } catch {}
+  try {
+    item.classList.add("active", "is-active");
+    item.setAttribute("aria-current", "page");
+    item.dataset.active = "true";
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function findBestMenuItemForCurrentPath(AppCore, sidebarMenu = null) {
+  if (!sidebarMenu) {
+    return null;
   }
 
   const currentPath = getCurrentPublicPath(AppCore);
@@ -1072,6 +1148,101 @@ function resolveActiveMenuItem(AppCore, sidebarMenu = null) {
   return bestScore >= 0
     ? best
     : null;
+}
+
+export function syncActiveMenuItem(AppCore, options = {}) {
+  const {
+    sidebarMenu,
+  } = getElements(AppCore);
+
+  if (!sidebarMenu) {
+    return null;
+  }
+
+  const opts =
+    options && typeof options === "object"
+      ? options
+      : {};
+
+  const shouldMutate =
+    opts.mutate !== false;
+
+  const best =
+    findBestMenuItemForCurrentPath(
+      AppCore,
+      sidebarMenu
+    );
+
+  if (shouldMutate) {
+    clearActiveItemClasses(sidebarMenu);
+
+    if (best) {
+      setActiveItemClasses(best);
+    }
+  }
+
+  safeEmit(AppCore, "sidebar:active:item:synced", {
+    reason:
+      safeText(opts.reason, "sync-active-item"),
+    matched:
+      Boolean(best),
+    route:
+      getMenuItemRoute(best),
+    currentPublicPath:
+      getCurrentPublicPath(AppCore),
+  });
+
+  return best;
+}
+
+function resolveActiveMenuItem(AppCore, sidebarMenu = null) {
+  if (!sidebarMenu) {
+    return null;
+  }
+
+  const directSelectors = [
+    ".menu-item[aria-current='page']",
+    ".menu-item.active",
+    ".menu-item.is-active",
+    ".menu-item[data-active='true']",
+    "[data-sidebar-nav='true'][aria-current='page']",
+    "[data-sidebar-nav='true'].active",
+    "[data-sidebar-nav='true'].is-active",
+  ];
+
+  for (const selector of directSelectors) {
+    try {
+      const candidate = sidebarMenu.querySelector(selector);
+
+      if (candidate && isElementVisible(candidate)) {
+        return candidate;
+      }
+    } catch {}
+  }
+
+  return syncActiveMenuItem(AppCore, {
+    mutate:
+      true,
+    reason:
+      "resolve-active-menu-item",
+  });
+}
+
+function isSidebarTransitioning(AppCore) {
+  const {
+    sidebar,
+    body,
+  } = getElements(AppCore);
+
+  const html = getHtmlElement();
+
+  return Boolean(
+    sidebarTransitionTimer ||
+      sidebar?.classList?.contains?.("is-transitioning") ||
+      body?.classList?.contains?.("sidebar-transitioning") ||
+      html?.classList?.contains?.("sidebar-transitioning") ||
+      sidebar?.dataset?.transitioning === "true"
+  );
 }
 
 function disableActiveMenuIndicator(AppCore, reason = "disabled") {
@@ -1147,13 +1318,24 @@ export function syncActiveMenuIndicator(AppCore, options = {}) {
     );
   }
 
+  if (
+    isSidebarTransitioning(AppCore) &&
+    opts.force !== true
+  ) {
+    return disableActiveMenuIndicator(
+      AppCore,
+      `${reason}:transitioning`
+    );
+  }
+
   const activeItem =
+    opts.activeItem ||
     resolveActiveMenuItem(
       AppCore,
       sidebarMenu
     );
 
-  if (!activeItem) {
+  if (!activeItem || !isElementVisible(activeItem)) {
     return disableActiveMenuIndicator(
       AppCore,
       `${reason}:no-active-item`
@@ -1270,10 +1452,13 @@ export function scheduleActiveMenuIndicator(AppCore, options = {}) {
   const reveal =
     opts.reveal !== false;
 
+  const force =
+    opts.force === true;
+
   clearIndicatorSchedule();
 
   if (delay > 0) {
-    indicatorTimer = setTimeout(() => {
+    indicatorTimer = safeSetTimeout(() => {
       indicatorTimer = null;
 
       indicatorRaf = safeRequestAnimationFrame(() => {
@@ -1282,6 +1467,7 @@ export function scheduleActiveMenuIndicator(AppCore, options = {}) {
         syncActiveMenuIndicator(AppCore, {
           reason,
           reveal,
+          force,
         });
       });
     }, delay);
@@ -1295,6 +1481,7 @@ export function scheduleActiveMenuIndicator(AppCore, options = {}) {
     syncActiveMenuIndicator(AppCore, {
       reason,
       reveal,
+      force,
     });
   });
 
@@ -1315,10 +1502,7 @@ function cleanupSidebarTransitionListener() {
 
 function clearSidebarTransitionTimer() {
   if (sidebarTransitionTimer) {
-    try {
-      clearTimeout(sidebarTransitionTimer);
-    } catch {}
-
+    safeClearTimeout(sidebarTransitionTimer);
     sidebarTransitionTimer = null;
   }
 }
@@ -1382,12 +1566,21 @@ function finishSidebarTransition(AppCore, reason = "finish") {
     reason
   );
 
+  syncActiveMenuItem(AppCore, {
+    reason:
+      `${reason}:active-final`,
+    mutate:
+      true,
+  });
+
   scheduleActiveMenuIndicator(AppCore, {
     reason:
       `${reason}:indicator-final`,
     delayMs:
       INDICATOR_RECALC_DELAY_MS,
     reveal:
+      true,
+    force:
       true,
   });
 
@@ -1411,6 +1604,7 @@ function beginSidebarTransition(AppCore, reason = "state-change", durationMs = S
     return false;
   }
 
+  clearIndicatorSchedule();
   clearSidebarTransitionTimer();
   cleanupSidebarTransitionListener();
 
@@ -1460,7 +1654,7 @@ function beginSidebarTransition(AppCore, reason = "state-change", durationMs = S
     sidebarTransitionEndCleanup = null;
   }
 
-  sidebarTransitionTimer = setTimeout(
+  sidebarTransitionTimer = safeSetTimeout(
     finish,
     clampNumber(durationMs, 80, 2000)
   );
@@ -1498,7 +1692,8 @@ export function syncTooltipMode(AppCore, isOpen = null) {
   const enabled =
     !mobile &&
     !open &&
-    !isRealShellHidden(AppCore);
+    !isRealShellHidden(AppCore) &&
+    !isSidebarTransitioning(AppCore);
 
   toggleClass(
     sidebar,
@@ -1547,6 +1742,9 @@ export function updateToggleLabel(AppCore, isOpen = null) {
       ? isOpen
       : getDesiredSidebarOpenState(AppCore);
 
+  const mobile =
+    isMobileViewport();
+
   const desktopText = open
     ? "Contraer barra lateral"
     : "Expandir barra lateral";
@@ -1558,6 +1756,7 @@ export function updateToggleLabel(AppCore, isOpen = null) {
   if (toggleBtn) {
     setAttr(toggleBtn, "aria-label", desktopText);
     setAttr(toggleBtn, "aria-expanded", String(open));
+    setAttr(toggleBtn, "type", "button");
 
     toggleClass(toggleBtn, "is-active", open);
 
@@ -1579,6 +1778,7 @@ export function updateToggleLabel(AppCore, isOpen = null) {
   if (mobileToggleBtn) {
     setAttr(mobileToggleBtn, "aria-label", mobileText);
     setAttr(mobileToggleBtn, "aria-expanded", String(open));
+    setAttr(mobileToggleBtn, "type", "button");
 
     toggleClass(mobileToggleBtn, "is-active", open);
 
@@ -1597,6 +1797,7 @@ export function updateToggleLabel(AppCore, isOpen = null) {
   if (sidebar) {
     setDataset(sidebar, "open", open ? "true" : "false");
     setDataset(sidebar, "collapsed", open ? "false" : "true");
+    setDataset(sidebar, "viewport", mobile ? "mobile" : "desktop");
   }
 
   syncTooltipMode(AppCore, open);
@@ -1648,6 +1849,7 @@ function syncHiddenShellState(AppCore, closeDropdown) {
   setDataset(sidebar, "open", "false");
   setDataset(sidebar, "collapsed", "false");
   setDataset(sidebar, "mode", "hidden");
+  setDataset(sidebar, "viewport", "");
   setDataset(body, "sidebarMode", "hidden");
 
   try {
@@ -1735,6 +1937,7 @@ function syncVisibleSidebarBase(AppCore, {
 
   setDataset(sidebar, "open", open ? "true" : "false");
   setDataset(sidebar, "collapsed", open ? "false" : "true");
+  setDataset(sidebar, "viewport", mobile ? "mobile" : "desktop");
 
   updateToggleLabel(AppCore, open);
 
@@ -1774,14 +1977,28 @@ export function syncSidebarState(AppCore, closeDropdown) {
     open,
   });
 
-  scheduleActiveMenuIndicator(AppCore, {
+  syncActiveMenuItem(AppCore, {
     reason:
       "sync-sidebar-state",
-    delayMs:
-      INDICATOR_RECALC_DELAY_MS,
-    reveal:
+    mutate:
       true,
   });
+
+  if (isSidebarTransitioning(AppCore)) {
+    disableActiveMenuIndicator(
+      AppCore,
+      "sync-sidebar-state:transitioning"
+    );
+  } else {
+    scheduleActiveMenuIndicator(AppCore, {
+      reason:
+        "sync-sidebar-state",
+      delayMs:
+        INDICATOR_RECALC_DELAY_MS,
+      reveal:
+        true,
+    });
+  }
 
   safeEmit(AppCore, "sidebar:state:synced", {
     open,
@@ -1790,6 +2007,7 @@ export function syncSidebarState(AppCore, closeDropdown) {
     realShellHidden: false,
     domShellHidden: isDomShellHiddenOnly(AppCore),
     collapsed: !open && !mobile,
+    transitioning: isSidebarTransitioning(AppCore),
   });
 
   return synced;
@@ -1822,6 +2040,14 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
     return false;
   }
 
+  safeEmit(AppCore, "sidebar:state:change:start", {
+    open: nextOpen,
+    previousOpen,
+    changed,
+    mobile,
+    collapsed: !nextOpen && !mobile,
+  });
+
   if (changed) {
     beginSidebarTransition(
       AppCore,
@@ -1853,10 +2079,12 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
     afterNextPaint(() => {
       scheduleActiveMenuIndicator(AppCore, {
         reason:
-          "set-sidebar-open:after-paint",
+          "set-sidebar-open:settled",
         delayMs:
-          SIDEBAR_TRANSITION_MS,
+          INDICATOR_SETTLED_DELAY_MS,
         reveal:
+          true,
+        force:
           true,
       });
     });
@@ -1868,6 +2096,8 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
         INDICATOR_RECALC_DELAY_MS,
       reveal:
         true,
+      force:
+        true,
     });
   }
 
@@ -1877,6 +2107,7 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
     changed,
     mobile,
     collapsed: !nextOpen && !mobile,
+    transitioning: changed,
   });
 
   return synced;
@@ -1925,9 +2156,23 @@ export function repairSidebarState(AppCore, closeDropdown) {
     reason:
       "repair-sidebar-state",
     delayMs:
-      SIDEBAR_TRANSITION_MS,
+      isSidebarTransitioning(AppCore)
+        ? INDICATOR_SETTLED_DELAY_MS
+        : INDICATOR_RECALC_DELAY_MS,
     reveal:
       true,
+    force:
+      true,
+  });
+
+  safeEmit(AppCore, "sidebar:state:repaired", {
+    mobile,
+    open:
+      Boolean(state.sidebarOpen),
+    desktopOpen:
+      Boolean(state.sidebarDesktopOpen),
+    mobileOpen:
+      Boolean(state.sidebarMobileOpen),
   });
 
   return synced;
@@ -1959,6 +2204,8 @@ export function getSidebarStateSnapshot(AppCore) {
     mobile,
     open,
     collapsed: !open && !mobile,
+    transitioning:
+      isSidebarTransitioning(AppCore),
 
     shellHidden:
       isDomShellHiddenOnly(AppCore),
@@ -2034,6 +2281,12 @@ export function getSidebarStateSnapshot(AppCore) {
       sidebarMode:
         sidebar?.dataset?.mode || null,
 
+      sidebarViewport:
+        sidebar?.dataset?.viewport || null,
+
+      sidebarTransitioning:
+        sidebar?.dataset?.transitioning || null,
+
       bodySidebarMode:
         body?.dataset?.sidebarMode || null,
     },
@@ -2090,6 +2343,7 @@ export default {
   syncTooltipMode,
   updateToggleLabel,
 
+  syncActiveMenuItem,
   syncActiveMenuIndicator,
   scheduleActiveMenuIndicator,
 

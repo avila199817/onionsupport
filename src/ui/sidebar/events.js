@@ -32,7 +32,7 @@
    - router rendered NO fuerza open/close del sidebar
    - active item se recalcula tras router:rendered/app:route:change
    - indicador se recalcula después del layout final
-   - durante transición se oculta el indicador para evitar “burbuja flotante”
+   - durante transición se oculta el indicador para evitar burbuja flotante
 
    HARDENING 10/10:
    - browser guard total
@@ -44,7 +44,7 @@
    - captura errores sync y async/rejected promise
    - AppCore.cleanup.event ya NO registra handlers crudos
    - dedupe defensivo de eventos ya gestionados por SidebarUI
-   - commit visual debounced para evitar loops entre eventos
+   - commit visual debounced por clave para evitar loops entre eventos
 ========================================================= */
 
 import {
@@ -66,10 +66,12 @@ const localCleanups = new Map();
 const DEFAULT_SCOPE = "ui:sidebar";
 
 const INDICATOR_DEFAULT_DELAY = 40;
-const INDICATOR_TRANSITION_MS = 360;
+const INDICATOR_TRANSITION_MS = 380;
 
 const HANDLED_FLAG = "__onionSidebarHandled";
 const LOCAL_HANDLED_FLAG = "__onionSidebarEventsHandled";
+
+const ROUTE_CURRENT_ATTR = "page";
 
 /* ======================================================
    BASICS
@@ -114,6 +116,10 @@ function isFn(value) {
 
 function resolveScope(scope = DEFAULT_SCOPE) {
   return safeText(scope, DEFAULT_SCOPE);
+}
+
+function resolveLocalScope(scope = DEFAULT_SCOPE, type = "local") {
+  return `${resolveScope(scope)}:${safeText(type, "local")}`;
 }
 
 function safeWarn(AppCore, ...args) {
@@ -360,12 +366,6 @@ function preventDefaultAndStop(event) {
   } catch {}
 }
 
-function stopImmediate(event) {
-  try {
-    event?.stopImmediatePropagation?.();
-  } catch {}
-}
-
 /* ======================================================
    EVENT DEDUPE
 ====================================================== */
@@ -464,7 +464,7 @@ function bindDom(
   try {
     if (isFn(AppCore?.cleanup?.on)) {
       AppCore.cleanup.on(
-        scopeName,
+        resolveScope(scope).split(":").slice(0, 2).join(":") || DEFAULT_SCOPE,
         target,
         eventName,
         safeHandler,
@@ -530,7 +530,7 @@ function bindCoreEvent(
   try {
     if (isFn(AppCore?.cleanup?.event)) {
       const maybeCleanup = AppCore.cleanup.event(
-        scopeName,
+        resolveScope(scope).split(":").slice(0, 2).join(":") || DEFAULT_SCOPE,
         cleanEventName,
         safeHandler
       );
@@ -674,6 +674,14 @@ function normalizeHashRouterPath(value = "") {
   return raw.replace(/^#\/?/, "/");
 }
 
+function stripUsernamePrefix(path = "/") {
+  return (
+    safeText(path, "/")
+      .replace(/^\/@[^/]+(?=\/|$)/i, "") ||
+    "/"
+  );
+}
+
 function normalizePathname(path = "/") {
   let value = safeText(path, "/");
 
@@ -713,6 +721,8 @@ function normalizePathname(path = "/") {
     value = value.replace(/\/+$/g, "") || "/";
   }
 
+  value = stripUsernamePrefix(value);
+
   return value || "/";
 }
 
@@ -725,7 +735,9 @@ function getBrowserPath() {
     const hash = window.location.hash || "";
 
     if (hash && isHashRouterPath(hash)) {
-      return normalizeHashRouterPath(hash);
+      return normalizePathname(
+        normalizeHashRouterPath(hash)
+      );
     }
 
     return normalizePathname(
@@ -734,6 +746,31 @@ function getBrowserPath() {
   } catch {
     return "/";
   }
+}
+
+function readMaybeFunction(fn, fallback = "") {
+  try {
+    if (isFn(fn)) {
+      return fn();
+    }
+  } catch {}
+
+  return fallback;
+}
+
+function getRouteFromObject(value = null) {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+
+  return safeText(
+    value.path ||
+      value.route ||
+      value.canonicalPath ||
+      value.publicPath ||
+      "",
+    ""
+  );
 }
 
 function getRouteFromElement(element = null) {
@@ -760,14 +797,17 @@ function getRouteFromElement(element = null) {
 
 function getCurrentPathCandidates(ctx = {}, payload = {}) {
   const AppCore = ctx.AppCore;
-  const Router = ctx.Router || AppCore?.Router || AppCore?.router;
+  const Router =
+    ctx.Router ||
+    AppCore?.Router ||
+    AppCore?.router;
 
   const detail = safeObject(payload);
 
   const values = [
     detail.publicPath,
     detail.path,
-    detail.route,
+    getRouteFromObject(detail.route),
     detail.canonicalPath,
     detail.to,
     detail.url,
@@ -777,9 +817,9 @@ function getCurrentPathCandidates(ctx = {}, payload = {}) {
     AppCore?.state?.canonicalPath,
     AppCore?.state?.lastRoute,
 
-    Router?.getCurrentPublicPath?.(),
-    Router?.getCurrentCanonicalPath?.(),
-    Router?.getCurrentPath?.(),
+    readMaybeFunction(() => Router?.getCurrentPublicPath?.(), ""),
+    readMaybeFunction(() => Router?.getCurrentCanonicalPath?.(), ""),
+    readMaybeFunction(() => Router?.getCurrentPath?.(), ""),
 
     getBrowserPath(),
   ];
@@ -930,6 +970,13 @@ function syncActiveMenuItem(ctx = {}, payload = {}) {
   let bestRoute = "";
 
   for (const item of items) {
+    if (
+      isHiddenOrInertElement(item) ||
+      !hasLayoutBox(item)
+    ) {
+      continue;
+    }
+
     const route = normalizePathname(
       getRouteFromElement(item)
     );
@@ -961,13 +1008,10 @@ function syncActiveMenuItem(ctx = {}, payload = {}) {
     } catch {}
   }
 
-  if (
-    bestItem &&
-    !isHiddenOrInertElement(bestItem)
-  ) {
+  if (bestItem) {
     try {
       bestItem.classList.add("active", "is-active");
-      bestItem.setAttribute("aria-current", "page");
+      bestItem.setAttribute("aria-current", ROUTE_CURRENT_ATTR);
       bestItem.dataset.active = "true";
     } catch {}
   }
@@ -1131,7 +1175,7 @@ function scheduleActiveMenuIndicator(ctx = {}, options = {}) {
   safeWindowTimeout(() => {
     afterFrames(() => {
       syncActiveMenuIndicator(ctx, options);
-    }, 2);
+    }, Number(options.frames) || 2);
   }, delayMs);
 
   return true;
@@ -1157,28 +1201,45 @@ function beginSidebarLayoutTransition(ctx = {}, reason = "transition") {
     sidebarMenu?.classList?.add?.("is-transitioning");
   } catch {}
 
-  safeWindowTimeout(() => {
-    try {
-      sidebar?.classList?.remove?.("is-transitioning");
-      body?.classList?.remove?.("sidebar-transitioning");
-      sidebarMenu?.classList?.remove?.("is-transitioning");
-    } catch {}
-
-    syncActiveMenuItem(ctx, {
-      reason:
-        `${reason}:after-transition`,
-    });
-
-    scheduleActiveMenuIndicator(ctx, {
-      reason:
-        `${reason}:after-transition`,
-      delayMs: 24,
-      reveal: true,
-    });
-  }, INDICATOR_TRANSITION_MS);
-
   safeEmit(AppCore, "sidebar:transition:begin", {
     reason,
+  });
+
+  return true;
+}
+
+function endSidebarLayoutTransition(ctx = {}, reason = "transition") {
+  const AppCore = ctx.AppCore;
+
+  const {
+    sidebar,
+    body,
+    sidebarMenu,
+  } = resolveElements(
+    AppCore,
+    ctx.getElements
+  );
+
+  try {
+    sidebar?.classList?.remove?.("is-transitioning");
+    body?.classList?.remove?.("sidebar-transitioning");
+    sidebarMenu?.classList?.remove?.("is-transitioning");
+  } catch {}
+
+  const activeItem = syncActiveMenuItem(ctx, {
+    reason: `${reason}:end`,
+  });
+
+  scheduleActiveMenuIndicator(ctx, {
+    reason: `${reason}:end`,
+    activeItem,
+    delayMs: 24,
+    reveal: true,
+  });
+
+  safeEmit(AppCore, "sidebar:transition:end", {
+    reason,
+    hasActiveItem: Boolean(activeItem),
   });
 
   return true;
@@ -1191,9 +1252,20 @@ function beginSidebarLayoutTransition(ctx = {}, reason = "transition") {
 function createSidebarVisualCommitter(ctx = {}) {
   const AppCore = ctx.AppCore;
 
-  let timer = null;
+  const timers = new Map();
+
+  let transitionTimer = null;
   let committing = false;
   let lastReason = "";
+
+  const clearTimer = (key = "default") => {
+    const timer = timers.get(key);
+
+    if (timer) {
+      clearWindowTimeout(timer);
+      timers.delete(key);
+    }
+  };
 
   const commitNow = (options = {}) => {
     if (committing) {
@@ -1281,6 +1353,8 @@ function createSidebarVisualCommitter(ctx = {}) {
           delayMs:
             options.indicatorDelayMs ??
             INDICATOR_DEFAULT_DELAY,
+          frames:
+            options.indicatorFrames || 2,
           reveal: true,
           payload:
             options.payload || {},
@@ -1300,18 +1374,55 @@ function createSidebarVisualCommitter(ctx = {}) {
   };
 
   const schedule = (options = {}) => {
-    clearWindowTimeout(timer);
+    const key = safeText(
+      options.key,
+      "default"
+    );
+
+    clearTimer(key);
 
     const delayMs =
       Number.isFinite(Number(options.delayMs))
         ? Number(options.delayMs)
         : 0;
 
-    timer = safeWindowTimeout(() => {
+    const timer = safeWindowTimeout(() => {
+      timers.delete(key);
+
       afterFrames(() => {
         commitNow(options);
       }, options.frames || 1);
     }, delayMs);
+
+    if (timer) {
+      timers.set(key, timer);
+    }
+
+    return true;
+  };
+
+  const cancelAll = () => {
+    timers.forEach((timer) => {
+      clearWindowTimeout(timer);
+    });
+
+    timers.clear();
+
+    clearWindowTimeout(transitionTimer);
+    transitionTimer = null;
+
+    return true;
+  };
+
+  const beginTransition = (reason = "transition") => {
+    clearWindowTimeout(transitionTimer);
+
+    beginSidebarLayoutTransition(ctx, reason);
+
+    transitionTimer = safeWindowTimeout(() => {
+      transitionTimer = null;
+      endSidebarLayoutTransition(ctx, reason);
+    }, INDICATOR_TRANSITION_MS);
 
     return true;
   };
@@ -1319,14 +1430,20 @@ function createSidebarVisualCommitter(ctx = {}) {
   return {
     commitNow,
     schedule,
+    cancelAll,
 
     hideIndicator:
       (reason = "hide") =>
         hideActiveMenuIndicator(ctx, reason),
 
-    beginTransition:
-      (reason = "transition") =>
-        beginSidebarLayoutTransition(ctx, reason),
+    beginTransition,
+
+    endTransition:
+      (reason = "transition") => {
+        clearWindowTimeout(transitionTimer);
+        transitionTimer = null;
+        return endSidebarLayoutTransition(ctx, reason);
+      },
 
     getLastReason:
       () => lastReason,
@@ -1560,7 +1677,9 @@ export function handleSidebarMenuClick({
     return;
   }
 
-  const link = target.closest("a[data-spa], a[data-route], .menu-item");
+  const link = target.closest(
+    "a[data-spa], a[data-route], .menu-item"
+  );
 
   if (!link) {
     return;
@@ -1570,6 +1689,11 @@ export function handleSidebarMenuClick({
     return;
   }
 
+  /*
+    No prevenimos navegación aquí.
+    Router global debe capturar el click SPA.
+    Solo cerramos dropdown footer.
+  */
   closeDropdown?.();
 }
 
@@ -1642,6 +1766,7 @@ export function handleGlobalKeydown({
 
 export function handleResize({
   AppCore,
+  Router,
   syncSidebarState,
   closeDropdown,
   getElements: resolver,
@@ -1656,6 +1781,10 @@ export function handleResize({
 
   const ctx = {
     AppCore,
+    Router:
+      Router ||
+      AppCore?.Router ||
+      AppCore?.router,
     getElements: resolver,
   };
 
@@ -1678,6 +1807,7 @@ export function bindDomEvents(ctx = {}) {
   const {
     AppCore,
     scope,
+    Router,
     handleLogout,
     toggleSidebar,
     toggleDropdown,
@@ -1692,10 +1822,13 @@ export function bindDomEvents(ctx = {}) {
   }
 
   const scopeName = resolveScope(scope);
+  const localScope = resolveLocalScope(scopeName, "dom");
+
+  runLocalCleanups(localScope);
 
   bindDom(
     AppCore,
-    scopeName,
+    localScope,
     document,
     "click",
     (event) =>
@@ -1712,7 +1845,7 @@ export function bindDomEvents(ctx = {}) {
 
   bindDom(
     AppCore,
-    scopeName,
+    localScope,
     document,
     "keydown",
     (event) =>
@@ -1728,6 +1861,7 @@ export function bindDomEvents(ctx = {}) {
           () =>
             handleResize({
               AppCore,
+              Router,
               syncSidebarState,
               closeDropdown,
               getElements: resolver,
@@ -1737,6 +1871,7 @@ export function bindDomEvents(ctx = {}) {
       : () =>
           handleResize({
             AppCore,
+            Router,
             syncSidebarState,
             closeDropdown,
             getElements: resolver,
@@ -1744,7 +1879,7 @@ export function bindDomEvents(ctx = {}) {
 
   bindDom(
     AppCore,
-    scopeName,
+    localScope,
     window,
     "resize",
     resizeHandler
@@ -1752,7 +1887,7 @@ export function bindDomEvents(ctx = {}) {
 
   bindDom(
     AppCore,
-    scopeName,
+    localScope,
     document,
     "transitionend",
     (event) => {
@@ -1786,18 +1921,17 @@ export function bindDomEvents(ctx = {}) {
 
       const localCtx = {
         AppCore,
+        Router:
+          Router ||
+          AppCore?.Router ||
+          AppCore?.router,
         getElements: resolver,
       };
 
-      syncActiveMenuItem(localCtx, {
-        reason: "transitionend",
-      });
-
-      scheduleActiveMenuIndicator(localCtx, {
-        reason: "transitionend",
-        delayMs: 24,
-        reveal: true,
-      });
+      endSidebarLayoutTransition(
+        localCtx,
+        "transitionend"
+      );
     },
     true
   );
@@ -1810,7 +1944,7 @@ export function bindDomEvents(ctx = {}) {
   if (userToggle) {
     bindDom(
       AppCore,
-      scopeName,
+      localScope,
       userToggle,
       "keydown",
       (event) =>
@@ -1828,7 +1962,7 @@ export function bindDomEvents(ctx = {}) {
   if (sidebarMenu) {
     bindDom(
       AppCore,
-      scopeName,
+      localScope,
       sidebarMenu,
       "click",
       (event) =>
@@ -1843,10 +1977,11 @@ export function bindDomEvents(ctx = {}) {
 
   safeEmit(AppCore, "sidebar:dom-events:bound", {
     scope: scopeName,
+    localScope,
   });
 
   return () => {
-    runLocalCleanups(scopeName);
+    runLocalCleanups(localScope);
   };
 }
 
@@ -1867,6 +2002,9 @@ export function bindCoreEvents(ctx = {}) {
   } = ctx;
 
   const scopeName = resolveScope(scope);
+  const localScope = resolveLocalScope(scopeName, "core");
+
+  runLocalCleanups(localScope);
 
   const visualCtx = {
     ...ctx,
@@ -1898,6 +2036,7 @@ export function bindCoreEvents(ctx = {}) {
     });
 
     visualCommitter.schedule({
+      key: "identity",
       reason: "identity",
       renderIdentity: false,
       syncState: false,
@@ -1907,6 +2046,7 @@ export function bindCoreEvents(ctx = {}) {
 
   const syncIdentityAndState = () => {
     visualCommitter.schedule({
+      key: "identity-state",
       reason: "identity-and-state",
       renderIdentity: true,
       syncState: true,
@@ -1916,6 +2056,7 @@ export function bindCoreEvents(ctx = {}) {
 
   const syncAfterSessionCleared = () => {
     visualCommitter.schedule({
+      key: "session-cleared",
       reason: "session-cleared",
       renderIdentity: true,
       syncState: true,
@@ -1939,7 +2080,7 @@ export function bindCoreEvents(ctx = {}) {
   ].forEach((eventName) => {
     bindCoreEvent(
       AppCore,
-      scopeName,
+      localScope,
       eventName,
       syncIdentity
     );
@@ -1952,7 +2093,7 @@ export function bindCoreEvents(ctx = {}) {
   ].forEach((eventName) => {
     bindCoreEvent(
       AppCore,
-      scopeName,
+      localScope,
       eventName,
       syncIdentityAndState
     );
@@ -1967,7 +2108,7 @@ export function bindCoreEvents(ctx = {}) {
   ].forEach((eventName) => {
     bindCoreEvent(
       AppCore,
-      scopeName,
+      localScope,
       eventName,
       syncAfterSessionCleared
     );
@@ -1980,7 +2121,7 @@ export function bindCoreEvents(ctx = {}) {
   ].forEach((eventName) => {
     bindCoreEvent(
       AppCore,
-      scopeName,
+      localScope,
       eventName,
       (eventOrPayload = {}) => {
         const detail = getEventDetail(eventOrPayload);
@@ -1988,15 +2129,17 @@ export function bindCoreEvents(ctx = {}) {
         visualCommitter.beginTransition(eventName);
 
         visualCommitter.schedule({
+          key: "sidebar-transition-live",
           reason: eventName,
           payload: detail,
           renderIdentity: false,
           syncState: false,
-          delayMs: 40,
+          delayMs: 48,
           indicatorDelayMs: 80,
         });
 
         visualCommitter.schedule({
+          key: "sidebar-transition-settled",
           reason: `${eventName}:settled`,
           payload: detail,
           renderIdentity: false,
@@ -2015,12 +2158,13 @@ export function bindCoreEvents(ctx = {}) {
   ].forEach((eventName) => {
     bindCoreEvent(
       AppCore,
-      scopeName,
+      localScope,
       eventName,
       (eventOrPayload = {}) => {
         const detail = getEventDetail(eventOrPayload);
 
         visualCommitter.schedule({
+          key: "sidebar-state-sync",
           reason: eventName,
           payload: detail,
           renderIdentity: false,
@@ -2034,7 +2178,7 @@ export function bindCoreEvents(ctx = {}) {
 
   bindCoreEvent(
     AppCore,
-    scopeName,
+    localScope,
     "router:before-render",
     () => {
       try {
@@ -2047,12 +2191,13 @@ export function bindCoreEvents(ctx = {}) {
 
   bindCoreEvent(
     AppCore,
-    scopeName,
+    localScope,
     "router:rendered",
     (eventOrPayload = {}) => {
       const detail = getEventDetail(eventOrPayload);
 
       visualCommitter.schedule({
+        key: "router-rendered",
         reason: "router:rendered",
         payload: detail,
         renderIdentity: true,
@@ -2064,11 +2209,12 @@ export function bindCoreEvents(ctx = {}) {
       });
 
       visualCommitter.schedule({
+        key: "router-rendered-settled",
         reason: "router:rendered:settled",
         payload: detail,
         renderIdentity: false,
         syncState: false,
-        delayMs: 120,
+        delayMs: 140,
         frames: 2,
         indicatorDelayMs: 0,
       });
@@ -2083,12 +2229,13 @@ export function bindCoreEvents(ctx = {}) {
   ].forEach((eventName) => {
     bindCoreEvent(
       AppCore,
-      scopeName,
+      localScope,
       eventName,
       (eventOrPayload = {}) => {
         const detail = getEventDetail(eventOrPayload);
 
         visualCommitter.schedule({
+          key: "route-change",
           reason: eventName,
           payload: detail,
           renderIdentity: false,
@@ -2102,44 +2249,52 @@ export function bindCoreEvents(ctx = {}) {
     );
   });
 
-  bindCoreEvent(
-    AppCore,
-    scopeName,
+  [
     "router:shell:change",
-    (eventOrPayload = {}) => {
-      const detail = safeObject(
-        getEventDetail(eventOrPayload)
-      );
+    "router:shell:state",
+    "router:shell:repair",
+  ].forEach((eventName) => {
+    bindCoreEvent(
+      AppCore,
+      localScope,
+      eventName,
+      (eventOrPayload = {}) => {
+        const detail = safeObject(
+          getEventDetail(eventOrPayload)
+        );
 
-      if (detail.hidden) {
-        try {
-          closeDropdown?.();
-        } catch {}
+        if (detail.hidden || detail.shellHidden) {
+          try {
+            closeDropdown?.();
+          } catch {}
 
-        visualCommitter.hideIndicator("router:shell:change:hidden");
+          visualCommitter.hideIndicator(`${eventName}:hidden`);
+        }
+
+        visualCommitter.schedule({
+          key: "shell-change",
+          reason: eventName,
+          payload: detail,
+          renderIdentity: true,
+          syncState: true,
+          closeDropdown: Boolean(detail.hidden || detail.shellHidden),
+          delayMs: 32,
+          frames: 2,
+          indicatorDelayMs: 56,
+        });
       }
-
-      visualCommitter.schedule({
-        reason: "router:shell:change",
-        payload: detail,
-        renderIdentity: true,
-        syncState: true,
-        closeDropdown: Boolean(detail.hidden),
-        delayMs: 32,
-        frames: 2,
-        indicatorDelayMs: 56,
-      });
-    }
-  );
+    );
+  });
 
   bindCoreEvent(
     AppCore,
-    scopeName,
+    localScope,
     "app:ui:repair-request",
     (eventOrPayload = {}) => {
       const detail = getEventDetail(eventOrPayload);
 
       visualCommitter.schedule({
+        key: "ui-repair",
         reason: "app:ui:repair-request",
         payload: detail,
         renderIdentity: true,
@@ -2159,12 +2314,13 @@ export function bindCoreEvents(ctx = {}) {
   ].forEach((eventName) => {
     bindCoreEvent(
       AppCore,
-      scopeName,
+      localScope,
       eventName,
       (eventOrPayload = {}) => {
         const detail = getEventDetail(eventOrPayload);
 
         visualCommitter.schedule({
+          key: "app-ready",
           reason: eventName,
           payload: detail,
           renderIdentity: true,
@@ -2185,12 +2341,13 @@ export function bindCoreEvents(ctx = {}) {
   ].forEach((eventName) => {
     bindCoreEvent(
       AppCore,
-      scopeName,
+      localScope,
       eventName,
       (eventOrPayload = {}) => {
         const detail = getEventDetail(eventOrPayload);
 
         visualCommitter.schedule({
+          key: "visual-env-change",
           reason: eventName,
           payload: detail,
           renderIdentity: true,
@@ -2205,14 +2362,17 @@ export function bindCoreEvents(ctx = {}) {
 
   safeEmit(AppCore, "sidebar:core-events:bound", {
     scope: scopeName,
+    localScope,
   });
 
   safeLog(AppCore, "core events bound", {
     scope: scopeName,
+    localScope,
   });
 
   return () => {
-    runLocalCleanups(scopeName);
+    visualCommitter.cancelAll();
+    runLocalCleanups(localScope);
   };
 }
 
@@ -2234,4 +2394,7 @@ export default {
   syncActiveMenuIndicator,
   scheduleActiveMenuIndicator,
   hideActiveMenuIndicator,
+
+  beginSidebarLayoutTransition,
+  endSidebarLayoutTransition,
 };

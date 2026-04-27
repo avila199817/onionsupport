@@ -19,6 +19,13 @@
    - no lanzar errores por DOM parcial
    - recache seguro si un nodo quedó desconectado
    - compatible con index.html estático y mounts dinámicos
+
+   FIX BOOT / UI DINÁMICA:
+   - sidebar/topbar NO son recommended durante Core.init()
+   - sidebar/topbar son deferred UI nodes porque los monta JS
+   - evita falso warning:
+     [CoreDOM] Faltan nodos recomendados del layout: ['sidebar', 'topbar']
+   - validateRequiredDom() permite includeDeferred:true para diagnóstico tardío
 ========================================================= */
 
 /* =========================================================
@@ -26,7 +33,7 @@
 ========================================================= */
 
 const DOM_VERSION =
-  "10.0.0";
+  "10.1.0";
 
 const REQUIRED_KEYS =
   Object.freeze([
@@ -35,13 +42,50 @@ const REQUIRED_KEYS =
     "viewContainer",
   ]);
 
+/*
+  Recomendados reales del shell estático.
+
+  Importante:
+  sidebar/topbar NO van aquí porque en Onion SPA los montan
+  SidebarUI/TopbarUI durante initUISystems().
+*/
 const RECOMMENDED_KEYS =
   Object.freeze([
     "html",
     "appShell",
     "loader",
+  ]);
+
+/*
+  Nodos UI montados tarde.
+  No deben generar warning en Core.init().
+*/
+const DEFERRED_UI_KEYS =
+  Object.freeze([
     "sidebar",
     "topbar",
+  ]);
+
+const OPTIONAL_KEYS =
+  Object.freeze([
+    "sidebarMenu",
+    "sidebarRecents",
+    "topbarTitle",
+    "topbarViewContainer",
+    "tablehead",
+    "tableheadContainer",
+    "searchInput",
+    "searchResults",
+    "userToggle",
+    "userDropdown",
+    "logoutBtn",
+    "sidebarToggle",
+    "sidebarMobileToggle",
+    "sidebarAvatar",
+    "sidebarName",
+    "toastRoot",
+    "modalRoot",
+    "overlayRoot",
   ]);
 
 const DOM_SELECTORS =
@@ -307,12 +351,24 @@ function safeIsoDate(ms = Date.now()) {
   }
 }
 
+function uniqueList(values = []) {
+  return Array.from(
+    new Set(
+      safeArray(values)
+        .map((value) => safeText(value, ""))
+        .filter(Boolean)
+    )
+  );
+}
+
 function safeWarn(utils, ...args) {
   try {
     utils?.warn?.(
       "[CoreDOM]",
       ...args
     );
+
+    return;
   } catch {}
 
   try {
@@ -332,14 +388,27 @@ function safeLog(utils, ...args) {
   } catch {}
 }
 
+/*
+  CoreDOM no debe duplicar eventos en window.
+  El bus central ya puede estar basado en document/window.
+*/
 function safeEmit(events, name, payload = {}) {
-  try {
-    events?.emit?.(
-      name,
-      payload
-    );
+  const eventName =
+    safeText(name, "");
 
-    return true;
+  if (!eventName) {
+    return false;
+  }
+
+  try {
+    if (isFunction(events?.emit)) {
+      events.emit(
+        eventName,
+        payload
+      );
+
+      return true;
+    }
   } catch {}
 
   return false;
@@ -460,13 +529,19 @@ function isNodeConnected(node) {
     return false;
   }
 
-  if (
-    node === document ||
-    node === document.documentElement ||
-    node === document.body
-  ) {
-    return true;
+  if (!isBrowser()) {
+    return false;
   }
+
+  try {
+    if (
+      node === document ||
+      node === document.documentElement ||
+      node === document.body
+    ) {
+      return true;
+    }
+  } catch {}
 
   try {
     return Boolean(node.isConnected);
@@ -669,6 +744,12 @@ export function createDomCache() {
         recommendedMissing:
           [],
 
+        deferredMissing:
+          [],
+
+        optionalMissing:
+          [],
+
         warnings:
           [],
       },
@@ -820,27 +901,51 @@ export function cacheDom({
    VALIDATION
 ========================================================= */
 
-function buildValidation({
-  dom,
+function buildNodeList({
   required = REQUIRED_KEYS,
   recommended = RECOMMENDED_KEYS,
+  deferred = DEFERRED_UI_KEYS,
+  optional = OPTIONAL_KEYS,
 } = {}) {
-  const missing =
-    safeArray(required)
-      .filter((key) => !dom?.[key])
-      .map((key) => safeText(key, ""));
+  return {
+    required:
+      uniqueList(required),
 
-  const recommendedMissing =
-    safeArray(recommended)
-      .filter((key) => !dom?.[key])
-      .map((key) => safeText(key, ""));
+    recommended:
+      uniqueList(recommended),
 
+    deferred:
+      uniqueList(deferred),
+
+    optional:
+      uniqueList(optional),
+  };
+}
+
+function missingKeys(dom, keys = []) {
+  return safeArray(keys)
+    .filter((key) => !dom?.[key])
+    .map((key) => safeText(key, ""))
+    .filter(Boolean);
+}
+
+function buildValidationWarnings({
+  dom,
+  missing = [],
+  recommendedMissing = [],
+  deferredMissing = [],
+  includeDeferred = false,
+  warnDeferred = false,
+} = {}) {
   const warnings = [];
 
   if (missing.includes("viewContainer")) {
     warnings.push({
       code:
         "VIEW_CONTAINER_MISSING",
+
+      level:
+        "error",
 
       message:
         "Falta #view-container o equivalente. El Router no tendrá un destino claro para pintar vistas.",
@@ -852,40 +957,138 @@ function buildValidation({
       code:
         "MAIN_CONTENT_MISSING",
 
+      level:
+        "error",
+
       message:
         "Falta mainContent/appContent. El layout principal puede quedar incompleto.",
     });
   }
 
-  if (!dom?.loader) {
+  if (recommendedMissing.includes("loader")) {
     warnings.push({
       code:
         "LOADER_MISSING",
+
+      level:
+        "warning",
 
       message:
         "No se encontró #app-loader. loader.js deberá crear fallback si aplica.",
     });
   }
 
-  if (!dom?.sidebar) {
+  /*
+    sidebar/topbar son diferidos.
+    Solo se advierten si el caller pide includeDeferred/warnDeferred.
+  */
+  if (
+    includeDeferred &&
+    warnDeferred &&
+    deferredMissing.includes("sidebar")
+  ) {
     warnings.push({
       code:
-        "SIDEBAR_MISSING",
+        "SIDEBAR_DEFERRED_MISSING",
+
+      level:
+        "info",
 
       message:
-        "No se encontró sidebar inicial. Puede ser correcto si SidebarUI monta dinámicamente.",
+        "No se encontró sidebar. Es correcto durante el boot inicial si SidebarUI lo monta dinámicamente.",
     });
   }
 
-  if (!dom?.topbar) {
+  if (
+    includeDeferred &&
+    warnDeferred &&
+    deferredMissing.includes("topbar")
+  ) {
     warnings.push({
       code:
-        "TOPBAR_MISSING",
+        "TOPBAR_DEFERRED_MISSING",
+
+      level:
+        "info",
 
       message:
-        "No se encontró topbar inicial. Puede ser correcto si TopbarUI monta dinámicamente.",
+        "No se encontró topbar. Es correcto durante el boot inicial si TopbarUI lo monta dinámicamente.",
     });
   }
+
+  if (
+    dom?.sidebar &&
+    !dom?.sidebarMenu &&
+    includeDeferred &&
+    warnDeferred
+  ) {
+    warnings.push({
+      code:
+        "SIDEBAR_MENU_DEFERRED_MISSING",
+
+      level:
+        "info",
+
+      message:
+        "Existe sidebar pero no sidebarMenu. Puede ser correcto si el menú se monta en una fase posterior.",
+    });
+  }
+
+  return warnings;
+}
+
+function buildValidation({
+  dom,
+  required = REQUIRED_KEYS,
+  recommended = RECOMMENDED_KEYS,
+  deferred = DEFERRED_UI_KEYS,
+  optional = OPTIONAL_KEYS,
+  includeDeferred = false,
+  warnDeferred = false,
+} = {}) {
+  const lists =
+    buildNodeList({
+      required,
+      recommended,
+      deferred,
+      optional,
+    });
+
+  const missing =
+    missingKeys(
+      dom,
+      lists.required
+    );
+
+  const recommendedMissing =
+    missingKeys(
+      dom,
+      lists.recommended
+    );
+
+  const deferredMissing =
+    includeDeferred
+      ? missingKeys(
+          dom,
+          lists.deferred
+        )
+      : [];
+
+  const optionalMissing =
+    missingKeys(
+      dom,
+      lists.optional
+    );
+
+  const warnings =
+    buildValidationWarnings({
+      dom,
+      missing,
+      recommendedMissing,
+      deferredMissing,
+      includeDeferred,
+      warnDeferred,
+    });
 
   return {
     ok:
@@ -895,7 +1098,31 @@ function buildValidation({
 
     recommendedMissing,
 
+    deferredMissing,
+
+    optionalMissing,
+
     warnings,
+
+    meta: {
+      requiredKeys:
+        lists.required,
+
+      recommendedKeys:
+        lists.recommended,
+
+      deferredUiKeys:
+        lists.deferred,
+
+      optionalKeys:
+        lists.optional,
+
+      includeDeferred:
+        Boolean(includeDeferred),
+
+      warnDeferred:
+        Boolean(warnDeferred),
+    },
   };
 }
 
@@ -905,6 +1132,10 @@ export function validateRequiredDom({
   events,
   required = REQUIRED_KEYS,
   recommended = RECOMMENDED_KEYS,
+  deferred = DEFERRED_UI_KEYS,
+  optional = OPTIONAL_KEYS,
+  includeDeferred = false,
+  warnDeferred = false,
   emit = true,
   log = true,
 } = {}) {
@@ -913,6 +1144,10 @@ export function validateRequiredDom({
       dom,
       required,
       recommended,
+      deferred,
+      optional,
+      includeDeferred,
+      warnDeferred,
     });
 
   try {
@@ -941,6 +1176,23 @@ export function validateRequiredDom({
       utils,
       "Faltan nodos recomendados del layout:",
       validation.recommendedMissing
+    );
+  }
+
+  /*
+    Por defecto no se loguean diferidos.
+    Esto evita warnings falsos antes de SidebarUI/TopbarUI.init().
+  */
+  if (
+    log &&
+    includeDeferred &&
+    warnDeferred &&
+    validation.deferredMissing.length > 0
+  ) {
+    safeLog(
+      utils,
+      "Nodos UI diferidos aún no montados:",
+      validation.deferredMissing
     );
   }
 
@@ -1041,7 +1293,51 @@ export function refreshDomNode({
     );
   }
 
+  if (
+    cleanKey === "mainContent" &&
+    !dom.appContent
+  ) {
+    setAlias(
+      dom,
+      "appContent",
+      "mainContent"
+    );
+  }
+
+  if (
+    cleanKey === "appContent" &&
+    !dom.mainContent
+  ) {
+    setAlias(
+      dom,
+      "mainContent",
+      "appContent"
+    );
+  }
+
   return node;
+}
+
+export function refreshDeferredDomNodes({
+  dom,
+  utils,
+  root = null,
+  force = true,
+} = {}) {
+  const result = {};
+
+  for (const key of DEFERRED_UI_KEYS) {
+    result[key] =
+      refreshDomNode({
+        dom,
+        utils,
+        key,
+        root,
+        force,
+      });
+  }
+
+  return result;
 }
 
 export function clearDomCache(dom) {
@@ -1069,6 +1365,12 @@ export function clearDomCache(dom) {
             [],
 
           recommendedMissing:
+            [],
+
+          deferredMissing:
+            [],
+
+          optionalMissing:
             [],
 
           warnings:
@@ -1189,12 +1491,45 @@ export function getDomSnapshot(dom = {}) {
     validation:
       dom?.validation || null,
 
+    groups: {
+      required:
+        REQUIRED_KEYS.map((key) => ({
+          key,
+          exists:
+            Boolean(dom?.[key]),
+        })),
+
+      recommended:
+        RECOMMENDED_KEYS.map((key) => ({
+          key,
+          exists:
+            Boolean(dom?.[key]),
+        })),
+
+      deferred:
+        DEFERRED_UI_KEYS.map((key) => ({
+          key,
+          exists:
+            Boolean(dom?.[key]),
+        })),
+
+      optional:
+        OPTIONAL_KEYS.map((key) => ({
+          key,
+          exists:
+            Boolean(dom?.[key]),
+        })),
+    },
+
     nodes: {
       html:
         getElementSnapshot(dom?.html),
 
       body:
         getElementSnapshot(dom?.body),
+
+      themeColorMeta:
+        getElementSnapshot(dom?.themeColorMeta),
 
       appRoot:
         getElementSnapshot(dom?.appRoot),
@@ -1288,6 +1623,9 @@ export function getDomSnapshot(dom = {}) {
       body:
         Boolean(dom?.body),
 
+      themeColorMeta:
+        Boolean(dom?.themeColorMeta),
+
       appRoot:
         Boolean(dom?.appRoot),
 
@@ -1306,8 +1644,20 @@ export function getDomSnapshot(dom = {}) {
       sidebar:
         Boolean(dom?.sidebar),
 
+      sidebarMenu:
+        Boolean(dom?.sidebarMenu),
+
+      sidebarRecents:
+        Boolean(dom?.sidebarRecents),
+
       topbar:
         Boolean(dom?.topbar),
+
+      topbarTitle:
+        Boolean(dom?.topbarTitle),
+
+      topbarViewContainer:
+        Boolean(dom?.topbarViewContainer),
 
       mainContent:
         Boolean(dom?.mainContent),
@@ -1323,6 +1673,42 @@ export function getDomSnapshot(dom = {}) {
 
       tableheadContainer:
         Boolean(dom?.tableheadContainer),
+
+      searchInput:
+        Boolean(dom?.searchInput),
+
+      searchResults:
+        Boolean(dom?.searchResults),
+
+      userToggle:
+        Boolean(dom?.userToggle),
+
+      userDropdown:
+        Boolean(dom?.userDropdown),
+
+      logoutBtn:
+        Boolean(dom?.logoutBtn),
+
+      sidebarToggle:
+        Boolean(dom?.sidebarToggle),
+
+      sidebarMobileToggle:
+        Boolean(dom?.sidebarMobileToggle),
+
+      sidebarAvatar:
+        Boolean(dom?.sidebarAvatar),
+
+      sidebarName:
+        Boolean(dom?.sidebarName),
+
+      toastRoot:
+        Boolean(dom?.toastRoot),
+
+      modalRoot:
+        Boolean(dom?.modalRoot),
+
+      overlayRoot:
+        Boolean(dom?.overlayRoot),
     },
   };
 }
@@ -1363,13 +1749,60 @@ export function findDomCandidates({
   }));
 }
 
+export function getDomValidationSnapshot(dom = {}) {
+  const validation =
+    buildValidation({
+      dom,
+      includeDeferred:
+        true,
+      warnDeferred:
+        false,
+    });
+
+  return {
+    ok:
+      validation.ok,
+
+    missing:
+      validation.missing,
+
+    recommendedMissing:
+      validation.recommendedMissing,
+
+    deferredMissing:
+      validation.deferredMissing,
+
+    optionalMissing:
+      validation.optionalMissing,
+
+    warnings:
+      validation.warnings,
+
+    exists:
+      getDomSnapshot(dom).exists,
+  };
+}
+
 /* =========================================================
    EXPORT
 ========================================================= */
 
+export {
+  DOM_VERSION,
+  DOM_SELECTORS,
+  REQUIRED_KEYS,
+  RECOMMENDED_KEYS,
+  DEFERRED_UI_KEYS,
+  OPTIONAL_KEYS,
+};
+
 export default {
   DOM_VERSION,
   DOM_SELECTORS,
+  REQUIRED_KEYS,
+  RECOMMENDED_KEYS,
+  DEFERRED_UI_KEYS,
+  OPTIONAL_KEYS,
 
   createDomCache,
   cacheDom,
@@ -1378,8 +1811,10 @@ export default {
   getDomNode,
   setDomNode,
   refreshDomNode,
+  refreshDeferredDomNodes,
   clearDomCache,
 
   getDomSnapshot,
+  getDomValidationSnapshot,
   findDomCandidates,
 };

@@ -2,7 +2,7 @@
    Onion SPA - Sidebar UI
    Archivo: src/ui/sidebar/index.js
 
-   FINAL EXTREME SYSTEM · DESKTOP STABLE MODE · ADMIN VISIBILITY HARDENED · APPLE INDICATOR · 10/10
+   FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · DROPDOWN SAFE · APPLE INDICATOR · 10/10
 
    RESPONSABILIDADES:
    - montar sidebar
@@ -15,42 +15,17 @@
    - reparar eventos tras login/restore/router render
    - registrar módulo en AppCore.modules
    - sincronizar item activo del menú
-   - mover indicador activo tipo Apple mediante CSS variables
+   - delegar indicador activo tipo Apple en state.js
+   - evitar doble toggle entre events.js y fallback delegado
+   - evitar carreras tras router render / auth restore / rebind
 
-   FIXES:
-   - desktop y mobile separados
-   - sin auto-collapse fantasma al cambiar de ruta
-   - restore robusto del estado
-   - dropdown estable
-   - detección admin robusta para ocultar/mostrar items admin
-   - soporte roles alias: admin / superadmin / administrator / owner / root
-   - soporte flags: isAdmin / admin / canManageUsers / canAccessUsers
-   - soporte permisos admin-like: users.manage / manage_users / admin:*
-   - cleanup scope defensivo
-   - rebind idempotente de DOM + Core events
-   - fallback delegado para collapse, dropdown, logout y navegación SPA
-   - corrige botones muertos hasta refrescar página
-   - evita duplicar navegación si Router ya interceptó el click
-   - cierra sidebar móvil después de navegación aunque Router haya prevenido default
-
-   FIX CRÍTICO DROPDOWN:
-   - evita doble toggle entre bindDomEvents() y fallback delegado
-   - añade bind directo en capture sobre userToggle
-   - stopImmediatePropagation defensivo solo para userToggle
-   - fallback no vuelve a ejecutar acciones si el evento ya fue prevenido
-   - conserva post-router cleanup para navegación SPA
-
-   APPLE INDICATOR:
-   - calcula item activo por ruta actual
-   - sincroniza aria-current / .active
-   - escribe variables CSS sobre .sidebar-menu:
-     --sidebar-indicator-x
-     --sidebar-indicator-y
-     --sidebar-indicator-w
-     --sidebar-indicator-h
-     --sidebar-indicator-opacity
-   - activa data-indicator-ready="true"
-   - se resincroniza en route/render/resize/repair/refresh/navigation
+   REGLAS:
+   - SidebarUI NO debe ser dueño del indicador CSS.
+   - SidebarUI solo marca active/aria-current y pide recálculo.
+   - state.js escribe variables:
+     --sidebar-indicator-x/y/w/h/opacity
+   - events.js centraliza commits visuales post-evento.
+   - index.js no debe emitir eventos que causen doble transición.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -82,10 +57,14 @@ import {
 
 import {
   isMobileViewport,
+  isRealShellHidden,
   updateToggleLabel,
   syncSidebarState as syncSidebarStateBase,
   getDesiredSidebarOpenState,
   setSidebarOpen as setSidebarOpenBase,
+  repairSidebarState as repairSidebarStateBase,
+  syncActiveMenuIndicator,
+  scheduleActiveMenuIndicator,
 } from "./state.js";
 
 import {
@@ -121,11 +100,11 @@ export const SidebarUI = (() => {
   let fallbackDomCleanup = null;
   let activeCleanupScope = null;
   let lastBindReason = "";
+  let bindGeneration = 0;
 
-  let indicatorFrame = 0;
-  let indicatorLastRoute = "";
+  let visualSyncTimer = null;
 
-  const state = {
+  const runtimeState = {
     dropdownOpen: false,
   };
 
@@ -193,6 +172,14 @@ export const SidebarUI = (() => {
     }
 
     return fallback;
+  }
+
+  function safeNumber(value, fallback = 0) {
+    const n = Number(value);
+
+    return Number.isFinite(n)
+      ? n
+      : fallback;
   }
 
   function safeWarn(...args) {
@@ -321,17 +308,37 @@ export const SidebarUI = (() => {
     } catch {}
   }
 
-  function cancelIndicatorFrame() {
-    if (!indicatorFrame || !isBrowser()) {
-      indicatorFrame = 0;
-      return;
+  function safeSetTimeout(callback, ms = 0) {
+    if (!isFunction(callback)) {
+      return null;
     }
 
     try {
-      window.cancelAnimationFrame(indicatorFrame);
-    } catch {}
+      return window.setTimeout(() => {
+        try {
+          callback();
+        } catch {}
+      }, ms);
+    } catch {
+      try {
+        callback();
+      } catch {}
 
-    indicatorFrame = 0;
+      return null;
+    }
+  }
+
+  function safeClearTimeout(timer) {
+    if (!timer) {
+      return false;
+    }
+
+    try {
+      window.clearTimeout(timer);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function getDatasetAction(element = null) {
@@ -414,14 +421,24 @@ export const SidebarUI = (() => {
   }
 
   function markSidebarEventHandled(event, reason = "") {
+    if (!event) {
+      return false;
+    }
+
     try {
       event.__onionSidebarHandled = true;
+      event.__onionSidebarEventsHandled = true;
       event.__onionSidebarReason = safeText(reason, "");
     } catch {}
+
+    return true;
   }
 
   function wasSidebarEventHandled(event) {
-    return Boolean(event?.__onionSidebarHandled);
+    return Boolean(
+      event?.__onionSidebarHandled ||
+        event?.__onionSidebarEventsHandled
+    );
   }
 
   function isElementHiddenOrDisabled(element = null) {
@@ -482,6 +499,19 @@ export const SidebarUI = (() => {
     } catch {}
 
     return false;
+  }
+
+  function isShellBlocked() {
+    /*
+      Para acciones interactivas usamos isRealShellHidden().
+      isShellHidden() puede leer sidebar.hidden y bloquear tras rutas auth
+      si el router todavía no ha terminado de reparar el DOM.
+    */
+    try {
+      return Boolean(isRealShellHidden(AppCore));
+    } catch {
+      return Boolean(isShellHidden(AppCore));
+    }
   }
 
   /* ======================================================
@@ -896,7 +926,10 @@ export const SidebarUI = (() => {
     }
 
     try {
-      if (typeof Auth?.isCurrentUserAdmin === "function" && Auth.isCurrentUserAdmin()) {
+      if (
+        typeof Auth?.isCurrentUserAdmin === "function" &&
+        Auth.isCurrentUserAdmin()
+      ) {
         return true;
       }
     } catch {}
@@ -951,13 +984,16 @@ export const SidebarUI = (() => {
 
       AppCore.dom.sidebar = el.sidebar || null;
       AppCore.dom.sidebarMenu = el.sidebarMenu || null;
+      AppCore.dom.sidebarRecents = el.sidebarRecents || null;
       AppCore.dom.sidebarAvatar = el.avatarEl || null;
       AppCore.dom.sidebarName = el.nameEl || null;
+      AppCore.dom.sidebarLogo = el.logoEl || null;
       AppCore.dom.userToggle = el.userToggle || null;
       AppCore.dom.userDropdown = el.userDropdown || null;
       AppCore.dom.logoutBtn = el.logoutBtn || null;
       AppCore.dom.sidebarToggle = el.toggleBtn || null;
       AppCore.dom.sidebarMobileToggle = el.mobileToggleBtn || null;
+      AppCore.dom.mobileSidebarToggle = el.mobileToggleBtn || null;
     } catch {}
   }
 
@@ -967,6 +1003,8 @@ export const SidebarUI = (() => {
     } catch {}
 
     syncSidebarDomIntoAppCore();
+
+    return getElements(AppCore);
   }
 
   function mountAndRefresh() {
@@ -983,24 +1021,37 @@ export const SidebarUI = (() => {
 
   function ensureRuntimeStateDefaults() {
     const mobile = isMobileViewport(MOBILE_BREAKPOINT);
-    const desktopOpen = true;
 
     try {
       if (!AppCore.state || typeof AppCore.state !== "object") {
         AppCore.state = {};
       }
 
+      /*
+        No pisamos el estado desktop guardado.
+        getDesiredSidebarOpenState() ya lee storage y normaliza memoria.
+      */
+      const desiredOpen = getDesiredSidebarOpenState(AppCore);
+
       if (typeof AppCore.state.sidebarDesktopOpen !== "boolean") {
-        AppCore.state.sidebarDesktopOpen = desktopOpen;
+        AppCore.state.sidebarDesktopOpen = mobile
+          ? true
+          : Boolean(desiredOpen);
       }
 
-      if (typeof AppCore.state.sidebarOpen !== "boolean") {
-        AppCore.state.sidebarOpen = mobile
-          ? false
-          : AppCore.state.sidebarDesktopOpen;
-      } else if (!mobile) {
-        AppCore.state.sidebarOpen = AppCore.state.sidebarDesktopOpen;
+      if (typeof AppCore.state.sidebarMobileOpen !== "boolean") {
+        AppCore.state.sidebarMobileOpen = false;
       }
+
+      AppCore.state.sidebarOpen = mobile
+        ? Boolean(AppCore.state.sidebarMobileOpen)
+        : Boolean(AppCore.state.sidebarDesktopOpen);
+
+      AppCore.state.sidebarMode = mobile
+        ? "mobile"
+        : "desktop";
+
+      AppCore.state.sidebarLastMode = AppCore.state.sidebarMode;
 
       return AppCore.state;
     } catch {
@@ -1040,6 +1091,7 @@ export const SidebarUI = (() => {
 
       nameEl.removeAttribute("title");
       nameEl.removeAttribute("data-tooltip");
+      nameEl.removeAttribute("aria-describedby");
     }
 
     if (avatarEl) {
@@ -1063,6 +1115,7 @@ export const SidebarUI = (() => {
 
       avatarEl.removeAttribute("title");
       avatarEl.removeAttribute("data-tooltip");
+      avatarEl.removeAttribute("aria-describedby");
     }
 
     if (userToggle) {
@@ -1071,13 +1124,38 @@ export const SidebarUI = (() => {
         `Abrir menú de usuario de ${displayName}`
       );
 
+      userToggle.setAttribute(
+        "aria-haspopup",
+        "menu"
+      );
+
       userToggle.removeAttribute("title");
       userToggle.removeAttribute("data-tooltip");
+      userToggle.removeAttribute("aria-describedby");
+
+      try {
+        if (
+          userDropdown?.id &&
+          !userToggle.getAttribute("aria-controls")
+        ) {
+          userToggle.setAttribute(
+            "aria-controls",
+            userDropdown.id
+          );
+        }
+      } catch {}
     }
 
     if (userDropdown) {
       userDropdown.removeAttribute("title");
       userDropdown.removeAttribute("data-tooltip");
+      userDropdown.removeAttribute("aria-describedby");
+
+      try {
+        if (!userDropdown.getAttribute("role")) {
+          userDropdown.setAttribute("role", "menu");
+        }
+      } catch {}
     }
 
     sanitizeFooterTooltipState(AppCore);
@@ -1093,7 +1171,7 @@ export const SidebarUI = (() => {
   }
 
   /* ======================================================
-     ROUTE / ACTIVE MENU / APPLE INDICATOR
+     ROUTE / ACTIVE MENU
   ====================================================== */
 
   function getBrowserPath() {
@@ -1111,14 +1189,22 @@ export const SidebarUI = (() => {
         hash.startsWith("#!")
       ) {
         return hash
-          .replace(/^#!/, "")
-          .replace(/^#/, "") || "/";
+          .replace(/^#!\/?/, "/")
+          .replace(/^#\/?/, "/") || "/";
       }
 
       return `${pathname}${search}`;
     } catch {
       return "/";
     }
+  }
+
+  function stripPublicUsernamePrefix(pathname = "/") {
+    const value =
+      safeText(pathname, "/")
+        .replace(/^\/@[^/]+(?=\/|$)/i, "");
+
+    return value || "/";
   }
 
   function stripSearchHash(path = "/") {
@@ -1137,9 +1223,22 @@ export const SidebarUI = (() => {
     }
 
     try {
-      if (/^https?:\/\//i.test(value) && isBrowser()) {
+      if (isBrowser()) {
         const parsed = new URL(value, window.location.origin);
-        value = `${parsed.pathname || "/"}${parsed.search || ""}`;
+
+        if (
+          parsed.hash &&
+          (
+            parsed.hash.startsWith("#/") ||
+            parsed.hash.startsWith("#!")
+          )
+        ) {
+          value = parsed.hash
+            .replace(/^#!\/?/, "/")
+            .replace(/^#\/?/, "/");
+        } else {
+          value = `${parsed.pathname || "/"}${parsed.search || ""}`;
+        }
       }
     } catch {}
 
@@ -1150,6 +1249,8 @@ export const SidebarUI = (() => {
     if (!value.startsWith("/")) {
       value = `/${value}`;
     }
+
+    value = stripPublicUsernamePrefix(value);
 
     if (
       value.length > 1 &&
@@ -1165,10 +1266,15 @@ export const SidebarUI = (() => {
     const candidates = [
       AppCore?.state?.publicPath,
       AppCore?.state?.route,
+      AppCore?.state?.canonicalPath,
+
       Router?.getCurrentPublicPath?.(),
       Router?.getCurrentCanonicalPath?.(),
+      Router?.getCurrentPath?.(),
+
       Router?.getPath?.(),
       Router?.currentPath,
+
       getBrowserPath(),
     ];
 
@@ -1181,27 +1287,6 @@ export const SidebarUI = (() => {
     }
 
     return "/";
-  }
-
-  function getMenuItems() {
-    const {
-      sidebarMenu,
-    } = getElements(AppCore);
-
-    if (!sidebarMenu) {
-      return [];
-    }
-
-    return queryAll(
-      sidebarMenu,
-      [
-        "a[data-sidebar-nav='true']",
-        "a.menu-item",
-        "a[data-spa]",
-        "a[data-route]",
-        ".menu-item[data-route]",
-      ].join(",")
-    ).filter((item) => !isElementHiddenOrDisabled(item));
   }
 
   function getRouteFromElement(element = null) {
@@ -1224,6 +1309,27 @@ export const SidebarUI = (() => {
       ),
       ""
     );
+  }
+
+  function getMenuItems() {
+    const {
+      sidebarMenu,
+    } = getElements(AppCore);
+
+    if (!sidebarMenu) {
+      return [];
+    }
+
+    return queryAll(
+      sidebarMenu,
+      [
+        "a[data-sidebar-nav='true']",
+        "a.menu-item",
+        "a[data-spa]",
+        "a[data-route]",
+        ".menu-item[data-route]",
+      ].join(",")
+    ).filter((item) => !isElementHiddenOrDisabled(item));
   }
 
   function getMenuItemRoute(element = null) {
@@ -1291,6 +1397,8 @@ export const SidebarUI = (() => {
   }
 
   function syncActiveRouteMarkers(route = "") {
+    refreshSidebarDomRefs();
+
     const currentPath =
       normalizeRoutePath(route || getCurrentRoutePath());
 
@@ -1321,15 +1429,17 @@ export const SidebarUI = (() => {
             "aria-current",
             "page"
           );
+
+          item.dataset.active = "true";
         } else {
           item.removeAttribute(
             "aria-current"
           );
+
+          delete item.dataset.active;
         }
       } catch {}
     }
-
-    indicatorLastRoute = currentPath;
 
     safeEmit("sidebar:active-route:synced", {
       route: currentPath,
@@ -1343,165 +1453,55 @@ export const SidebarUI = (() => {
     return activeItem;
   }
 
-  function setIndicatorVisible(sidebarMenu, visible = false) {
-    if (!sidebarMenu) {
-      return false;
-    }
-
-    try {
-      sidebarMenu.style.setProperty(
-        "--sidebar-indicator-opacity",
-        visible ? "1" : "0"
-      );
-
-      if (visible) {
-        sidebarMenu.dataset.indicatorReady = "true";
-      } else {
-        sidebarMenu.dataset.indicatorReady = "false";
-      }
-
-      return true;
-    } catch {
-      return false;
+  function clearVisualSyncTimer() {
+    if (visualSyncTimer) {
+      safeClearTimeout(visualSyncTimer);
+      visualSyncTimer = null;
     }
   }
 
-  function syncSlidingIndicator(reason = "sync-indicator") {
-    refreshSidebarDomRefs();
+  function scheduleSidebarVisualSync(reason = "visual-sync", options = {}) {
+    const opts = safeObject(options);
+    const delayMs = Math.max(0, safeNumber(opts.delayMs, 24));
 
-    const {
-      sidebarMenu,
-    } = getElements(AppCore);
+    clearVisualSyncTimer();
 
-    if (!sidebarMenu || isShellHidden(AppCore)) {
-      setIndicatorVisible(sidebarMenu, false);
-      return false;
-    }
+    visualSyncTimer = safeSetTimeout(() => {
+      visualSyncTimer = null;
 
-    const route =
-      getCurrentRoutePath();
-
-    const activeItem =
-      syncActiveRouteMarkers(route);
-
-    if (!activeItem) {
-      setIndicatorVisible(sidebarMenu, false);
-
-      safeEmit("sidebar:indicator:synced", {
-        ok: false,
-        reason,
-        route,
-        hasActiveItem: false,
-      });
-
-      return false;
-    }
-
-    try {
-      const menuRect =
-        sidebarMenu.getBoundingClientRect();
-
-      const itemRect =
-        activeItem.getBoundingClientRect();
-
-      if (
-        !menuRect ||
-        !itemRect ||
-        itemRect.width <= 0 ||
-        itemRect.height <= 0
-      ) {
-        setIndicatorVisible(sidebarMenu, false);
-        return false;
-      }
-
-      const x =
-        Math.round(itemRect.left - menuRect.left);
-
-      const y =
-        Math.round(itemRect.top - menuRect.top);
-
-      const width =
-        Math.round(itemRect.width);
-
-      const height =
-        Math.round(itemRect.height);
-
-      sidebarMenu.style.setProperty(
-        "--sidebar-indicator-x",
-        `${x}px`
-      );
-
-      sidebarMenu.style.setProperty(
-        "--sidebar-indicator-y",
-        `${y}px`
-      );
-
-      sidebarMenu.style.setProperty(
-        "--sidebar-indicator-w",
-        `${width}px`
-      );
-
-      sidebarMenu.style.setProperty(
-        "--sidebar-indicator-h",
-        `${height}px`
-      );
-
-      setIndicatorVisible(sidebarMenu, true);
-
-      safeEmit("sidebar:indicator:synced", {
-        ok: true,
-        reason,
-        route,
-        activeRoute:
-          getMenuItemRoute(activeItem),
-        x,
-        y,
-        width,
-        height,
-      });
-
-      return true;
-    } catch (error) {
-      safeWarn(
-        "syncSlidingIndicator falló.",
-        error
-      );
-
-      setIndicatorVisible(sidebarMenu, false);
-
-      return false;
-    }
-  }
-
-  function scheduleSlidingIndicatorSync(reason = "schedule-indicator") {
-    if (!isBrowser()) {
-      return syncSlidingIndicator(reason);
-    }
-
-    cancelIndicatorFrame();
-
-    try {
-      indicatorFrame = window.requestAnimationFrame(() => {
-        indicatorFrame = 0;
+      afterPaint(() => {
+        refreshSidebarDomRefs();
+        syncActiveRouteMarkers();
 
         try {
-          syncSlidingIndicator(reason);
-        } catch {}
+          scheduleActiveMenuIndicator(AppCore, {
+            reason,
+            delayMs: 0,
+            reveal: opts.reveal !== false,
+            force: opts.force === true,
+          });
+        } catch {
+          try {
+            syncActiveMenuIndicator(AppCore, {
+              reason,
+              reveal: opts.reveal !== false,
+              force: opts.force === true,
+            });
+          } catch {}
+        }
       });
+    }, delayMs);
 
-      return true;
-    } catch {
-      afterPaint(() => {
-        syncSlidingIndicator(reason);
-      });
-
-      return true;
-    }
+    return true;
   }
 
   function syncRouteAndIndicator(reason = "route-sync") {
     syncActiveRouteMarkers();
-    scheduleSlidingIndicatorSync(reason);
+
+    scheduleSidebarVisualSync(reason, {
+      delayMs: 16,
+      reveal: true,
+    });
 
     return true;
   }
@@ -1513,12 +1513,29 @@ export const SidebarUI = (() => {
   function closeDropdown() {
     refreshSidebarDomRefs();
 
-    return closeDropdownBase(AppCore, state);
+    const result =
+      closeDropdownBase(AppCore, runtimeState);
+
+    scheduleSidebarVisualSync("close-dropdown", {
+      delayMs: 24,
+    });
+
+    return result;
   }
 
   function ensureSidebarOpenForUserMenu() {
-    if (!getDesiredSidebarOpenState(AppCore)) {
-      openSidebar();
+    if (isShellBlocked()) {
+      return false;
+    }
+
+    const open =
+      getDesiredSidebarOpenState(AppCore);
+
+    if (!open) {
+      setSidebarOpen(true, {
+        source: "ensure-user-menu",
+      });
+
       return true;
     }
 
@@ -1526,35 +1543,39 @@ export const SidebarUI = (() => {
   }
 
   function openDropdown() {
-    if (isShellHidden(AppCore)) return false;
+    if (isShellBlocked()) return false;
 
     refreshSidebarDomRefs();
 
     const result =
       openDropdownBase(
         AppCore,
-        state,
+        runtimeState,
         ensureSidebarOpenForUserMenu
       );
 
-    scheduleSlidingIndicatorSync("open-dropdown");
+    scheduleSidebarVisualSync("open-dropdown", {
+      delayMs: 32,
+    });
 
     return result;
   }
 
   function toggleDropdown() {
-    if (isShellHidden(AppCore)) return false;
+    if (isShellBlocked()) return false;
 
     refreshSidebarDomRefs();
 
     const result =
       toggleDropdownBase(
         AppCore,
-        state,
+        runtimeState,
         ensureSidebarOpenForUserMenu
       );
 
-    scheduleSlidingIndicatorSync("toggle-dropdown");
+    scheduleSidebarVisualSync("toggle-dropdown", {
+      delayMs: 32,
+    });
 
     return result;
   }
@@ -1572,53 +1593,96 @@ export const SidebarUI = (() => {
         closeDropdown
       );
 
-    scheduleSlidingIndicatorSync("sync-sidebar-state");
+    syncActiveRouteMarkers();
 
     return result;
   }
 
-  function setSidebarOpen(open) {
-    setSidebarOpenBase(
-      AppCore,
-      Boolean(open),
-      closeDropdown
-    );
+  function repairSidebarState(reason = "repair-sidebar-state") {
+    refreshSidebarDomRefs();
 
-    syncSidebarState();
+    const result =
+      repairSidebarStateBase(
+        AppCore,
+        closeDropdown
+      );
 
-    safeEmit("sidebar:open:set", {
-      open: Boolean(open),
-      snapshot: getSidebarSnapshot(),
+    scheduleSidebarVisualSync(reason, {
+      delayMs: 48,
+      force: true,
     });
 
-    scheduleSlidingIndicatorSync("set-sidebar-open");
-
-    return true;
+    return result;
   }
 
-  function openSidebar() {
-    if (isShellHidden(AppCore)) return false;
-    return setSidebarOpen(true);
-  }
+  function setSidebarOpen(open, options = {}) {
+    if (isShellBlocked()) {
+      return false;
+    }
 
-  function closeSidebar() {
-    return setSidebarOpen(false);
-  }
+    const opts = safeObject(options);
+    const nextOpen = Boolean(open);
 
-  function toggleSidebar() {
-    if (isShellHidden(AppCore)) return false;
-
-    const nextOpen = !getDesiredSidebarOpenState(AppCore);
-
-    setSidebarOpen(nextOpen);
+    const previousOpen =
+      getDesiredSidebarOpenState(AppCore);
 
     if (!nextOpen) {
       closeDropdown();
     }
 
-    scheduleSlidingIndicatorSync("toggle-sidebar");
+    const result =
+      setSidebarOpenBase(
+        AppCore,
+        nextOpen,
+        closeDropdown
+      );
 
-    return true;
+    /*
+      No emitimos sidebar:open:set.
+      events.js ya escucha sidebar:state:change desde state.js.
+      Emitir ambos provocaba doble transición / indicador flotante.
+    */
+    safeEmit("sidebar:ui:open:set", {
+      open: nextOpen,
+      previousOpen,
+      changed: previousOpen !== nextOpen,
+      source: opts.source || "SidebarUI",
+      snapshot: getSidebarSnapshot(),
+    });
+
+    scheduleSidebarVisualSync("set-sidebar-open", {
+      delayMs: previousOpen !== nextOpen
+        ? 430
+        : 32,
+      force: true,
+    });
+
+    return Boolean(result);
+  }
+
+  function openSidebar() {
+    if (isShellBlocked()) return false;
+
+    return setSidebarOpen(true, {
+      source: "openSidebar",
+    });
+  }
+
+  function closeSidebar() {
+    return setSidebarOpen(false, {
+      source: "closeSidebar",
+    });
+  }
+
+  function toggleSidebar() {
+    if (isShellBlocked()) return false;
+
+    const nextOpen =
+      !getDesiredSidebarOpenState(AppCore);
+
+    return setSidebarOpen(nextOpen, {
+      source: "toggleSidebar",
+    });
   }
 
   function getSidebarSnapshot() {
@@ -1629,58 +1693,106 @@ export const SidebarUI = (() => {
     return {
       mobile,
       open,
+
       desktopOpen:
         typeof AppCore?.state?.sidebarDesktopOpen === "boolean"
           ? Boolean(AppCore.state.sidebarDesktopOpen)
           : open,
 
-      dropdownOpen: Boolean(state.dropdownOpen),
+      mobileOpen:
+        typeof AppCore?.state?.sidebarMobileOpen === "boolean"
+          ? Boolean(AppCore.state.sidebarMobileOpen)
+          : false,
+
+      dropdownOpen:
+        Boolean(runtimeState.dropdownOpen),
 
       initialized,
       eventsBound,
       logoutInFlight,
       lastBindReason,
+      bindGeneration,
 
-      isAdmin: isAdmin(),
+      isAdmin:
+        isAdmin(),
 
-      shellHidden: isShellHidden(AppCore),
-      hasShell: hasSidebarShell(AppCore),
+      shellHidden:
+        isShellHidden(AppCore),
+
+      realShellHidden:
+        isRealShellHidden(AppCore),
+
+      hasShell:
+        hasSidebarShell(AppCore),
 
       route:
         getCurrentRoutePath(),
 
-      indicatorLastRoute,
-
       dom: {
-        hasSidebar: Boolean(elements.sidebar),
-        hasSidebarMenu: Boolean(elements.sidebarMenu),
-        hasToggle: Boolean(elements.toggleBtn),
-        hasMobileToggle: Boolean(elements.mobileToggleBtn),
-        hasUserToggle: Boolean(elements.userToggle),
-        hasUserDropdown: Boolean(elements.userDropdown),
-        hasLogout: Boolean(elements.logoutBtn),
+        hasSidebar:
+          Boolean(elements.sidebar),
+
+        hasSidebarMenu:
+          Boolean(elements.sidebarMenu),
+
+        hasToggle:
+          Boolean(elements.toggleBtn),
+
+        hasMobileToggle:
+          Boolean(elements.mobileToggleBtn),
+
+        hasUserToggle:
+          Boolean(elements.userToggle),
+
+        hasUserDropdown:
+          Boolean(elements.userDropdown),
+
+        hasLogout:
+          Boolean(elements.logoutBtn),
       },
 
       dropdownDom: {
-        userToggleId: elements.userToggle?.id || "",
-        userToggleAriaExpanded: elements.userToggle?.getAttribute?.("aria-expanded") || "",
-        userDropdownId: elements.userDropdown?.id || "",
-        userDropdownHidden: Boolean(elements.userDropdown?.hidden),
-        userDropdownAriaHidden: elements.userDropdown?.getAttribute?.("aria-hidden") || "",
-        userDropdownClassName: elements.userDropdown?.className || "",
+        userToggleId:
+          elements.userToggle?.id || "",
+
+        userToggleAriaExpanded:
+          elements.userToggle?.getAttribute?.("aria-expanded") || "",
+
+        userDropdownId:
+          elements.userDropdown?.id || "",
+
+        userDropdownHidden:
+          Boolean(elements.userDropdown?.hidden),
+
+        userDropdownAriaHidden:
+          elements.userDropdown?.getAttribute?.("aria-hidden") || "",
+
+        userDropdownClassName:
+          elements.userDropdown?.className || "",
       },
 
       indicatorDom: {
         ready:
           elements.sidebarMenu?.dataset?.indicatorReady || "",
+
+        reason:
+          elements.sidebarMenu?.dataset?.indicatorReason || "",
+
+        route:
+          elements.sidebarMenu?.dataset?.indicatorRoute || "",
+
         opacity:
           elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-opacity") || "",
+
         x:
           elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
+
         y:
           elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-y") || "",
+
         w:
           elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-w") || "",
+
         h:
           elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-h") || "",
       },
@@ -1706,17 +1818,25 @@ export const SidebarUI = (() => {
       if (AppCore?.state && typeof AppCore.state === "object") {
         AppCore.state.sidebarDesktopOpen = desiredOpen;
         AppCore.state.sidebarOpen = desiredOpen;
+        AppCore.state.sidebarMode = "desktop";
+        AppCore.state.sidebarLastMode = "desktop";
       }
     } catch {}
 
     if (getDesiredSidebarOpenState(AppCore) === desiredOpen) {
       syncSidebarState();
-      scheduleSlidingIndicatorSync("restore-sidebar-state:same");
+
+      scheduleSidebarVisualSync("restore-sidebar-state:same", {
+        delayMs: 48,
+        force: true,
+      });
+
       return true;
     }
 
-    setSidebarOpen(desiredOpen);
-    scheduleSlidingIndicatorSync("restore-sidebar-state:set");
+    setSidebarOpen(desiredOpen, {
+      source: "restoreSidebarState",
+    });
 
     return true;
   }
@@ -1739,7 +1859,12 @@ export const SidebarUI = (() => {
         isAdmin
       );
 
-    scheduleSlidingIndicatorSync("apply-role-visibility");
+    syncActiveRouteMarkers();
+
+    scheduleSidebarVisualSync("apply-role-visibility", {
+      delayMs: 32,
+      force: true,
+    });
 
     return result;
   }
@@ -1752,9 +1877,7 @@ export const SidebarUI = (() => {
     /*
       Importante:
       events.js normaliza scope con String(scope).
-      Si aquí devolvemos AppCore.cleanup.scope(SCOPE) y eso es un objeto,
-      los listeners acaban en "[object Object]".
-      Por eso este módulo usa siempre el nombre estable SCOPE.
+      Aquí usamos siempre el nombre estable SCOPE.
     */
     return SCOPE;
   }
@@ -1769,7 +1892,7 @@ export const SidebarUI = (() => {
 
   function cleanupBoundEvents() {
     cleanupFallbackDomEvents();
-    cancelIndicatorFrame();
+    clearVisualSyncTimer();
 
     try {
       if (
@@ -1819,7 +1942,10 @@ export const SidebarUI = (() => {
         isLogoutInFlight,
       });
 
-    scheduleSlidingIndicatorSync("logout");
+    scheduleSidebarVisualSync("logout", {
+      delayMs: 80,
+      force: true,
+    });
 
     return result;
   }
@@ -1836,7 +1962,11 @@ export const SidebarUI = (() => {
           Router.navigate(target, opts)
         );
 
-        scheduleSlidingIndicatorSync("navigate:router.navigate");
+        scheduleSidebarVisualSync("navigate:router.navigate", {
+          delayMs: 80,
+          force: true,
+        });
+
         return true;
       }
 
@@ -1845,7 +1975,11 @@ export const SidebarUI = (() => {
           Router.go(target, opts)
         );
 
-        scheduleSlidingIndicatorSync("navigate:router.go");
+        scheduleSidebarVisualSync("navigate:router.go", {
+          delayMs: 80,
+          force: true,
+        });
+
         return true;
       }
 
@@ -1854,7 +1988,11 @@ export const SidebarUI = (() => {
           Router.push(target, opts)
         );
 
-        scheduleSlidingIndicatorSync("navigate:router.push");
+        scheduleSidebarVisualSync("navigate:router.push", {
+          delayMs: 80,
+          force: true,
+        });
+
         return true;
       }
 
@@ -1863,7 +2001,11 @@ export const SidebarUI = (() => {
           AppCore.router.navigate(target, opts)
         );
 
-        scheduleSlidingIndicatorSync("navigate:appcore.router.navigate");
+        scheduleSidebarVisualSync("navigate:appcore.router.navigate", {
+          delayMs: 80,
+          force: true,
+        });
+
         return true;
       }
 
@@ -1872,7 +2014,11 @@ export const SidebarUI = (() => {
           AppCore.navigate(target, opts)
         );
 
-        scheduleSlidingIndicatorSync("navigate:appcore.navigate");
+        scheduleSidebarVisualSync("navigate:appcore.navigate", {
+          delayMs: 80,
+          force: true,
+        });
+
         return true;
       }
     } catch (error) {
@@ -1886,7 +2032,12 @@ export const SidebarUI = (() => {
     try {
       window.history.pushState({}, "", target);
       window.dispatchEvent(new PopStateEvent("popstate"));
-      scheduleSlidingIndicatorSync("navigate:history");
+
+      scheduleSidebarVisualSync("navigate:history", {
+        delayMs: 80,
+        force: true,
+      });
+
       return true;
     } catch {}
 
@@ -1923,13 +2074,18 @@ export const SidebarUI = (() => {
 
     closeDropdown();
 
+    syncActiveRouteMarkers(route);
+
     if (!skipNavigation) {
       await navigateTo(route, {
         source: "sidebar",
         replaceState: false,
       });
     } else {
-      scheduleSlidingIndicatorSync("navigation-post-router");
+      scheduleSidebarVisualSync("navigation-post-router", {
+        delayMs: 80,
+        force: true,
+      });
     }
 
     if (closeSidebarOnMobileAfterNavigation()) {
@@ -2109,7 +2265,7 @@ export const SidebarUI = (() => {
   }
 
   function handleOutsideDropdownClick(event = null) {
-    if (!state.dropdownOpen) {
+    if (!runtimeState.dropdownOpen) {
       return false;
     }
 
@@ -2129,7 +2285,7 @@ export const SidebarUI = (() => {
     return false;
   }
 
-  function bindDirectUserToggleGuard(reason = "bind-direct-user-toggle") {
+  function bindDirectUserToggleGuard(reason = "bind-direct-user-toggle", generation = bindGeneration) {
     const {
       userToggle,
     } = getElements(AppCore);
@@ -2139,6 +2295,10 @@ export const SidebarUI = (() => {
     }
 
     const onUserToggleClick = (event) => {
+      if (generation !== bindGeneration) {
+        return;
+      }
+
       if (!initialized && !hasSidebarShell(AppCore)) {
         return;
       }
@@ -2148,9 +2308,11 @@ export const SidebarUI = (() => {
       }
 
       /*
-        Este listener va en capture sobre el botón real.
-        Evita que el click llegue al document listener de events.js
-        y al fallback delegado a la vez.
+        Listener en capture sobre el botón real.
+        Evita doble toggle entre:
+        - events.js document click
+        - fallback delegado
+        - bubbling del propio botón
       */
       markSidebarEventHandled(event, "direct-user-toggle");
 
@@ -2169,6 +2331,10 @@ export const SidebarUI = (() => {
     };
 
     const onUserToggleKeydown = (event) => {
+      if (generation !== bindGeneration) {
+        return;
+      }
+
       if (!containsElement(userToggle, event?.target)) {
         return;
       }
@@ -2243,10 +2409,17 @@ export const SidebarUI = (() => {
 
     cleanupFallbackDomEvents();
 
+    const generation =
+      bindGeneration;
+
     const directUserToggleCleanup =
-      bindDirectUserToggleGuard(reason);
+      bindDirectUserToggleGuard(reason, generation);
 
     const onDocumentClick = async (event) => {
+      if (generation !== bindGeneration) {
+        return;
+      }
+
       if (wasSidebarEventHandled(event)) {
         return;
       }
@@ -2269,19 +2442,12 @@ export const SidebarUI = (() => {
         return;
       }
 
-      /*
-        Importante:
-        Si otro handler ya ha prevenido el evento, NO re-ejecutamos
-        acciones de control como toggle/dropdown/logout.
-
-        Antes esto producía:
-          1) bindDomEvents abre dropdown
-          2) fallback lo vuelve a cerrar en el mismo click
-
-        Para navegación sí mantenemos cleanup post-router.
-      */
       const defaultWasPrevented = Boolean(event.defaultPrevented);
 
+      /*
+        Si events.js ya procesó un control, no repetimos acción.
+        Esto mata el bug de abrir/cerrar dropdown en el mismo click.
+      */
       if (
         defaultWasPrevented &&
         (
@@ -2290,7 +2456,11 @@ export const SidebarUI = (() => {
           isLogoutElement(actionElement)
         )
       ) {
-        markSidebarEventHandled(event, "fallback-skip-default-prevented-control");
+        markSidebarEventHandled(
+          event,
+          "fallback-skip-default-prevented-control"
+        );
+
         return;
       }
 
@@ -2368,25 +2538,50 @@ export const SidebarUI = (() => {
     };
 
     const onDocumentKeydown = (event) => {
+      if (generation !== bindGeneration) {
+        return;
+      }
+
       if (wasSidebarEventHandled(event)) {
         return;
       }
 
-      if (event?.key === "Escape" && state.dropdownOpen) {
+      if (event?.key === "Escape" && runtimeState.dropdownOpen) {
         closeDropdown();
       }
     };
 
     const onWindowResize = () => {
-      scheduleSlidingIndicatorSync("window-resize");
+      if (generation !== bindGeneration) {
+        return;
+      }
+
+      scheduleSidebarVisualSync("window-resize", {
+        delayMs: 120,
+        force: true,
+      });
     };
 
     const onWindowPopState = () => {
-      scheduleSlidingIndicatorSync("window-popstate");
+      if (generation !== bindGeneration) {
+        return;
+      }
+
+      scheduleSidebarVisualSync("window-popstate", {
+        delayMs: 80,
+        force: true,
+      });
     };
 
     const onHashChange = () => {
-      scheduleSlidingIndicatorSync("window-hashchange");
+      if (generation !== bindGeneration) {
+        return;
+      }
+
+      scheduleSidebarVisualSync("window-hashchange", {
+        delayMs: 80,
+        force: true,
+      });
     };
 
     document.addEventListener(
@@ -2485,6 +2680,8 @@ export const SidebarUI = (() => {
 
     cleanupBoundEvents();
 
+    bindGeneration += 1;
+
     const scope = getCleanupScope();
 
     activeCleanupScope = scope;
@@ -2494,7 +2691,7 @@ export const SidebarUI = (() => {
         AppCore,
         Router,
         Auth,
-        state,
+        state: runtimeState,
         scope,
         api,
         handleLogout,
@@ -2520,7 +2717,7 @@ export const SidebarUI = (() => {
         AppCore,
         Router,
         Auth,
-        state,
+        state: runtimeState,
         scope,
         api,
         renderUser,
@@ -2540,10 +2737,14 @@ export const SidebarUI = (() => {
 
     eventsBound = true;
 
-    scheduleSlidingIndicatorSync(`bind-events:${lastBindReason}`);
+    scheduleSidebarVisualSync(`bind-events:${lastBindReason}`, {
+      delayMs: 64,
+      force: true,
+    });
 
     safeEmit("sidebar:events:bound", {
       reason: lastBindReason,
+      generation: bindGeneration,
       snapshot: getSidebarSnapshot(),
     });
 
@@ -2590,7 +2791,7 @@ export const SidebarUI = (() => {
     ensureRuntimeStateDefaults();
 
     sanitizeFooterTooltipState(AppCore);
-    syncSidebarState();
+    repairSidebarState(`repair:${reason}`);
     renderUser();
     applyRoleVisibility();
 
@@ -2628,6 +2829,10 @@ export const SidebarUI = (() => {
           AppCore.modules.register("sidebar", api);
         }
 
+        if (!AppCore.modules.has("SidebarUI")) {
+          AppCore.modules.register("SidebarUI", api);
+        }
+
         return true;
       }
     } catch {}
@@ -2638,6 +2843,7 @@ export const SidebarUI = (() => {
         typeof AppCore.modules.register === "function"
       ) {
         AppCore.modules.register("sidebar", api);
+        AppCore.modules.register("SidebarUI", api);
         return true;
       }
     } catch {}
@@ -2648,6 +2854,7 @@ export const SidebarUI = (() => {
         typeof AppCore.modules.set === "function"
       ) {
         AppCore.modules.set("sidebar", api);
+        AppCore.modules.set("SidebarUI", api);
         return true;
       }
     } catch {}
@@ -2719,9 +2926,9 @@ export const SidebarUI = (() => {
 
     initialized = false;
     logoutInFlight = false;
-    state.dropdownOpen = false;
+    runtimeState.dropdownOpen = false;
     lastBindReason = "";
-    indicatorLastRoute = "";
+    bindGeneration += 1;
 
     safeEmit("sidebar:destroyed", {
       initialized: false,
@@ -2743,30 +2950,57 @@ export const SidebarUI = (() => {
     } = getElements(AppCore);
 
     const snapshot = {
-      stateDropdownOpen: Boolean(state.dropdownOpen),
+      stateDropdownOpen:
+        Boolean(runtimeState.dropdownOpen),
 
-      hasUserToggle: Boolean(userToggle),
-      hasUserDropdown: Boolean(userDropdown),
+      hasUserToggle:
+        Boolean(userToggle),
 
-      userToggleId: userToggle?.id || "",
-      userToggleClassName: userToggle?.className || "",
-      userToggleAriaExpanded: userToggle?.getAttribute?.("aria-expanded") || "",
-      userToggleHidden: Boolean(userToggle?.hidden),
-      userToggleInert: Boolean(userToggle?.hasAttribute?.("inert")),
-      userToggleParentHidden: Boolean(
-        userToggle?.closest?.("[hidden],[inert],[aria-hidden='true']")
-      ),
+      hasUserDropdown:
+        Boolean(userDropdown),
 
-      userDropdownId: userDropdown?.id || "",
-      userDropdownClassName: userDropdown?.className || "",
-      userDropdownHidden: Boolean(userDropdown?.hidden),
-      userDropdownAriaHidden: userDropdown?.getAttribute?.("aria-hidden") || "",
-      userDropdownInert: Boolean(userDropdown?.hasAttribute?.("inert")),
-      userDropdownParentHidden: Boolean(
-        userDropdown?.closest?.("[hidden],[inert],[aria-hidden='true']")
-      ),
+      userToggleId:
+        userToggle?.id || "",
 
-      sidebarSnapshot: getSidebarSnapshot(),
+      userToggleClassName:
+        userToggle?.className || "",
+
+      userToggleAriaExpanded:
+        userToggle?.getAttribute?.("aria-expanded") || "",
+
+      userToggleHidden:
+        Boolean(userToggle?.hidden),
+
+      userToggleInert:
+        Boolean(userToggle?.hasAttribute?.("inert")),
+
+      userToggleParentHidden:
+        Boolean(
+          userToggle?.closest?.("[hidden],[inert],[aria-hidden='true']")
+        ),
+
+      userDropdownId:
+        userDropdown?.id || "",
+
+      userDropdownClassName:
+        userDropdown?.className || "",
+
+      userDropdownHidden:
+        Boolean(userDropdown?.hidden),
+
+      userDropdownAriaHidden:
+        userDropdown?.getAttribute?.("aria-hidden") || "",
+
+      userDropdownInert:
+        Boolean(userDropdown?.hasAttribute?.("inert")),
+
+      userDropdownParentHidden:
+        Boolean(
+          userDropdown?.closest?.("[hidden],[inert],[aria-hidden='true']")
+        ),
+
+      sidebarSnapshot:
+        getSidebarSnapshot(),
     };
 
     try {
@@ -2790,8 +3024,6 @@ export const SidebarUI = (() => {
       route:
         getCurrentRoutePath(),
 
-      indicatorLastRoute,
-
       hasSidebarMenu:
         Boolean(sidebarMenu),
 
@@ -2809,15 +3041,25 @@ export const SidebarUI = (() => {
       indicatorReady:
         sidebarMenu?.dataset?.indicatorReady || "",
 
+      indicatorReason:
+        sidebarMenu?.dataset?.indicatorReason || "",
+
+      indicatorRoute:
+        sidebarMenu?.dataset?.indicatorRoute || "",
+
       variables: {
         x:
           sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
+
         y:
           sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-y") || "",
+
         w:
           sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-w") || "",
+
         h:
           sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-h") || "",
+
         opacity:
           sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-opacity") || "",
       },
@@ -2826,10 +3068,13 @@ export const SidebarUI = (() => {
         getMenuItems().map((item) => ({
           route:
             getMenuItemRoute(item),
+
           text:
             safeText(item.textContent, ""),
+
           active:
             item.classList?.contains?.("active") ||
+            item.classList?.contains?.("is-active") ||
             item.getAttribute?.("aria-current") === "page",
         })),
     };
@@ -2863,6 +3108,7 @@ export const SidebarUI = (() => {
     renderUser,
     applyRoleVisibility,
     syncSidebarState,
+    repairSidebarState,
 
     openDropdown,
     closeDropdown,
@@ -2871,17 +3117,22 @@ export const SidebarUI = (() => {
     openSidebar,
     closeSidebar,
     toggleSidebar,
+    setSidebarOpen,
 
     updateToggleLabel: () =>
       updateToggleLabel(AppCore),
 
     syncIndicator:
-      syncSlidingIndicator,
+      (reason = "api:syncIndicator") =>
+        scheduleSidebarVisualSync(reason, {
+          delayMs: 0,
+          force: true,
+        }),
 
     syncRouteAndIndicator,
 
     scheduleIndicatorSync:
-      scheduleSlidingIndicatorSync,
+      scheduleSidebarVisualSync,
 
     handleLogout,
 

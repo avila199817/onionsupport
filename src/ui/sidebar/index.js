@@ -18,14 +18,17 @@
    - delegar indicador activo tipo Apple en state.js
    - evitar doble toggle entre events.js y fallback delegado
    - evitar carreras tras router render / auth restore / rebind
+   - neutralizar hover/focus fantasma al cambiar de vista
+   - soportar rutas públicas con /@username sin romper active item
 
    REGLAS:
-   - SidebarUI NO debe ser dueño del indicador CSS.
+   - SidebarUI NO escribe variables CSS del indicador.
    - SidebarUI solo marca active/aria-current y pide recálculo.
    - state.js escribe variables:
      --sidebar-indicator-x/y/w/h/opacity
    - events.js centraliza commits visuales post-evento.
    - index.js no debe emitir eventos que causen doble transición.
+   - El matching visual de menú debe normalizar /@slug.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -103,6 +106,12 @@ export const SidebarUI = (() => {
   let bindGeneration = 0;
 
   let visualSyncTimer = null;
+  let hoverFlushTimer = null;
+
+  const VISUAL_SYNC_DEFAULT_DELAY = 24;
+  const VISUAL_SYNC_AFTER_NAV_DELAY = 80;
+  const VISUAL_SYNC_AFTER_TRANSITION_DELAY = 430;
+  const HOVER_FLUSH_MS = 96;
 
   const runtimeState = {
     dropdownOpen: false,
@@ -180,6 +189,15 @@ export const SidebarUI = (() => {
     return Number.isFinite(n)
       ? n
       : fallback;
+  }
+
+  function clampNumber(value, min = 0, max = Number.POSITIVE_INFINITY) {
+    const n = safeNumber(value, min);
+
+    return Math.min(
+      Math.max(n, min),
+      max
+    );
   }
 
   function safeWarn(...args) {
@@ -313,6 +331,14 @@ export const SidebarUI = (() => {
       return null;
     }
 
+    if (!isBrowser()) {
+      try {
+        callback();
+      } catch {}
+
+      return null;
+    }
+
     try {
       return window.setTimeout(() => {
         try {
@@ -329,7 +355,7 @@ export const SidebarUI = (() => {
   }
 
   function safeClearTimeout(timer) {
-    if (!timer) {
+    if (!timer || !isBrowser()) {
       return false;
     }
 
@@ -456,6 +482,10 @@ export const SidebarUI = (() => {
       }
 
       if (element.getAttribute?.("aria-disabled") === "true") {
+        return true;
+      }
+
+      if (element.getAttribute?.("aria-hidden") === "true") {
         return true;
       }
 
@@ -1081,59 +1111,63 @@ export const SidebarUI = (() => {
     const avatarUrl = getAvatarUrl(user);
 
     if (nameEl) {
-      nameEl.textContent = displayName;
+      try {
+        nameEl.textContent = displayName;
 
-      if (username) {
-        nameEl.dataset.username = username;
-      } else {
-        delete nameEl.dataset.username;
-      }
+        if (username) {
+          nameEl.dataset.username = username;
+        } else {
+          delete nameEl.dataset.username;
+        }
 
-      nameEl.removeAttribute("title");
-      nameEl.removeAttribute("data-tooltip");
-      nameEl.removeAttribute("aria-describedby");
+        nameEl.removeAttribute("title");
+        nameEl.removeAttribute("data-tooltip");
+        nameEl.removeAttribute("aria-describedby");
+      } catch {}
     }
 
     if (avatarEl) {
-      renderAvatarImage(
-        avatarEl,
-        avatarUrl,
-        displayName,
-        avatarText
-      );
+      try {
+        renderAvatarImage(
+          avatarEl,
+          avatarUrl,
+          displayName,
+          avatarText
+        );
 
-      avatarEl.setAttribute(
-        "aria-label",
-        `Avatar de ${displayName}`
-      );
+        avatarEl.setAttribute(
+          "aria-label",
+          `Avatar de ${displayName}`
+        );
 
-      if (username) {
-        avatarEl.dataset.username = username;
-      } else {
-        delete avatarEl.dataset.username;
-      }
+        if (username) {
+          avatarEl.dataset.username = username;
+        } else {
+          delete avatarEl.dataset.username;
+        }
 
-      avatarEl.removeAttribute("title");
-      avatarEl.removeAttribute("data-tooltip");
-      avatarEl.removeAttribute("aria-describedby");
+        avatarEl.removeAttribute("title");
+        avatarEl.removeAttribute("data-tooltip");
+        avatarEl.removeAttribute("aria-describedby");
+      } catch {}
     }
 
     if (userToggle) {
-      userToggle.setAttribute(
-        "aria-label",
-        `Abrir menú de usuario de ${displayName}`
-      );
-
-      userToggle.setAttribute(
-        "aria-haspopup",
-        "menu"
-      );
-
-      userToggle.removeAttribute("title");
-      userToggle.removeAttribute("data-tooltip");
-      userToggle.removeAttribute("aria-describedby");
-
       try {
+        userToggle.setAttribute(
+          "aria-label",
+          `Abrir menú de usuario de ${displayName}`
+        );
+
+        userToggle.setAttribute(
+          "aria-haspopup",
+          "menu"
+        );
+
+        userToggle.removeAttribute("title");
+        userToggle.removeAttribute("data-tooltip");
+        userToggle.removeAttribute("aria-describedby");
+
         if (
           userDropdown?.id &&
           !userToggle.getAttribute("aria-controls")
@@ -1147,18 +1181,20 @@ export const SidebarUI = (() => {
     }
 
     if (userDropdown) {
-      userDropdown.removeAttribute("title");
-      userDropdown.removeAttribute("data-tooltip");
-      userDropdown.removeAttribute("aria-describedby");
-
       try {
+        userDropdown.removeAttribute("title");
+        userDropdown.removeAttribute("data-tooltip");
+        userDropdown.removeAttribute("aria-describedby");
+
         if (!userDropdown.getAttribute("role")) {
           userDropdown.setAttribute("role", "menu");
         }
       } catch {}
     }
 
-    sanitizeFooterTooltipState(AppCore);
+    try {
+      sanitizeFooterTooltipState(AppCore);
+    } catch {}
 
     safeEmit("sidebar:user:rendered", {
       user,
@@ -1262,20 +1298,55 @@ export const SidebarUI = (() => {
     return value || "/";
   }
 
-  function getCurrentRoutePath() {
+  function resolvePreferredRouteFromOptions(options = {}) {
+    const opts = safeObject(options);
+    const payload = safeObject(opts.payload);
+
+    return first(
+      opts.route,
+      opts.path,
+      opts.publicPath,
+      opts.canonicalPath,
+
+      payload.publicPath,
+      payload.path,
+      payload.requestedPath,
+      payload.canonicalPath,
+      payload.to,
+      payload.url,
+      payload.route
+    );
+  }
+
+  function getCurrentRoutePath(preferred = "") {
+    const normalizedPreferred = normalizeRoutePath(preferred || "");
+
+    if (preferred && normalizedPreferred) {
+      return normalizedPreferred;
+    }
+
+    /*
+      Para active menu, la URL visible es la fuente más estable.
+      Corrige el caso:
+        /@cristian/usuarios
+      donde AppCore.state.publicPath puede quedar un tick tarde.
+    */
+    const browserPath =
+      normalizeRoutePath(getBrowserPath());
+
     const candidates = [
-      AppCore?.state?.publicPath,
-      AppCore?.state?.route,
-      AppCore?.state?.canonicalPath,
+      browserPath,
 
       Router?.getCurrentPublicPath?.(),
       Router?.getCurrentCanonicalPath?.(),
       Router?.getCurrentPath?.(),
 
+      AppCore?.state?.publicPath,
+      AppCore?.state?.route,
+      AppCore?.state?.canonicalPath,
+
       Router?.getPath?.(),
       Router?.currentPath,
-
-      getBrowserPath(),
     ];
 
     for (const candidate of candidates) {
@@ -1311,7 +1382,7 @@ export const SidebarUI = (() => {
     );
   }
 
-  function getMenuItems() {
+  function getAllMenuItems() {
     const {
       sidebarMenu,
     } = getElements(AppCore);
@@ -1329,7 +1400,12 @@ export const SidebarUI = (() => {
         "a[data-route]",
         ".menu-item[data-route]",
       ].join(",")
-    ).filter((item) => !isElementHiddenOrDisabled(item));
+    );
+  }
+
+  function getMenuItems() {
+    return getAllMenuItems()
+      .filter((item) => !isElementHiddenOrDisabled(item));
   }
 
   function getMenuItemRoute(element = null) {
@@ -1396,48 +1472,50 @@ export const SidebarUI = (() => {
     return exact || partial || null;
   }
 
+  function clearAllActiveRouteMarkers() {
+    const allItems = getAllMenuItems();
+
+    for (const item of allItems) {
+      try {
+        item.classList.remove(
+          "active",
+          "is-active",
+          "router-active"
+        );
+
+        item.removeAttribute("aria-current");
+
+        delete item.dataset.active;
+      } catch {}
+    }
+
+    return allItems.length;
+  }
+
   function syncActiveRouteMarkers(route = "") {
     refreshSidebarDomRefs();
 
     const currentPath =
       normalizeRoutePath(route || getCurrentRoutePath());
 
-    const items = getMenuItems();
-
     const activeItem =
       resolveActiveMenuItem(currentPath);
 
-    for (const item of items) {
-      const isActive =
-        item === activeItem;
+    clearAllActiveRouteMarkers();
 
+    if (activeItem && !isElementHiddenOrDisabled(activeItem)) {
       try {
-        item.classList.toggle(
+        activeItem.classList.add(
           "active",
-          isActive
+          "is-active"
         );
 
-        item.classList.toggle(
-          "is-active",
-          isActive
+        activeItem.setAttribute(
+          "aria-current",
+          "page"
         );
-      } catch {}
 
-      try {
-        if (isActive) {
-          item.setAttribute(
-            "aria-current",
-            "page"
-          );
-
-          item.dataset.active = "true";
-        } else {
-          item.removeAttribute(
-            "aria-current"
-          );
-
-          delete item.dataset.active;
-        }
+        activeItem.dataset.active = "true";
       } catch {}
     }
 
@@ -1460,18 +1538,143 @@ export const SidebarUI = (() => {
     }
   }
 
+  function clearHoverFlushTimer() {
+    if (hoverFlushTimer) {
+      safeClearTimeout(hoverFlushTimer);
+      hoverFlushTimer = null;
+    }
+  }
+
+  function flushMenuHoverState(reason = "hover-flush", durationMs = HOVER_FLUSH_MS) {
+    if (!isBrowser()) {
+      return false;
+    }
+
+    const {
+      body,
+      sidebar,
+      sidebarMenu,
+    } = getElements(AppCore);
+
+    if (!sidebarMenu) {
+      return false;
+    }
+
+    clearHoverFlushTimer();
+
+    const duration =
+      clampNumber(durationMs, 16, 600);
+
+    try {
+      body?.classList?.add?.("sidebar-visual-syncing");
+      sidebar?.classList?.add?.("is-visual-syncing");
+      sidebarMenu?.classList?.add?.("is-visual-syncing");
+
+      sidebarMenu.dataset.visualSyncing = "true";
+      sidebarMenu.dataset.visualSyncReason = reason;
+
+      if (!sidebarMenu.dataset.previousPointerEventsSet) {
+        sidebarMenu.dataset.previousPointerEvents =
+          sidebarMenu.style.pointerEvents || "__empty__";
+
+        sidebarMenu.dataset.previousPointerEventsSet = "true";
+      }
+
+      /*
+        Esto fuerza al navegador a soltar :hover real.
+        Es la pieza que mata el “hover colgado” después de navegación.
+      */
+      sidebarMenu.style.pointerEvents = "none";
+
+      const active = document.activeElement;
+
+      if (
+        active &&
+        sidebarMenu.contains(active) &&
+        typeof active.blur === "function"
+      ) {
+        active.blur();
+      }
+    } catch {}
+
+    hoverFlushTimer = safeSetTimeout(() => {
+      hoverFlushTimer = null;
+
+      try {
+        body?.classList?.remove?.("sidebar-visual-syncing");
+        sidebar?.classList?.remove?.("is-visual-syncing");
+        sidebarMenu?.classList?.remove?.("is-visual-syncing");
+
+        delete sidebarMenu.dataset.visualSyncing;
+        delete sidebarMenu.dataset.visualSyncReason;
+
+        const previous =
+          sidebarMenu.dataset.previousPointerEvents;
+
+        if (!previous || previous === "__empty__") {
+          sidebarMenu.style.pointerEvents = "";
+        } else {
+          sidebarMenu.style.pointerEvents = previous;
+        }
+
+        delete sidebarMenu.dataset.previousPointerEvents;
+        delete sidebarMenu.dataset.previousPointerEventsSet;
+      } catch {}
+    }, duration);
+
+    return true;
+  }
+
   function scheduleSidebarVisualSync(reason = "visual-sync", options = {}) {
     const opts = safeObject(options);
-    const delayMs = Math.max(0, safeNumber(opts.delayMs, 24));
+    const delayMs = clampNumber(
+      opts.delayMs,
+      0,
+      5000
+    );
+
+    const expectedGeneration =
+      typeof opts.generation === "number"
+        ? opts.generation
+        : bindGeneration;
+
+    const route =
+      normalizeRoutePath(
+        resolvePreferredRouteFromOptions(opts) ||
+          ""
+      );
 
     clearVisualSyncTimer();
+
+    if (opts.flushHover !== false) {
+      flushMenuHoverState(
+        reason,
+        opts.hoverFlushMs || HOVER_FLUSH_MS
+      );
+    }
 
     visualSyncTimer = safeSetTimeout(() => {
       visualSyncTimer = null;
 
+      if (
+        typeof expectedGeneration === "number" &&
+        expectedGeneration !== bindGeneration
+      ) {
+        return;
+      }
+
       afterPaint(() => {
+        if (
+          typeof expectedGeneration === "number" &&
+          expectedGeneration !== bindGeneration
+        ) {
+          return;
+        }
+
         refreshSidebarDomRefs();
-        syncActiveRouteMarkers();
+
+        const activeItem =
+          syncActiveRouteMarkers(route);
 
         try {
           scheduleActiveMenuIndicator(AppCore, {
@@ -1479,6 +1682,7 @@ export const SidebarUI = (() => {
             delayMs: 0,
             reveal: opts.reveal !== false,
             force: opts.force === true,
+            activeItem,
           });
         } catch {
           try {
@@ -1486,6 +1690,7 @@ export const SidebarUI = (() => {
               reason,
               reveal: opts.reveal !== false,
               force: opts.force === true,
+              activeItem,
             });
           } catch {}
         }
@@ -1495,12 +1700,25 @@ export const SidebarUI = (() => {
     return true;
   }
 
-  function syncRouteAndIndicator(reason = "route-sync") {
-    syncActiveRouteMarkers();
+  function syncRouteAndIndicator(reason = "route-sync", options = {}) {
+    const opts = safeObject(options);
+    const route =
+      normalizeRoutePath(
+        resolvePreferredRouteFromOptions(opts) ||
+          ""
+      );
+
+    syncActiveRouteMarkers(route);
 
     scheduleSidebarVisualSync(reason, {
-      delayMs: 16,
-      reveal: true,
+      ...opts,
+      route,
+      delayMs:
+        typeof opts.delayMs === "number"
+          ? opts.delayMs
+          : 16,
+      reveal: opts.reveal !== false,
+      force: opts.force === true,
     });
 
     return true;
@@ -1518,6 +1736,7 @@ export const SidebarUI = (() => {
 
     scheduleSidebarVisualSync("close-dropdown", {
       delayMs: 24,
+      flushHover: false,
     });
 
     return result;
@@ -1556,6 +1775,7 @@ export const SidebarUI = (() => {
 
     scheduleSidebarVisualSync("open-dropdown", {
       delayMs: 32,
+      flushHover: false,
     });
 
     return result;
@@ -1575,6 +1795,7 @@ export const SidebarUI = (() => {
 
     scheduleSidebarVisualSync("toggle-dropdown", {
       delayMs: 32,
+      flushHover: false,
     });
 
     return result;
@@ -1652,9 +1873,10 @@ export const SidebarUI = (() => {
 
     scheduleSidebarVisualSync("set-sidebar-open", {
       delayMs: previousOpen !== nextOpen
-        ? 430
+        ? VISUAL_SYNC_AFTER_TRANSITION_DELAY
         : 32,
       force: true,
+      flushHover: true,
     });
 
     return Boolean(result);
@@ -1769,6 +1991,31 @@ export const SidebarUI = (() => {
 
         userDropdownClassName:
           elements.userDropdown?.className || "",
+      },
+
+      activeRouteDom: {
+        currentRoute:
+          getCurrentRoutePath(),
+
+        activeItems:
+          getAllMenuItems()
+            .filter((item) => {
+              return Boolean(
+                item.classList?.contains?.("active") ||
+                  item.classList?.contains?.("is-active") ||
+                  item.getAttribute?.("aria-current") === "page"
+              );
+            })
+            .map((item) => ({
+              route:
+                getMenuItemRoute(item),
+
+              text:
+                safeText(item.textContent, ""),
+
+              hidden:
+                isElementHiddenOrDisabled(item),
+            })),
       },
 
       indicatorDom: {
@@ -1893,6 +2140,7 @@ export const SidebarUI = (() => {
   function cleanupBoundEvents() {
     cleanupFallbackDomEvents();
     clearVisualSyncTimer();
+    clearHoverFlushTimer();
 
     try {
       if (
@@ -1918,7 +2166,10 @@ export const SidebarUI = (() => {
 
   function cleanup() {
     cleanupBoundEvents();
-    closeDropdown();
+
+    try {
+      closeDropdown();
+    } catch {}
 
     return true;
   }
@@ -1963,7 +2214,8 @@ export const SidebarUI = (() => {
         );
 
         scheduleSidebarVisualSync("navigate:router.navigate", {
-          delayMs: 80,
+          route: target,
+          delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
           force: true,
         });
 
@@ -1976,7 +2228,8 @@ export const SidebarUI = (() => {
         );
 
         scheduleSidebarVisualSync("navigate:router.go", {
-          delayMs: 80,
+          route: target,
+          delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
           force: true,
         });
 
@@ -1989,7 +2242,8 @@ export const SidebarUI = (() => {
         );
 
         scheduleSidebarVisualSync("navigate:router.push", {
-          delayMs: 80,
+          route: target,
+          delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
           force: true,
         });
 
@@ -2002,7 +2256,8 @@ export const SidebarUI = (() => {
         );
 
         scheduleSidebarVisualSync("navigate:appcore.router.navigate", {
-          delayMs: 80,
+          route: target,
+          delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
           force: true,
         });
 
@@ -2015,7 +2270,8 @@ export const SidebarUI = (() => {
         );
 
         scheduleSidebarVisualSync("navigate:appcore.navigate", {
-          delayMs: 80,
+          route: target,
+          delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
           force: true,
         });
 
@@ -2034,7 +2290,8 @@ export const SidebarUI = (() => {
       window.dispatchEvent(new PopStateEvent("popstate"));
 
       scheduleSidebarVisualSync("navigate:history", {
-        delayMs: 80,
+        route: target,
+        delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
         force: true,
       });
 
@@ -2076,6 +2333,11 @@ export const SidebarUI = (() => {
 
     syncActiveRouteMarkers(route);
 
+    flushMenuHoverState(
+      "navigation",
+      HOVER_FLUSH_MS
+    );
+
     if (!skipNavigation) {
       await navigateTo(route, {
         source: "sidebar",
@@ -2083,7 +2345,8 @@ export const SidebarUI = (() => {
       });
     } else {
       scheduleSidebarVisualSync("navigation-post-router", {
-        delayMs: 80,
+        route,
+        delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
         force: true,
       });
     }
@@ -2559,6 +2822,7 @@ export const SidebarUI = (() => {
       scheduleSidebarVisualSync("window-resize", {
         delayMs: 120,
         force: true,
+        flushHover: true,
       });
     };
 
@@ -2568,8 +2832,9 @@ export const SidebarUI = (() => {
       }
 
       scheduleSidebarVisualSync("window-popstate", {
-        delayMs: 80,
+        delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
         force: true,
+        flushHover: true,
       });
     };
 
@@ -2579,8 +2844,9 @@ export const SidebarUI = (() => {
       }
 
       scheduleSidebarVisualSync("window-hashchange", {
-        delayMs: 80,
+        delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
         force: true,
+        flushHover: true,
       });
     };
 
@@ -2678,9 +2944,13 @@ export const SidebarUI = (() => {
       return api;
     }
 
-    cleanupBoundEvents();
-
+    /*
+      Primero invalidamos generación vieja.
+      Luego limpiamos listeners antiguos.
+    */
     bindGeneration += 1;
+
+    cleanupBoundEvents();
 
     const scope = getCleanupScope();
 
@@ -2740,6 +3010,8 @@ export const SidebarUI = (() => {
     scheduleSidebarVisualSync(`bind-events:${lastBindReason}`, {
       delayMs: 64,
       force: true,
+      flushHover: false,
+      generation: bindGeneration,
     });
 
     safeEmit("sidebar:events:bound", {
@@ -2763,11 +3035,18 @@ export const SidebarUI = (() => {
     mountAndRefresh();
     ensureRuntimeStateDefaults();
 
-    sanitizeFooterTooltipState(AppCore);
+    try {
+      sanitizeFooterTooltipState(AppCore);
+    } catch {}
+
     syncSidebarState();
     renderUser();
     applyRoleVisibility();
-    syncRouteAndIndicator(`refresh:${reason}`);
+
+    syncRouteAndIndicator(`refresh:${reason}`, {
+      delayMs: VISUAL_SYNC_DEFAULT_DELAY,
+      force: true,
+    });
 
     safeEmit("sidebar:refreshed", {
       reason,
@@ -2790,7 +3069,10 @@ export const SidebarUI = (() => {
 
     ensureRuntimeStateDefaults();
 
-    sanitizeFooterTooltipState(AppCore);
+    try {
+      sanitizeFooterTooltipState(AppCore);
+    } catch {}
+
     repairSidebarState(`repair:${reason}`);
     renderUser();
     applyRoleVisibility();
@@ -2799,10 +3081,16 @@ export const SidebarUI = (() => {
 
     initialized = true;
 
-    syncRouteAndIndicator(`repair:${reason}`);
+    syncRouteAndIndicator(`repair:${reason}`, {
+      delayMs: 32,
+      force: true,
+    });
 
     afterPaint(() => {
-      syncRouteAndIndicator(`repair:${reason}:after-paint`);
+      syncRouteAndIndicator(`repair:${reason}:after-paint`, {
+        delayMs: 0,
+        force: true,
+      });
     });
 
     safeEmit("sidebar:repaired", {
@@ -2887,7 +3175,9 @@ export const SidebarUI = (() => {
 
     ensureRuntimeStateDefaults();
 
-    sanitizeFooterTooltipState(AppCore);
+    try {
+      sanitizeFooterTooltipState(AppCore);
+    } catch {}
 
     syncSidebarState();
     renderUser();
@@ -2904,10 +3194,18 @@ export const SidebarUI = (() => {
 
     registerModule();
 
-    syncRouteAndIndicator("init");
+    syncRouteAndIndicator("init", {
+      delayMs: 32,
+      force: true,
+      flushHover: false,
+    });
 
     afterPaint(() => {
-      syncRouteAndIndicator("init:after-paint");
+      syncRouteAndIndicator("init:after-paint", {
+        delayMs: 0,
+        force: true,
+        flushHover: false,
+      });
     });
 
     safeEmit("sidebar:ready", {
@@ -3024,6 +3322,18 @@ export const SidebarUI = (() => {
       route:
         getCurrentRoutePath(),
 
+      browserRoute:
+        normalizeRoutePath(getBrowserPath()),
+
+      stateRoute:
+        normalizeRoutePath(AppCore?.state?.route || ""),
+
+      statePublicPath:
+        normalizeRoutePath(AppCore?.state?.publicPath || ""),
+
+      routerPublicPath:
+        normalizeRoutePath(Router?.getCurrentPublicPath?.() || ""),
+
       hasSidebarMenu:
         Boolean(sidebarMenu),
 
@@ -3047,6 +3357,9 @@ export const SidebarUI = (() => {
       indicatorRoute:
         sidebarMenu?.dataset?.indicatorRoute || "",
 
+      visualSyncing:
+        sidebarMenu?.dataset?.visualSyncing || "",
+
       variables: {
         x:
           sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
@@ -3065,12 +3378,18 @@ export const SidebarUI = (() => {
       },
 
       menuItems:
-        getMenuItems().map((item) => ({
+        getAllMenuItems().map((item) => ({
           route:
             getMenuItemRoute(item),
 
+          rawRoute:
+            getRouteFromElement(item),
+
           text:
             safeText(item.textContent, ""),
+
+          hidden:
+            isElementHiddenOrDisabled(item),
 
           active:
             item.classList?.contains?.("active") ||
@@ -3133,6 +3452,9 @@ export const SidebarUI = (() => {
 
     scheduleIndicatorSync:
       scheduleSidebarVisualSync,
+
+    flushHover:
+      flushMenuHoverState,
 
     handleLogout,
 

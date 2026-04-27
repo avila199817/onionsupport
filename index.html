@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html
   lang="es"
-  data-theme="dark"
+  data-theme="system"
+  data-theme-source="system"
   class="app-booting app-loading"
 >
 <head>
@@ -13,9 +14,13 @@
        - CSP clean
        - cero scripts inline
        - cero CSS inline
+       - modo tema por defecto: system / navegador
+       - dark si el sistema/navegador está en oscuro
+       - light si el sistema/navegador está en claro
        - favicon real de pestaña: favicon_black_circle.png
+       - NO preload del favicon real para evitar warning Chrome
        - loader estático inicial para refresh sin parpadeos
-       - logo del loader dependiente del tema
+       - logo del loader dependiente del tema resuelto por preboot
        - theme preboot externo antes del CSS
        - shell SPA limpio
        - sidebar / topbar montados por JS
@@ -111,6 +116,11 @@
 
   <!-- =========================
        FAVICON REAL DE PESTAÑA
+       IMPORTANTE:
+       - no usar rel="preload" aquí
+       - Chrome puede advertir que no se usa
+         porque el favicon no cuenta como imagen
+         consumida inmediatamente por el DOM
   ========================= -->
   <link
     rel="icon"
@@ -143,13 +153,7 @@
     crossorigin
   >
 
-  <link
-    rel="preload"
-    href="/src/media/img/favicon_black_circle.png"
-    as="image"
-    type="image/png"
-  >
-
+  <!-- Loader logos: sí se usan como <img> reales -->
   <link
     rel="preload"
     href="/src/media/img/favicon_white.png"
@@ -182,6 +186,10 @@
        CSP CLEAN:
        - sin inline script
        - debe ejecutarse antes del CSS final
+       - debe resolver:
+           data-theme="dark"  si system dark
+           data-theme="light" si system light
+       - source inicial esperado: system
   ========================= -->
   <script
     src="/src/preboot/theme.js"

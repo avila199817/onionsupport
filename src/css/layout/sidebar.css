@@ -22,8 +22,11 @@
    - light mode fino
    - menos ruido visual en navegación SPA
 
-   NOTA CLAVE:
-   - El estado visual activo fiable es:
+   ARQUITECTURA VISUAL:
+   - state.js es el único dueño de las variables:
+     --sidebar-indicator-x/y/w/h/opacity
+   - CSS solo consume esas variables.
+   - El activo fiable es:
      [aria-current="page"] o [data-active="true"]
    - .active / .is-active se conservan por compatibilidad,
      pero se neutralizan si aria-current="false" o data-active="false".
@@ -197,7 +200,7 @@
 
 
 /* =========================================================
-   TEMPORARY HIGH STACK FOR TOOLTIP / COMPACT / DROPDOWN
+   HIGH STACK FOR TOOLTIP / COMPACT / DROPDOWN
 ========================================================= */
 
 .sidebar.sidebar-tooltips-active,
@@ -230,14 +233,6 @@ body.sidebar-collapsed .sidebar{
 
 /* =========================================================
    TRANSITION / VISUAL SYNC GUARD
-   JS recomendado:
-   - body.sidebar-transitioning
-   - body.sidebar-visual-syncing
-   - body.router-rendering
-   - body.app-navigating
-   - .sidebar.is-transitioning
-   - .sidebar-menu.is-transitioning
-   - .sidebar-menu.is-visual-syncing
 ========================================================= */
 
 body.sidebar-transitioning .sidebar,
@@ -282,6 +277,23 @@ body.app-navigating .sidebar .menu-item:hover svg,
   color:var(--sidebar-icon) !important;
 }
 
+body.sidebar-transitioning .sidebar .menu-item[aria-current="page"] svg,
+body.sidebar-transitioning .sidebar .menu-item[data-active="true"] svg,
+body.sidebar-visual-syncing .sidebar .menu-item[aria-current="page"] svg,
+body.sidebar-visual-syncing .sidebar .menu-item[data-active="true"] svg,
+body.router-rendering .sidebar .menu-item[aria-current="page"] svg,
+body.router-rendering .sidebar .menu-item[data-active="true"] svg,
+body.app-navigating .sidebar .menu-item[aria-current="page"] svg,
+body.app-navigating .sidebar .menu-item[data-active="true"] svg,
+.sidebar.is-transitioning .menu-item[aria-current="page"] svg,
+.sidebar.is-transitioning .menu-item[data-active="true"] svg,
+.sidebar-menu.is-transitioning .menu-item[aria-current="page"] svg,
+.sidebar-menu.is-transitioning .menu-item[data-active="true"] svg,
+.sidebar-menu.is-visual-syncing .menu-item[aria-current="page"] svg,
+.sidebar-menu.is-visual-syncing .menu-item[data-active="true"] svg{
+  color:var(--sidebar-icon-active) !important;
+}
+
 body.sidebar-transitioning .sidebar .menu-item::before,
 body.sidebar-visual-syncing .sidebar .menu-item::before,
 body.router-rendering .sidebar .menu-item::before,
@@ -313,10 +325,15 @@ body.app-navigating .sidebar .menu-item:hover::after,
 .sidebar-menu.is-transitioning .menu-item:hover::before,
 .sidebar-menu.is-transitioning .menu-item:hover::after,
 .sidebar-menu.is-visual-syncing .menu-item:hover::before,
-.sidebar-menu.is-visual-syncing .menu-item:hover::after{
+.sidebar-menu.is-visual-syncing .menu-item:hover::after,
+.sidebar-menu.is-visual-syncing .menu-item:focus::before,
+.sidebar-menu.is-visual-syncing .menu-item:focus::after,
+.sidebar-menu.is-visual-syncing .menu-item:focus-visible::before,
+.sidebar-menu.is-visual-syncing .menu-item:focus-visible::after{
   opacity:0 !important;
   visibility:hidden !important;
   transform:none !important;
+  animation:none !important;
 }
 
 body.sidebar-transitioning .sidebar [data-tooltip]::before,
@@ -756,8 +773,11 @@ body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-i
 }
 
 .sidebar.collapsed .menu-item[aria-current="page"][data-tooltip]::after,
+.sidebar.collapsed .menu-item[data-active="true"][data-tooltip]::after,
 .sidebar.is-collapsed .menu-item[aria-current="page"][data-tooltip]::after,
-body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::after{
+.sidebar.is-collapsed .menu-item[data-active="true"][data-tooltip]::after,
+body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::after,
+body.sidebar-collapsed .sidebar .menu-item[data-active="true"][data-tooltip]::after{
   opacity:0 !important;
   visibility:hidden !important;
 }
@@ -836,6 +856,12 @@ body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::a
   transform:
     translateY(var(--sidebar-indicator-y))
     translateZ(0);
+
+  will-change:
+    transform,
+    inline-size,
+    block-size,
+    opacity;
 
   transition:
     transform .34s var(--ease-emphasis),
@@ -1013,12 +1039,6 @@ body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-i
 
 /* =========================================================
    ACTIVE STATE — CANONICAL SOURCE
-   Fuente fuerte:
-   - aria-current="page"
-   - data-active="true"
-
-   Compat:
-   - .active / .is-active solo pintan si NO están negadas.
 ========================================================= */
 
 .menu-item[aria-current="page"],
@@ -1047,7 +1067,7 @@ body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-i
 
 /*
   Neutraliza clases stale:
-  Si el JS dejó .active pero marcó aria-current=false o data-active=false,
+  Si JS dejó .active pero marcó aria-current=false o data-active=false,
   NO se pinta como activo.
 */
 .menu-item.active[aria-current="false"],
@@ -1085,8 +1105,23 @@ body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-i
 .sidebar-menu[data-indicator-ready="true"] .menu-item.active:not([aria-current="false"]):not([data-active="false"])::before,
 .sidebar-menu[data-indicator-ready="true"] .menu-item.is-active:not([aria-current="false"]):not([data-active="false"])::before{
   opacity:0;
+  visibility:hidden;
   transform:scale(.985);
   animation:none;
+}
+
+/*
+  Evita que el hover del activo mueva el rectángulo mientras el indicador
+  ya se está posicionando por JS.
+*/
+.sidebar-menu[data-indicator-ready="true"] .menu-item[aria-current="page"]:hover,
+.sidebar-menu[data-indicator-ready="true"] .menu-item[data-active="true"]:hover,
+.sidebar-menu[data-indicator-ready="true"] .menu-item.active:not([aria-current="false"]):not([data-active="false"]):hover,
+.sidebar-menu[data-indicator-ready="true"] .menu-item.is-active:not([aria-current="false"]):not([data-active="false"]):hover{
+  background:transparent;
+  border-color:transparent;
+  box-shadow:none;
+  transform:none;
 }
 
 .menu-item[aria-current="page"] svg,
@@ -1197,6 +1232,17 @@ body.sidebar-collapsed .sidebar .menu-item:hover{
   border-color:color-mix(in srgb, var(--text-strong), transparent 96%);
   color:var(--text-strong);
   transform:none !important;
+}
+
+.sidebar.collapsed .sidebar-menu[data-indicator-ready="true"] .menu-item[aria-current="page"]:hover,
+.sidebar.collapsed .sidebar-menu[data-indicator-ready="true"] .menu-item[data-active="true"]:hover,
+.sidebar.is-collapsed .sidebar-menu[data-indicator-ready="true"] .menu-item[aria-current="page"]:hover,
+.sidebar.is-collapsed .sidebar-menu[data-indicator-ready="true"] .menu-item[data-active="true"]:hover,
+body.sidebar-collapsed .sidebar .sidebar-menu[data-indicator-ready="true"] .menu-item[aria-current="page"]:hover,
+body.sidebar-collapsed .sidebar .sidebar-menu[data-indicator-ready="true"] .menu-item[data-active="true"]:hover{
+  background:transparent;
+  border-color:transparent;
+  box-shadow:none;
 }
 
 .sidebar.collapsed .menu-item[aria-current="page"],
@@ -1376,7 +1422,11 @@ body.sidebar-collapsed .sidebar .sidebar-section{
   border:1px solid transparent;
   border-radius:var(--radius-lg);
 
+  background:transparent;
   color:var(--text);
+
+  font:inherit;
+  text-align:left;
 
   cursor:pointer;
   user-select:none;
@@ -2192,7 +2242,7 @@ body.sidebar-open [data-sidebar-overlay]{
 
 /* =========================================================
    FINAL HOVER / FOCUS STALE KILLER
-   Este bloque debe quedar AL FINAL antes de reduced-motion/print.
+   Debe quedar al final antes de reduced-motion/print.
 ========================================================= */
 
 body.sidebar-visual-syncing .sidebar-menu,
@@ -2228,6 +2278,17 @@ body.app-navigating .sidebar-menu .menu-item:hover svg,
   color:var(--sidebar-icon) !important;
 }
 
+body.sidebar-visual-syncing .sidebar-menu .menu-item[aria-current="page"] svg,
+body.sidebar-visual-syncing .sidebar-menu .menu-item[data-active="true"] svg,
+body.router-rendering .sidebar-menu .menu-item[aria-current="page"] svg,
+body.router-rendering .sidebar-menu .menu-item[data-active="true"] svg,
+body.app-navigating .sidebar-menu .menu-item[aria-current="page"] svg,
+body.app-navigating .sidebar-menu .menu-item[data-active="true"] svg,
+.sidebar-menu.is-visual-syncing .menu-item[aria-current="page"] svg,
+.sidebar-menu.is-visual-syncing .menu-item[data-active="true"] svg{
+  color:var(--sidebar-icon-active) !important;
+}
+
 body.sidebar-visual-syncing .sidebar-menu .menu-item:hover::before,
 body.sidebar-visual-syncing .sidebar-menu .menu-item:hover::after,
 body.sidebar-visual-syncing .sidebar-menu .menu-item:focus::before,
@@ -2251,8 +2312,8 @@ body.app-navigating .sidebar-menu .menu-item:hover::after,
 }
 
 /*
-  Pero el activo canónico sí puede mantener color de texto durante sync.
-  La burbuja/indicador se recoloca por JS después del paint.
+  El activo canónico mantiene color durante sync.
+  La burbuja/indicador se recoloca por state.js después del paint.
 */
 body.sidebar-visual-syncing .sidebar-menu .menu-item[aria-current="page"],
 body.sidebar-visual-syncing .sidebar-menu .menu-item[data-active="true"],

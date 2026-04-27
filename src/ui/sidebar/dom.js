@@ -2,7 +2,7 @@
    Onion SPA - Sidebar DOM
    Archivo: src/ui/sidebar/dom.js
 
-   FINAL PRO SYSTEM · SIDEBAR DOM · 10/10
+   FINAL PRO SYSTEM · SIDEBAR DOM · 10/10 · DROPDOWN HARDENED
 
    Responsabilidades:
    - montar el HTML del sidebar en el shell
@@ -15,6 +15,8 @@
    - sanear tooltip del logo del sidebar
    - rehidratar refs tras mount dinámico
    - mantener compatibilidad con AppCore.dom
+   - resolver dropdown de usuario aunque cambien IDs/data/classes
+   - soportar aria-controls entre toggle y dropdown
 
    HARDENING:
    - no duplica sidebar si ya existe
@@ -24,6 +26,7 @@
    - limpieza de title/data-tooltip/aria-describedby
    - evita tooltips fantasma tras re-render/i18n/live refresh
    - no mete el sidebar dentro del view-container
+   - selector resolver ampliado para userToggle/userDropdown/logout
 ========================================================= */
 
 import { getSidebarTemplate } from "./template.js";
@@ -49,6 +52,157 @@ const SIDEBAR_MOBILE_TOGGLE_ID = "toggleSidebarMobile";
 const SIDEBAR_LOGO_ID = "homeLink";
 
 /* =========================================================
+   SELECTOR FALLBACKS
+========================================================= */
+
+const SIDEBAR_SELECTORS = [
+  `#${SIDEBAR_ROOT_ID}`,
+  ".sidebar",
+  "[data-sidebar='true']",
+  "[data-sidebar-root]",
+  "[data-sidebar]",
+];
+
+const SIDEBAR_MENU_SELECTORS = [
+  `#${SIDEBAR_MENU_ID}`,
+  "[data-sidebar-menu]",
+  ".sidebar-menu",
+  "[role='navigation']",
+];
+
+const SIDEBAR_RECENTS_SELECTORS = [
+  `#${SIDEBAR_RECENTS_ID}`,
+  "[data-sidebar-recents]",
+  "[data-sidebar-recent]",
+  ".sidebar-recents",
+];
+
+const SIDEBAR_TOGGLE_SELECTORS = [
+  `#${SIDEBAR_TOGGLE_ID}`,
+  "[data-sidebar-action='toggle-sidebar']",
+  "[data-sidebar-toggle]",
+  "[data-action='toggle-sidebar']",
+  ".sidebar-toggle",
+];
+
+const SIDEBAR_MOBILE_TOGGLE_SELECTORS = [
+  `#${SIDEBAR_MOBILE_TOGGLE_ID}`,
+  "[data-sidebar-mobile-toggle]",
+  "[data-sidebar-action='mobile-sidebar-toggle']",
+  "[data-action='mobile-sidebar-toggle']",
+  ".sidebar-mobile-toggle",
+];
+
+const USER_TOGGLE_SELECTORS = [
+  `#${USER_TOGGLE_ID}`,
+  "#sidebarUserToggle",
+  "#sidebar-user-toggle",
+  "#sidebarUserMenuToggle",
+  "#sidebar-user-menu-toggle",
+  "#userToggle",
+  "#user-toggle",
+
+  "[data-sidebar-action='toggle-user-dropdown']",
+  "[data-sidebar-action='toggle-user-menu']",
+  "[data-sidebar-action='user-toggle']",
+  "[data-sidebar-action='user-dropdown']",
+  "[data-sidebar-user-toggle]",
+  "[data-user-toggle]",
+  "[data-user-menu-toggle]",
+  "[data-dropdown-toggle='user']",
+  "[data-dropdown-target='user']",
+
+  ".sidebar-user-toggle",
+  ".sidebar-user__toggle",
+  ".sidebar-footer-user-toggle",
+  ".sidebar-footer__user-toggle",
+  ".user-toggle",
+  ".user-menu-toggle",
+
+  `[aria-controls='${USER_DROPDOWN_ID}']`,
+];
+
+const USER_DROPDOWN_SELECTORS = [
+  `#${USER_DROPDOWN_ID}`,
+  "#sidebarUserDropdown",
+  "#sidebar-user-dropdown",
+  "#sidebarUserMenu",
+  "#sidebar-user-menu",
+  "#userDropdown",
+  "#user-dropdown",
+  "#userMenu",
+  "#user-menu",
+
+  "[data-user-dropdown]",
+  "[data-user-menu]",
+  "[data-sidebar-user-dropdown]",
+  "[data-sidebar-user-menu]",
+  "[data-dropdown='user']",
+  "[data-dropdown-menu='user']",
+  "[data-sidebar-dropdown='user']",
+
+  ".sidebar-user-dropdown",
+  ".sidebar-user-menu",
+  ".sidebar-user__dropdown",
+  ".sidebar-user__menu",
+  ".sidebar-footer-user-dropdown",
+  ".sidebar-footer-user-menu",
+  ".sidebar-footer__user-dropdown",
+  ".sidebar-footer__user-menu",
+  ".user-dropdown",
+  ".user-menu",
+];
+
+const LOGOUT_SELECTORS = [
+  `#${LOGOUT_BUTTON_ID}`,
+  "#logoutBtn",
+  "#logoutButton",
+  "#sidebarLogout",
+  "#sidebar-logout",
+
+  "[data-sidebar-action='logout']",
+  "[data-action='logout']",
+  "[data-logout]",
+  "[data-sidebar-logout]",
+
+  ".sidebar-logout",
+  ".logout-button",
+  ".logout-btn",
+];
+
+const AVATAR_SELECTORS = [
+  `#${SIDEBAR_AVATAR_ID}`,
+  "#sidebarAvatar",
+  "#sidebar-avatar",
+  "[data-sidebar-avatar]",
+  "[data-user-avatar]",
+  ".sidebar-avatar",
+  ".sidebar-user-avatar",
+];
+
+const NAME_SELECTORS = [
+  `#${SIDEBAR_NAME_ID}`,
+  "#sidebarName",
+  "#sidebar-name",
+  "#sidebarUserName",
+  "#sidebar-user-name",
+  "[data-sidebar-name]",
+  "[data-user-name]",
+  ".sidebar-name",
+  ".sidebar-user-name",
+];
+
+const LOGO_SELECTORS = [
+  `#${SIDEBAR_LOGO_ID}`,
+  "#sidebarLogo",
+  "#sidebar-logo",
+  "[data-sidebar-logo]",
+  ".logo",
+  "a.logo",
+  ".sidebar-logo",
+];
+
+/* =========================================================
    SAFE HELPERS
 ========================================================= */
 
@@ -67,6 +221,18 @@ function safeText(value, fallback = "") {
   const text = String(value).trim();
 
   return text || fallback;
+}
+
+function isElement(value = null) {
+  if (!value) {
+    return false;
+  }
+
+  try {
+    return typeof Element !== "undefined" && value instanceof Element;
+  } catch {
+    return Boolean(value && typeof value.querySelector === "function");
+  }
 }
 
 function ensureDomBag(AppCore) {
@@ -135,6 +301,36 @@ function queryAll(selector = "", root = null) {
   }
 }
 
+function queryFirst(selectors = [], root = null) {
+  for (const selector of selectors) {
+    const element = query(selector, root);
+
+    if (element) {
+      return element;
+    }
+  }
+
+  return null;
+}
+
+function queryFirstGlobalThenLocal(selectors = [], root = null) {
+  for (const selector of selectors) {
+    const globalMatch = query(selector);
+
+    if (globalMatch) {
+      return globalMatch;
+    }
+
+    const localMatch = root ? query(selector, root) : null;
+
+    if (localMatch) {
+      return localMatch;
+    }
+  }
+
+  return null;
+}
+
 function setHidden(element = null, hidden = false) {
   if (!element) {
     return false;
@@ -178,6 +374,97 @@ function toFragment(html = "") {
   template.innerHTML = String(html || "").trim();
 
   return template.content;
+}
+
+/* =========================================================
+   SPECIAL RESOLVERS
+========================================================= */
+
+function resolveSidebarRoot() {
+  return queryFirstGlobalThenLocal(SIDEBAR_SELECTORS) || null;
+}
+
+function resolveControlledDropdownFromToggle(userToggle = null, sidebar = null) {
+  if (!userToggle) {
+    return null;
+  }
+
+  const controls = safeText(
+    userToggle.getAttribute?.("aria-controls") ||
+      userToggle.dataset?.controls ||
+      userToggle.dataset?.target ||
+      userToggle.dataset?.dropdownTarget ||
+      "",
+    ""
+  );
+
+  if (!controls) {
+    return null;
+  }
+
+  const controlled =
+    byId(controls) ||
+    query(`#${CSS.escape ? CSS.escape(controls) : controls}`, sidebar) ||
+    query(`#${CSS.escape ? CSS.escape(controls) : controls}`);
+
+  return controlled || null;
+}
+
+function resolveUserToggle(sidebar = null) {
+  const toggle =
+    queryFirstGlobalThenLocal(USER_TOGGLE_SELECTORS, sidebar);
+
+  if (toggle) {
+    return toggle;
+  }
+
+  /*
+    Fallback final:
+    botón dentro del footer que controle un dropdown mediante aria-expanded.
+  */
+  return (
+    query(
+      [
+        ".sidebar-footer button[aria-expanded]",
+        "[data-sidebar-footer] button[aria-expanded]",
+        ".sidebar-footer [role='button'][aria-expanded]",
+        "[data-sidebar-footer] [role='button'][aria-expanded]",
+      ].join(","),
+      sidebar
+    ) || null
+  );
+}
+
+function resolveUserDropdown(sidebar = null, userToggle = null) {
+  const byControl =
+    resolveControlledDropdownFromToggle(userToggle, sidebar);
+
+  if (byControl) {
+    return byControl;
+  }
+
+  const dropdown =
+    queryFirstGlobalThenLocal(USER_DROPDOWN_SELECTORS, sidebar);
+
+  if (dropdown) {
+    return dropdown;
+  }
+
+  /*
+    Fallback final:
+    menú cercano dentro del footer.
+  */
+  return (
+    query(
+      [
+        ".sidebar-footer [role='menu']",
+        "[data-sidebar-footer] [role='menu']",
+        ".sidebar-footer .dropdown-menu",
+        "[data-sidebar-footer] .dropdown-menu",
+      ].join(","),
+      sidebar
+    ) || null
+  );
 }
 
 /* =========================================================
@@ -261,9 +548,7 @@ export function sanitizeLogoTooltipState(AppCore) {
   const logo =
     logoEl ||
     byId(SIDEBAR_LOGO_ID) ||
-    query(".logo", sidebar) ||
-    query("a.logo", sidebar) ||
-    query("[data-sidebar-logo]", sidebar);
+    queryFirst(LOGO_SELECTORS, sidebar);
 
   if (!logo) {
     return false;
@@ -369,7 +654,7 @@ export function mountSidebar(AppCore) {
 
   const dom = ensureDomBag(AppCore);
 
-  let sidebar = byId(SIDEBAR_ROOT_ID);
+  let sidebar = byId(SIDEBAR_ROOT_ID) || resolveSidebarRoot();
 
   if (sidebar) {
     cacheDomRefs(AppCore);
@@ -404,7 +689,7 @@ export function mountSidebar(AppCore) {
     appendSidebarHtml(document.body, html, "prepend");
   }
 
-  sidebar = byId(SIDEBAR_ROOT_ID);
+  sidebar = byId(SIDEBAR_ROOT_ID) || resolveSidebarRoot();
 
   if (dom) {
     dom.sidebarMount = mount || byId(SIDEBAR_MOUNT_ID) || null;
@@ -440,77 +725,57 @@ export function cacheDomRefs(AppCore) {
 
   const sidebar =
     byId(SIDEBAR_ROOT_ID) ||
-    query(".sidebar") ||
-    query("[data-sidebar='true']") ||
-    query("[data-sidebar-root]") ||
-    null;
+    resolveSidebarRoot();
 
   const sidebarMenu =
     byId(SIDEBAR_MENU_ID) ||
-    query(`#${SIDEBAR_MENU_ID}`, sidebar) ||
-    query("[data-sidebar-menu]", sidebar) ||
-    query(".sidebar-menu", sidebar) ||
-    query(".sidebar-menu") ||
+    queryFirst(SIDEBAR_MENU_SELECTORS, sidebar) ||
+    queryFirst(SIDEBAR_MENU_SELECTORS) ||
     null;
 
   const sidebarRecents =
     byId(SIDEBAR_RECENTS_ID) ||
-    query(`#${SIDEBAR_RECENTS_ID}`, sidebar) ||
-    query("[data-sidebar-recents]", sidebar) ||
+    queryFirst(SIDEBAR_RECENTS_SELECTORS, sidebar) ||
     null;
 
   const sidebarToggle =
     byId(SIDEBAR_TOGGLE_ID) ||
-    query(`#${SIDEBAR_TOGGLE_ID}`, sidebar) ||
-    query("[data-sidebar-action='toggle-sidebar']", sidebar) ||
-    query("[data-sidebar-toggle]", sidebar) ||
+    queryFirst(SIDEBAR_TOGGLE_SELECTORS, sidebar) ||
     null;
 
   const mobileToggleBtn =
     byId(SIDEBAR_MOBILE_TOGGLE_ID) ||
-    query(`#${SIDEBAR_MOBILE_TOGGLE_ID}`, sidebar) ||
-    query("[data-sidebar-mobile-toggle]", sidebar) ||
-    query("[data-sidebar-action='mobile-sidebar-toggle']", sidebar) ||
+    queryFirst(SIDEBAR_MOBILE_TOGGLE_SELECTORS, sidebar) ||
     null;
 
   const userToggle =
     byId(USER_TOGGLE_ID) ||
-    query(`#${USER_TOGGLE_ID}`, sidebar) ||
-    query("[data-sidebar-action='toggle-user-dropdown']", sidebar) ||
-    query("[data-user-toggle]", sidebar) ||
+    resolveUserToggle(sidebar) ||
     null;
 
   const userDropdown =
     byId(USER_DROPDOWN_ID) ||
-    query(`#${USER_DROPDOWN_ID}`, sidebar) ||
-    query("[data-user-dropdown]", sidebar) ||
+    resolveUserDropdown(sidebar, userToggle) ||
     null;
 
   const logoutBtn =
     byId(LOGOUT_BUTTON_ID) ||
-    query(`#${LOGOUT_BUTTON_ID}`, sidebar) ||
-    query("[data-sidebar-action='logout']", sidebar) ||
-    query("[data-logout]", sidebar) ||
+    queryFirst(LOGOUT_SELECTORS, sidebar) ||
     null;
 
   const avatarEl =
     byId(SIDEBAR_AVATAR_ID) ||
-    query(`#${SIDEBAR_AVATAR_ID}`, sidebar) ||
-    query("[data-sidebar-avatar]", sidebar) ||
+    queryFirst(AVATAR_SELECTORS, sidebar) ||
     null;
 
   const nameEl =
     byId(SIDEBAR_NAME_ID) ||
-    query(`#${SIDEBAR_NAME_ID}`, sidebar) ||
-    query("[data-sidebar-name]", sidebar) ||
+    queryFirst(NAME_SELECTORS, sidebar) ||
     null;
 
   const logoEl =
     byId(SIDEBAR_LOGO_ID) ||
-    query(`#${SIDEBAR_LOGO_ID}`, sidebar) ||
-    query("[data-sidebar-logo]", sidebar) ||
-    query(".logo", sidebar) ||
-    query("a.logo", sidebar) ||
+    queryFirst(LOGO_SELECTORS, sidebar) ||
     null;
 
   const appShell = getAppShellEl(AppCore);
@@ -615,9 +880,21 @@ export function getElements(AppCore) {
     cached.sidebar ||
     dom.sidebar ||
     byId(SIDEBAR_ROOT_ID) ||
-    query(".sidebar") ||
-    query("[data-sidebar='true']") ||
-    query("[data-sidebar-root]") ||
+    resolveSidebarRoot() ||
+    null;
+
+  const userToggle =
+    cached.userToggle ||
+    dom.userToggle ||
+    byId(USER_TOGGLE_ID) ||
+    resolveUserToggle(sidebar) ||
+    null;
+
+  const userDropdown =
+    cached.userDropdown ||
+    dom.userDropdown ||
+    byId(USER_DROPDOWN_ID) ||
+    resolveUserDropdown(sidebar, userToggle) ||
     null;
 
   return {
@@ -676,18 +953,15 @@ export function getElements(AppCore) {
       cached.sidebarMenu ||
       dom.sidebarMenu ||
       byId(SIDEBAR_MENU_ID) ||
-      query(`#${SIDEBAR_MENU_ID}`, sidebar) ||
-      query("[data-sidebar-menu]", sidebar) ||
-      query(".sidebar-menu", sidebar) ||
-      query(".sidebar-menu") ||
+      queryFirst(SIDEBAR_MENU_SELECTORS, sidebar) ||
+      queryFirst(SIDEBAR_MENU_SELECTORS) ||
       null,
 
     sidebarRecents:
       cached.sidebarRecents ||
       dom.sidebarRecents ||
       byId(SIDEBAR_RECENTS_ID) ||
-      query(`#${SIDEBAR_RECENTS_ID}`, sidebar) ||
-      query("[data-sidebar-recents]", sidebar) ||
+      queryFirst(SIDEBAR_RECENTS_SELECTORS, sidebar) ||
       null,
 
     toggleBtn:
@@ -695,9 +969,7 @@ export function getElements(AppCore) {
       cached.sidebarToggle ||
       dom.sidebarToggle ||
       byId(SIDEBAR_TOGGLE_ID) ||
-      query(`#${SIDEBAR_TOGGLE_ID}`, sidebar) ||
-      query("[data-sidebar-action='toggle-sidebar']", sidebar) ||
-      query("[data-sidebar-toggle]", sidebar) ||
+      queryFirst(SIDEBAR_TOGGLE_SELECTORS, sidebar) ||
       null,
 
     mobileToggleBtn:
@@ -705,61 +977,39 @@ export function getElements(AppCore) {
       dom.sidebarMobileToggle ||
       dom.mobileSidebarToggle ||
       byId(SIDEBAR_MOBILE_TOGGLE_ID) ||
-      query(`#${SIDEBAR_MOBILE_TOGGLE_ID}`, sidebar) ||
-      query("[data-sidebar-mobile-toggle]", sidebar) ||
-      query("[data-sidebar-action='mobile-sidebar-toggle']", sidebar) ||
+      queryFirst(SIDEBAR_MOBILE_TOGGLE_SELECTORS, sidebar) ||
       null,
 
-    userToggle:
-      cached.userToggle ||
-      dom.userToggle ||
-      byId(USER_TOGGLE_ID) ||
-      query(`#${USER_TOGGLE_ID}`, sidebar) ||
-      query("[data-sidebar-action='toggle-user-dropdown']", sidebar) ||
-      query("[data-user-toggle]", sidebar) ||
-      null,
+    userToggle,
 
-    userDropdown:
-      cached.userDropdown ||
-      dom.userDropdown ||
-      byId(USER_DROPDOWN_ID) ||
-      query(`#${USER_DROPDOWN_ID}`, sidebar) ||
-      query("[data-user-dropdown]", sidebar) ||
-      null,
+    userDropdown,
 
     logoutBtn:
       cached.logoutBtn ||
       dom.logoutBtn ||
       byId(LOGOUT_BUTTON_ID) ||
-      query(`#${LOGOUT_BUTTON_ID}`, sidebar) ||
-      query("[data-sidebar-action='logout']", sidebar) ||
-      query("[data-logout]", sidebar) ||
+      queryFirst(LOGOUT_SELECTORS, sidebar) ||
       null,
 
     avatarEl:
       cached.avatarEl ||
       dom.sidebarAvatar ||
       byId(SIDEBAR_AVATAR_ID) ||
-      query(`#${SIDEBAR_AVATAR_ID}`, sidebar) ||
-      query("[data-sidebar-avatar]", sidebar) ||
+      queryFirst(AVATAR_SELECTORS, sidebar) ||
       null,
 
     nameEl:
       cached.nameEl ||
       dom.sidebarName ||
       byId(SIDEBAR_NAME_ID) ||
-      query(`#${SIDEBAR_NAME_ID}`, sidebar) ||
-      query("[data-sidebar-name]", sidebar) ||
+      queryFirst(NAME_SELECTORS, sidebar) ||
       null,
 
     logoEl:
       cached.logoEl ||
       dom.sidebarLogo ||
       byId(SIDEBAR_LOGO_ID) ||
-      query(`#${SIDEBAR_LOGO_ID}`, sidebar) ||
-      query("[data-sidebar-logo]", sidebar) ||
-      query(".logo", sidebar) ||
-      query("a.logo", sidebar) ||
+      queryFirst(LOGO_SELECTORS, sidebar) ||
       null,
   };
 }
@@ -911,6 +1161,30 @@ export function focusSidebar(AppCore) {
    DEBUG
 ========================================================= */
 
+function getElementDebug(element = null) {
+  if (!isElement(element)) {
+    return null;
+  }
+
+  return {
+    id: element.id || "",
+    tag: element.tagName || "",
+    hidden: Boolean(element.hidden),
+    inert: Boolean(element.hasAttribute?.("inert")),
+    ariaHidden: element.getAttribute?.("aria-hidden") || "",
+    ariaExpanded: element.getAttribute?.("aria-expanded") || "",
+    ariaControls: element.getAttribute?.("aria-controls") || "",
+    className: element.className || "",
+    dataAction:
+      element.getAttribute?.("data-action") ||
+      element.getAttribute?.("data-sidebar-action") ||
+      "",
+    parentHidden: Boolean(
+      element.closest?.("[hidden],[inert],[aria-hidden='true']")
+    ),
+  };
+}
+
 export function getSidebarDomSnapshot(AppCore) {
   const elements = getElements(AppCore);
 
@@ -942,6 +1216,10 @@ export function getSidebarDomSnapshot(AppCore) {
     sidebarHidden: Boolean(elements.sidebar?.hidden),
     sidebarClasses: elements.sidebar?.className || "",
     bodyClasses: elements.body?.className || "",
+
+    userToggle: getElementDebug(elements.userToggle),
+    userDropdown: getElementDebug(elements.userDropdown),
+    logoutBtn: getElementDebug(elements.logoutBtn),
   };
 }
 

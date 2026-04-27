@@ -2,7 +2,7 @@
    ONION SUPPORT — SIDEBAR
    Archivo: src/css/layout/sidebar.css
 
-   FINAL EXTREME SYSTEM · SIDEBAR / DROPDOWN SAFE · APPLE INDICATOR READY · 10/10
+   FINAL EXTREME SYSTEM · SIDEBAR / DROPDOWN SAFE · APPLE INDICATOR · CLOSED
 
    Objetivos:
    - sidebar premium limpio, compacto y operativo
@@ -16,8 +16,8 @@
    - footer de usuario sólido
    - tooltips sin clipping y con z-index saneado
    - selector activo tipo burbuja premium
-   - preparado para indicador deslizante tipo Apple con JS mínimo
-   - mata hover/tooltips durante collapse/expand para evitar burbujas flotantes
+   - indicador deslizante tipo Apple preparado para JS
+   - mata hover/tooltips/indicador durante collapse/expand
    - light mode fino
    - menos ruido visual en navegación SPA
 ========================================================= */
@@ -28,21 +28,21 @@
 ========================================================= */
 
 :root{
-  --sidebar-logo-size: 40px;
-  --sidebar-toggle-size: 36px;
-  --sidebar-toggle-size-collapsed: 34px;
+  --sidebar-logo-size:40px;
+  --sidebar-toggle-size:36px;
+  --sidebar-toggle-size-collapsed:34px;
 
-  --sidebar-menu-icon-box: var(--sidebar-icon-size, 18px);
-  --sidebar-menu-item-collapsed: 42px;
+  --sidebar-menu-icon-box:var(--sidebar-icon-size, 18px);
+  --sidebar-menu-item-collapsed:42px;
 
-  --sidebar-footer-avatar-size: 32px;
-  --sidebar-footer-avatar-size-collapsed: 30px;
+  --sidebar-footer-avatar-size:32px;
+  --sidebar-footer-avatar-size-collapsed:30px;
 
-  --sidebar-tooltip-z: var(--z-tooltip, 70);
-  --sidebar-dropdown-z: var(--z-dropdown, 50);
+  --sidebar-tooltip-z:var(--z-tooltip, 70);
+  --sidebar-dropdown-z:var(--z-dropdown, 50);
 
-  --sidebar-dropdown-width-collapsed: 224px;
-  --sidebar-dropdown-offset-collapsed: 12px;
+  --sidebar-dropdown-width-collapsed:224px;
+  --sidebar-dropdown-offset-collapsed:12px;
 
   --sidebar-active-pill-bg:
     linear-gradient(
@@ -52,7 +52,7 @@
     ),
     var(--sidebar-active);
 
-  --sidebar-active-pill-border: var(--sidebar-active-border);
+  --sidebar-active-pill-border:var(--sidebar-active-border);
 
   --sidebar-active-pill-shadow:
     inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 95%),
@@ -62,11 +62,11 @@
     inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 95%),
     0 8px 18px rgba(0,0,0,.10);
 
-  --sidebar-indicator-x: var(--sidebar-inline-padding, 9px);
-  --sidebar-indicator-y: 0px;
-  --sidebar-indicator-w: calc(100% - (var(--sidebar-inline-padding, 9px) * 2));
-  --sidebar-indicator-h: var(--sidebar-item-height, 40px);
-  --sidebar-indicator-opacity: 0;
+  --sidebar-indicator-x:var(--sidebar-inline-padding, 9px);
+  --sidebar-indicator-y:0px;
+  --sidebar-indicator-w:calc(100% - (var(--sidebar-inline-padding, 9px) * 2));
+  --sidebar-indicator-h:var(--sidebar-item-height, 40px);
+  --sidebar-indicator-opacity:0;
 
   --sidebar-mobile-shadow:
     0 24px 80px rgba(0,0,0,.34),
@@ -188,7 +188,7 @@
 
 
 /* =========================================================
-   TEMPORARY HIGH STACK FOR TOOLTIP / COMPACT MODE
+   TEMPORARY HIGH STACK FOR TOOLTIP / COMPACT / DROPDOWN
 ========================================================= */
 
 .sidebar.sidebar-tooltips-active,
@@ -221,8 +221,10 @@ body.sidebar-collapsed .sidebar{
 
 /* =========================================================
    TRANSITION GUARD
-   Requiere JS recomendado:
-   body.sidebar-transitioning + .sidebar.is-transitioning
+   JS recomendado:
+   - body.sidebar-transitioning
+   - .sidebar.is-transitioning
+   - .sidebar-menu.is-transitioning
 ========================================================= */
 
 body.sidebar-transitioning .sidebar,
@@ -250,7 +252,9 @@ body.sidebar-transitioning .sidebar .menu-item:hover,
 body.sidebar-transitioning .sidebar [data-tooltip]::before,
 body.sidebar-transitioning .sidebar [data-tooltip]::after,
 .sidebar.is-transitioning [data-tooltip]::before,
-.sidebar.is-transitioning [data-tooltip]::after{
+.sidebar.is-transitioning [data-tooltip]::after,
+.sidebar-menu.is-transitioning [data-tooltip]::before,
+.sidebar-menu.is-transitioning [data-tooltip]::after{
   opacity:0 !important;
   visibility:hidden !important;
   display:none !important;
@@ -258,7 +262,8 @@ body.sidebar-transitioning .sidebar [data-tooltip]::after,
 }
 
 body.sidebar-transitioning .sidebar-menu[data-indicator-ready="true"]::before,
-.sidebar.is-transitioning .sidebar-menu[data-indicator-ready="true"]::before{
+.sidebar.is-transitioning .sidebar-menu[data-indicator-ready="true"]::before,
+.sidebar-menu.is-transitioning[data-indicator-ready="true"]::before{
   opacity:0 !important;
   transition:none !important;
 }
@@ -646,10 +651,6 @@ body.sidebar-collapsed .sidebar .sidebar-toggle{
     transform var(--duration-fast) var(--ease-out);
 }
 
-/*
-   El tooltip de menú solo aparece en modo compacto real.
-   Esto evita globos colgando cuando el sidebar está expandiendo/contrayendo.
-*/
 .sidebar:not(.sidebar-tooltips-active) .menu-item[data-tooltip]::after,
 body:not(.sidebar-tooltips-active) .sidebar .menu-item[data-tooltip]::after{
   opacity:0 !important;
@@ -727,13 +728,6 @@ body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::a
 
 /* =========================================================
    APPLE-LIKE MOVING INDICATOR HOOK
-   JS mínimo esperado:
-   - sidebarMenu.dataset.indicatorReady = "true"
-   - --sidebar-indicator-y
-   - --sidebar-indicator-h
-   - --sidebar-indicator-x
-   - --sidebar-indicator-w
-   - --sidebar-indicator-opacity: 1
 ========================================================= */
 
 .sidebar-menu[data-indicator-ready="true"]::before{
@@ -775,11 +769,16 @@ body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::a
     box-shadow var(--duration-normal) var(--ease-standard);
 }
 
+.sidebar-menu[data-indicator-ready="false"]::before{
+  opacity:0 !important;
+  visibility:hidden !important;
+}
+
 .sidebar.collapsed .sidebar-menu,
 .sidebar.is-collapsed .sidebar-menu,
 body.sidebar-collapsed .sidebar .sidebar-menu{
-  --sidebar-indicator-x: calc((100% - var(--sidebar-menu-item-collapsed)) / 2);
-  --sidebar-indicator-w: var(--sidebar-menu-item-collapsed);
+  --sidebar-indicator-x:calc((100% - var(--sidebar-menu-item-collapsed)) / 2);
+  --sidebar-indicator-w:var(--sidebar-menu-item-collapsed);
 }
 
 .sidebar.collapsed .sidebar-menu[data-indicator-ready="true"]::before,
@@ -932,11 +931,13 @@ body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-i
 }
 
 .menu-item.active,
+.menu-item.is-active,
 .menu-item[aria-current="page"]{
   color:var(--sidebar-text-active);
 }
 
 .menu-item.active::before,
+.menu-item.is-active::before,
 .menu-item[aria-current="page"]::before{
   border-color:var(--sidebar-active-pill-border);
 
@@ -951,11 +952,8 @@ body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-i
   animation:sidebarActiveBubbleIn .22s var(--ease-emphasis);
 }
 
-/*
-   Cuando el indicador Apple está activo, se oculta la burbuja local del item.
-   El ::before del .sidebar-menu pasa a ser la burbuja única deslizante.
-*/
 .sidebar-menu[data-indicator-ready="true"] .menu-item.active::before,
+.sidebar-menu[data-indicator-ready="true"] .menu-item.is-active::before,
 .sidebar-menu[data-indicator-ready="true"] .menu-item[aria-current="page"]::before{
   opacity:0;
   transform:scale(.985);
@@ -963,6 +961,7 @@ body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-i
 }
 
 .menu-item.active svg,
+.menu-item.is-active svg,
 .menu-item[aria-current="page"] svg{
   color:var(--sidebar-icon-active);
 }
@@ -1069,19 +1068,25 @@ body.sidebar-collapsed .sidebar .menu-item:hover{
 }
 
 .sidebar.collapsed .menu-item.active,
+.sidebar.collapsed .menu-item.is-active,
 .sidebar.collapsed .menu-item[aria-current="page"],
 .sidebar.is-collapsed .menu-item.active,
+.sidebar.is-collapsed .menu-item.is-active,
 .sidebar.is-collapsed .menu-item[aria-current="page"],
 body.sidebar-collapsed .sidebar .menu-item.active,
+body.sidebar-collapsed .sidebar .menu-item.is-active,
 body.sidebar-collapsed .sidebar .menu-item[aria-current="page"]{
   transform:none !important;
 }
 
 .sidebar.collapsed .menu-item.active::before,
+.sidebar.collapsed .menu-item.is-active::before,
 .sidebar.collapsed .menu-item[aria-current="page"]::before,
 .sidebar.is-collapsed .menu-item.active::before,
+.sidebar.is-collapsed .menu-item.is-active::before,
 .sidebar.is-collapsed .menu-item[aria-current="page"]::before,
 body.sidebar-collapsed .sidebar .menu-item.active::before,
+body.sidebar-collapsed .sidebar .menu-item.is-active::before,
 body.sidebar-collapsed .sidebar .menu-item[aria-current="page"]::before{
   box-shadow:var(--sidebar-active-pill-shadow-collapsed);
 }
@@ -1798,6 +1803,7 @@ body.sidebar-open [data-sidebar-overlay]{
 }
 
 [data-theme="light"] .menu-item.active::before,
+[data-theme="light"] .menu-item.is-active::before,
 [data-theme="light"] .menu-item[aria-current="page"]::before{
   box-shadow:var(--sidebar-active-pill-shadow);
 }

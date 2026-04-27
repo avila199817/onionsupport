@@ -1,0 +1,24 @@
+{
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": [
+      "/src/*.{js,css,png,jpg,jpeg,gif,svg,webp,ico,json,woff,woff2,ttf,map}",
+      "/assets/*.{js,css,png,jpg,jpeg,gif,svg,webp,ico,json,woff,woff2,ttf,map}",
+      "/media/*.{png,jpg,jpeg,gif,svg,webp,ico}",
+      "/*.{js,css,png,jpg,jpeg,gif,svg,webp,ico,json,txt,xml,webmanifest,map}"
+    ]
+  },
+  "globalHeaders": {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()"
+  },
+  "mimeTypes": {
+    ".js": "text/javascript",
+    ".mjs": "text/javascript",
+    ".css": "text/css",
+    ".json": "application/json",
+    ".svg": "image/svg+xml",
+    ".webmanifest": "application/manifest+json"
+  }
+}

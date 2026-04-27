@@ -9,7 +9,7 @@
    - collapsed desktop estable
    - desktop sin transform innecesario
    - mobile separado con transición dedicada
-   - soporte body.sidebar-collapsed / .sidebar.collapsed
+   - soporte body.sidebar-collapsed / .sidebar.collapsed / .sidebar.is-collapsed
    - dropdown robusto aunque exista atributo hidden
    - dropdown robusto por clase, aria-hidden y data-state
    - dropdown visible en collapsed desktop sin clipping
@@ -17,6 +17,7 @@
    - tooltips sin clipping y con z-index saneado
    - selector activo tipo burbuja premium
    - preparado para indicador deslizante tipo Apple con JS mínimo
+   - mata hover/tooltips durante collapse/expand para evitar burbujas flotantes
    - light mode fino
    - menos ruido visual en navegación SPA
 ========================================================= */
@@ -187,7 +188,7 @@
 
 
 /* =========================================================
-   SIDEBAR TEMPORARY HIGH STACK FOR TOOLTIPS
+   TEMPORARY HIGH STACK FOR TOOLTIP / COMPACT MODE
 ========================================================= */
 
 .sidebar.sidebar-tooltips-active,
@@ -199,7 +200,9 @@ body.sidebar-collapsed .sidebar{
 @supports selector(:has(*)){
   .sidebar:has(.menu-item[data-tooltip]:hover),
   .sidebar:has(.sidebar-toggle[data-tooltip]:hover),
-  .sidebar:has(.logo[data-tooltip]:hover){
+  .sidebar:has(.logo[data-tooltip]:hover),
+  .sidebar:has(.user-dropdown[aria-hidden="false"]),
+  .sidebar:has(.user-dropdown[data-state="open"]){
     z-index:calc(var(--z-tooltip, 70) + 1);
   }
 }
@@ -213,6 +216,51 @@ body.sidebar-collapsed .sidebar{
 .sidebar.is-collapsed,
 body.sidebar-collapsed .sidebar{
   inline-size:var(--sidebar-collapsed);
+}
+
+
+/* =========================================================
+   TRANSITION GUARD
+   Requiere JS recomendado:
+   body.sidebar-transitioning + .sidebar.is-transitioning
+========================================================= */
+
+body.sidebar-transitioning .sidebar,
+.sidebar.is-transitioning{
+  pointer-events:none;
+}
+
+body.sidebar-transitioning .sidebar .menu-item,
+.sidebar.is-transitioning .menu-item,
+body.sidebar-transitioning .sidebar .user,
+.sidebar.is-transitioning .user,
+body.sidebar-transitioning .sidebar .sidebar-toggle,
+.sidebar.is-transitioning .sidebar-toggle{
+  transform:none !important;
+}
+
+body.sidebar-transitioning .sidebar .menu-item:hover,
+.sidebar.is-transitioning .menu-item:hover{
+  background:transparent !important;
+  border-color:transparent !important;
+  box-shadow:none !important;
+  transform:none !important;
+}
+
+body.sidebar-transitioning .sidebar [data-tooltip]::before,
+body.sidebar-transitioning .sidebar [data-tooltip]::after,
+.sidebar.is-transitioning [data-tooltip]::before,
+.sidebar.is-transitioning [data-tooltip]::after{
+  opacity:0 !important;
+  visibility:hidden !important;
+  display:none !important;
+  transform:none !important;
+}
+
+body.sidebar-transitioning .sidebar-menu[data-indicator-ready="true"]::before,
+.sidebar.is-transitioning .sidebar-menu[data-indicator-ready="true"]::before{
+  opacity:0 !important;
+  transition:none !important;
 }
 
 
@@ -598,18 +646,30 @@ body.sidebar-collapsed .sidebar .sidebar-toggle{
     transform var(--duration-fast) var(--ease-out);
 }
 
-.sidebar.collapsed .menu-item[data-tooltip]:hover::after,
-.sidebar.is-collapsed .menu-item[data-tooltip]:hover::after,
-body.sidebar-collapsed .sidebar .menu-item[data-tooltip]:hover::after{
+/*
+   El tooltip de menú solo aparece en modo compacto real.
+   Esto evita globos colgando cuando el sidebar está expandiendo/contrayendo.
+*/
+.sidebar:not(.sidebar-tooltips-active) .menu-item[data-tooltip]::after,
+body:not(.sidebar-tooltips-active) .sidebar .menu-item[data-tooltip]::after{
+  opacity:0 !important;
+  visibility:hidden !important;
+  display:none !important;
+}
+
+.sidebar.sidebar-tooltips-active.collapsed .menu-item[data-tooltip]:hover::after,
+.sidebar.sidebar-tooltips-active.is-collapsed .menu-item[data-tooltip]:hover::after,
+body.sidebar-tooltips-active.sidebar-collapsed .sidebar .menu-item[data-tooltip]:hover::after{
   opacity:1;
   visibility:visible;
+  display:block;
 
   transform:translateY(-50%) translateX(0);
 }
 
 .sidebar:not(.collapsed):not(.is-collapsed) .menu-item[data-tooltip]::after,
 body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-item[data-tooltip]::after{
-  display:none;
+  display:none !important;
 }
 
 .sidebar.collapsed .menu-item.active[data-tooltip]::after,
@@ -667,8 +727,8 @@ body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::a
 
 /* =========================================================
    APPLE-LIKE MOVING INDICATOR HOOK
-   Requiere JS mínimo:
-   - data-indicator-ready="true"
+   JS mínimo esperado:
+   - sidebarMenu.dataset.indicatorReady = "true"
    - --sidebar-indicator-y
    - --sidebar-indicator-h
    - --sidebar-indicator-x
@@ -891,6 +951,10 @@ body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-i
   animation:sidebarActiveBubbleIn .22s var(--ease-emphasis);
 }
 
+/*
+   Cuando el indicador Apple está activo, se oculta la burbuja local del item.
+   El ::before del .sidebar-menu pasa a ser la burbuja única deslizante.
+*/
 .sidebar-menu[data-indicator-ready="true"] .menu-item.active::before,
 .sidebar-menu[data-indicator-ready="true"] .menu-item[aria-current="page"]::before{
   opacity:0;
@@ -952,7 +1016,7 @@ body.sidebar-collapsed .sidebar .menu-item{
 
   border-radius:var(--radius-md);
 
-  transform:none;
+  transform:none !important;
 }
 
 .sidebar.collapsed .menu-item > span:first-child,
@@ -1001,7 +1065,7 @@ body.sidebar-collapsed .sidebar .menu-item:hover{
   background:var(--sidebar-hover);
   border-color:color-mix(in srgb, var(--text-strong), transparent 96%);
   color:var(--text-strong);
-  transform:none;
+  transform:none !important;
 }
 
 .sidebar.collapsed .menu-item.active,
@@ -1010,7 +1074,7 @@ body.sidebar-collapsed .sidebar .menu-item:hover{
 .sidebar.is-collapsed .menu-item[aria-current="page"],
 body.sidebar-collapsed .sidebar .menu-item.active,
 body.sidebar-collapsed .sidebar .menu-item[aria-current="page"]{
-  transform:none;
+  transform:none !important;
 }
 
 .sidebar.collapsed .menu-item.active::before,
@@ -1849,6 +1913,11 @@ body.sidebar-open [data-sidebar-overlay]{
     padding-inline:var(--sidebar-inline-padding);
   }
 
+  .sidebar .sidebar-menu[data-indicator-ready="true"]::before{
+    inset-inline-start:var(--sidebar-indicator-x);
+    inline-size:var(--sidebar-indicator-w);
+  }
+
   .sidebar .menu-item{
     display:flex;
     align-items:center;
@@ -2016,6 +2085,10 @@ body.sidebar-open [data-sidebar-overlay]{
   .logo:hover,
   .user:hover,
   .sidebar-toggle:hover{
+    transform:none !important;
+  }
+
+  .panel-content{
     transform:none !important;
   }
 }

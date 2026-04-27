@@ -5,27 +5,32 @@
    RESPONSABILIDADES:
    - punto único de arranque de la SPA
    - mantener estado visual de boot desde el primer tick JS
+   - capturar URL inicial antes de que el router normalice
+   - preservar rutas públicas técnicas con token
    - esperar DOM ready de forma segura
    - boot idempotente
    - capturar errores fatales de arranque
    - integrar App + AppCore
-   - no dejar loader pegado ante fallo fatal
+   - no dejar loader pegado ante fallo fatal o timeout
+   - exponer diagnóstico mínimo en window.OnionApp.main
 
    HARDENING PRO:
    - una sola vía de arranque
    - anti doble boot
-   - CSP clean
-   - sin innerHTML inseguro para errores
+   - CSP clean: sin innerHTML, sin estilos inline
    - fallback robusto si AppCore.ready falla/no existe
    - logs limpios
    - error fatal visible
-   - clases html/body coherentes: app-booting/app-loading/app-ready/app-fatal
+   - timeout de boot configurable
+   - clases html/body coherentes:
+     app-booting / app-loading / app-ready / app-fatal
 
    ALINEADO CON:
    - index.html con #app-loader estático
    - src/app/index.js
    - src/app/loader.js
    - src/css/core/loader.css
+   - router/helpers.js + router/history.js + router/render.js
 ========================================================= */
 
 import { App } from "./app/index.js";
@@ -37,8 +42,63 @@ import { AppCore } from "./core/index.js";
 
 let bootStarted = false;
 let bootSettled = false;
+let bootFailed = false;
 let bootPromise = null;
 let readyBound = false;
+let fatalRendered = false;
+let globalSafetyNetBound = false;
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const DEFAULT_BOOT_TIMEOUT_MS = 45000;
+
+const ACTIVATION_PATH = "/activate-account";
+const RESET_CONFIRM_PATH = "/reset-password/confirm";
+
+const ACTIVATION_TOKEN_PARAM_NAMES = Object.freeze([
+  "token",
+  "activationToken",
+  "activateToken",
+  "code",
+  "t",
+]);
+
+const RESET_TOKEN_PARAM_NAMES = Object.freeze([
+  "token",
+  "resetToken",
+  "passwordResetToken",
+  "confirmToken",
+  "code",
+  "t",
+]);
+
+const PROTECTED_PUBLIC_ROUTES = Object.freeze([
+  Object.freeze({
+    path: ACTIVATION_PATH,
+    windowKeys: Object.freeze([
+      "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+    ]),
+    tokenNames: ACTIVATION_TOKEN_PARAM_NAMES,
+    scrubbedFlags: Object.freeze([
+      "scrubbedActivationToken",
+    ]),
+  }),
+
+  Object.freeze({
+    path: RESET_CONFIRM_PATH,
+    windowKeys: Object.freeze([
+      "__ONION_RESET_CONFIRM_INITIAL_URL__",
+      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+    ]),
+    tokenNames: RESET_TOKEN_PARAM_NAMES,
+    scrubbedFlags: Object.freeze([
+      "scrubbedResetToken",
+      "scrubbedResetPasswordToken",
+    ]),
+  }),
+]);
 
 /* =========================================================
    BASIC HELPERS
@@ -59,9 +119,19 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value).trim();
 
   return text || fallback;
+}
+
+function safeNumber(value, fallback = 0) {
+  const numeric =
+    Number(value);
+
+  return Number.isFinite(numeric)
+    ? numeric
+    : fallback;
 }
 
 function safeObject(value) {
@@ -70,6 +140,10 @@ function safeObject(value) {
     !Array.isArray(value)
     ? value
     : {};
+}
+
+function isFunction(value) {
+  return typeof value === "function";
 }
 
 function safeLog(...args) {
@@ -108,8 +182,14 @@ function safeError(...args) {
 }
 
 function safeEmit(name = "", payload = {}) {
-  const eventName = safeText(name, "");
-  if (!eventName) return false;
+  const eventName =
+    safeText(name, "");
+
+  if (!eventName) {
+    return false;
+  }
+
+  let emitted = false;
 
   try {
     AppCore?.events?.emit?.(
@@ -117,7 +197,7 @@ function safeEmit(name = "", payload = {}) {
       payload
     );
 
-    return true;
+    emitted = true;
   } catch {}
 
   try {
@@ -128,11 +208,11 @@ function safeEmit(name = "", payload = {}) {
         })
       );
 
-      return true;
+      emitted = true;
     }
   } catch {}
 
-  return false;
+  return emitted;
 }
 
 function nextFrame() {
@@ -140,9 +220,12 @@ function nextFrame() {
     try {
       if (
         isBrowser() &&
-        typeof window.requestAnimationFrame === "function"
+        isFunction(window.requestAnimationFrame)
       ) {
-        window.requestAnimationFrame(() => resolve());
+        window.requestAnimationFrame(() => {
+          resolve();
+        });
+
         return;
       }
     } catch {}
@@ -155,17 +238,404 @@ function nextFrame() {
   });
 }
 
+async function nextPaint() {
+  await nextFrame();
+  await nextFrame();
+}
+
+/* =========================================================
+   INITIAL URL / TOKEN PRESERVATION
+========================================================= */
+
+function getBaseOrigin() {
+  if (
+    isBrowser() &&
+    window.location?.origin
+  ) {
+    return window.location.origin;
+  }
+
+  return "http://localhost";
+}
+
+function normalizePathnameOnly(pathname = "/") {
+  let value =
+    String(pathname || "/")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+  if (!value) {
+    value = "/";
+  }
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  if (
+    value.length > 1 &&
+    value.endsWith("/")
+  ) {
+    value =
+      value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
+}
+
+function isHashRouterPath(value = "") {
+  const raw =
+    String(value || "").trim();
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw =
+    String(value || "").trim();
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/");
+  }
+
+  return raw.replace(/^#\/?/, "/");
+}
+
+function pathFromUrlLike(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  if (isHashRouterPath(raw)) {
+    return normalizeHashRouterPath(raw);
+  }
+
+  try {
+    const parsed =
+      new URL(raw, getBaseOrigin());
+
+    if (
+      parsed.hash &&
+      isHashRouterPath(parsed.hash)
+    ) {
+      return normalizeHashRouterPath(
+        parsed.hash
+      );
+    }
+
+    return `${normalizePathnameOnly(
+      parsed.pathname || "/"
+    )}${parsed.search || ""}${parsed.hash || ""}`;
+  } catch {
+    const hashIndex =
+      raw.indexOf("#");
+
+    if (hashIndex >= 0) {
+      const hash =
+        raw.slice(hashIndex);
+
+      if (isHashRouterPath(hash)) {
+        return normalizeHashRouterPath(hash);
+      }
+    }
+
+    return raw.startsWith("/")
+      ? raw
+      : `/${raw}`;
+  }
+}
+
+function stripSearchAndHash(path = "/") {
+  const raw =
+    safeText(path, "/");
+
+  return normalizePathnameOnly(
+    raw.split("?")[0].split("#")[0] || "/"
+  );
+}
+
+function isPathOrChild(path = "/", basePath = "/") {
+  const clean =
+    stripSearchAndHash(
+      pathFromUrlLike(path) || path || "/"
+    );
+
+  return (
+    clean === basePath ||
+    clean.startsWith(`${basePath}/`)
+  );
+}
+
+function getPathToken(path = "", basePath = "") {
+  const clean =
+    stripSearchAndHash(
+      pathFromUrlLike(path) || path || "/"
+    );
+
+  if (
+    !basePath ||
+    !clean.startsWith(`${basePath}/`)
+  ) {
+    return "";
+  }
+
+  const token =
+    clean
+      .slice(`${basePath}/`.length)
+      .split("/")[0];
+
+  try {
+    return safeText(
+      decodeURIComponent(token || ""),
+      ""
+    );
+  } catch {
+    return safeText(token, "");
+  }
+}
+
+function hasTokenInSearch(search = "", tokenNames = []) {
+  try {
+    const params =
+      new URLSearchParams(search || "");
+
+    return tokenNames.some((name) => {
+      return Boolean(
+        safeText(
+          params.get(name),
+          ""
+        )
+      );
+    });
+  } catch {
+    return false;
+  }
+}
+
+function hasProtectedRouteToken(value = "", routeConfig = null) {
+  if (!routeConfig) {
+    return false;
+  }
+
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return false;
+  }
+
+  const path =
+    pathFromUrlLike(raw) || raw;
+
+  if (
+    isPathOrChild(path, routeConfig.path) &&
+    getPathToken(path, routeConfig.path)
+  ) {
+    return true;
+  }
+
+  try {
+    const parsed =
+      new URL(raw, getBaseOrigin());
+
+    if (
+      hasTokenInSearch(
+        parsed.search,
+        routeConfig.tokenNames
+      )
+    ) {
+      return true;
+    }
+
+    if (
+      parsed.hash &&
+      parsed.hash.includes("?")
+    ) {
+      const query =
+        parsed.hash
+          .split("?")
+          .slice(1)
+          .join("?");
+
+      return hasTokenInSearch(
+        query ? `?${query}` : "",
+        routeConfig.tokenNames
+      );
+    }
+  } catch {
+    if (path.includes("?")) {
+      const query =
+        path
+          .split("?")
+          .slice(1)
+          .join("?")
+          .split("#")[0];
+
+      if (
+        hasTokenInSearch(
+          query ? `?${query}` : "",
+          routeConfig.tokenNames
+        )
+      ) {
+        return true;
+      }
+    }
+
+    if (
+      path.includes("#") &&
+      path.includes("?")
+    ) {
+      const query =
+        path
+          .split("?")
+          .slice(1)
+          .join("?");
+
+      if (
+        hasTokenInSearch(
+          query ? `?${query}` : "",
+          routeConfig.tokenNames
+        )
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function isProtectedRouteScrubbed(routeConfig = null) {
+  if (
+    !isBrowser() ||
+    !routeConfig
+  ) {
+    return false;
+  }
+
+  try {
+    const state =
+      window.history?.state || {};
+
+    return routeConfig.scrubbedFlags.some(
+      (flag) => Boolean(state?.[flag])
+    );
+  } catch {
+    return false;
+  }
+}
+
+function setWindowValueOnce(key = "", value = "") {
+  if (
+    !isBrowser() ||
+    !key ||
+    !value
+  ) {
+    return false;
+  }
+
+  try {
+    if (!window[key]) {
+      window[key] = value;
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function captureInitialUrl(reason = "main") {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  let captured = false;
+
+  try {
+    const href =
+      window.location.href;
+
+    captured =
+      setWindowValueOnce(
+        "__ONION_INITIAL_URL__",
+        href
+      ) || captured;
+
+    const publicPath =
+      pathFromUrlLike(href);
+
+    for (const routeConfig of PROTECTED_PUBLIC_ROUTES) {
+      if (
+        isProtectedRouteScrubbed(routeConfig)
+      ) {
+        continue;
+      }
+
+      if (
+        !isPathOrChild(publicPath, routeConfig.path) ||
+        !hasProtectedRouteToken(href, routeConfig)
+      ) {
+        continue;
+      }
+
+      routeConfig.windowKeys.forEach((key) => {
+        captured =
+          setWindowValueOnce(
+            key,
+            href
+          ) || captured;
+      });
+    }
+
+    safeEmit(
+      "main:initial-url:capture",
+      {
+        reason,
+        href,
+        publicPath,
+        captured,
+      }
+    );
+
+    return captured;
+  } catch (error) {
+    safeWarn(
+      "No se pudo capturar URL inicial.",
+      error
+    );
+
+    return false;
+  }
+}
+
 /* =========================================================
    DOCUMENT STATE
 ========================================================= */
 
 function getHtml() {
-  if (!isBrowser()) return null;
+  if (!isBrowser()) {
+    return null;
+  }
+
   return document.documentElement || null;
 }
 
 function getBody() {
-  if (!isBrowser()) return null;
+  if (!isBrowser()) {
+    return null;
+  }
+
   return document.body || null;
 }
 
@@ -181,17 +651,13 @@ function removeClass(el, className) {
   } catch {}
 }
 
-function toggleClass(el, className, enabled) {
-  try {
-    el?.classList?.toggle?.(
-      className,
-      Boolean(enabled)
-    );
-  } catch {}
-}
-
 function setDataset(el, key, value) {
-  if (!el || !key) return;
+  if (
+    !el ||
+    !key
+  ) {
+    return;
+  }
 
   try {
     if (
@@ -208,8 +674,11 @@ function setDataset(el, key, value) {
 }
 
 function markDocumentBooting(reason = "main") {
-  const html = getHtml();
-  const body = getBody();
+  const html =
+    getHtml();
+
+  const body =
+    getBody();
 
   addClass(html, "app-booting");
   addClass(html, "app-loading");
@@ -226,38 +695,50 @@ function markDocumentBooting(reason = "main") {
   setDataset(body, "appLoading", "true");
   setDataset(body, "bootReason", reason);
 
-  safeEmit("main:booting", {
-    reason,
-  });
+  safeEmit(
+    "main:booting",
+    {
+      reason,
+    }
+  );
 }
 
 function markDocumentReady(reason = "boot-complete") {
-  const html = getHtml();
-  const body = getBody();
+  const html =
+    getHtml();
+
+  const body =
+    getBody();
 
   removeClass(html, "app-booting");
   removeClass(html, "app-loading");
-  addClass(html, "app-ready");
   removeClass(html, "app-fatal");
+  addClass(html, "app-ready");
 
   removeClass(body, "app-booting");
   removeClass(body, "app-loading");
   removeClass(body, "loading");
-  addClass(body, "app-ready");
   removeClass(body, "app-fatal");
+  addClass(body, "app-ready");
 
   setDataset(html, "appLoading", "false");
   setDataset(body, "appLoading", "false");
   setDataset(body, "bootReason", reason);
 
-  safeEmit("main:ready", {
-    reason,
-  });
+  safeEmit(
+    "main:ready",
+    {
+      reason,
+    }
+  );
 }
 
 function markDocumentFatal(reason = "boot-error") {
-  const html = getHtml();
-  const body = getBody();
+  const html =
+    getHtml();
+
+  const body =
+    getBody();
 
   removeClass(html, "app-booting");
   removeClass(html, "app-loading");
@@ -274,9 +755,12 @@ function markDocumentFatal(reason = "boot-error") {
   setDataset(body, "appLoading", "false");
   setDataset(body, "bootReason", reason);
 
-  safeEmit("main:fatal", {
-    reason,
-  });
+  safeEmit(
+    "main:fatal",
+    {
+      reason,
+    }
+  );
 }
 
 /* =========================================================
@@ -284,7 +768,9 @@ function markDocumentFatal(reason = "boot-error") {
 ========================================================= */
 
 function getLoaderElement() {
-  if (!isBrowser()) return null;
+  if (!isBrowser()) {
+    return null;
+  }
 
   try {
     return (
@@ -298,8 +784,9 @@ function getLoaderElement() {
   }
 }
 
-function ensureStaticLoaderVisible() {
-  const loader = getLoaderElement();
+function ensureStaticLoaderVisible(reason = "main") {
+  const loader =
+    getLoaderElement();
 
   if (!loader) {
     return false;
@@ -320,6 +807,7 @@ function ensureStaticLoaderVisible() {
     );
 
     loader.dataset.loaderVisible = "true";
+    loader.dataset.loaderReason = reason;
 
     loader.classList.remove(
       "is-hidden",
@@ -331,10 +819,12 @@ function ensureStaticLoaderVisible() {
       "is-visible"
     );
 
-    loader.style.display = "";
-    loader.style.opacity = "";
-    loader.style.visibility = "";
-    loader.style.pointerEvents = "";
+    safeEmit(
+      "main:loader:visible",
+      {
+        reason,
+      }
+    );
 
     return true;
   } catch {
@@ -342,8 +832,9 @@ function ensureStaticLoaderVisible() {
   }
 }
 
-function forceHideStaticLoader() {
-  const loader = getLoaderElement();
+function forceHideStaticLoader(reason = "main") {
+  const loader =
+    getLoaderElement();
 
   if (!loader) {
     return false;
@@ -363,6 +854,7 @@ function forceHideStaticLoader() {
     );
 
     loader.dataset.loaderVisible = "false";
+    loader.dataset.loaderReason = reason;
 
     loader.classList.remove(
       "is-visible",
@@ -374,10 +866,12 @@ function forceHideStaticLoader() {
       "has-hidden"
     );
 
-    loader.style.display = "none";
-    loader.style.opacity = "0";
-    loader.style.visibility = "hidden";
-    loader.style.pointerEvents = "none";
+    safeEmit(
+      "main:loader:hidden",
+      {
+        reason,
+      }
+    );
 
     return true;
   } catch {
@@ -390,7 +884,9 @@ function forceHideStaticLoader() {
 ========================================================= */
 
 function clearNode(node) {
-  if (!node) return;
+  if (!node) {
+    return;
+  }
 
   try {
     while (node.firstChild) {
@@ -415,11 +911,16 @@ function createElement(tag, {
     el.textContent = text;
   }
 
-  for (const [key, value] of Object.entries(attrs)) {
+  Object.entries(
+    safeObject(attrs)
+  ).forEach(([key, value]) => {
     try {
-      el.setAttribute(key, String(value));
+      el.setAttribute(
+        key,
+        String(value)
+      );
     } catch {}
-  }
+  });
 
   return el;
 }
@@ -434,14 +935,16 @@ function createReloadButton() {
       },
     });
 
-  button.addEventListener(
-    "click",
-    () => {
-      try {
-        window.location.reload();
-      } catch {}
-    }
-  );
+  try {
+    button.addEventListener(
+      "click",
+      () => {
+        try {
+          window.location.reload();
+        } catch {}
+      }
+    );
+  } catch {}
 
   return button;
 }
@@ -456,22 +959,52 @@ function createDetailsButton(error) {
       },
     });
 
-  button.addEventListener(
-    "click",
-    () => {
-      try {
-        console.group("[Main] Boot fatal details");
-        console.error(error);
-        console.groupEnd();
-      } catch {}
-    }
-  );
+  try {
+    button.addEventListener(
+      "click",
+      () => {
+        try {
+          console.group("[Main] Boot fatal details");
+          console.error(error);
+          console.groupEnd();
+        } catch {}
+      }
+    );
+  } catch {}
 
   return button;
 }
 
+function exposeFatalRoot(root) {
+  if (!root) {
+    return false;
+  }
+
+  try {
+    root.hidden = false;
+    root.removeAttribute("hidden");
+    root.setAttribute("aria-hidden", "false");
+    root.setAttribute("aria-busy", "false");
+  } catch {}
+
+  try {
+    let node =
+      root.parentElement;
+
+    while (node) {
+      node.hidden = false;
+      node.setAttribute("aria-hidden", "false");
+      node = node.parentElement;
+    }
+  } catch {}
+
+  return true;
+}
+
 function getFatalRoot() {
-  if (!isBrowser()) return null;
+  if (!isBrowser()) {
+    return null;
+  }
 
   try {
     return (
@@ -487,14 +1020,45 @@ function getFatalRoot() {
   }
 }
 
+function normalizeBootError(error) {
+  if (error instanceof Error) {
+    return error;
+  }
+
+  const message =
+    safeText(
+      error?.message ||
+        error?.reason ||
+        error,
+      "No se pudo iniciar la aplicación."
+    );
+
+  const normalized =
+    new Error(message);
+
+  try {
+    normalized.raw = error;
+  } catch {}
+
+  return normalized;
+}
+
 function showFatalBootError(error) {
-  if (!isBrowser()) {
+  if (
+    !isBrowser() ||
+    fatalRendered
+  ) {
     return false;
   }
 
+  fatalRendered = true;
+
   try {
+    const normalizedError =
+      normalizeBootError(error);
+
     markDocumentFatal("boot-error");
-    forceHideStaticLoader();
+    forceHideStaticLoader("boot-error");
 
     const root =
       getFatalRoot();
@@ -503,13 +1067,14 @@ function showFatalBootError(error) {
       return false;
     }
 
+    exposeFatalRoot(root);
+    clearNode(root);
+
     const message =
       safeText(
-        error?.message,
+        normalizedError?.message,
         "No se pudo iniciar la aplicación."
       );
-
-    clearNode(root);
 
     const section =
       createElement("section", {
@@ -559,7 +1124,9 @@ function showFatalBootError(error) {
     );
 
     actions.appendChild(
-      createDetailsButton(error)
+      createDetailsButton(
+        normalizedError
+      )
     );
 
     card.appendChild(eyebrow);
@@ -571,9 +1138,12 @@ function showFatalBootError(error) {
     section.appendChild(card);
     root.appendChild(section);
 
-    safeEmit("main:boot:fatal-rendered", {
-      message,
-    });
+    safeEmit(
+      "main:boot:fatal-rendered",
+      {
+        message,
+      }
+    );
 
     return true;
   } catch {
@@ -630,11 +1200,30 @@ function bindReady(callback) {
 
   readyBound = true;
 
+  const guardedCallback = () => {
+    void waitForDomReady()
+      .then(() => {
+        try {
+          callback();
+        } catch (error) {
+          safeError(
+            "Callback de ready falló.",
+            error
+          );
+
+          showFatalBootError(error);
+        }
+      });
+  };
+
   try {
     if (
-      typeof AppCore?.ready === "function"
+      isFunction(AppCore?.ready)
     ) {
-      AppCore.ready(callback);
+      AppCore.ready(
+        guardedCallback
+      );
+
       return;
     }
   } catch (error) {
@@ -645,87 +1234,244 @@ function bindReady(callback) {
   }
 
   void waitForDomReady()
-    .then(callback);
+    .then(guardedCallback);
+}
+
+/* =========================================================
+   BOOT TIMEOUT
+========================================================= */
+
+function getBootTimeoutMs() {
+  const configured =
+    safeNumber(
+      AppCore?.config?.bootTimeoutMs ??
+        AppCore?.config?.appBootTimeoutMs ??
+        AppCore?.config?.startupTimeoutMs,
+      DEFAULT_BOOT_TIMEOUT_MS
+    );
+
+  return Math.max(
+    0,
+    configured
+  );
+}
+
+function createBootTimeoutPromise(timeoutMs = 0) {
+  if (
+    !Number.isFinite(timeoutMs) ||
+    timeoutMs <= 0
+  ) {
+    return {
+      promise: new Promise(() => {}),
+      clear() {},
+    };
+  }
+
+  let timeoutId = null;
+
+  const promise =
+    new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        const error =
+          new Error(
+            `El arranque superó el límite de ${timeoutMs}ms.`
+          );
+
+        error.code = "BOOT_TIMEOUT";
+        error.status = 408;
+        error.timeout = true;
+
+        reject(error);
+      }, timeoutMs);
+    });
+
+  return {
+    promise,
+
+    clear() {
+      try {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+      } catch {}
+
+      timeoutId = null;
+    },
+  };
+}
+
+/* =========================================================
+   APP BOOT EXECUTION
+========================================================= */
+
+async function executeAppBoot() {
+  if (
+    !App ||
+    !isFunction(App.boot)
+  ) {
+    const error =
+      new Error(
+        "App.boot no está disponible."
+      );
+
+    error.code = "APP_BOOT_MISSING";
+
+    throw error;
+  }
+
+  return App.boot();
 }
 
 /* =========================================================
    BOOT
 ========================================================= */
 
-async function boot() {
-  if (bootStarted) {
+async function boot(options = {}) {
+  if (
+    bootStarted &&
+    bootPromise
+  ) {
     return bootPromise;
   }
 
   bootStarted = true;
   bootSettled = false;
+  bootFailed = false;
+  fatalRendered = false;
+
+  const startedAt =
+    Date.now();
+
+  captureInitialUrl("boot-start");
 
   markDocumentBooting("main-boot");
-  ensureStaticLoaderVisible();
+  ensureStaticLoaderVisible("main-boot");
+
+  const timeoutMs =
+    options.timeoutMs === undefined
+      ? getBootTimeoutMs()
+      : safeNumber(
+          options.timeoutMs,
+          getBootTimeoutMs()
+        );
+
+  const bootTimeout =
+    createBootTimeoutPromise(
+      timeoutMs
+    );
 
   bootPromise =
     Promise.resolve()
       .then(async () => {
         safeLog(
-          "Boot iniciando..."
+          "Boot iniciando...",
+          {
+            timeoutMs,
+          }
         );
 
-        safeEmit("main:boot:start", {
-          readyState:
-            isBrowser()
-              ? document.readyState
-              : "server",
-        });
-
-        await nextFrame();
-
-        await App.boot();
-
-        bootSettled = true;
+        safeEmit(
+          "main:boot:start",
+          {
+            readyState:
+              isBrowser()
+                ? document.readyState
+                : "server",
+            timeoutMs,
+          }
+        );
 
         /*
-          App.boot() normalmente ya marca ready/hide loader
-          desde src/app/index.js + loader.js.
-          Este mark es fallback final para que html/body no queden
-          en app-booting/app-loading si algún evento no sincronizó.
+          Primer paint con estado app-booting/app-loading aplicado.
         */
-        markDocumentReady("main-boot-complete");
+        await nextFrame();
 
-        safeEmit("main:boot:complete", {
-          appState:
-            typeof App?.getState === "function"
-              ? App.getState()
-              : null,
-        });
+        const result =
+          await Promise.race([
+            executeAppBoot(),
+            bootTimeout.promise,
+          ]);
 
-        safeLog(
-          "Boot completado."
+        bootTimeout.clear();
+
+        bootSettled = true;
+        bootFailed = false;
+
+        /*
+          Fallback final:
+          App.boot() debería haber sincronizado loader/shell.
+          Main sólo remata clases globales y evita loader pegado.
+        */
+        await nextPaint();
+
+        markDocumentReady(
+          "main-boot-complete"
         );
 
-        return App;
+        forceHideStaticLoader(
+          "main-boot-complete"
+        );
+
+        safeEmit(
+          "main:boot:complete",
+          {
+            durationMs:
+              Date.now() - startedAt,
+            appState:
+              isFunction(App?.getState)
+                ? App.getState()
+                : null,
+          }
+        );
+
+        safeLog(
+          "Boot completado.",
+          {
+            durationMs:
+              Date.now() - startedAt,
+          }
+        );
+
+        return result || App;
       })
       .catch((error) => {
+        bootTimeout.clear();
+
         bootSettled = true;
+        bootFailed = true;
+
+        const normalizedError =
+          normalizeBootError(error);
 
         safeError(
           "Fallo crítico en boot:",
-          error
+          normalizedError
         );
 
-        safeEmit("main:boot:error", {
-          message:
-            safeText(
-              error?.message,
-              "Boot error"
-            ),
-          error,
-        });
+        safeEmit(
+          "main:boot:error",
+          {
+            durationMs:
+              Date.now() - startedAt,
+            message:
+              safeText(
+                normalizedError?.message,
+                "Boot error"
+              ),
+            code:
+              normalizedError?.code || null,
+            timeout:
+              Boolean(normalizedError?.timeout),
+            error:
+              normalizedError,
+          }
+        );
 
         showFatalBootError(
-          error
+          normalizedError
         );
 
-        throw error;
+        throw normalizedError;
       });
 
   return bootPromise;
@@ -736,9 +1482,14 @@ async function boot() {
 ========================================================= */
 
 function bindGlobalBootSafetyNet() {
-  if (!isBrowser()) {
+  if (
+    !isBrowser() ||
+    globalSafetyNetBound
+  ) {
     return;
   }
+
+  globalSafetyNetBound = true;
 
   try {
     window.addEventListener(
@@ -750,7 +1501,8 @@ function bindGlobalBootSafetyNet() {
 
         safeError(
           "Error global durante boot:",
-          event?.error || event?.message
+          event?.error ||
+            event?.message
         );
       }
     );
@@ -781,12 +1533,27 @@ function start() {
   bindGlobalBootSafetyNet();
 
   bindReady(() => {
-    void boot();
+    captureInitialUrl("ready");
+
+    markDocumentBooting("dom-ready");
+    ensureStaticLoaderVisible("dom-ready");
+
+    void boot().catch(() => {
+      /*
+        showFatalBootError ya se ejecuta dentro de boot().
+        Evitamos un unhandled rejection adicional en el arranque automático.
+      */
+    });
   });
 }
 
+/* =========================================================
+   FIRST TICK
+========================================================= */
+
+captureInitialUrl("module-load");
 markDocumentBooting("module-load");
-ensureStaticLoaderVisible();
+ensureStaticLoaderVisible("module-load");
 start();
 
 /* =========================================================
@@ -800,25 +1567,66 @@ try {
 
     window.OnionApp.main = {
       boot,
+
+      start,
+
+      captureInitialUrl,
+
+      markDocumentBooting,
+      markDocumentReady,
+      markDocumentFatal,
+
+      ensureStaticLoaderVisible,
+      forceHideStaticLoader,
+
       getState() {
+        const loader =
+          getLoaderElement();
+
         return {
           bootStarted,
           bootSettled,
+          bootFailed,
           hasBootPromise:
             Boolean(bootPromise),
           readyBound,
+          fatalRendered,
+          globalSafetyNetBound,
+
+          bootTimeoutMs:
+            getBootTimeoutMs(),
+
           documentReadyState:
             document.readyState,
+
           htmlClassName:
             document.documentElement?.className || "",
+
           bodyClassName:
             document.body?.className || "",
+
           loaderExists:
-            Boolean(getLoaderElement()),
+            Boolean(loader),
+
           loaderHidden:
-            Boolean(getLoaderElement()?.hidden),
+            Boolean(loader?.hidden),
+
+          loaderVisible:
+            loader?.dataset?.loaderVisible || null,
+
+          initialUrl:
+            window.__ONION_INITIAL_URL__ || null,
+
+          activationInitialUrl:
+            window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__ || null,
+
+          resetConfirmInitialUrl:
+            window.__ONION_RESET_CONFIRM_INITIAL_URL__ ||
+            window.__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__ ||
+            null,
+
           appState:
-            typeof App?.getState === "function"
+            isFunction(App?.getState)
               ? App.getState()
               : null,
         };
@@ -826,3 +1634,8 @@ try {
     };
   }
 } catch {}
+
+export default {
+  boot,
+  start,
+};

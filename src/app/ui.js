@@ -9,20 +9,18 @@
    - refresco UI ante cambio idioma
    - evitar roturas si faltan deps
    - bridge global Toast robusto
-   - rebind seguro de SidebarUI / TopbarUI
    - exponer snapshots de diagnóstico
 
-   HARDENING EXTREMO:
-   - init idempotente total
-   - mounts aislados por módulo
-   - tolerancia absoluta a fallos parciales
-   - logs seguros enterprise
-   - sync user serializada
-   - eventos consistentes
-   - no duplicar listeners globales
-   - no mutar objetos no extensibles
-   - descriptors seguros en bridges
-   - compatible con firma legacy y firma objeto
+   FIX CRÍTICO EVENT STORM:
+   - syncUserUI() NO llama repair/render/rebind/bindEvents
+   - repairUISystems() NO fuerza rebind por defecto
+   - bindAppLanguageSync() NO rebindea sidebar/topbar
+   - initUISystems() inicializa módulos una sola vez
+   - safeEmit() NO duplica AppCore.events + window
+   - rebind queda reservado solo para petición explícita
+   - sync ligero por módulo:
+     SidebarUI: renderUser/applyRoleVisibility/syncRouteAndIndicator
+     TopbarUI: renderUser/refreshUser/updateUser/syncUser/refresh/sync
 ========================================================= */
 
 import {
@@ -104,30 +102,63 @@ const UI_MODULES =
       "topbar",
   });
 
-const UI_SYNC_METHODS =
-  Object.freeze([
-    "syncUser",
-    "refreshUser",
-    "updateUser",
-    "sync",
-    "refresh",
-    "repair",
-    "render",
-  ]);
-
-const UI_REBIND_METHODS =
-  Object.freeze([
-    "rebind",
-    "bindEvents",
-    "bind",
-  ]);
-
 const UI_INIT_METHODS =
   Object.freeze([
     "init",
     "boot",
     "mount",
     "start",
+  ]);
+
+const SIDEBAR_USER_LIGHT_METHODS =
+  Object.freeze([
+    "renderUser",
+    "refreshUser",
+    "updateUser",
+    "syncUser",
+  ]);
+
+const SIDEBAR_VISUAL_LIGHT_METHODS =
+  Object.freeze([
+    "applyRoleVisibility",
+    "syncRouteAndIndicator",
+    "syncIndicator",
+    "updateToggleLabel",
+  ]);
+
+const SIDEBAR_FALLBACK_LIGHT_METHODS =
+  Object.freeze([
+    "refresh",
+    "sync",
+  ]);
+
+const TOPBAR_USER_LIGHT_METHODS =
+  Object.freeze([
+    "renderUser",
+    "refreshUser",
+    "updateUser",
+    "syncUser",
+  ]);
+
+const TOPBAR_FALLBACK_LIGHT_METHODS =
+  Object.freeze([
+    "refresh",
+    "sync",
+  ]);
+
+const UI_HARD_REPAIR_METHODS =
+  Object.freeze([
+    "repair",
+    "refresh",
+    "sync",
+  ]);
+
+const UI_REBIND_METHODS =
+  Object.freeze([
+    "rebind",
+    "rebindEvents",
+    "bindEvents",
+    "bind",
   ]);
 
 const TOAST_TYPES =
@@ -140,6 +171,8 @@ const TOAST_TYPES =
     "loading",
   ]);
 
+const SYNC_QUEUE_DELAY_MS = 0;
+
 /* =========================================================
    INTERNAL STATE
 ========================================================= */
@@ -151,9 +184,9 @@ let uiInitialized = false;
 let languageSyncBound = false;
 let toastBridgeBound = false;
 
-const boundDisposers = [];
+let moduleInitState = new WeakMap();
 
-const moduleInitState = new WeakMap();
+const boundDisposers = [];
 
 const uiState = {
   initialized:
@@ -295,30 +328,6 @@ function safeDefineValue(target, key, value) {
   return false;
 }
 
-function safeInvoke(fn, thisArg = null, args = []) {
-  try {
-    if (isFunction(fn)) {
-      return fn.apply(
-        thisArg,
-        safeArray(args)
-      );
-    }
-  } catch {}
-
-  return undefined;
-}
-
-function safeMethod(target, methodName, args = []) {
-  const object =
-    ensureObject(target);
-
-  return safeInvoke(
-    object?.[methodName],
-    object,
-    args
-  );
-}
-
 function normalizeDeps(first = {}, second = {}) {
   if (
     isObject(first) &&
@@ -341,6 +350,14 @@ function normalizeDeps(first = {}, second = {}) {
     AppCore:
       first,
   };
+}
+
+function getPayload(eventOrPayload = {}) {
+  return ensureObject(
+    eventOrPayload?.detail ||
+      eventOrPayload?.payload ||
+      eventOrPayload
+  );
 }
 
 /* =========================================================
@@ -410,32 +427,53 @@ function safeWindowDispatch(eventName, payload = {}) {
   return false;
 }
 
-function safeEmit(AppCore, eventName, payload = {}) {
+function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   if (!eventName) {
     return false;
   }
 
-  let emitted = false;
+  const opts =
+    ensureObject(options);
+
+  let busAvailable = false;
+  let busEmitted = false;
 
   try {
-    AppCore?.events?.emit?.(
-      eventName,
-      payload
-    );
+    if (isFunction(AppCore?.events?.emit)) {
+      busAvailable = true;
 
-    emitted = true;
+      AppCore.events.emit(
+        eventName,
+        payload
+      );
+
+      busEmitted = true;
+    }
   } catch {}
 
+  /*
+    Importante:
+    No emitir siempre también por window.
+    Si AppCore.events existe, varios módulos ya escuchan el bus.
+    Duplicar a window provoca doble commit visual y dobles repairs.
+  */
   if (
-    safeWindowDispatch(
-      eventName,
-      payload
-    )
+    opts.window === true ||
+    (!busAvailable && isBrowser())
   ) {
-    emitted = true;
+    const windowOk =
+      safeWindowDispatch(
+        eventName,
+        payload
+      );
+
+    return Boolean(
+      busEmitted ||
+      windowOk
+    );
   }
 
-  return emitted;
+  return busEmitted;
 }
 
 function setLastError(AppCore, source = "ui", error = null) {
@@ -517,12 +555,20 @@ function getUserSnapshot(AppCore, Auth = null) {
 
   const user =
     state.user ||
+    state.currentUser ||
+    state.sessionUser ||
+    state.authUser ||
+    state.session?.user ||
     getAuthUser(Auth) ||
     null;
 
   const role =
     state.role ||
+    state.rol ||
+    state.userRole ||
+    state.session?.role ||
     user?.role ||
+    user?.rol ||
     getAuthRole(Auth) ||
     null;
 
@@ -539,6 +585,7 @@ function getUserSnapshot(AppCore, Auth = null) {
     authenticated:
       Boolean(
         state.authenticated ||
+        state.isAuthenticated ||
         getAuthStatus(Auth)
       ),
 
@@ -570,6 +617,7 @@ function getUserSnapshot(AppCore, Auth = null) {
 
     publicPath:
       state.publicPath ||
+      state.route ||
       "/",
   };
 }
@@ -689,10 +737,19 @@ function registerAppModule(AppCore, name, moduleRef) {
 
 function wasModuleInitialized(moduleRef) {
   try {
-    return Boolean(
-      moduleRef &&
-      moduleInitState.get(moduleRef)
-    );
+    if (!moduleRef) {
+      return false;
+    }
+
+    if (moduleInitState.get(moduleRef)) {
+      return true;
+    }
+
+    if (moduleRef.initialized === true) {
+      return true;
+    }
+
+    return false;
   } catch {}
 
   return false;
@@ -727,6 +784,25 @@ function callModuleMethod(moduleRef, methodName, context = {}) {
   try {
     fn.call(
       moduleRef,
+      context.reason || context
+    );
+
+    return true;
+  } catch {}
+
+  try {
+    fn.call(
+      moduleRef,
+      context.reason || "",
+      context
+    );
+
+    return true;
+  } catch {}
+
+  try {
+    fn.call(
+      moduleRef,
       context
     );
 
@@ -751,6 +827,65 @@ function callModuleMethod(moduleRef, methodName, context = {}) {
   return false;
 }
 
+function callFirstModuleMethod(moduleRef, methodNames = [], context = {}) {
+  for (const methodName of safeArray(methodNames)) {
+    if (
+      callModuleMethod(
+        moduleRef,
+        methodName,
+        context
+      )
+    ) {
+      return {
+        called:
+          true,
+        method:
+          methodName,
+      };
+    }
+  }
+
+  return {
+    called:
+      false,
+    method:
+      "",
+  };
+}
+
+function callAllModuleMethods(moduleRef, methodNames = [], context = {}) {
+  const called = [];
+  const failed = [];
+
+  for (const methodName of safeArray(methodNames)) {
+    try {
+      if (
+        callModuleMethod(
+          moduleRef,
+          methodName,
+          context
+        )
+      ) {
+        called.push(methodName);
+      } else {
+        failed.push(methodName);
+      }
+    } catch {
+      failed.push(methodName);
+    }
+  }
+
+  return {
+    called:
+      called.length > 0,
+
+    methods:
+      called,
+
+    failed,
+  };
+}
+
 function safeInitModule(AppCore, moduleRef, label = "module", context = {}) {
   if (!moduleRef) {
     return false;
@@ -767,6 +902,9 @@ function safeInitModule(AppCore, moduleRef, label = "module", context = {}) {
     ...ensureObject(context),
     AppCore,
     label,
+    reason:
+      context.reason ||
+      `${label}:init`,
   };
 
   for (const methodName of UI_INIT_METHODS) {
@@ -819,22 +957,144 @@ function safeInitModule(AppCore, moduleRef, label = "module", context = {}) {
   return initializedModule;
 }
 
-function callUiMethods(target, methodNames = [], context = {}) {
-  let called = false;
+/* =========================================================
+   LIGHT UI SYNC
+========================================================= */
 
-  for (const methodName of methodNames) {
-    if (
-      callModuleMethod(
-        target,
-        methodName,
-        context
-      )
-    ) {
-      called = true;
-    }
+function syncSidebarLight(SidebarUI, context = {}) {
+  if (!SidebarUI) {
+    return {
+      ok:
+        false,
+      user:
+        "",
+      visual:
+        [],
+      fallback:
+        "",
+    };
   }
 
-  return called;
+  const userResult =
+    callFirstModuleMethod(
+      SidebarUI,
+      SIDEBAR_USER_LIGHT_METHODS,
+      context
+    );
+
+  const visualResult =
+    callAllModuleMethods(
+      SidebarUI,
+      SIDEBAR_VISUAL_LIGHT_METHODS,
+      context
+    );
+
+  let fallbackResult = {
+    called:
+      false,
+    method:
+      "",
+  };
+
+  /*
+    Solo usamos refresh/sync si el módulo no expone métodos ligeros.
+    No llamamos repair/rebind/render.
+  */
+  if (
+    !userResult.called &&
+    !visualResult.called
+  ) {
+    fallbackResult =
+      callFirstModuleMethod(
+        SidebarUI,
+        SIDEBAR_FALLBACK_LIGHT_METHODS,
+        context
+      );
+  }
+
+  return {
+    ok:
+      Boolean(
+        userResult.called ||
+        visualResult.called ||
+        fallbackResult.called
+      ),
+
+    user:
+      userResult.method,
+
+    visual:
+      visualResult.methods,
+
+    fallback:
+      fallbackResult.method,
+  };
+}
+
+function syncTopbarLight(TopbarUI, context = {}) {
+  if (!TopbarUI) {
+    return {
+      ok:
+        false,
+      user:
+        "",
+      fallback:
+        "",
+    };
+  }
+
+  const userResult =
+    callFirstModuleMethod(
+      TopbarUI,
+      TOPBAR_USER_LIGHT_METHODS,
+      context
+    );
+
+  let fallbackResult = {
+    called:
+      false,
+    method:
+      "",
+  };
+
+  if (!userResult.called) {
+    fallbackResult =
+      callFirstModuleMethod(
+        TopbarUI,
+        TOPBAR_FALLBACK_LIGHT_METHODS,
+        context
+      );
+  }
+
+  return {
+    ok:
+      Boolean(
+        userResult.called ||
+        fallbackResult.called
+      ),
+
+    user:
+      userResult.method,
+
+    fallback:
+      fallbackResult.method,
+  };
+}
+
+function hardRepairModule(moduleRef, context = {}) {
+  return callFirstModuleMethod(
+    moduleRef,
+    UI_HARD_REPAIR_METHODS,
+    context
+  );
+}
+
+function rebindModule(moduleRef, context = {}) {
+  return callFirstModuleMethod(
+    moduleRef,
+    UI_REBIND_METHODS,
+    context
+  );
 }
 
 /* =========================================================
@@ -858,6 +1118,7 @@ export function syncUserUI(first = {}, second = {}) {
     reason = "sync-user-ui",
     payload = {},
     rebind = false,
+    hardRepair = false,
   } = deps;
 
   if (!AppCore) {
@@ -874,11 +1135,18 @@ export function syncUserUI(first = {}, second = {}) {
   const startedAt =
     Date.now();
 
+  const cleanReason =
+    safeText(
+      reason,
+      "sync-user-ui"
+    );
+
   safeEmit(
     AppCore,
     UI_EVENTS.userSyncStart,
     {
-      reason,
+      reason:
+        cleanReason,
       at:
         safeIsoDate(startedAt),
     }
@@ -900,7 +1168,7 @@ export function syncUserUI(first = {}, second = {}) {
       I18n,
 
       reason:
-        safeText(reason, "sync-user-ui"),
+        cleanReason,
 
       payload:
         ensureObject(payload),
@@ -937,62 +1205,99 @@ export function syncUserUI(first = {}, second = {}) {
 
     let ok = false;
 
-    try {
-      if (
-        isFunction(AppCore.syncUserUI) &&
-        AppCore.syncUserUI !== syncUserUI
-      ) {
-        AppCore.syncUserUI(context);
-        ok = true;
-      }
-    } catch (error) {
-      safeWarn(
-        AppCore,
-        "AppCore.syncUserUI() falló.",
-        error
-      );
-    }
+    let sidebarResult = {
+      ok:
+        false,
+    };
 
-    if (
-      callUiMethods(
-        SidebarUI,
-        UI_SYNC_METHODS,
-        context
-      )
-    ) {
-      ok = true;
-    }
+    let topbarResult = {
+      ok:
+        false,
+    };
 
-    if (
-      callUiMethods(
-        TopbarUI,
-        UI_SYNC_METHODS,
-        context
-      )
-    ) {
-      ok = true;
-    }
-
-    if (rebind) {
-      if (
-        callUiMethods(
+    if (hardRepair === true) {
+      const sidebarRepair =
+        hardRepairModule(
           SidebarUI,
-          UI_REBIND_METHODS,
           context
-        )
-      ) {
-        ok = true;
-      }
+        );
 
-      if (
-        callUiMethods(
+      const topbarRepair =
+        hardRepairModule(
           TopbarUI,
-          UI_REBIND_METHODS,
           context
-        )
-      ) {
-        ok = true;
-      }
+        );
+
+      sidebarResult = {
+        ok:
+          sidebarRepair.called,
+        repair:
+          sidebarRepair.method,
+      };
+
+      topbarResult = {
+        ok:
+          topbarRepair.called,
+        repair:
+          topbarRepair.method,
+      };
+    } else {
+      sidebarResult =
+        syncSidebarLight(
+          SidebarUI,
+          context
+        );
+
+      topbarResult =
+        syncTopbarLight(
+          TopbarUI,
+          context
+        );
+    }
+
+    ok =
+      Boolean(
+        sidebarResult.ok ||
+        topbarResult.ok
+      );
+
+    let sidebarRebind = {
+      called:
+        false,
+      method:
+        "",
+    };
+
+    let topbarRebind = {
+      called:
+        false,
+      method:
+        "",
+    };
+
+    /*
+      Rebind solo explícito.
+      Nunca por defecto durante auth/router/lang.
+    */
+    if (rebind === true) {
+      sidebarRebind =
+        rebindModule(
+          SidebarUI,
+          context
+        );
+
+      topbarRebind =
+        rebindModule(
+          TopbarUI,
+          context
+        );
+
+      ok =
+        Boolean(
+          ok ||
+          sidebarRebind.called ||
+          topbarRebind.called
+        );
     }
 
     uiState.syncCount += 1;
@@ -1008,6 +1313,8 @@ export function syncUserUI(first = {}, second = {}) {
         ...snapshot,
         reason:
           context.reason,
+        source:
+          "app:ui",
       }
     );
 
@@ -1026,6 +1333,16 @@ export function syncUserUI(first = {}, second = {}) {
           snapshot.username,
         role:
           snapshot.role,
+        sidebar:
+          sidebarResult,
+        topbar:
+          topbarResult,
+        rebind:
+          Boolean(rebind),
+        sidebarRebind:
+          sidebarRebind.method,
+        topbarRebind:
+          topbarRebind.method,
       }
     );
 
@@ -1041,6 +1358,12 @@ export function syncUserUI(first = {}, second = {}) {
           snapshot.username,
         role:
           snapshot.role,
+        sidebar:
+          sidebarResult,
+        topbar:
+          topbarResult,
+        rebind:
+          Boolean(rebind),
       }
     );
 
@@ -1067,7 +1390,8 @@ export function syncUserUI(first = {}, second = {}) {
             error?.message || error,
             "syncUserUI() error."
           ),
-        reason,
+        reason:
+          cleanReason,
       }
     );
 
@@ -1082,9 +1406,13 @@ export function syncUserUI(first = {}, second = {}) {
         syncUserUI({
           ...deps,
           reason:
-            `${safeText(reason, "sync-user-ui")}:queued`,
+            `${cleanReason}:queued`,
+          rebind:
+            false,
+          hardRepair:
+            false,
         });
-      }, 0);
+      }, SYNC_QUEUE_DELAY_MS);
     }
   }
 }
@@ -1118,14 +1446,16 @@ function bindEvent(AppCore, scope, eventName, handler) {
 
         return true;
       } catch {
-        AppCore.cleanup.event(
-          scope,
-          window,
-          eventName,
-          handler
-        );
+        if (isBrowser()) {
+          AppCore.cleanup.event(
+            scope,
+            window,
+            eventName,
+            handler
+          );
 
-        return true;
+          return true;
+        }
       }
     }
   } catch {}
@@ -1208,12 +1538,14 @@ export function bindAppLanguageSync(first = {}, second = {}) {
 
   const handler = (eventOrPayload = {}) => {
     const detail =
-      ensureObject(
-        eventOrPayload?.detail ||
-        eventOrPayload?.payload ||
-        eventOrPayload
-      );
+      getPayload(eventOrPayload);
 
+    /*
+      Cambio clave:
+      NO rebind en cambio de idioma.
+      El i18n live debe actualizar data-i18n.
+      El sidebar/topbar solo sincronizan usuario/activo/visibilidad.
+    */
     syncUserUI({
       AppCore,
       Auth,
@@ -1226,7 +1558,9 @@ export function bindAppLanguageSync(first = {}, second = {}) {
       payload:
         detail,
       rebind:
-        true,
+        false,
+      hardRepair:
+        false,
     });
 
     try {
@@ -1524,16 +1858,27 @@ export function repairUISystems(first = {}, second = {}) {
   const {
     AppCore,
     reason = "repair-ui",
+    rebind = false,
+    hardRepair = false,
   } = deps;
 
   uiState.repairCount += 1;
 
+  /*
+    Cambio clave:
+    Antes esto hacía syncUserUI(..., rebind:true).
+    Eso provocaba:
+      app/ui repair -> SidebarUI.rebind -> bindCoreEvents -> core events bound
+    repetido en cada router/auth/lang event.
+  */
   const ok =
     syncUserUI({
       ...deps,
       reason,
       rebind:
-        true,
+        rebind === true,
+      hardRepair:
+        hardRepair === true,
     });
 
   safeEmit(
@@ -1543,6 +1888,10 @@ export function repairUISystems(first = {}, second = {}) {
       reason:
         safeText(reason, "repair-ui"),
       ok,
+      rebind:
+        rebind === true,
+      hardRepair:
+        hardRepair === true,
       at:
         safeIsoDate(),
     }
@@ -1594,6 +1943,10 @@ export function initUISystems(first = {}) {
       ...deps,
       reason:
         "init-ui-already-initialized",
+      rebind:
+        false,
+      hardRepair:
+        false,
     });
 
     return true;
@@ -1647,7 +2000,11 @@ export function initUISystems(first = {}) {
       AppCore,
       Toast,
       "Toast",
-      deps
+      {
+        ...deps,
+        reason:
+          "init-ui:toast",
+      }
     );
 
     bindToastBridge({
@@ -1655,18 +2012,33 @@ export function initUISystems(first = {}) {
       Toast,
     });
 
+    /*
+      SidebarUI.init() debe ocurrir solo una vez.
+      El propio SidebarUI es dueño de sus binds internos iniciales.
+    */
     safeInitModule(
       AppCore,
       SidebarUI,
       "SidebarUI",
-      deps
+      {
+        ...deps,
+        reason:
+          "init-ui:sidebar",
+      }
     );
 
+    /*
+      TopbarUI.init() debe ocurrir solo una vez.
+    */
     safeInitModule(
       AppCore,
       TopbarUI,
       "TopbarUI",
-      deps
+      {
+        ...deps,
+        reason:
+          "init-ui:topbar",
+      }
     );
 
     bindAppLanguageSync({
@@ -1674,12 +2046,20 @@ export function initUISystems(first = {}) {
       scope,
     });
 
+    /*
+      Cambio clave:
+      No rebind después de init.
+      init ya bindeó.
+      Aquí solo sincronizamos datos de usuario/rol/ruta.
+    */
     syncUserUI({
       ...deps,
       reason:
         "init-ui",
       rebind:
-        true,
+        false,
+      hardRepair:
+        false,
     });
 
     uiInitialized =
@@ -1947,6 +2327,9 @@ export function resetUIRuntimeState() {
 
   toastBridgeBound =
     false;
+
+  moduleInitState =
+    new WeakMap();
 
   uiState.initialized =
     false;

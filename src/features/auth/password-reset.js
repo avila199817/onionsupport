@@ -669,7 +669,7 @@ function resolveStatus(response = {}) {
     payload,
     result,
     body,
-    response,
+    response: responseNode,
     responseData,
   } = getNode(response);
 
@@ -695,9 +695,9 @@ function resolveStatus(response = {}) {
       body.statusCode,
       body.status_code,
 
-      response.status,
-      response.statusCode,
-      response.status_code,
+      responseNode.status,
+      responseNode.statusCode,
+      responseNode.status_code,
 
       responseData.status,
       responseData.statusCode,

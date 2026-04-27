@@ -4,22 +4,25 @@
 
    Responsabilidades:
    - centralizar el event bus del core
-   - emitir eventos CustomEvent sobre document
+   - emitir eventos CustomEvent sobre document/window/custom target
    - registrar listeners persistentes o once
    - desacoplar módulos a través de eventos
    - funcionar con fallback in-memory si no hay DOM
    - exponer snapshot debug del bus
 
    HARDENING EXTREMO:
-   - cero throws accidentales
+   - cero throws accidentales desde handlers
    - compatible browser/server
    - listeners idempotentes
-   - off seguro
-   - once robusto
+   - off seguro por handler original
+   - once robusto sin depender de once nativo
    - normalización de options
    - soporte document/window/custom target
-   - métricas internas de emit/on/off/error
+   - métricas internas de emit/on/off/error/drop
    - payload estable: event.detail
+   - wrapper defensivo de listeners DOM
+   - protección contra recursión / tormentas de eventos
+   - no congela la SPA si un módulo emite en bucle
 ========================================================= */
 
 import {
@@ -31,14 +34,22 @@ import {
    CONSTANTS
 ========================================================= */
 
-const DEFAULT_TARGET =
-  "document";
+const DEFAULT_TARGET = "document";
 
-const MAX_RECENT_EVENTS =
-  40;
+const MAX_RECENT_EVENTS = 60;
 
-const EVENTS_VERSION =
-  "10.0.0";
+const EVENTS_VERSION = "10.1.0";
+
+/*
+  Firebreaks.
+  Valores altos para no molestar flujo normal,
+  pero suficientes para cortar bucles tipo:
+    app:user-ui:sync -> render -> emit -> sync -> emit...
+*/
+const MAX_SYNC_EMIT_DEPTH = 12;
+const RATE_WINDOW_MS = 1000;
+const MAX_EMITS_PER_WINDOW = 500;
+const MAX_EMITS_PER_EVENT_PER_WINDOW = 120;
 
 /* =========================================================
    BASICS
@@ -64,7 +75,8 @@ function isFunction(value) {
 function isObject(value) {
   return (
     value !== null &&
-    typeof value === "object"
+    typeof value === "object" &&
+    !Array.isArray(value)
   );
 }
 
@@ -76,16 +88,17 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
+  const text = String(value).trim();
 
   return text || fallback;
 }
 
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+
+  return Number.isFinite(n)
+    ? n
+    : fallback;
 }
 
 function safeNow() {
@@ -102,24 +115,36 @@ function safeIsoDate(ms = safeNow()) {
 
 function safeWarn(...args) {
   try {
-    console.warn(
-      "[CoreEvents]",
-      ...args
-    );
+    console.warn("[CoreEvents]", ...args);
   } catch {}
+}
+
+function createNoopOff() {
+  return () => false;
+}
+
+function normalizeEventName(name = "") {
+  return safeText(name, "");
 }
 
 function normalizeOptions(options = false) {
   try {
     if (typeof normalizeListenerOptions === "function") {
-      return normalizeListenerOptions(options);
+      const normalized = normalizeListenerOptions(options);
+
+      if (
+        normalized === true ||
+        normalized === false ||
+        isObject(normalized)
+      ) {
+        return normalized;
+      }
     }
   } catch {}
 
   if (options === true) {
     return {
-      capture:
-        true,
+      capture: true,
     };
   }
 
@@ -140,12 +165,68 @@ function normalizeOptions(options = false) {
   return false;
 }
 
-function normalizeEventName(name = "") {
-  return safeText(name, "");
+function getOptionsTarget(options = false) {
+  if (!isObject(options)) {
+    return null;
+  }
+
+  return options.target || null;
 }
 
-function createNoopOff() {
-  return () => false;
+function normalizeDomOptions(options = false) {
+  const normalized = normalizeOptions(options);
+
+  if (normalized === true) {
+    return {
+      capture: true,
+    };
+  }
+
+  if (
+    normalized === false ||
+    normalized === null ||
+    normalized === undefined
+  ) {
+    return false;
+  }
+
+  if (!isObject(normalized)) {
+    return false;
+  }
+
+  /*
+    No pasamos once aquí.
+    El once se controla manualmente para poder limpiar activeListeners.
+    target tampoco pertenece a addEventListener.
+  */
+  return {
+    capture: Boolean(normalized.capture),
+    passive: Boolean(normalized.passive),
+  };
+}
+
+function wantsOnce(options = false) {
+  const normalized = normalizeOptions(options);
+
+  return Boolean(
+    isObject(normalized) &&
+    normalized.once
+  );
+}
+
+function withoutOnce(options = false) {
+  const normalized = normalizeOptions(options);
+
+  if (!isObject(normalized)) {
+    return normalized;
+  }
+
+  const {
+    once,
+    ...rest
+  } = normalized;
+
+  return rest;
 }
 
 function isEventTargetLike(target) {
@@ -186,12 +267,14 @@ function resolveTarget(target = DEFAULT_TARGET) {
     return target;
   }
 
-  const key =
-    safeText(target, DEFAULT_TARGET)
-      .toLowerCase();
+  const key = safeText(target, DEFAULT_TARGET).toLowerCase();
 
   if (key === "window") {
     return getWindowTarget();
+  }
+
+  if (key === "document") {
+    return getDefaultTarget();
   }
 
   return getDefaultTarget();
@@ -201,20 +284,17 @@ function createCustomEvent(name, detail = {}) {
   try {
     return new CustomEvent(name, {
       detail,
-      bubbles:
-        false,
-      cancelable:
-        false,
-      composed:
-        false,
+      bubbles: false,
+      cancelable: false,
+      composed: false,
     });
   } catch {
-    /*
-      Fallback para navegadores antiguos.
-    */
     try {
-      const event =
-        document.createEvent("CustomEvent");
+      if (!localIsBrowser()) {
+        return null;
+      }
+
+      const event = document.createEvent("CustomEvent");
 
       event.initCustomEvent(
         name,
@@ -234,11 +314,11 @@ function createCustomEvent(name, detail = {}) {
    IDS / DEDUPE
 ========================================================= */
 
-const handlerIds =
-  new WeakMap();
+const handlerIds = new WeakMap();
+const targetIds = new WeakMap();
 
-let nextHandlerId =
-  1;
+let nextHandlerId = 1;
+let nextTargetId = 1;
 
 function getHandlerId(handler) {
   if (!isFunction(handler)) {
@@ -259,37 +339,118 @@ function getHandlerId(handler) {
   }
 }
 
+function getTargetKey(target = DEFAULT_TARGET) {
+  if (typeof target === "string") {
+    return `target:${safeText(target, DEFAULT_TARGET).toLowerCase()}`;
+  }
+
+  if (!target) {
+    return `target:${DEFAULT_TARGET}`;
+  }
+
+  try {
+    if (!targetIds.has(target)) {
+      targetIds.set(
+        target,
+        nextTargetId++
+      );
+    }
+
+    return `target:${targetIds.get(target)}`;
+  } catch {
+    return "target:unknown";
+  }
+}
+
 function normalizeOptionsForKey(options = false) {
-  if (options === true) {
-    return "capture:true";
+  const normalized = normalizeDomOptions(options);
+
+  if (normalized === true) {
+    return "capture:true|passive:false";
   }
 
   if (
-    options === false ||
-    options === null ||
-    options === undefined
+    normalized === false ||
+    normalized === null ||
+    normalized === undefined
   ) {
-    return "capture:false";
+    return "capture:false|passive:false";
   }
 
-  if (isObject(options)) {
+  if (isObject(normalized)) {
     return [
-      `capture:${Boolean(options.capture)}`,
-      `once:${Boolean(options.once)}`,
-      `passive:${Boolean(options.passive)}`,
+      `capture:${Boolean(normalized.capture)}`,
+      `passive:${Boolean(normalized.passive)}`,
     ].join("|");
   }
 
-  return String(options);
+  return String(normalized);
 }
 
-function makeListenerKey(name, handler, options, targetKey = DEFAULT_TARGET) {
+function makeListenerKey({
+  name = "",
+  handler = null,
+  options = false,
+  targetRef = DEFAULT_TARGET,
+} = {}) {
   return [
-    safeText(targetKey, DEFAULT_TARGET),
+    getTargetKey(targetRef),
     normalizeEventName(name),
     getHandlerId(handler),
     normalizeOptionsForKey(options),
   ].join("::");
+}
+
+/* =========================================================
+   SAFE PREVIEW
+========================================================= */
+
+function safePreview(value, depth = 0) {
+  if (depth > 2) {
+    return "[depth-limit]";
+  }
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return value;
+  }
+
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "function") {
+    return "[function]";
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 12)
+      .map((item) => safePreview(item, depth + 1));
+  }
+
+  if (isObject(value)) {
+    const output = {};
+    const entries = Object.entries(value).slice(0, 30);
+
+    for (const [key, item] of entries) {
+      output[key] = safePreview(item, depth + 1);
+    }
+
+    return output;
+  }
+
+  try {
+    return String(value);
+  } catch {
+    return "[unserializable]";
+  }
 }
 
 /* =========================================================
@@ -300,79 +461,56 @@ export function createEvents({
   target = DEFAULT_TARGET,
   mirrorToWindow = false,
   maxRecentEvents = MAX_RECENT_EVENTS,
+  maxSyncEmitDepth = MAX_SYNC_EMIT_DEPTH,
+  maxEmitsPerWindow = MAX_EMITS_PER_WINDOW,
+  maxEmitsPerEventPerWindow = MAX_EMITS_PER_EVENT_PER_WINDOW,
+  rateWindowMs = RATE_WINDOW_MS,
 } = {}) {
-  const memoryListeners =
-    new Map();
+  const memoryListeners = new Map();
+  const activeListeners = new Map();
+  const recentEvents = [];
 
-  const activeListeners =
-    new Map();
+  const emitDepthByName = new Map();
+  const eventRateMap = new Map();
 
-  const recentEvents =
-    [];
+  let rateWindowStartedAt = safeNow();
+  let totalEmitsInWindow = 0;
+  let lastDropWarningAt = 0;
 
   const state = {
-    version:
-      EVENTS_VERSION,
+    version: EVENTS_VERSION,
+    target: safeText(target, DEFAULT_TARGET),
+    browser: localIsBrowser(),
 
-    target:
-      safeText(target, DEFAULT_TARGET),
+    emitCount: 0,
+    onCount: 0,
+    offCount: 0,
+    onceCount: 0,
+    clearCount: 0,
+    errorCount: 0,
+    dropCount: 0,
 
-    browser:
-      localIsBrowser(),
-
-    emitCount:
-      0,
-
-    onCount:
-      0,
-
-    offCount:
-      0,
-
-    onceCount:
-      0,
-
-    errorCount:
-      0,
-
-    lastEvent:
-      "",
-
-    lastEventAt:
-      0,
-
-    lastError:
-      null,
+    lastEvent: "",
+    lastEventAt: 0,
+    lastError: null,
+    lastDroppedEvent: null,
   };
 
   function pushRecentEvent(type = "event", name = "", detail = {}) {
-    const atMs =
-      safeNow();
+    const atMs = safeNow();
 
     recentEvents.unshift({
-      type:
-        safeText(type, "event"),
-
-      name:
-        safeText(name, ""),
-
-      detail:
-        isObject(detail)
-          ? {
-              ...detail,
-            }
-          : detail,
-
-      at:
-        safeIsoDate(atMs),
-
+      type: safeText(type, "event"),
+      name: safeText(name, ""),
+      detail: safePreview(detail),
+      at: safeIsoDate(atMs),
       atMs,
     });
 
-    const limit =
-      Number.isFinite(Number(maxRecentEvents))
-        ? Number(maxRecentEvents)
-        : MAX_RECENT_EVENTS;
+    const limit = Math.max(
+      1,
+      safeNumber(maxRecentEvents, MAX_RECENT_EVENTS)
+    );
 
     if (recentEvents.length > limit) {
       recentEvents.splice(limit);
@@ -383,21 +521,24 @@ export function createEvents({
     state.errorCount += 1;
 
     state.lastError = {
-      source:
-        safeText(source, "events"),
-
-      name:
-        safeText(name, ""),
-
-      message:
-        safeText(
-          error?.message || error,
-          "Event bus error."
-        ),
-
-      at:
-        safeIsoDate(),
+      source: safeText(source, "events"),
+      name: safeText(name, ""),
+      message: safeText(
+        error?.message || error,
+        "Event bus error."
+      ),
+      stack: safeText(error?.stack, ""),
+      at: safeIsoDate(),
     };
+
+    pushRecentEvent(
+      "error",
+      name,
+      {
+        source,
+        message: state.lastError.message,
+      }
+    );
 
     safeWarn(
       state.lastError.message,
@@ -409,9 +550,159 @@ export function createEvents({
     );
   }
 
+  function recordDrop(name = "", reason = "", detail = {}) {
+    state.dropCount += 1;
+
+    state.lastDroppedEvent = {
+      name: safeText(name, ""),
+      reason: safeText(reason, ""),
+      at: safeIsoDate(),
+    };
+
+    pushRecentEvent(
+      "drop",
+      name,
+      {
+        reason,
+        ...safePreview(detail),
+      }
+    );
+
+    const now = safeNow();
+
+    /*
+      No spamear consola si precisamente estamos cortando una tormenta.
+    */
+    if (now - lastDropWarningAt > 1000) {
+      lastDropWarningAt = now;
+
+      safeWarn(
+        `Evento bloqueado por firebreak: ${name}`,
+        {
+          reason,
+          detail,
+        }
+      );
+    }
+  }
+
+  function resetRateWindowIfNeeded() {
+    const now = safeNow();
+    const windowMs = Math.max(100, safeNumber(rateWindowMs, RATE_WINDOW_MS));
+
+    if (now - rateWindowStartedAt <= windowMs) {
+      return;
+    }
+
+    rateWindowStartedAt = now;
+    totalEmitsInWindow = 0;
+    eventRateMap.clear();
+  }
+
+  function shouldAllowEmit(eventName = "") {
+    const name = normalizeEventName(eventName);
+
+    if (!name) {
+      return false;
+    }
+
+    resetRateWindowIfNeeded();
+
+    const currentDepth = safeNumber(
+      emitDepthByName.get(name),
+      0
+    );
+
+    if (currentDepth >= safeNumber(maxSyncEmitDepth, MAX_SYNC_EMIT_DEPTH)) {
+      recordDrop(
+        name,
+        "max-sync-depth",
+        {
+          currentDepth,
+          maxSyncEmitDepth,
+        }
+      );
+
+      return false;
+    }
+
+    totalEmitsInWindow += 1;
+
+    if (totalEmitsInWindow > safeNumber(maxEmitsPerWindow, MAX_EMITS_PER_WINDOW)) {
+      recordDrop(
+        name,
+        "max-total-rate",
+        {
+          totalEmitsInWindow,
+          maxEmitsPerWindow,
+        }
+      );
+
+      return false;
+    }
+
+    const currentEventCount = safeNumber(
+      eventRateMap.get(name),
+      0
+    ) + 1;
+
+    eventRateMap.set(
+      name,
+      currentEventCount
+    );
+
+    if (
+      currentEventCount >
+      safeNumber(maxEmitsPerEventPerWindow, MAX_EMITS_PER_EVENT_PER_WINDOW)
+    ) {
+      recordDrop(
+        name,
+        "max-event-rate",
+        {
+          currentEventCount,
+          maxEmitsPerEventPerWindow,
+        }
+      );
+
+      return false;
+    }
+
+    return true;
+  }
+
+  function beginEmit(eventName = "") {
+    const name = normalizeEventName(eventName);
+    const currentDepth = safeNumber(
+      emitDepthByName.get(name),
+      0
+    );
+
+    emitDepthByName.set(
+      name,
+      currentDepth + 1
+    );
+  }
+
+  function endEmit(eventName = "") {
+    const name = normalizeEventName(eventName);
+    const currentDepth = safeNumber(
+      emitDepthByName.get(name),
+      0
+    );
+
+    if (currentDepth <= 1) {
+      emitDepthByName.delete(name);
+      return;
+    }
+
+    emitDepthByName.set(
+      name,
+      currentDepth - 1
+    );
+  }
+
   function getMemorySet(name = "") {
-    const eventName =
-      normalizeEventName(name);
+    const eventName = normalizeEventName(name);
 
     if (!eventName) {
       return null;
@@ -427,53 +718,125 @@ export function createEvents({
     return memoryListeners.get(eventName);
   }
 
-  function emitMemory(name = "", detail = {}) {
-    const eventName =
-      normalizeEventName(name);
+  function makeEventLike(name = "", detail = {}, targetRef = null) {
+    return {
+      type: normalizeEventName(name),
+      detail,
+      payload: detail,
+      target: targetRef,
+      currentTarget: targetRef,
+      defaultPrevented: false,
 
-    const set =
-      memoryListeners.get(eventName);
+      preventDefault() {
+        this.defaultPrevented = true;
+      },
+
+      stopPropagation() {},
+      stopImmediatePropagation() {},
+    };
+  }
+
+  function callHandlerSafely({
+    handler,
+    event,
+    eventName = "",
+    source = "handler",
+  } = {}) {
+    if (!isFunction(handler)) {
+      return false;
+    }
+
+    try {
+      handler(event);
+      return true;
+    } catch (error) {
+      recordError(
+        source,
+        error,
+        eventName
+      );
+
+      return false;
+    }
+  }
+
+  function emitMemory(name = "", detail = {}) {
+    const eventName = normalizeEventName(name);
+    const set = memoryListeners.get(eventName);
 
     if (!set || !set.size) {
       return false;
     }
 
-    const eventLike = {
-      type:
-        eventName,
-
+    const eventLike = makeEventLike(
+      eventName,
       detail,
+      null
+    );
 
-      payload:
-        detail,
-
-      target:
-        null,
-
-      currentTarget:
-        null,
-    };
-
-    for (const handler of Array.from(set)) {
-      try {
-        handler(eventLike);
-      } catch (error) {
-        recordError(
-          "memory-handler",
-          error,
-          eventName
-        );
-      }
+    for (const record of Array.from(set)) {
+      callHandlerSafely({
+        handler: record.wrappedHandler || record.handler,
+        event: eventLike,
+        eventName,
+        source: "memory-handler",
+      });
     }
 
     return true;
   }
 
+  function dispatchDomEvent({
+    eventName = "",
+    payload = {},
+    domTarget = null,
+    source = "dom-dispatch",
+  } = {}) {
+    if (
+      !localIsBrowser() ||
+      !isEventTargetLike(domTarget)
+    ) {
+      return false;
+    }
+
+    try {
+      const event = createCustomEvent(
+        eventName,
+        payload
+      );
+
+      if (!event) {
+        return false;
+      }
+
+      /*
+        Importante:
+        Las excepciones de listeners DOM nativos no siempre se propagan
+        al try/catch de dispatchEvent. Por eso nuestros listeners se
+        registran SIEMPRE envueltos en makeSafeDomHandler().
+      */
+      return Boolean(
+        domTarget.dispatchEvent(event)
+      );
+    } catch (error) {
+      recordError(
+        source,
+        error,
+        eventName
+      );
+
+      return false;
+    }
+  }
+
   function emit(name, detail = {}, options = {}) {
-    const eventName =
-      normalizeEventName(name);
+    const eventName = normalizeEventName(name);
 
     if (!eventName) {
+      return false;
+    }
+
+    if (!shouldAllowEmit(eventName)) {
       return false;
     }
 
@@ -483,10 +846,8 @@ export function createEvents({
         : detail;
 
     state.emitCount += 1;
-    state.lastEvent =
-      eventName;
-    state.lastEventAt =
-      safeNow();
+    state.lastEvent = eventName;
+    state.lastEventAt = safeNow();
 
     pushRecentEvent(
       "emit",
@@ -494,81 +855,75 @@ export function createEvents({
       payload
     );
 
-    const domTarget =
-      resolveTarget(
-        options?.target || target
+    beginEmit(eventName);
+
+    try {
+      const optionsTarget = getOptionsTarget(options);
+      const domTarget = resolveTarget(
+        optionsTarget || target
       );
 
-    let emitted =
-      false;
-
-    if (
-      localIsBrowser() &&
-      isEventTargetLike(domTarget)
-    ) {
-      try {
-        const event =
-          createCustomEvent(
-            eventName,
-            payload
-          );
-
-        if (event) {
-          emitted =
-            Boolean(
-              domTarget.dispatchEvent(event)
-            );
-        }
-      } catch (error) {
-        recordError(
-          "dom-dispatch",
-          error,
-          eventName
-        );
-      }
+      let emitted = false;
 
       if (
-        mirrorToWindow &&
-        domTarget !== getWindowTarget()
+        localIsBrowser() &&
+        isEventTargetLike(domTarget)
       ) {
-        try {
-          const win =
-            getWindowTarget();
+        emitted = dispatchDomEvent({
+          eventName,
+          payload,
+          domTarget,
+          source: "dom-dispatch",
+        });
 
-          const event =
-            createCustomEvent(
-              eventName,
-              payload
-            );
-
-          if (
-            win &&
-            event
-          ) {
-            win.dispatchEvent(event);
-          }
-        } catch (error) {
-          recordError(
-            "window-mirror",
-            error,
-            eventName
-          );
+        if (
+          mirrorToWindow &&
+          domTarget !== getWindowTarget()
+        ) {
+          dispatchDomEvent({
+            eventName,
+            payload,
+            domTarget: getWindowTarget(),
+            source: "window-mirror",
+          });
         }
-      }
-    } else {
-      emitted =
-        emitMemory(
+      } else {
+        emitted = emitMemory(
           eventName,
           payload
         );
-    }
+      }
 
-    return emitted;
+      return emitted;
+    } finally {
+      endEmit(eventName);
+    }
+  }
+
+  function makeSafeDomHandler(eventName, handler) {
+    return function safeDomHandler(event) {
+      return callHandlerSafely({
+        handler,
+        event,
+        eventName,
+        source: "dom-handler",
+      });
+    };
+  }
+
+  function makeSafeMemoryHandler(eventName, handler) {
+    return function safeMemoryHandler(event) {
+      return callHandlerSafely({
+        handler,
+        event,
+        eventName,
+        source: "memory-handler",
+      });
+    };
   }
 
   function on(name, handler, options = false) {
-    const eventName =
-      normalizeEventName(name);
+    const eventName = normalizeEventName(name);
 
     if (
       !eventName ||
@@ -577,16 +932,25 @@ export function createEvents({
       return createNoopOff();
     }
 
-    const finalOptions =
-      normalizeOptions(options);
-
-    const key =
-      makeListenerKey(
+    if (wantsOnce(options)) {
+      return once(
         eventName,
         handler,
-        finalOptions,
-        state.target
+        withoutOnce(options)
       );
+    }
+
+    const finalOptions = normalizeDomOptions(options);
+    const optionsTarget = getOptionsTarget(options);
+    const targetRef = optionsTarget || target;
+    const domTarget = resolveTarget(targetRef);
+
+    const key = makeListenerKey({
+      name: eventName,
+      handler,
+      options: finalOptions,
+      targetRef,
+    });
 
     if (activeListeners.has(key)) {
       return activeListeners.get(key)?.off || createNoopOff();
@@ -594,20 +958,22 @@ export function createEvents({
 
     state.onCount += 1;
 
-    const domTarget =
-      resolveTarget(target);
-
-    let off =
-      createNoopOff();
+    let off = createNoopOff();
+    let wrappedHandler = null;
 
     if (
       localIsBrowser() &&
       isEventTargetLike(domTarget)
     ) {
+      wrappedHandler = makeSafeDomHandler(
+        eventName,
+        handler
+      );
+
       try {
         domTarget.addEventListener(
           eventName,
-          handler,
+          wrappedHandler,
           finalOptions
         );
 
@@ -619,7 +985,7 @@ export function createEvents({
           try {
             domTarget.removeEventListener(
               eventName,
-              handler,
+              wrappedHandler,
               finalOptions
             );
           } catch (error) {
@@ -654,14 +1020,25 @@ export function createEvents({
         return createNoopOff();
       }
     } else {
-      const set =
-        getMemorySet(eventName);
+      const set = getMemorySet(eventName);
 
       if (!set) {
         return createNoopOff();
       }
 
-      set.add(handler);
+      wrappedHandler = makeSafeMemoryHandler(
+        eventName,
+        handler
+      );
+
+      const memoryRecord = {
+        key,
+        name: eventName,
+        handler,
+        wrappedHandler,
+      };
+
+      set.add(memoryRecord);
 
       off = () => {
         if (!activeListeners.has(key)) {
@@ -669,7 +1046,7 @@ export function createEvents({
         }
 
         try {
-          set.delete(handler);
+          set.delete(memoryRecord);
         } catch {}
 
         activeListeners.delete(key);
@@ -692,18 +1069,18 @@ export function createEvents({
       key,
       {
         key,
-        name:
-          eventName,
+        name: eventName,
         handler,
-        options:
-          finalOptions,
-        once:
-          false,
-        target:
-          state.target,
+        wrappedHandler,
+        options: finalOptions,
+        once: false,
+        target: getTargetKey(targetRef),
+        targetName:
+          typeof targetRef === "string"
+            ? targetRef
+            : "custom",
         off,
-        createdAt:
-          safeIsoDate(),
+        createdAt: safeIsoDate(),
       }
     );
 
@@ -719,8 +1096,7 @@ export function createEvents({
   }
 
   function off(name, handler, options = false) {
-    const eventName =
-      normalizeEventName(name);
+    const eventName = normalizeEventName(name);
 
     if (
       !eventName ||
@@ -729,19 +1105,18 @@ export function createEvents({
       return false;
     }
 
-    const finalOptions =
-      normalizeOptions(options);
+    const finalOptions = normalizeDomOptions(options);
+    const optionsTarget = getOptionsTarget(options);
+    const targetRef = optionsTarget || target;
 
-    const key =
-      makeListenerKey(
-        eventName,
-        handler,
-        finalOptions,
-        state.target
-      );
+    const key = makeListenerKey({
+      name: eventName,
+      handler,
+      options: finalOptions,
+      targetRef,
+    });
 
-    const record =
-      activeListeners.get(key);
+    const record = activeListeners.get(key);
 
     if (
       record &&
@@ -751,11 +1126,12 @@ export function createEvents({
     }
 
     /*
-      Fallback directo por si el listener fue registrado fuera
-      del mapa interno.
+      Fallback directo:
+      solo útil si alguien registró fuera del mapa.
+      En listeners de este bus normalmente no se usa porque el handler real
+      registrado en DOM es el wrapper.
     */
-    const domTarget =
-      resolveTarget(target);
+    const domTarget = resolveTarget(targetRef);
 
     try {
       if (
@@ -768,12 +1144,24 @@ export function createEvents({
           finalOptions
         );
       } else {
-        memoryListeners
-          .get(eventName)
-          ?.delete(handler);
+        const set = memoryListeners.get(eventName);
+
+        if (set) {
+          for (const item of Array.from(set)) {
+            if (item?.handler === handler) {
+              set.delete(item);
+            }
+          }
+        }
       }
 
       state.offCount += 1;
+
+      pushRecentEvent(
+        "off:fallback",
+        eventName,
+        {}
+      );
 
       return true;
     } catch (error) {
@@ -788,8 +1176,7 @@ export function createEvents({
   }
 
   function once(name, handler, options = false) {
-    const eventName =
-      normalizeEventName(name);
+    const eventName = normalizeEventName(name);
 
     if (
       !eventName ||
@@ -800,50 +1187,26 @@ export function createEvents({
 
     state.onceCount += 1;
 
-    const baseOptions =
-      normalizeOptions(options);
+    let dispose = null;
 
-    const finalOptions =
-      isObject(baseOptions)
-        ? {
-            ...baseOptions,
-            once:
-              true,
-          }
-        : {
-            once:
-              true,
-          };
-
-    /*
-      Aunque el DOM soporte { once: true }, usamos wrapper para
-      mantener control del mapa interno y del fallback memory.
-    */
-    let dispose =
-      null;
-
-    const wrapped = (event) => {
+    const wrappedOnce = (event) => {
       try {
         dispose?.();
       } catch {}
 
-      try {
-        handler(event);
-      } catch (error) {
-        recordError(
-          "once-handler",
-          error,
-          eventName
-        );
-      }
+      callHandlerSafely({
+        handler,
+        event,
+        eventName,
+        source: "once-handler",
+      });
     };
 
-    dispose =
-      on(
-        eventName,
-        wrapped,
-        finalOptions
-      );
+    dispose = on(
+      eventName,
+      wrappedOnce,
+      withoutOnce(options)
+    );
 
     pushRecentEvent(
       "once",
@@ -855,11 +1218,9 @@ export function createEvents({
   }
 
   function clear(name = "") {
-    const eventName =
-      normalizeEventName(name);
+    const eventName = normalizeEventName(name);
 
-    let count =
-      0;
+    let count = 0;
 
     for (const record of Array.from(activeListeners.values())) {
       if (
@@ -870,8 +1231,9 @@ export function createEvents({
       }
 
       try {
-        record.off?.();
-        count += 1;
+        if (record.off?.()) {
+          count += 1;
+        }
       } catch (error) {
         recordError(
           "clear",
@@ -887,6 +1249,8 @@ export function createEvents({
       memoryListeners.clear();
     }
 
+    state.clearCount += 1;
+
     pushRecentEvent(
       "clear",
       eventName || "*",
@@ -899,15 +1263,13 @@ export function createEvents({
   }
 
   function listenerCount(name = "") {
-    const eventName =
-      normalizeEventName(name);
+    const eventName = normalizeEventName(name);
 
     if (!eventName) {
       return activeListeners.size;
     }
 
-    let count =
-      0;
+    let count = 0;
 
     for (const record of activeListeners.values()) {
       if (record.name === eventName) {
@@ -919,8 +1281,7 @@ export function createEvents({
   }
 
   function names() {
-    const set =
-      new Set();
+    const set = new Set();
 
     for (const record of activeListeners.values()) {
       if (record.name) {
@@ -937,66 +1298,49 @@ export function createEvents({
 
   function getSnapshot() {
     return {
-      version:
-        state.version,
+      version: state.version,
+      target: state.target,
+      browser: localIsBrowser(),
 
-      target:
-        state.target,
+      emitCount: state.emitCount,
+      onCount: state.onCount,
+      offCount: state.offCount,
+      onceCount: state.onceCount,
+      clearCount: state.clearCount,
+      errorCount: state.errorCount,
+      dropCount: state.dropCount,
 
-      browser:
-        localIsBrowser(),
-
-      emitCount:
-        state.emitCount,
-
-      onCount:
-        state.onCount,
-
-      offCount:
-        state.offCount,
-
-      onceCount:
-        state.onceCount,
-
-      errorCount:
-        state.errorCount,
-
-      lastEvent:
-        state.lastEvent,
-
-      lastEventAt:
-        state.lastEventAt,
-
+      lastEvent: state.lastEvent,
+      lastEventAt: state.lastEventAt,
       lastEventAtIso:
         state.lastEventAt
           ? safeIsoDate(state.lastEventAt)
           : "",
 
-      lastError:
-        state.lastError,
+      lastError: state.lastError,
+      lastDroppedEvent: state.lastDroppedEvent,
 
-      listenerCount:
-        listenerCount(),
+      listenerCount: listenerCount(),
+      eventNames: names(),
 
-      eventNames:
-        names(),
+      firebreaks: {
+        maxSyncEmitDepth,
+        rateWindowMs,
+        maxEmitsPerWindow,
+        maxEmitsPerEventPerWindow,
+        currentTotalEmitsInWindow: totalEmitsInWindow,
+        currentEventRates: Object.fromEntries(eventRateMap.entries()),
+        currentEmitDepth: Object.fromEntries(emitDepthByName.entries()),
+      },
 
       listeners:
         Array.from(activeListeners.values()).map((record) => ({
-          key:
-            record.key,
-
-          name:
-            record.name,
-
-          once:
-            Boolean(record.once),
-
-          target:
-            record.target,
-
-          createdAt:
-            record.createdAt,
+          key: record.key,
+          name: record.name,
+          once: Boolean(record.once),
+          target: record.target,
+          targetName: record.targetName,
+          createdAt: record.createdAt,
         })),
 
       recent:
@@ -1009,31 +1353,29 @@ export function createEvents({
   function reset() {
     clear();
 
-    state.emitCount =
-      0;
-
-    state.onCount =
-      0;
-
-    state.offCount =
-      0;
-
-    state.onceCount =
-      0;
-
-    state.errorCount =
-      0;
-
-    state.lastEvent =
-      "";
-
-    state.lastEventAt =
-      0;
-
-    state.lastError =
-      null;
-
+    memoryListeners.clear();
+    activeListeners.clear();
     recentEvents.splice(0);
+
+    emitDepthByName.clear();
+    eventRateMap.clear();
+
+    rateWindowStartedAt = safeNow();
+    totalEmitsInWindow = 0;
+    lastDropWarningAt = 0;
+
+    state.emitCount = 0;
+    state.onCount = 0;
+    state.offCount = 0;
+    state.onceCount = 0;
+    state.clearCount = 0;
+    state.errorCount = 0;
+    state.dropCount = 0;
+
+    state.lastEvent = "";
+    state.lastEventAt = 0;
+    state.lastError = null;
+    state.lastDroppedEvent = null;
 
     return getSnapshot();
   }
@@ -1051,8 +1393,7 @@ export function createEvents({
     names,
 
     getSnapshot,
-    getDebugSnapshot:
-      getSnapshot,
+    getDebugSnapshot: getSnapshot,
 
     reset,
   };

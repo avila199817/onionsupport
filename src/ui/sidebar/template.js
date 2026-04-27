@@ -2,7 +2,7 @@
    Onion SPA - Sidebar Template
    Archivo: src/ui/sidebar/template.js
 
-   FINAL PRO SYSTEM · SIDEBAR TEMPLATE · EXTREME HARDENED · 10/10
+   FINAL EXTREME SYSTEM · SIDEBAR TEMPLATE · I18N/A11Y/DOM SAFE · 10/10
 
    RESPONSABILIDADES:
    - generar el HTML base del sidebar
@@ -18,9 +18,10 @@
    - no pintar tooltip en el logo
    - no pintar tooltip nativo en avatar/footer
    - marcar rutas admin para filtrado visual posterior
+   - evitar flash de rutas admin antes de aplicar visibilidad
    - incluir data-sidebar-action para fallback delegado
    - incluir data-action para compatibilidad con delegación genérica
-   - incluir data-route para navegación robusta
+   - incluir data-route / data-href / data-to para navegación robusta
    - dropdown de usuario con button real, data-user-toggle y data-user-dropdown
    - estructura DOM compatible con dom.js / events.js / dropdown.js / index.js
 
@@ -32,6 +33,7 @@
    - evita aria-hidden en contenedores interactivos principales
    - SVGs preservados
    - sin title nativo en footer/logo/avatar
+   - rutas admin ocultas de inicio hasta applyRoleVisibility()
 ========================================================= */
 
 import { I18n } from "../../i18n/index.js";
@@ -54,9 +56,21 @@ import {
 const SIDEBAR_LOGO_ID = "homeLink";
 const SIDEBAR_TOGGLE_ID = "toggleSidebar";
 const SIDEBAR_MOBILE_TOGGLE_ID = "toggleSidebarMobile";
+
 const SIDEBAR_AVATAR_IMAGE_ID = "sidebarAvatarImage";
 const SIDEBAR_AVATAR_FALLBACK_ID = "sidebarAvatarFallback";
 const SIDEBAR_USER_PLAN_ID = "sidebarUserPlan";
+
+const ROUTES = Object.freeze({
+  home: "/",
+  tickets: "/incidencias",
+  invoices: "/facturas",
+  users: "/usuarios",
+  clients: "/clientes",
+  account: "/cuenta",
+  settings: "/ajustes",
+  server: "/servidor",
+});
 
 /* =========================================================
    I18N
@@ -122,13 +136,6 @@ function normalizeKey(value = "") {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9:_-]+/g, "-")
     .replace(/^-+|-+$/g, "");
-}
-
-function joinAttrs(...attrs) {
-  return attrs
-    .map((item) => safeText(item, ""))
-    .filter(Boolean)
-    .join("\n");
 }
 
 function boolAttr(name = "", enabled = false) {
@@ -360,145 +367,41 @@ const Icons = Object.freeze({
 
 function getSidebarLabels() {
   return {
-    sidebarAria: t(
-      "sidebar.aria.main",
-      "Barra lateral principal"
-    ),
+    sidebarAria: t("sidebar.aria.main", "Barra lateral principal"),
+    navAria: t("sidebar.aria.navigation", "Navegación principal"),
 
-    navAria: t(
-      "sidebar.aria.navigation",
-      "Navegación principal"
-    ),
+    logoLink: t("sidebar.logo.ariaLabel", "Ir al inicio"),
+    logoAlt: t("sidebar.logo.alt", "Onion Support"),
 
-    logoLink: t(
-      "sidebar.logo.ariaLabel",
-      "Ir al inicio"
-    ),
+    collapseSidebar: t("sidebar.toggle.collapse", "Contraer barra lateral"),
+    expandSidebar: t("sidebar.toggle.expand", "Expandir barra lateral"),
+    openSidebar: t("sidebar.toggle.open", "Abrir navegación"),
+    closeSidebar: t("sidebar.toggle.close", "Cerrar navegación"),
 
-    logoAlt: t(
-      "sidebar.logo.alt",
-      "Onion Support"
-    ),
+    home: t("sidebar.menu.home", "Inicio"),
+    tickets: t("sidebar.menu.tickets", "Incidencias"),
+    invoices: t("sidebar.menu.invoices", "Facturas"),
+    users: t("sidebar.menu.users", "Usuarios"),
+    clients: t("sidebar.menu.clients", "Clientes"),
+    account: t("sidebar.menu.account", "Cuenta"),
+    settings: t("sidebar.menu.settings", "Ajustes"),
+    server: t("sidebar.menu.server", "Servidor"),
 
-    collapseSidebar: t(
-      "sidebar.toggle.collapse",
-      "Contraer barra lateral"
-    ),
+    recentsAria: t("sidebar.recents.ariaLabel", "Recientes"),
+    recentsTitle: t("sidebar.recents.title", "Recientes"),
 
-    expandSidebar: t(
-      "sidebar.toggle.expand",
-      "Expandir barra lateral"
-    ),
+    userToggle: t("sidebar.user.toggleAriaLabel", "Abrir menú de usuario"),
+    userAvatar: t("sidebar.user.avatarAriaLabel", "Avatar usuario"),
+    userDefaultName: t("sidebar.user.defaultName", "Usuario"),
+    userPlan: t("sidebar.user.plan", "Go Plan"),
+    userMenu: t("sidebar.user.dropdownAriaLabel", "Menú de usuario"),
 
-    openSidebar: t(
-      "sidebar.toggle.open",
-      "Abrir navegación"
-    ),
-
-    closeSidebar: t(
-      "sidebar.toggle.close",
-      "Cerrar navegación"
-    ),
-
-    home: t(
-      "sidebar.menu.home",
-      "Inicio"
-    ),
-
-    tickets: t(
-      "sidebar.menu.tickets",
-      "Incidencias"
-    ),
-
-    invoices: t(
-      "sidebar.menu.invoices",
-      "Facturas"
-    ),
-
-    users: t(
-      "sidebar.menu.users",
-      "Usuarios"
-    ),
-
-    clients: t(
-      "sidebar.menu.clients",
-      "Clientes"
-    ),
-
-    account: t(
-      "sidebar.menu.account",
-      "Cuenta"
-    ),
-
-    settings: t(
-      "sidebar.menu.settings",
-      "Ajustes"
-    ),
-
-    server: t(
-      "sidebar.menu.server",
-      "Servidor"
-    ),
-
-    recentsAria: t(
-      "sidebar.recents.ariaLabel",
-      "Recientes"
-    ),
-
-    recentsTitle: t(
-      "sidebar.recents.title",
-      "Recientes"
-    ),
-
-    userToggle: t(
-      "sidebar.user.toggleAriaLabel",
-      "Abrir menú de usuario"
-    ),
-
-    userAvatar: t(
-      "sidebar.user.avatarAriaLabel",
-      "Avatar usuario"
-    ),
-
-    userDefaultName: t(
-      "sidebar.user.defaultName",
-      "Usuario"
-    ),
-
-    userMenu: t(
-      "sidebar.user.dropdownAriaLabel",
-      "Menú de usuario"
-    ),
-
-    addAccount: t(
-      "sidebar.user.addAccount",
-      "Añadir cuenta"
-    ),
-
-    changePlan: t(
-      "sidebar.user.changePlan",
-      "Cambiar plan"
-    ),
-
-    profile: t(
-      "sidebar.user.profile",
-      "Perfil"
-    ),
-
-    userSettings: t(
-      "sidebar.user.settings",
-      "Configuración"
-    ),
-
-    help: t(
-      "sidebar.user.help",
-      "Ayuda"
-    ),
-
-    logout: t(
-      "sidebar.user.logout",
-      "Cerrar sesión"
-    ),
+    addAccount: t("sidebar.user.addAccount", "Añadir cuenta"),
+    changePlan: t("sidebar.user.changePlan", "Cambiar plan"),
+    profile: t("sidebar.user.profile", "Perfil"),
+    userSettings: t("sidebar.user.settings", "Configuración"),
+    help: t("sidebar.user.help", "Ayuda"),
+    logout: t("sidebar.user.logout", "Cerrar sesión"),
   };
 }
 
@@ -521,15 +424,20 @@ function renderMenuItem({
   const cleanI18nKey = escapeAttr(i18nKey);
   const itemKey = escapeAttr(normalizeKey(key || label || route));
 
-  const roleAttrs = adminOnly
+  const adminAttrs = adminOnly
     ? `
           data-role="admin"
           data-admin-only="true"
           data-requires-role="admin"
           data-sidebar-visible="true"
-          data-admin-visible="true"
+          data-admin-visible="false"
+          aria-hidden="true"
+          tabindex="-1"
         `
-    : "";
+    : `
+          data-sidebar-visible="true"
+          data-admin-visible="true"
+        `;
 
   return `
         <a
@@ -545,35 +453,22 @@ function renderMenuItem({
           data-sidebar-action="navigate"
           class="menu-item"
           data-tooltip="${cleanLabel}"
-          ${
-            i18nKey
-              ? `data-i18n-data-tooltip="${cleanI18nKey}"`
-              : ""
-          }
+          ${i18nKey ? `data-i18n-data-tooltip="${cleanI18nKey}"` : ""}
           aria-label="${cleanLabel}"
-          ${
-            i18nKey
-              ? `data-i18n-aria-label="${cleanI18nKey}"`
-              : ""
-          }
-          aria-current="false"
-          ${roleAttrs}
+          ${i18nKey ? `data-i18n-aria-label="${cleanI18nKey}"` : ""}
+          ${adminAttrs}
           ${extraAttrs}
         >
           <span
-            class="menu-item-icon"
+            class="menu-item-icon menu-icon"
             aria-hidden="true"
           >
 ${icon}
           </span>
 
           <span
-            class="menu-item-label"
-            ${
-              i18nKey
-                ? `data-i18n="${cleanI18nKey}"`
-                : ""
-            }
+            class="menu-item-label menu-label"
+            ${i18nKey ? `data-i18n="${cleanI18nKey}"` : ""}
           >${cleanLabel}</span>
         </a>`;
 }
@@ -611,8 +506,15 @@ function renderDropdownButton({
             ${boolAttr("disabled", disabled)}
             ${disabled ? `aria-disabled="true"` : ""}
           >
-            ${icon}
             <span
+              class="dropdown-item-icon"
+              aria-hidden="true"
+            >
+${icon}
+            </span>
+
+            <span
+              class="dropdown-item-label"
               ${i18nKey ? `data-i18n="${cleanI18nKey}"` : ""}
             >${cleanLabel}</span>
           </button>`;
@@ -625,11 +527,11 @@ function renderDropdownButton({
 function renderLogo(labels) {
   return `
         <a
-          href="/"
+          href="${ROUTES.home}"
           data-spa
-          data-route="/"
-          data-href="/"
-          data-to="/"
+          data-route="${ROUTES.home}"
+          data-href="${ROUTES.home}"
+          data-to="${ROUTES.home}"
           data-sidebar-logo="true"
           data-sidebar-action="navigate"
           data-action="navigate"
@@ -637,7 +539,6 @@ function renderLogo(labels) {
           id="${SIDEBAR_LOGO_ID}"
           aria-label="${escapeAttr(labels.logoLink)}"
           data-i18n-aria-label="sidebar.logo.ariaLabel"
-          aria-current="false"
         >
           <img
             class="logo-dark"
@@ -717,9 +618,10 @@ function renderMainMenu(labels) {
         data-i18n-aria-label="sidebar.aria.navigation"
         data-sidebar-menu="true"
         data-nav-area="sidebar"
+        data-indicator-ready="false"
       >
 ${renderMenuItem({
-  href: "/",
+  href: ROUTES.home,
   label: labels.home,
   i18nKey: "sidebar.menu.home",
   key: "home",
@@ -727,7 +629,7 @@ ${renderMenuItem({
 })}
 
 ${renderMenuItem({
-  href: "/incidencias",
+  href: ROUTES.tickets,
   label: labels.tickets,
   i18nKey: "sidebar.menu.tickets",
   key: "tickets",
@@ -735,7 +637,7 @@ ${renderMenuItem({
 })}
 
 ${renderMenuItem({
-  href: "/facturas",
+  href: ROUTES.invoices,
   label: labels.invoices,
   i18nKey: "sidebar.menu.invoices",
   key: "invoices",
@@ -743,7 +645,7 @@ ${renderMenuItem({
 })}
 
 ${renderMenuItem({
-  href: "/usuarios",
+  href: ROUTES.users,
   label: labels.users,
   i18nKey: "sidebar.menu.users",
   key: "users",
@@ -752,7 +654,7 @@ ${renderMenuItem({
 })}
 
 ${renderMenuItem({
-  href: "/clientes",
+  href: ROUTES.clients,
   label: labels.clients,
   i18nKey: "sidebar.menu.clients",
   key: "clients",
@@ -761,7 +663,7 @@ ${renderMenuItem({
 })}
 
 ${renderMenuItem({
-  href: "/cuenta",
+  href: ROUTES.account,
   label: labels.account,
   i18nKey: "sidebar.menu.account",
   key: "account",
@@ -769,7 +671,7 @@ ${renderMenuItem({
 })}
 
 ${renderMenuItem({
-  href: "/ajustes",
+  href: ROUTES.settings,
   label: labels.settings,
   i18nKey: "sidebar.menu.settings",
   key: "settings",
@@ -777,7 +679,7 @@ ${renderMenuItem({
 })}
 
 ${renderMenuItem({
-  href: "/servidor",
+  href: ROUTES.server,
   label: labels.server,
   i18nKey: "sidebar.menu.server",
   key: "server",
@@ -796,6 +698,7 @@ function renderRecents(labels) {
         aria-label="${escapeAttr(labels.recentsAria)}"
         data-i18n-aria-label="sidebar.recents.ariaLabel"
         data-sidebar-recents="true"
+        data-sidebar-recent="true"
       >
         <span
           class="section-title"
@@ -826,6 +729,7 @@ function renderUserToggle(labels) {
             class="avatar"
             id="${SIDEBAR_AVATAR_ID}"
             aria-label="${escapeAttr(labels.userAvatar)}"
+            data-i18n-aria-label="sidebar.user.avatarAriaLabel"
             data-default-avatar="ON"
             data-avatar-root="true"
             data-sidebar-avatar="true"
@@ -844,9 +748,7 @@ function renderUserToggle(labels) {
               class="avatar-fallback"
               id="${SIDEBAR_AVATAR_FALLBACK_ID}"
               aria-hidden="true"
-            >
-              ON
-            </span>
+            >ON</span>
           </span>
 
           <span class="user-info">
@@ -862,7 +764,8 @@ function renderUserToggle(labels) {
               class="plan"
               id="${SIDEBAR_USER_PLAN_ID}"
               data-static="true"
-            >Go Plan</span>
+              data-i18n="sidebar.user.plan"
+            >${escapeHtml(labels.userPlan)}</span>
           </span>
 
 ${Icons.chevron}
@@ -879,7 +782,11 @@ function renderUserDropdown(labels) {
           aria-label="${escapeAttr(labels.userMenu)}"
           data-i18n-aria-label="sidebar.user.dropdownAriaLabel"
           data-user-dropdown="true"
+          data-user-menu="true"
+          data-sidebar-user-dropdown="true"
           data-sidebar-dropdown="user"
+          data-dropdown="user"
+          data-dropdown-menu="user"
           data-state="closed"
           aria-hidden="true"
           hidden
@@ -904,7 +811,7 @@ ${renderDropdownButton({
   label: labels.profile,
   i18nKey: "sidebar.user.profile",
   action: "profile",
-  route: "/cuenta",
+  route: ROUTES.account,
   icon: Icons.account,
 })}
 
@@ -912,7 +819,7 @@ ${renderDropdownButton({
   label: labels.userSettings,
   i18nKey: "sidebar.user.settings",
   action: "settings",
-  route: "/ajustes",
+  route: ROUTES.settings,
   icon: Icons.settings,
 })}
 

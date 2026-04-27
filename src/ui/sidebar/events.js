@@ -36,6 +36,14 @@
    - indicador se recalcula después del layout final.
    - durante transición se oculta el indicador para evitar burbuja flotante.
    - handlers viejos quedan invalidados por epoch aunque el bus no permita off().
+
+   FIX CLICK SIDEBAR:
+   - Los clicks del menú navegan explícitamente con Router.navigate().
+   - Ya no depende solo del listener global del Router.
+   - Soporta data-route / data-href / data-to / href.
+   - Respeta Ctrl/Cmd/Shift/Alt click.
+   - Respeta target="_blank", download, URLs externas y href inseguros.
+   - Los botones del dropdown con data-route también navegan.
 ========================================================= */
 
 import {
@@ -330,6 +338,292 @@ function preventDefaultAndStop(event) {
   try {
     event?.stopPropagation?.();
   } catch {}
+}
+
+/* ======================================================
+   NAVIGATION HELPERS
+====================================================== */
+
+function isPrimaryClick(event) {
+  if (!event) {
+    return true;
+  }
+
+  if (
+    "button" in event &&
+    event.button !== 0
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function isModifiedClick(event) {
+  return Boolean(
+    event?.metaKey ||
+      event?.ctrlKey ||
+      event?.shiftKey ||
+      event?.altKey
+  );
+}
+
+function getBaseOrigin() {
+  try {
+    if (isBrowser() && window.location?.origin) {
+      return window.location.origin;
+    }
+  } catch {}
+
+  return "http://localhost";
+}
+
+function isUnsafeHref(value = "") {
+  const href =
+    safeText(value, "").toLowerCase();
+
+  return (
+    href.startsWith("javascript:") ||
+    href.startsWith("data:") ||
+    href.startsWith("vbscript:") ||
+    href.startsWith("file:")
+  );
+}
+
+function isProtocolHref(value = "") {
+  return /^[a-z][a-z0-9+.-]*:/i.test(
+    safeText(value, "")
+  );
+}
+
+function isExternalHref(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return false;
+  }
+
+  if (!isProtocolHref(raw)) {
+    return false;
+  }
+
+  try {
+    const url = new URL(
+      raw,
+      getBaseOrigin()
+    );
+
+    if (
+      url.protocol === "http:" ||
+      url.protocol === "https:"
+    ) {
+      return url.origin !== getBaseOrigin();
+    }
+
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function isHashOnlyHref(value = "") {
+  const href =
+    safeText(value, "");
+
+  return (
+    href.startsWith("#") &&
+    !href.startsWith("#/")
+  );
+}
+
+function isDisabledInteractive(element = null) {
+  if (!element) {
+    return false;
+  }
+
+  return Boolean(
+    element.disabled ||
+      element.hasAttribute?.("disabled") ||
+      element.getAttribute?.("aria-disabled") === "true"
+  );
+}
+
+function getRouteFromElement(element = null) {
+  if (!element) {
+    return "";
+  }
+
+  return (
+    safeText(element.getAttribute?.("data-route"), "") ||
+    safeText(element.getAttribute?.("data-href"), "") ||
+    safeText(element.getAttribute?.("data-to"), "") ||
+    safeText(element.getAttribute?.("href"), "")
+  );
+}
+
+function normalizeSidebarTarget(AppCore, Router, value = "") {
+  let raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  if (
+    isUnsafeHref(raw) ||
+    isExternalHref(raw) ||
+    isHashOnlyHref(raw)
+  ) {
+    return "";
+  }
+
+  try {
+    if (isFn(Router?.resolveSpaHref)) {
+      raw = safeText(
+        Router.resolveSpaHref(raw),
+        raw
+      );
+    }
+  } catch {}
+
+  if (
+    !raw ||
+    isUnsafeHref(raw) ||
+    isExternalHref(raw) ||
+    isHashOnlyHref(raw)
+  ) {
+    return "";
+  }
+
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      const url = new URL(
+        raw,
+        getBaseOrigin()
+      );
+
+      if (url.origin !== getBaseOrigin()) {
+        return "";
+      }
+
+      raw = `${url.pathname || "/"}${url.search || ""}${url.hash || ""}`;
+    }
+  } catch {
+    return "";
+  }
+
+  try {
+    if (isFn(AppCore?.utils?.normalizePath)) {
+      return AppCore.utils.normalizePath(raw || "/");
+    }
+  } catch {}
+
+  if (raw.startsWith("#/")) {
+    return raw.replace(/^#\/?/, "/");
+  }
+
+  return raw.startsWith("/")
+    ? raw
+    : `/${raw}`;
+}
+
+async function navigateFromSidebar({
+  AppCore,
+  Router,
+  target = "",
+  source = "sidebar",
+} = {}) {
+  const finalRouter =
+    Router ||
+    AppCore?.Router ||
+    AppCore?.router;
+
+  const cleanTarget =
+    normalizeSidebarTarget(
+      AppCore,
+      finalRouter,
+      target
+    );
+
+  if (!cleanTarget) {
+    return false;
+  }
+
+  try {
+    if (isFn(finalRouter?.navigate)) {
+      await Promise.resolve(
+        finalRouter.navigate(cleanTarget, {
+          source,
+          force: false,
+        })
+      );
+
+      return true;
+    }
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      "Router.navigate falló desde sidebar.",
+      {
+        target:
+          cleanTarget,
+        source,
+        error,
+      }
+    );
+  }
+
+  try {
+    if (isBrowser()) {
+      window.location.href = cleanTarget;
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function getSidebarNavigationElement(target = null) {
+  if (!target || !isElement(target)) {
+    return null;
+  }
+
+  return target.closest?.(
+    [
+      "[data-sidebar-nav='true']",
+      "a[data-sidebar-item='true']",
+      "a[data-spa]",
+      "a[data-route]",
+      "a[data-href]",
+      "a[data-to]",
+      "a[href]",
+      ".menu-item[data-route]",
+      ".menu-item[data-href]",
+      ".menu-item[data-to]",
+    ].join(",")
+  ) || null;
+}
+
+function getDropdownNavigationElement(target = null) {
+  if (!target || !isElement(target)) {
+    return null;
+  }
+
+  return target.closest?.(
+    [
+      "a[data-spa]",
+      "a[data-route]",
+      "a[data-href]",
+      "a[data-to]",
+      "a[href]",
+      "button[data-route]",
+      "button[data-href]",
+      "button[data-to]",
+      "[data-sidebar-action='profile']",
+      "[data-sidebar-action='settings']",
+    ].join(",")
+  ) || null;
 }
 
 /* ======================================================
@@ -1126,6 +1420,7 @@ function preventHiddenTargetClick(event) {
 
 export function handleDocumentClick({
   AppCore,
+  Router,
   event,
   toggleSidebar,
   toggleDropdown,
@@ -1143,6 +1438,7 @@ export function handleDocumentClick({
     userToggle,
     userDropdown,
     logoutBtn,
+    sidebarMenu,
   } = resolveElements(AppCore, resolver);
 
   const target = event?.target;
@@ -1183,7 +1479,147 @@ export function handleDocumentClick({
     return;
   }
 
+  /*
+    Fallback delegado:
+    Si el bind directo sobre sidebarMenu no estaba disponible en el primer mount,
+    el document click aún puede navegar correctamente.
+  */
+  const sidebarNav =
+    getSidebarNavigationElement(target);
+
+  if (
+    sidebarNav &&
+    sidebarMenu?.contains?.(sidebarNav)
+  ) {
+    if (
+      !isPrimaryClick(event) ||
+      isModifiedClick(event) ||
+      isDisabledInteractive(sidebarNav) ||
+      sidebarNav.hasAttribute?.("download") ||
+      safeText(sidebarNav.getAttribute?.("target"), "").toLowerCase() === "_blank"
+    ) {
+      return;
+    }
+
+    const finalRouter =
+      Router ||
+      AppCore?.Router ||
+      AppCore?.router;
+
+    const targetPath =
+      normalizeSidebarTarget(
+        AppCore,
+        finalRouter,
+        getRouteFromElement(sidebarNav)
+      );
+
+    if (!targetPath) {
+      return;
+    }
+
+    markSidebarEventHandled(
+      event,
+      "document-sidebar-menu:navigate"
+    );
+
+    preventDefaultAndStop(event);
+
+    try {
+      closeDropdown?.();
+    } catch {}
+
+    safeEmit(
+      AppCore,
+      "sidebar:navigation:request",
+      {
+        target:
+          targetPath,
+
+        source:
+          "sidebar-menu",
+      }
+    );
+
+    void navigateFromSidebar({
+      AppCore,
+      Router:
+        finalRouter,
+      target:
+        targetPath,
+      source:
+        "sidebar-menu",
+    });
+
+    return;
+  }
+
   if (userDropdown?.contains?.(target)) {
+    const routeButton =
+      getDropdownNavigationElement(target);
+
+    if (!routeButton) {
+      return;
+    }
+
+    if (
+      !isPrimaryClick(event) ||
+      isModifiedClick(event) ||
+      isDisabledInteractive(routeButton) ||
+      routeButton.hasAttribute?.("download") ||
+      safeText(routeButton.getAttribute?.("target"), "").toLowerCase() === "_blank"
+    ) {
+      return;
+    }
+
+    const finalRouter =
+      Router ||
+      AppCore?.Router ||
+      AppCore?.router;
+
+    const targetPath =
+      normalizeSidebarTarget(
+        AppCore,
+        finalRouter,
+        getRouteFromElement(routeButton)
+      );
+
+    if (!targetPath) {
+      return;
+    }
+
+    markSidebarEventHandled(
+      event,
+      "sidebar-dropdown:navigate"
+    );
+
+    preventDefaultAndStop(event);
+
+    try {
+      closeDropdown?.();
+    } catch {}
+
+    safeEmit(
+      AppCore,
+      "sidebar:dropdown:navigation:request",
+      {
+        target:
+          targetPath,
+
+        source:
+          "sidebar-dropdown",
+      }
+    );
+
+    void navigateFromSidebar({
+      AppCore,
+      Router:
+        finalRouter,
+      target:
+        targetPath,
+      source:
+        "sidebar-dropdown",
+    });
+
     return;
   }
 
@@ -1192,11 +1628,19 @@ export function handleDocumentClick({
 
 export function handleSidebarMenuClick({
   AppCore,
+  Router,
   event,
   closeDropdown,
   getElements: resolver,
 }) {
   if (wasSidebarEventHandled(event)) {
+    return;
+  }
+
+  if (
+    !isPrimaryClick(event) ||
+    isModifiedClick(event)
+  ) {
     return;
   }
 
@@ -1218,9 +1662,8 @@ export function handleSidebarMenuClick({
     return;
   }
 
-  const link = target.closest(
-    "a[data-spa], a[data-route], .menu-item"
-  );
+  const link =
+    getSidebarNavigationElement(target);
 
   if (!link) {
     return;
@@ -1230,12 +1673,62 @@ export function handleSidebarMenuClick({
     return;
   }
 
-  /*
-    No prevenimos navegación aquí.
-    Router global o fallback de SidebarUI debe capturar el click SPA.
-    Solo cerramos dropdown footer.
-  */
-  closeDropdown?.();
+  if (
+    isDisabledInteractive(link) ||
+    link.hasAttribute?.("download") ||
+    safeText(link.getAttribute?.("target"), "").toLowerCase() === "_blank"
+  ) {
+    return;
+  }
+
+  const finalRouter =
+    Router ||
+    AppCore?.Router ||
+    AppCore?.router;
+
+  const targetPath =
+    normalizeSidebarTarget(
+      AppCore,
+      finalRouter,
+      getRouteFromElement(link)
+    );
+
+  if (!targetPath) {
+    return;
+  }
+
+  markSidebarEventHandled(
+    event,
+    "sidebar-menu:navigate"
+  );
+
+  preventDefaultAndStop(event);
+
+  try {
+    closeDropdown?.();
+  } catch {}
+
+  safeEmit(
+    AppCore,
+    "sidebar:navigation:request",
+    {
+      target:
+        targetPath,
+
+      source:
+        "sidebar-menu",
+    }
+  );
+
+  void navigateFromSidebar({
+    AppCore,
+    Router:
+      finalRouter,
+    target:
+      targetPath,
+    source:
+      "sidebar-menu",
+  });
 }
 
 export function handleUserToggleKeydown({
@@ -1376,6 +1869,7 @@ export function bindDomEvents(ctx = {}) {
     (event) =>
       handleDocumentClick({
         AppCore,
+        Router,
         event,
         toggleSidebar,
         toggleDropdown,
@@ -1515,6 +2009,7 @@ export function bindDomEvents(ctx = {}) {
       (event) =>
         handleSidebarMenuClick({
           AppCore,
+          Router,
           event,
           closeDropdown,
           getElements: resolver,

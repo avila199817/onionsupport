@@ -28,9 +28,10 @@
    - no destruye /reset-password/confirm?token=...
    - no destruye /reset-password/confirm/<token>
    - no resucita token tras scrubbedActivationToken
-   - no resucita token tras scrubbedResetToken
+   - no resucita token tras scrubbedResetToken / scrubbedResetPasswordToken
    - soporte hash-router /#/activate-account?token=...
    - soporte hash-router /#/reset-password/confirm?token=...
+   - soporte aliases legacy de reset initial url
    - métricas internas por flujo
    - cero throws accidentales
 
@@ -42,6 +43,10 @@
    - evita sensación de sidebar congelado.
    - repara el shell antes y después del render.
    - evita panel privado desplazado bajo sidebar tras login.
+
+   FIX ROUTER LOGIN:
+   - renderLoginRedirect respeta args.redirectTo ya construido por guards.
+   - history se actualiza en redirect a login cuando updateHistory está disponible.
 ========================================================= */
 
 import {
@@ -67,21 +72,22 @@ import {
 const ACTIVATION_PATH = "/activate-account";
 const RESET_CONFIRM_PATH = "/reset-password/confirm";
 
-const ACTIVATION_TOKEN_PARAM_NAMES = [
+const ACTIVATION_TOKEN_PARAM_NAMES = Object.freeze([
   "token",
   "activationToken",
   "activateToken",
   "code",
   "t",
-];
+]);
 
-const RESET_TOKEN_PARAM_NAMES = [
+const RESET_TOKEN_PARAM_NAMES = Object.freeze([
   "token",
   "resetToken",
   "passwordResetToken",
+  "confirmToken",
   "code",
   "t",
-];
+]);
 
 const AUTH_SCREEN_CANONICAL_PATHS = new Set([
   "/login",
@@ -96,15 +102,25 @@ const AUTH_SCREEN_CANONICAL_PATHS = new Set([
 const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
   Object.freeze({
     path: ACTIVATION_PATH,
-    stateScrubFlag: "scrubbedActivationToken",
-    windowKey: "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+    stateScrubFlags: Object.freeze([
+      "scrubbedActivationToken",
+    ]),
+    windowKeys: Object.freeze([
+      "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+    ]),
     tokenNames: ACTIVATION_TOKEN_PARAM_NAMES,
   }),
 
   Object.freeze({
     path: RESET_CONFIRM_PATH,
-    stateScrubFlag: "scrubbedResetToken",
-    windowKey: "__ONION_RESET_CONFIRM_INITIAL_URL__",
+    stateScrubFlags: Object.freeze([
+      "scrubbedResetToken",
+      "scrubbedResetPasswordToken",
+    ]),
+    windowKeys: Object.freeze([
+      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+      "__ONION_RESET_CONFIRM_INITIAL_URL__",
+    ]),
     tokenNames: RESET_TOKEN_PARAM_NAMES,
   }),
 ]);
@@ -199,6 +215,13 @@ function normalizePathnameOnly(pathname = "/") {
   }
 
   return value;
+}
+
+function stripPublicUsernamePrefix(pathname = "/") {
+  return (
+    normalizePathnameOnly(pathname).replace(/^\/@[^/]+(?=\/|$)/i, "") ||
+    "/"
+  );
 }
 
 function afterPaint(callback) {
@@ -311,6 +334,16 @@ function safeSetActiveMenu(setActiveMenu, path) {
       setActiveMenu(path);
     }
   } catch {}
+}
+
+function safeUpdateHistory(updateHistory, payload = {}) {
+  try {
+    if (typeof updateHistory === "function") {
+      return updateHistory(payload);
+    }
+  } catch {}
+
+  return false;
 }
 
 /* =========================================================
@@ -510,7 +543,7 @@ function getPathToken(AppCore, pathOrUrl = "") {
     return "";
   }
 
-  const pathname = normalizePathnameOnly(
+  const pathname = stripPublicUsernamePrefix(
     path.split("?")[0].split("#")[0] || "/"
   );
 
@@ -564,6 +597,26 @@ function hasProtectedToken(AppCore, pathOrUrl = "") {
 
     if (
       parsed.hash &&
+      isHashRouterPath(parsed.hash)
+    ) {
+      const hashPath = normalizeHashRouterPath(parsed.hash);
+
+      if (getPathToken(AppCore, hashPath)) {
+        return true;
+      }
+
+      const hashSuffix = getSearchAndHash(hashPath);
+
+      if (
+        hashSuffix &&
+        hasTokenInSearch(hashSuffix.split("#")[0], config.tokenNames)
+      ) {
+        return true;
+      }
+    }
+
+    if (
+      parsed.hash &&
       parsed.hash.includes("?")
     ) {
       const query = parsed.hash.split("?").slice(1).join("?");
@@ -611,9 +664,13 @@ function isTokenScrubbedForConfig(config = null) {
     return false;
   }
 
+  const flags = Array.isArray(config.stateScrubFlags)
+    ? config.stateScrubFlags
+    : [config.stateScrubFlag].filter(Boolean);
+
   try {
-    return Boolean(
-      window.history?.state?.[config.stateScrubFlag]
+    return flags.some((flag) =>
+      Boolean(window.history?.state?.[flag])
     );
   } catch {
     return false;
@@ -631,32 +688,48 @@ function getInitialUrl() {
   );
 }
 
-function getStoredInitialUrlByConfig(config = null) {
-  if (!isBrowser() || !config?.windowKey) {
-    return "";
+function getStoredInitialUrlsByConfig(config = null) {
+  if (!isBrowser() || !config) {
+    return [];
   }
 
-  try {
-    return safeText(
-      window[config.windowKey],
-      ""
-    );
-  } catch {
-    return "";
-  }
+  const keys = Array.isArray(config.windowKeys)
+    ? config.windowKeys
+    : [config.windowKey].filter(Boolean);
+
+  return keys
+    .map((key) => {
+      try {
+        return safeText(window[key], "");
+      } catch {
+        return "";
+      }
+    })
+    .filter(Boolean);
 }
 
 function setStoredInitialUrlByConfig(config = null, value = "") {
-  if (!isBrowser() || !config?.windowKey) {
+  if (!isBrowser() || !config) {
     return false;
   }
 
-  try {
-    window[config.windowKey] = value;
-    return true;
-  } catch {
-    return false;
+  const keys = Array.isArray(config.windowKeys)
+    ? config.windowKeys
+    : [config.windowKey].filter(Boolean);
+
+  let wrote = false;
+
+  for (const key of keys) {
+    try {
+      if (!window[key]) {
+        window[key] = value;
+      }
+
+      wrote = true;
+    } catch {}
   }
+
+  return wrote;
 }
 
 function getActivationInitialUrl() {
@@ -676,7 +749,8 @@ function getResetConfirmInitialUrl() {
   }
 
   return safeText(
-    window.__ONION_RESET_CONFIRM_INITIAL_URL__,
+    window.__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__ ||
+      window.__ONION_RESET_CONFIRM_INITIAL_URL__,
     ""
   );
 }
@@ -693,17 +767,16 @@ function captureInitialUrl(AppCore) {
       window.__ONION_INITIAL_URL__ = href;
     }
 
-    for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
-      const path = pathFromUrlLike(AppCore, href);
+    const path = pathFromUrlLike(AppCore, href);
 
+    for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
       const matchesRoute =
-        sameCanonicalRoute(AppCore, path, config.path) ||
-        normalizeCanonicalPath(AppCore, path).startsWith(`${config.path}/`);
+        sameCanonicalRoute(AppCore, path, config.path);
 
       if (
         matchesRoute &&
         hasProtectedToken(AppCore, href) &&
-        !getStoredInitialUrlByConfig(config)
+        getStoredInitialUrlsByConfig(config).length === 0
       ) {
         setStoredInitialUrlByConfig(config, href);
       }
@@ -725,11 +798,9 @@ function getProtectedPublicPath(AppCore) {
       continue;
     }
 
-    const stored = getStoredInitialUrlByConfig(config);
-
-    if (stored) {
-      candidates.push(stored);
-    }
+    candidates.push(
+      ...getStoredInitialUrlsByConfig(config)
+    );
   }
 
   const initialUrl = getInitialUrl();
@@ -1003,13 +1074,6 @@ function routeRequestsShellHidden(AppCore, route = null, canonicalPath = "/") {
     return true;
   }
 
-  if (
-    canonical.startsWith(`${ACTIVATION_PATH}/`) ||
-    canonical.startsWith(`${RESET_CONFIRM_PATH}/`)
-  ) {
-    return true;
-  }
-
   return false;
 }
 
@@ -1030,13 +1094,6 @@ function shouldUseAuthScreenClass(AppCore, route = null, canonicalPath = "/") {
   }
 
   if (AUTH_SCREEN_CANONICAL_PATHS.has(canonical)) {
-    return true;
-  }
-
-  if (
-    canonical.startsWith(`${ACTIVATION_PATH}/`) ||
-    canonical.startsWith(`${RESET_CONFIRM_PATH}/`)
-  ) {
     return true;
   }
 
@@ -1204,6 +1261,11 @@ function applyRenderShellRepair({
 
     setCoreShellVisible(AppCore, false);
 
+    setElementHidden(shell, false);
+    setElementHidden(main, false);
+    setElementHidden(appContent, false);
+    setElementHidden(view, false);
+
     setElementHidden(sidebar, true);
     setElementHidden(topbar, true);
     setElementHidden(tablehead, true);
@@ -1212,15 +1274,6 @@ function applyRenderShellRepair({
     setElementBusy(main, false);
     setElementBusy(appContent, false);
     setElementBusy(view, false);
-
-    try {
-      if (shell) {
-        shell.setAttribute(
-          "aria-hidden",
-          "false"
-        );
-      }
-    } catch {}
   } else {
     try {
       body.classList.remove(
@@ -1606,6 +1659,46 @@ function runRouteRender(
   }
 }
 
+function createDeferredViewInstance() {
+  let current = null;
+  let destroyed = false;
+
+  return {
+    set(view) {
+      current = view || null;
+
+      if (
+        destroyed &&
+        current &&
+        typeof current.destroy === "function"
+      ) {
+        try {
+          current.destroy();
+        } catch {}
+      }
+    },
+
+    destroy() {
+      destroyed = true;
+
+      if (
+        current &&
+        typeof current.destroy === "function"
+      ) {
+        try {
+          current.destroy();
+        } catch {}
+      }
+
+      current = null;
+    },
+
+    get current() {
+      return current;
+    },
+  };
+}
+
 /* =========================================================
    INTERNAL VIEWS
 ========================================================= */
@@ -1973,8 +2066,13 @@ export async function renderRouteSuccess({
         hideLoader: true,
       });
     } else if (isPromiseLike(result)) {
+      const deferredView =
+        createDeferredViewInstance();
+
       result
         .then((resolvedView) => {
+          deferredView.set(resolvedView);
+
           applyRenderShellRepair({
             AppCore,
             route,
@@ -2023,6 +2121,7 @@ export async function renderRouteSuccess({
         });
 
       view =
+        deferredView ||
         transitionView ||
         ctx.viewContainer ||
         null;
@@ -2117,6 +2216,16 @@ export async function renderRouteSuccess({
 export function renderRouteForbidden(args = {}) {
   const startedAt = nowMs();
 
+  safeSetShellMode(
+    args.setShellMode,
+    args.route || null
+  );
+
+  safeSetDocumentTitle(
+    args.setDocumentTitle,
+    "Acceso denegado"
+  );
+
   renderForbiddenView(
     args.AppCore,
     args.getRoute
@@ -2159,6 +2268,16 @@ export function renderRouteForbidden(args = {}) {
 export function renderRouteNotFound(args = {}) {
   const startedAt = nowMs();
 
+  safeSetShellMode(
+    args.setShellMode,
+    args.route || null
+  );
+
+  safeSetDocumentTitle(
+    args.setDocumentTitle,
+    "404"
+  );
+
   renderNotFoundView(
     args.AppCore,
     args.requestedPath,
@@ -2195,13 +2314,22 @@ export async function renderLoginRedirect(args = {}) {
 
   const routeNames = getRouteNames(args.AppCore);
 
-  const loginUrl = buildLoginUrl(
-    args.AppCore,
-    args.canonicalPath
-  );
+  const loginUrl =
+    safeText(args.redirectTo, "") ||
+    buildLoginUrl(
+      args.AppCore,
+      args.requestedPath ||
+        args.publicPath ||
+        args.canonicalPath
+    );
 
   const route = args.getRoute?.(
     routeNames.LOGIN
+  );
+
+  const publicPath = normalizePath(
+    args.AppCore,
+    loginUrl || routeNames.LOGIN
   );
 
   safeClearDynamicContainers(
@@ -2223,9 +2351,22 @@ export async function renderLoginRedirect(args = {}) {
     route?.title || "Login"
   );
 
-  const publicPath = preservePublicContextForSameRoute(
-    args.AppCore,
-    loginUrl
+  safeUpdateHistory(
+    args.updateHistory,
+    {
+      AppCore: args.AppCore,
+      getRoute: args.getRoute,
+      pathname: publicPath,
+      options: {
+        replaceState: true,
+        redirectedFrom:
+          args.publicPath ||
+          args.requestedPath ||
+          args.canonicalPath ||
+          null,
+        source: "guard:not-authenticated",
+      },
+    }
   );
 
   applyRenderShellRepair({
@@ -2249,7 +2390,11 @@ export async function renderLoginRedirect(args = {}) {
           requestedPath: publicPath,
           canonicalPath: routeNames.LOGIN,
           publicPath,
-          redirectedFrom: args.canonicalPath,
+          redirectedFrom:
+            args.publicPath ||
+            args.requestedPath ||
+            args.canonicalPath ||
+            null,
         })
       )
     );
@@ -2273,7 +2418,11 @@ export async function renderLoginRedirect(args = {}) {
       publicPath,
       found: true,
       route,
-      redirectedFrom: args.canonicalPath || null,
+      redirectedFrom:
+        args.publicPath ||
+        args.requestedPath ||
+        args.canonicalPath ||
+        null,
     }
   );
 
@@ -2290,6 +2439,16 @@ export async function renderLoginRedirect(args = {}) {
 
 export function renderRouteRuntimeError(args = {}) {
   const startedAt = nowMs();
+
+  safeSetShellMode(
+    args.setShellMode,
+    args.route || null
+  );
+
+  safeSetDocumentTitle(
+    args.setDocumentTitle,
+    "Error de navegación"
+  );
 
   renderRuntimeErrorView(
     args.AppCore,
@@ -2374,8 +2533,13 @@ export function getRenderSnapshot(AppCore) {
 
     resetTokenScrubbed:
       isBrowser()
-        ? Boolean(window.history?.state?.scrubbedResetToken)
+        ? Boolean(
+            window.history?.state?.scrubbedResetToken ||
+              window.history?.state?.scrubbedResetPasswordToken
+          )
         : false,
+
+    successRenderSequence,
 
     dom: {
       bodyClasses:

@@ -30,6 +30,12 @@
      [aria-current="page"] o [data-active="true"]
    - .active / .is-active se conservan por compatibilidad,
      pero se neutralizan si aria-current="false" o data-active="false".
+
+   FIX TOOLTIP:
+   - los tooltips del menú collapsed NO dependen de JS
+   - no requiere .sidebar-tooltips-active
+   - el item activo también muestra tooltip en hover/focus
+   - soporta .collapsed / .is-collapsed / [data-collapsed="true"] / body.sidebar-collapsed
 ========================================================= */
 
 
@@ -48,7 +54,8 @@
   --sidebar-footer-avatar-size:32px;
   --sidebar-footer-avatar-size-collapsed:30px;
 
-  --sidebar-tooltip-z:var(--z-tooltip, 70);
+  --sidebar-tooltip-offset:12px;
+  --sidebar-tooltip-z:var(--z-tooltip, 9999);
   --sidebar-dropdown-z:var(--z-dropdown, 50);
 
   --sidebar-dropdown-width-collapsed:224px;
@@ -205,17 +212,21 @@
 
 .sidebar.sidebar-tooltips-active,
 body.sidebar-tooltips-active .sidebar,
-body.sidebar-collapsed .sidebar{
-  z-index:calc(var(--z-tooltip, 70) + 1);
+body.sidebar-collapsed .sidebar,
+.sidebar.collapsed,
+.sidebar.is-collapsed,
+.sidebar[data-collapsed="true"]{
+  z-index:calc(var(--sidebar-tooltip-z, 9999) + 1);
 }
 
 @supports selector(:has(*)){
   .sidebar:has(.menu-item[data-tooltip]:hover),
+  .sidebar:has(.menu-item[data-tooltip]:focus-visible),
   .sidebar:has(.sidebar-toggle[data-tooltip]:hover),
   .sidebar:has(.logo[data-tooltip]:hover),
   .sidebar:has(.user-dropdown[aria-hidden="false"]),
   .sidebar:has(.user-dropdown[data-state="open"]){
-    z-index:calc(var(--z-tooltip, 70) + 1);
+    z-index:calc(var(--sidebar-tooltip-z, 9999) + 1);
   }
 }
 
@@ -226,6 +237,7 @@ body.sidebar-collapsed .sidebar{
 
 .sidebar.collapsed,
 .sidebar.is-collapsed,
+.sidebar[data-collapsed="true"],
 body.sidebar-collapsed .sidebar{
   inline-size:var(--sidebar-collapsed);
 }
@@ -551,6 +563,7 @@ body.app-navigating .sidebar-menu[data-indicator-ready="true"]::before,
 
 .sidebar.collapsed .sidebar-top,
 .sidebar.is-collapsed .sidebar-top,
+.sidebar[data-collapsed="true"] .sidebar-top,
 body.sidebar-collapsed .sidebar .sidebar-top{
   display:flex;
   align-items:center;
@@ -565,12 +578,14 @@ body.sidebar-collapsed .sidebar .sidebar-top{
 
 .sidebar.collapsed .logo,
 .sidebar.is-collapsed .logo,
+.sidebar[data-collapsed="true"] .logo,
 body.sidebar-collapsed .sidebar .logo{
   display:none;
 }
 
 .sidebar.collapsed .sidebar-toggle,
 .sidebar.is-collapsed .sidebar-toggle,
+.sidebar[data-collapsed="true"] .sidebar-toggle,
 body.sidebar-collapsed .sidebar .sidebar-toggle{
   inline-size:var(--sidebar-toggle-size-collapsed);
   block-size:var(--sidebar-toggle-size-collapsed);
@@ -586,6 +601,7 @@ body.sidebar-collapsed .sidebar .sidebar-toggle{
 .sidebar,
 .sidebar-top,
 .sidebar-menu,
+.sidebar-section,
 .sidebar-footer,
 .user,
 .user-dropdown{
@@ -612,7 +628,7 @@ body.sidebar-collapsed .sidebar .sidebar-toggle{
   inset-block-start:calc(100% + 10px);
   inset-inline-start:0;
 
-  z-index:calc(var(--sidebar-tooltip-z) + 2);
+  z-index:calc(var(--sidebar-tooltip-z, 9999) + 2);
 
   padding:9px 12px;
 
@@ -664,7 +680,7 @@ body.sidebar-collapsed .sidebar .sidebar-toggle{
   inset-block-start:calc(100% + 5px);
   inset-inline-start:14px;
 
-  z-index:calc(var(--sidebar-tooltip-z) + 1);
+  z-index:calc(var(--sidebar-tooltip-z, 9999) + 1);
 
   inline-size:10px;
   block-size:10px;
@@ -688,14 +704,20 @@ body.sidebar-collapsed .sidebar .sidebar-toggle{
 
 .logo[data-tooltip]:hover::after,
 .logo[data-tooltip]:hover::before,
+.logo[data-tooltip]:focus-visible::after,
+.logo[data-tooltip]:focus-visible::before,
 .sidebar-toggle[data-tooltip]:hover::after,
-.sidebar-toggle[data-tooltip]:hover::before{
+.sidebar-toggle[data-tooltip]:hover::before,
+.sidebar-toggle[data-tooltip]:focus-visible::after,
+.sidebar-toggle[data-tooltip]:focus-visible::before{
   opacity:1;
   visibility:visible;
 }
 
 .logo[data-tooltip]:hover::after,
-.sidebar-toggle[data-tooltip]:hover::after{
+.logo[data-tooltip]:focus-visible::after,
+.sidebar-toggle[data-tooltip]:hover::after,
+.sidebar-toggle[data-tooltip]:focus-visible::after{
   transform:translateY(0);
 }
 
@@ -707,9 +729,14 @@ body.sidebar-collapsed .sidebar .sidebar-toggle{
 
   position:absolute;
   inset-block-start:50%;
-  inset-inline-start:calc(100% + var(--sidebar-tooltip-offset));
+  inset-inline-start:calc(100% + var(--sidebar-tooltip-offset, 12px));
 
-  z-index:calc(var(--sidebar-tooltip-z) + 2);
+  z-index:calc(var(--sidebar-tooltip-z, 9999) + 2);
+
+  display:block;
+
+  min-inline-size:max-content;
+  max-inline-size:260px;
 
   padding:9px 12px;
 
@@ -736,6 +763,9 @@ body.sidebar-collapsed .sidebar .sidebar-toggle{
     0 14px 34px rgba(0,0,0,.28),
     inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 96%);
 
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+
   opacity:0;
   visibility:hidden;
 
@@ -750,16 +780,19 @@ body.sidebar-collapsed .sidebar .sidebar-toggle{
     transform var(--duration-fast) var(--ease-out);
 }
 
-.sidebar:not(.sidebar-tooltips-active) .menu-item[data-tooltip]::after,
-body:not(.sidebar-tooltips-active) .sidebar .menu-item[data-tooltip]::after{
-  opacity:0 !important;
-  visibility:hidden !important;
-  display:none !important;
-}
-
-.sidebar.sidebar-tooltips-active.collapsed .menu-item[data-tooltip]:hover::after,
-.sidebar.sidebar-tooltips-active.is-collapsed .menu-item[data-tooltip]:hover::after,
-body.sidebar-tooltips-active.sidebar-collapsed .sidebar .menu-item[data-tooltip]:hover::after{
+/*
+  IMPORTANTE:
+  No dependemos de .sidebar-tooltips-active.
+  En collapsed, cualquier item con data-tooltip puede mostrar tooltip.
+*/
+.sidebar.collapsed .menu-item[data-tooltip]:hover::after,
+.sidebar.collapsed .menu-item[data-tooltip]:focus-visible::after,
+.sidebar.is-collapsed .menu-item[data-tooltip]:hover::after,
+.sidebar.is-collapsed .menu-item[data-tooltip]:focus-visible::after,
+.sidebar[data-collapsed="true"] .menu-item[data-tooltip]:hover::after,
+.sidebar[data-collapsed="true"] .menu-item[data-tooltip]:focus-visible::after,
+body.sidebar-collapsed .sidebar .menu-item[data-tooltip]:hover::after,
+body.sidebar-collapsed .sidebar .menu-item[data-tooltip]:focus-visible::after{
   opacity:1;
   visibility:visible;
   display:block;
@@ -767,19 +800,9 @@ body.sidebar-tooltips-active.sidebar-collapsed .sidebar .menu-item[data-tooltip]
   transform:translateY(-50%) translateX(0);
 }
 
-.sidebar:not(.collapsed):not(.is-collapsed) .menu-item[data-tooltip]::after,
-body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-item[data-tooltip]::after{
+.sidebar:not(.collapsed):not(.is-collapsed):not([data-collapsed="true"]) .menu-item[data-tooltip]::after,
+body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed):not([data-collapsed="true"]) .menu-item[data-tooltip]::after{
   display:none !important;
-}
-
-.sidebar.collapsed .menu-item[aria-current="page"][data-tooltip]::after,
-.sidebar.collapsed .menu-item[data-active="true"][data-tooltip]::after,
-.sidebar.is-collapsed .menu-item[aria-current="page"][data-tooltip]::after,
-.sidebar.is-collapsed .menu-item[data-active="true"][data-tooltip]::after,
-body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::after,
-body.sidebar-collapsed .sidebar .menu-item[data-active="true"][data-tooltip]::after{
-  opacity:0 !important;
-  visibility:hidden !important;
 }
 
 
@@ -882,6 +905,7 @@ body.sidebar-collapsed .sidebar .menu-item[data-active="true"][data-tooltip]::af
 
 .sidebar.collapsed .sidebar-menu,
 .sidebar.is-collapsed .sidebar-menu,
+.sidebar[data-collapsed="true"] .sidebar-menu,
 body.sidebar-collapsed .sidebar .sidebar-menu{
   --sidebar-indicator-x:calc((100% - var(--sidebar-menu-item-collapsed)) / 2);
   --sidebar-indicator-w:var(--sidebar-menu-item-collapsed);
@@ -889,6 +913,7 @@ body.sidebar-collapsed .sidebar .sidebar-menu{
 
 .sidebar.collapsed .sidebar-menu[data-indicator-ready="true"]::before,
 .sidebar.is-collapsed .sidebar-menu[data-indicator-ready="true"]::before,
+.sidebar[data-collapsed="true"] .sidebar-menu[data-indicator-ready="true"]::before,
 body.sidebar-collapsed .sidebar .sidebar-menu[data-indicator-ready="true"]::before{
   box-shadow:var(--sidebar-active-pill-shadow-collapsed);
 }
@@ -1013,8 +1038,8 @@ body.sidebar-collapsed .sidebar .sidebar-menu[data-indicator-ready="true"]::befo
     opacity var(--duration-fast) var(--ease-standard);
 }
 
-.sidebar:not(.collapsed):not(.is-collapsed) .menu-item:hover,
-body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-item:hover{
+.sidebar:not(.collapsed):not(.is-collapsed):not([data-collapsed="true"]) .menu-item:hover,
+body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed):not([data-collapsed="true"]) .menu-item:hover{
   background:var(--sidebar-hover);
   border-color:color-mix(in srgb, var(--text-strong), transparent 96%);
   color:var(--text-strong);
@@ -1022,8 +1047,8 @@ body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-i
   transform:translateX(2px);
 }
 
-.sidebar:not(.collapsed):not(.is-collapsed) .menu-item:hover svg,
-body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-item:hover svg{
+.sidebar:not(.collapsed):not(.is-collapsed):not([data-collapsed="true"]) .menu-item:hover svg,
+body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed):not([data-collapsed="true"]) .menu-item:hover svg{
   color:var(--text-strong);
 }
 
@@ -1157,6 +1182,7 @@ body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed) .menu-i
 
 .sidebar.collapsed .sidebar-menu,
 .sidebar.is-collapsed .sidebar-menu,
+.sidebar[data-collapsed="true"] .sidebar-menu,
 body.sidebar-collapsed .sidebar .sidebar-menu{
   align-items:center;
 
@@ -1165,6 +1191,7 @@ body.sidebar-collapsed .sidebar .sidebar-menu{
 
 .sidebar.collapsed .menu-item,
 .sidebar.is-collapsed .menu-item,
+.sidebar[data-collapsed="true"] .menu-item,
 body.sidebar-collapsed .sidebar .menu-item{
   display:grid;
   place-items:center;
@@ -1189,6 +1216,9 @@ body.sidebar-collapsed .sidebar .menu-item{
 .sidebar.is-collapsed .menu-item > span:first-child,
 .sidebar.is-collapsed .menu-item .menu-icon,
 .sidebar.is-collapsed .menu-item .menu-item-icon,
+.sidebar[data-collapsed="true"] .menu-item > span:first-child,
+.sidebar[data-collapsed="true"] .menu-item .menu-icon,
+.sidebar[data-collapsed="true"] .menu-item .menu-item-icon,
 body.sidebar-collapsed .sidebar .menu-item > span:first-child,
 body.sidebar-collapsed .sidebar .menu-item .menu-icon,
 body.sidebar-collapsed .sidebar .menu-item .menu-item-icon{
@@ -1208,6 +1238,9 @@ body.sidebar-collapsed .sidebar .menu-item .menu-item-icon{
 .sidebar.is-collapsed .menu-item > span:last-child,
 .sidebar.is-collapsed .menu-item .menu-label,
 .sidebar.is-collapsed .menu-item .menu-item-label,
+.sidebar[data-collapsed="true"] .menu-item > span:last-child,
+.sidebar[data-collapsed="true"] .menu-item .menu-label,
+.sidebar[data-collapsed="true"] .menu-item .menu-item-label,
 body.sidebar-collapsed .sidebar .menu-item > span:last-child,
 body.sidebar-collapsed .sidebar .menu-label,
 body.sidebar-collapsed .sidebar .menu-item-label,
@@ -1218,6 +1251,7 @@ body.sidebar-collapsed .sidebar .menu-item .menu-item-label{
 
 .sidebar.collapsed .menu-item svg,
 .sidebar.is-collapsed .menu-item svg,
+.sidebar[data-collapsed="true"] .menu-item svg,
 body.sidebar-collapsed .sidebar .menu-item svg{
   inline-size:18px;
   block-size:18px;
@@ -1227,6 +1261,7 @@ body.sidebar-collapsed .sidebar .menu-item svg{
 
 .sidebar.collapsed .menu-item:hover,
 .sidebar.is-collapsed .menu-item:hover,
+.sidebar[data-collapsed="true"] .menu-item:hover,
 body.sidebar-collapsed .sidebar .menu-item:hover{
   background:var(--sidebar-hover);
   border-color:color-mix(in srgb, var(--text-strong), transparent 96%);
@@ -1238,6 +1273,8 @@ body.sidebar-collapsed .sidebar .menu-item:hover{
 .sidebar.collapsed .sidebar-menu[data-indicator-ready="true"] .menu-item[data-active="true"]:hover,
 .sidebar.is-collapsed .sidebar-menu[data-indicator-ready="true"] .menu-item[aria-current="page"]:hover,
 .sidebar.is-collapsed .sidebar-menu[data-indicator-ready="true"] .menu-item[data-active="true"]:hover,
+.sidebar[data-collapsed="true"] .sidebar-menu[data-indicator-ready="true"] .menu-item[aria-current="page"]:hover,
+.sidebar[data-collapsed="true"] .sidebar-menu[data-indicator-ready="true"] .menu-item[data-active="true"]:hover,
 body.sidebar-collapsed .sidebar .sidebar-menu[data-indicator-ready="true"] .menu-item[aria-current="page"]:hover,
 body.sidebar-collapsed .sidebar .sidebar-menu[data-indicator-ready="true"] .menu-item[data-active="true"]:hover{
   background:transparent;
@@ -1249,6 +1286,8 @@ body.sidebar-collapsed .sidebar .sidebar-menu[data-indicator-ready="true"] .menu
 .sidebar.collapsed .menu-item[data-active="true"],
 .sidebar.is-collapsed .menu-item[aria-current="page"],
 .sidebar.is-collapsed .menu-item[data-active="true"],
+.sidebar[data-collapsed="true"] .menu-item[aria-current="page"],
+.sidebar[data-collapsed="true"] .menu-item[data-active="true"],
 body.sidebar-collapsed .sidebar .menu-item[aria-current="page"],
 body.sidebar-collapsed .sidebar .menu-item[data-active="true"]{
   transform:none !important;
@@ -1258,6 +1297,8 @@ body.sidebar-collapsed .sidebar .menu-item[data-active="true"]{
 .sidebar.collapsed .menu-item[data-active="true"]::before,
 .sidebar.is-collapsed .menu-item[aria-current="page"]::before,
 .sidebar.is-collapsed .menu-item[data-active="true"]::before,
+.sidebar[data-collapsed="true"] .menu-item[aria-current="page"]::before,
+.sidebar[data-collapsed="true"] .menu-item[data-active="true"]::before,
 body.sidebar-collapsed .sidebar .menu-item[aria-current="page"]::before,
 body.sidebar-collapsed .sidebar .menu-item[data-active="true"]::before{
   box-shadow:var(--sidebar-active-pill-shadow-collapsed);
@@ -1364,6 +1405,7 @@ body.sidebar-collapsed .sidebar .menu-item[data-active="true"]::before{
 
 .sidebar.collapsed .sidebar-section,
 .sidebar.is-collapsed .sidebar-section,
+.sidebar[data-collapsed="true"] .sidebar-section,
 body.sidebar-collapsed .sidebar .sidebar-section{
   display:none;
 }
@@ -1466,6 +1508,7 @@ body.sidebar-collapsed .sidebar .sidebar-section{
 
 .sidebar.collapsed .user,
 .sidebar.is-collapsed .user,
+.sidebar[data-collapsed="true"] .user,
 body.sidebar-collapsed .sidebar .user{
   justify-content:center;
 
@@ -1476,12 +1519,14 @@ body.sidebar-collapsed .sidebar .user{
 
 .sidebar.collapsed .user-info,
 .sidebar.is-collapsed .user-info,
+.sidebar[data-collapsed="true"] .user-info,
 body.sidebar-collapsed .sidebar .user-info{
   display:none;
 }
 
 .sidebar.collapsed .user > svg,
 .sidebar.is-collapsed .user > svg,
+.sidebar[data-collapsed="true"] .user > svg,
 body.sidebar-collapsed .sidebar .user > svg{
   display:none;
 }
@@ -1609,6 +1654,7 @@ body.sidebar-collapsed .sidebar .user > svg{
 
 .sidebar.collapsed .avatar,
 .sidebar.is-collapsed .avatar,
+.sidebar[data-collapsed="true"] .avatar,
 body.sidebar-collapsed .sidebar .avatar{
   inline-size:var(--sidebar-footer-avatar-size-collapsed);
   block-size:var(--sidebar-footer-avatar-size-collapsed);
@@ -1704,6 +1750,7 @@ body.sidebar-collapsed .sidebar .avatar{
 
 .sidebar.collapsed .user-dropdown,
 .sidebar.is-collapsed .user-dropdown,
+.sidebar[data-collapsed="true"] .user-dropdown,
 body.sidebar-collapsed .sidebar .user-dropdown{
   inset-inline-start:calc(100% + var(--sidebar-dropdown-offset-collapsed));
   inset-inline-end:auto;
@@ -1730,6 +1777,12 @@ body.sidebar-collapsed .sidebar .user-dropdown{
 .sidebar.is-collapsed .user-dropdown.is-visible,
 .sidebar.is-collapsed .user-dropdown[data-state="open"],
 .sidebar.is-collapsed .user-dropdown[aria-hidden="false"],
+.sidebar[data-collapsed="true"] .user-dropdown.open,
+.sidebar[data-collapsed="true"] .user-dropdown.active,
+.sidebar[data-collapsed="true"] .user-dropdown.is-open,
+.sidebar[data-collapsed="true"] .user-dropdown.is-visible,
+.sidebar[data-collapsed="true"] .user-dropdown[data-state="open"],
+.sidebar[data-collapsed="true"] .user-dropdown[aria-hidden="false"],
 body.sidebar-collapsed .sidebar .user-dropdown.open,
 body.sidebar-collapsed .sidebar .user-dropdown.active,
 body.sidebar-collapsed .sidebar .user-dropdown.is-open,
@@ -2047,6 +2100,7 @@ body.sidebar-open [data-sidebar-overlay]{
 
   .sidebar.collapsed,
   .sidebar.is-collapsed,
+  .sidebar[data-collapsed="true"],
   body.sidebar-collapsed .sidebar{
     inline-size:var(--sidebar-mobile-width);
   }
@@ -2241,6 +2295,86 @@ body.sidebar-open [data-sidebar-overlay]{
 
 
 /* =========================================================
+   FINAL TOOLTIP HARDENING
+   Debe quedar después de mobile/content stacking.
+========================================================= */
+
+.sidebar,
+.sidebar-top,
+.sidebar-menu,
+.sidebar-section,
+.sidebar-footer{
+  overflow:visible;
+  contain:none;
+}
+
+.sidebar.collapsed,
+.sidebar.is-collapsed,
+.sidebar[data-collapsed="true"],
+body.sidebar-collapsed .sidebar{
+  overflow:visible !important;
+  z-index:calc(var(--sidebar-tooltip-z, 9999) + 1);
+}
+
+.sidebar.collapsed .menu-item[data-tooltip]::after,
+.sidebar.is-collapsed .menu-item[data-tooltip]::after,
+.sidebar[data-collapsed="true"] .menu-item[data-tooltip]::after,
+body.sidebar-collapsed .sidebar .menu-item[data-tooltip]::after{
+  display:block;
+
+  opacity:0;
+  visibility:hidden;
+}
+
+.sidebar.collapsed .menu-item[data-tooltip]:hover::after,
+.sidebar.collapsed .menu-item[data-tooltip]:focus-visible::after,
+.sidebar.is-collapsed .menu-item[data-tooltip]:hover::after,
+.sidebar.is-collapsed .menu-item[data-tooltip]:focus-visible::after,
+.sidebar[data-collapsed="true"] .menu-item[data-tooltip]:hover::after,
+.sidebar[data-collapsed="true"] .menu-item[data-tooltip]:focus-visible::after,
+body.sidebar-collapsed .sidebar .menu-item[data-tooltip]:hover::after,
+body.sidebar-collapsed .sidebar .menu-item[data-tooltip]:focus-visible::after{
+  opacity:1 !important;
+  visibility:visible !important;
+  display:block !important;
+
+  transform:translateY(-50%) translateX(0);
+}
+
+/*
+  Antes se ocultaba el tooltip del activo.
+  Ahora el activo también muestra tooltip en collapsed.
+*/
+.sidebar.collapsed .menu-item[aria-current="page"][data-tooltip]:hover::after,
+.sidebar.collapsed .menu-item[data-active="true"][data-tooltip]:hover::after,
+.sidebar.collapsed .menu-item[aria-current="page"][data-tooltip]:focus-visible::after,
+.sidebar.collapsed .menu-item[data-active="true"][data-tooltip]:focus-visible::after,
+.sidebar.is-collapsed .menu-item[aria-current="page"][data-tooltip]:hover::after,
+.sidebar.is-collapsed .menu-item[data-active="true"][data-tooltip]:hover::after,
+.sidebar.is-collapsed .menu-item[aria-current="page"][data-tooltip]:focus-visible::after,
+.sidebar.is-collapsed .menu-item[data-active="true"][data-tooltip]:focus-visible::after,
+.sidebar[data-collapsed="true"] .menu-item[aria-current="page"][data-tooltip]:hover::after,
+.sidebar[data-collapsed="true"] .menu-item[data-active="true"][data-tooltip]:hover::after,
+.sidebar[data-collapsed="true"] .menu-item[aria-current="page"][data-tooltip]:focus-visible::after,
+.sidebar[data-collapsed="true"] .menu-item[data-active="true"][data-tooltip]:focus-visible::after,
+body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]:hover::after,
+body.sidebar-collapsed .sidebar .menu-item[data-active="true"][data-tooltip]:hover::after,
+body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]:focus-visible::after,
+body.sidebar-collapsed .sidebar .menu-item[data-active="true"][data-tooltip]:focus-visible::after{
+  opacity:1 !important;
+  visibility:visible !important;
+  display:block !important;
+
+  transform:translateY(-50%) translateX(0);
+}
+
+.sidebar:not(.collapsed):not(.is-collapsed):not([data-collapsed="true"]) .menu-item[data-tooltip]::after,
+body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed):not([data-collapsed="true"]) .menu-item[data-tooltip]::after{
+  display:none !important;
+}
+
+
+/* =========================================================
    FINAL HOVER / FOCUS STALE KILLER
    Debe quedar al final antes de reduced-motion/print.
 ========================================================= */
@@ -2344,6 +2478,7 @@ body.app-navigating .sidebar-menu::before,
   .sidebar-toggle,
   .menu-item,
   .menu-item::before,
+  .menu-item::after,
   .chat-item,
   .user,
   .user-chevron,

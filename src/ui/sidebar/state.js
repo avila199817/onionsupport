@@ -2,7 +2,7 @@
    Onion SPA - Sidebar State
    Archivo: src/ui/sidebar/state.js
 
-   PRO HARDENED VERSION · DESKTOP/MOBILE STABLE
+   FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · DROPDOWN SAFE
 
    Responsabilidades:
    - resolver estado visual del sidebar
@@ -13,7 +13,8 @@
    - mantener tooltips coherentes
    - evitar auto-collapse fantasma al navegar
    - soportar fallback DOM / storage seguro
-   - no alterar estado si el shell está oculto
+   - no alterar estado si el shell real está oculto
+   - evitar que sidebar.hidden deje el sidebar bloqueado
    - emitir eventos de sincronización
 
    REGLAS:
@@ -22,12 +23,16 @@
      - fallback: storage sidebar-collapsed / sidebarOpen legacy
      - default: abierto
    - Mobile:
-     - estado fuente: AppCore.state.sidebarOpen
-     - fallback: DOM
+     - estado fuente real: AppCore.state.sidebarMobileOpen
+     - compat visible: AppCore.state.sidebarOpen
+     - fallback: DOM mobile
      - default: cerrado
    - Navegación:
      - NO debe abrir/cerrar sidebar
      - solo resincroniza clases visuales
+   - Dropdown:
+     - syncSidebarState no cierra dropdown salvo shell real oculto
+     - sidebar.hidden stale no debe bloquear apertura posterior
 ========================================================= */
 
 import {
@@ -72,8 +77,13 @@ function safeBoolean(value, fallback = null) {
   if (typeof value === "string") {
     const key = value.trim().toLowerCase();
 
-    if (["true", "1", "yes", "si", "sí"].includes(key)) return true;
-    if (["false", "0", "no"].includes(key)) return false;
+    if (["true", "1", "yes", "si", "sí", "ok", "on"].includes(key)) {
+      return true;
+    }
+
+    if (["false", "0", "no", "off"].includes(key)) {
+      return false;
+    }
   }
 
   if (typeof value === "number") {
@@ -82,6 +92,14 @@ function safeBoolean(value, fallback = null) {
   }
 
   return fallback;
+}
+
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+
+  return Number.isFinite(n)
+    ? n
+    : fallback;
 }
 
 function ensureStateBag(AppCore) {
@@ -103,9 +121,11 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
     return false;
   }
 
+  let emitted = false;
+
   try {
     AppCore?.events?.emit?.(name, payload);
-    return true;
+    emitted = true;
   } catch {}
 
   try {
@@ -116,11 +136,11 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
         })
       );
 
-      return true;
+      emitted = true;
     }
   } catch {}
 
-  return false;
+  return emitted;
 }
 
 function safeWarn(AppCore, ...args) {
@@ -221,39 +241,51 @@ function writeToLocalStorage(key = "", value = false) {
 }
 
 function removeClass(el, ...classes) {
-  if (!el) return;
+  if (!el) return false;
 
   try {
     el.classList.remove(...classes.filter(Boolean));
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function toggleClass(el, className = "", enabled = false) {
-  if (!el || !className) return;
+  if (!el || !className) return false;
 
   try {
     el.classList.toggle(className, Boolean(enabled));
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function setAttr(el, name = "", value = "") {
-  if (!el || !name) return;
+  if (!el || !name) return false;
 
   try {
     el.setAttribute(name, String(value));
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function removeAttr(el, name = "") {
-  if (!el || !name) return;
+  if (!el || !name) return false;
 
   try {
     el.removeAttribute(name);
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function setDataset(el, key = "", value = "") {
-  if (!el || !key) return;
+  if (!el || !key) return false;
 
   try {
     if (
@@ -262,11 +294,24 @@ function setDataset(el, key = "", value = "") {
       value === ""
     ) {
       delete el.dataset[key];
-      return;
+      return true;
     }
 
     el.dataset[key] = String(value);
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getHtmlElement() {
+  if (!isBrowser()) return null;
+
+  try {
+    return document.documentElement || null;
+  } catch {
+    return null;
+  }
 }
 
 /* =========================================================
@@ -280,8 +325,67 @@ export function isMobileViewport(breakpoint = MOBILE_BREAKPOINT) {
 
   try {
     return window.matchMedia(
-      `(max-width: ${Number(breakpoint) || MOBILE_BREAKPOINT}px)`
+      `(max-width: ${safeNumber(breakpoint, MOBILE_BREAKPOINT)}px)`
     ).matches;
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   REAL SHELL HIDDEN RESOLUTION
+========================================================= */
+
+export function isRealShellHidden(AppCore) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  const {
+    body,
+    appShell,
+    shell,
+    layout,
+  } = getElements(AppCore);
+
+  const html = getHtmlElement();
+
+  /*
+    Importante:
+    NO usamos sidebar.hidden como fuente.
+    dom.js/isShellHidden() sí lo usa, y eso puede dejar la UI bloqueada
+    después de una ruta pública/auth si no se rehidrata perfecto.
+  */
+  return Boolean(
+    AppCore?.state?.shellVisible === false ||
+      AppCore?.state?.routeShellHidden === true ||
+      AppCore?.state?.authScreen === true ||
+
+      body?.classList?.contains?.("route-shell-hidden") ||
+      body?.classList?.contains?.("auth-screen") ||
+      body?.dataset?.shell === "hidden" ||
+      body?.dataset?.shellVisible === "false" ||
+
+      html?.dataset?.shell === "hidden" ||
+      html?.dataset?.shellVisible === "false" ||
+
+      appShell?.classList?.contains?.("route-shell-hidden") ||
+      shell?.classList?.contains?.("route-shell-hidden") ||
+      layout?.classList?.contains?.("route-shell-hidden") ||
+
+      appShell?.hidden === true ||
+      shell?.hidden === true ||
+      layout?.hidden === true ||
+
+      appShell?.getAttribute?.("aria-hidden") === "true" ||
+      shell?.getAttribute?.("aria-hidden") === "true" ||
+      layout?.getAttribute?.("aria-hidden") === "true"
+  );
+}
+
+function isDomShellHiddenOnly(AppCore) {
+  try {
+    return Boolean(isShellHidden(AppCore));
   } catch {
     return false;
   }
@@ -383,11 +487,28 @@ export function saveSidebarCollapsed(value, AppCore = null) {
    INTERNAL MEMORY
 ========================================================= */
 
+function setModeMemory(AppCore, mode = "") {
+  const state = ensureStateBag(AppCore);
+  if (!state) return false;
+
+  const cleanMode = safeText(mode, "");
+
+  if (cleanMode) {
+    state.sidebarMode = cleanMode;
+    state.sidebarLastMode = cleanMode;
+  }
+
+  return true;
+}
+
 function setDesktopMemory(AppCore, open) {
   const state = ensureStateBag(AppCore);
   if (!state) return false;
 
   state.sidebarDesktopOpen = Boolean(open);
+  state.sidebarOpen = Boolean(open);
+
+  setModeMemory(AppCore, "desktop");
 
   return true;
 }
@@ -396,7 +517,14 @@ function setMobileMemory(AppCore, open) {
   const state = ensureStateBag(AppCore);
   if (!state) return false;
 
+  /*
+    Fuente real mobile.
+    sidebarOpen queda como compat visible actual.
+  */
+  state.sidebarMobileOpen = Boolean(open);
   state.sidebarOpen = Boolean(open);
+
+  setModeMemory(AppCore, "mobile");
 
   return true;
 }
@@ -407,8 +535,9 @@ function syncSharedState(AppCore, open) {
 
   /*
     Compatibilidad:
-    sidebarOpen queda como estado visible actual,
-    pero desktop tiene su fuente real en sidebarDesktopOpen.
+    sidebarOpen representa estado visible actual.
+    Desktop real vive en sidebarDesktopOpen.
+    Mobile real vive en sidebarMobileOpen.
   */
   state.sidebarOpen = Boolean(open);
 
@@ -435,7 +564,8 @@ function resolveDomSidebarOpenState(AppCore) {
     if (
       sidebar?.classList?.contains?.("open") ||
       sidebar?.classList?.contains?.("is-open") ||
-      body?.classList?.contains?.("sidebar-open")
+      body?.classList?.contains?.("sidebar-open") ||
+      sidebar?.dataset?.open === "true"
     ) {
       return true;
     }
@@ -446,7 +576,15 @@ function resolveDomSidebarOpenState(AppCore) {
   if (
     sidebar?.classList?.contains?.("collapsed") ||
     sidebar?.classList?.contains?.("is-collapsed") ||
-    body?.classList?.contains?.("sidebar-collapsed")
+    body?.classList?.contains?.("sidebar-collapsed") ||
+    sidebar?.dataset?.collapsed === "true"
+  ) {
+    return false;
+  }
+
+  if (
+    sidebar?.dataset?.open === "false" ||
+    sidebar?.dataset?.collapsed === "true"
   ) {
     return false;
   }
@@ -501,7 +639,23 @@ function getDesktopDesiredOpenState(AppCore) {
 function getMobileDesiredOpenState(AppCore) {
   const state = ensureStateBag(AppCore);
 
-  if (typeof state?.sidebarOpen === "boolean") {
+  /*
+    Fuente real mobile. Evita heredar desktopOpen/sidebarOpen
+    cuando se cambia de viewport.
+  */
+  if (typeof state?.sidebarMobileOpen === "boolean") {
+    return state.sidebarMobileOpen;
+  }
+
+  /*
+    Compat legacy solo si el último modo conocido fue mobile.
+    Así no heredamos sidebarOpen=true de desktop.
+  */
+  if (
+    state?.sidebarLastMode === "mobile" &&
+    typeof state?.sidebarOpen === "boolean"
+  ) {
+    setMobileMemory(AppCore, state.sidebarOpen);
     return state.sidebarOpen;
   }
 
@@ -558,7 +712,7 @@ export function syncTooltipMode(AppCore, isOpen = null) {
   const enabled =
     !mobile &&
     !open &&
-    !isShellHidden(AppCore);
+    !isRealShellHidden(AppCore);
 
   toggleClass(
     sidebar,
@@ -624,11 +778,14 @@ export function updateToggleLabel(AppCore, isOpen = null) {
     /*
       Solo tooltip custom. Nunca title nativo.
     */
-    toggleBtn.dataset.tooltip = desktopText;
-    toggleBtn.dataset.i18nDataTooltip =
+    setDataset(toggleBtn, "tooltip", desktopText);
+    setDataset(
+      toggleBtn,
+      "i18nDataTooltip",
       open
         ? "sidebar.toggle.collapse"
-        : "sidebar.toggle.expand";
+        : "sidebar.toggle.expand"
+    );
 
     removeAttr(toggleBtn, "title");
   }
@@ -639,11 +796,14 @@ export function updateToggleLabel(AppCore, isOpen = null) {
 
     toggleClass(mobileToggleBtn, "is-active", open);
 
-    mobileToggleBtn.dataset.tooltip = mobileText;
-    mobileToggleBtn.dataset.i18nDataTooltip =
+    setDataset(mobileToggleBtn, "tooltip", mobileText);
+    setDataset(
+      mobileToggleBtn,
+      "i18nDataTooltip",
       open
         ? "sidebar.toggle.close"
-        : "sidebar.toggle.open";
+        : "sidebar.toggle.open"
+    );
 
     removeAttr(mobileToggleBtn, "title");
   }
@@ -682,7 +842,8 @@ function syncHiddenShellState(AppCore, closeDropdown) {
     "open",
     "is-open",
     "collapsed",
-    "is-collapsed"
+    "is-collapsed",
+    "sidebar-tooltips-active"
   );
 
   removeClass(
@@ -695,6 +856,7 @@ function syncHiddenShellState(AppCore, closeDropdown) {
   setDataset(sidebar, "open", "false");
   setDataset(sidebar, "collapsed", "false");
   setDataset(sidebar, "mode", "hidden");
+  setDataset(body, "sidebarMode", "hidden");
 
   try {
     closeDropdown?.();
@@ -707,30 +869,22 @@ function syncHiddenShellState(AppCore, closeDropdown) {
     open: false,
     mobile: isMobileViewport(),
     hidden: true,
+    realShellHidden: true,
+    domShellHidden: isDomShellHiddenOnly(AppCore),
   });
 
   return true;
 }
 
-export function syncSidebarState(AppCore, closeDropdown) {
-  const {
-    sidebar,
-    body,
-  } = getElements(AppCore);
-
+function syncVisibleSidebarBase(AppCore, {
+  sidebar,
+  body,
+  mobile,
+  open,
+} = {}) {
   if (!sidebar) {
     return false;
   }
-
-  if (isShellHidden(AppCore)) {
-    return syncHiddenShellState(
-      AppCore,
-      closeDropdown
-    );
-  }
-
-  const mobile = isMobileViewport();
-  const open = getDesiredSidebarOpenState(AppCore);
 
   try {
     sidebar.hidden = false;
@@ -787,14 +941,52 @@ export function syncSidebarState(AppCore, closeDropdown) {
 
   updateToggleLabel(AppCore, open);
 
+  return true;
+}
+
+export function syncSidebarState(AppCore, closeDropdown) {
+  const {
+    sidebar,
+    body,
+  } = getElements(AppCore);
+
+  if (!sidebar) {
+    return false;
+  }
+
+  /*
+    Fix crítico:
+    No usar isShellHidden(AppCore) aquí directamente.
+    dom.js considera sidebar.hidden === true como shell hidden.
+    Eso puede dejar el sidebar bloqueado tras login/auth route/router repair.
+  */
+  if (isRealShellHidden(AppCore)) {
+    return syncHiddenShellState(
+      AppCore,
+      closeDropdown
+    );
+  }
+
+  const mobile = isMobileViewport();
+  const open = getDesiredSidebarOpenState(AppCore);
+
+  const synced = syncVisibleSidebarBase(AppCore, {
+    sidebar,
+    body,
+    mobile,
+    open,
+  });
+
   safeEmit(AppCore, "sidebar:state:synced", {
     open,
     mobile,
     hidden: false,
+    realShellHidden: false,
+    domShellHidden: isDomShellHiddenOnly(AppCore),
     collapsed: !open && !mobile,
   });
 
-  return true;
+  return synced;
 }
 
 /* =========================================================
@@ -804,6 +996,22 @@ export function syncSidebarState(AppCore, closeDropdown) {
 export function setSidebarOpen(AppCore, open, closeDropdown) {
   const nextOpen = Boolean(open);
   const mobile = isMobileViewport();
+
+  /*
+    Si la shell real está oculta, no persistimos ni mezclamos estado.
+    Solo resincronizamos oculto.
+  */
+  if (isRealShellHidden(AppCore)) {
+    syncHiddenShellState(AppCore, closeDropdown);
+
+    safeEmit(AppCore, "sidebar:state:change:blocked", {
+      reason: "shell-hidden",
+      requestedOpen: nextOpen,
+      mobile,
+    });
+
+    return false;
+  }
 
   if (mobile) {
     setMobileMemory(AppCore, nextOpen);
@@ -832,6 +1040,45 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
 }
 
 /* =========================================================
+   REPAIR HELPERS
+========================================================= */
+
+export function repairSidebarState(AppCore, closeDropdown) {
+  const state = ensureStateBag(AppCore);
+
+  if (!state) {
+    return false;
+  }
+
+  const mobile = isMobileViewport();
+
+  if (typeof state.sidebarDesktopOpen !== "boolean") {
+    const savedCollapsed = readSavedSidebarCollapsed(AppCore);
+
+    state.sidebarDesktopOpen =
+      typeof savedCollapsed === "boolean"
+        ? !savedCollapsed
+        : true;
+  }
+
+  if (typeof state.sidebarMobileOpen !== "boolean") {
+    state.sidebarMobileOpen = false;
+  }
+
+  if (mobile) {
+    state.sidebarOpen = Boolean(state.sidebarMobileOpen);
+    state.sidebarMode = "mobile";
+    state.sidebarLastMode = "mobile";
+  } else {
+    state.sidebarOpen = Boolean(state.sidebarDesktopOpen);
+    state.sidebarMode = "desktop";
+    state.sidebarLastMode = "desktop";
+  }
+
+  return syncSidebarState(AppCore, closeDropdown);
+}
+
+/* =========================================================
    DEBUG
 ========================================================= */
 
@@ -839,6 +1086,9 @@ export function getSidebarStateSnapshot(AppCore) {
   const {
     sidebar,
     body,
+    appShell,
+    shell,
+    layout,
   } = getElements(AppCore);
 
   const mobile = isMobileViewport();
@@ -848,38 +1098,80 @@ export function getSidebarStateSnapshot(AppCore) {
     mobile,
     open,
     collapsed: !open && !mobile,
-    shellHidden: isShellHidden(AppCore),
+
+    shellHidden:
+      isDomShellHiddenOnly(AppCore),
+
+    realShellHidden:
+      isRealShellHidden(AppCore),
 
     state: {
       sidebarOpen:
         AppCore?.state?.sidebarOpen ?? null,
+
       sidebarDesktopOpen:
         AppCore?.state?.sidebarDesktopOpen ?? null,
+
+      sidebarMobileOpen:
+        AppCore?.state?.sidebarMobileOpen ?? null,
+
+      sidebarMode:
+        AppCore?.state?.sidebarMode ?? null,
+
+      sidebarLastMode:
+        AppCore?.state?.sidebarLastMode ?? null,
+
+      shellVisible:
+        AppCore?.state?.shellVisible ?? null,
     },
 
     storage: {
       savedCollapsed:
         readSavedSidebarCollapsed(AppCore),
+
       collapsedKey:
         DESKTOP_COLLAPSED_STORAGE_KEY,
+
       legacyOpenKey:
         LEGACY_SIDEBAR_OPEN_STORAGE_KEY,
     },
 
     dom: {
-      hasSidebar: Boolean(sidebar),
+      hasSidebar:
+        Boolean(sidebar),
+
       sidebarHidden:
         Boolean(sidebar?.hidden),
+
+      sidebarAriaHidden:
+        sidebar?.getAttribute?.("aria-hidden") || null,
+
       sidebarClasses:
         sidebar?.className || "",
+
       bodyClasses:
         body?.className || "",
+
+      appShellHidden:
+        Boolean(appShell?.hidden),
+
+      shellHidden:
+        Boolean(shell?.hidden),
+
+      layoutHidden:
+        Boolean(layout?.hidden),
+
       sidebarOpenDataset:
         sidebar?.dataset?.open || null,
+
       sidebarCollapsedDataset:
         sidebar?.dataset?.collapsed || null,
+
       sidebarMode:
         sidebar?.dataset?.mode || null,
+
+      bodySidebarMode:
+        body?.dataset?.sidebarMode || null,
     },
   };
 }
@@ -891,6 +1183,8 @@ export function getSidebarStateSnapshot(AppCore) {
 export default {
   isMobileViewport,
 
+  isRealShellHidden,
+
   getSavedSidebarCollapsed,
   saveSidebarCollapsed,
 
@@ -901,6 +1195,7 @@ export default {
   updateToggleLabel,
   syncSidebarState,
   setSidebarOpen,
+  repairSidebarState,
 
   getSidebarStateSnapshot,
 };

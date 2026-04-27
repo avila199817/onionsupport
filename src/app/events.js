@@ -21,6 +21,8 @@
    - NO llama SidebarUI.bindEvents()
    - NO llama TopbarUI.rebind()
    - NO dispara app:ui:repair-request desde router:rendered
+   - NO emite app:user-ui:sync desde AppEvents
+   - NO emite app:route:change desde router:rendered
    - router:rendered solo sincroniza route/publicPath/loader
    - router:shell:state NO dispara sync UI
    - syncUserUI se llama una sola vez y con firma objeto
@@ -52,70 +54,85 @@ const TOAST_DEDUPE_MS =
 const LANG_RERENDER_DEDUPE_MS =
   250;
 
-const EVENT_NAMES = Object.freeze({
-  appReady:
-    APP_EVENTS?.ready || "app:ready",
+const ROUTER_RENDER_SYNC_DEDUPE_MS =
+  40;
 
-  appUiReady:
-    APP_EVENTS?.uiReady || "app:ui:ready",
+const EVENT_NAMES =
+  Object.freeze({
+    appReady:
+      APP_EVENTS?.ready || "app:ready",
 
-  appUiRepair:
-    APP_EVENTS?.uiRepair || "app:ui:repair",
+    appUiReady:
+      APP_EVENTS?.uiReady || "app:ui:ready",
 
-  appUiRepairRequest:
-    APP_EVENTS?.uiRepairRequest || "app:ui:repair-request",
+    appUiRepair:
+      APP_EVENTS?.uiRepair || "app:ui:repair",
 
-  appUserChange:
-    APP_EVENTS?.userChange || "app:user:change",
+    appUiRepairRequest:
+      APP_EVENTS?.uiRepairRequest || "app:ui:repair-request",
 
-  appUserUiSync:
-    "app:user-ui:sync",
+    appUserChange:
+      APP_EVENTS?.userChange || "app:user:change",
 
-  appSessionRestored:
-    APP_EVENTS?.sessionRestored || "app:session:restored",
+    /*
+      Evento caliente.
+      AppEvents NO debe emitirlo.
+      Lo mantiene como referencia legacy.
+    */
+    appUserUiSync:
+      "app:user-ui:sync",
 
-  appSessionCleared:
-    "app:session:cleared",
+    appEventsUiSynced:
+      "app:events:ui-synced",
 
-  appLangChange:
-    APP_EVENTS?.langChange || "app:lang:change",
+    appRouteSynced:
+      "app:events:route-synced",
 
-  appRouteChange:
-    APP_EVENTS?.routeChange || "app:route:change",
+    appSessionRestored:
+      APP_EVENTS?.sessionRestored || "app:session:restored",
 
-  appEventsReady:
-    "app:events:ready",
+    appSessionCleared:
+      "app:session:cleared",
 
-  appEventsBound:
-    "app:events:bound",
+    appLangChange:
+      APP_EVENTS?.langChange || "app:lang:change",
 
-  appEventsUnbound:
-    "app:events:unbound",
+    appRouteChange:
+      APP_EVENTS?.routeChange || "app:route:change",
 
-  appEventsError:
-    "app:events:error",
+    appEventsReady:
+      "app:events:ready",
 
-  authSessionRestored:
-    AUTH_EVENTS?.sessionRestored || "auth:session:restored",
+    appEventsBound:
+      "app:events:bound",
 
-  authLoginSuccess:
-    AUTH_EVENTS?.loginSuccess || "auth:login:success",
+    appEventsUnbound:
+      "app:events:unbound",
 
-  authLogout:
-    AUTH_EVENTS?.logout || "auth:logout",
+    appEventsError:
+      "app:events:error",
 
-  authLogoutSuccess:
-    "auth:logout:success",
+    authSessionRestored:
+      AUTH_EVENTS?.sessionRestored || "auth:session:restored",
 
-  routerRendered:
-    ROUTER_EVENTS?.rendered || "router:rendered",
+    authLoginSuccess:
+      AUTH_EVENTS?.loginSuccess || "auth:login:success",
 
-  routerAsyncComplete:
-    ROUTER_EVENTS?.asyncComplete || "router:render:async-complete",
+    authLogout:
+      AUTH_EVENTS?.logout || "auth:logout",
 
-  routerShellState:
-    ROUTER_EVENTS?.shellState || "router:shell:state",
-});
+    authLogoutSuccess:
+      "auth:logout:success",
+
+    routerRendered:
+      ROUTER_EVENTS?.rendered || "router:rendered",
+
+    routerAsyncComplete:
+      ROUTER_EVENTS?.asyncComplete || "router:render:async-complete",
+
+    routerShellState:
+      ROUTER_EVENTS?.shellState || "router:shell:state",
+  });
 
 /*
   Métodos permitidos.
@@ -126,39 +143,41 @@ const EVENT_NAMES = Object.freeze({
   - rebindEvents
   - init
 */
-const SIDEBAR_LIGHT_USER_METHODS = Object.freeze([
-  "renderUser",
-  "refreshUser",
-  "updateUser",
-  "syncUser",
-]);
+const SIDEBAR_LIGHT_USER_METHODS =
+  Object.freeze([
+    "renderUser",
+    "refreshUser",
+    "updateUser",
+    "syncUser",
+  ]);
 
-const SIDEBAR_LIGHT_VISUAL_METHODS = Object.freeze([
-  "applyRoleVisibility",
-  "syncRouteAndIndicator",
-  "syncIndicator",
-  "updateToggleLabel",
-]);
+const SIDEBAR_LIGHT_VISUAL_METHODS =
+  Object.freeze([
+    "applyRoleVisibility",
+    "syncRouteAndIndicator",
+    "syncIndicator",
+    "updateToggleLabel",
+  ]);
 
-const SIDEBAR_LIGHT_FALLBACK_METHODS = Object.freeze([
-  "refresh",
-  "sync",
-]);
+const SIDEBAR_LIGHT_FALLBACK_METHODS =
+  Object.freeze([
+    "refresh",
+    "sync",
+  ]);
 
-const TOPBAR_LIGHT_USER_METHODS = Object.freeze([
-  "renderUser",
-  "refreshUser",
-  "updateUser",
-  "syncUser",
-]);
+const TOPBAR_LIGHT_USER_METHODS =
+  Object.freeze([
+    "renderUser",
+    "refreshUser",
+    "updateUser",
+    "syncUser",
+  ]);
 
-const TOPBAR_LIGHT_FALLBACK_METHODS = Object.freeze([
-  "refresh",
-  "sync",
-]);
-
-const ROUTER_RENDER_SYNC_DEDUPE_MS =
-  40;
+const TOPBAR_LIGHT_FALLBACK_METHODS =
+  Object.freeze([
+    "refresh",
+    "sync",
+  ]);
 
 /* =========================================================
    INTERNAL STATE
@@ -179,11 +198,20 @@ let lastToastAt = 0;
 const boundDisposers = [];
 
 const eventState = {
-  totalHandled: 0,
-  totalErrors: 0,
-  lastEvent: "",
-  lastEventAt: 0,
-  lastError: null,
+  totalHandled:
+    0,
+
+  totalErrors:
+    0,
+
+  lastEvent:
+    "",
+
+  lastEventAt:
+    0,
+
+  lastError:
+    null,
 };
 
 /* =========================================================
@@ -248,19 +276,6 @@ function safeIsoDate(ms = safeNow()) {
   } catch {
     return "";
   }
-}
-
-function safeInvoke(fn, thisArg = null, args = []) {
-  try {
-    if (isFunction(fn)) {
-      return fn.apply(
-        thisArg,
-        safeArray(args)
-      );
-    }
-  } catch {}
-
-  return undefined;
 }
 
 function getEventPayload(eventOrPayload = {}) {
@@ -471,6 +486,37 @@ function recordError(AppCore, eventName = "", error = null) {
     AppCore,
     EVENT_NAMES.appEventsError,
     eventState.lastError
+  );
+}
+
+/* =========================================================
+   AUTH SAFE READ
+========================================================= */
+
+function getAuthUser(Auth) {
+  try {
+    return (
+      Auth?.getUser?.() ||
+      Auth?.getCurrentUser?.() ||
+      Auth?.user ||
+      null
+    );
+  } catch {}
+
+  return null;
+}
+
+function getAuthStatus(Auth) {
+  try {
+    if (isFunction(Auth?.isAuthenticated)) {
+      return Boolean(
+        Auth.isAuthenticated()
+      );
+    }
+  } catch {}
+
+  return Boolean(
+    Auth?.authenticated
   );
 }
 
@@ -1056,7 +1102,7 @@ function syncSidebarLight(SidebarUI, context = {}) {
 
   /*
     Fallback solo si no hay métodos ligeros.
-    refresh/sync son aceptables porque ya los blindamos para no rebindear.
+    refresh/sync son aceptables porque SidebarUI ya está blindado.
   */
   if (
     !user.called &&
@@ -1175,14 +1221,13 @@ function safeSyncUI({
 
     user:
       AppCore?.state?.user ||
-      Auth?.getUser?.() ||
-      Auth?.user ||
+      getAuthUser(Auth) ||
       null,
 
     authenticated:
       Boolean(
         AppCore?.state?.authenticated ||
-        Auth?.isAuthenticated?.()
+        getAuthStatus(Auth)
       ),
   };
 
@@ -1250,10 +1295,15 @@ function safeSyncUI({
       );
   }
 
+  /*
+    Importante:
+    NO emitir app:user-ui:sync desde AppEvents.
+    Ese evento lo emite src/app/ui.js.
+  */
   if (emit) {
     safeEmit(
       AppCore,
-      EVENT_NAMES.appUserUiSync,
+      EVENT_NAMES.appEventsUiSynced,
       {
         source:
           "app:events",
@@ -1287,7 +1337,7 @@ function safeSyncUI({
 
 function safeRequestUiRepair(AppCore, reason = "event", payload = {}) {
   /*
-    API pública por compatibilidad.
+    API interna por compatibilidad.
     NO se usa automáticamente desde router:rendered.
   */
   const detail = {
@@ -1607,16 +1657,12 @@ function bindLanguageEvents(context) {
             false;
         }
 
-        safeSyncUI({
-          ...context,
-          reason:
-            "app:lang:change",
-          payload:
-            {
-              ...payload,
-              lang,
-            },
-        });
+        /*
+          No forzamos safeSyncUI aquí:
+          src/app/ui.js ya escucha app:lang:change.
+          SidebarEvents también reacciona visualmente.
+          Así evitamos triple commit.
+        */
 
         toastOnce(
           Toast,
@@ -1746,15 +1792,17 @@ function bindRouterEvents(context) {
       return;
     }
 
-    safeSetPublicPath(
-      AppCore,
-      publicPath
-    );
+    const publicChanged =
+      safeSetPublicPath(
+        AppCore,
+        publicPath
+      );
 
-    safeSetRoute(
-      AppCore,
-      canonicalPath
-    );
+    const routeChanged =
+      safeSetRoute(
+        AppCore,
+        canonicalPath
+      );
 
     safeApplyPostRenderLoaderPolicy({
       AppCore,
@@ -1766,6 +1814,7 @@ function bindRouterEvents(context) {
       Importante:
       NO safeSyncUI aquí.
       NO app:ui:repair-request aquí.
+      NO app:route:change aquí.
 
       router:rendered ya lo escuchan:
       - src/app/index.js
@@ -1776,7 +1825,7 @@ function bindRouterEvents(context) {
     */
     safeEmit(
       AppCore,
-      EVENT_NAMES.appRouteChange,
+      EVENT_NAMES.appRouteSynced,
       {
         source:
           "app:events",
@@ -1790,6 +1839,12 @@ function bindRouterEvents(context) {
           canonicalPath,
 
         publicPath,
+
+        routeChanged:
+          Boolean(routeChanged),
+
+        publicChanged:
+          Boolean(publicChanged),
 
         silent:
           true,
@@ -1813,10 +1868,6 @@ function bindRouterEvents(context) {
 
     handler:
       (payload) => {
-        /*
-          También ligero.
-          No pedimos repair porque app/index ya gestiona este evento.
-        */
         const publicPath =
           resolvePublicPath(
             AppCore,
@@ -1833,7 +1884,7 @@ function bindRouterEvents(context) {
 
         safeEmit(
           AppCore,
-          EVENT_NAMES.appRouteChange,
+          EVENT_NAMES.appRouteSynced,
           {
             source:
               "app:events",
@@ -2074,4 +2125,7 @@ export default {
 
   getAppEventsSnapshot,
   resetAppEventsState,
+
+  requestUiRepair:
+    safeRequestUiRepair,
 };

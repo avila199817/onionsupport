@@ -2,31 +2,30 @@
    Onion SPA - Sidebar DOM
    Archivo: src/ui/sidebar/dom.js
 
-   FINAL PRO SYSTEM · SIDEBAR DOM · 10/10 · DROPDOWN HARDENED
+   FINAL EXTREME SYSTEM · SIDEBAR DOM · RACE SAFE · HIGH LEVEL
 
    Responsabilidades:
    - montar el HTML del sidebar en el shell
    - priorizar #sidebar-mount cuando existe
-   - cachear referencias DOM en AppCore
-   - resolver elementos del módulo
-   - detectar shell / main content
+   - cachear referencias DOM en AppCore de forma segura
+   - resolver elementos del módulo solo dentro del sidebar cuando procede
+   - evitar resolver nodos transitorios de vistas durante router render
+   - detectar shell / main content sin confundirlo con #view-container
    - helpers de foco
-   - sanear tooltips del footer del sidebar
-   - sanear tooltip del logo del sidebar
+   - sanear tooltips del footer/logo del sidebar
    - rehidratar refs tras mount dinámico
    - mantener compatibilidad con AppCore.dom
    - resolver dropdown de usuario aunque cambien IDs/data/classes
    - soportar aria-controls entre toggle y dropdown
+   - no duplicar sidebar
+   - no romper si document/window no existen
 
-   HARDENING:
-   - no duplica sidebar si ya existe
-   - tolera AppCore.dom inexistente
-   - tolera document inexistente
-   - fallback robusto de shell/main
-   - limpieza de title/data-tooltip/aria-describedby
-   - evita tooltips fantasma tras re-render/i18n/live refresh
-   - no mete el sidebar dentro del view-container
-   - selector resolver ampliado para userToggle/userDropdown/logout
+   FIX CRÍTICO RACE:
+   - no usa selectores genéricos globales para elementos internos
+   - valida node.isConnected antes de reutilizar cache
+   - getElements() no debe capturar navs/logos/dropdowns de una vista
+   - mountSidebar() no reemplaza mount si ya contiene sidebar válido
+   - no monta nunca dentro de #view-container
 ========================================================= */
 
 import { getSidebarTemplate } from "./template.js";
@@ -51,46 +50,50 @@ const SIDEBAR_TOGGLE_ID = "toggleSidebar";
 const SIDEBAR_MOBILE_TOGGLE_ID = "toggleSidebarMobile";
 const SIDEBAR_LOGO_ID = "homeLink";
 
+const DOM_CACHE_VERSION = "sidebar-dom-v4-race-safe";
+
 /* =========================================================
    SELECTOR FALLBACKS
 ========================================================= */
 
 const SIDEBAR_SELECTORS = [
   `#${SIDEBAR_ROOT_ID}`,
-  ".sidebar",
-  "[data-sidebar='true']",
+  "aside.sidebar",
+  ".sidebar[data-sidebar-root='true']",
+  ".sidebar[data-sidebar-root]",
+  "[data-sidebar-root='true']",
   "[data-sidebar-root]",
-  "[data-sidebar]",
+  "[data-sidebar='true']",
 ];
 
 const SIDEBAR_MENU_SELECTORS = [
   `#${SIDEBAR_MENU_ID}`,
-  "[data-sidebar-menu]",
   ".sidebar-menu",
-  "[role='navigation']",
+  "[data-sidebar-menu]",
+  "nav.sidebar-menu",
 ];
 
 const SIDEBAR_RECENTS_SELECTORS = [
   `#${SIDEBAR_RECENTS_ID}`,
+  ".sidebar-recents",
   "[data-sidebar-recents]",
   "[data-sidebar-recent]",
-  ".sidebar-recents",
 ];
 
 const SIDEBAR_TOGGLE_SELECTORS = [
   `#${SIDEBAR_TOGGLE_ID}`,
+  ".sidebar-toggle",
   "[data-sidebar-action='toggle-sidebar']",
   "[data-sidebar-toggle]",
   "[data-action='toggle-sidebar']",
-  ".sidebar-toggle",
 ];
 
 const SIDEBAR_MOBILE_TOGGLE_SELECTORS = [
   `#${SIDEBAR_MOBILE_TOGGLE_ID}`,
+  ".sidebar-mobile-toggle",
   "[data-sidebar-mobile-toggle]",
   "[data-sidebar-action='mobile-sidebar-toggle']",
   "[data-action='mobile-sidebar-toggle']",
-  ".sidebar-mobile-toggle",
 ];
 
 const USER_TOGGLE_SELECTORS = [
@@ -102,6 +105,14 @@ const USER_TOGGLE_SELECTORS = [
   "#userToggle",
   "#user-toggle",
 
+  ".user[role='button']",
+  ".sidebar-user-toggle",
+  ".sidebar-user__toggle",
+  ".sidebar-footer-user-toggle",
+  ".sidebar-footer__user-toggle",
+  ".user-toggle",
+  ".user-menu-toggle",
+
   "[data-sidebar-action='toggle-user-dropdown']",
   "[data-sidebar-action='toggle-user-menu']",
   "[data-sidebar-action='user-toggle']",
@@ -111,13 +122,6 @@ const USER_TOGGLE_SELECTORS = [
   "[data-user-menu-toggle]",
   "[data-dropdown-toggle='user']",
   "[data-dropdown-target='user']",
-
-  ".sidebar-user-toggle",
-  ".sidebar-user__toggle",
-  ".sidebar-footer-user-toggle",
-  ".sidebar-footer__user-toggle",
-  ".user-toggle",
-  ".user-menu-toggle",
 
   `[aria-controls='${USER_DROPDOWN_ID}']`,
 ];
@@ -133,14 +137,8 @@ const USER_DROPDOWN_SELECTORS = [
   "#userMenu",
   "#user-menu",
 
-  "[data-user-dropdown]",
-  "[data-user-menu]",
-  "[data-sidebar-user-dropdown]",
-  "[data-sidebar-user-menu]",
-  "[data-dropdown='user']",
-  "[data-dropdown-menu='user']",
-  "[data-sidebar-dropdown='user']",
-
+  ".user-dropdown",
+  ".user-menu",
   ".sidebar-user-dropdown",
   ".sidebar-user-menu",
   ".sidebar-user__dropdown",
@@ -149,8 +147,14 @@ const USER_DROPDOWN_SELECTORS = [
   ".sidebar-footer-user-menu",
   ".sidebar-footer__user-dropdown",
   ".sidebar-footer__user-menu",
-  ".user-dropdown",
-  ".user-menu",
+
+  "[data-user-dropdown]",
+  "[data-user-menu]",
+  "[data-sidebar-user-dropdown]",
+  "[data-sidebar-user-menu]",
+  "[data-dropdown='user']",
+  "[data-dropdown-menu='user']",
+  "[data-sidebar-dropdown='user']",
 ];
 
 const LOGOUT_SELECTORS = [
@@ -160,24 +164,25 @@ const LOGOUT_SELECTORS = [
   "#sidebarLogout",
   "#sidebar-logout",
 
+  ".sidebar-logout",
+  ".logout-button",
+  ".logout-btn",
+
   "[data-sidebar-action='logout']",
   "[data-action='logout']",
   "[data-logout]",
   "[data-sidebar-logout]",
-
-  ".sidebar-logout",
-  ".logout-button",
-  ".logout-btn",
 ];
 
 const AVATAR_SELECTORS = [
   `#${SIDEBAR_AVATAR_ID}`,
   "#sidebarAvatar",
   "#sidebar-avatar",
-  "[data-sidebar-avatar]",
-  "[data-user-avatar]",
+  ".avatar[data-avatar-root='true']",
   ".sidebar-avatar",
   ".sidebar-user-avatar",
+  "[data-sidebar-avatar]",
+  "[data-user-avatar]",
 ];
 
 const NAME_SELECTORS = [
@@ -186,20 +191,21 @@ const NAME_SELECTORS = [
   "#sidebar-name",
   "#sidebarUserName",
   "#sidebar-user-name",
-  "[data-sidebar-name]",
-  "[data-user-name]",
   ".sidebar-name",
   ".sidebar-user-name",
+  ".user-info .name",
+  "[data-sidebar-name]",
+  "[data-user-name]",
 ];
 
 const LOGO_SELECTORS = [
   `#${SIDEBAR_LOGO_ID}`,
   "#sidebarLogo",
   "#sidebar-logo",
-  "[data-sidebar-logo]",
-  ".logo",
   "a.logo",
+  ".logo",
   ".sidebar-logo",
+  "[data-sidebar-logo]",
 ];
 
 /* =========================================================
@@ -223,6 +229,12 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
+function safeObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+}
+
 function isElement(value = null) {
   if (!value) {
     return false;
@@ -235,8 +247,20 @@ function isElement(value = null) {
   }
 }
 
+function isConnectedNode(value = null) {
+  if (!isElement(value)) {
+    return false;
+  }
+
+  try {
+    return value.isConnected !== false;
+  } catch {
+    return true;
+  }
+}
+
 function ensureDomBag(AppCore) {
-  if (!AppCore) {
+  if (!AppCore || typeof AppCore !== "object") {
     return null;
   }
 
@@ -259,10 +283,28 @@ function byId(id = "") {
   }
 
   try {
-    return document.getElementById(cleanId);
+    const element = document.getElementById(cleanId);
+
+    return isConnectedNode(element) ? element : null;
   } catch {
     return null;
   }
+}
+
+function escapeCssIdent(value = "") {
+  const text = safeText(value, "");
+
+  if (!text) {
+    return "";
+  }
+
+  try {
+    if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+      return CSS.escape(text);
+    }
+  } catch {}
+
+  return text.replace(/["\\#.:,[\]>+~*=|^$()\s]/g, "\\$&");
 }
 
 function query(selector = "", root = null) {
@@ -276,8 +318,14 @@ function query(selector = "", root = null) {
     return null;
   }
 
+  const scope = root && isConnectedNode(root)
+    ? root
+    : document;
+
   try {
-    return (root || document).querySelector(cleanSelector);
+    const element = scope.querySelector(cleanSelector);
+
+    return isConnectedNode(element) ? element : null;
   } catch {
     return null;
   }
@@ -294,8 +342,13 @@ function queryAll(selector = "", root = null) {
     return [];
   }
 
+  const scope = root && isConnectedNode(root)
+    ? root
+    : document;
+
   try {
-    return Array.from((root || document).querySelectorAll(cleanSelector));
+    return Array.from(scope.querySelectorAll(cleanSelector))
+      .filter(isConnectedNode);
   } catch {
     return [];
   }
@@ -313,22 +366,36 @@ function queryFirst(selectors = [], root = null) {
   return null;
 }
 
-function queryFirstGlobalThenLocal(selectors = [], root = null) {
+function queryFirstDocument(selectors = []) {
   for (const selector of selectors) {
-    const globalMatch = query(selector);
+    const element = query(selector, document);
 
-    if (globalMatch) {
-      return globalMatch;
-    }
-
-    const localMatch = root ? query(selector, root) : null;
-
-    if (localMatch) {
-      return localMatch;
+    if (element) {
+      return element;
     }
   }
 
   return null;
+}
+
+function queryFirstInsideSidebar(selectors = [], sidebar = null) {
+  if (!sidebar || !isConnectedNode(sidebar)) {
+    return null;
+  }
+
+  return queryFirst(selectors, sidebar);
+}
+
+function getCachedElement(AppCore, key = "") {
+  const dom = AppCore?.dom;
+
+  if (!dom || typeof dom !== "object") {
+    return null;
+  }
+
+  const element = dom[key];
+
+  return isConnectedNode(element) ? element : null;
 }
 
 function setHidden(element = null, hidden = false) {
@@ -370,18 +437,57 @@ function toFragment(html = "") {
     return null;
   }
 
-  const template = document.createElement("template");
-  template.innerHTML = String(html || "").trim();
+  try {
+    const template = document.createElement("template");
+    template.innerHTML = String(html || "").trim();
 
-  return template.content;
+    return template.content;
+  } catch {
+    return null;
+  }
+}
+
+function isViewContainer(element = null) {
+  if (!isElement(element)) {
+    return false;
+  }
+
+  try {
+    return (
+      element.id === "view-container" ||
+      element.matches?.("#view-container,[data-view-root]")
+    );
+  } catch {
+    return false;
+  }
+}
+
+function containsElement(parent = null, child = null) {
+  if (!parent || !child) {
+    return false;
+  }
+
+  try {
+    return parent === child || parent.contains(child);
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
    SPECIAL RESOLVERS
 ========================================================= */
 
-function resolveSidebarRoot() {
-  return queryFirstGlobalThenLocal(SIDEBAR_SELECTORS) || null;
+function resolveSidebarRoot(AppCore = null) {
+  const cached =
+    getCachedElement(AppCore, "sidebar") ||
+    getCachedElement(AppCore, "sidebarRoot");
+
+  if (cached) {
+    return cached;
+  }
+
+  return byId(SIDEBAR_ROOT_ID) || queryFirstDocument(SIDEBAR_SELECTORS) || null;
 }
 
 function resolveControlledDropdownFromToggle(userToggle = null, sidebar = null) {
@@ -402,68 +508,72 @@ function resolveControlledDropdownFromToggle(userToggle = null, sidebar = null) 
     return null;
   }
 
+  const escaped = escapeCssIdent(controls);
+
   const controlled =
     byId(controls) ||
-    query(`#${CSS.escape ? CSS.escape(controls) : controls}`, sidebar) ||
-    query(`#${CSS.escape ? CSS.escape(controls) : controls}`);
+    query(`#${escaped}`, sidebar) ||
+    null;
 
-  return controlled || null;
+  if (!controlled) {
+    return null;
+  }
+
+  if (sidebar && !containsElement(sidebar, controlled)) {
+    return null;
+  }
+
+  return controlled;
 }
 
 function resolveUserToggle(sidebar = null) {
-  const toggle =
-    queryFirstGlobalThenLocal(USER_TOGGLE_SELECTORS, sidebar);
+  const local = queryFirstInsideSidebar(USER_TOGGLE_SELECTORS, sidebar);
 
-  if (toggle) {
-    return toggle;
+  if (local) {
+    return local;
   }
 
   /*
-    Fallback final:
-    botón dentro del footer que controle un dropdown mediante aria-expanded.
+    Fallback controlado:
+    solo dentro del sidebar.
+    Nunca global, porque una vista puede tener .user-toggle o role button.
   */
-  return (
-    query(
-      [
-        ".sidebar-footer button[aria-expanded]",
-        "[data-sidebar-footer] button[aria-expanded]",
-        ".sidebar-footer [role='button'][aria-expanded]",
-        "[data-sidebar-footer] [role='button'][aria-expanded]",
-      ].join(","),
-      sidebar
-    ) || null
+  return query(
+    [
+      ".sidebar-footer button[aria-expanded]",
+      ".sidebar-footer [role='button'][aria-expanded]",
+      "[data-sidebar-footer] button[aria-expanded]",
+      "[data-sidebar-footer] [role='button'][aria-expanded]",
+    ].join(","),
+    sidebar
   );
 }
 
 function resolveUserDropdown(sidebar = null, userToggle = null) {
-  const byControl =
-    resolveControlledDropdownFromToggle(userToggle, sidebar);
+  const byControl = resolveControlledDropdownFromToggle(userToggle, sidebar);
 
   if (byControl) {
     return byControl;
   }
 
-  const dropdown =
-    queryFirstGlobalThenLocal(USER_DROPDOWN_SELECTORS, sidebar);
+  const local = queryFirstInsideSidebar(USER_DROPDOWN_SELECTORS, sidebar);
 
-  if (dropdown) {
-    return dropdown;
+  if (local) {
+    return local;
   }
 
   /*
     Fallback final:
     menú cercano dentro del footer.
   */
-  return (
-    query(
-      [
-        ".sidebar-footer [role='menu']",
-        "[data-sidebar-footer] [role='menu']",
-        ".sidebar-footer .dropdown-menu",
-        "[data-sidebar-footer] .dropdown-menu",
-      ].join(","),
-      sidebar
-    ) || null
+  return query(
+    [
+      ".sidebar-footer [role='menu']",
+      ".sidebar-footer .dropdown-menu",
+      "[data-sidebar-footer] [role='menu']",
+      "[data-sidebar-footer] .dropdown-menu",
+    ].join(","),
+    sidebar
   );
 }
 
@@ -476,8 +586,10 @@ export function getSidebarMountEl(AppCore) {
     return null;
   }
 
+  const cached = getCachedElement(AppCore, "sidebarMount");
+
   return (
-    AppCore?.dom?.sidebarMount ||
+    cached ||
     byId(SIDEBAR_MOUNT_ID) ||
     query("[data-sidebar-mount]") ||
     null
@@ -489,19 +601,25 @@ export function getMainContentEl(AppCore) {
     return null;
   }
 
+  const cached =
+    getCachedElement(AppCore, "mainContent") ||
+    getCachedElement(AppCore, "main");
+
+  if (cached && !isViewContainer(cached)) {
+    return cached;
+  }
+
   /*
     Importante:
-    NO usar viewContainer como mainContent.
-    El sidebar jamás debe montarse pegado a #view-container.
+    NO usar #view-container como mainContent.
+    El sidebar jamás debe montarse pegado al view.
   */
   return (
-    AppCore?.dom?.mainContent ||
-    AppCore?.dom?.main ||
     byId("main-content") ||
     query("#main-content") ||
     query(".main-content") ||
     query("main[role='main']") ||
-    query("main") ||
+    query("main:not(#view-container)") ||
     null
   );
 }
@@ -511,10 +629,16 @@ export function getAppShellEl(AppCore) {
     return null;
   }
 
+  const cached =
+    getCachedElement(AppCore, "appShell") ||
+    getCachedElement(AppCore, "shell") ||
+    getCachedElement(AppCore, "layout");
+
+  if (cached && !isViewContainer(cached)) {
+    return cached;
+  }
+
   return (
-    AppCore?.dom?.appShell ||
-    AppCore?.dom?.shell ||
-    AppCore?.dom?.layout ||
     byId("app-shell") ||
     query("[data-app-shell='true']") ||
     query("[data-app-shell]") ||
@@ -530,8 +654,10 @@ export function getViewContainerEl(AppCore) {
     return null;
   }
 
+  const cached = getCachedElement(AppCore, "viewContainer");
+
   return (
-    AppCore?.dom?.viewContainer ||
+    cached ||
     byId("view-container") ||
     query("[data-view-root]") ||
     null
@@ -543,14 +669,17 @@ export function getViewContainerEl(AppCore) {
 ========================================================= */
 
 export function sanitizeLogoTooltipState(AppCore) {
-  const { sidebar, logoEl } = getElements(AppCore);
+  const sidebar = resolveSidebarRoot(AppCore);
+
+  if (!sidebar) {
+    return false;
+  }
 
   const logo =
-    logoEl ||
     byId(SIDEBAR_LOGO_ID) ||
-    queryFirst(LOGO_SELECTORS, sidebar);
+    queryFirstInsideSidebar(LOGO_SELECTORS, sidebar);
 
-  if (!logo) {
+  if (!logo || !containsElement(sidebar, logo)) {
     return false;
   }
 
@@ -567,17 +696,20 @@ export function sanitizeLogoTooltipState(AppCore) {
 }
 
 export function sanitizeFooterTooltipState(AppCore) {
-  const {
-    sidebar,
-    userToggle,
-    userDropdown,
-    avatarEl,
-    nameEl,
-  } = getElements(AppCore);
+  const sidebar = resolveSidebarRoot(AppCore);
 
   if (!sidebar) {
     return false;
   }
+
+  const userToggle = resolveUserToggle(sidebar);
+  const userDropdown = resolveUserDropdown(sidebar, userToggle);
+  const avatarEl =
+    byId(SIDEBAR_AVATAR_ID) ||
+    queryFirstInsideSidebar(AVATAR_SELECTORS, sidebar);
+  const nameEl =
+    byId(SIDEBAR_NAME_ID) ||
+    queryFirstInsideSidebar(NAME_SELECTORS, sidebar);
 
   [
     userToggle,
@@ -585,7 +717,9 @@ export function sanitizeFooterTooltipState(AppCore) {
     avatarEl,
     nameEl,
   ].forEach((element) => {
-    removeTooltipAttributes(element);
+    if (element && containsElement(sidebar, element)) {
+      removeTooltipAttributes(element);
+    }
   });
 
   queryAll(
@@ -623,6 +757,10 @@ function appendSidebarHtml(target, html = "", mode = "append") {
     return false;
   }
 
+  if (isViewContainer(target)) {
+    return false;
+  }
+
   const fragment = toFragment(html);
 
   if (!fragment) {
@@ -654,7 +792,7 @@ export function mountSidebar(AppCore) {
 
   const dom = ensureDomBag(AppCore);
 
-  let sidebar = byId(SIDEBAR_ROOT_ID) || resolveSidebarRoot();
+  let sidebar = resolveSidebarRoot(AppCore);
 
   if (sidebar) {
     cacheDomRefs(AppCore);
@@ -670,28 +808,42 @@ export function mountSidebar(AppCore) {
 
   /*
     Orden correcto:
-    1. #sidebar-mount si existe.
+    1. #sidebar-mount si existe y no es #view-container.
     2. app-shell antes del main.
     3. app-shell prepend.
     4. body prepend.
+
+    Importante:
+    Si #sidebar-mount existe pero contiene sidebar válido,
+    no se reemplaza. Evita carreras con reparaciones de UI.
   */
-  if (mount) {
-    appendSidebarHtml(mount, html, "replace");
-  } else if (appShell && mainContent && mainContent.parentElement === appShell) {
+  if (mount && !isViewContainer(mount)) {
+    const existingInMount = queryFirst(SIDEBAR_SELECTORS, mount);
+
+    if (!existingInMount) {
+      appendSidebarHtml(mount, html, "replace");
+    }
+  } else if (
+    appShell &&
+    !isViewContainer(appShell) &&
+    mainContent &&
+    mainContent.parentElement === appShell
+  ) {
     try {
       mainContent.insertAdjacentHTML("beforebegin", html);
     } catch {
       appendSidebarHtml(appShell, html, "prepend");
     }
-  } else if (appShell) {
+  } else if (appShell && !isViewContainer(appShell)) {
     appendSidebarHtml(appShell, html, "prepend");
   } else {
     appendSidebarHtml(document.body, html, "prepend");
   }
 
-  sidebar = byId(SIDEBAR_ROOT_ID) || resolveSidebarRoot();
+  sidebar = resolveSidebarRoot(AppCore);
 
   if (dom) {
+    dom.__sidebarDomCacheVersion = DOM_CACHE_VERSION;
     dom.sidebarMount = mount || byId(SIDEBAR_MOUNT_ID) || null;
   }
 
@@ -725,62 +877,88 @@ export function cacheDomRefs(AppCore) {
 
   const sidebar =
     byId(SIDEBAR_ROOT_ID) ||
-    resolveSidebarRoot();
+    resolveSidebarRoot(AppCore);
 
-  const sidebarMenu =
-    byId(SIDEBAR_MENU_ID) ||
-    queryFirst(SIDEBAR_MENU_SELECTORS, sidebar) ||
-    queryFirst(SIDEBAR_MENU_SELECTORS) ||
-    null;
+  /*
+    Sin sidebar no cacheamos elementos internos genéricos.
+    Esto evita capturar navegación, logo o dropdown de una vista.
+  */
+  const sidebarMenu = sidebar
+    ? (
+        byId(SIDEBAR_MENU_ID) ||
+        queryFirstInsideSidebar(SIDEBAR_MENU_SELECTORS, sidebar)
+      )
+    : null;
 
-  const sidebarRecents =
-    byId(SIDEBAR_RECENTS_ID) ||
-    queryFirst(SIDEBAR_RECENTS_SELECTORS, sidebar) ||
-    null;
+  const sidebarRecents = sidebar
+    ? (
+        byId(SIDEBAR_RECENTS_ID) ||
+        queryFirstInsideSidebar(SIDEBAR_RECENTS_SELECTORS, sidebar)
+      )
+    : null;
 
-  const sidebarToggle =
-    byId(SIDEBAR_TOGGLE_ID) ||
-    queryFirst(SIDEBAR_TOGGLE_SELECTORS, sidebar) ||
-    null;
+  const sidebarToggle = sidebar
+    ? (
+        byId(SIDEBAR_TOGGLE_ID) ||
+        queryFirstInsideSidebar(SIDEBAR_TOGGLE_SELECTORS, sidebar)
+      )
+    : null;
 
-  const mobileToggleBtn =
-    byId(SIDEBAR_MOBILE_TOGGLE_ID) ||
-    queryFirst(SIDEBAR_MOBILE_TOGGLE_SELECTORS, sidebar) ||
-    null;
+  const mobileToggleBtn = sidebar
+    ? (
+        byId(SIDEBAR_MOBILE_TOGGLE_ID) ||
+        queryFirstInsideSidebar(SIDEBAR_MOBILE_TOGGLE_SELECTORS, sidebar)
+      )
+    : null;
 
-  const userToggle =
-    byId(USER_TOGGLE_ID) ||
-    resolveUserToggle(sidebar) ||
-    null;
+  const userToggle = sidebar
+    ? (
+        byId(USER_TOGGLE_ID) ||
+        resolveUserToggle(sidebar)
+      )
+    : null;
 
-  const userDropdown =
-    byId(USER_DROPDOWN_ID) ||
-    resolveUserDropdown(sidebar, userToggle) ||
-    null;
+  const userDropdown = sidebar
+    ? (
+        byId(USER_DROPDOWN_ID) ||
+        resolveUserDropdown(sidebar, userToggle)
+      )
+    : null;
 
-  const logoutBtn =
-    byId(LOGOUT_BUTTON_ID) ||
-    queryFirst(LOGOUT_SELECTORS, sidebar) ||
-    null;
+  const logoutBtn = sidebar
+    ? (
+        byId(LOGOUT_BUTTON_ID) ||
+        queryFirstInsideSidebar(LOGOUT_SELECTORS, sidebar)
+      )
+    : null;
 
-  const avatarEl =
-    byId(SIDEBAR_AVATAR_ID) ||
-    queryFirst(AVATAR_SELECTORS, sidebar) ||
-    null;
+  const avatarEl = sidebar
+    ? (
+        byId(SIDEBAR_AVATAR_ID) ||
+        queryFirstInsideSidebar(AVATAR_SELECTORS, sidebar)
+      )
+    : null;
 
-  const nameEl =
-    byId(SIDEBAR_NAME_ID) ||
-    queryFirst(NAME_SELECTORS, sidebar) ||
-    null;
+  const nameEl = sidebar
+    ? (
+        byId(SIDEBAR_NAME_ID) ||
+        queryFirstInsideSidebar(NAME_SELECTORS, sidebar)
+      )
+    : null;
 
-  const logoEl =
-    byId(SIDEBAR_LOGO_ID) ||
-    queryFirst(LOGO_SELECTORS, sidebar) ||
-    null;
+  const logoEl = sidebar
+    ? (
+        byId(SIDEBAR_LOGO_ID) ||
+        queryFirstInsideSidebar(LOGO_SELECTORS, sidebar)
+      )
+    : null;
 
   const appShell = getAppShellEl(AppCore);
   const mainContent = getMainContentEl(AppCore);
   const viewContainer = getViewContainerEl(AppCore);
+
+  dom.__sidebarDomCacheVersion = DOM_CACHE_VERSION;
+  dom.__sidebarDomCachedAt = Date.now?.() || 0;
 
   dom.body = body;
 
@@ -794,6 +972,8 @@ export function cacheDomRefs(AppCore) {
 
   dom.sidebarMount = sidebarMount || null;
   dom.sidebar = sidebar || null;
+  dom.sidebarRoot = sidebar || null;
+
   dom.sidebarMenu = sidebarMenu || null;
   dom.sidebarRecents = sidebarRecents || null;
   dom.sidebarToggle = sidebarToggle || null;
@@ -874,28 +1054,32 @@ export function getElements(AppCore) {
   }
 
   const cached = cacheDomRefs(AppCore) || {};
-  const dom = AppCore?.dom || {};
+  const dom = safeObject(AppCore?.dom);
 
   const sidebar =
     cached.sidebar ||
-    dom.sidebar ||
+    getCachedElement(AppCore, "sidebar") ||
     byId(SIDEBAR_ROOT_ID) ||
-    resolveSidebarRoot() ||
+    resolveSidebarRoot(AppCore) ||
     null;
 
-  const userToggle =
-    cached.userToggle ||
-    dom.userToggle ||
-    byId(USER_TOGGLE_ID) ||
-    resolveUserToggle(sidebar) ||
-    null;
+  const userToggle = sidebar
+    ? (
+        cached.userToggle ||
+        getCachedElement(AppCore, "userToggle") ||
+        byId(USER_TOGGLE_ID) ||
+        resolveUserToggle(sidebar)
+      )
+    : null;
 
-  const userDropdown =
-    cached.userDropdown ||
-    dom.userDropdown ||
-    byId(USER_DROPDOWN_ID) ||
-    resolveUserDropdown(sidebar, userToggle) ||
-    null;
+  const userDropdown = sidebar
+    ? (
+        cached.userDropdown ||
+        getCachedElement(AppCore, "userDropdown") ||
+        byId(USER_DROPDOWN_ID) ||
+        resolveUserDropdown(sidebar, userToggle)
+      )
+    : null;
 
   return {
     body:
@@ -906,111 +1090,134 @@ export function getElements(AppCore) {
 
     appShell:
       cached.appShell ||
-      dom.appShell ||
-      dom.shell ||
-      dom.layout ||
+      getCachedElement(AppCore, "appShell") ||
+      getCachedElement(AppCore, "shell") ||
+      getCachedElement(AppCore, "layout") ||
       getAppShellEl(AppCore) ||
       null,
 
     shell:
       cached.shell ||
-      dom.shell ||
-      dom.appShell ||
-      dom.layout ||
+      getCachedElement(AppCore, "shell") ||
+      getCachedElement(AppCore, "appShell") ||
+      getCachedElement(AppCore, "layout") ||
       getAppShellEl(AppCore) ||
       null,
 
     layout:
       cached.layout ||
-      dom.layout ||
-      dom.appShell ||
-      dom.shell ||
+      getCachedElement(AppCore, "layout") ||
+      getCachedElement(AppCore, "appShell") ||
+      getCachedElement(AppCore, "shell") ||
       getAppShellEl(AppCore) ||
       null,
 
     mainContent:
       cached.mainContent ||
-      dom.mainContent ||
-      dom.main ||
+      getCachedElement(AppCore, "mainContent") ||
+      getCachedElement(AppCore, "main") ||
       getMainContentEl(AppCore) ||
       null,
 
     viewContainer:
       cached.viewContainer ||
-      dom.viewContainer ||
+      getCachedElement(AppCore, "viewContainer") ||
       getViewContainerEl(AppCore) ||
       null,
 
     sidebarMount:
       cached.sidebarMount ||
-      dom.sidebarMount ||
+      getCachedElement(AppCore, "sidebarMount") ||
       getSidebarMountEl(AppCore) ||
       null,
 
     sidebar,
 
     sidebarMenu:
-      cached.sidebarMenu ||
-      dom.sidebarMenu ||
-      byId(SIDEBAR_MENU_ID) ||
-      queryFirst(SIDEBAR_MENU_SELECTORS, sidebar) ||
-      queryFirst(SIDEBAR_MENU_SELECTORS) ||
-      null,
+      sidebar
+        ? (
+            cached.sidebarMenu ||
+            getCachedElement(AppCore, "sidebarMenu") ||
+            byId(SIDEBAR_MENU_ID) ||
+            queryFirstInsideSidebar(SIDEBAR_MENU_SELECTORS, sidebar)
+          )
+        : null,
 
     sidebarRecents:
-      cached.sidebarRecents ||
-      dom.sidebarRecents ||
-      byId(SIDEBAR_RECENTS_ID) ||
-      queryFirst(SIDEBAR_RECENTS_SELECTORS, sidebar) ||
-      null,
+      sidebar
+        ? (
+            cached.sidebarRecents ||
+            getCachedElement(AppCore, "sidebarRecents") ||
+            byId(SIDEBAR_RECENTS_ID) ||
+            queryFirstInsideSidebar(SIDEBAR_RECENTS_SELECTORS, sidebar)
+          )
+        : null,
 
     toggleBtn:
-      cached.toggleBtn ||
-      cached.sidebarToggle ||
-      dom.sidebarToggle ||
-      byId(SIDEBAR_TOGGLE_ID) ||
-      queryFirst(SIDEBAR_TOGGLE_SELECTORS, sidebar) ||
-      null,
+      sidebar
+        ? (
+            cached.toggleBtn ||
+            cached.sidebarToggle ||
+            getCachedElement(AppCore, "sidebarToggle") ||
+            byId(SIDEBAR_TOGGLE_ID) ||
+            queryFirstInsideSidebar(SIDEBAR_TOGGLE_SELECTORS, sidebar)
+          )
+        : null,
 
     mobileToggleBtn:
-      cached.mobileToggleBtn ||
-      dom.sidebarMobileToggle ||
-      dom.mobileSidebarToggle ||
-      byId(SIDEBAR_MOBILE_TOGGLE_ID) ||
-      queryFirst(SIDEBAR_MOBILE_TOGGLE_SELECTORS, sidebar) ||
-      null,
+      sidebar
+        ? (
+            cached.mobileToggleBtn ||
+            getCachedElement(AppCore, "sidebarMobileToggle") ||
+            getCachedElement(AppCore, "mobileSidebarToggle") ||
+            byId(SIDEBAR_MOBILE_TOGGLE_ID) ||
+            queryFirstInsideSidebar(SIDEBAR_MOBILE_TOGGLE_SELECTORS, sidebar)
+          )
+        : null,
 
     userToggle,
 
     userDropdown,
 
     logoutBtn:
-      cached.logoutBtn ||
-      dom.logoutBtn ||
-      byId(LOGOUT_BUTTON_ID) ||
-      queryFirst(LOGOUT_SELECTORS, sidebar) ||
-      null,
+      sidebar
+        ? (
+            cached.logoutBtn ||
+            getCachedElement(AppCore, "logoutBtn") ||
+            byId(LOGOUT_BUTTON_ID) ||
+            queryFirstInsideSidebar(LOGOUT_SELECTORS, sidebar)
+          )
+        : null,
 
     avatarEl:
-      cached.avatarEl ||
-      dom.sidebarAvatar ||
-      byId(SIDEBAR_AVATAR_ID) ||
-      queryFirst(AVATAR_SELECTORS, sidebar) ||
-      null,
+      sidebar
+        ? (
+            cached.avatarEl ||
+            getCachedElement(AppCore, "sidebarAvatar") ||
+            byId(SIDEBAR_AVATAR_ID) ||
+            queryFirstInsideSidebar(AVATAR_SELECTORS, sidebar)
+          )
+        : null,
 
     nameEl:
-      cached.nameEl ||
-      dom.sidebarName ||
-      byId(SIDEBAR_NAME_ID) ||
-      queryFirst(NAME_SELECTORS, sidebar) ||
-      null,
+      sidebar
+        ? (
+            cached.nameEl ||
+            getCachedElement(AppCore, "sidebarName") ||
+            byId(SIDEBAR_NAME_ID) ||
+            queryFirstInsideSidebar(NAME_SELECTORS, sidebar)
+          )
+        : null,
 
     logoEl:
-      cached.logoEl ||
-      dom.sidebarLogo ||
-      byId(SIDEBAR_LOGO_ID) ||
-      queryFirst(LOGO_SELECTORS, sidebar) ||
-      null,
+      sidebar
+        ? (
+            cached.logoEl ||
+            getCachedElement(AppCore, "sidebarLogo") ||
+            byId(SIDEBAR_LOGO_ID) ||
+            queryFirstInsideSidebar(LOGO_SELECTORS, sidebar)
+          )
+        : null,
   };
 }
 
@@ -1029,18 +1236,32 @@ export function isShellHidden(AppCore) {
     body,
     appShell,
     shell,
+    layout,
     sidebar,
   } = getElements(AppCore);
+
+  const html = document.documentElement || null;
 
   return Boolean(
     body?.classList?.contains?.("route-shell-hidden") ||
       body?.classList?.contains?.("auth-screen") ||
       body?.dataset?.shell === "hidden" ||
-      document.documentElement?.dataset?.shell === "hidden" ||
+      body?.dataset?.shellVisible === "false" ||
+
+      html?.dataset?.shell === "hidden" ||
+      html?.dataset?.shellVisible === "false" ||
+      html?.dataset?.routeMode === "auth" ||
+      body?.dataset?.routeMode === "auth" ||
+
       appShell?.classList?.contains?.("route-shell-hidden") ||
       shell?.classList?.contains?.("route-shell-hidden") ||
+      layout?.classList?.contains?.("route-shell-hidden") ||
+
       sidebar?.hidden === true ||
-      AppCore?.state?.shellVisible === false
+
+      AppCore?.state?.shellVisible === false ||
+      AppCore?.state?.routeShellHidden === true ||
+      AppCore?.state?.authScreen === true
   );
 }
 
@@ -1051,8 +1272,6 @@ export function isShellHidden(AppCore) {
 export function setSidebarHidden(AppCore, hidden = false) {
   const {
     sidebar,
-    sidebarMenu,
-    sidebarRecents,
     toggleBtn,
     mobileToggleBtn,
     userToggle,
@@ -1061,17 +1280,11 @@ export function setSidebarHidden(AppCore, hidden = false) {
 
   [
     sidebar,
-    sidebarMenu,
-    sidebarRecents,
     toggleBtn,
     mobileToggleBtn,
     userToggle,
     userDropdown,
   ].forEach((element) => {
-    if (element === sidebarMenu || element === sidebarRecents) {
-      return;
-    }
-
     setHidden(element, hidden);
   });
 
@@ -1169,6 +1382,7 @@ function getElementDebug(element = null) {
   return {
     id: element.id || "",
     tag: element.tagName || "",
+    connected: isConnectedNode(element),
     hidden: Boolean(element.hidden),
     inert: Boolean(element.hasAttribute?.("inert")),
     ariaHidden: element.getAttribute?.("aria-hidden") || "",
@@ -1189,6 +1403,7 @@ export function getSidebarDomSnapshot(AppCore) {
   const elements = getElements(AppCore);
 
   return {
+    version: DOM_CACHE_VERSION,
     hasDocument: hasDocument(),
 
     hasSidebarMount: Boolean(elements.sidebarMount),
@@ -1214,8 +1429,13 @@ export function getSidebarDomSnapshot(AppCore) {
     shellHidden: isShellHidden(AppCore),
 
     sidebarHidden: Boolean(elements.sidebar?.hidden),
+    sidebarConnected: isConnectedNode(elements.sidebar),
     sidebarClasses: elements.sidebar?.className || "",
     bodyClasses: elements.body?.className || "",
+
+    appShell: getElementDebug(elements.appShell),
+    mainContent: getElementDebug(elements.mainContent),
+    viewContainer: getElementDebug(elements.viewContainer),
 
     userToggle: getElementDebug(elements.userToggle),
     userDropdown: getElementDebug(elements.userDropdown),

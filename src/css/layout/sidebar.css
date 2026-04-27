@@ -1,19 +1,30 @@
 /* =========================================================
    ONION SUPPORT — SIDEBAR
-   HIGH LEVEL / PRO SAAS PANEL / FINAL / GOD TIER
    Archivo: src/css/layout/sidebar.css
 
-   REFINADO 10/10:
+   FINAL EXTREME SYSTEM · SIDEBAR / DROPDOWN SAFE · 10/10
+
+   Objetivos:
    - sidebar premium limpio, compacto y operativo
-   - collapsed desktop estable y sin teatrillo
+   - collapsed desktop estable
    - desktop sin transform innecesario
    - mobile separado con transición dedicada
    - soporte body.sidebar-collapsed / .sidebar.collapsed
-   - dropdown robusto incluso con hidden
-   - tooltip consistente y sin clipping
+   - dropdown robusto aunque exista atributo hidden
+   - dropdown robusto por clase, aria-hidden y data-state
+   - dropdown visible en collapsed desktop sin clipping
    - footer de usuario sólido
+   - tooltips sin clipping
    - light mode fino
    - menos ruido visual en navegación SPA
+
+   FIX CRÍTICO DROPDOWN:
+   - .user-dropdown[hidden] no lo mata visualmente
+   - .user-dropdown[data-state="open"] fuerza apertura
+   - .user[aria-expanded="true"] + .user-dropdown abre
+   - overflow visible en cadena sidebar/footer
+   - z-index fuerte dentro del stacking context del sidebar
+   - collapsed positioning saneado
 ========================================================= */
 
 
@@ -26,16 +37,17 @@
   --sidebar-toggle-size: 36px;
   --sidebar-toggle-size-collapsed: 34px;
 
-  --sidebar-menu-icon-box: var(--sidebar-icon-size);
+  --sidebar-menu-icon-box: var(--sidebar-icon-size, 18px);
   --sidebar-menu-item-collapsed: 42px;
 
   --sidebar-footer-avatar-size: 32px;
   --sidebar-footer-avatar-size-collapsed: 30px;
 
-  --sidebar-tooltip-z: var(--z-tooltip);
-  --sidebar-dropdown-z: var(--z-dropdown);
+  --sidebar-tooltip-z: var(--z-tooltip, 70);
+  --sidebar-dropdown-z: var(--z-dropdown, 50);
 
   --sidebar-dropdown-width-collapsed: 224px;
+  --sidebar-dropdown-offset-collapsed: 12px;
 
   --sidebar-mobile-shadow:
     0 24px 80px rgba(0,0,0,.34),
@@ -82,6 +94,9 @@
   -webkit-backdrop-filter:var(--blur-md);
 
   overflow:visible;
+  overflow-x:visible;
+  overflow-y:visible;
+
   isolation:isolate;
 
   z-index:var(--z-sidebar);
@@ -155,10 +170,6 @@
 
 /* =========================================================
    COLLAPSED STATE
-   Compatible con:
-   - .sidebar.collapsed
-   - .sidebar.is-collapsed
-   - body.sidebar-collapsed .sidebar
 ========================================================= */
 
 .sidebar.collapsed,
@@ -203,6 +214,7 @@ body.sidebar-collapsed .sidebar{
   padding:12px;
 
   overflow:visible;
+  z-index:4;
 }
 
 
@@ -386,14 +398,15 @@ body.sidebar-collapsed .sidebar .sidebar-toggle{
 .sidebar-top,
 .sidebar-menu,
 .sidebar-footer,
+.user,
 .user-dropdown{
   overflow:visible;
+  contain:none;
 }
 
 
 /* =========================================================
    TOOLTIP SYSTEM
-   Solo usa data-tooltip.
 ========================================================= */
 
 .logo[data-tooltip],
@@ -401,8 +414,6 @@ body.sidebar-collapsed .sidebar .sidebar-toggle{
 .menu-item[data-tooltip]{
   position:relative;
 }
-
-/* ---------- Top controls tooltip ---------- */
 
 .logo[data-tooltip]::after,
 .sidebar-toggle[data-tooltip]::after{
@@ -498,6 +509,7 @@ body.sidebar-collapsed .sidebar .sidebar-toggle{
 .sidebar-toggle[data-tooltip]:hover::after{
   transform:translateY(0);
 }
+
 
 /* ---------- Menu collapsed tooltip ---------- */
 
@@ -609,6 +621,8 @@ body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::a
   padding-block-end:10px;
 
   overflow:visible;
+
+  z-index:2;
 }
 
 .menu-item{
@@ -650,7 +664,8 @@ body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::a
 }
 
 .menu-item span:first-child,
-.menu-item .menu-icon{
+.menu-item .menu-icon,
+.menu-item .menu-item-icon{
   display:inline-flex;
   align-items:center;
   justify-content:center;
@@ -663,7 +678,8 @@ body.sidebar-collapsed .sidebar .menu-item[aria-current="page"][data-tooltip]::a
 }
 
 .menu-item span:last-child,
-.menu-item .menu-label{
+.menu-item .menu-label,
+.menu-item .menu-item-label{
   min-inline-size:0;
 
   overflow:hidden;
@@ -797,10 +813,13 @@ body.sidebar-collapsed .sidebar .menu-item{
 
 .sidebar.collapsed .menu-item > span:first-child,
 .sidebar.collapsed .menu-item .menu-icon,
+.sidebar.collapsed .menu-item .menu-item-icon,
 .sidebar.is-collapsed .menu-item > span:first-child,
 .sidebar.is-collapsed .menu-item .menu-icon,
+.sidebar.is-collapsed .menu-item .menu-item-icon,
 body.sidebar-collapsed .sidebar .menu-item > span:first-child,
-body.sidebar-collapsed .sidebar .menu-item .menu-icon{
+body.sidebar-collapsed .sidebar .menu-item .menu-icon,
+body.sidebar-collapsed .sidebar .menu-item .menu-item-icon{
   display:grid;
   place-items:center;
 
@@ -813,10 +832,13 @@ body.sidebar-collapsed .sidebar .menu-item .menu-icon{
 
 .sidebar.collapsed .menu-item > span:last-child,
 .sidebar.collapsed .menu-item .menu-label,
+.sidebar.collapsed .menu-item .menu-item-label,
 .sidebar.is-collapsed .menu-item > span:last-child,
 .sidebar.is-collapsed .menu-item .menu-label,
+.sidebar.is-collapsed .menu-item .menu-item-label,
 body.sidebar-collapsed .sidebar .menu-item > span:last-child,
-body.sidebar-collapsed .sidebar .menu-item .menu-label{
+body.sidebar-collapsed .sidebar .menu-item .menu-label,
+body.sidebar-collapsed .sidebar .menu-item .menu-item-label{
   display:none;
 }
 
@@ -880,6 +902,8 @@ body.sidebar-collapsed .sidebar .menu-item[aria-current="page"]{
 
   scrollbar-width:thin;
   scrollbar-color:var(--scrollbar-thumb) transparent;
+
+  z-index:1;
 }
 
 .sidebar-section::-webkit-scrollbar{
@@ -966,6 +990,7 @@ body.sidebar-collapsed .sidebar .sidebar-section{
 
 .sidebar-footer{
   position:relative;
+  z-index:20;
 
   flex:0 0 auto;
 
@@ -984,6 +1009,9 @@ body.sidebar-collapsed .sidebar .sidebar-section{
       transparent 0%,
       color-mix(in srgb, var(--text-strong), transparent 99%) 100%
     );
+
+  overflow:visible;
+  contain:none;
 }
 
 
@@ -993,6 +1021,7 @@ body.sidebar-collapsed .sidebar .sidebar-section{
 
 .user{
   position:relative;
+  z-index:2;
 
   display:flex;
   align-items:center;
@@ -1027,9 +1056,14 @@ body.sidebar-collapsed .sidebar .sidebar-section{
 }
 
 .user.active,
+.user.is-active,
+.user[data-state="open"],
 .user[aria-expanded="true"]{
   background:var(--sidebar-hover);
   border-color:color-mix(in srgb, var(--text-strong), transparent 95%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 97%),
+    0 8px 18px rgba(0,0,0,.12);
 }
 
 .user:active{
@@ -1172,6 +1206,8 @@ body.sidebar-collapsed .sidebar .avatar{
 
   z-index:var(--sidebar-dropdown-z);
 
+  display:block;
+
   inline-size:auto;
   min-inline-size:0;
 
@@ -1188,7 +1224,9 @@ body.sidebar-collapsed .sidebar .avatar{
     ),
     var(--dropdown-bg);
 
-  box-shadow:var(--shadow-lg);
+  box-shadow:
+    var(--shadow-lg),
+    0 0 0 1px color-mix(in srgb, var(--text-strong), transparent 97%) inset;
 
   backdrop-filter:blur(14px);
   -webkit-backdrop-filter:blur(14px);
@@ -1201,6 +1239,10 @@ body.sidebar-collapsed .sidebar .avatar{
   transform:translateY(8px) scale(.985);
   transform-origin:bottom center;
 
+  clip-path:none;
+  contain:none;
+  overflow:visible;
+
   transition:
     opacity var(--duration-fast) var(--ease-out),
     visibility var(--duration-fast) var(--ease-out),
@@ -1208,9 +1250,16 @@ body.sidebar-collapsed .sidebar .avatar{
 }
 
 /*
-   Importante:
-   reset.css tiene [hidden]{display:none!important}.
-   Aquí lo anulamos para permitir transición controlada por open/active.
+   Reset.css suele traer:
+   [hidden]{ display:none !important; }
+
+   Aquí lo anulamos para que el estado visual lo controle:
+   - .open
+   - .active
+   - .is-open
+   - .is-visible
+   - [data-state="open"]
+   - [aria-hidden="false"]
 */
 .user-dropdown[hidden]{
   display:block !important;
@@ -1218,7 +1267,12 @@ body.sidebar-collapsed .sidebar .avatar{
 
 .user-dropdown.open,
 .user-dropdown.active,
-.user-dropdown[aria-hidden="false"]{
+.user-dropdown.is-open,
+.user-dropdown.is-visible,
+.user-dropdown[data-state="open"],
+.user-dropdown[aria-hidden="false"],
+.user[aria-expanded="true"] + .user-dropdown,
+.user[data-state="open"] + .user-dropdown{
   opacity:1;
   visibility:visible;
 
@@ -1227,10 +1281,20 @@ body.sidebar-collapsed .sidebar .avatar{
   transform:translateY(0) scale(1);
 }
 
+.user-dropdown[data-state="closed"],
+.user-dropdown[aria-hidden="true"]:not(.open):not(.active):not(.is-open):not(.is-visible){
+  opacity:0;
+  visibility:hidden;
+
+  pointer-events:none;
+
+  transform:translateY(8px) scale(.985);
+}
+
 .sidebar.collapsed .user-dropdown,
 .sidebar.is-collapsed .user-dropdown,
 body.sidebar-collapsed .sidebar .user-dropdown{
-  inset-inline-start:calc(100% + 12px);
+  inset-inline-start:calc(100% + var(--sidebar-dropdown-offset-collapsed));
   inset-inline-end:auto;
   inset-block-end:10px;
 
@@ -1241,6 +1305,32 @@ body.sidebar-collapsed .sidebar .user-dropdown{
   );
 
   transform-origin:bottom left;
+}
+
+/*
+   Seguridad extra:
+   si el dropdown está abierto en collapsed, nunca debe quedar debajo
+   de menú, footer o topbar interno.
+*/
+.sidebar.collapsed .user-dropdown.open,
+.sidebar.collapsed .user-dropdown.active,
+.sidebar.collapsed .user-dropdown.is-open,
+.sidebar.collapsed .user-dropdown.is-visible,
+.sidebar.collapsed .user-dropdown[data-state="open"],
+.sidebar.collapsed .user-dropdown[aria-hidden="false"],
+.sidebar.is-collapsed .user-dropdown.open,
+.sidebar.is-collapsed .user-dropdown.active,
+.sidebar.is-collapsed .user-dropdown.is-open,
+.sidebar.is-collapsed .user-dropdown.is-visible,
+.sidebar.is-collapsed .user-dropdown[data-state="open"],
+.sidebar.is-collapsed .user-dropdown[aria-hidden="false"],
+body.sidebar-collapsed .sidebar .user-dropdown.open,
+body.sidebar-collapsed .sidebar .user-dropdown.active,
+body.sidebar-collapsed .sidebar .user-dropdown.is-open,
+body.sidebar-collapsed .sidebar .user-dropdown.is-visible,
+body.sidebar-collapsed .sidebar .user-dropdown[data-state="open"],
+body.sidebar-collapsed .sidebar .user-dropdown[aria-hidden="false"]{
+  z-index:var(--sidebar-dropdown-z);
 }
 
 
@@ -1377,8 +1467,24 @@ body.sidebar-collapsed .sidebar .user-dropdown{
 
 
 /* =========================================================
+   ROLE / VISIBILITY SAFETY
+========================================================= */
+
+[data-role-visible="false"],
+[data-admin-visible="false"],
+[data-sidebar-visible="false"]{
+  display:none !important;
+  pointer-events:none !important;
+}
+
+[aria-hidden="true"][data-sidebar-visible="false"],
+[hidden][data-sidebar-visible="false"]{
+  display:none !important;
+}
+
+
+/* =========================================================
    MOBILE OVERLAY OPTIONAL
-   Si tu JS monta un overlay, queda estilado.
 ========================================================= */
 
 .sidebar-overlay,
@@ -1457,6 +1563,8 @@ body.sidebar-open [data-sidebar-overlay]{
 
 [data-theme="light"] .user:hover,
 [data-theme="light"] .user.active,
+[data-theme="light"] .user.is-active,
+[data-theme="light"] .user[data-state="open"],
 [data-theme="light"] .user[aria-expanded="true"]{
   border-color:color-mix(in srgb, var(--text), transparent 95%);
 }
@@ -1466,7 +1574,8 @@ body.sidebar-open [data-sidebar-overlay]{
 
   box-shadow:
     0 14px 34px rgba(15,23,42,.08),
-    0 4px 10px rgba(15,23,42,.05);
+    0 4px 10px rgba(15,23,42,.05),
+    0 0 0 1px rgba(255,255,255,.72) inset;
 }
 
 [data-theme="light"] .dropdown-item:hover{
@@ -1578,7 +1687,8 @@ body.sidebar-open [data-sidebar-overlay]{
   }
 
   .sidebar .menu-item > span:first-child,
-  .sidebar .menu-item .menu-icon{
+  .sidebar .menu-item .menu-icon,
+  .sidebar .menu-item .menu-item-icon{
     display:inline-flex;
 
     inline-size:var(--sidebar-icon-size);
@@ -1589,7 +1699,8 @@ body.sidebar-open [data-sidebar-overlay]{
   }
 
   .sidebar .menu-item > span:last-child,
-  .sidebar .menu-item .menu-label{
+  .sidebar .menu-item .menu-label,
+  .sidebar .menu-item .menu-item-label{
     display:block !important;
 
     inline-size:auto !important;

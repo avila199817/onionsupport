@@ -24,6 +24,7 @@
    - no gestionar transición visual propia desde index.js
    - cortar tormentas de bindEvents / cleanup / repair / init
    - evitar AppCore.cleanup.run(SCOPE) agresivo en cada rebind
+   - evitar pointer-events:none colgado en .sidebar-menu
 
    REGLAS:
    - state.js es el único dueño de:
@@ -288,6 +289,12 @@ export const SidebarUI = (() => {
     try {
       event?.stopImmediatePropagation?.();
     } catch {}
+  }
+
+  function preventAndStop(event) {
+    preventDefault(event);
+    stopPropagation(event);
+    stopImmediatePropagation(event);
   }
 
   function containsElement(parent, child) {
@@ -1435,6 +1442,47 @@ export const SidebarUI = (() => {
     );
   }
 
+  function restoreMenuHoverState() {
+    if (!isBrowser()) {
+      return false;
+    }
+
+    const {
+      body,
+      sidebar,
+      sidebarMenu,
+    } = getElements(AppCore);
+
+    if (!sidebarMenu) {
+      return false;
+    }
+
+    try {
+      body?.classList?.remove?.("sidebar-visual-syncing");
+      sidebar?.classList?.remove?.("is-visual-syncing");
+      sidebarMenu?.classList?.remove?.("is-visual-syncing");
+
+      delete sidebarMenu.dataset.visualSyncing;
+      delete sidebarMenu.dataset.visualSyncReason;
+
+      const previous =
+        sidebarMenu.dataset.previousPointerEvents;
+
+      if (!previous || previous === "__empty__") {
+        sidebarMenu.style.pointerEvents = "";
+      } else {
+        sidebarMenu.style.pointerEvents = previous;
+      }
+
+      delete sidebarMenu.dataset.previousPointerEvents;
+      delete sidebarMenu.dataset.previousPointerEventsSet;
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function clearVisualSyncTimer() {
     if (visualSyncTimer) {
       safeClearTimeout(visualSyncTimer);
@@ -1442,11 +1490,17 @@ export const SidebarUI = (() => {
     }
   }
 
-  function clearHoverFlushTimer() {
+  function clearHoverFlushTimer({ restore = true } = {}) {
     if (hoverFlushTimer) {
       safeClearTimeout(hoverFlushTimer);
       hoverFlushTimer = null;
     }
+
+    if (restore) {
+      restoreMenuHoverState();
+    }
+
+    return true;
   }
 
   function flushMenuHoverState(reason = "hover-flush", durationMs = HOVER_FLUSH_MS) {
@@ -1464,7 +1518,9 @@ export const SidebarUI = (() => {
       return false;
     }
 
-    clearHoverFlushTimer();
+    clearHoverFlushTimer({
+      restore: true,
+    });
 
     const duration =
       clampNumber(durationMs, 16, 600);
@@ -1486,7 +1542,7 @@ export const SidebarUI = (() => {
 
       /*
         Fuerza al navegador a soltar :hover real.
-        Solo debe durar unos ms; si esto queda vivo, mata clicks.
+        Debe restaurarse SIEMPRE. Si queda vivo, mata clicks del menú.
       */
       sidebarMenu.style.pointerEvents = "none";
 
@@ -1503,27 +1559,7 @@ export const SidebarUI = (() => {
 
     hoverFlushTimer = safeSetTimeout(() => {
       hoverFlushTimer = null;
-
-      try {
-        body?.classList?.remove?.("sidebar-visual-syncing");
-        sidebar?.classList?.remove?.("is-visual-syncing");
-        sidebarMenu?.classList?.remove?.("is-visual-syncing");
-
-        delete sidebarMenu.dataset.visualSyncing;
-        delete sidebarMenu.dataset.visualSyncReason;
-
-        const previous =
-          sidebarMenu.dataset.previousPointerEvents;
-
-        if (!previous || previous === "__empty__") {
-          sidebarMenu.style.pointerEvents = "";
-        } else {
-          sidebarMenu.style.pointerEvents = previous;
-        }
-
-        delete sidebarMenu.dataset.previousPointerEvents;
-        delete sidebarMenu.dataset.previousPointerEventsSet;
-      } catch {}
+      restoreMenuHoverState();
     }, duration);
 
     return true;
@@ -1578,11 +1614,13 @@ export const SidebarUI = (() => {
         ? opts.generation
         : bindGeneration;
 
+    const preferredRoute =
+      resolvePreferredRouteFromOptions(opts);
+
     const route =
-      normalizeRoutePath(
-        resolvePreferredRouteFromOptions(opts) ||
-          ""
-      );
+      preferredRoute
+        ? normalizeRoutePath(preferredRoute)
+        : "";
 
     clearVisualSyncTimer();
 
@@ -1613,9 +1651,12 @@ export const SidebarUI = (() => {
 
         refreshSidebarDomRefs();
 
+        const resolvedRoute =
+          route || getCurrentRoutePath();
+
         const activeItem =
           syncActiveRouteMarkers(
-            route,
+            resolvedRoute,
             {
               reason,
             }
@@ -1624,8 +1665,8 @@ export const SidebarUI = (() => {
         scheduleActiveMenuIndicator(AppCore, {
           ...opts,
           reason,
-          route,
-          publicPath: route,
+          route: resolvedRoute,
+          publicPath: resolvedRoute,
           activeItem,
           delayMs: 0,
           reveal: opts.reveal !== false,
@@ -1993,6 +2034,12 @@ export const SidebarUI = (() => {
 
         h:
           elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-h") || "",
+
+        pointerEvents:
+          elements.sidebarMenu?.style?.pointerEvents || "",
+
+        visualSyncing:
+          elements.sidebarMenu?.dataset?.visualSyncing || "",
       },
     };
   }
@@ -2086,7 +2133,9 @@ export const SidebarUI = (() => {
   function cleanupBoundEvents() {
     cleanupFallbackDomEvents();
     clearVisualSyncTimer();
-    clearHoverFlushTimer();
+    clearHoverFlushTimer({
+      restore: true,
+    });
 
     /*
       Importante:
@@ -2282,7 +2331,14 @@ export const SidebarUI = (() => {
       return false;
     }
 
-    preventDefault(event);
+    /*
+      Clave:
+      Marcamos y cortamos ANTES del await.
+      Si esperamos a navigateTo(), otros listeners globales pueden capturar
+      el mismo click y provocar doble navegación / carrera.
+    */
+    markSidebarEventHandled(event, "navigation:pre");
+    preventAndStop(event);
 
     closeDropdown();
 
@@ -2551,9 +2607,7 @@ export const SidebarUI = (() => {
       */
       markSidebarEventHandled(event, "direct-user-toggle");
 
-      preventDefault(event);
-      stopPropagation(event);
-      stopImmediatePropagation(event);
+      preventAndStop(event);
 
       refreshSidebarDomRefs();
 
@@ -2586,9 +2640,7 @@ export const SidebarUI = (() => {
 
       markSidebarEventHandled(event, "direct-user-toggle-keydown");
 
-      preventDefault(event);
-      stopPropagation(event);
-      stopImmediatePropagation(event);
+      preventAndStop(event);
 
       if (event.key === "Escape") {
         closeDropdown();
@@ -2703,8 +2755,7 @@ export const SidebarUI = (() => {
       if (isToggleSidebarElement(actionElement)) {
         markSidebarEventHandled(event, "fallback-toggle-sidebar");
 
-        preventDefault(event);
-        stopPropagation(event);
+        preventAndStop(event);
 
         toggleSidebar();
 
@@ -2720,8 +2771,7 @@ export const SidebarUI = (() => {
       if (isUserDropdownElement(actionElement)) {
         markSidebarEventHandled(event, "fallback-toggle-dropdown");
 
-        preventDefault(event);
-        stopPropagation(event);
+        preventAndStop(event);
 
         toggleDropdown();
 
@@ -2738,8 +2788,7 @@ export const SidebarUI = (() => {
       if (isLogoutElement(actionElement)) {
         markSidebarEventHandled(event, "fallback-logout");
 
-        preventDefault(event);
-        stopPropagation(event);
+        preventAndStop(event);
 
         await handleLogout();
 
@@ -2763,8 +2812,6 @@ export const SidebarUI = (() => {
           );
 
         if (handled) {
-          markSidebarEventHandled(event, "fallback-navigation");
-
           safeEmit("sidebar:fallback:action", {
             source: "SidebarUI",
             action: defaultWasPrevented
@@ -3094,7 +3141,7 @@ export const SidebarUI = (() => {
     renderUser();
     applyRoleVisibility();
 
-    syncRouteAndIndicator(`refresh:${reason}`, {
+    syncRouteAndIndicator(`refresh:${safeText(reason, "refresh")}`, {
       delayMs: VISUAL_SYNC_DEFAULT_DELAY,
       force: true,
     });
@@ -3108,12 +3155,18 @@ export const SidebarUI = (() => {
     return api;
   }
 
-  function repair(reason = "repair") {
+  function repair(reason = "repair", options = {}) {
+    const opts =
+      safeObject(options);
+
+    const cleanReason =
+      safeText(reason, "repair");
+
     const mounted = mountAndRefresh();
 
     if (!mounted) {
       safeWarn("No se pudo reparar sidebar: shell ausente.", {
-        reason,
+        reason: cleanReason,
       });
 
       return api;
@@ -3125,18 +3178,23 @@ export const SidebarUI = (() => {
       sanitizeFooterTooltipState(AppCore);
     } catch {}
 
-    repairSidebarState(`repair:${reason}`);
+    repairSidebarState(`repair:${cleanReason}`);
     renderUser();
     applyRoleVisibility();
 
     /*
       Repair no debe rebindeaer siempre.
       Si ya hay eventos vivos, solo resincroniza visualmente.
+      Solo rebind() o repair(..., { rebind:true }) fuerzan limpieza/rebind.
     */
-    if (!eventsBound) {
-      bindEvents(reason);
+    if (opts.rebind === true) {
+      bindEvents(cleanReason, {
+        force: true,
+      });
+    } else if (!eventsBound) {
+      bindEvents(cleanReason);
     } else {
-      scheduleSidebarVisualSync(`repair:${reason}:events-already-bound`, {
+      scheduleSidebarVisualSync(`repair:${cleanReason}:events-already-bound`, {
         delayMs: 48,
         force: true,
         flushHover: true,
@@ -3145,13 +3203,13 @@ export const SidebarUI = (() => {
 
     initialized = true;
 
-    syncRouteAndIndicator(`repair:${reason}`, {
+    syncRouteAndIndicator(`repair:${cleanReason}`, {
       delayMs: 32,
       force: true,
     });
 
     afterPaint(() => {
-      syncRouteAndIndicator(`repair:${reason}:after-paint`, {
+      syncRouteAndIndicator(`repair:${cleanReason}:after-paint`, {
         delayMs: 0,
         force: true,
       });
@@ -3159,7 +3217,7 @@ export const SidebarUI = (() => {
 
     safeEmit("sidebar:repaired", {
       source: "SidebarUI",
-      reason,
+      reason: cleanReason,
       snapshot: getSidebarSnapshot(),
       isAdmin: isAdmin(),
     });
@@ -3254,9 +3312,11 @@ export const SidebarUI = (() => {
     applyRoleVisibility();
     closeDropdown();
 
-    try {
-      AppCore?.syncUserUI?.();
-    } catch {}
+    /*
+      No llamamos AppCore.syncUserUI() aquí.
+      App UI ya coordina la sincronización global.
+      Si se llama desde aquí, puede reentrar en SidebarUI durante init.
+    */
 
     initialized = true;
 
@@ -3300,6 +3360,8 @@ export const SidebarUI = (() => {
     bindingEvents = false;
     lastBindAt = 0;
     bindGeneration += 1;
+
+    restoreMenuHoverState();
 
     safeEmit("sidebar:destroyed", {
       source: "SidebarUI",
@@ -3440,6 +3502,9 @@ export const SidebarUI = (() => {
       visualSyncing:
         sidebarMenu?.dataset?.visualSyncing || "",
 
+      pointerEvents:
+        sidebarMenu?.style?.pointerEvents || "",
+
       variables: {
         x:
           sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
@@ -3537,6 +3602,9 @@ export const SidebarUI = (() => {
 
     flushHover:
       flushMenuHoverState,
+
+    restoreHover:
+      restoreMenuHoverState,
 
     handleLogout,
 

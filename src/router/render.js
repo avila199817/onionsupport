@@ -2,6 +2,8 @@
    Onion SPA - Router Render
    Archivo: src/router/render.js
 
+   FINAL EXTREME SYSTEM · RENDER HOST ISOLATED · RACE SAFE · 10/10
+
    RESPONSABILIDADES:
    - renderizar vistas internas del router
    - construir payloads de navegación
@@ -11,13 +13,16 @@
    - soportar route.render async
    - reparar shell tras login / restore / navegación privada
    - evitar que auth-screen deje el panel debajo del sidebar
+   - aislar cada render en un host propio para evitar carreras async
+   - impedir que renders antiguos reparen shell o pinten errores tardíos
+   - exponer contexto con renderId / signal / isStale / renderRoot
 
    HARDENING EXTREMO:
    - guards browser / DOM total safe
-   - evita doble router:rendered en success
+   - evita doble router:rendered en success / 404 / forbidden / login
    - evita doble sync route/publicPath en success
    - payloads estables y enriquecidos
-   - paso explícito de viewContainer al render
+   - paso explícito de viewContainer y renderRoot al render
    - compatibilidad función / objeto / adapters
    - return explícito de view instance
    - fallbacks seguros si falta render
@@ -35,18 +40,25 @@
    - métricas internas por flujo
    - cero throws accidentales
 
+   FIX REAL RACE CONDITIONS:
+   - cada navegación success crea un render host aislado
+   - route.render() recibe renderRoot en vez de tocar el root global
+   - async render antiguo queda en host desconectado si llega tarde
+   - async error antiguo se ignora
+   - reparación async solo corre si renderId sigue activo
+   - AbortController opcional para vistas que soporten ctx.signal
+
    FIX UX / PERFORMANCE:
-   - el flujo success ya no bloquea la navegación esperando
-     a que route.render() termine si la ruta no pide modo blocking.
-   - pinta transición inmediata.
-   - deja que la vista cargue datos en segundo plano.
-   - evita sensación de sidebar congelado.
-   - repara el shell antes y después del render.
-   - evita panel privado desplazado bajo sidebar tras login.
+   - success no bloquea navegación salvo route.awaitRender/renderMode=blocking
+   - pinta transición inmediata
+   - deja que la vista cargue datos en segundo plano
+   - evita sensación de sidebar congelado
+   - repara shell antes y después del render
+   - evita panel privado desplazado bajo sidebar tras login
 
    FIX ROUTER LOGIN:
-   - renderLoginRedirect respeta args.redirectTo ya construido por guards.
-   - history se actualiza en redirect a login cuando updateHistory está disponible.
+   - renderLoginRedirect respeta args.redirectTo ya construido por guards
+   - history se actualiza en redirect a login cuando updateHistory está disponible
 ========================================================= */
 
 import {
@@ -71,6 +83,10 @@ import {
 
 const ACTIVATION_PATH = "/activate-account";
 const RESET_CONFIRM_PATH = "/reset-password/confirm";
+
+const RENDER_HOST_ATTR = "data-router-view-host";
+const RENDER_HOST_CLASS = "router-view-host";
+const RENDER_FALLBACK_CLASS = "router-fallback-view";
 
 const ACTIVATION_TOKEN_PARAM_NAMES = Object.freeze([
   "token",
@@ -149,6 +165,34 @@ function isPromiseLike(value) {
       ) &&
       typeof value.then === "function"
   );
+}
+
+function isNode(value) {
+  if (!value) return false;
+
+  try {
+    return typeof Node !== "undefined" && value instanceof Node;
+  } catch {
+    return Boolean(
+      value &&
+        typeof value === "object" &&
+        typeof value.nodeType === "number"
+    );
+  }
+}
+
+function isElement(value) {
+  if (!value) return false;
+
+  try {
+    return typeof Element !== "undefined" && value instanceof Element;
+  } catch {
+    return Boolean(
+      value &&
+        typeof value === "object" &&
+        typeof value.querySelector === "function"
+    );
+  }
 }
 
 function nowMs() {
@@ -258,49 +302,122 @@ function afterPaint(callback) {
   } catch {}
 }
 
+function microtask(callback) {
+  if (!isFunction(callback)) {
+    return;
+  }
+
+  try {
+    if (typeof queueMicrotask === "function") {
+      queueMicrotask(() => {
+        try {
+          callback();
+        } catch {}
+      });
+
+      return;
+    }
+  } catch {}
+
+  try {
+    Promise.resolve().then(() => {
+      try {
+        callback();
+      } catch {}
+    });
+
+    return;
+  } catch {}
+
+  try {
+    callback();
+  } catch {}
+}
+
 /* =========================================================
    SAFE OPS
 ========================================================= */
 
 function safeEmit(AppCore, eventName, payload = {}) {
+  const name = safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  let emitted = false;
+
   try {
     AppCore?.events?.emit?.(
-      eventName,
+      name,
       payload
     );
+
+    emitted = true;
   } catch {}
 
   try {
     window?.AppCore?.events?.emit?.(
-      eventName,
+      name,
       payload
     );
+
+    emitted = true;
   } catch {}
+
+  try {
+    if (isBrowser()) {
+      window.dispatchEvent(
+        new CustomEvent(name, {
+          detail: payload,
+        })
+      );
+
+      emitted = true;
+    }
+  } catch {}
+
+  return emitted;
 }
 
 function safeWarn(AppCore, ...args) {
   try {
-    AppCore?.utils?.warn?.(...args);
+    AppCore?.utils?.warn?.(
+      "[RouterRender]",
+      ...args
+    );
   } catch {}
 
   try {
-    console.warn(...args);
+    console.warn(
+      "[RouterRender]",
+      ...args
+    );
   } catch {}
 }
 
 function safeError(AppCore, ...args) {
   try {
-    AppCore?.utils?.error?.(...args);
+    AppCore?.utils?.error?.(
+      "[RouterRender]",
+      ...args
+    );
   } catch {}
 
   try {
-    console.error(...args);
+    console.error(
+      "[RouterRender]",
+      ...args
+    );
   } catch {}
 }
 
 function safeLog(AppCore, ...args) {
   try {
-    AppCore?.utils?.log?.(...args);
+    AppCore?.utils?.log?.(
+      "[RouterRender]",
+      ...args
+    );
   } catch {}
 }
 
@@ -362,7 +479,7 @@ function emitFlowMetric(AppCore, flow = "unknown", payload = {}) {
 }
 
 /* =========================================================
-   VIEW CONTAINER
+   VIEW CONTAINER / HOST ISOLATION
 ========================================================= */
 
 export function getViewContainer(AppCore) {
@@ -382,6 +499,8 @@ export function getViewContainer(AppCore) {
   const el =
     document.getElementById("view-container") ||
     document.querySelector("#view-container") ||
+    document.querySelector("[data-view-root]") ||
+    document.querySelector("[data-view-container='true']") ||
     null;
 
   try {
@@ -391,6 +510,290 @@ export function getViewContainer(AppCore) {
   } catch {}
 
   return el;
+}
+
+function setDataset(el, key, value) {
+  if (!el || !key) {
+    return false;
+  }
+
+  try {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ""
+    ) {
+      delete el.dataset[key];
+      return true;
+    }
+
+    el.dataset[key] = String(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createAbortControllerSafe() {
+  try {
+    if (typeof AbortController === "function") {
+      return new AbortController();
+    }
+  } catch {}
+
+  return null;
+}
+
+let successRenderSequence = 0;
+let activeRenderController = null;
+
+function abortPreviousSuccessRender(reason = "new-render") {
+  try {
+    activeRenderController?.abort?.(reason);
+  } catch {}
+
+  activeRenderController = null;
+}
+
+function beginSuccessRender() {
+  abortPreviousSuccessRender("superseded");
+
+  const renderId = ++successRenderSequence;
+  const controller = createAbortControllerSafe();
+
+  activeRenderController = controller;
+
+  return {
+    renderId,
+    controller,
+    signal: controller?.signal || null,
+  };
+}
+
+function isCurrentRender(AppCore, renderId, canonicalPath = "") {
+  if (renderId !== successRenderSequence) {
+    return false;
+  }
+
+  const view = getViewContainer(AppCore);
+
+  if (!view) {
+    return false;
+  }
+
+  const viewRenderId =
+    safeText(view.dataset?.routerRenderId, "");
+
+  if (
+    viewRenderId &&
+    viewRenderId !== String(renderId)
+  ) {
+    return false;
+  }
+
+  const expectedCanonical =
+    safeText(canonicalPath, "");
+
+  if (expectedCanonical) {
+    const viewCanonical =
+      safeText(view.dataset?.routerCanonicalPath, "");
+
+    if (
+      viewCanonical &&
+      viewCanonical !== expectedCanonical
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function markViewContainer({
+  AppCore,
+  view,
+  renderId,
+  route = null,
+  canonicalPath = "/",
+  publicPath = "/",
+  status = "pending",
+} = {}) {
+  if (!view) {
+    return false;
+  }
+
+  setDataset(view, "routerRenderId", renderId);
+  setDataset(view, "routerStatus", status);
+  setDataset(view, "routerCanonicalPath", canonicalPath);
+  setDataset(view, "routerPublicPath", publicPath);
+  setDataset(view, "routerRoute", route?.path || canonicalPath || "/");
+
+  try {
+    view.classList.add("router-view-root");
+    view.classList.toggle("is-rendering", status === "pending");
+    view.classList.toggle("is-ready", status === "ready");
+    view.classList.toggle("has-error", status === "error");
+  } catch {}
+
+  try {
+    if (AppCore?.dom) {
+      AppCore.dom.viewContainer = view;
+    }
+  } catch {}
+
+  return true;
+}
+
+function markViewReady(AppCore, renderId, canonicalPath = "/") {
+  if (!isCurrentRender(AppCore, renderId, canonicalPath)) {
+    return false;
+  }
+
+  const view = getViewContainer(AppCore);
+
+  if (!view) {
+    return false;
+  }
+
+  setDataset(view, "routerStatus", "ready");
+
+  try {
+    view.classList.remove("is-rendering", "has-error");
+    view.classList.add("is-ready");
+  } catch {}
+
+  return true;
+}
+
+function markViewError(AppCore, renderId, canonicalPath = "/") {
+  if (!isCurrentRender(AppCore, renderId, canonicalPath)) {
+    return false;
+  }
+
+  const view = getViewContainer(AppCore);
+
+  if (!view) {
+    return false;
+  }
+
+  setDataset(view, "routerStatus", "error");
+
+  try {
+    view.classList.remove("is-rendering", "is-ready");
+    view.classList.add("has-error");
+  } catch {}
+
+  return true;
+}
+
+function prepareRenderHost({
+  AppCore,
+  route = null,
+  renderId,
+  canonicalPath = "/",
+  publicPath = "/",
+  mode = "success",
+} = {}) {
+  const view = getViewContainer(AppCore);
+
+  if (!view) {
+    return {
+      view: null,
+      host: null,
+    };
+  }
+
+  markViewContainer({
+    AppCore,
+    view,
+    renderId,
+    route,
+    canonicalPath,
+    publicPath,
+    status: "pending",
+  });
+
+  const host = document.createElement("div");
+
+  host.className = RENDER_HOST_CLASS;
+  host.setAttribute(RENDER_HOST_ATTR, "true");
+  host.setAttribute("data-router-render-id", String(renderId));
+  host.setAttribute("data-router-mode", mode);
+  host.setAttribute("data-router-route", route?.path || canonicalPath || "/");
+  host.setAttribute("data-router-canonical-path", canonicalPath);
+  host.setAttribute("data-router-public-path", publicPath);
+
+  try {
+    host.style.minInlineSize = "0";
+    host.style.inlineSize = "100%";
+  } catch {}
+
+  try {
+    view.replaceChildren(host);
+  } catch {
+    try {
+      view.innerHTML = "";
+      view.appendChild(host);
+    } catch {}
+  }
+
+  try {
+    if (AppCore?.dom) {
+      AppCore.dom.viewContainer = view;
+      AppCore.dom.routerViewHost = host;
+      AppCore.dom.viewHost = host;
+    }
+  } catch {}
+
+  return {
+    view,
+    host,
+  };
+}
+
+function getCurrentRenderHost(AppCore) {
+  const view = getViewContainer(AppCore);
+
+  if (!view) {
+    return null;
+  }
+
+  try {
+    return view.querySelector(`[${RENDER_HOST_ATTR}="true"]`);
+  } catch {
+    return null;
+  }
+}
+
+function adoptRenderedResult(target, result) {
+  if (!target || !result) {
+    return result || null;
+  }
+
+  if (!isNode(result)) {
+    return result;
+  }
+
+  if (result === target) {
+    return result;
+  }
+
+  try {
+    if (target.contains(result)) {
+      return result;
+    }
+  } catch {}
+
+  try {
+    target.replaceChildren(result);
+  } catch {
+    try {
+      target.innerHTML = "";
+      target.appendChild(result);
+    } catch {}
+  }
+
+  return result;
 }
 
 /* =========================================================
@@ -944,11 +1347,16 @@ function getShellElements(AppCore) {
   const shell =
     document.getElementById("app-shell") ||
     document.querySelector("[data-app-shell='true']") ||
+    document.querySelector("[data-app-shell]") ||
+    document.querySelector(".app-shell") ||
+    document.querySelector(".layout") ||
     null;
 
   const main =
     document.getElementById("main-content") ||
     document.querySelector(".main-content") ||
+    document.querySelector("main[role='main']") ||
+    document.querySelector("main") ||
     null;
 
   const appContent =
@@ -962,11 +1370,13 @@ function getShellElements(AppCore) {
   const sidebar =
     AppCore?.dom?.sidebar ||
     document.querySelector(".sidebar") ||
+    document.querySelector("[data-sidebar-root]") ||
     null;
 
   const topbar =
     AppCore?.dom?.topbar ||
     document.querySelector(".topbar") ||
+    document.querySelector("[data-topbar-root]") ||
     null;
 
   const tablehead =
@@ -977,13 +1387,29 @@ function getShellElements(AppCore) {
   const tableheadContainer =
     AppCore?.dom?.tableheadContainer ||
     document.getElementById("tablehead-container") ||
+    document.querySelector("[data-tablehead-container]") ||
     null;
 
   const loader =
     AppCore?.dom?.loader ||
     document.getElementById("app-loader") ||
     document.querySelector(".app-loader") ||
+    document.querySelector("[data-app-loader='true']") ||
     null;
+
+  try {
+    if (AppCore?.dom) {
+      AppCore.dom.appShell = shell || AppCore.dom.appShell || null;
+      AppCore.dom.mainContent = main || AppCore.dom.mainContent || null;
+      AppCore.dom.appContent = appContent || AppCore.dom.appContent || null;
+      AppCore.dom.viewContainer = view || AppCore.dom.viewContainer || null;
+      AppCore.dom.sidebar = sidebar || AppCore.dom.sidebar || null;
+      AppCore.dom.topbar = topbar || AppCore.dom.topbar || null;
+      AppCore.dom.tableheadContainer =
+        tableheadContainer || AppCore.dom.tableheadContainer || null;
+      AppCore.dom.loader = loader || AppCore.dom.loader || null;
+    }
+  } catch {}
 
   return {
     html,
@@ -1030,25 +1456,6 @@ function setElementBusy(el, busy = false) {
   } catch {}
 }
 
-function setDataset(el, key, value) {
-  if (!el) {
-    return;
-  }
-
-  try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
-      delete el.dataset[key];
-      return;
-    }
-
-    el.dataset[key] = String(value);
-  } catch {}
-}
-
 function routeRequestsShellHidden(AppCore, route = null, canonicalPath = "/") {
   const canonical =
     normalizeCanonicalPath(
@@ -1064,6 +1471,7 @@ function routeRequestsShellHidden(AppCore, route = null, canonicalPath = "/") {
     route?.layout === "public" ||
     route?.meta?.shell === false ||
     route?.meta?.hideShell === true ||
+    route?.meta?.showShell === false ||
     route?.meta?.layout === "auth" ||
     route?.meta?.layout === "public"
   ) {
@@ -1104,12 +1512,13 @@ function setCoreShellVisible(AppCore, visible = true) {
   try {
     AppCore?.setState?.({
       shellVisible: Boolean(visible),
+      routeShellHidden: !Boolean(visible),
     });
   } catch {
     try {
       if (AppCore?.state) {
-        AppCore.state.shellVisible =
-          Boolean(visible);
+        AppCore.state.shellVisible = Boolean(visible);
+        AppCore.state.routeShellHidden = !Boolean(visible);
       }
     } catch {}
   }
@@ -1132,6 +1541,7 @@ function hideLoaderSafe(AppCore, reason = "router-render") {
   try {
     loader.classList.remove(
       "is-visible",
+      "is-leaving",
       "app-loader--visible"
     );
 
@@ -1246,18 +1656,52 @@ function applyRenderShellRepair({
     body.classList.add("app-ready");
   } catch {}
 
+  setDataset(
+    html,
+    "routeMode",
+    shellHidden ? "auth" : "app"
+  );
+
+  setDataset(
+    body,
+    "routeMode",
+    shellHidden ? "auth" : "app"
+  );
+
   if (shellHidden) {
     try {
-      body.classList.add("route-shell-hidden");
-      body.classList.remove("route-shell-visible");
+      body.classList.add(
+        "route-shell-hidden",
+        "route-auth"
+      );
+
+      body.classList.remove(
+        "route-shell-visible",
+        "route-app",
+        "login-no-scroll"
+      );
+
+      html.classList.add(
+        "route-shell-hidden",
+        "route-auth"
+      );
+
+      html.classList.remove(
+        "route-shell-visible",
+        "route-app"
+      );
 
       if (useAuthScreen) {
         body.classList.add("auth-screen");
+      } else {
+        body.classList.remove("auth-screen");
       }
     } catch {}
 
     setDataset(body, "shell", "hidden");
     setDataset(html, "shell", "hidden");
+    setDataset(shell, "shell", "hidden");
+    setDataset(shell, "routeMode", "auth");
 
     setCoreShellVisible(AppCore, false);
 
@@ -1279,14 +1723,30 @@ function applyRenderShellRepair({
       body.classList.remove(
         "auth-screen",
         "login-no-scroll",
+        "route-auth",
         "route-shell-hidden"
       );
 
-      body.classList.add("route-shell-visible");
+      body.classList.add(
+        "route-app",
+        "route-shell-visible"
+      );
+
+      html.classList.remove(
+        "route-auth",
+        "route-shell-hidden"
+      );
+
+      html.classList.add(
+        "route-app",
+        "route-shell-visible"
+      );
     } catch {}
 
     setDataset(body, "shell", "visible");
     setDataset(html, "shell", "visible");
+    setDataset(shell, "shell", "visible");
+    setDataset(shell, "routeMode", "app");
 
     setCoreShellVisible(AppCore, true);
 
@@ -1294,7 +1754,6 @@ function applyRenderShellRepair({
     setElementHidden(main, false);
     setElementHidden(appContent, false);
     setElementHidden(view, false);
-
     setElementHidden(sidebar, false);
     setElementHidden(topbar, false);
 
@@ -1323,6 +1782,16 @@ function applyRenderShellRepair({
       );
 
       main?.setAttribute?.(
+        "aria-hidden",
+        "false"
+      );
+
+      appContent?.setAttribute?.(
+        "aria-hidden",
+        "false"
+      );
+
+      view?.setAttribute?.(
         "aria-hidden",
         "false"
       );
@@ -1388,6 +1857,7 @@ function resolveUsernameForPayload(
     getCurrentResolvedUsername(AppCore) ||
     getCurrentUsername(AppCore) ||
     AppCore?.state?.user?.username ||
+    AppCore?.state?.user?.slug ||
     null
   );
 }
@@ -1444,6 +1914,62 @@ function resolvePublicPathForRoute({
   };
 }
 
+function resolveRouteRenderer(route = null) {
+  if (isFunction(route?.render)) {
+    return {
+      source: "route.render",
+      render: route.render,
+    };
+  }
+
+  if (isFunction(route?.view)) {
+    return {
+      source: "route.view",
+      render: route.view,
+    };
+  }
+
+  if (isFunction(route?.component)) {
+    return {
+      source: "route.component",
+      render: route.component,
+    };
+  }
+
+  if (isFunction(route?.handler)) {
+    return {
+      source: "route.handler",
+      render: route.handler,
+    };
+  }
+
+  if (isFunction(route?.component?.render)) {
+    return {
+      source: "route.component.render",
+      render: route.component.render.bind(route.component),
+    };
+  }
+
+  if (isFunction(route?.view?.render)) {
+    return {
+      source: "route.view.render",
+      render: route.view.render.bind(route.view),
+    };
+  }
+
+  if (isFunction(route?.adapter?.render)) {
+    return {
+      source: "route.adapter.render",
+      render: route.adapter.render.bind(route.adapter),
+    };
+  }
+
+  return {
+    source: "",
+    render: null,
+  };
+}
+
 /* =========================================================
    PAYLOADS
 ========================================================= */
@@ -1459,6 +1985,7 @@ export function buildRenderPayload({
   forbidden = false,
   redirectedFrom = null,
   options = null,
+  renderId = null,
 } = {}) {
   return {
     path,
@@ -1471,6 +1998,7 @@ export function buildRenderPayload({
     forbidden: Boolean(forbidden),
     redirectedFrom,
     options,
+    renderId,
     ts: Date.now(),
   };
 }
@@ -1580,6 +2108,10 @@ export function buildRouteRenderContext({
   redirectedFrom = null,
   found = true,
   forbidden = false,
+  renderId = null,
+  signal = null,
+  renderRoot = null,
+  viewContainer = null,
 } = {}) {
   const finalPublicPath = preservePublicContextForSameRoute(
     AppCore,
@@ -1601,6 +2133,15 @@ export function buildRouteRenderContext({
     finalPublicPath
   );
 
+  const rootView =
+    viewContainer ||
+    getViewContainer(AppCore);
+
+  const host =
+    renderRoot ||
+    getCurrentRenderHost(AppCore) ||
+    rootView;
+
   return Object.freeze({
     AppCore,
     route,
@@ -1618,7 +2159,22 @@ export function buildRouteRenderContext({
     found: Boolean(found),
     forbidden: Boolean(forbidden),
 
-    viewContainer: getViewContainer(AppCore),
+    renderId,
+    signal,
+
+    viewContainer: rootView,
+    renderRoot: host,
+    renderHost: host,
+
+    isStale: () =>
+      renderId
+        ? !isCurrentRender(AppCore, renderId, finalCanonicalPath)
+        : false,
+
+    isCurrent: () =>
+      renderId
+        ? isCurrentRender(AppCore, renderId, finalCanonicalPath)
+        : true,
   });
 }
 
@@ -1629,37 +2185,51 @@ export function buildRouteRenderContext({
 function runRouteRender(
   AppCore,
   route,
-  viewContainer,
+  renderTarget,
   context
 ) {
-  if (!viewContainer) {
+  if (!renderTarget) {
     safeWarn(
       AppCore,
-      "[Router] viewContainer ausente."
+      "viewContainer/renderRoot ausente."
     );
+
     return null;
   }
 
-  if (!isFunction(route?.render)) {
+  const renderer =
+    resolveRouteRenderer(route);
+
+  if (!isFunction(renderer.render)) {
     safeWarn(
       AppCore,
-      "[Router] ruta sin render():",
+      "ruta sin render compatible:",
       route?.path
     );
+
     return null;
   }
 
   try {
-    return route.render(
-      viewContainer,
-      context
+    const result = renderer.render(
+      renderTarget,
+      {
+        ...context,
+        rendererSource: renderer.source,
+      }
     );
+
+    return result;
   } catch (error) {
     return Promise.reject(error);
   }
 }
 
-function createDeferredViewInstance() {
+function createDeferredViewInstance({
+  AppCore,
+  renderId,
+  canonicalPath,
+} = {}) {
   let current = null;
   let destroyed = false;
 
@@ -1691,6 +2261,13 @@ function createDeferredViewInstance() {
       }
 
       current = null;
+
+      if (
+        renderId &&
+        isCurrentRender(AppCore, renderId, canonicalPath)
+      ) {
+        abortPreviousSuccessRender("view-destroyed");
+      }
     },
 
     get current() {
@@ -1703,8 +2280,12 @@ function createDeferredViewInstance() {
    INTERNAL VIEWS
 ========================================================= */
 
+function getInternalViewTarget(AppCore) {
+  return getViewContainer(AppCore);
+}
+
 export function renderGenericView(AppCore, route) {
-  const view = getViewContainer(AppCore);
+  const view = getInternalViewTarget(AppCore);
 
   if (!view) {
     return null;
@@ -1715,7 +2296,7 @@ export function renderGenericView(AppCore, route) {
   const username = getCurrentResolvedUsername(AppCore);
 
   view.innerHTML = `
-<section class="content-wrapper">
+<section class="content-wrapper ${RENDER_FALLBACK_CLASS}">
   <div class="panel-block" style="padding:24px;">
     <div style="display:grid;gap:14px;">
       <h2 style="margin:0;">${escapeHtml(AppCore, route?.title || "Vista")}</h2>
@@ -1733,7 +2314,7 @@ export function renderGenericView(AppCore, route) {
 }
 
 export function renderForbiddenView(AppCore, getRoute) {
-  const view = getViewContainer(AppCore);
+  const view = getInternalViewTarget(AppCore);
 
   if (!view) {
     return null;
@@ -1745,7 +2326,7 @@ export function renderForbiddenView(AppCore, getRoute) {
   );
 
   view.innerHTML = `
-<section class="content-wrapper">
+<section class="content-wrapper ${RENDER_FALLBACK_CLASS}">
   <div class="panel-block" style="padding:24px;">
     <h2 style="margin:0 0 12px 0;">Acceso denegado</h2>
     <p style="margin:0 0 14px 0;color:var(--text-dim);">
@@ -1759,7 +2340,7 @@ export function renderForbiddenView(AppCore, getRoute) {
 }
 
 export function renderNotFoundView(AppCore, requestedPath, getRoute) {
-  const view = getViewContainer(AppCore);
+  const view = getInternalViewTarget(AppCore);
 
   if (!view) {
     return null;
@@ -1771,7 +2352,7 @@ export function renderNotFoundView(AppCore, requestedPath, getRoute) {
   );
 
   view.innerHTML = `
-<section class="content-wrapper">
+<section class="content-wrapper ${RENDER_FALLBACK_CLASS}">
   <div class="panel-block" style="padding:24px;">
     <h2 style="margin:0 0 12px 0;">404</h2>
     <p style="margin:0 0 14px 0;color:var(--text-dim);">
@@ -1786,7 +2367,7 @@ export function renderNotFoundView(AppCore, requestedPath, getRoute) {
 }
 
 export function renderRuntimeErrorView(AppCore, error, getRoute) {
-  const view = getViewContainer(AppCore);
+  const view = getInternalViewTarget(AppCore);
 
   if (!view) {
     return null;
@@ -1798,7 +2379,7 @@ export function renderRuntimeErrorView(AppCore, error, getRoute) {
   );
 
   view.innerHTML = `
-<section class="content-wrapper">
+<section class="content-wrapper ${RENDER_FALLBACK_CLASS}">
   <div class="panel-block" style="padding:24px;">
     <h2 style="margin:0 0 12px 0;">Error de navegación</h2>
     <p style="margin:0 0 14px 0;color:var(--text-dim);">
@@ -1814,8 +2395,6 @@ export function renderRuntimeErrorView(AppCore, error, getRoute) {
 /* =========================================================
    SUCCESS RENDER CONTROL
 ========================================================= */
-
-let successRenderSequence = 0;
 
 function shouldAwaitRouteRender(
   AppCore,
@@ -1845,9 +2424,13 @@ function shouldAwaitRouteRender(
 
 function renderRouteTransitionView(
   AppCore,
-  route = null
+  route = null,
+  target = null
 ) {
-  const view = getViewContainer(AppCore);
+  const view =
+    target ||
+    getCurrentRenderHost(AppCore) ||
+    getViewContainer(AppCore);
 
   if (!view) {
     return null;
@@ -1913,17 +2496,11 @@ function handleAsyncRouteRenderFailure({
   getRoute,
   renderId,
 } = {}) {
-  if (renderId !== successRenderSequence) {
-    return;
-  }
-
-  const currentCanonical =
-    AppCore?.state?.route || canonicalPath || "/";
-
   if (
-    !sameCanonicalRoute(
+    renderId &&
+    !isCurrentRender(
       AppCore,
-      currentCanonical,
+      renderId,
       canonicalPath
     )
   ) {
@@ -1932,7 +2509,7 @@ function handleAsyncRouteRenderFailure({
 
   safeError(
     AppCore,
-    "[RouterRender] async route render error",
+    "async route render error",
     error
   );
 
@@ -1947,8 +2524,15 @@ function handleAsyncRouteRenderFailure({
       canonicalPath,
       publicPath,
       username: requestedUsername || null,
+      renderId,
       ts: Date.now(),
     }
+  );
+
+  markViewError(
+    AppCore,
+    renderId,
+    canonicalPath
   );
 
   renderRuntimeErrorView(
@@ -1983,8 +2567,10 @@ export async function renderRouteSuccess({
 } = {}) {
   const startedAt = nowMs();
 
-  const renderId =
-    ++successRenderSequence;
+  const {
+    renderId,
+    signal,
+  } = beginSuccessRender();
 
   const resolved = resolvePublicPathForRoute({
     AppCore,
@@ -2021,6 +2607,18 @@ export async function renderRouteSuccess({
       "Onion"
   );
 
+  const {
+    view,
+    host,
+  } = prepareRenderHost({
+    AppCore,
+    route,
+    renderId,
+    canonicalPath: resolved.canonicalPath,
+    publicPath: resolved.publicPath,
+    mode: "success",
+  });
+
   const ctx = buildRouteRenderContext({
     AppCore,
     route,
@@ -2028,6 +2626,10 @@ export async function renderRouteSuccess({
     canonicalPath: resolved.canonicalPath,
     requestedUsername: resolved.username,
     publicPath: resolved.publicPath,
+    renderId,
+    signal,
+    viewContainer: view,
+    renderRoot: host,
   });
 
   const shouldBlock =
@@ -2036,26 +2638,55 @@ export async function renderRouteSuccess({
       route
     );
 
-  let view = null;
+  let viewInstance = null;
 
-  if (isFunction(route?.render)) {
+  const renderer =
+    resolveRouteRenderer(route);
+
+  if (isFunction(renderer.render)) {
     const transitionView =
       shouldBlock
         ? null
         : renderRouteTransitionView(
             AppCore,
-            route
+            route,
+            host
           );
 
     const result = runRouteRender(
       AppCore,
       route,
-      ctx.viewContainer,
+      host || ctx.viewContainer,
       ctx
     );
 
     if (shouldBlock) {
-      view = await Promise.resolve(result);
+      viewInstance = await Promise.resolve(result);
+
+      if (
+        !isCurrentRender(
+          AppCore,
+          renderId,
+          resolved.canonicalPath
+        )
+      ) {
+        try {
+          viewInstance?.destroy?.();
+        } catch {}
+
+        return null;
+      }
+
+      adoptRenderedResult(
+        host || ctx.viewContainer,
+        viewInstance
+      );
+
+      markViewReady(
+        AppCore,
+        renderId,
+        resolved.canonicalPath
+      );
 
       applyRenderShellRepair({
         AppCore,
@@ -2067,11 +2698,40 @@ export async function renderRouteSuccess({
       });
     } else if (isPromiseLike(result)) {
       const deferredView =
-        createDeferredViewInstance();
+        createDeferredViewInstance({
+          AppCore,
+          renderId,
+          canonicalPath: resolved.canonicalPath,
+        });
 
       result
         .then((resolvedView) => {
+          if (
+            !isCurrentRender(
+              AppCore,
+              renderId,
+              resolved.canonicalPath
+            )
+          ) {
+            try {
+              resolvedView?.destroy?.();
+            } catch {}
+
+            return;
+          }
+
           deferredView.set(resolvedView);
+
+          adoptRenderedResult(
+            host || ctx.viewContainer,
+            resolvedView
+          );
+
+          markViewReady(
+            AppCore,
+            renderId,
+            resolved.canonicalPath
+          );
 
           applyRenderShellRepair({
             AppCore,
@@ -2083,6 +2743,16 @@ export async function renderRouteSuccess({
           });
 
           afterPaint(() => {
+            if (
+              !isCurrentRender(
+                AppCore,
+                renderId,
+                resolved.canonicalPath
+              )
+            ) {
+              return;
+            }
+
             applyRenderShellRepair({
               AppCore,
               route,
@@ -2120,26 +2790,65 @@ export async function renderRouteSuccess({
           });
         });
 
-      view =
+      viewInstance =
         deferredView ||
         transitionView ||
+        host ||
         ctx.viewContainer ||
         null;
 
-      applyRenderShellRepair({
-        AppCore,
-        route,
-        canonicalPath: resolved.canonicalPath,
-        publicPath: resolved.publicPath,
-        phase: "after-non-blocking-dispatch",
-        hideLoader: true,
+      microtask(() => {
+        if (
+          !isCurrentRender(
+            AppCore,
+            renderId,
+            resolved.canonicalPath
+          )
+        ) {
+          return;
+        }
+
+        applyRenderShellRepair({
+          AppCore,
+          route,
+          canonicalPath: resolved.canonicalPath,
+          publicPath: resolved.publicPath,
+          phase: "after-non-blocking-dispatch",
+          hideLoader: true,
+        });
       });
     } else {
-      view =
+      viewInstance =
         result ||
         transitionView ||
+        host ||
         ctx.viewContainer ||
         null;
+
+      if (
+        !isCurrentRender(
+          AppCore,
+          renderId,
+          resolved.canonicalPath
+        )
+      ) {
+        try {
+          viewInstance?.destroy?.();
+        } catch {}
+
+        return null;
+      }
+
+      adoptRenderedResult(
+        host || ctx.viewContainer,
+        viewInstance
+      );
+
+      markViewReady(
+        AppCore,
+        renderId,
+        resolved.canonicalPath
+      );
 
       applyRenderShellRepair({
         AppCore,
@@ -2151,9 +2860,15 @@ export async function renderRouteSuccess({
       });
     }
   } else {
-    view = renderGenericView(
+    viewInstance = renderGenericView(
       AppCore,
       route
+    );
+
+    markViewReady(
+      AppCore,
+      renderId,
+      resolved.canonicalPath
     );
 
     applyRenderShellRepair({
@@ -2171,6 +2886,16 @@ export async function renderRouteSuccess({
     cubre casos donde topbar/sidebar se montan tarde o AppCore.syncUserUI llega después.
   */
   afterPaint(() => {
+    if (
+      !isCurrentRender(
+        AppCore,
+        renderId,
+        resolved.canonicalPath
+      )
+    ) {
+      return;
+    }
+
     applyRenderShellRepair({
       AppCore,
       route,
@@ -2195,26 +2920,32 @@ export async function renderRouteSuccess({
       canonicalPath: resolved.canonicalPath,
       publicPath: resolved.publicPath,
       renderMode: shouldBlock ? "blocking" : "non-blocking",
+      rendererSource: renderer.source || null,
+      renderId,
       durationMs: Math.round(nowMs() - startedAt),
     }
   );
 
   safeLog(
     AppCore,
-    "[RouterRender] success",
+    "success",
     {
       route: route?.path || null,
       canonicalPath: resolved.canonicalPath,
       publicPath: resolved.publicPath,
       renderMode: shouldBlock ? "blocking" : "non-blocking",
+      rendererSource: renderer.source || null,
+      renderId,
     }
   );
 
-  return view || null;
+  return viewInstance || null;
 }
 
 export function renderRouteForbidden(args = {}) {
   const startedAt = nowMs();
+
+  abortPreviousSuccessRender("forbidden");
 
   safeSetShellMode(
     args.setShellMode,
@@ -2240,19 +2971,10 @@ export function renderRouteForbidden(args = {}) {
     hideLoader: true,
   });
 
-  emitRendered(
-    args.AppCore,
-    {
-      path: args.requestedPath,
-      requestedPath: args.requestedPath,
-      canonicalPath: args.canonicalPath,
-      publicPath: args.requestedPath,
-      username: args.requestedUsername || null,
-      found: true,
-      forbidden: true,
-      route: args.route || null,
-    }
-  );
+  /*
+    No emitimos router:rendered aquí.
+    src/router/index.js ya lo emite en flujo forbidden.
+  */
 
   emitFlowMetric(
     args.AppCore,
@@ -2267,6 +2989,8 @@ export function renderRouteForbidden(args = {}) {
 
 export function renderRouteNotFound(args = {}) {
   const startedAt = nowMs();
+
+  abortPreviousSuccessRender("not-found");
 
   safeSetShellMode(
     args.setShellMode,
@@ -2311,6 +3035,8 @@ export function renderRouteNotFound(args = {}) {
 
 export async function renderLoginRedirect(args = {}) {
   const startedAt = nowMs();
+
+  abortPreviousSuccessRender("login-redirect");
 
   const routeNames = getRouteNames(args.AppCore);
 
@@ -2378,26 +3104,49 @@ export async function renderLoginRedirect(args = {}) {
     hideLoader: false,
   });
 
-  if (isFunction(route?.render)) {
-    await Promise.resolve(
+  const renderId = ++successRenderSequence;
+
+  const {
+    view,
+    host,
+  } = prepareRenderHost({
+    AppCore: args.AppCore,
+    route,
+    renderId,
+    canonicalPath: routeNames.LOGIN,
+    publicPath,
+    mode: "login",
+  });
+
+  const ctx = buildRouteRenderContext({
+    AppCore: args.AppCore,
+    route,
+    requestedPath: publicPath,
+    canonicalPath: routeNames.LOGIN,
+    publicPath,
+    redirectedFrom:
+      args.publicPath ||
+      args.requestedPath ||
+      args.canonicalPath ||
+      null,
+    renderId,
+    viewContainer: view,
+    renderRoot: host,
+  });
+
+  const renderer =
+    resolveRouteRenderer(route);
+
+  if (isFunction(renderer.render)) {
+    const result =
       runRouteRender(
         args.AppCore,
         route,
-        getViewContainer(args.AppCore),
-        buildRouteRenderContext({
-          AppCore: args.AppCore,
-          route,
-          requestedPath: publicPath,
-          canonicalPath: routeNames.LOGIN,
-          publicPath,
-          redirectedFrom:
-            args.publicPath ||
-            args.requestedPath ||
-            args.canonicalPath ||
-            null,
-        })
-      )
-    );
+        host || getViewContainer(args.AppCore),
+        ctx
+      );
+
+    await Promise.resolve(result);
   }
 
   applyRenderShellRepair({
@@ -2409,27 +3158,22 @@ export async function renderLoginRedirect(args = {}) {
     hideLoader: true,
   });
 
-  emitRendered(
+  markViewReady(
     args.AppCore,
-    {
-      path: publicPath,
-      requestedPath: publicPath,
-      canonicalPath: routeNames.LOGIN,
-      publicPath,
-      found: true,
-      route,
-      redirectedFrom:
-        args.publicPath ||
-        args.requestedPath ||
-        args.canonicalPath ||
-        null,
-    }
+    renderId,
+    routeNames.LOGIN
   );
+
+  /*
+    No emitimos router:rendered aquí.
+    src/router/index.js lo emite después del redirect.
+  */
 
   emitFlowMetric(
     args.AppCore,
     "login-redirect",
     {
+      renderId,
       durationMs: Math.round(nowMs() - startedAt),
     }
   );
@@ -2439,6 +3183,8 @@ export async function renderLoginRedirect(args = {}) {
 
 export function renderRouteRuntimeError(args = {}) {
   const startedAt = nowMs();
+
+  abortPreviousSuccessRender("runtime-error");
 
   safeSetShellMode(
     args.setShellMode,
@@ -2465,19 +3211,10 @@ export function renderRouteRuntimeError(args = {}) {
     hideLoader: true,
   });
 
-  emitRendered(
-    args.AppCore,
-    {
-      path: args.requestedPath,
-      requestedPath: args.requestedPath,
-      canonicalPath: args.canonicalPath,
-      publicPath: args.requestedPath,
-      username: args.requestedUsername || null,
-      found: true,
-      forbidden: false,
-      route: args.route || null,
-    }
-  );
+  /*
+    No emitimos router:rendered aquí.
+    src/router/index.js emite router:render:error en el catch.
+  */
 
   emitFlowMetric(
     args.AppCore,
@@ -2490,7 +3227,7 @@ export function renderRouteRuntimeError(args = {}) {
 
   safeError(
     args.AppCore,
-    "[RouterRender] runtime-error",
+    "runtime-error",
     args.error
   );
 
@@ -2507,11 +3244,16 @@ export function getRenderSnapshot(AppCore) {
     html,
     shell,
     main,
+    appContent,
+    view,
     sidebar,
     topbar,
     tablehead,
     loader,
   } = getShellElements(AppCore);
+
+  const host =
+    getCurrentRenderHost(AppCore);
 
   return {
     browserPublicPath: getBrowserPublicPath(AppCore),
@@ -2541,6 +3283,9 @@ export function getRenderSnapshot(AppCore) {
 
     successRenderSequence,
 
+    activeRenderAborted:
+      Boolean(activeRenderController?.signal?.aborted),
+
     dom: {
       bodyClasses:
         body?.className || "",
@@ -2554,11 +3299,26 @@ export function getRenderSnapshot(AppCore) {
       htmlShell:
         html?.dataset?.shell || null,
 
+      bodyRouteMode:
+        body?.dataset?.routeMode || null,
+
+      htmlRouteMode:
+        html?.dataset?.routeMode || null,
+
       hasShell:
         Boolean(shell),
 
       hasMain:
         Boolean(main),
+
+      hasAppContent:
+        Boolean(appContent),
+
+      hasView:
+        Boolean(view),
+
+      hasRenderHost:
+        Boolean(host),
 
       hasSidebar:
         Boolean(sidebar),
@@ -2583,9 +3343,34 @@ export function getRenderSnapshot(AppCore) {
 
       loaderHidden:
         Boolean(loader?.hidden),
+
+      viewRenderId:
+        view?.dataset?.routerRenderId || null,
+
+      viewStatus:
+        view?.dataset?.routerStatus || null,
+
+      viewCanonicalPath:
+        view?.dataset?.routerCanonicalPath || null,
+
+      viewPublicPath:
+        view?.dataset?.routerPublicPath || null,
+
+      hostRenderId:
+        host?.getAttribute?.("data-router-render-id") || null,
+
+      hostCanonicalPath:
+        host?.getAttribute?.("data-router-canonical-path") || null,
+
+      hostPublicPath:
+        host?.getAttribute?.("data-router-public-path") || null,
     },
   };
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   getViewContainer,

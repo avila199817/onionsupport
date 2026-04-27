@@ -1,6 +1,6 @@
 /* =========================================================
    Onion SPA - Reactive Store (FULL PRO SAAS PANEL)
-   Archivo: src/store/store.js
+   Archivo: src/store/index.js
 
    Responsabilidades:
    - estado global reactivo
@@ -12,6 +12,16 @@
    - helpers de colecciones
    - prevención de notificaciones inútiles
    - init idempotente
+   - batch updates robustos
+   - diagnóstico runtime
+
+   HARDENING:
+   - no expone mutaciones accidentales por get(path)
+   - patch no depende de mergeDeep mutante/inmutable
+   - eventos seguros aunque AppCore esté parcial
+   - rollback de batch si withBatch síncrono/async falla
+   - destroy limpia listeners y batch
+   - init idempotente sin duplicar core listeners
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -56,10 +66,12 @@ export const Store = (() => {
   "use strict";
 
   let initialized = false;
+  let mutationSeq = 0;
 
   /* =========================================================
      ESTADO INTERNO
   ========================================================= */
+
   const state =
     buildInitialState(
       AppCore
@@ -68,6 +80,7 @@ export const Store = (() => {
   /* =========================================================
      LISTENERS
   ========================================================= */
+
   const listeners =
     new Set();
 
@@ -82,12 +95,190 @@ export const Store = (() => {
 
   let batchDepth = 0;
   let batchPreviousState = null;
+
   const batchChangedPaths =
     new Set();
 
   /* =========================================================
-     READ HELPERS
+     SAFE HELPERS
   ========================================================= */
+
+  function nowMs() {
+    return Date.now();
+  }
+
+  function safeText(value, fallback = "") {
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      return fallback;
+    }
+
+    const text =
+      String(value).trim();
+
+    return text || fallback;
+  }
+
+  function safeArray(value) {
+    return Array.isArray(value)
+      ? value
+      : [];
+  }
+
+  function safeObject(value) {
+    return value &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+      ? value
+      : {};
+  }
+
+  function safeEmit(eventName, payload = {}) {
+    try {
+      AppCore?.events?.emit?.(
+        eventName,
+        payload
+      );
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function safeLog(...args) {
+    try {
+      AppCore?.utils?.log?.(
+        ...args
+      );
+    } catch {}
+  }
+
+  function safeWarn(...args) {
+    try {
+      AppCore?.utils?.warn?.(
+        ...args
+      );
+    } catch {}
+
+    try {
+      console.warn(...args);
+    } catch {}
+  }
+
+  function safeError(...args) {
+    try {
+      AppCore?.utils?.error?.(
+        ...args
+      );
+    } catch {}
+
+    try {
+      console.error(...args);
+    } catch {}
+  }
+
+  function normalizePath(path = "") {
+    return safeText(path, "");
+  }
+
+  function assertPath(path, method = "Store") {
+    const clean =
+      normalizePath(path);
+
+    if (!clean) {
+      throw new Error(
+        `${method}(path) requiere path`
+      );
+    }
+
+    return clean;
+  }
+
+  function assertPlainObject(value, method = "Store.patch") {
+    if (
+      value === null ||
+      typeof value !== "object" ||
+      Array.isArray(value)
+    ) {
+      throw new Error(
+        `${method}(partialState) requiere un objeto`
+      );
+    }
+
+    return value;
+  }
+
+  function cloneForRead(value) {
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      return value;
+    }
+
+    return deepClone(value);
+  }
+
+  function getRootReadClone() {
+    return shallowCloneRoot(
+      state
+    );
+  }
+
+  function incrementMutationSeq() {
+    mutationSeq += 1;
+    return mutationSeq;
+  }
+
+  function replaceRoot(nextState = {}) {
+    Object.keys(state).forEach((key) => {
+      delete state[key];
+    });
+
+    Object.keys(nextState).forEach((key) => {
+      state[key] = nextState[key];
+    });
+
+    return state;
+  }
+
+  function restoreRoot(previousState = {}) {
+    replaceRoot(
+      deepClone(previousState)
+    );
+
+    return state;
+  }
+
+  function buildPatchChangedPaths(partialState = {}) {
+    const paths =
+      collectChangedPaths(
+        partialState
+      );
+
+    if (
+      Array.isArray(paths) &&
+      paths.length
+    ) {
+      return paths
+        .map((path) =>
+          safeText(path, "")
+        )
+        .filter(Boolean);
+    }
+
+    return Object.keys(
+      safeObject(partialState)
+    );
+  }
+
+  /* =========================================================
+     READ API
+  ========================================================= */
+
   function snapshot() {
     return deepClone(state);
   }
@@ -97,9 +288,7 @@ export const Store = (() => {
     fallback = undefined
   ) {
     if (!path) {
-      return shallowCloneRoot(
-        state
-      );
+      return getRootReadClone();
     }
 
     const value =
@@ -108,8 +297,32 @@ export const Store = (() => {
         path
       );
 
-    return value ===
-      undefined
+    if (
+      value === undefined
+    ) {
+      return fallback;
+    }
+
+    return cloneForRead(
+      value
+    );
+  }
+
+  function getRaw(
+    path = null,
+    fallback = undefined
+  ) {
+    if (!path) {
+      return state;
+    }
+
+    const value =
+      getByPath(
+        state,
+        path
+      );
+
+    return value === undefined
       ? fallback
       : value;
   }
@@ -122,24 +335,21 @@ export const Store = (() => {
       !isFunction(selector)
     ) {
       throw new Error(
-        "select(selector) requiere una función"
+        "Store.select(selector) requiere una función"
       );
     }
 
     try {
       const result =
         selector(
-          shallowCloneRoot(
-            state
-          )
+          getRootReadClone()
         );
 
-      return result ===
-        undefined
+      return result === undefined
         ? fallback
         : result;
     } catch (error) {
-      AppCore.utils.error(
+      safeError(
         "Store select error",
         error
       );
@@ -151,40 +361,78 @@ export const Store = (() => {
   /* =========================================================
      INTERNAL NOTIFY
   ========================================================= */
+
   function emitChange(
     changedPaths = [],
     previousState = {}
   ) {
-    notify({
-      AppCore,
-      listeners,
-      keyListeners,
-      selectorListeners,
-      get,
-      snapshot,
-      shallowCloneRoot,
-      state,
-      payload:
-        buildPayload(
-          snapshot,
-          changedPaths,
-          previousState
-        ),
-    });
+    const cleanChangedPaths =
+      safeArray(changedPaths)
+        .map((path) =>
+          safeText(path, "")
+        )
+        .filter(Boolean);
 
-    AppCore?.events?.emit?.(
+    if (!cleanChangedPaths.length) {
+      return false;
+    }
+
+    const seq =
+      incrementMutationSeq();
+
+    const startedAt =
+      nowMs();
+
+    try {
+      notify({
+        AppCore,
+        listeners,
+        keyListeners,
+        selectorListeners,
+        get,
+        snapshot,
+        shallowCloneRoot,
+        state,
+        payload:
+          buildPayload(
+            snapshot,
+            cleanChangedPaths,
+            previousState
+          ),
+      });
+    } catch (error) {
+      safeError(
+        "Store notify error",
+        error
+      );
+
+      safeEmit(
+        "store:notify:error",
+        {
+          seq,
+          changedPaths:
+            cleanChangedPaths,
+          message:
+            error?.message ||
+            String(error),
+        }
+      );
+    }
+
+    safeEmit(
       "store:change",
       {
+        seq,
         changedPaths:
-          Array.isArray(
-            changedPaths
-          )
-            ? [
-                ...changedPaths,
-              ]
-            : [],
+          [...cleanChangedPaths],
+        changedCount:
+          cleanChangedPaths.length,
+        durationMs:
+          nowMs() - startedAt,
       }
     );
+
+    return true;
   }
 
   function startBatchIfNeeded() {
@@ -197,27 +445,27 @@ export const Store = (() => {
     }
 
     batchDepth += 1;
+
+    return batchDepth;
   }
 
   function queueBatchPaths(
     changedPaths = []
   ) {
     if (
-      !Array.isArray(
-        changedPaths
-      )
+      !Array.isArray(changedPaths)
     ) {
       return;
     }
 
-    changedPaths.forEach(
-      (path) => {
-        if (!path) return;
-        batchChangedPaths.add(
-          String(path)
-        );
-      }
-    );
+    changedPaths.forEach((path) => {
+      const clean =
+        safeText(path, "");
+
+      if (!clean) return;
+
+      batchChangedPaths.add(clean);
+    });
   }
 
   function flushBatchIfReady() {
@@ -225,9 +473,7 @@ export const Store = (() => {
       return false;
     }
 
-    if (
-      !batchPreviousState
-    ) {
+    if (!batchPreviousState) {
       return false;
     }
 
@@ -242,26 +488,28 @@ export const Store = (() => {
     batchPreviousState = null;
     batchChangedPaths.clear();
 
-    if (
-      !changedPaths.length
-    ) {
+    if (!changedPaths.length) {
       return false;
     }
 
-    emitChange(
-      changedPaths,
-      previousState
-    );
+    const flushed =
+      emitChange(
+        changedPaths,
+        previousState
+      );
 
-    AppCore?.events?.emit?.(
-      "store:batch:flush",
-      {
-        changedCount:
-          changedPaths.length,
-      }
-    );
+    if (flushed) {
+      safeEmit(
+        "store:batch:flush",
+        {
+          changedCount:
+            changedPaths.length,
+          changedPaths,
+        }
+      );
+    }
 
-    return true;
+    return flushed;
   }
 
   function emitOrQueueChange(
@@ -272,30 +520,37 @@ export const Store = (() => {
       queueBatchPaths(
         changedPaths
       );
-      return;
+      return true;
     }
 
-    emitChange(
+    return emitChange(
       changedPaths,
       previousState
     );
   }
 
+  function clearBatchState() {
+    batchDepth = 0;
+    batchPreviousState = null;
+    batchChangedPaths.clear();
+  }
+
   /* =========================================================
      WRITE API
   ========================================================= */
+
   function set(
     path,
     value
   ) {
-    if (!path) {
-      throw new Error(
-        "Store.set(path, value) requiere path"
+    const cleanPath =
+      assertPath(
+        path,
+        "Store.set"
       );
-    }
 
     const currentValue =
-      get(path);
+      getRaw(cleanPath);
 
     if (
       deepEqual(
@@ -303,52 +558,63 @@ export const Store = (() => {
         value
       )
     ) {
-      return currentValue;
+      return cloneForRead(
+        currentValue
+      );
     }
 
     const previousState =
-      snapshot();
+      batchDepth > 0 && batchPreviousState
+        ? batchPreviousState
+        : snapshot();
 
     setByPath(
       state,
-      path,
+      cleanPath,
       deepClone(value)
     );
 
     touchMeta(state);
 
     emitOrQueueChange(
-      [path],
+      [cleanPath],
       previousState
     );
 
-    return get(path);
+    return get(cleanPath);
   }
 
   function patch(
     partialState = {}
   ) {
+    assertPlainObject(
+      partialState,
+      "Store.patch"
+    );
+
     if (
-      partialState ===
-        null ||
-      typeof partialState !==
-        "object" ||
-      Array.isArray(
-        partialState
-      )
+      Object.keys(partialState).length === 0
     ) {
-      throw new Error(
-        "Store.patch(partialState) requiere un objeto"
-      );
+      return getRootReadClone();
     }
 
     const previousState =
+      batchDepth > 0 && batchPreviousState
+        ? batchPreviousState
+        : snapshot();
+
+    /*
+      Importante:
+      mergeDeep puede estar implementado como mutante o como inmutable.
+      Por eso fusionamos sobre un clon, nunca sobre state directamente.
+    */
+    const base =
       snapshot();
 
     const nextState =
       mergeDeep(
-        state,
-        partialState
+        base,
+        deepClone(partialState)
       );
 
     if (
@@ -357,131 +623,51 @@ export const Store = (() => {
         nextState
       )
     ) {
-      return shallowCloneRoot(
-        state
-      );
+      return getRootReadClone();
     }
 
-    Object.keys(
-      state
-    ).forEach((key) => {
-      if (
-        !(key in nextState)
-      ) {
-        delete state[key];
-      }
-    });
-
-    Object.keys(
+    replaceRoot(
       nextState
-    ).forEach((key) => {
-      state[key] =
-        nextState[key];
-    });
+    );
 
     touchMeta(state);
 
     emitOrQueueChange(
-      collectChangedPaths(
+      buildPatchChangedPaths(
         partialState
       ),
       previousState
     );
 
-    return shallowCloneRoot(
-      state
-    );
+    return getRootReadClone();
   }
 
-  function update(
-    path,
-    updater
+  function replace(
+    nextState = {}
   ) {
+    assertPlainObject(
+      nextState,
+      "Store.replace"
+    );
+
+    const previousState =
+      batchDepth > 0 && batchPreviousState
+        ? batchPreviousState
+        : snapshot();
+
+    const cleanNext =
+      deepClone(nextState);
+
     if (
-      !path ||
-      !isFunction(
-        updater
+      deepEqual(
+        state,
+        cleanNext
       )
     ) {
-      throw new Error(
-        "update(path, updater) requiere path y función"
-      );
+      return getRootReadClone();
     }
 
-    const currentValue =
-      get(path);
-
-    const nextValue =
-      updater(
-        deepClone(
-          currentValue
-        )
-      );
-
-    return set(
-      path,
-      nextValue
-    );
-  }
-
-  function remove(
-    path
-  ) {
-    if (!path) {
-      throw new Error(
-        "Store.remove(path) requiere path"
-      );
-    }
-
-    const currentValue =
-      get(path);
-
-    if (
-      currentValue ===
-      undefined
-    ) {
-      return false;
-    }
-
-    const previousState =
-      snapshot();
-
-    deleteByPath(
-      state,
-      path
-    );
-
-    touchMeta(state);
-
-    emitOrQueueChange(
-      [path],
-      previousState
-    );
-
-    return true;
-  }
-
-  function reset() {
-    const previousState =
-      snapshot();
-
-    const next =
-      buildInitialState(
-        AppCore
-      );
-
-    Object.keys(
-      state
-    ).forEach((key) => {
-      delete state[key];
-    });
-
-    Object.keys(
-      next
-    ).forEach((key) => {
-      state[key] =
-        next[key];
-    });
+    replaceRoot(cleanNext);
 
     touchMeta(state);
 
@@ -497,22 +683,127 @@ export const Store = (() => {
       previousState
     );
 
-    return shallowCloneRoot(
-      state
+    return getRootReadClone();
+  }
+
+  function update(
+    path,
+    updater
+  ) {
+    const cleanPath =
+      assertPath(
+        path,
+        "Store.update"
+      );
+
+    if (
+      !isFunction(updater)
+    ) {
+      throw new Error(
+        "Store.update(path, updater) requiere una función"
+      );
+    }
+
+    const currentValue =
+      get(cleanPath);
+
+    const nextValue =
+      updater(
+        deepClone(
+          currentValue
+        )
+      );
+
+    return set(
+      cleanPath,
+      nextValue
     );
   }
 
-  function beginBatch() {
-    startBatchIfNeeded();
+  function remove(
+    path
+  ) {
+    const cleanPath =
+      assertPath(
+        path,
+        "Store.remove"
+      );
 
-    AppCore?.events?.emit?.(
+    const currentValue =
+      getRaw(cleanPath);
+
+    if (
+      currentValue === undefined
+    ) {
+      return false;
+    }
+
+    const previousState =
+      batchDepth > 0 && batchPreviousState
+        ? batchPreviousState
+        : snapshot();
+
+    deleteByPath(
+      state,
+      cleanPath
+    );
+
+    touchMeta(state);
+
+    emitOrQueueChange(
+      [cleanPath],
+      previousState
+    );
+
+    return true;
+  }
+
+  function reset() {
+    const previousState =
+      batchDepth > 0 && batchPreviousState
+        ? batchPreviousState
+        : snapshot();
+
+    const next =
+      buildInitialState(
+        AppCore
+      );
+
+    replaceRoot(next);
+
+    touchMeta(state);
+
+    emitOrQueueChange(
+      [
+        "app",
+        "session",
+        "ui",
+        "entities",
+        "flags",
+        "meta",
+      ],
+      previousState
+    );
+
+    return getRootReadClone();
+  }
+
+  /* =========================================================
+     BATCH API
+  ========================================================= */
+
+  function beginBatch() {
+    const depth =
+      startBatchIfNeeded();
+
+    safeEmit(
       "store:batch:start",
       {
-        depth: batchDepth,
+        depth,
       }
     );
 
-    return batchDepth;
+    return depth;
   }
 
   function endBatch() {
@@ -522,6 +813,13 @@ export const Store = (() => {
 
     batchDepth -= 1;
 
+    safeEmit(
+      "store:batch:end",
+      {
+        depth: batchDepth,
+      }
+    );
+
     if (batchDepth > 0) {
       return false;
     }
@@ -529,12 +827,38 @@ export const Store = (() => {
     return flushBatchIfReady();
   }
 
-  function withBatch(fn) {
-    if (!isFunction(fn)) {
-      throw new Error(
-        "withBatch(fn) requiere una función"
+  function rollbackBatch(error = null) {
+    if (
+      batchPreviousState
+    ) {
+      restoreRoot(
+        batchPreviousState
       );
     }
+
+    clearBatchState();
+
+    safeEmit(
+      "store:batch:rollback",
+      {
+        message:
+          error?.message ||
+          String(error || ""),
+      }
+    );
+
+    return true;
+  }
+
+  function withBatch(fn, options = {}) {
+    if (!isFunction(fn)) {
+      throw new Error(
+        "Store.withBatch(fn) requiere una función"
+      );
+    }
+
+    const rollbackOnError =
+      options.rollbackOnError === true;
 
     beginBatch();
 
@@ -543,20 +867,33 @@ export const Store = (() => {
     try {
       result = fn(api);
     } catch (error) {
-      endBatch();
+      if (rollbackOnError) {
+        rollbackBatch(error);
+      } else {
+        endBatch();
+      }
+
       throw error;
     }
 
     if (
       result &&
-      typeof result.then ===
-        "function"
+      typeof result.then === "function"
     ) {
-      return result.finally(
-        () => {
+      return result
+        .then((value) => {
           endBatch();
-        }
-      );
+          return value;
+        })
+        .catch((error) => {
+          if (rollbackOnError) {
+            rollbackBatch(error);
+          } else {
+            endBatch();
+          }
+
+          throw error;
+        });
     }
 
     endBatch();
@@ -564,8 +901,122 @@ export const Store = (() => {
   }
 
   /* =========================================================
+     COLLECTION HELPERS
+  ========================================================= */
+
+  function push(
+    path,
+    item
+  ) {
+    return update(
+      path,
+      (current = []) => {
+        const list =
+          Array.isArray(current)
+            ? current
+            : [];
+
+        return [
+          ...list,
+          deepClone(item),
+        ];
+      }
+    );
+  }
+
+  function upsertById(
+    path,
+    item,
+    idKey = "id"
+  ) {
+    const cleanIdKey =
+      safeText(idKey, "id");
+
+    return update(
+      path,
+      (current = []) => {
+        const list =
+          Array.isArray(current)
+            ? current
+            : [];
+
+        const nextItem =
+          deepClone(item);
+
+        const nextId =
+          nextItem?.[cleanIdKey];
+
+        if (
+          nextId === null ||
+          nextId === undefined ||
+          nextId === ""
+        ) {
+          return [
+            ...list,
+            nextItem,
+          ];
+        }
+
+        const index =
+          list.findIndex(
+            (entry) =>
+              entry?.[cleanIdKey] === nextId
+          );
+
+        if (index < 0) {
+          return [
+            ...list,
+            nextItem,
+          ];
+        }
+
+        return list.map((entry, entryIndex) =>
+          entryIndex === index
+            ? {
+                ...entry,
+                ...nextItem,
+              }
+            : entry
+        );
+      }
+    );
+  }
+
+  function removeById(
+    path,
+    id,
+    idKey = "id"
+  ) {
+    const cleanIdKey =
+      safeText(idKey, "id");
+
+    return update(
+      path,
+      (current = []) => {
+        const list =
+          Array.isArray(current)
+            ? current
+            : [];
+
+        return list.filter(
+          (entry) =>
+            entry?.[cleanIdKey] !== id
+        );
+      }
+    );
+  }
+
+  function clearCollection(path) {
+    return set(
+      path,
+      []
+    );
+  }
+
+  /* =========================================================
      ACTIONS / SELECTORS
   ========================================================= */
+
   const actions =
     createActions({
       AppCore,
@@ -584,6 +1035,7 @@ export const Store = (() => {
   /* =========================================================
      SUBSCRIPTIONS
   ========================================================= */
+
   function subscribe(
     listener
   ) {
@@ -598,17 +1050,21 @@ export const Store = (() => {
     listener,
     options = {}
   ) {
-    return createKeySubscription(
-      {
-        AppCore,
-        keyListeners,
+    const cleanPath =
+      assertPath(
         path,
-        listener,
-        get,
-        snapshot,
-        options,
-      }
-    );
+        "Store.subscribeKey"
+      );
+
+    return createKeySubscription({
+      AppCore,
+      keyListeners,
+      path: cleanPath,
+      listener,
+      get,
+      snapshot,
+      options,
+    });
   }
 
   function subscribeSelector(
@@ -616,98 +1072,157 @@ export const Store = (() => {
     listener,
     options = {}
   ) {
-    return createSelectorSubscription(
-      {
-        AppCore,
-        selectorListeners,
-        selector,
-        listener,
-        snapshot,
-        shallowCloneRoot,
-        state,
-        options,
-      }
-    );
+    return createSelectorSubscription({
+      AppCore,
+      selectorListeners,
+      selector,
+      listener,
+      snapshot,
+      shallowCloneRoot,
+      state,
+      options,
+    });
   }
 
   /* =========================================================
      LIFECYCLE
   ========================================================= */
-  function init() {
+
+  function init(options = {}) {
     if (initialized) {
-      AppCore.utils.warn(
+      safeWarn(
         "Store ya estaba inicializado."
       );
 
       return api;
     }
 
-    actions.hydrateFromCore();
+    const startedAt =
+      nowMs();
 
-    bindCoreEvents({
-      AppCore,
-      state,
-      coreUnsubscribers,
-      actions,
-      patch,
-    });
+    const shouldHydrate =
+      options.hydrate !== false;
+
+    if (shouldHydrate) {
+      try {
+        actions.hydrateFromCore();
+      } catch (error) {
+        safeError(
+          "Store hydrateFromCore error",
+          error
+        );
+
+        safeEmit(
+          "store:hydrate:error",
+          {
+            message:
+              error?.message ||
+              String(error),
+          }
+        );
+      }
+    }
+
+    try {
+      bindCoreEvents({
+        AppCore,
+        state,
+        coreUnsubscribers,
+        actions,
+        patch,
+      });
+    } catch (error) {
+      safeError(
+        "Store bindCoreEvents error",
+        error
+      );
+
+      safeEmit(
+        "store:core-bind:error",
+        {
+          message:
+            error?.message ||
+            String(error),
+        }
+      );
+    }
 
     initialized = true;
 
-    AppCore?.events?.emit?.(
+    safeEmit(
       "store:init",
       {
         initialized: true,
+        durationMs:
+          nowMs() - startedAt,
       }
     );
 
-    AppCore.utils.log(
+    safeLog(
       "Store inicializado correctamente.",
       {
         route:
-          state.app
-            ?.route,
+          state.app?.route,
         publicPath:
-          state.app
-            ?.publicPath,
+          state.app?.publicPath,
         authenticated:
-          state.session
-            ?.authenticated,
+          state.session?.authenticated,
         theme:
-          state.ui
-            ?.theme,
+          state.ui?.theme,
         lang:
-          state.ui
-            ?.lang,
+          state.ui?.lang,
       }
     );
 
     return api;
   }
 
-  function destroy() {
-    unbindCoreEvents({
-      AppCore,
-      coreUnsubscribers,
-    });
+  function destroy(options = {}) {
+    const {
+      clearState = false,
+      silent = false,
+    } = options;
+
+    try {
+      unbindCoreEvents({
+        AppCore,
+        coreUnsubscribers,
+      });
+    } catch (error) {
+      safeError(
+        "Store unbindCoreEvents error",
+        error
+      );
+    }
 
     listeners.clear();
     keyListeners.clear();
     selectorListeners.clear();
 
-    batchDepth = 0;
-    batchPreviousState =
-      null;
-    batchChangedPaths.clear();
+    clearBatchState();
+
+    if (clearState) {
+      replaceRoot(
+        buildInitialState(
+          AppCore
+        )
+      );
+
+      touchMeta(state);
+    }
 
     initialized = false;
 
-    AppCore?.events?.emit?.(
-      "store:destroy",
-      {
-        initialized: false,
-      }
-    );
+    if (!silent) {
+      safeEmit(
+        "store:destroy",
+        {
+          initialized: false,
+          clearState:
+            Boolean(clearState),
+        }
+      );
+    }
 
     return true;
   }
@@ -715,39 +1230,92 @@ export const Store = (() => {
   function getDiagnostics() {
     return {
       initialized,
+
+      mutationSeq,
+
       listeners:
         listeners.size,
+
       keyListeners:
         keyListeners.size,
+
       selectorListeners:
         selectorListeners.size,
+
+      coreUnsubscribers:
+        coreUnsubscribers.length,
+
       batchDepth,
+
       batchedPaths:
         batchChangedPaths.size,
+
+      batchedChangedPaths:
+        Array.from(
+          batchChangedPaths
+        ),
+
+      hasBatchPreviousState:
+        Boolean(batchPreviousState),
+
+      stateKeys:
+        Object.keys(state),
+
+      route:
+        state.app?.route || null,
+
+      publicPath:
+        state.app?.publicPath || null,
+
+      authenticated:
+        Boolean(
+          state.session?.authenticated
+        ),
+
+      theme:
+        state.ui?.theme || null,
+
+      lang:
+        state.ui?.lang || null,
     };
+  }
+
+  function isInitialized() {
+    return Boolean(initialized);
   }
 
   /* =========================================================
      PUBLIC API
   ========================================================= */
+
   const api = {
     state,
 
     init,
     destroy,
+    isInitialized,
 
     get,
+    getRaw,
     set,
     patch,
+    replace,
     update,
     remove,
     reset,
+
     beginBatch,
     endBatch,
     withBatch,
+    rollbackBatch,
 
     snapshot,
     select,
+
+    push,
+    upsertById,
+    removeById,
+    clearCollection,
 
     subscribe,
     subscribeKey,
@@ -761,3 +1329,5 @@ export const Store = (() => {
 
   return api;
 })();
+
+export default Store;

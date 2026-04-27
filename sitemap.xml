@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- =====================================================
      ONION SUPPORT · SITEMAP
-     Tipo: Preparado para SEO (landing futura)
+     Archivo: /sitemap.xml
+
+     Uso:
+     - Preparado para SEO / landing pública futura
+     - Mantener sólo URLs públicas indexables
+     - No incluir rutas privadas de la SPA
 ===================================================== -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 
@@ -13,7 +18,7 @@
     <priority>1.0</priority>
   </url>
 
-  <!-- IDIOMA ES -->
+  <!-- LANDING ES -->
   <url>
     <loc>https://onionsupport.com/es/</loc>
     <lastmod>2026-04-08</lastmod>

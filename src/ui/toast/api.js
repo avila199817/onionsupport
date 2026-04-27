@@ -11,6 +11,10 @@
    - refresco live de idioma
    - soportar replace por id de forma estable
    - endurecer dismiss / clear / reset
+   - proteger SSR/no-browser
+   - evitar timers huérfanos
+   - evitar nodos zombie
+   - mantener estado store/dom/timers consistente
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -75,7 +79,286 @@ import {
 } from "./events.js";
 
 /* =========================================================
-   INTERNAL
+   BASICS
+========================================================= */
+
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function safeBool(value, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const key = value.trim().toLowerCase();
+
+    if (["true", "1", "yes", "si", "sí", "on"].includes(key)) {
+      return true;
+    }
+
+    if (["false", "0", "no", "off"].includes(key)) {
+      return false;
+    }
+  }
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  return fallback;
+}
+
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+
+  return Number.isFinite(n)
+    ? n
+    : fallback;
+}
+
+function safeWarn(...args) {
+  try {
+    AppCore?.utils?.warn?.(
+      "[ToastAPI]",
+      ...args
+    );
+  } catch {}
+
+  try {
+    console.warn(
+      "[ToastAPI]",
+      ...args
+    );
+  } catch {}
+}
+
+function safeError(...args) {
+  try {
+    AppCore?.utils?.error?.(
+      "[ToastAPI]",
+      ...args
+    );
+  } catch {}
+
+  try {
+    console.error(
+      "[ToastAPI]",
+      ...args
+    );
+  } catch {}
+}
+
+function safeEmit(eventName, payload = {}) {
+  const name = safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  let emitted = false;
+
+  try {
+    AppCore?.events?.emit?.(
+      name,
+      payload
+    );
+
+    emitted = true;
+  } catch {}
+
+  try {
+    if (isBrowser()) {
+      window.dispatchEvent(
+        new CustomEvent(name, {
+          detail: payload,
+        })
+      );
+
+      emitted = true;
+    }
+  } catch {}
+
+  return emitted;
+}
+
+function nextFrame(callback) {
+  if (!isFunction(callback)) {
+    return false;
+  }
+
+  if (!isBrowser()) {
+    try {
+      callback();
+    } catch {}
+
+    return true;
+  }
+
+  try {
+    window.requestAnimationFrame(() => {
+      try {
+        callback();
+      } catch {}
+    });
+
+    return true;
+  } catch {}
+
+  try {
+    window.setTimeout(() => {
+      try {
+        callback();
+      } catch {}
+    }, 0);
+
+    return true;
+  } catch {}
+
+  try {
+    callback();
+  } catch {}
+
+  return true;
+}
+
+function safeDelay(callback, delay = 0) {
+  if (!isFunction(callback)) {
+    return null;
+  }
+
+  if (!isBrowser()) {
+    try {
+      callback();
+    } catch {}
+
+    return null;
+  }
+
+  try {
+    return window.setTimeout(() => {
+      try {
+        callback();
+      } catch {}
+    }, Math.max(0, safeNumber(delay, 0)));
+  } catch {}
+
+  try {
+    callback();
+  } catch {}
+
+  return null;
+}
+
+/* =========================================================
+   DOM SAFETY
+========================================================= */
+
+function ensureToastDom() {
+  try {
+    ensureToastKeyframes();
+  } catch (error) {
+    safeWarn(
+      "No se pudieron asegurar keyframes.",
+      error
+    );
+  }
+
+  try {
+    return ensureToastContainer();
+  } catch (error) {
+    safeWarn(
+      "No se pudo asegurar contenedor.",
+      error
+    );
+
+    return null;
+  }
+}
+
+function appendToastNode(item) {
+  if (!item?.toastEl) {
+    return false;
+  }
+
+  const container = ensureToastDom();
+
+  if (!container) {
+    return false;
+  }
+
+  try {
+    if (!item.toastEl.isConnected) {
+      container.appendChild(item.toastEl);
+    }
+
+    return true;
+  } catch (error) {
+    safeWarn(
+      "No se pudo insertar toast en DOM.",
+      error
+    );
+
+    return false;
+  }
+}
+
+function showToastNode(item) {
+  if (!item?.toastEl) {
+    return false;
+  }
+
+  nextFrame(() => {
+    if (
+      item.toastEl?.isConnected &&
+      !item.dismissed
+    ) {
+      item.toastEl.classList.add("show");
+      item.toastEl.removeAttribute("aria-hidden");
+    }
+  });
+
+  return true;
+}
+
+function hideToastNode(item) {
+  const toastEl =
+    item?.toastEl || null;
+
+  if (!toastEl) {
+    return false;
+  }
+
+  try {
+    toastEl.classList.remove("show");
+    toastEl.style.pointerEvents = "none";
+    toastEl.setAttribute("aria-hidden", "true");
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+/* =========================================================
+   ITEM FACTORY
 ========================================================= */
 
 function buildToastItem({
@@ -89,111 +372,405 @@ function buildToastItem({
   progressEl,
   useDefaultTitle,
   useDefaultMessage,
+  meta = {},
 } = {}) {
   return {
     id,
     type,
     title,
     message,
+
     duration,
     remaining: duration,
     startedAt: 0,
     timeoutId: null,
+
     closable: Boolean(closable),
-    toastEl,
-    progressEl,
+
+    toastEl: toastEl || null,
+    progressEl: progressEl || null,
+
     createdAt: Date.now(),
+    updatedAt: Date.now(),
+
     dismissed: false,
+
     useDefaultTitle: Boolean(useDefaultTitle),
     useDefaultMessage: Boolean(useDefaultMessage),
+
     interactionsBound: false,
+
+    meta: isObject(meta)
+      ? meta
+      : {},
   };
 }
 
-function safeWarn(...args) {
-  try {
-    AppCore?.utils?.warn?.(...args);
-  } catch {}
+function resolveToastId(options = {}) {
+  const explicit =
+    safeText(options.id, "");
+
+  return explicit || nextToastId();
 }
+
+function resolveUseDefaultTitle(options = {}) {
+  return options.useDefaultTitle === true;
+}
+
+function resolveUseDefaultMessage(type, options = {}) {
+  const explicit =
+    options.useDefaultMessage;
+
+  if (explicit !== undefined) {
+    return explicit === true;
+  }
+
+  const message =
+    safeText(
+      options.message ??
+        options.text,
+      ""
+    );
+
+  return (
+    !message ||
+    type === TOAST_TYPE_LOADING
+  );
+}
+
+function resolveToastDuration(type, options = {}) {
+  if (
+    options.persist === true ||
+    options.persistent === true
+  ) {
+    return 0;
+  }
+
+  return normalizeToastDuration(
+    type,
+    options.duration
+  );
+}
+
+function resolveToastClosable(type, options = {}) {
+  if (options.closable !== undefined) {
+    return options.closable !== false;
+  }
+
+  if (type === TOAST_TYPE_LOADING) {
+    return false;
+  }
+
+  return true;
+}
+
+function normalizeToastInput(options = {}) {
+  const input =
+    isObject(options)
+      ? options
+      : {
+          message: safeText(options, ""),
+        };
+
+  const type =
+    normalizeToastType(input.type);
+
+  const id =
+    resolveToastId(input);
+
+  const useDefaultTitle =
+    resolveUseDefaultTitle(input);
+
+  const useDefaultMessage =
+    resolveUseDefaultMessage(
+      type,
+      input
+    );
+
+  const title =
+    resolveToastTitle(
+      type,
+      input.title,
+      useDefaultTitle
+    );
+
+  const message =
+    resolveToastMessage(
+      type,
+      input.message,
+      input.text,
+      useDefaultMessage
+    );
+
+  const duration =
+    resolveToastDuration(
+      type,
+      input
+    );
+
+  const closable =
+    resolveToastClosable(
+      type,
+      input
+    );
+
+  return {
+    id,
+    type,
+    title,
+    message,
+    duration,
+    closable,
+    useDefaultTitle,
+    useDefaultMessage,
+    meta:
+      isObject(input.meta)
+        ? input.meta
+        : {},
+  };
+}
+
+/* =========================================================
+   TIMER / PROGRESS
+========================================================= */
 
 function isPersistedToast(item) {
   return Number(item?.duration || 0) <= 0;
 }
 
 function syncToastProgress(item) {
-  if (!item || item.dismissed) {
-    return;
+  if (
+    !item ||
+    item.dismissed
+  ) {
+    return false;
   }
 
   if (isPersistedToast(item)) {
-    if (item?.progressEl) {
-      item.progressEl.style.animation = "none";
-      item.progressEl.style.opacity = "0";
-      item.progressEl.style.transform = "";
-    }
-    return;
+    try {
+      if (item.progressEl) {
+        item.progressEl.style.animation = "none";
+        item.progressEl.style.opacity = "0";
+        item.progressEl.style.transform = "";
+      }
+    } catch {}
+
+    return true;
   }
 
-  runToastProgress(item, item.duration);
+  try {
+    runToastProgress(
+      item,
+      item.duration
+    );
+
+    return true;
+  } catch (error) {
+    safeWarn(
+      "No se pudo iniciar progreso toast.",
+      error
+    );
+
+    return false;
+  }
 }
 
 function syncToastTimer(item) {
-  if (!item || item.dismissed) {
-    return;
+  if (
+    !item ||
+    item.dismissed
+  ) {
+    return false;
   }
 
-  clearToastTimer(item);
+  try {
+    clearToastTimer(item);
+  } catch {}
 
   if (isPersistedToast(item)) {
     item.remaining = 0;
     item.startedAt = 0;
-    return;
+    item.timeoutId = null;
+
+    return true;
   }
 
   item.remaining = item.duration;
   item.startedAt = 0;
-  startToastTimer(item);
+
+  try {
+    startToastTimer(item);
+    return true;
+  } catch (error) {
+    safeWarn(
+      "No se pudo iniciar timer toast.",
+      error
+    );
+
+    return false;
+  }
 }
+
+/* =========================================================
+   INTERACTIONS
+========================================================= */
 
 function registerToastInteractions(item) {
-  const toastEl = item?.toastEl;
+  const toastEl =
+    item?.toastEl || null;
 
-  if (!toastEl || item?.interactionsBound) {
-    return;
+  if (
+    !toastEl ||
+    item.interactionsBound
+  ) {
+    return false;
   }
 
-  toastEl.addEventListener("mouseenter", () => {
-    pauseToastTimer(item);
-  });
+  try {
+    toastEl.addEventListener(
+      "mouseenter",
+      () => {
+        pauseToastTimer(item);
+      }
+    );
 
-  toastEl.addEventListener("mouseleave", () => {
-    resumeToastTimer(item);
-  });
+    toastEl.addEventListener(
+      "mouseleave",
+      () => {
+        resumeToastTimer(item);
+      }
+    );
 
-  item.interactionsBound = true;
+    toastEl.addEventListener(
+      "focusin",
+      () => {
+        pauseToastTimer(item);
+      }
+    );
+
+    toastEl.addEventListener(
+      "focusout",
+      () => {
+        resumeToastTimer(item);
+      }
+    );
+
+    item.interactionsBound = true;
+
+    return true;
+  } catch (error) {
+    safeWarn(
+      "No se pudieron registrar interacciones toast.",
+      error
+    );
+
+    return false;
+  }
 }
+
+/* =========================================================
+   DESTROY
+========================================================= */
 
 function destroyToastItem(item) {
   if (!item) {
-    return;
+    return false;
   }
 
-  clearToastTimer(item);
-  removeToastNode(item);
+  try {
+    clearToastTimer(item);
+  } catch {}
 
-  deleteToastItem(item.id);
-  unmarkToastDismissing(item.id);
+  try {
+    removeToastNode(item);
+  } catch {}
+
+  try {
+    deleteToastItem(item.id);
+  } catch {}
+
+  try {
+    unmarkToastDismissing(item.id);
+  } catch {}
+
+  item.toastEl = null;
+  item.progressEl = null;
+  item.timeoutId = null;
+  item.interactionsBound = false;
+
+  return true;
 }
 
+function destroyToastById(id) {
+  const item =
+    getToastItem(id);
+
+  if (!item) {
+    return false;
+  }
+
+  return destroyToastItem(item);
+}
+
+/* =========================================================
+   LIMIT
+========================================================= */
+
 function enforceToastLimit() {
-  const active = getActiveToasts();
+  const active =
+    getActiveToasts();
 
-  while (active.length > TOAST_MAX_ITEMS) {
-    const oldest = active.shift();
+  let removed = 0;
 
-    if (oldest?.id) {
-      dismissToast(oldest.id);
+  while (
+    active.length > TOAST_MAX_ITEMS
+  ) {
+    const oldest =
+      active.shift();
+
+    if (!oldest?.id) {
+      continue;
     }
+
+    if (
+      dismissToast(
+        oldest.id,
+        {
+          reason: "limit",
+        }
+      )
+    ) {
+      removed += 1;
+    }
+  }
+
+  return removed;
+}
+
+/* =========================================================
+   NODE REPLACE / PATCH
+========================================================= */
+
+function createFreshToastNode(item) {
+  if (!item) {
+    return null;
+  }
+
+  try {
+    return createToastNode({
+      id: item.id,
+      type: item.type,
+      title: item.title,
+      message: item.message,
+      closable: item.closable,
+    });
+  } catch (error) {
+    safeWarn(
+      "No se pudo crear nodo toast.",
+      error
+    );
+
+    return null;
   }
 }
 
@@ -202,23 +779,64 @@ function createOrReplaceToastNode(item) {
     return item;
   }
 
-  const nextNode = createToastNode({
-    id: item.id,
-    type: item.type,
-    title: item.title,
-    message: item.message,
-    closable: item.closable,
-  });
+  const nextNode =
+    createFreshToastNode(item);
 
-  if (item.toastEl?.isConnected) {
-    item.toastEl.replaceWith(nextNode);
+  if (!nextNode) {
+    return item;
   }
 
-  item.toastEl = nextNode;
-  item.progressEl = nextNode.querySelector(".toast-progress");
-  item.interactionsBound = false;
+  try {
+    if (item.toastEl?.isConnected) {
+      item.toastEl.replaceWith(nextNode);
+    }
+
+    item.toastEl = nextNode;
+    item.progressEl =
+      nextNode.querySelector(".toast-progress");
+
+    item.interactionsBound = false;
+  } catch (error) {
+    safeWarn(
+      "No se pudo reemplazar nodo toast.",
+      error
+    );
+  }
 
   return item;
+}
+
+function patchExistingToastNode(item) {
+  if (!item?.toastEl) {
+    return false;
+  }
+
+  try {
+    patchToastNode(item);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function syncToastNode(item, { replaceNode = false } = {}) {
+  if (!item) {
+    return false;
+  }
+
+  if (
+    replaceNode ||
+    !item.toastEl
+  ) {
+    createOrReplaceToastNode(item);
+  } else if (!patchExistingToastNode(item)) {
+    createOrReplaceToastNode(item);
+  }
+
+  appendToastNode(item);
+  registerToastInteractions(item);
+
+  return true;
 }
 
 /* =========================================================
@@ -226,29 +844,50 @@ function createOrReplaceToastNode(item) {
 ========================================================= */
 
 export function refreshToastLanguage(item) {
-  if (!item || item.dismissed) {
+  if (
+    !item ||
+    item.dismissed
+  ) {
     return item;
   }
 
   if (item.useDefaultTitle) {
-    item.title = getToastTitle(item.type);
+    item.title =
+      getToastTitle(item.type);
   }
 
   if (item.useDefaultMessage) {
-    item.message = getToastMessage(item.type);
+    item.message =
+      getToastMessage(item.type);
   }
 
-  patchToastNode(item);
+  item.updatedAt = Date.now();
+
+  patchExistingToastNode(item);
 
   return item;
 }
 
 export function refreshAllToastsLanguage() {
-  const items = getToastItems();
+  const items =
+    getToastItems();
+
+  let refreshed = 0;
 
   items.forEach((item) => {
-    refreshToastLanguage(item);
+    if (
+      refreshToastLanguage(item)
+    ) {
+      refreshed += 1;
+    }
   });
+
+  safeEmit(
+    "toast:language:refresh",
+    {
+      refreshed,
+    }
+  );
 
   return true;
 }
@@ -258,104 +897,115 @@ export function refreshAllToastsLanguage() {
 ========================================================= */
 
 export function showToast(options = {}) {
-  ensureToastKeyframes();
+  const normalized =
+    normalizeToastInput(options);
 
-  const container = ensureToastContainer();
+  if (!normalized.message) {
+    safeWarn(
+      "showToast requiere message/text."
+    );
+
+    return null;
+  }
+
+  const container =
+    ensureToastDom();
 
   if (!container) {
     return null;
   }
 
-  const type = normalizeToastType(options.type);
-  const id = safeText(options.id, "") || nextToastId();
-
-  const useDefaultTitle =
-    options.useDefaultTitle === true;
-
-  const useDefaultMessage =
-    options.useDefaultMessage === true ||
-    (
-      type === TOAST_TYPE_LOADING &&
-      !safeText(options.message ?? options.text, "")
-    );
-
-  const title = resolveToastTitle(
-    type,
-    options.title,
-    useDefaultTitle
-  );
-
-  const message = resolveToastMessage(
-    type,
-    options.message,
-    options.text,
-    useDefaultMessage
-  );
-
-  if (!message) {
-    safeWarn("[Toast] show requiere message/text.");
-    return null;
-  }
-
-  const duration = normalizeToastDuration(
-    type,
-    options.duration
-  );
-
-  const closable = options.closable !== false;
-
-  const existing = getToastItem(id);
+  const existing =
+    getToastItem(normalized.id);
 
   if (existing) {
-    return updateToast(id, {
-      type,
-      title,
-      message,
-      duration,
-      closable,
-      useDefaultTitle,
-      useDefaultMessage,
-    });
+    return updateToast(
+      normalized.id,
+      {
+        type:
+          normalized.type,
+        title:
+          normalized.title,
+        message:
+          normalized.message,
+        duration:
+          normalized.duration,
+        closable:
+          normalized.closable,
+        useDefaultTitle:
+          normalized.useDefaultTitle,
+        useDefaultMessage:
+          normalized.useDefaultMessage,
+        meta:
+          normalized.meta,
+        replaceNode:
+          true,
+      }
+    );
   }
 
-  const toastEl = createToastNode({
-    id,
-    type,
-    title,
-    message,
-    closable,
-  });
+  const toastEl =
+    createToastNode({
+      id:
+        normalized.id,
+      type:
+        normalized.type,
+      title:
+        normalized.title,
+      message:
+        normalized.message,
+      closable:
+        normalized.closable,
+    });
 
-  const item = buildToastItem({
-    id,
-    type,
-    title,
-    message,
-    duration,
-    closable,
-    toastEl,
-    progressEl: toastEl.querySelector(".toast-progress"),
-    useDefaultTitle,
-    useDefaultMessage,
-  });
+  const item =
+    buildToastItem({
+      id:
+        normalized.id,
+      type:
+        normalized.type,
+      title:
+        normalized.title,
+      message:
+        normalized.message,
+      duration:
+        normalized.duration,
+      closable:
+        normalized.closable,
+      toastEl,
+      progressEl:
+        toastEl?.querySelector?.(".toast-progress") ||
+        null,
+      useDefaultTitle:
+        normalized.useDefaultTitle,
+      useDefaultMessage:
+        normalized.useDefaultMessage,
+      meta:
+        normalized.meta,
+    });
 
-  setToastItem(id, item);
-  container.appendChild(toastEl);
+  setToastItem(
+    item.id,
+    item
+  );
 
+  appendToastNode(item);
   registerToastInteractions(item);
   syncToastProgress(item);
   syncToastTimer(item);
   enforceToastLimit();
+  showToastNode(item);
 
-  requestAnimationFrame(() => {
-    if (item.toastEl?.isConnected && !item.dismissed) {
-      item.toastEl.classList.add("show");
-    }
-  });
+  try {
+    emitToastShown(item);
+  } catch (error) {
+    safeWarn(
+      "emitToastShown falló.",
+      error
+    );
+  }
 
-  emitToastShown(item);
-
-  return id;
+  return item.id;
 }
 
 /* =========================================================
@@ -363,65 +1013,103 @@ export function showToast(options = {}) {
 ========================================================= */
 
 export function updateToast(id, patch = {}) {
-  const item = getToastItem(id);
+  const normalizedId =
+    safeText(id, "");
 
-  if (!item || item.dismissed) {
+  if (!normalizedId) {
     return null;
   }
 
+  const item =
+    getToastItem(normalizedId);
+
+  if (
+    !item ||
+    item.dismissed
+  ) {
+    return null;
+  }
+
+  const patchObject =
+    isObject(patch)
+      ? patch
+      : {};
+
   const nextType =
-    patch.type !== undefined
-      ? normalizeToastType(patch.type)
+    patchObject.type !== undefined
+      ? normalizeToastType(
+          patchObject.type
+        )
       : item.type;
 
   const nextUseDefaultTitle =
-    patch.useDefaultTitle !== undefined
-      ? patch.useDefaultTitle === true
+    patchObject.useDefaultTitle !== undefined
+      ? patchObject.useDefaultTitle === true
       : item.useDefaultTitle;
 
   const nextUseDefaultMessage =
-    patch.useDefaultMessage !== undefined
-      ? patch.useDefaultMessage === true
+    patchObject.useDefaultMessage !== undefined
+      ? patchObject.useDefaultMessage === true
       : item.useDefaultMessage;
 
   const nextTitle =
-    patch.title !== undefined
+    patchObject.title !== undefined
       ? resolveToastTitle(
           nextType,
-          patch.title,
+          patchObject.title,
           nextUseDefaultTitle
         )
-      : item.title;
+      : (
+          nextUseDefaultTitle
+            ? getToastTitle(nextType)
+            : item.title
+        );
 
   const nextMessage =
-    patch.message !== undefined || patch.text !== undefined
+    patchObject.message !== undefined ||
+    patchObject.text !== undefined
       ? resolveToastMessage(
           nextType,
-          patch.message,
-          patch.text,
+          patchObject.message,
+          patchObject.text,
           nextUseDefaultMessage
         )
-      : item.message;
+      : (
+          nextUseDefaultMessage
+            ? getToastMessage(nextType)
+            : item.message
+        );
 
   if (!nextMessage) {
-    safeWarn("[Toast] update requiere message/text.");
+    safeWarn(
+      "updateToast requiere message/text."
+    );
+
     return null;
   }
 
   const nextDuration =
-    patch.duration !== undefined
-      ? normalizeToastDuration(
+    patchObject.duration !== undefined ||
+    patchObject.persist !== undefined ||
+    patchObject.persistent !== undefined
+      ? resolveToastDuration(
           nextType,
-          patch.duration
+          patchObject
         )
       : item.duration;
 
   const nextClosable =
-    patch.closable !== undefined
-      ? patch.closable !== false
-      : item.closable;
+    patchObject.closable !== undefined
+      ? patchObject.closable !== false
+      : (
+          nextType === TOAST_TYPE_LOADING
+            ? false
+            : item.closable
+        );
 
-  clearToastTimer(item);
+  try {
+    clearToastTimer(item);
+  } catch {}
 
   item.type = nextType;
   item.title = nextTitle;
@@ -432,24 +1120,35 @@ export function updateToast(id, patch = {}) {
   item.closable = nextClosable;
   item.useDefaultTitle = nextUseDefaultTitle;
   item.useDefaultMessage = nextUseDefaultMessage;
+  item.updatedAt = Date.now();
 
-  createOrReplaceToastNode(item);
-
-  if (!item.toastEl?.isConnected) {
-    ensureToastContainer()?.appendChild(item.toastEl);
+  if (isObject(patchObject.meta)) {
+    item.meta = {
+      ...(isObject(item.meta) ? item.meta : {}),
+      ...patchObject.meta,
+    };
   }
 
-  registerToastInteractions(item);
+  syncToastNode(
+    item,
+    {
+      replaceNode:
+        patchObject.replaceNode === true,
+    }
+  );
+
   syncToastProgress(item);
   syncToastTimer(item);
+  showToastNode(item);
 
-  requestAnimationFrame(() => {
-    if (item.toastEl?.isConnected && !item.dismissed) {
-      item.toastEl.classList.add("show");
-    }
-  });
-
-  emitToastUpdated(item);
+  try {
+    emitToastUpdated(item);
+  } catch (error) {
+    safeWarn(
+      "emitToastUpdated falló.",
+      error
+    );
+  }
 
   return item.id;
 }
@@ -458,50 +1157,79 @@ export function updateToast(id, patch = {}) {
    DISMISS
 ========================================================= */
 
-export function dismissToast(id) {
-  const normalizedId = safeText(id, "");
+export function dismissToast(id, options = {}) {
+  const normalizedId =
+    safeText(id, "");
 
   if (!normalizedId) {
     return false;
   }
 
-  const item = getToastItem(normalizedId);
+  const item =
+    getToastItem(normalizedId);
 
   if (!item) {
     return false;
   }
 
-  if (item.dismissed) {
+  if (
+    item.dismissed ||
+    isToastDismissing(normalizedId)
+  ) {
     return false;
   }
 
-  if (isToastDismissing(normalizedId)) {
-    return false;
-  }
+  const reason =
+    safeText(
+      options.reason,
+      "dismiss"
+    );
 
   markToastDismissing(normalizedId);
+
   item.dismissed = true;
+  item.dismissReason = reason;
+  item.dismissedAt = Date.now();
 
-  clearToastTimer(item);
+  try {
+    clearToastTimer(item);
+  } catch {}
 
-  const toastEl = item.toastEl;
+  const toastEl =
+    item.toastEl;
 
   if (!toastEl) {
     destroyToastItem(item);
-    emitToastDismissed(item);
+
+    try {
+      emitToastDismissed(item);
+    } catch {}
+
     return true;
   }
 
-  toastEl.classList.remove("show");
-  toastEl.style.pointerEvents = "none";
+  hideToastNode(item);
 
-  const delay = prefersReducedMotion() ? 0 : 220;
+  const delay =
+    prefersReducedMotion()
+      ? 0
+      : safeNumber(
+          options.delay,
+          220
+        );
 
-  window.setTimeout(() => {
+  safeDelay(() => {
     destroyToastItem(item);
   }, delay);
 
-  emitToastDismissed(item);
+  try {
+    emitToastDismissed(item);
+  } catch (error) {
+    safeWarn(
+      "emitToastDismissed falló.",
+      error
+    );
+  }
 
   return true;
 }
@@ -510,12 +1238,50 @@ export function dismissToast(id) {
    CLEAR
 ========================================================= */
 
-export function clearToasts() {
-  const ids = [...getToastIds()];
+export function clearToasts(options = {}) {
+  const immediate =
+    safeBool(
+      options.immediate,
+      false
+    );
+
+  const ids =
+    [...getToastIds()];
+
+  let cleared = 0;
 
   ids.forEach((id) => {
-    dismissToast(id);
+    if (immediate) {
+      if (destroyToastById(id)) {
+        cleared += 1;
+      }
+
+      return;
+    }
+
+    if (
+      dismissToast(
+        id,
+        {
+          reason:
+            options.reason ||
+            "clear",
+          delay:
+            options.delay,
+        }
+      )
+    ) {
+      cleared += 1;
+    }
   });
+
+  safeEmit(
+    "toast:clear",
+    {
+      cleared,
+      immediate,
+    }
+  );
 
   return true;
 }
@@ -525,59 +1291,84 @@ export function clearToasts() {
 ========================================================= */
 
 export function successToast(message = "", options = {}) {
-  const normalizedMessage = safeText(message, "");
+  const normalizedMessage =
+    safeText(message, "");
 
   return showToast({
     ...options,
     type: TOAST_TYPE_SUCCESS,
     message: normalizedMessage,
-    useDefaultMessage: !normalizedMessage,
+    useDefaultMessage:
+      !normalizedMessage,
   });
 }
 
 export function errorToast(message = "", options = {}) {
-  const normalizedMessage = safeText(message, "");
+  const normalizedMessage =
+    message instanceof Error
+      ? safeText(
+          message.message,
+          "Error inesperado"
+        )
+      : safeText(message, "");
 
   return showToast({
     ...options,
     type: TOAST_TYPE_ERROR,
     message: normalizedMessage,
-    useDefaultMessage: !normalizedMessage,
+    useDefaultMessage:
+      !normalizedMessage,
+    meta: {
+      ...(isObject(options.meta) ? options.meta : {}),
+      error:
+        message instanceof Error
+          ? message
+          : options.error || null,
+    },
   });
 }
 
 export function warningToast(message = "", options = {}) {
-  const normalizedMessage = safeText(message, "");
+  const normalizedMessage =
+    safeText(message, "");
 
   return showToast({
     ...options,
     type: TOAST_TYPE_WARNING,
     message: normalizedMessage,
-    useDefaultMessage: !normalizedMessage,
+    useDefaultMessage:
+      !normalizedMessage,
   });
 }
 
 export function infoToast(message = "", options = {}) {
-  const normalizedMessage = safeText(message, "");
+  const normalizedMessage =
+    safeText(message, "");
 
   return showToast({
     ...options,
     type: TOAST_TYPE_INFO,
     message: normalizedMessage,
-    useDefaultMessage: !normalizedMessage,
+    useDefaultMessage:
+      !normalizedMessage,
   });
 }
 
 export function loadingToast(message = "", options = {}) {
-  const normalizedMessage = safeText(message, "");
+  const normalizedMessage =
+    safeText(message, "");
 
   return showToast({
     ...options,
     type: TOAST_TYPE_LOADING,
     message: normalizedMessage,
-    useDefaultMessage: !normalizedMessage,
+    useDefaultMessage:
+      !normalizedMessage,
     duration: 0,
-    closable: options.closable ?? false,
+    persist: true,
+    closable:
+      options.closable ??
+      false,
   });
 }
 
@@ -586,16 +1377,123 @@ export function loadingToast(message = "", options = {}) {
 ========================================================= */
 
 export function resetToastApiState() {
-  const items = getToastItems();
+  const items =
+    getToastItems();
 
   items.forEach((item) => {
     try {
       clearToastTimer(item);
+    } catch {}
+
+    try {
       removeToastNode(item);
+    } catch {}
+
+    try {
+      unmarkToastDismissing(item.id);
     } catch {}
   });
 
-  resetToastStore();
+  try {
+    resetToastStore();
+  } catch (error) {
+    safeError(
+      "resetToastStore falló.",
+      error
+    );
+  }
+
+  safeEmit(
+    "toast:reset",
+    {
+      count:
+        items.length,
+    }
+  );
 
   return true;
 }
+
+/* =========================================================
+   DEBUG
+========================================================= */
+
+export function getToastApiSnapshot() {
+  const items =
+    getToastItems();
+
+  return {
+    count:
+      items.length,
+
+    ids:
+      getToastIds(),
+
+    maxItems:
+      TOAST_MAX_ITEMS,
+
+    activeCount:
+      getActiveToasts().length,
+
+    items:
+      items.map((item) => ({
+        id:
+          item.id,
+
+        type:
+          item.type,
+
+        duration:
+          item.duration,
+
+        remaining:
+          item.remaining,
+
+        dismissed:
+          Boolean(item.dismissed),
+
+        dismissing:
+          isToastDismissing(item.id),
+
+        hasNode:
+          Boolean(item.toastEl),
+
+        connected:
+          Boolean(item.toastEl?.isConnected),
+
+        hasProgress:
+          Boolean(item.progressEl),
+
+        useDefaultTitle:
+          Boolean(item.useDefaultTitle),
+
+        useDefaultMessage:
+          Boolean(item.useDefaultMessage),
+
+        createdAt:
+          item.createdAt,
+
+        updatedAt:
+          item.updatedAt || null,
+      })),
+  };
+}
+
+export default {
+  showToast,
+  updateToast,
+  dismissToast,
+  clearToasts,
+
+  successToast,
+  errorToast,
+  warningToast,
+  infoToast,
+  loadingToast,
+
+  refreshToastLanguage,
+  refreshAllToastsLanguage,
+
+  resetToastApiState,
+  getToastApiSnapshot,
+};

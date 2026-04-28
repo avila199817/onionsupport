@@ -1630,6 +1630,193 @@
 
 
 /* =========================================================
+   INCIDENCIAS MODAL — EXTREME TOKENS
+   Tokens específicos del modal de detalle de incidencias.
+   Objetivo:
+   - miniaturas grandes y clicables
+   - preview amplia
+   - cards con hover lift
+   - títulos sin corte vertical
+   - descripción alineada arriba
+   - adjuntos integrados en composer
+========================================================= */
+
+:root {
+  --incidencias-modal-width: min(1160px, calc(100vw - 40px));
+  --incidencias-modal-max-height: 92vh;
+  --incidencias-modal-radius: var(--modal-radius, 22px);
+  --incidencias-modal-padding: var(--space-lg);
+  --incidencias-modal-body-gap: var(--space-lg);
+
+  --incidencias-modal-overlay-bg: rgba(0,0,0,.64);
+  --incidencias-modal-overlay-blur: blur(8px);
+
+  --incidencias-modal-bg:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 8%, transparent), transparent 34%),
+    linear-gradient(180deg, var(--surface-2), var(--surface-1));
+
+  --incidencias-modal-border: var(--border-soft);
+  --incidencias-modal-shadow:
+    0 34px 84px rgba(0,0,0,.40),
+    0 0 0 1px rgba(255,255,255,.025) inset;
+
+  --incidencias-modal-header-padding: 18px 18px 14px;
+  --incidencias-modal-header-gap: var(--space-sm);
+  --incidencias-modal-header-border: var(--border-soft);
+
+  --incidencias-modal-avatar-size: 66px;
+  --incidencias-modal-avatar-radius: 19px;
+
+  --incidencias-modal-title-size: clamp(19px, 1.9vw, 27px);
+  --incidencias-modal-title-line: 1.14;
+  --incidencias-modal-title-letter: -.045em;
+  --incidencias-modal-title-bottom-fix: 3px;
+  --incidencias-modal-title-clamp: 2;
+
+  --incidencias-modal-chip-height: 24px;
+  --incidencias-modal-chip-padding-x: 9px;
+  --incidencias-modal-chip-font-size: 10px;
+
+  --incidencias-modal-meta-grid-gap: 10px;
+  --incidencias-modal-meta-card-padding: 12px;
+  --incidencias-modal-meta-card-radius: 14px;
+  --incidencias-modal-meta-card-bg: var(--surface-1, var(--surface-glass));
+  --incidencias-modal-meta-card-border: var(--border-soft);
+
+  --incidencias-modal-card-radius: var(--radius-xl, 18px);
+  --incidencias-modal-card-bg:
+    linear-gradient(180deg, rgba(255,255,255,.035), transparent 95%),
+    var(--surface-glass);
+  --incidencias-modal-card-border: var(--border-soft);
+  --incidencias-modal-card-hover-border:
+    color-mix(in srgb, var(--accent) 24%, var(--border-soft));
+  --incidencias-modal-card-hover-bg:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 95%),
+    var(--surface-glass);
+
+  --incidencias-modal-lift-transform: translateY(-2px);
+  --incidencias-modal-lift-shadow:
+    0 16px 34px rgba(15,23,42,.075),
+    0 0 0 1px rgba(255,255,255,.035) inset;
+
+  --incidencias-modal-description-min-height: 86px;
+  --incidencias-modal-description-padding: 16px 18px;
+  --incidencias-modal-description-radius: 16px;
+  --incidencias-modal-description-line: 1.55;
+
+  --incidencias-modal-composer-radius: 18px;
+  --incidencias-modal-composer-padding: 14px;
+  --incidencias-modal-composer-gap: 12px;
+  --incidencias-modal-composer-border:
+    color-mix(in srgb, var(--accent) 24%, var(--border-soft));
+  --incidencias-modal-composer-bg:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 92%),
+    var(--surface-1, var(--surface-glass));
+
+  --incidencias-modal-textarea-min-height: 138px;
+  --incidencias-modal-textarea-padding: 15px 16px;
+  --incidencias-modal-textarea-radius: 16px;
+  --incidencias-modal-textarea-line: 1.58;
+
+  --incidencias-modal-upload-radius: 16px;
+  --incidencias-modal-upload-padding: 14px;
+  --incidencias-modal-upload-gap: 10px;
+  --incidencias-modal-upload-border:
+    color-mix(in srgb, var(--accent) 22%, var(--border-soft));
+  --incidencias-modal-upload-bg:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, transparent), transparent 90%),
+    var(--surface-glass);
+
+  --incidencias-modal-thumb-width: 104px;
+  --incidencias-modal-thumb-height: 78px;
+  --incidencias-modal-thumb-radius: 16px;
+  --incidencias-modal-thumb-bg:
+    linear-gradient(180deg, rgba(255,255,255,.055), transparent),
+    var(--surface-1, var(--surface-glass));
+  --incidencias-modal-thumb-border: var(--border-soft);
+  --incidencias-modal-thumb-hover-border:
+    color-mix(in srgb, var(--accent) 28%, var(--border-soft));
+  --incidencias-modal-thumb-shadow:
+    0 14px 28px rgba(15,23,42,.10);
+
+  --incidencias-modal-preview-height: min(64vh, 720px);
+  --incidencias-modal-preview-min-height: 430px;
+  --incidencias-modal-preview-radius: 18px;
+  --incidencias-modal-preview-frame-radius: 15px;
+  --incidencias-modal-preview-border:
+    color-mix(in srgb, var(--accent) 22%, var(--border-soft));
+  --incidencias-modal-preview-bg:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 90%),
+    var(--surface-1, var(--surface-glass));
+
+  --incidencias-modal-timeline-radius: 18px;
+  --incidencias-modal-timeline-padding: 14px 16px 14px 0;
+  --incidencias-modal-timeline-gap: 14px;
+  --incidencias-modal-timeline-accent-width: 4px;
+
+  --incidencias-modal-footer-button-height: 42px;
+  --incidencias-modal-footer-button-radius: 12px;
+
+  --incidencias-modal-transition:
+    transform var(--duration-normal) var(--ease-standard),
+    box-shadow var(--duration-normal) var(--ease-standard),
+    border-color var(--duration-normal) var(--ease-standard),
+    background var(--duration-normal) var(--ease-standard);
+}
+
+[data-theme="light"] {
+  --incidencias-modal-overlay-bg: rgba(15,23,42,.28);
+  --incidencias-modal-bg:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 10%, transparent), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.96), rgba(250,251,255,.94));
+
+  --incidencias-modal-shadow:
+    0 30px 70px rgba(15,23,42,.14),
+    0 0 0 1px rgba(255,255,255,.65) inset;
+
+  --incidencias-modal-lift-shadow:
+    0 16px 34px rgba(15,23,42,.085),
+    0 0 0 1px rgba(255,255,255,.72) inset;
+
+  --incidencias-modal-thumb-shadow:
+    0 14px 28px rgba(15,23,42,.10);
+}
+
+@media (max-width: 980px) {
+  :root {
+    --incidencias-modal-width: min(100vw - 24px, 1160px);
+    --incidencias-modal-thumb-width: 82px;
+    --incidencias-modal-thumb-height: 68px;
+  }
+}
+
+@media (max-width: 720px) {
+  :root {
+    --incidencias-modal-width: min(100vw - 20px, 1160px);
+    --incidencias-modal-padding: var(--space-md);
+    --incidencias-modal-avatar-size: 58px;
+    --incidencias-modal-avatar-radius: 17px;
+    --incidencias-modal-title-size: clamp(18px, 5.4vw, 23px);
+    --incidencias-modal-thumb-width: 74px;
+    --incidencias-modal-thumb-height: 62px;
+    --incidencias-modal-thumb-radius: 14px;
+    --incidencias-modal-preview-height: 54vh;
+    --incidencias-modal-preview-min-height: 280px;
+    --incidencias-modal-textarea-min-height: 128px;
+  }
+}
+
+@media (max-width: 420px) {
+  :root {
+    --incidencias-modal-width: min(100vw - 16px, 1160px);
+    --incidencias-modal-thumb-width: 64px;
+    --incidencias-modal-thumb-height: 58px;
+    --incidencias-modal-body-gap: var(--space-md);
+  }
+}
+
+
+/* =========================================================
    RESPONSIVE TOKENS
 ========================================================= */
 
@@ -1782,6 +1969,11 @@ body[data-route-mode="app"],
     --modal-bg: var(--surface-2);
     --topbar-bg: var(--surface-1);
     --sidebar-bg: var(--surface-1);
+
+    --incidencias-modal-card-bg: var(--surface-2);
+    --incidencias-modal-upload-bg: var(--surface-2);
+    --incidencias-modal-composer-bg: var(--surface-2);
+    --incidencias-modal-preview-bg: var(--surface-2);
   }
 }
 

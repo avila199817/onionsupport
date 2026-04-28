@@ -4,6 +4,7 @@
 
    INCIDENCIAS EXPERIENCE PRO · CREATE MODAL · FINAL DEFINITIVO
    PATCH · MODAL ALIGNED · BUTTON HOVER ELEVATION · TOKENS 10/10
+   PATCH · USER SEARCH NO FLICKER · SLOT PATCHING 10/10
 
    RESPONSABILIDADES:
    - abrir/cerrar modal de creación de incidencia
@@ -19,6 +20,8 @@
    - mostrar loader overlay premium al crear incidencia
    - alinear visualmente modal con variables.css / ui.css
    - aplicar hover/elevación/active fino en botones y acciones
+   - evitar parpadeo del modal al buscar usuarios
+   - actualizar búsqueda por slots sin reconstruir el panel completo
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -1386,92 +1389,6 @@ async function searchUsersRequest(query = "") {
   return [];
 }
 
-async function performUserSearch(query = "") {
-  if (!canSelectTargetUser()) {
-    return [];
-  }
-
-  const normalized = normalizeWhitespace(query);
-  const currentSeq = ++modalState.userSearchSeq;
-
-  if (normalized.length < 2) {
-    modalState.userSearchLoading = false;
-    modalState.userSearchError = "";
-    modalState.userSearchResults = [];
-
-    renderModal();
-    attachRootBindings();
-    focusUserSearchInput();
-
-    return [];
-  }
-
-  modalState.userSearchLoading = true;
-  modalState.userSearchError = "";
-  modalState.userSearchResults = [];
-
-  renderModal();
-  attachRootBindings();
-  focusUserSearchInput();
-
-  try {
-    const items = await searchUsersRequest(normalized);
-
-    if (currentSeq !== modalState.userSearchSeq) {
-      return [];
-    }
-
-    modalState.userSearchLoading = false;
-    modalState.userSearchError = "";
-    modalState.userSearchResults = safeArray(items);
-
-    renderModal();
-    attachRootBindings();
-    focusUserSearchInput();
-
-    return items;
-  } catch (error) {
-    if (currentSeq !== modalState.userSearchSeq) {
-      return [];
-    }
-
-    modalState.userSearchLoading = false;
-    modalState.userSearchResults = [];
-    modalState.userSearchError = safeErrorMessage(
-      error,
-      "No se pudieron cargar usuarios."
-    );
-
-    renderModal();
-    attachRootBindings();
-    focusUserSearchInput();
-
-    return [];
-  }
-}
-
-function scheduleUserSearch(query = "") {
-  clearUserSearchTimer();
-
-  const normalized = normalizeWhitespace(query);
-
-  if (normalized.length < 2) {
-    modalState.userSearchLoading = false;
-    modalState.userSearchError = "";
-    modalState.userSearchResults = [];
-
-    renderModal();
-    attachRootBindings();
-    focusUserSearchInput();
-
-    return;
-  }
-
-  modalState.userSearchDebounce = setTimeout(() => {
-    performUserSearch(normalized);
-  }, USER_SEARCH_DEBOUNCE);
-}
-
 /* =========================================================
    TEMPLATE HELPERS
 ========================================================= */
@@ -1753,7 +1670,7 @@ function renderTargetUserBlock() {
   const error = safeText(modalState.errors?.targetUserId, "");
 
   return `
-    <section class="inc-create-block">
+    <section class="inc-create-block" data-target-user-block="true">
       <div class="inc-create-mini-title">
         Usuario
       </div>
@@ -1774,12 +1691,27 @@ function renderTargetUserBlock() {
           ${modalState.submitting ? "disabled" : ""}
         />
 
-        ${renderFieldError(error)}
+        <div
+          class="inc-create-target-error-slot"
+          data-target-user-error-slot="true"
+        >
+          ${renderFieldError(error)}
+        </div>
       </label>
 
-      ${renderUserSearchResults()}
+      <div
+        class="inc-create-user-search-slot"
+        data-user-search-results-slot="true"
+      >
+        ${renderUserSearchResults()}
+      </div>
 
-      ${renderSelectedUserCard()}
+      <div
+        class="inc-create-selected-user-slot"
+        data-selected-user-slot="true"
+      >
+        ${renderSelectedUserCard()}
+      </div>
     </section>
   `;
 }
@@ -2313,6 +2245,18 @@ function renderModalInner() {
             font-size:var(--form-error-size, var(--font-xs, 11px));
             line-height:var(--line-normal, 1.42);
             font-weight:var(--weight-semibold, 600);
+          }
+
+          .inc-create-target-error-slot:empty,
+          .inc-create-user-search-slot:empty,
+          .inc-create-selected-user-slot:empty{
+            display:none;
+          }
+
+          .inc-create-user-search-slot,
+          .inc-create-selected-user-slot{
+            display:grid;
+            gap:var(--space-xs, 8px);
           }
 
           .inc-create-target-user-card{
@@ -2923,6 +2867,81 @@ function renderModal() {
   return root;
 }
 
+function queryRoot(selector = "") {
+  try {
+    return getRoot()?.querySelector?.(selector) || null;
+  } catch {
+    return null;
+  }
+}
+
+function updateUserSearchResultsSlot() {
+  const slot = queryRoot("[data-user-search-results-slot='true']");
+  if (!slot) return false;
+
+  slot.innerHTML = renderUserSearchResults();
+
+  return true;
+}
+
+function updateSelectedUserSlot() {
+  const slot = queryRoot("[data-selected-user-slot='true']");
+  if (!slot) return false;
+
+  slot.innerHTML = renderSelectedUserCard();
+
+  return true;
+}
+
+function updateTargetUserErrorSlot() {
+  const slot = queryRoot("[data-target-user-error-slot='true']");
+  const input = queryRoot("[data-field='targetUserSearch']");
+  const error = safeText(modalState.errors?.targetUserId, "");
+
+  if (slot) {
+    slot.innerHTML = renderFieldError(error);
+  }
+
+  if (input) {
+    input.classList.toggle("is-error", Boolean(error));
+  }
+
+  return Boolean(slot || input);
+}
+
+function updateTargetUserInputState({ syncValue = false } = {}) {
+  const input = queryRoot("[data-field='targetUserSearch']");
+  if (!input) return false;
+
+  const targetUserId = safeText(modalState.form?.targetUserId, "");
+
+  input.placeholder = targetUserId
+    ? "Buscar otro usuario..."
+    : "Buscar por nombre, email, username, teléfono...";
+
+  if (syncValue) {
+    input.value = safeText(modalState.userSearchQuery, "");
+  }
+
+  return true;
+}
+
+function updateUserSearchUI({ syncInput = false } = {}) {
+  if (!modalState.isOpen) return false;
+
+  const updatedInput = updateTargetUserInputState({ syncValue: syncInput });
+  const updatedError = updateTargetUserErrorSlot();
+  const updatedResults = updateUserSearchResultsSlot();
+  const updatedSelected = updateSelectedUserSlot();
+
+  return Boolean(
+    updatedInput ||
+      updatedError ||
+      updatedResults ||
+      updatedSelected
+  );
+}
+
 function focusPanel() {
   try {
     const panel = document.getElementById(PANEL_ID);
@@ -2989,6 +3008,96 @@ function focusPreferredField() {
 
   focusPanel();
   return true;
+}
+
+/* =========================================================
+   USER SEARCH FLOW · NO FULL RERENDER
+========================================================= */
+
+async function performUserSearch(query = "") {
+  if (!canSelectTargetUser()) {
+    return [];
+  }
+
+  const normalized = normalizeWhitespace(query);
+  const currentSeq = ++modalState.userSearchSeq;
+
+  if (normalized.length < 2) {
+    modalState.userSearchLoading = false;
+    modalState.userSearchError = "";
+    modalState.userSearchResults = [];
+
+    updateUserSearchUI({
+      syncInput: false,
+    });
+
+    return [];
+  }
+
+  modalState.userSearchLoading = true;
+  modalState.userSearchError = "";
+  modalState.userSearchResults = [];
+
+  updateUserSearchUI({
+    syncInput: false,
+  });
+
+  try {
+    const items = await searchUsersRequest(normalized);
+
+    if (currentSeq !== modalState.userSearchSeq) {
+      return [];
+    }
+
+    modalState.userSearchLoading = false;
+    modalState.userSearchError = "";
+    modalState.userSearchResults = safeArray(items);
+
+    updateUserSearchUI({
+      syncInput: false,
+    });
+
+    return items;
+  } catch (error) {
+    if (currentSeq !== modalState.userSearchSeq) {
+      return [];
+    }
+
+    modalState.userSearchLoading = false;
+    modalState.userSearchResults = [];
+    modalState.userSearchError = safeErrorMessage(
+      error,
+      "No se pudieron cargar usuarios."
+    );
+
+    updateUserSearchUI({
+      syncInput: false,
+    });
+
+    return [];
+  }
+}
+
+function scheduleUserSearch(query = "") {
+  clearUserSearchTimer();
+
+  const normalized = normalizeWhitespace(query);
+
+  if (normalized.length < 2) {
+    modalState.userSearchLoading = false;
+    modalState.userSearchError = "";
+    modalState.userSearchResults = [];
+
+    updateUserSearchUI({
+      syncInput: false,
+    });
+
+    return;
+  }
+
+  modalState.userSearchDebounce = setTimeout(() => {
+    performUserSearch(normalized);
+  }, USER_SEARCH_DEBOUNCE);
 }
 
 /* =========================================================
@@ -3240,6 +3349,9 @@ function handleTargetUserSearchInput(target) {
   const value = safeText(target?.value, "");
 
   modalState.userSearchQuery = value;
+  modalState.userSearchResults = [];
+  modalState.userSearchLoading = false;
+  modalState.userSearchError = "";
 
   if (safeText(modalState.form?.targetUserId, "")) {
     clearTargetUserSelection();
@@ -3259,6 +3371,10 @@ function handleTargetUserSearchInput(target) {
     modalState.successMessage = "";
     modalState.createdTicketId = "";
   }
+
+  updateUserSearchUI({
+    syncInput: false,
+  });
 
   scheduleUserSearch(value);
 }
@@ -3325,8 +3441,10 @@ function selectTargetUserByIndex(index = -1) {
     modalState.errors = nextErrors;
   }
 
-  renderModal();
-  attachRootBindings();
+  updateUserSearchUI({
+    syncInput: true,
+  });
+
   focusField("subject");
 
   return true;
@@ -3510,8 +3628,10 @@ function attachRootBindings() {
       modalState.userSearchLoading = false;
       modalState.userSearchError = "";
 
-      renderModal();
-      attachRootBindings();
+      updateUserSearchUI({
+        syncInput: true,
+      });
+
       focusUserSearchInput();
     }
   };

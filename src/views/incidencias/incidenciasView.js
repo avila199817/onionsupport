@@ -18,6 +18,7 @@
    - permitir reload con rerender seguro
    - coordinar acciones y modales sin mezclar responsabilidades
    - preservar importes de facturas asociadas para tabla
+   - cargar el modal de detalle por import directo
 
    HARDENING PRO:
    - render inicial inmediato
@@ -32,7 +33,8 @@
    - anti spam click en apertura rápida
    - compatibilidad con template nuevo data-incidencias-action
    - template controlado por state real
-   - blindaje contra normalizadores que descartan total/importe/linkedinvoices
+   - blindaje contra normalizadores que descartan total/importe/linkedInvoices
+   - bridge fuerte con incidencias.modal.js
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -85,6 +87,7 @@ import {
 } from "./incidencias.actions.js";
 
 import IncidenciasCreateView from "./incidencias.create.modal.js";
+import { OnionIncidenciasModal } from "./incidencias.modal.js";
 
 export const IncidenciasView = (() => {
   "use strict";
@@ -174,6 +177,8 @@ export const IncidenciasView = (() => {
     for (const value of values) {
       if (value === undefined || value === null) continue;
       if (typeof value === "string" && value.trim() === "") continue;
+      if (Array.isArray(value) && value.length === 0) continue;
+
       return value;
     }
 
@@ -770,22 +775,44 @@ export const IncidenciasView = (() => {
   ========================================================= */
 
   function openTicketModalBridge(detail = null) {
-    if (!detail) return false;
+    const payload = safeObject(detail);
+
+    if (!hasOwnKeys(payload)) {
+      return false;
+    }
+
+    try {
+      if (typeof OnionIncidenciasModal?.getState === "function") {
+        const state = OnionIncidenciasModal.getState();
+
+        if (state?.isOpen && typeof OnionIncidenciasModal.update === "function") {
+          OnionIncidenciasModal.update(payload);
+          return true;
+        }
+
+        if (typeof OnionIncidenciasModal.open === "function") {
+          OnionIncidenciasModal.open(payload);
+          return true;
+        }
+      }
+    } catch (error) {
+      safeWarn("OnionIncidenciasModal import directo falló:", error);
+    }
 
     try {
       const modal = window?.OnionIncidenciasModal;
 
       if (modal?.getState?.()?.isOpen && typeof modal.update === "function") {
-        modal.update(detail);
+        modal.update(payload);
         return true;
       }
 
       if (typeof modal?.open === "function") {
-        modal.open(detail);
+        modal.open(payload);
         return true;
       }
     } catch (error) {
-      safeWarn("OnionIncidenciasModal hook falló:", error);
+      safeWarn("OnionIncidenciasModal hook global falló:", error);
     }
 
     try {
@@ -794,14 +821,16 @@ export const IncidenciasView = (() => {
         window?.renderTicketModal;
 
       if (typeof hook === "function") {
-        hook(detail);
+        hook(payload);
         return true;
       }
     } catch (error) {
-      safeWarn("ticket modal hook falló:", error);
+      safeWarn("ticket modal hook legacy falló:", error);
     }
 
-    safeEmit("incidencias:modal:open", { detail });
+    safeEmit("incidencias:modal:open", {
+      detail: payload,
+    });
 
     return true;
   }
@@ -1018,11 +1047,6 @@ export const IncidenciasView = (() => {
       incidenciasState.refreshing = hasVisibleData && asRefresh;
     }
 
-    /*
-      Importante:
-      - el listener está en el contenedor, no en los botones.
-      - aunque se haga innerHTML aquí, el listener sigue vivo.
-    */
     render();
 
     try {
@@ -1080,14 +1104,6 @@ export const IncidenciasView = (() => {
     hydrateBestEffort();
     ensureBaseState();
 
-    /*
-      FIX CRÍTICO DE CARRERA:
-      1. Pintamos la pantalla.
-      2. Bindeamos inmediatamente el contenedor.
-      3. Después cargamos datos.
-      Antes el usuario podía ver el botón "Crear nueva incidencia"
-      antes de que existiera el listener.
-    */
     render();
 
     if (!destroyed) {
@@ -1536,6 +1552,8 @@ export const IncidenciasView = (() => {
     }
 
     const onRefresh = async (event) => {
+      if (destroyed) return;
+
       const payload = getEventPayload(event);
 
       await handleRefreshTicketFromModal(
@@ -1547,6 +1565,8 @@ export const IncidenciasView = (() => {
     };
 
     const onCopy = async (event) => {
+      if (destroyed) return;
+
       const payload = getEventPayload(event);
 
       await handleCopyTicketId(
@@ -1558,6 +1578,8 @@ export const IncidenciasView = (() => {
     };
 
     const onMutated = async () => {
+      if (destroyed) return;
+
       await reload({
         force: true,
         asRefresh: true,
@@ -1604,6 +1626,8 @@ export const IncidenciasView = (() => {
 
   function bindWindowEvents() {
     const onCreated = async () => {
+      if (destroyed) return;
+
       await reload({
         force: true,
         asRefresh: true,
@@ -1612,6 +1636,8 @@ export const IncidenciasView = (() => {
     };
 
     const onMutated = async () => {
+      if (destroyed) return;
+
       await reload({
         force: true,
         asRefresh: true,

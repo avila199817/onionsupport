@@ -19,6 +19,8 @@
    - acciones compatibles con data-home-action y data-action
    - CSP friendly: sin handlers inline tipo onerror
    - rutas alineadas con src/router/routes.js
+   - avatares fallback con colores intensos pseudo-RNG estables
+   - dark/light mode conectado a variables globales con fallback defensivo
 
    CONTRATO SOPORTADO:
    renderHomeTemplate({
@@ -44,9 +46,28 @@
        navigatingAction,
        openingTicketId,
        role,
-       user
+       user,
+       dashboard,
+       summary,
+       tickets,
+       incidencias,
+       facturas,
+       invoices,
+       users,
+       usuarios,
+       clients,
+       clientes,
+       activity,
+       recentActivity
      }
    })
+
+   NOTA:
+   - Este template NO hace fetch.
+   - Si el contador llega en summary/dashboard, lo respeta.
+   - Si no llega contador, calcula con arrays visibles.
+   - Si algo sigue saliendo a 0, el problema está en HomeView/home.api:
+     no se está pasando esa colección al template.
 ========================================================= */
 
 /* =========================================================
@@ -92,10 +113,6 @@ function safeObject(value, fallback = {}) {
 
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function isNonEmptyObject(value) {
-  return Boolean(isObject(value) && Object.keys(value).length);
 }
 
 function first(...values) {
@@ -146,6 +163,62 @@ function normalizeKey(value = "") {
 function clampNumber(value = 0, min = 0, max = Number.POSITIVE_INFINITY) {
   const n = safeNumber(value, min);
   return Math.min(Math.max(n, min), max);
+}
+
+function getPath(object = {}, path = "") {
+  const root = safeObject(object, null);
+  const cleanPath = safeText(path, "");
+
+  if (!root || !cleanPath) return undefined;
+
+  return cleanPath.split(".").reduce((acc, segment) => {
+    if (acc === null || acc === undefined) return undefined;
+    return acc?.[segment];
+  }, root);
+}
+
+function firstPath(object = {}, paths = []) {
+  return first(...safeArray(paths).map((path) => getPath(object, path)));
+}
+
+function uniqueBy(items = [], picker = (item) => item) {
+  const rows = safeArray(items);
+  const seen = new Set();
+  const output = [];
+
+  for (const item of rows) {
+    const key = safeText(picker(item), "");
+
+    if (!key) {
+      output.push(item);
+      continue;
+    }
+
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    output.push(item);
+  }
+
+  return output;
+}
+
+function hashString(value = "") {
+  const text = safeText(value, "onion");
+
+  let hash = 2166136261;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash +=
+      (hash << 1) +
+      (hash << 4) +
+      (hash << 7) +
+      (hash << 8) +
+      (hash << 24);
+  }
+
+  return Math.abs(hash >>> 0);
 }
 
 function formatNumber(value = 0) {
@@ -214,17 +287,13 @@ function formatRelativeDate(value = null) {
   if (absMin < 1) return "Ahora mismo";
 
   if (absMin < 60) {
-    return diffMin > 0
-      ? `En ${absMin} min`
-      : `Hace ${absMin} min`;
+    return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
   }
 
   const diffHours = Math.round(absMin / 60);
 
   if (diffHours < 24) {
-    return diffMin > 0
-      ? `En ${diffHours} h`
-      : `Hace ${diffHours} h`;
+    return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
   }
 
   const diffDays = Math.round(diffHours / 24);
@@ -276,6 +345,89 @@ function normalizeRoute(route = "") {
 }
 
 /* =========================================================
+   AVATAR PALETTE
+========================================================= */
+
+const AVATAR_PALETTE = Object.freeze([
+  {
+    bg: "linear-gradient(135deg, #7c3aed 0%, #ec4899 100%)",
+    bgDark: "linear-gradient(135deg, #8b5cf6 0%, #f472b6 100%)",
+    ring: "rgba(124,58,237,.36)",
+    shadow: "rgba(236,72,153,.26)",
+  },
+  {
+    bg: "linear-gradient(135deg, #2563eb 0%, #06b6d4 100%)",
+    bgDark: "linear-gradient(135deg, #3b82f6 0%, #22d3ee 100%)",
+    ring: "rgba(37,99,235,.34)",
+    shadow: "rgba(6,182,212,.24)",
+  },
+  {
+    bg: "linear-gradient(135deg, #f97316 0%, #ef4444 100%)",
+    bgDark: "linear-gradient(135deg, #fb923c 0%, #f87171 100%)",
+    ring: "rgba(249,115,22,.34)",
+    shadow: "rgba(239,68,68,.24)",
+  },
+  {
+    bg: "linear-gradient(135deg, #16a34a 0%, #14b8a6 100%)",
+    bgDark: "linear-gradient(135deg, #22c55e 0%, #2dd4bf 100%)",
+    ring: "rgba(22,163,74,.34)",
+    shadow: "rgba(20,184,166,.24)",
+  },
+  {
+    bg: "linear-gradient(135deg, #db2777 0%, #9333ea 100%)",
+    bgDark: "linear-gradient(135deg, #ec4899 0%, #a855f7 100%)",
+    ring: "rgba(219,39,119,.34)",
+    shadow: "rgba(147,51,234,.25)",
+  },
+  {
+    bg: "linear-gradient(135deg, #ca8a04 0%, #ea580c 100%)",
+    bgDark: "linear-gradient(135deg, #facc15 0%, #fb923c 100%)",
+    ring: "rgba(202,138,4,.34)",
+    shadow: "rgba(234,88,12,.25)",
+  },
+  {
+    bg: "linear-gradient(135deg, #0891b2 0%, #4f46e5 100%)",
+    bgDark: "linear-gradient(135deg, #06b6d4 0%, #6366f1 100%)",
+    ring: "rgba(8,145,178,.34)",
+    shadow: "rgba(79,70,229,.25)",
+  },
+  {
+    bg: "linear-gradient(135deg, #e11d48 0%, #f59e0b 100%)",
+    bgDark: "linear-gradient(135deg, #fb7185 0%, #fbbf24 100%)",
+    ring: "rgba(225,29,72,.34)",
+    shadow: "rgba(245,158,11,.25)",
+  },
+  {
+    bg: "linear-gradient(135deg, #0f766e 0%, #84cc16 100%)",
+    bgDark: "linear-gradient(135deg, #14b8a6 0%, #a3e635 100%)",
+    ring: "rgba(15,118,110,.34)",
+    shadow: "rgba(132,204,22,.24)",
+  },
+  {
+    bg: "linear-gradient(135deg, #4338ca 0%, #c026d3 100%)",
+    bgDark: "linear-gradient(135deg, #6366f1 0%, #e879f9 100%)",
+    ring: "rgba(67,56,202,.34)",
+    shadow: "rgba(192,38,211,.25)",
+  },
+]);
+
+function getAvatarPalette(seed = "") {
+  const index = hashString(seed) % AVATAR_PALETTE.length;
+  return AVATAR_PALETTE[index];
+}
+
+function getAvatarStyle(seed = "") {
+  const palette = getAvatarPalette(seed);
+
+  return [
+    `--home-avatar-bg:${palette.bg}`,
+    `--home-avatar-bg-dark:${palette.bgDark}`,
+    `--home-avatar-ring:${palette.ring}`,
+    `--home-avatar-shadow:${palette.shadow}`,
+  ].join(";");
+}
+
+/* =========================================================
    DASHBOARD / SUMMARY
 ========================================================= */
 
@@ -289,6 +441,8 @@ function getDashboard(input = {}) {
       state.dashboard,
       data.raw?.dashboard,
       data.payload?.dashboard,
+      data.result?.dashboard,
+      data.response?.dashboard,
       {}
     )
   );
@@ -305,31 +459,49 @@ function getSummary(input = {}) {
       data.stats,
       data.metrics,
       data.totals,
+      data.counts,
       state.summary,
       state.stats,
+      state.metrics,
+      state.totals,
+      state.counts,
       dashboard.summary,
       dashboard.stats,
       dashboard.metrics,
       dashboard.totals,
+      dashboard.counts,
+      data.raw?.summary,
+      data.raw?.stats,
       data.payload?.summary,
       data.payload?.stats,
+      data.result?.summary,
+      data.response?.summary,
       {}
     )
   );
 }
 
 function getSummaryValue(input = {}, keys = [], fallback = null) {
-  const summary = getSummary(input);
-  const dashboard = getDashboard(input);
-  const state = safeObject(input.state);
+  const data = safeObject(input);
+  const summary = getSummary(data);
+  const dashboard = getDashboard(data);
+  const state = safeObject(data.state);
+  const payload = safeObject(data.payload);
+  const raw = safeObject(data.raw);
+  const result = safeObject(data.result);
+  const response = safeObject(data.response);
 
+  const sources = [summary, dashboard, state, payload, raw, result, response, data];
   const candidates = [];
 
   for (const key of safeArray(keys)) {
-    candidates.push(summary?.[key]);
-    candidates.push(dashboard?.[key]);
-    candidates.push(state?.[key]);
-    candidates.push(input?.[key]);
+    for (const source of sources) {
+      candidates.push(source?.[key]);
+
+      if (key.includes(".")) {
+        candidates.push(getPath(source, key));
+      }
+    }
   }
 
   return first(...candidates, fallback);
@@ -353,6 +525,7 @@ function getWidgets(input = {}) {
       dashboard.kpis,
       dashboard.blocks,
       data.payload?.widgets,
+      data.result?.widgets,
       []
     )
   );
@@ -367,7 +540,7 @@ function unwrapCollectionPayload(value = null, depth = 0) {
     return {};
   }
 
-  if (depth > 8) {
+  if (depth > 10) {
     return value;
   }
 
@@ -393,7 +566,9 @@ function unwrapCollectionPayload(value = null, depth = 0) {
     Array.isArray(object.records) ||
     Array.isArray(object.value) ||
     Array.isArray(object.docs) ||
-    Array.isArray(object.collection)
+    Array.isArray(object.documents) ||
+    Array.isArray(object.collection) ||
+    Array.isArray(object.list)
   ) {
     return object;
   }
@@ -403,6 +578,7 @@ function unwrapCollectionPayload(value = null, depth = 0) {
     object.incidencias,
     object.facturas,
     object.invoices,
+    object.bills,
     object.users,
     object.usuarios,
     object.clients,
@@ -411,14 +587,22 @@ function unwrapCollectionPayload(value = null, depth = 0) {
     object.activity,
     object.activities,
     object.recent,
-    object.recentActivity
+    object.recentActivity,
+    object.timeline,
+    object.logs
   );
 
   if (Array.isArray(directArray)) {
     return {
       ...object,
       items: directArray,
-      total: first(object.total, object.count, object.remoteCount, directArray.length),
+      total: first(
+        object.total,
+        object.count,
+        object.totalCount,
+        object.remoteCount,
+        directArray.length
+      ),
     };
   }
 
@@ -427,6 +611,7 @@ function unwrapCollectionPayload(value = null, depth = 0) {
     object.result,
     object.response,
     object.body,
+    object.content,
     object.data
   );
 
@@ -451,7 +636,9 @@ function normalizeCollection(value) {
       object.records,
       object.value,
       object.docs,
+      object.documents,
       object.collection,
+      object.list,
       []
     )
   );
@@ -469,17 +656,55 @@ function getRemoteCountFromCollection(value, fallback = 0) {
         object.total,
         object.count,
         object.length,
+        object.meta?.totalCount,
+        object.meta?.remoteCount,
         object.meta?.total,
         object.meta?.count,
+        object.pagination?.totalCount,
+        object.pagination?.remoteCount,
         object.pagination?.total,
         object.pagination?.count,
         object.page?.total,
         object.pageInfo?.total,
+        object.pageInfo?.totalCount,
         fallback
       ),
       fallback
     )
   );
+}
+
+function resolveCollectionSource(input = {}, aliases = []) {
+  const data = safeObject(input);
+  const state = safeObject(data.state);
+  const dashboard = getDashboard(data);
+  const payload = safeObject(data.payload);
+  const raw = safeObject(data.raw);
+  const result = safeObject(data.result);
+  const response = safeObject(data.response);
+
+  const candidates = [];
+
+  for (const alias of safeArray(aliases)) {
+    candidates.push(data?.[alias]);
+    candidates.push(state?.[alias]);
+    candidates.push(dashboard?.[alias]);
+    candidates.push(payload?.[alias]);
+    candidates.push(raw?.[alias]);
+    candidates.push(result?.[alias]);
+    candidates.push(response?.[alias]);
+
+    candidates.push(data?.collections?.[alias]);
+    candidates.push(state?.collections?.[alias]);
+    candidates.push(dashboard?.collections?.[alias]);
+    candidates.push(payload?.collections?.[alias]);
+
+    candidates.push(data?.resources?.[alias]);
+    candidates.push(state?.resources?.[alias]);
+    candidates.push(dashboard?.resources?.[alias]);
+  }
+
+  return first(...candidates, []);
 }
 
 /* =========================================================
@@ -503,6 +728,7 @@ function getUser(input = {}) {
       dashboard.currentUser,
       data.raw?.user,
       data.raw?.currentUser,
+      data.payload?.user,
       {}
     )
   );
@@ -605,98 +831,164 @@ function getInitials(value = "") {
 }
 
 /* =========================================================
-   DATA PICKERS
+   DATA PICKERS / COLLECTIONS
 ========================================================= */
 
 function getCollections(input = {}) {
   const data = safeObject(input);
-  const state = safeObject(data.state);
   const dashboard = getDashboard(data);
+  const summary = getSummary(data);
 
-  const ticketsSource = first(
-    data.tickets,
-    data.incidencias,
-    data.items,
-    data.rows,
-    state.tickets,
-    state.incidencias,
-    state.items,
-    state.rows,
-    dashboard.tickets,
-    dashboard.incidencias,
-    data.payload?.tickets,
-    data.payload?.incidencias,
-    []
-  );
+  const ticketsSource = resolveCollectionSource(data, [
+    "tickets",
+    "incidencias",
+    "incidents",
+    "issues",
+    "supportTickets",
+    "items",
+    "rows",
+  ]);
 
-  const invoicesSource = first(
-    data.facturas,
-    data.invoices,
-    data.bills,
-    state.facturas,
-    state.invoices,
-    state.bills,
-    dashboard.facturas,
-    dashboard.invoices,
-    data.payload?.facturas,
-    data.payload?.invoices,
-    []
-  );
+  const invoicesSource = resolveCollectionSource(data, [
+    "facturas",
+    "invoices",
+    "bills",
+    "billing",
+    "payments",
+  ]);
 
-  const usersSource = first(
-    data.users,
-    data.usuarios,
-    state.users,
-    state.usuarios,
-    dashboard.users,
-    dashboard.usuarios,
-    data.payload?.users,
-    data.payload?.usuarios,
-    []
-  );
+  const usersSource = resolveCollectionSource(data, [
+    "users",
+    "usuarios",
+    "members",
+    "accounts",
+  ]);
 
-  const clientsSource = first(
-    data.clients,
-    data.clientes,
-    data.customers,
-    state.clients,
-    state.clientes,
-    state.customers,
-    dashboard.clients,
-    dashboard.clientes,
-    dashboard.customers,
-    data.payload?.clients,
-    data.payload?.clientes,
-    []
-  );
+  const clientsSource = resolveCollectionSource(data, [
+    "clients",
+    "clientes",
+    "customers",
+    "accountsClients",
+  ]);
 
-  const activitySource = first(
-    data.activity,
-    data.activities,
-    data.recentActivity,
-    data.recent,
-    data.logs,
-    state.activity,
-    state.activities,
-    state.recentActivity,
-    state.recent,
-    state.logs,
-    dashboard.activity,
-    dashboard.activities,
-    dashboard.recentActivity,
-    dashboard.recent,
-    dashboard.timeline,
-    data.payload?.activity,
-    []
-  );
+  const activitySource = resolveCollectionSource(data, [
+    "activity",
+    "activities",
+    "recentActivity",
+    "recent",
+    "logs",
+    "timeline",
+    "events",
+  ]);
 
-  const tickets = normalizeCollection(ticketsSource);
-  const invoices = normalizeCollection(invoicesSource);
-  const users = normalizeCollection(usersSource);
-  const clients = normalizeCollection(clientsSource);
+  const tickets = uniqueBy(normalizeCollection(ticketsSource), getTicketId);
+  const invoices = uniqueBy(normalizeCollection(invoicesSource), getInvoiceId);
+  const users = uniqueBy(normalizeCollection(usersSource), getUserId);
+  const clients = uniqueBy(normalizeCollection(clientsSource), getClientId);
   const activity = normalizeCollection(activitySource);
 
-  const summary = getSummary(data);
+  const ticketsRemoteCount = Math.max(
+    tickets.length,
+    safeNumber(
+      first(
+        summary.totalTickets,
+        summary.ticketsTotal,
+        summary.incidenciasTotal,
+        summary.totalIncidencias,
+        summary.ticketsCount,
+        summary.incidenciasCount,
+        summary.tickets?.total,
+        summary.incidencias?.total,
+        dashboard.ticketsTotal,
+        dashboard.incidenciasTotal,
+        dashboard.totalTickets,
+        dashboard.totalIncidencias,
+        dashboard.tickets?.total,
+        dashboard.incidencias?.total,
+        getRemoteCountFromCollection(ticketsSource, tickets.length)
+      ),
+      tickets.length
+    )
+  );
+
+  const invoicesRemoteCount = Math.max(
+    invoices.length,
+    safeNumber(
+      first(
+        summary.totalInvoices,
+        summary.invoicesTotal,
+        summary.facturasTotal,
+        summary.totalFacturas,
+        summary.invoicesCount,
+        summary.facturasCount,
+        summary.invoices?.total,
+        summary.facturas?.total,
+        dashboard.invoicesTotal,
+        dashboard.facturasTotal,
+        dashboard.totalInvoices,
+        dashboard.totalFacturas,
+        dashboard.invoices?.total,
+        dashboard.facturas?.total,
+        getRemoteCountFromCollection(invoicesSource, invoices.length)
+      ),
+      invoices.length
+    )
+  );
+
+  const usersRemoteCount = Math.max(
+    users.length,
+    safeNumber(
+      first(
+        summary.usersCount,
+        summary.usuariosCount,
+        summary.totalUsers,
+        summary.totalUsuarios,
+        summary.activeUsers,
+        summary.usuariosActivos,
+        summary.users?.total,
+        summary.usuarios?.total,
+        dashboard.usersTotal,
+        dashboard.usuariosTotal,
+        dashboard.totalUsers,
+        dashboard.totalUsuarios,
+        dashboard.usersCount,
+        dashboard.usuariosCount,
+        dashboard.users?.total,
+        dashboard.usuarios?.total,
+        getRemoteCountFromCollection(usersSource, users.length)
+      ),
+      users.length
+    )
+  );
+
+  const clientsRemoteCount = Math.max(
+    clients.length,
+    safeNumber(
+      first(
+        summary.clientsCount,
+        summary.clientesCount,
+        summary.customersCount,
+        summary.totalClients,
+        summary.totalClientes,
+        summary.totalCustomers,
+        summary.activeClients,
+        summary.clientesActivos,
+        summary.clients?.total,
+        summary.clientes?.total,
+        dashboard.clientsTotal,
+        dashboard.clientesTotal,
+        dashboard.customersTotal,
+        dashboard.totalClients,
+        dashboard.totalClientes,
+        dashboard.clientsCount,
+        dashboard.clientesCount,
+        dashboard.clients?.total,
+        dashboard.clientes?.total,
+        getRemoteCountFromCollection(clientsSource, clients.length)
+      ),
+      clients.length
+    )
+  );
 
   return {
     tickets,
@@ -704,64 +996,15 @@ function getCollections(input = {}) {
     users,
     clients,
     activity,
-
-    ticketsRemoteCount: Math.max(
-      tickets.length,
-      safeNumber(
-        first(
-          summary.totalTickets,
-          summary.ticketsTotal,
-          summary.incidenciasTotal,
-          dashboard.ticketsTotal,
-          dashboard.incidenciasTotal,
-          getRemoteCountFromCollection(ticketsSource, tickets.length)
-        ),
-        tickets.length
-      )
-    ),
-
-    invoicesRemoteCount: Math.max(
-      invoices.length,
-      safeNumber(
-        first(
-          summary.totalInvoices,
-          summary.invoicesTotal,
-          summary.facturasTotal,
-          dashboard.invoicesTotal,
-          dashboard.facturasTotal,
-          getRemoteCountFromCollection(invoicesSource, invoices.length)
-        ),
-        invoices.length
-      )
-    ),
-
-    usersRemoteCount: Math.max(
-      users.length,
-      safeNumber(
-        first(
-          summary.usersCount,
-          summary.usuariosCount,
-          dashboard.usersTotal,
-          dashboard.usuariosTotal,
-          getRemoteCountFromCollection(usersSource, users.length)
-        ),
-        users.length
-      )
-    ),
-
-    clientsRemoteCount: Math.max(
-      clients.length,
-      safeNumber(
-        first(
-          summary.clientsCount,
-          summary.clientesCount,
-          dashboard.clientsTotal,
-          dashboard.clientesTotal,
-          getRemoteCountFromCollection(clientsSource, clients.length)
-        ),
-        clients.length
-      )
-    ),
+    ticketsSource,
+    invoicesSource,
+    usersSource,
+    clientsSource,
+    activitySource,
+    ticketsRemoteCount,
+    invoicesRemoteCount,
+    usersRemoteCount,
+    clientsRemoteCount,
   };
 }
 
@@ -912,8 +1155,11 @@ function getTicketAvatarUrl(item = {}) {
 function getTicketStatusKey(value = "") {
   const key = normalizeKey(value);
 
-  if (["pending", "pendiente"].includes(key)) return "pending";
-  if (["open", "abierta", "abierto", "new", "nueva", "nuevo"].includes(key)) return "open";
+  if (["pending", "pendiente", "pendientes"].includes(key)) return "pending";
+
+  if (["open", "abierta", "abierto", "new", "nueva", "nuevo"].includes(key)) {
+    return "open";
+  }
 
   if (
     [
@@ -999,9 +1245,7 @@ function isTicketClosedLike(item = {}) {
 }
 
 function isTicketOpenLike(item = {}) {
-  return ["open", "pending", "progress"].includes(
-    getTicketStatusKey(getTicketStatus(item))
-  );
+  return ["open", "pending", "progress"].includes(getTicketStatusKey(getTicketStatus(item)));
 }
 
 function getTicketCreatedAt(item = {}) {
@@ -1100,11 +1344,13 @@ function getInvoiceAmount(item = {}) {
       item.importe,
       item.price,
       item.subtotal,
+      item.base,
       item.raw?.total,
       item.raw?.amount,
       item.raw?.importe,
       item.raw?.price,
       item.raw?.subtotal,
+      item.raw?.base,
       0
     ),
     0
@@ -1113,13 +1359,7 @@ function getInvoiceAmount(item = {}) {
 
 function getInvoiceCurrency(item = {}) {
   return safeText(
-    first(
-      item.currency,
-      item.moneda,
-      item.raw?.currency,
-      item.raw?.moneda,
-      "EUR"
-    ),
+    first(item.currency, item.moneda, item.raw?.currency, item.raw?.moneda, "EUR"),
     "EUR"
   );
 }
@@ -1154,6 +1394,84 @@ function isInvoicePendingLike(item = {}) {
 }
 
 /* =========================================================
+   USERS / CLIENTS
+========================================================= */
+
+function getUserId(item = {}) {
+  return safeText(
+    first(
+      item.userId,
+      item.id,
+      item._id,
+      item.email,
+      item.username,
+      item.raw?.userId,
+      item.raw?.id,
+      item.raw?._id,
+      item.raw?.email,
+      item.raw?.username
+    ),
+    ""
+  );
+}
+
+function isActiveUser(item = {}) {
+  const active = first(
+    item.active,
+    item.isActive,
+    item.enabled,
+    item.raw?.active,
+    item.raw?.isActive,
+    item.raw?.enabled
+  );
+
+  if (active === false) return false;
+  if (active === "false") return false;
+  if (active === 0) return false;
+
+  return true;
+}
+
+function getClientId(item = {}) {
+  return safeText(
+    first(
+      item.clienteId,
+      item.clientId,
+      item.customerId,
+      item.id,
+      item._id,
+      item.email,
+      item.nif,
+      item.raw?.clienteId,
+      item.raw?.clientId,
+      item.raw?.customerId,
+      item.raw?.id,
+      item.raw?._id,
+      item.raw?.email,
+      item.raw?.nif
+    ),
+    ""
+  );
+}
+
+function isActiveClient(item = {}) {
+  const active = first(
+    item.active,
+    item.isActive,
+    item.enabled,
+    item.raw?.active,
+    item.raw?.isActive,
+    item.raw?.enabled
+  );
+
+  if (active === false) return false;
+  if (active === "false") return false;
+  if (active === 0) return false;
+
+  return true;
+}
+
+/* =========================================================
    STATS / ACTIVITY / PAGINATION
 ========================================================= */
 
@@ -1168,30 +1486,29 @@ function getLatestDateFromTickets(tickets = []) {
     })
     .filter(Boolean);
 
-  if (!timestamps.length) {
-    return null;
-  }
+  if (!timestamps.length) return null;
 
   return new Date(Math.max(...timestamps)).toISOString();
 }
 
 function computeHomeStats(input = {}) {
-  const collections = getCollections(input);
-  const role = getRole(input);
+  const data = safeObject(input);
+  const collections = getCollections(data);
+  const role = getRole(data);
   const admin = isAdminRole(role);
 
   const tickets = collections.tickets;
   const invoices = collections.invoices;
+  const users = collections.users;
+  const clients = collections.clients;
 
   const computedOpenTickets = tickets.filter((item) => isTicketOpenLike(item)).length;
   const computedClosedTickets = tickets.filter((item) => isTicketClosedLike(item)).length;
   const computedUrgentTickets = tickets.filter((item) => isTicketUrgent(item)).length;
   const computedPendingInvoices = invoices.filter((item) => isInvoicePendingLike(item)).length;
-
-  const computedInvoiceAmount = invoices.reduce(
-    (sum, item) => sum + getInvoiceAmount(item),
-    0
-  );
+  const computedInvoiceAmount = invoices.reduce((sum, item) => sum + getInvoiceAmount(item), 0);
+  const computedActiveUsers = users.filter((item) => isActiveUser(item)).length;
+  const computedActiveClients = clients.filter((item) => isActiveClient(item)).length;
 
   const attachmentsCount = tickets.reduce(
     (sum, item) => sum + getTicketAttachmentsCount(item),
@@ -1202,8 +1519,19 @@ function computeHomeStats(input = {}) {
 
   const totalTickets = safeNumber(
     getSummaryValue(
-      input,
-      ["totalTickets", "ticketsTotal", "incidenciasTotal", "totalIncidencias"],
+      data,
+      [
+        "totalTickets",
+        "ticketsTotal",
+        "incidenciasTotal",
+        "totalIncidencias",
+        "ticketsCount",
+        "incidenciasCount",
+        "tickets.total",
+        "incidencias.total",
+        "tickets.count",
+        "incidencias.count",
+      ],
       collections.ticketsRemoteCount
     ),
     collections.ticketsRemoteCount
@@ -1211,8 +1539,20 @@ function computeHomeStats(input = {}) {
 
   const openTickets = safeNumber(
     getSummaryValue(
-      input,
-      ["openTickets", "pendingTickets", "openIncidencias", "pendingIncidencias"],
+      data,
+      [
+        "openTickets",
+        "pendingTickets",
+        "openIncidencias",
+        "pendingIncidencias",
+        "incidenciasAbiertas",
+        "ticketsAbiertos",
+        "tickets.open",
+        "tickets.pending",
+        "incidencias.open",
+        "incidencias.pending",
+        "incidencias.abiertas",
+      ],
       computedOpenTickets
     ),
     computedOpenTickets
@@ -1220,8 +1560,20 @@ function computeHomeStats(input = {}) {
 
   const closedTickets = safeNumber(
     getSummaryValue(
-      input,
-      ["closedTickets", "resolvedTickets", "closedIncidencias", "resolvedIncidencias"],
+      data,
+      [
+        "closedTickets",
+        "resolvedTickets",
+        "closedIncidencias",
+        "resolvedIncidencias",
+        "incidenciasCerradas",
+        "ticketsCerrados",
+        "tickets.closed",
+        "tickets.resolved",
+        "incidencias.closed",
+        "incidencias.resolved",
+        "incidencias.cerradas",
+      ],
       computedClosedTickets
     ),
     computedClosedTickets
@@ -1229,8 +1581,18 @@ function computeHomeStats(input = {}) {
 
   const urgentTickets = safeNumber(
     getSummaryValue(
-      input,
-      ["urgentTickets", "urgentIncidencias", "highPriorityTickets"],
+      data,
+      [
+        "urgentTickets",
+        "urgentIncidencias",
+        "highPriorityTickets",
+        "ticketsUrgentes",
+        "incidenciasUrgentes",
+        "tickets.urgent",
+        "incidencias.urgent",
+        "tickets.high",
+        "incidencias.high",
+      ],
       computedUrgentTickets
     ),
     computedUrgentTickets
@@ -1238,8 +1600,19 @@ function computeHomeStats(input = {}) {
 
   const totalInvoices = safeNumber(
     getSummaryValue(
-      input,
-      ["totalInvoices", "invoicesTotal", "facturasTotal", "totalFacturas"],
+      data,
+      [
+        "totalInvoices",
+        "invoicesTotal",
+        "facturasTotal",
+        "totalFacturas",
+        "invoicesCount",
+        "facturasCount",
+        "invoices.total",
+        "facturas.total",
+        "invoices.count",
+        "facturas.count",
+      ],
       collections.invoicesRemoteCount
     ),
     collections.invoicesRemoteCount
@@ -1247,8 +1620,20 @@ function computeHomeStats(input = {}) {
 
   const pendingInvoices = safeNumber(
     getSummaryValue(
-      input,
-      ["pendingInvoices", "pendingFacturas", "facturasPendientes", "invoicesPending"],
+      data,
+      [
+        "pendingInvoices",
+        "pendingFacturas",
+        "facturasPendientes",
+        "invoicesPending",
+        "facturasVencidas",
+        "overdueInvoices",
+        "invoices.pending",
+        "facturas.pending",
+        "facturas.pendientes",
+        "invoices.overdue",
+        "facturas.overdue",
+      ],
       computedPendingInvoices
     ),
     computedPendingInvoices
@@ -1256,8 +1641,22 @@ function computeHomeStats(input = {}) {
 
   const invoiceAmount = safeNumber(
     getSummaryValue(
-      input,
-      ["invoiceAmount", "billingTotal", "totalBilling", "totalFacturado", "importeFacturas"],
+      data,
+      [
+        "invoiceAmount",
+        "billingTotal",
+        "totalBilling",
+        "totalFacturado",
+        "importeFacturas",
+        "facturacionVisible",
+        "facturacionTotal",
+        "facturasImporteTotal",
+        "invoices.amount",
+        "facturas.amount",
+        "invoices.totalAmount",
+        "facturas.totalAmount",
+        "billing.total",
+      ],
       computedInvoiceAmount
     ),
     computedInvoiceAmount
@@ -1265,21 +1664,54 @@ function computeHomeStats(input = {}) {
 
   const usersCount = safeNumber(
     getSummaryValue(
-      input,
-      ["usersCount", "usuariosCount", "totalUsers", "totalUsuarios"],
-      collections.usersRemoteCount
+      data,
+      [
+        "usersCount",
+        "usuariosCount",
+        "totalUsers",
+        "totalUsuarios",
+        "activeUsers",
+        "usuariosActivos",
+        "users.total",
+        "usuarios.total",
+        "users.count",
+        "usuarios.count",
+        "users.active",
+        "usuarios.active",
+      ],
+      collections.usersRemoteCount || computedActiveUsers
     ),
-    collections.usersRemoteCount
+    collections.usersRemoteCount || computedActiveUsers
   );
 
   const clientsCount = safeNumber(
     getSummaryValue(
-      input,
-      ["clientsCount", "clientesCount", "customersCount", "totalClients", "totalClientes"],
-      collections.clientsRemoteCount
+      data,
+      [
+        "clientsCount",
+        "clientesCount",
+        "customersCount",
+        "totalClients",
+        "totalClientes",
+        "totalCustomers",
+        "activeClients",
+        "clientesActivos",
+        "clients.total",
+        "clientes.total",
+        "customers.total",
+        "clients.count",
+        "clientes.count",
+        "clients.active",
+        "clientes.active",
+      ],
+      collections.clientsRemoteCount || computedActiveClients
     ),
-    collections.clientsRemoteCount
+    collections.clientsRemoteCount || computedActiveClients
   );
+
+  const healthRatio = totalTickets
+    ? clampNumber(((totalTickets - openTickets) / totalTickets) * 100, 0, 100)
+    : 100;
 
   return {
     role,
@@ -1297,33 +1729,31 @@ function computeHomeStats(input = {}) {
     invoiceAmount,
 
     usersCount,
+    activeUsersCount: computedActiveUsers,
+
     clientsCount,
+    activeClientsCount: computedActiveClients,
 
     attachmentsCount,
     lastTicketUpdate,
-
-    healthRatio: totalTickets
-      ? clampNumber(((totalTickets - openTickets) / totalTickets) * 100, 0, 100)
-      : 100,
+    healthRatio,
   };
 }
 
 function buildSyntheticActivity(input = {}) {
   const collections = getCollections(input);
 
-  const ticketActivity = collections.tickets.slice(0, 5).map((item) => ({
+  const ticketActivity = collections.tickets.slice(0, 8).map((item) => ({
     type: "ticket",
     title: getTicketSubject(item),
-    text: `Incidencia ${getTicketId(item)} · ${getTicketStatusLabel(
-      getTicketStatus(item)
-    )}`,
+    text: `Incidencia ${getTicketId(item)} · ${getTicketStatusLabel(getTicketStatus(item))}`,
     date: getTicketUpdatedAt(item) || getTicketCreatedAt(item),
     route: HOME_ROUTES.INCIDENCIAS,
     action: "open-ticket",
     entityId: getTicketId(item),
   }));
 
-  const invoiceActivity = collections.invoices.slice(0, 3).map((item) => ({
+  const invoiceActivity = collections.invoices.slice(0, 4).map((item) => ({
     type: "invoice",
     title: `Factura ${getInvoiceId(item)}`,
     text: `${formatMoney(getInvoiceAmount(item), getInvoiceCurrency(item))}`,
@@ -1341,7 +1771,34 @@ function buildSyntheticActivity(input = {}) {
     entityId: getInvoiceId(item),
   }));
 
-  return [...ticketActivity, ...invoiceActivity]
+  const clientActivity = collections.clients.slice(0, 3).map((item) => ({
+    type: "client",
+    title: safeText(first(item.name, item.nombre, item.razonSocial, item.email), "Cliente"),
+    text: "Cliente sincronizado en el panel.",
+    date: first(item.updatedAt, item.createdAt, item.raw?.updatedAt, item.raw?.createdAt),
+    route: HOME_ROUTES.CLIENTES,
+    action: "navigate-home",
+    entityId: getClientId(item),
+  }));
+
+  const userActivity = collections.users.slice(0, 3).map((item) => ({
+    type: "user",
+    title: safeText(first(item.name, item.nombre, item.username, item.email), "Usuario"),
+    text: "Usuario disponible en el sistema.",
+    date: first(
+      item.lastLoginAt,
+      item.updatedAt,
+      item.createdAt,
+      item.raw?.lastLoginAt,
+      item.raw?.updatedAt,
+      item.raw?.createdAt
+    ),
+    route: HOME_ROUTES.USUARIOS,
+    action: "navigate-home",
+    entityId: getUserId(item),
+  }));
+
+  return [...ticketActivity, ...invoiceActivity, ...clientActivity, ...userActivity]
     .filter((item) => item.title || item.text)
     .sort((a, b) => {
       const da = new Date(a.date || 0).getTime();
@@ -1421,10 +1878,10 @@ function getActivityType(item = {}) {
     )
   );
 
-  if (["factura", "invoice", "billing"].includes(key)) return "invoice";
-  if (["ticket", "incidencia", "support"].includes(key)) return "ticket";
+  if (["factura", "invoice", "billing", "bill"].includes(key)) return "invoice";
+  if (["ticket", "incidencia", "support", "issue"].includes(key)) return "ticket";
   if (["cliente", "client", "customer"].includes(key)) return "client";
-  if (["usuario", "user"].includes(key)) return "user";
+  if (["usuario", "user", "member"].includes(key)) return "user";
 
   return key || "activity";
 }
@@ -1464,10 +1921,7 @@ function getPagination(items = [], input = {}) {
     )
   );
 
-  const totalPagesFromProps = safeNumber(
-    first(data.totalPages, runtime.totalPages),
-    0
-  );
+  const totalPagesFromProps = safeNumber(first(data.totalPages, runtime.totalPages), 0);
 
   const totalPages = Math.max(
     1,
@@ -1513,86 +1967,36 @@ function getPagination(items = [], input = {}) {
 
 function getWidgetId(widget = {}) {
   return safeText(
-    first(
-      widget.widgetId,
-      widget.widgetKey,
-      widget.id,
-      widget.key,
-      widget.slug,
-      widget.code
-    ),
+    first(widget.widgetId, widget.widgetKey, widget.id, widget.key, widget.slug, widget.code),
     ""
   );
 }
 
 function getWidgetTitle(widget = {}) {
-  return safeText(
-    first(
-      widget.title,
-      widget.name,
-      widget.label,
-      widget.heading
-    ),
-    "Bloque"
-  );
+  return safeText(first(widget.title, widget.name, widget.label, widget.heading), "Bloque");
 }
 
 function getWidgetText(widget = {}) {
   return safeText(
-    first(
-      widget.description,
-      widget.descripcion,
-      widget.subtitle,
-      widget.text,
-      widget.summary
-    ),
+    first(widget.description, widget.descripcion, widget.subtitle, widget.text, widget.summary),
     ""
   );
 }
 
 function getWidgetValue(widget = {}) {
-  return first(
-    widget.value,
-    widget.total,
-    widget.amount,
-    widget.count,
-    widget.metric,
-    "—"
-  );
+  return first(widget.value, widget.total, widget.amount, widget.count, widget.metric, "—");
 }
 
 function getWidgetTrend(widget = {}) {
-  return first(
-    widget.trend,
-    widget.delta,
-    widget.change,
-    widget.variation,
-    ""
-  );
+  return first(widget.trend, widget.delta, widget.change, widget.variation, "");
 }
 
 function getWidgetType(widget = {}) {
-  return normalizeKey(
-    first(
-      widget.type,
-      widget.kind,
-      widget.variant,
-      widget.category,
-      "widget"
-    )
-  );
+  return normalizeKey(first(widget.type, widget.kind, widget.variant, widget.category, "widget"));
 }
 
 function getWidgetRoute(widget = {}) {
-  return normalizeRoute(
-    first(
-      widget.route,
-      widget.href,
-      widget.link,
-      widget.to,
-      ""
-    )
-  );
+  return normalizeRoute(first(widget.route, widget.href, widget.link, widget.to, ""));
 }
 
 /* =========================================================
@@ -1603,7 +2007,21 @@ function renderSpinner(label = "") {
   return `
     <span class="home-inline-loading">
       <span class="home-inline-spinner" aria-hidden="true"></span>
-      <span>${escapeHtml(label)}</span>
+      ${label ? `<span>${escapeHtml(label)}</span>` : ""}
+    </span>
+  `;
+}
+
+function renderLoaderOnly(label = "Cargando") {
+  return `
+    <span
+      class="home-loader-only"
+      role="status"
+      aria-label="${escapeHtml(label)}"
+      title="${escapeHtml(label)}"
+      data-tooltip="${escapeHtml(label)}"
+    >
+      <span class="home-inline-spinner" aria-hidden="true"></span>
     </span>
   `;
 }
@@ -1612,14 +2030,19 @@ function renderUserAvatar(input = {}) {
   const fullName = getDisplayName(input);
   const initials = getInitials(fullName);
   const avatarUrl = getAvatarUrl(input);
+  const user = getUser(input);
+  const seed = first(user.userId, user.id, user.email, user.username, fullName, "home-user");
+  const avatarStyle = getAvatarStyle(seed);
 
   return `
     <div
       class="home-user-avatar${avatarUrl ? "" : " home-user-avatar--fallback"}"
       aria-label="${escapeHtml(fullName)}"
+      title="${escapeHtml(fullName)}"
       data-tooltip="${escapeHtml(fullName)}"
       data-avatar-root="true"
       ${avatarUrl ? "" : 'data-fallback="true"'}
+      style="${escapeHtml(avatarStyle)}"
     >
       <span class="home-user-avatar-fallback">${escapeHtml(initials)}</span>
       ${
@@ -1645,14 +2068,18 @@ function renderTicketAvatar(item = {}) {
   const fullName = getTicketOwnerName(item);
   const initials = getInitials(fullName);
   const avatarUrl = getTicketAvatarUrl(item);
+  const seed = `${getTicketId(item)}|${fullName}`;
+  const avatarStyle = getAvatarStyle(seed);
 
   return `
     <div
       class="home-ticket-avatar${avatarUrl ? "" : " home-ticket-avatar--fallback"}"
       aria-label="${escapeHtml(fullName)}"
+      title="${escapeHtml(fullName)}"
       data-tooltip="${escapeHtml(fullName)}"
       data-avatar-root="true"
       ${avatarUrl ? "" : 'data-fallback="true"'}
+      style="${escapeHtml(avatarStyle)}"
     >
       <span class="home-ticket-avatar-fallback">${escapeHtml(initials)}</span>
       ${
@@ -1761,9 +2188,7 @@ function getStatCards(input = {}) {
     },
     {
       label: "Última actividad",
-      value: stats.lastTicketUpdate
-        ? formatRelativeDate(stats.lastTicketUpdate)
-        : "Sin fecha",
+      value: stats.lastTicketUpdate ? formatRelativeDate(stats.lastTicketUpdate) : "Sin fecha",
       text: "Movimiento más reciente en tus solicitudes.",
       modifier: "activity",
     },
@@ -1771,8 +2196,7 @@ function getStatCards(input = {}) {
 }
 
 function getQuickActions(input = {}) {
-  const role = getRole(input);
-  const admin = isAdminRole(role);
+  const admin = isAdminRole(getRole(input));
 
   if (admin) {
     return [
@@ -1899,16 +2323,8 @@ function renderWidgetCard(widget = {}, index = 0) {
       <span class="home-widget-kicker">${escapeHtml(type || "widget")}</span>
       <strong class="home-widget-value">${escapeHtml(String(value ?? "—"))}</strong>
       <span class="home-widget-title">${escapeHtml(title)}</span>
-      ${
-        text
-          ? `<span class="home-widget-text">${escapeHtml(text)}</span>`
-          : ""
-      }
-      ${
-        trend
-          ? `<span class="home-widget-trend">${escapeHtml(String(trend))}</span>`
-          : ""
-      }
+      ${text ? `<span class="home-widget-text">${escapeHtml(text)}</span>` : ""}
+      ${trend ? `<span class="home-widget-trend">${escapeHtml(String(trend))}</span>` : ""}
     </button>
   `;
 }
@@ -1940,7 +2356,7 @@ function renderTicketRow(item = {}, state = {}) {
       </td>
 
       <td class="home-ticket-cell home-ticket-cell--owner">
-        <span class="home-ticket-owner">${escapeHtml(ownerName)}</span>
+        <span class="home-ticket-owner" title="${escapeHtml(ownerName)}">${escapeHtml(ownerName)}</span>
       </td>
 
       <td class="home-ticket-cell home-ticket-cell--status">
@@ -1970,11 +2386,7 @@ function renderTicketRow(item = {}, state = {}) {
           data-route="${escapeHtml(HOME_ROUTES.INCIDENCIAS)}"
           ${isOpening ? 'disabled aria-busy="true"' : ""}
         >
-          ${
-            isOpening
-              ? renderSpinner("Cargando...")
-              : '<span class="home-btn-text">Ver detalle</span>'
-          }
+          ${isOpening ? renderLoaderOnly("Cargando detalle") : '<span class="home-btn-text">Ver detalle</span>'}
         </button>
       </td>
     </tr>
@@ -1987,7 +2399,10 @@ function renderActivityItem(item = {}) {
   const text = getActivityText(item);
   const date = getActivityDate(item);
   const route = normalizeRoute(first(item.route, item.href, item.link, item.raw?.route, ""));
-  const action = safeText(first(item.action, item.raw?.action, "open-activity"), "open-activity");
+  const action = safeText(
+    first(item.action, item.raw?.action, route ? "navigate-home" : "open-activity"),
+    "open-activity"
+  );
 
   const entityId = safeText(
     first(
@@ -2170,12 +2585,41 @@ function renderStyles() {
         border-radius:19px;
         overflow:hidden;
         flex:0 0 58px;
-        background:
-          linear-gradient(135deg, rgba(124,92,255,.22), rgba(56,189,248,.20)),
-          color-mix(in srgb, var(--accent, #7c5cff) 24%, #111827);
+        background:var(--home-avatar-bg, linear-gradient(135deg, rgba(124,92,255,.92), rgba(56,189,248,.82)));
         box-shadow:
-          0 12px 28px rgba(124,92,255,.12),
-          0 0 0 1px rgba(255,255,255,.38) inset;
+          0 12px 28px var(--home-avatar-shadow, rgba(124,92,255,.14)),
+          0 0 0 3px color-mix(in srgb, var(--home-avatar-ring, rgba(124,92,255,.28)) 52%, transparent),
+          0 1px 0 rgba(255,255,255,.40) inset;
+        transform:translateZ(0);
+      }
+
+      .home-ticket-avatar{
+        position:relative;
+        width:44px;
+        height:44px;
+        border-radius:999px;
+        overflow:hidden;
+        flex:0 0 44px;
+        background:var(--home-avatar-bg, linear-gradient(135deg, rgba(124,92,255,.92), rgba(56,189,248,.82)));
+        box-shadow:
+          0 10px 22px var(--home-avatar-shadow, rgba(15,23,42,.12)),
+          0 0 0 3px color-mix(in srgb, var(--home-avatar-ring, rgba(124,92,255,.22)) 48%, transparent),
+          0 1px 0 rgba(255,255,255,.35) inset;
+        transform:translateZ(0);
+      }
+
+      .home-user-avatar::after,
+      .home-ticket-avatar::after{
+        content:"";
+        position:absolute;
+        inset:0;
+        border-radius:inherit;
+        background:
+          radial-gradient(circle at 30% 22%, rgba(255,255,255,.42), transparent 34%),
+          linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.08));
+        pointer-events:none;
+        mix-blend-mode:screen;
+        z-index:3;
       }
 
       .home-user-avatar img,
@@ -2199,6 +2643,9 @@ function renderStyles() {
         justify-content:center;
         color:#fff;
         letter-spacing:-.035em;
+        text-shadow:
+          0 1px 2px rgba(0,0,0,.22),
+          0 0 16px rgba(255,255,255,.20);
       }
 
       .home-user-avatar-fallback{
@@ -2209,6 +2656,11 @@ function renderStyles() {
       .home-ticket-avatar-fallback{
         font-size:17px;
         font-weight:800;
+      }
+
+      .home-user-avatar[data-fallback="true"] img,
+      .home-ticket-avatar[data-fallback="true"] img{
+        display:none !important;
       }
 
       .home-hero-copy{
@@ -2842,18 +3294,6 @@ function renderStyles() {
         min-width:0;
       }
 
-      .home-ticket-avatar{
-        position:relative;
-        width:44px;
-        height:44px;
-        border-radius:999px;
-        overflow:hidden;
-        flex:0 0 44px;
-        background:
-          linear-gradient(135deg, rgba(124,92,255,.14), rgba(56,189,248,.16)),
-          color-mix(in srgb, var(--accent, #7c5cff) 20%, #111827);
-      }
-
       .home-ticket-copy{
         min-width:0;
         display:grid;
@@ -2975,9 +3415,11 @@ function renderStyles() {
       }
 
       .home-detail-btn{
-        width:auto;
-        min-width:0;
+        inline-size:104px;
+        min-inline-size:104px;
+        max-inline-size:104px;
         min-height:34px;
+        height:34px;
         padding:0 12px;
         border-radius:12px;
         border:1px solid rgba(15,23,42,.07);
@@ -3005,9 +3447,19 @@ function renderStyles() {
         transform:translateY(-1px);
       }
 
+      .home-loader-only{
+        display:inline-flex;
+        width:16px;
+        height:16px;
+        align-items:center;
+        justify-content:center;
+        flex:0 0 auto;
+      }
+
       .home-inline-loading{
         display:inline-flex;
         align-items:center;
+        justify-content:center;
         gap:7px;
         white-space:nowrap;
       }
@@ -3221,6 +3673,11 @@ function renderStyles() {
           rgba(255,255,255,.58);
       }
 
+      [data-theme="dark"] .home-user-avatar,
+      [data-theme="dark"] .home-ticket-avatar{
+        background:var(--home-avatar-bg-dark, var(--home-avatar-bg));
+      }
+
       [data-theme="dark"] .home-hero,
       [data-theme="dark"] .home-panel,
       [data-theme="dark"] .home-tickets,
@@ -3404,9 +3861,7 @@ export function renderHomeHeader(input = {}) {
     first(
       data.title,
       state.title,
-      stats.admin
-        ? "Panel de control"
-        : `Hola, ${displayName}`
+      stats.admin ? "Panel de control" : `Hola, ${displayName}`
     ),
     stats.admin ? "Panel de control" : "Tu home"
   );
@@ -3637,7 +4092,7 @@ export function renderHomeActivity(input = {}) {
               `
               : renderEmptyState({
                   title: "Sin actividad reciente",
-                  text: "Cuando haya movimientos en incidencias o facturas aparecerán aquí.",
+                  text: "Cuando haya movimientos en incidencias, facturas, clientes o usuarios aparecerán aquí.",
                 })
         }
       </div>

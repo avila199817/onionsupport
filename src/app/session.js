@@ -35,8 +35,10 @@
    - bootNavigationHandled solo se marca cuando Router navega/renderiza
    - las rutas públicas técnicas bloquean navegación, pero NO bloquean render inicial
    - Router.navigate se espera con await si devuelve Promise
-   - syncUserUI se ejecuta en modo moderno y legacy
-   - emite eventos de sesión/restauración para reparar Sidebar/Topbar
+   - syncUserUI se ejecuta una sola vez, con fallback legacy solo si falla modo moderno
+   - eventos session:restored no se emiten duplicados entre restoreAuthSession y restoreSessionInBackground
+   - emit() no duplica AppCore.events + window.AppCore.events
+   - no se intenta navegación post-restore si hay login en curso
 ========================================================= */
 
 import {
@@ -52,6 +54,8 @@ const LOGIN_PATH = "/login";
 const ACTIVATION_PATH = "/activate-account";
 const RESET_PASSWORD_PATH = "/reset-password";
 const RESET_CONFIRM_PATH = "/reset-password/confirm";
+
+const SESSION_READY_EVENT_DEDUPE_MS = 160;
 
 const PUBLIC_TECHNICAL_ROUTES = new Set([
   "/activate-account",
@@ -92,6 +96,13 @@ const RESET_TOKEN_PARAM_NAMES = [
   "code",
   "t",
 ];
+
+/* =========================================================
+   MODULE RUNTIME
+========================================================= */
+
+let lastSessionReadyEmitKey = "";
+let lastSessionReadyEmitAt = 0;
 
 /* =========================================================
    BASICS
@@ -212,20 +223,76 @@ function isAuthenticated(AppCore) {
   );
 }
 
-function emit(AppCore, eventName, payload = {}) {
+function isAuthLoginInProgress(Auth, state = {}) {
   try {
-    AppCore?.events?.emit?.(
-      eventName,
-      payload
-    );
+    if (state?.loginInProgress === true) {
+      return true;
+    }
   } catch {}
 
   try {
-    window?.AppCore?.events?.emit?.(
-      eventName,
-      payload
-    );
+    if (Auth?.session?.loggingIn === true) {
+      return true;
+    }
   } catch {}
+
+  try {
+    if (Auth?.session?.loginPromise) {
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function emit(AppCore, eventName, payload = {}, options = {}) {
+  const name =
+    safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  const opts =
+    safeObject(options);
+
+  let busAvailable = false;
+  let busEmitted = false;
+
+  try {
+    if (isFunction(AppCore?.events?.emit)) {
+      busAvailable = true;
+
+      AppCore.events.emit(
+        name,
+        payload
+      );
+
+      busEmitted = true;
+    }
+  } catch {}
+
+  /*
+    Evita doble emisión:
+    si AppCore.events existe, no repetimos por window.AppCore.events.
+    window queda como fallback real o emisión forzada.
+  */
+  if (
+    opts.window === true ||
+    (!busAvailable && isBrowser())
+  ) {
+    try {
+      window.dispatchEvent(
+        new CustomEvent(name, {
+          detail: payload,
+        })
+      );
+
+      return true;
+    } catch {}
+  }
+
+  return busEmitted;
 }
 
 function afterPaint(callback) {
@@ -969,8 +1036,6 @@ async function runSyncUserUI({
     return false;
   }
 
-  let synced = false;
-
   const context = {
     AppCore,
     Auth,
@@ -978,9 +1043,15 @@ async function runSyncUserUI({
     reason,
   };
 
+  let synced = false;
+
   /*
     Modo moderno:
     syncUserUI({ AppCore, Auth, Router, reason })
+
+    Importante:
+    no llamamos también a syncUserUI(AppCore) si esto funciona.
+    Antes se ejecutaba dos veces en app/index porque la función ignora args.
   */
   try {
     await Promise.resolve(
@@ -991,22 +1062,24 @@ async function runSyncUserUI({
   } catch (error) {
     safeWarn(
       AppCore,
-      "syncUserUI(context) falló.",
+      "syncUserUI(context) falló. Probando compat legacy.",
       error
     );
+
+    try {
+      await Promise.resolve(
+        syncUserUI(AppCore)
+      );
+
+      synced = true;
+    } catch (legacyError) {
+      safeWarn(
+        AppCore,
+        "syncUserUI(AppCore) también falló.",
+        legacyError
+      );
+    }
   }
-
-  /*
-    Compat legacy:
-    syncUserUI(AppCore)
-  */
-  try {
-    await Promise.resolve(
-      syncUserUI(AppCore)
-    );
-
-    synced = true;
-  } catch {}
 
   emit(
     AppCore,
@@ -1021,6 +1094,12 @@ async function runSyncUserUI({
         getResolvedSessionRole(AppCore),
       source:
         "AppSession",
+      repairShell:
+        false,
+      hardRepair:
+        false,
+      rebind:
+        false,
     }
   );
 
@@ -1063,9 +1142,26 @@ function clearAuthScreenDomState({
   }
 
   try {
+    document.documentElement?.classList?.remove?.(
+      "route-auth",
+      "route-shell-hidden"
+    );
+
+    document.documentElement?.classList?.add?.(
+      "route-app",
+      "route-shell-visible"
+    );
+
     document.body?.classList?.remove?.(
       "auth-screen",
-      "login-no-scroll"
+      "login-no-scroll",
+      "route-auth",
+      "route-shell-hidden"
+    );
+
+    document.body?.classList?.add?.(
+      "route-app",
+      "route-shell-visible"
     );
 
     document.body?.removeAttribute?.(
@@ -1083,10 +1179,9 @@ function clearAuthScreenDomState({
       document.getElementById("app-shell");
 
     if (shell) {
-      shell.setAttribute(
-        "aria-busy",
-        "false"
-      );
+      shell.hidden = false;
+      shell.setAttribute("aria-hidden", "false");
+      shell.setAttribute("aria-busy", "false");
     }
   } catch {}
 
@@ -1095,10 +1190,9 @@ function clearAuthScreenDomState({
       document.getElementById("main-content");
 
     if (main) {
-      main.setAttribute(
-        "aria-busy",
-        "false"
-      );
+      main.hidden = false;
+      main.setAttribute("aria-hidden", "false");
+      main.setAttribute("aria-busy", "false");
     }
   } catch {}
 
@@ -1107,10 +1201,9 @@ function clearAuthScreenDomState({
       document.getElementById("view-container");
 
     if (view) {
-      view.setAttribute(
-        "aria-busy",
-        "false"
-      );
+      view.hidden = false;
+      view.setAttribute("aria-hidden", "false");
+      view.setAttribute("aria-busy", "false");
     }
   } catch {}
 
@@ -1128,12 +1221,12 @@ function clearAuthScreenDomState({
   return true;
 }
 
-function emitSessionReadyEvents({
+function buildSessionReadyPayload({
   AppCore,
   reason = "session-ready",
   result = {},
 } = {}) {
-  const payload = {
+  return {
     reason,
     ok:
       Boolean(result?.ok) ||
@@ -1153,6 +1246,45 @@ function emitSessionReadyEvents({
     source:
       "AppSession",
   };
+}
+
+function emitSessionReadyEvents({
+  AppCore,
+  reason = "session-ready",
+  result = {},
+  dedupe = true,
+} = {}) {
+  const payload =
+    buildSessionReadyPayload({
+      AppCore,
+      reason,
+      result,
+    });
+
+  const key = [
+    payload.authenticated ? "auth" : "anon",
+    safeText(payload.username, ""),
+    safeText(payload.role, ""),
+    safeText(payload.route, ""),
+    safeText(payload.publicPath, ""),
+  ].join("|");
+
+  const now =
+    Date.now();
+
+  if (
+    dedupe &&
+    key === lastSessionReadyEmitKey &&
+    now - lastSessionReadyEmitAt < SESSION_READY_EVENT_DEDUPE_MS
+  ) {
+    return payload;
+  }
+
+  lastSessionReadyEmitKey =
+    key;
+
+  lastSessionReadyEmitAt =
+    now;
 
   emit(
     AppCore,
@@ -1175,7 +1307,15 @@ function emitSessionReadyEvents({
   emit(
     AppCore,
     "app:ui:repair-request",
-    payload
+    {
+      ...payload,
+      repairShell:
+        false,
+      hardRepair:
+        false,
+      rebind:
+        false,
+    }
   );
 
   return payload;
@@ -1185,11 +1325,12 @@ function emitSessionReadyEvents({
    NAVIGATION GUARDS
 ========================================================= */
 
-function shouldSkipNavigation(state) {
+function shouldSkipNavigation(state, Auth = null) {
   return Boolean(
     state?.bootNavigationHandled ||
     state?.loginNavigationHandled ||
-    state?.loginInProgress
+    state?.loginInProgress ||
+    isAuthLoginInProgress(Auth, state)
   );
 }
 
@@ -1539,16 +1680,18 @@ export async function navigateAfterSessionRestore({
   }
 
   if (
-    shouldSkipNavigation(state)
+    shouldSkipNavigation(state, Auth)
   ) {
     markNavigationSkipped(
       state,
-      "already-handled"
+      isAuthLoginInProgress(Auth, state)
+        ? "login-in-progress"
+        : "already-handled"
     );
 
     safeLog(
       AppCore,
-      "navigateAfterSessionRestore(): omitido porque ya hay navegación resuelta.",
+      "navigateAfterSessionRestore(): omitido porque ya hay navegación/login en curso.",
       {
         canonical:
           currentCanonicalPath,
@@ -1560,6 +1703,8 @@ export async function navigateAfterSessionRestore({
           Boolean(state?.loginNavigationHandled),
         loginInProgress:
           Boolean(state?.loginInProgress),
+        authLoginInProgress:
+          isAuthLoginInProgress(Auth, state),
       }
     );
 
@@ -1670,6 +1815,12 @@ export async function navigateAfterSessionRestore({
           target,
           authenticated: true,
           source: "AppSession",
+          repairShell:
+            false,
+          hardRepair:
+            false,
+          rebind:
+            false,
         }
       );
     });
@@ -1707,6 +1858,7 @@ export async function restoreAuthSession({
   Router,
   syncUserUI,
   state,
+  emitReadyEvents = true,
 } = {}) {
   if (
     state?.sessionRestorePromise
@@ -1790,6 +1942,7 @@ export async function restoreAuthSession({
         });
 
         if (
+          emitReadyEvents &&
           isAuthenticated(AppCore)
         ) {
           emitSessionReadyEvents({
@@ -1912,6 +2065,14 @@ export async function restoreSessionInBackground({
         Router,
         syncUserUI,
         state,
+
+        /*
+          Importante:
+          restoreSessionInBackground emite el evento final una sola vez,
+          después de warmup + posible navegación post-restore.
+          Así evitamos doble app:session:restored.
+        */
+        emitReadyEvents: false,
       });
 
     try {
@@ -2074,6 +2235,12 @@ export function getSessionBootstrapSnapshot({
     loginInProgress:
       Boolean(
         state?.loginInProgress
+      ),
+
+    authLoginInProgress:
+      isAuthLoginInProgress(
+        null,
+        state
       ),
 
     activationBoot:

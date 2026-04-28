@@ -15,6 +15,12 @@
    - evitar timers huérfanos
    - evitar nodos zombie
    - mantener estado store/dom/timers consistente
+
+   FIX CRÍTICO:
+   - evitar recursión infinita clearToasts() -> toast:clear -> clearToasts()
+   - safeEmit no duplica AppCore.events + window cuando existe bus
+   - clearToasts soporta silent / emit:false / source app-events
+   - clearToasts queda protegido por lock anti reentrada
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -79,6 +85,26 @@ import {
 } from "./events.js";
 
 /* =========================================================
+   RUNTIME GUARDS
+========================================================= */
+
+let clearToastsRunning = false;
+let resetToastApiRunning = false;
+let lastClearToastsEmitAt = 0;
+let lastResetToastEmitAt = 0;
+
+const CLEAR_TOASTS_EMIT_DEDUPE_MS = 120;
+const RESET_TOAST_EMIT_DEDUPE_MS = 120;
+
+const EVENT_SOURCE_BLOCKLIST = new Set([
+  "event-bus",
+  "app-events",
+  "toast-events",
+  "toast:clear",
+  "toast:reset",
+]);
+
+/* =========================================================
    BASICS
 ========================================================= */
 
@@ -135,12 +161,24 @@ function safeNumber(value, fallback = 0) {
 }
 
 function safeWarn(...args) {
+  let emittedByCore = false;
+
   try {
-    AppCore?.utils?.warn?.(
-      "[ToastAPI]",
-      ...args
-    );
-  } catch {}
+    if (typeof AppCore?.utils?.warn === "function") {
+      AppCore.utils.warn(
+        "[ToastAPI]",
+        ...args
+      );
+
+      emittedByCore = true;
+    }
+  } catch {
+    emittedByCore = false;
+  }
+
+  if (emittedByCore) {
+    return;
+  }
 
   try {
     console.warn(
@@ -151,12 +189,24 @@ function safeWarn(...args) {
 }
 
 function safeError(...args) {
+  let emittedByCore = false;
+
   try {
-    AppCore?.utils?.error?.(
-      "[ToastAPI]",
-      ...args
-    );
-  } catch {}
+    if (typeof AppCore?.utils?.error === "function") {
+      AppCore.utils.error(
+        "[ToastAPI]",
+        ...args
+      );
+
+      emittedByCore = true;
+    }
+  } catch {
+    emittedByCore = false;
+  }
+
+  if (emittedByCore) {
+    return;
+  }
 
   try {
     console.error(
@@ -166,26 +216,46 @@ function safeError(...args) {
   } catch {}
 }
 
-function safeEmit(eventName, payload = {}) {
+function safeEmit(eventName, payload = {}, options = {}) {
   const name = safeText(eventName, "");
 
   if (!name) {
     return false;
   }
 
+  const opts =
+    isObject(options)
+      ? options
+      : {};
+
+  let busAvailable = false;
   let emitted = false;
 
   try {
-    AppCore?.events?.emit?.(
-      name,
-      payload
-    );
+    if (
+      typeof AppCore?.events?.emit === "function"
+    ) {
+      busAvailable = true;
 
-    emitted = true;
+      AppCore.events.emit(
+        name,
+        payload
+      );
+
+      emitted = true;
+    }
   } catch {}
 
-  try {
-    if (isBrowser()) {
+  /*
+    CRÍTICO:
+    Si existe AppCore.events, NO duplicamos en window por defecto.
+    Emitir por bus + window puede duplicar listeners y provocar loops.
+  */
+  if (
+    opts.window === true ||
+    (!busAvailable && isBrowser())
+  ) {
+    try {
       window.dispatchEvent(
         new CustomEvent(name, {
           detail: payload,
@@ -193,8 +263,8 @@ function safeEmit(eventName, payload = {}) {
       );
 
       emitted = true;
-    }
-  } catch {}
+    } catch {}
+  }
 
   return emitted;
 }
@@ -265,6 +335,86 @@ function safeDelay(callback, delay = 0) {
   } catch {}
 
   return null;
+}
+
+function getEventSource(options = {}) {
+  return safeText(
+    options?.source ||
+      options?.origin ||
+      options?.eventSource ||
+      "",
+    ""
+  );
+}
+
+function shouldEmitClearToastsEvent(options = {}) {
+  if (options?.silent === true) {
+    return false;
+  }
+
+  if (options?.emit === false) {
+    return false;
+  }
+
+  const source =
+    getEventSource(options);
+
+  if (
+    source &&
+    EVENT_SOURCE_BLOCKLIST.has(source)
+  ) {
+    return false;
+  }
+
+  const now =
+    Date.now();
+
+  if (
+    now - lastClearToastsEmitAt <
+    CLEAR_TOASTS_EMIT_DEDUPE_MS
+  ) {
+    return false;
+  }
+
+  lastClearToastsEmitAt =
+    now;
+
+  return true;
+}
+
+function shouldEmitResetToastEvent(options = {}) {
+  if (options?.silent === true) {
+    return false;
+  }
+
+  if (options?.emit === false) {
+    return false;
+  }
+
+  const source =
+    getEventSource(options);
+
+  if (
+    source &&
+    EVENT_SOURCE_BLOCKLIST.has(source)
+  ) {
+    return false;
+  }
+
+  const now =
+    Date.now();
+
+  if (
+    now - lastResetToastEmitAt <
+    RESET_TOAST_EMIT_DEDUPE_MS
+  ) {
+    return false;
+  }
+
+  lastResetToastEmitAt =
+    now;
+
+  return true;
 }
 
 /* =========================================================
@@ -737,6 +887,8 @@ function enforceToastLimit() {
         oldest.id,
         {
           reason: "limit",
+          emit: false,
+          source: "toast-limit",
         }
       )
     ) {
@@ -1239,51 +1391,85 @@ export function dismissToast(id, options = {}) {
 ========================================================= */
 
 export function clearToasts(options = {}) {
-  const immediate =
-    safeBool(
-      options.immediate,
-      false
-    );
+  const opts =
+    isObject(options)
+      ? options
+      : {};
 
-  const ids =
-    [...getToastIds()];
+  /*
+    CRÍTICO:
+    Si toast:clear vuelve a llamar clearToasts() desde events.js,
+    cortamos la reentrada en seco.
+  */
+  if (clearToastsRunning) {
+    return false;
+  }
 
-  let cleared = 0;
+  clearToastsRunning = true;
 
-  ids.forEach((id) => {
-    if (immediate) {
-      if (destroyToastById(id)) {
-        cleared += 1;
+  try {
+    const immediate =
+      safeBool(
+        opts.immediate,
+        false
+      );
+
+    const ids =
+      [...getToastIds()];
+
+    let cleared = 0;
+
+    ids.forEach((id) => {
+      if (immediate) {
+        if (destroyToastById(id)) {
+          cleared += 1;
+        }
+
+        return;
       }
 
-      return;
-    }
+      if (
+        dismissToast(
+          id,
+          {
+            reason:
+              opts.reason ||
+              "clear",
+            delay:
+              opts.delay,
+            emit:
+              false,
+            source:
+              "clear-toasts",
+          }
+        )
+      ) {
+        cleared += 1;
+      }
+    });
 
     if (
-      dismissToast(
-        id,
-        {
-          reason:
-            options.reason ||
-            "clear",
-          delay:
-            options.delay,
-        }
-      )
+      shouldEmitClearToastsEvent(opts)
     ) {
-      cleared += 1;
+      safeEmit(
+        "toast:clear",
+        {
+          cleared,
+          immediate,
+          reason:
+            opts.reason ||
+            "clear",
+          source:
+            opts.source ||
+            "toast-api",
+        }
+      );
     }
-  });
 
-  safeEmit(
-    "toast:clear",
-    {
-      cleared,
-      immediate,
-    }
-  );
-
-  return true;
+    return true;
+  } finally {
+    clearToastsRunning = false;
+  }
 }
 
 /* =========================================================
@@ -1376,42 +1562,67 @@ export function loadingToast(message = "", options = {}) {
    RESET
 ========================================================= */
 
-export function resetToastApiState() {
-  const items =
-    getToastItems();
+export function resetToastApiState(options = {}) {
+  const opts =
+    isObject(options)
+      ? options
+      : {};
 
-  items.forEach((item) => {
-    try {
-      clearToastTimer(item);
-    } catch {}
-
-    try {
-      removeToastNode(item);
-    } catch {}
-
-    try {
-      unmarkToastDismissing(item.id);
-    } catch {}
-  });
-
-  try {
-    resetToastStore();
-  } catch (error) {
-    safeError(
-      "resetToastStore falló.",
-      error
-    );
+  if (resetToastApiRunning) {
+    return false;
   }
 
-  safeEmit(
-    "toast:reset",
-    {
-      count:
-        items.length,
-    }
-  );
+  resetToastApiRunning = true;
 
-  return true;
+  try {
+    const items =
+      getToastItems();
+
+    items.forEach((item) => {
+      try {
+        clearToastTimer(item);
+      } catch {}
+
+      try {
+        removeToastNode(item);
+      } catch {}
+
+      try {
+        unmarkToastDismissing(item.id);
+      } catch {}
+    });
+
+    try {
+      resetToastStore();
+    } catch (error) {
+      safeError(
+        "resetToastStore falló.",
+        error
+      );
+    }
+
+    if (
+      shouldEmitResetToastEvent(opts)
+    ) {
+      safeEmit(
+        "toast:reset",
+        {
+          count:
+            items.length,
+          reason:
+            opts.reason ||
+            "reset",
+          source:
+            opts.source ||
+            "toast-api",
+        }
+      );
+    }
+
+    return true;
+  } finally {
+    resetToastApiRunning = false;
+  }
 }
 
 /* =========================================================
@@ -1434,6 +1645,11 @@ export function getToastApiSnapshot() {
 
     activeCount:
       getActiveToasts().length,
+
+    clearToastsRunning,
+    resetToastApiRunning,
+    lastClearToastsEmitAt,
+    lastResetToastEmitAt,
 
     items:
       items.map((item) => ({

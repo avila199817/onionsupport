@@ -2,218 +2,1171 @@
    Onion SPA - Cuenta Bindings
    Archivo: src/views/cuenta/cuenta.bindings.js
 
-   Responsabilidades:
-   - bind DOM robusto
+   CLIENT EXPERIENCE PRO · DOM BINDINGS · 10/10
+
+   RESPONSABILIDADES:
+   - bind DOM robusto por delegación
    - refresh / retry
-   - guardar preferencias
-   - toggle dark mode / privacy mode
+   - save preferencias
+   - toggle theme
+   - change language
+   - change password
+   - open cuenta modal
    - rebind limpio tras rerender
    - cleanup sólido por scope
+   - compatibilidad con actions antiguas y nuevas
 
    FIX CRÍTICO:
    - evita doble click handlers
-   - soporta controles dinámicos
-   - delegación premium
+   - soporta botones dinámicos
+   - soporta callbacks modernos y legacy
+   - soporta updateCuenta(payload)
+   - soporta updateCuentaTheme(darkMode) y updateCuentaTheme({ darkMode })
+   - soporta updateCuentaLanguage(lang) y updateCuenta(payload)
+   - emite bridges si un handler no existe
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
-const DEFAULT_SCOPE =
-  "view:cuenta";
+const DEFAULT_SCOPE = "view:cuenta";
+const PASSWORD_MIN_LENGTH = 8;
+
+const ACTIONS = {
+  refresh: new Set([
+    "refresh-cuenta",
+    "reload-cuenta",
+    "cuenta-refresh",
+    "refresh",
+    "reload",
+    "retry",
+    "retry-cuenta",
+  ]),
+
+  save: new Set([
+    "save-cuenta",
+    "update-cuenta",
+    "cuenta-save",
+    "save",
+    "guardar",
+    "preferences-save",
+  ]),
+
+  theme: new Set([
+    "toggle-theme",
+    "change-theme",
+    "update-theme",
+    "cuenta-theme",
+    "theme-toggle",
+  ]),
+
+  language: new Set([
+    "change-language",
+    "update-language",
+    "apply-language",
+    "cuenta-language",
+    "language-change",
+  ]),
+
+  password: new Set([
+    "change-password",
+    "update-password",
+    "cuenta-password",
+    "password-change",
+  ]),
+
+  open: new Set([
+    "open-cuenta-modal",
+    "open-modal",
+    "cuenta-detail",
+    "detail",
+    "view-cuenta",
+  ]),
+};
+
+const INPUT_SELECTORS = {
+  darkMode: [
+    '[data-role="cuenta-darkmode-input"]',
+    "#cuenta-darkmode-input",
+    '[data-cuenta-field="darkMode"]',
+    '[data-field="darkMode"]',
+  ].join(","),
+
+  privacyMode: [
+    '[data-role="cuenta-privacymode-input"]',
+    '[data-role="cuenta-privacy-input"]',
+    "#cuenta-privacymode-input",
+    "#cuenta-privacy-input",
+    '[data-cuenta-field="privacyMode"]',
+    '[data-field="privacyMode"]',
+  ].join(","),
+
+  language: [
+    '[data-role="cuenta-language-select"]',
+    "#cuenta-language-select",
+    '[data-cuenta-field="lang"]',
+    '[data-field="lang"]',
+    '[data-field="language"]',
+  ].join(","),
+
+  currentPassword: [
+    '[data-role="cuenta-current-password"]',
+    "#cuenta-current-password",
+    '[data-cuenta-field="currentPassword"]',
+    '[data-field="currentPassword"]',
+  ].join(","),
+
+  newPassword: [
+    '[data-role="cuenta-new-password"]',
+    "#cuenta-new-password",
+    '[data-cuenta-field="newPassword"]',
+    '[data-field="newPassword"]',
+  ].join(","),
+};
+
+const INTERACTIVE_SELECTOR = [
+  "button",
+  "a",
+  "input",
+  "select",
+  "textarea",
+  "label",
+  "summary",
+  "[role='button']",
+  "[data-action]",
+  "[data-cuenta-action]",
+  "[data-spa]",
+].join(",");
+
+const fallbackCleanups = new Map();
+const busyKeys = new Set();
+
+let reloadScheduled = false;
 
 /* =========================================================
-   HELPERS
+   SAFE HELPERS
 ========================================================= */
 
-function safeText(
-  value,
-  fallback = ""
-) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
+function safeText(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+
+  const text = String(value).trim();
+  return text || fallback;
+}
+
+function safeObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function first(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
+    }
+
+    return value;
   }
 
-  const text =
-    String(value).trim();
+  return null;
+}
 
-  return text || fallback;
+function normalizeKey(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .trim();
+}
+
+function normalizeBoolean(value = undefined, fallback = false) {
+  if (typeof value === "boolean") return value;
+
+  if (typeof value === "number") {
+    return value === 1;
+  }
+
+  const key = normalizeKey(value);
+
+  if (["true", "1", "yes", "si", "sí", "on", "dark", "enabled"].includes(key)) {
+    return true;
+  }
+
+  if (["false", "0", "no", "off", "light", "disabled"].includes(key)) {
+    return false;
+  }
+
+  return Boolean(fallback);
+}
+
+function normalizeLang(value = "es") {
+  const key = normalizeKey(value);
+
+  if (["en", "eng", "english"].includes(key)) return "en";
+  if (["ca", "cat", "catala", "catalan"].includes(key)) return "ca";
+
+  return "es";
 }
 
 function safeWarn(...args) {
   try {
-    AppCore?.utils?.warn?.(
-      "[CuentaBindings]",
-      ...args
-    );
-  } catch {}
-}
-
-function resolveScopeName(
-  scope = DEFAULT_SCOPE
-) {
-  return safeText(
-    scope,
-    DEFAULT_SCOPE
-  );
-}
-
-function getScope(
-  scopeName = DEFAULT_SCOPE
-) {
-  const finalScope =
-    resolveScopeName(
-      scopeName
-    );
-
-  try {
-    AppCore?.cleanup?.run?.(
-      finalScope
-    );
+    AppCore?.utils?.warn?.("[CuentaBindings]", ...args);
+    return;
   } catch {}
 
   try {
-    return (
-      AppCore?.cleanup?.scope?.(
-        finalScope
-      ) || finalScope
+    console.warn("[CuentaBindings]", ...args);
+  } catch {}
+}
+
+function safeError(...args) {
+  try {
+    AppCore?.utils?.error?.("[CuentaBindings]", ...args);
+    return;
+  } catch {}
+
+  try {
+    console.error("[CuentaBindings]", ...args);
+  } catch {}
+}
+
+function showToast(message = "", type = "info") {
+  const text = safeText(message, "");
+  if (!text) return;
+
+  try {
+    if (typeof AppCore?.toast?.[type] === "function") {
+      AppCore.toast[type](text);
+      return;
+    }
+  } catch {}
+
+  try {
+    AppCore?.toast?.show?.(text, type);
+    return;
+  } catch {}
+
+  try {
+    AppCore?.ui?.toast?.[type]?.(text);
+  } catch {}
+}
+
+function safeEmit(event = "", payload = {}) {
+  const eventName = safeText(event, "");
+  if (!eventName) return false;
+
+  let emitted = false;
+
+  try {
+    AppCore?.events?.emit?.(eventName, payload);
+    emitted = true;
+  } catch {}
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent(eventName, {
+        detail: payload,
+      })
     );
+    emitted = true;
+  } catch {}
+
+  return emitted;
+}
+
+/* =========================================================
+   SCOPE / CLEANUP
+========================================================= */
+
+function resolveScopeName(scope = DEFAULT_SCOPE) {
+  return safeText(scope, DEFAULT_SCOPE);
+}
+
+function addFallbackCleanup(scopeName = DEFAULT_SCOPE, cleanup) {
+  const finalScope = resolveScopeName(scopeName);
+
+  if (typeof cleanup !== "function") return;
+
+  if (!fallbackCleanups.has(finalScope)) {
+    fallbackCleanups.set(finalScope, new Set());
+  }
+
+  fallbackCleanups.get(finalScope).add(cleanup);
+}
+
+function runFallbackCleanup(scopeName = DEFAULT_SCOPE) {
+  const finalScope = resolveScopeName(scopeName);
+  const cleanups = fallbackCleanups.get(finalScope);
+
+  if (!cleanups) return;
+
+  cleanups.forEach((cleanup) => {
+    try {
+      cleanup();
+    } catch {}
+  });
+
+  fallbackCleanups.delete(finalScope);
+}
+
+function runScopeCleanup(scopeName = DEFAULT_SCOPE) {
+  const finalScope = resolveScopeName(scopeName);
+
+  try {
+    AppCore?.cleanup?.run?.(finalScope);
+  } catch {}
+
+  runFallbackCleanup(finalScope);
+}
+
+function getScope(scopeName = DEFAULT_SCOPE) {
+  const finalScope = resolveScopeName(scopeName);
+
+  runScopeCleanup(finalScope);
+
+  try {
+    return AppCore?.cleanup?.scope?.(finalScope) || finalScope;
   } catch {
     return finalScope;
   }
 }
 
+function bindDomEvent({
+  scopeName = DEFAULT_SCOPE,
+  scopeRef = null,
+  target = null,
+  eventName = "",
+  handler = null,
+  options = undefined,
+} = {}) {
+  if (!target || !eventName || typeof handler !== "function") return false;
+
+  try {
+    if (typeof AppCore?.cleanup?.on === "function") {
+      AppCore.cleanup.on(scopeRef || scopeName, target, eventName, handler, options);
+      return true;
+    }
+  } catch {}
+
+  try {
+    target.addEventListener(eventName, handler, options);
+
+    addFallbackCleanup(scopeName, () => {
+      try {
+        target.removeEventListener(eventName, handler, options);
+      } catch {}
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function bindBusEvent({
+  scopeName = DEFAULT_SCOPE,
+  eventName = "",
+  handler = null,
+} = {}) {
+  if (!eventName || typeof handler !== "function") return false;
+
+  let bound = false;
+
+  try {
+    if (typeof AppCore?.events?.on === "function") {
+      AppCore.events.on(eventName, handler);
+      bound = true;
+
+      addFallbackCleanup(scopeName, () => {
+        try {
+          AppCore?.events?.off?.(eventName, handler);
+        } catch {}
+      });
+    }
+  } catch {}
+
+  if (!bound) {
+    const windowHandler = (event) => handler(event);
+
+    try {
+      window.addEventListener(eventName, windowHandler);
+      bound = true;
+
+      addFallbackCleanup(scopeName, () => {
+        try {
+          window.removeEventListener(eventName, windowHandler);
+        } catch {}
+      });
+    } catch {}
+  }
+
+  return bound;
+}
+
+/* =========================================================
+   DOM HELPERS
+========================================================= */
+
 function getContainer() {
   return (
-    AppCore?.dom
-      ?.viewContainer ||
-    document.getElementById(
-      "view-container"
-    ) ||
+    AppCore?.dom?.viewContainer ||
+    document.getElementById("view-container") ||
     document
   );
 }
 
-function readCheckboxValue(
-  element,
-  fallback = false
-) {
-  if (!element) {
-    return Boolean(fallback);
+function isElementInsideRoot(root, element) {
+  try {
+    if (!root || !element) return false;
+    if (root === document) return true;
+    return root.contains(element);
+  } catch {
+    return true;
+  }
+}
+
+function closestInside(root, target, selector = "") {
+  if (!target || !selector || typeof target.closest !== "function") {
+    return null;
   }
 
-  if (
-    typeof element.checked ===
-    "boolean"
-  ) {
-    return element.checked;
+  const match = target.closest(selector);
+
+  if (!match || !isElementInsideRoot(root, match)) {
+    return null;
   }
 
-  const attr =
-    element?.getAttribute?.(
-      "aria-checked"
-    );
-
-  if (attr === "true") return true;
-  if (attr === "false") return false;
-
-  return Boolean(fallback);
+  return match;
 }
 
-function findDarkModeInput() {
-  return (
-    document.getElementById(
-      "cuenta-darkmode-input"
-    ) ||
-    document.querySelector(
-      '[data-role="cuenta-darkmode-input"]'
+function getActionElement(root, target, actionSet) {
+  const actionElement = closestInside(
+    root,
+    target,
+    "[data-action], [data-cuenta-action]"
+  );
+
+  if (!actionElement) return null;
+
+  const action = safeText(
+    first(
+      actionElement.dataset?.cuentaAction,
+      actionElement.dataset?.action,
+      actionElement.getAttribute?.("data-cuenta-action"),
+      actionElement.getAttribute?.("data-action")
+    ),
+    ""
+  );
+
+  if (!action || !actionSet.has(action)) return null;
+
+  return actionElement;
+}
+
+function getField(root, selector = "") {
+  if (!root || !selector) return null;
+
+  try {
+    return root.querySelector?.(selector) || document.querySelector?.(selector) || null;
+  } catch {
+    return null;
+  }
+}
+
+function readCuentaForm(root = getContainer()) {
+  const darkInput = getField(root, INPUT_SELECTORS.darkMode);
+  const privacyInput = getField(root, INPUT_SELECTORS.privacyMode);
+  const languageInput = getField(root, INPUT_SELECTORS.language);
+
+  const darkMode =
+    typeof darkInput?.checked === "boolean"
+      ? Boolean(darkInput.checked)
+      : normalizeBoolean(
+          first(
+            darkInput?.value,
+            darkInput?.dataset?.value,
+            false
+          ),
+          false
+        );
+
+  const privacyMode =
+    typeof privacyInput?.checked === "boolean"
+      ? Boolean(privacyInput.checked)
+      : normalizeBoolean(
+          first(
+            privacyInput?.value,
+            privacyInput?.dataset?.value,
+            false
+          ),
+          false
+        );
+
+  const lang = normalizeLang(
+    first(
+      languageInput?.value,
+      languageInput?.dataset?.value,
+      languageInput?.getAttribute?.("value"),
+      "es"
     )
   );
-}
-
-function findPrivacyModeInput() {
-  return (
-    document.getElementById(
-      "cuenta-privacymode-input"
-    ) ||
-    document.querySelector(
-      '[data-role="cuenta-privacy-input"]'
-    )
-  );
-}
-
-function getCurrentPreferencesSnapshot() {
-  const darkModeInput =
-    findDarkModeInput();
-
-  const privacyModeInput =
-    findPrivacyModeInput();
 
   return {
-    darkMode:
-      readCheckboxValue(
-        darkModeInput,
-        true
-      ),
-    privacyMode:
-      readCheckboxValue(
-        privacyModeInput,
-        false
-      ),
+    darkMode,
+    privacyMode,
+    lang,
+    language: lang,
+    locale: lang,
+    theme: darkMode ? "dark" : "light",
   };
 }
 
-async function safeReload(
-  reload,
-  loadCuenta
-) {
-  try {
-    if (
-      typeof reload ===
-      "function"
-    ) {
-      await reload();
-      return;
-    }
+function readPasswordForm(root = getContainer()) {
+  const currentPasswordInput = getField(root, INPUT_SELECTORS.currentPassword);
+  const newPasswordInput = getField(root, INPUT_SELECTORS.newPassword);
 
-    if (
-      typeof loadCuenta ===
-      "function"
-    ) {
-      await loadCuenta({
-        force: true,
-      });
-    }
-  } catch (error) {
-    safeWarn(
-      "reload falló",
-      error
-    );
+  return {
+    currentPassword: safeText(currentPasswordInput?.value, ""),
+    newPassword: safeText(newPasswordInput?.value, ""),
+    currentPasswordInput,
+    newPasswordInput,
+  };
+}
+
+function setElementBusy(element, busy = false) {
+  if (!element) return;
+
+  try {
+    element.setAttribute("aria-busy", busy ? "true" : "false");
+  } catch {}
+
+  const tagName = safeText(element.tagName, "").toLowerCase();
+
+  if (["button", "input", "select", "textarea"].includes(tagName)) {
+    try {
+      element.disabled = Boolean(busy);
+    } catch {}
   }
 }
 
-async function safeSavePreferences({
-  saveCuenta,
-  updateCuenta,
-  payload,
-} = {}) {
-  if (
-    typeof saveCuenta ===
-    "function"
-  ) {
-    return saveCuenta(payload);
+async function runBusy(key = "", element = null, task = null) {
+  const finalKey = safeText(key, "");
+
+  if (!finalKey || typeof task !== "function") return null;
+
+  if (busyKeys.has(finalKey)) {
+    return null;
   }
 
-  if (
-    typeof updateCuenta ===
-    "function"
-  ) {
-    return updateCuenta(payload);
+  busyKeys.add(finalKey);
+  setElementBusy(element, true);
+
+  try {
+    return await task();
+  } finally {
+    busyKeys.delete(finalKey);
+    setElementBusy(element, false);
+  }
+}
+
+/* =========================================================
+   CALLBACK COMPAT
+========================================================= */
+
+async function callFlexibleReload({
+  reload,
+  loadCuenta,
+  force = true,
+  source = "bindings",
+} = {}) {
+  const payload = {
+    force,
+    asRefresh: true,
+    source,
+  };
+
+  const candidates = [];
+
+  if (typeof reload === "function") {
+    candidates.push(() => reload(payload));
+    candidates.push(() => reload(force));
+  }
+
+  if (typeof loadCuenta === "function") {
+    candidates.push(() => loadCuenta(payload));
+    candidates.push(() => loadCuenta({ force }));
+  }
+
+  const globalReload =
+    window?.OnionCuenta?.reload ||
+    window?.CuentaView?.reload ||
+    null;
+
+  if (typeof globalReload === "function" && globalReload !== reload) {
+    candidates.push(() => globalReload(payload));
+  }
+
+  let lastError = null;
+
+  for (const attempt of candidates) {
+    try {
+      const result = await attempt();
+
+      if (result !== null && result !== undefined) {
+        return result;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
   }
 
   return null;
+}
+
+async function callFlexibleSave({
+  saveCuenta,
+  updateCuenta,
+  payload = {},
+} = {}) {
+  const body = safeObject(payload);
+  const candidates = [];
+
+  if (typeof saveCuenta === "function") {
+    candidates.push(() => saveCuenta(body));
+  }
+
+  if (typeof updateCuenta === "function" && updateCuenta !== saveCuenta) {
+    candidates.push(() => updateCuenta(body));
+  }
+
+  const globalSave =
+    window?.OnionCuenta?.saveCuenta ||
+    window?.OnionCuenta?.save ||
+    window?.CuentaView?.saveCuenta ||
+    null;
+
+  if (typeof globalSave === "function" && globalSave !== saveCuenta) {
+    candidates.push(() => globalSave(body));
+  }
+
+  let lastError = null;
+
+  for (const attempt of candidates) {
+    try {
+      const result = await attempt();
+
+      if (result !== null && result !== undefined) {
+        return result;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  safeEmit("cuenta:update-preferences", body);
+
+  return null;
+}
+
+async function callFlexibleTheme({
+  updateCuentaTheme,
+  updateCuenta,
+  darkMode = true,
+  payload = {},
+} = {}) {
+  const body = {
+    ...safeObject(payload),
+    darkMode: Boolean(darkMode),
+    theme: Boolean(darkMode) ? "dark" : "light",
+  };
+
+  const candidates = [];
+
+  if (typeof updateCuentaTheme === "function") {
+    candidates.push(() => updateCuentaTheme(Boolean(darkMode)));
+    candidates.push(() => updateCuentaTheme(body));
+  }
+
+  if (typeof updateCuenta === "function") {
+    candidates.push(() => updateCuenta(body));
+  }
+
+  const globalTheme =
+    window?.OnionCuenta?.updateTheme ||
+    window?.OnionCuenta?.updateCuentaTheme ||
+    window?.CuentaView?.updateTheme ||
+    null;
+
+  if (typeof globalTheme === "function" && globalTheme !== updateCuentaTheme) {
+    candidates.push(() => globalTheme(Boolean(darkMode)));
+    candidates.push(() => globalTheme(body));
+  }
+
+  let lastError = null;
+
+  for (const attempt of candidates) {
+    try {
+      const result = await attempt();
+
+      if (result !== null && result !== undefined) {
+        return result;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  safeEmit("cuenta:modal:update-theme", body);
+
+  return null;
+}
+
+async function callFlexibleLanguage({
+  updateCuentaLanguage,
+  updateCuenta,
+  lang = "es",
+  payload = {},
+} = {}) {
+  const nextLang = normalizeLang(lang);
+
+  const body = {
+    ...safeObject(payload),
+    lang: nextLang,
+    language: nextLang,
+    locale: nextLang,
+  };
+
+  const candidates = [];
+
+  if (typeof updateCuentaLanguage === "function") {
+    candidates.push(() => updateCuentaLanguage(nextLang));
+    candidates.push(() => updateCuentaLanguage(body));
+  }
+
+  if (typeof updateCuenta === "function") {
+    candidates.push(() => updateCuenta(body));
+  }
+
+  const globalLanguage =
+    window?.OnionCuenta?.updateLanguage ||
+    window?.OnionCuenta?.updateCuentaLanguage ||
+    window?.CuentaView?.updateLanguage ||
+    null;
+
+  if (typeof globalLanguage === "function" && globalLanguage !== updateCuentaLanguage) {
+    candidates.push(() => globalLanguage(nextLang));
+    candidates.push(() => globalLanguage(body));
+  }
+
+  let lastError = null;
+
+  for (const attempt of candidates) {
+    try {
+      const result = await attempt();
+
+      if (result !== null && result !== undefined) {
+        return result;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  safeEmit("cuenta:modal:update-language", body);
+
+  return null;
+}
+
+async function callFlexiblePassword({
+  changePassword,
+  payload = {},
+} = {}) {
+  const body = safeObject(payload);
+  const candidates = [];
+
+  if (typeof changePassword === "function") {
+    candidates.push(() => changePassword(body));
+    candidates.push(() =>
+      changePassword(body.currentPassword, body.newPassword, body)
+    );
+  }
+
+  const globalPassword =
+    window?.OnionCuenta?.changePassword ||
+    window?.CuentaView?.changePassword ||
+    window?.OnionCuentaPassword?.change ||
+    window?.OnionCuentaPassword?.update ||
+    null;
+
+  if (typeof globalPassword === "function" && globalPassword !== changePassword) {
+    candidates.push(() => globalPassword(body));
+    candidates.push(() =>
+      globalPassword(body.currentPassword, body.newPassword, body)
+    );
+  }
+
+  let lastError = null;
+
+  for (const attempt of candidates) {
+    try {
+      const result = await attempt();
+
+      if (result !== null && result !== undefined) {
+        return result;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  safeEmit("cuenta:password:change", body);
+
+  return null;
+}
+
+/* =========================================================
+   MODAL BRIDGE
+========================================================= */
+
+function openModalBridge(detail = null) {
+  const payload = safeObject(detail);
+
+  try {
+    if (typeof window?.OnionCuentaModal?.open === "function") {
+      window.OnionCuentaModal.open(payload);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof window?.renderCuentaModal === "function") {
+      window.renderCuentaModal(payload);
+      return true;
+    }
+  } catch {}
+
+  safeEmit("cuenta:modal:open", {
+    detail: payload,
+  });
+
+  return true;
+}
+
+/* =========================================================
+   RELOAD
+========================================================= */
+
+async function safeReload(reload, loadCuenta, meta = {}) {
+  try {
+    safeEmit("cuenta:bindings:reload:start", meta);
+
+    const result = await callFlexibleReload({
+      reload,
+      loadCuenta,
+      force: true,
+      source: meta.source || "bindings",
+    });
+
+    safeEmit("cuenta:bindings:reload:success", {
+      ...meta,
+      result,
+    });
+
+    return result;
+  } catch (error) {
+    safeWarn("reload falló", error);
+
+    safeEmit("cuenta:bindings:reload:error", {
+      ...meta,
+      error,
+    });
+
+    return null;
+  }
+}
+
+function scheduleReload(reload, loadCuenta, meta = {}) {
+  if (reloadScheduled) return;
+
+  reloadScheduled = true;
+
+  setTimeout(async () => {
+    reloadScheduled = false;
+
+    await safeReload(reload, loadCuenta, {
+      source: "scheduled",
+      ...meta,
+    });
+  }, 80);
+}
+
+/* =========================================================
+   ACTION HANDLERS
+========================================================= */
+
+async function handleRefresh({
+  element = null,
+  reload,
+  loadCuenta,
+} = {}) {
+  await runBusy("cuenta:refresh", element, async () => {
+    await safeReload(reload, loadCuenta, {
+      source: "manual",
+    });
+  });
+}
+
+async function handleSave({
+  root = getContainer(),
+  element = null,
+  saveCuenta,
+  updateCuenta,
+} = {}) {
+  const payload = readCuentaForm(root);
+
+  await runBusy("cuenta:save", element, async () => {
+    try {
+      const result = await callFlexibleSave({
+        saveCuenta,
+        updateCuenta,
+        payload,
+      });
+
+      safeEmit("cuenta:bindings:save:success", {
+        payload,
+        result,
+      });
+
+      showToast("Preferencias guardadas", "success");
+
+      return result;
+    } catch (error) {
+      safeWarn("saveCuenta falló", error);
+
+      safeEmit("cuenta:bindings:save:error", {
+        payload,
+        error,
+      });
+
+      showToast("No se pudieron guardar las preferencias.", "error");
+
+      return null;
+    }
+  });
+}
+
+async function handleTheme({
+  root = getContainer(),
+  element = null,
+  updateCuentaTheme,
+  updateCuenta,
+  explicitDarkMode = null,
+} = {}) {
+  const payload = readCuentaForm(root);
+
+  const darkMode =
+    explicitDarkMode === null || explicitDarkMode === undefined
+      ? !Boolean(payload.darkMode)
+      : Boolean(explicitDarkMode);
+
+  await runBusy("cuenta:theme", element, async () => {
+    try {
+      const result = await callFlexibleTheme({
+        updateCuentaTheme,
+        updateCuenta,
+        darkMode,
+        payload: {
+          ...payload,
+          darkMode,
+          theme: darkMode ? "dark" : "light",
+        },
+      });
+
+      safeEmit("cuenta:bindings:theme:success", {
+        darkMode,
+        result,
+      });
+
+      return result;
+    } catch (error) {
+      safeWarn("updateCuentaTheme falló", error);
+
+      safeEmit("cuenta:bindings:theme:error", {
+        darkMode,
+        error,
+      });
+
+      showToast("No se pudo actualizar el tema.", "error");
+
+      return null;
+    }
+  });
+}
+
+async function handleLanguage({
+  root = getContainer(),
+  element = null,
+  updateCuentaLanguage,
+  updateCuenta,
+} = {}) {
+  const payload = readCuentaForm(root);
+  const lang = normalizeLang(payload.lang);
+
+  await runBusy("cuenta:language", element, async () => {
+    try {
+      const result = await callFlexibleLanguage({
+        updateCuentaLanguage,
+        updateCuenta,
+        lang,
+        payload,
+      });
+
+      safeEmit("cuenta:bindings:language:success", {
+        lang,
+        result,
+      });
+
+      return result;
+    } catch (error) {
+      safeWarn("updateCuentaLanguage falló", error);
+
+      safeEmit("cuenta:bindings:language:error", {
+        lang,
+        error,
+      });
+
+      showToast("No se pudo actualizar el idioma.", "error");
+
+      return null;
+    }
+  });
+}
+
+async function handlePassword({
+  root = getContainer(),
+  element = null,
+  changePassword,
+} = {}) {
+  const {
+    currentPassword,
+    newPassword,
+    currentPasswordInput,
+    newPasswordInput,
+  } = readPasswordForm(root);
+
+  if (!currentPassword) {
+    showToast("Introduce la contraseña actual.", "error");
+
+    try {
+      currentPasswordInput?.focus?.();
+    } catch {}
+
+    return false;
+  }
+
+  if (!newPassword) {
+    showToast("Introduce la nueva contraseña.", "error");
+
+    try {
+      newPasswordInput?.focus?.();
+    } catch {}
+
+    return false;
+  }
+
+  if (newPassword.length < PASSWORD_MIN_LENGTH) {
+    showToast(
+      `La nueva contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`,
+      "error"
+    );
+
+    try {
+      newPasswordInput?.focus?.();
+    } catch {}
+
+    return false;
+  }
+
+  await runBusy("cuenta:password", element, async () => {
+    try {
+      const result = await callFlexiblePassword({
+        changePassword,
+        payload: {
+          currentPassword,
+          newPassword,
+          source: "cuenta.bindings",
+        },
+      });
+
+      safeEmit("cuenta:bindings:password:success", {
+        result,
+      });
+
+      if (result) {
+        showToast("Contraseña actualizada", "success");
+      }
+
+      return result;
+    } catch (error) {
+      safeWarn("changePassword falló", error);
+
+      safeEmit("cuenta:bindings:password:error", {
+        error,
+      });
+
+      showToast("No se pudo cambiar la contraseña.", "error");
+
+      return false;
+    }
+  });
+
+  return true;
+}
+
+function handleOpenModal({
+  getItem,
+  getSnapshot,
+} = {}) {
+  let detail = null;
+
+  try {
+    if (typeof getItem === "function") {
+      detail = getItem();
+    }
+  } catch {}
+
+  if (!detail) {
+    try {
+      if (typeof getSnapshot === "function") {
+        detail = getSnapshot();
+      }
+    } catch {}
+  }
+
+  openModalBridge(detail || {});
 }
 
 /* =========================================================
@@ -224,402 +1177,380 @@ export function bindCuentaEvents({
   loadCuenta,
   updateCuenta,
   updateCuentaTheme,
+  updateCuentaLanguage,
   saveCuenta,
+  changePassword,
   reload,
+  getItem,
+  getSnapshot,
   scope = DEFAULT_SCOPE,
 } = {}) {
-  const scopeRef =
-    getScope(scope);
+  const scopeName = resolveScopeName(scope);
+  const scopeRef = getScope(scopeName);
+  const root = getContainer();
 
-  const root =
-    getContainer();
+  if (!root) {
+    safeWarn("No se encontró contenedor para bindings.");
+    return () => {};
+  }
 
-  const refreshBtn =
-    document.getElementById(
-      "cuenta-refresh-btn"
-    );
+  /* =======================================================
+     DIRECT BUTTONS BY ID
+     Compatibilidad con templates actuales.
+  ======================================================= */
 
-  const retryBtn =
-    document.getElementById(
-      "cuenta-retry-btn"
-    );
-
-  const saveBtn =
-    document.getElementById(
-      "cuenta-save-btn"
-    );
-
-  const themeBtn =
-    document.getElementById(
-      "cuenta-theme-btn"
-    );
-
-  const privacyBtn =
-    document.getElementById(
-      "cuenta-privacy-btn"
-    );
-
-  const darkModeInput =
-    findDarkModeInput();
-
-  const privacyModeInput =
-    findPrivacyModeInput();
-
-  /* =========================================
-     DIRECT BUTTONS
-  ========================================= */
+  const refreshBtn = document.getElementById("cuenta-refresh-btn");
+  const retryBtn = document.getElementById("cuenta-retry-btn");
+  const saveBtn = document.getElementById("cuenta-save-btn");
+  const passwordBtn = document.getElementById("cuenta-password-btn");
+  const openModalBtn = document.getElementById("cuenta-open-modal-btn");
 
   if (refreshBtn) {
-    AppCore.cleanup.on(
+    bindDomEvent({
+      scopeName,
       scopeRef,
-      refreshBtn,
-      "click",
-      async (event) => {
+      target: refreshBtn,
+      eventName: "click",
+      handler: async (event) => {
         event.preventDefault();
-        await safeReload(
+        event.stopPropagation();
+
+        await handleRefresh({
+          element: refreshBtn,
           reload,
-          loadCuenta
-        );
-      }
-    );
+          loadCuenta,
+        });
+      },
+    });
   }
 
   if (retryBtn) {
-    AppCore.cleanup.on(
+    bindDomEvent({
+      scopeName,
       scopeRef,
-      retryBtn,
-      "click",
-      async (event) => {
+      target: retryBtn,
+      eventName: "click",
+      handler: async (event) => {
         event.preventDefault();
-        await safeReload(
+        event.stopPropagation();
+
+        await handleRefresh({
+          element: retryBtn,
           reload,
-          loadCuenta
-        );
-      }
-    );
+          loadCuenta,
+        });
+      },
+    });
   }
 
   if (saveBtn) {
-    AppCore.cleanup.on(
+    bindDomEvent({
+      scopeName,
       scopeRef,
-      saveBtn,
-      "click",
-      async (event) => {
+      target: saveBtn,
+      eventName: "click",
+      handler: async (event) => {
         event.preventDefault();
+        event.stopPropagation();
 
-        try {
-          const payload =
-            getCurrentPreferencesSnapshot();
-
-          await safeSavePreferences({
-            saveCuenta,
-            updateCuenta,
-            payload,
-          });
-        } catch (error) {
-          safeWarn(
-            "save preferencias falló",
-            error
-          );
-        }
-      }
-    );
+        await handleSave({
+          root,
+          element: saveBtn,
+          saveCuenta,
+          updateCuenta,
+        });
+      },
+    });
   }
 
-  if (themeBtn) {
-    AppCore.cleanup.on(
+  if (passwordBtn) {
+    bindDomEvent({
+      scopeName,
       scopeRef,
-      themeBtn,
-      "click",
-      async (event) => {
+      target: passwordBtn,
+      eventName: "click",
+      handler: async (event) => {
         event.preventDefault();
+        event.stopPropagation();
 
-        try {
-          const darkModeInputNode =
-            findDarkModeInput();
-
-          const nextValue =
-            !readCheckboxValue(
-              darkModeInputNode,
-              true
-            );
-
-          if (
-            darkModeInputNode &&
-            typeof darkModeInputNode.checked ===
-              "boolean"
-          ) {
-            darkModeInputNode.checked =
-              nextValue;
-          }
-
-          await updateCuentaTheme?.(
-            nextValue
-          );
-        } catch (error) {
-          safeWarn(
-            "theme toggle falló",
-            error
-          );
-        }
-      }
-    );
+        await handlePassword({
+          root,
+          element: passwordBtn,
+          changePassword,
+        });
+      },
+    });
   }
 
-  if (privacyBtn) {
-    AppCore.cleanup.on(
+  if (openModalBtn) {
+    bindDomEvent({
+      scopeName,
       scopeRef,
-      privacyBtn,
-      "click",
-      async (event) => {
+      target: openModalBtn,
+      eventName: "click",
+      handler: (event) => {
         event.preventDefault();
+        event.stopPropagation();
 
-        try {
-          const privacyInputNode =
-            findPrivacyModeInput();
-
-          const nextValue =
-            !readCheckboxValue(
-              privacyInputNode,
-              false
-            );
-
-          if (
-            privacyInputNode &&
-            typeof privacyInputNode.checked ===
-              "boolean"
-          ) {
-            privacyInputNode.checked =
-              nextValue;
-          }
-
-          await safeSavePreferences({
-            saveCuenta,
-            updateCuenta,
-            payload: {
-              privacyMode: nextValue,
-            },
-          });
-        } catch (error) {
-          safeWarn(
-            "privacy toggle falló",
-            error
-          );
-        }
-      }
-    );
+        handleOpenModal({
+          getItem,
+          getSnapshot,
+        });
+      },
+    });
   }
 
-  if (darkModeInput) {
-    AppCore.cleanup.on(
-      scopeRef,
-      darkModeInput,
-      "change",
-      async (event) => {
-        try {
-          const nextValue =
-            readCheckboxValue(
-              event?.currentTarget,
-              true
-            );
-
-          await updateCuentaTheme?.(
-            nextValue
-          );
-        } catch (error) {
-          safeWarn(
-            "change darkMode falló",
-            error
-          );
-        }
-      }
-    );
-  }
-
-  if (privacyModeInput) {
-    AppCore.cleanup.on(
-      scopeRef,
-      privacyModeInput,
-      "change",
-      async (event) => {
-        try {
-          const nextValue =
-            readCheckboxValue(
-              event?.currentTarget,
-              false
-            );
-
-          await safeSavePreferences({
-            saveCuenta,
-            updateCuenta,
-            payload: {
-              privacyMode: nextValue,
-            },
-          });
-        } catch (error) {
-          safeWarn(
-            "change privacyMode falló",
-            error
-          );
-        }
-      }
-    );
-  }
-
-  /* =========================================
+  /* =======================================================
      DELEGATED ACTIONS
-  ========================================= */
+     Soporta contenido dinámico tras rerender.
+  ======================================================= */
 
-  AppCore.cleanup.on(
+  bindDomEvent({
+    scopeName,
     scopeRef,
-    root,
-    "click",
-    async (event) => {
-      const refreshActionBtn =
-        event.target?.closest?.(
-          '[data-action="refresh-cuenta"]'
-        );
+    target: root,
+    eventName: "click",
+    handler: async (event) => {
+      const target = event.target;
 
-      if (refreshActionBtn) {
+      if (!target) return;
+
+      const refreshAction = getActionElement(root, target, ACTIONS.refresh);
+
+      if (refreshAction) {
         event.preventDefault();
         event.stopPropagation();
 
-        await safeReload(
+        await handleRefresh({
+          element: refreshAction,
           reload,
-          loadCuenta
-        );
+          loadCuenta,
+        });
 
         return;
       }
 
-      const saveActionBtn =
-        event.target?.closest?.(
-          '[data-action="save-cuenta"]'
-        );
+      const saveAction = getActionElement(root, target, ACTIONS.save);
 
-      if (saveActionBtn) {
+      if (saveAction) {
         event.preventDefault();
         event.stopPropagation();
 
-        try {
-          const payload =
-            getCurrentPreferencesSnapshot();
-
-          await safeSavePreferences({
-            saveCuenta,
-            updateCuenta,
-            payload,
-          });
-        } catch (error) {
-          safeWarn(
-            "save-cuenta falló",
-            error
-          );
-        }
+        await handleSave({
+          root,
+          element: saveAction,
+          saveCuenta,
+          updateCuenta,
+        });
 
         return;
       }
 
-      const toggleThemeBtn =
-        event.target?.closest?.(
-          '[data-action="toggle-theme"]'
-        );
+      const themeAction = getActionElement(root, target, ACTIONS.theme);
 
-      if (toggleThemeBtn) {
+      if (themeAction) {
         event.preventDefault();
         event.stopPropagation();
 
-        try {
-          const darkModeInputNode =
-            findDarkModeInput();
-
-          const nextValue =
-            !readCheckboxValue(
-              darkModeInputNode,
-              true
-            );
-
-          if (
-            darkModeInputNode &&
-            typeof darkModeInputNode.checked ===
-              "boolean"
-          ) {
-            darkModeInputNode.checked =
-              nextValue;
-          }
-
-          await updateCuentaTheme?.(
-            nextValue
-          );
-        } catch (error) {
-          safeWarn(
-            "toggle-theme falló",
-            error
-          );
-        }
+        await handleTheme({
+          root,
+          element: themeAction,
+          updateCuentaTheme,
+          updateCuenta,
+        });
 
         return;
       }
 
-      const togglePrivacyBtn =
-        event.target?.closest?.(
-          '[data-action="toggle-privacy"]'
-        );
+      const languageAction = getActionElement(root, target, ACTIONS.language);
 
-      if (togglePrivacyBtn) {
+      if (languageAction) {
         event.preventDefault();
         event.stopPropagation();
 
-        try {
-          const privacyInputNode =
-            findPrivacyModeInput();
-
-          const nextValue =
-            !readCheckboxValue(
-              privacyInputNode,
-              false
-            );
-
-          if (
-            privacyInputNode &&
-            typeof privacyInputNode.checked ===
-              "boolean"
-          ) {
-            privacyInputNode.checked =
-              nextValue;
-          }
-
-          await safeSavePreferences({
-            saveCuenta,
-            updateCuenta,
-            payload: {
-              privacyMode: nextValue,
-            },
-          });
-        } catch (error) {
-          safeWarn(
-            "toggle-privacy falló",
-            error
-          );
-        }
+        await handleLanguage({
+          root,
+          element: languageAction,
+          updateCuentaLanguage,
+          updateCuenta,
+        });
 
         return;
       }
-    }
-  );
 
-  /* =========================================
+      const passwordAction = getActionElement(root, target, ACTIONS.password);
+
+      if (passwordAction) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        await handlePassword({
+          root,
+          element: passwordAction,
+          changePassword,
+        });
+
+        return;
+      }
+
+      const openAction = getActionElement(root, target, ACTIONS.open);
+
+      if (openAction) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        handleOpenModal({
+          getItem,
+          getSnapshot,
+        });
+      }
+    },
+  });
+
+  /* =======================================================
+     CHANGE EVENTS
+     - checkbox dark mode
+     - select idioma
+  ======================================================= */
+
+  bindDomEvent({
+    scopeName,
+    scopeRef,
+    target: root,
+    eventName: "change",
+    handler: async (event) => {
+      const target = event.target;
+
+      if (!target) return;
+
+      const darkInput = closestInside(root, target, INPUT_SELECTORS.darkMode);
+
+      if (darkInput) {
+        await handleTheme({
+          root,
+          element: darkInput,
+          updateCuentaTheme,
+          updateCuenta,
+          explicitDarkMode: Boolean(darkInput.checked),
+        });
+
+        return;
+      }
+
+      const languageInput = closestInside(root, target, INPUT_SELECTORS.language);
+
+      if (languageInput) {
+        safeEmit("cuenta:bindings:language:changed", {
+          lang: normalizeLang(languageInput.value),
+        });
+      }
+    },
+  });
+
+  /* =======================================================
+     KEYBOARD ACCESSIBILITY
+  ======================================================= */
+
+  bindDomEvent({
+    scopeName,
+    scopeRef,
+    target: root,
+    eventName: "keydown",
+    handler: async (event) => {
+      const key = safeText(event.key, "");
+
+      if (key !== "Enter") {
+        return;
+      }
+
+      const target = event.target;
+
+      if (!target) return;
+
+      const passwordInput =
+        closestInside(root, target, INPUT_SELECTORS.currentPassword) ||
+        closestInside(root, target, INPUT_SELECTORS.newPassword);
+
+      if (passwordInput) {
+        event.preventDefault();
+
+        await handlePassword({
+          root,
+          element: passwordInput,
+          changePassword,
+        });
+
+        return;
+      }
+
+      const languageInput = closestInside(root, target, INPUT_SELECTORS.language);
+
+      if (languageInput) {
+        event.preventDefault();
+
+        await handleLanguage({
+          root,
+          element: languageInput,
+          updateCuentaLanguage,
+          updateCuenta,
+        });
+      }
+    },
+  });
+
+  /* =======================================================
+     MODAL / MUTATION EVENTS
+     Cuando otro módulo actualiza cuenta, refrescamos.
+  ======================================================= */
+
+  const refreshAfterMutation = (event) => {
+    const payload = event?.detail || event || {};
+
+    scheduleReload(reload, loadCuenta, {
+      source: "mutation-event",
+      event,
+      payload,
+    });
+  };
+
+  bindBusEvent({
+    scopeName,
+    eventName: "cuenta:modal:updated",
+    handler: refreshAfterMutation,
+  });
+
+  bindBusEvent({
+    scopeName,
+    eventName: "cuenta:preferences:mutated",
+    handler: refreshAfterMutation,
+  });
+
+  bindBusEvent({
+    scopeName,
+    eventName: "cuenta:password:success",
+    handler: refreshAfterMutation,
+  });
+
+  bindBusEvent({
+    scopeName,
+    eventName: "cuenta:external:refresh",
+    handler: refreshAfterMutation,
+  });
+
+  safeEmit("cuenta:bindings:ready", {
+    scope: scopeName,
+  });
+
+  /* =======================================================
      CLEANUP
-  ========================================= */
+  ======================================================= */
 
   return () => {
-    try {
-      AppCore?.cleanup?.run?.(
-        resolveScopeName(
-          scope
-        )
-      );
-    } catch {}
+    runScopeCleanup(scopeName);
+
+    safeEmit("cuenta:bindings:destroyed", {
+      scope: scopeName,
+    });
   };
 }
 

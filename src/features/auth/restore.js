@@ -8,7 +8,8 @@
    - restaurar sesión desde token o refresh context
    - serializar me / refresh / restore
    - evitar carreras concurrentes
-   - priorizar refresh cuando exista contexto válido
+   - priorizar /me cuando ya existe token útil
+   - usar refresh sólo con payload refresh útil
    - endurecer errores y limpieza de sesión
    - respetar rutas públicas técnicas durante boot
    - no romper /activate-account?token=...
@@ -20,7 +21,7 @@
    HARDENING EXTREMO:
    - promises únicas anti race-condition
    - cooldown anti refresh-loop
-   - fallback refresh -> token -> /me
+   - fallback token -> /me -> refresh si procede
    - limpieza auth protegida
    - preservación route/publicPath en activation/reset
    - eventos enterprise
@@ -30,6 +31,8 @@
 
    FIX 10/10:
    - restore no marca sesión autenticada sin token + user válido
+   - no intenta /auth/refresh si no hay refresh payload útil
+   - si ya hay token + user, valida por /me antes de refresh
    - refresh token-only queda como token provisional y fuerza /me
    - refresh user-only sólo se acepta si ya hay token válido
    - no reutiliza AppCore.state.user como fallback tras refresh fallido
@@ -42,7 +45,6 @@ import { AppCore } from "../../core/index.js";
 
 import {
   extractMessage,
-  hasValidToken,
 } from "./helpers.js";
 
 import {
@@ -171,6 +173,9 @@ const AUTH_FAILURE_CODES = new Set([
   "AUTH_RESTORE_FAILED",
   "REFRESH_CONTEXT_MISSING",
   "REFRESH_INVALID_SESSION",
+  "REFRESH_EMPTY_RESPONSE",
+  "REFRESH_USER_WITHOUT_TOKEN",
+  "REFRESH_UNUSABLE_RESPONSE",
   "ME_INVALID_SESSION",
 ]);
 
@@ -191,6 +196,10 @@ function isPlainObject(value) {
     typeof value === "object" &&
     !Array.isArray(value)
   );
+}
+
+function isFunction(value) {
+  return typeof value === "function";
 }
 
 function safeObject(value) {
@@ -276,7 +285,11 @@ function emit(eventName, payload = {}) {
       eventName,
       payload
     );
-  } catch {}
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function log(...args) {
@@ -523,6 +536,7 @@ function getCurrentUser() {
     state.user ||
     state.currentUser ||
     state.authUser ||
+    state.sessionUser ||
     state.session?.user ||
     null
   );
@@ -790,6 +804,9 @@ function createRestoreError(
 
   error.status =
     status;
+
+  error.code =
+    code;
 
   error.data = {
     code,
@@ -1220,7 +1237,7 @@ function matchesTechnicalRoute(config, value = "") {
   );
 }
 
-function extractPathToken(config, value = "") {
+function extractRoutePathToken(config, value = "") {
   if (!config) {
     return "";
   }
@@ -1285,7 +1302,7 @@ function hasTechnicalRouteToken(config, value = "") {
 
   if (
     matchesTechnicalRoute(config, path) &&
-    extractPathToken(config, path)
+    extractRoutePathToken(config, path)
   ) {
     return true;
   }
@@ -1622,6 +1639,8 @@ function clearSessionLocalProtected({
     AppCore?.setState?.({
       authenticated:
         false,
+      hasToken:
+        false,
       user:
         null,
       currentUser:
@@ -1662,7 +1681,7 @@ function clearSessionLocalProtected({
 }
 
 /* =========================================================
-   STORAGE PAYLOAD
+   STORAGE PAYLOAD / REFRESH POLICY
 ========================================================= */
 
 function getStoredRefreshPayload() {
@@ -1685,6 +1704,52 @@ function getStoredRefreshPayload() {
         ""
       ),
   };
+}
+
+function hasUsableRefreshPayload(payload = getStoredRefreshPayload()) {
+  const refreshToken =
+    safeText(payload.refreshToken, "");
+
+  const sessionId =
+    safeText(payload.sessionId, "");
+
+  const userId =
+    safeText(payload.userId, "");
+
+  /*
+    Contexto fuerte:
+    - refreshToken real, o
+    - sessionId + userId si el backend soporta refresh por contexto.
+  */
+  return Boolean(
+    refreshToken ||
+      (
+        sessionId &&
+        userId
+      )
+  );
+}
+
+function hasStrongRefreshToken(payload = getStoredRefreshPayload()) {
+  return Boolean(
+    safeText(payload.refreshToken, "")
+  );
+}
+
+function canAttemptRefresh() {
+  const payload =
+    getStoredRefreshPayload();
+
+  return Boolean(
+    hasRefreshContext() &&
+      hasUsableRefreshPayload(payload)
+  );
+}
+
+function shouldPreferMeBeforeRefresh() {
+  return Boolean(
+    hasUsableToken(getCurrentToken())
+  );
 }
 
 function shouldClearForError(error) {
@@ -1780,6 +1845,8 @@ function applyAuthenticatedSession(payload = {}) {
     AppCore?.setState?.({
       authenticated:
         true,
+      hasToken:
+        true,
       user:
         snapshot?.user || payload.user || null,
       currentUser:
@@ -1818,6 +1885,8 @@ function applyProvisionalTokenSession(payload = {}) {
     AppCore?.setState?.({
       authenticated:
         false,
+      hasToken:
+        hasUsableToken(payload.token),
       user:
         null,
       currentUser:
@@ -1968,9 +2037,15 @@ export async function refreshSession(sessionArg = {}) {
   const session =
     getSession(sessionArg);
 
-  if (!hasRefreshContext()) {
+  const requestBody =
+    getStoredRefreshPayload();
+
+  if (
+    !hasRefreshContext() ||
+    !hasUsableRefreshPayload(requestBody)
+  ) {
     throw createRestoreError(
-      "No hay contexto refresh.",
+      "No hay contexto refresh útil.",
       {
         status: 401,
         code: "REFRESH_CONTEXT_MISSING",
@@ -2005,14 +2080,18 @@ export async function refreshSession(sessionArg = {}) {
   emit("auth:refresh:start", {
     hasRefreshContext:
       true,
+    hasRefreshToken:
+      hasStrongRefreshToken(requestBody),
+    hasSessionContext:
+      Boolean(
+        requestBody.sessionId &&
+          requestBody.userId
+      ),
   });
 
   session.refreshPromise =
     (async () => {
       try {
-        const requestBody =
-          getStoredRefreshPayload();
-
         const response =
           await apiPost(
             resolveEndpoint("refresh", "/api/auth/refresh"),
@@ -2262,6 +2341,14 @@ export async function refreshSession(sessionArg = {}) {
             "refresh",
           message:
             extractMessage(error),
+          status:
+            error?.status ||
+            error?.response?.status ||
+            null,
+          code:
+            error?.code ||
+            error?.data?.code ||
+            null,
           at:
             new Date().toISOString(),
         };
@@ -2383,12 +2470,12 @@ export async function restoreAfterMeFailure(
     meError
   );
 
-  if (!hasRefreshContext()) {
+  if (!canAttemptRefresh()) {
     clearSessionLocalProtected({
       options,
       routeContext,
       reason:
-        "me-failed-no-refresh-context",
+        "me-failed-no-usable-refresh-context",
     });
 
     emit(
@@ -2535,6 +2622,8 @@ export async function restoreSession(...args) {
         hasCompleteAuthState(),
       hasRefreshContext:
         hasRefreshContext(),
+      hasUsableRefreshPayload:
+        canAttemptRefresh(),
 
       publicRoute:
         Boolean(options.publicRoute),
@@ -2567,7 +2656,7 @@ export async function restoreSession(...args) {
           hasUsableToken(getCurrentToken());
 
         const refreshAvailable =
-          hasRefreshContext();
+          canAttemptRefresh();
 
         if (
           !tokenAvailable &&
@@ -2577,14 +2666,14 @@ export async function restoreSession(...args) {
             options,
             routeContext,
             reason:
-              "missing-token-and-refresh",
+              "missing-token-and-usable-refresh",
           });
 
           emit(
             "auth:restore:empty",
             {
               reason:
-                "missing-token-and-refresh",
+                "missing-token-and-usable-refresh",
               protectedRoute:
                 routeContext.shouldProtect,
               protectedRouteKey:
@@ -2603,13 +2692,61 @@ export async function restoreSession(...args) {
         }
 
         /*
-          Preferimos refresh cuando existe contexto.
-          Evita confiar en usuario/avatar antiguos persistidos.
+          CRÍTICO:
+          Si hay token, primero /me.
+          Esto evita que, después de login, el boot/restore dispare
+          /auth/refresh con contexto viejo o débil.
+        */
+        if (
+          tokenAvailable &&
+          shouldPreferMeBeforeRefresh()
+        ) {
+          try {
+            log(
+              "restoreSession(): validando token con /me.",
+              {
+                hasCompleteAuthState:
+                  hasCompleteAuthState(),
+                protectedRoute:
+                  routeContext.shouldProtect,
+                protectedRouteKey:
+                  routeContext.protectedRouteKey,
+                publicPath:
+                  routeContext.publicPath,
+              }
+            );
+
+            const result =
+              await restoreUsingMe(session);
+
+            restoreRouteContext(routeContext);
+
+            session.lastRestoreAt =
+              Date.now();
+
+            return result;
+          } catch (meError) {
+            const result =
+              await restoreAfterMeFailure(
+                session,
+                meError,
+                options,
+                routeContext
+              );
+
+            restoreRouteContext(routeContext);
+
+            return result;
+          }
+        }
+
+        /*
+          Sin token, sólo intentamos refresh si hay payload útil.
         */
         if (refreshAvailable) {
           try {
             log(
-              "restoreSession(): refresh preferente.",
+              "restoreSession(): refresh con contexto útil.",
               {
                 protectedRoute:
                   routeContext.shouldProtect,
@@ -2633,7 +2770,7 @@ export async function restoreSession(...args) {
             return result;
           } catch (refreshError) {
             warn(
-              "Refresh preferente falló.",
+              "Refresh falló durante restore.",
               refreshError
             );
 
@@ -2659,7 +2796,7 @@ export async function restoreSession(...args) {
             /*
               Error transitorio de red/API:
               no reintentamos refresh otra vez aquí.
-              Si hay token, validamos por /me.
+              Si aparece token por otro flujo, validamos por /me.
             */
             const result =
               await restoreUsingMeAfterRefreshFailure(
@@ -2675,33 +2812,21 @@ export async function restoreSession(...args) {
           }
         }
 
-        /*
-          Sólo token.
-          No aceptamos sesión completa hasta validar /me.
-        */
-        try {
-          const result =
-            await restoreUsingMe(session);
+        clearSessionLocalProtected({
+          options,
+          routeContext,
+          reason:
+            "restore-no-valid-strategy",
+        });
 
-          restoreRouteContext(routeContext);
-
-          session.lastRestoreAt =
-            Date.now();
-
-          return result;
-        } catch (meError) {
-          const result =
-            await restoreAfterMeFailure(
-              session,
-              meError,
-              options,
-              routeContext
-            );
-
-          restoreRouteContext(routeContext);
-
-          return result;
-        }
+        return {
+          ok: false,
+          user: null,
+          protectedRoute:
+            routeContext.shouldProtect,
+          protectedRouteKey:
+            routeContext.protectedRouteKey,
+        };
       } catch (error) {
         warn(
           "restoreSession() fatal:",
@@ -2759,6 +2884,9 @@ export function getRestoreSnapshot(sessionArg = {}) {
       publicRoute: false,
       preserveCurrentRoute: false,
     });
+
+  const refreshPayload =
+    getStoredRefreshPayload();
 
   return {
     ...getSafeSessionSnapshot(),
@@ -2821,6 +2949,22 @@ export function getRestoreSnapshot(sessionArg = {}) {
 
     hasRefreshContext:
       hasRefreshContext(),
+
+    hasUsableRefreshPayload:
+      hasUsableRefreshPayload(
+        refreshPayload
+      ),
+
+    hasStoredRefreshToken:
+      hasStrongRefreshToken(
+        refreshPayload
+      ),
+
+    hasStoredSessionContext:
+      Boolean(
+        refreshPayload.sessionId &&
+          refreshPayload.userId
+      ),
 
     protectedRoute:
       routeContext.shouldProtect,

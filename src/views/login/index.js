@@ -7,9 +7,11 @@
    - renderizar template auth pro
    - conectar dom, auth, core y toast
    - gestionar submit y feedback visual
-   - delegar sesión/navegación principal en Auth.login
+   - delegar sesión principal en Auth.login
    - evitar doble navegación post-login
    - evitar doble sync de sesión post-login
+   - evitar doble submit aunque la vista se monte dos veces
+   - evitar doble toast de éxito
    - reducir parpadeos al salir de /login
    - activar / limpiar modo auth-screen del body
    - mantener cleanup de listeners
@@ -18,10 +20,13 @@
    - conectar password-field compartido para eye / caps lock
 
    FIX CRÍTICO:
-   - Auth.login ya aplica sesión y navega.
-   - Esta vista NO debe volver a llamar navigateTo() cuando usa Auth.login.
+   - Auth.login aplica sesión.
    - Esta vista NO debe volver a llamar syncSession() cuando usa Auth.login.
+   - Esta vista SÍ navega si después de Auth.login seguimos en /login.
+   - La navegación queda protegida por isStillOnLoginRoute().
    - El auth-screen se limpia al salir realmente de /login.
+   - El submit queda protegido a nivel global contra doble binding.
+   - El toast success queda deduplicado.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -59,6 +64,87 @@ import {
   bindThemeToggle,
   bindLoginSubmit,
 } from "./login.dom.js";
+
+/* =========================================================
+   GLOBAL LOGIN SUBMIT FIREBREAK
+========================================================= */
+
+let globalLoginSubmitPromise = null;
+let lastLoginSuccessToastAt = 0;
+
+const LOGIN_SUCCESS_TOAST_DEDUPE_MS = 1600;
+
+function hasGlobalLoginSubmitInFlight() {
+  return Boolean(globalLoginSubmitPromise);
+}
+
+function runGlobalLoginSubmit(executor) {
+  if (globalLoginSubmitPromise) {
+    return globalLoginSubmitPromise;
+  }
+
+  const promise =
+    Promise.resolve()
+      .then(() => executor());
+
+  globalLoginSubmitPromise =
+    promise;
+
+  const clear = () => {
+    if (globalLoginSubmitPromise === promise) {
+      globalLoginSubmitPromise = null;
+    }
+  };
+
+  promise.then(clear, clear);
+
+  return promise;
+}
+
+function setFormSubmittingFlag(refs = {}, value = false) {
+  try {
+    if (!refs?.form?.dataset) {
+      return;
+    }
+
+    if (value) {
+      refs.form.dataset.loginSubmitting = "1";
+      return;
+    }
+
+    delete refs.form.dataset.loginSubmitting;
+  } catch {}
+}
+
+function isFormSubmittingFlagged(refs = {}) {
+  try {
+    return refs?.form?.dataset?.loginSubmitting === "1";
+  } catch {
+    return false;
+  }
+}
+
+function showLoginSuccessToastOnce(toast, message = "") {
+  const now =
+    Date.now();
+
+  if (
+    now - lastLoginSuccessToastAt <
+    LOGIN_SUCCESS_TOAST_DEDUPE_MS
+  ) {
+    return null;
+  }
+
+  lastLoginSuccessToastAt =
+    now;
+
+  return safeToastCall(
+    toast,
+    "success",
+    message ||
+      "Sesión iniciada correctamente."
+  );
+}
 
 /* =========================================================
    HELPERS
@@ -119,10 +205,6 @@ function isAuthLoginExecutor(executor, deps = {}) {
     return true;
   }
 
-  /*
-    Si no se ha inyectado ningún executor custom,
-    asumimos el flujo estándar: Auth.login controla sesión+navegación.
-  */
   return Boolean(
     !deps.onSubmit &&
       !deps.submitLogin &&
@@ -529,10 +611,6 @@ function scheduleAuthScreenCleanupAfterNavigation() {
     disableAuthScreenMode();
   };
 
-  /*
-    Si Auth.login ya ha navegado antes de devolver resultado,
-    limpiamos inmediatamente.
-  */
   if (!isStillOnLoginRoute()) {
     cleanup();
     return () => {};
@@ -585,6 +663,7 @@ function isAuthenticatedResult(auth = {}) {
     auth?.ok !== false &&
     (
       auth?.status === "authenticated" ||
+      auth?.authenticated === true ||
       auth?.success === true ||
       Boolean(auth?.token) ||
       Boolean(auth?.user)
@@ -595,7 +674,9 @@ function isAuthenticatedResult(auth = {}) {
 function isTwoFaResult(auth = {}) {
   return (
     auth?.requires2FA === true ||
-    auth?.status === "2fa_required"
+    auth?.status === "2fa_required" ||
+    auth?.status === "mfa_required" ||
+    auth?.status === "two_factor_required"
   );
 }
 
@@ -683,9 +764,16 @@ function renderLoginView(container, deps = {}) {
     return {
       destroy() {
         mounted = false;
+
+        setFormSubmittingFlag(
+          refs,
+          false
+        );
+
         cleanupPasswordBindings(
           passwordBindings
         );
+
         disableAuthScreenMode();
       },
     };
@@ -723,7 +811,9 @@ function renderLoginView(container, deps = {}) {
 
     if (
       isSubmitting ||
-      isLeavingLogin
+      isLeavingLogin ||
+      hasGlobalLoginSubmitInFlight() ||
+      isFormSubmittingFlagged(refs)
     ) {
       return;
     }
@@ -766,6 +856,11 @@ function renderLoginView(container, deps = {}) {
     try {
       isSubmitting = true;
 
+      setFormSubmittingFlag(
+        refs,
+        true
+      );
+
       setLoginLoading(
         refs,
         true,
@@ -786,27 +881,28 @@ function renderLoginView(container, deps = {}) {
         );
 
       /*
-        Importante:
-        - Si executor es Auth.login, él aplica sesión y navega.
-        - La vista NO vuelve a syncSession ni navigateTo.
-        - Las options extra son toleradas aunque Auth.login legacy las ignore.
+        Firebreak global:
+        aunque el submit esté bindeado dos veces,
+        solo una llamada real a Auth.login puede estar activa.
       */
       const rawResult =
-        await executeLogin(
-          payload,
-          {
-            navigate:
-              deps.navigate !== false,
+        await runGlobalLoginSubmit(() =>
+          executeLogin(
+            payload,
+            {
+              navigate:
+                deps.navigate !== false,
 
-            redirectTo:
-              deps.redirectTo,
+              redirectTo:
+                deps.redirectTo,
 
-            redirect:
-              deps.redirect,
+              redirect:
+                deps.redirect,
 
-            target:
-              deps.target,
-          }
+              target:
+                deps.target,
+            }
+          )
         );
 
       const auth =
@@ -840,17 +936,21 @@ function renderLoginView(container, deps = {}) {
           scheduleAuthScreenCleanupAfterNavigation();
 
         /*
-          Auth.login estándar ya navega.
-          Solo navegamos si el executor es custom.
+          Si Auth.login o un executor custom ya navegó, no hacemos nada.
+          Si seguimos en /login, navegamos nosotros.
         */
-        if (!executorIsAuthLogin) {
+        await Promise.resolve();
+
+        if (isStillOnLoginRoute()) {
           const redirectTo =
             resolveLoginRedirect(
               auth,
               deps
             );
 
-          navigateTo(redirectTo || "/2fa");
+          navigateTo(
+            redirectTo || "/2fa"
+          );
         }
 
         return;
@@ -870,9 +970,8 @@ function renderLoginView(container, deps = {}) {
         syncSession(auth);
       }
 
-      safeToastCall(
+      showLoginSuccessToastOnce(
         toast,
-        "success",
         auth.message ||
           "Sesión iniciada correctamente."
       );
@@ -883,17 +982,21 @@ function renderLoginView(container, deps = {}) {
         scheduleAuthScreenCleanupAfterNavigation();
 
       /*
-        Solo para executors custom.
-        Auth.login estándar ya hizo navegación.
+        Si Auth.login ya ha navegado internamente, no duplicamos navegación.
+        Si después del login seguimos en /login, esta vista resuelve destino.
       */
-      if (!executorIsAuthLogin) {
+      await Promise.resolve();
+
+      if (isStillOnLoginRoute()) {
         const redirectTo =
           resolveLoginRedirect(
             auth,
             deps
           );
 
-        navigateTo(redirectTo || "/");
+        navigateTo(
+          redirectTo || "/"
+        );
       }
     } catch (error) {
       safeToastCall(
@@ -933,6 +1036,11 @@ function renderLoginView(container, deps = {}) {
     } finally {
       if (!isLeavingLogin) {
         isSubmitting = false;
+
+        setFormSubmittingFlag(
+          refs,
+          false
+        );
 
         if (mounted) {
           setLoginLoading(
@@ -980,6 +1088,11 @@ function renderLoginView(container, deps = {}) {
       mounted = false;
       isSubmitting = false;
       isLeavingLogin = false;
+
+      setFormSubmittingFlag(
+        refs,
+        false
+      );
 
       safeUnbind(unbindInputs);
       safeUnbind(unbindTheme);

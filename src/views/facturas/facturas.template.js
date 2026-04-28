@@ -6,7 +6,8 @@
    PATCH · PAGINATION 5 ITEMS · INCIDENCIA MODAL READY
    PATCH · ADMIN CREATE BUTTON · COMPACT TABLE · BUTTON HOVER FIX
    PATCH · ONION TOKENS FULL · DARK/LIGHT MODE 10/10
-   PATCH · AVATAR RNG COLORS · STATUS CHIPS FIX · LOADER FIX
+   PATCH · AVATAR USER-STABLE COLORS · STATUS CHIPS FIX · LOADER FIX
+   PATCH · SORT DESC BY NEWEST INVOICES
 
    RESPONSABILIDADES:
    - render del hero/header de facturas
@@ -21,7 +22,9 @@
    - loading overlay en refresh sin desplazar tabla
    - dark/light mode conectado a variables.css + ui.css
    - chips de pago con contraste real en dark
-   - avatares fallback con colores pseudo-RNG estables
+   - avatares fallback con colores pseudo-RNG estables por usuario
+   - misma persona = mismo color de avatar en todas sus facturas
+   - tabla ordenada siempre de más reciente a menos reciente
    - tabla compacta premium SaaS
    - estados loading/error/empty blindados
 ========================================================= */
@@ -255,6 +258,18 @@ function pickTicketIdFromArray(value = []) {
   return null;
 }
 
+function toTimestamp(value = null) {
+  if (!value) return 0;
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return 0;
+  }
+
+  return date.getTime();
+}
+
 /* =========================================================
    AVATAR PALETTE
 ========================================================= */
@@ -323,13 +338,7 @@ const AVATAR_PALETTE = Object.freeze([
 ]);
 
 function getAvatarPalette(item = {}) {
-  const seed = [
-    getFacturaId(item),
-    getFacturaNumero(item),
-    getClientName(item),
-    getClientEmail(item),
-  ].join("|");
-
+  const seed = getClientStableKey(item);
   const index = hashString(seed) % AVATAR_PALETTE.length;
 
   return AVATAR_PALETTE[index];
@@ -470,6 +479,56 @@ function getClientAvatar(item = {}) {
       item?.raw?.client?.avatarUrl
     ),
     ""
+  );
+}
+
+function getClientStableKey(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return normalizeKey(
+    first(
+      item.clienteId,
+      item.clientId,
+      item.customerId,
+      item.userId,
+      item.uid,
+      item.cliente?.id,
+      item.cliente?.userId,
+      item.client?.id,
+      item.client?.userId,
+      item.customer?.id,
+      item.customer?.userId,
+
+      item.clienteEmail,
+      item.emailCliente,
+      item.clientEmail,
+      item.email,
+      item.cliente?.email,
+      item.client?.email,
+      item.customer?.email,
+
+      raw.clienteId,
+      raw.clientId,
+      raw.customerId,
+      raw.userId,
+      raw.uid,
+      raw.cliente?.id,
+      raw.cliente?.userId,
+      raw.client?.id,
+      raw.client?.userId,
+      raw.customer?.id,
+      raw.customer?.userId,
+
+      raw.clienteEmail,
+      raw.emailCliente,
+      raw.clientEmail,
+      raw.email,
+      raw.cliente?.email,
+      raw.client?.email,
+      raw.customer?.email,
+
+      getClientName(item)
+    )
   );
 }
 
@@ -720,6 +779,52 @@ function getUpdatedAt(item = {}) {
   );
 }
 
+function getSortDate(item = {}) {
+  return first(
+    item.fecha,
+    item.fechaFactura,
+    item.issueDate,
+    item.createdAt,
+    item.fechaCreacion,
+    item.updatedAt,
+    item.fechaActualizacion,
+    item.lastUpdateAt,
+
+    item?.raw?.fecha,
+    item?.raw?.fechaFactura,
+    item?.raw?.issueDate,
+    item?.raw?.createdAt,
+    item?.raw?.fechaCreacion,
+    item?.raw?.updatedAt,
+    item?.raw?.fechaActualizacion,
+    item?.raw?.lastUpdateAt
+  );
+}
+
+function getSortTimestamp(item = {}) {
+  return toTimestamp(getSortDate(item));
+}
+
+function compareFacturasNewestFirst(a = {}, b = {}) {
+  const diff = getSortTimestamp(b) - getSortTimestamp(a);
+
+  if (diff !== 0) {
+    return diff;
+  }
+
+  const bNumero = safeText(getFacturaNumero(b), "");
+  const aNumero = safeText(getFacturaNumero(a), "");
+
+  return bNumero.localeCompare(aNumero, "es", {
+    numeric: true,
+    sensitivity: "base",
+  });
+}
+
+function sortFacturasNewestFirst(items = []) {
+  return [...safeArray(items)].sort(compareFacturasNewestFirst);
+}
+
 function hasPdf(item = {}) {
   return Boolean(
     first(
@@ -774,7 +879,7 @@ function computeStats(items = []) {
 }
 
 function getPagination(items = [], state = {}) {
-  const allItems = safeArray(items);
+  const allItems = sortFacturasNewestFirst(items);
   const runtime = safeObject(state);
 
   const pageSize = Math.max(
@@ -2187,7 +2292,7 @@ function renderStyles() {
 ========================================================= */
 
 export function renderHeader({ items = [], state = {} } = {}) {
-  const rows = safeArray(items);
+  const rows = sortFacturasNewestFirst(items);
   const runtime = safeObject(state);
 
   const stats = computeStats(rows);
@@ -2343,7 +2448,7 @@ export function renderErrorState(message = "No se pudieron cargar las facturas."
 ========================================================= */
 
 export function renderCards({ items = [], state = {} } = {}) {
-  const rows = safeArray(items);
+  const rows = sortFacturasNewestFirst(items);
   const runtime = safeObject(state);
 
   const loading = Boolean(runtime.loading);
@@ -2428,8 +2533,10 @@ export function renderCards({ items = [], state = {} } = {}) {
 ========================================================= */
 
 export function renderFacturasTemplate({ items = [], state = {} } = {}) {
+  const rows = sortFacturasNewestFirst(items);
+
   const data = {
-    items: safeArray(items),
+    items: rows,
     state: safeObject(state),
   };
 

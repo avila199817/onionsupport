@@ -3,6 +3,16 @@
    Archivo: src/views/incidencias/incidencias.modal.js
 
    CLIENT EXPERIENCE PRO · DETAIL MODAL · FINAL GOD MODE
+
+   CIERRE DEFINITIVO:
+   - imágenes previsualizadas directamente en miniatura
+   - archivos no previsualizables con texto + descarga
+   - icono de descarga sobre miniaturas
+   - subida multipart con barra de progreso real mediante XHR
+   - textarea de actualización con presencia visual clara
+   - header compacto sin cortar agresivamente el título
+   - factura/importe alineado con lógica de tabla
+   - soporte para URLs protegidas mediante hidratación Blob/ObjectURL
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -24,6 +34,7 @@ const PANEL_ID = "incidencias-detail-modal-panel";
 
 const REQUEST_TIMEOUT_MS = 90000;
 const ATTACHMENT_TIMEOUT_MS = 90000;
+const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000;
 
 /* =========================================================
    LOCAL STATE
@@ -43,12 +54,24 @@ const modalState = {
 
   pendingFiles: [],
 
+  uploadProgress: {
+    active: false,
+    percent: 0,
+    loaded: 0,
+    total: 0,
+    label: "",
+  },
+
   openingAttachmentId: "",
   downloadingAttachmentId: "",
   attachmentActionKey: "",
 
   previewFile: null,
   previewObjectUrl: "",
+
+  thumbnailObjectUrls: new Map(),
+  thumbnailLoadingIds: new Set(),
+  thumbnailFailedIds: new Set(),
 };
 
 /* =========================================================
@@ -138,6 +161,10 @@ function first(...values) {
       continue;
     }
 
+    if (Array.isArray(value) && value.length === 0) {
+      continue;
+    }
+
     return value;
   }
 
@@ -155,6 +182,15 @@ function escapeHtml(value = "") {
 
 function normalizeWhitespace(value = "") {
   return safeText(value, "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeKey(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .trim();
 }
 
 function showToast(message = "", type = "info") {
@@ -189,6 +225,16 @@ function setFeedback(message = "", type = "info") {
 function clearFeedback() {
   modalState.feedbackMessage = "";
   modalState.feedbackType = "info";
+}
+
+function clearUploadProgress() {
+  modalState.uploadProgress = {
+    active: false,
+    percent: 0,
+    loaded: 0,
+    total: 0,
+    label: "",
+  };
 }
 
 function clearAttachmentBusyState() {
@@ -236,6 +282,76 @@ function setAttachmentPreview(file = {}) {
   return true;
 }
 
+function revokeAttachmentThumbnails() {
+  try {
+    modalState.thumbnailObjectUrls.forEach((entry) => {
+      const item = safeObject(entry);
+
+      if (item.managed && item.url) {
+        try {
+          URL.revokeObjectURL(item.url);
+        } catch {}
+      }
+    });
+  } catch {}
+
+  try {
+    modalState.thumbnailObjectUrls.clear();
+  } catch {
+    modalState.thumbnailObjectUrls = new Map();
+  }
+
+  try {
+    modalState.thumbnailLoadingIds.clear();
+  } catch {
+    modalState.thumbnailLoadingIds = new Set();
+  }
+
+  try {
+    modalState.thumbnailFailedIds.clear();
+  } catch {
+    modalState.thumbnailFailedIds = new Set();
+  }
+}
+
+function getStoredThumbnailUrl(attachmentId = "") {
+  const id = safeText(attachmentId, "");
+  if (!id) return "";
+
+  try {
+    const entry = modalState.thumbnailObjectUrls.get(id);
+    return safeText(entry?.url, "");
+  } catch {
+    return "";
+  }
+}
+
+function setStoredThumbnailUrl(attachmentId = "", url = "", managed = false) {
+  const id = safeText(attachmentId, "");
+  const finalUrl = safeText(url, "");
+
+  if (!id || !finalUrl) return false;
+
+  try {
+    const previous = modalState.thumbnailObjectUrls.get(id);
+
+    if (previous?.managed && previous?.url && previous.url !== finalUrl) {
+      try {
+        URL.revokeObjectURL(previous.url);
+      } catch {}
+    }
+
+    modalState.thumbnailObjectUrls.set(id, {
+      url: finalUrl,
+      managed: Boolean(managed),
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function formatBytes(bytes = 0) {
   const size = Number(bytes);
 
@@ -249,6 +365,24 @@ function formatBytes(bytes = 0) {
   }
 
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function formatMoney(value = 0, currency = "EUR") {
+  const amount = Number(value);
+
+  if (!Number.isFinite(amount)) {
+    return "";
+  }
+
+  try {
+    return new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: safeText(currency, "EUR"),
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${safeText(currency, "EUR")}`;
+  }
 }
 
 function isFile(value) {
@@ -692,6 +826,132 @@ async function fetchAttachmentResource(url = "", fallbackFilename = "archivo") {
   }
 }
 
+function requestMultipartWithProgress(path = "", formData = null, options = {}) {
+  return new Promise((resolve, reject) => {
+    const finalUrl = resolveApiUrl(path);
+    const token = getAuthToken();
+
+    if (!finalUrl) {
+      reject(new Error("API_URL_REQUIRED"));
+      return;
+    }
+
+    if (!isFormData(formData)) {
+      reject(new Error("FORM_DATA_REQUIRED"));
+      return;
+    }
+
+    const xhr = new XMLHttpRequest();
+    const timeoutMs = safeNumber(options?.timeoutMs, UPLOAD_TIMEOUT_MS);
+
+    xhr.open(safeText(options?.method, "POST").toUpperCase(), finalUrl, true);
+    xhr.timeout = timeoutMs;
+    xhr.withCredentials = true;
+
+    xhr.setRequestHeader("Accept", "application/json, text/plain, */*");
+
+    if (token) {
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    }
+
+    xhr.upload.onprogress = (event) => {
+      if (!modalState.isOpen) return;
+
+      if (!event.lengthComputable) {
+        modalState.uploadProgress = {
+          active: true,
+          percent: 0,
+          loaded: safeNumber(event.loaded, 0),
+          total: 0,
+          label: "Subiendo archivos...",
+        };
+
+        renderModal();
+        attachRootBindings();
+        return;
+      }
+
+      const loaded = safeNumber(event.loaded, 0);
+      const total = safeNumber(event.total, 0);
+      const percent = total > 0
+        ? Math.min(100, Math.round((loaded / total) * 100))
+        : 0;
+
+      modalState.uploadProgress = {
+        active: true,
+        percent,
+        loaded,
+        total,
+        label: `Subiendo archivos... ${percent}%`,
+      };
+
+      renderModal();
+      attachRootBindings();
+    };
+
+    xhr.onload = () => {
+      const status = safeNumber(xhr.status, 0);
+      const contentType = safeText(xhr.getResponseHeader("content-type"), "");
+      const raw = xhr.responseText || "";
+
+      let payload = raw;
+
+      if (contentType.includes("application/json")) {
+        try {
+          payload = raw ? JSON.parse(raw) : null;
+        } catch {
+          payload = raw;
+        }
+      } else {
+        try {
+          payload = raw ? JSON.parse(raw) : raw;
+        } catch {
+          payload = raw;
+        }
+      }
+
+      if (status < 200 || status >= 300) {
+        const message = safeText(
+          first(
+            payload?.message,
+            payload?.error,
+            raw,
+            `HTTP ${status}`
+          ),
+          `HTTP ${status}`
+        );
+
+        const error = new Error(message);
+        error.status = status;
+        error.statusCode = status;
+        error.response = payload;
+        reject(error);
+        return;
+      }
+
+      resolve(payload);
+    };
+
+    xhr.onerror = () => {
+      reject(new Error("No se pudo conectar con el servidor durante la subida."));
+    };
+
+    xhr.ontimeout = () => {
+      reject(
+        new Error(
+          "La subida ha tardado demasiado. El archivo puede ser muy pesado o la conexión demasiado lenta."
+        )
+      );
+    };
+
+    xhr.onabort = () => {
+      reject(new Error("La subida se ha cancelado."));
+    };
+
+    xhr.send(formData);
+  });
+}
+
 /* =========================================================
    BLOB / DOWNLOAD / PREVIEW NORMALIZATION
 ========================================================= */
@@ -957,6 +1217,69 @@ function isPreviewPdf(file = {}) {
   return type.includes("application/pdf") || name.endsWith(".pdf");
 }
 
+function isImageLikeAttachment(file = {}) {
+  const item = safeObject(file);
+
+  const type = safeText(
+    first(
+      item.contentType,
+      item.type,
+      item.mimeType,
+      item.mimetype,
+      item.raw?.contentType,
+      item.raw?.type,
+      item.raw?.mimeType,
+      item.raw?.mimetype
+    ),
+    ""
+  ).toLowerCase();
+
+  const name = safeText(
+    first(
+      item.filename,
+      item.fileName,
+      item.name,
+      item.raw?.filename,
+      item.raw?.fileName,
+      item.raw?.name
+    ),
+    ""
+  ).toLowerCase();
+
+  return (
+    type.startsWith("image/") ||
+    /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(name)
+  );
+}
+
+function getAttachmentDownloadIconSvg() {
+  return `
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+      style="display:block;"
+    >
+      <path
+        d="M12 3v11m0 0 4-4m-4 4-4-4"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+      />
+    </svg>
+  `;
+}
+
 /* =========================================================
    DATE HELPERS
 ========================================================= */
@@ -1142,24 +1465,124 @@ function getTecnico(detail = {}) {
 }
 
 function getFacturaRelacionada(detail = {}) {
-  return safeText(
+  const invoiceCode = safeText(
     first(
+      detail.invoiceCode,
       detail.invoiceId,
       detail.facturaId,
       detail.factura,
-      detail.invoiceCode,
+      detail?.invoice?.code,
+      detail?.invoice?.id,
+      detail?.factura?.code,
+      detail?.factura?.id,
+      detail?.linkedInvoices?.code,
+      detail?.linkedInvoices?.id,
+
+      detail?.raw?.invoiceCode,
       detail?.raw?.invoiceId,
       detail?.raw?.facturaId,
       detail?.raw?.factura,
-      detail?.raw?.invoiceCode,
       detail?.raw?.facturaRelacionada,
-      detail?.raw?.invoice?.id,
-      detail?.raw?.factura?.id,
       detail?.raw?.invoice?.code,
-      detail?.raw?.factura?.code
+      detail?.raw?.invoice?.id,
+      detail?.raw?.factura?.code,
+      detail?.raw?.factura?.id,
+      detail?.raw?.linkedInvoices?.code,
+      detail?.raw?.linkedInvoices?.id
     ),
-    "No vinculada"
+    ""
   );
+
+  const amount = first(
+    detail.total,
+    detail.amount,
+    detail.importe,
+    detail.price,
+
+    detail.facturasTotal,
+    detail.invoicesTotal,
+    detail.importeFacturas,
+    detail.invoiceTotal,
+
+    detail.linkedInvoices?.total,
+    detail.linkedInvoices?.amount,
+    detail.linkedInvoices?.importe,
+
+    detail.meta?.invoicesTotal,
+    detail.meta?.invoiceTotal,
+
+    detail?.raw?.total,
+    detail?.raw?.amount,
+    detail?.raw?.importe,
+    detail?.raw?.price,
+
+    detail?.raw?.facturasTotal,
+    detail?.raw?.invoicesTotal,
+    detail?.raw?.importeFacturas,
+    detail?.raw?.invoiceTotal,
+
+    detail?.raw?.linkedInvoices?.total,
+    detail?.raw?.linkedInvoices?.amount,
+    detail?.raw?.linkedInvoices?.importe,
+
+    detail?.raw?.meta?.invoicesTotal,
+    detail?.raw?.meta?.invoiceTotal
+  );
+
+  const currency = safeText(
+    first(
+      detail.currency,
+      detail.moneda,
+      detail.linkedInvoices?.currency,
+      detail.linkedInvoices?.moneda,
+      detail.meta?.invoiceCurrency,
+      detail.meta?.currency,
+
+      detail?.raw?.currency,
+      detail?.raw?.moneda,
+      detail?.raw?.linkedInvoices?.currency,
+      detail?.raw?.linkedInvoices?.moneda,
+      detail?.raw?.meta?.invoiceCurrency,
+      detail?.raw?.meta?.currency,
+
+      "EUR"
+    ),
+    "EUR"
+  );
+
+  const numericAmount = Number(amount);
+
+  if (invoiceCode && Number.isFinite(numericAmount)) {
+    return `${invoiceCode} · ${formatMoney(numericAmount, currency)}`;
+  }
+
+  if (invoiceCode) {
+    return invoiceCode;
+  }
+
+  if (Number.isFinite(numericAmount)) {
+    return formatMoney(numericAmount, currency);
+  }
+
+  const paymentStatus = normalizeKey(
+    first(
+      detail.paymentStatus,
+      detail.estadoPago,
+      detail.linkedInvoices?.paymentStatus,
+      detail.linkedInvoices?.estadoPago,
+      detail?.raw?.paymentStatus,
+      detail?.raw?.estadoPago,
+      detail?.raw?.linkedInvoices?.paymentStatus,
+      detail?.raw?.linkedInvoices?.estadoPago
+    )
+  );
+
+  if (["paid", "pagada", "pagado", "cobrada"].includes(paymentStatus)) return "Pagado";
+  if (["pending", "pendiente"].includes(paymentStatus)) return "Pendiente";
+  if (["partial", "parcial"].includes(paymentStatus)) return "Parcial";
+  if (["overdue", "vencida"].includes(paymentStatus)) return "Vencido";
+
+  return "No vinculada";
 }
 
 /* =========================================================
@@ -1659,6 +2082,123 @@ function buildAttachmentCandidates(detail = {}, attachment = {}, mode = "open") 
   return unique;
 }
 
+function getBestThumbnailCandidate(file = {}) {
+  return safeText(
+    first(
+      file.viewUrl,
+      file.openUrl,
+      file.signedUrl,
+      file.url,
+      file.blobUrl,
+      file.publicUrl,
+      file.downloadUrl,
+      file?.raw?.viewUrl,
+      file?.raw?.openUrl,
+      file?.raw?.signedUrl,
+      file?.raw?.url,
+      file?.raw?.blobUrl,
+      file?.raw?.publicUrl,
+      file?.raw?.downloadUrl
+    ),
+    ""
+  );
+}
+
+async function hydrateAttachmentThumbnails() {
+  if (!modalState.isOpen || !modalState.detail) return false;
+
+  const files = getAttachments(modalState.detail).filter(isImageLikeAttachment);
+
+  if (!files.length) return false;
+
+  files.forEach(async (file) => {
+    const attachmentId = safeText(file.id, "");
+    if (!attachmentId) return;
+
+    if (getStoredThumbnailUrl(attachmentId)) return;
+
+    try {
+      if (modalState.thumbnailLoadingIds.has(attachmentId)) return;
+      if (modalState.thumbnailFailedIds.has(attachmentId)) return;
+    } catch {}
+
+    const candidate = getBestThumbnailCandidate(file);
+
+    if (!candidate) {
+      try {
+        modalState.thumbnailFailedIds.add(attachmentId);
+      } catch {}
+      return;
+    }
+
+    if (!looksLikeProtectedApiUrl(candidate)) {
+      setStoredThumbnailUrl(attachmentId, candidate, false);
+      return;
+    }
+
+    try {
+      modalState.thumbnailLoadingIds.add(attachmentId);
+    } catch {}
+
+    try {
+      const payload = await fetchAttachmentResource(
+        candidate,
+        safeText(first(file.filename, file.name), "imagen")
+      );
+
+      if (!modalState.isOpen) return;
+
+      if (payload?.kind === "blob" && isBlob(payload.blob)) {
+        const type = safeText(first(payload.contentType, payload.blob.type), "");
+
+        if (type && !type.startsWith("image/")) {
+          try {
+            modalState.thumbnailFailedIds.add(attachmentId);
+          } catch {}
+          return;
+        }
+
+        const objectUrl = URL.createObjectURL(payload.blob);
+        setStoredThumbnailUrl(attachmentId, objectUrl, true);
+
+        renderModal();
+        attachRootBindings();
+
+        return;
+      }
+
+      if (payload?.kind === "json") {
+        const fileFromPayload = normalizeAttachmentActionFile(
+          payload,
+          file,
+          "open"
+        );
+
+        if (fileFromPayload?.url) {
+          setStoredThumbnailUrl(
+            attachmentId,
+            fileFromPayload.url,
+            Boolean(fileFromPayload.managedObjectUrl)
+          );
+
+          renderModal();
+          attachRootBindings();
+        }
+      }
+    } catch {
+      try {
+        modalState.thumbnailFailedIds.add(attachmentId);
+      } catch {}
+    } finally {
+      try {
+        modalState.thumbnailLoadingIds.delete(attachmentId);
+      } catch {}
+    }
+  });
+
+  return true;
+}
+
 /* =========================================================
    INTERNAL API ACTIONS
 ========================================================= */
@@ -1674,14 +2214,6 @@ async function uploadTicketAttachmentsInternal({
     throw new Error("Faltan ticketId o archivos para subir.");
   }
 
-  const formData = new FormData();
-
-  list.forEach((file) => {
-    if (isFile(file)) {
-      formData.append("attachments", file, file.name);
-    }
-  });
-
   const encodedTicketId = encodeUrlPathSegment(id);
 
   const candidates = [
@@ -1694,11 +2226,29 @@ async function uploadTicketAttachmentsInternal({
   let lastError = null;
 
   for (const path of candidates) {
+    const formData = new FormData();
+
+    list.forEach((file) => {
+      if (isFile(file)) {
+        formData.append("attachments", file, file.name);
+      }
+    });
+
     try {
-      return await requestJson(path, {
+      modalState.uploadProgress = {
+        active: true,
+        percent: 0,
+        loaded: 0,
+        total: list.reduce((sum, file) => sum + safeNumber(file.size, 0), 0),
+        label: "Preparando subida...",
+      };
+
+      renderModal();
+      attachRootBindings();
+
+      return await requestMultipartWithProgress(path, formData, {
         method: "POST",
-        body: formData,
-        timeoutMs: REQUEST_TIMEOUT_MS,
+        timeoutMs: UPLOAD_TIMEOUT_MS,
       });
     } catch (error) {
       lastError = error;
@@ -2258,11 +2808,11 @@ function renderChip(label = "", style = "") {
         align-items:center;
         justify-content:center;
         flex:0 0 auto;
-        min-height:26px;
-        height:26px;
-        padding:0 10px;
+        min-height:24px;
+        height:24px;
+        padding:0 9px;
         border-radius:999px;
-        font-size:11px;
+        font-size:10px;
         line-height:1;
         font-weight:var(--weight-bold, 700);
         letter-spacing:.05em;
@@ -2349,39 +2899,13 @@ function renderAvatar(detail = {}) {
         class="incidencias-modal-avatar"
         data-tooltip="${escapeHtml(clientName)}"
         aria-label="${escapeHtml(clientName)}"
-        style="
-          position:relative;
-          flex:0 0 76px;
-          width:76px;
-          height:76px;
-          overflow:visible;
-          cursor:default;
-        "
       >
-        <div
-          class="incidencias-modal-avatar-frame"
-          style="
-            position:relative;
-            width:76px;
-            height:76px;
-            border-radius:22px;
-            overflow:hidden;
-            border:1px solid var(--border-soft);
-            background:transparent;
-            box-shadow:none;
-          "
-        >
+        <div class="incidencias-modal-avatar-frame">
           <img
             src="${escapeHtml(avatarUrl)}"
             alt="${escapeHtml(clientName)}"
             loading="lazy"
             referrerpolicy="no-referrer"
-            style="
-              display:block;
-              width:100%;
-              height:100%;
-              object-fit:cover;
-            "
             onerror="this.style.display='none'; this.parentNode.setAttribute('data-modal-avatar-fallback','true');"
           />
           <span
@@ -2393,7 +2917,7 @@ function renderAvatar(detail = {}) {
               background:${palette.bg};
               border:1px solid ${palette.border};
               color:${palette.text};
-              font-size:22px;
+              font-size:18px;
               font-weight:var(--weight-black, 800);
               letter-spacing:.03em;
               box-shadow:0 12px 28px ${palette.glow};
@@ -2411,32 +2935,19 @@ function renderAvatar(detail = {}) {
       class="incidencias-modal-avatar"
       data-tooltip="${escapeHtml(clientName)}"
       aria-label="${escapeHtml(clientName)}"
-      style="
-        position:relative;
-        flex:0 0 76px;
-        width:76px;
-        height:76px;
-        overflow:visible;
-        cursor:default;
-      "
     >
       <div
         class="incidencias-modal-avatar-frame"
         style="
-          position:relative;
-          width:76px;
-          height:76px;
-          border-radius:22px;
           display:grid;
           place-items:center;
           background:${palette.bg};
           border:1px solid ${palette.border};
           color:${palette.text};
-          font-size:22px;
+          font-size:18px;
           font-weight:var(--weight-black, 800);
           letter-spacing:.03em;
           box-shadow:0 12px 28px ${palette.glow};
-          overflow:hidden;
         "
       >
         ${escapeHtml(initials)}
@@ -2522,6 +3033,42 @@ function renderFeedbackBox() {
       >
         ${escapeHtml(message)}
       </span>
+    </div>
+  `;
+}
+
+function renderUploadProgress() {
+  const progress = safeObject(modalState.uploadProgress);
+
+  if (!progress.active) return "";
+
+  const percent = Math.max(0, Math.min(100, safeNumber(progress.percent, 0)));
+  const loaded = formatBytes(progress.loaded);
+  const total = formatBytes(progress.total);
+
+  return `
+    <div class="incidencias-modal-upload-progress" aria-live="polite">
+      <div class="incidencias-modal-upload-progress-head">
+        <strong>${escapeHtml(safeText(progress.label, "Subiendo archivos..."))}</strong>
+        <span>${escapeHtml(percent ? `${percent}%` : "Procesando")}</span>
+      </div>
+
+      <div class="incidencias-modal-upload-progress-track">
+        <div
+          class="incidencias-modal-upload-progress-bar"
+          style="width:${percent || 8}%;"
+        ></div>
+      </div>
+
+      ${
+        loaded || total
+          ? `
+            <div class="incidencias-modal-upload-progress-meta">
+              ${escapeHtml([loaded, total ? `de ${total}` : ""].filter(Boolean).join(" "))}
+            </div>
+          `
+          : ""
+      }
     </div>
   `;
 }
@@ -2653,55 +3200,95 @@ function renderAttachmentActionButtons(file = {}) {
   const busy = getAttachmentBusyMeta(file);
 
   return `
-    <div
-      style="
-        display:flex;
-        gap:8px;
-        flex-wrap:wrap;
-        justify-content:flex-end;
-        flex:0 0 auto;
-      "
-    >
-      <button
-        type="button"
-        data-modal-action="open-attachment"
-        data-attachment-id="${escapeHtml(file.id)}"
-        ${busy.isOpening || modalState.isSubmitting ? "disabled" : ""}
-        style="
-          min-height:34px;
-          padding:0 12px;
-          border-radius:10px;
-          border:1px solid var(--border-soft);
-          background:transparent;
-          color:var(--text-soft);
-          font-size:12px;
-          font-weight:var(--weight-bold, 700);
-          cursor:${busy.isOpening || modalState.isSubmitting ? "wait" : "pointer"};
-          opacity:${busy.isOpening ? ".82" : "1"};
-        "
-      >
-        ${busy.isOpening ? renderInlineSpinner("Cargando...") : "Visualizar"}
-      </button>
-
+    <div class="incidencias-modal-attachment-actions">
       <button
         type="button"
         data-modal-action="download-attachment"
         data-attachment-id="${escapeHtml(file.id)}"
         ${busy.isDownloading || modalState.isSubmitting ? "disabled" : ""}
-        style="
-          min-height:34px;
-          padding:0 12px;
-          border-radius:10px;
-          border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
-          background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-          color:var(--text-strong);
-          font-size:12px;
-          font-weight:var(--weight-bold, 700);
-          cursor:${busy.isDownloading || modalState.isSubmitting ? "wait" : "pointer"};
-          opacity:${busy.isDownloading ? ".82" : "1"};
-        "
+        class="incidencias-modal-download-btn"
+        title="Descargar"
+        aria-label="Descargar ${escapeHtml(file.name || file.filename || "archivo")}"
       >
-        ${busy.isDownloading ? renderInlineSpinner("Bajando...") : "Descargar"}
+        ${
+          busy.isDownloading
+            ? renderInlineSpinner("Bajando...")
+            : `
+              <span class="incidencias-modal-download-icon">
+                ${getAttachmentDownloadIconSvg()}
+              </span>
+              <span class="incidencias-modal-download-text">Descargar</span>
+            `
+        }
+      </button>
+    </div>
+  `;
+}
+
+function renderAttachmentPreviewSquare(file = {}) {
+  const isImage = isImageLikeAttachment(file);
+
+  if (!isImage) {
+    return `
+      <div class="incidencias-modal-file-square" aria-hidden="true">
+        <span>DOC</span>
+      </div>
+    `;
+  }
+
+  const storedUrl = getStoredThumbnailUrl(file.id);
+
+  const directUrl = safeText(
+    first(
+      storedUrl,
+      !looksLikeProtectedApiUrl(file.viewUrl) ? file.viewUrl : "",
+      !looksLikeProtectedApiUrl(file.openUrl) ? file.openUrl : "",
+      !looksLikeProtectedApiUrl(file.signedUrl) ? file.signedUrl : "",
+      !looksLikeProtectedApiUrl(file.url) ? file.url : "",
+      !looksLikeProtectedApiUrl(file.blobUrl) ? file.blobUrl : "",
+      !looksLikeProtectedApiUrl(file.publicUrl) ? file.publicUrl : ""
+    ),
+    ""
+  );
+
+  const loading = (() => {
+    try {
+      return modalState.thumbnailLoadingIds.has(safeText(file.id, ""));
+    } catch {
+      return false;
+    }
+  })();
+
+  if (!directUrl) {
+    return `
+      <div class="incidencias-modal-file-square incidencias-modal-file-square--image" aria-hidden="true">
+        <span>${loading ? "..." : "IMG"}</span>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="incidencias-modal-image-thumb-wrap">
+      <img
+        src="${escapeHtml(directUrl)}"
+        alt="${escapeHtml(file.name || file.filename || "Imagen adjunta")}"
+        loading="lazy"
+        referrerpolicy="no-referrer"
+        class="incidencias-modal-image-thumb"
+        onerror="this.style.display='none'; this.parentNode.setAttribute('data-thumb-error','true');"
+      />
+
+      <span class="incidencias-modal-image-thumb-fallback">IMG</span>
+
+      <button
+        type="button"
+        data-modal-action="download-attachment"
+        data-attachment-id="${escapeHtml(file.id)}"
+        class="incidencias-modal-image-download"
+        title="Descargar imagen"
+        aria-label="Descargar imagen"
+      >
+        ${getAttachmentDownloadIconSvg()}
       </button>
     </div>
   `;
@@ -2743,6 +3330,8 @@ function renderAttachments(detail = {}) {
             Puedes adjuntar capturas, PDFs u otros archivos útiles. Se enviarán cuando pulses “Actualizar incidencia”.
           </span>
         </div>
+
+        ${renderUploadProgress()}
 
         <input
           id="incidencias-modal-attachments-input"
@@ -2792,47 +3381,16 @@ function renderAttachments(detail = {}) {
                 ${files
                   .map(
                     (file) => `
-                      <article
-                        style="
-                          width:100%;
-                          display:grid;
-                          gap:10px;
-                          padding:12px 14px;
-                          border-radius:14px;
-                          border:1px solid var(--border-soft);
-                          background:var(--surface-glass);
-                        "
-                      >
-                        <div
-                          class="incidencias-modal-attachment-row"
-                          style="
-                            display:grid;
-                            grid-template-columns:minmax(0, 1fr) auto;
-                            gap:12px;
-                            align-items:center;
-                          "
-                        >
-                          <div style="display:grid; gap:4px; min-width:0;">
-                            <strong
-                              style="
-                                min-width:0;
-                                font-weight:var(--weight-semibold, 600);
-                                font-size:13px;
-                                line-height:1.35;
-                                word-break:break-word;
-                                color:var(--text-strong);
-                              "
-                            >
+                      <article class="incidencias-modal-attachment-card">
+                        <div class="incidencias-modal-attachment-row">
+                          ${renderAttachmentPreviewSquare(file)}
+
+                          <div class="incidencias-modal-attachment-copy">
+                            <strong>
                               ${escapeHtml(file.name)}
                             </strong>
 
-                            <span
-                              style="
-                                color:var(--text-dim);
-                                font-size:11px;
-                                line-height:1.4;
-                              "
-                            >
+                            <span>
                               ${escapeHtml(
                                 [
                                   file.contentType || file.type,
@@ -3008,59 +3566,32 @@ function renderComposer() {
   const draft = safeText(modalState.commentDraft, "");
 
   return `
-    <section style="display:grid; gap:10px;">
-      <div style="display:grid; gap:4px;">
-        <h3
-          style="
-            margin:0;
-            color:var(--text-strong);
-            font-size:18px;
-            letter-spacing:-.02em;
-          "
-        >
-          Añadir más información
-        </h3>
+    <section class="incidencias-modal-composer">
+      <div class="incidencias-modal-composer-head">
+        <div class="incidencias-modal-composer-icon" aria-hidden="true">
+          +
+        </div>
 
-        <span
-          style="
-            color:var(--text-dim);
-            font-size:12px;
-            line-height:1.5;
-          "
-        >
-          Puedes escribir una actualización, adjuntar archivos o hacer ambas cosas a la vez.
-        </span>
+        <div class="incidencias-modal-composer-copy">
+          <h3>Añadir actualización a la incidencia</h3>
+          <span>
+            Escribe aquí la nueva información que quieres enviar al equipo técnico.
+            Puedes adjuntar archivos en el bloque inferior antes de actualizar.
+          </span>
+        </div>
       </div>
 
       <textarea
         id="incidencias-modal-comment-input"
         data-modal-field="comment"
-        placeholder="Escribe aquí nuevos detalles, contexto adicional o cualquier actualización que quieras añadir..."
+        placeholder="Ejemplo: He probado de nuevo, el error sigue apareciendo al iniciar sesión. Adjunto captura..."
         ${modalState.isSubmitting ? "disabled" : ""}
-        style="
-          width:100%;
-          min-height:120px;
-          padding:12px 14px;
-          border-radius:14px;
-          border:1px solid var(--border-soft);
-          background:var(--surface-1, var(--surface-glass));
-          color:var(--text-strong);
-          outline:none;
-          resize:vertical;
-          line-height:1.55;
-          font-size:13px;
-        "
+        class="incidencias-modal-comment-textarea"
       >${escapeHtml(draft)}</textarea>
 
-      <div>
-        <span
-          style="
-            color:var(--text-dim);
-            font-size:11px;
-            line-height:1.5;
-          "
-        >
-          Al actualizar, la incidencia volverá a abierta y se procesarán también los documentos pendientes.
+      <div class="incidencias-modal-composer-foot">
+        <span>
+          Al pulsar “Actualizar incidencia”, se enviará esta información y la incidencia volverá a estado abierta.
         </span>
       </div>
     </section>
@@ -3260,12 +3791,11 @@ function renderModalInner(detail = {}) {
 
         <div
           style="
-            padding:22px 22px 18px;
+            padding:18px 18px 14px;
             border-bottom:1px solid var(--border-soft);
             display:flex;
             justify-content:space-between;
-            gap:16px;
-            flex-wrap:wrap;
+            gap:12px;
             overflow:visible;
           "
         >
@@ -3273,9 +3803,11 @@ function renderModalInner(detail = {}) {
             class="incidencias-modal-hero"
             style="
               display:flex;
-              gap:16px;
+              gap:13px;
               align-items:center;
-              min-width:min(100%, 620px);
+              flex:1 1 0;
+              min-width:0;
+              max-width:calc(100% - 58px);
               overflow:visible;
             "
           >
@@ -3287,10 +3819,10 @@ function renderModalInner(detail = {}) {
                 display:grid;
                 grid-template-rows:auto auto auto;
                 align-content:center;
-                gap:5px;
+                gap:4px;
                 min-width:0;
                 flex:1 1 auto;
-                min-height:76px;
+                min-height:66px;
                 overflow:visible;
               "
             >
@@ -3299,12 +3831,12 @@ function renderModalInner(detail = {}) {
                 style="
                   display:flex;
                   align-items:center;
-                  gap:8px;
-                  flex-wrap:nowrap;
+                  gap:7px;
+                  flex-wrap:wrap;
                   min-width:0;
                   overflow:visible;
-                  min-height:30px;
-                  padding:2px 0 1px;
+                  min-height:26px;
+                  padding:1px 0;
                 "
               >
                 <button
@@ -3319,14 +3851,14 @@ function renderModalInner(detail = {}) {
                     flex:0 1 auto;
                     min-width:0;
                     max-width:220px;
-                    min-height:26px;
-                    height:26px;
-                    padding:0 10px;
+                    min-height:24px;
+                    height:24px;
+                    padding:0 9px;
                     border-radius:999px;
                     border:1px solid var(--border-soft);
                     background:var(--surface-glass);
                     color:var(--text-dim);
-                    font-size:11px;
+                    font-size:10px;
                     line-height:1;
                     font-weight:var(--weight-bold, 700);
                     letter-spacing:.045em;
@@ -3350,14 +3882,17 @@ function renderModalInner(detail = {}) {
                 style="
                   margin:0;
                   min-width:0;
+                  max-width:100%;
                   color:var(--text-strong);
-                  font-size:clamp(22px, 2.35vw, 32px);
-                  line-height:.98;
-                  letter-spacing:-.055em;
+                  font-size:clamp(19px, 1.9vw, 27px);
+                  line-height:1.05;
+                  letter-spacing:-.045em;
                   font-weight:var(--weight-black, 850);
-                  white-space:nowrap;
+                  white-space:normal;
                   overflow:hidden;
-                  text-overflow:ellipsis;
+                  display:-webkit-box;
+                  -webkit-line-clamp:2;
+                  -webkit-box-orient:vertical;
                 "
               >
                 ${escapeHtml(title)}
@@ -3369,7 +3904,7 @@ function renderModalInner(detail = {}) {
                   display:block;
                   min-width:0;
                   color:var(--text-dim);
-                  font-size:13px;
+                  font-size:12px;
                   line-height:1.15;
                   white-space:nowrap;
                   overflow:hidden;
@@ -3387,6 +3922,7 @@ function renderModalInner(detail = {}) {
               gap:8px;
               flex-wrap:wrap;
               align-items:flex-start;
+              flex:0 0 auto;
             "
           >
             <button
@@ -3395,8 +3931,8 @@ function renderModalInner(detail = {}) {
               aria-label="Cerrar modal"
               ${modalState.isSubmitting ? "disabled" : ""}
               style="
-                width:42px;
-                height:42px;
+                width:40px;
+                height:40px;
                 border:none;
                 border-radius:14px;
                 cursor:${modalState.isSubmitting ? "not-allowed" : "pointer"};
@@ -3502,34 +4038,51 @@ function renderModalInner(detail = {}) {
           }
 
           .incidencias-modal-hero {
-            min-height:76px;
+            min-height:66px;
           }
 
           .incidencias-modal-hero-content {
             transform:translateY(-1px);
             max-height:none !important;
-            min-height:76px !important;
+            min-height:66px !important;
           }
 
           .incidencias-modal-hero-chips {
             height:auto !important;
-            min-height:30px !important;
-            padding:2px 0 1px !important;
+            min-height:26px !important;
             align-items:center !important;
           }
 
           .incidencias-modal-hero-chips > * {
-            min-height:26px !important;
-            height:26px !important;
+            min-height:24px !important;
+            height:24px !important;
           }
 
           .incidencias-modal-avatar {
-            cursor:default;
+            position:relative;
+            flex:0 0 66px;
+            width:66px;
+            height:66px;
             overflow:visible !important;
+            cursor:default;
           }
 
           .incidencias-modal-avatar-frame {
+            position:relative;
+            width:66px;
+            height:66px;
+            border-radius:19px;
             overflow:hidden;
+            border:1px solid var(--border-soft);
+            background:transparent;
+            box-shadow:none;
+          }
+
+          .incidencias-modal-avatar-frame img {
+            display:block;
+            width:100%;
+            height:100%;
+            object-fit:cover;
           }
 
           #${PANEL_ID} [data-modal-avatar-fallback="true"] > img {
@@ -3627,6 +4180,277 @@ function renderModalInner(detail = {}) {
             color:var(--text-dim);
             font-size:11px;
             line-height:1.45;
+          }
+
+          .incidencias-modal-composer {
+            display:grid;
+            gap:12px;
+            padding:14px;
+            border-radius:18px;
+            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
+            background:
+              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 92%),
+              var(--surface-1, var(--surface-glass));
+            box-shadow:
+              0 10px 26px rgba(0,0,0,.045),
+              inset 0 1px 0 rgba(255,255,255,.04);
+          }
+
+          .incidencias-modal-composer-head {
+            display:flex;
+            align-items:flex-start;
+            gap:12px;
+          }
+
+          .incidencias-modal-composer-icon {
+            width:34px;
+            height:34px;
+            flex:0 0 34px;
+            border-radius:13px;
+            display:grid;
+            place-items:center;
+            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft));
+            background:color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent);
+            color:var(--accent, #7c5cff);
+            font-size:22px;
+            line-height:1;
+            font-weight:var(--weight-black, 800);
+          }
+
+          .incidencias-modal-composer-copy {
+            display:grid;
+            gap:4px;
+            min-width:0;
+          }
+
+          .incidencias-modal-composer-copy h3 {
+            margin:0;
+            color:var(--text-strong);
+            font-size:18px;
+            line-height:1.15;
+            letter-spacing:-.025em;
+          }
+
+          .incidencias-modal-composer-copy span,
+          .incidencias-modal-composer-foot span {
+            color:var(--text-dim);
+            font-size:12px;
+            line-height:1.5;
+          }
+
+          .incidencias-modal-comment-textarea {
+            width:100%;
+            min-height:138px;
+            padding:15px 16px;
+            border-radius:16px;
+            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
+            background:
+              linear-gradient(180deg, rgba(255,255,255,.035), transparent 80%),
+              color-mix(in srgb, var(--surface-1, #fff) 94%, var(--accent, #7c5cff) 6%);
+            color:var(--text-strong);
+            outline:none;
+            resize:vertical;
+            line-height:1.58;
+            font-size:14px;
+            box-shadow:
+              inset 0 1px 0 rgba(255,255,255,.04),
+              0 0 0 0 color-mix(in srgb, var(--accent, #7c5cff) 0%, transparent);
+            transition:
+              border-color .16s ease,
+              box-shadow .16s ease,
+              background .16s ease;
+          }
+
+          .incidencias-modal-comment-textarea::placeholder {
+            color:color-mix(in srgb, var(--text-dim) 76%, transparent);
+          }
+
+          .incidencias-modal-comment-textarea:focus {
+            border-color:color-mix(in srgb, var(--accent, #7c5cff) 48%, var(--border-soft));
+            box-shadow:
+              0 0 0 4px color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent),
+              inset 0 1px 0 rgba(255,255,255,.06);
+          }
+
+          .incidencias-modal-upload-progress {
+            display:grid;
+            gap:8px;
+            padding:10px 12px;
+            border-radius:13px;
+            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
+            background:color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent);
+          }
+
+          .incidencias-modal-upload-progress-head {
+            display:flex;
+            justify-content:space-between;
+            gap:12px;
+            align-items:center;
+          }
+
+          .incidencias-modal-upload-progress-head strong,
+          .incidencias-modal-upload-progress-head span {
+            color:var(--text-strong);
+            font-size:12px;
+            line-height:1.2;
+            font-weight:var(--weight-bold, 700);
+          }
+
+          .incidencias-modal-upload-progress-track {
+            height:8px;
+            overflow:hidden;
+            border-radius:999px;
+            background:rgba(255,255,255,.09);
+          }
+
+          .incidencias-modal-upload-progress-bar {
+            height:100%;
+            min-width:8%;
+            border-radius:inherit;
+            background:var(--btn-primary-bg, var(--accent, #7c5cff));
+            transition:width .16s ease;
+          }
+
+          .incidencias-modal-upload-progress-meta {
+            color:var(--text-dim);
+            font-size:11px;
+            line-height:1.3;
+          }
+
+          .incidencias-modal-attachment-card {
+            width:100%;
+            display:block;
+            padding:10px;
+            border-radius:16px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+          }
+
+          .incidencias-modal-attachment-row {
+            display:grid;
+            grid-template-columns:74px minmax(0, 1fr) auto;
+            gap:12px;
+            align-items:center;
+          }
+
+          .incidencias-modal-attachment-copy {
+            display:grid;
+            gap:4px;
+            min-width:0;
+          }
+
+          .incidencias-modal-attachment-copy strong {
+            min-width:0;
+            font-weight:var(--weight-semibold, 600);
+            font-size:13px;
+            line-height:1.35;
+            word-break:break-word;
+            color:var(--text-strong);
+          }
+
+          .incidencias-modal-attachment-copy span {
+            color:var(--text-dim);
+            font-size:11px;
+            line-height:1.4;
+          }
+
+          .incidencias-modal-attachment-actions {
+            display:flex;
+            gap:8px;
+            flex-wrap:wrap;
+            justify-content:flex-end;
+            flex:0 0 auto;
+          }
+
+          .incidencias-modal-file-square,
+          .incidencias-modal-image-thumb-wrap {
+            position:relative;
+            width:64px;
+            height:64px;
+            border-radius:15px;
+            overflow:hidden;
+            border:1px solid var(--border-soft);
+            background:
+              linear-gradient(180deg, rgba(255,255,255,.045), transparent),
+              var(--surface-1, var(--surface-glass));
+            display:grid;
+            place-items:center;
+            color:var(--text-dim);
+            font-size:11px;
+            font-weight:var(--weight-black, 800);
+            letter-spacing:.08em;
+          }
+
+          .incidencias-modal-file-square--image {
+            color:color-mix(in srgb, var(--accent, #7c5cff) 76%, var(--text-strong));
+            border-color:color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft));
+            background:
+              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent),
+              var(--surface-1, var(--surface-glass));
+          }
+
+          .incidencias-modal-image-thumb {
+            display:block;
+            width:100%;
+            height:100%;
+            object-fit:cover;
+          }
+
+          .incidencias-modal-image-thumb-fallback {
+            display:none;
+          }
+
+          .incidencias-modal-image-thumb-wrap[data-thumb-error="true"] .incidencias-modal-image-thumb-fallback {
+            display:grid;
+            position:absolute;
+            inset:0;
+            place-items:center;
+            background:var(--surface-1, var(--surface-glass));
+          }
+
+          .incidencias-modal-image-download {
+            position:absolute;
+            right:5px;
+            bottom:5px;
+            width:28px;
+            height:28px;
+            border-radius:10px;
+            border:1px solid rgba(255,255,255,.36);
+            background:rgba(0,0,0,.52);
+            color:#fff;
+            display:grid;
+            place-items:center;
+            cursor:pointer;
+            backdrop-filter:blur(8px);
+          }
+
+          .incidencias-modal-download-btn {
+            min-height:34px;
+            padding:0 12px;
+            border-radius:10px;
+            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
+            background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+            color:var(--text-strong);
+            font-size:12px;
+            font-weight:var(--weight-bold, 700);
+            cursor:pointer;
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            gap:7px;
+          }
+
+          .incidencias-modal-download-btn:disabled,
+          .incidencias-modal-image-download:disabled {
+            cursor:wait;
+            opacity:.74;
+          }
+
+          .incidencias-modal-download-icon {
+            display:inline-grid;
+            place-items:center;
+            width:15px;
+            height:15px;
           }
 
           .incidencias-timeline-empty {
@@ -3769,46 +4593,60 @@ function renderModalInner(detail = {}) {
             backdrop-filter:none;
           }
 
+          [data-theme="light"] .incidencias-modal-upload-progress-track {
+            background:rgba(23,32,51,.08);
+          }
+
           @media (max-width: 980px) {
             .incidencias-modal-meta-grid {
               grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
             }
 
             .incidencias-modal-attachment-row {
-              grid-template-columns: 1fr !important;
+              grid-template-columns:64px minmax(0, 1fr) !important;
+            }
+
+            .incidencias-modal-attachment-actions {
+              grid-column:1 / -1;
+              justify-content:flex-start !important;
             }
           }
 
           @media (max-width: 720px) {
+            [data-incidencias-modal-overlay="true"] {
+              padding:10px !important;
+            }
+
             .incidencias-modal-avatar,
             .incidencias-modal-avatar-frame {
-              flex-basis:64px !important;
-              width:64px !important;
-              height:64px !important;
-              border-radius:19px !important;
+              flex-basis:58px !important;
+              width:58px !important;
+              height:58px !important;
+              border-radius:17px !important;
             }
 
             .incidencias-modal-hero {
-              gap:12px !important;
-              min-height:64px !important;
+              gap:11px !important;
+              min-height:58px !important;
               align-items:center !important;
+              max-width:calc(100% - 50px) !important;
             }
 
             .incidencias-modal-hero-content {
-              min-height:64px !important;
+              min-height:58px !important;
               max-height:none !important;
               overflow:visible !important;
-              gap:4px !important;
+              gap:3px !important;
             }
 
             .incidencias-modal-hero-chips {
               height:auto !important;
-              min-height:28px !important;
+              min-height:26px !important;
             }
 
             .incidencias-modal-title {
-              font-size:clamp(20px, 6vw, 25px) !important;
-              line-height:.98 !important;
+              font-size:clamp(18px, 5.4vw, 23px) !important;
+              line-height:1.05 !important;
             }
 
             .incidencias-modal-updated {
@@ -3834,11 +4672,39 @@ function renderModalInner(detail = {}) {
               height:52vh;
               min-height:280px;
             }
+
+            .incidencias-modal-attachment-row {
+              grid-template-columns:58px minmax(0, 1fr) !important;
+            }
+
+            .incidencias-modal-file-square,
+            .incidencias-modal-image-thumb-wrap {
+              width:54px;
+              height:54px;
+              border-radius:13px;
+            }
           }
 
           @media (max-width: 640px) {
             .incidencias-modal-meta-grid {
               grid-template-columns: 1fr !important;
+            }
+
+            .incidencias-modal-composer-head {
+              gap:10px;
+            }
+
+            .incidencias-modal-composer-icon {
+              width:30px;
+              height:30px;
+              flex-basis:30px;
+              border-radius:11px;
+              font-size:20px;
+            }
+
+            .incidencias-modal-comment-textarea {
+              min-height:128px;
+              font-size:13px;
             }
           }
         </style>
@@ -3956,10 +4822,12 @@ export function openIncidenciasModal(detail = {}) {
   modalState.commentDraft = "";
   modalState.pendingFiles = [];
 
+  clearUploadProgress();
   clearAttachmentPreview();
   clearFeedback();
   clearAttachmentBusyState();
   clearAttachmentActionKey();
+  revokeAttachmentThumbnails();
 
   renderModal();
   lockBody();
@@ -3988,10 +4856,12 @@ export function closeIncidenciasModal() {
   modalState.commentDraft = "";
   modalState.pendingFiles = [];
 
+  clearUploadProgress();
   clearAttachmentPreview();
   clearFeedback();
   clearAttachmentBusyState();
   clearAttachmentActionKey();
+  revokeAttachmentThumbnails();
 
   detachRootBindings();
 
@@ -4018,6 +4888,7 @@ export function updateIncidenciasModal(detail = {}) {
 
   clearAttachmentBusyState();
   clearAttachmentActionKey();
+  revokeAttachmentThumbnails();
 
   renderModal();
   attachRootBindings();
@@ -4157,6 +5028,8 @@ async function handleSubmitUpdate(ticketId = "") {
     modalState.commentDraft = "";
     modalState.pendingFiles = [];
 
+    revokeAttachmentThumbnails();
+
     if (message && files.length) {
       setFeedback(
         "La actualización y los documentos se han enviado correctamente. La incidencia vuelve a abierta.",
@@ -4193,6 +5066,8 @@ async function handleSubmitUpdate(ticketId = "") {
     return false;
   } finally {
     modalState.isSubmitting = false;
+    clearUploadProgress();
+
     renderModal();
     attachRootBindings();
     focusPanel();
@@ -4207,8 +5082,8 @@ function getAttachmentById(attachmentId = "") {
   );
 }
 
-async function handleAttachmentAction(attachmentId = "", mode = "open") {
-  const finalMode = mode === "download" ? "download" : "open";
+async function handleAttachmentAction(attachmentId = "", mode = "download") {
+  const finalMode = mode === "open" ? "open" : "download";
   const attachment = getAttachmentById(attachmentId);
   const ticketId = getTicketId(modalState.detail);
 
@@ -4399,7 +5274,10 @@ async function handleAttachmentAction(attachmentId = "", mode = "open") {
 ========================================================= */
 
 function attachRootBindings() {
-  if (modalState.bindingsAttached) return;
+  if (modalState.bindingsAttached) {
+    hydrateAttachmentThumbnails();
+    return;
+  }
 
   const root = ensureRoot();
 
@@ -4580,6 +5458,8 @@ function attachRootBindings() {
   root.addEventListener("click", onClick);
 
   modalState.bindingsAttached = true;
+
+  hydrateAttachmentThumbnails();
 }
 
 function detachRootBindings() {
@@ -4674,6 +5554,8 @@ function handleCommentSuccess(event) {
     },
   });
 
+  revokeAttachmentThumbnails();
+
   setFeedback(
     "Tu actualización se ha registrado correctamente y la incidencia vuelve a abierta.",
     "success"
@@ -4693,6 +5575,8 @@ function handleUploadSuccess(event) {
 
   modalState.pendingFiles = [];
   modalState.detail = getDetail(detail);
+
+  revokeAttachmentThumbnails();
 
   setFeedback("Los documentos se han añadido correctamente.", "success");
 
@@ -4763,12 +5647,17 @@ export const OnionIncidenciasModal = {
       detail: modalState.detail ? { ...modalState.detail } : null,
       pendingFiles: [...safeArray(modalState.pendingFiles)],
       previewFile: modalState.previewFile ? { ...modalState.previewFile } : null,
+      uploadProgress: { ...safeObject(modalState.uploadProgress) },
+      thumbnailObjectUrls: Array.from(modalState.thumbnailObjectUrls?.keys?.() || []),
+      thumbnailLoadingIds: Array.from(modalState.thumbnailLoadingIds?.values?.() || []),
+      thumbnailFailedIds: Array.from(modalState.thumbnailFailedIds?.values?.() || []),
     };
   },
 
   destroy() {
     closeIncidenciasModal();
     clearAttachmentPreview();
+    revokeAttachmentThumbnails();
     detachEscHandler();
     detachRootBindings();
     detachBus();

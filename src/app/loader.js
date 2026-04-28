@@ -28,12 +28,19 @@
    - SSR safe
    - no deja overlay dark pegado
    - respeta state.bootFailsafeTimer
+   - failsafe no agresivo
+   - warnings deduplicados
 
    FIX VISUAL:
    - html/body reciben clases app-booting/app-loading/app-ready
    - loader visible desde boot/refresco si existe en index.html
    - fallback loader con logo si no existe #app-loader
    - ocultación suave + limpieza final
+
+   FIX CONSOLA:
+   - no duplica warnings por AppCore.utils.warn + console.warn
+   - no dispara failsafe antes de 8s
+   - no marca failsafe como warning si el boot ya terminó
 ========================================================= */
 
 import {
@@ -50,7 +57,10 @@ const LOADER_SELECTOR =
 
 const DEFAULT_HIDE_TRANSITION_MS = 220;
 const DEFAULT_MIN_VISIBLE_MS = 320;
+
 const DEFAULT_FAILSAFE_MS = 12000;
+const MIN_FAILSAFE_MS = 8000;
+const FAILSAFE_WARN_DEDUPE_MS = 30000;
 
 const BODY_LOADING_CLASSES = [
   "loading",
@@ -79,6 +89,10 @@ let lastShowAt = 0;
 let hideTimer = null;
 let transitionTimer = null;
 let sequence = 0;
+
+let failsafeArmSequence = 0;
+let lastFailsafeWarnKey = "";
+let lastFailsafeWarnAt = 0;
 
 /* =========================================================
    BASICS
@@ -124,15 +138,67 @@ function safeWarn(
   AppCore,
   ...args
 ) {
+  let emittedByCore = false;
+
   try {
-    AppCore?.utils?.warn?.(
+    if (
+      typeof AppCore?.utils?.warn === "function"
+    ) {
+      AppCore.utils.warn(
+        "[Loader]",
+        ...args
+      );
+
+      emittedByCore = true;
+    }
+  } catch {
+    emittedByCore = false;
+  }
+
+  /*
+    Evita duplicar:
+    - [Onion Support] [Loader] ...
+    - [Loader] ...
+  */
+  if (emittedByCore) {
+    return;
+  }
+
+  try {
+    console.warn(
       "[Loader]",
       ...args
     );
   } catch {}
+}
+
+function safeLog(
+  AppCore,
+  ...args
+) {
+  let emittedByCore = false;
 
   try {
-    console.warn(
+    if (
+      typeof AppCore?.utils?.log === "function"
+    ) {
+      AppCore.utils.log(
+        "[Loader]",
+        ...args
+      );
+
+      emittedByCore = true;
+    }
+  } catch {
+    emittedByCore = false;
+  }
+
+  if (emittedByCore) {
+    return;
+  }
+
+  try {
+    console.log(
       "[Loader]",
       ...args
     );
@@ -144,21 +210,34 @@ function safeEmit(
   eventName,
   payload = {}
 ) {
+  let busAvailable = false;
+
   try {
-    AppCore?.events?.emit?.(
-      eventName,
-      payload
-    );
-    return true;
+    if (
+      typeof AppCore?.events?.emit === "function"
+    ) {
+      busAvailable = true;
+
+      AppCore.events.emit(
+        eventName,
+        payload
+      );
+
+      return true;
+    }
   } catch {}
 
   try {
-    if (isBrowser()) {
+    if (
+      !busAvailable &&
+      isBrowser()
+    ) {
       window.dispatchEvent(
         new CustomEvent(eventName, {
           detail: payload,
         })
       );
+
       return true;
     }
   } catch {}
@@ -196,11 +275,30 @@ function now() {
   return Date.now();
 }
 
+function epochNow() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
 function requestPaint() {
   return new Promise((resolve) => {
     try {
       if (
-        !isBrowser() ||
+        !isBrowser()
+      ) {
+        if (typeof setTimeout === "function") {
+          setTimeout(resolve, 0);
+          return;
+        }
+
+        resolve();
+        return;
+      }
+
+      if (
         typeof window.requestAnimationFrame !== "function"
       ) {
         window.setTimeout(resolve, 0);
@@ -335,6 +433,19 @@ function getLoaderConfig(AppCore) {
     createIfMissing:
       cfg.loaderCreateIfMissing !== false,
   };
+}
+
+function getFailsafeTimeoutMs(timeoutMs = null) {
+  return Math.max(
+    MIN_FAILSAFE_MS,
+    safeNumber(
+      timeoutMs,
+      safeNumber(
+        BOOT_FAILSAFE_LOADER_MS,
+        DEFAULT_FAILSAFE_MS
+      )
+    )
+  );
 }
 
 /* =========================================================
@@ -798,6 +909,48 @@ function clearLoaderTimers() {
   transitionTimer = null;
 }
 
+function isLoaderActuallyVisible(loader) {
+  if (!loader) {
+    return false;
+  }
+
+  try {
+    if (loader.hidden) {
+      return false;
+    }
+
+    if (
+      loader.classList?.contains?.("is-hidden")
+    ) {
+      return false;
+    }
+
+    const style =
+      window.getComputedStyle?.(loader);
+
+    if (style) {
+      if (style.display === "none") {
+        return false;
+      }
+
+      if (style.visibility === "hidden") {
+        return false;
+      }
+
+      if (Number(style.opacity) === 0) {
+        return false;
+      }
+    }
+
+    return true;
+  } catch {
+    return Boolean(
+      loader &&
+        !loader.hidden
+    );
+  }
+}
+
 function restoreLoaderInlineStyles(
   AppCore
 ) {
@@ -1085,6 +1238,8 @@ export function showLoader(
       hasLoader: Boolean(loader),
       booting:
         Boolean(opts.booting),
+      reason:
+        safeText(opts.reason, ""),
     }
   );
 
@@ -1149,6 +1304,8 @@ export function forceHideLoader(
       sequence: id,
       forced: true,
       hasLoader: Boolean(loader),
+      reason:
+        safeText(opts.reason, ""),
     }
   );
 
@@ -1248,6 +1405,8 @@ export function hideLoader(
         forced: false,
         hasLoader: Boolean(loader),
         remaining,
+        reason:
+          safeText(opts.reason, ""),
       }
     );
 
@@ -1358,7 +1517,58 @@ export function clearBootFailsafeTimer(
       state.bootFailsafeTimer =
         null;
     }
+
+    if (state) {
+      state.bootFailsafeStartedAt = 0;
+      state.bootFailsafeTimeoutMs = 0;
+      state.bootFailsafeArmId = 0;
+    }
   } catch {}
+
+  return true;
+}
+
+function isBootFinalizedState(
+  state = null,
+  coreState = {}
+) {
+  return Boolean(
+    state?.booted ||
+      state?.readyEmitted ||
+      (
+        state?.finalizedCycleId &&
+        state?.bootCycleId &&
+        state.finalizedCycleId === state.bootCycleId
+      ) ||
+      coreState.booted ||
+      coreState.ready ||
+      coreState.appReady
+  );
+}
+
+function shouldWarnFailsafe({
+  phase = "boot",
+  route = "/",
+  publicPath = "/",
+} = {}) {
+  const key = [
+    phase,
+    route,
+    publicPath,
+  ].join("|");
+
+  const current =
+    epochNow();
+
+  if (
+    key === lastFailsafeWarnKey &&
+    current - lastFailsafeWarnAt < FAILSAFE_WARN_DEDUPE_MS
+  ) {
+    return false;
+  }
+
+  lastFailsafeWarnKey = key;
+  lastFailsafeWarnAt = current;
 
   return true;
 }
@@ -1378,24 +1588,48 @@ export function armBootFailsafeLoader({
   );
 
   const timeout =
-    Math.max(
-      1000,
-      safeNumber(
-        timeoutMs,
-        safeNumber(
-          BOOT_FAILSAFE_LOADER_MS,
-          DEFAULT_FAILSAFE_MS
-        )
-      )
+    getFailsafeTimeoutMs(
+      timeoutMs
     );
+
+  const armId =
+    ++failsafeArmSequence;
+
+  const startedAt =
+    epochNow();
+
+  if (state) {
+    try {
+      state.bootFailsafeStartedAt = startedAt;
+      state.bootFailsafeTimeoutMs = timeout;
+      state.bootFailsafeArmId = armId;
+    } catch {}
+  }
 
   const timer =
     window.setTimeout(
       () => {
         try {
+          if (
+            state?.bootFailsafeArmId &&
+            state.bootFailsafeArmId !== armId
+          ) {
+            return;
+          }
+
           const coreState =
             safeGetState(
               AppCore
+            );
+
+          const loader =
+            getLoaderElement(
+              AppCore
+            );
+
+          const loaderVisible =
+            isLoaderActuallyVisible(
+              loader
             );
 
           const stillBooting =
@@ -1410,34 +1644,97 @@ export function armBootFailsafeLoader({
                 coreState.loading
             );
 
+          const finalized =
+            isBootFinalizedState(
+              state,
+              coreState
+            );
+
+          const route =
+            coreState.route ||
+            state?.route ||
+            "/";
+
+          const publicPath =
+            coreState.publicPath ||
+            state?.publicPath ||
+            "/";
+
+          /*
+            Si ya no hay boot/loading/loader visible, no hay nada que hacer.
+          */
           if (
             !stillBooting &&
-            !stillLoading
+            !stillLoading &&
+            !loaderVisible
           ) {
             return;
           }
 
-          safeWarn(
-            AppCore,
-            "Failsafe loader aplicado.",
-            {
-              booting:
-                stillBooting,
-              loading:
-                stillLoading,
-              route:
-                coreState.route ||
-                "/",
-              publicPath:
-                coreState.publicPath ||
-                "/",
-            }
-          );
+          /*
+            Si la app ya finalizó y sólo queda una bandera o loader stale,
+            limpiar silenciosamente. No es un fallo real de boot.
+          */
+          if (
+            finalized &&
+            !stillBooting
+          ) {
+            hideFn(
+              AppCore,
+              {
+                reason:
+                  "failsafe-stale-after-ready",
+              }
+            );
+
+            safeEmit(
+              AppCore,
+              "app:loader:failsafe:stale",
+              {
+                timeout,
+                booting:
+                  stillBooting,
+                loading:
+                  stillLoading,
+                loaderVisible,
+                finalized,
+                route,
+                publicPath,
+              }
+            );
+
+            return;
+          }
+
+          if (
+            shouldWarnFailsafe({
+              phase: "boot",
+              route,
+              publicPath,
+            })
+          ) {
+            safeWarn(
+              AppCore,
+              "Failsafe loader aplicado.",
+              {
+                timeout,
+                booting:
+                  stillBooting,
+                loading:
+                  stillLoading,
+                loaderVisible,
+                finalized,
+                route,
+                publicPath,
+              }
+            );
+          }
 
           hideFn(
             AppCore,
             {
-              reason: "failsafe",
+              reason:
+                "failsafe",
             }
           );
 
@@ -1450,6 +1747,10 @@ export function armBootFailsafeLoader({
                 stillBooting,
               loading:
                 stillLoading,
+              loaderVisible,
+              finalized,
+              route,
+              publicPath,
             }
           );
         } catch {}
@@ -1461,6 +1762,15 @@ export function armBootFailsafeLoader({
     state.bootFailsafeTimer =
       timer;
   }
+
+  safeEmit(
+    AppCore,
+    "app:loader:failsafe:armed",
+    {
+      timeout,
+      armId,
+    }
+  );
 
   return timer;
 }
@@ -1527,10 +1837,14 @@ export function getLoaderSnapshot(
       ),
 
     visible:
-      Boolean(
-        loader &&
-          !loader.hidden &&
-          !loader.classList?.contains?.("is-hidden")
+      isLoaderActuallyVisible(
+        loader
+      ),
+
+    datasetVisible:
+      safeText(
+        loader?.dataset?.loaderVisible,
+        ""
       ),
 
     display:
@@ -1561,6 +1875,19 @@ export function getLoaderSnapshot(
         coreState.booting
       ),
 
+    booted:
+      Boolean(
+        coreState.booted ||
+          state?.booted
+      ),
+
+    ready:
+      Boolean(
+        coreState.ready ||
+          coreState.appReady ||
+          state?.readyEmitted
+      ),
+
     route:
       coreState.route ||
       "/",
@@ -1578,6 +1905,24 @@ export function getLoaderSnapshot(
           coreState.bootFailsafeTimer
       ),
 
+    failsafeTimeoutMs:
+      safeNumber(
+        state?.bootFailsafeTimeoutMs,
+        0
+      ),
+
+    failsafeStartedAt:
+      safeNumber(
+        state?.bootFailsafeStartedAt,
+        0
+      ),
+
+    failsafeArmId:
+      safeNumber(
+        state?.bootFailsafeArmId,
+        0
+      ),
+
     lastShowAt,
 
     hasHideTimer:
@@ -1587,6 +1932,10 @@ export function getLoaderSnapshot(
       Boolean(transitionTimer),
 
     sequence,
+
+    failsafeArmSequence,
+    lastFailsafeWarnKey,
+    lastFailsafeWarnAt,
   };
 }
 

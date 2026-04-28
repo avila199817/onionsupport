@@ -36,6 +36,8 @@
    - login preserva flujo 2FA sin marcar authenticated
    - login fuerza commit de sesión en AppCore tras éxito
    - login emite eventos post-login para reparar Sidebar/Topbar/Shell
+   - login NO emite eventos de restore
+   - login NO duplica auth:login:success en afterPaint
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -108,7 +110,7 @@ import {
 ========================================================= */
 
 const AUTH_MODULE_VERSION =
-  "10.0.0";
+  "10.0.1";
 
 /* =========================================================
    PUBLIC TECHNICAL ROUTES
@@ -2480,11 +2482,12 @@ function applyAcceptedLoginSession(normalized = {}) {
   };
 }
 
-function emitAcceptedLoginEvents({
+function buildAcceptedLoginPayload({
   normalized = {},
   committed = {},
   durationMs = 0,
   phase = "sync",
+  reason = "login-success",
 } = {}) {
   const user =
     committed.user ||
@@ -2495,7 +2498,7 @@ function emitAcceptedLoginEvents({
     committed.role ||
     extractRoleFromUser(user || {});
 
-  const payload = {
+  return {
     durationMs,
     user,
     role,
@@ -2503,35 +2506,68 @@ function emitAcceptedLoginEvents({
       true,
     source:
       "Auth",
-    reason:
-      "login-success",
+    reason,
     phase,
     redirectTo:
       normalized.redirectTo || null,
   };
+}
 
+function emitAcceptedLoginEvents({
+  normalized = {},
+  committed = {},
+  durationMs = 0,
+  phase = "sync",
+} = {}) {
+  const payload =
+    buildAcceptedLoginPayload({
+      normalized,
+      committed,
+      durationMs,
+      phase,
+      reason:
+        "login-success",
+    });
+
+  /*
+    Login correcto != restore de sesión.
+
+    No emitimos aquí:
+    - auth:session:restored
+    - app:session:restored
+
+    Esos eventos deben quedar reservados para restoreSession().
+    Emitirlos desde login provoca listeners de restore/refresh,
+    doble reparación UI y potencial doble toast.
+  */
   emit("auth:login:success", payload);
-  emit("auth:session:applied", payload);
 
-  emit("auth:session:restored", {
-    ...payload,
-    reason:
-      "login-session-applied",
-  });
-
-  emit("app:session:restored", {
+  emit("auth:session:applied", {
     ...payload,
     reason:
       "login-session-applied",
   });
 
   emit("app:user:change", payload);
-  emit("app:auth:ready", payload);
+
+  emit("app:auth:ready", {
+    ...payload,
+    reason:
+      "login-auth-ready",
+  });
 
   emit("app:ui:repair-request", {
     ...payload,
     reason:
       "auth-login-success",
+    repairShell:
+      false,
+    hardRepair:
+      false,
+    rebind:
+      false,
+    afterPaint:
+      false,
   });
 }
 
@@ -2541,27 +2577,48 @@ function schedulePostLoginRepair({
   durationMs = 0,
 } = {}) {
   afterPaint(() => {
-    emitAcceptedLoginEvents({
-      normalized,
-      committed,
-      durationMs,
-      phase:
-        "after-paint",
+    const payload =
+      buildAcceptedLoginPayload({
+        normalized,
+        committed,
+        durationMs,
+        phase:
+          "after-paint",
+        reason:
+          "auth-login-after-paint",
+      });
+
+    /*
+      Post-login visual repair únicamente.
+
+      No reemitimos:
+      - auth:login:success
+      - auth:session:applied
+      - auth:session:restored
+      - app:session:restored
+
+      Esto evita que un login correcto genere dos cadenas de eventos.
+    */
+    emit("app:ui:repair-request", {
+      ...payload,
+      repairShell:
+        false,
+      hardRepair:
+        false,
+      rebind:
+        false,
+      afterPaint:
+        false,
     });
 
     emit("app:ui:repair", {
-      reason:
-        "auth-login-after-paint",
-      authenticated:
-        true,
-      user:
-        committed.user ||
-        normalized.user ||
-        null,
-      role:
-        committed.role || null,
-      source:
-        "Auth",
+      ...payload,
+      repairShell:
+        false,
+      hardRepair:
+        false,
+      rebind:
+        false,
     });
   });
 }

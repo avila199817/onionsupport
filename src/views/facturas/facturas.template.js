@@ -5,6 +5,25 @@
    FINAL PRODUCTION TEMPLATE · FACTURAS 10/10 · VISUAL FIX
    PATCH · PAGINATION 5 ITEMS · INCIDENCIA MODAL READY
    PATCH · ADMIN CREATE BUTTON · COMPACT TABLE · BUTTON HOVER FIX
+   PATCH · ONION TOKENS FULL · DARK/LIGHT MODE 10/10
+   PATCH · AVATAR RNG COLORS · STATUS CHIPS FIX · LOADER FIX
+
+   RESPONSABILIDADES:
+   - render del hero/header de facturas
+   - render de tabla productiva con paginación real
+   - compatibilidad con FacturasView.js
+   - acciones compatibles con data-facturas-action y data-action
+   - botón admin "Crear factura"
+   - paginación compacta de 5 items
+   - enlace a incidencia relacionada listo para modal
+   - loaders sin mover columnas ni tamaño de botones
+   - loader icon-only centrado en acciones
+   - loading overlay en refresh sin desplazar tabla
+   - dark/light mode conectado a variables.css + ui.css
+   - chips de pago con contraste real en dark
+   - avatares fallback con colores pseudo-RNG estables
+   - tabla compacta premium SaaS
+   - estados loading/error/empty blindados
 ========================================================= */
 
 /* =========================================================
@@ -81,8 +100,35 @@ function normalizeWhitespace(value = "") {
   return safeText(value, "").replace(/\s+/g, " ").trim();
 }
 
+function normalizeKey(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .trim();
+}
+
 function normalizeRole(value = "") {
   return safeText(value, "").toLowerCase();
+}
+
+function hashString(value = "") {
+  const text = safeText(value, "onion");
+
+  let hash = 2166136261;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash +=
+      (hash << 1) +
+      (hash << 4) +
+      (hash << 7) +
+      (hash << 8) +
+      (hash << 24);
+  }
+
+  return Math.abs(hash >>> 0);
 }
 
 function isAdminState(state = {}) {
@@ -210,6 +256,97 @@ function pickTicketIdFromArray(value = []) {
 }
 
 /* =========================================================
+   AVATAR PALETTE
+========================================================= */
+
+const AVATAR_PALETTE = Object.freeze([
+  {
+    bg: "linear-gradient(135deg, #7c3aed 0%, #ec4899 100%)",
+    bgDark: "linear-gradient(135deg, #8b5cf6 0%, #f472b6 100%)",
+    ring: "rgba(124,58,237,.36)",
+    shadow: "rgba(236,72,153,.26)",
+  },
+  {
+    bg: "linear-gradient(135deg, #2563eb 0%, #06b6d4 100%)",
+    bgDark: "linear-gradient(135deg, #3b82f6 0%, #22d3ee 100%)",
+    ring: "rgba(37,99,235,.34)",
+    shadow: "rgba(6,182,212,.24)",
+  },
+  {
+    bg: "linear-gradient(135deg, #f97316 0%, #ef4444 100%)",
+    bgDark: "linear-gradient(135deg, #fb923c 0%, #f87171 100%)",
+    ring: "rgba(249,115,22,.34)",
+    shadow: "rgba(239,68,68,.24)",
+  },
+  {
+    bg: "linear-gradient(135deg, #16a34a 0%, #14b8a6 100%)",
+    bgDark: "linear-gradient(135deg, #22c55e 0%, #2dd4bf 100%)",
+    ring: "rgba(22,163,74,.34)",
+    shadow: "rgba(20,184,166,.24)",
+  },
+  {
+    bg: "linear-gradient(135deg, #db2777 0%, #9333ea 100%)",
+    bgDark: "linear-gradient(135deg, #ec4899 0%, #a855f7 100%)",
+    ring: "rgba(219,39,119,.34)",
+    shadow: "rgba(147,51,234,.25)",
+  },
+  {
+    bg: "linear-gradient(135deg, #ca8a04 0%, #ea580c 100%)",
+    bgDark: "linear-gradient(135deg, #facc15 0%, #fb923c 100%)",
+    ring: "rgba(202,138,4,.34)",
+    shadow: "rgba(234,88,12,.25)",
+  },
+  {
+    bg: "linear-gradient(135deg, #0891b2 0%, #4f46e5 100%)",
+    bgDark: "linear-gradient(135deg, #06b6d4 0%, #6366f1 100%)",
+    ring: "rgba(8,145,178,.34)",
+    shadow: "rgba(79,70,229,.25)",
+  },
+  {
+    bg: "linear-gradient(135deg, #e11d48 0%, #f59e0b 100%)",
+    bgDark: "linear-gradient(135deg, #fb7185 0%, #fbbf24 100%)",
+    ring: "rgba(225,29,72,.34)",
+    shadow: "rgba(245,158,11,.25)",
+  },
+  {
+    bg: "linear-gradient(135deg, #0f766e 0%, #84cc16 100%)",
+    bgDark: "linear-gradient(135deg, #14b8a6 0%, #a3e635 100%)",
+    ring: "rgba(15,118,110,.34)",
+    shadow: "rgba(132,204,22,.24)",
+  },
+  {
+    bg: "linear-gradient(135deg, #4338ca 0%, #c026d3 100%)",
+    bgDark: "linear-gradient(135deg, #6366f1 0%, #e879f9 100%)",
+    ring: "rgba(67,56,202,.34)",
+    shadow: "rgba(192,38,211,.25)",
+  },
+]);
+
+function getAvatarPalette(item = {}) {
+  const seed = [
+    getFacturaId(item),
+    getFacturaNumero(item),
+    getClientName(item),
+    getClientEmail(item),
+  ].join("|");
+
+  const index = hashString(seed) % AVATAR_PALETTE.length;
+
+  return AVATAR_PALETTE[index];
+}
+
+function getAvatarStyle(item = {}) {
+  const palette = getAvatarPalette(item);
+
+  return [
+    `--fac-avatar-bg:${palette.bg}`,
+    `--fac-avatar-bg-dark:${palette.bgDark}`,
+    `--fac-avatar-ring:${palette.ring}`,
+    `--fac-avatar-shadow:${palette.shadow}`,
+  ].join(";");
+}
+
+/* =========================================================
    DOMAIN HELPERS
 ========================================================= */
 
@@ -311,6 +448,31 @@ function getClientEmail(item = {}) {
   );
 }
 
+function getClientAvatar(item = {}) {
+  return safeText(
+    first(
+      item.clienteAvatar,
+      item.clientAvatar,
+      item.avatar,
+      item.avatarUrl,
+      item.cliente?.avatar,
+      item.cliente?.avatarUrl,
+      item.client?.avatar,
+      item.client?.avatarUrl,
+
+      item?.raw?.clienteAvatar,
+      item?.raw?.clientAvatar,
+      item?.raw?.avatar,
+      item?.raw?.avatarUrl,
+      item?.raw?.cliente?.avatar,
+      item?.raw?.cliente?.avatarUrl,
+      item?.raw?.client?.avatar,
+      item?.raw?.client?.avatarUrl
+    ),
+    ""
+  );
+}
+
 function getInitials(value = "") {
   const text = normalizeWhitespace(value);
 
@@ -326,7 +488,7 @@ function getInitials(value = "") {
 }
 
 function getEstadoPagoKey(value = "") {
-  const key = safeText(value, "").toLowerCase();
+  const key = normalizeKey(value);
 
   if (["paid", "pagada", "pagado", "cobrada", "abonada"].includes(key)) {
     return "paid";
@@ -460,26 +622,39 @@ function getIncidenciaId(item = {}) {
   );
 }
 
-function getTotalLabel(item = {}) {
-  return formatMoney(
-    first(
-      item.total,
-      item.amount,
-      item.importe,
-      item.importeTotal,
-      item?.raw?.total,
-      item?.raw?.amount,
-      item?.raw?.importe,
-      item?.raw?.importeTotal,
-      0
-    ),
+function getTotalRaw(item = {}) {
+  return first(
+    item.total,
+    item.amount,
+    item.importe,
+    item.importeTotal,
+    item.totalFactura,
+    item?.raw?.total,
+    item?.raw?.amount,
+    item?.raw?.importe,
+    item?.raw?.importeTotal,
+    item?.raw?.totalFactura,
+    0
+  );
+}
+
+function getCurrency(item = {}) {
+  return safeText(
     first(
       item.moneda,
       item.currency,
       item?.raw?.moneda,
       item?.raw?.currency,
       "EUR"
-    )
+    ),
+    "EUR"
+  );
+}
+
+function getTotalLabel(item = {}) {
+  return formatMoney(
+    getTotalRaw(item),
+    getCurrency(item)
   );
 }
 
@@ -592,22 +767,7 @@ function computeStats(items = []) {
     ).length,
 
     totalImporte: rows.reduce(
-      (acc, item) =>
-        acc +
-        safeNumber(
-          first(
-            item.total,
-            item.amount,
-            item.importe,
-            item.importeTotal,
-            item?.raw?.total,
-            item?.raw?.amount,
-            item?.raw?.importe,
-            item?.raw?.importeTotal,
-            0
-          ),
-          0
-        ),
+      (acc, item) => acc + safeNumber(getTotalRaw(item), 0),
       0
     ),
   };
@@ -617,7 +777,18 @@ function getPagination(items = [], state = {}) {
   const allItems = safeArray(items);
   const runtime = safeObject(state);
 
-  const pageSize = DEFAULT_PAGE_SIZE;
+  const pageSize = Math.max(
+    1,
+    safeNumber(
+      first(
+        runtime.pageSize,
+        runtime.limit,
+        runtime.facturasPageSize,
+        DEFAULT_PAGE_SIZE
+      ),
+      DEFAULT_PAGE_SIZE
+    )
+  );
 
   const totalCount = allItems.length;
 
@@ -694,7 +865,25 @@ function renderSpinner(label = "") {
   return `
     <span class="facturas-inline-loading">
       <span class="facturas-inline-spinner" aria-hidden="true"></span>
-      <span>${escapeHtml(label)}</span>
+      ${
+        label
+          ? `<span class="facturas-inline-loading-text">${escapeHtml(label)}</span>`
+          : ""
+      }
+    </span>
+  `;
+}
+
+function renderLoaderOnly(label = "Cargando") {
+  return `
+    <span
+      class="facturas-loader-only"
+      role="status"
+      aria-label="${escapeHtml(label)}"
+      title="${escapeHtml(label)}"
+      data-tooltip="${escapeHtml(label)}"
+    >
+      <span class="facturas-inline-spinner" aria-hidden="true"></span>
     </span>
   `;
 }
@@ -702,12 +891,37 @@ function renderSpinner(label = "") {
 function renderAvatar(item = {}) {
   const fullName = getClientName(item);
   const initials = getInitials(fullName);
+  const avatarUrl = getClientAvatar(item);
+  const avatarStyle = getAvatarStyle(item);
+
+  if (avatarUrl) {
+    return `
+      <div
+        class="facturas-avatar"
+        title="${escapeHtml(fullName)}"
+        aria-label="${escapeHtml(fullName)}"
+        data-tooltip="${escapeHtml(fullName)}"
+        style="${escapeHtml(avatarStyle)}"
+      >
+        <img
+          src="${escapeHtml(avatarUrl)}"
+          alt="${escapeHtml(fullName)}"
+          loading="lazy"
+          referrerpolicy="no-referrer"
+          onerror="this.style.display='none'; this.parentNode.setAttribute('data-fallback','true');"
+        />
+        <span class="facturas-avatar-fallback">${escapeHtml(initials)}</span>
+      </div>
+    `;
+  }
 
   return `
     <div
       class="facturas-avatar facturas-avatar--fallback"
       title="${escapeHtml(fullName)}"
       aria-label="${escapeHtml(fullName)}"
+      data-tooltip="${escapeHtml(fullName)}"
+      style="${escapeHtml(avatarStyle)}"
     >
       <span class="facturas-avatar-fallback">${escapeHtml(initials)}</span>
     </div>
@@ -750,6 +964,7 @@ function renderIncidenciaLink(item = {}) {
       data-incidencia-id="${escapeHtml(incidenciaId)}"
       data-factura-id="${escapeHtml(facturaId)}"
       title="Abrir incidencia relacionada"
+      data-tooltip="Abrir incidencia relacionada"
     >
       ${escapeHtml(incidenciaId)}
     </button>
@@ -843,7 +1058,7 @@ function renderRow(item = {}, state = {}) {
         <div class="facturas-actions">
           <button
             type="button"
-            class="facturas-action-btn"
+            class="facturas-action-btn${busy.isOpening ? " is-loading" : ""}"
             data-action="open-factura"
             data-facturas-action="open-factura"
             data-factura-id="${escapeHtml(facturaId)}"
@@ -851,14 +1066,14 @@ function renderRow(item = {}, state = {}) {
           >
             ${
               busy.isOpening
-                ? renderSpinner("Abriendo...")
+                ? renderLoaderOnly("Abriendo detalle")
                 : '<span class="facturas-btn-text">Detalle</span>'
             }
           </button>
 
           <button
             type="button"
-            class="facturas-action-btn"
+            class="facturas-action-btn${busy.isViewingPdf ? " is-loading" : ""}"
             data-action="view-factura-pdf"
             data-facturas-action="view-factura-pdf"
             data-factura-id="${escapeHtml(facturaId)}"
@@ -870,14 +1085,14 @@ function renderRow(item = {}, state = {}) {
           >
             ${
               busy.isViewingPdf
-                ? renderSpinner("Abriendo...")
+                ? renderLoaderOnly("Abriendo PDF")
                 : '<span class="facturas-btn-text">Ver PDF</span>'
             }
           </button>
 
           <button
             type="button"
-            class="facturas-action-btn facturas-action-btn--primary"
+            class="facturas-action-btn facturas-action-btn--primary${busy.isDownloading ? " is-loading" : ""}"
             data-action="download-factura"
             data-facturas-action="download-factura"
             data-factura-id="${escapeHtml(facturaId)}"
@@ -889,14 +1104,14 @@ function renderRow(item = {}, state = {}) {
           >
             ${
               busy.isDownloading
-                ? renderSpinner("Bajando...")
+                ? renderLoaderOnly("Descargando factura")
                 : '<span class="facturas-btn-text">Descargar</span>'
             }
           </button>
 
           <button
             type="button"
-            class="facturas-action-btn facturas-action-btn--success"
+            class="facturas-action-btn facturas-action-btn--success${busy.isSending ? " is-loading" : ""}"
             data-action="send-factura"
             data-facturas-action="send-factura"
             data-factura-id="${escapeHtml(facturaId)}"
@@ -904,7 +1119,7 @@ function renderRow(item = {}, state = {}) {
           >
             ${
               busy.isSending
-                ? renderSpinner("Enviando...")
+                ? renderLoaderOnly("Enviando factura")
                 : '<span class="facturas-btn-text">Enviar</span>'
             }
           </button>
@@ -942,6 +1157,16 @@ function renderTableLoading(rows = DEFAULT_PAGE_SIZE) {
   `;
 }
 
+function renderRefreshOverlay() {
+  return `
+    <div class="facturas-refresh-overlay" aria-live="polite">
+      <div class="facturas-refresh-card">
+        ${renderSpinner("Actualizando facturas...")}
+      </div>
+    </div>
+  `;
+}
+
 function renderEmptyState() {
   return `
     <div class="facturas-empty">
@@ -960,169 +1185,152 @@ function renderEmptyState() {
 function renderStyles() {
   return `
     <style>
+      .facturas-view-root{
+        display:grid;
+        gap:var(--view-section-gap, var(--space-lg, 18px));
+        color:var(--text, #f5f5f5);
+        font-family:var(--font-family, inherit);
+      }
+
       .facturas-hero{
         position:relative;
         overflow:hidden;
-        border-radius:24px;
-        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
+        border-radius:var(--view-hero-radius, var(--card-radius-lg, 22px));
+        border:1px solid var(--view-hero-border, var(--panel-border, var(--border-default, rgba(255,255,255,.08))));
         background:
-          linear-gradient(180deg, rgba(255,255,255,.58), rgba(255,255,255,.36)),
-          color-mix(in srgb, var(--panel-bg, #ffffff) 92%, transparent);
-        box-shadow:
-          0 10px 30px rgba(15,23,42,.04),
-          0 1px 0 rgba(255,255,255,.55) inset;
-        padding:22px 24px 22px;
+          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
+          var(--view-hero-bg, var(--panel-bg, var(--card-bg, var(--surface-elevated, #262626))));
+        box-shadow:var(--view-hero-shadow, var(--panel-shadow, var(--shadow-md, 0 14px 30px rgba(0,0,0,.22))));
+        padding:var(--space-xl, 22px) var(--space-xl, 24px);
       }
 
       .facturas-hero-top{
         display:grid;
         grid-template-columns:minmax(0, 1fr) auto;
-        gap:18px;
+        gap:var(--space-lg, 18px);
         align-items:start;
       }
 
       .facturas-hero-copy{
         min-width:0;
         display:grid;
-        gap:10px;
+        gap:var(--space-xs, 10px);
       }
 
       .facturas-page-title{
         margin:0;
         max-width:100%;
-        font-size:clamp(26px, 2.6vw, 42px);
-        line-height:.98;
-        letter-spacing:-.05em;
-        font-weight:780;
-        color:var(--text-strong, #0f172a);
+        font-size:clamp(var(--font-3xl, 24px), 2.6vw, var(--font-5xl, 40px));
+        line-height:var(--line-tight, .98);
+        letter-spacing:var(--view-title-letter, -.05em);
+        font-weight:var(--view-title-weight, var(--weight-black, 800));
+        color:var(--text-strong, #ffffff);
         white-space:nowrap;
       }
 
       .facturas-page-subtitle{
         margin:0;
         max-width:860px;
-        font-size:15px;
-        line-height:1.58;
-        color:var(--text-dim, #6b7280);
+        font-size:var(--font-lg, 15px);
+        line-height:var(--line-relaxed, 1.58);
+        color:var(--view-subtitle-color, var(--text-muted, rgba(245,245,245,.70)));
       }
 
       .facturas-hero-actions{
         display:flex;
         align-items:flex-start;
         justify-content:flex-end;
-        gap:10px;
+        gap:var(--space-xs, 10px);
         flex-wrap:wrap;
       }
 
       .facturas-btn{
-        min-height:44px;
-        padding:0 16px;
-        border-radius:14px;
-        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 92%, transparent);
-        background:rgba(255,255,255,.72);
-        color:var(--text-strong, #111827);
-        font-size:13px;
-        font-weight:680;
+        min-height:var(--btn-height, 42px);
+        padding:0 var(--space-md, 16px);
+        border-radius:var(--btn-radius, var(--radius-md, 13px));
+        border:1px solid var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
+        background:var(--btn-secondary-bg, rgba(255,255,255,.045));
+        color:var(--btn-secondary-text, var(--text, #f5f5f5));
+        font-size:var(--font-md, 13px);
+        font-weight:var(--weight-bold, 700);
         line-height:1;
         cursor:pointer;
         display:inline-flex;
         align-items:center;
         justify-content:center;
         text-decoration:none;
-        box-shadow:0 4px 14px rgba(15,23,42,.04);
+        box-shadow:var(--btn-secondary-shadow, var(--shadow-sm, 0 6px 14px rgba(0,0,0,.16)));
         transition:
-          transform .16s ease,
-          box-shadow .16s ease,
-          border-color .16s ease,
-          background .16s ease,
-          opacity .16s ease;
+          transform var(--duration-fast, .16s) var(--ease-standard, ease),
+          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease),
+          border-color var(--duration-fast, .16s) var(--ease-standard, ease),
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          opacity var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
       .facturas-btn:hover{
-        transform:translateY(-1px);
-        box-shadow:0 8px 18px rgba(15,23,42,.06);
-        background:rgba(255,255,255,.9);
+        transform:translateY(var(--ui-hover-lift, -1px));
+        background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
+        box-shadow:var(--shadow-md, 0 14px 30px rgba(0,0,0,.22));
       }
 
-      .facturas-btn--primary,
-      .facturas-btn--create{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
-        background:linear-gradient(
-          180deg,
-          color-mix(in srgb, var(--accent, #7c5cff) 86%, white 14%),
-          color-mix(in srgb, var(--accent, #7c5cff) 92%, black 8%)
-        );
-        color:#fff;
-        box-shadow:0 8px 20px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
-      }
-
-      .facturas-btn--create{
-        background:
-          linear-gradient(180deg, rgba(255,255,255,.16), rgba(255,255,255,0)),
-          linear-gradient(
-            180deg,
-            color-mix(in srgb, var(--success-strong, #36c690) 86%, white 14%),
-            color-mix(in srgb, var(--success-strong, #36c690) 92%, black 8%)
-          );
-        border-color:color-mix(in srgb, var(--success-strong, #36c690) 18%, rgba(15,23,42,.06));
-        box-shadow:0 8px 20px color-mix(in srgb, var(--success-strong, #36c690) 16%, transparent);
-      }
-
-      .facturas-btn--primary:hover,
-      .facturas-btn--create:hover{
-        color:#fff;
-        transform:translateY(-1px);
-        box-shadow:0 12px 24px color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent);
+      .facturas-btn--primary{
+        border-color:var(--btn-primary-border, var(--accent-border, rgba(255,255,255,.05)));
+        background:var(--btn-primary-bg, var(--gradient-accent, linear-gradient(135deg, #55555d 0%, #3f3f46 55%, #2f2f35 100%)));
+        color:var(--btn-primary-text, var(--text-on-accent, #ffffff));
+        box-shadow:var(--btn-primary-shadow, 0 12px 28px rgba(0,0,0,.22));
       }
 
       .facturas-btn--primary:hover{
-        background:linear-gradient(
-          180deg,
-          color-mix(in srgb, var(--accent, #7c5cff) 90%, white 10%),
-          color-mix(in srgb, var(--accent, #7c5cff) 96%, black 4%)
-        );
+        background:var(--btn-primary-bg-hover, var(--btn-primary-bg));
+        color:var(--btn-primary-text, #ffffff);
+      }
+
+      .facturas-btn--create{
+        border-color:color-mix(in srgb, var(--success, #22c55e) 32%, var(--btn-primary-border, transparent));
+        background:var(--gradient-success, linear-gradient(180deg, #22c55e 0%, #16a34a 100%));
+        color:var(--text-on-accent, #ffffff);
+        box-shadow:
+          0 10px 24px color-mix(in srgb, var(--success, #22c55e), transparent 82%),
+          var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
       }
 
       .facturas-btn--create:hover{
-        background:
-          linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,0)),
-          linear-gradient(
-            180deg,
-            color-mix(in srgb, var(--success-strong, #36c690) 90%, white 10%),
-            color-mix(in srgb, var(--success-strong, #36c690) 96%, black 4%)
-          );
-        box-shadow:0 12px 24px color-mix(in srgb, var(--success-strong, #36c690) 22%, transparent);
+        color:var(--text-on-accent, #ffffff);
+        filter:brightness(1.02);
       }
 
       .facturas-btn.is-loading,
       .facturas-action-btn.is-loading{
         cursor:wait;
-        opacity:.9;
+        opacity:.92;
       }
 
       .facturas-btn:disabled,
-      .facturas-action-btn:disabled{
+      .facturas-action-btn:disabled,
+      .facturas-action-btn[aria-disabled="true"]{
         pointer-events:none;
+        opacity:.68;
       }
 
       .facturas-hero-meta{
-        margin-top:14px;
+        margin-top:var(--space-md, 14px);
         display:flex;
         align-items:center;
-        gap:8px;
+        gap:var(--space-xs, 8px);
         flex-wrap:wrap;
       }
 
       .facturas-meta-pill{
-        min-height:30px;
-        padding:0 12px;
-        border-radius:999px;
-        border:1px solid rgba(15,23,42,.06);
-        background:rgba(255,255,255,.52);
-        color:#7a8392;
-        font-size:11px;
-        font-weight:760;
-        letter-spacing:.045em;
+        min-height:calc(30px * var(--ui-scale, 1));
+        padding:0 var(--space-sm, 12px);
+        border-radius:var(--radius-pill, 999px);
+        border:1px solid var(--badge-border, var(--border-default, rgba(255,255,255,.07)));
+        background:var(--badge-bg, rgba(255,255,255,.048));
+        color:var(--badge-text, var(--text-muted, rgba(245,245,245,.70)));
+        font-size:var(--font-xs, 11px);
+        font-weight:var(--weight-bold, 700);
+        letter-spacing:var(--letter-wider, .08em);
         text-transform:uppercase;
         display:inline-flex;
         align-items:center;
@@ -1130,135 +1338,133 @@ function renderStyles() {
       }
 
       .facturas-stats{
-        margin-top:16px;
+        margin-top:var(--space-md, 16px);
         display:grid;
         grid-template-columns:repeat(4, minmax(0, 1fr));
-        gap:12px;
+        gap:var(--space-sm, 12px);
       }
 
       .facturas-stat-card{
         display:grid;
-        gap:8px;
-        min-height:124px;
-        padding:16px 18px;
-        border-radius:20px;
-        border:1px solid rgba(15,23,42,.06);
+        gap:var(--space-xs, 8px);
+        min-height:calc(124px * var(--ui-scale, 1));
+        padding:var(--space-md, 16px) var(--space-lg, 18px);
+        border-radius:var(--card-radius, 18px);
+        border:1px solid var(--card-border, var(--border-default, rgba(255,255,255,.082)));
         background:
-          linear-gradient(180deg, rgba(255,255,255,.58), rgba(255,255,255,.22)),
-          rgba(255,255,255,.46);
-        box-shadow:0 6px 20px rgba(15,23,42,.03);
+          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
+          var(--card-bg, var(--surface-elevated, rgba(39,39,42,.88)));
+        box-shadow:var(--shadow-card, var(--card-shadow, 0 16px 36px rgba(0,0,0,.24)));
       }
 
       .facturas-stat-card--accent{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
+        border-color:var(--accent-border, var(--border-accent, rgba(113,113,122,.30)));
       }
 
       .facturas-stat-card--success{
-        border-color:color-mix(in srgb, var(--success-strong, #36c690) 18%, rgba(15,23,42,.06));
+        border-color:var(--border-success, rgba(34,197,94,.30));
       }
 
       .facturas-stat-card--warning{
-        border-color:color-mix(in srgb, var(--warning-strong, #ffbc42) 18%, rgba(15,23,42,.06));
+        border-color:var(--border-warning, rgba(245,158,11,.30));
       }
 
       .facturas-stat-card--danger{
-        border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 18%, rgba(15,23,42,.06));
+        border-color:var(--border-error, rgba(239,68,68,.30));
       }
 
       .facturas-stat-label{
-        font-size:11px;
-        font-weight:760;
-        letter-spacing:.08em;
+        font-size:var(--font-xs, 11px);
+        font-weight:var(--weight-bold, 700);
+        letter-spacing:var(--letter-wider, .08em);
         text-transform:uppercase;
-        color:#7b8494;
+        color:var(--text-dim, rgba(245,245,245,.50));
       }
 
       .facturas-stat-value{
-        font-size:42px;
+        font-size:var(--font-5xl, 40px);
         line-height:.92;
-        letter-spacing:-.045em;
-        font-weight:780;
-        color:var(--text-strong, #111827);
+        letter-spacing:var(--letter-tight, -.03em);
+        font-weight:var(--weight-black, 800);
+        color:var(--text-strong, #ffffff);
       }
 
       .facturas-stat-text{
-        font-size:14px;
-        line-height:1.45;
-        color:var(--text-dim, #6b7280);
+        font-size:var(--font-base, 14px);
+        line-height:var(--line-normal, 1.42);
+        color:var(--text-muted, rgba(245,245,245,.70));
       }
 
       .facturas-history{
         overflow:hidden;
-        border-radius:24px;
-        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
+        border-radius:var(--data-table-radius, var(--card-radius-lg, 22px));
+        border:1px solid var(--data-table-border, var(--card-border, var(--border-default, rgba(255,255,255,.082))));
         background:
-          linear-gradient(180deg, rgba(255,255,255,.6), rgba(255,255,255,.4)),
-          color-mix(in srgb, var(--panel-bg, #ffffff) 94%, transparent);
-        box-shadow:
-          0 10px 30px rgba(15,23,42,.04),
-          0 1px 0 rgba(255,255,255,.5) inset;
+          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
+          var(--data-table-bg, var(--card-bg, var(--surface-elevated, rgba(39,39,42,.88))));
+        box-shadow:var(--data-table-shadow, var(--shadow-card, var(--card-shadow, 0 16px 36px rgba(0,0,0,.24))));
       }
 
       .facturas-history-head{
         display:grid;
         grid-template-columns:minmax(0, 1fr) auto;
-        gap:14px;
+        gap:var(--space-md, 14px);
         align-items:start;
-        padding:14px 18px 12px;
-        border-bottom:1px solid rgba(15,23,42,.06);
+        padding:var(--space-md, 14px) var(--space-lg, 18px) var(--space-sm, 12px);
+        border-bottom:1px solid var(--data-table-row-border, var(--table-border, rgba(255,255,255,.052)));
       }
 
       .facturas-history-copy{
         min-width:0;
         display:grid;
-        gap:2px;
+        gap:var(--space-3xs, 2px);
       }
 
       .facturas-history-title{
         margin:0;
-        font-size:16px;
-        line-height:1.2;
-        font-weight:760;
-        color:var(--text-strong, #111827);
+        font-size:var(--section-title-size, var(--font-xl, 16px));
+        line-height:var(--line-snug, 1.22);
+        font-weight:var(--section-title-weight, var(--weight-bold, 700));
+        color:var(--section-title-color, var(--text-strong, #ffffff));
       }
 
       .facturas-history-subtitle{
         margin:0;
-        font-size:12px;
-        line-height:1.4;
-        color:var(--text-dim, #7b8494);
+        font-size:var(--section-subtitle-size, var(--font-sm, 12px));
+        line-height:var(--line-normal, 1.42);
+        color:var(--section-subtitle-color, var(--text-dim, rgba(245,245,245,.50)));
       }
 
       .facturas-pagination{
         display:flex;
-        gap:8px;
+        gap:var(--space-xs, 8px);
         flex-wrap:wrap;
         justify-content:flex-end;
       }
 
       .facturas-pagination-btn{
-        min-height:38px;
-        padding:0 14px;
-        border-radius:13px;
-        border:1px solid rgba(15,23,42,.06);
-        background:rgba(255,255,255,.66);
-        color:#273142;
-        font-size:12px;
-        font-weight:680;
+        min-height:calc(38px * var(--ui-scale, 1));
+        padding:0 var(--space-sm, 14px);
+        border-radius:var(--radius-md, 13px);
+        border:1px solid var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
+        background:var(--btn-secondary-bg, rgba(255,255,255,.045));
+        color:var(--btn-secondary-text, var(--text, #f5f5f5));
+        font-size:var(--font-sm, 12px);
+        font-weight:var(--weight-bold, 700);
         cursor:pointer;
         display:inline-flex;
         align-items:center;
         justify-content:center;
         text-decoration:none;
         transition:
-          background .16s ease,
-          border-color .16s ease,
-          opacity .16s ease;
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          border-color var(--duration-fast, .16s) var(--ease-standard, ease),
+          opacity var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
       .facturas-pagination-btn:hover{
-        background:rgba(255,255,255,.9);
-        border-color:rgba(15,23,42,.10);
+        background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
+        border-color:var(--border-strong, rgba(255,255,255,.12));
       }
 
       .facturas-pagination-btn[disabled],
@@ -1270,19 +1476,24 @@ function renderStyles() {
 
       .facturas-table-wrap{
         position:relative;
+        min-height:120px;
       }
 
       .facturas-table-wrap.is-refreshing .facturas-table-shell{
-        opacity:.58;
-        filter:blur(.8px);
-        transition:opacity .18s ease, filter .18s ease;
+        opacity:.56;
+        filter:blur(.7px);
+        transition:
+          opacity var(--duration-fast, .18s) var(--ease-standard, ease),
+          filter var(--duration-fast, .18s) var(--ease-standard, ease);
       }
 
       .facturas-table-shell{
         width:100%;
         overflow-x:auto;
         overflow-y:hidden;
-        transition:opacity .18s ease, filter .18s ease;
+        transition:
+          opacity var(--duration-fast, .18s) var(--ease-standard, ease),
+          filter var(--duration-fast, .18s) var(--ease-standard, ease);
       }
 
       .facturas-table{
@@ -1291,25 +1502,26 @@ function renderStyles() {
         border-spacing:0;
         min-width:1040px;
         table-layout:fixed;
+        background:var(--table-bg, transparent);
       }
 
       .facturas-table thead th{
-        padding:12px 12px;
+        padding:var(--table-cell-padding-y, 12px) var(--table-cell-padding-x, 12px);
         text-align:left;
-        font-size:11px;
-        font-weight:760;
-        letter-spacing:.08em;
+        font-size:var(--data-table-head-font-size, var(--font-xs, 11px));
+        font-weight:var(--data-table-head-font-weight, var(--weight-bold, 700));
+        letter-spacing:var(--data-table-head-letter, .075em);
         text-transform:uppercase;
-        color:#97a0af;
-        background:rgba(248,250,252,.62);
-        border-bottom:1px solid rgba(15,23,42,.06);
+        color:var(--data-table-head-text, var(--text-dim, rgba(245,245,245,.50)));
+        background:var(--data-table-head-bg, var(--table-head-bg, rgba(255,255,255,.020)));
+        border-bottom:1px solid var(--table-head-border, var(--border-default, rgba(255,255,255,.082)));
         white-space:nowrap;
       }
 
       .facturas-table tbody td{
-        padding:12px 12px;
+        padding:calc(12px * var(--ui-scale, 1)) var(--table-cell-padding-x, 12px);
         vertical-align:middle;
-        border-bottom:1px solid rgba(15,23,42,.055);
+        border-bottom:1px solid var(--data-table-row-border, var(--table-border, rgba(255,255,255,.052)));
       }
 
       .facturas-table tbody tr:last-child td{
@@ -1317,64 +1529,108 @@ function renderStyles() {
       }
 
       .facturas-table-row{
-        transition:background .16s ease;
+        transition:
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
       .facturas-table-row:hover{
-        background:rgba(124,92,255,.018);
+        background:var(--data-table-row-hover, var(--table-row-hover, rgba(255,255,255,.024)));
       }
 
       .facturas-main{
         display:grid;
-        grid-template-columns:44px minmax(0, 1fr);
-        gap:12px;
+        grid-template-columns:var(--avatar-size-lg, calc(44px * var(--ui-scale, 1))) minmax(0, 1fr);
+        gap:var(--space-sm, 12px);
         align-items:center;
         min-width:0;
       }
 
       .facturas-avatar{
         position:relative;
-        width:44px;
-        height:44px;
-        border-radius:999px;
+        width:var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
+        height:var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
+        border-radius:var(--radius-pill, 999px);
         overflow:hidden;
-        flex:0 0 44px;
-        background:linear-gradient(135deg, rgba(124,92,255,.12), rgba(139,92,246,.24));
+        flex:0 0 var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
+        background:var(--fac-avatar-bg, var(--avatar-bg, linear-gradient(180deg, #52525b 0%, #3f3f46 100%)));
+        box-shadow:
+          0 10px 22px var(--fac-avatar-shadow, rgba(0,0,0,.20)),
+          0 0 0 3px color-mix(in srgb, var(--fac-avatar-ring, var(--accent-ring, rgba(113,113,122,.30))) 58%, transparent),
+          var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
+        transform:translateZ(0);
+      }
+
+      .facturas-avatar::after{
+        content:"";
+        position:absolute;
+        inset:0;
+        border-radius:inherit;
+        background:
+          radial-gradient(circle at 30% 22%, rgba(255,255,255,.42), transparent 34%),
+          linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.08));
+        pointer-events:none;
+        mix-blend-mode:screen;
+      }
+
+      .facturas-avatar img{
+        position:relative;
+        z-index:1;
+        display:block;
+        width:100%;
+        height:100%;
+        object-fit:cover;
       }
 
       .facturas-avatar-fallback{
         position:absolute;
         inset:0;
-        display:flex;
+        z-index:2;
+        display:none;
         align-items:center;
         justify-content:center;
-        font-size:18px;
-        font-weight:780;
-        color:#fff;
-        letter-spacing:-.03em;
+        font-size:var(--font-2xl, 19px);
+        font-weight:var(--weight-black, 800);
+        color:var(--avatar-text, #ffffff);
+        letter-spacing:-.035em;
+        text-shadow:
+          0 1px 2px rgba(0,0,0,.22),
+          0 0 16px rgba(255,255,255,.20);
+      }
+
+      .facturas-avatar[data-fallback="true"] .facturas-avatar-fallback{
+        display:flex;
+      }
+
+      .facturas-avatar[data-fallback="true"] img{
+        display:none !important;
+      }
+
+      .facturas-avatar--fallback .facturas-avatar-fallback{
+        display:flex;
       }
 
       .facturas-main-copy{
         min-width:0;
         display:grid;
-        gap:3px;
+        gap:var(--space-3xs, 3px);
       }
 
       .facturas-factura-id{
-        font-size:12px;
-        line-height:1.15;
-        font-weight:760;
+        font-size:var(--font-sm, 12px);
+        line-height:var(--line-snug, 1.22);
+        font-weight:var(--weight-bold, 700);
         letter-spacing:.055em;
-        color:#667084;
+        color:var(--text-dim, rgba(245,245,245,.50));
         text-transform:uppercase;
       }
 
       .facturas-factura-client{
-        font-size:15px;
+        font-size:var(--font-lg, 15px);
         line-height:1.14;
-        font-weight:760;
-        letter-spacing:-.025em;
-        color:var(--text-strong, #111827);
+        font-weight:var(--weight-black, 800);
+        letter-spacing:var(--letter-tight, -.03em);
+        color:var(--text-strong, #ffffff);
         overflow:hidden;
         text-overflow:ellipsis;
         display:-webkit-box;
@@ -1383,86 +1639,92 @@ function renderStyles() {
       }
 
       .facturas-factura-email{
-        font-size:13px;
+        font-size:var(--font-md, 13px);
         line-height:1.3;
-        color:#8a93a3;
+        color:var(--text-dim, rgba(245,245,245,.50));
         overflow:hidden;
         text-overflow:ellipsis;
         white-space:nowrap;
       }
 
       .facturas-chip{
-        min-height:32px;
-        padding:0 12px;
-        border-radius:999px;
+        min-height:var(--chip-height, calc(26px * var(--ui-scale, 1)));
+        padding:0 var(--space-sm, 12px);
+        border-radius:var(--radius-pill, 999px);
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        font-size:11px;
-        font-weight:760;
+        font-size:var(--font-xs, 11px);
+        font-weight:var(--weight-bold, 700);
         letter-spacing:.045em;
         text-transform:uppercase;
         white-space:nowrap;
         border:1px solid transparent;
+        box-shadow:var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
       }
 
       .facturas-chip--pending,
-      .facturas-chip--partial,
+      .facturas-chip--partial{
+        color:var(--warning, #f59e0b);
+        background:color-mix(in srgb, var(--warning-bg, rgba(245,158,11,.10)) 78%, var(--surface-active, transparent));
+        border-color:var(--border-warning, rgba(245,158,11,.30));
+      }
+
       .facturas-chip--draft{
-        color:#b7791f;
-        background:rgba(255,188,66,.11);
-        border-color:rgba(255,188,66,.22);
+        color:var(--text-soft, rgba(245,245,245,.88));
+        background:var(--chip-bg, rgba(255,255,255,.034));
+        border-color:var(--chip-border, rgba(255,255,255,.07));
       }
 
       .facturas-chip--paid{
-        color:#258a59;
-        background:rgba(54,198,144,.10);
-        border-color:rgba(54,198,144,.22);
+        color:var(--success, #22c55e);
+        background:color-mix(in srgb, var(--success-bg, rgba(34,197,94,.10)) 78%, var(--surface-active, transparent));
+        border-color:var(--border-success, rgba(34,197,94,.30));
       }
 
       .facturas-chip--overdue,
       .facturas-chip--cancelled{
-        color:#c24141;
-        background:rgba(255,107,107,.10);
-        border-color:rgba(255,107,107,.22);
+        color:var(--error, #ef4444);
+        background:color-mix(in srgb, var(--error-bg, rgba(239,68,68,.10)) 78%, var(--surface-active, transparent));
+        border-color:var(--border-error, rgba(239,68,68,.30));
       }
 
       .facturas-date-inline{
         display:inline-block;
         white-space:nowrap;
-        font-size:13px;
+        font-size:var(--font-md, 13px);
         line-height:1.2;
-        font-weight:650;
+        font-weight:var(--weight-semibold, 600);
         font-variant-numeric:tabular-nums;
-        color:#344054;
+        color:var(--data-table-cell-text, var(--text-soft, rgba(245,245,245,.88)));
       }
 
       .facturas-total-stack{
         display:grid;
-        gap:2px;
+        gap:var(--space-3xs, 2px);
         min-width:0;
       }
 
       .facturas-total-value{
-        font-size:14px;
+        font-size:var(--font-base, 14px);
         line-height:1.15;
-        font-weight:760;
-        color:var(--text-strong, #111827);
+        font-weight:var(--weight-bold, 700);
+        color:var(--text-strong, #ffffff);
         white-space:nowrap;
       }
 
       .facturas-total-caption{
-        font-size:11px;
+        font-size:var(--font-xs, 11px);
         line-height:1.15;
-        color:#6b7280;
+        color:var(--text-muted, rgba(245,245,245,.70));
         white-space:nowrap;
-        font-weight:700;
+        font-weight:var(--weight-bold, 700);
       }
 
       .facturas-total-meta{
-        font-size:11px;
+        font-size:var(--font-xs, 11px);
         line-height:1.15;
-        color:#98a2b3;
+        color:var(--text-dim, rgba(245,245,245,.50));
         white-space:nowrap;
         overflow:hidden;
         text-overflow:ellipsis;
@@ -1470,14 +1732,14 @@ function renderStyles() {
 
       .facturas-incidencia-link{
         max-width:100%;
-        min-height:30px;
-        padding:0 10px;
-        border-radius:999px;
-        border:1px solid rgba(124,92,255,.18);
-        background:rgba(124,92,255,.08);
-        color:#6d53d7;
-        font-size:11px;
-        font-weight:760;
+        min-height:calc(30px * var(--ui-scale, 1));
+        padding:0 var(--space-sm, 10px);
+        border-radius:var(--radius-pill, 999px);
+        border:1px solid var(--accent-border, rgba(113,113,122,.28));
+        background:var(--accent-soft, rgba(63,63,70,.18));
+        color:var(--text-strong, #ffffff);
+        font-size:var(--font-xs, 11px);
+        font-weight:var(--weight-bold, 700);
         letter-spacing:.025em;
         text-transform:uppercase;
         cursor:pointer;
@@ -1488,21 +1750,21 @@ function renderStyles() {
         overflow:hidden;
         text-overflow:ellipsis;
         transition:
-          transform .16s ease,
-          background .16s ease,
-          border-color .16s ease;
+          transform var(--duration-fast, .16s) var(--ease-standard, ease),
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          border-color var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
       .facturas-incidencia-link:hover{
-        transform:translateY(-1px);
-        background:rgba(124,92,255,.12);
-        border-color:rgba(124,92,255,.24);
+        transform:translateY(var(--ui-hover-lift, -1px));
+        background:var(--accent-ghost, rgba(63,63,70,.10));
+        border-color:var(--accent-border-strong, rgba(113,113,122,.42));
       }
 
       .facturas-incidencia-empty{
-        color:#98a2b3;
-        font-size:13px;
-        font-weight:650;
+        color:var(--text-dim, rgba(245,245,245,.50));
+        font-size:var(--font-md, 13px);
+        font-weight:var(--weight-semibold, 600);
       }
 
       .facturas-cell--actions{
@@ -1512,24 +1774,25 @@ function renderStyles() {
 
       .facturas-actions{
         display:grid;
-        grid-template-columns:repeat(2, minmax(76px, 1fr));
-        gap:6px;
+        grid-template-columns:repeat(2, minmax(calc(82px * var(--ui-scale, 1)), 1fr));
+        gap:var(--space-2xs, 6px);
         width:100%;
-        min-width:172px;
+        min-width:calc(180px * var(--ui-scale, 1));
         justify-content:end;
       }
 
       .facturas-action-btn{
-        width:100%;
-        min-width:0;
-        min-height:30px;
-        padding:0 8px;
-        border-radius:10px;
-        border:1px solid rgba(15,23,42,.07);
-        background:rgba(255,255,255,.68);
-        color:#1f2937;
-        font-size:11px;
-        font-weight:700;
+        inline-size:100%;
+        min-inline-size:0;
+        min-height:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
+        height:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
+        padding:0 var(--space-xs, 8px);
+        border-radius:var(--radius-md, 10px);
+        border:1px solid var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
+        background:var(--btn-secondary-bg, rgba(255,255,255,.045));
+        color:var(--btn-secondary-text, var(--text, #f5f5f5));
+        font-size:var(--font-xs, 11px);
+        font-weight:var(--weight-bold, 700);
         line-height:1;
         cursor:pointer;
         display:inline-flex;
@@ -1538,74 +1801,78 @@ function renderStyles() {
         white-space:nowrap;
         box-shadow:none;
         transition:
-          border-color .16s ease,
-          background .16s ease,
-          transform .16s ease,
-          opacity .16s ease,
-          box-shadow .16s ease;
+          border-color var(--duration-fast, .16s) var(--ease-standard, ease),
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          transform var(--duration-fast, .16s) var(--ease-standard, ease),
+          opacity var(--duration-fast, .16s) var(--ease-standard, ease),
+          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
       .facturas-action-btn:hover{
-        border-color:rgba(15,23,42,.11);
-        background:rgba(255,255,255,.9);
-        color:#1f2937;
-        transform:translateY(-1px);
+        border-color:var(--border-strong, rgba(255,255,255,.12));
+        background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
+        color:var(--text-strong, #ffffff);
+        transform:translateY(var(--ui-hover-lift, -1px));
+      }
+
+      .facturas-action-btn.is-loading{
+        min-height:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
+        height:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
+        justify-content:center;
       }
 
       .facturas-action-btn--primary{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
-        background:linear-gradient(
-          180deg,
-          color-mix(in srgb, var(--accent, #7c5cff) 86%, white 14%),
-          color-mix(in srgb, var(--accent, #7c5cff) 92%, black 8%)
-        );
-        color:#fff;
+        border-color:var(--btn-primary-border, var(--accent-border, rgba(255,255,255,.05)));
+        background:var(--btn-primary-bg, var(--gradient-accent, linear-gradient(135deg, #55555d 0%, #3f3f46 55%, #2f2f35 100%)));
+        color:var(--btn-primary-text, var(--text-on-accent, #ffffff));
       }
 
       .facturas-action-btn--primary:hover{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 22%, rgba(15,23,42,.06));
-        background:linear-gradient(
-          180deg,
-          color-mix(in srgb, var(--accent, #7c5cff) 90%, white 10%),
-          color-mix(in srgb, var(--accent, #7c5cff) 96%, black 4%)
-        );
-        color:#fff;
-        box-shadow:0 8px 18px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
+        background:var(--btn-primary-bg-hover, var(--btn-primary-bg));
+        color:var(--btn-primary-text, #ffffff);
+        box-shadow:var(--btn-primary-shadow, 0 12px 28px rgba(0,0,0,.22));
       }
 
       .facturas-action-btn--success{
-        border-color:color-mix(in srgb, var(--success-strong, #36c690) 16%, rgba(15,23,42,.06));
-        background:linear-gradient(
-          180deg,
-          color-mix(in srgb, var(--success-strong, #36c690) 86%, white 14%),
-          color-mix(in srgb, var(--success-strong, #36c690) 92%, black 8%)
-        );
-        color:#fff;
+        border-color:color-mix(in srgb, var(--success, #22c55e) 32%, var(--btn-primary-border, transparent));
+        background:var(--gradient-success, linear-gradient(180deg, #22c55e 0%, #16a34a 100%));
+        color:var(--text-on-accent, #ffffff);
       }
 
       .facturas-action-btn--success:hover{
-        border-color:color-mix(in srgb, var(--success-strong, #36c690) 22%, rgba(15,23,42,.06));
-        background:linear-gradient(
-          180deg,
-          color-mix(in srgb, var(--success-strong, #36c690) 90%, white 10%),
-          color-mix(in srgb, var(--success-strong, #36c690) 96%, black 4%)
-        );
-        color:#fff;
-        box-shadow:0 8px 18px color-mix(in srgb, var(--success-strong, #36c690) 18%, transparent);
+        color:var(--text-on-accent, #ffffff);
+        filter:brightness(1.02);
+        box-shadow:
+          0 10px 22px color-mix(in srgb, var(--success, #22c55e), transparent 84%),
+          var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
+      }
+
+      .facturas-loader-only{
+        display:inline-flex;
+        width:16px;
+        height:16px;
+        align-items:center;
+        justify-content:center;
+        flex:0 0 auto;
       }
 
       .facturas-inline-loading{
         display:inline-flex;
         align-items:center;
-        gap:7px;
+        justify-content:center;
+        gap:var(--space-xs, 7px);
         white-space:nowrap;
       }
 
+      .facturas-inline-loading-text{
+        display:inline-block;
+      }
+
       .facturas-inline-spinner{
-        width:13px;
-        height:13px;
-        border-radius:999px;
-        border:2px solid rgba(255,255,255,.30);
+        width:14px;
+        height:14px;
+        border-radius:var(--radius-pill, 999px);
+        border:2px solid var(--loader-ring, rgba(255,255,255,.12));
         border-top-color:currentColor;
         animation:facturasSpin .78s linear infinite;
         flex:0 0 auto;
@@ -1613,33 +1880,65 @@ function renderStyles() {
 
       .facturas-btn:not(.facturas-btn--primary):not(.facturas-btn--create) .facturas-inline-spinner,
       .facturas-action-btn:not(.facturas-action-btn--primary):not(.facturas-action-btn--success) .facturas-inline-spinner{
-        border-color:rgba(15,23,42,.16);
+        border-color:var(--loader-ring, rgba(255,255,255,.12));
         border-top-color:currentColor;
       }
 
-      .facturas-table-loading{
-        padding:12px 18px 16px;
+      .facturas-action-btn.is-loading .facturas-inline-spinner{
+        width:15px;
+        height:15px;
+      }
+
+      .facturas-refresh-overlay{
+        position:absolute;
+        inset:0;
+        z-index:3;
         display:grid;
-        gap:12px;
+        place-items:center;
+        pointer-events:none;
+        background:var(--backdrop-bg, rgba(10,10,12,.28));
+        backdrop-filter:var(--blur-sm, blur(8px));
+        -webkit-backdrop-filter:var(--blur-sm, blur(8px));
+      }
+
+      .facturas-refresh-card{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        min-height:var(--btn-height, 42px);
+        padding:0 var(--space-md, 16px);
+        border-radius:var(--radius-md, 14px);
+        border:1px solid var(--card-border, var(--border-default, rgba(255,255,255,.082)));
+        background:var(--popover-bg, var(--surface-elevated-strong, rgba(44,44,48,.94)));
+        color:var(--text-soft, rgba(245,245,245,.88));
+        font-size:var(--font-md, 13px);
+        font-weight:var(--weight-bold, 700);
+        box-shadow:var(--shadow-lg, 0 20px 46px rgba(0,0,0,.28));
+      }
+
+      .facturas-table-loading{
+        padding:var(--space-sm, 12px) var(--space-lg, 18px) var(--space-md, 16px);
+        display:grid;
+        gap:var(--space-sm, 12px);
       }
 
       .facturas-table-loading-row{
         display:grid;
-        grid-template-columns:44px minmax(190px, 1.1fr) 102px 130px 108px 150px 172px;
-        gap:10px;
+        grid-template-columns:var(--avatar-size-lg, 44px) minmax(190px, 1.1fr) 102px 130px 108px 150px 180px;
+        gap:var(--space-xs, 10px);
         align-items:center;
       }
 
       .facturas-table-loading-copy{
         display:grid;
-        gap:7px;
+        gap:var(--space-xs, 7px);
       }
 
       .facturas-skeleton{
         position:relative;
         overflow:hidden;
-        border-radius:999px;
-        background:rgba(148,163,184,.14);
+        border-radius:var(--skeleton-radius, var(--radius-md, 13px));
+        background:var(--skeleton-bg, rgba(255,255,255,.050));
       }
 
       .facturas-skeleton::after{
@@ -1650,26 +1949,26 @@ function renderStyles() {
         background:linear-gradient(
           90deg,
           transparent,
-          rgba(255,255,255,.55),
+          var(--skeleton-shine, rgba(255,255,255,.095)),
           transparent
         );
-        animation:facturasSkeleton 1.2s ease-in-out infinite;
+        animation:facturasSkeleton 1.2s var(--ease-standard, ease-in-out) infinite;
       }
 
       .facturas-skeleton--avatar{
-        width:44px;
-        height:44px;
-        border-radius:999px;
+        width:var(--avatar-size-lg, 44px);
+        height:var(--avatar-size-lg, 44px);
+        border-radius:var(--radius-pill, 999px);
       }
 
       .facturas-skeleton--xs{
         width:120px;
-        height:10px;
+        height:var(--skeleton-height-sm, 10px);
       }
 
       .facturas-skeleton--lg{
         width:74%;
-        height:14px;
+        height:var(--skeleton-height-md, 14px);
       }
 
       .facturas-skeleton--md{
@@ -1680,6 +1979,7 @@ function renderStyles() {
       .facturas-skeleton--pill{
         width:86px;
         height:30px;
+        border-radius:var(--radius-pill, 999px);
       }
 
       .facturas-skeleton--date{
@@ -1695,60 +1995,62 @@ function renderStyles() {
       .facturas-skeleton--ticket{
         width:148px;
         height:30px;
+        border-radius:var(--radius-pill, 999px);
       }
 
       .facturas-skeleton--actions{
-        width:172px;
-        height:66px;
-        border-radius:12px;
+        width:180px;
+        height:calc((var(--btn-height-sm, 34px) * 2) + var(--space-2xs, 6px));
+        border-radius:var(--radius-md, 12px);
       }
 
       .facturas-empty{
         display:grid;
         justify-items:center;
-        gap:8px;
-        padding:44px 20px 48px;
+        gap:var(--space-xs, 8px);
+        padding:var(--space-4xl, 44px) var(--space-lg, 20px) var(--space-5xl, 48px);
         text-align:center;
       }
 
       .facturas-empty-title{
         margin:0;
-        font-size:18px;
-        font-weight:760;
-        color:var(--text-strong, #111827);
+        font-size:var(--font-2xl, 18px);
+        font-weight:var(--weight-bold, 700);
+        color:var(--text-strong, #ffffff);
       }
 
       .facturas-empty-text{
         margin:0;
-        font-size:13px;
-        line-height:1.55;
-        color:var(--text-dim, #6b7280);
+        font-size:var(--font-md, 13px);
+        line-height:var(--line-relaxed, 1.62);
+        color:var(--text-muted, rgba(245,245,245,.70));
       }
 
       .facturas-error{
         display:grid;
         justify-items:start;
-        gap:10px;
-        padding:24px 22px;
-        border-radius:20px;
-        border:1px solid rgba(255,107,107,.22);
+        gap:var(--space-xs, 10px);
+        padding:var(--space-xl, 24px) var(--space-xl, 22px);
+        border-radius:var(--card-radius-lg, 22px);
+        border:1px solid var(--border-error, rgba(239,68,68,.30));
         background:
-          linear-gradient(180deg, rgba(255,107,107,.06), rgba(255,255,255,.5)),
-          rgba(255,255,255,.7);
+          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
+          color-mix(in srgb, var(--error-bg, rgba(239,68,68,.10)) 46%, var(--card-bg, transparent));
+        box-shadow:var(--shadow-sm, 0 6px 14px rgba(0,0,0,.16));
       }
 
       .facturas-error-title{
         margin:0;
-        font-size:18px;
-        font-weight:760;
-        color:var(--text-strong, #111827);
+        font-size:var(--font-2xl, 18px);
+        font-weight:var(--weight-bold, 700);
+        color:var(--text-strong, #ffffff);
       }
 
       .facturas-error-text{
         margin:0;
-        font-size:13px;
-        line-height:1.6;
-        color:var(--text-dim, #6b7280);
+        font-size:var(--font-md, 13px);
+        line-height:var(--line-relaxed, 1.62);
+        color:var(--text-muted, rgba(245,245,245,.70));
       }
 
       @keyframes facturasSpin{
@@ -1759,25 +2061,59 @@ function renderStyles() {
         to{ transform:translateX(100%); }
       }
 
+      [data-theme="dark"] .facturas-avatar,
+      :root:not([data-theme="light"]) .facturas-avatar{
+        background:var(--fac-avatar-bg-dark, var(--fac-avatar-bg, var(--avatar-bg)));
+      }
+
       [data-theme="light"] .facturas-hero,
       [data-theme="light"] .facturas-history{
         background:
-          linear-gradient(180deg, rgba(255,255,255,.82), rgba(248,250,252,.74)),
-          rgba(255,255,255,.82);
-        box-shadow:
-          0 12px 28px rgba(15,23,42,.035),
-          0 0 0 1px rgba(255,255,255,.72) inset;
+          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.82), rgba(255,255,255,0) 34%)),
+          var(--view-hero-bg, var(--panel-bg, var(--card-bg, var(--surface-elevated, #ffffff))));
       }
 
       [data-theme="light"] .facturas-stat-card{
         background:
-          linear-gradient(180deg, rgba(255,255,255,.78), rgba(255,255,255,.48)),
-          rgba(255,255,255,.56);
+          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.82), rgba(255,255,255,0) 34%)),
+          var(--card-bg, var(--surface-elevated, #ffffff));
+      }
+
+      [data-theme="light"] .facturas-chip--pending,
+      [data-theme="light"] .facturas-chip--partial{
+        color:var(--warning-hover, #9c6110);
+        background:var(--warning-soft, rgba(192,122,22,.12));
+        border-color:var(--border-warning, rgba(217,119,6,.245));
+      }
+
+      [data-theme="light"] .facturas-chip--draft{
+        color:var(--text-muted, rgba(23,32,51,.70));
+        background:var(--chip-bg, rgba(23,32,51,.040));
+        border-color:var(--chip-border, rgba(23,32,51,.075));
+      }
+
+      [data-theme="light"] .facturas-chip--paid{
+        color:var(--success-hover, #157a4f);
+        background:var(--success-soft, rgba(31,157,104,.12));
+        border-color:var(--border-success, rgba(22,163,74,.245));
+      }
+
+      [data-theme="light"] .facturas-chip--overdue,
+      [data-theme="light"] .facturas-chip--cancelled{
+        color:var(--error-hover, #b52a39);
+        background:var(--error-soft, rgba(216,60,77,.12));
+        border-color:var(--border-error, rgba(220,38,38,.245));
+      }
+
+      [data-theme="light"] .facturas-incidencia-link{
+        color:var(--accent-active, #533cb6);
+        background:var(--accent-soft, rgba(111,89,217,.125));
+        border-color:var(--accent-border-strong, rgba(111,89,217,.36));
       }
 
       @media (max-width: 1180px){
         .facturas-hero{
-          padding:20px;
+          padding:var(--space-lg, 20px);
         }
 
         .facturas-hero-top{
@@ -1798,18 +2134,22 @@ function renderStyles() {
       }
 
       @media (max-width: 760px){
+        .facturas-view-root{
+          gap:var(--space-md, 16px);
+        }
+
         .facturas-hero{
-          padding:18px 16px;
-          border-radius:20px;
+          padding:var(--space-lg, 18px) var(--space-md, 16px);
+          border-radius:var(--radius-xl, 18px);
         }
 
         .facturas-history{
-          border-radius:20px;
+          border-radius:var(--radius-xl, 18px);
         }
 
         .facturas-history-head{
           grid-template-columns:1fr;
-          padding:14px 14px 12px;
+          padding:var(--space-md, 14px) var(--space-md, 14px) var(--space-sm, 12px);
         }
 
         .facturas-pagination{
@@ -1821,13 +2161,21 @@ function renderStyles() {
         }
 
         .facturas-page-title{
-          font-size:clamp(24px, 8vw, 34px);
+          font-size:clamp(var(--font-3xl, 24px), 8vw, var(--font-4xl, 34px));
           line-height:1;
           white-space:normal;
         }
 
         .facturas-page-subtitle{
-          font-size:14px;
+          font-size:var(--font-base, 14px);
+        }
+
+        .facturas-hero-actions{
+          width:100%;
+        }
+
+        .facturas-btn{
+          flex:1 1 auto;
         }
       }
     </style>
@@ -1856,6 +2204,8 @@ export function renderHeader({ items = [], state = {} } = {}) {
   );
 
   const refreshing = Boolean(runtime.refreshing);
+  const loading = Boolean(runtime.loading);
+  const creating = Boolean(runtime.creating || runtime.creatingFactura);
 
   return `
     ${renderStyles()}
@@ -1876,6 +2226,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
             class="facturas-btn"
             data-action="export"
             data-facturas-action="export"
+            ${loading || refreshing || !rows.length ? "disabled" : ""}
           >
             <span class="facturas-btn-text">Exportar CSV</span>
           </button>
@@ -1886,12 +2237,17 @@ export function renderHeader({ items = [], state = {} } = {}) {
                 <button
                   type="button"
                   id="facturas-create-btn"
-                  class="facturas-btn facturas-btn--create"
+                  class="facturas-btn facturas-btn--create${creating ? " is-loading" : ""}"
                   data-action="create-factura"
                   data-facturas-action="create-factura"
                   aria-label="Crear nueva factura"
+                  ${creating ? 'disabled aria-busy="true"' : ""}
                 >
-                  <span class="facturas-btn-text">Crear factura</span>
+                  ${
+                    creating
+                      ? renderSpinner("Abriendo...")
+                      : '<span class="facturas-btn-text">Crear factura</span>'
+                  }
                 </button>
               `
               : ""
@@ -1903,7 +2259,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
             class="facturas-btn facturas-btn--primary${refreshing ? " is-loading" : ""}"
             data-action="refresh"
             data-facturas-action="refresh"
-            ${refreshing ? 'disabled aria-busy="true"' : ""}
+            ${refreshing || loading ? 'disabled aria-busy="true"' : ""}
           >
             ${
               refreshing
@@ -1989,9 +2345,21 @@ export function renderErrorState(message = "No se pudieron cargar las facturas."
 export function renderCards({ items = [], state = {} } = {}) {
   const rows = safeArray(items);
   const runtime = safeObject(state);
+
+  const loading = Boolean(runtime.loading);
   const refreshing = Boolean(runtime.refreshing);
 
   const pagination = getPagination(rows, runtime);
+
+  if (loading && !rows.length) {
+    return `
+      ${renderStyles()}
+
+      <section class="facturas-history">
+        ${renderTableLoading(DEFAULT_PAGE_SIZE)}
+      </section>
+    `;
+  }
 
   if (!rows.length) {
     return `
@@ -2021,11 +2389,7 @@ export function renderCards({ items = [], state = {} } = {}) {
       </div>
 
       <div class="facturas-table-wrap${refreshing ? " is-refreshing" : ""}">
-        ${
-          refreshing
-            ? renderTableLoading(Math.min(DEFAULT_PAGE_SIZE, Math.max(3, pagination.pageItems.length || 3)))
-            : ""
-        }
+        ${refreshing ? renderRefreshOverlay() : ""}
 
         <div class="facturas-table-shell">
           <table class="facturas-table" role="table" aria-label="Listado de facturas">
@@ -2059,9 +2423,32 @@ export function renderCards({ items = [], state = {} } = {}) {
   `;
 }
 
+/* =========================================================
+   FULL TEMPLATE
+========================================================= */
+
+export function renderFacturasTemplate({ items = [], state = {} } = {}) {
+  const data = {
+    items: safeArray(items),
+    state: safeObject(state),
+  };
+
+  return `
+    <section class="facturas-view-root">
+      ${renderHeader(data)}
+      ${renderCards(data)}
+    </section>
+  `;
+}
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
 export default {
   renderHeader,
   renderCards,
   renderLoadingState,
   renderErrorState,
+  renderFacturasTemplate,
 };

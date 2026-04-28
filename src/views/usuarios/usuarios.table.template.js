@@ -2,7 +2,8 @@
    Onion SPA - Usuarios Table Template
    Archivo: src/views/usuarios/usuarios.table.template.js
 
-   FINAL PRODUCTION TEMPLATE · USERS VIEW · CLON 1:1 INCIDENCIAS
+   FINAL PRODUCTION TEMPLATE · USERS VIEW · 10/10
+   ALIGNED WITH INCIDENCIAS / FACTURAS · PRO SAAS PANEL
 
    RESPONSABILIDADES:
    - render del hero/header de usuarios
@@ -13,7 +14,7 @@
    - estado loading visual en refresh / retry / export
    - soporte para payloads backend heterogéneos
    - soporte para envelope backend { ok, count, users }
-   - lenguaje visual alineado 1:1 con incidencias
+   - lenguaje visual alineado con incidencias/facturas
    - versión desktop + cards mobile
    - sin columna rol
    - sin columna equipo
@@ -22,6 +23,8 @@
    - columna ubicación solo ciudad
    - actividad mostrando solo última conexión
    - límite fijo de 5 usuarios por hoja
+   - orden descendente por actualización / actividad / creación
+   - avatar fallback estable por usuario
 
    HARDENING PRO:
    - no depende de imports externos
@@ -54,6 +57,7 @@ function safeText(value, fallback = "") {
 
 function safeNumber(value, fallback = 0) {
   const n = Number(value);
+
   return Number.isFinite(n) ? n : fallback;
 }
 
@@ -221,6 +225,7 @@ function unwrapItemsEnvelope(value) {
   if (Array.isArray(obj.rows)) return obj.rows;
   if (Array.isArray(obj.data)) return obj.data;
   if (Array.isArray(obj.results)) return obj.results;
+  if (Array.isArray(obj.records)) return obj.records;
 
   if (obj.data && typeof obj.data === "object") {
     return unwrapItemsEnvelope(obj.data);
@@ -232,6 +237,10 @@ function unwrapItemsEnvelope(value) {
 
   if (obj.response && typeof obj.response === "object") {
     return unwrapItemsEnvelope(obj.response);
+  }
+
+  if (obj.result && typeof obj.result === "object") {
+    return unwrapItemsEnvelope(obj.result);
   }
 
   return [];
@@ -248,8 +257,10 @@ function getResolvedItems(input = {}) {
     data.usuarios,
     data.data,
     data.results,
+    data.records,
     data.payload,
     data.response,
+    data.result,
 
     state.items,
     state.rows,
@@ -257,8 +268,10 @@ function getResolvedItems(input = {}) {
     state.usuarios,
     state.data,
     state.results,
+    state.records,
     state.payload,
     state.response,
+    state.result,
 
     input,
   ];
@@ -280,6 +293,7 @@ function resolveRemoteCount(input = {}, items = []) {
 
   const payload = safeObject(first(data.payload, state.payload));
   const response = safeObject(first(data.response, state.response));
+  const result = safeObject(first(data.result, state.result));
   const lastResponse = safeObject(first(data.lastResponse, state.lastResponse));
   const stats = safeObject(first(data.stats, state.stats));
 
@@ -302,6 +316,8 @@ function resolveRemoteCount(input = {}, items = []) {
         payload.total,
         response.count,
         response.total,
+        result.count,
+        result.total,
         lastResponse.count,
         lastResponse.total,
 
@@ -334,6 +350,7 @@ function getUsuarioId(item = {}) {
       item.userId,
       item.usuarioId,
       item.id,
+      item._id,
       item.code,
       item.username,
       item.userName,
@@ -342,6 +359,7 @@ function getUsuarioId(item = {}) {
       item?.raw?.userId,
       item?.raw?.usuarioId,
       item?.raw?.id,
+      item?.raw?._id,
       item?.raw?.code,
       item?.raw?.username,
       item?.raw?.userName,
@@ -359,6 +377,7 @@ function getUsuarioCode(item = {}) {
       item.userId,
       item.usuarioId,
       item.id,
+      item._id,
       item.code,
       item.email,
 
@@ -367,6 +386,7 @@ function getUsuarioCode(item = {}) {
       item?.raw?.userId,
       item?.raw?.usuarioId,
       item?.raw?.id,
+      item?.raw?._id,
       item?.raw?.code,
       item?.raw?.email
     ),
@@ -378,6 +398,13 @@ function getUsuarioName(item = {}) {
   const composedName = [
     safeText(first(item.firstName, item.nombre), ""),
     safeText(first(item.lastName, item.apellidos), ""),
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const rawComposedName = [
+    safeText(first(item?.raw?.firstName, item?.raw?.nombre), ""),
+    safeText(first(item?.raw?.lastName, item?.raw?.apellidos), ""),
   ]
     .filter(Boolean)
     .join(" ");
@@ -405,6 +432,7 @@ function getUsuarioName(item = {}) {
       item?.raw?.usuario?.name,
       item?.raw?.profile?.name,
       item?.raw?.profile?.displayName,
+      rawComposedName,
       item?.raw?.username,
       item?.raw?.userName,
       item?.raw?.email
@@ -538,6 +566,8 @@ function getUsuarioInitials(item = {}) {
     first(
       item.userInitials,
       item.initials,
+      item?.raw?.userInitials,
+      item?.raw?.initials,
       getUsuarioName(item),
       getUsuarioCode(item),
       "US"
@@ -679,6 +709,8 @@ function getUpdatedAt(item = {}) {
     item.last_login_at,
     item.lastAccessAt,
     item.ultimoAcceso,
+    item.lastSeenAt,
+    item.lastActivityAt,
     item.createdAt,
     item.created_at,
 
@@ -690,6 +722,8 @@ function getUpdatedAt(item = {}) {
     item?.raw?.last_login_at,
     item?.raw?.lastAccessAt,
     item?.raw?.ultimoAcceso,
+    item?.raw?.lastSeenAt,
+    item?.raw?.lastActivityAt,
     item?.raw?.createdAt,
     item?.raw?.created_at
   );
@@ -714,7 +748,13 @@ function getLastLoginAt(item = {}) {
 }
 
 function getSortTimestamp(item = {}) {
-  const value = first(getUpdatedAt(item), getCreatedAt(item), 0);
+  const value = first(
+    getUpdatedAt(item),
+    getLastLoginAt(item),
+    getCreatedAt(item),
+    0
+  );
+
   const date = new Date(value);
   const time = date.getTime();
 
@@ -971,9 +1011,7 @@ function renderUsuarioRow(item = {}, state = {}) {
   const city = getUsuarioLocation(item);
   const createdAt = formatDate(getCreatedAt(item));
   const lastLoginAtRaw = getLastLoginAt(item);
-  const lastLoginAt = lastLoginAtRaw
-    ? formatLastUpdate(lastLoginAtRaw)
-    : "Sin acceso";
+  const lastLoginAt = lastLoginAtRaw ? formatLastUpdate(lastLoginAtRaw) : "Sin acceso";
 
   const openingUserId = safeText(runtime.openingUserId, "");
   const isOpening = Boolean(openingUserId && openingUserId === userId);
@@ -1001,7 +1039,7 @@ function renderUsuarioRow(item = {}, state = {}) {
       </td>
 
       <td class="usuarios-cell usuarios-cell--email">
-        <span class="usuarios-email-inline">${escapeHtml(email)}</span>
+        <span class="usuarios-email-inline" title="${escapeHtml(email)}">${escapeHtml(email)}</span>
       </td>
 
       <td class="usuarios-cell usuarios-cell--location">
@@ -1030,9 +1068,7 @@ function renderMobileUsuarioCard(item = {}, state = {}) {
   const city = getUsuarioLocation(item);
   const createdAt = formatDate(getCreatedAt(item));
   const lastLoginAtRaw = getLastLoginAt(item);
-  const lastLoginAt = lastLoginAtRaw
-    ? formatLastUpdate(lastLoginAtRaw)
-    : "Sin acceso";
+  const lastLoginAt = lastLoginAtRaw ? formatLastUpdate(lastLoginAtRaw) : "Sin acceso";
 
   const openingUserId = safeText(runtime.openingUserId, "");
   const isOpening = Boolean(openingUserId && openingUserId === userId);
@@ -1154,11 +1190,13 @@ function renderTableLoading(rows = PAGE_SIZE) {
           () => `
             <div class="usuarios-table-loading-row">
               <div class="usuarios-skeleton usuarios-skeleton--avatar"></div>
+
               <div class="usuarios-table-loading-copy">
                 <div class="usuarios-skeleton usuarios-skeleton--xs"></div>
                 <div class="usuarios-skeleton usuarios-skeleton--lg"></div>
                 <div class="usuarios-skeleton usuarios-skeleton--md"></div>
               </div>
+
               <div class="usuarios-skeleton usuarios-skeleton--pill"></div>
               <div class="usuarios-skeleton usuarios-skeleton--date"></div>
               <div class="usuarios-skeleton usuarios-skeleton--email"></div>
@@ -1174,7 +1212,7 @@ function renderTableLoading(rows = PAGE_SIZE) {
 
 function renderRefreshOverlay() {
   return `
-    <div class="usuarios-refresh-overlay" aria-live="polite">
+    <div class="usuarios-refresh-overlay" aria-live="polite" aria-busy="true">
       <div class="usuarios-refresh-card">
         ${renderSpinner("Actualizando usuarios...")}
       </div>
@@ -1192,20 +1230,25 @@ function renderStyles() {
       .usuarios-view-root{
         display:grid;
         gap:18px;
+        min-inline-size:0;
       }
 
-      .usuarios-hero{
+      .usuarios-hero,
+      .usuarios-history{
         position:relative;
         overflow:hidden;
         border-radius:24px;
-        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
+        border:1px solid color-mix(in srgb, var(--panel-border, var(--border-soft, rgba(15,23,42,.08))) 88%, transparent);
         background:
-          linear-gradient(180deg, rgba(255,255,255,.58), rgba(255,255,255,.36)),
-          color-mix(in srgb, var(--panel-bg, #ffffff) 92%, transparent);
+          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.58), rgba(255,255,255,.36))),
+          color-mix(in srgb, var(--panel-bg, #ffffff) 94%, transparent);
         box-shadow:
-          0 10px 30px rgba(15,23,42,.04),
-          0 1px 0 rgba(255,255,255,.55) inset;
-        padding:22px 24px 22px;
+          var(--panel-shadow, 0 10px 30px rgba(15,23,42,.04)),
+          0 1px 0 color-mix(in srgb, var(--text-strong, #fff) 12%, transparent) inset;
+      }
+
+      .usuarios-hero{
+        padding:22px 24px;
       }
 
       .usuarios-hero-top{
@@ -1216,28 +1259,28 @@ function renderStyles() {
       }
 
       .usuarios-hero-copy{
-        min-width:0;
+        min-inline-size:0;
         display:grid;
         gap:10px;
       }
 
       .usuarios-page-title{
         margin:0;
-        max-width:100%;
+        max-inline-size:100%;
+        color:var(--text-strong, #0f172a);
         font-size:clamp(26px, 2.6vw, 42px);
         line-height:.98;
         letter-spacing:-.05em;
         font-weight:780;
-        color:var(--text-strong, #0f172a);
         white-space:nowrap;
       }
 
       .usuarios-page-subtitle{
         margin:0;
-        max-width:860px;
+        max-inline-size:860px;
+        color:var(--text-dim, #6b7280);
         font-size:15px;
         line-height:1.58;
-        color:var(--text-dim, #6b7280);
       }
 
       .usuarios-hero-actions{
@@ -1248,44 +1291,145 @@ function renderStyles() {
         flex-wrap:wrap;
       }
 
-      .usuarios-btn{
-        min-height:44px;
-        padding:0 16px;
-        border-radius:14px;
-        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 92%, transparent);
-        background:rgba(255,255,255,.72);
-        color:var(--text-strong, #111827);
-        font-size:13px;
-        font-weight:680;
-        line-height:1;
-        cursor:pointer;
+      .usuarios-btn,
+      .usuarios-detail-btn,
+      .usuarios-pagination-btn{
+        position:relative;
+        isolation:isolate;
         display:inline-flex;
         align-items:center;
         justify-content:center;
+        gap:8px;
+
+        min-inline-size:0;
+        border:1px solid transparent;
+
+        font:inherit;
+        line-height:1;
+        font-weight:700;
+        white-space:nowrap;
+        text-align:center;
         text-decoration:none;
-        box-shadow:0 4px 14px rgba(15,23,42,.04);
+
+        cursor:pointer;
+        user-select:none;
+        -webkit-tap-highlight-color:transparent;
+
         transition:
-          transform .16s ease,
-          box-shadow .16s ease,
-          border-color .16s ease,
-          background .16s ease,
-          opacity .16s ease;
+          transform var(--duration-fast, .16s) var(--ease-out, ease),
+          box-shadow var(--duration-normal, .18s) var(--ease-standard, ease),
+          background var(--duration-normal, .18s) var(--ease-standard, ease),
+          border-color var(--duration-normal, .18s) var(--ease-standard, ease),
+          color var(--duration-normal, .18s) var(--ease-standard, ease),
+          opacity var(--duration-fast, .16s) var(--ease-standard, ease),
+          filter var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .usuarios-btn::before,
+      .usuarios-detail-btn::before,
+      .usuarios-pagination-btn::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        z-index:-1;
+        border-radius:inherit;
+        background:
+          linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--text-strong, #fff), transparent 94%),
+            transparent 42%
+          );
+        opacity:0;
+        pointer-events:none;
+        transition:opacity var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .usuarios-btn{
+        min-block-size:44px;
+        padding-inline:16px;
+        border-radius:14px;
+        border-color:color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 92%, transparent);
+        background:var(--btn-secondary-bg, rgba(255,255,255,.72));
+        color:var(--btn-secondary-text, var(--text-strong, #111827));
+        font-size:13px;
+        box-shadow:var(--btn-secondary-shadow, 0 4px 14px rgba(15,23,42,.04));
+      }
+
+      .usuarios-btn:hover,
+      .usuarios-detail-btn:hover,
+      .usuarios-pagination-btn:hover{
+        transform:translateY(var(--ui-hover-lift, -1px));
+      }
+
+      .usuarios-btn:hover::before,
+      .usuarios-detail-btn:hover::before,
+      .usuarios-pagination-btn:hover::before{
+        opacity:.64;
+      }
+
+      .usuarios-btn:active,
+      .usuarios-detail-btn:active,
+      .usuarios-pagination-btn:active{
+        transform:translateY(0) scale(var(--ui-active-scale, .985));
+      }
+
+      .usuarios-btn:focus-visible,
+      .usuarios-detail-btn:focus-visible,
+      .usuarios-pagination-btn:focus-visible{
+        outline:none;
+        box-shadow:var(--focus-ring, 0 0 0 4px rgba(124,92,255,.18));
+      }
+
+      .usuarios-btn:disabled,
+      .usuarios-btn[aria-disabled="true"],
+      .usuarios-detail-btn:disabled,
+      .usuarios-detail-btn[aria-disabled="true"],
+      .usuarios-pagination-btn:disabled,
+      .usuarios-pagination-btn[aria-disabled="true"]{
+        opacity:.56;
+        cursor:not-allowed;
+        transform:none;
+        box-shadow:none;
+        filter:none;
+        pointer-events:none;
       }
 
       .usuarios-btn:hover{
-        transform:translateY(-1px);
-        box-shadow:0 8px 18px rgba(15,23,42,.06);
+        border-color:color-mix(in srgb, var(--border-strong, rgba(15,23,42,.14)) 82%, transparent);
+        background:var(--btn-secondary-bg-hover, rgba(255,255,255,.9));
+        box-shadow:var(--shadow-sm, 0 8px 18px rgba(15,23,42,.06));
       }
 
-      .usuarios-btn--primary{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
-        background:linear-gradient(
-          180deg,
-          color-mix(in srgb, var(--accent, #7c5cff) 86%, white 14%),
-          color-mix(in srgb, var(--accent, #7c5cff) 92%, black 8%)
+      .usuarios-btn--primary,
+      .usuarios-btn--create{
+        border-color:var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 22%, rgba(15,23,42,.06)));
+        background:var(
+          --btn-primary-bg,
+          linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--accent, #7c5cff) 86%, white 14%),
+            color-mix(in srgb, var(--accent, #7c5cff) 92%, black 8%)
+          )
         );
-        color:#fff;
-        box-shadow:0 8px 20px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
+        color:var(--btn-primary-text, #fff);
+        box-shadow:var(--btn-primary-shadow, 0 8px 20px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent));
+      }
+
+      .usuarios-btn--primary:hover,
+      .usuarios-btn--create:hover{
+        color:var(--btn-primary-text, #fff);
+        background:var(
+          --btn-primary-bg-hover,
+          linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--accent, #7c5cff) 90%, white 10%),
+            color-mix(in srgb, var(--accent, #7c5cff) 96%, black 4%)
+          )
+        );
+        box-shadow:
+          var(--btn-primary-shadow, 0 8px 20px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent)),
+          var(--shadow-md, 0 12px 24px color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent));
+        filter:brightness(1.02);
       }
 
       .usuarios-btn.is-loading,
@@ -1294,14 +1438,8 @@ function renderStyles() {
         opacity:.9;
       }
 
-      .usuarios-btn:disabled,
-      .usuarios-detail-btn:disabled{
-        pointer-events:none;
-        opacity:.72;
-      }
-
       .usuarios-hero-meta{
-        margin-top:14px;
+        margin-block-start:14px;
         display:flex;
         align-items:center;
         gap:8px;
@@ -1309,12 +1447,12 @@ function renderStyles() {
       }
 
       .usuarios-meta-pill{
-        min-height:30px;
-        padding:0 12px;
-        border-radius:999px;
-        border:1px solid rgba(15,23,42,.06);
-        background:rgba(255,255,255,.52);
-        color:#7a8392;
+        min-block-size:30px;
+        padding-inline:12px;
+        border-radius:var(--radius-pill, 999px);
+        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
+        background:var(--badge-bg, rgba(255,255,255,.52));
+        color:var(--badge-text, #7a8392);
         font-size:11px;
         font-weight:760;
         letter-spacing:.045em;
@@ -1325,7 +1463,7 @@ function renderStyles() {
       }
 
       .usuarios-stats{
-        margin-top:16px;
+        margin-block-start:16px;
         display:grid;
         grid-template-columns:repeat(4, minmax(0, 1fr));
         gap:12px;
@@ -1334,64 +1472,52 @@ function renderStyles() {
       .usuarios-stat-card{
         display:grid;
         gap:8px;
-        min-height:122px;
+        min-block-size:122px;
         padding:16px 18px;
         border-radius:20px;
-        border:1px solid rgba(15,23,42,.06);
+        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 86%, transparent);
         background:
-          linear-gradient(180deg, rgba(255,255,255,.58), rgba(255,255,255,.22)),
-          rgba(255,255,255,.46);
-        box-shadow:0 6px 20px rgba(15,23,42,.03);
+          linear-gradient(180deg, color-mix(in srgb, var(--text-strong, #fff) 6%, transparent), transparent 72%),
+          var(--card-bg, rgba(255,255,255,.46));
+        box-shadow:var(--shadow-xs, 0 6px 20px rgba(15,23,42,.03));
       }
 
       .usuarios-stat-card--total{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, rgba(15,23,42,.06));
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 16%, var(--border-soft, rgba(15,23,42,.08)));
       }
 
       .usuarios-stat-card--active{
-        border-color:color-mix(in srgb, var(--success-strong, #36c690) 18%, rgba(15,23,42,.06));
+        border-color:color-mix(in srgb, var(--success, #36c690) 20%, var(--border-soft, rgba(15,23,42,.08)));
       }
 
       .usuarios-stat-card--pending{
-        border-color:color-mix(in srgb, var(--warning-strong, #ffbc42) 18%, rgba(15,23,42,.06));
+        border-color:color-mix(in srgb, var(--warning, #ffbc42) 20%, var(--border-soft, rgba(15,23,42,.08)));
       }
 
       .usuarios-stat-card--blocked{
-        border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 18%, rgba(15,23,42,.06));
+        border-color:color-mix(in srgb, var(--error, #ff6b6b) 20%, var(--border-soft, rgba(15,23,42,.08)));
       }
 
       .usuarios-stat-label{
+        color:var(--text-muted, #7b8494);
         font-size:11px;
         font-weight:760;
         letter-spacing:.08em;
         text-transform:uppercase;
-        color:#7b8494;
       }
 
       .usuarios-stat-value{
+        color:var(--text-strong, #111827);
         font-size:40px;
         line-height:.92;
         letter-spacing:-.045em;
         font-weight:780;
-        color:var(--text-strong, #111827);
       }
 
       .usuarios-stat-text{
+        color:var(--text-dim, #6b7280);
         font-size:13px;
         line-height:1.45;
-        color:var(--text-dim, #6b7280);
-      }
-
-      .usuarios-history{
-        overflow:hidden;
-        border-radius:24px;
-        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
-        background:
-          linear-gradient(180deg, rgba(255,255,255,.6), rgba(255,255,255,.4)),
-          color-mix(in srgb, var(--panel-bg, #ffffff) 94%, transparent);
-        box-shadow:
-          0 10px 30px rgba(15,23,42,.04),
-          0 1px 0 rgba(255,255,255,.5) inset;
       }
 
       .usuarios-history-head{
@@ -1400,123 +1526,116 @@ function renderStyles() {
         gap:14px;
         align-items:start;
         padding:14px 18px 12px;
-        border-bottom:1px solid rgba(15,23,42,.06);
+        border-block-end:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 82%, transparent);
       }
 
       .usuarios-history-copy{
-        min-width:0;
+        min-inline-size:0;
         display:grid;
         gap:2px;
       }
 
       .usuarios-history-title{
         margin:0;
+        color:var(--text-strong, #111827);
         font-size:16px;
         line-height:1.2;
         font-weight:760;
-        color:var(--text-strong, #111827);
       }
 
       .usuarios-history-subtitle{
         margin:0;
+        color:var(--text-dim, #7b8494);
         font-size:12px;
         line-height:1.4;
-        color:var(--text-dim, #7b8494);
       }
 
       .usuarios-pagination{
         display:flex;
+        justify-content:flex-end;
         gap:8px;
         flex-wrap:wrap;
       }
 
       .usuarios-pagination-btn{
-        min-height:38px;
-        padding:0 14px;
+        min-block-size:38px;
+        padding-inline:14px;
         border-radius:13px;
-        border:1px solid rgba(15,23,42,.06);
-        background:rgba(255,255,255,.66);
-        color:#273142;
+        border-color:color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 86%, transparent);
+        background:var(--btn-secondary-bg, rgba(255,255,255,.66));
+        color:var(--text, #273142);
         font-size:12px;
         font-weight:680;
-        cursor:pointer;
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        text-decoration:none;
-        transition:
-          background .16s ease,
-          border-color .16s ease,
-          opacity .16s ease;
       }
 
       .usuarios-pagination-btn:hover{
-        background:rgba(255,255,255,.9);
-        border-color:rgba(15,23,42,.10);
-      }
-
-      .usuarios-pagination-btn[disabled],
-      .usuarios-pagination-btn[aria-disabled="true"]{
-        opacity:.48;
-        cursor:not-allowed;
-        pointer-events:none;
+        background:var(--btn-secondary-bg-hover, rgba(255,255,255,.9));
+        border-color:color-mix(in srgb, var(--border-strong, rgba(15,23,42,.14)) 80%, transparent);
+        box-shadow:var(--shadow-xs, 0 5px 14px rgba(15,23,42,.05));
       }
 
       .usuarios-table-wrap{
         position:relative;
-        min-height:120px;
+        min-block-size:120px;
       }
 
       .usuarios-table-wrap.is-refreshing .usuarios-table-shell,
       .usuarios-table-wrap.is-refreshing .usuarios-mobile-list{
         opacity:.56;
         filter:blur(.7px);
-        transition:opacity .18s ease, filter .18s ease;
+        transition:
+          opacity var(--duration-fast, .18s) var(--ease-out, ease),
+          filter var(--duration-fast, .18s) var(--ease-out, ease);
       }
 
       .usuarios-table-shell{
-        width:100%;
+        inline-size:100%;
         overflow-x:auto;
         overflow-y:hidden;
-        transition:opacity .18s ease, filter .18s ease;
+        transition:
+          opacity var(--duration-fast, .18s) var(--ease-out, ease),
+          filter var(--duration-fast, .18s) var(--ease-out, ease);
       }
 
       .usuarios-table{
-        width:100%;
+        inline-size:100%;
+        min-inline-size:1120px;
         border-collapse:separate;
         border-spacing:0;
-        min-width:1120px;
+        table-layout:fixed;
       }
 
       .usuarios-table thead th{
         padding:12px 18px;
-        text-align:left;
+        border-block-end:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 82%, transparent);
+        background:var(--table-head-bg, rgba(248,250,252,.62));
+        color:var(--text-muted, #97a0af);
+        text-align:start;
         font-size:11px;
         font-weight:760;
         letter-spacing:.08em;
         text-transform:uppercase;
-        color:#97a0af;
-        background:rgba(248,250,252,.62);
-        border-bottom:1px solid rgba(15,23,42,.06);
         white-space:nowrap;
       }
 
       .usuarios-table tbody td{
         padding:14px 18px;
+        border-block-end:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 76%, transparent);
+        color:var(--text, #344054);
         vertical-align:middle;
-        border-bottom:1px solid rgba(15,23,42,.055);
       }
 
       .usuarios-table tbody tr:last-child td{
-        border-bottom:none;
+        border-block-end:none;
       }
 
       .usuarios-row{
-        transition:background .16s ease;
+        background:transparent;
+        transition:background var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
       .usuarios-row:hover{
-        background:rgba(124,92,255,.018);
+        background:color-mix(in srgb, var(--accent, #7c5cff) 4%, transparent);
       }
 
       .usuarios-main{
@@ -1524,24 +1643,25 @@ function renderStyles() {
         grid-template-columns:44px minmax(0, 1fr);
         gap:12px;
         align-items:center;
-        min-width:0;
+        min-inline-size:0;
       }
 
       .usuarios-avatar{
         position:relative;
-        width:44px;
-        height:44px;
-        border-radius:999px;
-        overflow:hidden;
+        inline-size:44px;
+        block-size:44px;
         flex:0 0 44px;
-        background:var(--avatar-fallback-bg, linear-gradient(135deg, rgba(124,92,255,.12), rgba(139,92,246,.24)));
+        overflow:hidden;
+        border-radius:var(--radius-pill, 999px);
         border:1px solid var(--avatar-fallback-border, rgba(124,92,255,.18));
+        background:var(--avatar-fallback-bg, linear-gradient(135deg, rgba(124,92,255,.12), rgba(139,92,246,.24)));
+        box-shadow:var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.08));
       }
 
       .usuarios-avatar img{
         display:block;
-        width:100%;
-        height:100%;
+        inline-size:100%;
+        block-size:100%;
         object-fit:cover;
       }
 
@@ -1551,13 +1671,14 @@ function renderStyles() {
         display:none;
         align-items:center;
         justify-content:center;
+        color:var(--avatar-fallback-text, #fff);
         font-size:18px;
         font-weight:780;
-        color:var(--avatar-fallback-text, #fff);
         letter-spacing:-.03em;
       }
 
-      .usuarios-avatar[data-fallback="true"] .usuarios-avatar-fallback{
+      .usuarios-avatar[data-fallback="true"] .usuarios-avatar-fallback,
+      .usuarios-avatar--fallback .usuarios-avatar-fallback{
         display:flex;
       }
 
@@ -1565,31 +1686,27 @@ function renderStyles() {
         display:none !important;
       }
 
-      .usuarios-avatar--fallback .usuarios-avatar-fallback{
-        display:flex;
-      }
-
       .usuarios-main-copy{
-        min-width:0;
+        min-inline-size:0;
         display:grid;
         gap:3px;
       }
 
       .usuarios-user-id{
+        color:var(--text-muted, #667084);
         font-size:12px;
         line-height:1.15;
         font-weight:760;
         letter-spacing:.055em;
-        color:#667084;
         text-transform:uppercase;
       }
 
       .usuarios-user-subject{
+        color:var(--text-strong, #111827);
         font-size:15px;
         line-height:1.14;
         font-weight:760;
         letter-spacing:-.025em;
-        color:var(--text-strong, #111827);
         overflow:hidden;
         text-overflow:ellipsis;
         display:-webkit-box;
@@ -1598,18 +1715,18 @@ function renderStyles() {
       }
 
       .usuarios-user-description{
+        color:var(--text-dim, #8a93a3);
         font-size:13px;
         line-height:1.3;
-        color:#8a93a3;
         overflow:hidden;
         text-overflow:ellipsis;
         white-space:nowrap;
       }
 
       .usuarios-chip{
-        min-height:32px;
-        padding:0 12px;
-        border-radius:999px;
+        min-block-size:32px;
+        padding-inline:12px;
+        border-radius:var(--radius-pill, 999px);
         display:inline-flex;
         align-items:center;
         justify-content:center;
@@ -1622,27 +1739,27 @@ function renderStyles() {
       }
 
       .usuarios-chip--active{
-        color:#258a59;
-        background:rgba(54,198,144,.10);
-        border-color:rgba(54,198,144,.22);
+        color:var(--success, #258a59);
+        background:var(--success-soft, rgba(54,198,144,.10));
+        border-color:color-mix(in srgb, var(--success, #36c690) 28%, transparent);
       }
 
       .usuarios-chip--pending{
-        color:#b7791f;
-        background:rgba(255,188,66,.11);
-        border-color:rgba(255,188,66,.22);
+        color:var(--warning, #b7791f);
+        background:var(--warning-soft, rgba(255,188,66,.11));
+        border-color:color-mix(in srgb, var(--warning, #ffbc42) 30%, transparent);
       }
 
       .usuarios-chip--blocked{
-        color:#b42318;
-        background:rgba(255,107,107,.10);
-        border-color:rgba(255,107,107,.22);
+        color:var(--error, #b42318);
+        background:var(--error-soft, rgba(255,107,107,.10));
+        border-color:color-mix(in srgb, var(--error, #ff6b6b) 30%, transparent);
       }
 
       .usuarios-chip--inactive{
-        color:#64748b;
-        background:rgba(100,116,139,.10);
-        border-color:rgba(100,116,139,.18);
+        color:var(--text-muted, #64748b);
+        background:color-mix(in srgb, var(--text-muted, #64748b) 10%, transparent);
+        border-color:color-mix(in srgb, var(--text-muted, #64748b) 18%, transparent);
       }
 
       .usuarios-date-inline,
@@ -1650,59 +1767,46 @@ function renderStyles() {
       .usuarios-location-inline,
       .usuarios-activity-inline{
         display:inline-block;
+        max-inline-size:100%;
+        overflow:hidden;
+        text-overflow:ellipsis;
         white-space:nowrap;
+        color:var(--text, #344054);
         font-size:13px;
         line-height:1.2;
         font-weight:650;
         font-variant-numeric:tabular-nums;
-        color:#344054;
-        max-width:100%;
-        overflow:hidden;
-        text-overflow:ellipsis;
       }
 
       .usuarios-cell--email{
-        max-width:220px;
+        max-inline-size:220px;
       }
 
       .usuarios-cell--location{
-        max-width:150px;
+        max-inline-size:150px;
       }
 
       .usuarios-cell--actions{
-        width:1%;
+        inline-size:1%;
         white-space:nowrap;
       }
 
       .usuarios-detail-btn{
-        width:auto;
-        min-width:0;
-        min-height:34px;
-        padding:0 12px;
+        min-block-size:34px;
+        padding-inline:12px;
         border-radius:12px;
-        border:1px solid rgba(15,23,42,.07);
-        background:rgba(255,255,255,.68);
-        color:#1f2937;
+        border-color:color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
+        background:var(--btn-secondary-bg, rgba(255,255,255,.68));
+        color:var(--btn-secondary-text, #1f2937);
         font-size:13px;
         font-weight:700;
-        line-height:1;
-        cursor:pointer;
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        white-space:nowrap;
         box-shadow:none;
-        transition:
-          border-color .16s ease,
-          background .16s ease,
-          transform .16s ease,
-          opacity .16s ease;
       }
 
       .usuarios-detail-btn:hover{
-        border-color:rgba(15,23,42,.11);
-        background:rgba(255,255,255,.9);
-        transform:translateY(-1px);
+        border-color:color-mix(in srgb, var(--border-strong, rgba(15,23,42,.14)) 82%, transparent);
+        background:var(--btn-secondary-bg-hover, rgba(255,255,255,.9));
+        box-shadow:var(--shadow-xs, 0 6px 16px rgba(15,23,42,.06));
       }
 
       .usuarios-inline-loading{
@@ -1713,19 +1817,19 @@ function renderStyles() {
       }
 
       .usuarios-inline-spinner{
-        width:13px;
-        height:13px;
-        border-radius:999px;
-        border:2px solid rgba(255,255,255,.30);
-        border-top-color:currentColor;
-        animation:usuariosSpin .78s linear infinite;
+        inline-size:13px;
+        block-size:13px;
         flex:0 0 auto;
+        border-radius:var(--radius-pill, 999px);
+        border:2px solid rgba(255,255,255,.30);
+        border-block-start-color:currentColor;
+        animation:usuariosSpin .78s linear infinite;
       }
 
-      .usuarios-btn:not(.usuarios-btn--primary) .usuarios-inline-spinner,
+      .usuarios-btn:not(.usuarios-btn--primary):not(.usuarios-btn--create) .usuarios-inline-spinner,
       .usuarios-detail-btn .usuarios-inline-spinner{
-        border-color:rgba(15,23,42,.16);
-        border-top-color:currentColor;
+        border-color:color-mix(in srgb, currentColor 22%, transparent);
+        border-block-start-color:currentColor;
       }
 
       .usuarios-refresh-overlay{
@@ -1735,23 +1839,24 @@ function renderStyles() {
         display:grid;
         place-items:center;
         pointer-events:none;
-        background:linear-gradient(180deg, rgba(255,255,255,.24), rgba(255,255,255,.12));
+        background:color-mix(in srgb, var(--panel-bg, #fff) 30%, transparent);
         backdrop-filter:blur(2px);
+        -webkit-backdrop-filter:blur(2px);
       }
 
       .usuarios-refresh-card{
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        min-height:42px;
-        padding:0 16px;
+        min-block-size:42px;
+        padding-inline:16px;
         border-radius:14px;
-        border:1px solid rgba(15,23,42,.07);
-        background:rgba(255,255,255,.82);
-        color:#344054;
+        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 86%, transparent);
+        background:var(--popover-bg, rgba(255,255,255,.82));
+        color:var(--text, #344054);
         font-size:13px;
         font-weight:720;
-        box-shadow:0 10px 26px rgba(15,23,42,.08);
+        box-shadow:var(--shadow-md, 0 10px 26px rgba(15,23,42,.08));
       }
 
       .usuarios-table-loading{
@@ -1775,8 +1880,8 @@ function renderStyles() {
       .usuarios-skeleton{
         position:relative;
         overflow:hidden;
-        border-radius:999px;
-        background:rgba(148,163,184,.14);
+        border-radius:var(--radius-pill, 999px);
+        background:color-mix(in srgb, var(--surface-3, #94a3b8) 16%, transparent);
       }
 
       .usuarios-skeleton::after{
@@ -1787,74 +1892,74 @@ function renderStyles() {
         background:linear-gradient(
           90deg,
           transparent,
-          rgba(255,255,255,.55),
+          color-mix(in srgb, var(--text-strong, #fff) 55%, transparent),
           transparent
         );
         animation:usuariosSkeleton 1.2s ease-in-out infinite;
       }
 
       .usuarios-skeleton--avatar{
-        width:44px;
-        height:44px;
-        border-radius:999px;
+        inline-size:44px;
+        block-size:44px;
+        border-radius:var(--radius-pill, 999px);
       }
 
       .usuarios-skeleton--xs{
-        width:120px;
-        height:10px;
+        inline-size:120px;
+        block-size:10px;
       }
 
       .usuarios-skeleton--lg{
-        width:74%;
-        height:14px;
+        inline-size:74%;
+        block-size:14px;
       }
 
       .usuarios-skeleton--md{
-        width:56%;
-        height:12px;
+        inline-size:56%;
+        block-size:12px;
       }
 
       .usuarios-skeleton--pill{
-        width:86px;
-        height:30px;
+        inline-size:86px;
+        block-size:30px;
       }
 
       .usuarios-skeleton--date{
-        width:124px;
-        height:12px;
+        inline-size:124px;
+        block-size:12px;
       }
 
       .usuarios-skeleton--email{
-        width:160px;
-        height:12px;
+        inline-size:160px;
+        block-size:12px;
       }
 
       .usuarios-skeleton--btn{
-        width:98px;
-        height:34px;
+        inline-size:98px;
+        block-size:34px;
       }
 
       .usuarios-empty{
         display:grid;
         justify-items:center;
-        gap:8px;
+        gap:10px;
         padding:44px 20px 48px;
         text-align:center;
       }
 
       .usuarios-empty-title{
         margin:0;
+        color:var(--text-strong, #111827);
         font-size:18px;
         font-weight:760;
-        color:var(--text-strong, #111827);
       }
 
       .usuarios-empty-text{
         margin:0;
-        max-width:520px;
+        max-inline-size:520px;
+        color:var(--text-dim, #6b7280);
         font-size:13px;
         line-height:1.55;
-        color:var(--text-dim, #6b7280);
       }
 
       .usuarios-mobile-list{
@@ -1868,24 +1973,25 @@ function renderStyles() {
         gap:12px;
         padding:16px;
         border-radius:18px;
-        border:1px solid rgba(15,23,42,.06);
+        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 86%, transparent);
         background:
-          linear-gradient(180deg, rgba(255,255,255,.58), rgba(255,255,255,.22)),
-          rgba(255,255,255,.46);
+          linear-gradient(180deg, color-mix(in srgb, var(--text-strong, #fff) 6%, transparent), transparent 72%),
+          var(--card-bg, rgba(255,255,255,.46));
+        box-shadow:var(--shadow-xs, 0 5px 16px rgba(15,23,42,.03));
       }
 
       .usuarios-mobile-top{
         display:flex;
-        gap:12px;
         align-items:flex-start;
         justify-content:space-between;
+        gap:12px;
       }
 
       .usuarios-mobile-main{
         display:flex;
         gap:12px;
-        min-width:0;
-        flex:1;
+        min-inline-size:0;
+        flex:1 1 auto;
       }
 
       .usuarios-mobile-meta{
@@ -1899,13 +2005,13 @@ function renderStyles() {
         gap:4px;
         padding:12px;
         border-radius:14px;
-        border:1px solid rgba(15,23,42,.06);
-        background:rgba(255,255,255,.52);
+        border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 84%, transparent);
+        background:var(--surface-glass, rgba(255,255,255,.52));
       }
 
       .usuarios-mobile-meta-label{
+        color:var(--text-muted, #97a0af);
         font-size:11px;
-        color:#97a0af;
         font-weight:760;
         letter-spacing:.05em;
         text-transform:uppercase;
@@ -1926,11 +2032,15 @@ function renderStyles() {
       }
 
       @keyframes usuariosSpin{
-        to{ transform:rotate(360deg); }
+        to{
+          transform:rotate(360deg);
+        }
       }
 
       @keyframes usuariosSkeleton{
-        to{ transform:translateX(100%); }
+        to{
+          transform:translateX(100%);
+        }
       }
 
       [data-theme="light"] .usuarios-hero,
@@ -1955,33 +2065,16 @@ function renderStyles() {
         background:
           radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 7%, transparent), transparent 34%),
           linear-gradient(180deg, var(--surface-2, #171922), var(--surface-1, #10121a));
-        border-color:var(--border-soft, rgba(255,255,255,.08));
+        border-color:var(--panel-border, rgba(255,255,255,.08));
       }
 
-      [data-theme="dark"] .usuarios-page-title,
-      [data-theme="dark"] .usuarios-history-title,
-      [data-theme="dark"] .usuarios-stat-value,
-      [data-theme="dark"] .usuarios-user-subject,
-      [data-theme="dark"] .usuarios-empty-title,
-      [data-theme="dark"] .usuarios-mobile-meta-value{
-        color:var(--text-strong, #f8fafc);
-      }
-
-      [data-theme="dark"] .usuarios-page-subtitle,
-      [data-theme="dark"] .usuarios-history-subtitle,
-      [data-theme="dark"] .usuarios-stat-text,
-      [data-theme="dark"] .usuarios-user-description,
-      [data-theme="dark"] .usuarios-empty-text{
-        color:var(--text-dim, #94a3b8);
-      }
-
-      [data-theme="dark"] .usuarios-btn,
-      [data-theme="dark"] .usuarios-pagination-btn,
-      [data-theme="dark"] .usuarios-detail-btn,
-      [data-theme="dark"] .usuarios-refresh-card{
-        background:rgba(255,255,255,.06);
-        border-color:rgba(255,255,255,.08);
-        color:var(--text-strong, #f8fafc);
+      [data-theme="dark"] .usuarios-stat-card,
+      [data-theme="dark"] .usuarios-mobile-card,
+      [data-theme="dark"] .usuarios-mobile-meta-card{
+        background:
+          linear-gradient(180deg, rgba(255,255,255,.045), transparent 64%),
+          rgba(255,255,255,.035);
+        border-color:rgba(255,255,255,.07);
       }
 
       [data-theme="dark"] .usuarios-table thead th{
@@ -1993,6 +2086,28 @@ function renderStyles() {
         border-bottom-color:rgba(255,255,255,.055);
       }
 
+      [data-theme="dark"] .usuarios-btn,
+      [data-theme="dark"] .usuarios-pagination-btn,
+      [data-theme="dark"] .usuarios-detail-btn,
+      [data-theme="dark"] .usuarios-refresh-card{
+        background:rgba(255,255,255,.06);
+        border-color:rgba(255,255,255,.08);
+        color:var(--text-strong, #f8fafc);
+      }
+
+      [data-theme="dark"] .usuarios-btn:hover,
+      [data-theme="dark"] .usuarios-pagination-btn:hover,
+      [data-theme="dark"] .usuarios-detail-btn:hover{
+        background:rgba(255,255,255,.09);
+        border-color:rgba(255,255,255,.12);
+      }
+
+      [data-theme="dark"] .usuarios-btn--primary,
+      [data-theme="dark"] .usuarios-btn--create{
+        background:var(--btn-primary-bg, var(--accent, #7c5cff));
+        color:var(--btn-primary-text, #fff);
+      }
+
       [data-theme="dark"] .usuarios-date-inline,
       [data-theme="dark"] .usuarios-email-inline,
       [data-theme="dark"] .usuarios-location-inline,
@@ -2000,13 +2115,7 @@ function renderStyles() {
         color:var(--text-soft, #cbd5e1);
       }
 
-      [data-theme="dark"] .usuarios-mobile-card,
-      [data-theme="dark"] .usuarios-mobile-meta-card{
-        background:rgba(255,255,255,.04);
-        border-color:rgba(255,255,255,.07);
-      }
-
-      @media (max-width: 1240px){
+      @media (max-width:1240px){
         .usuarios-page-title{
           font-size:clamp(24px, 2.4vw, 36px);
         }
@@ -2016,7 +2125,7 @@ function renderStyles() {
         }
       }
 
-      @media (max-width: 1180px){
+      @media (max-width:1180px){
         .usuarios-hero{
           padding:20px;
         }
@@ -2034,7 +2143,7 @@ function renderStyles() {
         }
       }
 
-      @media (max-width: 980px){
+      @media (max-width:980px){
         .usuarios-desktop-table{
           display:none;
         }
@@ -2044,7 +2153,7 @@ function renderStyles() {
         }
       }
 
-      @media (max-width: 760px){
+      @media (max-width:760px){
         .usuarios-view-root{
           gap:16px;
         }
@@ -2082,7 +2191,7 @@ function renderStyles() {
         }
 
         .usuarios-hero-actions{
-          width:100%;
+          inline-size:100%;
         }
 
         .usuarios-btn{
@@ -2091,6 +2200,26 @@ function renderStyles() {
 
         .usuarios-mobile-meta{
           grid-template-columns:1fr;
+        }
+      }
+
+      @media (prefers-reduced-motion:reduce){
+        .usuarios-btn,
+        .usuarios-detail-btn,
+        .usuarios-pagination-btn,
+        .usuarios-row,
+        .usuarios-table-wrap.is-refreshing .usuarios-table-shell,
+        .usuarios-table-wrap.is-refreshing .usuarios-mobile-list,
+        .usuarios-inline-spinner,
+        .usuarios-skeleton::after{
+          transition:none !important;
+          animation:none !important;
+        }
+
+        .usuarios-btn:hover,
+        .usuarios-detail-btn:hover,
+        .usuarios-pagination-btn:hover{
+          transform:none !important;
         }
       }
     </style>
@@ -2105,6 +2234,7 @@ export function renderHeader(input = {}) {
   const data = safeObject(input);
   const items = getResolvedItems(data);
   const state = safeObject(data.state);
+
   const stats = computeStats(items);
   const remoteCount = resolveRemoteCount(data, items);
 
@@ -2118,8 +2248,8 @@ export function renderHeader(input = {}) {
   );
 
   const title = safeText(
-    first(data.title, "Usuarios y accesos"),
-    "Usuarios y accesos"
+    first(data.title, "Centro de control de usuarios"),
+    "Centro de control de usuarios"
   );
 
   const subtitle = safeText(
@@ -2133,6 +2263,7 @@ export function renderHeader(input = {}) {
   const creating = Boolean(state.creating);
   const refreshing = Boolean(state.refreshing);
   const loading = Boolean(state.loading);
+  const exporting = Boolean(state.exporting);
 
   return `
     ${renderStyles()}
@@ -2145,6 +2276,21 @@ export function renderHeader(input = {}) {
         </div>
 
         <div class="usuarios-hero-actions">
+          <button
+            type="button"
+            id="usuarios-export-btn"
+            class="usuarios-btn${exporting ? " is-loading" : ""}"
+            data-usuarios-action="export"
+            data-action="export-csv"
+            ${loading || refreshing || exporting || !items.length ? 'disabled aria-disabled="true"' : ""}
+          >
+            ${
+              exporting
+                ? renderSpinner("Exportando...")
+                : '<span class="usuarios-btn-text">Exportar CSV</span>'
+            }
+          </button>
+
           <button
             type="button"
             id="usuarios-refresh-btn"
@@ -2162,19 +2308,8 @@ export function renderHeader(input = {}) {
 
           <button
             type="button"
-            id="usuarios-export-btn"
-            class="usuarios-btn"
-            data-usuarios-action="export"
-            data-action="export-csv"
-            ${loading || refreshing || !items.length ? "disabled" : ""}
-          >
-            <span class="usuarios-btn-text">Exportar historial</span>
-          </button>
-
-          <button
-            type="button"
             id="usuarios-create-btn"
-            class="usuarios-btn usuarios-btn--primary${creating ? " is-loading" : ""}"
+            class="usuarios-btn usuarios-btn--primary usuarios-btn--create${creating ? " is-loading" : ""}"
             data-usuarios-action="create"
             data-action="create-user"
             ${creating ? 'disabled aria-busy="true"' : ""}
@@ -2237,19 +2372,51 @@ export function renderHeader(input = {}) {
    TABLE
 ========================================================= */
 
+function renderPagination(pagination = {}, state = {}) {
+  const runtime = safeObject(state);
+  const loading = Boolean(runtime.loading);
+  const refreshing = Boolean(runtime.refreshing);
+
+  return `
+    <div class="usuarios-pagination" aria-label="Paginación de usuarios">
+      <button
+        type="button"
+        class="usuarios-pagination-btn"
+        data-usuarios-action="prev-page"
+        data-action="prev-page"
+        data-page="${escapeHtml(String(Math.max(1, pagination.currentPage - 1)))}"
+        ${!pagination.hasPrev || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
+      >
+        Anterior
+      </button>
+
+      <button
+        type="button"
+        class="usuarios-pagination-btn"
+        data-usuarios-action="next-page"
+        data-action="next-page"
+        data-page="${escapeHtml(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
+        ${!pagination.hasNext || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
+      >
+        Siguiente
+      </button>
+    </div>
+  `;
+}
+
 function renderDesktopTable(items = [], state = {}) {
   return `
     <div class="usuarios-desktop-table">
       <div class="usuarios-table-shell">
         <table class="usuarios-table" role="table" aria-label="Listado de usuarios">
           <colgroup>
-            <col style="width:36%;">
+            <col style="width:34%;">
             <col style="width:11%;">
-            <col style="width:13%;">
-            <col style="width:18%;">
-            <col style="width:10%;">
             <col style="width:12%;">
-            <col style="width:7%;">
+            <col style="width:20%;">
+            <col style="width:10%;">
+            <col style="width:13%;">
+            <col style="width:9%;">
           </colgroup>
 
           <thead>
@@ -2316,29 +2483,7 @@ export function renderTable(input = {}) {
           </p>
         </div>
 
-        <div class="usuarios-pagination">
-          <button
-            type="button"
-            class="usuarios-pagination-btn"
-            data-usuarios-action="prev-page"
-            data-action="prev-page"
-            data-page="${escapeHtml(String(Math.max(1, pagination.currentPage - 1)))}"
-            ${!pagination.hasPrev || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
-          >
-            Anterior
-          </button>
-
-          <button
-            type="button"
-            class="usuarios-pagination-btn"
-            data-usuarios-action="next-page"
-            data-action="next-page"
-            data-page="${escapeHtml(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
-            ${!pagination.hasNext || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
-          >
-            Siguiente
-          </button>
-        </div>
+        ${renderPagination(pagination, state)}
       </div>
 
       ${

@@ -12,6 +12,7 @@
    - evitar doble sync de sesión post-login
    - evitar doble submit aunque la vista se monte dos veces
    - evitar doble toast de éxito
+   - evitar toast loading huérfano si Router desmonta login durante Auth.login
    - reducir parpadeos al salir de /login
    - activar / limpiar modo auth-screen del body
    - mantener cleanup de listeners
@@ -27,6 +28,7 @@
    - El auth-screen se limpia al salir realmente de /login.
    - El submit queda protegido a nivel global contra doble binding.
    - El toast success queda deduplicado.
+   - El toast loading se cierra aunque mounted=false.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -396,6 +398,46 @@ function safeToastCall(toast, method, ...args) {
   return null;
 }
 
+function dismissLoginLoadingToast(toast, loadingToastId = null) {
+  /*
+    CRÍTICO:
+    El toast loading puede quedarse vivo si Router desmonta /login
+    mientras Auth.login() sigue pendiente. Lo cerramos siempre antes de
+    cualquier return por mounted=false, catch, finally y destroy.
+  */
+  try {
+    if (
+      loadingToastId !== null &&
+      loadingToastId !== undefined &&
+      loadingToastId !== ""
+    ) {
+      safeToastCall(
+        toast,
+        "dismiss",
+        loadingToastId
+      );
+    }
+  } catch {}
+
+  /*
+    Fallback tolerante:
+    si Toast.loading no devuelve id estable, intentamos dismiss global.
+  */
+  try {
+    safeToastCall(
+      toast,
+      "dismiss"
+    );
+  } catch {}
+
+  try {
+    safeToastCall(
+      toast,
+      "clearLoading"
+    );
+  } catch {}
+}
+
 function safeLog(...args) {
   try {
     AppCore?.utils?.log?.(
@@ -695,6 +737,7 @@ function renderLoginView(container, deps = {}) {
   let isSubmitting = false;
   let isLeavingLogin = false;
   let cleanupAfterNavigation = null;
+  let loadingToastId = null;
 
   enableAuthScreenMode();
 
@@ -764,6 +807,13 @@ function renderLoginView(container, deps = {}) {
     return {
       destroy() {
         mounted = false;
+
+        dismissLoginLoadingToast(
+          toast,
+          loadingToastId
+        );
+
+        loadingToastId = null;
 
         setFormSubmittingFlag(
           refs,
@@ -851,8 +901,6 @@ function renderLoginView(container, deps = {}) {
       payload
     );
 
-    let loadingToastId = null;
-
     try {
       isSubmitting = true;
 
@@ -910,15 +958,21 @@ function renderLoginView(container, deps = {}) {
           rawResult
         );
 
+      /*
+        CRÍTICO:
+        cerrar el loading ANTES del guard mounted.
+        Si Router ya desmontó login, igualmente hay que matar el toast.
+      */
+      dismissLoginLoadingToast(
+        toast,
+        loadingToastId
+      );
+
+      loadingToastId = null;
+
       if (!mounted) {
         return;
       }
-
-      safeToastCall(
-        toast,
-        "dismiss",
-        loadingToastId
-      );
 
       if (
         isTwoFaResult(auth)
@@ -999,11 +1053,12 @@ function renderLoginView(container, deps = {}) {
         );
       }
     } catch (error) {
-      safeToastCall(
+      dismissLoginLoadingToast(
         toast,
-        "dismiss",
         loadingToastId
       );
+
+      loadingToastId = null;
 
       const message =
         resolveAuthErrorMessage(error);
@@ -1034,6 +1089,15 @@ function renderLoginView(container, deps = {}) {
         error
       );
     } finally {
+      if (loadingToastId !== null) {
+        dismissLoginLoadingToast(
+          toast,
+          loadingToastId
+        );
+
+        loadingToastId = null;
+      }
+
       if (!isLeavingLogin) {
         isSubmitting = false;
 
@@ -1088,6 +1152,13 @@ function renderLoginView(container, deps = {}) {
       mounted = false;
       isSubmitting = false;
       isLeavingLogin = false;
+
+      dismissLoginLoadingToast(
+        toast,
+        loadingToastId
+      );
+
+      loadingToastId = null;
 
       setFormSubmittingFlag(
         refs,

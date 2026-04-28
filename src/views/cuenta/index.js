@@ -1,5 +1,5 @@
 /* =========================================================
-   Onion SPA - Cuenta
+   Onion SPA - Cuenta View
    Archivo: src/views/cuenta/index.js
 
    FINAL PRO SYSTEM · ENTRYPOINT REAL · 10/10
@@ -10,7 +10,7 @@
    - compatibilidad router legacy y moderna
    - puente entre router y cuentaView.js
    - init / reload / destroy seguros
-   - exponer modal / helpers públicos
+   - exponer save / theme / language / password / modal / helpers públicos
    - evitar duplicidad de lógica en index.js
 
    HARDENING PRO:
@@ -20,17 +20,16 @@
    - compatible con imports antiguos
    - lazy wrappers seguros
    - no rompe si un submódulo no existe
+   - bridge global opcional window.OnionCuenta
 ========================================================= */
 
 import CuentaView from "./cuentaView.js";
-import CuentaModal from "./cuenta.modal.js";
 
 /* =========================================================
    CORE EXPORTS
 ========================================================= */
 
 export { CuentaView };
-export { CuentaModal };
 
 export default CuentaView;
 
@@ -76,11 +75,17 @@ export const saveCuenta = (...args) =>
 export const updateTheme = (...args) =>
   safeCall(CuentaView, "updateTheme", args);
 
+export const updateLanguage = (...args) =>
+  safeCall(CuentaView, "updateLanguage", args);
+
 export const refreshCuenta = (...args) =>
   safeCall(CuentaView, "refreshCuenta", args);
 
-export const openModalFromView = (...args) =>
-  safeCall(CuentaView, "openModal", args);
+export const changePassword = (...args) =>
+  safeCall(CuentaView, "changePassword", args);
+
+export const openModal = (...args) =>
+  safeCall(CuentaView, "openModal", args, false);
 
 /* =========================================================
    DATA API
@@ -92,21 +97,34 @@ export const getItem = (...args) =>
 export const getSnapshot = (...args) =>
   safeCall(CuentaView, "getSnapshot", args, null);
 
+export const getState = (...args) =>
+  safeCall(CuentaView, "getState", args, null);
+
 /* =========================================================
-   MODAL API
+   ALIASES API
+   Compatibilidad semántica con otros módulos / router legacy
 ========================================================= */
 
-export const openModal = (...args) =>
-  safeCall(CuentaModal, "open", args);
+export const save = (...args) =>
+  saveCuenta(...args);
 
-export const closeModal = (...args) =>
-  safeCall(CuentaModal, "close", args);
+export const refresh = (...args) =>
+  refreshCuenta(...args);
 
-export const updateModal = (...args) =>
-  safeCall(CuentaModal, "update", args);
+export const updateCuentaTheme = (...args) =>
+  updateTheme(...args);
 
-export const getModalState = (...args) =>
-  safeCall(CuentaModal, "getState", args, null);
+export const updateCuentaLanguage = (...args) =>
+  updateLanguage(...args);
+
+export const openCuentaModal = (...args) =>
+  openModal(...args);
+
+export const getCuenta = (...args) =>
+  getItem(...args);
+
+export const getCuentaSnapshot = (...args) =>
+  getSnapshot(...args);
 
 /* =========================================================
    FLAGS
@@ -119,7 +137,7 @@ export const isDestroyed = () =>
   Boolean(CuentaView?.destroyed);
 
 /* =========================================================
-   LEGACY GLOBAL BRIDGE (OPTIONAL)
+   LEGACY GLOBAL BRIDGE OPTIONAL
 ========================================================= */
 
 try {
@@ -131,17 +149,32 @@ try {
       destroy,
 
       saveCuenta,
+      save,
+
       updateTheme,
+      updateCuentaTheme,
+
+      updateLanguage,
+      updateCuentaLanguage,
+
       refreshCuenta,
+      refresh,
+
+      changePassword,
+
+      openModal,
+      openCuentaModal,
 
       getItem,
-      getSnapshot,
+      getCuenta,
 
-      openModalFromView,
-      openModal,
-      closeModal,
-      updateModal,
-      getModalState,
+      getSnapshot,
+      getCuentaSnapshot,
+
+      getState,
+
+      isInitialized,
+      isDestroyed,
     };
   }
 } catch {}

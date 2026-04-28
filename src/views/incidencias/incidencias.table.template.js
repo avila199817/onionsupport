@@ -13,12 +13,14 @@
    - estado loading visual en refresh / retry / export
    - título compacto y responsive
    - fechas siempre en una sola línea
-   - botón "Ver detalle" ajustado al ancho del texto
+   - botón "Ver detalle" mantiene tamaño fijo durante loading
+   - loader centrado dentro del botón sin cambiar layout
    - loading de tabla suave en carga / refresh
    - acciones compatibles con data-incidencias-action y data-action
    - pintar importe total de facturas asociadas al ticket
    - avatares fallback con colores intensos pseudo-RNG estables
-   - dark/light mode 100% conectado a variables.css
+   - dark/light mode 100% conectado a variables.css + ui.css
+   - chips de estado alineados con tokens globales y contraste real
 
    HARDENING PRO:
    - no depende de imports externos
@@ -1071,7 +1073,7 @@ function renderStyles() {
       }
 
       .incidencias-btn:hover{
-        transform:translateY(-1px);
+        transform:translateY(var(--ui-hover-lift, -1px));
         background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
         box-shadow:var(--shadow-md, 0 14px 30px rgba(0,0,0,.22));
       }
@@ -1440,30 +1442,45 @@ function renderStyles() {
         text-transform:uppercase;
         white-space:nowrap;
         border:1px solid transparent;
+        box-shadow:var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
       }
 
       .incidencias-chip--pending{
         color:var(--warning, #f59e0b);
-        background:var(--warning-bg, rgba(245,158,11,.10));
+        background:color-mix(in srgb, var(--warning-bg, rgba(245,158,11,.10)) 78%, var(--surface-active, transparent));
         border-color:var(--border-warning, rgba(245,158,11,.30));
       }
 
       .incidencias-chip--open{
-        color:var(--accent-hover, var(--accent, #3f3f46));
-        background:var(--accent-soft, rgba(63,63,70,.18));
-        border-color:var(--accent-border, rgba(113,113,122,.28));
+        color:var(--text-strong, #ffffff);
+        background:
+          linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--text-strong, #ffffff), transparent 94%),
+            transparent 48%
+          ),
+          color-mix(
+            in srgb,
+            var(--accent, #3f3f46) 34%,
+            var(--surface-active, rgba(255,255,255,.066)) 66%
+          );
+        border-color:color-mix(
+          in srgb,
+          var(--accent, #3f3f46) 54%,
+          var(--border-strong, rgba(255,255,255,.12)) 46%
+        );
       }
 
       .incidencias-chip--progress{
         color:var(--info, #94a3b8);
-        background:var(--info-bg, rgba(148,163,184,.10));
+        background:color-mix(in srgb, var(--info-bg, rgba(148,163,184,.10)) 78%, var(--surface-active, transparent));
         border-color:var(--border-info, rgba(148,163,184,.28));
       }
 
       .incidencias-chip--resolved,
       .incidencias-chip--closed{
         color:var(--success, #22c55e);
-        background:var(--success-bg, rgba(34,197,94,.10));
+        background:color-mix(in srgb, var(--success-bg, rgba(34,197,94,.10)) 78%, var(--surface-active, transparent));
         border-color:var(--border-success, rgba(34,197,94,.30));
       }
 
@@ -1516,8 +1533,9 @@ function renderStyles() {
       }
 
       .incidencias-detail-btn{
-        width:auto;
-        min-width:calc(96px * var(--ui-scale, 1));
+        inline-size:calc(104px * var(--ui-scale, 1));
+        min-inline-size:calc(104px * var(--ui-scale, 1));
+        max-inline-size:calc(104px * var(--ui-scale, 1));
         min-height:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
         height:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
         padding:0 var(--space-sm, 12px);
@@ -1544,13 +1562,13 @@ function renderStyles() {
       .incidencias-detail-btn:hover{
         border-color:var(--border-strong, rgba(255,255,255,.12));
         background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
-        transform:translateY(-1px);
+        transform:translateY(var(--ui-hover-lift, -1px));
       }
 
       .incidencias-detail-btn.is-loading{
-        min-width:calc(96px * var(--ui-scale, 1));
-        width:auto;
-        max-width:none;
+        inline-size:calc(104px * var(--ui-scale, 1));
+        min-inline-size:calc(104px * var(--ui-scale, 1));
+        max-inline-size:calc(104px * var(--ui-scale, 1));
         height:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
         min-height:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
         padding:0 var(--space-sm, 12px);
@@ -1609,6 +1627,7 @@ function renderStyles() {
         pointer-events:none;
         background:var(--backdrop-bg, rgba(10,10,12,.28));
         backdrop-filter:var(--blur-sm, blur(8px));
+        -webkit-backdrop-filter:var(--blur-sm, blur(8px));
       }
 
       .incidencias-refresh-card{
@@ -1698,7 +1717,7 @@ function renderStyles() {
       }
 
       .incidencias-skeleton--btn{
-        width:96px;
+        width:calc(104px * var(--ui-scale, 1));
         height:var(--btn-height-sm, 34px);
         border-radius:var(--radius-md, 12px);
       }
@@ -1749,6 +1768,31 @@ function renderStyles() {
         background:
           var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.82), rgba(255,255,255,0) 34%)),
           var(--card-bg, var(--surface-elevated, #ffffff));
+      }
+
+      [data-theme="light"] .incidencias-chip--open{
+        color:var(--accent-active, #533cb6);
+        background:var(--accent-soft, rgba(111,89,217,.125));
+        border-color:var(--accent-border-strong, rgba(111,89,217,.36));
+      }
+
+      [data-theme="light"] .incidencias-chip--pending{
+        color:var(--warning-hover, #9c6110);
+        background:var(--warning-soft, rgba(192,122,22,.12));
+        border-color:var(--border-warning, rgba(217,119,6,.245));
+      }
+
+      [data-theme="light"] .incidencias-chip--progress{
+        color:var(--info-hover, #2f6d8d);
+        background:var(--info-soft, rgba(59,130,166,.12));
+        border-color:var(--border-info, rgba(59,130,166,.245));
+      }
+
+      [data-theme="light"] .incidencias-chip--resolved,
+      [data-theme="light"] .incidencias-chip--closed{
+        color:var(--success-hover, #157a4f);
+        background:var(--success-soft, rgba(31,157,104,.12));
+        border-color:var(--border-success, rgba(22,163,74,.245));
       }
 
       @media (max-width: 1240px){

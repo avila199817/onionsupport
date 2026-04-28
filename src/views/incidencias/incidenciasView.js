@@ -2,7 +2,7 @@
    Onion SPA - Incidencias View
    Archivo: src/views/incidencias/incidenciasView.js
 
-   CLIENT EXPERIENCE MODE · VIEW REAL · HARDENED · FINAL 10/10
+   CLIENT EXPERIENCE MODE · VIEW REAL · EXTREME GOD MODE
 
    RESPONSABILIDADES:
    - punto de entrada real de la vista de incidencias
@@ -18,9 +18,10 @@
    - permitir reload con rerender seguro
    - coordinar acciones y modales sin mezclar responsabilidades
    - preservar importes de facturas asociadas para tabla
+   - preservar numeroFacturaLegal para tabla/modal
    - cargar el modal de detalle por import directo
 
-   HARDENING PRO:
+   HARDENING EXTREME:
    - render inicial inmediato
    - bind inmediato tras primer render para evitar pérdida de clicks
    - cola segura para crear incidencia antes de app ready
@@ -31,10 +32,14 @@
    - fallback elegante si los modales aún no existen
    - bloqueo de acciones antes de app ready sin perder intención del usuario
    - anti spam click en apertura rápida
+   - anti spam apertura rápida de tickets
    - compatibilidad con template nuevo data-incidencias-action
+   - compatibilidad con data-action legacy
    - template controlado por state real
    - blindaje contra normalizadores que descartan total/importe/linkedInvoices
+   - blindaje contra normalizadores que descartan numeroFacturaLegal
    - bridge fuerte con incidencias.modal.js
+   - soporte backend aliases: tickets/items/data/incidencias/results
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -97,8 +102,14 @@ export const IncidenciasView = (() => {
   ========================================================= */
 
   const SCOPE = "view:incidencias";
-  const PAGE_SIZE = Number(MODEL_DEFAULT_PAGE_SIZE || STATE_DEFAULT_PAGE_SIZE || 5) || 5;
+
+  const PAGE_SIZE =
+    Number(MODEL_DEFAULT_PAGE_SIZE || STATE_DEFAULT_PAGE_SIZE || 5) || 5;
+
   const CREATE_CLICK_THROTTLE_MS = 450;
+  const OPEN_TICKET_THROTTLE_MS = 350;
+
+  const DEFAULT_CURRENCY = "EUR";
 
   /* =========================================================
      LOCAL RUNTIME
@@ -106,12 +117,20 @@ export const IncidenciasView = (() => {
 
   let initialized = false;
   let destroyed = false;
+
   let inflightInit = null;
   let inflightReload = null;
+  let queuedReloadOptions = null;
+
   let bindingsCleanup = null;
+
   let renderToken = 0;
+
   let pendingCreateRequest = false;
   let lastCreateClickAt = 0;
+  let lastOpenTicketClickAt = 0;
+
+  let lastApiPayload = null;
 
   /* =========================================================
      SAFE HELPERS
@@ -126,6 +145,10 @@ export const IncidenciasView = (() => {
   function safeWarn(...args) {
     try {
       AppCore?.utils?.warn?.("[IncidenciasView]", ...args);
+    } catch {}
+
+    try {
+      console.warn("[IncidenciasView]", ...args);
     } catch {}
   }
 
@@ -153,9 +176,16 @@ export const IncidenciasView = (() => {
   function safeText(value, fallback = "") {
     if (value === null || value === undefined) return fallback;
 
-    const text = String(value).trim();
+    const text = String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
     return text || fallback;
+  }
+
+  function safeLower(value, fallback = "") {
+    return safeText(value, fallback).toLowerCase();
   }
 
   function safeNumber(value, fallback = 0) {
@@ -194,6 +224,17 @@ export const IncidenciasView = (() => {
     );
   }
 
+  function uniqueStrings(values = []) {
+    return [
+      ...new Set(
+        safeArray(values)
+          .flatMap((value) => (Array.isArray(value) ? value : [value]))
+          .map((value) => safeText(value, ""))
+          .filter(Boolean)
+      ),
+    ];
+  }
+
   function getStableTicketId(item = {}) {
     return safeText(
       first(
@@ -202,18 +243,44 @@ export const IncidenciasView = (() => {
         item?.code,
         item?.numero,
         item?.ticketCode,
+        item?.incidenciaId,
+
         item?.raw?.ticketId,
         item?.raw?.id,
         item?.raw?.code,
         item?.raw?.numero,
-        item?.raw?.ticketCode
+        item?.raw?.ticketCode,
+        item?.raw?.incidenciaId
       ),
       ""
     );
   }
 
+  function normalizeMoney(value, fallback = null) {
+    if (value === null || value === undefined || value === "") {
+      return fallback;
+    }
+
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : fallback;
+    }
+
+    const normalized = String(value)
+      .replace(/\s+/g, "")
+      .replace(/\./g, "")
+      .replace(",", ".");
+
+    const amount = Number(normalized);
+
+    if (!Number.isFinite(amount)) {
+      return fallback;
+    }
+
+    return amount;
+  }
+
   function roundMoney(value) {
-    const amount = Number(value);
+    const amount = normalizeMoney(value, null);
 
     if (!Number.isFinite(amount)) {
       return null;
@@ -289,6 +356,11 @@ export const IncidenciasView = (() => {
 
     try {
       AppCore?.ui?.toast?.[type]?.(text);
+      return;
+    } catch {}
+
+    try {
+      AppCore?.ui?.toast?.show?.(text, type);
     } catch {}
   }
 
@@ -307,20 +379,524 @@ export const IncidenciasView = (() => {
   }
 
   /* =========================================================
-     INVOICE AMOUNT PRESERVER
-     Evita que normalizeIncidenciasCollection pierda:
-     - total / amount / importe
-     - facturasTotal / invoicesTotal
-     - linkedInvoices.total
-     - meta.invoicesTotal
+     BACKEND PAYLOAD HELPERS
   ========================================================= */
+
+  function extractItemsFromPayload(payload = null) {
+    if (Array.isArray(payload)) {
+      return payload;
+    }
+
+    const data = safeObject(payload);
+
+    return safeArray(
+      first(
+        data.tickets,
+        data.items,
+        data.data,
+        data.incidencias,
+        data.results,
+        data.rows,
+        data.list,
+        data.payload?.tickets,
+        data.payload?.items,
+        data.payload?.data,
+        data.payload?.incidencias
+      )
+    );
+  }
+
+  function extractRemoteCountFromPayload(payload = null, fallback = 0) {
+    const data = safeObject(payload);
+
+    return Math.max(
+      0,
+      safeNumber(
+        first(
+          data.total,
+          data.count,
+          data.remoteCount,
+          data.totalCount,
+          data.meta?.total,
+          data.meta?.count,
+          data.pagination?.total,
+          data.payload?.total,
+          data.payload?.count,
+          fallback
+        ),
+        fallback
+      )
+    );
+  }
+
+  function makeRawMap(...collections) {
+    const map = new Map();
+
+    for (const collection of collections) {
+      safeArray(collection).forEach((item) => {
+        const id = getStableTicketId(item);
+
+        if (id && !map.has(id)) {
+          map.set(id, item);
+        }
+      });
+    }
+
+    return map;
+  }
+
+  /* =========================================================
+     INVOICE FIELD PRESERVER
+     Evita que normalizeIncidenciasCollection pierda:
+     - facturaTotal / facturaImporte / importeFactura
+     - total / amount / importe
+     - linkedInvoices.total
+     - numeroFacturaLegal
+     - factura/invoice/billing
+  ========================================================= */
+
+  function collectInvoiceObjects(source = {}, raw = {}) {
+    const output = [];
+
+    const candidates = [
+      source?.factura,
+      source?.invoice,
+      source?.billing,
+      source?.linkedInvoices,
+
+      raw?.factura,
+      raw?.invoice,
+      raw?.billing,
+      raw?.linkedInvoices,
+
+      ...safeArray(source?.facturas),
+      ...safeArray(source?.invoices),
+      ...safeArray(source?.facturasRelacionadas),
+      ...safeArray(source?.linkedInvoices?.invoices),
+
+      ...safeArray(raw?.facturas),
+      ...safeArray(raw?.invoices),
+      ...safeArray(raw?.facturasRelacionadas),
+      ...safeArray(raw?.linkedInvoices?.invoices),
+    ];
+
+    candidates.forEach((candidate) => {
+      if (hasOwnKeys(candidate)) {
+        output.push(candidate);
+      }
+    });
+
+    return output;
+  }
+
+  function resolveInvoiceNumber(source = {}, raw = {}) {
+    const invoices = collectInvoiceObjects(source, raw);
+
+    return safeText(
+      first(
+        source.numeroFacturaLegal,
+        source.numeroFactura,
+        source.invoiceNumber,
+        source.legalInvoiceNumber,
+        source.facturaNumeroLegal,
+
+        source.billing?.numeroFacturaLegal,
+        source.billing?.numeroFactura,
+        source.billing?.invoiceNumber,
+
+        source.factura?.numeroFacturaLegal,
+        source.factura?.numeroFactura,
+        source.factura?.invoiceNumber,
+        source.factura?.legalNumber,
+        source.factura?.number,
+
+        source.invoice?.numeroFacturaLegal,
+        source.invoice?.numeroFactura,
+        source.invoice?.invoiceNumber,
+        source.invoice?.legalNumber,
+        source.invoice?.number,
+
+        source.linkedInvoices?.numeroFacturaLegal,
+        source.linkedInvoices?.numeroFactura,
+        source.linkedInvoices?.invoiceNumber,
+
+        raw.numeroFacturaLegal,
+        raw.numeroFactura,
+        raw.invoiceNumber,
+        raw.legalInvoiceNumber,
+        raw.facturaNumeroLegal,
+
+        raw.billing?.numeroFacturaLegal,
+        raw.billing?.numeroFactura,
+        raw.billing?.invoiceNumber,
+
+        raw.factura?.numeroFacturaLegal,
+        raw.factura?.numeroFactura,
+        raw.factura?.invoiceNumber,
+        raw.factura?.legalNumber,
+        raw.factura?.number,
+
+        raw.invoice?.numeroFacturaLegal,
+        raw.invoice?.numeroFactura,
+        raw.invoice?.invoiceNumber,
+        raw.invoice?.legalNumber,
+        raw.invoice?.number,
+
+        raw.linkedInvoices?.numeroFacturaLegal,
+        raw.linkedInvoices?.numeroFactura,
+        raw.linkedInvoices?.invoiceNumber,
+
+        ...invoices.map((invoice) => invoice?.numeroFacturaLegal),
+        ...invoices.map((invoice) => invoice?.numeroFactura),
+        ...invoices.map((invoice) => invoice?.invoiceNumber),
+        ...invoices.map((invoice) => invoice?.legalNumber),
+        ...invoices.map((invoice) => invoice?.number)
+      ),
+      ""
+    );
+  }
+
+  function resolvePrimaryInvoiceId(source = {}, raw = {}) {
+    const invoices = collectInvoiceObjects(source, raw);
+
+    return safeText(
+      first(
+        source.facturaId,
+        source.invoiceId,
+        source.linkedFacturaId,
+        source.linkedInvoiceId,
+
+        source.billing?.facturaId,
+        source.billing?.invoiceId,
+
+        source.factura?.id,
+        source.factura?.facturaId,
+        source.factura?.invoiceId,
+
+        source.invoice?.id,
+        source.invoice?.facturaId,
+        source.invoice?.invoiceId,
+
+        source.linkedInvoices?.primaryInvoiceId,
+
+        raw.facturaId,
+        raw.invoiceId,
+        raw.linkedFacturaId,
+        raw.linkedInvoiceId,
+
+        raw.billing?.facturaId,
+        raw.billing?.invoiceId,
+
+        raw.factura?.id,
+        raw.factura?.facturaId,
+        raw.factura?.invoiceId,
+
+        raw.invoice?.id,
+        raw.invoice?.facturaId,
+        raw.invoice?.invoiceId,
+
+        raw.linkedInvoices?.primaryInvoiceId,
+
+        ...safeArray(source.facturaIds),
+        ...safeArray(source.invoiceIds),
+        ...safeArray(source.linkedInvoices?.ids),
+
+        ...safeArray(raw.facturaIds),
+        ...safeArray(raw.invoiceIds),
+        ...safeArray(raw.linkedInvoices?.ids),
+
+        ...invoices.map((invoice) => invoice?.id),
+        ...invoices.map((invoice) => invoice?.facturaId),
+        ...invoices.map((invoice) => invoice?.invoiceId)
+      ),
+      ""
+    );
+  }
+
+  function resolveInvoiceIds(source = {}, raw = {}) {
+    const invoices = collectInvoiceObjects(source, raw);
+
+    return uniqueStrings([
+      source.facturaId,
+      source.invoiceId,
+      source.linkedFacturaId,
+      source.linkedInvoiceId,
+
+      raw.facturaId,
+      raw.invoiceId,
+      raw.linkedFacturaId,
+      raw.linkedInvoiceId,
+
+      source.linkedInvoices?.primaryInvoiceId,
+      raw.linkedInvoices?.primaryInvoiceId,
+
+      ...safeArray(source.facturaIds),
+      ...safeArray(source.invoiceIds),
+      ...safeArray(source.linkedInvoices?.ids),
+
+      ...safeArray(raw.facturaIds),
+      ...safeArray(raw.invoiceIds),
+      ...safeArray(raw.linkedInvoices?.ids),
+
+      ...invoices.flatMap((invoice) => [
+        invoice?.id,
+        invoice?.facturaId,
+        invoice?.invoiceId,
+        invoice?.numeroFacturaLegal,
+        invoice?.numeroFactura,
+        invoice?.invoiceNumber,
+      ]),
+    ]);
+  }
+
+  function resolveInvoiceCount(source = {}, raw = {}, invoiceIds = []) {
+    const invoices = collectInvoiceObjects(source, raw);
+
+    return Math.max(
+      0,
+      safeNumber(
+        first(
+          source.facturasCount,
+          source.invoicesCount,
+          source.linkedInvoices?.count,
+
+          source.meta?.linkedInvoiceCount,
+          source.meta?.invoiceCount,
+
+          raw.facturasCount,
+          raw.invoicesCount,
+          raw.linkedInvoices?.count,
+
+          raw.meta?.linkedInvoiceCount,
+          raw.meta?.invoiceCount,
+
+          invoiceIds.length,
+          invoices.length
+        ),
+        Math.max(invoiceIds.length, invoices.length)
+      )
+    );
+  }
+
+  function resolveInvoiceCurrency(source = {}, raw = {}) {
+    const invoices = collectInvoiceObjects(source, raw);
+
+    return safeText(
+      first(
+        source.facturaCurrency,
+        source.facturaMoneda,
+        source.currency,
+        source.moneda,
+
+        source.linkedInvoices?.currency,
+        source.linkedInvoices?.moneda,
+
+        source.meta?.invoiceCurrency,
+        source.meta?.currency,
+        source.meta?.moneda,
+
+        source.billing?.currency,
+        source.billing?.moneda,
+
+        source.factura?.currency,
+        source.factura?.moneda,
+
+        source.invoice?.currency,
+        source.invoice?.moneda,
+
+        raw.facturaCurrency,
+        raw.facturaMoneda,
+        raw.currency,
+        raw.moneda,
+
+        raw.linkedInvoices?.currency,
+        raw.linkedInvoices?.moneda,
+
+        raw.meta?.invoiceCurrency,
+        raw.meta?.currency,
+        raw.meta?.moneda,
+
+        raw.billing?.currency,
+        raw.billing?.moneda,
+
+        raw.factura?.currency,
+        raw.factura?.moneda,
+
+        raw.invoice?.currency,
+        raw.invoice?.moneda,
+
+        ...invoices.map((invoice) => invoice?.currency),
+        ...invoices.map((invoice) => invoice?.moneda),
+
+        DEFAULT_CURRENCY
+      ),
+      DEFAULT_CURRENCY
+    ).toUpperCase();
+  }
+
+  function resolveInvoiceAmount(source = {}, raw = {}) {
+    const invoices = collectInvoiceObjects(source, raw);
+
+    const candidates = [
+      source.facturaTotal,
+      source.facturaImporte,
+      source.importeFactura,
+      source.totalFactura,
+      source.invoiceAmount,
+
+      source.facturasTotal,
+      source.invoicesTotal,
+      source.importeFacturas,
+      source.invoiceTotal,
+
+      source.linkedInvoices?.total,
+      source.linkedInvoices?.amount,
+      source.linkedInvoices?.importe,
+
+      source.meta?.invoicesTotal,
+      source.meta?.invoiceTotal,
+
+      source.billing?.total,
+      source.billing?.amount,
+      source.billing?.importe,
+
+      source.factura?.total,
+      source.factura?.amount,
+      source.factura?.importe,
+      source.factura?.importeTotal,
+      source.factura?.totalFactura,
+
+      source.invoice?.total,
+      source.invoice?.amount,
+      source.invoice?.importe,
+      source.invoice?.importeTotal,
+      source.invoice?.totalFactura,
+
+      raw.facturaTotal,
+      raw.facturaImporte,
+      raw.importeFactura,
+      raw.totalFactura,
+      raw.invoiceAmount,
+
+      raw.facturasTotal,
+      raw.invoicesTotal,
+      raw.importeFacturas,
+      raw.invoiceTotal,
+
+      raw.linkedInvoices?.total,
+      raw.linkedInvoices?.amount,
+      raw.linkedInvoices?.importe,
+
+      raw.meta?.invoicesTotal,
+      raw.meta?.invoiceTotal,
+
+      raw.billing?.total,
+      raw.billing?.amount,
+      raw.billing?.importe,
+
+      raw.factura?.total,
+      raw.factura?.amount,
+      raw.factura?.importe,
+      raw.factura?.importeTotal,
+      raw.factura?.totalFactura,
+
+      raw.invoice?.total,
+      raw.invoice?.amount,
+      raw.invoice?.importe,
+      raw.invoice?.importeTotal,
+      raw.invoice?.totalFactura,
+
+      ...invoices.map((invoice) => invoice?.total),
+      ...invoices.map((invoice) => invoice?.amount),
+      ...invoices.map((invoice) => invoice?.importe),
+      ...invoices.map((invoice) => invoice?.importeTotal),
+      ...invoices.map((invoice) => invoice?.totalFactura),
+    ];
+
+    for (const candidate of candidates) {
+      const amount = roundMoney(candidate);
+
+      if (amount !== null) {
+        return amount;
+      }
+    }
+
+    /*
+      Último recurso:
+      solo usamos total/amount/importe genéricos si existe algún indicio de factura.
+      Esto evita transformar tickets sin factura en "0 €" artificial.
+    */
+    const invoiceNumber = resolveInvoiceNumber(source, raw);
+    const invoiceIds = resolveInvoiceIds(source, raw);
+    const hasInvoiceEvidence =
+      Boolean(invoiceNumber) ||
+      invoiceIds.length > 0 ||
+      collectInvoiceObjects(source, raw).length > 0;
+
+    if (hasInvoiceEvidence) {
+      const genericAmount = roundMoney(
+        first(
+          source.total,
+          source.amount,
+          source.importe,
+          source.price,
+          raw.total,
+          raw.amount,
+          raw.importe,
+          raw.price
+        )
+      );
+
+      return genericAmount === null ? 0 : genericAmount;
+    }
+
+    return null;
+  }
+
+  function normalizeInvoiceLite(invoice = {}) {
+    if (!hasOwnKeys(invoice)) return null;
+
+    const total = resolveInvoiceAmount(invoice, {});
+    const numeroFacturaLegal = resolveInvoiceNumber(invoice, {});
+    const id = resolvePrimaryInvoiceId(invoice, {});
+
+    return {
+      ...invoice,
+
+      id,
+      facturaId: safeText(first(invoice.facturaId, id), id),
+      invoiceId: safeText(first(invoice.invoiceId, id), id),
+
+      numeroFacturaLegal,
+      numeroFactura: safeText(first(invoice.numeroFactura, numeroFacturaLegal), numeroFacturaLegal),
+      invoiceNumber: safeText(first(invoice.invoiceNumber, numeroFacturaLegal), numeroFacturaLegal),
+
+      total: total === null ? 0 : total,
+      amount: total === null ? 0 : total,
+      importe: total === null ? 0 : total,
+      totalFactura: total === null ? 0 : total,
+      importeTotal: total === null ? 0 : total,
+
+      currency: resolveInvoiceCurrency(invoice, {}),
+      moneda: resolveInvoiceCurrency(invoice, {}),
+    };
+  }
+
+  function normalizeInvoiceArray(source = {}, raw = {}) {
+    return collectInvoiceObjects(source, raw)
+      .map(normalizeInvoiceLite)
+      .filter(Boolean);
+  }
 
   function preserveInvoiceAmountFields(item = {}, fallbackRaw = {}) {
     const source = safeObject(item);
 
     const embeddedRaw = safeObject(source.raw);
     const externalRaw = safeObject(fallbackRaw);
-    const raw = hasOwnKeys(embeddedRaw) ? embeddedRaw : externalRaw;
+
+    const raw = hasOwnKeys(embeddedRaw)
+      ? embeddedRaw
+      : externalRaw;
 
     const sourceMeta = safeObject(source.meta);
     const rawMeta = safeObject(raw.meta);
@@ -332,97 +908,32 @@ export const IncidenciasView = (() => {
       ? sourceLinkedInvoices
       : rawLinkedInvoices;
 
-    const rawAmount = first(
-      source.total,
-      source.amount,
-      source.importe,
-      source.price,
+    const invoiceIds = resolveInvoiceIds(source, raw);
+    const primaryInvoiceId = resolvePrimaryInvoiceId(source, raw) || invoiceIds[0] || "";
+    const facturasCount = resolveInvoiceCount(source, raw, invoiceIds);
 
-      source.facturasTotal,
-      source.invoicesTotal,
-      source.importeFacturas,
-      source.invoiceTotal,
+    const amount = resolveInvoiceAmount(source, raw);
+    const normalizedAmount = amount === null ? null : roundMoney(amount);
 
-      linkedInvoices.total,
-      linkedInvoices.amount,
-      linkedInvoices.importe,
+    const currency = resolveInvoiceCurrency(source, raw);
+    const numeroFacturaLegal = resolveInvoiceNumber(source, raw);
 
-      sourceMeta.invoicesTotal,
-      sourceMeta.invoiceTotal,
+    const normalizedInvoices = normalizeInvoiceArray(source, raw);
 
-      raw.total,
-      raw.amount,
-      raw.importe,
-      raw.price,
-
-      raw.facturasTotal,
-      raw.invoicesTotal,
-      raw.importeFacturas,
-      raw.invoiceTotal,
-
-      rawLinkedInvoices.total,
-      rawLinkedInvoices.amount,
-      rawLinkedInvoices.importe,
-
-      rawMeta.invoicesTotal,
-      rawMeta.invoiceTotal
+    const hasInvoiceEvidence = Boolean(
+      numeroFacturaLegal ||
+        primaryInvoiceId ||
+        invoiceIds.length ||
+        facturasCount ||
+        normalizedInvoices.length ||
+        normalizedAmount !== null
     );
 
-    const normalizedAmount =
-      rawAmount === null || rawAmount === undefined || rawAmount === ""
-        ? null
-        : roundMoney(rawAmount);
-
-    const currency = safeText(
-      first(
-        source.currency,
-        source.moneda,
-
-        linkedInvoices.currency,
-        linkedInvoices.moneda,
-
-        sourceMeta.invoiceCurrency,
-        sourceMeta.currency,
-        sourceMeta.moneda,
-
-        raw.currency,
-        raw.moneda,
-
-        rawLinkedInvoices.currency,
-        rawLinkedInvoices.moneda,
-
-        rawMeta.invoiceCurrency,
-        rawMeta.currency,
-        rawMeta.moneda,
-
-        "EUR"
-      ),
-      "EUR"
-    );
-
-    const facturaIds = safeArray(
-      first(
-        source.facturaIds,
-        source.invoiceIds,
-        linkedInvoices.ids,
-        raw.facturaIds,
-        raw.invoiceIds,
-        rawLinkedInvoices.ids
-      )
-    );
-
-    const facturasCount = safeNumber(
-      first(
-        source.facturasCount,
-        source.invoicesCount,
-        linkedInvoices.count,
-        raw.facturasCount,
-        raw.invoicesCount,
-        rawLinkedInvoices.count,
-        facturaIds.length
-      ),
-      facturaIds.length
-    );
+    const finalAmount = normalizedAmount === null
+      ? hasInvoiceEvidence
+        ? 0
+        : null
+      : normalizedAmount;
 
     const nextLinkedInvoices = {
       ...linkedInvoices,
@@ -431,17 +942,69 @@ export const IncidenciasView = (() => {
         facturasCount,
         safeNumber(linkedInvoices.count, 0),
         safeNumber(rawLinkedInvoices.count, 0),
-        facturaIds.length
+        invoiceIds.length,
+        normalizedInvoices.length,
+        hasInvoiceEvidence ? 1 : 0
       ),
 
-      ids: safeArray(first(linkedInvoices.ids, rawLinkedInvoices.ids, facturaIds)),
+      ids: uniqueStrings(
+        first(
+          linkedInvoices.ids,
+          rawLinkedInvoices.ids,
+          invoiceIds
+        )
+      ),
 
-      total: first(linkedInvoices.total, rawLinkedInvoices.total, normalizedAmount),
-      amount: first(linkedInvoices.amount, rawLinkedInvoices.amount, normalizedAmount),
-      importe: first(linkedInvoices.importe, rawLinkedInvoices.importe, normalizedAmount),
+      primaryInvoiceId: safeText(
+        first(
+          linkedInvoices.primaryInvoiceId,
+          rawLinkedInvoices.primaryInvoiceId,
+          primaryInvoiceId
+        ),
+        primaryInvoiceId
+      ),
+
+      numeroFacturaLegal: safeText(
+        first(
+          linkedInvoices.numeroFacturaLegal,
+          rawLinkedInvoices.numeroFacturaLegal,
+          numeroFacturaLegal
+        ),
+        numeroFacturaLegal
+      ),
+
+      numeroFactura: safeText(
+        first(
+          linkedInvoices.numeroFactura,
+          rawLinkedInvoices.numeroFactura,
+          numeroFacturaLegal
+        ),
+        numeroFacturaLegal
+      ),
+
+      invoiceNumber: safeText(
+        first(
+          linkedInvoices.invoiceNumber,
+          rawLinkedInvoices.invoiceNumber,
+          numeroFacturaLegal
+        ),
+        numeroFacturaLegal
+      ),
+
+      total: first(linkedInvoices.total, rawLinkedInvoices.total, finalAmount),
+      amount: first(linkedInvoices.amount, rawLinkedInvoices.amount, finalAmount),
+      importe: first(linkedInvoices.importe, rawLinkedInvoices.importe, finalAmount),
 
       currency: safeText(first(linkedInvoices.currency, rawLinkedInvoices.currency, currency), currency),
       moneda: safeText(first(linkedInvoices.moneda, rawLinkedInvoices.moneda, currency), currency),
+
+      invoices: safeArray(
+        first(
+          linkedInvoices.invoices,
+          rawLinkedInvoices.invoices,
+          normalizedInvoices
+        )
+      ),
     };
 
     const nextMeta = {
@@ -450,27 +1013,28 @@ export const IncidenciasView = (() => {
       hasLinkedInvoices: Boolean(
         sourceMeta.hasLinkedInvoices ||
           rawMeta.hasLinkedInvoices ||
-          facturasCount > 0 ||
-          facturaIds.length > 0
+          hasInvoiceEvidence
       ),
 
       linkedInvoiceCount: Math.max(
         safeNumber(sourceMeta.linkedInvoiceCount, 0),
         safeNumber(rawMeta.linkedInvoiceCount, 0),
+        nextLinkedInvoices.count,
         facturasCount,
-        facturaIds.length
+        invoiceIds.length,
+        normalizedInvoices.length
       ),
 
       invoicesTotal: first(
         sourceMeta.invoicesTotal,
         rawMeta.invoicesTotal,
-        normalizedAmount
+        finalAmount
       ),
 
       invoiceTotal: first(
         sourceMeta.invoiceTotal,
         rawMeta.invoiceTotal,
-        normalizedAmount
+        finalAmount
       ),
 
       invoiceCurrency: safeText(
@@ -481,6 +1045,15 @@ export const IncidenciasView = (() => {
         ),
         currency
       ),
+
+      numeroFacturaLegal: safeText(
+        first(
+          sourceMeta.numeroFacturaLegal,
+          rawMeta.numeroFacturaLegal,
+          numeroFacturaLegal
+        ),
+        numeroFacturaLegal
+      ),
     };
 
     return {
@@ -488,11 +1061,32 @@ export const IncidenciasView = (() => {
 
       raw: hasOwnKeys(source.raw) ? source.raw : raw,
 
-      facturaId: safeText(first(source.facturaId, raw.facturaId, source.invoiceId, raw.invoiceId), ""),
-      invoiceId: safeText(first(source.invoiceId, raw.invoiceId, source.facturaId, raw.facturaId), ""),
+      facturaId: safeText(
+        first(source.facturaId, raw.facturaId, source.invoiceId, raw.invoiceId, primaryInvoiceId),
+        ""
+      ),
 
-      facturaIds: safeArray(first(source.facturaIds, raw.facturaIds, facturaIds)),
-      invoiceIds: safeArray(first(source.invoiceIds, raw.invoiceIds, facturaIds)),
+      invoiceId: safeText(
+        first(source.invoiceId, raw.invoiceId, source.facturaId, raw.facturaId, primaryInvoiceId),
+        ""
+      ),
+
+      linkedFacturaId: safeText(
+        first(source.linkedFacturaId, raw.linkedFacturaId, primaryInvoiceId),
+        ""
+      ),
+
+      linkedInvoiceId: safeText(
+        first(source.linkedInvoiceId, raw.linkedInvoiceId, primaryInvoiceId),
+        ""
+      ),
+
+      numeroFacturaLegal,
+      numeroFactura: safeText(first(source.numeroFactura, raw.numeroFactura, numeroFacturaLegal), numeroFacturaLegal),
+      invoiceNumber: safeText(first(source.invoiceNumber, raw.invoiceNumber, numeroFacturaLegal), numeroFacturaLegal),
+
+      facturaIds: uniqueStrings(first(source.facturaIds, raw.facturaIds, invoiceIds)),
+      invoiceIds: uniqueStrings(first(source.invoiceIds, raw.invoiceIds, invoiceIds)),
 
       facturaRelacionada: safeText(
         first(
@@ -514,21 +1108,49 @@ export const IncidenciasView = (() => {
 
       linkedInvoices: nextLinkedInvoices,
 
-      invoices: safeArray(first(source.invoices, raw.invoices, linkedInvoices.invoices, rawLinkedInvoices.invoices)),
-      facturas: safeArray(first(source.facturas, raw.facturas, linkedInvoices.invoices, rawLinkedInvoices.invoices)),
+      factura: first(source.factura, raw.factura, normalizedInvoices[0], null),
+      invoice: first(source.invoice, raw.invoice, normalizedInvoices[0], null),
+      billing: first(
+        source.billing,
+        raw.billing,
+        hasInvoiceEvidence
+          ? {
+              facturaId: primaryInvoiceId,
+              invoiceId: primaryInvoiceId,
+              numeroFacturaLegal,
+              total: finalAmount,
+              amount: finalAmount,
+              currency,
+            }
+          : null
+      ),
 
-      facturasTotal: first(source.facturasTotal, raw.facturasTotal, normalizedAmount),
-      invoicesTotal: first(source.invoicesTotal, raw.invoicesTotal, normalizedAmount),
-      importeFacturas: first(source.importeFacturas, raw.importeFacturas, normalizedAmount),
-      invoiceTotal: first(source.invoiceTotal, raw.invoiceTotal, normalizedAmount),
+      invoices: safeArray(first(source.invoices, raw.invoices, normalizedInvoices)),
+      facturas: safeArray(first(source.facturas, raw.facturas, normalizedInvoices)),
+      facturasRelacionadas: safeArray(
+        first(source.facturasRelacionadas, raw.facturasRelacionadas, normalizedInvoices)
+      ),
 
-      total: normalizedAmount,
-      amount: normalizedAmount,
-      importe: normalizedAmount,
-      price: normalizedAmount,
+      facturasTotal: finalAmount,
+      invoicesTotal: finalAmount,
+      importeFacturas: finalAmount,
+      invoiceTotal: finalAmount,
+
+      facturaTotal: finalAmount,
+      facturaImporte: finalAmount,
+      importeFactura: finalAmount,
+      totalFactura: finalAmount,
+      invoiceAmount: finalAmount,
+
+      total: finalAmount,
+      amount: finalAmount,
+      importe: finalAmount,
+      price: finalAmount,
 
       currency,
       moneda: currency,
+      facturaCurrency: currency,
+      facturaMoneda: currency,
 
       meta: nextMeta,
     };
@@ -569,7 +1191,10 @@ export const IncidenciasView = (() => {
       }
     } catch {
       incidenciasState.page = Math.max(1, safeNumber(incidenciasState.page, 1));
-      incidenciasState.pageSize = Math.max(1, safeNumber(incidenciasState.pageSize, PAGE_SIZE));
+      incidenciasState.pageSize = Math.max(
+        1,
+        safeNumber(incidenciasState.pageSize, PAGE_SIZE)
+      );
     }
 
     if (typeof incidenciasState.loading !== "boolean") {
@@ -612,10 +1237,11 @@ export const IncidenciasView = (() => {
     }
   }
 
-  function markLoadedOk(items = []) {
+  function markLoadedOk(items = [], remoteCountFallback = null) {
     const total = Math.max(
       safeArray(items).length,
-      safeNumber(incidenciasState.remoteCount, safeArray(items).length)
+      safeNumber(incidenciasState.remoteCount, safeArray(items).length),
+      safeNumber(remoteCountFallback, 0)
     );
 
     try {
@@ -636,38 +1262,45 @@ export const IncidenciasView = (() => {
 
   function getRawItems() {
     try {
-      return getIncidencias();
+      return safeArray(getIncidencias());
     } catch {
       return [];
     }
   }
 
+  function getPayloadRawItems() {
+    return extractItemsFromPayload(lastApiPayload);
+  }
+
   function getItems() {
     try {
-      const rawItems = safeArray(getRawItems());
+      const storeRawItems = getRawItems();
+      const payloadRawItems = getPayloadRawItems();
 
-      const rawById = new Map();
+      const rawById = makeRawMap(payloadRawItems, storeRawItems);
 
-      rawItems.forEach((rawItem) => {
-        const id = getStableTicketId(rawItem);
-
-        if (id && !rawById.has(id)) {
-          rawById.set(id, rawItem);
-        }
-      });
+      const baseItems = storeRawItems.length
+        ? storeRawItems
+        : payloadRawItems;
 
       const normalizedItems = safeArray(
-        normalizeIncidenciasCollection(rawItems)
+        normalizeIncidenciasCollection(baseItems)
       );
 
       const patchedItems = normalizedItems.map((item, index) => {
         const id = getStableTicketId(item);
-        const matchingRaw = rawById.get(id) || rawItems[index] || {};
+        const matchingRaw =
+          rawById.get(id) ||
+          payloadRawItems[index] ||
+          storeRawItems[index] ||
+          {};
 
         return preserveInvoiceAmountFields(item, matchingRaw);
       });
 
-      return sortIncidenciasByUpdatedDesc(patchedItems);
+      const sorted = sortIncidenciasByUpdatedDesc(patchedItems);
+
+      return safeArray(sorted);
     } catch (error) {
       safeWarn("getItems falló:", error);
       return [];
@@ -741,17 +1374,17 @@ export const IncidenciasView = (() => {
   function isDomReady() {
     return Boolean(
       typeof document !== "undefined" &&
-      document.body &&
-      document.readyState !== "loading"
+        document.body &&
+        document.readyState !== "loading"
     );
   }
 
   function isAppReady() {
     return Boolean(
       AppCore?.state?.ready ||
-      AppCore?.state?.bootCompleted ||
-      AppCore?.state?.appReady ||
-      AppCore?.state?.authenticated !== undefined
+        AppCore?.state?.bootCompleted ||
+        AppCore?.state?.appReady ||
+        AppCore?.state?.authenticated !== undefined
     );
   }
 
@@ -767,6 +1400,17 @@ export const IncidenciasView = (() => {
     }
 
     lastCreateClickAt = now;
+    return true;
+  }
+
+  function throttleOpenTicketClick() {
+    const now = Date.now();
+
+    if (now - lastOpenTicketClickAt < OPEN_TICKET_THROTTLE_MS) {
+      return false;
+    }
+
+    lastOpenTicketClickAt = now;
     return true;
   }
 
@@ -1047,16 +1691,33 @@ export const IncidenciasView = (() => {
       incidenciasState.refreshing = hasVisibleData && asRefresh;
     }
 
-    render();
+    if (!destroyed) {
+      rerender();
+    }
 
     try {
-      await loadIncidencias({
+      const payload = await loadIncidencias({
         force,
       });
 
+      lastApiPayload = payload || lastApiPayload;
+
+      const payloadRemoteCount = extractRemoteCountFromPayload(
+        payload,
+        getItems().length
+      );
+
+      if (payloadRemoteCount > 0) {
+        try {
+          setRemoteCount(payloadRemoteCount);
+        } catch {
+          incidenciasState.remoteCount = payloadRemoteCount;
+        }
+      }
+
       const itemsAfter = getItems();
 
-      markLoadedOk(itemsAfter);
+      markLoadedOk(itemsAfter, payloadRemoteCount);
 
       try {
         touchLastSyncAt();
@@ -1189,6 +1850,10 @@ export const IncidenciasView = (() => {
     const id = safeText(ticketId, "");
     if (!id) return null;
 
+    if (!throttleOpenTicketClick()) {
+      return null;
+    }
+
     if (incidenciasState.openingTicketId) {
       return null;
     }
@@ -1214,9 +1879,14 @@ export const IncidenciasView = (() => {
         return null;
       }
 
-      openTicketModalBridge(detail);
+      const patchedDetail = preserveInvoiceAmountFields(
+        safeObject(detail),
+        safeObject(detail?.raw)
+      );
 
-      return detail;
+      openTicketModalBridge(patchedDetail);
+
+      return patchedDetail;
     } catch (error) {
       safeWarn("handleOpenTicket falló:", error);
       showToast("No se pudo abrir la incidencia.", "error");
@@ -1243,10 +1913,16 @@ export const IncidenciasView = (() => {
       });
 
       if (detail) {
-        openTicketModalBridge(detail);
+        const patchedDetail = preserveInvoiceAmountFields(
+          safeObject(detail),
+          safeObject(detail?.raw)
+        );
+
+        openTicketModalBridge(patchedDetail);
+        return patchedDetail;
       }
 
-      return detail;
+      return null;
     } catch (error) {
       safeWarn("handleRefreshTicketFromModal falló:", error);
       showToast("No se pudo actualizar la incidencia.", "error");
@@ -1366,12 +2042,29 @@ export const IncidenciasView = (() => {
   function getTicketIdFromElement(element = null) {
     if (!element) return "";
 
+    const closestRow =
+      element.closest?.("[data-ticket-id]") ||
+      element.closest?.("[data-incidencia-id]") ||
+      element.closest?.("[data-ticket-code]") ||
+      null;
+
     return safeText(
       first(
         element.dataset?.ticketId,
+        element.dataset?.incidenciaId,
         element.dataset?.ticketCode,
+
         element.getAttribute?.("data-ticket-id"),
-        element.getAttribute?.("data-ticket-code")
+        element.getAttribute?.("data-incidencia-id"),
+        element.getAttribute?.("data-ticket-code"),
+
+        closestRow?.dataset?.ticketId,
+        closestRow?.dataset?.incidenciaId,
+        closestRow?.dataset?.ticketCode,
+
+        closestRow?.getAttribute?.("data-ticket-id"),
+        closestRow?.getAttribute?.("data-incidencia-id"),
+        closestRow?.getAttribute?.("data-ticket-code")
       ),
       ""
     );
@@ -1558,9 +2251,10 @@ export const IncidenciasView = (() => {
 
       await handleRefreshTicketFromModal(
         payload.ticketId ||
-        payload.detail?.ticketId ||
-        payload.detail?.id ||
-        ""
+          payload.id ||
+          payload.detail?.ticketId ||
+          payload.detail?.id ||
+          ""
       );
     };
 
@@ -1571,9 +2265,10 @@ export const IncidenciasView = (() => {
 
       await handleCopyTicketId(
         payload.ticketId ||
-        payload.detail?.ticketId ||
-        payload.detail?.id ||
-        ""
+          payload.id ||
+          payload.detail?.ticketId ||
+          payload.detail?.id ||
+          ""
       );
     };
 
@@ -1597,6 +2292,7 @@ export const IncidenciasView = (() => {
 
       bus.on("incidencias:create:success", onMutated);
       bus.on("incidencias:modal:updated", onMutated);
+      bus.on("incidencias:ticket:updated", onMutated);
       bus.on("incidencias:upload:success", onMutated);
       bus.on("incidencias:comment:success", onMutated);
       bus.on("incidencias:reopen:success", onMutated);
@@ -1613,6 +2309,7 @@ export const IncidenciasView = (() => {
 
       try { bus.off("incidencias:create:success", onMutated); } catch {}
       try { bus.off("incidencias:modal:updated", onMutated); } catch {}
+      try { bus.off("incidencias:ticket:updated", onMutated); } catch {}
       try { bus.off("incidencias:upload:success", onMutated); } catch {}
       try { bus.off("incidencias:comment:success", onMutated); } catch {}
       try { bus.off("incidencias:reopen:success", onMutated); } catch {}
@@ -1625,16 +2322,6 @@ export const IncidenciasView = (() => {
   }
 
   function bindWindowEvents() {
-    const onCreated = async () => {
-      if (destroyed) return;
-
-      await reload({
-        force: true,
-        asRefresh: true,
-        silent: true,
-      });
-    };
-
     const onMutated = async () => {
       if (destroyed) return;
 
@@ -1650,8 +2337,9 @@ export const IncidenciasView = (() => {
     };
 
     try {
-      window.addEventListener("incidencias:create:success", onCreated);
+      window.addEventListener("incidencias:create:success", onMutated);
       window.addEventListener("incidencias:modal:updated", onMutated);
+      window.addEventListener("incidencias:ticket:updated", onMutated);
       window.addEventListener("incidencias:upload:success", onMutated);
       window.addEventListener("incidencias:comment:success", onMutated);
       window.addEventListener("incidencias:reopen:success", onMutated);
@@ -1664,8 +2352,9 @@ export const IncidenciasView = (() => {
 
     return () => {
       try {
-        window.removeEventListener("incidencias:create:success", onCreated);
+        window.removeEventListener("incidencias:create:success", onMutated);
         window.removeEventListener("incidencias:modal:updated", onMutated);
+        window.removeEventListener("incidencias:ticket:updated", onMutated);
         window.removeEventListener("incidencias:upload:success", onMutated);
         window.removeEventListener("incidencias:comment:success", onMutated);
         window.removeEventListener("incidencias:reopen:success", onMutated);
@@ -1706,16 +2395,34 @@ export const IncidenciasView = (() => {
   async function reload(options = {}) {
     if (destroyed) return api;
 
+    const incomingOptions = safeObject(options);
+
     if (inflightReload) {
+      queuedReloadOptions = {
+        ...(queuedReloadOptions || {}),
+        ...incomingOptions,
+        force: Boolean(queuedReloadOptions?.force || incomingOptions.force),
+        asRefresh: Boolean(queuedReloadOptions?.asRefresh || incomingOptions.asRefresh),
+        silent: Boolean(queuedReloadOptions?.silent ?? incomingOptions.silent),
+      };
+
       return inflightReload;
     }
 
     inflightReload = (async () => {
-      await renderAndLoad(options);
+      let currentOptions = incomingOptions;
 
-      if (!destroyed) {
-        bind();
-      }
+      do {
+        queuedReloadOptions = null;
+
+        await renderAndLoad(currentOptions);
+
+        if (!destroyed) {
+          bind();
+        }
+
+        currentOptions = queuedReloadOptions;
+      } while (currentOptions && !destroyed);
 
       return api;
     })();
@@ -1724,6 +2431,7 @@ export const IncidenciasView = (() => {
       return await inflightReload;
     } finally {
       inflightReload = null;
+      queuedReloadOptions = null;
     }
   }
 
@@ -1792,6 +2500,7 @@ export const IncidenciasView = (() => {
     }
 
     pendingCreateRequest = false;
+    queuedReloadOptions = null;
     inflightReload = null;
 
     safeLog("destroy");
@@ -1829,7 +2538,9 @@ export const IncidenciasView = (() => {
       destroyed,
       hasInflightInit: Boolean(inflightInit),
       hasInflightReload: Boolean(inflightReload),
+      hasQueuedReload: Boolean(queuedReloadOptions),
       pendingCreateRequest,
+      lastApiPayloadHasItems: extractItemsFromPayload(lastApiPayload).length > 0,
     }),
 
     get initialized() {

@@ -3095,60 +3095,6 @@ function getFeedbackStyle(type = "info") {
   `;
 }
 
-function getAttachmentDownloadIconSvg() {
-  return `
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-      focusable="false"
-      style="display:block;"
-    >
-      <path
-        d="M12 3v11m0 0 4-4m-4 4-4-4"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-      />
-    </svg>
-  `;
-}
-
-function getAttachmentViewIconSvg() {
-  return `
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-      focusable="false"
-      style="display:block;"
-    >
-      <path
-        d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
-        stroke="currentColor"
-        stroke-width="2"
-      />
-    </svg>
-  `;
-}
-
 function renderChip(label = "", style = "") {
   return `
     <span

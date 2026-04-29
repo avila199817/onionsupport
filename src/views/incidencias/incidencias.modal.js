@@ -2,17 +2,24 @@
    Onion SPA - Incidencias Modal
    Archivo: src/views/incidencias/incidencias.modal.js
 
-   CLIENT EXPERIENCE PRO · DETAIL MODAL · FINAL GOD MODE
+   CLIENT EXPERIENCE PRO · DETAIL MODAL · EXTREME GOD MODE
 
    CIERRE DEFINITIVO:
-   - imágenes previsualizadas directamente en miniatura
-   - archivos no previsualizables con texto + descarga
-   - icono de descarga sobre miniaturas
+   - imágenes previsualizadas en miniatura grande
+   - click sobre miniatura abre preview grande
+   - preview amplia para imágenes/PDF
+   - sin botón de descarga sobre imagen previsualizada
+   - archivos no previsualizables con acciones claras
    - subida multipart con barra de progreso real mediante XHR
    - textarea de actualización con presencia visual clara
-   - header compacto sin cortar agresivamente el título
+   - adjuntos integrados dentro del card de actualización
+   - header compacto sin cortar títulos ni letras bajas
+   - descripción colocada arriba, no flotando en mitad del modal
    - factura/importe alineado con lógica de tabla
+   - captura numeroFacturaLegal + total
    - soporte para URLs protegidas mediante hidratación Blob/ObjectURL
+   - cards con hover lift premium
+   - timeline saneado sin saltos absurdos
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -181,7 +188,11 @@ function escapeHtml(value = "") {
 }
 
 function normalizeWhitespace(value = "") {
-  return safeText(value, "").replace(/\s+/g, " ").trim();
+  return safeText(value, "")
+    .replace(/\r/g, " ")
+    .replace(/\n+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function normalizeKey(value = "") {
@@ -191,6 +202,15 @@ function normalizeKey(value = "") {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[\s-]+/g, "_")
     .trim();
+}
+
+function hasOwnKeys(value = {}) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length
+  );
 }
 
 function showToast(message = "", type = "info") {
@@ -248,7 +268,6 @@ function clearAttachmentActionKey() {
 
 function revokePreviewObjectUrl() {
   const url = safeText(modalState.previewObjectUrl, "");
-
   if (!url) return;
 
   try {
@@ -628,10 +647,12 @@ function safeErrorMessage(
     fallback
   );
 
+  const lower = rawMessage.toLowerCase();
+
   if (
     rawMessage === "AbortError" ||
-    rawMessage.toLowerCase().includes("aborted") ||
-    rawMessage.toLowerCase().includes("abort")
+    lower.includes("aborted") ||
+    lower.includes("abort")
   ) {
     return "La operación ha tardado demasiado y se ha cancelado. Revisa si el archivo es muy pesado o si el servidor sigue procesando la subida.";
   }
@@ -1280,6 +1301,32 @@ function getAttachmentDownloadIconSvg() {
   `;
 }
 
+function getAttachmentViewIconSvg() {
+  return `
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+      style="display:block;"
+    >
+      <path
+        d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
+        stroke="currentColor"
+        stroke-width="2"
+      />
+    </svg>
+  `;
+}
+
 /* =========================================================
    DATE HELPERS
 ========================================================= */
@@ -1340,8 +1387,104 @@ function formatRelativeDate(value = null) {
    DETAIL NORMALIZATION
 ========================================================= */
 
+function preserveRawDetailFields(input = {}, normalized = {}) {
+  const source = safeObject(input);
+  const sourceRaw = safeObject(source.raw);
+  const normalizedRaw = safeObject(normalized.raw);
+
+  const raw = {
+    ...sourceRaw,
+    ...source,
+    ...normalizedRaw,
+  };
+
+  return {
+    ...normalized,
+
+    raw,
+
+    facturaId: first(normalized.facturaId, source.facturaId, raw.facturaId),
+    invoiceId: first(normalized.invoiceId, source.invoiceId, raw.invoiceId),
+
+    facturaIds: safeArray(
+      first(normalized.facturaIds, source.facturaIds, raw.facturaIds)
+    ),
+
+    invoiceIds: safeArray(
+      first(normalized.invoiceIds, source.invoiceIds, raw.invoiceIds)
+    ),
+
+    facturasCount: safeNumber(
+      first(normalized.facturasCount, source.facturasCount, raw.facturasCount),
+      0
+    ),
+
+    invoicesCount: safeNumber(
+      first(normalized.invoicesCount, source.invoicesCount, raw.invoicesCount),
+      0
+    ),
+
+    linkedInvoices: {
+      ...safeObject(raw.linkedInvoices),
+      ...safeObject(source.linkedInvoices),
+      ...safeObject(normalized.linkedInvoices),
+    },
+
+    invoices: safeArray(first(normalized.invoices, source.invoices, raw.invoices)),
+    facturas: safeArray(first(normalized.facturas, source.facturas, raw.facturas)),
+
+    total: first(normalized.total, source.total, raw.total),
+    amount: first(normalized.amount, source.amount, raw.amount),
+    importe: first(normalized.importe, source.importe, raw.importe),
+    price: first(normalized.price, source.price, raw.price),
+
+    facturasTotal: first(
+      normalized.facturasTotal,
+      source.facturasTotal,
+      raw.facturasTotal
+    ),
+
+    invoicesTotal: first(
+      normalized.invoicesTotal,
+      source.invoicesTotal,
+      raw.invoicesTotal
+    ),
+
+    importeFacturas: first(
+      normalized.importeFacturas,
+      source.importeFacturas,
+      raw.importeFacturas
+    ),
+
+    invoiceTotal: first(
+      normalized.invoiceTotal,
+      source.invoiceTotal,
+      raw.invoiceTotal
+    ),
+
+    currency: safeText(
+      first(normalized.currency, source.currency, raw.currency, "EUR"),
+      "EUR"
+    ),
+
+    moneda: safeText(
+      first(normalized.moneda, source.moneda, raw.moneda, "EUR"),
+      "EUR"
+    ),
+
+    meta: {
+      ...safeObject(raw.meta),
+      ...safeObject(source.meta),
+      ...safeObject(normalized.meta),
+    },
+  };
+}
+
 function getDetail(detail = {}) {
-  return normalizeIncidenciaModel(safeObject(detail));
+  const source = safeObject(detail);
+  const normalized = normalizeIncidenciaModel(source);
+
+  return preserveRawDetailFields(source, normalized);
 }
 
 function pickDetailPayload(response = null) {
@@ -1361,16 +1504,17 @@ function pickDetailPayload(response = null) {
 
 function coerceDetailResponse(response = null, fallback = {}) {
   const payload = safeObject(pickDetailPayload(response));
+  const base = safeObject(fallback);
 
   if (!Object.keys(payload).length) {
-    return getDetail(fallback);
+    return getDetail(base);
   }
 
   return getDetail({
-    ...safeObject(fallback),
+    ...base,
     ...payload,
     raw: {
-      ...safeObject(fallback?.raw || fallback),
+      ...safeObject(base?.raw || base),
       ...safeObject(payload?.raw || payload),
     },
   });
@@ -1440,6 +1584,7 @@ function getDisplayDescription(detail = {}) {
   return safeText(
     first(
       detail.description,
+      detail.descripcion,
       detail.message,
       detail.preview,
       detail?.raw?.description,
@@ -1464,36 +1609,165 @@ function getTecnico(detail = {}) {
   );
 }
 
+/* =========================================================
+   FACTURA LINKED DATA
+   Captura:
+   - numeroFacturaLegal
+   - total
+   - objetos factura / invoice anidados
+   - arrays facturas / invoices / linkedInvoices.facturas
+========================================================= */
+
+function collectInvoiceObjects(detail = {}) {
+  const raw = safeObject(detail.raw);
+  const linked = safeObject(first(detail.linkedInvoices, raw.linkedInvoices));
+  const rawLinked = safeObject(raw.linkedInvoices);
+
+  return [
+    ...safeArray(detail.invoices),
+    ...safeArray(detail.facturas),
+    ...safeArray(detail.facturasRelacionadas),
+    ...safeArray(linked.invoices),
+    ...safeArray(linked.facturas),
+
+    safeObject(detail.invoice),
+    safeObject(detail.factura),
+
+    ...safeArray(raw.invoices),
+    ...safeArray(raw.facturas),
+    ...safeArray(raw.facturasRelacionadas),
+    ...safeArray(rawLinked.invoices),
+    ...safeArray(rawLinked.facturas),
+
+    safeObject(raw.invoice),
+    safeObject(raw.factura),
+  ].filter((item) => Object.keys(safeObject(item)).length > 0);
+}
+
+function extractInvoiceCodeFromObject(invoice = {}) {
+  const item = safeObject(invoice);
+
+  return safeText(
+    first(
+      item.numeroFacturaLegal,
+      item.legalInvoiceNumber,
+      item.numeroFacturaSistema,
+      item.systemInvoiceNumber,
+      item.facturaId,
+      item.invoiceId,
+      item.id,
+      item.numero,
+      item.code,
+      item.reference,
+      item.ref
+    ),
+    ""
+  );
+}
+
+function extractInvoiceAmountFromObject(invoice = {}) {
+  const item = safeObject(invoice);
+
+  return first(
+    item.total,
+    item.amount,
+    item.importe,
+    item.totalFactura,
+    item.importeTotal,
+    item.grandTotal,
+    item.price
+  );
+}
+
+function extractInvoiceCurrencyFromObject(invoice = {}) {
+  const item = safeObject(invoice);
+
+  return safeText(
+    first(
+      item.currency,
+      item.moneda,
+      item.divisa,
+      "EUR"
+    ),
+    "EUR"
+  );
+}
+
 function getFacturaRelacionada(detail = {}) {
+  const raw = safeObject(detail.raw);
+  const linked = safeObject(first(detail.linkedInvoices, raw.linkedInvoices));
+  const rawLinked = safeObject(raw.linkedInvoices);
+
+  const invoiceObjects = collectInvoiceObjects(detail);
+
+  const primaryInvoice = invoiceObjects.find((invoice) =>
+    Boolean(
+      extractInvoiceCodeFromObject(invoice) ||
+        extractInvoiceAmountFromObject(invoice)
+    )
+  );
+
   const invoiceCode = safeText(
     first(
+      primaryInvoice ? extractInvoiceCodeFromObject(primaryInvoice) : "",
+
+      detail.numeroFacturaLegal,
+      detail.numeroFacturaSistema,
       detail.invoiceCode,
       detail.invoiceId,
       detail.facturaId,
       detail.factura,
+
+      detail?.invoice?.numeroFacturaLegal,
+      detail?.invoice?.numeroFacturaSistema,
       detail?.invoice?.code,
       detail?.invoice?.id,
+
+      detail?.factura?.numeroFacturaLegal,
+      detail?.factura?.numeroFacturaSistema,
       detail?.factura?.code,
       detail?.factura?.id,
-      detail?.linkedInvoices?.code,
-      detail?.linkedInvoices?.id,
 
-      detail?.raw?.invoiceCode,
-      detail?.raw?.invoiceId,
-      detail?.raw?.facturaId,
-      detail?.raw?.factura,
-      detail?.raw?.facturaRelacionada,
-      detail?.raw?.invoice?.code,
-      detail?.raw?.invoice?.id,
-      detail?.raw?.factura?.code,
-      detail?.raw?.factura?.id,
-      detail?.raw?.linkedInvoices?.code,
-      detail?.raw?.linkedInvoices?.id
+      linked.numeroFacturaLegal,
+      linked.numeroFacturaSistema,
+      linked.primaryInvoiceId,
+      linked.invoiceId,
+      linked.facturaId,
+      linked.code,
+      linked.id,
+
+      raw.numeroFacturaLegal,
+      raw.numeroFacturaSistema,
+      raw.invoiceCode,
+      raw.invoiceId,
+      raw.facturaId,
+      raw.factura,
+      raw.facturaRelacionada,
+
+      raw?.invoice?.numeroFacturaLegal,
+      raw?.invoice?.numeroFacturaSistema,
+      raw?.invoice?.code,
+      raw?.invoice?.id,
+
+      raw?.factura?.numeroFacturaLegal,
+      raw?.factura?.numeroFacturaSistema,
+      raw?.factura?.code,
+      raw?.factura?.id,
+
+      rawLinked.numeroFacturaLegal,
+      rawLinked.numeroFacturaSistema,
+      rawLinked.primaryInvoiceId,
+      rawLinked.invoiceId,
+      rawLinked.facturaId,
+      rawLinked.code,
+      rawLinked.id
     ),
     ""
   );
 
   const amount = first(
+    primaryInvoice ? extractInvoiceAmountFromObject(primaryInvoice) : null,
+
     detail.total,
     detail.amount,
     detail.importe,
@@ -1504,46 +1778,48 @@ function getFacturaRelacionada(detail = {}) {
     detail.importeFacturas,
     detail.invoiceTotal,
 
-    detail.linkedInvoices?.total,
-    detail.linkedInvoices?.amount,
-    detail.linkedInvoices?.importe,
+    linked.total,
+    linked.amount,
+    linked.importe,
 
     detail.meta?.invoicesTotal,
     detail.meta?.invoiceTotal,
 
-    detail?.raw?.total,
-    detail?.raw?.amount,
-    detail?.raw?.importe,
-    detail?.raw?.price,
+    raw.total,
+    raw.amount,
+    raw.importe,
+    raw.price,
 
-    detail?.raw?.facturasTotal,
-    detail?.raw?.invoicesTotal,
-    detail?.raw?.importeFacturas,
-    detail?.raw?.invoiceTotal,
+    raw.facturasTotal,
+    raw.invoicesTotal,
+    raw.importeFacturas,
+    raw.invoiceTotal,
 
-    detail?.raw?.linkedInvoices?.total,
-    detail?.raw?.linkedInvoices?.amount,
-    detail?.raw?.linkedInvoices?.importe,
+    rawLinked.total,
+    rawLinked.amount,
+    rawLinked.importe,
 
-    detail?.raw?.meta?.invoicesTotal,
-    detail?.raw?.meta?.invoiceTotal
+    raw.meta?.invoicesTotal,
+    raw.meta?.invoiceTotal
   );
 
   const currency = safeText(
     first(
+      primaryInvoice ? extractInvoiceCurrencyFromObject(primaryInvoice) : "",
+
       detail.currency,
       detail.moneda,
-      detail.linkedInvoices?.currency,
-      detail.linkedInvoices?.moneda,
+      linked.currency,
+      linked.moneda,
       detail.meta?.invoiceCurrency,
       detail.meta?.currency,
 
-      detail?.raw?.currency,
-      detail?.raw?.moneda,
-      detail?.raw?.linkedInvoices?.currency,
-      detail?.raw?.linkedInvoices?.moneda,
-      detail?.raw?.meta?.invoiceCurrency,
-      detail?.raw?.meta?.currency,
+      raw.currency,
+      raw.moneda,
+      rawLinked.currency,
+      rawLinked.moneda,
+      raw.meta?.invoiceCurrency,
+      raw.meta?.currency,
 
       "EUR"
     ),
@@ -1568,19 +1844,30 @@ function getFacturaRelacionada(detail = {}) {
     first(
       detail.paymentStatus,
       detail.estadoPago,
-      detail.linkedInvoices?.paymentStatus,
-      detail.linkedInvoices?.estadoPago,
-      detail?.raw?.paymentStatus,
-      detail?.raw?.estadoPago,
-      detail?.raw?.linkedInvoices?.paymentStatus,
-      detail?.raw?.linkedInvoices?.estadoPago
+      linked.paymentStatus,
+      linked.estadoPago,
+      raw.paymentStatus,
+      raw.estadoPago,
+      rawLinked.paymentStatus,
+      rawLinked.estadoPago
     )
   );
 
-  if (["paid", "pagada", "pagado", "cobrada"].includes(paymentStatus)) return "Pagado";
-  if (["pending", "pendiente"].includes(paymentStatus)) return "Pendiente";
-  if (["partial", "parcial"].includes(paymentStatus)) return "Parcial";
-  if (["overdue", "vencida"].includes(paymentStatus)) return "Vencido";
+  if (["paid", "pagada", "pagado", "cobrada"].includes(paymentStatus)) {
+    return "Pagado";
+  }
+
+  if (["pending", "pendiente"].includes(paymentStatus)) {
+    return "Pendiente";
+  }
+
+  if (["partial", "parcial"].includes(paymentStatus)) {
+    return "Parcial";
+  }
+
+  if (["overdue", "vencida"].includes(paymentStatus)) {
+    return "Vencido";
+  }
 
   return "No vinculada";
 }
@@ -2479,6 +2766,15 @@ function mergeDetailWithOpenStatus(detail = {}, response = null) {
    TIMELINE NORMALIZATION / CLEANUP
 ========================================================= */
 
+function cleanTimelineText(value = "") {
+  return safeText(value, "")
+    .replace(/\r/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function formatChange(change = {}) {
   const item = safeObject(change);
   const field = safeText(item.field, "").toLowerCase();
@@ -2576,9 +2872,8 @@ function normalizeTimelineEntries(detail = {}) {
         "Actualización"
       );
 
-      let body = safeText(
-        first(item.description, item.detail, item.body, item.message, item.text),
-        ""
+      let body = cleanTimelineText(
+        first(item.description, item.detail, item.body, item.message, item.text, "")
       );
 
       if (type === "created") {
@@ -2589,14 +2884,16 @@ function normalizeTimelineEntries(detail = {}) {
       if (type === "attachments_added") {
         title = "Adjuntos añadidos";
         const changeLines = changes.map(formatChange).filter(Boolean);
-        body = safeText(body || changeLines.join("\n"), "Se añadieron adjuntos.");
+        body = cleanTimelineText(body || changeLines.join("\n"));
+        body = safeText(body, "Se añadieron adjuntos.");
       }
 
       if (type === "update") {
         const changeLines = changes.map(formatChange).filter(Boolean);
+        const changesBody = cleanTimelineText(changeLines.join("\n"));
 
         title = "Actualización";
-        body = changeLines.join("\n");
+        body = cleanTimelineText(changesBody || body);
       }
 
       return {
@@ -2646,9 +2943,8 @@ function normalizeTimelineEntries(detail = {}) {
         kind: "comment",
         type: "comment",
         title: "Comentario",
-        body: safeText(
-          first(item.message, item.text, item.body, item.comment),
-          ""
+        body: cleanTimelineText(
+          first(item.message, item.text, item.body, item.comment, "")
         ),
         author: safeText(
           first(item.byName, item.user, item.author, item.name),
@@ -2796,6 +3092,60 @@ function getFeedbackStyle(type = "info") {
     background:
       linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 85%),
       var(--surface-1, var(--surface-glass));
+  `;
+}
+
+function getAttachmentDownloadIconSvg() {
+  return `
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+      style="display:block;"
+    >
+      <path
+        d="M12 3v11m0 0 4-4m-4 4-4-4"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+      />
+    </svg>
+  `;
+}
+
+function getAttachmentViewIconSvg() {
+  return `
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+      style="display:block;"
+    >
+      <path
+        d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
+        stroke="currentColor"
+        stroke-width="2"
+      />
+    </svg>
   `;
 }
 
@@ -2962,38 +3312,9 @@ function renderAvatar(detail = {}) {
 
 function renderMetaField(label = "", value = "") {
   return `
-    <div
-      style="
-        display:grid;
-        gap:5px;
-        padding:12px;
-        border-radius:14px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-      "
-    >
-      <span
-        style="
-          font-size:10px;
-          color:var(--text-faint, #8b8b8b);
-          text-transform:uppercase;
-          letter-spacing:.08em;
-          font-weight:var(--weight-bold, 700);
-        "
-      >
-        ${escapeHtml(label)}
-      </span>
-
-      <strong
-        style="
-          color:var(--text-strong, #fff);
-          font-size:13px;
-          line-height:1.35;
-          word-break:break-word;
-        "
-      >
-        ${escapeHtml(safeText(value, "—"))}
-      </strong>
+    <div class="incidencias-modal-meta-card">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(safeText(value, "—"))}</strong>
     </div>
   `;
 }
@@ -3006,15 +3327,10 @@ function renderFeedbackBox() {
 
   return `
     <div
-      style="
-        display:grid;
-        gap:5px;
-        padding:12px 14px;
-        border-radius:14px;
-        ${getFeedbackStyle(type)}
-      "
+      class="incidencias-modal-feedback"
+      style="${getFeedbackStyle(type)}"
     >
-      <strong style="color:var(--text-strong); font-size:13px;">
+      <strong>
         ${
           type === "error"
             ? "No se ha podido completar la acción"
@@ -3024,15 +3340,7 @@ function renderFeedbackBox() {
         }
       </strong>
 
-      <span
-        style="
-          color:var(--text-dim);
-          font-size:12px;
-          line-height:1.5;
-        "
-      >
-        ${escapeHtml(message)}
-      </span>
+      <span>${escapeHtml(message)}</span>
     </div>
   `;
 }
@@ -3078,53 +3386,21 @@ function renderPendingFiles() {
 
   if (!files.length) {
     return `
-      <div
-        style="
-          color:var(--text-dim);
-          font-size:12px;
-          line-height:1.45;
-        "
-      >
+      <div class="incidencias-modal-pending-empty">
         No has seleccionado archivos nuevos.
       </div>
     `;
   }
 
   return `
-    <div style="display:grid; gap:8px;">
+    <div class="incidencias-modal-pending-list">
       ${files
         .map(
           (file, index) => `
-            <div
-              style="
-                display:flex;
-                justify-content:space-between;
-                align-items:center;
-                gap:12px;
-                padding:10px 12px;
-                border-radius:12px;
-                border:1px solid var(--border-soft);
-                background:var(--surface-glass);
-              "
-            >
-              <div style="display:grid; gap:4px; min-width:0;">
-                <strong
-                  style="
-                    color:var(--text-strong);
-                    font-size:12px;
-                    line-height:1.35;
-                    word-break:break-word;
-                  "
-                >
-                  ${escapeHtml(file.name || `archivo_${index + 1}`)}
-                </strong>
-
-                <span
-                  style="
-                    color:var(--text-dim);
-                    font-size:11px;
-                  "
-                >
+            <div class="incidencias-modal-pending-file">
+              <div>
+                <strong>${escapeHtml(file.name || `archivo_${index + 1}`)}</strong>
+                <span>
                   ${escapeHtml(
                     [
                       safeText(file.type, ""),
@@ -3140,18 +3416,6 @@ function renderPendingFiles() {
                 type="button"
                 data-modal-action="remove-pending-file"
                 data-file-index="${index}"
-                style="
-                  min-height:32px;
-                  padding:0 10px;
-                  border-radius:10px;
-                  border:1px solid var(--border-soft);
-                  background:transparent;
-                  color:var(--text-dim);
-                  font-size:12px;
-                  font-weight:var(--weight-bold, 700);
-                  cursor:pointer;
-                  flex:0 0 auto;
-                "
               >
                 Quitar
               </button>
@@ -3179,18 +3443,8 @@ function getAttachmentBusyMeta(file = {}) {
 
 function renderInlineSpinner(label = "") {
   return `
-    <span style="display:inline-flex; align-items:center; gap:8px;">
-      <span
-        aria-hidden="true"
-        style="
-          width:14px;
-          height:14px;
-          border-radius:999px;
-          border:2px solid color-mix(in srgb, currentColor 22%, transparent);
-          border-top-color:currentColor;
-          animation:incidenciasModalSpin .8s linear infinite;
-        "
-      ></span>
+    <span class="incidencias-modal-inline-spinner">
+      <span aria-hidden="true"></span>
       ${escapeHtml(label)}
     </span>
   `;
@@ -3198,9 +3452,31 @@ function renderInlineSpinner(label = "") {
 
 function renderAttachmentActionButtons(file = {}) {
   const busy = getAttachmentBusyMeta(file);
+  const isImage = isImageLikeAttachment(file);
 
   return `
     <div class="incidencias-modal-attachment-actions">
+      <button
+        type="button"
+        data-modal-action="open-attachment"
+        data-attachment-id="${escapeHtml(file.id)}"
+        ${busy.isOpening || modalState.isSubmitting ? "disabled" : ""}
+        class="incidencias-modal-view-btn"
+        title="${isImage ? "Ampliar imagen" : "Ver documento"}"
+        aria-label="${isImage ? "Ampliar imagen" : "Ver documento"} ${escapeHtml(file.name || file.filename || "archivo")}"
+      >
+        ${
+          busy.isOpening
+            ? renderInlineSpinner("Abriendo...")
+            : `
+              <span class="incidencias-modal-action-icon">
+                ${getAttachmentViewIconSvg()}
+              </span>
+              <span>${isImage ? "Ampliar" : "Ver"}</span>
+            `
+        }
+      </button>
+
       <button
         type="button"
         data-modal-action="download-attachment"
@@ -3214,10 +3490,10 @@ function renderAttachmentActionButtons(file = {}) {
           busy.isDownloading
             ? renderInlineSpinner("Bajando...")
             : `
-              <span class="incidencias-modal-download-icon">
+              <span class="incidencias-modal-action-icon">
                 ${getAttachmentDownloadIconSvg()}
               </span>
-              <span class="incidencias-modal-download-text">Descargar</span>
+              <span>Descargar</span>
             `
         }
       </button>
@@ -3230,9 +3506,15 @@ function renderAttachmentPreviewSquare(file = {}) {
 
   if (!isImage) {
     return `
-      <div class="incidencias-modal-file-square" aria-hidden="true">
+      <button
+        type="button"
+        data-modal-action="open-attachment"
+        data-attachment-id="${escapeHtml(file.id)}"
+        class="incidencias-modal-file-square"
+        aria-label="Ver ${escapeHtml(file.name || file.filename || "archivo")}"
+      >
         <span>DOC</span>
-      </div>
+      </button>
     `;
   }
 
@@ -3261,14 +3543,27 @@ function renderAttachmentPreviewSquare(file = {}) {
 
   if (!directUrl) {
     return `
-      <div class="incidencias-modal-file-square incidencias-modal-file-square--image" aria-hidden="true">
+      <button
+        type="button"
+        data-modal-action="open-attachment"
+        data-attachment-id="${escapeHtml(file.id)}"
+        class="incidencias-modal-file-square incidencias-modal-file-square--image"
+        aria-label="Ampliar ${escapeHtml(file.name || file.filename || "imagen")}"
+      >
         <span>${loading ? "..." : "IMG"}</span>
-      </div>
+      </button>
     `;
   }
 
   return `
-    <div class="incidencias-modal-image-thumb-wrap">
+    <button
+      type="button"
+      data-modal-action="open-attachment"
+      data-attachment-id="${escapeHtml(file.id)}"
+      class="incidencias-modal-image-thumb-wrap"
+      aria-label="Ampliar ${escapeHtml(file.name || file.filename || "imagen adjunta")}"
+      title="Click para ampliar"
+    >
       <img
         src="${escapeHtml(directUrl)}"
         alt="${escapeHtml(file.name || file.filename || "Imagen adjunta")}"
@@ -3280,104 +3575,69 @@ function renderAttachmentPreviewSquare(file = {}) {
 
       <span class="incidencias-modal-image-thumb-fallback">IMG</span>
 
-      <button
-        type="button"
-        data-modal-action="download-attachment"
-        data-attachment-id="${escapeHtml(file.id)}"
-        class="incidencias-modal-image-download"
-        title="Descargar imagen"
-        aria-label="Descargar imagen"
-      >
-        ${getAttachmentDownloadIconSvg()}
-      </button>
-    </div>
+      <span class="incidencias-modal-image-open-badge">
+        Ampliar
+      </span>
+    </button>
   `;
 }
+
 
 function renderAttachments(detail = {}) {
   const files = getAttachments(detail);
 
   return `
-    <div style="display:grid; gap:12px;">
-      <div
-        style="
-          display:grid;
-          gap:10px;
-          padding:14px;
-          border-radius:16px;
-          border:1px dashed var(--border-soft);
-          background:var(--surface-1, var(--surface-glass));
-        "
-      >
-        <div style="display:grid; gap:5px;">
-          <strong
-            style="
-              color:var(--text-strong);
-              font-size:13px;
-              line-height:1.35;
-            "
-          >
-            Añadir documentos
-          </strong>
+    <div class="incidencias-modal-files-block">
+      <article class="incidencias-modal-add-files-card">
+        <div class="incidencias-modal-add-files-main">
+          <div class="incidencias-modal-add-files-icon" aria-hidden="true">
+            +
+          </div>
 
-          <span
-            style="
-              color:var(--text-dim);
-              font-size:12px;
-              line-height:1.5;
-            "
-          >
-            Puedes adjuntar capturas, PDFs u otros archivos útiles. Se enviarán cuando pulses “Actualizar incidencia”.
-          </span>
+          <div class="incidencias-modal-add-files-copy">
+            <strong>Añadir documentos</strong>
+            <span>
+              Adjunta capturas, PDFs u otros archivos útiles. Se subirán junto con tu actualización.
+            </span>
+          </div>
         </div>
 
         ${renderUploadProgress()}
 
-        <input
-          id="incidencias-modal-attachments-input"
-          type="file"
-          data-modal-field="attachments"
-          multiple
-          ${modalState.isSubmitting ? "disabled" : ""}
-          style="
-            width:100%;
-            color:var(--text-soft);
-          "
-        />
+        <label
+          for="incidencias-modal-attachments-input"
+          class="incidencias-modal-dropzone"
+        >
+          <input
+            id="incidencias-modal-attachments-input"
+            type="file"
+            data-modal-field="attachments"
+            multiple
+            ${modalState.isSubmitting ? "disabled" : ""}
+          />
+
+          <span>Seleccionar archivos</span>
+          <small>Imágenes, PDFs y documentos de soporte</small>
+        </label>
 
         ${renderPendingFiles()}
-      </div>
+      </article>
 
-      <div style="display:grid; gap:8px;">
-        <h3
-          style="
-            margin:0;
-            color:var(--text-strong);
-            font-size:18px;
-            letter-spacing:-.02em;
-          "
-        >
-          Documentos actuales
-        </h3>
+      <section class="incidencias-modal-current-files">
+        <div class="incidencias-modal-section-head">
+          <h3>Documentos actuales</h3>
+          <span>${escapeHtml(String(files.length))} adjunto${files.length === 1 ? "" : "s"}</span>
+        </div>
 
         ${
           !files.length
             ? `
-              <div
-                style="
-                  padding:12px 14px;
-                  border-radius:14px;
-                  border:1px solid var(--border-soft);
-                  background:var(--surface-glass);
-                  color:var(--text-dim);
-                  font-size:12px;
-                "
-              >
+              <div class="incidencias-modal-empty-box">
                 No hay archivos adjuntos en esta incidencia.
               </div>
             `
             : `
-              <div style="display:grid; gap:8px;">
+              <div class="incidencias-modal-attachments-grid">
                 ${files
                   .map(
                     (file) => `
@@ -3386,9 +3646,7 @@ function renderAttachments(detail = {}) {
                           ${renderAttachmentPreviewSquare(file)}
 
                           <div class="incidencias-modal-attachment-copy">
-                            <strong>
-                              ${escapeHtml(file.name)}
-                            </strong>
+                            <strong>${escapeHtml(file.name)}</strong>
 
                             <span>
                               ${escapeHtml(
@@ -3412,7 +3670,7 @@ function renderAttachments(detail = {}) {
               </div>
             `
         }
-      </div>
+      </section>
     </div>
   `;
 }
@@ -3430,6 +3688,8 @@ function renderAttachmentPreview() {
 
   const type = getAttachmentPreviewType(file);
   const size = formatBytes(file.size);
+  const image = isPreviewImage(file);
+  const pdf = isPreviewPdf(file);
 
   const meta = [
     type || "Vista previa",
@@ -3445,13 +3705,19 @@ function renderAttachmentPreview() {
         </div>
 
         <div class="incidencias-modal-preview-actions">
-          <button
-            type="button"
-            data-modal-action="download-preview"
-            class="incidencias-modal-preview-btn"
-          >
-            Descargar
-          </button>
+          ${
+            !image
+              ? `
+                <button
+                  type="button"
+                  data-modal-action="download-preview"
+                  class="incidencias-modal-preview-btn"
+                >
+                  Descargar
+                </button>
+              `
+              : ""
+          }
 
           <button
             type="button"
@@ -3464,9 +3730,9 @@ function renderAttachmentPreview() {
         </div>
       </div>
 
-      <div class="incidencias-modal-preview-frame">
+      <div class="incidencias-modal-preview-frame ${image ? "is-image" : ""}">
         ${
-          isPreviewImage(file)
+          image
             ? `
               <img
                 src="${escapeHtml(url)}"
@@ -3487,7 +3753,7 @@ function renderAttachmentPreview() {
       </div>
 
       ${
-        !isPreviewImage(file) && !isPreviewPdf(file)
+        !image && !pdf
           ? `
             <p class="incidencias-modal-preview-note">
               Si el navegador no puede previsualizar este tipo de archivo, usa “Descargar”.
@@ -3517,7 +3783,7 @@ function renderTimeline(detail = {}) {
           const kind = safeText(entry.kind, "event");
           const type = safeText(entry.type, "update");
           const rawTitle = safeText(entry.title, "");
-          const rawBody = safeText(entry.body, "");
+          const rawBody = cleanTimelineText(entry.body);
 
           const isComment = kind === "comment";
           const isCreated = type === "created";
@@ -3575,8 +3841,7 @@ function renderComposer() {
         <div class="incidencias-modal-composer-copy">
           <h3>Añadir actualización a la incidencia</h3>
           <span>
-            Escribe aquí la nueva información que quieres enviar al equipo técnico.
-            Puedes adjuntar archivos en el bloque inferior antes de actualizar.
+            Escribe la nueva información para el equipo técnico. Puedes adjuntar archivos en el bloque de documentos.
           </span>
         </div>
       </div>
@@ -3600,52 +3865,10 @@ function renderComposer() {
 
 function renderLoadingOverlay(label = "Procesando...") {
   return `
-    <div
-      style="
-        position:absolute;
-        inset:0;
-        display:grid;
-        place-items:center;
-        padding:20px;
-        background:color-mix(in srgb, var(--surface-1, #0f1115) 76%, transparent);
-        backdrop-filter:blur(4px);
-        z-index:5;
-      "
-    >
-      <div
-        style="
-          display:grid;
-          justify-items:center;
-          gap:10px;
-          min-width:min(100%, 220px);
-          padding:16px 18px;
-          border-radius:16px;
-          border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
-          background:linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent), var(--surface-1, var(--surface-glass));
-          box-shadow:0 20px 40px rgba(0,0,0,.22);
-        "
-      >
-        <span
-          aria-hidden="true"
-          style="
-            width:24px;
-            height:24px;
-            border-radius:999px;
-            border:3px solid color-mix(in srgb, var(--accent, #7c5cff) 16%, transparent);
-            border-top-color:var(--accent, #7c5cff);
-            animation:incidenciasModalSpin .8s linear infinite;
-          "
-        ></span>
-
-        <strong
-          style="
-            color:var(--text-strong);
-            font-size:13px;
-            letter-spacing:-.02em;
-          "
-        >
-          ${escapeHtml(label)}
-        </strong>
+    <div class="incidencias-modal-loading-overlay">
+      <div class="incidencias-modal-loading-box">
+        <span aria-hidden="true"></span>
+        <strong>${escapeHtml(label)}</strong>
       </div>
     </div>
   `;
@@ -3655,55 +3878,21 @@ function renderFooter(detail = {}) {
   const ticketId = getTicketId(detail);
 
   return `
-    <div
-      style="
-        display:flex;
-        justify-content:flex-end;
-        gap:10px;
-        padding-top:2px;
-      "
-    >
+    <footer class="incidencias-modal-footer">
       <button
         type="button"
         data-modal-action="submit-update"
         data-ticket-id="${escapeHtml(ticketId)}"
         ${modalState.isSubmitting ? "disabled" : ""}
-        style="
-          min-height:42px;
-          padding:0 16px;
-          border-radius:12px;
-          border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-          background:var(--btn-primary-bg, var(--accent, #7c5cff));
-          color:var(--btn-primary-text, #fff);
-          font-size:13px;
-          font-weight:var(--weight-bold, 700);
-          cursor:${modalState.isSubmitting ? "wait" : "pointer"};
-          opacity:${modalState.isSubmitting ? ".82" : "1"};
-          box-shadow:0 12px 28px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
-        "
+        class="incidencias-modal-submit-btn"
       >
         ${
           modalState.isSubmitting
-            ? `
-              <span style="display:inline-flex; align-items:center; gap:8px;">
-                <span
-                  aria-hidden="true"
-                  style="
-                    width:14px;
-                    height:14px;
-                    border-radius:999px;
-                    border:2px solid rgba(255,255,255,.28);
-                    border-top-color:#fff;
-                    animation:incidenciasModalSpin .8s linear infinite;
-                  "
-                ></span>
-                Actualizando...
-              </span>
-            `
+            ? renderInlineSpinner("Actualizando...")
             : "Actualizar incidencia"
         }
       </button>
-    </div>
+    </footer>
   `;
 }
 
@@ -3756,16 +3945,7 @@ function renderModalInner(detail = {}) {
   return `
     <div
       data-incidencias-modal-overlay="true"
-      style="
-        position:fixed;
-        inset:0;
-        z-index:9999;
-        padding:20px;
-        display:grid;
-        place-items:center;
-        background:rgba(0,0,0,.64);
-        backdrop-filter:blur(8px);
-      "
+      class="incidencias-modal-overlay"
     >
       <div
         id="${PANEL_ID}"
@@ -3774,100 +3954,22 @@ function renderModalInner(detail = {}) {
         aria-modal="true"
         aria-labelledby="incidencias-modal-title"
         tabindex="-1"
-        style="
-          position:relative;
-          width:min(1080px, 100%);
-          max-height:92vh;
-          overflow:auto;
-          border-radius:24px;
-          border:1px solid var(--border-soft, #2b2b2b);
-          background:
-            radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
-            linear-gradient(180deg, var(--surface-2, #151515), var(--surface-1, #121212));
-          box-shadow:0 34px 84px rgba(0,0,0,.40);
-        "
+        class="incidencias-modal-panel"
       >
         ${busyLabel ? renderLoadingOverlay(busyLabel) : ""}
 
-        <div
-          style="
-            padding:18px 18px 14px;
-            border-bottom:1px solid var(--border-soft);
-            display:flex;
-            justify-content:space-between;
-            gap:12px;
-            overflow:visible;
-          "
-        >
-          <div
-            class="incidencias-modal-hero"
-            style="
-              display:flex;
-              gap:13px;
-              align-items:center;
-              flex:1 1 0;
-              min-width:0;
-              max-width:calc(100% - 58px);
-              overflow:visible;
-            "
-          >
+        <header class="incidencias-modal-header">
+          <div class="incidencias-modal-hero">
             ${renderAvatar(item)}
 
-            <div
-              class="incidencias-modal-hero-content"
-              style="
-                display:grid;
-                grid-template-rows:auto auto auto;
-                align-content:center;
-                gap:4px;
-                min-width:0;
-                flex:1 1 auto;
-                min-height:66px;
-                overflow:visible;
-              "
-            >
-              <div
-                class="incidencias-modal-hero-chips"
-                style="
-                  display:flex;
-                  align-items:center;
-                  gap:7px;
-                  flex-wrap:wrap;
-                  min-width:0;
-                  overflow:visible;
-                  min-height:26px;
-                  padding:1px 0;
-                "
-              >
+            <div class="incidencias-modal-hero-content">
+              <div class="incidencias-modal-hero-chips">
                 <button
                   type="button"
                   data-modal-action="copy"
                   data-ticket-id="${escapeHtml(ticketId)}"
                   title="Copiar ID"
-                  style="
-                    display:inline-flex;
-                    align-items:center;
-                    justify-content:center;
-                    flex:0 1 auto;
-                    min-width:0;
-                    max-width:220px;
-                    min-height:24px;
-                    height:24px;
-                    padding:0 9px;
-                    border-radius:999px;
-                    border:1px solid var(--border-soft);
-                    background:var(--surface-glass);
-                    color:var(--text-dim);
-                    font-size:10px;
-                    line-height:1;
-                    font-weight:var(--weight-bold, 700);
-                    letter-spacing:.045em;
-                    text-transform:uppercase;
-                    cursor:pointer;
-                    white-space:nowrap;
-                    overflow:hidden;
-                    text-overflow:ellipsis;
-                  "
+                  class="incidencias-modal-id-chip"
                 >
                   ${escapeHtml(ticketId)}
                 </button>
@@ -3879,156 +3981,117 @@ function renderModalInner(detail = {}) {
               <h2
                 id="incidencias-modal-title"
                 class="incidencias-modal-title"
-                style="
-                  margin:0;
-                  min-width:0;
-                  max-width:100%;
-                  color:var(--text-strong);
-                  font-size:clamp(19px, 1.9vw, 27px);
-                  line-height:1.05;
-                  letter-spacing:-.045em;
-                  font-weight:var(--weight-black, 850);
-                  white-space:normal;
-                  overflow:hidden;
-                  display:-webkit-box;
-                  -webkit-line-clamp:2;
-                  -webkit-box-orient:vertical;
-                "
               >
                 ${escapeHtml(title)}
               </h2>
 
-              <span
-                class="incidencias-modal-updated"
-                style="
-                  display:block;
-                  min-width:0;
-                  color:var(--text-dim);
-                  font-size:12px;
-                  line-height:1.15;
-                  white-space:nowrap;
-                  overflow:hidden;
-                  text-overflow:ellipsis;
-                "
-              >
+              <span class="incidencias-modal-updated">
                 Última actualización ${escapeHtml(updatedAgo)}
               </span>
             </div>
           </div>
 
-          <div
-            style="
-              display:flex;
-              gap:8px;
-              flex-wrap:wrap;
-              align-items:flex-start;
-              flex:0 0 auto;
-            "
+          <button
+            type="button"
+            data-modal-close="true"
+            aria-label="Cerrar modal"
+            ${modalState.isSubmitting ? "disabled" : ""}
+            class="incidencias-modal-close-btn"
           >
-            <button
-              type="button"
-              data-modal-close="true"
-              aria-label="Cerrar modal"
-              ${modalState.isSubmitting ? "disabled" : ""}
-              style="
-                width:40px;
-                height:40px;
-                border:none;
-                border-radius:14px;
-                cursor:${modalState.isSubmitting ? "not-allowed" : "pointer"};
-                font-size:18px;
-                background:var(--surface-glass);
-                color:var(--text-strong);
-                border:1px solid var(--border-soft);
-                opacity:${modalState.isSubmitting ? ".72" : "1"};
-              "
-            >
-              ✕
-            </button>
-          </div>
-        </div>
+            ✕
+          </button>
+        </header>
 
-        <div
-          style="
-            padding:16px 18px 18px;
-            display:grid;
-            gap:16px;
-          "
-        >
+        <main class="incidencias-modal-body">
           ${renderFeedbackBox()}
 
           ${renderAttachmentPreview()}
 
-          <div
-            class="incidencias-modal-meta-grid"
-            style="
-              display:grid;
-              grid-template-columns:repeat(4, minmax(0, 1fr));
-              gap:10px;
-            "
-          >
+          <section class="incidencias-modal-description-section">
+            <div class="incidencias-modal-section-head">
+              <h3>Descripción de la incidencia</h3>
+              <span>Detalle inicial</span>
+            </div>
+
+            <div class="incidencias-modal-description-box">
+              ${escapeHtml(description)}
+            </div>
+          </section>
+
+          <div class="incidencias-modal-meta-grid">
             ${renderMetaField("Técnico", tecnico)}
             ${renderMetaField("Factura", facturaRelacionada)}
             ${renderMetaField("Creada", createdAt)}
             ${renderMetaField("Adjuntos", String(attachments.length))}
           </div>
 
-          <section style="display:grid; gap:8px;">
-            <h3
-              style="
-                margin:0;
-                color:var(--text-strong);
-                font-size:18px;
-                letter-spacing:-.02em;
-              "
-            >
-              Descripción de la incidencia
-            </h3>
-
-            <div
-              style="
-                padding:14px;
-                border-radius:16px;
-                background:var(--surface-glass);
-                border:1px solid var(--border-soft);
-                color:var(--text-soft);
-                font-size:13px;
-                line-height:1.65;
-                white-space:pre-wrap;
-                word-break:break-word;
-              "
-            >
-              ${escapeHtml(description)}
-            </div>
-          </section>
-
           ${renderComposer(item)}
 
-          <section style="display:grid; gap:8px;">
-            ${renderAttachments(item)}
-          </section>
+          ${renderAttachments(item)}
 
-          <section style="display:grid; gap:8px;">
-            <h3
-              style="
-                margin:0;
-                color:var(--text-strong);
-                font-size:18px;
-                letter-spacing:-.02em;
-              "
-            >
-              Historial y actividad
-            </h3>
+          <section class="incidencias-modal-history-section">
+            <div class="incidencias-modal-section-head">
+              <h3>Historial y actividad</h3>
+              <span>Timeline</span>
+            </div>
 
             ${renderTimeline(item)}
           </section>
 
           ${renderFooter(item)}
-        </div>
+        </main>
 
         <style>
           @keyframes incidenciasModalSpin {
             to { transform: rotate(360deg); }
+          }
+
+          .incidencias-modal-overlay {
+            position:fixed;
+            inset:0;
+            z-index:var(--z-modal, 9999);
+            padding:20px;
+            display:grid;
+            place-items:center;
+            background:var(--overlay-bg, rgba(0,0,0,.64));
+            backdrop-filter:var(--overlay-blur, blur(10px));
+          }
+
+          .incidencias-modal-panel {
+            position:relative;
+            width:min(1120px, 100%);
+            max-height:92vh;
+            overflow:auto;
+            border-radius:var(--modal-radius, 24px);
+            border:1px solid var(--border-soft, #2b2b2b);
+            background:
+              radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
+              linear-gradient(180deg, var(--surface-2, #151515), var(--surface-1, #121212));
+            box-shadow:var(--shadow-modal, 0 34px 84px rgba(0,0,0,.40));
+            scrollbar-width:thin;
+            scrollbar-color:var(--scrollbar-thumb) transparent;
+          }
+
+          .incidencias-modal-panel::-webkit-scrollbar {
+            width:var(--scrollbar-size, 10px);
+          }
+
+          .incidencias-modal-panel::-webkit-scrollbar-track {
+            background:transparent;
+          }
+
+          .incidencias-modal-panel::-webkit-scrollbar-thumb {
+            background:var(--scrollbar-thumb);
+            border-radius:999px;
+          }
+
+          .incidencias-modal-header {
+            padding:19px 18px 15px;
+            border-bottom:1px solid var(--border-soft);
+            display:flex;
+            justify-content:space-between;
+            gap:14px;
+            overflow:visible;
           }
 
           .incidencias-modal-hero,
@@ -4038,24 +4101,119 @@ function renderModalInner(detail = {}) {
           }
 
           .incidencias-modal-hero {
-            min-height:66px;
+            display:flex;
+            gap:14px;
+            align-items:center;
+            flex:1 1 0;
+            min-width:0;
+            min-height:74px;
+            max-width:calc(100% - 58px);
           }
 
           .incidencias-modal-hero-content {
-            transform:translateY(-1px);
-            max-height:none !important;
-            min-height:66px !important;
+            display:grid;
+            align-content:center;
+            gap:5px;
+            min-width:0;
+            flex:1 1 auto;
+            min-height:74px;
+            padding:2px 0 4px;
           }
 
           .incidencias-modal-hero-chips {
-            height:auto !important;
-            min-height:26px !important;
-            align-items:center !important;
+            display:flex;
+            align-items:center;
+            gap:7px;
+            flex-wrap:wrap;
+            min-width:0;
+            min-height:27px;
+            padding:1px 0;
           }
 
-          .incidencias-modal-hero-chips > * {
-            min-height:24px !important;
-            height:24px !important;
+          .incidencias-modal-id-chip {
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            flex:0 1 auto;
+            min-width:0;
+            max-width:220px;
+            min-height:24px;
+            height:24px;
+            padding:0 9px;
+            border-radius:999px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+            color:var(--text-dim);
+            font-size:10px;
+            line-height:1;
+            font-weight:var(--weight-bold, 700);
+            letter-spacing:.045em;
+            text-transform:uppercase;
+            cursor:pointer;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+          }
+
+          .incidencias-modal-title {
+            margin:0;
+            min-width:0;
+            max-width:100%;
+            color:var(--text-strong);
+            font-size:clamp(20px, 1.9vw, 28px);
+            line-height:1.18;
+            letter-spacing:-.045em;
+            font-weight:var(--weight-black, 850);
+            white-space:normal;
+            overflow:hidden;
+            display:-webkit-box;
+            -webkit-line-clamp:2;
+            -webkit-box-orient:vertical;
+            padding-bottom:3px;
+          }
+
+          .incidencias-modal-updated {
+            display:block;
+            min-width:0;
+            color:var(--text-dim);
+            font-size:12px;
+            line-height:1.25;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+          }
+
+          .incidencias-modal-close-btn {
+            width:40px;
+            height:40px;
+            border-radius:14px;
+            cursor:pointer;
+            font-size:18px;
+            background:var(--surface-glass);
+            color:var(--text-strong);
+            border:1px solid var(--border-soft);
+            flex:0 0 auto;
+            transition:
+              transform var(--duration-fast, .12s) var(--ease-standard, ease),
+              background var(--duration-fast, .12s) var(--ease-standard, ease),
+              border-color var(--duration-fast, .12s) var(--ease-standard, ease);
+          }
+
+          .incidencias-modal-close-btn:hover {
+            transform:translateY(-1px);
+            background:var(--surface-hover-strong);
+            border-color:var(--border-default);
+          }
+
+          .incidencias-modal-close-btn:disabled {
+            cursor:not-allowed;
+            opacity:.72;
+          }
+
+          .incidencias-modal-body {
+            padding:16px 18px 18px;
+            display:grid;
+            gap:16px;
           }
 
           .incidencias-modal-avatar {
@@ -4091,6 +4249,109 @@ function renderModalInner(detail = {}) {
 
           #${PANEL_ID} [data-modal-avatar-fallback="true"] > span {
             display:grid !important;
+          }
+
+          .incidencias-modal-section-head {
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:12px;
+            flex-wrap:wrap;
+          }
+
+          .incidencias-modal-section-head h3 {
+            margin:0;
+            color:var(--text-strong);
+            font-size:18px;
+            line-height:1.25;
+            letter-spacing:-.02em;
+          }
+
+          .incidencias-modal-section-head span {
+            color:var(--text-dim);
+            font-size:11px;
+            line-height:1.2;
+            font-weight:var(--weight-bold, 700);
+            letter-spacing:.06em;
+            text-transform:uppercase;
+          }
+
+          .incidencias-modal-description-section,
+          .incidencias-modal-history-section {
+            display:grid;
+            gap:8px;
+          }
+
+          .incidencias-modal-description-box {
+            padding:14px;
+            border-radius:16px;
+            background:var(--surface-glass);
+            border:1px solid var(--border-soft);
+            color:var(--text-soft);
+            font-size:13px;
+            line-height:1.62;
+            white-space:pre-wrap;
+            word-break:break-word;
+          }
+
+          .incidencias-modal-meta-grid {
+            display:grid;
+            grid-template-columns:repeat(4, minmax(0, 1fr));
+            gap:10px;
+          }
+
+          .incidencias-modal-meta-card {
+            display:grid;
+            gap:5px;
+            padding:12px;
+            border-radius:14px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-1, var(--surface-glass));
+            transition:
+              transform var(--duration-fast, .12s) var(--ease-standard, ease),
+              border-color var(--duration-fast, .12s) var(--ease-standard, ease),
+              box-shadow var(--duration-fast, .12s) var(--ease-standard, ease),
+              background var(--duration-fast, .12s) var(--ease-standard, ease);
+          }
+
+          .incidencias-modal-meta-card:hover {
+            transform:translateY(-2px);
+            border-color:var(--border-default);
+            background:var(--surface-hover);
+            box-shadow:var(--shadow-sm);
+          }
+
+          .incidencias-modal-meta-card span {
+            font-size:10px;
+            color:var(--text-faint, #8b8b8b);
+            text-transform:uppercase;
+            letter-spacing:.08em;
+            font-weight:var(--weight-bold, 700);
+          }
+
+          .incidencias-modal-meta-card strong {
+            color:var(--text-strong, #fff);
+            font-size:13px;
+            line-height:1.35;
+            word-break:break-word;
+          }
+
+          .incidencias-modal-feedback {
+            display:grid;
+            gap:5px;
+            padding:12px 14px;
+            border-radius:14px;
+          }
+
+          .incidencias-modal-feedback strong {
+            color:var(--text-strong);
+            font-size:13px;
+          }
+
+          .incidencias-modal-feedback span {
+            color:var(--text-dim);
+            font-size:12px;
+            line-height:1.5;
           }
 
           .incidencias-modal-preview {
@@ -4147,16 +4408,31 @@ function renderModalInner(detail = {}) {
             font-size:12px;
             font-weight:var(--weight-bold, 700);
             cursor:pointer;
+            transition:
+              transform var(--duration-fast, .12s) var(--ease-standard, ease),
+              background var(--duration-fast, .12s) var(--ease-standard, ease),
+              border-color var(--duration-fast, .12s) var(--ease-standard, ease);
+          }
+
+          .incidencias-modal-preview-btn:hover {
+            transform:translateY(-1px);
+            background:var(--surface-hover-strong);
+            border-color:var(--border-default);
           }
 
           .incidencias-modal-preview-frame {
             width:100%;
-            height:min(58vh, 640px);
-            min-height:360px;
+            height:min(68vh, 760px);
+            min-height:460px;
             overflow:hidden;
             border-radius:15px;
             border:1px solid var(--border-soft);
             background:rgba(0,0,0,.08);
+          }
+
+          .incidencias-modal-preview-frame.is-image {
+            height:min(72vh, 820px);
+            min-height:520px;
           }
 
           .incidencias-modal-preview-iframe {
@@ -4227,8 +4503,9 @@ function renderModalInner(detail = {}) {
             margin:0;
             color:var(--text-strong);
             font-size:18px;
-            line-height:1.15;
+            line-height:1.2;
             letter-spacing:-.025em;
+            padding-bottom:2px;
           }
 
           .incidencias-modal-composer-copy span,
@@ -4270,6 +4547,172 @@ function renderModalInner(detail = {}) {
             box-shadow:
               0 0 0 4px color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent),
               inset 0 1px 0 rgba(255,255,255,.06);
+          }
+
+          .incidencias-modal-files-block {
+            display:grid;
+            gap:12px;
+          }
+
+          .incidencias-modal-add-files-card {
+            display:grid;
+            gap:12px;
+            padding:14px;
+            border-radius:18px;
+            border:1px dashed color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
+            background:
+              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 5%, transparent), transparent 92%),
+              var(--surface-1, var(--surface-glass));
+            transition:
+              transform var(--duration-fast, .12s) var(--ease-standard, ease),
+              border-color var(--duration-fast, .12s) var(--ease-standard, ease),
+              box-shadow var(--duration-fast, .12s) var(--ease-standard, ease),
+              background var(--duration-fast, .12s) var(--ease-standard, ease);
+          }
+
+          .incidencias-modal-add-files-card:hover {
+            transform:translateY(-2px);
+            border-color:color-mix(in srgb, var(--accent, #7c5cff) 38%, var(--border-soft));
+            box-shadow:var(--shadow-sm);
+          }
+
+          .incidencias-modal-add-files-main {
+            display:flex;
+            align-items:flex-start;
+            gap:12px;
+          }
+
+          .incidencias-modal-add-files-icon {
+            width:34px;
+            height:34px;
+            flex:0 0 34px;
+            border-radius:13px;
+            display:grid;
+            place-items:center;
+            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft));
+            background:color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent);
+            color:var(--accent, #7c5cff);
+            font-size:22px;
+            line-height:1;
+            font-weight:var(--weight-black, 800);
+          }
+
+          .incidencias-modal-add-files-copy {
+            display:grid;
+            gap:4px;
+            min-width:0;
+          }
+
+          .incidencias-modal-add-files-copy strong {
+            color:var(--text-strong);
+            font-size:15px;
+            line-height:1.3;
+            font-weight:var(--weight-bold, 700);
+          }
+
+          .incidencias-modal-add-files-copy span {
+            color:var(--text-dim);
+            font-size:12px;
+            line-height:1.5;
+          }
+
+          .incidencias-modal-dropzone {
+            position:relative;
+            min-height:74px;
+            display:grid;
+            place-items:center;
+            gap:4px;
+            padding:14px;
+            border-radius:16px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+            color:var(--text-soft);
+            cursor:pointer;
+            text-align:center;
+            transition:
+              transform var(--duration-fast, .12s) var(--ease-standard, ease),
+              background var(--duration-fast, .12s) var(--ease-standard, ease),
+              border-color var(--duration-fast, .12s) var(--ease-standard, ease);
+          }
+
+          .incidencias-modal-dropzone:hover {
+            transform:translateY(-1px);
+            border-color:color-mix(in srgb, var(--accent, #7c5cff) 28%, var(--border-soft));
+            background:var(--surface-hover);
+          }
+
+          .incidencias-modal-dropzone input {
+            position:absolute;
+            inline-size:1px;
+            block-size:1px;
+            opacity:0;
+            pointer-events:none;
+          }
+
+          .incidencias-modal-dropzone span {
+            color:var(--text-strong);
+            font-size:13px;
+            line-height:1.3;
+            font-weight:var(--weight-bold, 700);
+          }
+
+          .incidencias-modal-dropzone small {
+            color:var(--text-dim);
+            font-size:11px;
+            line-height:1.35;
+          }
+
+          .incidencias-modal-pending-empty {
+            color:var(--text-dim);
+            font-size:12px;
+            line-height:1.45;
+          }
+
+          .incidencias-modal-pending-list {
+            display:grid;
+            gap:8px;
+          }
+
+          .incidencias-modal-pending-file {
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            gap:12px;
+            padding:10px 12px;
+            border-radius:12px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+          }
+
+          .incidencias-modal-pending-file > div {
+            display:grid;
+            gap:4px;
+            min-width:0;
+          }
+
+          .incidencias-modal-pending-file strong {
+            color:var(--text-strong);
+            font-size:12px;
+            line-height:1.35;
+            word-break:break-word;
+          }
+
+          .incidencias-modal-pending-file span {
+            color:var(--text-dim);
+            font-size:11px;
+          }
+
+          .incidencias-modal-pending-file button {
+            min-height:32px;
+            padding:0 10px;
+            border-radius:10px;
+            border:1px solid var(--border-soft);
+            background:transparent;
+            color:var(--text-dim);
+            font-size:12px;
+            font-weight:var(--weight-bold, 700);
+            cursor:pointer;
+            flex:0 0 auto;
           }
 
           .incidencias-modal-upload-progress {
@@ -4317,6 +4760,25 @@ function renderModalInner(detail = {}) {
             line-height:1.3;
           }
 
+          .incidencias-modal-current-files {
+            display:grid;
+            gap:8px;
+          }
+
+          .incidencias-modal-empty-box {
+            padding:12px 14px;
+            border-radius:14px;
+            border:1px solid var(--border-soft);
+            background:var(--surface-glass);
+            color:var(--text-dim);
+            font-size:12px;
+          }
+
+          .incidencias-modal-attachments-grid {
+            display:grid;
+            gap:8px;
+          }
+
           .incidencias-modal-attachment-card {
             width:100%;
             display:block;
@@ -4324,11 +4786,23 @@ function renderModalInner(detail = {}) {
             border-radius:16px;
             border:1px solid var(--border-soft);
             background:var(--surface-glass);
+            transition:
+              transform var(--duration-fast, .12s) var(--ease-standard, ease),
+              border-color var(--duration-fast, .12s) var(--ease-standard, ease),
+              box-shadow var(--duration-fast, .12s) var(--ease-standard, ease),
+              background var(--duration-fast, .12s) var(--ease-standard, ease);
+          }
+
+          .incidencias-modal-attachment-card:hover {
+            transform:translateY(-2px);
+            border-color:color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
+            box-shadow:var(--shadow-sm);
+            background:var(--surface-hover);
           }
 
           .incidencias-modal-attachment-row {
             display:grid;
-            grid-template-columns:74px minmax(0, 1fr) auto;
+            grid-template-columns:86px minmax(0, 1fr) auto;
             gap:12px;
             align-items:center;
           }
@@ -4365,9 +4839,9 @@ function renderModalInner(detail = {}) {
           .incidencias-modal-file-square,
           .incidencias-modal-image-thumb-wrap {
             position:relative;
-            width:64px;
-            height:64px;
-            border-radius:15px;
+            width:78px;
+            height:78px;
+            border-radius:16px;
             overflow:hidden;
             border:1px solid var(--border-soft);
             background:
@@ -4379,6 +4853,19 @@ function renderModalInner(detail = {}) {
             font-size:11px;
             font-weight:var(--weight-black, 800);
             letter-spacing:.08em;
+            cursor:pointer;
+            padding:0;
+            transition:
+              transform var(--duration-fast, .12s) var(--ease-standard, ease),
+              border-color var(--duration-fast, .12s) var(--ease-standard, ease),
+              box-shadow var(--duration-fast, .12s) var(--ease-standard, ease);
+          }
+
+          .incidencias-modal-file-square:hover,
+          .incidencias-modal-image-thumb-wrap:hover {
+            transform:translateY(-2px);
+            border-color:color-mix(in srgb, var(--accent, #7c5cff) 34%, var(--border-soft));
+            box-shadow:var(--shadow-sm);
           }
 
           .incidencias-modal-file-square--image {
@@ -4408,22 +4895,36 @@ function renderModalInner(detail = {}) {
             background:var(--surface-1, var(--surface-glass));
           }
 
-          .incidencias-modal-image-download {
+          .incidencias-modal-image-open-badge {
             position:absolute;
-            right:5px;
-            bottom:5px;
-            width:28px;
-            height:28px;
-            border-radius:10px;
-            border:1px solid rgba(255,255,255,.36);
-            background:rgba(0,0,0,.52);
-            color:#fff;
+            left:6px;
+            right:6px;
+            bottom:6px;
+            min-height:22px;
             display:grid;
             place-items:center;
-            cursor:pointer;
+            border-radius:999px;
+            background:rgba(0,0,0,.52);
+            color:#fff;
+            font-size:10px;
+            line-height:1;
+            font-weight:var(--weight-bold, 700);
+            letter-spacing:.04em;
+            text-transform:uppercase;
             backdrop-filter:blur(8px);
+            opacity:0;
+            transform:translateY(4px);
+            transition:
+              opacity var(--duration-fast, .12s) var(--ease-standard, ease),
+              transform var(--duration-fast, .12s) var(--ease-standard, ease);
           }
 
+          .incidencias-modal-image-thumb-wrap:hover .incidencias-modal-image-open-badge {
+            opacity:1;
+            transform:translateY(0);
+          }
+
+          .incidencias-modal-view-btn,
           .incidencias-modal-download-btn {
             min-height:34px;
             padding:0 12px;
@@ -4438,19 +4939,45 @@ function renderModalInner(detail = {}) {
             align-items:center;
             justify-content:center;
             gap:7px;
+            transition:
+              transform var(--duration-fast, .12s) var(--ease-standard, ease),
+              background var(--duration-fast, .12s) var(--ease-standard, ease),
+              border-color var(--duration-fast, .12s) var(--ease-standard, ease);
           }
 
-          .incidencias-modal-download-btn:disabled,
-          .incidencias-modal-image-download:disabled {
+          .incidencias-modal-view-btn:hover,
+          .incidencias-modal-download-btn:hover {
+            transform:translateY(-1px);
+            border-color:color-mix(in srgb, var(--accent, #7c5cff) 36%, var(--border-soft));
+            background:color-mix(in srgb, var(--accent, #7c5cff) 15%, transparent);
+          }
+
+          .incidencias-modal-view-btn:disabled,
+          .incidencias-modal-download-btn:disabled {
             cursor:wait;
             opacity:.74;
           }
 
-          .incidencias-modal-download-icon {
+          .incidencias-modal-action-icon {
             display:inline-grid;
             place-items:center;
             width:15px;
             height:15px;
+          }
+
+          .incidencias-modal-inline-spinner {
+            display:inline-flex;
+            align-items:center;
+            gap:8px;
+          }
+
+          .incidencias-modal-inline-spinner > span {
+            width:14px;
+            height:14px;
+            border-radius:999px;
+            border:2px solid color-mix(in srgb, currentColor 22%, transparent);
+            border-top-color:currentColor;
+            animation:incidenciasModalSpin .8s linear infinite;
           }
 
           .incidencias-timeline-empty {
@@ -4481,14 +5008,14 @@ function renderModalInner(detail = {}) {
               var(--surface-glass);
             box-shadow:0 10px 24px rgba(0,0,0,.035);
             transition:
-              transform .16s ease,
-              border-color .16s ease,
-              box-shadow .16s ease,
-              background .16s ease;
+              transform var(--duration-fast, .12s) var(--ease-standard, ease),
+              border-color var(--duration-fast, .12s) var(--ease-standard, ease),
+              box-shadow var(--duration-fast, .12s) var(--ease-standard, ease),
+              background var(--duration-fast, .12s) var(--ease-standard, ease);
           }
 
           .incidencias-timeline-card:hover {
-            transform:translateY(-1px);
+            transform:translateY(-2px);
             border-color:color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
             box-shadow:0 14px 30px rgba(0,0,0,.055);
           }
@@ -4580,6 +5107,81 @@ function renderModalInner(detail = {}) {
             font-variant-numeric:tabular-nums;
           }
 
+          .incidencias-modal-footer {
+            display:flex;
+            justify-content:flex-end;
+            gap:10px;
+            padding-top:2px;
+          }
+
+          .incidencias-modal-submit-btn {
+            min-height:42px;
+            padding:0 16px;
+            border-radius:12px;
+            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
+            background:var(--btn-primary-bg, var(--accent, #7c5cff));
+            color:var(--btn-primary-text, #fff);
+            font-size:13px;
+            font-weight:var(--weight-bold, 700);
+            cursor:pointer;
+            box-shadow:var(--btn-primary-shadow, 0 12px 28px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent));
+            transition:
+              transform var(--duration-fast, .12s) var(--ease-standard, ease),
+              filter var(--duration-fast, .12s) var(--ease-standard, ease),
+              box-shadow var(--duration-fast, .12s) var(--ease-standard, ease);
+          }
+
+          .incidencias-modal-submit-btn:hover {
+            transform:translateY(-1px);
+            filter:brightness(1.04);
+          }
+
+          .incidencias-modal-submit-btn:disabled {
+            cursor:wait;
+            opacity:.82;
+          }
+
+          .incidencias-modal-loading-overlay {
+            position:absolute;
+            inset:0;
+            display:grid;
+            place-items:center;
+            padding:20px;
+            background:color-mix(in srgb, var(--surface-1, #0f1115) 76%, transparent);
+            backdrop-filter:blur(4px);
+            z-index:5;
+          }
+
+          .incidencias-modal-loading-box {
+            display:grid;
+            justify-items:center;
+            gap:10px;
+            min-width:min(100%, 220px);
+            padding:16px 18px;
+            border-radius:16px;
+            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
+            background:
+              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent),
+              var(--surface-1, var(--surface-glass));
+            box-shadow:0 20px 40px rgba(0,0,0,.22);
+          }
+
+          .incidencias-modal-loading-box > span {
+            width:24px;
+            height:24px;
+            border-radius:999px;
+            border:3px solid color-mix(in srgb, var(--accent, #7c5cff) 16%, transparent);
+            border-top-color:var(--accent, #7c5cff);
+            animation:incidenciasModalSpin .8s linear infinite;
+          }
+
+          .incidencias-modal-loading-box strong {
+            color:var(--text-strong);
+            font-size:13px;
+            line-height:1.25;
+            letter-spacing:-.02em;
+          }
+
           [data-theme="light"] #${PANEL_ID}{
             background:
               radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
@@ -4587,10 +5189,6 @@ function renderModalInner(detail = {}) {
             box-shadow:
               0 30px 70px rgba(15,23,42,.14),
               0 0 0 1px rgba(255,255,255,.65) inset;
-          }
-
-          [data-theme="light"] #${PANEL_ID} [style*="background:var(--surface-glass)"]{
-            backdrop-filter:none;
           }
 
           [data-theme="light"] .incidencias-modal-upload-progress-track {
@@ -4603,7 +5201,7 @@ function renderModalInner(detail = {}) {
             }
 
             .incidencias-modal-attachment-row {
-              grid-template-columns:64px minmax(0, 1fr) !important;
+              grid-template-columns:78px minmax(0, 1fr) !important;
             }
 
             .incidencias-modal-attachment-actions {
@@ -4613,7 +5211,7 @@ function renderModalInner(detail = {}) {
           }
 
           @media (max-width: 720px) {
-            [data-incidencias-modal-overlay="true"] {
+            .incidencias-modal-overlay {
               padding:10px !important;
             }
 
@@ -4627,26 +5225,19 @@ function renderModalInner(detail = {}) {
 
             .incidencias-modal-hero {
               gap:11px !important;
-              min-height:58px !important;
+              min-height:66px !important;
               align-items:center !important;
               max-width:calc(100% - 50px) !important;
             }
 
             .incidencias-modal-hero-content {
-              min-height:58px !important;
-              max-height:none !important;
-              overflow:visible !important;
-              gap:3px !important;
-            }
-
-            .incidencias-modal-hero-chips {
-              height:auto !important;
-              min-height:26px !important;
+              min-height:66px !important;
+              gap:4px !important;
             }
 
             .incidencias-modal-title {
               font-size:clamp(18px, 5.4vw, 23px) !important;
-              line-height:1.05 !important;
+              line-height:1.18 !important;
             }
 
             .incidencias-modal-updated {
@@ -4668,20 +5259,21 @@ function renderModalInner(detail = {}) {
               text-align:left;
             }
 
-            .incidencias-modal-preview-frame {
-              height:52vh;
-              min-height:280px;
+            .incidencias-modal-preview-frame,
+            .incidencias-modal-preview-frame.is-image {
+              height:62vh;
+              min-height:360px;
             }
 
             .incidencias-modal-attachment-row {
-              grid-template-columns:58px minmax(0, 1fr) !important;
+              grid-template-columns:68px minmax(0, 1fr) !important;
             }
 
             .incidencias-modal-file-square,
             .incidencias-modal-image-thumb-wrap {
-              width:54px;
-              height:54px;
-              border-radius:13px;
+              width:62px;
+              height:62px;
+              border-radius:14px;
             }
           }
 
@@ -4690,11 +5282,13 @@ function renderModalInner(detail = {}) {
               grid-template-columns: 1fr !important;
             }
 
-            .incidencias-modal-composer-head {
+            .incidencias-modal-composer-head,
+            .incidencias-modal-add-files-main {
               gap:10px;
             }
 
-            .incidencias-modal-composer-icon {
+            .incidencias-modal-composer-icon,
+            .incidencias-modal-add-files-icon {
               width:30px;
               height:30px;
               flex-basis:30px;
@@ -4705,6 +5299,12 @@ function renderModalInner(detail = {}) {
             .incidencias-modal-comment-textarea {
               min-height:128px;
               font-size:13px;
+            }
+
+            .incidencias-modal-preview-frame,
+            .incidencias-modal-preview-frame.is-image {
+              height:58vh;
+              min-height:300px;
             }
           }
         </style>

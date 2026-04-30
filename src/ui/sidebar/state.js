@@ -1150,9 +1150,13 @@ function getCurrentPublicPathCandidates(AppCore, options = {}) {
   };
 
   /*
-    La URL visible va primero porque AppCore.state.publicPath puede ir
-    un tick tarde durante router render o rutas con /@username.
+    Priorizamos SIEMPRE la URL visible del navegador primero.
+    En ciertos clicks de sidebar, algunos payloads/eventos pueden traer
+    la ruta anterior durante 1 tick; si esos valores van primero, el
+    activo puede quedarse en el item viejo (p.ej. Incidencias en /facturas).
   */
+  push(getBrowserPublicPath());
+
   push(opts.route);
   push(opts.path);
   push(opts.publicPath);
@@ -1164,8 +1168,6 @@ function getCurrentPublicPathCandidates(AppCore, options = {}) {
   push(opts.payload?.to);
   push(opts.payload?.url);
   push(opts.payload?.route);
-
-  push(getBrowserPublicPath());
 
   push(AppCore?.state?.publicPath);
   push(AppCore?.state?.route);

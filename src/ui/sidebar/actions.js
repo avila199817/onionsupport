@@ -130,12 +130,18 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
   const name = safeText(eventName, "");
   if (!name) return false;
 
-  let emitted = false;
-
   try {
-    AppCore?.events?.emit?.(name, payload);
-    emitted = true;
-  } catch {}
+    if (isFunction(AppCore?.events?.emit)) {
+      AppCore.events.emit(name, payload);
+      return true;
+    }
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      `AppCore.events.emit("${name}") falló`,
+      error
+    );
+  }
 
   try {
     if (isBrowser()) {
@@ -145,11 +151,11 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
         })
       );
 
-      emitted = true;
+      return true;
     }
   } catch {}
 
-  return emitted;
+  return false;
 }
 
 function safeSetLoading(AppCore, value = false) {

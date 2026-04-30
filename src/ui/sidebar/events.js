@@ -626,6 +626,38 @@ function getDropdownNavigationElement(target = null) {
   ) || null;
 }
 
+function setOptimisticSidebarActiveItem(sidebarMenu = null, item = null) {
+  if (!sidebarMenu || !item) {
+    return false;
+  }
+
+  try {
+    const items = Array.from(
+      sidebarMenu.querySelectorAll(".menu-item, [data-sidebar-nav='true']")
+    );
+
+    for (const candidate of items) {
+      try {
+        candidate.classList?.remove?.("active", "is-active", "router-active");
+        candidate.removeAttribute?.("aria-current");
+        if (candidate.dataset) {
+          delete candidate.dataset.active;
+        }
+      } catch {}
+    }
+
+    item.classList?.add?.("active", "is-active", "router-active");
+    item.setAttribute?.("aria-current", "page");
+    if (item.dataset) {
+      item.dataset.active = "true";
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /* ======================================================
    EVENT DEDUPE
 ====================================================== */
@@ -1540,6 +1572,11 @@ export function handleDocumentClick({
       }
     );
 
+    setOptimisticSidebarActiveItem(
+      sidebarMenu,
+      sidebarNav
+    );
+
     void navigateFromSidebar({
       AppCore,
       Router:
@@ -1718,6 +1755,11 @@ export function handleSidebarMenuClick({
       source:
         "sidebar-menu",
     }
+  );
+
+  setOptimisticSidebarActiveItem(
+    sidebarMenu,
+    link
   );
 
   void navigateFromSidebar({

@@ -2,14 +2,23 @@
    Onion SPA - Facturas Create Modal
    Archivo: src/views/facturas/facturas.create.modal.js
 
-   FACTURAS EXPERIENCE PRO · CREATE MODAL · SIMPLE CONNECTOR
+   FACTURAS EXPERIENCE PRO · CREATE MODAL · COSMOS/BLOB ALIGNED · GOD MODE
 
-   RESPONSABILIDADES:
-   - abrir/cerrar modal simple de creación de factura
+   Responsabilidades:
+   - abrir/cerrar modal premium de creación de factura
    - buscar cliente/usuario objetivo
-   - crear factura básica desde panel admin
-   - emitir facturas:create:success para refrescar la vista
+   - buscar incidencia/ticket vinculado obligatorio
+   - crear factura desde panel admin alineada con backend v3
+   - enviar payload compatible con /router/facturas/factura_create_admin.js
+   - soportar factura con:
+       clienteId
+       ticketId / incidenciaId
+       fechaEmision / fechaFacturaLegal / fechaServicio
+       lineas
+       sendEmail
+   - emitir facturas:create:success para refrescar vista
    - evitar doble submit y doble binding
+   - exponer bridge global para abrir desde cualquier vista
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -23,12 +32,21 @@ const PANEL_ID = "facturas-create-modal-panel";
 
 const FACTURAS_CREATE_ENDPOINT = "/api/facturas";
 
-const SEARCH_ENDPOINTS = Object.freeze([
+const CLIENT_SEARCH_ENDPOINTS = Object.freeze([
   "/api/search/clientes",
   "/api/clientes/search",
   "/api/search/users",
   "/api/users/search",
   "/api/usuarios/search",
+]);
+
+const TICKET_SEARCH_ENDPOINTS = Object.freeze([
+  "/api/search/tickets",
+  "/api/search/incidencias",
+  "/api/tickets/search",
+  "/api/incidencias/search",
+  "/api/tickets",
+  "/api/incidencias",
 ]);
 
 const SEARCH_LIMIT = 8;
@@ -42,17 +60,24 @@ const DEFAULT_FORM = Object.freeze({
   clienteNombre: "",
   clienteEmail: "",
 
-  concepto: "",
+  ticketId: "",
+  incidenciaId: "",
+  incidenciaSubject: "",
+
+  concepto: "Servicios de soporte y asistencia técnica informática",
   descripcion: "",
   cantidad: 1,
-  precioUnitario: 0,
+  precioUnitario: 20,
 
   fechaFactura: "",
   fechaServicio: "",
 
   formaPago: "transferencia bancaria",
+  cuentaPago: "",
   moneda: "EUR",
   estadoPago: "pendiente",
+
+  sendEmail: true,
 });
 
 /* =========================================================
@@ -66,12 +91,19 @@ const modalState = {
   escHandler: null,
   lastActiveElement: null,
 
-  searchQuery: "",
-  searchResults: [],
-  searchLoading: false,
-  searchError: "",
-  searchDebounce: null,
-  searchSeq: 0,
+  clienteSearchQuery: "",
+  clienteSearchResults: [],
+  clienteSearchLoading: false,
+  clienteSearchError: "",
+  clienteSearchDebounce: null,
+  clienteSearchSeq: 0,
+
+  ticketSearchQuery: "",
+  ticketSearchResults: [],
+  ticketSearchLoading: false,
+  ticketSearchError: "",
+  ticketSearchDebounce: null,
+  ticketSearchSeq: 0,
 
   errors: {},
   serverError: "",
@@ -144,8 +176,66 @@ function normalizeWhitespace(value = "") {
   return safeText(value, "").replace(/\s+/g, " ").trim();
 }
 
+function normalizeText(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function isAbsoluteUrl(value = "") {
   return /^https?:\/\//i.test(safeText(value, ""));
+}
+
+function round2(value) {
+  return Math.round((safeNumber(value, 0) + Number.EPSILON) * 100) / 100;
+}
+
+function parseBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === "string") {
+    const normalized = normalizeText(value);
+
+    if (["true", "1", "yes", "si", "sí", "on"].includes(normalized)) {
+      return true;
+    }
+
+    if (["false", "0", "no", "off"].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return fallback;
+}
+
+function todayInputValue() {
+  try {
+    return new Date().toISOString().slice(0, 10);
+  } catch {
+    return "";
+  }
+}
+
+function formatMoney(value = 0, currency = "EUR") {
+  const amount = safeNumber(value, 0);
+
+  try {
+    return new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: safeText(currency, "EUR"),
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${safeText(currency, "EUR")}`;
+  }
 }
 
 function safeEmit(event = "", payload = {}) {
@@ -269,10 +359,16 @@ function getAuthToken() {
       AppCore?.auth?.getToken?.(),
       AppCore?.Auth?.getToken?.(),
       window?.Auth?.getToken?.(),
+
       typeof localStorage !== "undefined" ? localStorage.getItem("token") : "",
       typeof localStorage !== "undefined" ? localStorage.getItem("accessToken") : "",
+      typeof localStorage !== "undefined" ? localStorage.getItem("authToken") : "",
+      typeof localStorage !== "undefined" ? localStorage.getItem("onion.token") : "",
+
       typeof sessionStorage !== "undefined" ? sessionStorage.getItem("token") : "",
-      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("accessToken") : ""
+      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("accessToken") : "",
+      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("authToken") : "",
+      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("onion.token") : ""
     ),
     ""
   );
@@ -331,14 +427,6 @@ function shouldTryNext(error = null) {
   return [404, 405, 409, 415, 422, 500, 502, 503, 504].includes(status);
 }
 
-function todayInputValue() {
-  try {
-    return new Date().toISOString().slice(0, 10);
-  } catch {
-    return "";
-  }
-}
-
 /* =========================================================
    API HELPERS
 ========================================================= */
@@ -381,11 +469,7 @@ async function requestJsonFetch(endpoint = "", options = {}) {
     if (!response.ok) {
       const error = new Error(
         safeText(
-          first(
-            data?.message,
-            data?.error,
-            `HTTP ${response.status}`
-          ),
+          first(data?.message, data?.error, data?.code, `HTTP ${response.status}`),
           `HTTP ${response.status}`
         )
       );
@@ -404,7 +488,11 @@ async function requestJsonFetch(endpoint = "", options = {}) {
 }
 
 async function apiGet(endpoint = "") {
-  const client = AppCore?.apiClient || AppCore?.modules?.Http || AppCore?.Http || window?.Http;
+  const client =
+    AppCore?.apiClient ||
+    AppCore?.modules?.Http ||
+    AppCore?.Http ||
+    window?.Http;
 
   if (typeof client?.get === "function") {
     return client.get(endpoint, {
@@ -428,7 +516,11 @@ async function apiGet(endpoint = "") {
 }
 
 async function apiPost(endpoint = "", body = {}) {
-  const client = AppCore?.apiClient || AppCore?.modules?.Http || AppCore?.Http || window?.Http;
+  const client =
+    AppCore?.apiClient ||
+    AppCore?.modules?.Http ||
+    AppCore?.Http ||
+    window?.Http;
 
   if (typeof client?.post === "function") {
     return client.post(endpoint, body, {
@@ -454,36 +546,48 @@ async function apiPost(endpoint = "", body = {}) {
 }
 
 /* =========================================================
-   SEARCH
+   CLIENT SEARCH
 ========================================================= */
 
-function buildSearchUrls(query = "") {
+function buildClientSearchUrls(query = "") {
   const params = new URLSearchParams();
 
   params.set("q", safeText(query, ""));
   params.set("search", safeText(query, ""));
   params.set("limit", String(SEARCH_LIMIT));
 
-  return SEARCH_ENDPOINTS.map((endpoint) => `${endpoint}?${params.toString()}`);
+  return CLIENT_SEARCH_ENDPOINTS.map((endpoint) => `${endpoint}?${params.toString()}`);
 }
 
-function normalizeSearchCandidate(raw = null) {
+function normalizeClientCandidate(raw = null) {
   const obj = safeObject(raw);
   const user = safeObject(obj.user);
   const cliente = safeObject(obj.cliente);
   const contacto = safeObject(obj.contacto);
 
-  const id = safeText(
+  const clienteId = safeText(
     first(
       obj.clienteId,
-      obj.userId,
       obj.id,
       obj._id,
+
+      cliente.clienteId,
+      cliente.id,
+      cliente.clienteIdInterno,
+
+      obj.clienteIdInterno
+    ),
+    ""
+  );
+
+  const userId = safeText(
+    first(
+      obj.userId,
+      obj.usuarioId,
       obj.uid,
 
-      cliente.id,
-      cliente.clienteId,
       cliente.userId,
+      cliente.usuarioId,
 
       user.userId,
       user.id,
@@ -492,6 +596,7 @@ function normalizeSearchCandidate(raw = null) {
     ""
   );
 
+  const id = clienteId || userId;
   if (!id) return null;
 
   const name = safeText(
@@ -509,6 +614,7 @@ function normalizeSearchCandidate(raw = null) {
       cliente.nombreContacto,
       cliente.nombre,
       cliente.name,
+      cliente.displayName,
 
       contacto.nombre,
       contacto.name,
@@ -527,10 +633,12 @@ function normalizeSearchCandidate(raw = null) {
       obj.emailCliente,
       obj.clienteEmail,
       obj.mail,
+      obj.emailLower,
 
       cliente.email,
       cliente.emailCliente,
       cliente.clienteEmail,
+      cliente.emailLower,
 
       contacto.email,
       contacto.mail,
@@ -539,34 +647,48 @@ function normalizeSearchCandidate(raw = null) {
       user.mail
     ),
     ""
+  ).toLowerCase();
+
+  const empresa = safeText(
+    first(
+      obj.razonSocial,
+      obj.nombreFiscal,
+      obj.empresa,
+      cliente.razonSocial,
+      cliente.nombreFiscal,
+      cliente.empresa,
+      ""
+    ),
+    ""
   );
 
   const subtitle = safeText(
     first(
-      obj.subtitle,
+      empresa && empresa !== name ? empresa : "",
       email,
       obj.telefono,
       obj.phone,
       contacto.telefono,
       contacto.phone,
-      id
+      clienteId || userId
     ),
     id
   );
 
   return {
     id,
-    clienteId: id,
-    userId: safeText(first(obj.userId, user.userId, user.id, id), id),
+    clienteId: clienteId || id,
+    userId: userId || "",
     name,
     nombre: name,
     email,
+    empresa,
     subtitle,
     raw: obj,
   };
 }
 
-function extractSearchItems(payload = null) {
+function extractItems(payload = null) {
   if (Array.isArray(payload)) {
     return payload;
   }
@@ -577,6 +699,8 @@ function extractSearchItems(payload = null) {
     obj.clientes,
     obj.users,
     obj.usuarios,
+    obj.tickets,
+    obj.incidencias,
     obj.items,
     obj.results,
     obj.rows,
@@ -586,6 +710,8 @@ function extractSearchItems(payload = null) {
     obj.data?.clientes,
     obj.data?.users,
     obj.data?.usuarios,
+    obj.data?.tickets,
+    obj.data?.incidencias,
     obj.data?.items,
     obj.data?.results,
     obj.data?.rows,
@@ -594,12 +720,16 @@ function extractSearchItems(payload = null) {
     obj.payload?.clientes,
     obj.payload?.users,
     obj.payload?.usuarios,
+    obj.payload?.tickets,
+    obj.payload?.incidencias,
     obj.payload?.items,
     obj.payload?.results,
 
     obj.result?.clientes,
     obj.result?.users,
     obj.result?.usuarios,
+    obj.result?.tickets,
+    obj.result?.incidencias,
     obj.result?.items,
     obj.result?.results,
   ];
@@ -613,15 +743,17 @@ function extractSearchItems(payload = null) {
   return [];
 }
 
-function dedupeSearchResults(items = []) {
+function dedupeClients(items = []) {
   const map = new Map();
 
   safeArray(items).forEach((item) => {
-    const normalized = normalizeSearchCandidate(item);
+    const normalized = normalizeClientCandidate(item);
     if (!normalized?.id) return;
 
-    if (!map.has(normalized.id)) {
-      map.set(normalized.id, normalized);
+    const key = normalized.clienteId || normalized.userId || normalized.id;
+
+    if (!map.has(key)) {
+      map.set(key, normalized);
     }
   });
 
@@ -629,14 +761,14 @@ function dedupeSearchResults(items = []) {
 }
 
 async function searchClientesRequest(query = "") {
-  const urls = buildSearchUrls(query);
+  const urls = buildClientSearchUrls(query);
 
   let lastError = null;
 
   for (const url of urls) {
     try {
       const response = await apiGet(url);
-      const items = dedupeSearchResults(extractSearchItems(response));
+      const items = dedupeClients(extractItems(response));
 
       if (items.length) {
         return items;
@@ -657,33 +789,35 @@ async function searchClientesRequest(query = "") {
   return [];
 }
 
-function clearSearchTimer() {
-  if (!modalState.searchDebounce) return;
+function clearClientSearchTimer() {
+  if (!modalState.clienteSearchDebounce) return;
 
   try {
-    clearTimeout(modalState.searchDebounce);
+    clearTimeout(modalState.clienteSearchDebounce);
   } catch {}
 
-  modalState.searchDebounce = null;
+  modalState.clienteSearchDebounce = null;
 }
 
-async function performSearch(query = "") {
+async function performClientSearch(query = "") {
   const normalized = normalizeWhitespace(query);
-  const seq = ++modalState.searchSeq;
+  const seq = ++modalState.clienteSearchSeq;
 
   if (normalized.length < 2) {
-    modalState.searchLoading = false;
-    modalState.searchError = "";
-    modalState.searchResults = [];
+    modalState.clienteSearchLoading = false;
+    modalState.clienteSearchError = "";
+    modalState.clienteSearchResults = [];
+
     renderModal();
     attachRootBindings();
     focusField("clienteSearch");
+
     return [];
   }
 
-  modalState.searchLoading = true;
-  modalState.searchError = "";
-  modalState.searchResults = [];
+  modalState.clienteSearchLoading = true;
+  modalState.clienteSearchError = "";
+  modalState.clienteSearchResults = [];
 
   renderModal();
   attachRootBindings();
@@ -692,13 +826,13 @@ async function performSearch(query = "") {
   try {
     const results = await searchClientesRequest(normalized);
 
-    if (seq !== modalState.searchSeq) {
+    if (seq !== modalState.clienteSearchSeq) {
       return [];
     }
 
-    modalState.searchLoading = false;
-    modalState.searchError = "";
-    modalState.searchResults = results;
+    modalState.clienteSearchLoading = false;
+    modalState.clienteSearchError = "";
+    modalState.clienteSearchResults = results;
 
     renderModal();
     attachRootBindings();
@@ -706,13 +840,13 @@ async function performSearch(query = "") {
 
     return results;
   } catch (error) {
-    if (seq !== modalState.searchSeq) {
+    if (seq !== modalState.clienteSearchSeq) {
       return [];
     }
 
-    modalState.searchLoading = false;
-    modalState.searchResults = [];
-    modalState.searchError = safeErrorMessage(error, "No se pudo buscar cliente.");
+    modalState.clienteSearchLoading = false;
+    modalState.clienteSearchResults = [];
+    modalState.clienteSearchError = safeErrorMessage(error, "No se pudo buscar cliente.");
 
     renderModal();
     attachRootBindings();
@@ -722,15 +856,15 @@ async function performSearch(query = "") {
   }
 }
 
-function scheduleSearch(query = "") {
-  clearSearchTimer();
+function scheduleClientSearch(query = "") {
+  clearClientSearchTimer();
 
   const normalized = normalizeWhitespace(query);
 
   if (normalized.length < 2) {
-    modalState.searchLoading = false;
-    modalState.searchError = "";
-    modalState.searchResults = [];
+    modalState.clienteSearchLoading = false;
+    modalState.clienteSearchError = "";
+    modalState.clienteSearchResults = [];
 
     renderModal();
     attachRootBindings();
@@ -739,8 +873,289 @@ function scheduleSearch(query = "") {
     return;
   }
 
-  modalState.searchDebounce = setTimeout(() => {
-    performSearch(normalized);
+  modalState.clienteSearchDebounce = setTimeout(() => {
+    performClientSearch(normalized);
+  }, SEARCH_DEBOUNCE);
+}
+
+/* =========================================================
+   TICKET SEARCH
+========================================================= */
+
+function buildTicketSearchUrls(query = "") {
+  const params = new URLSearchParams();
+
+  params.set("q", safeText(query, ""));
+  params.set("search", safeText(query, ""));
+  params.set("limit", String(SEARCH_LIMIT));
+
+  const clienteId = safeText(modalState.form?.clienteId, "");
+
+  if (clienteId) {
+    params.set("clienteId", clienteId);
+  }
+
+  return TICKET_SEARCH_ENDPOINTS.map((endpoint) => `${endpoint}?${params.toString()}`);
+}
+
+function normalizeTicketCandidate(raw = null) {
+  const obj = safeObject(raw);
+  const ticket = safeObject(obj.ticket);
+  const incidencia = safeObject(obj.incidencia);
+  const cliente = safeObject(obj.cliente);
+  const requesterSnapshot = safeObject(obj.requesterSnapshot);
+
+  const id = safeText(
+    first(
+      obj.ticketId,
+      obj.incidenciaId,
+      obj.id,
+      obj.caseId,
+      obj.supportTicketId,
+
+      ticket.ticketId,
+      ticket.incidenciaId,
+      ticket.id,
+
+      incidencia.ticketId,
+      incidencia.incidenciaId,
+      incidencia.id
+    ),
+    ""
+  );
+
+  if (!id) return null;
+
+  const subject = safeText(
+    first(
+      obj.subject,
+      obj.asunto,
+      obj.title,
+      obj.preview,
+      obj.description,
+
+      ticket.subject,
+      ticket.asunto,
+      ticket.title,
+
+      incidencia.subject,
+      incidencia.asunto,
+      incidencia.title
+    ),
+    id
+  );
+
+  const clienteId = safeText(
+    first(
+      obj.clienteId,
+      ticket.clienteId,
+      incidencia.clienteId,
+      cliente.id,
+      cliente.clienteId,
+      requesterSnapshot.clienteId
+    ),
+    ""
+  );
+
+  const userId = safeText(
+    first(
+      obj.userId,
+      ticket.userId,
+      incidencia.userId,
+      requesterSnapshot.userId,
+      cliente.userId
+    ),
+    ""
+  );
+
+  const status = safeText(
+    first(
+      obj.status,
+      obj.estado,
+      ticket.status,
+      ticket.estado,
+      incidencia.status,
+      incidencia.estado
+    ),
+    ""
+  );
+
+  const category = safeText(
+    first(
+      obj.category,
+      obj.categoria,
+      obj.tipoLabel,
+      obj.tipo,
+      ticket.category,
+      ticket.categoria,
+      incidencia.category,
+      incidencia.categoria
+    ),
+    ""
+  );
+
+  const date = safeText(
+    first(
+      obj.createdAtES,
+      obj.createdAt,
+      obj.updatedAtES,
+      obj.updatedAt,
+      ticket.createdAtES,
+      ticket.createdAt,
+      incidencia.createdAtES,
+      incidencia.createdAt
+    ),
+    ""
+  );
+
+  const subtitle = [status, category, date].filter(Boolean).join(" · ") || id;
+
+  return {
+    id,
+    ticketId: id,
+    incidenciaId: id,
+    subject,
+    asunto: subject,
+    clienteId,
+    userId,
+    status,
+    category,
+    date,
+    subtitle,
+    raw: obj,
+  };
+}
+
+function dedupeTickets(items = []) {
+  const map = new Map();
+
+  safeArray(items).forEach((item) => {
+    const normalized = normalizeTicketCandidate(item);
+    if (!normalized?.id) return;
+
+    if (!map.has(normalized.id)) {
+      map.set(normalized.id, normalized);
+    }
+  });
+
+  return Array.from(map.values()).slice(0, SEARCH_LIMIT);
+}
+
+async function searchTicketsRequest(query = "") {
+  const urls = buildTicketSearchUrls(query);
+
+  let lastError = null;
+
+  for (const url of urls) {
+    try {
+      const response = await apiGet(url);
+      const items = dedupeTickets(extractItems(response));
+
+      if (items.length) {
+        return items;
+      }
+    } catch (error) {
+      lastError = error;
+
+      if (!shouldTryNext(error)) {
+        throw error;
+      }
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return [];
+}
+
+function clearTicketSearchTimer() {
+  if (!modalState.ticketSearchDebounce) return;
+
+  try {
+    clearTimeout(modalState.ticketSearchDebounce);
+  } catch {}
+
+  modalState.ticketSearchDebounce = null;
+}
+
+async function performTicketSearch(query = "") {
+  const normalized = normalizeWhitespace(query);
+  const seq = ++modalState.ticketSearchSeq;
+
+  if (normalized.length < 2) {
+    modalState.ticketSearchLoading = false;
+    modalState.ticketSearchError = "";
+    modalState.ticketSearchResults = [];
+
+    renderModal();
+    attachRootBindings();
+    focusField("ticketSearch");
+
+    return [];
+  }
+
+  modalState.ticketSearchLoading = true;
+  modalState.ticketSearchError = "";
+  modalState.ticketSearchResults = [];
+
+  renderModal();
+  attachRootBindings();
+  focusField("ticketSearch");
+
+  try {
+    const results = await searchTicketsRequest(normalized);
+
+    if (seq !== modalState.ticketSearchSeq) {
+      return [];
+    }
+
+    modalState.ticketSearchLoading = false;
+    modalState.ticketSearchError = "";
+    modalState.ticketSearchResults = results;
+
+    renderModal();
+    attachRootBindings();
+    focusField("ticketSearch");
+
+    return results;
+  } catch (error) {
+    if (seq !== modalState.ticketSearchSeq) {
+      return [];
+    }
+
+    modalState.ticketSearchLoading = false;
+    modalState.ticketSearchResults = [];
+    modalState.ticketSearchError = safeErrorMessage(error, "No se pudo buscar incidencia.");
+
+    renderModal();
+    attachRootBindings();
+    focusField("ticketSearch");
+
+    return [];
+  }
+}
+
+function scheduleTicketSearch(query = "") {
+  clearTicketSearchTimer();
+
+  const normalized = normalizeWhitespace(query);
+
+  if (normalized.length < 2) {
+    modalState.ticketSearchLoading = false;
+    modalState.ticketSearchError = "";
+    modalState.ticketSearchResults = [];
+
+    renderModal();
+    attachRootBindings();
+    focusField("ticketSearch");
+
+    return;
+  }
+
+  modalState.ticketSearchDebounce = setTimeout(() => {
+    performTicketSearch(normalized);
   }, SEARCH_DEBOUNCE);
 }
 
@@ -772,11 +1187,16 @@ function clearFeedback() {
   modalState.createdFacturaId = "";
 }
 
+function getFormTotal(form = {}) {
+  return round2(safeNumber(form.cantidad, 0) * safeNumber(form.precioUnitario, 0));
+}
+
 function validateForm(form = {}) {
   const current = safeObject(form);
   const errors = {};
 
   const clienteId = safeText(current.clienteId, "");
+  const incidenciaId = safeText(first(current.incidenciaId, current.ticketId), "");
   const concepto = normalizeWhitespace(current.concepto);
   const descripcion = normalizeWhitespace(current.descripcion);
 
@@ -785,6 +1205,10 @@ function validateForm(form = {}) {
 
   if (!clienteId) {
     errors.clienteId = "Selecciona un cliente.";
+  }
+
+  if (!incidenciaId) {
+    errors.incidenciaId = "Selecciona una incidencia. La factura debe quedar vinculada.";
   }
 
   if (!concepto || concepto.length < 3) {
@@ -814,37 +1238,65 @@ function buildCreatePayload(form = {}) {
 
   const cantidad = safeNumber(current.cantidad, 1);
   const precioUnitario = safeNumber(current.precioUnitario, 0);
-  const totalLinea = Math.round((cantidad * precioUnitario + Number.EPSILON) * 100) / 100;
+  const totalLinea = round2(cantidad * precioUnitario);
 
   const clienteId = safeText(current.clienteId, "");
   const clienteNombre = safeText(current.clienteNombre, "");
-  const clienteEmail = safeText(current.clienteEmail, "");
+  const clienteEmail = safeText(current.clienteEmail, "").toLowerCase();
+
+  const ticketId = safeText(first(current.ticketId, current.incidenciaId), "");
+  const incidenciaSubject = safeText(current.incidenciaSubject, ticketId);
+
+  const fechaFactura = safeText(current.fechaFactura, todayInputValue());
+  const fechaServicio = safeText(current.fechaServicio, fechaFactura);
 
   const concepto = normalizeWhitespace(current.concepto);
   const descripcion = normalizeWhitespace(current.descripcion);
 
   return {
     tipoDocumento: "factura",
-    tipoFactura: "ordinaria",
+    entityType: "invoice",
+    schemaVersion: 3,
+    versionEsquema: 3,
+
+    source: "panel_admin",
+    origen: "panel_admin",
+    createdFrom: "facturas_create_modal",
 
     clienteId,
-    userId: clienteId,
+
+    clienteNombre,
+    clienteEmail,
+    emailCliente: clienteEmail || undefined,
 
     cliente: {
       id: clienteId,
       clienteId,
+      clienteIdInterno: clienteId,
       nombre: clienteNombre,
+      name: clienteNombre,
+      displayName: clienteNombre,
       nombreContacto: clienteNombre,
       razonSocial: clienteNombre,
-      email: clienteEmail,
+      email: clienteEmail || undefined,
+      emailLower: clienteEmail || undefined,
     },
 
-    clienteNombre,
-    clienteEmail,
-    emailCliente: clienteEmail,
+    ticketId,
+    incidenciaId: ticketId,
+    supportTicketId: ticketId,
+    incidenciaSubject,
+    ticketSubject: incidenciaSubject,
+    asunto: incidenciaSubject,
 
-    fechaFactura: safeText(current.fechaFactura, todayInputValue()),
-    fechaServicio: safeText(current.fechaServicio, safeText(current.fechaFactura, todayInputValue())),
+    fechaFactura,
+    fechaFacturaLegal: fechaFactura,
+    fechaEmision: fechaFactura,
+    invoiceDate: fechaFactura,
+
+    fechaServicio,
+    fechaTrabajo: fechaServicio,
+    serviceDate: fechaServicio,
 
     moneda: safeText(current.moneda, "EUR"),
     currency: safeText(current.moneda, "EUR"),
@@ -852,33 +1304,47 @@ function buildCreatePayload(form = {}) {
     formaPago: safeText(current.formaPago, "transferencia bancaria"),
     metodoPago: safeText(current.formaPago, "transferencia bancaria"),
 
+    cuentaPago: safeText(current.cuentaPago, "") || undefined,
+
     estadoPago: safeText(current.estadoPago, "pendiente"),
     estado: "emitida",
 
+    sendEmail: parseBoolean(current.sendEmail, true),
+
     concepto,
     descripcion,
+    description: descripcion,
     preview: descripcion || concepto,
 
     cantidad,
+    horas: cantidad,
     precioUnitario,
 
     lineas: [
       {
+        id: "linea-1",
+        lineNumber: 1,
         concepto,
         descripcion,
         cantidad,
+        horas: cantidad,
+        unidad: "h",
         precioUnitario,
         totalLinea,
+        subtotal: totalLinea,
+        base: totalLinea,
+        baseImponible: totalLinea,
+        total: totalLinea,
+        importe: totalLinea,
       },
     ],
 
     baseImponible: totalLinea,
+    subtotal: totalLinea,
     total: totalLinea,
     amount: totalLinea,
     importe: totalLinea,
-
-    source: "panel",
-    origen: "panel",
+    importeTotal: totalLinea,
   };
 }
 
@@ -910,11 +1376,12 @@ function getCreatedFacturaId(payload = null) {
     first(
       item.id,
       item.facturaId,
-      item.numero,
+      item.invoiceId,
       item.numeroFacturaLegal,
       item.numeroFacturaSistema,
       payload?.id,
-      payload?.facturaId
+      payload?.facturaId,
+      payload?.invoiceId
     ),
     ""
   );
@@ -1003,6 +1470,30 @@ function renderTextarea({
   `;
 }
 
+function renderCheckbox({
+  label = "",
+  name = "",
+  checked = false,
+  help = "",
+} = {}) {
+  return `
+    <label class="fac-create-check">
+      <input
+        data-field="${escapeHtml(name)}"
+        name="${escapeHtml(name)}"
+        type="checkbox"
+        ${checked ? "checked" : ""}
+        ${modalState.submitting ? "disabled" : ""}
+      />
+
+      <span>
+        <strong>${escapeHtml(label)}</strong>
+        ${help ? `<small>${escapeHtml(help)}</small>` : ""}
+      </span>
+    </label>
+  `;
+}
+
 function renderSelectedCliente() {
   const form = safeObject(modalState.form);
 
@@ -1027,16 +1518,16 @@ function renderSelectedCliente() {
   `;
 }
 
-function renderSearchResults() {
-  const query = safeText(modalState.searchQuery, "");
-  const loading = Boolean(modalState.searchLoading);
-  const error = safeText(modalState.searchError, "");
-  const results = safeArray(modalState.searchResults);
+function renderClientSearchResults() {
+  const query = safeText(modalState.clienteSearchQuery, "");
+  const loading = Boolean(modalState.clienteSearchLoading);
+  const error = safeText(modalState.clienteSearchError, "");
+  const results = safeArray(modalState.clienteSearchResults);
 
   if (!query) return "";
 
   if (loading) {
-    return `<div class="fac-create-search-state">Buscando...</div>`;
+    return `<div class="fac-create-search-state">Buscando cliente...</div>`;
   }
 
   if (error) {
@@ -1085,7 +1576,7 @@ function renderClienteSearchBlock() {
           data-field="clienteSearch"
           name="clienteSearch"
           type="text"
-          value="${escapeHtml(modalState.searchQuery)}"
+          value="${escapeHtml(modalState.clienteSearchQuery)}"
           placeholder="Buscar cliente por nombre, email, usuario..."
           autocomplete="off"
           ${modalState.submitting ? "disabled" : ""}
@@ -1094,9 +1585,137 @@ function renderClienteSearchBlock() {
         ${renderFieldError(error)}
       </label>
 
-      ${renderSearchResults()}
+      ${renderClientSearchResults()}
       ${renderSelectedCliente()}
     </section>
+  `;
+}
+
+function renderSelectedTicket() {
+  const form = safeObject(modalState.form);
+  const ticketId = safeText(first(form.ticketId, form.incidenciaId), "");
+
+  if (!ticketId) return "";
+
+  return `
+    <div class="fac-create-selected">
+      <div class="fac-create-selected-copy">
+        <strong>${escapeHtml(ticketId)}</strong>
+        <span>${escapeHtml(safeText(form.incidenciaSubject, "Incidencia vinculada"))}</span>
+      </div>
+
+      <button
+        type="button"
+        class="fac-create-selected-clear"
+        data-clear-ticket="true"
+        ${modalState.submitting ? "disabled" : ""}
+      >
+        Cambiar
+      </button>
+    </div>
+  `;
+}
+
+function renderTicketSearchResults() {
+  const query = safeText(modalState.ticketSearchQuery, "");
+  const loading = Boolean(modalState.ticketSearchLoading);
+  const error = safeText(modalState.ticketSearchError, "");
+  const results = safeArray(modalState.ticketSearchResults);
+
+  if (!query) return "";
+
+  if (loading) {
+    return `<div class="fac-create-search-state">Buscando incidencia...</div>`;
+  }
+
+  if (error) {
+    return `<div class="fac-create-search-state is-error">${escapeHtml(error)}</div>`;
+  }
+
+  if (query.length < 2) {
+    return `<div class="fac-create-search-state">Mínimo 2 caracteres.</div>`;
+  }
+
+  if (!results.length) {
+    return `<div class="fac-create-search-state">Sin incidencias.</div>`;
+  }
+
+  return `
+    <div class="fac-create-search-results">
+      ${results
+        .map(
+          (item, index) => `
+            <button
+              type="button"
+              class="fac-create-search-item"
+              data-select-ticket="${index}"
+              ${modalState.submitting ? "disabled" : ""}
+            >
+              <strong>${escapeHtml(item.id)} · ${escapeHtml(item.subject)}</strong>
+              <span>${escapeHtml(item.subtitle || item.clienteId || item.id)}</span>
+            </button>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderTicketSearchBlock() {
+  const error = safeText(modalState.errors?.incidenciaId, "");
+  const clienteSelected = Boolean(safeText(modalState.form?.clienteId, ""));
+
+  return `
+    <section class="fac-create-block">
+      <div class="fac-create-mini-title">Incidencia vinculada</div>
+
+      <label class="fac-create-field">
+        <input
+          class="fac-create-input ${error ? "is-error" : ""}"
+          data-field="ticketSearch"
+          name="ticketSearch"
+          type="text"
+          value="${escapeHtml(modalState.ticketSearchQuery)}"
+          placeholder="${
+            clienteSelected
+              ? "Buscar incidencia por código, asunto..."
+              : "Selecciona primero un cliente"
+          }"
+          autocomplete="off"
+          ${modalState.submitting || !clienteSelected ? "disabled" : ""}
+        />
+
+        ${renderFieldError(error)}
+      </label>
+
+      ${renderTicketSearchResults()}
+      ${renderSelectedTicket()}
+    </section>
+  `;
+}
+
+function renderTotalsPreview() {
+  const form = safeObject(modalState.form);
+  const total = getFormTotal(form);
+  const currency = safeText(form.moneda, "EUR");
+
+  return `
+    <div class="fac-create-preview">
+      <div>
+        <span>Base estimada</span>
+        <strong>${escapeHtml(formatMoney(total, currency))}</strong>
+      </div>
+
+      <div>
+        <span>IVA/IRPF</span>
+        <strong>Lo calcula backend</strong>
+      </div>
+
+      <div>
+        <span>PDF</span>
+        <strong>Blob canónico</strong>
+      </div>
+    </div>
   `;
 }
 
@@ -1106,6 +1725,7 @@ function renderLoadingOverlay() {
       <div class="fac-create-loading-card">
         <span class="fac-create-loading-spinner" aria-hidden="true"></span>
         <strong>Creando factura...</strong>
+        <small>Generando PDF, subiendo blob y preparando email</small>
       </div>
     </div>
   `;
@@ -1134,8 +1754,12 @@ function renderModalInner() {
 
         <div class="fac-create-header">
           <div class="fac-create-header-copy">
+            <span>Facturación · Onion Support</span>
             <h2 id="facturas-create-modal-title">Crear factura</h2>
-            <p>Selecciona cliente y crea una factura básica. Luego afinamos fiscalidad, PDF y líneas avanzadas.</p>
+            <p>
+              Crea factura vinculada a incidencia. El backend generará PDF, blob canónico,
+              numeración legal y auditoría.
+            </p>
           </div>
 
           <button
@@ -1170,6 +1794,7 @@ function renderModalInner() {
 
           <form id="facturas-create-form" class="fac-create-form" novalidate>
             ${renderClienteSearchBlock()}
+            ${renderTicketSearchBlock()}
 
             <div class="fac-create-grid fac-create-grid--2">
               ${renderInput({
@@ -1200,14 +1825,14 @@ function renderModalInner() {
               label: "Descripción",
               name: "descripcion",
               value: form.descripcion,
-              placeholder: "Detalle breve de la factura...",
+              placeholder: "Detalle de la factura...",
               required: true,
               error: errors.descripcion,
             })}
 
             <div class="fac-create-grid fac-create-grid--3">
               ${renderInput({
-                label: "Cantidad",
+                label: "Cantidad / horas",
                 name: "cantidad",
                 type: "number",
                 value: form.cantidad,
@@ -1235,14 +1860,41 @@ function renderModalInner() {
               })}
             </div>
 
-            ${renderInput({
-              label: "Forma de pago",
-              name: "formaPago",
-              value: form.formaPago,
-              placeholder: "transferencia bancaria",
+            <div class="fac-create-grid fac-create-grid--2">
+              ${renderInput({
+                label: "Forma de pago",
+                name: "formaPago",
+                value: form.formaPago,
+                placeholder: "transferencia bancaria",
+              })}
+
+              ${renderInput({
+                label: "Cuenta de pago",
+                name: "cuentaPago",
+                value: form.cuentaPago,
+                placeholder: "Vacío = backend default",
+              })}
+            </div>
+
+            ${renderTotalsPreview()}
+
+            ${renderCheckbox({
+              label: "Enviar email al cliente",
+              name: "sendEmail",
+              checked: parseBoolean(form.sendEmail, true),
+              help: "Adjunta el PDF y usa el template de factura si el backend lo tiene disponible.",
             })}
 
             <div class="fac-create-actions">
+              <button
+                type="button"
+                class="fac-create-secondary"
+                data-modal-close="true"
+                ${modalState.submitting ? "disabled" : ""}
+              >
+                Cancelar
+              </button>
+
               <button
                 type="submit"
                 class="fac-create-submit"
@@ -1282,13 +1934,13 @@ function renderModalInner() {
 
           .fac-create-panel{
             position:relative;
-            width:min(760px, 100%);
+            width:min(840px, 100%);
             max-height:92vh;
             overflow:auto;
-            border-radius:22px;
+            border-radius:24px;
             border:1px solid var(--border-soft, rgba(255,255,255,.12));
             background:
-              radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
+              radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent 34%),
               linear-gradient(180deg, var(--surface-2, #171717), var(--surface-1, #111));
             box-shadow:0 34px 84px rgba(0,0,0,.45);
           }
@@ -1304,17 +1956,17 @@ function renderModalInner() {
             display:grid;
             place-items:center;
             padding:22px;
-            background:color-mix(in srgb, var(--surface-1, #111) 78%, transparent);
-            backdrop-filter:blur(5px);
-            -webkit-backdrop-filter:blur(5px);
+            background:color-mix(in srgb, var(--surface-1, #111) 82%, transparent);
+            backdrop-filter:blur(6px);
+            -webkit-backdrop-filter:blur(6px);
           }
 
           .fac-create-loading-card{
             display:grid;
             justify-items:center;
-            gap:12px;
-            padding:22px 26px;
-            border-radius:18px;
+            gap:10px;
+            padding:24px 28px;
+            border-radius:20px;
             border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft, rgba(255,255,255,.12)));
             background:
               linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent),
@@ -1327,6 +1979,11 @@ function renderModalInner() {
             font-size:14px;
           }
 
+          .fac-create-loading-card small{
+            color:var(--text-dim, rgba(255,255,255,.62));
+            font-size:12px;
+          }
+
           .fac-create-loading-spinner,
           .fac-create-spinner{
             border-radius:999px;
@@ -1336,8 +1993,8 @@ function renderModalInner() {
           }
 
           .fac-create-loading-spinner{
-            width:30px;
-            height:30px;
+            width:32px;
+            height:32px;
             border-width:3px;
             border-color:color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
             border-top-color:var(--accent, #7c5cff);
@@ -1348,29 +2005,38 @@ function renderModalInner() {
             justify-content:space-between;
             align-items:flex-start;
             gap:14px;
-            padding:18px 18px 14px;
+            padding:20px 20px 15px;
             border-bottom:1px solid var(--border-soft, rgba(255,255,255,.10));
           }
 
           .fac-create-header-copy{
             display:grid;
-            gap:5px;
+            gap:6px;
             min-width:0;
+          }
+
+          .fac-create-header-copy > span{
+            color:var(--accent, #7c5cff);
+            font-size:11px;
+            font-weight:800;
+            letter-spacing:.08em;
+            text-transform:uppercase;
           }
 
           .fac-create-header-copy h2{
             margin:0;
             color:var(--text-strong, #fff);
-            font-size:clamp(24px, 3.6vw, 32px);
+            font-size:clamp(25px, 3.7vw, 34px);
             line-height:1;
-            letter-spacing:-.045em;
+            letter-spacing:-.05em;
           }
 
           .fac-create-header-copy p{
+            max-width:680px;
             margin:0;
             color:var(--text-dim, rgba(255,255,255,.62));
             font-size:12px;
-            line-height:1.45;
+            line-height:1.5;
           }
 
           .fac-create-close{
@@ -1388,7 +2054,7 @@ function renderModalInner() {
           .fac-create-body{
             display:grid;
             gap:14px;
-            padding:16px 18px 18px;
+            padding:17px 20px 20px;
           }
 
           .fac-create-form{
@@ -1400,7 +2066,7 @@ function renderModalInner() {
             display:grid;
             gap:10px;
             padding:13px;
-            border-radius:17px;
+            border-radius:18px;
             border:1px solid var(--border-soft, rgba(255,255,255,.12));
             background:var(--surface-1, rgba(255,255,255,.04));
           }
@@ -1555,11 +2221,13 @@ function renderModalInner() {
           .fac-create-search-item strong{
             color:var(--text-strong, #fff);
             font-size:13px;
+            line-height:1.35;
           }
 
           .fac-create-search-item span{
             color:var(--text-dim, rgba(255,255,255,.62));
             font-size:11px;
+            line-height:1.35;
           }
 
           .fac-create-selected{
@@ -1604,26 +2272,95 @@ function renderModalInner() {
             cursor:pointer;
           }
 
+          .fac-create-preview{
+            display:grid;
+            grid-template-columns:repeat(3, minmax(0, 1fr));
+            gap:10px;
+          }
+
+          .fac-create-preview > div{
+            display:grid;
+            gap:4px;
+            padding:12px 13px;
+            border-radius:15px;
+            border:1px solid var(--border-soft, rgba(255,255,255,.12));
+            background:var(--surface-glass, rgba(255,255,255,.05));
+          }
+
+          .fac-create-preview span{
+            color:var(--text-dim, rgba(255,255,255,.62));
+            font-size:11px;
+          }
+
+          .fac-create-preview strong{
+            color:var(--text-strong, #fff);
+            font-size:13px;
+          }
+
+          .fac-create-check{
+            display:flex;
+            align-items:flex-start;
+            gap:10px;
+            padding:12px 13px;
+            border-radius:15px;
+            border:1px solid var(--border-soft, rgba(255,255,255,.12));
+            background:var(--surface-glass, rgba(255,255,255,.05));
+            cursor:pointer;
+          }
+
+          .fac-create-check input{
+            margin-top:2px;
+            accent-color:var(--accent, #7c5cff);
+          }
+
+          .fac-create-check span{
+            display:grid;
+            gap:3px;
+          }
+
+          .fac-create-check strong{
+            color:var(--text-strong, #fff);
+            font-size:13px;
+          }
+
+          .fac-create-check small{
+            color:var(--text-dim, rgba(255,255,255,.62));
+            font-size:11px;
+            line-height:1.35;
+          }
+
           .fac-create-actions{
             display:flex;
             justify-content:flex-end;
+            gap:10px;
             padding-top:2px;
           }
 
+          .fac-create-secondary,
           .fac-create-submit{
             min-height:43px;
             padding:0 18px;
             border-radius:13px;
-            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 30%, transparent));
-            background:var(--btn-primary-bg, var(--accent, #7c5cff));
-            color:var(--btn-primary-text, #fff);
             font-size:13px;
             font-weight:var(--weight-bold, 700);
             cursor:pointer;
+          }
+
+          .fac-create-secondary{
+            border:1px solid var(--border-soft, rgba(255,255,255,.12));
+            background:var(--surface-glass, rgba(255,255,255,.05));
+            color:var(--text-soft, rgba(255,255,255,.78));
+          }
+
+          .fac-create-submit{
+            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 30%, transparent));
+            background:var(--btn-primary-bg, var(--accent, #7c5cff));
+            color:var(--btn-primary-text, #fff);
             box-shadow:0 12px 26px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
           }
 
-          .fac-create-submit:disabled{
+          .fac-create-submit:disabled,
+          .fac-create-secondary:disabled{
             opacity:.82;
             cursor:wait;
           }
@@ -1653,7 +2390,9 @@ function renderModalInner() {
           [data-theme="light"] .fac-create-input,
           [data-theme="light"] .fac-create-textarea,
           [data-theme="light"] .fac-create-search-item strong,
-          [data-theme="light"] .fac-create-selected-copy strong{
+          [data-theme="light"] .fac-create-selected-copy strong,
+          [data-theme="light"] .fac-create-preview strong,
+          [data-theme="light"] .fac-create-check strong{
             color:var(--text-strong, #111827);
           }
 
@@ -1663,7 +2402,9 @@ function renderModalInner() {
           [data-theme="light"] .fac-create-mini-title,
           [data-theme="light"] .fac-create-search-state,
           [data-theme="light"] .fac-create-search-item span,
-          [data-theme="light"] .fac-create-selected-copy span{
+          [data-theme="light"] .fac-create-selected-copy span,
+          [data-theme="light"] .fac-create-preview span,
+          [data-theme="light"] .fac-create-check small{
             color:var(--text-dim, #6b7280);
           }
 
@@ -1674,22 +2415,28 @@ function renderModalInner() {
           [data-theme="light"] .fac-create-textarea,
           [data-theme="light"] .fac-create-search-state,
           [data-theme="light"] .fac-create-search-item,
-          [data-theme="light"] .fac-create-selected{
+          [data-theme="light"] .fac-create-selected,
+          [data-theme="light"] .fac-create-preview > div,
+          [data-theme="light"] .fac-create-check,
+          [data-theme="light"] .fac-create-secondary{
             background:rgba(255,255,255,.68);
             border-color:rgba(15,23,42,.08);
           }
 
-          @media (max-width: 680px){
+          @media (max-width: 720px){
             .fac-create-grid--2,
-            .fac-create-grid--3{
+            .fac-create-grid--3,
+            .fac-create-preview{
               grid-template-columns:1fr;
             }
 
             .fac-create-actions{
               justify-content:stretch;
+              flex-direction:column-reverse;
             }
 
-            .fac-create-submit{
+            .fac-create-submit,
+            .fac-create-secondary{
               width:100%;
             }
 
@@ -1824,6 +2571,7 @@ function focusFirstInvalidField() {
   const errors = safeObject(modalState.errors);
 
   if (errors.clienteId && focusField("clienteSearch")) return true;
+  if (errors.incidenciaId && focusField("ticketSearch")) return true;
   if (errors.concepto && focusField("concepto")) return true;
   if (errors.descripcion && focusField("descripcion")) return true;
   if (errors.cantidad && focusField("cantidad")) return true;
@@ -1843,18 +2591,56 @@ export function openFacturasCreateModal(draft = {}) {
   modalState.submitting = false;
 
   clearFeedback();
-  clearSearchTimer();
+  clearClientSearchTimer();
+  clearTicketSearchTimer();
 
-  modalState.searchQuery = "";
-  modalState.searchResults = [];
-  modalState.searchLoading = false;
-  modalState.searchError = "";
+  modalState.clienteSearchQuery = "";
+  modalState.clienteSearchResults = [];
+  modalState.clienteSearchLoading = false;
+  modalState.clienteSearchError = "";
+
+  modalState.ticketSearchQuery = "";
+  modalState.ticketSearchResults = [];
+  modalState.ticketSearchLoading = false;
+  modalState.ticketSearchError = "";
 
   resetForm();
 
+  const normalizedDraft = safeObject(draft);
+
+  const draftTicketId = safeText(
+    first(
+      normalizedDraft.ticketId,
+      normalizedDraft.incidenciaId,
+      normalizedDraft.supportTicketId,
+      normalizedDraft.ticket?.ticketId,
+      normalizedDraft.ticket?.id,
+      normalizedDraft.incidencia?.ticketId,
+      normalizedDraft.incidencia?.id
+    ),
+    ""
+  );
+
+  const draftTicketSubject = safeText(
+    first(
+      normalizedDraft.incidenciaSubject,
+      normalizedDraft.ticketSubject,
+      normalizedDraft.subject,
+      normalizedDraft.asunto,
+      normalizedDraft.ticket?.subject,
+      normalizedDraft.ticket?.asunto,
+      normalizedDraft.incidencia?.subject,
+      normalizedDraft.incidencia?.asunto
+    ),
+    ""
+  );
+
   modalState.form = {
     ...modalState.form,
-    ...safeObject(draft),
+    ...normalizedDraft,
+    ticketId: draftTicketId || safeText(normalizedDraft.ticketId, ""),
+    incidenciaId: draftTicketId || safeText(normalizedDraft.incidenciaId, ""),
+    incidenciaSubject: draftTicketSubject || safeText(normalizedDraft.incidenciaSubject, ""),
   };
 
   renderModal();
@@ -1864,8 +2650,10 @@ export function openFacturasCreateModal(draft = {}) {
 
   if (!safeText(modalState.form.clienteId, "")) {
     focusField("clienteSearch");
+  } else if (!safeText(first(modalState.form.ticketId, modalState.form.incidenciaId), "")) {
+    focusField("ticketSearch");
   } else {
-    focusField("concepto");
+    focusField("descripcion");
   }
 
   safeEmit("facturas:create-modal:opened", {
@@ -1884,7 +2672,8 @@ export function closeFacturasCreateModal() {
   modalState.submitting = false;
 
   clearFeedback();
-  clearSearchTimer();
+  clearClientSearchTimer();
+  clearTicketSearchTimer();
 
   detachRootBindings();
 
@@ -1981,13 +2770,14 @@ async function handleSubmit() {
       facturaId: createdFacturaId,
       response,
       detail,
+      payload,
     });
 
     setTimeout(() => {
       if (modalState.isOpen && !modalState.submitting) {
         closeFacturasCreateModal();
       }
-    }, 360);
+    }, 420);
 
     return true;
   } catch (error) {
@@ -2014,32 +2804,42 @@ async function handleSubmit() {
 ========================================================= */
 
 function selectCliente(index = -1) {
-  const item = safeArray(modalState.searchResults)[Number(index)];
+  const item = safeArray(modalState.clienteSearchResults)[Number(index)];
 
   if (!item?.id) {
     return false;
   }
 
   setFormPatch({
-    clienteId: item.id,
+    clienteId: item.clienteId || item.id,
     clienteNombre: item.name,
     clienteEmail: item.email,
+
+    ticketId: "",
+    incidenciaId: "",
+    incidenciaSubject: "",
   });
 
-  modalState.searchQuery = "";
-  modalState.searchResults = [];
-  modalState.searchLoading = false;
-  modalState.searchError = "";
+  modalState.clienteSearchQuery = "";
+  modalState.clienteSearchResults = [];
+  modalState.clienteSearchLoading = false;
+  modalState.clienteSearchError = "";
 
-  if (modalState.errors.clienteId) {
+  modalState.ticketSearchQuery = "";
+  modalState.ticketSearchResults = [];
+  modalState.ticketSearchLoading = false;
+  modalState.ticketSearchError = "";
+
+  if (modalState.errors.clienteId || modalState.errors.incidenciaId) {
     const nextErrors = { ...safeObject(modalState.errors) };
     delete nextErrors.clienteId;
+    delete nextErrors.incidenciaId;
     modalState.errors = nextErrors;
   }
 
   renderModal();
   attachRootBindings();
-  focusField("concepto");
+  focusField("ticketSearch");
 
   return true;
 }
@@ -2049,16 +2849,75 @@ function clearCliente() {
     clienteId: "",
     clienteNombre: "",
     clienteEmail: "",
+
+    ticketId: "",
+    incidenciaId: "",
+    incidenciaSubject: "",
   });
 
-  modalState.searchQuery = "";
-  modalState.searchResults = [];
-  modalState.searchLoading = false;
-  modalState.searchError = "";
+  modalState.clienteSearchQuery = "";
+  modalState.clienteSearchResults = [];
+  modalState.clienteSearchLoading = false;
+  modalState.clienteSearchError = "";
+
+  modalState.ticketSearchQuery = "";
+  modalState.ticketSearchResults = [];
+  modalState.ticketSearchLoading = false;
+  modalState.ticketSearchError = "";
 
   renderModal();
   attachRootBindings();
   focusField("clienteSearch");
+
+  return true;
+}
+
+function selectTicket(index = -1) {
+  const item = safeArray(modalState.ticketSearchResults)[Number(index)];
+
+  if (!item?.id) {
+    return false;
+  }
+
+  setFormPatch({
+    ticketId: item.ticketId || item.id,
+    incidenciaId: item.incidenciaId || item.id,
+    incidenciaSubject: item.subject || item.asunto || item.id,
+  });
+
+  modalState.ticketSearchQuery = "";
+  modalState.ticketSearchResults = [];
+  modalState.ticketSearchLoading = false;
+  modalState.ticketSearchError = "";
+
+  if (modalState.errors.incidenciaId) {
+    const nextErrors = { ...safeObject(modalState.errors) };
+    delete nextErrors.incidenciaId;
+    modalState.errors = nextErrors;
+  }
+
+  renderModal();
+  attachRootBindings();
+  focusField("descripcion");
+
+  return true;
+}
+
+function clearTicket() {
+  setFormPatch({
+    ticketId: "",
+    incidenciaId: "",
+    incidenciaSubject: "",
+  });
+
+  modalState.ticketSearchQuery = "";
+  modalState.ticketSearchResults = [];
+  modalState.ticketSearchLoading = false;
+  modalState.ticketSearchError = "";
+
+  renderModal();
+  attachRootBindings();
+  focusField("ticketSearch");
 
   return true;
 }
@@ -2071,13 +2930,16 @@ function handleFieldInput(field) {
   if (fieldName === "clienteSearch") {
     const value = safeText(field.value, "");
 
-    modalState.searchQuery = value;
+    modalState.clienteSearchQuery = value;
 
     if (safeText(modalState.form.clienteId, "")) {
       setFormPatch({
         clienteId: "",
         clienteNombre: "",
         clienteEmail: "",
+        ticketId: "",
+        incidenciaId: "",
+        incidenciaSubject: "",
       });
     }
 
@@ -2087,13 +2949,42 @@ function handleFieldInput(field) {
       modalState.errors = nextErrors;
     }
 
-    scheduleSearch(value);
+    scheduleClientSearch(value);
     return;
   }
 
-  setFormPatch({
-    [fieldName]: field.value,
-  });
+  if (fieldName === "ticketSearch") {
+    const value = safeText(field.value, "");
+
+    modalState.ticketSearchQuery = value;
+
+    if (safeText(first(modalState.form.ticketId, modalState.form.incidenciaId), "")) {
+      setFormPatch({
+        ticketId: "",
+        incidenciaId: "",
+        incidenciaSubject: "",
+      });
+    }
+
+    if (modalState.errors.incidenciaId) {
+      const nextErrors = { ...safeObject(modalState.errors) };
+      delete nextErrors.incidenciaId;
+      modalState.errors = nextErrors;
+    }
+
+    scheduleTicketSearch(value);
+    return;
+  }
+
+  if (field.type === "checkbox") {
+    setFormPatch({
+      [fieldName]: Boolean(field.checked),
+    });
+  } else {
+    setFormPatch({
+      [fieldName]: field.value,
+    });
+  }
 
   if (modalState.errors[fieldName]) {
     const nextErrors = { ...safeObject(modalState.errors) };
@@ -2116,6 +3007,8 @@ function attachRootBindings() {
   const onInput = (event) => {
     const field = event.target.closest("[data-field]");
     if (!field) return;
+
+    if (field.type === "checkbox") return;
 
     handleFieldInput(field);
   };
@@ -2157,25 +3050,47 @@ function attachRootBindings() {
       return;
     }
 
-    const selectBtn = event.target.closest("[data-select-cliente]");
+    const selectClienteBtn = event.target.closest("[data-select-cliente]");
 
-    if (selectBtn) {
+    if (selectClienteBtn) {
       event.preventDefault();
 
       if (modalState.submitting) return;
 
-      selectCliente(selectBtn.dataset.selectCliente);
+      selectCliente(selectClienteBtn.dataset.selectCliente);
       return;
     }
 
-    const clearBtn = event.target.closest("[data-clear-cliente='true']");
+    const selectTicketBtn = event.target.closest("[data-select-ticket]");
 
-    if (clearBtn) {
+    if (selectTicketBtn) {
+      event.preventDefault();
+
+      if (modalState.submitting) return;
+
+      selectTicket(selectTicketBtn.dataset.selectTicket);
+      return;
+    }
+
+    const clearClienteBtn = event.target.closest("[data-clear-cliente='true']");
+
+    if (clearClienteBtn) {
       event.preventDefault();
 
       if (modalState.submitting) return;
 
       clearCliente();
+      return;
+    }
+
+    const clearTicketBtn = event.target.closest("[data-clear-ticket='true']");
+
+    if (clearTicketBtn) {
+      event.preventDefault();
+
+      if (modalState.submitting) return;
+
+      clearTicket();
     }
   };
 
@@ -2298,9 +3213,16 @@ export const OnionFacturasCreateModal = {
     return {
       ...modalState,
       errors: { ...safeObject(modalState.errors) },
-      searchResults: [...safeArray(modalState.searchResults)],
+
+      clienteSearchResults: [...safeArray(modalState.clienteSearchResults)],
+      ticketSearchResults: [...safeArray(modalState.ticketSearchResults)],
+
       form: { ...safeObject(modalState.form) },
     };
+  },
+
+  buildPayload() {
+    return buildCreatePayload(modalState.form);
   },
 
   destroy() {
@@ -2308,7 +3230,8 @@ export const OnionFacturasCreateModal = {
     closeFacturasCreateModal();
     detachEscHandler();
     detachBus();
-    clearSearchTimer();
+    clearClientSearchTimer();
+    clearTicketSearchTimer();
 
     const root = getRoot();
 

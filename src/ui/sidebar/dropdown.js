@@ -103,11 +103,11 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
     return false;
   }
 
-  let emitted = false;
-
   try {
-    AppCore?.events?.emit?.(name, payload);
-    emitted = true;
+    if (isFunction(AppCore?.events?.emit)) {
+      AppCore.events.emit(name, payload);
+      return true;
+    }
   } catch {}
 
   try {
@@ -118,11 +118,11 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
         })
       );
 
-      emitted = true;
+      return true;
     }
   } catch {}
 
-  return emitted;
+  return false;
 }
 
 function afterPaint(callback) {

@@ -1942,7 +1942,10 @@ export function bindAppEvents({
   rerenderCurrentRoute,
   applyPostRenderLoaderPolicy,
 } = {}) {
-  if (eventsBound) {
+  if (
+    eventsBound ||
+    eventsBindingInFlight
+  ) {
     return true;
   }
 

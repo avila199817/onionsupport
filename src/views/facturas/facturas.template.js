@@ -2,31 +2,28 @@
    Onion SPA - Facturas Template
    Archivo: src/views/facturas/facturas.template.js
 
-   FINAL PRODUCTION TEMPLATE · FACTURAS 10/10 · VISUAL FIX
-   PATCH · PAGINATION 5 ITEMS · INCIDENCIA MODAL READY
-   PATCH · ADMIN CREATE BUTTON · COMPACT TABLE · BUTTON HOVER FIX
-   PATCH · ONION TOKENS FULL · DARK/LIGHT MODE 10/10
-   PATCH · AVATAR USER-STABLE COLORS · STATUS CHIPS FIX · LOADER FIX
-   PATCH · SORT DESC BY NEWEST INVOICES
+   EXTREME PRODUCTION TEMPLATE · FACTURAS 11/10
+   VISUAL SYSTEM · TOKEN ALIGNED · SPA ACTION READY
 
    RESPONSABILIDADES:
-   - render del hero/header de facturas
-   - render de tabla productiva con paginación real
-   - compatibilidad con FacturasView.js
+   - render premium de vista de facturas
+   - alineación total con variables.css / layout.css / ui.css
+   - hero operativo tipo centro de control
+   - tabla compacta premium SaaS
+   - paginación real de 5 items por defecto
+   - orden descendente por factura más reciente
    - acciones compatibles con data-facturas-action y data-action
    - botón admin "Crear factura"
-   - paginación compacta de 5 items
-   - enlace a incidencia relacionada listo para modal
-   - loaders sin mover columnas ni tamaño de botones
-   - loader icon-only centrado en acciones
-   - loading overlay en refresh sin desplazar tabla
-   - dark/light mode conectado a variables.css + ui.css
-   - chips de pago con contraste real en dark
-   - avatares fallback con colores pseudo-RNG estables por usuario
-   - misma persona = mismo color de avatar en todas sus facturas
-   - tabla ordenada siempre de más reciente a menos reciente
-   - tabla compacta premium SaaS
+   - envío de factura conectado a send-factura
+   - estado "Enviar / Reenviar" según delivery/meta
+   - bloqueo seguro de acciones sin PDF/email
+   - loader icon-only estable sin mover layout
+   - refresh overlay sin desplazar columnas
+   - avatares fallback con color estable por cliente
+   - chips de pago con contraste real dark/light
+   - incidencia relacionada lista para modal
    - estados loading/error/empty blindados
+   - HTML endurecido con escape/fallbacks
 ========================================================= */
 
 /* =========================================================
@@ -34,6 +31,7 @@
 ========================================================= */
 
 const DEFAULT_PAGE_SIZE = 5;
+const DEFAULT_CURRENCY = "EUR";
 
 const ADMIN_ROLES = new Set([
   "admin",
@@ -44,8 +42,10 @@ const ADMIN_ROLES = new Set([
   "owner",
 ]);
 
+const STYLE_ID = "onion-facturas-template-styles-v11";
+
 /* =========================================================
-   HELPERS
+   BASE HELPERS
 ========================================================= */
 
 function safeText(value, fallback = "") {
@@ -57,6 +57,28 @@ function safeText(value, fallback = "") {
 }
 
 function safeNumber(value, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback;
+
+  if (typeof value === "string") {
+    let normalized = value
+      .trim()
+      .replace(/€/g, "")
+      .replace(/%/g, "")
+      .replace(/\s/g, "");
+
+    const hasComma = normalized.includes(",");
+    const hasDot = normalized.includes(".");
+
+    if (hasComma && hasDot) {
+      normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
+    } else if (hasComma) {
+      normalized = normalized.replace(/,/g, ".");
+    }
+
+    const n = Number(normalized);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
   const n = Number(value);
 
   return Number.isFinite(n) ? n : fallback;
@@ -103,17 +125,41 @@ function normalizeWhitespace(value = "") {
   return safeText(value, "").replace(/\s+/g, " ").trim();
 }
 
-function normalizeKey(value = "") {
+function normalizeText(value = "") {
   return safeText(value, "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
+    .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeKey(value = "") {
+  return normalizeText(value)
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^\w]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 function normalizeRole(value = "") {
   return safeText(value, "").toLowerCase();
+}
+
+function isValidEmail(value = "") {
+  const email = safeText(value, "").toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function bool(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+
+  const key = normalizeText(value);
+
+  if (["true", "1", "yes", "si", "sí", "on"].includes(key)) return true;
+  if (["false", "0", "no", "off"].includes(key)) return false;
+
+  return fallback;
 }
 
 function hashString(value = "") {
@@ -134,50 +180,110 @@ function hashString(value = "") {
   return Math.abs(hash >>> 0);
 }
 
-function isAdminState(state = {}) {
-  const runtime = safeObject(state);
+function toTimestamp(value = null) {
+  if (!value) return 0;
 
-  const role = normalizeRole(
-    first(
-      runtime.role,
-      runtime.rol,
-      runtime.user?.role,
-      runtime.user?.rol,
-      runtime.currentUser?.role,
-      runtime.currentUser?.rol,
-      runtime.session?.user?.role,
-      runtime.session?.user?.rol,
-      runtime.auth?.role,
-      runtime.auth?.user?.role,
-      runtime.auth?.user?.rol
-    )
-  );
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 9999999999 ? value : value * 1000;
+  }
 
-  return ADMIN_ROLES.has(role);
+  const raw = safeText(value, "");
+  const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
+
+  if (Number.isNaN(date.getTime())) {
+    return 0;
+  }
+
+  return date.getTime();
 }
 
-function formatMoney(value = 0, currency = "EUR") {
-  const amount = Number(value);
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+/* =========================================================
+   FORMATTERS
+========================================================= */
+
+const moneyFormatterCache = new Map();
+const dateTimeFormatterCache = new Map();
+
+function getMoneyFormatter(currency = DEFAULT_CURRENCY) {
+  const code = safeText(currency, DEFAULT_CURRENCY).toUpperCase();
+
+  if (moneyFormatterCache.has(code)) {
+    return moneyFormatterCache.get(code);
+  }
+
+  const formatter = new Intl.NumberFormat("es-ES", {
+    style: "currency",
+    currency: code,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  moneyFormatterCache.set(code, formatter);
+
+  return formatter;
+}
+
+function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
+  const amount = safeNumber(value, NaN);
 
   if (!Number.isFinite(amount)) {
     return "—";
   }
 
+  const code = safeText(currency, DEFAULT_CURRENCY).toUpperCase();
+
   try {
-    return new Intl.NumberFormat("es-ES", {
-      style: "currency",
-      currency: safeText(currency, "EUR"),
-      maximumFractionDigits: 2,
-    }).format(amount);
+    return getMoneyFormatter(code).format(amount);
   } catch {
-    return `${amount.toFixed(2)} ${safeText(currency, "EUR")}`;
+    return `${amount.toFixed(2).replace(".", ",")} ${code}`;
   }
+}
+
+function getDateTimeFormatter() {
+  const key = "es-ES:date-time";
+
+  if (dateTimeFormatterCache.has(key)) {
+    return dateTimeFormatterCache.get(key);
+  }
+
+  const formatter = new Intl.DateTimeFormat("es-ES", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  dateTimeFormatterCache.set(key, formatter);
+
+  return formatter;
 }
 
 function formatDateTime(value = null) {
   if (!value) return "—";
 
-  const date = new Date(value);
+  const raw = safeText(value, "");
+  const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
+
+  if (Number.isNaN(date.getTime())) return "—";
+
+  try {
+    return getDateTimeFormatter().format(date);
+  } catch {
+    return "—";
+  }
+}
+
+function formatDateShort(value = null) {
+  if (!value) return "—";
+
+  const raw = safeText(value, "");
+  const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
+
   if (Number.isNaN(date.getTime())) return "—";
 
   try {
@@ -185,8 +291,6 @@ function formatDateTime(value = null) {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
     }).format(date);
   } catch {
     return "—";
@@ -196,10 +300,10 @@ function formatDateTime(value = null) {
 function formatRelativeDate(value = null) {
   if (!value) return "Sin fecha";
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Sin fecha";
+  const ts = toTimestamp(value);
+  if (!ts) return "Sin fecha";
 
-  const diffMs = date.getTime() - Date.now();
+  const diffMs = ts - Date.now();
   const diffMin = Math.round(diffMs / 60000);
   const absMin = Math.abs(diffMin);
 
@@ -223,8 +327,63 @@ function formatRelativeDate(value = null) {
       : `Hace ${diffDays} día${diffDays === 1 ? "" : "s"}`;
   }
 
-  return formatDateTime(value);
+  return formatDateShort(value);
 }
+
+/* =========================================================
+   ICONS
+========================================================= */
+
+function icon(name = "") {
+  const common = `aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+
+  const icons = {
+    refresh: `<svg ${common}><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><path d="M21 4v6h-6"/><path d="M3 20v-6h6"/></svg>`,
+    export: `<svg ${common}><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>`,
+    plus: `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
+    detail: `<svg ${common}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>`,
+    eye: `<svg ${common}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
+    download: `<svg ${common}><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>`,
+    send: `<svg ${common}><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>`,
+    ticket: `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
+    pdf: `<svg ${common}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 17v-5"/><path d="M8 12h2a1.5 1.5 0 0 1 0 3H8"/><path d="M13 17v-5h1.5a2.5 2.5 0 0 1 0 5H13"/><path d="M18 12h-2v5"/></svg>`,
+    lock: `<svg ${common}><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`,
+    mail: `<svg ${common}><path d="M4 4h16v16H4z"/><path d="m22 6-10 7L2 6"/></svg>`,
+    check: `<svg ${common}><path d="m20 6-11 11-5-5"/></svg>`,
+  };
+
+  return icons[name] || "";
+}
+
+/* =========================================================
+   AUTH / ROLE
+========================================================= */
+
+function isAdminState(state = {}) {
+  const runtime = safeObject(state);
+
+  const role = normalizeRole(
+    first(
+      runtime.role,
+      runtime.rol,
+      runtime.user?.role,
+      runtime.user?.rol,
+      runtime.currentUser?.role,
+      runtime.currentUser?.rol,
+      runtime.session?.user?.role,
+      runtime.session?.user?.rol,
+      runtime.auth?.role,
+      runtime.auth?.user?.role,
+      runtime.auth?.user?.rol
+    )
+  );
+
+  return ADMIN_ROLES.has(role);
+}
+
+/* =========================================================
+   DOMAIN HELPERS
+========================================================= */
 
 function pickTicketIdFromArray(value = []) {
   const items = safeArray(value);
@@ -251,23 +410,693 @@ function pickTicketIdFromArray(value = []) {
     );
 
     if (candidate) {
-      return candidate;
+      return safeText(candidate, "");
     }
   }
 
-  return null;
+  return "";
 }
 
-function toTimestamp(value = null) {
-  if (!value) return 0;
+function getFacturaId(item = {}) {
+  const raw = safeObject(item?.raw);
 
-  const date = new Date(value);
+  return safeText(
+    first(
+      item.id,
+      item._id,
+      item.facturaId,
+      item.invoiceId,
+      item.numero,
+      item.numeroFacturaLegal,
+      item.numeroFacturaSistema,
 
-  if (Number.isNaN(date.getTime())) {
-    return 0;
+      raw.id,
+      raw._id,
+      raw.facturaId,
+      raw.invoiceId,
+      raw.numero,
+      raw.numeroFacturaLegal,
+      raw.numeroFacturaSistema
+    ),
+    "FAC-SIN-ID"
+  );
+}
+
+function getFacturaNumero(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.numeroFacturaLegal,
+      item.numero,
+      item.invoiceNumber,
+      item.code,
+      item.facturaId,
+      item.invoiceId,
+      item.numeroFacturaSistema,
+      item.id,
+
+      raw.numeroFacturaLegal,
+      raw.numero,
+      raw.invoiceNumber,
+      raw.code,
+      raw.facturaId,
+      raw.invoiceId,
+      raw.numeroFacturaSistema,
+      raw.id
+    ),
+    "Factura sin número"
+  );
+}
+
+function getFacturaSistema(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.numeroFacturaSistema,
+      item.systemInvoiceNumber,
+      raw.numeroFacturaSistema,
+      raw.systemInvoiceNumber,
+      ""
+    ),
+    ""
+  );
+}
+
+function getClientName(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.clienteNombre,
+      item.cliente?.nombreContacto,
+      item.cliente?.nombre,
+      item.cliente?.name,
+      item.cliente?.displayName,
+      item.clientName,
+      item.client?.name,
+      item.customer?.name,
+      item.name,
+      item.nombre,
+      item.clienteEmpresa,
+      item.cliente?.empresa,
+      item.cliente?.razonSocial,
+      item.company,
+
+      raw.clienteNombre,
+      raw.cliente?.nombreContacto,
+      raw.cliente?.nombre,
+      raw.cliente?.name,
+      raw.cliente?.displayName,
+      raw.clientName,
+      raw.client?.name,
+      raw.customer?.name,
+      raw.name,
+      raw.nombre,
+      raw.clienteEmpresa,
+      raw.cliente?.empresa,
+      raw.cliente?.razonSocial
+    ),
+    "Cliente"
+  );
+}
+
+function getClientEmail(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.clienteEmail,
+      item.cliente?.email,
+      item.cliente?.emailLower,
+      item.email,
+      item.emailCliente,
+      item.clientEmail,
+      item.client?.email,
+      item.customer?.email,
+
+      raw.clienteEmail,
+      raw.emailCliente,
+      raw.cliente?.email,
+      raw.cliente?.emailLower,
+      raw.email,
+      raw.clientEmail,
+      raw.client?.email,
+      raw.customer?.email
+    ),
+    ""
+  ).toLowerCase();
+}
+
+function getClientEmailLabel(item = {}) {
+  return getClientEmail(item) || "Sin email";
+}
+
+function getClientAvatar(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.clienteAvatar,
+      item.clientAvatar,
+      item.avatar,
+      item.avatarUrl,
+      item.cliente?.avatar,
+      item.cliente?.avatarUrl,
+      item.client?.avatar,
+      item.client?.avatarUrl,
+
+      raw.clienteAvatar,
+      raw.clientAvatar,
+      raw.avatar,
+      raw.avatarUrl,
+      raw.cliente?.avatar,
+      raw.cliente?.avatarUrl,
+      raw.client?.avatar,
+      raw.client?.avatarUrl
+    ),
+    ""
+  );
+}
+
+function getClientStableKey(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return normalizeKey(
+    first(
+      item.clienteId,
+      item.clientId,
+      item.customerId,
+      item.userId,
+      item.uid,
+      item.cliente?.id,
+      item.cliente?.userId,
+      item.client?.id,
+      item.client?.userId,
+      item.customer?.id,
+      item.customer?.userId,
+
+      item.clienteEmail,
+      item.emailCliente,
+      item.clientEmail,
+      item.email,
+      item.cliente?.email,
+      item.client?.email,
+      item.customer?.email,
+
+      raw.clienteId,
+      raw.clientId,
+      raw.customerId,
+      raw.userId,
+      raw.uid,
+      raw.cliente?.id,
+      raw.cliente?.userId,
+      raw.client?.id,
+      raw.client?.userId,
+      raw.customer?.id,
+      raw.customer?.userId,
+
+      raw.clienteEmail,
+      raw.emailCliente,
+      raw.clientEmail,
+      raw.email,
+      raw.cliente?.email,
+      raw.client?.email,
+      raw.customer?.email,
+
+      getClientName(item)
+    )
+  );
+}
+
+function getInitials(value = "") {
+  const text = normalizeWhitespace(value);
+
+  if (!text) return "ON";
+
+  const parts = text.split(" ").filter(Boolean);
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
   }
 
-  return date.getTime();
+  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "ON";
+}
+
+function getEstadoPagoKey(value = "") {
+  const key = normalizeKey(value);
+
+  if (["paid", "pagada", "pagado", "cobrada", "abonada"].includes(key)) {
+    return "paid";
+  }
+
+  if (["pending", "pendiente", "unpaid"].includes(key)) {
+    return "pending";
+  }
+
+  if (["partial", "parcial", "pago_parcial"].includes(key)) {
+    return "partial";
+  }
+
+  if (["overdue", "vencida", "vencido"].includes(key)) {
+    return "overdue";
+  }
+
+  if (["cancelled", "canceled", "cancelada", "cancelado", "anulada"].includes(key)) {
+    return "cancelled";
+  }
+
+  if (["draft", "borrador"].includes(key)) {
+    return "draft";
+  }
+
+  return "pending";
+}
+
+function getEstadoPagoLabel(value = "") {
+  const key = getEstadoPagoKey(value);
+
+  if (key === "paid") return "Pagada";
+  if (key === "pending") return "Pendiente";
+  if (key === "partial") return "Pago parcial";
+  if (key === "overdue") return "Vencida";
+  if (key === "cancelled") return "Cancelada";
+  if (key === "draft") return "Borrador";
+
+  return safeText(value, "Pendiente");
+}
+
+function getEstadoPagoChipClass(value = "") {
+  const key = getEstadoPagoKey(value);
+
+  return `facturas-chip--${key || "pending"}`;
+}
+
+function getEstadoKey(value = "") {
+  const key = normalizeKey(value);
+
+  if (["sent", "enviada", "enviado"].includes(key)) return "sent";
+  if (["issued", "emitida", "emitido"].includes(key)) return "issued";
+  if (["draft", "borrador"].includes(key)) return "draft";
+  if (["void", "anulada", "anulado"].includes(key)) return "void";
+  if (["cancelled", "canceled", "cancelada", "cancelado"].includes(key)) return "cancelled";
+
+  return "issued";
+}
+
+function getEstadoLabel(value = "") {
+  const key = getEstadoKey(value);
+
+  if (key === "sent") return "Enviada";
+  if (key === "issued") return "Emitida";
+  if (key === "draft") return "Borrador";
+  if (key === "void") return "Anulada";
+  if (key === "cancelled") return "Cancelada";
+
+  return "Emitida";
+}
+
+function getIncidenciaId(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.ticketId,
+      item.incidenciaId,
+
+      item.incidencia?.id,
+      item.incidencia?.ticketId,
+      item.incidencia?.incidenciaId,
+
+      item.ticket?.id,
+      item.ticket?.ticketId,
+      item.ticket?.incidenciaId,
+
+      item.linkedTicket?.id,
+      item.linkedTicket?.ticketId,
+      item.linkedTicket?.incidenciaId,
+
+      item.relatedTicketId,
+      item.relatedIncidentId,
+      item.supportTicketId,
+      item.caseId,
+
+      item.meta?.ticketId,
+      item.meta?.incidenciaId,
+
+      pickTicketIdFromArray(item.ticketIds),
+      pickTicketIdFromArray(item.incidenciaIds),
+      pickTicketIdFromArray(item.relatedTicketIds),
+      pickTicketIdFromArray(item.relatedIncidentIds),
+      pickTicketIdFromArray(item.linkedTickets),
+      pickTicketIdFromArray(item.incidencias),
+      pickTicketIdFromArray(item.tickets),
+      pickTicketIdFromArray(item.relatedTickets),
+      pickTicketIdFromArray(item.facturasRelacionadas),
+      pickTicketIdFromArray(item.linkedInvoices?.tickets),
+      pickTicketIdFromArray(item.relations),
+
+      raw.ticketId,
+      raw.incidenciaId,
+
+      raw.incidencia?.id,
+      raw.incidencia?.ticketId,
+      raw.incidencia?.incidenciaId,
+
+      raw.ticket?.id,
+      raw.ticket?.ticketId,
+      raw.ticket?.incidenciaId,
+
+      raw.linkedTicket?.id,
+      raw.linkedTicket?.ticketId,
+      raw.linkedTicket?.incidenciaId,
+
+      raw.relatedTicketId,
+      raw.relatedIncidentId,
+      raw.supportTicketId,
+      raw.caseId,
+
+      raw.meta?.ticketId,
+      raw.meta?.incidenciaId,
+
+      pickTicketIdFromArray(raw.ticketIds),
+      pickTicketIdFromArray(raw.incidenciaIds),
+      pickTicketIdFromArray(raw.relatedTicketIds),
+      pickTicketIdFromArray(raw.relatedIncidentIds),
+      pickTicketIdFromArray(raw.linkedTickets),
+      pickTicketIdFromArray(raw.incidencias),
+      pickTicketIdFromArray(raw.tickets),
+      pickTicketIdFromArray(raw.relatedTickets),
+      pickTicketIdFromArray(raw.facturasRelacionadas),
+      pickTicketIdFromArray(raw.linkedInvoices?.tickets),
+      pickTicketIdFromArray(raw.relations)
+    ),
+    ""
+  );
+}
+
+function getIncidenciaSubject(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.incidencia?.subject,
+      item.incidencia?.asunto,
+      item.incidencia?.title,
+
+      item.ticket?.subject,
+      item.ticket?.asunto,
+      item.ticket?.title,
+
+      item.linkedTicket?.subject,
+      item.linkedTicket?.asunto,
+      item.linkedTicket?.title,
+
+      raw.incidencia?.subject,
+      raw.incidencia?.asunto,
+      raw.incidencia?.title,
+
+      raw.ticket?.subject,
+      raw.ticket?.asunto,
+      raw.ticket?.title,
+
+      raw.linkedTicket?.subject,
+      raw.linkedTicket?.asunto,
+      raw.linkedTicket?.title,
+      ""
+    ),
+    ""
+  );
+}
+
+function getTotalRaw(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return first(
+    item.total,
+    item.amount,
+    item.importe,
+    item.importeTotal,
+    item.totalFactura,
+    item.facturaTotal,
+    item.invoiceAmount,
+
+    raw.total,
+    raw.amount,
+    raw.importe,
+    raw.importeTotal,
+    raw.totalFactura,
+    raw.facturaTotal,
+    raw.invoiceAmount,
+    0
+  );
+}
+
+function getCurrency(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.moneda,
+      item.currency,
+      item.facturaCurrency,
+
+      raw.moneda,
+      raw.currency,
+      raw.facturaCurrency,
+      DEFAULT_CURRENCY
+    ),
+    DEFAULT_CURRENCY
+  );
+}
+
+function getTotalLabel(item = {}) {
+  return formatMoney(getTotalRaw(item), getCurrency(item));
+}
+
+function getTotalCaption(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  const taxIncluded = first(
+    item.taxIncluded,
+    item.impuestosIncluidos,
+    item.ivaIncluido,
+
+    raw.taxIncluded,
+    raw.impuestosIncluidos,
+    raw.ivaIncluido
+  );
+
+  if (taxIncluded === false) {
+    return "Impuestos no incl.";
+  }
+
+  return "Impuestos incl.";
+}
+
+function getFormaPago(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.formaPago,
+      item.metodoPago,
+      item.paymentMethod,
+      item.payment?.method,
+
+      raw.formaPago,
+      raw.metodoPago,
+      raw.paymentMethod,
+      raw.payment?.method
+    ),
+    "—"
+  );
+}
+
+function getCreatedAt(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return first(
+    item.fechaFactura,
+    item.fecha,
+    item.issueDate,
+    item.createdAt,
+    item.fechaCreacion,
+
+    raw.fechaFactura,
+    raw.fecha,
+    raw.issueDate,
+    raw.createdAt,
+    raw.fechaCreacion
+  );
+}
+
+function getUpdatedAt(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return first(
+    item.updatedAt,
+    item.fechaEnvio,
+    item.delivery?.lastSentAt,
+    item.sentAt,
+    item.mailSentAt,
+    item.fechaActualizacion,
+    item.lastUpdateAt,
+
+    raw.updatedAt,
+    raw.fechaEnvio,
+    raw.delivery?.lastSentAt,
+    raw.sentAt,
+    raw.mailSentAt,
+    raw.fechaActualizacion,
+    raw.lastUpdateAt,
+    raw.createdAt
+  );
+}
+
+function getSentAt(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return first(
+    item.fechaEnvio,
+    item.sentAt,
+    item.mailSentAt,
+    item.delivery?.lastSentAt,
+    item.meta?.lastSentAt,
+
+    raw.fechaEnvio,
+    raw.sentAt,
+    raw.mailSentAt,
+    raw.delivery?.lastSentAt,
+    raw.meta?.lastSentAt
+  );
+}
+
+function getSortTimestamp(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return (
+    safeNumber(item?.meta?.timestampMs, 0) ||
+    safeNumber(raw?.meta?.timestampMs, 0) ||
+    toTimestamp(getCreatedAt(item)) ||
+    toTimestamp(getUpdatedAt(item)) ||
+    toTimestamp(raw?._ts) ||
+    0
+  );
+}
+
+function compareFacturasNewestFirst(a = {}, b = {}) {
+  const diff = getSortTimestamp(b) - getSortTimestamp(a);
+
+  if (diff !== 0) {
+    return diff;
+  }
+
+  return safeText(getFacturaNumero(b), "").localeCompare(
+    safeText(getFacturaNumero(a), ""),
+    "es",
+    {
+      numeric: true,
+      sensitivity: "base",
+    }
+  );
+}
+
+function sortFacturasNewestFirst(items = []) {
+  return [...safeArray(items)].sort(compareFacturasNewestFirst);
+}
+
+function hasPdf(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  if (
+    bool(
+      first(
+        item.pdfAvailable,
+        item.hasPdf,
+        item.meta?.hasPdf,
+        raw.pdfAvailable,
+        raw.hasPdf,
+        raw.meta?.hasPdf
+      ),
+      false
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    first(
+      item.blobPath,
+      item.blobName,
+      item.pdfPath,
+      item.pdfUrl,
+      item.downloadUrl,
+      item.viewUrl,
+      item.pdf,
+
+      raw.blobPath,
+      raw.blobName,
+      raw.pdfPath,
+      raw.pdfUrl,
+      raw.downloadUrl,
+      raw.viewUrl,
+      raw.pdf
+    )
+  ) {
+    return true;
+  }
+
+  const files = safeArray(
+    first(
+      item.attachments,
+      item.files,
+      item.adjuntos,
+      raw.attachments,
+      raw.files,
+      raw.adjuntos,
+      []
+    )
+  );
+
+  return files.some((file) => {
+    const value = safeObject(file);
+    const type = normalizeText(
+      first(value.contentType, value.mimeType, value.mimetype, value.type)
+    );
+    const name = normalizeText(
+      first(value.name, value.filename, value.fileName, value.url)
+    );
+
+    return type.includes("pdf") || name.endsWith(".pdf");
+  });
+}
+
+function isFacturaSent(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return Boolean(
+    first(
+      item.fechaEnvio,
+      item.sentAt,
+      item.mailSentAt,
+      item.delivery?.lastSentAt,
+      item.meta?.lastSentAt,
+      item.meta?.isSent,
+
+      raw.fechaEnvio,
+      raw.sentAt,
+      raw.mailSentAt,
+      raw.delivery?.lastSentAt,
+      raw.meta?.lastSentAt,
+      raw.meta?.isSent
+    )
+  );
+}
+
+function canSendFactura(item = {}) {
+  return hasPdf(item) && isValidEmail(getClientEmail(item));
 }
 
 /* =========================================================
@@ -356,565 +1185,95 @@ function getAvatarStyle(item = {}) {
 }
 
 /* =========================================================
-   DOMAIN HELPERS
-========================================================= */
-
-function getFacturaId(item = {}) {
-  return safeText(
-    first(
-      item.id,
-      item._id,
-      item.facturaId,
-      item.invoiceId,
-      item.numero,
-      item.numeroFacturaLegal,
-      item.numeroFacturaSistema,
-
-      item?.raw?.id,
-      item?.raw?._id,
-      item?.raw?.facturaId,
-      item?.raw?.invoiceId,
-      item?.raw?.numero,
-      item?.raw?.numeroFacturaLegal,
-      item?.raw?.numeroFacturaSistema
-    ),
-    "FAC-SIN-ID"
-  );
-}
-
-function getFacturaNumero(item = {}) {
-  return safeText(
-    first(
-      item.numero,
-      item.invoiceNumber,
-      item.code,
-      item.facturaId,
-      item.invoiceId,
-      item.numeroFacturaLegal,
-      item.numeroFacturaSistema,
-      item.id,
-
-      item?.raw?.numero,
-      item?.raw?.invoiceNumber,
-      item?.raw?.code,
-      item?.raw?.facturaId,
-      item?.raw?.invoiceId,
-      item?.raw?.numeroFacturaLegal,
-      item?.raw?.numeroFacturaSistema,
-      item?.raw?.id
-    ),
-    "Factura sin número"
-  );
-}
-
-function getClientName(item = {}) {
-  return safeText(
-    first(
-      item.clienteNombre,
-      item.cliente?.nombre,
-      item.cliente?.nombreContacto,
-      item.clientName,
-      item.client?.name,
-      item.name,
-      item.nombre,
-      item.clienteEmpresa,
-      item.cliente?.empresa,
-      item.company,
-
-      item?.raw?.clienteNombre,
-      item?.raw?.cliente?.nombre,
-      item?.raw?.cliente?.nombreContacto,
-      item?.raw?.clientName,
-      item?.raw?.client?.name,
-      item?.raw?.name,
-      item?.raw?.nombre,
-      item?.raw?.clienteEmpresa,
-      item?.raw?.cliente?.empresa,
-      item?.raw?.cliente?.razonSocial
-    ),
-    "Cliente"
-  );
-}
-
-function getClientEmail(item = {}) {
-  return safeText(
-    first(
-      item.clienteEmail,
-      item.cliente?.email,
-      item.email,
-      item.emailCliente,
-      item.clientEmail,
-      item.client?.email,
-
-      item?.raw?.clienteEmail,
-      item?.raw?.emailCliente,
-      item?.raw?.cliente?.email,
-      item?.raw?.email,
-      item?.raw?.clientEmail,
-      item?.raw?.client?.email
-    ),
-    "Sin email"
-  );
-}
-
-function getClientAvatar(item = {}) {
-  return safeText(
-    first(
-      item.clienteAvatar,
-      item.clientAvatar,
-      item.avatar,
-      item.avatarUrl,
-      item.cliente?.avatar,
-      item.cliente?.avatarUrl,
-      item.client?.avatar,
-      item.client?.avatarUrl,
-
-      item?.raw?.clienteAvatar,
-      item?.raw?.clientAvatar,
-      item?.raw?.avatar,
-      item?.raw?.avatarUrl,
-      item?.raw?.cliente?.avatar,
-      item?.raw?.cliente?.avatarUrl,
-      item?.raw?.client?.avatar,
-      item?.raw?.client?.avatarUrl
-    ),
-    ""
-  );
-}
-
-function getClientStableKey(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return normalizeKey(
-    first(
-      item.clienteId,
-      item.clientId,
-      item.customerId,
-      item.userId,
-      item.uid,
-      item.cliente?.id,
-      item.cliente?.userId,
-      item.client?.id,
-      item.client?.userId,
-      item.customer?.id,
-      item.customer?.userId,
-
-      item.clienteEmail,
-      item.emailCliente,
-      item.clientEmail,
-      item.email,
-      item.cliente?.email,
-      item.client?.email,
-      item.customer?.email,
-
-      raw.clienteId,
-      raw.clientId,
-      raw.customerId,
-      raw.userId,
-      raw.uid,
-      raw.cliente?.id,
-      raw.cliente?.userId,
-      raw.client?.id,
-      raw.client?.userId,
-      raw.customer?.id,
-      raw.customer?.userId,
-
-      raw.clienteEmail,
-      raw.emailCliente,
-      raw.clientEmail,
-      raw.email,
-      raw.cliente?.email,
-      raw.client?.email,
-      raw.customer?.email,
-
-      getClientName(item)
-    )
-  );
-}
-
-function getInitials(value = "") {
-  const text = normalizeWhitespace(value);
-
-  if (!text) return "ON";
-
-  const parts = text.split(" ").filter(Boolean);
-
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
-  }
-
-  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "ON";
-}
-
-function getEstadoPagoKey(value = "") {
-  const key = normalizeKey(value);
-
-  if (["paid", "pagada", "pagado", "cobrada", "abonada"].includes(key)) {
-    return "paid";
-  }
-
-  if (["pending", "pendiente", "unpaid"].includes(key)) {
-    return "pending";
-  }
-
-  if (["partial", "parcial"].includes(key)) {
-    return "partial";
-  }
-
-  if (["overdue", "vencida"].includes(key)) {
-    return "overdue";
-  }
-
-  if (["cancelled", "canceled", "cancelada", "cancelado"].includes(key)) {
-    return "cancelled";
-  }
-
-  if (["draft", "borrador"].includes(key)) {
-    return "draft";
-  }
-
-  return "pending";
-}
-
-function getEstadoPagoLabel(value = "") {
-  const key = getEstadoPagoKey(value);
-
-  if (key === "paid") return "Pagada";
-  if (key === "pending") return "Pendiente";
-  if (key === "partial") return "Pago parcial";
-  if (key === "overdue") return "Vencida";
-  if (key === "cancelled") return "Cancelada";
-  if (key === "draft") return "Borrador";
-
-  return safeText(value, "Pendiente");
-}
-
-function getEstadoPagoChipClass(value = "") {
-  const key = getEstadoPagoKey(value);
-
-  if (key === "paid") return "facturas-chip--paid";
-  if (key === "pending") return "facturas-chip--pending";
-  if (key === "partial") return "facturas-chip--partial";
-  if (key === "overdue") return "facturas-chip--overdue";
-  if (key === "cancelled") return "facturas-chip--cancelled";
-  if (key === "draft") return "facturas-chip--draft";
-
-  return "facturas-chip--pending";
-}
-
-function getIncidenciaId(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return safeText(
-    first(
-      item.ticketId,
-      item.incidenciaId,
-
-      item.incidencia?.id,
-      item.incidencia?.ticketId,
-      item.incidencia?.incidenciaId,
-
-      item.ticket?.id,
-      item.ticket?.ticketId,
-      item.ticket?.incidenciaId,
-
-      item.linkedTicket?.id,
-      item.linkedTicket?.ticketId,
-      item.linkedTicket?.incidenciaId,
-
-      item.relatedTicketId,
-      item.relatedIncidentId,
-      item.supportTicketId,
-      item.caseId,
-
-      item.meta?.ticketId,
-      item.meta?.incidenciaId,
-
-      pickTicketIdFromArray(item.ticketIds),
-      pickTicketIdFromArray(item.incidenciaIds),
-      pickTicketIdFromArray(item.relatedTicketIds),
-      pickTicketIdFromArray(item.relatedIncidentIds),
-      pickTicketIdFromArray(item.linkedTickets),
-      pickTicketIdFromArray(item.incidencias),
-      pickTicketIdFromArray(item.tickets),
-      pickTicketIdFromArray(item.relatedTickets),
-      pickTicketIdFromArray(item.facturasRelacionadas),
-      pickTicketIdFromArray(item.linkedInvoices?.tickets),
-      pickTicketIdFromArray(item.relations),
-
-      raw.ticketId,
-      raw.incidenciaId,
-
-      raw.incidencia?.id,
-      raw.incidencia?.ticketId,
-      raw.incidencia?.incidenciaId,
-
-      raw.ticket?.id,
-      raw.ticket?.ticketId,
-      raw.ticket?.incidenciaId,
-
-      raw.linkedTicket?.id,
-      raw.linkedTicket?.ticketId,
-      raw.linkedTicket?.incidenciaId,
-
-      raw.relatedTicketId,
-      raw.relatedIncidentId,
-      raw.supportTicketId,
-      raw.caseId,
-
-      raw.meta?.ticketId,
-      raw.meta?.incidenciaId,
-
-      pickTicketIdFromArray(raw.ticketIds),
-      pickTicketIdFromArray(raw.incidenciaIds),
-      pickTicketIdFromArray(raw.relatedTicketIds),
-      pickTicketIdFromArray(raw.relatedIncidentIds),
-      pickTicketIdFromArray(raw.linkedTickets),
-      pickTicketIdFromArray(raw.incidencias),
-      pickTicketIdFromArray(raw.tickets),
-      pickTicketIdFromArray(raw.relatedTickets),
-      pickTicketIdFromArray(raw.facturasRelacionadas),
-      pickTicketIdFromArray(raw.linkedInvoices?.tickets),
-      pickTicketIdFromArray(raw.relations)
-    ),
-    "—"
-  );
-}
-
-function getTotalRaw(item = {}) {
-  return first(
-    item.total,
-    item.amount,
-    item.importe,
-    item.importeTotal,
-    item.totalFactura,
-    item?.raw?.total,
-    item?.raw?.amount,
-    item?.raw?.importe,
-    item?.raw?.importeTotal,
-    item?.raw?.totalFactura,
-    0
-  );
-}
-
-function getCurrency(item = {}) {
-  return safeText(
-    first(
-      item.moneda,
-      item.currency,
-      item?.raw?.moneda,
-      item?.raw?.currency,
-      "EUR"
-    ),
-    "EUR"
-  );
-}
-
-function getTotalLabel(item = {}) {
-  return formatMoney(
-    getTotalRaw(item),
-    getCurrency(item)
-  );
-}
-
-function getTotalCaption(item = {}) {
-  const taxIncluded = first(
-    item.taxIncluded,
-    item.impuestosIncluidos,
-    item.ivaIncluido,
-    item?.raw?.taxIncluded,
-    item?.raw?.impuestosIncluidos,
-    item?.raw?.ivaIncluido
-  );
-
-  if (taxIncluded === false) {
-    return "Impuestos no incl.";
-  }
-
-  return "Impuestos incl.";
-}
-
-function getFormaPago(item = {}) {
-  return safeText(
-    first(
-      item.formaPago,
-      item.metodoPago,
-      item.paymentMethod,
-      item?.raw?.formaPago,
-      item?.raw?.metodoPago,
-      item?.raw?.paymentMethod
-    ),
-    "—"
-  );
-}
-
-function getCreatedAt(item = {}) {
-  return first(
-    item.fecha,
-    item.createdAt,
-    item.fechaCreacion,
-    item.issueDate,
-    item.fechaFactura,
-
-    item?.raw?.fecha,
-    item?.raw?.createdAt,
-    item?.raw?.fechaCreacion,
-    item?.raw?.issueDate,
-    item?.raw?.fechaFactura
-  );
-}
-
-function getUpdatedAt(item = {}) {
-  return first(
-    item.updatedAt,
-    item.fechaEnvio,
-    item.fechaActualizacion,
-    item.lastUpdateAt,
-
-    item?.raw?.updatedAt,
-    item?.raw?.fechaEnvio,
-    item?.raw?.fechaActualizacion,
-    item?.raw?.lastUpdateAt,
-    item?.raw?.createdAt
-  );
-}
-
-function getSortDate(item = {}) {
-  return first(
-    item.fecha,
-    item.fechaFactura,
-    item.issueDate,
-    item.createdAt,
-    item.fechaCreacion,
-    item.updatedAt,
-    item.fechaActualizacion,
-    item.lastUpdateAt,
-
-    item?.raw?.fecha,
-    item?.raw?.fechaFactura,
-    item?.raw?.issueDate,
-    item?.raw?.createdAt,
-    item?.raw?.fechaCreacion,
-    item?.raw?.updatedAt,
-    item?.raw?.fechaActualizacion,
-    item?.raw?.lastUpdateAt
-  );
-}
-
-function getSortTimestamp(item = {}) {
-  return toTimestamp(getSortDate(item));
-}
-
-function compareFacturasNewestFirst(a = {}, b = {}) {
-  const diff = getSortTimestamp(b) - getSortTimestamp(a);
-
-  if (diff !== 0) {
-    return diff;
-  }
-
-  const bNumero = safeText(getFacturaNumero(b), "");
-  const aNumero = safeText(getFacturaNumero(a), "");
-
-  return bNumero.localeCompare(aNumero, "es", {
-    numeric: true,
-    sensitivity: "base",
-  });
-}
-
-function sortFacturasNewestFirst(items = []) {
-  return [...safeArray(items)].sort(compareFacturasNewestFirst);
-}
-
-function hasPdf(item = {}) {
-  return Boolean(
-    first(
-      item.pdfAvailable,
-      item.blobPath,
-      item.pdfUrl,
-      item.pdf,
-      item.hasPdf,
-
-      item?.raw?.pdfAvailable,
-      item?.raw?.blobPath,
-      item?.raw?.pdfUrl,
-      item?.raw?.pdf,
-      item?.raw?.hasPdf
-    )
-  );
-}
-
-/* =========================================================
    STATS / PAGINATION
 ========================================================= */
 
 function computeStats(items = []) {
   const rows = safeArray(items);
 
-  return {
-    total: rows.length,
+  return rows.reduce(
+    (acc, item) => {
+      const total = safeNumber(getTotalRaw(item), 0);
+      const paymentKey = getEstadoPagoKey(
+        first(item.estadoPago, item.paymentStatus, item?.raw?.estadoPago, item?.raw?.paymentStatus)
+      );
 
-    pendingCount: rows.filter((item) =>
-      ["pending", "partial", "draft"].includes(
-        getEstadoPagoKey(first(item.estadoPago, item?.raw?.estadoPago))
-      )
-    ).length,
+      acc.total += 1;
+      acc.totalImporte += total;
 
-    paidCount: rows.filter((item) =>
-      ["paid"].includes(
-        getEstadoPagoKey(first(item.estadoPago, item?.raw?.estadoPago))
-      )
-    ).length,
+      if (paymentKey === "paid") {
+        acc.paidCount += 1;
+        acc.totalPagado += total;
+      }
 
-    overdueCount: rows.filter((item) =>
-      ["overdue"].includes(
-        getEstadoPagoKey(first(item.estadoPago, item?.raw?.estadoPago))
-      )
-    ).length,
+      if (["pending", "partial", "draft"].includes(paymentKey)) {
+        acc.pendingCount += 1;
+        acc.totalPendiente += total;
+      }
 
-    totalImporte: rows.reduce(
-      (acc, item) => acc + safeNumber(getTotalRaw(item), 0),
-      0
+      if (paymentKey === "overdue") {
+        acc.overdueCount += 1;
+        acc.totalVencido += total;
+      }
+
+      if (hasPdf(item)) acc.pdfCount += 1;
+      if (isFacturaSent(item)) acc.sentCount += 1;
+      if (getIncidenciaId(item)) acc.incidenciaCount += 1;
+
+      return acc;
+    },
+    {
+      total: 0,
+      totalImporte: 0,
+      totalPagado: 0,
+      totalPendiente: 0,
+      totalVencido: 0,
+      pendingCount: 0,
+      paidCount: 0,
+      overdueCount: 0,
+      pdfCount: 0,
+      sentCount: 0,
+      incidenciaCount: 0,
+    }
+  );
+}
+
+function normalizePageSize(state = {}) {
+  return clamp(
+    safeNumber(
+      first(
+        state.pageSize,
+        state.limit,
+        state.facturasPageSize,
+        DEFAULT_PAGE_SIZE
+      ),
+      DEFAULT_PAGE_SIZE
     ),
-  };
+    1,
+    50
+  );
 }
 
 function getPagination(items = [], state = {}) {
   const allItems = sortFacturasNewestFirst(items);
   const runtime = safeObject(state);
 
-  const pageSize = Math.max(
-    1,
-    safeNumber(
-      first(
-        runtime.pageSize,
-        runtime.limit,
-        runtime.facturasPageSize,
-        DEFAULT_PAGE_SIZE
-      ),
-      DEFAULT_PAGE_SIZE
-    )
-  );
-
+  const pageSize = normalizePageSize(runtime);
   const totalCount = allItems.length;
 
-  const totalPages = Math.max(
-    1,
-    Math.ceil((totalCount || 1) / pageSize)
-  );
+  const totalPages = Math.max(1, Math.ceil((totalCount || 1) / pageSize));
 
-  const currentPage = Math.min(
-    Math.max(
-      1,
-      safeNumber(
-        first(
-          runtime.page,
-          runtime.currentPage,
-          runtime.facturasPage,
-          1
-        ),
+  const currentPage = clamp(
+    safeNumber(
+      first(
+        runtime.page,
+        runtime.currentPage,
+        runtime.facturasPage,
         1
-      )
+      ),
+      1
     ),
+    1,
     totalPages
   );
 
@@ -941,7 +1300,7 @@ function getPagination(items = [], state = {}) {
 }
 
 /* =========================================================
-   STATE HELPERS
+   BUSY STATE
 ========================================================= */
 
 function resolveBusyMeta(item = {}, state = {}) {
@@ -965,6 +1324,10 @@ function resolveBusyMeta(item = {}, state = {}) {
 /* =========================================================
    UI PARTIALS
 ========================================================= */
+
+function renderMaybeStyles(includeStyles = true) {
+  return includeStyles ? renderStyles() : "";
+}
 
 function renderSpinner(label = "") {
   return `
@@ -1046,18 +1409,79 @@ function renderEstadoPagoChip(item = {}) {
 
   return `
     <span class="facturas-chip ${klass}">
+      <span class="facturas-chip-dot" aria-hidden="true"></span>
       ${escapeHtml(label)}
+    </span>
+  `;
+}
+
+function renderDeliveryBadge(item = {}) {
+  const sent = isFacturaSent(item);
+  const sentAt = getSentAt(item);
+
+  if (sent) {
+    return `
+      <span
+        class="facturas-mini-badge facturas-mini-badge--sent"
+        title="${escapeHtml(sentAt ? `Enviada · ${formatDateTime(sentAt)}` : "Factura enviada")}"
+        data-tooltip="${escapeHtml(sentAt ? `Enviada · ${formatDateTime(sentAt)}` : "Factura enviada")}"
+      >
+        ${icon("check")}
+        Enviada
+      </span>
+    `;
+  }
+
+  return `
+    <span
+      class="facturas-mini-badge facturas-mini-badge--idle"
+      title="Factura no enviada todavía"
+      data-tooltip="Factura no enviada todavía"
+    >
+      ${icon("mail")}
+      No enviada
+    </span>
+  `;
+}
+
+function renderPdfBadge(item = {}) {
+  if (hasPdf(item)) {
+    return `
+      <span
+        class="facturas-mini-badge facturas-mini-badge--pdf"
+        title="PDF disponible"
+        data-tooltip="PDF disponible"
+      >
+        ${icon("pdf")}
+        PDF
+      </span>
+    `;
+  }
+
+  return `
+    <span
+      class="facturas-mini-badge facturas-mini-badge--blocked"
+      title="PDF no disponible"
+      data-tooltip="PDF no disponible"
+    >
+      ${icon("lock")}
+      Sin PDF
     </span>
   `;
 }
 
 function renderIncidenciaLink(item = {}) {
   const incidenciaId = getIncidenciaId(item);
+  const incidenciaSubject = getIncidenciaSubject(item);
   const facturaId = getFacturaId(item);
 
-  if (!incidenciaId || incidenciaId === "—") {
+  if (!incidenciaId) {
     return `<span class="facturas-incidencia-empty">—</span>`;
   }
+
+  const tooltip = incidenciaSubject
+    ? `Abrir incidencia · ${incidenciaSubject}`
+    : "Abrir incidencia relacionada";
 
   return `
     <button
@@ -1068,10 +1492,11 @@ function renderIncidenciaLink(item = {}) {
       data-ticket-id="${escapeHtml(incidenciaId)}"
       data-incidencia-id="${escapeHtml(incidenciaId)}"
       data-factura-id="${escapeHtml(facturaId)}"
-      title="Abrir incidencia relacionada"
-      data-tooltip="Abrir incidencia relacionada"
+      title="${escapeHtml(tooltip)}"
+      data-tooltip="${escapeHtml(tooltip)}"
     >
-      ${escapeHtml(incidenciaId)}
+      ${icon("ticket")}
+      <span>${escapeHtml(incidenciaId)}</span>
     </button>
   `;
 }
@@ -1094,9 +1519,13 @@ function renderPagination(pagination = {}, state = {}) {
         Anterior
       </button>
 
+      <span class="facturas-pagination-status">
+        ${escapeHtml(`${pagination.currentPage}/${pagination.totalPages}`)}
+      </span>
+
       <button
         type="button"
-        class="facturas-pagination-btn"
+        class="facturas-pagination-btn facturas-pagination-btn--next"
         data-action="next-page"
         data-facturas-action="next-page"
         data-page="${escapeHtml(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
@@ -1108,23 +1537,81 @@ function renderPagination(pagination = {}, state = {}) {
   `;
 }
 
+function renderActionButton({
+  klass = "",
+  action = "",
+  facturaId = "",
+  label = "",
+  loadingLabel = "",
+  iconName = "",
+  loading = false,
+  disabled = false,
+  tooltip = "",
+  ariaBusy = false,
+} = {}) {
+  const finalDisabled = disabled || loading;
+  const finalTooltip = tooltip || label;
+
+  return `
+    <button
+      type="button"
+      class="facturas-action-btn ${klass}${loading ? " is-loading" : ""}"
+      data-action="${escapeHtml(action)}"
+      data-facturas-action="${escapeHtml(action)}"
+      data-factura-id="${escapeHtml(facturaId)}"
+      title="${escapeHtml(finalTooltip)}"
+      data-tooltip="${escapeHtml(finalTooltip)}"
+      ${finalDisabled ? 'disabled aria-disabled="true"' : ""}
+      ${ariaBusy || loading ? 'aria-busy="true"' : ""}
+    >
+      ${
+        loading
+          ? renderLoaderOnly(loadingLabel || label)
+          : `
+            <span class="facturas-action-icon">${icon(iconName)}</span>
+            <span class="facturas-btn-text">${escapeHtml(label)}</span>
+          `
+      }
+    </button>
+  `;
+}
+
 function renderRow(item = {}, state = {}) {
   const busy = resolveBusyMeta(item, state);
 
   const facturaId = busy.facturaId;
   const numero = getFacturaNumero(item);
+  const numeroSistema = getFacturaSistema(item);
   const clientName = getClientName(item);
-  const clientEmail = getClientEmail(item);
-  const createdAt = formatDateTime(getCreatedAt(item));
+  const clientEmail = getClientEmailLabel(item);
+  const createdAtRaw = getCreatedAt(item);
+  const createdAt = formatDateTime(createdAtRaw);
   const total = getTotalLabel(item);
   const totalCaption = getTotalCaption(item);
   const formaPago = getFormaPago(item);
   const pdfAvailable = hasPdf(item);
+  const sent = isFacturaSent(item);
+  const canSend = canSendFactura(item);
+
+  const sendLabel = sent ? "Reenviar" : "Enviar";
+  const sendTooltip = !pdfAvailable
+    ? "No se puede enviar: falta PDF"
+    : !isValidEmail(getClientEmail(item))
+      ? "No se puede enviar: falta email válido"
+      : sent
+        ? "Reenviar factura al cliente"
+        : "Enviar factura al cliente";
+
+  const paymentKey = getEstadoPagoKey(
+    first(item.estadoPago, item.paymentStatus, item?.raw?.estadoPago, item?.raw?.paymentStatus)
+  );
 
   return `
     <tr
-      class="facturas-table-row"
+      class="facturas-table-row facturas-table-row--${escapeHtml(paymentKey)}"
       data-factura-id="${escapeHtml(facturaId)}"
+      data-sent="${sent ? "true" : "false"}"
+      data-has-pdf="${pdfAvailable ? "true" : "false"}"
       data-row-click-disabled="true"
     >
       <td class="facturas-cell facturas-cell--main">
@@ -1132,9 +1619,21 @@ function renderRow(item = {}, state = {}) {
           ${renderAvatar(item)}
 
           <div class="facturas-main-copy">
-            <div class="facturas-factura-id">${escapeHtml(numero)}</div>
+            <div class="facturas-factura-line">
+              <span class="facturas-factura-id">${escapeHtml(numero)}</span>
+              ${numeroSistema && numeroSistema !== numero ? `<span class="facturas-system-id">${escapeHtml(numeroSistema)}</span>` : ""}
+            </div>
+
             <div class="facturas-factura-client">${escapeHtml(clientName)}</div>
-            <div class="facturas-factura-email">${escapeHtml(clientEmail)}</div>
+
+            <div class="facturas-factura-email">
+              ${escapeHtml(clientEmail)}
+            </div>
+
+            <div class="facturas-row-badges">
+              ${renderDeliveryBadge(item)}
+              ${renderPdfBadge(item)}
+            </div>
           </div>
         </div>
       </td>
@@ -1144,7 +1643,13 @@ function renderRow(item = {}, state = {}) {
       </td>
 
       <td class="facturas-cell facturas-cell--date">
-        <span class="facturas-date-inline">${escapeHtml(createdAt)}</span>
+        <span
+          class="facturas-date-inline"
+          title="${escapeHtml(createdAt)}"
+          data-tooltip="${escapeHtml(createdAt)}"
+        >
+          ${escapeHtml(createdAt)}
+        </span>
       </td>
 
       <td class="facturas-cell facturas-cell--amount">
@@ -1161,73 +1666,54 @@ function renderRow(item = {}, state = {}) {
 
       <td class="facturas-cell facturas-cell--actions">
         <div class="facturas-actions">
-          <button
-            type="button"
-            class="facturas-action-btn${busy.isOpening ? " is-loading" : ""}"
-            data-action="open-factura"
-            data-facturas-action="open-factura"
-            data-factura-id="${escapeHtml(facturaId)}"
-            ${busy.isOpening ? 'disabled aria-busy="true"' : ""}
-          >
-            ${
-              busy.isOpening
-                ? renderLoaderOnly("Abriendo detalle")
-                : '<span class="facturas-btn-text">Detalle</span>'
-            }
-          </button>
+          ${renderActionButton({
+            action: "open-factura",
+            facturaId,
+            label: "Detalle",
+            loadingLabel: "Abriendo detalle",
+            iconName: "detail",
+            loading: busy.isOpening,
+            tooltip: "Abrir detalle de factura",
+            ariaBusy: busy.isOpening,
+          })}
 
-          <button
-            type="button"
-            class="facturas-action-btn${busy.isViewingPdf ? " is-loading" : ""}"
-            data-action="view-factura-pdf"
-            data-facturas-action="view-factura-pdf"
-            data-factura-id="${escapeHtml(facturaId)}"
-            ${
-              pdfAvailable && !busy.isViewingPdf
-                ? ""
-                : 'disabled aria-disabled="true"'
-            }
-          >
-            ${
-              busy.isViewingPdf
-                ? renderLoaderOnly("Abriendo PDF")
-                : '<span class="facturas-btn-text">Ver PDF</span>'
-            }
-          </button>
+          ${renderActionButton({
+            action: "view-factura-pdf",
+            facturaId,
+            label: "Ver PDF",
+            loadingLabel: "Abriendo PDF",
+            iconName: "eye",
+            loading: busy.isViewingPdf,
+            disabled: !pdfAvailable,
+            tooltip: pdfAvailable ? "Ver PDF de factura" : "PDF no disponible",
+            ariaBusy: busy.isViewingPdf,
+          })}
 
-          <button
-            type="button"
-            class="facturas-action-btn facturas-action-btn--primary${busy.isDownloading ? " is-loading" : ""}"
-            data-action="download-factura"
-            data-facturas-action="download-factura"
-            data-factura-id="${escapeHtml(facturaId)}"
-            ${
-              pdfAvailable && !busy.isDownloading
-                ? ""
-                : 'disabled aria-disabled="true"'
-            }
-          >
-            ${
-              busy.isDownloading
-                ? renderLoaderOnly("Descargando factura")
-                : '<span class="facturas-btn-text">Descargar</span>'
-            }
-          </button>
+          ${renderActionButton({
+            klass: "facturas-action-btn--primary",
+            action: "download-factura",
+            facturaId,
+            label: "Descargar",
+            loadingLabel: "Descargando factura",
+            iconName: "download",
+            loading: busy.isDownloading,
+            disabled: !pdfAvailable,
+            tooltip: pdfAvailable ? "Descargar factura PDF" : "PDF no disponible",
+            ariaBusy: busy.isDownloading,
+          })}
 
-          <button
-            type="button"
-            class="facturas-action-btn facturas-action-btn--success${busy.isSending ? " is-loading" : ""}"
-            data-action="send-factura"
-            data-facturas-action="send-factura"
-            data-factura-id="${escapeHtml(facturaId)}"
-            ${busy.isSending ? 'disabled aria-busy="true"' : ""}
-          >
-            ${
-              busy.isSending
-                ? renderLoaderOnly("Enviando factura")
-                : '<span class="facturas-btn-text">Enviar</span>'
-            }
-          </button>
+          ${renderActionButton({
+            klass: "facturas-action-btn--success",
+            action: "send-factura",
+            facturaId,
+            label: sendLabel,
+            loadingLabel: "Enviando factura",
+            iconName: "send",
+            loading: busy.isSending,
+            disabled: !canSend,
+            tooltip: sendTooltip,
+            ariaBusy: busy.isSending,
+          })}
         </div>
       </td>
     </tr>
@@ -1275,9 +1761,12 @@ function renderRefreshOverlay() {
 function renderEmptyState() {
   return `
     <div class="facturas-empty">
+      <div class="facturas-empty-icon" aria-hidden="true">
+        ${icon("detail")}
+      </div>
       <h3 class="facturas-empty-title">No hay facturas para mostrar</h3>
       <p class="facturas-empty-text">
-        Cuando haya documentos registrados aparecerán aquí.
+        Cuando haya documentos registrados aparecerán aquí con su PDF, estado de pago, incidencia relacionada y acciones disponibles.
       </p>
     </div>
   `;
@@ -1289,12 +1778,20 @@ function renderEmptyState() {
 
 function renderStyles() {
   return `
-    <style>
+    <style id="${STYLE_ID}">
       .facturas-view-root{
+        --fac-row-accent:var(--accent, #6f59d9);
+        --fac-row-accent-soft:var(--accent-soft, rgba(111,89,217,.12));
+
         display:grid;
         gap:var(--view-section-gap, var(--space-lg, 18px));
         color:var(--text, #f5f5f5);
         font-family:var(--font-family, inherit);
+        min-inline-size:0;
+      }
+
+      .facturas-view-root *{
+        box-sizing:border-box;
       }
 
       .facturas-hero{
@@ -1303,10 +1800,30 @@ function renderStyles() {
         border-radius:var(--view-hero-radius, var(--card-radius-lg, 22px));
         border:1px solid var(--view-hero-border, var(--panel-border, var(--border-default, rgba(255,255,255,.08))));
         background:
+          radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent, #6f59d9) 10%, transparent), transparent 38%),
+          radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info, #3b82a6) 8%, transparent), transparent 34%),
           var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
           var(--view-hero-bg, var(--panel-bg, var(--card-bg, var(--surface-elevated, #262626))));
         box-shadow:var(--view-hero-shadow, var(--panel-shadow, var(--shadow-md, 0 14px 30px rgba(0,0,0,.22))));
         padding:var(--space-xl, 22px) var(--space-xl, 24px);
+        isolation:isolate;
+      }
+
+      .facturas-hero::after{
+        content:"";
+        position:absolute;
+        inset:auto -8% -38% 48%;
+        block-size:220px;
+        pointer-events:none;
+        background:radial-gradient(circle, color-mix(in srgb, var(--accent, #6f59d9) 9%, transparent), transparent 68%);
+        filter:blur(10px);
+        opacity:.8;
+        z-index:0;
+      }
+
+      .facturas-hero > *{
+        position:relative;
+        z-index:1;
       }
 
       .facturas-hero-top{
@@ -1317,16 +1834,16 @@ function renderStyles() {
       }
 
       .facturas-hero-copy{
-        min-width:0;
+        min-inline-size:0;
         display:grid;
         gap:var(--space-xs, 10px);
       }
 
       .facturas-page-title{
         margin:0;
-        max-width:100%;
+        max-inline-size:100%;
         font-size:clamp(var(--font-3xl, 24px), 2.6vw, var(--font-5xl, 40px));
-        line-height:var(--line-tight, .98);
+        line-height:var(--line-tight, 1.08);
         letter-spacing:var(--view-title-letter, -.05em);
         font-weight:var(--view-title-weight, var(--weight-black, 800));
         color:var(--text-strong, #ffffff);
@@ -1335,7 +1852,7 @@ function renderStyles() {
 
       .facturas-page-subtitle{
         margin:0;
-        max-width:860px;
+        max-inline-size:880px;
         font-size:var(--font-lg, 15px);
         line-height:var(--line-relaxed, 1.58);
         color:var(--view-subtitle-color, var(--text-muted, rgba(245,245,245,.70)));
@@ -1350,8 +1867,8 @@ function renderStyles() {
       }
 
       .facturas-btn{
-        min-height:var(--btn-height, 42px);
-        padding:0 var(--space-md, 16px);
+        min-block-size:var(--btn-height, 42px);
+        padding-inline:var(--space-md, 16px);
         border-radius:var(--btn-radius, var(--radius-md, 13px));
         border:1px solid var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
         background:var(--btn-secondary-bg, rgba(255,255,255,.045));
@@ -1363,20 +1880,42 @@ function renderStyles() {
         display:inline-flex;
         align-items:center;
         justify-content:center;
+        gap:8px;
         text-decoration:none;
+        white-space:nowrap;
         box-shadow:var(--btn-secondary-shadow, var(--shadow-sm, 0 6px 14px rgba(0,0,0,.16)));
         transition:
           transform var(--duration-fast, .16s) var(--ease-standard, ease),
           box-shadow var(--duration-fast, .16s) var(--ease-standard, ease),
           border-color var(--duration-fast, .16s) var(--ease-standard, ease),
           background var(--duration-fast, .16s) var(--ease-standard, ease),
-          opacity var(--duration-fast, .16s) var(--ease-standard, ease);
+          color var(--duration-fast, .16s) var(--ease-standard, ease),
+          opacity var(--duration-fast, .16s) var(--ease-standard, ease),
+          filter var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .facturas-btn svg{
+        inline-size:16px;
+        block-size:16px;
       }
 
       .facturas-btn:hover{
         transform:translateY(var(--ui-hover-lift, -1px));
         background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
+        color:var(--text-strong, #ffffff);
         box-shadow:var(--shadow-md, 0 14px 30px rgba(0,0,0,.22));
+      }
+
+      .facturas-btn:active{
+        transform:translateY(0) scale(var(--ui-active-scale, .985));
+      }
+
+      .facturas-btn:focus-visible,
+      .facturas-action-btn:focus-visible,
+      .facturas-pagination-btn:focus-visible,
+      .facturas-incidencia-link:focus-visible{
+        outline:none;
+        box-shadow:var(--focus-ring, 0 0 0 4px rgba(113,113,122,.16));
       }
 
       .facturas-btn--primary{
@@ -1409,18 +1948,19 @@ function renderStyles() {
       .facturas-btn.is-loading,
       .facturas-action-btn.is-loading{
         cursor:wait;
-        opacity:.92;
+        opacity:.94;
       }
 
       .facturas-btn:disabled,
       .facturas-action-btn:disabled,
       .facturas-action-btn[aria-disabled="true"]{
         pointer-events:none;
-        opacity:.68;
+        opacity:.54;
+        filter:saturate(.75);
       }
 
       .facturas-hero-meta{
-        margin-top:var(--space-md, 14px);
+        margin-block-start:var(--space-md, 14px);
         display:flex;
         align-items:center;
         gap:var(--space-xs, 8px);
@@ -1428,8 +1968,8 @@ function renderStyles() {
       }
 
       .facturas-meta-pill{
-        min-height:calc(30px * var(--ui-scale, 1));
-        padding:0 var(--space-sm, 12px);
+        min-block-size:calc(30px * var(--ui-scale, 1));
+        padding-inline:var(--space-sm, 12px);
         border-radius:var(--radius-pill, 999px);
         border:1px solid var(--badge-border, var(--border-default, rgba(255,255,255,.07)));
         background:var(--badge-bg, rgba(255,255,255,.048));
@@ -1440,20 +1980,27 @@ function renderStyles() {
         text-transform:uppercase;
         display:inline-flex;
         align-items:center;
+        gap:7px;
         white-space:nowrap;
       }
 
+      .facturas-meta-pill svg{
+        inline-size:14px;
+        block-size:14px;
+      }
+
       .facturas-stats{
-        margin-top:var(--space-md, 16px);
+        margin-block-start:var(--space-md, 16px);
         display:grid;
         grid-template-columns:repeat(4, minmax(0, 1fr));
         gap:var(--space-sm, 12px);
       }
 
       .facturas-stat-card{
+        position:relative;
         display:grid;
         gap:var(--space-xs, 8px);
-        min-height:calc(124px * var(--ui-scale, 1));
+        min-block-size:calc(124px * var(--ui-scale, 1));
         padding:var(--space-md, 16px) var(--space-lg, 18px);
         border-radius:var(--card-radius, 18px);
         border:1px solid var(--card-border, var(--border-default, rgba(255,255,255,.082)));
@@ -1461,21 +2008,38 @@ function renderStyles() {
           var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
           var(--card-bg, var(--surface-elevated, rgba(39,39,42,.88)));
         box-shadow:var(--shadow-card, var(--card-shadow, 0 16px 36px rgba(0,0,0,.24)));
+        overflow:hidden;
+      }
+
+      .facturas-stat-card::after{
+        content:"";
+        position:absolute;
+        inset:auto -20% -44% auto;
+        inline-size:120px;
+        block-size:120px;
+        border-radius:50%;
+        pointer-events:none;
+        background:color-mix(in srgb, var(--fac-stat-color, var(--accent, #6f59d9)) 16%, transparent);
+        filter:blur(8px);
       }
 
       .facturas-stat-card--accent{
+        --fac-stat-color:var(--accent, #6f59d9);
         border-color:var(--accent-border, var(--border-accent, rgba(113,113,122,.30)));
       }
 
       .facturas-stat-card--success{
+        --fac-stat-color:var(--success, #22c55e);
         border-color:var(--border-success, rgba(34,197,94,.30));
       }
 
       .facturas-stat-card--warning{
+        --fac-stat-color:var(--warning, #f59e0b);
         border-color:var(--border-warning, rgba(245,158,11,.30));
       }
 
       .facturas-stat-card--danger{
+        --fac-stat-color:var(--error, #ef4444);
         border-color:var(--border-error, rgba(239,68,68,.30));
       }
 
@@ -1488,7 +2052,7 @@ function renderStyles() {
       }
 
       .facturas-stat-value{
-        font-size:var(--font-5xl, 40px);
+        font-size:clamp(28px, 3vw, var(--font-5xl, 40px));
         line-height:.92;
         letter-spacing:var(--letter-tight, -.03em);
         font-weight:var(--weight-black, 800);
@@ -1521,7 +2085,7 @@ function renderStyles() {
       }
 
       .facturas-history-copy{
-        min-width:0;
+        min-inline-size:0;
         display:grid;
         gap:var(--space-3xs, 2px);
       }
@@ -1543,14 +2107,29 @@ function renderStyles() {
 
       .facturas-pagination{
         display:flex;
+        align-items:center;
         gap:var(--space-xs, 8px);
         flex-wrap:wrap;
         justify-content:flex-end;
       }
 
+      .facturas-pagination-status{
+        min-block-size:calc(34px * var(--ui-scale, 1));
+        padding-inline:10px;
+        border-radius:var(--radius-pill, 999px);
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        font-size:var(--font-xs, 11px);
+        font-weight:var(--weight-bold, 700);
+        color:var(--text-dim, rgba(245,245,245,.50));
+        background:var(--badge-bg, rgba(255,255,255,.048));
+        border:1px solid var(--badge-border, rgba(255,255,255,.07));
+      }
+
       .facturas-pagination-btn{
-        min-height:calc(38px * var(--ui-scale, 1));
-        padding:0 var(--space-sm, 14px);
+        min-block-size:calc(38px * var(--ui-scale, 1));
+        padding-inline:var(--space-sm, 14px);
         border-radius:var(--radius-md, 13px);
         border:1px solid var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
         background:var(--btn-secondary-bg, rgba(255,255,255,.045));
@@ -1563,12 +2142,14 @@ function renderStyles() {
         justify-content:center;
         text-decoration:none;
         transition:
+          transform var(--duration-fast, .16s) var(--ease-standard, ease),
           background var(--duration-fast, .16s) var(--ease-standard, ease),
           border-color var(--duration-fast, .16s) var(--ease-standard, ease),
           opacity var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
       .facturas-pagination-btn:hover{
+        transform:translateY(var(--ui-hover-lift, -1px));
         background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
         border-color:var(--border-strong, rgba(255,255,255,.12));
       }
@@ -1578,11 +2159,12 @@ function renderStyles() {
         opacity:.48;
         cursor:not-allowed;
         pointer-events:none;
+        transform:none;
       }
 
       .facturas-table-wrap{
         position:relative;
-        min-height:120px;
+        min-block-size:120px;
       }
 
       .facturas-table-wrap.is-refreshing .facturas-table-shell{
@@ -1594,19 +2176,36 @@ function renderStyles() {
       }
 
       .facturas-table-shell{
-        width:100%;
+        inline-size:100%;
         overflow-x:auto;
         overflow-y:hidden;
+        scrollbar-width:thin;
+        scrollbar-color:var(--scrollbar-thumb, rgba(255,255,255,.12)) transparent;
         transition:
           opacity var(--duration-fast, .18s) var(--ease-standard, ease),
           filter var(--duration-fast, .18s) var(--ease-standard, ease);
       }
 
+      .facturas-table-shell::-webkit-scrollbar{
+        block-size:var(--scrollbar-size, 10px);
+      }
+
+      .facturas-table-shell::-webkit-scrollbar-track{
+        background:transparent;
+      }
+
+      .facturas-table-shell::-webkit-scrollbar-thumb{
+        border:2px solid transparent;
+        border-radius:999px;
+        background:var(--scrollbar-thumb, rgba(255,255,255,.12));
+        background-clip:padding-box;
+      }
+
       .facturas-table{
-        width:100%;
+        inline-size:100%;
         border-collapse:separate;
         border-spacing:0;
-        min-width:1040px;
+        min-inline-size:1120px;
         table-layout:fixed;
         background:var(--table-bg, transparent);
       }
@@ -1642,13 +2241,49 @@ function renderStyles() {
       }
 
       .facturas-table-row{
+        position:relative;
         transition:
           background var(--duration-fast, .16s) var(--ease-standard, ease),
           box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
+      .facturas-table-row::before{
+        content:"";
+        position:absolute;
+        inset-block:10px;
+        inset-inline-start:0;
+        inline-size:3px;
+        border-radius:0 999px 999px 0;
+        background:var(--fac-row-accent);
+        opacity:.65;
+        transform:scaleY(.72);
+        transition:
+          opacity var(--duration-fast, .16s) var(--ease-standard, ease),
+          transform var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
       .facturas-table-row:hover{
         background:var(--data-table-row-hover, var(--table-row-hover, rgba(255,255,255,.024)));
+      }
+
+      .facturas-table-row:hover::before{
+        opacity:1;
+        transform:scaleY(1);
+      }
+
+      .facturas-table-row--paid{
+        --fac-row-accent:var(--success, #22c55e);
+      }
+
+      .facturas-table-row--pending,
+      .facturas-table-row--partial,
+      .facturas-table-row--draft{
+        --fac-row-accent:var(--warning, #f59e0b);
+      }
+
+      .facturas-table-row--overdue,
+      .facturas-table-row--cancelled{
+        --fac-row-accent:var(--error, #ef4444);
       }
 
       .facturas-main{
@@ -1656,13 +2291,13 @@ function renderStyles() {
         grid-template-columns:var(--avatar-size-lg, calc(44px * var(--ui-scale, 1))) minmax(0, 1fr);
         gap:var(--space-sm, 12px);
         align-items:center;
-        min-width:0;
+        min-inline-size:0;
       }
 
       .facturas-avatar{
         position:relative;
-        width:var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
-        height:var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
+        inline-size:var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
+        block-size:var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
         border-radius:var(--radius-pill, 999px);
         overflow:hidden;
         flex:0 0 var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
@@ -1690,8 +2325,8 @@ function renderStyles() {
         position:relative;
         z-index:1;
         display:block;
-        width:100%;
-        height:100%;
+        inline-size:100%;
+        block-size:100%;
         object-fit:cover;
       }
 
@@ -1711,7 +2346,8 @@ function renderStyles() {
           0 0 16px rgba(255,255,255,.20);
       }
 
-      .facturas-avatar[data-fallback="true"] .facturas-avatar-fallback{
+      .facturas-avatar[data-fallback="true"] .facturas-avatar-fallback,
+      .facturas-avatar--fallback .facturas-avatar-fallback{
         display:flex;
       }
 
@@ -1719,23 +2355,49 @@ function renderStyles() {
         display:none !important;
       }
 
-      .facturas-avatar--fallback .facturas-avatar-fallback{
-        display:flex;
-      }
-
       .facturas-main-copy{
-        min-width:0;
+        min-inline-size:0;
         display:grid;
         gap:var(--space-3xs, 3px);
       }
 
+      .facturas-factura-line{
+        display:flex;
+        align-items:center;
+        gap:7px;
+        min-inline-size:0;
+      }
+
       .facturas-factura-id{
+        min-inline-size:0;
         font-size:var(--font-sm, 12px);
         line-height:var(--line-snug, 1.22);
         font-weight:var(--weight-bold, 700);
         letter-spacing:.055em;
         color:var(--text-dim, rgba(245,245,245,.50));
         text-transform:uppercase;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .facturas-system-id{
+        flex:0 0 auto;
+        max-inline-size:120px;
+        min-block-size:20px;
+        padding-inline:7px;
+        border-radius:999px;
+        display:inline-flex;
+        align-items:center;
+        font-size:10px;
+        font-weight:800;
+        letter-spacing:.045em;
+        color:var(--text-dim, rgba(245,245,245,.50));
+        background:var(--badge-bg, rgba(255,255,255,.048));
+        border:1px solid var(--badge-border, rgba(255,255,255,.07));
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
       }
 
       .facturas-factura-client{
@@ -1760,13 +2422,63 @@ function renderStyles() {
         white-space:nowrap;
       }
 
+      .facturas-row-badges{
+        display:flex;
+        align-items:center;
+        flex-wrap:wrap;
+        gap:5px;
+        margin-block-start:3px;
+      }
+
+      .facturas-mini-badge{
+        min-block-size:20px;
+        padding-inline:7px;
+        border-radius:999px;
+        display:inline-flex;
+        align-items:center;
+        gap:4px;
+        border:1px solid var(--badge-border, rgba(255,255,255,.07));
+        background:var(--badge-bg, rgba(255,255,255,.048));
+        color:var(--text-dim, rgba(245,245,245,.50));
+        font-size:10px;
+        font-weight:800;
+        line-height:1;
+        letter-spacing:.035em;
+        text-transform:uppercase;
+        white-space:nowrap;
+      }
+
+      .facturas-mini-badge svg{
+        inline-size:12px;
+        block-size:12px;
+      }
+
+      .facturas-mini-badge--sent{
+        color:var(--success, #22c55e);
+        background:var(--success-bg, rgba(34,197,94,.10));
+        border-color:var(--border-success, rgba(34,197,94,.30));
+      }
+
+      .facturas-mini-badge--pdf{
+        color:var(--info, #94a3b8);
+        background:var(--info-bg, rgba(148,163,184,.10));
+        border-color:var(--border-info, rgba(148,163,184,.28));
+      }
+
+      .facturas-mini-badge--blocked{
+        color:var(--error, #ef4444);
+        background:var(--error-bg, rgba(239,68,68,.10));
+        border-color:var(--border-error, rgba(239,68,68,.30));
+      }
+
       .facturas-chip{
-        min-height:var(--chip-height, calc(26px * var(--ui-scale, 1)));
-        padding:0 var(--space-sm, 12px);
+        min-block-size:var(--chip-height, calc(26px * var(--ui-scale, 1)));
+        padding-inline:var(--space-sm, 12px);
         border-radius:var(--radius-pill, 999px);
         display:inline-flex;
         align-items:center;
         justify-content:center;
+        gap:7px;
         font-size:var(--font-xs, 11px);
         font-weight:var(--weight-bold, 700);
         letter-spacing:.045em;
@@ -1774,6 +2486,14 @@ function renderStyles() {
         white-space:nowrap;
         border:1px solid transparent;
         box-shadow:var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
+      }
+
+      .facturas-chip-dot{
+        inline-size:6px;
+        block-size:6px;
+        border-radius:999px;
+        background:currentColor;
+        box-shadow:0 0 0 3px color-mix(in srgb, currentColor 16%, transparent);
       }
 
       .facturas-chip--pending,
@@ -1815,7 +2535,7 @@ function renderStyles() {
       .facturas-total-stack{
         display:grid;
         gap:var(--space-3xs, 2px);
-        min-width:0;
+        min-inline-size:0;
       }
 
       .facturas-total-value{
@@ -1844,9 +2564,9 @@ function renderStyles() {
       }
 
       .facturas-incidencia-link{
-        max-width:100%;
-        min-height:calc(30px * var(--ui-scale, 1));
-        padding:0 var(--space-sm, 10px);
+        max-inline-size:100%;
+        min-block-size:calc(30px * var(--ui-scale, 1));
+        padding-inline:var(--space-sm, 10px);
         border-radius:var(--radius-pill, 999px);
         border:1px solid var(--accent-border, rgba(113,113,122,.28));
         background:var(--accent-soft, rgba(63,63,70,.18));
@@ -1859,13 +2579,27 @@ function renderStyles() {
         display:inline-flex;
         align-items:center;
         justify-content:center;
+        gap:6px;
         white-space:nowrap;
         overflow:hidden;
         text-overflow:ellipsis;
         transition:
           transform var(--duration-fast, .16s) var(--ease-standard, ease),
           background var(--duration-fast, .16s) var(--ease-standard, ease),
-          border-color var(--duration-fast, .16s) var(--ease-standard, ease);
+          border-color var(--duration-fast, .16s) var(--ease-standard, ease),
+          color var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .facturas-incidencia-link svg{
+        inline-size:14px;
+        block-size:14px;
+        flex:0 0 auto;
+      }
+
+      .facturas-incidencia-link span{
+        min-inline-size:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
       }
 
       .facturas-incidencia-link:hover{
@@ -1887,19 +2621,19 @@ function renderStyles() {
 
       .facturas-actions{
         display:grid;
-        grid-template-columns:repeat(2, minmax(calc(82px * var(--ui-scale, 1)), 1fr));
+        grid-template-columns:repeat(2, minmax(calc(88px * var(--ui-scale, 1)), 1fr));
         gap:var(--space-2xs, 6px);
-        width:100%;
-        min-width:calc(180px * var(--ui-scale, 1));
+        inline-size:100%;
+        min-inline-size:calc(194px * var(--ui-scale, 1));
         justify-content:end;
       }
 
       .facturas-action-btn{
         inline-size:100%;
         min-inline-size:0;
-        min-height:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
-        height:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
-        padding:0 var(--space-xs, 8px);
+        min-block-size:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
+        block-size:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
+        padding-inline:var(--space-xs, 8px);
         border-radius:var(--radius-md, 10px);
         border:1px solid var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
         background:var(--btn-secondary-bg, rgba(255,255,255,.045));
@@ -1911,6 +2645,7 @@ function renderStyles() {
         display:inline-flex;
         align-items:center;
         justify-content:center;
+        gap:6px;
         white-space:nowrap;
         box-shadow:none;
         transition:
@@ -1918,7 +2653,21 @@ function renderStyles() {
           background var(--duration-fast, .16s) var(--ease-standard, ease),
           transform var(--duration-fast, .16s) var(--ease-standard, ease),
           opacity var(--duration-fast, .16s) var(--ease-standard, ease),
-          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
+          color var(--duration-fast, .16s) var(--ease-standard, ease),
+          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease),
+          filter var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .facturas-action-icon{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        flex:0 0 auto;
+      }
+
+      .facturas-action-icon svg{
+        inline-size:14px;
+        block-size:14px;
       }
 
       .facturas-action-btn:hover{
@@ -1928,9 +2677,13 @@ function renderStyles() {
         transform:translateY(var(--ui-hover-lift, -1px));
       }
 
+      .facturas-action-btn:active{
+        transform:translateY(0) scale(var(--ui-active-scale, .985));
+      }
+
       .facturas-action-btn.is-loading{
-        min-height:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
-        height:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
+        min-block-size:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
+        block-size:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
         justify-content:center;
       }
 
@@ -1963,8 +2716,8 @@ function renderStyles() {
 
       .facturas-loader-only{
         display:inline-flex;
-        width:16px;
-        height:16px;
+        inline-size:16px;
+        block-size:16px;
         align-items:center;
         justify-content:center;
         flex:0 0 auto;
@@ -1983,8 +2736,8 @@ function renderStyles() {
       }
 
       .facturas-inline-spinner{
-        width:14px;
-        height:14px;
+        inline-size:14px;
+        block-size:14px;
         border-radius:var(--radius-pill, 999px);
         border:2px solid var(--loader-ring, rgba(255,255,255,.12));
         border-top-color:currentColor;
@@ -1992,15 +2745,9 @@ function renderStyles() {
         flex:0 0 auto;
       }
 
-      .facturas-btn:not(.facturas-btn--primary):not(.facturas-btn--create) .facturas-inline-spinner,
-      .facturas-action-btn:not(.facturas-action-btn--primary):not(.facturas-action-btn--success) .facturas-inline-spinner{
-        border-color:var(--loader-ring, rgba(255,255,255,.12));
-        border-top-color:currentColor;
-      }
-
       .facturas-action-btn.is-loading .facturas-inline-spinner{
-        width:15px;
-        height:15px;
+        inline-size:15px;
+        block-size:15px;
       }
 
       .facturas-refresh-overlay{
@@ -2010,7 +2757,7 @@ function renderStyles() {
         display:grid;
         place-items:center;
         pointer-events:none;
-        background:var(--backdrop-bg, rgba(10,10,12,.28));
+        background:color-mix(in srgb, var(--backdrop-bg, rgba(10,10,12,.28)) 72%, transparent);
         backdrop-filter:var(--blur-sm, blur(8px));
         -webkit-backdrop-filter:var(--blur-sm, blur(8px));
       }
@@ -2019,8 +2766,8 @@ function renderStyles() {
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        min-height:var(--btn-height, 42px);
-        padding:0 var(--space-md, 16px);
+        min-block-size:var(--btn-height, 42px);
+        padding-inline:var(--space-md, 16px);
         border-radius:var(--radius-md, 14px);
         border:1px solid var(--card-border, var(--border-default, rgba(255,255,255,.082)));
         background:var(--popover-bg, var(--surface-elevated-strong, rgba(44,44,48,.94)));
@@ -2038,7 +2785,7 @@ function renderStyles() {
 
       .facturas-table-loading-row{
         display:grid;
-        grid-template-columns:var(--avatar-size-lg, 44px) minmax(190px, 1.1fr) 102px 130px 108px 150px 180px;
+        grid-template-columns:var(--avatar-size-lg, 44px) minmax(190px, 1.1fr) 102px 130px 108px 150px 194px;
         gap:var(--space-xs, 10px);
         align-items:center;
       }
@@ -2070,51 +2817,51 @@ function renderStyles() {
       }
 
       .facturas-skeleton--avatar{
-        width:var(--avatar-size-lg, 44px);
-        height:var(--avatar-size-lg, 44px);
+        inline-size:var(--avatar-size-lg, 44px);
+        block-size:var(--avatar-size-lg, 44px);
         border-radius:var(--radius-pill, 999px);
       }
 
       .facturas-skeleton--xs{
-        width:120px;
-        height:var(--skeleton-height-sm, 10px);
+        inline-size:120px;
+        block-size:var(--skeleton-height-sm, 10px);
       }
 
       .facturas-skeleton--lg{
-        width:74%;
-        height:var(--skeleton-height-md, 14px);
+        inline-size:74%;
+        block-size:var(--skeleton-height-md, 14px);
       }
 
       .facturas-skeleton--md{
-        width:56%;
-        height:12px;
+        inline-size:56%;
+        block-size:12px;
       }
 
       .facturas-skeleton--pill{
-        width:86px;
-        height:30px;
+        inline-size:86px;
+        block-size:30px;
         border-radius:var(--radius-pill, 999px);
       }
 
       .facturas-skeleton--date{
-        width:124px;
-        height:12px;
+        inline-size:124px;
+        block-size:12px;
       }
 
       .facturas-skeleton--amount{
-        width:92px;
-        height:30px;
+        inline-size:92px;
+        block-size:30px;
       }
 
       .facturas-skeleton--ticket{
-        width:148px;
-        height:30px;
+        inline-size:148px;
+        block-size:30px;
         border-radius:var(--radius-pill, 999px);
       }
 
       .facturas-skeleton--actions{
-        width:180px;
-        height:calc((var(--btn-height-sm, 34px) * 2) + var(--space-2xs, 6px));
+        inline-size:194px;
+        block-size:calc((var(--btn-height-sm, 34px) * 2) + var(--space-2xs, 6px));
         border-radius:var(--radius-md, 12px);
       }
 
@@ -2126,6 +2873,23 @@ function renderStyles() {
         text-align:center;
       }
 
+      .facturas-empty-icon{
+        inline-size:54px;
+        block-size:54px;
+        display:grid;
+        place-items:center;
+        border-radius:var(--radius-xl, 18px);
+        border:1px solid var(--state-empty-border, rgba(148,163,184,.20));
+        background:var(--state-empty-bg, rgba(148,163,184,.10));
+        color:var(--state-empty-icon, var(--info, #94a3b8));
+        box-shadow:var(--shadow-soft, 0 8px 18px rgba(0,0,0,.13));
+      }
+
+      .facturas-empty-icon svg{
+        inline-size:24px;
+        block-size:24px;
+      }
+
       .facturas-empty-title{
         margin:0;
         font-size:var(--font-2xl, 18px);
@@ -2135,6 +2899,7 @@ function renderStyles() {
 
       .facturas-empty-text{
         margin:0;
+        max-inline-size:58ch;
         font-size:var(--font-md, 13px);
         line-height:var(--line-relaxed, 1.62);
         color:var(--text-muted, rgba(245,245,245,.70));
@@ -2183,6 +2948,8 @@ function renderStyles() {
       [data-theme="light"] .facturas-hero,
       [data-theme="light"] .facturas-history{
         background:
+          radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent, #6f59d9) 9%, transparent), transparent 38%),
+          radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info, #3b82a6) 7%, transparent), transparent 34%),
           var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.82), rgba(255,255,255,0) 34%)),
           var(--view-hero-bg, var(--panel-bg, var(--card-bg, var(--surface-elevated, #ffffff))));
       }
@@ -2223,6 +2990,25 @@ function renderStyles() {
         color:var(--accent-active, #533cb6);
         background:var(--accent-soft, rgba(111,89,217,.125));
         border-color:var(--accent-border-strong, rgba(111,89,217,.36));
+      }
+
+      [data-theme="light"] .facturas-mini-badge--sent{
+        color:var(--success-hover, #157a4f);
+      }
+
+      [data-theme="light"] .facturas-mini-badge--pdf{
+        color:var(--info-hover, #2f6d8d);
+      }
+
+      [data-theme="light"] .facturas-action-btn:disabled,
+      [data-theme="light"] .facturas-action-btn[aria-disabled="true"]{
+        opacity:.46;
+      }
+
+      @media (max-width: 1280px){
+        .facturas-table{
+          min-inline-size:1080px;
+        }
       }
 
       @media (max-width: 1180px){
@@ -2285,11 +3071,40 @@ function renderStyles() {
         }
 
         .facturas-hero-actions{
-          width:100%;
+          inline-size:100%;
         }
 
         .facturas-btn{
           flex:1 1 auto;
+        }
+
+        .facturas-table{
+          min-inline-size:1040px;
+        }
+      }
+
+      @media (max-width: 520px){
+        .facturas-meta-pill{
+          inline-size:100%;
+          justify-content:center;
+        }
+
+        .facturas-hero-actions{
+          display:grid;
+          grid-template-columns:1fr;
+        }
+
+        .facturas-btn{
+          inline-size:100%;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce){
+        .facturas-view-root *,
+        .facturas-view-root *::before,
+        .facturas-view-root *::after{
+          animation:none !important;
+          transition:none !important;
         }
       }
     </style>
@@ -2300,7 +3115,7 @@ function renderStyles() {
    HEADER
 ========================================================= */
 
-export function renderHeader({ items = [], state = {} } = {}) {
+export function renderHeader({ items = [], state = {}, includeStyles = true } = {}) {
   const rows = sortFacturasNewestFirst(items);
   const runtime = safeObject(state);
 
@@ -2309,11 +3124,12 @@ export function renderHeader({ items = [], state = {} } = {}) {
 
   const updatedAt = first(
     runtime.lastSyncAt,
+    runtime.updatedAt,
     ...rows.map((item) => getUpdatedAt(item))
   );
 
   const remoteCount = safeNumber(
-    first(runtime.remoteCount, runtime.totalCount, rows.length),
+    first(runtime.remoteCount, runtime.totalCount, runtime.totalMatched, rows.length),
     rows.length
   );
 
@@ -2322,14 +3138,14 @@ export function renderHeader({ items = [], state = {} } = {}) {
   const creating = Boolean(runtime.creating || runtime.creatingFactura);
 
   return `
-    ${renderStyles()}
+    ${renderMaybeStyles(includeStyles)}
 
     <section class="facturas-hero">
       <div class="facturas-hero-top">
         <div class="facturas-hero-copy">
           <h1 class="facturas-page-title">Centro de control de facturas</h1>
           <p class="facturas-page-subtitle">
-            Gestiona emisión, seguimiento, consulta y descarga de documentos fiscales desde una vista clara, premium y conectada con sus incidencias relacionadas.
+            Gestiona emisión, seguimiento, consulta, descarga y envío de documentos fiscales desde una vista clara, premium y conectada con sus incidencias relacionadas.
           </p>
         </div>
 
@@ -2342,6 +3158,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
             data-facturas-action="export"
             ${loading || refreshing || !rows.length ? "disabled" : ""}
           >
+            ${icon("export")}
             <span class="facturas-btn-text">Exportar CSV</span>
           </button>
 
@@ -2360,7 +3177,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
                   ${
                     creating
                       ? renderSpinner("Abriendo...")
-                      : '<span class="facturas-btn-text">Crear factura</span>'
+                      : `${icon("plus")}<span class="facturas-btn-text">Crear factura</span>`
                   }
                 </button>
               `
@@ -2378,7 +3195,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
             ${
               refreshing
                 ? renderSpinner("Actualizando...")
-                : '<span class="facturas-btn-text">Actualizar</span>'
+                : `${icon("refresh")}<span class="facturas-btn-text">Actualizar</span>`
             }
           </button>
         </div>
@@ -2386,15 +3203,27 @@ export function renderHeader({ items = [], state = {} } = {}) {
 
       <div class="facturas-hero-meta">
         <span class="facturas-meta-pill">
+          ${icon("detail")}
           ${escapeHtml(`${remoteCount} registros remotos`)}
         </span>
 
         <span class="facturas-meta-pill">
+          ${icon("refresh")}
           ${
             updatedAt
               ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`)
               : "Sin actualizaciones recientes"
           }
+        </span>
+
+        <span class="facturas-meta-pill">
+          ${icon("pdf")}
+          ${escapeHtml(`${stats.pdfCount} con PDF`)}
+        </span>
+
+        <span class="facturas-meta-pill">
+          ${icon("mail")}
+          ${escapeHtml(`${stats.sentCount} enviadas`)}
         </span>
       </div>
 
@@ -2407,7 +3236,7 @@ export function renderHeader({ items = [], state = {} } = {}) {
 
         <article class="facturas-stat-card facturas-stat-card--success">
           <div class="facturas-stat-label">Importe agregado</div>
-          <div class="facturas-stat-value">${escapeHtml(formatMoney(stats.totalImporte, "EUR"))}</div>
+          <div class="facturas-stat-value">${escapeHtml(formatMoney(stats.totalImporte, DEFAULT_CURRENCY))}</div>
           <div class="facturas-stat-text">Suma de la colección actualmente visible.</div>
         </article>
 
@@ -2431,9 +3260,9 @@ export function renderHeader({ items = [], state = {} } = {}) {
    LOADING / ERROR
 ========================================================= */
 
-export function renderLoadingState() {
+export function renderLoadingState({ includeStyles = true } = {}) {
   return `
-    ${renderStyles()}
+    ${renderMaybeStyles(includeStyles)}
 
     <section class="facturas-history">
       ${renderTableLoading(DEFAULT_PAGE_SIZE)}
@@ -2441,9 +3270,9 @@ export function renderLoadingState() {
   `;
 }
 
-export function renderErrorState(message = "No se pudieron cargar las facturas.") {
+export function renderErrorState(message = "No se pudieron cargar las facturas.", { includeStyles = true } = {}) {
   return `
-    ${renderStyles()}
+    ${renderMaybeStyles(includeStyles)}
 
     <section class="facturas-error">
       <h3 class="facturas-error-title">No se pudo renderizar la vista de facturas</h3>
@@ -2456,7 +3285,7 @@ export function renderErrorState(message = "No se pudieron cargar las facturas."
    MAIN TABLE
 ========================================================= */
 
-export function renderCards({ items = [], state = {} } = {}) {
+export function renderCards({ items = [], state = {}, includeStyles = true } = {}) {
   const rows = sortFacturasNewestFirst(items);
   const runtime = safeObject(state);
 
@@ -2467,7 +3296,7 @@ export function renderCards({ items = [], state = {} } = {}) {
 
   if (loading && !rows.length) {
     return `
-      ${renderStyles()}
+      ${renderMaybeStyles(includeStyles)}
 
       <section class="facturas-history">
         ${renderTableLoading(DEFAULT_PAGE_SIZE)}
@@ -2477,7 +3306,7 @@ export function renderCards({ items = [], state = {} } = {}) {
 
   if (!rows.length) {
     return `
-      ${renderStyles()}
+      ${renderMaybeStyles(includeStyles)}
 
       <section class="facturas-history">
         ${renderEmptyState()}
@@ -2486,7 +3315,7 @@ export function renderCards({ items = [], state = {} } = {}) {
   }
 
   return `
-    ${renderStyles()}
+    ${renderMaybeStyles(includeStyles)}
 
     <section class="facturas-history">
       <div class="facturas-history-head">
@@ -2508,12 +3337,12 @@ export function renderCards({ items = [], state = {} } = {}) {
         <div class="facturas-table-shell">
           <table class="facturas-table" role="table" aria-label="Listado de facturas">
             <colgroup>
-              <col style="width:31%;">
+              <col style="width:32%;">
               <col style="width:10%;">
-              <col style="width:14%;">
+              <col style="width:13%;">
               <col style="width:12%;">
-              <col style="width:16%;">
-              <col style="width:17%;">
+              <col style="width:15%;">
+              <col style="width:18%;">
             </colgroup>
 
             <thead>
@@ -2543,14 +3372,26 @@ export function renderCards({ items = [], state = {} } = {}) {
 
 export function renderFacturasTemplate({ items = [], state = {} } = {}) {
   const rows = sortFacturasNewestFirst(items);
+  const runtime = safeObject(state);
+
+  if (runtime.error && !rows.length) {
+    return `
+      <section class="facturas-view-root">
+        ${renderStyles()}
+        ${renderErrorState(runtime.error, { includeStyles: false })}
+      </section>
+    `;
+  }
 
   const data = {
     items: rows,
-    state: safeObject(state),
+    state: runtime,
+    includeStyles: false,
   };
 
   return `
     <section class="facturas-view-root">
+      ${renderStyles()}
       ${renderHeader(data)}
       ${renderCards(data)}
     </section>

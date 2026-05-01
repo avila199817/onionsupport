@@ -6,6 +6,7 @@
    PATCH · API ALIGNED · STORE SAFE · DETAIL RACE SAFE
    PATCH · FACTURAS ARRAY + INCIDENCIA PRESERVER
    PATCH · NORMALIZED API COMPAT + LEGACY RESPONSE COMPAT
+   PATCH · RAW PAYLOAD DEEP READER + STALE RESPONSE FALLBACK
 
    RESPONSABILIDADES:
    - cargar colección de facturas desde backend
@@ -18,6 +19,8 @@
    - preservar relación factura ↔ incidencia en detalle
    - tolerar respuestas normalizadas desde facturas.api.js
    - tolerar respuestas legacy del backend
+   - leer datos reales dentro de raw/raw.data/raw.payload/raw.result
+   - evitar tabla vacía si una respuesta stale trae datos y el store sigue vacío
 
    BACKEND ALINEADO:
    - GET /api/facturas
@@ -57,6 +60,7 @@
    - no rompe si normalizeFactura falla
    - no duplica inflight de colección
    - no devuelve inflight de detalle de otra factura
+   - no descarta datos si el wrapper normalizado viene vacío pero raw trae facturas
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -929,35 +933,103 @@ function normalizeFacturaPreservingLinks(item = {}) {
 
 /* =========================================================
    RESPONSE NORMALIZERS
+   PATCH 10/10:
+   - baja a raw / raw.data / raw.payload / raw.result
+   - tolera wrappers normalizados con items=[] pero raw con datos reales
+   - tolera backend legacy con facturas/items/data/results
+   - no deja que total=0 de un wrapper vacío tape un raw con total real
 ========================================================= */
 
-function getPayloadCandidates(payload = null) {
-  const obj = safeObject(payload, null);
+const COLLECTION_ARRAY_KEYS = Object.freeze([
+  "items",
+  "facturas",
+  "invoices",
+  "data",
+  "rows",
+  "results",
+  "records",
+  "list",
+  "collection",
+  "documents",
+]);
 
-  if (!obj) {
-    return [payload].filter((item) => item !== undefined && item !== null);
+const PAYLOAD_OBJECT_KEYS = Object.freeze([
+  "data",
+  "body",
+  "result",
+  "payload",
+  "response",
+  "raw",
+]);
+
+const TOTAL_KEYS = Object.freeze([
+  "total",
+  "count",
+  "remoteCount",
+  "totalCount",
+  "totalItems",
+  "matched",
+  "totalMatched",
+]);
+
+function pushCandidate(output = [], value = null) {
+  if (value === undefined || value === null) {
+    return output;
   }
 
-  return [
-    payload,
+  output.push(value);
 
-    obj.data,
-    obj.body,
-    obj.result,
-    obj.payload,
-    obj.response,
+  return output;
+}
 
-    obj.data?.data,
-    obj.data?.body,
-    obj.data?.result,
-    obj.data?.payload,
+function collectPayloadCandidates(value = null, output = [], seen = new WeakSet(), depth = 0) {
+  if (value === undefined || value === null) {
+    return output;
+  }
 
-    obj.result?.data,
-    obj.result?.payload,
+  pushCandidate(output, value);
 
-    obj.payload?.data,
-    obj.payload?.result,
-  ].filter((item) => item !== undefined && item !== null);
+  if (depth >= 5) {
+    return output;
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return output;
+  }
+
+  if (seen.has(value)) {
+    return output;
+  }
+
+  seen.add(value);
+
+  for (const key of COLLECTION_ARRAY_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(value, key)) {
+      pushCandidate(output, value[key]);
+
+      if (value[key] && typeof value[key] === "object" && !Array.isArray(value[key])) {
+        collectPayloadCandidates(value[key], output, seen, depth + 1);
+      }
+    }
+  }
+
+  for (const key of PAYLOAD_OBJECT_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(value, key)) {
+      pushCandidate(output, value[key]);
+
+      if (value[key] && typeof value[key] === "object" && !Array.isArray(value[key])) {
+        collectPayloadCandidates(value[key], output, seen, depth + 1);
+      }
+    }
+  }
+
+  return output;
+}
+
+function getPayloadCandidates(payload = null) {
+  return collectPayloadCandidates(payload).filter(
+    (item) => item !== undefined && item !== null
+  );
 }
 
 function pickArrayFromCandidate(candidate = null) {
@@ -971,103 +1043,121 @@ function pickArrayFromCandidate(candidate = null) {
     return null;
   }
 
-  const found = first(
-    obj.items,
-    obj.facturas,
-    obj.rows,
-    obj.results,
-    obj.records,
-    obj.list,
-    obj.collection,
+  let emptyArray = null;
 
-    obj.data?.items,
-    obj.data?.facturas,
-    obj.data?.rows,
-    obj.data?.results,
-    obj.data?.records,
+  for (const key of COLLECTION_ARRAY_KEYS) {
+    const value = obj[key];
 
-    obj.result?.items,
-    obj.result?.facturas,
-    obj.result?.rows,
-    obj.result?.results,
-    obj.result?.records,
+    if (Array.isArray(value)) {
+      if (value.length > 0) {
+        return value;
+      }
 
-    obj.payload?.items,
-    obj.payload?.facturas,
-    obj.payload?.rows,
-    obj.payload?.results,
-    obj.payload?.records
-  );
+      if (!emptyArray) {
+        emptyArray = value;
+      }
+    }
+  }
 
-  return Array.isArray(found) ? found : null;
+  return emptyArray;
 }
 
 function pickCollectionItems(response = null) {
   const candidates = getPayloadCandidates(response);
 
+  let emptyArray = null;
+
   for (const candidate of candidates) {
     const found = pickArrayFromCandidate(candidate);
 
-    if (Array.isArray(found)) {
+    if (Array.isArray(found) && found.length > 0) {
       return found;
+    }
+
+    if (Array.isArray(found) && !emptyArray) {
+      emptyArray = found;
     }
   }
 
-  return [];
+  return emptyArray || [];
+}
+
+function readTotalFromObject(obj = null) {
+  const source = safeObject(obj, null);
+
+  if (!source) {
+    return null;
+  }
+
+  for (const key of TOTAL_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) {
+      continue;
+    }
+
+    const value = source[key];
+
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+
+    const number = safeNumber(value, NaN);
+
+    if (Number.isFinite(number)) {
+      return number;
+    }
+  }
+
+  for (const containerKey of ["meta", "pagination", "pageInfo", "summary"]) {
+    const nested = safeObject(source[containerKey], null);
+
+    if (!nested) {
+      continue;
+    }
+
+    for (const key of TOTAL_KEYS) {
+      if (!Object.prototype.hasOwnProperty.call(nested, key)) {
+        continue;
+      }
+
+      const value = nested[key];
+
+      if (value === undefined || value === null || value === "") {
+        continue;
+      }
+
+      const number = safeNumber(value, NaN);
+
+      if (Number.isFinite(number)) {
+        return number;
+      }
+    }
+  }
+
+  return null;
 }
 
 function pickCollectionTotal(response = null, fallback = 0) {
   const candidates = getPayloadCandidates(response);
 
+  let zeroTotal = null;
+
   for (const candidate of candidates) {
-    const obj = safeObject(candidate, null);
+    const total = readTotalFromObject(candidate);
 
-    if (!obj) continue;
+    if (total === null) {
+      continue;
+    }
 
-    const total = first(
-      obj.total,
-      obj.count,
-      obj.remoteCount,
-      obj.totalCount,
-      obj.totalItems,
+    if (total > 0) {
+      return total;
+    }
 
-      obj.meta?.total,
-      obj.meta?.count,
-      obj.meta?.remoteCount,
-      obj.meta?.totalCount,
-      obj.meta?.totalItems,
-
-      obj.pagination?.total,
-      obj.pagination?.count,
-      obj.pagination?.remoteCount,
-      obj.pagination?.totalCount,
-      obj.pagination?.totalItems,
-
-      obj.data?.total,
-      obj.data?.count,
-      obj.data?.remoteCount,
-      obj.data?.totalCount,
-      obj.data?.totalItems,
-
-      obj.result?.total,
-      obj.result?.count,
-      obj.result?.remoteCount,
-      obj.result?.totalCount,
-      obj.result?.totalItems,
-
-      obj.payload?.total,
-      obj.payload?.count,
-      obj.payload?.remoteCount,
-      obj.payload?.totalCount,
-      obj.payload?.totalItems
-    );
-
-    if (total !== null && total !== undefined) {
-      return safeNumber(total, fallback);
+    if (total === 0) {
+      zeroTotal = 0;
     }
   }
 
-  return fallback;
+  return zeroTotal !== null ? zeroTotal : fallback;
 }
 
 function normalizeCollectionResponse(response = null) {
@@ -1077,7 +1167,10 @@ function normalizeCollectionResponse(response = null) {
     .map((item) => normalizeFacturaPreservingLinks(item))
     .filter((item) => hasOwnKeys(item));
 
-  const total = pickCollectionTotal(response, items.length);
+  const total = Math.max(
+    pickCollectionTotal(response, items.length),
+    items.length
+  );
 
   return {
     items,
@@ -1107,19 +1200,28 @@ function pickDetailPayload(response = null) {
     const detail = first(
       obj.item,
       obj.factura,
+      obj.invoice,
       obj.record,
 
       obj.data?.item,
       obj.data?.factura,
+      obj.data?.invoice,
       obj.data?.record,
 
       obj.result?.item,
       obj.result?.factura,
+      obj.result?.invoice,
       obj.result?.record,
 
       obj.payload?.item,
       obj.payload?.factura,
-      obj.payload?.record
+      obj.payload?.invoice,
+      obj.payload?.record,
+
+      obj.raw?.item,
+      obj.raw?.factura,
+      obj.raw?.invoice,
+      obj.raw?.record
     );
 
     if (detail && typeof detail === "object" && !Array.isArray(detail)) {
@@ -1127,29 +1229,11 @@ function pickDetailPayload(response = null) {
     }
   }
 
-  const obj = safeObject(response, null);
+  for (const candidate of candidates) {
+    const obj = safeObject(candidate, null);
 
-  if (obj && !Array.isArray(obj)) {
-    const nested = first(
-      obj.data,
-      obj.result,
-      obj.payload,
-      obj.body
-    );
-
-    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
-      const nestedObj = safeObject(nested);
-
-      if (
-        nestedObj.id ||
-        nestedObj.facturaId ||
-        nestedObj.invoiceId ||
-        nestedObj.numero ||
-        nestedObj.numeroFacturaLegal ||
-        nestedObj.numeroFacturaSistema
-      ) {
-        return nestedObj;
-      }
+    if (!obj || Array.isArray(obj)) {
+      continue;
     }
 
     if (
@@ -1158,7 +1242,8 @@ function pickDetailPayload(response = null) {
       obj.invoiceId ||
       obj.numero ||
       obj.numeroFacturaLegal ||
-      obj.numeroFacturaSistema
+      obj.numeroFacturaSistema ||
+      obj.invoiceNumber
     ) {
       return obj;
     }
@@ -1317,17 +1402,70 @@ export async function loadFacturasCollection({
       const normalized = normalizeCollectionResponse(response);
       const { items, total } = normalized;
 
+      safeLog("Colección normalizada:", {
+        rawItems: normalized.rawItems.length,
+        items: items.length,
+        total,
+        responseKeys: response && typeof response === "object"
+          ? Object.keys(response)
+          : typeof response,
+      });
+
       if (!isCurrentCollectionToken(state, token)) {
-        safeLog("Ignorando colección obsoleta:", {
+        safeLog("Colección obsoleta recibida:", {
           token,
           currentToken: state.inflight.collectionToken,
+          count: items.length,
+          total,
         });
+
+        /*
+          Salvavidas:
+          Si una respuesta vieja trae datos reales y el estado actual sigue vacío,
+          no dejamos la UI clavada en 0 registros.
+        */
+        const currentRemoteCount = safeNumber(
+          first(
+            state?.view?.remoteCount,
+            state?.view?.totalCount,
+            state?.remoteCount,
+            0
+          ),
+          0
+        );
+
+        if (items.length > 0 && currentRemoteCount <= 0) {
+          safeWarn("Aplicando colección obsoleta como fallback porque el store seguía vacío:", {
+            token,
+            count: items.length,
+            total,
+          });
+
+          setFacturasStore(items);
+          setFacturasRemoteCount(state, Math.max(total, items.length));
+
+          setFacturasLoading(state, false);
+          setFacturasRefreshing(state, false);
+          setFacturasLoaded(state, true);
+          setFacturasLastSyncAt(state, new Date().toISOString());
+          clearFacturasError(state);
+
+          safeEmit("facturas:load:stale-fallback", {
+            total: Math.max(total, items.length),
+            count: items.length,
+            items,
+            response,
+            token,
+          });
+
+          safeRender(render);
+        }
 
         return items;
       }
 
       setFacturasStore(items);
-      setFacturasRemoteCount(state, total);
+      setFacturasRemoteCount(state, Math.max(total, items.length));
 
       setFacturasLoading(state, false);
       setFacturasRefreshing(state, false);
@@ -1336,7 +1474,7 @@ export async function loadFacturasCollection({
       clearFacturasError(state);
 
       safeEmit("facturas:load:success", {
-        total,
+        total: Math.max(total, items.length),
         count: items.length,
         items,
         response,

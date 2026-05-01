@@ -2,7 +2,11 @@
    Onion SPA - Incidencias View
    Archivo: src/views/incidencias/incidenciasView.js
 
-   CLIENT EXPERIENCE MODE · VIEW REAL · EXTREME GOD MODE
+   EXTREME PRO SYSTEM · VIEW REAL · FULL PATCH 11/10
+   SEARCH BRIDGE · URL AUTOPEN · TOPBAR READY
+   DETAIL STORE MERGE · CREATE MODAL BRIDGE
+   PAGINATION 5 · ACTION STATE SYNC · RERENDER SAFE · CLEANUP PRO
+   FACTURAS LINKED PRESERVER · MODAL DIRECT IMPORT HARDENED
 
    RESPONSABILIDADES:
    - punto de entrada real de la vista de incidencias
@@ -20,6 +24,12 @@
    - preservar importes de facturas asociadas para tabla
    - preservar numeroFacturaLegal para tabla/modal
    - cargar el modal de detalle por import directo
+   - abrir incidencia desde topbar search por bridge directo
+   - abrir incidencia desde URL /incidencias?ticketId=... / ?id=...
+   - registrar bridge público window/AppCore.modules para search
+   - sincronizar loaders de acciones sin romper tabla
+   - refrescar listado tras crear / modificar incidencia
+   - fusionar detalle remoto con snapshot enriquecido del store
 
    HARDENING EXTREME:
    - render inicial inmediato
@@ -40,6 +50,16 @@
    - blindaje contra normalizadores que descartan numeroFacturaLegal
    - bridge fuerte con incidencias.modal.js
    - soporte backend aliases: tickets/items/data/incidencias/results
+
+   FIX CLAVE:
+   - El listado recibe incidencias enriquecidas desde store.
+   - El detalle remoto puede venir sin facturas asociadas.
+   - Antes de abrir modal se fusiona el payload remoto con la
+     incidencia enriquecida del store por id/ticketId/code.
+   - El search puede pasar detail completo, payload de evento, string o ID.
+   - openTicket() sigue aceptando ID; el bridge externo normaliza payload.
+   - Si el detalle remoto viene pobre, no pisa importe/factura/legal number
+     existentes en store/raw.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -111,6 +131,49 @@ export const IncidenciasView = (() => {
 
   const DEFAULT_CURRENCY = "EUR";
 
+  const TICKET_QUERY_KEYS = Object.freeze([
+    "ticket",
+    "ticketId",
+    "incidencia",
+    "incidenciaId",
+    "id",
+    "openTicket",
+    "openIncidencia",
+  ]);
+
+  const TICKET_OPEN_EVENTS = Object.freeze([
+    "incidencias:detail:open",
+    "incidencia:detail:open",
+    "ticket:detail:open",
+    "tickets:detail:open",
+    "incidencias:ficha:open",
+    "incidencia:ficha:open",
+    "ticket:ficha:open",
+    "topbar:search:open-incidencia",
+    "topbar:search:open-ticket",
+    "search:open-incidencia",
+    "search:open-ticket",
+    "global-search:open-incidencia",
+    "global-search:open-ticket",
+  ]);
+
+  const MUTATION_EVENTS = Object.freeze([
+    "incidencias:modal:updated",
+    "incidencias:ticket:updated",
+    "incidencias:upload:success",
+    "incidencias:comment:success",
+    "incidencias:reopen:success",
+    "incidencias:delete:success",
+    "incidencias:status:changed",
+  ]);
+
+  const READY_EVENTS = Object.freeze([
+    "app:ready",
+    "app:boot:ready",
+    "app:boot:complete",
+    "router:rendered",
+  ]);
+
   /* =========================================================
      LOCAL RUNTIME
   ========================================================= */
@@ -120,58 +183,31 @@ export const IncidenciasView = (() => {
 
   let inflightInit = null;
   let inflightReload = null;
+  let inflightExternalOpen = null;
+
   let queuedReloadOptions = null;
 
   let bindingsCleanup = null;
+  let externalOpenCleanup = null;
+  let mutationCleanup = null;
+  let createSuccessCleanup = null;
+  let readyCleanup = null;
 
+  let pendingRenderFrame = 0;
   let renderToken = 0;
 
   let pendingCreateRequest = false;
   let lastCreateClickAt = 0;
   let lastOpenTicketClickAt = 0;
 
+  let inflightExternalOpenTicketId = "";
+  let lastAutoOpenedTicketId = "";
+
   let lastApiPayload = null;
 
   /* =========================================================
      SAFE HELPERS
   ========================================================= */
-
-  function safeLog(...args) {
-    try {
-      AppCore?.utils?.log?.("[IncidenciasView]", ...args);
-    } catch {}
-  }
-
-  function safeWarn(...args) {
-    try {
-      AppCore?.utils?.warn?.("[IncidenciasView]", ...args);
-    } catch {}
-
-    try {
-      console.warn("[IncidenciasView]", ...args);
-    } catch {}
-  }
-
-  function safeEmit(event = "", payload = {}) {
-    const eventName = safeText(event, "");
-    if (!eventName) return false;
-
-    try {
-      AppCore?.events?.emit?.(eventName, payload);
-      return true;
-    } catch {}
-
-    try {
-      window.dispatchEvent(
-        new CustomEvent(eventName, {
-          detail: payload,
-        })
-      );
-      return true;
-    } catch {}
-
-    return false;
-  }
 
   function safeText(value, fallback = "") {
     if (value === null || value === undefined) return fallback;
@@ -189,6 +225,28 @@ export const IncidenciasView = (() => {
   }
 
   function safeNumber(value, fallback = 0) {
+    if (value === null || value === undefined || value === "") return fallback;
+
+    if (typeof value === "string") {
+      let normalized = value
+        .trim()
+        .replace(/€/g, "")
+        .replace(/%/g, "")
+        .replace(/\s/g, "");
+
+      const hasComma = normalized.includes(",");
+      const hasDot = normalized.includes(".");
+
+      if (hasComma && hasDot) {
+        normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
+      } else if (hasComma) {
+        normalized = normalized.replace(/,/g, ".");
+      }
+
+      const parsed = Number(normalized);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
     const n = Number(value);
     return Number.isFinite(n) ? n : fallback;
   }
@@ -208,7 +266,6 @@ export const IncidenciasView = (() => {
       if (value === undefined || value === null) continue;
       if (typeof value === "string" && value.trim() === "") continue;
       if (Array.isArray(value) && value.length === 0) continue;
-
       return value;
     }
 
@@ -235,25 +292,26 @@ export const IncidenciasView = (() => {
     ];
   }
 
-  function getStableTicketId(item = {}) {
-    return safeText(
-      first(
-        item?.ticketId,
-        item?.id,
-        item?.code,
-        item?.numero,
-        item?.ticketCode,
-        item?.incidenciaId,
+  function normalizeText(value = "") {
+    return String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
 
-        item?.raw?.ticketId,
-        item?.raw?.id,
-        item?.raw?.code,
-        item?.raw?.numero,
-        item?.raw?.ticketCode,
-        item?.raw?.incidenciaId
-      ),
-      ""
-    );
+  function normalizeKey(value = "") {
+    return normalizeText(value)
+      .replace(/[^\w]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  }
+
+  function sameTicketIdentity(a = "", b = "") {
+    const left = normalizeText(a);
+    const right = normalizeText(b);
+
+    return Boolean(left && right && left === right);
   }
 
   function normalizeMoney(value, fallback = null) {
@@ -289,14 +347,48 @@ export const IncidenciasView = (() => {
     return Math.round((amount + Number.EPSILON) * 100) / 100;
   }
 
-  function getEventPayload(event = null) {
-    return safeObject(
-      first(
-        event?.detail,
-        event?.payload,
-        event
-      )
+  function getContainer() {
+    return (
+      AppCore?.dom?.viewContainer ||
+      document.getElementById("view-container") ||
+      null
     );
+  }
+
+  function nextRenderToken() {
+    renderToken += 1;
+    return renderToken;
+  }
+
+  function isActiveToken(token) {
+    return !destroyed && token === renderToken;
+  }
+
+  function requestFrame(callback) {
+    if (
+      typeof window !== "undefined" &&
+      typeof window.requestAnimationFrame === "function"
+    ) {
+      return window.requestAnimationFrame(callback);
+    }
+
+    return window.setTimeout(callback, 0);
+  }
+
+  function cancelFrame(frameId) {
+    if (!frameId) return;
+
+    try {
+      if (
+        typeof window !== "undefined" &&
+        typeof window.cancelAnimationFrame === "function"
+      ) {
+        window.cancelAnimationFrame(frameId);
+        return;
+      }
+
+      window.clearTimeout(frameId);
+    } catch {}
   }
 
   function waitForPaint() {
@@ -321,21 +413,98 @@ export const IncidenciasView = (() => {
     });
   }
 
-  function getContainer() {
-    return (
-      AppCore?.dom?.viewContainer ||
-      document.getElementById("view-container") ||
-      null
-    );
+  /* =========================================================
+     CORE HELPERS
+  ========================================================= */
+
+  function safeLog(...args) {
+    try {
+      AppCore?.utils?.log?.("[IncidenciasView]", ...args);
+    } catch {}
   }
 
-  function nextRenderToken() {
-    renderToken += 1;
-    return renderToken;
+  function safeWarn(...args) {
+    try {
+      AppCore?.utils?.warn?.("[IncidenciasView]", ...args);
+    } catch {}
+
+    try {
+      console.warn("[IncidenciasView]", ...args);
+    } catch {}
   }
 
-  function isActiveToken(token) {
-    return !destroyed && token === renderToken;
+  function safeEmit(event = "", payload = {}) {
+    const eventName = safeText(event, "");
+    if (!eventName) return false;
+
+    let emitted = false;
+
+    try {
+      AppCore?.events?.emit?.(eventName, payload);
+      emitted = true;
+    } catch {}
+
+    try {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent(eventName, {
+            detail: payload,
+          })
+        );
+        emitted = true;
+      }
+    } catch {}
+
+    return emitted;
+  }
+
+  function safeOn(event = "", handler = null) {
+    const eventName = safeText(event, "");
+
+    if (!eventName || typeof handler !== "function") {
+      return () => {};
+    }
+
+    let busAttached = false;
+    let windowAttached = false;
+    let busCleanup = null;
+
+    const windowHandler = (domEvent) => handler(domEvent);
+
+    try {
+      const maybeCleanup = AppCore?.events?.on?.(eventName, handler);
+
+      if (typeof maybeCleanup === "function") {
+        busCleanup = maybeCleanup;
+      }
+
+      busAttached = true;
+    } catch {}
+
+    try {
+      if (typeof window !== "undefined") {
+        window.addEventListener(eventName, windowHandler);
+        windowAttached = true;
+      }
+    } catch {}
+
+    return () => {
+      if (busCleanup) {
+        try {
+          busCleanup();
+        } catch {}
+      } else if (busAttached) {
+        try {
+          AppCore?.events?.off?.(eventName, handler);
+        } catch {}
+      }
+
+      if (windowAttached) {
+        try {
+          window.removeEventListener(eventName, windowHandler);
+        } catch {}
+      }
+    };
   }
 
   function showToast(message = "", type = "info") {
@@ -379,6 +548,66 @@ export const IncidenciasView = (() => {
   }
 
   /* =========================================================
+     CLEANUP HELPERS
+  ========================================================= */
+
+  function cleanupBindings() {
+    try {
+      bindingsCleanup?.();
+    } catch {}
+
+    bindingsCleanup = null;
+
+    cleanupExternalOpenListener();
+    cleanupMutationListeners();
+    cleanupCreateSuccessListener();
+    cleanupReadyListeners();
+
+    try {
+      AppCore?.cleanup?.run?.(SCOPE);
+    } catch {}
+  }
+
+  function cleanupExternalOpenListener() {
+    try {
+      externalOpenCleanup?.();
+    } catch {}
+
+    externalOpenCleanup = null;
+  }
+
+  function cleanupMutationListeners() {
+    try {
+      mutationCleanup?.();
+    } catch {}
+
+    mutationCleanup = null;
+  }
+
+  function cleanupCreateSuccessListener() {
+    try {
+      createSuccessCleanup?.();
+    } catch {}
+
+    createSuccessCleanup = null;
+  }
+
+  function cleanupReadyListeners() {
+    try {
+      readyCleanup?.();
+    } catch {}
+
+    readyCleanup = null;
+  }
+
+  function cancelPendingRender() {
+    if (!pendingRenderFrame) return;
+
+    cancelFrame(pendingRenderFrame);
+    pendingRenderFrame = 0;
+  }
+
+  /* =========================================================
      BACKEND PAYLOAD HELPERS
   ========================================================= */
 
@@ -401,7 +630,11 @@ export const IncidenciasView = (() => {
         data.payload?.tickets,
         data.payload?.items,
         data.payload?.data,
-        data.payload?.incidencias
+        data.payload?.incidencias,
+        data.result?.tickets,
+        data.result?.items,
+        data.result?.data,
+        data.result?.incidencias
       )
     );
   }
@@ -422,6 +655,8 @@ export const IncidenciasView = (() => {
           data.pagination?.total,
           data.payload?.total,
           data.payload?.count,
+          data.result?.total,
+          data.result?.count,
           fallback
         ),
         fallback
@@ -443,6 +678,259 @@ export const IncidenciasView = (() => {
     }
 
     return map;
+  }
+
+  /* =========================================================
+     TICKET ID / SEARCH HELPERS
+  ========================================================= */
+
+  function getStableTicketId(item = {}) {
+    if (typeof item === "string" || typeof item === "number") {
+      return safeText(item, "");
+    }
+
+    return safeText(
+      first(
+        item?.ticketId,
+        item?.id,
+        item?._id,
+        item?.code,
+        item?.numero,
+        item?.ticketCode,
+        item?.incidenciaId,
+        item?.entityId,
+
+        item?.raw?.ticketId,
+        item?.raw?.id,
+        item?.raw?._id,
+        item?.raw?.code,
+        item?.raw?.numero,
+        item?.raw?.ticketCode,
+        item?.raw?.incidenciaId,
+        item?.raw?.entityId,
+
+        item?.detail?.ticketId,
+        item?.detail?.id,
+        item?.detail?.code,
+        item?.detail?.ticketCode,
+        item?.detail?.incidenciaId,
+
+        item?.ticket?.ticketId,
+        item?.ticket?.id,
+        item?.ticket?.code,
+        item?.ticket?.ticketCode,
+        item?.ticket?.incidenciaId,
+
+        item?.incidencia?.ticketId,
+        item?.incidencia?.id,
+        item?.incidencia?.code,
+        item?.incidencia?.ticketCode,
+        item?.incidencia?.incidenciaId,
+
+        item?.payload?.ticketId,
+        item?.payload?.id,
+        item?.payload?.code,
+        item?.payload?.ticketCode,
+        item?.payload?.incidenciaId,
+
+        item?.result?.ticketId,
+        item?.result?.id,
+        item?.result?.code,
+        item?.result?.ticketCode,
+        item?.result?.incidenciaId
+      ),
+      ""
+    );
+  }
+
+  function getTicketIdentityList(item = {}) {
+    if (typeof item === "string" || typeof item === "number") {
+      return [safeText(item, "")].filter(Boolean);
+    }
+
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    return uniqueStrings([
+      source.ticketId,
+      source.id,
+      source._id,
+      source.code,
+      source.numero,
+      source.ticketCode,
+      source.incidenciaId,
+      source.entityId,
+
+      raw.ticketId,
+      raw.id,
+      raw._id,
+      raw.code,
+      raw.numero,
+      raw.ticketCode,
+      raw.incidenciaId,
+      raw.entityId,
+    ]);
+  }
+
+  function extractExternalOpenPayload(eventOrPayload = {}) {
+    if (
+      typeof eventOrPayload === "string" ||
+      typeof eventOrPayload === "number"
+    ) {
+      return {
+        ticketId: safeText(eventOrPayload, ""),
+      };
+    }
+
+    const value = eventOrPayload;
+
+    if (value?.detail?.payload) {
+      return safeObject(value.detail.payload);
+    }
+
+    if (
+      value?.detail?.detail ||
+      value?.detail?.ticket ||
+      value?.detail?.incidencia ||
+      value?.detail?.item
+    ) {
+      return safeObject(value.detail);
+    }
+
+    if (value?.detail && typeof value.detail === "object") {
+      return safeObject(value.detail);
+    }
+
+    return safeObject(value);
+  }
+
+  function getTicketIdFromExternalPayload(payload = {}) {
+    if (typeof payload === "string" || typeof payload === "number") {
+      return safeText(payload, "");
+    }
+
+    const source = safeObject(payload);
+    const item = safeObject(source.item);
+    const detail = safeObject(source.detail);
+    const ticket = safeObject(source.ticket);
+    const incidencia = safeObject(source.incidencia);
+    const raw = safeObject(
+      first(source.raw, item.raw, detail.raw, ticket.raw, incidencia.raw)
+    );
+
+    const direct = safeText(
+      first(
+        source.ticketId,
+        source.incidenciaId,
+        source.id,
+        source._id,
+        source.entityId,
+        source.value,
+        source.key,
+        source.code,
+        source.ticketCode,
+
+        detail.ticketId,
+        detail.incidenciaId,
+        detail.id,
+        detail._id,
+        detail.code,
+        detail.ticketCode,
+
+        ticket.ticketId,
+        ticket.incidenciaId,
+        ticket.id,
+        ticket._id,
+        ticket.code,
+        ticket.ticketCode,
+
+        incidencia.ticketId,
+        incidencia.incidenciaId,
+        incidencia.id,
+        incidencia._id,
+        incidencia.code,
+        incidencia.ticketCode,
+
+        item.entityId,
+        item.ticketId,
+        item.incidenciaId,
+        item.id,
+        item._id,
+        item.value,
+        item.key,
+        item.code,
+        item.ticketCode,
+
+        raw.ticketId,
+        raw.incidenciaId,
+        raw.id,
+        raw._id,
+        raw.code,
+        raw.ticketCode
+      ),
+      ""
+    );
+
+    if (direct) return direct;
+
+    try {
+      const href = safeText(first(source.href, source.url, item.href, item.url), "");
+
+      if (href) {
+        const url = new URL(href, window.location.origin);
+
+        for (const key of TICKET_QUERY_KEYS) {
+          const value = safeText(url.searchParams.get(key), "");
+          if (value) return value;
+        }
+      }
+    } catch {}
+
+    return "";
+  }
+
+  function getTicketIdFromLocation() {
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+
+      for (const key of TICKET_QUERY_KEYS) {
+        const value = safeText(params.get(key), "");
+        if (value) return value;
+      }
+
+      return "";
+    } catch {
+      return "";
+    }
+  }
+
+  function clearTicketIdFromLocation() {
+    try {
+      const url = new URL(window.location.href);
+      const params = url.searchParams;
+
+      TICKET_QUERY_KEYS.forEach((key) => {
+        params.delete(key);
+      });
+
+      const nextSearch = params.toString();
+
+      const nextUrl = [
+        url.pathname,
+        nextSearch ? `?${nextSearch}` : "",
+        url.hash || "",
+      ].join("");
+
+      window.history.replaceState(
+        window.history.state || {},
+        "",
+        nextUrl
+      );
+
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /* =========================================================
@@ -821,13 +1309,9 @@ export const IncidenciasView = (() => {
       }
     }
 
-    /*
-      Último recurso:
-      solo usamos total/amount/importe genéricos si existe algún indicio de factura.
-      Esto evita transformar tickets sin factura en "0 €" artificial.
-    */
     const invoiceNumber = resolveInvoiceNumber(source, raw);
     const invoiceIds = resolveInvoiceIds(source, raw);
+
     const hasInvoiceEvidence =
       Boolean(invoiceNumber) ||
       invoiceIds.length > 0 ||
@@ -868,8 +1352,14 @@ export const IncidenciasView = (() => {
       invoiceId: safeText(first(invoice.invoiceId, id), id),
 
       numeroFacturaLegal,
-      numeroFactura: safeText(first(invoice.numeroFactura, numeroFacturaLegal), numeroFacturaLegal),
-      invoiceNumber: safeText(first(invoice.invoiceNumber, numeroFacturaLegal), numeroFacturaLegal),
+      numeroFactura: safeText(
+        first(invoice.numeroFactura, numeroFacturaLegal),
+        numeroFacturaLegal
+      ),
+      invoiceNumber: safeText(
+        first(invoice.invoiceNumber, numeroFacturaLegal),
+        numeroFacturaLegal
+      ),
 
       total: total === null ? 0 : total,
       amount: total === null ? 0 : total,
@@ -909,7 +1399,9 @@ export const IncidenciasView = (() => {
       : rawLinkedInvoices;
 
     const invoiceIds = resolveInvoiceIds(source, raw);
-    const primaryInvoiceId = resolvePrimaryInvoiceId(source, raw) || invoiceIds[0] || "";
+    const primaryInvoiceId =
+      resolvePrimaryInvoiceId(source, raw) || invoiceIds[0] || "";
+
     const facturasCount = resolveInvoiceCount(source, raw, invoiceIds);
 
     const amount = resolveInvoiceAmount(source, raw);
@@ -929,11 +1421,12 @@ export const IncidenciasView = (() => {
         normalizedAmount !== null
     );
 
-    const finalAmount = normalizedAmount === null
-      ? hasInvoiceEvidence
-        ? 0
-        : null
-      : normalizedAmount;
+    const finalAmount =
+      normalizedAmount === null
+        ? hasInvoiceEvidence
+          ? 0
+          : null
+        : normalizedAmount;
 
     const nextLinkedInvoices = {
       ...linkedInvoices,
@@ -995,8 +1488,14 @@ export const IncidenciasView = (() => {
       amount: first(linkedInvoices.amount, rawLinkedInvoices.amount, finalAmount),
       importe: first(linkedInvoices.importe, rawLinkedInvoices.importe, finalAmount),
 
-      currency: safeText(first(linkedInvoices.currency, rawLinkedInvoices.currency, currency), currency),
-      moneda: safeText(first(linkedInvoices.moneda, rawLinkedInvoices.moneda, currency), currency),
+      currency: safeText(
+        first(linkedInvoices.currency, rawLinkedInvoices.currency, currency),
+        currency
+      ),
+      moneda: safeText(
+        first(linkedInvoices.moneda, rawLinkedInvoices.moneda, currency),
+        currency
+      ),
 
       invoices: safeArray(
         first(
@@ -1062,12 +1561,24 @@ export const IncidenciasView = (() => {
       raw: hasOwnKeys(source.raw) ? source.raw : raw,
 
       facturaId: safeText(
-        first(source.facturaId, raw.facturaId, source.invoiceId, raw.invoiceId, primaryInvoiceId),
+        first(
+          source.facturaId,
+          raw.facturaId,
+          source.invoiceId,
+          raw.invoiceId,
+          primaryInvoiceId
+        ),
         ""
       ),
 
       invoiceId: safeText(
-        first(source.invoiceId, raw.invoiceId, source.facturaId, raw.facturaId, primaryInvoiceId),
+        first(
+          source.invoiceId,
+          raw.invoiceId,
+          source.facturaId,
+          raw.facturaId,
+          primaryInvoiceId
+        ),
         ""
       ),
 
@@ -1082,8 +1593,14 @@ export const IncidenciasView = (() => {
       ),
 
       numeroFacturaLegal,
-      numeroFactura: safeText(first(source.numeroFactura, raw.numeroFactura, numeroFacturaLegal), numeroFacturaLegal),
-      invoiceNumber: safeText(first(source.invoiceNumber, raw.invoiceNumber, numeroFacturaLegal), numeroFacturaLegal),
+      numeroFactura: safeText(
+        first(source.numeroFactura, raw.numeroFactura, numeroFacturaLegal),
+        numeroFacturaLegal
+      ),
+      invoiceNumber: safeText(
+        first(source.invoiceNumber, raw.invoiceNumber, numeroFacturaLegal),
+        numeroFacturaLegal
+      ),
 
       facturaIds: uniqueStrings(first(source.facturaIds, raw.facturaIds, invoiceIds)),
       invoiceIds: uniqueStrings(first(source.invoiceIds, raw.invoiceIds, invoiceIds)),
@@ -1157,19 +1674,163 @@ export const IncidenciasView = (() => {
   }
 
   /* =========================================================
-     CLEANUP
+     STORE / DETAIL MERGE
   ========================================================= */
 
-  function cleanupBindings() {
+  function getRawItems() {
     try {
-      bindingsCleanup?.();
-    } catch {}
+      return safeArray(getIncidencias());
+    } catch {
+      return [];
+    }
+  }
 
-    bindingsCleanup = null;
+  function getPayloadRawItems() {
+    return extractItemsFromPayload(lastApiPayload);
+  }
 
+  function getItems() {
     try {
-      AppCore?.cleanup?.run?.(SCOPE);
-    } catch {}
+      const storeRawItems = getRawItems();
+      const payloadRawItems = getPayloadRawItems();
+
+      const rawById = makeRawMap(payloadRawItems, storeRawItems);
+
+      const baseItems = storeRawItems.length
+        ? storeRawItems
+        : payloadRawItems;
+
+      const normalizedItems = safeArray(
+        normalizeIncidenciasCollection(baseItems)
+      );
+
+      const patchedItems = normalizedItems.map((item, index) => {
+        const id = getStableTicketId(item);
+
+        const matchingRaw =
+          rawById.get(id) ||
+          payloadRawItems[index] ||
+          storeRawItems[index] ||
+          {};
+
+        return preserveInvoiceAmountFields(item, matchingRaw);
+      });
+
+      const sorted = sortIncidenciasByUpdatedDesc(patchedItems);
+
+      return safeArray(sorted);
+    } catch (error) {
+      safeWarn("getItems falló:", error);
+      return [];
+    }
+  }
+
+  function findTicketById(ticketId = "") {
+    const id = safeText(ticketId, "");
+
+    if (!id) return null;
+
+    return (
+      getItems().find((item) =>
+        getTicketIdentityList(item).some((candidate) =>
+          sameTicketIdentity(candidate, id)
+        )
+      ) || null
+    );
+  }
+
+  function findTicketForDetail(detail = {}, preferredId = "") {
+    const remote = safeObject(detail);
+
+    const preferred = safeText(preferredId, "");
+    if (preferred) {
+      const byPreferred = findTicketById(preferred);
+      if (byPreferred) return byPreferred;
+    }
+
+    const remoteIds = getTicketIdentityList(remote);
+
+    for (const id of remoteIds) {
+      const found = findTicketById(id);
+      if (found) return found;
+    }
+
+    return null;
+  }
+
+  function mergeTicketDetailWithStoreSnapshot(detail = {}, preferredTicketId = "") {
+    const remote = safeObject(detail);
+
+    if (!hasOwnKeys(remote)) {
+      return null;
+    }
+
+    const storeItem = findTicketForDetail(remote, preferredTicketId);
+
+    if (!storeItem) {
+      return preserveInvoiceAmountFields(remote, remote.raw || remote);
+    }
+
+    const storeEnriched = preserveInvoiceAmountFields(
+      storeItem,
+      storeItem?.raw || storeItem
+    );
+
+    const id = safeText(
+      first(
+        remote.ticketId,
+        remote.id,
+        remote.code,
+        remote.ticketCode,
+        remote.incidenciaId,
+        storeEnriched.ticketId,
+        storeEnriched.id,
+        storeEnriched.code,
+        storeEnriched.ticketCode,
+        preferredTicketId
+      ),
+      ""
+    );
+
+    const preliminary = {
+      ...storeEnriched,
+      ...remote,
+
+      id: safeText(first(remote.id, id), id),
+      ticketId: safeText(first(remote.ticketId, id), id),
+      incidenciaId: safeText(first(remote.incidenciaId, id), id),
+      code: safeText(first(remote.code, remote.ticketCode, id), id),
+      ticketCode: safeText(first(remote.ticketCode, remote.code, id), id),
+
+      raw: {
+        ...safeObject(storeEnriched.raw),
+        ...safeObject(remote.raw || remote),
+
+        id: safeText(first(remote.raw?.id, remote.id, id), id),
+        ticketId: safeText(first(remote.raw?.ticketId, remote.ticketId, id), id),
+        incidenciaId: safeText(
+          first(remote.raw?.incidenciaId, remote.incidenciaId, id),
+          id
+        ),
+        code: safeText(first(remote.raw?.code, remote.code, id), id),
+        ticketCode: safeText(
+          first(remote.raw?.ticketCode, remote.ticketCode, id),
+          id
+        ),
+      },
+
+      meta: {
+        ...safeObject(storeEnriched.meta),
+        ...safeObject(storeEnriched.raw?.meta),
+        ...safeObject(remote.raw?.meta),
+        ...safeObject(remote.meta),
+      },
+    };
+
+    return preserveInvoiceAmountFields(
+      preliminary,
+      preliminary.raw || storeEnriched.raw || storeEnriched
+    );
   }
 
   /* =========================================================
@@ -1211,6 +1872,11 @@ export const IncidenciasView = (() => {
 
     incidenciasState.openingTicketId = safeText(
       incidenciasState.openingTicketId,
+      ""
+    );
+
+    incidenciasState.selectedTicketId = safeText(
+      incidenciasState.selectedTicketId,
       ""
     );
 
@@ -1258,53 +1924,6 @@ export const IncidenciasView = (() => {
     }
 
     return total;
-  }
-
-  function getRawItems() {
-    try {
-      return safeArray(getIncidencias());
-    } catch {
-      return [];
-    }
-  }
-
-  function getPayloadRawItems() {
-    return extractItemsFromPayload(lastApiPayload);
-  }
-
-  function getItems() {
-    try {
-      const storeRawItems = getRawItems();
-      const payloadRawItems = getPayloadRawItems();
-
-      const rawById = makeRawMap(payloadRawItems, storeRawItems);
-
-      const baseItems = storeRawItems.length
-        ? storeRawItems
-        : payloadRawItems;
-
-      const normalizedItems = safeArray(
-        normalizeIncidenciasCollection(baseItems)
-      );
-
-      const patchedItems = normalizedItems.map((item, index) => {
-        const id = getStableTicketId(item);
-        const matchingRaw =
-          rawById.get(id) ||
-          payloadRawItems[index] ||
-          storeRawItems[index] ||
-          {};
-
-        return preserveInvoiceAmountFields(item, matchingRaw);
-      });
-
-      const sorted = sortIncidenciasByUpdatedDesc(patchedItems);
-
-      return safeArray(sorted);
-    } catch (error) {
-      safeWarn("getItems falló:", error);
-      return [];
-    }
   }
 
   function getPaginationMeta(items = []) {
@@ -1427,9 +2046,12 @@ export const IncidenciasView = (() => {
 
     try {
       if (typeof OnionIncidenciasModal?.getState === "function") {
-        const state = OnionIncidenciasModal.getState();
+        const modalState = OnionIncidenciasModal.getState();
 
-        if (state?.isOpen && typeof OnionIncidenciasModal.update === "function") {
+        if (
+          modalState?.isOpen &&
+          typeof OnionIncidenciasModal.update === "function"
+        ) {
           OnionIncidenciasModal.update(payload);
           return true;
         }
@@ -1446,7 +2068,10 @@ export const IncidenciasView = (() => {
     try {
       const modal = window?.OnionIncidenciasModal;
 
-      if (modal?.getState?.()?.isOpen && typeof modal.update === "function") {
+      if (
+        modal?.getState?.()?.isOpen &&
+        typeof modal.update === "function"
+      ) {
         modal.update(payload);
         return true;
       }
@@ -1474,17 +2099,63 @@ export const IncidenciasView = (() => {
 
     safeEmit("incidencias:modal:open", {
       detail: payload,
+      ticketId: getStableTicketId(payload),
+      source: "incidenciasView:fallback",
     });
 
     return true;
   }
 
+  function closeTicketModalBridge() {
+    try {
+      if (typeof OnionIncidenciasModal?.close === "function") {
+        OnionIncidenciasModal.close();
+        return true;
+      }
+    } catch {}
+
+    try {
+      if (typeof window?.OnionIncidenciasModal?.close === "function") {
+        window.OnionIncidenciasModal.close();
+        return true;
+      }
+    } catch {}
+
+    safeEmit("incidencias:modal:close", {
+      source: "incidenciasView",
+    });
+
+    return true;
+  }
+
+  function updateTicketModalBridge(detail = {}) {
+    const payload = safeObject(detail);
+
+    try {
+      if (typeof OnionIncidenciasModal?.update === "function") {
+        OnionIncidenciasModal.update(payload);
+        return true;
+      }
+    } catch {}
+
+    try {
+      if (typeof window?.OnionIncidenciasModal?.update === "function") {
+        window.OnionIncidenciasModal.update(payload);
+        return true;
+      }
+    } catch {}
+
+    return openTicketModalBridge(payload);
+  }
+
   function openCreateModalBridge(draft = {}) {
+    const payload = safeObject(draft);
+
     try {
       const modal = window?.OnionIncidenciasCreateModal;
 
       if (typeof modal?.open === "function") {
-        modal.open(draft);
+        modal.open(payload);
         return true;
       }
     } catch (error) {
@@ -1498,14 +2169,17 @@ export const IncidenciasView = (() => {
         IncidenciasCreateView?.open;
 
       if (typeof hook === "function") {
-        hook(draft);
+        hook(payload);
         return true;
       }
     } catch (error) {
       safeWarn("create modal hook falló:", error);
     }
 
-    safeEmit("incidencias:create-modal:open", { draft });
+    safeEmit("incidencias:create-modal:open", {
+      draft: payload,
+      source: "incidenciasView:fallback",
+    });
 
     return true;
   }
@@ -1586,10 +2260,12 @@ export const IncidenciasView = (() => {
   }
 
   /* =========================================================
-     RENDER
+     TEMPLATE
   ========================================================= */
 
   function buildHtml() {
+    ensureBaseState();
+
     const allItems = getItems();
     const pagination = clampPageAgainstItems(allItems);
 
@@ -1601,7 +2277,11 @@ export const IncidenciasView = (() => {
     const totalCount = remoteCount;
 
     return `
-      <section class="panel-content dashboard ready" data-view="incidencias">
+      <section
+        class="panel-content dashboard ready"
+        data-view="incidencias"
+        data-incidencias-scope="${SCOPE}"
+      >
         <div class="content-wrapper" style="display:grid;gap:var(--space-lg);">
           ${renderIncidenciasTableTemplate({
             items: allItems,
@@ -1614,12 +2294,28 @@ export const IncidenciasView = (() => {
             title: "Tus incidencias y solicitudes",
             subtitle:
               "Consulta el estado de tus incidencias, revisa las actualizaciones más recientes y crea nuevas solicitudes desde una vista clara, cercana y fácil de seguir.",
-            state: incidenciasState,
+            state: {
+              ...incidenciasState,
+              page: pagination.page,
+              pageSize: pagination.pageSize,
+              totalPages: pagination.totalPages,
+              totalCount,
+              remoteCount,
+              selectedTicketId: safeText(incidenciasState.selectedTicketId, ""),
+              openingTicketId: safeText(incidenciasState.openingTicketId, ""),
+              creating: Boolean(incidenciasState.creating),
+              loading: Boolean(incidenciasState.loading),
+              refreshing: Boolean(incidenciasState.refreshing),
+            },
           })}
         </div>
       </section>
     `;
   }
+
+  /* =========================================================
+     RENDER
+  ========================================================= */
 
   function render() {
     const container = getContainer();
@@ -1628,6 +2324,8 @@ export const IncidenciasView = (() => {
       safeWarn("No existe #view-container para renderizar incidencias.");
       return null;
     }
+
+    if (destroyed) return null;
 
     ensureBaseState();
 
@@ -1654,6 +2352,8 @@ export const IncidenciasView = (() => {
   function rerender() {
     if (destroyed) return null;
 
+    cancelPendingRender();
+
     const container = render();
 
     if (!destroyed) {
@@ -1661,6 +2361,21 @@ export const IncidenciasView = (() => {
     }
 
     return container;
+  }
+
+  function scheduleRerender() {
+    if (destroyed) return null;
+
+    if (pendingRenderFrame) {
+      return pendingRenderFrame;
+    }
+
+    pendingRenderFrame = requestFrame(() => {
+      pendingRenderFrame = 0;
+      rerender();
+    });
+
+    return pendingRenderFrame;
   }
 
   /* =========================================================
@@ -1731,6 +2446,14 @@ export const IncidenciasView = (() => {
 
       persistCacheBestEffort();
 
+      safeEmit("incidencias:loaded", {
+        items: itemsAfter,
+        payload,
+        force,
+        silent,
+        asRefresh,
+      });
+
       return itemsAfter;
     } catch (error) {
       const message = safeErrorMessage(error);
@@ -1748,6 +2471,11 @@ export const IncidenciasView = (() => {
       if (!silent) {
         showToast(message, "error");
       }
+
+      safeEmit("incidencias:load:error", {
+        error,
+        message,
+      });
 
       return getItems();
     } finally {
@@ -1846,22 +2574,57 @@ export const IncidenciasView = (() => {
     return nextSize;
   }
 
-  async function handleOpenTicket(ticketId = "") {
+  async function handleOpenTicket(ticketId = "", options = {}) {
     const id = safeText(ticketId, "");
+    const opts = safeObject(options);
+
     if (!id) return null;
 
-    if (!throttleOpenTicketClick()) {
+    if (!opts.skipThrottle && !throttleOpenTicketClick()) {
       return null;
     }
 
-    if (incidenciasState.openingTicketId) {
+    if (
+      incidenciasState.openingTicketId &&
+      !sameTicketIdentity(incidenciasState.openingTicketId, id)
+    ) {
       return null;
     }
+
+    incidenciasState.selectedTicketId = id;
 
     try {
       setOpeningTicketId(id);
     } catch {
       incidenciasState.openingTicketId = id;
+    }
+
+    const payloadDetail = safeObject(
+      first(
+        opts.detail,
+        opts.payload?.detail,
+        opts.payload?.ticket,
+        opts.payload?.incidencia,
+        opts.payload?.item,
+        opts.payload
+      )
+    );
+
+    const storeSnapshot = findTicketById(id);
+    const immediateDetail = mergeTicketDetailWithStoreSnapshot(
+      hasOwnKeys(payloadDetail) ? payloadDetail : storeSnapshot || {},
+      id
+    );
+
+    if (immediateDetail && opts.openImmediate !== false) {
+      openTicketModalBridge({
+        ...immediateDetail,
+        meta: {
+          ...safeObject(immediateDetail.meta),
+          openingFromView: true,
+          detailLoading: true,
+        },
+      });
     }
 
     rerender();
@@ -1870,25 +2633,71 @@ export const IncidenciasView = (() => {
     try {
       const detail = await openTicketAction({
         ticketId: id,
-        preferFresh: true,
-        silent: true,
+        preferFresh: opts.preferFresh !== false,
+        silent: opts.silent !== false,
       });
 
-      if (!detail) {
+      const patchedDetail = detail
+        ? mergeTicketDetailWithStoreSnapshot(detail, id)
+        : immediateDetail;
+
+      if (!patchedDetail) {
         showToast("No se pudo abrir la incidencia.", "error");
         return null;
       }
 
-      const patchedDetail = preserveInvoiceAmountFields(
-        safeObject(detail),
-        safeObject(detail?.raw)
-      );
+      updateTicketModalBridge({
+        ...patchedDetail,
+        meta: {
+          ...safeObject(patchedDetail.meta),
+          openingFromView: false,
+          detailLoading: false,
+        },
+      });
 
-      openTicketModalBridge(patchedDetail);
+      safeEmit("incidencias:open:success", {
+        ticketId: id,
+        incidenciaId: id,
+        detail: patchedDetail,
+        source: safeText(opts.source, "view"),
+      });
 
       return patchedDetail;
     } catch (error) {
       safeWarn("handleOpenTicket falló:", error);
+
+      if (immediateDetail) {
+        updateTicketModalBridge({
+          ...immediateDetail,
+          meta: {
+            ...safeObject(immediateDetail.meta),
+            openingFromView: false,
+            detailLoading: false,
+            detailFallback: true,
+          },
+        });
+
+        safeEmit("incidencias:open:fallback", {
+          ticketId: id,
+          incidenciaId: id,
+          detail: immediateDetail,
+          error,
+        });
+
+        showToast(
+          "Incidencia abierta con datos locales. No se pudo cargar el detalle remoto.",
+          "warning"
+        );
+
+        return immediateDetail;
+      }
+
+      safeEmit("incidencias:open:error", {
+        ticketId: id,
+        incidenciaId: id,
+        error,
+      });
+
       showToast("No se pudo abrir la incidencia.", "error");
       return null;
     } finally {
@@ -1913,12 +2722,16 @@ export const IncidenciasView = (() => {
       });
 
       if (detail) {
-        const patchedDetail = preserveInvoiceAmountFields(
-          safeObject(detail),
-          safeObject(detail?.raw)
-        );
+        const patchedDetail = mergeTicketDetailWithStoreSnapshot(detail, id);
 
-        openTicketModalBridge(patchedDetail);
+        updateTicketModalBridge(patchedDetail);
+
+        safeEmit("incidencias:modal:refresh:success", {
+          ticketId: id,
+          incidenciaId: id,
+          detail: patchedDetail,
+        });
+
         return patchedDetail;
       }
 
@@ -1926,6 +2739,13 @@ export const IncidenciasView = (() => {
     } catch (error) {
       safeWarn("handleRefreshTicketFromModal falló:", error);
       showToast("No se pudo actualizar la incidencia.", "error");
+
+      safeEmit("incidencias:modal:refresh:error", {
+        ticketId: id,
+        incidenciaId: id,
+        error,
+      });
+
       return null;
     }
   }
@@ -2002,11 +2822,15 @@ export const IncidenciasView = (() => {
     await waitForPaint();
 
     try {
-      const opened = openCreateModalBridge({});
+      const opened = openCreateModalBridge(opts.draft || {});
 
       if (!opened) {
         showToast("No se pudo abrir el formulario.", "error");
       }
+
+      safeEmit("incidencias:create:open", {
+        draft: opts.draft || {},
+      });
 
       return opened;
     } finally {
@@ -2018,6 +2842,320 @@ export const IncidenciasView = (() => {
 
       if (!destroyed) rerender();
     }
+  }
+
+  /* =========================================================
+     SEARCH / GLOBAL OPEN BRIDGE
+  ========================================================= */
+
+  async function openTicketFromExternalRequest(payload = {}) {
+    const source = extractExternalOpenPayload(payload);
+    const ticketId = getTicketIdFromExternalPayload(source);
+
+    if (!ticketId) {
+      showToast("No se pudo identificar la incidencia.", "error");
+      return null;
+    }
+
+    if (
+      inflightExternalOpen &&
+      inflightExternalOpenTicketId &&
+      sameTicketIdentity(inflightExternalOpenTicketId, ticketId)
+    ) {
+      return inflightExternalOpen;
+    }
+
+    inflightExternalOpenTicketId = ticketId;
+
+    inflightExternalOpen = (async () => {
+      if (!getItems().length && !incidenciasState.loaded) {
+        await reload({
+          force: false,
+          silent: true,
+          asRefresh: false,
+        });
+      }
+
+      const result = await handleOpenTicket(ticketId, {
+        skipThrottle: true,
+        source: safeText(source.source, "external"),
+        payload: source,
+        detail: first(
+          source.detail,
+          source.ticket,
+          source.incidencia,
+          source.item,
+          source
+        ),
+      });
+
+      if (result) {
+        safeEmit("incidencias:opened-from-external", {
+          source: safeText(source.source, "external"),
+          ticketId,
+          incidenciaId: ticketId,
+          detail: result,
+          payload: source,
+        });
+      }
+
+      return result;
+    })();
+
+    try {
+      return await inflightExternalOpen;
+    } finally {
+      inflightExternalOpen = null;
+      inflightExternalOpenTicketId = "";
+    }
+  }
+
+  async function openTicketFromLocationOnce() {
+    const ticketId = getTicketIdFromLocation();
+
+    if (!ticketId) return null;
+
+    if (
+      lastAutoOpenedTicketId === ticketId &&
+      sameTicketIdentity(incidenciasState.selectedTicketId, ticketId)
+    ) {
+      clearTicketIdFromLocation();
+      return findTicketById(ticketId);
+    }
+
+    lastAutoOpenedTicketId = ticketId;
+
+    const result = await openTicketFromExternalRequest({
+      source: "location",
+      ticketId,
+    });
+
+    clearTicketIdFromLocation();
+
+    return result;
+  }
+
+  function registerIncidenciasBridge() {
+    const bridge = {
+      open(payload = {}) {
+        return openTicketFromExternalRequest(payload);
+      },
+
+      openById(ticketId = "") {
+        return openTicketFromExternalRequest({ ticketId });
+      },
+
+      close() {
+        return closeTicketModalBridge();
+      },
+
+      refresh(options = {}) {
+        return reload({
+          force: true,
+          silent: Boolean(options.silent),
+          asRefresh: true,
+        });
+      },
+
+      create(draft = {}) {
+        return handleCreateIncidencia({
+          draft,
+          skipThrottle: true,
+        });
+      },
+
+      getState() {
+        return api.getState();
+      },
+    };
+
+    try {
+      if (!AppCore.modules || typeof AppCore.modules !== "object") {
+        AppCore.modules = {};
+      }
+
+      AppCore.modules.Incidencias = api;
+      AppCore.modules.IncidenciasView = api;
+      AppCore.modules.OnionIncidenciasUI = api;
+      AppCore.modules.OnionIncidenciasBridge = bridge;
+      AppCore.modules.OnionIncidenciaBridge = bridge;
+    } catch {}
+
+    try {
+      window.OnionIncidenciasUI = api;
+      window.OnionIncidenciasView = api;
+      window.IncidenciasView = api;
+
+      window.OnionIncidenciasBridge = bridge;
+      window.OnionIncidenciaBridge = bridge;
+      window.IncidenciasBridge = bridge;
+      window.IncidenciaBridge = bridge;
+
+      window.openIncidenciaModal = (payload = {}) =>
+        openTicketFromExternalRequest(payload);
+
+      window.openIncidenciaFicha = (payload = {}) =>
+        openTicketFromExternalRequest(payload);
+
+      window.openTicketModal = (payload = {}) =>
+        openTicketFromExternalRequest(payload);
+
+      window.openTicketFicha = (payload = {}) =>
+        openTicketFromExternalRequest(payload);
+
+      window.renderIncidenciaModal = (payload = {}) =>
+        openTicketFromExternalRequest(payload);
+    } catch {}
+
+    return true;
+  }
+
+  function attachExternalOpenListener() {
+    cleanupExternalOpenListener();
+
+    const cleanups = TICKET_OPEN_EVENTS.map((eventName) =>
+      safeOn(eventName, async (eventOrPayload) => {
+        if (destroyed) return;
+
+        const payload = extractExternalOpenPayload(eventOrPayload);
+
+        if (payload.source === "incidenciasView:fallback") {
+          return;
+        }
+
+        await openTicketFromExternalRequest({
+          ...payload,
+          source: safeText(payload.source, eventName),
+        });
+      })
+    );
+
+    externalOpenCleanup = () => {
+      cleanups.forEach((cleanup) => {
+        try {
+          cleanup?.();
+        } catch {}
+      });
+    };
+  }
+
+  function attachMutationListeners() {
+    cleanupMutationListeners();
+
+    const onMutated = async (eventOrPayload = {}) => {
+      if (destroyed) return;
+
+      const payload = extractExternalOpenPayload(eventOrPayload);
+
+      await reload({
+        force: true,
+        asRefresh: true,
+        silent: payload.silent !== false,
+      });
+    };
+
+    const onRefresh = async (eventOrPayload = {}) => {
+      if (destroyed) return;
+
+      const payload = extractExternalOpenPayload(eventOrPayload);
+
+      await handleRefreshTicketFromModal(
+        first(
+          payload.ticketId,
+          payload.incidenciaId,
+          payload.id,
+          payload.detail?.ticketId,
+          payload.detail?.id,
+          ""
+        )
+      );
+    };
+
+    const onCopy = async (eventOrPayload = {}) => {
+      if (destroyed) return;
+
+      const payload = extractExternalOpenPayload(eventOrPayload);
+
+      await handleCopyTicketId(
+        first(
+          payload.ticketId,
+          payload.incidenciaId,
+          payload.id,
+          payload.detail?.ticketId,
+          payload.detail?.id,
+          ""
+        )
+      );
+    };
+
+    const cleanups = [
+      safeOn("incidencias:modal:refresh", onRefresh),
+      safeOn("incidencias:modal:copy", onCopy),
+      ...MUTATION_EVENTS.map((eventName) => safeOn(eventName, onMutated)),
+    ];
+
+    mutationCleanup = () => {
+      cleanups.forEach((cleanup) => {
+        try {
+          cleanup?.();
+        } catch {}
+      });
+    };
+  }
+
+  function attachCreateSuccessListener() {
+    cleanupCreateSuccessListener();
+
+    const onCreated = async (eventOrPayload = {}) => {
+      if (destroyed) return;
+
+      const payload = extractExternalOpenPayload(eventOrPayload);
+
+      try {
+        await reload({
+          force: true,
+          asRefresh: true,
+          silent: true,
+        });
+
+        const ticketId = getTicketIdFromExternalPayload(payload);
+
+        if (ticketId && payload.openAfterCreate !== false) {
+          await openTicketFromExternalRequest({
+            ...payload,
+            ticketId,
+            source: "create-success",
+          });
+        }
+      } catch {
+        showToast(
+          "Incidencia creada, pero no se pudo refrescar el historial.",
+          "warning"
+        );
+      }
+    };
+
+    createSuccessCleanup = safeOn("incidencias:create:success", onCreated);
+  }
+
+  function attachReadyListeners() {
+    cleanupReadyListeners();
+
+    const onReady = () => {
+      flushPendingCreate();
+    };
+
+    const cleanups = READY_EVENTS.map((eventName) =>
+      safeOn(eventName, onReady)
+    );
+
+    readyCleanup = () => {
+      cleanups.forEach((cleanup) => {
+        try {
+          cleanup?.();
+        } catch {}
+      });
+    };
   }
 
   /* =========================================================
@@ -2237,147 +3375,17 @@ export const IncidenciasView = (() => {
     };
   }
 
-  function bindModalBridgeEvents() {
-    const bus = AppCore?.events;
-
-    if (!bus?.on) {
-      return () => {};
-    }
-
-    const onRefresh = async (event) => {
-      if (destroyed) return;
-
-      const payload = getEventPayload(event);
-
-      await handleRefreshTicketFromModal(
-        payload.ticketId ||
-          payload.id ||
-          payload.detail?.ticketId ||
-          payload.detail?.id ||
-          ""
-      );
-    };
-
-    const onCopy = async (event) => {
-      if (destroyed) return;
-
-      const payload = getEventPayload(event);
-
-      await handleCopyTicketId(
-        payload.ticketId ||
-          payload.id ||
-          payload.detail?.ticketId ||
-          payload.detail?.id ||
-          ""
-      );
-    };
-
-    const onMutated = async () => {
-      if (destroyed) return;
-
-      await reload({
-        force: true,
-        asRefresh: true,
-        silent: true,
-      });
-    };
-
-    const onReady = () => {
-      flushPendingCreate();
-    };
-
-    try {
-      bus.on("incidencias:modal:refresh", onRefresh);
-      bus.on("incidencias:modal:copy", onCopy);
-
-      bus.on("incidencias:create:success", onMutated);
-      bus.on("incidencias:modal:updated", onMutated);
-      bus.on("incidencias:ticket:updated", onMutated);
-      bus.on("incidencias:upload:success", onMutated);
-      bus.on("incidencias:comment:success", onMutated);
-      bus.on("incidencias:reopen:success", onMutated);
-
-      bus.on("app:ready", onReady);
-      bus.on("app:boot:ready", onReady);
-      bus.on("app:boot:complete", onReady);
-      bus.on("router:rendered", onReady);
-    } catch {}
-
-    return () => {
-      try { bus.off("incidencias:modal:refresh", onRefresh); } catch {}
-      try { bus.off("incidencias:modal:copy", onCopy); } catch {}
-
-      try { bus.off("incidencias:create:success", onMutated); } catch {}
-      try { bus.off("incidencias:modal:updated", onMutated); } catch {}
-      try { bus.off("incidencias:ticket:updated", onMutated); } catch {}
-      try { bus.off("incidencias:upload:success", onMutated); } catch {}
-      try { bus.off("incidencias:comment:success", onMutated); } catch {}
-      try { bus.off("incidencias:reopen:success", onMutated); } catch {}
-
-      try { bus.off("app:ready", onReady); } catch {}
-      try { bus.off("app:boot:ready", onReady); } catch {}
-      try { bus.off("app:boot:complete", onReady); } catch {}
-      try { bus.off("router:rendered", onReady); } catch {}
-    };
-  }
-
-  function bindWindowEvents() {
-    const onMutated = async () => {
-      if (destroyed) return;
-
-      await reload({
-        force: true,
-        asRefresh: true,
-        silent: true,
-      });
-    };
-
-    const onReady = () => {
-      flushPendingCreate();
-    };
-
-    try {
-      window.addEventListener("incidencias:create:success", onMutated);
-      window.addEventListener("incidencias:modal:updated", onMutated);
-      window.addEventListener("incidencias:ticket:updated", onMutated);
-      window.addEventListener("incidencias:upload:success", onMutated);
-      window.addEventListener("incidencias:comment:success", onMutated);
-      window.addEventListener("incidencias:reopen:success", onMutated);
-
-      window.addEventListener("app:ready", onReady);
-      window.addEventListener("app:boot:ready", onReady);
-      window.addEventListener("app:boot:complete", onReady);
-      window.addEventListener("router:rendered", onReady);
-    } catch {}
-
-    return () => {
-      try {
-        window.removeEventListener("incidencias:create:success", onMutated);
-        window.removeEventListener("incidencias:modal:updated", onMutated);
-        window.removeEventListener("incidencias:ticket:updated", onMutated);
-        window.removeEventListener("incidencias:upload:success", onMutated);
-        window.removeEventListener("incidencias:comment:success", onMutated);
-        window.removeEventListener("incidencias:reopen:success", onMutated);
-
-        window.removeEventListener("app:ready", onReady);
-        window.removeEventListener("app:boot:ready", onReady);
-        window.removeEventListener("app:boot:complete", onReady);
-        window.removeEventListener("router:rendered", onReady);
-      } catch {}
-    };
-  }
-
   function bind() {
     cleanupBindings();
 
     if (destroyed) return;
 
+    registerIncidenciasBridge();
+
     const container = getContainer();
     const cleanups = [];
 
     cleanups.push(bindNativeActions(container));
-    cleanups.push(bindModalBridgeEvents());
-    cleanups.push(bindWindowEvents());
 
     bindingsCleanup = () => {
       for (const cleanup of cleanups) {
@@ -2386,6 +3394,11 @@ export const IncidenciasView = (() => {
         } catch {}
       }
     };
+
+    attachExternalOpenListener();
+    attachMutationListeners();
+    attachCreateSuccessListener();
+    attachReadyListeners();
   }
 
   /* =========================================================
@@ -2402,8 +3415,12 @@ export const IncidenciasView = (() => {
         ...(queuedReloadOptions || {}),
         ...incomingOptions,
         force: Boolean(queuedReloadOptions?.force || incomingOptions.force),
-        asRefresh: Boolean(queuedReloadOptions?.asRefresh || incomingOptions.asRefresh),
-        silent: Boolean(queuedReloadOptions?.silent ?? incomingOptions.silent),
+        asRefresh: Boolean(
+          queuedReloadOptions?.asRefresh || incomingOptions.asRefresh
+        ),
+        silent: Boolean(
+          queuedReloadOptions?.silent ?? incomingOptions.silent
+        ),
       };
 
       return inflightReload;
@@ -2445,13 +3462,27 @@ export const IncidenciasView = (() => {
     }
 
     if (initialized && !destroyed) {
+      registerIncidenciasBridge();
       ensureBaseState();
       rerender();
       flushPendingCreate();
+
+      if (!incidenciasState.loaded && !inflightReload) {
+        await reload({
+          force: false,
+          silent: true,
+          asRefresh: false,
+        });
+      }
+
+      await openTicketFromLocationOnce();
+
       return api;
     }
 
     initialized = true;
+
+    registerIncidenciasBridge();
 
     inflightInit = (async () => {
       safeLog("init");
@@ -2470,6 +3501,8 @@ export const IncidenciasView = (() => {
 
       flushPendingCreate();
 
+      await openTicketFromLocationOnce();
+
       return api;
     })();
 
@@ -2485,7 +3518,13 @@ export const IncidenciasView = (() => {
     initialized = false;
 
     nextRenderToken();
+    cancelPendingRender();
+
     cleanupBindings();
+    cleanupExternalOpenListener();
+    cleanupMutationListeners();
+    cleanupCreateSuccessListener();
+    cleanupReadyListeners();
 
     try {
       setOpeningTicketId("");
@@ -2499,9 +3538,19 @@ export const IncidenciasView = (() => {
       incidenciasState.loading = false;
     }
 
+    incidenciasState.selectedTicketId = "";
+
     pendingCreateRequest = false;
     queuedReloadOptions = null;
+
     inflightReload = null;
+    inflightInit = null;
+    inflightExternalOpen = null;
+    inflightExternalOpenTicketId = "";
+
+    try {
+      IncidenciasCreateView?.close?.();
+    } catch {}
 
     safeLog("destroy");
   }
@@ -2512,14 +3561,24 @@ export const IncidenciasView = (() => {
 
   const api = {
     init,
+    mount: init,
     render: rerender,
+    scheduleRender: scheduleRerender,
     reload,
     destroy,
+    unmount: destroy,
 
     openTicket: handleOpenTicket,
+    openTicketFromExternalRequest,
+    openTicketFromLocationOnce,
+    registerIncidenciasBridge,
+
+    closeTicket: closeTicketModalBridge,
     copyTicketId: handleCopyTicketId,
     exportCsv: handleExportCsv,
     createIncidencia: handleCreateIncidencia,
+
+    refreshTicketDetail: handleRefreshTicketFromModal,
 
     goToPage,
     goPrevPage,
@@ -2529,18 +3588,32 @@ export const IncidenciasView = (() => {
     getItems: () => getItems(),
     getPageItems: () => getPaginationMeta(getItems()).items,
     getPagination: () => getPaginationMeta(getItems()),
+
     getTicketById: (ticketId = "") =>
-      findIncidenciaById(getItems(), ticketId),
+      findIncidenciaById(getItems(), ticketId) || findTicketById(ticketId),
+
+    findTicketById,
+
+    mergeTicketDetailWithStoreSnapshot,
 
     getState: () => ({
       ...getIncidenciasStateSnapshot?.(),
+
       initialized,
       destroyed,
+
       hasInflightInit: Boolean(inflightInit),
       hasInflightReload: Boolean(inflightReload),
       hasQueuedReload: Boolean(queuedReloadOptions),
+      hasInflightExternalOpen: Boolean(inflightExternalOpen),
+      inflightExternalOpenTicketId,
+
       pendingCreateRequest,
+      lastAutoOpenedTicketId,
+
       lastApiPayloadHasItems: extractItemsFromPayload(lastApiPayload).length > 0,
+      itemsCount: getItems().length,
+      pagination: getPaginationMeta(getItems()),
     }),
 
     get initialized() {
@@ -2551,6 +3624,8 @@ export const IncidenciasView = (() => {
       return destroyed;
     },
   };
+
+  registerIncidenciasBridge();
 
   return api;
 })();

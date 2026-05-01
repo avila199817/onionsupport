@@ -1949,6 +1949,22 @@ export function bindAppEvents({
     return true;
   }
 
+  if (eventsBindingInFlight) {
+    safeWarn(
+      AppCore,
+      "bindAppEvents skipped: binding already in progress.",
+      {
+        scope:
+          safeText(
+            scope,
+            DEFAULT_SCOPE
+          ),
+      }
+    );
+
+    return false;
+  }
+
   eventsBindingInFlight =
     true;
 
@@ -2055,6 +2071,8 @@ export function unbindAppEvents(AppCore = null) {
     "";
 
   langChangeInFlight =
+    false;
+  eventsBindingInFlight =
     false;
 
   safeEmit(

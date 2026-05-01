@@ -2,12 +2,17 @@
    Onion SPA - Incidencias Actions
    Archivo: src/views/incidencias/incidencias.actions.js
 
-   CLIENT EXPERIENCE PRO · ACTIONS REAL · 10/10
+   EXTREME PRO SYSTEM · ACTIONS REAL · 12/10
+   PATCH · MODEL-AWARE DETAIL PRESERVER
+   PATCH · FACTURAS / BILLING / LINKED INVOICES SAFE
+   PATCH · ATTACHMENTS SECURE VIEW/DOWNLOAD
+   PATCH · NO FAKE LOCAL WRITES
 
    RESPONSABILIDADES:
    - centralizar acciones operativas del módulo de incidencias
    - resolver detalle ticket desde store + backend
    - abrir detalle a nivel de datos, no de UI
+   - preservar payload rico del backend mediante incidencias.model.js
    - copiar referencia de ticket
    - exportar colección a CSV
    - abrir modal de creación
@@ -26,9 +31,10 @@
    - soporte envelope backend
    - export seguro con escape CSV
    - clipboard robusto con fallback legacy
-   - eventos opcionales vía AppCore.events
+   - eventos opcionales vía AppCore.events + window CustomEvent
    - create modal bridge multi-entorno
    - upload / comment / reopen / download con API real + fetch directo
+   - conserva factura / billing / linkedInvoices / numeroFacturaLegal
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -46,6 +52,10 @@ import {
   getSortedIncidenciasStore,
   upsertIncidenciaStore,
 } from "./incidencias.store.js";
+
+import {
+  normalizeIncidenciaModel,
+} from "./incidencias.model.js";
 
 import {
   safeText,
@@ -73,33 +83,12 @@ const TICKET_API_PREFIXES = [
    CORE HELPERS
 ========================================================= */
 
-function safeEmit(event = "", payload = {}) {
-  const eventName = safeText(event, "");
-  if (!eventName) return false;
-
-  let emitted = false;
-
-  try {
-    AppCore?.events?.emit?.(eventName, payload);
-    emitted = true;
-  } catch {}
-
-  try {
-    window.dispatchEvent(
-      new CustomEvent(eventName, {
-        detail: payload,
-      })
-    );
-    emitted = true;
-  } catch {}
-
-  return emitted;
-}
-
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+
     return value;
   }
 
@@ -120,6 +109,16 @@ function normalizeCommentMessage(value = "") {
 
 function normalizeLower(value = "", fallback = "") {
   return safeText(value, fallback).toLowerCase();
+}
+
+function normalizeKey(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^\w]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 function normalizePathPart(value = "") {
@@ -157,11 +156,28 @@ function getApiBase() {
       AppCore?.config?.apiBase,
       AppCore?.config?.api?.baseUrl,
       AppCore?.state?.apiBase,
-      window?.ONION_API_BASE,
-      window?.API_BASE
+      typeof window !== "undefined" ? window.ONION_API_BASE : "",
+      typeof window !== "undefined" ? window.API_BASE : ""
     ),
     ""
   ).replace(/\/+$/, "");
+}
+
+function getStorageValue(key = "") {
+  const cleanKey = safeText(key, "");
+  if (!cleanKey) return "";
+
+  try {
+    const value = localStorage.getItem(cleanKey);
+    if (value) return value;
+  } catch {}
+
+  try {
+    const value = sessionStorage.getItem(cleanKey);
+    if (value) return value;
+  } catch {}
+
+  return "";
 }
 
 function getAuthToken() {
@@ -171,11 +187,9 @@ function getAuthToken() {
       AppCore?.state?.accessToken,
       AppCore?.auth?.getToken?.(),
       AppCore?.Auth?.getToken?.(),
-      window?.Auth?.getToken?.(),
-      typeof localStorage !== "undefined" ? localStorage.getItem("token") : "",
-      typeof localStorage !== "undefined" ? localStorage.getItem("accessToken") : "",
-      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("token") : "",
-      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("accessToken") : ""
+      typeof window !== "undefined" ? window.Auth?.getToken?.() : "",
+      getStorageValue("token"),
+      getStorageValue("accessToken")
     ),
     ""
   );
@@ -221,7 +235,8 @@ function getHttpStatus(error = null) {
         error?.status,
         error?.statusCode,
         error?.response?.status,
-        error?.data?.status
+        error?.data?.status,
+        error?.response?.data?.status
       )
     ) || 0
   );
@@ -237,6 +252,8 @@ function getErrorMessage(
       error?.response?.message,
       error?.response?.data?.message,
       error?.data?.message,
+      error?.response?.error,
+      error?.response?.data?.error,
       error?.data?.error,
       error?.error,
       fallback
@@ -263,14 +280,41 @@ function shouldTryNextCandidate(error = null) {
   ].includes(status);
 }
 
+function safeEmit(event = "", payload = {}) {
+  const eventName = safeText(event, "");
+  if (!eventName) return false;
+
+  let emitted = false;
+
+  try {
+    AppCore?.events?.emit?.(eventName, payload);
+    emitted = true;
+  } catch {}
+
+  try {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent(eventName, {
+          detail: payload,
+        })
+      );
+      emitted = true;
+    }
+  } catch {}
+
+  return emitted;
+}
+
 function persistDetail(detail = null) {
   if (!detail) return null;
 
+  const normalized = normalizeTicketDetail(detail);
+
   try {
-    upsertIncidenciaStore?.(detail);
+    upsertIncidenciaStore?.(normalized);
   } catch {}
 
-  return detail;
+  return normalized;
 }
 
 /* =========================================================
@@ -309,8 +353,15 @@ async function requestJson(path = "", options = {}) {
   const token = getAuthToken();
 
   const body = options.body ?? null;
+
   const isFormData =
     typeof FormData !== "undefined" && body instanceof FormData;
+
+  const isBlobBody =
+    typeof Blob !== "undefined" && body instanceof Blob;
+
+  const isArrayBufferBody =
+    typeof ArrayBuffer !== "undefined" && body instanceof ArrayBuffer;
 
   const timeoutMs = safeNumber(
     options.timeoutMs,
@@ -342,8 +393,8 @@ async function requestJson(path = "", options = {}) {
       fetchOptions.body = body;
     } else if (
       typeof body === "string" ||
-      body instanceof Blob ||
-      body instanceof ArrayBuffer
+      isBlobBody ||
+      isArrayBufferBody
     ) {
       fetchOptions.body = body;
     } else {
@@ -366,6 +417,7 @@ async function requestJson(path = "", options = {}) {
           first(
             safeObject(payload)?.message,
             safeObject(payload)?.error,
+            safeObject(payload)?.code,
             `HTTP ${response.status}`
           ),
           `HTTP ${response.status}`
@@ -428,14 +480,17 @@ function isLikelyTicket(value) {
 
   return Boolean(
     value.ticketId ||
+      value.incidenciaId ||
       value.id ||
+      value._id ||
       value.code ||
       value.ticketCode ||
       value.title ||
       value.subject ||
       value.asunto ||
       value.message ||
-      value.descripcion
+      value.descripcion ||
+      value.description
   );
 }
 
@@ -455,6 +510,10 @@ function looksLikeEnvelope(value) {
 
 function pickDetail(payload = null) {
   if (!payload) return null;
+
+  if (Array.isArray(payload)) {
+    return payload[0] || null;
+  }
 
   if (isLikelyTicket(payload)) {
     return payload;
@@ -505,6 +564,15 @@ function pickFilePayload(payload = null) {
 }
 
 /* =========================================================
+   DETAIL MODEL BRIDGE
+========================================================= */
+
+function normalizeTicketDetail(detail = {}) {
+  const picked = pickDetail(detail) || detail;
+  return normalizeIncidenciaModel(picked);
+}
+
+/* =========================================================
    DATA PICKERS
 ========================================================= */
 
@@ -512,10 +580,12 @@ function getId(item = {}) {
   return safeText(
     first(
       item.ticketId,
+      item.incidenciaId,
       item.id,
       item.code,
       item.ticketCode,
       item.raw?.ticketId,
+      item.raw?.incidenciaId,
       item.raw?.id
     ),
     ""
@@ -684,15 +754,161 @@ function getCreatedAt(item = {}) {
 
 function getUpdatedAt(item = {}) {
   return first(
+    item.lastActivityAt,
     item.updatedAt,
     item.closedAt,
     item.lastUpdate,
     item.modifiedAt,
     item.createdAt,
+    item.raw?.lastActivityAt,
     item.raw?.updatedAt,
     item.raw?.closedAt,
     item.raw?.createdAt
   );
+}
+
+function getCategory(item = {}) {
+  return safeText(
+    first(
+      item.category,
+      item.categoria,
+      item.tipo,
+      item.raw?.category,
+      item.raw?.categoria,
+      item.raw?.tipo
+    ),
+    "General"
+  );
+}
+
+function getSource(item = {}) {
+  return safeText(
+    first(
+      item.source,
+      item.origen,
+      item.channel,
+      item.raw?.source,
+      item.raw?.origen,
+      item.raw?.channel
+    ),
+    "panel"
+  );
+}
+
+function getTags(item = {}) {
+  const raw = first(
+    item.tags,
+    item.labels,
+    item.raw?.tags,
+    item.raw?.labels
+  );
+
+  if (Array.isArray(raw)) {
+    return raw.map((tag) => safeText(tag, "")).filter(Boolean);
+  }
+
+  if (typeof raw === "string") {
+    return raw
+      .split(/[,\s|;]+/g)
+      .map((tag) => safeText(tag, ""))
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function getInvoiceNumber(item = {}) {
+  return safeText(
+    first(
+      item.numeroFacturaLegal,
+      item.numeroFactura,
+      item.invoiceNumber,
+      item.linkedInvoices?.numeroFacturaLegal,
+      item.linkedInvoices?.numeroFactura,
+      item.linkedInvoices?.invoiceNumber,
+      item.billing?.numeroFacturaLegal,
+      item.factura?.numeroFacturaLegal,
+      item.invoice?.numeroFacturaLegal,
+      item.raw?.numeroFacturaLegal,
+      item.raw?.numeroFactura,
+      item.raw?.invoiceNumber
+    ),
+    ""
+  );
+}
+
+function getInvoiceAmount(item = {}) {
+  return safeNumber(
+    first(
+      item.facturasTotal,
+      item.invoicesTotal,
+      item.importeFacturas,
+      item.invoiceTotal,
+
+      item.facturaTotal,
+      item.facturaImporte,
+      item.importeFactura,
+      item.totalFactura,
+      item.invoiceAmount,
+
+      item.linkedInvoices?.total,
+      item.linkedInvoices?.amount,
+      item.linkedInvoices?.importe,
+
+      item.billing?.total,
+      item.billing?.amount,
+      item.billing?.importe,
+
+      item.meta?.invoiceTotal,
+      item.meta?.invoicesTotal,
+
+      item.total,
+      item.amount,
+      item.importe,
+
+      item.raw?.facturasTotal,
+      item.raw?.invoicesTotal,
+      item.raw?.importeFacturas,
+      item.raw?.invoiceTotal,
+
+      item.raw?.facturaTotal,
+      item.raw?.facturaImporte,
+      item.raw?.importeFactura,
+      item.raw?.totalFactura,
+      item.raw?.invoiceAmount,
+
+      item.raw?.linkedInvoices?.total,
+      item.raw?.linkedInvoices?.amount,
+      item.raw?.linkedInvoices?.importe,
+
+      item.raw?.billing?.total,
+      item.raw?.billing?.amount,
+      item.raw?.billing?.importe,
+
+      0
+    ),
+    0
+  );
+}
+
+function getInvoiceCurrency(item = {}) {
+  return safeText(
+    first(
+      item.currency,
+      item.moneda,
+      item.facturaCurrency,
+      item.facturaMoneda,
+      item.linkedInvoices?.currency,
+      item.linkedInvoices?.moneda,
+      item.billing?.currency,
+      item.billing?.moneda,
+      item.meta?.invoiceCurrency,
+      item.raw?.currency,
+      item.raw?.moneda,
+      "EUR"
+    ),
+    "EUR"
+  ).toUpperCase();
 }
 
 function getAttachmentUrl(entry = {}) {
@@ -730,6 +946,7 @@ function getAttachments(item = {}) {
         entry.filename,
         entry.fileName,
         entry.originalname,
+        entry.originalName,
         entry.title
       ),
       `archivo_${index + 1}`
@@ -764,7 +981,7 @@ function getAttachments(item = {}) {
       ...entry,
 
       id,
-      attachmentId: id,
+      attachmentId: safeText(first(entry.attachmentId, id), id),
 
       name,
 
@@ -773,7 +990,19 @@ function getAttachments(item = {}) {
           entry.filename,
           entry.fileName,
           entry.name,
-          entry.originalname
+          entry.originalname,
+          entry.originalName
+        ),
+        name
+      ),
+
+      fileName: safeText(
+        first(
+          entry.fileName,
+          entry.filename,
+          entry.name,
+          entry.originalname,
+          entry.originalName
         ),
         name
       ),
@@ -781,17 +1010,17 @@ function getAttachments(item = {}) {
       url: getAttachmentUrl(entry),
 
       viewUrl: safeText(
-        first(entry.viewUrl, entry.openUrl, entry.url),
+        first(entry.viewUrl, entry.openUrl, entry.signedUrl, entry.url),
         ""
       ),
 
       openUrl: safeText(
-        first(entry.openUrl, entry.viewUrl, entry.url),
+        first(entry.openUrl, entry.viewUrl, entry.signedUrl, entry.url),
         ""
       ),
 
       downloadUrl: safeText(
-        first(entry.downloadUrl, entry.url),
+        first(entry.downloadUrl, entry.signedUrl, entry.url),
         ""
       ),
 
@@ -813,7 +1042,12 @@ function getAttachments(item = {}) {
         path
       ),
 
-      size: safeNumber(entry.size, 0),
+      storagePath: safeText(first(entry.storagePath, path), path),
+      blobPath: safeText(first(entry.blobPath, path), path),
+      blobName: safeText(first(entry.blobName, path), path),
+
+      size: safeNumber(first(entry.size, entry.sizeBytes, entry.contentLength), 0),
+      sizeBytes: safeNumber(first(entry.sizeBytes, entry.size, entry.contentLength), 0),
 
       type: safeText(
         first(
@@ -874,116 +1108,6 @@ function getComments(item = {}) {
   ).map((row) => safeObject(row));
 }
 
-function getCategory(item = {}) {
-  return safeText(
-    first(
-      item.category,
-      item.categoria,
-      item.raw?.category,
-      item.raw?.categoria
-    ),
-    "General"
-  );
-}
-
-function getSource(item = {}) {
-  return safeText(
-    first(
-      item.source,
-      item.origen,
-      item.channel,
-      item.raw?.source,
-      item.raw?.origen,
-      item.raw?.channel
-    ),
-    "panel"
-  );
-}
-
-function getTags(item = {}) {
-  const raw = first(
-    item.tags,
-    item.labels,
-    item.raw?.tags,
-    item.raw?.labels
-  );
-
-  if (Array.isArray(raw)) {
-    return raw.map((tag) => safeText(tag, "")).filter(Boolean);
-  }
-
-  if (typeof raw === "string") {
-    return raw
-      .split(",")
-      .map((tag) => safeText(tag, ""))
-      .filter(Boolean);
-  }
-
-  return [];
-}
-
-function normalizeTicketDetail(detail = {}) {
-  const raw = safeObject(detail);
-
-  const ticketId = getId(raw);
-  const title = getTitle(raw);
-  const description = getDescription(raw);
-  const status = getStatus(raw);
-  const priority = getPriority(raw);
-  const attachments = getAttachments(raw);
-  const history = getHistory(raw);
-  const comments = getComments(raw);
-  const category = getCategory(raw);
-
-  return {
-    ...raw,
-
-    raw,
-
-    id: safeText(first(raw.id, ticketId), ticketId),
-    ticketId,
-    ticketCode: safeText(first(raw.ticketCode, raw.code, ticketId), ticketId),
-
-    title,
-    subject: safeText(first(raw.subject, raw.asunto, title), title),
-
-    description,
-    message: safeText(
-      first(raw.message, raw.descripcion, description),
-      description
-    ),
-
-    clientName: getClient(raw),
-    clientEmail: getEmail(raw),
-
-    assignedToName: getAssigned(raw),
-
-    status,
-    estado: status,
-
-    priority,
-    prioridad: priority,
-
-    createdAt: getCreatedAt(raw),
-    updatedAt: getUpdatedAt(raw),
-
-    attachments,
-    attachmentsCount: attachments.length,
-
-    history,
-    historyCount: history.length,
-
-    comments,
-    commentsCount: comments.length,
-
-    category,
-    categoria: safeText(first(raw.categoria, category), "general"),
-
-    source: getSource(raw),
-    tags: getTags(raw),
-  };
-}
-
 /* =========================================================
    API ROUTE BUILDERS
 ========================================================= */
@@ -1017,6 +1141,21 @@ function buildFilePath({
     prefix,
     encodeUrlPathSegment(ticketId),
     "files",
+    encodeUrlPathSegment(attachmentId),
+    mode
+  )}`;
+}
+
+function buildAdjuntoPath({
+  prefix = "/api/tickets",
+  ticketId = "",
+  attachmentId = "",
+  mode = "view",
+} = {}) {
+  return `/${joinApiPath(
+    prefix,
+    encodeUrlPathSegment(ticketId),
+    "adjuntos",
     encodeUrlPathSegment(attachmentId),
     mode
   )}`;
@@ -1098,6 +1237,15 @@ function buildAttachmentCandidates({
         mode: finalMode,
       }),
     },
+    {
+      method: "GET",
+      path: buildAdjuntoPath({
+        prefix,
+        ticketId: id,
+        attachmentId: attId,
+        mode: finalMode,
+      }),
+    },
   ]);
 }
 
@@ -1121,25 +1269,39 @@ function buildCsvRows(items = []) {
     "description",
     "status",
     "priority",
+    "category",
     "client",
     "email",
     "assignedTo",
     "createdAt",
     "updatedAt",
+    "numeroFacturaLegal",
+    "importeFactura",
+    "moneda",
+    "attachmentsCount",
   ];
 
-  const rows = safeArray(items).map((item) => [
-    getId(item),
-    getTitle(item),
-    getDescription(item),
-    getStatus(item),
-    getPriority(item),
-    getClient(item),
-    getEmail(item),
-    getAssigned(item),
-    getCreatedAt(item) || "",
-    getUpdatedAt(item) || "",
-  ]);
+  const rows = safeArray(items).map((item) => {
+    const normalized = normalizeTicketDetail(item);
+
+    return [
+      getId(normalized),
+      getTitle(normalized),
+      getDescription(normalized),
+      getStatus(normalized),
+      getPriority(normalized),
+      getCategory(normalized),
+      getClient(normalized),
+      getEmail(normalized),
+      getAssigned(normalized),
+      getCreatedAt(normalized) || "",
+      getUpdatedAt(normalized) || "",
+      getInvoiceNumber(normalized),
+      getInvoiceAmount(normalized),
+      getInvoiceCurrency(normalized),
+      getAttachments(normalized).length,
+    ];
+  });
 
   return [
     header.map(escapeCsvCell).join(","),
@@ -1265,13 +1427,17 @@ export async function getTicketDetailAction({
 
     try {
       response = await getIncidenciaByIdRequest(id);
-    } catch {
+    } catch (apiError) {
+      if (!shouldTryNextCandidate(apiError)) {
+        throw apiError;
+      }
+
       response = await requestFirstJsonCandidate(buildDetailCandidates(id), {
         timeoutMs: REQUEST_TIMEOUT_MS,
       });
     }
 
-    const detail = pickDetail(response);
+    const detail = pickDetail(response) || response;
 
     if (!detail) {
       if (fallbackStoreDetail) {
@@ -1286,7 +1452,7 @@ export async function getTicketDetailAction({
       throw new Error("EMPTY_TICKET_DETAIL");
     }
 
-    const normalized = persistDetail(normalizeTicketDetail(detail));
+    const normalized = persistDetail(detail);
 
     safeEmit("incidencias:detail:success", {
       ticketId: id,
@@ -1381,7 +1547,7 @@ export async function refreshTicketDetailAction({
 ========================================================= */
 
 function canReopenStatus(value = "") {
-  const key = normalizeLower(value);
+  const key = normalizeKey(value);
 
   return [
     "resolved",
@@ -1390,6 +1556,12 @@ function canReopenStatus(value = "") {
     "closed",
     "cerrada",
     "cerrado",
+    "cancelled",
+    "cancelada",
+    "cancelado",
+    "archived",
+    "archivada",
+    "archivado",
   ].includes(key);
 }
 
@@ -1419,7 +1591,21 @@ export async function commentTicketAction({
     return null;
   }
 
-  const finalStatus = safeText(status, "open") || "open";
+  const currentDetail =
+    detail ||
+    getTicketDetailFromStoreAction({
+      ticketId: id,
+    });
+
+  const finalStatus = safeText(
+    first(
+      status,
+      currentDetail?.status,
+      currentDetail?.estado,
+      "open"
+    ),
+    "open"
+  );
 
   const payload = {
     message: normalizedMessage,
@@ -1456,23 +1642,21 @@ export async function commentTicketAction({
       );
     }
 
-    let picked = pickDetail(response);
+    let picked = pickDetail(response) || response;
 
-    if (!picked) {
-      const fresh = await getTicketDetailAction({
+    if (!picked || !isLikelyTicket(picked)) {
+      picked = await getTicketDetailAction({
         ticketId: id,
         preferFresh: true,
         silent: true,
       });
-
-      picked = fresh;
     }
 
     if (!picked) {
       throw new Error("COMMENT_RESPONSE_EMPTY");
     }
 
-    const normalized = persistDetail(normalizeTicketDetail(picked));
+    const normalized = persistDetail(picked);
 
     safeEmit("incidencias:comment:success", {
       ticketId: id,
@@ -1562,23 +1746,21 @@ export async function reopenTicketAction({
       );
     }
 
-    let picked = pickDetail(response);
+    let picked = pickDetail(response) || response;
 
-    if (!picked) {
-      const fresh = await getTicketDetailAction({
+    if (!picked || !isLikelyTicket(picked)) {
+      picked = await getTicketDetailAction({
         ticketId: id,
         preferFresh: true,
         silent: true,
       });
-
-      picked = fresh;
     }
 
     if (!picked) {
       throw new Error("REOPEN_RESPONSE_EMPTY");
     }
 
-    const normalized = persistDetail(normalizeTicketDetail(picked));
+    const normalized = persistDetail(picked);
 
     safeEmit("incidencias:reopen:success", {
       ticketId: id,
@@ -1612,11 +1794,15 @@ export async function reopenTicketAction({
    ATTACHMENTS UPLOAD
 ========================================================= */
 
+function isFileLike(value) {
+  return typeof File !== "undefined" && value instanceof File;
+}
+
 function dedupeFiles(files = []) {
   const map = new Map();
 
   safeArray(files).forEach((file) => {
-    if (!(file instanceof File)) return;
+    if (!isFileLike(file)) return;
 
     const key = [
       safeText(file.name, ""),
@@ -1633,29 +1819,43 @@ function dedupeFiles(files = []) {
   return Array.from(map.values());
 }
 
-function buildUploadFormData(files = []) {
+function buildUploadFormData(files = [], extra = {}) {
   const formData = new FormData();
 
   dedupeFiles(files).forEach((file) => {
     formData.append("attachments", file, file.name);
   });
 
+  const cleanExtra = safeObject(extra);
+
+  Object.entries(cleanExtra).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    if (typeof value === "string" && value.trim() === "") return;
+
+    formData.append(key, String(value));
+  });
+
   return formData;
 }
 
-function buildUploadCandidates(ticketId = "", files = []) {
+function buildUploadCandidates(ticketId = "", files = [], extra = {}) {
   const id = normalizeTicketId(ticketId);
 
   return TICKET_API_PREFIXES.flatMap((prefix) => [
     {
       method: "POST",
       path: `/${joinApiPath(prefix, encodeUrlPathSegment(id), "attachments")}`,
-      bodyFactory: () => buildUploadFormData(files),
+      bodyFactory: () => buildUploadFormData(files, extra),
     },
     {
       method: "POST",
       path: `/${joinApiPath(prefix, encodeUrlPathSegment(id), "files")}`,
-      bodyFactory: () => buildUploadFormData(files),
+      bodyFactory: () => buildUploadFormData(files, extra),
+    },
+    {
+      method: "POST",
+      path: `/${joinApiPath(prefix, encodeUrlPathSegment(id), "adjuntos")}`,
+      bodyFactory: () => buildUploadFormData(files, extra),
     },
   ]);
 }
@@ -1664,6 +1864,7 @@ export async function uploadTicketAttachmentsAction({
   ticketId = "",
   files = [],
   detail = null,
+  status = "open",
   silent = false,
 } = {}) {
   const id = normalizeTicketId(ticketId);
@@ -1693,6 +1894,21 @@ export async function uploadTicketAttachmentsAction({
     );
   }
 
+  const finalStatus = safeText(
+    first(
+      status,
+      detail?.status,
+      detail?.estado,
+      "open"
+    ),
+    "open"
+  );
+
+  const extra = {
+    status: finalStatus,
+    estado: finalStatus,
+  };
+
   safeEmit("incidencias:upload:start", {
     ticketId: id,
     files: finalFiles,
@@ -1705,6 +1921,7 @@ export async function uploadTicketAttachmentsAction({
     try {
       response = await uploadIncidenciaAttachmentsRequest(id, finalFiles, {
         timeout: UPLOAD_TIMEOUT_MS,
+        status: finalStatus,
       });
     } catch (apiError) {
       if (!shouldTryNextCandidate(apiError)) {
@@ -1712,30 +1929,28 @@ export async function uploadTicketAttachmentsAction({
       }
 
       response = await requestFirstJsonCandidate(
-        buildUploadCandidates(id, finalFiles),
+        buildUploadCandidates(id, finalFiles, extra),
         {
           timeoutMs: UPLOAD_TIMEOUT_MS,
         }
       );
     }
 
-    let picked = pickDetail(response);
+    let picked = pickDetail(response) || response;
 
-    if (!picked) {
-      const fresh = await getTicketDetailAction({
+    if (!picked || !isLikelyTicket(picked)) {
+      picked = await getTicketDetailAction({
         ticketId: id,
         preferFresh: true,
         silent: true,
       });
-
-      picked = fresh;
     }
 
     if (!picked) {
       throw new Error("UPLOAD_RESPONSE_EMPTY");
     }
 
-    const normalized = persistDetail(normalizeTicketDetail(picked));
+    const normalized = persistDetail(picked);
 
     safeEmit("incidencias:upload:success", {
       ticketId: id,
@@ -1773,6 +1988,7 @@ export async function uploadTicketAttachmentsAction({
 
 function getAttachmentId(attachment = {}) {
   const item = safeObject(attachment);
+  const raw = safeObject(item.raw);
 
   return safeText(
     first(
@@ -1782,14 +1998,16 @@ function getAttachmentId(attachment = {}) {
       item.storageKey,
       item.path,
       item.blobName,
+      item.blobPath,
       item.key,
-      item.raw?.id,
-      item.raw?.fileId,
-      item.raw?.attachmentId,
-      item.raw?.storageKey,
-      item.raw?.path,
-      item.raw?.blobName,
-      item.raw?.key
+      raw.id,
+      raw.fileId,
+      raw.attachmentId,
+      raw.storageKey,
+      raw.path,
+      raw.blobName,
+      raw.blobPath,
+      raw.key
     ),
     ""
   );
@@ -1797,6 +2015,7 @@ function getAttachmentId(attachment = {}) {
 
 function getAttachmentName(attachment = {}) {
   const item = safeObject(attachment);
+  const raw = safeObject(item.raw);
 
   return safeText(
     first(
@@ -1804,10 +2023,12 @@ function getAttachmentName(attachment = {}) {
       item.filename,
       item.fileName,
       item.originalname,
-      item.raw?.name,
-      item.raw?.filename,
-      item.raw?.fileName,
-      item.raw?.originalname
+      item.originalName,
+      raw.name,
+      raw.filename,
+      raw.fileName,
+      raw.originalname,
+      raw.originalName
     ),
     "archivo"
   );
@@ -1907,6 +2128,18 @@ function normalizeAttachmentFileResponse(payload = {}, fallback = {}) {
       getAttachmentName(fallbackObj)
     ),
 
+    fileName: safeText(
+      first(
+        file.fileName,
+        file.filename,
+        file.name,
+        fallbackObj.fileName,
+        fallbackObj.filename,
+        fallbackObj.name
+      ),
+      getAttachmentName(fallbackObj)
+    ),
+
     name: safeText(
       first(
         file.name,
@@ -1933,6 +2166,45 @@ function normalizeAttachmentFileResponse(payload = {}, fallback = {}) {
 
     raw: payload,
   };
+}
+
+function openExternalUrl(url = "") {
+  const target = safeText(url, "");
+  if (!target) return false;
+
+  try {
+    const opened = window.open(target, "_blank", "noopener,noreferrer");
+    return Boolean(opened);
+  } catch {
+    return false;
+  }
+}
+
+function downloadExternalUrl(url = "", filename = "") {
+  const target = safeText(url, "");
+  if (!target) return false;
+
+  try {
+    const anchor = document.createElement("a");
+
+    anchor.href = target;
+    anchor.rel = "noopener";
+    anchor.target = "_blank";
+
+    if (filename) {
+      anchor.download = filename;
+    }
+
+    anchor.style.display = "none";
+
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+
+    return true;
+  } catch {
+    return openExternalUrl(target);
+  }
 }
 
 export async function getTicketAttachmentFileAction({
@@ -2050,6 +2322,7 @@ export async function openTicketAttachmentAction({
   detail = null,
   mode = "view",
   silent = true,
+  autoOpen = true,
 } = {}) {
   const file = await getTicketAttachmentFileAction({
     ticketId,
@@ -2071,6 +2344,10 @@ export async function openTicketAttachmentAction({
     mode,
   });
 
+  if (autoOpen) {
+    openExternalUrl(file.viewUrl || file.openUrl || file.url);
+  }
+
   return file;
 }
 
@@ -2081,6 +2358,7 @@ export async function downloadTicketAttachmentAction({
   detail = null,
   mode = "download",
   silent = true,
+  autoDownload = true,
 } = {}) {
   const file = await getTicketAttachmentFileAction({
     ticketId,
@@ -2101,6 +2379,13 @@ export async function downloadTicketAttachmentAction({
     file,
     mode,
   });
+
+  if (autoDownload) {
+    downloadExternalUrl(
+      file.downloadUrl || file.url,
+      file.filename || file.fileName || file.name || "archivo"
+    );
+  }
 
   return file;
 }
@@ -2205,20 +2490,28 @@ export function exportIncidenciasCsvAction({
 ========================================================= */
 
 function openCreateModalBridge(payload = {}) {
-  const modal =
-    window?.OnionIncidenciasCreateModal ||
-    window?.OnionIncidencias?.createModal ||
-    null;
+  try {
+    const modal =
+      window?.OnionIncidenciasCreateModal ||
+      window?.OnionIncidencias?.createModal ||
+      window?.IncidenciasCreateModal ||
+      null;
 
-  if (typeof modal?.open === "function") {
-    modal.open(payload);
-    return true;
-  }
+    if (typeof modal?.open === "function") {
+      modal.open(payload);
+      return true;
+    }
 
-  if (typeof window?.renderIncidenciasCreateModal === "function") {
-    window.renderIncidenciasCreateModal(payload);
-    return true;
-  }
+    if (typeof window?.openIncidenciasCreateModal === "function") {
+      window.openIncidenciasCreateModal(payload);
+      return true;
+    }
+
+    if (typeof window?.renderIncidenciasCreateModal === "function") {
+      window.renderIncidenciasCreateModal(payload);
+      return true;
+    }
+  } catch {}
 
   return false;
 }
@@ -2256,6 +2549,10 @@ export async function createIncidenciaAction({
       await AppCore.Router.navigate(targetRoute);
       return true;
     }
+
+    safeEmit("incidencias:create:opened", {
+      mode: "event",
+    });
 
     return true;
   } catch (error) {
@@ -2295,15 +2592,17 @@ export const OnionIncidenciasActions = {
 };
 
 try {
-  window.OnionIncidenciasActions = {
-    ...(window.OnionIncidenciasActions || {}),
-    ...OnionIncidenciasActions,
-  };
+  if (typeof window !== "undefined") {
+    window.OnionIncidenciasActions = {
+      ...(window.OnionIncidenciasActions || {}),
+      ...OnionIncidenciasActions,
+    };
 
-  window.IncidenciasActions = {
-    ...(window.IncidenciasActions || {}),
-    ...OnionIncidenciasActions,
-  };
+    window.IncidenciasActions = {
+      ...(window.IncidenciasActions || {}),
+      ...OnionIncidenciasActions,
+    };
+  }
 } catch {}
 
 /* =========================================================
@@ -2327,6 +2626,9 @@ export {
   getCategory as getIncidenciaCategoryAction,
   getSource as getIncidenciaSourceAction,
   getTags as getIncidenciaTagsAction,
+  getInvoiceNumber as getIncidenciaInvoiceNumberAction,
+  getInvoiceAmount as getIncidenciaInvoiceAmountAction,
+  getInvoiceCurrency as getIncidenciaInvoiceCurrencyAction,
   normalizeTicketDetail as normalizeIncidenciaDetailAction,
 };
 

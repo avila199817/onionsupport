@@ -2773,6 +2773,9 @@ function mergeDetailWithOpenStatus(detail = {}, response = null) {
 function cleanTimelineText(value = "") {
   return safeText(value, "")
     .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.replace(/^[ \t]+/g, ""))
+    .join("\n")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n[ \t]+/g, "\n")
     .replace(/\n{3,}/g, "\n\n")

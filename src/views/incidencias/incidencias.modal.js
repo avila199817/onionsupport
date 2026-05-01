@@ -75,6 +75,8 @@ const modalState = {
 
   previewFile: null,
   previewObjectUrl: "",
+  bodyLockDepth: 0,
+  bodyOverflowBeforeLock: "",
 
   thumbnailObjectUrls: new Map(),
   thumbnailLoadingIds: new Set(),
@@ -3533,42 +3535,7 @@ function renderAttachments(detail = {}) {
   const files = getAttachments(detail);
 
   return `
-    <div class="incidencias-modal-files-block">
-      <article class="incidencias-modal-add-files-card">
-        <div class="incidencias-modal-add-files-main">
-          <div class="incidencias-modal-add-files-icon" aria-hidden="true">
-            +
-          </div>
-
-          <div class="incidencias-modal-add-files-copy">
-            <strong>Añadir documentos</strong>
-            <span>
-              Adjunta capturas, PDFs u otros archivos útiles. Se subirán junto con tu actualización.
-            </span>
-          </div>
-        </div>
-
-        ${renderUploadProgress()}
-
-        <label
-          for="incidencias-modal-attachments-input"
-          class="incidencias-modal-dropzone"
-        >
-          <input
-            id="incidencias-modal-attachments-input"
-            type="file"
-            data-modal-field="attachments"
-            multiple
-            ${modalState.isSubmitting ? "disabled" : ""}
-          />
-
-          <span>Seleccionar archivos</span>
-          <small>Imágenes, PDFs y documentos de soporte</small>
-        </label>
-
-        ${renderPendingFiles()}
-      </article>
-
+    <div class="incidencias-modal-files-block incidencias-modal-files-block--compact">
       <section class="incidencias-modal-current-files">
         <div class="incidencias-modal-section-head">
           <h3>Documentos actuales</h3>
@@ -3785,9 +3752,9 @@ function renderComposer() {
         </div>
 
         <div class="incidencias-modal-composer-copy">
-          <h3>Añadir actualización a la incidencia</h3>
+          <h3>Añadir comentario y adjuntos</h3>
           <span>
-            Escribe la nueva información para el equipo técnico. Puedes adjuntar archivos en el bloque de documentos.
+            Redacta la actualización y adjunta archivos en este mismo bloque.
           </span>
         </div>
       </div>
@@ -3805,6 +3772,26 @@ function renderComposer() {
           Al pulsar “Actualizar incidencia”, se enviará esta información y la incidencia volverá a estado abierta.
         </span>
       </div>
+
+      ${renderUploadProgress()}
+
+      <label
+        for="incidencias-modal-attachments-input"
+        class="incidencias-modal-dropzone"
+      >
+        <input
+          id="incidencias-modal-attachments-input"
+          type="file"
+          data-modal-field="attachments"
+          multiple
+          ${modalState.isSubmitting ? "disabled" : ""}
+        />
+
+        <span>Seleccionar archivos</span>
+        <small>Imágenes, PDFs y documentos de soporte</small>
+      </label>
+
+      ${renderPendingFiles()}
     </section>
   `;
 }
@@ -3956,7 +3943,7 @@ function renderModalInner(detail = {}) {
           <section class="incidencias-modal-description-section">
             <div class="incidencias-modal-section-head">
               <h3>Descripción de la incidencia</h3>
-              <span>Detalle inicial</span>
+              <span>Info clave</span>
             </div>
 
             <div class="incidencias-modal-description-box">
@@ -4105,11 +4092,11 @@ function renderModalInner(detail = {}) {
             margin:0;
             min-width:0;
             max-width:100%;
-            color:var(--text-strong);
-            font-size:clamp(20px, 1.9vw, 28px);
-            line-height:1.18;
-            letter-spacing:-.045em;
-            font-weight:var(--weight-black, 850);
+            color:var(--text-soft);
+            font-size:clamp(18px, 1.6vw, 24px);
+            line-height:1.22;
+            letter-spacing:-.02em;
+            font-weight:var(--weight-bold, 700);
             white-space:normal;
             overflow:hidden;
             display:-webkit-box;
@@ -4157,9 +4144,9 @@ function renderModalInner(detail = {}) {
           }
 
           .incidencias-modal-body {
-            padding:16px 18px 18px;
+            padding:14px 16px 16px;
             display:grid;
-            gap:16px;
+            gap:12px;
           }
 
           .incidencias-modal-avatar {
@@ -4225,17 +4212,18 @@ function renderModalInner(detail = {}) {
           .incidencias-modal-description-section,
           .incidencias-modal-history-section {
             display:grid;
-            gap:8px;
+            gap:6px;
           }
 
           .incidencias-modal-description-box {
-            padding:14px;
+            padding:12px 14px;
             border-radius:16px;
             background:var(--surface-glass);
             border:1px solid var(--border-soft);
-            color:var(--text-soft);
-            font-size:13px;
-            line-height:1.62;
+            color:var(--text-strong);
+            font-size:17px;
+            line-height:1.5;
+            font-weight:var(--weight-bold, 700);
             white-space:pre-wrap;
             word-break:break-word;
           }
@@ -4406,7 +4394,7 @@ function renderModalInner(detail = {}) {
 
           .incidencias-modal-composer {
             display:grid;
-            gap:12px;
+            gap:10px;
             padding:14px;
             border-radius:18px;
             border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
@@ -4448,7 +4436,7 @@ function renderModalInner(detail = {}) {
           .incidencias-modal-composer-copy h3 {
             margin:0;
             color:var(--text-strong);
-            font-size:18px;
+            font-size:16px;
             line-height:1.2;
             letter-spacing:-.025em;
             padding-bottom:2px;
@@ -4463,8 +4451,8 @@ function renderModalInner(detail = {}) {
 
           .incidencias-modal-comment-textarea {
             width:100%;
-            min-height:138px;
-            padding:15px 16px;
+            min-height:124px;
+            padding:13px 14px;
             border-radius:16px;
             border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
             background:
@@ -4497,7 +4485,11 @@ function renderModalInner(detail = {}) {
 
           .incidencias-modal-files-block {
             display:grid;
-            gap:12px;
+            gap:8px;
+          }
+
+          .incidencias-modal-files-block--compact {
+            margin-top:-2px;
           }
 
           .incidencias-modal-add-files-card {
@@ -5280,6 +5272,29 @@ function ensureRoot() {
 }
 
 function lockBody() {
+  if (
+    typeof document === "undefined" ||
+    !document?.body
+  ) {
+    return false;
+  }
+
+  if (modalState.bodyLockDepth <= 0) {
+    try {
+      modalState.bodyOverflowBeforeLock = safeText(
+        document.body.style?.overflow,
+        ""
+      );
+    } catch {
+      modalState.bodyOverflowBeforeLock = "";
+    }
+  }
+
+  modalState.bodyLockDepth = Math.max(
+    1,
+    safeNumber(modalState.bodyLockDepth, 0) + 1
+  );
+
   try {
     document.body.classList.add("modal-open");
   } catch {}
@@ -5287,16 +5302,44 @@ function lockBody() {
   try {
     document.body.style.overflow = "hidden";
   } catch {}
+
+  return true;
 }
 
 function unlockBody() {
+  if (
+    typeof document === "undefined" ||
+    !document?.body
+  ) {
+    return false;
+  }
+
+  const nextDepth = Math.max(
+    0,
+    safeNumber(modalState.bodyLockDepth, 0) - 1
+  );
+
+  modalState.bodyLockDepth = nextDepth;
+
+  if (nextDepth > 0) {
+    return true;
+  }
+
   try {
     document.body.classList.remove("modal-open");
   } catch {}
 
   try {
-    document.body.style.overflow = "";
+    document.body.style.overflow =
+      safeText(
+        modalState.bodyOverflowBeforeLock,
+        ""
+      );
   } catch {}
+
+  modalState.bodyOverflowBeforeLock = "";
+
+  return true;
 }
 
 function restoreFocus() {
@@ -5361,7 +5404,13 @@ function focusPanel() {
 ========================================================= */
 
 export function openIncidenciasModal(detail = {}) {
-  modalState.lastActiveElement = document.activeElement || null;
+  if (
+    !modalState.isOpen &&
+    typeof document !== "undefined"
+  ) {
+    modalState.lastActiveElement =
+      document.activeElement || null;
+  }
   modalState.detail = getDetail(detail);
   modalState.isOpen = true;
   modalState.isSubmitting = false;

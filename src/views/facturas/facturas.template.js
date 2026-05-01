@@ -2,9 +2,11 @@
    Onion SPA - Facturas Template
    Archivo: src/views/facturas/facturas.template.js
 
-   FINAL PRO SAAS PANEL · FACTURAS TEMPLATE · 10/10
+   FINAL PRO SAAS PANEL · FACTURAS TEMPLATE · 10/10 EXTREME
    PATCH · TABLE SYSTEM LOCK · TOKEN ALIGNED · NO GLOBAL CSS BLEED
    PATCH · SINGLE STYLE OWNER · DATA-SCOPE READY · ACTION SAFE
+   PATCH · TABLE ROW PSEUDO FIX · REAL TABLE LAYOUT PRESERVED
+   PATCH · LIGHT/DARK TOKEN PERFECT FIT · ACTIONS COMPACT GRID
 
    RESPONSABILIDADES:
    - render premium de vista de facturas
@@ -27,10 +29,12 @@
    - HTML endurecido con escape/fallbacks
 
    FIX CLAVE:
-   - El root real de FacturasView es [data-facturas-scope].
-   - El CSS ahora se aplica también a ese root.
-   - La tabla queda protegida contra CSS global externo.
-   - renderHeader es el dueño de estilos en uso composicional.
+   - NUNCA usar ::before sobre <tr>.
+   - Algunos navegadores interpretan ::before en table-row como celda anónima.
+   - Eso desplaza columnas y genera el hueco gigante a la izquierda.
+   - La barra de estado ahora vive en .facturas-cell--main::before.
+   - Hover y backgrounds se aplican sobre <td>, no sobre <tr>.
+   - La tabla conserva display table real.
 ========================================================= */
 
 /* =========================================================
@@ -49,7 +53,7 @@ const ADMIN_ROLES = new Set([
   "owner",
 ]);
 
-const STYLE_ID = "onion-facturas-template-styles-v12";
+const STYLE_ID = "onion-facturas-template-styles-v13";
 
 /* =========================================================
    BASE HELPERS
@@ -368,13 +372,42 @@ function icon(name = "") {
    AUTH / ROLE
 ========================================================= */
 
+function hasPermission(state = {}, permission = "") {
+  const runtime = safeObject(state);
+  const target = safeText(permission, "");
+
+  if (!target) return false;
+
+  const permissions = first(
+    runtime.permissions,
+    runtime.user?.permissions,
+    runtime.currentUser?.permissions,
+    runtime.session?.user?.permissions,
+    runtime.auth?.user?.permissions
+  );
+
+  if (Array.isArray(permissions)) {
+    return permissions.includes(target);
+  }
+
+  if (typeof permissions === "string") {
+    return permissions
+      .split(/[,\s]+/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .includes(target);
+  }
+
+  return false;
+}
+
 function isAdminState(state = {}) {
   const runtime = safeObject(state);
 
   if (
     runtime.canCreateFactura === true ||
     runtime.view?.canCreateFactura === true ||
-    runtime.permissions?.includes?.("facturas:create")
+    hasPermission(runtime, "facturas:create")
   ) {
     return true;
   }
@@ -1130,7 +1163,12 @@ function computeStats(items = []) {
     (acc, item) => {
       const total = safeNumber(getTotalRaw(item), 0);
       const paymentKey = getEstadoPagoKey(
-        first(item.estadoPago, item.paymentStatus, item?.raw?.estadoPago, item?.raw?.paymentStatus)
+        first(
+          item.estadoPago,
+          item.paymentStatus,
+          item?.raw?.estadoPago,
+          item?.raw?.paymentStatus
+        )
       );
 
       acc.total += 1;
@@ -1537,7 +1575,12 @@ function renderRow(item = {}, state = {}) {
         : "Enviar factura al cliente";
 
   const paymentKey = getEstadoPagoKey(
-    first(item.estadoPago, item.paymentStatus, item?.raw?.estadoPago, item?.raw?.paymentStatus)
+    first(
+      item.estadoPago,
+      item.paymentStatus,
+      item?.raw?.estadoPago,
+      item?.raw?.paymentStatus
+    )
   );
 
   return `
@@ -1720,6 +1763,8 @@ function renderStyles() {
       :where(.facturas-view-root, [data-facturas-scope]){
         --fac-row-accent:var(--accent, #6f59d9);
         --fac-row-accent-soft:var(--accent-soft, rgba(111,89,217,.12));
+        --fac-table-min-width:1040px;
+        --fac-actions-width:178px;
 
         display:grid;
         gap:var(--view-section-gap, var(--space-lg, 18px));
@@ -2141,7 +2186,7 @@ function renderStyles() {
       .facturas-table{
         display:table !important;
         inline-size:100%;
-        min-inline-size:1120px;
+        min-inline-size:var(--fac-table-min-width);
         table-layout:fixed;
         border-collapse:separate;
         border-spacing:0;
@@ -2195,45 +2240,25 @@ function renderStyles() {
         vertical-align:middle;
         border-bottom:1px solid var(--data-table-row-border, var(--table-border, rgba(255,255,255,.052)));
         background:transparent;
+        transition:
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
       .facturas-table tbody tr:last-child td{
         border-bottom:none;
       }
 
-      .facturas-table tbody tr:nth-child(even) td{
+      .facturas-table tbody tr:nth-child(even) > td{
         background:color-mix(in srgb, var(--surface-elevated, rgba(39,39,42,.88)) 86%, transparent);
       }
 
       .facturas-table-row{
-        position:relative;
-        transition:
-          background var(--duration-fast, .16s) var(--ease-standard, ease),
-          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
+        --fac-row-accent:var(--accent, #6f59d9);
       }
 
-      .facturas-table-row::before{
-        content:"";
-        position:absolute;
-        inset-block:10px;
-        inset-inline-start:0;
-        inline-size:3px;
-        border-radius:0 999px 999px 0;
-        background:var(--fac-row-accent);
-        opacity:.65;
-        transform:scaleY(.72);
-        transition:
-          opacity var(--duration-fast, .16s) var(--ease-standard, ease),
-          transform var(--duration-fast, .16s) var(--ease-standard, ease);
-      }
-
-      .facturas-table-row:hover{
+      .facturas-table-row:hover > td{
         background:var(--data-table-row-hover, var(--table-row-hover, rgba(255,255,255,.024)));
-      }
-
-      .facturas-table-row:hover::before{
-        opacity:1;
-        transform:scaleY(1);
       }
 
       .facturas-table-row--paid{
@@ -2253,6 +2278,32 @@ function renderStyles() {
 
       .facturas-cell{
         min-inline-size:0;
+      }
+
+      .facturas-cell--main{
+        position:relative;
+        padding-inline-start:calc(var(--table-cell-padding-x, 12px) + 10px) !important;
+      }
+
+      .facturas-cell--main::before{
+        content:"";
+        position:absolute;
+        inset-block:12px;
+        inset-inline-start:0;
+        inline-size:3px;
+        border-radius:0 999px 999px 0;
+        background:var(--fac-row-accent);
+        opacity:.70;
+        transform:scaleY(.76);
+        transform-origin:center;
+        transition:
+          opacity var(--duration-fast, .16s) var(--ease-standard, ease),
+          transform var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .facturas-table-row:hover .facturas-cell--main::before{
+        opacity:1;
+        transform:scaleY(1);
       }
 
       .facturas-main{
@@ -2351,8 +2402,8 @@ function renderStyles() {
       }
 
       .facturas-system-id{
-        flex:0 0 auto;
-        max-inline-size:120px;
+        flex:0 1 auto;
+        max-inline-size:124px;
         min-block-size:20px;
         padding-inline:7px;
         border-radius:999px;
@@ -2587,15 +2638,18 @@ function renderStyles() {
       .facturas-cell--actions{
         width:1%;
         white-space:nowrap;
+        text-align:end;
       }
 
       .facturas-actions{
         display:grid;
-        grid-template-columns:repeat(2, minmax(calc(88px * var(--ui-scale, 1)), 1fr));
+        grid-template-columns:repeat(2, minmax(76px, 1fr));
         gap:var(--space-2xs, 6px);
         inline-size:100%;
-        min-inline-size:calc(194px * var(--ui-scale, 1));
+        max-inline-size:var(--fac-actions-width);
+        min-inline-size:0;
         justify-content:end;
+        margin-inline-start:auto;
       }
 
       .facturas-action-btn{
@@ -2604,7 +2658,7 @@ function renderStyles() {
         min-inline-size:0;
         min-block-size:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
         block-size:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
-        padding-inline:var(--space-xs, 8px);
+        padding-inline:7px;
         border-radius:var(--radius-md, 10px);
         border:1px solid var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
         background:var(--btn-secondary-bg, rgba(255,255,255,.045));
@@ -2616,9 +2670,10 @@ function renderStyles() {
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        gap:6px;
+        gap:5px;
         white-space:nowrap;
         box-shadow:none;
+        overflow:hidden;
         transition:
           border-color var(--duration-fast, .16s) var(--ease-standard, ease),
           background var(--duration-fast, .16s) var(--ease-standard, ease),
@@ -2639,6 +2694,12 @@ function renderStyles() {
       .facturas-action-icon svg{
         inline-size:14px;
         block-size:14px;
+      }
+
+      .facturas-action-btn .facturas-btn-text{
+        min-inline-size:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
       }
 
       .facturas-action-btn:hover{
@@ -2742,7 +2803,7 @@ function renderStyles() {
 
       .facturas-table-loading-row{
         display:grid;
-        grid-template-columns:var(--avatar-size-lg, 44px) minmax(190px, 1.1fr) 102px 130px 108px 150px 194px;
+        grid-template-columns:var(--avatar-size-lg, 44px) minmax(190px, 1.1fr) 102px 130px 108px 150px 178px;
         gap:var(--space-xs, 10px);
         align-items:center;
       }
@@ -2817,7 +2878,7 @@ function renderStyles() {
       }
 
       .facturas-skeleton--actions{
-        inline-size:194px;
+        inline-size:178px;
         block-size:calc((var(--btn-height-sm, 34px) * 2) + var(--space-2xs, 6px));
         border-radius:var(--radius-md, 12px);
       }
@@ -2912,6 +2973,14 @@ function renderStyles() {
           var(--card-bg, var(--surface-elevated, #ffffff));
       }
 
+      [data-theme="light"] .facturas-table tbody tr:nth-child(even) > td{
+        background:rgba(23,32,51,.012);
+      }
+
+      [data-theme="light"] .facturas-table-row:hover > td{
+        background:var(--data-table-row-hover, rgba(23,32,51,.023));
+      }
+
       [data-theme="light"] .facturas-chip--pending,
       [data-theme="light"] .facturas-chip--partial{
         color:var(--warning-hover, #9c6110);
@@ -2945,6 +3014,11 @@ function renderStyles() {
       }
 
       @media (max-width: 1180px){
+        :where(.facturas-view-root, [data-facturas-scope]){
+          --fac-table-min-width:1010px;
+          --fac-actions-width:170px;
+        }
+
         .facturas-hero{
           padding:var(--space-lg, 20px);
         }
@@ -2960,10 +3034,16 @@ function renderStyles() {
         .facturas-stats{
           grid-template-columns:repeat(2, minmax(0, 1fr));
         }
+
+        .facturas-actions{
+          grid-template-columns:repeat(2, minmax(72px, 1fr));
+        }
       }
 
       @media (max-width: 760px){
         :where(.facturas-view-root, [data-facturas-scope]){
+          --fac-table-min-width:980px;
+          --fac-actions-width:164px;
           gap:var(--space-md, 16px);
         }
 
@@ -3004,10 +3084,6 @@ function renderStyles() {
 
         .facturas-btn{
           flex:1 1 auto;
-        }
-
-        .facturas-table{
-          min-inline-size:1040px;
         }
       }
 
@@ -3265,12 +3341,12 @@ export function renderCards({ items = [], state = {}, includeStyles = false } = 
         <div class="facturas-table-shell">
           <table class="facturas-table" role="table" aria-label="Listado de facturas">
             <colgroup>
-              <col style="width:32%;">
+              <col style="width:33%;">
               <col style="width:10%;">
-              <col style="width:13%;">
+              <col style="width:14%;">
               <col style="width:12%;">
+              <col style="width:16%;">
               <col style="width:15%;">
-              <col style="width:18%;">
             </colgroup>
 
             <thead>
@@ -3304,7 +3380,7 @@ export function renderFacturasTemplate({ items = [], state = {} } = {}) {
 
   if (runtime.error && !rows.length) {
     return `
-      <section class="facturas-view-root">
+      <section class="facturas-view-root" data-facturas-scope="true">
         ${renderStyles()}
         ${renderErrorState(runtime.error, { includeStyles: false })}
       </section>
@@ -3318,7 +3394,7 @@ export function renderFacturasTemplate({ items = [], state = {} } = {}) {
   };
 
   return `
-    <section class="facturas-view-root">
+    <section class="facturas-view-root" data-facturas-scope="true">
       ${renderStyles()}
       ${renderHeader(data)}
       ${renderCards(data)}

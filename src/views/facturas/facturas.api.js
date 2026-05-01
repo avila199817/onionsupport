@@ -2,27 +2,22 @@
    Onion SPA - Facturas API
    Archivo: src/views/facturas/facturas.api.js
 
-   FULL PRODUCTION API · FACTURAS 10/10 · INCIDENCIA SAFE
-   PATCH · RELATION PRESERVE AFTER MODEL NORMALIZATION
+   EXTREME PRODUCTION API · FACTURAS 10/10
+   COSMOS ALIGNED · ROUTER ALIGNED · INCIDENCIA SAFE
+   PDF INLINE / DOWNLOAD · SEND · CREATE · STATS · HEALTH
 
    RESPONSABILIDADES:
-   - centralizar las llamadas HTTP del módulo de facturas
-   - exponer operaciones de listado, detalle, pdf y envío
-   - aislar la vista del acceso directo al apiClient
+   - centralizar llamadas HTTP del módulo de facturas
+   - alinear endpoints con /router/facturas/index.js
+   - exponer listado, detalle, stats, health, PDF, descarga, envío y CRUD base
+   - aislar la vista del acceso directo a AppCore.apiClient
    - reutilizar shared/api/collectionApi para mutaciones base
    - mantener endpoints y timeouts en un único punto
    - tolerar distintos shapes del cliente HTTP
-   - mantener surface pública estable y clara
-
-   HARDENING PRO:
-   - validación defensiva de ids y disposition
-   - helpers comunes para requests GET/POST
-   - endpoints centralizados y extensibles
-   - soporte inline / attachment robusto
-   - normalización delegada al model del dominio
-   - preservación explícita de ticket/incidencia tras normalizeFactura()
-   - compatibilidad con backends que devuelven facturas/factura
-   - integración limpia con AppCore.apiClient
+   - preservar ticket/incidencia tras normalizeFactura()
+   - soportar respuestas legacy + normalizadas v2/v3
+   - preparar PDF para clientes HTTP que devuelven blob, response, url o payload JSON
+   - mantener surface pública estable
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -37,22 +32,50 @@ export const FACTURAS_RESOURCE = "facturas";
 export const FACTURAS_ENDPOINT = "/api/facturas";
 
 export const FACTURAS_TIMEOUT = 15000;
-export const FACTURAS_SEND_TIMEOUT = 20000;
+export const FACTURAS_LIST_TIMEOUT = 18000;
+export const FACTURAS_DETAIL_TIMEOUT = 16000;
+export const FACTURAS_STATS_TIMEOUT = 18000;
+export const FACTURAS_PDF_TIMEOUT = 45000;
+export const FACTURAS_SEND_TIMEOUT = 30000;
+export const FACTURAS_CREATE_TIMEOUT = 45000;
 
 export const FACTURAS_DEFAULT_PAGE = 1;
-export const FACTURAS_DEFAULT_LIMIT = 20;
+export const FACTURAS_DEFAULT_LIMIT = 100;
+export const FACTURAS_MAX_LIMIT = 200;
 
 export const FACTURAS_DISPOSITIONS = Object.freeze({
   INLINE: "inline",
   ATTACHMENT: "attachment",
 });
 
+export const FACTURAS_PDF_MODES = Object.freeze({
+  INLINE: "inline",
+  VIEW: "view",
+  DOWNLOAD: "download",
+  ATTACHMENT: "attachment",
+});
+
 export const FACTURAS_ENDPOINTS = Object.freeze({
   collection: FACTURAS_ENDPOINT,
+
+  health: () => `${FACTURAS_ENDPOINT}/health`,
+  healthPing: () => `${FACTURAS_ENDPOINT}/health/ping`,
+  stats: () => `${FACTURAS_ENDPOINT}/stats`,
+
   detail: (id) => getFacturaEndpoint(id),
-  pdf: (id, disposition = FACTURAS_DISPOSITIONS.ATTACHMENT) =>
+
+  pdf: (id) => `${getFacturaEndpoint(id)}/pdf`,
+  view: (id) => `${getFacturaEndpoint(id)}/view`,
+  ver: (id) => `${getFacturaEndpoint(id)}/ver`,
+
+  descargar: (id) => `${getFacturaEndpoint(id)}/descargar`,
+  download: (id) => `${getFacturaEndpoint(id)}/download`,
+
+  pdfByDisposition: (id, disposition = FACTURAS_DISPOSITIONS.ATTACHMENT) =>
     buildFacturaPdfEndpoint(id, disposition),
+
   send: (id) => `${getFacturaEndpoint(id)}/enviar`,
+  sendAlias: (id) => `${getFacturaEndpoint(id)}/send`,
 });
 
 /* =========================================================
@@ -60,15 +83,35 @@ export const FACTURAS_ENDPOINTS = Object.freeze({
 ========================================================= */
 
 function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
   const text = String(value).trim();
   return text || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback;
+
+  if (typeof value === "string") {
+    let text = value
+      .trim()
+      .replace(/€/g, "")
+      .replace(/%/g, "")
+      .replace(/\s+/g, "");
+
+    const hasComma = text.includes(",");
+    const hasDot = text.includes(".");
+
+    if (hasComma && hasDot) {
+      text = text.replace(/\./g, "").replace(/,/g, ".");
+    } else if (hasComma) {
+      text = text.replace(/,/g, ".");
+    }
+
+    const parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
@@ -109,15 +152,8 @@ function safeObject(value, fallback = {}) {
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
-
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
-
-    if (Array.isArray(value) && value.length === 0) {
-      continue;
-    }
-
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
     return value;
   }
 
@@ -133,6 +169,21 @@ function isNonEmptyObject(value) {
   );
 }
 
+function normalizeText(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeKey(value = "") {
+  return normalizeText(value)
+    .replace(/[^\w]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
 function normalizeQueryValue(value) {
   if (value === undefined || value === null) return "";
 
@@ -140,7 +191,16 @@ function normalizeQueryValue(value) {
     return value ? "true" : "false";
   }
 
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "";
+  }
+
   return String(value).trim();
+}
+
+function round2(value = 0) {
+  const n = safeNumber(value, 0);
+  return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
 /* =========================================================
@@ -168,11 +228,27 @@ function pickTicketIdFromArray(value = []) {
       item.relatedTicketId,
       item.relatedIncidentId,
       item.supportTicketId,
-      item.caseId
+      item.caseId,
+
+      item.ticket?.ticketId,
+      item.ticket?.incidenciaId,
+      item.ticket?.id,
+
+      item.incidencia?.ticketId,
+      item.incidencia?.incidenciaId,
+      item.incidencia?.id,
+
+      item.linkedTicket?.ticketId,
+      item.linkedTicket?.incidenciaId,
+      item.linkedTicket?.id,
+
+      item.relations?.ticket?.ticketId,
+      item.relations?.ticket?.incidenciaId,
+      item.relations?.ticket?.id
     );
 
     if (candidate) {
-      return candidate;
+      return safeText(candidate, "");
     }
   }
 
@@ -200,10 +276,21 @@ function getIncidenciaIdFromFactura(item = {}) {
       factura.linkedTicket?.ticketId,
       factura.linkedTicket?.incidenciaId,
 
+      factura.relatedTicket?.id,
+      factura.relatedTicket?.ticketId,
+      factura.relatedTicket?.incidenciaId,
+
       factura.relatedTicketId,
       factura.relatedIncidentId,
       factura.supportTicketId,
       factura.caseId,
+
+      factura.relations?.ticket?.id,
+      factura.relations?.ticket?.ticketId,
+      factura.relations?.ticket?.incidenciaId,
+      factura.relations?.incidencia?.id,
+      factura.relations?.incidencia?.ticketId,
+      factura.relations?.incidencia?.incidenciaId,
 
       factura.meta?.ticketId,
       factura.meta?.incidenciaId,
@@ -218,6 +305,8 @@ function getIncidenciaIdFromFactura(item = {}) {
       pickTicketIdFromArray(factura.relatedTickets),
       pickTicketIdFromArray(factura.facturasRelacionadas),
       pickTicketIdFromArray(factura.linkedInvoices?.tickets),
+      pickTicketIdFromArray(factura.invoiceLinks),
+      pickTicketIdFromArray(factura.invoiceRelations),
       pickTicketIdFromArray(factura.relations),
 
       raw.ticketId,
@@ -235,10 +324,21 @@ function getIncidenciaIdFromFactura(item = {}) {
       raw.linkedTicket?.ticketId,
       raw.linkedTicket?.incidenciaId,
 
+      raw.relatedTicket?.id,
+      raw.relatedTicket?.ticketId,
+      raw.relatedTicket?.incidenciaId,
+
       raw.relatedTicketId,
       raw.relatedIncidentId,
       raw.supportTicketId,
       raw.caseId,
+
+      raw.relations?.ticket?.id,
+      raw.relations?.ticket?.ticketId,
+      raw.relations?.ticket?.incidenciaId,
+      raw.relations?.incidencia?.id,
+      raw.relations?.incidencia?.ticketId,
+      raw.relations?.incidencia?.incidenciaId,
 
       raw.meta?.ticketId,
       raw.meta?.incidenciaId,
@@ -253,6 +353,8 @@ function getIncidenciaIdFromFactura(item = {}) {
       pickTicketIdFromArray(raw.relatedTickets),
       pickTicketIdFromArray(raw.facturasRelacionadas),
       pickTicketIdFromArray(raw.linkedInvoices?.tickets),
+      pickTicketIdFromArray(raw.invoiceLinks),
+      pickTicketIdFromArray(raw.invoiceRelations),
       pickTicketIdFromArray(raw.relations)
     ),
     ""
@@ -267,10 +369,16 @@ function getRelationObjectFromFactura(item = {}) {
     factura.incidencia,
     factura.ticket,
     factura.linkedTicket,
+    factura.relatedTicket,
+    factura.relations?.ticket,
+    factura.relations?.incidencia,
 
     raw.incidencia,
     raw.ticket,
-    raw.linkedTicket
+    raw.linkedTicket,
+    raw.relatedTicket,
+    raw.relations?.ticket,
+    raw.relations?.incidencia
   );
 
   return isNonEmptyObject(candidate) ? safeObject(candidate) : null;
@@ -295,54 +403,53 @@ function buildIncidenciaPayload(item = {}, incidenciaId = "") {
     ""
   );
 
-  if (!finalId) {
-    return null;
-  }
+  if (!finalId) return null;
+
+  const subject = safeText(
+    first(
+      relation.subject,
+      relation.asunto,
+      relation.title,
+
+      factura.incidencia?.subject,
+      factura.incidencia?.asunto,
+      factura.incidencia?.title,
+
+      factura.ticket?.subject,
+      factura.ticket?.asunto,
+      factura.ticket?.title,
+
+      raw.incidencia?.subject,
+      raw.incidencia?.asunto,
+      raw.incidencia?.title,
+
+      raw.ticket?.subject,
+      raw.ticket?.asunto,
+      raw.ticket?.title
+    ),
+    ""
+  );
 
   return {
+    ...relation,
+
     id: finalId,
     ticketId: finalId,
     incidenciaId: finalId,
 
-    subject: safeText(
-      first(
-        relation.subject,
-        relation.asunto,
-        factura.incidencia?.subject,
-        factura.incidencia?.asunto,
-        factura.ticket?.subject,
-        factura.ticket?.asunto,
-        raw.incidencia?.subject,
-        raw.incidencia?.asunto,
-        raw.ticket?.subject,
-        raw.ticket?.asunto
-      ),
-      ""
-    ),
-
-    asunto: safeText(
-      first(
-        relation.asunto,
-        relation.subject,
-        factura.incidencia?.asunto,
-        factura.incidencia?.subject,
-        factura.ticket?.asunto,
-        factura.ticket?.subject,
-        raw.incidencia?.asunto,
-        raw.incidencia?.subject,
-        raw.ticket?.asunto,
-        raw.ticket?.subject
-      ),
-      ""
-    ),
+    subject,
+    asunto: safeText(first(relation.asunto, subject), subject),
+    title: safeText(first(relation.title, subject), subject),
 
     clienteId: safeText(
       first(
         relation.clienteId,
         factura.clienteId,
         factura.cliente?.id,
+        factura.cliente?.clienteId,
         raw.clienteId,
-        raw.cliente?.id
+        raw.cliente?.id,
+        raw.cliente?.clienteId
       ),
       ""
     ),
@@ -353,9 +460,13 @@ function buildIncidenciaPayload(item = {}, incidenciaId = "") {
         factura.clienteNombre,
         factura.cliente?.nombre,
         factura.cliente?.nombreContacto,
+        factura.cliente?.name,
+        factura.cliente?.razonSocial,
         raw.clienteNombre,
         raw.cliente?.nombre,
-        raw.cliente?.nombreContacto
+        raw.cliente?.nombreContacto,
+        raw.cliente?.name,
+        raw.cliente?.razonSocial
       ),
       ""
     ),
@@ -375,6 +486,8 @@ function buildIncidenciaPayload(item = {}, incidenciaId = "") {
         relation.linkedAt,
         factura.linkedAt,
         raw.linkedAt,
+        factura.ticketLinkAudit?.linkedAt,
+        raw.ticketLinkAudit?.linkedAt,
         factura.updatedAt,
         raw.updatedAt
       ),
@@ -386,6 +499,8 @@ function buildIncidenciaPayload(item = {}, incidenciaId = "") {
         relation.linkedAtES,
         factura.linkedAtES,
         raw.linkedAtES,
+        factura.ticketLinkAudit?.linkedAtES,
+        raw.ticketLinkAudit?.linkedAtES,
         factura.updatedAtES,
         raw.updatedAtES
       ),
@@ -401,51 +516,72 @@ function mergeIncidenciaIntoRaw(raw = {}, incidenciaId = "", incidenciaPayload =
     return base;
   }
 
+  const payload = safeObject(incidenciaPayload, {
+    id: incidenciaId,
+    ticketId: incidenciaId,
+    incidenciaId,
+  });
+
   return {
     ...base,
 
     ticketId: safeText(first(base.ticketId, incidenciaId), incidenciaId),
     incidenciaId: safeText(first(base.incidenciaId, incidenciaId), incidenciaId),
-    relatedTicketId: safeText(
-      first(base.relatedTicketId, incidenciaId),
-      incidenciaId
-    ),
-    relatedIncidentId: safeText(
-      first(base.relatedIncidentId, incidenciaId),
-      incidenciaId
-    ),
+    relatedTicketId: safeText(first(base.relatedTicketId, incidenciaId), incidenciaId),
+    relatedIncidentId: safeText(first(base.relatedIncidentId, incidenciaId), incidenciaId),
+    supportTicketId: safeText(first(base.supportTicketId, incidenciaId), incidenciaId),
+    caseId: safeText(first(base.caseId, incidenciaId), incidenciaId),
 
     incidencia: isNonEmptyObject(base.incidencia)
       ? {
-          ...incidenciaPayload,
+          ...payload,
           ...base.incidencia,
           id: safeText(first(base.incidencia?.id, incidenciaId), incidenciaId),
-          ticketId: safeText(
-            first(base.incidencia?.ticketId, incidenciaId),
-            incidenciaId
-          ),
-          incidenciaId: safeText(
-            first(base.incidencia?.incidenciaId, incidenciaId),
-            incidenciaId
-          ),
+          ticketId: safeText(first(base.incidencia?.ticketId, incidenciaId), incidenciaId),
+          incidenciaId: safeText(first(base.incidencia?.incidenciaId, incidenciaId), incidenciaId),
         }
-      : incidenciaPayload,
+      : payload,
 
     ticket: isNonEmptyObject(base.ticket)
       ? {
-          ...incidenciaPayload,
+          ...payload,
           ...base.ticket,
           id: safeText(first(base.ticket?.id, incidenciaId), incidenciaId),
-          ticketId: safeText(
-            first(base.ticket?.ticketId, incidenciaId),
-            incidenciaId
-          ),
-          incidenciaId: safeText(
-            first(base.ticket?.incidenciaId, incidenciaId),
-            incidenciaId
-          ),
+          ticketId: safeText(first(base.ticket?.ticketId, incidenciaId), incidenciaId),
+          incidenciaId: safeText(first(base.ticket?.incidenciaId, incidenciaId), incidenciaId),
         }
-      : incidenciaPayload,
+      : payload,
+
+    linkedTicket: isNonEmptyObject(base.linkedTicket)
+      ? {
+          ...payload,
+          ...base.linkedTicket,
+          id: safeText(first(base.linkedTicket?.id, incidenciaId), incidenciaId),
+          ticketId: safeText(first(base.linkedTicket?.ticketId, incidenciaId), incidenciaId),
+          incidenciaId: safeText(first(base.linkedTicket?.incidenciaId, incidenciaId), incidenciaId),
+        }
+      : payload,
+
+    relations: {
+      ...safeObject(base.relations),
+      ticket: {
+        ...payload,
+        ...safeObject(base.relations?.ticket),
+        id: safeText(first(base.relations?.ticket?.id, incidenciaId), incidenciaId),
+        ticketId: safeText(first(base.relations?.ticket?.ticketId, incidenciaId), incidenciaId),
+        incidenciaId: safeText(
+          first(base.relations?.ticket?.incidenciaId, incidenciaId),
+          incidenciaId
+        ),
+      },
+    },
+
+    meta: {
+      ...safeObject(base.meta),
+      hasIncidencia: true,
+      incidenciaId,
+      ticketId: incidenciaId,
+    },
   };
 }
 
@@ -458,7 +594,12 @@ function normalizeFacturaSafe(source = {}) {
   try {
     normalized = normalizeFactura(original);
   } catch (error) {
-    console.error("❌ FACTURAS NORMALIZE ERROR:", error);
+    console.error("❌ FACTURAS NORMALIZE ERROR:", {
+      message: error?.message || "UNKNOWN_ERROR",
+      stack: error?.stack || null,
+      source: original,
+    });
+
     normalized = original;
   }
 
@@ -473,18 +614,17 @@ function normalizeFacturaSafe(source = {}) {
     ""
   );
 
-  const incidenciaPayload = buildIncidenciaPayload(
-    {
+  const incidenceSource = {
+    ...originalRaw,
+    ...original,
+    ...model,
+    raw: {
       ...originalRaw,
-      ...original,
-      ...model,
-      raw: {
-        ...originalRaw,
-        ...safeObject(model.raw),
-      },
+      ...safeObject(model.raw),
     },
-    incidenciaId
-  );
+  };
+
+  const incidenciaPayload = buildIncidenciaPayload(incidenceSource, incidenciaId);
 
   const mergedRaw = mergeIncidenciaIntoRaw(
     {
@@ -519,54 +659,86 @@ function normalizeFacturaSafe(source = {}) {
     };
   }
 
+  const payload = safeObject(incidenciaPayload, {
+    id: incidenciaId,
+    ticketId: incidenciaId,
+    incidenciaId,
+  });
+
   return {
     ...model,
 
     ticketId: safeText(first(model.ticketId, incidenciaId), incidenciaId),
     incidenciaId: safeText(first(model.incidenciaId, incidenciaId), incidenciaId),
-    relatedTicketId: safeText(
-      first(model.relatedTicketId, incidenciaId),
-      incidenciaId
-    ),
-    relatedIncidentId: safeText(
-      first(model.relatedIncidentId, incidenciaId),
-      incidenciaId
-    ),
+    relatedTicketId: safeText(first(model.relatedTicketId, incidenciaId), incidenciaId),
+    relatedIncidentId: safeText(first(model.relatedIncidentId, incidenciaId), incidenciaId),
+    supportTicketId: safeText(first(model.supportTicketId, incidenciaId), incidenciaId),
+    caseId: safeText(first(model.caseId, incidenciaId), incidenciaId),
 
     incidencia: isNonEmptyObject(model.incidencia)
       ? {
-          ...incidenciaPayload,
+          ...payload,
           ...model.incidencia,
           id: safeText(first(model.incidencia?.id, incidenciaId), incidenciaId),
-          ticketId: safeText(
-            first(model.incidencia?.ticketId, incidenciaId),
-            incidenciaId
-          ),
+          ticketId: safeText(first(model.incidencia?.ticketId, incidenciaId), incidenciaId),
           incidenciaId: safeText(
             first(model.incidencia?.incidenciaId, incidenciaId),
             incidenciaId
           ),
         }
-      : incidenciaPayload,
+      : payload,
 
     ticket: isNonEmptyObject(model.ticket)
       ? {
-          ...incidenciaPayload,
+          ...payload,
           ...model.ticket,
           id: safeText(first(model.ticket?.id, incidenciaId), incidenciaId),
+          ticketId: safeText(first(model.ticket?.ticketId, incidenciaId), incidenciaId),
+          incidenciaId: safeText(first(model.ticket?.incidenciaId, incidenciaId), incidenciaId),
+        }
+      : payload,
+
+    linkedTicket: isNonEmptyObject(model.linkedTicket)
+      ? {
+          ...payload,
+          ...model.linkedTicket,
+          id: safeText(first(model.linkedTicket?.id, incidenciaId), incidenciaId),
           ticketId: safeText(
-            first(model.ticket?.ticketId, incidenciaId),
+            first(model.linkedTicket?.ticketId, incidenciaId),
             incidenciaId
           ),
           incidenciaId: safeText(
-            first(model.ticket?.incidenciaId, incidenciaId),
+            first(model.linkedTicket?.incidenciaId, incidenciaId),
             incidenciaId
           ),
         }
-      : incidenciaPayload,
+      : payload,
+
+    relations: {
+      ...safeObject(model.relations),
+      ticket: {
+        ...payload,
+        ...safeObject(model.relations?.ticket),
+        id: safeText(first(model.relations?.ticket?.id, incidenciaId), incidenciaId),
+        ticketId: safeText(
+          first(model.relations?.ticket?.ticketId, incidenciaId),
+          incidenciaId
+        ),
+        incidenciaId: safeText(
+          first(model.relations?.ticket?.incidenciaId, incidenciaId),
+          incidenciaId
+        ),
+      },
+    },
 
     relationType: safeText(
-      first(model.relationType, original.relationType, originalRaw.relationType, "linked_ticket"),
+      first(
+        model.relationType,
+        original.relationType,
+        originalRaw.relationType,
+        payload.relationType,
+        "linked_ticket"
+      ),
       "linked_ticket"
     ),
 
@@ -583,7 +755,7 @@ function getPayloadCandidates(payload = null) {
   const obj = safeObject(payload, null);
 
   if (!obj) {
-    return [payload];
+    return [payload].filter((item) => item !== undefined && item !== null);
   }
 
   return [
@@ -594,17 +766,21 @@ function getPayloadCandidates(payload = null) {
     obj.result,
     obj.payload,
     obj.response,
+    obj.resource,
 
     obj.data?.data,
     obj.data?.body,
     obj.data?.result,
     obj.data?.payload,
+    obj.data?.resource,
 
     obj.result?.data,
     obj.result?.payload,
+    obj.result?.resource,
 
     obj.payload?.data,
     obj.payload?.result,
+    obj.payload?.resource,
   ].filter((item) => item !== undefined && item !== null);
 }
 
@@ -675,29 +851,35 @@ function extractFacturasTotal(payload = null, fallback = 0) {
       obj.total,
       obj.count,
       obj.remoteCount,
+      obj.totalMatched,
 
       obj.meta?.total,
       obj.meta?.count,
       obj.meta?.remoteCount,
+      obj.meta?.totalMatched,
 
       obj.pagination?.total,
       obj.pagination?.count,
       obj.pagination?.totalItems,
+      obj.pagination?.totalMatched,
 
       obj.data?.total,
       obj.data?.count,
       obj.data?.remoteCount,
+      obj.data?.totalMatched,
 
       obj.result?.total,
       obj.result?.count,
       obj.result?.remoteCount,
+      obj.result?.totalMatched,
 
       obj.payload?.total,
       obj.payload?.count,
-      obj.payload?.remoteCount
+      obj.payload?.remoteCount,
+      obj.payload?.totalMatched
     );
 
-    if (total !== null) {
+    if (total !== null && total !== undefined) {
       return safeNumber(total, fallback);
     }
   }
@@ -711,37 +893,37 @@ function extractFacturaDetail(payload = null) {
   for (const candidate of candidates) {
     const obj = safeObject(candidate, null);
 
-    if (!obj) {
-      continue;
-    }
+    if (!obj) continue;
 
     const detail = first(
       obj.factura,
       obj.item,
       obj.record,
+      obj.invoice,
 
       obj.data?.factura,
       obj.data?.item,
       obj.data?.record,
+      obj.data?.invoice,
 
       obj.result?.factura,
       obj.result?.item,
       obj.result?.record,
+      obj.result?.invoice,
 
       obj.payload?.factura,
       obj.payload?.item,
-      obj.payload?.record
+      obj.payload?.record,
+      obj.payload?.invoice
     );
 
-    if (detail) {
-      return detail;
-    }
+    if (detail) return detail;
   }
 
   const obj = safeObject(payload, null);
 
   if (obj && !Array.isArray(obj)) {
-    return first(obj.data, obj.result, obj.payload, obj);
+    return first(obj.data, obj.result, obj.payload, obj.resource, obj);
   }
 
   return payload || null;
@@ -773,10 +955,14 @@ function extractMeta(payload = null) {
     const meta = first(
       obj.meta,
       obj.pagination,
+      obj.filters,
+
       obj.data?.meta,
       obj.data?.pagination,
+
       obj.result?.meta,
       obj.result?.pagination,
+
       obj.payload?.meta,
       obj.payload?.pagination
     );
@@ -787,6 +973,54 @@ function extractMeta(payload = null) {
   }
 
   return {};
+}
+
+function extractStats(payload = null) {
+  const candidates = getPayloadCandidates(payload);
+
+  for (const candidate of candidates) {
+    const obj = safeObject(candidate, null);
+
+    if (!obj) continue;
+
+    const stats = first(
+      obj.stats,
+      obj.data?.stats,
+      obj.result?.stats,
+      obj.payload?.stats
+    );
+
+    if (isNonEmptyObject(stats)) {
+      return safeObject(stats);
+    }
+  }
+
+  return {};
+}
+
+function extractRequestId(payload = null) {
+  const candidates = getPayloadCandidates(payload);
+
+  for (const candidate of candidates) {
+    const obj = safeObject(candidate, null);
+
+    if (!obj) continue;
+
+    const requestId = safeText(
+      first(
+        obj.requestId,
+        obj.data?.requestId,
+        obj.result?.requestId,
+        obj.payload?.requestId,
+        obj.meta?.requestId
+      ),
+      ""
+    );
+
+    if (requestId) return requestId;
+  }
+
+  return "";
 }
 
 /* =========================================================
@@ -841,12 +1075,16 @@ export function getFacturaEndpoint(id = "") {
 }
 
 export function normalizeFacturaPdfDisposition(disposition = "") {
-  const value = safeText(
-    disposition,
-    FACTURAS_DISPOSITIONS.ATTACHMENT
-  ).toLowerCase();
+  const value = normalizeKey(
+    safeText(disposition, FACTURAS_DISPOSITIONS.ATTACHMENT)
+  );
 
-  if (value === FACTURAS_DISPOSITIONS.INLINE) {
+  if (
+    value === FACTURAS_DISPOSITIONS.INLINE ||
+    value === FACTURAS_PDF_MODES.INLINE ||
+    value === FACTURAS_PDF_MODES.VIEW ||
+    value === "ver"
+  ) {
     return FACTURAS_DISPOSITIONS.INLINE;
   }
 
@@ -867,18 +1105,58 @@ export function buildFacturaPdfEndpoint(
   return `${getFacturaEndpoint(facturaId)}/descargar?disposition=attachment`;
 }
 
+export function buildFacturaPdfViewEndpoint(id = "") {
+  return `${getFacturaEndpoint(id)}/pdf?disposition=inline`;
+}
+
+export function buildFacturaDownloadEndpoint(id = "") {
+  return `${getFacturaEndpoint(id)}/descargar?disposition=attachment`;
+}
+
+function appendParam(params, name, value) {
+  const key = safeText(name, "");
+  if (!key) return;
+
+  if (Array.isArray(value)) {
+    const cleanValues = value
+      .map((item) => normalizeQueryValue(item))
+      .filter(Boolean);
+
+    if (cleanValues.length) {
+      params.set(key, cleanValues.join(","));
+    }
+
+    return;
+  }
+
+  const normalizedValue = normalizeQueryValue(value);
+
+  if (normalizedValue) {
+    params.set(key, normalizedValue);
+  }
+}
+
 export function buildFacturasListEndpoint({
   page = FACTURAS_DEFAULT_PAGE,
   limit = FACTURAS_DEFAULT_LIMIT,
+
   search = "",
+  q = "",
+
+  sort = "",
+  direction = "",
   sortBy = "",
   sortDir = "",
+
   filters = {},
 } = {}) {
   const params = new URLSearchParams();
 
   const finalPage = Math.max(1, safeNumber(page, FACTURAS_DEFAULT_PAGE));
-  const finalLimit = Math.max(1, safeNumber(limit, FACTURAS_DEFAULT_LIMIT));
+  const finalLimit = Math.min(
+    Math.max(1, safeNumber(limit, FACTURAS_DEFAULT_LIMIT)),
+    FACTURAS_MAX_LIMIT
+  );
 
   if (finalPage !== FACTURAS_DEFAULT_PAGE) {
     params.set("page", String(finalPage));
@@ -888,46 +1166,50 @@ export function buildFacturasListEndpoint({
     params.set("limit", String(finalLimit));
   }
 
-  const finalSearch = safeText(search, "");
+  const finalSearch = safeText(first(search, q), "");
 
   if (finalSearch) {
+    params.set("q", finalSearch);
     params.set("search", finalSearch);
   }
 
-  const finalSortBy = safeText(sortBy, "");
-  const finalSortDir = safeText(sortDir, "");
+  const finalSort = safeText(first(sort, sortBy), "");
+  const finalDirection = safeText(first(direction, sortDir), "");
 
-  if (finalSortBy) {
-    params.set("sortBy", finalSortBy);
+  if (finalSort) {
+    params.set("sort", finalSort);
+    params.set("sortBy", finalSort);
   }
 
-  if (finalSortDir) {
-    params.set("sortDir", finalSortDir);
+  if (finalDirection) {
+    params.set("direction", finalDirection);
+    params.set("sortDir", finalDirection);
   }
 
   const finalFilters = safeObject(filters);
 
-  for (const [key, value] of Object.entries(finalFilters)) {
-    const name = safeText(key, "");
+  const aliases = {
+    paymentStatus: "estadoPago",
+    status: "estado",
+    incidenciaId: "ticketId",
+    relatedTicketId: "ticketId",
+    relatedIncidentId: "ticketId",
+    month: "mes",
+    fechaDesde: "from",
+    fechaHasta: "to",
+    hasIncidencia: "withIncidencia",
+    hasPdf: "withPdf",
+  };
 
-    if (!name) continue;
+  for (const [rawKey, value] of Object.entries(finalFilters)) {
+    const key = safeText(rawKey, "");
+    if (!key) continue;
 
-    if (Array.isArray(value)) {
-      const cleanValues = value
-        .map((item) => normalizeQueryValue(item))
-        .filter(Boolean);
+    appendParam(params, key, value);
 
-      if (cleanValues.length) {
-        params.set(name, cleanValues.join(","));
-      }
-
-      continue;
-    }
-
-    const normalizedValue = normalizeQueryValue(value);
-
-    if (normalizedValue) {
-      params.set(name, normalizedValue);
+    const alias = aliases[key];
+    if (alias) {
+      appendParam(params, alias, value);
     }
   }
 
@@ -958,9 +1240,19 @@ function buildRequestOptions({
 
 async function apiGet(endpoint = "", options = {}) {
   const client = getApiClient();
-  const request = assertMethod(client, "get");
 
-  return request(endpoint, buildRequestOptions(options));
+  if (typeof client?.get === "function") {
+    return client.get(endpoint, buildRequestOptions(options));
+  }
+
+  if (typeof client?.request === "function") {
+    return client.request(endpoint, {
+      method: "GET",
+      ...buildRequestOptions(options),
+    });
+  }
+
+  throw new Error("FACTURAS_API_METHOD_UNAVAILABLE:get");
 }
 
 async function apiPost(endpoint = "", body = {}, options = {}) {
@@ -979,6 +1271,63 @@ async function apiPost(endpoint = "", body = {}, options = {}) {
   }
 
   throw new Error("FACTURAS_API_METHOD_UNAVAILABLE:post");
+}
+
+async function apiPut(endpoint = "", body = {}, options = {}) {
+  const client = getApiClient();
+
+  if (typeof client?.put === "function") {
+    return client.put(endpoint, body, buildRequestOptions(options));
+  }
+
+  if (typeof client?.request === "function") {
+    return client.request(endpoint, {
+      method: "PUT",
+      body,
+      ...buildRequestOptions(options),
+    });
+  }
+
+  throw new Error("FACTURAS_API_METHOD_UNAVAILABLE:put");
+}
+
+async function apiPatch(endpoint = "", body = {}, options = {}) {
+  const client = getApiClient();
+
+  if (typeof client?.patch === "function") {
+    return client.patch(endpoint, body, buildRequestOptions(options));
+  }
+
+  if (typeof client?.request === "function") {
+    return client.request(endpoint, {
+      method: "PATCH",
+      body,
+      ...buildRequestOptions(options),
+    });
+  }
+
+  throw new Error("FACTURAS_API_METHOD_UNAVAILABLE:patch");
+}
+
+async function apiDelete(endpoint = "", options = {}) {
+  const client = getApiClient();
+
+  if (typeof client?.delete === "function") {
+    return client.delete(endpoint, buildRequestOptions(options));
+  }
+
+  if (typeof client?.remove === "function") {
+    return client.remove(endpoint, buildRequestOptions(options));
+  }
+
+  if (typeof client?.request === "function") {
+    return client.request(endpoint, {
+      method: "DELETE",
+      ...buildRequestOptions(options),
+    });
+  }
+
+  throw new Error("FACTURAS_API_METHOD_UNAVAILABLE:delete");
 }
 
 /* =========================================================
@@ -1016,15 +1365,20 @@ export function normalizeFacturasListResponse(payload = null, requestMeta = {}) 
   );
 
   const ok = extractOk(payload, true);
+  const requestId = extractRequestId(payload);
 
   return {
     ok,
+    requestId,
+
     items,
     facturas: items,
+    data: items,
 
     total,
     count: items.length,
     remoteCount: total,
+    totalMatched: safeNumber(first(meta.totalMatched, total), total),
 
     page,
     limit,
@@ -1033,8 +1387,14 @@ export function normalizeFacturasListResponse(payload = null, requestMeta = {}) 
     isEmpty: items.length === 0,
 
     raw: payload,
+
+    filters: safeObject(first(payload?.filters, payload?.data?.filters, {})),
+
+    stats: safeObject(first(payload?.stats, payload?.data?.stats, {})),
+
     meta: {
       ...meta,
+      requestId,
       total,
       count: items.length,
       remoteCount: total,
@@ -1050,10 +1410,181 @@ export function normalizeFacturaDetailResponse(payload = null) {
 
   return {
     ok: extractOk(payload, Boolean(item)),
+    requestId: extractRequestId(payload),
     item,
     factura: item,
+    data: item,
     raw: payload,
     meta: extractMeta(payload),
+  };
+}
+
+export function normalizeFacturasStatsResponse(payload = null) {
+  const stats = extractStats(payload);
+
+  return {
+    ok: extractOk(payload, true),
+    requestId: extractRequestId(payload),
+    stats,
+    raw: payload,
+    meta: extractMeta(payload),
+  };
+}
+
+export function normalizeFacturasHealthResponse(payload = null) {
+  const obj = safeObject(extractFacturaDetail(payload), safeObject(payload));
+
+  return {
+    ok: extractOk(payload, true),
+    requestId: extractRequestId(payload),
+    health: obj,
+    raw: payload,
+    meta: extractMeta(payload),
+  };
+}
+
+export function normalizeFacturaSendResponse(payload = null) {
+  const obj = safeObject(extractFacturaDetail(payload), safeObject(payload));
+  const factura = first(obj.factura, obj.data?.factura, obj.result?.factura);
+
+  return {
+    ok: extractOk(payload, true),
+    requestId: extractRequestId(payload),
+
+    sent: safeObject(first(obj.sent, obj.data?.sent, obj.result?.sent), null),
+    factura: factura ? normalizeFacturaSafe(factura) : null,
+
+    message: safeText(
+      first(obj.message, obj.data?.message, obj.result?.message),
+      "Factura enviada correctamente."
+    ),
+
+    raw: payload,
+    meta: extractMeta(payload),
+  };
+}
+
+/* =========================================================
+   PDF HELPERS
+========================================================= */
+
+function isBlobLike(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof value.size === "number" &&
+      typeof value.type === "string"
+  );
+}
+
+function isArrayBufferLike(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof value.byteLength === "number" &&
+      typeof value.slice === "function"
+  );
+}
+
+function extractBlobFromResponse(response = null) {
+  if (!response) return null;
+
+  if (isBlobLike(response)) return response;
+  if (isBlobLike(response.data)) return response.data;
+  if (isBlobLike(response.body)) return response.body;
+  if (isBlobLike(response.result)) return response.result;
+  if (isBlobLike(response.payload)) return response.payload;
+
+  if (isArrayBufferLike(response)) {
+    return new Blob([response], { type: "application/pdf" });
+  }
+
+  if (isArrayBufferLike(response.data)) {
+    return new Blob([response.data], { type: "application/pdf" });
+  }
+
+  if (isArrayBufferLike(response.body)) {
+    return new Blob([response.body], { type: "application/pdf" });
+  }
+
+  return null;
+}
+
+export function resolveFacturaPdfUrl(response = null) {
+  if (typeof response === "string") {
+    return response;
+  }
+
+  const candidates = getPayloadCandidates(response);
+
+  for (const candidate of candidates) {
+    const obj = safeObject(candidate, null);
+
+    if (!obj) continue;
+
+    const url = safeText(
+      first(
+        obj?.file?.url,
+        obj?.url,
+        obj?.downloadUrl,
+        obj?.viewUrl,
+        obj?.pdfUrl,
+        obj?.publicUrl,
+
+        obj?.data?.file?.url,
+        obj?.data?.url,
+        obj?.data?.downloadUrl,
+        obj?.data?.viewUrl,
+        obj?.data?.pdfUrl,
+        obj?.data?.publicUrl,
+
+        obj?.result?.file?.url,
+        obj?.result?.url,
+        obj?.result?.downloadUrl,
+        obj?.result?.viewUrl,
+        obj?.result?.pdfUrl,
+        obj?.result?.publicUrl,
+
+        obj?.payload?.file?.url,
+        obj?.payload?.url,
+        obj?.payload?.downloadUrl,
+        obj?.payload?.viewUrl,
+        obj?.payload?.pdfUrl,
+        obj?.payload?.publicUrl
+      ),
+      ""
+    );
+
+    if (url) return url;
+  }
+
+  return "";
+}
+
+export function createObjectUrlFromPdfResponse(response = null) {
+  const blob = extractBlobFromResponse(response);
+
+  if (!blob) return "";
+
+  try {
+    return URL.createObjectURL(blob);
+  } catch {
+    return "";
+  }
+}
+
+export function normalizeFacturaPdfResponse(response = null, fallbackUrl = "") {
+  const explicitUrl = resolveFacturaPdfUrl(response);
+  const objectUrl = explicitUrl ? "" : createObjectUrlFromPdfResponse(response);
+  const blob = extractBlobFromResponse(response);
+
+  return {
+    ok: true,
+    url: explicitUrl || objectUrl || fallbackUrl || "",
+    objectUrl,
+    blob,
+    raw: response,
+    meta: extractMeta(response),
   };
 }
 
@@ -1086,28 +1617,28 @@ const baseCollectionApi = createCollectionApi(FACTURAS_RESOURCE, {
   listQueryConfig: {
     pageParam: "page",
     limitParam: "limit",
-    searchParam: "search",
-    sortByParam: "sortBy",
-    sortDirParam: "sortDir",
+    searchParam: "q",
+    sortByParam: "sort",
+    sortDirParam: "direction",
     defaultPage: FACTURAS_DEFAULT_PAGE,
     defaultLimit: FACTURAS_DEFAULT_LIMIT,
     includeDefaults: false,
   },
 
   buildListOptions: ({ requestOptions }) => ({
-    timeout: FACTURAS_TIMEOUT,
+    timeout: FACTURAS_LIST_TIMEOUT,
     auth: true,
     ...safeObject(requestOptions),
   }),
 
   buildDetailOptions: ({ requestOptions }) => ({
-    timeout: FACTURAS_TIMEOUT,
+    timeout: FACTURAS_DETAIL_TIMEOUT,
     auth: true,
     ...safeObject(requestOptions),
   }),
 
   buildCreateOptions: ({ requestOptions }) => ({
-    timeout: FACTURAS_TIMEOUT,
+    timeout: FACTURAS_CREATE_TIMEOUT,
     auth: true,
     ...safeObject(requestOptions),
   }),
@@ -1135,13 +1666,39 @@ const baseCollectionApi = createCollectionApi(FACTURAS_RESOURCE, {
    PUBLIC REQUESTS
 ========================================================= */
 
+export async function fetchFacturasHealthRequest(requestOptions = {}) {
+  const response = await apiGet(FACTURAS_ENDPOINTS.health(), {
+    timeout: FACTURAS_TIMEOUT,
+    auth: true,
+    ...safeObject(requestOptions),
+  });
+
+  return normalizeFacturasHealthResponse(response);
+}
+
+export async function fetchFacturasStatsRequest(requestOptions = {}) {
+  const response = await apiGet(FACTURAS_ENDPOINTS.stats(), {
+    timeout: FACTURAS_STATS_TIMEOUT,
+    auth: true,
+    ...safeObject(requestOptions),
+  });
+
+  return normalizeFacturasStatsResponse(response);
+}
+
 export async function fetchFacturasRequest(
   {
     page = FACTURAS_DEFAULT_PAGE,
     limit = FACTURAS_DEFAULT_LIMIT,
+
     search = "",
+    q = "",
+
+    sort = "recent",
+    direction = "desc",
     sortBy = "",
     sortDir = "",
+
     filters = {},
   } = {},
   requestOptions = {}
@@ -1150,13 +1707,16 @@ export async function fetchFacturasRequest(
     page,
     limit,
     search,
+    q,
+    sort,
+    direction,
     sortBy,
     sortDir,
     filters,
   });
 
   const response = await apiGet(endpoint, {
-    timeout: FACTURAS_TIMEOUT,
+    timeout: FACTURAS_LIST_TIMEOUT,
     auth: true,
     ...safeObject(requestOptions),
   });
@@ -1164,9 +1724,9 @@ export async function fetchFacturasRequest(
   return normalizeFacturasListResponse(response, {
     page,
     limit,
-    search,
-    sortBy,
-    sortDir,
+    search: first(search, q, ""),
+    sort: first(sort, sortBy, ""),
+    direction: first(direction, sortDir, ""),
     filters,
   });
 }
@@ -1174,7 +1734,7 @@ export async function fetchFacturasRequest(
 export async function fetchFacturaDetailRequest(
   id,
   {
-    timeout = FACTURAS_TIMEOUT,
+    timeout = FACTURAS_DETAIL_TIMEOUT,
     auth = true,
     ...rest
   } = {}
@@ -1188,20 +1748,50 @@ export async function fetchFacturaDetailRequest(
   return normalizeFacturaDetailResponse(response);
 }
 
-export async function fetchFacturaPdfUrlRequest(
+export async function fetchFacturaPdfRequest(
   id,
   disposition = FACTURAS_DISPOSITIONS.ATTACHMENT,
   {
-    timeout = FACTURAS_TIMEOUT,
+    timeout = FACTURAS_PDF_TIMEOUT,
     auth = true,
+    responseType = "blob",
+    raw = true,
     ...rest
   } = {}
 ) {
-  return apiGet(FACTURAS_ENDPOINTS.pdf(id, disposition), {
+  const endpoint = buildFacturaPdfEndpoint(id, disposition);
+
+  const response = await apiGet(endpoint, {
     timeout,
     auth,
+    responseType,
+    raw,
     ...rest,
   });
+
+  return normalizeFacturaPdfResponse(response, endpoint);
+}
+
+export async function fetchFacturaPdfUrlRequest(
+  id,
+  disposition = FACTURAS_DISPOSITIONS.ATTACHMENT,
+  options = {}
+) {
+  const result = await fetchFacturaPdfRequest(id, disposition, options);
+
+  if (result.url) {
+    return result.url;
+  }
+
+  return buildFacturaPdfEndpoint(id, disposition);
+}
+
+export async function viewFacturaPdfRequest(id, options = {}) {
+  return fetchFacturaPdfRequest(id, FACTURAS_DISPOSITIONS.INLINE, options);
+}
+
+export async function downloadFacturaPdfRequest(id, options = {}) {
+  return fetchFacturaPdfRequest(id, FACTURAS_DISPOSITIONS.ATTACHMENT, options);
 }
 
 export async function sendFacturaRequest(
@@ -1213,7 +1803,77 @@ export async function sendFacturaRequest(
     ...rest
   } = {}
 ) {
-  return apiPost(FACTURAS_ENDPOINTS.send(id), safeObject(payload), {
+  const response = await apiPost(FACTURAS_ENDPOINTS.send(id), safeObject(payload), {
+    timeout,
+    auth,
+    ...rest,
+  });
+
+  return normalizeFacturaSendResponse(response);
+}
+
+export async function createFacturaRequest(
+  payload = {},
+  {
+    timeout = FACTURAS_CREATE_TIMEOUT,
+    auth = true,
+    ...rest
+  } = {}
+) {
+  const response = await apiPost(FACTURAS_ENDPOINT, safeObject(payload), {
+    timeout,
+    auth,
+    ...rest,
+  });
+
+  return normalizeFacturaDetailResponse(response);
+}
+
+export async function updateFacturaRequest(
+  id,
+  payload = {},
+  {
+    timeout = FACTURAS_TIMEOUT,
+    auth = true,
+    ...rest
+  } = {}
+) {
+  const response = await apiPut(getFacturaEndpoint(id), safeObject(payload), {
+    timeout,
+    auth,
+    ...rest,
+  });
+
+  return normalizeFacturaDetailResponse(response);
+}
+
+export async function patchFacturaRequest(
+  id,
+  payload = {},
+  {
+    timeout = FACTURAS_TIMEOUT,
+    auth = true,
+    ...rest
+  } = {}
+) {
+  const response = await apiPatch(getFacturaEndpoint(id), safeObject(payload), {
+    timeout,
+    auth,
+    ...rest,
+  });
+
+  return normalizeFacturaDetailResponse(response);
+}
+
+export async function removeFacturaRequest(
+  id,
+  {
+    timeout = FACTURAS_TIMEOUT,
+    auth = true,
+    ...rest
+  } = {}
+) {
+  return apiDelete(getFacturaEndpoint(id), {
     timeout,
     auth,
     ...rest,
@@ -1221,49 +1881,8 @@ export async function sendFacturaRequest(
 }
 
 /* =========================================================
-   OPTIONAL HELPERS
+   DOMAIN HELPERS PUBLIC
 ========================================================= */
-
-export function resolveFacturaPdfUrl(response = null) {
-  const candidates = getPayloadCandidates(response);
-
-  for (const candidate of candidates) {
-    const obj = safeObject(candidate, null);
-
-    if (!obj) continue;
-
-    const url = safeText(
-      first(
-        obj?.file?.url,
-        obj?.url,
-        obj?.downloadUrl,
-        obj?.viewUrl,
-
-        obj?.data?.file?.url,
-        obj?.data?.url,
-        obj?.data?.downloadUrl,
-        obj?.data?.viewUrl,
-
-        obj?.result?.file?.url,
-        obj?.result?.url,
-        obj?.result?.downloadUrl,
-        obj?.result?.viewUrl,
-
-        obj?.payload?.file?.url,
-        obj?.payload?.url,
-        obj?.payload?.downloadUrl,
-        obj?.payload?.viewUrl
-      ),
-      ""
-    );
-
-    if (url) {
-      return url;
-    }
-  }
-
-  return "";
-}
 
 export function hasFacturaIncidencia(item = {}) {
   return Boolean(getIncidenciaIdFromFactura(item));
@@ -1271,6 +1890,60 @@ export function hasFacturaIncidencia(item = {}) {
 
 export function getFacturaIncidenciaId(item = {}) {
   return getIncidenciaIdFromFactura(item);
+}
+
+export function getFacturaStableId(item = {}) {
+  const factura = safeObject(item);
+  const raw = safeObject(factura.raw);
+
+  return safeText(
+    first(
+      factura.id,
+      factura.facturaId,
+      factura.invoiceId,
+      factura.numero,
+      factura.numeroFacturaLegal,
+      factura.numeroFacturaSistema,
+      raw.id,
+      raw.facturaId,
+      raw.invoiceId,
+      raw.numero,
+      raw.numeroFacturaLegal,
+      raw.numeroFacturaSistema
+    ),
+    ""
+  );
+}
+
+export function getFacturaAmount(item = {}) {
+  const factura = safeObject(item);
+  const raw = safeObject(factura.raw);
+
+  return round2(
+    first(
+      factura.total,
+      factura.amount,
+      factura.importe,
+      factura.importeTotal,
+      factura.totalFactura,
+      factura.invoiceAmount,
+      factura.facturaTotal,
+      factura.totals?.total,
+      factura.resumen?.total,
+
+      raw.total,
+      raw.amount,
+      raw.importe,
+      raw.importeTotal,
+      raw.totalFactura,
+      raw.invoiceAmount,
+      raw.facturaTotal,
+      raw.totals?.total,
+      raw.resumen?.total,
+
+      0
+    )
+  );
 }
 
 /* =========================================================
@@ -1283,10 +1956,16 @@ export const FacturasApi = Object.freeze({
 
   timeouts: Object.freeze({
     default: FACTURAS_TIMEOUT,
+    list: FACTURAS_LIST_TIMEOUT,
+    detail: FACTURAS_DETAIL_TIMEOUT,
+    stats: FACTURAS_STATS_TIMEOUT,
+    pdf: FACTURAS_PDF_TIMEOUT,
     send: FACTURAS_SEND_TIMEOUT,
+    create: FACTURAS_CREATE_TIMEOUT,
   }),
 
   dispositions: FACTURAS_DISPOSITIONS,
+  pdfModes: FACTURAS_PDF_MODES,
   endpoints: FACTURAS_ENDPOINTS,
 
   getApiClient,
@@ -1294,30 +1973,60 @@ export const FacturasApi = Object.freeze({
   normalizeFactura: normalizeFacturaSafe,
   normalizeFacturaSafe,
   normalizeFacturaId,
+
   normalizeFacturasListResponse,
   normalizeFacturaDetailResponse,
+  normalizeFacturasStatsResponse,
+  normalizeFacturasHealthResponse,
+  normalizeFacturaSendResponse,
+  normalizeFacturaPdfResponse,
 
   getFacturaEndpoint,
   buildFacturasListEndpoint,
   normalizeFacturaPdfDisposition,
   buildFacturaPdfEndpoint,
+  buildFacturaPdfViewEndpoint,
+  buildFacturaDownloadEndpoint,
+
   resolveFacturaPdfUrl,
+  createObjectUrlFromPdfResponse,
 
   hasFacturaIncidencia,
   getFacturaIncidenciaId,
+  getFacturaStableId,
+  getFacturaAmount,
+
+  health: fetchFacturasHealthRequest,
+  stats: fetchFacturasStatsRequest,
 
   list: fetchFacturasRequest,
   detail: fetchFacturaDetailRequest,
 
-  create: baseCollectionApi.create,
-  update: baseCollectionApi.update,
-  patch: baseCollectionApi.patch,
-  remove: baseCollectionApi.remove,
+  create: createFacturaRequest,
+  update: updateFacturaRequest,
+  patch: patchFacturaRequest,
+  remove: removeFacturaRequest,
 
+  baseCreate: baseCollectionApi.create,
+  baseUpdate: baseCollectionApi.update,
+  basePatch: baseCollectionApi.patch,
+  baseRemove: baseCollectionApi.remove,
+
+  fetchFacturasHealthRequest,
+  fetchFacturasStatsRequest,
   fetchFacturasRequest,
   fetchFacturaDetailRequest,
+
+  fetchFacturaPdfRequest,
   fetchFacturaPdfUrlRequest,
+  viewFacturaPdfRequest,
+  downloadFacturaPdfRequest,
+
   sendFacturaRequest,
+  createFacturaRequest,
+  updateFacturaRequest,
+  patchFacturaRequest,
+  removeFacturaRequest,
 });
 
 export default FacturasApi;

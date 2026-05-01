@@ -2,8 +2,8 @@
    Onion SPA - Incidencias View
    Archivo: src/views/incidencias/incidenciasView.js
 
-   EXTREME PRO SYSTEM · VIEW REAL · FULL PATCH 11/10
-   SEARCH BRIDGE · URL AUTOPEN · TOPBAR READY
+   EXTREME PRO SYSTEM · VIEW REAL · FULL PATCH 12/10
+   FILTERS CONNECTED · SEARCH BRIDGE · URL AUTOPEN · TOPBAR READY
    DETAIL STORE MERGE · CREATE MODAL BRIDGE
    PAGINATION 5 · ACTION STATE SYNC · RERENDER SAFE · CLEANUP PRO
    FACTURAS LINKED PRESERVER · MODAL DIRECT IMPORT HARDENED
@@ -12,6 +12,8 @@
    - punto de entrada real de la vista de incidencias
    - render principal con template final unificado
    - paginación visual fija a 5 incidencias por vista
+   - filtros visuales conectados al estado real del View
+   - búsqueda local conectada al template por input/debounce
    - carga inicial robusta con fallback a cache
    - refresh con loader SOLO en historial / tabla
    - apertura de incidencia con estado visual de loading
@@ -60,6 +62,8 @@
    - openTicket() sigue aceptando ID; el bridge externo normaliza payload.
    - Si el detalle remoto viene pobre, no pisa importe/factura/legal number
      existentes en store/raw.
+   - Los filtros del template funcionan desde el View real.
+   - La paginación usa la colección filtrada.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -130,6 +134,69 @@ export const IncidenciasView = (() => {
   const OPEN_TICKET_THROTTLE_MS = 350;
 
   const DEFAULT_CURRENCY = "EUR";
+
+  const DEFAULT_FILTER = "all";
+  const FILTER_SEARCH_DEBOUNCE_MS = 180;
+
+  const FILTER_ALIASES = Object.freeze({
+    all: "all",
+    todos: "all",
+    todas: "all",
+
+    open: "open",
+    abierta: "open",
+    abiertas: "open",
+    abierto: "open",
+    abiertos: "open",
+
+    pending: "pending",
+    pendiente: "pending",
+    pendientes: "pending",
+    new: "pending",
+    nueva: "pending",
+    nuevo: "pending",
+
+    progress: "progress",
+    in_progress: "progress",
+    inprogress: "progress",
+    proceso: "progress",
+    en_proceso: "progress",
+    trabajando: "progress",
+
+    resolved: "resolved",
+    resuelta: "resolved",
+    resueltas: "resolved",
+    resuelto: "resolved",
+    resueltos: "resolved",
+
+    closed: "closed",
+    cerrada: "closed",
+    cerradas: "closed",
+    cerrado: "closed",
+    cerrados: "closed",
+    archived: "closed",
+    archivada: "closed",
+
+    urgent: "urgent",
+    urgente: "urgent",
+    urgentes: "urgent",
+    critical: "urgent",
+    critica: "urgent",
+    crítico: "urgent",
+    critico: "urgent",
+    alta: "urgent",
+    high: "urgent",
+
+    attachments: "attachments",
+    adjuntos: "attachments",
+    con_adjuntos: "attachments",
+
+    billed: "billed",
+    importe: "billed",
+    factura: "billed",
+    facturas: "billed",
+    con_importe: "billed",
+  });
 
   const TICKET_QUERY_KEYS = Object.freeze([
     "ticket",
@@ -205,6 +272,10 @@ export const IncidenciasView = (() => {
 
   let lastApiPayload = null;
 
+  let activeFilter = DEFAULT_FILTER;
+  let filterQuery = "";
+  let filterSearchTimer = null;
+
   /* =========================================================
      SAFE HELPERS
   ========================================================= */
@@ -231,14 +302,24 @@ export const IncidenciasView = (() => {
       let normalized = value
         .trim()
         .replace(/€/g, "")
+        .replace(/\$/g, "")
+        .replace(/£/g, "")
         .replace(/%/g, "")
+        .replace(/[^\d.,+\-\s]/g, "")
         .replace(/\s/g, "");
 
       const hasComma = normalized.includes(",");
       const hasDot = normalized.includes(".");
 
       if (hasComma && hasDot) {
-        normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
+        const lastComma = normalized.lastIndexOf(",");
+        const lastDot = normalized.lastIndexOf(".");
+
+        if (lastComma > lastDot) {
+          normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
+        } else {
+          normalized = normalized.replace(/,/g, "");
+        }
       } else if (hasComma) {
         normalized = normalized.replace(/,/g, ".");
       }
@@ -306,6 +387,403 @@ export const IncidenciasView = (() => {
       .replace(/[^\w]+/g, "_")
       .replace(/^_+|_+$/g, "");
   }
+
+  /* =========================================================
+     FILTER STATE / MATCHERS
+  ========================================================= */
+
+  function normalizeFilter(value = DEFAULT_FILTER) {
+    const key = normalizeKey(value || DEFAULT_FILTER);
+
+    return FILTER_ALIASES[key] || DEFAULT_FILTER;
+  }
+
+  function getCurrentFilter() {
+    return normalizeFilter(
+      first(
+        incidenciasState.activeFilter,
+        incidenciasState.statusFilter,
+        incidenciasState.filter,
+        activeFilter,
+        DEFAULT_FILTER
+      )
+    );
+  }
+
+  function getCurrentSearchQuery() {
+    return safeText(
+      first(
+        incidenciasState.searchQuery,
+        incidenciasState.filterQuery,
+        incidenciasState.query,
+        filterQuery,
+        ""
+      ),
+      ""
+    );
+  }
+
+  function syncFilterRuntime({
+    filter = getCurrentFilter(),
+    searchQuery = getCurrentSearchQuery(),
+  } = {}) {
+    activeFilter = normalizeFilter(filter);
+    filterQuery = safeText(searchQuery, "");
+
+    incidenciasState.activeFilter = activeFilter;
+    incidenciasState.statusFilter = activeFilter;
+    incidenciasState.filter = activeFilter;
+
+    incidenciasState.searchQuery = filterQuery;
+    incidenciasState.filterQuery = filterQuery;
+    incidenciasState.query = filterQuery;
+
+    return {
+      activeFilter,
+      searchQuery: filterQuery,
+    };
+  }
+
+  function clearFilterSearchTimer() {
+    if (!filterSearchTimer) return;
+
+    try {
+      clearTimeout(filterSearchTimer);
+    } catch {}
+
+    filterSearchTimer = null;
+  }
+
+  function getItemStatusRaw(item = {}) {
+    return first(
+      item.status,
+      item.estado,
+      item.state,
+      item.lifecycle?.status,
+      item.raw?.status,
+      item.raw?.estado,
+      item.raw?.state,
+      item.raw?.lifecycle?.status,
+      ""
+    );
+  }
+
+  function getItemStatusKey(item = {}) {
+    return normalizeFilter(getItemStatusRaw(item));
+  }
+
+  function getItemPriorityKey(item = {}) {
+    const key = normalizeKey(
+      first(
+        item.priority,
+        item.prioridad,
+        item.severity,
+        item.urgency,
+        item.sla?.priority,
+        item.raw?.priority,
+        item.raw?.prioridad,
+        item.raw?.severity,
+        item.raw?.urgency,
+        item.raw?.sla?.priority,
+        ""
+      )
+    );
+
+    if (
+      [
+        "critical",
+        "critica",
+        "crítica",
+        "critico",
+        "crítico",
+        "urgent",
+        "urgente",
+        "high",
+        "alta",
+        "p0",
+        "p1",
+      ].includes(key)
+    ) {
+      return "urgent";
+    }
+
+    return key || "medium";
+  }
+
+  function getItemAttachmentsCount(item = {}) {
+    const attachments = first(
+      item.attachments,
+      item.files,
+      item.adjuntos,
+      item.raw?.attachments,
+      item.raw?.files,
+      item.raw?.adjuntos
+    );
+
+    if (Array.isArray(attachments)) return attachments.length;
+
+    return safeNumber(
+      first(
+        item.attachmentsCount,
+        item.filesCount,
+        item.adjuntosCount,
+        item.raw?.attachmentsCount,
+        item.raw?.filesCount,
+        item.raw?.adjuntosCount,
+        0
+      ),
+      0
+    );
+  }
+
+  function getItemAmount(item = {}) {
+    return roundMoney(
+      first(
+        item.total,
+        item.amount,
+        item.importe,
+        item.price,
+
+        item.facturasTotal,
+        item.invoicesTotal,
+        item.importeFacturas,
+        item.invoiceTotal,
+
+        item.facturaTotal,
+        item.facturaImporte,
+        item.importeFactura,
+        item.totalFactura,
+        item.invoiceAmount,
+
+        item.linkedInvoices?.total,
+        item.linkedInvoices?.amount,
+        item.linkedInvoices?.importe,
+
+        item.meta?.invoicesTotal,
+        item.meta?.invoiceTotal,
+
+        item.raw?.total,
+        item.raw?.amount,
+        item.raw?.importe,
+        item.raw?.price,
+
+        item.raw?.facturasTotal,
+        item.raw?.invoicesTotal,
+        item.raw?.importeFacturas,
+        item.raw?.invoiceTotal,
+
+        item.raw?.facturaTotal,
+        item.raw?.facturaImporte,
+        item.raw?.importeFactura,
+        item.raw?.totalFactura,
+        item.raw?.invoiceAmount,
+
+        item.raw?.linkedInvoices?.total,
+        item.raw?.linkedInvoices?.amount,
+        item.raw?.linkedInvoices?.importe,
+
+        item.raw?.meta?.invoicesTotal,
+        item.raw?.meta?.invoiceTotal
+      )
+    );
+  }
+
+  function getItemSearchText(item = {}) {
+    return normalizeText(
+      [
+        item.ticketId,
+        item.id,
+        item.code,
+        item.ticketCode,
+        item.incidenciaId,
+
+        item.subject,
+        item.title,
+        item.asunto,
+        item.description,
+        item.descripcion,
+        item.message,
+        item.preview,
+
+        item.clientName,
+        item.clienteNombre,
+        item.requesterName,
+        item.name,
+        item.email,
+        item.clientEmail,
+        item.clienteEmail,
+
+        item.requesterSnapshot?.name,
+        item.requesterSnapshot?.email,
+        item.cliente?.nombre,
+        item.cliente?.name,
+        item.cliente?.email,
+        item.client?.name,
+        item.client?.email,
+        item.customer?.name,
+        item.customer?.email,
+        item.receptor?.name,
+        item.receptor?.email,
+
+        item.assignedTo?.name,
+        item.assignedTo?.email,
+        item.assignment?.assignedToName,
+        item.assignment?.assignedToEmail,
+        item.tecnico?.name,
+        item.tecnico?.email,
+
+        item.category,
+        item.categoria,
+        item.type,
+        item.tipo,
+
+        item.raw?.search?.text,
+      ]
+        .map((value) => safeText(value, ""))
+        .filter(Boolean)
+        .join(" ")
+    );
+  }
+
+  function itemMatchesCurrentFilter(item = {}, filter = getCurrentFilter()) {
+    const key = normalizeFilter(filter);
+
+    if (key === "all") return true;
+    if (key === "open") return getItemStatusKey(item) === "open";
+    if (key === "pending") return getItemStatusKey(item) === "pending";
+    if (key === "progress") return getItemStatusKey(item) === "progress";
+    if (key === "resolved") return getItemStatusKey(item) === "resolved";
+    if (key === "closed") return getItemStatusKey(item) === "closed";
+    if (key === "urgent") return getItemPriorityKey(item) === "urgent";
+    if (key === "attachments") return getItemAttachmentsCount(item) > 0;
+
+    if (key === "billed") {
+      const amount = getItemAmount(item);
+      return Number.isFinite(amount) && amount > 0;
+    }
+
+    return true;
+  }
+
+  function itemMatchesCurrentSearch(item = {}, searchQuery = getCurrentSearchQuery()) {
+    const query = normalizeText(searchQuery);
+
+    if (!query) return true;
+
+    return getItemSearchText(item).includes(query);
+  }
+
+  function getFilteredItems(items = getItems()) {
+    const filter = getCurrentFilter();
+    const searchQuery = getCurrentSearchQuery();
+
+    return safeArray(items).filter((item) => {
+      return (
+        itemMatchesCurrentFilter(item, filter) &&
+        itemMatchesCurrentSearch(item, searchQuery)
+      );
+    });
+  }
+
+  function resetPageToOne() {
+    try {
+      setPage(1);
+    } catch {
+      incidenciasState.page = 1;
+    }
+  }
+
+  function setFilter(filter = DEFAULT_FILTER) {
+    const nextFilter = normalizeFilter(filter);
+
+    syncFilterRuntime({
+      filter: nextFilter,
+      searchQuery: getCurrentSearchQuery(),
+    });
+
+    resetPageToOne();
+    rerender();
+
+    safeEmit("incidencias:filter:changed", {
+      filter: nextFilter,
+      searchQuery: getCurrentSearchQuery(),
+      source: "incidenciasView",
+    });
+
+    return nextFilter;
+  }
+
+  function setSearchQuery(query = "") {
+    const nextQuery = safeText(query, "");
+
+    syncFilterRuntime({
+      filter: getCurrentFilter(),
+      searchQuery: nextQuery,
+    });
+
+    resetPageToOne();
+    rerender();
+
+    safeEmit("incidencias:filter-search:changed", {
+      filter: getCurrentFilter(),
+      searchQuery: nextQuery,
+      source: "incidenciasView",
+    });
+
+    return nextQuery;
+  }
+
+  function clearFilters() {
+    clearFilterSearchTimer();
+
+    syncFilterRuntime({
+      filter: DEFAULT_FILTER,
+      searchQuery: "",
+    });
+
+    resetPageToOne();
+    rerender();
+
+    safeEmit("incidencias:filters:cleared", {
+      source: "incidenciasView",
+    });
+
+    return true;
+  }
+
+  function clearSearchOnly() {
+    clearFilterSearchTimer();
+
+    syncFilterRuntime({
+      filter: getCurrentFilter(),
+      searchQuery: "",
+    });
+
+    resetPageToOne();
+    rerender();
+
+    safeEmit("incidencias:filter-search:cleared", {
+      filter: getCurrentFilter(),
+      source: "incidenciasView",
+    });
+
+    return true;
+  }
+
+  function scheduleSearchQuery(query = "") {
+    clearFilterSearchTimer();
+
+    const value = safeText(query, "");
+
+    filterSearchTimer = setTimeout(() => {
+      filterSearchTimer = null;
+      setSearchQuery(value);
+    }, FILTER_SEARCH_DEBOUNCE_MS);
+  }
+
+  /* =========================================================
+     GENERIC HELPERS
+  ========================================================= */
 
   function sameTicketIdentity(a = "", b = "") {
     const left = normalizeText(a);
@@ -935,12 +1413,6 @@ export const IncidenciasView = (() => {
 
   /* =========================================================
      INVOICE FIELD PRESERVER
-     Evita que normalizeIncidenciasCollection pierda:
-     - facturaTotal / facturaImporte / importeFactura
-     - total / amount / importe
-     - linkedInvoices.total
-     - numeroFacturaLegal
-     - factura/invoice/billing
   ========================================================= */
 
   function collectInvoiceObjects(source = {}, raw = {}) {
@@ -1343,6 +1815,7 @@ export const IncidenciasView = (() => {
     const total = resolveInvoiceAmount(invoice, {});
     const numeroFacturaLegal = resolveInvoiceNumber(invoice, {});
     const id = resolvePrimaryInvoiceId(invoice, {});
+    const currency = resolveInvoiceCurrency(invoice, {});
 
     return {
       ...invoice,
@@ -1367,8 +1840,8 @@ export const IncidenciasView = (() => {
       totalFactura: total === null ? 0 : total,
       importeTotal: total === null ? 0 : total,
 
-      currency: resolveInvoiceCurrency(invoice, {}),
-      moneda: resolveInvoiceCurrency(invoice, {}),
+      currency,
+      moneda: currency,
     };
   }
 
@@ -1890,6 +2363,11 @@ export const IncidenciasView = (() => {
       safeNumber(incidenciasState.remoteCount, 0)
     );
 
+    syncFilterRuntime({
+      filter: getCurrentFilter(),
+      searchQuery: getCurrentSearchQuery(),
+    });
+
     return incidenciasState;
   }
 
@@ -1929,9 +2407,10 @@ export const IncidenciasView = (() => {
   function getPaginationMeta(items = []) {
     const page = safeNumber(incidenciasState.page, 1);
     const pageSize = safeNumber(incidenciasState.pageSize, PAGE_SIZE);
+    const visibleItems = getFilteredItems(items);
 
     return paginateIncidencias(
-      safeArray(items),
+      visibleItems,
       page,
       pageSize || PAGE_SIZE
     );
@@ -2267,6 +2746,15 @@ export const IncidenciasView = (() => {
     ensureBaseState();
 
     const allItems = getItems();
+
+    syncFilterRuntime({
+      filter: getCurrentFilter(),
+      searchQuery: getCurrentSearchQuery(),
+    });
+
+    const currentFilter = getCurrentFilter();
+    const currentSearchQuery = getCurrentSearchQuery();
+
     const pagination = clampPageAgainstItems(allItems);
 
     const remoteCount = Math.max(
@@ -2294,6 +2782,14 @@ export const IncidenciasView = (() => {
             title: "Tus incidencias y solicitudes",
             subtitle:
               "Consulta el estado de tus incidencias, revisa las actualizaciones más recientes y crea nuevas solicitudes desde una vista clara, cercana y fácil de seguir.",
+
+            filter: currentFilter,
+            activeFilter: currentFilter,
+            statusFilter: currentFilter,
+            searchQuery: currentSearchQuery,
+            filterQuery: currentSearchQuery,
+            query: currentSearchQuery,
+
             state: {
               ...incidenciasState,
               page: pagination.page,
@@ -2306,6 +2802,13 @@ export const IncidenciasView = (() => {
               creating: Boolean(incidenciasState.creating),
               loading: Boolean(incidenciasState.loading),
               refreshing: Boolean(incidenciasState.refreshing),
+
+              filter: currentFilter,
+              activeFilter: currentFilter,
+              statusFilter: currentFilter,
+              searchQuery: currentSearchQuery,
+              filterQuery: currentSearchQuery,
+              query: currentSearchQuery,
             },
           })}
         </div>
@@ -2531,7 +3034,7 @@ export const IncidenciasView = (() => {
       return incidenciasState.page || 1;
     }
 
-    const items = getItems();
+    const items = getFilteredItems(getItems());
 
     const pagination = paginateIncidencias(
       items,
@@ -2964,6 +3467,18 @@ export const IncidenciasView = (() => {
         });
       },
 
+      setFilter(filter = DEFAULT_FILTER) {
+        return setFilter(filter);
+      },
+
+      setSearchQuery(query = "") {
+        return setSearchQuery(query);
+      },
+
+      clearFilters() {
+        return clearFilters();
+      },
+
       getState() {
         return api.getState();
       },
@@ -3216,6 +3731,56 @@ export const IncidenciasView = (() => {
     const onClick = async (event) => {
       if (destroyed) return;
 
+      const filterBtn = getActionTarget(event, [
+        "filter",
+        "filter-incidencias",
+        "status-filter",
+        "incidencias-filter",
+      ]);
+
+      if (filterBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const filter = first(
+          filterBtn.dataset?.filter,
+          filterBtn.dataset?.filterStatus,
+          filterBtn.getAttribute?.("data-filter"),
+          filterBtn.getAttribute?.("data-filter-status"),
+          DEFAULT_FILTER
+        );
+
+        setFilter(filter);
+        return;
+      }
+
+      const clearSearchBtn = getActionTarget(event, [
+        "clear-filter-search",
+        "clear-search",
+      ]);
+
+      if (clearSearchBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        clearSearchOnly();
+        return;
+      }
+
+      const clearFiltersBtn = getActionTarget(event, [
+        "clear-filters",
+        "reset-filters",
+        "filters-clear",
+      ]);
+
+      if (clearFiltersBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        clearFilters();
+        return;
+      }
+
       const detailBtn = getActionTarget(event, [
         "detail",
         "open",
@@ -3352,8 +3917,32 @@ export const IncidenciasView = (() => {
       }
     };
 
+    const onInput = (event) => {
+      if (destroyed) return;
+
+      const searchField =
+        event.target?.closest?.("#incidencias-filter-search") ||
+        event.target?.closest?.("[data-incidencias-action='filter-search']") ||
+        event.target?.closest?.("[data-action='filter-search']");
+
+      if (!searchField) return;
+
+      scheduleSearchQuery(searchField.value);
+    };
+
     const onChange = (event) => {
       if (destroyed) return;
+
+      const searchField =
+        event.target?.closest?.("#incidencias-filter-search") ||
+        event.target?.closest?.("[data-incidencias-action='filter-search']") ||
+        event.target?.closest?.("[data-action='filter-search']");
+
+      if (searchField) {
+        clearFilterSearchTimer();
+        setSearchQuery(searchField.value);
+        return;
+      }
 
       const pageSizeField =
         event.target?.closest?.("[data-incidencias-field='page-size']") ||
@@ -3365,11 +3954,13 @@ export const IncidenciasView = (() => {
     };
 
     container.addEventListener("click", onClick);
+    container.addEventListener("input", onInput);
     container.addEventListener("change", onChange);
 
     return () => {
       try {
         container.removeEventListener("click", onClick);
+        container.removeEventListener("input", onInput);
         container.removeEventListener("change", onChange);
       } catch {}
     };
@@ -3519,6 +4110,7 @@ export const IncidenciasView = (() => {
 
     nextRenderToken();
     cancelPendingRender();
+    clearFilterSearchTimer();
 
     cleanupBindings();
     cleanupExternalOpenListener();
@@ -3585,7 +4177,13 @@ export const IncidenciasView = (() => {
     goNextPage,
     changePageSize,
 
+    setFilter,
+    setSearchQuery,
+    clearFilters,
+    clearSearchOnly,
+
     getItems: () => getItems(),
+    getFilteredItems: () => getFilteredItems(getItems()),
     getPageItems: () => getPaginationMeta(getItems()).items,
     getPagination: () => getPaginationMeta(getItems()),
 
@@ -3596,25 +4194,38 @@ export const IncidenciasView = (() => {
 
     mergeTicketDetailWithStoreSnapshot,
 
-    getState: () => ({
-      ...getIncidenciasStateSnapshot?.(),
+    getState: () => {
+      const allItems = getItems();
+      const filteredItems = getFilteredItems(allItems);
+      const pagination = getPaginationMeta(allItems);
 
-      initialized,
-      destroyed,
+      return {
+        ...getIncidenciasStateSnapshot?.(),
 
-      hasInflightInit: Boolean(inflightInit),
-      hasInflightReload: Boolean(inflightReload),
-      hasQueuedReload: Boolean(queuedReloadOptions),
-      hasInflightExternalOpen: Boolean(inflightExternalOpen),
-      inflightExternalOpenTicketId,
+        initialized,
+        destroyed,
 
-      pendingCreateRequest,
-      lastAutoOpenedTicketId,
+        hasInflightInit: Boolean(inflightInit),
+        hasInflightReload: Boolean(inflightReload),
+        hasQueuedReload: Boolean(queuedReloadOptions),
+        hasInflightExternalOpen: Boolean(inflightExternalOpen),
+        inflightExternalOpenTicketId,
 
-      lastApiPayloadHasItems: extractItemsFromPayload(lastApiPayload).length > 0,
-      itemsCount: getItems().length,
-      pagination: getPaginationMeta(getItems()),
-    }),
+        pendingCreateRequest,
+        lastAutoOpenedTicketId,
+
+        filter: getCurrentFilter(),
+        activeFilter: getCurrentFilter(),
+        statusFilter: getCurrentFilter(),
+        searchQuery: getCurrentSearchQuery(),
+        filterQuery: getCurrentSearchQuery(),
+
+        lastApiPayloadHasItems: extractItemsFromPayload(lastApiPayload).length > 0,
+        itemsCount: allItems.length,
+        filteredItemsCount: filteredItems.length,
+        pagination,
+      };
+    },
 
     get initialized() {
       return initialized;

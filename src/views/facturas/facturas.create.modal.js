@@ -13,9 +13,11 @@
    - crear factura desde panel admin alineada con backend v3
    - enviar payload compatible con /router/facturas/factura_create_admin.js
    - NO pedir fecha factura: el backend usa fecha de creación real
-   - NO pedir moneda: backend EUR por defecto
-   - NO pedir cuenta bancaria: backend default
+   - NO pedir moneda: EUR fija
+   - NO pedir cuenta bancaria: no se solicita en UI
    - unificar bloque cliente + incidencia
+   - total estimado calculado en tiempo real
+   - forma de pago mediante select
    - emitir facturas:create:success para refrescar la vista
    - evitar doble submit y doble binding
    - exponer bridge global para abrir desde cualquier vista
@@ -56,6 +58,17 @@ const SEARCH_DEBOUNCE = 240;
 const CREATE_TIMEOUT_MS = 90000;
 const SEARCH_TIMEOUT_MS = 15000;
 
+const PAYMENT_OPTIONS = Object.freeze([
+  {
+    value: "transferencia bancaria",
+    label: "Transferencia bancaria",
+  },
+  {
+    value: "efectivo",
+    label: "Efectivo",
+  },
+]);
+
 const DEFAULT_FORM = Object.freeze({
   clienteId: "",
   clienteUserId: "",
@@ -73,7 +86,6 @@ const DEFAULT_FORM = Object.freeze({
   precioUnitario: 20,
 
   fechaServicio: "",
-
   formaPago: "transferencia bancaria",
   estadoPago: "pendiente",
 
@@ -122,7 +134,6 @@ const modalState = {
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
-
   const text = String(value).trim();
   return text || fallback;
 }
@@ -171,7 +182,6 @@ function first(...values) {
     if (Array.isArray(value) && value.length === 0) continue;
     return value;
   }
-
   return null;
 }
 
@@ -1523,6 +1533,9 @@ function buildCreatePayload(form = {}) {
     estadoPago: safeText(current.estadoPago, "pendiente"),
     estado: "emitida",
 
+    moneda: "EUR",
+    currency: "EUR",
+
     sendEmail: parseBoolean(current.sendEmail, true),
 
     concepto,
@@ -1602,6 +1615,29 @@ function getCreatedFacturaId(payload = null) {
 }
 
 /* =========================================================
+   DERIVED UI SYNC
+========================================================= */
+
+function syncDerivedUi() {
+  const root = getRoot();
+  if (!root) return false;
+
+  const total = formatMoney(getFormTotal(modalState.form));
+
+  const totalInput = root.querySelector('[data-role="total-preview-input"]');
+  if (totalInput) {
+    totalInput.value = total;
+  }
+
+  const totalInline = root.querySelector('[data-role="total-preview-inline"]');
+  if (totalInline) {
+    totalInline.textContent = total;
+  }
+
+  return true;
+}
+
+/* =========================================================
    RENDER HELPERS
 ========================================================= */
 
@@ -1637,6 +1673,8 @@ function renderInput({
   step = "",
   min = "",
   readonly = false,
+  inputmode = "",
+  role = "",
 } = {}) {
   return `
     <label class="fac-create-field">
@@ -1651,6 +1689,8 @@ function renderInput({
         placeholder="${escapeHtml(placeholder)}"
         ${step ? `step="${escapeHtml(step)}"` : ""}
         ${min ? `min="${escapeHtml(min)}"` : ""}
+        ${inputmode ? `inputmode="${escapeHtml(inputmode)}"` : ""}
+        ${role ? `data-role="${escapeHtml(role)}"` : ""}
         ${readonly ? "readonly" : ""}
         ${modalState.submitting ? "disabled" : ""}
       />
@@ -1680,6 +1720,46 @@ function renderTextarea({
         placeholder="${escapeHtml(placeholder)}"
         ${modalState.submitting ? "disabled" : ""}
       >${escapeHtml(value)}</textarea>
+
+      ${renderFieldError(error)}
+    </label>
+  `;
+}
+
+function renderSelect({
+  label = "",
+  name = "",
+  value = "",
+  options = [],
+  error = "",
+  required = false,
+} = {}) {
+  return `
+    <label class="fac-create-field">
+      <span class="fac-create-label">${escapeHtml(label)}${required ? " *" : ""}</span>
+
+      <select
+        class="fac-create-select ${error ? "is-error" : ""}"
+        data-field="${escapeHtml(name)}"
+        name="${escapeHtml(name)}"
+        ${modalState.submitting ? "disabled" : ""}
+      >
+        ${safeArray(options)
+          .map((option) => {
+            const optionValue = safeText(option?.value, "");
+            const optionLabel = safeText(option?.label, optionValue);
+
+            return `
+              <option
+                value="${escapeHtml(optionValue)}"
+                ${optionValue === safeText(value, "") ? "selected" : ""}
+              >
+                ${escapeHtml(optionLabel)}
+              </option>
+            `;
+          })
+          .join("")}
+      </select>
 
       ${renderFieldError(error)}
     </label>
@@ -1924,12 +2004,9 @@ function renderTargetBlock() {
           <span>Destino de facturación</span>
           <h3>Cliente e incidencia</h3>
           <p>
-            Selecciona el cliente y vincula la factura a una incidencia real. El backend hará numeración legal, PDF, blob y auditoría.
+            Selecciona el cliente y vincula la factura a una incidencia real.
+            La numeración, el PDF y la auditoría se resuelven automáticamente al crearla.
           </p>
-        </div>
-
-        <div class="fac-create-target-pill">
-          EUR · backend
         </div>
       </div>
 
@@ -1969,7 +2046,7 @@ function renderTargetBlock() {
               ? `
                 <div class="fac-create-locked">
                   <strong>Primero selecciona un cliente</strong>
-                  <span>Las incidencias se cargan automáticamente por cliente/usuario.</span>
+                  <span>Después podrás cargar y elegir una incidencia asociada.</span>
                   ${renderFieldError(errors.incidenciaId)}
                 </div>
               `
@@ -2046,7 +2123,7 @@ function renderLoadingOverlay() {
       <div class="fac-create-loading-card">
         <span class="fac-create-loading-spinner" aria-hidden="true"></span>
         <strong>Creando factura...</strong>
-        <small>Generando PDF, subiendo blob y preparando email</small>
+        <small>Generando documento y preparando el envío</small>
       </div>
     </div>
   `;
@@ -2066,23 +2143,25 @@ function renderStyles() {
         display:grid;
         place-items:center;
         padding:16px;
-        background:rgba(0,0,0,.62);
+        background:rgba(10,14,24,.48);
         backdrop-filter:blur(12px);
         -webkit-backdrop-filter:blur(12px);
       }
 
       .fac-create-panel{
         position:relative;
-        width:min(930px, 100%);
+        width:min(940px, 100%);
         max-height:92vh;
         overflow:auto;
         border-radius:26px;
         border:1px solid var(--border-soft, rgba(255,255,255,.12));
         background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent), transparent 34%),
-          radial-gradient(circle at 92% 0%, color-mix(in srgb, var(--info, #38bdf8) 9%, transparent), transparent 32%),
+          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent 34%),
+          radial-gradient(circle at 95% 0%, rgba(255,255,255,.14), transparent 30%),
           linear-gradient(180deg, var(--surface-2, #171717), var(--surface-1, #111));
-        box-shadow:0 34px 84px rgba(0,0,0,.45);
+        box-shadow:
+          0 36px 90px rgba(0,0,0,.42),
+          0 1px 0 rgba(255,255,255,.05) inset;
         color:var(--text, #f5f5f5);
       }
 
@@ -2104,8 +2183,8 @@ function renderStyles() {
         place-items:center;
         padding:22px;
         background:color-mix(in srgb, var(--surface-1, #111) 82%, transparent);
-        backdrop-filter:blur(7px);
-        -webkit-backdrop-filter:blur(7px);
+        backdrop-filter:blur(8px);
+        -webkit-backdrop-filter:blur(8px);
       }
 
       .fac-create-loading-card{
@@ -2114,11 +2193,11 @@ function renderStyles() {
         gap:10px;
         padding:24px 28px;
         border-radius:20px;
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft, rgba(255,255,255,.12)));
+        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft, rgba(255,255,255,.12)));
         background:
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent),
+          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent),
           var(--surface-2, #171717);
-        box-shadow:0 30px 70px rgba(0,0,0,.35);
+        box-shadow:0 28px 70px rgba(0,0,0,.34);
       }
 
       .fac-create-loading-card strong{
@@ -2152,60 +2231,60 @@ function renderStyles() {
         justify-content:space-between;
         align-items:flex-start;
         gap:14px;
-        padding:22px 22px 16px;
+        padding:24px 24px 18px;
         border-bottom:1px solid var(--border-soft, rgba(255,255,255,.10));
       }
 
       .fac-create-header-copy{
         display:grid;
-        gap:7px;
+        gap:8px;
         min-width:0;
-      }
-
-      .fac-create-header-copy > span{
-        color:var(--accent, #7c5cff);
-        font-size:11px;
-        font-weight:800;
-        letter-spacing:.08em;
-        text-transform:uppercase;
       }
 
       .fac-create-header-copy h2{
         margin:0;
         color:var(--text-strong, #fff);
-        font-size:clamp(26px, 3.7vw, 38px);
-        line-height:1;
-        letter-spacing:-.055em;
+        font-size:clamp(30px, 4vw, 42px);
+        line-height:0.95;
+        letter-spacing:-.06em;
       }
 
       .fac-create-header-copy p{
         max-width:720px;
         margin:0;
-        color:var(--text-dim, rgba(255,255,255,.62));
-        font-size:12px;
-        line-height:1.55;
+        color:var(--text-dim, rgba(255,255,255,.64));
+        font-size:13px;
+        line-height:1.6;
       }
 
       .fac-create-close{
-        width:42px;
-        height:42px;
+        width:44px;
+        height:44px;
         flex:0 0 auto;
-        border-radius:15px;
+        border-radius:16px;
         border:1px solid var(--border-soft, rgba(255,255,255,.12));
         background:var(--surface-glass, rgba(255,255,255,.05));
         color:var(--text-strong, #fff);
         cursor:pointer;
-        font-size:17px;
+        font-size:18px;
+        transition:
+          transform .18s ease,
+          border-color .18s ease,
+          background .18s ease,
+          box-shadow .18s ease;
       }
 
       .fac-create-close:hover{
-        background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+        transform:translateY(-1px);
+        background:color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent);
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft, rgba(255,255,255,.12)));
+        box-shadow:0 10px 24px color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent);
       }
 
       .fac-create-body{
         display:grid;
         gap:14px;
-        padding:18px 22px 22px;
+        padding:18px 24px 24px;
       }
 
       .fac-create-form{
@@ -2245,9 +2324,9 @@ function renderStyles() {
         gap:14px;
         padding:16px;
         border-radius:22px;
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 16%, var(--border-soft, rgba(255,255,255,.12)));
+        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 15%, var(--border-soft, rgba(255,255,255,.12)));
         background:
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 7%, transparent), transparent),
+          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 6%, transparent), transparent),
           var(--surface-glass, rgba(255,255,255,.04));
       }
 
@@ -2287,23 +2366,7 @@ function renderStyles() {
         margin:0;
         color:var(--text-dim, rgba(255,255,255,.60));
         font-size:12px;
-        line-height:1.5;
-      }
-
-      .fac-create-target-pill{
-        min-height:32px;
-        padding:0 12px;
-        border-radius:999px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.12));
-        background:var(--surface-glass, rgba(255,255,255,.05));
-        color:var(--text-soft, rgba(255,255,255,.78));
-        font-size:11px;
-        font-weight:900;
-        letter-spacing:.07em;
-        text-transform:uppercase;
-        display:inline-flex;
-        align-items:center;
-        white-space:nowrap;
+        line-height:1.55;
       }
 
       .fac-create-target-grid{
@@ -2317,10 +2380,21 @@ function renderStyles() {
         align-content:start;
         gap:10px;
         min-width:0;
-        padding:13px;
+        padding:14px;
         border-radius:18px;
         border:1px solid var(--border-soft, rgba(255,255,255,.10));
-        background:color-mix(in srgb, var(--surface-1, #111) 70%, transparent);
+        background:color-mix(in srgb, var(--surface-1, #111) 72%, transparent);
+        transition:
+          transform .18s ease,
+          border-color .18s ease,
+          box-shadow .18s ease,
+          background .18s ease;
+      }
+
+      .fac-create-target-column:hover{
+        transform:translateY(-1px);
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft, rgba(255,255,255,.10)));
+        box-shadow:0 14px 32px rgba(0,0,0,.12);
       }
 
       .fac-create-field{
@@ -2352,9 +2426,16 @@ function renderStyles() {
         border:1px solid var(--border-soft, rgba(255,255,255,.12));
         font-size:14px;
         transition:
+          transform .16s ease,
           border-color .18s ease,
           box-shadow .18s ease,
           background .18s ease;
+      }
+
+      .fac-create-input:hover,
+      .fac-create-textarea:hover,
+      .fac-create-select:hover{
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft, rgba(255,255,255,.12)));
       }
 
       .fac-create-input,
@@ -2396,7 +2477,7 @@ function renderStyles() {
       }
 
       .fac-create-input.is-readonly{
-        opacity:.88;
+        opacity:.92;
         cursor:default;
         font-weight:800;
       }
@@ -2440,12 +2521,15 @@ function renderStyles() {
         transition:
           transform .18s ease,
           border-color .18s ease,
-          background .18s ease;
+          background .18s ease,
+          box-shadow .18s ease;
       }
 
       .fac-create-search-item:hover{
         transform:translateY(-1px);
         border-color:color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft, rgba(255,255,255,.12)));
+        background:color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass, rgba(255,255,255,.05)));
+        box-shadow:0 12px 26px rgba(0,0,0,.08);
       }
 
       .fac-create-search-item strong{
@@ -2462,20 +2546,31 @@ function renderStyles() {
 
       .fac-create-selected{
         display:grid;
-        grid-template-columns:38px minmax(0, 1fr) auto;
+        grid-template-columns:40px minmax(0, 1fr) auto;
         align-items:center;
         gap:11px;
         padding:12px;
         border-radius:16px;
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 28%, var(--border-soft, rgba(255,255,255,.12)));
+        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft, rgba(255,255,255,.12)));
         background:
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent),
+          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 9%, transparent), transparent),
           var(--surface-glass, rgba(255,255,255,.05));
+        transition:
+          transform .18s ease,
+          border-color .18s ease,
+          box-shadow .18s ease,
+          background .18s ease;
+      }
+
+      .fac-create-selected:hover{
+        transform:translateY(-1px);
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 34%, var(--border-soft, rgba(255,255,255,.12)));
+        box-shadow:0 14px 28px color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
       }
 
       .fac-create-selected-icon{
-        width:38px;
-        height:38px;
+        width:40px;
+        height:40px;
         border-radius:14px;
         display:grid;
         place-items:center;
@@ -2519,15 +2614,27 @@ function renderStyles() {
       }
 
       .fac-create-selected-clear{
-        min-height:32px;
-        padding:0 11px;
-        border-radius:10px;
+        min-height:34px;
+        padding:0 12px;
+        border-radius:11px;
         border:1px solid var(--border-soft, rgba(255,255,255,.12));
-        background:transparent;
-        color:var(--text-dim, rgba(255,255,255,.62));
+        background:rgba(255,255,255,.04);
+        color:var(--text-soft, rgba(255,255,255,.78));
         font-size:12px;
         font-weight:800;
         cursor:pointer;
+        transition:
+          transform .18s ease,
+          border-color .18s ease,
+          background .18s ease,
+          box-shadow .18s ease;
+      }
+
+      .fac-create-selected-clear:hover{
+        transform:translateY(-1px);
+        background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft, rgba(255,255,255,.12)));
+        box-shadow:0 10px 24px color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent);
       }
 
       .fac-create-ticket-toolbar{
@@ -2548,6 +2655,18 @@ function renderStyles() {
         font-weight:900;
         cursor:pointer;
         white-space:nowrap;
+        transition:
+          transform .18s ease,
+          border-color .18s ease,
+          background .18s ease,
+          box-shadow .18s ease;
+      }
+
+      .fac-create-mini-button:hover{
+        transform:translateY(-1px);
+        background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft, rgba(255,255,255,.12)));
+        box-shadow:0 10px 24px color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
       }
 
       .fac-create-locked{
@@ -2574,11 +2693,22 @@ function renderStyles() {
         display:flex;
         align-items:flex-start;
         gap:10px;
-        padding:13px 14px;
+        padding:14px 14px;
         border-radius:16px;
         border:1px solid var(--border-soft, rgba(255,255,255,.12));
         background:var(--surface-glass, rgba(255,255,255,.05));
         cursor:pointer;
+        transition:
+          transform .18s ease,
+          border-color .18s ease,
+          background .18s ease,
+          box-shadow .18s ease;
+      }
+
+      .fac-create-check:hover{
+        transform:translateY(-1px);
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft, rgba(255,255,255,.12)));
+        box-shadow:0 12px 28px rgba(0,0,0,.08);
       }
 
       .fac-create-check input{
@@ -2630,18 +2760,31 @@ function renderStyles() {
 
       .fac-create-secondary,
       .fac-create-submit{
-        min-height:44px;
-        padding:0 18px;
+        min-height:46px;
+        padding:0 20px;
         border-radius:14px;
         font-size:13px;
         font-weight:800;
         cursor:pointer;
+        transition:
+          transform .18s ease,
+          border-color .18s ease,
+          background .18s ease,
+          box-shadow .18s ease,
+          opacity .18s ease;
       }
 
       .fac-create-secondary{
         border:1px solid var(--border-soft, rgba(255,255,255,.12));
         background:var(--surface-glass, rgba(255,255,255,.05));
         color:var(--text-soft, rgba(255,255,255,.78));
+      }
+
+      .fac-create-secondary:hover{
+        transform:translateY(-1px);
+        background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft, rgba(255,255,255,.12)));
+        box-shadow:0 12px 26px color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
       }
 
       .fac-create-submit{
@@ -2651,11 +2794,22 @@ function renderStyles() {
         box-shadow:0 12px 26px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
       }
 
+      .fac-create-submit:hover{
+        transform:translateY(-1px);
+        filter:saturate(1.03) brightness(1.02);
+        box-shadow:0 16px 32px color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent);
+      }
+
       .fac-create-submit:disabled,
       .fac-create-secondary:disabled,
-      .fac-create-mini-button:disabled{
+      .fac-create-mini-button:disabled,
+      .fac-create-selected-clear:disabled,
+      .fac-create-search-item:disabled,
+      .fac-create-close:disabled{
         opacity:.82;
         cursor:wait;
+        transform:none;
+        box-shadow:none;
       }
 
       .fac-create-submit-inner{
@@ -2671,8 +2825,8 @@ function renderStyles() {
 
       [data-theme="light"] .fac-create-panel{
         background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
-          radial-gradient(circle at 92% 0%, color-mix(in srgb, var(--info, #38bdf8) 7%, transparent), transparent 32%),
+          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 7%, transparent), transparent 34%),
+          radial-gradient(circle at 95% 0%, rgba(255,255,255,.66), transparent 30%),
           linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,255,.96));
         box-shadow:
           0 28px 70px rgba(15,23,42,.14),
@@ -2722,8 +2876,8 @@ function renderStyles() {
       [data-theme="light"] .fac-create-check,
       [data-theme="light"] .fac-create-secondary,
       [data-theme="light"] .fac-create-mini-button,
-      [data-theme="light"] .fac-create-locked,
-      [data-theme="light"] .fac-create-target-pill{
+      [data-theme="light"] .fac-create-selected-clear,
+      [data-theme="light"] .fac-create-locked{
         background:rgba(255,255,255,.72);
         border-color:rgba(15,23,42,.08);
       }
@@ -2763,7 +2917,7 @@ function renderStyles() {
         }
 
         .fac-create-selected{
-          grid-template-columns:38px minmax(0, 1fr);
+          grid-template-columns:40px minmax(0, 1fr);
         }
 
         .fac-create-selected-clear{
@@ -2808,11 +2962,10 @@ function renderModalInner() {
 
         <div class="fac-create-header">
           <div class="fac-create-header-copy">
-            <span>Facturación · Onion Support</span>
             <h2 id="facturas-create-modal-title">Crear factura</h2>
             <p>
-              Factura vinculada a incidencia. La fecha fiscal se toma de la creación real;
-              moneda EUR, cuenta de pago y cálculo fiscal quedan resueltos por backend.
+              Crea una factura vinculada a una incidencia.
+              La fecha de factura se toma automáticamente al crearla.
             </p>
           </div>
 
@@ -2857,11 +3010,11 @@ function renderModalInner() {
                 value: form.fechaServicio,
               })}
 
-              ${renderInput({
+              ${renderSelect({
                 label: "Forma de pago",
                 name: "formaPago",
                 value: form.formaPago,
-                placeholder: "transferencia bancaria",
+                options: PAYMENT_OPTIONS,
               })}
             </div>
 
@@ -2891,6 +3044,7 @@ function renderModalInner() {
                 value: form.cantidad,
                 min: "0.01",
                 step: "0.01",
+                inputmode: "decimal",
                 required: true,
                 error: errors.cantidad,
               })}
@@ -2902,6 +3056,7 @@ function renderModalInner() {
                 value: form.precioUnitario,
                 min: "0.01",
                 step: "0.01",
+                inputmode: "decimal",
                 required: true,
                 error: errors.precioUnitario,
               })}
@@ -2911,6 +3066,7 @@ function renderModalInner() {
                 name: "totalPreview",
                 value: formatMoney(total),
                 readonly: true,
+                role: "total-preview-input",
               })}
             </div>
 
@@ -2918,13 +3074,13 @@ function renderModalInner() {
               label: "Enviar email al cliente",
               name: "sendEmail",
               checked: parseBoolean(form.sendEmail, true),
-              help: "Adjunta el PDF generado y usa el template premium del backend.",
+              help: "Adjunta el PDF generado y utiliza el envío configurado para facturas.",
             })}
 
             <div class="fac-create-actions">
               <div class="fac-create-submit-summary">
-                <span>Total estimado · cálculo fiscal final en backend</span>
-                <strong>${escapeHtml(formatMoney(total))}</strong>
+                <span>Total estimado</span>
+                <strong data-role="total-preview-inline">${escapeHtml(formatMoney(total))}</strong>
               </div>
 
               <div class="fac-create-action-buttons">
@@ -3168,12 +3324,14 @@ export function openFacturasCreateModal(draft = {}) {
     incidenciaId: draftTicketId || safeText(normalizedDraft.incidenciaId, ""),
     incidenciaSubject: draftTicketSubject || safeText(normalizedDraft.incidenciaSubject, ""),
     fechaServicio: safeText(normalizedDraft.fechaServicio, modalState.form.fechaServicio),
+    formaPago: safeText(normalizedDraft.formaPago, modalState.form.formaPago),
   };
 
   renderModal();
   lockBody();
   attachEscHandler();
   attachRootBindings();
+  syncDerivedUi();
 
   if (!safeText(modalState.form.clienteId, "")) {
     focusField("clienteSearch");
@@ -3235,6 +3393,7 @@ export function updateFacturasCreateModal(draft = {}) {
 
   renderModal();
   attachRootBindings();
+  syncDerivedUi();
   focusPanel();
 
   return true;
@@ -3257,6 +3416,7 @@ async function handleSubmit() {
   if (!validation.valid) {
     renderModal();
     attachRootBindings();
+    syncDerivedUi();
     focusFirstInvalidField();
 
     showToast("Revisa los campos obligatorios.", "warning");
@@ -3270,6 +3430,7 @@ async function handleSubmit() {
 
   renderModal();
   attachRootBindings();
+  syncDerivedUi();
   focusPanel();
 
   safeEmit("facturas:create:submit", {
@@ -3290,6 +3451,7 @@ async function handleSubmit() {
 
     renderModal();
     attachRootBindings();
+    syncDerivedUi();
     focusPanel();
 
     showToast("Factura creada correctamente.", "success");
@@ -3319,6 +3481,7 @@ async function handleSubmit() {
 
     renderModal();
     attachRootBindings();
+    syncDerivedUi();
     focusFirstInvalidField();
 
     showToast(modalState.serverError, "error");
@@ -3367,6 +3530,7 @@ async function selectCliente(index = -1) {
 
   renderModal();
   attachRootBindings();
+  syncDerivedUi();
   focusField("ticketSelect");
 
   await loadTicketsForSelectedClient({
@@ -3403,6 +3567,7 @@ function clearCliente() {
 
   renderModal();
   attachRootBindings();
+  syncDerivedUi();
   focusField("clienteSearch");
 
   return true;
@@ -3421,6 +3586,7 @@ function selectTicket(index = -1) {
 
   renderModal();
   attachRootBindings();
+  syncDerivedUi();
   focusField("descripcion");
 
   return true;
@@ -3446,6 +3612,7 @@ function selectTicketById(ticketId = "") {
 
   renderModal();
   attachRootBindings();
+  syncDerivedUi();
   focusField("ticketSelect");
 
   return true;
@@ -3462,6 +3629,7 @@ function clearTicket() {
 
   renderModal();
   attachRootBindings();
+  syncDerivedUi();
   focusField("ticketSelect");
 
   return true;
@@ -3541,6 +3709,8 @@ function handleFieldInput(field) {
   modalState.serverError = "";
   modalState.successMessage = "";
   modalState.createdFacturaId = "";
+
+  syncDerivedUi();
 }
 
 function attachRootBindings() {

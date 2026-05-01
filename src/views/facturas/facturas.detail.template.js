@@ -2,28 +2,33 @@
    Onion SPA - Facturas Detail Template
    Archivo: src/views/facturas/facturas.detail.template.js
 
-   FACTURAS DETAIL MODAL · VISUAL 1:1 CON INCIDENCIAS MODE
-   FINAL PRO SYSTEM · DETAIL MODAL · COMPACT VERSION
+   FINAL PRO SYSTEM · FACTURAS DETAIL MODAL · EXTREME 10/10
+   PATCH · IVA / IRPF REAL · TAX BREAKDOWN HARDENED
+   PATCH · CLASS BASED MODAL · ACTION SAFE · NO ROUTE NAVIGATION
 
    RESPONSABILIDADES:
    - renderizar modal premium centrado de detalle de factura
    - mantener compatibilidad con facturasView.js
-   - soportar estado loading / sending / acciones del header
+   - soportar estado loading / sending / viewing / downloading
    - exponer exports legacy para imports antiguos
-   - mantener data-action estables para bindings existentes
+   - mantener data-action y data-facturas-action estables
    - eliminar secciones Cliente y Metadata
    - mostrar IVA / IRPF / retenciones / otros impuestos cuando existan
    - mostrar incidencia vinculada como acción modal
    - no usar navegación a URL inexistente para incidencia
-   - quitar "Total línea"
+   - quitar "Total línea" visual pesado
    - cerrar modal con botón aspa X
-
-   PATCH:
-   - extracción de incidencia alineada con facturas.template.js
-   - soporte para payloads detail más pobres que el listado
-   - soporte raw.raw / data / payload / result / factura / invoice
-   - cards fiscales dedicadas para IVA e IRPF
+   - tolerar payloads pobres, normalizados, raw, raw.raw, data, payload,
+     result, factura e invoice
+   - soportar facturas enriquecidas desde incidenciaGet.js
 ========================================================= */
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const STYLE_ID = "onion-facturas-detail-template-styles-v3";
+const DEFAULT_CURRENCY = "EUR";
 
 /* =========================================================
    SAFE HELPERS
@@ -37,12 +42,6 @@ function safeText(value, fallback = "—") {
   return text || fallback;
 }
 
-function safeNumber(value, fallback = 0) {
-  const n = Number(value);
-
-  return Number.isFinite(n) ? n : fallback;
-}
-
 function safeArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -51,6 +50,15 @@ function safeObject(value) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
+}
+
+function hasOwnKeys(value = {}) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length
+  );
 }
 
 function first(...values) {
@@ -65,6 +73,15 @@ function first(...values) {
       continue;
     }
 
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === 0
+    ) {
+      continue;
+    }
+
     return value;
   }
 
@@ -73,11 +90,11 @@ function first(...values) {
 
 function escapeHtml(value = "") {
   return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function normalizeText(value = "") {
@@ -88,98 +105,63 @@ function normalizeText(value = "") {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-function formatMoney(value, currency = "EUR") {
-  const amount = safeNumber(value, 0);
-  const code = safeText(currency, "EUR");
-
-  try {
-    return new Intl.NumberFormat("es-ES", {
-      style: "currency",
-      currency: code,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(2)} ${code}`;
-  }
+function normalizeKey(value = "") {
+  return normalizeText(value)
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^\w]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
-function formatPercent(value = 0) {
-  const n = safeNumber(value, 0);
+function safeNumber(value, fallback = 0) {
+  if (value === null || value === undefined || value === "") {
+    return fallback;
+  }
 
-  if (!n) return "";
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : fallback;
+  }
 
-  const clean = Number.isInteger(n) ? String(n) : String(n).replace(".", ",");
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
 
-  return `${clean}%`;
+  if (typeof value === "object") {
+    return fallback;
+  }
+
+  const raw = String(value)
+    .trim()
+    .replace(/€/g, "")
+    .replace(/%/g, "")
+    .replace(/\s/g, "");
+
+  if (!raw) return fallback;
+
+  let normalized = raw;
+  const hasComma = normalized.includes(",");
+  const hasDot = normalized.includes(".");
+
+  if (hasComma && hasDot) {
+    normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
+  } else if (hasComma) {
+    normalized = normalized.replace(/,/g, ".");
+  }
+
+  const n = Number(normalized);
+
+  return Number.isFinite(n) ? n : fallback;
 }
 
-function formatDate(value) {
-  if (!value) return "—";
+function bool(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
+  const key = normalizeText(value);
 
-  try {
-    return new Intl.DateTimeFormat("es-ES", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(date);
-  } catch {
-    return "—";
-  }
-}
+  if (["true", "1", "yes", "si", "sí", "on"].includes(key)) return true;
+  if (["false", "0", "no", "off"].includes(key)) return false;
 
-function formatDateTime(value) {
-  if (!value) return "—";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-
-  try {
-    return new Intl.DateTimeFormat("es-ES", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(date);
-  } catch {
-    return "—";
-  }
-}
-
-function formatRelativeDate(value) {
-  if (!value) return "Sin fecha";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Sin fecha";
-
-  const diffMs = date.getTime() - Date.now();
-  const diffMin = Math.round(diffMs / 60000);
-  const absMin = Math.abs(diffMin);
-
-  if (absMin < 1) return "Ahora mismo";
-
-  if (absMin < 60) {
-    return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
-  }
-
-  const diffHours = Math.round(absMin / 60);
-
-  if (diffHours < 24) {
-    return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
-  }
-
-  const diffDays = Math.round(diffHours / 24);
-
-  if (diffDays <= 7) {
-    return diffMin > 0
-      ? `En ${diffDays} día${diffDays === 1 ? "" : "s"}`
-      : `Hace ${diffDays} día${diffDays === 1 ? "" : "s"}`;
-  }
-
-  return formatDate(value);
+  return fallback;
 }
 
 function readPath(source = {}, path = "") {
@@ -210,7 +192,7 @@ function uniqueObjects(items = []) {
 
   safeArray(items).forEach((item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) return;
-
+    if (!hasOwnKeys(item)) return;
     if (seen.has(item)) return;
 
     seen.add(item);
@@ -236,6 +218,11 @@ function getPayloadSources(payload = {}) {
     safeObject(item.item),
     safeObject(item.factura),
     safeObject(item.invoice),
+    safeObject(item.billing),
+    safeObject(item.totales),
+    safeObject(item.totals),
+    safeObject(item.summary),
+    safeObject(item.payment),
 
     safeObject(raw.data),
     safeObject(raw.payload),
@@ -243,6 +230,11 @@ function getPayloadSources(payload = {}) {
     safeObject(raw.item),
     safeObject(raw.factura),
     safeObject(raw.invoice),
+    safeObject(raw.billing),
+    safeObject(raw.totales),
+    safeObject(raw.totals),
+    safeObject(raw.summary),
+    safeObject(raw.payment),
 
     safeObject(rawRaw.data),
     safeObject(rawRaw.payload),
@@ -250,6 +242,11 @@ function getPayloadSources(payload = {}) {
     safeObject(rawRaw.item),
     safeObject(rawRaw.factura),
     safeObject(rawRaw.invoice),
+    safeObject(rawRaw.billing),
+    safeObject(rawRaw.totales),
+    safeObject(rawRaw.totals),
+    safeObject(rawRaw.summary),
+    safeObject(rawRaw.payment),
   ]);
 }
 
@@ -262,12 +259,133 @@ function firstFromSources(sources = [], paths = []) {
         if (typeof value === "string" && value.trim() === "") continue;
         if (Array.isArray(value) && value.length === 0) continue;
 
+        if (
+          value &&
+          typeof value === "object" &&
+          !Array.isArray(value) &&
+          Object.keys(value).length === 0
+        ) {
+          continue;
+        }
+
         return value;
       }
     }
   }
 
   return null;
+}
+
+/* =========================================================
+   FORMATTERS
+========================================================= */
+
+function formatMoney(value, currency = DEFAULT_CURRENCY) {
+  const amount = safeNumber(value, 0);
+  const code = safeText(currency, DEFAULT_CURRENCY).toUpperCase();
+
+  try {
+    return new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: code,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${amount.toFixed(2).replace(".", ",")} ${code}`;
+  }
+}
+
+function formatPercent(value = 0) {
+  const n = Math.abs(safeNumber(value, 0));
+
+  if (!n) return "";
+
+  const clean = Number.isInteger(n)
+    ? String(n)
+    : String(n).replace(".", ",");
+
+  return `${clean}%`;
+}
+
+function normalizeDateInput(value = null) {
+  if (!value) return null;
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 9999999999 ? new Date(value) : new Date(value * 1000);
+  }
+
+  const raw = safeText(value, "");
+
+  if (!raw) return null;
+
+  return new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
+}
+
+function formatDate(value) {
+  const date = normalizeDateInput(value);
+
+  if (!date || Number.isNaN(date.getTime())) return "—";
+
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(date);
+  } catch {
+    return "—";
+  }
+}
+
+function formatDateTime(value) {
+  const date = normalizeDateInput(value);
+
+  if (!date || Number.isNaN(date.getTime())) return "—";
+
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  } catch {
+    return "—";
+  }
+}
+
+function formatRelativeDate(value) {
+  const date = normalizeDateInput(value);
+
+  if (!date || Number.isNaN(date.getTime())) return "Sin fecha";
+
+  const diffMs = date.getTime() - Date.now();
+  const diffMin = Math.round(diffMs / 60000);
+  const absMin = Math.abs(diffMin);
+
+  if (absMin < 1) return "Ahora mismo";
+
+  if (absMin < 60) {
+    return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
+  }
+
+  const diffHours = Math.round(absMin / 60);
+
+  if (diffHours < 24) {
+    return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
+  }
+
+  const diffDays = Math.round(diffHours / 24);
+
+  if (diffDays <= 7) {
+    return diffMin > 0
+      ? `En ${diffDays} día${diffDays === 1 ? "" : "s"}`
+      : `Hace ${diffDays} día${diffDays === 1 ? "" : "s"}`;
+  }
+
+  return formatDate(value);
 }
 
 /* =========================================================
@@ -283,9 +401,11 @@ function getFacturaId(factura = {}) {
       "_id",
       "facturaId",
       "invoiceId",
-      "numero",
+      "documentId",
+      "uuid",
       "numeroFacturaLegal",
       "numeroFacturaSistema",
+      "numero",
     ]),
     ""
   );
@@ -296,17 +416,34 @@ function getFacturaNumero(factura = {}) {
 
   return safeText(
     firstFromSources(sources, [
-      "numero",
       "numeroFacturaLegal",
-      "numeroFacturaSistema",
+      "legalInvoiceNumber",
+      "legalNumber",
+      "numeroLegal",
+      "numeroFactura",
+      "invoiceNumber",
+      "number",
+      "numero",
       "code",
       "facturaCode",
-      "invoiceNumber",
       "facturaId",
       "invoiceId",
       "id",
     ]),
     "—"
+  );
+}
+
+function getFacturaSistema(factura = {}) {
+  const sources = getPayloadSources(factura);
+
+  return safeText(
+    firstFromSources(sources, [
+      "numeroFacturaSistema",
+      "systemInvoiceNumber",
+      "systemNumber",
+    ]),
+    ""
   );
 }
 
@@ -318,19 +455,46 @@ function getClienteNombre(factura = {}) {
       "cliente.nombreContacto",
       "cliente.empresa",
       "cliente.razonSocial",
+      "cliente.companyName",
       "cliente.nombreCompleto",
       "cliente.nombre",
       "cliente.name",
+      "cliente.displayName",
+
+      "clienteSnapshot.nombreContacto",
+      "clienteSnapshot.razonSocial",
+      "clienteSnapshot.name",
+
       "client.name",
       "customer.name",
+
       "clienteEmpresa",
       "clienteNombre",
       "clientName",
       "customerName",
+      "companyName",
       "name",
       "nombre",
     ]),
     "Cliente"
+  );
+}
+
+function getClienteEmpresa(factura = {}) {
+  const sources = getPayloadSources(factura);
+
+  return safeText(
+    firstFromSources(sources, [
+      "cliente.razonSocial",
+      "cliente.companyName",
+      "cliente.empresa",
+      "cliente.nombreFiscal",
+      "clienteSnapshot.razonSocial",
+      "clienteSnapshot.companyName",
+      "clienteEmpresa",
+      "companyName",
+    ]),
+    ""
   );
 }
 
@@ -341,6 +505,8 @@ function getClienteEmail(factura = {}) {
     firstFromSources(sources, [
       "cliente.email",
       "cliente.mail",
+      "cliente.emailCliente",
+      "clienteSnapshot.email",
       "client.email",
       "customer.email",
       "clienteEmail",
@@ -348,6 +514,7 @@ function getClienteEmail(factura = {}) {
       "email",
       "clientEmail",
       "customerEmail",
+      "email.customerEmail",
     ]),
     ""
   );
@@ -357,12 +524,26 @@ function getFacturaFecha(factura = {}) {
   const sources = getPayloadSources(factura);
 
   return firstFromSources(sources, [
-    "fecha",
     "fechaFactura",
+    "fechaFacturaISO",
+    "fecha",
     "date",
     "issueDate",
+    "issuedAt",
+    "fechaEmision",
+    "lifecycle.issuedAt",
     "createdAt",
-    "updatedAt",
+  ]);
+}
+
+function getFacturaServicioAt(factura = {}) {
+  const sources = getPayloadSources(factura);
+
+  return firstFromSources(sources, [
+    "fechaServicio",
+    "fechaServicioISO",
+    "serviceAt",
+    "lifecycle.serviceAt",
   ]);
 }
 
@@ -371,9 +552,12 @@ function getFacturaUpdatedAt(factura = {}) {
 
   return firstFromSources(sources, [
     "updatedAt",
+    "lastActivityAt",
+    "lifecycle.updatedAt",
+    "lifecycle.lastActivityAt",
     "fechaEnvio",
     "sentAt",
-    "fecha",
+    "email.sentAt",
     "createdAt",
   ]);
 }
@@ -385,6 +569,8 @@ function getFacturaFechaEnvio(factura = {}) {
     "fechaEnvio",
     "sentAt",
     "mailSentAt",
+    "email.sentAt",
+    "lifecycle.sentAt",
   ]);
 }
 
@@ -396,6 +582,8 @@ function getFacturaFormaPago(factura = {}) {
       "formaPago",
       "metodoPago",
       "paymentMethod",
+      "payment.methodLabel",
+      "payment.method",
     ]),
     "—"
   );
@@ -408,9 +596,14 @@ function getFacturaMoneda(factura = {}) {
     firstFromSources(sources, [
       "moneda",
       "currency",
+      "facturaCurrency",
+      "facturaMoneda",
+      "totales.currency",
+      "payment.currency",
+      "meta.currency",
     ]),
-    "EUR"
-  );
+    DEFAULT_CURRENCY
+  ).toUpperCase();
 }
 
 function getFacturaTotal(factura = {}) {
@@ -422,6 +615,15 @@ function getFacturaTotal(factura = {}) {
       "amount",
       "importe",
       "importeTotal",
+      "facturaTotal",
+      "facturaImporte",
+      "importeFactura",
+      "totalFactura",
+      "invoiceAmount",
+      "totales.total",
+      "totals.total",
+      "summary.total",
+      "payment.paidAmount",
     ]),
     0
   );
@@ -437,6 +639,12 @@ function getFacturaBase(factura = {}) {
       "base",
       "taxBase",
       "baseAmount",
+      "totales.baseImponible",
+      "totales.subtotal",
+      "totals.baseImponible",
+      "totals.subtotal",
+      "summary.baseImponible",
+      "summary.subtotal",
     ]),
     0
   );
@@ -445,18 +653,81 @@ function getFacturaBase(factura = {}) {
 function getFacturaImpuestos(factura = {}) {
   const sources = getPayloadSources(factura);
 
-  return safeNumber(
+  const direct = safeNumber(
     firstFromSources(sources, [
       "impuestosTotal",
       "taxTotal",
       "totalImpuestos",
       "tax",
       "taxAmount",
-      "iva",
+      "totales.totalImpuestos",
+      "totals.totalImpuestos",
+      "summary.totalImpuestos",
+    ]),
+    NaN
+  );
+
+  if (Number.isFinite(direct)) {
+    return direct;
+  }
+
+  const iva = safeNumber(
+    firstFromSources(sources, [
+      "totales.iva",
+      "iva.importe",
+      "iva.amount",
       "ivaImporte",
       "importeIva",
       "totalIva",
       "ivaTotal",
+      "ivaAmount",
+    ]),
+    0
+  );
+
+  const irpf = safeNumber(
+    firstFromSources(sources, [
+      "totales.irpf",
+      "irpf.importe",
+      "irpf.amount",
+      "irpfImporte",
+      "importeIrpf",
+      "totalIrpf",
+      "irpfTotal",
+      "irpfAmount",
+      "retencion",
+      "withholding",
+      "withholdingAmount",
+    ]),
+    0
+  );
+
+  return iva + irpf;
+}
+
+function getFacturaPagado(factura = {}) {
+  const sources = getPayloadSources(factura);
+
+  return safeNumber(
+    firstFromSources(sources, [
+      "paidAmount",
+      "payment.paidAmount",
+      "totales.pagado",
+      "totals.paid",
+    ]),
+    0
+  );
+}
+
+function getFacturaPendiente(factura = {}) {
+  const sources = getPayloadSources(factura);
+
+  return safeNumber(
+    firstFromSources(sources, [
+      "pendingAmount",
+      "payment.pendingAmount",
+      "totales.pendiente",
+      "totals.pending",
     ]),
     0
   );
@@ -469,6 +740,9 @@ function getFacturaEnviadoA(factura = {}) {
     firstFromSources(sources, [
       "enviadoA",
       "sentTo",
+      "email.enviadoA",
+      "email.to",
+      "email.customerEmail",
       "cliente.email",
       "client.email",
       "customer.email",
@@ -482,13 +756,28 @@ function getFacturaEnviadoA(factura = {}) {
 function getFacturaPdfAvailable(factura = {}) {
   const sources = getPayloadSources(factura);
 
+  const explicit = firstFromSources(sources, [
+    "pdfAvailable",
+    "hasPdf",
+    "meta.hasPdf",
+    "document.available",
+    "document.hasPdf",
+  ]);
+
+  if (explicit !== null && explicit !== undefined) {
+    return bool(explicit, false);
+  }
+
   return Boolean(
     firstFromSources(sources, [
-      "pdfAvailable",
-      "hasPdf",
       "blobPath",
       "pdfUrl",
       "pdf",
+      "document.blobPath",
+      "document.fileName",
+      "document.url",
+      "document.downloadUrl",
+      "document.viewUrl",
     ])
   );
 }
@@ -498,6 +787,8 @@ function getFacturaPreview(factura = {}) {
 
   return safeText(
     firstFromSources(sources, [
+      "descripcionPrincipal",
+      "conceptoPrincipal",
       "descripcion",
       "concepto",
       "preview",
@@ -508,6 +799,10 @@ function getFacturaPreview(factura = {}) {
       "items.0.concepto",
       "conceptos.0.descripcion",
       "conceptos.0.concepto",
+      "incidencia.subject",
+      "incidencia.asunto",
+      "ticket.subject",
+      "ticket.asunto",
     ]),
     "Factura disponible para consulta."
   );
@@ -574,6 +869,7 @@ function getRelationSources(factura = {}) {
       safeObject(source.relatedIncident),
       safeObject(source.supportTicket),
       safeObject(source.case),
+      safeObject(source.relations?.ticket),
       safeObject(source.meta)
     );
   });
@@ -604,6 +900,9 @@ function getFacturaIncidenciaId(factura = {}) {
       "linkedTicket.id",
       "linkedTicket.incidenciaId",
 
+      "relations.ticket.ticketId",
+      "relations.ticket.id",
+
       "relatedTicket.ticketId",
       "relatedTicket.id",
       "relatedTicket.incidenciaId",
@@ -623,6 +922,7 @@ function getFacturaIncidenciaId(factura = {}) {
 
       "meta.ticketId",
       "meta.incidenciaId",
+      "meta.linkedTicketId",
     ]),
     ""
   );
@@ -656,6 +956,28 @@ function getFacturaIncidenciaId(factura = {}) {
   return "";
 }
 
+function getFacturaIncidenciaSubject(factura = {}) {
+  const sources = getRelationSources(factura);
+
+  return safeText(
+    firstFromSources(sources, [
+      "incidencia.subject",
+      "incidencia.asunto",
+      "incidencia.title",
+      "ticket.subject",
+      "ticket.asunto",
+      "ticket.title",
+      "linkedTicket.subject",
+      "linkedTicket.asunto",
+      "linkedTicket.title",
+      "subject",
+      "asunto",
+      "title",
+    ]),
+    ""
+  );
+}
+
 /* =========================================================
    DOMAIN HELPERS · LÍNEAS
 ========================================================= */
@@ -671,7 +993,29 @@ function getLineas(factura = {}) {
     "invoiceLines",
   ]);
 
-  return safeArray(value);
+  const rows = safeArray(value);
+
+  if (rows.length) {
+    return rows;
+  }
+
+  const concepto = getFacturaPreview(factura);
+  const base = getFacturaBase(factura);
+
+  if (concepto && base) {
+    return [
+      {
+        id: "linea-principal",
+        concepto,
+        descripcion: "",
+        cantidad: 1,
+        precioUnitario: base,
+        subtotal: base,
+      },
+    ];
+  }
+
+  return [];
 }
 
 function getLineaConcepto(linea = {}) {
@@ -714,6 +1058,7 @@ function getLineaUnitario(linea = {}) {
   return safeNumber(
     first(
       linea?.precioUnitario,
+      linea?.importeUnitario,
       linea?.unitPrice,
       linea?.precio,
       linea?.price
@@ -736,18 +1081,28 @@ function getLineaSubtotal(linea = {}) {
   return getLineaCantidad(linea) * getLineaUnitario(linea);
 }
 
-function getLineaTotal(linea = {}) {
-  const explicit = first(
-    linea?.totalLinea,
-    linea?.total,
-    linea?.importe
+function getLineaIvaPct(linea = {}) {
+  return safeNumber(
+    first(
+      linea?.ivaPorcentaje,
+      linea?.porcentajeIva,
+      linea?.ivaRate,
+      linea?.taxRate
+    ),
+    0
   );
+}
 
-  if (explicit !== null && explicit !== undefined && explicit !== "") {
-    return safeNumber(explicit, 0);
-  }
-
-  return getLineaSubtotal(linea);
+function getLineaIrpfPct(linea = {}) {
+  return safeNumber(
+    first(
+      linea?.irpfPorcentaje,
+      linea?.porcentajeIrpf,
+      linea?.irpfRate,
+      linea?.withholdingRate
+    ),
+    0
+  );
 }
 
 /* =========================================================
@@ -755,7 +1110,7 @@ function getLineaTotal(linea = {}) {
 ========================================================= */
 
 function getEstadoPagoLabel(value = "") {
-  const key = String(value || "").trim().toLowerCase();
+  const key = normalizeKey(value);
 
   switch (key) {
     case "paid":
@@ -772,6 +1127,7 @@ function getEstadoPagoLabel(value = "") {
 
     case "overdue":
     case "vencida":
+    case "vencido":
       return "Vencida";
 
     case "cancelled":
@@ -786,6 +1142,7 @@ function getEstadoPagoLabel(value = "") {
 
     case "partial":
     case "parcial":
+    case "pago_parcial":
       return "Pago parcial";
 
     default:
@@ -794,18 +1151,21 @@ function getEstadoPagoLabel(value = "") {
 }
 
 function getEstadoLabel(value = "") {
-  const key = String(value || "").trim().toLowerCase();
+  const key = normalizeKey(value);
 
   switch (key) {
     case "emitida":
+    case "emitido":
     case "issued":
       return "Emitida";
 
     case "enviada":
+    case "enviado":
     case "sent":
       return "Enviada";
 
     case "anulada":
+    case "anulado":
     case "void":
       return "Anulada";
 
@@ -814,6 +1174,7 @@ function getEstadoLabel(value = "") {
       return "Borrador";
 
     case "cancelada":
+    case "cancelado":
     case "cancelled":
     case "canceled":
       return "Cancelada";
@@ -833,6 +1194,7 @@ function getFacturaEstadoPagoRaw(factura = {}) {
   return firstFromSources(sources, [
     "estadoPago",
     "paymentStatus",
+    "payment.status",
   ]);
 }
 
@@ -853,100 +1215,52 @@ function getFacturaEstadoLabel(factura = {}) {
   return getEstadoLabel(getFacturaEstadoRaw(factura));
 }
 
-function getEstadoPagoChipStyle(value = "") {
-  const key = String(value || "").trim().toLowerCase();
+function getEstadoPagoTone(value = "") {
+  const key = normalizeKey(value);
 
   if (["paid", "pagada", "pagado", "cobrada", "abonada"].includes(key)) {
-    return `
-      color:var(--success-strong, #36c690);
-      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
-    `;
+    return "success";
   }
 
   if (["pending", "pendiente", "partial", "parcial", "unpaid"].includes(key)) {
-    return `
-      color:var(--warning-strong, #ffbc42);
-      background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
-    `;
+    return "warning";
   }
 
-  if (["overdue", "vencida"].includes(key)) {
-    return `
-      color:var(--danger-strong, #ff6b6b);
-      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
-    `;
+  if (["overdue", "vencida", "vencido"].includes(key)) {
+    return "danger";
   }
 
   if (["cancelled", "canceled", "cancelada", "cancelado"].includes(key)) {
-    return `
-      color:var(--text-dim);
-      background:var(--surface-glass);
-      border:1px solid var(--border-soft);
-    `;
+    return "muted";
   }
 
-  return `
-    color:var(--text-soft);
-    background:var(--surface-glass);
-    border:1px solid var(--border-soft);
-  `;
+  return "neutral";
 }
 
-function getEstadoChipStyle(value = "") {
-  const key = String(value || "").trim().toLowerCase();
+function getEstadoTone(value = "") {
+  const key = normalizeKey(value);
 
-  if (["emitida", "issued"].includes(key)) {
-    return `
-      color:var(--accent-strong, var(--accent, #7c5cff));
-      background:color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, transparent);
-    `;
-  }
-
-  if (["enviada", "sent"].includes(key)) {
-    return `
-      color:var(--success-strong, #36c690);
-      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
-    `;
-  }
-
-  if (["anulada", "void", "cancelada", "cancelled", "canceled"].includes(key)) {
-    return `
-      color:var(--danger-strong, #ff6b6b);
-      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
-    `;
+  if (["enviada", "enviado", "sent", "abonada", "paid"].includes(key)) {
+    return "success";
   }
 
   if (["borrador", "draft"].includes(key)) {
-    return `
-      color:var(--warning-strong, #ffbc42);
-      background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
-    `;
+    return "warning";
   }
 
-  if (["abonada", "paid"].includes(key)) {
-    return `
-      color:var(--success-strong, #36c690);
-      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
-    `;
+  if (["anulada", "anulado", "void", "cancelada", "cancelado", "cancelled", "canceled"].includes(key)) {
+    return "danger";
   }
 
-  return `
-    color:var(--text-soft);
-    background:var(--surface-glass);
-    border:1px solid var(--border-soft);
-  `;
+  if (["emitida", "emitido", "issued"].includes(key)) {
+    return "accent";
+  }
+
+  return "neutral";
 }
 
 /* =========================================================
-   IMPUESTOS
+   IMPUESTOS · IVA / IRPF HARDENED
 ========================================================= */
 
 function getTaxLines(factura = {}) {
@@ -966,27 +1280,21 @@ function getTaxLines(factura = {}) {
 function normalizeTaxLine(entry = {}) {
   const impuesto = safeObject(entry);
 
-  return {
-    tipo: safeText(
-      first(
-        impuesto.tipo,
-        impuesto.nombre,
-        impuesto.name,
-        impuesto.label,
-        impuesto.code
-      ),
-      "Impuesto"
+  const tipo = safeText(
+    first(
+      impuesto.tipo,
+      impuesto.taxType,
+      impuesto.nombre,
+      impuesto.name,
+      impuesto.label,
+      impuesto.code
     ),
+    "Impuesto"
+  );
 
-    key: normalizeText(
-      first(
-        impuesto.tipo,
-        impuesto.nombre,
-        impuesto.name,
-        impuesto.label,
-        impuesto.code
-      )
-    ),
+  return {
+    tipo,
+    key: normalizeKey(tipo),
 
     porcentaje: safeNumber(
       first(
@@ -994,6 +1302,15 @@ function normalizeTaxLine(entry = {}) {
         impuesto.percent,
         impuesto.rate,
         impuesto.tipoPorcentaje
+      ),
+      0
+    ),
+
+    base: safeNumber(
+      first(
+        impuesto.base,
+        impuesto.taxBase,
+        impuesto.baseAmount
       ),
       0
     ),
@@ -1007,11 +1324,85 @@ function normalizeTaxLine(entry = {}) {
       ),
       0
     ),
+
+    sign: safeText(
+      first(
+        impuesto.sign,
+        impuesto.tipoOperacion
+      ),
+      ""
+    ),
+  };
+}
+
+function getObjectTax(factura = {}, type = "iva") {
+  const sources = getPayloadSources(factura);
+
+  const objectPaths =
+    type === "iva"
+      ? ["iva", "tax.iva", "taxes.iva"]
+      : ["irpf", "retencionIrpf", "withholding", "tax.irpf", "taxes.irpf"];
+
+  const obj = safeObject(firstFromSources(sources, objectPaths));
+
+  if (!hasOwnKeys(obj)) {
+    return null;
+  }
+
+  const importe = safeNumber(
+    first(
+      obj.importe,
+      obj.amount,
+      obj.total,
+      obj.value
+    ),
+    0
+  );
+
+  const porcentaje = safeNumber(
+    first(
+      obj.porcentaje,
+      obj.percent,
+      obj.rate,
+      obj.tipoPorcentaje
+    ),
+    0
+  );
+
+  const base = safeNumber(
+    first(
+      obj.base,
+      obj.taxBase,
+      obj.baseAmount
+    ),
+    0
+  );
+
+  const enabled = bool(obj.enabled, Boolean(importe || porcentaje || base));
+
+  if (!enabled && !importe && !porcentaje && !base) {
+    return null;
+  }
+
+  return {
+    tipo: type === "iva" ? "IVA" : "IRPF",
+    key: type,
+    porcentaje,
+    base,
+    importe,
+    sign: type === "irpf" ? "negative" : "positive",
+    source: "object",
   };
 }
 
 function getExplicitTax(factura = {}, type = "iva") {
   const sources = getPayloadSources(factura);
+
+  const objectTax = getObjectTax(factura, type);
+
+  if (objectTax) {
+    return objectTax;
+  }
 
   if (type === "iva") {
     const importe = safeNumber(
@@ -1021,9 +1412,10 @@ function getExplicitTax(factura = {}, type = "iva") {
         "totalIva",
         "ivaTotal",
         "ivaAmount",
-        "tax",
-        "taxAmount",
-        "iva",
+        "totales.iva",
+        "totals.iva",
+        "summary.iva",
+        "meta.displayIva",
       ]),
       0
     );
@@ -1038,11 +1430,25 @@ function getExplicitTax(factura = {}, type = "iva") {
       0
     );
 
-    if (importe || porcentaje) {
+    const base = safeNumber(
+      firstFromSources(sources, [
+        "ivaBase",
+        "baseIva",
+        "baseImponible",
+        "totales.baseImponible",
+      ]),
+      0
+    );
+
+    if (importe || porcentaje || base) {
       return {
         tipo: "IVA",
+        key: "iva",
         porcentaje,
+        base,
         importe,
+        sign: "positive",
+        source: "explicit",
       };
     }
 
@@ -1060,7 +1466,10 @@ function getExplicitTax(factura = {}, type = "iva") {
       "retencionIrpf",
       "withholding",
       "withholdingAmount",
-      "irpf",
+      "totales.irpf",
+      "totals.irpf",
+      "summary.irpf",
+      "meta.displayIrpf",
     ]),
     0
   );
@@ -1076,11 +1485,26 @@ function getExplicitTax(factura = {}, type = "iva") {
     0
   );
 
-  if (importe || porcentaje) {
+  const base = safeNumber(
+    firstFromSources(sources, [
+      "irpfBase",
+      "baseIrpf",
+      "retencionBase",
+      "baseImponible",
+      "totales.baseImponible",
+    ]),
+    0
+  );
+
+  if (importe || porcentaje || base) {
     return {
       tipo: "IRPF",
+      key: "irpf",
       porcentaje,
+      base,
       importe,
+      sign: "negative",
+      source: "explicit",
     };
   }
 
@@ -1096,20 +1520,29 @@ function getImpuestosBreakdown(factura = {}) {
 
   impuestos.forEach((entry) => {
     const normalized = normalizeTaxLine(entry);
-    const tipo = normalized.key;
+    const key = normalized.key;
 
-    if (tipo.includes("iva") || tipo.includes("vat")) {
-      iva = normalized;
+    if (key.includes("iva") || key.includes("vat")) {
+      iva = {
+        ...normalized,
+        tipo: "IVA",
+        key: "iva",
+      };
       return;
     }
 
     if (
-      tipo.includes("irpf") ||
-      tipo.includes("retencion") ||
-      tipo.includes("retención") ||
-      tipo.includes("withholding")
+      key.includes("irpf") ||
+      key.includes("retencion") ||
+      key.includes("retention") ||
+      key.includes("withholding")
     ) {
-      irpf = normalized;
+      irpf = {
+        ...normalized,
+        tipo: "IRPF",
+        key: "irpf",
+        sign: normalized.sign || "negative",
+      };
       return;
     }
 
@@ -1129,8 +1562,12 @@ function getImpuestosBreakdown(factura = {}) {
   if (!iva && !irpf && !otros.length && totalFallback) {
     otros.push({
       tipo: "Impuestos",
+      key: "impuestos",
       porcentaje: 0,
+      base: getFacturaBase(factura),
       importe: totalFallback,
+      sign: totalFallback < 0 ? "negative" : "positive",
+      source: "fallback",
     });
   }
 
@@ -1142,13 +1579,155 @@ function getImpuestosBreakdown(factura = {}) {
 }
 
 /* =========================================================
-   UI PARTIALS
+   STYLES
 ========================================================= */
 
-function chip(label = "", style = "") {
+function renderStyles() {
   return `
-    <span
-      style="
+    <style id="${STYLE_ID}">
+      .facturas-detail-overlay,
+      .facturas-detail-overlay *,
+      .facturas-detail-overlay *::before,
+      .facturas-detail-overlay *::after{
+        box-sizing:border-box;
+      }
+
+      .facturas-detail-overlay{
+        position:fixed;
+        inset:0;
+        z-index:9999;
+        padding:20px;
+        display:grid;
+        place-items:center;
+        background:rgba(0,0,0,.64);
+        backdrop-filter:blur(10px);
+        -webkit-backdrop-filter:blur(10px);
+      }
+
+      .facturas-detail-modal{
+        position:relative;
+        width:min(1120px, 100%);
+        max-height:92vh;
+        overflow:hidden;
+        border-radius:24px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.08));
+        background:
+          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
+          linear-gradient(180deg, var(--surface-2, #151515), var(--surface-1, #121212));
+        box-shadow:0 34px 84px rgba(0,0,0,.40);
+        color:var(--text-soft, rgba(245,245,245,.88));
+      }
+
+      .facturas-detail-layout{
+        display:flex;
+        flex-direction:column;
+        min-height:0;
+        height:100%;
+        max-height:92vh;
+      }
+
+      .facturas-detail-header{
+        position:sticky;
+        top:0;
+        z-index:4;
+        display:grid;
+        gap:16px;
+        padding:22px 22px 18px;
+        border-bottom:1px solid var(--border-soft, rgba(255,255,255,.08));
+        background:
+          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
+          linear-gradient(180deg, var(--surface-2, #151515), var(--surface-1, #121212));
+      }
+
+      .facturas-detail-hero{
+        display:flex;
+        justify-content:space-between;
+        gap:16px;
+        flex-wrap:wrap;
+        align-items:flex-start;
+      }
+
+      .facturas-detail-identity{
+        display:flex;
+        gap:16px;
+        align-items:center;
+        min-width:0;
+        flex:1 1 620px;
+      }
+
+      .facturas-detail-avatar{
+        position:relative;
+        flex:0 0 76px;
+        width:76px;
+        height:76px;
+        border-radius:22px;
+        display:grid;
+        place-items:center;
+        background:
+          radial-gradient(circle at 25% 20%, rgba(255,255,255,.24), transparent 35%),
+          linear-gradient(135deg, rgba(124,92,255,.42), rgba(88,72,200,.18));
+        border:1px solid rgba(124,92,255,.28);
+        color:#efeaff;
+        font-size:22px;
+        font-weight:850;
+        letter-spacing:.03em;
+        box-shadow:0 12px 28px rgba(124,92,255,.18);
+      }
+
+      .facturas-detail-title-stack{
+        display:grid;
+        gap:7px;
+        min-width:0;
+        flex:1 1 auto;
+      }
+
+      .facturas-detail-chip-row{
+        display:flex;
+        align-items:center;
+        gap:8px;
+        flex-wrap:wrap;
+        min-width:0;
+      }
+
+      .facturas-detail-number{
+        display:inline-flex;
+        align-items:center;
+        max-width:230px;
+        min-height:28px;
+        padding:0 10px;
+        border-radius:999px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.08));
+        background:var(--surface-glass, rgba(255,255,255,.045));
+        color:var(--text-dim, rgba(245,245,245,.58));
+        font-size:11px;
+        font-weight:800;
+        letter-spacing:.045em;
+        text-transform:uppercase;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+      }
+
+      .facturas-detail-system-number{
+        display:inline-flex;
+        align-items:center;
+        max-width:210px;
+        min-height:28px;
+        padding:0 10px;
+        border-radius:999px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.08));
+        background:rgba(255,255,255,.026);
+        color:var(--text-faint, rgba(245,245,245,.42));
+        font-size:10px;
+        font-weight:800;
+        letter-spacing:.045em;
+        text-transform:uppercase;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+      }
+
+      .facturas-detail-chip{
         display:inline-flex;
         align-items:center;
         justify-content:center;
@@ -1156,172 +1735,594 @@ function chip(label = "", style = "") {
         padding:0 10px;
         border-radius:999px;
         font-size:11px;
-        font-weight:700;
+        font-weight:800;
         letter-spacing:.05em;
         text-transform:uppercase;
         white-space:nowrap;
-        ${style || "border:1px solid var(--border-soft); background:var(--surface-glass); color:var(--text-soft);"}
-      "
-    >
-      ${escapeHtml(label)}
-    </span>
-  `;
-}
+        border:1px solid var(--border-soft, rgba(255,255,255,.08));
+        background:var(--surface-glass, rgba(255,255,255,.045));
+        color:var(--text-soft, rgba(245,245,245,.88));
+      }
 
-function renderActionSpinner(label = "") {
-  return `
-    <span style="display:inline-flex; align-items:center; gap:8px;">
-      <span
-        aria-hidden="true"
-        style="
-          width:14px;
-          height:14px;
-          border-radius:999px;
-          border:2px solid color-mix(in srgb, currentColor 24%, transparent);
-          border-top-color:currentColor;
-          animation:facturasDetailSpin .8s linear infinite;
-        "
-      ></span>
-      ${escapeHtml(label)}
-    </span>
-  `;
-}
+      .facturas-detail-chip--success{
+        color:var(--success-strong, #36c690);
+        background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
+        border-color:color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
+      }
 
-function stat(label = "", value = "") {
-  return `
-    <article
-      style="
+      .facturas-detail-chip--warning{
+        color:var(--warning-strong, #ffbc42);
+        background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
+        border-color:color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
+      }
+
+      .facturas-detail-chip--danger{
+        color:var(--danger-strong, #ff6b6b);
+        background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
+        border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
+      }
+
+      .facturas-detail-chip--accent{
+        color:var(--accent-strong, var(--accent, #7c5cff));
+        background:color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 26%, transparent);
+      }
+
+      .facturas-detail-chip--muted{
+        color:var(--text-dim, rgba(245,245,245,.58));
+        background:var(--surface-glass, rgba(255,255,255,.045));
+        border-color:var(--border-soft, rgba(255,255,255,.08));
+      }
+
+      .facturas-detail-title{
+        margin:0;
+        color:var(--text-strong, #ffffff);
+        font-size:clamp(22px, 2.35vw, 32px);
+        line-height:.98;
+        letter-spacing:-.055em;
+        font-weight:var(--weight-black, 850);
+        word-break:break-word;
+      }
+
+      .facturas-detail-subtitle{
+        color:var(--text-dim, rgba(245,245,245,.58));
+        font-size:13px;
+        line-height:1.42;
+        word-break:break-word;
+      }
+
+      .facturas-detail-actions{
+        display:flex;
+        gap:8px;
+        flex-wrap:wrap;
+        align-items:flex-start;
+        justify-content:flex-end;
+      }
+
+      .facturas-detail-btn{
+        appearance:none;
+        min-height:38px;
+        padding:0 12px;
+        border-radius:12px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.08));
+        background:var(--surface-glass, rgba(255,255,255,.045));
+        color:var(--text-soft, rgba(245,245,245,.88));
+        font-size:12px;
+        font-weight:800;
+        cursor:pointer;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        gap:8px;
+        white-space:nowrap;
+      }
+
+      .facturas-detail-btn:hover{
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 30%, var(--border-soft));
+        background:color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent);
+      }
+
+      .facturas-detail-btn:disabled,
+      .facturas-detail-btn[aria-disabled="true"]{
+        opacity:.56;
+        cursor:not-allowed;
+        pointer-events:none;
+      }
+
+      .facturas-detail-btn--primary{
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent);
+        background:var(--accent, #7c5cff);
+        color:#fff;
+        box-shadow:0 12px 28px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
+      }
+
+      .facturas-detail-btn--close{
+        width:38px;
+        height:38px;
+        padding:0;
+        background:transparent;
+        color:var(--text-dim, rgba(245,245,245,.58));
+        font-size:18px;
+        font-weight:850;
+      }
+
+      .facturas-detail-meta-grid,
+      .facturas-detail-stats-grid{
+        display:grid;
+        grid-template-columns:repeat(4, minmax(0, 1fr));
+        gap:10px;
+      }
+
+      .facturas-detail-body-shell{
+        flex:1 1 auto;
+        min-height:0;
+        overflow:auto;
+        scrollbar-width:thin;
+      }
+
+      .facturas-detail-body{
+        padding:16px 18px 18px;
+        display:grid;
+        gap:16px;
+      }
+
+      .facturas-detail-section{
+        display:grid;
+        gap:12px;
+        padding:16px;
+        border-radius:18px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.08));
+        background:var(--surface-glass, rgba(255,255,255,.045));
+      }
+
+      .facturas-detail-section-head{
+        display:grid;
+        gap:4px;
+      }
+
+      .facturas-detail-section-title{
+        margin:0;
+        color:var(--text-strong, #ffffff);
+        font-size:18px;
+        letter-spacing:-.02em;
+      }
+
+      .facturas-detail-section-subtitle{
+        margin:0;
+        color:var(--text-dim, rgba(245,245,245,.58));
+        line-height:1.55;
+        font-size:12px;
+      }
+
+      .facturas-detail-mini{
+        display:grid;
+        gap:6px;
+        padding:12px;
+        border-radius:14px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.08));
+        background:var(--surface-1, rgba(255,255,255,.035));
+        min-width:0;
+      }
+
+      .facturas-detail-mini-label{
+        font-size:10px;
+        color:var(--text-faint, rgba(245,245,245,.42));
+        text-transform:uppercase;
+        font-weight:800;
+        letter-spacing:.08em;
+      }
+
+      .facturas-detail-mini-value{
+        color:var(--text-strong, #ffffff);
+        font-size:13px;
+        line-height:1.4;
+        word-break:break-word;
+      }
+
+      .facturas-detail-stat{
         display:grid;
         gap:8px;
         min-height:92px;
         padding:16px;
         border-radius:18px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-      "
-    >
-      <span
-        style="
-          font-size:11px;
-          color:var(--text-faint);
-          text-transform:uppercase;
-          letter-spacing:.05em;
-          font-weight:700;
-        "
-      >
-        ${escapeHtml(label)}
-      </span>
+        border:1px solid var(--border-soft, rgba(255,255,255,.08));
+        background:var(--surface-1, rgba(255,255,255,.035));
+      }
 
-      <strong
-        style="
-          font-size:24px;
-          line-height:1.05;
-          color:var(--text-strong);
-          word-break:break-word;
-        "
-      >
-        ${escapeHtml(value)}
-      </strong>
-    </article>
-  `;
-}
+      .facturas-detail-stat-label{
+        font-size:11px;
+        color:var(--text-faint, rgba(245,245,245,.42));
+        text-transform:uppercase;
+        letter-spacing:.05em;
+        font-weight:800;
+      }
 
-function taxCard(label = "", tax = null, moneda = "EUR") {
-  const item = safeObject(tax);
-  const porcentaje = formatPercent(item.porcentaje);
-  const caption = porcentaje ? `${label} · ${porcentaje}` : label;
+      .facturas-detail-stat-value{
+        font-size:24px;
+        line-height:1.05;
+        color:var(--text-strong, #ffffff);
+        word-break:break-word;
+      }
 
-  return `
-    <article
-      style="
+      .facturas-detail-tax-grid{
+        display:grid;
+        grid-template-columns:repeat(auto-fit, minmax(190px, 1fr));
+        gap:12px;
+      }
+
+      .facturas-detail-tax-card{
+        position:relative;
         display:grid;
         gap:8px;
-        min-height:104px;
+        min-height:112px;
         padding:16px;
         border-radius:18px;
         border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
         background:
           linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 7%, transparent), transparent),
-          var(--surface-1, var(--surface-glass));
-      "
-    >
-      <span
-        style="
-          font-size:11px;
-          color:var(--text-faint);
-          text-transform:uppercase;
-          letter-spacing:.05em;
-          font-weight:800;
-        "
-      >
-        ${escapeHtml(caption)}
-      </span>
-
-      <strong
-        style="
-          font-size:25px;
-          line-height:1.05;
-          color:var(--text-strong);
-          word-break:break-word;
-        "
-      >
-        ${escapeHtml(formatMoney(item.importe, moneda))}
-      </strong>
-
-      ${
-        porcentaje
-          ? `
-            <span
-              style="
-                color:var(--text-dim);
-                font-size:12px;
-                line-height:1.35;
-              "
-            >
-              Tipo aplicado: ${escapeHtml(porcentaje)}
-            </span>
-          `
-          : ""
+          var(--surface-1, rgba(255,255,255,.035));
+        overflow:hidden;
       }
-    </article>
+
+      .facturas-detail-tax-card::after{
+        content:"";
+        position:absolute;
+        inset:auto -18% -42% auto;
+        width:120px;
+        height:120px;
+        border-radius:50%;
+        background:color-mix(in srgb, var(--fac-tax-color, var(--accent, #7c5cff)) 16%, transparent);
+        filter:blur(8px);
+        pointer-events:none;
+      }
+
+      .facturas-detail-tax-card--iva{
+        --fac-tax-color:var(--success-strong, #36c690);
+        border-color:color-mix(in srgb, var(--success-strong, #36c690) 26%, var(--border-soft));
+      }
+
+      .facturas-detail-tax-card--irpf{
+        --fac-tax-color:var(--danger-strong, #ff6b6b);
+        border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, var(--border-soft));
+      }
+
+      .facturas-detail-tax-label{
+        position:relative;
+        z-index:1;
+        font-size:11px;
+        color:var(--text-faint, rgba(245,245,245,.42));
+        text-transform:uppercase;
+        letter-spacing:.05em;
+        font-weight:850;
+      }
+
+      .facturas-detail-tax-value{
+        position:relative;
+        z-index:1;
+        font-size:25px;
+        line-height:1.05;
+        color:var(--text-strong, #ffffff);
+        word-break:break-word;
+      }
+
+      .facturas-detail-tax-caption{
+        position:relative;
+        z-index:1;
+        color:var(--text-dim, rgba(245,245,245,.58));
+        font-size:12px;
+        line-height:1.35;
+      }
+
+      .facturas-detail-description{
+        padding:14px;
+        border-radius:16px;
+        background:var(--surface-1, rgba(255,255,255,.035));
+        border:1px solid var(--border-soft, rgba(255,255,255,.08));
+        color:var(--text-soft, rgba(245,245,245,.88));
+        font-size:13px;
+        line-height:1.65;
+        white-space:pre-wrap;
+        word-break:break-word;
+      }
+
+      .facturas-detail-lineas{
+        display:grid;
+        gap:12px;
+      }
+
+      .facturas-detail-linea{
+        display:grid;
+        gap:12px;
+        padding:14px;
+        border-radius:16px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.08));
+        background:var(--surface-1, rgba(255,255,255,.035));
+      }
+
+      .facturas-detail-linea-top{
+        display:flex;
+        justify-content:space-between;
+        gap:12px;
+        flex-wrap:wrap;
+        align-items:flex-start;
+      }
+
+      .facturas-detail-linea-title{
+        color:var(--text-strong, #ffffff);
+        line-height:1.4;
+        word-break:break-word;
+        font-size:14px;
+      }
+
+      .facturas-detail-linea-desc{
+        color:var(--text-dim, rgba(245,245,245,.58));
+        font-size:12px;
+        line-height:1.5;
+        word-break:break-word;
+      }
+
+      .facturas-detail-linea-amount{
+        color:var(--text-strong, #ffffff);
+        line-height:1.4;
+        white-space:nowrap;
+        font-size:14px;
+      }
+
+      .facturas-detail-linea-grid{
+        display:grid;
+        grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+        gap:10px;
+      }
+
+      .facturas-detail-incidencia-btn{
+        appearance:none;
+        justify-self:start;
+        max-width:100%;
+        min-height:28px;
+        padding:0 10px;
+        border-radius:999px;
+        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
+        background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+        color:var(--accent-strong, var(--accent, #7c5cff));
+        font-size:11px;
+        font-weight:850;
+        letter-spacing:.04em;
+        text-transform:uppercase;
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        cursor:pointer;
+      }
+
+      .facturas-detail-loading{
+        padding:18px;
+        display:grid;
+        gap:16px;
+      }
+
+      .facturas-detail-skeleton{
+        border-radius:18px;
+        background:var(--surface-glass, rgba(255,255,255,.045));
+        border:1px solid var(--border-soft, rgba(255,255,255,.08));
+        overflow:hidden;
+        position:relative;
+      }
+
+      .facturas-detail-skeleton::after{
+        content:"";
+        position:absolute;
+        inset:0;
+        transform:translateX(-100%);
+        background:linear-gradient(90deg, transparent, rgba(255,255,255,.08), transparent);
+        animation:facturasDetailSkeleton 1.2s ease-in-out infinite;
+      }
+
+      .facturas-detail-spinner{
+        width:14px;
+        height:14px;
+        border-radius:999px;
+        border:2px solid color-mix(in srgb, currentColor 24%, transparent);
+        border-top-color:currentColor;
+        animation:facturasDetailSpin .8s linear infinite;
+      }
+
+      @keyframes facturasDetailSpin{
+        to{ transform:rotate(360deg); }
+      }
+
+      @keyframes facturasDetailSkeleton{
+        to{ transform:translateX(100%); }
+      }
+
+      [data-theme="light"] .facturas-detail-modal{
+        background:
+          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
+          linear-gradient(180deg, rgba(255,255,255,.98), rgba(250,251,255,.96));
+        box-shadow:
+          0 30px 70px rgba(15,23,42,.14),
+          0 0 0 1px rgba(255,255,255,.65) inset;
+      }
+
+      [data-theme="light"] .facturas-detail-header{
+        background:
+          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
+          linear-gradient(180deg, rgba(255,255,255,.98), rgba(250,251,255,.96));
+      }
+
+      [data-theme="light"] .facturas-detail-chip--success{
+        color:var(--success-hover, #157a4f);
+      }
+
+      [data-theme="light"] .facturas-detail-chip--warning{
+        color:var(--warning-hover, #9c6110);
+      }
+
+      [data-theme="light"] .facturas-detail-chip--danger{
+        color:var(--error-hover, #b52a39);
+      }
+
+      @media (max-width: 980px){
+        .facturas-detail-meta-grid,
+        .facturas-detail-stats-grid{
+          grid-template-columns:repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 900px){
+        .facturas-detail-overlay{
+          padding:14px;
+        }
+
+        .facturas-detail-modal{
+          width:100%;
+          max-height:94vh;
+          border-radius:22px;
+        }
+
+        .facturas-detail-layout{
+          max-height:94vh;
+        }
+      }
+
+      @media (max-width: 720px){
+        .facturas-detail-hero{
+          align-items:flex-start;
+        }
+
+        .facturas-detail-actions{
+          justify-content:flex-start;
+          width:100%;
+        }
+      }
+
+      @media (max-width: 640px){
+        .facturas-detail-overlay{
+          padding:10px;
+        }
+
+        .facturas-detail-modal{
+          width:100%;
+          max-height:96vh;
+          border-radius:18px;
+        }
+
+        .facturas-detail-layout{
+          max-height:96vh;
+        }
+
+        .facturas-detail-header{
+          padding:16px;
+        }
+
+        .facturas-detail-body{
+          padding:14px;
+        }
+
+        .facturas-detail-identity{
+          align-items:flex-start;
+        }
+
+        .facturas-detail-avatar{
+          width:58px;
+          height:58px;
+          flex-basis:58px;
+          border-radius:18px;
+          font-size:18px;
+        }
+
+        .facturas-detail-meta-grid,
+        .facturas-detail-stats-grid{
+          grid-template-columns:1fr;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce){
+        .facturas-detail-overlay *,
+        .facturas-detail-overlay *::before,
+        .facturas-detail-overlay *::after{
+          animation:none !important;
+          transition:none !important;
+        }
+      }
+    </style>
+  `;
+}
+
+/* =========================================================
+   UI PARTIALS
+========================================================= */
+
+function renderActionSpinner(label = "") {
+  return `
+    <span style="display:inline-flex; align-items:center; gap:8px;">
+      <span class="facturas-detail-spinner" aria-hidden="true"></span>
+      ${escapeHtml(label)}
+    </span>
+  `;
+}
+
+function renderChip(label = "", tone = "neutral") {
+  return `
+    <span class="facturas-detail-chip facturas-detail-chip--${escapeHtml(tone)}">
+      ${escapeHtml(label)}
+    </span>
   `;
 }
 
 function mini(label = "", value = "") {
   return `
-    <div
-      style="
-        display:grid;
-        gap:6px;
-        padding:12px;
-        border-radius:14px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-      "
-    >
-      <span
-        style="
-          font-size:10px;
-          color:var(--text-faint);
-          text-transform:uppercase;
-          font-weight:700;
-          letter-spacing:.08em;
-        "
-      >
-        ${escapeHtml(label)}
+    <div class="facturas-detail-mini">
+      <span class="facturas-detail-mini-label">${escapeHtml(label)}</span>
+      <strong class="facturas-detail-mini-value">${escapeHtml(value)}</strong>
+    </div>
+  `;
+}
+
+function stat(label = "", value = "") {
+  return `
+    <article class="facturas-detail-stat">
+      <span class="facturas-detail-stat-label">${escapeHtml(label)}</span>
+      <strong class="facturas-detail-stat-value">${escapeHtml(value)}</strong>
+    </article>
+  `;
+}
+
+function taxCard(label = "", tax = null, moneda = DEFAULT_CURRENCY, tone = "neutral") {
+  const item = safeObject(tax);
+  const porcentaje = formatPercent(item.porcentaje);
+  const base = safeNumber(item.base, 0);
+  const captionParts = [];
+
+  if (porcentaje) {
+    captionParts.push(`Tipo aplicado: ${porcentaje}`);
+  }
+
+  if (base) {
+    captionParts.push(`Base: ${formatMoney(base, moneda)}`);
+  }
+
+  if (tone === "irpf") {
+    captionParts.push("Retención descontada del total");
+  }
+
+  const caption = captionParts.join(" · ");
+
+  return `
+    <article class="facturas-detail-tax-card facturas-detail-tax-card--${escapeHtml(tone)}">
+      <span class="facturas-detail-tax-label">
+        ${escapeHtml(porcentaje ? `${label} · ${porcentaje}` : label)}
       </span>
 
-      <strong
-        style="
-          color:var(--text-strong);
-          font-size:13px;
-          line-height:1.4;
-          word-break:break-word;
-        "
-      >
-        ${escapeHtml(value)}
+      <strong class="facturas-detail-tax-value">
+        ${escapeHtml(formatMoney(item.importe, moneda))}
       </strong>
-    </div>
+
+      ${
+        caption
+          ? `<span class="facturas-detail-tax-caption">${escapeHtml(caption)}</span>`
+          : ""
+      }
+    </article>
   `;
 }
 
@@ -1331,42 +2332,13 @@ function renderSectionCard({
   content = "",
 } = {}) {
   return `
-    <section
-      style="
-        display:grid;
-        gap:12px;
-        padding:16px;
-        border-radius:18px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-glass);
-      "
-    >
-      <div style="display:grid; gap:4px;">
-        <h3
-          style="
-            margin:0;
-            color:var(--text-strong);
-            font-size:18px;
-            letter-spacing:-.02em;
-          "
-        >
-          ${escapeHtml(title)}
-        </h3>
+    <section class="facturas-detail-section">
+      <div class="facturas-detail-section-head">
+        <h3 class="facturas-detail-section-title">${escapeHtml(title)}</h3>
 
         ${
           subtitle
-            ? `
-              <p
-                style="
-                  margin:0;
-                  color:var(--text-dim);
-                  line-height:1.55;
-                  font-size:12px;
-                "
-              >
-                ${escapeHtml(subtitle)}
-              </p>
-            `
+            ? `<p class="facturas-detail-section-subtitle">${escapeHtml(subtitle)}</p>`
             : ""
         }
       </div>
@@ -1377,7 +2349,11 @@ function renderSectionCard({
 }
 
 function renderAvatar(factura = {}) {
-  const raw = safeText(getClienteNombre(factura), "ON");
+  const raw = safeText(
+    first(getClienteEmpresa(factura), getClienteNombre(factura)),
+    "ON"
+  );
+
   const parts = raw.split(/\s+/).filter(Boolean);
 
   const initials =
@@ -1386,24 +2362,7 @@ function renderAvatar(factura = {}) {
       : raw.slice(0, 2).toUpperCase();
 
   return `
-    <div
-      style="
-        position:relative;
-        flex:0 0 76px;
-        width:76px;
-        height:76px;
-        border-radius:22px;
-        display:grid;
-        place-items:center;
-        background:linear-gradient(135deg, rgba(124,92,255,.36), rgba(88,72,200,.18));
-        border:1px solid rgba(124,92,255,.28);
-        color:#efeaff;
-        font-size:22px;
-        font-weight:800;
-        letter-spacing:.03em;
-        box-shadow:0 12px 28px rgba(124,92,255,.18);
-      "
-    >
+    <div class="facturas-detail-avatar" aria-hidden="true">
       ${escapeHtml(initials || "ON")}
     </div>
   `;
@@ -1411,6 +2370,7 @@ function renderAvatar(factura = {}) {
 
 function renderIncidenciaMini(factura = {}) {
   const incidenciaId = getFacturaIncidenciaId(factura);
+  const incidenciaSubject = getFacturaIncidenciaSubject(factura);
   const facturaId = getFacturaId(factura);
 
   if (!incidenciaId) {
@@ -1418,53 +2378,19 @@ function renderIncidenciaMini(factura = {}) {
   }
 
   return `
-    <div
-      style="
-        display:grid;
-        gap:6px;
-        padding:12px;
-        border-radius:14px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-      "
-    >
-      <span
-        style="
-          font-size:10px;
-          color:var(--text-faint);
-          text-transform:uppercase;
-          font-weight:700;
-          letter-spacing:.08em;
-        "
-      >
-        Incidencia
-      </span>
+    <div class="facturas-detail-mini">
+      <span class="facturas-detail-mini-label">Incidencia</span>
 
       <button
         type="button"
+        class="facturas-detail-incidencia-btn"
         data-action="open-incidencia"
+        data-facturas-action="open-incidencia"
         data-ticket-id="${escapeHtml(incidenciaId)}"
         data-incidencia-id="${escapeHtml(incidenciaId)}"
         data-factura-id="${escapeHtml(facturaId)}"
-        style="
-          justify-self:start;
-          max-width:100%;
-          min-height:28px;
-          padding:0 10px;
-          border-radius:999px;
-          border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
-          background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-          color:var(--accent-strong, var(--accent, #7c5cff));
-          font-size:11px;
-          font-weight:800;
-          letter-spacing:.04em;
-          text-transform:uppercase;
-          white-space:nowrap;
-          overflow:hidden;
-          text-overflow:ellipsis;
-          cursor:pointer;
-        "
-        title="Abrir incidencia relacionada"
+        title="${escapeHtml(incidenciaSubject || "Abrir incidencia relacionada")}"
+        data-tooltip="${escapeHtml(incidenciaSubject || "Abrir incidencia relacionada")}"
       >
         ${escapeHtml(incidenciaId)}
       </button>
@@ -1500,99 +2426,47 @@ export function renderHeaderActions({
   const pdfAvailable = getFacturaPdfAvailable(factura);
 
   return `
-    <div
-      style="
-        display:flex;
-        gap:8px;
-        flex-wrap:wrap;
-        align-items:flex-start;
-        justify-content:flex-end;
-      "
-    >
+    <div class="facturas-detail-actions">
       <button
         type="button"
+        class="facturas-detail-btn"
         data-action="view-factura-pdf"
+        data-facturas-action="view-factura-pdf"
         data-factura-id="${escapeHtml(facturaId)}"
-        ${pdfAvailable && !viewingPdf ? "" : "disabled"}
-        style="
-          min-height:38px;
-          padding:0 12px;
-          border-radius:12px;
-          border:1px solid var(--border-soft);
-          background:var(--surface-glass);
-          color:var(--text-soft);
-          font-size:12px;
-          font-weight:700;
-          cursor:${pdfAvailable && !viewingPdf ? "pointer" : "not-allowed"};
-          opacity:${pdfAvailable ? (viewingPdf ? ".78" : "1") : ".56"};
-        "
+        ${pdfAvailable && !viewingPdf ? "" : "disabled aria-disabled=\"true\""}
       >
         ${viewingPdf ? renderActionSpinner("Abriendo...") : "Ver PDF"}
       </button>
 
       <button
         type="button"
+        class="facturas-detail-btn"
         data-action="download-factura"
+        data-facturas-action="download-factura"
         data-factura-id="${escapeHtml(facturaId)}"
-        ${pdfAvailable && !downloading ? "" : "disabled"}
-        style="
-          min-height:38px;
-          padding:0 12px;
-          border-radius:12px;
-          border:1px solid var(--border-soft);
-          background:var(--surface-glass);
-          color:var(--text-soft);
-          font-size:12px;
-          font-weight:700;
-          cursor:${pdfAvailable && !downloading ? "pointer" : "not-allowed"};
-          opacity:${pdfAvailable ? (downloading ? ".78" : "1") : ".56"};
-        "
+        ${pdfAvailable && !downloading ? "" : "disabled aria-disabled=\"true\""}
       >
         ${downloading ? renderActionSpinner("Bajando...") : "Descargar"}
       </button>
 
       <button
         type="button"
+        class="facturas-detail-btn facturas-detail-btn--primary"
         data-action="send-factura"
+        data-facturas-action="send-factura"
         data-factura-id="${escapeHtml(facturaId)}"
-        ${sending ? "disabled" : ""}
-        style="
-          min-height:38px;
-          padding:0 12px;
-          border-radius:12px;
-          border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent);
-          background:var(--accent, #7c5cff);
-          color:#fff;
-          font-size:12px;
-          font-weight:700;
-          cursor:${sending ? "wait" : "pointer"};
-          opacity:${sending ? ".82" : "1"};
-          box-shadow:0 12px 28px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
-        "
+        ${sending ? "disabled aria-disabled=\"true\"" : ""}
       >
         ${sending ? renderActionSpinner("Enviando...") : "Enviar"}
       </button>
 
       <button
         type="button"
+        class="facturas-detail-btn facturas-detail-btn--close"
         data-action="close-factura-detail"
+        data-facturas-action="close-factura-detail"
         aria-label="Cerrar modal"
         title="Cerrar"
-        style="
-          width:38px;
-          height:38px;
-          padding:0;
-          border-radius:12px;
-          border:1px solid var(--border-soft);
-          background:transparent;
-          color:var(--text-dim);
-          font-size:18px;
-          font-weight:700;
-          cursor:pointer;
-          display:inline-flex;
-          align-items:center;
-          justify-content:center;
-        "
       >
         ✕
       </button>
@@ -1605,19 +2479,18 @@ export function renderHeaderActions({
 ========================================================= */
 
 function renderHeroMeta(factura = {}) {
+  const servicioAt = getFacturaServicioAt(factura);
+
   return `
-    <div
-      class="facturas-detail-meta-grid"
-      style="
-        display:grid;
-        grid-template-columns:repeat(4, minmax(0, 1fr));
-        gap:10px;
-      "
-    >
-      ${mini("Número", getFacturaNumero(factura))}
+    <div class="facturas-detail-meta-grid">
+      ${mini("Número legal", getFacturaNumero(factura))}
       ${mini("Fecha emisión", formatDate(getFacturaFecha(factura)))}
+      ${mini("Servicio", servicioAt ? formatDate(servicioAt) : "—")}
       ${mini("Forma de pago", getFacturaFormaPago(factura))}
       ${renderIncidenciaMini(factura)}
+      ${mini("Enviado a", getFacturaEnviadoA(factura))}
+      ${mini("Pagado", formatMoney(getFacturaPagado(factura), getFacturaMoneda(factura)))}
+      ${mini("Pendiente", formatMoney(getFacturaPendiente(factura), getFacturaMoneda(factura)))}
     </div>
   `;
 }
@@ -1629,17 +2502,10 @@ function renderResumenSection(factura = {}) {
     title: "Resumen económico",
     subtitle: "Vista principal del documento y del cierre financiero.",
     content: `
-      <div
-        class="facturas-detail-stats-grid"
-        style="
-          display:grid;
-          grid-template-columns:repeat(4, minmax(0, 1fr));
-          gap:12px;
-        "
-      >
+      <div class="facturas-detail-stats-grid">
         ${stat("Total", formatMoney(getFacturaTotal(factura), moneda))}
-        ${stat("Base", formatMoney(getFacturaBase(factura), moneda))}
-        ${stat("Impuestos", formatMoney(getFacturaImpuestos(factura), moneda))}
+        ${stat("Base imponible", formatMoney(getFacturaBase(factura), moneda))}
+        ${stat("Impuestos netos", formatMoney(getFacturaImpuestos(factura), moneda))}
         ${stat("Pago", getFacturaEstadoPagoLabel(factura))}
       </div>
     `,
@@ -1653,137 +2519,85 @@ function renderImpuestosSection(factura = {}) {
   const cards = [];
 
   if (breakdown.iva) {
-    cards.push(taxCard("IVA", breakdown.iva, moneda));
+    cards.push(taxCard("IVA", breakdown.iva, moneda, "iva"));
   }
 
   if (breakdown.irpf) {
-    cards.push(taxCard("IRPF / Retención", breakdown.irpf, moneda));
+    cards.push(taxCard("IRPF", breakdown.irpf, moneda, "irpf"));
   }
 
   breakdown.otros.forEach((item) => {
-    cards.push(taxCard(item.tipo, item, moneda));
+    cards.push(taxCard(item.tipo, item, moneda, "neutral"));
   });
 
   return renderSectionCard({
     title: "Impuestos",
-    subtitle: "Desglose fiscal de IVA, IRPF y otros conceptos detectados en la factura.",
+    subtitle: "Desglose fiscal real: IVA, IRPF/retenciones y otros conceptos detectados en la factura.",
     content: cards.length
-      ? `
-        <div
-          class="facturas-detail-tax-grid"
-          style="
-            display:grid;
-            grid-template-columns:repeat(auto-fit, minmax(190px, 1fr));
-            gap:12px;
-          "
-        >
-          ${cards.join("")}
-        </div>
-      `
+      ? `<div class="facturas-detail-tax-grid">${cards.join("")}</div>`
       : mini("Desglose", "Sin desglose fiscal disponible"),
   });
 }
 
 function renderDescripcionSection(factura = {}) {
+  const incidenciaId = getFacturaIncidenciaId(factura);
+  const incidenciaSubject = getFacturaIncidenciaSubject(factura);
+  const preview = getFacturaPreview(factura);
+
   return renderSectionCard({
-    title: "Incidencia",
-    subtitle: "",
+    title: "Descripción / incidencia",
+    subtitle: incidenciaId
+      ? `Vinculada con ${incidenciaId}${incidenciaSubject ? ` · ${incidenciaSubject}` : ""}`
+      : "",
     content: `
-      <div
-        style="
-          padding:14px;
-          border-radius:16px;
-          background:var(--surface-1, var(--surface-glass));
-          border:1px solid var(--border-soft);
-          color:var(--text-soft);
-          font-size:13px;
-          line-height:1.65;
-          white-space:pre-wrap;
-          word-break:break-word;
-        "
-      >
-        ${escapeHtml(getFacturaPreview(factura))}
+      <div class="facturas-detail-description">
+        ${escapeHtml(preview)}
       </div>
     `,
   });
 }
 
-function renderLineaItem(linea = {}, moneda = "EUR") {
+function renderLineaItem(linea = {}, moneda = DEFAULT_CURRENCY) {
   const item = safeObject(linea);
   const descripcion = getLineaDescripcion(item);
+  const ivaPct = getLineaIvaPct(item);
+  const irpfPct = getLineaIrpfPct(item);
 
   return `
-    <article
-      style="
-        display:grid;
-        gap:12px;
-        padding:14px;
-        border-radius:16px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-      "
-    >
-      <div
-        style="
-          display:flex;
-          justify-content:space-between;
-          gap:12px;
-          flex-wrap:wrap;
-          align-items:flex-start;
-        "
-      >
+    <article class="facturas-detail-linea">
+      <div class="facturas-detail-linea-top">
         <div style="display:grid; gap:4px; min-width:0;">
-          <strong
-            style="
-              color:var(--text-strong);
-              line-height:1.4;
-              word-break:break-word;
-              font-size:14px;
-            "
-          >
+          <strong class="facturas-detail-linea-title">
             ${escapeHtml(getLineaConcepto(item))}
           </strong>
 
           ${
             descripcion
+              ? `<span class="facturas-detail-linea-desc">${escapeHtml(descripcion)}</span>`
+              : ""
+          }
+
+          ${
+            ivaPct || irpfPct
               ? `
-                <span
-                  style="
-                    color:var(--text-dim);
-                    font-size:12px;
-                    line-height:1.5;
-                    word-break:break-word;
-                  "
-                >
-                  ${escapeHtml(descripcion)}
-                </span>
+                <div class="facturas-detail-chip-row">
+                  ${ivaPct ? renderChip(`IVA ${formatPercent(ivaPct)}`, "success") : ""}
+                  ${irpfPct ? renderChip(`IRPF ${formatPercent(irpfPct)}`, "danger") : ""}
+                </div>
               `
               : ""
           }
         </div>
 
-        <strong
-          style="
-            color:var(--text-strong);
-            line-height:1.4;
-            white-space:nowrap;
-            font-size:14px;
-          "
-        >
-          ${escapeHtml(formatMoney(getLineaTotal(item), moneda))}
+        <strong class="facturas-detail-linea-amount">
+          ${escapeHtml(formatMoney(getLineaSubtotal(item), moneda))}
         </strong>
       </div>
 
-      <div
-        style="
-          display:grid;
-          grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
-          gap:10px;
-        "
-      >
+      <div class="facturas-detail-linea-grid">
         ${mini("Cantidad", String(getLineaCantidad(item)))}
         ${mini("Unitario", formatMoney(getLineaUnitario(item), moneda))}
-        ${mini("Subtotal", formatMoney(getLineaSubtotal(item), moneda))}
+        ${mini("Base línea", formatMoney(getLineaSubtotal(item), moneda))}
       </div>
     </article>
   `;
@@ -1795,13 +2609,9 @@ function renderLineasSection(factura = {}) {
 
   return renderSectionCard({
     title: "Conceptos",
-    subtitle: "",
+    subtitle: "Líneas facturadas y base económica de cada concepto.",
     content: lineas.length
-      ? `
-        <div style="display:grid; gap:12px;">
-          ${lineas.map((linea) => renderLineaItem(linea, moneda)).join("")}
-        </div>
-      `
+      ? `<div class="facturas-detail-lineas">${lineas.map((linea) => renderLineaItem(linea, moneda)).join("")}</div>`
       : mini("Líneas", "Sin líneas"),
   });
 }
@@ -1816,17 +2626,13 @@ function renderEnvioSection(factura = {}) {
 
   return renderSectionCard({
     title: "Envío",
-    subtitle: "",
+    subtitle: "Información de entrega del documento fiscal.",
     content: `
-      <div
-        style="
-          display:grid;
-          grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
-          gap:12px;
-        "
-      >
+      <div class="facturas-detail-meta-grid">
         ${mini("Enviado a", enviadoA)}
         ${mini("Fecha envío", fechaEnvio ? formatDateTime(fechaEnvio) : "—")}
+        ${mini("PDF", getFacturaPdfAvailable(factura) ? "Disponible" : "No disponible")}
+        ${mini("Última actualización", formatDateTime(getFacturaUpdatedAt(factura)))}
       </div>
     `,
   });
@@ -1845,17 +2651,17 @@ export function renderFacturasDetailContent({
 } = {}) {
   if (loading) {
     return `
-      <div style="padding:18px; display:grid; gap:16px;">
-        <div style="height:88px; border-radius:18px; background:var(--surface-glass); border:1px solid var(--border-soft);"></div>
-        <div style="height:120px; border-radius:18px; background:var(--surface-glass); border:1px solid var(--border-soft);"></div>
-        <div style="height:240px; border-radius:18px; background:var(--surface-glass); border:1px solid var(--border-soft);"></div>
+      <div class="facturas-detail-loading">
+        <div class="facturas-detail-skeleton" style="height:88px;"></div>
+        <div class="facturas-detail-skeleton" style="height:120px;"></div>
+        <div class="facturas-detail-skeleton" style="height:240px;"></div>
       </div>
     `;
   }
 
   if (!factura) {
     return `
-      <div style="padding:18px;">
+      <div class="facturas-detail-body">
         ${mini("Detalle", "No disponible")}
       </div>
     `;
@@ -1866,142 +2672,60 @@ export function renderFacturasDetailContent({
   const viewingPdf = String(viewingFacturaId) === String(facturaId);
   const downloading = String(downloadingFacturaId) === String(facturaId);
 
+  const paymentRaw = getFacturaEstadoPagoRaw(factura);
+  const estadoRaw = getFacturaEstadoRaw(factura);
+  const numeroSistema = getFacturaSistema(factura);
+  const clienteEmail = getClienteEmail(factura);
+  const empresa = getClienteEmpresa(factura);
+
   return `
-    <div
-      style="
-        display:flex;
-        flex-direction:column;
-        min-height:0;
-        height:100%;
-        max-height:100%;
-      "
-    >
-      <header
-        class="facturas-detail-header"
-        style="
-          position:sticky;
-          top:0;
-          z-index:4;
-          display:grid;
-          gap:16px;
-          padding:22px 22px 18px;
-          border-bottom:1px solid var(--border-soft);
-          background:
-            radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
-            linear-gradient(180deg, var(--surface-2, #151515), var(--surface-1, #121212));
-        "
-      >
-        <div
-          class="facturas-modal-hero"
-          style="
-            display:flex;
-            justify-content:space-between;
-            gap:16px;
-            flex-wrap:wrap;
-            align-items:flex-start;
-          "
-        >
-          <div
-            style="
-              display:flex;
-              gap:16px;
-              align-items:center;
-              min-width:0;
-              flex:1 1 620px;
-            "
-          >
+    <div class="facturas-detail-layout">
+      <header class="facturas-detail-header">
+        <div class="facturas-detail-hero">
+          <div class="facturas-detail-identity">
             ${renderAvatar(factura)}
 
-            <div
-              style="
-                display:grid;
-                gap:6px;
-                min-width:0;
-                flex:1 1 auto;
-              "
-            >
-              <div
-                style="
-                  display:flex;
-                  align-items:center;
-                  gap:8px;
-                  flex-wrap:wrap;
-                  min-width:0;
-                "
-              >
-                <span
-                  style="
-                    display:inline-flex;
-                    align-items:center;
-                    max-width:220px;
-                    min-height:28px;
-                    padding:0 9px;
-                    border-radius:999px;
-                    border:1px solid var(--border-soft);
-                    background:var(--surface-glass);
-                    color:var(--text-dim);
-                    font-size:11px;
-                    font-weight:700;
-                    letter-spacing:.04em;
-                    text-transform:uppercase;
-                    white-space:nowrap;
-                    overflow:hidden;
-                    text-overflow:ellipsis;
-                  "
-                >
+            <div class="facturas-detail-title-stack">
+              <div class="facturas-detail-chip-row">
+                <span class="facturas-detail-number">
                   ${escapeHtml(getFacturaNumero(factura))}
                 </span>
 
-                ${chip(
+                ${
+                  numeroSistema && numeroSistema !== getFacturaNumero(factura)
+                    ? `<span class="facturas-detail-system-number">${escapeHtml(numeroSistema)}</span>`
+                    : ""
+                }
+
+                ${renderChip(
                   getFacturaEstadoPagoLabel(factura),
-                  getEstadoPagoChipStyle(getFacturaEstadoPagoRaw(factura))
+                  getEstadoPagoTone(paymentRaw)
                 )}
 
-                ${chip(
+                ${renderChip(
                   getFacturaEstadoLabel(factura),
-                  getEstadoChipStyle(getFacturaEstadoRaw(factura))
+                  getEstadoTone(estadoRaw)
                 )}
               </div>
 
               <div style="display:grid; gap:4px; min-width:0;">
-                <h2
-                  style="
-                    margin:0;
-                    color:var(--text-strong);
-                    font-size:clamp(22px, 2.35vw, 32px);
-                    line-height:.98;
-                    letter-spacing:-.055em;
-                    font-weight:var(--weight-black, 850);
-                    word-break:break-word;
-                  "
-                >
-                  ${escapeHtml(getClienteNombre(factura))}
+                <h2 class="facturas-detail-title">
+                  ${escapeHtml(empresa || getClienteNombre(factura))}
                 </h2>
 
                 ${
-                  getClienteEmail(factura)
-                    ? `
-                      <span
-                        style="
-                          color:var(--text-dim);
-                          font-size:13px;
-                          line-height:1.35;
-                          word-break:break-word;
-                        "
-                      >
-                        ${escapeHtml(getClienteEmail(factura))}
-                      </span>
-                    `
+                  empresa && empresa !== getClienteNombre(factura)
+                    ? `<span class="facturas-detail-subtitle">${escapeHtml(getClienteNombre(factura))}</span>`
                     : ""
                 }
 
-                <span
-                  style="
-                    color:var(--text-dim);
-                    font-size:12px;
-                    line-height:1.42;
-                  "
-                >
+                ${
+                  clienteEmail
+                    ? `<span class="facturas-detail-subtitle">${escapeHtml(clienteEmail)}</span>`
+                    : ""
+                }
+
+                <span class="facturas-detail-subtitle">
                   Última actualización ${escapeHtml(formatRelativeDate(getFacturaUpdatedAt(factura)))}
                 </span>
               </div>
@@ -2019,73 +2743,16 @@ export function renderFacturasDetailContent({
         ${renderHeroMeta(factura)}
       </header>
 
-      <div
-        class="facturas-detail-body-shell"
-        style="
-          flex:1 1 auto;
-          min-height:0;
-          overflow:auto;
-        "
-      >
-        <div
-          style="
-            padding:16px 18px 18px;
-            display:grid;
-            gap:16px;
-          "
-        >
+      <div class="facturas-detail-body-shell">
+        <div class="facturas-detail-body">
           ${renderResumenSection(factura)}
+          ${renderImpuestosSection(factura)}
           ${renderDescripcionSection(factura)}
           ${renderLineasSection(factura)}
-          ${renderImpuestosSection(factura)}
           ${renderEnvioSection(factura)}
         </div>
       </div>
     </div>
-
-    <style>
-      @keyframes facturasDetailSpin {
-        to { transform: rotate(360deg); }
-      }
-
-      .facturas-detail-body-shell {
-        scrollbar-width: thin;
-      }
-
-      [data-theme="light"] .facturas-detail-header {
-        background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
-          linear-gradient(180deg, rgba(255,255,255,.96), rgba(250,251,255,.94)) !important;
-      }
-
-      @media (max-width: 980px) {
-        .facturas-detail-meta-grid,
-        .facturas-detail-stats-grid {
-          grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-        }
-      }
-
-      @media (max-width: 720px) {
-        .facturas-modal-hero {
-          align-items:flex-start !important;
-        }
-      }
-
-      @media (max-width: 640px) {
-        .facturas-detail-header {
-          padding: 16px !important;
-        }
-
-        .facturas-detail-body-shell > div {
-          padding: 14px !important;
-        }
-
-        .facturas-detail-meta-grid,
-        .facturas-detail-stats-grid {
-          grid-template-columns: 1fr !important;
-        }
-      }
-    </style>
   `;
 }
 
@@ -2104,19 +2771,11 @@ export function renderFacturasDetailModal({
   if (!detailOpen) return "";
 
   return `
+    ${renderStyles()}
+
     <div
       class="facturas-detail-overlay"
       data-facturas-detail-overlay="true"
-      style="
-        position:fixed;
-        inset:0;
-        z-index:9999;
-        padding:20px;
-        display:grid;
-        place-items:center;
-        background:rgba(0,0,0,.64);
-        backdrop-filter:blur(8px);
-      "
     >
       <div
         class="facturas-detail-modal"
@@ -2124,18 +2783,6 @@ export function renderFacturasDetailModal({
         role="dialog"
         aria-modal="true"
         aria-label="Detalle factura"
-        style="
-          position:relative;
-          width:min(1080px, 100%);
-          max-height:92vh;
-          overflow:hidden;
-          border-radius:24px;
-          border:1px solid var(--border-soft, #2b2b2b);
-          background:
-            radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
-            linear-gradient(180deg, var(--surface-2, #151515), var(--surface-1, #121212));
-          box-shadow:0 34px 84px rgba(0,0,0,.40);
-        "
       >
         ${renderFacturasDetailContent({
           factura,
@@ -2144,41 +2791,6 @@ export function renderFacturasDetailModal({
           viewingFacturaId,
           downloadingFacturaId,
         })}
-
-        <style>
-          [data-theme="light"] .facturas-detail-modal{
-            background:
-              radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
-              linear-gradient(180deg, rgba(255,255,255,.96), rgba(250,251,255,.94));
-            box-shadow:
-              0 30px 70px rgba(15,23,42,.14),
-              0 0 0 1px rgba(255,255,255,.65) inset;
-          }
-
-          @media (max-width: 900px) {
-            .facturas-detail-overlay {
-              padding: 14px !important;
-            }
-
-            .facturas-detail-modal {
-              width: 100% !important;
-              max-height: 94vh !important;
-              border-radius: 22px !important;
-            }
-          }
-
-          @media (max-width: 640px) {
-            .facturas-detail-overlay {
-              padding: 10px !important;
-            }
-
-            .facturas-detail-modal {
-              width: 100% !important;
-              max-height: 96vh !important;
-              border-radius: 18px !important;
-            }
-          }
-        </style>
       </div>
     </div>
   `;

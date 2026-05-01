@@ -5,6 +5,7 @@
    EXTREME PRODUCTION API · FACTURAS 10/10
    COSMOS ALIGNED · ROUTER ALIGNED · INCIDENCIA SAFE
    PDF INLINE / DOWNLOAD · SEND · CREATE · STATS · HEALTH
+   PATCH · PDF SAS SAFE · NO PRIVATE ENDPOINT FALLBACK
 
    RESPONSABILIDADES:
    - centralizar llamadas HTTP del módulo de facturas
@@ -17,6 +18,9 @@
    - preservar ticket/incidencia tras normalizeFactura()
    - soportar respuestas legacy + normalizadas v2/v3
    - preparar PDF para clientes HTTP que devuelven blob, response, url o payload JSON
+   - consumir endpoint PDF privado con auth y abrir solo SAS/blob público
+   - NUNCA devolver /api/facturas/:id/pdf como fallback visible
+   - normalizar create admin con factura + file + email + counter
    - mantener surface pública estable
 ========================================================= */
 
@@ -1023,6 +1027,34 @@ function extractRequestId(payload = null) {
   return "";
 }
 
+function extractNamedObject(payload = null, name = "") {
+  const key = safeText(name, "");
+
+  if (!key) return null;
+
+  const candidates = getPayloadCandidates(payload);
+
+  for (const candidate of candidates) {
+    const obj = safeObject(candidate, null);
+
+    if (!obj) continue;
+
+    const found = first(
+      obj[key],
+      obj.data?.[key],
+      obj.result?.[key],
+      obj.payload?.[key],
+      obj.response?.[key]
+    );
+
+    if (isNonEmptyObject(found)) {
+      return safeObject(found);
+    }
+  }
+
+  return null;
+}
+
 /* =========================================================
    CLIENT RESOLUTION
 ========================================================= */
@@ -1464,6 +1496,32 @@ export function normalizeFacturaSendResponse(payload = null) {
   };
 }
 
+export function normalizeFacturaCreateResponse(payload = null) {
+  const detail = extractFacturaDetail(payload);
+  const item = detail ? normalizeFacturaSafe(detail) : null;
+
+  const file = extractNamedObject(payload, "file");
+  const email = extractNamedObject(payload, "email");
+  const counter = extractNamedObject(payload, "counter");
+
+  return {
+    ok: extractOk(payload, Boolean(item)),
+    requestId: extractRequestId(payload),
+
+    item,
+    factura: item,
+    data: item,
+
+    file,
+    email,
+    counter,
+
+    created: Boolean(item),
+    raw: payload,
+    meta: extractMeta(payload),
+  };
+}
+
 /* =========================================================
    PDF HELPERS
 ========================================================= */
@@ -1510,6 +1568,35 @@ function extractBlobFromResponse(response = null) {
   return null;
 }
 
+function extractPdfFileObject(response = null) {
+  const directFile = extractNamedObject(response, "file");
+
+  if (directFile) {
+    return directFile;
+  }
+
+  const candidates = getPayloadCandidates(response);
+
+  for (const candidate of candidates) {
+    const obj = safeObject(candidate, null);
+
+    if (!obj) continue;
+
+    const file = first(
+      obj.file,
+      obj.data?.file,
+      obj.result?.file,
+      obj.payload?.file
+    );
+
+    if (isNonEmptyObject(file)) {
+      return safeObject(file);
+    }
+  }
+
+  return {};
+}
+
 export function resolveFacturaPdfUrl(response = null) {
   if (typeof response === "string") {
     return response;
@@ -1525,32 +1612,58 @@ export function resolveFacturaPdfUrl(response = null) {
     const url = safeText(
       first(
         obj?.file?.url,
+        obj?.file?.viewUrl,
+        obj?.file?.downloadUrl,
+        obj?.file?.sasUrl,
+        obj?.file?.signedUrl,
+        obj?.file?.publicUrl,
+
         obj?.url,
         obj?.downloadUrl,
         obj?.viewUrl,
         obj?.pdfUrl,
         obj?.publicUrl,
+        obj?.sasUrl,
+        obj?.signedUrl,
 
         obj?.data?.file?.url,
+        obj?.data?.file?.viewUrl,
+        obj?.data?.file?.downloadUrl,
+        obj?.data?.file?.sasUrl,
+        obj?.data?.file?.signedUrl,
         obj?.data?.url,
         obj?.data?.downloadUrl,
         obj?.data?.viewUrl,
         obj?.data?.pdfUrl,
         obj?.data?.publicUrl,
+        obj?.data?.sasUrl,
+        obj?.data?.signedUrl,
 
         obj?.result?.file?.url,
+        obj?.result?.file?.viewUrl,
+        obj?.result?.file?.downloadUrl,
+        obj?.result?.file?.sasUrl,
+        obj?.result?.file?.signedUrl,
         obj?.result?.url,
         obj?.result?.downloadUrl,
         obj?.result?.viewUrl,
         obj?.result?.pdfUrl,
         obj?.result?.publicUrl,
+        obj?.result?.sasUrl,
+        obj?.result?.signedUrl,
 
         obj?.payload?.file?.url,
+        obj?.payload?.file?.viewUrl,
+        obj?.payload?.file?.downloadUrl,
+        obj?.payload?.file?.sasUrl,
+        obj?.payload?.file?.signedUrl,
         obj?.payload?.url,
         obj?.payload?.downloadUrl,
         obj?.payload?.viewUrl,
         obj?.payload?.pdfUrl,
-        obj?.payload?.publicUrl
+        obj?.payload?.publicUrl,
+        obj?.payload?.sasUrl,
+        obj?.payload?.signedUrl
       ),
       ""
     );
@@ -1574,15 +1687,33 @@ export function createObjectUrlFromPdfResponse(response = null) {
 }
 
 export function normalizeFacturaPdfResponse(response = null, fallbackUrl = "") {
+  const file = extractPdfFileObject(response);
+
   const explicitUrl = resolveFacturaPdfUrl(response);
   const objectUrl = explicitUrl ? "" : createObjectUrlFromPdfResponse(response);
   const blob = extractBlobFromResponse(response);
 
+  const finalUrl = explicitUrl || objectUrl || "";
+
   return {
-    ok: true,
-    url: explicitUrl || objectUrl || fallbackUrl || "",
+    ok: extractOk(response, Boolean(finalUrl || blob)),
+    requestId: extractRequestId(response),
+
+    url: finalUrl,
+    viewUrl: safeText(first(file?.viewUrl, explicitUrl, finalUrl), ""),
+    downloadUrl: safeText(first(file?.downloadUrl, explicitUrl, finalUrl), ""),
+
     objectUrl,
     blob,
+
+    file: {
+      ...file,
+      url: safeText(first(file?.url, finalUrl), ""),
+      viewUrl: safeText(first(file?.viewUrl, finalUrl), ""),
+      downloadUrl: safeText(first(file?.downloadUrl, finalUrl), ""),
+    },
+
+    fallbackUrl: safeText(fallbackUrl, ""),
     raw: response,
     meta: extractMeta(response),
   };
@@ -1754,8 +1885,8 @@ export async function fetchFacturaPdfRequest(
   {
     timeout = FACTURAS_PDF_TIMEOUT,
     auth = true,
-    responseType = "blob",
-    raw = true,
+    responseType = "auto",
+    raw = false,
     ...rest
   } = {}
 ) {
@@ -1769,7 +1900,7 @@ export async function fetchFacturaPdfRequest(
     ...rest,
   });
 
-  return normalizeFacturaPdfResponse(response, endpoint);
+  return normalizeFacturaPdfResponse(response, "");
 }
 
 export async function fetchFacturaPdfUrlRequest(
@@ -1777,21 +1908,36 @@ export async function fetchFacturaPdfUrlRequest(
   disposition = FACTURAS_DISPOSITIONS.ATTACHMENT,
   options = {}
 ) {
-  const result = await fetchFacturaPdfRequest(id, disposition, options);
+  const result = await fetchFacturaPdfRequest(id, disposition, {
+    ...safeObject(options),
+    responseType: "auto",
+    raw: false,
+    auth: true,
+  });
 
-  if (result.url) {
+  if (result?.url) {
     return result.url;
   }
 
-  return buildFacturaPdfEndpoint(id, disposition);
+  throw new Error("FACTURA_PDF_URL_MISSING");
 }
 
 export async function viewFacturaPdfRequest(id, options = {}) {
-  return fetchFacturaPdfRequest(id, FACTURAS_DISPOSITIONS.INLINE, options);
+  return fetchFacturaPdfRequest(id, FACTURAS_DISPOSITIONS.INLINE, {
+    ...safeObject(options),
+    responseType: "auto",
+    raw: false,
+    auth: true,
+  });
 }
 
 export async function downloadFacturaPdfRequest(id, options = {}) {
-  return fetchFacturaPdfRequest(id, FACTURAS_DISPOSITIONS.ATTACHMENT, options);
+  return fetchFacturaPdfRequest(id, FACTURAS_DISPOSITIONS.ATTACHMENT, {
+    ...safeObject(options),
+    responseType: "auto",
+    raw: false,
+    auth: true,
+  });
 }
 
 export async function sendFacturaRequest(
@@ -1826,7 +1972,7 @@ export async function createFacturaRequest(
     ...rest,
   });
 
-  return normalizeFacturaDetailResponse(response);
+  return normalizeFacturaCreateResponse(response);
 }
 
 export async function updateFacturaRequest(
@@ -1979,6 +2125,7 @@ export const FacturasApi = Object.freeze({
   normalizeFacturasStatsResponse,
   normalizeFacturasHealthResponse,
   normalizeFacturaSendResponse,
+  normalizeFacturaCreateResponse,
   normalizeFacturaPdfResponse,
 
   getFacturaEndpoint,

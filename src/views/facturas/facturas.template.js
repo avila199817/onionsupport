@@ -2,8 +2,9 @@
    Onion SPA - Facturas Template
    Archivo: src/views/facturas/facturas.template.js
 
-   EXTREME PRODUCTION TEMPLATE · FACTURAS 11/10
-   VISUAL SYSTEM · TOKEN ALIGNED · SPA ACTION READY
+   FINAL PRO SAAS PANEL · FACTURAS TEMPLATE · 10/10
+   PATCH · TABLE SYSTEM LOCK · TOKEN ALIGNED · NO GLOBAL CSS BLEED
+   PATCH · SINGLE STYLE OWNER · DATA-SCOPE READY · ACTION SAFE
 
    RESPONSABILIDADES:
    - render premium de vista de facturas
@@ -24,6 +25,12 @@
    - incidencia relacionada lista para modal
    - estados loading/error/empty blindados
    - HTML endurecido con escape/fallbacks
+
+   FIX CLAVE:
+   - El root real de FacturasView es [data-facturas-scope].
+   - El CSS ahora se aplica también a ese root.
+   - La tabla queda protegida contra CSS global externo.
+   - renderHeader es el dueño de estilos en uso composicional.
 ========================================================= */
 
 /* =========================================================
@@ -42,7 +49,7 @@ const ADMIN_ROLES = new Set([
   "owner",
 ]);
 
-const STYLE_ID = "onion-facturas-template-styles-v11";
+const STYLE_ID = "onion-facturas-template-styles-v12";
 
 /* =========================================================
    BASE HELPERS
@@ -76,6 +83,7 @@ function safeNumber(value, fallback = 0) {
     }
 
     const n = Number(normalized);
+
     return Number.isFinite(n) ? n : fallback;
   }
 
@@ -147,6 +155,7 @@ function normalizeRole(value = "") {
 
 function isValidEmail(value = "") {
   const email = safeText(value, "").toLowerCase();
+
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
@@ -362,6 +371,14 @@ function icon(name = "") {
 function isAdminState(state = {}) {
   const runtime = safeObject(state);
 
+  if (
+    runtime.canCreateFactura === true ||
+    runtime.view?.canCreateFactura === true ||
+    runtime.permissions?.includes?.("facturas:create")
+  ) {
+    return true;
+  }
+
   const role = normalizeRole(
     first(
       runtime.role,
@@ -426,17 +443,17 @@ function getFacturaId(item = {}) {
       item._id,
       item.facturaId,
       item.invoiceId,
-      item.numero,
       item.numeroFacturaLegal,
       item.numeroFacturaSistema,
+      item.numero,
 
       raw.id,
       raw._id,
       raw.facturaId,
       raw.invoiceId,
-      raw.numero,
       raw.numeroFacturaLegal,
-      raw.numeroFacturaSistema
+      raw.numeroFacturaSistema,
+      raw.numero
     ),
     "FAC-SIN-ID"
   );
@@ -688,33 +705,7 @@ function getEstadoPagoLabel(value = "") {
 }
 
 function getEstadoPagoChipClass(value = "") {
-  const key = getEstadoPagoKey(value);
-
-  return `facturas-chip--${key || "pending"}`;
-}
-
-function getEstadoKey(value = "") {
-  const key = normalizeKey(value);
-
-  if (["sent", "enviada", "enviado"].includes(key)) return "sent";
-  if (["issued", "emitida", "emitido"].includes(key)) return "issued";
-  if (["draft", "borrador"].includes(key)) return "draft";
-  if (["void", "anulada", "anulado"].includes(key)) return "void";
-  if (["cancelled", "canceled", "cancelada", "cancelado"].includes(key)) return "cancelled";
-
-  return "issued";
-}
-
-function getEstadoLabel(value = "") {
-  const key = getEstadoKey(value);
-
-  if (key === "sent") return "Enviada";
-  if (key === "issued") return "Emitida";
-  if (key === "draft") return "Borrador";
-  if (key === "void") return "Anulada";
-  if (key === "cancelled") return "Cancelada";
-
-  return "Emitida";
+  return `facturas-chip--${getEstadoPagoKey(value) || "pending"}`;
 }
 
 function getIncidenciaId(item = {}) {
@@ -950,8 +941,7 @@ function getUpdatedAt(item = {}) {
     raw.sentAt,
     raw.mailSentAt,
     raw.fechaActualizacion,
-    raw.lastUpdateAt,
-    raw.createdAt
+    raw.lastUpdateAt
   );
 }
 
@@ -977,10 +967,12 @@ function getSortTimestamp(item = {}) {
   const raw = safeObject(item?.raw);
 
   return (
+    safeNumber(item?.meta?.updatedAtMs, 0) ||
     safeNumber(item?.meta?.timestampMs, 0) ||
+    safeNumber(raw?.meta?.updatedAtMs, 0) ||
     safeNumber(raw?.meta?.timestampMs, 0) ||
-    toTimestamp(getCreatedAt(item)) ||
     toTimestamp(getUpdatedAt(item)) ||
+    toTimestamp(getCreatedAt(item)) ||
     toTimestamp(raw?._ts) ||
     0
   );
@@ -1104,83 +1096,26 @@ function canSendFactura(item = {}) {
 ========================================================= */
 
 const AVATAR_PALETTE = Object.freeze([
-  {
-    bg: "linear-gradient(135deg, #7c3aed 0%, #ec4899 100%)",
-    bgDark: "linear-gradient(135deg, #8b5cf6 0%, #f472b6 100%)",
-    ring: "rgba(124,58,237,.36)",
-    shadow: "rgba(236,72,153,.26)",
-  },
-  {
-    bg: "linear-gradient(135deg, #2563eb 0%, #06b6d4 100%)",
-    bgDark: "linear-gradient(135deg, #3b82f6 0%, #22d3ee 100%)",
-    ring: "rgba(37,99,235,.34)",
-    shadow: "rgba(6,182,212,.24)",
-  },
-  {
-    bg: "linear-gradient(135deg, #f97316 0%, #ef4444 100%)",
-    bgDark: "linear-gradient(135deg, #fb923c 0%, #f87171 100%)",
-    ring: "rgba(249,115,22,.34)",
-    shadow: "rgba(239,68,68,.24)",
-  },
-  {
-    bg: "linear-gradient(135deg, #16a34a 0%, #14b8a6 100%)",
-    bgDark: "linear-gradient(135deg, #22c55e 0%, #2dd4bf 100%)",
-    ring: "rgba(22,163,74,.34)",
-    shadow: "rgba(20,184,166,.24)",
-  },
-  {
-    bg: "linear-gradient(135deg, #db2777 0%, #9333ea 100%)",
-    bgDark: "linear-gradient(135deg, #ec4899 0%, #a855f7 100%)",
-    ring: "rgba(219,39,119,.34)",
-    shadow: "rgba(147,51,234,.25)",
-  },
-  {
-    bg: "linear-gradient(135deg, #ca8a04 0%, #ea580c 100%)",
-    bgDark: "linear-gradient(135deg, #facc15 0%, #fb923c 100%)",
-    ring: "rgba(202,138,4,.34)",
-    shadow: "rgba(234,88,12,.25)",
-  },
-  {
-    bg: "linear-gradient(135deg, #0891b2 0%, #4f46e5 100%)",
-    bgDark: "linear-gradient(135deg, #06b6d4 0%, #6366f1 100%)",
-    ring: "rgba(8,145,178,.34)",
-    shadow: "rgba(79,70,229,.25)",
-  },
-  {
-    bg: "linear-gradient(135deg, #e11d48 0%, #f59e0b 100%)",
-    bgDark: "linear-gradient(135deg, #fb7185 0%, #fbbf24 100%)",
-    ring: "rgba(225,29,72,.34)",
-    shadow: "rgba(245,158,11,.25)",
-  },
-  {
-    bg: "linear-gradient(135deg, #0f766e 0%, #84cc16 100%)",
-    bgDark: "linear-gradient(135deg, #14b8a6 0%, #a3e635 100%)",
-    ring: "rgba(15,118,110,.34)",
-    shadow: "rgba(132,204,22,.24)",
-  },
-  {
-    bg: "linear-gradient(135deg, #4338ca 0%, #c026d3 100%)",
-    bgDark: "linear-gradient(135deg, #6366f1 0%, #e879f9 100%)",
-    ring: "rgba(67,56,202,.34)",
-    shadow: "rgba(192,38,211,.25)",
-  },
+  ["#7c3aed", "#ec4899"],
+  ["#2563eb", "#06b6d4"],
+  ["#f97316", "#ef4444"],
+  ["#16a34a", "#14b8a6"],
+  ["#db2777", "#9333ea"],
+  ["#ca8a04", "#ea580c"],
+  ["#0891b2", "#4f46e5"],
+  ["#e11d48", "#f59e0b"],
+  ["#0f766e", "#84cc16"],
+  ["#4338ca", "#c026d3"],
 ]);
 
-function getAvatarPalette(item = {}) {
-  const seed = getClientStableKey(item);
-  const index = hashString(seed) % AVATAR_PALETTE.length;
-
-  return AVATAR_PALETTE[index];
-}
-
 function getAvatarStyle(item = {}) {
-  const palette = getAvatarPalette(item);
+  const seed = getClientStableKey(item);
+  const [a, b] = AVATAR_PALETTE[hashString(seed) % AVATAR_PALETTE.length];
 
   return [
-    `--fac-avatar-bg:${palette.bg}`,
-    `--fac-avatar-bg-dark:${palette.bgDark}`,
-    `--fac-avatar-ring:${palette.ring}`,
-    `--fac-avatar-shadow:${palette.shadow}`,
+    `--fac-avatar-a:${a}`,
+    `--fac-avatar-b:${b}`,
+    `--fac-avatar-bg:linear-gradient(135deg, ${a} 0%, ${b} 100%)`,
   ].join(";");
 }
 
@@ -1307,17 +1242,12 @@ function resolveBusyMeta(item = {}, state = {}) {
   const runtime = safeObject(state);
   const facturaId = getFacturaId(item);
 
-  const openingFacturaId = safeText(runtime.openingFacturaId, "");
-  const viewingFacturaId = safeText(runtime.viewingFacturaId, "");
-  const downloadingFacturaId = safeText(runtime.downloadingFacturaId, "");
-  const sendingFacturaId = safeText(runtime.sendingFacturaId, "");
-
   return {
     facturaId,
-    isOpening: openingFacturaId === facturaId,
-    isViewingPdf: viewingFacturaId === facturaId,
-    isDownloading: downloadingFacturaId === facturaId,
-    isSending: sendingFacturaId === facturaId,
+    isOpening: safeText(runtime.openingFacturaId, "") === facturaId,
+    isViewingPdf: safeText(runtime.viewingFacturaId, "") === facturaId,
+    isDownloading: safeText(runtime.downloadingFacturaId, "") === facturaId,
+    isSending: safeText(runtime.sendingFacturaId, "") === facturaId,
   };
 }
 
@@ -1325,7 +1255,7 @@ function resolveBusyMeta(item = {}, state = {}) {
    UI PARTIALS
 ========================================================= */
 
-function renderMaybeStyles(includeStyles = true) {
+function renderMaybeStyles(includeStyles = false) {
   return includeStyles ? renderStyles() : "";
 }
 
@@ -1420,11 +1350,15 @@ function renderDeliveryBadge(item = {}) {
   const sentAt = getSentAt(item);
 
   if (sent) {
+    const title = sentAt
+      ? `Enviada · ${formatDateTime(sentAt)}`
+      : "Factura enviada";
+
     return `
       <span
         class="facturas-mini-badge facturas-mini-badge--sent"
-        title="${escapeHtml(sentAt ? `Enviada · ${formatDateTime(sentAt)}` : "Factura enviada")}"
-        data-tooltip="${escapeHtml(sentAt ? `Enviada · ${formatDateTime(sentAt)}` : "Factura enviada")}"
+        title="${escapeHtml(title)}"
+        data-tooltip="${escapeHtml(title)}"
       >
         ${icon("check")}
         Enviada
@@ -1621,7 +1555,11 @@ function renderRow(item = {}, state = {}) {
           <div class="facturas-main-copy">
             <div class="facturas-factura-line">
               <span class="facturas-factura-id">${escapeHtml(numero)}</span>
-              ${numeroSistema && numeroSistema !== numero ? `<span class="facturas-system-id">${escapeHtml(numeroSistema)}</span>` : ""}
+              ${
+                numeroSistema && numeroSistema !== numero
+                  ? `<span class="facturas-system-id">${escapeHtml(numeroSistema)}</span>`
+                  : ""
+              }
             </div>
 
             <div class="facturas-factura-client">${escapeHtml(clientName)}</div>
@@ -1779,7 +1717,7 @@ function renderEmptyState() {
 function renderStyles() {
   return `
     <style id="${STYLE_ID}">
-      .facturas-view-root{
+      :where(.facturas-view-root, [data-facturas-scope]){
         --fac-row-accent:var(--accent, #6f59d9);
         --fac-row-accent-soft:var(--accent-soft, rgba(111,89,217,.12));
 
@@ -1788,9 +1726,13 @@ function renderStyles() {
         color:var(--text, #f5f5f5);
         font-family:var(--font-family, inherit);
         min-inline-size:0;
+        inline-size:100%;
+        container-type:inline-size;
       }
 
-      .facturas-view-root *{
+      :where(.facturas-view-root, [data-facturas-scope]) *,
+      :where(.facturas-view-root, [data-facturas-scope]) *::before,
+      :where(.facturas-view-root, [data-facturas-scope]) *::after{
         box-sizing:border-box;
       }
 
@@ -1807,6 +1749,7 @@ function renderStyles() {
         box-shadow:var(--view-hero-shadow, var(--panel-shadow, var(--shadow-md, 0 14px 30px rgba(0,0,0,.22))));
         padding:var(--space-xl, 22px) var(--space-xl, 24px);
         isolation:isolate;
+        min-inline-size:0;
       }
 
       .facturas-hero::after{
@@ -1847,7 +1790,7 @@ function renderStyles() {
         letter-spacing:var(--view-title-letter, -.05em);
         font-weight:var(--view-title-weight, var(--weight-black, 800));
         color:var(--text-strong, #ffffff);
-        white-space:nowrap;
+        white-space:normal;
       }
 
       .facturas-page-subtitle{
@@ -1867,6 +1810,7 @@ function renderStyles() {
       }
 
       .facturas-btn{
+        appearance:none;
         min-block-size:var(--btn-height, 42px);
         padding-inline:var(--space-md, 16px);
         border-radius:var(--btn-radius, var(--radius-md, 13px));
@@ -1910,24 +1854,11 @@ function renderStyles() {
         transform:translateY(0) scale(var(--ui-active-scale, .985));
       }
 
-      .facturas-btn:focus-visible,
-      .facturas-action-btn:focus-visible,
-      .facturas-pagination-btn:focus-visible,
-      .facturas-incidencia-link:focus-visible{
-        outline:none;
-        box-shadow:var(--focus-ring, 0 0 0 4px rgba(113,113,122,.16));
-      }
-
       .facturas-btn--primary{
         border-color:var(--btn-primary-border, var(--accent-border, rgba(255,255,255,.05)));
         background:var(--btn-primary-bg, var(--gradient-accent, linear-gradient(135deg, #55555d 0%, #3f3f46 55%, #2f2f35 100%)));
         color:var(--btn-primary-text, var(--text-on-accent, #ffffff));
         box-shadow:var(--btn-primary-shadow, 0 12px 28px rgba(0,0,0,.22));
-      }
-
-      .facturas-btn--primary:hover{
-        background:var(--btn-primary-bg-hover, var(--btn-primary-bg));
-        color:var(--btn-primary-text, #ffffff);
       }
 
       .facturas-btn--create{
@@ -1939,10 +1870,12 @@ function renderStyles() {
           var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
       }
 
-      .facturas-btn--create:hover{
-        color:var(--text-on-accent, #ffffff);
-        background:var(--gradient-success, linear-gradient(180deg, #22c55e 0%, #16a34a 100%));
-        border-color:color-mix(in srgb, var(--success, #22c55e) 32%, var(--btn-primary-border, transparent));
+      .facturas-btn:focus-visible,
+      .facturas-action-btn:focus-visible,
+      .facturas-pagination-btn:focus-visible,
+      .facturas-incidencia-link:focus-visible{
+        outline:none;
+        box-shadow:var(--focus-ring, 0 0 0 4px rgba(113,113,122,.16));
       }
 
       .facturas-btn.is-loading,
@@ -2073,6 +2006,7 @@ function renderStyles() {
           var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
           var(--data-table-bg, var(--card-bg, var(--surface-elevated, rgba(39,39,42,.88))));
         box-shadow:var(--data-table-shadow, var(--shadow-card, var(--card-shadow, 0 16px 36px rgba(0,0,0,.24))));
+        min-inline-size:0;
       }
 
       .facturas-history-head{
@@ -2128,6 +2062,7 @@ function renderStyles() {
       }
 
       .facturas-pagination-btn{
+        appearance:none;
         min-block-size:calc(38px * var(--ui-scale, 1));
         padding-inline:var(--space-sm, 14px);
         border-radius:var(--radius-md, 13px);
@@ -2165,6 +2100,7 @@ function renderStyles() {
       .facturas-table-wrap{
         position:relative;
         min-block-size:120px;
+        min-inline-size:0;
       }
 
       .facturas-table-wrap.is-refreshing .facturas-table-shell{
@@ -2177,6 +2113,7 @@ function renderStyles() {
 
       .facturas-table-shell{
         inline-size:100%;
+        max-inline-size:100%;
         overflow-x:auto;
         overflow-y:hidden;
         scrollbar-width:thin;
@@ -2202,12 +2139,39 @@ function renderStyles() {
       }
 
       .facturas-table{
+        display:table !important;
         inline-size:100%;
-        border-collapse:separate;
-        border-spacing:0;
         min-inline-size:1120px;
         table-layout:fixed;
+        border-collapse:separate;
+        border-spacing:0;
         background:var(--table-bg, transparent);
+        margin:0;
+      }
+
+      .facturas-table colgroup{
+        display:table-column-group !important;
+      }
+
+      .facturas-table col{
+        display:table-column !important;
+      }
+
+      .facturas-table thead{
+        display:table-header-group !important;
+      }
+
+      .facturas-table tbody{
+        display:table-row-group !important;
+      }
+
+      .facturas-table tr{
+        display:table-row !important;
+      }
+
+      .facturas-table th,
+      .facturas-table td{
+        display:table-cell !important;
       }
 
       .facturas-table thead th{
@@ -2230,6 +2194,7 @@ function renderStyles() {
         padding:calc(12px * var(--ui-scale, 1)) var(--table-cell-padding-x, 12px);
         vertical-align:middle;
         border-bottom:1px solid var(--data-table-row-border, var(--table-border, rgba(255,255,255,.052)));
+        background:transparent;
       }
 
       .facturas-table tbody tr:last-child td{
@@ -2286,6 +2251,10 @@ function renderStyles() {
         --fac-row-accent:var(--error, #ef4444);
       }
 
+      .facturas-cell{
+        min-inline-size:0;
+      }
+
       .facturas-main{
         display:grid;
         grid-template-columns:var(--avatar-size-lg, calc(44px * var(--ui-scale, 1))) minmax(0, 1fr);
@@ -2301,10 +2270,10 @@ function renderStyles() {
         border-radius:var(--radius-pill, 999px);
         overflow:hidden;
         flex:0 0 var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
-        background:var(--fac-avatar-bg, var(--avatar-bg, linear-gradient(180deg, #52525b 0%, #3f3f46 100%)));
+        background:var(--fac-avatar-bg, linear-gradient(135deg, #55555d 0%, #303036 100%));
         box-shadow:
-          0 10px 22px var(--fac-avatar-shadow, rgba(0,0,0,.20)),
-          0 0 0 3px color-mix(in srgb, var(--fac-avatar-ring, var(--accent-ring, rgba(113,113,122,.30))) 58%, transparent),
+          0 10px 22px color-mix(in srgb, var(--fac-avatar-b, #000000) 22%, transparent),
+          0 0 0 3px color-mix(in srgb, var(--fac-avatar-a, #71717a) 24%, transparent),
           var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
         transform:translateZ(0);
       }
@@ -2564,6 +2533,7 @@ function renderStyles() {
       }
 
       .facturas-incidencia-link{
+        appearance:none;
         max-inline-size:100%;
         min-block-size:calc(30px * var(--ui-scale, 1));
         padding-inline:var(--space-sm, 10px);
@@ -2629,6 +2599,7 @@ function renderStyles() {
       }
 
       .facturas-action-btn{
+        appearance:none;
         inline-size:100%;
         min-inline-size:0;
         min-block-size:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
@@ -2705,15 +2676,6 @@ function renderStyles() {
         color:var(--text-on-accent, #ffffff);
       }
 
-      .facturas-action-btn--success:hover{
-        color:var(--text-on-accent, #ffffff);
-        background:var(--gradient-success, linear-gradient(180deg, #22c55e 0%, #16a34a 100%));
-        border-color:color-mix(in srgb, var(--success, #22c55e) 32%, var(--btn-primary-border, transparent));
-        box-shadow:
-          0 10px 22px color-mix(in srgb, var(--success, #22c55e), transparent 84%),
-          var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
-      }
-
       .facturas-loader-only{
         display:inline-flex;
         inline-size:16px;
@@ -2743,11 +2705,6 @@ function renderStyles() {
         border-top-color:currentColor;
         animation:facturasSpin .78s linear infinite;
         flex:0 0 auto;
-      }
-
-      .facturas-action-btn.is-loading .facturas-inline-spinner{
-        inline-size:15px;
-        block-size:15px;
       }
 
       .facturas-refresh-overlay{
@@ -2940,11 +2897,6 @@ function renderStyles() {
         to{ transform:translateX(100%); }
       }
 
-      [data-theme="dark"] .facturas-avatar,
-      :root:not([data-theme="light"]) .facturas-avatar{
-        background:var(--fac-avatar-bg-dark, var(--fac-avatar-bg, var(--avatar-bg)));
-      }
-
       [data-theme="light"] .facturas-hero,
       [data-theme="light"] .facturas-history{
         background:
@@ -2992,25 +2944,6 @@ function renderStyles() {
         border-color:var(--accent-border-strong, rgba(111,89,217,.36));
       }
 
-      [data-theme="light"] .facturas-mini-badge--sent{
-        color:var(--success-hover, #157a4f);
-      }
-
-      [data-theme="light"] .facturas-mini-badge--pdf{
-        color:var(--info-hover, #2f6d8d);
-      }
-
-      [data-theme="light"] .facturas-action-btn:disabled,
-      [data-theme="light"] .facturas-action-btn[aria-disabled="true"]{
-        opacity:.46;
-      }
-
-      @media (max-width: 1280px){
-        .facturas-table{
-          min-inline-size:1080px;
-        }
-      }
-
       @media (max-width: 1180px){
         .facturas-hero{
           padding:var(--space-lg, 20px);
@@ -3024,17 +2957,13 @@ function renderStyles() {
           justify-content:flex-start;
         }
 
-        .facturas-page-title{
-          white-space:normal;
-        }
-
         .facturas-stats{
           grid-template-columns:repeat(2, minmax(0, 1fr));
         }
       }
 
       @media (max-width: 760px){
-        .facturas-view-root{
+        :where(.facturas-view-root, [data-facturas-scope]){
           gap:var(--space-md, 16px);
         }
 
@@ -3063,7 +2992,6 @@ function renderStyles() {
         .facturas-page-title{
           font-size:clamp(var(--font-3xl, 24px), 8vw, var(--font-4xl, 34px));
           line-height:1;
-          white-space:normal;
         }
 
         .facturas-page-subtitle{
@@ -3100,9 +3028,9 @@ function renderStyles() {
       }
 
       @media (prefers-reduced-motion: reduce){
-        .facturas-view-root *,
-        .facturas-view-root *::before,
-        .facturas-view-root *::after{
+        :where(.facturas-view-root, [data-facturas-scope]) *,
+        :where(.facturas-view-root, [data-facturas-scope]) *::before,
+        :where(.facturas-view-root, [data-facturas-scope]) *::after{
           animation:none !important;
           transition:none !important;
         }
@@ -3260,7 +3188,7 @@ export function renderHeader({ items = [], state = {}, includeStyles = true } = 
    LOADING / ERROR
 ========================================================= */
 
-export function renderLoadingState({ includeStyles = true } = {}) {
+export function renderLoadingState({ includeStyles = false } = {}) {
   return `
     ${renderMaybeStyles(includeStyles)}
 
@@ -3270,7 +3198,7 @@ export function renderLoadingState({ includeStyles = true } = {}) {
   `;
 }
 
-export function renderErrorState(message = "No se pudieron cargar las facturas.", { includeStyles = true } = {}) {
+export function renderErrorState(message = "No se pudieron cargar las facturas.", { includeStyles = false } = {}) {
   return `
     ${renderMaybeStyles(includeStyles)}
 
@@ -3285,7 +3213,7 @@ export function renderErrorState(message = "No se pudieron cargar las facturas."
    MAIN TABLE
 ========================================================= */
 
-export function renderCards({ items = [], state = {}, includeStyles = true } = {}) {
+export function renderCards({ items = [], state = {}, includeStyles = false } = {}) {
   const rows = sortFacturasNewestFirst(items);
   const runtime = safeObject(state);
 
@@ -3347,12 +3275,12 @@ export function renderCards({ items = [], state = {}, includeStyles = true } = {
 
             <thead>
               <tr>
-                <th>Factura / cliente</th>
-                <th>Pago</th>
-                <th>Fecha de emisión</th>
-                <th>Total</th>
-                <th>Incidencia</th>
-                <th>Acciones</th>
+                <th scope="col">Factura / cliente</th>
+                <th scope="col">Pago</th>
+                <th scope="col">Fecha de emisión</th>
+                <th scope="col">Total</th>
+                <th scope="col">Incidencia</th>
+                <th scope="col">Acciones</th>
               </tr>
             </thead>
 

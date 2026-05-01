@@ -2,11 +2,15 @@
    Onion SPA - Incidencias View
    Archivo: src/views/incidencias/incidenciasView.js
 
-   EXTREME PRO SYSTEM · VIEW REAL · FULL PATCH 12/10
+   EXTREME PRO SYSTEM · VIEW REAL · FULL PATCH 13/10
    FILTERS CONNECTED · SEARCH BRIDGE · URL AUTOPEN · TOPBAR READY
    DETAIL STORE MERGE · CREATE MODAL BRIDGE
    PAGINATION 5 · ACTION STATE SYNC · RERENDER SAFE · CLEANUP PRO
    FACTURAS LINKED PRESERVER · MODAL DIRECT IMPORT HARDENED
+   PATCH · FILTERS SIMPLIFIED: TODAS / ABIERTAS / CERRADAS
+   PATCH · SEARCH INPUT CONNECTED WITH TEMPLATE V13
+   PATCH · OPEN FILTER GROUPS OPEN/PENDING/PROGRESS
+   PATCH · CLOSED FILTER GROUPS RESOLVED/CLOSED/CANCELLED/ARCHIVED
 
    RESPONSABILIDADES:
    - punto de entrada real de la vista de incidencias
@@ -64,6 +68,8 @@
      existentes en store/raw.
    - Los filtros del template funcionan desde el View real.
    - La paginación usa la colección filtrada.
+   - El filtro "Abiertas" incluye abiertas, pendientes y en proceso.
+   - El filtro "Cerradas" incluye resueltas, cerradas, canceladas y archivadas.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -140,21 +146,99 @@ export const IncidenciasView = (() => {
 
   const FILTER_ALIASES = Object.freeze({
     all: "all",
+    todo: "all",
     todos: "all",
     todas: "all",
+    total: "all",
+    totales: "all",
 
     open: "open",
+    opened: "open",
     abierta: "open",
     abiertas: "open",
     abierto: "open",
     abiertos: "open",
+    active: "open",
+    activa: "open",
+    activas: "open",
+    activo: "open",
+    activos: "open",
 
+    pending: "open",
+    pendiente: "open",
+    pendientes: "open",
+    new: "open",
+    nueva: "open",
+    nuevo: "open",
+    created: "open",
+
+    progress: "open",
+    in_progress: "open",
+    inprogress: "open",
+    proceso: "open",
+    en_proceso: "open",
+    trabajando: "open",
+    working: "open",
+    assigned: "open",
+    asignada: "open",
+    asignado: "open",
+
+    resolved: "closed",
+    resuelta: "closed",
+    resueltas: "closed",
+    resuelto: "closed",
+    resueltos: "closed",
+    solved: "closed",
+
+    closed: "closed",
+    close: "closed",
+    cerrada: "closed",
+    cerradas: "closed",
+    cerrado: "closed",
+    cerrados: "closed",
+    cancelled: "closed",
+    cancelada: "closed",
+    cancelado: "closed",
+    archived: "closed",
+    archivada: "closed",
+    archivado: "closed",
+
+    urgent: "all",
+    urgente: "all",
+    urgentes: "all",
+    critical: "all",
+    critica: "all",
+    crítico: "all",
+    critico: "all",
+    alta: "all",
+    high: "all",
+
+    attachments: "all",
+    adjuntos: "all",
+    con_adjuntos: "all",
+
+    billed: "all",
+    importe: "all",
+    factura: "all",
+    facturas: "all",
+    con_importe: "all",
+  });
+
+  const STATUS_ALIASES = Object.freeze({
     pending: "pending",
     pendiente: "pending",
     pendientes: "pending",
     new: "pending",
     nueva: "pending",
     nuevo: "pending",
+    created: "pending",
+
+    open: "open",
+    opened: "open",
+    abierta: "open",
+    abiertas: "open",
+    abierto: "open",
+    abiertos: "open",
 
     progress: "progress",
     in_progress: "progress",
@@ -162,40 +246,30 @@ export const IncidenciasView = (() => {
     proceso: "progress",
     en_proceso: "progress",
     trabajando: "progress",
+    working: "progress",
+    assigned: "progress",
+    asignada: "progress",
+    asignado: "progress",
 
     resolved: "resolved",
     resuelta: "resolved",
     resueltas: "resolved",
     resuelto: "resolved",
     resueltos: "resolved",
+    solved: "resolved",
 
     closed: "closed",
+    close: "closed",
     cerrada: "closed",
     cerradas: "closed",
     cerrado: "closed",
     cerrados: "closed",
+    cancelled: "closed",
+    cancelada: "closed",
+    cancelado: "closed",
     archived: "closed",
     archivada: "closed",
-
-    urgent: "urgent",
-    urgente: "urgent",
-    urgentes: "urgent",
-    critical: "urgent",
-    critica: "urgent",
-    crítico: "urgent",
-    critico: "urgent",
-    alta: "urgent",
-    high: "urgent",
-
-    attachments: "attachments",
-    adjuntos: "attachments",
-    con_adjuntos: "attachments",
-
-    billed: "billed",
-    importe: "billed",
-    factura: "billed",
-    facturas: "billed",
-    con_importe: "billed",
+    archivado: "closed",
   });
 
   const TICKET_QUERY_KEYS = Object.freeze([
@@ -289,10 +363,6 @@ export const IncidenciasView = (() => {
       .trim();
 
     return text || fallback;
-  }
-
-  function safeLower(value, fallback = "") {
-    return safeText(value, fallback).toLowerCase();
   }
 
   function safeNumber(value, fallback = 0) {
@@ -398,6 +468,12 @@ export const IncidenciasView = (() => {
     return FILTER_ALIASES[key] || DEFAULT_FILTER;
   }
 
+  function normalizeStatusKey(value = "") {
+    const key = normalizeKey(value || "");
+
+    return STATUS_ALIASES[key] || "pending";
+  }
+
   function getCurrentFilter() {
     return normalizeFilter(
       first(
@@ -469,7 +545,7 @@ export const IncidenciasView = (() => {
   }
 
   function getItemStatusKey(item = {}) {
-    return normalizeFilter(getItemStatusRaw(item));
+    return normalizeStatusKey(getItemStatusRaw(item));
   }
 
   function getItemPriorityKey(item = {}) {
@@ -629,13 +705,29 @@ export const IncidenciasView = (() => {
         item.assignedTo?.email,
         item.assignment?.assignedToName,
         item.assignment?.assignedToEmail,
+        item.assignment?.agentName,
+        item.assignment?.name,
         item.tecnico?.name,
         item.tecnico?.email,
+        item.tecnico,
 
         item.category,
         item.categoria,
+        item.subcategory,
+        item.subcategoria,
         item.type,
         item.tipo,
+
+        item.status,
+        item.estado,
+        item.priority,
+        item.prioridad,
+
+        item.numeroFacturaLegal,
+        item.numeroFactura,
+        item.invoiceNumber,
+        item.facturaId,
+        item.invoiceId,
 
         item.raw?.search?.text,
       ]
@@ -647,19 +739,16 @@ export const IncidenciasView = (() => {
 
   function itemMatchesCurrentFilter(item = {}, filter = getCurrentFilter()) {
     const key = normalizeFilter(filter);
+    const statusKey = getItemStatusKey(item);
 
     if (key === "all") return true;
-    if (key === "open") return getItemStatusKey(item) === "open";
-    if (key === "pending") return getItemStatusKey(item) === "pending";
-    if (key === "progress") return getItemStatusKey(item) === "progress";
-    if (key === "resolved") return getItemStatusKey(item) === "resolved";
-    if (key === "closed") return getItemStatusKey(item) === "closed";
-    if (key === "urgent") return getItemPriorityKey(item) === "urgent";
-    if (key === "attachments") return getItemAttachmentsCount(item) > 0;
 
-    if (key === "billed") {
-      const amount = getItemAmount(item);
-      return Number.isFinite(amount) && amount > 0;
+    if (key === "open") {
+      return ["open", "pending", "progress"].includes(statusKey);
+    }
+
+    if (key === "closed") {
+      return ["resolved", "closed"].includes(statusKey);
     }
 
     return true;
@@ -670,7 +759,10 @@ export const IncidenciasView = (() => {
 
     if (!query) return true;
 
-    return getItemSearchText(item).includes(query);
+    const terms = query.split(" ").filter(Boolean);
+    const haystack = getItemSearchText(item);
+
+    return terms.every((term) => haystack.includes(term));
   }
 
   function getFilteredItems(items = getItems()) {
@@ -2770,7 +2862,7 @@ export const IncidenciasView = (() => {
         data-view="incidencias"
         data-incidencias-scope="${SCOPE}"
       >
-        <div class="content-wrapper" style="display:grid;gap:var(--space-lg);">
+        <div class="content-wrapper" style="display:grid;gap:var(--space-lg);min-width:0;max-width:100%;">
           ${renderIncidenciasTableTemplate({
             items: allItems,
             totalCount,
@@ -2786,9 +2878,11 @@ export const IncidenciasView = (() => {
             filter: currentFilter,
             activeFilter: currentFilter,
             statusFilter: currentFilter,
+            search: currentSearchQuery,
             searchQuery: currentSearchQuery,
             filterQuery: currentSearchQuery,
             query: currentSearchQuery,
+            q: currentSearchQuery,
 
             state: {
               ...incidenciasState,
@@ -2806,9 +2900,11 @@ export const IncidenciasView = (() => {
               filter: currentFilter,
               activeFilter: currentFilter,
               statusFilter: currentFilter,
+              search: currentSearchQuery,
               searchQuery: currentSearchQuery,
               filterQuery: currentSearchQuery,
               query: currentSearchQuery,
+              q: currentSearchQuery,
             },
           })}
         </div>
@@ -3479,6 +3575,10 @@ export const IncidenciasView = (() => {
         return clearFilters();
       },
 
+      clearSearch() {
+        return clearSearchOnly();
+      },
+
       getState() {
         return api.getState();
       },
@@ -3690,6 +3790,19 @@ export const IncidenciasView = (() => {
     if (!selectors) return null;
 
     return event.target?.closest?.(selectors) || null;
+  }
+
+  function getSearchFieldTarget(event) {
+    return (
+      event.target?.closest?.("#incidencias-search-input") ||
+      event.target?.closest?.("#incidencias-filter-search") ||
+      event.target?.closest?.("[data-incidencias-search-input='true']") ||
+      event.target?.closest?.("[data-incidencias-action='search']") ||
+      event.target?.closest?.("[data-action='search-incidencias']") ||
+      event.target?.closest?.("[data-incidencias-action='filter-search']") ||
+      event.target?.closest?.("[data-action='filter-search']") ||
+      null
+    );
   }
 
   function getTicketIdFromElement(element = null) {
@@ -3920,10 +4033,7 @@ export const IncidenciasView = (() => {
     const onInput = (event) => {
       if (destroyed) return;
 
-      const searchField =
-        event.target?.closest?.("#incidencias-filter-search") ||
-        event.target?.closest?.("[data-incidencias-action='filter-search']") ||
-        event.target?.closest?.("[data-action='filter-search']");
+      const searchField = getSearchFieldTarget(event);
 
       if (!searchField) return;
 
@@ -3933,10 +4043,7 @@ export const IncidenciasView = (() => {
     const onChange = (event) => {
       if (destroyed) return;
 
-      const searchField =
-        event.target?.closest?.("#incidencias-filter-search") ||
-        event.target?.closest?.("[data-incidencias-action='filter-search']") ||
-        event.target?.closest?.("[data-action='filter-search']");
+      const searchField = getSearchFieldTarget(event);
 
       if (searchField) {
         clearFilterSearchTimer();
@@ -4217,8 +4324,10 @@ export const IncidenciasView = (() => {
         filter: getCurrentFilter(),
         activeFilter: getCurrentFilter(),
         statusFilter: getCurrentFilter(),
+        search: getCurrentSearchQuery(),
         searchQuery: getCurrentSearchQuery(),
         filterQuery: getCurrentSearchQuery(),
+        query: getCurrentSearchQuery(),
 
         lastApiPayloadHasItems: extractItemsFromPayload(lastApiPayload).length > 0,
         itemsCount: allItems.length,

@@ -2,29 +2,36 @@
    Onion SPA - Facturas Actions
    Archivo: src/views/facturas/facturas.actions.js
 
-   FINAL PRO SYSTEM · ACTIONS REAL · 10/10
-   PATCH · INCIDENCIA SAFE · NO URL NAVIGATION
+   FINAL PRO SYSTEM · ACTIONS REAL · 10/10 EXTREME
+   PATCH · API ALIGNED · PDF STREAM SAFE · CSV PRO · INCIDENCIA SAFE
 
    RESPONSABILIDADES:
    - centralizar acciones operativas del módulo de facturas
    - resolver detalle desde store + loader/backend
    - abrir detalle a nivel de datos, no de UI
    - preservar relación factura ↔ incidencia
-   - abrir pdf inline / descarga
-   - enviar factura al cliente
+   - abrir PDF inline contra endpoint real del backend
+   - descargar PDF contra endpoint real del backend
+   - soportar respuestas PDF como URL / Blob / Response / stream adaptado
+   - enviar factura al cliente por endpoint real
    - copiar identificadores
-   - exportar colección a CSV
+   - exportar colección a CSV pro
    - desacoplar facturasView.js de la lógica operativa
 
-   FULL PRO 10/10:
-   - misma filosofía que incidencias.actions.js
-   - sin acoplar modal global en actions
-   - fallback store -> loader
-   - export CSV robusto con incidencia
-   - clipboard con fallback legacy
-   - eventos opcionales vía AppCore.events
+   BACKEND ALINEADO:
+   - GET  /api/facturas/:id
+   - GET  /api/facturas/:id/pdf
+   - GET  /api/facturas/:id/descargar
+   - POST /api/facturas/:id/enviar
+
+   HARDENING:
+   - no navegación a rutas inexistentes de incidencia
+   - apertura PDF con ventana preabierta para evitar popup blockers
+   - descarga con anchor seguro
+   - fallback directo a endpoint si el apiClient no devuelve URL/blob
+   - eventos AppCore + window
    - tolerancia a payloads heterogéneos
-   - compatible con API normalizada actual
+   - CSV con BOM + sep=; para Excel ES
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -33,6 +40,8 @@ import {
   fetchFacturaPdfUrlRequest,
   sendFacturaRequest,
   resolveFacturaPdfUrl,
+  buildFacturaPdfEndpoint,
+  FACTURAS_DISPOSITIONS,
 } from "./facturas.api.js";
 
 import {
@@ -54,31 +63,26 @@ import {
 
 const CSV_FILENAME_PREFIX = "facturas";
 
+const PDF_OBJECT_URL_REVOKE_MS = 120000;
+const DOWNLOAD_OBJECT_URL_REVOKE_MS = 15000;
+
+const FACTURA_SENT_EVENTS = Object.freeze([
+  "facturas:sent",
+  "facturas:send:success",
+  "invoice:sent",
+]);
+
+const FACTURA_PDF_EVENTS = Object.freeze({
+  OPEN_REQUEST: "facturas:pdf:open:request",
+  OPEN_SUCCESS: "facturas:pdf:opened",
+  DOWNLOAD_REQUEST: "facturas:pdf:download:request",
+  DOWNLOAD_SUCCESS: "facturas:pdf:download",
+  ERROR: "facturas:pdf:error",
+});
+
 /* =========================================================
    BASE HELPERS
 ========================================================= */
-
-function safeEmit(eventName = "", payload = {}) {
-  const name = safeText(eventName, "");
-
-  if (!name) return false;
-
-  try {
-    AppCore?.events?.emit?.(name, payload);
-    return true;
-  } catch {}
-
-  try {
-    window.dispatchEvent(
-      new CustomEvent(name, {
-        detail: payload,
-      })
-    );
-    return true;
-  } catch {}
-
-  return false;
-}
 
 function first(...values) {
   for (const value of values) {
@@ -98,10 +102,6 @@ function first(...values) {
   return null;
 }
 
-function normalizeFacturaId(value = "") {
-  return safeText(value, "");
-}
-
 function isObject(value) {
   return Boolean(
     value &&
@@ -119,6 +119,145 @@ function hasOwnKeys(value = {}) {
   );
 }
 
+function normalizeFacturaId(value = "") {
+  return safeText(value, "");
+}
+
+function normalizeText(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function normalizeKey(value = "") {
+  return normalizeText(value)
+    .replace(/[^\w]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function safeDateIso(value = null) {
+  if (!value) return "";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return date.toISOString();
+}
+
+function safeDateLabel(value = null) {
+  if (!value) return "";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  } catch {
+    return safeDateIso(value);
+  }
+}
+
+function round2(value = 0) {
+  return Math.round((safeNumber(value, 0) + Number.EPSILON) * 100) / 100;
+}
+
+function safeEmit(eventName = "", payload = {}) {
+  const name = safeText(eventName, "");
+
+  if (!name) return false;
+
+  let emitted = false;
+
+  try {
+    AppCore?.events?.emit?.(name, payload);
+    emitted = true;
+  } catch {}
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent(name, {
+        detail: payload,
+      })
+    );
+    emitted = true;
+  } catch {}
+
+  return emitted;
+}
+
+function safeEmitMany(events = [], payload = {}) {
+  safeArray(events).forEach((eventName) => {
+    safeEmit(eventName, payload);
+  });
+}
+
+function safeLog(...args) {
+  try {
+    AppCore?.utils?.log?.("[FacturasActions]", ...args);
+  } catch {}
+}
+
+function safeWarn(...args) {
+  try {
+    AppCore?.utils?.warn?.("[FacturasActions]", ...args);
+  } catch {
+    try {
+      console.warn("[FacturasActions]", ...args);
+    } catch {}
+  }
+}
+
+function safeErrorMessage(error = null, fallback = "") {
+  return safeText(
+    first(
+      error?.data?.message,
+      error?.response?.data?.message,
+      error?.response?.message,
+      error?.response?.error,
+      error?.payload?.message,
+      error?.result?.message,
+      error?.message,
+      fallback
+    ),
+    fallback
+  );
+}
+
+function getErrorStatus(error = null) {
+  return safeNumber(
+    first(
+      error?.status,
+      error?.statusCode,
+      error?.code,
+      error?.response?.status,
+      error?.response?.statusCode,
+      error?.data?.status,
+      error?.payload?.status
+    ),
+    0
+  );
+}
+
+function isFatalHttpError(error = null) {
+  const status = getErrorStatus(error);
+
+  return status >= 400 && status < 600;
+}
+
 function isLikelyFactura(value) {
   if (!isObject(value)) {
     return false;
@@ -133,6 +272,7 @@ function isLikelyFactura(value) {
       value.code ||
       value.numeroFacturaLegal ||
       value.numeroFacturaSistema ||
+      value.invoiceNumber ||
       value.total !== undefined ||
       value.amount !== undefined ||
       value.importe !== undefined ||
@@ -152,9 +292,12 @@ function looksLikeEnvelope(value) {
   return Boolean(
     obj.factura ||
       obj.item ||
+      obj.record ||
       obj.data ||
       obj.result ||
-      obj.payload
+      obj.payload ||
+      obj.body ||
+      obj.response
   );
 }
 
@@ -169,52 +312,83 @@ function pickDetail(payload = null) {
 
   const obj = safeObject(payload);
 
-  if (isLikelyFactura(obj.factura)) {
-    return obj.factura;
+  const direct = first(
+    obj.factura,
+    obj.item,
+    obj.record,
+    obj.data?.factura,
+    obj.data?.item,
+    obj.data?.record,
+    obj.result?.factura,
+    obj.result?.item,
+    obj.result?.record,
+    obj.payload?.factura,
+    obj.payload?.item,
+    obj.payload?.record
+  );
+
+  if (isLikelyFactura(direct)) {
+    return direct;
   }
 
-  if (isLikelyFactura(obj.item)) {
-    return obj.item;
+  const nested = first(
+    obj.data,
+    obj.result,
+    obj.payload,
+    obj.body,
+    obj.response
+  );
+
+  if (looksLikeEnvelope(nested)) {
+    return pickDetail(nested);
   }
 
-  if (isLikelyFactura(obj.result)) {
-    return obj.result;
-  }
-
-  if (isLikelyFactura(obj.payload)) {
-    return obj.payload;
-  }
-
-  if (isLikelyFactura(obj.data)) {
-    return obj.data;
-  }
-
-  if (looksLikeEnvelope(obj.data)) {
-    return pickDetail(obj.data);
-  }
-
-  if (looksLikeEnvelope(obj.payload)) {
-    return pickDetail(obj.payload);
-  }
-
-  if (looksLikeEnvelope(obj.result)) {
-    return pickDetail(obj.result);
+  if (isLikelyFactura(nested)) {
+    return nested;
   }
 
   return null;
 }
 
-function safeErrorMessage(error = null, fallback = "") {
+/* =========================================================
+   API URL HELPERS
+========================================================= */
+
+function getApiBase() {
   return safeText(
     first(
-      error?.data?.message,
-      error?.response?.data?.message,
-      error?.response?.message,
-      error?.message,
-      fallback
+      AppCore?.config?.apiBase,
+      AppCore?.config?.api?.baseUrl,
+      AppCore?.state?.apiBase,
+      window?.ONION_API_BASE,
+      window?.API_BASE
     ),
-    fallback
-  );
+    ""
+  ).replace(/\/+$/, "");
+}
+
+function resolveApiUrl(path = "") {
+  const value = safeText(path, "");
+
+  if (!value) return "";
+
+  if (/^https?:\/\//i.test(value) || value.startsWith("blob:")) {
+    return value;
+  }
+
+  const apiBase = getApiBase();
+
+  if (!apiBase) {
+    return value.startsWith("/") ? value : `/${value}`;
+  }
+
+  const normalizedPath = value.startsWith("/") ? value : `/${value}`;
+
+  if (apiBase.endsWith("/api") && normalizedPath.startsWith("/api/")) {
+    return `${apiBase}${normalizedPath.slice(4)}`;
+  }
+
+  return `${apiBase}${normalizedPath}`;
 }
 
 /* =========================================================
@@ -222,35 +396,41 @@ function safeErrorMessage(error = null, fallback = "") {
 ========================================================= */
 
 function getRaw(item = {}) {
-  return safeObject(item?.raw);
+  const source = safeObject(item);
+
+  return safeObject(source.raw);
 }
 
-function resolveFacturaId(detail = null) {
-  const item = safeObject(detail);
-  const raw = getRaw(item);
+function getFacturaId(item = {}) {
+  const source = safeObject(item);
+  const raw = getRaw(source);
 
   return safeText(
     first(
-      item.id,
-      item._id,
-      item.facturaId,
-      item.invoiceId,
-      item.numeroFacturaLegal,
-      item.numeroFacturaSistema,
+      source.id,
+      source._id,
+      source.facturaId,
+      source.invoiceId,
+      source.numeroFacturaLegal,
+      source.numeroFacturaSistema,
+      source.numero,
+      source.invoiceNumber,
 
       raw.id,
       raw._id,
       raw.facturaId,
       raw.invoiceId,
       raw.numeroFacturaLegal,
-      raw.numeroFacturaSistema
+      raw.numeroFacturaSistema,
+      raw.numero,
+      raw.invoiceNumber
     ),
     ""
   );
 }
 
-function getFacturaId(item = {}) {
-  return resolveFacturaId(item);
+function resolveFacturaId(detail = null) {
+  return getFacturaId(detail);
 }
 
 function getFacturaNumber(item = {}) {
@@ -264,16 +444,24 @@ function getFacturaNumber(item = {}) {
       source.facturaCode,
       source.facturaNumero,
       source.numeroFacturaLegal,
+      source.numeroFactura,
       source.numeroFacturaSistema,
       source.invoiceNumber,
+      source.facturaId,
+      source.invoiceId,
+      source.id,
 
       raw.numero,
       raw.code,
       raw.facturaCode,
       raw.facturaNumero,
       raw.numeroFacturaLegal,
+      raw.numeroFactura,
       raw.numeroFacturaSistema,
-      raw.invoiceNumber
+      raw.invoiceNumber,
+      raw.facturaId,
+      raw.invoiceId,
+      raw.id
     ),
     "—"
   );
@@ -287,9 +475,11 @@ function getFacturaClientObject(item = {}) {
     source.cliente,
     source.client,
     source.customer,
+    source.clienteSnapshot,
     raw.cliente,
     raw.client,
-    raw.customer
+    raw.customer,
+    raw.clienteSnapshot
   );
 
   return isObject(client) ? client : {};
@@ -300,7 +490,7 @@ function getFacturaClient(item = {}) {
   const raw = getRaw(source);
   const client = getFacturaClientObject(source);
 
-  if (Object.keys(client).length) {
+  if (hasOwnKeys(client)) {
     return safeText(
       first(
         client.empresa,
@@ -339,11 +529,14 @@ function getFacturaEmail(item = {}) {
   const raw = getRaw(source);
   const client = getFacturaClientObject(source);
 
-  if (Object.keys(client).length) {
+  if (hasOwnKeys(client)) {
     return safeText(
       first(
         client.email,
-        client.mail
+        client.emailLower,
+        client.mail,
+        client.emailFacturacion,
+        client.emailAdministracion
       ),
       "Sin email"
     );
@@ -376,6 +569,7 @@ function getFacturaDate(item = {}) {
     source.date,
     source.fechaFactura,
     source.issueDate,
+    source.issuedAt,
     source.createdAt,
     source.updatedAt,
 
@@ -383,8 +577,30 @@ function getFacturaDate(item = {}) {
     raw.date,
     raw.fechaFactura,
     raw.issueDate,
+    raw.issuedAt,
     raw.createdAt,
     raw.updatedAt
+  );
+}
+
+function getFacturaUpdatedAt(item = {}) {
+  const source = safeObject(item);
+  const raw = getRaw(source);
+
+  return first(
+    source.updatedAt,
+    source.fechaEnvio,
+    source.sentAt,
+    source.mailSentAt,
+    source.delivery?.lastSentAt,
+    source.createdAt,
+
+    raw.updatedAt,
+    raw.fechaEnvio,
+    raw.sentAt,
+    raw.mailSentAt,
+    raw.delivery?.lastSentAt,
+    raw.createdAt
   );
 }
 
@@ -396,9 +612,10 @@ function getFacturaEstadoPago(item = {}) {
     first(
       source.estadoPago,
       source.paymentStatus,
-
+      source.payment?.status,
       raw.estadoPago,
-      raw.paymentStatus
+      raw.paymentStatus,
+      raw.payment?.status
     ),
     "pending"
   );
@@ -412,7 +629,6 @@ function getFacturaEstado(item = {}) {
     first(
       source.estado,
       source.status,
-
       raw.estado,
       raw.status
     ),
@@ -429,10 +645,12 @@ function getFacturaFormaPago(item = {}) {
       source.formaPago,
       source.metodoPago,
       source.paymentMethod,
+      source.payment?.method,
 
       raw.formaPago,
       raw.metodoPago,
-      raw.paymentMethod
+      raw.paymentMethod,
+      raw.payment?.method
     ),
     "—"
   );
@@ -446,9 +664,11 @@ function getFacturaMoneda(item = {}) {
     first(
       source.moneda,
       source.currency,
+      source.facturaCurrency,
 
       raw.moneda,
-      raw.currency
+      raw.currency,
+      raw.facturaCurrency
     ),
     "EUR"
   );
@@ -458,19 +678,28 @@ function getFacturaTotal(item = {}) {
   const source = safeObject(item);
   const raw = getRaw(source);
 
-  return safeNumber(
+  return round2(
     first(
       source.total,
       source.amount,
       source.importe,
       source.importeTotal,
+      source.totalFactura,
+      source.invoiceAmount,
+      source.facturaTotal,
+      source.totals?.total,
+      source.resumen?.total,
 
       raw.total,
       raw.amount,
       raw.importe,
-      raw.importeTotal
-    ),
-    0
+      raw.importeTotal,
+      raw.totalFactura,
+      raw.invoiceAmount,
+      raw.facturaTotal,
+      raw.totals?.total,
+      raw.resumen?.total
+    )
   );
 }
 
@@ -482,15 +711,17 @@ function getFacturaSentTo(item = {}) {
     first(
       source.enviadoA,
       source.sentTo,
-      source?.cliente?.email,
-      source?.client?.email,
-      source?.customer?.email,
+      source.delivery?.lastSentTo,
+      source.cliente?.email,
+      source.client?.email,
+      source.customer?.email,
 
       raw.enviadoA,
       raw.sentTo,
-      raw?.cliente?.email,
-      raw?.client?.email,
-      raw?.customer?.email
+      raw.delivery?.lastSentTo,
+      raw.cliente?.email,
+      raw.client?.email,
+      raw.customer?.email
     ),
     ""
   );
@@ -504,13 +735,82 @@ function getFacturaSentAt(item = {}) {
     source.fechaEnvio,
     source.sentAt,
     source.mailSentAt,
-    source.updatedAt,
+    source.delivery?.lastSentAt,
 
     raw.fechaEnvio,
     raw.sentAt,
     raw.mailSentAt,
-    raw.updatedAt
+    raw.delivery?.lastSentAt
   );
+}
+
+function isFacturaSent(item = {}) {
+  return Boolean(getFacturaSentAt(item) || getFacturaSentTo(item));
+}
+
+function hasFacturaPdf(item = {}) {
+  const source = safeObject(item);
+  const raw = getRaw(source);
+
+  if (
+    first(
+      source.hasPdf,
+      source.pdfAvailable,
+      source.blobPath,
+      source.blobName,
+      source.pdfPath,
+      source.pdfUrl,
+      source.downloadUrl,
+      source.viewUrl,
+
+      raw.hasPdf,
+      raw.pdfAvailable,
+      raw.blobPath,
+      raw.blobName,
+      raw.pdfPath,
+      raw.pdfUrl,
+      raw.downloadUrl,
+      raw.viewUrl
+    )
+  ) {
+    return true;
+  }
+
+  const files = safeArray(
+    first(
+      source.attachments,
+      source.files,
+      source.adjuntos,
+      raw.attachments,
+      raw.files,
+      raw.adjuntos
+    )
+  );
+
+  return files.some((file) => {
+    const itemFile = safeObject(file);
+
+    const type = normalizeText(
+      first(
+        itemFile.contentType,
+        itemFile.mimeType,
+        itemFile.mimetype,
+        itemFile.type
+      )
+    );
+
+    const name = normalizeText(
+      first(
+        itemFile.name,
+        itemFile.filename,
+        itemFile.fileName,
+        itemFile.url,
+        itemFile.path
+      )
+    );
+
+    return type.includes("pdf") || name.endsWith(".pdf");
+  });
 }
 
 /* =========================================================
@@ -538,11 +838,19 @@ function pickTicketIdFromArray(value = []) {
       item.relatedTicketId,
       item.relatedIncidentId,
       item.supportTicketId,
-      item.caseId
+      item.caseId,
+
+      item.ticket?.ticketId,
+      item.ticket?.incidenciaId,
+      item.ticket?.id,
+
+      item.incidencia?.ticketId,
+      item.incidencia?.incidenciaId,
+      item.incidencia?.id
     );
 
     if (candidate) {
-      return candidate;
+      return safeText(candidate, "");
     }
   }
 
@@ -558,10 +866,16 @@ function getRelationObject(item = {}) {
       source.incidencia,
       source.ticket,
       source.linkedTicket,
+      source.relatedTicket,
+      source.relations?.ticket,
+      source.relations?.incidencia,
 
       raw.incidencia,
       raw.ticket,
-      raw.linkedTicket
+      raw.linkedTicket,
+      raw.relatedTicket,
+      raw.relations?.ticket,
+      raw.relations?.incidencia
     )
   );
 }
@@ -573,6 +887,8 @@ function getFacturaIncidenciaId(item = {}) {
   const incidencia = safeObject(first(source.incidencia, raw.incidencia));
   const ticket = safeObject(first(source.ticket, raw.ticket));
   const linkedTicket = safeObject(first(source.linkedTicket, raw.linkedTicket));
+  const relationTicket = safeObject(first(source.relations?.ticket, raw.relations?.ticket));
+  const relationIncidencia = safeObject(first(source.relations?.incidencia, raw.relations?.incidencia));
 
   return safeText(
     first(
@@ -590,6 +906,14 @@ function getFacturaIncidenciaId(item = {}) {
       linkedTicket.ticketId,
       linkedTicket.id,
       linkedTicket.incidenciaId,
+
+      relationTicket.ticketId,
+      relationTicket.id,
+      relationTicket.incidenciaId,
+
+      relationIncidencia.ticketId,
+      relationIncidencia.id,
+      relationIncidencia.incidenciaId,
 
       source.relatedTicketId,
       source.relatedIncidentId,
@@ -624,6 +948,14 @@ function getFacturaIncidenciaId(item = {}) {
       raw.linkedTicket?.id,
       raw.linkedTicket?.incidenciaId,
 
+      raw.relations?.ticket?.ticketId,
+      raw.relations?.ticket?.id,
+      raw.relations?.ticket?.incidenciaId,
+
+      raw.relations?.incidencia?.ticketId,
+      raw.relations?.incidencia?.id,
+      raw.relations?.incidencia?.incidenciaId,
+
       raw.relatedTicketId,
       raw.relatedIncidentId,
       raw.supportTicketId,
@@ -653,6 +985,7 @@ function buildIncidenciaPayload(item = {}, forcedId = "") {
   const incidencia = safeObject(first(source.incidencia, raw.incidencia));
   const ticket = safeObject(first(source.ticket, raw.ticket));
   const linkedTicket = safeObject(first(source.linkedTicket, raw.linkedTicket));
+  const relationTicket = safeObject(first(source.relations?.ticket, raw.relations?.ticket));
 
   const incidenciaId = safeText(
     first(
@@ -666,62 +999,51 @@ function buildIncidenciaPayload(item = {}, forcedId = "") {
     return null;
   }
 
+  const subject = safeText(
+    first(
+      incidencia.subject,
+      incidencia.asunto,
+      incidencia.title,
+
+      ticket.subject,
+      ticket.asunto,
+      ticket.title,
+
+      linkedTicket.subject,
+      linkedTicket.asunto,
+      linkedTicket.title,
+
+      relationTicket.subject,
+      relationTicket.asunto,
+      relationTicket.title,
+
+      source.subject,
+      source.asunto,
+      raw.subject,
+      raw.asunto
+    ),
+    ""
+  );
+
   return {
     ...incidencia,
 
     id: incidenciaId,
     ticketId: incidenciaId,
     incidenciaId,
+    code: safeText(first(incidencia.code, ticket.code, linkedTicket.code, incidenciaId), incidenciaId),
+    ticketCode: safeText(first(incidencia.ticketCode, ticket.ticketCode, linkedTicket.ticketCode, incidenciaId), incidenciaId),
 
-    subject: safeText(
-      first(
-        incidencia.subject,
-        incidencia.asunto,
-        incidencia.title,
-
-        ticket.subject,
-        ticket.asunto,
-        ticket.title,
-
-        linkedTicket.subject,
-        linkedTicket.asunto,
-        linkedTicket.title,
-
-        source.subject,
-        source.asunto,
-        raw.subject,
-        raw.asunto
-      ),
-      ""
-    ),
-
-    asunto: safeText(
-      first(
-        incidencia.asunto,
-        incidencia.subject,
-        incidencia.title,
-
-        ticket.asunto,
-        ticket.subject,
-        ticket.title,
-
-        linkedTicket.asunto,
-        linkedTicket.subject,
-        linkedTicket.title,
-
-        source.asunto,
-        source.subject,
-        raw.asunto,
-        raw.subject
-      ),
-      ""
-    ),
+    subject,
+    asunto: safeText(first(incidencia.asunto, subject), subject),
+    title: safeText(first(incidencia.title, subject), subject),
 
     clienteId: safeText(
       first(
         incidencia.clienteId,
         ticket.clienteId,
         linkedTicket.clienteId,
+        relationTicket.clienteId,
         source.clienteId,
         source.cliente?.id,
         raw.clienteId,
@@ -744,6 +1066,10 @@ function buildIncidenciaPayload(item = {}, forcedId = "") {
         linkedTicket.name,
         linkedTicket.nombre,
 
+        relationTicket.clienteNombre,
+        relationTicket.name,
+        relationTicket.nombre,
+
         source.cliente?.nombre,
         source.cliente?.nombreContacto,
         source.cliente?.name,
@@ -760,6 +1086,7 @@ function buildIncidenciaPayload(item = {}, forcedId = "") {
         incidencia.relationType,
         ticket.relationType,
         linkedTicket.relationType,
+        relationTicket.relationType,
         source.relationType,
         raw.relationType,
         "linked_ticket"
@@ -772,6 +1099,7 @@ function buildIncidenciaPayload(item = {}, forcedId = "") {
         incidencia.linkedAt,
         ticket.linkedAt,
         linkedTicket.linkedAt,
+        relationTicket.linkedAt,
         source.linkedAt,
         raw.linkedAt,
         source.updatedAt,
@@ -785,6 +1113,7 @@ function buildIncidenciaPayload(item = {}, forcedId = "") {
         incidencia.linkedAtES,
         ticket.linkedAtES,
         linkedTicket.linkedAtES,
+        relationTicket.linkedAtES,
         source.linkedAtES,
         raw.linkedAtES,
         source.updatedAtES,
@@ -817,6 +1146,7 @@ function preserveFacturaIncidenciaFields(normalized = {}, original = {}) {
       ...base,
       raw,
       meta: {
+        ...safeObject(source.meta),
         ...safeObject(base.meta),
         hasIncidencia: Boolean(base.meta?.hasIncidencia),
       },
@@ -920,6 +1250,16 @@ function preserveFacturaIncidenciaFields(normalized = {}, original = {}) {
         incidenciaId
       ),
 
+      supportTicketId: safeText(
+        first(raw.supportTicketId, incidenciaId),
+        incidenciaId
+      ),
+
+      caseId: safeText(
+        first(raw.caseId, incidenciaId),
+        incidenciaId
+      ),
+
       incidencia: hasOwnKeys(raw.incidencia)
         ? {
             ...incidenciaPayload,
@@ -951,6 +1291,22 @@ function preserveFacturaIncidenciaFields(normalized = {}, original = {}) {
             ),
           }
         : incidenciaPayload,
+
+      linkedTicket: hasOwnKeys(raw.linkedTicket)
+        ? {
+            ...incidenciaPayload,
+            ...raw.linkedTicket,
+            id: safeText(first(raw.linkedTicket?.id, incidenciaId), incidenciaId),
+            ticketId: safeText(
+              first(raw.linkedTicket?.ticketId, incidenciaId),
+              incidenciaId
+            ),
+            incidenciaId: safeText(
+              first(raw.linkedTicket?.incidenciaId, incidenciaId),
+              incidenciaId
+            ),
+          }
+        : incidenciaPayload,
     },
   };
 }
@@ -961,21 +1317,15 @@ function preserveFacturaIncidenciaFields(normalized = {}, original = {}) {
 
 function normalizeFacturaDetail(detail = {}) {
   const source = safeObject(detail);
+
   const raw = {
     ...safeObject(source.raw),
   };
 
   const facturaId = getFacturaId(source);
 
-  const normalized = {
-    ...source,
-
-    id: facturaId,
-    facturaId,
-
-    numero: getFacturaNumber(source),
-
-    cliente: isObject(source.cliente)
+  const client =
+    isObject(source.cliente)
       ? source.cliente
       : isObject(source.client)
         ? source.client
@@ -984,17 +1334,56 @@ function normalizeFacturaDetail(detail = {}) {
           : {
               empresa: getFacturaClient(source),
               nombre: getFacturaClient(source),
+              nombreContacto: getFacturaClient(source),
+              name: getFacturaClient(source),
               email: getFacturaEmail(source),
-            },
+              emailLower: getFacturaEmail(source),
+            };
+
+  const normalized = {
+    ...source,
+
+    id: facturaId,
+    facturaId,
+    invoiceId: safeText(first(source.invoiceId, raw.invoiceId, facturaId), facturaId),
+
+    numero: getFacturaNumber(source),
+    numeroFactura: safeText(first(source.numeroFactura, source.numeroFacturaLegal, raw.numeroFactura, raw.numeroFacturaLegal, getFacturaNumber(source)), getFacturaNumber(source)),
+    numeroFacturaLegal: safeText(first(source.numeroFacturaLegal, raw.numeroFacturaLegal, getFacturaNumber(source)), getFacturaNumber(source)),
+    numeroFacturaSistema: safeText(first(source.numeroFacturaSistema, raw.numeroFacturaSistema), ""),
+
+    cliente: client,
+
+    clienteId: safeText(first(source.clienteId, source.cliente?.id, raw.clienteId, raw.cliente?.id), ""),
+    userId: safeText(first(source.userId, raw.userId), ""),
 
     fecha: getFacturaDate(source),
+    fechaFactura: first(source.fechaFactura, raw.fechaFactura, getFacturaDate(source)) || null,
+    updatedAt: first(source.updatedAt, raw.updatedAt, getFacturaUpdatedAt(source)) || null,
+
     estadoPago: getFacturaEstadoPago(source),
     estado: getFacturaEstado(source),
+
     formaPago: getFacturaFormaPago(source),
+    metodoPago: safeText(first(source.metodoPago, source.formaPago, raw.metodoPago, raw.formaPago, getFacturaFormaPago(source)), "—"),
+
     moneda: getFacturaMoneda(source),
+    currency: getFacturaMoneda(source),
+
     total: getFacturaTotal(source),
+    amount: getFacturaTotal(source),
+    importe: getFacturaTotal(source),
+
     enviadoA: getFacturaSentTo(source),
-    fechaEnvio: getFacturaSentAt(source),
+    fechaEnvio: getFacturaSentAt(source) || null,
+
+    hasPdf: hasFacturaPdf(source),
+
+    meta: {
+      ...safeObject(source.meta),
+      hasPdf: hasFacturaPdf(source),
+      isSent: isFacturaSent(source),
+    },
 
     raw,
   };
@@ -1105,6 +1494,16 @@ function buildIncidenciaOpenPayload({
       "Incidencia relacionada con una factura."
     ),
 
+    message: safeText(
+      first(
+        relation.message,
+        relation.description,
+        relation.descripcion,
+        ""
+      ),
+      ""
+    ),
+
     clientName,
     clienteNombre: clientName,
 
@@ -1194,6 +1593,365 @@ function buildIncidenciaOpenPayload({
 }
 
 /* =========================================================
+   PDF RESPONSE HELPERS
+========================================================= */
+
+function isBlob(value) {
+  return typeof Blob !== "undefined" && value instanceof Blob;
+}
+
+function isArrayBuffer(value) {
+  return typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer;
+}
+
+function isTypedArray(value) {
+  return Boolean(
+    value &&
+      typeof ArrayBuffer !== "undefined" &&
+      ArrayBuffer.isView?.(value)
+  );
+}
+
+function isResponseLike(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof value.blob === "function" &&
+      typeof value.headers === "object"
+  );
+}
+
+function getPayloadCandidates(payload = null) {
+  const obj = safeObject(payload, null);
+
+  if (!obj) {
+    return [payload].filter((item) => item !== undefined && item !== null);
+  }
+
+  return [
+    payload,
+
+    obj.file,
+    obj.blob,
+    obj.body,
+    obj.data,
+    obj.result,
+    obj.payload,
+    obj.response,
+
+    obj.data?.file,
+    obj.data?.blob,
+    obj.data?.body,
+    obj.data?.result,
+    obj.data?.payload,
+
+    obj.result?.file,
+    obj.result?.blob,
+    obj.result?.body,
+    obj.result?.payload,
+
+    obj.payload?.file,
+    obj.payload?.blob,
+    obj.payload?.body,
+    obj.payload?.result,
+  ].filter((item) => item !== undefined && item !== null);
+}
+
+async function extractBlobFromPayload(payload = null) {
+  const candidates = getPayloadCandidates(payload);
+
+  for (const candidate of candidates) {
+    if (isBlob(candidate)) {
+      return candidate;
+    }
+
+    if (isArrayBuffer(candidate)) {
+      return new Blob([candidate], {
+        type: "application/pdf",
+      });
+    }
+
+    if (isTypedArray(candidate)) {
+      return new Blob([candidate.buffer], {
+        type: "application/pdf",
+      });
+    }
+
+    if (isResponseLike(candidate)) {
+      try {
+        return await candidate.blob();
+      } catch {}
+    }
+  }
+
+  return null;
+}
+
+function extractUrlFromPayload(payload = null) {
+  const direct = safeText(resolveFacturaPdfUrl(payload), "");
+
+  if (direct) {
+    return resolveApiUrl(direct);
+  }
+
+  const candidates = getPayloadCandidates(payload);
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string") {
+      const value = safeText(candidate, "");
+
+      if (
+        value.startsWith("blob:") ||
+        /^https?:\/\//i.test(value) ||
+        value.startsWith("/api/") ||
+        value.startsWith("/facturas/") ||
+        value.startsWith("/router/")
+      ) {
+        return resolveApiUrl(value);
+      }
+    }
+
+    const obj = safeObject(candidate, null);
+
+    if (!obj) continue;
+
+    const url = safeText(
+      first(
+        obj.url,
+        obj.href,
+        obj.downloadUrl,
+        obj.viewUrl,
+        obj.pdfUrl,
+        obj.publicUrl,
+        obj.sasUrl,
+        obj.signedUrl,
+        obj.location
+      ),
+      ""
+    );
+
+    if (url) {
+      return resolveApiUrl(url);
+    }
+  }
+
+  return "";
+}
+
+function scheduleObjectUrlRevoke(url = "", delayMs = PDF_OBJECT_URL_REVOKE_MS) {
+  const value = safeText(url, "");
+
+  if (!value || !value.startsWith("blob:")) {
+    return false;
+  }
+
+  window.setTimeout(() => {
+    try {
+      URL.revokeObjectURL(value);
+    } catch {}
+  }, delayMs);
+
+  return true;
+}
+
+function buildSafePdfFilename(facturaId = "", detail = null) {
+  const factura = detail ? normalizeFacturaDetail(detail) : null;
+
+  const numero = safeText(
+    first(
+      factura ? getFacturaNumber(factura) : "",
+      facturaId,
+      "factura"
+    ),
+    "factura"
+  );
+
+  const cliente = safeText(
+    factura ? getFacturaClient(factura) : "",
+    "cliente"
+  );
+
+  const slug = `${numero}__${cliente}`
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w.-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 120);
+
+  return `${slug || "factura"}.pdf`;
+}
+
+function preopenBlankWindow() {
+  try {
+    const popup = window.open("about:blank", "_blank", "noopener,noreferrer");
+
+    if (popup) {
+      try {
+        popup.document.title = "Abriendo factura…";
+        popup.document.body.innerHTML = `
+          <div style="
+            min-height:100vh;
+            display:grid;
+            place-items:center;
+            margin:0;
+            font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+            background:#0f172a;
+            color:#e5e7eb;
+          ">
+            <div style="text-align:center">
+              <div style="font-weight:800;font-size:18px;margin-bottom:8px;">Abriendo factura…</div>
+              <div style="font-size:13px;color:#94a3b8;">Preparando PDF</div>
+            </div>
+          </div>
+        `;
+      } catch {}
+    }
+
+    return popup || null;
+  } catch {
+    return null;
+  }
+}
+
+function closePreopenedWindow(popup = null) {
+  try {
+    if (popup && !popup.closed) {
+      popup.close();
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function openUrlInNewTab(url = "", popup = null) {
+  const finalUrl = safeText(url, "");
+
+  if (!finalUrl) {
+    return false;
+  }
+
+  try {
+    if (popup && !popup.closed) {
+      popup.location.href = finalUrl;
+      return true;
+    }
+  } catch {}
+
+  try {
+    const opened = window.open(finalUrl, "_blank", "noopener,noreferrer");
+    return Boolean(opened);
+  } catch {}
+
+  return false;
+}
+
+function triggerDownloadUrl(url = "", filename = "") {
+  const finalUrl = safeText(url, "");
+  const finalFilename = safeText(filename, "factura.pdf");
+
+  if (!finalUrl) {
+    return false;
+  }
+
+  try {
+    const anchor = document.createElement("a");
+
+    anchor.href = finalUrl;
+    anchor.download = finalFilename;
+    anchor.rel = "noopener noreferrer";
+    anchor.target = "_blank";
+
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+
+    return true;
+  } catch {
+    try {
+      window.open(finalUrl, "_blank", "noopener,noreferrer");
+      return true;
+    } catch {}
+  }
+
+  return false;
+}
+
+async function resolvePdfActionTarget({
+  facturaId = "",
+  disposition = FACTURAS_DISPOSITIONS.ATTACHMENT,
+  detail = null,
+} = {}) {
+  const id = normalizeFacturaId(facturaId);
+  const mode =
+    disposition === FACTURAS_DISPOSITIONS.INLINE
+      ? FACTURAS_DISPOSITIONS.INLINE
+      : FACTURAS_DISPOSITIONS.ATTACHMENT;
+
+  const endpoint = buildFacturaPdfEndpoint(id, mode);
+  const directUrl = resolveApiUrl(endpoint);
+
+  let response = null;
+  let requestError = null;
+
+  try {
+    response = await fetchFacturaPdfUrlRequest(id, mode, {
+      responseType: "blob",
+      raw: true,
+      cache: "no-store",
+    });
+  } catch (error) {
+    requestError = error;
+
+    if (isFatalHttpError(error)) {
+      throw error;
+    }
+
+    safeWarn("PDF apiClient fallback to direct endpoint:", error);
+  }
+
+  const url = extractUrlFromPayload(response);
+
+  if (url) {
+    return {
+      url,
+      directUrl,
+      response,
+      requestError,
+      isObjectUrl: url.startsWith("blob:"),
+      from: "url",
+      filename: buildSafePdfFilename(id, detail),
+    };
+  }
+
+  const blob = await extractBlobFromPayload(response);
+
+  if (blob && blob.size > 0) {
+    const objectUrl = URL.createObjectURL(blob);
+
+    return {
+      url: objectUrl,
+      directUrl,
+      response,
+      requestError,
+      isObjectUrl: true,
+      from: "blob",
+      filename: buildSafePdfFilename(id, detail),
+    };
+  }
+
+  return {
+    url: directUrl,
+    directUrl,
+    response,
+    requestError,
+    isObjectUrl: false,
+    from: "direct-endpoint",
+    filename: buildSafePdfFilename(id, detail),
+  };
+}
+
+/* =========================================================
    CSV HELPERS
 ========================================================= */
 
@@ -1212,14 +1970,18 @@ function buildCsvRows(items = []) {
     "numero",
     "cliente",
     "email",
-    "fecha",
+    "fechaFactura",
+    "fechaFacturaES",
     "estadoPago",
     "estado",
     "formaPago",
     "total",
     "moneda",
+    "hasPdf",
+    "enviada",
     "enviadoA",
     "fechaEnvio",
+    "fechaEnvioES",
     "ticketId",
     "incidenciaId",
     "incidenciaAsunto",
@@ -1229,28 +1991,36 @@ function buildCsvRows(items = []) {
     const normalized = normalizeFacturaDetail(item);
     const incidencia = safeObject(normalized.incidencia);
 
+    const fecha = getFacturaDate(normalized);
+    const fechaEnvio = getFacturaSentAt(normalized);
+
     return [
       getFacturaId(normalized),
       getFacturaNumber(normalized),
       getFacturaClient(normalized),
       getFacturaEmail(normalized),
-      getFacturaDate(normalized) || "",
+      safeDateIso(fecha),
+      safeDateLabel(fecha),
       getFacturaEstadoPago(normalized),
       getFacturaEstado(normalized),
       getFacturaFormaPago(normalized),
       getFacturaTotal(normalized),
       getFacturaMoneda(normalized),
+      hasFacturaPdf(normalized) ? "sí" : "no",
+      isFacturaSent(normalized) ? "sí" : "no",
       getFacturaSentTo(normalized),
-      getFacturaSentAt(normalized) || "",
+      safeDateIso(fechaEnvio),
+      safeDateLabel(fechaEnvio),
       normalized.ticketId || "",
       normalized.incidenciaId || "",
-      safeText(first(incidencia.asunto, incidencia.subject), ""),
+      safeText(first(incidencia.asunto, incidencia.subject, incidencia.title), ""),
     ];
   });
 
   return [
-    header.map(escapeCsvCell).join(","),
-    ...rows.map((row) => row.map(escapeCsvCell).join(",")),
+    "sep=;",
+    header.map(escapeCsvCell).join(";"),
+    ...rows.map((row) => row.map(escapeCsvCell).join(";")),
   ].join("\n");
 }
 
@@ -1274,6 +2044,7 @@ async function writeClipboardText(text = "") {
     textarea.value = value;
     textarea.setAttribute("readonly", "true");
     textarea.style.position = "fixed";
+    textarea.style.insetBlockStart = "-9999px";
     textarea.style.opacity = "0";
     textarea.style.pointerEvents = "none";
 
@@ -1296,23 +2067,26 @@ function downloadTextFile({
   content = "",
   mimeType = "text/plain;charset=utf-8;",
 } = {}) {
-  const blob = new Blob([String(content || "")], {
+  const blob = new Blob([`\uFEFF${String(content || "")}`], {
     type: mimeType,
   });
 
   const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
 
-  anchor.href = url;
-  anchor.download = filename;
+  try {
+    const anchor = document.createElement("a");
 
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
+    anchor.href = url;
+    anchor.download = filename;
 
-  URL.revokeObjectURL(url);
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
 
-  return true;
+    return true;
+  } finally {
+    scheduleObjectUrlRevoke(url, DOWNLOAD_OBJECT_URL_REVOKE_MS);
+  }
 }
 
 /* =========================================================
@@ -1337,7 +2111,8 @@ export function getFacturaDetailFromStoreAction({
     }
 
     return normalizeFacturaDetail(picked);
-  } catch {
+  } catch (error) {
+    safeWarn("getFacturaDetailFromStoreAction error:", error);
     return null;
   }
 }
@@ -1459,6 +2234,11 @@ export async function openFacturaAction({
   });
 
   if (!detail) {
+    safeEmit("facturas:open:error", {
+      facturaId: id,
+      error: "EMPTY_DETAIL",
+    });
+
     return null;
   }
 
@@ -1562,6 +2342,7 @@ export async function openFacturaIncidenciaAction({
 
 export async function openFacturaPdfAction({
   facturaId = "",
+  detail = null,
   onStart,
   onEnd,
   silent = false,
@@ -1576,38 +2357,68 @@ export async function openFacturaPdfAction({
     return null;
   }
 
+  const popup = preopenBlankWindow();
+
   try {
     onStart?.(id);
 
-    const response = await fetchFacturaPdfUrlRequest(id, "inline");
+    safeEmit(FACTURA_PDF_EVENTS.OPEN_REQUEST, {
+      facturaId: id,
+      mode: FACTURAS_DISPOSITIONS.INLINE,
+    });
 
-    const url = safeText(resolveFacturaPdfUrl(response), "");
+    const target = await resolvePdfActionTarget({
+      facturaId: id,
+      disposition: FACTURAS_DISPOSITIONS.INLINE,
+      detail,
+    });
 
-    if (!url) {
-      throw new Error("PDF_URL_MISSING");
+    if (!target?.url) {
+      throw new Error("PDF_TARGET_MISSING");
     }
 
-    window.open(url, "_blank", "noopener,noreferrer");
+    const opened = openUrlInNewTab(target.url, popup);
 
-    safeEmit("facturas:pdf:opened", {
+    if (!opened) {
+      throw new Error("PDF_WINDOW_OPEN_FAILED");
+    }
+
+    if (target.isObjectUrl) {
+      scheduleObjectUrlRevoke(target.url, PDF_OBJECT_URL_REVOKE_MS);
+    }
+
+    safeEmit(FACTURA_PDF_EVENTS.OPEN_SUCCESS, {
       facturaId: id,
-      url,
+      url: target.url,
+      directUrl: target.directUrl,
+      from: target.from,
+      isObjectUrl: target.isObjectUrl,
+      response: target.response,
     });
 
     if (!silent) {
       showToast("Abriendo PDF de la factura.", "success");
     }
 
-    return response;
+    return target.response || {
+      ok: true,
+      url: target.url,
+      from: target.from,
+    };
   } catch (error) {
-    safeEmit("facturas:pdf:error", {
+    closePreopenedWindow(popup);
+
+    safeEmit(FACTURA_PDF_EVENTS.ERROR, {
       facturaId: id,
       error,
-      mode: "inline",
+      mode: FACTURAS_DISPOSITIONS.INLINE,
     });
 
     if (!silent) {
-      showToast("No se pudo abrir el PDF.", "error");
+      showToast(
+        safeErrorMessage(error, "No se pudo abrir el PDF."),
+        "error"
+      );
     }
 
     return null;
@@ -1622,6 +2433,7 @@ export async function openFacturaPdfAction({
 
 export async function downloadFacturaPdfAction({
   facturaId = "",
+  detail = null,
   onStart,
   onEnd,
   silent = false,
@@ -1639,35 +2451,71 @@ export async function downloadFacturaPdfAction({
   try {
     onStart?.(id);
 
-    const response = await fetchFacturaPdfUrlRequest(id, "attachment");
+    safeEmit(FACTURA_PDF_EVENTS.DOWNLOAD_REQUEST, {
+      facturaId: id,
+      mode: FACTURAS_DISPOSITIONS.ATTACHMENT,
+    });
 
-    const url = safeText(resolveFacturaPdfUrl(response), "");
+    const storeDetail =
+      detail ||
+      getFacturaDetailFromStoreAction({
+        facturaId: id,
+      });
 
-    if (!url) {
-      throw new Error("DOWNLOAD_URL_MISSING");
+    const target = await resolvePdfActionTarget({
+      facturaId: id,
+      disposition: FACTURAS_DISPOSITIONS.ATTACHMENT,
+      detail: storeDetail,
+    });
+
+    if (!target?.url) {
+      throw new Error("DOWNLOAD_TARGET_MISSING");
     }
 
-    window.open(url, "_blank", "noopener,noreferrer");
+    const downloaded = triggerDownloadUrl(
+      target.url,
+      target.filename || buildSafePdfFilename(id, storeDetail)
+    );
 
-    safeEmit("facturas:pdf:download", {
+    if (!downloaded) {
+      throw new Error("DOWNLOAD_TRIGGER_FAILED");
+    }
+
+    if (target.isObjectUrl) {
+      scheduleObjectUrlRevoke(target.url, DOWNLOAD_OBJECT_URL_REVOKE_MS);
+    }
+
+    safeEmit(FACTURA_PDF_EVENTS.DOWNLOAD_SUCCESS, {
       facturaId: id,
-      url,
+      url: target.url,
+      directUrl: target.directUrl,
+      filename: target.filename,
+      from: target.from,
+      isObjectUrl: target.isObjectUrl,
+      response: target.response,
     });
 
     if (!silent) {
-      showToast("Preparando descarga de factura.", "success");
+      showToast("Descarga de factura preparada.", "success");
     }
 
-    return response;
+    return target.response || {
+      ok: true,
+      url: target.url,
+      from: target.from,
+    };
   } catch (error) {
-    safeEmit("facturas:pdf:error", {
+    safeEmit(FACTURA_PDF_EVENTS.ERROR, {
       facturaId: id,
       error,
-      mode: "download",
+      mode: FACTURAS_DISPOSITIONS.ATTACHMENT,
     });
 
     if (!silent) {
-      showToast("No se pudo descargar la factura.", "error");
+      showToast(
+        safeErrorMessage(error, "No se pudo descargar la factura."),
+        "error"
+      );
     }
 
     return null;
@@ -1707,10 +2555,15 @@ export async function sendFacturaToClientAction({
 
   const factura = normalizeFacturaDetail(selectedDetail);
 
-  const targetEmail =
-    factura?.cliente?.email ||
-    factura?.enviadoA ||
-    "el cliente";
+  const targetEmail = safeText(
+    first(
+      factura?.cliente?.email,
+      factura?.cliente?.emailLower,
+      factura?.emailCliente,
+      factura?.enviadoA
+    ),
+    "el cliente"
+  );
 
   if (confirmSend) {
     const confirmed = window.confirm(
@@ -1718,6 +2571,11 @@ export async function sendFacturaToClientAction({
     );
 
     if (!confirmed) {
+      safeEmit("facturas:send:cancelled", {
+        facturaId: id,
+        factura,
+      });
+
       return null;
     }
   }
@@ -1725,21 +2583,34 @@ export async function sendFacturaToClientAction({
   try {
     onStart?.(id);
 
-    const response = await sendFacturaRequest(id);
+    safeEmit("facturas:send:request", {
+      facturaId: id,
+      factura,
+      to: targetEmail,
+    });
 
-    onSent?.({
+    const response = await sendFacturaRequest(id, {});
+
+    const sentAt = new Date().toISOString();
+
+    const payload = {
       facturaId: id,
       response,
       factura,
-    });
+      to: targetEmail,
+      sentAt,
+    };
 
-    safeEmit("facturas:sent", {
-      facturaId: id,
-      response,
-    });
+    onSent?.(payload);
+
+    safeEmitMany(FACTURA_SENT_EVENTS, payload);
 
     if (typeof reloadFacturas === "function") {
-      await reloadFacturas();
+      await reloadFacturas({
+        force: true,
+        silent: true,
+        asRefresh: true,
+      });
     }
 
     if (!silent) {
@@ -1751,10 +2622,15 @@ export async function sendFacturaToClientAction({
     safeEmit("facturas:send:error", {
       facturaId: id,
       error,
+      factura,
+      to: targetEmail,
     });
 
     if (!silent) {
-      showToast("No se pudo enviar la factura.", "error");
+      showToast(
+        safeErrorMessage(error, "No se pudo enviar la factura."),
+        "error"
+      );
     }
 
     return null;
@@ -1916,6 +2792,16 @@ export default {
   copyFacturaIdAction,
   exportFacturasCsvAction,
 
+  getFacturaIdAction: getFacturaId,
+  getFacturaNumberAction: getFacturaNumber,
+  getFacturaClientAction: getFacturaClient,
+  getFacturaEmailAction: getFacturaEmail,
+  getFacturaDateAction: getFacturaDate,
+  getFacturaEstadoPagoAction: getFacturaEstadoPago,
+  getFacturaEstadoAction: getFacturaEstado,
+  getFacturaFormaPagoAction: getFacturaFormaPago,
+  getFacturaMonedaAction: getFacturaMoneda,
+  getFacturaTotalAction: getFacturaTotal,
   getFacturaIncidenciaIdAction: getFacturaIncidenciaId,
   buildFacturaIncidenciaOpenPayloadAction: buildIncidenciaOpenPayload,
   normalizeFacturaDetailAction: normalizeFacturaDetail,

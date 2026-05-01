@@ -2,7 +2,10 @@
    Onion SPA - Incidencias Table Template
    Archivo: src/views/incidencias/incidencias.table.template.js
 
-   FINAL PRODUCTION TEMPLATE · LIST VIEW · EXTREME SAAS MODE · 10/10
+   FINAL PRODUCTION TEMPLATE · LIST VIEW · EXTREME SAAS MODE · 12/10
+   PATCH · TABLE ALIGNMENT PREMIUM
+   PATCH · FILTER BAR READY
+   PATCH · CREATE BUTTON ACCENT LOCKED
    PATCH · FACTURAS VISUAL SYSTEM INSPIRED
    PATCH · TABLE SYSTEM LOCK · NO GLOBAL CSS BLEED
    PATCH · TOKEN ALIGNED · LIGHT/DARK PREMIUM
@@ -11,6 +14,7 @@
    RESPONSABILIDADES:
    - render del hero/header de incidencias
    - render de tabla productiva con paginación real
+   - render de filtros visuales compatibles con state/props/bindings
    - compatibilidad con IncidenciasView.js
    - estado loading visual en "Ver detalle" sin mover tabla
    - estado loading visual en "Crear nueva incidencia"
@@ -35,7 +39,7 @@
    - paginación defensiva
    - estilos encapsulados
    - responsive robusto
-   - columna prioridad eliminada de tabla
+   - columna prioridad eliminada de tabla, pero badge interno conservado
    - importe blindado contra normalizadores intermedios
    - loading inline icon-only centrado sin cambiar tamaño del botón
    - CSS aplicable a .incidencias-view-root y [data-incidencias-scope]
@@ -47,7 +51,19 @@
 
 const DEFAULT_PAGE_SIZE = 5;
 const DEFAULT_CURRENCY = "EUR";
-const STYLE_ID = "onion-incidencias-table-template-styles-v10";
+const STYLE_ID = "onion-incidencias-table-template-styles-v12";
+
+const FILTERS = Object.freeze([
+  { key: "all", label: "Todas" },
+  { key: "open", label: "Abiertas" },
+  { key: "pending", label: "Pendientes" },
+  { key: "progress", label: "En proceso" },
+  { key: "resolved", label: "Resueltas" },
+  { key: "closed", label: "Cerradas" },
+  { key: "urgent", label: "Urgentes" },
+  { key: "attachments", label: "Con adjuntos" },
+  { key: "billed", label: "Con importe" },
+]);
 
 /* =========================================================
    HELPERS
@@ -68,14 +84,24 @@ function safeNumber(value, fallback = 0) {
     let normalized = value
       .trim()
       .replace(/€/g, "")
+      .replace(/\$/g, "")
+      .replace(/£/g, "")
       .replace(/%/g, "")
+      .replace(/[^\d.,+\-\s]/g, "")
       .replace(/\s/g, "");
 
     const hasComma = normalized.includes(",");
     const hasDot = normalized.includes(".");
 
     if (hasComma && hasDot) {
-      normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
+      const lastComma = normalized.lastIndexOf(",");
+      const lastDot = normalized.lastIndexOf(".");
+
+      if (lastComma > lastDot) {
+        normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
+      } else {
+        normalized = normalized.replace(/,/g, "");
+      }
     } else if (hasComma) {
       normalized = normalized.replace(/,/g, ".");
     }
@@ -180,11 +206,42 @@ function hashString(value = "") {
 function toTimestamp(value = null) {
   if (!value) return 0;
 
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? 0 : value.getTime();
+  }
+
   if (typeof value === "number" && Number.isFinite(value)) {
     return value > 9999999999 ? value : value * 1000;
   }
 
   const raw = safeText(value, "");
+  if (!raw) return 0;
+
+  const numeric = Number(raw);
+
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric > 9999999999 ? numeric : numeric * 1000;
+  }
+
+  const esMatch = raw.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,\s*|\s+)?(?:(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+  );
+
+  if (esMatch) {
+    const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = esMatch;
+
+    const date = new Date(
+      Number(yyyy),
+      Number(mm) - 1,
+      Number(dd),
+      Number(hh),
+      Number(min),
+      Number(ss)
+    );
+
+    return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+  }
+
   const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
 
   if (Number.isNaN(date.getTime())) {
@@ -373,6 +430,9 @@ function icon(name = "") {
     euro: `<svg ${common}><path d="M4 10h10"/><path d="M4 14h9"/><path d="M19 5a7.7 7.7 0 0 0-5.2-2C8.4 3 4 7 4 12s4.4 9 9.8 9a7.7 7.7 0 0 0 5.2-2"/></svg>`,
     activity: `<svg ${common}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
     users: `<svg ${common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+    search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`,
+    filter: `<svg ${common}><path d="M3 5h18"/><path d="M6 12h12"/><path d="M10 19h4"/></svg>`,
+    close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
   };
 
   return icons[name] || "";
@@ -1031,6 +1091,136 @@ function isUrgentLike(item = {}) {
   return ["urgent", "critical"].includes(getPriorityKey(item));
 }
 
+function hasImporteLike(item = {}) {
+  const amount = safeNumber(getImporteAmount(item), NaN);
+
+  return Number.isFinite(amount) && amount > 0;
+}
+
+/* =========================================================
+   FILTERS / SEARCH
+========================================================= */
+
+function normalizeFilter(value = "") {
+  const key = normalizeKey(value);
+
+  if (!key || key === "todos" || key === "todas") return "all";
+
+  if (
+    [
+      "all",
+      "open",
+      "pending",
+      "progress",
+      "in_progress",
+      "resolved",
+      "closed",
+      "urgent",
+      "attachments",
+      "billed",
+    ].includes(key)
+  ) {
+    return key === "in_progress" ? "progress" : key;
+  }
+
+  return "all";
+}
+
+function getActiveFilter(input = {}) {
+  const data = safeObject(input);
+  const runtime = safeObject(data.state);
+
+  return normalizeFilter(
+    first(
+      data.filter,
+      data.statusFilter,
+      data.activeFilter,
+      runtime.filter,
+      runtime.statusFilter,
+      runtime.activeFilter,
+      "all"
+    )
+  );
+}
+
+function getSearchQuery(input = {}) {
+  const data = safeObject(input);
+  const runtime = safeObject(data.state);
+
+  return normalizeWhitespace(
+    first(
+      data.search,
+      data.searchQuery,
+      data.query,
+      data.filterQuery,
+      runtime.search,
+      runtime.searchQuery,
+      runtime.query,
+      runtime.filterQuery,
+      ""
+    )
+  );
+}
+
+function itemMatchesSearch(item = {}, query = "") {
+  const q = normalizeText(query);
+  if (!q) return true;
+
+  const haystack = normalizeText(
+    [
+      getTicketId(item),
+      getSubject(item),
+      getDescription(item),
+      getClientName(item),
+      getClientEmail(item),
+      getCategory(item),
+      getAssignedTo(item),
+      getStatusLabel(getStatusRaw(item)),
+      getPriorityLabel(item),
+    ].join(" ")
+  );
+
+  return haystack.includes(q);
+}
+
+function itemMatchesFilter(item = {}, filter = "all") {
+  const key = normalizeFilter(filter);
+
+  if (key === "all") return true;
+  if (key === "open") return getStatusKey(getStatusRaw(item)) === "open";
+  if (key === "pending") return getStatusKey(getStatusRaw(item)) === "pending";
+  if (key === "progress") return getStatusKey(getStatusRaw(item)) === "progress";
+  if (key === "resolved") return getStatusKey(getStatusRaw(item)) === "resolved";
+  if (key === "closed") return getStatusKey(getStatusRaw(item)) === "closed";
+  if (key === "urgent") return isUrgentLike(item);
+  if (key === "attachments") return getAttachmentsCount(item) > 0;
+  if (key === "billed") return hasImporteLike(item);
+
+  return true;
+}
+
+function filterAndSortIncidencias(items = [], input = {}) {
+  const activeFilter = getActiveFilter(input);
+  const query = getSearchQuery(input);
+
+  return sortIncidenciasNewestFirst(items).filter((item) => {
+    return itemMatchesFilter(item, activeFilter) && itemMatchesSearch(item, query);
+  });
+}
+
+function isFilterActive(input = {}) {
+  return getActiveFilter(input) !== "all" || Boolean(getSearchQuery(input));
+}
+
+function computeFilterCounts(items = []) {
+  const rows = safeArray(items);
+
+  return FILTERS.reduce((acc, filter) => {
+    acc[filter.key] = rows.filter((item) => itemMatchesFilter(item, filter.key)).length;
+    return acc;
+  }, {});
+}
+
 /* =========================================================
    STATS / PAGINATION
 ========================================================= */
@@ -1087,11 +1277,11 @@ function getPagination(items = [], input = {}) {
   const data = safeObject(input);
   const runtime = safeObject(data.state);
 
-  const allItems = sortIncidenciasNewestFirst(items);
+  const allItems = filterAndSortIncidencias(items, data);
   const pageSize = normalizePageSize(data);
+  const filtering = isFilterActive(data);
 
-  const reportedTotal = Math.max(
-    allItems.length,
+  const remoteTotal = Math.max(
     safeNumber(
       first(
         data.totalCount,
@@ -1102,13 +1292,15 @@ function getPagination(items = [], input = {}) {
         allItems.length
       ),
       allItems.length
-    )
+    ),
+    allItems.length
   );
 
-  const totalPagesFromProps = safeNumber(
-    first(data.totalPages, runtime.totalPages),
-    0
-  );
+  const reportedTotal = filtering ? allItems.length : remoteTotal;
+
+  const totalPagesFromProps = filtering
+    ? 0
+    : safeNumber(first(data.totalPages, runtime.totalPages), 0);
 
   const totalPages = Math.max(
     1,
@@ -1145,10 +1337,15 @@ function getPagination(items = [], input = {}) {
     currentPage,
     totalPages,
     totalCount: reportedTotal,
+    unfilteredCount: safeArray(items).length,
+    remoteTotal,
     rangeStart,
     rangeEnd,
     hasPrev: currentPage > 1,
     hasNext: currentPage < totalPages,
+    filtering,
+    activeFilter: getActiveFilter(data),
+    searchQuery: getSearchQuery(data),
   };
 }
 
@@ -1360,9 +1557,9 @@ function renderRow(item = {}, state = {}) {
   return `
     <tr
       class="incidencias-row incidencias-row--${escapeHtml(statusKey)}"
+      data-ticket-row="true"
       data-ticket-id="${escapeHtml(ticketId)}"
       data-incidencia-id="${escapeHtml(ticketId)}"
-      data-row-click-disabled="true"
     >
       <td class="incidencias-cell incidencias-cell--main">
         <div class="incidencias-main">
@@ -1480,7 +1677,92 @@ function renderPagination(pagination = {}, state = {}) {
   `;
 }
 
-function renderEmptyState({ hasError = false } = {}) {
+function renderFilters(input = {}, pagination = {}) {
+  const data = safeObject(input);
+  const items = safeArray(first(data.items, data.rows, data.tickets, data.incidencias));
+  const counts = computeFilterCounts(items);
+  const activeFilter = normalizeFilter(pagination.activeFilter || getActiveFilter(data));
+  const searchQuery = safeText(pagination.searchQuery || getSearchQuery(data), "");
+  const filtering = activeFilter !== "all" || Boolean(searchQuery);
+
+  return `
+    <div class="incidencias-filters" aria-label="Filtros de incidencias">
+      <div class="incidencias-filter-search">
+        <span class="incidencias-filter-search-icon">${icon("search")}</span>
+
+        <input
+          type="search"
+          class="incidencias-filter-input"
+          id="incidencias-filter-search"
+          name="incidencias-filter-search"
+          value="${escapeHtml(searchQuery)}"
+          placeholder="Filtrar por referencia, cliente, asunto, técnico..."
+          autocomplete="off"
+          spellcheck="false"
+          data-incidencias-action="filter-search"
+          data-action="filter-search"
+        />
+
+        ${
+          searchQuery
+            ? `
+              <button
+                type="button"
+                class="incidencias-filter-clear"
+                data-incidencias-action="clear-filter-search"
+                data-action="clear-filter-search"
+                title="Limpiar búsqueda"
+                data-tooltip="Limpiar búsqueda"
+              >
+                ${icon("close")}
+              </button>
+            `
+            : ""
+        }
+      </div>
+
+      <div class="incidencias-filter-pills">
+        ${FILTERS.map((filter) => {
+          const isActive = filter.key === activeFilter;
+          const count = counts[filter.key] ?? 0;
+
+          return `
+            <button
+              type="button"
+              class="incidencias-filter-pill${isActive ? " is-active" : ""}"
+              data-incidencias-action="filter"
+              data-action="filter-incidencias"
+              data-filter="${escapeHtml(filter.key)}"
+              data-filter-status="${escapeHtml(filter.key)}"
+              aria-pressed="${isActive ? "true" : "false"}"
+            >
+              <span>${escapeHtml(filter.label)}</span>
+              <strong>${escapeHtml(String(count))}</strong>
+            </button>
+          `;
+        }).join("")}
+      </div>
+
+      ${
+        filtering
+          ? `
+            <button
+              type="button"
+              class="incidencias-filter-reset"
+              data-incidencias-action="clear-filters"
+              data-action="clear-filters"
+            >
+              ${icon("close")}
+              Limpiar filtros
+            </button>
+          `
+          : ""
+      }
+    </div>
+  `;
+}
+
+function renderEmptyState({ hasError = false, filtering = false } = {}) {
   return `
     <div class="incidencias-empty">
       <div class="incidencias-empty-icon" aria-hidden="true">
@@ -1491,7 +1773,9 @@ function renderEmptyState({ hasError = false } = {}) {
         ${
           hasError
             ? "No se pudieron cargar las incidencias"
-            : "No hay incidencias para mostrar"
+            : filtering
+              ? "No hay coincidencias con los filtros"
+              : "No hay incidencias para mostrar"
         }
       </h3>
 
@@ -1499,7 +1783,9 @@ function renderEmptyState({ hasError = false } = {}) {
         ${
           hasError
             ? "Puedes reintentar la carga desde el botón de actualizar."
-            : "Cuando haya solicitudes registradas aparecerán aquí con su estado, seguimiento, adjuntos, facturación asociada y acciones disponibles."
+            : filtering
+              ? "Ajusta la búsqueda o limpia los filtros para volver al historial completo."
+              : "Cuando haya solicitudes registradas aparecerán aquí con su estado, seguimiento, adjuntos, facturación asociada y acciones disponibles."
         }
       </p>
 
@@ -1516,7 +1802,19 @@ function renderEmptyState({ hasError = false } = {}) {
               <span class="incidencias-btn-text">Reintentar</span>
             </button>
           `
-          : ""
+          : filtering
+            ? `
+              <button
+                type="button"
+                class="incidencias-btn"
+                data-incidencias-action="clear-filters"
+                data-action="clear-filters"
+              >
+                ${icon("close")}
+                <span class="incidencias-btn-text">Limpiar filtros</span>
+              </button>
+            `
+            : ""
       }
     </div>
   `;
@@ -1571,6 +1869,10 @@ function renderStyles() {
       :where(.incidencias-view-root, [data-incidencias-scope]){
         --inc-row-accent:var(--accent, #6f59d9);
         --inc-row-accent-soft:var(--accent-soft, rgba(111,89,217,.12));
+        --inc-create-bg:var(--btn-primary-bg, var(--gradient-accent, linear-gradient(135deg, #6f59d9 0%, #5f45d8 55%, #4f37bf 100%)));
+        --inc-create-bg-hover:var(--inc-create-bg);
+        --inc-create-border:var(--btn-primary-border, color-mix(in srgb, var(--accent, #6f59d9) 46%, transparent));
+        --inc-table-row-height:88px;
 
         display:grid;
         gap:var(--view-section-gap, var(--space-lg, 18px));
@@ -1708,7 +2010,7 @@ function renderStyles() {
 
       .incidencias-btn--primary{
         border-color:var(--btn-primary-border, var(--accent-border, rgba(255,255,255,.05)));
-        background:var(--btn-primary-bg, var(--gradient-accent, linear-gradient(135deg, #55555d 0%, #3f3f46 55%, #2f2f35 100%)));
+        background:var(--btn-primary-bg, var(--gradient-accent, linear-gradient(135deg, #6f59d9 0%, #5f45d8 55%, #4f37bf 100%)));
         color:var(--btn-primary-text, var(--text-on-accent, #ffffff));
         box-shadow:var(--btn-primary-shadow, 0 12px 28px rgba(0,0,0,.22));
       }
@@ -1719,17 +2021,37 @@ function renderStyles() {
       }
 
       .incidencias-btn--create{
-        border-color:color-mix(in srgb, var(--success, #22c55e) 32%, var(--btn-primary-border, transparent));
-        background:var(--gradient-success, linear-gradient(180deg, #22c55e 0%, #16a34a 100%));
-        color:var(--text-on-accent, #ffffff);
+        border-color:var(--inc-create-border);
+        background:var(--inc-create-bg);
+        color:var(--btn-primary-text, var(--text-on-accent, #ffffff));
         box-shadow:
-          0 10px 24px color-mix(in srgb, var(--success, #22c55e), transparent 82%),
-          var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
+          0 12px 28px color-mix(in srgb, var(--accent, #6f59d9), transparent 78%),
+          var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.10));
+      }
+
+      .incidencias-btn--create:hover{
+        transform:translateY(-2px);
+        border-color:var(--inc-create-border);
+        background:var(--inc-create-bg-hover);
+        color:var(--btn-primary-text, var(--text-on-accent, #ffffff));
+        box-shadow:
+          0 16px 34px color-mix(in srgb, var(--accent, #6f59d9), transparent 74%),
+          0 0 0 1px color-mix(in srgb, var(--text-on-accent, #ffffff) 18%, transparent) inset;
+        filter:none;
+      }
+
+      .incidencias-btn--create:active{
+        transform:translateY(0) scale(var(--ui-active-scale, .985));
+        background:var(--inc-create-bg);
       }
 
       .incidencias-btn:focus-visible,
       .incidencias-detail-btn:focus-visible,
-      .incidencias-pagination-btn:focus-visible{
+      .incidencias-pagination-btn:focus-visible,
+      .incidencias-filter-input:focus-visible,
+      .incidencias-filter-pill:focus-visible,
+      .incidencias-filter-reset:focus-visible,
+      .incidencias-filter-clear:focus-visible{
         outline:none;
         box-shadow:var(--focus-ring, 0 0 0 4px rgba(113,113,122,.16));
       }
@@ -1955,6 +2277,204 @@ function renderStyles() {
         transform:none;
       }
 
+      .incidencias-filters{
+        grid-column:1 / -1;
+        display:grid;
+        grid-template-columns:minmax(260px, 420px) minmax(0, 1fr) auto;
+        gap:var(--space-xs, 10px);
+        align-items:center;
+        padding-block-start:var(--space-xs, 4px);
+      }
+
+      .incidencias-filter-search{
+        position:relative;
+        min-inline-size:0;
+      }
+
+      .incidencias-filter-search-icon{
+        position:absolute;
+        inset-inline-start:13px;
+        inset-block:0;
+        display:grid;
+        place-items:center;
+        color:var(--text-dim, rgba(245,245,245,.50));
+        pointer-events:none;
+      }
+
+      .incidencias-filter-search-icon svg{
+        inline-size:15px;
+        block-size:15px;
+      }
+
+      .incidencias-filter-input{
+        appearance:none;
+        inline-size:100%;
+        min-block-size:calc(40px * var(--ui-scale, 1));
+        padding-inline:38px 38px;
+        border-radius:var(--radius-pill, 999px);
+        border:1px solid var(--input-border, rgba(255,255,255,.09));
+        background:var(--input-bg, rgba(255,255,255,.028));
+        color:var(--input-text, var(--text, #f5f5f5));
+        font:inherit;
+        font-size:var(--font-sm, 12px);
+        font-weight:var(--weight-semibold, 600);
+        outline:none;
+        box-shadow:var(--input-shadow, inset 0 1px 0 rgba(255,255,255,.018));
+        transition:
+          border-color var(--duration-fast, .16s) var(--ease-standard, ease),
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .incidencias-filter-input::placeholder{
+        color:var(--input-placeholder, rgba(245,245,245,.34));
+      }
+
+      .incidencias-filter-input:hover{
+        background:var(--input-bg-hover, rgba(255,255,255,.040));
+        border-color:var(--input-border-hover, rgba(255,255,255,.14));
+      }
+
+      .incidencias-filter-input:focus{
+        background:var(--input-bg-focus, rgba(255,255,255,.046));
+        border-color:var(--input-border-focus, rgba(113,113,122,.50));
+        box-shadow:var(--input-shadow-focus, 0 0 0 4px rgba(113,113,122,.14));
+      }
+
+      .incidencias-filter-clear{
+        position:absolute;
+        inset-inline-end:7px;
+        inset-block:5px;
+        inline-size:30px;
+        block-size:30px;
+        border:0;
+        border-radius:999px;
+        display:grid;
+        place-items:center;
+        background:transparent;
+        color:var(--text-dim, rgba(245,245,245,.50));
+        cursor:pointer;
+        transition:
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          color var(--duration-fast, .16s) var(--ease-standard, ease),
+          transform var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .incidencias-filter-clear:hover{
+        background:var(--btn-ghost-bg-hover, rgba(255,255,255,.046));
+        color:var(--text-strong, #ffffff);
+        transform:translateY(-1px);
+      }
+
+      .incidencias-filter-clear svg{
+        inline-size:14px;
+        block-size:14px;
+      }
+
+      .incidencias-filter-pills{
+        min-inline-size:0;
+        display:flex;
+        align-items:center;
+        gap:var(--space-2xs, 6px);
+        overflow-x:auto;
+        scrollbar-width:none;
+        padding-block:2px;
+      }
+
+      .incidencias-filter-pills::-webkit-scrollbar{
+        display:none;
+      }
+
+      .incidencias-filter-pill{
+        appearance:none;
+        min-block-size:calc(34px * var(--ui-scale, 1));
+        padding-inline:11px 8px;
+        border-radius:999px;
+        border:1px solid var(--badge-border, rgba(255,255,255,.07));
+        background:var(--badge-bg, rgba(255,255,255,.048));
+        color:var(--badge-text, var(--text-muted, rgba(245,245,245,.70)));
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        gap:7px;
+        font:inherit;
+        font-size:var(--font-xs, 11px);
+        font-weight:var(--weight-bold, 700);
+        line-height:1;
+        white-space:nowrap;
+        cursor:pointer;
+        transition:
+          transform var(--duration-fast, .16s) var(--ease-standard, ease),
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          border-color var(--duration-fast, .16s) var(--ease-standard, ease),
+          color var(--duration-fast, .16s) var(--ease-standard, ease),
+          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .incidencias-filter-pill strong{
+        min-inline-size:22px;
+        min-block-size:20px;
+        padding-inline:6px;
+        border-radius:999px;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        color:inherit;
+        background:color-mix(in srgb, currentColor 10%, transparent);
+        font-size:10px;
+        font-weight:900;
+      }
+
+      .incidencias-filter-pill:hover{
+        transform:translateY(-1px);
+        border-color:var(--border-strong, rgba(255,255,255,.12));
+        background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
+        color:var(--text-strong, #ffffff);
+      }
+
+      .incidencias-filter-pill.is-active{
+        border-color:color-mix(in srgb, var(--accent, #6f59d9) 42%, var(--border-strong, rgba(255,255,255,.12)));
+        background:color-mix(in srgb, var(--accent, #6f59d9) 14%, var(--badge-bg, rgba(255,255,255,.048)));
+        color:var(--accent-active, var(--text-strong, #ffffff));
+        box-shadow:0 8px 20px color-mix(in srgb, var(--accent, #6f59d9), transparent 88%);
+      }
+
+      .incidencias-filter-reset{
+        appearance:none;
+        min-block-size:calc(34px * var(--ui-scale, 1));
+        padding-inline:11px;
+        border-radius:999px;
+        border:1px solid var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
+        background:var(--btn-secondary-bg, rgba(255,255,255,.045));
+        color:var(--btn-secondary-text, var(--text, #f5f5f5));
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        gap:7px;
+        font:inherit;
+        font-size:var(--font-xs, 11px);
+        font-weight:var(--weight-bold, 700);
+        cursor:pointer;
+        white-space:nowrap;
+        transition:
+          transform var(--duration-fast, .16s) var(--ease-standard, ease),
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          color var(--duration-fast, .16s) var(--ease-standard, ease),
+          border-color var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .incidencias-filter-reset:hover{
+        transform:translateY(-1px);
+        background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
+        color:var(--text-strong, #ffffff);
+        border-color:var(--border-strong, rgba(255,255,255,.12));
+      }
+
+      .incidencias-filter-reset svg{
+        inline-size:13px;
+        block-size:13px;
+      }
+
       .incidencias-table-wrap{
         position:relative;
         min-block-size:120px;
@@ -1999,7 +2519,7 @@ function renderStyles() {
       .incidencias-table{
         display:table !important;
         inline-size:100%;
-        min-inline-size:1160px;
+        min-inline-size:1240px;
         table-layout:fixed;
         border-collapse:separate;
         border-spacing:0;
@@ -2036,8 +2556,10 @@ function renderStyles() {
         position:sticky;
         top:0;
         z-index:2;
+        block-size:44px;
         padding:var(--table-cell-padding-y, 12px) var(--table-cell-padding-x, 12px);
-        text-align:left;
+        text-align:center;
+        vertical-align:middle;
         font-size:var(--data-table-head-font-size, var(--font-xs, 11px));
         font-weight:var(--data-table-head-font-weight, var(--weight-bold, 700));
         letter-spacing:var(--data-table-head-letter, .075em);
@@ -2046,6 +2568,15 @@ function renderStyles() {
         background:var(--data-table-head-bg, var(--table-head-bg, rgba(255,255,255,.020)));
         border-bottom:1px solid var(--table-head-border, var(--border-default, rgba(255,255,255,.082)));
         white-space:nowrap;
+      }
+
+      .incidencias-table thead th:first-child{
+        text-align:left;
+        padding-inline-start:22px;
+      }
+
+      .incidencias-table tbody tr{
+        block-size:var(--inc-table-row-height);
       }
 
       .incidencias-table tbody td{
@@ -2097,6 +2628,8 @@ function renderStyles() {
 
       .incidencias-cell--main{
         position:relative;
+        text-align:left;
+        padding-inline-start:18px !important;
       }
 
       .incidencias-cell--main::before{
@@ -2117,6 +2650,21 @@ function renderStyles() {
       .incidencias-row:hover .incidencias-cell--main::before{
         opacity:1;
         transform:scaleY(1);
+      }
+
+      .incidencias-cell--status,
+      .incidencias-cell--date,
+      .incidencias-cell--importe,
+      .incidencias-cell--attachments,
+      .incidencias-cell--actions{
+        text-align:center;
+      }
+
+      .incidencias-cell--status > *,
+      .incidencias-cell--importe > *,
+      .incidencias-cell--attachments > *,
+      .incidencias-cell--actions > *{
+        margin-inline:auto;
       }
 
       .incidencias-main{
@@ -2403,7 +2951,9 @@ function renderStyles() {
       }
 
       .incidencias-date-inline{
-        display:inline-block;
+        display:inline-flex;
+        justify-content:center;
+        inline-size:100%;
         white-space:nowrap;
         font-size:var(--font-md, 13px);
         line-height:1.2;
@@ -2425,6 +2975,10 @@ function renderStyles() {
         font-weight:var(--weight-bold, 700);
         white-space:nowrap;
         border:1px solid transparent;
+      }
+
+      .incidencias-importe{
+        min-inline-size:86px;
       }
 
       .incidencias-importe svg,
@@ -2467,7 +3021,7 @@ function renderStyles() {
       }
 
       .incidencias-attachments-pill{
-        min-inline-size:44px;
+        min-inline-size:48px;
         color:var(--chip-text, var(--text-soft, rgba(245,245,245,.88)));
         background:var(--chip-bg, rgba(255,255,255,.034));
         border-color:var(--chip-border, rgba(255,255,255,.07));
@@ -2774,6 +3328,28 @@ function renderStyles() {
           var(--card-bg, var(--surface-elevated, #ffffff));
       }
 
+      [data-theme="light"] .incidencias-btn--create{
+        --inc-create-bg:var(--btn-primary-bg, linear-gradient(135deg, var(--accent, #6f59d9) 0%, var(--accent-hover, #5f45d8) 100%));
+        --inc-create-bg-hover:var(--inc-create-bg);
+        --inc-create-border:color-mix(in srgb, var(--accent, #6f59d9) 44%, transparent);
+      }
+
+      [data-theme="light"] .incidencias-filter-input{
+        background:var(--input-bg, rgba(255,255,255,.86));
+        border-color:var(--input-border, rgba(23,32,51,.10));
+      }
+
+      [data-theme="light"] .incidencias-filter-input:hover,
+      [data-theme="light"] .incidencias-filter-input:focus{
+        background:var(--input-bg-focus, #ffffff);
+      }
+
+      [data-theme="light"] .incidencias-filter-pill.is-active{
+        color:var(--accent-active, #533cb6);
+        background:var(--accent-soft, rgba(111,89,217,.125));
+        border-color:var(--accent-border-strong, rgba(111,89,217,.36));
+      }
+
       [data-theme="light"] .incidencias-chip--open{
         color:var(--accent-active, #533cb6);
         background:var(--accent-soft, rgba(111,89,217,.125));
@@ -2841,6 +3417,10 @@ function renderStyles() {
         .incidencias-stats{
           grid-template-columns:repeat(2, minmax(0, 1fr));
         }
+
+        .incidencias-filters{
+          grid-template-columns:1fr;
+        }
       }
 
       @media (max-width: 1180px){
@@ -2902,7 +3482,7 @@ function renderStyles() {
         }
 
         .incidencias-table{
-          min-inline-size:1080px;
+          min-inline-size:1120px;
         }
       }
 
@@ -2919,6 +3499,10 @@ function renderStyles() {
 
         .incidencias-btn{
           inline-size:100%;
+        }
+
+        .incidencias-filter-pills{
+          margin-inline:-2px;
         }
       }
 
@@ -2971,15 +3555,15 @@ export function renderHeader(input = {}) {
   );
 
   const title = safeText(
-    first(data.title, state.title, "Centro de control de incidencias"),
-    "Centro de control de incidencias"
+    first(data.title, state.title, "Tus incidencias y solicitudes"),
+    "Tus incidencias y solicitudes"
   );
 
   const subtitle = safeText(
     first(
       data.subtitle,
       state.subtitle,
-      "Consulta, prioriza y resuelve solicitudes desde una vista operativa conectada con clientes, adjuntos, seguimiento técnico y facturación asociada."
+      "Consulta el estado de tus incidencias, revisa las actualizaciones más recientes y crea nuevas solicitudes desde una vista clara, cercana y fácil de seguir."
     ),
     ""
   );
@@ -3146,6 +3730,12 @@ export function renderTable(input = {}) {
 
   const includeStyles = Boolean(data.includeStyles);
 
+  const subtitle = showInitialLoading
+    ? "Cargando incidencias..."
+    : pagination.filtering
+      ? `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} filtradas · ${pagination.unfilteredCount} totales`
+      : `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`;
+
   return `
     ${renderMaybeStyles(includeStyles)}
 
@@ -3154,17 +3744,12 @@ export function renderTable(input = {}) {
         <div class="incidencias-history-copy">
           <h2 class="incidencias-history-title">Historial de incidencias</h2>
           <p class="incidencias-history-subtitle">
-            ${
-              showInitialLoading
-                ? "Cargando incidencias..."
-                : escapeHtml(
-                    `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`
-                  )
-            }
+            ${escapeHtml(subtitle)}
           </p>
         </div>
 
         ${renderPagination(pagination, state)}
+        ${renderFilters(data, pagination)}
       </div>
 
       ${
@@ -3180,12 +3765,12 @@ export function renderTable(input = {}) {
                     <div class="incidencias-table-shell">
                       <table class="incidencias-table" role="table" aria-label="Listado de incidencias">
                         <colgroup>
-                          <col style="width:36%;">
+                          <col style="width:39%;">
                           <col style="width:11%;">
-                          <col style="width:14%;">
-                          <col style="width:14%;">
+                          <col style="width:13%;">
+                          <col style="width:13%;">
                           <col style="width:10%;">
-                          <col style="width:6%;">
+                          <col style="width:5%;">
                           <col style="width:9%;">
                         </colgroup>
 
@@ -3207,7 +3792,10 @@ export function renderTable(input = {}) {
                       </table>
                     </div>
                   `
-                  : renderEmptyState({ hasError })
+                  : renderEmptyState({
+                      hasError,
+                      filtering: pagination.filtering,
+                    })
               }
             </div>
           `

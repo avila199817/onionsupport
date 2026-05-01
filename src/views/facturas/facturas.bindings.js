@@ -2,24 +2,26 @@
    Onion SPA - Facturas Bindings
    Archivo: src/views/facturas/facturas.bindings.js
 
-   FINAL PRO SYSTEM · BINDINGS REAL · 10/10
+   FINAL PRO SYSTEM · BINDINGS REAL · 10/10 EXTREME
+   PATCH · SINGLE DELEGATION · NO DOUBLE BIND · ACTION LOCKS
    PATCH · CREATE FACTURA MODAL · OPEN INCIDENCIA MODAL · NO ROUTE NAVIGATION
-   PATCH · PAGINATION SUPPORT
+   PATCH · PAGINATION SUPPORT · CLEANUP ENTERPRISE
 
    RESPONSABILIDADES:
    - registrar eventos UI del módulo de facturas
    - bind de crear factura / refresh / retry / export
-   - delegación de eventos sobre tabla/cards y acciones de colección
-   - abrir incidencia relacionada mediante incidencias.modal.js
+   - delegación única sobre tabla/cards y acciones de colección
+   - abrir incidencia relacionada mediante bridge externo o modal fallback
    - soportar paginación visual: prev / next / page
    - evitar dobles listeners por re-render
+   - evitar dobles clicks por acción/factura
    - re-evaluar estado vivo en cada interacción
    - mantener facturasView.js limpio
 
    HARDENING PRO:
    - cleanup sólido por scope
    - no navega a rutas inexistentes de incidencia
-   - importa lazy el modal de incidencias
+   - importa lazy el modal de incidencias solo si no hay bridge superior
    - abre fallback inmediato y actualiza con detalle remoto si existe
    - tolera ausencia parcial de acciones
    - soporta refresh explícito con asRefresh
@@ -30,8 +32,70 @@ import { AppCore } from "../../core/index.js";
 import { safeText } from "./facturas.utils.js";
 import { getFacturaByIdStore } from "./facturas.store.js";
 
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
 const DEFAULT_SCOPE = "view:facturas";
 const INCIDENCIA_DETAIL_TIMEOUT = 90000;
+
+const ACTION_ALIASES = Object.freeze({
+  "create-factura": "create-factura",
+  "new-factura": "create-factura",
+  "create-invoice": "create-factura",
+  "new-invoice": "create-factura",
+
+  refresh: "refresh",
+  reload: "refresh",
+
+  retry: "retry",
+
+  export: "export",
+  "export-csv": "export",
+
+  "open-factura": "open-factura",
+  detail: "open-factura",
+  "open-detail": "open-factura",
+
+  "view-factura-pdf": "view-factura-pdf",
+  "view-pdf": "view-factura-pdf",
+  "ver-pdf": "view-factura-pdf",
+
+  "download-factura": "download-factura",
+  "download-pdf": "download-factura",
+  descargar: "download-factura",
+
+  "send-factura": "send-factura",
+  "send-invoice": "send-factura",
+  enviar: "send-factura",
+
+  "open-incidencia": "open-incidencia",
+  "open-ticket": "open-incidencia",
+  "open-related-incidencia": "open-incidencia",
+
+  "prev-page": "prev-page",
+  "pagination-prev": "prev-page",
+
+  "next-page": "next-page",
+  "pagination-next": "next-page",
+
+  page: "page",
+  "go-page": "page",
+
+  "close-detail": "close-detail",
+  "close-factura-detail": "close-detail",
+});
+
+const INTERACTIVE_SELECTOR = [
+  "button",
+  "a",
+  "input",
+  "select",
+  "textarea",
+  "[role='button']",
+  "[data-action]",
+  "[data-facturas-action]",
+].join(",");
 
 /* =========================================================
    BASE HELPERS
@@ -40,6 +104,10 @@ const INCIDENCIA_DETAIL_TIMEOUT = 90000;
 function safeNumber(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 function safeObject(value, fallback = {}) {
@@ -51,93 +119,39 @@ function safeObject(value, fallback = {}) {
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
-
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
-
-    if (Array.isArray(value) && value.length === 0) {
-      continue;
-    }
-
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
     return value;
   }
 
   return null;
 }
 
-function encodeSegment(value = "") {
-  return encodeURIComponent(safeText(value, ""));
+function normalizeKey(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s_]+/g, "-")
+    .trim();
 }
 
-function showBindingToast(message = "", type = "info") {
-  const text = safeText(message, "");
+function normalizeActionName(value = "") {
+  const key = normalizeKey(value);
+  return ACTION_ALIASES[key] || key;
+}
 
-  if (!text) return false;
-
-  try {
-    if (typeof AppCore?.toast?.[type] === "function") {
-      AppCore.toast[type](text);
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (typeof AppCore?.toast?.show === "function") {
-      AppCore.toast.show(text, type);
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (typeof AppCore?.ui?.toast?.[type] === "function") {
-      AppCore.ui.toast[type](text);
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (typeof AppCore?.showToast === "function") {
-      AppCore.showToast(text, type);
-      return true;
-    }
-  } catch {}
-
-  try {
-    const logger =
-      type === "error"
-        ? console.error
-        : type === "warning"
-          ? console.warn
-          : console.log;
-
-    logger(`[FacturasBindings:${type}]`, text);
-  } catch {}
-
-  return false;
+function encodeSegment(value = "") {
+  return encodeURIComponent(safeText(value, ""));
 }
 
 function resolveScopeName(scopeName = DEFAULT_SCOPE) {
   return safeText(scopeName, DEFAULT_SCOPE);
 }
 
-function resolveScope(scopeName = DEFAULT_SCOPE) {
-  const finalScope = resolveScopeName(scopeName);
-
-  try {
-    AppCore?.cleanup?.run?.(finalScope);
-  } catch {}
-
-  try {
-    return AppCore?.cleanup?.scope?.(finalScope) || finalScope;
-  } catch {
-    return finalScope;
-  }
-}
-
 function getLiveState(getState) {
   try {
-    return typeof getState === "function" ? getState() || {} : {};
+    return typeof getState === "function" ? safeObject(getState()) : {};
   } catch {
     return {};
   }
@@ -158,10 +172,7 @@ function getDatasetValue(element, ...keys) {
 
   for (const key of keys) {
     const value = element?.dataset?.[key];
-
-    if (safeText(value, "")) {
-      return safeText(value, "");
-    }
+    if (safeText(value, "")) return safeText(value, "");
   }
 
   return "";
@@ -173,10 +184,7 @@ function getAttrValue(element, ...attrs) {
   for (const attr of attrs) {
     try {
       const value = element.getAttribute?.(attr);
-
-      if (safeText(value, "")) {
-        return safeText(value, "");
-      }
+      if (safeText(value, "")) return safeText(value, "");
     } catch {}
   }
 
@@ -202,11 +210,10 @@ function getIncidenciaId(element) {
 }
 
 function getActionName(element) {
-  return safeText(
+  return normalizeActionName(
     getDatasetValue(element, "facturasAction", "action") ||
       getAttrValue(element, "data-facturas-action", "data-action") ||
-      "",
-    ""
+      ""
   );
 }
 
@@ -220,12 +227,43 @@ function getPageValue(element, fallback = 1) {
 
   const n = Number.parseInt(raw, 10);
 
-  if (!Number.isFinite(n) || n <= 0) {
-    return fallback;
-  }
-
-  return n;
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
+
+function isDisabledElement(element) {
+  if (!element) return false;
+
+  return Boolean(
+    element.disabled ||
+      element.getAttribute?.("disabled") !== null ||
+      element.getAttribute?.("aria-disabled") === "true"
+  );
+}
+
+function markElementBusy(element, busy = true) {
+  if (!element) return;
+
+  try {
+    if (busy) {
+      element.setAttribute("aria-busy", "true");
+      element.classList?.add?.("is-binding-busy");
+    } else {
+      element.removeAttribute("aria-busy");
+      element.classList?.remove?.("is-binding-busy");
+    }
+  } catch {}
+}
+
+function prevent(event) {
+  try {
+    event.preventDefault();
+    event.stopPropagation();
+  } catch {}
+}
+
+/* =========================================================
+   STATE HELPERS
+========================================================= */
 
 function isBusyState(state = {}) {
   return Boolean(state?.loading || state?.refreshing);
@@ -242,7 +280,6 @@ function isOpenBusyState(state = {}) {
 
 function isActionBusyForFactura(state = {}, facturaId = "") {
   const id = safeText(facturaId, "");
-
   if (!id) return false;
 
   return Boolean(
@@ -254,36 +291,139 @@ function isActionBusyForFactura(state = {}, facturaId = "") {
 }
 
 function canCreateFacturaFromState(state = {}) {
+  const role = normalizeKey(first(state?.role, state?.view?.role, ""));
+
   return Boolean(
     state?.canCreateFactura ||
       state?.isAdmin ||
-      state?.role === "admin" ||
       state?.view?.canCreateFactura ||
-      state?.view?.isAdmin
+      state?.view?.isAdmin ||
+      role === "admin" ||
+      role === "superadmin" ||
+      role === "super-admin" ||
+      role === "root" ||
+      role === "owner"
   );
 }
 
-async function safeRefresh({
-  loadFacturas,
-  silent = true,
-  asRefresh = true,
-  force = true,
-} = {}) {
-  if (typeof loadFacturas !== "function") {
-    return false;
-  }
+/* =========================================================
+   TOAST
+========================================================= */
 
-  await loadFacturas({
-    silent,
-    asRefresh,
-    force,
-  });
+function showBindingToast(message = "", type = "info") {
+  const text = safeText(message, "");
+  if (!text) return false;
 
-  return true;
+  const finalType = normalizeKey(type) || "info";
+
+  try {
+    if (typeof AppCore?.toast?.[finalType] === "function") {
+      AppCore.toast[finalType](text);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof AppCore?.toast?.show === "function") {
+      AppCore.toast.show(text, finalType);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof AppCore?.ui?.toast?.[finalType] === "function") {
+      AppCore.ui.toast[finalType](text);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof AppCore?.showToast === "function") {
+      AppCore.showToast(text, finalType);
+      return true;
+    }
+  } catch {}
+
+  try {
+    const logger =
+      finalType === "error"
+        ? console.error
+        : finalType === "warning"
+          ? console.warn
+          : console.log;
+
+    logger(`[FacturasBindings:${finalType}]`, text);
+  } catch {}
+
+  return false;
 }
 
 /* =========================================================
-   INCIDENCIAS MODAL BRIDGE
+   CLEANUP / LISTENERS
+========================================================= */
+
+function runScopeCleanup(scopeName = DEFAULT_SCOPE) {
+  try {
+    AppCore?.cleanup?.run?.(resolveScopeName(scopeName));
+  } catch {}
+}
+
+function addScopedListener(cleanups, scopeName, target, eventName, handler, options) {
+  if (!target || !eventName || typeof handler !== "function") {
+    return;
+  }
+
+  const scope = resolveScopeName(scopeName);
+
+  try {
+    if (typeof AppCore?.cleanup?.on === "function") {
+      AppCore.cleanup.on(scope, target, eventName, handler, options);
+      return;
+    }
+  } catch {}
+
+  try {
+    target.addEventListener(eventName, handler, options);
+    cleanups.push(() => {
+      try {
+        target.removeEventListener(eventName, handler, options);
+      } catch {}
+    });
+  } catch {}
+}
+
+/* =========================================================
+   ACTION LOCKS
+========================================================= */
+
+const actionLocks = new Set();
+
+function buildActionLockKey(action = "", payload = "") {
+  return `${normalizeActionName(action)}:${safeText(payload, "global")}`;
+}
+
+async function runLocked(action = "", payload = "", callback = null) {
+  const key = buildActionLockKey(action, payload);
+
+  if (actionLocks.has(key)) {
+    return false;
+  }
+
+  actionLocks.add(key);
+
+  try {
+    if (typeof callback === "function") {
+      return await callback();
+    }
+
+    return true;
+  } finally {
+    actionLocks.delete(key);
+  }
+}
+
+/* =========================================================
+   API FALLBACK FOR INCIDENCIA DETAIL
 ========================================================= */
 
 function getStorageValue(key = "") {
@@ -341,7 +481,6 @@ function getApiBase() {
 
 function resolveApiUrl(path = "") {
   const value = safeText(path, "");
-
   if (!value) return "";
 
   if (/^https?:\/\//i.test(value)) {
@@ -389,22 +528,6 @@ function isRecoverableDetailError(error = null) {
   return status === 404 || status === 405;
 }
 
-async function loadIncidenciasModal() {
-  const module = await import("../incidencias/incidencias.modal.js");
-
-  const modal =
-    module?.OnionIncidenciasModal ||
-    module?.default ||
-    window?.OnionIncidenciasModal ||
-    null;
-
-  if (!modal || typeof modal.open !== "function") {
-    throw new Error("INCIDENCIAS_MODAL_UNAVAILABLE");
-  }
-
-  return modal;
-}
-
 async function apiGet(path = "") {
   const finalPath = safeText(path, "");
   const client = getApiClient();
@@ -444,6 +567,7 @@ async function apiGet(path = "") {
     });
 
     const text = await response.text();
+
     let payload = null;
 
     try {
@@ -531,6 +655,38 @@ async function fetchIncidenciaDetail(ticketId = "") {
   }
 
   throw lastError || new Error("INCIDENCIA_DETAIL_NOT_FOUND");
+}
+
+/* =========================================================
+   INCIDENCIA FALLBACK BUILDERS
+========================================================= */
+
+async function loadIncidenciasModal() {
+  const module = await import("../incidencias/incidencias.modal.js");
+
+  const modal =
+    module?.OnionIncidenciasModal ||
+    module?.default ||
+    window?.OnionIncidenciasModal ||
+    null;
+
+  if (!modal || typeof modal.open !== "function") {
+    throw new Error("INCIDENCIAS_MODAL_UNAVAILABLE");
+  }
+
+  return modal;
+}
+
+function getFacturaByIdSafe(facturaId = "") {
+  const id = safeText(facturaId, "");
+
+  if (!id) return null;
+
+  try {
+    return getFacturaByIdStore(id) || null;
+  } catch {
+    return null;
+  }
 }
 
 function getRelationObject(factura = {}) {
@@ -1013,14 +1169,10 @@ async function openIncidenciaModalFromFacturas({
   openRelatedIncidencia = null,
 } = {}) {
   const finalFacturaId = safeText(facturaId, "");
-  const factura = finalFacturaId ? getFacturaByIdStore(finalFacturaId) : null;
+  const factura = finalFacturaId ? getFacturaByIdSafe(finalFacturaId) : null;
 
   const finalTicketId = safeText(
-    first(
-      ticketId,
-      incidenciaId,
-      getIncidenciaIdFromFactura(factura)
-    ),
+    first(ticketId, incidenciaId, getIncidenciaIdFromFactura(factura)),
     ""
   );
 
@@ -1050,11 +1202,7 @@ async function openIncidenciaModalFromFacturas({
   try {
     modal = await loadIncidenciasModal();
   } catch {
-    showBindingToast(
-      "No se pudo cargar el modal de incidencias.",
-      "error"
-    );
-
+    showBindingToast("No se pudo cargar el modal de incidencias.", "error");
     return false;
   }
 
@@ -1066,11 +1214,7 @@ async function openIncidenciaModalFromFacturas({
   try {
     modal.open(fallbackDetail);
   } catch {
-    showBindingToast(
-      "No se pudo abrir el modal de incidencias.",
-      "error"
-    );
-
+    showBindingToast("No se pudo abrir el modal de incidencias.", "error");
     return false;
   }
 
@@ -1140,16 +1284,14 @@ function resolveCurrentPage(state = {}) {
     state?.facturasPage,
     state?.view?.page,
     state?.view?.currentPage,
+    state?.view?.facturasPage,
     state?.pagination?.page,
     state?.pagination?.currentPage,
   ];
 
   for (const candidate of candidates) {
     const n = Number.parseInt(candidate, 10);
-
-    if (Number.isFinite(n) && n > 0) {
-      return n;
-    }
+    if (Number.isFinite(n) && n > 0) return n;
   }
 
   return 1;
@@ -1206,42 +1348,41 @@ async function handlePagination({
   goNextPage,
   setPage,
 } = {}) {
-  if (isBusyState(state)) {
-    return false;
-  }
+  if (isBusyState(state)) return false;
 
   const currentPage = resolveCurrentPage(state);
+  let targetPage = page;
 
-  if (action === "prev-page" || action === "pagination-prev") {
+  if (action === "prev-page") {
     if (typeof goPrevPage === "function") {
       await goPrevPage();
       return true;
     }
 
-    page = Math.max(1, currentPage - 1);
+    targetPage = Math.max(1, currentPage - 1);
   }
 
-  if (action === "next-page" || action === "pagination-next") {
+  if (action === "next-page") {
     if (typeof goNextPage === "function") {
       await goNextPage();
       return true;
     }
 
-    page = currentPage + 1;
+    targetPage = currentPage + 1;
   }
 
   if (typeof goToPage === "function") {
-    await goToPage(page);
+    await goToPage(targetPage);
     return true;
   }
 
   if (typeof setPage === "function") {
-    await setPage(page);
+    await setPage(targetPage);
     runRender(render);
     return true;
   }
 
-  const patched = trySetPageOnState(state, page);
+  const patched = trySetPageOnState(state, targetPage);
 
   if (patched) {
     runRender(render);
@@ -1252,6 +1393,321 @@ async function handlePagination({
     "La paginación necesita conectar goToPage o setPage desde FacturasView.",
     "warning"
   );
+
+  return false;
+}
+
+/* =========================================================
+   COLLECTION ACTIONS
+========================================================= */
+
+async function safeRefresh({
+  loadFacturas,
+  silent = true,
+  asRefresh = true,
+  force = true,
+} = {}) {
+  if (typeof loadFacturas !== "function") {
+    return false;
+  }
+
+  await loadFacturas({
+    silent,
+    asRefresh,
+    force,
+  });
+
+  return true;
+}
+
+/* =========================================================
+   ACTION DISPATCHER
+========================================================= */
+
+async function dispatchFacturasAction({
+  event,
+  actionEl,
+  state,
+
+  render,
+
+  loadFacturas,
+  openFactura,
+  openFacturaPdf,
+  downloadFacturaPdf,
+  sendFacturaToClient,
+  closeDetail,
+  exportFacturasCsv,
+
+  createFactura,
+
+  openIncidencia,
+  openRelatedIncidencia,
+
+  goToPage,
+  goPrevPage,
+  goNextPage,
+  setPage,
+} = {}) {
+  const action = getActionName(actionEl);
+
+  if (!action) {
+    return false;
+  }
+
+  const rowEl = actionEl.closest?.("[data-factura-id]") || null;
+
+  const facturaId = safeText(
+    getFacturaId(actionEl) ||
+      getFacturaId(rowEl) ||
+      "",
+    ""
+  );
+
+  const incidenciaId = getIncidenciaId(actionEl);
+
+  if (isDisabledElement(actionEl)) {
+    prevent(event);
+    return true;
+  }
+
+  if (action === "create-factura") {
+    prevent(event);
+
+    if (isBusyState(state)) return true;
+
+    if (!canCreateFacturaFromState(state)) {
+      showBindingToast("No tienes permisos para crear facturas.", "error");
+      return true;
+    }
+
+    if (typeof createFactura !== "function") {
+      showBindingToast(
+        "El modal de creación de facturas no está conectado.",
+        "error"
+      );
+      return true;
+    }
+
+    await runLocked(action, "global", async () => {
+      markElementBusy(actionEl, true);
+      try {
+        await createFactura();
+      } finally {
+        markElementBusy(actionEl, false);
+      }
+    });
+
+    return true;
+  }
+
+  if (action === "refresh") {
+    prevent(event);
+
+    if (isBusyState(state)) return true;
+
+    await runLocked(action, "global", async () => {
+      markElementBusy(actionEl, true);
+
+      try {
+        await safeRefresh({
+          loadFacturas,
+          silent: true,
+          asRefresh: true,
+          force: true,
+        });
+
+        showBindingToast("Facturas actualizadas correctamente.", "success");
+      } catch {
+        showBindingToast("No se pudo actualizar el listado.", "error");
+      } finally {
+        markElementBusy(actionEl, false);
+      }
+    });
+
+    return true;
+  }
+
+  if (action === "retry") {
+    prevent(event);
+
+    if (isBusyState(state)) return true;
+
+    await runLocked(action, "global", async () => {
+      markElementBusy(actionEl, true);
+
+      try {
+        await safeRefresh({
+          loadFacturas,
+          silent: false,
+          asRefresh: false,
+          force: true,
+        });
+      } catch {
+        showBindingToast("No se pudo recargar la facturación.", "error");
+      } finally {
+        markElementBusy(actionEl, false);
+      }
+    });
+
+    return true;
+  }
+
+  if (action === "export") {
+    prevent(event);
+
+    if (isBusyState(state)) return true;
+
+    await runLocked(action, "global", async () => {
+      try {
+        exportFacturasCsv?.();
+      } catch {
+        showBindingToast("No se pudo exportar el CSV.", "error");
+      }
+    });
+
+    return true;
+  }
+
+  if (action === "prev-page" || action === "next-page" || action === "page") {
+    prevent(event);
+
+    const page = getPageValue(actionEl, resolveCurrentPage(state));
+
+    await runLocked(action, String(page), async () => {
+      await handlePagination({
+        action,
+        page,
+        state,
+        render,
+        goToPage,
+        goPrevPage,
+        goNextPage,
+        setPage,
+      });
+    });
+
+    return true;
+  }
+
+  if (action === "open-incidencia") {
+    prevent(event);
+
+    if (!incidenciaId || isBusyState(state)) {
+      return true;
+    }
+
+    await runLocked(action, incidenciaId, async () => {
+      markElementBusy(actionEl, true);
+
+      try {
+        const opened = await openIncidenciaModalFromFacturas({
+          incidenciaId,
+          ticketId: incidenciaId,
+          facturaId,
+          openIncidencia,
+          openRelatedIncidencia,
+        });
+
+        if (!opened) {
+          showBindingToast(
+            "No se pudo abrir la incidencia relacionada.",
+            "error"
+          );
+        }
+      } finally {
+        markElementBusy(actionEl, false);
+      }
+    });
+
+    return true;
+  }
+
+  if (action === "open-factura") {
+    prevent(event);
+
+    if (!facturaId || isOpenBusyState(state)) {
+      return true;
+    }
+
+    await runLocked(action, facturaId, async () => {
+      markElementBusy(actionEl, true);
+
+      try {
+        await openFactura?.(facturaId);
+      } finally {
+        markElementBusy(actionEl, false);
+      }
+    });
+
+    return true;
+  }
+
+  if (action === "view-factura-pdf") {
+    prevent(event);
+
+    if (!facturaId || isActionBusyForFactura(state, facturaId)) {
+      return true;
+    }
+
+    await runLocked(action, facturaId, async () => {
+      markElementBusy(actionEl, true);
+
+      try {
+        await openFacturaPdf?.(facturaId);
+      } finally {
+        markElementBusy(actionEl, false);
+      }
+    });
+
+    return true;
+  }
+
+  if (action === "download-factura") {
+    prevent(event);
+
+    if (!facturaId || isActionBusyForFactura(state, facturaId)) {
+      return true;
+    }
+
+    await runLocked(action, facturaId, async () => {
+      markElementBusy(actionEl, true);
+
+      try {
+        await downloadFacturaPdf?.(facturaId);
+      } finally {
+        markElementBusy(actionEl, false);
+      }
+    });
+
+    return true;
+  }
+
+  if (action === "send-factura") {
+    prevent(event);
+
+    if (!facturaId || isActionBusyForFactura(state, facturaId)) {
+      return true;
+    }
+
+    await runLocked(action, facturaId, async () => {
+      markElementBusy(actionEl, true);
+
+      try {
+        await sendFacturaToClient?.(facturaId);
+      } finally {
+        markElementBusy(actionEl, false);
+      }
+    });
+
+    return true;
+  }
+
+  if (action === "close-detail") {
+    prevent(event);
+    closeDetail?.();
+    return true;
+  }
 
   return false;
 }
@@ -1290,443 +1746,158 @@ export function bindFacturasView({
     return () => {};
   }
 
-  const scope = resolveScope(scopeName);
+  const cleanups = [];
+  const finalScopeName = resolveScopeName(scopeName);
+
+  runScopeCleanup(finalScopeName);
+
   const container = getContainer();
-  const root = getRoot(container, scopeName);
+  const root = getRoot(container, finalScopeName);
 
   if (!container || !root) {
     return () => {};
   }
 
-  const createBtn = container.querySelector("#facturas-create-btn");
-  const refreshBtn = container.querySelector("#facturas-refresh-btn");
-  const retryBtn = container.querySelector("#facturas-retry-btn");
-  const exportBtn = container.querySelector("#facturas-export-btn");
-  const closeDetailBtn = container.querySelector("[data-action='close-detail']");
-
-  if (createBtn) {
-    AppCore?.cleanup?.on?.(
-      scope,
-      createBtn,
-      "click",
-      async (event) => {
-        event.preventDefault();
-
-        const state = getLiveState(getState);
-
-        if (isBusyState(state)) {
-          return;
-        }
-
-        if (!canCreateFacturaFromState(state)) {
-          showBindingToast(
-            "No tienes permisos para crear facturas.",
-            "error"
-          );
-          return;
-        }
-
-        if (typeof createFactura !== "function") {
-          showBindingToast(
-            "El modal de creación de facturas no está conectado.",
-            "error"
-          );
-          return;
-        }
-
-        await createFactura();
-      }
-    );
-  }
-
-  if (refreshBtn) {
-    AppCore?.cleanup?.on?.(
-      scope,
-      refreshBtn,
-      "click",
-      async (event) => {
-        event.preventDefault();
-
-        const state = getLiveState(getState);
-
-        if (isBusyState(state)) {
-          return;
-        }
-
-        try {
-          await safeRefresh({
-            loadFacturas,
-            silent: true,
-            asRefresh: true,
-            force: true,
-          });
-
-          showBindingToast(
-            "Facturas actualizadas correctamente.",
-            "success"
-          );
-        } catch {
-          showBindingToast(
-            "No se pudo actualizar el listado.",
-            "error"
-          );
-        }
-      }
-    );
-  }
-
-  if (retryBtn) {
-    AppCore?.cleanup?.on?.(
-      scope,
-      retryBtn,
-      "click",
-      async (event) => {
-        event.preventDefault();
-
-        const state = getLiveState(getState);
-
-        if (isBusyState(state)) {
-          return;
-        }
-
-        try {
-          await safeRefresh({
-            loadFacturas,
-            silent: false,
-            asRefresh: false,
-            force: true,
-          });
-        } catch {
-          showBindingToast(
-            "No se pudo recargar la facturación.",
-            "error"
-          );
-        }
-      }
-    );
-  }
-
-  if (exportBtn) {
-    AppCore?.cleanup?.on?.(
-      scope,
-      exportBtn,
-      "click",
-      (event) => {
-        event.preventDefault();
-
-        const state = getLiveState(getState);
-
-        if (isBusyState(state)) {
-          return;
-        }
-
-        try {
-          exportFacturasCsv?.();
-        } catch {
-          showBindingToast(
-            "No se pudo exportar el CSV.",
-            "error"
-          );
-        }
-      }
-    );
-  }
-
-  if (closeDetailBtn) {
-    AppCore?.cleanup?.on?.(
-      scope,
-      closeDetailBtn,
-      "click",
-      (event) => {
-        event.preventDefault();
-        closeDetail?.();
-      }
-    );
-  }
-
-  AppCore?.cleanup?.on?.(
-    scope,
-    root,
-    "click",
-    async (event) => {
-      const state = getLiveState(getState);
-
-      const actionEl =
-        event.target?.closest?.("[data-facturas-action]") ||
-        event.target?.closest?.("[data-action]");
-
-      const cardEl =
-        event.target?.closest?.(".factura-card") ||
-        event.target?.closest?.(".facturas-mobile-card") ||
-        event.target?.closest?.(".facturas-row") ||
-        event.target?.closest?.(".facturas-table-row") ||
-        event.target?.closest?.("[data-factura-id]");
-
-      if (actionEl) {
-        const action = getActionName(actionEl);
-        const rowEl = actionEl.closest?.("[data-factura-id]");
-
-        const facturaId = safeText(
-          getFacturaId(actionEl) ||
-            getFacturaId(rowEl) ||
-            "",
-          ""
-        );
-
-        const incidenciaId = getIncidenciaId(actionEl);
-
-        if (
-          action === "create-factura" ||
-          action === "new-factura" ||
-          action === "create-invoice" ||
-          action === "new-invoice"
-        ) {
-          event.preventDefault();
-          event.stopPropagation();
-
-          if (isBusyState(state)) {
-            return;
-          }
-
-          if (!canCreateFacturaFromState(state)) {
-            showBindingToast(
-              "No tienes permisos para crear facturas.",
-              "error"
-            );
-            return;
-          }
-
-          if (typeof createFactura !== "function") {
-            showBindingToast(
-              "El modal de creación de facturas no está conectado.",
-              "error"
-            );
-            return;
-          }
-
-          await createFactura();
-          return;
-        }
-
-        if (
-          action === "prev-page" ||
-          action === "pagination-prev" ||
-          action === "next-page" ||
-          action === "pagination-next" ||
-          action === "page" ||
-          action === "go-page"
-        ) {
-          event.preventDefault();
-          event.stopPropagation();
-
-          const page = getPageValue(
-            actionEl,
-            resolveCurrentPage(state)
-          );
-
-          await handlePagination({
-            action,
-            page,
-            state,
-            render,
-            goToPage,
-            goPrevPage,
-            goNextPage,
-            setPage,
-          });
-
-          return;
-        }
-
-        if (action === "refresh" || action === "reload") {
-          event.preventDefault();
-          event.stopPropagation();
-
-          if (isBusyState(state)) {
-            return;
-          }
-
-          try {
-            await safeRefresh({
-              loadFacturas,
-              silent: true,
-              asRefresh: true,
-              force: true,
-            });
-
-            showBindingToast(
-              "Facturas actualizadas correctamente.",
-              "success"
-            );
-          } catch {
-            showBindingToast(
-              "No se pudo actualizar el listado.",
-              "error"
-            );
-          }
-
-          return;
-        }
-
-        if (action === "retry") {
-          event.preventDefault();
-          event.stopPropagation();
-
-          if (isBusyState(state)) {
-            return;
-          }
-
-          try {
-            await safeRefresh({
-              loadFacturas,
-              silent: false,
-              asRefresh: false,
-              force: true,
-            });
-          } catch {
-            showBindingToast(
-              "No se pudo recargar la facturación.",
-              "error"
-            );
-          }
-
-          return;
-        }
-
-        if (action === "export" || action === "export-csv") {
-          event.preventDefault();
-          event.stopPropagation();
-
-          if (isBusyState(state)) {
-            return;
-          }
-
-          try {
-            exportFacturasCsv?.();
-          } catch {
-            showBindingToast(
-              "No se pudo exportar el CSV.",
-              "error"
-            );
-          }
-
-          return;
-        }
-
-        if (action === "open-incidencia") {
-          event.preventDefault();
-          event.stopPropagation();
-
-          if (!incidenciaId || isBusyState(state)) {
-            return;
-          }
-
-          const opened = await openIncidenciaModalFromFacturas({
-            incidenciaId,
-            ticketId: incidenciaId,
-            facturaId,
-            openIncidencia,
-            openRelatedIncidencia,
-          });
-
-          if (!opened) {
-            showBindingToast(
-              "No se pudo abrir la incidencia relacionada.",
-              "error"
-            );
-          }
-
-          return;
-        }
-
-        if (action === "open-factura") {
-          event.preventDefault();
-          event.stopPropagation();
-
-          if (!facturaId || isOpenBusyState(state)) {
-            return;
-          }
-
-          await openFactura?.(facturaId);
-          return;
-        }
-
-        if (action === "view-factura-pdf") {
-          event.preventDefault();
-          event.stopPropagation();
-
-          if (!facturaId || isActionBusyForFactura(state, facturaId)) {
-            return;
-          }
-
-          await openFacturaPdf?.(facturaId);
-          return;
-        }
-
-        if (action === "download-factura") {
-          event.preventDefault();
-          event.stopPropagation();
-
-          if (!facturaId || isActionBusyForFactura(state, facturaId)) {
-            return;
-          }
-
-          await downloadFacturaPdf?.(facturaId);
-          return;
-        }
-
-        if (action === "send-factura") {
-          event.preventDefault();
-          event.stopPropagation();
-
-          if (!facturaId || isActionBusyForFactura(state, facturaId)) {
-            return;
-          }
-
-          await sendFacturaToClient?.(facturaId);
-          return;
-        }
-
-        if (
-          action === "close-detail" ||
-          action === "close-factura-detail"
-        ) {
-          event.preventDefault();
-          event.stopPropagation();
-
-          closeDetail?.();
-          return;
-        }
-      }
-
-      if (
-        cardEl &&
-        !event.target?.closest?.(
-          "button, a, input, select, textarea, [data-action], [data-facturas-action]"
-        )
-      ) {
-        const rowClickDisabled =
-          safeText(cardEl?.dataset?.rowClickDisabled, "") === "true";
-
-        if (rowClickDisabled) {
-          return;
-        }
-
-        const facturaId = getFacturaId(cardEl);
-
-        if (!facturaId || isOpenBusyState(state)) {
-          return;
-        }
-
-        await openFactura?.(facturaId);
+  const onClick = async (event) => {
+    const state = getLiveState(getState);
+
+    const actionEl =
+      event.target?.closest?.("[data-facturas-action]") ||
+      event.target?.closest?.("[data-action]") ||
+      null;
+
+    if (actionEl && root.contains(actionEl)) {
+      const handled = await dispatchFacturasAction({
+        event,
+        actionEl,
+        state,
+
+        render,
+
+        loadFacturas,
+        openFactura,
+        openFacturaPdf,
+        downloadFacturaPdf,
+        sendFacturaToClient,
+        closeDetail,
+        exportFacturasCsv,
+
+        createFactura,
+
+        openIncidencia,
+        openRelatedIncidencia,
+
+        goToPage,
+        goPrevPage,
+        goNextPage,
+        setPage,
+      });
+
+      if (handled) {
+        return;
       }
     }
-  );
+
+    const cardEl =
+      event.target?.closest?.(".factura-card") ||
+      event.target?.closest?.(".facturas-mobile-card") ||
+      event.target?.closest?.(".facturas-row") ||
+      event.target?.closest?.(".facturas-table-row") ||
+      event.target?.closest?.("[data-factura-id]") ||
+      null;
+
+    if (!cardEl || !root.contains(cardEl)) {
+      return;
+    }
+
+    if (event.target?.closest?.(INTERACTIVE_SELECTOR)) {
+      return;
+    }
+
+    const rowClickDisabled =
+      safeText(cardEl?.dataset?.rowClickDisabled, "") === "true";
+
+    if (rowClickDisabled) {
+      return;
+    }
+
+    const facturaId = getFacturaId(cardEl);
+
+    if (!facturaId || isOpenBusyState(state)) {
+      return;
+    }
+
+    prevent(event);
+
+    await runLocked("row-open", facturaId, async () => {
+      await openFactura?.(facturaId);
+    });
+  };
+
+  const onKeydown = async (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    const actionEl =
+      event.target?.closest?.("[data-facturas-action]") ||
+      event.target?.closest?.("[data-action]") ||
+      null;
+
+    if (!actionEl || !root.contains(actionEl)) {
+      return;
+    }
+
+    if (
+      actionEl.tagName === "BUTTON" ||
+      actionEl.tagName === "A" ||
+      actionEl.getAttribute?.("role") === "button"
+    ) {
+      return;
+    }
+
+    const state = getLiveState(getState);
+
+    await dispatchFacturasAction({
+      event,
+      actionEl,
+      state,
+
+      render,
+
+      loadFacturas,
+      openFactura,
+      openFacturaPdf,
+      downloadFacturaPdf,
+      sendFacturaToClient,
+      closeDetail,
+      exportFacturasCsv,
+
+      createFactura,
+
+      openIncidencia,
+      openRelatedIncidencia,
+
+      goToPage,
+      goPrevPage,
+      goNextPage,
+      setPage,
+    });
+  };
+
+  addScopedListener(cleanups, finalScopeName, root, "click", onClick);
+  addScopedListener(cleanups, finalScopeName, root, "keydown", onKeydown);
 
   return () => {
-    try {
-      AppCore?.cleanup?.run?.(resolveScopeName(scopeName));
-    } catch {}
+    runScopeCleanup(finalScopeName);
+
+    cleanups.forEach((cleanup) => {
+      try {
+        cleanup?.();
+      } catch {}
+    });
+
+    cleanups.length = 0;
   };
 }
 

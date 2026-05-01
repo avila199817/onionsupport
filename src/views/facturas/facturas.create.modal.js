@@ -12,13 +12,10 @@
    - permitir cambiar incidencia desde desplegable
    - crear factura desde panel admin alineada con backend v3
    - enviar payload compatible con /router/facturas/factura_create_admin.js
-   - soportar factura con:
-       clienteId
-       userId
-       ticketId / incidenciaId
-       fechaEmision / fechaFacturaLegal / fechaServicio
-       lineas
-       sendEmail
+   - NO pedir fecha factura: el backend usa fecha de creación real
+   - NO pedir moneda: backend EUR por defecto
+   - NO pedir cuenta bancaria: backend default
+   - unificar bloque cliente + incidencia
    - emitir facturas:create:success para refrescar la vista
    - evitar doble submit y doble binding
    - exponer bridge global para abrir desde cualquier vista
@@ -71,15 +68,13 @@ const DEFAULT_FORM = Object.freeze({
 
   concepto: "Servicios de soporte y asistencia técnica informática",
   descripcion: "",
+
   cantidad: 1,
   precioUnitario: 20,
 
-  fechaFactura: "",
   fechaServicio: "",
 
   formaPago: "transferencia bancaria",
-  cuentaPago: "",
-  moneda: "EUR",
   estadoPago: "pendiente",
 
   sendEmail: true,
@@ -132,19 +127,37 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
-function safeLower(value, fallback = "") {
-  return safeText(value, fallback).toLowerCase();
-}
-
 function safeNumber(value, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback;
+
+  if (typeof value === "string") {
+    let text = value
+      .trim()
+      .replace(/€/g, "")
+      .replace(/%/g, "")
+      .replace(/\s+/g, "");
+
+    const hasComma = text.includes(",");
+    const hasDot = text.includes(".");
+
+    if (hasComma && hasDot) {
+      text = text.replace(/\./g, "").replace(/,/g, ".");
+    } else if (hasComma) {
+      text = text.replace(/,/g, ".");
+    }
+
+    const parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
 
-function safeObject(value) {
+function safeObject(value, fallback = {}) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
-    : {};
+    : fallback;
 }
 
 function safeArray(value) {
@@ -154,15 +167,8 @@ function safeArray(value) {
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
-
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
-
-    if (Array.isArray(value) && value.length === 0) {
-      continue;
-    }
-
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
     return value;
   }
 
@@ -230,27 +236,26 @@ function todayInputValue() {
   }
 }
 
-function formatMoney(value = 0, currency = "EUR") {
+function formatMoney(value = 0) {
   const amount = safeNumber(value, 0);
 
   try {
     return new Intl.NumberFormat("es-ES", {
       style: "currency",
-      currency: safeText(currency, "EUR"),
+      currency: "EUR",
+      minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(amount);
   } catch {
-    return `${amount.toFixed(2)} ${safeText(currency, "EUR")}`;
+    return `${amount.toFixed(2).replace(".", ",")} €`;
   }
 }
 
 function getSortableDate(value = "") {
   const raw = safeText(value, "");
-
   if (!raw) return 0;
 
   const time = Date.parse(raw);
-
   return Number.isFinite(time) ? time : 0;
 }
 
@@ -258,9 +263,11 @@ function safeEmit(event = "", payload = {}) {
   const eventName = safeText(event, "");
   if (!eventName) return false;
 
+  let emitted = false;
+
   try {
     AppCore?.events?.emit?.(eventName, payload);
-    return true;
+    emitted = true;
   } catch {}
 
   try {
@@ -269,10 +276,10 @@ function safeEmit(event = "", payload = {}) {
         detail: payload,
       })
     );
-    return true;
+    emitted = true;
   } catch {}
 
-  return false;
+  return emitted;
 }
 
 function safeOn(event = "", handler = null) {
@@ -350,9 +357,7 @@ function buildUrl(endpoint = "") {
   const path = safeText(endpoint, "");
   if (!path) return "";
 
-  if (isAbsoluteUrl(path)) {
-    return path;
-  }
+  if (isAbsoluteUrl(path)) return path;
 
   const apiBase = getApiBase();
 
@@ -450,6 +455,7 @@ function shouldTryNext(error = null) {
 async function requestJsonFetch(endpoint = "", options = {}) {
   const url = buildUrl(endpoint);
   const token = getAuthToken();
+
   const timeout = createTimeoutController(
     safeNumber(options.timeoutMs, SEARCH_TIMEOUT_MS)
   );
@@ -493,6 +499,7 @@ async function requestJsonFetch(endpoint = "", options = {}) {
       error.status = response.status;
       error.statusCode = response.status;
       error.response = data;
+      error.data = data;
 
       throw error;
     }
@@ -562,6 +569,61 @@ async function apiPost(endpoint = "", body = {}) {
 }
 
 /* =========================================================
+   GENERIC RESPONSE HELPERS
+========================================================= */
+
+function extractItems(payload = null) {
+  if (Array.isArray(payload)) return payload;
+
+  const obj = safeObject(payload);
+
+  const candidates = [
+    obj.clientes,
+    obj.users,
+    obj.usuarios,
+    obj.tickets,
+    obj.incidencias,
+    obj.items,
+    obj.results,
+    obj.rows,
+    obj.records,
+    obj.list,
+
+    obj.data?.clientes,
+    obj.data?.users,
+    obj.data?.usuarios,
+    obj.data?.tickets,
+    obj.data?.incidencias,
+    obj.data?.items,
+    obj.data?.results,
+    obj.data?.rows,
+    obj.data?.records,
+
+    obj.payload?.clientes,
+    obj.payload?.users,
+    obj.payload?.usuarios,
+    obj.payload?.tickets,
+    obj.payload?.incidencias,
+    obj.payload?.items,
+    obj.payload?.results,
+
+    obj.result?.clientes,
+    obj.result?.users,
+    obj.result?.usuarios,
+    obj.result?.tickets,
+    obj.result?.incidencias,
+    obj.result?.items,
+    obj.result?.results,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate;
+  }
+
+  return [];
+}
+
+/* =========================================================
    CLIENT SEARCH
 ========================================================= */
 
@@ -586,12 +648,12 @@ function normalizeClientCandidate(raw = null) {
       obj.clienteId,
       obj.id,
       obj._id,
+      obj.clienteIdInterno,
 
       cliente.clienteId,
       cliente.id,
-      cliente.clienteIdInterno,
-
-      obj.clienteIdInterno
+      cliente._id,
+      cliente.clienteIdInterno
     ),
     ""
   );
@@ -619,6 +681,7 @@ function normalizeClientCandidate(raw = null) {
     first(
       obj.nombreFiscal,
       obj.razonSocial,
+      obj.empresa,
       obj.nombreContacto,
       obj.nombre,
       obj.name,
@@ -627,6 +690,7 @@ function normalizeClientCandidate(raw = null) {
 
       cliente.nombreFiscal,
       cliente.razonSocial,
+      cliente.empresa,
       cliente.nombreContacto,
       cliente.nombre,
       cliente.name,
@@ -680,8 +744,8 @@ function normalizeClientCandidate(raw = null) {
 
   const subtitle = safeText(
     first(
-      empresa && empresa !== name ? empresa : "",
       email,
+      empresa && empresa !== name ? empresa : "",
       obj.telefono,
       obj.phone,
       contacto.telefono,
@@ -702,61 +766,6 @@ function normalizeClientCandidate(raw = null) {
     subtitle,
     raw: obj,
   };
-}
-
-function extractItems(payload = null) {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-
-  const obj = safeObject(payload);
-
-  const candidates = [
-    obj.clientes,
-    obj.users,
-    obj.usuarios,
-    obj.tickets,
-    obj.incidencias,
-    obj.items,
-    obj.results,
-    obj.rows,
-    obj.records,
-    obj.list,
-
-    obj.data?.clientes,
-    obj.data?.users,
-    obj.data?.usuarios,
-    obj.data?.tickets,
-    obj.data?.incidencias,
-    obj.data?.items,
-    obj.data?.results,
-    obj.data?.rows,
-    obj.data?.records,
-
-    obj.payload?.clientes,
-    obj.payload?.users,
-    obj.payload?.usuarios,
-    obj.payload?.tickets,
-    obj.payload?.incidencias,
-    obj.payload?.items,
-    obj.payload?.results,
-
-    obj.result?.clientes,
-    obj.result?.users,
-    obj.result?.usuarios,
-    obj.result?.tickets,
-    obj.result?.incidencias,
-    obj.result?.items,
-    obj.result?.results,
-  ];
-
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) {
-      return candidate;
-    }
-  }
-
-  return [];
 }
 
 function dedupeClients(items = []) {
@@ -786,9 +795,7 @@ async function searchClientesRequest(query = "") {
       const response = await apiGet(url);
       const items = dedupeClients(extractItems(response));
 
-      if (items.length) {
-        return items;
-      }
+      if (items.length) return items;
     } catch (error) {
       lastError = error;
 
@@ -798,9 +805,7 @@ async function searchClientesRequest(query = "") {
     }
   }
 
-  if (lastError) {
-    throw lastError;
-  }
+  if (lastError) throw lastError;
 
   return [];
 }
@@ -842,9 +847,7 @@ async function performClientSearch(query = "") {
   try {
     const results = await searchClientesRequest(normalized);
 
-    if (seq !== modalState.clienteSearchSeq) {
-      return [];
-    }
+    if (seq !== modalState.clienteSearchSeq) return [];
 
     modalState.clienteSearchLoading = false;
     modalState.clienteSearchError = "";
@@ -856,9 +859,7 @@ async function performClientSearch(query = "") {
 
     return results;
   } catch (error) {
-    if (seq !== modalState.clienteSearchSeq) {
-      return [];
-    }
+    if (seq !== modalState.clienteSearchSeq) return [];
 
     modalState.clienteSearchLoading = false;
     modalState.clienteSearchResults = [];
@@ -895,7 +896,7 @@ function scheduleClientSearch(query = "") {
 }
 
 /* =========================================================
-   TICKET SEARCH / USER-SCOPED INCIDENTS
+   TICKET SEARCH
 ========================================================= */
 
 function getSelectedClienteId() {
@@ -911,7 +912,7 @@ function buildTicketSearchUrls(query = "") {
   const userId = getSelectedClienteUserId();
   const q = normalizeWhitespace(query);
 
-  const buildParams = () => {
+  return TICKET_SEARCH_ENDPOINTS.map((endpoint) => {
     const params = new URLSearchParams();
 
     if (q) {
@@ -921,28 +922,14 @@ function buildTicketSearchUrls(query = "") {
 
     params.set("limit", String(TICKET_LIMIT));
 
-    if (clienteId) {
-      params.set("clienteId", clienteId);
-    }
+    if (clienteId) params.set("clienteId", clienteId);
+    if (userId) params.set("userId", userId);
 
-    if (userId) {
-      params.set("userId", userId);
-    }
-
-    /*
-      Compatibilidad con endpoints que soporten filtros de facturación.
-    */
     params.set("includeClosed", "true");
     params.set("includeAll", "true");
     params.set("onlyMine", "false");
 
-    return params;
-  };
-
-  return TICKET_SEARCH_ENDPOINTS.map((endpoint) => {
-    const params = buildParams();
     const separator = endpoint.includes("?") ? "&" : "?";
-
     return `${endpoint}${separator}${params.toString()}`;
   });
 }
@@ -1148,21 +1135,11 @@ function ticketBelongsToSelectedClient(ticket = {}) {
   const ticketClienteId = safeText(ticket?.clienteId, "");
   const ticketUserId = safeText(ticket?.userId, "");
 
-  /*
-    Si tenemos clienteId, debe coincidir.
-    Si también tenemos userId, aceptamos coincidencia por cualquiera para
-    compatibilidad con documentos antiguos.
-  */
-  if (selectedClienteId && ticketClienteId === selectedClienteId) {
-    return true;
-  }
+  if (selectedClienteId && ticketClienteId === selectedClienteId) return true;
+  if (selectedUserId && ticketUserId === selectedUserId) return true;
 
-  if (selectedUserId && ticketUserId === selectedUserId) {
+  if (!ticketClienteId && !ticketUserId && (selectedClienteId || selectedUserId)) {
     return true;
-  }
-
-  if (!selectedClienteId && !selectedUserId) {
-    return false;
   }
 
   return false;
@@ -1173,9 +1150,7 @@ function sortTicketsByLatest(items = []) {
     const dateA = safeNumber(a?.sortDate, 0);
     const dateB = safeNumber(b?.sortDate, 0);
 
-    if (dateA !== dateB) {
-      return dateB - dateA;
-    }
+    if (dateA !== dateB) return dateB - dateA;
 
     return safeText(b?.id, "").localeCompare(safeText(a?.id, ""));
   });
@@ -1188,9 +1163,7 @@ function dedupeAndFilterTickets(items = []) {
     const normalized = normalizeTicketCandidate(item);
     if (!normalized?.id) return;
 
-    if (!ticketBelongsToSelectedClient(normalized)) {
-      return;
-    }
+    if (!ticketBelongsToSelectedClient(normalized)) return;
 
     if (!map.has(normalized.id)) {
       map.set(normalized.id, normalized);
@@ -1225,13 +1198,9 @@ async function searchTicketsRequest(query = "") {
 
   const normalized = dedupeAndFilterTickets(collected);
 
-  if (normalized.length) {
-    return normalized;
-  }
+  if (normalized.length) return normalized;
 
-  if (lastError && collected.length === 0) {
-    throw lastError;
-  }
+  if (lastError && collected.length === 0) throw lastError;
 
   return [];
 }
@@ -1272,9 +1241,7 @@ function autoSelectLatestTicketIfPossible({ force = false } = {}) {
     ""
   );
 
-  if (currentTicketId && !force) {
-    return false;
-  }
+  if (currentTicketId && !force) return false;
 
   const latest = safeArray(modalState.ticketSearchResults)[0];
 
@@ -1336,16 +1303,12 @@ async function loadTicketsForSelectedClient({
   renderModal();
   attachRootBindings();
 
-  if (focus) {
-    focusField(focus);
-  }
+  if (focus) focusField(focus);
 
   try {
     const results = await searchTicketsRequest(query);
 
-    if (seq !== modalState.ticketSearchSeq) {
-      return [];
-    }
+    if (seq !== modalState.ticketSearchSeq) return [];
 
     modalState.ticketSearchLoading = false;
     modalState.ticketSearchError = "";
@@ -1360,15 +1323,11 @@ async function loadTicketsForSelectedClient({
     renderModal();
     attachRootBindings();
 
-    if (focus) {
-      focusField(focus);
-    }
+    if (focus) focusField(focus);
 
     return results;
   } catch (error) {
-    if (seq !== modalState.ticketSearchSeq) {
-      return [];
-    }
+    if (seq !== modalState.ticketSearchSeq) return [];
 
     modalState.ticketSearchLoading = false;
     modalState.ticketSearchResults = [];
@@ -1387,19 +1346,15 @@ async function loadTicketsForSelectedClient({
     renderModal();
     attachRootBindings();
 
-    if (focus) {
-      focusField(focus);
-    }
+    if (focus) focusField(focus);
 
     return [];
   }
 }
 
 async function performTicketSearch(query = "") {
-  const normalized = normalizeWhitespace(query);
-
   return loadTicketsForSelectedClient({
-    query: normalized,
+    query: normalizeWhitespace(query),
     autoSelectLatest: false,
     focus: "ticketSearch",
   });
@@ -1434,7 +1389,6 @@ function scheduleTicketSearch(query = "") {
 function resetForm() {
   modalState.form = {
     ...DEFAULT_FORM,
-    fechaFactura: todayInputValue(),
     fechaServicio: todayInputValue(),
   };
 }
@@ -1516,8 +1470,7 @@ function buildCreatePayload(form = {}) {
   const ticketId = safeText(first(current.ticketId, current.incidenciaId), "");
   const incidenciaSubject = safeText(current.incidenciaSubject, ticketId);
 
-  const fechaFactura = safeText(current.fechaFactura, todayInputValue());
-  const fechaServicio = safeText(current.fechaServicio, fechaFactura);
+  const fechaServicio = safeText(current.fechaServicio, todayInputValue());
 
   const concepto = normalizeWhitespace(current.concepto);
   const descripcion = normalizeWhitespace(current.descripcion);
@@ -1560,22 +1513,12 @@ function buildCreatePayload(form = {}) {
     ticketSubject: incidenciaSubject,
     asunto: incidenciaSubject,
 
-    fechaFactura,
-    fechaFacturaLegal: fechaFactura,
-    fechaEmision: fechaFactura,
-    invoiceDate: fechaFactura,
-
     fechaServicio,
     fechaTrabajo: fechaServicio,
     serviceDate: fechaServicio,
 
-    moneda: safeText(current.moneda, "EUR"),
-    currency: safeText(current.moneda, "EUR"),
-
     formaPago: safeText(current.formaPago, "transferencia bancaria"),
     metodoPago: safeText(current.formaPago, "transferencia bancaria"),
-
-    cuentaPago: safeText(current.cuentaPago, "") || undefined,
 
     estadoPago: safeText(current.estadoPago, "pendiente"),
     estado: "emitida",
@@ -1693,13 +1636,14 @@ function renderInput({
   required = false,
   step = "",
   min = "",
+  readonly = false,
 } = {}) {
   return `
     <label class="fac-create-field">
       <span class="fac-create-label">${escapeHtml(label)}${required ? " *" : ""}</span>
 
       <input
-        class="fac-create-input ${error ? "is-error" : ""}"
+        class="fac-create-input ${error ? "is-error" : ""}${readonly ? " is-readonly" : ""}"
         data-field="${escapeHtml(name)}"
         name="${escapeHtml(name)}"
         type="${escapeHtml(type)}"
@@ -1707,6 +1651,7 @@ function renderInput({
         placeholder="${escapeHtml(placeholder)}"
         ${step ? `step="${escapeHtml(step)}"` : ""}
         ${min ? `min="${escapeHtml(min)}"` : ""}
+        ${readonly ? "readonly" : ""}
         ${modalState.submitting ? "disabled" : ""}
       />
 
@@ -1765,30 +1710,6 @@ function renderCheckbox({
   `;
 }
 
-function renderSelectedCliente() {
-  const form = safeObject(modalState.form);
-
-  if (!safeText(form.clienteId, "")) return "";
-
-  return `
-    <div class="fac-create-selected">
-      <div class="fac-create-selected-copy">
-        <strong>${escapeHtml(safeText(form.clienteNombre, "Cliente seleccionado"))}</strong>
-        <span>${escapeHtml(safeText(form.clienteEmail, form.clienteId))}</span>
-      </div>
-
-      <button
-        type="button"
-        class="fac-create-selected-clear"
-        data-clear-cliente="true"
-        ${modalState.submitting ? "disabled" : ""}
-      >
-        Cambiar
-      </button>
-    </div>
-  `;
-}
-
 function renderClientSearchResults() {
   const query = safeText(modalState.clienteSearchQuery, "");
   const loading = Boolean(modalState.clienteSearchLoading);
@@ -1834,31 +1755,30 @@ function renderClientSearchResults() {
   `;
 }
 
-function renderClienteSearchBlock() {
-  const error = safeText(modalState.errors?.clienteId, "");
+function renderSelectedCliente() {
+  const form = safeObject(modalState.form);
+
+  if (!safeText(form.clienteId, "")) return "";
 
   return `
-    <section class="fac-create-block">
-      <div class="fac-create-mini-title">Cliente</div>
+    <div class="fac-create-selected is-client">
+      <div class="fac-create-selected-icon" aria-hidden="true">C</div>
 
-      <label class="fac-create-field">
-        <input
-          class="fac-create-input ${error ? "is-error" : ""}"
-          data-field="clienteSearch"
-          name="clienteSearch"
-          type="text"
-          value="${escapeHtml(modalState.clienteSearchQuery)}"
-          placeholder="Buscar cliente por nombre, email, usuario..."
-          autocomplete="off"
-          ${modalState.submitting ? "disabled" : ""}
-        />
+      <div class="fac-create-selected-copy">
+        <span>Cliente seleccionado</span>
+        <strong>${escapeHtml(safeText(form.clienteNombre, "Cliente seleccionado"))}</strong>
+        <small>${escapeHtml(safeText(form.clienteEmail, form.clienteId))}</small>
+      </div>
 
-        ${renderFieldError(error)}
-      </label>
-
-      ${renderClientSearchResults()}
-      ${renderSelectedCliente()}
-    </section>
+      <button
+        type="button"
+        class="fac-create-selected-clear"
+        data-clear-cliente="true"
+        ${modalState.submitting ? "disabled" : ""}
+      >
+        Cambiar
+      </button>
+    </div>
   `;
 }
 
@@ -1870,15 +1790,17 @@ function getCurrentSelectedTicket() {
 
   if (!selectedId) return null;
 
-  return safeArray(modalState.ticketSearchResults).find((ticket) => {
-    return ticket.id === selectedId;
-  }) || {
-    id: selectedId,
-    ticketId: selectedId,
-    incidenciaId: selectedId,
-    subject: safeText(modalState.form?.incidenciaSubject, selectedId),
-    subtitle: "",
-  };
+  return (
+    safeArray(modalState.ticketSearchResults).find((ticket) => {
+      return ticket.id === selectedId;
+    }) || {
+      id: selectedId,
+      ticketId: selectedId,
+      incidenciaId: selectedId,
+      subject: safeText(modalState.form?.incidenciaSubject, selectedId),
+      subtitle: "",
+    }
+  );
 }
 
 function renderSelectedTicket() {
@@ -1887,16 +1809,19 @@ function renderSelectedTicket() {
   if (!ticket?.id) return "";
 
   return `
-    <div class="fac-create-selected">
+    <div class="fac-create-selected is-ticket">
+      <div class="fac-create-selected-icon" aria-hidden="true">I</div>
+
       <div class="fac-create-selected-copy">
-        <strong>${escapeHtml(ticket.id)} · ${escapeHtml(ticket.subject || ticket.id)}</strong>
         <span>
           ${
             modalState.ticketAutoSelected
-              ? "Última incidencia detectada automáticamente"
-              : "Incidencia seleccionada manualmente"
+              ? "Incidencia más reciente seleccionada"
+              : "Incidencia seleccionada"
           }
         </span>
+        <strong>${escapeHtml(ticket.id)}</strong>
+        <small>${escapeHtml(ticket.subject || ticket.id)}</small>
       </div>
 
       <button
@@ -1919,17 +1844,11 @@ function renderTicketOptions() {
   );
 
   if (!results.length) {
-    return `
-      <option value="">
-        Sin incidencias relacionadas
-      </option>
-    `;
+    return `<option value="">Sin incidencias relacionadas</option>`;
   }
 
   return `
-    <option value="">
-      Selecciona una incidencia...
-    </option>
+    <option value="">Selecciona una incidencia...</option>
 
     ${results
       .map((ticket, index) => {
@@ -1990,141 +1909,134 @@ function renderTicketSearchResults() {
   `;
 }
 
-function renderTicketSearchBlock() {
-  const error = safeText(modalState.errors?.incidenciaId, "");
+function renderTargetBlock() {
+  const errors = safeObject(modalState.errors);
+
   const clienteSelected = Boolean(getSelectedClienteId());
-  const loading = Boolean(modalState.ticketSearchLoading);
-  const list = safeArray(modalState.ticketSearchResults);
+  const ticketLoading = Boolean(modalState.ticketSearchLoading);
+  const ticketList = safeArray(modalState.ticketSearchResults);
   const selectedTicket = getCurrentSelectedTicket();
 
   return `
-    <section class="fac-create-block">
-      <div class="fac-create-block-head">
+    <section class="fac-create-target">
+      <div class="fac-create-target-head">
         <div>
-          <div class="fac-create-mini-title">Incidencia vinculada</div>
+          <span>Destino de facturación</span>
+          <h3>Cliente e incidencia</h3>
           <p>
-            ${
-              clienteSelected
-                ? "Solo se muestran incidencias asociadas al cliente/usuario seleccionado."
-                : "Selecciona primero un cliente."
-            }
+            Selecciona el cliente y vincula la factura a una incidencia real. El backend hará numeración legal, PDF, blob y auditoría.
           </p>
         </div>
 
-        ${
-          clienteSelected
-            ? `
-              <button
-                type="button"
-                class="fac-create-mini-button"
-                data-refresh-tickets="true"
-                ${modalState.submitting || loading ? "disabled" : ""}
-              >
-                ${loading ? "Cargando..." : "Recargar"}
-              </button>
-            `
-            : ""
-        }
+        <div class="fac-create-target-pill">
+          EUR · backend
+        </div>
       </div>
 
-      ${
-        clienteSelected
-          ? `
-            <label class="fac-create-field">
-              <span class="fac-create-label">Listado de incidencias del usuario</span>
+      <div class="fac-create-target-grid">
+        <div class="fac-create-target-column">
+          <div class="fac-create-column-title">Cliente</div>
 
-              <select
-                class="fac-create-select ${error ? "is-error" : ""}"
-                data-field="ticketSelect"
-                name="ticketSelect"
-                ${modalState.submitting || loading || !list.length ? "disabled" : ""}
-              >
-                ${renderTicketOptions()}
-              </select>
+          ${
+            clienteSelected
+              ? renderSelectedCliente()
+              : `
+                <label class="fac-create-field">
+                  <input
+                    class="fac-create-input ${errors.clienteId ? "is-error" : ""}"
+                    data-field="clienteSearch"
+                    name="clienteSearch"
+                    type="text"
+                    value="${escapeHtml(modalState.clienteSearchQuery)}"
+                    placeholder="Buscar por nombre, email o usuario..."
+                    autocomplete="off"
+                    ${modalState.submitting ? "disabled" : ""}
+                  />
 
-              ${renderFieldError(error)}
-            </label>
+                  ${renderFieldError(errors.clienteId)}
+                </label>
 
-            ${
-              loading
-                ? `<div class="fac-create-search-state">Cargando incidencias del cliente...</div>`
-                : ""
-            }
+                ${renderClientSearchResults()}
+              `
+          }
+        </div>
 
-            ${
-              !loading && modalState.ticketSearchError
-                ? `<div class="fac-create-search-state is-error">${escapeHtml(modalState.ticketSearchError)}</div>`
-                : ""
-            }
+        <div class="fac-create-target-column">
+          <div class="fac-create-column-title">Incidencia vinculada</div>
 
-            ${
-              !loading && !modalState.ticketSearchError && !list.length
-                ? `<div class="fac-create-search-state">Este cliente no tiene incidencias relacionadas disponibles.</div>`
-                : ""
-            }
+          ${
+            !clienteSelected
+              ? `
+                <div class="fac-create-locked">
+                  <strong>Primero selecciona un cliente</strong>
+                  <span>Las incidencias se cargan automáticamente por cliente/usuario.</span>
+                  ${renderFieldError(errors.incidenciaId)}
+                </div>
+              `
+              : `
+                <div class="fac-create-ticket-toolbar">
+                  <label class="fac-create-field">
+                    <select
+                      class="fac-create-select ${errors.incidenciaId ? "is-error" : ""}"
+                      data-field="ticketSelect"
+                      name="ticketSelect"
+                      ${modalState.submitting || ticketLoading || !ticketList.length ? "disabled" : ""}
+                    >
+                      ${renderTicketOptions()}
+                    </select>
 
-            ${selectedTicket?.id ? renderSelectedTicket() : ""}
+                    ${renderFieldError(errors.incidenciaId)}
+                  </label>
 
-            <label class="fac-create-field">
-              <span class="fac-create-label">Filtrar incidencias</span>
+                  <button
+                    type="button"
+                    class="fac-create-mini-button"
+                    data-refresh-tickets="true"
+                    ${modalState.submitting || ticketLoading ? "disabled" : ""}
+                  >
+                    ${ticketLoading ? "Cargando..." : "Recargar"}
+                  </button>
+                </div>
 
-              <input
-                class="fac-create-input"
-                data-field="ticketSearch"
-                name="ticketSearch"
-                type="text"
-                value="${escapeHtml(modalState.ticketSearchQuery)}"
-                placeholder="Filtrar por código, asunto, estado..."
-                autocomplete="off"
-                ${modalState.submitting || loading ? "disabled" : ""}
-              />
-            </label>
+                ${
+                  ticketLoading
+                    ? `<div class="fac-create-search-state">Cargando incidencias del cliente...</div>`
+                    : ""
+                }
 
-            ${renderTicketSearchResults()}
-          `
-          : `
-            <label class="fac-create-field">
-              <input
-                class="fac-create-input ${error ? "is-error" : ""}"
-                data-field="ticketSearch"
-                name="ticketSearch"
-                type="text"
-                value=""
-                placeholder="Selecciona primero un cliente"
-                autocomplete="off"
-                disabled
-              />
+                ${
+                  !ticketLoading && modalState.ticketSearchError
+                    ? `<div class="fac-create-search-state is-error">${escapeHtml(modalState.ticketSearchError)}</div>`
+                    : ""
+                }
 
-              ${renderFieldError(error)}
-            </label>
-          `
-      }
+                ${
+                  !ticketLoading && !modalState.ticketSearchError && !ticketList.length
+                    ? `<div class="fac-create-search-state">Este cliente no tiene incidencias disponibles.</div>`
+                    : ""
+                }
+
+                ${selectedTicket?.id ? renderSelectedTicket() : ""}
+
+                <label class="fac-create-field">
+                  <input
+                    class="fac-create-input"
+                    data-field="ticketSearch"
+                    name="ticketSearch"
+                    type="text"
+                    value="${escapeHtml(modalState.ticketSearchQuery)}"
+                    placeholder="Filtrar por código, asunto o estado..."
+                    autocomplete="off"
+                    ${modalState.submitting || ticketLoading ? "disabled" : ""}
+                  />
+                </label>
+
+                ${renderTicketSearchResults()}
+              `
+          }
+        </div>
+      </div>
     </section>
-  `;
-}
-
-function renderTotalsPreview() {
-  const form = safeObject(modalState.form);
-  const total = getFormTotal(form);
-  const currency = safeText(form.moneda, "EUR");
-
-  return `
-    <div class="fac-create-preview">
-      <div>
-        <span>Base estimada</span>
-        <strong>${escapeHtml(formatMoney(total, currency))}</strong>
-      </div>
-
-      <div>
-        <span>IVA/IRPF</span>
-        <strong>Lo calcula backend</strong>
-      </div>
-
-      <div>
-        <span>PDF</span>
-        <strong>Blob canónico</strong>
-      </div>
-    </div>
   `;
 }
 
@@ -2140,6 +2052,738 @@ function renderLoadingOverlay() {
   `;
 }
 
+function renderStyles() {
+  return `
+    <style>
+      @keyframes facturasCreateSpin {
+        to { transform: rotate(360deg); }
+      }
+
+      .fac-create-overlay{
+        position:fixed;
+        inset:0;
+        z-index:9999;
+        display:grid;
+        place-items:center;
+        padding:16px;
+        background:rgba(0,0,0,.62);
+        backdrop-filter:blur(12px);
+        -webkit-backdrop-filter:blur(12px);
+      }
+
+      .fac-create-panel{
+        position:relative;
+        width:min(930px, 100%);
+        max-height:92vh;
+        overflow:auto;
+        border-radius:26px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.12));
+        background:
+          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent), transparent 34%),
+          radial-gradient(circle at 92% 0%, color-mix(in srgb, var(--info, #38bdf8) 9%, transparent), transparent 32%),
+          linear-gradient(180deg, var(--surface-2, #171717), var(--surface-1, #111));
+        box-shadow:0 34px 84px rgba(0,0,0,.45);
+        color:var(--text, #f5f5f5);
+      }
+
+      .fac-create-panel *,
+      .fac-create-panel *::before,
+      .fac-create-panel *::after{
+        box-sizing:border-box;
+      }
+
+      .fac-create-panel.is-submitting{
+        overflow:hidden;
+      }
+
+      .fac-create-loading-overlay{
+        position:absolute;
+        inset:0;
+        z-index:20;
+        display:grid;
+        place-items:center;
+        padding:22px;
+        background:color-mix(in srgb, var(--surface-1, #111) 82%, transparent);
+        backdrop-filter:blur(7px);
+        -webkit-backdrop-filter:blur(7px);
+      }
+
+      .fac-create-loading-card{
+        display:grid;
+        justify-items:center;
+        gap:10px;
+        padding:24px 28px;
+        border-radius:20px;
+        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft, rgba(255,255,255,.12)));
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent),
+          var(--surface-2, #171717);
+        box-shadow:0 30px 70px rgba(0,0,0,.35);
+      }
+
+      .fac-create-loading-card strong{
+        color:var(--text-strong, #fff);
+        font-size:14px;
+      }
+
+      .fac-create-loading-card small{
+        color:var(--text-dim, rgba(255,255,255,.62));
+        font-size:12px;
+      }
+
+      .fac-create-loading-spinner,
+      .fac-create-spinner{
+        border-radius:999px;
+        border:2px solid rgba(255,255,255,.28);
+        border-top-color:#fff;
+        animation:facturasCreateSpin .8s linear infinite;
+      }
+
+      .fac-create-loading-spinner{
+        width:32px;
+        height:32px;
+        border-width:3px;
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
+        border-top-color:var(--accent, #7c5cff);
+      }
+
+      .fac-create-header{
+        display:flex;
+        justify-content:space-between;
+        align-items:flex-start;
+        gap:14px;
+        padding:22px 22px 16px;
+        border-bottom:1px solid var(--border-soft, rgba(255,255,255,.10));
+      }
+
+      .fac-create-header-copy{
+        display:grid;
+        gap:7px;
+        min-width:0;
+      }
+
+      .fac-create-header-copy > span{
+        color:var(--accent, #7c5cff);
+        font-size:11px;
+        font-weight:800;
+        letter-spacing:.08em;
+        text-transform:uppercase;
+      }
+
+      .fac-create-header-copy h2{
+        margin:0;
+        color:var(--text-strong, #fff);
+        font-size:clamp(26px, 3.7vw, 38px);
+        line-height:1;
+        letter-spacing:-.055em;
+      }
+
+      .fac-create-header-copy p{
+        max-width:720px;
+        margin:0;
+        color:var(--text-dim, rgba(255,255,255,.62));
+        font-size:12px;
+        line-height:1.55;
+      }
+
+      .fac-create-close{
+        width:42px;
+        height:42px;
+        flex:0 0 auto;
+        border-radius:15px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.12));
+        background:var(--surface-glass, rgba(255,255,255,.05));
+        color:var(--text-strong, #fff);
+        cursor:pointer;
+        font-size:17px;
+      }
+
+      .fac-create-close:hover{
+        background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+      }
+
+      .fac-create-body{
+        display:grid;
+        gap:14px;
+        padding:18px 22px 22px;
+      }
+
+      .fac-create-form{
+        display:grid;
+        gap:14px;
+      }
+
+      .fac-create-alert{
+        display:grid;
+        gap:4px;
+        padding:12px 14px;
+        border-radius:15px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.12));
+        background:var(--surface-glass, rgba(255,255,255,.05));
+      }
+
+      .fac-create-alert strong{
+        color:var(--text-strong, #fff);
+        font-size:13px;
+      }
+
+      .fac-create-alert span{
+        color:var(--text-dim, rgba(255,255,255,.62));
+        font-size:12px;
+      }
+
+      .fac-create-alert.is-success{
+        border-color:color-mix(in srgb, var(--success-strong, #36c690) 30%, var(--border-soft, rgba(255,255,255,.12)));
+      }
+
+      .fac-create-alert.is-error{
+        border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 34%, var(--border-soft, rgba(255,255,255,.12)));
+      }
+
+      .fac-create-target{
+        display:grid;
+        gap:14px;
+        padding:16px;
+        border-radius:22px;
+        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 16%, var(--border-soft, rgba(255,255,255,.12)));
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 7%, transparent), transparent),
+          var(--surface-glass, rgba(255,255,255,.04));
+      }
+
+      .fac-create-target-head{
+        display:flex;
+        align-items:flex-start;
+        justify-content:space-between;
+        gap:14px;
+      }
+
+      .fac-create-target-head > div{
+        display:grid;
+        gap:5px;
+        min-width:0;
+      }
+
+      .fac-create-target-head span,
+      .fac-create-column-title,
+      .fac-create-label{
+        color:var(--text-soft, rgba(255,255,255,.74));
+        font-size:11px;
+        font-weight:800;
+        letter-spacing:.06em;
+        text-transform:uppercase;
+      }
+
+      .fac-create-target-head h3{
+        margin:0;
+        color:var(--text-strong, #fff);
+        font-size:20px;
+        line-height:1.1;
+        letter-spacing:-.035em;
+      }
+
+      .fac-create-target-head p{
+        max-width:680px;
+        margin:0;
+        color:var(--text-dim, rgba(255,255,255,.60));
+        font-size:12px;
+        line-height:1.5;
+      }
+
+      .fac-create-target-pill{
+        min-height:32px;
+        padding:0 12px;
+        border-radius:999px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.12));
+        background:var(--surface-glass, rgba(255,255,255,.05));
+        color:var(--text-soft, rgba(255,255,255,.78));
+        font-size:11px;
+        font-weight:900;
+        letter-spacing:.07em;
+        text-transform:uppercase;
+        display:inline-flex;
+        align-items:center;
+        white-space:nowrap;
+      }
+
+      .fac-create-target-grid{
+        display:grid;
+        grid-template-columns:minmax(0, .92fr) minmax(0, 1.08fr);
+        gap:12px;
+      }
+
+      .fac-create-target-column{
+        display:grid;
+        align-content:start;
+        gap:10px;
+        min-width:0;
+        padding:13px;
+        border-radius:18px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.10));
+        background:color-mix(in srgb, var(--surface-1, #111) 70%, transparent);
+      }
+
+      .fac-create-field{
+        display:grid;
+        gap:7px;
+        min-width:0;
+      }
+
+      .fac-create-grid{
+        display:grid;
+        gap:12px;
+      }
+
+      .fac-create-grid--2{
+        grid-template-columns:repeat(2, minmax(0, 1fr));
+      }
+
+      .fac-create-grid--3{
+        grid-template-columns:repeat(3, minmax(0, 1fr));
+      }
+
+      .fac-create-input,
+      .fac-create-textarea,
+      .fac-create-select{
+        width:100%;
+        outline:none;
+        color:var(--text-strong, #fff);
+        background:var(--surface-1, rgba(255,255,255,.04));
+        border:1px solid var(--border-soft, rgba(255,255,255,.12));
+        font-size:14px;
+        transition:
+          border-color .18s ease,
+          box-shadow .18s ease,
+          background .18s ease;
+      }
+
+      .fac-create-input,
+      .fac-create-select{
+        min-height:46px;
+        padding:0 14px;
+        border-radius:15px;
+      }
+
+      .fac-create-select{
+        appearance:auto;
+      }
+
+      .fac-create-textarea{
+        min-height:116px;
+        padding:13px 14px;
+        border-radius:15px;
+        resize:vertical;
+        line-height:1.55;
+      }
+
+      .fac-create-input::placeholder,
+      .fac-create-textarea::placeholder{
+        color:var(--text-faint, rgba(255,255,255,.36));
+      }
+
+      .fac-create-input:focus,
+      .fac-create-textarea:focus,
+      .fac-create-select:focus{
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 34%, var(--border-soft, rgba(255,255,255,.12)));
+        box-shadow:0 0 0 4px color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+      }
+
+      .fac-create-input.is-error,
+      .fac-create-textarea.is-error,
+      .fac-create-select.is-error{
+        border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 42%, var(--border-soft, rgba(255,255,255,.12)));
+        box-shadow:0 0 0 4px color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent);
+      }
+
+      .fac-create-input.is-readonly{
+        opacity:.88;
+        cursor:default;
+        font-weight:800;
+      }
+
+      .fac-create-error{
+        color:var(--danger-strong, #ff6b6b);
+        font-size:11px;
+        line-height:1.35;
+        font-weight:700;
+      }
+
+      .fac-create-search-state{
+        padding:10px 12px;
+        border-radius:13px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.12));
+        background:var(--surface-glass, rgba(255,255,255,.05));
+        color:var(--text-dim, rgba(255,255,255,.62));
+        font-size:12px;
+      }
+
+      .fac-create-search-state.is-error{
+        color:var(--danger-strong, #ff6b6b);
+        border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 30%, var(--border-soft, rgba(255,255,255,.12)));
+      }
+
+      .fac-create-search-results{
+        display:grid;
+        gap:7px;
+      }
+
+      .fac-create-search-item{
+        display:grid;
+        gap:3px;
+        width:100%;
+        padding:11px 13px;
+        border-radius:13px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.12));
+        background:var(--surface-glass, rgba(255,255,255,.05));
+        text-align:left;
+        cursor:pointer;
+        transition:
+          transform .18s ease,
+          border-color .18s ease,
+          background .18s ease;
+      }
+
+      .fac-create-search-item:hover{
+        transform:translateY(-1px);
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft, rgba(255,255,255,.12)));
+      }
+
+      .fac-create-search-item strong{
+        color:var(--text-strong, #fff);
+        font-size:13px;
+        line-height:1.35;
+      }
+
+      .fac-create-search-item span{
+        color:var(--text-dim, rgba(255,255,255,.62));
+        font-size:11px;
+        line-height:1.35;
+      }
+
+      .fac-create-selected{
+        display:grid;
+        grid-template-columns:38px minmax(0, 1fr) auto;
+        align-items:center;
+        gap:11px;
+        padding:12px;
+        border-radius:16px;
+        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 28%, var(--border-soft, rgba(255,255,255,.12)));
+        background:
+          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent),
+          var(--surface-glass, rgba(255,255,255,.05));
+      }
+
+      .fac-create-selected-icon{
+        width:38px;
+        height:38px;
+        border-radius:14px;
+        display:grid;
+        place-items:center;
+        color:#fff;
+        font-size:13px;
+        font-weight:900;
+        background:linear-gradient(135deg, var(--accent, #7c5cff), color-mix(in srgb, var(--accent, #7c5cff) 45%, #111827));
+        box-shadow:0 10px 22px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
+      }
+
+      .fac-create-selected-copy{
+        display:grid;
+        gap:3px;
+        min-width:0;
+      }
+
+      .fac-create-selected-copy span{
+        color:var(--text-dim, rgba(255,255,255,.56));
+        font-size:10px;
+        font-weight:900;
+        letter-spacing:.065em;
+        text-transform:uppercase;
+      }
+
+      .fac-create-selected-copy strong{
+        color:var(--text-strong, #fff);
+        font-size:13px;
+        line-height:1.3;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .fac-create-selected-copy small{
+        color:var(--text-dim, rgba(255,255,255,.62));
+        font-size:11px;
+        line-height:1.35;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .fac-create-selected-clear{
+        min-height:32px;
+        padding:0 11px;
+        border-radius:10px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.12));
+        background:transparent;
+        color:var(--text-dim, rgba(255,255,255,.62));
+        font-size:12px;
+        font-weight:800;
+        cursor:pointer;
+      }
+
+      .fac-create-ticket-toolbar{
+        display:grid;
+        grid-template-columns:minmax(0, 1fr) auto;
+        gap:8px;
+        align-items:start;
+      }
+
+      .fac-create-mini-button{
+        min-height:46px;
+        padding:0 12px;
+        border-radius:14px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.12));
+        background:var(--surface-glass, rgba(255,255,255,.05));
+        color:var(--text-soft, rgba(255,255,255,.74));
+        font-size:11px;
+        font-weight:900;
+        cursor:pointer;
+        white-space:nowrap;
+      }
+
+      .fac-create-locked{
+        display:grid;
+        gap:4px;
+        padding:14px;
+        border-radius:15px;
+        border:1px dashed var(--border-soft, rgba(255,255,255,.14));
+        background:color-mix(in srgb, var(--surface-1, #111) 70%, transparent);
+      }
+
+      .fac-create-locked strong{
+        color:var(--text-soft, rgba(255,255,255,.78));
+        font-size:13px;
+      }
+
+      .fac-create-locked span{
+        color:var(--text-dim, rgba(255,255,255,.58));
+        font-size:12px;
+        line-height:1.4;
+      }
+
+      .fac-create-check{
+        display:flex;
+        align-items:flex-start;
+        gap:10px;
+        padding:13px 14px;
+        border-radius:16px;
+        border:1px solid var(--border-soft, rgba(255,255,255,.12));
+        background:var(--surface-glass, rgba(255,255,255,.05));
+        cursor:pointer;
+      }
+
+      .fac-create-check input{
+        margin-top:2px;
+        accent-color:var(--accent, #7c5cff);
+      }
+
+      .fac-create-check span{
+        display:grid;
+        gap:3px;
+      }
+
+      .fac-create-check strong{
+        color:var(--text-strong, #fff);
+        font-size:13px;
+      }
+
+      .fac-create-check small{
+        color:var(--text-dim, rgba(255,255,255,.62));
+        font-size:11px;
+        line-height:1.35;
+      }
+
+      .fac-create-actions{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:12px;
+        padding-top:2px;
+      }
+
+      .fac-create-submit-summary{
+        display:grid;
+        gap:2px;
+        color:var(--text-dim, rgba(255,255,255,.62));
+        font-size:11px;
+      }
+
+      .fac-create-submit-summary strong{
+        color:var(--text-strong, #fff);
+        font-size:15px;
+      }
+
+      .fac-create-action-buttons{
+        display:flex;
+        justify-content:flex-end;
+        gap:10px;
+      }
+
+      .fac-create-secondary,
+      .fac-create-submit{
+        min-height:44px;
+        padding:0 18px;
+        border-radius:14px;
+        font-size:13px;
+        font-weight:800;
+        cursor:pointer;
+      }
+
+      .fac-create-secondary{
+        border:1px solid var(--border-soft, rgba(255,255,255,.12));
+        background:var(--surface-glass, rgba(255,255,255,.05));
+        color:var(--text-soft, rgba(255,255,255,.78));
+      }
+
+      .fac-create-submit{
+        border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 30%, transparent));
+        background:var(--btn-primary-bg, var(--accent, #7c5cff));
+        color:var(--btn-primary-text, #fff);
+        box-shadow:0 12px 26px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
+      }
+
+      .fac-create-submit:disabled,
+      .fac-create-secondary:disabled,
+      .fac-create-mini-button:disabled{
+        opacity:.82;
+        cursor:wait;
+      }
+
+      .fac-create-submit-inner{
+        display:inline-flex;
+        align-items:center;
+        gap:8px;
+      }
+
+      .fac-create-spinner{
+        width:14px;
+        height:14px;
+      }
+
+      [data-theme="light"] .fac-create-panel{
+        background:
+          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
+          radial-gradient(circle at 92% 0%, color-mix(in srgb, var(--info, #38bdf8) 7%, transparent), transparent 32%),
+          linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,255,.96));
+        box-shadow:
+          0 28px 70px rgba(15,23,42,.14),
+          0 0 0 1px rgba(255,255,255,.68) inset;
+      }
+
+      [data-theme="light"] .fac-create-header-copy h2,
+      [data-theme="light"] .fac-create-target-head h3,
+      [data-theme="light"] .fac-create-alert strong,
+      [data-theme="light"] .fac-create-input,
+      [data-theme="light"] .fac-create-textarea,
+      [data-theme="light"] .fac-create-select,
+      [data-theme="light"] .fac-create-search-item strong,
+      [data-theme="light"] .fac-create-selected-copy strong,
+      [data-theme="light"] .fac-create-check strong,
+      [data-theme="light"] .fac-create-submit-summary strong,
+      [data-theme="light"] .fac-create-locked strong{
+        color:var(--text-strong, #111827);
+      }
+
+      [data-theme="light"] .fac-create-header-copy p,
+      [data-theme="light"] .fac-create-target-head p,
+      [data-theme="light"] .fac-create-alert span,
+      [data-theme="light"] .fac-create-label,
+      [data-theme="light"] .fac-create-target-head span,
+      [data-theme="light"] .fac-create-column-title,
+      [data-theme="light"] .fac-create-search-state,
+      [data-theme="light"] .fac-create-search-item span,
+      [data-theme="light"] .fac-create-selected-copy span,
+      [data-theme="light"] .fac-create-selected-copy small,
+      [data-theme="light"] .fac-create-check small,
+      [data-theme="light"] .fac-create-submit-summary,
+      [data-theme="light"] .fac-create-locked span{
+        color:var(--text-dim, #6b7280);
+      }
+
+      [data-theme="light"] .fac-create-close,
+      [data-theme="light"] .fac-create-target,
+      [data-theme="light"] .fac-create-target-column,
+      [data-theme="light"] .fac-create-alert,
+      [data-theme="light"] .fac-create-input,
+      [data-theme="light"] .fac-create-textarea,
+      [data-theme="light"] .fac-create-select,
+      [data-theme="light"] .fac-create-search-state,
+      [data-theme="light"] .fac-create-search-item,
+      [data-theme="light"] .fac-create-selected,
+      [data-theme="light"] .fac-create-check,
+      [data-theme="light"] .fac-create-secondary,
+      [data-theme="light"] .fac-create-mini-button,
+      [data-theme="light"] .fac-create-locked,
+      [data-theme="light"] .fac-create-target-pill{
+        background:rgba(255,255,255,.72);
+        border-color:rgba(15,23,42,.08);
+      }
+
+      [data-theme="light"] .fac-create-target-column{
+        background:rgba(255,255,255,.54);
+      }
+
+      @media (max-width: 820px){
+        .fac-create-target-grid,
+        .fac-create-grid--2,
+        .fac-create-grid--3{
+          grid-template-columns:1fr;
+        }
+
+        .fac-create-target-head{
+          flex-direction:column;
+        }
+
+        .fac-create-ticket-toolbar{
+          grid-template-columns:1fr;
+        }
+
+        .fac-create-actions{
+          align-items:stretch;
+          flex-direction:column;
+        }
+
+        .fac-create-action-buttons{
+          flex-direction:column-reverse;
+          width:100%;
+        }
+
+        .fac-create-submit,
+        .fac-create-secondary{
+          width:100%;
+        }
+
+        .fac-create-selected{
+          grid-template-columns:38px minmax(0, 1fr);
+        }
+
+        .fac-create-selected-clear{
+          grid-column:1 / -1;
+          width:100%;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce){
+        .fac-create-panel *,
+        .fac-create-panel *::before,
+        .fac-create-panel *::after{
+          animation:none !important;
+          transition:none !important;
+        }
+      }
+    </style>
+  `;
+}
+
 /* =========================================================
    MODAL TEMPLATE
 ========================================================= */
@@ -2147,6 +2791,7 @@ function renderLoadingOverlay() {
 function renderModalInner() {
   const form = safeObject(modalState.form);
   const errors = safeObject(modalState.errors);
+  const total = getFormTotal(form);
 
   return `
     <div class="fac-create-overlay" data-facturas-create-modal-overlay="true">
@@ -2166,8 +2811,8 @@ function renderModalInner() {
             <span>Facturación · Onion Support</span>
             <h2 id="facturas-create-modal-title">Crear factura</h2>
             <p>
-              Crea factura vinculada a incidencia. El backend generará PDF, blob canónico,
-              numeración legal y auditoría.
+              Factura vinculada a incidencia. La fecha fiscal se toma de la creación real;
+              moneda EUR, cuenta de pago y cálculo fiscal quedan resueltos por backend.
             </p>
           </div>
 
@@ -2202,22 +2847,21 @@ function renderModalInner() {
           }
 
           <form id="facturas-create-form" class="fac-create-form" novalidate>
-            ${renderClienteSearchBlock()}
-            ${renderTicketSearchBlock()}
+            ${renderTargetBlock()}
 
             <div class="fac-create-grid fac-create-grid--2">
-              ${renderInput({
-                label: "Fecha factura",
-                name: "fechaFactura",
-                type: "date",
-                value: form.fechaFactura,
-              })}
-
               ${renderInput({
                 label: "Fecha servicio",
                 name: "fechaServicio",
                 type: "date",
                 value: form.fechaServicio,
+              })}
+
+              ${renderInput({
+                label: "Forma de pago",
+                name: "formaPago",
+                value: form.formaPago,
+                placeholder: "transferencia bancaria",
               })}
             </div>
 
@@ -2234,7 +2878,7 @@ function renderModalInner() {
               label: "Descripción",
               name: "descripcion",
               value: form.descripcion,
-              placeholder: "Detalle de la factura...",
+              placeholder: "Detalle del trabajo facturable...",
               required: true,
               error: errors.descripcion,
             })}
@@ -2263,648 +2907,58 @@ function renderModalInner() {
               })}
 
               ${renderInput({
-                label: "Moneda",
-                name: "moneda",
-                value: form.moneda,
+                label: "Total estimado",
+                name: "totalPreview",
+                value: formatMoney(total),
+                readonly: true,
               })}
             </div>
-
-            <div class="fac-create-grid fac-create-grid--2">
-              ${renderInput({
-                label: "Forma de pago",
-                name: "formaPago",
-                value: form.formaPago,
-                placeholder: "transferencia bancaria",
-              })}
-
-              ${renderInput({
-                label: "Cuenta de pago",
-                name: "cuentaPago",
-                value: form.cuentaPago,
-                placeholder: "Vacío = backend default",
-              })}
-            </div>
-
-            ${renderTotalsPreview()}
 
             ${renderCheckbox({
               label: "Enviar email al cliente",
               name: "sendEmail",
               checked: parseBoolean(form.sendEmail, true),
-              help: "Adjunta el PDF y usa el template de factura si el backend lo tiene disponible.",
+              help: "Adjunta el PDF generado y usa el template premium del backend.",
             })}
 
             <div class="fac-create-actions">
-              <button
-                type="button"
-                class="fac-create-secondary"
-                data-modal-close="true"
-                ${modalState.submitting ? "disabled" : ""}
-              >
-                Cancelar
-              </button>
+              <div class="fac-create-submit-summary">
+                <span>Total estimado · cálculo fiscal final en backend</span>
+                <strong>${escapeHtml(formatMoney(total))}</strong>
+              </div>
 
-              <button
-                type="submit"
-                class="fac-create-submit"
-                ${modalState.submitting ? "disabled" : ""}
-              >
-                ${
-                  modalState.submitting
-                    ? `
-                      <span class="fac-create-submit-inner">
-                        <span class="fac-create-spinner" aria-hidden="true"></span>
-                        Creando...
-                      </span>
-                    `
-                    : "Crear factura"
-                }
-              </button>
+              <div class="fac-create-action-buttons">
+                <button
+                  type="button"
+                  class="fac-create-secondary"
+                  data-modal-close="true"
+                  ${modalState.submitting ? "disabled" : ""}
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="submit"
+                  class="fac-create-submit"
+                  ${modalState.submitting ? "disabled" : ""}
+                >
+                  ${
+                    modalState.submitting
+                      ? `
+                        <span class="fac-create-submit-inner">
+                          <span class="fac-create-spinner" aria-hidden="true"></span>
+                          Creando...
+                        </span>
+                      `
+                      : "Crear factura"
+                  }
+                </button>
+              </div>
             </div>
           </form>
         </div>
 
-        <style>
-          @keyframes facturasCreateSpin {
-            to { transform: rotate(360deg); }
-          }
-
-          .fac-create-overlay{
-            position:fixed;
-            inset:0;
-            z-index:9999;
-            display:grid;
-            place-items:center;
-            padding:16px;
-            background:rgba(0,0,0,.62);
-            backdrop-filter:blur(10px);
-            -webkit-backdrop-filter:blur(10px);
-          }
-
-          .fac-create-panel{
-            position:relative;
-            width:min(860px, 100%);
-            max-height:92vh;
-            overflow:auto;
-            border-radius:24px;
-            border:1px solid var(--border-soft, rgba(255,255,255,.12));
-            background:
-              radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent 34%),
-              linear-gradient(180deg, var(--surface-2, #171717), var(--surface-1, #111));
-            box-shadow:0 34px 84px rgba(0,0,0,.45);
-          }
-
-          .fac-create-panel.is-submitting{
-            overflow:hidden;
-          }
-
-          .fac-create-loading-overlay{
-            position:absolute;
-            inset:0;
-            z-index:20;
-            display:grid;
-            place-items:center;
-            padding:22px;
-            background:color-mix(in srgb, var(--surface-1, #111) 82%, transparent);
-            backdrop-filter:blur(6px);
-            -webkit-backdrop-filter:blur(6px);
-          }
-
-          .fac-create-loading-card{
-            display:grid;
-            justify-items:center;
-            gap:10px;
-            padding:24px 28px;
-            border-radius:20px;
-            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft, rgba(255,255,255,.12)));
-            background:
-              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent),
-              var(--surface-2, #171717);
-            box-shadow:0 30px 70px rgba(0,0,0,.35);
-          }
-
-          .fac-create-loading-card strong{
-            color:var(--text-strong, #fff);
-            font-size:14px;
-          }
-
-          .fac-create-loading-card small{
-            color:var(--text-dim, rgba(255,255,255,.62));
-            font-size:12px;
-          }
-
-          .fac-create-loading-spinner,
-          .fac-create-spinner{
-            border-radius:999px;
-            border:2px solid rgba(255,255,255,.28);
-            border-top-color:#fff;
-            animation:facturasCreateSpin .8s linear infinite;
-          }
-
-          .fac-create-loading-spinner{
-            width:32px;
-            height:32px;
-            border-width:3px;
-            border-color:color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
-            border-top-color:var(--accent, #7c5cff);
-          }
-
-          .fac-create-header{
-            display:flex;
-            justify-content:space-between;
-            align-items:flex-start;
-            gap:14px;
-            padding:20px 20px 15px;
-            border-bottom:1px solid var(--border-soft, rgba(255,255,255,.10));
-          }
-
-          .fac-create-header-copy{
-            display:grid;
-            gap:6px;
-            min-width:0;
-          }
-
-          .fac-create-header-copy > span{
-            color:var(--accent, #7c5cff);
-            font-size:11px;
-            font-weight:800;
-            letter-spacing:.08em;
-            text-transform:uppercase;
-          }
-
-          .fac-create-header-copy h2{
-            margin:0;
-            color:var(--text-strong, #fff);
-            font-size:clamp(25px, 3.7vw, 34px);
-            line-height:1;
-            letter-spacing:-.05em;
-          }
-
-          .fac-create-header-copy p{
-            max-width:680px;
-            margin:0;
-            color:var(--text-dim, rgba(255,255,255,.62));
-            font-size:12px;
-            line-height:1.5;
-          }
-
-          .fac-create-close{
-            width:40px;
-            height:40px;
-            flex:0 0 auto;
-            border-radius:14px;
-            border:1px solid var(--border-soft, rgba(255,255,255,.12));
-            background:var(--surface-glass, rgba(255,255,255,.05));
-            color:var(--text-strong, #fff);
-            cursor:pointer;
-            font-size:17px;
-          }
-
-          .fac-create-body{
-            display:grid;
-            gap:14px;
-            padding:17px 20px 20px;
-          }
-
-          .fac-create-form{
-            display:grid;
-            gap:14px;
-          }
-
-          .fac-create-block{
-            display:grid;
-            gap:10px;
-            padding:13px;
-            border-radius:18px;
-            border:1px solid var(--border-soft, rgba(255,255,255,.12));
-            background:var(--surface-1, rgba(255,255,255,.04));
-          }
-
-          .fac-create-block-head{
-            display:flex;
-            align-items:flex-start;
-            justify-content:space-between;
-            gap:12px;
-          }
-
-          .fac-create-block-head > div{
-            display:grid;
-            gap:4px;
-            min-width:0;
-          }
-
-          .fac-create-block-head p{
-            margin:0;
-            color:var(--text-dim, rgba(255,255,255,.58));
-            font-size:11px;
-            line-height:1.4;
-          }
-
-          .fac-create-mini-title,
-          .fac-create-label{
-            color:var(--text-soft, rgba(255,255,255,.74));
-            font-size:11px;
-            font-weight:var(--weight-bold, 700);
-            letter-spacing:.05em;
-            text-transform:uppercase;
-          }
-
-          .fac-create-mini-button{
-            min-height:30px;
-            padding:0 10px;
-            border-radius:10px;
-            border:1px solid var(--border-soft, rgba(255,255,255,.12));
-            background:var(--surface-glass, rgba(255,255,255,.05));
-            color:var(--text-soft, rgba(255,255,255,.74));
-            font-size:11px;
-            font-weight:800;
-            cursor:pointer;
-          }
-
-          .fac-create-field{
-            display:grid;
-            gap:7px;
-            min-width:0;
-          }
-
-          .fac-create-grid{
-            display:grid;
-            gap:12px;
-          }
-
-          .fac-create-grid--2{
-            grid-template-columns:repeat(2, minmax(0, 1fr));
-          }
-
-          .fac-create-grid--3{
-            grid-template-columns:repeat(3, minmax(0, 1fr));
-          }
-
-          .fac-create-input,
-          .fac-create-textarea,
-          .fac-create-select{
-            width:100%;
-            outline:none;
-            color:var(--text-strong, #fff);
-            background:var(--surface-1, rgba(255,255,255,.04));
-            border:1px solid var(--border-soft, rgba(255,255,255,.12));
-            font-size:14px;
-            transition:
-              border-color .18s ease,
-              box-shadow .18s ease,
-              background .18s ease;
-          }
-
-          .fac-create-input,
-          .fac-create-select{
-            min-height:44px;
-            padding:0 13px;
-            border-radius:14px;
-          }
-
-          .fac-create-select{
-            appearance:auto;
-          }
-
-          .fac-create-textarea{
-            min-height:112px;
-            padding:12px 13px;
-            border-radius:14px;
-            resize:vertical;
-            line-height:1.55;
-          }
-
-          .fac-create-input::placeholder,
-          .fac-create-textarea::placeholder{
-            color:var(--text-faint, rgba(255,255,255,.36));
-          }
-
-          .fac-create-input:focus,
-          .fac-create-textarea:focus,
-          .fac-create-select:focus{
-            border-color:color-mix(in srgb, var(--accent, #7c5cff) 34%, var(--border-soft, rgba(255,255,255,.12)));
-            box-shadow:0 0 0 4px color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-          }
-
-          .fac-create-input.is-error,
-          .fac-create-textarea.is-error,
-          .fac-create-select.is-error{
-            border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 42%, var(--border-soft, rgba(255,255,255,.12)));
-            box-shadow:0 0 0 4px color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent);
-          }
-
-          .fac-create-error{
-            color:var(--danger-strong, #ff6b6b);
-            font-size:11px;
-            line-height:1.35;
-            font-weight:var(--weight-semibold, 600);
-          }
-
-          .fac-create-alert{
-            display:grid;
-            gap:4px;
-            padding:11px 13px;
-            border-radius:14px;
-            border:1px solid var(--border-soft, rgba(255,255,255,.12));
-            background:var(--surface-glass, rgba(255,255,255,.05));
-          }
-
-          .fac-create-alert strong{
-            color:var(--text-strong, #fff);
-            font-size:13px;
-          }
-
-          .fac-create-alert span{
-            color:var(--text-dim, rgba(255,255,255,.62));
-            font-size:12px;
-          }
-
-          .fac-create-alert.is-success{
-            border-color:color-mix(in srgb, var(--success-strong, #36c690) 30%, var(--border-soft, rgba(255,255,255,.12)));
-          }
-
-          .fac-create-alert.is-error{
-            border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 34%, var(--border-soft, rgba(255,255,255,.12)));
-          }
-
-          .fac-create-search-state{
-            padding:10px 12px;
-            border-radius:13px;
-            border:1px solid var(--border-soft, rgba(255,255,255,.12));
-            background:var(--surface-glass, rgba(255,255,255,.05));
-            color:var(--text-dim, rgba(255,255,255,.62));
-            font-size:12px;
-          }
-
-          .fac-create-search-state.is-error{
-            color:var(--danger-strong, #ff6b6b);
-            border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 30%, var(--border-soft, rgba(255,255,255,.12)));
-          }
-
-          .fac-create-search-results{
-            display:grid;
-            gap:7px;
-          }
-
-          .fac-create-search-item{
-            display:grid;
-            gap:3px;
-            width:100%;
-            padding:11px 13px;
-            border-radius:13px;
-            border:1px solid var(--border-soft, rgba(255,255,255,.12));
-            background:var(--surface-glass, rgba(255,255,255,.05));
-            text-align:left;
-            cursor:pointer;
-            transition:
-              transform .18s ease,
-              border-color .18s ease,
-              background .18s ease;
-          }
-
-          .fac-create-search-item:hover{
-            transform:translateY(-1px);
-            border-color:color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft, rgba(255,255,255,.12)));
-          }
-
-          .fac-create-search-item strong{
-            color:var(--text-strong, #fff);
-            font-size:13px;
-            line-height:1.35;
-          }
-
-          .fac-create-search-item span{
-            color:var(--text-dim, rgba(255,255,255,.62));
-            font-size:11px;
-            line-height:1.35;
-          }
-
-          .fac-create-selected{
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            gap:12px;
-            padding:11px 13px;
-            border-radius:14px;
-            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 28%, var(--border-soft, rgba(255,255,255,.12)));
-            background:
-              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent),
-              var(--surface-glass, rgba(255,255,255,.05));
-          }
-
-          .fac-create-selected-copy{
-            display:grid;
-            gap:3px;
-            min-width:0;
-          }
-
-          .fac-create-selected-copy strong{
-            color:var(--text-strong, #fff);
-            font-size:13px;
-            line-height:1.35;
-          }
-
-          .fac-create-selected-copy span{
-            color:var(--text-dim, rgba(255,255,255,.62));
-            font-size:11px;
-            word-break:break-word;
-          }
-
-          .fac-create-selected-clear{
-            min-height:32px;
-            padding:0 11px;
-            border-radius:10px;
-            border:1px solid var(--border-soft, rgba(255,255,255,.12));
-            background:transparent;
-            color:var(--text-dim, rgba(255,255,255,.62));
-            font-size:12px;
-            font-weight:var(--weight-bold, 700);
-            cursor:pointer;
-          }
-
-          .fac-create-preview{
-            display:grid;
-            grid-template-columns:repeat(3, minmax(0, 1fr));
-            gap:10px;
-          }
-
-          .fac-create-preview > div{
-            display:grid;
-            gap:4px;
-            padding:12px 13px;
-            border-radius:15px;
-            border:1px solid var(--border-soft, rgba(255,255,255,.12));
-            background:var(--surface-glass, rgba(255,255,255,.05));
-          }
-
-          .fac-create-preview span{
-            color:var(--text-dim, rgba(255,255,255,.62));
-            font-size:11px;
-          }
-
-          .fac-create-preview strong{
-            color:var(--text-strong, #fff);
-            font-size:13px;
-          }
-
-          .fac-create-check{
-            display:flex;
-            align-items:flex-start;
-            gap:10px;
-            padding:12px 13px;
-            border-radius:15px;
-            border:1px solid var(--border-soft, rgba(255,255,255,.12));
-            background:var(--surface-glass, rgba(255,255,255,.05));
-            cursor:pointer;
-          }
-
-          .fac-create-check input{
-            margin-top:2px;
-            accent-color:var(--accent, #7c5cff);
-          }
-
-          .fac-create-check span{
-            display:grid;
-            gap:3px;
-          }
-
-          .fac-create-check strong{
-            color:var(--text-strong, #fff);
-            font-size:13px;
-          }
-
-          .fac-create-check small{
-            color:var(--text-dim, rgba(255,255,255,.62));
-            font-size:11px;
-            line-height:1.35;
-          }
-
-          .fac-create-actions{
-            display:flex;
-            justify-content:flex-end;
-            gap:10px;
-            padding-top:2px;
-          }
-
-          .fac-create-secondary,
-          .fac-create-submit{
-            min-height:43px;
-            padding:0 18px;
-            border-radius:13px;
-            font-size:13px;
-            font-weight:var(--weight-bold, 700);
-            cursor:pointer;
-          }
-
-          .fac-create-secondary{
-            border:1px solid var(--border-soft, rgba(255,255,255,.12));
-            background:var(--surface-glass, rgba(255,255,255,.05));
-            color:var(--text-soft, rgba(255,255,255,.78));
-          }
-
-          .fac-create-submit{
-            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 30%, transparent));
-            background:var(--btn-primary-bg, var(--accent, #7c5cff));
-            color:var(--btn-primary-text, #fff);
-            box-shadow:0 12px 26px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
-          }
-
-          .fac-create-submit:disabled,
-          .fac-create-secondary:disabled,
-          .fac-create-mini-button:disabled{
-            opacity:.82;
-            cursor:wait;
-          }
-
-          .fac-create-submit-inner{
-            display:inline-flex;
-            align-items:center;
-            gap:8px;
-          }
-
-          .fac-create-spinner{
-            width:14px;
-            height:14px;
-          }
-
-          [data-theme="light"] .fac-create-panel{
-            background:
-              radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
-              linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,255,.96));
-            box-shadow:
-              0 28px 70px rgba(15,23,42,.14),
-              0 0 0 1px rgba(255,255,255,.68) inset;
-          }
-
-          [data-theme="light"] .fac-create-header-copy h2,
-          [data-theme="light"] .fac-create-alert strong,
-          [data-theme="light"] .fac-create-input,
-          [data-theme="light"] .fac-create-textarea,
-          [data-theme="light"] .fac-create-select,
-          [data-theme="light"] .fac-create-search-item strong,
-          [data-theme="light"] .fac-create-selected-copy strong,
-          [data-theme="light"] .fac-create-preview strong,
-          [data-theme="light"] .fac-create-check strong{
-            color:var(--text-strong, #111827);
-          }
-
-          [data-theme="light"] .fac-create-header-copy p,
-          [data-theme="light"] .fac-create-alert span,
-          [data-theme="light"] .fac-create-label,
-          [data-theme="light"] .fac-create-mini-title,
-          [data-theme="light"] .fac-create-block-head p,
-          [data-theme="light"] .fac-create-search-state,
-          [data-theme="light"] .fac-create-search-item span,
-          [data-theme="light"] .fac-create-selected-copy span,
-          [data-theme="light"] .fac-create-preview span,
-          [data-theme="light"] .fac-create-check small{
-            color:var(--text-dim, #6b7280);
-          }
-
-          [data-theme="light"] .fac-create-close,
-          [data-theme="light"] .fac-create-block,
-          [data-theme="light"] .fac-create-alert,
-          [data-theme="light"] .fac-create-input,
-          [data-theme="light"] .fac-create-textarea,
-          [data-theme="light"] .fac-create-select,
-          [data-theme="light"] .fac-create-search-state,
-          [data-theme="light"] .fac-create-search-item,
-          [data-theme="light"] .fac-create-selected,
-          [data-theme="light"] .fac-create-preview > div,
-          [data-theme="light"] .fac-create-check,
-          [data-theme="light"] .fac-create-secondary,
-          [data-theme="light"] .fac-create-mini-button{
-            background:rgba(255,255,255,.68);
-            border-color:rgba(15,23,42,.08);
-          }
-
-          @media (max-width: 720px){
-            .fac-create-grid--2,
-            .fac-create-grid--3,
-            .fac-create-preview{
-              grid-template-columns:1fr;
-            }
-
-            .fac-create-block-head{
-              flex-direction:column;
-            }
-
-            .fac-create-actions{
-              justify-content:stretch;
-              flex-direction:column-reverse;
-            }
-
-            .fac-create-submit,
-            .fac-create-secondary{
-              width:100%;
-            }
-
-            .fac-create-selected{
-              align-items:flex-start;
-              flex-direction:column;
-            }
-          }
-        </style>
+        ${renderStyles()}
       </div>
     </div>
   `;
@@ -3113,6 +3167,7 @@ export function openFacturasCreateModal(draft = {}) {
     ticketId: draftTicketId || safeText(normalizedDraft.ticketId, ""),
     incidenciaId: draftTicketId || safeText(normalizedDraft.incidenciaId, ""),
     incidenciaSubject: draftTicketSubject || safeText(normalizedDraft.incidenciaSubject, ""),
+    fechaServicio: safeText(normalizedDraft.fechaServicio, modalState.form.fechaServicio),
   };
 
   renderModal();
@@ -3142,9 +3197,7 @@ export function openFacturasCreateModal(draft = {}) {
 }
 
 export function closeFacturasCreateModal() {
-  if (modalState.submitting) {
-    return false;
-  }
+  if (modalState.submitting) return false;
 
   modalState.isOpen = false;
   modalState.submitting = false;
@@ -3192,16 +3245,13 @@ export function updateFacturasCreateModal(draft = {}) {
 ========================================================= */
 
 async function handleSubmit() {
-  if (modalState.submitting) {
-    return false;
-  }
+  if (modalState.submitting) return false;
 
   modalState.serverError = "";
   modalState.successMessage = "";
   modalState.createdFacturaId = "";
 
   const validation = validateForm(modalState.form);
-
   modalState.errors = validation.errors;
 
   if (!validation.valid) {
@@ -3284,9 +3334,7 @@ async function handleSubmit() {
 async function selectCliente(index = -1) {
   const item = safeArray(modalState.clienteSearchResults)[Number(index)];
 
-  if (!item?.id) {
-    return false;
-  }
+  if (!item?.id) return false;
 
   setFormPatch({
     clienteId: item.clienteId || item.id,
@@ -3363,9 +3411,7 @@ function clearCliente() {
 function selectTicket(index = -1) {
   const item = safeArray(modalState.ticketSearchResults)[Number(index)];
 
-  if (!item?.id) {
-    return false;
-  }
+  if (!item?.id) return false;
 
   setSelectedTicketFromItem(item, {
     auto: false,
@@ -3392,9 +3438,7 @@ function selectTicketById(ticketId = "") {
     return ticket.id === id || ticket.ticketId === id || ticket.incidenciaId === id;
   });
 
-  if (!item) {
-    return false;
-  }
+  if (!item) return false;
 
   setSelectedTicketFromItem(item, {
     auto: false,
@@ -3425,7 +3469,6 @@ function clearTicket() {
 
 function handleFieldInput(field) {
   const fieldName = safeText(field?.dataset?.field, "");
-
   if (!fieldName) return;
 
   if (fieldName === "clienteSearch") {
@@ -3475,6 +3518,10 @@ function handleFieldInput(field) {
     return;
   }
 
+  if (fieldName === "totalPreview") {
+    return;
+  }
+
   if (field.type === "checkbox") {
     setFormPatch({
       [fieldName]: Boolean(field.checked),
@@ -3497,9 +3544,7 @@ function handleFieldInput(field) {
 }
 
 function attachRootBindings() {
-  if (modalState.bindingsAttached) {
-    return;
-  }
+  if (modalState.bindingsAttached) return;
 
   const root = ensureRoot();
 
@@ -3603,7 +3648,10 @@ function attachRootBindings() {
 
       await loadTicketsForSelectedClient({
         query: modalState.ticketSearchQuery,
-        autoSelectLatest: !safeText(first(modalState.form.ticketId, modalState.form.incidenciaId), ""),
+        autoSelectLatest: !safeText(
+          first(modalState.form.ticketId, modalState.form.incidenciaId),
+          ""
+        ),
         focus: "ticketSelect",
       });
     }

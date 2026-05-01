@@ -3,15 +3,16 @@
    Archivo: src/views/facturas/facturas.actions.js
 
    FINAL PRO SYSTEM · ACTIONS REAL · 10/10 EXTREME
-   PATCH · API ALIGNED · PDF STREAM SAFE · CSV PRO · INCIDENCIA SAFE
+   PATCH · API ALIGNED · PDF SAS SAFE · CSV PRO · INCIDENCIA SAFE
 
    RESPONSABILIDADES:
    - centralizar acciones operativas del módulo de facturas
    - resolver detalle desde store + loader/backend
    - abrir detalle a nivel de datos, no de UI
    - preservar relación factura ↔ incidencia
-   - abrir PDF inline contra endpoint real del backend
-   - descargar PDF contra endpoint real del backend
+   - abrir PDF inline usando fetch autenticado + URL SAS devuelta por backend
+   - descargar PDF usando fetch autenticado + URL SAS devuelta por backend
+   - bloquear fallback directo a endpoint privado para evitar MISSING_TOKEN
    - soportar respuestas PDF como URL / Blob / Response / stream adaptado
    - enviar factura al cliente por endpoint real
    - copiar identificadores
@@ -28,7 +29,9 @@
    - no navegación a rutas inexistentes de incidencia
    - apertura PDF con ventana preabierta para evitar popup blockers
    - descarga con anchor seguro
-   - fallback directo a endpoint si el apiClient no devuelve URL/blob
+   - NUNCA abrir /api/facturas/:id/pdf directamente en pestaña nueva
+   - el endpoint privado se consume con apiClient autenticado
+   - la pestaña nueva solo abre blob: o SAS/public URL final
    - eventos AppCore + window
    - tolerancia a payloads heterogéneos
    - CSV con BOM + sep=; para Excel ES
@@ -389,6 +392,54 @@ function resolveApiUrl(path = "") {
   }
 
   return `${apiBase}${normalizedPath}`;
+}
+
+function isPrivateFacturaPdfEndpoint(url = "") {
+  const value = safeText(url, "");
+
+  if (!value || value.startsWith("blob:")) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(value, window.location.origin);
+    const pathname = parsed.pathname || "";
+
+    return (
+      pathname.includes("/api/facturas/") &&
+      (
+        pathname.endsWith("/pdf") ||
+        pathname.includes("/pdf/") ||
+        pathname.endsWith("/descargar") ||
+        pathname.includes("/descargar/") ||
+        pathname.endsWith("/download") ||
+        pathname.includes("/download/")
+      )
+    );
+  } catch {
+    return (
+      value.includes("/api/facturas/") &&
+      (
+        value.includes("/pdf") ||
+        value.includes("/descargar") ||
+        value.includes("/download")
+      )
+    );
+  }
+}
+
+function assertPublicPdfTarget(url = "") {
+  const value = safeText(url, "");
+
+  if (!value) {
+    return "";
+  }
+
+  if (isPrivateFacturaPdfEndpoint(value)) {
+    return "";
+  }
+
+  return value;
 }
 
 /* =========================================================
@@ -1825,7 +1876,7 @@ function closePreopenedWindow(popup = null) {
 }
 
 function openUrlInNewTab(url = "", popup = null) {
-  const finalUrl = safeText(url, "");
+  const finalUrl = assertPublicPdfTarget(url);
 
   if (!finalUrl) {
     return false;
@@ -1847,7 +1898,7 @@ function openUrlInNewTab(url = "", popup = null) {
 }
 
 function triggerDownloadUrl(url = "", filename = "") {
-  const finalUrl = safeText(url, "");
+  const finalUrl = assertPublicPdfTarget(url);
   const finalFilename = safeText(filename, "factura.pdf");
 
   if (!finalUrl) {
@@ -1883,6 +1934,7 @@ async function resolvePdfActionTarget({
   detail = null,
 } = {}) {
   const id = normalizeFacturaId(facturaId);
+
   const mode =
     disposition === FACTURAS_DISPOSITIONS.INLINE
       ? FACTURAS_DISPOSITIONS.INLINE
@@ -1896,9 +1948,10 @@ async function resolvePdfActionTarget({
 
   try {
     response = await fetchFacturaPdfUrlRequest(id, mode, {
-      responseType: "blob",
-      raw: true,
+      responseType: "auto",
+      raw: false,
       cache: "no-store",
+      auth: true,
     });
   } catch (error) {
     requestError = error;
@@ -1907,21 +1960,31 @@ async function resolvePdfActionTarget({
       throw error;
     }
 
-    safeWarn("PDF apiClient fallback to direct endpoint:", error);
+    safeWarn("PDF apiClient request failed:", error);
+    throw error;
   }
 
-  const url = extractUrlFromPayload(response);
+  const extractedUrl = extractUrlFromPayload(response);
+  const publicUrl = assertPublicPdfTarget(extractedUrl);
 
-  if (url) {
+  if (publicUrl) {
     return {
-      url,
+      url: publicUrl,
       directUrl,
       response,
       requestError,
-      isObjectUrl: url.startsWith("blob:"),
-      from: "url",
+      isObjectUrl: publicUrl.startsWith("blob:"),
+      from: "sas-url",
       filename: buildSafePdfFilename(id, detail),
     };
+  }
+
+  if (extractedUrl && isPrivateFacturaPdfEndpoint(extractedUrl)) {
+    const error = new Error("FACTURA_PDF_PRIVATE_ENDPOINT_FALLBACK_BLOCKED");
+    error.response = response;
+    error.directUrl = directUrl;
+    error.extractedUrl = extractedUrl;
+    throw error;
   }
 
   const blob = await extractBlobFromPayload(response);
@@ -1940,15 +2003,10 @@ async function resolvePdfActionTarget({
     };
   }
 
-  return {
-    url: directUrl,
-    directUrl,
-    response,
-    requestError,
-    isObjectUrl: false,
-    from: "direct-endpoint",
-    filename: buildSafePdfFilename(id, detail),
-  };
+  const error = new Error("FACTURA_PDF_TARGET_MISSING");
+  error.response = response;
+  error.directUrl = directUrl;
+  throw error;
 }
 
 /* =========================================================
@@ -2396,6 +2454,12 @@ export async function openFacturaPdfAction({
       response: target.response,
     });
 
+    safeLog("PDF opened:", {
+      facturaId: id,
+      from: target.from,
+      isObjectUrl: target.isObjectUrl,
+    });
+
     if (!silent) {
       showToast("Abriendo PDF de la factura.", "success");
     }
@@ -2412,6 +2476,14 @@ export async function openFacturaPdfAction({
       facturaId: id,
       error,
       mode: FACTURAS_DISPOSITIONS.INLINE,
+    });
+
+    safeWarn("openFacturaPdfAction error:", {
+      facturaId: id,
+      message: error?.message || "UNKNOWN_ERROR",
+      status: getErrorStatus(error),
+      directUrl: error?.directUrl || "",
+      extractedUrl: error?.extractedUrl || "",
     });
 
     if (!silent) {
@@ -2495,6 +2567,12 @@ export async function downloadFacturaPdfAction({
       response: target.response,
     });
 
+    safeLog("PDF download prepared:", {
+      facturaId: id,
+      from: target.from,
+      filename: target.filename,
+    });
+
     if (!silent) {
       showToast("Descarga de factura preparada.", "success");
     }
@@ -2509,6 +2587,14 @@ export async function downloadFacturaPdfAction({
       facturaId: id,
       error,
       mode: FACTURAS_DISPOSITIONS.ATTACHMENT,
+    });
+
+    safeWarn("downloadFacturaPdfAction error:", {
+      facturaId: id,
+      message: error?.message || "UNKNOWN_ERROR",
+      status: getErrorStatus(error),
+      directUrl: error?.directUrl || "",
+      extractedUrl: error?.extractedUrl || "",
     });
 
     if (!silent) {

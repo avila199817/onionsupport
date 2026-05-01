@@ -75,6 +75,8 @@ const modalState = {
 
   previewFile: null,
   previewObjectUrl: "",
+  bodyLockDepth: 0,
+  bodyOverflowBeforeLock: "",
 
   thumbnailObjectUrls: new Map(),
   thumbnailLoadingIds: new Set(),
@@ -5280,6 +5282,29 @@ function ensureRoot() {
 }
 
 function lockBody() {
+  if (
+    typeof document === "undefined" ||
+    !document?.body
+  ) {
+    return false;
+  }
+
+  if (modalState.bodyLockDepth <= 0) {
+    try {
+      modalState.bodyOverflowBeforeLock = safeText(
+        document.body.style?.overflow,
+        ""
+      );
+    } catch {
+      modalState.bodyOverflowBeforeLock = "";
+    }
+  }
+
+  modalState.bodyLockDepth = Math.max(
+    1,
+    safeNumber(modalState.bodyLockDepth, 0) + 1
+  );
+
   try {
     document.body.classList.add("modal-open");
   } catch {}
@@ -5287,16 +5312,44 @@ function lockBody() {
   try {
     document.body.style.overflow = "hidden";
   } catch {}
+
+  return true;
 }
 
 function unlockBody() {
+  if (
+    typeof document === "undefined" ||
+    !document?.body
+  ) {
+    return false;
+  }
+
+  const nextDepth = Math.max(
+    0,
+    safeNumber(modalState.bodyLockDepth, 0) - 1
+  );
+
+  modalState.bodyLockDepth = nextDepth;
+
+  if (nextDepth > 0) {
+    return true;
+  }
+
   try {
     document.body.classList.remove("modal-open");
   } catch {}
 
   try {
-    document.body.style.overflow = "";
+    document.body.style.overflow =
+      safeText(
+        modalState.bodyOverflowBeforeLock,
+        ""
+      );
   } catch {}
+
+  modalState.bodyOverflowBeforeLock = "";
+
+  return true;
 }
 
 function restoreFocus() {
@@ -5361,7 +5414,13 @@ function focusPanel() {
 ========================================================= */
 
 export function openIncidenciasModal(detail = {}) {
-  modalState.lastActiveElement = document.activeElement || null;
+  if (
+    !modalState.isOpen &&
+    typeof document !== "undefined"
+  ) {
+    modalState.lastActiveElement =
+      document.activeElement || null;
+  }
   modalState.detail = getDetail(detail);
   modalState.isOpen = true;
   modalState.isSubmitting = false;

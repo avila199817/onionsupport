@@ -3,8 +3,10 @@
    Archivo: src/views/incidencias/incidencias.bindings.js
 
    CLIENT EXPERIENCE PRO · DOM BINDINGS · EXTREME 12/10
+   PATCH · FILTER PILLS CONNECTED
    PATCH · DATA-ACTION + DATA-INCIDENCIAS-ACTION
    PATCH · CREATE BUTTON READY
+   PATCH · CREATE MODAL EVENT BRIDGE FIXED
    PATCH · PAGINATION READY
    PATCH · ROW CLICK SAFE
    PATCH · NO DOUBLE HANDLERS
@@ -16,6 +18,7 @@
    - refresh / retry
    - export CSV
    - create incidencia
+   - filtros visuales funcionales
    - pagination prev / next
    - open ticket modal
    - copy id
@@ -31,9 +34,11 @@
    - abre modal si la action solo devuelve el detail
    - refresca listado tras updates del modal
    - respeta data-row-click-disabled="true"
+   - conecta filtros con incidenciasState + render/rerender
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
+import { incidenciasState } from "./incidencias.state.js";
 
 /* =========================================================
    CONSTANTS
@@ -96,6 +101,25 @@ const ACTIONS = Object.freeze({
     "open-create-incidencia",
   ]),
 
+  filter: new Set([
+    "filter",
+    "filter-incidencias",
+    "filter-tickets",
+    "status-filter",
+    "set-filter",
+    "set-status-filter",
+    "incidencias-filter",
+  ]),
+
+  clearFilters: new Set([
+    "clear-filter",
+    "clear-filters",
+    "reset-filter",
+    "reset-filters",
+    "clear-incidencias-filter",
+    "clear-incidencias-filters",
+  ]),
+
   prevPage: new Set([
     "prev",
     "previous",
@@ -110,6 +134,18 @@ const ACTIONS = Object.freeze({
     "incidencias-next-page",
   ]),
 });
+
+const VALID_FILTERS = new Set([
+  "all",
+  "open",
+  "pending",
+  "progress",
+  "resolved",
+  "closed",
+  "urgent",
+  "attachments",
+  "billed",
+]);
 
 const ACTION_SELECTOR = [
   "[data-incidencias-action]",
@@ -173,10 +209,6 @@ function safeObject(value, fallback = {}) {
     : fallback;
 }
 
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
 function first(...values) {
   for (const value of values) {
     if (value === null || value === undefined) continue;
@@ -191,10 +223,6 @@ function first(...values) {
   return null;
 }
 
-function isFunction(value) {
-  return typeof value === "function";
-}
-
 function isObject(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -206,6 +234,17 @@ function normalizeAction(value = "") {
     .replace(/^-+|-+$/g, "");
 }
 
+function normalizeFilter(value = "") {
+  const key = normalizeAction(value);
+
+  if (!key || key === "todos" || key === "todas") return "all";
+  if (key === "in-progress") return "progress";
+  if (key === "with-attachments" || key === "con-adjuntos") return "attachments";
+  if (key === "with-amount" || key === "with-invoices" || key === "con-importe") return "billed";
+
+  return VALID_FILTERS.has(key) ? key : "all";
+}
+
 function safeWarn(...args) {
   try {
     AppCore?.utils?.warn?.("[IncidenciasBindings]", ...args);
@@ -214,17 +253,6 @@ function safeWarn(...args) {
 
   try {
     console.warn("[IncidenciasBindings]", ...args);
-  } catch {}
-}
-
-function safeError(...args) {
-  try {
-    AppCore?.utils?.error?.("[IncidenciasBindings]", ...args);
-    return;
-  } catch {}
-
-  try {
-    console.error("[IncidenciasBindings]", ...args);
   } catch {}
 }
 
@@ -570,6 +598,19 @@ function getPageFromElement(element = null) {
   );
 }
 
+function getFilterFromElement(element = null) {
+  return normalizeFilter(
+    first(
+      element?.dataset?.filter,
+      element?.dataset?.filterStatus,
+      element?.dataset?.statusFilter,
+      element?.getAttribute?.("data-filter"),
+      element?.getAttribute?.("data-filter-status"),
+      element?.getAttribute?.("data-status-filter")
+    )
+  );
+}
+
 function getRouteFromElement(element = null) {
   return safeText(
     first(
@@ -685,7 +726,7 @@ async function runBusy(key = "", element = null, task = null) {
 }
 
 /* =========================================================
-   CALLBACK COMPAT
+   VIEW / STATE BRIDGE
 ========================================================= */
 
 function getGlobalActions() {
@@ -695,6 +736,154 @@ function getGlobalActions() {
     {}
   );
 }
+
+function getViewBridge() {
+  return (
+    BrowserWindow?.OnionIncidenciasView ||
+    BrowserWindow?.IncidenciasView ||
+    AppCore?.modules?.IncidenciasView ||
+    AppCore?.modules?.incidenciasView ||
+    null
+  );
+}
+
+function patchLocalFilterState(filter = "all") {
+  const nextFilter = normalizeFilter(filter);
+
+  try {
+    incidenciasState.activeFilter = nextFilter;
+    incidenciasState.filter = nextFilter;
+    incidenciasState.statusFilter = nextFilter;
+
+    incidenciasState.page = 1;
+    incidenciasState.currentPage = 1;
+    incidenciasState.incidenciasPage = 1;
+
+    incidenciasState.filters = {
+      ...safeObject(incidenciasState.filters),
+      active: nextFilter,
+      status: nextFilter,
+    };
+
+    incidenciasState.table = {
+      ...safeObject(incidenciasState.table),
+      activeFilter: nextFilter,
+      filter: nextFilter,
+      statusFilter: nextFilter,
+      page: 1,
+      currentPage: 1,
+    };
+  } catch {}
+
+  return nextFilter;
+}
+
+async function callFlexibleRerender({
+  payload = {},
+  render,
+  rerender,
+} = {}) {
+  const view = getViewBridge();
+  const globalActions = getGlobalActions();
+
+  const candidates = [
+    rerender,
+    render,
+    view?.rerender,
+    view?.render,
+    view?.refreshView,
+    view?.update,
+    globalActions?.rerender,
+    globalActions?.render,
+  ].filter((candidate) => typeof candidate === "function");
+
+  let handled = false;
+  let lastError = null;
+
+  for (const candidate of candidates) {
+    try {
+      await candidate(payload);
+      handled = true;
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  safeEmit("incidencias:render:requested", payload);
+  safeEmit("incidencias:rerender:requested", payload);
+
+  if (!handled && lastError) {
+    throw lastError;
+  }
+
+  return handled;
+}
+
+async function callFlexibleFilter({
+  filter = "all",
+  setFilter,
+  changeFilter,
+  applyFilter,
+} = {}) {
+  const finalFilter = normalizeFilter(filter);
+  const view = getViewBridge();
+  const globalActions = getGlobalActions();
+
+  const payload = {
+    filter: finalFilter,
+    activeFilter: finalFilter,
+    statusFilter: finalFilter,
+    page: 1,
+    source: "bindings",
+  };
+
+  const candidates = [
+    setFilter,
+    changeFilter,
+    applyFilter,
+    view?.setFilter,
+    view?.changeFilter,
+    view?.applyFilter,
+    globalActions?.setFilter,
+    globalActions?.changeFilter,
+    globalActions?.applyFilter,
+  ].filter((candidate) => typeof candidate === "function");
+
+  let handled = false;
+  let lastError = null;
+
+  for (const candidate of candidates) {
+    try {
+      await candidate(finalFilter, payload);
+      handled = true;
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+
+    try {
+      await candidate(payload);
+      handled = true;
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  safeEmit("incidencias:filter:change", payload);
+  safeEmit("incidencias:bindings:filter:change", payload);
+
+  if (!handled && lastError) {
+    throw lastError;
+  }
+
+  return handled;
+}
+
+/* =========================================================
+   CALLBACK COMPAT
+========================================================= */
 
 async function callFlexibleOpen(openTicket, payload = {}) {
   const ticketId = safeText(payload.ticketId, "");
@@ -793,7 +982,10 @@ async function callFlexibleExport(exportIncidenciasCsvAction) {
   }
 
   const globalActions = getGlobalActions();
-  const globalExport = globalActions.exportCsv || globalActions.exportIncidenciasCsv || null;
+  const globalExport =
+    globalActions.exportCsv ||
+    globalActions.exportIncidenciasCsv ||
+    null;
 
   if (typeof globalExport === "function" && globalExport !== exportIncidenciasCsvAction) {
     candidates.push(() => globalExport());
@@ -894,6 +1086,7 @@ async function callFlexiblePage({
 
   if (typeof changePage === "function") {
     candidates.push(() => changePage(payload));
+
     if (finalPage > 0) {
       candidates.push(() => changePage(finalPage, payload));
     }
@@ -907,11 +1100,7 @@ async function callFlexiblePage({
     candidates.push(() => prevPage(payload));
   }
 
-  const view =
-    BrowserWindow?.OnionIncidenciasView ||
-    BrowserWindow?.IncidenciasView ||
-    AppCore?.modules?.IncidenciasView ||
-    null;
+  const view = getViewBridge();
 
   if (finalPage > 0 && typeof view?.setPage === "function") {
     candidates.push(() => view.setPage(finalPage, payload));
@@ -943,21 +1132,16 @@ async function callFlexiblePage({
   }
 
   safeEmit("incidencias:page:change", payload);
+  safeEmit("incidencias:bindings:page:change", payload);
 
   try {
-    if (typeof render === "function") {
-      await render(payload);
-      handled = true;
-    } else if (typeof rerender === "function") {
-      await rerender(payload);
-      handled = true;
-    } else if (typeof view?.render === "function") {
-      await view.render(payload);
-      handled = true;
-    } else if (typeof view?.rerender === "function") {
-      await view.rerender(payload);
-      handled = true;
-    }
+    await callFlexibleRerender({
+      payload,
+      render,
+      rerender,
+    });
+
+    handled = true;
   } catch (error) {
     lastError = error;
   }
@@ -1050,9 +1234,10 @@ function openCreateModalBridge(payload = {}) {
     }
   } catch {}
 
+  safeEmit("incidencias:create-modal:open", payload);
   safeEmit("incidencias:create:open", payload);
 
-  return false;
+  return true;
 }
 
 async function navigateToCreate(route = "/incidencias/nueva") {
@@ -1248,6 +1433,71 @@ async function handleCreate({
   });
 }
 
+async function handleFilter({
+  element = null,
+  filter = "",
+  setFilter,
+  changeFilter,
+  applyFilter,
+  render,
+  rerender,
+} = {}) {
+  const nextFilter = normalizeFilter(filter || getFilterFromElement(element));
+
+  await runBusy(`incidencias:filter:${nextFilter}`, element, async () => {
+    try {
+      patchLocalFilterState(nextFilter);
+
+      const payload = {
+        filter: nextFilter,
+        activeFilter: nextFilter,
+        statusFilter: nextFilter,
+        page: 1,
+        source: "bindings",
+      };
+
+      await callFlexibleFilter({
+        filter: nextFilter,
+        setFilter,
+        changeFilter,
+        applyFilter,
+      });
+
+      await callFlexibleRerender({
+        payload,
+        render,
+        rerender,
+      });
+    } catch (error) {
+      safeWarn("filter action falló", error);
+
+      safeEmit("incidencias:bindings:filter:error", {
+        filter: nextFilter,
+        error,
+      });
+    }
+  });
+}
+
+async function handleClearFilters({
+  element = null,
+  setFilter,
+  changeFilter,
+  applyFilter,
+  render,
+  rerender,
+} = {}) {
+  await handleFilter({
+    element,
+    filter: "all",
+    setFilter,
+    changeFilter,
+    applyFilter,
+    render,
+    rerender,
+  });
+}
+
 async function handleOpenTicket({
   element = null,
   openTicket,
@@ -1399,6 +1649,10 @@ export function bindIncidenciasEvents({
 
   reload,
 
+  setFilter,
+  changeFilter,
+  applyFilter,
+
   setPage,
   nextPage,
   prevPage,
@@ -1475,6 +1729,42 @@ export function bindIncidenciasEvents({
         return;
       }
 
+      const clearFiltersAction = getActionElement(root, target, ACTIONS.clearFilters);
+
+      if (clearFiltersAction) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        await handleClearFilters({
+          element: clearFiltersAction,
+          setFilter,
+          changeFilter,
+          applyFilter,
+          render,
+          rerender,
+        });
+
+        return;
+      }
+
+      const filterAction = getActionElement(root, target, ACTIONS.filter);
+
+      if (filterAction) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        await handleFilter({
+          element: filterAction,
+          setFilter,
+          changeFilter,
+          applyFilter,
+          render,
+          rerender,
+        });
+
+        return;
+      }
+
       const prevPageAction = getActionElement(root, target, ACTIONS.prevPage);
 
       if (prevPageAction) {
@@ -1543,11 +1833,6 @@ export function bindIncidenciasEvents({
         return;
       }
 
-      /*
-        Row click fallback:
-        - se respeta data-row-click-disabled="true"
-        - si el template quiere solo botón detalle, no abre por row.
-      */
       const row = shouldOpenRowFromClick(root, event);
 
       if (row) {
@@ -1561,10 +1846,6 @@ export function bindIncidenciasEvents({
         return;
       }
 
-      /*
-        Debug/evento para acciones no reconocidas.
-        No bloquea nada.
-      */
       const unknownAction = getAnyActionElement(root, target);
 
       if (unknownAction) {

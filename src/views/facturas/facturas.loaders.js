@@ -2,8 +2,10 @@
    Onion SPA - Facturas Loaders
    Archivo: src/views/facturas/facturas.loaders.js
 
-   FINAL PRO SYSTEM · LOADERS REAL · 10/10
+   FINAL PRO SYSTEM · LOADERS REAL · 10/10 EXTREME
+   PATCH · API ALIGNED · STORE SAFE · DETAIL RACE SAFE
    PATCH · FACTURAS ARRAY + INCIDENCIA PRESERVER
+   PATCH · NORMALIZED API COMPAT + LEGACY RESPONSE COMPAT
 
    RESPONSABILIDADES:
    - cargar colección de facturas desde backend
@@ -13,23 +15,51 @@
    - mantener paridad de flujo con incidenciasView
    - evitar estados colgados en render / inflight
    - preservar relación factura ↔ incidencia para columna Incidencia
+   - preservar relación factura ↔ incidencia en detalle
+   - tolerar respuestas normalizadas desde facturas.api.js
+   - tolerar respuestas legacy del backend
+
+   BACKEND ALINEADO:
+   - GET /api/facturas
+   - GET /api/facturas/:id
+
+   API NORMALIZADA ESPERADA:
+   - fetchFacturasRequest() -> {
+       ok,
+       items,
+       facturas,
+       total,
+       count,
+       remoteCount,
+       page,
+       limit,
+       raw,
+       meta
+     }
+
+   - fetchFacturaDetailRequest(id) -> {
+       ok,
+       item,
+       factura,
+       raw,
+       meta
+     }
 
    HARDENING PRO:
-   - anti-race básico por inflight
+   - anti-race por token en colección
+   - anti-race por id/token en detalle
    - loading inicial vs refreshing posterior
    - lastSyncAt coherente
    - remoteCount robusto
    - detalle con apertura previa segura
-   - error de detalle no rompe el estado principal
-   - no ensucia error global con fallos de detalle
-   - compatible con API normalizada:
-     { items, total }
-     { facturas, total }
-     { data: { items/facturas } }
-     { result: { items/facturas } }
-     { payload: { items/facturas } }
-     { item/factura }
+   - error de detalle no ensucia error global
+   - no pisa detalle si llega una respuesta vieja
+   - no rompe si normalizeFactura falla
+   - no duplica inflight de colección
+   - no devuelve inflight de detalle de otra factura
 ========================================================= */
+
+import { AppCore } from "../../core/index.js";
 
 import {
   normalizeFactura,
@@ -40,7 +70,10 @@ import {
   fetchFacturaDetailRequest,
 } from "./facturas.api.js";
 
-import { setFacturasStore } from "./facturas.store.js";
+import {
+  setFacturasStore,
+  getFacturaByIdStore,
+} from "./facturas.store.js";
 
 import {
   safeText,
@@ -69,13 +102,25 @@ import {
 } from "./facturas.state.js";
 
 /* =========================================================
-   HELPERS
+   MODULE STATE
+========================================================= */
+
+let collectionLoadToken = 0;
+let detailLoadToken = 0;
+
+/* =========================================================
+   BASE HELPERS
 ========================================================= */
 
 function safeRender(render) {
   try {
-    render?.();
+    if (typeof render === "function") {
+      render();
+      return true;
+    }
   } catch {}
+
+  return false;
 }
 
 function safeArray(value) {
@@ -120,14 +165,98 @@ function hasOwnKeys(value = {}) {
   );
 }
 
+function normalizeText(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function sameIdentity(a = "", b = "") {
+  const left = normalizeText(a);
+  const right = normalizeText(b);
+
+  return Boolean(left && right && left === right);
+}
+
+function safeLog(...args) {
+  try {
+    AppCore?.utils?.log?.("[FacturasLoaders]", ...args);
+  } catch {}
+}
+
+function safeWarn(...args) {
+  try {
+    AppCore?.utils?.warn?.("[FacturasLoaders]", ...args);
+  } catch {
+    try {
+      console.warn("[FacturasLoaders]", ...args);
+    } catch {}
+  }
+}
+
+function safeEmit(eventName = "", payload = {}) {
+  const name = safeText(eventName, "");
+
+  if (!name) return false;
+
+  let emitted = false;
+
+  try {
+    AppCore?.events?.emit?.(name, payload);
+    emitted = true;
+  } catch {}
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent(name, {
+        detail: payload,
+      })
+    );
+    emitted = true;
+  } catch {}
+
+  return emitted;
+}
+
 function safeErrorMessage(error = null, fallback = "") {
   return safeText(
-    error?.data?.message ||
-      error?.response?.data?.message ||
-      error?.response?.message ||
+    first(
+      error?.data?.message,
+      error?.response?.data?.message,
+      error?.response?.message,
+      error?.payload?.message,
+      error?.result?.message,
       error?.message,
+      fallback
+    ),
     fallback
   );
+}
+
+function ensureStateShape(state = null) {
+  if (!state || typeof state !== "object") {
+    throw new Error("FACTURAS_STATE_REQUIRED");
+  }
+
+  if (!state.view || typeof state.view !== "object") {
+    state.view = {};
+  }
+
+  if (!state.detail || typeof state.detail !== "object") {
+    state.detail = {};
+  }
+
+  if (!state.inflight || typeof state.inflight !== "object") {
+    state.inflight = {};
+  }
+
+  if (!state.actions || typeof state.actions !== "object") {
+    state.actions = {};
+  }
+
+  return state;
 }
 
 function getFacturaIdentity(item = null) {
@@ -143,6 +272,8 @@ function getFacturaIdentity(item = null) {
       source.numero,
       source.numeroFacturaLegal,
       source.numeroFacturaSistema,
+      source.invoiceNumber,
+      source.code,
 
       raw.id,
       raw._id,
@@ -150,10 +281,41 @@ function getFacturaIdentity(item = null) {
       raw.invoiceId,
       raw.numero,
       raw.numeroFacturaLegal,
-      raw.numeroFacturaSistema
+      raw.numeroFacturaSistema,
+      raw.invoiceNumber,
+      raw.code
     ),
     ""
   );
+}
+
+function getFacturaIdentityList(item = null) {
+  const source = safeObject(item);
+  const raw = safeObject(source.raw);
+
+  return [
+    source.id,
+    source._id,
+    source.facturaId,
+    source.invoiceId,
+    source.numero,
+    source.numeroFacturaLegal,
+    source.numeroFacturaSistema,
+    source.invoiceNumber,
+    source.code,
+
+    raw.id,
+    raw._id,
+    raw.facturaId,
+    raw.invoiceId,
+    raw.numero,
+    raw.numeroFacturaLegal,
+    raw.numeroFacturaSistema,
+    raw.invoiceNumber,
+    raw.code,
+  ]
+    .map((value) => safeText(value, ""))
+    .filter(Boolean);
 }
 
 function pickTicketIdFromArray(value = []) {
@@ -177,11 +339,23 @@ function pickTicketIdFromArray(value = []) {
       item.relatedTicketId,
       item.relatedIncidentId,
       item.supportTicketId,
-      item.caseId
+      item.caseId,
+
+      item.ticket?.ticketId,
+      item.ticket?.incidenciaId,
+      item.ticket?.id,
+
+      item.incidencia?.ticketId,
+      item.incidencia?.incidenciaId,
+      item.incidencia?.id,
+
+      item.linkedTicket?.ticketId,
+      item.linkedTicket?.incidenciaId,
+      item.linkedTicket?.id
     );
 
     if (candidate) {
-      return candidate;
+      return safeText(candidate, "");
     }
   }
 
@@ -217,6 +391,27 @@ function getRelatedIncidenciaId(item = {}) {
     )
   );
 
+  const relatedTicket = safeObject(
+    first(
+      source.relatedTicket,
+      raw.relatedTicket
+    )
+  );
+
+  const relationTicket = safeObject(
+    first(
+      source.relations?.ticket,
+      raw.relations?.ticket
+    )
+  );
+
+  const relationIncidencia = safeObject(
+    first(
+      source.relations?.incidencia,
+      raw.relations?.incidencia
+    )
+  );
+
   return safeText(
     first(
       source.ticketId,
@@ -233,6 +428,18 @@ function getRelatedIncidenciaId(item = {}) {
       linkedTicket.ticketId,
       linkedTicket.id,
       linkedTicket.incidenciaId,
+
+      relatedTicket.ticketId,
+      relatedTicket.id,
+      relatedTicket.incidenciaId,
+
+      relationTicket.ticketId,
+      relationTicket.id,
+      relationTicket.incidenciaId,
+
+      relationIncidencia.ticketId,
+      relationIncidencia.id,
+      relationIncidencia.incidenciaId,
 
       source.relatedTicketId,
       source.relatedIncidentId,
@@ -251,6 +458,10 @@ function getRelatedIncidenciaId(item = {}) {
       pickTicketIdFromArray(source.tickets),
       pickTicketIdFromArray(source.relatedTickets),
       pickTicketIdFromArray(source.relations),
+      pickTicketIdFromArray(source.facturasRelacionadas),
+      pickTicketIdFromArray(source.linkedInvoices?.tickets),
+      pickTicketIdFromArray(source.invoiceLinks),
+      pickTicketIdFromArray(source.invoiceRelations),
 
       raw.ticketId,
       raw.incidenciaId,
@@ -266,6 +477,18 @@ function getRelatedIncidenciaId(item = {}) {
       raw.linkedTicket?.ticketId,
       raw.linkedTicket?.id,
       raw.linkedTicket?.incidenciaId,
+
+      raw.relatedTicket?.ticketId,
+      raw.relatedTicket?.id,
+      raw.relatedTicket?.incidenciaId,
+
+      raw.relations?.ticket?.ticketId,
+      raw.relations?.ticket?.id,
+      raw.relations?.ticket?.incidenciaId,
+
+      raw.relations?.incidencia?.ticketId,
+      raw.relations?.incidencia?.id,
+      raw.relations?.incidencia?.incidenciaId,
 
       raw.relatedTicketId,
       raw.relatedIncidentId,
@@ -283,7 +506,11 @@ function getRelatedIncidenciaId(item = {}) {
       pickTicketIdFromArray(raw.incidencias),
       pickTicketIdFromArray(raw.tickets),
       pickTicketIdFromArray(raw.relatedTickets),
-      pickTicketIdFromArray(raw.relations)
+      pickTicketIdFromArray(raw.relations),
+      pickTicketIdFromArray(raw.facturasRelacionadas),
+      pickTicketIdFromArray(raw.linkedInvoices?.tickets),
+      pickTicketIdFromArray(raw.invoiceLinks),
+      pickTicketIdFromArray(raw.invoiceRelations)
     ),
     ""
   );
@@ -314,11 +541,59 @@ function buildIncidenciaPayload(item = {}) {
     )
   );
 
+  const relatedTicket = safeObject(
+    first(
+      source.relatedTicket,
+      raw.relatedTicket
+    )
+  );
+
+  const relationTicket = safeObject(
+    first(
+      source.relations?.ticket,
+      raw.relations?.ticket
+    )
+  );
+
   const incidenciaId = getRelatedIncidenciaId(source);
 
   if (!incidenciaId) {
     return null;
   }
+
+  const subject = safeText(
+    first(
+      incidencia.subject,
+      incidencia.asunto,
+      incidencia.title,
+
+      ticket.subject,
+      ticket.asunto,
+      ticket.title,
+
+      linkedTicket.subject,
+      linkedTicket.asunto,
+      linkedTicket.title,
+
+      relatedTicket.subject,
+      relatedTicket.asunto,
+      relatedTicket.title,
+
+      relationTicket.subject,
+      relationTicket.asunto,
+      relationTicket.title,
+
+      source.subject,
+      source.asunto,
+      source.title,
+      raw.subject,
+      raw.asunto,
+      raw.title,
+
+      "Incidencia relacionada"
+    ),
+    "Incidencia relacionada"
+  );
 
   return {
     ...incidencia,
@@ -326,46 +601,20 @@ function buildIncidenciaPayload(item = {}) {
     id: incidenciaId,
     ticketId: incidenciaId,
     incidenciaId,
+    code: safeText(first(incidencia.code, ticket.code, linkedTicket.code, incidenciaId), incidenciaId),
+    ticketCode: safeText(first(incidencia.ticketCode, ticket.ticketCode, linkedTicket.ticketCode, incidenciaId), incidenciaId),
 
-    subject: safeText(
-      first(
-        incidencia.subject,
-        incidencia.asunto,
-        ticket.subject,
-        ticket.asunto,
-        linkedTicket.subject,
-        linkedTicket.asunto,
-        source.subject,
-        source.asunto,
-        raw.subject,
-        raw.asunto,
-        ""
-      ),
-      ""
-    ),
-
-    asunto: safeText(
-      first(
-        incidencia.asunto,
-        incidencia.subject,
-        ticket.asunto,
-        ticket.subject,
-        linkedTicket.asunto,
-        linkedTicket.subject,
-        source.asunto,
-        source.subject,
-        raw.asunto,
-        raw.subject,
-        ""
-      ),
-      ""
-    ),
+    subject,
+    asunto: safeText(first(incidencia.asunto, subject), subject),
+    title: safeText(first(incidencia.title, subject), subject),
 
     clienteId: safeText(
       first(
         incidencia.clienteId,
         ticket.clienteId,
         linkedTicket.clienteId,
+        relatedTicket.clienteId,
+        relationTicket.clienteId,
         source.clienteId,
         source.cliente?.id,
         raw.clienteId,
@@ -380,11 +629,31 @@ function buildIncidenciaPayload(item = {}) {
         incidencia.clienteNombre,
         incidencia.name,
         incidencia.nombre,
+
         ticket.clienteNombre,
+        ticket.name,
+        ticket.nombre,
+
         linkedTicket.clienteNombre,
+        linkedTicket.name,
+        linkedTicket.nombre,
+
+        relatedTicket.clienteNombre,
+        relatedTicket.name,
+        relatedTicket.nombre,
+
+        relationTicket.clienteNombre,
+        relationTicket.name,
+        relationTicket.nombre,
+
+        source.clienteNombre,
         source.cliente?.nombre,
+        source.cliente?.nombreContacto,
         source.cliente?.name,
+
+        raw.clienteNombre,
         raw.cliente?.nombre,
+        raw.cliente?.nombreContacto,
         raw.cliente?.name,
         ""
       ),
@@ -396,6 +665,8 @@ function buildIncidenciaPayload(item = {}) {
         incidencia.relationType,
         ticket.relationType,
         linkedTicket.relationType,
+        relatedTicket.relationType,
+        relationTicket.relationType,
         source.relationType,
         raw.relationType,
         "linked_ticket"
@@ -408,8 +679,12 @@ function buildIncidenciaPayload(item = {}) {
         incidencia.linkedAt,
         ticket.linkedAt,
         linkedTicket.linkedAt,
+        relatedTicket.linkedAt,
+        relationTicket.linkedAt,
         source.linkedAt,
         raw.linkedAt,
+        source.updatedAt,
+        raw.updatedAt,
         ""
       ),
       ""
@@ -420,12 +695,88 @@ function buildIncidenciaPayload(item = {}) {
         incidencia.linkedAtES,
         ticket.linkedAtES,
         linkedTicket.linkedAtES,
+        relatedTicket.linkedAtES,
+        relationTicket.linkedAtES,
         source.linkedAtES,
         raw.linkedAtES,
+        source.updatedAtES,
+        raw.updatedAtES,
         ""
       ),
       ""
     ),
+  };
+}
+
+function mergeRawIncidencia(raw = {}, incidenciaId = "", incidenciaPayload = null) {
+  const base = safeObject(raw);
+
+  if (!incidenciaId) {
+    return base;
+  }
+
+  return {
+    ...base,
+
+    ticketId: safeText(first(base.ticketId, incidenciaId), incidenciaId),
+    incidenciaId: safeText(first(base.incidenciaId, incidenciaId), incidenciaId),
+
+    relatedTicketId: safeText(
+      first(base.relatedTicketId, incidenciaId),
+      incidenciaId
+    ),
+
+    relatedIncidentId: safeText(
+      first(base.relatedIncidentId, incidenciaId),
+      incidenciaId
+    ),
+
+    supportTicketId: safeText(
+      first(base.supportTicketId, incidenciaId),
+      incidenciaId
+    ),
+
+    caseId: safeText(
+      first(base.caseId, incidenciaId),
+      incidenciaId
+    ),
+
+    incidencia: hasOwnKeys(base.incidencia)
+      ? {
+          ...incidenciaPayload,
+          ...base.incidencia,
+          id: safeText(first(base.incidencia?.id, incidenciaId), incidenciaId),
+          ticketId: safeText(first(base.incidencia?.ticketId, incidenciaId), incidenciaId),
+          incidenciaId: safeText(first(base.incidencia?.incidenciaId, incidenciaId), incidenciaId),
+        }
+      : incidenciaPayload,
+
+    ticket: hasOwnKeys(base.ticket)
+      ? {
+          ...incidenciaPayload,
+          ...base.ticket,
+          id: safeText(first(base.ticket?.id, incidenciaId), incidenciaId),
+          ticketId: safeText(first(base.ticket?.ticketId, incidenciaId), incidenciaId),
+          incidenciaId: safeText(first(base.ticket?.incidenciaId, incidenciaId), incidenciaId),
+        }
+      : incidenciaPayload,
+
+    linkedTicket: hasOwnKeys(base.linkedTicket)
+      ? {
+          ...incidenciaPayload,
+          ...base.linkedTicket,
+          id: safeText(first(base.linkedTicket?.id, incidenciaId), incidenciaId),
+          ticketId: safeText(first(base.linkedTicket?.ticketId, incidenciaId), incidenciaId),
+          incidenciaId: safeText(first(base.linkedTicket?.incidenciaId, incidenciaId), incidenciaId),
+        }
+      : incidenciaPayload,
+
+    meta: {
+      ...safeObject(base.meta),
+      hasIncidencia: true,
+      incidenciaId,
+      ticketId: incidenciaId,
+    },
   };
 }
 
@@ -436,11 +787,10 @@ function preserveIncidenciaFields(normalized = {}, original = {}) {
   const embeddedRaw = safeObject(base.raw);
   const sourceRaw = safeObject(source.raw);
 
-  const raw = hasOwnKeys(embeddedRaw)
-    ? embeddedRaw
-    : hasOwnKeys(sourceRaw)
-      ? sourceRaw
-      : source;
+  const raw = {
+    ...(hasOwnKeys(sourceRaw) ? sourceRaw : source),
+    ...(hasOwnKeys(embeddedRaw) ? embeddedRaw : {}),
+  };
 
   const probe = {
     ...source,
@@ -454,14 +804,31 @@ function preserveIncidenciaFields(normalized = {}, original = {}) {
   if (!incidenciaId) {
     return {
       ...base,
+
       raw,
+
+      meta: {
+        ...safeObject(source.meta),
+        ...safeObject(base.meta),
+        hasIncidencia: Boolean(
+          first(
+            base.meta?.hasIncidencia,
+            source.meta?.hasIncidencia,
+            false
+          )
+        ),
+      },
     };
   }
 
+  const nextRaw = mergeRawIncidencia(
+    raw,
+    incidenciaId,
+    incidenciaPayload
+  );
+
   return {
     ...base,
-
-    raw,
 
     ticketId: incidenciaId,
     incidenciaId,
@@ -470,7 +837,7 @@ function preserveIncidenciaFields(normalized = {}, original = {}) {
       first(
         base.relatedTicketId,
         source.relatedTicketId,
-        raw.relatedTicketId,
+        nextRaw.relatedTicketId,
         incidenciaId
       ),
       incidenciaId
@@ -480,7 +847,7 @@ function preserveIncidenciaFields(normalized = {}, original = {}) {
       first(
         base.relatedIncidentId,
         source.relatedIncidentId,
-        raw.relatedIncidentId,
+        nextRaw.relatedIncidentId,
         incidenciaId
       ),
       incidenciaId
@@ -490,7 +857,7 @@ function preserveIncidenciaFields(normalized = {}, original = {}) {
       first(
         base.supportTicketId,
         source.supportTicketId,
-        raw.supportTicketId,
+        nextRaw.supportTicketId,
         incidenciaId
       ),
       incidenciaId
@@ -500,36 +867,33 @@ function preserveIncidenciaFields(normalized = {}, original = {}) {
       first(
         base.caseId,
         source.caseId,
-        raw.caseId,
+        nextRaw.caseId,
         incidenciaId
       ),
       incidenciaId
     ),
 
     incidencia: incidenciaPayload,
-    ticket: safeObject(
-      first(
-        base.ticket,
-        source.ticket,
-        raw.ticket,
-        incidenciaPayload
-      )
-    ),
 
-    linkedTicket: safeObject(
-      first(
-        base.linkedTicket,
-        source.linkedTicket,
-        raw.linkedTicket,
-        incidenciaPayload
-      )
-    ),
+    ticket: hasOwnKeys(first(base.ticket, source.ticket, nextRaw.ticket))
+      ? {
+          ...incidenciaPayload,
+          ...safeObject(first(base.ticket, source.ticket, nextRaw.ticket)),
+        }
+      : incidenciaPayload,
+
+    linkedTicket: hasOwnKeys(first(base.linkedTicket, source.linkedTicket, nextRaw.linkedTicket))
+      ? {
+          ...incidenciaPayload,
+          ...safeObject(first(base.linkedTicket, source.linkedTicket, nextRaw.linkedTicket)),
+        }
+      : incidenciaPayload,
 
     relationType: safeText(
       first(
         base.relationType,
         source.relationType,
-        raw.relationType,
+        nextRaw.relationType,
         incidenciaPayload?.relationType,
         "linked_ticket"
       ),
@@ -537,22 +901,26 @@ function preserveIncidenciaFields(normalized = {}, original = {}) {
     ),
 
     meta: {
+      ...safeObject(source.meta),
       ...safeObject(base.meta),
       hasIncidencia: true,
       incidenciaId,
       ticketId: incidenciaId,
     },
+
+    raw: nextRaw,
   };
 }
 
 function normalizeFacturaPreservingLinks(item = {}) {
   const original = safeObject(item);
 
-  let normalized = {};
+  let normalized = original;
 
   try {
     normalized = normalizeFactura(original);
-  } catch {
+  } catch (error) {
+    safeWarn("normalizeFactura falló, usando payload original:", error);
     normalized = original;
   }
 
@@ -563,105 +931,240 @@ function normalizeFacturaPreservingLinks(item = {}) {
    RESPONSE NORMALIZERS
 ========================================================= */
 
-function pickCollectionItems(response = null) {
-  const obj = safeObject(response);
+function getPayloadCandidates(payload = null) {
+  const obj = safeObject(payload, null);
 
-  return safeArray(
-    first(
-      obj.items,
-      obj.facturas,
-      obj.rows,
-      obj.results,
-      obj.data,
+  if (!obj) {
+    return [payload].filter((item) => item !== undefined && item !== null);
+  }
 
-      obj.data?.items,
-      obj.data?.facturas,
-      obj.data?.rows,
-      obj.data?.results,
+  return [
+    payload,
 
-      obj.result?.items,
-      obj.result?.facturas,
-      obj.result?.rows,
-      obj.result?.results,
+    obj.data,
+    obj.body,
+    obj.result,
+    obj.payload,
+    obj.response,
 
-      obj.payload?.items,
-      obj.payload?.facturas,
-      obj.payload?.rows,
-      obj.payload?.results,
+    obj.data?.data,
+    obj.data?.body,
+    obj.data?.result,
+    obj.data?.payload,
 
-      []
-    )
+    obj.result?.data,
+    obj.result?.payload,
+
+    obj.payload?.data,
+    obj.payload?.result,
+  ].filter((item) => item !== undefined && item !== null);
+}
+
+function pickArrayFromCandidate(candidate = null) {
+  if (Array.isArray(candidate)) {
+    return candidate;
+  }
+
+  const obj = safeObject(candidate, null);
+
+  if (!obj) {
+    return null;
+  }
+
+  const found = first(
+    obj.items,
+    obj.facturas,
+    obj.rows,
+    obj.results,
+    obj.records,
+    obj.list,
+    obj.collection,
+
+    obj.data?.items,
+    obj.data?.facturas,
+    obj.data?.rows,
+    obj.data?.results,
+    obj.data?.records,
+
+    obj.result?.items,
+    obj.result?.facturas,
+    obj.result?.rows,
+    obj.result?.results,
+    obj.result?.records,
+
+    obj.payload?.items,
+    obj.payload?.facturas,
+    obj.payload?.rows,
+    obj.payload?.results,
+    obj.payload?.records
   );
+
+  return Array.isArray(found) ? found : null;
+}
+
+function pickCollectionItems(response = null) {
+  const candidates = getPayloadCandidates(response);
+
+  for (const candidate of candidates) {
+    const found = pickArrayFromCandidate(candidate);
+
+    if (Array.isArray(found)) {
+      return found;
+    }
+  }
+
+  return [];
 }
 
 function pickCollectionTotal(response = null, fallback = 0) {
-  const obj = safeObject(response);
+  const candidates = getPayloadCandidates(response);
 
-  return safeNumber(
-    first(
+  for (const candidate of candidates) {
+    const obj = safeObject(candidate, null);
+
+    if (!obj) continue;
+
+    const total = first(
       obj.total,
       obj.count,
       obj.remoteCount,
       obj.totalCount,
+      obj.totalItems,
+
+      obj.meta?.total,
+      obj.meta?.count,
+      obj.meta?.remoteCount,
+      obj.meta?.totalCount,
+      obj.meta?.totalItems,
+
+      obj.pagination?.total,
+      obj.pagination?.count,
+      obj.pagination?.remoteCount,
+      obj.pagination?.totalCount,
+      obj.pagination?.totalItems,
 
       obj.data?.total,
       obj.data?.count,
       obj.data?.remoteCount,
       obj.data?.totalCount,
+      obj.data?.totalItems,
 
       obj.result?.total,
       obj.result?.count,
       obj.result?.remoteCount,
       obj.result?.totalCount,
+      obj.result?.totalItems,
 
       obj.payload?.total,
       obj.payload?.count,
       obj.payload?.remoteCount,
-      obj.payload?.totalCount
-    ),
-    fallback
-  );
+      obj.payload?.totalCount,
+      obj.payload?.totalItems
+    );
+
+    if (total !== null && total !== undefined) {
+      return safeNumber(total, fallback);
+    }
+  }
+
+  return fallback;
 }
 
 function normalizeCollectionResponse(response = null) {
   const rawItems = pickCollectionItems(response);
 
-  const items = rawItems.map((item) =>
-    normalizeFacturaPreservingLinks(item)
-  );
+  const items = rawItems
+    .map((item) => normalizeFacturaPreservingLinks(item))
+    .filter((item) => hasOwnKeys(item));
 
   const total = pickCollectionTotal(response, items.length);
 
   return {
     items,
+    facturas: items,
     total,
+    count: items.length,
+    remoteCount: total,
     rawItems,
     raw: response,
   };
 }
 
 function pickDetailPayload(response = null) {
-  const obj = safeObject(response);
+  if (!response) {
+    return null;
+  }
 
-  return first(
-    obj.item,
-    obj.factura,
+  const candidates = getPayloadCandidates(response);
 
-    obj.data?.item,
-    obj.data?.factura,
+  for (const candidate of candidates) {
+    const obj = safeObject(candidate, null);
 
-    obj.result?.item,
-    obj.result?.factura,
+    if (!obj) {
+      continue;
+    }
 
-    obj.payload?.item,
-    obj.payload?.factura,
+    const detail = first(
+      obj.item,
+      obj.factura,
+      obj.record,
 
-    obj.data,
-    obj.result,
-    obj.payload,
+      obj.data?.item,
+      obj.data?.factura,
+      obj.data?.record,
 
-    null
-  );
+      obj.result?.item,
+      obj.result?.factura,
+      obj.result?.record,
+
+      obj.payload?.item,
+      obj.payload?.factura,
+      obj.payload?.record
+    );
+
+    if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+      return detail;
+    }
+  }
+
+  const obj = safeObject(response, null);
+
+  if (obj && !Array.isArray(obj)) {
+    const nested = first(
+      obj.data,
+      obj.result,
+      obj.payload,
+      obj.body
+    );
+
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+      const nestedObj = safeObject(nested);
+
+      if (
+        nestedObj.id ||
+        nestedObj.facturaId ||
+        nestedObj.invoiceId ||
+        nestedObj.numero ||
+        nestedObj.numeroFacturaLegal ||
+        nestedObj.numeroFacturaSistema
+      ) {
+        return nestedObj;
+      }
+    }
+
+    if (
+      obj.id ||
+      obj.facturaId ||
+      obj.invoiceId ||
+      obj.numero ||
+      obj.numeroFacturaLegal ||
+      obj.numeroFacturaSistema
+    ) {
+      return obj;
+    }
+  }
+
+  return null;
 }
 
 function normalizeDetailResponse(response = null) {
@@ -670,6 +1173,93 @@ function normalizeDetailResponse(response = null) {
   return payload
     ? normalizeFacturaPreservingLinks(payload)
     : null;
+}
+
+/* =========================================================
+   STORE FALLBACK / MERGE
+========================================================= */
+
+function findStoreFacturaById(facturaId = "") {
+  const id = safeText(facturaId, "");
+
+  if (!id) return null;
+
+  try {
+    const direct = getFacturaByIdStore(id);
+
+    if (direct) {
+      return normalizeFacturaPreservingLinks(direct);
+    }
+  } catch {}
+
+  return null;
+}
+
+function mergeDetailWithStore(remoteDetail = {}, facturaId = "") {
+  const remote = safeObject(remoteDetail);
+
+  if (!hasOwnKeys(remote)) {
+    return null;
+  }
+
+  const storeItem = findStoreFacturaById(facturaId || getFacturaIdentity(remote));
+
+  if (!storeItem) {
+    return normalizeFacturaPreservingLinks(remote);
+  }
+
+  const merged = {
+    ...storeItem,
+    ...remote,
+
+    raw: {
+      ...safeObject(storeItem.raw),
+      ...safeObject(remote.raw),
+    },
+
+    meta: {
+      ...safeObject(storeItem.meta),
+      ...safeObject(remote.meta),
+    },
+  };
+
+  const normalizedMerged = normalizeFacturaPreservingLinks(merged);
+
+  if (getRelatedIncidenciaId(normalizedMerged)) {
+    return normalizedMerged;
+  }
+
+  const storeRelationId = getRelatedIncidenciaId(storeItem);
+
+  if (!storeRelationId) {
+    return normalizedMerged;
+  }
+
+  return preserveIncidenciaFields(
+    {
+      ...normalizedMerged,
+      ticketId: storeRelationId,
+      incidenciaId: storeRelationId,
+    },
+    storeItem
+  );
+}
+
+function isCurrentCollectionToken(state = {}, token = 0) {
+  return Boolean(
+    state &&
+      state.inflight &&
+      safeNumber(state.inflight.collectionToken, 0) === token
+  );
+}
+
+function isCurrentDetailToken(state = {}, token = 0, facturaId = "") {
+  return Boolean(
+    state &&
+      state.inflight &&
+      safeNumber(state.inflight.detailToken, 0) === token &&
+      sameIdentity(state.inflight.detailFacturaId, facturaId)
+  );
 }
 
 /* =========================================================
@@ -683,18 +1273,21 @@ export async function loadFacturasCollection({
   force = false,
   query = {},
 } = {}) {
-  if (!state) {
-    throw new Error("FACTURAS_STATE_REQUIRED");
-  }
+  ensureStateShape(state);
 
   const inflight = getFacturasInflightLoad(state);
 
-  if (inflight) {
+  if (inflight && !force) {
     return inflight;
   }
 
-  const shouldRefresh =
-    Boolean(silent || isFacturasLoaded(state) || force);
+  const token = collectionLoadToken + 1;
+  collectionLoadToken = token;
+
+  state.inflight.collectionToken = token;
+
+  const hasLoaded = isFacturasLoaded(state);
+  const shouldRefresh = Boolean(silent || hasLoaded || force);
 
   clearFacturasError(state);
 
@@ -710,12 +1303,28 @@ export async function loadFacturasCollection({
 
   const promise = (async () => {
     try {
+      safeEmit("facturas:load:request", {
+        query: safeObject(query),
+        silent,
+        force,
+        token,
+      });
+
       const response = await fetchFacturasRequest({
         ...safeObject(query),
       });
 
-      const { items, total } =
-        normalizeCollectionResponse(response);
+      const normalized = normalizeCollectionResponse(response);
+      const { items, total } = normalized;
+
+      if (!isCurrentCollectionToken(state, token)) {
+        safeLog("Ignorando colección obsoleta:", {
+          token,
+          currentToken: state.inflight.collectionToken,
+        });
+
+        return items;
+      }
 
       setFacturasStore(items);
       setFacturasRemoteCount(state, total);
@@ -726,30 +1335,59 @@ export async function loadFacturasCollection({
       setFacturasLastSyncAt(state, new Date().toISOString());
       clearFacturasError(state);
 
+      safeEmit("facturas:load:success", {
+        total,
+        count: items.length,
+        items,
+        response,
+        token,
+      });
+
       safeRender(render);
 
       return items;
     } catch (error) {
-      setFacturasLoading(state, false);
-      setFacturasRefreshing(state, false);
-      setFacturasLoaded(state, true);
+      if (isCurrentCollectionToken(state, token)) {
+        setFacturasLoading(state, false);
+        setFacturasRefreshing(state, false);
 
-      setFacturasError(
-        state,
-        safeErrorMessage(
+        setFacturasError(
+          state,
+          safeErrorMessage(
+            error,
+            "No se pudieron cargar las facturas."
+          )
+        );
+
+        /*
+          Marcamos loaded=true para evitar skeleton infinito.
+          La vista ya tiene error state + retry.
+        */
+        setFacturasLoaded(state, true);
+
+        safeEmit("facturas:load:error", {
           error,
-          "No se pudieron cargar las facturas."
-        )
-      );
+          message: safeErrorMessage(
+            error,
+            "No se pudieron cargar las facturas."
+          ),
+          token,
+        });
 
-      safeRender(render);
+        safeRender(render);
+      }
+
       throw error;
     } finally {
-      setFacturasInflightLoad(state, null);
+      if (isCurrentCollectionToken(state, token)) {
+        setFacturasInflightLoad(state, null);
+        state.inflight.collectionToken = 0;
+      }
     }
   })();
 
   setFacturasInflightLoad(state, promise);
+
   return promise;
 }
 
@@ -763,9 +1401,7 @@ export async function loadFacturaDetailById({
   facturaId = "",
   force = true,
 } = {}) {
-  if (!state) {
-    throw new Error("FACTURAS_STATE_REQUIRED");
-  }
+  ensureStateShape(state);
 
   const id = safeText(facturaId, "");
 
@@ -774,9 +1410,13 @@ export async function loadFacturaDetailById({
   }
 
   const currentDetail = getFacturasDetailData(state);
-  const currentDetailId = getFacturaIdentity(currentDetail);
+  const currentDetailIds = getFacturaIdentityList(currentDetail);
 
-  if (!force && currentDetail && currentDetailId === id) {
+  if (
+    !force &&
+    currentDetail &&
+    currentDetailIds.some((candidate) => sameIdentity(candidate, id))
+  ) {
     setFacturasDetailOpen(state, true);
     setFacturasDetailLoading(state, false);
     safeRender(render);
@@ -784,47 +1424,124 @@ export async function loadFacturaDetailById({
   }
 
   const inflight = getFacturasInflightDetail(state);
+  const inflightId = safeText(state?.inflight?.detailFacturaId, "");
 
-  if (inflight) {
+  if (inflight && sameIdentity(inflightId, id)) {
     return inflight;
   }
 
+  const token = detailLoadToken + 1;
+  detailLoadToken = token;
+
+  state.inflight.detailToken = token;
+  state.inflight.detailFacturaId = id;
+
+  const storeFallback = findStoreFacturaById(id);
+
   setFacturasDetailOpen(state, true);
   setFacturasDetailLoading(state, true);
+
+  if (storeFallback) {
+    setFacturasDetailData(state, storeFallback);
+  }
 
   safeRender(render);
 
   const promise = (async () => {
     try {
+      safeEmit("facturas:detail:load:request", {
+        facturaId: id,
+        token,
+        hasStoreFallback: Boolean(storeFallback),
+      });
+
       const response = await fetchFacturaDetailRequest(id);
-      const factura = normalizeDetailResponse(response);
+      const remoteFactura = normalizeDetailResponse(response);
+
+      if (!remoteFactura) {
+        throw new Error("FACTURA_DETAIL_EMPTY");
+      }
+
+      const factura = mergeDetailWithStore(remoteFactura, id);
 
       if (!factura) {
-        throw new Error("FACTURA_DETAIL_EMPTY");
+        throw new Error("FACTURA_DETAIL_EMPTY_AFTER_MERGE");
+      }
+
+      if (!isCurrentDetailToken(state, token, id)) {
+        safeLog("Ignorando detalle obsoleto:", {
+          facturaId: id,
+          token,
+          currentToken: state.inflight.detailToken,
+          currentFacturaId: state.inflight.detailFacturaId,
+        });
+
+        return factura;
       }
 
       setFacturasDetailData(state, factura);
       setFacturasDetailOpen(state, true);
       setFacturasDetailLoading(state, false);
 
+      safeEmit("facturas:detail:load:success", {
+        facturaId: id,
+        detail: factura,
+        response,
+        token,
+      });
+
       safeRender(render);
 
       return factura;
     } catch (error) {
-      setFacturasDetailLoading(state, false);
+      if (isCurrentDetailToken(state, token, id)) {
+        setFacturasDetailLoading(state, false);
 
-      if (!getFacturasDetailData(state)) {
-        setFacturasDetailOpen(state, false);
+        if (storeFallback) {
+          setFacturasDetailData(state, storeFallback);
+          setFacturasDetailOpen(state, true);
+
+          safeEmit("facturas:detail:load:fallback", {
+            facturaId: id,
+            detail: storeFallback,
+            error,
+            token,
+          });
+
+          safeRender(render);
+
+          return storeFallback;
+        }
+
+        if (!getFacturasDetailData(state)) {
+          setFacturasDetailOpen(state, false);
+        }
+
+        safeEmit("facturas:detail:load:error", {
+          facturaId: id,
+          error,
+          message: safeErrorMessage(
+            error,
+            "No se pudo cargar el detalle de la factura."
+          ),
+          token,
+        });
+
+        safeRender(render);
       }
 
-      safeRender(render);
       throw error;
     } finally {
-      setFacturasInflightDetail(state, null);
+      if (isCurrentDetailToken(state, token, id)) {
+        setFacturasInflightDetail(state, null);
+        state.inflight.detailToken = 0;
+        state.inflight.detailFacturaId = "";
+      }
     }
   })();
 
   setFacturasInflightDetail(state, promise);
+
   return promise;
 }
 

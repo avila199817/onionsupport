@@ -1941,7 +1941,8 @@ function renderStyles() {
 
       .facturas-btn--create:hover{
         color:var(--text-on-accent, #ffffff);
-        filter:brightness(1.02);
+        background:var(--gradient-success, linear-gradient(180deg, #22c55e 0%, #16a34a 100%));
+        border-color:color-mix(in srgb, var(--success, #22c55e) 32%, var(--btn-primary-border, transparent));
       }
 
       .facturas-btn.is-loading,
@@ -2210,6 +2211,9 @@ function renderStyles() {
       }
 
       .facturas-table thead th{
+        position:sticky;
+        top:0;
+        z-index:2;
         padding:var(--table-cell-padding-y, 12px) var(--table-cell-padding-x, 12px);
         text-align:left;
         font-size:var(--data-table-head-font-size, var(--font-xs, 11px));
@@ -2230,6 +2234,10 @@ function renderStyles() {
 
       .facturas-table tbody tr:last-child td{
         border-bottom:none;
+      }
+
+      .facturas-table tbody tr:nth-child(even) td{
+        background:color-mix(in srgb, var(--surface-elevated, rgba(39,39,42,.88)) 86%, transparent);
       }
 
       .facturas-table-row{
@@ -2699,7 +2707,8 @@ function renderStyles() {
 
       .facturas-action-btn--success:hover{
         color:var(--text-on-accent, #ffffff);
-        filter:brightness(1.02);
+        background:var(--gradient-success, linear-gradient(180deg, #22c55e 0%, #16a34a 100%));
+        border-color:color-mix(in srgb, var(--success, #22c55e) 32%, var(--btn-primary-border, transparent));
         box-shadow:
           0 10px 22px color-mix(in srgb, var(--success, #22c55e), transparent 84%),
           var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));

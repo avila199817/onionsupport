@@ -1718,7 +1718,6 @@ function getFacturaRelacionada(detail = {}) {
       detail.invoiceCode,
       detail.invoiceId,
       detail.facturaId,
-      detail.factura,
 
       detail?.invoice?.numeroFacturaLegal,
       detail?.invoice?.numeroFacturaSistema,
@@ -1743,7 +1742,6 @@ function getFacturaRelacionada(detail = {}) {
       raw.invoiceCode,
       raw.invoiceId,
       raw.facturaId,
-      raw.factura,
       raw.facturaRelacionada,
 
       raw?.invoice?.numeroFacturaLegal,
@@ -1829,13 +1827,17 @@ function getFacturaRelacionada(detail = {}) {
   );
 
   const numericAmount = Number(amount);
+  const safeInvoiceCode =
+    invoiceCode === "[object Object]"
+      ? ""
+      : invoiceCode;
 
-  if (invoiceCode && Number.isFinite(numericAmount)) {
-    return `${invoiceCode} · ${formatMoney(numericAmount, currency)}`;
+  if (safeInvoiceCode && Number.isFinite(numericAmount)) {
+    return `${safeInvoiceCode} · ${formatMoney(numericAmount, currency)}`;
   }
 
-  if (invoiceCode) {
-    return invoiceCode;
+  if (safeInvoiceCode) {
+    return safeInvoiceCode;
   }
 
   if (Number.isFinite(numericAmount)) {
@@ -3940,23 +3942,22 @@ function renderModalInner(detail = {}) {
 
           ${renderAttachmentPreview()}
 
-          <section class="incidencias-modal-description-section">
-            <div class="incidencias-modal-section-head">
-              <h3>Descripción de la incidencia</h3>
-              <span>Info clave</span>
-            </div>
-
-            <div class="incidencias-modal-description-box">
-              ${escapeHtml(description)}
-            </div>
-          </section>
-
           <div class="incidencias-modal-meta-grid">
             ${renderMetaField("Técnico", tecnico)}
             ${renderMetaField("Factura", facturaRelacionada)}
             ${renderMetaField("Creada", createdAt)}
             ${renderMetaField("Adjuntos", String(attachments.length))}
           </div>
+
+          <section class="incidencias-modal-description-section">
+            <div class="incidencias-modal-section-head">
+              <h3>Descripción de la incidencia</h3>
+            </div>
+
+            <div class="incidencias-modal-description-box">
+              ${escapeHtml(description)}
+            </div>
+          </section>
 
           ${renderComposer(item)}
 
@@ -3965,7 +3966,6 @@ function renderModalInner(detail = {}) {
           <section class="incidencias-modal-history-section">
             <div class="incidencias-modal-section-head">
               <h3>Historial y actividad</h3>
-              <span>Timeline</span>
             </div>
 
             ${renderTimeline(item)}
@@ -4395,15 +4395,15 @@ function renderModalInner(detail = {}) {
           .incidencias-modal-composer {
             display:grid;
             gap:10px;
-            padding:14px;
-            border-radius:18px;
-            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
+            padding:16px;
+            border-radius:20px;
+            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 44%, var(--border-soft));
             background:
-              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 92%),
+              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent), transparent 92%),
               var(--surface-1, var(--surface-glass));
             box-shadow:
-              0 10px 26px rgba(0,0,0,.045),
-              inset 0 1px 0 rgba(255,255,255,.04);
+              0 14px 36px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent),
+              inset 0 1px 0 rgba(255,255,255,.06);
           }
 
           .incidencias-modal-composer-head {
@@ -4413,16 +4413,16 @@ function renderModalInner(detail = {}) {
           }
 
           .incidencias-modal-composer-icon {
-            width:34px;
-            height:34px;
-            flex:0 0 34px;
+            width:38px;
+            height:38px;
+            flex:0 0 38px;
             border-radius:13px;
             display:grid;
             place-items:center;
             border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft));
             background:color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent);
             color:var(--accent, #7c5cff);
-            font-size:22px;
+            font-size:24px;
             line-height:1;
             font-weight:var(--weight-black, 800);
           }

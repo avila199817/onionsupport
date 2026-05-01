@@ -184,6 +184,7 @@ const TOPBAR_LIGHT_FALLBACK_METHODS =
 ========================================================= */
 
 let eventsBound = false;
+let eventsBindingInFlight = false;
 let boundScope = "";
 
 let langChangeInFlight = false;
@@ -1945,6 +1946,25 @@ export function bindAppEvents({
     return true;
   }
 
+  if (eventsBindingInFlight) {
+    safeWarn(
+      AppCore,
+      "bindAppEvents skipped: binding already in progress.",
+      {
+        scope:
+          safeText(
+            scope,
+            DEFAULT_SCOPE
+          ),
+      }
+    );
+
+    return false;
+  }
+
+  eventsBindingInFlight =
+    true;
+
   const finalScope =
     safeText(
       scope,
@@ -1969,43 +1989,67 @@ export function bindAppEvents({
     applyPostRenderLoaderPolicy,
   };
 
-  bindUserEvents(context);
-  bindLanguageEvents(context);
-  bindAuthEvents(context);
-  bindRouterEvents(context);
+  try {
+    bindUserEvents(context);
+    bindLanguageEvents(context);
+    bindAuthEvents(context);
+    bindRouterEvents(context);
 
-  eventsBound =
-    true;
+    eventsBound =
+      true;
 
-  boundScope =
-    finalScope;
+    boundScope =
+      finalScope;
 
-  safeEmit(
-    AppCore,
-    EVENT_NAMES.appEventsBound,
-    {
-      scope:
-        boundScope,
+    safeEmit(
+      AppCore,
+      EVENT_NAMES.appEventsBound,
+      {
+        scope:
+          boundScope,
 
-      at:
-        safeIsoDate(),
+        at:
+          safeIsoDate(),
+      }
+    );
+
+    safeEmit(
+      AppCore,
+      EVENT_NAMES.appEventsReady,
+      getAppEventsSnapshot()
+    );
+
+    safeLog(
+      AppCore,
+      "App events ready.",
+      {
+        scope:
+          boundScope,
+      }
+    );
+  } catch (error) {
+    for (const dispose of boundDisposers.splice(0)) {
+      try {
+        dispose();
+      } catch {}
     }
-  );
 
-  safeEmit(
-    AppCore,
-    EVENT_NAMES.appEventsReady,
-    getAppEventsSnapshot()
-  );
+    eventsBound =
+      false;
+    boundScope =
+      "";
 
-  safeLog(
-    AppCore,
-    "App events ready.",
-    {
-      scope:
-        boundScope,
-    }
-  );
+    recordError(
+      AppCore,
+      EVENT_NAMES.appEventsError,
+      error
+    );
+
+    return false;
+  } finally {
+    eventsBindingInFlight =
+      false;
+  }
 
   return true;
 }
@@ -2024,6 +2068,8 @@ export function unbindAppEvents(AppCore = null) {
     "";
 
   langChangeInFlight =
+    false;
+  eventsBindingInFlight =
     false;
 
   safeEmit(
@@ -2047,6 +2093,9 @@ export function getAppEventsSnapshot() {
   return {
     eventsBound:
       Boolean(eventsBound),
+
+    eventsBindingInFlight:
+      Boolean(eventsBindingInFlight),
 
     boundScope,
 

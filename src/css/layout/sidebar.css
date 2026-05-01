@@ -249,16 +249,12 @@ body.sidebar-collapsed .sidebar{
 
 body.sidebar-transitioning .sidebar,
 body.sidebar-visual-syncing .sidebar,
-body.router-rendering .sidebar,
-body.app-navigating .sidebar,
 .sidebar.is-transitioning{
   pointer-events:none;
 }
 
 body.sidebar-transitioning .sidebar .menu-item,
 body.sidebar-visual-syncing .sidebar .menu-item,
-body.router-rendering .sidebar .menu-item,
-body.app-navigating .sidebar .menu-item,
 .sidebar.is-transitioning .menu-item,
 .sidebar-menu.is-transitioning .menu-item,
 .sidebar-menu.is-visual-syncing .menu-item{
@@ -267,8 +263,6 @@ body.app-navigating .sidebar .menu-item,
 
 body.sidebar-transitioning .sidebar .menu-item:hover,
 body.sidebar-visual-syncing .sidebar .menu-item:hover,
-body.router-rendering .sidebar .menu-item:hover,
-body.app-navigating .sidebar .menu-item:hover,
 .sidebar.is-transitioning .menu-item:hover,
 .sidebar-menu.is-transitioning .menu-item:hover,
 .sidebar-menu.is-visual-syncing .menu-item:hover{

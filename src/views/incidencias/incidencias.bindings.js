@@ -2,17 +2,27 @@
    Onion SPA - Incidencias Bindings
    Archivo: src/views/incidencias/incidencias.bindings.js
 
-   CLIENT EXPERIENCE PRO · DOM BINDINGS · 10/10
+   CLIENT EXPERIENCE PRO · DOM BINDINGS · EXTREME 12/10
+   PATCH · DATA-ACTION + DATA-INCIDENCIAS-ACTION
+   PATCH · CREATE BUTTON READY
+   PATCH · PAGINATION READY
+   PATCH · ROW CLICK SAFE
+   PATCH · NO DOUBLE HANDLERS
+   PATCH · MODAL BRIDGE REAL
+   PATCH · MUTATION RELOAD BRIDGE
 
    Responsabilidades:
    - bind DOM robusto por delegación
    - refresh / retry
    - export CSV
+   - create incidencia
+   - pagination prev / next
    - open ticket modal
    - copy id
    - rebind limpio tras rerender
    - cleanup sólido por scope
    - compatibilidad con actions antiguas y nuevas
+   - compatibilidad con data-action y data-incidencias-action
 
    FIX CRÍTICO:
    - evita doble click handlers
@@ -20,46 +30,94 @@
    - soporta openTicket(ticketId) y openTicket({ ticketId })
    - abre modal si la action solo devuelve el detail
    - refresca listado tras updates del modal
+   - respeta data-row-click-disabled="true"
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
 const DEFAULT_SCOPE = "view:incidencias";
 
-const ACTIONS = {
+const BrowserWindow = typeof window !== "undefined" ? window : null;
+const BrowserDocument = typeof document !== "undefined" ? document : null;
+
+const ACTIONS = Object.freeze({
   refresh: new Set([
+    "refresh",
+    "retry",
+    "reload",
     "refresh-incidencias",
     "reload-incidencias",
     "incidencias-refresh",
-    "refresh",
-    "retry",
+    "incidencias-retry",
   ]),
 
   export: new Set([
+    "export",
+    "export-csv",
     "export-incidencias",
     "export-incidencias-csv",
     "incidencias-export",
-    "export-csv",
+    "incidencias-export-csv",
   ]),
 
   open: new Set([
+    "detail",
+    "open-detail",
     "open-ticket",
     "open-incidencia",
     "view-ticket",
     "view-incidencia",
     "ticket-open",
     "incidencia-open",
+    "show-ticket",
+    "show-incidencia",
   ]),
 
   copy: new Set([
+    "copy",
+    "copy-id",
     "copy-ticket-id",
     "copy-incidencia-id",
     "copy-ticket",
     "copy-incidencia",
   ]),
-};
+
+  create: new Set([
+    "create",
+    "new",
+    "new-incidencia",
+    "create-incidencia",
+    "incidencias-create",
+    "open-create",
+    "open-create-incidencia",
+  ]),
+
+  prevPage: new Set([
+    "prev",
+    "previous",
+    "prev-page",
+    "previous-page",
+    "incidencias-prev-page",
+  ]),
+
+  nextPage: new Set([
+    "next",
+    "next-page",
+    "incidencias-next-page",
+  ]),
+});
+
+const ACTION_SELECTOR = [
+  "[data-incidencias-action]",
+  "[data-action]",
+].join(",");
 
 const ROW_SELECTOR = [
+  ".incidencias-row",
   "[data-ticket-row]",
   "[data-incidencia-row]",
   "[data-ticket-id][data-row]",
@@ -78,12 +136,14 @@ const INTERACTIVE_SELECTOR = [
   "summary",
   "[role='button']",
   "[data-action]",
+  "[data-incidencias-action]",
   "[data-spa]",
   "[data-no-row-open]",
 ].join(",");
 
 const fallbackCleanups = new Map();
 const busyKeys = new Set();
+const busyElementMeta = new WeakMap();
 
 let reloadScheduled = false;
 
@@ -98,10 +158,23 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
-function safeObject(value) {
+function safeLower(value, fallback = "") {
+  return safeText(value, fallback).toLowerCase();
+}
+
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function safeObject(value, fallback = {}) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
-    : {};
+    : fallback;
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 function first(...values) {
@@ -116,6 +189,21 @@ function first(...values) {
   }
 
   return null;
+}
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function normalizeAction(value = "") {
+  return safeLower(value, "")
+    .replace(/\s+/g, "-")
+    .replace(/_+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function safeWarn(...args) {
@@ -141,20 +229,25 @@ function safeError(...args) {
 }
 
 function showToast(message = "", type = "info") {
+  const text = safeText(message, "");
+  const kind = safeText(type, "info");
+
+  if (!text) return;
+
   try {
-    if (typeof AppCore?.toast?.[type] === "function") {
-      AppCore.toast[type](message);
+    if (typeof AppCore?.toast?.[kind] === "function") {
+      AppCore.toast[kind](text);
       return;
     }
   } catch {}
 
   try {
-    AppCore?.toast?.show?.(message, type);
+    AppCore?.toast?.show?.(text, kind);
     return;
   } catch {}
 
   try {
-    AppCore?.ui?.toast?.[type]?.(message);
+    AppCore?.ui?.toast?.[kind]?.(text);
   } catch {}
 }
 
@@ -170,7 +263,7 @@ function safeEmit(event = "", payload = {}) {
   } catch {}
 
   try {
-    window.dispatchEvent(
+    BrowserWindow?.dispatchEvent?.(
       new CustomEvent(eventName, {
         detail: payload,
       })
@@ -257,11 +350,13 @@ function bindDomEvent({
 
   try {
     target.addEventListener(eventName, handler, options);
+
     addFallbackCleanup(scopeName, () => {
       try {
         target.removeEventListener(eventName, handler, options);
       } catch {}
     });
+
     return true;
   } catch {
     return false;
@@ -279,31 +374,36 @@ function bindBusEvent({
 
   try {
     if (typeof AppCore?.events?.on === "function") {
-      AppCore.events.on(eventName, handler);
+      const off = AppCore.events.on(eventName, handler);
       bound = true;
 
       addFallbackCleanup(scopeName, () => {
         try {
+          if (typeof off === "function") {
+            off();
+            return;
+          }
+
           AppCore?.events?.off?.(eventName, handler);
         } catch {}
       });
     }
   } catch {}
 
-  if (!bound) {
-    const windowHandler = (event) => handler(event);
+  try {
+    if (BrowserWindow?.addEventListener) {
+      const windowHandler = (event) => handler(event);
 
-    try {
-      window.addEventListener(eventName, windowHandler);
+      BrowserWindow.addEventListener(eventName, windowHandler);
       bound = true;
 
       addFallbackCleanup(scopeName, () => {
         try {
-          window.removeEventListener(eventName, windowHandler);
+          BrowserWindow.removeEventListener(eventName, windowHandler);
         } catch {}
       });
-    } catch {}
-  }
+    }
+  } catch {}
 
   return bound;
 }
@@ -315,15 +415,27 @@ function bindBusEvent({
 function getContainer() {
   return (
     AppCore?.dom?.viewContainer ||
-    document.getElementById("view-container") ||
-    document
+    BrowserDocument?.getElementById?.("view-container") ||
+    BrowserDocument
   );
+}
+
+function getEventTargetElement(event) {
+  const target = event?.target || null;
+
+  if (!target) return null;
+
+  if (target.nodeType === 1) {
+    return target;
+  }
+
+  return target.parentElement || null;
 }
 
 function isElementInsideRoot(root, element) {
   try {
     if (!root || !element) return false;
-    if (root === document) return true;
+    if (root === BrowserDocument) return true;
     return root.contains(element);
   } catch {
     return true;
@@ -331,11 +443,13 @@ function isElementInsideRoot(root, element) {
 }
 
 function closestInside(root, target, selector = "") {
-  if (!target || !selector || typeof target.closest !== "function") {
+  const element = target?.nodeType === 1 ? target : target?.parentElement;
+
+  if (!element || !selector || typeof element.closest !== "function") {
     return null;
   }
 
-  const match = target.closest(selector);
+  const match = element.closest(selector);
 
   if (!match || !isElementInsideRoot(root, match)) {
     return null;
@@ -344,14 +458,48 @@ function closestInside(root, target, selector = "") {
   return match;
 }
 
-function getActionElement(root, target, actionSet) {
-  const actionElement = closestInside(root, target, "[data-action]");
-  if (!actionElement) return null;
+function getActionNames(element = null) {
+  if (!element) return [];
 
-  const action = safeText(actionElement.dataset?.action || "");
-  if (!action || !actionSet.has(action)) return null;
+  return [
+    element?.dataset?.incidenciasAction,
+    element?.dataset?.action,
+    element?.getAttribute?.("data-incidencias-action"),
+    element?.getAttribute?.("data-action"),
+  ]
+    .map(normalizeAction)
+    .filter(Boolean);
+}
 
-  return actionElement;
+function elementMatchesActionSet(element = null, actionSet = new Set()) {
+  if (!element || !actionSet) return false;
+
+  return getActionNames(element).some((action) => actionSet.has(action));
+}
+
+function getActionElement(root, target, actionSet = new Set()) {
+  let element = target?.nodeType === 1 ? target : target?.parentElement;
+
+  while (element && isElementInsideRoot(root, element)) {
+    if (
+      element.matches?.(ACTION_SELECTOR) &&
+      elementMatchesActionSet(element, actionSet)
+    ) {
+      return element;
+    }
+
+    if (element === root || element === BrowserDocument?.body) {
+      break;
+    }
+
+    element = element.parentElement;
+  }
+
+  return null;
+}
+
+function getAnyActionElement(root, target) {
+  return closestInside(root, target, ACTION_SELECTOR);
 }
 
 function getDataSource(element) {
@@ -410,12 +558,53 @@ function getTicketCode(element) {
   );
 }
 
+function getPageFromElement(element = null) {
+  return safeNumber(
+    first(
+      element?.dataset?.page,
+      element?.getAttribute?.("data-page"),
+      element?.dataset?.targetPage,
+      element?.getAttribute?.("data-target-page")
+    ),
+    0
+  );
+}
+
+function getRouteFromElement(element = null) {
+  return safeText(
+    first(
+      element?.dataset?.route,
+      element?.getAttribute?.("data-route"),
+      element?.getAttribute?.("href")
+    ),
+    ""
+  );
+}
+
+function isRowClickDisabled(row = null) {
+  const value = safeLower(
+    first(
+      row?.dataset?.rowClickDisabled,
+      row?.getAttribute?.("data-row-click-disabled"),
+      row?.dataset?.noRowOpen,
+      row?.getAttribute?.("data-no-row-open")
+    ),
+    ""
+  );
+
+  return ["true", "1", "yes", "si", "sí", "on"].includes(value);
+}
+
 function shouldOpenRowFromClick(root, event) {
-  const target = event?.target;
+  const target = getEventTargetElement(event);
   if (!target) return null;
 
   const row = closestInside(root, target, ROW_SELECTOR);
   if (!row) return null;
+
+  if (isRowClickDisabled(row)) {
+    return null;
+  }
 
   const interactive = target.closest?.(INTERACTIVE_SELECTOR);
 
@@ -426,20 +615,53 @@ function shouldOpenRowFromClick(root, event) {
   return row;
 }
 
+function isFormControl(element = null) {
+  const tagName = safeLower(element?.tagName, "");
+
+  return ["button", "input", "select", "textarea"].includes(tagName);
+}
+
 function setElementBusy(element, busy = false) {
   if (!element) return;
 
   try {
-    element.setAttribute("aria-busy", busy ? "true" : "false");
+    if (busy && !busyElementMeta.has(element)) {
+      busyElementMeta.set(element, {
+        disabled: Boolean(element.disabled),
+        ariaBusy: element.getAttribute?.("aria-busy"),
+        classLoading: element.classList?.contains?.("is-loading"),
+      });
+    }
+
+    if (busy) {
+      element.setAttribute("aria-busy", "true");
+      element.classList?.add?.("is-loading");
+
+      if (isFormControl(element)) {
+        element.disabled = true;
+      }
+
+      return;
+    }
+
+    const previous = busyElementMeta.get(element) || {};
+
+    if (previous.ariaBusy === null || previous.ariaBusy === undefined) {
+      element.removeAttribute?.("aria-busy");
+    } else {
+      element.setAttribute?.("aria-busy", previous.ariaBusy);
+    }
+
+    if (!previous.classLoading) {
+      element.classList?.remove?.("is-loading");
+    }
+
+    if (isFormControl(element)) {
+      element.disabled = Boolean(previous.disabled);
+    }
+
+    busyElementMeta.delete(element);
   } catch {}
-
-  const tagName = safeText(element.tagName, "").toLowerCase();
-
-  if (["button", "input", "select", "textarea"].includes(tagName)) {
-    try {
-      element.disabled = Boolean(busy);
-    } catch {}
-  }
 }
 
 async function runBusy(key = "", element = null, task = null) {
@@ -466,6 +688,14 @@ async function runBusy(key = "", element = null, task = null) {
    CALLBACK COMPAT
 ========================================================= */
 
+function getGlobalActions() {
+  return (
+    BrowserWindow?.OnionIncidenciasActions ||
+    BrowserWindow?.IncidenciasActions ||
+    {}
+  );
+}
+
 async function callFlexibleOpen(openTicket, payload = {}) {
   const ticketId = safeText(payload.ticketId, "");
   if (!ticketId) return null;
@@ -473,18 +703,15 @@ async function callFlexibleOpen(openTicket, payload = {}) {
   const candidates = [];
 
   if (typeof openTicket === "function") {
-    if (openTicket.length === 0) {
-      candidates.push(() => openTicket(payload));
-      candidates.push(() => openTicket(ticketId, payload));
-    } else {
-      candidates.push(() => openTicket(ticketId, payload));
-      candidates.push(() => openTicket(payload));
-    }
+    candidates.push(() => openTicket(payload));
+    candidates.push(() => openTicket(ticketId, payload));
   }
 
+  const globalActions = getGlobalActions();
   const globalOpen =
-    window?.OnionIncidenciasActions?.openTicket ||
-    window?.OnionIncidenciasActions?.getTicketDetail ||
+    globalActions.openTicket ||
+    globalActions.getTicketDetail ||
+    globalActions.getTicket ||
     null;
 
   if (typeof globalOpen === "function" && globalOpen !== openTicket) {
@@ -524,7 +751,8 @@ async function callFlexibleCopy(copyTicketIdAction, payload = {}) {
     candidates.push(() => copyTicketIdAction(ticketId, payload));
   }
 
-  const globalCopy = window?.OnionIncidenciasActions?.copyTicketId || null;
+  const globalActions = getGlobalActions();
+  const globalCopy = globalActions.copyTicketId || globalActions.copyId || null;
 
   if (typeof globalCopy === "function" && globalCopy !== copyTicketIdAction) {
     candidates.push(() => globalCopy(payload));
@@ -564,7 +792,8 @@ async function callFlexibleExport(exportIncidenciasCsvAction) {
     );
   }
 
-  const globalExport = window?.OnionIncidenciasActions?.exportCsv || null;
+  const globalActions = getGlobalActions();
+  const globalExport = globalActions.exportCsv || globalActions.exportIncidenciasCsv || null;
 
   if (typeof globalExport === "function" && globalExport !== exportIncidenciasCsvAction) {
     candidates.push(() => globalExport());
@@ -596,23 +825,171 @@ async function callFlexibleExport(exportIncidenciasCsvAction) {
   return false;
 }
 
+async function callFlexibleCreate(createIncidenciaAction, payload = {}) {
+  const candidates = [];
+
+  if (typeof createIncidenciaAction === "function") {
+    candidates.push(() => createIncidenciaAction(payload));
+    candidates.push(() => createIncidenciaAction(payload?.draft || {}, payload));
+  }
+
+  const globalActions = getGlobalActions();
+  const globalCreate =
+    globalActions.createIncidencia ||
+    globalActions.openCreate ||
+    globalActions.create ||
+    null;
+
+  if (typeof globalCreate === "function" && globalCreate !== createIncidenciaAction) {
+    candidates.push(() => globalCreate(payload));
+    candidates.push(() => globalCreate(payload?.draft || {}, payload));
+  }
+
+  let lastError = null;
+
+  for (const attempt of candidates) {
+    try {
+      const result = await attempt();
+
+      if (result !== null && result !== undefined) {
+        return result;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (lastError) {
+    throw lastError;
+  }
+
+  return null;
+}
+
+async function callFlexiblePage({
+  page = 0,
+  direction = "",
+  setPage,
+  nextPage,
+  prevPage,
+  changePage,
+  render,
+  rerender,
+} = {}) {
+  const finalPage = safeNumber(page, 0);
+  const finalDirection = safeText(direction, "");
+
+  const payload = {
+    page: finalPage,
+    direction: finalDirection,
+    source: "bindings",
+  };
+
+  const candidates = [];
+
+  if (finalPage > 0 && typeof setPage === "function") {
+    candidates.push(() => setPage(finalPage, payload));
+    candidates.push(() => setPage(payload));
+  }
+
+  if (typeof changePage === "function") {
+    candidates.push(() => changePage(payload));
+    if (finalPage > 0) {
+      candidates.push(() => changePage(finalPage, payload));
+    }
+  }
+
+  if (finalDirection === "next" && typeof nextPage === "function") {
+    candidates.push(() => nextPage(payload));
+  }
+
+  if (finalDirection === "prev" && typeof prevPage === "function") {
+    candidates.push(() => prevPage(payload));
+  }
+
+  const view =
+    BrowserWindow?.OnionIncidenciasView ||
+    BrowserWindow?.IncidenciasView ||
+    AppCore?.modules?.IncidenciasView ||
+    null;
+
+  if (finalPage > 0 && typeof view?.setPage === "function") {
+    candidates.push(() => view.setPage(finalPage, payload));
+  }
+
+  if (typeof view?.changePage === "function") {
+    candidates.push(() => view.changePage(payload));
+  }
+
+  if (finalDirection === "next" && typeof view?.nextPage === "function") {
+    candidates.push(() => view.nextPage(payload));
+  }
+
+  if (finalDirection === "prev" && typeof view?.prevPage === "function") {
+    candidates.push(() => view.prevPage(payload));
+  }
+
+  let handled = false;
+  let lastError = null;
+
+  for (const attempt of candidates) {
+    try {
+      await attempt();
+      handled = true;
+      break;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  safeEmit("incidencias:page:change", payload);
+
+  try {
+    if (typeof render === "function") {
+      await render(payload);
+      handled = true;
+    } else if (typeof rerender === "function") {
+      await rerender(payload);
+      handled = true;
+    } else if (typeof view?.render === "function") {
+      await view.render(payload);
+      handled = true;
+    } else if (typeof view?.rerender === "function") {
+      await view.rerender(payload);
+      handled = true;
+    }
+  } catch (error) {
+    lastError = error;
+  }
+
+  if (!handled && lastError) {
+    throw lastError;
+  }
+
+  return handled;
+}
+
 /* =========================================================
-   MODAL BRIDGE
+   MODAL BRIDGES
 ========================================================= */
 
 function pickDetailPayload(response = null) {
-  const obj = safeObject(response);
+  if (!response) return null;
 
-  return (
-    obj.detail ||
-    obj.ticket ||
-    obj.item ||
-    obj.data ||
-    obj.result ||
-    obj.payload ||
-    obj.incidencia ||
-    obj
-  );
+  if (isObject(response)) {
+    return (
+      response.detail ||
+      response.ticket ||
+      response.item ||
+      response.data ||
+      response.result ||
+      response.payload ||
+      response.incidencia ||
+      response
+    );
+  }
+
+  return null;
 }
 
 function openModalBridge(detail = null, ticketId = "") {
@@ -623,15 +1000,22 @@ function openModalBridge(detail = null, ticketId = "") {
   }
 
   try {
-    if (typeof window?.OnionIncidenciasModal?.open === "function") {
-      window.OnionIncidenciasModal.open(payload);
+    if (typeof BrowserWindow?.OnionIncidenciasModal?.open === "function") {
+      BrowserWindow.OnionIncidenciasModal.open(payload);
       return true;
     }
   } catch {}
 
   try {
-    if (typeof window?.renderIncidenciaTicketModal === "function") {
-      window.renderIncidenciaTicketModal(payload);
+    if (typeof BrowserWindow?.IncidenciasModal?.open === "function") {
+      BrowserWindow.IncidenciasModal.open(payload);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof BrowserWindow?.renderIncidenciaTicketModal === "function") {
+      BrowserWindow.renderIncidenciaTicketModal(payload);
       return true;
     }
   } catch {}
@@ -642,6 +1026,67 @@ function openModalBridge(detail = null, ticketId = "") {
   });
 
   return true;
+}
+
+function openCreateModalBridge(payload = {}) {
+  try {
+    if (typeof BrowserWindow?.OnionIncidenciasCreateModal?.open === "function") {
+      BrowserWindow.OnionIncidenciasCreateModal.open(payload);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof BrowserWindow?.OnionIncidencias?.createModal?.open === "function") {
+      BrowserWindow.OnionIncidencias.createModal.open(payload);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof BrowserWindow?.renderIncidenciasCreateModal === "function") {
+      BrowserWindow.renderIncidenciasCreateModal(payload);
+      return true;
+    }
+  } catch {}
+
+  safeEmit("incidencias:create:open", payload);
+
+  return false;
+}
+
+async function navigateToCreate(route = "/incidencias/nueva") {
+  const target = safeText(route, "/incidencias/nueva");
+
+  try {
+    if (typeof AppCore?.router?.navigate === "function") {
+      await AppCore.router.navigate(target);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof AppCore?.Router?.navigate === "function") {
+      await AppCore.Router.navigate(target);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof AppCore?.modules?.Router?.navigate === "function") {
+      await AppCore.modules.Router.navigate(target);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof BrowserWindow?.Router?.navigate === "function") {
+      await BrowserWindow.Router.navigate(target);
+      return true;
+    }
+  } catch {}
+
+  return false;
 }
 
 /* =========================================================
@@ -669,6 +1114,7 @@ async function safeReload(reload, loadIncidencias, meta = {}) {
     if (typeof loadIncidencias === "function") {
       const result = await loadIncidencias({
         force: true,
+        source: meta.source || "bindings",
       });
 
       safeEmit("incidencias:bindings:reload:success", {
@@ -741,6 +1187,67 @@ async function handleExport({
   });
 }
 
+async function handleCreate({
+  element = null,
+  createIncidenciaAction,
+} = {}) {
+  const route = getRouteFromElement(element) || "/incidencias/nueva";
+
+  await runBusy("incidencias:create", element, async () => {
+    try {
+      const payload = {
+        route,
+        source: "bindings",
+        silent: false,
+        draft: {},
+      };
+
+      safeEmit("incidencias:bindings:create:start", payload);
+
+      const actionResult = await callFlexibleCreate(createIncidenciaAction, payload);
+
+      if (actionResult) {
+        safeEmit("incidencias:bindings:create:success", {
+          route,
+          result: actionResult,
+        });
+
+        return actionResult;
+      }
+
+      const opened = openCreateModalBridge(payload);
+
+      if (opened) {
+        safeEmit("incidencias:bindings:create:opened", {
+          route,
+          mode: "modal",
+        });
+
+        return true;
+      }
+
+      const navigated = await navigateToCreate(route);
+
+      safeEmit("incidencias:bindings:create:opened", {
+        route,
+        mode: navigated ? "route" : "event",
+      });
+
+      return navigated;
+    } catch (error) {
+      safeWarn("createIncidenciaAction falló", error);
+
+      safeEmit("incidencias:bindings:create:error", {
+        error,
+      });
+
+      showToast("No se pudo abrir el formulario de nueva incidencia.", "error");
+
+      return false;
+    }
+  });
+}
+
 async function handleOpenTicket({
   element = null,
   openTicket,
@@ -752,6 +1259,7 @@ async function handleOpenTicket({
     safeWarn("open-ticket sin id", {
       element,
     });
+
     showToast("No se pudo identificar la incidencia.", "error");
     return;
   }
@@ -816,6 +1324,7 @@ async function handleCopyTicket({
     safeWarn("copy-ticket-id sin id", {
       element,
     });
+
     showToast("No hay referencia para copiar.", "error");
     return;
   }
@@ -840,6 +1349,43 @@ async function handleCopyTicket({
   });
 }
 
+async function handlePage({
+  element = null,
+  direction = "",
+  setPage,
+  nextPage,
+  prevPage,
+  changePage,
+  render,
+  rerender,
+} = {}) {
+  const page = getPageFromElement(element);
+  const finalDirection = safeText(direction, "");
+
+  await runBusy(`incidencias:page:${finalDirection}:${page || "auto"}`, element, async () => {
+    try {
+      await callFlexiblePage({
+        page,
+        direction: finalDirection,
+        setPage,
+        nextPage,
+        prevPage,
+        changePage,
+        render,
+        rerender,
+      });
+    } catch (error) {
+      safeWarn("pagination action falló", error);
+
+      safeEmit("incidencias:bindings:page:error", {
+        page,
+        direction: finalDirection,
+        error,
+      });
+    }
+  });
+}
+
 /* =========================================================
    MAIN
 ========================================================= */
@@ -849,7 +1395,17 @@ export function bindIncidenciasEvents({
   openTicket,
   copyTicketIdAction,
   exportIncidenciasCsvAction,
+  createIncidenciaAction,
+
   reload,
+
+  setPage,
+  nextPage,
+  prevPage,
+  changePage,
+  render,
+  rerender,
+
   scope = DEFAULT_SCOPE,
 } = {}) {
   const scopeName = resolveScopeName(scope);
@@ -859,71 +1415,6 @@ export function bindIncidenciasEvents({
   if (!root) {
     safeWarn("No se encontró contenedor para bindings.");
     return () => {};
-  }
-
-  /* =======================================================
-     DIRECT BUTTONS BY ID
-     Compatibilidad con templates actuales.
-  ======================================================= */
-
-  const refreshBtn = document.getElementById("incidencias-refresh-btn");
-  const retryBtn = document.getElementById("incidencias-retry-btn");
-  const exportBtn = document.getElementById("incidencias-export-btn");
-
-  if (refreshBtn) {
-    bindDomEvent({
-      scopeName,
-      scopeRef,
-      target: refreshBtn,
-      eventName: "click",
-      handler: async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        await handleRefresh({
-          element: refreshBtn,
-          reload,
-          loadIncidencias,
-        });
-      },
-    });
-  }
-
-  if (retryBtn) {
-    bindDomEvent({
-      scopeName,
-      scopeRef,
-      target: retryBtn,
-      eventName: "click",
-      handler: async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        await handleRefresh({
-          element: retryBtn,
-          reload,
-          loadIncidencias,
-        });
-      },
-    });
-  }
-
-  if (exportBtn) {
-    bindDomEvent({
-      scopeName,
-      scopeRef,
-      target: exportBtn,
-      eventName: "click",
-      handler: async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        await handleExport({
-          element: exportBtn,
-          exportIncidenciasCsvAction,
-        });
-      },
-    });
   }
 
   /* =======================================================
@@ -937,7 +1428,7 @@ export function bindIncidenciasEvents({
     target: root,
     eventName: "click",
     handler: async (event) => {
-      const target = event.target;
+      const target = getEventTargetElement(event);
 
       if (!target) return;
 
@@ -965,6 +1456,60 @@ export function bindIncidenciasEvents({
         await handleExport({
           element: exportAction,
           exportIncidenciasCsvAction,
+        });
+
+        return;
+      }
+
+      const createAction = getActionElement(root, target, ACTIONS.create);
+
+      if (createAction) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        await handleCreate({
+          element: createAction,
+          createIncidenciaAction,
+        });
+
+        return;
+      }
+
+      const prevPageAction = getActionElement(root, target, ACTIONS.prevPage);
+
+      if (prevPageAction) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        await handlePage({
+          element: prevPageAction,
+          direction: "prev",
+          setPage,
+          nextPage,
+          prevPage,
+          changePage,
+          render,
+          rerender,
+        });
+
+        return;
+      }
+
+      const nextPageAction = getActionElement(root, target, ACTIONS.nextPage);
+
+      if (nextPageAction) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        await handlePage({
+          element: nextPageAction,
+          direction: "next",
+          setPage,
+          nextPage,
+          prevPage,
+          changePage,
+          render,
+          rerender,
         });
 
         return;
@@ -998,6 +1543,11 @@ export function bindIncidenciasEvents({
         return;
       }
 
+      /*
+        Row click fallback:
+        - se respeta data-row-click-disabled="true"
+        - si el template quiere solo botón detalle, no abre por row.
+      */
       const row = shouldOpenRowFromClick(root, event);
 
       if (row) {
@@ -1007,12 +1557,27 @@ export function bindIncidenciasEvents({
           element: row,
           openTicket,
         });
+
+        return;
+      }
+
+      /*
+        Debug/evento para acciones no reconocidas.
+        No bloquea nada.
+      */
+      const unknownAction = getAnyActionElement(root, target);
+
+      if (unknownAction) {
+        safeEmit("incidencias:bindings:unknown-action", {
+          actions: getActionNames(unknownAction),
+          element: unknownAction,
+        });
       }
     },
   });
 
   /* =======================================================
-     KEYBOARD ACCESSIBILITY FOR ROWS
+     KEYBOARD ACCESSIBILITY
   ======================================================= */
 
   bindDomEvent({
@@ -1022,15 +1587,25 @@ export function bindIncidenciasEvents({
     eventName: "keydown",
     handler: async (event) => {
       const key = safeText(event.key, "");
+      const target = getEventTargetElement(event);
+
+      if (!target) return;
 
       if (key !== "Enter" && key !== " ") {
         return;
       }
 
-      const target = event.target;
+      const actionElement = closestInside(root, target, ACTION_SELECTOR);
+
+      if (actionElement) {
+        return;
+      }
+
       const row = closestInside(root, target, ROW_SELECTOR);
 
-      if (!row) return;
+      if (!row || isRowClickDisabled(row)) {
+        return;
+      }
 
       const interactive = target?.closest?.(INTERACTIVE_SELECTOR);
 
@@ -1057,33 +1632,26 @@ export function bindIncidenciasEvents({
 
     scheduleReload(reload, loadIncidencias, {
       source: "mutation-event",
-      event,
       payload,
     });
   };
 
-  bindBusEvent({
-    scopeName,
-    eventName: "incidencias:modal:updated",
-    handler: refreshAfterMutation,
-  });
-
-  bindBusEvent({
-    scopeName,
-    eventName: "incidencias:upload:success",
-    handler: refreshAfterMutation,
-  });
-
-  bindBusEvent({
-    scopeName,
-    eventName: "incidencias:comment:success",
-    handler: refreshAfterMutation,
-  });
-
-  bindBusEvent({
-    scopeName,
-    eventName: "incidencias:reopen:success",
-    handler: refreshAfterMutation,
+  [
+    "incidencias:modal:updated",
+    "incidencias:modal:update",
+    "incidencias:ticket:updated",
+    "incidencias:update:success",
+    "incidencias:upload:success",
+    "incidencias:comment:success",
+    "incidencias:reopen:success",
+    "incidencias:create:success",
+    "incidencias:created",
+  ].forEach((eventName) => {
+    bindBusEvent({
+      scopeName,
+      eventName,
+      handler: refreshAfterMutation,
+    });
   });
 
   safeEmit("incidencias:bindings:ready", {
@@ -1103,6 +1671,18 @@ export function bindIncidenciasEvents({
   };
 }
 
+/* =========================================================
+   ALIAS / DEFAULT EXPORT
+========================================================= */
+
+export const bind = bindIncidenciasEvents;
+
+export function cleanupIncidenciasBindings(scope = DEFAULT_SCOPE) {
+  runScopeCleanup(scope);
+}
+
 export default {
   bindIncidenciasEvents,
+  bind,
+  cleanupIncidenciasBindings,
 };

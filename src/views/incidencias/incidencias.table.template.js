@@ -4,7 +4,7 @@
 
    FINAL PRODUCTION TEMPLATE · LIST VIEW · EXTREME SAAS MODE · 12/10
    PATCH · TABLE ALIGNMENT PREMIUM
-   PATCH · FILTER BAR READY
+   PATCH · FILTER PILLS READY · SEARCH REMOVED
    PATCH · CREATE BUTTON ACCENT LOCKED
    PATCH · FACTURAS VISUAL SYSTEM INSPIRED
    PATCH · TABLE SYSTEM LOCK · NO GLOBAL CSS BLEED
@@ -37,7 +37,6 @@
    - tolera payload heterogéneo
    - soporta state + props directas
    - paginación defensiva
-   - estilos encapsulados
    - responsive robusto
    - columna prioridad eliminada de tabla, pero badge interno conservado
    - importe blindado contra normalizadores intermedios
@@ -130,13 +129,8 @@ function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
 
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
-
-    if (Array.isArray(value) && value.length === 0) {
-      continue;
-    }
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
 
     return value;
   }
@@ -173,21 +167,8 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
-function bool(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") return value === 1;
-
-  const key = normalizeText(value);
-
-  if (["true", "1", "yes", "si", "sí", "on"].includes(key)) return true;
-  if (["false", "0", "no", "off"].includes(key)) return false;
-
-  return fallback;
-}
-
 function hashString(value = "") {
   const text = safeText(value, "onion");
-
   let hash = 2166136261;
 
   for (let index = 0; index < text.length; index += 1) {
@@ -244,9 +225,7 @@ function toTimestamp(value = null) {
 
   const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
 
-  if (Number.isNaN(date.getTime())) {
-    return 0;
-  }
+  if (Number.isNaN(date.getTime())) return 0;
 
   return date.getTime();
 }
@@ -284,9 +263,7 @@ function getMoneyFormatter(currency = DEFAULT_CURRENCY) {
 function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
   const amount = safeNumber(value, NaN);
 
-  if (!Number.isFinite(amount)) {
-    return "—";
-  }
+  if (!Number.isFinite(amount)) return "—";
 
   const code = safeText(currency, DEFAULT_CURRENCY).toUpperCase();
 
@@ -421,18 +398,14 @@ function icon(name = "") {
     export: `<svg ${common}><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>`,
     plus: `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
     ticket: `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
-    detail: `<svg ${common}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>`,
     eye: `<svg ${common}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
     paperclip: `<svg ${common}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
     alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
-    check: `<svg ${common}><path d="m20 6-11 11-5-5"/></svg>`,
+    close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
     clock: `<svg ${common}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`,
     euro: `<svg ${common}><path d="M4 10h10"/><path d="M4 14h9"/><path d="M19 5a7.7 7.7 0 0 0-5.2-2C8.4 3 4 7 4 12s4.4 9 9.8 9a7.7 7.7 0 0 0 5.2-2"/></svg>`,
     activity: `<svg ${common}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
     users: `<svg ${common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
-    search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`,
-    filter: `<svg ${common}><path d="M3 5h18"/><path d="M6 12h12"/><path d="M10 19h4"/></svg>`,
-    close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
   };
 
   return icons[name] || "";
@@ -459,7 +432,6 @@ function getAvatarStyle(item = {}) {
   const ticketId = getTicketId(item);
   const clientName = getClientName(item);
   const seed = `${ticketId}|${clientName}`;
-
   const [a, b] = AVATAR_PALETTE[hashString(seed) % AVATAR_PALETTE.length];
 
   return [
@@ -485,7 +457,6 @@ function getTicketId(item = {}) {
       item.ticketCode,
       item.id,
       item._id,
-
       raw.ticketId,
       raw.incidenciaId,
       raw.code,
@@ -508,7 +479,6 @@ function getSubject(item = {}) {
       item.asunto,
       item.name,
       item.preview,
-
       raw.subject,
       raw.title,
       raw.asunto,
@@ -530,7 +500,6 @@ function getDescription(item = {}) {
       item.body,
       item.preview,
       item.text,
-
       raw.description,
       raw.descripcion,
       raw.message,
@@ -562,7 +531,6 @@ function getClientName(item = {}) {
       item.customer?.name,
       item.receptor?.name,
       item.name,
-
       raw.clientName,
       raw.clienteNombre,
       raw.requesterName,
@@ -599,7 +567,6 @@ function getClientEmail(item = {}) {
       item.client?.email,
       item.customer?.email,
       item.receptor?.email,
-
       raw.clientEmail,
       raw.clienteEmail,
       raw.email,
@@ -632,7 +599,6 @@ function getAvatarUrl(item = {}) {
       item.client?.avatarUrl,
       item.customer?.avatar,
       item.customer?.avatarUrl,
-
       raw.clientAvatar,
       raw.avatar,
       raw.avatarUrl,
@@ -671,7 +637,6 @@ function getStatusRaw(item = {}) {
     item.estado,
     item.state,
     item.lifecycle?.status,
-
     raw.status,
     raw.estado,
     raw.state,
@@ -750,7 +715,6 @@ function getPriorityRaw(item = {}) {
     item.severity,
     item.urgency,
     item.sla?.priority,
-
     raw.priority,
     raw.prioridad,
     raw.severity,
@@ -804,7 +768,6 @@ function getCategory(item = {}) {
       item.tipo,
       item.subcategory,
       item.subcategoria,
-
       raw.category,
       raw.categoria,
       raw.type,
@@ -829,7 +792,6 @@ function getAssignedTo(item = {}) {
       item.tecnico?.displayName,
       item.tecnico,
       item.agent,
-
       raw.assignedTo?.name,
       raw.assignedTo?.displayName,
       raw.assignment?.agentName,
@@ -851,33 +813,26 @@ function getImporteAmount(item = {}) {
     item.amount,
     item.importe,
     item.price,
-
     item.facturasTotal,
     item.invoicesTotal,
     item.importeFacturas,
     item.invoiceTotal,
-
     item.linkedInvoices?.total,
     item.linkedInvoices?.amount,
     item.linkedInvoices?.importe,
-
     item.meta?.invoicesTotal,
     item.meta?.invoiceTotal,
-
     raw.total,
     raw.amount,
     raw.importe,
     raw.price,
-
     raw.facturasTotal,
     raw.invoicesTotal,
     raw.importeFacturas,
     raw.invoiceTotal,
-
     raw.linkedInvoices?.total,
     raw.linkedInvoices?.amount,
     raw.linkedInvoices?.importe,
-
     raw.meta?.invoicesTotal,
     raw.meta?.invoiceTotal
   );
@@ -890,24 +845,18 @@ function getImporteCurrency(item = {}) {
     first(
       item.currency,
       item.moneda,
-
       item.linkedInvoices?.currency,
       item.linkedInvoices?.moneda,
-
       item.meta?.invoiceCurrency,
       item.meta?.currency,
       item.meta?.moneda,
-
       raw.currency,
       raw.moneda,
-
       raw.linkedInvoices?.currency,
       raw.linkedInvoices?.moneda,
-
       raw.meta?.invoiceCurrency,
       raw.meta?.currency,
       raw.meta?.moneda,
-
       DEFAULT_CURRENCY
     ),
     DEFAULT_CURRENCY
@@ -923,7 +872,6 @@ function getPaymentStatusKey(item = {}) {
       item.estadoPago,
       item.linkedInvoices?.paymentStatus,
       item.linkedInvoices?.estadoPago,
-
       raw.paymentStatus,
       raw.estadoPago,
       raw.linkedInvoices?.paymentStatus,
@@ -931,21 +879,10 @@ function getPaymentStatusKey(item = {}) {
     )
   );
 
-  if (["paid", "pagada", "pagado", "cobrada", "cobrado"].includes(key)) {
-    return "paid";
-  }
-
-  if (["pending", "pendiente", "unpaid"].includes(key)) {
-    return "pending";
-  }
-
-  if (["partial", "parcial", "pago_parcial"].includes(key)) {
-    return "partial";
-  }
-
-  if (["overdue", "vencida", "vencido"].includes(key)) {
-    return "overdue";
-  }
+  if (["paid", "pagada", "pagado", "cobrada", "cobrado"].includes(key)) return "paid";
+  if (["pending", "pendiente", "unpaid"].includes(key)) return "pending";
+  if (["partial", "parcial", "pago_parcial"].includes(key)) return "partial";
+  if (["overdue", "vencida", "vencido"].includes(key)) return "overdue";
 
   return "";
 }
@@ -980,7 +917,6 @@ function getCreatedAt(item = {}) {
     item.createdAtES,
     item.date,
     item.lifecycle?.createdAt,
-
     raw.createdAt,
     raw.fechaCreacion,
     raw.createdAtES,
@@ -1002,7 +938,6 @@ function getUpdatedAt(item = {}) {
     item.lifecycle?.updatedAt,
     item.lifecycle?.lastUpdateAt,
     item.audit?.updatedAt,
-
     raw.updatedAt,
     raw.lastUpdateAt,
     raw.ultimaNovedad,
@@ -1033,9 +968,7 @@ function getSortTimestamp(item = {}) {
 function compareIncidenciasNewestFirst(a = {}, b = {}) {
   const diff = getSortTimestamp(b) - getSortTimestamp(a);
 
-  if (diff !== 0) {
-    return diff;
-  }
+  if (diff !== 0) return diff;
 
   return safeText(getTicketId(b), "").localeCompare(
     safeText(getTicketId(a), ""),
@@ -1093,12 +1026,11 @@ function isUrgentLike(item = {}) {
 
 function hasImporteLike(item = {}) {
   const amount = safeNumber(getImporteAmount(item), NaN);
-
   return Number.isFinite(amount) && amount > 0;
 }
 
 /* =========================================================
-   FILTERS / SEARCH
+   FILTERS
 ========================================================= */
 
 function normalizeFilter(value = "") {
@@ -1143,55 +1075,16 @@ function getActiveFilter(input = {}) {
   );
 }
 
-function getSearchQuery(input = {}) {
-  const data = safeObject(input);
-  const runtime = safeObject(data.state);
-
-  return normalizeWhitespace(
-    first(
-      data.search,
-      data.searchQuery,
-      data.query,
-      data.filterQuery,
-      runtime.search,
-      runtime.searchQuery,
-      runtime.query,
-      runtime.filterQuery,
-      ""
-    )
-  );
-}
-
-function itemMatchesSearch(item = {}, query = "") {
-  const q = normalizeText(query);
-  if (!q) return true;
-
-  const haystack = normalizeText(
-    [
-      getTicketId(item),
-      getSubject(item),
-      getDescription(item),
-      getClientName(item),
-      getClientEmail(item),
-      getCategory(item),
-      getAssignedTo(item),
-      getStatusLabel(getStatusRaw(item)),
-      getPriorityLabel(item),
-    ].join(" ")
-  );
-
-  return haystack.includes(q);
-}
-
 function itemMatchesFilter(item = {}, filter = "all") {
   const key = normalizeFilter(filter);
+  const statusKey = getStatusKey(getStatusRaw(item));
 
   if (key === "all") return true;
-  if (key === "open") return getStatusKey(getStatusRaw(item)) === "open";
-  if (key === "pending") return getStatusKey(getStatusRaw(item)) === "pending";
-  if (key === "progress") return getStatusKey(getStatusRaw(item)) === "progress";
-  if (key === "resolved") return getStatusKey(getStatusRaw(item)) === "resolved";
-  if (key === "closed") return getStatusKey(getStatusRaw(item)) === "closed";
+  if (key === "open") return statusKey === "open";
+  if (key === "pending") return statusKey === "pending";
+  if (key === "progress") return statusKey === "progress";
+  if (key === "resolved") return statusKey === "resolved";
+  if (key === "closed") return statusKey === "closed";
   if (key === "urgent") return isUrgentLike(item);
   if (key === "attachments") return getAttachmentsCount(item) > 0;
   if (key === "billed") return hasImporteLike(item);
@@ -1201,15 +1094,14 @@ function itemMatchesFilter(item = {}, filter = "all") {
 
 function filterAndSortIncidencias(items = [], input = {}) {
   const activeFilter = getActiveFilter(input);
-  const query = getSearchQuery(input);
 
   return sortIncidenciasNewestFirst(items).filter((item) => {
-    return itemMatchesFilter(item, activeFilter) && itemMatchesSearch(item, query);
+    return itemMatchesFilter(item, activeFilter);
   });
 }
 
 function isFilterActive(input = {}) {
-  return getActiveFilter(input) !== "all" || Boolean(getSearchQuery(input));
+  return getActiveFilter(input) !== "all";
 }
 
 function computeFilterCounts(items = []) {
@@ -1345,7 +1237,6 @@ function getPagination(items = [], input = {}) {
     hasNext: currentPage < totalPages,
     filtering,
     activeFilter: getActiveFilter(data),
-    searchQuery: getSearchQuery(data),
   };
 }
 
@@ -1682,45 +1573,10 @@ function renderFilters(input = {}, pagination = {}) {
   const items = safeArray(first(data.items, data.rows, data.tickets, data.incidencias));
   const counts = computeFilterCounts(items);
   const activeFilter = normalizeFilter(pagination.activeFilter || getActiveFilter(data));
-  const searchQuery = safeText(pagination.searchQuery || getSearchQuery(data), "");
-  const filtering = activeFilter !== "all" || Boolean(searchQuery);
+  const filtering = activeFilter !== "all";
 
   return `
     <div class="incidencias-filters" aria-label="Filtros de incidencias">
-      <div class="incidencias-filter-search">
-        <span class="incidencias-filter-search-icon">${icon("search")}</span>
-
-        <input
-          type="search"
-          class="incidencias-filter-input"
-          id="incidencias-filter-search"
-          name="incidencias-filter-search"
-          value="${escapeHtml(searchQuery)}"
-          placeholder="Filtrar por referencia, cliente, asunto, técnico..."
-          autocomplete="off"
-          spellcheck="false"
-          data-incidencias-action="filter-search"
-          data-action="filter-search"
-        />
-
-        ${
-          searchQuery
-            ? `
-              <button
-                type="button"
-                class="incidencias-filter-clear"
-                data-incidencias-action="clear-filter-search"
-                data-action="clear-filter-search"
-                title="Limpiar búsqueda"
-                data-tooltip="Limpiar búsqueda"
-              >
-                ${icon("close")}
-              </button>
-            `
-            : ""
-        }
-      </div>
-
       <div class="incidencias-filter-pills">
         ${FILTERS.map((filter) => {
           const isActive = filter.key === activeFilter;
@@ -1774,7 +1630,7 @@ function renderEmptyState({ hasError = false, filtering = false } = {}) {
           hasError
             ? "No se pudieron cargar las incidencias"
             : filtering
-              ? "No hay coincidencias con los filtros"
+              ? "No hay incidencias con este filtro"
               : "No hay incidencias para mostrar"
         }
       </h3>
@@ -1784,7 +1640,7 @@ function renderEmptyState({ hasError = false, filtering = false } = {}) {
           hasError
             ? "Puedes reintentar la carga desde el botón de actualizar."
             : filtering
-              ? "Ajusta la búsqueda o limpia los filtros para volver al historial completo."
+              ? "Cambia el filtro activo o limpia filtros para volver al historial completo."
               : "Cuando haya solicitudes registradas aparecerán aquí con su estado, seguimiento, adjuntos, facturación asociada y acciones disponibles."
         }
       </p>
@@ -2048,10 +1904,8 @@ function renderStyles() {
       .incidencias-btn:focus-visible,
       .incidencias-detail-btn:focus-visible,
       .incidencias-pagination-btn:focus-visible,
-      .incidencias-filter-input:focus-visible,
       .incidencias-filter-pill:focus-visible,
-      .incidencias-filter-reset:focus-visible,
-      .incidencias-filter-clear:focus-visible{
+      .incidencias-filter-reset:focus-visible{
         outline:none;
         box-shadow:var(--focus-ring, 0 0 0 4px rgba(113,113,122,.16));
       }
@@ -2280,95 +2134,10 @@ function renderStyles() {
       .incidencias-filters{
         grid-column:1 / -1;
         display:grid;
-        grid-template-columns:minmax(260px, 420px) minmax(0, 1fr) auto;
+        grid-template-columns:minmax(0, 1fr) auto;
         gap:var(--space-xs, 10px);
         align-items:center;
         padding-block-start:var(--space-xs, 4px);
-      }
-
-      .incidencias-filter-search{
-        position:relative;
-        min-inline-size:0;
-      }
-
-      .incidencias-filter-search-icon{
-        position:absolute;
-        inset-inline-start:13px;
-        inset-block:0;
-        display:grid;
-        place-items:center;
-        color:var(--text-dim, rgba(245,245,245,.50));
-        pointer-events:none;
-      }
-
-      .incidencias-filter-search-icon svg{
-        inline-size:15px;
-        block-size:15px;
-      }
-
-      .incidencias-filter-input{
-        appearance:none;
-        inline-size:100%;
-        min-block-size:calc(40px * var(--ui-scale, 1));
-        padding-inline:38px 38px;
-        border-radius:var(--radius-pill, 999px);
-        border:1px solid var(--input-border, rgba(255,255,255,.09));
-        background:var(--input-bg, rgba(255,255,255,.028));
-        color:var(--input-text, var(--text, #f5f5f5));
-        font:inherit;
-        font-size:var(--font-sm, 12px);
-        font-weight:var(--weight-semibold, 600);
-        outline:none;
-        box-shadow:var(--input-shadow, inset 0 1px 0 rgba(255,255,255,.018));
-        transition:
-          border-color var(--duration-fast, .16s) var(--ease-standard, ease),
-          background var(--duration-fast, .16s) var(--ease-standard, ease),
-          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
-      }
-
-      .incidencias-filter-input::placeholder{
-        color:var(--input-placeholder, rgba(245,245,245,.34));
-      }
-
-      .incidencias-filter-input:hover{
-        background:var(--input-bg-hover, rgba(255,255,255,.040));
-        border-color:var(--input-border-hover, rgba(255,255,255,.14));
-      }
-
-      .incidencias-filter-input:focus{
-        background:var(--input-bg-focus, rgba(255,255,255,.046));
-        border-color:var(--input-border-focus, rgba(113,113,122,.50));
-        box-shadow:var(--input-shadow-focus, 0 0 0 4px rgba(113,113,122,.14));
-      }
-
-      .incidencias-filter-clear{
-        position:absolute;
-        inset-inline-end:7px;
-        inset-block:5px;
-        inline-size:30px;
-        block-size:30px;
-        border:0;
-        border-radius:999px;
-        display:grid;
-        place-items:center;
-        background:transparent;
-        color:var(--text-dim, rgba(245,245,245,.50));
-        cursor:pointer;
-        transition:
-          background var(--duration-fast, .16s) var(--ease-standard, ease),
-          color var(--duration-fast, .16s) var(--ease-standard, ease),
-          transform var(--duration-fast, .16s) var(--ease-standard, ease);
-      }
-
-      .incidencias-filter-clear:hover{
-        background:var(--btn-ghost-bg-hover, rgba(255,255,255,.046));
-        color:var(--text-strong, #ffffff);
-        transform:translateY(-1px);
-      }
-
-      .incidencias-filter-clear svg{
-        inline-size:14px;
-        block-size:14px;
       }
 
       .incidencias-filter-pills{
@@ -2484,9 +2253,6 @@ function renderStyles() {
       .incidencias-table-wrap.is-refreshing .incidencias-table-shell{
         opacity:.56;
         filter:blur(.7px);
-        transition:
-          opacity var(--duration-fast, .18s) var(--ease-standard, ease),
-          filter var(--duration-fast, .18s) var(--ease-standard, ease);
       }
 
       .incidencias-table-shell{
@@ -2496,9 +2262,6 @@ function renderStyles() {
         overflow-y:hidden;
         scrollbar-width:thin;
         scrollbar-color:var(--scrollbar-thumb, rgba(255,255,255,.12)) transparent;
-        transition:
-          opacity var(--duration-fast, .18s) var(--ease-standard, ease),
-          filter var(--duration-fast, .18s) var(--ease-standard, ease);
       }
 
       .incidencias-table-shell::-webkit-scrollbar{
@@ -2519,7 +2282,7 @@ function renderStyles() {
       .incidencias-table{
         display:table !important;
         inline-size:100%;
-        min-inline-size:1240px;
+        min-inline-size:1320px;
         table-layout:fixed;
         border-collapse:separate;
         border-spacing:0;
@@ -2572,7 +2335,7 @@ function renderStyles() {
 
       .incidencias-table thead th:first-child{
         text-align:left;
-        padding-inline-start:22px;
+        padding-inline-start:24px;
       }
 
       .incidencias-table tbody tr{
@@ -2596,9 +2359,6 @@ function renderStyles() {
 
       .incidencias-row{
         --inc-row-accent:var(--accent, #6f59d9);
-        transition:
-          background var(--duration-fast, .16s) var(--ease-standard, ease),
-          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
       .incidencias-row:hover{
@@ -3334,16 +3094,6 @@ function renderStyles() {
         --inc-create-border:color-mix(in srgb, var(--accent, #6f59d9) 44%, transparent);
       }
 
-      [data-theme="light"] .incidencias-filter-input{
-        background:var(--input-bg, rgba(255,255,255,.86));
-        border-color:var(--input-border, rgba(23,32,51,.10));
-      }
-
-      [data-theme="light"] .incidencias-filter-input:hover,
-      [data-theme="light"] .incidencias-filter-input:focus{
-        background:var(--input-bg-focus, #ffffff);
-      }
-
       [data-theme="light"] .incidencias-filter-pill.is-active{
         color:var(--accent-active, #533cb6);
         background:var(--accent-soft, rgba(111,89,217,.125));
@@ -3482,7 +3232,7 @@ function renderStyles() {
         }
 
         .incidencias-table{
-          min-inline-size:1120px;
+          min-inline-size:1160px;
         }
       }
 
@@ -3698,7 +3448,10 @@ export function renderLoadingState({ includeStyles = false } = {}) {
   `;
 }
 
-export function renderErrorState(message = "No se pudieron cargar las incidencias.", { includeStyles = false } = {}) {
+export function renderErrorState(
+  message = "No se pudieron cargar las incidencias.",
+  { includeStyles = false } = {}
+) {
   return `
     ${renderMaybeStyles(includeStyles)}
 
@@ -3765,13 +3518,13 @@ export function renderTable(input = {}) {
                     <div class="incidencias-table-shell">
                       <table class="incidencias-table" role="table" aria-label="Listado de incidencias">
                         <colgroup>
-                          <col style="width:39%;">
-                          <col style="width:11%;">
-                          <col style="width:13%;">
-                          <col style="width:13%;">
-                          <col style="width:10%;">
-                          <col style="width:5%;">
-                          <col style="width:9%;">
+                          <col>
+                          <col style="width:138px;">
+                          <col style="width:174px;">
+                          <col style="width:174px;">
+                          <col style="width:142px;">
+                          <col style="width:86px;">
+                          <col style="width:146px;">
                         </colgroup>
 
                         <thead>

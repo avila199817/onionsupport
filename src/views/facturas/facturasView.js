@@ -2,10 +2,11 @@
    Onion SPA - Facturas View
    Archivo: src/views/facturas/facturasView.js
 
-   EXTREME PRO SYSTEM · VIEW REAL · FULL PATCH 10/10
+   EXTREME PRO SYSTEM · VIEW REAL · FULL PATCH 11/10
    PORTAL MODAL · SEARCH BRIDGE · URL AUTOPEN · TOPBAR READY
    DETAIL STORE MERGE · INCIDENCIA MODAL BRIDGE · CREATE MODAL
    PAGINATION 5 · ACTION STATE SYNC · RERENDER SAFE · CLEANUP PRO
+   FISCAL PRESERVER · IVA/IRPF/TOTALES/IMPUESTOS HARDENED
 
    RESPONSABILIDADES:
    - render principal de facturas
@@ -25,6 +26,7 @@
    - registrar bridge público window/AppCore.modules para search
    - sincronizar loaders de acciones sin romper tabla
    - refrescar listado tras enviar / crear factura
+   - preservar fiscalidad en detalle: impuestos, IVA, IRPF, totales y líneas
 
    FIX CLAVE:
    - El listado recibe facturas enriquecidas desde store.
@@ -33,6 +35,8 @@
      factura enriquecida del store por id/número/facturaId/invoiceId.
    - El search puede pasar detail completo, payload de evento, string o ID.
    - openFactura() sigue aceptando ID; el bridge externo normaliza payload.
+   - Si el detalle remoto viene pobre, no pisa IVA/IRPF/impuestos/totales
+     existentes en store/raw.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -364,6 +368,27 @@ export const FacturasView = (() => {
     return !destroyed && token === renderToken;
   }
 
+  function requestFrame(callback) {
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      return window.requestAnimationFrame(callback);
+    }
+
+    return window.setTimeout(callback, 0);
+  }
+
+  function cancelFrame(frameId) {
+    if (!frameId) return;
+
+    try {
+      if (typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
+        window.cancelAnimationFrame(frameId);
+        return;
+      }
+
+      window.clearTimeout(frameId);
+    } catch {}
+  }
+
   /* =====================================================
      CORE HELPERS
   ===================================================== */
@@ -377,6 +402,10 @@ export const FacturasView = (() => {
   function safeWarn(...args) {
     try {
       AppCore?.utils?.warn?.("[FacturasView]", ...args);
+    } catch {}
+
+    try {
+      console.warn("[FacturasView]", ...args);
     } catch {}
   }
 
@@ -514,10 +543,7 @@ export const FacturasView = (() => {
   function cancelPendingRender() {
     if (!pendingRenderFrame) return;
 
-    try {
-      window.cancelAnimationFrame(pendingRenderFrame);
-    } catch {}
-
+    cancelFrame(pendingRenderFrame);
     pendingRenderFrame = 0;
   }
 
@@ -1232,6 +1258,383 @@ export const FacturasView = (() => {
   }
 
   /* =====================================================
+     FISCAL PRESERVER · IVA / IRPF / IMPUESTOS / TOTALES
+  ===================================================== */
+
+  function readFiscalObject(source = {}, raw = {}, key = "") {
+    const k = safeText(key, "");
+
+    if (!k) return {};
+
+    return {
+      ...safeObject(raw?.[k]),
+      ...safeObject(source?.[k]),
+    };
+  }
+
+  function readFiscalArray(source = {}, raw = {}, keys = []) {
+    for (const key of safeArray(keys)) {
+      const direct = source?.[key];
+      const rawDirect = raw?.[key];
+
+      if (Array.isArray(direct) && direct.length) {
+        return direct;
+      }
+
+      if (Array.isArray(rawDirect) && rawDirect.length) {
+        return rawDirect;
+      }
+    }
+
+    return [];
+  }
+
+  function hasFiscalEvidence(item = {}) {
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    return Boolean(
+      safeArray(source.impuestos).length ||
+        safeArray(raw.impuestos).length ||
+        safeArray(source.taxes).length ||
+        safeArray(raw.taxes).length ||
+        safeArray(source.taxLines).length ||
+        safeArray(raw.taxLines).length ||
+        safeArray(source.desgloseImpuestos).length ||
+        safeArray(raw.desgloseImpuestos).length ||
+        hasOwnKeys(source.iva) ||
+        hasOwnKeys(raw.iva) ||
+        hasOwnKeys(source.irpf) ||
+        hasOwnKeys(raw.irpf) ||
+        hasOwnKeys(source.totales) ||
+        hasOwnKeys(raw.totales) ||
+        hasOwnKeys(source.totals) ||
+        hasOwnKeys(raw.totals) ||
+        source.meta?.hasIva ||
+        raw.meta?.hasIva ||
+        source.meta?.hasIrpf ||
+        raw.meta?.hasIrpf ||
+        source.meta?.displayIva ||
+        raw.meta?.displayIva ||
+        source.meta?.displayIrpf ||
+        raw.meta?.displayIrpf
+    );
+  }
+
+  function buildFiscalPatch(storeItem = {}, remoteItem = {}) {
+    const store = safeObject(storeItem);
+    const remote = safeObject(remoteItem);
+
+    const storeRaw = safeObject(store.raw);
+    const remoteRaw = safeObject(remote.raw);
+
+    const impuestos = safeArray(
+      first(
+        remote.impuestos,
+        remote.taxes,
+        remote.taxLines,
+        remote.desgloseImpuestos,
+        remoteRaw.impuestos,
+        remoteRaw.taxes,
+        remoteRaw.taxLines,
+        remoteRaw.desgloseImpuestos,
+
+        store.impuestos,
+        store.taxes,
+        store.taxLines,
+        store.desgloseImpuestos,
+        storeRaw.impuestos,
+        storeRaw.taxes,
+        storeRaw.taxLines,
+        storeRaw.desgloseImpuestos
+      )
+    );
+
+    const lineas = safeArray(
+      first(
+        remote.lineas,
+        remote.items,
+        remote.conceptos,
+        remote.lines,
+        remote.invoiceLines,
+        remoteRaw.lineas,
+        remoteRaw.items,
+        remoteRaw.conceptos,
+        remoteRaw.lines,
+        remoteRaw.invoiceLines,
+
+        store.lineas,
+        store.items,
+        store.conceptos,
+        store.lines,
+        store.invoiceLines,
+        storeRaw.lineas,
+        storeRaw.items,
+        storeRaw.conceptos,
+        storeRaw.lines,
+        storeRaw.invoiceLines
+      )
+    );
+
+    const iva = {
+      ...readFiscalObject(store, storeRaw, "iva"),
+      ...readFiscalObject(remote, remoteRaw, "iva"),
+    };
+
+    const irpf = {
+      ...readFiscalObject(store, storeRaw, "irpf"),
+      ...readFiscalObject(remote, remoteRaw, "irpf"),
+    };
+
+    const totales = {
+      ...readFiscalObject(store, storeRaw, "totales"),
+      ...readFiscalObject(remote, remoteRaw, "totales"),
+    };
+
+    const totals = {
+      ...readFiscalObject(store, storeRaw, "totals"),
+      ...readFiscalObject(remote, remoteRaw, "totals"),
+    };
+
+    const summary = {
+      ...readFiscalObject(store, storeRaw, "summary"),
+      ...readFiscalObject(remote, remoteRaw, "summary"),
+    };
+
+    const taxes = readFiscalArray(
+      { ...store, ...remote },
+      { ...storeRaw, ...remoteRaw },
+      ["taxes", "taxLines", "desgloseImpuestos", "taxBreakdown"]
+    );
+
+    const meta = {
+      ...safeObject(store.meta),
+      ...safeObject(storeRaw.meta),
+      ...safeObject(remote.meta),
+      ...safeObject(remoteRaw.meta),
+    };
+
+    const hasIva = Boolean(
+      meta.hasIva ||
+        hasOwnKeys(iva) ||
+        impuestos.some((tax) => {
+          const tipo = normalizeText(first(tax?.tipo, tax?.taxType, tax?.name, tax?.label));
+          return tipo.includes("iva") || tipo.includes("vat");
+        })
+    );
+
+    const hasIrpf = Boolean(
+      meta.hasIrpf ||
+        hasOwnKeys(irpf) ||
+        impuestos.some((tax) => {
+          const tipo = normalizeText(first(tax?.tipo, tax?.taxType, tax?.name, tax?.label));
+          return tipo.includes("irpf") ||
+            tipo.includes("retencion") ||
+            tipo.includes("retención") ||
+            tipo.includes("withholding");
+        })
+    );
+
+    return {
+      impuestos,
+      taxes,
+      taxLines: taxes.length ? taxes : impuestos,
+      desgloseImpuestos: taxes.length ? taxes : impuestos,
+
+      iva,
+      irpf,
+      totales,
+      totals,
+      summary,
+      lineas,
+
+      meta: {
+        ...meta,
+
+        hasFiscalData: Boolean(
+          meta.hasFiscalData ||
+            hasIva ||
+            hasIrpf ||
+            impuestos.length ||
+            taxes.length ||
+            hasOwnKeys(totales) ||
+            hasOwnKeys(totals)
+        ),
+
+        hasIva,
+        hasIrpf,
+
+        displayIva: safeText(
+          first(
+            remote.meta?.displayIva,
+            remoteRaw.meta?.displayIva,
+            store.meta?.displayIva,
+            storeRaw.meta?.displayIva,
+            meta.displayIva,
+            ""
+          ),
+          ""
+        ),
+
+        displayIrpf: safeText(
+          first(
+            remote.meta?.displayIrpf,
+            remoteRaw.meta?.displayIrpf,
+            store.meta?.displayIrpf,
+            storeRaw.meta?.displayIrpf,
+            meta.displayIrpf,
+            ""
+          ),
+          ""
+        ),
+
+        taxProfile: safeText(
+          first(
+            remote.meta?.taxProfile,
+            remoteRaw.meta?.taxProfile,
+            store.meta?.taxProfile,
+            storeRaw.meta?.taxProfile,
+            meta.taxProfile,
+            ""
+          ),
+          ""
+        ),
+      },
+
+      raw: {
+        impuestos,
+        taxes,
+        taxLines: taxes.length ? taxes : impuestos,
+        desgloseImpuestos: taxes.length ? taxes : impuestos,
+
+        iva,
+        irpf,
+        totales,
+        totals,
+        summary,
+        lineas,
+
+        meta: {
+          ...meta,
+          hasIva,
+          hasIrpf,
+          hasFiscalData: Boolean(
+            meta.hasFiscalData ||
+              hasIva ||
+              hasIrpf ||
+              impuestos.length ||
+              taxes.length ||
+              hasOwnKeys(totales) ||
+              hasOwnKeys(totals)
+          ),
+        },
+      },
+    };
+  }
+
+  function preserveFiscalFields(item = {}, fallback = {}) {
+    const source = safeObject(item);
+    const fallbackSource = safeObject(fallback);
+
+    if (!hasFiscalEvidence(source) && !hasFiscalEvidence(fallbackSource)) {
+      return source;
+    }
+
+    const patch = buildFiscalPatch(fallbackSource, source);
+
+    return {
+      ...source,
+
+      impuestos: safeArray(first(source.impuestos, patch.impuestos)),
+      taxes: safeArray(first(source.taxes, patch.taxes)),
+      taxLines: safeArray(first(source.taxLines, patch.taxLines)),
+      desgloseImpuestos: safeArray(first(source.desgloseImpuestos, patch.desgloseImpuestos)),
+
+      iva: {
+        ...safeObject(patch.iva),
+        ...safeObject(source.iva),
+      },
+
+      irpf: {
+        ...safeObject(patch.irpf),
+        ...safeObject(source.irpf),
+      },
+
+      totales: {
+        ...safeObject(patch.totales),
+        ...safeObject(source.totales),
+      },
+
+      totals: {
+        ...safeObject(patch.totals),
+        ...safeObject(source.totals),
+      },
+
+      summary: {
+        ...safeObject(patch.summary),
+        ...safeObject(source.summary),
+      },
+
+      lineas: safeArray(first(source.lineas, patch.lineas)),
+
+      raw: {
+        ...safeObject(patch.raw),
+        ...safeObject(source.raw),
+
+        impuestos: safeArray(first(source.raw?.impuestos, source.impuestos, patch.raw.impuestos)),
+        taxes: safeArray(first(source.raw?.taxes, source.taxes, patch.raw.taxes)),
+        taxLines: safeArray(first(source.raw?.taxLines, source.taxLines, patch.raw.taxLines)),
+        desgloseImpuestos: safeArray(
+          first(source.raw?.desgloseImpuestos, source.desgloseImpuestos, patch.raw.desgloseImpuestos)
+        ),
+
+        iva: {
+          ...safeObject(patch.raw.iva),
+          ...safeObject(source.raw?.iva),
+          ...safeObject(source.iva),
+        },
+
+        irpf: {
+          ...safeObject(patch.raw.irpf),
+          ...safeObject(source.raw?.irpf),
+          ...safeObject(source.irpf),
+        },
+
+        totales: {
+          ...safeObject(patch.raw.totales),
+          ...safeObject(source.raw?.totales),
+          ...safeObject(source.totales),
+        },
+
+        totals: {
+          ...safeObject(patch.raw.totals),
+          ...safeObject(source.raw?.totals),
+          ...safeObject(source.totals),
+        },
+
+        summary: {
+          ...safeObject(patch.raw.summary),
+          ...safeObject(source.raw?.summary),
+          ...safeObject(source.summary),
+        },
+
+        lineas: safeArray(first(source.raw?.lineas, source.lineas, patch.raw.lineas)),
+
+        meta: {
+          ...safeObject(patch.raw.meta),
+          ...safeObject(source.raw?.meta),
+          ...safeObject(source.meta),
+        },
+      },
+
+      meta: {
+        ...safeObject(patch.meta),
+        ...safeObject(source.meta),
+      },
+    };
+  }
+
+  /* =====================================================
      STORE / DETAIL MERGE
   ===================================================== */
 
@@ -1258,7 +1661,9 @@ export const FacturasView = (() => {
           storeItems[index] ||
           {};
 
-        return preserveIncidenciaFields(item, fallbackRaw);
+        const withFiscal = preserveFiscalFields(item, fallbackRaw);
+
+        return preserveIncidenciaFields(withFiscal, fallbackRaw);
       });
     } catch (error) {
       safeWarn("getItems falló:", error);
@@ -1321,32 +1726,272 @@ export const FacturasView = (() => {
     const storeItem = findFacturaForDetail(remote, preferredFacturaId);
 
     if (!storeItem) {
-      return preserveIncidenciaFields(remote, remote.raw || remote);
+      const fiscalOnly = preserveFiscalFields(remote, remote.raw || remote);
+      return preserveIncidenciaFields(fiscalOnly, fiscalOnly.raw || fiscalOnly);
     }
 
     const storeEnriched = preserveIncidenciaFields(
-      storeItem,
+      preserveFiscalFields(storeItem, storeItem?.raw || storeItem),
       storeItem?.raw || storeItem
     );
+
+    const fiscalPatch = buildFiscalPatch(storeEnriched, remote);
 
     const preliminary = {
       ...storeEnriched,
       ...remote,
 
+      impuestos: safeArray(first(
+        remote.impuestos,
+        remote.taxes,
+        remote.taxLines,
+        remote.desgloseImpuestos,
+        remote.raw?.impuestos,
+        remote.raw?.taxes,
+        fiscalPatch.impuestos,
+        storeEnriched.impuestos
+      )),
+
+      taxes: safeArray(first(
+        remote.taxes,
+        remote.taxLines,
+        remote.desgloseImpuestos,
+        remote.raw?.taxes,
+        fiscalPatch.taxes,
+        storeEnriched.taxes
+      )),
+
+      taxLines: safeArray(first(
+        remote.taxLines,
+        remote.taxes,
+        remote.desgloseImpuestos,
+        remote.raw?.taxLines,
+        fiscalPatch.taxLines,
+        storeEnriched.taxLines
+      )),
+
+      desgloseImpuestos: safeArray(first(
+        remote.desgloseImpuestos,
+        remote.taxBreakdown,
+        remote.taxes,
+        remote.raw?.desgloseImpuestos,
+        fiscalPatch.desgloseImpuestos,
+        storeEnriched.desgloseImpuestos
+      )),
+
+      iva: {
+        ...safeObject(storeEnriched.iva),
+        ...safeObject(storeEnriched.raw?.iva),
+        ...safeObject(fiscalPatch.iva),
+        ...safeObject(remote.raw?.iva),
+        ...safeObject(remote.iva),
+      },
+
+      irpf: {
+        ...safeObject(storeEnriched.irpf),
+        ...safeObject(storeEnriched.raw?.irpf),
+        ...safeObject(fiscalPatch.irpf),
+        ...safeObject(remote.raw?.irpf),
+        ...safeObject(remote.irpf),
+      },
+
+      totales: {
+        ...safeObject(storeEnriched.totales),
+        ...safeObject(storeEnriched.raw?.totales),
+        ...safeObject(fiscalPatch.totales),
+        ...safeObject(remote.raw?.totales),
+        ...safeObject(remote.totales),
+      },
+
+      totals: {
+        ...safeObject(storeEnriched.totals),
+        ...safeObject(storeEnriched.raw?.totals),
+        ...safeObject(fiscalPatch.totals),
+        ...safeObject(remote.raw?.totals),
+        ...safeObject(remote.totals),
+      },
+
+      summary: {
+        ...safeObject(storeEnriched.summary),
+        ...safeObject(storeEnriched.raw?.summary),
+        ...safeObject(fiscalPatch.summary),
+        ...safeObject(remote.raw?.summary),
+        ...safeObject(remote.summary),
+      },
+
+      lineas: safeArray(first(
+        remote.lineas,
+        remote.items,
+        remote.conceptos,
+        remote.lines,
+        remote.invoiceLines,
+        remote.raw?.lineas,
+        remote.raw?.items,
+        remote.raw?.conceptos,
+        fiscalPatch.lineas,
+        storeEnriched.lineas
+      )),
+
       raw: {
         ...safeObject(storeEnriched.raw),
         ...safeObject(remote.raw),
+
+        impuestos: safeArray(first(
+          remote.raw?.impuestos,
+          remote.raw?.taxes,
+          remote.impuestos,
+          remote.taxes,
+          remote.taxLines,
+          fiscalPatch.raw.impuestos,
+          storeEnriched.raw?.impuestos,
+          storeEnriched.impuestos
+        )),
+
+        taxes: safeArray(first(
+          remote.raw?.taxes,
+          remote.taxes,
+          remote.taxLines,
+          fiscalPatch.raw.taxes,
+          storeEnriched.raw?.taxes,
+          storeEnriched.taxes
+        )),
+
+        taxLines: safeArray(first(
+          remote.raw?.taxLines,
+          remote.taxLines,
+          remote.taxes,
+          fiscalPatch.raw.taxLines,
+          storeEnriched.raw?.taxLines,
+          storeEnriched.taxLines
+        )),
+
+        desgloseImpuestos: safeArray(first(
+          remote.raw?.desgloseImpuestos,
+          remote.desgloseImpuestos,
+          remote.taxBreakdown,
+          fiscalPatch.raw.desgloseImpuestos,
+          storeEnriched.raw?.desgloseImpuestos,
+          storeEnriched.desgloseImpuestos
+        )),
+
+        iva: {
+          ...safeObject(storeEnriched.raw?.iva),
+          ...safeObject(storeEnriched.iva),
+          ...safeObject(fiscalPatch.raw.iva),
+          ...safeObject(remote.raw?.iva),
+          ...safeObject(remote.iva),
+        },
+
+        irpf: {
+          ...safeObject(storeEnriched.raw?.irpf),
+          ...safeObject(storeEnriched.irpf),
+          ...safeObject(fiscalPatch.raw.irpf),
+          ...safeObject(remote.raw?.irpf),
+          ...safeObject(remote.irpf),
+        },
+
+        totales: {
+          ...safeObject(storeEnriched.raw?.totales),
+          ...safeObject(storeEnriched.totales),
+          ...safeObject(fiscalPatch.raw.totales),
+          ...safeObject(remote.raw?.totales),
+          ...safeObject(remote.totales),
+        },
+
+        totals: {
+          ...safeObject(storeEnriched.raw?.totals),
+          ...safeObject(storeEnriched.totals),
+          ...safeObject(fiscalPatch.raw.totals),
+          ...safeObject(remote.raw?.totals),
+          ...safeObject(remote.totals),
+        },
+
+        summary: {
+          ...safeObject(storeEnriched.raw?.summary),
+          ...safeObject(storeEnriched.summary),
+          ...safeObject(fiscalPatch.raw.summary),
+          ...safeObject(remote.raw?.summary),
+          ...safeObject(remote.summary),
+        },
+
+        lineas: safeArray(first(
+          remote.raw?.lineas,
+          remote.raw?.items,
+          remote.lineas,
+          remote.items,
+          fiscalPatch.raw.lineas,
+          storeEnriched.raw?.lineas,
+          storeEnriched.lineas
+        )),
       },
 
       meta: {
         ...safeObject(storeEnriched.meta),
+        ...safeObject(storeEnriched.raw?.meta),
+        ...safeObject(fiscalPatch.meta),
+        ...safeObject(remote.raw?.meta),
         ...safeObject(remote.meta),
+
+        hasIva: Boolean(
+          remote.meta?.hasIva ||
+            remote.raw?.meta?.hasIva ||
+            fiscalPatch.meta?.hasIva ||
+            storeEnriched.meta?.hasIva ||
+            storeEnriched.raw?.meta?.hasIva ||
+            hasOwnKeys(remote.iva) ||
+            hasOwnKeys(remote.raw?.iva) ||
+            hasOwnKeys(storeEnriched.iva)
+        ),
+
+        hasIrpf: Boolean(
+          remote.meta?.hasIrpf ||
+            remote.raw?.meta?.hasIrpf ||
+            fiscalPatch.meta?.hasIrpf ||
+            storeEnriched.meta?.hasIrpf ||
+            storeEnriched.raw?.meta?.hasIrpf ||
+            hasOwnKeys(remote.irpf) ||
+            hasOwnKeys(remote.raw?.irpf) ||
+            hasOwnKeys(storeEnriched.irpf)
+        ),
+
+        displayIva: safeText(
+          first(
+            remote.meta?.displayIva,
+            remote.raw?.meta?.displayIva,
+            fiscalPatch.meta?.displayIva,
+            storeEnriched.meta?.displayIva,
+            storeEnriched.raw?.meta?.displayIva,
+            ""
+          ),
+          ""
+        ),
+
+        displayIrpf: safeText(
+          first(
+            remote.meta?.displayIrpf,
+            remote.raw?.meta?.displayIrpf,
+            fiscalPatch.meta?.displayIrpf,
+            storeEnriched.meta?.displayIrpf,
+            storeEnriched.raw?.meta?.displayIrpf,
+            ""
+          ),
+          ""
+        ),
       },
     };
 
+    preliminary.raw = {
+      ...safeObject(preliminary.raw),
+      meta: {
+        ...safeObject(preliminary.raw?.meta),
+        ...safeObject(preliminary.meta),
+      },
+    };
+
+    const withFiscal = preserveFiscalFields(preliminary, storeEnriched);
     const withRemoteRelation = preserveIncidenciaFields(
-      preliminary,
-      preliminary.raw || preliminary
+      withFiscal,
+      withFiscal.raw || withFiscal
     );
 
     if (getRelatedIncidenciaId(withRemoteRelation)) {
@@ -1360,20 +2005,23 @@ export const FacturasView = (() => {
     }
 
     return preserveIncidenciaFields(
-      {
-        ...preliminary,
-        ...forcedRelationPatch,
+      preserveFiscalFields(
+        {
+          ...preliminary,
+          ...forcedRelationPatch,
 
-        raw: {
-          ...safeObject(preliminary.raw),
-          ...safeObject(forcedRelationPatch.raw),
-        },
+          raw: {
+            ...safeObject(preliminary.raw),
+            ...safeObject(forcedRelationPatch.raw),
+          },
 
-        meta: {
-          ...safeObject(preliminary.meta),
-          ...safeObject(forcedRelationPatch.meta),
+          meta: {
+            ...safeObject(preliminary.meta),
+            ...safeObject(forcedRelationPatch.meta),
+          },
         },
-      },
+        storeEnriched
+      ),
       {
         ...safeObject(preliminary.raw),
         ...safeObject(forcedRelationPatch.raw),
@@ -2402,7 +3050,7 @@ export const FacturasView = (() => {
       return pendingRenderFrame;
     }
 
-    pendingRenderFrame = window.requestAnimationFrame(() => {
+    pendingRenderFrame = requestFrame(() => {
       pendingRenderFrame = 0;
       rerender();
     });

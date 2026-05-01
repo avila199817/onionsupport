@@ -184,6 +184,7 @@ const TOPBAR_LIGHT_FALLBACK_METHODS =
 ========================================================= */
 
 let eventsBound = false;
+let eventsBindingInFlight = false;
 let boundScope = "";
 
 let langChangeInFlight = false;
@@ -1941,9 +1942,15 @@ export function bindAppEvents({
   rerenderCurrentRoute,
   applyPostRenderLoaderPolicy,
 } = {}) {
-  if (eventsBound) {
+  if (
+    eventsBound ||
+    eventsBindingInFlight
+  ) {
     return true;
   }
+
+  eventsBindingInFlight =
+    true;
 
   const finalScope =
     safeText(
@@ -1969,43 +1976,67 @@ export function bindAppEvents({
     applyPostRenderLoaderPolicy,
   };
 
-  bindUserEvents(context);
-  bindLanguageEvents(context);
-  bindAuthEvents(context);
-  bindRouterEvents(context);
+  try {
+    bindUserEvents(context);
+    bindLanguageEvents(context);
+    bindAuthEvents(context);
+    bindRouterEvents(context);
 
-  eventsBound =
-    true;
+    eventsBound =
+      true;
 
-  boundScope =
-    finalScope;
+    boundScope =
+      finalScope;
 
-  safeEmit(
-    AppCore,
-    EVENT_NAMES.appEventsBound,
-    {
-      scope:
-        boundScope,
+    safeEmit(
+      AppCore,
+      EVENT_NAMES.appEventsBound,
+      {
+        scope:
+          boundScope,
 
-      at:
-        safeIsoDate(),
+        at:
+          safeIsoDate(),
+      }
+    );
+
+    safeEmit(
+      AppCore,
+      EVENT_NAMES.appEventsReady,
+      getAppEventsSnapshot()
+    );
+
+    safeLog(
+      AppCore,
+      "App events ready.",
+      {
+        scope:
+          boundScope,
+      }
+    );
+  } catch (error) {
+    for (const dispose of boundDisposers.splice(0)) {
+      try {
+        dispose();
+      } catch {}
     }
-  );
 
-  safeEmit(
-    AppCore,
-    EVENT_NAMES.appEventsReady,
-    getAppEventsSnapshot()
-  );
+    eventsBound =
+      false;
+    boundScope =
+      "";
 
-  safeLog(
-    AppCore,
-    "App events ready.",
-    {
-      scope:
-        boundScope,
-    }
-  );
+    recordError(
+      AppCore,
+      EVENT_NAMES.appEventsError,
+      error
+    );
+
+    return false;
+  } finally {
+    eventsBindingInFlight =
+      false;
+  }
 
   return true;
 }
@@ -2047,6 +2078,9 @@ export function getAppEventsSnapshot() {
   return {
     eventsBound:
       Boolean(eventsBound),
+
+    eventsBindingInFlight:
+      Boolean(eventsBindingInFlight),
 
     boundScope,
 

@@ -76,6 +76,34 @@ const ROUTE_CURRENT_VALUE = "page";
 
 const STATE_EMIT_MIN_INTERVAL_MS = 24;
 
+const ROUTE_ALIASES = Object.freeze({
+  "/home": "/",
+  "/dashboard": "/",
+
+  "/tickets": "/incidencias",
+  "/ticket": "/incidencias",
+  "/incidents": "/incidencias",
+  "/incident": "/incidencias",
+
+  "/invoices": "/facturas",
+  "/invoice": "/facturas",
+  "/billing": "/facturas",
+
+  "/users": "/usuarios",
+  "/user": "/usuarios",
+
+  "/clients": "/clientes",
+  "/client": "/clientes",
+  "/customers": "/clientes",
+  "/customer": "/clientes",
+
+  "/account": "/cuenta",
+  "/profile": "/cuenta",
+
+  "/settings": "/ajustes",
+  "/config": "/ajustes",
+});
+
 /* =========================================================
    MODULE RUNTIME
 ========================================================= */
@@ -216,7 +244,7 @@ function safeLog(AppCore, ...args) {
 /*
   Importante:
   No emitimos por AppCore.events Y window a la vez.
-  events.js suele escuchar ambos canales, y el doble dispatch provoca:
+  events.js puede escuchar bus o window; doble dispatch provoca:
   - doble transición
   - doble cálculo de indicador
   - parpadeos
@@ -265,7 +293,10 @@ function getStorage(AppCore = null) {
       (
         isFunction(storage.get) ||
         isFunction(storage.set) ||
-        isFunction(storage.remove)
+        isFunction(storage.remove) ||
+        isFunction(storage.getItem) ||
+        isFunction(storage.setItem) ||
+        isFunction(storage.removeItem)
       )
     ) {
       return storage;
@@ -290,6 +321,15 @@ function readFromAppStorage(AppCore, key = "") {
         return parsed;
       }
     }
+
+    if (isFunction(storage?.getItem)) {
+      const value = storage.getItem(cleanKey);
+      const parsed = safeBoolean(value, null);
+
+      if (typeof parsed === "boolean") {
+        return parsed;
+      }
+    }
   } catch {}
 
   return null;
@@ -304,6 +344,11 @@ function writeToAppStorage(AppCore, key = "", value = false) {
 
     if (isFunction(storage?.set)) {
       storage.set(cleanKey, String(Boolean(value)));
+      return true;
+    }
+
+    if (isFunction(storage?.setItem)) {
+      storage.setItem(cleanKey, String(Boolean(value)));
       return true;
     }
   } catch {}
@@ -687,8 +732,8 @@ export function isRealShellHidden(AppCore) {
   /*
     Importante:
     NO usamos sidebar.hidden como fuente real.
-    dom.js/isShellHidden() sí lo usa, y eso puede dejar la UI bloqueada
-    después de rutas públicas/auth si el router todavía no rehidrató.
+    dom.js/isShellHidden() puede considerar sidebar.hidden === true,
+    y eso deja el sidebar bloqueado después de login/auth/router repair.
   */
   return Boolean(
     AppCore?.state?.shellVisible === false ||
@@ -977,7 +1022,7 @@ function getMobileDesiredOpenState(AppCore) {
 
   /*
     Fuente real mobile. Evita heredar desktopOpen/sidebarOpen
-    cuando se cambia de viewport.
+    cuando cambia el viewport.
   */
   if (typeof state?.sidebarMobileOpen === "boolean") {
     return state.sidebarMobileOpen;
@@ -1036,6 +1081,56 @@ function stripPublicUsernamePrefix(pathname = "/") {
   return value || "/";
 }
 
+function isUnsafeRouteValue(value = "") {
+  const raw = safeText(value, "").toLowerCase();
+
+  return Boolean(
+    raw.startsWith("javascript:") ||
+      raw.startsWith("data:") ||
+      raw.startsWith("vbscript:") ||
+      raw.startsWith("file:") ||
+      raw.startsWith("mailto:") ||
+      raw.startsWith("tel:")
+  );
+}
+
+function isExternalHttpUrl(value = "") {
+  const raw = safeText(value, "");
+
+  if (!/^https?:\/\//i.test(raw)) {
+    return false;
+  }
+
+  try {
+    const origin = isBrowser()
+      ? window.location.origin
+      : "http://localhost";
+
+    return new URL(raw, origin).origin !== origin;
+  } catch {
+    return true;
+  }
+}
+
+function applyRouteAlias(pathname = "/") {
+  const clean = safeText(pathname, "/") || "/";
+
+  if (ROUTE_ALIASES[clean]) {
+    return ROUTE_ALIASES[clean];
+  }
+
+  for (const [from, to] of Object.entries(ROUTE_ALIASES)) {
+    if (
+      from !== "/" &&
+      clean.startsWith(`${from}/`)
+    ) {
+      return `${to}${clean.slice(from.length)}`;
+    }
+  }
+
+  return clean;
+}
+
 function normalizePathLike(path = "/") {
   let value =
     safeText(path, "/")
@@ -1046,6 +1141,13 @@ function normalizePathLike(path = "/") {
     return "/";
   }
 
+  if (
+    isUnsafeRouteValue(value) ||
+    isExternalHttpUrl(value)
+  ) {
+    return "";
+  }
+
   try {
     const url = new URL(
       value,
@@ -1053,6 +1155,14 @@ function normalizePathLike(path = "/") {
         ? window.location.origin
         : "http://localhost"
     );
+
+    if (
+      isBrowser() &&
+      url.origin !== window.location.origin &&
+      (url.protocol === "http:" || url.protocol === "https:")
+    ) {
+      return "";
+    }
 
     if (
       url.hash &&
@@ -1098,6 +1208,8 @@ function normalizePathLike(path = "/") {
     cleanPathname = cleanPathname.replace(/\/+$/g, "") || "/";
   }
 
+  cleanPathname = applyRouteAlias(cleanPathname);
+
   return query
     ? `${cleanPathname}?${query}`
     : cleanPathname;
@@ -1134,56 +1246,110 @@ function getBrowserPublicPath() {
   }
 }
 
+function getExplicitPathCandidates(options = {}) {
+  const opts = safeObject(options);
+  const payload = safeObject(opts.payload);
+
+  return [
+    opts.route,
+    opts.path,
+    opts.publicPath,
+    opts.canonicalPath,
+
+    payload.publicPath,
+    payload.path,
+    payload.requestedPath,
+    payload.canonicalPath,
+    payload.to,
+    payload.url,
+    payload.route,
+  ]
+    .map((value) => normalizePathLike(value || ""))
+    .filter(Boolean);
+}
+
+function shouldPreferExplicitRoute(options = {}) {
+  const opts = safeObject(options);
+  const reason = safeText(opts.reason, "").toLowerCase();
+
+  if (opts.preferExplicitRoute === true) {
+    return true;
+  }
+
+  if (opts.forceRoute === true) {
+    return true;
+  }
+
+  if (opts.activeItem) {
+    return true;
+  }
+
+  if (
+    reason.includes("navigation") ||
+    reason.includes("navigate") ||
+    reason.includes("sidebar-ui:active-route") ||
+    reason.includes("sync-active-route") ||
+    reason.includes("open-activity") ||
+    reason.includes("route-marker")
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function pushUniquePath(list, value) {
+  const normalized = normalizePathLike(value || "");
+
+  if (
+    normalized &&
+    !list.includes(normalized)
+  ) {
+    list.push(normalized);
+  }
+
+  return list;
+}
+
 function getCurrentPublicPathCandidates(AppCore, options = {}) {
   const opts = safeObject(options);
   const candidates = [];
 
-  const push = (value) => {
-    const normalized = normalizePathLike(value || "");
+  const explicitCandidates =
+    getExplicitPathCandidates(opts);
 
-    if (
-      normalized &&
-      !candidates.includes(normalized)
-    ) {
-      candidates.push(normalized);
-    }
-  };
+  const browserPath =
+    getBrowserPublicPath();
 
   /*
-    Priorizamos SIEMPRE la URL visible del navegador primero.
-    En ciertos clicks de sidebar, algunos payloads/eventos pueden traer
-    la ruta anterior durante 1 tick; si esos valores van primero, el
-    activo puede quedarse en el item viejo (p.ej. Incidencias en /facturas).
+    Regla:
+    - Navegación explícita/sidebar: ruta explícita primero.
+    - Eventos de router/render/auth normales: URL visible primero.
+      Evita que payloads atrasados de 1 tick dejen activo el item viejo.
   */
-  push(getBrowserPublicPath());
+  if (shouldPreferExplicitRoute(opts)) {
+    explicitCandidates.forEach((value) => pushUniquePath(candidates, value));
+    pushUniquePath(candidates, browserPath);
+  } else {
+    pushUniquePath(candidates, browserPath);
+    explicitCandidates.forEach((value) => pushUniquePath(candidates, value));
+  }
 
-  push(opts.route);
-  push(opts.path);
-  push(opts.publicPath);
-  push(opts.canonicalPath);
-
-  push(opts.payload?.publicPath);
-  push(opts.payload?.path);
-  push(opts.payload?.canonicalPath);
-  push(opts.payload?.to);
-  push(opts.payload?.url);
-  push(opts.payload?.route);
-
-  push(AppCore?.state?.publicPath);
-  push(AppCore?.state?.route);
-  push(AppCore?.state?.canonicalPath);
-  push(AppCore?.state?.lastRoute);
+  pushUniquePath(candidates, AppCore?.state?.publicPath);
+  pushUniquePath(candidates, AppCore?.state?.route);
+  pushUniquePath(candidates, AppCore?.state?.canonicalPath);
+  pushUniquePath(candidates, AppCore?.state?.lastRoute);
 
   try {
-    push(AppCore?.router?.getCurrentPublicPath?.());
+    pushUniquePath(candidates, AppCore?.router?.getCurrentPublicPath?.());
   } catch {}
 
   try {
-    push(AppCore?.router?.getCurrentCanonicalPath?.());
+    pushUniquePath(candidates, AppCore?.router?.getCurrentCanonicalPath?.());
   } catch {}
 
   try {
-    push(AppCore?.router?.getCurrentPath?.());
+    pushUniquePath(candidates, AppCore?.router?.getCurrentPath?.());
   } catch {}
 
   return candidates.length
@@ -1200,7 +1366,7 @@ function getMenuItemRoute(item = null) {
     return "";
   }
 
-  return safeText(
+  const raw = safeText(
     item.dataset?.route ||
       item.dataset?.href ||
       item.dataset?.to ||
@@ -1211,6 +1377,16 @@ function getMenuItemRoute(item = null) {
       "",
     ""
   );
+
+  if (
+    !raw ||
+    isUnsafeRouteValue(raw) ||
+    isExternalHttpUrl(raw)
+  ) {
+    return "";
+  }
+
+  return raw;
 }
 
 function isElementVisible(element = null) {
@@ -1275,6 +1451,8 @@ function getMenuItems(sidebarMenu = null) {
           ".menu-item",
           "a[data-spa]",
           "a[data-route]",
+          "a[data-href]",
+          "a[data-to]",
           "[data-sidebar-nav='true']",
         ].join(",")
       )
@@ -1314,7 +1492,7 @@ function setActiveItemClasses(item = null) {
   }
 
   try {
-    item.classList.add("active", "is-active");
+    item.classList.add("active", "is-active", "router-active");
     item.setAttribute("aria-current", ROUTE_CURRENT_VALUE);
     item.dataset.active = "true";
 
@@ -1390,14 +1568,16 @@ function findBestMenuItemForCurrentPath(AppCore, sidebarMenu = null, options = {
 
     const routePath = normalizePathLike(route);
 
+    if (!routePath) {
+      continue;
+    }
+
     for (let i = 0; i < currentPaths.length; i += 1) {
       const current = currentPaths[i];
 
       /*
-        Pequeña penalización por orden:
-        - ruta explícita/opciones
-        - browser
-        - state
+        Penalización por orden:
+        el primer candidato es el más fiable según contexto.
       */
       const score =
         scoreRouteMatch(routePath, current) - i;
@@ -1716,7 +1896,7 @@ export function syncActiveMenuIndicator(AppCore, options = {}) {
 
     /*
       Si no cambió nada, no reescribimos vars.
-      Esto reduce parpadeo cuando router/events/index piden sync seguido.
+      Reduce parpadeo cuando router/events/index piden sync seguido.
     */
     if (
       signature === lastIndicatorSignature &&
@@ -1976,13 +2156,20 @@ function beginSidebarTransition(AppCore, reason = "state-change", durationMs = S
   };
 
   const onTransitionEnd = (event) => {
+    const propertyName = safeText(
+      event?.propertyName,
+      ""
+    );
+
     if (
       event?.target !== sidebar ||
       ![
         "inline-size",
         "width",
+        "max-inline-size",
         "transform",
-      ].includes(event?.propertyName)
+        "margin-inline-start",
+      ].includes(propertyName)
     ) {
       return;
     }
@@ -2099,6 +2286,9 @@ export function updateToggleLabel(AppCore, isOpen = null) {
   const mobile =
     isMobileViewport();
 
+  const collapsed =
+    !mobile && !open;
+
   const desktopText = open
     ? "Contraer barra lateral"
     : "Expandir barra lateral";
@@ -2154,7 +2344,7 @@ export function updateToggleLabel(AppCore, isOpen = null) {
 
   if (sidebar) {
     setDataset(sidebar, "open", open ? "true" : "false");
-    setDataset(sidebar, "collapsed", open ? "false" : "true");
+    setDataset(sidebar, "collapsed", collapsed ? "true" : "false");
     setDataset(sidebar, "viewport", mobile ? "mobile" : "desktop");
   }
 
@@ -2278,6 +2468,9 @@ function syncVisibleSidebarBase(AppCore, {
     return false;
   }
 
+  const collapsed =
+    !mobile && !open;
+
   try {
     sidebar.hidden = false;
     sidebar.setAttribute("aria-hidden", "false");
@@ -2308,8 +2501,8 @@ function syncVisibleSidebarBase(AppCore, {
     setDesktopMemory(AppCore, open);
     syncSharedState(AppCore, open);
 
-    toggleClass(sidebar, "collapsed", !open);
-    toggleClass(sidebar, "is-collapsed", !open);
+    toggleClass(sidebar, "collapsed", collapsed);
+    toggleClass(sidebar, "is-collapsed", collapsed);
 
     removeClass(
       sidebar,
@@ -2317,7 +2510,7 @@ function syncVisibleSidebarBase(AppCore, {
       "is-open"
     );
 
-    toggleClass(body, "sidebar-collapsed", !open);
+    toggleClass(body, "sidebar-collapsed", collapsed);
 
     removeClass(
       body,
@@ -2329,7 +2522,7 @@ function syncVisibleSidebarBase(AppCore, {
   }
 
   setDataset(sidebar, "open", open ? "true" : "false");
-  setDataset(sidebar, "collapsed", open ? "false" : "true");
+  setDataset(sidebar, "collapsed", collapsed ? "true" : "false");
   setDataset(sidebar, "viewport", mobile ? "mobile" : "desktop");
 
   updateToggleLabel(AppCore, open);
@@ -2352,7 +2545,7 @@ function syncSidebarStateInternal(AppCore, closeDropdown, options = {}) {
   /*
     Fix crítico:
     No usar isShellHidden(AppCore) aquí directamente.
-    dom.js considera sidebar.hidden === true como shell hidden.
+    dom.js puede considerar sidebar.hidden === true como shell hidden.
     Eso puede dejar el sidebar bloqueado tras login/auth route/router repair.
   */
   if (isRealShellHidden(AppCore)) {
@@ -2364,6 +2557,7 @@ function syncSidebarStateInternal(AppCore, closeDropdown, options = {}) {
 
   const mobile = isMobileViewport();
   const open = getDesiredSidebarOpenState(AppCore);
+  const collapsed = !open && !mobile;
 
   const synced = syncVisibleSidebarBase(AppCore, {
     sidebar,
@@ -2402,7 +2596,7 @@ function syncSidebarStateInternal(AppCore, closeDropdown, options = {}) {
       hidden: false,
       realShellHidden: false,
       domShellHidden: isDomShellHiddenOnly(AppCore),
-      collapsed: !open && !mobile,
+      collapsed,
       transitioning: isSidebarTransitioning(AppCore),
     },
     {
@@ -2432,6 +2626,7 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
   const mobile = isMobileViewport();
   const previousOpen = getDesiredSidebarOpenState(AppCore);
   const changed = previousOpen !== nextOpen;
+  const collapsed = !nextOpen && !mobile;
 
   /*
     Si la shell real está oculta, no persistimos ni mezclamos estado.
@@ -2467,7 +2662,7 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
       previousOpen,
       changed: false,
       mobile,
-      collapsed: !nextOpen && !mobile,
+      collapsed,
     });
 
     return synced;
@@ -2479,7 +2674,7 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
     previousOpen,
     changed,
     mobile,
-    collapsed: !nextOpen && !mobile,
+    collapsed,
   });
 
   beginSidebarTransition(
@@ -2528,7 +2723,7 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
     previousOpen,
     changed,
     mobile,
-    collapsed: !nextOpen && !mobile,
+    collapsed,
     transitioning: true,
   });
 
@@ -2613,6 +2808,7 @@ export function getSidebarStateSnapshot(AppCore) {
 
   const mobile = isMobileViewport();
   const open = getDesiredSidebarOpenState(AppCore);
+  const collapsed = !open && !mobile;
 
   const activeItem =
     sidebarMenu
@@ -2622,7 +2818,7 @@ export function getSidebarStateSnapshot(AppCore) {
   return {
     mobile,
     open,
-    collapsed: !open && !mobile,
+    collapsed,
     transitioning: isSidebarTransitioning(AppCore),
     lastTransitionReason,
 
@@ -2725,6 +2921,9 @@ export function getSidebarStateSnapshot(AppCore) {
     route: {
       currentPublicPath:
         getCurrentPublicPath(AppCore),
+
+      browserPublicPath:
+        getBrowserPublicPath(),
 
       candidates:
         getCurrentPublicPathCandidates(AppCore),

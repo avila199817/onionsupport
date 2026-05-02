@@ -3,10 +3,16 @@
    Archivo: src/views/facturas/facturas.create.modal.js
 
    FACTURAS EXPERIENCE PRO · CREATE MODAL · COSMOS/BLOB ALIGNED · GOD MODE
+   PATCH · CLIENT + INCIDENCIA CARDS REDESIGN
+   PATCH · CLIENT SEARCH AVATAR REAL + FALLBACK
+   PATCH · NO CANCEL BUTTON
+   PATCH · ONLY TOTAL CARD / NO TOTAL INPUT FIELD
 
    Responsabilidades:
    - abrir/cerrar modal premium de creación de factura
    - buscar cliente/usuario objetivo
+   - pintar avatar real del cliente/usuario si backend lo entrega
+   - fallback de avatar con iniciales si no hay imagen
    - al seleccionar cliente, cargar incidencias vinculadas a ese cliente/usuario
    - seleccionar automáticamente la incidencia más reciente
    - permitir cambiar incidencia desde desplegable
@@ -74,6 +80,7 @@ const DEFAULT_FORM = Object.freeze({
   clienteUserId: "",
   clienteNombre: "",
   clienteEmail: "",
+  clienteAvatar: "",
 
   ticketId: "",
   incidenciaId: "",
@@ -102,6 +109,7 @@ const modalState = {
   bindingsAttached: false,
   escHandler: null,
   lastActiveElement: null,
+  previousBodyOverflow: "",
 
   clienteSearchQuery: "",
   clienteSearchResults: [],
@@ -182,6 +190,7 @@ function first(...values) {
     if (Array.isArray(value) && value.length === 0) continue;
     return value;
   }
+
   return null;
 }
 
@@ -267,6 +276,20 @@ function getSortableDate(value = "") {
 
   const time = Date.parse(raw);
   return Number.isFinite(time) ? time : 0;
+}
+
+function getInitials(value = "", fallback = "CL") {
+  const text = normalizeWhitespace(value);
+
+  if (!text) return fallback;
+
+  const parts = text.split(" ").filter(Boolean);
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || fallback;
 }
 
 function safeEmit(event = "", payload = {}) {
@@ -382,6 +405,23 @@ function buildUrl(endpoint = "") {
   return `${apiBase}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
+function getStorageValue(key = "") {
+  const cleanKey = safeText(key, "");
+  if (!cleanKey) return "";
+
+  try {
+    const value = localStorage.getItem(cleanKey);
+    if (value) return value;
+  } catch {}
+
+  try {
+    const value = sessionStorage.getItem(cleanKey);
+    if (value) return value;
+  } catch {}
+
+  return "";
+}
+
 function getAuthToken() {
   return safeText(
     first(
@@ -391,15 +431,10 @@ function getAuthToken() {
       AppCore?.Auth?.getToken?.(),
       window?.Auth?.getToken?.(),
 
-      typeof localStorage !== "undefined" ? localStorage.getItem("token") : "",
-      typeof localStorage !== "undefined" ? localStorage.getItem("accessToken") : "",
-      typeof localStorage !== "undefined" ? localStorage.getItem("authToken") : "",
-      typeof localStorage !== "undefined" ? localStorage.getItem("onion.token") : "",
-
-      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("token") : "",
-      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("accessToken") : "",
-      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("authToken") : "",
-      typeof sessionStorage !== "undefined" ? sessionStorage.getItem("onion.token") : ""
+      getStorageValue("token"),
+      getStorageValue("accessToken"),
+      getStorageValue("authToken"),
+      getStorageValue("onion.token")
     ),
     ""
   );
@@ -589,6 +624,8 @@ function extractItems(payload = null) {
 
   const candidates = [
     obj.clientes,
+    obj.clients,
+    obj.customers,
     obj.users,
     obj.usuarios,
     obj.tickets,
@@ -600,6 +637,8 @@ function extractItems(payload = null) {
     obj.list,
 
     obj.data?.clientes,
+    obj.data?.clients,
+    obj.data?.customers,
     obj.data?.users,
     obj.data?.usuarios,
     obj.data?.tickets,
@@ -610,6 +649,8 @@ function extractItems(payload = null) {
     obj.data?.records,
 
     obj.payload?.clientes,
+    obj.payload?.clients,
+    obj.payload?.customers,
     obj.payload?.users,
     obj.payload?.usuarios,
     obj.payload?.tickets,
@@ -618,6 +659,8 @@ function extractItems(payload = null) {
     obj.payload?.results,
 
     obj.result?.clientes,
+    obj.result?.clients,
+    obj.result?.customers,
     obj.result?.users,
     obj.result?.usuarios,
     obj.result?.tickets,
@@ -631,6 +674,154 @@ function extractItems(payload = null) {
   }
 
   return [];
+}
+
+/* =========================================================
+   AVATAR HELPERS
+========================================================= */
+
+function getAvatarUrlFromObject(raw = null) {
+  const obj = safeObject(raw);
+  const cliente = safeObject(obj.cliente);
+  const user = safeObject(obj.user);
+  const usuario = safeObject(obj.usuario);
+  const profile = safeObject(obj.profile);
+  const contacto = safeObject(obj.contacto);
+  const avatar = safeObject(obj.avatar);
+  const photo = safeObject(obj.photo);
+
+  return safeText(
+    first(
+      obj.avatarUrl,
+      obj.avatarURL,
+      obj.avatar_url,
+      obj.avatar,
+      obj.logoUrl,
+      obj.logoURL,
+      obj.logo_url,
+      obj.logo,
+      obj.photoUrl,
+      obj.photoURL,
+      obj.photo_url,
+      obj.photo,
+      obj.imageUrl,
+      obj.imageURL,
+      obj.image_url,
+      obj.image,
+      obj.picture,
+      obj.pictureUrl,
+      obj.profilePicture,
+      obj.profilePictureUrl,
+      obj.clienteAvatar,
+      obj.clienteAvatarUrl,
+      obj.clientAvatar,
+      obj.clientAvatarUrl,
+      obj.userAvatar,
+      obj.userAvatarUrl,
+
+      cliente.avatarUrl,
+      cliente.avatarURL,
+      cliente.avatar_url,
+      cliente.avatar,
+      cliente.logoUrl,
+      cliente.logo,
+      cliente.photoUrl,
+      cliente.photo,
+      cliente.imageUrl,
+      cliente.image,
+      cliente.picture,
+      cliente.pictureUrl,
+      cliente.profilePicture,
+      cliente.profilePictureUrl,
+
+      user.avatarUrl,
+      user.avatarURL,
+      user.avatar_url,
+      user.avatar,
+      user.photoUrl,
+      user.photoURL,
+      user.photo_url,
+      user.photo,
+      user.imageUrl,
+      user.imageURL,
+      user.image_url,
+      user.image,
+      user.picture,
+      user.pictureUrl,
+      user.profilePicture,
+      user.profilePictureUrl,
+
+      usuario.avatarUrl,
+      usuario.avatar,
+      usuario.photoUrl,
+      usuario.photo,
+      usuario.imageUrl,
+      usuario.image,
+      usuario.picture,
+      usuario.pictureUrl,
+
+      profile.avatarUrl,
+      profile.avatar,
+      profile.photoUrl,
+      profile.photo,
+      profile.imageUrl,
+      profile.image,
+      profile.picture,
+      profile.pictureUrl,
+
+      contacto.avatarUrl,
+      contacto.avatar,
+      contacto.photoUrl,
+      contacto.photo,
+      contacto.imageUrl,
+      contacto.image,
+
+      avatar.url,
+      avatar.src,
+      photo.url,
+      photo.src
+    ),
+    ""
+  );
+}
+
+function renderAvatar({
+  name = "",
+  email = "",
+  avatarUrl = "",
+  fallback = "CL",
+  className = "fac-create-avatar",
+} = {}) {
+  const displayName = safeText(first(name, email, "Cliente"), "Cliente");
+  const initials = getInitials(displayName, fallback);
+  const url = safeText(avatarUrl, "");
+
+  return `
+    <span
+      class="${escapeHtml(className)}${url ? " has-image" : ""}"
+      title="${escapeHtml(displayName)}"
+      aria-label="${escapeHtml(displayName)}"
+      data-tooltip="${escapeHtml(displayName)}"
+    >
+      ${
+        url
+          ? `
+            <img
+              src="${escapeHtml(url)}"
+              alt="${escapeHtml(displayName)}"
+              loading="lazy"
+              referrerpolicy="no-referrer"
+              onerror="this.style.display='none'; this.parentNode.setAttribute('data-fallback','true');"
+            />
+          `
+          : ""
+      }
+
+      <span class="fac-create-avatar-fallback">
+        ${escapeHtml(initials)}
+      </span>
+    </span>
+  `;
 }
 
 /* =========================================================
@@ -650,17 +841,23 @@ function buildClientSearchUrls(query = "") {
 function normalizeClientCandidate(raw = null) {
   const obj = safeObject(raw);
   const user = safeObject(obj.user);
+  const usuario = safeObject(obj.usuario);
   const cliente = safeObject(obj.cliente);
   const contacto = safeObject(obj.contacto);
+  const profile = safeObject(obj.profile);
 
   const clienteId = safeText(
     first(
       obj.clienteId,
+      obj.clientId,
+      obj.customerId,
       obj.id,
       obj._id,
       obj.clienteIdInterno,
 
       cliente.clienteId,
+      cliente.clientId,
+      cliente.customerId,
       cliente.id,
       cliente._id,
       cliente.clienteIdInterno
@@ -679,7 +876,11 @@ function normalizeClientCandidate(raw = null) {
 
       user.userId,
       user.id,
-      user._id
+      user._id,
+
+      usuario.userId,
+      usuario.id,
+      usuario._id
     ),
     ""
   );
@@ -692,6 +893,8 @@ function normalizeClientCandidate(raw = null) {
       obj.nombreFiscal,
       obj.razonSocial,
       obj.empresa,
+      obj.company,
+      obj.businessName,
       obj.nombreContacto,
       obj.nombre,
       obj.name,
@@ -701,18 +904,33 @@ function normalizeClientCandidate(raw = null) {
       cliente.nombreFiscal,
       cliente.razonSocial,
       cliente.empresa,
+      cliente.company,
+      cliente.businessName,
       cliente.nombreContacto,
       cliente.nombre,
       cliente.name,
+      cliente.fullName,
       cliente.displayName,
 
       contacto.nombre,
       contacto.name,
+      contacto.fullName,
+      contacto.displayName,
 
       user.name,
       user.nombre,
       user.fullName,
-      user.displayName
+      user.displayName,
+
+      usuario.name,
+      usuario.nombre,
+      usuario.fullName,
+      usuario.displayName,
+
+      profile.name,
+      profile.nombre,
+      profile.fullName,
+      profile.displayName
     ),
     `Cliente ${id}`
   );
@@ -722,19 +940,27 @@ function normalizeClientCandidate(raw = null) {
       obj.email,
       obj.emailCliente,
       obj.clienteEmail,
+      obj.clientEmail,
+      obj.customerEmail,
       obj.mail,
       obj.emailLower,
 
       cliente.email,
       cliente.emailCliente,
       cliente.clienteEmail,
+      cliente.clientEmail,
       cliente.emailLower,
 
       contacto.email,
       contacto.mail,
 
       user.email,
-      user.mail
+      user.mail,
+
+      usuario.email,
+      usuario.mail,
+
+      profile.email
     ),
     ""
   ).toLowerCase();
@@ -744,13 +970,19 @@ function normalizeClientCandidate(raw = null) {
       obj.razonSocial,
       obj.nombreFiscal,
       obj.empresa,
+      obj.company,
+      obj.businessName,
       cliente.razonSocial,
       cliente.nombreFiscal,
       cliente.empresa,
+      cliente.company,
+      cliente.businessName,
       ""
     ),
     ""
   );
+
+  const avatarUrl = getAvatarUrlFromObject(obj);
 
   const subtitle = safeText(
     first(
@@ -773,6 +1005,9 @@ function normalizeClientCandidate(raw = null) {
     nombre: name,
     email,
     empresa,
+    avatarUrl,
+    avatar: avatarUrl,
+    initials: getInitials(name, "CL"),
     subtitle,
     raw: obj,
   };
@@ -1476,6 +1711,7 @@ function buildCreatePayload(form = {}) {
   const userId = safeText(current.clienteUserId, "");
   const clienteNombre = safeText(current.clienteNombre, "");
   const clienteEmail = safeText(current.clienteEmail, "").toLowerCase();
+  const clienteAvatar = safeText(current.clienteAvatar, "");
 
   const ticketId = safeText(first(current.ticketId, current.incidenciaId), "");
   const incidenciaSubject = safeText(current.incidenciaSubject, ticketId);
@@ -1501,6 +1737,8 @@ function buildCreatePayload(form = {}) {
     clienteNombre,
     clienteEmail,
     emailCliente: clienteEmail || undefined,
+    clienteAvatar: clienteAvatar || undefined,
+    avatarUrl: clienteAvatar || undefined,
 
     cliente: {
       id: clienteId,
@@ -1514,6 +1752,10 @@ function buildCreatePayload(form = {}) {
       razonSocial: clienteNombre,
       email: clienteEmail || undefined,
       emailLower: clienteEmail || undefined,
+      avatar: clienteAvatar || undefined,
+      avatarUrl: clienteAvatar || undefined,
+      logo: clienteAvatar || undefined,
+      logoUrl: clienteAvatar || undefined,
     },
 
     ticketId,
@@ -1624,11 +1866,6 @@ function syncDerivedUi() {
 
   const total = formatMoney(getFormTotal(modalState.form));
 
-  const totalInput = root.querySelector('[data-role="total-preview-input"]');
-  if (totalInput) {
-    totalInput.value = total;
-  }
-
   const totalInline = root.querySelector('[data-role="total-preview-inline"]');
   if (totalInline) {
     totalInline.textContent = total;
@@ -1674,7 +1911,6 @@ function renderInput({
   min = "",
   readonly = false,
   inputmode = "",
-  role = "",
 } = {}) {
   return `
     <label class="fac-create-field">
@@ -1690,7 +1926,6 @@ function renderInput({
         ${step ? `step="${escapeHtml(step)}"` : ""}
         ${min ? `min="${escapeHtml(min)}"` : ""}
         ${inputmode ? `inputmode="${escapeHtml(inputmode)}"` : ""}
-        ${role ? `data-role="${escapeHtml(role)}"` : ""}
         ${readonly ? "readonly" : ""}
         ${modalState.submitting ? "disabled" : ""}
       />
@@ -1821,12 +2056,22 @@ function renderClientSearchResults() {
           (item, index) => `
             <button
               type="button"
-              class="fac-create-search-item"
+              class="fac-create-search-item fac-create-search-item--client"
               data-select-cliente="${index}"
               ${modalState.submitting ? "disabled" : ""}
             >
-              <strong>${escapeHtml(item.name)}</strong>
-              <span>${escapeHtml(item.subtitle || item.email || item.id)}</span>
+              ${renderAvatar({
+                name: item.name,
+                email: item.email,
+                avatarUrl: item.avatarUrl,
+                fallback: "CL",
+                className: "fac-create-avatar fac-create-avatar--search",
+              })}
+
+              <span class="fac-create-search-copy">
+                <strong>${escapeHtml(item.name)}</strong>
+                <span>${escapeHtml(item.subtitle || item.email || item.id)}</span>
+              </span>
             </button>
           `
         )
@@ -1840,14 +2085,27 @@ function renderSelectedCliente() {
 
   if (!safeText(form.clienteId, "")) return "";
 
-  return `
-    <div class="fac-create-selected is-client">
-      <div class="fac-create-selected-icon" aria-hidden="true">C</div>
+  const name = safeText(form.clienteNombre, "Cliente seleccionado");
+  const email = safeText(form.clienteEmail, "");
+  const clienteId = safeText(form.clienteId, "");
+  const avatarUrl = safeText(form.clienteAvatar, "");
 
-      <div class="fac-create-selected-copy">
-        <span>Cliente seleccionado</span>
-        <strong>${escapeHtml(safeText(form.clienteNombre, "Cliente seleccionado"))}</strong>
-        <small>${escapeHtml(safeText(form.clienteEmail, form.clienteId))}</small>
+  return `
+    <div class="fac-create-selected fac-create-selected--client">
+      <div class="fac-create-selected-main">
+        ${renderAvatar({
+          name,
+          email,
+          avatarUrl,
+          fallback: "CL",
+          className: "fac-create-avatar fac-create-avatar--selected",
+        })}
+
+        <div class="fac-create-selected-copy">
+          <span>Cliente seleccionado</span>
+          <strong>${escapeHtml(name)}</strong>
+          <small>${escapeHtml(email || clienteId)}</small>
+        </div>
       </div>
 
       <button
@@ -1888,20 +2146,22 @@ function renderSelectedTicket() {
 
   if (!ticket?.id) return "";
 
-  return `
-    <div class="fac-create-selected is-ticket">
-      <div class="fac-create-selected-icon" aria-hidden="true">I</div>
+  const label = modalState.ticketAutoSelected
+    ? "Incidencia más reciente"
+    : "Incidencia seleccionada";
 
-      <div class="fac-create-selected-copy">
-        <span>
-          ${
-            modalState.ticketAutoSelected
-              ? "Incidencia más reciente seleccionada"
-              : "Incidencia seleccionada"
-          }
-        </span>
-        <strong>${escapeHtml(ticket.id)}</strong>
-        <small>${escapeHtml(ticket.subject || ticket.id)}</small>
+  return `
+    <div class="fac-create-selected fac-create-selected--ticket">
+      <div class="fac-create-selected-main">
+        <div class="fac-create-ticket-badge" aria-hidden="true">
+          <span>I</span>
+        </div>
+
+        <div class="fac-create-selected-copy">
+          <span>${escapeHtml(label)}</span>
+          <strong>${escapeHtml(ticket.id)}</strong>
+          <small>${escapeHtml(ticket.subject || ticket.id)}</small>
+        </div>
       </div>
 
       <button
@@ -1975,12 +2235,16 @@ function renderTicketSearchResults() {
           (item, index) => `
             <button
               type="button"
-              class="fac-create-search-item"
+              class="fac-create-search-item fac-create-search-item--ticket"
               data-select-ticket="${index}"
               ${modalState.submitting ? "disabled" : ""}
             >
-              <strong>${escapeHtml(item.id)} · ${escapeHtml(item.subject)}</strong>
-              <span>${escapeHtml(item.subtitle || item.clienteId || item.id)}</span>
+              <span class="fac-create-ticket-mini-badge" aria-hidden="true">I</span>
+
+              <span class="fac-create-search-copy">
+                <strong>${escapeHtml(item.id)} · ${escapeHtml(item.subject)}</strong>
+                <span>${escapeHtml(item.subtitle || item.clienteId || item.id)}</span>
+              </span>
             </button>
           `
         )
@@ -2509,13 +2773,13 @@ function renderStyles() {
       }
 
       .fac-create-search-item{
-        display:grid;
-        gap:3px;
         width:100%;
+        min-width:0;
         padding:11px 13px;
-        border-radius:13px;
+        border-radius:15px;
         border:1px solid var(--border-soft, rgba(255,255,255,.12));
         background:var(--surface-glass, rgba(255,255,255,.05));
+        color:inherit;
         text-align:left;
         cursor:pointer;
         transition:
@@ -2525,6 +2789,14 @@ function renderStyles() {
           box-shadow .18s ease;
       }
 
+      .fac-create-search-item--client,
+      .fac-create-search-item--ticket{
+        display:grid;
+        grid-template-columns:auto minmax(0, 1fr);
+        align-items:center;
+        gap:11px;
+      }
+
       .fac-create-search-item:hover{
         transform:translateY(-1px);
         border-color:color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft, rgba(255,255,255,.12)));
@@ -2532,10 +2804,19 @@ function renderStyles() {
         box-shadow:0 12px 26px rgba(0,0,0,.08);
       }
 
+      .fac-create-search-copy{
+        display:grid;
+        gap:3px;
+        min-width:0;
+      }
+
       .fac-create-search-item strong{
         color:var(--text-strong, #fff);
         font-size:13px;
         line-height:1.35;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
       }
 
       .fac-create-search-item span{
@@ -2544,17 +2825,108 @@ function renderStyles() {
         line-height:1.35;
       }
 
+      .fac-create-search-copy > span{
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .fac-create-avatar{
+        position:relative;
+        display:grid;
+        place-items:center;
+        overflow:hidden;
+        border-radius:999px;
+        background:linear-gradient(135deg, var(--accent, #7c5cff), color-mix(in srgb, var(--accent, #7c5cff) 45%, #ec4899));
+        color:#fff;
+        font-weight:900;
+        letter-spacing:-.03em;
+        isolation:isolate;
+        transform:translateZ(0);
+        box-shadow:
+          0 10px 22px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent),
+          0 0 0 3px color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
+      }
+
+      .fac-create-avatar--search{
+        width:42px;
+        height:42px;
+        min-width:42px;
+        min-height:42px;
+        font-size:13px;
+      }
+
+      .fac-create-avatar--selected{
+        width:50px;
+        height:50px;
+        min-width:50px;
+        min-height:50px;
+        font-size:15px;
+      }
+
+      .fac-create-avatar::after{
+        content:"";
+        position:absolute;
+        inset:0;
+        z-index:2;
+        pointer-events:none;
+        border-radius:inherit;
+        background:
+          radial-gradient(circle at 30% 22%, rgba(255,255,255,.42), transparent 34%),
+          linear-gradient(180deg, rgba(255,255,255,.11), rgba(0,0,0,.10));
+        mix-blend-mode:screen;
+      }
+
+      .fac-create-avatar img{
+        position:absolute;
+        inset:0;
+        z-index:1;
+        width:100%;
+        height:100%;
+        object-fit:cover;
+      }
+
+      .fac-create-avatar-fallback{
+        position:relative;
+        z-index:3;
+        display:grid;
+        place-items:center;
+        width:100%;
+        height:100%;
+        color:#fff;
+        text-shadow:
+          0 1px 2px rgba(0,0,0,.24),
+          0 0 18px rgba(255,255,255,.20);
+      }
+
+      .fac-create-avatar.has-image .fac-create-avatar-fallback{
+        display:none;
+      }
+
+      .fac-create-avatar[data-fallback="true"] .fac-create-avatar-fallback{
+        display:grid;
+      }
+
+      .fac-create-avatar[data-fallback="true"] img{
+        display:none !important;
+      }
+
       .fac-create-selected{
         display:grid;
-        grid-template-columns:40px minmax(0, 1fr) auto;
+        grid-template-columns:minmax(0, 1fr) auto;
         align-items:center;
-        gap:11px;
-        padding:12px;
-        border-radius:16px;
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft, rgba(255,255,255,.12)));
+        gap:12px;
+        min-width:0;
+        padding:14px;
+        border-radius:18px;
+        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft, rgba(255,255,255,.12)));
         background:
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 9%, transparent), transparent),
+          radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent 44%),
+          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 6%, transparent), transparent),
           var(--surface-glass, rgba(255,255,255,.05));
+        box-shadow:
+          0 16px 34px color-mix(in srgb, var(--accent, #7c5cff) 7%, transparent),
+          inset 0 1px 0 rgba(255,255,255,.045);
         transition:
           transform .18s ease,
           border-color .18s ease,
@@ -2564,26 +2936,63 @@ function renderStyles() {
 
       .fac-create-selected:hover{
         transform:translateY(-1px);
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 34%, var(--border-soft, rgba(255,255,255,.12)));
-        box-shadow:0 14px 28px color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
+        border-color:color-mix(in srgb, var(--accent, #7c5cff) 36%, var(--border-soft, rgba(255,255,255,.12)));
+        box-shadow:
+          0 18px 38px color-mix(in srgb, var(--accent, #7c5cff) 11%, transparent),
+          inset 0 1px 0 rgba(255,255,255,.055);
       }
 
-      .fac-create-selected-icon{
-        width:40px;
-        height:40px;
-        border-radius:14px;
+      .fac-create-selected-main{
+        display:grid;
+        grid-template-columns:auto minmax(0, 1fr);
+        align-items:center;
+        gap:12px;
+        min-width:0;
+      }
+
+      .fac-create-ticket-badge{
         display:grid;
         place-items:center;
+        width:50px;
+        height:50px;
+        min-width:50px;
+        min-height:50px;
+        border-radius:16px;
         color:#fff;
-        font-size:13px;
+        background:
+          radial-gradient(circle at 26% 22%, rgba(255,255,255,.34), transparent 34%),
+          linear-gradient(135deg, var(--accent, #7c5cff), color-mix(in srgb, var(--accent, #7c5cff) 44%, #111827));
+        box-shadow:
+          0 12px 28px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent),
+          0 0 0 3px color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
+      }
+
+      .fac-create-ticket-badge span{
+        color:#fff;
+        font-size:15px;
+        line-height:1;
         font-weight:900;
-        background:linear-gradient(135deg, var(--accent, #7c5cff), color-mix(in srgb, var(--accent, #7c5cff) 45%, #111827));
-        box-shadow:0 10px 22px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
+        letter-spacing:-.03em;
+      }
+
+      .fac-create-ticket-mini-badge{
+        display:grid;
+        place-items:center;
+        width:38px;
+        height:38px;
+        min-width:38px;
+        min-height:38px;
+        border-radius:14px;
+        color:#fff !important;
+        font-size:13px !important;
+        font-weight:900;
+        background:linear-gradient(135deg, var(--accent, #7c5cff), color-mix(in srgb, var(--accent, #7c5cff) 50%, #111827));
+        box-shadow:0 10px 22px color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
       }
 
       .fac-create-selected-copy{
         display:grid;
-        gap:3px;
+        gap:4px;
         min-width:0;
       }
 
@@ -2597,8 +3006,8 @@ function renderStyles() {
 
       .fac-create-selected-copy strong{
         color:var(--text-strong, #fff);
-        font-size:13px;
-        line-height:1.3;
+        font-size:14px;
+        line-height:1.25;
         overflow:hidden;
         text-overflow:ellipsis;
         white-space:nowrap;
@@ -2606,7 +3015,7 @@ function renderStyles() {
 
       .fac-create-selected-copy small{
         color:var(--text-dim, rgba(255,255,255,.62));
-        font-size:11px;
+        font-size:12px;
         line-height:1.35;
         overflow:hidden;
         text-overflow:ellipsis;
@@ -2614,15 +3023,16 @@ function renderStyles() {
       }
 
       .fac-create-selected-clear{
-        min-height:34px;
-        padding:0 12px;
-        border-radius:11px;
+        min-height:36px;
+        padding:0 13px;
+        border-radius:12px;
         border:1px solid var(--border-soft, rgba(255,255,255,.12));
         background:rgba(255,255,255,.04);
         color:var(--text-soft, rgba(255,255,255,.78));
         font-size:12px;
         font-weight:800;
         cursor:pointer;
+        white-space:nowrap;
         transition:
           transform .18s ease,
           border-color .18s ease,
@@ -2742,14 +3152,30 @@ function renderStyles() {
 
       .fac-create-submit-summary{
         display:grid;
-        gap:2px;
+        gap:4px;
+        min-width:180px;
+        padding:13px 15px;
+        border-radius:17px;
+        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 14%, var(--border-soft, rgba(255,255,255,.12)));
+        background:
+          radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent, #7c5cff) 9%, transparent), transparent 42%),
+          var(--surface-glass, rgba(255,255,255,.045));
         color:var(--text-dim, rgba(255,255,255,.62));
         font-size:11px;
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+      }
+
+      .fac-create-submit-summary span{
+        color:var(--text-dim, rgba(255,255,255,.62));
+        font-size:11px;
+        line-height:1.25;
       }
 
       .fac-create-submit-summary strong{
         color:var(--text-strong, #fff);
-        font-size:15px;
+        font-size:18px;
+        line-height:1.1;
+        letter-spacing:-.035em;
       }
 
       .fac-create-action-buttons{
@@ -2758,10 +3184,9 @@ function renderStyles() {
         gap:10px;
       }
 
-      .fac-create-secondary,
       .fac-create-submit{
         min-height:46px;
-        padding:0 20px;
+        padding:0 22px;
         border-radius:14px;
         font-size:13px;
         font-weight:800;
@@ -2772,22 +3197,6 @@ function renderStyles() {
           background .18s ease,
           box-shadow .18s ease,
           opacity .18s ease;
-      }
-
-      .fac-create-secondary{
-        border:1px solid var(--border-soft, rgba(255,255,255,.12));
-        background:var(--surface-glass, rgba(255,255,255,.05));
-        color:var(--text-soft, rgba(255,255,255,.78));
-      }
-
-      .fac-create-secondary:hover{
-        transform:translateY(-1px);
-        background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft, rgba(255,255,255,.12)));
-        box-shadow:0 12px 26px color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-      }
-
-      .fac-create-submit{
         border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 30%, transparent));
         background:var(--btn-primary-bg, var(--accent, #7c5cff));
         color:var(--btn-primary-text, #fff);
@@ -2801,7 +3210,6 @@ function renderStyles() {
       }
 
       .fac-create-submit:disabled,
-      .fac-create-secondary:disabled,
       .fac-create-mini-button:disabled,
       .fac-create-selected-clear:disabled,
       .fac-create-search-item:disabled,
@@ -2859,6 +3267,7 @@ function renderStyles() {
       [data-theme="light"] .fac-create-selected-copy small,
       [data-theme="light"] .fac-create-check small,
       [data-theme="light"] .fac-create-submit-summary,
+      [data-theme="light"] .fac-create-submit-summary span,
       [data-theme="light"] .fac-create-locked span{
         color:var(--text-dim, #6b7280);
       }
@@ -2874,9 +3283,9 @@ function renderStyles() {
       [data-theme="light"] .fac-create-search-item,
       [data-theme="light"] .fac-create-selected,
       [data-theme="light"] .fac-create-check,
-      [data-theme="light"] .fac-create-secondary,
       [data-theme="light"] .fac-create-mini-button,
       [data-theme="light"] .fac-create-selected-clear,
+      [data-theme="light"] .fac-create-submit-summary,
       [data-theme="light"] .fac-create-locked{
         background:rgba(255,255,255,.72);
         border-color:rgba(15,23,42,.08);
@@ -2907,21 +3316,23 @@ function renderStyles() {
         }
 
         .fac-create-action-buttons{
-          flex-direction:column-reverse;
+          flex-direction:column;
           width:100%;
         }
 
-        .fac-create-submit,
-        .fac-create-secondary{
+        .fac-create-submit{
+          width:100%;
+        }
+
+        .fac-create-submit-summary{
           width:100%;
         }
 
         .fac-create-selected{
-          grid-template-columns:40px minmax(0, 1fr);
+          grid-template-columns:1fr;
         }
 
         .fac-create-selected-clear{
-          grid-column:1 / -1;
           width:100%;
         }
       }
@@ -3036,7 +3447,7 @@ function renderModalInner() {
               error: errors.descripcion,
             })}
 
-            <div class="fac-create-grid fac-create-grid--3">
+            <div class="fac-create-grid fac-create-grid--2">
               ${renderInput({
                 label: "Cantidad / horas",
                 name: "cantidad",
@@ -3060,14 +3471,6 @@ function renderModalInner() {
                 required: true,
                 error: errors.precioUnitario,
               })}
-
-              ${renderInput({
-                label: "Total estimado",
-                name: "totalPreview",
-                value: formatMoney(total),
-                readonly: true,
-                role: "total-preview-input",
-              })}
             </div>
 
             ${renderCheckbox({
@@ -3084,15 +3487,6 @@ function renderModalInner() {
               </div>
 
               <div class="fac-create-action-buttons">
-                <button
-                  type="button"
-                  class="fac-create-secondary"
-                  data-modal-close="true"
-                  ${modalState.submitting ? "disabled" : ""}
-                >
-                  Cancelar
-                </button>
-
                 <button
                   type="submit"
                   class="fac-create-submit"
@@ -3142,6 +3536,10 @@ function ensureRoot() {
 
 function lockBody() {
   try {
+    modalState.previousBodyOverflow = document.body.style.overflow || "";
+  } catch {}
+
+  try {
     document.body.classList.add("modal-open");
   } catch {}
 
@@ -3156,7 +3554,8 @@ function unlockBody() {
   } catch {}
 
   try {
-    document.body.style.overflow = "";
+    document.body.style.overflow = modalState.previousBodyOverflow || "";
+    modalState.previousBodyOverflow = "";
   } catch {}
 }
 
@@ -3316,10 +3715,28 @@ export function openFacturasCreateModal(draft = {}) {
     ""
   );
 
+  const draftClienteAvatar = safeText(
+    first(
+      normalizedDraft.clienteAvatar,
+      normalizedDraft.avatarUrl,
+      normalizedDraft.avatar,
+      normalizedDraft.logoUrl,
+      normalizedDraft.logo,
+      normalizedDraft.cliente?.avatarUrl,
+      normalizedDraft.cliente?.avatar,
+      normalizedDraft.cliente?.logoUrl,
+      normalizedDraft.user?.avatarUrl,
+      normalizedDraft.user?.avatar,
+      getAvatarUrlFromObject(normalizedDraft)
+    ),
+    ""
+  );
+
   modalState.form = {
     ...modalState.form,
     ...normalizedDraft,
     clienteUserId: draftClienteUserId || safeText(normalizedDraft.clienteUserId, ""),
+    clienteAvatar: draftClienteAvatar || safeText(normalizedDraft.clienteAvatar, ""),
     ticketId: draftTicketId || safeText(normalizedDraft.ticketId, ""),
     incidenciaId: draftTicketId || safeText(normalizedDraft.incidenciaId, ""),
     incidenciaSubject: draftTicketSubject || safeText(normalizedDraft.incidenciaSubject, ""),
@@ -3386,9 +3803,21 @@ export function updateFacturasCreateModal(draft = {}) {
     return openFacturasCreateModal(draft);
   }
 
+  const normalizedDraft = safeObject(draft);
+
   modalState.form = {
     ...safeObject(modalState.form),
-    ...safeObject(draft),
+    ...normalizedDraft,
+    clienteAvatar: safeText(
+      first(
+        normalizedDraft.clienteAvatar,
+        normalizedDraft.avatarUrl,
+        normalizedDraft.avatar,
+        getAvatarUrlFromObject(normalizedDraft),
+        modalState.form.clienteAvatar
+      ),
+      ""
+    ),
   };
 
   renderModal();
@@ -3504,6 +3933,7 @@ async function selectCliente(index = -1) {
     clienteUserId: item.userId || "",
     clienteNombre: item.name,
     clienteEmail: item.email,
+    clienteAvatar: safeText(first(item.avatarUrl, item.avatar), ""),
 
     ticketId: "",
     incidenciaId: "",
@@ -3548,6 +3978,7 @@ function clearCliente() {
     clienteUserId: "",
     clienteNombre: "",
     clienteEmail: "",
+    clienteAvatar: "",
 
     ticketId: "",
     incidenciaId: "",
@@ -3650,6 +4081,7 @@ function handleFieldInput(field) {
         clienteUserId: "",
         clienteNombre: "",
         clienteEmail: "",
+        clienteAvatar: "",
         ticketId: "",
         incidenciaId: "",
         incidenciaSubject: "",
@@ -3683,10 +4115,6 @@ function handleFieldInput(field) {
 
   if (fieldName === "ticketSelect") {
     selectTicketById(field.value);
-    return;
-  }
-
-  if (fieldName === "totalPreview") {
     return;
   }
 

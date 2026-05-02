@@ -2,7 +2,7 @@
    Onion SPA - Home View
    Archivo: src/views/home/index.js
 
-   FINAL PRO SYSTEM · ENTRYPOINT REAL · 10/10
+   FINAL PRO SYSTEM · ENTRYPOINT REAL · ROUTE SAFE · 10/10
 
    RESPONSABILIDADES:
    - punto de entrada único del módulo home
@@ -24,19 +24,62 @@
    - lazy wrappers seguros
    - no rompe si un submódulo no existe
    - no pisa bridges globales existentes sin mezclar
+
+   FIX ROUTE SAFE:
+   - HomeView.init/render/mount/reload/refresh solo corren en HOME real
+   - bloquea Home si ctx.canonicalPath/publicPath/route no corresponde a "/"
+   - bloquea Home si browserPath actual es /@usuario/incidencias, /incidencias, etc.
+   - evita que un render viejo de Home pinte encima de Incidencias
+   - mantiene destroy/unmount siempre permitidos
 ========================================================= */
 
-import HomeView from "./homeView.js";
+import RawHomeView from "./homeView.js";
 import HomeModal from "./home.modal.js";
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const HOME_INDEX_SOURCE = "views:home:index";
+const HOME_CANONICAL_PATH = "/";
+
+const GUARDED_HOME_METHODS = new Set([
+  "init",
+  "render",
+  "mount",
+  "reload",
+  "refresh",
+
+  "openWidget",
+  "copyWidgetId",
+  "exportCsv",
+  "navigate",
+  "quickAction",
+
+  "goToPage",
+  "goPrevPage",
+  "goNextPage",
+]);
+
+const ALWAYS_ALLOWED_METHODS = new Set([
+  "destroy",
+  "unmount",
+  "getDashboard",
+  "getWidgets",
+  "getPageWidgets",
+  "getWidgetById",
+  "getState",
+  "getSnapshot",
+  "isInitialized",
+  "isDestroyed",
+  "isReady",
+]);
 
 /* =========================================================
    CORE EXPORTS
 ========================================================= */
 
-export { HomeView };
 export { HomeModal };
-
-export default HomeView;
 
 /* =========================================================
    SAFE HELPERS
@@ -53,13 +96,629 @@ function isFn(value) {
   return typeof value === "function";
 }
 
+function isObject(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+  );
+}
+
+function isNodeLike(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof value.nodeType === "number"
+  );
+}
+
 function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
+  return isObject(value)
     ? value
     : {};
 }
+
+function safeText(value, fallback = "") {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text =
+    String(value).trim();
+
+  return text || fallback;
+}
+
+function safeWarn(...args) {
+  try {
+    console.warn(
+      "[HomeIndex]",
+      ...args
+    );
+  } catch {}
+}
+
+function getBaseOrigin() {
+  if (
+    isBrowser() &&
+    window.location?.origin
+  ) {
+    return window.location.origin;
+  }
+
+  return "http://localhost";
+}
+
+function normalizePathnameOnly(pathname = "/") {
+  let value =
+    String(pathname || "/")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+  if (!value) {
+    value = "/";
+  }
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  if (value.length > 1) {
+    value =
+      value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
+}
+
+function isHashRouterPath(value = "") {
+  const raw =
+    safeText(value, "");
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/");
+  }
+
+  return raw.replace(/^#\/?/, "/");
+}
+
+function splitPath(value = "/") {
+  const raw =
+    safeText(value, "/");
+
+  if (isHashRouterPath(raw)) {
+    return splitPath(
+      normalizeHashRouterPath(raw)
+    );
+  }
+
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex =
+    pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash =
+      pathname.slice(hashIndex);
+
+    pathname =
+      pathname.slice(0, hashIndex) || "/";
+  }
+
+  const searchIndex =
+    pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search =
+      pathname.slice(searchIndex);
+
+    pathname =
+      pathname.slice(0, searchIndex) || "/";
+  }
+
+  return {
+    pathname:
+      normalizePathnameOnly(pathname),
+    search,
+    hash,
+  };
+}
+
+function normalizeFullPath(path = "/") {
+  const raw =
+    safeText(path, "/");
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (isHashRouterPath(raw)) {
+    return normalizeFullPath(
+      normalizeHashRouterPath(raw)
+    );
+  }
+
+  try {
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
+      const parsed =
+        new URL(
+          raw,
+          getBaseOrigin()
+        );
+
+      if (
+        parsed.hash &&
+        isHashRouterPath(parsed.hash)
+      ) {
+        return normalizeFullPath(
+          normalizeHashRouterPath(parsed.hash)
+        );
+      }
+
+      return normalizeFullPath(
+        `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
+      );
+    }
+  } catch {}
+
+  const {
+    pathname,
+    search,
+    hash,
+  } = splitPath(raw);
+
+  return `${pathname}${search}${hash}`;
+}
+
+function stripSearchAndHash(path = "/") {
+  return (
+    normalizeFullPath(path)
+      .split("?")[0]
+      .split("#")[0] ||
+    "/"
+  );
+}
+
+function isUsernameSegment(segment = "") {
+  return /^@[A-Za-z0-9._-]{1,80}$/.test(
+    safeText(segment, "")
+  );
+}
+
+function stripUsernamePrefix(path = "/") {
+  const {
+    pathname,
+    search,
+    hash,
+  } = splitPath(
+    normalizeFullPath(path)
+  );
+
+  const segments =
+    pathname
+      .split("/")
+      .filter(Boolean);
+
+  if (
+    segments.length > 0 &&
+    isUsernameSegment(segments[0])
+  ) {
+    const rest =
+      segments
+        .slice(1)
+        .join("/");
+
+    const cleanPathname =
+      rest
+        ? normalizePathnameOnly(`/${rest}`)
+        : "/";
+
+    return `${cleanPathname}${search}${hash}`;
+  }
+
+  return `${pathname}${search}${hash}`;
+}
+
+function canonicalizePath(path = "/") {
+  return normalizeFullPath(
+    stripUsernamePrefix(path || "/")
+  );
+}
+
+function getCleanCanonicalPath(path = "/") {
+  return stripSearchAndHash(
+    canonicalizePath(path || "/")
+  );
+}
+
+function isHomePath(path = "") {
+  return getCleanCanonicalPath(path || "/") === HOME_CANONICAL_PATH;
+}
+
+function getBrowserPath() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  try {
+    const pathname =
+      window.location.pathname || "/";
+
+    const search =
+      window.location.search || "";
+
+    const hash =
+      window.location.hash || "";
+
+    if (
+      hash &&
+      isHashRouterPath(hash)
+    ) {
+      return normalizeFullPath(
+        normalizeHashRouterPath(hash)
+      );
+    }
+
+    return normalizeFullPath(
+      `${pathname}${search}${hash}`
+    );
+  } catch {
+    return "";
+  }
+}
+
+function getWindowAppCore() {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    return (
+      window.AppCore ||
+      window.OnionApp?.AppCore ||
+      window.Onion?.AppCore ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function getAppStatePath() {
+  const AppCore =
+    getWindowAppCore();
+
+  try {
+    return safeText(
+      AppCore?.state?.route ||
+        AppCore?.state?.canonicalPath ||
+        "",
+      ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+function getAppPublicPath() {
+  const AppCore =
+    getWindowAppCore();
+
+  try {
+    return safeText(
+      AppCore?.state?.publicPath ||
+        "",
+      ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+function getDefaultFallback(method = "") {
+  switch (method) {
+    case "destroy":
+    case "unmount":
+      return true;
+
+    case "copyWidgetId":
+    case "exportCsv":
+    case "navigate":
+    case "quickAction":
+    case "goToPage":
+    case "goPrevPage":
+    case "goNextPage":
+      return false;
+
+    case "getDashboard":
+      return {};
+
+    case "getWidgets":
+    case "getPageWidgets":
+      return [];
+
+    case "getWidgetById":
+    case "getState":
+      return null;
+
+    case "getSnapshot":
+      return {
+        initialized:
+          false,
+        destroyed:
+          false,
+        routeBlocked:
+          true,
+        source:
+          HOME_INDEX_SOURCE,
+      };
+
+    default:
+      return null;
+  }
+}
+
+/* =========================================================
+   ROUTE CONTEXT INSPECTION
+========================================================= */
+
+function pushPathSignal(signals, label, value) {
+  const text =
+    safeText(value, "");
+
+  if (!text) {
+    return;
+  }
+
+  signals.push({
+    type:
+      "path",
+    label,
+    value:
+      text,
+    canonical:
+      getCleanCanonicalPath(text),
+    isHome:
+      isHomePath(text),
+  });
+}
+
+function pushViewSignal(signals, label, value) {
+  const text =
+    safeText(value, "");
+
+  if (!text) {
+    return;
+  }
+
+  signals.push({
+    type:
+      "view",
+    label,
+    value:
+      text.toLowerCase(),
+    isHome:
+      text.toLowerCase() === "home",
+  });
+}
+
+function collectRouteSignalsFromObject(signals, value, label = "arg") {
+  if (
+    !isObject(value) ||
+    isNodeLike(value)
+  ) {
+    return;
+  }
+
+  pushViewSignal(
+    signals,
+    `${label}.viewKey`,
+    value.viewKey
+  );
+
+  pushViewSignal(
+    signals,
+    `${label}.route.viewKey`,
+    value.route?.viewKey
+  );
+
+  pushPathSignal(
+    signals,
+    `${label}.canonicalPath`,
+    value.canonicalPath
+  );
+
+  pushPathSignal(
+    signals,
+    `${label}.routePath`,
+    value.routePath
+  );
+
+  pushPathSignal(
+    signals,
+    `${label}.route.path`,
+    value.route?.path
+  );
+
+  pushPathSignal(
+    signals,
+    `${label}.publicPath`,
+    value.publicPath
+  );
+
+  pushPathSignal(
+    signals,
+    `${label}.requestedPath`,
+    value.requestedPath
+  );
+
+  pushPathSignal(
+    signals,
+    `${label}.path`,
+    value.path
+  );
+
+  collectRouteSignalsFromObject(
+    signals,
+    value.options,
+    `${label}.options`
+  );
+}
+
+function collectRouteSignals(args = []) {
+  const signals = [];
+
+  const list =
+    Array.isArray(args)
+      ? args
+      : [];
+
+  list.forEach((arg, index) => {
+    collectRouteSignalsFromObject(
+      signals,
+      arg,
+      `args[${index}]`
+    );
+  });
+
+  const statePath =
+    getAppStatePath();
+
+  if (statePath) {
+    pushPathSignal(
+      signals,
+      "AppCore.state.route",
+      statePath
+    );
+  }
+
+  const publicPath =
+    getAppPublicPath();
+
+  if (publicPath) {
+    pushPathSignal(
+      signals,
+      "AppCore.state.publicPath",
+      publicPath
+    );
+  }
+
+  const browserPath =
+    getBrowserPath();
+
+  if (browserPath) {
+    pushPathSignal(
+      signals,
+      "window.location",
+      browserPath
+    );
+  }
+
+  return signals;
+}
+
+function getBlockingSignal(signals = []) {
+  return (
+    signals.find((signal) => signal.isHome === false) ||
+    null
+  );
+}
+
+function hasPositiveHomeSignal(signals = []) {
+  return signals.some((signal) => signal.isHome === true);
+}
+
+function shouldAllowHomeMethod(method = "", args = []) {
+  const cleanMethod =
+    safeText(method, "");
+
+  if (!cleanMethod) {
+    return true;
+  }
+
+  if (ALWAYS_ALLOWED_METHODS.has(cleanMethod)) {
+    return true;
+  }
+
+  if (!GUARDED_HOME_METHODS.has(cleanMethod)) {
+    return true;
+  }
+
+  const signals =
+    collectRouteSignals(args);
+
+  const blockingSignal =
+    getBlockingSignal(signals);
+
+  if (blockingSignal) {
+    return false;
+  }
+
+  if (hasPositiveHomeSignal(signals)) {
+    return true;
+  }
+
+  /*
+    Sin señales de ruta:
+    - en browser, si location existe y no es home, bloquea
+    - fuera de browser/tests, permite compatibilidad
+  */
+  const browserPath =
+    getBrowserPath();
+
+  if (browserPath) {
+    return isHomePath(browserPath);
+  }
+
+  return true;
+}
+
+function logBlockedHomeMethod(method = "", args = []) {
+  const signals =
+    collectRouteSignals(args);
+
+  const blockingSignal =
+    getBlockingSignal(signals);
+
+  safeWarn(
+    `HomeView.${method} bloqueado: ruta actual no es Home.`,
+    {
+      method,
+      blockingSignal,
+      signals,
+      browserPath:
+        getBrowserPath(),
+      appRoute:
+        getAppStatePath(),
+      appPublicPath:
+        getAppPublicPath(),
+    }
+  );
+}
+
+/* =========================================================
+   SAFE CALL
+========================================================= */
 
 function safeCall(
   target,
@@ -67,17 +726,23 @@ function safeCall(
   args = [],
   fallback = undefined
 ) {
+  const callArgs =
+    Array.isArray(args)
+      ? args
+      : [];
+
   try {
-    const source = safeObject(target);
-    const fn = source?.[method];
+    const source =
+      target || {};
+
+    const fn =
+      source?.[method];
 
     if (isFn(fn)) {
-      /*
-        Importante:
-        apply(source, args) preserva this si HomeView/HomeModal
-        usan estado interno como this.state / this.initialized.
-      */
-      return fn.apply(source, Array.isArray(args) ? args : []);
+      return fn.apply(
+        source,
+        callArgs
+      );
     }
   } catch (error) {
     try {
@@ -91,6 +756,41 @@ function safeCall(
   return fallback;
 }
 
+function guardedCall(
+  target,
+  method,
+  args = [],
+  fallback = undefined
+) {
+  const callArgs =
+    Array.isArray(args)
+      ? args
+      : [];
+
+  if (
+    !shouldAllowHomeMethod(
+      method,
+      callArgs
+    )
+  ) {
+    logBlockedHomeMethod(
+      method,
+      callArgs
+    );
+
+    return fallback !== undefined
+      ? fallback
+      : getDefaultFallback(method);
+  }
+
+  return safeCall(
+    target,
+    method,
+    callArgs,
+    fallback
+  );
+}
+
 function safeFlag(target, key, fallback = false) {
   try {
     return Boolean(target?.[key]);
@@ -100,48 +800,233 @@ function safeFlag(target, key, fallback = false) {
 }
 
 /* =========================================================
+   GUARDED VIEW BRIDGE
+========================================================= */
+
+function createGuardedHomeViewBridge(view) {
+  const source =
+    view || {};
+
+  const cache =
+    new Map();
+
+  if (
+    typeof Proxy !== "function" ||
+    !isObject(source)
+  ) {
+    return source;
+  }
+
+  return new Proxy(source, {
+    get(target, prop, receiver) {
+      if (prop === "__raw") {
+        return target;
+      }
+
+      if (prop === "__source") {
+        return HOME_INDEX_SOURCE;
+      }
+
+      const value =
+        Reflect.get(
+          target,
+          prop,
+          receiver
+        );
+
+      if (!isFn(value)) {
+        return value;
+      }
+
+      const method =
+        String(prop);
+
+      if (cache.has(method)) {
+        return cache.get(method);
+      }
+
+      const wrapped =
+        function guardedHomeViewMethod(...args) {
+          if (
+            !shouldAllowHomeMethod(
+              method,
+              args
+            )
+          ) {
+            logBlockedHomeMethod(
+              method,
+              args
+            );
+
+            return getDefaultFallback(method);
+          }
+
+          try {
+            return value.apply(
+              target,
+              args
+            );
+          } catch (error) {
+            safeWarn(
+              `HomeView.${method} falló.`,
+              error
+            );
+
+            throw error;
+          }
+        };
+
+      try {
+        Object.defineProperties(wrapped, {
+          name: {
+            value:
+              `guardedHome_${method}`,
+          },
+
+          routeViewKey: {
+            value:
+              "home",
+            enumerable:
+              true,
+          },
+
+          routeViewName: {
+            value:
+              "HomeView",
+            enumerable:
+              true,
+          },
+        });
+      } catch {}
+
+      cache.set(
+        method,
+        wrapped
+      );
+
+      return wrapped;
+    },
+
+    set(target, prop, value) {
+      try {
+        target[prop] = value;
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  });
+}
+
+export const HomeView =
+  createGuardedHomeViewBridge(
+    RawHomeView
+  );
+
+export default HomeView;
+
+/* =========================================================
+   FLAGS
+========================================================= */
+
+export const isInitialized = () =>
+  safeFlag(
+    RawHomeView,
+    "initialized",
+    false
+  );
+
+export const isDestroyed = () =>
+  safeFlag(
+    RawHomeView,
+    "destroyed",
+    false
+  );
+
+export const isReady = () =>
+  Boolean(
+    isInitialized() &&
+      !isDestroyed()
+  );
+
+/* =========================================================
    VIEW API
 ========================================================= */
 
 export const init = (...args) =>
-  safeCall(HomeView, "init", args, null);
+  guardedCall(
+    RawHomeView,
+    "init",
+    args,
+    null
+  );
 
 export const render = (...args) =>
-  safeCall(HomeView, "render", args, null);
+  guardedCall(
+    RawHomeView,
+    "render",
+    args,
+    null
+  );
 
 export const mount = (...args) =>
-  safeCall(
-    HomeView,
+  guardedCall(
+    RawHomeView,
     "mount",
     args,
-    safeCall(HomeView, "init", args, null)
+    guardedCall(
+      RawHomeView,
+      "init",
+      args,
+      null
+    )
   );
 
 export const reload = (...args) =>
-  safeCall(
-    HomeView,
+  guardedCall(
+    RawHomeView,
     "reload",
     args,
-    safeCall(HomeView, "refresh", args, null)
+    guardedCall(
+      RawHomeView,
+      "refresh",
+      args,
+      null
+    )
   );
 
 export const refresh = (...args) =>
-  safeCall(
-    HomeView,
+  guardedCall(
+    RawHomeView,
     "refresh",
     args,
-    safeCall(HomeView, "reload", args, null)
+    guardedCall(
+      RawHomeView,
+      "reload",
+      args,
+      null
+    )
   );
 
 export const destroy = (...args) =>
-  safeCall(HomeView, "destroy", args, true);
+  safeCall(
+    RawHomeView,
+    "destroy",
+    args,
+    true
+  );
 
 export const unmount = (...args) =>
   safeCall(
-    HomeView,
+    RawHomeView,
     "unmount",
     args,
-    safeCall(HomeView, "destroy", args, true)
+    safeCall(
+      RawHomeView,
+      "destroy",
+      args,
+      true
+    )
   );
 
 /* =========================================================
@@ -149,62 +1034,160 @@ export const unmount = (...args) =>
 ========================================================= */
 
 export const openWidget = (...args) =>
-  safeCall(HomeView, "openWidget", args, null);
+  guardedCall(
+    RawHomeView,
+    "openWidget",
+    args,
+    null
+  );
 
 export const copyWidgetId = (...args) =>
-  safeCall(HomeView, "copyWidgetId", args, false);
+  guardedCall(
+    RawHomeView,
+    "copyWidgetId",
+    args,
+    false
+  );
 
 export const exportCsv = (...args) =>
-  safeCall(HomeView, "exportCsv", args, false);
+  guardedCall(
+    RawHomeView,
+    "exportCsv",
+    args,
+    false
+  );
 
 export const navigate = (...args) =>
-  safeCall(HomeView, "navigate", args, false);
+  guardedCall(
+    RawHomeView,
+    "navigate",
+    args,
+    false
+  );
 
 export const quickAction = (...args) =>
-  safeCall(HomeView, "quickAction", args, false);
+  guardedCall(
+    RawHomeView,
+    "quickAction",
+    args,
+    false
+  );
 
 /* =========================================================
    PAGINATION API
 ========================================================= */
 
 export const goToPage = (...args) =>
-  safeCall(HomeView, "goToPage", args, false);
+  guardedCall(
+    RawHomeView,
+    "goToPage",
+    args,
+    false
+  );
 
 export const goPrevPage = (...args) =>
-  safeCall(HomeView, "goPrevPage", args, false);
+  guardedCall(
+    RawHomeView,
+    "goPrevPage",
+    args,
+    false
+  );
 
 export const goNextPage = (...args) =>
-  safeCall(HomeView, "goNextPage", args, false);
+  guardedCall(
+    RawHomeView,
+    "goNextPage",
+    args,
+    false
+  );
 
 /* =========================================================
    DATA API
 ========================================================= */
 
 export const getDashboard = (...args) =>
-  safeCall(HomeView, "getDashboard", args, {});
+  safeCall(
+    RawHomeView,
+    "getDashboard",
+    args,
+    {}
+  );
 
 export const getWidgets = (...args) =>
-  safeCall(HomeView, "getWidgets", args, []);
+  safeCall(
+    RawHomeView,
+    "getWidgets",
+    args,
+    []
+  );
 
 export const getPageWidgets = (...args) =>
-  safeCall(HomeView, "getPageWidgets", args, []);
+  safeCall(
+    RawHomeView,
+    "getPageWidgets",
+    args,
+    []
+  );
 
 export const getWidgetById = (...args) =>
-  safeCall(HomeView, "getWidgetById", args, null);
+  safeCall(
+    RawHomeView,
+    "getWidgetById",
+    args,
+    null
+  );
 
 export const getState = (...args) =>
-  safeCall(HomeView, "getState", args, null);
+  safeCall(
+    RawHomeView,
+    "getState",
+    args,
+    null
+  );
 
 export const getSnapshot = (...args) =>
   safeCall(
-    HomeView,
+    RawHomeView,
     "getSnapshot",
     args,
     {
-      initialized: isInitialized(),
-      destroyed: isDestroyed(),
-      hasHomeView: Boolean(HomeView),
-      hasHomeModal: Boolean(HomeModal),
+      initialized:
+        isInitialized(),
+
+      destroyed:
+        isDestroyed(),
+
+      ready:
+        isReady(),
+
+      hasHomeView:
+        Boolean(RawHomeView),
+
+      hasHomeModal:
+        Boolean(HomeModal),
+
+      source:
+        HOME_INDEX_SOURCE,
+
+      browserPath:
+        getBrowserPath(),
+
+      browserCanonicalPath:
+        getCleanCanonicalPath(
+          getBrowserPath() || "/"
+        ),
+
+      appRoute:
+        getAppStatePath(),
+
+      appPublicPath:
+        getAppPublicPath(),
+
+      homeAllowedNow:
+        shouldAllowHomeMethod(
+          "render",
+          []
+        ),
     }
   );
 
@@ -217,7 +1200,12 @@ export const openModal = (...args) =>
     HomeModal,
     "open",
     args,
-    safeCall(HomeModal, "show", args, null)
+    safeCall(
+      HomeModal,
+      "show",
+      args,
+      null
+    )
   );
 
 export const closeModal = (...args) =>
@@ -225,7 +1213,12 @@ export const closeModal = (...args) =>
     HomeModal,
     "close",
     args,
-    safeCall(HomeModal, "hide", args, true)
+    safeCall(
+      HomeModal,
+      "hide",
+      args,
+      true
+    )
   );
 
 export const updateModal = (...args) =>
@@ -233,24 +1226,66 @@ export const updateModal = (...args) =>
     HomeModal,
     "update",
     args,
-    safeCall(HomeModal, "patch", args, null)
+    safeCall(
+      HomeModal,
+      "patch",
+      args,
+      null
+    )
   );
 
 export const destroyModal = (...args) =>
-  safeCall(HomeModal, "destroy", args, true);
+  safeCall(
+    HomeModal,
+    "destroy",
+    args,
+    true
+  );
 
 /* =========================================================
-   FLAGS
+   DEBUG API
 ========================================================= */
 
-export const isInitialized = () =>
-  safeFlag(HomeView, "initialized", false);
+export const canRenderHomeNow = (...args) =>
+  shouldAllowHomeMethod(
+    "render",
+    args
+  );
 
-export const isDestroyed = () =>
-  safeFlag(HomeView, "destroyed", false);
+export const getHomeRouteDebug = (...args) => {
+  const signals =
+    collectRouteSignals(args);
 
-export const isReady = () =>
-  Boolean(isInitialized() && !isDestroyed());
+  return {
+    source:
+      HOME_INDEX_SOURCE,
+
+    allowed:
+      shouldAllowHomeMethod(
+        "render",
+        args
+      ),
+
+    browserPath:
+      getBrowserPath(),
+
+    browserCanonicalPath:
+      getCleanCanonicalPath(
+        getBrowserPath() || "/"
+      ),
+
+    appRoute:
+      getAppStatePath(),
+
+    appPublicPath:
+      getAppPublicPath(),
+
+    signals,
+
+    blockingSignal:
+      getBlockingSignal(signals),
+  };
+};
 
 /* =========================================================
    PUBLIC MODULE API
@@ -293,8 +1328,17 @@ export const Home = Object.freeze({
   isDestroyed,
   isReady,
 
-  View: HomeView,
-  Modal: HomeModal,
+  canRenderHomeNow,
+  getHomeRouteDebug,
+
+  View:
+    HomeView,
+
+  RawView:
+    RawHomeView,
+
+  Modal:
+    HomeModal,
 });
 
 /* =========================================================

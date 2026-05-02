@@ -30,6 +30,14 @@
    - reparación post-render no pisa navegación nueva
    - Router NO escucha app:user-ui:sync ni app:ui:repair para evitar bucles
    - repairShellForRoute no emite app:ui:repair-request por defecto
+
+   FIX ROUTE SCOPE:
+   - distingue publicPath y canonicalPath de forma estricta
+   - /@cristian/incidencias -> publicPath
+   - /incidencias           -> canonicalPath
+   - Router.render(path, options) respeta options.canonicalPath/options.publicPath
+   - getRequestedData() no permite que /@usuario/ruta caiga a "/"
+   - navigate() conserva canonicalPath/publicPath en el render encolado
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -280,12 +288,6 @@ export const Router = (() => {
       }
     } catch {}
 
-    /*
-      Clave:
-      No emitir siempre también por window.
-      Si AppCore.events existe, ya hay un bus principal.
-      Duplicar a window provoca doble router:rendered / doble repair.
-    */
     if (
       opts.window === true ||
       (!busAvailable && isBrowser())
@@ -390,10 +392,6 @@ export const Router = (() => {
       return () => {};
     }
 
-    /*
-      Fallback real:
-      solo si no existe AppCore.events.
-    */
     return safeOn(
       window,
       eventName,
@@ -508,6 +506,169 @@ export const Router = (() => {
      PATH HELPERS
   ===================================================== */
 
+  function normalizePathnameOnly(pathname = "/") {
+    let value =
+      safeText(pathname, "/")
+        .replace(/\\/g, "/")
+        .replace(/\/{2,}/g, "/");
+
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
+    }
+
+    if (value.length > 1) {
+      value =
+        value.replace(/\/+$/g, "") || "/";
+    }
+
+    return value || "/";
+  }
+
+  function normalizeSearch(search = "") {
+    const value =
+      safeText(search, "");
+
+    if (!value) {
+      return "";
+    }
+
+    return value.startsWith("?")
+      ? value
+      : `?${value.replace(/^\?+/, "")}`;
+  }
+
+  function normalizeHash(hash = "") {
+    const value =
+      safeText(hash, "");
+
+    if (!value) {
+      return "";
+    }
+
+    return value.startsWith("#")
+      ? value
+      : `#${value.replace(/^#+/, "")}`;
+  }
+
+  function isHashRouterPath(value = "") {
+    const raw =
+      safeText(value, "");
+
+    return (
+      raw.startsWith("#/") ||
+      raw.startsWith("#!")
+    );
+  }
+
+  function normalizeHashRouterPath(value = "") {
+    const raw =
+      safeText(value, "");
+
+    if (!raw) {
+      return "/";
+    }
+
+    if (raw.startsWith("#!")) {
+      return raw.replace(/^#!\/?/, "/");
+    }
+
+    return raw.replace(/^#\/?/, "/");
+  }
+
+  function splitFullPath(value = "/") {
+    const raw =
+      safeText(value, "/");
+
+    if (isHashRouterPath(raw)) {
+      return splitFullPath(
+        normalizeHashRouterPath(raw)
+      );
+    }
+
+    let pathname = raw;
+    let search = "";
+    let hash = "";
+
+    const hashIndex =
+      pathname.indexOf("#");
+
+    if (hashIndex >= 0) {
+      hash =
+        pathname.slice(hashIndex);
+
+      pathname =
+        pathname.slice(0, hashIndex) || "/";
+    }
+
+    const searchIndex =
+      pathname.indexOf("?");
+
+    if (searchIndex >= 0) {
+      search =
+        pathname.slice(searchIndex);
+
+      pathname =
+        pathname.slice(0, searchIndex) || "/";
+    }
+
+    return {
+      pathname:
+        normalizePathnameOnly(pathname),
+      search:
+        normalizeSearch(search),
+      hash:
+        normalizeHash(hash),
+    };
+  }
+
+  function normalizeLocalFullPath(path = "/") {
+    const raw =
+      safeText(path, "/");
+
+    if (!raw) {
+      return "/";
+    }
+
+    if (isHashRouterPath(raw)) {
+      return normalizeLocalFullPath(
+        normalizeHashRouterPath(raw)
+      );
+    }
+
+    try {
+      if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
+        const parsed =
+          new URL(
+            raw,
+            isBrowser()
+              ? window.location.origin
+              : "http://localhost"
+          );
+
+        if (
+          parsed.hash &&
+          isHashRouterPath(parsed.hash)
+        ) {
+          return normalizeLocalFullPath(
+            normalizeHashRouterPath(parsed.hash)
+          );
+        }
+
+        return normalizeLocalFullPath(
+          `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
+        );
+      }
+    } catch {}
+
+    const {
+      pathname,
+      search,
+      hash,
+    } = splitFullPath(raw);
+
+    return `${pathname}${search}${hash}`;
+  }
+
   function stripSearchAndHash(path = "/") {
     const raw =
       safeText(path, "/") || "/";
@@ -532,9 +693,108 @@ export const Router = (() => {
     return value;
   }
 
-  function isPublicAuthPath(path = "/") {
+  function isUsernameSegment(segment = "") {
+    const raw =
+      safeText(segment, "");
+
+    return /^@[A-Za-z0-9._-]{1,80}$/.test(raw);
+  }
+
+  function isUsernameScopedPath(path = "") {
     const clean =
       stripSearchAndHash(path);
+
+    const first =
+      clean
+        .split("/")
+        .filter(Boolean)[0] || "";
+
+    return isUsernameSegment(first);
+  }
+
+  function stripUsernamePrefixLocal(path = "/") {
+    const {
+      pathname,
+      search,
+      hash,
+    } = splitFullPath(path);
+
+    const segments =
+      pathname
+        .split("/")
+        .filter(Boolean);
+
+    if (
+      segments.length > 0 &&
+      isUsernameSegment(segments[0])
+    ) {
+      const rest =
+        segments
+          .slice(1)
+          .join("/");
+
+      const cleanPathname =
+        rest
+          ? normalizePathnameOnly(`/${rest}`)
+          : "/";
+
+      return `${cleanPathname}${search}${hash}`;
+    }
+
+    return `${pathname}${search}${hash}`;
+  }
+
+  function canonicalizePath(path = "/") {
+    const normalized =
+      normalizeLocalFullPath(path || "/");
+
+    const stripped =
+      stripUsernamePrefixLocal(normalized);
+
+    return normalizeLocalFullPath(stripped || "/");
+  }
+
+  function safePublicPath(path = "/") {
+    const raw =
+      safeText(path, "/");
+
+    if (
+      isUnsafeHref(raw) ||
+      isExternalHref(raw)
+    ) {
+      return "/";
+    }
+
+    if (isHashOnlyHref(raw)) {
+      return raw;
+    }
+
+    return normalizeLocalFullPath(raw);
+  }
+
+  function safeCanonicalPath(path = "/") {
+    const raw =
+      safeText(path, "/");
+
+    if (
+      isUnsafeHref(raw) ||
+      isExternalHref(raw)
+    ) {
+      return "/";
+    }
+
+    if (isHashOnlyHref(raw)) {
+      return raw;
+    }
+
+    return canonicalizePath(raw);
+  }
+
+  function isPublicAuthPath(path = "/") {
+    const clean =
+      stripSearchAndHash(
+        canonicalizePath(path)
+      );
 
     if (PUBLIC_AUTH_PATHS.has(clean)) {
       return true;
@@ -547,7 +807,9 @@ export const Router = (() => {
 
   function getTechnicalRouteBase(path = "/") {
     const clean =
-      stripSearchAndHash(path);
+      stripSearchAndHash(
+        canonicalizePath(path)
+      );
 
     for (const base of TECHNICAL_ROUTE_BASES) {
       if (
@@ -588,43 +850,71 @@ export const Router = (() => {
           : hash.replace(/^#\/?/, "/");
       }
 
-      return `${pathname}${search}${hash}`;
+      return normalizeLocalFullPath(
+        `${pathname}${search}${hash}`
+      );
     } catch {
       return "/";
     }
   }
 
   function safePath(path = "/") {
-    const raw =
-      safeText(path, "/");
-
-    if (
-      isUnsafeHref(raw) ||
-      isExternalHref(raw)
-    ) {
-      return "/";
-    }
-
-    if (isHashOnlyHref(raw)) {
-      return raw;
-    }
-
-    const normalized =
-      raw.startsWith("/")
-        ? raw
-        : `/${raw}`;
-
-    return normalizePath(
-      AppCore,
-      normalized
-    );
+    return safePublicPath(path);
   }
 
   function getCanonical(path = "/") {
-    return normalizeCanonicalPath(
-      AppCore,
-      path
-    );
+    const localCanonical =
+      canonicalizePath(path);
+
+    let helperCanonical = "";
+
+    try {
+      helperCanonical =
+        normalizeCanonicalPath(
+          AppCore,
+          path
+        ) || "";
+    } catch {}
+
+    helperCanonical =
+      helperCanonical
+        ? canonicalizePath(helperCanonical)
+        : "";
+
+    const localClean =
+      stripSearchAndHash(localCanonical);
+
+    const helperClean =
+      stripSearchAndHash(helperCanonical);
+
+    if (
+      isUsernameScopedPath(path) &&
+      (
+        !helperClean ||
+        helperClean === "/"
+      ) &&
+      localClean !== "/"
+    ) {
+      return localCanonical;
+    }
+
+    if (
+      helperClean &&
+      helperClean !== "/" &&
+      helperClean === localClean
+    ) {
+      return helperCanonical;
+    }
+
+    if (
+      helperClean &&
+      helperClean !== "/" &&
+      !isUsernameScopedPath(helperCanonical)
+    ) {
+      return helperCanonical;
+    }
+
+    return localCanonical || helperCanonical || "/";
   }
 
   function getRouteMatch(path = "/") {
@@ -732,7 +1022,7 @@ export const Router = (() => {
 
   function getCurrentComparable() {
     const canonical =
-      safePath(
+      safeCanonicalPath(
         getCurrentCanonicalPath(AppCore) ||
           AppCore?.state?.route ||
           lastRenderedCanonicalPath ||
@@ -740,7 +1030,7 @@ export const Router = (() => {
       );
 
     const publicPath =
-      safePath(
+      safePublicPath(
         getCurrentPublicPath(AppCore) ||
           AppCore?.state?.publicPath ||
           lastRenderedPublicPath ||
@@ -826,7 +1116,11 @@ export const Router = (() => {
   function shouldSkipHistory(options = {}) {
     return (
       options.skipHistory === true ||
-      options.protectedInitialUrl === true
+      options.protectedInitialUrl === true ||
+      (
+        options.initialRender === true &&
+        options.preserveUrl === true
+      )
     );
   }
 
@@ -857,11 +1151,17 @@ export const Router = (() => {
 
       preservePath:
         options.preservePath === true ||
+        options.preservePublicPath === true ||
+        options.preserveUrl === true ||
         options.protectedInitialUrl === true,
 
       skipHistory:
         options.skipHistory === true ||
-        options.protectedInitialUrl === true,
+        options.protectedInitialUrl === true ||
+        (
+          options.initialRender === true &&
+          options.preserveUrl === true
+        ),
 
       protectedInitialUrl:
         options.protectedInitialUrl === true,
@@ -1474,7 +1774,14 @@ export const Router = (() => {
       getBrowserPath();
 
     const data =
-      getRequestedData(path);
+      getRequestedData(
+        path,
+        {
+          preservePublicPath: true,
+          preserveUrl: true,
+          source: "repair-current-route",
+        }
+      );
 
     return repairShellForRoute({
       route:
@@ -1542,7 +1849,36 @@ export const Router = (() => {
     );
   }
 
-  function getRequestedData(path = "/") {
+  function shouldPreservePublicPath(options = {}) {
+    return Boolean(
+      options.preservePublicPath === true ||
+        options.preservePath === true ||
+        options.preserveUrl === true ||
+        options.protectedInitialUrl === true ||
+        options.initialRender === true
+    );
+  }
+
+  function getRequestedData(path = "/", options = {}) {
+    const opts =
+      safeObject(options);
+
+    const explicitCanonicalPath =
+      safeText(
+        opts.canonicalPath ||
+          opts.route ||
+          "",
+        ""
+      );
+
+    const explicitPublicPath =
+      safeText(
+        opts.publicPath ||
+          opts.requestedPath ||
+          "",
+        ""
+      );
+
     const resolvedHref =
       resolveSpaHref(
         AppCore,
@@ -1550,10 +1886,15 @@ export const Router = (() => {
       ) || path;
 
     const requestedPath =
-      safePath(resolvedHref);
+      safePublicPath(resolvedHref);
+
+    const canonicalInput =
+      explicitCanonicalPath
+        ? safeCanonicalPath(explicitCanonicalPath)
+        : safeCanonicalPath(requestedPath);
 
     const match =
-      getRouteMatch(requestedPath);
+      getRouteMatch(canonicalInput);
 
     const route =
       match.route;
@@ -1565,29 +1906,51 @@ export const Router = (() => {
       match.rawCanonicalPath;
 
     const username =
-      resolveUsername(requestedPath);
+      resolveUsername(
+        explicitPublicPath ||
+          requestedPath ||
+          canonicalPath
+      );
 
     let publicPath =
-      requestedPath;
+      explicitPublicPath
+        ? safePublicPath(explicitPublicPath)
+        : requestedPath;
 
-    if (canUsePublicSlugForRoute(route)) {
+    if (
+      !publicPath ||
+      publicPath === "/"
+    ) {
       publicPath =
-        safePath(
-          buildPublicPath(
-            AppCore,
-            getRoute,
-            requestedPath,
-            {
+        canonicalPath || "/";
+    }
+
+    if (
+      canUsePublicSlugForRoute(route) &&
+      !shouldPreservePublicPath(opts)
+    ) {
+      const builtPublicPath =
+        buildPublicPath(
+          AppCore,
+          getRoute,
+          canonicalPath,
+          {
+            username,
+            resolvedUsername:
               username,
-              resolvedUsername:
-                username,
-              fromPath:
-                requestedPath,
-              publicPath:
-                requestedPath,
-            }
-          ) ||
-            requestedPath
+            fromPath:
+              requestedPath,
+            publicPath:
+              requestedPath,
+            canonicalPath,
+          }
+        );
+
+      publicPath =
+        safePublicPath(
+          builtPublicPath ||
+            publicPath ||
+            canonicalPath
         );
     }
 
@@ -1595,7 +1958,41 @@ export const Router = (() => {
       match.matchedBy === "technical-prefix"
     ) {
       publicPath =
-        safePath(requestedPath);
+        safePublicPath(
+          explicitPublicPath ||
+            requestedPath ||
+            publicPath
+        );
+    }
+
+    if (
+      isUsernameScopedPath(publicPath) &&
+      stripSearchAndHash(canonicalPath) === "/" &&
+      stripSearchAndHash(publicPath) !== "/"
+    ) {
+      const repairedCanonical =
+        stripSearchAndHash(
+          safeCanonicalPath(publicPath)
+        );
+
+      const repairedMatch =
+        getRouteMatch(repairedCanonical);
+
+      if (repairedMatch.route) {
+        return {
+          requestedPath,
+          canonicalPath:
+            repairedMatch.canonicalPath,
+          rawCanonicalPath:
+            repairedMatch.rawCanonicalPath,
+          publicPath,
+          route:
+            repairedMatch.route,
+          username,
+          matchedBy:
+            `repaired-${repairedMatch.matchedBy}`,
+        };
+      }
     }
 
     return {
@@ -1649,7 +2046,7 @@ export const Router = (() => {
     }
 
     const resolved =
-      safePath(
+      safePublicPath(
         resolveSpaHref(
           AppCore,
           raw
@@ -1705,11 +2102,11 @@ export const Router = (() => {
   } = {}) {
     const safeCanonical =
       stripSearchAndHash(
-        canonicalPath || "/"
+        safeCanonicalPath(canonicalPath || "/")
       );
 
     const safePublic =
-      safePath(
+      safePublicPath(
         publicPath ||
           safeCanonical
       );
@@ -1780,7 +2177,19 @@ export const Router = (() => {
 
   async function redirectInsideRender(target = "/", options = {}) {
     const redirectTarget =
-      safePath(target || getDefaultHome());
+      safePublicPath(target || getDefaultHome());
+
+    const redirectData =
+      getRequestedData(
+        redirectTarget,
+        {
+          ...safeObject(options),
+          preservePublicPath:
+            true,
+          preserveUrl:
+            true,
+        }
+      );
 
     const redirectToken =
       ++renderToken;
@@ -1793,6 +2202,10 @@ export const Router = (() => {
       {
         target:
           redirectTarget,
+        canonicalPath:
+          redirectData.canonicalPath,
+        publicPath:
+          redirectData.publicPath,
         token:
           redirectToken,
         options:
@@ -1801,9 +2214,13 @@ export const Router = (() => {
     );
 
     return executeRender(
-      redirectTarget,
+      redirectData.publicPath,
       {
         ...safeObject(options),
+        canonicalPath:
+          redirectData.canonicalPath,
+        publicPath:
+          redirectData.publicPath,
         force: true,
         forceRender: true,
         replaceState:
@@ -1842,7 +2259,7 @@ export const Router = (() => {
       destroyActiveView();
 
       const loginPublicPath =
-        safePath(
+        safePublicPath(
           access.redirectTo ||
             "/login"
         );
@@ -1932,13 +2349,19 @@ export const Router = (() => {
 
     if (reason === "already-authenticated") {
       const target =
-        safePath(
+        safePublicPath(
           access.redirectTo ||
             getDefaultHome()
         );
 
       const targetData =
-        getRequestedData(target);
+        getRequestedData(
+          target,
+          {
+            preservePublicPath:
+              true,
+          }
+        );
 
       const current =
         getCurrentComparable();
@@ -1969,12 +2392,6 @@ export const Router = (() => {
         };
       }
 
-      /*
-        CRÍTICO:
-        No usar navigate() aquí.
-        Estamos dentro del renderChain. Si llamamos navigate() y lo await-eamos,
-        el nuevo render queda encolado detrás del render actual y se produce deadlock.
-      */
       await redirectInsideRender(
         target,
         {
@@ -2104,7 +2521,10 @@ export const Router = (() => {
       route,
       username,
       matchedBy,
-    } = getRequestedData(path);
+    } = getRequestedData(
+      path,
+      options
+    );
 
     const historyOptions =
       getHistoryOptions(
@@ -2567,7 +2987,10 @@ export const Router = (() => {
       safeObject(options);
 
     const data =
-      getRequestedData(path);
+      getRequestedData(
+        path,
+        opts
+      );
 
     const key =
       `${data.publicPath}|${data.canonicalPath}`;
@@ -2664,7 +3087,13 @@ export const Router = (() => {
 
     return render(
       data.publicPath,
-      opts
+      {
+        ...opts,
+        canonicalPath:
+          data.canonicalPath,
+        publicPath:
+          data.publicPath,
+      }
     );
   }
 
@@ -2797,13 +3226,29 @@ export const Router = (() => {
     const path =
       getBrowserPath();
 
+    const data =
+      getRequestedData(
+        path,
+        {
+          preservePublicPath: true,
+          preserveUrl: true,
+          source: "popstate",
+        }
+      );
+
     render(
-      path,
+      data.publicPath,
       {
         skipHistory: true,
         replaceState: true,
         force: true,
         forceRender: true,
+        preservePublicPath: true,
+        preserveUrl: true,
+        canonicalPath:
+          data.canonicalPath,
+        publicPath:
+          data.publicPath,
         source: "popstate",
       }
     );
@@ -3028,14 +3473,6 @@ export const Router = (() => {
         );
       });
 
-      /*
-        No escuchar:
-        - app:user-ui:sync
-        - app:ui:repair
-
-        Son eventos derivados de UI repair/sync y pueden cerrar el bucle:
-          router repair -> app repair request -> user UI sync -> router repair
-      */
       [
         "app:user:change",
         "auth:logout:success",
@@ -3049,10 +3486,6 @@ export const Router = (() => {
         );
       });
 
-      /*
-        Permitido solo para requests externas.
-        Las emitidas por este Router se ignoran por source.
-      */
       disposers.push(
         safeEventOn(
           "app:ui:repair-request",
@@ -3141,6 +3574,12 @@ export const Router = (() => {
     const dom =
       getDomSnapshot();
 
+    const browserPath =
+      getBrowserPath();
+
+    const browserCanonicalPath =
+      safeCanonicalPath(browserPath);
+
     return {
       configured,
       bound,
@@ -3159,6 +3598,9 @@ export const Router = (() => {
 
       publicPath:
         AppCore?.state?.publicPath || "/",
+
+      browserPath,
+      browserCanonicalPath,
 
       lastNavKey,
       lastNavAt,

@@ -25,7 +25,7 @@
 
    HARDENING:
    - no depende solo de role === admin
-   - soporta aliases admin/superadmin/owner/root
+   - soporta aliases admin/superadmin/owner/root/support/staff
    - soporta flags isAdmin/admin/canManageUsers/canAccessUsers
    - soporta permisos admin-like: users.manage / manage_users / admin:*
    - inspecciona state/session/user/profile/raw/meta/claims/account
@@ -34,12 +34,21 @@
    - no destruye permanentemente tooltips i18n
    - evita estado visual fantasma tras login/logout/restore
    - restaura correctamente items admin ocultos inicialmente por template
+   - safeEmit usa AppCore.events si existe; window solo fallback
 ========================================================= */
 
 import {
   getElements,
   sanitizeFooterTooltipState,
 } from "./dom.js";
+
+import {
+  SIDEBAR_EVENTS,
+  SIDEBAR_ADMIN_ROLE_KEYS,
+  SIDEBAR_ADMIN_FLAG_KEYS,
+  SERVER_NAV_ID,
+  SERVER_ROUTE,
+} from "./constants.js";
 
 /* =========================================================
    CONSTANTS
@@ -49,14 +58,19 @@ const ROLE_SELECTOR = [
   "[data-role]",
   "[data-roles]",
   "[data-admin-only]",
+  "[data-sidebar-admin-only]",
   "[data-requires-role]",
   "[data-requires-roles]",
+  "[data-required-role]",
+  "[data-required-roles]",
   "[data-sidebar-role]",
   "[data-sidebar-roles]",
   "[data-permission]",
   "[data-permissions]",
   "[data-sidebar-permission]",
   "[data-sidebar-permissions]",
+  "[data-scope]",
+  "[data-scopes]",
 ].join(",");
 
 const FOCUSABLE_SELECTOR = [
@@ -66,13 +80,16 @@ const FOCUSABLE_SELECTOR = [
   "select",
   "textarea",
   "summary",
+  "details",
+  "audio[controls]",
+  "video[controls]",
   "[tabindex]",
   "[role='button']",
   "[role='link']",
   "[contenteditable='true']",
 ].join(",");
 
-const ADMIN_ROLE_KEYS = new Set([
+const DEFAULT_ADMIN_ROLE_KEYS = [
   "admin",
   "administrator",
   "administrador",
@@ -81,7 +98,38 @@ const ADMIN_ROLE_KEYS = new Set([
   "super_administrador",
   "owner",
   "root",
-]);
+  "staff",
+  "support",
+];
+
+const ADMIN_ROLE_KEYS = new Set(
+  [
+    ...DEFAULT_ADMIN_ROLE_KEYS,
+    ...(
+      Array.isArray(SIDEBAR_ADMIN_ROLE_KEYS)
+        ? SIDEBAR_ADMIN_ROLE_KEYS
+        : []
+    ),
+  ].map(normalizeRole)
+);
+
+const ADMIN_FLAG_KEYS = [
+  "isAdmin",
+  "admin",
+  "is_admin",
+
+  "isSuperAdmin",
+  "superAdmin",
+  "is_super_admin",
+
+  "canManageUsers",
+  "can_manage_users",
+
+  "canAccessUsers",
+  "can_access_users",
+
+  ...(Array.isArray(SIDEBAR_ADMIN_FLAG_KEYS) ? SIDEBAR_ADMIN_FLAG_KEYS : []),
+];
 
 const ADMIN_PERMISSION_KEYS = new Set([
   "admin:*",
@@ -89,6 +137,10 @@ const ADMIN_PERMISSION_KEYS = new Set([
   "admin.full",
   "admin.manage",
   "admin:manage",
+  "admin.write",
+  "admin:write",
+  "admin.read",
+  "admin:read",
 
   "users.manage",
   "users:manage",
@@ -96,6 +148,8 @@ const ADMIN_PERMISSION_KEYS = new Set([
   "users:write",
   "users.admin",
   "users:admin",
+  "users.access",
+  "users:access",
 
   "usuarios.manage",
   "usuarios:manage",
@@ -103,6 +157,8 @@ const ADMIN_PERMISSION_KEYS = new Set([
   "usuarios:write",
   "usuarios.admin",
   "usuarios:admin",
+  "usuarios.access",
+  "usuarios:access",
 
   "manage_users",
   "can_manage_users",
@@ -111,17 +167,44 @@ const ADMIN_PERMISSION_KEYS = new Set([
 
   "clients.manage",
   "clients:manage",
+  "clients.write",
+  "clients:write",
+  "clients.admin",
+  "clients:admin",
+
   "clientes.manage",
   "clientes:manage",
+  "clientes.write",
+  "clientes:write",
+  "clientes.admin",
+  "clientes:admin",
 
   "server.manage",
   "server:manage",
+  "server.admin",
+  "server:admin",
+  "server.access",
+  "server:access",
+
   "servidor.manage",
   "servidor:manage",
+  "servidor.admin",
+  "servidor:admin",
+  "servidor.access",
+  "servidor:access",
 ]);
 
 const ORIGINAL_NONE = "__none__";
 const ORIGINAL_EMPTY = "__empty__";
+
+const EVENT_ROLE_VISIBILITY_APPLIED =
+  SIDEBAR_EVENTS?.roleVisibilityApplied ||
+  "sidebar:role-visibility:applied";
+
+const EVENT_VISIBILITY_APPLIED = "sidebar:visibility:applied";
+const EVENT_ROLES_APPLIED_LEGACY = "sidebar:roles:applied";
+const EVENT_ACTIVE_INVALIDATED = "sidebar:active:invalidated";
+const EVENT_INDICATOR_REFRESH_REQUEST = "sidebar:indicator:refresh-request";
 
 /* =========================================================
    SAFE HELPERS
@@ -173,6 +256,15 @@ function first(...values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
+
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === 0
+    ) {
+      continue;
+    }
 
     return value;
   }
@@ -226,14 +318,28 @@ function safeWarn(AppCore, ...args) {
 
 function safeEmit(AppCore, eventName = "", payload = {}) {
   const name = safeText(eventName, "");
-  if (!name) return false;
 
-  let emitted = false;
+  if (!name) {
+    return false;
+  }
 
+  /*
+    Importante:
+    No emitir por AppCore.events y window a la vez.
+    events.js puede escuchar ambos canales en fallback.
+  */
   try {
-    AppCore?.events?.emit?.(name, payload);
-    emitted = true;
-  } catch {}
+    if (isFn(AppCore?.events?.emit)) {
+      AppCore.events.emit(name, payload);
+      return true;
+    }
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      `AppCore.events.emit("${name}") falló.`,
+      error
+    );
+  }
 
   try {
     if (
@@ -246,11 +352,11 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
         })
       );
 
-      emitted = true;
+      return true;
     }
   } catch {}
 
-  return emitted;
+  return false;
 }
 
 /* =========================================================
@@ -267,7 +373,11 @@ function normalizeRole(value = "") {
     .trim();
 }
 
-function splitRoles(value = "") {
+function normalizePermission(value = "") {
+  return normalizeRole(value);
+}
+
+function splitRoleList(value = "") {
   return safeText(value, "")
     .split(/[,\s|;]+/)
     .map(normalizeRole)
@@ -370,7 +480,7 @@ function isAdminRole(value = "") {
 }
 
 function isAdminPermission(value = "") {
-  const key = normalizeRole(value);
+  const key = normalizePermission(value);
 
   if (!key) {
     return false;
@@ -381,6 +491,7 @@ function isAdminPermission(value = "") {
   }
 
   return (
+    key === "*" ||
     key.startsWith("admin:") ||
     key.startsWith("admin.") ||
     key.includes(":admin") ||
@@ -412,8 +523,65 @@ function expandRoleAliases(roles = []) {
   return Array.from(result).filter(Boolean);
 }
 
+function getModuleCandidate(AppCore = null, ...names) {
+  try {
+    if (isFn(AppCore?.modules?.get)) {
+      for (const name of names) {
+        const mod = AppCore.modules.get(name);
+        if (mod) return mod;
+      }
+    }
+  } catch {}
+
+  try {
+    for (const name of names) {
+      if (AppCore?.modules?.[name]) {
+        return AppCore.modules[name];
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
+function getAuthCandidate(AppCore = null) {
+  return (
+    getModuleCandidate(
+      AppCore,
+      "auth",
+      "Auth",
+      "session",
+      "Session"
+    ) ||
+    AppCore?.auth ||
+    AppCore?.Auth ||
+    null
+  );
+}
+
 function getCurrentUser(AppCore = null) {
   const state = safeObject(AppCore?.state);
+  const auth = getAuthCandidate(AppCore);
+
+  let authUser = null;
+
+  try {
+    if (isFn(auth?.getUser)) {
+      authUser = auth.getUser();
+    }
+  } catch {}
+
+  try {
+    if (!authUser && isFn(auth?.getCurrentUser)) {
+      authUser = auth.getCurrentUser();
+    }
+  } catch {}
+
+  try {
+    if (!authUser && isFn(auth?.currentUser)) {
+      authUser = auth.currentUser();
+    }
+  } catch {}
 
   return safeObject(
     first(
@@ -421,7 +589,11 @@ function getCurrentUser(AppCore = null) {
       state.currentUser,
       state.sessionUser,
       state.authUser,
-      state.session?.user
+      state.profile,
+      state.session?.user,
+      authUser,
+      auth?.user,
+      {}
     )
   );
 }
@@ -455,6 +627,7 @@ function getUserBranches(user = null) {
 function getRoleCandidatesFromAppCore(AppCore = null) {
   const state = safeObject(AppCore?.state);
   const session = safeObject(state.session);
+  const auth = getAuthCandidate(AppCore);
   const user = getCurrentUser(AppCore);
   const branches = getUserBranches(user);
 
@@ -476,6 +649,10 @@ function getRoleCandidatesFromAppCore(AppCore = null) {
     session.userType,
     session.user_type,
     session.perfil,
+
+    auth?.role,
+    auth?.rol,
+    auth?.userRole,
 
     ...branches.flatMap((branch) => [
       branch.role,
@@ -515,6 +692,10 @@ function getRoleCandidatesFromAppCore(AppCore = null) {
     session.groups,
     session.authorities,
 
+    auth?.roles,
+    auth?.permissions,
+    auth?.scopes,
+
     ...branches.flatMap((branch) => [
       branch.roles,
       branch.roleList,
@@ -528,6 +709,30 @@ function getRoleCandidatesFromAppCore(AppCore = null) {
     ]),
   ];
 
+  try {
+    if (isFn(auth?.getRole)) {
+      scalarCandidates.push(auth.getRole());
+    }
+  } catch {}
+
+  try {
+    if (isFn(auth?.getCurrentRole)) {
+      scalarCandidates.push(auth.getCurrentRole());
+    }
+  } catch {}
+
+  try {
+    if (isFn(auth?.getRoles)) {
+      collectionCandidates.push(auth.getRoles());
+    }
+  } catch {}
+
+  try {
+    if (isFn(auth?.getPermissions)) {
+      collectionCandidates.push(auth.getPermissions());
+    }
+  } catch {}
+
   return [
     ...scalarCandidates,
     ...collectionCandidates,
@@ -540,34 +745,19 @@ function hasAdminFlag(AppCore = null) {
   const user = getCurrentUser(AppCore);
   const branches = getUserBranches(user);
 
-  return [
-    state.isAdmin,
-    state.admin,
-    state.isSuperAdmin,
-    state.superAdmin,
-    state.canManageUsers,
-    state.canAccessUsers,
-
-    session.isAdmin,
-    session.admin,
-    session.isSuperAdmin,
-    session.superAdmin,
-    session.canManageUsers,
-    session.canAccessUsers,
-
-    ...branches.flatMap((branch) => [
-      branch.isAdmin,
-      branch.admin,
-      branch.is_admin,
-      branch.isSuperAdmin,
-      branch.superAdmin,
-      branch.is_super_admin,
-      branch.canManageUsers,
-      branch.can_manage_users,
-      branch.canAccessUsers,
-      branch.can_access_users,
+  const values = [
+    ...ADMIN_FLAG_KEYS.flatMap((key) => [
+      state?.[key],
+      session?.[key],
+      user?.[key],
     ]),
-  ].some((value) => safeBoolean(value, false));
+
+    ...branches.flatMap((branch) => {
+      return ADMIN_FLAG_KEYS.map((key) => branch?.[key]);
+    }),
+  ];
+
+  return values.some((value) => safeBoolean(value, false));
 }
 
 function getUserRolesFallback(AppCore = null) {
@@ -599,6 +789,20 @@ function resolveAdminFlag(AppCore, isAdminFn, userRoles = []) {
     return true;
   }
 
+  const auth = getAuthCandidate(AppCore);
+
+  try {
+    if (isFn(auth?.isCurrentUserAdmin) && auth.isCurrentUserAdmin()) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (isFn(auth?.hasRole) && auth.hasRole("admin")) {
+      return true;
+    }
+  } catch {}
+
   if (hasAdminFlag(AppCore)) {
     return true;
   }
@@ -612,14 +816,16 @@ function resolveAdminFlag(AppCore, isAdminFn, userRoles = []) {
    ELEMENT ROLE RESOLUTION
 ========================================================= */
 
-function getAttrRoles(element = null, attrs = []) {
+function getAttrValues(element = null, attrs = []) {
   if (!element) {
     return [];
   }
 
-  return attrs.flatMap((attrName) =>
-    splitRoles(element.getAttribute(attrName))
-  );
+  return attrs.flatMap((attrName) => {
+    const value = element.getAttribute(attrName);
+
+    return splitRoleList(value);
+  });
 }
 
 function isElementAdminOnly(element = null) {
@@ -627,10 +833,15 @@ function isElementAdminOnly(element = null) {
     return false;
   }
 
-  const value =
+  const direct =
     element.getAttribute("data-admin-only");
 
-  if (value === null) {
+  const sidebar =
+    element.getAttribute("data-sidebar-admin-only");
+
+  const value = first(direct, sidebar);
+
+  if (value === null || value === undefined) {
     return false;
   }
 
@@ -646,20 +857,24 @@ function getElementRequiredRoles(element = null) {
   }
 
   const roles = [
-    ...getAttrRoles(element, [
+    ...getAttrValues(element, [
       "data-role",
       "data-roles",
       "data-sidebar-role",
       "data-sidebar-roles",
       "data-requires-role",
       "data-requires-roles",
+      "data-required-role",
+      "data-required-roles",
     ]),
 
-    ...getAttrRoles(element, [
+    ...getAttrValues(element, [
       "data-permission",
       "data-permissions",
       "data-sidebar-permission",
       "data-sidebar-permissions",
+      "data-scope",
+      "data-scopes",
     ]),
   ];
 
@@ -710,9 +925,16 @@ function shouldShowElementForRoles(
   const userRoleSet =
     new Set(normalizeRoles(userRoles));
 
-  return requiredRoles.some((role) =>
-    userRoleSet.has(normalizeRole(role))
-  );
+  return requiredRoles.some((role) => {
+    const normalized = normalizeRole(role);
+
+    return (
+      userRoleSet.has(normalized) ||
+      userRoles.some((candidate) =>
+        normalizeRole(candidate) === normalized
+      )
+    );
+  });
 }
 
 /* =========================================================
@@ -729,6 +951,7 @@ function isInitiallyTemplateHiddenRoleElement(element = null) {
       element.dataset?.roleVisible === "false" ||
       element.dataset?.sidebarVisible === "false" ||
       element.getAttribute?.("aria-hidden") === "true" ||
+      element.hasAttribute?.("hidden") ||
       element.hasAttribute?.("inert")
   );
 }
@@ -1040,6 +1263,28 @@ function restoreDescendantFocus(element = null) {
   });
 }
 
+function blurIfFocusInside(element = null) {
+  if (!isBrowser() || !element) {
+    return false;
+  }
+
+  try {
+    const active = document.activeElement;
+
+    if (
+      active &&
+      active !== document.body &&
+      element.contains(active) &&
+      isFn(active.blur)
+    ) {
+      active.blur();
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
 /* =========================================================
    DOM STATE
 ========================================================= */
@@ -1053,7 +1298,8 @@ function setVisibilityDatasets(
   const isAdminManaged =
     elementRequiresAdmin(element) ||
     hasDatasetKey(element, "adminVisible") ||
-    hasDatasetKey(element, "adminOnly");
+    hasDatasetKey(element, "adminOnly") ||
+    hasDatasetKey(element, "sidebarAdminOnly");
 
   try {
     element.dataset.sidebarVisible =
@@ -1107,6 +1353,8 @@ function setElementVisible(element = null, visible = true) {
     force: true,
   });
 
+  blurIfFocusInside(element);
+
   try {
     element.hidden = true;
     element.setAttribute("hidden", "");
@@ -1142,6 +1390,22 @@ function setElementVisible(element = null, visible = true) {
   return true;
 }
 
+function isRoleElementVisible(element = null) {
+  if (!element) {
+    return false;
+  }
+
+  return !(
+    element.hidden === true ||
+    element.getAttribute?.("aria-hidden") === "true" ||
+    element.hasAttribute?.("hidden") ||
+    element.hasAttribute?.("inert") ||
+    element.dataset?.sidebarVisible === "false" ||
+    element.dataset?.roleVisible === "false" ||
+    element.dataset?.adminVisible === "false"
+  );
+}
+
 function clearHiddenActiveState(sidebar = null) {
   if (!sidebar) return 0;
 
@@ -1155,6 +1419,11 @@ function clearHiddenActiveState(sidebar = null) {
           "[hidden].is-active",
           "[hidden].router-active",
           "[hidden][aria-current]",
+
+          "[aria-hidden='true'].active",
+          "[aria-hidden='true'].is-active",
+          "[aria-hidden='true'].router-active",
+          "[aria-hidden='true'][aria-current]",
 
           "[data-sidebar-visible='false'].active",
           "[data-sidebar-visible='false'].is-active",
@@ -1180,6 +1449,10 @@ function clearHiddenActiveState(sidebar = null) {
         );
 
         element.removeAttribute("aria-current");
+
+        try {
+          delete element.dataset.active;
+        } catch {}
 
         cleared += 1;
       });
@@ -1244,9 +1517,98 @@ function runLegacyServerNavEnsure({
   return false;
 }
 
+function normalizeServerItemIfPresent(sidebar = null) {
+  if (!sidebar) {
+    return false;
+  }
+
+  try {
+    const item =
+      sidebar.querySelector(`#${SERVER_NAV_ID}`) ||
+      sidebar.querySelector(`[data-route="${SERVER_ROUTE}"]`) ||
+      sidebar.querySelector(`[href="${SERVER_ROUTE}"]`);
+
+    if (!item) {
+      return false;
+    }
+
+    if (!item.dataset.adminOnly) {
+      item.dataset.adminOnly = "true";
+    }
+
+    if (!item.dataset.role) {
+      item.dataset.role = "admin";
+    }
+
+    if (!item.dataset.requiresRole) {
+      item.dataset.requiresRole = "admin";
+    }
+
+    if (!item.dataset.adminVisible) {
+      item.dataset.adminVisible = "false";
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /* =========================================================
    SNAPSHOT
 ========================================================= */
+
+function getElementSnapshot(element = null) {
+  if (!element) {
+    return null;
+  }
+
+  return {
+    tag:
+      element.tagName || "",
+
+    id:
+      element.id || "",
+
+    text:
+      safeText(element.textContent, ""),
+
+    route:
+      element.getAttribute?.("data-route") ||
+      element.getAttribute?.("href") ||
+      "",
+
+    requiredRoles:
+      getElementRequiredRoles(element),
+
+    adminManaged:
+      elementRequiresAdmin(element),
+
+    hidden:
+      Boolean(element.hidden),
+
+    ariaHidden:
+      element.getAttribute?.("aria-hidden") || "",
+
+    inert:
+      Boolean(element.hasAttribute?.("inert")),
+
+    tabindex:
+      element.getAttribute?.("tabindex"),
+
+    sidebarVisible:
+      element.dataset?.sidebarVisible || "",
+
+    roleVisible:
+      element.dataset?.roleVisible || "",
+
+    adminVisible:
+      element.dataset?.adminVisible || "",
+
+    className:
+      element.className || "",
+  };
+}
 
 export function getRoleVisibilitySnapshot(AppCore, isAdminFn) {
   const { sidebar } =
@@ -1265,6 +1627,12 @@ export function getRoleVisibilitySnapshot(AppCore, isAdminFn) {
   const elements =
     getRoleManagedElements(sidebar);
 
+  const visibleElements =
+    elements.filter(isRoleElementVisible);
+
+  const hiddenElements =
+    elements.filter((element) => !isRoleElementVisible(element));
+
   return {
     ok: Boolean(sidebar),
     isAdmin: admin,
@@ -1272,59 +1640,11 @@ export function getRoleVisibilitySnapshot(AppCore, isAdminFn) {
 
     counts: {
       total: elements.length,
-      visible: elements.filter((element) =>
-        element.dataset?.sidebarVisible !== "false" &&
-        element.dataset?.roleVisible !== "false" &&
-        element.dataset?.adminVisible !== "false" &&
-        element.hidden !== true
-      ).length,
-      hidden: elements.filter((element) =>
-        element.dataset?.sidebarVisible === "false" ||
-        element.dataset?.roleVisible === "false" ||
-        element.dataset?.adminVisible === "false" ||
-        element.hidden === true
-      ).length,
+      visible: visibleElements.length,
+      hidden: hiddenElements.length,
     },
 
-    items: elements.map((element) => ({
-      tag:
-        element.tagName || "",
-
-      id:
-        element.id || "",
-
-      text:
-        safeText(element.textContent, ""),
-
-      route:
-        element.getAttribute?.("data-route") ||
-        element.getAttribute?.("href") ||
-        "",
-
-      requiredRoles:
-        getElementRequiredRoles(element),
-
-      adminManaged:
-        elementRequiresAdmin(element),
-
-      hidden:
-        Boolean(element.hidden),
-
-      ariaHidden:
-        element.getAttribute?.("aria-hidden") || "",
-
-      sidebarVisible:
-        element.dataset?.sidebarVisible || "",
-
-      roleVisible:
-        element.dataset?.roleVisible || "",
-
-      adminVisible:
-        element.dataset?.adminVisible || "",
-
-      className:
-        element.className || "",
-    })),
+    items: elements.map(getElementSnapshot),
   };
 }
 
@@ -1359,23 +1679,35 @@ export function applyRoleVisibility(
     getElements(AppCore);
 
   if (!sidebar) {
+    const payload = {
+      ok: false,
+      reason: "sidebar-not-found",
+      isAdmin: admin,
+      roles: userRoles,
+      hiddenCount: 0,
+      visibleCount: 0,
+      totalCount: 0,
+      legacyEnsured,
+      serverNormalized: false,
+    };
+
     safeEmit(
       AppCore,
-      "sidebar:roles:applied",
-      {
-        ok: false,
-        reason: "sidebar-not-found",
-        isAdmin: admin,
-        roles: userRoles,
-        hiddenCount: 0,
-        visibleCount: 0,
-        totalCount: 0,
-        legacyEnsured,
-      }
+      EVENT_ROLE_VISIBILITY_APPLIED,
+      payload
+    );
+
+    safeEmit(
+      AppCore,
+      EVENT_ROLES_APPLIED_LEGACY,
+      payload
     );
 
     return false;
   }
+
+  const serverNormalized =
+    normalizeServerItemIfPresent(sidebar);
 
   const roleElements =
     getRoleManagedElements(sidebar);
@@ -1456,24 +1788,34 @@ export function applyRoleVisibility(
 
     clearedActiveCount,
     legacyEnsured,
+    serverNormalized,
   };
 
   safeEmit(
     AppCore,
-    "sidebar:roles:applied",
+    EVENT_ROLE_VISIBILITY_APPLIED,
     payload
   );
 
   safeEmit(
     AppCore,
-    "sidebar:visibility:applied",
+    EVENT_VISIBILITY_APPLIED,
+    payload
+  );
+
+  /*
+    Legacy event: se mantiene por compatibilidad con builds previos.
+  */
+  safeEmit(
+    AppCore,
+    EVENT_ROLES_APPLIED_LEGACY,
     payload
   );
 
   if (clearedActiveCount > 0 || hiddenCount > 0) {
     safeEmit(
       AppCore,
-      "sidebar:active:invalidated",
+      EVENT_ACTIVE_INVALIDATED,
       {
         reason: "role-visibility",
         clearedActiveCount,
@@ -1482,7 +1824,7 @@ export function applyRoleVisibility(
 
     safeEmit(
       AppCore,
-      "sidebar:indicator:refresh-request",
+      EVENT_INDICATOR_REFRESH_REQUEST,
       {
         reason: "role-visibility",
       }

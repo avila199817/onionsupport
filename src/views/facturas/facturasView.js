@@ -2,11 +2,12 @@
    Onion SPA - Facturas View
    Archivo: src/views/facturas/facturasView.js
 
-   EXTREME PRO SYSTEM · VIEW REAL · FULL PATCH 11/10
+   EXTREME PRO SYSTEM · VIEW REAL · FULL PATCH 12/10
    PORTAL MODAL · SEARCH BRIDGE · URL AUTOPEN · TOPBAR READY
    DETAIL STORE MERGE · INCIDENCIA MODAL BRIDGE · CREATE MODAL
    PAGINATION 5 · ACTION STATE SYNC · RERENDER SAFE · CLEANUP PRO
    FISCAL PRESERVER · IVA/IRPF/TOTALES/IMPUESTOS HARDENED
+   FILTER PILLS + SEARCH · FACTURAS CONTROL CENTER 10/10
 
    RESPONSABILIDADES:
    - render principal de facturas
@@ -27,6 +28,11 @@
    - sincronizar loaders de acciones sin romper tabla
    - refrescar listado tras enviar / crear factura
    - preservar fiscalidad en detalle: impuestos, IVA, IRPF, totales y líneas
+   - manejar filtros visuales del template:
+     todas / pendientes / pagadas / vencidas / enviadas / con PDF / con incidencia
+   - manejar búsqueda por factura, cliente, email, importe, forma de pago e incidencia
+   - resetear página a 1 al filtrar/buscar
+   - exportar CSV filtrado cuando haya filtro activo
 
    FIX CLAVE:
    - El listado recibe facturas enriquecidas desde store.
@@ -37,6 +43,7 @@
    - openFactura() sigue aceptando ID; el bridge externo normaliza payload.
    - Si el detalle remoto viene pobre, no pisa IVA/IRPF/impuestos/totales
      existentes en store/raw.
+   - El template puede pintar filtros; esta vista les da estado y bindings reales.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -116,6 +123,8 @@ export const FacturasView = (() => {
   const DETAIL_MODAL_ID = "facturas-detail-root";
   const PAGE_SIZE = 5;
   const INCIDENCIA_DETAIL_TIMEOUT = 90000;
+  const DEFAULT_FACTURAS_FILTER = "all";
+  const FACTURAS_SEARCH_DEBOUNCE_MS = 120;
 
   const ADMIN_ROLES = Object.freeze([
     "admin",
@@ -174,6 +183,9 @@ export const FacturasView = (() => {
   let modalBindingsCleanup = null;
   let createSuccessCleanup = null;
   let searchOpenCleanup = null;
+  let filterControlsCleanup = null;
+
+  let facturasSearchTimer = 0;
 
   let renderToken = 0;
   let pendingRenderFrame = 0;
@@ -259,6 +271,106 @@ export const FacturasView = (() => {
     return normalizeText(value)
       .replace(/[^\w]+/g, "_")
       .replace(/^_+|_+$/g, "");
+  }
+
+  function normalizeWhitespace(value = "") {
+    return safeText(value, "").replace(/\s+/g, " ").trim();
+  }
+
+  /* =====================================================
+     FILTER / SEARCH STATE · FACTURAS 10/10
+  ===================================================== */
+
+  function normalizeFacturaFilter(value = "") {
+    const key = normalizeKey(value);
+
+    if (!key || ["all", "todo", "todos", "todas", "total"].includes(key)) {
+      return "all";
+    }
+
+    if (
+      [
+        "pending",
+        "pendiente",
+        "pendientes",
+        "partial",
+        "parcial",
+        "draft",
+        "borrador",
+        "unpaid",
+        "sin_pagar",
+      ].includes(key)
+    ) {
+      return "pending";
+    }
+
+    if (
+      [
+        "paid",
+        "pagada",
+        "pagado",
+        "pagadas",
+        "pagados",
+        "cobrada",
+        "cobrado",
+        "cobradas",
+        "cobrados",
+      ].includes(key)
+    ) {
+      return "paid";
+    }
+
+    if (
+      [
+        "overdue",
+        "vencida",
+        "vencido",
+        "vencidas",
+        "vencidos",
+      ].includes(key)
+    ) {
+      return "overdue";
+    }
+
+    if (
+      [
+        "sent",
+        "enviada",
+        "enviado",
+        "enviadas",
+        "enviados",
+      ].includes(key)
+    ) {
+      return "sent";
+    }
+
+    if (
+      [
+        "pdf",
+        "con_pdf",
+        "has_pdf",
+        "documento",
+        "documentos",
+      ].includes(key)
+    ) {
+      return "pdf";
+    }
+
+    if (
+      [
+        "linked",
+        "incidencia",
+        "incidencias",
+        "ticket",
+        "tickets",
+        "con_incidencia",
+        "con_ticket",
+      ].includes(key)
+    ) {
+      return "linked";
+    }
+
+    return "all";
   }
 
   function normalizeTokenList(value) {
@@ -517,7 +629,23 @@ export const FacturasView = (() => {
     searchOpenCleanup = null;
   }
 
+  function cleanupFilterControls() {
+    try {
+      filterControlsCleanup?.();
+    } catch {}
+
+    filterControlsCleanup = null;
+
+    try {
+      window.clearTimeout(facturasSearchTimer);
+    } catch {}
+
+    facturasSearchTimer = 0;
+  }
+
   function cleanupBindings() {
+    cleanupFilterControls();
+
     try {
       bindingsCleanup?.();
     } catch {}
@@ -579,6 +707,527 @@ export const FacturasView = (() => {
     if (typeof state.view.error !== "string") {
       state.view.error = safeText(state.view.error, "");
     }
+
+    state.view.facturasFilter = normalizeFacturaFilter(
+      first(
+        state.view.facturasFilter,
+        state.view.paymentFilter,
+        state.view.statusFilter,
+        state.view.activeFilter,
+        state.view.filter,
+        DEFAULT_FACTURAS_FILTER
+      )
+    );
+
+    state.view.paymentFilter = state.view.facturasFilter;
+    state.view.statusFilter = state.view.facturasFilter;
+    state.view.activeFilter = state.view.facturasFilter;
+    state.view.filter = state.view.facturasFilter;
+
+    state.view.facturasSearch = normalizeWhitespace(
+      first(
+        state.view.facturasSearch,
+        state.view.searchQuery,
+        state.view.search,
+        state.view.query,
+        state.view.q,
+        state.view.term,
+        state.view.keyword,
+        ""
+      )
+    );
+
+    state.view.searchQuery = state.view.facturasSearch;
+    state.view.search = state.view.facturasSearch;
+    state.view.query = state.view.facturasSearch;
+    state.view.q = state.view.facturasSearch;
+    state.view.term = state.view.facturasSearch;
+    state.view.keyword = state.view.facturasSearch;
+  }
+
+  function getViewFilter() {
+    ensureBaseState();
+
+    return normalizeFacturaFilter(
+      first(
+        state.view.facturasFilter,
+        state.view.paymentFilter,
+        state.view.statusFilter,
+        state.view.activeFilter,
+        state.view.filter,
+        DEFAULT_FACTURAS_FILTER
+      )
+    );
+  }
+
+  function getViewSearch() {
+    ensureBaseState();
+
+    return normalizeWhitespace(
+      first(
+        state.view.facturasSearch,
+        state.view.searchQuery,
+        state.view.search,
+        state.view.query,
+        state.view.q,
+        state.view.term,
+        state.view.keyword,
+        ""
+      )
+    );
+  }
+
+  function resetViewPage() {
+    ensureBaseState();
+
+    state.view.page = 1;
+    state.view.currentPage = 1;
+    state.view.facturasPage = 1;
+
+    state.view.pageSize = getPageSize();
+    state.view.facturasPageSize = getPageSize();
+
+    return 1;
+  }
+
+  function setViewFilter(filter = DEFAULT_FACTURAS_FILTER) {
+    ensureBaseState();
+
+    const nextFilter = normalizeFacturaFilter(filter);
+
+    state.view.facturasFilter = nextFilter;
+    state.view.paymentFilter = nextFilter;
+    state.view.statusFilter = nextFilter;
+    state.view.activeFilter = nextFilter;
+    state.view.filter = nextFilter;
+
+    resetViewPage();
+
+    safeEmit("facturas:filter:change", {
+      filter: nextFilter,
+      search: getViewSearch(),
+    });
+
+    return nextFilter;
+  }
+
+  function setViewSearch(query = "") {
+    ensureBaseState();
+
+    const nextSearch = normalizeWhitespace(query);
+
+    state.view.facturasSearch = nextSearch;
+    state.view.searchQuery = nextSearch;
+    state.view.search = nextSearch;
+    state.view.query = nextSearch;
+    state.view.q = nextSearch;
+    state.view.term = nextSearch;
+    state.view.keyword = nextSearch;
+
+    resetViewPage();
+
+    safeEmit("facturas:search:change", {
+      filter: getViewFilter(),
+      search: nextSearch,
+    });
+
+    return nextSearch;
+  }
+
+  function clearViewFilters() {
+    ensureBaseState();
+
+    state.view.facturasFilter = DEFAULT_FACTURAS_FILTER;
+    state.view.paymentFilter = DEFAULT_FACTURAS_FILTER;
+    state.view.statusFilter = DEFAULT_FACTURAS_FILTER;
+    state.view.activeFilter = DEFAULT_FACTURAS_FILTER;
+    state.view.filter = DEFAULT_FACTURAS_FILTER;
+
+    state.view.facturasSearch = "";
+    state.view.searchQuery = "";
+    state.view.search = "";
+    state.view.query = "";
+    state.view.q = "";
+    state.view.term = "";
+    state.view.keyword = "";
+
+    resetViewPage();
+
+    safeEmit("facturas:filters:clear", {});
+
+    return true;
+  }
+
+  function getPaymentStatusKeyForView(item = {}) {
+    const raw = safeObject(item?.raw);
+
+    const key = normalizeKey(
+      first(
+        item.estadoPago,
+        item.paymentStatus,
+        item.payment?.status,
+        item.billing?.paymentStatus,
+
+        raw.estadoPago,
+        raw.paymentStatus,
+        raw.payment?.status,
+        raw.billing?.paymentStatus
+      )
+    );
+
+    if (
+      [
+        "paid",
+        "pagada",
+        "pagado",
+        "cobrada",
+        "cobrado",
+        "abonada",
+        "abonado",
+      ].includes(key)
+    ) {
+      return "paid";
+    }
+
+    if (
+      [
+        "pending",
+        "pendiente",
+        "unpaid",
+        "sin_pagar",
+      ].includes(key)
+    ) {
+      return "pending";
+    }
+
+    if (
+      [
+        "partial",
+        "parcial",
+        "pago_parcial",
+      ].includes(key)
+    ) {
+      return "partial";
+    }
+
+    if (
+      [
+        "overdue",
+        "vencida",
+        "vencido",
+      ].includes(key)
+    ) {
+      return "overdue";
+    }
+
+    if (
+      [
+        "cancelled",
+        "canceled",
+        "cancelada",
+        "cancelado",
+        "anulada",
+        "anulado",
+      ].includes(key)
+    ) {
+      return "cancelled";
+    }
+
+    if (["draft", "borrador"].includes(key)) {
+      return "draft";
+    }
+
+    return "pending";
+  }
+
+  function hasPdfForView(item = {}) {
+    const raw = safeObject(item?.raw);
+
+    if (
+      Boolean(
+        first(
+          item.pdfAvailable,
+          item.hasPdf,
+          item.meta?.hasPdf,
+          raw.pdfAvailable,
+          raw.hasPdf,
+          raw.meta?.hasPdf
+        )
+      )
+    ) {
+      return true;
+    }
+
+    if (
+      first(
+        item.blobPath,
+        item.blobName,
+        item.pdfPath,
+        item.pdfUrl,
+        item.downloadUrl,
+        item.viewUrl,
+        item.pdf,
+
+        raw.blobPath,
+        raw.blobName,
+        raw.pdfPath,
+        raw.pdfUrl,
+        raw.downloadUrl,
+        raw.viewUrl,
+        raw.pdf
+      )
+    ) {
+      return true;
+    }
+
+    const files = safeArray(
+      first(
+        item.attachments,
+        item.files,
+        item.adjuntos,
+        raw.attachments,
+        raw.files,
+        raw.adjuntos,
+        []
+      )
+    );
+
+    return files.some((file) => {
+      const value = safeObject(file);
+
+      const type = normalizeText(
+        first(value.contentType, value.mimeType, value.mimetype, value.type)
+      );
+
+      const name = normalizeText(
+        first(value.name, value.filename, value.fileName, value.url)
+      );
+
+      return type.includes("pdf") || name.endsWith(".pdf");
+    });
+  }
+
+  function isFacturaSentForView(item = {}) {
+    const raw = safeObject(item?.raw);
+
+    return Boolean(
+      first(
+        item.fechaEnvio,
+        item.sentAt,
+        item.mailSentAt,
+        item.delivery?.lastSentAt,
+        item.meta?.lastSentAt,
+        item.meta?.isSent,
+
+        raw.fechaEnvio,
+        raw.sentAt,
+        raw.mailSentAt,
+        raw.delivery?.lastSentAt,
+        raw.meta?.lastSentAt,
+        raw.meta?.isSent
+      )
+    );
+  }
+
+  function getClientNameForView(item = {}) {
+    const raw = safeObject(item?.raw);
+
+    return safeText(
+      first(
+        item.clienteNombre,
+        item.clientName,
+        item.cliente?.nombreContacto,
+        item.cliente?.nombre,
+        item.cliente?.name,
+        item.cliente?.displayName,
+        item.client?.name,
+        item.customer?.name,
+        item.name,
+        item.nombre,
+        item.company,
+
+        raw.clienteNombre,
+        raw.clientName,
+        raw.cliente?.nombreContacto,
+        raw.cliente?.nombre,
+        raw.cliente?.name,
+        raw.cliente?.displayName,
+        raw.client?.name,
+        raw.customer?.name,
+        raw.name,
+        raw.nombre,
+        raw.company
+      ),
+      ""
+    );
+  }
+
+  function getClientEmailForView(item = {}) {
+    const raw = safeObject(item?.raw);
+
+    return safeText(
+      first(
+        item.clienteEmail,
+        item.emailCliente,
+        item.clientEmail,
+        item.email,
+        item.cliente?.email,
+        item.cliente?.emailLower,
+        item.client?.email,
+        item.customer?.email,
+
+        raw.clienteEmail,
+        raw.emailCliente,
+        raw.clientEmail,
+        raw.email,
+        raw.cliente?.email,
+        raw.cliente?.emailLower,
+        raw.client?.email,
+        raw.customer?.email
+      ),
+      ""
+    );
+  }
+
+  function getFacturaAmountForView(item = {}) {
+    const raw = safeObject(item?.raw);
+
+    return first(
+      item.total,
+      item.amount,
+      item.importe,
+      item.importeTotal,
+      item.totalFactura,
+      item.facturaTotal,
+      item.invoiceAmount,
+
+      raw.total,
+      raw.amount,
+      raw.importe,
+      raw.importeTotal,
+      raw.totalFactura,
+      raw.facturaTotal,
+      raw.invoiceAmount
+    );
+  }
+
+  function getFormaPagoForView(item = {}) {
+    const raw = safeObject(item?.raw);
+
+    return safeText(
+      first(
+        item.formaPago,
+        item.metodoPago,
+        item.paymentMethod,
+        item.payment?.method,
+
+        raw.formaPago,
+        raw.metodoPago,
+        raw.paymentMethod,
+        raw.payment?.method
+      ),
+      ""
+    );
+  }
+
+  function itemMatchesFacturaFilterForView(item = {}, filter = DEFAULT_FACTURAS_FILTER) {
+    const key = normalizeFacturaFilter(filter);
+    const paymentKey = getPaymentStatusKeyForView(item);
+
+    if (key === "all") return true;
+
+    if (key === "pending") {
+      return ["pending", "partial", "draft"].includes(paymentKey);
+    }
+
+    if (key === "paid") {
+      return paymentKey === "paid";
+    }
+
+    if (key === "overdue") {
+      return paymentKey === "overdue";
+    }
+
+    if (key === "sent") {
+      return isFacturaSentForView(item);
+    }
+
+    if (key === "pdf") {
+      return hasPdfForView(item);
+    }
+
+    if (key === "linked") {
+      return Boolean(getRelatedIncidenciaId(item));
+    }
+
+    return true;
+  }
+
+  function getFacturaSearchHaystackForView(item = {}) {
+    const raw = safeObject(item?.raw);
+    const identities = getFacturaIdentityList(item);
+    const incidenciaId = getRelatedIncidenciaId(item);
+    const amount = getFacturaAmountForView(item);
+
+    return [
+      ...identities,
+
+      getClientNameForView(item),
+      getClientEmailForView(item),
+      getFormaPagoForView(item),
+
+      amount,
+      Number.isFinite(safeNumber(amount, NaN))
+        ? String(safeNumber(amount, 0)).replace(".", ",")
+        : "",
+
+      incidenciaId,
+
+      item.clienteId,
+      item.clientId,
+      item.customerId,
+      item.userId,
+      item.uid,
+      item.blobPath,
+      item.blobName,
+      item.pdfPath,
+
+      raw.clienteId,
+      raw.clientId,
+      raw.customerId,
+      raw.userId,
+      raw.uid,
+      raw.blobPath,
+      raw.blobName,
+      raw.pdfPath,
+    ]
+      .map((value) => normalizeText(value))
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  function itemMatchesFacturaSearchForView(item = {}, query = "") {
+    const normalizedQuery = normalizeText(query);
+
+    if (!normalizedQuery) return true;
+
+    const terms = normalizedQuery.split(" ").filter(Boolean);
+    const haystack = getFacturaSearchHaystackForView(item);
+
+    return terms.every((term) => haystack.includes(term));
+  }
+
+  function getFilteredFacturasItems(items = []) {
+    const rows = safeArray(items);
+    const filter = getViewFilter();
+    const search = getViewSearch();
+
+    return rows.filter((item) => {
+      return (
+        itemMatchesFacturaFilterForView(item, filter) &&
+        itemMatchesFacturaSearchForView(item, search)
+      );
+    });
   }
 
   /* =====================================================
@@ -2513,7 +3162,7 @@ export const FacturasView = (() => {
   }
 
   function getTotalPages(items = []) {
-    const rows = safeArray(items);
+    const rows = getFilteredFacturasItems(items);
     const pageSize = getPageSize();
 
     return Math.max(1, Math.ceil((rows.length || 1) / pageSize));
@@ -2539,7 +3188,10 @@ export const FacturasView = (() => {
   function clampPageAgainstItems(items = []) {
     ensureBaseState();
 
-    const totalPages = getTotalPages(items);
+    const rows = safeArray(items);
+    const filteredRows = getFilteredFacturasItems(rows);
+
+    const totalPages = getTotalPages(rows);
     const currentPage = getCurrentPage();
     const nextPage = clampNumber(currentPage, 1, totalPages);
 
@@ -2554,12 +3206,35 @@ export const FacturasView = (() => {
       page: nextPage,
       currentPage: nextPage,
       facturasPage: nextPage,
+
       pageSize: getPageSize(),
       facturasPageSize: getPageSize(),
+
       totalPages,
-      totalCount: safeArray(items).length,
-      remoteCount: safeNumber(first(state.view.remoteCount, state.view.totalCount), safeArray(items).length),
-      totalMatched: safeNumber(first(state.view.totalMatched, state.view.totalCount), safeArray(items).length),
+
+      totalCount: filteredRows.length,
+      totalMatched: filteredRows.length,
+      filteredCount: filteredRows.length,
+      unfilteredCount: rows.length,
+
+      remoteCount: safeNumber(
+        first(state.view.remoteCount, state.view.totalCount),
+        rows.length
+      ),
+
+      filter: getViewFilter(),
+      paymentFilter: getViewFilter(),
+      statusFilter: getViewFilter(),
+      activeFilter: getViewFilter(),
+      facturasFilter: getViewFilter(),
+
+      search: getViewSearch(),
+      searchQuery: getViewSearch(),
+      query: getViewSearch(),
+      q: getViewSearch(),
+      term: getViewSearch(),
+      keyword: getViewSearch(),
+      facturasSearch: getViewSearch(),
     };
   }
 
@@ -2608,6 +3283,20 @@ export const FacturasView = (() => {
       pageSize: getPageSize(),
       facturasPageSize: getPageSize(),
 
+      filter: getViewFilter(),
+      paymentFilter: getViewFilter(),
+      statusFilter: getViewFilter(),
+      activeFilter: getViewFilter(),
+      facturasFilter: getViewFilter(),
+
+      search: getViewSearch(),
+      searchQuery: getViewSearch(),
+      query: getViewSearch(),
+      q: getViewSearch(),
+      term: getViewSearch(),
+      keyword: getViewSearch(),
+      facturasSearch: getViewSearch(),
+
       loading: isFacturasLoading(state),
       refreshing: isFacturasRefreshing(state),
 
@@ -2643,6 +3332,20 @@ export const FacturasView = (() => {
         facturasPage: getCurrentPage(),
         pageSize: getPageSize(),
         facturasPageSize: getPageSize(),
+
+        filter: getViewFilter(),
+        paymentFilter: getViewFilter(),
+        statusFilter: getViewFilter(),
+        activeFilter: getViewFilter(),
+        facturasFilter: getViewFilter(),
+
+        search: getViewSearch(),
+        searchQuery: getViewSearch(),
+        query: getViewSearch(),
+        q: getViewSearch(),
+        term: getViewSearch(),
+        keyword: getViewSearch(),
+        facturasSearch: getViewSearch(),
       },
 
       actions: {
@@ -3113,10 +3816,13 @@ export const FacturasView = (() => {
 
         safeEmit("facturas:loaded", {
           items: getItems(),
+          filteredItems: getFilteredFacturasItems(getItems()),
           response,
           force,
           silent,
           asRefresh,
+          filter: getViewFilter(),
+          search: getViewSearch(),
         });
 
         return getItems();
@@ -3410,9 +4116,16 @@ export const FacturasView = (() => {
   }
 
   function exportFacturasCsv() {
+    const items = getItems();
+    const filteredItems = getFilteredFacturasItems(items);
+    const hasActiveCriteria = getViewFilter() !== "all" || Boolean(getViewSearch());
+    const exportingItems = hasActiveCriteria ? filteredItems : items;
+
     return exportFacturasCsvAction({
-      items: getItems(),
-      filenamePrefix: "facturas",
+      items: exportingItems,
+      filenamePrefix: hasActiveCriteria
+        ? "facturas-filtradas"
+        : "facturas",
     });
   }
 
@@ -3544,6 +4257,24 @@ export const FacturasView = (() => {
         return createFactura(draft);
       },
 
+      setFilter(filter = DEFAULT_FACTURAS_FILTER) {
+        const next = setViewFilter(filter);
+        rerender();
+        return next;
+      },
+
+      setSearch(query = "") {
+        const next = setViewSearch(query);
+        rerender();
+        return next;
+      },
+
+      clearFilters() {
+        clearViewFilters();
+        rerender();
+        return true;
+      },
+
       getState() {
         return api.getState();
       },
@@ -3586,6 +4317,177 @@ export const FacturasView = (() => {
      BINDINGS
   ===================================================== */
 
+  function focusFacturasSearchInput(caret = null) {
+    requestFrame(() => {
+      try {
+        const input = document.getElementById("facturas-search-input");
+
+        if (!input) return;
+
+        input.focus({ preventScroll: true });
+
+        if (
+          caret !== null &&
+          typeof input.setSelectionRange === "function"
+        ) {
+          const nextCaret = Math.min(
+            Math.max(Number(caret) || 0, 0),
+            input.value.length
+          );
+
+          input.setSelectionRange(nextCaret, nextCaret);
+        }
+      } catch {}
+    });
+  }
+
+  function bindFacturasFilterControls() {
+    cleanupFilterControls();
+
+    const container = getContainer();
+
+    if (!container || destroyed) return;
+
+    const onClick = (event) => {
+      const target = event.target.closest?.(
+        "[data-facturas-action], [data-action]"
+      );
+
+      if (!target || !container.contains(target)) return;
+
+      const action = normalizeKey(
+        first(
+          target.dataset.facturasAction,
+          target.dataset.action,
+          target.getAttribute("data-facturas-action"),
+          target.getAttribute("data-action")
+        )
+      );
+
+      if (["filter", "filter_facturas"].includes(action)) {
+        event.preventDefault();
+
+        const nextFilter = first(
+          target.dataset.filter,
+          target.dataset.filterStatus,
+          target.dataset.paymentFilter,
+          target.getAttribute("data-filter"),
+          target.getAttribute("data-filter-status"),
+          target.getAttribute("data-payment-filter"),
+          DEFAULT_FACTURAS_FILTER
+        );
+
+        setViewFilter(nextFilter);
+        rerender();
+
+        return;
+      }
+
+      if (
+        [
+          "clear_search",
+          "clear_facturas_search",
+          "search_clear",
+        ].includes(action)
+      ) {
+        event.preventDefault();
+
+        setViewSearch("");
+        rerender();
+
+        focusFacturasSearchInput(0);
+
+        return;
+      }
+
+      if (
+        [
+          "clear_filters",
+          "clear_facturas_filters",
+          "reset_filters",
+          "reset_facturas_filters",
+        ].includes(action)
+      ) {
+        event.preventDefault();
+
+        clearViewFilters();
+        rerender();
+
+        return;
+      }
+    };
+
+    const onInput = (event) => {
+      const input = event.target.closest?.(
+        "[data-facturas-search-input='true'], #facturas-search-input"
+      );
+
+      if (!input || !container.contains(input)) return;
+
+      const value = input.value || "";
+      const caret = typeof input.selectionStart === "number"
+        ? input.selectionStart
+        : value.length;
+
+      try {
+        window.clearTimeout(facturasSearchTimer);
+      } catch {}
+
+      facturasSearchTimer = window.setTimeout(() => {
+        const previous = getViewSearch();
+        const next = normalizeWhitespace(value);
+
+        if (previous === next) {
+          return;
+        }
+
+        setViewSearch(next);
+        rerender();
+
+        if (next) {
+          focusFacturasSearchInput(caret);
+        }
+      }, FACTURAS_SEARCH_DEBOUNCE_MS);
+    };
+
+    const onSearch = (event) => {
+      const input = event.target.closest?.(
+        "[data-facturas-search-input='true'], #facturas-search-input"
+      );
+
+      if (!input || !container.contains(input)) return;
+
+      const next = normalizeWhitespace(input.value || "");
+
+      setViewSearch(next);
+      rerender();
+
+      if (next) {
+        focusFacturasSearchInput(input.value.length);
+      }
+    };
+
+    container.addEventListener("click", onClick);
+    container.addEventListener("input", onInput);
+    container.addEventListener("search", onSearch);
+    container.addEventListener("change", onSearch);
+
+    filterControlsCleanup = () => {
+      try {
+        container.removeEventListener("click", onClick);
+        container.removeEventListener("input", onInput);
+        container.removeEventListener("search", onSearch);
+        container.removeEventListener("change", onSearch);
+      } catch {}
+
+      try {
+        window.clearTimeout(facturasSearchTimer);
+      } catch {}
+
+      facturasSearchTimer = 0;
+    };
+  }
+
   function bind() {
     cleanupBindings();
 
@@ -3624,6 +4526,21 @@ export const FacturasView = (() => {
         rerender();
       },
 
+      setFilter(filter = DEFAULT_FACTURAS_FILTER) {
+        setViewFilter(filter);
+        rerender();
+      },
+
+      setSearch(query = "") {
+        setViewSearch(query);
+        rerender();
+      },
+
+      clearFilters() {
+        clearViewFilters();
+        rerender();
+      },
+
       onBootstrap() {
         setFacturasBootstrapped(state, true);
         loadFacturas();
@@ -3631,6 +4548,8 @@ export const FacturasView = (() => {
     });
 
     bindingsCleanup = typeof cleanup === "function" ? cleanup : null;
+
+    bindFacturasFilterControls();
 
     attachCreateSuccessListener();
     attachSearchOpenListener();
@@ -3706,6 +4625,7 @@ export const FacturasView = (() => {
     cleanupModalBindings();
     cleanupCreateSuccessListener();
     cleanupSearchOpenListener();
+    cleanupFilterControls();
 
     closeFacturasDetail(state);
     clearFacturasActionIds(state);
@@ -3762,7 +4682,37 @@ export const FacturasView = (() => {
     goPrevPage,
     goNextPage,
 
+    setFilter(filter = DEFAULT_FACTURAS_FILTER) {
+      const next = setViewFilter(filter);
+      rerender();
+      return next;
+    },
+
+    setSearch(query = "") {
+      const next = setViewSearch(query);
+      rerender();
+      return next;
+    },
+
+    clearFilters() {
+      clearViewFilters();
+      rerender();
+      return true;
+    },
+
+    getFilter() {
+      return getViewFilter();
+    },
+
+    getSearch() {
+      return getViewSearch();
+    },
+
     getItems,
+
+    getFilteredItems() {
+      return getFilteredFacturasItems(getItems());
+    },
 
     getPagination() {
       const items = getItems();
@@ -3771,6 +4721,7 @@ export const FacturasView = (() => {
       return {
         ...pagination,
         items,
+        filteredItems: getFilteredFacturasItems(items),
       };
     },
 

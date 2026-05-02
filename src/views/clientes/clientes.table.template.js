@@ -2,52 +2,48 @@
    Onion SPA - Clientes Table Template
    Archivo: src/views/clientes/clientes.table.template.js
 
-   FINAL PRODUCTION TEMPLATE · CLIENTES VIEW · SOFT APPLE MODE · 10/10
-   CLON 1:1 USUARIOS / INCIDENCIAS · PRO SAAS PANEL
+   FINAL PRODUCTION TEMPLATE · CLIENTES VIEW · EXTREME SAAS MODE · 12/10
+   ALIGNED WITH INCIDENCIAS / USUARIOS / FACTURAS · PRO SAAS PANEL
 
    RESPONSABILIDADES:
    - render del hero/header de clientes
    - render de tabla productiva con paginación real
+   - render de filtros visuales compatibles con state/props/bindings
+   - render de búsqueda compatible con state/props/bindings
    - compatibilidad con clientesView.js
-   - estado loading visual en "Ver detalle" sin mover tabla
-   - estado loading visual en "Nuevo cliente"
-   - estado loading visual en refresh / retry / export
-   - soporte para payloads backend heterogéneos
-   - soporte para envelope backend { ok, count, clientes }
-   - lenguaje visual alineado 1:1 con usuarios/incidencias
-   - título compacto y responsive
-   - fechas siempre en una sola línea
-   - botón "Ver detalle" mantiene tamaño fijo durante loading
-   - loader centrado dentro del botón sin cambiar layout
-   - loading de tabla suave en carga / refresh
+   - loading visual en detalle / nuevo cliente / refresh / retry / export
+   - soporte para payloads backend heterogéneos y envelopes anidados
    - acciones compatibles con data-clientes-action y data-action
-   - avatares fallback con colores intensos pseudo-RNG estables
-   - dark/light mode conectado a variables.css + ui.css
-   - chips de estado alineados con tokens globales y contraste real
-   - versión desktop + cards mobile
-   - columna email dedicada
-   - columna responsable dedicada
-   - columna nivel dedicada
-   - actividad mostrando última actualización
+   - avatares fallback pseudo-RNG estables
+   - dark/light conectado a variables.css + ui.css
+   - chips de estado y nivel alineados con tokens globales
+   - tabla blindada contra reset/core/layout/ui global
+   - row accent seguro sin pseudo-elementos sobre <tr>
    - límite fijo de 5 clientes por hoja
    - orden descendente por actualización / actividad / creación
 
    HARDENING PRO:
    - no depende de imports externos
-   - tolera payload heterogéneo
-   - soporta state + props directas
+   - tolera state + props directas
    - paginación defensiva
-   - estilos encapsulados
    - responsive robusto
-   - acciones compatibles con data-clientes-action y data-action
-   - restricción admin no duplicada: la controla la View
+   - restricción admin no duplicada: la controla la View, pero soporta forbidden/accessDenied
 ========================================================= */
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-const PAGE_SIZE = 5;
+const DEFAULT_PAGE_SIZE = 5;
+const STYLE_ID = "onion-clientes-table-template-styles-v13";
+
+const FILTERS = Object.freeze([
+  { key: "all", label: "Todos" },
+  { key: "active", label: "Activos" },
+  { key: "pending", label: "Pendientes" },
+  { key: "blocked", label: "Bloqueados" },
+  { key: "vip", label: "VIP" },
+]);
 
 /* =========================================================
    HELPERS
@@ -62,6 +58,38 @@ function safeText(value, fallback = "") {
 }
 
 function safeNumber(value, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback;
+
+  if (typeof value === "string") {
+    let normalized = value
+      .trim()
+      .replace(/€/g, "")
+      .replace(/\$/g, "")
+      .replace(/£/g, "")
+      .replace(/%/g, "")
+      .replace(/[^\d.,+\-\s]/g, "")
+      .replace(/\s/g, "");
+
+    const hasComma = normalized.includes(",");
+    const hasDot = normalized.includes(".");
+
+    if (hasComma && hasDot) {
+      const lastComma = normalized.lastIndexOf(",");
+      const lastDot = normalized.lastIndexOf(".");
+
+      normalized =
+        lastComma > lastDot
+          ? normalized.replace(/\./g, "").replace(/,/g, ".")
+          : normalized.replace(/,/g, "");
+    } else if (hasComma) {
+      normalized = normalized.replace(/,/g, ".");
+    }
+
+    const n = Number(normalized);
+
+    return Number.isFinite(n) ? n : fallback;
+  }
+
   const n = Number(value);
 
   return Number.isFinite(n) ? n : fallback;
@@ -72,22 +100,15 @@ function safeArray(value) {
 }
 
 function safeObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : {};
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
 
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
-
-    if (Array.isArray(value) && value.length === 0) {
-      continue;
-    }
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
 
     return value;
   }
@@ -108,31 +129,33 @@ function normalizeWhitespace(value = "") {
   return safeText(value, "").replace(/\s+/g, " ").trim();
 }
 
-function normalizeKey(value = "") {
+function normalizeText(value = "") {
   return safeText(value, "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^a-z0-9_:.]/g, "")
+    .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeKey(value = "") {
+  return normalizeText(value)
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^\w:.]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 function truncate(value = "", max = 96) {
   const text = normalizeWhitespace(value);
 
   if (!text) return "";
-
-  if (text.length <= max) {
-    return text;
-  }
+  if (text.length <= max) return text;
 
   return `${text.slice(0, Math.max(0, max - 1)).trim()}…`;
 }
 
 function hashString(value = "") {
   const text = safeText(value, "onion");
-
   let hash = 2166136261;
 
   for (let index = 0; index < text.length; index += 1) {
@@ -146,6 +169,54 @@ function hashString(value = "") {
   }
 
   return Math.abs(hash >>> 0);
+}
+
+function toTimestamp(value = null) {
+  if (!value) return 0;
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? 0 : value.getTime();
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value > 9999999999 ? value : value * 1000;
+  }
+
+  const raw = safeText(value, "");
+  if (!raw) return 0;
+
+  const numeric = Number(raw);
+
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric > 9999999999 ? numeric : numeric * 1000;
+  }
+
+  const esMatch = raw.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,\s*|\s+)?(?:(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+  );
+
+  if (esMatch) {
+    const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = esMatch;
+
+    const date = new Date(
+      Number(yyyy),
+      Number(mm) - 1,
+      Number(dd),
+      Number(hh),
+      Number(min),
+      Number(ss)
+    );
+
+    return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+  }
+
+  const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
+
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
 }
 
 function getNamedText(value, fallback = "") {
@@ -175,49 +246,80 @@ function getNamedText(value, fallback = "") {
   );
 }
 
-function formatDate(value = null) {
-  if (!value) return "—";
+/* =========================================================
+   FORMATTERS
+========================================================= */
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
+const dateTimeFormatterCache = new Map();
+
+function getDateTimeFormatter() {
+  const key = "es-ES:date-time";
+
+  if (dateTimeFormatterCache.has(key)) {
+    return dateTimeFormatterCache.get(key);
+  }
+
+  const formatter = new Intl.DateTimeFormat("es-ES", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  dateTimeFormatterCache.set(key, formatter);
+
+  return formatter;
+}
+
+function getDateFormatter() {
+  const key = "es-ES:date";
+
+  if (dateTimeFormatterCache.has(key)) {
+    return dateTimeFormatterCache.get(key);
+  }
+
+  const formatter = new Intl.DateTimeFormat("es-ES", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+
+  dateTimeFormatterCache.set(key, formatter);
+
+  return formatter;
+}
+
+function formatDateTime(value = null) {
+  const ts = toTimestamp(value);
+
+  if (!ts) return "—";
 
   try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    }).format(date);
+    return getDateTimeFormatter().format(new Date(ts));
   } catch {
     return "—";
   }
 }
 
-function formatDateTime(value = null) {
-  if (!value) return "—";
+function formatDateShort(value = null) {
+  const ts = toTimestamp(value);
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
+  if (!ts) return "—";
 
   try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(date);
+    return getDateFormatter().format(new Date(ts));
   } catch {
     return "—";
   }
 }
 
 function formatRelativeDate(value = null) {
-  if (!value) return "Sin fecha";
+  const ts = toTimestamp(value);
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Sin fecha";
+  if (!ts) return "Sin fecha";
 
-  const diffMs = date.getTime() - Date.now();
+  const diffMs = ts - Date.now();
   const diffMin = Math.round(diffMs / 60000);
   const absMin = Math.abs(diffMin);
 
@@ -241,16 +343,15 @@ function formatRelativeDate(value = null) {
       : `Hace ${diffDays} día${diffDays === 1 ? "" : "s"}`;
   }
 
-  return formatDateTime(value);
+  return formatDateShort(value);
 }
 
 function formatLastUpdate(value = null) {
-  if (!value) return "Sin actualización";
+  const ts = toTimestamp(value);
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Sin actualización";
+  if (!ts) return "Sin actualización";
 
-  const diffHours = Math.abs(Date.now() - date.getTime()) / 3600000;
+  const diffHours = Math.abs(Date.now() - ts) / 3600000;
 
   if (diffHours <= 72) {
     return formatRelativeDate(value);
@@ -260,13 +361,38 @@ function formatLastUpdate(value = null) {
 }
 
 /* =========================================================
-   BACKEND ENVELOPE / RESOLVE
+   ICONS
+========================================================= */
+
+function icon(name = "") {
+  const common = `aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+
+  const icons = {
+    refresh: `<svg ${common}><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><path d="M21 4v6h-6"/><path d="M3 20v-6h6"/></svg>`,
+    export: `<svg ${common}><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>`,
+    plus: `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
+    users: `<svg ${common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+    briefcase: `<svg ${common}><path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/><rect x="2" y="7" width="20" height="13" rx="2"/></svg>`,
+    eye: `<svg ${common}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
+    search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
+    close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
+    shield: `<svg ${common}><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.5a1.2 1.2 0 0 1 1.52 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>`,
+    clock: `<svg ${common}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`,
+    mail: `<svg ${common}><path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"/><rect x="2" y="4" width="20" height="16" rx="2"/></svg>`,
+    map: `<svg ${common}><path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/></svg>`,
+    star: `<svg ${common}><path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>`,
+    alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
+  };
+
+  return icons[name] || "";
+}
+
+/* =========================================================
+   BACKEND ENVELOPE
 ========================================================= */
 
 function unwrapItemsEnvelope(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
+  if (Array.isArray(value)) return value;
 
   const obj = safeObject(value);
 
@@ -279,21 +405,11 @@ function unwrapItemsEnvelope(value) {
   if (Array.isArray(obj.results)) return obj.results;
   if (Array.isArray(obj.records)) return obj.records;
 
-  if (obj.data && typeof obj.data === "object") {
-    return unwrapItemsEnvelope(obj.data);
-  }
-
-  if (obj.payload && typeof obj.payload === "object") {
-    return unwrapItemsEnvelope(obj.payload);
-  }
-
-  if (obj.response && typeof obj.response === "object") {
-    return unwrapItemsEnvelope(obj.response);
-  }
-
-  if (obj.result && typeof obj.result === "object") {
-    return unwrapItemsEnvelope(obj.result);
-  }
+  if (obj.data && typeof obj.data === "object") return unwrapItemsEnvelope(obj.data);
+  if (obj.payload && typeof obj.payload === "object") return unwrapItemsEnvelope(obj.payload);
+  if (obj.response && typeof obj.response === "object") return unwrapItemsEnvelope(obj.response);
+  if (obj.result && typeof obj.result === "object") return unwrapItemsEnvelope(obj.result);
+  if (obj.body && typeof obj.body === "object") return unwrapItemsEnvelope(obj.body);
 
   return [];
 }
@@ -314,6 +430,7 @@ function getResolvedItems(input = {}) {
     data.payload,
     data.response,
     data.result,
+    data.body,
 
     state.items,
     state.rows,
@@ -326,6 +443,7 @@ function getResolvedItems(input = {}) {
     state.payload,
     state.response,
     state.result,
+    state.body,
 
     input,
   ];
@@ -334,7 +452,7 @@ function getResolvedItems(input = {}) {
     const rows = unwrapItemsEnvelope(candidate);
 
     if (rows.length) {
-      return sortClientesByUpdatedDesc(rows);
+      return sortClientesNewestFirst(rows);
     }
   }
 
@@ -359,12 +477,10 @@ function resolveRemoteCount(input = {}, items = []) {
         data.totalCount,
         data.count,
         data.total,
-
         state.remoteCount,
         state.totalCount,
         state.count,
         state.total,
-
         stats.total,
         payload.count,
         payload.total,
@@ -374,7 +490,6 @@ function resolveRemoteCount(input = {}, items = []) {
         result.total,
         lastResponse.count,
         lastResponse.total,
-
         safeArray(items).length
       ),
       safeArray(items).length
@@ -389,8 +504,10 @@ function shouldRenderRestricted(input = {}) {
   return Boolean(
     data.forbidden === true ||
       data.accessDenied === true ||
+      data.restricted === true ||
       state.forbidden === true ||
-      state.accessDenied === true
+      state.accessDenied === true ||
+      state.restricted === true
   );
 }
 
@@ -399,90 +516,26 @@ function shouldRenderRestricted(input = {}) {
 ========================================================= */
 
 const AVATAR_PALETTE = Object.freeze([
-  {
-    bg: "linear-gradient(135deg, #7c3aed 0%, #ec4899 100%)",
-    bgDark: "linear-gradient(135deg, #8b5cf6 0%, #f472b6 100%)",
-    ring: "rgba(124,58,237,.36)",
-    shadow: "rgba(236,72,153,.26)",
-  },
-  {
-    bg: "linear-gradient(135deg, #2563eb 0%, #06b6d4 100%)",
-    bgDark: "linear-gradient(135deg, #3b82f6 0%, #22d3ee 100%)",
-    ring: "rgba(37,99,235,.34)",
-    shadow: "rgba(6,182,212,.24)",
-  },
-  {
-    bg: "linear-gradient(135deg, #f97316 0%, #ef4444 100%)",
-    bgDark: "linear-gradient(135deg, #fb923c 0%, #f87171 100%)",
-    ring: "rgba(249,115,22,.34)",
-    shadow: "rgba(239,68,68,.24)",
-  },
-  {
-    bg: "linear-gradient(135deg, #16a34a 0%, #14b8a6 100%)",
-    bgDark: "linear-gradient(135deg, #22c55e 0%, #2dd4bf 100%)",
-    ring: "rgba(22,163,74,.34)",
-    shadow: "rgba(20,184,166,.24)",
-  },
-  {
-    bg: "linear-gradient(135deg, #db2777 0%, #9333ea 100%)",
-    bgDark: "linear-gradient(135deg, #ec4899 0%, #a855f7 100%)",
-    ring: "rgba(219,39,119,.34)",
-    shadow: "rgba(147,51,234,.25)",
-  },
-  {
-    bg: "linear-gradient(135deg, #ca8a04 0%, #ea580c 100%)",
-    bgDark: "linear-gradient(135deg, #facc15 0%, #fb923c 100%)",
-    ring: "rgba(202,138,4,.34)",
-    shadow: "rgba(234,88,12,.25)",
-  },
-  {
-    bg: "linear-gradient(135deg, #0891b2 0%, #4f46e5 100%)",
-    bgDark: "linear-gradient(135deg, #06b6d4 0%, #6366f1 100%)",
-    ring: "rgba(8,145,178,.34)",
-    shadow: "rgba(79,70,229,.25)",
-  },
-  {
-    bg: "linear-gradient(135deg, #e11d48 0%, #f59e0b 100%)",
-    bgDark: "linear-gradient(135deg, #fb7185 0%, #fbbf24 100%)",
-    ring: "rgba(225,29,72,.34)",
-    shadow: "rgba(245,158,11,.25)",
-  },
-  {
-    bg: "linear-gradient(135deg, #0f766e 0%, #84cc16 100%)",
-    bgDark: "linear-gradient(135deg, #14b8a6 0%, #a3e635 100%)",
-    ring: "rgba(15,118,110,.34)",
-    shadow: "rgba(132,204,22,.24)",
-  },
-  {
-    bg: "linear-gradient(135deg, #4338ca 0%, #c026d3 100%)",
-    bgDark: "linear-gradient(135deg, #6366f1 0%, #e879f9 100%)",
-    ring: "rgba(67,56,202,.34)",
-    shadow: "rgba(192,38,211,.25)",
-  },
+  ["#7c3aed", "#ec4899"],
+  ["#2563eb", "#06b6d4"],
+  ["#f97316", "#ef4444"],
+  ["#16a34a", "#14b8a6"],
+  ["#db2777", "#9333ea"],
+  ["#ca8a04", "#ea580c"],
+  ["#0891b2", "#4f46e5"],
+  ["#e11d48", "#f59e0b"],
+  ["#0f766e", "#84cc16"],
+  ["#4338ca", "#c026d3"],
 ]);
 
-function getAvatarPalette(item = {}) {
-  const seed = first(
-    getClienteId(item),
-    getClienteCode(item),
-    getClienteEmail(item),
-    getClienteName(item),
-    "onion-client"
-  );
-
-  const index = hashString(seed) % AVATAR_PALETTE.length;
-
-  return AVATAR_PALETTE[index];
-}
-
 function getAvatarStyle(item = {}) {
-  const palette = getAvatarPalette(item);
+  const seed = `${getClienteId(item)}|${getClienteEmail(item)}|${getClienteName(item)}`;
+  const [a, b] = AVATAR_PALETTE[hashString(seed) % AVATAR_PALETTE.length];
 
   return [
-    `--clientes-avatar-bg:${palette.bg}`,
-    `--clientes-avatar-bg-dark:${palette.bgDark}`,
-    `--clientes-avatar-ring:${palette.ring}`,
-    `--clientes-avatar-shadow:${palette.shadow}`,
+    `--clientes-avatar-a:${a}`,
+    `--clientes-avatar-b:${b}`,
+    `--clientes-avatar-bg:linear-gradient(135deg, ${a} 0%, ${b} 100%)`,
   ].join(";");
 }
 
@@ -491,6 +544,8 @@ function getAvatarStyle(item = {}) {
 ========================================================= */
 
 function getClienteId(item = {}) {
+  const raw = safeObject(item?.raw);
+
   return safeText(
     first(
       item.clientId,
@@ -503,23 +558,24 @@ function getClienteId(item = {}) {
       item.clienteCode,
       item.customerCode,
       item.email,
-
-      item?.raw?.clientId,
-      item?.raw?.clienteId,
-      item?.raw?.customerId,
-      item?.raw?.id,
-      item?.raw?._id,
-      item?.raw?.code,
-      item?.raw?.clientCode,
-      item?.raw?.clienteCode,
-      item?.raw?.customerCode,
-      item?.raw?.email
+      raw.clientId,
+      raw.clienteId,
+      raw.customerId,
+      raw.id,
+      raw._id,
+      raw.code,
+      raw.clientCode,
+      raw.clienteCode,
+      raw.customerCode,
+      raw.email
     ),
     ""
   );
 }
 
 function getClienteCode(item = {}) {
+  const raw = safeObject(item?.raw);
+
   return safeText(
     first(
       item.clientCode,
@@ -532,23 +588,24 @@ function getClienteCode(item = {}) {
       item._id,
       item.code,
       item.email,
-
-      item?.raw?.clientCode,
-      item?.raw?.clienteCode,
-      item?.raw?.customerCode,
-      item?.raw?.clientId,
-      item?.raw?.clienteId,
-      item?.raw?.customerId,
-      item?.raw?.id,
-      item?.raw?._id,
-      item?.raw?.code,
-      item?.raw?.email
+      raw.clientCode,
+      raw.clienteCode,
+      raw.customerCode,
+      raw.clientId,
+      raw.clienteId,
+      raw.customerId,
+      raw.id,
+      raw._id,
+      raw.code,
+      raw.email
     ),
     "CLI-SIN-ID"
   );
 }
 
 function getClienteName(item = {}) {
+  const raw = safeObject(item?.raw);
+
   return safeText(
     first(
       item.clientName,
@@ -562,40 +619,39 @@ function getClienteName(item = {}) {
       item.empresa,
       item.businessName,
       item.razonSocial,
-
-      item?.cliente?.nombre,
-      item?.cliente?.name,
-      item?.client?.name,
-      item?.customer?.name,
-      item?.profile?.name,
-      item?.profile?.displayName,
-
-      item?.raw?.clientName,
-      item?.raw?.clienteName,
-      item?.raw?.customerName,
-      item?.raw?.nombre,
-      item?.raw?.name,
-      item?.raw?.fullName,
-      item?.raw?.displayName,
-      item?.raw?.company,
-      item?.raw?.empresa,
-      item?.raw?.businessName,
-      item?.raw?.razonSocial,
-      item?.raw?.cliente?.nombre,
-      item?.raw?.cliente?.name,
-      item?.raw?.client?.name,
-      item?.raw?.customer?.name,
-      item?.raw?.profile?.name,
-      item?.raw?.profile?.displayName,
-
+      item.cliente?.nombre,
+      item.cliente?.name,
+      item.client?.name,
+      item.customer?.name,
+      item.profile?.name,
+      item.profile?.displayName,
+      raw.clientName,
+      raw.clienteName,
+      raw.customerName,
+      raw.nombre,
+      raw.name,
+      raw.fullName,
+      raw.displayName,
+      raw.company,
+      raw.empresa,
+      raw.businessName,
+      raw.razonSocial,
+      raw.cliente?.nombre,
+      raw.cliente?.name,
+      raw.client?.name,
+      raw.customer?.name,
+      raw.profile?.name,
+      raw.profile?.displayName,
       item.email,
-      item?.raw?.email
+      raw.email
     ),
     "Cliente"
   );
 }
 
 function getClienteDescription(item = {}) {
+  const raw = safeObject(item?.raw);
+
   return safeText(
     first(
       item.phone,
@@ -608,34 +664,34 @@ function getClienteDescription(item = {}) {
       item.segment,
       item.category,
       item.categoria,
-
-      item?.cliente?.phone,
-      item?.cliente?.telefono,
-      item?.client?.phone,
-      item?.customer?.phone,
-      item?.profile?.phone,
-
-      item?.raw?.phone,
-      item?.raw?.telefono,
-      item?.raw?.mobile,
-      item?.raw?.description,
-      item?.raw?.descripcion,
-      item?.raw?.notes,
-      item?.raw?.tipo,
-      item?.raw?.segment,
-      item?.raw?.category,
-      item?.raw?.categoria,
-      item?.raw?.cliente?.phone,
-      item?.raw?.cliente?.telefono,
-      item?.raw?.client?.phone,
-      item?.raw?.customer?.phone,
-      item?.raw?.profile?.phone
+      item.cliente?.phone,
+      item.cliente?.telefono,
+      item.client?.phone,
+      item.customer?.phone,
+      item.profile?.phone,
+      raw.phone,
+      raw.telefono,
+      raw.mobile,
+      raw.description,
+      raw.descripcion,
+      raw.notes,
+      raw.tipo,
+      raw.segment,
+      raw.category,
+      raw.categoria,
+      raw.cliente?.phone,
+      raw.cliente?.telefono,
+      raw.client?.phone,
+      raw.customer?.phone,
+      raw.profile?.phone
     ),
     "Sin teléfono"
   );
 }
 
 function getClienteEmail(item = {}) {
+  const raw = safeObject(item?.raw);
+
   return safeText(
     first(
       item.clientEmail,
@@ -643,29 +699,29 @@ function getClienteEmail(item = {}) {
       item.customerEmail,
       item.email,
       item.mail,
-
-      item?.cliente?.email,
-      item?.client?.email,
-      item?.customer?.email,
-      item?.profile?.email,
-      item?.contact?.email,
-
-      item?.raw?.clientEmail,
-      item?.raw?.clienteEmail,
-      item?.raw?.customerEmail,
-      item?.raw?.email,
-      item?.raw?.mail,
-      item?.raw?.cliente?.email,
-      item?.raw?.client?.email,
-      item?.raw?.customer?.email,
-      item?.raw?.profile?.email,
-      item?.raw?.contact?.email
+      item.cliente?.email,
+      item.client?.email,
+      item.customer?.email,
+      item.profile?.email,
+      item.contact?.email,
+      raw.clientEmail,
+      raw.clienteEmail,
+      raw.customerEmail,
+      raw.email,
+      raw.mail,
+      raw.cliente?.email,
+      raw.client?.email,
+      raw.customer?.email,
+      raw.profile?.email,
+      raw.contact?.email
     ),
     "Sin email"
-  );
+  ).toLowerCase();
 }
 
 function getClienteLocation(item = {}) {
+  const raw = safeObject(item?.raw);
+
   return safeText(
     first(
       item.city,
@@ -687,32 +743,33 @@ function getClienteLocation(item = {}) {
       item.client?.ciudad,
       item.customer?.city,
       item.customer?.ciudad,
-
-      item?.raw?.city,
-      item?.raw?.ciudad,
-      item?.raw?.locationCity,
-      item?.raw?.location?.city,
-      item?.raw?.location?.ciudad,
-      item?.raw?.ubicacion?.city,
-      item?.raw?.ubicacion?.ciudad,
-      item?.raw?.address?.city,
-      item?.raw?.address?.ciudad,
-      item?.raw?.direccion?.city,
-      item?.raw?.direccion?.ciudad,
-      item?.raw?.profile?.city,
-      item?.raw?.profile?.ciudad,
-      item?.raw?.cliente?.city,
-      item?.raw?.cliente?.ciudad,
-      item?.raw?.client?.city,
-      item?.raw?.client?.ciudad,
-      item?.raw?.customer?.city,
-      item?.raw?.customer?.ciudad
+      raw.city,
+      raw.ciudad,
+      raw.locationCity,
+      raw.location?.city,
+      raw.location?.ciudad,
+      raw.ubicacion?.city,
+      raw.ubicacion?.ciudad,
+      raw.address?.city,
+      raw.address?.ciudad,
+      raw.direccion?.city,
+      raw.direccion?.ciudad,
+      raw.profile?.city,
+      raw.profile?.ciudad,
+      raw.cliente?.city,
+      raw.cliente?.ciudad,
+      raw.client?.city,
+      raw.client?.ciudad,
+      raw.customer?.city,
+      raw.customer?.ciudad
     ),
     "Sin ciudad"
   );
 }
 
 function getClienteManager(item = {}) {
+  const raw = safeObject(item?.raw);
+
   return safeText(
     first(
       item.managerName,
@@ -720,30 +777,29 @@ function getClienteManager(item = {}) {
       item.ownerName,
       item.assignedToName,
       item.accountManagerName,
-
       getNamedText(item.manager),
       getNamedText(item.assignedTo),
       getNamedText(item.owner),
       getNamedText(item.responsable),
       getNamedText(item.accountManager),
-
-      item?.raw?.managerName,
-      item?.raw?.responsableName,
-      item?.raw?.ownerName,
-      item?.raw?.assignedToName,
-      item?.raw?.accountManagerName,
-
-      getNamedText(item?.raw?.manager),
-      getNamedText(item?.raw?.assignedTo),
-      getNamedText(item?.raw?.owner),
-      getNamedText(item?.raw?.responsable),
-      getNamedText(item?.raw?.accountManager)
+      raw.managerName,
+      raw.responsableName,
+      raw.ownerName,
+      raw.assignedToName,
+      raw.accountManagerName,
+      getNamedText(raw.manager),
+      getNamedText(raw.assignedTo),
+      getNamedText(raw.owner),
+      getNamedText(raw.responsable),
+      getNamedText(raw.accountManager)
     ),
     "No asignado"
   );
 }
 
 function getClienteAvatarUrl(item = {}) {
+  const raw = safeObject(item?.raw);
+
   return safeText(
     first(
       item.clientAvatar,
@@ -758,52 +814,52 @@ function getClienteAvatarUrl(item = {}) {
       item.logoUrl,
       item.image,
       item.imageUrl,
-
-      item?.cliente?.avatar,
-      item?.cliente?.avatarUrl,
-      item?.client?.avatar,
-      item?.client?.avatarUrl,
-      item?.customer?.avatar,
-      item?.customer?.avatarUrl,
-      item?.profile?.avatar,
-      item?.profile?.avatarUrl,
-
-      item?.raw?.clientAvatar,
-      item?.raw?.clientAvatarUrl,
-      item?.raw?.clienteAvatar,
-      item?.raw?.clienteAvatarUrl,
-      item?.raw?.customerAvatar,
-      item?.raw?.customerAvatarUrl,
-      item?.raw?.avatar,
-      item?.raw?.avatarUrl,
-      item?.raw?.logo,
-      item?.raw?.logoUrl,
-      item?.raw?.image,
-      item?.raw?.imageUrl,
-      item?.raw?.cliente?.avatar,
-      item?.raw?.cliente?.avatarUrl,
-      item?.raw?.client?.avatar,
-      item?.raw?.client?.avatarUrl,
-      item?.raw?.customer?.avatar,
-      item?.raw?.customer?.avatarUrl,
-      item?.raw?.profile?.avatar,
-      item?.raw?.profile?.avatarUrl
+      item.cliente?.avatar,
+      item.cliente?.avatarUrl,
+      item.client?.avatar,
+      item.client?.avatarUrl,
+      item.customer?.avatar,
+      item.customer?.avatarUrl,
+      item.profile?.avatar,
+      item.profile?.avatarUrl,
+      raw.clientAvatar,
+      raw.clientAvatarUrl,
+      raw.clienteAvatar,
+      raw.clienteAvatarUrl,
+      raw.customerAvatar,
+      raw.customerAvatarUrl,
+      raw.avatar,
+      raw.avatarUrl,
+      raw.logo,
+      raw.logoUrl,
+      raw.image,
+      raw.imageUrl,
+      raw.cliente?.avatar,
+      raw.cliente?.avatarUrl,
+      raw.client?.avatar,
+      raw.client?.avatarUrl,
+      raw.customer?.avatar,
+      raw.customer?.avatarUrl,
+      raw.profile?.avatar,
+      raw.profile?.avatarUrl
     ),
     ""
   );
 }
 
 function getClienteInitials(item = {}) {
+  const raw = safeObject(item?.raw);
+
   const text = normalizeWhitespace(
     first(
       item.clientInitials,
       item.clienteInitials,
       item.customerInitials,
       item.initials,
-      item?.raw?.clientInitials,
-      item?.raw?.clienteInitials,
-      item?.raw?.customerInitials,
-      item?.raw?.initials,
+      raw.clientInitials,
+      raw.clienteInitials,
+      raw.customerInitials,
+      raw.initials,
       getClienteName(item),
       getClienteCode(item),
       "CL"
@@ -822,6 +878,8 @@ function getClienteInitials(item = {}) {
 }
 
 function getStatusValue(item = {}) {
+  const raw = safeObject(item?.raw);
+
   return first(
     item.status,
     item.estado,
@@ -829,43 +887,29 @@ function getStatusValue(item = {}) {
     item.accountStatus,
     item.clientStatus,
     item.customerStatus,
-
-    item?.raw?.status,
-    item?.raw?.estado,
-    item?.raw?.state,
-    item?.raw?.accountStatus,
-    item?.raw?.clientStatus,
-    item?.raw?.customerStatus,
-
-    typeof item.isActive === "boolean"
-      ? item.isActive
-        ? "active"
-        : "inactive"
-      : null,
-
-    typeof item.enabled === "boolean"
-      ? item.enabled
-        ? "active"
-        : "inactive"
-      : null,
-
-    typeof item?.raw?.isActive === "boolean"
-      ? item.raw.isActive
-        ? "active"
-        : "inactive"
-      : null,
-
-    typeof item?.raw?.enabled === "boolean"
-      ? item.raw.enabled
-        ? "active"
-        : "inactive"
-      : null,
-
+    item.lifecycle?.status,
+    raw.status,
+    raw.estado,
+    raw.state,
+    raw.accountStatus,
+    raw.clientStatus,
+    raw.customerStatus,
+    raw.lifecycle?.status,
+    typeof item.isActive === "boolean" ? (item.isActive ? "active" : "inactive") : null,
+    typeof item.enabled === "boolean" ? (item.enabled ? "active" : "inactive") : null,
+    typeof item.disabled === "boolean" ? (item.disabled ? "inactive" : "active") : null,
+    typeof item.blocked === "boolean" ? (item.blocked ? "blocked" : null) : null,
+    typeof raw.isActive === "boolean" ? (raw.isActive ? "active" : "inactive") : null,
+    typeof raw.enabled === "boolean" ? (raw.enabled ? "active" : "inactive") : null,
+    typeof raw.disabled === "boolean" ? (raw.disabled ? "inactive" : "active") : null,
+    typeof raw.blocked === "boolean" ? (raw.blocked ? "blocked" : null) : null,
     "active"
   );
 }
 
 function getTierValue(item = {}) {
+  const raw = safeObject(item?.raw);
+
   return first(
     item.tier,
     item.plan,
@@ -877,18 +921,16 @@ function getTierValue(item = {}) {
     item.clientType,
     item.level,
     item.nivel,
-
-    item?.raw?.tier,
-    item?.raw?.plan,
-    item?.raw?.segment,
-    item?.raw?.category,
-    item?.raw?.categoria,
-    item?.raw?.tipo,
-    item?.raw?.customerType,
-    item?.raw?.clientType,
-    item?.raw?.level,
-    item?.raw?.nivel,
-
+    raw.tier,
+    raw.plan,
+    raw.segment,
+    raw.category,
+    raw.categoria,
+    raw.tipo,
+    raw.customerType,
+    raw.clientType,
+    raw.level,
+    raw.nivel,
     "standard"
   );
 }
@@ -896,11 +938,11 @@ function getTierValue(item = {}) {
 function getStatusKey(value = "") {
   const key = normalizeKey(value);
 
-  if (["active", "activo", "activa", "enabled", "habilitado"].includes(key)) {
+  if (["active", "activo", "activa", "enabled", "habilitado", "habilitada", "ok"].includes(key)) {
     return "active";
   }
 
-  if (["pending", "pendiente", "invited", "invitado", "invite"].includes(key)) {
+  if (["pending", "pendiente", "invited", "invitado", "invitada", "invite", "new"].includes(key)) {
     return "pending";
   }
 
@@ -913,6 +955,9 @@ function getStatusKey(value = "") {
       "suspendido",
       "suspendida",
       "locked",
+      "restricted",
+      "restringido",
+      "restringida",
     ].includes(key)
   ) {
     return "blocked";
@@ -926,6 +971,9 @@ function getStatusKey(value = "") {
       "inactiva",
       "deshabilitado",
       "deshabilitada",
+      "archived",
+      "archivado",
+      "archivada",
     ].includes(key)
   ) {
     return "inactive";
@@ -948,14 +996,26 @@ function getStatusLabel(value = "") {
 function getTierKey(value = "") {
   const key = normalizeKey(value);
 
-  if (["vip"].includes(key)) return "vip";
-  if (["enterprise", "empresa_enterprise", "empresa", "company"].includes(key)) {
+  if (["vip", "priority", "prioritario", "prioritaria"].includes(key)) return "vip";
+
+  if (
+    [
+      "enterprise",
+      "empresa_enterprise",
+      "empresa",
+      "company",
+      "corporate",
+      "corporativo",
+      "corporativa",
+    ].includes(key)
+  ) {
     return "enterprise";
   }
 
-  if (["pro", "premium"].includes(key)) return "pro";
-  if (["starter", "basic", "basico"].includes(key)) return "starter";
-  if (["particular", "personal", "standard", "estandar"].includes(key)) {
+  if (["pro", "premium", "professional", "profesional"].includes(key)) return "pro";
+  if (["starter", "basic", "basico", "básico", "trial"].includes(key)) return "starter";
+
+  if (["particular", "personal", "standard", "estandar", "estándar"].includes(key)) {
     return "standard";
   }
 
@@ -970,10 +1030,12 @@ function getTierLabel(value = "") {
   if (key === "pro") return "Pro";
   if (key === "starter") return "Starter";
 
-  return safeText(value, "Estándar");
+  return "Estándar";
 }
 
 function getCreatedAt(item = {}) {
+  const raw = safeObject(item?.raw);
+
   return first(
     item.createdAt,
     item.created_at,
@@ -981,19 +1043,22 @@ function getCreatedAt(item = {}) {
     item.registeredAt,
     item.created,
     item.date,
-    item.updatedAt,
-
-    item?.raw?.createdAt,
-    item?.raw?.created_at,
-    item?.raw?.fechaCreacion,
-    item?.raw?.registeredAt,
-    item?.raw?.created,
-    item?.raw?.date,
-    item?.raw?.updatedAt
+    item.lifecycle?.createdAt,
+    item.audit?.createdAt,
+    raw.createdAt,
+    raw.created_at,
+    raw.fechaCreacion,
+    raw.registeredAt,
+    raw.created,
+    raw.date,
+    raw.lifecycle?.createdAt,
+    raw.audit?.createdAt
   );
 }
 
 function getUpdatedAt(item = {}) {
+  const raw = safeObject(item?.raw);
+
   return first(
     item.updatedAt,
     item.updated_at,
@@ -1003,40 +1068,58 @@ function getUpdatedAt(item = {}) {
     item.lastModifiedAt,
     item.lastActivityAt,
     item.activityAt,
+    item.lifecycle?.updatedAt,
+    item.audit?.updatedAt,
     item.createdAt,
     item.created_at,
-
-    item?.raw?.updatedAt,
-    item?.raw?.updated_at,
-    item?.raw?.lastContactAt,
-    item?.raw?.last_contact_at,
-    item?.raw?.modifiedAt,
-    item?.raw?.lastModifiedAt,
-    item?.raw?.lastActivityAt,
-    item?.raw?.activityAt,
-    item?.raw?.createdAt,
-    item?.raw?.created_at
+    raw.updatedAt,
+    raw.updated_at,
+    raw.lastContactAt,
+    raw.last_contact_at,
+    raw.modifiedAt,
+    raw.lastModifiedAt,
+    raw.lastActivityAt,
+    raw.activityAt,
+    raw.lifecycle?.updatedAt,
+    raw.audit?.updatedAt,
+    raw.createdAt,
+    raw.created_at
   );
 }
 
 function getSortTimestamp(item = {}) {
-  const value = first(getUpdatedAt(item), getCreatedAt(item), 0);
+  const raw = safeObject(item?.raw);
 
-  const date = new Date(value);
-  const time = date.getTime();
-
-  return Number.isFinite(time) ? time : 0;
+  return (
+    safeNumber(item?.meta?.updatedAtMs, 0) ||
+    safeNumber(item?.meta?.timestampMs, 0) ||
+    safeNumber(raw?.meta?.updatedAtMs, 0) ||
+    safeNumber(raw?.meta?.timestampMs, 0) ||
+    toTimestamp(getUpdatedAt(item)) ||
+    toTimestamp(getCreatedAt(item)) ||
+    toTimestamp(raw?._ts) ||
+    0
+  );
 }
 
-function sortClientesByUpdatedDesc(items = []) {
-  return safeArray(items)
-    .slice()
-    .sort((a, b) => getSortTimestamp(b) - getSortTimestamp(a));
+function compareClientesNewestFirst(a = {}, b = {}) {
+  const diff = getSortTimestamp(b) - getSortTimestamp(a);
+
+  if (diff !== 0) return diff;
+
+  return safeText(getClienteCode(b), "").localeCompare(
+    safeText(getClienteCode(a), ""),
+    "es",
+    {
+      numeric: true,
+      sensitivity: "base",
+    }
+  );
 }
 
-/* =========================================================
-   STATS / PAGINATION
-========================================================= */
+function sortClientesNewestFirst(items = []) {
+  return [...safeArray(items)].sort(compareClientesNewestFirst);
+}
 
 function isActiveLike(item = {}) {
   return getStatusKey(getStatusValue(item)) === "active";
@@ -1054,27 +1137,253 @@ function isVipLike(item = {}) {
   return ["vip", "enterprise"].includes(getTierKey(getTierValue(item)));
 }
 
-function computeStats(items = []) {
-  const rows = safeArray(items);
+/* =========================================================
+   FILTERS / SEARCH
+========================================================= */
 
-  return {
-    total: rows.length,
-    activeCount: rows.filter((item) => isActiveLike(item)).length,
-    pendingCount: rows.filter((item) => isPendingLike(item)).length,
-    blockedCount: rows.filter((item) => isBlockedLike(item)).length,
-    vipCount: rows.filter((item) => isVipLike(item)).length,
-  };
+function normalizeFilter(value = "") {
+  const key = normalizeKey(value);
+
+  if (!key || ["all", "todo", "todos", "todas", "total", "totales"].includes(key)) return "all";
+
+  if (["active", "activo", "activa", "activos", "activas", "enabled", "habilitado"].includes(key)) {
+    return "active";
+  }
+
+  if (["pending", "pendiente", "pendientes", "invited", "invitado", "invitada", "invite"].includes(key)) {
+    return "pending";
+  }
+
+  if (
+    [
+      "blocked",
+      "bloqueado",
+      "bloqueada",
+      "bloqueados",
+      "bloqueadas",
+      "inactive",
+      "inactivo",
+      "inactiva",
+      "inactivos",
+      "inactivas",
+      "disabled",
+      "deshabilitado",
+      "deshabilitada",
+      "suspended",
+      "suspendido",
+      "suspendida",
+      "locked",
+    ].includes(key)
+  ) {
+    return "blocked";
+  }
+
+  if (
+    [
+      "vip",
+      "priority",
+      "prioritario",
+      "prioritaria",
+      "enterprise",
+      "empresa",
+      "corporate",
+      "corporativo",
+      "corporativa",
+    ].includes(key)
+  ) {
+    return "vip";
+  }
+
+  return "all";
 }
 
-function getPagination(items = [], input = {}) {
-  const allItems = safeArray(items);
+function getActiveFilter(input = {}) {
   const data = safeObject(input);
   const runtime = safeObject(data.state);
 
-  const pageSize = PAGE_SIZE;
+  return normalizeFilter(
+    first(
+      data.filter,
+      data.statusFilter,
+      data.activeFilter,
+      data.tierFilter,
+      runtime.filter,
+      runtime.statusFilter,
+      runtime.activeFilter,
+      runtime.tierFilter,
+      "all"
+    )
+  );
+}
 
-  const reportedTotal = Math.max(
-    allItems.length,
+function getFilterLabel(filter = "all") {
+  const key = normalizeFilter(filter);
+
+  return FILTERS.find((item) => item.key === key)?.label || "Todos";
+}
+
+function getSearchQuery(input = {}) {
+  const data = safeObject(input);
+  const runtime = safeObject(data.state);
+
+  return normalizeWhitespace(
+    first(
+      data.search,
+      data.searchQuery,
+      data.query,
+      data.q,
+      data.term,
+      data.keyword,
+      runtime.search,
+      runtime.searchQuery,
+      runtime.query,
+      runtime.q,
+      runtime.term,
+      runtime.keyword,
+      ""
+    )
+  );
+}
+
+function itemMatchesFilter(item = {}, filter = "all") {
+  const key = normalizeFilter(filter);
+
+  if (key === "all") return true;
+  if (key === "active") return isActiveLike(item);
+  if (key === "pending") return isPendingLike(item);
+  if (key === "blocked") return isBlockedLike(item);
+  if (key === "vip") return isVipLike(item);
+
+  return true;
+}
+
+function getSearchHaystack(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return [
+    getClienteId(item),
+    getClienteCode(item),
+    getClienteName(item),
+    getClienteDescription(item),
+    getClienteEmail(item),
+    getClienteLocation(item),
+    getClienteManager(item),
+    getStatusLabel(getStatusValue(item)),
+    getTierLabel(getTierValue(item)),
+    item.clientId,
+    item.clienteId,
+    item.customerId,
+    item.company,
+    item.empresa,
+    item.razonSocial,
+    item.phone,
+    item.telefono,
+    raw.clientId,
+    raw.clienteId,
+    raw.customerId,
+    raw.company,
+    raw.empresa,
+    raw.razonSocial,
+    raw.phone,
+    raw.telefono,
+  ]
+    .map((value) => normalizeText(value))
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function itemMatchesSearch(item = {}, query = "") {
+  const normalizedQuery = normalizeText(query);
+
+  if (!normalizedQuery) return true;
+
+  const terms = normalizedQuery.split(" ").filter(Boolean);
+  const haystack = getSearchHaystack(item);
+
+  return terms.every((term) => haystack.includes(term));
+}
+
+function filterAndSortClientes(items = [], input = {}) {
+  const activeFilter = getActiveFilter(input);
+  const searchQuery = getSearchQuery(input);
+
+  return sortClientesNewestFirst(items).filter((item) => {
+    return itemMatchesFilter(item, activeFilter) && itemMatchesSearch(item, searchQuery);
+  });
+}
+
+function isFilterActive(input = {}) {
+  return getActiveFilter(input) !== "all" || Boolean(getSearchQuery(input));
+}
+
+function computeFilterCounts(items = [], input = {}) {
+  const rows = safeArray(items);
+  const searchQuery = getSearchQuery(input);
+  const searchableRows = rows.filter((item) => itemMatchesSearch(item, searchQuery));
+
+  return FILTERS.reduce((acc, filter) => {
+    acc[filter.key] = searchableRows.filter((item) => itemMatchesFilter(item, filter.key)).length;
+    return acc;
+  }, {});
+}
+
+/* =========================================================
+   STATS / PAGINATION
+========================================================= */
+
+function computeStats(items = []) {
+  const rows = safeArray(items);
+
+  return rows.reduce(
+    (acc, item) => {
+      acc.total += 1;
+
+      if (isActiveLike(item)) acc.activeCount += 1;
+      if (isPendingLike(item)) acc.pendingCount += 1;
+      if (isBlockedLike(item)) acc.blockedCount += 1;
+      if (isVipLike(item)) acc.vipCount += 1;
+
+      return acc;
+    },
+    {
+      total: 0,
+      activeCount: 0,
+      pendingCount: 0,
+      blockedCount: 0,
+      vipCount: 0,
+    }
+  );
+}
+
+function normalizePageSize(input = {}) {
+  const data = safeObject(input);
+  const runtime = safeObject(data.state);
+
+  return clamp(
+    safeNumber(
+      first(
+        data.pageSize,
+        runtime.pageSize,
+        runtime.limit,
+        runtime.clientesPageSize,
+        DEFAULT_PAGE_SIZE
+      ),
+      DEFAULT_PAGE_SIZE
+    ),
+    1,
+    50
+  );
+}
+
+function getPagination(items = [], input = {}) {
+  const data = safeObject(input);
+  const runtime = safeObject(data.state);
+
+  const allItems = filterAndSortClientes(items, data);
+  const pageSize = normalizePageSize(data);
+  const filtering = isFilterActive(data);
+
+  const remoteTotal = Math.max(
     safeNumber(
       first(
         data.totalCount,
@@ -1088,24 +1397,30 @@ function getPagination(items = [], input = {}) {
         allItems.length
       ),
       allItems.length
-    )
+    ),
+    allItems.length
   );
 
-  const totalPagesFromProps = safeNumber(
-    first(data.totalPages, runtime.totalPages),
-    0
-  );
+  const reportedTotal = filtering ? allItems.length : remoteTotal;
+  const totalPagesFromProps = filtering ? 0 : safeNumber(first(data.totalPages, runtime.totalPages), 0);
 
   const totalPages = Math.max(
     1,
     totalPagesFromProps || Math.ceil((reportedTotal || 1) / pageSize)
   );
 
-  const currentPage = Math.min(
-    Math.max(
-      1,
-      safeNumber(first(data.page, runtime.page, runtime.currentPage, 1), 1)
+  const currentPage = clamp(
+    safeNumber(
+      first(
+        data.page,
+        runtime.page,
+        runtime.currentPage,
+        runtime.clientesPage,
+        1
+      ),
+      1
     ),
+    1,
     totalPages
   );
 
@@ -1113,9 +1428,7 @@ function getPagination(items = [], input = {}) {
   const pageItems = allItems.slice(startIndex, startIndex + pageSize);
 
   const rangeStart = reportedTotal && pageItems.length ? startIndex + 1 : 0;
-  const rangeEnd = reportedTotal
-    ? Math.min(startIndex + pageItems.length, reportedTotal)
-    : 0;
+  const rangeEnd = reportedTotal ? Math.min(startIndex + pageItems.length, reportedTotal) : 0;
 
   return {
     allItems,
@@ -1124,16 +1437,25 @@ function getPagination(items = [], input = {}) {
     currentPage,
     totalPages,
     totalCount: reportedTotal,
+    unfilteredCount: safeArray(items).length,
+    remoteTotal,
     rangeStart,
     rangeEnd,
     hasPrev: currentPage > 1,
     hasNext: currentPage < totalPages,
+    filtering,
+    activeFilter: getActiveFilter(data),
+    searchQuery: getSearchQuery(data),
   };
 }
 
 /* =========================================================
    UI PARTIALS
 ========================================================= */
+
+function renderMaybeStyles(includeStyles = false) {
+  return includeStyles ? renderStyles() : "";
+}
 
 function renderSpinner(label = "") {
   return `
@@ -1209,6 +1531,7 @@ function renderStatusChip(item = {}) {
 
   return `
     <span class="clientes-chip clientes-chip--${escapeHtml(key)}">
+      <span class="clientes-chip-dot" aria-hidden="true"></span>
       ${escapeHtml(label)}
     </span>
   `;
@@ -1221,33 +1544,52 @@ function renderTierChip(item = {}) {
 
   return `
     <span class="clientes-chip clientes-chip--tier-${escapeHtml(key)}">
+      <span class="clientes-chip-dot" aria-hidden="true"></span>
       ${escapeHtml(label)}
     </span>
   `;
 }
 
-function renderOpenClienteButton({ clienteId = "", isOpening = false } = {}) {
+function renderActionButton({
+  action = "detail",
+  clienteId = "",
+  label = "Detalle",
+  loadingLabel = "Cargando detalle",
+  loading = false,
+  disabled = false,
+  iconName = "eye",
+  tooltip = "",
+} = {}) {
+  const finalDisabled = disabled || loading;
+  const finalTooltip = tooltip || label;
+
   return `
     <button
       type="button"
-      class="clientes-detail-btn${isOpening ? " is-loading" : ""}"
-      data-clientes-action="detail"
-      data-action="open-cliente"
+      class="clientes-detail-btn${loading ? " is-loading" : ""}"
+      data-clientes-action="${escapeHtml(action)}"
+      data-action="${escapeHtml(action === "detail" ? "open-cliente" : action)}"
       data-cliente-id="${escapeHtml(clienteId)}"
       data-client-id="${escapeHtml(clienteId)}"
       data-customer-id="${escapeHtml(clienteId)}"
-      ${isOpening ? 'disabled aria-busy="true"' : ""}
+      title="${escapeHtml(finalTooltip)}"
+      data-tooltip="${escapeHtml(finalTooltip)}"
+      ${finalDisabled ? 'disabled aria-disabled="true"' : ""}
+      ${loading ? 'aria-busy="true"' : ""}
     >
       ${
-        isOpening
-          ? renderLoaderOnly("Cargando detalle")
-          : '<span class="clientes-btn-text">Ver detalle</span>'
+        loading
+          ? renderLoaderOnly(loadingLabel)
+          : `
+            <span class="clientes-action-icon">${icon(iconName)}</span>
+            <span class="clientes-btn-text">${escapeHtml(label)}</span>
+          `
       }
     </button>
   `;
 }
 
-function renderClienteRow(item = {}, state = {}) {
+function renderRow(item = {}, state = {}) {
   const runtime = safeObject(state);
 
   const clienteId = getClienteId(item);
@@ -1257,17 +1599,21 @@ function renderClienteRow(item = {}, state = {}) {
   const email = getClienteEmail(item);
   const city = getClienteLocation(item);
   const manager = getClienteManager(item);
-  const createdAt = formatDate(getCreatedAt(item));
+  const createdAtRaw = getCreatedAt(item);
   const updatedAtRaw = getUpdatedAt(item);
-  const updatedAt = updatedAtRaw
-    ? formatLastUpdate(updatedAtRaw)
-    : "Sin actualización";
+  const createdAt = formatDateShort(createdAtRaw);
+  const updatedAt = updatedAtRaw ? formatLastUpdate(updatedAtRaw) : "Sin actualización";
+  const statusKey = getStatusKey(getStatusValue(item));
 
   const openingClienteId = safeText(
     first(
       runtime.openingClienteId,
       runtime.openingClientId,
-      runtime.openingCustomerId
+      runtime.openingCustomerId,
+      runtime.detailClienteId,
+      runtime.detailClientId,
+      runtime.loadingClienteId,
+      runtime.loadingClientId
     ),
     ""
   );
@@ -1275,15 +1621,25 @@ function renderClienteRow(item = {}, state = {}) {
   const isOpening = Boolean(openingClienteId && openingClienteId === clienteId);
 
   return `
-    <tr class="clientes-row" data-cliente-id="${escapeHtml(clienteId)}">
+    <tr
+      class="clientes-row clientes-row--${escapeHtml(statusKey)}"
+      data-cliente-row="true"
+      data-cliente-id="${escapeHtml(clienteId)}"
+      data-client-id="${escapeHtml(clienteId)}"
+      data-customer-id="${escapeHtml(clienteId)}"
+    >
       <td class="clientes-cell clientes-cell--main">
         <div class="clientes-main">
           ${renderAvatar(item)}
 
           <div class="clientes-main-copy">
-            <div class="clientes-user-id">${escapeHtml(code)}</div>
-            <div class="clientes-user-subject">${escapeHtml(name)}</div>
-            <div class="clientes-user-description">${escapeHtml(preview)}</div>
+            <div class="clientes-client-line">
+              <span class="clientes-client-id">${escapeHtml(code)}</span>
+              <span class="clientes-role-pill">Cliente</span>
+            </div>
+
+            <div class="clientes-client-subject">${escapeHtml(name)}</div>
+            <div class="clientes-client-description">${escapeHtml(preview)}</div>
           </div>
         </div>
       </td>
@@ -1297,138 +1653,226 @@ function renderClienteRow(item = {}, state = {}) {
       </td>
 
       <td class="clientes-cell clientes-cell--date">
-        <span class="clientes-date-inline">${escapeHtml(createdAt)}</span>
+        <span
+          class="clientes-date-inline"
+          title="${escapeHtml(formatDateTime(createdAtRaw))}"
+          data-tooltip="${escapeHtml(formatDateTime(createdAtRaw))}"
+        >
+          ${escapeHtml(createdAt)}
+        </span>
       </td>
 
       <td class="clientes-cell clientes-cell--email">
-        <span class="clientes-email-inline" title="${escapeHtml(email)}">
+        <span
+          class="clientes-email-inline"
+          title="${escapeHtml(email)}"
+          data-tooltip="${escapeHtml(email)}"
+        >
           ${escapeHtml(email)}
         </span>
       </td>
 
       <td class="clientes-cell clientes-cell--location">
-        <span class="clientes-location-inline">${escapeHtml(city)}</span>
+        <span
+          class="clientes-location-inline"
+          title="${escapeHtml(city)}"
+          data-tooltip="${escapeHtml(city)}"
+        >
+          ${escapeHtml(city)}
+        </span>
       </td>
 
       <td class="clientes-cell clientes-cell--manager">
-        <span class="clientes-manager-inline" title="${escapeHtml(manager)}">
+        <span
+          class="clientes-manager-inline"
+          title="${escapeHtml(manager)}"
+          data-tooltip="${escapeHtml(manager)}"
+        >
           ${escapeHtml(manager)}
         </span>
       </td>
 
       <td class="clientes-cell clientes-cell--activity">
-        <span class="clientes-activity-inline">${escapeHtml(updatedAt)}</span>
+        <span
+          class="clientes-activity-inline"
+          title="${escapeHtml(updatedAtRaw ? formatDateTime(updatedAtRaw) : "Sin actualización")}"
+          data-tooltip="${escapeHtml(updatedAtRaw ? formatDateTime(updatedAtRaw) : "Sin actualización")}"
+        >
+          ${escapeHtml(updatedAt)}
+        </span>
       </td>
 
       <td class="clientes-cell clientes-cell--actions">
-        ${renderOpenClienteButton({ clienteId, isOpening })}
+        ${renderActionButton({
+          clienteId,
+          loading: isOpening,
+          label: "Detalle",
+          loadingLabel: "Cargando detalle",
+          iconName: "eye",
+          tooltip: "Abrir detalle de cliente",
+        })}
       </td>
     </tr>
   `;
 }
 
-function renderMobileClienteCard(item = {}, state = {}) {
+function renderPagination(pagination = {}, state = {}) {
   const runtime = safeObject(state);
-
-  const clienteId = getClienteId(item);
-  const code = getClienteCode(item);
-  const name = getClienteName(item);
-  const preview = truncate(getClienteDescription(item), 120);
-  const email = getClienteEmail(item);
-  const city = getClienteLocation(item);
-  const manager = getClienteManager(item);
-  const createdAt = formatDate(getCreatedAt(item));
-  const updatedAtRaw = getUpdatedAt(item);
-  const updatedAt = updatedAtRaw
-    ? formatLastUpdate(updatedAtRaw)
-    : "Sin actualización";
-
-  const openingClienteId = safeText(
-    first(
-      runtime.openingClienteId,
-      runtime.openingClientId,
-      runtime.openingCustomerId
-    ),
-    ""
-  );
-
-  const isOpening = Boolean(openingClienteId && openingClienteId === clienteId);
+  const loading = Boolean(runtime.loading);
+  const refreshing = Boolean(runtime.refreshing);
 
   return `
-    <article class="clientes-mobile-card" data-cliente-id="${escapeHtml(clienteId)}">
-      <div class="clientes-mobile-top">
-        <div class="clientes-mobile-main">
-          ${renderAvatar(item)}
+    <div class="clientes-pagination" aria-label="Paginación de clientes">
+      <button
+        type="button"
+        class="clientes-pagination-btn"
+        data-clientes-action="prev-page"
+        data-action="prev-page"
+        data-page="${escapeHtml(String(Math.max(1, pagination.currentPage - 1)))}"
+        ${!pagination.hasPrev || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
+      >
+        Anterior
+      </button>
 
-          <div class="clientes-main-copy">
-            <div class="clientes-user-id">${escapeHtml(code)}</div>
-            <div class="clientes-user-subject">${escapeHtml(name)}</div>
-            <div class="clientes-user-description">${escapeHtml(preview)}</div>
-          </div>
-        </div>
+      <span class="clientes-pagination-status">
+        ${escapeHtml(`${pagination.currentPage}/${pagination.totalPages}`)}
+      </span>
 
-        ${renderStatusChip(item)}
-      </div>
-
-      <div class="clientes-mobile-tier">
-        ${renderTierChip(item)}
-      </div>
-
-      <div class="clientes-mobile-meta">
-        <div class="clientes-mobile-meta-card">
-          <span class="clientes-mobile-meta-label">Alta</span>
-          <strong class="clientes-mobile-meta-value">${escapeHtml(createdAt)}</strong>
-        </div>
-
-        <div class="clientes-mobile-meta-card">
-          <span class="clientes-mobile-meta-label">Email</span>
-          <strong class="clientes-mobile-meta-value">${escapeHtml(email)}</strong>
-        </div>
-
-        <div class="clientes-mobile-meta-card">
-          <span class="clientes-mobile-meta-label">Ciudad</span>
-          <strong class="clientes-mobile-meta-value">${escapeHtml(city)}</strong>
-        </div>
-
-        <div class="clientes-mobile-meta-card">
-          <span class="clientes-mobile-meta-label">Responsable</span>
-          <strong class="clientes-mobile-meta-value">${escapeHtml(manager)}</strong>
-        </div>
-
-        <div class="clientes-mobile-meta-card">
-          <span class="clientes-mobile-meta-label">Actualización</span>
-          <strong class="clientes-mobile-meta-value">${escapeHtml(updatedAt)}</strong>
-        </div>
-      </div>
-
-      <div class="clientes-mobile-actions">
-        ${renderOpenClienteButton({ clienteId, isOpening })}
-      </div>
-    </article>
+      <button
+        type="button"
+        class="clientes-pagination-btn clientes-pagination-btn--next"
+        data-clientes-action="next-page"
+        data-action="next-page"
+        data-page="${escapeHtml(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
+        ${!pagination.hasNext || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
+      >
+        Siguiente
+      </button>
+    </div>
   `;
 }
 
-function renderEmptyContent({ hasError = false, message = "" } = {}) {
+function renderSearch(input = {}) {
+  const searchQuery = getSearchQuery(input);
+
+  return `
+    <div class="clientes-search" role="search" aria-label="Buscar clientes">
+      <span class="clientes-search-icon" aria-hidden="true">
+        ${icon("search")}
+      </span>
+
+      <input
+        id="clientes-search-input"
+        class="clientes-search-input"
+        type="search"
+        value="${escapeHtml(searchQuery)}"
+        placeholder="Buscar nombre, email, ciudad, responsable, teléfono, ID..."
+        autocomplete="off"
+        spellcheck="false"
+        data-clientes-action="search"
+        data-action="search-clientes"
+        data-clientes-search-input="true"
+        aria-label="Buscar clientes por nombre, email, ciudad, responsable, teléfono o identificador"
+      />
+
+      ${
+        searchQuery
+          ? `
+            <button
+              type="button"
+              class="clientes-search-clear"
+              data-clientes-action="clear-search"
+              data-action="clear-search"
+              title="Limpiar búsqueda"
+              data-tooltip="Limpiar búsqueda"
+              aria-label="Limpiar búsqueda"
+            >
+              ${icon("close")}
+            </button>
+          `
+          : ""
+      }
+    </div>
+  `;
+}
+
+function renderFilters(input = {}, pagination = {}) {
+  const data = safeObject(input);
+  const items = getResolvedItems(data);
+  const counts = computeFilterCounts(items, data);
+  const activeFilter = normalizeFilter(pagination.activeFilter || getActiveFilter(data));
+
+  return `
+    <div class="clientes-filters" aria-label="Filtros y búsqueda de clientes">
+      <div class="clientes-filter-pills">
+        ${FILTERS.map((filter) => {
+          const isActive = filter.key === activeFilter;
+          const count = counts[filter.key] ?? 0;
+
+          return `
+            <button
+              type="button"
+              class="clientes-filter-pill${isActive ? " is-active" : ""}"
+              data-clientes-action="filter"
+              data-action="filter-clientes"
+              data-filter="${escapeHtml(filter.key)}"
+              data-filter-status="${escapeHtml(filter.key)}"
+              aria-pressed="${isActive ? "true" : "false"}"
+            >
+              <span>${escapeHtml(filter.label)}</span>
+              <strong>${escapeHtml(String(count))}</strong>
+            </button>
+          `;
+        }).join("")}
+      </div>
+
+      ${renderSearch(data)}
+    </div>
+  `;
+}
+
+function renderEmptyContent({
+  hasError = false,
+  filtering = false,
+  searchQuery = "",
+  message = "",
+  restricted = false,
+} = {}) {
+  if (restricted) {
+    return `
+      <div class="clientes-empty clientes-empty--forbidden">
+        <div class="clientes-empty-icon" aria-hidden="true">${icon("shield")}</div>
+        <h3 class="clientes-empty-title">Acceso restringido</h3>
+        <p class="clientes-empty-text">La vista de clientes está reservada para administradores.</p>
+      </div>
+    `;
+  }
+
   return `
     <div class="clientes-empty">
+      <div class="clientes-empty-icon" aria-hidden="true">
+        ${hasError ? icon("alert") : icon("briefcase")}
+      </div>
+
       <h3 class="clientes-empty-title">
         ${
           hasError
             ? "No se pudieron cargar los clientes"
-            : "No hay clientes para mostrar"
+            : filtering
+              ? "No hay clientes con este criterio"
+              : "No hay clientes para mostrar"
         }
       </h3>
 
       <p class="clientes-empty-text">
         ${
           hasError
-            ? escapeHtml(
-                safeText(
-                  message,
-                  "Puedes reintentar la carga desde el botón de actualizar."
-                )
-              )
-            : "Cuando haya clientes registrados aparecerán aquí."
+            ? escapeHtml(safeText(message, "Puedes reintentar la carga desde el botón de actualizar."))
+            : filtering
+              ? searchQuery
+                ? `No se encontraron clientes para “${escapeHtml(searchQuery)}”. Prueba con otro nombre, email, ciudad, responsable o identificador.`
+                : "Cambia el filtro activo para volver al listado completo."
+              : "Cuando haya clientes registrados aparecerán aquí con su estado, nivel, alta, email, ciudad, responsable, última actualización y acciones disponibles."
         }
       </p>
 
@@ -1437,42 +1881,43 @@ function renderEmptyContent({ hasError = false, message = "" } = {}) {
           ? `
             <button
               type="button"
-              id="clientes-retry-btn"
               class="clientes-btn clientes-btn--primary"
               data-clientes-action="retry"
               data-action="retry"
             >
-              Reintentar
+              ${icon("refresh")}
+              <span class="clientes-btn-text">Reintentar</span>
             </button>
           `
-          : `
-            <button
-              type="button"
-              id="clientes-create-empty-btn"
-              class="clientes-btn clientes-btn--primary clientes-btn--create"
-              data-clientes-action="create"
-              data-action="create-cliente"
-            >
-              Crear cliente
-            </button>
-          `
+          : filtering
+            ? `
+              <button
+                type="button"
+                class="clientes-btn"
+                data-clientes-action="clear-filters"
+                data-action="clear-filters"
+              >
+                ${icon("close")}
+                <span class="clientes-btn-text">Limpiar filtros</span>
+              </button>
+            `
+            : `
+              <button
+                type="button"
+                class="clientes-btn clientes-btn--primary clientes-btn--create"
+                data-clientes-action="create"
+                data-action="create-cliente"
+              >
+                ${icon("plus")}
+                <span class="clientes-btn-text">Crear cliente</span>
+              </button>
+            `
       }
     </div>
   `;
 }
 
-function renderAccessDeniedContent() {
-  return `
-    <div class="clientes-empty clientes-empty--forbidden">
-      <h3 class="clientes-empty-title">Acceso restringido</h3>
-      <p class="clientes-empty-text">
-        La vista de clientes está reservada para administradores.
-      </p>
-    </div>
-  `;
-}
-
-function renderTableLoading(rows = PAGE_SIZE) {
+function renderTableLoading(rows = DEFAULT_PAGE_SIZE) {
   return `
     <div class="clientes-table-loading" aria-hidden="true">
       ${Array.from({ length: rows })
@@ -1493,6 +1938,7 @@ function renderTableLoading(rows = PAGE_SIZE) {
               <div class="clientes-skeleton clientes-skeleton--email"></div>
               <div class="clientes-skeleton clientes-skeleton--date"></div>
               <div class="clientes-skeleton clientes-skeleton--date"></div>
+              <div class="clientes-skeleton clientes-skeleton--date"></div>
               <div class="clientes-skeleton clientes-skeleton--btn"></div>
             </div>
           `
@@ -1504,7 +1950,7 @@ function renderTableLoading(rows = PAGE_SIZE) {
 
 function renderRefreshOverlay() {
   return `
-    <div class="clientes-refresh-overlay" aria-live="polite" aria-busy="true">
+    <div class="clientes-refresh-overlay" aria-live="polite">
       <div class="clientes-refresh-card">
         ${renderSpinner("Actualizando clientes...")}
       </div>
@@ -1518,29 +1964,64 @@ function renderRefreshOverlay() {
 
 function renderStyles() {
   return `
-    <style>
-      .clientes-view-root{
+    <style id="${STYLE_ID}">
+      :where(.clientes-view-root, [data-clientes-scope]){
+        --cli-row-accent:var(--accent, #6f59d9);
+        --cli-row-accent-soft:var(--accent-soft, rgba(111,89,217,.12));
+        --cli-create-bg:var(--btn-primary-bg, var(--gradient-accent, linear-gradient(135deg, #6f59d9 0%, #5f45d8 55%, #4f37bf 100%)));
+        --cli-create-bg-hover:var(--cli-create-bg);
+        --cli-create-border:var(--btn-primary-border, color-mix(in srgb, var(--accent, #6f59d9) 46%, transparent));
+        --cli-table-row-height:88px;
+
         display:grid;
         gap:var(--view-section-gap, var(--space-lg, 18px));
-        min-inline-size:0;
         color:var(--text, #f5f5f5);
         font-family:var(--font-family, inherit);
+        min-inline-size:0;
+        inline-size:100%;
+        max-inline-size:100%;
+        container-type:inline-size;
       }
 
-      .clientes-hero,
-      .clientes-history{
-        position:relative;
-        overflow:hidden;
-        border-radius:var(--view-hero-radius, var(--card-radius-lg, 24px));
-        border:1px solid var(--view-hero-border, var(--panel-border, var(--border-default, rgba(255,255,255,.08))));
-        background:
-          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
-          var(--view-hero-bg, var(--panel-bg, var(--card-bg, var(--surface-elevated, #262626))));
-        box-shadow:var(--view-hero-shadow, var(--panel-shadow, var(--shadow-md, 0 14px 30px rgba(0,0,0,.22))));
+      :where(.clientes-view-root, [data-clientes-scope]) *,
+      :where(.clientes-view-root, [data-clientes-scope]) *::before,
+      :where(.clientes-view-root, [data-clientes-scope]) *::after{
+        box-sizing:border-box;
       }
 
       .clientes-hero{
+        position:relative;
+        overflow:hidden;
+        border-radius:var(--view-hero-radius, var(--card-radius-lg, 22px));
+        border:1px solid var(--view-hero-border, var(--panel-border, var(--border-default, rgba(255,255,255,.08))));
+        background:
+          radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent, #6f59d9) 12%, transparent), transparent 38%),
+          radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info, #3b82a6) 10%, transparent), transparent 34%),
+          radial-gradient(circle at 68% 110%, color-mix(in srgb, var(--success, #22c55e) 7%, transparent), transparent 36%),
+          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
+          var(--view-hero-bg, var(--panel-bg, var(--card-bg, var(--surface-elevated, #262626))));
+        box-shadow:var(--view-hero-shadow, var(--panel-shadow, var(--shadow-md, 0 14px 30px rgba(0,0,0,.22))));
         padding:var(--space-xl, 22px) var(--space-xl, 24px);
+        isolation:isolate;
+        min-inline-size:0;
+        max-inline-size:100%;
+      }
+
+      .clientes-hero::after{
+        content:"";
+        position:absolute;
+        inset:auto -8% -38% 48%;
+        block-size:220px;
+        pointer-events:none;
+        background:radial-gradient(circle, color-mix(in srgb, var(--accent, #6f59d9) 10%, transparent), transparent 68%);
+        filter:blur(10px);
+        opacity:.82;
+        z-index:0;
+      }
+
+      .clientes-hero > *{
+        position:relative;
+        z-index:1;
       }
 
       .clientes-hero-top{
@@ -1559,20 +2040,19 @@ function renderStyles() {
       .clientes-page-title{
         margin:0;
         max-inline-size:100%;
-        color:var(--text-strong, #ffffff);
         font-size:clamp(var(--font-3xl, 24px), 2.6vw, var(--font-5xl, 40px));
-        line-height:var(--line-tight, .98);
+        line-height:var(--line-tight, 1.08);
         letter-spacing:var(--view-title-letter, -.05em);
         font-weight:var(--view-title-weight, var(--weight-black, 800));
-        white-space:nowrap;
+        color:var(--text-strong, #ffffff);
       }
 
       .clientes-page-subtitle{
         margin:0;
-        max-inline-size:860px;
-        color:var(--view-subtitle-color, var(--text-muted, rgba(245,245,245,.70)));
+        max-inline-size:900px;
         font-size:var(--font-lg, 15px);
         line-height:var(--line-relaxed, 1.58);
+        color:var(--view-subtitle-color, var(--text-muted, rgba(245,245,245,.70)));
       }
 
       .clientes-hero-actions{
@@ -1583,130 +2063,95 @@ function renderStyles() {
         flex-wrap:wrap;
       }
 
-      .clientes-btn,
-      .clientes-detail-btn,
-      .clientes-pagination-btn{
-        position:relative;
-        isolation:isolate;
+      .clientes-btn{
+        appearance:none;
+        min-block-size:var(--btn-height, 42px);
+        padding-inline:var(--space-md, 16px);
+        border-radius:var(--btn-radius, var(--radius-md, 13px));
+        border:1px solid var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
+        background:var(--btn-secondary-bg, rgba(255,255,255,.045));
+        color:var(--btn-secondary-text, var(--text, #f5f5f5));
+        font-size:var(--font-md, 13px);
+        font-weight:var(--weight-bold, 700);
+        line-height:1;
+        cursor:pointer;
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        gap:var(--space-xs, 8px);
-        min-inline-size:0;
-        border:1px solid transparent;
-        font:inherit;
-        line-height:1;
-        font-weight:var(--weight-bold, 700);
-        white-space:nowrap;
-        text-align:center;
+        gap:8px;
         text-decoration:none;
-        cursor:pointer;
-        user-select:none;
-        -webkit-tap-highlight-color:transparent;
+        white-space:nowrap;
+        box-shadow:var(--btn-secondary-shadow, var(--shadow-sm, 0 6px 14px rgba(0,0,0,.16)));
         transition:
           transform var(--duration-fast, .16s) var(--ease-standard, ease),
-          box-shadow var(--duration-normal, .18s) var(--ease-standard, ease),
-          background var(--duration-normal, .18s) var(--ease-standard, ease),
-          border-color var(--duration-normal, .18s) var(--ease-standard, ease),
-          color var(--duration-normal, .18s) var(--ease-standard, ease),
+          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease),
+          border-color var(--duration-fast, .16s) var(--ease-standard, ease),
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          color var(--duration-fast, .16s) var(--ease-standard, ease),
           opacity var(--duration-fast, .16s) var(--ease-standard, ease),
           filter var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
-      .clientes-btn::before,
-      .clientes-detail-btn::before,
-      .clientes-pagination-btn::before{
-        content:"";
-        position:absolute;
-        inset:0;
-        z-index:-1;
-        border-radius:inherit;
-        background:
-          linear-gradient(
-            180deg,
-            color-mix(in srgb, var(--text-strong, #fff), transparent 94%),
-            transparent 42%
-          );
-        opacity:0;
-        pointer-events:none;
-        transition:opacity var(--duration-fast, .16s) var(--ease-standard, ease);
-      }
-
-      .clientes-btn{
-        min-block-size:var(--btn-height, 42px);
-        padding-inline:var(--space-md, 16px);
-        border-radius:var(--btn-radius, var(--radius-md, 14px));
-        border-color:var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
-        background:var(--btn-secondary-bg, rgba(255,255,255,.045));
-        color:var(--btn-secondary-text, var(--text, #f5f5f5));
-        font-size:var(--font-md, 13px);
-        box-shadow:var(--btn-secondary-shadow, var(--shadow-sm, 0 6px 14px rgba(0,0,0,.16)));
-      }
-
-      .clientes-btn:hover,
-      .clientes-detail-btn:hover,
-      .clientes-pagination-btn:hover{
-        transform:translateY(var(--ui-hover-lift, -1px));
-      }
-
-      .clientes-btn:hover::before,
-      .clientes-detail-btn:hover::before,
-      .clientes-pagination-btn:hover::before{
-        opacity:.64;
-      }
-
-      .clientes-btn:active,
-      .clientes-detail-btn:active,
-      .clientes-pagination-btn:active{
-        transform:translateY(0) scale(var(--ui-active-scale, .985));
-      }
-
-      .clientes-btn:focus-visible,
-      .clientes-detail-btn:focus-visible,
-      .clientes-pagination-btn:focus-visible{
-        outline:none;
-        box-shadow:var(--focus-ring, 0 0 0 4px rgba(124,92,255,.18));
-      }
-
-      .clientes-btn:disabled,
-      .clientes-btn[aria-disabled="true"],
-      .clientes-detail-btn:disabled,
-      .clientes-detail-btn[aria-disabled="true"],
-      .clientes-pagination-btn:disabled,
-      .clientes-pagination-btn[aria-disabled="true"]{
-        opacity:.56;
-        cursor:not-allowed;
-        transform:none;
-        box-shadow:none;
-        filter:none;
-        pointer-events:none;
+      .clientes-btn svg{
+        inline-size:16px;
+        block-size:16px;
       }
 
       .clientes-btn:hover{
-        border-color:var(--border-strong, rgba(255,255,255,.12));
+        transform:translateY(var(--ui-hover-lift, -1px));
         background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
+        color:var(--text-strong, #ffffff);
         box-shadow:var(--shadow-md, 0 14px 30px rgba(0,0,0,.22));
+      }
+
+      .clientes-btn:active{
+        transform:translateY(0) scale(var(--ui-active-scale, .985));
       }
 
       .clientes-btn--primary,
       .clientes-btn--create{
-        border-color:var(--btn-primary-border, var(--accent-border, rgba(255,255,255,.05)));
-        background:var(--btn-primary-bg, var(--gradient-accent, linear-gradient(135deg, #55555d 0%, #3f3f46 55%, #2f2f35 100%)));
+        border-color:var(--cli-create-border);
+        background:var(--cli-create-bg);
         color:var(--btn-primary-text, var(--text-on-accent, #ffffff));
-        box-shadow:var(--btn-primary-shadow, 0 12px 28px rgba(0,0,0,.22));
+        box-shadow:
+          0 12px 28px color-mix(in srgb, var(--accent, #6f59d9), transparent 78%),
+          var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.10));
       }
 
       .clientes-btn--primary:hover,
       .clientes-btn--create:hover{
-        color:var(--btn-primary-text, #fff);
-        background:var(--btn-primary-bg-hover, var(--btn-primary-bg));
-        filter:brightness(1.02);
+        transform:translateY(-2px);
+        border-color:var(--cli-create-border);
+        background:var(--cli-create-bg-hover);
+        color:var(--btn-primary-text, #ffffff);
+        box-shadow:
+          0 16px 34px color-mix(in srgb, var(--accent, #6f59d9), transparent 74%),
+          0 0 0 1px color-mix(in srgb, var(--text-on-accent, #ffffff) 18%, transparent) inset;
+      }
+
+      .clientes-btn:focus-visible,
+      .clientes-detail-btn:focus-visible,
+      .clientes-pagination-btn:focus-visible,
+      .clientes-filter-pill:focus-visible,
+      .clientes-search-input:focus-visible,
+      .clientes-search-clear:focus-visible{
+        outline:none;
+        box-shadow:var(--focus-ring, 0 0 0 4px rgba(113,113,122,.16));
       }
 
       .clientes-btn.is-loading,
       .clientes-detail-btn.is-loading{
         cursor:wait;
-        opacity:.92;
+        opacity:.94;
+      }
+
+      .clientes-btn:disabled,
+      .clientes-btn[aria-disabled="true"],
+      .clientes-detail-btn:disabled,
+      .clientes-detail-btn[aria-disabled="true"]{
+        pointer-events:none;
+        opacity:.54;
+        filter:saturate(.75);
       }
 
       .clientes-hero-meta{
@@ -1730,7 +2175,13 @@ function renderStyles() {
         text-transform:uppercase;
         display:inline-flex;
         align-items:center;
+        gap:7px;
         white-space:nowrap;
+      }
+
+      .clientes-meta-pill svg{
+        inline-size:14px;
+        block-size:14px;
       }
 
       .clientes-stats{
@@ -1741,54 +2192,86 @@ function renderStyles() {
       }
 
       .clientes-stat-card{
+        --cli-stat-color:var(--accent, #6f59d9);
+
+        position:relative;
         display:grid;
         gap:var(--space-xs, 8px);
-        min-block-size:calc(122px * var(--ui-scale, 1));
+        min-block-size:calc(124px * var(--ui-scale, 1));
         padding:var(--space-md, 16px) var(--space-lg, 18px);
-        border-radius:var(--card-radius, 20px);
+        border-radius:var(--card-radius, 18px);
         border:1px solid var(--card-border, var(--border-default, rgba(255,255,255,.082)));
         background:
           var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
           var(--card-bg, var(--surface-elevated, rgba(39,39,42,.88)));
         box-shadow:var(--shadow-card, var(--card-shadow, 0 16px 36px rgba(0,0,0,.24)));
+        overflow:hidden;
+      }
+
+      .clientes-stat-card::after{
+        content:"";
+        position:absolute;
+        inset:auto -20% -44% auto;
+        inline-size:120px;
+        block-size:120px;
+        border-radius:50%;
+        pointer-events:none;
+        background:color-mix(in srgb, var(--cli-stat-color) 16%, transparent);
+        filter:blur(8px);
       }
 
       .clientes-stat-card--total{
+        --cli-stat-color:var(--accent, #6f59d9);
         border-color:var(--accent-border, var(--border-accent, rgba(113,113,122,.30)));
       }
 
       .clientes-stat-card--active{
+        --cli-stat-color:var(--success, #22c55e);
         border-color:var(--border-success, rgba(34,197,94,.30));
       }
 
       .clientes-stat-card--pending{
+        --cli-stat-color:var(--warning, #f59e0b);
         border-color:var(--border-warning, rgba(245,158,11,.30));
       }
 
       .clientes-stat-card--blocked{
+        --cli-stat-color:var(--error, #ef4444);
         border-color:var(--border-error, rgba(239,68,68,.30));
       }
 
       .clientes-stat-label{
-        color:var(--text-dim, rgba(245,245,245,.50));
         font-size:var(--font-xs, 11px);
         font-weight:var(--weight-bold, 700);
         letter-spacing:var(--letter-wider, .08em);
         text-transform:uppercase;
+        color:var(--text-dim, rgba(245,245,245,.50));
       }
 
       .clientes-stat-value{
-        color:var(--text-strong, #ffffff);
-        font-size:var(--font-5xl, 40px);
+        font-size:clamp(28px, 3vw, var(--font-5xl, 40px));
         line-height:.92;
         letter-spacing:var(--letter-tight, -.03em);
         font-weight:var(--weight-black, 800);
+        color:var(--text-strong, #ffffff);
       }
 
       .clientes-stat-text{
-        color:var(--text-muted, rgba(245,245,245,.70));
-        font-size:var(--font-md, 13px);
+        font-size:var(--font-base, 14px);
         line-height:var(--line-normal, 1.42);
+        color:var(--text-muted, rgba(245,245,245,.70));
+      }
+
+      .clientes-history{
+        overflow:hidden;
+        border-radius:var(--data-table-radius, var(--card-radius-lg, 22px));
+        border:1px solid var(--data-table-border, var(--card-border, var(--border-default, rgba(255,255,255,.082))));
+        background:
+          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
+          var(--data-table-bg, var(--card-bg, var(--surface-elevated, rgba(39,39,42,.88))));
+        box-shadow:var(--data-table-shadow, var(--shadow-card, var(--card-shadow, 0 16px 36px rgba(0,0,0,.24))));
+        min-inline-size:0;
+        max-inline-size:100%;
       }
 
       .clientes-history-head{
@@ -1797,7 +2280,7 @@ function renderStyles() {
         gap:var(--space-md, 14px);
         align-items:start;
         padding:var(--space-md, 14px) var(--space-lg, 18px) var(--space-sm, 12px);
-        border-block-end:1px solid var(--data-table-row-border, var(--table-border, rgba(255,255,255,.052)));
+        border-bottom:1px solid var(--data-table-row-border, var(--table-border, rgba(255,255,255,.052)));
       }
 
       .clientes-history-copy{
@@ -1808,107 +2291,433 @@ function renderStyles() {
 
       .clientes-history-title{
         margin:0;
-        color:var(--section-title-color, var(--text-strong, #ffffff));
         font-size:var(--section-title-size, var(--font-xl, 16px));
         line-height:var(--line-snug, 1.22);
         font-weight:var(--section-title-weight, var(--weight-bold, 700));
+        color:var(--section-title-color, var(--text-strong, #ffffff));
       }
 
       .clientes-history-subtitle{
         margin:0;
-        color:var(--section-subtitle-color, var(--text-dim, rgba(245,245,245,.50)));
         font-size:var(--section-subtitle-size, var(--font-sm, 12px));
         line-height:var(--line-normal, 1.42);
+        color:var(--section-subtitle-color, var(--text-dim, rgba(245,245,245,.50)));
       }
 
       .clientes-pagination{
         display:flex;
-        justify-content:flex-end;
+        align-items:center;
         gap:var(--space-xs, 8px);
         flex-wrap:wrap;
+        justify-content:flex-end;
+      }
+
+      .clientes-pagination-status{
+        min-block-size:calc(34px * var(--ui-scale, 1));
+        padding-inline:10px;
+        border-radius:var(--radius-pill, 999px);
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        font-size:var(--font-xs, 11px);
+        font-weight:var(--weight-bold, 700);
+        color:var(--text-dim, rgba(245,245,245,.50));
+        background:var(--badge-bg, rgba(255,255,255,.048));
+        border:1px solid var(--badge-border, rgba(255,255,255,.07));
       }
 
       .clientes-pagination-btn{
+        appearance:none;
         min-block-size:calc(38px * var(--ui-scale, 1));
         padding-inline:var(--space-sm, 14px);
         border-radius:var(--radius-md, 13px);
-        border-color:var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
+        border:1px solid var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
         background:var(--btn-secondary-bg, rgba(255,255,255,.045));
         color:var(--btn-secondary-text, var(--text, #f5f5f5));
         font-size:var(--font-sm, 12px);
         font-weight:var(--weight-bold, 700);
+        cursor:pointer;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        transition:
+          transform var(--duration-fast, .16s) var(--ease-standard, ease),
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          border-color var(--duration-fast, .16s) var(--ease-standard, ease),
+          opacity var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
       .clientes-pagination-btn:hover{
+        transform:translateY(var(--ui-hover-lift, -1px));
         background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
         border-color:var(--border-strong, rgba(255,255,255,.12));
+      }
+
+      .clientes-pagination-btn[disabled],
+      .clientes-pagination-btn[aria-disabled="true"]{
+        opacity:.48;
+        cursor:not-allowed;
+        pointer-events:none;
+        transform:none;
+      }
+
+      .clientes-filters{
+        grid-column:1 / -1;
+        display:grid;
+        grid-template-columns:minmax(0, 1fr) minmax(250px, 420px);
+        gap:var(--space-sm, 12px);
+        align-items:center;
+        padding-block-start:var(--space-xs, 4px);
+      }
+
+      .clientes-filter-pills{
+        min-inline-size:0;
+        display:flex;
+        align-items:center;
+        gap:var(--space-2xs, 6px);
+        overflow-x:auto;
+        scrollbar-width:none;
+        padding-block:2px;
+      }
+
+      .clientes-filter-pills::-webkit-scrollbar{
+        display:none;
+      }
+
+      .clientes-filter-pill{
+        appearance:none;
+        min-block-size:calc(34px * var(--ui-scale, 1));
+        padding-inline:11px 8px;
+        border-radius:999px;
+        border:1px solid var(--badge-border, rgba(255,255,255,.07));
+        background:var(--badge-bg, rgba(255,255,255,.048));
+        color:var(--badge-text, var(--text-muted, rgba(245,245,245,.70)));
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        gap:7px;
+        font:inherit;
+        font-size:var(--font-xs, 11px);
+        font-weight:var(--weight-bold, 700);
+        line-height:1;
+        white-space:nowrap;
+        cursor:pointer;
+        transition:
+          transform var(--duration-fast, .16s) var(--ease-standard, ease),
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          border-color var(--duration-fast, .16s) var(--ease-standard, ease),
+          color var(--duration-fast, .16s) var(--ease-standard, ease),
+          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .clientes-filter-pill strong{
+        min-inline-size:22px;
+        min-block-size:20px;
+        padding-inline:6px;
+        border-radius:999px;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        color:inherit;
+        background:color-mix(in srgb, currentColor 10%, transparent);
+        font-size:10px;
+        font-weight:900;
+      }
+
+      .clientes-filter-pill:hover{
+        transform:translateY(-1px);
+        border-color:var(--border-strong, rgba(255,255,255,.12));
+        background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
+        color:var(--text-strong, #ffffff);
+      }
+
+      .clientes-filter-pill.is-active{
+        border-color:color-mix(in srgb, var(--accent, #6f59d9) 42%, var(--border-strong, rgba(255,255,255,.12)));
+        background:color-mix(in srgb, var(--accent, #6f59d9) 14%, var(--badge-bg, rgba(255,255,255,.048)));
+        color:var(--accent-active, var(--text-strong, #ffffff));
+        box-shadow:0 8px 20px color-mix(in srgb, var(--accent, #6f59d9), transparent 88%);
+      }
+
+      .clientes-search{
+        position:relative;
+        min-inline-size:0;
+        inline-size:100%;
+        display:flex;
+        align-items:center;
+      }
+
+      .clientes-search-icon{
+        position:absolute;
+        inset-inline-start:12px;
+        inset-block:0;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        color:var(--text-dim, rgba(245,245,245,.50));
+        pointer-events:none;
+      }
+
+      .clientes-search-icon svg{
+        inline-size:14px;
+        block-size:14px;
+      }
+
+      .clientes-search-input{
+        appearance:none;
+        inline-size:100%;
+        min-inline-size:0;
+        min-block-size:calc(36px * var(--ui-scale, 1));
+        border-radius:999px;
+        border:1px solid var(--input-border, var(--border-default, rgba(255,255,255,.09)));
+        background:var(--input-bg, rgba(255,255,255,.045));
+        color:var(--input-text, var(--text, #f5f5f5));
+        padding:0 38px 0 36px;
+        font:inherit;
+        font-size:var(--font-xs, 11px);
+        font-weight:var(--weight-semibold, 600);
+        line-height:1;
+        outline:none;
+        box-shadow:var(--input-shadow, none);
+        transition:
+          border-color var(--duration-fast, .16s) var(--ease-standard, ease),
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          color var(--duration-fast, .16s) var(--ease-standard, ease),
+          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .clientes-search-input::placeholder{
+        color:var(--input-placeholder, var(--text-faint, rgba(245,245,245,.34)));
+      }
+
+      .clientes-search-input:hover{
+        border-color:var(--border-strong, rgba(255,255,255,.12));
+        background:var(--input-bg-hover, var(--btn-secondary-bg-hover, rgba(255,255,255,.062)));
+      }
+
+      .clientes-search-input:focus{
+        border-color:color-mix(in srgb, var(--accent, #6f59d9) 42%, var(--border-strong, rgba(255,255,255,.12)));
+        background:var(--input-bg-focus, var(--input-bg, rgba(255,255,255,.045)));
+      }
+
+      .clientes-search-clear{
+        appearance:none;
+        position:absolute;
+        inset-inline-end:6px;
+        inset-block:50% auto;
+        transform:translateY(-50%);
+        inline-size:26px;
+        block-size:26px;
+        border-radius:999px;
+        border:1px solid transparent;
+        background:transparent;
+        color:var(--text-dim, rgba(245,245,245,.50));
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        cursor:pointer;
+        padding:0;
+        transition:
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          color var(--duration-fast, .16s) var(--ease-standard, ease),
+          border-color var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .clientes-search-clear:hover{
+        color:var(--text-strong, #ffffff);
+        background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
+        border-color:var(--border-default, rgba(255,255,255,.09));
+      }
+
+      .clientes-search-clear svg{
+        inline-size:13px;
+        block-size:13px;
       }
 
       .clientes-table-wrap{
         position:relative;
         min-block-size:120px;
+        min-inline-size:0;
+        max-inline-size:100%;
       }
 
-      .clientes-table-wrap.is-refreshing .clientes-table-shell,
-      .clientes-table-wrap.is-refreshing .clientes-mobile-list{
+      .clientes-table-wrap.is-refreshing .clientes-table-shell{
         opacity:.56;
         filter:blur(.7px);
-        transition:
-          opacity var(--duration-fast, .18s) var(--ease-standard, ease),
-          filter var(--duration-fast, .18s) var(--ease-standard, ease);
       }
 
       .clientes-table-shell{
         inline-size:100%;
+        max-inline-size:100%;
         overflow-x:auto;
         overflow-y:hidden;
-        transition:
-          opacity var(--duration-fast, .18s) var(--ease-standard, ease),
-          filter var(--duration-fast, .18s) var(--ease-standard, ease);
+        scrollbar-width:thin;
+        scrollbar-color:var(--scrollbar-thumb, rgba(255,255,255,.12)) transparent;
+      }
+
+      .clientes-table-shell::-webkit-scrollbar{
+        block-size:var(--scrollbar-size, 10px);
+      }
+
+      .clientes-table-shell::-webkit-scrollbar-track{
+        background:transparent;
+      }
+
+      .clientes-table-shell::-webkit-scrollbar-thumb{
+        border:2px solid transparent;
+        border-radius:999px;
+        background:var(--scrollbar-thumb, rgba(255,255,255,.12));
+        background-clip:padding-box;
       }
 
       .clientes-table{
+        display:table !important;
         inline-size:100%;
-        min-inline-size:1240px;
+        min-inline-size:0;
+        max-inline-size:100%;
+        table-layout:fixed;
         border-collapse:separate;
         border-spacing:0;
-        table-layout:fixed;
         background:var(--table-bg, transparent);
+        margin:0;
+      }
+
+      .clientes-table colgroup{
+        display:table-column-group !important;
+      }
+
+      .clientes-table col{
+        display:table-column !important;
+      }
+
+      .clientes-table thead{
+        display:table-header-group !important;
+      }
+
+      .clientes-table tbody{
+        display:table-row-group !important;
+      }
+
+      .clientes-table tr{
+        display:table-row !important;
+      }
+
+      .clientes-table th,
+      .clientes-table td{
+        display:table-cell !important;
       }
 
       .clientes-table thead th{
-        padding:var(--table-cell-padding-y, 12px) var(--table-cell-padding-x, 18px);
-        border-block-end:1px solid var(--table-head-border, var(--border-default, rgba(255,255,255,.082)));
-        background:var(--data-table-head-bg, var(--table-head-bg, rgba(255,255,255,.020)));
-        color:var(--data-table-head-text, var(--text-dim, rgba(245,245,245,.50)));
-        text-align:start;
+        position:sticky;
+        top:0;
+        z-index:2;
+        block-size:44px;
+        padding:var(--table-cell-padding-y, 12px) var(--table-cell-padding-x, 12px);
+        text-align:center;
+        vertical-align:middle;
         font-size:var(--data-table-head-font-size, var(--font-xs, 11px));
         font-weight:var(--data-table-head-font-weight, var(--weight-bold, 700));
         letter-spacing:var(--data-table-head-letter, .075em);
         text-transform:uppercase;
+        color:var(--data-table-head-text, var(--text-dim, rgba(245,245,245,.50)));
+        background:var(--data-table-head-bg, var(--table-head-bg, rgba(255,255,255,.020)));
+        border-bottom:1px solid var(--table-head-border, var(--border-default, rgba(255,255,255,.082)));
         white-space:nowrap;
       }
 
+      .clientes-table thead th:first-child{
+        text-align:left;
+        padding-inline-start:24px;
+      }
+
+      .clientes-table thead th:last-child,
+      .clientes-table tbody td:last-child{
+        padding-inline-end:18px;
+      }
+
+      .clientes-table tbody tr{
+        block-size:var(--cli-table-row-height);
+      }
+
       .clientes-table tbody td{
-        padding:calc(14px * var(--ui-scale, 1)) var(--table-cell-padding-x, 18px);
-        border-block-end:1px solid var(--data-table-row-border, var(--table-border, rgba(255,255,255,.052)));
-        color:var(--data-table-cell-text, var(--text-soft, rgba(245,245,245,.88)));
+        padding:calc(12px * var(--ui-scale, 1)) var(--table-cell-padding-x, 12px);
         vertical-align:middle;
+        border-bottom:1px solid var(--data-table-row-border, var(--table-border, rgba(255,255,255,.052)));
+        background:transparent;
       }
 
       .clientes-table tbody tr:last-child td{
-        border-block-end:none;
+        border-bottom:none;
       }
 
-      .clientes-row{
-        background:transparent;
-        transition:
-          background var(--duration-fast, .16s) var(--ease-standard, ease),
-          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
+      .clientes-table tbody tr:nth-child(even) td{
+        background:color-mix(in srgb, var(--surface-elevated, rgba(39,39,42,.88)) 86%, transparent);
       }
 
       .clientes-row:hover{
         background:var(--data-table-row-hover, var(--table-row-hover, rgba(255,255,255,.024)));
+      }
+
+      .clientes-row--active{
+        --cli-row-accent:var(--success, #22c55e);
+      }
+
+      .clientes-row--pending{
+        --cli-row-accent:var(--warning, #f59e0b);
+      }
+
+      .clientes-row--blocked{
+        --cli-row-accent:var(--error, #ef4444);
+      }
+
+      .clientes-row--inactive{
+        --cli-row-accent:var(--text-dim, rgba(245,245,245,.50));
+      }
+
+      .clientes-cell{
+        min-inline-size:0;
+      }
+
+      .clientes-cell--main{
+        position:relative;
+        text-align:left;
+        padding-inline-start:18px !important;
+      }
+
+      .clientes-cell--main::before{
+        content:"";
+        position:absolute;
+        inset-block:10px;
+        inset-inline-start:0;
+        inline-size:3px;
+        border-radius:0 999px 999px 0;
+        background:var(--cli-row-accent);
+        opacity:.68;
+        transform:scaleY(.72);
+        transition:
+          opacity var(--duration-fast, .16s) var(--ease-standard, ease),
+          transform var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .clientes-row:hover .clientes-cell--main::before{
+        opacity:1;
+        transform:scaleY(1);
+      }
+
+      .clientes-cell--status,
+      .clientes-cell--tier,
+      .clientes-cell--date,
+      .clientes-cell--email,
+      .clientes-cell--location,
+      .clientes-cell--manager,
+      .clientes-cell--activity,
+      .clientes-cell--actions{
+        text-align:center;
+      }
+
+      .clientes-cell--status > *,
+      .clientes-cell--tier > *,
+      .clientes-cell--actions > *{
+        margin-inline:auto;
       }
 
       .clientes-main{
@@ -1917,19 +2726,20 @@ function renderStyles() {
         gap:var(--space-sm, 12px);
         align-items:center;
         min-inline-size:0;
+        padding-inline-start:6px;
       }
 
       .clientes-avatar{
         position:relative;
         inline-size:var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
         block-size:var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
-        flex:0 0 var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
-        overflow:hidden;
         border-radius:var(--radius-pill, 999px);
-        background:var(--clientes-avatar-bg, var(--avatar-bg, linear-gradient(180deg, #52525b 0%, #3f3f46 100%)));
+        overflow:hidden;
+        flex:0 0 var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
+        background:var(--clientes-avatar-bg, linear-gradient(135deg, #55555d 0%, #303036 100%));
         box-shadow:
-          0 10px 22px var(--clientes-avatar-shadow, rgba(0,0,0,.20)),
-          0 0 0 3px color-mix(in srgb, var(--clientes-avatar-ring, var(--accent-ring, rgba(113,113,122,.30))) 58%, transparent),
+          0 10px 22px color-mix(in srgb, var(--clientes-avatar-b, #000000) 22%, transparent),
+          0 0 0 3px color-mix(in srgb, var(--clientes-avatar-a, #71717a) 24%, transparent),
           var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
         transform:translateZ(0);
       }
@@ -1962,9 +2772,9 @@ function renderStyles() {
         display:none;
         align-items:center;
         justify-content:center;
-        color:var(--avatar-text, #ffffff);
         font-size:var(--font-2xl, 19px);
         font-weight:var(--weight-black, 800);
+        color:var(--avatar-text, #ffffff);
         letter-spacing:-.035em;
         text-shadow:
           0 1px 2px rgba(0,0,0,.22),
@@ -1986,21 +2796,52 @@ function renderStyles() {
         gap:var(--space-3xs, 3px);
       }
 
-      .clientes-user-id{
-        color:var(--text-dim, rgba(245,245,245,.50));
+      .clientes-client-line{
+        display:flex;
+        align-items:center;
+        gap:7px;
+        min-inline-size:0;
+      }
+
+      .clientes-client-id{
+        min-inline-size:0;
         font-size:var(--font-sm, 12px);
         line-height:var(--line-snug, 1.22);
         font-weight:var(--weight-bold, 700);
         letter-spacing:.055em;
+        color:var(--text-dim, rgba(245,245,245,.50));
+        text-transform:uppercase;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .clientes-role-pill{
+        flex:0 0 auto;
+        max-inline-size:130px;
+        min-block-size:20px;
+        padding-inline:7px;
+        border-radius:999px;
+        display:inline-flex;
+        align-items:center;
+        font-size:10px;
+        font-weight:800;
+        letter-spacing:.045em;
+        color:var(--text-dim, rgba(245,245,245,.50));
+        background:var(--badge-bg, rgba(255,255,255,.048));
+        border:1px solid var(--badge-border, rgba(255,255,255,.07));
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
         text-transform:uppercase;
       }
 
-      .clientes-user-subject{
-        color:var(--text-strong, #ffffff);
+      .clientes-client-subject{
         font-size:var(--font-lg, 15px);
         line-height:1.14;
         font-weight:var(--weight-black, 800);
         letter-spacing:var(--letter-tight, -.03em);
+        color:var(--text-strong, #ffffff);
         overflow:hidden;
         text-overflow:ellipsis;
         display:-webkit-box;
@@ -2008,10 +2849,10 @@ function renderStyles() {
         -webkit-box-orient:vertical;
       }
 
-      .clientes-user-description{
-        color:var(--text-dim, rgba(245,245,245,.50));
+      .clientes-client-description{
         font-size:var(--font-md, 13px);
         line-height:1.3;
+        color:var(--text-dim, rgba(245,245,245,.50));
         overflow:hidden;
         text-overflow:ellipsis;
         white-space:nowrap;
@@ -2024,6 +2865,7 @@ function renderStyles() {
         display:inline-flex;
         align-items:center;
         justify-content:center;
+        gap:7px;
         font-size:var(--font-xs, 11px);
         font-weight:var(--weight-bold, 700);
         letter-spacing:.045em;
@@ -2033,21 +2875,29 @@ function renderStyles() {
         box-shadow:var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
       }
 
+      .clientes-chip-dot{
+        inline-size:6px;
+        block-size:6px;
+        border-radius:999px;
+        background:currentColor;
+        box-shadow:0 0 0 3px color-mix(in srgb, currentColor 16%, transparent);
+      }
+
       .clientes-chip--active{
         color:var(--success, #22c55e);
-        background:color-mix(in srgb, var(--success-bg, rgba(34,197,94,.10)) 78%, var(--surface-active, transparent));
+        background:var(--success-bg, rgba(34,197,94,.10));
         border-color:var(--border-success, rgba(34,197,94,.30));
       }
 
       .clientes-chip--pending{
         color:var(--warning, #f59e0b);
-        background:color-mix(in srgb, var(--warning-bg, rgba(245,158,11,.10)) 78%, var(--surface-active, transparent));
+        background:var(--warning-bg, rgba(245,158,11,.10));
         border-color:var(--border-warning, rgba(245,158,11,.30));
       }
 
       .clientes-chip--blocked{
         color:var(--error, #ef4444);
-        background:color-mix(in srgb, var(--error-bg, rgba(239,68,68,.10)) 78%, var(--surface-active, transparent));
+        background:var(--error-bg, rgba(239,68,68,.10));
         border-color:var(--border-error, rgba(239,68,68,.30));
       }
 
@@ -2092,64 +2942,92 @@ function renderStyles() {
       .clientes-location-inline,
       .clientes-manager-inline,
       .clientes-activity-inline{
-        display:inline-block;
+        display:inline-flex;
+        justify-content:center;
+        inline-size:100%;
         max-inline-size:100%;
         overflow:hidden;
         text-overflow:ellipsis;
         white-space:nowrap;
         color:var(--data-table-cell-text, var(--text-soft, rgba(245,245,245,.88)));
-        font-size:var(--font-md, 13px);
+        font-size:var(--font-sm, 12px);
         line-height:1.2;
         font-weight:var(--weight-semibold, 600);
         font-variant-numeric:tabular-nums;
       }
 
-      .clientes-cell--email{
-        max-inline-size:220px;
+      .clientes-email-inline,
+      .clientes-manager-inline{
+        justify-content:flex-start;
+        text-align:left;
       }
 
-      .clientes-cell--location{
-        max-inline-size:150px;
-      }
-
+      .clientes-cell--email,
       .clientes-cell--manager{
-        max-inline-size:170px;
+        text-align:left;
       }
 
       .clientes-cell--actions{
-        inline-size:1%;
+        width:1%;
         white-space:nowrap;
       }
 
       .clientes-detail-btn{
-        inline-size:calc(104px * var(--ui-scale, 1));
-        min-inline-size:calc(104px * var(--ui-scale, 1));
-        max-inline-size:calc(104px * var(--ui-scale, 1));
+        appearance:none;
+        inline-size:calc(96px * var(--ui-scale, 1));
+        min-inline-size:calc(96px * var(--ui-scale, 1));
+        max-inline-size:calc(96px * var(--ui-scale, 1));
         min-block-size:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
         block-size:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
-        padding-inline:var(--space-sm, 12px);
-        border-radius:var(--radius-md, 12px);
-        border-color:var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
+        padding-inline:var(--space-xs, 8px);
+        border-radius:var(--radius-md, 10px);
+        border:1px solid var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
         background:var(--btn-secondary-bg, rgba(255,255,255,.045));
         color:var(--btn-secondary-text, var(--text, #f5f5f5));
-        font-size:var(--font-md, 13px);
+        font-size:var(--font-xs, 11px);
         font-weight:var(--weight-bold, 700);
+        line-height:1;
+        cursor:pointer;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        gap:6px;
+        white-space:nowrap;
         box-shadow:none;
+        transition:
+          border-color var(--duration-fast, .16s) var(--ease-standard, ease),
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          transform var(--duration-fast, .16s) var(--ease-standard, ease),
+          opacity var(--duration-fast, .16s) var(--ease-standard, ease),
+          color var(--duration-fast, .16s) var(--ease-standard, ease),
+          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease),
+          filter var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .clientes-action-icon{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        flex:0 0 auto;
+      }
+
+      .clientes-action-icon svg{
+        inline-size:14px;
+        block-size:14px;
       }
 
       .clientes-detail-btn:hover{
         border-color:var(--border-strong, rgba(255,255,255,.12));
         background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
+        color:var(--text-strong, #ffffff);
+        transform:translateY(var(--ui-hover-lift, -1px));
+      }
+
+      .clientes-detail-btn:active{
+        transform:translateY(0) scale(var(--ui-active-scale, .985));
       }
 
       .clientes-detail-btn.is-loading{
-        inline-size:calc(104px * var(--ui-scale, 1));
-        min-inline-size:calc(104px * var(--ui-scale, 1));
-        max-inline-size:calc(104px * var(--ui-scale, 1));
-        block-size:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
-        min-block-size:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
-        padding-inline:var(--space-sm, 12px);
-        border-radius:var(--radius-md, 12px);
         justify-content:center;
       }
 
@@ -2177,22 +3055,11 @@ function renderStyles() {
       .clientes-inline-spinner{
         inline-size:14px;
         block-size:14px;
-        flex:0 0 auto;
         border-radius:var(--radius-pill, 999px);
         border:2px solid var(--loader-ring, rgba(255,255,255,.12));
-        border-block-start-color:currentColor;
+        border-top-color:currentColor;
         animation:clientesSpin .78s linear infinite;
-      }
-
-      .clientes-btn:not(.clientes-btn--primary):not(.clientes-btn--create) .clientes-inline-spinner,
-      .clientes-detail-btn .clientes-inline-spinner{
-        border-color:var(--loader-ring, rgba(255,255,255,.12));
-        border-block-start-color:currentColor;
-      }
-
-      .clientes-detail-btn.is-loading .clientes-inline-spinner{
-        inline-size:15px;
-        block-size:15px;
+        flex:0 0 auto;
       }
 
       .clientes-refresh-overlay{
@@ -2202,7 +3069,7 @@ function renderStyles() {
         display:grid;
         place-items:center;
         pointer-events:none;
-        background:var(--backdrop-bg, rgba(10,10,12,.28));
+        background:color-mix(in srgb, var(--backdrop-bg, rgba(10,10,12,.28)) 72%, transparent);
         backdrop-filter:var(--blur-sm, blur(8px));
         -webkit-backdrop-filter:var(--blur-sm, blur(8px));
       }
@@ -2230,7 +3097,7 @@ function renderStyles() {
 
       .clientes-table-loading-row{
         display:grid;
-        grid-template-columns:var(--avatar-size-lg, 44px) minmax(220px, 1.45fr) 112px 112px 140px 180px 130px 130px 112px;
+        grid-template-columns:var(--avatar-size-lg, 44px) minmax(220px, 1fr) 96px 92px 108px 160px 88px 132px 132px 96px;
         gap:var(--space-sm, 12px);
         align-items:center;
       }
@@ -2283,13 +3150,13 @@ function renderStyles() {
       }
 
       .clientes-skeleton--pill{
-        inline-size:86px;
+        inline-size:92px;
         block-size:30px;
         border-radius:var(--radius-pill, 999px);
       }
 
       .clientes-skeleton--date{
-        inline-size:124px;
+        inline-size:112px;
         block-size:12px;
       }
 
@@ -2299,7 +3166,7 @@ function renderStyles() {
       }
 
       .clientes-skeleton--btn{
-        inline-size:calc(104px * var(--ui-scale, 1));
+        inline-size:calc(96px * var(--ui-scale, 1));
         block-size:var(--btn-height-sm, 34px);
         border-radius:var(--radius-md, 12px);
       }
@@ -2307,99 +3174,68 @@ function renderStyles() {
       .clientes-empty{
         display:grid;
         justify-items:center;
-        gap:var(--space-xs, 10px);
+        gap:var(--space-xs, 8px);
         padding:var(--space-4xl, 44px) var(--space-lg, 20px) var(--space-5xl, 48px);
         text-align:center;
       }
 
+      .clientes-empty-icon{
+        inline-size:54px;
+        block-size:54px;
+        display:grid;
+        place-items:center;
+        border-radius:var(--radius-xl, 18px);
+        border:1px solid var(--state-empty-border, rgba(148,163,184,.20));
+        background:var(--state-empty-bg, rgba(148,163,184,.10));
+        color:var(--state-empty-icon, var(--info, #94a3b8));
+        box-shadow:var(--shadow-soft, 0 8px 18px rgba(0,0,0,.13));
+      }
+
+      .clientes-empty-icon svg{
+        inline-size:24px;
+        block-size:24px;
+      }
+
       .clientes-empty-title{
         margin:0;
-        color:var(--text-strong, #ffffff);
         font-size:var(--font-2xl, 18px);
         font-weight:var(--weight-bold, 700);
+        color:var(--text-strong, #ffffff);
       }
 
       .clientes-empty-text{
         margin:0;
-        max-inline-size:520px;
-        color:var(--text-muted, rgba(245,245,245,.70));
+        max-inline-size:58ch;
         font-size:var(--font-md, 13px);
         line-height:var(--line-relaxed, 1.62);
+        color:var(--text-muted, rgba(245,245,245,.70));
       }
 
-      .clientes-mobile-list{
-        display:none;
-        gap:var(--space-sm, 12px);
-        padding:var(--space-sm, 12px);
-      }
-
-      .clientes-mobile-card{
+      .clientes-error{
         display:grid;
-        gap:var(--space-sm, 12px);
-        padding:var(--space-md, 16px);
-        border-radius:var(--card-radius, 18px);
-        border:1px solid var(--card-border, var(--border-default, rgba(255,255,255,.082)));
+        justify-items:start;
+        gap:var(--space-xs, 10px);
+        padding:var(--space-xl, 24px) var(--space-xl, 22px);
+        border-radius:var(--card-radius-lg, 22px);
+        border:1px solid var(--border-error, rgba(239,68,68,.30));
         background:
           var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
-          var(--card-bg, var(--surface-elevated, rgba(39,39,42,.88)));
-        box-shadow:var(--shadow-xs, 0 5px 16px rgba(0,0,0,.12));
+          color-mix(in srgb, var(--error-bg, rgba(239,68,68,.10)) 46%, var(--card-bg, transparent));
+        box-shadow:var(--shadow-sm, 0 6px 14px rgba(0,0,0,.16));
       }
 
-      .clientes-mobile-top{
-        display:flex;
-        align-items:flex-start;
-        justify-content:space-between;
-        gap:var(--space-sm, 12px);
-      }
-
-      .clientes-mobile-main{
-        display:flex;
-        gap:var(--space-sm, 12px);
-        min-inline-size:0;
-        flex:1 1 auto;
-      }
-
-      .clientes-mobile-tier{
-        display:flex;
-        gap:var(--space-xs, 8px);
-        flex-wrap:wrap;
-      }
-
-      .clientes-mobile-meta{
-        display:grid;
-        grid-template-columns:repeat(2, minmax(0, 1fr));
-        gap:var(--space-xs, 10px);
-      }
-
-      .clientes-mobile-meta-card{
-        display:grid;
-        gap:var(--space-3xs, 4px);
-        padding:var(--space-sm, 12px);
-        border-radius:var(--radius-md, 14px);
-        border:1px solid var(--card-border, var(--border-default, rgba(255,255,255,.07)));
-        background:var(--surface-glass, rgba(255,255,255,.035));
-      }
-
-      .clientes-mobile-meta-label{
-        color:var(--text-dim, rgba(245,245,245,.50));
-        font-size:var(--font-xs, 11px);
+      .clientes-error-title{
+        margin:0;
+        font-size:var(--font-2xl, 18px);
         font-weight:var(--weight-bold, 700);
-        letter-spacing:.05em;
-        text-transform:uppercase;
-      }
-
-      .clientes-mobile-meta-value{
         color:var(--text-strong, #ffffff);
-        font-size:var(--font-md, 13px);
-        line-height:1.35;
-        font-weight:var(--weight-bold, 700);
-        word-break:break-word;
       }
 
-      .clientes-mobile-actions{
-        display:flex;
-        gap:var(--space-xs, 8px);
-        flex-wrap:wrap;
+      .clientes-error-text{
+        margin:0;
+        font-size:var(--font-md, 13px);
+        line-height:var(--line-relaxed, 1.62);
+        color:var(--text-muted, rgba(245,245,245,.70));
       }
 
       @keyframes clientesSpin{
@@ -2410,30 +3246,47 @@ function renderStyles() {
         to{ transform:translateX(100%); }
       }
 
-      [data-theme="dark"] .clientes-avatar,
-      :root:not([data-theme="light"]) .clientes-avatar{
-        background:var(--clientes-avatar-bg-dark, var(--clientes-avatar-bg, var(--avatar-bg)));
-      }
-
       [data-theme="light"] .clientes-hero,
       [data-theme="light"] .clientes-history{
         background:
+          radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent, #6f59d9) 9%, transparent), transparent 38%),
+          radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info, #3b82a6) 7%, transparent), transparent 34%),
           var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.82), rgba(255,255,255,0) 34%)),
           var(--view-hero-bg, var(--panel-bg, var(--card-bg, var(--surface-elevated, #ffffff))));
-        box-shadow:
-          0 12px 28px rgba(15,23,42,.035),
-          0 0 0 1px rgba(255,255,255,.72) inset;
       }
 
-      [data-theme="light"] .clientes-stat-card,
-      [data-theme="light"] .clientes-mobile-card{
+      [data-theme="light"] .clientes-stat-card{
         background:
           var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.82), rgba(255,255,255,0) 34%)),
           var(--card-bg, var(--surface-elevated, #ffffff));
       }
 
-      [data-theme="light"] .clientes-mobile-meta-card{
-        background:var(--surface-glass, rgba(255,255,255,.56));
+      [data-theme="light"] .clientes-btn--create{
+        --cli-create-bg:var(--btn-primary-bg, linear-gradient(135deg, var(--accent, #6f59d9) 0%, var(--accent-hover, #5f45d8) 100%));
+        --cli-create-bg-hover:var(--cli-create-bg);
+        --cli-create-border:color-mix(in srgb, var(--accent, #6f59d9) 44%, transparent);
+      }
+
+      [data-theme="light"] .clientes-filter-pill.is-active{
+        color:var(--accent-active, #533cb6);
+        background:var(--accent-soft, rgba(111,89,217,.125));
+        border-color:var(--accent-border-strong, rgba(111,89,217,.36));
+      }
+
+      [data-theme="light"] .clientes-search-input{
+        color:var(--input-text, var(--text, #111827));
+        background:var(--input-bg, rgba(255,255,255,.76));
+        border-color:var(--input-border, var(--border-default, rgba(15,23,42,.10)));
+      }
+
+      [data-theme="light"] .clientes-search-icon,
+      [data-theme="light"] .clientes-search-clear{
+        color:var(--text-dim, rgba(15,23,42,.50));
+      }
+
+      [data-theme="light"] .clientes-search-clear:hover{
+        color:var(--text-strong, #111827);
+        background:var(--btn-secondary-bg-hover, rgba(15,23,42,.052));
       }
 
       [data-theme="light"] .clientes-chip--active{
@@ -2449,8 +3302,8 @@ function renderStyles() {
       }
 
       [data-theme="light"] .clientes-chip--blocked{
-        color:var(--error-hover, #b42318);
-        background:var(--error-soft, rgba(239,68,68,.12));
+        color:var(--error-hover, #b52a39);
+        background:var(--error-soft, rgba(216,60,77,.12));
         border-color:var(--border-error, rgba(220,38,38,.245));
       }
 
@@ -2490,17 +3343,21 @@ function renderStyles() {
         border-color:rgba(148,163,184,.20);
       }
 
-      @media (max-width:1240px){
-        .clientes-page-title{
-          font-size:clamp(var(--font-3xl, 24px), 2.4vw, var(--font-4xl, 32px));
-        }
-
+      @media (max-width: 1240px){
         .clientes-stats{
           grid-template-columns:repeat(2, minmax(0, 1fr));
         }
+
+        .clientes-filters{
+          grid-template-columns:1fr;
+        }
+
+        .clientes-search{
+          max-inline-size:560px;
+        }
       }
 
-      @media (max-width:1180px){
+      @media (max-width: 1180px){
         .clientes-hero{
           padding:var(--space-lg, 20px);
         }
@@ -2512,34 +3369,26 @@ function renderStyles() {
         .clientes-hero-actions{
           justify-content:flex-start;
         }
+      }
 
-        .clientes-page-title{
-          white-space:normal;
+      @media (max-width: 1200px){
+        .clientes-table{
+          min-inline-size:1180px;
         }
       }
 
-      @media (max-width:980px){
-        .clientes-desktop-table{
-          display:none;
-        }
-
-        .clientes-mobile-list{
-          display:grid;
-        }
-      }
-
-      @media (max-width:760px){
-        .clientes-view-root{
+      @media (max-width: 760px){
+        :where(.clientes-view-root, [data-clientes-scope]){
           gap:var(--space-md, 16px);
         }
 
         .clientes-hero{
           padding:var(--space-lg, 18px) var(--space-md, 16px);
-          border-radius:var(--radius-xl, 20px);
+          border-radius:var(--radius-xl, 18px);
         }
 
         .clientes-history{
-          border-radius:var(--radius-xl, 20px);
+          border-radius:var(--radius-xl, 18px);
         }
 
         .clientes-history-head{
@@ -2558,7 +3407,6 @@ function renderStyles() {
         .clientes-page-title{
           font-size:clamp(var(--font-3xl, 24px), 8vw, var(--font-4xl, 34px));
           line-height:1;
-          white-space:normal;
         }
 
         .clientes-page-subtitle{
@@ -2573,33 +3421,37 @@ function renderStyles() {
           flex:1 1 auto;
         }
 
-        .clientes-mobile-meta{
-          grid-template-columns:1fr;
-        }
-
-        .clientes-mobile-top{
-          display:grid;
-          gap:var(--space-sm, 12px);
+        .clientes-search{
+          max-inline-size:none;
         }
       }
 
-      @media (prefers-reduced-motion:reduce){
-        .clientes-btn,
-        .clientes-detail-btn,
-        .clientes-pagination-btn,
-        .clientes-row,
-        .clientes-table-wrap.is-refreshing .clientes-table-shell,
-        .clientes-table-wrap.is-refreshing .clientes-mobile-list,
-        .clientes-inline-spinner,
-        .clientes-skeleton::after{
-          transition:none !important;
-          animation:none !important;
+      @media (max-width: 520px){
+        .clientes-meta-pill{
+          inline-size:100%;
+          justify-content:center;
         }
 
-        .clientes-btn:hover,
-        .clientes-detail-btn:hover,
-        .clientes-pagination-btn:hover{
-          transform:none !important;
+        .clientes-hero-actions{
+          display:grid;
+          grid-template-columns:1fr;
+        }
+
+        .clientes-btn{
+          inline-size:100%;
+        }
+
+        .clientes-filter-pills{
+          margin-inline:-2px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce){
+        :where(.clientes-view-root, [data-clientes-scope]) *,
+        :where(.clientes-view-root, [data-clientes-scope]) *::before,
+        :where(.clientes-view-root, [data-clientes-scope]) *::after{
+          animation:none !important;
+          transition:none !important;
         }
       }
     </style>
@@ -2628,25 +3480,28 @@ export function renderHeader(input = {}) {
   );
 
   const title = safeText(
-    first(data.title, "Centro de control de clientes"),
+    first(data.title, state.title, "Centro de control de clientes"),
     "Centro de control de clientes"
   );
 
   const subtitle = safeText(
     first(
       data.subtitle,
+      state.subtitle,
       "Consulta clientes registrados, revisa su estado, nivel de cuenta, responsable y última actualización desde una vista clara, compacta y alineada con el sistema."
     ),
     ""
   );
 
-  const creating = Boolean(state.creating);
-  const refreshing = Boolean(state.refreshing);
-  const loading = Boolean(state.loading);
-  const exporting = Boolean(state.exporting);
+  const creating = Boolean(first(state.creating, state.creatingCliente, data.creating));
+  const refreshing = Boolean(first(state.refreshing, data.refreshing));
+  const loading = Boolean(first(state.loading, data.loading));
+  const exporting = Boolean(first(state.exporting, data.exporting));
+
+  const includeStyles = data.includeStyles !== false;
 
   return `
-    ${renderStyles()}
+    ${renderMaybeStyles(includeStyles)}
 
     <section class="clientes-hero">
       <div class="clientes-hero-top">
@@ -2658,21 +3513,6 @@ export function renderHeader(input = {}) {
         <div class="clientes-hero-actions">
           <button
             type="button"
-            id="clientes-export-btn"
-            class="clientes-btn${exporting ? " is-loading" : ""}"
-            data-clientes-action="export"
-            data-action="export-csv"
-            ${loading || refreshing || exporting || !items.length ? 'disabled aria-disabled="true"' : ""}
-          >
-            ${
-              exporting
-                ? renderSpinner("Exportando...")
-                : '<span class="clientes-btn-text">Exportar CSV</span>'
-            }
-          </button>
-
-          <button
-            type="button"
             id="clientes-refresh-btn"
             class="clientes-btn${refreshing ? " is-loading" : ""}"
             data-clientes-action="refresh"
@@ -2682,7 +3522,22 @@ export function renderHeader(input = {}) {
             ${
               refreshing
                 ? renderSpinner("Actualizando...")
-                : '<span class="clientes-btn-text">Actualizar</span>'
+                : `${icon("refresh")}<span class="clientes-btn-text">Actualizar</span>`
+            }
+          </button>
+
+          <button
+            type="button"
+            id="clientes-export-btn"
+            class="clientes-btn${exporting ? " is-loading" : ""}"
+            data-clientes-action="export"
+            data-action="export-csv"
+            ${loading || refreshing || exporting || !items.length ? 'disabled aria-disabled="true"' : ""}
+          >
+            ${
+              exporting
+                ? renderSpinner("Exportando...")
+                : `${icon("export")}<span class="clientes-btn-text">Exportar CSV</span>`
             }
           </button>
 
@@ -2697,25 +3552,35 @@ export function renderHeader(input = {}) {
             ${
               creating
                 ? renderSpinner("Abriendo...")
-                : '<span class="clientes-btn-text">Nuevo cliente</span>'
+                : `${icon("plus")}<span class="clientes-btn-text">Nuevo cliente</span>`
             }
           </button>
         </div>
       </div>
 
       <div class="clientes-hero-meta">
-        <span class="clientes-meta-pill">Panel admin</span>
+        <span class="clientes-meta-pill">
+          ${icon("shield")}
+          Panel admin
+        </span>
 
         <span class="clientes-meta-pill">
+          ${icon("briefcase")}
           ${escapeHtml(`${remoteCount} clientes registrados`)}
         </span>
 
         <span class="clientes-meta-pill">
+          ${icon("refresh")}
           ${
             updatedAt
               ? escapeHtml(`Última actualización · ${formatRelativeDate(updatedAt)}`)
               : "Sin sincronización reciente"
           }
+        </span>
+
+        <span class="clientes-meta-pill">
+          ${icon("star")}
+          ${escapeHtml(`${stats.vipCount} prioritarios`)}
         </span>
       </div>
 
@@ -2749,88 +3614,66 @@ export function renderHeader(input = {}) {
 }
 
 /* =========================================================
-   TABLE
+   LOADING / ERROR
 ========================================================= */
 
-function renderPagination(pagination = {}, state = {}) {
-  const runtime = safeObject(state);
-  const loading = Boolean(runtime.loading);
-  const refreshing = Boolean(runtime.refreshing);
+export function renderLoadingState(options = {}) {
+  const rows =
+    typeof options === "number"
+      ? options
+      : safeNumber(options?.rows, DEFAULT_PAGE_SIZE);
+
+  const includeStyles =
+    typeof options === "object" && options !== null
+      ? Boolean(options.includeStyles)
+      : false;
 
   return `
-    <div class="clientes-pagination" aria-label="Paginación de clientes">
-      <button
-        type="button"
-        class="clientes-pagination-btn"
-        data-clientes-action="prev-page"
-        data-action="prev-page"
-        data-page="${escapeHtml(String(Math.max(1, pagination.currentPage - 1)))}"
-        ${!pagination.hasPrev || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
-      >
-        Anterior
-      </button>
+    ${renderMaybeStyles(includeStyles)}
 
-      <button
-        type="button"
-        class="clientes-pagination-btn"
-        data-clientes-action="next-page"
-        data-action="next-page"
-        data-page="${escapeHtml(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
-        ${!pagination.hasNext || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
-      >
-        Siguiente
-      </button>
-    </div>
+    <section class="clientes-history">
+      ${renderTableLoading(Math.max(3, safeNumber(rows, DEFAULT_PAGE_SIZE)))}
+    </section>
   `;
 }
 
-function renderDesktopTable(items = [], state = {}) {
+export function renderErrorState(
+  message = "No se pudieron cargar los clientes.",
+  { includeStyles = false } = {}
+) {
   return `
-    <div class="clientes-desktop-table">
-      <div class="clientes-table-shell">
-        <table class="clientes-table" role="table" aria-label="Listado de clientes">
-          <colgroup>
-            <col style="width:29%;">
-            <col style="width:10%;">
-            <col style="width:10%;">
-            <col style="width:11%;">
-            <col style="width:16%;">
-            <col style="width:10%;">
-            <col style="width:11%;">
-            <col style="width:12%;">
-            <col style="width:7%;">
-          </colgroup>
+    ${renderMaybeStyles(includeStyles)}
 
-          <thead>
-            <tr>
-              <th>Cliente</th>
-              <th>Estado</th>
-              <th>Nivel</th>
-              <th>Alta</th>
-              <th>Email</th>
-              <th>Ciudad</th>
-              <th>Responsable</th>
-              <th>Actualización</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            ${safeArray(items).map((item) => renderClienteRow(item, state)).join("")}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <section class="clientes-error">
+      <h3 class="clientes-error-title">No se pudo renderizar la vista de clientes</h3>
+      <p class="clientes-error-text">${escapeHtml(safeText(message, "Error desconocido al cargar la vista."))}</p>
+    </section>
   `;
 }
 
-function renderMobileCards(items = [], state = {}) {
+export function renderAccessDeniedState({ includeStyles = false } = {}) {
   return `
-    <div class="clientes-mobile-list">
-      ${safeArray(items).map((item) => renderMobileClienteCard(item, state)).join("")}
-    </div>
+    ${renderMaybeStyles(includeStyles)}
+
+    <section class="clientes-history">
+      ${renderEmptyContent({ restricted: true })}
+    </section>
   `;
 }
+
+export function renderEmptyClientesState(options = {}) {
+  return `
+    ${renderMaybeStyles(Boolean(options?.includeStyles))}
+
+    <section class="clientes-history">
+      ${renderEmptyContent(options)}
+    </section>
+  `;
+}
+
+/* =========================================================
+   TABLE
+========================================================= */
 
 export function renderTable(input = {}) {
   const data = safeObject(input);
@@ -2840,39 +3683,52 @@ export function renderTable(input = {}) {
   const pagination = getPagination(items, {
     ...data,
     remoteCount: resolveRemoteCount(data, items),
-    pageSize: PAGE_SIZE,
+    pageSize: DEFAULT_PAGE_SIZE,
   });
 
-  const loading = Boolean(state.loading);
-  const refreshing = Boolean(state.refreshing);
+  const loading = Boolean(first(state.loading, data.loading));
+  const refreshing = Boolean(first(state.refreshing, data.refreshing));
   const hasError = Boolean(safeText(first(state.error, data.error), ""));
   const errorMessage = safeText(first(state.error, data.error), "");
 
   const showInitialLoading = loading && !pagination.pageItems.length;
   const showRefreshOverlay = refreshing && pagination.pageItems.length;
 
+  const includeStyles = Boolean(data.includeStyles);
+
+  const activeFilterLabel = getFilterLabel(pagination.activeFilter);
+  const searchQuery = pagination.searchQuery;
+
+  const activeCriteria = [
+    pagination.activeFilter !== "all" ? activeFilterLabel : "",
+    searchQuery ? `búsqueda “${searchQuery}”` : "",
+  ].filter(Boolean);
+
+  const subtitle = showInitialLoading
+    ? "Cargando clientes..."
+    : pagination.filtering
+      ? `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · ${activeCriteria.join(" · ")}`
+      : `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`;
+
   return `
+    ${renderMaybeStyles(includeStyles)}
+
     <section class="clientes-history">
       <div class="clientes-history-head">
         <div class="clientes-history-copy">
           <h2 class="clientes-history-title">Historial de clientes</h2>
           <p class="clientes-history-subtitle">
-            ${
-              showInitialLoading
-                ? "Cargando clientes..."
-                : escapeHtml(
-                    `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`
-                  )
-            }
+            ${escapeHtml(subtitle)}
           </p>
         </div>
 
         ${renderPagination(pagination, state)}
+        ${renderFilters(data, pagination)}
       </div>
 
       ${
         showInitialLoading
-          ? renderTableLoading(Math.max(3, pagination.pageSize || PAGE_SIZE))
+          ? renderTableLoading(Math.max(3, pagination.pageSize || DEFAULT_PAGE_SIZE))
           : `
             <div class="clientes-table-wrap${refreshing ? " is-refreshing" : ""}">
               ${showRefreshOverlay ? renderRefreshOverlay() : ""}
@@ -2880,10 +3736,46 @@ export function renderTable(input = {}) {
               ${
                 pagination.pageItems.length
                   ? `
-                    ${renderDesktopTable(pagination.pageItems, state)}
-                    ${renderMobileCards(pagination.pageItems, state)}
+                    <div class="clientes-table-shell">
+                      <table class="clientes-table" role="table" aria-label="Listado de clientes">
+                        <colgroup>
+                          <col>
+                          <col style="width:118px;">
+                          <col style="width:112px;">
+                          <col style="width:112px;">
+                          <col style="width:210px;">
+                          <col style="width:112px;">
+                          <col style="width:150px;">
+                          <col style="width:146px;">
+                          <col style="width:116px;">
+                        </colgroup>
+
+                        <thead>
+                          <tr>
+                            <th scope="col">Cliente</th>
+                            <th scope="col">Estado</th>
+                            <th scope="col">Nivel</th>
+                            <th scope="col">Alta</th>
+                            <th scope="col">Email</th>
+                            <th scope="col">Ciudad</th>
+                            <th scope="col">Responsable</th>
+                            <th scope="col">Actualización</th>
+                            <th scope="col">Acciones</th>
+                          </tr>
+                        </thead>
+
+                        <tbody>
+                          ${pagination.pageItems.map((item) => renderRow(item, state)).join("")}
+                        </tbody>
+                      </table>
+                    </div>
                   `
-                  : renderEmptyContent({ hasError, message: errorMessage })
+                  : renderEmptyContent({
+                      hasError,
+                      filtering: pagination.filtering,
+                      searchQuery,
+                      message: errorMessage,
+                    })
               }
             </div>
           `
@@ -2896,68 +3788,22 @@ export function renderTable(input = {}) {
    BACKWARD COMPAT EXPORTS
 ========================================================= */
 
-export function renderLoadingState(rows = PAGE_SIZE) {
-  return `
-    ${renderStyles()}
-
-    <section class="clientes-history">
-      <div class="clientes-history-head">
-        <div class="clientes-history-copy">
-          <h2 class="clientes-history-title">Historial de clientes</h2>
-          <p class="clientes-history-subtitle">Cargando clientes...</p>
-        </div>
-      </div>
-
-      ${renderTableLoading(Math.max(3, safeNumber(rows, PAGE_SIZE)))}
-    </section>
-  `;
-}
-
-export function renderErrorState(message = "No se pudo cargar la colección.") {
-  return `
-    ${renderStyles()}
-
-    <section class="clientes-history">
-      ${renderEmptyContent({
-        hasError: true,
-        message: safeText(message, "Error desconocido al cargar la vista."),
-      })}
-    </section>
-  `;
-}
-
 export function renderEmptyState(options = {}) {
   return `
-    ${renderStyles()}
+    ${renderMaybeStyles(Boolean(options?.includeStyles))}
 
     <section class="clientes-history">
       ${renderEmptyContent({
         hasError: Boolean(options?.hasError),
+        filtering: Boolean(options?.filtering),
+        searchQuery: safeText(options?.searchQuery, ""),
         message: safeText(options?.message, ""),
       })}
     </section>
   `;
 }
 
-export function renderEmptyClientesState() {
-  return renderEmptyState({
-    hasError: false,
-  });
-}
-
-export function renderAccessDeniedState() {
-  return `
-    ${renderStyles()}
-
-    <section class="clientes-history">
-      ${renderAccessDeniedContent()}
-    </section>
-  `;
-}
-
-export function renderCards(input = {}) {
-  return renderTable(input);
-}
+export const renderCards = renderTable;
 
 /* =========================================================
    FULL TEMPLATE
@@ -2968,18 +3814,43 @@ export function renderClientesTableTemplate(input = {}) {
 
   if (shouldRenderRestricted(data)) {
     return `
-      <section class="clientes-view-root">
-        ${renderAccessDeniedState()}
+      <section class="clientes-view-root" data-clientes-scope="true">
+        ${renderStyles()}
+        ${renderAccessDeniedState({ includeStyles: false })}
       </section>
     `;
   }
 
+  const items = getResolvedItems(data);
+  const state = safeObject(data.state);
+
+  if (state.error && !items.length) {
+    return `
+      <section class="clientes-view-root" data-clientes-scope="true">
+        ${renderStyles()}
+        ${renderErrorState(state.error, { includeStyles: false })}
+      </section>
+    `;
+  }
+
+  const payload = {
+    ...data,
+    items,
+    state,
+    includeStyles: false,
+  };
+
   return `
-    <section class="clientes-view-root">
-      ${renderHeader(data)}
-      ${renderTable(data)}
+    <section class="clientes-view-root" data-clientes-scope="true">
+      ${renderStyles()}
+      ${renderHeader(payload)}
+      ${renderTable(payload)}
     </section>
   `;
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default renderClientesTableTemplate;

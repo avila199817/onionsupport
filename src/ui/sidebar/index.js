@@ -2,7 +2,15 @@
    Onion SPA - Sidebar UI
    Archivo: src/ui/sidebar/index.js
 
-   FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · DROPDOWN SAFE · BIND DEDUPE · CLICK SAFE · 10/10
+   FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · DROPDOWN SAFE · BIND DEDUPE · CLICK SAFE · 12/10
+   PATCH · MENU INTERACTION LOCKED
+   PATCH · ROUTER/AUTH REPAIR SAFE
+   PATCH · DROPDOWN DIRECT GUARD
+   PATCH · ACTIVE INDICATOR APPLE MODE
+   PATCH · USER/ROLE SYNC HARDENED
+   PATCH · NO POINTER-EVENTS NONE
+   PATCH · NO CLEANUP STORM
+   PATCH · NO DOUBLE TOGGLE
 
    RESPONSABILIDADES:
    - montar sidebar
@@ -32,6 +40,9 @@
    - restoreMenuHoverState() nunca restaura pointer-events:none
    - ensureMenuInteractive() repara un menú muerto si quedó legacy
    - mount/repair/bind/navegación aseguran interacción del menú
+   - init() repetido no fuerza rebind destructivo
+   - repair() solo rebindea si no hay eventos vivos o si se fuerza
+   - safeEmit() evita doble bus/window
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -116,13 +127,17 @@ export const SidebarUI = (() => {
 
   let visualSyncTimer = null;
   let hoverFlushTimer = null;
+  let repairTimer = null;
 
   const BIND_DEDUP_WINDOW_MS = 250;
+  const REPAIR_DEDUP_WINDOW_MS = 180;
 
   const VISUAL_SYNC_DEFAULT_DELAY = 24;
   const VISUAL_SYNC_AFTER_NAV_DELAY = 80;
   const VISUAL_SYNC_AFTER_TRANSITION_DELAY = 430;
   const HOVER_FLUSH_MS = 96;
+
+  let lastRepairAt = 0;
 
   const runtimeState = {
     dropdownOpen: false,
@@ -172,6 +187,15 @@ export const SidebarUI = (() => {
       if (value === undefined || value === null) continue;
       if (typeof value === "string" && value.trim() === "") continue;
       if (Array.isArray(value) && value.length === 0) continue;
+
+      if (
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        Object.keys(value).length === 0
+      ) {
+        continue;
+      }
 
       return value;
     }
@@ -236,6 +260,7 @@ export const SidebarUI = (() => {
   }
 
   /*
+    Importante:
     No emitimos por AppCore.events Y window a la vez.
     events.js suele escuchar el bus; doble dispatch = doble commit visual.
   */
@@ -1513,6 +1538,15 @@ export const SidebarUI = (() => {
     return true;
   }
 
+  function clearRepairTimer() {
+    if (repairTimer) {
+      safeClearTimeout(repairTimer);
+      repairTimer = null;
+    }
+
+    return true;
+  }
+
   function flushMenuHoverState(reason = "hover-flush", durationMs = HOVER_FLUSH_MS) {
     if (!isBrowser()) {
       return false;
@@ -1600,6 +1634,16 @@ export const SidebarUI = (() => {
         !hoverFlushTimer
       ) {
         restoreMenuHoverState();
+        repaired = true;
+      }
+
+      if (sidebarMenu.hasAttribute("inert")) {
+        sidebarMenu.removeAttribute("inert");
+        repaired = true;
+      }
+
+      if (sidebarMenu.getAttribute("aria-disabled") === "true") {
+        sidebarMenu.removeAttribute("aria-disabled");
         repaired = true;
       }
     } catch {}
@@ -2007,6 +2051,7 @@ export const SidebarUI = (() => {
       bindGeneration,
       bindingEvents,
       lastBindAt,
+      lastRepairAt,
 
       isAdmin:
         isAdmin(),
@@ -2200,6 +2245,7 @@ export const SidebarUI = (() => {
     clearHoverFlushTimer({
       restore: true,
     });
+    clearRepairTimer();
 
     /*
       Importante:
@@ -3208,6 +3254,7 @@ export const SidebarUI = (() => {
         source: "SidebarUI",
         reason: lastBindReason,
         generation: bindGeneration,
+        activeCleanupScope,
         snapshot: getSidebarSnapshot(),
       });
 
@@ -3260,6 +3307,30 @@ export const SidebarUI = (() => {
 
     const cleanReason =
       safeText(reason, "repair");
+
+    const ts = nowTs();
+
+    if (
+      opts.force !== true &&
+      ts - lastRepairAt < REPAIR_DEDUP_WINDOW_MS
+    ) {
+      scheduleSidebarVisualSync(`repair:deduped:${cleanReason}`, {
+        delayMs: 48,
+        force: true,
+        flushHover: true,
+      });
+
+      safeEmit("sidebar:repair:deduped", {
+        source: "SidebarUI",
+        reason: cleanReason,
+        sinceLastRepairMs: ts - lastRepairAt,
+        snapshot: getSidebarSnapshot(),
+      });
+
+      return api;
+    }
+
+    lastRepairAt = ts;
 
     const mounted = mountAndRefresh();
 
@@ -3327,6 +3398,24 @@ export const SidebarUI = (() => {
     return api;
   }
 
+  function scheduleRepair(reason = "scheduled-repair", options = {}) {
+    const opts = safeObject(options);
+    const delayMs = clampNumber(opts.delayMs, 0, 1000);
+
+    clearRepairTimer();
+
+    repairTimer = safeSetTimeout(() => {
+      repairTimer = null;
+
+      repair(reason, {
+        ...opts,
+        force: opts.force === true,
+      });
+    }, delayMs);
+
+    return api;
+  }
+
   /* ======================================================
      MODULE REGISTRATION
   ====================================================== */
@@ -3382,6 +3471,20 @@ export const SidebarUI = (() => {
     return false;
   }
 
+  function exposeGlobalBridge() {
+    if (!isBrowser()) {
+      return false;
+    }
+
+    try {
+      window.SidebarUI = api;
+      window.OnionSidebarUI = api;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /* ======================================================
      INIT
   ====================================================== */
@@ -3393,6 +3496,9 @@ export const SidebarUI = (() => {
         init() repetido NO debe hacer repair + rebind.
         Solo refresca visual/usuario/roles.
       */
+      registerModule();
+      exposeGlobalBridge();
+
       return refresh("init-already-initialized");
     }
 
@@ -3423,9 +3529,10 @@ export const SidebarUI = (() => {
 
     initialized = true;
 
-    bindEvents("init");
-
     registerModule();
+    exposeGlobalBridge();
+
+    bindEvents("init");
 
     syncRouteAndIndicator("init", {
       delayMs: 32,
@@ -3464,6 +3571,7 @@ export const SidebarUI = (() => {
     lastBindReason = "";
     bindingEvents = false;
     lastBindAt = 0;
+    lastRepairAt = 0;
     bindGeneration += 1;
 
     restoreMenuHoverState();
@@ -3659,6 +3767,19 @@ export const SidebarUI = (() => {
     return snapshot;
   }
 
+  function debug() {
+    refreshSidebarDomRefs();
+    ensureMenuInteractive("debug");
+
+    const snapshot = getSidebarSnapshot();
+
+    try {
+      console.log("[SidebarUI]", snapshot);
+    } catch {}
+
+    return snapshot;
+  }
+
   /* ======================================================
      API
   ====================================================== */
@@ -3669,6 +3790,7 @@ export const SidebarUI = (() => {
     cleanup,
 
     repair,
+    scheduleRepair,
     refresh,
     sync: refresh,
     render: refresh,
@@ -3720,6 +3842,7 @@ export const SidebarUI = (() => {
 
     isAdmin,
 
+    debug,
     debugDropdown,
     debugIndicator,
 

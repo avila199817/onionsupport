@@ -1,44 +1,50 @@
 /* =========================================================
-   Onion SPA - Facturas Template
-   Archivo: src/views/facturas/facturas.template.js
+   Onion SPA - Incidencias Table Template
+   Archivo: src/views/incidencias/incidencias.table.template.js
 
-   FINAL PRO SAAS PANEL · FACTURAS TEMPLATE · 10/10 EXTREME
-   PATCH · TABLE SYSTEM LOCK · TOKEN ALIGNED · NO GLOBAL CSS BLEED
-   PATCH · SINGLE STYLE OWNER · DATA-SCOPE READY · ACTION SAFE
-   PATCH · TABLE ROW PSEUDO FIX · REAL TABLE LAYOUT PRESERVED
-   PATCH · LIGHT/DARK TOKEN PERFECT FIT · ACTIONS COMPACT GRID
-   PATCH · FILTER PILLS + SEARCH · FACTURAS CONTROL CENTER 10/10
+   FINAL PRODUCTION TEMPLATE · LIST VIEW · EXTREME SAAS MODE · 12/10
+   PATCH · TABLE ALIGNMENT PREMIUM
+   PATCH · FILTER PILLS READY · SEARCH RESTORED
+   PATCH · FILTERS SIMPLIFIED: TODAS / ABIERTAS / CERRADAS
+   PATCH · CREATE BUTTON ACCENT LOCKED
+   PATCH · FACTURAS VISUAL SYSTEM INSPIRED
+   PATCH · TABLE SYSTEM LOCK · NO GLOBAL CSS BLEED
+   PATCH · TOKEN ALIGNED · LIGHT/DARK PREMIUM
+   PATCH · ROW ACCENT SAFE WITHOUT TR PSEUDO
+   PATCH · DESKTOP FIT MODE · ACTION COLUMN NO-CUT
 
    RESPONSABILIDADES:
-   - render premium de vista de facturas
-   - alineación total con variables.css / layout.css / ui.css
-   - hero operativo tipo centro de control
-   - tabla compacta premium SaaS
-   - filtros visuales:
-     todas / pendientes / pagadas / vencidas / enviadas / con PDF / con incidencia
-   - búsqueda por factura, cliente, email, importe, forma de pago e incidencia
-   - paginación real de 5 items por defecto sobre resultados filtrados
-   - orden descendente por factura más reciente
-   - acciones compatibles con data-facturas-action y data-action
-   - botón admin "Crear factura"
-   - envío de factura conectado a send-factura
-   - estado "Enviar / Reenviar" según delivery/meta
-   - bloqueo seguro de acciones sin PDF/email
-   - loader icon-only estable sin mover layout
-   - refresh overlay sin desplazar columnas
-   - avatares fallback con color estable por cliente
-   - chips de pago con contraste real dark/light
-   - incidencia relacionada lista para modal
-   - estados loading/error/empty blindados
-   - HTML endurecido con escape/fallbacks
+   - render del hero/header de incidencias
+   - render de tabla productiva con paginación real
+   - render de filtros visuales compatibles con state/props/bindings
+   - render de búsqueda compatible con state/props/bindings
+   - compatibilidad con IncidenciasView.js
+   - estado loading visual en "Ver detalle" sin mover tabla
+   - estado loading visual en "Crear nueva incidencia"
+   - estado loading visual en refresh / retry / export
+   - título compacto y responsive
+   - fechas siempre en una sola línea
+   - botón "Ver detalle" mantiene tamaño fijo durante loading
+   - loader centrado dentro del botón sin cambiar layout
+   - loading de tabla suave en carga / refresh
+   - acciones compatibles con data-incidencias-action y data-action
+   - pintar importe total de facturas asociadas al ticket
+   - avatares fallback con colores intensos pseudo-RNG estables
+   - dark/light mode 100% conectado a variables.css + ui.css
+   - chips de estado alineados con tokens globales y contraste real
+   - tabla blindada contra resets / layout / ui global
+   - diseño premium coherente con Facturas
 
-   FIX CLAVE:
-   - NUNCA usar ::before sobre <tr>.
-   - Algunos navegadores interpretan ::before en table-row como celda anónima.
-   - Eso desplaza columnas y genera el hueco gigante a la izquierda.
-   - La barra de estado ahora vive en .facturas-cell--main::before.
-   - Hover y backgrounds se aplican sobre <td>, no sobre <tr>.
-   - La tabla conserva display table real.
+   HARDENING PRO:
+   - no depende de imports externos
+   - tolera payload heterogéneo
+   - soporta state + props directas
+   - paginación defensiva
+   - responsive robusto
+   - columna prioridad eliminada de tabla, pero badge interno conservado
+   - importe blindado contra normalizadores intermedios
+   - loading inline icon-only centrado sin cambiar tamaño del botón
+   - CSS aplicable a .incidencias-view-root y [data-incidencias-scope]
 ========================================================= */
 
 /* =========================================================
@@ -47,30 +53,16 @@
 
 const DEFAULT_PAGE_SIZE = 5;
 const DEFAULT_CURRENCY = "EUR";
-
-const ADMIN_ROLES = new Set([
-  "admin",
-  "administrator",
-  "superadmin",
-  "super_admin",
-  "root",
-  "owner",
-]);
-
-const STYLE_ID = "onion-facturas-template-styles-v14";
+const STYLE_ID = "onion-incidencias-table-template-styles-v13";
 
 const FILTERS = Object.freeze([
   { key: "all", label: "Todas" },
-  { key: "pending", label: "Pendientes" },
-  { key: "paid", label: "Pagadas" },
-  { key: "overdue", label: "Vencidas" },
-  { key: "sent", label: "Enviadas" },
-  { key: "pdf", label: "Con PDF" },
-  { key: "linked", label: "Con incidencia" },
+  { key: "open", label: "Abiertas" },
+  { key: "closed", label: "Cerradas" },
 ]);
 
 /* =========================================================
-   BASE HELPERS
+   HELPERS
 ========================================================= */
 
 function safeText(value, fallback = "") {
@@ -133,6 +125,7 @@ function safeObject(value) {
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
+
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
 
@@ -169,28 +162,6 @@ function normalizeKey(value = "") {
     .replace(/[\s-]+/g, "_")
     .replace(/[^\w]+/g, "_")
     .replace(/^_+|_+$/g, "");
-}
-
-function normalizeRole(value = "") {
-  return safeText(value, "").toLowerCase();
-}
-
-function isValidEmail(value = "") {
-  const email = safeText(value, "").toLowerCase();
-
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-function bool(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") return value === 1;
-
-  const key = normalizeText(value);
-
-  if (["true", "1", "yes", "si", "sí", "on"].includes(key)) return true;
-  if (["false", "0", "no", "off"].includes(key)) return false;
-
-  return fallback;
 }
 
 function hashString(value = "") {
@@ -339,6 +310,8 @@ function getDateFormatter() {
 }
 
 function formatDateTime(value = null) {
+  if (!value) return "—";
+
   const ts = toTimestamp(value);
   if (!ts) return "—";
 
@@ -350,6 +323,8 @@ function formatDateTime(value = null) {
 }
 
 function formatDateShort(value = null) {
+  if (!value) return "—";
+
   const ts = toTimestamp(value);
   if (!ts) return "—";
 
@@ -361,6 +336,8 @@ function formatDateShort(value = null) {
 }
 
 function formatRelativeDate(value = null) {
+  if (!value) return "Sin fecha";
+
   const ts = toTimestamp(value);
   if (!ts) return "Sin fecha";
 
@@ -391,6 +368,21 @@ function formatRelativeDate(value = null) {
   return formatDateShort(value);
 }
 
+function formatLastUpdate(value = null) {
+  if (!value) return "Sin fecha";
+
+  const ts = toTimestamp(value);
+  if (!ts) return "Sin fecha";
+
+  const diffHours = Math.abs(Date.now() - ts) / 3600000;
+
+  if (diffHours <= 72) {
+    return formatRelativeDate(value);
+  }
+
+  return formatDateTime(value);
+}
+
 /* =========================================================
    ICONS
 ========================================================= */
@@ -402,751 +394,19 @@ function icon(name = "") {
     refresh: `<svg ${common}><path d="M21 12a9 9 0 0 1-15.5 6.3"/><path d="M3 12a9 9 0 0 1 15.5-6.3"/><path d="M21 4v6h-6"/><path d="M3 20v-6h6"/></svg>`,
     export: `<svg ${common}><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>`,
     plus: `<svg ${common}><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
-    detail: `<svg ${common}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>`,
-    eye: `<svg ${common}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
-    download: `<svg ${common}><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>`,
-    send: `<svg ${common}><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>`,
     ticket: `<svg ${common}><path d="M3 9a3 3 0 0 0 0 6v2a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2a3 3 0 0 0 0-6V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2Z"/><path d="M13 5v14"/></svg>`,
-    pdf: `<svg ${common}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 17v-5"/><path d="M8 12h2a1.5 1.5 0 0 1 0 3H8"/><path d="M13 17v-5h1.5a2.5 2.5 0 0 1 0 5H13"/><path d="M18 12h-2v5"/></svg>`,
-    lock: `<svg ${common}><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`,
-    mail: `<svg ${common}><path d="M4 4h16v16H4z"/><path d="m22 6-10 7L2 6"/></svg>`,
-    check: `<svg ${common}><path d="m20 6-11 11-5-5"/></svg>`,
-    search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
+    eye: `<svg ${common}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
+    paperclip: `<svg ${common}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
+    alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
     close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
-    filter: `<svg ${common}><path d="M22 3H2l8 9.46V19l4 2v-8.54Z"/></svg>`,
+    search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
+    clock: `<svg ${common}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`,
+    euro: `<svg ${common}><path d="M4 10h10"/><path d="M4 14h9"/><path d="M19 5a7.7 7.7 0 0 0-5.2-2C8.4 3 4 7 4 12s4.4 9 9.8 9a7.7 7.7 0 0 0 5.2-2"/></svg>`,
+    activity: `<svg ${common}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
+    users: `<svg ${common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
   };
 
   return icons[name] || "";
-}
-
-/* =========================================================
-   AUTH / ROLE
-========================================================= */
-
-function hasPermission(state = {}, permission = "") {
-  const runtime = safeObject(state);
-  const target = safeText(permission, "");
-
-  if (!target) return false;
-
-  const permissions = first(
-    runtime.permissions,
-    runtime.user?.permissions,
-    runtime.currentUser?.permissions,
-    runtime.session?.user?.permissions,
-    runtime.auth?.user?.permissions
-  );
-
-  if (Array.isArray(permissions)) {
-    return permissions.includes(target);
-  }
-
-  if (typeof permissions === "string") {
-    return permissions
-      .split(/[,\s]+/)
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .includes(target);
-  }
-
-  return false;
-}
-
-function isAdminState(state = {}) {
-  const runtime = safeObject(state);
-
-  if (
-    runtime.canCreateFactura === true ||
-    runtime.view?.canCreateFactura === true ||
-    hasPermission(runtime, "facturas:create")
-  ) {
-    return true;
-  }
-
-  const role = normalizeRole(
-    first(
-      runtime.role,
-      runtime.rol,
-      runtime.user?.role,
-      runtime.user?.rol,
-      runtime.currentUser?.role,
-      runtime.currentUser?.rol,
-      runtime.session?.user?.role,
-      runtime.session?.user?.rol,
-      runtime.auth?.role,
-      runtime.auth?.user?.role,
-      runtime.auth?.user?.rol
-    )
-  );
-
-  return ADMIN_ROLES.has(role);
-}
-
-/* =========================================================
-   DOMAIN HELPERS
-========================================================= */
-
-function pickTicketIdFromArray(value = []) {
-  const items = safeArray(value);
-
-  for (const item of items) {
-    if (typeof item === "string" && item.trim()) {
-      return item.trim();
-    }
-
-    if (!item || typeof item !== "object") continue;
-
-    const candidate = first(
-      item.ticketId,
-      item.incidenciaId,
-      item.id,
-      item.code,
-      item.numero,
-      item.relatedTicketId,
-      item.relatedIncidentId,
-      item.supportTicketId,
-      item.caseId
-    );
-
-    if (candidate) return safeText(candidate, "");
-  }
-
-  return "";
-}
-
-function getFacturaId(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return safeText(
-    first(
-      item.id,
-      item._id,
-      item.facturaId,
-      item.invoiceId,
-      item.numeroFacturaLegal,
-      item.numeroFacturaSistema,
-      item.numero,
-      raw.id,
-      raw._id,
-      raw.facturaId,
-      raw.invoiceId,
-      raw.numeroFacturaLegal,
-      raw.numeroFacturaSistema,
-      raw.numero
-    ),
-    "FAC-SIN-ID"
-  );
-}
-
-function getFacturaNumero(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return safeText(
-    first(
-      item.numeroFacturaLegal,
-      item.numero,
-      item.invoiceNumber,
-      item.code,
-      item.facturaId,
-      item.invoiceId,
-      item.numeroFacturaSistema,
-      item.id,
-      raw.numeroFacturaLegal,
-      raw.numero,
-      raw.invoiceNumber,
-      raw.code,
-      raw.facturaId,
-      raw.invoiceId,
-      raw.numeroFacturaSistema,
-      raw.id
-    ),
-    "Factura sin número"
-  );
-}
-
-function getFacturaSistema(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return safeText(
-    first(
-      item.numeroFacturaSistema,
-      item.systemInvoiceNumber,
-      raw.numeroFacturaSistema,
-      raw.systemInvoiceNumber,
-      ""
-    ),
-    ""
-  );
-}
-
-function getClientName(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return safeText(
-    first(
-      item.clienteNombre,
-      item.cliente?.nombreContacto,
-      item.cliente?.nombre,
-      item.cliente?.name,
-      item.cliente?.displayName,
-      item.clientName,
-      item.client?.name,
-      item.customer?.name,
-      item.name,
-      item.nombre,
-      item.clienteEmpresa,
-      item.cliente?.empresa,
-      item.cliente?.razonSocial,
-      item.company,
-      raw.clienteNombre,
-      raw.cliente?.nombreContacto,
-      raw.cliente?.nombre,
-      raw.cliente?.name,
-      raw.cliente?.displayName,
-      raw.clientName,
-      raw.client?.name,
-      raw.customer?.name,
-      raw.name,
-      raw.nombre,
-      raw.clienteEmpresa,
-      raw.cliente?.empresa,
-      raw.cliente?.razonSocial,
-      raw.company
-    ),
-    "Cliente"
-  );
-}
-
-function getClientEmail(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return safeText(
-    first(
-      item.clienteEmail,
-      item.cliente?.email,
-      item.cliente?.emailLower,
-      item.email,
-      item.emailCliente,
-      item.clientEmail,
-      item.client?.email,
-      item.customer?.email,
-      raw.clienteEmail,
-      raw.emailCliente,
-      raw.cliente?.email,
-      raw.cliente?.emailLower,
-      raw.email,
-      raw.clientEmail,
-      raw.client?.email,
-      raw.customer?.email
-    ),
-    ""
-  ).toLowerCase();
-}
-
-function getClientEmailLabel(item = {}) {
-  return getClientEmail(item) || "Sin email";
-}
-
-function getClientAvatar(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return safeText(
-    first(
-      item.clienteAvatar,
-      item.clientAvatar,
-      item.avatar,
-      item.avatarUrl,
-      item.cliente?.avatar,
-      item.cliente?.avatarUrl,
-      item.client?.avatar,
-      item.client?.avatarUrl,
-      raw.clienteAvatar,
-      raw.clientAvatar,
-      raw.avatar,
-      raw.avatarUrl,
-      raw.cliente?.avatar,
-      raw.cliente?.avatarUrl,
-      raw.client?.avatar,
-      raw.client?.avatarUrl
-    ),
-    ""
-  );
-}
-
-function getClientStableKey(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return normalizeKey(
-    first(
-      item.clienteId,
-      item.clientId,
-      item.customerId,
-      item.userId,
-      item.uid,
-      item.cliente?.id,
-      item.cliente?.userId,
-      item.client?.id,
-      item.client?.userId,
-      item.customer?.id,
-      item.customer?.userId,
-      item.clienteEmail,
-      item.emailCliente,
-      item.clientEmail,
-      item.email,
-      item.cliente?.email,
-      item.client?.email,
-      item.customer?.email,
-      raw.clienteId,
-      raw.clientId,
-      raw.customerId,
-      raw.userId,
-      raw.uid,
-      raw.cliente?.id,
-      raw.cliente?.userId,
-      raw.client?.id,
-      raw.client?.userId,
-      raw.customer?.id,
-      raw.customer?.userId,
-      raw.clienteEmail,
-      raw.emailCliente,
-      raw.clientEmail,
-      raw.email,
-      raw.cliente?.email,
-      raw.client?.email,
-      raw.customer?.email,
-      getClientName(item)
-    )
-  );
-}
-
-function getInitials(value = "") {
-  const text = normalizeWhitespace(value);
-
-  if (!text) return "ON";
-
-  const parts = text.split(" ").filter(Boolean);
-
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
-  }
-
-  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "ON";
-}
-
-function getEstadoPagoKey(value = "") {
-  const key = normalizeKey(value);
-
-  if (["paid", "pagada", "pagado", "cobrada", "cobrado", "abonada", "abonado"].includes(key)) {
-    return "paid";
-  }
-
-  if (["pending", "pendiente", "unpaid", "sin_pagar"].includes(key)) {
-    return "pending";
-  }
-
-  if (["partial", "parcial", "pago_parcial"].includes(key)) {
-    return "partial";
-  }
-
-  if (["overdue", "vencida", "vencido"].includes(key)) {
-    return "overdue";
-  }
-
-  if (["cancelled", "canceled", "cancelada", "cancelado", "anulada", "anulado"].includes(key)) {
-    return "cancelled";
-  }
-
-  if (["draft", "borrador"].includes(key)) {
-    return "draft";
-  }
-
-  return "pending";
-}
-
-function getEstadoPagoLabel(value = "") {
-  const key = getEstadoPagoKey(value);
-
-  if (key === "paid") return "Pagada";
-  if (key === "pending") return "Pendiente";
-  if (key === "partial") return "Pago parcial";
-  if (key === "overdue") return "Vencida";
-  if (key === "cancelled") return "Cancelada";
-  if (key === "draft") return "Borrador";
-
-  return safeText(value, "Pendiente");
-}
-
-function getEstadoPagoChipClass(value = "") {
-  return `facturas-chip--${getEstadoPagoKey(value) || "pending"}`;
-}
-
-function getPaymentRaw(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return first(
-    item.estadoPago,
-    item.paymentStatus,
-    item.payment?.status,
-    item.billing?.paymentStatus,
-    raw.estadoPago,
-    raw.paymentStatus,
-    raw.payment?.status,
-    raw.billing?.paymentStatus
-  );
-}
-
-function getIncidenciaId(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return safeText(
-    first(
-      item.ticketId,
-      item.incidenciaId,
-      item.incidencia?.id,
-      item.incidencia?.ticketId,
-      item.incidencia?.incidenciaId,
-      item.ticket?.id,
-      item.ticket?.ticketId,
-      item.ticket?.incidenciaId,
-      item.linkedTicket?.id,
-      item.linkedTicket?.ticketId,
-      item.linkedTicket?.incidenciaId,
-      item.relatedTicketId,
-      item.relatedIncidentId,
-      item.supportTicketId,
-      item.caseId,
-      item.meta?.ticketId,
-      item.meta?.incidenciaId,
-      pickTicketIdFromArray(item.ticketIds),
-      pickTicketIdFromArray(item.incidenciaIds),
-      pickTicketIdFromArray(item.relatedTicketIds),
-      pickTicketIdFromArray(item.relatedIncidentIds),
-      pickTicketIdFromArray(item.linkedTickets),
-      pickTicketIdFromArray(item.incidencias),
-      pickTicketIdFromArray(item.tickets),
-      pickTicketIdFromArray(item.relatedTickets),
-      pickTicketIdFromArray(item.facturasRelacionadas),
-      pickTicketIdFromArray(item.linkedInvoices?.tickets),
-      pickTicketIdFromArray(item.relations),
-      raw.ticketId,
-      raw.incidenciaId,
-      raw.incidencia?.id,
-      raw.incidencia?.ticketId,
-      raw.incidencia?.incidenciaId,
-      raw.ticket?.id,
-      raw.ticket?.ticketId,
-      raw.ticket?.incidenciaId,
-      raw.linkedTicket?.id,
-      raw.linkedTicket?.ticketId,
-      raw.linkedTicket?.incidenciaId,
-      raw.relatedTicketId,
-      raw.relatedIncidentId,
-      raw.supportTicketId,
-      raw.caseId,
-      raw.meta?.ticketId,
-      raw.meta?.incidenciaId,
-      pickTicketIdFromArray(raw.ticketIds),
-      pickTicketIdFromArray(raw.incidenciaIds),
-      pickTicketIdFromArray(raw.relatedTicketIds),
-      pickTicketIdFromArray(raw.relatedIncidentIds),
-      pickTicketIdFromArray(raw.linkedTickets),
-      pickTicketIdFromArray(raw.incidencias),
-      pickTicketIdFromArray(raw.tickets),
-      pickTicketIdFromArray(raw.relatedTickets),
-      pickTicketIdFromArray(raw.facturasRelacionadas),
-      pickTicketIdFromArray(raw.linkedInvoices?.tickets),
-      pickTicketIdFromArray(raw.relations)
-    ),
-    ""
-  );
-}
-
-function getIncidenciaSubject(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return safeText(
-    first(
-      item.incidencia?.subject,
-      item.incidencia?.asunto,
-      item.incidencia?.title,
-      item.ticket?.subject,
-      item.ticket?.asunto,
-      item.ticket?.title,
-      item.linkedTicket?.subject,
-      item.linkedTicket?.asunto,
-      item.linkedTicket?.title,
-      raw.incidencia?.subject,
-      raw.incidencia?.asunto,
-      raw.incidencia?.title,
-      raw.ticket?.subject,
-      raw.ticket?.asunto,
-      raw.ticket?.title,
-      raw.linkedTicket?.subject,
-      raw.linkedTicket?.asunto,
-      raw.linkedTicket?.title,
-      ""
-    ),
-    ""
-  );
-}
-
-function getTotalRaw(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return first(
-    item.total,
-    item.amount,
-    item.importe,
-    item.importeTotal,
-    item.totalFactura,
-    item.facturaTotal,
-    item.invoiceAmount,
-    raw.total,
-    raw.amount,
-    raw.importe,
-    raw.importeTotal,
-    raw.totalFactura,
-    raw.facturaTotal,
-    raw.invoiceAmount,
-    0
-  );
-}
-
-function getCurrency(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return safeText(
-    first(
-      item.moneda,
-      item.currency,
-      item.facturaCurrency,
-      raw.moneda,
-      raw.currency,
-      raw.facturaCurrency,
-      DEFAULT_CURRENCY
-    ),
-    DEFAULT_CURRENCY
-  );
-}
-
-function getTotalLabel(item = {}) {
-  return formatMoney(getTotalRaw(item), getCurrency(item));
-}
-
-function getTotalCaption(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  const taxIncluded = first(
-    item.taxIncluded,
-    item.impuestosIncluidos,
-    item.ivaIncluido,
-    raw.taxIncluded,
-    raw.impuestosIncluidos,
-    raw.ivaIncluido
-  );
-
-  if (taxIncluded === false) return "Impuestos no incl.";
-
-  return "Impuestos incl.";
-}
-
-function getFormaPago(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return safeText(
-    first(
-      item.formaPago,
-      item.metodoPago,
-      item.paymentMethod,
-      item.payment?.method,
-      raw.formaPago,
-      raw.metodoPago,
-      raw.paymentMethod,
-      raw.payment?.method
-    ),
-    "—"
-  );
-}
-
-function getCreatedAt(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return first(
-    item.fechaFactura,
-    item.fecha,
-    item.issueDate,
-    item.createdAt,
-    item.fechaCreacion,
-    raw.fechaFactura,
-    raw.fecha,
-    raw.issueDate,
-    raw.createdAt,
-    raw.fechaCreacion
-  );
-}
-
-function getUpdatedAt(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return first(
-    item.updatedAt,
-    item.fechaEnvio,
-    item.delivery?.lastSentAt,
-    item.sentAt,
-    item.mailSentAt,
-    item.fechaActualizacion,
-    item.lastUpdateAt,
-    raw.updatedAt,
-    raw.fechaEnvio,
-    raw.delivery?.lastSentAt,
-    raw.sentAt,
-    raw.mailSentAt,
-    raw.fechaActualizacion,
-    raw.lastUpdateAt
-  );
-}
-
-function getSentAt(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return first(
-    item.fechaEnvio,
-    item.sentAt,
-    item.mailSentAt,
-    item.delivery?.lastSentAt,
-    item.meta?.lastSentAt,
-    raw.fechaEnvio,
-    raw.sentAt,
-    raw.mailSentAt,
-    raw.delivery?.lastSentAt,
-    raw.meta?.lastSentAt
-  );
-}
-
-function getSortTimestamp(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return (
-    safeNumber(item?.meta?.updatedAtMs, 0) ||
-    safeNumber(item?.meta?.timestampMs, 0) ||
-    safeNumber(raw?.meta?.updatedAtMs, 0) ||
-    safeNumber(raw?.meta?.timestampMs, 0) ||
-    toTimestamp(getUpdatedAt(item)) ||
-    toTimestamp(getCreatedAt(item)) ||
-    toTimestamp(raw?._ts) ||
-    0
-  );
-}
-
-function compareFacturasNewestFirst(a = {}, b = {}) {
-  const diff = getSortTimestamp(b) - getSortTimestamp(a);
-
-  if (diff !== 0) return diff;
-
-  return safeText(getFacturaNumero(b), "").localeCompare(
-    safeText(getFacturaNumero(a), ""),
-    "es",
-    {
-      numeric: true,
-      sensitivity: "base",
-    }
-  );
-}
-
-function sortFacturasNewestFirst(items = []) {
-  return [...safeArray(items)].sort(compareFacturasNewestFirst);
-}
-
-function hasPdf(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  if (
-    bool(
-      first(
-        item.pdfAvailable,
-        item.hasPdf,
-        item.meta?.hasPdf,
-        raw.pdfAvailable,
-        raw.hasPdf,
-        raw.meta?.hasPdf
-      ),
-      false
-    )
-  ) {
-    return true;
-  }
-
-  if (
-    first(
-      item.blobPath,
-      item.blobName,
-      item.pdfPath,
-      item.pdfUrl,
-      item.downloadUrl,
-      item.viewUrl,
-      item.pdf,
-      raw.blobPath,
-      raw.blobName,
-      raw.pdfPath,
-      raw.pdfUrl,
-      raw.downloadUrl,
-      raw.viewUrl,
-      raw.pdf
-    )
-  ) {
-    return true;
-  }
-
-  const files = safeArray(
-    first(
-      item.attachments,
-      item.files,
-      item.adjuntos,
-      raw.attachments,
-      raw.files,
-      raw.adjuntos,
-      []
-    )
-  );
-
-  return files.some((file) => {
-    const value = safeObject(file);
-
-    const type = normalizeText(
-      first(value.contentType, value.mimeType, value.mimetype, value.type)
-    );
-
-    const name = normalizeText(
-      first(value.name, value.filename, value.fileName, value.url)
-    );
-
-    return type.includes("pdf") || name.endsWith(".pdf");
-  });
-}
-
-function isFacturaSent(item = {}) {
-  const raw = safeObject(item?.raw);
-
-  return Boolean(
-    first(
-      item.fechaEnvio,
-      item.sentAt,
-      item.mailSentAt,
-      item.delivery?.lastSentAt,
-      item.meta?.lastSentAt,
-      item.meta?.isSent,
-      raw.fechaEnvio,
-      raw.sentAt,
-      raw.mailSentAt,
-      raw.delivery?.lastSentAt,
-      raw.meta?.lastSentAt,
-      raw.meta?.isSent
-    )
-  );
-}
-
-function canSendFactura(item = {}) {
-  return hasPdf(item) && isValidEmail(getClientEmail(item));
 }
 
 /* =========================================================
@@ -1167,14 +427,604 @@ const AVATAR_PALETTE = Object.freeze([
 ]);
 
 function getAvatarStyle(item = {}) {
-  const seed = getClientStableKey(item);
+  const ticketId = getTicketId(item);
+  const clientName = getClientName(item);
+  const seed = `${ticketId}|${clientName}`;
   const [a, b] = AVATAR_PALETTE[hashString(seed) % AVATAR_PALETTE.length];
 
   return [
-    `--fac-avatar-a:${a}`,
-    `--fac-avatar-b:${b}`,
-    `--fac-avatar-bg:linear-gradient(135deg, ${a} 0%, ${b} 100%)`,
+    `--inc-avatar-a:${a}`,
+    `--inc-avatar-b:${b}`,
+    `--inc-avatar-bg:linear-gradient(135deg, ${a} 0%, ${b} 100%)`,
   ].join(";");
+}
+
+/* =========================================================
+   DATA PICKERS
+========================================================= */
+
+function getTicketId(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.ticketId,
+      item.incidenciaId,
+      item.code,
+      item.numero,
+      item.ticketCode,
+      item.id,
+      item._id,
+      raw.ticketId,
+      raw.incidenciaId,
+      raw.code,
+      raw.numero,
+      raw.ticketCode,
+      raw.id,
+      raw._id
+    ),
+    "INC-SIN-ID"
+  );
+}
+
+function getSubject(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.subject,
+      item.title,
+      item.asunto,
+      item.name,
+      item.preview,
+      raw.subject,
+      raw.title,
+      raw.asunto,
+      raw.name,
+      raw.preview
+    ),
+    "Incidencia sin asunto"
+  );
+}
+
+function getDescription(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.description,
+      item.descripcion,
+      item.message,
+      item.body,
+      item.preview,
+      item.text,
+      raw.description,
+      raw.descripcion,
+      raw.message,
+      raw.body,
+      raw.preview,
+      raw.text
+    ),
+    "Sin descripción."
+  );
+}
+
+function getClientName(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.clientName,
+      item.clienteNombre,
+      item.requesterName,
+      item.requesterSnapshot?.name,
+      item.requesterSnapshot?.displayName,
+      item.createdBy?.name,
+      item.createdBy?.displayName,
+      item.cliente?.nombreContacto,
+      item.cliente?.nombre,
+      item.cliente?.name,
+      item.cliente?.displayName,
+      item.client?.name,
+      item.customer?.name,
+      item.receptor?.name,
+      item.name,
+      raw.clientName,
+      raw.clienteNombre,
+      raw.requesterName,
+      raw.requesterSnapshot?.name,
+      raw.requesterSnapshot?.displayName,
+      raw.createdBy?.name,
+      raw.createdBy?.displayName,
+      raw.cliente?.nombreContacto,
+      raw.cliente?.nombre,
+      raw.cliente?.name,
+      raw.cliente?.displayName,
+      raw.client?.name,
+      raw.customer?.name,
+      raw.receptor?.name,
+      raw.name
+    ),
+    "Cliente"
+  );
+}
+
+function getClientEmail(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.clientEmail,
+      item.clienteEmail,
+      item.email,
+      item.emailCliente,
+      item.requesterSnapshot?.email,
+      item.createdBy?.email,
+      item.cliente?.email,
+      item.cliente?.emailLower,
+      item.client?.email,
+      item.customer?.email,
+      item.receptor?.email,
+      raw.clientEmail,
+      raw.clienteEmail,
+      raw.email,
+      raw.emailCliente,
+      raw.requesterSnapshot?.email,
+      raw.createdBy?.email,
+      raw.cliente?.email,
+      raw.cliente?.emailLower,
+      raw.client?.email,
+      raw.customer?.email,
+      raw.receptor?.email
+    ),
+    ""
+  ).toLowerCase();
+}
+
+function getAvatarUrl(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.clientAvatar,
+      item.avatar,
+      item.avatarUrl,
+      item.requesterSnapshot?.avatar,
+      item.requesterSnapshot?.avatarUrl,
+      item.cliente?.avatar,
+      item.cliente?.avatarUrl,
+      item.client?.avatar,
+      item.client?.avatarUrl,
+      item.customer?.avatar,
+      item.customer?.avatarUrl,
+      raw.clientAvatar,
+      raw.avatar,
+      raw.avatarUrl,
+      raw.requesterSnapshot?.avatar,
+      raw.requesterSnapshot?.avatarUrl,
+      raw.cliente?.avatar,
+      raw.cliente?.avatarUrl,
+      raw.client?.avatar,
+      raw.client?.avatarUrl,
+      raw.customer?.avatar,
+      raw.customer?.avatarUrl
+    ),
+    ""
+  );
+}
+
+function getInitials(value = "") {
+  const text = normalizeWhitespace(value);
+
+  if (!text) return "ON";
+
+  const parts = text.split(" ").filter(Boolean);
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "ON";
+}
+
+function getStatusRaw(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return first(
+    item.status,
+    item.estado,
+    item.state,
+    item.lifecycle?.status,
+    raw.status,
+    raw.estado,
+    raw.state,
+    raw.lifecycle?.status
+  );
+}
+
+function getStatusKey(value = "") {
+  const key = normalizeKey(value);
+
+  if (["pending", "pendiente", "new", "nueva", "nuevo", "created"].includes(key)) {
+    return "pending";
+  }
+
+  if (["open", "abierta", "abierto"].includes(key)) {
+    return "open";
+  }
+
+  if (
+    [
+      "progress",
+      "in_progress",
+      "inprogress",
+      "en_proceso",
+      "proceso",
+      "working",
+      "trabajando",
+      "assigned",
+      "asignada",
+      "asignado",
+    ].includes(key)
+  ) {
+    return "progress";
+  }
+
+  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) {
+    return "resolved";
+  }
+
+  if (
+    [
+      "closed",
+      "cerrada",
+      "cerrado",
+      "cancelled",
+      "cancelada",
+      "cancelado",
+      "archived",
+      "archivada",
+    ].includes(key)
+  ) {
+    return "closed";
+  }
+
+  return "pending";
+}
+
+function getStatusLabel(value = "") {
+  const key = getStatusKey(value);
+
+  if (key === "open") return "Abierta";
+  if (key === "pending") return "Pendiente";
+  if (key === "progress") return "En proceso";
+  if (key === "resolved") return "Resuelta";
+  if (key === "closed") return "Cerrada";
+
+  return safeText(value, "Pendiente");
+}
+
+function getPriorityRaw(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return first(
+    item.priority,
+    item.prioridad,
+    item.severity,
+    item.urgency,
+    item.sla?.priority,
+    raw.priority,
+    raw.prioridad,
+    raw.severity,
+    raw.urgency,
+    raw.sla?.priority,
+    "medium"
+  );
+}
+
+function getPriorityKey(item = {}) {
+  const key = normalizeKey(getPriorityRaw(item));
+
+  if (["critical", "critica", "crítica", "critico", "crítico", "p0"].includes(key)) {
+    return "critical";
+  }
+
+  if (["urgent", "urgente", "high", "alta", "p1"].includes(key)) {
+    return "urgent";
+  }
+
+  if (["medium", "media", "normal", "p2"].includes(key)) {
+    return "medium";
+  }
+
+  if (["low", "baja", "minor", "p3"].includes(key)) {
+    return "low";
+  }
+
+  return "medium";
+}
+
+function getPriorityLabel(item = {}) {
+  const key = getPriorityKey(item);
+
+  if (key === "critical") return "Crítica";
+  if (key === "urgent") return "Urgente";
+  if (key === "medium") return "Media";
+  if (key === "low") return "Baja";
+
+  return "Media";
+}
+
+function getCategory(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.category,
+      item.categoria,
+      item.type,
+      item.tipo,
+      item.subcategory,
+      item.subcategoria,
+      raw.category,
+      raw.categoria,
+      raw.type,
+      raw.tipo,
+      raw.subcategory,
+      raw.subcategoria
+    ),
+    "Soporte"
+  );
+}
+
+function getAssignedTo(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.assignedTo?.name,
+      item.assignedTo?.displayName,
+      item.assignment?.agentName,
+      item.assignment?.name,
+      item.tecnico?.name,
+      item.tecnico?.displayName,
+      item.tecnico,
+      item.agent,
+      raw.assignedTo?.name,
+      raw.assignedTo?.displayName,
+      raw.assignment?.agentName,
+      raw.assignment?.name,
+      raw.tecnico?.name,
+      raw.tecnico?.displayName,
+      raw.tecnico,
+      raw.agent
+    ),
+    "Sin asignar"
+  );
+}
+
+function getImporteAmount(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return first(
+    item.total,
+    item.amount,
+    item.importe,
+    item.price,
+    item.facturasTotal,
+    item.invoicesTotal,
+    item.importeFacturas,
+    item.invoiceTotal,
+    item.linkedInvoices?.total,
+    item.linkedInvoices?.amount,
+    item.linkedInvoices?.importe,
+    item.meta?.invoicesTotal,
+    item.meta?.invoiceTotal,
+    raw.total,
+    raw.amount,
+    raw.importe,
+    raw.price,
+    raw.facturasTotal,
+    raw.invoicesTotal,
+    raw.importeFacturas,
+    raw.invoiceTotal,
+    raw.linkedInvoices?.total,
+    raw.linkedInvoices?.amount,
+    raw.linkedInvoices?.importe,
+    raw.meta?.invoicesTotal,
+    raw.meta?.invoiceTotal
+  );
+}
+
+function getImporteCurrency(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.currency,
+      item.moneda,
+      item.linkedInvoices?.currency,
+      item.linkedInvoices?.moneda,
+      item.meta?.invoiceCurrency,
+      item.meta?.currency,
+      item.meta?.moneda,
+      raw.currency,
+      raw.moneda,
+      raw.linkedInvoices?.currency,
+      raw.linkedInvoices?.moneda,
+      raw.meta?.invoiceCurrency,
+      raw.meta?.currency,
+      raw.meta?.moneda,
+      DEFAULT_CURRENCY
+    ),
+    DEFAULT_CURRENCY
+  );
+}
+
+function getPaymentStatusKey(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  const key = normalizeKey(
+    first(
+      item.paymentStatus,
+      item.estadoPago,
+      item.linkedInvoices?.paymentStatus,
+      item.linkedInvoices?.estadoPago,
+      raw.paymentStatus,
+      raw.estadoPago,
+      raw.linkedInvoices?.paymentStatus,
+      raw.linkedInvoices?.estadoPago
+    )
+  );
+
+  if (["paid", "pagada", "pagado", "cobrada", "cobrado"].includes(key)) return "paid";
+  if (["pending", "pendiente", "unpaid"].includes(key)) return "pending";
+  if (["partial", "parcial", "pago_parcial"].includes(key)) return "partial";
+  if (["overdue", "vencida", "vencido"].includes(key)) return "overdue";
+
+  return "";
+}
+
+function getImporteLabel(item = {}) {
+  const amount = getImporteAmount(item);
+
+  if (amount !== null && amount !== undefined && amount !== "") {
+    const numericAmount = safeNumber(amount, NaN);
+
+    if (Number.isFinite(numericAmount)) {
+      return formatMoney(numericAmount, getImporteCurrency(item));
+    }
+  }
+
+  const paymentKey = getPaymentStatusKey(item);
+
+  if (paymentKey === "paid") return "Pagado";
+  if (paymentKey === "pending") return "Pendiente";
+  if (paymentKey === "partial") return "Parcial";
+  if (paymentKey === "overdue") return "Vencido";
+
+  return "—";
+}
+
+function getCreatedAt(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return first(
+    item.createdAt,
+    item.fechaCreacion,
+    item.createdAtES,
+    item.date,
+    item.lifecycle?.createdAt,
+    raw.createdAt,
+    raw.fechaCreacion,
+    raw.createdAtES,
+    raw.date,
+    raw.lifecycle?.createdAt
+  );
+}
+
+function getUpdatedAt(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return first(
+    item.updatedAt,
+    item.lastUpdateAt,
+    item.ultimaNovedad,
+    item.modifiedAt,
+    item.closedAt,
+    item.createdAt,
+    item.lifecycle?.updatedAt,
+    item.lifecycle?.lastUpdateAt,
+    item.audit?.updatedAt,
+    raw.updatedAt,
+    raw.lastUpdateAt,
+    raw.ultimaNovedad,
+    raw.modifiedAt,
+    raw.closedAt,
+    raw.createdAt,
+    raw.lifecycle?.updatedAt,
+    raw.lifecycle?.lastUpdateAt,
+    raw.audit?.updatedAt
+  );
+}
+
+function getSortTimestamp(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return (
+    safeNumber(item?.meta?.updatedAtMs, 0) ||
+    safeNumber(item?.meta?.timestampMs, 0) ||
+    safeNumber(raw?.meta?.updatedAtMs, 0) ||
+    safeNumber(raw?.meta?.timestampMs, 0) ||
+    toTimestamp(getUpdatedAt(item)) ||
+    toTimestamp(getCreatedAt(item)) ||
+    toTimestamp(raw?._ts) ||
+    0
+  );
+}
+
+function compareIncidenciasNewestFirst(a = {}, b = {}) {
+  const diff = getSortTimestamp(b) - getSortTimestamp(a);
+
+  if (diff !== 0) return diff;
+
+  return safeText(getTicketId(b), "").localeCompare(
+    safeText(getTicketId(a), ""),
+    "es",
+    {
+      numeric: true,
+      sensitivity: "base",
+    }
+  );
+}
+
+function sortIncidenciasNewestFirst(items = []) {
+  return [...safeArray(items)].sort(compareIncidenciasNewestFirst);
+}
+
+function getAttachmentsCount(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  const attachments = first(
+    item.attachments,
+    item.files,
+    item.adjuntos,
+    raw.attachments,
+    raw.files,
+    raw.adjuntos
+  );
+
+  if (Array.isArray(attachments)) return attachments.length;
+
+  return safeNumber(
+    first(
+      item.attachmentsCount,
+      item.filesCount,
+      item.adjuntosCount,
+      raw.attachmentsCount,
+      raw.filesCount,
+      raw.adjuntosCount,
+      0
+    ),
+    0
+  );
+}
+
+function isClosedLike(item = {}) {
+  return ["closed", "resolved"].includes(getStatusKey(getStatusRaw(item)));
+}
+
+function isOpenLike(item = {}) {
+  return ["open", "pending", "progress"].includes(getStatusKey(getStatusRaw(item)));
+}
+
+function isUrgentLike(item = {}) {
+  return ["urgent", "critical"].includes(getPriorityKey(item));
+}
+
+function hasImporteLike(item = {}) {
+  const amount = safeNumber(getImporteAmount(item), NaN);
+  return Number.isFinite(amount) && amount > 0;
 }
 
 /* =========================================================
@@ -1184,52 +1034,75 @@ function getAvatarStyle(item = {}) {
 function normalizeFilter(value = "") {
   const key = normalizeKey(value);
 
-  if (!key || ["all", "todo", "todos", "todas", "total"].includes(key)) return "all";
+  if (!key || key === "todos" || key === "todas") return "all";
 
   if (
     [
+      "all",
+      "todo",
+      "todos",
+      "todas",
+      "total",
+      "totales",
+    ].includes(key)
+  ) {
+    return "all";
+  }
+
+  if (
+    [
+      "open",
+      "opened",
+      "abierta",
+      "abierto",
+      "abiertas",
+      "abiertos",
+      "active",
+      "activa",
+      "activo",
+      "activas",
+      "activos",
       "pending",
       "pendiente",
       "pendientes",
-      "partial",
-      "parcial",
-      "draft",
-      "borrador",
-      "unpaid",
-      "sin_pagar",
+      "progress",
+      "in_progress",
+      "inprogress",
+      "en_proceso",
+      "proceso",
+      "working",
+      "trabajando",
+      "assigned",
+      "asignada",
+      "asignado",
     ].includes(key)
   ) {
-    return "pending";
-  }
-
-  if (["paid", "pagada", "pagado", "pagadas", "cobrada", "cobrado"].includes(key)) {
-    return "paid";
-  }
-
-  if (["overdue", "vencida", "vencido", "vencidas"].includes(key)) {
-    return "overdue";
-  }
-
-  if (["sent", "enviada", "enviado", "enviadas", "enviados"].includes(key)) {
-    return "sent";
-  }
-
-  if (["pdf", "con_pdf", "has_pdf", "documento"].includes(key)) {
-    return "pdf";
+    return "open";
   }
 
   if (
     [
-      "linked",
-      "incidencia",
-      "incidencias",
-      "ticket",
-      "tickets",
-      "con_incidencia",
-      "con_ticket",
+      "closed",
+      "close",
+      "cerrada",
+      "cerrado",
+      "cerradas",
+      "cerrados",
+      "resolved",
+      "resuelta",
+      "resuelto",
+      "resueltas",
+      "resueltos",
+      "solved",
+      "cancelled",
+      "cancelada",
+      "cancelado",
+      "archived",
+      "archivada",
+      "archivado",
     ].includes(key)
   ) {
-    return "linked";
+    return "closed";
   }
 
   return "all";
@@ -1242,15 +1115,11 @@ function getActiveFilter(input = {}) {
   return normalizeFilter(
     first(
       data.filter,
-      data.paymentFilter,
       data.statusFilter,
       data.activeFilter,
-      data.facturasFilter,
       runtime.filter,
-      runtime.paymentFilter,
       runtime.statusFilter,
       runtime.activeFilter,
-      runtime.facturasFilter,
       "all"
     )
   );
@@ -1273,14 +1142,12 @@ function getSearchQuery(input = {}) {
       data.q,
       data.term,
       data.keyword,
-      data.facturasSearch,
       runtime.search,
       runtime.searchQuery,
       runtime.query,
       runtime.q,
       runtime.term,
       runtime.keyword,
-      runtime.facturasSearch,
       ""
     )
   );
@@ -1288,15 +1155,10 @@ function getSearchQuery(input = {}) {
 
 function itemMatchesFilter(item = {}, filter = "all") {
   const key = normalizeFilter(filter);
-  const paymentKey = getEstadoPagoKey(getPaymentRaw(item));
 
   if (key === "all") return true;
-  if (key === "pending") return ["pending", "partial", "draft"].includes(paymentKey);
-  if (key === "paid") return paymentKey === "paid";
-  if (key === "overdue") return paymentKey === "overdue";
-  if (key === "sent") return isFacturaSent(item);
-  if (key === "pdf") return hasPdf(item);
-  if (key === "linked") return Boolean(getIncidenciaId(item));
+  if (key === "open") return isOpenLike(item);
+  if (key === "closed") return isClosedLike(item);
 
   return true;
 }
@@ -1305,37 +1167,32 @@ function getSearchHaystack(item = {}) {
   const raw = safeObject(item?.raw);
 
   return [
-    getFacturaId(item),
-    getFacturaNumero(item),
-    getFacturaSistema(item),
+    getTicketId(item),
+    getSubject(item),
+    getDescription(item),
     getClientName(item),
     getClientEmail(item),
-    getClientEmailLabel(item),
-    getEstadoPagoLabel(getPaymentRaw(item)),
-    getTotalLabel(item),
-    getFormaPago(item),
-    getIncidenciaId(item),
-    getIncidenciaSubject(item),
-    getCreatedAt(item),
-    getUpdatedAt(item),
+    getCategory(item),
+    getAssignedTo(item),
+    getStatusLabel(getStatusRaw(item)),
+    getPriorityLabel(item),
+    getImporteLabel(item),
 
-    item.clienteId,
-    item.clientId,
-    item.customerId,
     item.userId,
-    item.uid,
-    item.blobPath,
-    item.blobName,
-    item.pdfPath,
+    item.clienteId,
+    item.requesterId,
+    item.createdBy?.id,
+    item.createdBy?.userId,
+    item.requesterSnapshot?.id,
+    item.requesterSnapshot?.userId,
 
-    raw.clienteId,
-    raw.clientId,
-    raw.customerId,
     raw.userId,
-    raw.uid,
-    raw.blobPath,
-    raw.blobName,
-    raw.pdfPath,
+    raw.clienteId,
+    raw.requesterId,
+    raw.createdBy?.id,
+    raw.createdBy?.userId,
+    raw.requesterSnapshot?.id,
+    raw.requesterSnapshot?.userId,
   ]
     .map((value) => normalizeText(value))
     .filter(Boolean)
@@ -1353,11 +1210,11 @@ function itemMatchesSearch(item = {}, query = "") {
   return terms.every((term) => haystack.includes(term));
 }
 
-function filterAndSortFacturas(items = [], input = {}) {
+function filterAndSortIncidencias(items = [], input = {}) {
   const activeFilter = getActiveFilter(input);
   const searchQuery = getSearchQuery(input);
 
-  return sortFacturasNewestFirst(items).filter((item) => {
+  return sortIncidenciasNewestFirst(items).filter((item) => {
     return itemMatchesFilter(item, activeFilter) && itemMatchesSearch(item, searchQuery);
   });
 }
@@ -1373,10 +1230,7 @@ function computeFilterCounts(items = [], input = {}) {
   const searchableRows = rows.filter((item) => itemMatchesSearch(item, searchQuery));
 
   return FILTERS.reduce((acc, filter) => {
-    acc[filter.key] = searchableRows.filter((item) =>
-      itemMatchesFilter(item, filter.key)
-    ).length;
-
+    acc[filter.key] = searchableRows.filter((item) => itemMatchesFilter(item, filter.key)).length;
     return acc;
   }, {});
 }
@@ -1390,45 +1244,25 @@ function computeStats(items = []) {
 
   return rows.reduce(
     (acc, item) => {
-      const total = safeNumber(getTotalRaw(item), 0);
-      const paymentKey = getEstadoPagoKey(getPaymentRaw(item));
+      const amount = safeNumber(getImporteAmount(item), 0);
 
       acc.total += 1;
-      acc.totalImporte += total;
+      acc.totalImporte += amount;
+      acc.attachmentsCount += getAttachmentsCount(item);
 
-      if (paymentKey === "paid") {
-        acc.paidCount += 1;
-        acc.totalPagado += total;
-      }
-
-      if (["pending", "partial", "draft"].includes(paymentKey)) {
-        acc.pendingCount += 1;
-        acc.totalPendiente += total;
-      }
-
-      if (paymentKey === "overdue") {
-        acc.overdueCount += 1;
-        acc.totalVencido += total;
-      }
-
-      if (hasPdf(item)) acc.pdfCount += 1;
-      if (isFacturaSent(item)) acc.sentCount += 1;
-      if (getIncidenciaId(item)) acc.incidenciaCount += 1;
+      if (isOpenLike(item)) acc.openCount += 1;
+      if (isClosedLike(item)) acc.closedCount += 1;
+      if (isUrgentLike(item)) acc.urgentCount += 1;
 
       return acc;
     },
     {
       total: 0,
+      openCount: 0,
+      closedCount: 0,
+      urgentCount: 0,
+      attachmentsCount: 0,
       totalImporte: 0,
-      totalPagado: 0,
-      totalPendiente: 0,
-      totalVencido: 0,
-      pendingCount: 0,
-      paidCount: 0,
-      overdueCount: 0,
-      pdfCount: 0,
-      sentCount: 0,
-      incidenciaCount: 0,
     }
   );
 }
@@ -1443,7 +1277,7 @@ function normalizePageSize(input = {}) {
         data.pageSize,
         runtime.pageSize,
         runtime.limit,
-        runtime.facturasPageSize,
+        runtime.incidenciasPageSize,
         DEFAULT_PAGE_SIZE
       ),
       DEFAULT_PAGE_SIZE
@@ -1457,7 +1291,7 @@ function getPagination(items = [], input = {}) {
   const data = safeObject(input);
   const runtime = safeObject(data.state);
 
-  const allItems = filterAndSortFacturas(items, data);
+  const allItems = filterAndSortIncidencias(items, data);
   const pageSize = normalizePageSize(data);
   const filtering = isFilterActive(data);
 
@@ -1466,10 +1300,8 @@ function getPagination(items = [], input = {}) {
       first(
         data.totalCount,
         data.remoteCount,
-        data.totalMatched,
         runtime.totalCount,
         runtime.remoteCount,
-        runtime.totalMatched,
         runtime.total,
         allItems.length
       ),
@@ -1495,7 +1327,7 @@ function getPagination(items = [], input = {}) {
         data.page,
         runtime.page,
         runtime.currentPage,
-        runtime.facturasPage,
+        runtime.incidenciasPage,
         1
       ),
       1
@@ -1532,23 +1364,6 @@ function getPagination(items = [], input = {}) {
 }
 
 /* =========================================================
-   BUSY STATE
-========================================================= */
-
-function resolveBusyMeta(item = {}, state = {}) {
-  const runtime = safeObject(state);
-  const facturaId = getFacturaId(item);
-
-  return {
-    facturaId,
-    isOpening: safeText(runtime.openingFacturaId, "") === facturaId,
-    isViewingPdf: safeText(runtime.viewingFacturaId, "") === facturaId,
-    isDownloading: safeText(runtime.downloadingFacturaId, "") === facturaId,
-    isSending: safeText(runtime.sendingFacturaId, "") === facturaId,
-  };
-}
-
-/* =========================================================
    UI PARTIALS
 ========================================================= */
 
@@ -1558,11 +1373,11 @@ function renderMaybeStyles(includeStyles = false) {
 
 function renderSpinner(label = "") {
   return `
-    <span class="facturas-inline-loading">
-      <span class="facturas-inline-spinner" aria-hidden="true"></span>
+    <span class="incidencias-inline-loading">
+      <span class="incidencias-inline-spinner" aria-hidden="true"></span>
       ${
         label
-          ? `<span class="facturas-inline-loading-text">${escapeHtml(label)}</span>`
+          ? `<span class="incidencias-inline-loading-text">${escapeHtml(label)}</span>`
           : ""
       }
     </span>
@@ -1572,13 +1387,13 @@ function renderSpinner(label = "") {
 function renderLoaderOnly(label = "Cargando") {
   return `
     <span
-      class="facturas-loader-only"
+      class="incidencias-loader-only"
       role="status"
       aria-label="${escapeHtml(label)}"
       title="${escapeHtml(label)}"
       data-tooltip="${escapeHtml(label)}"
     >
-      <span class="facturas-inline-spinner" aria-hidden="true"></span>
+      <span class="incidencias-inline-spinner" aria-hidden="true"></span>
     </span>
   `;
 }
@@ -1586,13 +1401,13 @@ function renderLoaderOnly(label = "Cargando") {
 function renderAvatar(item = {}) {
   const fullName = getClientName(item);
   const initials = getInitials(fullName);
-  const avatarUrl = getClientAvatar(item);
+  const avatarUrl = getAvatarUrl(item);
   const avatarStyle = getAvatarStyle(item);
 
   if (avatarUrl) {
     return `
       <div
-        class="facturas-avatar"
+        class="incidencias-avatar"
         title="${escapeHtml(fullName)}"
         aria-label="${escapeHtml(fullName)}"
         data-tooltip="${escapeHtml(fullName)}"
@@ -1605,124 +1420,238 @@ function renderAvatar(item = {}) {
           referrerpolicy="no-referrer"
           onerror="this.style.display='none'; this.parentNode.setAttribute('data-fallback','true');"
         />
-        <span class="facturas-avatar-fallback">${escapeHtml(initials)}</span>
+        <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
       </div>
     `;
   }
 
   return `
     <div
-      class="facturas-avatar facturas-avatar--fallback"
+      class="incidencias-avatar incidencias-avatar--fallback"
       title="${escapeHtml(fullName)}"
       aria-label="${escapeHtml(fullName)}"
       data-tooltip="${escapeHtml(fullName)}"
       style="${escapeHtml(avatarStyle)}"
     >
-      <span class="facturas-avatar-fallback">${escapeHtml(initials)}</span>
+      <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
     </div>
   `;
 }
 
-function renderEstadoPagoChip(item = {}) {
-  const rawStatus = getPaymentRaw(item);
-  const label = getEstadoPagoLabel(rawStatus);
-  const klass = getEstadoPagoChipClass(rawStatus);
+function renderStatusChip(item = {}) {
+  const rawStatus = getStatusRaw(item);
+  const key = getStatusKey(rawStatus);
+  const label = getStatusLabel(rawStatus);
 
   return `
-    <span class="facturas-chip ${klass}">
-      <span class="facturas-chip-dot" aria-hidden="true"></span>
+    <span class="incidencias-chip incidencias-chip--${escapeHtml(key)}">
+      <span class="incidencias-chip-dot" aria-hidden="true"></span>
       ${escapeHtml(label)}
     </span>
   `;
 }
 
-function renderDeliveryBadge(item = {}) {
-  const sent = isFacturaSent(item);
-  const sentAt = getSentAt(item);
+function renderPriorityBadge(item = {}) {
+  const key = getPriorityKey(item);
+  const label = getPriorityLabel(item);
 
-  if (sent) {
-    const title = sentAt
-      ? `Enviada · ${formatDateTime(sentAt)}`
-      : "Factura enviada";
+  return `
+    <span
+      class="incidencias-mini-badge incidencias-mini-badge--${escapeHtml(key)}"
+      title="${escapeHtml(`Prioridad ${label}`)}"
+      data-tooltip="${escapeHtml(`Prioridad ${label}`)}"
+    >
+      ${key === "critical" || key === "urgent" ? icon("alert") : icon("activity")}
+      ${escapeHtml(label)}
+    </span>
+  `;
+}
 
+function renderAssignedBadge(item = {}) {
+  const assigned = getAssignedTo(item);
+
+  return `
+    <span
+      class="incidencias-mini-badge incidencias-mini-badge--agent"
+      title="${escapeHtml(`Técnico · ${assigned}`)}"
+      data-tooltip="${escapeHtml(`Técnico · ${assigned}`)}"
+    >
+      ${icon("users")}
+      ${escapeHtml(assigned)}
+    </span>
+  `;
+}
+
+function renderImporteChip(item = {}) {
+  const label = getImporteLabel(item);
+  const isMoney = /€|EUR|\$|USD|£|GBP/i.test(label);
+  const paymentKey = getPaymentStatusKey(item) || "idle";
+
+  if (isMoney) {
     return `
-      <span
-        class="facturas-mini-badge facturas-mini-badge--sent"
-        title="${escapeHtml(title)}"
-        data-tooltip="${escapeHtml(title)}"
-      >
-        ${icon("check")}
-        Enviada
+      <span class="incidencias-importe incidencias-importe--money incidencias-importe--${escapeHtml(paymentKey)}">
+        ${icon("euro")}
+        ${escapeHtml(label)}
       </span>
     `;
   }
 
   return `
-    <span
-      class="facturas-mini-badge facturas-mini-badge--idle"
-      title="Factura no enviada todavía"
-      data-tooltip="Factura no enviada todavía"
-    >
-      ${icon("mail")}
-      No enviada
+    <span class="incidencias-importe incidencias-importe--status incidencias-importe--${escapeHtml(paymentKey)}">
+      ${escapeHtml(label)}
     </span>
   `;
 }
 
-function renderPdfBadge(item = {}) {
-  if (hasPdf(item)) {
-    return `
-      <span
-        class="facturas-mini-badge facturas-mini-badge--pdf"
-        title="PDF disponible"
-        data-tooltip="PDF disponible"
-      >
-        ${icon("pdf")}
-        PDF
-      </span>
-    `;
-  }
-
-  return `
-    <span
-      class="facturas-mini-badge facturas-mini-badge--blocked"
-      title="PDF no disponible"
-      data-tooltip="PDF no disponible"
-    >
-      ${icon("lock")}
-      Sin PDF
-    </span>
-  `;
-}
-
-function renderIncidenciaLink(item = {}) {
-  const incidenciaId = getIncidenciaId(item);
-  const incidenciaSubject = getIncidenciaSubject(item);
-  const facturaId = getFacturaId(item);
-
-  if (!incidenciaId) {
-    return `<span class="facturas-incidencia-empty">—</span>`;
-  }
-
-  const tooltip = incidenciaSubject
-    ? `Abrir incidencia · ${incidenciaSubject}`
-    : "Abrir incidencia relacionada";
+function renderActionButton({
+  action = "detail",
+  ticketId = "",
+  label = "Detalle",
+  loadingLabel = "Cargando detalle",
+  loading = false,
+  disabled = false,
+  iconName = "eye",
+  tooltip = "",
+} = {}) {
+  const finalDisabled = disabled || loading;
+  const finalTooltip = tooltip || label;
 
   return `
     <button
       type="button"
-      class="facturas-incidencia-link"
-      data-action="open-incidencia"
-      data-facturas-action="open-incidencia"
-      data-ticket-id="${escapeHtml(incidenciaId)}"
-      data-incidencia-id="${escapeHtml(incidenciaId)}"
-      data-factura-id="${escapeHtml(facturaId)}"
-      title="${escapeHtml(tooltip)}"
-      data-tooltip="${escapeHtml(tooltip)}"
+      class="incidencias-detail-btn${loading ? " is-loading" : ""}"
+      data-incidencias-action="${escapeHtml(action)}"
+      data-action="${escapeHtml(action === "detail" ? "open-ticket" : action)}"
+      data-ticket-id="${escapeHtml(ticketId)}"
+      title="${escapeHtml(finalTooltip)}"
+      data-tooltip="${escapeHtml(finalTooltip)}"
+      ${finalDisabled ? 'disabled aria-disabled="true"' : ""}
+      ${loading ? 'aria-busy="true"' : ""}
     >
-      ${icon("ticket")}
-      <span>${escapeHtml(incidenciaId)}</span>
+      ${
+        loading
+          ? renderLoaderOnly(loadingLabel)
+          : `
+            <span class="incidencias-action-icon">${icon(iconName)}</span>
+            <span class="incidencias-btn-text">${escapeHtml(label)}</span>
+          `
+      }
     </button>
+  `;
+}
+
+function renderRow(item = {}, state = {}) {
+  const runtime = safeObject(state);
+
+  const ticketId = getTicketId(item);
+  const subject = getSubject(item);
+  const description = getDescription(item);
+  const clientName = getClientName(item);
+  const clientEmail = getClientEmail(item) || "Sin email";
+  const createdAtRaw = getCreatedAt(item);
+  const updatedAtRaw = getUpdatedAt(item);
+  const createdAt = formatDateTime(createdAtRaw);
+  const updatedAt = formatLastUpdate(updatedAtRaw);
+  const attachmentsCount = getAttachmentsCount(item);
+  const category = getCategory(item);
+  const statusKey = getStatusKey(getStatusRaw(item));
+
+  const openingTicketId = safeText(
+    first(
+      runtime.openingTicketId,
+      runtime.openingIncidenciaId,
+      runtime.detailTicketId,
+      runtime.loadingTicketId
+    ),
+    ""
+  );
+
+  const isOpening = openingTicketId === ticketId;
+
+  return `
+    <tr
+      class="incidencias-row incidencias-row--${escapeHtml(statusKey)}"
+      data-ticket-row="true"
+      data-ticket-id="${escapeHtml(ticketId)}"
+      data-incidencia-id="${escapeHtml(ticketId)}"
+    >
+      <td class="incidencias-cell incidencias-cell--main">
+        <div class="incidencias-main">
+          ${renderAvatar(item)}
+
+          <div class="incidencias-main-copy">
+            <div class="incidencias-ticket-line">
+              <span class="incidencias-ticket-id">${escapeHtml(ticketId)}</span>
+              <span class="incidencias-category-pill">${escapeHtml(category)}</span>
+            </div>
+
+            <div class="incidencias-ticket-subject">${escapeHtml(subject)}</div>
+            <div class="incidencias-ticket-description">${escapeHtml(description)}</div>
+
+            <div class="incidencias-client-line">
+              <span class="incidencias-client-name">${escapeHtml(clientName)}</span>
+              <span class="incidencias-client-separator">·</span>
+              <span class="incidencias-client-email">${escapeHtml(clientEmail)}</span>
+            </div>
+
+            <div class="incidencias-row-badges">
+              ${renderPriorityBadge(item)}
+              ${renderAssignedBadge(item)}
+            </div>
+          </div>
+        </div>
+      </td>
+
+      <td class="incidencias-cell incidencias-cell--status">
+        ${renderStatusChip(item)}
+      </td>
+
+      <td class="incidencias-cell incidencias-cell--date">
+        <span
+          class="incidencias-date-inline"
+          title="${escapeHtml(createdAt)}"
+          data-tooltip="${escapeHtml(createdAt)}"
+        >
+          ${escapeHtml(createdAt)}
+        </span>
+      </td>
+
+      <td class="incidencias-cell incidencias-cell--date">
+        <span
+          class="incidencias-date-inline"
+          title="${escapeHtml(formatDateTime(updatedAtRaw))}"
+          data-tooltip="${escapeHtml(formatDateTime(updatedAtRaw))}"
+        >
+          ${escapeHtml(updatedAt)}
+        </span>
+      </td>
+
+      <td class="incidencias-cell incidencias-cell--importe">
+        ${renderImporteChip(item)}
+      </td>
+
+      <td class="incidencias-cell incidencias-cell--attachments">
+        <span
+          class="incidencias-attachments-pill"
+          title="${escapeHtml(`${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`)}"
+          data-tooltip="${escapeHtml(`${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`)}"
+        >
+          ${icon("paperclip")}
+          ${escapeHtml(String(attachmentsCount))}
+        </span>
+      </td>
+
+      <td class="incidencias-cell incidencias-cell--actions">
+        ${renderActionButton({
+          ticketId,
+          loading: isOpening,
+          label: "Detalle",
+          loadingLabel: "Cargando detalle",
+          iconName: "eye",
+          tooltip: "Abrir detalle de incidencia",
+        })}
+      </td>
+    </tr>
   `;
 }
 
@@ -1732,27 +1661,27 @@ function renderPagination(pagination = {}, state = {}) {
   const refreshing = Boolean(runtime.refreshing);
 
   return `
-    <div class="facturas-pagination" aria-label="Paginación de facturas">
+    <div class="incidencias-pagination" aria-label="Paginación de incidencias">
       <button
         type="button"
-        class="facturas-pagination-btn"
+        class="incidencias-pagination-btn"
+        data-incidencias-action="prev-page"
         data-action="prev-page"
-        data-facturas-action="prev-page"
         data-page="${escapeHtml(String(Math.max(1, pagination.currentPage - 1)))}"
         ${!pagination.hasPrev || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
       >
         Anterior
       </button>
 
-      <span class="facturas-pagination-status">
+      <span class="incidencias-pagination-status">
         ${escapeHtml(`${pagination.currentPage}/${pagination.totalPages}`)}
       </span>
 
       <button
         type="button"
-        class="facturas-pagination-btn facturas-pagination-btn--next"
+        class="incidencias-pagination-btn incidencias-pagination-btn--next"
+        data-incidencias-action="next-page"
         data-action="next-page"
-        data-facturas-action="next-page"
         data-page="${escapeHtml(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
         ${!pagination.hasNext || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
       >
@@ -1766,23 +1695,23 @@ function renderSearch(input = {}) {
   const searchQuery = getSearchQuery(input);
 
   return `
-    <div class="facturas-search" role="search" aria-label="Buscar facturas">
-      <span class="facturas-search-icon" aria-hidden="true">
+    <div class="incidencias-search" role="search" aria-label="Buscar incidencias">
+      <span class="incidencias-search-icon" aria-hidden="true">
         ${icon("search")}
       </span>
 
       <input
-        id="facturas-search-input"
-        class="facturas-search-input"
+        id="incidencias-search-input"
+        class="incidencias-search-input"
         type="search"
         value="${escapeHtml(searchQuery)}"
-        placeholder="Buscar factura, cliente, email, importe, incidencia..."
+        placeholder="Buscar cliente, email, asunto, ID..."
         autocomplete="off"
         spellcheck="false"
-        data-facturas-action="search"
-        data-action="search-facturas"
-        data-facturas-search-input="true"
-        aria-label="Buscar facturas por cliente, email, factura o incidencia"
+        data-incidencias-action="search"
+        data-action="search-incidencias"
+        data-incidencias-search-input="true"
+        aria-label="Buscar incidencias por cliente, email, asunto o identificador"
       />
 
       ${
@@ -1790,8 +1719,8 @@ function renderSearch(input = {}) {
           ? `
             <button
               type="button"
-              class="facturas-search-clear"
-              data-facturas-action="clear-search"
+              class="incidencias-search-clear"
+              data-incidencias-action="clear-search"
               data-action="clear-search"
               title="Limpiar búsqueda"
               data-tooltip="Limpiar búsqueda"
@@ -1808,13 +1737,13 @@ function renderSearch(input = {}) {
 
 function renderFilters(input = {}, pagination = {}) {
   const data = safeObject(input);
-  const items = safeArray(first(data.items, data.rows, data.facturas, data.invoices));
+  const items = safeArray(first(data.items, data.rows, data.tickets, data.incidencias));
   const counts = computeFilterCounts(items, data);
   const activeFilter = normalizeFilter(pagination.activeFilter || getActiveFilter(data));
 
   return `
-    <div class="facturas-filters" aria-label="Filtros y búsqueda de facturas">
-      <div class="facturas-filter-pills">
+    <div class="incidencias-filters" aria-label="Filtros y búsqueda de incidencias">
+      <div class="incidencias-filter-pills">
         ${FILTERS.map((filter) => {
           const isActive = filter.key === activeFilter;
           const count = counts[filter.key] ?? 0;
@@ -1822,12 +1751,11 @@ function renderFilters(input = {}, pagination = {}) {
           return `
             <button
               type="button"
-              class="facturas-filter-pill${isActive ? " is-active" : ""}"
-              data-facturas-action="filter"
-              data-action="filter-facturas"
+              class="incidencias-filter-pill${isActive ? " is-active" : ""}"
+              data-incidencias-action="filter"
+              data-action="filter-incidencias"
               data-filter="${escapeHtml(filter.key)}"
               data-filter-status="${escapeHtml(filter.key)}"
-              data-payment-filter="${escapeHtml(filter.key)}"
               aria-pressed="${isActive ? "true" : "false"}"
             >
               <span>${escapeHtml(filter.label)}</span>
@@ -1842,211 +1770,87 @@ function renderFilters(input = {}, pagination = {}) {
   `;
 }
 
-function renderActionButton({
-  klass = "",
-  action = "",
-  facturaId = "",
-  label = "",
-  loadingLabel = "",
-  iconName = "",
-  loading = false,
-  disabled = false,
-  tooltip = "",
-  ariaBusy = false,
-} = {}) {
-  const finalDisabled = disabled || loading;
-  const finalTooltip = tooltip || label;
-
+function renderEmptyState({ hasError = false, filtering = false, searchQuery = "" } = {}) {
   return `
-    <button
-      type="button"
-      class="facturas-action-btn ${klass}${loading ? " is-loading" : ""}"
-      data-action="${escapeHtml(action)}"
-      data-facturas-action="${escapeHtml(action)}"
-      data-factura-id="${escapeHtml(facturaId)}"
-      title="${escapeHtml(finalTooltip)}"
-      data-tooltip="${escapeHtml(finalTooltip)}"
-      ${finalDisabled ? 'disabled aria-disabled="true"' : ""}
-      ${ariaBusy || loading ? 'aria-busy="true"' : ""}
-    >
+    <div class="incidencias-empty">
+      <div class="incidencias-empty-icon" aria-hidden="true">
+        ${hasError ? icon("alert") : icon("ticket")}
+      </div>
+
+      <h3 class="incidencias-empty-title">
+        ${
+          hasError
+            ? "No se pudieron cargar las incidencias"
+            : filtering
+              ? "No hay incidencias con este criterio"
+              : "No hay incidencias para mostrar"
+        }
+      </h3>
+
+      <p class="incidencias-empty-text">
+        ${
+          hasError
+            ? "Puedes reintentar la carga desde el botón de actualizar."
+            : filtering
+              ? searchQuery
+                ? `No se encontraron incidencias para “${escapeHtml(searchQuery)}”. Prueba con otro nombre, email, asunto o identificador.`
+                : "Cambia el filtro activo para volver al historial completo."
+              : "Cuando haya solicitudes registradas aparecerán aquí con su estado, seguimiento, adjuntos, facturación asociada y acciones disponibles."
+        }
+      </p>
+
       ${
-        loading
-          ? renderLoaderOnly(loadingLabel || label)
-          : `
-            <span class="facturas-action-icon">${icon(iconName)}</span>
-            <span class="facturas-btn-text">${escapeHtml(label)}</span>
+        hasError
+          ? `
+            <button
+              type="button"
+              class="incidencias-btn incidencias-btn--primary"
+              data-incidencias-action="retry"
+              data-action="retry"
+            >
+              ${icon("refresh")}
+              <span class="incidencias-btn-text">Reintentar</span>
+            </button>
           `
+          : filtering
+            ? `
+              <button
+                type="button"
+                class="incidencias-btn"
+                data-incidencias-action="clear-filters"
+                data-action="clear-filters"
+              >
+                ${icon("close")}
+                <span class="incidencias-btn-text">Limpiar filtros</span>
+              </button>
+            `
+            : ""
       }
-    </button>
-  `;
-}
-
-function renderRow(item = {}, state = {}) {
-  const busy = resolveBusyMeta(item, state);
-
-  const facturaId = busy.facturaId;
-  const numero = getFacturaNumero(item);
-  const numeroSistema = getFacturaSistema(item);
-  const clientName = getClientName(item);
-  const clientEmail = getClientEmailLabel(item);
-  const createdAtRaw = getCreatedAt(item);
-  const createdAt = formatDateTime(createdAtRaw);
-  const total = getTotalLabel(item);
-  const totalCaption = getTotalCaption(item);
-  const formaPago = getFormaPago(item);
-  const pdfAvailable = hasPdf(item);
-  const sent = isFacturaSent(item);
-  const canSend = canSendFactura(item);
-
-  const sendLabel = sent ? "Reenviar" : "Enviar";
-  const sendTooltip = !pdfAvailable
-    ? "No se puede enviar: falta PDF"
-    : !isValidEmail(getClientEmail(item))
-      ? "No se puede enviar: falta email válido"
-      : sent
-        ? "Reenviar factura al cliente"
-        : "Enviar factura al cliente";
-
-  const paymentKey = getEstadoPagoKey(getPaymentRaw(item));
-
-  return `
-    <tr
-      class="facturas-table-row facturas-table-row--${escapeHtml(paymentKey)}"
-      data-factura-id="${escapeHtml(facturaId)}"
-      data-sent="${sent ? "true" : "false"}"
-      data-has-pdf="${pdfAvailable ? "true" : "false"}"
-      data-row-click-disabled="true"
-    >
-      <td class="facturas-cell facturas-cell--main">
-        <div class="facturas-main">
-          ${renderAvatar(item)}
-
-          <div class="facturas-main-copy">
-            <div class="facturas-factura-line">
-              <span class="facturas-factura-id">${escapeHtml(numero)}</span>
-              ${
-                numeroSistema && numeroSistema !== numero
-                  ? `<span class="facturas-system-id">${escapeHtml(numeroSistema)}</span>`
-                  : ""
-              }
-            </div>
-
-            <div class="facturas-factura-client">${escapeHtml(clientName)}</div>
-
-            <div class="facturas-factura-email">
-              ${escapeHtml(clientEmail)}
-            </div>
-
-            <div class="facturas-row-badges">
-              ${renderDeliveryBadge(item)}
-              ${renderPdfBadge(item)}
-            </div>
-          </div>
-        </div>
-      </td>
-
-      <td class="facturas-cell facturas-cell--status">
-        ${renderEstadoPagoChip(item)}
-      </td>
-
-      <td class="facturas-cell facturas-cell--date">
-        <span
-          class="facturas-date-inline"
-          title="${escapeHtml(createdAt)}"
-          data-tooltip="${escapeHtml(createdAt)}"
-        >
-          ${escapeHtml(createdAt)}
-        </span>
-      </td>
-
-      <td class="facturas-cell facturas-cell--amount">
-        <div class="facturas-total-stack">
-          <span class="facturas-total-value">${escapeHtml(total)}</span>
-          <span class="facturas-total-caption">${escapeHtml(totalCaption)}</span>
-          <span class="facturas-total-meta">${escapeHtml(formaPago)}</span>
-        </div>
-      </td>
-
-      <td class="facturas-cell facturas-cell--incidencia">
-        ${renderIncidenciaLink(item)}
-      </td>
-
-      <td class="facturas-cell facturas-cell--actions">
-        <div class="facturas-actions">
-          ${renderActionButton({
-            action: "open-factura",
-            facturaId,
-            label: "Detalle",
-            loadingLabel: "Abriendo detalle",
-            iconName: "detail",
-            loading: busy.isOpening,
-            tooltip: "Abrir detalle de factura",
-            ariaBusy: busy.isOpening,
-          })}
-
-          ${renderActionButton({
-            action: "view-factura-pdf",
-            facturaId,
-            label: "Ver PDF",
-            loadingLabel: "Abriendo PDF",
-            iconName: "eye",
-            loading: busy.isViewingPdf,
-            disabled: !pdfAvailable,
-            tooltip: pdfAvailable ? "Ver PDF de factura" : "PDF no disponible",
-            ariaBusy: busy.isViewingPdf,
-          })}
-
-          ${renderActionButton({
-            klass: "facturas-action-btn--primary",
-            action: "download-factura",
-            facturaId,
-            label: "Descargar",
-            loadingLabel: "Descargando factura",
-            iconName: "download",
-            loading: busy.isDownloading,
-            disabled: !pdfAvailable,
-            tooltip: pdfAvailable ? "Descargar factura PDF" : "PDF no disponible",
-            ariaBusy: busy.isDownloading,
-          })}
-
-          ${renderActionButton({
-            klass: "facturas-action-btn--success",
-            action: "send-factura",
-            facturaId,
-            label: sendLabel,
-            loadingLabel: "Enviando factura",
-            iconName: "send",
-            loading: busy.isSending,
-            disabled: !canSend,
-            tooltip: sendTooltip,
-            ariaBusy: busy.isSending,
-          })}
-        </div>
-      </td>
-    </tr>
+    </div>
   `;
 }
 
 function renderTableLoading(rows = DEFAULT_PAGE_SIZE) {
   return `
-    <div class="facturas-table-loading" aria-hidden="true">
+    <div class="incidencias-table-loading" aria-hidden="true">
       ${Array.from({ length: rows })
         .map(
           () => `
-            <div class="facturas-table-loading-row">
-              <div class="facturas-skeleton facturas-skeleton--avatar"></div>
+            <div class="incidencias-table-loading-row">
+              <div class="incidencias-skeleton incidencias-skeleton--avatar"></div>
 
-              <div class="facturas-table-loading-copy">
-                <div class="facturas-skeleton facturas-skeleton--xs"></div>
-                <div class="facturas-skeleton facturas-skeleton--lg"></div>
-                <div class="facturas-skeleton facturas-skeleton--md"></div>
+              <div class="incidencias-table-loading-copy">
+                <div class="incidencias-skeleton incidencias-skeleton--xs"></div>
+                <div class="incidencias-skeleton incidencias-skeleton--lg"></div>
+                <div class="incidencias-skeleton incidencias-skeleton--md"></div>
               </div>
 
-              <div class="facturas-skeleton facturas-skeleton--pill"></div>
-              <div class="facturas-skeleton facturas-skeleton--date"></div>
-              <div class="facturas-skeleton facturas-skeleton--amount"></div>
-              <div class="facturas-skeleton facturas-skeleton--ticket"></div>
-              <div class="facturas-skeleton facturas-skeleton--actions"></div>
+              <div class="incidencias-skeleton incidencias-skeleton--pill"></div>
+              <div class="incidencias-skeleton incidencias-skeleton--date"></div>
+              <div class="incidencias-skeleton incidencias-skeleton--date"></div>
+              <div class="incidencias-skeleton incidencias-skeleton--amount"></div>
+              <div class="incidencias-skeleton incidencias-skeleton--attach"></div>
+              <div class="incidencias-skeleton incidencias-skeleton--btn"></div>
             </div>
           `
         )
@@ -2057,58 +1861,10 @@ function renderTableLoading(rows = DEFAULT_PAGE_SIZE) {
 
 function renderRefreshOverlay() {
   return `
-    <div class="facturas-refresh-overlay" aria-live="polite">
-      <div class="facturas-refresh-card">
-        ${renderSpinner("Actualizando facturas...")}
+    <div class="incidencias-refresh-overlay" aria-live="polite">
+      <div class="incidencias-refresh-card">
+        ${renderSpinner("Actualizando historial...")}
       </div>
-    </div>
-  `;
-}
-
-function renderEmptyState({ hasError = false, filtering = false, searchQuery = "" } = {}) {
-  return `
-    <div class="facturas-empty">
-      <div class="facturas-empty-icon" aria-hidden="true">
-        ${hasError ? icon("lock") : filtering ? icon("filter") : icon("detail")}
-      </div>
-
-      <h3 class="facturas-empty-title">
-        ${
-          hasError
-            ? "No se pudieron cargar las facturas"
-            : filtering
-              ? "No hay facturas con este criterio"
-              : "No hay facturas para mostrar"
-        }
-      </h3>
-
-      <p class="facturas-empty-text">
-        ${
-          hasError
-            ? "Puedes reintentar la carga desde el botón de actualizar."
-            : filtering
-              ? searchQuery
-                ? `No se encontraron facturas para “${escapeHtml(searchQuery)}”. Prueba con otro cliente, email, número de factura o incidencia.`
-                : "Cambia el filtro activo para volver al historial completo."
-              : "Cuando haya documentos registrados aparecerán aquí con su PDF, estado de pago, incidencia relacionada y acciones disponibles."
-        }
-      </p>
-
-      ${
-        filtering
-          ? `
-            <button
-              type="button"
-              class="facturas-btn"
-              data-facturas-action="clear-filters"
-              data-action="clear-filters"
-            >
-              ${icon("close")}
-              <span class="facturas-btn-text">Limpiar filtros</span>
-            </button>
-          `
-          : ""
-      }
     </div>
   `;
 }
@@ -2120,11 +1876,13 @@ function renderEmptyState({ hasError = false, filtering = false, searchQuery = "
 function renderStyles() {
   return `
     <style id="${STYLE_ID}">
-      :where(.facturas-view-root, [data-facturas-scope]){
-        --fac-row-accent:var(--accent, #6f59d9);
-        --fac-row-accent-soft:var(--accent-soft, rgba(111,89,217,.12));
-        --fac-table-min-width:1040px;
-        --fac-actions-width:178px;
+      :where(.incidencias-view-root, [data-incidencias-scope]){
+        --inc-row-accent:var(--accent, #6f59d9);
+        --inc-row-accent-soft:var(--accent-soft, rgba(111,89,217,.12));
+        --inc-create-bg:var(--btn-primary-bg, var(--gradient-accent, linear-gradient(135deg, #6f59d9 0%, #5f45d8 55%, #4f37bf 100%)));
+        --inc-create-bg-hover:var(--inc-create-bg);
+        --inc-create-border:var(--btn-primary-border, color-mix(in srgb, var(--accent, #6f59d9) 46%, transparent));
+        --inc-table-row-height:88px;
 
         display:grid;
         gap:var(--view-section-gap, var(--space-lg, 18px));
@@ -2132,62 +1890,65 @@ function renderStyles() {
         font-family:var(--font-family, inherit);
         min-inline-size:0;
         inline-size:100%;
+        max-inline-size:100%;
         container-type:inline-size;
       }
 
-      :where(.facturas-view-root, [data-facturas-scope]) *,
-      :where(.facturas-view-root, [data-facturas-scope]) *::before,
-      :where(.facturas-view-root, [data-facturas-scope]) *::after{
+      :where(.incidencias-view-root, [data-incidencias-scope]) *,
+      :where(.incidencias-view-root, [data-incidencias-scope]) *::before,
+      :where(.incidencias-view-root, [data-incidencias-scope]) *::after{
         box-sizing:border-box;
       }
 
-      .facturas-hero{
+      .incidencias-hero{
         position:relative;
         overflow:hidden;
         border-radius:var(--view-hero-radius, var(--card-radius-lg, 22px));
         border:1px solid var(--view-hero-border, var(--panel-border, var(--border-default, rgba(255,255,255,.08))));
         background:
-          radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent, #6f59d9) 10%, transparent), transparent 38%),
-          radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info, #3b82a6) 8%, transparent), transparent 34%),
+          radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent, #6f59d9) 12%, transparent), transparent 38%),
+          radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info, #3b82a6) 10%, transparent), transparent 34%),
+          radial-gradient(circle at 68% 110%, color-mix(in srgb, var(--success, #22c55e) 7%, transparent), transparent 36%),
           var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
           var(--view-hero-bg, var(--panel-bg, var(--card-bg, var(--surface-elevated, #262626))));
         box-shadow:var(--view-hero-shadow, var(--panel-shadow, var(--shadow-md, 0 14px 30px rgba(0,0,0,.22))));
         padding:var(--space-xl, 22px) var(--space-xl, 24px);
         isolation:isolate;
         min-inline-size:0;
+        max-inline-size:100%;
       }
 
-      .facturas-hero::after{
+      .incidencias-hero::after{
         content:"";
         position:absolute;
         inset:auto -8% -38% 48%;
         block-size:220px;
         pointer-events:none;
-        background:radial-gradient(circle, color-mix(in srgb, var(--accent, #6f59d9) 9%, transparent), transparent 68%);
+        background:radial-gradient(circle, color-mix(in srgb, var(--accent, #6f59d9) 10%, transparent), transparent 68%);
         filter:blur(10px);
-        opacity:.8;
+        opacity:.82;
         z-index:0;
       }
 
-      .facturas-hero > *{
+      .incidencias-hero > *{
         position:relative;
         z-index:1;
       }
 
-      .facturas-hero-top{
+      .incidencias-hero-top{
         display:grid;
         grid-template-columns:minmax(0, 1fr) auto;
         gap:var(--space-lg, 18px);
         align-items:start;
       }
 
-      .facturas-hero-copy{
+      .incidencias-hero-copy{
         min-inline-size:0;
         display:grid;
         gap:var(--space-xs, 10px);
       }
 
-      .facturas-page-title{
+      .incidencias-page-title{
         margin:0;
         max-inline-size:100%;
         font-size:clamp(var(--font-3xl, 24px), 2.6vw, var(--font-5xl, 40px));
@@ -2198,15 +1959,15 @@ function renderStyles() {
         white-space:normal;
       }
 
-      .facturas-page-subtitle{
+      .incidencias-page-subtitle{
         margin:0;
-        max-inline-size:880px;
+        max-inline-size:900px;
         font-size:var(--font-lg, 15px);
         line-height:var(--line-relaxed, 1.58);
         color:var(--view-subtitle-color, var(--text-muted, rgba(245,245,245,.70)));
       }
 
-      .facturas-hero-actions{
+      .incidencias-hero-actions{
         display:flex;
         align-items:flex-start;
         justify-content:flex-end;
@@ -2214,7 +1975,7 @@ function renderStyles() {
         flex-wrap:wrap;
       }
 
-      .facturas-btn{
+      .incidencias-btn{
         appearance:none;
         min-block-size:var(--btn-height, 42px);
         padding-inline:var(--space-md, 16px);
@@ -2243,64 +2004,85 @@ function renderStyles() {
           filter var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
-      .facturas-btn svg{
+      .incidencias-btn svg{
         inline-size:16px;
         block-size:16px;
       }
 
-      .facturas-btn:hover{
+      .incidencias-btn:hover{
         transform:translateY(var(--ui-hover-lift, -1px));
         background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
         color:var(--text-strong, #ffffff);
         box-shadow:var(--shadow-md, 0 14px 30px rgba(0,0,0,.22));
       }
 
-      .facturas-btn:active{
+      .incidencias-btn:active{
         transform:translateY(0) scale(var(--ui-active-scale, .985));
       }
 
-      .facturas-btn--primary{
+      .incidencias-btn--primary{
         border-color:var(--btn-primary-border, var(--accent-border, rgba(255,255,255,.05)));
-        background:var(--btn-primary-bg, var(--gradient-accent, linear-gradient(135deg, #55555d 0%, #3f3f46 55%, #2f2f35 100%)));
+        background:var(--btn-primary-bg, var(--gradient-accent, linear-gradient(135deg, #6f59d9 0%, #5f45d8 55%, #4f37bf 100%)));
         color:var(--btn-primary-text, var(--text-on-accent, #ffffff));
         box-shadow:var(--btn-primary-shadow, 0 12px 28px rgba(0,0,0,.22));
       }
 
-      .facturas-btn--create{
-        border-color:color-mix(in srgb, var(--success, #22c55e) 32%, var(--btn-primary-border, transparent));
-        background:var(--gradient-success, linear-gradient(180deg, #22c55e 0%, #16a34a 100%));
-        color:var(--text-on-accent, #ffffff);
-        box-shadow:
-          0 10px 24px color-mix(in srgb, var(--success, #22c55e), transparent 82%),
-          var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
+      .incidencias-btn--primary:hover{
+        background:var(--btn-primary-bg-hover, var(--btn-primary-bg));
+        color:var(--btn-primary-text, #ffffff);
       }
 
-      .facturas-btn:focus-visible,
-      .facturas-action-btn:focus-visible,
-      .facturas-pagination-btn:focus-visible,
-      .facturas-incidencia-link:focus-visible,
-      .facturas-filter-pill:focus-visible,
-      .facturas-search-input:focus-visible,
-      .facturas-search-clear:focus-visible{
+      .incidencias-btn--create{
+        border-color:var(--inc-create-border);
+        background:var(--inc-create-bg);
+        color:var(--btn-primary-text, var(--text-on-accent, #ffffff));
+        box-shadow:
+          0 12px 28px color-mix(in srgb, var(--accent, #6f59d9), transparent 78%),
+          var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.10));
+      }
+
+      .incidencias-btn--create:hover{
+        transform:translateY(-2px);
+        border-color:var(--inc-create-border);
+        background:var(--inc-create-bg-hover);
+        color:var(--btn-primary-text, var(--text-on-accent, #ffffff));
+        box-shadow:
+          0 16px 34px color-mix(in srgb, var(--accent, #6f59d9), transparent 74%),
+          0 0 0 1px color-mix(in srgb, var(--text-on-accent, #ffffff) 18%, transparent) inset;
+        filter:none;
+      }
+
+      .incidencias-btn--create:active{
+        transform:translateY(0) scale(var(--ui-active-scale, .985));
+        background:var(--inc-create-bg);
+      }
+
+      .incidencias-btn:focus-visible,
+      .incidencias-detail-btn:focus-visible,
+      .incidencias-pagination-btn:focus-visible,
+      .incidencias-filter-pill:focus-visible,
+      .incidencias-filter-reset:focus-visible,
+      .incidencias-search-input:focus-visible,
+      .incidencias-search-clear:focus-visible{
         outline:none;
         box-shadow:var(--focus-ring, 0 0 0 4px rgba(113,113,122,.16));
       }
 
-      .facturas-btn.is-loading,
-      .facturas-action-btn.is-loading{
+      .incidencias-btn.is-loading,
+      .incidencias-detail-btn.is-loading{
         cursor:wait;
         opacity:.94;
       }
 
-      .facturas-btn:disabled,
-      .facturas-action-btn:disabled,
-      .facturas-action-btn[aria-disabled="true"]{
+      .incidencias-btn:disabled,
+      .incidencias-detail-btn:disabled,
+      .incidencias-detail-btn[aria-disabled="true"]{
         pointer-events:none;
         opacity:.54;
         filter:saturate(.75);
       }
 
-      .facturas-hero-meta{
+      .incidencias-hero-meta{
         margin-block-start:var(--space-md, 14px);
         display:flex;
         align-items:center;
@@ -2308,7 +2090,7 @@ function renderStyles() {
         flex-wrap:wrap;
       }
 
-      .facturas-meta-pill{
+      .incidencias-meta-pill{
         min-block-size:calc(30px * var(--ui-scale, 1));
         padding-inline:var(--space-sm, 12px);
         border-radius:var(--radius-pill, 999px);
@@ -2325,19 +2107,21 @@ function renderStyles() {
         white-space:nowrap;
       }
 
-      .facturas-meta-pill svg{
+      .incidencias-meta-pill svg{
         inline-size:14px;
         block-size:14px;
       }
 
-      .facturas-stats{
+      .incidencias-stats{
         margin-block-start:var(--space-md, 16px);
         display:grid;
         grid-template-columns:repeat(4, minmax(0, 1fr));
         gap:var(--space-sm, 12px);
       }
 
-      .facturas-stat-card{
+      .incidencias-stat-card{
+        --inc-stat-color:var(--accent, #6f59d9);
+
         position:relative;
         display:grid;
         gap:var(--space-xs, 8px);
@@ -2352,7 +2136,7 @@ function renderStyles() {
         overflow:hidden;
       }
 
-      .facturas-stat-card::after{
+      .incidencias-stat-card::after{
         content:"";
         position:absolute;
         inset:auto -20% -44% auto;
@@ -2360,31 +2144,31 @@ function renderStyles() {
         block-size:120px;
         border-radius:50%;
         pointer-events:none;
-        background:color-mix(in srgb, var(--fac-stat-color, var(--accent, #6f59d9)) 16%, transparent);
+        background:color-mix(in srgb, var(--inc-stat-color) 16%, transparent);
         filter:blur(8px);
       }
 
-      .facturas-stat-card--accent{
-        --fac-stat-color:var(--accent, #6f59d9);
+      .incidencias-stat-card--open{
+        --inc-stat-color:var(--accent, #6f59d9);
         border-color:var(--accent-border, var(--border-accent, rgba(113,113,122,.30)));
       }
 
-      .facturas-stat-card--success{
-        --fac-stat-color:var(--success, #22c55e);
+      .incidencias-stat-card--closed{
+        --inc-stat-color:var(--success, #22c55e);
         border-color:var(--border-success, rgba(34,197,94,.30));
       }
 
-      .facturas-stat-card--warning{
-        --fac-stat-color:var(--warning, #f59e0b);
-        border-color:var(--border-warning, rgba(245,158,11,.30));
-      }
-
-      .facturas-stat-card--danger{
-        --fac-stat-color:var(--error, #ef4444);
+      .incidencias-stat-card--urgent{
+        --inc-stat-color:var(--error, #ef4444);
         border-color:var(--border-error, rgba(239,68,68,.30));
       }
 
-      .facturas-stat-label{
+      .incidencias-stat-card--amount{
+        --inc-stat-color:var(--info, #94a3b8);
+        border-color:var(--border-info, rgba(148,163,184,.28));
+      }
+
+      .incidencias-stat-label{
         font-size:var(--font-xs, 11px);
         font-weight:var(--weight-bold, 700);
         letter-spacing:var(--letter-wider, .08em);
@@ -2392,7 +2176,7 @@ function renderStyles() {
         color:var(--text-dim, rgba(245,245,245,.50));
       }
 
-      .facturas-stat-value{
+      .incidencias-stat-value{
         font-size:clamp(28px, 3vw, var(--font-5xl, 40px));
         line-height:.92;
         letter-spacing:var(--letter-tight, -.03em);
@@ -2400,13 +2184,13 @@ function renderStyles() {
         color:var(--text-strong, #ffffff);
       }
 
-      .facturas-stat-text{
+      .incidencias-stat-text{
         font-size:var(--font-base, 14px);
         line-height:var(--line-normal, 1.42);
         color:var(--text-muted, rgba(245,245,245,.70));
       }
 
-      .facturas-history{
+      .incidencias-history{
         overflow:hidden;
         border-radius:var(--data-table-radius, var(--card-radius-lg, 22px));
         border:1px solid var(--data-table-border, var(--card-border, var(--border-default, rgba(255,255,255,.082))));
@@ -2415,9 +2199,10 @@ function renderStyles() {
           var(--data-table-bg, var(--card-bg, var(--surface-elevated, rgba(39,39,42,.88))));
         box-shadow:var(--data-table-shadow, var(--shadow-card, var(--card-shadow, 0 16px 36px rgba(0,0,0,.24))));
         min-inline-size:0;
+        max-inline-size:100%;
       }
 
-      .facturas-history-head{
+      .incidencias-history-head{
         display:grid;
         grid-template-columns:minmax(0, 1fr) auto;
         gap:var(--space-md, 14px);
@@ -2426,13 +2211,13 @@ function renderStyles() {
         border-bottom:1px solid var(--data-table-row-border, var(--table-border, rgba(255,255,255,.052)));
       }
 
-      .facturas-history-copy{
+      .incidencias-history-copy{
         min-inline-size:0;
         display:grid;
         gap:var(--space-3xs, 2px);
       }
 
-      .facturas-history-title{
+      .incidencias-history-title{
         margin:0;
         font-size:var(--section-title-size, var(--font-xl, 16px));
         line-height:var(--line-snug, 1.22);
@@ -2440,14 +2225,14 @@ function renderStyles() {
         color:var(--section-title-color, var(--text-strong, #ffffff));
       }
 
-      .facturas-history-subtitle{
+      .incidencias-history-subtitle{
         margin:0;
         font-size:var(--section-subtitle-size, var(--font-sm, 12px));
         line-height:var(--line-normal, 1.42);
         color:var(--section-subtitle-color, var(--text-dim, rgba(245,245,245,.50)));
       }
 
-      .facturas-pagination{
+      .incidencias-pagination{
         display:flex;
         align-items:center;
         gap:var(--space-xs, 8px);
@@ -2455,7 +2240,7 @@ function renderStyles() {
         justify-content:flex-end;
       }
 
-      .facturas-pagination-status{
+      .incidencias-pagination-status{
         min-block-size:calc(34px * var(--ui-scale, 1));
         padding-inline:10px;
         border-radius:var(--radius-pill, 999px);
@@ -2469,7 +2254,7 @@ function renderStyles() {
         border:1px solid var(--badge-border, rgba(255,255,255,.07));
       }
 
-      .facturas-pagination-btn{
+      .incidencias-pagination-btn{
         appearance:none;
         min-block-size:calc(38px * var(--ui-scale, 1));
         padding-inline:var(--space-sm, 14px);
@@ -2491,30 +2276,30 @@ function renderStyles() {
           opacity var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
-      .facturas-pagination-btn:hover{
+      .incidencias-pagination-btn:hover{
         transform:translateY(var(--ui-hover-lift, -1px));
         background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
         border-color:var(--border-strong, rgba(255,255,255,.12));
       }
 
-      .facturas-pagination-btn[disabled],
-      .facturas-pagination-btn[aria-disabled="true"]{
+      .incidencias-pagination-btn[disabled],
+      .incidencias-pagination-btn[aria-disabled="true"]{
         opacity:.48;
         cursor:not-allowed;
         pointer-events:none;
         transform:none;
       }
 
-      .facturas-filters{
+      .incidencias-filters{
         grid-column:1 / -1;
         display:grid;
-        grid-template-columns:minmax(0, 1fr) minmax(260px, 430px);
+        grid-template-columns:minmax(0, 1fr) minmax(250px, 390px);
         gap:var(--space-sm, 12px);
         align-items:center;
         padding-block-start:var(--space-xs, 4px);
       }
 
-      .facturas-filter-pills{
+      .incidencias-filter-pills{
         min-inline-size:0;
         display:flex;
         align-items:center;
@@ -2524,11 +2309,11 @@ function renderStyles() {
         padding-block:2px;
       }
 
-      .facturas-filter-pills::-webkit-scrollbar{
+      .incidencias-filter-pills::-webkit-scrollbar{
         display:none;
       }
 
-      .facturas-filter-pill{
+      .incidencias-filter-pill{
         appearance:none;
         min-block-size:calc(34px * var(--ui-scale, 1));
         padding-inline:11px 8px;
@@ -2554,7 +2339,7 @@ function renderStyles() {
           box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
-      .facturas-filter-pill strong{
+      .incidencias-filter-pill strong{
         min-inline-size:22px;
         min-block-size:20px;
         padding-inline:6px;
@@ -2568,21 +2353,21 @@ function renderStyles() {
         font-weight:900;
       }
 
-      .facturas-filter-pill:hover{
+      .incidencias-filter-pill:hover{
         transform:translateY(-1px);
         border-color:var(--border-strong, rgba(255,255,255,.12));
         background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
         color:var(--text-strong, #ffffff);
       }
 
-      .facturas-filter-pill.is-active{
+      .incidencias-filter-pill.is-active{
         border-color:color-mix(in srgb, var(--accent, #6f59d9) 42%, var(--border-strong, rgba(255,255,255,.12)));
         background:color-mix(in srgb, var(--accent, #6f59d9) 14%, var(--badge-bg, rgba(255,255,255,.048)));
         color:var(--accent-active, var(--text-strong, #ffffff));
         box-shadow:0 8px 20px color-mix(in srgb, var(--accent, #6f59d9), transparent 88%);
       }
 
-      .facturas-search{
+      .incidencias-search{
         position:relative;
         min-inline-size:0;
         inline-size:100%;
@@ -2590,7 +2375,7 @@ function renderStyles() {
         align-items:center;
       }
 
-      .facturas-search-icon{
+      .incidencias-search-icon{
         position:absolute;
         inset-inline-start:12px;
         inset-block:0;
@@ -2601,12 +2386,12 @@ function renderStyles() {
         pointer-events:none;
       }
 
-      .facturas-search-icon svg{
+      .incidencias-search-icon svg{
         inline-size:14px;
         block-size:14px;
       }
 
-      .facturas-search-input{
+      .incidencias-search-input{
         appearance:none;
         inline-size:100%;
         min-inline-size:0;
@@ -2629,21 +2414,21 @@ function renderStyles() {
           box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
-      .facturas-search-input::placeholder{
+      .incidencias-search-input::placeholder{
         color:var(--input-placeholder, var(--text-faint, rgba(245,245,245,.34)));
       }
 
-      .facturas-search-input:hover{
+      .incidencias-search-input:hover{
         border-color:var(--border-strong, rgba(255,255,255,.12));
         background:var(--input-bg-hover, var(--btn-secondary-bg-hover, rgba(255,255,255,.062)));
       }
 
-      .facturas-search-input:focus{
+      .incidencias-search-input:focus{
         border-color:color-mix(in srgb, var(--accent, #6f59d9) 42%, var(--border-strong, rgba(255,255,255,.12)));
         background:var(--input-bg-focus, var(--input-bg, rgba(255,255,255,.045)));
       }
 
-      .facturas-search-clear{
+      .incidencias-search-clear{
         appearance:none;
         position:absolute;
         inset-inline-end:6px;
@@ -2666,62 +2451,94 @@ function renderStyles() {
           border-color var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
-      .facturas-search-clear:hover{
+      .incidencias-search-clear:hover{
         color:var(--text-strong, #ffffff);
         background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
         border-color:var(--border-default, rgba(255,255,255,.09));
       }
 
-      .facturas-search-clear svg{
+      .incidencias-search-clear svg{
         inline-size:13px;
         block-size:13px;
       }
 
-      .facturas-table-wrap{
+      .incidencias-filter-reset{
+        appearance:none;
+        min-block-size:calc(34px * var(--ui-scale, 1));
+        padding-inline:11px;
+        border-radius:999px;
+        border:1px solid var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
+        background:var(--btn-secondary-bg, rgba(255,255,255,.045));
+        color:var(--btn-secondary-text, var(--text, #f5f5f5));
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        gap:7px;
+        font:inherit;
+        font-size:var(--font-xs, 11px);
+        font-weight:var(--weight-bold, 700);
+        cursor:pointer;
+        white-space:nowrap;
+        transition:
+          transform var(--duration-fast, .16s) var(--ease-standard, ease),
+          background var(--duration-fast, .16s) var(--ease-standard, ease),
+          color var(--duration-fast, .16s) var(--ease-standard, ease),
+          border-color var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .incidencias-filter-reset:hover{
+        transform:translateY(-1px);
+        background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
+        color:var(--text-strong, #ffffff);
+        border-color:var(--border-strong, rgba(255,255,255,.12));
+      }
+
+      .incidencias-filter-reset svg{
+        inline-size:13px;
+        block-size:13px;
+      }
+
+      .incidencias-table-wrap{
         position:relative;
         min-block-size:120px;
         min-inline-size:0;
+        max-inline-size:100%;
       }
 
-      .facturas-table-wrap.is-refreshing .facturas-table-shell{
+      .incidencias-table-wrap.is-refreshing .incidencias-table-shell{
         opacity:.56;
         filter:blur(.7px);
-        transition:
-          opacity var(--duration-fast, .18s) var(--ease-standard, ease),
-          filter var(--duration-fast, .18s) var(--ease-standard, ease);
       }
 
-      .facturas-table-shell{
+      .incidencias-table-shell{
         inline-size:100%;
         max-inline-size:100%;
         overflow-x:auto;
         overflow-y:hidden;
         scrollbar-width:thin;
         scrollbar-color:var(--scrollbar-thumb, rgba(255,255,255,.12)) transparent;
-        transition:
-          opacity var(--duration-fast, .18s) var(--ease-standard, ease),
-          filter var(--duration-fast, .18s) var(--ease-standard, ease);
       }
 
-      .facturas-table-shell::-webkit-scrollbar{
+      .incidencias-table-shell::-webkit-scrollbar{
         block-size:var(--scrollbar-size, 10px);
       }
 
-      .facturas-table-shell::-webkit-scrollbar-track{
+      .incidencias-table-shell::-webkit-scrollbar-track{
         background:transparent;
       }
 
-      .facturas-table-shell::-webkit-scrollbar-thumb{
+      .incidencias-table-shell::-webkit-scrollbar-thumb{
         border:2px solid transparent;
         border-radius:999px;
         background:var(--scrollbar-thumb, rgba(255,255,255,.12));
         background-clip:padding-box;
       }
 
-      .facturas-table{
+      .incidencias-table{
         display:table !important;
         inline-size:100%;
-        min-inline-size:var(--fac-table-min-width);
+        min-inline-size:0;
+        max-inline-size:100%;
         table-layout:fixed;
         border-collapse:separate;
         border-spacing:0;
@@ -2729,37 +2546,39 @@ function renderStyles() {
         margin:0;
       }
 
-      .facturas-table colgroup{
+      .incidencias-table colgroup{
         display:table-column-group !important;
       }
 
-      .facturas-table col{
+      .incidencias-table col{
         display:table-column !important;
       }
 
-      .facturas-table thead{
+      .incidencias-table thead{
         display:table-header-group !important;
       }
 
-      .facturas-table tbody{
+      .incidencias-table tbody{
         display:table-row-group !important;
       }
 
-      .facturas-table tr{
+      .incidencias-table tr{
         display:table-row !important;
       }
 
-      .facturas-table th,
-      .facturas-table td{
+      .incidencias-table th,
+      .incidencias-table td{
         display:table-cell !important;
       }
 
-      .facturas-table thead th{
+      .incidencias-table thead th{
         position:sticky;
         top:0;
         z-index:2;
+        block-size:44px;
         padding:var(--table-cell-padding-y, 12px) var(--table-cell-padding-x, 12px);
-        text-align:left;
+        text-align:center;
+        vertical-align:middle;
         font-size:var(--data-table-head-font-size, var(--font-xs, 11px));
         font-weight:var(--data-table-head-font-weight, var(--weight-bold, 700));
         letter-spacing:var(--data-table-head-letter, .075em);
@@ -2770,101 +2589,130 @@ function renderStyles() {
         white-space:nowrap;
       }
 
-      .facturas-table tbody td{
+      .incidencias-table thead th:first-child{
+        text-align:left;
+        padding-inline-start:24px;
+      }
+
+      .incidencias-table thead th:last-child,
+      .incidencias-table tbody td:last-child{
+        padding-inline-end:18px;
+      }
+
+      .incidencias-table tbody tr{
+        block-size:var(--inc-table-row-height);
+      }
+
+      .incidencias-table tbody td{
         padding:calc(12px * var(--ui-scale, 1)) var(--table-cell-padding-x, 12px);
         vertical-align:middle;
         border-bottom:1px solid var(--data-table-row-border, var(--table-border, rgba(255,255,255,.052)));
         background:transparent;
-        transition:
-          background var(--duration-fast, .16s) var(--ease-standard, ease),
-          box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
-      .facturas-table tbody tr:last-child td{
+      .incidencias-table tbody tr:last-child td{
         border-bottom:none;
       }
 
-      .facturas-table tbody tr:nth-child(even) > td{
+      .incidencias-table tbody tr:nth-child(even) td{
         background:color-mix(in srgb, var(--surface-elevated, rgba(39,39,42,.88)) 86%, transparent);
       }
 
-      .facturas-table-row{
-        --fac-row-accent:var(--accent, #6f59d9);
+      .incidencias-row{
+        --inc-row-accent:var(--accent, #6f59d9);
       }
 
-      .facturas-table-row:hover > td{
+      .incidencias-row:hover{
         background:var(--data-table-row-hover, var(--table-row-hover, rgba(255,255,255,.024)));
       }
 
-      .facturas-table-row--paid{
-        --fac-row-accent:var(--success, #22c55e);
+      .incidencias-row--pending{
+        --inc-row-accent:var(--warning, #f59e0b);
       }
 
-      .facturas-table-row--pending,
-      .facturas-table-row--partial,
-      .facturas-table-row--draft{
-        --fac-row-accent:var(--warning, #f59e0b);
+      .incidencias-row--open{
+        --inc-row-accent:var(--accent, #6f59d9);
       }
 
-      .facturas-table-row--overdue,
-      .facturas-table-row--cancelled{
-        --fac-row-accent:var(--error, #ef4444);
+      .incidencias-row--progress{
+        --inc-row-accent:var(--info, #94a3b8);
       }
 
-      .facturas-cell{
+      .incidencias-row--resolved,
+      .incidencias-row--closed{
+        --inc-row-accent:var(--success, #22c55e);
+      }
+
+      .incidencias-cell{
         min-inline-size:0;
       }
 
-      .facturas-cell--main{
+      .incidencias-cell--main{
         position:relative;
-        padding-inline-start:calc(var(--table-cell-padding-x, 12px) + 10px) !important;
+        text-align:left;
+        padding-inline-start:18px !important;
       }
 
-      .facturas-cell--main::before{
+      .incidencias-cell--main::before{
         content:"";
         position:absolute;
-        inset-block:12px;
+        inset-block:10px;
         inset-inline-start:0;
         inline-size:3px;
         border-radius:0 999px 999px 0;
-        background:var(--fac-row-accent);
-        opacity:.70;
-        transform:scaleY(.76);
-        transform-origin:center;
+        background:var(--inc-row-accent);
+        opacity:.68;
+        transform:scaleY(.72);
         transition:
           opacity var(--duration-fast, .16s) var(--ease-standard, ease),
           transform var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
-      .facturas-table-row:hover .facturas-cell--main::before{
+      .incidencias-row:hover .incidencias-cell--main::before{
         opacity:1;
         transform:scaleY(1);
       }
 
-      .facturas-main{
+      .incidencias-cell--status,
+      .incidencias-cell--date,
+      .incidencias-cell--importe,
+      .incidencias-cell--attachments,
+      .incidencias-cell--actions{
+        text-align:center;
+      }
+
+      .incidencias-cell--status > *,
+      .incidencias-cell--importe > *,
+      .incidencias-cell--attachments > *,
+      .incidencias-cell--actions > *{
+        margin-inline:auto;
+      }
+
+      .incidencias-main{
         display:grid;
         grid-template-columns:var(--avatar-size-lg, calc(44px * var(--ui-scale, 1))) minmax(0, 1fr);
         gap:var(--space-sm, 12px);
         align-items:center;
         min-inline-size:0;
+        padding-inline-start:6px;
       }
 
-      .facturas-avatar{
+      .incidencias-avatar{
         position:relative;
         inline-size:var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
         block-size:var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
         border-radius:var(--radius-pill, 999px);
         overflow:hidden;
         flex:0 0 var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
-        background:var(--fac-avatar-bg, linear-gradient(135deg, #55555d 0%, #303036 100%));
+        background:var(--inc-avatar-bg, linear-gradient(135deg, #55555d 0%, #303036 100%));
         box-shadow:
-          0 10px 22px color-mix(in srgb, var(--fac-avatar-b, #000000) 22%, transparent),
-          0 0 0 3px color-mix(in srgb, var(--fac-avatar-a, #71717a) 24%, transparent),
+          0 10px 22px color-mix(in srgb, var(--inc-avatar-b, #000000) 22%, transparent),
+          0 0 0 3px color-mix(in srgb, var(--inc-avatar-a, #71717a) 24%, transparent),
           var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
         transform:translateZ(0);
       }
 
-      .facturas-avatar::after{
+      .incidencias-avatar::after{
         content:"";
         position:absolute;
         inset:0;
@@ -2876,7 +2724,7 @@ function renderStyles() {
         mix-blend-mode:screen;
       }
 
-      .facturas-avatar img{
+      .incidencias-avatar img{
         position:relative;
         z-index:1;
         display:block;
@@ -2885,7 +2733,7 @@ function renderStyles() {
         object-fit:cover;
       }
 
-      .facturas-avatar-fallback{
+      .incidencias-avatar-fallback{
         position:absolute;
         inset:0;
         z-index:2;
@@ -2901,29 +2749,29 @@ function renderStyles() {
           0 0 16px rgba(255,255,255,.20);
       }
 
-      .facturas-avatar[data-fallback="true"] .facturas-avatar-fallback,
-      .facturas-avatar--fallback .facturas-avatar-fallback{
+      .incidencias-avatar[data-fallback="true"] .incidencias-avatar-fallback,
+      .incidencias-avatar--fallback .incidencias-avatar-fallback{
         display:flex;
       }
 
-      .facturas-avatar[data-fallback="true"] img{
+      .incidencias-avatar[data-fallback="true"] img{
         display:none !important;
       }
 
-      .facturas-main-copy{
+      .incidencias-main-copy{
         min-inline-size:0;
         display:grid;
         gap:var(--space-3xs, 3px);
       }
 
-      .facturas-factura-line{
+      .incidencias-ticket-line{
         display:flex;
         align-items:center;
         gap:7px;
         min-inline-size:0;
       }
 
-      .facturas-factura-id{
+      .incidencias-ticket-id{
         min-inline-size:0;
         font-size:var(--font-sm, 12px);
         line-height:var(--line-snug, 1.22);
@@ -2936,9 +2784,9 @@ function renderStyles() {
         white-space:nowrap;
       }
 
-      .facturas-system-id{
-        flex:0 1 auto;
-        max-inline-size:124px;
+      .incidencias-category-pill{
+        flex:0 0 auto;
+        max-inline-size:130px;
         min-block-size:20px;
         padding-inline:7px;
         border-radius:999px;
@@ -2953,9 +2801,10 @@ function renderStyles() {
         overflow:hidden;
         text-overflow:ellipsis;
         white-space:nowrap;
+        text-transform:uppercase;
       }
 
-      .facturas-factura-client{
+      .incidencias-ticket-subject{
         font-size:var(--font-lg, 15px);
         line-height:1.14;
         font-weight:var(--weight-black, 800);
@@ -2968,7 +2817,7 @@ function renderStyles() {
         -webkit-box-orient:vertical;
       }
 
-      .facturas-factura-email{
+      .incidencias-ticket-description{
         font-size:var(--font-md, 13px);
         line-height:1.3;
         color:var(--text-dim, rgba(245,245,245,.50));
@@ -2977,7 +2826,30 @@ function renderStyles() {
         white-space:nowrap;
       }
 
-      .facturas-row-badges{
+      .incidencias-client-line{
+        display:flex;
+        align-items:center;
+        gap:5px;
+        min-inline-size:0;
+        color:var(--text-muted, rgba(245,245,245,.70));
+        font-size:var(--font-xs, 11px);
+        line-height:1.22;
+        font-weight:var(--weight-semibold, 600);
+      }
+
+      .incidencias-client-name,
+      .incidencias-client-email{
+        min-inline-size:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .incidencias-client-separator{
+        color:var(--text-faint, rgba(245,245,245,.34));
+      }
+
+      .incidencias-row-badges{
         display:flex;
         align-items:center;
         flex-wrap:wrap;
@@ -2985,7 +2857,7 @@ function renderStyles() {
         margin-block-start:3px;
       }
 
-      .facturas-mini-badge{
+      .incidencias-mini-badge{
         min-block-size:20px;
         padding-inline:7px;
         border-radius:999px;
@@ -3001,32 +2873,41 @@ function renderStyles() {
         letter-spacing:.035em;
         text-transform:uppercase;
         white-space:nowrap;
+        max-inline-size:160px;
+        overflow:hidden;
+        text-overflow:ellipsis;
       }
 
-      .facturas-mini-badge svg{
+      .incidencias-mini-badge svg{
         inline-size:12px;
         block-size:12px;
+        flex:0 0 auto;
       }
 
-      .facturas-mini-badge--sent{
-        color:var(--success, #22c55e);
-        background:var(--success-bg, rgba(34,197,94,.10));
-        border-color:var(--border-success, rgba(34,197,94,.30));
-      }
-
-      .facturas-mini-badge--pdf{
-        color:var(--info, #94a3b8);
-        background:var(--info-bg, rgba(148,163,184,.10));
-        border-color:var(--border-info, rgba(148,163,184,.28));
-      }
-
-      .facturas-mini-badge--blocked{
+      .incidencias-mini-badge--critical,
+      .incidencias-mini-badge--urgent{
         color:var(--error, #ef4444);
         background:var(--error-bg, rgba(239,68,68,.10));
         border-color:var(--border-error, rgba(239,68,68,.30));
       }
 
-      .facturas-chip{
+      .incidencias-mini-badge--medium{
+        color:var(--warning, #f59e0b);
+        background:var(--warning-bg, rgba(245,158,11,.10));
+        border-color:var(--border-warning, rgba(245,158,11,.30));
+      }
+
+      .incidencias-mini-badge--low{
+        color:var(--info, #94a3b8);
+        background:var(--info-bg, rgba(148,163,184,.10));
+        border-color:var(--border-info, rgba(148,163,184,.28));
+      }
+
+      .incidencias-mini-badge--agent{
+        color:var(--text-dim, rgba(245,245,245,.50));
+      }
+
+      .incidencias-chip{
         min-block-size:var(--chip-height, calc(26px * var(--ui-scale, 1)));
         padding-inline:var(--space-sm, 12px);
         border-radius:var(--radius-pill, 999px);
@@ -3043,7 +2924,7 @@ function renderStyles() {
         box-shadow:var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
       }
 
-      .facturas-chip-dot{
+      .incidencias-chip-dot{
         inline-size:6px;
         block-size:6px;
         border-radius:999px;
@@ -3051,149 +2932,135 @@ function renderStyles() {
         box-shadow:0 0 0 3px color-mix(in srgb, currentColor 16%, transparent);
       }
 
-      .facturas-chip--pending,
-      .facturas-chip--partial{
+      .incidencias-chip--pending{
         color:var(--warning, #f59e0b);
         background:color-mix(in srgb, var(--warning-bg, rgba(245,158,11,.10)) 78%, var(--surface-active, transparent));
         border-color:var(--border-warning, rgba(245,158,11,.30));
       }
 
-      .facturas-chip--draft{
-        color:var(--text-soft, rgba(245,245,245,.88));
-        background:var(--chip-bg, rgba(255,255,255,.034));
-        border-color:var(--chip-border, rgba(255,255,255,.07));
+      .incidencias-chip--open{
+        color:var(--text-strong, #ffffff);
+        background:
+          linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--text-strong, #ffffff), transparent 94%),
+            transparent 48%
+          ),
+          color-mix(
+            in srgb,
+            var(--accent, #3f3f46) 34%,
+            var(--surface-active, rgba(255,255,255,.066)) 66%
+          );
+        border-color:color-mix(
+          in srgb,
+          var(--accent, #3f3f46) 54%,
+          var(--border-strong, rgba(255,255,255,.12)) 46%
+        );
       }
 
-      .facturas-chip--paid{
+      .incidencias-chip--progress{
+        color:var(--info, #94a3b8);
+        background:color-mix(in srgb, var(--info-bg, rgba(148,163,184,.10)) 78%, var(--surface-active, transparent));
+        border-color:var(--border-info, rgba(148,163,184,.28));
+      }
+
+      .incidencias-chip--resolved,
+      .incidencias-chip--closed{
         color:var(--success, #22c55e);
         background:color-mix(in srgb, var(--success-bg, rgba(34,197,94,.10)) 78%, var(--surface-active, transparent));
         border-color:var(--border-success, rgba(34,197,94,.30));
       }
 
-      .facturas-chip--overdue,
-      .facturas-chip--cancelled{
-        color:var(--error, #ef4444);
-        background:color-mix(in srgb, var(--error-bg, rgba(239,68,68,.10)) 78%, var(--surface-active, transparent));
-        border-color:var(--border-error, rgba(239,68,68,.30));
-      }
-
-      .facturas-date-inline{
-        display:inline-block;
+      .incidencias-date-inline{
+        display:inline-flex;
+        justify-content:center;
+        inline-size:100%;
         white-space:nowrap;
-        font-size:var(--font-md, 13px);
+        font-size:var(--font-sm, 12px);
         line-height:1.2;
         font-weight:var(--weight-semibold, 600);
         font-variant-numeric:tabular-nums;
         color:var(--data-table-cell-text, var(--text-soft, rgba(245,245,245,.88)));
       }
 
-      .facturas-total-stack{
-        display:grid;
-        gap:var(--space-3xs, 2px);
-        min-inline-size:0;
-      }
-
-      .facturas-total-value{
-        font-size:var(--font-base, 14px);
-        line-height:1.15;
-        font-weight:var(--weight-bold, 700);
-        color:var(--text-strong, #ffffff);
-        white-space:nowrap;
-      }
-
-      .facturas-total-caption{
-        font-size:var(--font-xs, 11px);
-        line-height:1.15;
-        color:var(--text-muted, rgba(245,245,245,.70));
-        white-space:nowrap;
-        font-weight:var(--weight-bold, 700);
-      }
-
-      .facturas-total-meta{
-        font-size:var(--font-xs, 11px);
-        line-height:1.15;
-        color:var(--text-dim, rgba(245,245,245,.50));
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-      }
-
-      .facturas-incidencia-link{
-        appearance:none;
-        max-inline-size:100%;
-        min-block-size:calc(30px * var(--ui-scale, 1));
-        padding-inline:var(--space-sm, 10px);
-        border-radius:var(--radius-pill, 999px);
-        border:1px solid var(--accent-border, rgba(113,113,122,.28));
-        background:var(--accent-soft, rgba(63,63,70,.18));
-        color:var(--text-strong, #ffffff);
-        font-size:var(--font-xs, 11px);
-        font-weight:var(--weight-bold, 700);
-        letter-spacing:.025em;
-        text-transform:uppercase;
-        cursor:pointer;
+      .incidencias-importe,
+      .incidencias-attachments-pill{
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        gap:6px;
+        gap:5px;
+        min-block-size:calc(30px * var(--ui-scale, 1));
+        padding-inline:var(--space-sm, 12px);
+        border-radius:var(--radius-pill, 999px);
+        font-size:var(--font-xs, 11px);
+        font-weight:var(--weight-bold, 700);
         white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-        transition:
-          transform var(--duration-fast, .16s) var(--ease-standard, ease),
-          background var(--duration-fast, .16s) var(--ease-standard, ease),
-          border-color var(--duration-fast, .16s) var(--ease-standard, ease),
-          color var(--duration-fast, .16s) var(--ease-standard, ease);
+        border:1px solid transparent;
       }
 
-      .facturas-incidencia-link svg{
-        inline-size:14px;
-        block-size:14px;
+      .incidencias-importe{
+        min-inline-size:84px;
+      }
+
+      .incidencias-importe svg,
+      .incidencias-attachments-pill svg{
+        inline-size:13px;
+        block-size:13px;
         flex:0 0 auto;
       }
 
-      .facturas-incidencia-link span{
-        min-inline-size:0;
-        overflow:hidden;
-        text-overflow:ellipsis;
+      .incidencias-importe--money{
+        color:var(--chip-text, var(--text-soft, rgba(245,245,245,.88)));
+        background:var(--chip-bg, rgba(255,255,255,.034));
+        border-color:var(--chip-border, rgba(255,255,255,.07));
       }
 
-      .facturas-incidencia-link:hover{
-        transform:translateY(var(--ui-hover-lift, -1px));
-        background:var(--accent-ghost, rgba(63,63,70,.10));
-        border-color:var(--accent-border-strong, rgba(113,113,122,.42));
+      .incidencias-importe--paid{
+        color:var(--success, #22c55e);
+        background:var(--success-bg, rgba(34,197,94,.10));
+        border-color:var(--border-success, rgba(34,197,94,.30));
       }
 
-      .facturas-incidencia-empty{
+      .incidencias-importe--pending,
+      .incidencias-importe--partial{
+        color:var(--warning, #f59e0b);
+        background:var(--warning-bg, rgba(245,158,11,.10));
+        border-color:var(--border-warning, rgba(245,158,11,.30));
+      }
+
+      .incidencias-importe--overdue{
+        color:var(--error, #ef4444);
+        background:var(--error-bg, rgba(239,68,68,.10));
+        border-color:var(--border-error, rgba(239,68,68,.30));
+      }
+
+      .incidencias-importe--status,
+      .incidencias-importe--idle{
         color:var(--text-dim, rgba(245,245,245,.50));
-        font-size:var(--font-md, 13px);
-        font-weight:var(--weight-semibold, 600);
+        background:var(--chip-bg, rgba(255,255,255,.034));
+        border-color:var(--chip-border, rgba(255,255,255,.07));
       }
 
-      .facturas-cell--actions{
+      .incidencias-attachments-pill{
+        min-inline-size:48px;
+        color:var(--chip-text, var(--text-soft, rgba(245,245,245,.88)));
+        background:var(--chip-bg, rgba(255,255,255,.034));
+        border-color:var(--chip-border, rgba(255,255,255,.07));
+      }
+
+      .incidencias-cell--actions{
         width:1%;
         white-space:nowrap;
-        text-align:end;
       }
 
-      .facturas-actions{
-        display:grid;
-        grid-template-columns:repeat(2, minmax(76px, 1fr));
-        gap:var(--space-2xs, 6px);
-        inline-size:100%;
-        max-inline-size:var(--fac-actions-width);
-        min-inline-size:0;
-        justify-content:end;
-        margin-inline-start:auto;
-      }
-
-      .facturas-action-btn{
+      .incidencias-detail-btn{
         appearance:none;
-        inline-size:100%;
-        min-inline-size:0;
+        inline-size:calc(96px * var(--ui-scale, 1));
+        min-inline-size:calc(96px * var(--ui-scale, 1));
+        max-inline-size:calc(96px * var(--ui-scale, 1));
         min-block-size:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
         block-size:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
-        padding-inline:7px;
+        padding-inline:var(--space-xs, 8px);
         border-radius:var(--radius-md, 10px);
         border:1px solid var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
         background:var(--btn-secondary-bg, rgba(255,255,255,.045));
@@ -3205,10 +3072,9 @@ function renderStyles() {
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        gap:5px;
+        gap:6px;
         white-space:nowrap;
         box-shadow:none;
-        overflow:hidden;
         transition:
           border-color var(--duration-fast, .16s) var(--ease-standard, ease),
           background var(--duration-fast, .16s) var(--ease-standard, ease),
@@ -3219,60 +3085,34 @@ function renderStyles() {
           filter var(--duration-fast, .16s) var(--ease-standard, ease);
       }
 
-      .facturas-action-icon{
+      .incidencias-action-icon{
         display:inline-flex;
         align-items:center;
         justify-content:center;
         flex:0 0 auto;
       }
 
-      .facturas-action-icon svg{
+      .incidencias-action-icon svg{
         inline-size:14px;
         block-size:14px;
       }
 
-      .facturas-action-btn .facturas-btn-text{
-        min-inline-size:0;
-        overflow:hidden;
-        text-overflow:ellipsis;
-      }
-
-      .facturas-action-btn:hover{
+      .incidencias-detail-btn:hover{
         border-color:var(--border-strong, rgba(255,255,255,.12));
         background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
         color:var(--text-strong, #ffffff);
         transform:translateY(var(--ui-hover-lift, -1px));
       }
 
-      .facturas-action-btn:active{
+      .incidencias-detail-btn:active{
         transform:translateY(0) scale(var(--ui-active-scale, .985));
       }
 
-      .facturas-action-btn.is-loading{
-        min-block-size:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
-        block-size:var(--btn-height-sm, calc(34px * var(--ui-scale, 1)));
+      .incidencias-detail-btn.is-loading{
         justify-content:center;
       }
 
-      .facturas-action-btn--primary{
-        border-color:var(--btn-primary-border, var(--accent-border, rgba(255,255,255,.05)));
-        background:var(--btn-primary-bg, var(--gradient-accent, linear-gradient(135deg, #55555d 0%, #3f3f46 55%, #2f2f35 100%)));
-        color:var(--btn-primary-text, var(--text-on-accent, #ffffff));
-      }
-
-      .facturas-action-btn--primary:hover{
-        background:var(--btn-primary-bg-hover, var(--btn-primary-bg));
-        color:var(--btn-primary-text, #ffffff);
-        box-shadow:var(--btn-primary-shadow, 0 12px 28px rgba(0,0,0,.22));
-      }
-
-      .facturas-action-btn--success{
-        border-color:color-mix(in srgb, var(--success, #22c55e) 32%, var(--btn-primary-border, transparent));
-        background:var(--gradient-success, linear-gradient(180deg, #22c55e 0%, #16a34a 100%));
-        color:var(--text-on-accent, #ffffff);
-      }
-
-      .facturas-loader-only{
+      .incidencias-loader-only{
         display:inline-flex;
         inline-size:16px;
         block-size:16px;
@@ -3281,7 +3121,7 @@ function renderStyles() {
         flex:0 0 auto;
       }
 
-      .facturas-inline-loading{
+      .incidencias-inline-loading{
         display:inline-flex;
         align-items:center;
         justify-content:center;
@@ -3289,21 +3129,21 @@ function renderStyles() {
         white-space:nowrap;
       }
 
-      .facturas-inline-loading-text{
+      .incidencias-inline-loading-text{
         display:inline-block;
       }
 
-      .facturas-inline-spinner{
+      .incidencias-inline-spinner{
         inline-size:14px;
         block-size:14px;
         border-radius:var(--radius-pill, 999px);
         border:2px solid var(--loader-ring, rgba(255,255,255,.12));
         border-top-color:currentColor;
-        animation:facturasSpin .78s linear infinite;
+        animation:incidenciasSpin .78s linear infinite;
         flex:0 0 auto;
       }
 
-      .facturas-refresh-overlay{
+      .incidencias-refresh-overlay{
         position:absolute;
         inset:0;
         z-index:3;
@@ -3315,7 +3155,7 @@ function renderStyles() {
         -webkit-backdrop-filter:var(--blur-sm, blur(8px));
       }
 
-      .facturas-refresh-card{
+      .incidencias-refresh-card{
         display:inline-flex;
         align-items:center;
         justify-content:center;
@@ -3330,32 +3170,32 @@ function renderStyles() {
         box-shadow:var(--shadow-lg, 0 20px 46px rgba(0,0,0,.28));
       }
 
-      .facturas-table-loading{
+      .incidencias-table-loading{
         padding:var(--space-sm, 12px) var(--space-lg, 18px) var(--space-md, 16px);
         display:grid;
         gap:var(--space-sm, 12px);
       }
 
-      .facturas-table-loading-row{
+      .incidencias-table-loading-row{
         display:grid;
-        grid-template-columns:var(--avatar-size-lg, 44px) minmax(190px, 1.1fr) 102px 130px 108px 150px 178px;
-        gap:var(--space-xs, 10px);
+        grid-template-columns:var(--avatar-size-lg, 44px) minmax(220px, 1fr) 98px 122px 116px 88px 48px 96px;
+        gap:var(--space-sm, 12px);
         align-items:center;
       }
 
-      .facturas-table-loading-copy{
+      .incidencias-table-loading-copy{
         display:grid;
         gap:var(--space-xs, 7px);
       }
 
-      .facturas-skeleton{
+      .incidencias-skeleton{
         position:relative;
         overflow:hidden;
         border-radius:var(--skeleton-radius, var(--radius-md, 13px));
         background:var(--skeleton-bg, rgba(255,255,255,.050));
       }
 
-      .facturas-skeleton::after{
+      .incidencias-skeleton::after{
         content:"";
         position:absolute;
         inset:0;
@@ -3366,59 +3206,60 @@ function renderStyles() {
           var(--skeleton-shine, rgba(255,255,255,.095)),
           transparent
         );
-        animation:facturasSkeleton 1.2s var(--ease-standard, ease-in-out) infinite;
+        animation:incidenciasSkeleton 1.2s var(--ease-standard, ease-in-out) infinite;
       }
 
-      .facturas-skeleton--avatar{
+      .incidencias-skeleton--avatar{
         inline-size:var(--avatar-size-lg, 44px);
         block-size:var(--avatar-size-lg, 44px);
         border-radius:var(--radius-pill, 999px);
       }
 
-      .facturas-skeleton--xs{
+      .incidencias-skeleton--xs{
         inline-size:120px;
         block-size:var(--skeleton-height-sm, 10px);
       }
 
-      .facturas-skeleton--lg{
+      .incidencias-skeleton--lg{
         inline-size:74%;
         block-size:var(--skeleton-height-md, 14px);
       }
 
-      .facturas-skeleton--md{
+      .incidencias-skeleton--md{
         inline-size:56%;
         block-size:12px;
       }
 
-      .facturas-skeleton--pill{
-        inline-size:86px;
+      .incidencias-skeleton--pill{
+        inline-size:92px;
         block-size:30px;
         border-radius:var(--radius-pill, 999px);
       }
 
-      .facturas-skeleton--date{
-        inline-size:124px;
+      .incidencias-skeleton--date{
+        inline-size:112px;
         block-size:12px;
       }
 
-      .facturas-skeleton--amount{
-        inline-size:92px;
-        block-size:30px;
-      }
-
-      .facturas-skeleton--ticket{
-        inline-size:148px;
+      .incidencias-skeleton--amount{
+        inline-size:88px;
         block-size:30px;
         border-radius:var(--radius-pill, 999px);
       }
 
-      .facturas-skeleton--actions{
-        inline-size:178px;
-        block-size:calc((var(--btn-height-sm, 34px) * 2) + var(--space-2xs, 6px));
+      .incidencias-skeleton--attach{
+        inline-size:48px;
+        block-size:30px;
+        border-radius:var(--radius-pill, 999px);
+      }
+
+      .incidencias-skeleton--btn{
+        inline-size:calc(96px * var(--ui-scale, 1));
+        block-size:var(--btn-height-sm, 34px);
         border-radius:var(--radius-md, 12px);
       }
 
-      .facturas-empty{
+      .incidencias-empty{
         display:grid;
         justify-items:center;
         gap:var(--space-xs, 8px);
@@ -3426,7 +3267,7 @@ function renderStyles() {
         text-align:center;
       }
 
-      .facturas-empty-icon{
+      .incidencias-empty-icon{
         inline-size:54px;
         block-size:54px;
         display:grid;
@@ -3438,19 +3279,19 @@ function renderStyles() {
         box-shadow:var(--shadow-soft, 0 8px 18px rgba(0,0,0,.13));
       }
 
-      .facturas-empty-icon svg{
+      .incidencias-empty-icon svg{
         inline-size:24px;
         block-size:24px;
       }
 
-      .facturas-empty-title{
+      .incidencias-empty-title{
         margin:0;
         font-size:var(--font-2xl, 18px);
         font-weight:var(--weight-bold, 700);
         color:var(--text-strong, #ffffff);
       }
 
-      .facturas-empty-text{
+      .incidencias-empty-text{
         margin:0;
         max-inline-size:58ch;
         font-size:var(--font-md, 13px);
@@ -3458,7 +3299,7 @@ function renderStyles() {
         color:var(--text-muted, rgba(245,245,245,.70));
       }
 
-      .facturas-error{
+      .incidencias-error{
         display:grid;
         justify-items:start;
         gap:var(--space-xs, 10px);
@@ -3471,30 +3312,30 @@ function renderStyles() {
         box-shadow:var(--shadow-sm, 0 6px 14px rgba(0,0,0,.16));
       }
 
-      .facturas-error-title{
+      .incidencias-error-title{
         margin:0;
         font-size:var(--font-2xl, 18px);
         font-weight:var(--weight-bold, 700);
         color:var(--text-strong, #ffffff);
       }
 
-      .facturas-error-text{
+      .incidencias-error-text{
         margin:0;
         font-size:var(--font-md, 13px);
         line-height:var(--line-relaxed, 1.62);
         color:var(--text-muted, rgba(245,245,245,.70));
       }
 
-      @keyframes facturasSpin{
+      @keyframes incidenciasSpin{
         to{ transform:rotate(360deg); }
       }
 
-      @keyframes facturasSkeleton{
+      @keyframes incidenciasSkeleton{
         to{ transform:translateX(100%); }
       }
 
-      [data-theme="light"] .facturas-hero,
-      [data-theme="light"] .facturas-history{
+      [data-theme="light"] .incidencias-hero,
+      [data-theme="light"] .incidencias-history{
         background:
           radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent, #6f59d9) 9%, transparent), transparent 38%),
           radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info, #3b82a6) 7%, transparent), transparent 34%),
@@ -3502,186 +3343,210 @@ function renderStyles() {
           var(--view-hero-bg, var(--panel-bg, var(--card-bg, var(--surface-elevated, #ffffff))));
       }
 
-      [data-theme="light"] .facturas-stat-card{
+      [data-theme="light"] .incidencias-stat-card{
         background:
           var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.82), rgba(255,255,255,0) 34%)),
           var(--card-bg, var(--surface-elevated, #ffffff));
       }
 
-      [data-theme="light"] .facturas-table tbody tr:nth-child(even) > td{
-        background:rgba(23,32,51,.012);
+      [data-theme="light"] .incidencias-btn--create{
+        --inc-create-bg:var(--btn-primary-bg, linear-gradient(135deg, var(--accent, #6f59d9) 0%, var(--accent-hover, #5f45d8) 100%));
+        --inc-create-bg-hover:var(--inc-create-bg);
+        --inc-create-border:color-mix(in srgb, var(--accent, #6f59d9) 44%, transparent);
       }
 
-      [data-theme="light"] .facturas-table-row:hover > td{
-        background:var(--data-table-row-hover, rgba(23,32,51,.023));
-      }
-
-      [data-theme="light"] .facturas-filter-pill.is-active{
+      [data-theme="light"] .incidencias-filter-pill.is-active{
         color:var(--accent-active, #533cb6);
         background:var(--accent-soft, rgba(111,89,217,.125));
         border-color:var(--accent-border-strong, rgba(111,89,217,.36));
       }
 
-      [data-theme="light"] .facturas-search-input{
+      [data-theme="light"] .incidencias-search-input{
         color:var(--input-text, var(--text, #111827));
         background:var(--input-bg, rgba(255,255,255,.76));
         border-color:var(--input-border, var(--border-default, rgba(15,23,42,.10)));
       }
 
-      [data-theme="light"] .facturas-search-icon,
-      [data-theme="light"] .facturas-search-clear{
+      [data-theme="light"] .incidencias-search-icon,
+      [data-theme="light"] .incidencias-search-clear{
         color:var(--text-dim, rgba(15,23,42,.50));
       }
 
-      [data-theme="light"] .facturas-search-clear:hover{
+      [data-theme="light"] .incidencias-search-clear:hover{
         color:var(--text-strong, #111827);
         background:var(--btn-secondary-bg-hover, rgba(15,23,42,.052));
       }
 
-      [data-theme="light"] .facturas-chip--pending,
-      [data-theme="light"] .facturas-chip--partial{
-        color:var(--warning-hover, #9c6110);
-        background:var(--warning-soft, rgba(192,122,22,.12));
-        border-color:var(--border-warning, rgba(217,119,6,.245));
-      }
-
-      [data-theme="light"] .facturas-chip--draft{
-        color:var(--text-muted, rgba(23,32,51,.70));
-        background:var(--chip-bg, rgba(23,32,51,.040));
-        border-color:var(--chip-border, rgba(23,32,51,.075));
-      }
-
-      [data-theme="light"] .facturas-chip--paid{
-        color:var(--success-hover, #157a4f);
-        background:var(--success-soft, rgba(31,157,104,.12));
-        border-color:var(--border-success, rgba(22,163,74,.245));
-      }
-
-      [data-theme="light"] .facturas-chip--overdue,
-      [data-theme="light"] .facturas-chip--cancelled{
-        color:var(--error-hover, #b52a39);
-        background:var(--error-soft, rgba(216,60,77,.12));
-        border-color:var(--border-error, rgba(220,38,38,.245));
-      }
-
-      [data-theme="light"] .facturas-incidencia-link{
+      [data-theme="light"] .incidencias-chip--open{
         color:var(--accent-active, #533cb6);
         background:var(--accent-soft, rgba(111,89,217,.125));
         border-color:var(--accent-border-strong, rgba(111,89,217,.36));
       }
 
+      [data-theme="light"] .incidencias-chip--pending{
+        color:var(--warning-hover, #9c6110);
+        background:var(--warning-soft, rgba(192,122,22,.12));
+        border-color:var(--border-warning, rgba(217,119,6,.245));
+      }
+
+      [data-theme="light"] .incidencias-chip--progress{
+        color:var(--info-hover, #2f6d8d);
+        background:var(--info-soft, rgba(59,130,166,.12));
+        border-color:var(--border-info, rgba(59,130,166,.245));
+      }
+
+      [data-theme="light"] .incidencias-chip--resolved,
+      [data-theme="light"] .incidencias-chip--closed{
+        color:var(--success-hover, #157a4f);
+        background:var(--success-soft, rgba(31,157,104,.12));
+        border-color:var(--border-success, rgba(22,163,74,.245));
+      }
+
+      [data-theme="light"] .incidencias-mini-badge--critical,
+      [data-theme="light"] .incidencias-mini-badge--urgent{
+        color:var(--error-hover, #b52a39);
+        background:var(--error-soft, rgba(216,60,77,.12));
+        border-color:var(--border-error, rgba(220,38,38,.245));
+      }
+
+      [data-theme="light"] .incidencias-mini-badge--medium{
+        color:var(--warning-hover, #9c6110);
+        background:var(--warning-soft, rgba(192,122,22,.12));
+        border-color:var(--border-warning, rgba(217,119,6,.245));
+      }
+
+      [data-theme="light"] .incidencias-mini-badge--low{
+        color:var(--info-hover, #2f6d8d);
+        background:var(--info-soft, rgba(59,130,166,.12));
+        border-color:var(--border-info, rgba(59,130,166,.245));
+      }
+
+      [data-theme="light"] .incidencias-importe--paid{
+        color:var(--success-hover, #157a4f);
+        background:var(--success-soft, rgba(31,157,104,.12));
+        border-color:var(--border-success, rgba(22,163,74,.245));
+      }
+
+      [data-theme="light"] .incidencias-importe--pending,
+      [data-theme="light"] .incidencias-importe--partial{
+        color:var(--warning-hover, #9c6110);
+        background:var(--warning-soft, rgba(192,122,22,.12));
+        border-color:var(--border-warning, rgba(217,119,6,.245));
+      }
+
+      [data-theme="light"] .incidencias-importe--overdue{
+        color:var(--error-hover, #b52a39);
+        background:var(--error-soft, rgba(216,60,77,.12));
+        border-color:var(--border-error, rgba(220,38,38,.245));
+      }
+
       @media (max-width: 1240px){
-        .facturas-filters{
+        .incidencias-stats{
+          grid-template-columns:repeat(2, minmax(0, 1fr));
+        }
+
+        .incidencias-filters{
           grid-template-columns:1fr;
         }
 
-        .facturas-search{
-          max-inline-size:560px;
+        .incidencias-search{
+          max-inline-size:520px;
         }
       }
 
       @media (max-width: 1180px){
-        :where(.facturas-view-root, [data-facturas-scope]){
-          --fac-table-min-width:1010px;
-          --fac-actions-width:170px;
-        }
-
-        .facturas-hero{
+        .incidencias-hero{
           padding:var(--space-lg, 20px);
         }
 
-        .facturas-hero-top{
+        .incidencias-hero-top{
           grid-template-columns:1fr;
         }
 
-        .facturas-hero-actions{
+        .incidencias-hero-actions{
           justify-content:flex-start;
         }
+      }
 
-        .facturas-stats{
-          grid-template-columns:repeat(2, minmax(0, 1fr));
-        }
-
-        .facturas-actions{
-          grid-template-columns:repeat(2, minmax(72px, 1fr));
+      @media (max-width: 1100px){
+        .incidencias-table{
+          min-inline-size:980px;
         }
       }
 
       @media (max-width: 760px){
-        :where(.facturas-view-root, [data-facturas-scope]){
-          --fac-table-min-width:980px;
-          --fac-actions-width:164px;
+        :where(.incidencias-view-root, [data-incidencias-scope]){
           gap:var(--space-md, 16px);
         }
 
-        .facturas-hero{
+        .incidencias-hero{
           padding:var(--space-lg, 18px) var(--space-md, 16px);
           border-radius:var(--radius-xl, 18px);
         }
 
-        .facturas-history{
+        .incidencias-history{
           border-radius:var(--radius-xl, 18px);
         }
 
-        .facturas-history-head{
+        .incidencias-history-head{
           grid-template-columns:1fr;
           padding:var(--space-md, 14px) var(--space-md, 14px) var(--space-sm, 12px);
         }
 
-        .facturas-pagination{
+        .incidencias-pagination{
           justify-content:flex-start;
         }
 
-        .facturas-stats{
+        .incidencias-stats{
           grid-template-columns:1fr;
         }
 
-        .facturas-page-title{
+        .incidencias-page-title{
           font-size:clamp(var(--font-3xl, 24px), 8vw, var(--font-4xl, 34px));
           line-height:1;
         }
 
-        .facturas-page-subtitle{
+        .incidencias-page-subtitle{
           font-size:var(--font-base, 14px);
         }
 
-        .facturas-hero-actions{
+        .incidencias-hero-actions{
           inline-size:100%;
         }
 
-        .facturas-btn{
+        .incidencias-btn{
           flex:1 1 auto;
         }
 
-        .facturas-search{
+        .incidencias-search{
           max-inline-size:none;
         }
       }
 
       @media (max-width: 520px){
-        .facturas-meta-pill{
+        .incidencias-meta-pill{
           inline-size:100%;
           justify-content:center;
         }
 
-        .facturas-hero-actions{
+        .incidencias-hero-actions{
           display:grid;
           grid-template-columns:1fr;
         }
 
-        .facturas-btn{
+        .incidencias-btn{
           inline-size:100%;
         }
 
-        .facturas-filter-pills{
+        .incidencias-filter-pills{
           margin-inline:-2px;
         }
       }
 
       @media (prefers-reduced-motion: reduce){
-        :where(.facturas-view-root, [data-facturas-scope]) *,
-        :where(.facturas-view-root, [data-facturas-scope]) *::before,
-        :where(.facturas-view-root, [data-facturas-scope]) *::after{
+        :where(.incidencias-view-root, [data-incidencias-scope]) *,
+        :where(.incidencias-view-root, [data-incidencias-scope]) *::before,
+        :where(.incidencias-view-root, [data-incidencias-scope]) *::after{
           animation:none !important;
           transition:none !important;
         }
@@ -3697,22 +3562,12 @@ function renderStyles() {
 export function renderHeader(input = {}) {
   const data = safeObject(input);
 
-  const rows = sortFacturasNewestFirst(
-    safeArray(first(data.items, data.rows, data.facturas, data.invoices))
+  const items = sortIncidenciasNewestFirst(
+    safeArray(first(data.items, data.rows, data.tickets, data.incidencias))
   );
 
-  const runtime = safeObject(data.state);
-
-  const stats = computeStats(rows);
-  const canCreateFactura = isAdminState(runtime);
-
-  const updatedAt = first(
-    data.lastUpdatedAt,
-    runtime.lastSyncAt,
-    data.updatedAt,
-    runtime.updatedAt,
-    ...rows.map((item) => getUpdatedAt(item))
-  );
+  const state = safeObject(data.state);
+  const stats = computeStats(items);
 
   const remoteCount = Math.max(
     stats.total,
@@ -3720,93 +3575,104 @@ export function renderHeader(input = {}) {
       first(
         data.remoteCount,
         data.totalCount,
-        data.totalMatched,
-        runtime.remoteCount,
-        runtime.totalCount,
-        runtime.totalMatched,
+        state.remoteCount,
+        state.totalCount,
         stats.total
       ),
       stats.total
     )
   );
 
-  const refreshing = Boolean(first(runtime.refreshing, data.refreshing));
-  const loading = Boolean(first(runtime.loading, data.loading));
-  const creating = Boolean(first(runtime.creating, runtime.creatingFactura, data.creating));
+  const updatedAt = first(
+    data.lastUpdatedAt,
+    state.lastSyncAt,
+    data.updatedAt,
+    state.updatedAt,
+    ...items.map((item) => getUpdatedAt(item))
+  );
+
+  const title = safeText(
+    first(data.title, state.title, "Tus incidencias y solicitudes"),
+    "Tus incidencias y solicitudes"
+  );
+
+  const subtitle = safeText(
+    first(
+      data.subtitle,
+      state.subtitle,
+      "Consulta el estado de tus incidencias, revisa las actualizaciones más recientes y crea nuevas solicitudes desde una vista clara, cercana y fácil de seguir."
+    ),
+    ""
+  );
+
+  const creating = Boolean(first(state.creating, state.creatingIncidencia, data.creating));
+  const refreshing = Boolean(first(state.refreshing, data.refreshing));
+  const loading = Boolean(first(state.loading, data.loading));
 
   const includeStyles = data.includeStyles !== false;
 
   return `
     ${renderMaybeStyles(includeStyles)}
 
-    <section class="facturas-hero">
-      <div class="facturas-hero-top">
-        <div class="facturas-hero-copy">
-          <h1 class="facturas-page-title">Centro de control de facturas</h1>
-          <p class="facturas-page-subtitle">
-            Gestiona emisión, seguimiento, consulta, descarga y envío de documentos fiscales desde una vista clara, premium y conectada con sus incidencias relacionadas.
-          </p>
+    <section class="incidencias-hero">
+      <div class="incidencias-hero-top">
+        <div class="incidencias-hero-copy">
+          <h1 class="incidencias-page-title">${escapeHtml(title)}</h1>
+          <p class="incidencias-page-subtitle">${escapeHtml(subtitle)}</p>
         </div>
 
-        <div class="facturas-hero-actions">
+        <div class="incidencias-hero-actions">
           <button
             type="button"
-            id="facturas-export-btn"
-            class="facturas-btn"
-            data-action="export"
-            data-facturas-action="export"
-            ${loading || refreshing || !rows.length ? "disabled" : ""}
-          >
-            ${icon("export")}
-            <span class="facturas-btn-text">Exportar CSV</span>
-          </button>
-
-          ${
-            canCreateFactura
-              ? `
-                <button
-                  type="button"
-                  id="facturas-create-btn"
-                  class="facturas-btn facturas-btn--create${creating ? " is-loading" : ""}"
-                  data-action="create-factura"
-                  data-facturas-action="create-factura"
-                  aria-label="Crear nueva factura"
-                  ${creating ? 'disabled aria-busy="true"' : ""}
-                >
-                  ${
-                    creating
-                      ? renderSpinner("Abriendo...")
-                      : `${icon("plus")}<span class="facturas-btn-text">Crear factura</span>`
-                  }
-                </button>
-              `
-              : ""
-          }
-
-          <button
-            type="button"
-            id="facturas-refresh-btn"
-            class="facturas-btn facturas-btn--primary${refreshing ? " is-loading" : ""}"
+            id="incidencias-refresh-btn"
+            class="incidencias-btn${refreshing ? " is-loading" : ""}"
+            data-incidencias-action="refresh"
             data-action="refresh"
-            data-facturas-action="refresh"
             ${refreshing || loading ? 'disabled aria-busy="true"' : ""}
           >
             ${
               refreshing
                 ? renderSpinner("Actualizando...")
-                : `${icon("refresh")}<span class="facturas-btn-text">Actualizar</span>`
+                : `${icon("refresh")}<span class="incidencias-btn-text">Actualizar</span>`
+            }
+          </button>
+
+          <button
+            type="button"
+            id="incidencias-export-btn"
+            class="incidencias-btn"
+            data-incidencias-action="export"
+            data-action="export-csv"
+            ${loading || refreshing || !items.length ? "disabled" : ""}
+          >
+            ${icon("export")}
+            <span class="incidencias-btn-text">Exportar historial</span>
+          </button>
+
+          <button
+            type="button"
+            id="incidencias-create-btn"
+            class="incidencias-btn incidencias-btn--primary incidencias-btn--create${creating ? " is-loading" : ""}"
+            data-incidencias-action="create"
+            data-action="create-incidencia"
+            ${creating ? 'disabled aria-busy="true"' : ""}
+          >
+            ${
+              creating
+                ? renderSpinner("Abriendo...")
+                : `${icon("plus")}<span class="incidencias-btn-text">Crear incidencia</span>`
             }
           </button>
         </div>
       </div>
 
-      <div class="facturas-hero-meta">
-        <span class="facturas-meta-pill">
-          ${icon("detail")}
-          ${escapeHtml(`${remoteCount} registros remotos`)}
+      <div class="incidencias-hero-meta">
+        <span class="incidencias-meta-pill">
+          ${icon("ticket")}
+          ${escapeHtml(`${remoteCount} solicitudes registradas`)}
         </span>
 
-        <span class="facturas-meta-pill">
+        <span class="incidencias-meta-pill">
           ${icon("refresh")}
           ${
             updatedAt
@@ -3815,40 +3681,40 @@ export function renderHeader(input = {}) {
           }
         </span>
 
-        <span class="facturas-meta-pill">
-          ${icon("pdf")}
-          ${escapeHtml(`${stats.pdfCount} con PDF`)}
+        <span class="incidencias-meta-pill">
+          ${icon("paperclip")}
+          ${escapeHtml(`${stats.attachmentsCount} adjuntos`)}
         </span>
 
-        <span class="facturas-meta-pill">
-          ${icon("mail")}
-          ${escapeHtml(`${stats.sentCount} enviadas`)}
+        <span class="incidencias-meta-pill">
+          ${icon("euro")}
+          ${escapeHtml(formatMoney(stats.totalImporte, DEFAULT_CURRENCY))}
         </span>
       </div>
 
-      <div class="facturas-stats">
-        <article class="facturas-stat-card facturas-stat-card--accent">
-          <div class="facturas-stat-label">Facturas visibles</div>
-          <div class="facturas-stat-value">${escapeHtml(String(stats.total))}</div>
-          <div class="facturas-stat-text">Documentos actualmente cargados en pantalla.</div>
+      <div class="incidencias-stats">
+        <article class="incidencias-stat-card incidencias-stat-card--open">
+          <div class="incidencias-stat-label">Abiertas</div>
+          <div class="incidencias-stat-value">${escapeHtml(String(stats.openCount))}</div>
+          <div class="incidencias-stat-text">Solicitudes activas, pendientes o en proceso.</div>
         </article>
 
-        <article class="facturas-stat-card facturas-stat-card--success">
-          <div class="facturas-stat-label">Importe agregado</div>
-          <div class="facturas-stat-value">${escapeHtml(formatMoney(stats.totalImporte, DEFAULT_CURRENCY))}</div>
-          <div class="facturas-stat-text">Suma de la colección actualmente visible.</div>
+        <article class="incidencias-stat-card incidencias-stat-card--closed">
+          <div class="incidencias-stat-label">Cerradas</div>
+          <div class="incidencias-stat-value">${escapeHtml(String(stats.closedCount))}</div>
+          <div class="incidencias-stat-text">Casos resueltos, cerrados o archivados.</div>
         </article>
 
-        <article class="facturas-stat-card facturas-stat-card--warning">
-          <div class="facturas-stat-label">Pendientes</div>
-          <div class="facturas-stat-value">${escapeHtml(String(stats.pendingCount))}</div>
-          <div class="facturas-stat-text">Facturas con cobro pendiente, parcial o en borrador.</div>
+        <article class="incidencias-stat-card incidencias-stat-card--urgent">
+          <div class="incidencias-stat-label">Urgentes</div>
+          <div class="incidencias-stat-value">${escapeHtml(String(stats.urgentCount))}</div>
+          <div class="incidencias-stat-text">Incidencias marcadas como urgentes o críticas.</div>
         </article>
 
-        <article class="facturas-stat-card facturas-stat-card--danger">
-          <div class="facturas-stat-label">Vencidas / pagadas</div>
-          <div class="facturas-stat-value">${escapeHtml(`${stats.overdueCount} / ${stats.paidCount}`)}</div>
-          <div class="facturas-stat-text">Balance rápido entre deuda vencida y cobros cerrados.</div>
+        <article class="incidencias-stat-card incidencias-stat-card--amount">
+          <div class="incidencias-stat-label">Importe asociado</div>
+          <div class="incidencias-stat-value">${escapeHtml(formatMoney(stats.totalImporte, DEFAULT_CURRENCY))}</div>
+          <div class="incidencias-stat-text">Total vinculado a facturas visibles.</div>
         </article>
       </div>
     </section>
@@ -3863,44 +3729,45 @@ export function renderLoadingState({ includeStyles = false } = {}) {
   return `
     ${renderMaybeStyles(includeStyles)}
 
-    <section class="facturas-history">
+    <section class="incidencias-history">
       ${renderTableLoading(DEFAULT_PAGE_SIZE)}
     </section>
   `;
 }
 
 export function renderErrorState(
-  message = "No se pudieron cargar las facturas.",
+  message = "No se pudieron cargar las incidencias.",
   { includeStyles = false } = {}
 ) {
   return `
     ${renderMaybeStyles(includeStyles)}
 
-    <section class="facturas-error">
-      <h3 class="facturas-error-title">No se pudo renderizar la vista de facturas</h3>
-      <p class="facturas-error-text">${escapeHtml(safeText(message, "Error desconocido al cargar la vista."))}</p>
+    <section class="incidencias-error">
+      <h3 class="incidencias-error-title">No se pudo renderizar la vista de incidencias</h3>
+      <p class="incidencias-error-text">${escapeHtml(safeText(message, "Error desconocido al cargar la vista."))}</p>
     </section>
   `;
 }
 
 /* =========================================================
-   MAIN TABLE
+   TABLE
 ========================================================= */
 
-export function renderCards(input = {}) {
+export function renderTable(input = {}) {
   const data = safeObject(input);
 
-  const items = safeArray(first(data.items, data.rows, data.facturas, data.invoices));
-  const runtime = safeObject(data.state);
+  const items = safeArray(first(data.items, data.rows, data.tickets, data.incidencias));
+  const state = safeObject(data.state);
 
   const pagination = getPagination(items, data);
 
-  const loading = Boolean(first(runtime.loading, data.loading));
-  const refreshing = Boolean(first(runtime.refreshing, data.refreshing));
-  const hasError = Boolean(safeText(first(runtime.error, data.error), ""));
+  const loading = Boolean(first(state.loading, data.loading));
+  const refreshing = Boolean(first(state.refreshing, data.refreshing));
+  const hasError = Boolean(safeText(first(state.error, data.error), ""));
 
   const showInitialLoading = loading && !pagination.pageItems.length;
   const showRefreshOverlay = refreshing && pagination.pageItems.length;
+
   const includeStyles = Boolean(data.includeStyles);
 
   const activeFilterLabel = getFilterLabel(pagination.activeFilter);
@@ -3912,7 +3779,7 @@ export function renderCards(input = {}) {
   ].filter(Boolean);
 
   const subtitle = showInitialLoading
-    ? "Cargando facturas..."
+    ? "Cargando incidencias..."
     : pagination.filtering
       ? `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · ${activeCriteria.join(" · ")}`
       : `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`;
@@ -3920,53 +3787,55 @@ export function renderCards(input = {}) {
   return `
     ${renderMaybeStyles(includeStyles)}
 
-    <section class="facturas-history">
-      <div class="facturas-history-head">
-        <div class="facturas-history-copy">
-          <h2 class="facturas-history-title">Historial de facturas</h2>
-          <p class="facturas-history-subtitle">
+    <section class="incidencias-history">
+      <div class="incidencias-history-head">
+        <div class="incidencias-history-copy">
+          <h2 class="incidencias-history-title">Historial de incidencias</h2>
+          <p class="incidencias-history-subtitle">
             ${escapeHtml(subtitle)}
           </p>
         </div>
 
-        ${renderPagination(pagination, runtime)}
-        ${renderFilters({ ...data, items }, pagination)}
+        ${renderPagination(pagination, state)}
+        ${renderFilters(data, pagination)}
       </div>
 
       ${
         showInitialLoading
           ? renderTableLoading(Math.max(3, pagination.pageSize || DEFAULT_PAGE_SIZE))
           : `
-            <div class="facturas-table-wrap${refreshing ? " is-refreshing" : ""}">
+            <div class="incidencias-table-wrap${refreshing ? " is-refreshing" : ""}">
               ${showRefreshOverlay ? renderRefreshOverlay() : ""}
 
               ${
                 pagination.pageItems.length
                   ? `
-                    <div class="facturas-table-shell">
-                      <table class="facturas-table" role="table" aria-label="Listado de facturas">
+                    <div class="incidencias-table-shell">
+                      <table class="incidencias-table" role="table" aria-label="Listado de incidencias">
                         <colgroup>
-                          <col style="width:33%;">
-                          <col style="width:10%;">
-                          <col style="width:14%;">
-                          <col style="width:12%;">
-                          <col style="width:16%;">
-                          <col style="width:15%;">
+                          <col>
+                          <col style="width:118px;">
+                          <col style="width:146px;">
+                          <col style="width:134px;">
+                          <col style="width:116px;">
+                          <col style="width:70px;">
+                          <col style="width:116px;">
                         </colgroup>
 
                         <thead>
                           <tr>
-                            <th scope="col">Factura / cliente</th>
-                            <th scope="col">Pago</th>
-                            <th scope="col">Fecha de emisión</th>
-                            <th scope="col">Total</th>
-                            <th scope="col">Incidencia</th>
+                            <th scope="col">Incidencia / cliente</th>
+                            <th scope="col">Estado</th>
+                            <th scope="col">Creación</th>
+                            <th scope="col">Última novedad</th>
+                            <th scope="col">Importe</th>
+                            <th scope="col">Adj.</th>
                             <th scope="col">Acciones</th>
                           </tr>
                         </thead>
 
                         <tbody>
-                          ${pagination.pageItems.map((item) => renderRow(item, runtime)).join("")}
+                          ${pagination.pageItems.map((item) => renderRow(item, state)).join("")}
                         </tbody>
                       </table>
                     </div>
@@ -3988,40 +3857,39 @@ export function renderCards(input = {}) {
    ALIAS PARA COMPATIBILIDAD
 ========================================================= */
 
-export const renderTable = renderCards;
+export const renderCards = renderTable;
 
 /* =========================================================
    FULL TEMPLATE
 ========================================================= */
 
-export function renderFacturasTemplate(input = {}) {
+export function renderIncidenciasTableTemplate(input = {}) {
   const data = safeObject(input);
 
-  const items = safeArray(first(data.items, data.rows, data.facturas, data.invoices));
-  const rows = sortFacturasNewestFirst(items);
-  const runtime = safeObject(data.state);
+  const items = safeArray(first(data.items, data.rows, data.tickets, data.incidencias));
+  const state = safeObject(data.state);
 
-  if (runtime.error && !rows.length) {
+  if (state.error && !items.length) {
     return `
-      <section class="facturas-view-root" data-facturas-scope="true">
+      <section class="incidencias-view-root" data-incidencias-scope="true">
         ${renderStyles()}
-        ${renderErrorState(runtime.error, { includeStyles: false })}
+        ${renderErrorState(state.error, { includeStyles: false })}
       </section>
     `;
   }
 
   const payload = {
     ...data,
-    items: rows,
-    state: runtime,
+    items,
+    state,
     includeStyles: false,
   };
 
   return `
-    <section class="facturas-view-root" data-facturas-scope="true">
+    <section class="incidencias-view-root" data-incidencias-scope="true">
       ${renderStyles()}
       ${renderHeader(payload)}
-      ${renderCards(payload)}
+      ${renderTable(payload)}
     </section>
   `;
 }
@@ -4030,11 +3898,4 @@ export function renderFacturasTemplate(input = {}) {
    DEFAULT EXPORT
 ========================================================= */
 
-export default {
-  renderHeader,
-  renderCards,
-  renderTable,
-  renderLoadingState,
-  renderErrorState,
-  renderFacturasTemplate,
-};
+export default renderIncidenciasTableTemplate;

@@ -1877,23 +1877,23 @@ function renderFilters(input = {}, pagination = {}) {
         }).join("")}
       </div>
 
-      <label class="facturas-sort-control" for="facturas-sort-select">
+      <div class="facturas-sort-control" role="group" aria-label="Ordenar listado de facturas">
         <span>Ordenar</span>
-        <select
-          id="facturas-sort-select"
-          class="facturas-sort-select"
-          data-facturas-action="sort"
-          data-action="sort-facturas"
-          data-sort-control="true"
-          aria-label="Ordenar listado de facturas"
-        >
+        <div class="facturas-sort-pills">
           ${SORT_OPTIONS.map((option) => `
-            <option value="${escapeHtml(option.key)}" ${option.key === sortMode ? "selected" : ""}>
+            <button
+              type="button"
+              class="facturas-sort-pill${option.key === sortMode ? " is-active" : ""}"
+              data-facturas-action="sort"
+              data-action="sort-facturas"
+              data-sort="${escapeHtml(option.key)}"
+              aria-pressed="${option.key === sortMode ? "true" : "false"}"
+            >
               ${escapeHtml(option.label)}
-            </option>
+            </button>
           `).join("")}
-        </select>
-      </label>
+        </div>
+      </div>
 
       ${renderSearch(data)}
     </div>
@@ -2578,13 +2578,33 @@ function renderStyles() {
         color:var(--text-dim, rgba(245,245,245,.50));
         font-weight:var(--weight-bold, 700);
       }
-      .facturas-sort-select{
-        min-block-size:38px;
-        border-radius:10px;
-        border:1px solid var(--field-border, rgba(255,255,255,.09));
-        background:var(--field-bg, rgba(255,255,255,.045));
-        color:var(--text, #f5f5f5);
-        padding-inline:10px;
+      .facturas-sort-pills{
+        display:flex;
+        gap:6px;
+        flex-wrap:wrap;
+      }
+      .facturas-sort-pill{
+        appearance:none;
+        min-block-size:calc(34px * var(--ui-scale, 1));
+        padding-inline:11px;
+        border-radius:999px;
+        border:1px solid var(--badge-border, rgba(255,255,255,.07));
+        background:var(--badge-bg, rgba(255,255,255,.048));
+        color:var(--badge-text, var(--text-muted, rgba(245,245,245,.70)));
+        font:inherit;
+        font-size:var(--font-xs, 11px);
+        font-weight:var(--weight-bold, 700);
+        cursor:pointer;
+      }
+      .facturas-sort-pill:hover{
+        border-color:var(--border-strong, rgba(255,255,255,.12));
+        background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
+        color:var(--text-strong, #ffffff);
+      }
+      .facturas-sort-pill.is-active{
+        border-color:color-mix(in srgb, var(--accent, #6f59d9) 42%, var(--border-strong, rgba(255,255,255,.12)));
+        background:color-mix(in srgb, var(--accent, #6f59d9) 14%, var(--badge-bg, rgba(255,255,255,.048)));
+        color:var(--accent-active, var(--text-strong, #ffffff));
       }
 
       .facturas-filter-pills{

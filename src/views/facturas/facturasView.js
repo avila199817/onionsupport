@@ -4416,6 +4416,17 @@ export const FacturasView = (() => {
 
         return;
       }
+      if (["sort", "sort_facturas"].includes(action)) {
+        event.preventDefault();
+        const nextSort = first(
+          target.dataset.sort,
+          target.getAttribute("data-sort"),
+          DEFAULT_FACTURAS_SORT
+        );
+        setViewSort(nextSort);
+        rerender();
+        return;
+      }
 
       if (
         [

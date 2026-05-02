@@ -9,12 +9,18 @@
    PATCH · CATEGORY / PRIORITY SELECTS REAL
    PATCH · MULTIPART CREATE REAL
    PATCH · EVENTS BRIDGE WITH BINDINGS
+   PATCH · HEADER CLEAN · NO EYEBROW TEXT
+   PATCH · NO CANCEL BUTTON · CLOSE ONLY
+   PATCH · SUBMIT WITHOUT LIGHTNING ICON
+   PATCH · USER SEARCH AVATAR REAL + FALLBACK INITIALS
 
    RESPONSABILIDADES:
    - abrir/cerrar modal de creación de incidencia
    - crear incidencia normal para usuario autenticado
    - crear incidencia para usuario objetivo si el usuario tiene permisos
    - buscar usuarios de forma segura y desacoplada
+   - pintar avatar real en resultados de búsqueda de usuarios si backend lo entrega
+   - fallback de avatar con iniciales si no hay imagen
    - validar campos obligatorios
    - validar adjuntos iniciales
    - enviar multipart/form-data real
@@ -110,6 +116,7 @@ const DEFAULT_FORM = Object.freeze({
   targetUserId: "",
   targetUserName: "",
   targetUserEmail: "",
+  targetUserAvatar: "",
 
   subject: "",
   description: "",
@@ -623,10 +630,26 @@ function canSelectTargetUser() {
   );
 }
 
+function getUserInitials(value = "", fallback = "US") {
+  const text = normalizeWhitespace(value);
+
+  if (!text) return fallback;
+
+  const parts = text.split(" ").filter(Boolean);
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || fallback;
+}
+
 function normalizeUserCandidate(raw = null) {
   const obj = safeObject(raw);
   const nestedUser = safeObject(obj.user);
   const nestedProfile = safeObject(obj.profile);
+  const nestedAvatar = safeObject(obj.avatar);
+  const nestedPhoto = safeObject(obj.photo);
 
   const id = safeText(
     first(
@@ -694,12 +717,90 @@ function normalizeUserCandidate(raw = null) {
       nestedUser.fullName,
       nestedUser.displayName,
       nestedProfile.name,
+      nestedProfile.nombre,
+      nestedProfile.fullName,
+      nestedProfile.displayName,
       username,
       email,
       obj.label,
       `Usuario ${id}`
     ),
     `Usuario ${id}`
+  );
+
+  const avatarUrl = safeText(
+    first(
+      obj.avatarUrl,
+      obj.avatarURL,
+      obj.avatar_url,
+      obj.avatar,
+      obj.userAvatar,
+      obj.userAvatarUrl,
+      obj.photoUrl,
+      obj.photoURL,
+      obj.photo_url,
+      obj.photo,
+      obj.imageUrl,
+      obj.imageURL,
+      obj.image_url,
+      obj.image,
+      obj.picture,
+      obj.pictureUrl,
+      obj.profilePicture,
+      obj.profilePictureUrl,
+
+      nestedUser.avatarUrl,
+      nestedUser.avatarURL,
+      nestedUser.avatar_url,
+      nestedUser.avatar,
+      nestedUser.photoUrl,
+      nestedUser.photoURL,
+      nestedUser.photo_url,
+      nestedUser.photo,
+      nestedUser.imageUrl,
+      nestedUser.imageURL,
+      nestedUser.image_url,
+      nestedUser.image,
+      nestedUser.picture,
+      nestedUser.pictureUrl,
+      nestedUser.profilePicture,
+      nestedUser.profilePictureUrl,
+
+      nestedProfile.avatarUrl,
+      nestedProfile.avatarURL,
+      nestedProfile.avatar_url,
+      nestedProfile.avatar,
+      nestedProfile.photoUrl,
+      nestedProfile.photoURL,
+      nestedProfile.photo_url,
+      nestedProfile.photo,
+      nestedProfile.imageUrl,
+      nestedProfile.imageURL,
+      nestedProfile.image_url,
+      nestedProfile.image,
+      nestedProfile.picture,
+      nestedProfile.pictureUrl,
+      nestedProfile.profilePicture,
+      nestedProfile.profilePictureUrl,
+
+      nestedAvatar.url,
+      nestedAvatar.src,
+      nestedPhoto.url,
+      nestedPhoto.src
+    ),
+    ""
+  );
+
+  const initials = getUserInitials(
+    first(
+      obj.initials,
+      obj.userInitials,
+      nestedUser.initials,
+      nestedUser.userInitials,
+      nestedProfile.initials,
+      name
+    ),
+    "US"
   );
 
   const label = safeText(
@@ -729,6 +830,9 @@ function normalizeUserCandidate(raw = null) {
     username,
     phone,
     role,
+    avatarUrl,
+    avatar: avatarUrl,
+    initials,
     label,
     subtitle,
   };
@@ -760,6 +864,7 @@ function getInitialForm() {
     targetUserId: safeText(first(draft.targetUserId, draft.userId), ""),
     targetUserName: safeText(first(draft.targetUserName, draft.userName), ""),
     targetUserEmail: safeText(first(draft.targetUserEmail, draft.userEmail), ""),
+    targetUserAvatar: safeText(first(draft.targetUserAvatar, draft.userAvatar), ""),
 
     subject: safeText(draft.subject, ""),
     description: safeText(first(draft.description, draft.descripcion, draft.message), ""),
@@ -793,10 +898,12 @@ function persistDraft() {
     targetUserId: safeText(form.targetUserId, ""),
     targetUserName: safeText(form.targetUserName, ""),
     targetUserEmail: safeText(form.targetUserEmail, ""),
+    targetUserAvatar: safeText(form.targetUserAvatar, ""),
 
     userId: safeText(form.targetUserId, ""),
     userName: safeText(form.targetUserName, ""),
     userEmail: safeText(form.targetUserEmail, ""),
+    userAvatar: safeText(form.targetUserAvatar, ""),
 
     subject: safeText(form.subject, ""),
     description: safeText(form.description, ""),
@@ -816,9 +923,11 @@ function clearDraft() {
     targetUserId: "",
     targetUserName: "",
     targetUserEmail: "",
+    targetUserAvatar: "",
     userId: "",
     userName: "",
     userEmail: "",
+    userAvatar: "",
     subject: "",
     description: "",
     priority: "medium",
@@ -894,6 +1003,7 @@ function clearTargetUserSelection() {
     targetUserId: "",
     targetUserName: "",
     targetUserEmail: "",
+    targetUserAvatar: "",
   });
 
   if (modalState.errors.targetUserId) {
@@ -1004,6 +1114,7 @@ function buildPayload(form = {}) {
     const targetUserId = safeText(current.targetUserId, "");
     const targetUserName = safeText(current.targetUserName, "");
     const targetUserEmail = safeText(current.targetUserEmail, "");
+    const targetUserAvatar = safeText(current.targetUserAvatar, "");
 
     if (targetUserId) {
       fd.append("userId", targetUserId);
@@ -1014,10 +1125,16 @@ function buildPayload(form = {}) {
 
     appendIfValue(fd, "targetUserName", targetUserName);
     appendIfValue(fd, "targetUserEmail", targetUserEmail);
+    appendIfValue(fd, "targetUserAvatar", targetUserAvatar);
+
     appendIfValue(fd, "clienteNombre", targetUserName);
     appendIfValue(fd, "clienteEmail", targetUserEmail);
+    appendIfValue(fd, "clienteAvatar", targetUserAvatar);
+
     appendIfValue(fd, "name", targetUserName);
     appendIfValue(fd, "email", targetUserEmail);
+    appendIfValue(fd, "avatar", targetUserAvatar);
+    appendIfValue(fd, "avatarUrl", targetUserAvatar);
   }
 
   dedupeFiles(current.attachments).forEach((file) => {
@@ -1482,7 +1599,6 @@ function icon(name = "") {
     paperclip: `<svg ${common}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
     alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
     check: `<svg ${common}><path d="m20 6-11 11-5-5"/></svg>`,
-    spark: `<svg ${common}><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>`,
     trash: `<svg ${common}><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 18H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`,
   };
 
@@ -1607,6 +1723,43 @@ function renderSelect({
   `;
 }
 
+function renderUserAvatar(user = {}, className = "inc-create-search-avatar") {
+  const source = safeObject(user);
+  const name = safeText(first(source.name, source.label, source.email, "Usuario"), "Usuario");
+  const initials = safeText(
+    first(source.initials, getUserInitials(name, "US")),
+    "US"
+  );
+  const avatarUrl = safeText(first(source.avatarUrl, source.avatar, source.photoUrl, source.imageUrl), "");
+
+  return `
+    <span
+      class="${escapeHtml(className)}${avatarUrl ? " has-image" : ""}"
+      title="${escapeHtml(name)}"
+      aria-label="${escapeHtml(name)}"
+      data-tooltip="${escapeHtml(name)}"
+    >
+      ${
+        avatarUrl
+          ? `
+            <img
+              src="${escapeHtml(avatarUrl)}"
+              alt="${escapeHtml(name)}"
+              loading="lazy"
+              referrerpolicy="no-referrer"
+              onerror="this.style.display='none'; this.parentNode.setAttribute('data-fallback','true');"
+            />
+          `
+          : ""
+      }
+
+      <span class="inc-create-search-avatar-fallback">
+        ${escapeHtml(initials)}
+      </span>
+    </span>
+  `;
+}
+
 function renderFilesSummary(files = []) {
   const items = safeArray(files);
 
@@ -1705,12 +1858,20 @@ function renderSelectedUserCard() {
 
   const targetUserName = safeText(form.targetUserName, "Usuario seleccionado");
   const targetUserEmail = safeText(form.targetUserEmail, "");
+  const targetUserAvatar = safeText(form.targetUserAvatar, "");
 
   return `
     <div class="inc-create-target-user-card">
-      <div class="inc-create-target-user-icon">
-        ${icon("user")}
-      </div>
+      ${renderUserAvatar(
+        {
+          id: targetUserId,
+          name: targetUserName,
+          email: targetUserEmail,
+          avatarUrl: targetUserAvatar,
+          initials: getUserInitials(targetUserName, "US"),
+        },
+        "inc-create-search-avatar inc-create-target-user-avatar"
+      )}
 
       <div class="inc-create-target-user-copy">
         <strong>${escapeHtml(targetUserName)}</strong>
@@ -1788,16 +1949,7 @@ function renderUserSearchResults() {
               class="inc-create-search-item"
               ${modalState.submitting ? "disabled" : ""}
             >
-              <span class="inc-create-search-avatar" aria-hidden="true">
-                ${escapeHtml(
-                  safeText(user?.name, "US")
-                    .split(/\s+/)
-                    .slice(0, 2)
-                    .map((part) => part[0])
-                    .join("")
-                    .toUpperCase() || "US"
-                )}
-              </span>
+              ${renderUserAvatar(user)}
 
               <span class="inc-create-search-item-copy">
                 <strong>
@@ -1897,7 +2049,7 @@ function renderAlert(type = "info", title = "", text = "") {
   return `
     <div class="inc-create-alert is-${escapeHtml(type)}">
       <span class="inc-create-alert-icon">
-        ${type === "success" ? icon("check") : type === "error" ? icon("alert") : icon("spark")}
+        ${type === "success" ? icon("check") : type === "error" ? icon("alert") : icon("ticket")}
       </span>
 
       <span class="inc-create-alert-copy">
@@ -1950,11 +2102,6 @@ function renderModalInner() {
 
         <div class="inc-create-header">
           <div class="inc-create-header-copy">
-            <span class="inc-create-eyebrow">
-              ${icon("ticket")}
-              Nueva solicitud
-            </span>
-
             <h2 id="incidencias-create-modal-title">
               Crear incidencia
             </h2>
@@ -2050,15 +2197,6 @@ function renderModalInner() {
 
             <div class="inc-create-actions">
               <button
-                type="button"
-                data-modal-close="true"
-                ${submitting ? "disabled" : ""}
-                class="inc-create-cancel"
-              >
-                Cancelar
-              </button>
-
-              <button
                 id="incidencias-create-submit-btn"
                 type="submit"
                 ${submitting ? "disabled" : ""}
@@ -2074,7 +2212,6 @@ function renderModalInner() {
                     `
                     : `
                       <span class="inc-create-submit-inner">
-                        ${icon("spark")}
                         Crear incidencia
                       </span>
                     `
@@ -2263,28 +2400,6 @@ function renderStyles() {
         min-inline-size:0;
       }
 
-      .inc-create-eyebrow{
-        display:inline-flex;
-        align-items:center;
-        gap:7px;
-        inline-size:max-content;
-        min-block-size:24px;
-        padding-inline:10px;
-        border-radius:var(--radius-pill, 999px);
-        border:1px solid var(--badge-border, rgba(255,255,255,.07));
-        background:var(--badge-bg, rgba(255,255,255,.048));
-        color:var(--badge-text, var(--text-muted, rgba(245,245,245,.70)));
-        font-size:var(--font-xs, 11px);
-        font-weight:var(--weight-bold, 700);
-        letter-spacing:var(--letter-wider, .08em);
-        text-transform:uppercase;
-      }
-
-      .inc-create-eyebrow svg{
-        inline-size:14px;
-        block-size:14px;
-      }
-
       .inc-create-header-copy h2{
         margin:0;
         color:var(--text-strong, #ffffff);
@@ -2345,7 +2460,6 @@ function renderStyles() {
       }
 
       .inc-create-close:focus-visible,
-      .inc-create-cancel:focus-visible,
       .inc-create-submit:focus-visible,
       .inc-create-target-user-clear:focus-visible,
       .inc-create-file-remove:focus-visible,
@@ -2655,17 +2769,6 @@ function renderStyles() {
         box-shadow:var(--shadow-xs, 0 2px 8px rgba(0,0,0,.12));
       }
 
-      .inc-create-target-user-icon{
-        display:grid;
-        place-items:center;
-        inline-size:36px;
-        block-size:36px;
-        border-radius:var(--radius-pill, 999px);
-        color:var(--accent, #7c5cff);
-        background:var(--accent-soft, rgba(124,92,255,.14));
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent);
-      }
-
       .inc-create-target-user-copy{
         display:grid;
         gap:var(--space-3xs, 3px);
@@ -2688,8 +2791,7 @@ function renderStyles() {
       }
 
       .inc-create-target-user-clear,
-      .inc-create-file-remove,
-      .inc-create-cancel{
+      .inc-create-file-remove{
         min-block-size:var(--btn-height-sm, 34px);
         padding-inline:12px;
         border:1px solid var(--btn-ghost-border, var(--border-soft, rgba(255,255,255,.07)));
@@ -2722,8 +2824,7 @@ function renderStyles() {
       }
 
       .inc-create-target-user-clear:hover,
-      .inc-create-file-remove:hover,
-      .inc-create-cancel:hover{
+      .inc-create-file-remove:hover{
         transform:translateY(var(--ui-hover-lift, -1px));
         background:var(--btn-ghost-bg-hover, rgba(255,255,255,.046));
         border-color:var(--border-strong, rgba(255,255,255,.12));
@@ -2732,15 +2833,13 @@ function renderStyles() {
       }
 
       .inc-create-target-user-clear:active,
-      .inc-create-file-remove:active,
-      .inc-create-cancel:active{
+      .inc-create-file-remove:active{
         transform:translateY(0) scale(var(--ui-active-scale, .985));
         background:var(--btn-ghost-bg-active, rgba(255,255,255,.062));
       }
 
       .inc-create-target-user-clear:disabled,
-      .inc-create-file-remove:disabled,
-      .inc-create-cancel:disabled{
+      .inc-create-file-remove:disabled{
         opacity:.58;
         cursor:not-allowed;
         transform:none;
@@ -2814,17 +2913,80 @@ function renderStyles() {
       }
 
       .inc-create-search-avatar{
+        position:relative;
         display:grid;
         place-items:center;
-        inline-size:36px;
-        block-size:36px;
+        inline-size:40px;
+        block-size:40px;
+        min-inline-size:40px;
+        min-block-size:40px;
+        overflow:hidden;
         border-radius:var(--radius-pill, 999px);
         background:linear-gradient(135deg, var(--accent, #7c5cff), color-mix(in srgb, var(--accent, #7c5cff) 52%, #ec4899));
         color:var(--text-on-accent, #ffffff);
         font-size:var(--font-sm, 12px);
         font-weight:var(--weight-black, 800);
         letter-spacing:-.02em;
-        box-shadow:0 8px 18px color-mix(in srgb, var(--accent, #7c5cff) 20%, transparent);
+        box-shadow:
+          0 8px 18px color-mix(in srgb, var(--accent, #7c5cff) 20%, transparent),
+          0 0 0 3px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
+        isolation:isolate;
+        transform:translateZ(0);
+      }
+
+      .inc-create-search-avatar::after{
+        content:"";
+        position:absolute;
+        inset:0;
+        z-index:2;
+        border-radius:inherit;
+        pointer-events:none;
+        background:
+          radial-gradient(circle at 30% 22%, rgba(255,255,255,.42), transparent 34%),
+          linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.08));
+        mix-blend-mode:screen;
+      }
+
+      .inc-create-search-avatar img{
+        position:absolute;
+        inset:0;
+        z-index:1;
+        display:block;
+        inline-size:100%;
+        block-size:100%;
+        object-fit:cover;
+      }
+
+      .inc-create-search-avatar-fallback{
+        position:relative;
+        z-index:3;
+        display:grid;
+        place-items:center;
+        inline-size:100%;
+        block-size:100%;
+        color:var(--text-on-accent, #ffffff);
+        text-shadow:
+          0 1px 2px rgba(0,0,0,.22),
+          0 0 16px rgba(255,255,255,.20);
+      }
+
+      .inc-create-search-avatar.has-image .inc-create-search-avatar-fallback{
+        display:none;
+      }
+
+      .inc-create-search-avatar[data-fallback="true"] .inc-create-search-avatar-fallback{
+        display:grid;
+      }
+
+      .inc-create-search-avatar[data-fallback="true"] img{
+        display:none !important;
+      }
+
+      .inc-create-target-user-avatar{
+        inline-size:40px;
+        block-size:40px;
+        min-inline-size:40px;
+        min-block-size:40px;
       }
 
       .inc-create-search-item-copy{
@@ -2986,7 +3148,7 @@ function renderStyles() {
         isolation:isolate;
 
         min-block-size:var(--btn-height, 42px);
-        padding-inline:18px;
+        padding-inline:22px;
 
         border:1px solid var(--btn-primary-border, rgba(255,255,255,.05));
         border-radius:var(--btn-radius, 13px);
@@ -3151,7 +3313,6 @@ function renderStyles() {
           grid-template-columns:1fr;
         }
 
-        .inc-create-cancel,
         .inc-create-submit{
           inline-size:100%;
         }
@@ -3161,7 +3322,6 @@ function renderStyles() {
         .inc-create-panel,
         .inc-create-close,
         .inc-create-submit,
-        .inc-create-cancel,
         .inc-create-search-item,
         .inc-create-dropzone,
         .inc-create-target-user-clear,
@@ -3175,7 +3335,6 @@ function renderStyles() {
 
         .inc-create-close:hover,
         .inc-create-submit:hover,
-        .inc-create-cancel:hover,
         .inc-create-search-item:hover,
         .inc-create-dropzone:hover,
         .inc-create-target-user-clear:hover,
@@ -3548,6 +3707,10 @@ export function openIncidenciasCreateModal(draft = {}) {
   modalState.form.status = safeText(modalState.form.status, "open");
   modalState.form.source = safeText(modalState.form.source, "panel");
   modalState.form.attachments = [];
+  modalState.form.targetUserAvatar = safeText(
+    first(modalState.form.targetUserAvatar, modalState.form.userAvatar),
+    ""
+  );
 
   persistDraft();
 
@@ -3565,6 +3728,7 @@ export function openIncidenciasCreateModal(draft = {}) {
       targetUserId: modalState.form.targetUserId,
       targetUserName: modalState.form.targetUserName,
       targetUserEmail: modalState.form.targetUserEmail,
+      targetUserAvatar: modalState.form.targetUserAvatar,
       subject: modalState.form.subject,
       description: modalState.form.description,
       priority: modalState.form.priority,
@@ -3619,6 +3783,10 @@ export function updateIncidenciasCreateModal(draft = {}) {
 
   modalState.form.priority = validateOption(modalState.form.priority, PRIORITY_OPTIONS, "medium");
   modalState.form.category = validateOption(modalState.form.category, CATEGORY_OPTIONS, "general");
+  modalState.form.targetUserAvatar = safeText(
+    first(modalState.form.targetUserAvatar, modalState.form.userAvatar),
+    ""
+  );
 
   persistDraft();
   renderModal();
@@ -3677,6 +3845,8 @@ async function handleSubmit() {
   safeEmit("incidencias:create:submit", {
     userId: safeText(modalState.form.targetUserId, ""),
     userName: safeText(modalState.form.targetUserName, ""),
+    userEmail: safeText(modalState.form.targetUserEmail, ""),
+    userAvatar: safeText(modalState.form.targetUserAvatar, ""),
     subject: safeText(modalState.form.subject, ""),
     description: safeText(modalState.form.description, ""),
     priority: safeText(modalState.form.priority, "medium"),
@@ -3876,6 +4046,7 @@ function selectTargetUserByIndex(index = -1) {
     targetUserId: safeText(user.id, ""),
     targetUserName: safeText(user.name, ""),
     targetUserEmail: safeText(user.email, ""),
+    targetUserAvatar: safeText(first(user.avatarUrl, user.avatar), ""),
   });
 
   modalState.userSearchQuery = "";

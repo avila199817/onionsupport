@@ -64,9 +64,11 @@ const FILTERS = Object.freeze([
   { key: "pending", label: "Pendientes" },
   { key: "paid", label: "Pagadas" },
   { key: "overdue", label: "Vencidas" },
-  { key: "sent", label: "Enviadas" },
-  { key: "pdf", label: "Con PDF" },
-  { key: "linked", label: "Con incidencia" },
+]);
+
+const SORT_OPTIONS = Object.freeze([
+  { key: "date_desc", label: "Fecha (mayor a menor)" },
+  { key: "invoice_desc", label: "Nº factura (mayor a menor)" },
 ]);
 
 /* =========================================================
@@ -1057,6 +1059,15 @@ function sortFacturasNewestFirst(items = []) {
   return [...safeArray(items)].sort(compareFacturasNewestFirst);
 }
 
+function sortFacturasByInvoiceDesc(items = []) {
+  return [...safeArray(items)].sort((a, b) =>
+    safeText(getFacturaNumero(b), "").localeCompare(safeText(getFacturaNumero(a), ""), "es", {
+      numeric: true,
+      sensitivity: "base",
+    })
+  );
+}
+
 function hasPdf(item = {}) {
   const raw = safeObject(item?.raw);
 
@@ -1286,6 +1297,33 @@ function getSearchQuery(input = {}) {
   );
 }
 
+function normalizeSort(value = "") {
+  const key = normalizeKey(value);
+  if (["invoice_desc", "factura_desc", "numero_desc", "n_factura_desc"].includes(key)) {
+    return "invoice_desc";
+  }
+  return "date_desc";
+}
+
+function getSortMode(input = {}) {
+  const data = safeObject(input);
+  const runtime = safeObject(data.state);
+
+  return normalizeSort(
+    first(
+      data.sort,
+      data.sortBy,
+      data.orderBy,
+      data.sortMode,
+      runtime.sort,
+      runtime.sortBy,
+      runtime.orderBy,
+      runtime.sortMode,
+      "date_desc"
+    )
+  );
+}
+
 function itemMatchesFilter(item = {}, filter = "all") {
   const key = normalizeFilter(filter);
   const paymentKey = getEstadoPagoKey(getPaymentRaw(item));
@@ -1294,10 +1332,6 @@ function itemMatchesFilter(item = {}, filter = "all") {
   if (key === "pending") return ["pending", "partial", "draft"].includes(paymentKey);
   if (key === "paid") return paymentKey === "paid";
   if (key === "overdue") return paymentKey === "overdue";
-  if (key === "sent") return isFacturaSent(item);
-  if (key === "pdf") return hasPdf(item);
-  if (key === "linked") return Boolean(getIncidenciaId(item));
-
   return true;
 }
 
@@ -1356,10 +1390,15 @@ function itemMatchesSearch(item = {}, query = "") {
 function filterAndSortFacturas(items = [], input = {}) {
   const activeFilter = getActiveFilter(input);
   const searchQuery = getSearchQuery(input);
+  const sortMode = getSortMode(input);
 
-  return sortFacturasNewestFirst(items).filter((item) => {
+  const filtered = safeArray(items).filter((item) => {
     return itemMatchesFilter(item, activeFilter) && itemMatchesSearch(item, searchQuery);
   });
+
+  return sortMode === "invoice_desc"
+    ? sortFacturasByInvoiceDesc(filtered)
+    : sortFacturasNewestFirst(filtered);
 }
 
 function isFilterActive(input = {}) {
@@ -1776,13 +1815,13 @@ function renderSearch(input = {}) {
         class="facturas-search-input"
         type="search"
         value="${escapeHtml(searchQuery)}"
-        placeholder="Buscar factura, cliente, email, importe, incidencia..."
+        placeholder="Buscar factura, cliente, email, importe..."
         autocomplete="off"
         spellcheck="false"
         data-facturas-action="search"
         data-action="search-facturas"
         data-facturas-search-input="true"
-        aria-label="Buscar facturas por cliente, email, factura o incidencia"
+        aria-label="Buscar facturas por cliente, email, importe o número de factura"
       />
 
       ${
@@ -1811,6 +1850,7 @@ function renderFilters(input = {}, pagination = {}) {
   const items = safeArray(first(data.items, data.rows, data.facturas, data.invoices));
   const counts = computeFilterCounts(items, data);
   const activeFilter = normalizeFilter(pagination.activeFilter || getActiveFilter(data));
+  const sortMode = getSortMode(data);
 
   return `
     <div class="facturas-filters" aria-label="Filtros y búsqueda de facturas">
@@ -1836,6 +1876,24 @@ function renderFilters(input = {}, pagination = {}) {
           `;
         }).join("")}
       </div>
+
+      <label class="facturas-sort-control" for="facturas-sort-select">
+        <span>Ordenar</span>
+        <select
+          id="facturas-sort-select"
+          class="facturas-sort-select"
+          data-facturas-action="sort"
+          data-action="sort-facturas"
+          data-sort-control="true"
+          aria-label="Ordenar listado de facturas"
+        >
+          ${SORT_OPTIONS.map((option) => `
+            <option value="${escapeHtml(option.key)}" ${option.key === sortMode ? "selected" : ""}>
+              ${escapeHtml(option.label)}
+            </option>
+          `).join("")}
+        </select>
+      </label>
 
       ${renderSearch(data)}
     </div>
@@ -2508,10 +2566,25 @@ function renderStyles() {
       .facturas-filters{
         grid-column:1 / -1;
         display:grid;
-        grid-template-columns:minmax(0, 1fr) minmax(260px, 430px);
+        grid-template-columns:minmax(0, 1fr) minmax(220px, 280px) minmax(260px, 430px);
         gap:var(--space-sm, 12px);
         align-items:center;
         padding-block-start:var(--space-xs, 4px);
+      }
+      .facturas-sort-control{
+        display:grid;
+        gap:4px;
+        font-size:var(--font-xs, 11px);
+        color:var(--text-dim, rgba(245,245,245,.50));
+        font-weight:var(--weight-bold, 700);
+      }
+      .facturas-sort-select{
+        min-block-size:38px;
+        border-radius:10px;
+        border:1px solid var(--field-border, rgba(255,255,255,.09));
+        background:var(--field-bg, rgba(255,255,255,.045));
+        color:var(--text, #f5f5f5);
+        padding-inline:10px;
       }
 
       .facturas-filter-pills{

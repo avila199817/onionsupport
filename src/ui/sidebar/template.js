@@ -24,6 +24,7 @@
    - incluir data-route / data-href / data-to para navegación robusta
    - dropdown de usuario con button real, data-user-toggle y data-user-dropdown
    - estructura DOM compatible con dom.js / events.js / dropdown.js / index.js
+   - SVGs preservados
 
    HARDENING:
    - IDs alineados con constants.js
@@ -31,9 +32,10 @@
    - aria-controls / aria-expanded / aria-hidden coherentes
    - dropdown nace cerrado pero desbloqueable por JS
    - evita aria-hidden en contenedores interactivos principales
-   - SVGs preservados
    - sin title nativo en footer/logo/avatar
    - rutas admin ocultas de inicio hasta applyRoleVisibility()
+   - avatar image sin src inicial para evitar request vacío
+   - menú preparado para indicador activo tipo Apple desde state.js
 ========================================================= */
 
 import { I18n } from "../../i18n/index.js";
@@ -52,6 +54,8 @@ import {
 /* =========================================================
    LOCAL CONSTANTS
 ========================================================= */
+
+const SIDEBAR_TEMPLATE_VERSION = "sidebar-template-v5-final-pro";
 
 const SIDEBAR_LOGO_ID = "homeLink";
 const SIDEBAR_TOGGLE_ID = "toggleSidebar";
@@ -138,8 +142,25 @@ function normalizeKey(value = "") {
     .replace(/^-+|-+$/g, "");
 }
 
-function boolAttr(name = "", enabled = false) {
-  return enabled ? safeText(name, "") : "";
+function attrIf(name = "", enabled = false) {
+  const cleanName = safeText(name, "");
+
+  if (!cleanName || !enabled) {
+    return "";
+  }
+
+  return cleanName;
+}
+
+function attr(name = "", value = "") {
+  const cleanName = safeText(name, "");
+  const cleanValue = safeText(value, "");
+
+  if (!cleanName || !cleanValue) {
+    return "";
+  }
+
+  return `${cleanName}="${escapeAttr(cleanValue)}"`;
 }
 
 /* =========================================================
@@ -256,7 +277,7 @@ const Icons = Object.freeze({
 
   plus: `
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" focusable="false" aria-hidden="true">
-              <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
             </svg>
   `,
 
@@ -278,8 +299,8 @@ const Icons = Object.freeze({
 
   logout: `
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" focusable="false" aria-hidden="true">
-              <path d="M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M4 4h5v16H4z" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M16 17l5-5-5-5M21 12H9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M4 4h5v16H4z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
             </svg>
   `,
 
@@ -409,6 +430,30 @@ function getSidebarLabels() {
    MENU ITEM
 ========================================================= */
 
+function renderAdminVisibilityAttrs(adminOnly = false) {
+  if (!adminOnly) {
+    return `
+          data-sidebar-visible="true"
+          data-role-visible="true"
+          data-admin-visible="true"
+        `;
+  }
+
+  return `
+          data-role="admin"
+          data-required-role="admin"
+          data-requires-role="admin"
+          data-admin-only="true"
+          data-sidebar-admin-only="true"
+          data-sidebar-visible="false"
+          data-role-visible="false"
+          data-admin-visible="false"
+          aria-hidden="true"
+          tabindex="-1"
+          hidden
+        `;
+}
+
 function renderMenuItem({
   href = "/",
   label = "",
@@ -424,21 +469,6 @@ function renderMenuItem({
   const cleanI18nKey = escapeAttr(i18nKey);
   const itemKey = escapeAttr(normalizeKey(key || label || route));
 
-  const adminAttrs = adminOnly
-    ? `
-          data-role="admin"
-          data-admin-only="true"
-          data-requires-role="admin"
-          data-sidebar-visible="true"
-          data-admin-visible="false"
-          aria-hidden="true"
-          tabindex="-1"
-        `
-    : `
-          data-sidebar-visible="true"
-          data-admin-visible="true"
-        `;
-
   return `
         <a
           href="${cleanHref}"
@@ -449,15 +479,18 @@ function renderMenuItem({
           data-sidebar-nav="true"
           data-sidebar-item="true"
           data-sidebar-item-key="${itemKey}"
+          data-nav-key="${itemKey}"
+          data-route-key="${itemKey}"
           data-action="navigate"
           data-sidebar-action="navigate"
+          data-active="false"
           class="menu-item"
           data-tooltip="${cleanLabel}"
           ${i18nKey ? `data-i18n-data-tooltip="${cleanI18nKey}"` : ""}
           aria-label="${cleanLabel}"
           ${i18nKey ? `data-i18n-aria-label="${cleanI18nKey}"` : ""}
-          ${adminAttrs}
-          ${extraAttrs}
+          ${renderAdminVisibilityAttrs(adminOnly)}
+          ${safeText(extraAttrs, "")}
         >
           <span
             class="menu-item-icon menu-icon"
@@ -490,7 +523,7 @@ function renderDropdownButton({
   const cleanId = safeText(id, "");
   const cleanLabel = escapeHtml(label);
   const cleanI18nKey = escapeAttr(i18nKey);
-  const cleanAction = escapeAttr(action);
+  const cleanAction = escapeAttr(action || "dropdown-action");
   const cleanRoute = escapeAttr(route ? normalizeRoute(route) : "");
 
   return `
@@ -503,7 +536,9 @@ function renderDropdownButton({
             data-sidebar-action="${cleanAction}"
             data-action="${cleanAction}"
             ${cleanRoute ? `data-route="${cleanRoute}" data-href="${cleanRoute}" data-to="${cleanRoute}"` : ""}
-            ${boolAttr("disabled", disabled)}
+            aria-label="${escapeAttr(label)}"
+            ${i18nKey ? `data-i18n-aria-label="${cleanI18nKey}"` : ""}
+            ${attrIf("disabled", disabled)}
             ${disabled ? `aria-disabled="true"` : ""}
           >
             <span
@@ -549,6 +584,7 @@ function renderLogo(labels) {
             width="36"
             height="36"
             decoding="async"
+            loading="eager"
           >
 
           <img
@@ -560,6 +596,7 @@ function renderLogo(labels) {
             width="36"
             height="36"
             decoding="async"
+            loading="eager"
           >
         </a>
   `;
@@ -619,6 +656,8 @@ function renderMainMenu(labels) {
         data-sidebar-menu="true"
         data-nav-area="sidebar"
         data-indicator-ready="false"
+        data-indicator-route=""
+        data-indicator-reason="initial"
       >
 ${renderMenuItem({
   href: ROUTES.home,
@@ -737,8 +776,7 @@ function renderUserToggle(labels) {
             <img
               class="avatar-image"
               id="${SIDEBAR_AVATAR_IMAGE_ID}"
-              src=""
-              alt="${escapeAttr(labels.userDefaultName)}"
+              alt=""
               draggable="false"
               decoding="async"
               hidden
@@ -756,6 +794,7 @@ function renderUserToggle(labels) {
               class="name"
               id="${SIDEBAR_NAME_ID}"
               data-sidebar-name="true"
+              data-user-name="true"
               data-default-i18n="sidebar.user.defaultName"
               data-default-name="${escapeAttr(labels.userDefaultName)}"
             >${escapeHtml(labels.userDefaultName)}</span>
@@ -784,6 +823,7 @@ function renderUserDropdown(labels) {
           data-user-dropdown="true"
           data-user-menu="true"
           data-sidebar-user-dropdown="true"
+          data-sidebar-user-menu="true"
           data-sidebar-dropdown="user"
           data-dropdown="user"
           data-dropdown-menu="user"
@@ -798,7 +838,7 @@ ${renderDropdownButton({
   icon: Icons.plus,
 })}
 
-          <div class="dropdown-divider" role="separator"></div>
+          <div class="dropdown-divider" role="separator" aria-hidden="true"></div>
 
 ${renderDropdownButton({
   label: labels.changePlan,
@@ -823,7 +863,7 @@ ${renderDropdownButton({
   icon: Icons.settings,
 })}
 
-          <div class="dropdown-divider" role="separator"></div>
+          <div class="dropdown-divider" role="separator" aria-hidden="true"></div>
 
 ${renderDropdownButton({
   label: labels.help,
@@ -873,11 +913,14 @@ export function getSidebarTemplate() {
       data-sidebar-root="true"
       data-sidebar="true"
       data-component="sidebar"
+      data-template-version="${SIDEBAR_TEMPLATE_VERSION}"
       data-open="true"
       data-collapsed="false"
       data-mode="desktop"
+      data-viewport="desktop"
       data-dropdown-open="false"
       data-ready="false"
+      aria-hidden="false"
     >
       <div
         class="sidebar-top"

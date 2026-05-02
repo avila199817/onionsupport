@@ -39,6 +39,7 @@
 
    FIX CLICK SIDEBAR:
    - Los clicks del menú navegan explícitamente con Router.navigate().
+   - El listener document click va en capture para ganar al Router global.
    - Ya no depende solo del listener global del Router.
    - Soporta data-route / data-href / data-to / href.
    - Respeta Ctrl/Cmd/Shift/Alt click.
@@ -73,6 +74,8 @@ const DEFAULT_SCOPE = "ui:sidebar";
 
 const INDICATOR_DEFAULT_DELAY = 40;
 const INDICATOR_TRANSITION_MS = 380;
+const ROUTER_SETTLED_DELAY = 140;
+const RESIZE_DEBOUNCE_MS = 120;
 
 const HANDLED_FLAG = "__onionSidebarHandled";
 const LOCAL_HANDLED_FLAG = "__onionSidebarEventsHandled";
@@ -112,6 +115,27 @@ function safeObject(value) {
 
 function isFn(value) {
   return typeof value === "function";
+}
+
+function first(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === 0
+    ) {
+      continue;
+    }
+
+    return value;
+  }
+
+  return null;
 }
 
 function resolveScope(scope = DEFAULT_SCOPE) {
@@ -305,6 +329,18 @@ function isElement(value = null) {
   }
 }
 
+function containsElement(parent = null, child = null) {
+  if (!parent || !child) {
+    return false;
+  }
+
+  try {
+    return parent === child || parent.contains(child);
+  } catch {
+    return false;
+  }
+}
+
 function getEventDetail(eventOrPayload = {}) {
   if (
     eventOrPayload?.detail &&
@@ -338,6 +374,124 @@ function preventDefaultAndStop(event) {
   try {
     event?.stopPropagation?.();
   } catch {}
+
+  try {
+    event?.stopImmediatePropagation?.();
+  } catch {}
+}
+
+/* ======================================================
+   ROUTE / CURRENT PATH HELPERS
+====================================================== */
+
+function getBrowserPath() {
+  if (!isBrowser()) {
+    return "/";
+  }
+
+  try {
+    const pathname = window.location.pathname || "/";
+    const search = window.location.search || "";
+    const hash = window.location.hash || "";
+
+    if (
+      hash.startsWith("#/") ||
+      hash.startsWith("#!")
+    ) {
+      return hash
+        .replace(/^#!\/?/, "/")
+        .replace(/^#\/?/, "/") || "/";
+    }
+
+    return `${pathname}${search}`;
+  } catch {
+    return "/";
+  }
+}
+
+function normalizeRoutePath(path = "/") {
+  let value = safeText(path, "/");
+
+  if (!value) {
+    value = "/";
+  }
+
+  try {
+    if (isBrowser()) {
+      const parsed = new URL(value, window.location.origin);
+
+      if (
+        parsed.hash &&
+        (
+          parsed.hash.startsWith("#/") ||
+          parsed.hash.startsWith("#!")
+        )
+      ) {
+        value = parsed.hash
+          .replace(/^#!\/?/, "/")
+          .replace(/^#\/?/, "/");
+      } else {
+        value = `${parsed.pathname || "/"}${parsed.search || ""}`;
+      }
+    }
+  } catch {}
+
+  value = safeText(value, "/")
+    .split("#")[0]
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  if (
+    value.length > 1 &&
+    value.endsWith("/")
+  ) {
+    value = value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value || "/";
+}
+
+function getRouteFromPayload(payload = {}, AppCore = null, Router = null) {
+  const detail = safeObject(payload);
+
+  return safeText(
+    first(
+      detail.publicPath,
+      detail.path,
+      detail.requestedPath,
+      detail.canonicalPath,
+      detail.route,
+      detail.to,
+      detail.url,
+
+      detail.current?.publicPath,
+      detail.current?.path,
+      detail.current?.route,
+
+      detail.next?.publicPath,
+      detail.next?.path,
+      detail.next?.route,
+
+      detail.route?.publicPath,
+      detail.route?.path,
+      detail.route?.canonicalPath,
+
+      Router?.getCurrentPublicPath?.(),
+      Router?.getCurrentCanonicalPath?.(),
+      Router?.getCurrentPath?.(),
+
+      AppCore?.state?.publicPath,
+      AppCore?.state?.route,
+      AppCore?.state?.canonicalPath,
+
+      getBrowserPath()
+    ),
+    "/"
+  );
 }
 
 /* ======================================================
@@ -449,6 +603,32 @@ function isDisabledInteractive(element = null) {
   );
 }
 
+function shouldLetBrowserHandleNavigation(element = null, event = null) {
+  if (!element) {
+    return true;
+  }
+
+  if (
+    !isPrimaryClick(event) ||
+    isModifiedClick(event)
+  ) {
+    return true;
+  }
+
+  if (
+    isDisabledInteractive(element) ||
+    element.hasAttribute?.("download")
+  ) {
+    return true;
+  }
+
+  const target =
+    safeText(element.getAttribute?.("target"), "")
+      .toLowerCase();
+
+  return target === "_blank";
+}
+
 function getRouteFromElement(element = null) {
   if (!element) {
     return "";
@@ -523,9 +703,11 @@ function normalizeSidebarTarget(AppCore, Router, value = "") {
     return raw.replace(/^#\/?/, "/");
   }
 
-  return raw.startsWith("/")
-    ? raw
-    : `/${raw}`;
+  return normalizeRoutePath(
+    raw.startsWith("/")
+      ? raw
+      : `/${raw}`
+  );
 }
 
 async function navigateFromSidebar({
@@ -561,18 +743,47 @@ async function navigateFromSidebar({
 
       return true;
     }
+
+    if (isFn(finalRouter?.go)) {
+      await Promise.resolve(
+        finalRouter.go(cleanTarget, {
+          source,
+          force: false,
+        })
+      );
+
+      return true;
+    }
+
+    if (isFn(finalRouter?.push)) {
+      await Promise.resolve(
+        finalRouter.push(cleanTarget, {
+          source,
+          force: false,
+        })
+      );
+
+      return true;
+    }
   } catch (error) {
     safeWarn(
       AppCore,
-      "Router.navigate falló desde sidebar.",
+      "Navegación Router falló desde sidebar.",
       {
-        target:
-          cleanTarget,
+        target: cleanTarget,
         source,
         error,
       }
     );
   }
+
+  try {
+    if (isBrowser()) {
+      window.history.pushState({}, "", cleanTarget);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+      return true;
+    }
+  } catch {}
 
   try {
     if (isBrowser()) {
@@ -633,21 +844,40 @@ function setOptimisticSidebarActiveItem(sidebarMenu = null, item = null) {
 
   try {
     const items = Array.from(
-      sidebarMenu.querySelectorAll(".menu-item, [data-sidebar-nav='true']")
+      sidebarMenu.querySelectorAll(
+        [
+          ".menu-item",
+          "[data-sidebar-nav='true']",
+          "a[data-spa]",
+          "a[data-route]",
+        ].join(",")
+      )
     );
 
     for (const candidate of items) {
       try {
-        candidate.classList?.remove?.("active", "is-active", "router-active");
+        candidate.classList?.remove?.(
+          "active",
+          "is-active",
+          "router-active"
+        );
+
         candidate.removeAttribute?.("aria-current");
+
         if (candidate.dataset) {
           delete candidate.dataset.active;
         }
       } catch {}
     }
 
-    item.classList?.add?.("active", "is-active", "router-active");
+    item.classList?.add?.(
+      "active",
+      "is-active",
+      "router-active"
+    );
+
     item.setAttribute?.("aria-current", "page");
+
     if (item.dataset) {
       item.dataset.active = "true";
     }
@@ -992,9 +1222,18 @@ function bindCoreEvent(
 
 function syncActiveMenuItem(ctx = {}, payload = {}) {
   const AppCore = ctx.AppCore;
+  const Router =
+    ctx.Router ||
+    AppCore?.Router ||
+    AppCore?.router;
+
+  const route = normalizeRoutePath(
+    getRouteFromPayload(payload, AppCore, Router)
+  );
 
   try {
     return syncActiveMenuItemBase(AppCore, {
+      ...safeObject(payload),
       reason:
         safeText(
           payload?.reason ||
@@ -1003,6 +1242,9 @@ function syncActiveMenuItem(ctx = {}, payload = {}) {
             "sidebar-events:active-sync",
           "sidebar-events:active-sync"
         ),
+      route,
+      publicPath: route,
+      path: route,
       mutate: true,
     });
   } catch (error) {
@@ -1018,14 +1260,26 @@ function syncActiveMenuItem(ctx = {}, payload = {}) {
 
 function syncActiveMenuIndicator(ctx = {}, options = {}) {
   const AppCore = ctx.AppCore;
+  const Router =
+    ctx.Router ||
+    AppCore?.Router ||
+    AppCore?.router;
+
+  const route = normalizeRoutePath(
+    getRouteFromPayload(options, AppCore, Router)
+  );
 
   try {
     return syncActiveMenuIndicatorBase(AppCore, {
+      ...safeObject(options),
       reason:
         safeText(
           options.reason,
           "sidebar-events:indicator-sync"
         ),
+      route,
+      publicPath: route,
+      path: route,
       reveal:
         options.reveal !== false,
       force:
@@ -1044,14 +1298,26 @@ function syncActiveMenuIndicator(ctx = {}, options = {}) {
 
 function scheduleActiveMenuIndicator(ctx = {}, options = {}) {
   const AppCore = ctx.AppCore;
+  const Router =
+    ctx.Router ||
+    AppCore?.Router ||
+    AppCore?.router;
+
+  const route = normalizeRoutePath(
+    getRouteFromPayload(options, AppCore, Router)
+  );
 
   try {
     return scheduleActiveMenuIndicatorBase(AppCore, {
+      ...safeObject(options),
       reason:
         safeText(
           options.reason,
           "sidebar-events:indicator-scheduled"
         ),
+      route,
+      publicPath: route,
+      path: route,
       delayMs:
         Number.isFinite(Number(options.delayMs))
           ? Number(options.delayMs)
@@ -1148,12 +1414,14 @@ function endSidebarLayoutTransition(ctx = {}, reason = "transition") {
     sidebarMenu?.classList?.remove?.("is-transitioning");
   } catch {}
 
-  syncActiveMenuItem(ctx, {
-    reason: `${reason}:end`,
-  });
+  const activeItem =
+    syncActiveMenuItem(ctx, {
+      reason: `${reason}:end`,
+    });
 
   scheduleActiveMenuIndicator(ctx, {
     reason: `${reason}:end`,
+    activeItem,
     delayMs: 24,
     reveal: true,
     force: true,
@@ -1268,14 +1536,19 @@ function createSidebarVisualCommitter(ctx = {}) {
         }
       }
 
-      syncActiveMenuItem(ctx, {
-        ...(options.payload || {}),
+      const payload = {
+        ...(safeObject(options.payload)),
         reason,
-      });
+      };
+
+      const activeItem =
+        syncActiveMenuItem(ctx, payload);
 
       if (options.indicator !== false) {
         scheduleActiveMenuIndicator(ctx, {
+          ...payload,
           reason,
+          activeItem,
           delayMs:
             options.indicatorDelayMs ??
             INDICATOR_DEFAULT_DELAY,
@@ -1378,6 +1651,28 @@ function createSidebarVisualCommitter(ctx = {}) {
    HIDDEN / INERT CLICK GUARD
 ====================================================== */
 
+function isInsideSidebarArea(elements = {}, target = null) {
+  const {
+    sidebar,
+    sidebarMenu,
+    userToggle,
+    userDropdown,
+    toggleBtn,
+    mobileToggleBtn,
+    logoutBtn,
+  } = safeObject(elements);
+
+  return Boolean(
+    containsElement(sidebar, target) ||
+      containsElement(sidebarMenu, target) ||
+      containsElement(userToggle, target) ||
+      containsElement(userDropdown, target) ||
+      containsElement(toggleBtn, target) ||
+      containsElement(mobileToggleBtn, target) ||
+      containsElement(logoutBtn, target)
+  );
+}
+
 function shouldIgnoreHiddenTarget(target = null) {
   if (!isElement(target)) {
     return false;
@@ -1464,6 +1759,9 @@ export function handleDocumentClick({
     return;
   }
 
+  const elements =
+    resolveElements(AppCore, resolver);
+
   const {
     toggleBtn,
     mobileToggleBtn,
@@ -1471,7 +1769,7 @@ export function handleDocumentClick({
     userDropdown,
     logoutBtn,
     sidebarMenu,
-  } = resolveElements(AppCore, resolver);
+  } = elements;
 
   const target = event?.target;
 
@@ -1479,7 +1777,17 @@ export function handleDocumentClick({
     return;
   }
 
-  if (preventHiddenTargetClick(event)) {
+  const insideSidebar =
+    isInsideSidebarArea(elements, target);
+
+  /*
+    No bloqueamos clicks hidden/inert fuera del sidebar.
+    Este módulo solo debe proteger su propia UI.
+  */
+  if (
+    insideSidebar &&
+    preventHiddenTargetClick(event)
+  ) {
     return;
   }
 
@@ -1513,8 +1821,8 @@ export function handleDocumentClick({
 
   /*
     Fallback delegado:
-    Si el bind directo sobre sidebarMenu no estaba disponible en el primer mount,
-    el document click aún puede navegar correctamente.
+    Como este listener va en capture, gana al Router global.
+    Así el menú nunca depende del listener SPA externo.
   */
   const sidebarNav =
     getSidebarNavigationElement(target);
@@ -1524,11 +1832,7 @@ export function handleDocumentClick({
     sidebarMenu?.contains?.(sidebarNav)
   ) {
     if (
-      !isPrimaryClick(event) ||
-      isModifiedClick(event) ||
-      isDisabledInteractive(sidebarNav) ||
-      sidebarNav.hasAttribute?.("download") ||
-      safeText(sidebarNav.getAttribute?.("target"), "").toLowerCase() === "_blank"
+      shouldLetBrowserHandleNavigation(sidebarNav, event)
     ) {
       return;
     }
@@ -1564,11 +1868,10 @@ export function handleDocumentClick({
       AppCore,
       "sidebar:navigation:request",
       {
-        target:
-          targetPath,
-
-        source:
-          "sidebar-menu",
+        target: targetPath,
+        route: targetPath,
+        publicPath: targetPath,
+        source: "sidebar-menu",
       }
     );
 
@@ -1579,12 +1882,9 @@ export function handleDocumentClick({
 
     void navigateFromSidebar({
       AppCore,
-      Router:
-        finalRouter,
-      target:
-        targetPath,
-      source:
-        "sidebar-menu",
+      Router: finalRouter,
+      target: targetPath,
+      source: "sidebar-menu",
     });
 
     return;
@@ -1599,11 +1899,7 @@ export function handleDocumentClick({
     }
 
     if (
-      !isPrimaryClick(event) ||
-      isModifiedClick(event) ||
-      isDisabledInteractive(routeButton) ||
-      routeButton.hasAttribute?.("download") ||
-      safeText(routeButton.getAttribute?.("target"), "").toLowerCase() === "_blank"
+      shouldLetBrowserHandleNavigation(routeButton, event)
     ) {
       return;
     }
@@ -1639,28 +1935,33 @@ export function handleDocumentClick({
       AppCore,
       "sidebar:dropdown:navigation:request",
       {
-        target:
-          targetPath,
-
-        source:
-          "sidebar-dropdown",
+        target: targetPath,
+        route: targetPath,
+        publicPath: targetPath,
+        source: "sidebar-dropdown",
       }
     );
 
     void navigateFromSidebar({
       AppCore,
-      Router:
-        finalRouter,
-      target:
-        targetPath,
-      source:
-        "sidebar-dropdown",
+      Router: finalRouter,
+      target: targetPath,
+      source: "sidebar-dropdown",
     });
 
     return;
   }
 
-  closeDropdown?.();
+  /*
+    Click fuera del dropdown: cerramos solo el dropdown.
+    No tocamos open/close del sidebar por navegación ni por click exterior.
+  */
+  if (
+    !containsElement(userDropdown, target) &&
+    !containsElement(userToggle, target)
+  ) {
+    closeDropdown?.();
+  }
 }
 
 export function handleSidebarMenuClick({
@@ -1711,9 +2012,7 @@ export function handleSidebarMenuClick({
   }
 
   if (
-    isDisabledInteractive(link) ||
-    link.hasAttribute?.("download") ||
-    safeText(link.getAttribute?.("target"), "").toLowerCase() === "_blank"
+    shouldLetBrowserHandleNavigation(link, event)
   ) {
     return;
   }
@@ -1749,11 +2048,10 @@ export function handleSidebarMenuClick({
     AppCore,
     "sidebar:navigation:request",
     {
-      target:
-        targetPath,
-
-      source:
-        "sidebar-menu",
+      target: targetPath,
+      route: targetPath,
+      publicPath: targetPath,
+      source: "sidebar-menu",
     }
   );
 
@@ -1764,12 +2062,9 @@ export function handleSidebarMenuClick({
 
   void navigateFromSidebar({
     AppCore,
-    Router:
-      finalRouter,
-    target:
-      targetPath,
-    source:
-      "sidebar-menu",
+    Router: finalRouter,
+    target: targetPath,
+    source: "sidebar-menu",
   });
 }
 
@@ -1793,7 +2088,7 @@ export function handleUserToggleKeydown({
     return;
   }
 
-  if (event?.target !== userToggle) {
+  if (!containsElement(userToggle, event?.target)) {
     return;
   }
 
@@ -1802,24 +2097,21 @@ export function handleUserToggleKeydown({
     event.key === " "
   ) {
     markSidebarEventHandled(event, "user-toggle-keyboard-toggle");
-    event.preventDefault?.();
-    event.stopPropagation?.();
+    preventDefaultAndStop(event);
     toggleDropdown?.();
     return;
   }
 
   if (event.key === "Escape") {
     markSidebarEventHandled(event, "user-toggle-keyboard-close");
-    event.preventDefault?.();
-    event.stopPropagation?.();
+    preventDefaultAndStop(event);
     closeDropdown?.();
     return;
   }
 
   if (event.key === "ArrowDown") {
     markSidebarEventHandled(event, "user-toggle-keyboard-open");
-    event.preventDefault?.();
-    event.stopPropagation?.();
+    preventDefaultAndStop(event);
 
     openDropdown?.({
       focusFirst: true,
@@ -1864,12 +2156,14 @@ export function handleResize({
     getElements: resolver,
   };
 
-  syncActiveMenuItem(ctx, {
-    reason: "resize",
-  });
+  const activeItem =
+    syncActiveMenuItem(ctx, {
+      reason: "resize",
+    });
 
   scheduleActiveMenuIndicator(ctx, {
     reason: "resize",
+    activeItem,
     delayMs: 96,
     reveal: true,
     force: true,
@@ -1902,6 +2196,12 @@ export function bindDomEvents(ctx = {}) {
   const localScope = resolveLocalScope(scopeName, "dom");
   const epoch = resetLocalScope(localScope);
 
+  /*
+    Capture:
+    - gana al listener global del Router
+    - evita doble navegación
+    - permite marcar el evento antes del bubble
+  */
   bindDom(
     AppCore,
     localScope,
@@ -1918,7 +2218,8 @@ export function bindDomEvents(ctx = {}) {
         closeDropdown,
         handleLogout,
         getElements: resolver,
-      })
+      }),
+    true
   );
 
   bindDom(
@@ -1927,11 +2228,21 @@ export function bindDomEvents(ctx = {}) {
     epoch,
     document,
     "keydown",
-    (event) =>
+    (event) => {
+      handleUserToggleKeydown({
+        AppCore,
+        event,
+        toggleDropdown,
+        closeDropdown,
+        openDropdown,
+        getElements: resolver,
+      });
+
       handleGlobalKeydown({
         event,
         closeDropdown,
-      })
+      });
+    }
   );
 
   const resizeHandler =
@@ -1945,7 +2256,7 @@ export function bindDomEvents(ctx = {}) {
               closeDropdown,
               getElements: resolver,
             }),
-          120
+          RESIZE_DEBOUNCE_MS
         )
       : () =>
           handleResize({
@@ -1994,6 +2305,7 @@ export function bindDomEvents(ctx = {}) {
           "width",
           "transform",
           "margin-inline-start",
+          "margin-left",
           "max-inline-size",
         ].includes(propertyName)
       ) {
@@ -2022,6 +2334,11 @@ export function bindDomEvents(ctx = {}) {
     sidebarMenu,
   } = resolveElements(AppCore, resolver);
 
+  /*
+    Direct binds:
+    - se mantienen por precisión cuando el DOM existe
+    - document capture sigue siendo el fallback robusto si el DOM cambia
+  */
   if (userToggle) {
     bindDom(
       AppCore,
@@ -2037,7 +2354,8 @@ export function bindDomEvents(ctx = {}) {
           closeDropdown,
           openDropdown,
           getElements: resolver,
-        })
+        }),
+      true
     );
   }
 
@@ -2055,7 +2373,8 @@ export function bindDomEvents(ctx = {}) {
           event,
           closeDropdown,
           getElements: resolver,
-        })
+        }),
+      false
     );
   }
 
@@ -2139,6 +2458,7 @@ export function bindCoreEvents(ctx = {}) {
       delayMs: 16,
       frames: 1,
       indicatorDelayMs: 48,
+      force: true,
     });
   };
 
@@ -2162,6 +2482,7 @@ export function bindCoreEvents(ctx = {}) {
       delayMs: 24,
       frames: 1,
       indicatorDelayMs: 56,
+      force: true,
     });
   };
 
@@ -2185,17 +2506,32 @@ export function bindCoreEvents(ctx = {}) {
       delayMs: 24,
       frames: 1,
       indicatorDelayMs: 56,
+      force: true,
     });
   };
 
   const commitRoute = (eventName) => {
     return (eventOrPayload = {}) => {
       const detail = getEventDetail(eventOrPayload);
+      const route = normalizeRoutePath(
+        getRouteFromPayload(
+          detail,
+          AppCore,
+          Router ||
+            AppCore?.Router ||
+            AppCore?.router
+        )
+      );
 
       visualCommitter.schedule({
         key: "route",
         reason: eventName,
-        payload: detail,
+        payload: {
+          ...detail,
+          route,
+          publicPath: route,
+          path: route,
+        },
         renderIdentity: false,
         syncState: false,
         closeDropdown: false,
@@ -2209,11 +2545,25 @@ export function bindCoreEvents(ctx = {}) {
 
   const commitRouterRendered = (eventOrPayload = {}) => {
     const detail = getEventDetail(eventOrPayload);
+    const route = normalizeRoutePath(
+      getRouteFromPayload(
+        detail,
+        AppCore,
+        Router ||
+          AppCore?.Router ||
+          AppCore?.router
+      )
+    );
 
     visualCommitter.schedule({
       key: "router-rendered",
       reason: "router:rendered",
-      payload: detail,
+      payload: {
+        ...detail,
+        route,
+        publicPath: route,
+        path: route,
+      },
       renderIdentity: false,
       syncState: false,
       closeDropdown: true,
@@ -2226,11 +2576,16 @@ export function bindCoreEvents(ctx = {}) {
     visualCommitter.schedule({
       key: "router-rendered-settled",
       reason: "router:rendered:settled",
-      payload: detail,
+      payload: {
+        ...detail,
+        route,
+        publicPath: route,
+        path: route,
+      },
       renderIdentity: false,
       syncState: false,
       closeDropdown: false,
-      delayMs: 140,
+      delayMs: ROUTER_SETTLED_DELAY,
       frames: 2,
       indicatorDelayMs: 0,
       force: true,

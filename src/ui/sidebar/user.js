@@ -21,15 +21,17 @@
    - evitar title/data-tooltip residuales
    - emitir snapshot estable del usuario renderizado
 
-   HARDENING:
+   HARDENING EXTREMO:
    - no depende de una única forma de user
-   - soporta user/profile/account/meta/claims/raw
+   - soporta user/profile/account/meta/claims/raw/account/customer
    - soporta avatarUrl/photoUrl/picture/profileImage anidados
    - bloquea protocolos peligrosos
-   - cache bust con avatarUpdatedAt
+   - cache bust con avatarUpdatedAt/avatarVersion
    - fallback inmediato mientras carga imagen real
    - onload/onerror con token anti-race
    - admin por rol, permiso o flags
+   - safeEmit no duplica bus + window
+   - no deja avatar viejo si cambia usuario
    - cero throws hacia la UI
 ========================================================= */
 
@@ -46,8 +48,20 @@ const DEFAULT_DISPLAY_NAME = "Usuario";
 const DEFAULT_AVATAR_TEXT = "ON";
 const DEFAULT_PLAN_LABEL = "Go Plan";
 
+const LOG_PREFIX = "[SidebarUser]";
+
 const AVATAR_CACHE_PARAM = "v";
 const AVATAR_RENDER_SEQ_DATASET_KEY = "avatarRenderSeq";
+
+const SIDEBAR_AVATAR_IMAGE_ID = "sidebarAvatarImage";
+const SIDEBAR_AVATAR_FALLBACK_ID = "sidebarAvatarFallback";
+const SIDEBAR_USER_PLAN_ID = "sidebarUserPlan";
+
+const EVENTS = Object.freeze({
+  userRendered: "sidebar:user:rendered",
+  userAvatarLoaded: "sidebar:user:avatar:loaded",
+  userAvatarError: "sidebar:user:avatar:error",
+});
 
 const ADMIN_ROLE_KEYS = new Set([
   "admin",
@@ -58,6 +72,8 @@ const ADMIN_ROLE_KEYS = new Set([
   "super_administrador",
   "owner",
   "root",
+  "staff",
+  "support",
 ]);
 
 const ADMIN_PERMISSION_KEYS = new Set([
@@ -95,6 +111,16 @@ const ADMIN_PERMISSION_KEYS = new Set([
   "server:manage",
   "servidor.manage",
   "servidor:manage",
+
+  "tickets.manage",
+  "tickets:manage",
+  "incidencias.manage",
+  "incidencias:manage",
+
+  "facturas.manage",
+  "facturas:manage",
+  "invoices.manage",
+  "invoices:manage",
 ]);
 
 /* =========================================================
@@ -106,6 +132,10 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
+}
+
+function hasWindow() {
+  return typeof window !== "undefined";
 }
 
 function isFn(value) {
@@ -130,16 +160,10 @@ function safeObject(value) {
     : {};
 }
 
-function toArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (value === null || value === undefined) {
-    return [];
-  }
-
-  return [value];
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 function first(...values) {
@@ -147,6 +171,15 @@ function first(...values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
+
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === 0
+    ) {
+      continue;
+    }
 
     return value;
   }
@@ -179,24 +212,35 @@ function safeBoolean(value, fallback = false) {
 
 function safeWarn(AppCore, ...args) {
   try {
-    AppCore?.utils?.warn?.("[SidebarUser]", ...args);
+    AppCore?.utils?.warn?.(LOG_PREFIX, ...args);
   } catch {}
 
   try {
-    console.warn("[SidebarUser]", ...args);
+    console.warn(LOG_PREFIX, ...args);
   } catch {}
 }
 
+/*
+  Importante:
+  No emitimos por AppCore.events Y window a la vez.
+  Si el bus existe, usamos bus. Window solo fallback.
+*/
 function safeEmit(AppCore, eventName = "", payload = {}) {
   const name = safeText(eventName, "");
   if (!name) return false;
 
-  let emitted = false;
-
   try {
-    AppCore?.events?.emit?.(name, payload);
-    emitted = true;
-  } catch {}
+    if (isFn(AppCore?.events?.emit)) {
+      AppCore.events.emit(name, payload);
+      return true;
+    }
+  } catch (error) {
+    safeWarn(
+      AppCore,
+      `AppCore.events.emit("${name}") falló.`,
+      error
+    );
+  }
 
   try {
     if (
@@ -209,11 +253,11 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
         })
       );
 
-      emitted = true;
+      return true;
     }
   } catch {}
 
-  return emitted;
+  return false;
 }
 
 function removeTooltipAttributes(element = null) {
@@ -257,18 +301,50 @@ function normalizeString(value = "") {
 }
 
 function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
-    return window.location.origin;
-  }
+  try {
+    if (
+      isBrowser() &&
+      window.location?.origin
+    ) {
+      return window.location.origin;
+    }
+  } catch {}
 
   return "http://localhost";
 }
 
+function nowMs() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+function setDatasetValue(element = null, key = "", value = "") {
+  if (!element || !key) {
+    return false;
+  }
+
+  try {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ""
+    ) {
+      delete element.dataset[key];
+      return true;
+    }
+
+    element.dataset[key] = String(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /* =========================================================
-   USER SOURCE RESOLUTION
+   MODULE / AUTH-LIKE SOURCES
 ========================================================= */
 
 function callUserGetter(source = null, methodName = "") {
@@ -285,12 +361,38 @@ function callUserGetter(source = null, methodName = "") {
   return null;
 }
 
+function getModule(AppCore = null, name = "") {
+  const cleanName = safeText(name, "");
+
+  if (!AppCore || !cleanName) {
+    return null;
+  }
+
+  try {
+    if (isFn(AppCore?.modules?.get)) {
+      const value = AppCore.modules.get(cleanName);
+      if (value) return value;
+    }
+  } catch {}
+
+  try {
+    return AppCore?.modules?.[cleanName] || null;
+  } catch {
+    return null;
+  }
+}
+
 function getAuthLikeSources(AppCore = null) {
   return [
     AppCore?.Auth,
     AppCore?.auth,
-    AppCore?.modules?.Auth,
-    AppCore?.modules?.auth,
+    AppCore?.features?.auth,
+    AppCore?.state?.auth,
+
+    getModule(AppCore, "Auth"),
+    getModule(AppCore, "auth"),
+    getModule(AppCore, "Session"),
+    getModule(AppCore, "session"),
   ].filter(Boolean);
 }
 
@@ -302,9 +404,11 @@ function getUserFromAuthLikeSources(AppCore = null) {
       callUserGetter(source, "getUser"),
       callUserGetter(source, "getCurrentUser"),
       callUserGetter(source, "currentUser"),
+
       source?.user,
       source?.currentUser,
       source?.state?.user,
+      source?.state?.currentUser,
       source?.session?.user
     );
 
@@ -314,6 +418,616 @@ function getUserFromAuthLikeSources(AppCore = null) {
   }
 
   return {};
+}
+
+/* =========================================================
+   STORAGE USER FALLBACK
+========================================================= */
+
+function tryParseJson(value = "") {
+  const text = safeText(value, "");
+
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function readStorageValue(key = "") {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  const cleanKey = safeText(key, "");
+
+  if (!cleanKey) {
+    return "";
+  }
+
+  try {
+    return safeText(window.localStorage?.getItem?.(cleanKey), "");
+  } catch {}
+
+  try {
+    return safeText(window.sessionStorage?.getItem?.(cleanKey), "");
+  } catch {}
+
+  return "";
+}
+
+function getStoragePrefix(AppCore = null) {
+  return safeText(
+    AppCore?.config?.storagePrefix,
+    "onion"
+  );
+}
+
+function getStoredUserFallback(AppCore = null) {
+  const prefix = getStoragePrefix(AppCore);
+
+  const keys = [
+    "user",
+    "currentUser",
+    "auth.user",
+    "session.user",
+    "auth:user",
+    "session:user",
+
+    "onion:user",
+    "onion_user",
+    "onion:auth:user",
+    "onion:session:user",
+
+    `${prefix}:user`,
+    `${prefix}_user`,
+    `${prefix}:auth:user`,
+    `${prefix}:session:user`,
+  ];
+
+  for (const key of keys) {
+    const raw = readStorageValue(key);
+    const parsed = tryParseJson(raw);
+
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+    ) {
+      return parsed;
+    }
+  }
+
+  return {};
+}
+
+/* =========================================================
+   USER RESOLUTION
+========================================================= */
+
+export function getUser(AppCore) {
+  const state = safeObject(AppCore?.state);
+
+  let user = first(
+    state.user,
+    state.currentUser,
+    state.sessionUser,
+    state.authUser,
+    state.profile,
+
+    state.session?.user,
+    state.session?.currentUser,
+    state.session?.profile,
+
+    state.auth?.user,
+    state.auth?.currentUser
+  );
+
+  if (!user || typeof user !== "object") {
+    try {
+      user = first(
+        callUserGetter(AppCore, "getUser"),
+        callUserGetter(AppCore, "getCurrentUser"),
+        callUserGetter(AppCore, "currentUser")
+      );
+    } catch {}
+  }
+
+  if (!user || typeof user !== "object") {
+    user = getUserFromAuthLikeSources(AppCore);
+  }
+
+  if (!user || typeof user !== "object") {
+    user = getStoredUserFallback(AppCore);
+  }
+
+  return safeObject(user);
+}
+
+function getProfileLikeBranches(user = null) {
+  const current = safeObject(user);
+
+  return [
+    current,
+
+    safeObject(current.profile),
+    safeObject(current.account),
+    safeObject(current.customer),
+    safeObject(current.client),
+    safeObject(current.cliente),
+    safeObject(current.meta),
+    safeObject(current.claims),
+    safeObject(current.permissions),
+
+    safeObject(current.raw),
+    safeObject(current.raw?.profile),
+    safeObject(current.raw?.account),
+    safeObject(current.raw?.customer),
+    safeObject(current.raw?.client),
+    safeObject(current.raw?.cliente),
+    safeObject(current.raw?.meta),
+    safeObject(current.raw?.claims),
+    safeObject(current.raw?.permissions),
+
+    safeObject(current.profile?.account),
+    safeObject(current.account?.profile),
+    safeObject(current.meta?.profile),
+    safeObject(current.claims?.profile),
+  ];
+}
+
+/* =========================================================
+   DISPLAY / USERNAME
+========================================================= */
+
+export function getDisplayName(AppCore, user = null) {
+  const currentUser = safeObject(user || getUser(AppCore));
+  const branches = getProfileLikeBranches(currentUser);
+
+  try {
+    if (isFn(AppCore?.getUserDisplayName)) {
+      const value = safeText(
+        AppCore.getUserDisplayName(currentUser),
+        ""
+      );
+
+      if (value) return value;
+    }
+  } catch {}
+
+  try {
+    if (isFn(AppCore?.utils?.getUserDisplayName)) {
+      const value = safeText(
+        AppCore.utils.getUserDisplayName(currentUser),
+        ""
+      );
+
+      if (value) return value;
+    }
+  } catch {}
+
+  const value = first(
+    ...branches.flatMap((branch) => [
+      branch.displayName,
+      branch.display_name,
+      branch.fullName,
+      branch.full_name,
+      branch.name,
+      branch.nombre,
+      branch.razonSocial,
+      branch.razon_social,
+      branch.company,
+      branch.companyName,
+      branch.company_name,
+
+      branch.firstName && branch.lastName
+        ? `${branch.firstName} ${branch.lastName}`
+        : null,
+
+      branch.first_name && branch.last_name
+        ? `${branch.first_name} ${branch.last_name}`
+        : null,
+
+      branch.given_name && branch.family_name
+        ? `${branch.given_name} ${branch.family_name}`
+        : null,
+
+      branch.username,
+      branch.userName,
+      branch.user_name,
+      branch.preferred_username,
+      branch.email,
+      branch.mail,
+      branch.phone,
+      branch.telefono,
+    ])
+  );
+
+  return safeText(
+    value,
+    DEFAULT_DISPLAY_NAME
+  );
+}
+
+function sanitizeUsername(value = "") {
+  return normalizeString(value)
+    .replace(/^@+/, "")
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .toLowerCase();
+}
+
+function usernameFromEmail(email = "") {
+  const text = safeText(email, "");
+
+  if (!text.includes("@")) {
+    return "";
+  }
+
+  return sanitizeUsername(
+    text.split("@")[0]
+  );
+}
+
+export function getUsername(AppCore, user = null) {
+  const currentUser = safeObject(user || getUser(AppCore));
+  const branches = getProfileLikeBranches(currentUser);
+
+  try {
+    if (isFn(AppCore?.getUserUsername)) {
+      const value = sanitizeUsername(
+        AppCore.getUserUsername(currentUser)
+      );
+
+      if (value) return value;
+    }
+  } catch {}
+
+  try {
+    if (isFn(AppCore?.utils?.getUserUsername)) {
+      const value = sanitizeUsername(
+        AppCore.utils.getUserUsername(currentUser)
+      );
+
+      if (value) return value;
+    }
+  } catch {}
+
+  const direct = sanitizeUsername(
+    first(
+      ...branches.flatMap((branch) => [
+        branch.username,
+        branch.userName,
+        branch.user_name,
+        branch.preferred_username,
+        branch.slug,
+        branch.nick,
+        branch.alias,
+        branch.handle,
+        branch.userId,
+        branch.user_id,
+      ])
+    )
+  );
+
+  if (direct) {
+    return direct;
+  }
+
+  return usernameFromEmail(
+    first(
+      ...branches.flatMap((branch) => [
+        branch.email,
+        branch.mail,
+        branch.upn,
+      ])
+    )
+  );
+}
+
+/* =========================================================
+   AVATAR TEXT
+========================================================= */
+
+function extractInitialsFromText(value = "") {
+  const text = safeText(value, "");
+
+  if (!text) {
+    return "";
+  }
+
+  const parts = normalizeString(text)
+    .replace(/@.*/, "")
+    .split(/[\s._-]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const initials = parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || "")
+    .join("")
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 2);
+
+  return initials;
+}
+
+export function getAvatarText(AppCore, user = null) {
+  const currentUser = safeObject(user || getUser(AppCore));
+
+  const explicit = safeText(
+    first(
+      currentUser.avatarText,
+      currentUser.avatar_text,
+      currentUser.initials,
+      currentUser.iniciales,
+      currentUser.raw?.avatarText,
+      currentUser.raw?.initials,
+      currentUser.profile?.avatarText,
+      currentUser.profile?.initials
+    ),
+    ""
+  );
+
+  if (explicit) {
+    return explicit
+      .replace(/[^a-zA-Z0-9]/g, "")
+      .slice(0, 2)
+      .toUpperCase() || DEFAULT_AVATAR_TEXT;
+  }
+
+  const displayName = getDisplayName(
+    AppCore,
+    currentUser
+  );
+
+  const username = getUsername(
+    AppCore,
+    currentUser
+  );
+
+  const email = safeText(
+    first(
+      currentUser.email,
+      currentUser.mail,
+      currentUser.raw?.email,
+      currentUser.profile?.email,
+      currentUser.claims?.email
+    ),
+    ""
+  );
+
+  const initials =
+    extractInitialsFromText(displayName) ||
+    extractInitialsFromText(username) ||
+    extractInitialsFromText(email);
+
+  if (initials) {
+    return initials;
+  }
+
+  return DEFAULT_AVATAR_TEXT;
+}
+
+/* =========================================================
+   AVATAR URL
+========================================================= */
+
+function getAvatarUpdatedAt(user = null) {
+  const currentUser = safeObject(user);
+  const branches = getProfileLikeBranches(currentUser);
+
+  return safeText(
+    first(
+      ...branches.flatMap((branch) => [
+        branch.avatarUpdatedAt,
+        branch.avatar_updated_at,
+        branch.pictureUpdatedAt,
+        branch.picture_updated_at,
+        branch.photoUpdatedAt,
+        branch.photo_updated_at,
+        branch.imageUpdatedAt,
+        branch.image_updated_at,
+
+        branch.avatarVersion,
+        branch.avatar_version,
+        branch.pictureVersion,
+        branch.picture_version,
+        branch.photoVersion,
+        branch.photo_version,
+
+        branch.updatedAt,
+        branch.updated_at,
+        branch.modifiedAt,
+        branch.modified_at,
+        branch.version,
+        branch.etag,
+        branch._etag,
+      ])
+    ),
+    ""
+  );
+}
+
+function userHasAvatar(user = null) {
+  const currentUser = safeObject(user);
+  const branches = getProfileLikeBranches(currentUser);
+
+  const rawValue = first(
+    ...branches.flatMap((branch) => [
+      branch.hasAvatar,
+      branch.has_avatar,
+      branch.avatarEnabled,
+      branch.avatar_enabled,
+      branch.hasPhoto,
+      branch.has_photo,
+      branch.hasPicture,
+      branch.has_picture,
+    ])
+  );
+
+  if (rawValue === null || rawValue === undefined) {
+    return true;
+  }
+
+  return safeBoolean(rawValue, false);
+}
+
+function sanitizeAvatarUrl(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  const compact = raw.replace(/\s+/g, "");
+  const lower = compact.toLowerCase();
+
+  if (
+    lower.startsWith("javascript:") ||
+    lower.startsWith("vbscript:") ||
+    lower.startsWith("file:") ||
+    lower.startsWith("data:text/") ||
+    lower.startsWith("data:application/") ||
+    lower.startsWith("data:audio/") ||
+    lower.startsWith("data:video/")
+  ) {
+    return "";
+  }
+
+  if (
+    lower.startsWith("data:") &&
+    !lower.startsWith("data:image/")
+  ) {
+    return "";
+  }
+
+  if (
+    lower.startsWith("http://") ||
+    lower.startsWith("https://") ||
+    lower.startsWith("/") ||
+    lower.startsWith("./") ||
+    lower.startsWith("../") ||
+    lower.startsWith("blob:") ||
+    lower.startsWith("data:image/")
+  ) {
+    return raw;
+  }
+
+  /*
+    Ruta relativa simple tipo "uploads/avatar.png".
+  */
+  if (/^[a-zA-Z0-9._~:/?#@!$&'()*+,;=%-]+$/.test(raw)) {
+    return raw.startsWith("/")
+      ? raw
+      : `/${raw}`;
+  }
+
+  return "";
+}
+
+function appendAvatarCacheBust(url = "", updatedAt = "") {
+  const cleanUrl = sanitizeAvatarUrl(url);
+  const cleanUpdatedAt = safeText(updatedAt, "");
+
+  if (!cleanUrl || !cleanUpdatedAt) {
+    return cleanUrl;
+  }
+
+  const lower = cleanUrl.toLowerCase();
+
+  if (
+    lower.startsWith("data:") ||
+    lower.startsWith("blob:")
+  ) {
+    return cleanUrl;
+  }
+
+  try {
+    const parsed = new URL(
+      cleanUrl,
+      getBaseOrigin()
+    );
+
+    parsed.searchParams.set(
+      AVATAR_CACHE_PARAM,
+      cleanUpdatedAt
+    );
+
+    if (
+      cleanUrl.startsWith("/") ||
+      cleanUrl.startsWith("./") ||
+      cleanUrl.startsWith("../")
+    ) {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+
+    return parsed.toString();
+  } catch {
+    return cleanUrl;
+  }
+}
+
+export function getAvatarUrl(user = null) {
+  const currentUser = safeObject(user);
+
+  if (!Object.keys(currentUser).length) {
+    return "";
+  }
+
+  if (!userHasAvatar(currentUser)) {
+    return "";
+  }
+
+  const branches = getProfileLikeBranches(currentUser);
+
+  const explicitAvatar = first(
+    ...branches.flatMap((branch) => [
+      branch.avatar,
+      branch.avatarUrl,
+      branch.avatar_url,
+      branch.avatarURI,
+      branch.avatar_uri,
+
+      branch.photo,
+      branch.photoUrl,
+      branch.photo_url,
+
+      branch.image,
+      branch.imageUrl,
+      branch.image_url,
+
+      branch.profileImage,
+      branch.profileImageUrl,
+      branch.profile_image,
+      branch.profile_image_url,
+
+      branch.picture,
+      branch.pictureUrl,
+      branch.picture_url,
+      branch.pictureURI,
+      branch.picture_uri,
+
+      branch.logo,
+      branch.logoUrl,
+      branch.logo_url,
+    ])
+  );
+
+  const avatar = sanitizeAvatarUrl(explicitAvatar);
+
+  if (!avatar) {
+    return "";
+  }
+
+  return appendAvatarCacheBust(
+    avatar,
+    getAvatarUpdatedAt(currentUser)
+  );
 }
 
 /* =========================================================
@@ -431,58 +1145,33 @@ function isAdminPermission(value = "") {
   );
 }
 
-function getRawUserBranches(user = null) {
-  const current = safeObject(user);
-
-  return [
-    current,
-
-    safeObject(current.raw),
-    safeObject(current.profile),
-    safeObject(current.account),
-    safeObject(current.meta),
-    safeObject(current.claims),
-    safeObject(current.permissions),
-
-    safeObject(current.raw?.profile),
-    safeObject(current.raw?.account),
-    safeObject(current.raw?.meta),
-    safeObject(current.raw?.claims),
-    safeObject(current.raw?.permissions),
-
-    safeObject(current.profile?.permissions),
-    safeObject(current.account?.permissions),
-    safeObject(current.meta?.permissions),
-    safeObject(current.claims?.permissions),
-  ];
-}
-
 function collectRoleCandidates(AppCore, user = null) {
   const state = safeObject(AppCore?.state);
   const session = safeObject(state.session);
   const current = safeObject(user || getUser(AppCore));
-  const branches = getRawUserBranches(current);
+  const branches = getProfileLikeBranches(current);
 
   const authLikeSources = getAuthLikeSources(AppCore);
 
   const authRoleCandidates = authLikeSources.flatMap((source) => {
-    const values = [
+    return [
       source?.role,
       source?.rol,
       source?.userRole,
       source?.roles,
       source?.permissions,
       source?.scopes,
+
       source?.state?.role,
       source?.state?.roles,
       source?.state?.permissions,
+
       callUserGetter(source, "getRole"),
       callUserGetter(source, "getCurrentRole"),
       callUserGetter(source, "getRoles"),
       callUserGetter(source, "getPermissions"),
+      callUserGetter(source, "getScopes"),
     ];
-
-    return values;
   });
 
   const directRoles = [
@@ -514,9 +1203,11 @@ function collectRoleCandidates(AppCore, user = null) {
       branch.scope,
       branch.permission,
       branch.authority,
+
       branch["custom:role"],
       branch["custom:roles"],
       branch["custom:permissions"],
+
       branch["https://onion/role"],
       branch["https://onion/roles"],
       branch["https://onion/permissions"],
@@ -564,7 +1255,7 @@ function hasAdminFlag(AppCore, user = null) {
   const state = safeObject(AppCore?.state);
   const session = safeObject(state.session);
   const current = safeObject(user || getUser(AppCore));
-  const branches = getRawUserBranches(current);
+  const branches = getProfileLikeBranches(current);
 
   const authLikeSources = getAuthLikeSources(AppCore);
 
@@ -575,8 +1266,11 @@ function hasAdminFlag(AppCore, user = null) {
     source?.superAdmin,
     source?.canManageUsers,
     source?.canAccessUsers,
+
     callUserGetter(source, "isAdmin"),
     callUserGetter(source, "isCurrentUserAdmin"),
+    callUserGetter(source, "canManageUsers"),
+    callUserGetter(source, "canAccessUsers"),
   ]);
 
   return [
@@ -611,423 +1305,6 @@ function hasAdminFlag(AppCore, user = null) {
   ].some((value) => safeBoolean(value, false));
 }
 
-/* =========================================================
-   USER RESOLUTION
-========================================================= */
-
-export function getUser(AppCore) {
-  const state = safeObject(AppCore?.state);
-
-  let user = first(
-    state.user,
-    state.currentUser,
-    state.sessionUser,
-    state.authUser,
-    state.session?.user,
-    state.session?.currentUser,
-    state.auth?.user
-  );
-
-  if (!user || typeof user !== "object") {
-    try {
-      user = first(
-        callUserGetter(AppCore, "getUser"),
-        callUserGetter(AppCore, "getCurrentUser"),
-        callUserGetter(AppCore, "currentUser")
-      );
-    } catch {}
-  }
-
-  if (!user || typeof user !== "object") {
-    user = getUserFromAuthLikeSources(AppCore);
-  }
-
-  return safeObject(user);
-}
-
-function getProfileLikeBranches(user = null) {
-  const current = safeObject(user);
-
-  return [
-    current,
-    safeObject(current.profile),
-    safeObject(current.account),
-    safeObject(current.meta),
-    safeObject(current.claims),
-    safeObject(current.raw),
-    safeObject(current.raw?.profile),
-    safeObject(current.raw?.account),
-    safeObject(current.raw?.meta),
-    safeObject(current.raw?.claims),
-  ];
-}
-
-export function getDisplayName(AppCore, user = null) {
-  const currentUser = safeObject(user || getUser(AppCore));
-  const branches = getProfileLikeBranches(currentUser);
-
-  try {
-    if (isFn(AppCore?.getUserDisplayName)) {
-      const value = safeText(
-        AppCore.getUserDisplayName(currentUser),
-        ""
-      );
-
-      if (value) return value;
-    }
-  } catch {}
-
-  try {
-    if (isFn(AppCore?.utils?.getUserDisplayName)) {
-      const value = safeText(
-        AppCore.utils.getUserDisplayName(currentUser),
-        ""
-      );
-
-      if (value) return value;
-    }
-  } catch {}
-
-  const value = first(
-    ...branches.flatMap((branch) => [
-      branch.displayName,
-      branch.display_name,
-      branch.fullName,
-      branch.full_name,
-      branch.name,
-      branch.nombre,
-      branch.firstName && branch.lastName
-        ? `${branch.firstName} ${branch.lastName}`
-        : null,
-      branch.first_name && branch.last_name
-        ? `${branch.first_name} ${branch.last_name}`
-        : null,
-      branch.username,
-      branch.userName,
-      branch.user_name,
-      branch.email,
-      branch.phone,
-      branch.telefono,
-    ])
-  );
-
-  return safeText(
-    value,
-    DEFAULT_DISPLAY_NAME
-  );
-}
-
-export function getUsername(AppCore, user = null) {
-  const currentUser = safeObject(user || getUser(AppCore));
-  const branches = getProfileLikeBranches(currentUser);
-
-  try {
-    if (isFn(AppCore?.getUserUsername)) {
-      const value = safeText(
-        AppCore.getUserUsername(currentUser),
-        ""
-      );
-
-      if (value) return sanitizeUsername(value);
-    }
-  } catch {}
-
-  try {
-    if (isFn(AppCore?.utils?.getUserUsername)) {
-      const value = safeText(
-        AppCore.utils.getUserUsername(currentUser),
-        ""
-      );
-
-      if (value) return sanitizeUsername(value);
-    }
-  } catch {}
-
-  const value = first(
-    ...branches.flatMap((branch) => [
-      branch.username,
-      branch.userName,
-      branch.user_name,
-      branch.slug,
-      branch.nick,
-      branch.alias,
-      branch.handle,
-    ])
-  );
-
-  return sanitizeUsername(value);
-}
-
-function sanitizeUsername(value = "") {
-  return normalizeString(value)
-    .replace(/^@+/, "")
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
-}
-
-function extractInitialsFromText(value = "") {
-  const text = safeText(value, "");
-
-  if (!text) {
-    return "";
-  }
-
-  const parts = normalizeString(text)
-    .split(/[\s._-]+/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  const initials = parts
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || "")
-    .join("")
-    .replace(/[^A-Z0-9]/g, "")
-    .slice(0, 2);
-
-  return initials;
-}
-
-export function getAvatarText(AppCore, user = null) {
-  const currentUser = safeObject(user || getUser(AppCore));
-
-  const displayName = getDisplayName(
-    AppCore,
-    currentUser
-  );
-
-  const username = getUsername(
-    AppCore,
-    currentUser
-  );
-
-  const email = safeText(
-    first(
-      currentUser.email,
-      currentUser.raw?.email,
-      currentUser.profile?.email,
-      currentUser.claims?.email
-    ),
-    ""
-  );
-
-  const initials =
-    extractInitialsFromText(displayName) ||
-    extractInitialsFromText(username) ||
-    extractInitialsFromText(email);
-
-  if (initials) {
-    return initials;
-  }
-
-  return DEFAULT_AVATAR_TEXT;
-}
-
-/* =========================================================
-   AVATAR URL
-========================================================= */
-
-function getAvatarUpdatedAt(user = null) {
-  const currentUser = safeObject(user);
-  const branches = getProfileLikeBranches(currentUser);
-
-  return safeText(
-    first(
-      ...branches.flatMap((branch) => [
-        branch.avatarUpdatedAt,
-        branch.avatar_updated_at,
-        branch.pictureUpdatedAt,
-        branch.picture_updated_at,
-        branch.photoUpdatedAt,
-        branch.photo_updated_at,
-        branch.imageUpdatedAt,
-        branch.image_updated_at,
-        branch.updatedAt,
-        branch.updated_at,
-        branch.version,
-        branch.avatarVersion,
-        branch.avatar_version,
-      ])
-    ),
-    ""
-  );
-}
-
-function userHasAvatar(user = null) {
-  const currentUser = safeObject(user);
-  const branches = getProfileLikeBranches(currentUser);
-
-  const rawValue = first(
-    ...branches.flatMap((branch) => [
-      branch.hasAvatar,
-      branch.has_avatar,
-      branch.avatarEnabled,
-      branch.avatar_enabled,
-      branch.hasPhoto,
-      branch.has_photo,
-      branch.hasPicture,
-      branch.has_picture,
-    ])
-  );
-
-  if (rawValue === null || rawValue === undefined) {
-    return true;
-  }
-
-  return safeBoolean(rawValue, false);
-}
-
-function sanitizeAvatarUrl(value = "") {
-  const raw = safeText(value, "");
-
-  if (!raw) {
-    return "";
-  }
-
-  const compact = raw.replace(/\s+/g, "");
-  const lower = compact.toLowerCase();
-
-  if (
-    lower.startsWith("javascript:") ||
-    lower.startsWith("vbscript:") ||
-    lower.startsWith("file:") ||
-    lower.startsWith("data:text/") ||
-    lower.startsWith("data:application/")
-  ) {
-    return "";
-  }
-
-  if (
-    lower.startsWith("data:") &&
-    !lower.startsWith("data:image/")
-  ) {
-    return "";
-  }
-
-  if (
-    lower.startsWith("http://") ||
-    lower.startsWith("https://") ||
-    lower.startsWith("/") ||
-    lower.startsWith("./") ||
-    lower.startsWith("../") ||
-    lower.startsWith("blob:") ||
-    lower.startsWith("data:image/")
-  ) {
-    return raw;
-  }
-
-  /*
-    Ruta relativa simple tipo "uploads/avatar.png".
-  */
-  if (/^[a-zA-Z0-9._~:/?#@!$&'()*+,;=%-]+$/.test(raw)) {
-    return raw.startsWith("/")
-      ? raw
-      : `/${raw}`;
-  }
-
-  return "";
-}
-
-function appendAvatarCacheBust(url = "", updatedAt = "") {
-  const cleanUrl = sanitizeAvatarUrl(url);
-  const cleanUpdatedAt = safeText(updatedAt, "");
-
-  if (!cleanUrl || !cleanUpdatedAt) {
-    return cleanUrl;
-  }
-
-  const lower = cleanUrl.toLowerCase();
-
-  if (
-    lower.startsWith("data:") ||
-    lower.startsWith("blob:")
-  ) {
-    return cleanUrl;
-  }
-
-  try {
-    const parsed = new URL(
-      cleanUrl,
-      getBaseOrigin()
-    );
-
-    parsed.searchParams.set(
-      AVATAR_CACHE_PARAM,
-      cleanUpdatedAt
-    );
-
-    if (
-      cleanUrl.startsWith("/") ||
-      cleanUrl.startsWith("./") ||
-      cleanUrl.startsWith("../")
-    ) {
-      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
-    }
-
-    return parsed.toString();
-  } catch {
-    return cleanUrl;
-  }
-}
-
-export function getAvatarUrl(user = null) {
-  const currentUser = safeObject(user);
-
-  if (!Object.keys(currentUser).length) {
-    return "";
-  }
-
-  if (!userHasAvatar(currentUser)) {
-    return "";
-  }
-
-  const branches = getProfileLikeBranches(currentUser);
-
-  const explicitAvatar = first(
-    ...branches.flatMap((branch) => [
-      branch.avatar,
-      branch.avatarUrl,
-      branch.avatar_url,
-      branch.avatarURI,
-      branch.avatar_uri,
-
-      branch.photo,
-      branch.photoUrl,
-      branch.photo_url,
-
-      branch.image,
-      branch.imageUrl,
-      branch.image_url,
-
-      branch.profileImage,
-      branch.profileImageUrl,
-      branch.profile_image,
-      branch.profile_image_url,
-
-      branch.picture,
-      branch.pictureUrl,
-      branch.picture_url,
-      branch.pictureURI,
-      branch.picture_uri,
-    ])
-  );
-
-  const avatar = sanitizeAvatarUrl(explicitAvatar);
-
-  if (!avatar) {
-    return "";
-  }
-
-  return appendAvatarCacheBust(
-    avatar,
-    getAvatarUpdatedAt(currentUser)
-  );
-}
-
-/* =========================================================
-   ADMIN
-========================================================= */
-
 export function isAdmin(AppCore, user = null) {
   const currentUser = safeObject(user || getUser(AppCore));
 
@@ -1057,7 +1334,7 @@ function getAvatarNodes(avatarEl) {
 
   try {
     imgEl =
-      avatarEl.querySelector("#sidebarAvatarImage") ||
+      avatarEl.querySelector(`#${SIDEBAR_AVATAR_IMAGE_ID}`) ||
       avatarEl.querySelector(".avatar-image") ||
       avatarEl.querySelector("img") ||
       null;
@@ -1065,7 +1342,7 @@ function getAvatarNodes(avatarEl) {
 
   try {
     fallbackEl =
-      avatarEl.querySelector("#sidebarAvatarFallback") ||
+      avatarEl.querySelector(`#${SIDEBAR_AVATAR_FALLBACK_ID}`) ||
       avatarEl.querySelector(".avatar-fallback") ||
       null;
   } catch {}
@@ -1100,6 +1377,9 @@ function clearImageNode(imgEl = null) {
   if (!imgEl) return;
 
   try {
+    imgEl.onload = null;
+    imgEl.onerror = null;
+
     imgEl.hidden = true;
     imgEl.removeAttribute("src");
     imgEl.removeAttribute("srcset");
@@ -1108,9 +1388,14 @@ function clearImageNode(imgEl = null) {
     imgEl.removeAttribute("data-tooltip");
     imgEl.removeAttribute("data-i18n-data-tooltip");
     imgEl.removeAttribute("aria-describedby");
-    imgEl.onload = null;
-    imgEl.onerror = null;
   } catch {}
+}
+
+function normalizeAvatarText(value = "") {
+  return safeText(value, DEFAULT_AVATAR_TEXT)
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, 2)
+    .toUpperCase() || DEFAULT_AVATAR_TEXT;
 }
 
 function setFallbackNode({
@@ -1119,12 +1404,7 @@ function setFallbackNode({
   text,
   visible,
 }) {
-  const finalText = safeText(
-    text,
-    DEFAULT_AVATAR_TEXT
-  )
-    .slice(0, 2)
-    .toUpperCase();
+  const finalText = normalizeAvatarText(text);
 
   if (fallbackEl) {
     try {
@@ -1137,10 +1417,16 @@ function setFallbackNode({
     return true;
   }
 
+  /*
+    Solo escribimos textContent directo si no hay nodos hijos estructurales.
+    Evita destruir <img> + <span> del template.
+  */
   if (avatarEl && visible) {
     try {
-      avatarEl.textContent = finalText;
-      return true;
+      if (!avatarEl.querySelector?.("img,.avatar-fallback")) {
+        avatarEl.textContent = finalText;
+        return true;
+      }
     } catch {}
   }
 
@@ -1153,6 +1439,7 @@ function setAvatarState(
     hasImage = false,
     loading = false,
     url = "",
+    error = false,
   } = {}
 ) {
   if (!avatarEl) {
@@ -1163,9 +1450,11 @@ function setAvatarState(
     avatarEl.classList.toggle("has-image", Boolean(hasImage));
     avatarEl.classList.toggle("has-fallback", !hasImage);
     avatarEl.classList.toggle("is-loading", Boolean(loading));
+    avatarEl.classList.toggle("has-error", Boolean(error));
 
     avatarEl.dataset.hasImage = hasImage ? "true" : "false";
     avatarEl.dataset.loading = loading ? "true" : "false";
+    avatarEl.dataset.avatarError = error ? "true" : "false";
 
     if (url) {
       avatarEl.dataset.avatarUrl = url;
@@ -1190,7 +1479,7 @@ function nextAvatarRenderSeq(avatarEl = null) {
   const next =
     Number.isFinite(current)
       ? current + 1
-      : Date.now();
+      : nowMs();
 
   try {
     avatarEl.dataset[AVATAR_RENDER_SEQ_DATASET_KEY] = String(next);
@@ -1227,9 +1516,8 @@ export function renderAvatarFallback(
     DEFAULT_DISPLAY_NAME
   );
 
-  const finalAvatarText = safeText(
-    avatarText,
-    DEFAULT_AVATAR_TEXT
+  const finalAvatarText = normalizeAvatarText(
+    avatarText
   );
 
   const {
@@ -1257,6 +1545,7 @@ export function renderAvatarFallback(
     hasImage: false,
     loading: false,
     url: "",
+    error: false,
   });
 
   return true;
@@ -1266,10 +1555,12 @@ export function renderAvatarImage(
   avatarEl,
   avatarUrl,
   displayName = DEFAULT_DISPLAY_NAME,
-  avatarText = DEFAULT_AVATAR_TEXT
+  avatarText = DEFAULT_AVATAR_TEXT,
+  options = {}
 ) {
   if (!avatarEl) return false;
 
+  const AppCore = options?.AppCore || null;
   const safeUrl = sanitizeAvatarUrl(avatarUrl);
 
   if (!safeUrl) {
@@ -1285,9 +1576,8 @@ export function renderAvatarImage(
     DEFAULT_DISPLAY_NAME
   );
 
-  const finalAvatarText = safeText(
-    avatarText,
-    DEFAULT_AVATAR_TEXT
+  const finalAvatarText = normalizeAvatarText(
+    avatarText
   );
 
   const {
@@ -1326,6 +1616,7 @@ export function renderAvatarImage(
     hasImage: false,
     loading: true,
     url: safeUrl,
+    error: false,
   });
 
   try {
@@ -1334,7 +1625,14 @@ export function renderAvatarImage(
     imgEl.loading = "eager";
     imgEl.decoding = "async";
     imgEl.draggable = false;
-    imgEl.referrerPolicy = "no-referrer";
+
+    /*
+      Evita mandar referrer a avatares externos.
+      No rompe rutas internas.
+    */
+    try {
+      imgEl.referrerPolicy = "no-referrer";
+    } catch {}
 
     removeTooltipAttributes(imgEl);
 
@@ -1358,13 +1656,39 @@ export function renderAvatarImage(
         hasImage: true,
         loading: false,
         url: safeUrl,
+        error: false,
       });
+
+      safeEmit(
+        AppCore,
+        EVENTS.userAvatarLoaded,
+        {
+          url: safeUrl,
+          displayName: finalDisplayName,
+        }
+      );
     };
 
     imgEl.onerror = () => {
       if (!isCurrentAvatarRenderSeq(avatarEl, renderSeq)) {
         return;
       }
+
+      setAvatarState(avatarEl, {
+        hasImage: false,
+        loading: false,
+        url: "",
+        error: true,
+      });
+
+      safeEmit(
+        AppCore,
+        EVENTS.userAvatarError,
+        {
+          url: safeUrl,
+          displayName: finalDisplayName,
+        }
+      );
 
       renderAvatarFallback(
         avatarEl,
@@ -1373,12 +1697,19 @@ export function renderAvatarImage(
       );
     };
 
+    /*
+      Limpiamos primero para forzar recarga si cambia token SAS/cache-bust.
+    */
+    try {
+      imgEl.removeAttribute("src");
+    } catch {}
+
     imgEl.src = safeUrl;
 
     /*
       Si la imagen ya está en caché y naturalWidth existe,
-      forzamos el commit sin esperar evento.
-  */
+      forzamos commit sin esperar evento.
+    */
     if (
       imgEl.complete === true &&
       Number(imgEl.naturalWidth || 0) > 0
@@ -1419,6 +1750,7 @@ function getPlanLabel(AppCore, user = null) {
       branch.subscription_plan,
       branch.subscription?.plan,
       branch.account?.plan,
+      branch.billing?.plan,
     ])
   );
 
@@ -1432,7 +1764,7 @@ function getPlanElement(userToggle = null) {
 
   try {
     return (
-      userToggle.querySelector("#sidebarUserPlan") ||
+      userToggle.querySelector(`#${SIDEBAR_USER_PLAN_ID}`) ||
       userToggle.querySelector(".plan") ||
       null
     );
@@ -1441,26 +1773,22 @@ function getPlanElement(userToggle = null) {
   }
 }
 
-function setDatasetValue(element = null, key = "", value = "") {
-  if (!element || !key) {
+function setUserDataset(element = null, {
+  username = "",
+  displayName = "",
+  admin = false,
+  avatarUrl = "",
+} = {}) {
+  if (!element) {
     return false;
   }
 
-  try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
-      delete element.dataset[key];
-      return true;
-    }
+  setDatasetValue(element, "username", username || "");
+  setDatasetValue(element, "displayName", displayName || "");
+  setDatasetValue(element, "admin", admin ? "true" : "false");
+  setDatasetValue(element, "avatarUrl", avatarUrl || "");
 
-    element.dataset[key] = String(value);
-    return true;
-  } catch {
-    return false;
-  }
+  return true;
 }
 
 /* =========================================================
@@ -1505,17 +1833,12 @@ export function renderUser(AppCore) {
     try {
       nameEl.textContent = displayName;
 
-      setDatasetValue(
-        nameEl,
-        "username",
-        username || ""
-      );
-
-      setDatasetValue(
-        nameEl,
-        "displayName",
-        displayName
-      );
+      setUserDataset(nameEl, {
+        username,
+        displayName,
+        admin,
+        avatarUrl,
+      });
 
       removeTooltipAttributes(nameEl);
     } catch {}
@@ -1527,7 +1850,10 @@ export function renderUser(AppCore) {
         avatarEl,
         avatarUrl,
         displayName,
-        avatarText
+        avatarText,
+        {
+          AppCore,
+        }
       );
     } else {
       renderAvatarFallback(
@@ -1538,17 +1864,12 @@ export function renderUser(AppCore) {
     }
 
     try {
-      setDatasetValue(
-        avatarEl,
-        "username",
-        username || ""
-      );
-
-      setDatasetValue(
-        avatarEl,
-        "displayName",
-        displayName
-      );
+      setUserDataset(avatarEl, {
+        username,
+        displayName,
+        admin,
+        avatarUrl,
+      });
 
       removeTooltipAttributesDeep(avatarEl);
     } catch {}
@@ -1561,23 +1882,21 @@ export function renderUser(AppCore) {
         `Abrir menú de usuario de ${displayName}`
       );
 
-      setDatasetValue(
-        userToggle,
-        "username",
-        username || ""
+      userToggle.setAttribute(
+        "aria-haspopup",
+        "menu"
       );
 
-      setDatasetValue(
-        userToggle,
-        "displayName",
-        displayName
-      );
+      if (!userToggle.getAttribute("aria-expanded")) {
+        userToggle.setAttribute("aria-expanded", "false");
+      }
 
-      setDatasetValue(
-        userToggle,
-        "admin",
-        admin ? "true" : "false"
-      );
+      setUserDataset(userToggle, {
+        username,
+        displayName,
+        admin,
+        avatarUrl,
+      });
 
       removeTooltipAttributes(userToggle);
 
@@ -1593,17 +1912,12 @@ export function renderUser(AppCore) {
 
   if (userDropdown) {
     try {
-      setDatasetValue(
-        userDropdown,
-        "username",
-        username || ""
-      );
-
-      setDatasetValue(
-        userDropdown,
-        "admin",
-        admin ? "true" : "false"
-      );
+      setUserDataset(userDropdown, {
+        username,
+        displayName,
+        admin,
+        avatarUrl,
+      });
 
       removeTooltipAttributes(userDropdown);
     } catch {}
@@ -1627,21 +1941,13 @@ export function renderUser(AppCore) {
     username: username || null,
     planLabel,
     isAdmin: admin,
+    roles: collectRoleCandidates(AppCore, user),
   };
 
   safeEmit(
     AppCore,
-    "sidebar:user:rendered",
+    EVENTS.userRendered,
     snapshot
-  );
-
-  safeEmit(
-    AppCore,
-    "app:user-ui:rendered",
-    {
-      source: "sidebar.user",
-      ...snapshot,
-    }
   );
 
   return snapshot;
@@ -1665,7 +1971,11 @@ export function getSidebarUserSnapshot(AppCore) {
   const avatarText = getAvatarText(AppCore, user);
   const avatarUrl = getAvatarUrl(user);
 
+  const roles = collectRoleCandidates(AppCore, user);
+
   return {
+    hasWindow: hasWindow(),
+
     hasUser:
       Boolean(Object.keys(user).length),
 
@@ -1681,8 +1991,7 @@ export function getSidebarUserSnapshot(AppCore) {
     isAdmin:
       isAdmin(AppCore, user),
 
-    roles:
-      collectRoleCandidates(AppCore, user),
+    roles,
 
     dom: {
       hasName:
@@ -1690,6 +1999,9 @@ export function getSidebarUserSnapshot(AppCore) {
 
       nameText:
         nameEl?.textContent || "",
+
+      nameDataset:
+        { ...(nameEl?.dataset || {}) },
 
       hasAvatar:
         Boolean(avatarEl),
@@ -1703,8 +2015,14 @@ export function getSidebarUserSnapshot(AppCore) {
       avatarLoading:
         avatarEl?.dataset?.loading || "",
 
+      avatarError:
+        avatarEl?.dataset?.avatarError || "",
+
       avatarUrl:
         avatarEl?.dataset?.avatarUrl || "",
+
+      avatarSeq:
+        avatarEl?.dataset?.[AVATAR_RENDER_SEQ_DATASET_KEY] || "",
 
       hasUserToggle:
         Boolean(userToggle),
@@ -1715,11 +2033,17 @@ export function getSidebarUserSnapshot(AppCore) {
       userToggleAriaExpanded:
         userToggle?.getAttribute?.("aria-expanded") || "",
 
+      userToggleDataset:
+        { ...(userToggle?.dataset || {}) },
+
       hasUserDropdown:
         Boolean(userDropdown),
 
       userDropdownAriaHidden:
         userDropdown?.getAttribute?.("aria-hidden") || "",
+
+      userDropdownDataset:
+        { ...(userDropdown?.dataset || {}) },
     },
   };
 }

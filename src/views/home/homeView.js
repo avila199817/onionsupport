@@ -2,14 +2,15 @@
    Onion SPA - Home View
    Archivo: src/views/home/homeView.js
 
-   HOME EXPERIENCE MODE · USER + ADMIN · DASHBOARD API FIRST · FINAL PRO 10/10
+   HOME EXPERIENCE MODE · USER + ADMIN · DASHBOARD API FIRST
+   EXTREME PRO SYSTEM · FINAL PATCH 12/10
 
    RESPONSABILIDADES:
    - punto de entrada real de la vista Home
    - render principal con template unificado home.template.js
    - usar home.api.js como fuente principal de datos
    - consumir /api/dashboard/summary normalizado por HomeApi
-   - mantener fallback elegante a incidencias si el dashboard no trae tickets
+   - mantener fallback elegante a incidencias si dashboard no trae tickets
    - Home para user/admin con la misma lógica
    - paginación visual fija a 5 incidencias por vista
    - render inicial inmediato
@@ -22,6 +23,10 @@
    - evitar doble bind de listeners
    - soportar destroy limpio del router
    - permitir reload con rerender seguro
+   - registrar bridge público para topbar/global search
+   - preservar datos de dashboard y fallback de incidencias
+   - evitar que refresh empobrezca el Home si API devuelve parcial
+   - trabajar alineado con el template Home premium
 
    HARDENING PRO:
    - View = UX, render, eventos y bridges
@@ -32,8 +37,13 @@
    - click delegation sólida
    - fallback si /api/dashboard/summary no entrega tickets
    - anti spam click en crear incidencia
+   - anti spam apertura rápida de tickets
    - compatible con template data-home-action y data-action
    - no escanea endpoints opcionales desde la vista
+   - reload con cola segura
+   - eventos AppCore + window
+   - bridge AppCore.modules + window
+   - modal directo por import + fallback global
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -70,6 +80,7 @@ import {
 } from "../incidencias/incidencias.actions.js";
 
 import IncidenciasCreateView from "../incidencias/incidencias.create.modal.js";
+import { OnionIncidenciasModal } from "../incidencias/incidencias.modal.js";
 
 export const HomeView = (() => {
   "use strict";
@@ -82,21 +93,104 @@ export const HomeView = (() => {
 
   const PAGE_SIZE = 5;
   const CREATE_CLICK_THROTTLE_MS = 450;
+  const OPEN_TICKET_THROTTLE_MS = 350;
 
-  const HOME_CACHE_KEY = "onion.home.view.cache.v2";
+  const HOME_CACHE_KEY = "onion.home.view.cache.v3";
   const HOME_CACHE_TTL_MS = 1000 * 60 * 10;
 
+  const ROUTES = Object.freeze({
+    HOME: "/",
+    INCIDENCIAS: "/incidencias",
+    FACTURAS: "/facturas",
+    USUARIOS: "/usuarios",
+    CLIENTES: "/clientes",
+    CUENTA: "/cuenta",
+    AJUSTES: "/ajustes",
+  });
+
   const ROUTE_ALIASES = Object.freeze({
+    "/home": "/",
+    "/dashboard": "/",
+
+    "/tickets": "/incidencias",
+    "/ticket": "/incidencias",
+    "/incidents": "/incidencias",
+    "/incident": "/incidencias",
+    "/issues": "/incidencias",
+    "/issue": "/incidencias",
+
+    "/invoices": "/facturas",
+    "/invoice": "/facturas",
+    "/bills": "/facturas",
+    "/bill": "/facturas",
+    "/billing": "/facturas",
+
     "/users": "/usuarios",
     "/user": "/usuarios",
+    "/members": "/usuarios",
+    "/member": "/usuarios",
+
     "/clients": "/clientes",
     "/client": "/clientes",
     "/customers": "/clientes",
     "/customer": "/clientes",
+
     "/account": "/cuenta",
     "/profile": "/cuenta",
+
     "/settings": "/ajustes",
   });
+
+  const HOME_RELOAD_EVENTS = Object.freeze([
+    "home:reload",
+    "dashboard:reload",
+    "dashboard:summary:updated",
+
+    "incidencias:create:success",
+    "incidencias:modal:updated",
+    "incidencias:ticket:updated",
+    "incidencias:upload:success",
+    "incidencias:comment:success",
+    "incidencias:reopen:success",
+    "incidencias:delete:success",
+    "incidencias:status:changed",
+
+    "facturas:create:success",
+    "facturas:update:success",
+    "facturas:delete:success",
+
+    "clientes:create:success",
+    "clientes:update:success",
+    "clientes:delete:success",
+
+    "users:create:success",
+    "users:update:success",
+    "users:delete:success",
+    "usuarios:create:success",
+    "usuarios:update:success",
+    "usuarios:delete:success",
+  ]);
+
+  const HOME_OPEN_TICKET_EVENTS = Object.freeze([
+    "home:ticket:open",
+    "home:incidencia:open",
+    "home:open-ticket",
+    "home:open-incidencia",
+
+    "topbar:search:open-ticket",
+    "topbar:search:open-incidencia",
+    "search:open-ticket",
+    "search:open-incidencia",
+    "global-search:open-ticket",
+    "global-search:open-incidencia",
+  ]);
+
+  const READY_EVENTS = Object.freeze([
+    "app:ready",
+    "app:boot:ready",
+    "app:boot:complete",
+    "router:rendered",
+  ]);
 
   /* =========================================================
      LOCAL RUNTIME
@@ -104,12 +198,23 @@ export const HomeView = (() => {
 
   let initialized = false;
   let destroyed = false;
+
   let inflightInit = null;
   let inflightReload = null;
+  let inflightOpenTicket = null;
+
+  let queuedReloadOptions = null;
+
   let bindingsCleanup = null;
+  let bridgeCleanup = null;
+
   let renderToken = 0;
+
   let pendingCreateRequest = false;
   let lastCreateClickAt = 0;
+  let lastOpenTicketClickAt = 0;
+
+  let inflightOpenTicketId = "";
 
   const homeState = {
     hydrated: false,
@@ -120,6 +225,7 @@ export const HomeView = (() => {
     creating: false,
 
     openingTicketId: "",
+    selectedTicketId: "",
     navigatingAction: "",
 
     error: "",
@@ -175,13 +281,52 @@ export const HomeView = (() => {
       return fallback;
     }
 
-    const text = String(value).trim();
+    const text = String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
     return text || fallback;
   }
 
   function safeNumber(value, fallback = 0) {
+    if (value === null || value === undefined || value === "") {
+      return fallback;
+    }
+
+    if (typeof value === "string") {
+      let normalized = value
+        .trim()
+        .replace(/€/g, "")
+        .replace(/\$/g, "")
+        .replace(/£/g, "")
+        .replace(/%/g, "")
+        .replace(/[^\d.,+\-\s]/g, "")
+        .replace(/\s/g, "");
+
+      const hasComma = normalized.includes(",");
+      const hasDot = normalized.includes(".");
+
+      if (hasComma && hasDot) {
+        const lastComma = normalized.lastIndexOf(",");
+        const lastDot = normalized.lastIndexOf(".");
+
+        if (lastComma > lastDot) {
+          normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
+        } else {
+          normalized = normalized.replace(/,/g, "");
+        }
+      } else if (hasComma) {
+        normalized = normalized.replace(/,/g, ".");
+      }
+
+      const parsed = Number(normalized);
+
+      return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
     const n = Number(value);
+
     return Number.isFinite(n) ? n : fallback;
   }
 
@@ -222,14 +367,55 @@ export const HomeView = (() => {
     return null;
   }
 
-  function normalizeKey(value = "") {
+  function normalizeText(value = "") {
     return safeText(value, "")
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function normalizeKey(value = "") {
+    return normalizeText(value)
       .replace(/[\s-]+/g, "_")
       .replace(/[^a-z0-9_:.]/g, "")
-      .trim();
+      .replace(/^_+|_+$/g, "");
+  }
+
+  function uniqueStrings(values = []) {
+    return [
+      ...new Set(
+        safeArray(values)
+          .flatMap((value) => (Array.isArray(value) ? value : [value]))
+          .map((value) => safeText(value, ""))
+          .filter(Boolean)
+      ),
+    ];
+  }
+
+  function uniqueBy(items = [], picker = (item) => item) {
+    const rows = safeArray(items);
+    const seen = new Set();
+    const output = [];
+
+    for (const item of rows) {
+      const key = safeText(picker(item), "");
+
+      if (!key) {
+        output.push(item);
+        continue;
+      }
+
+      const normalized = normalizeText(key);
+
+      if (seen.has(normalized)) continue;
+
+      seen.add(normalized);
+      output.push(item);
+    }
+
+    return output;
   }
 
   function nowIso() {
@@ -238,46 +424,6 @@ export const HomeView = (() => {
     } catch {
       return String(Date.now());
     }
-  }
-
-  function safeLog(...args) {
-    try {
-      AppCore?.utils?.log?.("[HomeView]", ...args);
-    } catch {}
-  }
-
-  function safeWarn(...args) {
-    try {
-      AppCore?.utils?.warn?.("[HomeView]", ...args);
-    } catch {}
-
-    try {
-      console.warn("[HomeView]", ...args);
-    } catch {}
-  }
-
-  function safeEmit(event = "", payload = {}) {
-    const eventName = safeText(event, "");
-    if (!eventName) return false;
-
-    try {
-      AppCore?.events?.emit?.(eventName, payload);
-      return true;
-    } catch {}
-
-    try {
-      if (isBrowser()) {
-        window.dispatchEvent(
-          new CustomEvent(eventName, {
-            detail: payload,
-          })
-        );
-
-        return true;
-      }
-    } catch {}
-
-    return false;
   }
 
   function waitForPaint() {
@@ -302,27 +448,6 @@ export const HomeView = (() => {
     });
   }
 
-  function getContainer() {
-    if (!isBrowser()) {
-      return null;
-    }
-
-    return (
-      AppCore?.dom?.viewContainer ||
-      document.getElementById("view-container") ||
-      null
-    );
-  }
-
-  function nextRenderToken() {
-    renderToken += 1;
-    return renderToken;
-  }
-
-  function isActiveToken(token) {
-    return !destroyed && token === renderToken;
-  }
-
   function safeErrorMessage(error = null) {
     return safeText(
       first(
@@ -337,14 +462,126 @@ export const HomeView = (() => {
     );
   }
 
-  function getEventPayload(event = null) {
+  function getEventPayload(eventOrPayload = {}) {
+    if (
+      typeof eventOrPayload === "string" ||
+      typeof eventOrPayload === "number"
+    ) {
+      return {
+        ticketId: safeText(eventOrPayload, ""),
+      };
+    }
+
     return safeObject(
       first(
-        event?.detail,
-        event?.payload,
-        event
+        eventOrPayload?.detail?.payload,
+        eventOrPayload?.detail,
+        eventOrPayload?.payload,
+        eventOrPayload
       )
     );
+  }
+
+  function sameIdentity(a = "", b = "") {
+    const left = normalizeText(a);
+    const right = normalizeText(b);
+
+    return Boolean(left && right && left === right);
+  }
+
+  /* =========================================================
+     LOG / EVENTS
+  ========================================================= */
+
+  function safeLog(...args) {
+    try {
+      AppCore?.utils?.log?.("[HomeView]", ...args);
+    } catch {}
+  }
+
+  function safeWarn(...args) {
+    try {
+      AppCore?.utils?.warn?.("[HomeView]", ...args);
+    } catch {}
+
+    try {
+      console.warn("[HomeView]", ...args);
+    } catch {}
+  }
+
+  function safeEmit(event = "", payload = {}) {
+    const eventName = safeText(event, "");
+    if (!eventName) return false;
+
+    let emitted = false;
+
+    try {
+      AppCore?.events?.emit?.(eventName, payload);
+      emitted = true;
+    } catch {}
+
+    try {
+      if (isBrowser()) {
+        window.dispatchEvent(
+          new CustomEvent(eventName, {
+            detail: payload,
+          })
+        );
+
+        emitted = true;
+      }
+    } catch {}
+
+    return emitted;
+  }
+
+  function safeOn(event = "", handler = null) {
+    const eventName = safeText(event, "");
+
+    if (!eventName || !isFunction(handler)) {
+      return () => {};
+    }
+
+    let busAttached = false;
+    let windowAttached = false;
+    let busCleanup = null;
+
+    const windowHandler = (domEvent) => handler(domEvent);
+
+    try {
+      const maybeCleanup = AppCore?.events?.on?.(eventName, handler);
+
+      if (isFunction(maybeCleanup)) {
+        busCleanup = maybeCleanup;
+      }
+
+      busAttached = true;
+    } catch {}
+
+    try {
+      if (isBrowser()) {
+        window.addEventListener(eventName, windowHandler);
+        windowAttached = true;
+      }
+    } catch {}
+
+    return () => {
+      if (busCleanup) {
+        try {
+          busCleanup();
+        } catch {}
+      } else if (busAttached) {
+        try {
+          AppCore?.events?.off?.(eventName, handler);
+        } catch {}
+      }
+
+      if (windowAttached) {
+        try {
+          window.removeEventListener(eventName, windowHandler);
+        } catch {}
+      }
+    };
   }
 
   /* =========================================================
@@ -354,9 +591,7 @@ export const HomeView = (() => {
   function normalizeToastType(type = "info") {
     const key = normalizeKey(type);
 
-    if (key === "warn") {
-      return "warning";
-    }
+    if (key === "warn") return "warning";
 
     if (
       [
@@ -436,23 +671,9 @@ export const HomeView = (() => {
       } catch {}
     }
 
-    try {
-      safeEmit(`toast:${toastType}`, payload);
-      return true;
-    } catch {}
+    safeEmit(`toast:${toastType}`, payload);
 
-    try {
-      const logger =
-        toastType === "error"
-          ? console.error
-          : toastType === "warning"
-            ? console.warn
-            : console.log;
-
-      logger(`[HomeToast:${toastType}]`, text);
-    } catch {}
-
-    return false;
+    return true;
   }
 
   /* =========================================================
@@ -501,6 +722,7 @@ export const HomeView = (() => {
       "administrador",
       "superadmin",
       "super_admin",
+      "super_administrador",
       "owner",
       "root",
       "staff",
@@ -561,6 +783,17 @@ export const HomeView = (() => {
     return true;
   }
 
+  function throttleOpenTicketClick() {
+    const current = Date.now();
+
+    if (current - lastOpenTicketClickAt < OPEN_TICKET_THROTTLE_MS) {
+      return false;
+    }
+
+    lastOpenTicketClickAt = current;
+    return true;
+  }
+
   /* =========================================================
      ROUTES
   ========================================================= */
@@ -589,16 +822,101 @@ export const HomeView = (() => {
           return raw;
         }
 
-        return new URL(raw).pathname || "/";
+        const url = new URL(raw);
+
+        return normalizeRoute(`${url.pathname}${url.search || ""}${url.hash || ""}`);
       } catch {
         return raw;
       }
     }
 
     const normalized = raw.startsWith("/") ? raw : `/${raw}`;
-    const clean = normalized.replace(/\/{2,}/g, "/");
+    const [pathWithMaybeQuery, hash = ""] = normalized.split("#");
+    const [path, query = ""] = pathWithMaybeQuery.split("?");
 
-    return ROUTE_ALIASES[clean] || clean;
+    const cleanPath = path.replace(/\/{2,}/g, "/") || "/";
+    const mappedPath = ROUTE_ALIASES[cleanPath] || cleanPath;
+
+    return [
+      mappedPath,
+      query ? `?${query}` : "",
+      hash ? `#${hash}` : "",
+    ].join("");
+  }
+
+  function getRouterCandidate() {
+    try {
+      if (isFunction(AppCore?.modules?.get)) {
+        const routerModule =
+          AppCore.modules.get("router") ||
+          AppCore.modules.get("Router");
+
+        if (routerModule) return routerModule;
+      }
+    } catch {}
+
+    try {
+      return (
+        AppCore?.router ||
+        AppCore?.Router ||
+        AppCore?.modules?.router ||
+        AppCore?.modules?.Router ||
+        (isBrowser() ? window.Router : null) ||
+        (isBrowser() ? window.OnionRouter : null) ||
+        null
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  async function navigateTo(route = "", options = {}) {
+    const target = normalizeRoute(route);
+    if (!target) return false;
+
+    const opts = safeObject(options);
+    const router = getRouterCandidate();
+
+    try {
+      if (isFunction(router?.navigate)) {
+        await router.navigate(target, opts);
+        return true;
+      }
+
+      if (isFunction(router?.go)) {
+        await router.go(target, opts);
+        return true;
+      }
+
+      if (isFunction(router?.push)) {
+        await router.push(target, opts);
+        return true;
+      }
+
+      if (isFunction(AppCore?.navigate)) {
+        await AppCore.navigate(target, opts);
+        return true;
+      }
+    } catch (error) {
+      safeWarn("navigateTo vía router falló:", error);
+    }
+
+    try {
+      if (isBrowser() && target.startsWith("/")) {
+        window.history.pushState({}, "", target);
+        window.dispatchEvent(new PopStateEvent("popstate"));
+        return true;
+      }
+    } catch {}
+
+    try {
+      if (isBrowser()) {
+        window.location.assign(target);
+        return true;
+      }
+    } catch {}
+
+    return false;
   }
 
   /* =========================================================
@@ -735,12 +1053,16 @@ export const HomeView = (() => {
     try {
       const apiCache = hydrateHomeApiFromCache?.();
 
-      if (apiCache?.dashboard && hasOwnKeys(apiCache.dashboard)) {
-        syncDashboardPayload(apiCache.dashboard, {
-          requestId: apiCache.requestId || "",
-          lastSyncAt: apiCache.lastSyncAt || "",
-          writeCache: false,
-        });
+      if (apiCache?.dashboard || hasOwnKeys(apiCache)) {
+        syncDashboardPayload(
+          apiCache.dashboard || apiCache,
+          {
+            requestId: apiCache.requestId || "",
+            lastSyncAt: apiCache.lastSyncAt || "",
+            writeCache: false,
+            preserveExisting: true,
+          }
+        );
 
         hydrated = true;
       }
@@ -782,27 +1104,221 @@ export const HomeView = (() => {
   }
 
   /* =========================================================
+     COLLECTION HELPERS
+  ========================================================= */
+
+  function unwrapCollectionPayload(value = null, depth = 0) {
+    if (value === null || value === undefined) {
+      return {};
+    }
+
+    if (depth > 10) {
+      return value;
+    }
+
+    if (Array.isArray(value)) {
+      return {
+        items: value,
+        total: value.length,
+        count: value.length,
+      };
+    }
+
+    const object = safeObject(value);
+
+    if (!hasOwnKeys(object)) {
+      return {};
+    }
+
+    if (
+      Array.isArray(object.items) ||
+      Array.isArray(object.rows) ||
+      Array.isArray(object.data) ||
+      Array.isArray(object.results) ||
+      Array.isArray(object.records) ||
+      Array.isArray(object.value) ||
+      Array.isArray(object.docs) ||
+      Array.isArray(object.documents) ||
+      Array.isArray(object.collection) ||
+      Array.isArray(object.list)
+    ) {
+      return object;
+    }
+
+    const directArray = first(
+      object.tickets,
+      object.incidencias,
+      object.facturas,
+      object.invoices,
+      object.users,
+      object.usuarios,
+      object.clients,
+      object.clientes,
+      object.activity,
+      object.activities,
+      object.recent,
+      object.recentActivity,
+      object.timeline
+    );
+
+    if (Array.isArray(directArray)) {
+      return {
+        ...object,
+        items: directArray,
+        total: first(
+          object.total,
+          object.count,
+          object.totalCount,
+          object.remoteCount,
+          directArray.length
+        ),
+      };
+    }
+
+    const nested = first(
+      object.payload,
+      object.result,
+      object.response,
+      object.body,
+      object.content,
+      object.data
+    );
+
+    if (isObject(nested) || Array.isArray(nested)) {
+      return unwrapCollectionPayload(nested, depth + 1);
+    }
+
+    return object;
+  }
+
+  function normalizeCollection(value) {
+    if (Array.isArray(value)) return value;
+
+    const object = safeObject(unwrapCollectionPayload(value));
+
+    return safeArray(
+      first(
+        object.items,
+        object.rows,
+        object.data,
+        object.results,
+        object.records,
+        object.value,
+        object.docs,
+        object.documents,
+        object.collection,
+        object.list,
+        []
+      )
+    );
+  }
+
+  function getRemoteCountFromCollection(value, fallback = 0) {
+    const object = safeObject(unwrapCollectionPayload(value));
+
+    return Math.max(
+      fallback,
+      safeNumber(
+        first(
+          object.totalCount,
+          object.remoteCount,
+          object.total,
+          object.count,
+          object.length,
+          object.meta?.totalCount,
+          object.meta?.remoteCount,
+          object.meta?.total,
+          object.meta?.count,
+          object.pagination?.totalCount,
+          object.pagination?.remoteCount,
+          object.pagination?.total,
+          object.pagination?.count,
+          object.page?.total,
+          object.pageInfo?.total,
+          object.pageInfo?.totalCount,
+          fallback
+        ),
+        fallback
+      )
+    );
+  }
+
+  function buildCollectionInput(items = [], remoteCount = 0) {
+    const list = safeArray(items);
+    const total = Math.max(
+      list.length,
+      safeNumber(remoteCount, list.length)
+    );
+
+    return {
+      items: list,
+      rows: list,
+      data: list,
+      results: list,
+      total,
+      count: list.length,
+      totalCount: total,
+      remoteCount: total,
+    };
+  }
+
+  /* =========================================================
      DATA NORMALIZATION
   ========================================================= */
 
   function getStableTicketId(item = {}) {
+    if (typeof item === "string" || typeof item === "number") {
+      return safeText(item, "");
+    }
+
     return safeText(
       first(
         item?.ticketId,
         item?.incidenciaId,
         item?.id,
+        item?._id,
         item?.code,
         item?.numero,
         item?.ticketCode,
+        item?.entityId,
+
         item?.raw?.ticketId,
         item?.raw?.incidenciaId,
         item?.raw?.id,
+        item?.raw?._id,
         item?.raw?.code,
         item?.raw?.numero,
-        item?.raw?.ticketCode
+        item?.raw?.ticketCode,
+        item?.raw?.entityId
       ),
       ""
     );
+  }
+
+  function getTicketIdentityList(item = {}) {
+    if (typeof item === "string" || typeof item === "number") {
+      return [safeText(item, "")].filter(Boolean);
+    }
+
+    return uniqueStrings([
+      item.ticketId,
+      item.incidenciaId,
+      item.id,
+      item._id,
+      item.code,
+      item.numero,
+      item.ticketCode,
+      item.entityId,
+
+      item.raw?.ticketId,
+      item.raw?.incidenciaId,
+      item.raw?.id,
+      item.raw?._id,
+      item.raw?.code,
+      item.raw?.numero,
+      item.raw?.ticketCode,
+      item.raw?.entityId,
+    ]);
   }
 
   function getTicketUpdatedAt(item = {}) {
@@ -813,12 +1329,19 @@ export const HomeView = (() => {
       item.modifiedAt,
       item.closedAt,
       item.createdAt,
+      item.lifecycle?.updatedAt,
+      item.lifecycle?.lastUpdateAt,
+      item.audit?.updatedAt,
+
       item.raw?.updatedAt,
       item.raw?.lastUpdateAt,
       item.raw?.ultimaNovedad,
       item.raw?.modifiedAt,
       item.raw?.closedAt,
-      item.raw?.createdAt
+      item.raw?.createdAt,
+      item.raw?.lifecycle?.updatedAt,
+      item.raw?.lifecycle?.lastUpdateAt,
+      item.raw?.audit?.updatedAt
     );
   }
 
@@ -828,10 +1351,13 @@ export const HomeView = (() => {
       item.fechaCreacion,
       item.createdAtES,
       item.date,
+      item.lifecycle?.createdAt,
+
       item.raw?.createdAt,
       item.raw?.fechaCreacion,
       item.raw?.createdAtES,
-      item.raw?.date
+      item.raw?.date,
+      item.raw?.lifecycle?.createdAt
     );
   }
 
@@ -842,10 +1368,13 @@ export const HomeView = (() => {
         item.title,
         item.asunto,
         item.name,
+        item.preview,
+
         item.raw?.subject,
         item.raw?.title,
         item.raw?.asunto,
-        item.raw?.name
+        item.raw?.name,
+        item.raw?.preview
       ),
       "Incidencia sin asunto"
     );
@@ -857,20 +1386,29 @@ export const HomeView = (() => {
         item.status,
         item.estado,
         item.state,
+        item.lifecycle?.status,
+
         item.raw?.status,
         item.raw?.estado,
         item.raw?.state,
+        item.raw?.lifecycle?.status,
+
         "pending"
       ),
       "pending"
     );
   }
 
-  function getTicketStatusLabel(item = {}) {
+  function getTicketStatusKey(item = {}) {
     const key = normalizeKey(getTicketStatus(item));
 
-    if (["open", "abierta", "abierto"].includes(key)) return "Abierta";
-    if (["pending", "pendiente"].includes(key)) return "Pendiente";
+    if (["pending", "pendiente", "new", "nueva", "nuevo", "created"].includes(key)) {
+      return "pending";
+    }
+
+    if (["open", "opened", "abierta", "abierto"].includes(key)) {
+      return "open";
+    }
 
     if (
       [
@@ -881,14 +1419,46 @@ export const HomeView = (() => {
         "proceso",
         "working",
         "trabajando",
+        "assigned",
+        "asignada",
+        "asignado",
       ].includes(key)
     ) {
-      return "En proceso";
+      return "progress";
     }
 
-    if (["resolved", "resuelta", "resuelto"].includes(key)) return "Resuelta";
-    if (["closed", "cerrada", "cerrado"].includes(key)) return "Cerrada";
-    if (["cancelled", "cancelada", "cancelado"].includes(key)) return "Cerrada";
+    if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) {
+      return "resolved";
+    }
+
+    if (
+      [
+        "closed",
+        "close",
+        "cerrada",
+        "cerrado",
+        "cancelled",
+        "cancelada",
+        "cancelado",
+        "archived",
+        "archivada",
+        "archivado",
+      ].includes(key)
+    ) {
+      return "closed";
+    }
+
+    return "pending";
+  }
+
+  function getTicketStatusLabel(item = {}) {
+    const key = getTicketStatusKey(item);
+
+    if (key === "open") return "Abierta";
+    if (key === "pending") return "Pendiente";
+    if (key === "progress") return "En proceso";
+    if (key === "resolved") return "Resuelta";
+    if (key === "closed") return "Cerrada";
 
     return safeText(getTicketStatus(item), "Pendiente");
   }
@@ -900,14 +1470,21 @@ export const HomeView = (() => {
         item.facturaId,
         item.number,
         item.numero,
+        item.numeroFacturaLegal,
+        item.numeroFactura,
         item.code,
         item.id,
+        item._id,
+
         item.raw?.invoiceId,
         item.raw?.facturaId,
         item.raw?.number,
         item.raw?.numero,
+        item.raw?.numeroFacturaLegal,
+        item.raw?.numeroFactura,
         item.raw?.code,
-        item.raw?.id
+        item.raw?.id,
+        item.raw?._id
       ),
       ""
     );
@@ -921,11 +1498,15 @@ export const HomeView = (() => {
         item.importe,
         item.price,
         item.subtotal,
+        item.base,
+
         item.raw?.total,
         item.raw?.amount,
         item.raw?.importe,
         item.raw?.price,
         item.raw?.subtotal,
+        item.raw?.base,
+
         0
       ),
       0
@@ -984,135 +1565,107 @@ export const HomeView = (() => {
 
   function getTickets() {
     const stateTickets = normalizeTickets(homeState.tickets);
-
-    if (stateTickets.length) {
-      return stateTickets;
-    }
-
     const storeTickets = getTicketsFromStore();
 
-    if (storeTickets.length) {
-      return storeTickets;
+    const merged = uniqueBy(
+      [
+        ...stateTickets,
+        ...storeTickets,
+      ],
+      getStableTicketId
+    );
+
+    return normalizeTickets(merged);
+  }
+
+  function findTicketById(ticketId = "") {
+    const id = safeText(ticketId, "");
+
+    if (!id) return null;
+
+    return (
+      getTickets().find((item) =>
+        getTicketIdentityList(item).some((candidate) =>
+          sameIdentity(candidate, id)
+        )
+      ) || null
+    );
+  }
+
+  function getTicketIdFromPayload(payload = {}) {
+    if (
+      typeof payload === "string" ||
+      typeof payload === "number"
+    ) {
+      return safeText(payload, "");
     }
 
-    return [];
-  }
+    const source = safeObject(payload);
+    const item = safeObject(source.item);
+    const detail = safeObject(source.detail);
+    const ticket = safeObject(source.ticket);
+    const incidencia = safeObject(source.incidencia);
+    const raw = safeObject(
+      first(source.raw, item.raw, detail.raw, ticket.raw, incidencia.raw)
+    );
 
-  function buildCollectionInput(items = [], remoteCount = 0) {
-    const list = safeArray(items);
-
-    return {
-      items: list,
-      rows: list,
-      data: list,
-      total: Math.max(list.length, safeNumber(remoteCount, list.length)),
-      count: list.length,
-      remoteCount: Math.max(list.length, safeNumber(remoteCount, list.length)),
-    };
-  }
-
-  function normalizePaginationResult(result = {}, sourceItems = []) {
-    const rows = safeArray(sourceItems);
-    const data = safeObject(result);
-
-    const items = safeArray(
+    return safeText(
       first(
-        data.items,
-        data.pageItems,
-        data.rows,
-        data.data,
-        []
-      )
+        source.ticketId,
+        source.incidenciaId,
+        source.id,
+        source._id,
+        source.entityId,
+        source.value,
+        source.key,
+        source.code,
+        source.ticketCode,
+
+        detail.ticketId,
+        detail.incidenciaId,
+        detail.id,
+        detail._id,
+        detail.code,
+        detail.ticketCode,
+
+        ticket.ticketId,
+        ticket.incidenciaId,
+        ticket.id,
+        ticket._id,
+        ticket.code,
+        ticket.ticketCode,
+
+        incidencia.ticketId,
+        incidencia.incidenciaId,
+        incidencia.id,
+        incidencia._id,
+        incidencia.code,
+        incidencia.ticketCode,
+
+        item.entityId,
+        item.ticketId,
+        item.incidenciaId,
+        item.id,
+        item._id,
+        item.value,
+        item.key,
+        item.code,
+        item.ticketCode,
+
+        raw.ticketId,
+        raw.incidenciaId,
+        raw.id,
+        raw._id,
+        raw.code,
+        raw.ticketCode
+      ),
+      ""
     );
-
-    const page = Math.max(
-      1,
-      safeNumber(
-        first(data.page, data.currentPage),
-        homeState.page || 1
-      )
-    );
-
-    const pageSize = Math.max(
-      1,
-      safeNumber(
-        first(data.pageSize, data.limit),
-        homeState.pageSize || PAGE_SIZE
-      )
-    );
-
-    const total = Math.max(
-      rows.length,
-      safeNumber(
-        first(data.total, data.totalCount),
-        rows.length
-      )
-    );
-
-    const totalPages = Math.max(
-      1,
-      safeNumber(
-        first(data.totalPages, data.pages),
-        Math.ceil((total || 1) / pageSize)
-      )
-    );
-
-    return {
-      ...data,
-      items,
-      page: Math.min(page, totalPages),
-      pageSize,
-      total,
-      totalPages,
-      hasPrev: page > 1,
-      hasNext: page < totalPages,
-    };
-  }
-
-  function getPaginationMeta(items = []) {
-    const rows = safeArray(items);
-    const page = safeNumber(homeState.page, 1);
-    const pageSize = safeNumber(homeState.pageSize, PAGE_SIZE);
-
-    try {
-      const result = paginateIncidencias(
-        rows,
-        page,
-        pageSize || PAGE_SIZE
-      );
-
-      return normalizePaginationResult(result, rows);
-    } catch {
-      const size = Math.max(1, pageSize || PAGE_SIZE);
-      const totalPages = Math.max(1, Math.ceil((rows.length || 1) / size));
-      const nextPage = Math.min(Math.max(1, page), totalPages);
-      const start = (nextPage - 1) * size;
-
-      return {
-        items: rows.slice(start, start + size),
-        page: nextPage,
-        pageSize: size,
-        totalPages,
-        total: rows.length,
-        hasPrev: nextPage > 1,
-        hasNext: nextPage < totalPages,
-      };
-    }
-  }
-
-  function clampPageAgainstItems(items = []) {
-    const pagination = getPaginationMeta(items);
-
-    if (safeNumber(homeState.page, 1) !== pagination.page) {
-      homeState.page = pagination.page;
-    }
-
-    return pagination;
   }
 
   function buildActivityFromData() {
     const ticketActivity = getTickets()
-      .slice(0, 6)
+      .slice(0, 8)
       .map((item) => {
         const ticketId = getStableTicketId(item);
 
@@ -1121,7 +1674,7 @@ export const HomeView = (() => {
           title: getTicketSubject(item),
           text: `Incidencia ${ticketId || "sin ID"} · ${getTicketStatusLabel(item)}`,
           date: getTicketUpdatedAt(item) || getTicketCreatedAt(item),
-          route: "/incidencias",
+          route: ROUTES.INCIDENCIAS,
           action: "open-ticket",
           entityId: ticketId,
         };
@@ -1140,19 +1693,116 @@ export const HomeView = (() => {
           text: formatMoney(amount, currency),
           date: first(
             item.updatedAt,
+            item.modifiedAt,
             item.createdAt,
             item.date,
             item.raw?.updatedAt,
+            item.raw?.modifiedAt,
             item.raw?.createdAt,
             item.raw?.date
           ),
-          route: "/facturas",
+          route: ROUTES.FACTURAS,
           action: "open-invoice",
           entityId: invoiceId,
         };
       });
 
-    return [...ticketActivity, ...invoiceActivity]
+    const clientActivity = safeArray(homeState.clients)
+      .slice(0, 3)
+      .map((item) => ({
+        type: "client",
+        title: safeText(
+          first(
+            item.name,
+            item.nombre,
+            item.razonSocial,
+            item.email,
+            item.raw?.name,
+            item.raw?.nombre,
+            item.raw?.razonSocial,
+            item.raw?.email
+          ),
+          "Cliente"
+        ),
+        text: "Cliente sincronizado en el panel.",
+        date: first(
+          item.updatedAt,
+          item.createdAt,
+          item.raw?.updatedAt,
+          item.raw?.createdAt
+        ),
+        route: ROUTES.CLIENTES,
+        action: "navigate-home",
+        entityId: safeText(
+          first(
+            item.clienteId,
+            item.clientId,
+            item.customerId,
+            item.id,
+            item._id,
+            item.email,
+            item.raw?.clienteId,
+            item.raw?.clientId,
+            item.raw?.customerId,
+            item.raw?.id,
+            item.raw?._id,
+            item.raw?.email
+          ),
+          ""
+        ),
+      }));
+
+    const userActivity = safeArray(homeState.users)
+      .slice(0, 3)
+      .map((item) => ({
+        type: "user",
+        title: safeText(
+          first(
+            item.name,
+            item.nombre,
+            item.username,
+            item.email,
+            item.raw?.name,
+            item.raw?.nombre,
+            item.raw?.username,
+            item.raw?.email
+          ),
+          "Usuario"
+        ),
+        text: "Usuario disponible en el sistema.",
+        date: first(
+          item.lastLoginAt,
+          item.updatedAt,
+          item.createdAt,
+          item.raw?.lastLoginAt,
+          item.raw?.updatedAt,
+          item.raw?.createdAt
+        ),
+        route: ROUTES.USUARIOS,
+        action: "navigate-home",
+        entityId: safeText(
+          first(
+            item.userId,
+            item.id,
+            item._id,
+            item.email,
+            item.username,
+            item.raw?.userId,
+            item.raw?.id,
+            item.raw?._id,
+            item.raw?.email,
+            item.raw?.username
+          ),
+          ""
+        ),
+      }));
+
+    return [
+      ...ticketActivity,
+      ...invoiceActivity,
+      ...clientActivity,
+      ...userActivity,
+    ]
       .filter((item) => item.title || item.text)
       .sort((a, b) => {
         const da = new Date(a.date || 0).getTime();
@@ -1164,142 +1814,287 @@ export const HomeView = (() => {
 
   function syncDashboardPayload(payload = null, options = {}) {
     const opts = safeObject(options);
-    const normalizedResponse = normalizeHomeDashboardResponse(payload);
-    const dashboard = safeObject(normalizedResponse.dashboard);
 
-    const tickets = normalizeTickets(
-      first(
-        dashboard.tickets,
-        dashboard.incidencias,
-        normalizedResponse.tickets,
-        normalizedResponse.incidencias,
-        []
-      )
+    const normalizedResponse = safeObject(
+      normalizeHomeDashboardResponse?.(payload) || payload
     );
 
-    const invoices = safeArray(
+    const dashboard = safeObject(
       first(
-        dashboard.facturas,
-        dashboard.invoices,
-        normalizedResponse.facturas,
-        normalizedResponse.invoices,
-        []
-      )
-    );
-
-    const users = safeArray(
-      first(
-        dashboard.users,
-        dashboard.usuarios,
-        normalizedResponse.users,
-        normalizedResponse.usuarios,
-        []
-      )
-    );
-
-    const clients = safeArray(
-      first(
-        dashboard.clients,
-        dashboard.clientes,
-        normalizedResponse.clients,
-        normalizedResponse.clientes,
-        []
-      )
-    );
-
-    const activity = safeArray(
-      first(
-        dashboard.activity,
-        dashboard.recentActivity,
-        dashboard.recent,
-        normalizedResponse.activity,
-        normalizedResponse.recent,
-        []
+        normalizedResponse.dashboard,
+        normalizedResponse.data?.dashboard,
+        normalizedResponse.payload?.dashboard,
+        normalizedResponse.result?.dashboard,
+        normalizedResponse
       )
     );
 
     const summary = safeObject(
       first(
         dashboard.summary,
+        dashboard.stats,
+        dashboard.metrics,
+        dashboard.totals,
+        dashboard.counts,
+
         normalizedResponse.summary,
+        normalizedResponse.stats,
+        normalizedResponse.metrics,
+        normalizedResponse.totals,
+        normalizedResponse.counts,
+
         {}
       )
     );
 
-    homeState.dashboard = dashboard;
-    homeState.summary = summary;
-    homeState.widgets = safeArray(dashboard.widgets);
+    const ticketsSource = first(
+      dashboard.tickets,
+      dashboard.incidencias,
+      dashboard.supportTickets,
+      dashboard.issues,
 
-    homeState.tickets = tickets;
-    homeState.invoices = invoices;
-    homeState.users = users;
-    homeState.clients = clients;
+      normalizedResponse.tickets,
+      normalizedResponse.incidencias,
+      normalizedResponse.supportTickets,
+      normalizedResponse.issues,
 
-    homeState.remoteCount = Math.max(
-      tickets.length,
+      normalizedResponse.data?.tickets,
+      normalizedResponse.data?.incidencias,
+
+      []
+    );
+
+    const invoicesSource = first(
+      dashboard.facturas,
+      dashboard.invoices,
+      dashboard.billing,
+      dashboard.bills,
+
+      normalizedResponse.facturas,
+      normalizedResponse.invoices,
+      normalizedResponse.billing,
+      normalizedResponse.bills,
+
+      normalizedResponse.data?.facturas,
+      normalizedResponse.data?.invoices,
+
+      []
+    );
+
+    const usersSource = first(
+      dashboard.users,
+      dashboard.usuarios,
+      dashboard.members,
+
+      normalizedResponse.users,
+      normalizedResponse.usuarios,
+      normalizedResponse.members,
+
+      normalizedResponse.data?.users,
+      normalizedResponse.data?.usuarios,
+
+      []
+    );
+
+    const clientsSource = first(
+      dashboard.clients,
+      dashboard.clientes,
+      dashboard.customers,
+
+      normalizedResponse.clients,
+      normalizedResponse.clientes,
+      normalizedResponse.customers,
+
+      normalizedResponse.data?.clients,
+      normalizedResponse.data?.clientes,
+
+      []
+    );
+
+    const activitySource = first(
+      dashboard.activity,
+      dashboard.recentActivity,
+      dashboard.recent,
+      dashboard.activities,
+      dashboard.timeline,
+
+      normalizedResponse.activity,
+      normalizedResponse.recentActivity,
+      normalizedResponse.recent,
+      normalizedResponse.activities,
+      normalizedResponse.timeline,
+
+      normalizedResponse.data?.activity,
+      normalizedResponse.data?.recentActivity,
+
+      []
+    );
+
+    const tickets = normalizeTickets(normalizeCollection(ticketsSource));
+    const invoices = safeArray(normalizeCollection(invoicesSource));
+    const users = safeArray(normalizeCollection(usersSource));
+    const clients = safeArray(normalizeCollection(clientsSource));
+    const activity = safeArray(normalizeCollection(activitySource));
+
+    const preserveExisting = opts.preserveExisting !== false;
+
+    homeState.dashboard = {
+      ...(preserveExisting ? safeObject(homeState.dashboard) : {}),
+      ...dashboard,
+    };
+
+    homeState.summary = {
+      ...(preserveExisting ? safeObject(homeState.summary) : {}),
+      ...summary,
+    };
+
+    const widgets = safeArray(
+      first(
+        dashboard.widgets,
+        dashboard.cards,
+        dashboard.kpis,
+        normalizedResponse.widgets,
+        normalizedResponse.cards,
+        normalizedResponse.kpis,
+        []
+      )
+    );
+
+    if (widgets.length || !preserveExisting) {
+      homeState.widgets = widgets;
+    }
+
+    if (tickets.length || !preserveExisting) {
+      homeState.tickets = tickets;
+    }
+
+    if (invoices.length || !preserveExisting) {
+      homeState.invoices = invoices;
+    }
+
+    if (users.length || !preserveExisting) {
+      homeState.users = users;
+    }
+
+    if (clients.length || !preserveExisting) {
+      homeState.clients = clients;
+    }
+
+    const ticketsRemoteCount = Math.max(
+      homeState.tickets.length,
+      getRemoteCountFromCollection(ticketsSource, homeState.tickets.length),
       safeNumber(
         first(
           dashboard.ticketsTotal,
           dashboard.incidenciasTotal,
-          summary.totalTickets,
-          summary.ticketsTotal,
-          summary.incidenciasTotal
+          dashboard.totalTickets,
+          dashboard.totalIncidencias,
+
+          homeState.summary.totalTickets,
+          homeState.summary.ticketsTotal,
+          homeState.summary.incidenciasTotal,
+          homeState.summary.totalIncidencias,
+          homeState.summary.ticketsCount,
+          homeState.summary.incidenciasCount,
+          homeState.summary.tickets?.total,
+          homeState.summary.incidencias?.total
         ),
-        tickets.length
+        homeState.tickets.length
       )
     );
 
-    homeState.ticketsRemoteCount = homeState.remoteCount;
-
-    homeState.invoicesRemoteCount = Math.max(
-      invoices.length,
+    const invoicesRemoteCount = Math.max(
+      homeState.invoices.length,
+      getRemoteCountFromCollection(invoicesSource, homeState.invoices.length),
       safeNumber(
         first(
           dashboard.facturasTotal,
           dashboard.invoicesTotal,
-          summary.totalInvoices,
-          summary.invoicesTotal,
-          summary.facturasTotal
+          dashboard.totalFacturas,
+          dashboard.totalInvoices,
+
+          homeState.summary.totalInvoices,
+          homeState.summary.invoicesTotal,
+          homeState.summary.facturasTotal,
+          homeState.summary.totalFacturas,
+          homeState.summary.invoicesCount,
+          homeState.summary.facturasCount,
+          homeState.summary.invoices?.total,
+          homeState.summary.facturas?.total
         ),
-        invoices.length
+        homeState.invoices.length
       )
     );
 
-    homeState.usersRemoteCount = Math.max(
-      users.length,
+    const usersRemoteCount = Math.max(
+      homeState.users.length,
+      getRemoteCountFromCollection(usersSource, homeState.users.length),
       safeNumber(
         first(
           dashboard.usersTotal,
           dashboard.usuariosTotal,
-          summary.usersCount,
-          summary.usuariosCount
+          dashboard.totalUsers,
+          dashboard.totalUsuarios,
+
+          homeState.summary.usersCount,
+          homeState.summary.usuariosCount,
+          homeState.summary.totalUsers,
+          homeState.summary.totalUsuarios,
+          homeState.summary.users?.total,
+          homeState.summary.usuarios?.total
         ),
-        users.length
+        homeState.users.length
       )
     );
 
-    homeState.clientsRemoteCount = Math.max(
-      clients.length,
+    const clientsRemoteCount = Math.max(
+      homeState.clients.length,
+      getRemoteCountFromCollection(clientsSource, homeState.clients.length),
       safeNumber(
         first(
           dashboard.clientsTotal,
           dashboard.clientesTotal,
-          summary.clientsCount,
-          summary.clientesCount
+          dashboard.customersTotal,
+          dashboard.totalClients,
+          dashboard.totalClientes,
+
+          homeState.summary.clientsCount,
+          homeState.summary.clientesCount,
+          homeState.summary.customersCount,
+          homeState.summary.totalClients,
+          homeState.summary.totalClientes,
+          homeState.summary.clients?.total,
+          homeState.summary.clientes?.total
         ),
-        clients.length
+        homeState.clients.length
       )
     );
 
-    homeState.activity = activity.length
-      ? activity
-      : buildActivityFromData();
+    homeState.remoteCount = Math.max(
+      homeState.remoteCount,
+      ticketsRemoteCount,
+      homeState.tickets.length
+    );
+
+    homeState.ticketsRemoteCount = ticketsRemoteCount;
+    homeState.invoicesRemoteCount = invoicesRemoteCount;
+    homeState.usersRemoteCount = usersRemoteCount;
+    homeState.clientsRemoteCount = clientsRemoteCount;
+
+    if (activity.length || !preserveExisting) {
+      homeState.activity = activity.length ? activity : buildActivityFromData();
+    } else if (!homeState.activity.length) {
+      homeState.activity = buildActivityFromData();
+    }
 
     homeState.requestId = safeText(
       first(
         opts.requestId,
         normalizedResponse.requestId,
+        normalizedResponse.id,
         dashboard.requestId,
+        dashboard.meta?.requestId,
+        homeState.requestId,
         ""
       ),
       ""
@@ -1308,9 +2103,13 @@ export const HomeView = (() => {
     homeState.lastSyncAt = safeText(
       first(
         opts.lastSyncAt,
+        normalizedResponse.lastSyncAt,
+        normalizedResponse.updatedAt,
+        normalizedResponse.generatedAt,
         dashboard.updatedAt,
         dashboard.generatedAt,
         dashboard.meta?.updatedAt,
+        homeState.lastSyncAt,
         nowIso()
       ),
       nowIso()
@@ -1324,7 +2123,7 @@ export const HomeView = (() => {
       writeCachePayload();
     }
 
-    return dashboard;
+    return homeState.dashboard;
   }
 
   /* =========================================================
@@ -1340,6 +2139,7 @@ export const HomeView = (() => {
     homeState.creating = Boolean(homeState.creating);
 
     homeState.openingTicketId = safeText(homeState.openingTicketId, "");
+    homeState.selectedTicketId = safeText(homeState.selectedTicketId, "");
     homeState.navigatingAction = safeText(homeState.navigatingAction, "");
     homeState.error = safeText(homeState.error, "");
 
@@ -1401,6 +2201,10 @@ export const HomeView = (() => {
       tickets.length
     );
 
+    if (!homeState.activity.length) {
+      homeState.activity = buildActivityFromData();
+    }
+
     homeState.loaded = true;
     homeState.hydrated = true;
     homeState.error = "";
@@ -1411,7 +2215,113 @@ export const HomeView = (() => {
   function clearTransientState() {
     homeState.creating = false;
     homeState.openingTicketId = "";
+    homeState.selectedTicketId = "";
     homeState.navigatingAction = "";
+  }
+
+  /* =========================================================
+     PAGINATION
+  ========================================================= */
+
+  function normalizePaginationResult(result = {}, sourceItems = []) {
+    const rows = safeArray(sourceItems);
+    const data = safeObject(result);
+
+    const items = safeArray(
+      first(
+        data.items,
+        data.pageItems,
+        data.rows,
+        data.data,
+        []
+      )
+    );
+
+    const page = Math.max(
+      1,
+      safeNumber(
+        first(data.page, data.currentPage),
+        homeState.page || 1
+      )
+    );
+
+    const pageSize = Math.max(
+      1,
+      safeNumber(
+        first(data.pageSize, data.limit),
+        homeState.pageSize || PAGE_SIZE
+      )
+    );
+
+    const total = Math.max(
+      rows.length,
+      safeNumber(
+        first(data.total, data.totalCount),
+        rows.length
+      )
+    );
+
+    const totalPages = Math.max(
+      1,
+      safeNumber(
+        first(data.totalPages, data.pages),
+        Math.ceil((total || 1) / pageSize)
+      )
+    );
+
+    const currentPage = Math.min(page, totalPages);
+
+    return {
+      ...data,
+      items,
+      page: currentPage,
+      pageSize,
+      total,
+      totalPages,
+      hasPrev: currentPage > 1,
+      hasNext: currentPage < totalPages,
+    };
+  }
+
+  function getPaginationMeta(items = []) {
+    const rows = safeArray(items);
+    const page = safeNumber(homeState.page, 1);
+    const pageSize = safeNumber(homeState.pageSize, PAGE_SIZE);
+
+    try {
+      const result = paginateIncidencias(
+        rows,
+        page,
+        pageSize || PAGE_SIZE
+      );
+
+      return normalizePaginationResult(result, rows);
+    } catch {
+      const size = Math.max(1, pageSize || PAGE_SIZE);
+      const totalPages = Math.max(1, Math.ceil((rows.length || 1) / size));
+      const nextPage = Math.min(Math.max(1, page), totalPages);
+      const start = (nextPage - 1) * size;
+
+      return {
+        items: rows.slice(start, start + size),
+        page: nextPage,
+        pageSize: size,
+        totalPages,
+        total: rows.length,
+        hasPrev: nextPage > 1,
+        hasNext: nextPage < totalPages,
+      };
+    }
+  }
+
+  function clampPageAgainstItems(items = []) {
+    const pagination = getPaginationMeta(items);
+
+    if (safeNumber(homeState.page, 1) !== pagination.page) {
+      homeState.page = pagination.page;
+    }
+
+    return pagination;
   }
 
   /* =========================================================
@@ -1426,139 +2336,121 @@ export const HomeView = (() => {
     bindingsCleanup = null;
 
     try {
+      bridgeCleanup?.();
+    } catch {}
+
+    bridgeCleanup = null;
+
+    try {
       AppCore?.cleanup?.run?.(SCOPE);
     } catch {}
   }
 
   /* =========================================================
-     MODAL / NAVIGATION BRIDGES
+     MODAL BRIDGES
   ========================================================= */
 
-  function getRouterCandidate() {
-    try {
-      if (isFunction(AppCore?.modules?.get)) {
-        const routerModule =
-          AppCore.modules.get("router") ||
-          AppCore.modules.get("Router");
+  function openTicketModalBridge(detail = null) {
+    const payload = safeObject(detail);
 
-        if (routerModule) return routerModule;
-      }
-    } catch {}
+    if (!hasOwnKeys(payload)) return false;
 
     try {
-      return (
-        AppCore?.router ||
-        AppCore?.Router ||
-        AppCore?.modules?.router ||
-        AppCore?.modules?.Router ||
-        (isBrowser() ? window.Router : null) ||
-        (isBrowser() ? window.OnionRouter : null) ||
-        null
-      );
-    } catch {
-      return null;
-    }
-  }
+      if (isFunction(OnionIncidenciasModal?.getState)) {
+        const modalState = OnionIncidenciasModal.getState();
 
-  async function navigateTo(route = "", options = {}) {
-    const target = normalizeRoute(route);
-    if (!target) return false;
+        if (
+          modalState?.isOpen &&
+          isFunction(OnionIncidenciasModal.update)
+        ) {
+          OnionIncidenciasModal.update(payload);
+          return true;
+        }
 
-    const opts = safeObject(options);
-    const router = getRouterCandidate();
-
-    try {
-      if (isFunction(router?.navigate)) {
-        router.navigate(target, opts);
-        return true;
-      }
-
-      if (isFunction(router?.go)) {
-        router.go(target, opts);
-        return true;
-      }
-
-      if (isFunction(router?.push)) {
-        router.push(target, opts);
-        return true;
-      }
-
-      if (isFunction(AppCore?.navigate)) {
-        AppCore.navigate(target, opts);
-        return true;
+        if (isFunction(OnionIncidenciasModal.open)) {
+          OnionIncidenciasModal.open(payload);
+          return true;
+        }
       }
     } catch (error) {
-      safeWarn("navigateTo vía router falló:", error);
+      safeWarn("OnionIncidenciasModal import directo falló:", error);
     }
-
-    try {
-      if (isBrowser()) {
-        window.history.pushState({}, "", target);
-        window.dispatchEvent(new PopStateEvent("popstate"));
-        return true;
-      }
-    } catch {}
-
-    try {
-      if (isBrowser()) {
-        window.location.assign(target);
-        return true;
-      }
-    } catch {}
-
-    return false;
-  }
-
-  function openTicketModalBridge(detail = null) {
-    if (!detail) return false;
 
     try {
       if (isBrowser()) {
         const modal = window.OnionIncidenciasModal;
 
-        if (modal?.getState?.()?.isOpen && isFunction(modal.update)) {
-          modal.update(detail);
+        if (
+          modal?.getState?.()?.isOpen &&
+          isFunction(modal.update)
+        ) {
+          modal.update(payload);
           return true;
         }
 
         if (isFunction(modal?.open)) {
-          modal.open(detail);
+          modal.open(payload);
           return true;
         }
       }
     } catch (error) {
-      safeWarn("OnionIncidenciasModal hook falló:", error);
+      safeWarn("OnionIncidenciasModal hook global falló:", error);
     }
 
     try {
       if (isBrowser()) {
         const hook =
           window.renderIncidenciaTicketModal ||
-          window.renderTicketModal;
+          window.renderTicketModal ||
+          window.renderIncidenciaModal;
 
         if (isFunction(hook)) {
-          hook(detail);
+          hook(payload);
           return true;
         }
       }
     } catch (error) {
-      safeWarn("ticket modal hook falló:", error);
+      safeWarn("ticket modal hook legacy falló:", error);
     }
 
     safeEmit("incidencias:modal:open", {
-      detail,
+      detail: payload,
+      ticketId: getStableTicketId(payload),
+      source: "homeView:fallback",
     });
 
     return true;
   }
 
+  function updateTicketModalBridge(detail = {}) {
+    const payload = safeObject(detail);
+
+    try {
+      if (isFunction(OnionIncidenciasModal?.update)) {
+        OnionIncidenciasModal.update(payload);
+        return true;
+      }
+    } catch {}
+
+    try {
+      if (isBrowser() && isFunction(window?.OnionIncidenciasModal?.update)) {
+        window.OnionIncidenciasModal.update(payload);
+        return true;
+      }
+    } catch {}
+
+    return openTicketModalBridge(payload);
+  }
+
   function openCreateModalBridge(draft = {}) {
+    const payload = safeObject(draft);
+
     try {
       if (isBrowser()) {
         const modal = window.OnionIncidenciasCreateModal;
 
         if (isFunction(modal?.open)) {
-          modal.open(draft);
+          modal.open(payload);
           return true;
         }
       }
@@ -1573,7 +2465,7 @@ export const HomeView = (() => {
           window.renderIncidenciaCreateModal;
 
         if (isFunction(hook)) {
-          hook(draft);
+          hook(payload);
           return true;
         }
       }
@@ -1583,7 +2475,7 @@ export const HomeView = (() => {
 
     try {
       if (isFunction(IncidenciasCreateView?.open)) {
-        IncidenciasCreateView.open(draft);
+        IncidenciasCreateView.open(payload);
         return true;
       }
     } catch (error) {
@@ -1591,7 +2483,8 @@ export const HomeView = (() => {
     }
 
     safeEmit("incidencias:create-modal:open", {
-      draft,
+      draft: payload,
+      source: "homeView:fallback",
     });
 
     return true;
@@ -1616,6 +2509,18 @@ export const HomeView = (() => {
   /* =========================================================
      DOM POST-RENDER
   ========================================================= */
+
+  function getContainer() {
+    if (!isBrowser()) {
+      return null;
+    }
+
+    return (
+      AppCore?.dom?.viewContainer ||
+      document.getElementById("view-container") ||
+      null
+    );
+  }
 
   function applyErrorStateToDom(container) {
     if (!container) return;
@@ -1658,10 +2563,38 @@ export const HomeView = (() => {
     anchor.insertAdjacentElement("afterend", banner);
   }
 
+  function decorateAvatarFallbacks(container) {
+    if (!container) return;
+
+    const images = container.querySelectorAll(
+      "[data-avatar-image='true']"
+    );
+
+    images.forEach((img) => {
+      if (img.dataset.homeFallbackBound === "true") return;
+
+      img.dataset.homeFallbackBound = "true";
+
+      img.addEventListener(
+        "error",
+        () => {
+          try {
+            img.style.display = "none";
+            img.closest("[data-avatar-root='true']")?.setAttribute("data-fallback", "true");
+          } catch {}
+        },
+        {
+          once: true,
+        }
+      );
+    });
+  }
+
   function decorateDom(container) {
     if (!container) return container;
 
     applyErrorStateToDom(container);
+    decorateAvatarFallbacks(container);
 
     return container;
   }
@@ -1669,6 +2602,15 @@ export const HomeView = (() => {
   /* =========================================================
      RENDER
   ========================================================= */
+
+  function nextRenderToken() {
+    renderToken += 1;
+    return renderToken;
+  }
+
+  function isActiveToken(token) {
+    return !destroyed && token === renderToken;
+  }
 
   function buildHtml() {
     ensureBaseState();
@@ -1709,8 +2651,12 @@ export const HomeView = (() => {
     const activityInput = buildCollectionInput(activity, activity.length);
 
     return `
-      <section class="panel-content dashboard ready" data-view="home">
-        <div class="content-wrapper" style="display:grid;gap:var(--space-lg);">
+      <section
+        class="panel-content dashboard ready"
+        data-view="home"
+        data-home-scope="${SCOPE}"
+      >
+        <div class="content-wrapper" style="display:grid;gap:var(--space-lg);min-width:0;max-width:100%;">
           ${renderHomeTemplate({
             user,
             role,
@@ -1745,6 +2691,7 @@ export const HomeView = (() => {
 
             state: {
               ...homeState,
+
               user,
               role,
 
@@ -1783,6 +2730,8 @@ export const HomeView = (() => {
       safeWarn("No existe #view-container para renderizar Home.");
       return null;
     }
+
+    if (destroyed) return null;
 
     ensureBaseState();
 
@@ -1866,7 +2815,8 @@ export const HomeView = (() => {
       homeState.users.length ||
       homeState.clients.length ||
       homeState.activity.length ||
-      hasOwnKeys(homeState.summary);
+      hasOwnKeys(homeState.summary) ||
+      hasOwnKeys(homeState.dashboard);
 
     try {
       homeState.error = "";
@@ -1881,7 +2831,9 @@ export const HomeView = (() => {
       homeState.refreshing = hasVisibleData && asRefresh;
     }
 
-    render();
+    if (!destroyed) {
+      rerender();
+    }
 
     try {
       const dashboard = asRefresh
@@ -1897,9 +2849,10 @@ export const HomeView = (() => {
       syncDashboardPayload(dashboard, {
         lastSyncAt: nowIso(),
         writeCache: true,
+        preserveExisting: true,
       });
 
-      if (!homeState.tickets.length) {
+      if (!getTickets().length) {
         await loadTicketsFallback({
           force,
         });
@@ -1913,6 +2866,15 @@ export const HomeView = (() => {
 
       markLoadedOk();
       writeCachePayload();
+
+      safeEmit("home:loaded", {
+        dashboard: homeState.dashboard,
+        summary: homeState.summary,
+        tickets: getTickets(),
+        force,
+        silent,
+        asRefresh,
+      });
 
       return getTickets();
     } catch (error) {
@@ -1934,6 +2896,12 @@ export const HomeView = (() => {
         markIdle();
         writeCachePayload();
 
+        safeEmit("home:loaded:fallback", {
+          tickets: recoveredTickets,
+          error,
+          message,
+        });
+
         return recoveredTickets;
       }
 
@@ -1946,6 +2914,11 @@ export const HomeView = (() => {
       if (!silent) {
         showToast(message, "error");
       }
+
+      safeEmit("home:load:error", {
+        error,
+        message,
+      });
 
       return getTickets();
     } finally {
@@ -2041,43 +3014,156 @@ export const HomeView = (() => {
     return nextSize;
   }
 
-  async function handleOpenTicket(ticketId = "") {
+  async function handleOpenTicket(ticketId = "", options = {}) {
     const id = safeText(ticketId, "");
+    const opts = safeObject(options);
+
     if (!id) return null;
 
-    if (homeState.openingTicketId) {
+    if (!opts.skipThrottle && !throttleOpenTicketClick()) {
       return null;
     }
 
-    homeState.openingTicketId = id;
+    if (
+      inflightOpenTicket &&
+      inflightOpenTicketId &&
+      sameIdentity(inflightOpenTicketId, id)
+    ) {
+      return inflightOpenTicket;
+    }
 
-    rerender();
-    await waitForPaint();
+    if (
+      homeState.openingTicketId &&
+      !sameIdentity(homeState.openingTicketId, id)
+    ) {
+      return null;
+    }
 
-    try {
-      const detail = await openTicketAction({
-        ticketId: id,
-        preferFresh: true,
-        silent: true,
-      });
+    inflightOpenTicketId = id;
 
-      if (!detail) {
-        showToast("No se pudo abrir la incidencia.", "error");
-        return null;
+    inflightOpenTicket = (async () => {
+      homeState.openingTicketId = id;
+      homeState.selectedTicketId = id;
+
+      const localSnapshot =
+        findTicketById(id) ||
+        safeObject(
+          first(
+            opts.detail,
+            opts.payload?.detail,
+            opts.payload?.ticket,
+            opts.payload?.incidencia,
+            opts.payload?.item,
+            opts.payload
+          )
+        );
+
+      if (hasOwnKeys(localSnapshot) && opts.openImmediate !== false) {
+        openTicketModalBridge({
+          ...localSnapshot,
+          meta: {
+            ...safeObject(localSnapshot.meta),
+            openingFromHome: true,
+            detailLoading: true,
+          },
+        });
       }
 
-      openTicketModalBridge(detail);
+      rerender();
+      await waitForPaint();
 
-      return detail;
-    } catch (error) {
-      safeWarn("handleOpenTicket falló:", error);
-      showToast("No se pudo abrir la incidencia.", "error");
-      return null;
-    } finally {
-      homeState.openingTicketId = "";
+      try {
+        const detail = await openTicketAction({
+          ticketId: id,
+          preferFresh: opts.preferFresh !== false,
+          silent: opts.silent !== false,
+        });
 
-      if (!destroyed) rerender();
-    }
+        const finalDetail =
+          hasOwnKeys(detail)
+            ? {
+                ...safeObject(localSnapshot),
+                ...safeObject(detail),
+                meta: {
+                  ...safeObject(localSnapshot?.meta),
+                  ...safeObject(detail?.meta),
+                  openingFromHome: false,
+                  detailLoading: false,
+                },
+              }
+            : {
+                ...safeObject(localSnapshot),
+                meta: {
+                  ...safeObject(localSnapshot?.meta),
+                  openingFromHome: false,
+                  detailLoading: false,
+                  detailFallback: true,
+                },
+              };
+
+        if (!hasOwnKeys(finalDetail)) {
+          showToast("No se pudo abrir la incidencia.", "error");
+          return null;
+        }
+
+        updateTicketModalBridge(finalDetail);
+
+        safeEmit("home:ticket:open:success", {
+          ticketId: id,
+          incidenciaId: id,
+          detail: finalDetail,
+          source: safeText(opts.source, "home"),
+        });
+
+        return finalDetail;
+      } catch (error) {
+        safeWarn("handleOpenTicket falló:", error);
+
+        if (hasOwnKeys(localSnapshot)) {
+          updateTicketModalBridge({
+            ...localSnapshot,
+            meta: {
+              ...safeObject(localSnapshot.meta),
+              openingFromHome: false,
+              detailLoading: false,
+              detailFallback: true,
+            },
+          });
+
+          showToast(
+            "Incidencia abierta con datos locales. No se pudo cargar el detalle remoto.",
+            "warning"
+          );
+
+          safeEmit("home:ticket:open:fallback", {
+            ticketId: id,
+            incidenciaId: id,
+            detail: localSnapshot,
+            error,
+          });
+
+          return localSnapshot;
+        }
+
+        showToast("No se pudo abrir la incidencia.", "error");
+
+        safeEmit("home:ticket:open:error", {
+          ticketId: id,
+          incidenciaId: id,
+          error,
+        });
+
+        return null;
+      } finally {
+        homeState.openingTicketId = "";
+        inflightOpenTicket = null;
+        inflightOpenTicketId = "";
+
+        if (!destroyed) rerender();
+      }
+    })();
+
+    return inflightOpenTicket;
   }
 
   async function handleCopyTicketId(ticketId = "") {
@@ -2130,11 +3216,16 @@ export const HomeView = (() => {
     await waitForPaint();
 
     try {
-      const opened = openCreateModalBridge({});
+      const opened = openCreateModalBridge(opts.draft || {});
 
       if (!opened) {
         showToast("No se pudo abrir el formulario.", "error");
       }
+
+      safeEmit("home:create:open", {
+        draft: opts.draft || {},
+        source: "home",
+      });
 
       return opened;
     } finally {
@@ -2174,7 +3265,7 @@ export const HomeView = (() => {
   async function handleOpenInvoice(invoiceId = "") {
     const id = safeText(invoiceId, "");
 
-    await handleNavigateAction("go-facturas", "/facturas");
+    await handleNavigateAction("go-facturas", ROUTES.FACTURAS);
 
     if (id) {
       safeEmit("facturas:open-requested", {
@@ -2215,7 +3306,9 @@ export const HomeView = (() => {
     );
 
     if (action === "open-ticket" && entityId) {
-      return handleOpenTicket(entityId);
+      return handleOpenTicket(entityId, {
+        source: "home:activity",
+      });
     }
 
     if (action === "open-invoice" && entityId) {
@@ -2227,6 +3320,37 @@ export const HomeView = (() => {
     }
 
     return false;
+  }
+
+  async function openTicketFromExternalRequest(payload = {}) {
+    const source = getEventPayload(payload);
+    const ticketId = getTicketIdFromPayload(source);
+
+    if (!ticketId) {
+      showToast("No se pudo identificar la incidencia.", "error");
+      return null;
+    }
+
+    if (!getTickets().length && !homeState.loaded) {
+      await reload({
+        force: false,
+        silent: true,
+        asRefresh: false,
+      });
+    }
+
+    return handleOpenTicket(ticketId, {
+      skipThrottle: true,
+      source: safeText(source.source, "external"),
+      payload: source,
+      detail: first(
+        source.detail,
+        source.ticket,
+        source.incidencia,
+        source.item,
+        source
+      ),
+    });
   }
 
   /* =========================================================
@@ -2251,14 +3375,33 @@ export const HomeView = (() => {
   function getTicketIdFromElement(element = null) {
     if (!element) return "";
 
+    const closestRow =
+      element.closest?.("[data-ticket-id]") ||
+      element.closest?.("[data-incidencia-id]") ||
+      element.closest?.("[data-entity-id]") ||
+      null;
+
     return safeText(
       first(
         element.dataset?.ticketId,
+        element.dataset?.incidenciaId,
         element.dataset?.ticketCode,
         element.dataset?.entityId,
+
         element.getAttribute?.("data-ticket-id"),
+        element.getAttribute?.("data-incidencia-id"),
         element.getAttribute?.("data-ticket-code"),
-        element.getAttribute?.("data-entity-id")
+        element.getAttribute?.("data-entity-id"),
+
+        closestRow?.dataset?.ticketId,
+        closestRow?.dataset?.incidenciaId,
+        closestRow?.dataset?.ticketCode,
+        closestRow?.dataset?.entityId,
+
+        closestRow?.getAttribute?.("data-ticket-id"),
+        closestRow?.getAttribute?.("data-incidencia-id"),
+        closestRow?.getAttribute?.("data-ticket-code"),
+        closestRow?.getAttribute?.("data-entity-id")
       ),
       ""
     );
@@ -2313,7 +3456,9 @@ export const HomeView = (() => {
         event.preventDefault();
         event.stopPropagation();
 
-        await handleOpenTicket(getTicketIdFromElement(ticketBtn));
+        await handleOpenTicket(getTicketIdFromElement(ticketBtn), {
+          source: "home:table",
+        });
         return;
       }
 
@@ -2414,7 +3559,7 @@ export const HomeView = (() => {
         event.preventDefault();
 
         const invoiceId = getInvoiceIdFromElement(invoiceBtn);
-        const route = getRouteFromElement(invoiceBtn) || "/facturas";
+        const route = getRouteFromElement(invoiceBtn) || ROUTES.FACTURAS;
 
         if (invoiceId) {
           await handleOpenInvoice(invoiceId);
@@ -2430,6 +3575,7 @@ export const HomeView = (() => {
         "navigate-home",
         "go-home",
         "go-incidencias",
+        "go-tickets",
         "go-users",
         "go-usuarios",
         "go-clientes",
@@ -2456,6 +3602,22 @@ export const HomeView = (() => {
         );
 
         await handleNavigateAction(action, route);
+        return;
+      }
+
+      const widgetBtn = getActionTarget(event, [
+        "open-widget",
+      ]);
+
+      if (widgetBtn) {
+        event.preventDefault();
+
+        const route = getRouteFromElement(widgetBtn);
+
+        if (route) {
+          await handleNavigateAction("open-widget", route);
+        }
+
         return;
       }
 
@@ -2516,18 +3678,29 @@ export const HomeView = (() => {
     };
   }
 
-  function bindBusEvents() {
-    const bus = AppCore?.events;
+  function attachExternalListeners() {
+    const cleanups = [];
 
-    if (!bus?.on) {
-      return () => {};
-    }
+    const onMutated = async (eventOrPayload = {}) => {
+      if (destroyed) return;
 
-    const onMutated = async () => {
+      const payload = getEventPayload(eventOrPayload);
+
       await reload({
         force: true,
         asRefresh: true,
-        silent: true,
+        silent: payload.silent !== false,
+      });
+    };
+
+    const onOpenTicket = async (eventOrPayload = {}) => {
+      if (destroyed) return;
+
+      const payload = getEventPayload(eventOrPayload);
+
+      await openTicketFromExternalRequest({
+        ...payload,
+        source: safeText(payload.source, "home:event"),
       });
     };
 
@@ -2535,143 +3708,109 @@ export const HomeView = (() => {
       flushPendingCreate();
     };
 
-    const onRefreshTicket = async (event) => {
-      const payload = getEventPayload(event);
+    HOME_RELOAD_EVENTS.forEach((eventName) => {
+      cleanups.push(safeOn(eventName, onMutated));
+    });
 
-      await handleOpenTicket(
-        payload.ticketId ||
-          payload.incidenciaId ||
-          payload.detail?.ticketId ||
-          payload.detail?.incidenciaId ||
-          payload.detail?.id ||
-          ""
-      );
+    HOME_OPEN_TICKET_EVENTS.forEach((eventName) => {
+      cleanups.push(safeOn(eventName, onOpenTicket));
+    });
+
+    READY_EVENTS.forEach((eventName) => {
+      cleanups.push(safeOn(eventName, onReady));
+    });
+
+    bridgeCleanup = () => {
+      cleanups.forEach((cleanup) => {
+        try {
+          cleanup?.();
+        } catch {}
+      });
     };
 
-    try {
-      bus.on("home:reload", onMutated);
-
-      bus.on("incidencias:create:success", onMutated);
-      bus.on("incidencias:modal:updated", onMutated);
-      bus.on("incidencias:upload:success", onMutated);
-      bus.on("incidencias:comment:success", onMutated);
-      bus.on("incidencias:reopen:success", onMutated);
-
-      bus.on("facturas:create:success", onMutated);
-      bus.on("facturas:update:success", onMutated);
-      bus.on("clientes:update:success", onMutated);
-      bus.on("users:update:success", onMutated);
-      bus.on("usuarios:update:success", onMutated);
-
-      bus.on("home:ticket:open", onRefreshTicket);
-
-      bus.on("app:ready", onReady);
-      bus.on("app:boot:ready", onReady);
-      bus.on("app:boot:complete", onReady);
-      bus.on("router:rendered", onReady);
-    } catch {}
-
-    return () => {
-      try { bus.off("home:reload", onMutated); } catch {}
-
-      try { bus.off("incidencias:create:success", onMutated); } catch {}
-      try { bus.off("incidencias:modal:updated", onMutated); } catch {}
-      try { bus.off("incidencias:upload:success", onMutated); } catch {}
-      try { bus.off("incidencias:comment:success", onMutated); } catch {}
-      try { bus.off("incidencias:reopen:success", onMutated); } catch {}
-
-      try { bus.off("facturas:create:success", onMutated); } catch {}
-      try { bus.off("facturas:update:success", onMutated); } catch {}
-      try { bus.off("clientes:update:success", onMutated); } catch {}
-      try { bus.off("users:update:success", onMutated); } catch {}
-      try { bus.off("usuarios:update:success", onMutated); } catch {}
-
-      try { bus.off("home:ticket:open", onRefreshTicket); } catch {}
-
-      try { bus.off("app:ready", onReady); } catch {}
-      try { bus.off("app:boot:ready", onReady); } catch {}
-      try { bus.off("app:boot:complete", onReady); } catch {}
-      try { bus.off("router:rendered", onReady); } catch {}
-    };
+    return bridgeCleanup;
   }
 
-  function bindWindowEvents() {
-    if (!isBrowser()) {
-      return () => {};
-    }
+  function registerHomeBridge() {
+    const bridge = {
+      openTicket(payload = {}) {
+        return openTicketFromExternalRequest(payload);
+      },
 
-    const onMutated = async () => {
-      await reload({
-        force: true,
-        asRefresh: true,
-        silent: true,
-      });
-    };
+      openTicketById(ticketId = "") {
+        return openTicketFromExternalRequest({ ticketId });
+      },
 
-    const onReady = () => {
-      flushPendingCreate();
-    };
+      openIncidencia(payload = {}) {
+        return openTicketFromExternalRequest(payload);
+      },
 
-    const onOpenTicket = async (event) => {
-      const payload = getEventPayload(event);
+      openIncidenciaById(ticketId = "") {
+        return openTicketFromExternalRequest({ ticketId });
+      },
 
-      await handleOpenTicket(
-        payload.ticketId ||
-          payload.incidenciaId ||
-          payload.detail?.ticketId ||
-          payload.detail?.incidenciaId ||
-          payload.detail?.id ||
-          ""
-      );
+      create(draft = {}) {
+        return handleCreateIncidencia({
+          draft,
+          skipThrottle: true,
+        });
+      },
+
+      refresh(options = {}) {
+        return reload({
+          force: true,
+          silent: Boolean(options.silent),
+          asRefresh: true,
+        });
+      },
+
+      reload(options = {}) {
+        return reload(options);
+      },
+
+      navigate(route = "", options = {}) {
+        return navigateTo(route, {
+          source: "home-bridge",
+          ...safeObject(options),
+        });
+      },
+
+      getState() {
+        return api.getState();
+      },
+
+      getItems() {
+        return api.getItems();
+      },
     };
 
     try {
-      window.addEventListener("home:reload", onMutated);
+      if (!AppCore.modules || typeof AppCore.modules !== "object") {
+        AppCore.modules = {};
+      }
 
-      window.addEventListener("incidencias:create:success", onMutated);
-      window.addEventListener("incidencias:modal:updated", onMutated);
-      window.addEventListener("incidencias:upload:success", onMutated);
-      window.addEventListener("incidencias:comment:success", onMutated);
-      window.addEventListener("incidencias:reopen:success", onMutated);
-
-      window.addEventListener("facturas:create:success", onMutated);
-      window.addEventListener("facturas:update:success", onMutated);
-      window.addEventListener("clientes:update:success", onMutated);
-      window.addEventListener("users:update:success", onMutated);
-      window.addEventListener("usuarios:update:success", onMutated);
-
-      window.addEventListener("home:ticket:open", onOpenTicket);
-
-      window.addEventListener("app:ready", onReady);
-      window.addEventListener("app:boot:ready", onReady);
-      window.addEventListener("app:boot:complete", onReady);
-      window.addEventListener("router:rendered", onReady);
+      AppCore.modules.Home = api;
+      AppCore.modules.HomeView = api;
+      AppCore.modules.OnionHomeView = api;
+      AppCore.modules.OnionHomeBridge = bridge;
     } catch {}
 
-    return () => {
-      try {
-        window.removeEventListener("home:reload", onMutated);
+    try {
+      if (isBrowser()) {
+        window.OnionHomeView = api;
+        window.HomeView = api;
+        window.OnionHomeBridge = bridge;
+        window.HomeBridge = bridge;
 
-        window.removeEventListener("incidencias:create:success", onMutated);
-        window.removeEventListener("incidencias:modal:updated", onMutated);
-        window.removeEventListener("incidencias:upload:success", onMutated);
-        window.removeEventListener("incidencias:comment:success", onMutated);
-        window.removeEventListener("incidencias:reopen:success", onMutated);
+        window.openHomeTicket = (payload = {}) =>
+          openTicketFromExternalRequest(payload);
 
-        window.removeEventListener("facturas:create:success", onMutated);
-        window.removeEventListener("facturas:update:success", onMutated);
-        window.removeEventListener("clientes:update:success", onMutated);
-        window.removeEventListener("users:update:success", onMutated);
-        window.removeEventListener("usuarios:update:success", onMutated);
+        window.openHomeIncidencia = (payload = {}) =>
+          openTicketFromExternalRequest(payload);
+      }
+    } catch {}
 
-        window.removeEventListener("home:ticket:open", onOpenTicket);
-
-        window.removeEventListener("app:ready", onReady);
-        window.removeEventListener("app:boot:ready", onReady);
-        window.removeEventListener("app:boot:complete", onReady);
-        window.removeEventListener("router:rendered", onReady);
-      } catch {}
-    };
+    return true;
   }
 
   function bind() {
@@ -2679,12 +3818,13 @@ export const HomeView = (() => {
 
     if (destroyed) return;
 
+    registerHomeBridge();
+
     const container = getContainer();
     const cleanups = [];
 
     cleanups.push(bindNativeActions(container));
-    cleanups.push(bindBusEvents());
-    cleanups.push(bindWindowEvents());
+    cleanups.push(attachExternalListeners());
 
     bindingsCleanup = () => {
       for (const cleanup of cleanups) {
@@ -2702,16 +3842,38 @@ export const HomeView = (() => {
   async function reload(options = {}) {
     if (destroyed) return api;
 
+    const incomingOptions = safeObject(options);
+
     if (inflightReload) {
+      queuedReloadOptions = {
+        ...(queuedReloadOptions || {}),
+        ...incomingOptions,
+        force: Boolean(queuedReloadOptions?.force || incomingOptions.force),
+        asRefresh: Boolean(
+          queuedReloadOptions?.asRefresh || incomingOptions.asRefresh
+        ),
+        silent: Boolean(
+          queuedReloadOptions?.silent ?? incomingOptions.silent
+        ),
+      };
+
       return inflightReload;
     }
 
     inflightReload = (async () => {
-      await renderAndLoad(options);
+      let currentOptions = incomingOptions;
 
-      if (!destroyed) {
-        bind();
-      }
+      do {
+        queuedReloadOptions = null;
+
+        await renderAndLoad(currentOptions);
+
+        if (!destroyed) {
+          bind();
+        }
+
+        currentOptions = queuedReloadOptions;
+      } while (currentOptions && !destroyed);
 
       return api;
     })();
@@ -2720,6 +3882,7 @@ export const HomeView = (() => {
       return await inflightReload;
     } finally {
       inflightReload = null;
+      queuedReloadOptions = null;
     }
   }
 
@@ -2733,13 +3896,25 @@ export const HomeView = (() => {
     }
 
     if (initialized && !destroyed) {
+      registerHomeBridge();
       ensureBaseState();
       rerender();
       flushPendingCreate();
+
+      if (!homeState.loaded && !inflightReload) {
+        await reload({
+          force: false,
+          silent: true,
+          asRefresh: false,
+        });
+      }
+
       return api;
     }
 
     initialized = true;
+
+    registerHomeBridge();
 
     inflightInit = (async () => {
       safeLog("init");
@@ -2779,8 +3954,12 @@ export const HomeView = (() => {
     clearTransientState();
 
     pendingCreateRequest = false;
+    queuedReloadOptions = null;
+
     inflightInit = null;
     inflightReload = null;
+    inflightOpenTicket = null;
+    inflightOpenTicketId = "";
 
     safeLog("destroy");
   }
@@ -2791,15 +3970,25 @@ export const HomeView = (() => {
 
   const api = {
     init,
+    mount: init,
+
     render: rerender,
+    scheduleRender: rerender,
+
     reload,
     destroy,
+    unmount: destroy,
 
     bind,
+    registerHomeBridge,
 
     openTicket: handleOpenTicket,
+    openTicketFromExternalRequest,
+    openIncidencia: handleOpenTicket,
+
     copyTicketId: handleCopyTicketId,
     createIncidencia: handleCreateIncidencia,
+
     navigateTo,
     openInvoice: handleOpenInvoice,
 
@@ -2822,19 +4011,34 @@ export const HomeView = (() => {
     getPagination: () => getPaginationMeta(getTickets()),
 
     getTicketById: (ticketId = "") =>
-      findIncidenciaById(getTickets(), ticketId),
+      findIncidenciaById(getTickets(), ticketId) || findTicketById(ticketId),
+
+    findTicketById,
 
     getHomeApiSnapshot,
 
     getState: () => ({
       ...homeState,
+
       user: getCurrentUser(),
       role: getCurrentRole(),
+      isAdmin: isAdminRole(getCurrentRole()),
+
       initialized,
       destroyed,
+
       hasInflightInit: Boolean(inflightInit),
       hasInflightReload: Boolean(inflightReload),
+      hasQueuedReload: Boolean(queuedReloadOptions),
+      hasInflightOpenTicket: Boolean(inflightOpenTicket),
+      inflightOpenTicketId,
+
       pendingCreateRequest,
+
+      itemsCount: getTickets().length,
+      pageItems: getPaginationMeta(getTickets()).items,
+      pagination: getPaginationMeta(getTickets()),
+
       apiSnapshot: getHomeApiSnapshot?.(),
     }),
 
@@ -2847,11 +4051,7 @@ export const HomeView = (() => {
     },
   };
 
-  try {
-    if (isBrowser()) {
-      window.OnionHomeView = api;
-    }
-  } catch {}
+  registerHomeBridge();
 
   return api;
 })();

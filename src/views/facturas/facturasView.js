@@ -125,6 +125,7 @@ export const FacturasView = (() => {
   const INCIDENCIA_DETAIL_TIMEOUT = 90000;
   const DEFAULT_FACTURAS_FILTER = "all";
   const FACTURAS_SEARCH_DEBOUNCE_MS = 120;
+  const DEFAULT_FACTURAS_SORT = "date_desc";
 
   const ADMIN_ROLES = Object.freeze([
     "admin",
@@ -332,45 +333,15 @@ export const FacturasView = (() => {
       return "overdue";
     }
 
-    if (
-      [
-        "sent",
-        "enviada",
-        "enviado",
-        "enviadas",
-        "enviados",
-      ].includes(key)
-    ) {
-      return "sent";
-    }
-
-    if (
-      [
-        "pdf",
-        "con_pdf",
-        "has_pdf",
-        "documento",
-        "documentos",
-      ].includes(key)
-    ) {
-      return "pdf";
-    }
-
-    if (
-      [
-        "linked",
-        "incidencia",
-        "incidencias",
-        "ticket",
-        "tickets",
-        "con_incidencia",
-        "con_ticket",
-      ].includes(key)
-    ) {
-      return "linked";
-    }
-
     return "all";
+  }
+
+  function normalizeFacturaSort(value = "") {
+    const key = normalizeKey(value);
+    if (["invoice_desc", "factura_desc", "numero_desc", "n_factura_desc"].includes(key)) {
+      return "invoice_desc";
+    }
+    return "date_desc";
   }
 
   function normalizeTokenList(value) {
@@ -743,6 +714,21 @@ export const FacturasView = (() => {
     state.view.q = state.view.facturasSearch;
     state.view.term = state.view.facturasSearch;
     state.view.keyword = state.view.facturasSearch;
+
+    state.view.facturasSort = normalizeFacturaSort(
+      first(
+        state.view.facturasSort,
+        state.view.sort,
+        state.view.sortBy,
+        state.view.orderBy,
+        state.view.sortMode,
+        DEFAULT_FACTURAS_SORT
+      )
+    );
+    state.view.sort = state.view.facturasSort;
+    state.view.sortBy = state.view.facturasSort;
+    state.view.orderBy = state.view.facturasSort;
+    state.view.sortMode = state.view.facturasSort;
   }
 
   function getViewFilter() {
@@ -773,6 +759,20 @@ export const FacturasView = (() => {
         state.view.term,
         state.view.keyword,
         ""
+      )
+    );
+  }
+
+  function getViewSort() {
+    ensureBaseState();
+    return normalizeFacturaSort(
+      first(
+        state.view.facturasSort,
+        state.view.sort,
+        state.view.sortBy,
+        state.view.orderBy,
+        state.view.sortMode,
+        DEFAULT_FACTURAS_SORT
       )
     );
   }
@@ -834,6 +834,19 @@ export const FacturasView = (() => {
     return nextSearch;
   }
 
+  function setViewSort(sort = DEFAULT_FACTURAS_SORT) {
+    ensureBaseState();
+    const nextSort = normalizeFacturaSort(sort);
+    state.view.facturasSort = nextSort;
+    state.view.sort = nextSort;
+    state.view.sortBy = nextSort;
+    state.view.orderBy = nextSort;
+    state.view.sortMode = nextSort;
+    resetViewPage();
+    safeEmit("facturas:sort:change", { sort: nextSort, filter: getViewFilter(), search: getViewSearch() });
+    return nextSort;
+  }
+
   function clearViewFilters() {
     ensureBaseState();
 
@@ -850,6 +863,11 @@ export const FacturasView = (() => {
     state.view.q = "";
     state.view.term = "";
     state.view.keyword = "";
+    state.view.facturasSort = DEFAULT_FACTURAS_SORT;
+    state.view.sort = DEFAULT_FACTURAS_SORT;
+    state.view.sortBy = DEFAULT_FACTURAS_SORT;
+    state.view.orderBy = DEFAULT_FACTURAS_SORT;
+    state.view.sortMode = DEFAULT_FACTURAS_SORT;
 
     resetViewPage();
 
@@ -1148,18 +1166,6 @@ export const FacturasView = (() => {
       return paymentKey === "overdue";
     }
 
-    if (key === "sent") {
-      return isFacturaSentForView(item);
-    }
-
-    if (key === "pdf") {
-      return hasPdfForView(item);
-    }
-
-    if (key === "linked") {
-      return Boolean(getRelatedIncidenciaId(item));
-    }
-
     return true;
   }
 
@@ -1221,13 +1227,26 @@ export const FacturasView = (() => {
     const rows = safeArray(items);
     const filter = getViewFilter();
     const search = getViewSearch();
+    const sort = getViewSort();
 
-    return rows.filter((item) => {
+    const filtered = rows.filter((item) => {
       return (
         itemMatchesFacturaFilterForView(item, filter) &&
         itemMatchesFacturaSearchForView(item, search)
       );
     });
+
+    if (sort === "invoice_desc") {
+      return [...filtered].sort((a, b) =>
+        safeText(getFacturaDisplayId(b), "").localeCompare(
+          safeText(getFacturaDisplayId(a), ""),
+          "es",
+          { numeric: true, sensitivity: "base" }
+        )
+      );
+    }
+
+    return filtered;
   }
 
   /* =====================================================
@@ -3235,6 +3254,11 @@ export const FacturasView = (() => {
       term: getViewSearch(),
       keyword: getViewSearch(),
       facturasSearch: getViewSearch(),
+      sort: getViewSort(),
+      sortBy: getViewSort(),
+      orderBy: getViewSort(),
+      sortMode: getViewSort(),
+      facturasSort: getViewSort(),
     };
   }
 
@@ -3346,6 +3370,11 @@ export const FacturasView = (() => {
         term: getViewSearch(),
         keyword: getViewSearch(),
         facturasSearch: getViewSearch(),
+        sort: getViewSort(),
+        sortBy: getViewSort(),
+        orderBy: getViewSort(),
+        sortMode: getViewSort(),
+        facturasSort: getViewSort(),
       },
 
       actions: {
@@ -4268,6 +4297,11 @@ export const FacturasView = (() => {
         rerender();
         return next;
       },
+      setSort(sort = DEFAULT_FACTURAS_SORT) {
+        const next = setViewSort(sort);
+        rerender();
+        return next;
+      },
 
       clearFilters() {
         clearViewFilters();
@@ -4450,6 +4484,13 @@ export const FacturasView = (() => {
       }, FACTURAS_SEARCH_DEBOUNCE_MS);
     };
 
+    const onChange = (event) => {
+      const select = event.target.closest?.("[data-sort-control='true'], #facturas-sort-select");
+      if (!select || !container.contains(select)) return;
+      setViewSort(select.value || DEFAULT_FACTURAS_SORT);
+      rerender();
+    };
+
     const onSearch = (event) => {
       const input = event.target.closest?.(
         "[data-facturas-search-input='true'], #facturas-search-input"
@@ -4469,6 +4510,7 @@ export const FacturasView = (() => {
 
     container.addEventListener("click", onClick);
     container.addEventListener("input", onInput);
+    container.addEventListener("change", onChange);
     container.addEventListener("search", onSearch);
     container.addEventListener("change", onSearch);
 
@@ -4476,6 +4518,7 @@ export const FacturasView = (() => {
       try {
         container.removeEventListener("click", onClick);
         container.removeEventListener("input", onInput);
+        container.removeEventListener("change", onChange);
         container.removeEventListener("search", onSearch);
         container.removeEventListener("change", onSearch);
       } catch {}
@@ -4533,6 +4576,10 @@ export const FacturasView = (() => {
 
       setSearch(query = "") {
         setViewSearch(query);
+        rerender();
+      },
+      setSort(sort = DEFAULT_FACTURAS_SORT) {
+        setViewSort(sort);
         rerender();
       },
 
@@ -4693,6 +4740,11 @@ export const FacturasView = (() => {
       rerender();
       return next;
     },
+    setSort(sort = DEFAULT_FACTURAS_SORT) {
+      const next = setViewSort(sort);
+      rerender();
+      return next;
+    },
 
     clearFilters() {
       clearViewFilters();
@@ -4706,6 +4758,9 @@ export const FacturasView = (() => {
 
     getSearch() {
       return getViewSearch();
+    },
+    getSort() {
+      return getViewSort();
     },
 
     getItems,

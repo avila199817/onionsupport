@@ -8,6 +8,7 @@
    PATCH · TABLE ROW PSEUDO FIX · REAL TABLE LAYOUT PRESERVED
    PATCH · LIGHT/DARK TOKEN PERFECT FIT · ACTIONS COMPACT GRID
    PATCH · FILTER PILLS + SEARCH · FACTURAS CONTROL CENTER 10/10
+   PATCH · SORT PILLS INLINE · NO ORDENAR LABEL · FILTER-ALIGNED UI
 
    RESPONSABILIDADES:
    - render premium de vista de facturas
@@ -15,7 +16,9 @@
    - hero operativo tipo centro de control
    - tabla compacta premium SaaS
    - filtros visuales:
-     todas / pendientes / pagadas / vencidas / enviadas / con PDF / con incidencia
+     todas / pendientes / pagadas / vencidas
+   - orden visual integrado:
+     fecha mayor a menor / nº factura mayor a menor
    - búsqueda por factura, cliente, email, importe, forma de pago e incidencia
    - paginación real de 5 items por defecto sobre resultados filtrados
    - orden descendente por factura más reciente
@@ -39,6 +42,12 @@
    - La barra de estado ahora vive en .facturas-cell--main::before.
    - Hover y backgrounds se aplican sobre <td>, no sobre <tr>.
    - La tabla conserva display table real.
+
+   PATCH UI ORDEN:
+   - Se elimina el texto visible "Ordenar".
+   - Los botones de orden se renderizan como pills homogéneas.
+   - El bloque de orden queda integrado con los filtros y no como subgrupo roto.
+   - Mismo lenguaje visual: altura, borde, radios, estados hover/focus/active.
 ========================================================= */
 
 /* =========================================================
@@ -57,7 +66,7 @@ const ADMIN_ROLES = new Set([
   "owner",
 ]);
 
-const STYLE_ID = "onion-facturas-template-styles-v14";
+const STYLE_ID = "onion-facturas-template-styles-v15";
 
 const FILTERS = Object.freeze([
   { key: "all", label: "Todas" },
@@ -67,8 +76,16 @@ const FILTERS = Object.freeze([
 ]);
 
 const SORT_OPTIONS = Object.freeze([
-  { key: "date_desc", label: "Fecha (mayor a menor)" },
-  { key: "invoice_desc", label: "Nº factura (mayor a menor)" },
+  {
+    key: "date_desc",
+    label: "Fecha ↓",
+    title: "Ordenar por fecha de mayor a menor",
+  },
+  {
+    key: "invoice_desc",
+    label: "Nº factura ↓",
+    title: "Ordenar por número de factura de mayor a menor",
+  },
 ]);
 
 /* =========================================================
@@ -1221,28 +1238,6 @@ function normalizeFilter(value = "") {
     return "overdue";
   }
 
-  if (["sent", "enviada", "enviado", "enviadas", "enviados"].includes(key)) {
-    return "sent";
-  }
-
-  if (["pdf", "con_pdf", "has_pdf", "documento"].includes(key)) {
-    return "pdf";
-  }
-
-  if (
-    [
-      "linked",
-      "incidencia",
-      "incidencias",
-      "ticket",
-      "tickets",
-      "con_incidencia",
-      "con_ticket",
-    ].includes(key)
-  ) {
-    return "linked";
-  }
-
   return "all";
 }
 
@@ -1299,9 +1294,20 @@ function getSearchQuery(input = {}) {
 
 function normalizeSort(value = "") {
   const key = normalizeKey(value);
-  if (["invoice_desc", "factura_desc", "numero_desc", "n_factura_desc"].includes(key)) {
+
+  if (
+    [
+      "invoice_desc",
+      "factura_desc",
+      "numero_desc",
+      "n_factura_desc",
+      "num_factura_desc",
+      "number_desc",
+    ].includes(key)
+  ) {
     return "invoice_desc";
   }
+
   return "date_desc";
 }
 
@@ -1332,6 +1338,7 @@ function itemMatchesFilter(item = {}, filter = "all") {
   if (key === "pending") return ["pending", "partial", "draft"].includes(paymentKey);
   if (key === "paid") return paymentKey === "paid";
   if (key === "overdue") return paymentKey === "overdue";
+
   return true;
 }
 
@@ -1853,8 +1860,8 @@ function renderFilters(input = {}, pagination = {}) {
   const sortMode = getSortMode(data);
 
   return `
-    <div class="facturas-filters" aria-label="Filtros y búsqueda de facturas">
-      <div class="facturas-filter-pills">
+    <div class="facturas-filters" aria-label="Filtros, orden y búsqueda de facturas">
+      <div class="facturas-filter-pills" aria-label="Filtrar facturas por estado de pago">
         ${FILTERS.map((filter) => {
           const isActive = filter.key === activeFilter;
           const count = counts[filter.key] ?? 0;
@@ -1877,22 +1884,26 @@ function renderFilters(input = {}, pagination = {}) {
         }).join("")}
       </div>
 
-      <div class="facturas-sort-control" role="group" aria-label="Ordenar listado de facturas">
-        <span>Ordenar</span>
-        <div class="facturas-sort-pills">
-          ${SORT_OPTIONS.map((option) => `
+      <div class="facturas-sort-pills" role="group" aria-label="Ordenar listado de facturas">
+        ${SORT_OPTIONS.map((option) => {
+          const isActive = option.key === sortMode;
+
+          return `
             <button
               type="button"
-              class="facturas-sort-pill${option.key === sortMode ? " is-active" : ""}"
+              class="facturas-sort-pill${isActive ? " is-active" : ""}"
               data-facturas-action="sort"
               data-action="sort-facturas"
               data-sort="${escapeHtml(option.key)}"
-              aria-pressed="${option.key === sortMode ? "true" : "false"}"
+              title="${escapeHtml(option.title)}"
+              data-tooltip="${escapeHtml(option.title)}"
+              aria-label="${escapeHtml(option.title)}"
+              aria-pressed="${isActive ? "true" : "false"}"
             >
-              ${escapeHtml(option.label)}
+              <span>${escapeHtml(option.label)}</span>
             </button>
-          `).join("")}
-        </div>
+          `;
+        }).join("")}
       </div>
 
       ${renderSearch(data)}
@@ -2338,6 +2349,7 @@ function renderStyles() {
       .facturas-pagination-btn:focus-visible,
       .facturas-incidencia-link:focus-visible,
       .facturas-filter-pill:focus-visible,
+      .facturas-sort-pill:focus-visible,
       .facturas-search-input:focus-visible,
       .facturas-search-clear:focus-visible{
         outline:none;
@@ -2566,62 +2578,38 @@ function renderStyles() {
       .facturas-filters{
         grid-column:1 / -1;
         display:grid;
-        grid-template-columns:minmax(0, 1fr) minmax(220px, 280px) minmax(260px, 430px);
+        grid-template-columns:minmax(0, 1fr) auto minmax(280px, 430px);
         gap:var(--space-sm, 12px);
         align-items:center;
         padding-block-start:var(--space-xs, 4px);
-      }
-      .facturas-sort-control{
-        display:grid;
-        gap:4px;
-        font-size:var(--font-xs, 11px);
-        color:var(--text-dim, rgba(245,245,245,.50));
-        font-weight:var(--weight-bold, 700);
-      }
-      .facturas-sort-pills{
-        display:flex;
-        gap:6px;
-        flex-wrap:wrap;
-      }
-      .facturas-sort-pill{
-        appearance:none;
-        min-block-size:calc(34px * var(--ui-scale, 1));
-        padding-inline:11px;
-        border-radius:999px;
-        border:1px solid var(--badge-border, rgba(255,255,255,.07));
-        background:var(--badge-bg, rgba(255,255,255,.048));
-        color:var(--badge-text, var(--text-muted, rgba(245,245,245,.70)));
-        font:inherit;
-        font-size:var(--font-xs, 11px);
-        font-weight:var(--weight-bold, 700);
-        cursor:pointer;
-      }
-      .facturas-sort-pill:hover{
-        border-color:var(--border-strong, rgba(255,255,255,.12));
-        background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
-        color:var(--text-strong, #ffffff);
-      }
-      .facturas-sort-pill.is-active{
-        border-color:color-mix(in srgb, var(--accent, #6f59d9) 42%, var(--border-strong, rgba(255,255,255,.12)));
-        background:color-mix(in srgb, var(--accent, #6f59d9) 14%, var(--badge-bg, rgba(255,255,255,.048)));
-        color:var(--accent-active, var(--text-strong, #ffffff));
+        min-inline-size:0;
       }
 
-      .facturas-filter-pills{
+      .facturas-filter-pills,
+      .facturas-sort-pills{
         min-inline-size:0;
         display:flex;
         align-items:center;
         gap:var(--space-2xs, 6px);
         overflow-x:auto;
+        overflow-y:hidden;
         scrollbar-width:none;
         padding-block:2px;
       }
 
-      .facturas-filter-pills::-webkit-scrollbar{
+      .facturas-sort-pills{
+        justify-content:center;
+        flex-wrap:nowrap;
+        min-inline-size:max-content;
+      }
+
+      .facturas-filter-pills::-webkit-scrollbar,
+      .facturas-sort-pills::-webkit-scrollbar{
         display:none;
       }
 
-      .facturas-filter-pill{
+      .facturas-filter-pill,
+      .facturas-sort-pill{
         appearance:none;
         min-block-size:calc(34px * var(--ui-scale, 1));
         padding-inline:11px 8px;
@@ -2639,12 +2627,17 @@ function renderStyles() {
         line-height:1;
         white-space:nowrap;
         cursor:pointer;
+        flex:0 0 auto;
         transition:
           transform var(--duration-fast, .16s) var(--ease-standard, ease),
           background var(--duration-fast, .16s) var(--ease-standard, ease),
           border-color var(--duration-fast, .16s) var(--ease-standard, ease),
           color var(--duration-fast, .16s) var(--ease-standard, ease),
           box-shadow var(--duration-fast, .16s) var(--ease-standard, ease);
+      }
+
+      .facturas-sort-pill{
+        padding-inline:12px;
       }
 
       .facturas-filter-pill strong{
@@ -2661,14 +2654,16 @@ function renderStyles() {
         font-weight:900;
       }
 
-      .facturas-filter-pill:hover{
+      .facturas-filter-pill:hover,
+      .facturas-sort-pill:hover{
         transform:translateY(-1px);
         border-color:var(--border-strong, rgba(255,255,255,.12));
         background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
         color:var(--text-strong, #ffffff);
       }
 
-      .facturas-filter-pill.is-active{
+      .facturas-filter-pill.is-active,
+      .facturas-sort-pill.is-active{
         border-color:color-mix(in srgb, var(--accent, #6f59d9) 42%, var(--border-strong, rgba(255,255,255,.12)));
         background:color-mix(in srgb, var(--accent, #6f59d9) 14%, var(--badge-bg, rgba(255,255,255,.048)));
         color:var(--accent-active, var(--text-strong, #ffffff));
@@ -3609,7 +3604,8 @@ function renderStyles() {
         background:var(--data-table-row-hover, rgba(23,32,51,.023));
       }
 
-      [data-theme="light"] .facturas-filter-pill.is-active{
+      [data-theme="light"] .facturas-filter-pill.is-active,
+      [data-theme="light"] .facturas-sort-pill.is-active{
         color:var(--accent-active, #533cb6);
         background:var(--accent-soft, rgba(111,89,217,.125));
         border-color:var(--accent-border-strong, rgba(111,89,217,.36));
@@ -3666,6 +3662,11 @@ function renderStyles() {
       @media (max-width: 1240px){
         .facturas-filters{
           grid-template-columns:1fr;
+        }
+
+        .facturas-sort-pills{
+          justify-content:flex-start;
+          min-inline-size:0;
         }
 
         .facturas-search{
@@ -3766,7 +3767,8 @@ function renderStyles() {
           inline-size:100%;
         }
 
-        .facturas-filter-pills{
+        .facturas-filter-pills,
+        .facturas-sort-pills{
           margin-inline:-2px;
         }
       }

@@ -2,13 +2,27 @@
    Onion SPA - Routes
    Archivo: src/router/routes.js
 
+   FINAL EXTREME SYSTEM · ROUTES TABLE · CANONICAL SAFE · 10/10
+   PATCH · SIDEBAR ACTIVE ROUTE SAFE
+   PATCH · VIEWKEY/VIEWNAME HARD LOCKED
+   PATCH · PUBLIC AUTH TOKEN ROUTES SAFE
+   PATCH · ADAPTERS RENDER HOST COMPATIBLE
+   PATCH · ROUTE VALIDATION EXTREME
+
    RESPONSABILIDADES:
    - definir la tabla de rutas canónicas de la SPA
    - encapsular adapters de render
    - exponer rutas inmutables
-   - validar estructura mínima
+   - validar estructura mínima/extrema
    - resolver títulos reactivos vía i18n
    - mantener orden consistente con sidebar/router
+   - centralizar paths/names/viewKeys
+   - blindar Home / Incidencias / Facturas
+   - evitar que una ruta pinte la vista equivocada
+   - no tocar history
+   - no modificar search/hash
+   - no destruir tokens públicos por query/path
+   - entregar metadata estable para guards/render/sidebar
 
    HARDENING EXTREMO:
    - lazy title getter
@@ -24,22 +38,25 @@
    - soporte público para reset password
    - aliases públicos forgot/recover/password-reset
    - rutas sin query/hash por definición
-   - no toca history
-   - no modifica search/hash
-   - no destruye /activate-account?token=...
-   - no destruye /activate-account/<token>
-   - no destruye /reset-password/confirm?token=...
-   - no destruye /reset-password/confirm/<token>
    - roles admin centralizados
    - Home real en /
+   - cada ruta declara viewKey estable
+   - cada ruta declara viewName estable
+   - cada render adapter queda marcado con routeViewKey/routeViewName
+   - validateRoutesTable verifica bindings críticos
+   - validateRoutesTable NO depende ciegamente de normalizeCanonicalPath externo
 
    FIX CRÍTICO:
    - / solo renderiza HomeView
    - /incidencias solo renderiza IncidenciasView
    - /facturas solo renderiza FacturasView
-   - cada ruta declara viewKey estable
-   - validateRoutesTable verifica bindings críticos
-   - validateRoutesTable NO depende ciegamente de normalizeCanonicalPath externo
+   - /usuarios solo renderiza UsuariosView
+   - /clientes solo renderiza ClientesView
+   - /cuenta solo renderiza CuentaView
+   - /ajustes solo renderiza AjustesView
+   - /servidor solo renderiza ServerView
+   - /login solo renderiza LoginView
+   - /reset-password/confirm solo renderiza ConfirmResetPasswordView
 ========================================================= */
 
 import { I18n } from "../i18n/index.js";
@@ -63,9 +80,11 @@ import { AjustesView } from "../views/ajustes/index.js";
 ========================================================= */
 
 const ROUTE_SOURCE = "router:routes";
+const ROUTES_VERSION = "13.0.0";
 
 export const ROUTE_PATHS = Object.freeze({
   HOME: "/",
+
   INCIDENCIAS: "/incidencias",
   FACTURAS: "/facturas",
   USUARIOS: "/usuarios",
@@ -76,8 +95,10 @@ export const ROUTE_PATHS = Object.freeze({
 
   LOGIN: "/login",
   ACTIVATE_ACCOUNT: "/activate-account",
+
   RESET_PASSWORD: "/reset-password",
   RESET_PASSWORD_CONFIRM: "/reset-password/confirm",
+
   FORGOT_PASSWORD: "/forgot-password",
   RECOVER_PASSWORD: "/recover-password",
   PASSWORD_RESET: "/password-reset",
@@ -85,6 +106,7 @@ export const ROUTE_PATHS = Object.freeze({
 
 export const ROUTE_NAMES = Object.freeze({
   HOME: "home",
+
   INCIDENCIAS: "incidencias",
   FACTURAS: "facturas",
   USUARIOS: "usuarios",
@@ -95,8 +117,10 @@ export const ROUTE_NAMES = Object.freeze({
 
   LOGIN: "login",
   ACTIVATE_ACCOUNT: "activate-account",
+
   RESET_PASSWORD: "reset-password",
   RESET_PASSWORD_CONFIRM: "reset-password-confirm",
+
   FORGOT_PASSWORD: "forgot-password",
   RECOVER_PASSWORD: "recover-password",
   PASSWORD_RESET: "password-reset",
@@ -104,6 +128,7 @@ export const ROUTE_NAMES = Object.freeze({
 
 export const ROUTE_VIEW_KEYS = Object.freeze({
   HOME: "home",
+
   INCIDENCIAS: "incidencias",
   FACTURAS: "facturas",
   USUARIOS: "usuarios",
@@ -114,22 +139,28 @@ export const ROUTE_VIEW_KEYS = Object.freeze({
 
   LOGIN: "login",
   ACTIVATE_ACCOUNT: "activate-account",
+
   RESET_PASSWORD: "reset-password",
   RESET_PASSWORD_CONFIRM: "reset-password-confirm",
 });
 
-const PUBLIC_AUTH_ROUTES = Object.freeze([
-  ROUTE_PATHS.LOGIN,
-  ROUTE_PATHS.ACTIVATE_ACCOUNT,
-  ROUTE_PATHS.RESET_PASSWORD,
-  ROUTE_PATHS.RESET_PASSWORD_CONFIRM,
-  ROUTE_PATHS.FORGOT_PASSWORD,
-  ROUTE_PATHS.RECOVER_PASSWORD,
-  ROUTE_PATHS.PASSWORD_RESET,
-]);
+export const ROUTE_VIEW_NAMES = Object.freeze({
+  HOME: "HomeView",
 
-const PUBLIC_AUTH_ROUTE_SET =
-  new Set(PUBLIC_AUTH_ROUTES);
+  INCIDENCIAS: "IncidenciasView",
+  FACTURAS: "FacturasView",
+  USUARIOS: "UsuariosView",
+  CLIENTES: "ClientesView",
+  CUENTA: "CuentaView",
+  AJUSTES: "AjustesView",
+  SERVIDOR: "ServerView",
+
+  LOGIN: "LoginView",
+  ACTIVATE_ACCOUNT: "ActivateAccountView",
+
+  RESET_PASSWORD: "ResetPasswordView",
+  RESET_PASSWORD_CONFIRM: "ConfirmResetPasswordView",
+});
 
 export const ADMIN_ROLES = Object.freeze([
   "admin",
@@ -144,25 +175,155 @@ export const ADMIN_ROLES = Object.freeze([
   "root",
 ]);
 
+export const PUBLIC_AUTH_ROUTES = Object.freeze([
+  ROUTE_PATHS.LOGIN,
+  ROUTE_PATHS.ACTIVATE_ACCOUNT,
+  ROUTE_PATHS.RESET_PASSWORD,
+  ROUTE_PATHS.RESET_PASSWORD_CONFIRM,
+  ROUTE_PATHS.FORGOT_PASSWORD,
+  ROUTE_PATHS.RECOVER_PASSWORD,
+  ROUTE_PATHS.PASSWORD_RESET,
+]);
+
+const PUBLIC_AUTH_ROUTE_SET =
+  new Set(PUBLIC_AUTH_ROUTES);
+
+export const ROUTE_ALIASES = Object.freeze({
+  "/home": ROUTE_PATHS.HOME,
+  "/dashboard": ROUTE_PATHS.HOME,
+
+  "/tickets": ROUTE_PATHS.INCIDENCIAS,
+  "/ticket": ROUTE_PATHS.INCIDENCIAS,
+  "/incidents": ROUTE_PATHS.INCIDENCIAS,
+  "/incident": ROUTE_PATHS.INCIDENCIAS,
+
+  "/invoices": ROUTE_PATHS.FACTURAS,
+  "/invoice": ROUTE_PATHS.FACTURAS,
+  "/billing": ROUTE_PATHS.FACTURAS,
+
+  "/users": ROUTE_PATHS.USUARIOS,
+  "/user": ROUTE_PATHS.USUARIOS,
+
+  "/clients": ROUTE_PATHS.CLIENTES,
+  "/client": ROUTE_PATHS.CLIENTES,
+  "/customers": ROUTE_PATHS.CLIENTES,
+  "/customer": ROUTE_PATHS.CLIENTES,
+
+  "/account": ROUTE_PATHS.CUENTA,
+  "/profile": ROUTE_PATHS.CUENTA,
+
+  "/settings": ROUTE_PATHS.AJUSTES,
+  "/config": ROUTE_PATHS.AJUSTES,
+
+  "/server": ROUTE_PATHS.SERVIDOR,
+});
+
 const CRITICAL_ROUTE_BINDINGS = Object.freeze([
   Object.freeze({
     path: ROUTE_PATHS.HOME,
     name: ROUTE_NAMES.HOME,
     viewKey: ROUTE_VIEW_KEYS.HOME,
+    viewName: ROUTE_VIEW_NAMES.HOME,
   }),
 
   Object.freeze({
     path: ROUTE_PATHS.INCIDENCIAS,
     name: ROUTE_NAMES.INCIDENCIAS,
     viewKey: ROUTE_VIEW_KEYS.INCIDENCIAS,
+    viewName: ROUTE_VIEW_NAMES.INCIDENCIAS,
   }),
 
   Object.freeze({
     path: ROUTE_PATHS.FACTURAS,
     name: ROUTE_NAMES.FACTURAS,
     viewKey: ROUTE_VIEW_KEYS.FACTURAS,
+    viewName: ROUTE_VIEW_NAMES.FACTURAS,
+  }),
+
+  Object.freeze({
+    path: ROUTE_PATHS.CUENTA,
+    name: ROUTE_NAMES.CUENTA,
+    viewKey: ROUTE_VIEW_KEYS.CUENTA,
+    viewName: ROUTE_VIEW_NAMES.CUENTA,
   }),
 ]);
+
+const ROUTE_RENDER_EXPECTATIONS = Object.freeze({
+  [ROUTE_PATHS.HOME]: Object.freeze({
+    viewKey: ROUTE_VIEW_KEYS.HOME,
+    viewName: ROUTE_VIEW_NAMES.HOME,
+  }),
+
+  [ROUTE_PATHS.INCIDENCIAS]: Object.freeze({
+    viewKey: ROUTE_VIEW_KEYS.INCIDENCIAS,
+    viewName: ROUTE_VIEW_NAMES.INCIDENCIAS,
+  }),
+
+  [ROUTE_PATHS.FACTURAS]: Object.freeze({
+    viewKey: ROUTE_VIEW_KEYS.FACTURAS,
+    viewName: ROUTE_VIEW_NAMES.FACTURAS,
+  }),
+
+  [ROUTE_PATHS.USUARIOS]: Object.freeze({
+    viewKey: ROUTE_VIEW_KEYS.USUARIOS,
+    viewName: ROUTE_VIEW_NAMES.USUARIOS,
+  }),
+
+  [ROUTE_PATHS.CLIENTES]: Object.freeze({
+    viewKey: ROUTE_VIEW_KEYS.CLIENTES,
+    viewName: ROUTE_VIEW_NAMES.CLIENTES,
+  }),
+
+  [ROUTE_PATHS.CUENTA]: Object.freeze({
+    viewKey: ROUTE_VIEW_KEYS.CUENTA,
+    viewName: ROUTE_VIEW_NAMES.CUENTA,
+  }),
+
+  [ROUTE_PATHS.AJUSTES]: Object.freeze({
+    viewKey: ROUTE_VIEW_KEYS.AJUSTES,
+    viewName: ROUTE_VIEW_NAMES.AJUSTES,
+  }),
+
+  [ROUTE_PATHS.SERVIDOR]: Object.freeze({
+    viewKey: ROUTE_VIEW_KEYS.SERVIDOR,
+    viewName: ROUTE_VIEW_NAMES.SERVIDOR,
+  }),
+
+  [ROUTE_PATHS.LOGIN]: Object.freeze({
+    viewKey: ROUTE_VIEW_KEYS.LOGIN,
+    viewName: ROUTE_VIEW_NAMES.LOGIN,
+  }),
+
+  [ROUTE_PATHS.ACTIVATE_ACCOUNT]: Object.freeze({
+    viewKey: ROUTE_VIEW_KEYS.ACTIVATE_ACCOUNT,
+    viewName: ROUTE_VIEW_NAMES.ACTIVATE_ACCOUNT,
+  }),
+
+  [ROUTE_PATHS.RESET_PASSWORD]: Object.freeze({
+    viewKey: ROUTE_VIEW_KEYS.RESET_PASSWORD,
+    viewName: ROUTE_VIEW_NAMES.RESET_PASSWORD,
+  }),
+
+  [ROUTE_PATHS.FORGOT_PASSWORD]: Object.freeze({
+    viewKey: ROUTE_VIEW_KEYS.RESET_PASSWORD,
+    viewName: ROUTE_VIEW_NAMES.RESET_PASSWORD,
+  }),
+
+  [ROUTE_PATHS.RECOVER_PASSWORD]: Object.freeze({
+    viewKey: ROUTE_VIEW_KEYS.RESET_PASSWORD,
+    viewName: ROUTE_VIEW_NAMES.RESET_PASSWORD,
+  }),
+
+  [ROUTE_PATHS.PASSWORD_RESET]: Object.freeze({
+    viewKey: ROUTE_VIEW_KEYS.RESET_PASSWORD,
+    viewName: ROUTE_VIEW_NAMES.RESET_PASSWORD,
+  }),
+
+  [ROUTE_PATHS.RESET_PASSWORD_CONFIRM]: Object.freeze({
+    viewKey: ROUTE_VIEW_KEYS.RESET_PASSWORD_CONFIRM,
+    viewName: ROUTE_VIEW_NAMES.RESET_PASSWORD_CONFIRM,
+  }),
+});
 
 /* =========================================================
    I18N
@@ -170,10 +331,12 @@ const CRITICAL_ROUTE_BINDINGS = Object.freeze([
 
 function t(key, fallback = "", params = {}) {
   try {
-    return I18n.t(key, params, fallback) || fallback || key;
-  } catch {
-    return fallback || key;
-  }
+    if (typeof I18n?.t === "function") {
+      return I18n.t(key, params, fallback) || fallback || key;
+    }
+  } catch {}
+
+  return fallback || key;
 }
 
 /* =========================================================
@@ -192,6 +355,55 @@ function safeText(value, fallback = "") {
     String(value).trim();
 
   return text || fallback;
+}
+
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+
+  return Number.isFinite(n)
+    ? n
+    : fallback;
+}
+
+function safeBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === "string") {
+    const key =
+      value.trim().toLowerCase();
+
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "si",
+        "sí",
+        "on",
+        "ok",
+      ].includes(key)
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "off",
+      ].includes(key)
+    ) {
+      return false;
+    }
+  }
+
+  return fallback;
 }
 
 function safeError(...args) {
@@ -225,6 +437,28 @@ function isPromiseLike(value) {
   );
 }
 
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function first(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
+    }
+
+    if (Array.isArray(value) && value.length === 0) {
+      continue;
+    }
+
+    return value;
+  }
+
+  return null;
+}
+
 function toArray(value) {
   if (Array.isArray(value)) {
     return value;
@@ -254,25 +488,41 @@ function freezeArray(values = []) {
   );
 }
 
-function deepFreezeObject(value) {
-  if (!isObject(value)) {
+function deepFreeze(value) {
+  if (
+    !value ||
+    (
+      typeof value !== "object" &&
+      typeof value !== "function"
+    )
+  ) {
     return value;
   }
 
-  for (const key of Object.keys(value)) {
-    const item = value[key];
+  try {
+    const keys =
+      Object.keys(value);
 
-    if (
-      isObject(item) ||
-      Array.isArray(item)
-    ) {
-      try {
-        Object.freeze(item);
-      } catch {}
+    for (const key of keys) {
+      const item =
+        value[key];
+
+      if (
+        item &&
+        (
+          typeof item === "object" ||
+          typeof item === "function"
+        ) &&
+        !Object.isFrozen(item)
+      ) {
+        deepFreeze(item);
+      }
     }
-  }
 
-  return Object.freeze(value);
+    Object.freeze(value);
+  } catch {}
+
+  return value;
 }
 
 /* =========================================================
@@ -316,33 +566,78 @@ function stripQueryAndHash(path = "/") {
   return withoutSearch || "/";
 }
 
+function stripPublicUsernamePrefix(path = "/") {
+  const raw =
+    safeText(path, "/")
+      .replace(/\\/g, "/");
+
+  const withoutQuery =
+    stripQueryAndHash(raw);
+
+  const clean =
+    withoutQuery.replace(/^\/@[^/]+(?=\/|$)/i, "");
+
+  return clean || "/";
+}
+
+function applyRouteAlias(path = "/") {
+  const clean =
+    safeText(path, "/") || "/";
+
+  if (ROUTE_ALIASES[clean]) {
+    return ROUTE_ALIASES[clean];
+  }
+
+  for (const [from, to] of Object.entries(ROUTE_ALIASES)) {
+    if (
+      from !== "/" &&
+      clean.startsWith(`${from}/`)
+    ) {
+      return `${to}${clean.slice(from.length)}`;
+    }
+  }
+
+  return clean;
+}
+
 function normalizeRoutePath(path = "/") {
   const withoutQuery =
-    stripQueryAndHash(path);
+    stripPublicUsernamePrefix(path);
 
-  const normalized =
+  let normalized =
     String(withoutQuery || "/")
       .trim()
       .replace(/\\/g, "/")
       .replace(/\/{2,}/g, "/");
 
   if (!normalized) {
-    return "/";
+    normalized = "/";
   }
 
-  const prefixed =
-    normalized.startsWith("/")
-      ? normalized
-      : `/${normalized}`;
+  if (!normalized.startsWith("/")) {
+    normalized = `/${normalized}`;
+  }
 
   if (
-    prefixed.length > 1 &&
-    prefixed.endsWith("/")
+    normalized.length > 1 &&
+    normalized.endsWith("/")
   ) {
-    return prefixed.replace(/\/+$/g, "") || "/";
+    normalized =
+      normalized.replace(/\/+$/g, "") || "/";
   }
 
-  return prefixed;
+  normalized =
+    applyRouteAlias(normalized);
+
+  if (
+    normalized.length > 1 &&
+    normalized.endsWith("/")
+  ) {
+    normalized =
+      normalized.replace(/\/+$/g, "") || "/";
+  }
+
+  return normalized || "/";
 }
 
 function normalizeRouteName(name = "route") {
@@ -364,6 +659,15 @@ function normalizeViewKey(value = "view") {
       .replace(/\s+/g, "-")
       .replace(/[^a-z0-9._:-]/g, "") ||
     "view"
+  );
+}
+
+function normalizeViewName(value = "View") {
+  return (
+    String(value || "View")
+      .trim()
+      .replace(/\s+/g, "") ||
+    "View"
   );
 }
 
@@ -389,6 +693,8 @@ function safeRun(fn, meta = {}) {
       safeText(meta.routePath, ""),
     viewKey:
       safeText(meta.viewKey, ""),
+    viewName:
+      safeText(meta.viewName, ""),
   };
 
   return function wrappedRouteRender(...args) {
@@ -458,6 +764,18 @@ function resolveViewRenderer(view) {
 
   if (
     view &&
+    typeof view.mount === "function"
+  ) {
+    return {
+      renderer:
+        view.mount.bind(view),
+      kind:
+        "object.mount",
+    };
+  }
+
+  if (
+    view &&
     typeof view.render === "function"
   ) {
     return {
@@ -470,13 +788,13 @@ function resolveViewRenderer(view) {
 
   if (
     view &&
-    typeof view.mount === "function"
+    typeof view.bootstrap === "function"
   ) {
     return {
       renderer:
-        view.mount.bind(view),
+        view.bootstrap.bind(view),
       kind:
-        "object.mount",
+        "object.bootstrap",
     };
   }
 
@@ -505,9 +823,9 @@ function createViewAdapter(view, config = {}) {
     );
 
   const viewName =
-    safeText(
-      config.viewName,
-      getViewDebugName(view, viewKey)
+    normalizeViewName(
+      config.viewName ||
+        getViewDebugName(view, viewKey)
     );
 
   const {
@@ -521,9 +839,8 @@ function createViewAdapter(view, config = {}) {
         renderer(...args);
 
       /*
-        Si la vista es objeto y su init() no devuelve nada,
+        Si la vista es objeto y su init()/mount()/render() no devuelve nada,
         devolvemos la propia vista para que Router pueda ejecutar destroy().
-        Si devuelve HTML/string/objeto, respetamos su retorno.
       */
       if (
         result === undefined &&
@@ -555,6 +872,13 @@ function createViewAdapter(view, config = {}) {
       routeViewKind: {
         value:
           kind,
+        enumerable:
+          true,
+      },
+
+      routeViewHasRawView: {
+        value:
+          Boolean(view),
         enumerable:
           true,
       },
@@ -621,12 +945,31 @@ function normalizeMeta(definition = {}) {
       ? false
       : true;
 
-  return deepFreezeObject({
+  const viewKey =
+    normalizeViewKey(
+      definition.viewKey || definition.name || "view"
+    );
+
+  const viewName =
+    normalizeViewName(
+      definition.viewName || viewKey
+    );
+
+  return deepFreeze({
+    version:
+      ROUTES_VERSION,
+
     order:
-      Number(definition.order || 0),
+      safeNumber(definition.order, 0),
 
     source:
       definition.source || ROUTE_SOURCE,
+
+    path:
+      normalizedPath,
+
+    canonicalPath:
+      normalizedPath,
 
     requiresAuth,
     private:
@@ -656,11 +999,23 @@ function normalizeMeta(definition = {}) {
     layout,
     authScreen,
 
-    viewKey:
-      normalizeViewKey(definition.viewKey || definition.name || "view"),
+    viewKey,
+    viewName,
 
-    viewName:
-      safeText(definition.viewName, ""),
+    sidebarKey:
+      viewKey,
+
+    routeGroup:
+      safeText(definition.routeGroup, publicRoute ? "auth" : "app"),
+
+    tokenRoute:
+      safeBoolean(definition.tokenRoute, false),
+
+    preserveSearch:
+      safeBoolean(definition.preserveSearch, false),
+
+    preserveHash:
+      safeBoolean(definition.preserveHash, false),
   });
 }
 
@@ -697,9 +1052,9 @@ function createRoute(definition = {}) {
     );
 
   const viewName =
-    safeText(
-      definition.viewName,
-      viewKey
+    normalizeViewName(
+      definition.viewName ||
+        viewKey
     );
 
   const normalizedRoles =
@@ -741,6 +1096,12 @@ function createRoute(definition = {}) {
           normalizedName,
       }),
 
+    version:
+      ROUTES_VERSION,
+
+    source:
+      ROUTE_SOURCE,
+
     path:
       normalizedPath,
 
@@ -752,6 +1113,9 @@ function createRoute(definition = {}) {
 
     viewKey,
     viewName,
+
+    sidebarKey:
+      viewKey,
 
     titleKey:
       safeText(definition.titleKey, ""),
@@ -781,6 +1145,9 @@ function createRoute(definition = {}) {
       normalizedRoles,
 
     allowRoles:
+      normalizedRoles,
+
+    requireRoles:
       normalizedRoles,
 
     hideShell,
@@ -836,6 +1203,22 @@ function createRoute(definition = {}) {
         ? false
         : true,
 
+    tokenRoute:
+      safeBoolean(definition.tokenRoute, false),
+
+    preserveSearch:
+      safeBoolean(definition.preserveSearch, false),
+
+    preserveHash:
+      safeBoolean(definition.preserveHash, false),
+
+    aliases:
+      freezeArray(
+        toArray(definition.aliases)
+          .map(normalizeRoutePath)
+          .filter((alias) => alias && alias !== normalizedPath)
+      ),
+
     render:
       safeRun(
         rawRender,
@@ -845,6 +1228,7 @@ function createRoute(definition = {}) {
           routePath:
             normalizedPath,
           viewKey,
+          viewName,
         }
       ),
 
@@ -880,6 +1264,13 @@ function createRoute(definition = {}) {
         enumerable:
           true,
       },
+
+      routeSource: {
+        value:
+          ROUTE_SOURCE,
+        enumerable:
+          true,
+      },
     });
   } catch {}
 
@@ -894,7 +1285,7 @@ function createRoute(definition = {}) {
     },
   });
 
-  return Object.freeze(route);
+  return deepFreeze(route);
 }
 
 /* =========================================================
@@ -908,7 +1299,7 @@ const renderHomeView =
       viewKey:
         ROUTE_VIEW_KEYS.HOME,
       viewName:
-        "HomeView",
+        ROUTE_VIEW_NAMES.HOME,
     }
   );
 
@@ -919,7 +1310,7 @@ const renderIncidenciasView =
       viewKey:
         ROUTE_VIEW_KEYS.INCIDENCIAS,
       viewName:
-        "IncidenciasView",
+        ROUTE_VIEW_NAMES.INCIDENCIAS,
     }
   );
 
@@ -930,7 +1321,7 @@ const renderFacturasView =
       viewKey:
         ROUTE_VIEW_KEYS.FACTURAS,
       viewName:
-        "FacturasView",
+        ROUTE_VIEW_NAMES.FACTURAS,
     }
   );
 
@@ -941,7 +1332,7 @@ const renderUsuariosView =
       viewKey:
         ROUTE_VIEW_KEYS.USUARIOS,
       viewName:
-        "UsuariosView",
+        ROUTE_VIEW_NAMES.USUARIOS,
     }
   );
 
@@ -952,7 +1343,7 @@ const renderClientesView =
       viewKey:
         ROUTE_VIEW_KEYS.CLIENTES,
       viewName:
-        "ClientesView",
+        ROUTE_VIEW_NAMES.CLIENTES,
     }
   );
 
@@ -963,7 +1354,7 @@ const renderCuentaView =
       viewKey:
         ROUTE_VIEW_KEYS.CUENTA,
       viewName:
-        "CuentaView",
+        ROUTE_VIEW_NAMES.CUENTA,
     }
   );
 
@@ -974,7 +1365,7 @@ const renderAjustesView =
       viewKey:
         ROUTE_VIEW_KEYS.AJUSTES,
       viewName:
-        "AjustesView",
+        ROUTE_VIEW_NAMES.AJUSTES,
     }
   );
 
@@ -985,7 +1376,7 @@ const renderServidorView =
       viewKey:
         ROUTE_VIEW_KEYS.SERVIDOR,
       viewName:
-        "ServerView",
+        ROUTE_VIEW_NAMES.SERVIDOR,
     }
   );
 
@@ -996,7 +1387,7 @@ const renderLoginView =
       viewKey:
         ROUTE_VIEW_KEYS.LOGIN,
       viewName:
-        "LoginView",
+        ROUTE_VIEW_NAMES.LOGIN,
     }
   );
 
@@ -1007,7 +1398,7 @@ const renderActivateAccountView =
       viewKey:
         ROUTE_VIEW_KEYS.ACTIVATE_ACCOUNT,
       viewName:
-        "ActivateAccountView",
+        ROUTE_VIEW_NAMES.ACTIVATE_ACCOUNT,
     }
   );
 
@@ -1018,7 +1409,7 @@ const renderResetPasswordView =
       viewKey:
         ROUTE_VIEW_KEYS.RESET_PASSWORD,
       viewName:
-        "ResetPasswordView",
+        ROUTE_VIEW_NAMES.RESET_PASSWORD,
     }
   );
 
@@ -1029,12 +1420,12 @@ const renderConfirmResetPasswordView =
       viewKey:
         ROUTE_VIEW_KEYS.RESET_PASSWORD_CONFIRM,
       viewName:
-        "ConfirmResetPasswordView",
+        ROUTE_VIEW_NAMES.RESET_PASSWORD_CONFIRM,
     }
   );
 
 /* =========================================================
-   ROUTE DEFINITIONS
+   ROUTE DEFINITIONS HELPERS
 ========================================================= */
 
 function privateRoute(definition = {}) {
@@ -1047,6 +1438,8 @@ function privateRoute(definition = {}) {
       false,
     layout:
       "app",
+    authScreen:
+      false,
     ...definition,
   });
 }
@@ -1075,6 +1468,10 @@ function publicAuthRoute(definition = {}) {
       true,
     guestOnly:
       false,
+    preserveSearch:
+      true,
+    preserveHash:
+      true,
     ...definition,
   });
 }
@@ -1084,7 +1481,7 @@ function publicAuthRoute(definition = {}) {
 ========================================================= */
 
 export function createRoutes() {
-  return [
+  const routes = [
     privateRoute({
       path:
         ROUTE_PATHS.HOME,
@@ -1093,7 +1490,7 @@ export function createRoutes() {
       viewKey:
         ROUTE_VIEW_KEYS.HOME,
       viewName:
-        "HomeView",
+        ROUTE_VIEW_NAMES.HOME,
       titleKey:
         "routes.home",
       titleFallback:
@@ -1102,6 +1499,11 @@ export function createRoutes() {
         10,
       render:
         renderHomeView,
+      aliases:
+        [
+          "/home",
+          "/dashboard",
+        ],
     }),
 
     privateRoute({
@@ -1112,7 +1514,7 @@ export function createRoutes() {
       viewKey:
         ROUTE_VIEW_KEYS.INCIDENCIAS,
       viewName:
-        "IncidenciasView",
+        ROUTE_VIEW_NAMES.INCIDENCIAS,
       titleKey:
         "routes.incidencias",
       titleFallback:
@@ -1121,6 +1523,13 @@ export function createRoutes() {
         20,
       render:
         renderIncidenciasView,
+      aliases:
+        [
+          "/tickets",
+          "/ticket",
+          "/incidents",
+          "/incident",
+        ],
     }),
 
     privateRoute({
@@ -1131,7 +1540,7 @@ export function createRoutes() {
       viewKey:
         ROUTE_VIEW_KEYS.FACTURAS,
       viewName:
-        "FacturasView",
+        ROUTE_VIEW_NAMES.FACTURAS,
       titleKey:
         "routes.facturas",
       titleFallback:
@@ -1140,6 +1549,12 @@ export function createRoutes() {
         30,
       render:
         renderFacturasView,
+      aliases:
+        [
+          "/invoices",
+          "/invoice",
+          "/billing",
+        ],
     }),
 
     adminRoute({
@@ -1150,7 +1565,7 @@ export function createRoutes() {
       viewKey:
         ROUTE_VIEW_KEYS.USUARIOS,
       viewName:
-        "UsuariosView",
+        ROUTE_VIEW_NAMES.USUARIOS,
       titleKey:
         "routes.usuarios",
       titleFallback:
@@ -1159,6 +1574,11 @@ export function createRoutes() {
         40,
       render:
         renderUsuariosView,
+      aliases:
+        [
+          "/users",
+          "/user",
+        ],
     }),
 
     adminRoute({
@@ -1169,7 +1589,7 @@ export function createRoutes() {
       viewKey:
         ROUTE_VIEW_KEYS.CLIENTES,
       viewName:
-        "ClientesView",
+        ROUTE_VIEW_NAMES.CLIENTES,
       titleKey:
         "routes.clientes",
       titleFallback:
@@ -1178,6 +1598,13 @@ export function createRoutes() {
         50,
       render:
         renderClientesView,
+      aliases:
+        [
+          "/clients",
+          "/client",
+          "/customers",
+          "/customer",
+        ],
     }),
 
     privateRoute({
@@ -1188,7 +1615,7 @@ export function createRoutes() {
       viewKey:
         ROUTE_VIEW_KEYS.CUENTA,
       viewName:
-        "CuentaView",
+        ROUTE_VIEW_NAMES.CUENTA,
       titleKey:
         "routes.cuenta",
       titleFallback:
@@ -1197,6 +1624,11 @@ export function createRoutes() {
         60,
       render:
         renderCuentaView,
+      aliases:
+        [
+          "/account",
+          "/profile",
+        ],
     }),
 
     privateRoute({
@@ -1207,7 +1639,7 @@ export function createRoutes() {
       viewKey:
         ROUTE_VIEW_KEYS.AJUSTES,
       viewName:
-        "AjustesView",
+        ROUTE_VIEW_NAMES.AJUSTES,
       titleKey:
         "routes.ajustes",
       titleFallback:
@@ -1216,6 +1648,11 @@ export function createRoutes() {
         70,
       render:
         renderAjustesView,
+      aliases:
+        [
+          "/settings",
+          "/config",
+        ],
     }),
 
     adminRoute({
@@ -1226,7 +1663,7 @@ export function createRoutes() {
       viewKey:
         ROUTE_VIEW_KEYS.SERVIDOR,
       viewName:
-        "ServerView",
+        ROUTE_VIEW_NAMES.SERVIDOR,
       titleKey:
         "routes.servidor",
       titleFallback:
@@ -1235,6 +1672,10 @@ export function createRoutes() {
         80,
       render:
         renderServidorView,
+      aliases:
+        [
+          "/server",
+        ],
     }),
 
     publicAuthRoute({
@@ -1245,7 +1686,7 @@ export function createRoutes() {
       viewKey:
         ROUTE_VIEW_KEYS.LOGIN,
       viewName:
-        "LoginView",
+        ROUTE_VIEW_NAMES.LOGIN,
       titleKey:
         "routes.login",
       titleFallback:
@@ -1268,11 +1709,17 @@ export function createRoutes() {
       viewKey:
         ROUTE_VIEW_KEYS.ACTIVATE_ACCOUNT,
       viewName:
-        "ActivateAccountView",
+        ROUTE_VIEW_NAMES.ACTIVATE_ACCOUNT,
       titleKey:
         "routes.activateAccount",
       titleFallback:
         "Activar cuenta",
+      tokenRoute:
+        true,
+      preserveSearch:
+        true,
+      preserveHash:
+        true,
       order:
         1005,
       render:
@@ -1287,11 +1734,15 @@ export function createRoutes() {
       viewKey:
         ROUTE_VIEW_KEYS.RESET_PASSWORD,
       viewName:
-        "ResetPasswordView",
+        ROUTE_VIEW_NAMES.RESET_PASSWORD,
       titleKey:
         "routes.resetPassword",
       titleFallback:
         "Recuperar acceso",
+      preserveSearch:
+        true,
+      preserveHash:
+        true,
       order:
         1010,
       render:
@@ -1306,11 +1757,17 @@ export function createRoutes() {
       viewKey:
         ROUTE_VIEW_KEYS.RESET_PASSWORD_CONFIRM,
       viewName:
-        "ConfirmResetPasswordView",
+        ROUTE_VIEW_NAMES.RESET_PASSWORD_CONFIRM,
       titleKey:
         "routes.resetPasswordConfirm",
       titleFallback:
         "Nueva contraseña",
+      tokenRoute:
+        true,
+      preserveSearch:
+        true,
+      preserveHash:
+        true,
       order:
         1020,
       render:
@@ -1325,11 +1782,15 @@ export function createRoutes() {
       viewKey:
         ROUTE_VIEW_KEYS.RESET_PASSWORD,
       viewName:
-        "ResetPasswordView",
+        ROUTE_VIEW_NAMES.RESET_PASSWORD,
       titleKey:
         "routes.forgotPassword",
       titleFallback:
         "Recuperar acceso",
+      preserveSearch:
+        true,
+      preserveHash:
+        true,
       order:
         1030,
       render:
@@ -1344,11 +1805,15 @@ export function createRoutes() {
       viewKey:
         ROUTE_VIEW_KEYS.RESET_PASSWORD,
       viewName:
-        "ResetPasswordView",
+        ROUTE_VIEW_NAMES.RESET_PASSWORD,
       titleKey:
         "routes.recoverPassword",
       titleFallback:
         "Recuperar acceso",
+      preserveSearch:
+        true,
+      preserveHash:
+        true,
       order:
         1040,
       render:
@@ -1363,17 +1828,37 @@ export function createRoutes() {
       viewKey:
         ROUTE_VIEW_KEYS.RESET_PASSWORD,
       viewName:
-        "ResetPasswordView",
+        ROUTE_VIEW_NAMES.RESET_PASSWORD,
       titleKey:
         "routes.passwordReset",
       titleFallback:
         "Recuperar acceso",
+      preserveSearch:
+        true,
+      preserveHash:
+        true,
       order:
         1050,
       render:
         renderResetPasswordView,
     }),
   ];
+
+  return routes
+    .slice()
+    .sort((a, b) => {
+      const orderA =
+        safeNumber(a.order, 0);
+
+      const orderB =
+        safeNumber(b.order, 0);
+
+      if (orderA !== orderB) {
+        return orderA - orderB;
+      }
+
+      return String(a.path).localeCompare(String(b.path));
+    });
 }
 
 /* =========================================================
@@ -1389,10 +1874,15 @@ export function getImmutableRoutes() {
 
   ROUTES_CACHE =
     Object.freeze(
-      createRoutes()
+      createRoutes().map((route) => deepFreeze(route))
     );
 
   return ROUTES_CACHE;
+}
+
+export function resetRoutesCacheForTests() {
+  ROUTES_CACHE = null;
+  return true;
 }
 
 /* =========================================================
@@ -1483,12 +1973,54 @@ function assertValidViewKey(route, normalizedPath) {
       `Router: meta.viewKey inconsistente en "${normalizedPath}".`
     );
   }
+
+  if (
+    route.meta?.viewName &&
+    route.meta.viewName !== route.viewName
+  ) {
+    throw new Error(
+      `Router: meta.viewName inconsistente en "${normalizedPath}".`
+    );
+  }
 }
 
 function assertValidRender(route, normalizedPath) {
   if (typeof route.render !== "function") {
     throw new Error(
       `Router: la ruta "${normalizedPath}" no tiene render().`
+    );
+  }
+
+  const expected =
+    ROUTE_RENDER_EXPECTATIONS[normalizedPath];
+
+  if (!expected) {
+    return;
+  }
+
+  const renderViewKey =
+    route.render.routeViewKey ||
+    route.render.routeViewName ||
+    "";
+
+  const renderViewName =
+    route.render.routeViewName || "";
+
+  if (
+    renderViewKey &&
+    renderViewKey !== expected.viewKey
+  ) {
+    throw new Error(
+      `Router: render incorrecto en "${normalizedPath}". route.render.routeViewKey="${renderViewKey}", esperado "${expected.viewKey}".`
+    );
+  }
+
+  if (
+    renderViewName &&
+    renderViewName !== expected.viewName
+  ) {
+    throw new Error(
+      `Router: render incorrecto en "${normalizedPath}". route.render.routeViewName="${renderViewName}", esperado "${expected.viewName}".`
     );
   }
 }
@@ -1625,6 +2157,24 @@ function assertValidFlags(route, normalizedPath) {
       `Router: shell inconsistente en "${normalizedPath}".`
     );
   }
+
+  if (
+    route.hideShell === true &&
+    route.showShell !== false
+  ) {
+    throw new Error(
+      `Router: showShell inconsistente en "${normalizedPath}".`
+    );
+  }
+
+  if (
+    route.hideShell === false &&
+    route.showShell !== true
+  ) {
+    throw new Error(
+      `Router: showShell inconsistente en "${normalizedPath}".`
+    );
+  }
 }
 
 function assertValidMeta(route, normalizedPath) {
@@ -1674,6 +2224,30 @@ function assertValidMeta(route, normalizedPath) {
   ) {
     throw new Error(
       `Router: meta.shell inconsistente en "${normalizedPath}".`
+    );
+  }
+
+  if (
+    route.meta.showShell !== route.showShell
+  ) {
+    throw new Error(
+      `Router: meta.showShell inconsistente en "${normalizedPath}".`
+    );
+  }
+
+  if (
+    route.meta.viewKey !== route.viewKey
+  ) {
+    throw new Error(
+      `Router: meta.viewKey inconsistente en "${normalizedPath}".`
+    );
+  }
+
+  if (
+    route.meta.viewName !== route.viewName
+  ) {
+    throw new Error(
+      `Router: meta.viewName inconsistente en "${normalizedPath}".`
     );
   }
 
@@ -1733,6 +2307,23 @@ function assertHomeRoute(routes) {
   }
 
   if (
+    home.viewName !== ROUTE_VIEW_NAMES.HOME
+  ) {
+    throw new Error(
+      "Router: la ruta '/' debe usar viewName 'HomeView'."
+    );
+  }
+
+  if (
+    home.render?.routeViewKey !== ROUTE_VIEW_KEYS.HOME ||
+    home.render?.routeViewName !== ROUTE_VIEW_NAMES.HOME
+  ) {
+    throw new Error(
+      "Router: la ruta '/' no está ligada a HomeView."
+    );
+  }
+
+  if (
     home.public !== false ||
     home.requiresAuth !== true
   ) {
@@ -1780,10 +2371,19 @@ function assertIncidenciasRoute(routes) {
   }
 
   if (
-    incidencias.viewName !== "IncidenciasView"
+    incidencias.viewName !== ROUTE_VIEW_NAMES.INCIDENCIAS
   ) {
     throw new Error(
       "Router: la ruta '/incidencias' debe usar viewName 'IncidenciasView'."
+    );
+  }
+
+  if (
+    incidencias.render?.routeViewKey !== ROUTE_VIEW_KEYS.INCIDENCIAS ||
+    incidencias.render?.routeViewName !== ROUTE_VIEW_NAMES.INCIDENCIAS
+  ) {
+    throw new Error(
+      "Router: la ruta '/incidencias' no está ligada a IncidenciasView."
     );
   }
 
@@ -1835,10 +2435,37 @@ function assertFacturasRoute(routes) {
   }
 
   if (
-    facturas.viewName !== "FacturasView"
+    facturas.viewName !== ROUTE_VIEW_NAMES.FACTURAS
   ) {
     throw new Error(
       "Router: la ruta '/facturas' debe usar viewName 'FacturasView'."
+    );
+  }
+
+  if (
+    facturas.render?.routeViewKey !== ROUTE_VIEW_KEYS.FACTURAS ||
+    facturas.render?.routeViewName !== ROUTE_VIEW_NAMES.FACTURAS
+  ) {
+    throw new Error(
+      "Router: la ruta '/facturas' no está ligada a FacturasView."
+    );
+  }
+
+  if (
+    facturas.public !== false ||
+    facturas.requiresAuth !== true
+  ) {
+    throw new Error(
+      "Router: Facturas debe ser privada y requerir auth."
+    );
+  }
+
+  if (
+    facturas.hideShell !== false ||
+    facturas.shell !== true
+  ) {
+    throw new Error(
+      "Router: Facturas debe usar shell visible."
     );
   }
 }
@@ -1873,6 +2500,14 @@ function assertPublicAuthRoutes(routes) {
         `Router: ruta pública auth debe ocultar shell "${path}".`
       );
     }
+
+    if (
+      route.layout !== "auth"
+    ) {
+      throw new Error(
+        `Router: ruta pública auth debe usar layout auth "${path}".`
+      );
+    }
   }
 }
 
@@ -1898,6 +2533,21 @@ function assertCriticalBindings(routes) {
     if (route.viewKey !== expected.viewKey) {
       throw new Error(
         `Router: ruta crítica "${expected.path}" tiene viewKey "${route.viewKey}", esperado "${expected.viewKey}".`
+      );
+    }
+
+    if (route.viewName !== expected.viewName) {
+      throw new Error(
+        `Router: ruta crítica "${expected.path}" tiene viewName "${route.viewName}", esperado "${expected.viewName}".`
+      );
+    }
+
+    if (
+      route.render?.routeViewKey !== expected.viewKey ||
+      route.render?.routeViewName !== expected.viewName
+    ) {
+      throw new Error(
+        `Router: ruta crítica "${expected.path}" está ligada a render incorrecto.`
       );
     }
   }
@@ -1944,7 +2594,7 @@ export function validateRoutesTable(AppCore, routes, normalizeCanonicalPath) {
       CRÍTICO:
       La ruta definida manda. No usamos normalizeCanonicalPath externo
       como fuente de verdad porque si el helper está mal puede convertir
-      "/incidencias" en "/" y romper el boot.
+      "/incidencias" o "/facturas" en "/" y romper el boot/sidebar.
     */
     const normalizedPath =
       normalizeRoutePath(route.path || "/");
@@ -2012,6 +2662,71 @@ export function validateRoutesTable(AppCore, routes, normalizeCanonicalPath) {
 }
 
 /* =========================================================
+   ROUTE RESOLUTION HELPERS
+========================================================= */
+
+export function resolveRouteAlias(path = "/") {
+  return normalizeRoutePath(path);
+}
+
+export function getRouteByPath(path = "/") {
+  const normalizedPath =
+    normalizeRoutePath(path);
+
+  const routes =
+    getImmutableRoutes();
+
+  return (
+    routes.find(
+      (route) => route.path === normalizedPath
+    ) ||
+    routes.find(
+      (route) => Array.isArray(route.aliases) && route.aliases.includes(normalizedPath)
+    ) ||
+    null
+  );
+}
+
+export function getRouteByName(name = "") {
+  const normalizedName =
+    normalizeRouteName(name);
+
+  return (
+    getImmutableRoutes().find(
+      (route) => route.name === normalizedName
+    ) || null
+  );
+}
+
+export function getRouteByViewKey(viewKey = "") {
+  const normalized =
+    normalizeViewKey(viewKey);
+
+  return (
+    getImmutableRoutes().find(
+      (route) => route.viewKey === normalized
+    ) || null
+  );
+}
+
+export function isPublicAuthPath(path = "/") {
+  return PUBLIC_AUTH_ROUTE_SET.has(
+    normalizeRoutePath(path)
+  );
+}
+
+export function isPrivateRoutePath(path = "/") {
+  const route =
+    getRouteByPath(path);
+
+  return Boolean(
+    route &&
+      route.requiresAuth === true &&
+      route.public === false
+  );
+}
+
+/* =========================================================
    DEBUG HELPERS
 ========================================================= */
 
@@ -2020,11 +2735,20 @@ export function getRoutesSnapshot() {
     id:
       route.id,
 
+    version:
+      route.version,
+
+    source:
+      route.source,
+
     path:
       route.path,
 
     canonicalPath:
       route.canonicalPath,
+
+    aliases:
+      route.aliases,
 
     name:
       route.name,
@@ -2035,9 +2759,18 @@ export function getRoutesSnapshot() {
     viewName:
       route.viewName,
 
+    sidebarKey:
+      route.sidebarKey,
+
     renderViewKey:
       route.render?.routeViewKey ||
+      null,
+
+    renderViewName:
       route.render?.routeViewName ||
+      null,
+
+    renderViewKind:
       route.render?.routeViewKind ||
       null,
 
@@ -2062,11 +2795,23 @@ export function getRoutesSnapshot() {
     shell:
       route.shell,
 
+    showShell:
+      route.showShell,
+
     layout:
       route.layout,
 
     authScreen:
       route.authScreen,
+
+    tokenRoute:
+      route.tokenRoute,
+
+    preserveSearch:
+      route.preserveSearch,
+
+    preserveHash:
+      route.preserveHash,
 
     roles:
       route.roles,
@@ -2085,60 +2830,133 @@ export function getRoutesSnapshot() {
   }));
 }
 
-export function getRouteByPath(path = "/") {
+export function getRouteDebug(path = "/") {
   const normalizedPath =
     normalizeRoutePath(path);
 
-  return (
-    getImmutableRoutes().find(
-      (route) => route.path === normalizedPath
-    ) || null
-  );
-}
-
-export function getRouteDebug(path = "/") {
   const route =
-    getRouteByPath(path);
+    getRouteByPath(normalizedPath);
 
   if (!route) {
     return {
       found:
         false,
+      input:
+        path,
       path:
-        normalizeRoutePath(path),
+        normalizedPath,
     };
   }
 
   return {
     found:
       true,
+
+    input:
+      path,
+
     id:
       route.id,
+
     path:
       route.path,
+
     canonicalPath:
       route.canonicalPath,
+
+    aliases:
+      route.aliases,
+
     name:
       route.name,
+
     viewKey:
       route.viewKey,
+
     viewName:
       route.viewName,
+
+    renderViewKey:
+      route.render?.routeViewKey ||
+      null,
+
+    renderViewName:
+      route.render?.routeViewName ||
+      null,
+
+    renderViewKind:
+      route.render?.routeViewKind ||
+      null,
+
     title:
       route.title,
+
     public:
       route.public,
+
     requiresAuth:
       route.requiresAuth,
+
     hideShell:
       route.hideShell,
+
     shell:
       route.shell,
+
+    showShell:
+      route.showShell,
+
     layout:
       route.layout,
+
     roles:
       route.roles,
+
+    meta:
+      route.meta,
   };
+}
+
+export function getCriticalRoutesDebug() {
+  return CRITICAL_ROUTE_BINDINGS.map((expected) => {
+    const route =
+      getRouteByPath(expected.path);
+
+    return {
+      expected,
+      found:
+        Boolean(route),
+
+      actual:
+        route
+          ? {
+              path:
+                route.path,
+              name:
+                route.name,
+              viewKey:
+                route.viewKey,
+              viewName:
+                route.viewName,
+              renderViewKey:
+                route.render?.routeViewKey || null,
+              renderViewName:
+                route.render?.routeViewName || null,
+            }
+          : null,
+
+      ok:
+        Boolean(
+          route &&
+            route.path === expected.path &&
+            route.name === expected.name &&
+            route.viewKey === expected.viewKey &&
+            route.viewName === expected.viewName &&
+            route.render?.routeViewKey === expected.viewKey &&
+            route.render?.routeViewName === expected.viewName
+        ),
+    };
+  });
 }
 
 /* =========================================================
@@ -2149,13 +2967,24 @@ export default {
   ROUTE_PATHS,
   ROUTE_NAMES,
   ROUTE_VIEW_KEYS,
+  ROUTE_VIEW_NAMES,
+  ROUTE_ALIASES,
   ADMIN_ROLES,
+  PUBLIC_AUTH_ROUTES,
 
   createRoutes,
   getImmutableRoutes,
+  resetRoutesCacheForTests,
   validateRoutesTable,
 
-  getRoutesSnapshot,
+  resolveRouteAlias,
   getRouteByPath,
+  getRouteByName,
+  getRouteByViewKey,
+  isPublicAuthPath,
+  isPrivateRoutePath,
+
+  getRoutesSnapshot,
   getRouteDebug,
+  getCriticalRoutesDebug,
 };

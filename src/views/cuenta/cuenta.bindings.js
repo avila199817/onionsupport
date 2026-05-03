@@ -2,8 +2,9 @@
    Onion SPA - Cuenta Bindings
    Archivo: src/views/cuenta/cuenta.bindings.js
 
-   EXTREME PRO SYSTEM · DOM BINDINGS · FULL PATCH 12/10
-   CLIENT EXPERIENCE MODE · DELEGATION SAFE · CLEANUP SAFE
+   EXTREME PRO SYSTEM · DOM BINDINGS · FULL PATCH 13/10
+   NATIVE-FIRST EVENTS · DELEGATION SAFE · CLEANUP SAFE
+   CUENTAVIEW COMPAT · TEMPLATE GOD LEVEL READY
 
    RESPONSABILIDADES:
    - bind DOM robusto por delegación
@@ -17,26 +18,16 @@
    - cleanup sólido por scope
    - compatibilidad con actions antiguas y nuevas
    - compatibilidad con cuentaView.js
-   - compatibilidad con cuenta.api.js
    - compatibilidad con bridges window.OnionCuenta / CuentaView
-   - compatibilidad con AppCore.events y CustomEvent
    - no romper si un callback no existe
 
-   HARDENING EXTREME:
-   - evita doble click handlers
-   - soporta botones dinámicos
-   - soporta callbacks modernos y legacy
-   - soporta updateCuenta(payload)
-   - soporta updateCuentaTheme(darkMode)
-   - soporta updateCuentaTheme({ darkMode })
-   - soporta updateCuentaLanguage(lang)
-   - soporta updateCuentaLanguage({ lang })
-   - emite bridges si un handler no existe
-   - busy lock por acción
-   - cleanup fallback si AppCore.cleanup no existe
-   - lectura de DOM tolerante
-   - normalización theme/lang/privacy
-   - password validation local
+   FIX CRÍTICO:
+   - NO depende de AppCore.cleanup.on para enganchar eventos
+   - addEventListener nativo siempre
+   - cleanup local siempre
+   - fallback por data-action, data-cuenta-action e IDs directos
+   - soporta confirm password
+   - soporta save con name / phone / privacy / lang / theme
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -46,7 +37,7 @@ import { AppCore } from "../../core/index.js";
 ========================================================= */
 
 export const CUENTA_BINDINGS_SCOPE = "view:cuenta";
-export const CUENTA_BINDINGS_VERSION = "12.0.0";
+export const CUENTA_BINDINGS_VERSION = "13.0.0";
 
 const DEFAULT_SCOPE = CUENTA_BINDINGS_SCOPE;
 const PASSWORD_MIN_LENGTH = 8;
@@ -107,7 +98,60 @@ const ACTIONS = {
   ]),
 };
 
+const DIRECT_IDS = {
+  refresh: new Set([
+    "cuenta-refresh-btn",
+    "cuenta-retry-btn",
+  ]),
+
+  save: new Set([
+    "cuenta-save-btn",
+  ]),
+
+  password: new Set([
+    "cuenta-password-btn",
+  ]),
+
+  open: new Set([
+    "cuenta-open-modal-btn",
+  ]),
+};
+
 const INPUT_SELECTORS = {
+  name: [
+    '[data-role="cuenta-name-input"]',
+    "#cuenta-name-input",
+    '[data-cuenta-field="name"]',
+    '[data-field="name"]',
+    '[name="name"]',
+    '[name="displayName"]',
+  ].join(","),
+
+  phone: [
+    '[data-role="cuenta-phone-input"]',
+    "#cuenta-phone-input",
+    '[data-cuenta-field="phone"]',
+    '[data-field="phone"]',
+    '[name="phone"]',
+    '[name="telefono"]',
+  ].join(","),
+
+  email: [
+    '[data-role="cuenta-email-input"]',
+    "#cuenta-email-input",
+    '[data-cuenta-field="email"]',
+    '[data-field="email"]',
+    '[name="email"]',
+  ].join(","),
+
+  username: [
+    '[data-role="cuenta-username-input"]',
+    "#cuenta-username-input",
+    '[data-cuenta-field="username"]',
+    '[data-field="username"]',
+    '[name="username"]',
+  ].join(","),
+
   darkMode: [
     '[data-role="cuenta-darkmode-input"]',
     "#cuenta-darkmode-input",
@@ -152,14 +196,22 @@ const INPUT_SELECTORS = {
     '[data-field="newPassword"]',
     '[name="newPassword"]',
   ].join(","),
+
+  confirmPassword: [
+    '[data-role="cuenta-confirm-password"]',
+    "#cuenta-confirm-password",
+    '[data-cuenta-field="confirmPassword"]',
+    '[data-field="confirmPassword"]',
+    '[name="confirmPassword"]',
+  ].join(","),
 };
 
 const ROOT_SELECTORS = [
+  "#view-container",
+  '[data-view-container]',
   '[data-view="cuenta"]',
   ".cuenta-view",
-  ".cuenta-panel",
   ".content-wrapper",
-  "#view-container",
 ].join(",");
 
 const DISABLED_SELECTOR = [
@@ -179,10 +231,7 @@ let reloadScheduled = false;
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 function safeText(value, fallback = "") {
@@ -302,17 +351,6 @@ function safeWarn(...args) {
   } catch {}
 }
 
-function safeError(...args) {
-  try {
-    AppCore?.utils?.error?.("[CuentaBindings]", ...args);
-    return;
-  } catch {}
-
-  try {
-    console.error("[CuentaBindings]", ...args);
-  } catch {}
-}
-
 function showToast(message = "", type = "info") {
   const text = safeText(message, "");
   if (!text) return false;
@@ -332,13 +370,6 @@ function showToast(message = "", type = "info") {
   } catch {}
 
   try {
-    if (typeof AppCore?.ui?.toast?.[type] === "function") {
-      AppCore.ui.toast[type](text);
-      return true;
-    }
-  } catch {}
-
-  try {
     if (typeof AppCore?.ui?.toast?.show === "function") {
       AppCore.ui.toast.show({
         message: text,
@@ -349,10 +380,7 @@ function showToast(message = "", type = "info") {
   } catch {}
 
   try {
-    if (
-      isBrowser() &&
-      typeof window.Toast?.show === "function"
-    ) {
+    if (isBrowser() && typeof window.Toast?.show === "function") {
       window.Toast.show({
         message: text,
         type,
@@ -391,7 +419,7 @@ function safeEmit(event = "", payload = {}) {
 }
 
 /* =========================================================
-   SCOPE / CLEANUP
+   CLEANUP
 ========================================================= */
 
 function resolveScopeName(scope = DEFAULT_SCOPE) {
@@ -435,21 +463,8 @@ function runScopeCleanup(scopeName = DEFAULT_SCOPE) {
   runFallbackCleanup(finalScope);
 }
 
-function getScope(scopeName = DEFAULT_SCOPE) {
-  const finalScope = resolveScopeName(scopeName);
-
-  runScopeCleanup(finalScope);
-
-  try {
-    return AppCore?.cleanup?.scope?.(finalScope) || finalScope;
-  } catch {
-    return finalScope;
-  }
-}
-
 function bindDomEvent({
   scopeName = DEFAULT_SCOPE,
-  scopeRef = null,
   target = null,
   eventName = "",
   handler = null,
@@ -458,13 +473,6 @@ function bindDomEvent({
   if (!target || !eventName || typeof handler !== "function") {
     return false;
   }
-
-  try {
-    if (typeof AppCore?.cleanup?.on === "function") {
-      AppCore.cleanup.on(scopeRef || scopeName, target, eventName, handler, options);
-      return true;
-    }
-  } catch {}
 
   try {
     target.addEventListener(eventName, handler, options);
@@ -476,7 +484,8 @@ function bindDomEvent({
     });
 
     return true;
-  } catch {
+  } catch (error) {
+    safeWarn("No se pudo enganchar evento DOM:", eventName, error);
     return false;
   }
 }
@@ -526,15 +535,17 @@ function bindBusEvent({
 ========================================================= */
 
 function getContainer(customRoot = null) {
-  if (customRoot) return customRoot;
+  if (customRoot && typeof customRoot.querySelector === "function") {
+    return customRoot;
+  }
 
   if (!isBrowser()) return null;
 
   try {
     return (
       AppCore?.dom?.viewContainer ||
-      document.querySelector(ROOT_SELECTORS) ||
       document.getElementById("view-container") ||
+      document.querySelector(ROOT_SELECTORS) ||
       document
     );
   } catch {
@@ -576,15 +587,11 @@ function isDisabledElement(element = null) {
   if (!element) return false;
 
   try {
-    if (element.matches?.(DISABLED_SELECTOR)) {
-      return true;
-    }
+    if (element.matches?.(DISABLED_SELECTOR)) return true;
   } catch {}
 
   try {
-    if (element.closest?.(DISABLED_SELECTOR)) {
-      return true;
-    }
+    if (element.closest?.(DISABLED_SELECTOR)) return true;
   } catch {}
 
   return false;
@@ -604,7 +611,39 @@ function getActionName(element = null) {
   );
 }
 
-function getActionElement(root, target, actionSet) {
+function hasDirectId(element = null, idSet = new Set()) {
+  if (!element || !idSet?.size) return false;
+
+  try {
+    const directId = safeText(element.id, "");
+    if (directId && idSet.has(directId)) return true;
+  } catch {}
+
+  try {
+    for (const id of idSet) {
+      if (element.closest?.(`#${id}`)) return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function getActionElement(root, target, actionSet, idSet = new Set()) {
+  const byId = (() => {
+    try {
+      for (const id of idSet) {
+        const match = target?.closest?.(`#${id}`);
+        if (match && isElementInsideRoot(root, match) && !isDisabledElement(match)) {
+          return match;
+        }
+      }
+    } catch {}
+
+    return null;
+  })();
+
+  if (byId) return byId;
+
   const actionElement = closestInside(
     root,
     target,
@@ -613,15 +652,11 @@ function getActionElement(root, target, actionSet) {
 
   if (!actionElement) return null;
 
-  if (isDisabledElement(actionElement)) {
-    return null;
-  }
+  if (isDisabledElement(actionElement)) return null;
 
   const action = getActionName(actionElement);
 
-  if (!action || !actionSet.has(action)) {
-    return null;
-  }
+  if (!action || !actionSet.has(action)) return null;
 
   return actionElement;
 }
@@ -636,6 +671,16 @@ function getField(root, selector = "") {
   }
 }
 
+function readInputText(input = null, fallback = "") {
+  if (!input) return fallback;
+
+  if ("value" in input) {
+    return safeText(input.value, fallback);
+  }
+
+  return safeText(input.textContent, fallback);
+}
+
 function readInputBoolean(input = null, fallback = false) {
   if (!input) return Boolean(fallback);
 
@@ -647,16 +692,26 @@ function readInputBoolean(input = null, fallback = false) {
     first(
       input.value,
       input.dataset?.value,
-      input.getAttribute?.("value")
+      input.getAttribute?.("value"),
+      input.getAttribute?.("aria-checked")
     ),
     fallback
   );
 }
 
 function readCuentaForm(root = getContainer()) {
+  const nameInput = getField(root, INPUT_SELECTORS.name);
+  const phoneInput = getField(root, INPUT_SELECTORS.phone);
+  const emailInput = getField(root, INPUT_SELECTORS.email);
+  const usernameInput = getField(root, INPUT_SELECTORS.username);
   const darkInput = getField(root, INPUT_SELECTORS.darkMode);
   const privacyInput = getField(root, INPUT_SELECTORS.privacyMode);
   const languageInput = getField(root, INPUT_SELECTORS.language);
+
+  const name = readInputText(nameInput, "");
+  const phone = readInputText(phoneInput, "");
+  const email = readInputText(emailInput, "");
+  const username = readInputText(usernameInput, "");
 
   const darkMode = readInputBoolean(darkInput, false);
   const privacyMode = readInputBoolean(privacyInput, false);
@@ -673,6 +728,16 @@ function readCuentaForm(root = getContainer()) {
   const theme = normalizeThemeFromDarkMode(darkMode);
 
   return {
+    name,
+    displayName: name,
+    fullName: name,
+
+    phone,
+    telefono: phone,
+
+    email,
+    username,
+
     darkMode,
     privacyMode,
 
@@ -689,13 +754,30 @@ function readCuentaForm(root = getContainer()) {
 function readPasswordForm(root = getContainer()) {
   const currentPasswordInput = getField(root, INPUT_SELECTORS.currentPassword);
   const newPasswordInput = getField(root, INPUT_SELECTORS.newPassword);
+  const confirmPasswordInput = getField(root, INPUT_SELECTORS.confirmPassword);
 
   return {
     currentPassword: safeText(currentPasswordInput?.value, ""),
     newPassword: safeText(newPasswordInput?.value, ""),
+    confirmPassword: safeText(confirmPasswordInput?.value, ""),
+
     currentPasswordInput,
     newPasswordInput,
+    confirmPasswordInput,
   };
+}
+
+function clearPasswordFields(root = getContainer()) {
+  [
+    INPUT_SELECTORS.currentPassword,
+    INPUT_SELECTORS.newPassword,
+    INPUT_SELECTORS.confirmPassword,
+  ].forEach((selector) => {
+    try {
+      const input = getField(root, selector);
+      if (input && "value" in input) input.value = "";
+    } catch {}
+  });
 }
 
 function setElementBusy(element, busy = false) {
@@ -721,13 +803,9 @@ function setElementBusy(element, busy = false) {
 async function runBusy(key = "", element = null, task = null) {
   const finalKey = safeText(key, "");
 
-  if (!finalKey || typeof task !== "function") {
-    return null;
-  }
+  if (!finalKey || typeof task !== "function") return null;
 
-  if (busyKeys.has(finalKey)) {
-    return null;
-  }
+  if (busyKeys.has(finalKey)) return null;
 
   busyKeys.add(finalKey);
   setElementBusy(element, true);
@@ -761,9 +839,7 @@ async function callCandidates(candidates = []) {
     }
   }
 
-  if (lastError) {
-    throw lastError;
-  }
+  if (lastError) throw lastError;
 
   return null;
 }
@@ -847,9 +923,7 @@ async function callFlexibleSave({
       : null,
   ]);
 
-  if (result !== null) {
-    return result;
-  }
+  if (result !== null) return result;
 
   safeEmit("cuenta:update-preferences", body);
   safeEmit("cuenta:modal:update-preferences", body);
@@ -864,13 +938,14 @@ async function callFlexibleTheme({
   payload = {},
 } = {}) {
   const nextDarkMode = Boolean(darkMode);
+  const theme = nextDarkMode ? "dark" : "light";
 
   const body = {
     ...safeObject(payload),
     darkMode: nextDarkMode,
-    theme: nextDarkMode ? "dark" : "light",
-    mode: nextDarkMode ? "dark" : "light",
-    appearance: nextDarkMode ? "dark" : "light",
+    theme,
+    mode: theme,
+    appearance: theme,
   };
 
   const globalApi = getGlobalCuentaApi();
@@ -901,9 +976,7 @@ async function callFlexibleTheme({
       : null,
   ]);
 
-  if (result !== null) {
-    return result;
-  }
+  if (result !== null) return result;
 
   safeEmit("cuenta:modal:update-theme", body);
   safeEmit("cuenta:theme:update", body);
@@ -954,9 +1027,7 @@ async function callFlexibleLanguage({
       : null,
   ]);
 
-  if (result !== null) {
-    return result;
-  }
+  if (result !== null) return result;
 
   safeEmit("cuenta:modal:update-language", body);
   safeEmit("cuenta:language:update", body);
@@ -997,9 +1068,7 @@ async function callFlexiblePassword({
       : null,
   ]);
 
-  if (result !== null) {
-    return result;
-  }
+  if (result !== null) return result;
 
   safeEmit("cuenta:password:change", body);
 
@@ -1014,40 +1083,28 @@ function openModalBridge(detail = null) {
   const payload = safeObject(detail);
 
   try {
-    if (
-      isBrowser() &&
-      typeof window.OnionCuentaModal?.open === "function"
-    ) {
+    if (isBrowser() && typeof window.OnionCuentaModal?.open === "function") {
       window.OnionCuentaModal.open(payload);
       return true;
     }
   } catch {}
 
   try {
-    if (
-      isBrowser() &&
-      typeof window.OnionCuentaModal?.render === "function"
-    ) {
+    if (isBrowser() && typeof window.OnionCuentaModal?.render === "function") {
       window.OnionCuentaModal.render(payload);
       return true;
     }
   } catch {}
 
   try {
-    if (
-      isBrowser() &&
-      typeof window.renderCuentaModal === "function"
-    ) {
+    if (isBrowser() && typeof window.renderCuentaModal === "function") {
       window.renderCuentaModal(payload);
       return true;
     }
   } catch {}
 
   try {
-    if (
-      isBrowser() &&
-      typeof window.openCuentaModal === "function"
-    ) {
+    if (isBrowser() && typeof window.openCuentaModal === "function") {
       window.openCuentaModal(payload);
       return true;
     }
@@ -1274,8 +1331,10 @@ async function handlePassword({
   const {
     currentPassword,
     newPassword,
+    confirmPassword,
     currentPasswordInput,
     newPasswordInput,
+    confirmPasswordInput,
   } = readPasswordForm(root);
 
   if (!currentPassword) {
@@ -1311,6 +1370,16 @@ async function handlePassword({
     return false;
   }
 
+  if (confirmPassword && confirmPassword !== newPassword) {
+    showToast("La confirmación de contraseña no coincide.", "error");
+
+    try {
+      confirmPasswordInput?.focus?.();
+    } catch {}
+
+    return false;
+  }
+
   return runBusy("cuenta:password", element, async () => {
     try {
       safeEmit("cuenta:bindings:password:start", {
@@ -1322,6 +1391,7 @@ async function handlePassword({
         payload: {
           currentPassword,
           newPassword,
+          confirmPassword,
           source: "cuenta.bindings",
         },
       });
@@ -1331,12 +1401,10 @@ async function handlePassword({
       });
 
       if (result) {
+        clearPasswordFields(root);
         showToast("Contraseña actualizada", "success");
       } else {
-        showToast(
-          "Solicitud de cambio de contraseña enviada.",
-          "info"
-        );
+        showToast("Solicitud de cambio de contraseña enviada.", "info");
       }
 
       return result;
@@ -1395,8 +1463,9 @@ export function bindCuentaEvents({
   root: customRoot = null,
 } = {}) {
   const scopeName = resolveScopeName(scope);
-  const scopeRef = getScope(scopeName);
   const root = getContainer(customRoot);
+
+  runScopeCleanup(scopeName);
 
   if (!root) {
     safeWarn("No se encontró contenedor para bindings.");
@@ -1414,12 +1483,11 @@ export function bindCuentaEvents({
   };
 
   /* =======================================================
-     DELEGATED CLICK ACTIONS
+     CLICK DELEGATION
   ======================================================= */
 
   bindDomEvent({
     scopeName,
-    scopeRef,
     target: root,
     eventName: "click",
     handler: async (event) => {
@@ -1427,7 +1495,12 @@ export function bindCuentaEvents({
 
       if (!target) return;
 
-      const refreshAction = getActionElement(root, target, ACTIONS.refresh);
+      const refreshAction = getActionElement(
+        root,
+        target,
+        ACTIONS.refresh,
+        DIRECT_IDS.refresh
+      );
 
       if (refreshAction) {
         event.preventDefault();
@@ -1442,7 +1515,12 @@ export function bindCuentaEvents({
         return;
       }
 
-      const saveAction = getActionElement(root, target, ACTIONS.save);
+      const saveAction = getActionElement(
+        root,
+        target,
+        ACTIONS.save,
+        DIRECT_IDS.save
+      );
 
       if (saveAction) {
         event.preventDefault();
@@ -1490,7 +1568,12 @@ export function bindCuentaEvents({
         return;
       }
 
-      const passwordAction = getActionElement(root, target, ACTIONS.password);
+      const passwordAction = getActionElement(
+        root,
+        target,
+        ACTIONS.password,
+        DIRECT_IDS.password
+      );
 
       if (passwordAction) {
         event.preventDefault();
@@ -1505,7 +1588,12 @@ export function bindCuentaEvents({
         return;
       }
 
-      const openAction = getActionElement(root, target, ACTIONS.open);
+      const openAction = getActionElement(
+        root,
+        target,
+        ACTIONS.open,
+        DIRECT_IDS.open
+      );
 
       if (openAction) {
         event.preventDefault();
@@ -1520,12 +1608,11 @@ export function bindCuentaEvents({
   });
 
   /* =======================================================
-     CHANGE EVENTS
+     CHANGE DELEGATION
   ======================================================= */
 
   bindDomEvent({
     scopeName,
-    scopeRef,
     target: root,
     eventName: "change",
     handler: async (event) => {
@@ -1575,15 +1662,12 @@ export function bindCuentaEvents({
 
   bindDomEvent({
     scopeName,
-    scopeRef,
     target: root,
     eventName: "keydown",
     handler: async (event) => {
       const key = safeText(event.key, "");
 
-      if (key !== "Enter") {
-        return;
-      }
+      if (key !== "Enter") return;
 
       const target = event.target;
 
@@ -1591,7 +1675,8 @@ export function bindCuentaEvents({
 
       const passwordInput =
         closestInside(root, target, INPUT_SELECTORS.currentPassword) ||
-        closestInside(root, target, INPUT_SELECTORS.newPassword);
+        closestInside(root, target, INPUT_SELECTORS.newPassword) ||
+        closestInside(root, target, INPUT_SELECTORS.confirmPassword);
 
       if (passwordInput) {
         event.preventDefault();
@@ -1648,34 +1733,11 @@ export function bindCuentaEvents({
     handler: refreshAfterMutation,
   });
 
-  bindBusEvent({
-    scopeName,
-    eventName: "app:theme:change",
-    handler: () => {
-      safeEmit("cuenta:bindings:external-theme-change", {
-        source: "app:theme:change",
-      });
-    },
-  });
-
-  bindBusEvent({
-    scopeName,
-    eventName: "app:lang:change",
-    handler: () => {
-      safeEmit("cuenta:bindings:external-lang-change", {
-        source: "app:lang:change",
-      });
-    },
-  });
-
   safeEmit("cuenta:bindings:ready", {
     scope: scopeName,
     version: CUENTA_BINDINGS_VERSION,
+    nativeFirst: true,
   });
-
-  /* =======================================================
-     CLEANUP
-  ======================================================= */
 
   return () => {
     runScopeCleanup(scopeName);
@@ -1696,7 +1758,6 @@ export const bindCuentaBindings = bindCuentaEvents;
 
 export function destroyCuentaBindings(scope = DEFAULT_SCOPE) {
   runScopeCleanup(scope);
-
   return true;
 }
 

@@ -2,11 +2,17 @@
    Onion SPA - Cuenta Template
    Archivo: src/views/cuenta/cuenta.template.js
 
-   FINAL PRO SYSTEM · ACCOUNT SETTINGS MODE · SOFT APPLE MODE
+   FINAL PRO SYSTEM · ACCOUNT SETTINGS MODE · GOD LEVEL UI
+   PATCH · PREMIUM ACCOUNT COMMAND CENTER
+   PATCH · REAL AVATAR + FALLBACK
+   PATCH · PROFILE / THEME / LANGUAGE / SECURITY CARDS
+   PATCH · ROUTE/BINDINGS SAFE DATA-ACTION + DATA-ROLE
+   PATCH · LIGHT/DARK VARIABLES.CSS + UI.CSS ALIGNED
 
    RESPONSABILIDADES:
    - render header premium de cuenta
    - render panel productivo de preferencias
+   - render perfil / apariencia / idioma / seguridad
    - render loading / error / empty
    - soportar darkMode / idioma / cambio de contraseña
    - mantener compatibilidad con cuentaView.js
@@ -14,7 +20,7 @@
    - acciones compatibles con data-action
    - inputs compatibles con data-role
    - dark/light mode 100% conectado a variables.css + ui.css
-   - estilos encapsulados
+   - estilos encapsulados sin :root local
    - responsive robusto
 ========================================================= */
 
@@ -34,10 +40,64 @@ function safeText(value, fallback = "—") {
   return text || fallback;
 }
 
-function safeObject(value) {
+function safeNumber(value, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback;
+
+  if (typeof value === "string") {
+    let text = value
+      .trim()
+      .replace(/€/g, "")
+      .replace(/%/g, "")
+      .replace(/\s+/g, "");
+
+    const hasComma = text.includes(",");
+    const hasDot = text.includes(".");
+
+    if (hasComma && hasDot) {
+      text = text.replace(/\./g, "").replace(/,/g, ".");
+    } else if (hasComma) {
+      text = text.replace(/,/g, ".");
+    }
+
+    const parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function safeBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === "string") {
+    const normalized = normalizeKey(value);
+
+    if (["true", "1", "yes", "si", "sí", "on", "dark", "enabled"].includes(normalized)) {
+      return true;
+    }
+
+    if (["false", "0", "no", "off", "light", "disabled"].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return fallback;
+}
+
+function safeArray(value, fallback = []) {
+  return Array.isArray(value) ? value : fallback;
+}
+
+function safeObject(value, fallback = {}) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
-    : {};
+    : fallback;
 }
 
 function first(...values) {
@@ -45,6 +105,10 @@ function first(...values) {
     if (value === undefined || value === null) continue;
 
     if (typeof value === "string" && value.trim() === "") {
+      continue;
+    }
+
+    if (Array.isArray(value) && value.length === 0) {
       continue;
     }
 
@@ -73,7 +137,32 @@ function normalizeKey(value = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[\s-]+/g, "_")
+    .replace(/[^\w]+/g, "_")
+    .replace(/^_+|_+$/g, "")
     .trim();
+}
+
+function truncate(value = "", max = 120) {
+  const text = safeText(value, "");
+  const limit = safeNumber(max, 120);
+
+  if (!text) return "";
+  if (text.length <= limit) return text;
+
+  return `${text.slice(0, limit).trim()}…`;
+}
+
+function isHttpUrl(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) return false;
+
+  try {
+    const url = new URL(raw);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -96,6 +185,26 @@ function formatDate(value = null) {
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+    }).format(date);
+  } catch {
+    return "—";
+  }
+}
+
+function formatDateOnly(value = null) {
+  if (!value) return "—";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "—";
+  }
+
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
     }).format(date);
   } catch {
     return "—";
@@ -172,11 +281,18 @@ function getDisplayName(detail = {}) {
       detail.name,
       detail.fullName,
       detail.displayName,
+      detail.nombre,
       detail.username,
       detail.email,
+
+      detail.profile?.name,
+      detail.profile?.fullName,
+      detail.profile?.displayName,
+
       detail.raw?.name,
       detail.raw?.fullName,
       detail.raw?.displayName,
+      detail.raw?.nombre,
       detail.raw?.username,
       detail.raw?.email
     ),
@@ -186,7 +302,15 @@ function getDisplayName(detail = {}) {
 
 function getEmail(detail = {}) {
   return safeText(
-    first(detail.email, detail.emailLower, detail.raw?.email, detail.raw?.emailLower),
+    first(
+      detail.email,
+      detail.emailLower,
+      detail.mail,
+      detail.profile?.email,
+      detail.raw?.email,
+      detail.raw?.emailLower,
+      detail.raw?.mail
+    ),
     "Sin email"
   );
 }
@@ -196,26 +320,139 @@ function getUsername(detail = {}) {
     first(
       detail.username,
       detail.usernameLower,
+      detail.slug,
+      detail.handle,
       detail.raw?.username,
-      detail.raw?.usernameLower
+      detail.raw?.usernameLower,
+      detail.raw?.slug,
+      detail.raw?.handle
     ),
     "sin-usuario"
   );
 }
 
-function getRole(detail = {}) {
-  const role = normalizeKey(first(detail.role, detail.raw?.role, "user"));
+function getUserId(detail = {}) {
+  return safeText(
+    first(
+      detail.userId,
+      detail.id,
+      detail.uid,
+      detail.sub,
+      detail.raw?.userId,
+      detail.raw?.id,
+      detail.raw?.uid,
+      detail.raw?.sub
+    ),
+    "—"
+  );
+}
 
-  if (role === "admin") return "Administrador";
+function getClienteId(detail = {}) {
+  return safeText(
+    first(
+      detail.clienteId,
+      detail.clientId,
+      detail.customerId,
+      detail.cliente?.clienteId,
+      detail.cliente?.id,
+      detail.raw?.clienteId,
+      detail.raw?.clientId,
+      detail.raw?.customerId,
+      detail.raw?.cliente?.clienteId,
+      detail.raw?.cliente?.id
+    ),
+    "—"
+  );
+}
+
+function getRoleValue(detail = {}) {
+  return normalizeKey(
+    first(
+      detail.role,
+      detail.rol,
+      detail.raw?.role,
+      detail.raw?.rol,
+      "user"
+    )
+  );
+}
+
+function getRole(detail = {}) {
+  const role = getRoleValue(detail);
+
+  if (role === "admin" || role === "administrator") return "Administrador";
+  if (role === "superadmin" || role === "super_admin" || role === "root") return "Super admin";
   if (role === "support") return "Soporte";
   if (role === "technician" || role === "tecnico") return "Técnico";
+  if (role === "owner") return "Owner";
   if (role === "user") return "Usuario";
 
   return safeText(role, "Usuario");
 }
 
 function getPhone(detail = {}) {
-  return safeText(first(detail.phone, detail.telefono, detail.raw?.phone), "No configurado");
+  return safeText(
+    first(
+      detail.phone,
+      detail.telefono,
+      detail.mobile,
+      detail.profile?.phone,
+      detail.profile?.telefono,
+      detail.raw?.phone,
+      detail.raw?.telefono,
+      detail.raw?.mobile
+    ),
+    "No configurado"
+  );
+}
+
+function getAvatarUrl(detail = {}) {
+  return safeText(
+    first(
+      detail.avatarUrl,
+      detail.avatarURL,
+      detail.avatar_url,
+      detail.avatar,
+      detail.photoUrl,
+      detail.photoURL,
+      detail.photo_url,
+      detail.photo,
+      detail.imageUrl,
+      detail.image,
+      detail.picture,
+      detail.pictureUrl,
+      detail.profilePicture,
+      detail.profilePictureUrl,
+
+      detail.profile?.avatarUrl,
+      detail.profile?.avatar,
+      detail.profile?.photoUrl,
+      detail.profile?.photo,
+      detail.profile?.imageUrl,
+      detail.profile?.image,
+
+      detail.raw?.avatarUrl,
+      detail.raw?.avatar,
+      detail.raw?.photoUrl,
+      detail.raw?.photo,
+      detail.raw?.imageUrl,
+      detail.raw?.image,
+      detail.raw?.picture,
+      detail.raw?.pictureUrl
+    ),
+    ""
+  );
+}
+
+function getCreatedAt(detail = {}) {
+  return first(
+    detail.createdAt,
+    detail.created,
+    detail.registeredAt,
+    detail.raw?.createdAt,
+    detail.raw?.created,
+    detail.raw?.registeredAt
+  );
 }
 
 function getUpdatedAt(detail = {}) {
@@ -231,21 +468,40 @@ function getUpdatedAt(detail = {}) {
   );
 }
 
+function getLastLoginAt(detail = {}) {
+  return first(
+    detail.lastLoginAt,
+    detail.lastSeenAt,
+    detail.lastAccessAt,
+    detail.session?.lastLoginAt,
+    detail.raw?.lastLoginAt,
+    detail.raw?.lastSeenAt,
+    detail.raw?.lastAccessAt,
+    detail.raw?.session?.lastLoginAt
+  );
+}
+
 function getLangValue(detail = {}) {
   const lang = normalizeKey(
     first(
       detail.lang,
       detail.language,
       detail.locale,
+      detail.preferences?.lang,
+      detail.preferences?.language,
+      detail.settings?.lang,
+      detail.settings?.language,
       detail.raw?.lang,
       detail.raw?.language,
       detail.raw?.locale,
+      detail.raw?.preferences?.lang,
+      detail.raw?.settings?.lang,
       "es"
     )
   );
 
-  if (["en", "english"].includes(lang)) return "en";
-  if (["ca", "cat", "catala", "catalan"].includes(lang)) return "ca";
+  if (["en", "english", "en_us", "en_gb"].includes(lang)) return "en";
+  if (["ca", "cat", "catala", "catalan", "ca_es"].includes(lang)) return "ca";
 
   return "es";
 }
@@ -260,19 +516,90 @@ function getLangLabel(detail = {}) {
 }
 
 function getThemeValue(detail = {}) {
-  return detail?.darkMode ? "dark" : "light";
+  const explicitTheme = normalizeKey(
+    first(
+      detail.theme,
+      detail.appearance,
+      detail.preferences?.theme,
+      detail.preferences?.appearance,
+      detail.settings?.theme,
+      detail.raw?.theme,
+      detail.raw?.appearance,
+      detail.raw?.preferences?.theme,
+      detail.raw?.settings?.theme,
+      ""
+    )
+  );
+
+  if (["dark", "oscuro", "night"].includes(explicitTheme)) return "dark";
+  if (["light", "claro", "day"].includes(explicitTheme)) return "light";
+
+  return safeBoolean(
+    first(
+      detail.darkMode,
+      detail.isDark,
+      detail.preferences?.darkMode,
+      detail.settings?.darkMode,
+      detail.raw?.darkMode,
+      detail.raw?.preferences?.darkMode,
+      detail.raw?.settings?.darkMode
+    ),
+    false
+  )
+    ? "dark"
+    : "light";
+}
+
+function isDarkMode(detail = {}) {
+  return getThemeValue(detail) === "dark";
 }
 
 function getThemeLabel(detail = {}) {
-  return detail?.darkMode ? "Dark mode" : "Light mode";
+  return isDarkMode(detail) ? "Dark mode" : "Light mode";
 }
 
 function getThemeStatusLabel(detail = {}) {
-  return detail?.darkMode ? "Tema oscuro activo" : "Tema claro activo";
+  return isDarkMode(detail) ? "Tema oscuro activo" : "Tema claro activo";
 }
 
-function getSecurityStatusLabel() {
+function getSecurityStatusLabel(detail = {}) {
+  const lastLogin = getLastLoginAt(detail);
+
+  if (lastLogin) {
+    return `Último acceso ${formatRelativeDate(lastLogin)}`;
+  }
+
   return "Cambio manual";
+}
+
+function getAccountStatus(detail = {}) {
+  const status = normalizeKey(
+    first(
+      detail.status,
+      detail.estado,
+      detail.accountStatus,
+      detail.raw?.status,
+      detail.raw?.estado,
+      detail.raw?.accountStatus,
+      "active"
+    )
+  );
+
+  if (["active", "activo", "enabled"].includes(status)) return "Activa";
+  if (["pending", "pendiente"].includes(status)) return "Pendiente";
+  if (["blocked", "bloqueada", "disabled", "inactive"].includes(status)) return "Bloqueada";
+
+  return safeText(status, "Activa");
+}
+
+function getAccountStatusTone(detail = {}) {
+  const status = normalizeKey(getAccountStatus(detail));
+
+  if (["activa", "active"].includes(status)) return "success";
+  if (["pendiente", "pending"].includes(status)) return "warning";
+  if (["bloqueada", "blocked", "disabled"].includes(status)) return "danger";
+
+  return "default";
 }
 
 function getInitials(value = "") {
@@ -314,28 +641,80 @@ function renderChip(label = "", tone = "default") {
   `;
 }
 
-function renderAvatar(detail = {}) {
+function renderAvatar(detail = {}, size = "hero") {
   const name = getDisplayName(detail);
   const initials = getInitials(name);
+  const avatarUrl = getAvatarUrl(detail);
+  const hasImage = isHttpUrl(avatarUrl);
 
   return `
     <div
-      class="cuenta-avatar"
+      class="cuenta-avatar cuenta-avatar--${escapeHtml(size)}${hasImage ? " has-image" : ""}"
       title="${escapeHtml(name)}"
       aria-label="${escapeHtml(name)}"
       data-tooltip="${escapeHtml(name)}"
     >
-      <span>${escapeHtml(initials)}</span>
+      ${
+        hasImage
+          ? `
+            <img
+              src="${escapeHtml(avatarUrl)}"
+              alt="${escapeHtml(name)}"
+              loading="lazy"
+              referrerpolicy="no-referrer"
+              onerror="this.style.display='none'; this.parentNode.setAttribute('data-fallback','true');"
+            />
+          `
+          : ""
+      }
+
+      <span class="cuenta-avatar-fallback">${escapeHtml(initials)}</span>
     </div>
   `;
 }
 
-function renderMetaRow(label = "", value = "") {
+function renderMetaRow(label = "", value = "", tone = "default") {
   return `
-    <div class="cuenta-meta-row">
+    <div class="cuenta-meta-row cuenta-meta-row--${escapeHtml(tone)}">
       <span class="cuenta-meta-label">${escapeHtml(label)}</span>
       <strong class="cuenta-meta-value">${escapeHtml(safeText(value, "—"))}</strong>
     </div>
+  `;
+}
+
+function renderMiniStat({ label = "", value = "", tone = "default" } = {}) {
+  return `
+    <div class="cuenta-mini-stat cuenta-mini-stat--${escapeHtml(tone)}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `;
+}
+
+function renderField({
+  label = "",
+  value = "",
+  dataRole = "",
+  type = "text",
+  placeholder = "",
+  readonly = false,
+  disabled = false,
+  autocomplete = "",
+} = {}) {
+  return `
+    <label class="cuenta-field">
+      <span class="cuenta-field-label">${escapeHtml(label)}</span>
+
+      <input
+        data-role="${escapeHtml(dataRole)}"
+        type="${escapeHtml(type)}"
+        value="${escapeHtml(safeText(value, ""))}"
+        placeholder="${escapeHtml(placeholder)}"
+        ${autocomplete ? `autocomplete="${escapeHtml(autocomplete)}"` : ""}
+        ${readonly ? "readonly" : ""}
+        ${disabled ? "disabled" : ""}
+      />
+    </label>
   `;
 }
 
@@ -349,6 +728,7 @@ function renderSwitchRow({
   disabled = false,
   checkedLabel = "Activo",
   uncheckedLabel = "Inactivo",
+  buttonLabel = "",
 } = {}) {
   return `
     <div class="cuenta-control-row">
@@ -389,7 +769,7 @@ function renderSwitchRow({
           data-action="${escapeHtml(action)}"
           ${disabled ? 'disabled aria-busy="true"' : ""}
         >
-          ${disabled ? renderSpinner("Procesando...") : escapeHtml(checked ? "Cambiar" : "Activar")}
+          ${disabled ? renderSpinner("Procesando...") : escapeHtml(buttonLabel || "Cambiar")}
         </button>
       </div>
     </div>
@@ -471,6 +851,18 @@ function renderPasswordRow({ disabled = false } = {}) {
             ${disabled ? "disabled" : ""}
           />
         </label>
+
+        <label class="cuenta-field">
+          <span class="cuenta-field-label">Confirmar contraseña</span>
+          <input
+            id="cuenta-confirm-password"
+            data-role="cuenta-confirm-password"
+            type="password"
+            placeholder="Repite la nueva contraseña"
+            autocomplete="new-password"
+            ${disabled ? "disabled" : ""}
+          />
+        </label>
       </div>
 
       <div class="cuenta-password-actions">
@@ -495,6 +887,25 @@ function renderPasswordRow({ disabled = false } = {}) {
 function renderStyles() {
   return `
     <style>
+      @keyframes cuentaSpin{
+        to{ transform:rotate(360deg); }
+      }
+
+      @keyframes cuentaSkeleton{
+        to{ transform:translateX(100%); }
+      }
+
+      @keyframes cuentaFloatIn{
+        from{
+          opacity:0;
+          transform:translateY(10px);
+        }
+        to{
+          opacity:1;
+          transform:translateY(0);
+        }
+      }
+
       .cuenta-view{
         display:grid;
         gap:var(--view-section-gap, var(--space-lg, 18px));
@@ -502,20 +913,43 @@ function renderStyles() {
         font-family:var(--font-family, inherit);
       }
 
+      .cuenta-view *,
+      .cuenta-view *::before,
+      .cuenta-view *::after{
+        box-sizing:border-box;
+      }
+
       .cuenta-hero,
       .cuenta-panel,
       .cuenta-state{
         position:relative;
         overflow:hidden;
-        border-radius:var(--view-hero-radius, var(--card-radius-lg, 22px));
+        border-radius:var(--view-hero-radius, var(--card-radius-lg, 24px));
         border:1px solid var(--view-hero-border, var(--panel-border, var(--border-default, rgba(255,255,255,.08))));
         background:
+          radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent, #6f59d9) 18%, transparent), transparent 34%),
+          radial-gradient(circle at 100% 0, rgba(255,255,255,.08), transparent 28%),
           var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
           var(--view-hero-bg, var(--panel-bg, var(--card-bg, var(--surface-elevated, #262626))));
         box-shadow:var(--view-hero-shadow, var(--panel-shadow, var(--shadow-md, 0 14px 30px rgba(0,0,0,.22))));
+        animation:cuentaFloatIn .28s ease both;
+      }
+
+      .cuenta-hero::before,
+      .cuenta-panel::before{
+        content:"";
+        position:absolute;
+        inset:0;
+        pointer-events:none;
+        background:
+          linear-gradient(135deg, rgba(255,255,255,.070), transparent 32%),
+          linear-gradient(180deg, rgba(255,255,255,.030), transparent 44%);
+        opacity:.72;
       }
 
       .cuenta-hero-inner{
+        position:relative;
+        z-index:1;
         display:grid;
         gap:var(--space-lg, 18px);
         padding:var(--space-xl, 24px);
@@ -536,15 +970,15 @@ function renderStyles() {
 
       .cuenta-eyebrow{
         width:max-content;
-        min-height:calc(28px * var(--ui-scale, 1));
+        min-height:calc(30px * var(--ui-scale, 1));
         padding:0 var(--space-sm, 12px);
         border-radius:var(--radius-pill, 999px);
-        border:1px solid var(--badge-border, var(--border-default, rgba(255,255,255,.07)));
-        background:var(--badge-bg, rgba(255,255,255,.048));
-        color:var(--badge-text, var(--text-muted, rgba(245,245,245,.70)));
+        border:1px solid color-mix(in srgb, var(--accent, #6f59d9) 28%, var(--badge-border, rgba(255,255,255,.08)));
+        background:color-mix(in srgb, var(--accent, #6f59d9) 12%, transparent);
+        color:var(--accent-active, var(--text-strong, #ffffff));
         font-size:var(--font-xs, 11px);
-        font-weight:var(--weight-bold, 700);
-        letter-spacing:var(--letter-wider, .08em);
+        font-weight:var(--weight-black, 800);
+        letter-spacing:var(--letter-wider, .09em);
         text-transform:uppercase;
         display:inline-flex;
         align-items:center;
@@ -554,16 +988,16 @@ function renderStyles() {
       .cuenta-title{
         margin:0;
         max-width:100%;
-        font-size:clamp(var(--font-3xl, 24px), 2.6vw, var(--font-5xl, 40px));
-        line-height:var(--line-tight, 1.08);
-        letter-spacing:var(--view-title-letter, -.045em);
-        font-weight:var(--view-title-weight, var(--weight-black, 800));
+        font-size:clamp(var(--font-3xl, 25px), 3vw, var(--font-5xl, 44px));
+        line-height:.98;
+        letter-spacing:var(--view-title-letter, -.06em);
+        font-weight:var(--view-title-weight, var(--weight-black, 900));
         color:var(--text-strong, #ffffff);
       }
 
       .cuenta-subtitle{
         margin:0;
-        max-width:860px;
+        max-width:900px;
         font-size:var(--font-lg, 15px);
         line-height:var(--line-relaxed, 1.62);
         color:var(--view-subtitle-color, var(--text-muted, rgba(245,245,245,.70)));
@@ -585,7 +1019,7 @@ function renderStyles() {
         background:var(--btn-secondary-bg, rgba(255,255,255,.045));
         color:var(--btn-secondary-text, var(--text, #f5f5f5));
         font-size:var(--font-md, 13px);
-        font-weight:var(--weight-bold, 700);
+        font-weight:var(--weight-bold, 800);
         line-height:1;
         cursor:pointer;
         display:inline-flex;
@@ -605,14 +1039,19 @@ function renderStyles() {
       .cuenta-btn:hover{
         transform:translateY(var(--ui-hover-lift, -1px));
         background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
+        border-color:color-mix(in srgb, var(--accent, #6f59d9) 24%, var(--btn-secondary-border, rgba(255,255,255,.09)));
         box-shadow:var(--shadow-md, 0 14px 30px rgba(0,0,0,.22));
       }
 
       .cuenta-btn--primary{
-        border-color:var(--btn-primary-border, var(--accent-border, rgba(255,255,255,.05)));
-        background:var(--btn-primary-bg, var(--gradient-accent, linear-gradient(135deg, #55555d 0%, #3f3f46 55%, #2f2f35 100%)));
+        border-color:var(--btn-primary-border, color-mix(in srgb, var(--accent, #6f59d9) 42%, transparent));
+        background:var(--btn-primary-bg, var(--accent, #6f59d9));
         color:var(--btn-primary-text, var(--text-on-accent, #ffffff));
-        box-shadow:var(--btn-primary-shadow, 0 12px 28px rgba(0,0,0,.22));
+        box-shadow:var(--btn-primary-shadow, 0 14px 30px color-mix(in srgb, var(--accent, #6f59d9) 22%, transparent));
+      }
+
+      .cuenta-btn--primary:hover{
+        box-shadow:0 18px 40px color-mix(in srgb, var(--accent, #6f59d9) 28%, transparent);
       }
 
       .cuenta-btn--soft{
@@ -626,83 +1065,166 @@ function renderStyles() {
         pointer-events:none;
         cursor:wait;
         opacity:.72;
+        transform:none;
+        box-shadow:none;
       }
 
-      .cuenta-identity{
+      .cuenta-account-strip{
         display:grid;
-        grid-template-columns:auto minmax(0, 1fr);
-        gap:var(--space-sm, 12px);
+        grid-template-columns:auto minmax(0, 1fr) auto;
+        gap:var(--space-md, 16px);
         align-items:center;
-        min-width:min(100%, 330px);
         padding:var(--space-md, 16px);
-        border-radius:var(--card-radius, 18px);
-        border:1px solid var(--card-border, var(--border-default, rgba(255,255,255,.082)));
+        border-radius:var(--card-radius, 20px);
+        border:1px solid color-mix(in srgb, var(--accent, #6f59d9) 18%, var(--card-border, rgba(255,255,255,.08)));
         background:
-          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
+          radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent, #6f59d9) 16%, transparent), transparent 42%),
           var(--card-bg, var(--surface-elevated, rgba(39,39,42,.88)));
         box-shadow:var(--shadow-card, var(--card-shadow, 0 16px 36px rgba(0,0,0,.24)));
       }
 
       .cuenta-avatar{
         position:relative;
-        width:var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
-        height:var(--avatar-size-lg, calc(44px * var(--ui-scale, 1)));
-        border-radius:var(--radius-pill, 999px);
         display:grid;
         place-items:center;
         overflow:hidden;
-        background:var(--gradient-accent, linear-gradient(135deg, #55555d 0%, #3f3f46 55%, #2f2f35 100%));
+        border-radius:var(--radius-pill, 999px);
+        background:
+          radial-gradient(circle at 30% 20%, rgba(255,255,255,.42), transparent 30%),
+          linear-gradient(135deg, var(--accent, #6f59d9), color-mix(in srgb, var(--accent, #6f59d9) 46%, #111827));
         color:var(--avatar-text, #ffffff);
+        isolation:isolate;
         box-shadow:
-          0 12px 26px color-mix(in srgb, var(--accent, #3f3f46) 22%, transparent),
-          0 0 0 3px color-mix(in srgb, var(--accent-ring, rgba(113,113,122,.30)) 64%, transparent),
+          0 14px 30px color-mix(in srgb, var(--accent, #6f59d9) 22%, transparent),
+          0 0 0 3px color-mix(in srgb, var(--accent-ring, rgba(113,113,122,.30)) 68%, transparent),
           var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
+      }
+
+      .cuenta-avatar--hero{
+        width:calc(58px * var(--ui-scale, 1));
+        height:calc(58px * var(--ui-scale, 1));
+        min-width:calc(58px * var(--ui-scale, 1));
+      }
+
+      .cuenta-avatar--small{
+        width:calc(42px * var(--ui-scale, 1));
+        height:calc(42px * var(--ui-scale, 1));
+        min-width:calc(42px * var(--ui-scale, 1));
       }
 
       .cuenta-avatar::after{
         content:"";
         position:absolute;
         inset:0;
+        z-index:2;
         background:
           radial-gradient(circle at 30% 22%, rgba(255,255,255,.42), transparent 34%),
-          linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.08));
+          linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.10));
         pointer-events:none;
         mix-blend-mode:screen;
       }
 
-      .cuenta-avatar span{
-        position:relative;
+      .cuenta-avatar img{
+        position:absolute;
+        inset:0;
         z-index:1;
-        font-size:var(--font-2xl, 19px);
-        font-weight:var(--weight-black, 800);
-        letter-spacing:-.035em;
-        text-shadow:0 1px 2px rgba(0,0,0,.22);
+        width:100%;
+        height:100%;
+        object-fit:cover;
       }
 
-      .cuenta-identity-copy{
-        min-width:0;
+      .cuenta-avatar-fallback{
+        position:relative;
+        z-index:3;
+        font-size:var(--font-2xl, 20px);
+        font-weight:var(--weight-black, 900);
+        letter-spacing:-.045em;
+        text-shadow:0 1px 2px rgba(0,0,0,.24);
+      }
+
+      .cuenta-avatar.has-image .cuenta-avatar-fallback{
+        display:none;
+      }
+
+      .cuenta-avatar[data-fallback="true"] .cuenta-avatar-fallback{
+        display:block;
+      }
+
+      .cuenta-avatar[data-fallback="true"] img{
+        display:none !important;
+      }
+
+      .cuenta-account-copy{
         display:grid;
         gap:var(--space-3xs, 3px);
+        min-width:0;
       }
 
-      .cuenta-identity-name{
+      .cuenta-account-name{
         overflow:hidden;
         text-overflow:ellipsis;
         white-space:nowrap;
         color:var(--text-strong, #ffffff);
-        font-size:var(--font-lg, 15px);
-        font-weight:var(--weight-black, 800);
-        letter-spacing:var(--letter-tight, -.03em);
+        font-size:var(--font-xl, 17px);
+        font-weight:var(--weight-black, 900);
+        letter-spacing:-.035em;
       }
 
-      .cuenta-identity-email,
-      .cuenta-identity-role{
+      .cuenta-account-line{
         overflow:hidden;
         text-overflow:ellipsis;
         white-space:nowrap;
-        color:var(--text-dim, rgba(245,245,245,.50));
+        color:var(--text-dim, rgba(245,245,245,.58));
         font-size:var(--font-sm, 12px);
-        line-height:1.3;
+        line-height:1.35;
+      }
+
+      .cuenta-account-stats{
+        display:flex;
+        justify-content:flex-end;
+        gap:var(--space-xs, 8px);
+        flex-wrap:wrap;
+      }
+
+      .cuenta-mini-stat{
+        min-width:120px;
+        display:grid;
+        gap:var(--space-3xs, 3px);
+        padding:var(--space-xs, 10px) var(--space-sm, 12px);
+        border-radius:var(--radius-lg, 16px);
+        border:1px solid var(--border-soft, rgba(255,255,255,.07));
+        background:var(--surface-glass, rgba(255,255,255,.045));
+      }
+
+      .cuenta-mini-stat span{
+        color:var(--text-dim, rgba(245,245,245,.55));
+        font-size:var(--font-xs, 11px);
+        font-weight:var(--weight-bold, 800);
+        letter-spacing:.07em;
+        text-transform:uppercase;
+      }
+
+      .cuenta-mini-stat strong{
+        color:var(--text-strong, #ffffff);
+        font-size:var(--font-sm, 12px);
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
+      .cuenta-mini-stat--success{
+        border-color:var(--border-success, rgba(34,197,94,.30));
+        background:var(--success-bg, rgba(34,197,94,.10));
+      }
+
+      .cuenta-mini-stat--warning{
+        border-color:var(--border-warning, rgba(245,158,11,.30));
+        background:var(--warning-bg, rgba(245,158,11,.10));
+      }
+
+      .cuenta-mini-stat--danger{
+        border-color:var(--border-danger, rgba(239,68,68,.30));
+        background:var(--danger-bg, rgba(239,68,68,.10));
       }
 
       .cuenta-hero-meta{
@@ -720,8 +1242,8 @@ function renderStyles() {
         background:var(--badge-bg, rgba(255,255,255,.048));
         color:var(--badge-text, var(--text-muted, rgba(245,245,245,.70)));
         font-size:var(--font-xs, 11px);
-        font-weight:var(--weight-bold, 700);
-        letter-spacing:var(--letter-wider, .08em);
+        font-weight:var(--weight-bold, 800);
+        letter-spacing:var(--letter-wider, .075em);
         text-transform:uppercase;
         display:inline-flex;
         align-items:center;
@@ -730,8 +1252,8 @@ function renderStyles() {
 
       .cuenta-chip--accent{
         color:var(--accent-active, var(--text-strong, #ffffff));
-        background:color-mix(in srgb, var(--accent, #3f3f46) 16%, transparent);
-        border-color:color-mix(in srgb, var(--accent, #3f3f46) 32%, transparent);
+        background:color-mix(in srgb, var(--accent, #6f59d9) 16%, transparent);
+        border-color:color-mix(in srgb, var(--accent, #6f59d9) 32%, transparent);
       }
 
       .cuenta-chip--success{
@@ -746,29 +1268,53 @@ function renderStyles() {
         border-color:var(--border-warning, rgba(245,158,11,.30));
       }
 
+      .cuenta-chip--danger{
+        color:var(--danger, #ef4444);
+        background:var(--danger-bg, rgba(239,68,68,.10));
+        border-color:var(--border-danger, rgba(239,68,68,.30));
+      }
+
       .cuenta-cards-grid{
+        position:relative;
+        z-index:1;
         display:grid;
-        grid-template-columns:repeat(3, minmax(0, 1fr));
+        grid-template-columns:1.08fr .92fr;
         gap:var(--space-md, 16px);
         padding:var(--space-md, 16px);
+      }
+
+      .cuenta-column{
+        display:grid;
+        gap:var(--space-md, 16px);
+        min-width:0;
       }
 
       .cuenta-card{
         display:grid;
         align-content:start;
         gap:var(--space-md, 16px);
-        min-height:calc(420px * var(--ui-scale, 1));
         padding:var(--space-lg, 18px);
-        border-radius:var(--card-radius, 18px);
+        border-radius:var(--card-radius, 20px);
         border:1px solid var(--card-border, var(--border-default, rgba(255,255,255,.082)));
         background:
           var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
           var(--card-bg, var(--surface-elevated, rgba(39,39,42,.88)));
         box-shadow:var(--shadow-card, var(--card-shadow, 0 16px 36px rgba(0,0,0,.24)));
+        transition:
+          transform .16s ease,
+          border-color .16s ease,
+          box-shadow .16s ease,
+          background .16s ease;
+      }
+
+      .cuenta-card:hover{
+        transform:translateY(-1px);
+        border-color:color-mix(in srgb, var(--accent, #6f59d9) 18%, var(--card-border, rgba(255,255,255,.082)));
+        box-shadow:var(--shadow-lg, 0 22px 48px rgba(0,0,0,.24));
       }
 
       .cuenta-card--accent{
-        border-color:var(--accent-border, rgba(113,113,122,.30));
+        border-color:color-mix(in srgb, var(--accent, #6f59d9) 28%, var(--card-border, rgba(255,255,255,.082)));
       }
 
       .cuenta-card--success{
@@ -781,7 +1327,15 @@ function renderStyles() {
 
       .cuenta-card-head{
         display:grid;
+        grid-template-columns:minmax(0, 1fr) auto;
+        gap:var(--space-sm, 12px);
+        align-items:start;
+      }
+
+      .cuenta-card-copy{
+        display:grid;
         gap:var(--space-xs, 8px);
+        min-width:0;
       }
 
       .cuenta-card-title{
@@ -789,8 +1343,8 @@ function renderStyles() {
         color:var(--text-strong, #ffffff);
         font-size:var(--font-2xl, 19px);
         line-height:var(--line-snug, 1.22);
-        font-weight:var(--weight-black, 800);
-        letter-spacing:var(--letter-tight, -.03em);
+        font-weight:var(--weight-black, 900);
+        letter-spacing:var(--letter-tight, -.035em);
       }
 
       .cuenta-card-text{
@@ -800,13 +1354,31 @@ function renderStyles() {
         line-height:var(--line-relaxed, 1.62);
       }
 
+      .cuenta-card-icon{
+        width:42px;
+        height:42px;
+        border-radius:var(--radius-lg, 16px);
+        display:grid;
+        place-items:center;
+        border:1px solid color-mix(in srgb, var(--accent, #6f59d9) 24%, transparent);
+        background:color-mix(in srgb, var(--accent, #6f59d9) 12%, transparent);
+        color:var(--accent-active, var(--text-strong, #ffffff));
+        font-size:18px;
+        font-weight:900;
+      }
+
+      .cuenta-profile-grid{
+        display:grid;
+        grid-template-columns:repeat(2, minmax(0, 1fr));
+        gap:var(--space-sm, 12px);
+      }
+
       .cuenta-control-row,
       .cuenta-password-block{
         display:grid;
         gap:var(--space-sm, 12px);
         padding:var(--space-sm, 12px) 0;
         border-top:1px solid var(--border-soft, rgba(255,255,255,.05));
-        border-bottom:1px solid var(--border-soft, rgba(255,255,255,.05));
       }
 
       .cuenta-control-row--select{
@@ -822,11 +1394,11 @@ function renderStyles() {
         color:var(--text-strong, #ffffff);
         font-size:var(--font-lg, 15px);
         line-height:var(--line-snug, 1.22);
-        font-weight:var(--weight-bold, 700);
+        font-weight:var(--weight-bold, 800);
       }
 
       .cuenta-control-description{
-        color:var(--text-dim, rgba(245,245,245,.50));
+        color:var(--text-dim, rgba(245,245,245,.56));
         font-size:var(--font-md, 13px);
         line-height:var(--line-relaxed, 1.62);
       }
@@ -853,8 +1425,8 @@ function renderStyles() {
       .cuenta-switch-track{
         position:relative;
         display:inline-flex;
-        width:calc(58px * var(--ui-scale, 1));
-        height:calc(32px * var(--ui-scale, 1));
+        width:calc(62px * var(--ui-scale, 1));
+        height:calc(34px * var(--ui-scale, 1));
         border-radius:var(--radius-pill, 999px);
         padding:4px;
         border:1px solid var(--switch-border, var(--border-default, rgba(255,255,255,.09)));
@@ -869,8 +1441,8 @@ function renderStyles() {
         position:absolute;
         top:4px;
         left:4px;
-        width:calc(22px * var(--ui-scale, 1));
-        height:calc(22px * var(--ui-scale, 1));
+        width:calc(24px * var(--ui-scale, 1));
+        height:calc(24px * var(--ui-scale, 1));
         border-radius:var(--radius-pill, 999px);
         background:var(--text-strong, #ffffff);
         box-shadow:0 7px 16px rgba(0,0,0,.26);
@@ -880,13 +1452,13 @@ function renderStyles() {
       }
 
       .cuenta-switch.is-checked .cuenta-switch-track{
-        background:color-mix(in srgb, var(--accent, #3f3f46) 22%, transparent);
-        border-color:color-mix(in srgb, var(--accent, #3f3f46) 42%, transparent);
+        background:color-mix(in srgb, var(--accent, #6f59d9) 24%, transparent);
+        border-color:color-mix(in srgb, var(--accent, #6f59d9) 46%, transparent);
       }
 
       .cuenta-switch.is-checked .cuenta-switch-thumb{
-        left:calc(32px * var(--ui-scale, 1));
-        background:var(--accent, #3f3f46);
+        left:calc(34px * var(--ui-scale, 1));
+        background:var(--accent, #6f59d9);
       }
 
       .cuenta-native-control{
@@ -898,9 +1470,9 @@ function renderStyles() {
       }
 
       .cuenta-control-state{
-        color:var(--text-dim, rgba(245,245,245,.50));
+        color:var(--text-dim, rgba(245,245,245,.56));
         font-size:var(--font-xs, 11px);
-        font-weight:var(--weight-bold, 700);
+        font-weight:var(--weight-bold, 800);
         letter-spacing:var(--letter-wider, .08em);
         text-transform:uppercase;
       }
@@ -921,13 +1493,13 @@ function renderStyles() {
 
       .cuenta-select,
       .cuenta-field input{
-        min-height:var(--input-height, 42px);
-        border-radius:var(--input-radius, var(--radius-md, 13px));
+        min-height:var(--input-height, 44px);
+        border-radius:var(--input-radius, var(--radius-md, 14px));
         border:1px solid var(--input-border, rgba(255,255,255,.09));
         background:var(--input-bg, rgba(255,255,255,.028));
         color:var(--input-text, var(--text, #f5f5f5));
         font-size:var(--font-md, 13px);
-        font-weight:var(--weight-semibold, 600);
+        font-weight:var(--weight-semibold, 650);
         outline:none;
         box-shadow:var(--input-shadow, inset 0 1px 0 rgba(255,255,255,.018));
         transition:
@@ -943,15 +1515,24 @@ function renderStyles() {
 
       .cuenta-select:focus,
       .cuenta-field input:focus{
-        border-color:var(--input-border-focus, rgba(113,113,122,.50));
+        border-color:var(--input-border-focus, color-mix(in srgb, var(--accent, #6f59d9) 46%, transparent));
         background:var(--input-bg-focus, rgba(255,255,255,.046));
-        box-shadow:var(--input-shadow-focus, 0 0 0 4px rgba(113,113,122,.14));
+        box-shadow:var(--input-shadow-focus, 0 0 0 4px color-mix(in srgb, var(--accent, #6f59d9) 13%, transparent));
+      }
+
+      .cuenta-field input[readonly]{
+        opacity:.86;
+        cursor:default;
       }
 
       .cuenta-password-grid{
         display:grid;
         grid-template-columns:repeat(2, minmax(0, 1fr));
         gap:var(--space-sm, 12px);
+      }
+
+      .cuenta-password-grid .cuenta-field:last-child{
+        grid-column:1 / -1;
       }
 
       .cuenta-field{
@@ -963,7 +1544,7 @@ function renderStyles() {
       .cuenta-field-label{
         color:var(--form-label-color, var(--text-soft, rgba(245,245,245,.88)));
         font-size:var(--form-label-size, var(--font-sm, 12px));
-        font-weight:var(--form-label-weight, var(--weight-semibold, 600));
+        font-weight:var(--form-label-weight, var(--weight-semibold, 700));
       }
 
       .cuenta-field input{
@@ -975,6 +1556,7 @@ function renderStyles() {
         display:grid;
         gap:0;
         margin-top:auto;
+        border-top:1px solid var(--border-soft, rgba(255,255,255,.05));
       }
 
       .cuenta-meta-row{
@@ -982,7 +1564,7 @@ function renderStyles() {
         align-items:center;
         justify-content:space-between;
         gap:var(--space-sm, 12px);
-        padding:var(--space-xs, 9px) 0;
+        padding:var(--space-xs, 10px) 0;
         border-bottom:1px solid var(--border-soft, rgba(255,255,255,.05));
       }
 
@@ -991,7 +1573,7 @@ function renderStyles() {
       }
 
       .cuenta-meta-label{
-        color:var(--text-dim, rgba(245,245,245,.50));
+        color:var(--text-dim, rgba(245,245,245,.56));
         font-size:var(--font-sm, 12px);
         line-height:1.3;
       }
@@ -1038,8 +1620,8 @@ function renderStyles() {
         color:var(--text-strong, #ffffff);
         font-size:var(--font-3xl, 24px);
         line-height:var(--line-tight, 1.08);
-        font-weight:var(--weight-black, 800);
-        letter-spacing:var(--letter-tight, -.03em);
+        font-weight:var(--weight-black, 900);
+        letter-spacing:var(--letter-tight, -.04em);
       }
 
       .cuenta-state-text{
@@ -1062,7 +1644,7 @@ function renderStyles() {
         gap:var(--space-sm, 12px);
         min-height:260px;
         padding:var(--space-lg, 18px);
-        border-radius:var(--card-radius, 18px);
+        border-radius:var(--card-radius, 20px);
         border:1px solid var(--card-border, var(--border-default, rgba(255,255,255,.082)));
         background:var(--card-bg, var(--surface-elevated, rgba(39,39,42,.88)));
       }
@@ -1116,7 +1698,7 @@ function renderStyles() {
         display:grid;
         place-items:center;
         padding:var(--space-lg, 18px);
-        background:color-mix(in srgb, var(--surface-1, #0f1115) 72%, transparent);
+        background:color-mix(in srgb, var(--surface-1, #0f1115) 76%, transparent);
         backdrop-filter:var(--blur-sm, blur(8px));
         -webkit-backdrop-filter:var(--blur-sm, blur(8px));
       }
@@ -1125,48 +1707,66 @@ function renderStyles() {
         display:grid;
         justify-items:center;
         gap:var(--space-sm, 12px);
-        min-width:min(100%, 230px);
+        min-width:min(100%, 260px);
         padding:var(--space-lg, 18px) var(--space-xl, 22px);
         border-radius:var(--radius-xl, 18px);
-        border:1px solid color-mix(in srgb, var(--accent, #3f3f46) 26%, var(--border-soft));
+        border:1px solid color-mix(in srgb, var(--accent, #6f59d9) 32%, var(--border-soft, rgba(255,255,255,.08)));
         background:var(--popover-bg, var(--surface-elevated-strong, rgba(44,44,48,.94)));
         color:var(--text-strong, #ffffff);
         font-size:var(--font-md, 13px);
-        font-weight:var(--weight-bold, 700);
+        font-weight:var(--weight-bold, 800);
         box-shadow:var(--shadow-lg, 0 20px 46px rgba(0,0,0,.28));
       }
 
       .cuenta-panel-overlay-spinner{
-        width:28px;
-        height:28px;
+        width:30px;
+        height:30px;
         border-radius:var(--radius-pill, 999px);
         border:3px solid var(--loader-ring, rgba(255,255,255,.12));
-        border-top-color:var(--accent, #3f3f46);
+        border-top-color:var(--accent, #6f59d9);
         animation:cuentaSpin .8s linear infinite;
-      }
-
-      @keyframes cuentaSpin{
-        to{ transform:rotate(360deg); }
-      }
-
-      @keyframes cuentaSkeleton{
-        to{ transform:translateX(100%); }
       }
 
       [data-theme="light"] .cuenta-hero,
       [data-theme="light"] .cuenta-panel,
       [data-theme="light"] .cuenta-state{
         background:
-          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.82), rgba(255,255,255,0) 34%)),
+          radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent, #6f59d9) 9%, transparent), transparent 34%),
+          radial-gradient(circle at 100% 0, rgba(255,255,255,.90), transparent 28%),
+          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.86), rgba(255,255,255,0) 34%)),
           var(--view-hero-bg, var(--panel-bg, var(--card-bg, var(--surface-elevated, #ffffff))));
+        box-shadow:
+          0 24px 60px rgba(15,23,42,.10),
+          0 0 0 1px rgba(255,255,255,.72) inset;
       }
 
       [data-theme="light"] .cuenta-card,
-      [data-theme="light"] .cuenta-identity,
+      [data-theme="light"] .cuenta-account-strip,
       [data-theme="light"] .cuenta-skeleton-card{
         background:
-          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.82), rgba(255,255,255,0) 34%)),
+          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.88), rgba(255,255,255,0) 34%)),
           var(--card-bg, var(--surface-elevated, #ffffff));
+        box-shadow:0 18px 42px rgba(15,23,42,.08);
+      }
+
+      [data-theme="light"] .cuenta-title,
+      [data-theme="light"] .cuenta-account-name,
+      [data-theme="light"] .cuenta-card-title,
+      [data-theme="light"] .cuenta-control-title,
+      [data-theme="light"] .cuenta-meta-value,
+      [data-theme="light"] .cuenta-mini-stat strong,
+      [data-theme="light"] .cuenta-state-title{
+        color:var(--text-strong, #111827);
+      }
+
+      [data-theme="light"] .cuenta-subtitle,
+      [data-theme="light"] .cuenta-account-line,
+      [data-theme="light"] .cuenta-card-text,
+      [data-theme="light"] .cuenta-control-description,
+      [data-theme="light"] .cuenta-control-state,
+      [data-theme="light"] .cuenta-meta-label,
+      [data-theme="light"] .cuenta-state-text{
+        color:var(--text-dim, #6b7280);
       }
 
       [data-theme="light"] .cuenta-chip--accent{
@@ -1175,26 +1775,36 @@ function renderStyles() {
         border-color:var(--accent-border-strong, rgba(111,89,217,.36));
       }
 
+      [data-theme="light"] .cuenta-select,
+      [data-theme="light"] .cuenta-field input{
+        background:var(--input-bg, rgba(255,255,255,.84));
+        color:var(--input-text, #111827);
+        border-color:var(--input-border, rgba(15,23,42,.10));
+      }
+
+      [data-theme="light"] .cuenta-panel-overlay{
+        background:rgba(248,250,252,.72);
+      }
+
+      [data-theme="light"] .cuenta-panel-overlay-card{
+        background:#ffffff;
+        color:#111827;
+      }
+
       @media (max-width: 1180px){
-        .cuenta-hero-top{
+        .cuenta-hero-top,
+        .cuenta-account-strip,
+        .cuenta-cards-grid{
           grid-template-columns:1fr;
         }
 
-        .cuenta-hero-actions{
+        .cuenta-hero-actions,
+        .cuenta-account-stats{
           justify-content:flex-start;
         }
 
-        .cuenta-identity{
-          width:100%;
-        }
-
-        .cuenta-cards-grid,
         .cuenta-loading-grid{
           grid-template-columns:1fr;
-        }
-
-        .cuenta-card{
-          min-height:auto;
         }
       }
 
@@ -1208,7 +1818,7 @@ function renderStyles() {
         }
 
         .cuenta-title{
-          font-size:clamp(var(--font-3xl, 24px), 8vw, var(--font-4xl, 34px));
+          font-size:clamp(var(--font-3xl, 25px), 8vw, var(--font-4xl, 34px));
           line-height:1;
         }
 
@@ -1219,12 +1829,14 @@ function renderStyles() {
         .cuenta-hero-actions,
         .cuenta-select-line,
         .cuenta-control-actions,
-        .cuenta-password-actions{
+        .cuenta-password-actions,
+        .cuenta-account-stats{
           width:100%;
         }
 
         .cuenta-btn,
-        .cuenta-select{
+        .cuenta-select,
+        .cuenta-mini-stat{
           width:100%;
         }
 
@@ -1236,8 +1848,14 @@ function renderStyles() {
           padding:var(--space-md, 16px);
         }
 
+        .cuenta-card-head,
+        .cuenta-profile-grid,
         .cuenta-password-grid{
           grid-template-columns:1fr;
+        }
+
+        .cuenta-password-grid .cuenta-field:last-child{
+          grid-column:auto;
         }
 
         .cuenta-meta-row{
@@ -1249,6 +1867,15 @@ function renderStyles() {
         .cuenta-meta-value{
           text-align:left;
           white-space:normal;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce){
+        .cuenta-view *,
+        .cuenta-view *::before,
+        .cuenta-view *::after{
+          animation:none !important;
+          transition:none !important;
         }
       }
     </style>
@@ -1269,10 +1896,14 @@ export function renderHeader({ item = null, state = {} } = {}) {
 
   const name = detail ? getDisplayName(detail) : "Ajustes de cuenta";
   const email = detail ? getEmail(detail) : "Preferencias del usuario";
+  const username = detail ? getUsername(detail) : "sin-usuario";
   const role = detail ? getRole(detail) : "Usuario";
 
   const updatedAt = detail ? getUpdatedAt(detail) : null;
   const updatedText = updatedAt ? formatRelativeDate(updatedAt) : "Sin sincronización reciente";
+
+  const status = detail ? getAccountStatus(detail) : "Activa";
+  const statusTone = detail ? getAccountStatusTone(detail) : "success";
 
   return `
     ${renderStyles()}
@@ -1283,10 +1914,10 @@ export function renderHeader({ item = null, state = {} } = {}) {
           <div class="cuenta-hero-copy">
             <span class="cuenta-eyebrow">Cuenta</span>
 
-            <h1 class="cuenta-title">Ajustes de cuenta</h1>
+            <h1 class="cuenta-title">Centro de control de cuenta</h1>
 
             <p class="cuenta-subtitle">
-              Gestiona tema, idioma y seguridad desde un panel claro, compacto y conectado al sistema visual de Onion Support.
+              Gestiona identidad, apariencia, idioma y seguridad desde un panel premium conectado al sistema visual de Onion Support.
             </p>
           </div>
 
@@ -1313,20 +1944,41 @@ export function renderHeader({ item = null, state = {} } = {}) {
           </div>
         </div>
 
-        <div class="cuenta-identity">
-          ${renderAvatar(detail || {})}
+        <div class="cuenta-account-strip">
+          ${renderAvatar(detail || {}, "hero")}
 
-          <div class="cuenta-identity-copy">
-            <div class="cuenta-identity-name">${escapeHtml(name)}</div>
-            <div class="cuenta-identity-email">${escapeHtml(email)}</div>
-            <div class="cuenta-identity-role">${escapeHtml(role)}</div>
+          <div class="cuenta-account-copy">
+            <div class="cuenta-account-name">${escapeHtml(name)}</div>
+            <div class="cuenta-account-line">${escapeHtml(email)}</div>
+            <div class="cuenta-account-line">@${escapeHtml(username)} · ${escapeHtml(role)}</div>
+          </div>
+
+          <div class="cuenta-account-stats">
+            ${renderMiniStat({
+              label: "Estado",
+              value: status,
+              tone: statusTone,
+            })}
+
+            ${renderMiniStat({
+              label: "Tema",
+              value: detail ? getThemeLabel(detail) : "Light mode",
+              tone: "default",
+            })}
+
+            ${renderMiniStat({
+              label: "Idioma",
+              value: detail ? getLangLabel(detail) : "Español",
+              tone: "default",
+            })}
           </div>
         </div>
 
         <div class="cuenta-hero-meta">
-          ${renderChip(`Tema · ${detail ? getThemeLabel(detail) : "Light mode"}`, "accent")}
+          ${renderChip(`Rol · ${role}`, "accent")}
+          ${renderChip(`Tema · ${detail ? getThemeLabel(detail) : "Light mode"}`, "default")}
           ${renderChip(`Idioma · ${detail ? getLangLabel(detail) : "Español"}`, "default")}
-          ${renderChip(`Estado · ${detail ? getThemeStatusLabel(detail) : "Configuración estándar"}`, detail?.darkMode ? "success" : "default")}
+          ${renderChip(`Estado · ${status}`, statusTone)}
           ${renderChip(`Sync · ${updatedText}`, refreshing || loading ? "warning" : "default")}
           ${saving ? renderChip("Guardando cambios", "accent") : ""}
         </div>
@@ -1405,6 +2057,207 @@ export function renderEmptyState() {
 }
 
 /* =========================================================
+   PANEL CARDS
+========================================================= */
+
+function renderProfileCard(detail = {}, { disabled = false } = {}) {
+  return `
+    <article class="cuenta-card cuenta-card--accent">
+      <div class="cuenta-card-head">
+        <div class="cuenta-card-copy">
+          <h2 class="cuenta-card-title">Identidad</h2>
+          <p class="cuenta-card-text">
+            Datos principales asociados a la sesión y al perfil visible en Onion Support.
+          </p>
+        </div>
+
+        <div class="cuenta-card-icon" aria-hidden="true">ID</div>
+      </div>
+
+      <div class="cuenta-profile-grid">
+        ${renderField({
+          label: "Nombre visible",
+          value: getDisplayName(detail),
+          dataRole: "cuenta-name-input",
+          placeholder: "Nombre visible",
+          disabled,
+          autocomplete: "name",
+        })}
+
+        ${renderField({
+          label: "Usuario",
+          value: getUsername(detail),
+          dataRole: "cuenta-username-input",
+          placeholder: "usuario",
+          readonly: true,
+          disabled,
+          autocomplete: "username",
+        })}
+
+        ${renderField({
+          label: "Email",
+          value: getEmail(detail),
+          dataRole: "cuenta-email-input",
+          type: "email",
+          placeholder: "email@dominio.com",
+          readonly: true,
+          disabled,
+          autocomplete: "email",
+        })}
+
+        ${renderField({
+          label: "Teléfono",
+          value: getPhone(detail) === "No configurado" ? "" : getPhone(detail),
+          dataRole: "cuenta-phone-input",
+          type: "tel",
+          placeholder: "No configurado",
+          disabled,
+          autocomplete: "tel",
+        })}
+      </div>
+
+      <div class="cuenta-meta-list">
+        ${renderMetaRow("User ID", getUserId(detail))}
+        ${renderMetaRow("Cliente ID", getClienteId(detail))}
+        ${renderMetaRow("Rol", getRole(detail))}
+        ${renderMetaRow("Estado", getAccountStatus(detail), getAccountStatusTone(detail))}
+      </div>
+    </article>
+  `;
+}
+
+function renderAppearanceCard(detail = {}, { disabled = false } = {}) {
+  const dark = isDarkMode(detail);
+
+  return `
+    <article class="cuenta-card">
+      <div class="cuenta-card-head">
+        <div class="cuenta-card-copy">
+          <h2 class="cuenta-card-title">Apariencia</h2>
+          <p class="cuenta-card-text">
+            Ajusta el modo visual principal de la SPA. El cambio debe sincronizarse con Core, variables CSS y almacenamiento.
+          </p>
+        </div>
+
+        <div class="cuenta-card-icon" aria-hidden="true">${dark ? "☾" : "☼"}</div>
+      </div>
+
+      ${renderSwitchRow({
+        title: "Dark / Light mode",
+        description: "Alterna entre modo claro y modo oscuro para toda la interfaz.",
+        checked: dark,
+        inputId: "cuenta-darkmode-input",
+        dataRole: "cuenta-darkmode-input",
+        action: "toggle-theme",
+        disabled,
+        checkedLabel: "Dark",
+        uncheckedLabel: "Light",
+        buttonLabel: dark ? "Cambiar a light" : "Cambiar a dark",
+      })}
+
+      <div class="cuenta-meta-list">
+        ${renderMetaRow("Tema actual", getThemeLabel(detail))}
+        ${renderMetaRow("Valor técnico", getThemeValue(detail))}
+        ${renderMetaRow("Estado", getThemeStatusLabel(detail))}
+      </div>
+    </article>
+  `;
+}
+
+function renderLanguageCard(detail = {}, { disabled = false } = {}) {
+  const langValue = getLangValue(detail);
+  const langLabel = getLangLabel(detail);
+
+  return `
+    <article class="cuenta-card">
+      <div class="cuenta-card-head">
+        <div class="cuenta-card-copy">
+          <h2 class="cuenta-card-title">Idioma</h2>
+          <p class="cuenta-card-text">
+            Define el idioma activo de la SPA. Compatible con Español, English y Català.
+          </p>
+        </div>
+
+        <div class="cuenta-card-icon" aria-hidden="true">LG</div>
+      </div>
+
+      ${renderSelectRow({
+        title: "Idioma del sistema",
+        description: "Selecciona el idioma que utilizarán las vistas y componentes compatibles con i18n.",
+        value: langValue,
+        inputId: "cuenta-language-select",
+        dataRole: "cuenta-language-select",
+        action: "change-language",
+        disabled,
+      })}
+
+      <div class="cuenta-meta-list">
+        ${renderMetaRow("Idioma actual", langLabel)}
+        ${renderMetaRow("Código", langValue)}
+        ${renderMetaRow("Motor", "I18n")}
+      </div>
+    </article>
+  `;
+}
+
+function renderSecurityCard(detail = {}, { disabled = false } = {}) {
+  return `
+    <article class="cuenta-card cuenta-card--warning">
+      <div class="cuenta-card-head">
+        <div class="cuenta-card-copy">
+          <h2 class="cuenta-card-title">Seguridad</h2>
+          <p class="cuenta-card-text">
+            Actualiza la contraseña de acceso de la cuenta. La acción queda delegada a cuenta.bindings.js.
+          </p>
+        </div>
+
+        <div class="cuenta-card-icon" aria-hidden="true">●</div>
+      </div>
+
+      ${renderPasswordRow({
+        disabled,
+      })}
+
+      <div class="cuenta-meta-list">
+        ${renderMetaRow("Último acceso", getLastLoginAt(detail) ? formatRelativeDate(getLastLoginAt(detail)) : "Sin dato")}
+        ${renderMetaRow("Creación", getCreatedAt(detail) ? formatDateOnly(getCreatedAt(detail)) : "—")}
+        ${renderMetaRow("Estado", getSecurityStatusLabel(detail))}
+      </div>
+    </article>
+  `;
+}
+
+function renderAuditCard(detail = {}) {
+  const updatedAt = getUpdatedAt(detail);
+  const createdAt = getCreatedAt(detail);
+  const lastLoginAt = getLastLoginAt(detail);
+
+  return `
+    <article class="cuenta-card cuenta-card--success">
+      <div class="cuenta-card-head">
+        <div class="cuenta-card-copy">
+          <h2 class="cuenta-card-title">Actividad</h2>
+          <p class="cuenta-card-text">
+            Resumen técnico de sincronización y metadatos de la cuenta.
+          </p>
+        </div>
+
+        <div class="cuenta-card-icon" aria-hidden="true">OK</div>
+      </div>
+
+      <div class="cuenta-meta-list">
+        ${renderMetaRow("Actualizado", updatedAt ? formatDate(updatedAt) : "—")}
+        ${renderMetaRow("Actualizado relativo", updatedAt ? formatRelativeDate(updatedAt) : "Sin fecha")}
+        ${renderMetaRow("Creado", createdAt ? formatDate(createdAt) : "—")}
+        ${renderMetaRow("Último login", lastLoginAt ? formatDate(lastLoginAt) : "—")}
+        ${renderMetaRow("Email", truncate(getEmail(detail), 42))}
+        ${renderMetaRow("Username", `@${getUsername(detail)}`)}
+      </div>
+    </article>
+  `;
+}
+
+/* =========================================================
    PANEL
 ========================================================= */
 
@@ -1415,6 +2268,7 @@ export function renderPanel({ item = null, state = {} } = {}) {
   const loading = Boolean(localState.loading);
   const refreshing = Boolean(localState.refreshing);
   const saving = Boolean(localState.saving);
+  const busy = saving || refreshing;
 
   if (loading && !detail) {
     return renderLoadingState();
@@ -1428,91 +2282,34 @@ export function renderPanel({ item = null, state = {} } = {}) {
     return renderEmptyState();
   }
 
-  const langValue = getLangValue(detail);
-  const langLabel = getLangLabel(detail);
-  const themeValue = getThemeValue(detail);
-  const exactUpdatedAt = getUpdatedAt(detail) ? formatDate(getUpdatedAt(detail)) : "—";
-
   return `
     <section class="cuenta-panel">
       <div class="cuenta-cards-grid">
-        <article class="cuenta-card cuenta-card--accent">
-          <div class="cuenta-card-head">
-            <h2 class="cuenta-card-title">Tema</h2>
-            <p class="cuenta-card-text">
-              Controla la preferencia visual principal del panel. El cambio debe sincronizarse con Core, variables CSS y estado persistido.
-            </p>
-          </div>
-
-          ${renderSwitchRow({
-            title: "Dark / Light mode",
-            description: "Alterna entre modo claro y modo oscuro para toda la interfaz.",
-            checked: Boolean(detail.darkMode),
-            inputId: "cuenta-darkmode-input",
-            dataRole: "cuenta-darkmode-input",
-            action: "toggle-theme",
-            disabled: saving || refreshing,
-            checkedLabel: "Dark",
-            uncheckedLabel: "Light",
+        <div class="cuenta-column">
+          ${renderProfileCard(detail, {
+            disabled: busy,
           })}
 
-          <div class="cuenta-meta-list">
-            ${renderMetaRow("Tema actual", getThemeLabel(detail))}
-            ${renderMetaRow("Valor técnico", themeValue)}
-            ${renderMetaRow("Estado", getThemeStatusLabel(detail))}
-            ${renderMetaRow("Última actualización", exactUpdatedAt)}
-          </div>
-        </article>
+          ${renderAuditCard(detail)}
+        </div>
 
-        <article class="cuenta-card">
-          <div class="cuenta-card-head">
-            <h2 class="cuenta-card-title">Idioma</h2>
-            <p class="cuenta-card-text">
-              Define el idioma activo de la SPA. Compatible con Español, English y Català.
-            </p>
-          </div>
-
-          ${renderSelectRow({
-            title: "Idioma del sistema",
-            description: "Selecciona el idioma que utilizarán las vistas y componentes compatibles con i18n.",
-            value: langValue,
-            inputId: "cuenta-language-select",
-            dataRole: "cuenta-language-select",
-            action: "change-language",
-            disabled: saving || refreshing,
+        <div class="cuenta-column">
+          ${renderAppearanceCard(detail, {
+            disabled: busy,
           })}
 
-          <div class="cuenta-meta-list">
-            ${renderMetaRow("Idioma actual", langLabel)}
-            ${renderMetaRow("Código", langValue)}
-            ${renderMetaRow("Motor", "I18n")}
-            ${renderMetaRow("Última actualización", exactUpdatedAt)}
-          </div>
-        </article>
-
-        <article class="cuenta-card cuenta-card--warning">
-          <div class="cuenta-card-head">
-            <h2 class="cuenta-card-title">Seguridad</h2>
-            <p class="cuenta-card-text">
-              Actualiza la contraseña de acceso de la cuenta. La acción queda delegada a cuenta.bindings.js.
-            </p>
-          </div>
-
-          ${renderPasswordRow({
-            disabled: saving || refreshing,
+          ${renderLanguageCard(detail, {
+            disabled: busy,
           })}
 
-          <div class="cuenta-meta-list">
-            ${renderMetaRow("Usuario", getUsername(detail))}
-            ${renderMetaRow("Email", getEmail(detail))}
-            ${renderMetaRow("Teléfono", getPhone(detail))}
-            ${renderMetaRow("Estado", saving ? "Procesando" : getSecurityStatusLabel())}
-          </div>
-        </article>
+          ${renderSecurityCard(detail, {
+            disabled: busy,
+          })}
+        </div>
       </div>
 
       ${
-        refreshing || saving
+        busy
           ? `
             <div
               class="cuenta-panel-overlay"

@@ -2057,16 +2057,40 @@ export function renderHeader({ item = null, state = {} } = {}) {
   const role = detail ? getRole(detail) : "Usuario";
 
   const updatedAt = detail ? getUpdatedAt(detail) : null;
-  const updatedText = updatedAt ? formatRelativeDate(updatedAt) : "Sin sincronización reciente";
+  const updatedText = updatedAt
+    ? formatRelativeDate(updatedAt)
+    : "Sin sincronización reciente";
 
   const status = detail ? getAccountStatus(detail) : "Activa";
   const statusTone = detail ? getAccountStatusTone(detail) : "success";
 
-  return `
-    ${render";
+  const privacyMode = detail
+    ? safeBoolean(
+        first(
+          detail.privacyMode,
+          detail.privateMode,
+          detail.preferences?.privacyMode,
+          detail.preferences?.privateMode,
+          detail.settings?.privacyMode,
+          detail.settings?.privateMode,
+          detail.raw?.privacyMode,
+          detail.raw?.privateMode,
+          detail.raw?.preferences?.privacyMode,
+          detail.raw?.settings?.privacyMode,
+          false
+        ),
+        false
+      )
+    : false;
 
-  const status = detail ? getAccountStatus(detail) : "Activa";
-  const statusTone = detail ? getAccountStatusTone(detail) : "Styles()}
+  const privacyLabel = privacyMode ? "Activa" : "Estándar";
+  const privacyTone = privacyMode ? "success" : "default";
+
+  const themeLabel = detail ? getThemeLabel(detail) : "Light mode";
+  const langLabel = detail ? getLangLabel(detail) : "Español";
+
+  return `
+    ${renderStyles()}
 
     <section class="cuenta-hero">
       <div class="cuenta-hero-inner">
@@ -2104,7 +2128,7 @@ export function renderHeader({ item = null, state = {} } = {}) {
           </div>
         </div>
 
-        <div class="cuenta-command-strip">
+        <div class="cuenta-command-strip cuenta-account-strip">
           ${renderAvatar(detail || {}, "hero")}
 
           <div class="cuenta-account-copy">
@@ -2122,13 +2146,13 @@ export function renderHeader({ item = null, state = {} } = {}) {
 
             ${renderMiniStat({
               label: "Tema",
-              value: detail ? getThemeLabel(detail) : "Light mode",
+              value: themeLabel,
               tone: "default",
             })}
 
             ${renderMiniStat({
               label: "Idioma",
-              value: detail ? getLangLabel(detail) : "Español",
+              value: langLabel,
               tone: "default",
             })}
           </div>
@@ -2136,9 +2160,9 @@ export function renderHeader({ item = null, state = {} } = {}) {
 
         <div class="cuenta-hero-meta">
           ${renderChip(`Rol · ${role}`, "accent")}
-          ${renderChip(`Tema · ${detail ? getThemeLabel(detail) : "Light mode"}`, "default")}
-          ${renderChip(`Idioma · ${detail ? getLangLabel(detail) : "Español"}`, "default")}
-          ${renderChip(`Privacidad · ${detail ? getPrivacyLabel(detail) : "Estándar"}`, detail && getPrivacyMode(detail) ? "success" : "default")}
+          ${renderChip(`Tema · ${themeLabel}`, "default")}
+          ${renderChip(`Idioma · ${langLabel}`, "default")}
+          ${renderChip(`Privacidad · ${privacyLabel}`, privacyTone)}
           ${renderChip(`Estado · ${status}`, statusTone)}
           ${renderChip(`Sync · ${updatedText}`, refreshing || loading ? "warning" : "default")}
           ${saving ? renderChip("Guardando cambios", "accent") : ""}

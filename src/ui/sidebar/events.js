@@ -2564,47 +2564,8 @@ export function bindDomEvents(ctx = {}) {
     },
     true
   );
-
-  const { userToggle, sidebarMenu } = resolveElements(AppCore, resolver);
-
-  if (userToggle) {
-    bindDom(
-      AppCore,
-      localScope,
-      epoch,
-      userToggle,
-      "keydown",
-      (event) =>
-        handleUserToggleKeydown({
-          AppCore,
-          event,
-          toggleDropdown,
-          closeDropdown,
-          openDropdown,
-          getElements: resolver,
-        }),
-      true
-    );
-  }
-
-  if (sidebarMenu) {
-    bindDom(
-      AppCore,
-      localScope,
-      epoch,
-      sidebarMenu,
-      "click",
-      (event) =>
-        handleSidebarMenuClick({
-          AppCore,
-          Router,
-          event,
-          closeDropdown,
-          getElements: resolver,
-        }),
-      false
-    );
-  }
+  // Document-level handlers already process keydown/click for userToggle and menu navigation.
+  // Avoid double-binding local handlers that can cause duplicated navigation/visual commits.
 
   safeEmit(AppCore, "sidebar:dom-events:bound", {
     scope: scopeName,

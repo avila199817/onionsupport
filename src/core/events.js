@@ -25,14 +25,14 @@
    - wrapper defensivo de listeners DOM
    - protección contra recursión / tormentas de eventos
    - no congela la SPA si un módulo emite en bucle
-
-   FIX FIREBREAK:
-   - separa eventos críticos / normales / low-priority UI
-   - eventos UI tipo sidebar:* ya no consumen el contador global normal
-   - sidebar:user:rendered no queda bloqueado por max-total-rate
-   - mantiene límites propios para eventos ruidosos
-   - evita spam de consola durante drops repetidos
+   - redacción defensiva de tokens/secrets en snapshots
    - captura errores async de handlers con .catch()
+
+   FIREBREAK:
+   - eventos críticos no se bloquean por rate normal
+   - eventos UI low-priority tienen rate propio
+   - eventos absolutos siguen protegidos por max-absolute-rate
+   - app:state/session/user/token/router/auth/core protegidos
 ========================================================= */
 
 import {
@@ -44,94 +44,157 @@ import {
    CONSTANTS
 ========================================================= */
 
-const DEFAULT_TARGET = "document";
+const DEFAULT_TARGET =
+  "document";
 
-const MAX_RECENT_EVENTS = 80;
+const MAX_RECENT_EVENTS =
+  80;
 
-const EVENTS_VERSION = "10.2.0";
+const EVENTS_VERSION =
+  "10.3.0";
 
-/*
-  Firebreaks.
+const MAX_SYNC_EMIT_DEPTH =
+  12;
 
-  Regla:
-  - eventos críticos: no se bloquean por rate normal, solo por recursión
-  - eventos normales: rate normal
-  - eventos low-priority UI: rate separado más generoso
-*/
-const MAX_SYNC_EMIT_DEPTH = 12;
+const RATE_WINDOW_MS =
+  1000;
 
-const RATE_WINDOW_MS = 1000;
+const MAX_EMITS_PER_WINDOW =
+  900;
 
-const MAX_EMITS_PER_WINDOW = 900;
-const MAX_EMITS_PER_EVENT_PER_WINDOW = 180;
+const MAX_EMITS_PER_EVENT_PER_WINDOW =
+  180;
 
-const MAX_LOW_PRIORITY_EMITS_PER_WINDOW = 1800;
-const MAX_LOW_PRIORITY_EMITS_PER_EVENT_PER_WINDOW = 360;
+const MAX_LOW_PRIORITY_EMITS_PER_WINDOW =
+  1800;
 
-const MAX_ABSOLUTE_EMITS_PER_WINDOW = 5000;
+const MAX_LOW_PRIORITY_EMITS_PER_EVENT_PER_WINDOW =
+  360;
 
-const DROP_WARNING_INTERVAL_MS = 1200;
-const NOISY_RECENT_SAMPLE_MS = 160;
+const MAX_ABSOLUTE_EMITS_PER_WINDOW =
+  5000;
 
-/*
-  Eventos críticos del lifecycle. No deben quedarse bloqueados por ruido UI.
-*/
-const CRITICAL_EVENT_NAMES = new Set([
-  "app:ready",
-  "app:boot:ready",
-  "app:boot:complete",
-  "app:boot:error",
+const DROP_WARNING_INTERVAL_MS =
+  1200;
 
-  "app:route:change",
-
-  "router:before-render",
-  "router:rendered",
-  "router:render:async-complete",
-  "router:navigation:complete",
-  "router:bound",
-
-  "auth:login:success",
-  "auth:logout",
-  "auth:logout:success",
-  "auth:session:restored",
-  "auth:session:cleared",
-
-  "app:session:restored",
-  "app:session:cleared",
-  "app:auth:change",
-
-  "app:lang:change",
-  "app:theme:change",
-]);
+const NOISY_RECENT_SAMPLE_MS =
+  160;
 
 /*
-  Eventos UI/telemetría que pueden repetirse durante boot/render.
-  Tienen rate propio, no consumen max-total-rate normal.
+  Eventos críticos exactos.
+
+  Estos no deben quedar bloqueados por ruido de UI, sidebar,
+  topbar, loader, toast o renders repetidos.
 */
-const LOW_PRIORITY_EVENT_PREFIXES = Object.freeze([
-  "sidebar:",
-  "topbar:",
-  "toast:",
-  "app:user-ui:",
-  "app:ui:module:",
-  "app:ui:toast-bridge:",
-  "app:boot:loader:",
-]);
+const CRITICAL_EVENT_NAMES =
+  new Set([
+    "app:ready",
+    "app:boot:ready",
+    "app:boot:complete",
+    "app:boot:error",
 
-const LOW_PRIORITY_EVENT_NAMES = new Set([
-  "app:ui:ready",
-  "app:ui:repair",
-  "app:ui:repair-request",
-  "app:ui:init:start",
-  "app:ui:init:success",
-  "app:ui:init:error",
-]);
+    "app:core:init:start",
+    "app:core:ready",
+    "app:core:init:error",
 
-const SILENT_DROP_PREFIXES = Object.freeze([
-  "sidebar:indicator:",
-  "sidebar:active:",
-  "sidebar:visual:",
-]);
+    "app:state:change",
+
+    "app:route:change",
+    "app:public-path:change",
+
+    "app:user:change",
+    "app:token:change",
+    "app:auth:change",
+
+    "app:session:state",
+    "app:session:applied",
+    "app:session:loaded",
+    "app:session:restored",
+    "app:session:cleared",
+
+    "app:loading:change",
+    "app:error",
+
+    "app:lang:change",
+    "app:theme:change",
+
+    "app:module:registered",
+
+    "router:before-render",
+    "router:rendered",
+    "router:render:async-complete",
+    "router:navigation:complete",
+    "router:bound",
+    "router:error",
+
+    "auth:login:success",
+    "auth:logout",
+    "auth:logout:success",
+    "auth:session:restored",
+    "auth:session:cleared",
+    "auth:restore:error",
+
+    "app:request:error",
+  ]);
+
+/*
+  Prefijos críticos.
+
+  Ojo: no se usa "app:" completo para no convertir todo en crítico.
+*/
+const CRITICAL_EVENT_PREFIXES =
+  Object.freeze([
+    "router:",
+    "auth:",
+    "app:core:",
+    "app:session:",
+  ]);
+
+/*
+  Eventos UI/telemetría ruidosos.
+  Tienen rate propio y no consumen el contador normal.
+*/
+const LOW_PRIORITY_EVENT_PREFIXES =
+  Object.freeze([
+    "sidebar:",
+    "topbar:",
+    "toast:",
+    "tooltip:",
+    "loader:",
+    "app:user-ui:",
+    "app:ui:module:",
+    "app:ui:toast-bridge:",
+    "app:boot:loader:",
+    "app:request:start",
+    "app:request:success",
+    "app:request:retry",
+    "app:request:deduped",
+  ]);
+
+const LOW_PRIORITY_EVENT_NAMES =
+  new Set([
+    "app:ui:ready",
+    "app:ui:repair",
+    "app:ui:repair-request",
+    "app:ui:init:start",
+    "app:ui:init:success",
+    "app:ui:init:error",
+  ]);
+
+const SILENT_DROP_PREFIXES =
+  Object.freeze([
+    "sidebar:indicator:",
+    "sidebar:active:",
+    "sidebar:visual:",
+    "topbar:visual:",
+    "tooltip:position:",
+  ]);
+
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|session|jwt|bearer/i;
+
+const TOKENISH_TEXT_RE =
+  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)/i;
 
 /* =========================================================
    BASICS
@@ -140,7 +203,9 @@ const SILENT_DROP_PREFIXES = Object.freeze([
 function localIsBrowser() {
   try {
     if (typeof isBrowser === "function") {
-      return Boolean(isBrowser());
+      return Boolean(
+        isBrowser()
+      );
     }
   } catch {}
 
@@ -170,16 +235,18 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value).trim();
 
   return text || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
-  const n = Number(value);
+  const number =
+    Number(value);
 
-  return Number.isFinite(n)
-    ? n
+  return Number.isFinite(number)
+    ? number
     : fallback;
 }
 
@@ -201,7 +268,10 @@ function safeIsoDate(ms = safeNow()) {
 
 function safeWarn(...args) {
   try {
-    console.warn("[CoreEvents]", ...args);
+    console.warn(
+      "[CoreEvents]",
+      ...args
+    );
   } catch {}
 }
 
@@ -210,13 +280,17 @@ function createNoopOff() {
 }
 
 function normalizeEventName(name = "") {
-  return safeText(name, "");
+  return safeText(
+    name,
+    ""
+  );
 }
 
 function normalizeOptions(options = false) {
   try {
     if (typeof normalizeListenerOptions === "function") {
-      const normalized = normalizeListenerOptions(options);
+      const normalized =
+        normalizeListenerOptions(options);
 
       if (
         normalized === true ||
@@ -230,7 +304,8 @@ function normalizeOptions(options = false) {
 
   if (options === true) {
     return {
-      capture: true,
+      capture:
+        true,
     };
   }
 
@@ -252,19 +327,24 @@ function normalizeOptions(options = false) {
 }
 
 function getOptionsTarget(options = false) {
-  if (!isObject(options)) {
-    return null;
+  if (
+    isObject(options) &&
+    options.target
+  ) {
+    return options.target;
   }
 
-  return options.target || null;
+  return null;
 }
 
 function normalizeDomOptions(options = false) {
-  const normalized = normalizeOptions(options);
+  const normalized =
+    normalizeOptions(options);
 
   if (normalized === true) {
     return {
-      capture: true,
+      capture:
+        true,
     };
   }
 
@@ -281,18 +361,28 @@ function normalizeDomOptions(options = false) {
   }
 
   /*
-    No pasamos once aquí.
+    No pasamos once ni target a addEventListener.
     once se controla manualmente para poder limpiar activeListeners.
-    target tampoco pertenece a addEventListener.
   */
   return {
-    capture: Boolean(normalized.capture),
-    passive: Boolean(normalized.passive),
+    capture:
+      Boolean(normalized.capture),
+
+    passive:
+      Boolean(normalized.passive),
   };
 }
 
 function wantsOnce(options = false) {
-  const normalized = normalizeOptions(options);
+  if (
+    isObject(options) &&
+    options.once === true
+  ) {
+    return true;
+  }
+
+  const normalized =
+    normalizeOptions(options);
 
   return Boolean(
     isObject(normalized) &&
@@ -301,22 +391,28 @@ function wantsOnce(options = false) {
 }
 
 function withoutOnce(options = false) {
-  const normalized = normalizeOptions(options);
-
-  if (!isObject(normalized)) {
-    return normalized;
+  if (!isObject(options)) {
+    return options;
   }
 
   const {
     once,
     ...rest
-  } = normalized;
+  } = options;
 
   return rest;
 }
 
 function wantsFirebreakBypass(options = false) {
-  const normalized = normalizeOptions(options);
+  if (
+    isObject(options) &&
+    options.bypassFirebreak === true
+  ) {
+    return true;
+  }
+
+  const normalized =
+    normalizeOptions(options);
 
   return Boolean(
     isObject(normalized) &&
@@ -362,7 +458,11 @@ function resolveTarget(target = DEFAULT_TARGET) {
     return target;
   }
 
-  const key = safeText(target, DEFAULT_TARGET).toLowerCase();
+  const key =
+    safeText(
+      target,
+      DEFAULT_TARGET
+    ).toLowerCase();
 
   if (key === "window") {
     return getWindowTarget();
@@ -379,9 +479,12 @@ function createCustomEvent(name, detail = {}) {
   try {
     return new CustomEvent(name, {
       detail,
-      bubbles: false,
-      cancelable: false,
-      composed: false,
+      bubbles:
+        false,
+      cancelable:
+        false,
+      composed:
+        false,
     });
   } catch {
     try {
@@ -389,7 +492,10 @@ function createCustomEvent(name, detail = {}) {
         return null;
       }
 
-      const event = document.createEvent("CustomEvent");
+      const event =
+        document.createEvent(
+          "CustomEvent"
+        );
 
       event.initCustomEvent(
         name,
@@ -410,7 +516,8 @@ function createCustomEvent(name, detail = {}) {
 ========================================================= */
 
 function startsWithAny(value = "", prefixes = []) {
-  const text = safeText(value, "");
+  const text =
+    safeText(value, "");
 
   return prefixes.some((prefix) =>
     text.startsWith(prefix)
@@ -418,8 +525,15 @@ function startsWithAny(value = "", prefixes = []) {
 }
 
 function isCriticalEvent(name = "") {
-  return CRITICAL_EVENT_NAMES.has(
-    normalizeEventName(name)
+  const eventName =
+    normalizeEventName(name);
+
+  return Boolean(
+    CRITICAL_EVENT_NAMES.has(eventName) ||
+    startsWithAny(
+      eventName,
+      CRITICAL_EVENT_PREFIXES
+    )
   );
 }
 
@@ -462,11 +576,17 @@ function getEventClass(name = "") {
    IDS / DEDUPE
 ========================================================= */
 
-const handlerIds = new WeakMap();
-const targetIds = new WeakMap();
+const handlerIds =
+  new WeakMap();
 
-let nextHandlerId = 1;
-let nextTargetId = 1;
+const targetIds =
+  new WeakMap();
+
+let nextHandlerId =
+  1;
+
+let nextTargetId =
+  1;
 
 function getHandlerId(handler) {
   if (!isFunction(handler)) {
@@ -511,7 +631,8 @@ function getTargetKey(target = DEFAULT_TARGET) {
 }
 
 function normalizeOptionsForKey(options = false) {
-  const normalized = normalizeDomOptions(options);
+  const normalized =
+    normalizeDomOptions(options);
 
   if (normalized === true) {
     return "capture:true|passive:false";
@@ -550,10 +671,38 @@ function makeListenerKey({
 }
 
 /* =========================================================
-   SAFE PREVIEW
+   SAFE PREVIEW / REDACTION
 ========================================================= */
 
-function safePreview(value, depth = 0) {
+function redactString(value = "") {
+  const text =
+    safeText(value, "");
+
+  if (!text) {
+    return text;
+  }
+
+  if (TOKENISH_TEXT_RE.test(text)) {
+    return text.replace(
+      TOKENISH_TEXT_RE,
+      "***"
+    );
+  }
+
+  return text;
+}
+
+function shouldRedactKey(key = "") {
+  return SENSITIVE_KEY_RE.test(
+    safeText(key, "")
+  );
+}
+
+function safePreview(value, depth = 0, keyHint = "") {
+  if (shouldRedactKey(keyHint)) {
+    return "***";
+  }
+
   if (depth > 2) {
     return "[depth-limit]";
   }
@@ -565,37 +714,86 @@ function safePreview(value, depth = 0) {
     return value;
   }
 
+  if (typeof value === "string") {
+    return redactString(value);
+  }
+
   if (
-    typeof value === "string" ||
     typeof value === "number" ||
     typeof value === "boolean"
   ) {
     return value;
   }
 
+  if (typeof value === "bigint") {
+    return String(value);
+  }
+
   if (typeof value === "function") {
     return "[function]";
+  }
+
+  if (value instanceof Error) {
+    return {
+      name:
+        value.name || "Error",
+
+      message:
+        safeText(
+          value.message,
+          "Error"
+        ),
+
+      stack:
+        value.stack
+          ? "[stack]"
+          : "",
+    };
+  }
+
+  if (value instanceof Date) {
+    try {
+      return value.toISOString();
+    } catch {
+      return String(value);
+    }
   }
 
   if (Array.isArray(value)) {
     return value
       .slice(0, 12)
-      .map((item) => safePreview(item, depth + 1));
+      .map((item) =>
+        safePreview(
+          item,
+          depth + 1,
+          keyHint
+        )
+      );
   }
 
   if (isObject(value)) {
     const output = {};
-    const entries = Object.entries(value).slice(0, 30);
+    const entries =
+      Object.entries(value).slice(0, 30);
 
     for (const [key, item] of entries) {
-      output[key] = safePreview(item, depth + 1);
+      output[key] =
+        shouldRedactKey(key)
+          ? "***"
+          : safePreview(
+              item,
+              depth + 1,
+              key
+            );
     }
 
     return output;
   }
 
   try {
-    return String(value);
+    return redactString(
+      String(value)
+    );
   } catch {
     return "[unserializable]";
   }
@@ -640,41 +838,87 @@ export function createEvents({
 
   rateWindowMs = RATE_WINDOW_MS,
 } = {}) {
-  const memoryListeners = new Map();
-  const activeListeners = new Map();
-  const recentEvents = [];
+  const memoryListeners =
+    new Map();
 
-  const emitDepthByName = new Map();
-  const eventRateMap = new Map();
+  const activeListeners =
+    new Map();
 
-  const recentSampleMap = new Map();
+  const recentEvents =
+    [];
 
-  let rateWindowStartedAt = safeNow();
+  const emitDepthByName =
+    new Map();
 
-  let normalEmitsInWindow = 0;
-  let lowPriorityEmitsInWindow = 0;
-  let criticalEmitsInWindow = 0;
-  let absoluteEmitsInWindow = 0;
+  const eventRateMap =
+    new Map();
 
-  let lastDropWarningAt = 0;
+  const recentSampleMap =
+    new Map();
+
+  let rateWindowStartedAt =
+    safeNow();
+
+  let normalEmitsInWindow =
+    0;
+
+  let lowPriorityEmitsInWindow =
+    0;
+
+  let criticalEmitsInWindow =
+    0;
+
+  let absoluteEmitsInWindow =
+    0;
+
+  let lastDropWarningAt =
+    0;
 
   const state = {
-    version: EVENTS_VERSION,
-    target: safeText(target, DEFAULT_TARGET),
-    browser: localIsBrowser(),
+    version:
+      EVENTS_VERSION,
 
-    emitCount: 0,
-    onCount: 0,
-    offCount: 0,
-    onceCount: 0,
-    clearCount: 0,
-    errorCount: 0,
-    dropCount: 0,
+    target:
+      safeText(
+        target,
+        DEFAULT_TARGET
+      ),
 
-    lastEvent: "",
-    lastEventAt: 0,
-    lastError: null,
-    lastDroppedEvent: null,
+    browser:
+      localIsBrowser(),
+
+    emitCount:
+      0,
+
+    onCount:
+      0,
+
+    offCount:
+      0,
+
+    onceCount:
+      0,
+
+    clearCount:
+      0,
+
+    errorCount:
+      0,
+
+    dropCount:
+      0,
+
+    lastEvent:
+      "",
+
+    lastEventAt:
+      0,
+
+    lastError:
+      null,
+
+    lastDroppedEvent:
+      null,
   };
 
   function shouldSampleRecent(type = "event", name = "") {
@@ -718,22 +962,42 @@ export function createEvents({
       return;
     }
 
-    const atMs = safeNow();
+    const atMs =
+      safeNow();
 
     recentEvents.unshift({
-      type: safeText(type, "event"),
-      name: safeText(name, ""),
+      type:
+        safeText(
+          type,
+          "event"
+        ),
+
+      name:
+        safeText(
+          name,
+          ""
+        ),
+
       className:
         getEventClass(name),
-      detail: safePreview(detail),
-      at: safeIsoDate(atMs),
+
+      detail:
+        safePreview(detail),
+
+      at:
+        safeIsoDate(atMs),
+
       atMs,
     });
 
-    const limit = Math.max(
-      1,
-      safeNumber(maxRecentEvents, MAX_RECENT_EVENTS)
-    );
+    const limit =
+      Math.max(
+        1,
+        safeNumber(
+          maxRecentEvents,
+          MAX_RECENT_EVENTS
+        )
+      );
 
     if (recentEvents.length > limit) {
       recentEvents.splice(limit);
@@ -744,14 +1008,31 @@ export function createEvents({
     state.errorCount += 1;
 
     state.lastError = {
-      source: safeText(source, "events"),
-      name: safeText(name, ""),
-      message: safeText(
-        error?.message || error,
-        "Event bus error."
-      ),
-      stack: safeText(error?.stack, ""),
-      at: safeIsoDate(),
+      source:
+        safeText(
+          source,
+          "events"
+        ),
+
+      name:
+        safeText(
+          name,
+          ""
+        ),
+
+      message:
+        safeText(
+          error?.message || error,
+          "Event bus error."
+        ),
+
+      stack:
+        error?.stack
+          ? "[stack]"
+          : "",
+
+      at:
+        safeIsoDate(),
     };
 
     pushRecentEvent(
@@ -769,7 +1050,8 @@ export function createEvents({
       {
         source,
         name,
-        error,
+        error:
+          safePreview(error),
       }
     );
   }
@@ -778,11 +1060,23 @@ export function createEvents({
     state.dropCount += 1;
 
     state.lastDroppedEvent = {
-      name: safeText(name, ""),
-      reason: safeText(reason, ""),
+      name:
+        safeText(
+          name,
+          ""
+        ),
+
+      reason:
+        safeText(
+          reason,
+          ""
+        ),
+
       className:
         getEventClass(name),
-      at: safeIsoDate(),
+
+      at:
+        safeIsoDate(),
     };
 
     pushRecentEvent(
@@ -794,7 +1088,8 @@ export function createEvents({
       )
     );
 
-    const now = safeNow();
+    const now =
+      safeNow();
 
     if (
       isSilentDropEvent(name) &&
@@ -803,11 +1098,9 @@ export function createEvents({
       return;
     }
 
-    /*
-      No spamear consola si precisamente estamos cortando una tormenta.
-    */
     if (now - lastDropWarningAt > DROP_WARNING_INTERVAL_MS) {
-      lastDropWarningAt = now;
+      lastDropWarningAt =
+        now;
 
       safeWarn(
         `Evento bloqueado por firebreak: ${name}`,
@@ -815,37 +1108,52 @@ export function createEvents({
           reason,
           className:
             getEventClass(name),
-          detail,
+          detail:
+            safePreview(detail),
         }
       );
     }
   }
 
   function resetRateWindowIfNeeded() {
-    const now = safeNow();
+    const now =
+      safeNow();
 
-    const windowMs = Math.max(
-      100,
-      safeNumber(rateWindowMs, RATE_WINDOW_MS)
-    );
+    const windowMs =
+      Math.max(
+        100,
+        safeNumber(
+          rateWindowMs,
+          RATE_WINDOW_MS
+        )
+      );
 
     if (now - rateWindowStartedAt <= windowMs) {
       return;
     }
 
-    rateWindowStartedAt = now;
+    rateWindowStartedAt =
+      now;
 
-    normalEmitsInWindow = 0;
-    lowPriorityEmitsInWindow = 0;
-    criticalEmitsInWindow = 0;
-    absoluteEmitsInWindow = 0;
+    normalEmitsInWindow =
+      0;
+
+    lowPriorityEmitsInWindow =
+      0;
+
+    criticalEmitsInWindow =
+      0;
+
+    absoluteEmitsInWindow =
+      0;
 
     eventRateMap.clear();
     recentSampleMap.clear();
   }
 
   function shouldAllowEmit(eventName = "", options = {}) {
-    const name = normalizeEventName(eventName);
+    const name =
+      normalizeEventName(eventName);
 
     if (!name) {
       return false;
@@ -860,14 +1168,18 @@ export function createEvents({
     const eventClass =
       getEventClass(name);
 
-    const currentDepth = safeNumber(
-      emitDepthByName.get(name),
-      0
-    );
+    const currentDepth =
+      safeNumber(
+        emitDepthByName.get(name),
+        0
+      );
 
     if (
       currentDepth >=
-      safeNumber(maxSyncEmitDepth, MAX_SYNC_EMIT_DEPTH)
+      safeNumber(
+        maxSyncEmitDepth,
+        MAX_SYNC_EMIT_DEPTH
+      )
     ) {
       recordDrop(
         name,
@@ -885,7 +1197,10 @@ export function createEvents({
 
     if (
       absoluteEmitsInWindow >
-      safeNumber(maxAbsoluteEmitsPerWindow, MAX_ABSOLUTE_EMITS_PER_WINDOW)
+      safeNumber(
+        maxAbsoluteEmitsPerWindow,
+        MAX_ABSOLUTE_EMITS_PER_WINDOW
+      )
     ) {
       recordDrop(
         name,
@@ -899,10 +1214,11 @@ export function createEvents({
       return false;
     }
 
-    const currentEventCount = safeNumber(
-      eventRateMap.get(name),
-      0
-    ) + 1;
+    const currentEventCount =
+      safeNumber(
+        eventRateMap.get(name),
+        0
+      ) + 1;
 
     eventRateMap.set(
       name,
@@ -962,7 +1278,10 @@ export function createEvents({
 
     if (
       normalEmitsInWindow >
-      safeNumber(maxEmitsPerWindow, MAX_EMITS_PER_WINDOW)
+      safeNumber(
+        maxEmitsPerWindow,
+        MAX_EMITS_PER_WINDOW
+      )
     ) {
       recordDrop(
         name,
@@ -999,12 +1318,14 @@ export function createEvents({
   }
 
   function beginEmit(eventName = "") {
-    const name = normalizeEventName(eventName);
+    const name =
+      normalizeEventName(eventName);
 
-    const currentDepth = safeNumber(
-      emitDepthByName.get(name),
-      0
-    );
+    const currentDepth =
+      safeNumber(
+        emitDepthByName.get(name),
+        0
+      );
 
     emitDepthByName.set(
       name,
@@ -1013,12 +1334,14 @@ export function createEvents({
   }
 
   function endEmit(eventName = "") {
-    const name = normalizeEventName(eventName);
+    const name =
+      normalizeEventName(eventName);
 
-    const currentDepth = safeNumber(
-      emitDepthByName.get(name),
-      0
-    );
+    const currentDepth =
+      safeNumber(
+        emitDepthByName.get(name),
+        0
+      );
 
     if (currentDepth <= 1) {
       emitDepthByName.delete(name);
@@ -1032,7 +1355,8 @@ export function createEvents({
   }
 
   function getMemorySet(name = "") {
-    const eventName = normalizeEventName(name);
+    const eventName =
+      normalizeEventName(name);
 
     if (!eventName) {
       return null;
@@ -1050,18 +1374,29 @@ export function createEvents({
 
   function makeEventLike(name = "", detail = {}, targetRef = null) {
     return {
-      type: normalizeEventName(name),
+      type:
+        normalizeEventName(name),
+
       detail,
-      payload: detail,
-      target: targetRef,
-      currentTarget: targetRef,
-      defaultPrevented: false,
+      payload:
+        detail,
+
+      target:
+        targetRef,
+
+      currentTarget:
+        targetRef,
+
+      defaultPrevented:
+        false,
 
       preventDefault() {
-        this.defaultPrevented = true;
+        this.defaultPrevented =
+          true;
       },
 
       stopPropagation() {},
+
       stopImmediatePropagation() {},
     };
   }
@@ -1107,27 +1442,37 @@ export function createEvents({
   }
 
   function emitMemory(name = "", detail = {}) {
-    const eventName = normalizeEventName(name);
-    const set = memoryListeners.get(eventName);
+    const eventName =
+      normalizeEventName(name);
 
-    if (!set || !set.size) {
+    const set =
+      memoryListeners.get(eventName);
+
+    if (
+      !set ||
+      !set.size
+    ) {
       return false;
     }
 
-    const eventLike = makeEventLike(
-      eventName,
-      detail,
-      null
-    );
+    const eventLike =
+      makeEventLike(
+        eventName,
+        detail,
+        null
+      );
 
     for (const record of Array.from(set)) {
       callHandlerSafely({
         handler:
           record.wrappedHandler ||
           record.handler,
+
         event:
           eventLike,
+
         eventName,
+
         source:
           "memory-handler",
       });
@@ -1150,20 +1495,16 @@ export function createEvents({
     }
 
     try {
-      const event = createCustomEvent(
-        eventName,
-        payload
-      );
+      const event =
+        createCustomEvent(
+          eventName,
+          payload
+        );
 
       if (!event) {
         return false;
       }
 
-      /*
-        Las excepciones de listeners DOM nativos no siempre se propagan
-        al try/catch de dispatchEvent. Por eso los listeners de este bus
-        se registran envueltos.
-      */
       return Boolean(
         domTarget.dispatchEvent(event)
       );
@@ -1179,7 +1520,8 @@ export function createEvents({
   }
 
   function emit(name, detail = {}, options = {}) {
-    const eventName = normalizeEventName(name);
+    const eventName =
+      normalizeEventName(name);
 
     if (!eventName) {
       return false;
@@ -1195,8 +1537,10 @@ export function createEvents({
         : detail;
 
     state.emitCount += 1;
-    state.lastEvent = eventName;
-    state.lastEventAt = safeNow();
+    state.lastEvent =
+      eventName;
+    state.lastEventAt =
+      safeNow();
 
     pushRecentEvent(
       "emit",
@@ -1207,25 +1551,29 @@ export function createEvents({
     beginEmit(eventName);
 
     try {
-      const optionsTarget = getOptionsTarget(options);
+      const optionsTarget =
+        getOptionsTarget(options);
 
-      const domTarget = resolveTarget(
-        optionsTarget || target
-      );
+      const domTarget =
+        resolveTarget(
+          optionsTarget || target
+        );
 
-      let emitted = false;
+      let emitted =
+        false;
 
       if (
         localIsBrowser() &&
         isEventTargetLike(domTarget)
       ) {
-        emitted = dispatchDomEvent({
-          eventName,
-          payload,
-          domTarget,
-          source:
-            "dom-dispatch",
-        });
+        emitted =
+          dispatchDomEvent({
+            eventName,
+            payload,
+            domTarget,
+            source:
+              "dom-dispatch",
+          });
 
         if (
           mirrorToWindow &&
@@ -1241,10 +1589,11 @@ export function createEvents({
           });
         }
       } else {
-        emitted = emitMemory(
-          eventName,
-          payload
-        );
+        emitted =
+          emitMemory(
+            eventName,
+            payload
+          );
       }
 
       return emitted;
@@ -1278,7 +1627,8 @@ export function createEvents({
   }
 
   function on(name, handler, options = false) {
-    const eventName = normalizeEventName(name);
+    const eventName =
+      normalizeEventName(name);
 
     if (
       !eventName ||
@@ -1295,35 +1645,52 @@ export function createEvents({
       );
     }
 
-    const finalOptions = normalizeDomOptions(options);
-    const optionsTarget = getOptionsTarget(options);
-    const targetRef = optionsTarget || target;
-    const domTarget = resolveTarget(targetRef);
+    const finalOptions =
+      normalizeDomOptions(options);
 
-    const key = makeListenerKey({
-      name: eventName,
-      handler,
-      options: finalOptions,
-      targetRef,
-    });
+    const optionsTarget =
+      getOptionsTarget(options);
+
+    const targetRef =
+      optionsTarget || target;
+
+    const domTarget =
+      resolveTarget(targetRef);
+
+    const key =
+      makeListenerKey({
+        name:
+          eventName,
+        handler,
+        options:
+          finalOptions,
+        targetRef,
+      });
 
     if (activeListeners.has(key)) {
-      return activeListeners.get(key)?.off || createNoopOff();
+      return (
+        activeListeners.get(key)?.off ||
+        createNoopOff()
+      );
     }
 
     state.onCount += 1;
 
-    let off = createNoopOff();
-    let wrappedHandler = null;
+    let off =
+      createNoopOff();
+
+    let wrappedHandler =
+      null;
 
     if (
       localIsBrowser() &&
       isEventTargetLike(domTarget)
     ) {
-      wrappedHandler = makeSafeDomHandler(
-        eventName,
-        handler
-      );
+      wrappedHandler =
+        makeSafeDomHandler(
+          eventName,
+          handler
+        );
 
       try {
         domTarget.addEventListener(
@@ -1375,16 +1742,18 @@ export function createEvents({
         return createNoopOff();
       }
     } else {
-      const set = getMemorySet(eventName);
+      const set =
+        getMemorySet(eventName);
 
       if (!set) {
         return createNoopOff();
       }
 
-      wrappedHandler = makeSafeMemoryHandler(
-        eventName,
-        handler
-      );
+      wrappedHandler =
+        makeSafeMemoryHandler(
+          eventName,
+          handler
+        );
 
       const memoryRecord = {
         key,
@@ -1457,7 +1826,8 @@ export function createEvents({
   }
 
   function off(name, handler, options = false) {
-    const eventName = normalizeEventName(name);
+    const eventName =
+      normalizeEventName(name);
 
     if (
       !eventName ||
@@ -1466,20 +1836,30 @@ export function createEvents({
       return false;
     }
 
-    const finalOptions = normalizeDomOptions(options);
-    const optionsTarget = getOptionsTarget(options);
-    const targetRef = optionsTarget || target;
+    const finalOptions =
+      normalizeDomOptions(options);
 
-    const key = makeListenerKey({
-      name:
-        eventName,
-      handler,
-      options:
-        finalOptions,
-      targetRef,
-    });
+    const optionsTarget =
+      getOptionsTarget(options);
 
-    const record = activeListeners.get(key);
+    const targetRef =
+      optionsTarget || target;
+
+    const key =
+      makeListenerKey({
+        name:
+          eventName,
+
+        handler,
+
+        options:
+          finalOptions,
+
+        targetRef,
+      });
+
+    const record =
+      activeListeners.get(key);
 
     if (
       record &&
@@ -1488,13 +1868,8 @@ export function createEvents({
       return record.off();
     }
 
-    /*
-      Fallback directo:
-      solo útil si alguien registró fuera del mapa.
-      En listeners de este bus normalmente no se usa porque el handler real
-      registrado en DOM es el wrapper.
-    */
-    const domTarget = resolveTarget(targetRef);
+    const domTarget =
+      resolveTarget(targetRef);
 
     try {
       if (
@@ -1507,7 +1882,8 @@ export function createEvents({
           finalOptions
         );
       } else {
-        const set = memoryListeners.get(eventName);
+        const set =
+          memoryListeners.get(eventName);
 
         if (set) {
           for (const item of Array.from(set)) {
@@ -1539,7 +1915,8 @@ export function createEvents({
   }
 
   function once(name, handler, options = false) {
-    const eventName = normalizeEventName(name);
+    const eventName =
+      normalizeEventName(name);
 
     if (
       !eventName ||
@@ -1550,7 +1927,8 @@ export function createEvents({
 
     state.onceCount += 1;
 
-    let dispose = null;
+    let dispose =
+      null;
 
     const wrappedOnce = (event) => {
       try {
@@ -1566,11 +1944,12 @@ export function createEvents({
       });
     };
 
-    dispose = on(
-      eventName,
-      wrappedOnce,
-      withoutOnce(options)
-    );
+    dispose =
+      on(
+        eventName,
+        wrappedOnce,
+        withoutOnce(options)
+      );
 
     pushRecentEvent(
       "once",
@@ -1582,9 +1961,11 @@ export function createEvents({
   }
 
   function clear(name = "") {
-    const eventName = normalizeEventName(name);
+    const eventName =
+      normalizeEventName(name);
 
-    let count = 0;
+    let count =
+      0;
 
     for (const record of Array.from(activeListeners.values())) {
       if (
@@ -1627,13 +2008,15 @@ export function createEvents({
   }
 
   function listenerCount(name = "") {
-    const eventName = normalizeEventName(name);
+    const eventName =
+      normalizeEventName(name);
 
     if (!eventName) {
       return activeListeners.size;
     }
 
-    let count = 0;
+    let count =
+      0;
 
     for (const record of activeListeners.values()) {
       if (record.name === eventName) {
@@ -1645,7 +2028,8 @@ export function createEvents({
   }
 
   function names() {
-    const set = new Set();
+    const set =
+      new Set();
 
     for (const record of activeListeners.values()) {
       if (record.name) {
@@ -1694,6 +2078,9 @@ export function createEvents({
 
       lastEvent:
         state.lastEvent,
+
+      lastEventClass:
+        getEventClass(state.lastEvent),
 
       lastEventAt:
         state.lastEventAt,
@@ -1793,27 +2180,56 @@ export function createEvents({
     eventRateMap.clear();
     recentSampleMap.clear();
 
-    rateWindowStartedAt = safeNow();
+    rateWindowStartedAt =
+      safeNow();
 
-    normalEmitsInWindow = 0;
-    lowPriorityEmitsInWindow = 0;
-    criticalEmitsInWindow = 0;
-    absoluteEmitsInWindow = 0;
+    normalEmitsInWindow =
+      0;
 
-    lastDropWarningAt = 0;
+    lowPriorityEmitsInWindow =
+      0;
 
-    state.emitCount = 0;
-    state.onCount = 0;
-    state.offCount = 0;
-    state.onceCount = 0;
-    state.clearCount = 0;
-    state.errorCount = 0;
-    state.dropCount = 0;
+    criticalEmitsInWindow =
+      0;
 
-    state.lastEvent = "";
-    state.lastEventAt = 0;
-    state.lastError = null;
-    state.lastDroppedEvent = null;
+    absoluteEmitsInWindow =
+      0;
+
+    lastDropWarningAt =
+      0;
+
+    state.emitCount =
+      0;
+
+    state.onCount =
+      0;
+
+    state.offCount =
+      0;
+
+    state.onceCount =
+      0;
+
+    state.clearCount =
+      0;
+
+    state.errorCount =
+      0;
+
+    state.dropCount =
+      0;
+
+    state.lastEvent =
+      "";
+
+    state.lastEventAt =
+      0;
+
+    state.lastError =
+      null;
+
+    state.lastDroppedEvent =
+      null;
 
     return getSnapshot();
   }

@@ -587,7 +587,6 @@ function getMainMenuItems(labels) {
 function renderAdminVisibilityAttrs(adminOnly = false) {
   if (!adminOnly) {
     return `
-          data-role="user"
           data-required-role=""
           data-requires-role=""
           data-admin-only="false"

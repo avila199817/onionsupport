@@ -2,8 +2,12 @@
    Onion SPA - Home API
    Archivo: src/views/home/home.api.js
 
-   FINAL PRODUCTION API · HOME DASHBOARD · EXTREME CONTRACT MODE · 12/10
-   PATCH · DASHBOARD SUMMARY + COLLECTIONS NORMALIZED
+   FINAL PRODUCTION API · HOME DASHBOARD · EXTREME CONTRACT MODE · 13/10
+
+   PATCH · SUMMARY COUNTS NEVER OVERRIDDEN BY EMPTY ARRAYS
+   PATCH · VISIBLE COUNT VS TOTAL COUNT SEPARATED
+   PATCH · WIDGET METRICS FALLBACK FOR CLIENTS/USERS/BILLING
+   PATCH · CACHE V4 TO AVOID OLD ZERO-META PAYLOADS
    PATCH · HOMEVIEW/TEMPLATE CONTRACT LOCKED
    PATCH · DEEP ENVELOPE UNWRAP
    PATCH · STORE/STATE SYNC HARDENED
@@ -25,6 +29,7 @@
    - soportar adapters múltiples de request
    - anti-race soft para dashboard load
    - entregar shape estable para home.template.js y HomeView.js
+   - preservar contadores reales aunque no haya arrays visibles
 
    CONTRATO ESTABLE ENTREGADO:
    {
@@ -34,6 +39,7 @@
      stats,
      metrics,
      totals,
+     counts,
      widgets,
      cards,
      kpis,
@@ -56,19 +62,10 @@
      raw
    }
 
-   HARDENING PRO:
-   - soporta { ok, data, payload, result, summary, dashboard }
-   - soporta nested envelopes profundos
-   - soporta collections/resources/dashboard/summary/data/result/payload
-   - soporta tickets/incidencias, facturas/invoices, usuarios/users, clientes/clients
-   - genera aliases compatibles para template, HomeView y store
-   - fallback AppCore.apiClient -> AppCore.request -> Http -> fetch
-   - no reintenta con otro adapter si el backend respondió error real
-   - browser guards para window/localStorage/sessionStorage/fetch/FormData/Blob
-   - Authorization robusto
-   - params soportados en fetch fallback
-   - persistencia coherente en store/state
-   - contrato alineado con /api/dashboard/summary
+   REGLA CRÍTICA:
+   - total/count = contador agregado real.
+   - visibleCount = longitud del array renderizable.
+   - NUNCA pisar un contador summary/widget con array vacío.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -105,7 +102,7 @@ export const HOME_DASHBOARD_PING_ENDPOINT = "/api/dashboard/ping";
 export const HOME_TIMEOUT = 15000;
 export const HOME_HEALTH_TIMEOUT = 8000;
 
-const HOME_API_CACHE_KEY = "onion.home.api.cache.v3";
+const HOME_API_CACHE_KEY = "onion.home.api.cache.v4";
 const HOME_API_CACHE_TTL_MS = 1000 * 60 * 10;
 
 let lastLoadToken = 0;
@@ -175,6 +172,11 @@ function safeNumber(value, fallback = 0) {
 
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function toFiniteNumber(value = null) {
+  const n = safeNumber(value, NaN);
+  return Number.isFinite(n) ? n : null;
 }
 
 function safeBoolean(value, fallback = false) {
@@ -281,22 +283,6 @@ function safeEmit(eventName = "", payload = {}) {
   return emitted;
 }
 
-function safeLog(...args) {
-  try {
-    AppCore?.utils?.log?.("[HomeAPI]", ...args);
-  } catch {}
-}
-
-function safeWarn(...args) {
-  try {
-    AppCore?.utils?.warn?.("[HomeAPI]", ...args);
-  } catch {}
-
-  try {
-    console.warn("[HomeAPI]", ...args);
-  } catch {}
-}
-
 function safeError(...args) {
   try {
     AppCore?.utils?.error?.("[HomeAPI]", ...args);
@@ -317,6 +303,69 @@ function getPath(object = {}, path = "") {
     if (acc === null || acc === undefined) return undefined;
     return acc?.[segment];
   }, root);
+}
+
+function firstPath(object = {}, paths = []) {
+  const root = safeObject(object, null);
+  if (!root) return undefined;
+
+  for (const path of safeArray(paths)) {
+    const cleanPath = safeText(path, "");
+    if (!cleanPath) continue;
+
+    const value = cleanPath.includes(".")
+      ? getPath(root, cleanPath)
+      : root?.[cleanPath];
+
+    if (isMeaningfulValue(value)) return value;
+  }
+
+  return undefined;
+}
+
+function maxNumber(...values) {
+  let max = null;
+
+  for (const value of values) {
+    const n = toFiniteNumber(value);
+    if (n === null) continue;
+    max = max === null ? n : Math.max(max, n);
+  }
+
+  return max === null ? 0 : max;
+}
+
+function pickMaxFromSources(keys = [], sources = []) {
+  const values = [];
+
+  for (const source of safeArray(sources)) {
+    const obj = safeObject(source, null);
+    if (!obj) continue;
+
+    for (const key of safeArray(keys)) {
+      const value = key.includes(".") ? getPath(obj, key) : obj?.[key];
+      values.push(value);
+    }
+  }
+
+  return maxNumber(...values);
+}
+
+function pickFirstFromSources(keys = [], sources = [], fallback = null) {
+  for (const source of safeArray(sources)) {
+    const obj = safeObject(source, null);
+    if (!obj) continue;
+
+    for (const key of safeArray(keys)) {
+      const value = key.includes(".") ? getPath(obj, key) : obj?.[key];
+
+      if (isMeaningfulValue(value)) {
+        return value;
+      }
+    }
+  }
+
+  return fallback;
 }
 
 function uniqueBy(items = [], picker = (item) => item) {
@@ -462,7 +511,6 @@ function getDashboardEndpoint() {
       first(
         AppCore?.config?.endpoints?.dashboard_summary,
         AppCore?.config?.endpoints?.dashboardSummary,
-        AppCore?.config?.endpoints?.dashboard,
         HOME_DASHBOARD_ENDPOINT
       ),
       HOME_DASHBOARD_ENDPOINT
@@ -477,6 +525,7 @@ function getLegacyDashboardEndpoint() {
       first(
         AppCore?.config?.endpoints?.dashboardLegacy,
         AppCore?.config?.endpoints?.dashboard_legacy,
+        AppCore?.config?.endpoints?.dashboard,
         HOME_DASHBOARD_LEGACY_ENDPOINT
       ),
       HOME_DASHBOARD_LEGACY_ENDPOINT
@@ -775,6 +824,7 @@ function getPayloadCandidates(payload = null) {
     obj.stats,
     obj.metrics,
     obj.totals,
+    obj.counts,
 
     obj.data,
     obj.body,
@@ -788,6 +838,7 @@ function getPayloadCandidates(payload = null) {
     obj.data?.stats,
     obj.data?.metrics,
     obj.data?.totals,
+    obj.data?.counts,
     obj.data?.data,
     obj.data?.body,
     obj.data?.result,
@@ -798,6 +849,7 @@ function getPayloadCandidates(payload = null) {
     obj.result?.stats,
     obj.result?.metrics,
     obj.result?.totals,
+    obj.result?.counts,
     obj.result?.data,
     obj.result?.payload,
 
@@ -806,6 +858,7 @@ function getPayloadCandidates(payload = null) {
     obj.payload?.stats,
     obj.payload?.metrics,
     obj.payload?.totals,
+    obj.payload?.counts,
     obj.payload?.data,
     obj.payload?.result,
 
@@ -814,6 +867,7 @@ function getPayloadCandidates(payload = null) {
     obj.response?.stats,
     obj.response?.metrics,
     obj.response?.totals,
+    obj.response?.counts,
     obj.response?.data,
     obj.response?.result,
   ].filter((item) => item !== undefined && item !== null);
@@ -1103,6 +1157,7 @@ function getCollectionSearchSources(source = {}) {
     raw.stats,
     raw.metrics,
     raw.totals,
+    raw.counts,
     raw.data,
     raw.payload,
     raw.result,
@@ -1152,25 +1207,6 @@ function pickCollectionBlock(source = {}, keys = []) {
     total: 0,
     raw: null,
   };
-}
-
-function getArrayCount(value = null) {
-  if (Array.isArray(value)) return value.length;
-
-  const obj = safeObject(value, null);
-  if (!obj) return 0;
-
-  return safeNumber(
-    first(
-      obj.total,
-      obj.count,
-      obj.remoteCount,
-      obj.totalCount,
-      obj.meta?.total,
-      obj.pagination?.total
-    ),
-    safeArray(first(obj.items, obj.rows, obj.data, obj.results, [])).length
-  );
 }
 
 /* =========================================================
@@ -1504,6 +1540,7 @@ function normalizeTicketItem(item = {}) {
   const priority = getTicketPriority(raw);
   const clientName = getTicketClientName(raw);
   const clientEmail = getTicketClientEmail(raw);
+  const avatar = getTicketAvatar(raw);
 
   return {
     ...raw,
@@ -1563,9 +1600,9 @@ function normalizeTicketItem(item = {}) {
     clienteEmail: safeText(first(raw.clienteEmail, clientEmail), clientEmail),
     email: safeText(first(raw.email, clientEmail), clientEmail),
 
-    clientAvatar: getTicketAvatar(raw),
-    avatar: safeText(first(raw.avatar, getTicketAvatar(raw)), getTicketAvatar(raw)),
-    avatarUrl: safeText(first(raw.avatarUrl, getTicketAvatar(raw)), getTicketAvatar(raw)),
+    clientAvatar: avatar,
+    avatar: safeText(first(raw.avatar, avatar), avatar),
+    avatarUrl: safeText(first(raw.avatarUrl, avatar), avatar),
 
     category: safeText(first(raw.category, raw.categoria, raw.type, raw.tipo), "Soporte"),
     categoria: safeText(first(raw.categoria, raw.category, raw.type, raw.tipo), "Soporte"),
@@ -1656,7 +1693,6 @@ function getInvoiceAmount(item = {}) {
 function normalizeInvoiceItem(item = {}) {
   const raw = safeObject(item);
   const id = getInvoiceId(raw);
-
   const amount = getInvoiceAmount(raw);
 
   const status = safeText(
@@ -2005,6 +2041,51 @@ function getWidgetTitle(item = {}) {
   );
 }
 
+function getWidgetNumericValue(item = {}) {
+  return toFiniteNumber(
+    first(
+      item.value,
+      item.total,
+      item.amount,
+      item.count,
+      item.metric,
+      item.raw?.value,
+      item.raw?.total,
+      item.raw?.amount,
+      item.raw?.count,
+      item.raw?.metric
+    )
+  );
+}
+
+function getWidgetCorpus(widget = {}) {
+  const raw = safeObject(widget);
+
+  return normalizeKey(
+    [
+      raw.widgetId,
+      raw.widgetKey,
+      raw.id,
+      raw.key,
+      raw.slug,
+      raw.code,
+      raw.type,
+      raw.kind,
+      raw.variant,
+      raw.category,
+      raw.title,
+      raw.name,
+      raw.label,
+      raw.heading,
+      raw.description,
+      raw.subtitle,
+      raw.text,
+    ]
+      .filter((item) => item !== undefined && item !== null)
+      .join(" ")
+  );
+}
+
 function normalizeWidget(item = {}) {
   const raw = safeObject(item);
   const id = getWidgetId(raw);
@@ -2116,7 +2197,7 @@ function getDashboardWidgetsBlock(dashboard = {}) {
 }
 
 /* =========================================================
-   SUMMARY NORMALIZATION
+   STATUS / SUMMARY HELPERS
 ========================================================= */
 
 function getTicketStatusKey(value = "") {
@@ -2270,15 +2351,141 @@ function getDashboardSummaryBlock(dashboard = {}) {
     "ticketsTotal" in maybeSummaryOnly ||
     "incidenciasTotal" in maybeSummaryOnly ||
     "openTickets" in maybeSummaryOnly ||
+    "pendingTickets" in maybeSummaryOnly ||
     "totalInvoices" in maybeSummaryOnly ||
+    "invoicesTotal" in maybeSummaryOnly ||
+    "facturasTotal" in maybeSummaryOnly ||
+    "totalFacturas" in maybeSummaryOnly ||
+    "pendingInvoices" in maybeSummaryOnly ||
     "invoiceAmount" in maybeSummaryOnly ||
+    "billingTotal" in maybeSummaryOnly ||
+    "usersCount" in maybeSummaryOnly ||
+    "usuariosCount" in maybeSummaryOnly ||
+    "totalUsers" in maybeSummaryOnly ||
+    "totalUsuarios" in maybeSummaryOnly ||
     "clientsCount" in maybeSummaryOnly ||
-    "usersCount" in maybeSummaryOnly
+    "clientesCount" in maybeSummaryOnly ||
+    "customersCount" in maybeSummaryOnly ||
+    "totalClients" in maybeSummaryOnly ||
+    "totalClientes" in maybeSummaryOnly ||
+    "totalCustomers" in maybeSummaryOnly
   ) {
     return maybeSummaryOnly;
   }
 
   return {};
+}
+
+function buildWidgetSummary(widgets = []) {
+  const summary = {
+    totalTickets: 0,
+    openTickets: 0,
+    urgentTickets: 0,
+
+    totalInvoices: 0,
+    pendingInvoices: 0,
+    invoiceAmount: 0,
+
+    usersCount: 0,
+    usuariosCount: 0,
+
+    clientsCount: 0,
+    clientesCount: 0,
+    customersCount: 0,
+  };
+
+  for (const widget of safeArray(widgets)) {
+    const corpus = getWidgetCorpus(widget);
+    const value = getWidgetNumericValue(widget);
+
+    if (value === null) continue;
+
+    const isTicket =
+      corpus.includes("ticket") ||
+      corpus.includes("incidencia") ||
+      corpus.includes("solicitud") ||
+      corpus.includes("soporte");
+
+    const isInvoice =
+      corpus.includes("factura") ||
+      corpus.includes("invoice") ||
+      corpus.includes("billing") ||
+      corpus.includes("facturacion") ||
+      corpus.includes("facturacin") ||
+      corpus.includes("cobro");
+
+    const isUser =
+      corpus.includes("usuario") ||
+      corpus.includes("user") ||
+      corpus.includes("member") ||
+      corpus.includes("account");
+
+    const isClient =
+      corpus.includes("cliente") ||
+      corpus.includes("client") ||
+      corpus.includes("customer");
+
+    if (isTicket) {
+      if (
+        corpus.includes("abierta") ||
+        corpus.includes("abierto") ||
+        corpus.includes("open") ||
+        corpus.includes("pendiente") ||
+        corpus.includes("pending") ||
+        corpus.includes("proceso")
+      ) {
+        summary.openTickets = Math.max(summary.openTickets, value);
+      } else {
+        summary.totalTickets = Math.max(summary.totalTickets, value);
+      }
+
+      if (
+        corpus.includes("urgente") ||
+        corpus.includes("urgent") ||
+        corpus.includes("critica") ||
+        corpus.includes("critical") ||
+        corpus.includes("alta")
+      ) {
+        summary.urgentTickets = Math.max(summary.urgentTickets, value);
+      }
+    }
+
+    if (isInvoice) {
+      if (
+        corpus.includes("importe") ||
+        corpus.includes("amount") ||
+        corpus.includes("facturacion") ||
+        corpus.includes("billing") ||
+        corpus.includes("total_facturado") ||
+        corpus.includes("facturacion_total") ||
+        corpus.includes("visible")
+      ) {
+        summary.invoiceAmount = Math.max(summary.invoiceAmount, value);
+      } else if (
+        corpus.includes("pendiente") ||
+        corpus.includes("pending") ||
+        corpus.includes("vencida") ||
+        corpus.includes("overdue")
+      ) {
+        summary.pendingInvoices = Math.max(summary.pendingInvoices, value);
+      } else {
+        summary.totalInvoices = Math.max(summary.totalInvoices, value);
+      }
+    }
+
+    if (isUser && !isClient) {
+      summary.usersCount = Math.max(summary.usersCount, value);
+      summary.usuariosCount = Math.max(summary.usuariosCount, value);
+    }
+
+    if (isClient) {
+      summary.clientsCount = Math.max(summary.clientsCount, value);
+      summary.clientesCount = Math.max(summary.clientesCount, value);
+      summary.customersCount = Math.max(summary.customersCount, value);
+    }
+  }
+
+  return summary;
 }
 
 function buildDerivedSummary({
@@ -2369,114 +2576,134 @@ function buildDerivedSummary({
   };
 }
 
-function normalizeSummary(rawSummary = {}, derivedSummary = {}) {
+function normalizeSummary(rawSummary = {}, widgetSummary = {}, derivedSummary = {}) {
   const raw = safeObject(rawSummary);
+  const widget = safeObject(widgetSummary);
   const derived = safeObject(derivedSummary);
+
+  const sources = [raw, widget, derived];
+
+  const totalTickets = pickMaxFromSources(
+    ["totalTickets", "ticketsTotal", "incidenciasTotal", "totalIncidencias", "ticketsCount", "incidenciasCount"],
+    sources
+  );
+
+  const openTickets = pickMaxFromSources(
+    ["openTickets", "pendingTickets", "openIncidencias", "pendingIncidencias", "incidenciasAbiertas", "ticketsOpen"],
+    sources
+  );
+
+  const closedTickets = pickMaxFromSources(
+    ["closedTickets", "resolvedTickets", "closedIncidencias", "resolvedIncidencias", "incidenciasCerradas"],
+    sources
+  );
+
+  const urgentTickets = pickMaxFromSources(
+    ["urgentTickets", "urgentIncidencias", "highPriorityTickets", "incidenciasUrgentes"],
+    sources
+  );
+
+  const totalInvoices = pickMaxFromSources(
+    ["totalInvoices", "invoicesTotal", "facturasTotal", "totalFacturas", "invoicesCount", "facturasCount"],
+    sources
+  );
+
+  const pendingInvoices = pickMaxFromSources(
+    ["pendingInvoices", "pendingFacturas", "facturasPendientes", "invoicesPending", "facturasVencidas", "overdueInvoices"],
+    sources
+  );
+
+  const invoiceAmount = pickMaxFromSources(
+    ["invoiceAmount", "billingTotal", "totalBilling", "totalFacturado", "importeFacturas", "facturacionVisible", "facturacionTotal", "facturasImporteTotal"],
+    sources
+  );
+
+  const usersCount = pickMaxFromSources(
+    ["usersCount", "usuariosCount", "totalUsers", "totalUsuarios", "activeUsers", "usuariosActivos"],
+    sources
+  );
+
+  const clientsCount = pickMaxFromSources(
+    ["clientsCount", "clientesCount", "customersCount", "totalClients", "totalClientes", "totalCustomers", "activeClients", "clientesActivos"],
+    sources
+  );
+
+  const attachmentsCount = pickMaxFromSources(
+    ["attachmentsCount", "filesCount", "adjuntosCount"],
+    sources
+  );
+
+  const lastTicketUpdate = pickFirstFromSources(
+    ["lastTicketUpdate", "lastIncidenciaUpdate", "lastUpdate", "updatedAt"],
+    sources,
+    null
+  );
 
   return {
     ...derived,
+    ...widget,
     ...raw,
 
-    totalTickets: safeNumber(
-      first(raw.totalTickets, raw.ticketsTotal, raw.incidenciasTotal, raw.totalIncidencias, derived.totalTickets),
-      derived.totalTickets || 0
-    ),
-    ticketsTotal: safeNumber(
-      first(raw.ticketsTotal, raw.totalTickets, raw.incidenciasTotal, raw.totalIncidencias, derived.ticketsTotal),
-      derived.ticketsTotal || 0
-    ),
-    incidenciasTotal: safeNumber(
-      first(raw.incidenciasTotal, raw.totalIncidencias, raw.totalTickets, raw.ticketsTotal, derived.incidenciasTotal),
-      derived.incidenciasTotal || 0
-    ),
-    totalIncidencias: safeNumber(
-      first(raw.totalIncidencias, raw.incidenciasTotal, raw.totalTickets, raw.ticketsTotal, derived.totalIncidencias),
-      derived.totalIncidencias || derived.totalTickets || 0
-    ),
+    totalTickets,
+    ticketsTotal: totalTickets,
+    incidenciasTotal: totalTickets,
+    totalIncidencias: totalTickets,
 
-    openTickets: safeNumber(
-      first(raw.openTickets, raw.openIncidencias, raw.pendingTickets, raw.ticketsOpen, raw.incidenciasAbiertas, derived.openTickets),
-      derived.openTickets || 0
-    ),
-    pendingTickets: safeNumber(
-      first(raw.pendingTickets, raw.openTickets, raw.pendingIncidencias, raw.incidenciasAbiertas, derived.pendingTickets),
-      derived.pendingTickets || derived.openTickets || 0
-    ),
-    closedTickets: safeNumber(
-      first(raw.closedTickets, raw.closedIncidencias, raw.resolvedTickets, raw.incidenciasCerradas, derived.closedTickets),
-      derived.closedTickets || 0
-    ),
-    urgentTickets: safeNumber(
-      first(raw.urgentTickets, raw.urgentIncidencias, raw.highPriorityTickets, raw.incidenciasUrgentes, derived.urgentTickets),
-      derived.urgentTickets || 0
-    ),
+    openTickets,
+    pendingTickets: openTickets,
+    openIncidencias: openTickets,
+    pendingIncidencias: openTickets,
+    incidenciasAbiertas: openTickets,
 
-    totalInvoices: safeNumber(
-      first(raw.totalInvoices, raw.invoicesTotal, raw.facturasTotal, raw.totalFacturas, derived.totalInvoices),
-      derived.totalInvoices || 0
-    ),
-    invoicesTotal: safeNumber(
-      first(raw.invoicesTotal, raw.totalInvoices, raw.facturasTotal, raw.totalFacturas, derived.invoicesTotal),
-      derived.invoicesTotal || 0
-    ),
-    facturasTotal: safeNumber(
-      first(raw.facturasTotal, raw.totalFacturas, raw.totalInvoices, raw.invoicesTotal, derived.facturasTotal),
-      derived.facturasTotal || 0
-    ),
-    totalFacturas: safeNumber(
-      first(raw.totalFacturas, raw.facturasTotal, raw.totalInvoices, raw.invoicesTotal, derived.totalFacturas),
-      derived.totalFacturas || derived.totalInvoices || 0
-    ),
+    closedTickets,
+    resolvedTickets: closedTickets,
+    closedIncidencias: closedTickets,
+    resolvedIncidencias: closedTickets,
+    incidenciasCerradas: closedTickets,
 
-    pendingInvoices: safeNumber(
-      first(raw.pendingInvoices, raw.pendingFacturas, raw.invoicesPending, raw.facturasPendientes, raw.facturasVencidas, raw.overdueInvoices, derived.pendingInvoices),
-      derived.pendingInvoices || 0
-    ),
+    urgentTickets,
+    urgentIncidencias: urgentTickets,
+    highPriorityTickets: urgentTickets,
 
-    invoiceAmount: safeNumber(
-      first(raw.invoiceAmount, raw.billingTotal, raw.totalBilling, raw.totalFacturado, raw.importeFacturas, raw.facturacionVisible, raw.facturacionTotal, derived.invoiceAmount),
-      derived.invoiceAmount || 0
-    ),
-    billingTotal: safeNumber(
-      first(raw.billingTotal, raw.invoiceAmount, raw.totalBilling, raw.totalFacturado, raw.facturacionTotal, derived.billingTotal),
-      derived.billingTotal || derived.invoiceAmount || 0
-    ),
+    totalInvoices,
+    invoicesTotal: totalInvoices,
+    facturasTotal: totalInvoices,
+    totalFacturas: totalInvoices,
 
-    usersCount: safeNumber(
-      first(raw.usersCount, raw.usuariosCount, raw.totalUsers, raw.totalUsuarios, raw.activeUsers, raw.usuariosActivos, derived.usersCount),
-      derived.usersCount || 0
-    ),
-    usuariosCount: safeNumber(
-      first(raw.usuariosCount, raw.usersCount, raw.totalUsuarios, raw.totalUsers, raw.usuariosActivos, derived.usuariosCount),
-      derived.usuariosCount || derived.usersCount || 0
-    ),
+    pendingInvoices,
+    pendingFacturas: pendingInvoices,
+    facturasPendientes: pendingInvoices,
+    invoicesPending: pendingInvoices,
 
-    clientsCount: safeNumber(
-      first(raw.clientsCount, raw.clientesCount, raw.customersCount, raw.totalClients, raw.totalClientes, raw.totalCustomers, raw.activeClients, raw.clientesActivos, derived.clientsCount),
-      derived.clientsCount || 0
-    ),
-    clientesCount: safeNumber(
-      first(raw.clientesCount, raw.clientsCount, raw.customersCount, raw.totalClientes, raw.totalClients, raw.clientesActivos, derived.clientesCount),
-      derived.clientesCount || derived.clientsCount || 0
-    ),
+    invoiceAmount,
+    billingTotal: invoiceAmount,
+    totalBilling: invoiceAmount,
+    totalFacturado: invoiceAmount,
+    importeFacturas: invoiceAmount,
+    facturacionVisible: invoiceAmount,
 
-    attachmentsCount: safeNumber(
-      first(raw.attachmentsCount, raw.filesCount, raw.adjuntosCount, derived.attachmentsCount),
-      derived.attachmentsCount || 0
-    ),
+    usersCount,
+    usuariosCount: usersCount,
+    totalUsers: usersCount,
+    totalUsuarios: usersCount,
 
-    lastTicketUpdate: first(
-      raw.lastTicketUpdate,
-      raw.lastIncidenciaUpdate,
-      raw.lastUpdate,
-      raw.updatedAt,
-      derived.lastTicketUpdate
-    ),
+    clientsCount,
+    clientesCount: clientsCount,
+    customersCount: clientsCount,
+    totalClients: clientsCount,
+    totalClientes: clientsCount,
+    totalCustomers: clientsCount,
+
+    attachmentsCount,
+    filesCount: attachmentsCount,
+    adjuntosCount: attachmentsCount,
+
+    lastTicketUpdate,
   };
 }
 
 /* =========================================================
-   DASHBOARD NORMALIZATION
+   DASHBOARD COLLECTIONS
 ========================================================= */
 
 function getDashboardCollections(dashboard = {}) {
@@ -2602,6 +2829,7 @@ export function normalizeDashboard(payload = null) {
   const widgets = getDashboardWidgetsBlock(raw);
 
   const rawSummary = getDashboardSummaryBlock(raw);
+  const widgetSummary = buildWidgetSummary(widgets);
 
   const derivedSummary = buildDerivedSummary({
     tickets: collections.tickets,
@@ -2610,6 +2838,7 @@ export function normalizeDashboard(payload = null) {
       rawSummary.ticketsTotal,
       rawSummary.incidenciasTotal,
       rawSummary.totalIncidencias,
+      widgetSummary.totalTickets,
       collections.ticketsTotal
     ),
 
@@ -2619,6 +2848,7 @@ export function normalizeDashboard(payload = null) {
       rawSummary.invoicesTotal,
       rawSummary.facturasTotal,
       rawSummary.totalFacturas,
+      widgetSummary.totalInvoices,
       collections.invoicesTotal
     ),
 
@@ -2628,6 +2858,8 @@ export function normalizeDashboard(payload = null) {
       rawSummary.usuariosCount,
       rawSummary.totalUsers,
       rawSummary.totalUsuarios,
+      widgetSummary.usersCount,
+      widgetSummary.usuariosCount,
       collections.usersTotal
     ),
 
@@ -2638,11 +2870,14 @@ export function normalizeDashboard(payload = null) {
       rawSummary.customersCount,
       rawSummary.totalClients,
       rawSummary.totalClientes,
+      widgetSummary.clientsCount,
+      widgetSummary.clientesCount,
+      widgetSummary.customersCount,
       collections.clientsTotal
     ),
   });
 
-  const summary = normalizeSummary(rawSummary, derivedSummary);
+  const summary = normalizeSummary(rawSummary, widgetSummary, derivedSummary);
 
   const updatedAt = first(
     raw.updatedAt,
@@ -2653,6 +2888,12 @@ export function normalizeDashboard(payload = null) {
     summary.lastUpdate,
     nowIso()
   );
+
+  const visibleTicketsCount = collections.tickets.length;
+  const visibleInvoicesCount = collections.invoices.length;
+  const visibleUsersCount = collections.users.length;
+  const visibleClientsCount = collections.clients.length;
+  const visibleActivityCount = collections.activity.length;
 
   return {
     ...raw,
@@ -2672,39 +2913,84 @@ export function normalizeDashboard(payload = null) {
 
     tickets: collections.tickets,
     incidencias: collections.incidencias,
+
     ticketsTotal: summary.totalTickets,
     incidenciasTotal: summary.totalTickets,
     totalTickets: summary.totalTickets,
     totalIncidencias: summary.totalTickets,
+    ticketsCount: summary.totalTickets,
+    incidenciasCount: summary.totalTickets,
+
+    openTickets: summary.openTickets,
+    pendingTickets: summary.pendingTickets,
+    urgentTickets: summary.urgentTickets,
+    closedTickets: summary.closedTickets,
+    resolvedTickets: summary.resolvedTickets,
+
+    visibleTicketsCount,
+    visibleIncidenciasCount: visibleTicketsCount,
 
     invoices: collections.invoices,
     facturas: collections.facturas,
+
     invoicesTotal: summary.totalInvoices,
     facturasTotal: summary.totalInvoices,
     totalInvoices: summary.totalInvoices,
     totalFacturas: summary.totalInvoices,
+    invoicesCount: summary.totalInvoices,
+    facturasCount: summary.totalInvoices,
+
+    pendingInvoices: summary.pendingInvoices,
+    pendingFacturas: summary.pendingFacturas,
+    invoiceAmount: summary.invoiceAmount,
+    billingTotal: summary.billingTotal,
+    totalBilling: summary.totalBilling,
+    totalFacturado: summary.totalFacturado,
+    importeFacturas: summary.importeFacturas,
+    facturacionVisible: summary.facturacionVisible,
+
+    visibleInvoicesCount,
+    visibleFacturasCount: visibleInvoicesCount,
 
     users: collections.users,
     usuarios: collections.usuarios,
+
     usersTotal: summary.usersCount,
-    usuariosTotal: summary.usersCount,
+    usuariosTotal: summary.usuariosCount,
     totalUsers: summary.usersCount,
-    totalUsuarios: summary.usersCount,
+    totalUsuarios: summary.usuariosCount,
+    usersCount: summary.usersCount,
+    usuariosCount: summary.usuariosCount,
+
+    visibleUsersCount,
+    visibleUsuariosCount: visibleUsersCount,
 
     clients: collections.clients,
     clientes: collections.clientes,
     customers: collections.customers,
+
     clientsTotal: summary.clientsCount,
-    clientesTotal: summary.clientsCount,
-    customersTotal: summary.clientsCount,
+    clientesTotal: summary.clientesCount,
+    customersTotal: summary.customersCount,
     totalClients: summary.clientsCount,
-    totalClientes: summary.clientsCount,
-    totalCustomers: summary.clientsCount,
+    totalClientes: summary.clientesCount,
+    totalCustomers: summary.customersCount,
+    clientsCount: summary.clientsCount,
+    clientesCount: summary.clientesCount,
+    customersCount: summary.customersCount,
+
+    visibleClientsCount,
+    visibleClientesCount: visibleClientsCount,
+    visibleCustomersCount: visibleClientsCount,
 
     activity: collections.activity,
     activities: collections.activities,
     recent: collections.recent,
     recentActivity: collections.recentActivity,
+
+    activityCount: visibleActivityCount,
+    recentCount: visibleActivityCount,
+    visibleActivityCount,
 
     updatedAt,
     generatedAt: first(raw.generatedAt, updatedAt),
@@ -2713,16 +2999,55 @@ export function normalizeDashboard(payload = null) {
 
     meta: {
       ...extractMeta(payload),
+
       updatedAt,
+      generatedAt: first(raw.generatedAt, updatedAt),
+      requestId: getRequestIdFromPayload(payload),
+
       widgetsCount: widgets.length,
-      ticketsCount: collections.tickets.length,
-      invoicesCount: collections.invoices.length,
-      facturasCount: collections.invoices.length,
-      usersCount: collections.users.length,
-      usuariosCount: collections.users.length,
-      clientsCount: collections.clients.length,
-      clientesCount: collections.clients.length,
-      activityCount: collections.activity.length,
+
+      ticketsCount: summary.totalTickets,
+      incidenciasCount: summary.totalTickets,
+      totalTickets: summary.totalTickets,
+      totalIncidencias: summary.totalTickets,
+      openTickets: summary.openTickets,
+      pendingTickets: summary.pendingTickets,
+      urgentTickets: summary.urgentTickets,
+      closedTickets: summary.closedTickets,
+      visibleTicketsCount,
+      visibleIncidenciasCount: visibleTicketsCount,
+
+      invoicesCount: summary.totalInvoices,
+      facturasCount: summary.totalInvoices,
+      totalInvoices: summary.totalInvoices,
+      totalFacturas: summary.totalInvoices,
+      pendingInvoices: summary.pendingInvoices,
+      pendingFacturas: summary.pendingFacturas,
+      invoiceAmount: summary.invoiceAmount,
+      billingTotal: summary.billingTotal,
+      visibleInvoicesCount,
+      visibleFacturasCount: visibleInvoicesCount,
+
+      usersCount: summary.usersCount,
+      usuariosCount: summary.usuariosCount,
+      totalUsers: summary.usersCount,
+      totalUsuarios: summary.usuariosCount,
+      visibleUsersCount,
+      visibleUsuariosCount: visibleUsersCount,
+
+      clientsCount: summary.clientsCount,
+      clientesCount: summary.clientesCount,
+      customersCount: summary.customersCount,
+      totalClients: summary.clientsCount,
+      totalClientes: summary.clientesCount,
+      totalCustomers: summary.customersCount,
+      visibleClientsCount,
+      visibleClientesCount: visibleClientsCount,
+      visibleCustomersCount: visibleClientsCount,
+
+      activityCount: visibleActivityCount,
+      recentCount: visibleActivityCount,
+      visibleActivityCount,
     },
   };
 }
@@ -2740,6 +3065,7 @@ export function normalizeHomeDashboardResponse(payload = null) {
     stats: dashboard.summary,
     metrics: dashboard.summary,
     totals: dashboard.summary,
+    counts: dashboard.summary,
 
     widgets: dashboard.widgets,
     cards: dashboard.widgets,
@@ -2762,6 +3088,25 @@ export function normalizeHomeDashboardResponse(payload = null) {
     clients: dashboard.clients,
     clientes: dashboard.clientes,
     customers: dashboard.customers,
+
+    ticketsCount: dashboard.ticketsCount,
+    incidenciasCount: dashboard.incidenciasCount,
+    invoicesCount: dashboard.invoicesCount,
+    facturasCount: dashboard.facturasCount,
+    usersCount: dashboard.usersCount,
+    usuariosCount: dashboard.usuariosCount,
+    clientsCount: dashboard.clientsCount,
+    clientesCount: dashboard.clientesCount,
+    customersCount: dashboard.customersCount,
+
+    visibleTicketsCount: dashboard.visibleTicketsCount,
+    visibleIncidenciasCount: dashboard.visibleIncidenciasCount,
+    visibleInvoicesCount: dashboard.visibleInvoicesCount,
+    visibleFacturasCount: dashboard.visibleFacturasCount,
+    visibleUsersCount: dashboard.visibleUsersCount,
+    visibleUsuariosCount: dashboard.visibleUsuariosCount,
+    visibleClientsCount: dashboard.visibleClientsCount,
+    visibleClientesCount: dashboard.visibleClientesCount,
 
     requestId,
     lastSyncAt: first(dashboard.updatedAt, dashboard.generatedAt, nowIso()),
@@ -3141,6 +3486,7 @@ function writeApiCache(payload = {}) {
       HOME_API_CACHE_KEY,
       JSON.stringify({
         savedAt: Date.now(),
+        cacheVersion: 4,
         ...safeObject(payload),
       })
     );
@@ -3267,6 +3613,7 @@ export function hydrateHomeFromCache() {
 
         clients: dashboard.clients,
         clientes: dashboard.clientes,
+        customers: dashboard.customers,
 
         requestId: safeText(apiCache.requestId, ""),
         lastSyncAt: first(apiCache.lastSyncAt, dashboard.updatedAt, null),
@@ -3341,6 +3688,7 @@ export function hydrateHomeFromCache() {
 
         clients: dashboard.clients,
         clientes: dashboard.clientes,
+        customers: dashboard.customers,
 
         requestId: currentRequestId,
         lastSyncAt: currentLastSyncAt,
@@ -3363,6 +3711,7 @@ export function hydrateHomeFromCache() {
       usuarios: [],
       clients: [],
       clientes: [],
+      customers: [],
       requestId: "",
       lastSyncAt: null,
       hydrated: false,
@@ -3383,6 +3732,7 @@ export function hydrateHomeFromCache() {
       usuarios: [],
       clients: [],
       clientes: [],
+      customers: [],
       requestId: "",
       lastSyncAt: null,
       hydrated: false,
@@ -3517,16 +3867,30 @@ export async function loadHomeDashboard({
 
     safeEmit("home:dashboard:load:success", {
       requestId,
+
       widgetsCount: dashboard.widgets.length,
       recentCount: dashboard.recent.length,
-      ticketsCount: dashboard.tickets.length,
-      incidenciasCount: dashboard.incidencias.length,
-      invoicesCount: dashboard.facturas.length,
-      facturasCount: dashboard.facturas.length,
-      usersCount: dashboard.users.length,
-      usuariosCount: dashboard.usuarios.length,
-      clientsCount: dashboard.clients.length,
-      clientesCount: dashboard.clientes.length,
+
+      ticketsCount: dashboard.summary.totalTickets,
+      incidenciasCount: dashboard.summary.totalTickets,
+      visibleTicketsCount: dashboard.visibleTicketsCount,
+      visibleIncidenciasCount: dashboard.visibleIncidenciasCount,
+
+      invoicesCount: dashboard.summary.totalInvoices,
+      facturasCount: dashboard.summary.totalInvoices,
+      visibleInvoicesCount: dashboard.visibleInvoicesCount,
+      visibleFacturasCount: dashboard.visibleFacturasCount,
+
+      usersCount: dashboard.summary.usersCount,
+      usuariosCount: dashboard.summary.usuariosCount,
+      visibleUsersCount: dashboard.visibleUsersCount,
+      visibleUsuariosCount: dashboard.visibleUsuariosCount,
+
+      clientsCount: dashboard.summary.clientsCount,
+      clientesCount: dashboard.summary.clientesCount,
+      visibleClientsCount: dashboard.visibleClientsCount,
+      visibleClientesCount: dashboard.visibleClientesCount,
+
       syncedAt,
     });
 
@@ -3653,20 +4017,39 @@ export function getHomeApiSnapshot() {
       cacheKey: HOME_API_CACHE_KEY,
       ttlMs: HOME_API_CACHE_TTL_MS,
       savedAt: cache?.savedAt || null,
+      cacheVersion: cache?.cacheVersion || null,
     },
 
     lastLoadToken,
 
     dashboard: {
       widgetsCount: dashboard.widgets.length,
-      ticketsCount: dashboard.tickets.length,
-      incidenciasCount: dashboard.incidencias.length,
-      invoicesCount: dashboard.facturas.length,
-      facturasCount: dashboard.facturas.length,
-      usersCount: dashboard.users.length,
-      usuariosCount: dashboard.usuarios.length,
-      clientsCount: dashboard.clients.length,
-      clientesCount: dashboard.clientes.length,
+
+      ticketsCount: dashboard.summary.totalTickets,
+      incidenciasCount: dashboard.summary.incidenciasTotal,
+      openTickets: dashboard.summary.openTickets,
+      urgentTickets: dashboard.summary.urgentTickets,
+      visibleTicketsCount: dashboard.visibleTicketsCount,
+      visibleIncidenciasCount: dashboard.visibleIncidenciasCount,
+
+      invoicesCount: dashboard.summary.totalInvoices,
+      facturasCount: dashboard.summary.totalFacturas,
+      pendingInvoices: dashboard.summary.pendingInvoices,
+      invoiceAmount: dashboard.summary.invoiceAmount,
+      visibleInvoicesCount: dashboard.visibleInvoicesCount,
+      visibleFacturasCount: dashboard.visibleFacturasCount,
+
+      usersCount: dashboard.summary.usersCount,
+      usuariosCount: dashboard.summary.usuariosCount,
+      visibleUsersCount: dashboard.visibleUsersCount,
+      visibleUsuariosCount: dashboard.visibleUsuariosCount,
+
+      clientsCount: dashboard.summary.clientsCount,
+      clientesCount: dashboard.summary.clientesCount,
+      customersCount: dashboard.summary.customersCount,
+      visibleClientsCount: dashboard.visibleClientsCount,
+      visibleClientesCount: dashboard.visibleClientesCount,
+
       activityCount: dashboard.activity.length,
       updatedAt: dashboard.updatedAt || null,
     },

@@ -2,13 +2,13 @@
    Onion SPA - Cuenta View
    Archivo: src/views/cuenta/cuentaView.js
 
-   CLIENT EXPERIENCE MODE · VIEW REAL · HARDENED · EXTREME 10/10
-   PATCH · TEMPLATE GOD LEVEL COMPATIBLE
-   PATCH · PROFILE / THEME / LANGUAGE / SECURITY READY
-   PATCH · CONFIRM PASSWORD SUPPORT
-   PATCH · DOM / APPCORE / STORAGE SIDE EFFECTS
-   PATCH · ANTI-RACE / ANTI-SPAM / CLEANUP SAFE
-   PATCH · SINGLE RESOURCE MODE REAL PARA /api/user/preferences
+   EXTREME PRO SYSTEM · VIEW REAL · FULL PATCH 12/10
+   ACCOUNT EXPERIENCE MODE · TEMPLATE GOD LEVEL COMPATIBLE
+   PROFILE / THEME / LANGUAGE / SECURITY READY
+   CONFIRM PASSWORD SUPPORT
+   DOM / APPCORE / STORAGE SIDE EFFECTS
+   ANTI-RACE / ANTI-SPAM / CLEANUP SAFE
+   SINGLE RESOURCE MODE REAL PARA /api/user/preferences
 
    RESPONSABILIDADES:
    - punto de entrada real de la vista cuenta
@@ -19,52 +19,34 @@
    - cambio de theme con side effects reales en DOM / AppCore / storage
    - cambio de idioma con side effects reales en DOM / AppCore / storage
    - cambio de contraseña delegado por bridge/evento
-   - bind de eventos de pantalla
+   - bind de eventos mediante cuenta.bindings.js
    - evitar doble bind de listeners
    - soportar destroy limpio del router
    - permitir reload con rerender seguro
    - coordinar acciones y bridges sin mezclar responsabilidades
    - conservar compatibilidad con cuenta.template.js premium
    - leer inputs nuevos: nombre / teléfono / confirm password
+   - registrar bridge público estable en AppCore.modules/window
+
+   HARDENING EXTREME:
+   - namespace imports para no romper por named exports ausentes
+   - fallback local si bindings no existe
+   - render route-safe para /cuenta y /@usuario/cuenta
+   - anti-race por token de render/carga
+   - inflight guards por init/reload/save/theme/language/password
+   - side effects optimistas con rollback best-effort
+   - snapshot debug estable
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
-import {
-  cuentaState,
-  setHydrated,
-  setViewForm,
-  patchViewForm,
-  syncViewFormFromItem,
-  setViewSuccess,
-  setViewServerError,
-  clearViewSuccess,
-  clearViewErrors,
-} from "./cuenta.state.js";
-
-import {
-  loadCuenta,
-  updateCuenta,
-  updateCuentaTheme,
-  hydrateCuentaFromCache,
-  loadCuentaMeta,
-} from "./cuenta.api.js";
-
-import {
-  getCuentaStore,
-} from "./cuenta.store.js";
-
-import {
-  renderCuentaTemplate,
-} from "./cuenta.template.js";
-
-import {
-  normalizeCuentaModel,
-} from "./cuenta.model.js";
-
-import {
-  buildCuentaSnapshot,
-} from "./cuenta.utils.js";
+import * as State from "./cuenta.state.js";
+import * as CuentaApi from "./cuenta.api.js";
+import * as CuentaStore from "./cuenta.store.js";
+import * as CuentaModel from "./cuenta.model.js";
+import * as CuentaTemplate from "./cuenta.template.js";
+import * as CuentaUtils from "./cuenta.utils.js";
+import * as CuentaBindings from "./cuenta.bindings.js";
 
 export const CuentaView = (() => {
   "use strict";
@@ -76,6 +58,7 @@ export const CuentaView = (() => {
   const SCOPE = "view:cuenta";
   const MODULE = "cuenta";
   const VIEW_NAME = "CuentaView";
+  const VERSION = "12.0.0";
   const CANONICAL_PATH = "/cuenta";
 
   const PASSWORD_MIN_LENGTH = 8;
@@ -87,6 +70,25 @@ export const CuentaView = (() => {
     lang: "lang",
     language: "language",
   };
+
+  /* =========================================================
+     STATE REF
+  ========================================================= */
+
+  const cuentaState =
+    State.cuentaState ||
+    {
+      hydrated: false,
+      loading: false,
+      refreshing: false,
+      loaded: false,
+      saving: false,
+      error: "",
+      item: null,
+      view: {
+        form: {},
+      },
+    };
 
   /* =========================================================
      LOCAL RUNTIME
@@ -101,6 +103,7 @@ export const CuentaView = (() => {
   let inflightSave = null;
   let inflightTheme = null;
   let inflightLanguage = null;
+  let inflightPassword = null;
 
   let bindingsCleanup = null;
   let renderToken = 0;
@@ -111,15 +114,20 @@ export const CuentaView = (() => {
      SAFE HELPERS
   ========================================================= */
 
+  function isBrowser() {
+    return (
+      typeof window !== "undefined" &&
+      typeof document !== "undefined"
+    );
+  }
+
   function safeLog(...args) {
     try {
       AppCore?.utils?.log?.("[CuentaView]", ...args);
     } catch {}
 
     try {
-      if (typeof console !== "undefined" && typeof console.log === "function") {
-        console.log("[CuentaView]", ...args);
-      }
+      console.log("[CuentaView]", ...args);
     } catch {}
   }
 
@@ -129,49 +137,29 @@ export const CuentaView = (() => {
     } catch {}
 
     try {
-      if (typeof console !== "undefined" && typeof console.warn === "function") {
-        console.warn("[CuentaView]", ...args);
-      }
+      console.warn("[CuentaView]", ...args);
     } catch {}
   }
 
   function safeText(value, fallback = "") {
     if (value === null || value === undefined) return fallback;
 
-    const text = String(value).trim();
+    const text = String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
     return text || fallback;
   }
 
   function safeNumber(value, fallback = 0) {
-    if (value === null || value === undefined || value === "") return fallback;
+    if (value === null || value === undefined || value === "") {
+      return fallback;
+    }
 
     const n = Number(value);
 
     return Number.isFinite(n) ? n : fallback;
-  }
-
-  function safeBoolean(value, fallback = false) {
-    if (typeof value === "boolean") return value;
-
-    if (typeof value === "number") {
-      if (value === 1) return true;
-      if (value === 0) return false;
-    }
-
-    if (typeof value === "string") {
-      const normalized = normalizeKey(value);
-
-      if (["true", "1", "yes", "si", "sí", "on", "dark", "enabled"].includes(normalized)) {
-        return true;
-      }
-
-      if (["false", "0", "no", "off", "light", "disabled"].includes(normalized)) {
-        return false;
-      }
-    }
-
-    return fallback;
   }
 
   function safeObject(value, fallback = {}) {
@@ -210,28 +198,99 @@ export const CuentaView = (() => {
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, " ")
       .replace(/[\s-]+/g, "_")
       .replace(/[^\w]+/g, "_")
       .replace(/^_+|_+$/g, "")
       .trim();
   }
 
+  function safeBoolean(value, fallback = false) {
+    if (typeof value === "boolean") return value;
+
+    if (typeof value === "number") {
+      if (value === 1) return true;
+      if (value === 0) return false;
+      return value !== 0;
+    }
+
+    const key = normalizeKey(value);
+
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "y",
+        "si",
+        "sí",
+        "on",
+        "dark",
+        "enabled",
+        "activo",
+        "activa",
+      ].includes(key)
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "n",
+        "off",
+        "light",
+        "disabled",
+        "inactivo",
+        "inactiva",
+      ].includes(key)
+    ) {
+      return false;
+    }
+
+    return Boolean(fallback);
+  }
+
   function normalizeLang(value = "es") {
     const key = normalizeKey(value);
 
-    if (["en", "english", "en_us", "en_gb"].includes(key)) return "en";
-    if (["ca", "cat", "catala", "catalan", "ca_es"].includes(key)) return "ca";
+    if (["en", "eng", "english", "en_us", "en_gb"].includes(key)) {
+      return "en";
+    }
+
+    if (["ca", "cat", "catala", "catalan", "ca_es"].includes(key)) {
+      return "ca";
+    }
 
     return "es";
   }
 
-  function normalizeTheme(value = "light") {
+  function normalizeTheme(value = "light", fallbackDarkMode = false) {
     const key = normalizeKey(value);
 
-    if (["dark", "oscuro", "night"].includes(key)) return "dark";
-    if (["light", "claro", "day"].includes(key)) return "light";
+    if (["dark", "oscuro", "night", "theme_dark"].includes(key)) {
+      return "dark";
+    }
 
-    return safeBoolean(value, false) ? "dark" : "light";
+    if (["light", "claro", "day", "theme_light"].includes(key)) {
+      return "light";
+    }
+
+    return fallbackDarkMode ? "dark" : "light";
+  }
+
+  function callSafe(fn, ...args) {
+    try {
+      if (typeof fn === "function") {
+        return fn(...args);
+      }
+    } catch (error) {
+      safeWarn("callSafe falló:", error);
+    }
+
+    return undefined;
   }
 
   function getEventPayload(event = null) {
@@ -247,7 +306,7 @@ export const CuentaView = (() => {
   function waitForPaint() {
     return new Promise((resolve) => {
       try {
-        if (typeof window === "undefined") {
+        if (!isBrowser()) {
           resolve();
           return;
         }
@@ -279,7 +338,7 @@ export const CuentaView = (() => {
     } catch {}
 
     try {
-      if (typeof window !== "undefined") {
+      if (isBrowser()) {
         window.dispatchEvent(
           new CustomEvent(eventName, {
             detail: payload,
@@ -295,39 +354,81 @@ export const CuentaView = (() => {
 
   function showToast(message = "", type = "info") {
     const text = safeText(message, "");
-
-    if (!text) return;
+    if (!text) return false;
 
     const normalizedType = normalizeKey(type) || "info";
 
     try {
-      if (typeof AppCore?.toast?.[normalizedType] === "function") {
-        AppCore.toast[normalizedType](text);
-        return;
+      if (typeof CuentaUtils.showToast === "function") {
+        const ok = CuentaUtils.showToast(text, normalizedType);
+        if (ok !== false) return true;
       }
     } catch {}
 
     try {
-      AppCore?.toast?.show?.(text, normalizedType);
-      return;
+      if (typeof AppCore?.toast?.[normalizedType] === "function") {
+        AppCore.toast[normalizedType](text);
+        return true;
+      }
     } catch {}
 
     try {
-      AppCore?.ui?.toast?.[normalizedType]?.(text);
-      return;
+      if (typeof AppCore?.toast?.show === "function") {
+        AppCore.toast.show(text, normalizedType);
+        return true;
+      }
     } catch {}
 
     try {
-      window?.Toast?.[normalizedType]?.(text);
-      return;
+      if (typeof AppCore?.ui?.toast?.[normalizedType] === "function") {
+        AppCore.ui.toast[normalizedType](text);
+        return true;
+      }
     } catch {}
 
     try {
-      window?.Toast?.show?.(text, normalizedType);
+      if (typeof AppCore?.ui?.toast?.show === "function") {
+        AppCore.ui.toast.show({
+          message: text,
+          type: normalizedType,
+        });
+        return true;
+      }
     } catch {}
+
+    try {
+      if (isBrowser() && typeof window.Toast?.show === "function") {
+        window.Toast.show({
+          message: text,
+          type: normalizedType,
+        });
+        return true;
+      }
+    } catch {}
+
+    return false;
+  }
+
+  function safeErrorMessage(error = null, fallback = "No se pudo cargar la cuenta.") {
+    return safeText(
+      first(
+        error?.message,
+        error?.response?.message,
+        error?.response?.data?.message,
+        error?.data?.message,
+        error?.response?.error,
+        error?.data?.error,
+        error?.error,
+        error?.code,
+        fallback
+      ),
+      fallback
+    );
   }
 
   function getContainer() {
+    if (!isBrowser()) return null;
+
     try {
       return (
         AppCore?.dom?.viewContainer ||
@@ -347,25 +448,6 @@ export const CuentaView = (() => {
 
   function isActiveToken(token) {
     return !destroyed && token === renderToken;
-  }
-
-  function safeErrorMessage(error = null, fallback = "No se pudo cargar la cuenta.") {
-    return safeText(
-      first(
-        error?.message,
-        error?.response?.message,
-        error?.response?.data?.message,
-        error?.data?.message,
-        error?.error,
-        error?.code,
-        fallback
-      ),
-      fallback
-    );
-  }
-
-  function isBrowser() {
-    return typeof window !== "undefined" && typeof document !== "undefined";
   }
 
   /* =========================================================
@@ -444,7 +526,6 @@ export const CuentaView = (() => {
 
   function stripUsernamePrefix(path = "/") {
     const { pathname, search, hash } = splitPath(path);
-
     const segments = pathname.split("/").filter(Boolean);
 
     if (segments.length > 0 && isUsernameSegment(segments[0])) {
@@ -464,6 +545,14 @@ export const CuentaView = (() => {
         .split("#")[0] ||
       "/"
     );
+  }
+
+  function getCleanCanonicalPath(path = "/") {
+    return stripSearchAndHash(stripUsernamePrefix(path || "/"));
+  }
+
+  function isCuentaPath(path = "") {
+    return getCleanCanonicalPath(path || "/") === CANONICAL_PATH;
   }
 
   function getBrowserPath() {
@@ -508,14 +597,6 @@ export const CuentaView = (() => {
     }
   }
 
-  function getCleanCanonicalPath(path = "/") {
-    return stripSearchAndHash(stripUsernamePrefix(path || "/"));
-  }
-
-  function isCuentaPath(path = "") {
-    return getCleanCanonicalPath(path || "/") === CANONICAL_PATH;
-  }
-
   function canRenderCuentaNow() {
     const browserPath = getBrowserPath();
     const appRoute = getAppRoutePath();
@@ -528,6 +609,233 @@ export const CuentaView = (() => {
     if (!browserPath && !appRoute && !publicPath) return true;
 
     return false;
+  }
+
+  function getRouteDebug() {
+    const browserPath = getBrowserPath();
+    const appRoute = getAppRoutePath();
+    const publicPath = getAppPublicPath();
+
+    return {
+      browserPath,
+      browserCanonicalPath: getCleanCanonicalPath(browserPath || "/"),
+      appRoute,
+      appPublicPath: publicPath,
+      canRender: canRenderCuentaNow(),
+    };
+  }
+
+  /* =========================================================
+     MODEL / STORE HELPERS
+  ========================================================= */
+
+  function normalizeCuentaLocal(raw = null) {
+    const source = safeObject(raw, null);
+
+    if (!source) return null;
+
+    const rawTheme = first(
+      source.theme,
+      source.mode,
+      source.appearance,
+      source.preferences?.theme,
+      source.settings?.theme,
+      ""
+    );
+
+    const darkMode = safeBoolean(
+      first(
+        source.darkMode,
+        source.isDark,
+        source.preferences?.darkMode,
+        source.settings?.darkMode,
+        rawTheme === "dark" ? true : null,
+        rawTheme === "light" ? false : null,
+        false
+      ),
+      false
+    );
+
+    const theme = normalizeTheme(rawTheme, darkMode);
+
+    const lang = normalizeLang(
+      first(
+        source.lang,
+        source.language,
+        source.locale,
+        source.preferences?.lang,
+        source.preferences?.language,
+        source.settings?.lang,
+        "es"
+      )
+    );
+
+    const email = safeText(
+      first(source.email, source.emailLower, source.raw?.email, ""),
+      ""
+    ).toLowerCase();
+
+    const username = safeText(
+      first(source.username, source.usernameLower, source.userName, source.raw?.username, ""),
+      ""
+    );
+
+    const name = safeText(
+      first(
+        source.name,
+        source.displayName,
+        source.fullName,
+        source.nombre,
+        source.raw?.name,
+        source.raw?.displayName,
+        username,
+        email,
+        "Usuario Onion"
+      ),
+      "Usuario Onion"
+    );
+
+    const userId = safeText(
+      first(
+        source.userId,
+        source.id,
+        source.uid,
+        source.sub,
+        source.raw?.userId,
+        source.raw?.id,
+        ""
+      ),
+      ""
+    );
+
+    return {
+      ...source,
+
+      id: safeText(first(source.id, userId), userId),
+      userId,
+
+      name,
+      displayName: safeText(first(source.displayName, name), name),
+      fullName: safeText(first(source.fullName, name), name),
+      nombre: safeText(first(source.nombre, name), name),
+
+      username,
+      usernameLower: safeText(first(source.usernameLower, username), username).toLowerCase(),
+
+      email,
+      emailLower: safeText(first(source.emailLower, email), email),
+
+      phone: safeText(first(source.phone, source.telefono, source.mobile, ""), ""),
+      telefono: safeText(first(source.telefono, source.phone, source.mobile, ""), ""),
+
+      role: safeText(first(source.role, source.rol, "user"), "user"),
+      status: safeText(first(source.status, source.estado, "active"), "active"),
+
+      darkMode,
+      privacyMode: safeBoolean(
+        first(
+          source.privacyMode,
+          source.privateMode,
+          source.preferences?.privacyMode,
+          source.settings?.privacyMode,
+          false
+        ),
+        false
+      ),
+
+      theme,
+      mode: theme,
+      appearance: theme,
+
+      lang,
+      language: lang,
+      locale: lang,
+
+      updatedAt: first(source.updatedAt, source.updated_at, source.modifiedAt, null),
+      createdAt: first(source.createdAt, source.created_at, null),
+      lastLoginAt: first(source.lastLoginAt, source.lastLogin, source.lastAccessAt, null),
+
+      preferences: {
+        ...safeObject(source.preferences),
+        darkMode,
+        privacyMode: safeBoolean(
+          first(
+            source.privacyMode,
+            source.privateMode,
+            source.preferences?.privacyMode,
+            source.settings?.privacyMode,
+            false
+          ),
+          false
+        ),
+        theme,
+        mode: theme,
+        appearance: theme,
+        lang,
+        language: lang,
+        locale: lang,
+      },
+
+      raw: first(source.raw, source),
+    };
+  }
+
+  function normalizeCuentaModelSafe(raw = null) {
+    if (!raw) return null;
+
+    try {
+      if (typeof CuentaModel.normalizeCuentaModel === "function") {
+        const normalized = CuentaModel.normalizeCuentaModel(raw);
+        if (normalized) return normalizeCuentaLocal(normalized);
+      }
+    } catch (error) {
+      safeWarn("normalizeCuentaModel falló:", error);
+    }
+
+    try {
+      if (typeof CuentaApi.normalizeCuentaDetail === "function") {
+        const normalized = CuentaApi.normalizeCuentaDetail(raw);
+        if (normalized) return normalizeCuentaLocal(normalized);
+      }
+    } catch {}
+
+    try {
+      if (typeof CuentaUtils.normalizeCuentaPayload === "function") {
+        const normalized = CuentaUtils.normalizeCuentaPayload(raw);
+        if (normalized) return normalizeCuentaLocal(normalized);
+      }
+    } catch {}
+
+    return normalizeCuentaLocal(raw);
+  }
+
+  function getCurrentItem() {
+    try {
+      const fromStore = CuentaStore.getCuentaStore?.();
+
+      if (fromStore) {
+        return normalizeCuentaModelSafe(fromStore);
+      }
+    } catch (error) {
+      safeWarn("getCuentaStore falló:", error);
+    }
+
+    try {
+      const fromState =
+        State.getItem?.() ||
+        State.getCuentaItem?.() ||
+        cuentaState.item;
+
+      if (fromState) {
+        return normalizeCuentaModelSafe(fromState);
+      }
+    } catch {}
+
+    return null;
+  }
+
+  function getCurrentFormState() {
+    return safeObject(cuentaState?.view?.form);
   }
 
   /* =========================================================
@@ -549,6 +857,7 @@ export const CuentaView = (() => {
     if (typeof cuentaState.refreshing !== "boolean") cuentaState.refreshing = false;
     if (typeof cuentaState.saving !== "boolean") cuentaState.saving = false;
     if (typeof cuentaState.hydrated !== "boolean") cuentaState.hydrated = false;
+    if (typeof cuentaState.loaded !== "boolean") cuentaState.loaded = false;
 
     cuentaState.error = safeText(cuentaState.error, "");
     cuentaState.lastSyncAt = first(cuentaState.lastSyncAt, "") || "";
@@ -561,14 +870,39 @@ export const CuentaView = (() => {
       cuentaState.view.form = {};
     }
 
+    if (!cuentaState.action || typeof cuentaState.action !== "object") {
+      cuentaState.action = {};
+    }
+
+    return cuentaState;
+  }
+
+  function setLoadingFlags({
+    loading = cuentaState.loading,
+    refreshing = cuentaState.refreshing,
+    saving = cuentaState.saving,
+  } = {}) {
+    setState({
+      loading: Boolean(loading),
+      refreshing: Boolean(refreshing),
+      saving: Boolean(saving),
+    });
+
+    callSafe(State.setLoading, Boolean(loading));
+    callSafe(State.setRefreshing, Boolean(refreshing));
+    callSafe(State.setSaving, Boolean(saving));
+
     return cuentaState;
   }
 
   function markIdle() {
-    setState({
+    setLoadingFlags({
       loading: false,
       refreshing: false,
+      saving: Boolean(cuentaState.saving),
     });
+
+    return cuentaState;
   }
 
   function markLoadedOk(detail = null) {
@@ -577,14 +911,14 @@ export const CuentaView = (() => {
       refreshing: false,
       error: "",
       hydrated: true,
+      loaded: true,
       lastSyncAt: new Date().toISOString(),
     });
 
-    try {
-      setHydrated?.(true);
-    } catch {
-      cuentaState.hydrated = true;
-    }
+    callSafe(State.setHydrated, true);
+    callSafe(State.setLoaded, true);
+    callSafe(State.setError, null);
+    callSafe(State.setLastSyncAt, cuentaState.lastSyncAt);
 
     if (detail) {
       syncFormFromDetail(detail);
@@ -593,59 +927,48 @@ export const CuentaView = (() => {
     return detail;
   }
 
-  function getCurrentItem() {
+  function setActionFlags(patch = {}) {
+    cuentaState.action = {
+      ...safeObject(cuentaState.action),
+      ...safeObject(patch),
+    };
+
+    callSafe(State.patchActionState, patch);
+
+    return cuentaState.action;
+  }
+
+  function patchFormSafe(payload = {}) {
+    const nextPayload = safeObject(payload);
+
     try {
-      const raw = getCuentaStore();
-
-      if (!raw) return null;
-
-      return normalizeCuentaModel(raw);
-    } catch (error) {
-      safeWarn("getCurrentItem falló:", error);
-      return null;
-    }
-  }
-
-  function getCurrentFormState() {
-    return safeObject(cuentaState?.view?.form);
-  }
-
-  function getFieldValue(container, selectors = [], fallback = "") {
-    for (const selector of selectors) {
-      try {
-        const node = container?.querySelector?.(selector);
-
-        if (!node) continue;
-
-        if ("value" in node) {
-          return safeText(node.value, fallback);
-        }
-
-        return safeText(node.textContent, fallback);
-      } catch {}
+      if (typeof State.patchViewForm === "function") {
+        State.patchViewForm(nextPayload);
+      } else if (typeof State.setViewForm === "function") {
+        State.setViewForm({
+          ...getCurrentFormState(),
+          ...nextPayload,
+        });
+      } else {
+        cuentaState.view = cuentaState.view || {};
+        cuentaState.view.form = {
+          ...safeObject(cuentaState.view.form),
+          ...nextPayload,
+        };
+      }
+    } catch {
+      cuentaState.view = cuentaState.view || {};
+      cuentaState.view.form = {
+        ...safeObject(cuentaState.view.form),
+        ...nextPayload,
+      };
     }
 
-    return fallback;
-  }
-
-  function getCheckboxValue(container, selectors = [], fallback = false) {
-    for (const selector of selectors) {
-      try {
-        const node = container?.querySelector?.(selector);
-
-        if (!node) continue;
-
-        if (typeof node.checked === "boolean") {
-          return Boolean(node.checked);
-        }
-      } catch {}
-    }
-
-    return fallback;
+    return getCurrentFormState();
   }
 
   function syncFormFromDetail(detail = null) {
-    const item = detail || getCurrentItem();
+    const item = normalizeCuentaModelSafe(detail || getCurrentItem());
 
     const payload = {
       name: safeText(
@@ -656,7 +979,17 @@ export const CuentaView = (() => {
           item?.nombre,
           item?.raw?.name,
           item?.raw?.displayName,
-          item?.raw?.fullName,
+          ""
+        ),
+        ""
+      ),
+
+      displayName: safeText(
+        first(
+          item?.displayName,
+          item?.name,
+          item?.fullName,
+          item?.nombre,
           ""
         ),
         ""
@@ -669,7 +1002,16 @@ export const CuentaView = (() => {
           item?.mobile,
           item?.raw?.phone,
           item?.raw?.telefono,
-          item?.raw?.mobile,
+          ""
+        ),
+        ""
+      ),
+
+      telefono: safeText(
+        first(
+          item?.telefono,
+          item?.phone,
+          item?.mobile,
           ""
         ),
         ""
@@ -701,10 +1043,11 @@ export const CuentaView = (() => {
         first(
           item?.darkMode,
           item?.isDark,
-          item?.theme === "dark",
-          item?.appearance === "dark",
+          item?.theme === "dark" ? true : null,
+          item?.theme === "light" ? false : null,
+          item?.appearance === "dark" ? true : null,
           item?.raw?.darkMode,
-          item?.raw?.theme === "dark",
+          item?.raw?.theme === "dark" ? true : null,
           false
         ),
         false
@@ -713,6 +1056,7 @@ export const CuentaView = (() => {
       privacyMode: safeBoolean(
         first(
           item?.privacyMode,
+          item?.privateMode,
           item?.raw?.privacyMode,
           false
         ),
@@ -732,14 +1076,20 @@ export const CuentaView = (() => {
       ),
     };
 
+    payload.language = payload.lang;
+    payload.locale = payload.lang;
+    payload.theme = payload.darkMode ? "dark" : "light";
+    payload.mode = payload.theme;
+    payload.appearance = payload.theme;
+
     try {
-      setViewForm?.(payload);
+      if (typeof State.setViewForm === "function") {
+        State.setViewForm(payload);
+      } else {
+        patchFormSafe(payload);
+      }
     } catch {
-      cuentaState.view = cuentaState.view || {};
-      cuentaState.view.form = {
-        ...safeObject(cuentaState.view.form),
-        ...payload,
-      };
+      patchFormSafe(payload);
     }
 
     return payload;
@@ -749,20 +1099,52 @@ export const CuentaView = (() => {
     return syncFormFromDetail(getCurrentItem());
   }
 
-  function patchFormSafe(payload = {}) {
-    const nextPayload = safeObject(payload);
+  /* =========================================================
+     DOM READERS
+  ========================================================= */
 
-    try {
-      patchViewForm?.(nextPayload);
-    } catch {
-      cuentaState.view = cuentaState.view || {};
-      cuentaState.view.form = {
-        ...safeObject(cuentaState.view.form),
-        ...nextPayload,
-      };
+  function getFieldValue(container, selectors = [], fallback = "") {
+    for (const selector of safeArray(selectors)) {
+      try {
+        const node = container?.querySelector?.(selector);
+
+        if (!node) continue;
+
+        if ("value" in node) {
+          return safeText(node.value, fallback);
+        }
+
+        return safeText(node.textContent, fallback);
+      } catch {}
     }
 
-    return getCurrentFormState();
+    return fallback;
+  }
+
+  function getCheckboxValue(container, selectors = [], fallback = false) {
+    for (const selector of safeArray(selectors)) {
+      try {
+        const node = container?.querySelector?.(selector);
+
+        if (!node) continue;
+
+        if (typeof node.checked === "boolean") {
+          return Boolean(node.checked);
+        }
+
+        return safeBoolean(
+          first(
+            node.getAttribute?.("aria-checked"),
+            node.dataset?.checked,
+            node.dataset?.value,
+            node.value
+          ),
+          fallback
+        );
+      } catch {}
+    }
+
+    return fallback;
   }
 
   function readFormPayloadFromDom() {
@@ -775,10 +1157,15 @@ export const CuentaView = (() => {
       [
         '[data-role="cuenta-name-input"]',
         "#cuenta-name-input",
+        '[data-cuenta-field="name"]',
+        '[data-field="name"]',
+        '[name="name"]',
+        '[name="displayName"]',
       ],
       safeText(
         first(
           currentForm.name,
+          currentForm.displayName,
           item?.name,
           item?.displayName,
           item?.fullName,
@@ -794,10 +1181,15 @@ export const CuentaView = (() => {
       [
         '[data-role="cuenta-phone-input"]',
         "#cuenta-phone-input",
+        '[data-cuenta-field="phone"]',
+        '[data-field="phone"]',
+        '[name="phone"]',
+        '[name="telefono"]',
       ],
       safeText(
         first(
           currentForm.phone,
+          currentForm.telefono,
           item?.phone,
           item?.telefono,
           item?.mobile,
@@ -814,6 +1206,9 @@ export const CuentaView = (() => {
       [
         '[data-role="cuenta-email-input"]',
         "#cuenta-email-input",
+        '[data-cuenta-field="email"]',
+        '[data-field="email"]',
+        '[name="email"]',
       ],
       safeText(
         first(
@@ -832,6 +1227,9 @@ export const CuentaView = (() => {
       [
         '[data-role="cuenta-username-input"]',
         "#cuenta-username-input",
+        '[data-cuenta-field="username"]',
+        '[data-field="username"]',
+        '[name="username"]',
       ],
       safeText(
         first(
@@ -850,12 +1248,15 @@ export const CuentaView = (() => {
       [
         '[data-role="cuenta-darkmode-input"]',
         "#cuenta-darkmode-input",
+        '[data-cuenta-field="darkMode"]',
+        '[data-field="darkMode"]',
+        '[name="darkMode"]',
       ],
       safeBoolean(
         first(
           currentForm.darkMode,
           item?.darkMode,
-          item?.theme === "dark",
+          item?.theme === "dark" ? true : null,
           item?.raw?.darkMode,
           false
         ),
@@ -867,7 +1268,12 @@ export const CuentaView = (() => {
       container,
       [
         '[data-role="cuenta-privacymode-input"]',
+        '[data-role="cuenta-privacy-input"]',
         "#cuenta-privacymode-input",
+        "#cuenta-privacy-input",
+        '[data-cuenta-field="privacyMode"]',
+        '[data-field="privacyMode"]',
+        '[name="privacyMode"]',
       ],
       safeBoolean(
         first(
@@ -886,10 +1292,16 @@ export const CuentaView = (() => {
         [
           '[data-role="cuenta-language-select"]',
           "#cuenta-language-select",
+          '[data-cuenta-field="lang"]',
+          '[data-field="lang"]',
+          '[data-field="language"]',
+          '[name="lang"]',
+          '[name="language"]',
         ],
         safeText(
           first(
             currentForm.lang,
+            currentForm.language,
             item?.lang,
             item?.language,
             item?.locale,
@@ -903,21 +1315,139 @@ export const CuentaView = (() => {
       )
     );
 
+    const theme = darkMode ? "dark" : "light";
+
     return {
       name,
       displayName: name,
+      fullName: name,
+
       phone,
       telefono: phone,
+
       email,
       username,
+
       darkMode,
       privacyMode,
+
       lang,
       language: lang,
       locale: lang,
-      theme: darkMode ? "dark" : "light",
-      appearance: darkMode ? "dark" : "light",
+
+      theme,
+      mode: theme,
+      appearance: theme,
     };
+  }
+
+  function readPasswordPayloadFromDom() {
+    const container = getContainer();
+
+    const currentPassword = getFieldValue(
+      container,
+      [
+        '[data-role="cuenta-current-password"]',
+        "#cuenta-current-password",
+        '[data-cuenta-field="currentPassword"]',
+        '[data-field="currentPassword"]',
+        '[name="currentPassword"]',
+      ],
+      ""
+    );
+
+    const newPassword = getFieldValue(
+      container,
+      [
+        '[data-role="cuenta-new-password"]',
+        "#cuenta-new-password",
+        '[data-cuenta-field="newPassword"]',
+        '[data-field="newPassword"]',
+        '[name="newPassword"]',
+      ],
+      ""
+    );
+
+    const confirmPassword = getFieldValue(
+      container,
+      [
+        '[data-role="cuenta-confirm-password"]',
+        "#cuenta-confirm-password",
+        '[data-cuenta-field="confirmPassword"]',
+        '[data-field="confirmPassword"]',
+        '[name="confirmPassword"]',
+      ],
+      ""
+    );
+
+    return {
+      currentPassword,
+      newPassword,
+      confirmPassword,
+    };
+  }
+
+  function focusPasswordField(role = "") {
+    const container = getContainer();
+
+    const selectorsByRole = {
+      current: [
+        '[data-role="cuenta-current-password"]',
+        "#cuenta-current-password",
+        '[name="currentPassword"]',
+      ],
+      next: [
+        '[data-role="cuenta-new-password"]',
+        "#cuenta-new-password",
+        '[name="newPassword"]',
+      ],
+      confirm: [
+        '[data-role="cuenta-confirm-password"]',
+        "#cuenta-confirm-password",
+        '[name="confirmPassword"]',
+      ],
+    };
+
+    const selectors = selectorsByRole[role] || [];
+
+    for (const selector of selectors) {
+      try {
+        const node = container?.querySelector?.(selector);
+
+        if (node) {
+          node.focus?.();
+          return true;
+        }
+      } catch {}
+    }
+
+    return false;
+  }
+
+  function clearPasswordFields() {
+    const container = getContainer();
+
+    const selectors = [
+      '[data-role="cuenta-current-password"]',
+      '[data-role="cuenta-new-password"]',
+      '[data-role="cuenta-confirm-password"]',
+      "#cuenta-current-password",
+      "#cuenta-new-password",
+      "#cuenta-confirm-password",
+      '[name="currentPassword"]',
+      '[name="newPassword"]',
+      '[name="confirmPassword"]',
+    ];
+
+    for (const selector of selectors) {
+      try {
+        const node = container?.querySelector?.(selector);
+
+        if (node && "value" in node) {
+          node.value = "";
+        }
+      } catch {}
+    }
   }
 
   /* =========================================================
@@ -934,9 +1464,6 @@ export const CuentaView = (() => {
 
     try {
       document.documentElement.dataset.theme = theme;
-    } catch {}
-
-    try {
       document.documentElement.setAttribute("data-theme", theme);
     } catch {}
 
@@ -991,6 +1518,7 @@ export const CuentaView = (() => {
       theme,
       darkMode: isDark,
       source: MODULE,
+      view: VIEW_NAME,
     });
 
     return theme;
@@ -1001,9 +1529,6 @@ export const CuentaView = (() => {
 
     try {
       document.documentElement.lang = nextLang;
-    } catch {}
-
-    try {
       document.documentElement.dataset.lang = nextLang;
     } catch {}
 
@@ -1058,24 +1583,26 @@ export const CuentaView = (() => {
     safeEmit("cuenta:language:applied", {
       lang: nextLang,
       language: nextLang,
+      locale: nextLang,
       source: MODULE,
+      view: VIEW_NAME,
     });
 
     return nextLang;
   }
 
   function applyCuentaPreferencesSideEffects(detail = null) {
-    const item = detail || getCurrentItem();
+    const item = normalizeCuentaModelSafe(detail || getCurrentItem());
 
     if (!item) return null;
 
     const darkMode = safeBoolean(
       first(
         item.darkMode,
-        item.theme === "dark",
-        item.appearance === "dark",
+        item.theme === "dark" ? true : null,
+        item.appearance === "dark" ? true : null,
         item.raw?.darkMode,
-        item.raw?.theme === "dark",
+        item.raw?.theme === "dark" ? true : null,
         false
       ),
       false
@@ -1107,7 +1634,12 @@ export const CuentaView = (() => {
     let hydrated = false;
 
     try {
-      hydrated = Boolean(hydrateCuentaFromCache?.());
+      const result =
+        CuentaApi.hydrateCuentaFromCache?.() ||
+        CuentaApi.hydrateFromCache?.() ||
+        null;
+
+      if (result) hydrated = true;
     } catch (error) {
       safeWarn("hydrateCuentaFromCache falló:", error);
     }
@@ -1119,9 +1651,7 @@ export const CuentaView = (() => {
         syncFormFromDetail(item);
         applyCuentaPreferencesSideEffects(item);
 
-        try {
-          setHydrated?.(true);
-        } catch {}
+        callSafe(State.setHydrated, true);
 
         cuentaState.hydrated = true;
         hydrated = true;
@@ -1208,6 +1738,7 @@ export const CuentaView = (() => {
     safeEmit("cuenta:modal:open", {
       detail: payload,
       source: MODULE,
+      view: VIEW_NAME,
     });
 
     return true;
@@ -1277,84 +1808,22 @@ export const CuentaView = (() => {
      DOM POST-RENDER
   ========================================================= */
 
-  function applyErrorStateToDom(container) {
-    if (!container) return;
-
-    let oldBanner = null;
-
+  function removeBanner(container, selector = "") {
     try {
-      oldBanner = container.querySelector("[data-cuenta-error-banner='true']");
+      const oldBanner = container?.querySelector?.(selector);
+      oldBanner?.remove?.();
     } catch {}
-
-    if (oldBanner) {
-      try {
-        oldBanner.remove();
-      } catch {}
-    }
-
-    const message = safeText(cuentaState.error, "");
-    const hasVisibleData = Boolean(getCurrentItem());
-
-    if (!message || !hasVisibleData) {
-      return;
-    }
-
-    let anchor = null;
-
-    try {
-      anchor =
-        container.querySelector(".cuenta-panel") ||
-        container.querySelector("[data-view='cuenta']") ||
-        container.querySelector(".content-wrapper");
-    } catch {}
-
-    if (!anchor) return;
-
-    const banner = document.createElement("div");
-    banner.setAttribute("data-cuenta-error-banner", "true");
-
-    Object.assign(banner.style, {
-      margin: "0 0 var(--space-md, 14px)",
-      padding: "11px 13px",
-      borderRadius: "14px",
-      border:
-        "1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 22%, var(--border-soft, rgba(15,23,42,.08)))",
-      background:
-        "linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 6%, transparent), transparent), var(--surface-1, rgba(255,255,255,.78))",
-      color: "var(--text-soft, #4b5563)",
-      fontSize: "12px",
-      lineHeight: "1.5",
-    });
-
-    banner.textContent = message;
-    anchor.insertAdjacentElement("beforebegin", banner);
   }
 
-  function applySuccessStateToDom(container) {
-    if (!container) return;
+  function applyInfoBannerToDom({
+    container = null,
+    selector = "",
+    message = "",
+    tone = "info",
+  } = {}) {
+    if (!container || !message) return;
 
-    let oldBanner = null;
-
-    try {
-      oldBanner = container.querySelector("[data-cuenta-success-banner='true']");
-    } catch {}
-
-    if (oldBanner) {
-      try {
-        oldBanner.remove();
-      } catch {}
-    }
-
-    const message = safeText(
-      first(
-        cuentaState?.view?.successMessage,
-        cuentaState?.successMessage,
-        ""
-      ),
-      ""
-    );
-
-    if (!message) return;
+    removeBanner(container, selector);
 
     let anchor = null;
 
@@ -1368,16 +1837,23 @@ export const CuentaView = (() => {
     if (!anchor) return;
 
     const banner = document.createElement("div");
-    banner.setAttribute("data-cuenta-success-banner", "true");
+    banner.setAttribute(selector.replace(/^\[|\]$/g, "").split("=")[0], "true");
+
+    const color =
+      tone === "success"
+        ? "var(--success, #22c55e)"
+        : tone === "error"
+          ? "var(--danger-strong, #ff6b6b)"
+          : "var(--info, #3b82f6)";
 
     Object.assign(banner.style, {
       margin: "0 0 var(--space-md, 14px)",
       padding: "11px 13px",
       borderRadius: "14px",
       border:
-        "1px solid color-mix(in srgb, var(--success, #22c55e) 24%, var(--border-soft, rgba(15,23,42,.08)))",
+        `1px solid color-mix(in srgb, ${color} 24%, var(--border-soft, rgba(15,23,42,.08)))`,
       background:
-        "linear-gradient(180deg, color-mix(in srgb, var(--success, #22c55e) 7%, transparent), transparent), var(--surface-1, rgba(255,255,255,.78))",
+        `linear-gradient(180deg, color-mix(in srgb, ${color} 7%, transparent), transparent), var(--surface-1, rgba(255,255,255,.78))`,
       color: "var(--text-soft, #4b5563)",
       fontSize: "12px",
       lineHeight: "1.5",
@@ -1390,51 +1866,83 @@ export const CuentaView = (() => {
   function decorateDom(container) {
     if (!container) return container;
 
-    applyErrorStateToDom(container);
-    applySuccessStateToDom(container);
+    removeBanner(container, "[data-cuenta-error-banner='true']");
+    removeBanner(container, "[data-cuenta-success-banner='true']");
+
+    const errorMessage = safeText(cuentaState.error, "");
+    const successMessage = safeText(
+      first(
+        cuentaState?.view?.successMessage,
+        cuentaState?.successMessage,
+        ""
+      ),
+      ""
+    );
+
+    if (errorMessage && getCurrentItem()) {
+      applyInfoBannerToDom({
+        container,
+        selector: "[data-cuenta-error-banner='true']",
+        message: errorMessage,
+        tone: "error",
+      });
+    }
+
+    if (successMessage) {
+      applyInfoBannerToDom({
+        container,
+        selector: "[data-cuenta-success-banner='true']",
+        message: successMessage,
+        tone: "success",
+      });
+    }
 
     try {
       container.setAttribute("data-cuenta-mounted", "true");
-      container.setAttribute("data-cuenta-view-version", "12.0.0");
+      container.setAttribute("data-cuenta-view-version", VERSION);
     } catch {}
 
     return container;
-  }
-
-  function clearPasswordFields() {
-    const container = getContainer();
-
-    const selectors = [
-      '[data-role="cuenta-current-password"]',
-      '[data-role="cuenta-new-password"]',
-      '[data-role="cuenta-confirm-password"]',
-      "#cuenta-current-password",
-      "#cuenta-new-password",
-      "#cuenta-confirm-password",
-    ];
-
-    for (const selector of selectors) {
-      try {
-        const node = container?.querySelector?.(selector);
-
-        if (node && "value" in node) {
-          node.value = "";
-        }
-      } catch {}
-    }
   }
 
   /* =========================================================
      RENDER
   ========================================================= */
 
+  function renderTemplateSafe({ item = null, state = cuentaState } = {}) {
+    try {
+      if (typeof CuentaTemplate.renderCuentaTemplate === "function") {
+        return CuentaTemplate.renderCuentaTemplate({
+          item,
+          state,
+        });
+      }
+    } catch (error) {
+      safeWarn("renderCuentaTemplate falló:", error);
+    }
+
+    return `
+      <div class="cuenta-view">
+        <section class="cuenta-state">
+          <h1>Cuenta</h1>
+          <p>No se pudo renderizar la plantilla de cuenta.</p>
+        </section>
+      </div>
+    `;
+  }
+
   function buildHtml() {
     const item = getCurrentItem();
 
     return `
-      <section class="panel-content dashboard ready" data-view="cuenta" data-module="cuenta">
+      <section
+        class="panel-content dashboard ready"
+        data-view="cuenta"
+        data-module="cuenta"
+        data-cuenta-view="true"
+      >
         <div class="content-wrapper" style="display:grid;gap:var(--space-lg);">
-          ${renderCuentaTemplate({
+          ${renderTemplateSafe({
             item,
             state: cuentaState,
           })}
@@ -1447,12 +1955,7 @@ export const CuentaView = (() => {
     if (destroyed) return null;
 
     if (!canRenderCuentaNow()) {
-      safeWarn("Render bloqueado: la ruta actual no es /cuenta.", {
-        browserPath: getBrowserPath(),
-        appRoute: getAppRoutePath(),
-        publicPath: getAppPublicPath(),
-      });
-
+      safeWarn("Render bloqueado: la ruta actual no es /cuenta.", getRouteDebug());
       return null;
     }
 
@@ -1486,14 +1989,13 @@ export const CuentaView = (() => {
 
     decorateDom(container);
 
-    try {
-      setHydrated?.(true);
-    } catch {
-      cuentaState.hydrated = true;
-    }
+    callSafe(State.setHydrated, true);
+    cuentaState.hydrated = true;
 
     safeEmit("cuenta:rendered", {
       source: MODULE,
+      view: VIEW_NAME,
+      version: VERSION,
       mounted: true,
       state: getPublicStateSnapshot(),
     });
@@ -1543,26 +2045,30 @@ export const CuentaView = (() => {
     const itemBefore = getCurrentItem();
     const hasVisibleData = Boolean(itemBefore);
 
+    setLoadingFlags({
+      loading: !hasVisibleData && !silent,
+      refreshing: hasVisibleData && asRefresh && !silent,
+      saving: Boolean(cuentaState.saving),
+    });
+
     setState({
       error: "",
-      loading: !hasVisibleData && !silent,
-      refreshing: hasVisibleData && asRefresh,
     });
 
     render();
 
     try {
-      const detail = await loadCuenta({
+      const detail = await CuentaApi.loadCuenta?.({
         force,
       });
 
-      const normalized = detail ? normalizeCuentaModel(detail) : getCurrentItem();
+      const normalized = normalizeCuentaModelSafe(detail || getCurrentItem());
 
       markLoadedOk(normalized);
       applyCuentaPreferencesSideEffects(normalized);
 
       try {
-        syncViewFormFromItem?.();
+        State.syncViewFormFromItem?.();
       } catch {
         syncFormFromDetail(normalized);
       }
@@ -1570,6 +2076,7 @@ export const CuentaView = (() => {
       safeEmit("cuenta:loaded", {
         detail: normalized,
         source: MODULE,
+        view: VIEW_NAME,
       });
 
       return normalized;
@@ -1583,11 +2090,12 @@ export const CuentaView = (() => {
         refreshing: false,
         error: message,
         hydrated: true,
+        loaded: true,
       });
 
-      try {
-        setHydrated?.(true);
-      } catch {}
+      callSafe(State.setHydrated, true);
+      callSafe(State.setLoaded, true);
+      callSafe(State.setError, message);
 
       if (!silent) {
         showToast(message, "error");
@@ -1597,6 +2105,7 @@ export const CuentaView = (() => {
         error,
         message,
         source: MODULE,
+        view: VIEW_NAME,
       });
 
       return getCurrentItem();
@@ -1653,37 +2162,37 @@ export const CuentaView = (() => {
       ...explicitPayload,
     };
 
-    merged.name = safeText(
-      first(
-        merged.name,
-        merged.displayName,
-        ""
-      ),
-      ""
-    );
+    const name = safeText(first(merged.name, merged.displayName, ""), "");
+    const phone = safeText(first(merged.phone, merged.telefono, ""), "");
+    const darkMode = safeBoolean(merged.darkMode, false);
+    const privacyMode = safeBoolean(merged.privacyMode, false);
+    const lang = normalizeLang(first(merged.lang, merged.language, merged.locale, "es"));
+    const theme = darkMode ? "dark" : "light";
 
-    merged.displayName = merged.name;
+    return {
+      ...merged,
 
-    merged.phone = safeText(
-      first(
-        merged.phone,
-        merged.telefono,
-        ""
-      ),
-      ""
-    );
+      name,
+      displayName: name,
+      fullName: safeText(first(merged.fullName, name), name),
 
-    merged.telefono = merged.phone;
+      phone,
+      telefono: phone,
 
-    merged.darkMode = safeBoolean(merged.darkMode, false);
-    merged.privacyMode = safeBoolean(merged.privacyMode, false);
-    merged.lang = normalizeLang(merged.lang);
-    merged.language = merged.lang;
-    merged.locale = merged.lang;
-    merged.theme = merged.darkMode ? "dark" : "light";
-    merged.appearance = merged.theme;
+      email: safeText(merged.email, ""),
+      username: safeText(merged.username, ""),
 
-    return merged;
+      darkMode,
+      privacyMode,
+
+      lang,
+      language: lang,
+      locale: lang,
+
+      theme,
+      mode: theme,
+      appearance: theme,
+    };
   }
 
   async function handleSaveCuenta(payload = null) {
@@ -1696,24 +2205,21 @@ export const CuentaView = (() => {
     inflightSave = (async () => {
       const nextPayload = buildPreferenceUpdatePayload(payload);
 
-      try {
-        clearViewErrors?.();
-      } catch {}
-
-      try {
-        clearViewSuccess?.();
-      } catch {}
-
-      try {
-        setViewServerError?.("");
-      } catch {}
+      try { State.clearViewErrors?.(); } catch {}
+      try { State.clearViewSuccess?.(); } catch {}
+      try { State.setViewServerError?.(""); } catch {}
 
       patchFormSafe({
         name: nextPayload.name,
+        displayName: nextPayload.displayName,
         phone: nextPayload.phone,
+        telefono: nextPayload.telefono,
         darkMode: nextPayload.darkMode,
         privacyMode: nextPayload.privacyMode,
         lang: nextPayload.lang,
+        language: nextPayload.lang,
+        locale: nextPayload.lang,
+        theme: nextPayload.theme,
       });
 
       setState({
@@ -1721,23 +2227,30 @@ export const CuentaView = (() => {
         error: "",
       });
 
+      setActionFlags({
+        savingPreferences: true,
+      });
+
+      callSafe(State.setSaving, true);
+      callSafe(State.setSavingPreferences, true);
+
       rerender();
       await waitForPaint();
 
       try {
-        const detail = await updateCuenta(nextPayload);
+        const detail = await CuentaApi.updateCuenta?.(nextPayload);
 
-        const normalized = detail ? normalizeCuentaModel(detail) : getCurrentItem();
+        const normalized = normalizeCuentaModelSafe(detail || getCurrentItem());
 
         applyCuentaPreferencesSideEffects(normalized);
         syncFormFromDetail(normalized);
 
         try {
-          syncViewFormFromItem?.();
+          State.syncViewFormFromItem?.();
         } catch {}
 
         try {
-          setViewSuccess?.({
+          State.setViewSuccess?.({
             successMessage: "Preferencias guardadas correctamente.",
             updatedAt: normalized?.updatedAt || new Date().toISOString(),
           });
@@ -1747,6 +2260,7 @@ export const CuentaView = (() => {
           detail: normalized,
           payload: nextPayload,
           source: MODULE,
+          view: VIEW_NAME,
         });
 
         showToast("Preferencias guardadas", "success");
@@ -1760,13 +2274,14 @@ export const CuentaView = (() => {
         syncFormFromCurrentItem();
 
         try {
-          setViewServerError?.(message);
+          State.setViewServerError?.(message);
         } catch {}
 
         safeEmit("cuenta:update:error", {
           error,
           message,
           source: MODULE,
+          view: VIEW_NAME,
         });
 
         showToast(message, "error");
@@ -1776,6 +2291,13 @@ export const CuentaView = (() => {
         setState({
           saving: false,
         });
+
+        setActionFlags({
+          savingPreferences: false,
+        });
+
+        callSafe(State.setSaving, false);
+        callSafe(State.setSavingPreferences, false);
 
         inflightSave = null;
 
@@ -1797,19 +2319,15 @@ export const CuentaView = (() => {
 
     inflightTheme = (async () => {
       const nextDarkMode = safeBoolean(darkMode, false);
-      const currentPayload = readFormPayloadFromDom();
+      const previousItem = getCurrentItem();
+      const previousDarkMode = safeBoolean(previousItem?.darkMode, false);
+      const currentPayload = buildPreferenceUpdatePayload({
+        darkMode: nextDarkMode,
+      });
 
-      try {
-        clearViewErrors?.();
-      } catch {}
-
-      try {
-        clearViewSuccess?.();
-      } catch {}
-
-      try {
-        setViewServerError?.("");
-      } catch {}
+      try { State.clearViewErrors?.(); } catch {}
+      try { State.clearViewSuccess?.(); } catch {}
+      try { State.setViewServerError?.(""); } catch {}
 
       patchFormSafe({
         ...currentPayload,
@@ -1822,15 +2340,29 @@ export const CuentaView = (() => {
         error: "",
       });
 
+      setActionFlags({
+        savingTheme: true,
+      });
+
+      callSafe(State.setSaving, true);
+      callSafe(State.setSavingTheme, true);
+
       applyCuentaThemeToDom(nextDarkMode);
 
       rerender();
       await waitForPaint();
 
       try {
-        const detail = await updateCuentaTheme(nextDarkMode);
+        const detail =
+          typeof CuentaApi.updateCuentaTheme === "function"
+            ? await CuentaApi.updateCuentaTheme(nextDarkMode)
+            : await CuentaApi.updateCuenta?.({
+                ...currentPayload,
+                darkMode: nextDarkMode,
+                theme: nextDarkMode ? "dark" : "light",
+              });
 
-        const normalized = detail ? normalizeCuentaModel(detail) : getCurrentItem();
+        const normalized = normalizeCuentaModelSafe(detail || getCurrentItem());
 
         applyCuentaPreferencesSideEffects(normalized);
 
@@ -1838,7 +2370,7 @@ export const CuentaView = (() => {
           darkMode: safeBoolean(
             first(
               normalized?.darkMode,
-              normalized?.theme === "dark",
+              normalized?.theme === "dark" ? true : null,
               nextDarkMode
             ),
             nextDarkMode
@@ -1863,7 +2395,7 @@ export const CuentaView = (() => {
         });
 
         try {
-          setViewSuccess?.({
+          State.setViewSuccess?.({
             successMessage: "Tema actualizado correctamente.",
             updatedAt: normalized?.updatedAt || new Date().toISOString(),
           });
@@ -1874,6 +2406,7 @@ export const CuentaView = (() => {
           darkMode: nextDarkMode,
           theme: nextDarkMode ? "dark" : "light",
           source: MODULE,
+          view: VIEW_NAME,
         });
 
         showToast("Tema actualizado", "success");
@@ -1885,10 +2418,11 @@ export const CuentaView = (() => {
         safeWarn("handleUpdateTheme falló:", error);
 
         syncFormFromCurrentItem();
+        applyCuentaThemeToDom(previousDarkMode);
         applyCuentaPreferencesSideEffects(getCurrentItem());
 
         try {
-          setViewServerError?.(message);
+          State.setViewServerError?.(message);
         } catch {}
 
         safeEmit("cuenta:theme:update:error", {
@@ -1896,6 +2430,7 @@ export const CuentaView = (() => {
           message,
           darkMode: nextDarkMode,
           source: MODULE,
+          view: VIEW_NAME,
         });
 
         showToast(message, "error");
@@ -1905,6 +2440,13 @@ export const CuentaView = (() => {
         setState({
           saving: false,
         });
+
+        setActionFlags({
+          savingTheme: false,
+        });
+
+        callSafe(State.setSaving, false);
+        callSafe(State.setSavingTheme, false);
 
         inflightTheme = null;
 
@@ -1926,23 +2468,23 @@ export const CuentaView = (() => {
 
     inflightLanguage = (async () => {
       const nextLang = normalizeLang(lang);
-      const currentPayload = buildPreferenceUpdatePayload();
+      const previousItem = getCurrentItem();
+      const previousLang = normalizeLang(previousItem?.lang || previousItem?.language || "es");
+      const currentPayload = buildPreferenceUpdatePayload({
+        lang: nextLang,
+        language: nextLang,
+        locale: nextLang,
+      });
 
-      try {
-        clearViewErrors?.();
-      } catch {}
-
-      try {
-        clearViewSuccess?.();
-      } catch {}
-
-      try {
-        setViewServerError?.("");
-      } catch {}
+      try { State.clearViewErrors?.(); } catch {}
+      try { State.clearViewSuccess?.(); } catch {}
+      try { State.setViewServerError?.(""); } catch {}
 
       patchFormSafe({
         ...currentPayload,
         lang: nextLang,
+        language: nextLang,
+        locale: nextLang,
       });
 
       setState({
@@ -1950,26 +2492,36 @@ export const CuentaView = (() => {
         error: "",
       });
 
+      setActionFlags({
+        savingLanguage: true,
+      });
+
+      callSafe(State.setSaving, true);
+      callSafe(State.setSavingLanguage, true);
+
       applyCuentaLanguageToDom(nextLang);
 
       rerender();
       await waitForPaint();
 
       try {
-        const detail = await updateCuenta({
-          ...currentPayload,
-          lang: nextLang,
-          language: nextLang,
-          locale: nextLang,
-        });
+        const detail =
+          typeof CuentaApi.updateCuentaLanguage === "function"
+            ? await CuentaApi.updateCuentaLanguage(nextLang)
+            : await CuentaApi.updateCuenta?.({
+                ...currentPayload,
+                lang: nextLang,
+                language: nextLang,
+                locale: nextLang,
+              });
 
-        const normalized = detail ? normalizeCuentaModel(detail) : getCurrentItem();
+        const normalized = normalizeCuentaModelSafe(detail || getCurrentItem());
 
         applyCuentaPreferencesSideEffects(normalized);
         syncFormFromDetail(normalized);
 
         try {
-          setViewSuccess?.({
+          State.setViewSuccess?.({
             successMessage: "Idioma actualizado correctamente.",
             updatedAt: normalized?.updatedAt || new Date().toISOString(),
           });
@@ -1980,6 +2532,7 @@ export const CuentaView = (() => {
           lang: nextLang,
           language: nextLang,
           source: MODULE,
+          view: VIEW_NAME,
         });
 
         showToast("Idioma actualizado", "success");
@@ -1991,10 +2544,11 @@ export const CuentaView = (() => {
         safeWarn("handleUpdateLanguage falló:", error);
 
         syncFormFromCurrentItem();
+        applyCuentaLanguageToDom(previousLang);
         applyCuentaPreferencesSideEffects(getCurrentItem());
 
         try {
-          setViewServerError?.(message);
+          State.setViewServerError?.(message);
         } catch {}
 
         safeEmit("cuenta:language:update:error", {
@@ -2002,6 +2556,7 @@ export const CuentaView = (() => {
           message,
           lang: nextLang,
           source: MODULE,
+          view: VIEW_NAME,
         });
 
         showToast(message, "error");
@@ -2011,6 +2566,13 @@ export const CuentaView = (() => {
         setState({
           saving: false,
         });
+
+        setActionFlags({
+          savingLanguage: false,
+        });
+
+        callSafe(State.setSaving, false);
+        callSafe(State.setSavingLanguage, false);
 
         inflightLanguage = null;
 
@@ -2038,6 +2600,7 @@ export const CuentaView = (() => {
       safeEmit("cuenta:refresh:success", {
         detail: item,
         source: MODULE,
+        view: VIEW_NAME,
       });
 
       return item;
@@ -2047,6 +2610,7 @@ export const CuentaView = (() => {
       safeEmit("cuenta:refresh:error", {
         error,
         source: MODULE,
+        view: VIEW_NAME,
       });
 
       return null;
@@ -2073,212 +2637,170 @@ export const CuentaView = (() => {
     return opened;
   }
 
-  function readPasswordPayloadFromDom() {
-    const container = getContainer();
-
-    const currentPassword = getFieldValue(
-      container,
-      [
-        '[data-role="cuenta-current-password"]',
-        "#cuenta-current-password",
-      ],
-      ""
-    );
-
-    const newPassword = getFieldValue(
-      container,
-      [
-        '[data-role="cuenta-new-password"]',
-        "#cuenta-new-password",
-      ],
-      ""
-    );
-
-    const confirmPassword = getFieldValue(
-      container,
-      [
-        '[data-role="cuenta-confirm-password"]',
-        "#cuenta-confirm-password",
-      ],
-      ""
-    );
-
-    return {
-      currentPassword,
-      newPassword,
-      confirmPassword,
-    };
-  }
-
-  function focusPasswordField(role = "") {
-    const container = getContainer();
-
-    const selectorsByRole = {
-      current: [
-        '[data-role="cuenta-current-password"]',
-        "#cuenta-current-password",
-      ],
-      next: [
-        '[data-role="cuenta-new-password"]',
-        "#cuenta-new-password",
-      ],
-      confirm: [
-        '[data-role="cuenta-confirm-password"]',
-        "#cuenta-confirm-password",
-      ],
-    };
-
-    const selectors = selectorsByRole[role] || [];
-
-    for (const selector of selectors) {
-      try {
-        const node = container?.querySelector?.(selector);
-
-        if (node) {
-          node.focus?.();
-          return true;
-        }
-      } catch {}
-    }
-
-    return false;
-  }
-
-  async function handlePasswordChange() {
+  async function handlePasswordChange(payload = null) {
     if (destroyed) return false;
 
-    const {
-      currentPassword,
-      newPassword,
-      confirmPassword,
-    } = readPasswordPayloadFromDom();
-
-    if (!currentPassword) {
-      showToast("Introduce la contraseña actual.", "error");
-      focusPasswordField("current");
-      return false;
+    if (inflightPassword) {
+      return inflightPassword;
     }
 
-    if (!newPassword) {
-      showToast("Introduce la nueva contraseña.", "error");
-      focusPasswordField("next");
-      return false;
-    }
+    inflightPassword = (async () => {
+      const domPayload = readPasswordPayloadFromDom();
 
-    if (newPassword.length < PASSWORD_MIN_LENGTH) {
-      showToast(
-        `La nueva contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`,
-        "error"
-      );
-      focusPasswordField("next");
-      return false;
-    }
+      const finalPayload = {
+        ...domPayload,
+        ...safeObject(payload),
+      };
 
-    if (confirmPassword && confirmPassword !== newPassword) {
-      showToast("La confirmación de contraseña no coincide.", "error");
-      focusPasswordField("confirm");
-      return false;
-    }
+      const currentPassword = safeText(finalPayload.currentPassword, "");
+      const newPassword = safeText(finalPayload.newPassword, "");
+      const confirmPassword = safeText(finalPayload.confirmPassword, "");
 
-    setState({
-      saving: true,
-      error: "",
-    });
+      if (!currentPassword) {
+        showToast("Introduce la contraseña actual.", "error");
+        focusPasswordField("current");
+        return false;
+      }
 
-    rerender();
-    await waitForPaint();
+      if (!newPassword) {
+        showToast("Introduce la nueva contraseña.", "error");
+        focusPasswordField("next");
+        return false;
+      }
 
-    try {
-      const handled = passwordChangeBridge({
-        currentPassword,
-        newPassword,
-        confirmPassword,
-        source: MODULE,
-        view: VIEW_NAME,
-      });
-
-      safeEmit("cuenta:password:requested", {
-        source: MODULE,
-        view: VIEW_NAME,
-      });
-
-      if (handled) {
-        clearPasswordFields();
-        showToast("Solicitud de cambio de contraseña enviada.", "success");
-      } else {
+      if (newPassword.length < PASSWORD_MIN_LENGTH) {
         showToast(
-          "Conecta el handler cuenta:password:change para procesar la contraseña.",
-          "info"
+          `La nueva contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.`,
+          "error"
         );
+        focusPasswordField("next");
+        return false;
       }
 
-      return handled;
-    } catch (error) {
-      const message = safeErrorMessage(error, "No se pudo procesar el cambio de contraseña.");
+      if (confirmPassword && confirmPassword !== newPassword) {
+        showToast("La confirmación de contraseña no coincide.", "error");
+        focusPasswordField("confirm");
+        return false;
+      }
 
-      safeWarn("handlePasswordChange falló:", error);
-      showToast(message, "error");
-
-      return false;
-    } finally {
       setState({
-        saving: false,
+        saving: true,
+        error: "",
       });
 
-      if (!destroyed) {
-        rerender();
+      setActionFlags({
+        changingPassword: true,
+      });
+
+      callSafe(State.setSaving, true);
+      callSafe(State.setChangingPassword, true);
+
+      rerender();
+      await waitForPaint();
+
+      try {
+        const handled = passwordChangeBridge({
+          currentPassword,
+          newPassword,
+          confirmPassword,
+          source: MODULE,
+          view: VIEW_NAME,
+        });
+
+        safeEmit("cuenta:password:requested", {
+          source: MODULE,
+          view: VIEW_NAME,
+        });
+
+        if (handled) {
+          clearPasswordFields();
+          showToast("Solicitud de cambio de contraseña enviada.", "success");
+        } else {
+          showToast(
+            "Conecta el handler cuenta:password:change para procesar la contraseña.",
+            "info"
+          );
+        }
+
+        return handled;
+      } catch (error) {
+        const message = safeErrorMessage(error, "No se pudo procesar el cambio de contraseña.");
+
+        safeWarn("handlePasswordChange falló:", error);
+
+        safeEmit("cuenta:password:error", {
+          error,
+          message,
+          source: MODULE,
+          view: VIEW_NAME,
+        });
+
+        showToast(message, "error");
+
+        return false;
+      } finally {
+        setState({
+          saving: false,
+        });
+
+        setActionFlags({
+          changingPassword: false,
+        });
+
+        callSafe(State.setSaving, false);
+        callSafe(State.setChangingPassword, false);
+
+        inflightPassword = null;
+
+        if (!destroyed) {
+          rerender();
+        }
       }
-    }
+    })();
+
+    return inflightPassword;
   }
 
   /* =========================================================
      BINDINGS
   ========================================================= */
 
-  function getActionTarget(event, actions = []) {
-    const selectors = actions
-      .map((action) => {
-        return [
-          `[data-cuenta-action="${action}"]`,
-          `[data-action="${action}"]`,
-        ].join(",");
-      })
-      .join(",");
-
-    if (!selectors) return null;
-
-    return event.target?.closest?.(selectors) || null;
-  }
-
-  function bindNativeActions(container) {
+  function bindFallbackEvents(container) {
     if (!container) {
       return () => {};
     }
+
+    const getActionTarget = (event, actions = []) => {
+      const selectors = actions
+        .map((action) =>
+          [
+            `[data-cuenta-action="${action}"]`,
+            `[data-action="${action}"]`,
+          ].join(",")
+        )
+        .join(",");
+
+      if (!selectors) return null;
+
+      return event.target?.closest?.(selectors) || null;
+    };
 
     const onClick = async (event) => {
       if (destroyed) return;
 
       const openModalBtn =
-        getActionTarget(event, [
-          "open-cuenta-modal",
-          "open-modal",
-          "detail",
-        ]) ||
+        getActionTarget(event, ["open-cuenta-modal", "open-modal", "detail"]) ||
         event.target?.closest?.("#cuenta-open-modal-btn");
 
       if (openModalBtn) {
         event.preventDefault();
         event.stopPropagation();
-
         handleOpenModal();
         return;
       }
 
       const retryBtn =
-        getActionTarget(event, [
-          "retry",
-          "retry-cuenta",
-        ]) ||
+        getActionTarget(event, ["retry", "retry-cuenta"]) ||
         event.target?.closest?.("#cuenta-retry-btn");
 
       if (retryBtn) {
@@ -2294,11 +2816,7 @@ export const CuentaView = (() => {
       }
 
       const refreshBtn =
-        getActionTarget(event, [
-          "refresh",
-          "reload",
-          "refresh-cuenta",
-        ]) ||
+        getActionTarget(event, ["refresh", "reload", "refresh-cuenta"]) ||
         event.target?.closest?.("#cuenta-refresh-btn");
 
       if (refreshBtn) {
@@ -2314,25 +2832,17 @@ export const CuentaView = (() => {
       }
 
       const saveBtn =
-        getActionTarget(event, [
-          "save",
-          "save-cuenta",
-        ]) ||
+        getActionTarget(event, ["save", "save-cuenta"]) ||
         event.target?.closest?.("#cuenta-save-btn");
 
       if (saveBtn) {
         event.preventDefault();
-
         await handleSaveCuenta();
         return;
       }
 
       const toggleThemeBtn =
-        getActionTarget(event, [
-          "toggle-theme",
-          "change-theme",
-          "update-theme",
-        ]);
+        getActionTarget(event, ["toggle-theme", "change-theme", "update-theme"]);
 
       if (toggleThemeBtn) {
         event.preventDefault();
@@ -2345,11 +2855,7 @@ export const CuentaView = (() => {
       }
 
       const languageBtn =
-        getActionTarget(event, [
-          "change-language",
-          "update-language",
-          "apply-language",
-        ]);
+        getActionTarget(event, ["change-language", "update-language", "apply-language"]);
 
       if (languageBtn) {
         event.preventDefault();
@@ -2361,15 +2867,11 @@ export const CuentaView = (() => {
       }
 
       const passwordBtn =
-        getActionTarget(event, [
-          "change-password",
-          "update-password",
-        ]) ||
+        getActionTarget(event, ["change-password", "update-password"]) ||
         event.target?.closest?.("#cuenta-password-btn");
 
       if (passwordBtn) {
         event.preventDefault();
-
         await handlePasswordChange();
       }
     };
@@ -2438,16 +2940,11 @@ export const CuentaView = (() => {
     };
   }
 
-  function bindModalBridgeEvents() {
+  function bindExternalEventsFallback() {
     const bus = AppCore?.events;
-
-    if (!bus?.on) {
-      return () => {};
-    }
 
     const onRefresh = async () => {
       if (destroyed) return;
-
       await handleRefreshCuenta();
     };
 
@@ -2456,13 +2953,18 @@ export const CuentaView = (() => {
 
       const payload = getEventPayload(event);
 
-      const darkMode =
-        payload.darkMode ??
-        payload.detail?.darkMode ??
-        payload.theme === "dark" ??
-        true;
+      const darkMode = safeBoolean(
+        first(
+          payload.darkMode,
+          payload.detail?.darkMode,
+          payload.theme === "dark" ? true : null,
+          payload.theme === "light" ? false : null,
+          true
+        ),
+        true
+      );
 
-      await handleUpdateTheme(Boolean(darkMode));
+      await handleUpdateTheme(darkMode);
     };
 
     const onUpdateLanguage = async (event) => {
@@ -2485,108 +2987,51 @@ export const CuentaView = (() => {
       if (destroyed) return;
 
       const payload = getEventPayload(event);
-      const currentPayload = readFormPayloadFromDom();
 
       await handleSaveCuenta({
-        ...currentPayload,
-
+        ...readFormPayloadFromDom(),
         ...safeObject(payload),
-
-        darkMode:
-          payload.darkMode ??
-          payload.detail?.darkMode ??
-          currentPayload.darkMode,
-
-        privacyMode:
-          payload.privacyMode ??
-          payload.detail?.privacyMode ??
-          currentPayload.privacyMode,
-
-        lang:
-          payload.lang ??
-          payload.language ??
-          payload.locale ??
-          payload.detail?.lang ??
-          payload.detail?.language ??
-          currentPayload.lang,
+        ...safeObject(payload.detail),
       });
     };
 
     try {
-      bus.on("cuenta:modal:refresh", onRefresh);
-      bus.on("cuenta:modal:update-theme", onUpdateTheme);
-      bus.on("cuenta:modal:update-language", onUpdateLanguage);
-      bus.on("cuenta:modal:update-preferences", onUpdatePreferences);
+      bus?.on?.("cuenta:modal:refresh", onRefresh);
+      bus?.on?.("cuenta:modal:update-theme", onUpdateTheme);
+      bus?.on?.("cuenta:modal:update-language", onUpdateLanguage);
+      bus?.on?.("cuenta:modal:update-preferences", onUpdatePreferences);
 
-      bus.on("cuenta:external:refresh", onRefresh);
-      bus.on("cuenta:preferences:mutated", onRefresh);
-      bus.on("cuenta:password:success", onRefresh);
-    } catch (error) {
-      safeWarn("bind modal bridge error:", error);
-    }
-
-    return () => {
-      try { bus.off("cuenta:modal:refresh", onRefresh); } catch {}
-      try { bus.off("cuenta:modal:update-theme", onUpdateTheme); } catch {}
-      try { bus.off("cuenta:modal:update-language", onUpdateLanguage); } catch {}
-      try { bus.off("cuenta:modal:update-preferences", onUpdatePreferences); } catch {}
-
-      try { bus.off("cuenta:external:refresh", onRefresh); } catch {}
-      try { bus.off("cuenta:preferences:mutated", onRefresh); } catch {}
-      try { bus.off("cuenta:password:success", onRefresh); } catch {}
-    };
-  }
-
-  function bindWindowEvents() {
-    if (typeof window === "undefined") {
-      return () => {};
-    }
-
-    const onRefresh = async () => {
-      if (destroyed) return;
-
-      await reload({
-        force: true,
-        asRefresh: true,
-        silent: true,
-      });
-    };
-
-    const onPreferencesMutated = async () => {
-      if (destroyed) return;
-
-      await reload({
-        force: true,
-        asRefresh: true,
-        silent: true,
-      });
-    };
-
-    const onPasswordSuccess = async () => {
-      if (destroyed) return;
-
-      clearPasswordFields();
-
-      await reload({
-        force: true,
-        asRefresh: true,
-        silent: true,
-      });
-    };
+      bus?.on?.("cuenta:external:refresh", onRefresh);
+      bus?.on?.("cuenta:preferences:mutated", onRefresh);
+      bus?.on?.("cuenta:password:success", onRefresh);
+    } catch {}
 
     try {
-      window.addEventListener("cuenta:external:refresh", onRefresh);
-      window.addEventListener("cuenta:preferences:mutated", onPreferencesMutated);
-      window.addEventListener("cuenta:modal:updated", onPreferencesMutated);
-      window.addEventListener("cuenta:password:success", onPasswordSuccess);
+      if (isBrowser()) {
+        window.addEventListener("cuenta:external:refresh", onRefresh);
+        window.addEventListener("cuenta:preferences:mutated", onRefresh);
+        window.addEventListener("cuenta:modal:updated", onRefresh);
+        window.addEventListener("cuenta:password:success", onRefresh);
+      }
     } catch {}
 
     return () => {
+      try { bus?.off?.("cuenta:modal:refresh", onRefresh); } catch {}
+      try { bus?.off?.("cuenta:modal:update-theme", onUpdateTheme); } catch {}
+      try { bus?.off?.("cuenta:modal:update-language", onUpdateLanguage); } catch {}
+      try { bus?.off?.("cuenta:modal:update-preferences", onUpdatePreferences); } catch {}
+
+      try { bus?.off?.("cuenta:external:refresh", onRefresh); } catch {}
+      try { bus?.off?.("cuenta:preferences:mutated", onRefresh); } catch {}
+      try { bus?.off?.("cuenta:password:success", onRefresh); } catch {}
+
       try {
-        window.removeEventListener("cuenta:external:refresh", onRefresh);
-        window.removeEventListener("cuenta:preferences:mutated", onPreferencesMutated);
-        window.removeEventListener("cuenta:modal:updated", onPreferencesMutated);
-        window.removeEventListener("cuenta:password:success", onPasswordSuccess);
+        if (isBrowser()) {
+          window.removeEventListener("cuenta:external:refresh", onRefresh);
+          window.removeEventListener("cuenta:preferences:mutated", onRefresh);
+          window.removeEventListener("cuenta:modal:updated", onRefresh);
+          window.removeEventListener("cuenta:password:success", onRefresh);
+        }
       } catch {}
     };
   }
@@ -2597,11 +3042,37 @@ export const CuentaView = (() => {
     if (destroyed) return;
 
     const container = getContainer();
-    const cleanups = [];
 
-    cleanups.push(bindNativeActions(container));
-    cleanups.push(bindModalBridgeEvents());
-    cleanups.push(bindWindowEvents());
+    if (!container) {
+      return;
+    }
+
+    try {
+      if (typeof CuentaBindings.bindCuentaEvents === "function") {
+        bindingsCleanup = CuentaBindings.bindCuentaEvents({
+          loadCuenta: CuentaApi.loadCuenta,
+          updateCuenta: handleSaveCuenta,
+          updateCuentaTheme: handleUpdateTheme,
+          updateCuentaLanguage: handleUpdateLanguage,
+          saveCuenta: handleSaveCuenta,
+          changePassword: handlePasswordChange,
+          reload,
+          getItem,
+          getSnapshot,
+          scope: SCOPE,
+          root: container,
+        });
+
+        return;
+      }
+    } catch (error) {
+      safeWarn("bindCuentaEvents falló. Usando fallback local.", error);
+    }
+
+    const cleanups = [
+      bindFallbackEvents(container),
+      bindExternalEventsFallback(),
+    ];
 
     bindingsCleanup = () => {
       for (const cleanup of cleanups) {
@@ -2613,7 +3084,7 @@ export const CuentaView = (() => {
   }
 
   /* =========================================================
-     PUBLIC
+     PUBLIC LIFECYCLE
   ========================================================= */
 
   async function reload(options = {}) {
@@ -2676,13 +3147,13 @@ export const CuentaView = (() => {
       });
 
       try {
-        await loadCuentaMeta?.();
+        await CuentaApi.loadCuentaMeta?.();
       } catch (error) {
         safeWarn("loadCuentaMeta falló:", error);
       }
 
       try {
-        syncViewFormFromItem?.();
+        State.syncViewFormFromItem?.();
       } catch {
         syncFormFromCurrentItem();
       }
@@ -2695,6 +3166,8 @@ export const CuentaView = (() => {
 
       safeEmit("cuenta:init:done", {
         source: MODULE,
+        view: VIEW_NAME,
+        version: VERSION,
         state: getPublicStateSnapshot(),
       });
 
@@ -2723,26 +3196,34 @@ export const CuentaView = (() => {
       saving: false,
     });
 
+    callSafe(State.setRefreshing, false);
+    callSafe(State.setLoading, false);
+    callSafe(State.setSaving, false);
+
+    inflightInit = null;
     inflightReload = null;
     inflightSave = null;
     inflightTheme = null;
     inflightLanguage = null;
+    inflightPassword = null;
 
     safeEmit("cuenta:destroyed", {
       source: MODULE,
+      view: VIEW_NAME,
+      version: VERSION,
     });
 
     safeLog("destroy");
+
+    return true;
   }
 
   function unmount() {
-    destroy();
-    return true;
+    return destroy();
   }
 
   function dispose() {
-    destroy();
-    return true;
+    return destroy();
   }
 
   /* =========================================================
@@ -2765,15 +3246,19 @@ export const CuentaView = (() => {
     }
 
     try {
-      return buildCuentaSnapshot(item);
-    } catch {
-      return {
-        item,
-        state: {
-          ...cuentaState,
-        },
-      };
-    }
+      if (typeof CuentaUtils.buildCuentaSnapshot === "function") {
+        return CuentaUtils.buildCuentaSnapshot(item);
+      }
+    } catch {}
+
+    return {
+      item,
+      state: {
+        ...cuentaState,
+      },
+      view: VIEW_NAME,
+      version: VERSION,
+    };
   }
 
   function getPublicStateSnapshot() {
@@ -2781,24 +3266,26 @@ export const CuentaView = (() => {
       initialized,
       mounted,
       destroyed,
+
       loading: Boolean(cuentaState.loading),
       refreshing: Boolean(cuentaState.refreshing),
       saving: Boolean(cuentaState.saving),
       hydrated: Boolean(cuentaState.hydrated),
+      loaded: Boolean(cuentaState.loaded),
+
       error: safeText(cuentaState.error, ""),
-      lastSyncAt: safeText(cuentaState.lastSyncAt, ""),
+      lastSyncAt: first(cuentaState.lastSyncAt, ""),
+
       hasItem: Boolean(getCurrentItem()),
+
       hasInflightInit: Boolean(inflightInit),
       hasInflightReload: Boolean(inflightReload),
       hasInflightSave: Boolean(inflightSave),
       hasInflightTheme: Boolean(inflightTheme),
       hasInflightLanguage: Boolean(inflightLanguage),
-      route: {
-        browserPath: getBrowserPath(),
-        appRoute: getAppRoutePath(),
-        publicPath: getAppPublicPath(),
-        canRender: canRenderCuentaNow(),
-      },
+      hasInflightPassword: Boolean(inflightPassword),
+
+      route: getRouteDebug(),
     };
   }
 
@@ -2839,8 +3326,8 @@ export const CuentaView = (() => {
     return handleUpdateTheme(darkMode);
   }
 
-  function changePassword() {
-    return handlePasswordChange();
+  function changePassword(payload = null) {
+    return handlePasswordChange(payload);
   }
 
   function isInitialized() {
@@ -2855,11 +3342,44 @@ export const CuentaView = (() => {
     return Boolean(mounted);
   }
 
+  function registerPublicBridge() {
+    try {
+      if (!AppCore.modules || typeof AppCore.modules !== "object") {
+        AppCore.modules = {};
+      }
+
+      AppCore.modules.CuentaView = api;
+      AppCore.modules.Cuenta = api;
+      AppCore.modules.OnionCuentaView = api;
+    } catch {}
+
+    try {
+      if (isBrowser()) {
+        window.CuentaView = api;
+        window.OnionCuentaView = api;
+
+        window.OnionCuenta = {
+          ...(window.OnionCuenta && typeof window.OnionCuenta === "object"
+            ? window.OnionCuenta
+            : {}),
+          ...api,
+        };
+      }
+    } catch {}
+
+    return api;
+  }
+
   /* =========================================================
      API
   ========================================================= */
 
   const api = {
+    name: MODULE,
+    viewName: VIEW_NAME,
+    version: VERSION,
+    source: "views:cuenta:cuentaView",
+
     init,
     mount,
     bootstrap,
@@ -2896,6 +3416,8 @@ export const CuentaView = (() => {
     getSnapshot,
     getCuentaSnapshot: getSnapshot,
     getState,
+    getPublicStateSnapshot,
+    getRouteDebug,
 
     canRenderCuentaNow,
 
@@ -2919,6 +3441,8 @@ export const CuentaView = (() => {
       return destroyed;
     },
   };
+
+  registerPublicBridge();
 
   return api;
 })();

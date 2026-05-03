@@ -3,6 +3,9 @@
    Archivo: src/router/render.js
 
    FINAL EXTREME SYSTEM · RENDER HOST ISOLATED · RACE SAFE · EVENT SAFE · 10/10
+   PATCH 13/10 · ROUTE STATE COMMIT BEFORE/SUCCESS RENDERED
+   PATCH · SIDEBAR ACTIVE ROUTE FIX
+   PATCH · CANONICAL/PUBLIC PAYLOAD HARDENED
 
    RESPONSABILIDADES:
    - renderizar vistas internas del router
@@ -69,6 +72,12 @@
    - helpers externos no pueden degradar /incidencias a /
    - render host queda marcado con canonical/public/status/renderId
    - async stale render no puede escribir ni reparar shell
+
+   FIX SIDEBAR ACTIVE:
+   - success hace commit real de AppCore.state.route/publicPath antes del render
+   - success emite router:before-render con canonical/public definitivos
+   - success emite router:rendered con canonical/public definitivos
+   - el sidebar ya no queda activo en la ruta anterior
 ========================================================= */
 
 import {
@@ -239,6 +248,24 @@ function safeObject(value) {
     !Array.isArray(value)
     ? value
     : {};
+}
+
+function firstResolved(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
+    }
+
+    if (Array.isArray(value) && value.length === 0) {
+      continue;
+    }
+
+    return value;
+  }
+
+  return null;
 }
 
 function getBaseOrigin() {
@@ -2565,56 +2592,220 @@ function resolveRouteRenderer(route = null) {
 ========================================================= */
 
 export function buildRenderPayload({
+  AppCore = null,
+
   path = null,
   requestedPath = null,
   canonicalPath = null,
   publicPath = null,
   username = null,
+
   route = null,
+
   found = false,
   forbidden = false,
   redirectedFrom = null,
+
   options = null,
   renderId = null,
+
+  flow = "",
+  status = "",
 } = {}) {
+  const routePathRaw =
+    route?.path || null;
+
+  const rawRequestedPath =
+    safeText(
+      firstResolved(
+        requestedPath,
+        path,
+        publicPath,
+        canonicalPath,
+        routePathRaw,
+        getBrowserPublicPath(AppCore),
+        AppCore?.state?.publicPath,
+        AppCore?.state?.route,
+        "/"
+      ),
+      "/"
+    );
+
+  const canonicalInput =
+    safeText(
+      firstResolved(
+        canonicalPath,
+        routePathRaw,
+        rawRequestedPath,
+        "/"
+      ),
+      "/"
+    );
+
+  const canonicalWithSuffix =
+    buildCanonicalSourceWithSuffix(
+      AppCore,
+      canonicalInput,
+      rawRequestedPath
+    );
+
+  const finalCanonicalPath =
+    stripSearchAndHash(
+      safeCanonicalPath(
+        AppCore,
+        canonicalWithSuffix || canonicalInput || "/"
+      )
+    );
+
+  const publicInput =
+    safeText(
+      firstResolved(
+        publicPath,
+        path,
+        requestedPath,
+        rawRequestedPath,
+        canonicalWithSuffix,
+        finalCanonicalPath,
+        "/"
+      ),
+      "/"
+    );
+
+  const normalizedPublicPath =
+    safeNormalizePublicPath(
+      AppCore,
+      publicInput
+    );
+
+  const preferredPublicPath =
+    preferRequestedPublicPathIfCompatible(
+      AppCore,
+      rawRequestedPath,
+      normalizedPublicPath ||
+        canonicalWithSuffix ||
+        finalCanonicalPath,
+      finalCanonicalPath
+    );
+
+  const finalPublicPath =
+    preservePublicContextForSameRoute(
+      AppCore,
+      preferredPublicPath ||
+        normalizedPublicPath ||
+        finalCanonicalPath ||
+        "/"
+    );
+
+  const finalUsername =
+    safeText(username, "") ||
+    resolveUsernameForPayload(
+      AppCore,
+      null,
+      finalPublicPath
+    ) ||
+    null;
+
+  const finalRoutePath =
+    routePathRaw
+      ? stripSearchAndHash(
+          safeCanonicalPath(
+            AppCore,
+            routePathRaw
+          )
+        )
+      : finalCanonicalPath;
+
   return {
-    path,
-    requestedPath,
-    canonicalPath,
-    publicPath,
-    username,
-    route,
+    path:
+      finalPublicPath,
+
+    requestedPath:
+      rawRequestedPath,
+
+    canonicalPath:
+      finalCanonicalPath,
+
+    publicPath:
+      finalPublicPath,
+
+    username:
+      finalUsername,
+
+    route:
+      route || null,
+
     routePath:
-      route?.path || null,
+      finalRoutePath,
+
     routeName:
       route?.name || null,
+
     viewKey:
       route?.viewKey || null,
+
     viewName:
       route?.viewName || null,
-    found: Boolean(found),
-    forbidden: Boolean(forbidden),
-    redirectedFrom,
-    options,
-    renderId,
-    ts: Date.now(),
+
+    found:
+      Boolean(found),
+
+    forbidden:
+      Boolean(forbidden),
+
+    redirectedFrom:
+      redirectedFrom || null,
+
+    options:
+      options || null,
+
+    renderId:
+      renderId || null,
+
+    flow:
+      safeText(flow, "") || null,
+
+    status:
+      safeText(status, "") || null,
+
+    ts:
+      Date.now(),
   };
 }
 
 export function emitBeforeRender(AppCore, payload = {}) {
+  const finalPayload =
+    buildRenderPayload({
+      AppCore,
+      ...safeObject(payload),
+      flow:
+        payload?.flow || "before-render",
+    });
+
   safeEmit(
     AppCore,
     "router:before-render",
-    buildRenderPayload(payload)
+    finalPayload
   );
+
+  return finalPayload;
 }
 
 export function emitRendered(AppCore, payload = {}) {
+  const finalPayload =
+    buildRenderPayload({
+      AppCore,
+      ...safeObject(payload),
+      flow:
+        payload?.flow || "rendered",
+    });
+
   safeEmit(
     AppCore,
     "router:rendered",
-    buildRenderPayload(payload)
+    finalPayload
   );
+
+  return finalPayload;
 }
 
 /* =========================================================
@@ -2676,6 +2867,15 @@ export function syncRouteState(
     });
   } catch {}
 
+  try {
+    if (AppCore?.state) {
+      AppCore.state.route = finalCanonical;
+      AppCore.state.canonicalPath = finalCanonical;
+      AppCore.state.publicPath = finalPublic;
+      AppCore.state.currentResolvedUsername = username;
+    }
+  } catch {}
+
   return {
     canonicalPath:
       finalCanonical,
@@ -2683,6 +2883,77 @@ export function syncRouteState(
       finalPublic,
     username,
   };
+}
+
+function syncRouteStateFromPayload(AppCore, payload = {}) {
+  const normalized =
+    buildRenderPayload({
+      AppCore,
+      ...safeObject(payload),
+    });
+
+  const synced =
+    syncRouteState(
+      AppCore,
+      normalized.canonicalPath,
+      normalized.publicPath
+    );
+
+  return buildRenderPayload({
+    AppCore,
+    ...normalized,
+
+    path:
+      synced.publicPath,
+
+    canonicalPath:
+      synced.canonicalPath,
+
+    publicPath:
+      synced.publicPath,
+
+    username:
+      synced.username ||
+      normalized.username,
+  });
+}
+
+function commitRouteStateAndEmitBefore(AppCore, payload = {}) {
+  const finalPayload =
+    syncRouteStateFromPayload(
+      AppCore,
+      {
+        ...safeObject(payload),
+        flow:
+          payload?.flow || "success",
+        status:
+          payload?.status || "before-render",
+      }
+    );
+
+  return emitBeforeRender(
+    AppCore,
+    finalPayload
+  );
+}
+
+function commitRouteStateAndEmitRendered(AppCore, payload = {}) {
+  const finalPayload =
+    syncRouteStateFromPayload(
+      AppCore,
+      {
+        ...safeObject(payload),
+        flow:
+          payload?.flow || "success",
+        status:
+          payload?.status || "rendered",
+      }
+    );
+
+  return emitRendered(
+    AppCore,
+    finalPayload
+  );
 }
 
 export function applyResolvedRouteState(
@@ -3244,7 +3515,7 @@ export async function renderRouteSuccess({
     signal,
   } = beginSuccessRender();
 
-  const resolved =
+  const resolvedRaw =
     resolvePublicPathForRoute({
       AppCore,
       getRoute,
@@ -3253,6 +3524,64 @@ export async function renderRouteSuccess({
       requestedPath,
       requestedUsername,
     });
+
+  /*
+    FIX CRÍTICO:
+    Antes de pintar nada, el router hace commit de la ruta final real.
+    Esto corrige el caso:
+      vista /facturas cargada
+      sidebar todavía activo en /incidencias
+  */
+  const lifecycleStart =
+    commitRouteStateAndEmitBefore(
+      AppCore,
+      {
+        path:
+          resolvedRaw.publicPath,
+
+        requestedPath:
+          requestedPath ||
+          resolvedRaw.publicPath,
+
+        canonicalPath:
+          resolvedRaw.canonicalPath,
+
+        publicPath:
+          resolvedRaw.publicPath,
+
+        username:
+          resolvedRaw.username,
+
+        route,
+        found: true,
+        forbidden: false,
+        renderId,
+
+        flow:
+          "success",
+
+        status:
+          "before-render",
+
+        options: {
+          requestedUsername:
+            requestedUsername || null,
+        },
+      }
+    );
+
+  const resolved = {
+    canonicalPath:
+      lifecycleStart.canonicalPath,
+
+    publicPath:
+      lifecycleStart.publicPath,
+
+    username:
+      lifecycleStart.username ||
+      resolvedRaw.username ||
+      null,
+  };
 
   applyRenderShellRepair({
     AppCore,
@@ -3298,18 +3627,25 @@ export async function renderRouteSuccess({
     buildRouteRenderContext({
       AppCore,
       route,
+
       requestedPath:
         resolved.publicPath,
+
       canonicalPath:
         resolved.canonicalPath,
+
       requestedUsername:
         resolved.username,
+
       publicPath:
         resolved.publicPath,
+
       renderId,
       signal,
+
       viewContainer:
         view,
+
       renderRoot:
         host,
     });
@@ -3324,6 +3660,67 @@ export async function renderRouteSuccess({
 
   const renderer =
     resolveRouteRenderer(route);
+
+  let asyncDispatched = false;
+
+  const commitSuccessRendered = (extra = {}) => {
+    if (
+      !isCurrentRender(
+        AppCore,
+        renderId,
+        resolved.canonicalPath
+      )
+    ) {
+      return null;
+    }
+
+    return commitRouteStateAndEmitRendered(
+      AppCore,
+      {
+        path:
+          resolved.publicPath,
+
+        requestedPath:
+          requestedPath ||
+          resolved.publicPath,
+
+        canonicalPath:
+          resolved.canonicalPath,
+
+        publicPath:
+          resolved.publicPath,
+
+        username:
+          resolved.username,
+
+        route,
+        found: true,
+        forbidden: false,
+        renderId,
+
+        flow:
+          "success",
+
+        status:
+          "rendered",
+
+        options: {
+          renderMode:
+            shouldBlock
+              ? "blocking"
+              : "non-blocking",
+
+          rendererSource:
+            renderer.source || null,
+
+          asyncDispatched:
+            Boolean(asyncDispatched),
+
+          ...safeObject(extra),
+        },
+      }
+    );
+  };
 
   if (isFunction(renderer.render)) {
     const transitionView =
@@ -3385,6 +3782,8 @@ export async function renderRouteSuccess({
           true,
       });
     } else if (isPromiseLike(result)) {
+      asyncDispatched = true;
+
       const deferredView =
         createDeferredViewInstance({
           AppCore,
@@ -3466,21 +3865,42 @@ export async function renderRouteSuccess({
             AppCore,
             "router:render:async-complete",
             {
+              path:
+                resolved.publicPath,
+
+              requestedPath:
+                requestedPath ||
+                resolved.publicPath,
+
               route:
                 route?.path || null,
+
+              routePath:
+                route?.path || null,
+
               routeName:
                 route?.name || null,
+
               viewKey:
                 route?.viewKey || null,
+
               viewName:
                 route?.viewName || null,
+
               canonicalPath:
                 resolved.canonicalPath,
+
               publicPath:
                 resolved.publicPath,
+
+              username:
+                resolved.username,
+
               hasView:
                 Boolean(resolvedView),
+
               renderId,
+
               durationMs:
                 Math.round(
                   nowMs() - startedAt
@@ -3493,7 +3913,9 @@ export async function renderRouteSuccess({
             AppCore,
             error,
             route,
-            requestedPath,
+            requestedPath:
+              requestedPath ||
+              resolved.publicPath,
             canonicalPath:
               resolved.canonicalPath,
             publicPath:
@@ -3635,27 +4057,61 @@ export async function renderRouteSuccess({
     });
   });
 
+  /*
+    FIX CLAVE:
+    router:rendered sale DESDE AQUÍ con canonical/public definitivos.
+    El sidebar ya no tiene que adivinar ni tirar de estados stale.
+  */
+  commitSuccessRendered({
+    durationMs:
+      Math.round(
+        nowMs() - startedAt
+      ),
+  });
+
   emitFlowMetric(
     AppCore,
     "success",
     {
+      path:
+        resolved.publicPath,
+
+      requestedPath:
+        requestedPath ||
+        resolved.publicPath,
+
       route:
         route?.path || null,
+
       routeName:
         route?.name || null,
+
       viewKey:
         route?.viewKey || null,
+
       viewName:
         route?.viewName || null,
+
       canonicalPath:
         resolved.canonicalPath,
+
       publicPath:
         resolved.publicPath,
+
+      username:
+        resolved.username,
+
       renderMode:
         shouldBlock ? "blocking" : "non-blocking",
+
       rendererSource:
         renderer.source || null,
+
+      asyncDispatched:
+        Boolean(asyncDispatched),
+
       renderId,
+
       durationMs:
         Math.round(
           nowMs() - startedAt
@@ -3669,20 +4125,34 @@ export async function renderRouteSuccess({
     {
       route:
         route?.path || null,
+
       routeName:
         route?.name || null,
+
       viewKey:
         route?.viewKey || null,
+
       viewName:
         route?.viewName || null,
+
       canonicalPath:
         resolved.canonicalPath,
+
       publicPath:
         resolved.publicPath,
+
+      username:
+        resolved.username,
+
       renderMode:
         shouldBlock ? "blocking" : "non-blocking",
+
       rendererSource:
         renderer.source || null,
+
+      asyncDispatched:
+        Boolean(asyncDispatched),
+
       renderId,
     }
   );
@@ -3862,6 +4332,12 @@ export async function renderLoginRedirect(args = {}) {
     }
   );
 
+  syncRouteState(
+    args.AppCore,
+    routeNames.LOGIN,
+    publicPath
+  );
+
   applyRenderShellRepair({
     AppCore:
       args.AppCore,
@@ -3877,6 +4353,34 @@ export async function renderLoginRedirect(args = {}) {
 
   const renderId =
     ++successRenderSequence;
+
+  emitBeforeRender(
+    args.AppCore,
+    {
+      path:
+        publicPath,
+      requestedPath:
+        publicPath,
+      canonicalPath:
+        routeNames.LOGIN,
+      publicPath,
+      route,
+      found:
+        Boolean(route),
+      forbidden:
+        false,
+      redirectedFrom:
+        args.publicPath ||
+        args.requestedPath ||
+        args.canonicalPath ||
+        null,
+      renderId,
+      flow:
+        "login-redirect",
+      status:
+        "before-render",
+    }
+  );
 
   const {
     view,
@@ -3961,6 +4465,34 @@ export async function renderLoginRedirect(args = {}) {
     args.AppCore,
     renderId,
     routeNames.LOGIN
+  );
+
+  emitRendered(
+    args.AppCore,
+    {
+      path:
+        publicPath,
+      requestedPath:
+        publicPath,
+      canonicalPath:
+        routeNames.LOGIN,
+      publicPath,
+      route,
+      found:
+        Boolean(route),
+      forbidden:
+        false,
+      redirectedFrom:
+        args.publicPath ||
+        args.requestedPath ||
+        args.canonicalPath ||
+        null,
+      renderId,
+      flow:
+        "login-redirect",
+      status:
+        "rendered",
+    }
   );
 
   emitFlowMetric(

@@ -2,7 +2,13 @@
    Onion SPA - Sidebar Events
    Archivo: src/ui/sidebar/events.js
 
-   FINAL EXTREME SYSTEM · SIDEBAR EVENTS / VISUAL COMMIT · BIND SAFE · 10/10
+   FINAL EXTREME SYSTEM · SIDEBAR EVENTS / VISUAL COMMIT · BIND SAFE · 12/10
+   PATCH · STALE ROUTE FIREBREAK
+   PATCH · ACTIVE MENU LOCAL OVERRIDE
+   PATCH · FACTURAS/INCIDENCIAS WRONG ACTIVE FIX
+   PATCH · USERNAME PUBLIC PATH READY /@usuario/ruta
+   PATCH · CATALAN/SPANISH/ENGLISH ROUTE ALIASES
+   PATCH · ROUTER PAYLOAD STALE SAFE
 
    Responsabilidades:
    - bind de eventos DOM del sidebar
@@ -15,6 +21,7 @@
    - tolerar DOM re-renderizado
    - cero throws accidentales
    - sincronizar item activo del menú delegando en state.js
+   - corregir item activo localmente si state/router payload llega stale
    - sincronizar indicador visual tipo Apple delegando en state.js
    - evitar indicador colgado al colapsar/expandir
    - centralizar commit visual post-router/post-resize/post-auth
@@ -45,6 +52,17 @@
    - Respeta Ctrl/Cmd/Shift/Alt click.
    - Respeta target="_blank", download, URLs externas y href inseguros.
    - Los botones del dropdown con data-route también navegan.
+
+   FIX ACTIVE WRONG:
+   - En commits de router, la URL visible tiene prioridad.
+   - Payloads viejos de router/app state no pisan el activo.
+   - /@usuario/facturas se normaliza a /facturas.
+   - Alias ES/CA/EN:
+     /factures, /invoices => /facturas
+     /incidencies, /tickets => /incidencias
+     /usuaris, /users => /usuarios
+     /clients, /customers => /clientes
+     /compte, /account => /cuenta
 ========================================================= */
 
 import {
@@ -57,6 +75,7 @@ import {
   syncActiveMenuItem as syncActiveMenuItemBase,
   syncActiveMenuIndicator as syncActiveMenuIndicatorBase,
   scheduleActiveMenuIndicator as scheduleActiveMenuIndicatorBase,
+  isRealShellHidden as isRealShellHiddenBase,
 } from "./state.js";
 
 /* ======================================================
@@ -80,19 +99,69 @@ const RESIZE_DEBOUNCE_MS = 120;
 const HANDLED_FLAG = "__onionSidebarHandled";
 const LOCAL_HANDLED_FLAG = "__onionSidebarEventsHandled";
 
+const ROUTE_CURRENT_VALUE = "page";
+
+const ROUTE_ALIASES = Object.freeze({
+  "/home": "/",
+  "/dashboard": "/",
+  "/inicio": "/",
+  "/inici": "/",
+
+  "/tickets": "/incidencias",
+  "/ticket": "/incidencias",
+  "/incidents": "/incidencias",
+  "/incident": "/incidencias",
+  "/incidencies": "/incidencias",
+  "/incidencia": "/incidencias",
+
+  "/invoices": "/facturas",
+  "/invoice": "/facturas",
+  "/billing": "/facturas",
+  "/factures": "/facturas",
+  "/factura": "/facturas",
+
+  "/users": "/usuarios",
+  "/user": "/usuarios",
+  "/usuaris": "/usuarios",
+  "/usuari": "/usuarios",
+  "/usuario": "/usuarios",
+
+  "/clients": "/clientes",
+  "/client": "/clientes",
+  "/customers": "/clientes",
+  "/customer": "/clientes",
+  "/cliente": "/clientes",
+
+  "/account": "/cuenta",
+  "/profile": "/cuenta",
+  "/compte": "/cuenta",
+  "/perfil": "/cuenta",
+
+  "/settings": "/ajustes",
+  "/config": "/ajustes",
+  "/configuracion": "/ajustes",
+  "/configuración": "/ajustes",
+  "/configuracio": "/ajustes",
+  "/configuració": "/ajustes",
+
+  "/server": "/servidor",
+  "/servidor": "/servidor",
+});
+
 /* ======================================================
    BASICS
 ====================================================== */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 function hasWindow() {
   return typeof window !== "undefined";
+}
+
+function hasDocument() {
+  return typeof document !== "undefined";
 }
 
 function safeText(value, fallback = "") {
@@ -106,11 +175,18 @@ function safeText(value, fallback = "") {
 }
 
 function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
+  return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 function isFn(value) {
@@ -180,11 +256,7 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
       return true;
     }
   } catch (error) {
-    safeWarn(
-      AppCore,
-      `AppCore.events.emit("${name}") falló`,
-      error
-    );
+    safeWarn(AppCore, `AppCore.events.emit("${name}") falló`, error);
   }
 
   try {
@@ -215,10 +287,7 @@ function safeWindowTimeout(fn, ms = 0) {
 
   try {
     if (hasWindow()) {
-      return window.setTimeout(
-        safeFn,
-        Math.max(0, Number(ms) || 0)
-      );
+      return window.setTimeout(safeFn, Math.max(0, Number(ms) || 0));
     }
   } catch {}
 
@@ -254,10 +323,7 @@ function safeRequestAnimationFrame(fn) {
   };
 
   try {
-    if (
-      hasWindow() &&
-      isFn(window.requestAnimationFrame)
-    ) {
+    if (hasWindow() && isFn(window.requestAnimationFrame)) {
       return window.requestAnimationFrame(safeFn);
     }
   } catch {}
@@ -286,6 +352,12 @@ function afterFrames(fn, frames = 2) {
 }
 
 function safeIsShellHidden(AppCore) {
+  try {
+    if (isFn(isRealShellHiddenBase)) {
+      return Boolean(isRealShellHiddenBase(AppCore));
+    }
+  } catch {}
+
   try {
     return Boolean(isShellHidden(AppCore));
   } catch {
@@ -329,6 +401,18 @@ function isElement(value = null) {
   }
 }
 
+function isConnectedElement(value = null) {
+  if (!isElement(value)) {
+    return false;
+  }
+
+  try {
+    return value.isConnected !== false;
+  } catch {
+    return true;
+  }
+}
+
 function containsElement(parent = null, child = null) {
   if (!parent || !child) {
     return false;
@@ -342,24 +426,15 @@ function containsElement(parent = null, child = null) {
 }
 
 function getEventDetail(eventOrPayload = {}) {
-  if (
-    eventOrPayload?.detail &&
-    typeof eventOrPayload.detail === "object"
-  ) {
+  if (eventOrPayload?.detail && typeof eventOrPayload.detail === "object") {
     return eventOrPayload.detail;
   }
 
-  if (
-    eventOrPayload?.payload &&
-    typeof eventOrPayload.payload === "object"
-  ) {
+  if (eventOrPayload?.payload && typeof eventOrPayload.payload === "object") {
     return eventOrPayload.payload;
   }
 
-  if (
-    eventOrPayload &&
-    typeof eventOrPayload === "object"
-  ) {
+  if (eventOrPayload && typeof eventOrPayload === "object") {
     return eventOrPayload;
   }
 
@@ -384,6 +459,173 @@ function preventDefaultAndStop(event) {
    ROUTE / CURRENT PATH HELPERS
 ====================================================== */
 
+function getBaseOrigin() {
+  try {
+    if (isBrowser() && window.location?.origin) {
+      return window.location.origin;
+    }
+  } catch {}
+
+  return "http://localhost";
+}
+
+function isUnsafeRouteValue(value = "") {
+  const raw = safeText(value, "").toLowerCase();
+
+  return Boolean(
+    raw.startsWith("javascript:") ||
+      raw.startsWith("data:") ||
+      raw.startsWith("vbscript:") ||
+      raw.startsWith("file:") ||
+      raw.startsWith("mailto:") ||
+      raw.startsWith("tel:")
+  );
+}
+
+function isProtocolHref(value = "") {
+  return /^[a-z][a-z0-9+.-]*:/i.test(safeText(value, ""));
+}
+
+function isExternalHref(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) {
+    return false;
+  }
+
+  if (!isProtocolHref(raw)) {
+    return false;
+  }
+
+  try {
+    const url = new URL(raw, getBaseOrigin());
+
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      return url.origin !== getBaseOrigin();
+    }
+
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function isHashOnlyHref(value = "") {
+  const href = safeText(value, "");
+  return href.startsWith("#") && !href.startsWith("#/") && !href.startsWith("#!");
+}
+
+function isHashRouterPath(value = "") {
+  const raw = safeText(value, "");
+  return raw.startsWith("#/") || raw.startsWith("#!");
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/");
+  }
+
+  return raw.replace(/^#\/?/, "/");
+}
+
+function stripPublicUsernamePrefix(pathname = "/") {
+  const value = safeText(pathname, "/").replace(/^\/@[^/]+(?=\/|$)/i, "");
+  return value || "/";
+}
+
+function normalizePathnameOnly(pathname = "/") {
+  let value = safeText(pathname, "/")
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/")
+    .trim();
+
+  if (!value) {
+    value = "/";
+  }
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
+}
+
+function applyRouteAlias(pathname = "/") {
+  const clean = normalizePathnameOnly(pathname || "/");
+
+  if (ROUTE_ALIASES[clean]) {
+    return ROUTE_ALIASES[clean];
+  }
+
+  for (const [from, to] of Object.entries(ROUTE_ALIASES)) {
+    if (from !== "/" && clean.startsWith(`${from}/`)) {
+      return `${to}${clean.slice(from.length)}`;
+    }
+  }
+
+  return clean;
+}
+
+function normalizeRoutePath(path = "/") {
+  let value = safeText(path, "/");
+
+  if (!value) {
+    return "/";
+  }
+
+  if (isUnsafeRouteValue(value) || isExternalHref(value) || isHashOnlyHref(value)) {
+    return "";
+  }
+
+  if (isHashRouterPath(value)) {
+    value = normalizeHashRouterPath(value);
+  }
+
+  try {
+    const parsed = new URL(value, getBaseOrigin());
+
+    if (parsed.hash && isHashRouterPath(parsed.hash)) {
+      value = normalizeHashRouterPath(parsed.hash);
+    } else {
+      value = `${parsed.pathname || "/"}${parsed.search || ""}`;
+    }
+  } catch {
+    value = value.split("#")[0] || "/";
+  }
+
+  value = safeText(value, "/")
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  const [pathname, query = ""] = value.split("?");
+
+  const cleanPathname = applyRouteAlias(
+    stripPublicUsernamePrefix(
+      normalizePathnameOnly(pathname || "/")
+    )
+  );
+
+  return query ? `${cleanPathname}?${query}` : cleanPathname;
+}
+
+function stripQuery(path = "/") {
+  return normalizeRoutePath(path).split("?")[0] || "/";
+}
+
 function getBrowserPath() {
   if (!isBrowser()) {
     return "/";
@@ -394,104 +636,174 @@ function getBrowserPath() {
     const search = window.location.search || "";
     const hash = window.location.hash || "";
 
-    if (
-      hash.startsWith("#/") ||
-      hash.startsWith("#!")
-    ) {
-      return hash
-        .replace(/^#!\/?/, "/")
-        .replace(/^#\/?/, "/") || "/";
+    if (hash && isHashRouterPath(hash)) {
+      return normalizeRoutePath(normalizeHashRouterPath(hash));
     }
 
-    return `${pathname}${search}`;
+    return normalizeRoutePath(`${pathname}${search}`);
   } catch {
     return "/";
   }
 }
 
-function normalizeRoutePath(path = "/") {
-  let value = safeText(path, "/");
+function getRouterPath(Router = null) {
+  const router = Router || null;
 
-  if (!value) {
-    value = "/";
-  }
-
-  try {
-    if (isBrowser()) {
-      const parsed = new URL(value, window.location.origin);
-
-      if (
-        parsed.hash &&
-        (
-          parsed.hash.startsWith("#/") ||
-          parsed.hash.startsWith("#!")
-        )
-      ) {
-        value = parsed.hash
-          .replace(/^#!\/?/, "/")
-          .replace(/^#\/?/, "/");
-      } else {
-        value = `${parsed.pathname || "/"}${parsed.search || ""}`;
-      }
-    }
-  } catch {}
-
-  value = safeText(value, "/")
-    .split("#")[0]
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
-  }
-
-  if (
-    value.length > 1 &&
-    value.endsWith("/")
-  ) {
-    value = value.replace(/\/+$/g, "") || "/";
-  }
-
-  return value || "/";
+  return normalizeRoutePath(
+    first(
+      router?.getCurrentPublicPath?.(),
+      router?.getCurrentCanonicalPath?.(),
+      router?.getCurrentPath?.(),
+      ""
+    )
+  );
 }
 
-function getRouteFromPayload(payload = {}, AppCore = null, Router = null) {
-  const detail = safeObject(payload);
-
-  return safeText(
+function getAppStatePath(AppCore = null) {
+  return normalizeRoutePath(
     first(
-      detail.publicPath,
-      detail.path,
-      detail.requestedPath,
-      detail.canonicalPath,
-      detail.route,
-      detail.to,
-      detail.url,
-
-      detail.current?.publicPath,
-      detail.current?.path,
-      detail.current?.route,
-
-      detail.next?.publicPath,
-      detail.next?.path,
-      detail.next?.route,
-
-      detail.route?.publicPath,
-      detail.route?.path,
-      detail.route?.canonicalPath,
-
-      Router?.getCurrentPublicPath?.(),
-      Router?.getCurrentCanonicalPath?.(),
-      Router?.getCurrentPath?.(),
-
       AppCore?.state?.publicPath,
       AppCore?.state?.route,
       AppCore?.state?.canonicalPath,
-
-      getBrowserPath()
-    ),
-    "/"
+      AppCore?.state?.lastRoute,
+      ""
+    )
   );
+}
+
+function collectExplicitRouteCandidates(payload = {}) {
+  const detail = safeObject(payload);
+
+  return [
+    detail.publicPath,
+    detail.path,
+    detail.requestedPath,
+    detail.canonicalPath,
+    detail.route,
+    detail.to,
+    detail.url,
+    detail.href,
+
+    detail.current?.publicPath,
+    detail.current?.path,
+    detail.current?.route,
+    detail.current?.canonicalPath,
+
+    detail.next?.publicPath,
+    detail.next?.path,
+    detail.next?.route,
+    detail.next?.canonicalPath,
+
+    detail.route?.publicPath,
+    detail.route?.path,
+    detail.route?.canonicalPath,
+
+    detail.payload?.publicPath,
+    detail.payload?.path,
+    detail.payload?.requestedPath,
+    detail.payload?.canonicalPath,
+    detail.payload?.route,
+    detail.payload?.to,
+    detail.payload?.url,
+
+    detail.detail?.publicPath,
+    detail.detail?.path,
+    detail.detail?.requestedPath,
+    detail.detail?.canonicalPath,
+    detail.detail?.route,
+    detail.detail?.to,
+    detail.detail?.url,
+  ]
+    .map((value) => normalizeRoutePath(value || ""))
+    .filter(Boolean);
+}
+
+function pushUniqueRoute(list, value) {
+  const route = normalizeRoutePath(value || "");
+
+  if (route && !list.includes(route)) {
+    list.push(route);
+  }
+
+  return list;
+}
+
+function reasonPrefersExplicitRoute(reason = "") {
+  const key = safeText(reason, "").toLowerCase();
+
+  return Boolean(
+    key.includes("sidebar") ||
+      key.includes("navigation") ||
+      key.includes("navigate") ||
+      key.includes("active-route") ||
+      key.includes("open-activity") ||
+      key.includes("manual") ||
+      key.includes("click")
+  );
+}
+
+function resolveFreshRoute(payload = {}, AppCore = null, Router = null, options = {}) {
+  const opts = safeObject(options);
+  const detail = safeObject(payload);
+
+  const explicit = collectExplicitRouteCandidates(detail);
+  const browser = getBrowserPath();
+  const router = getRouterPath(Router || AppCore?.Router || AppCore?.router);
+  const appState = getAppStatePath(AppCore);
+
+  const preferExplicit =
+    opts.preferExplicitRoute === true ||
+    opts.forceRoute === true ||
+    detail.preferExplicitRoute === true ||
+    detail.forceRoute === true ||
+    reasonPrefersExplicitRoute(
+      first(opts.reason, detail.reason, detail.type, detail.event, "")
+    );
+
+  const candidates = [];
+
+  if (preferExplicit) {
+    explicit.forEach((value) => pushUniqueRoute(candidates, value));
+    pushUniqueRoute(candidates, router);
+    pushUniqueRoute(candidates, appState);
+    pushUniqueRoute(candidates, browser);
+  } else {
+    /*
+      FIX CRÍTICO:
+      En commits de router/render/theme/lang, la URL visible gana.
+      Esto evita que un payload atrasado de /incidencias marque el menú
+      cuando el navegador ya está en /@usuario/facturas.
+    */
+    pushUniqueRoute(candidates, browser);
+    pushUniqueRoute(candidates, router);
+    pushUniqueRoute(candidates, appState);
+    explicit.forEach((value) => pushUniqueRoute(candidates, value));
+  }
+
+  return candidates[0] || "/";
+}
+
+function buildRoutePayload(ctx = {}, payload = {}, reason = "", options = {}) {
+  const AppCore = ctx.AppCore;
+  const Router = ctx.Router || AppCore?.Router || AppCore?.router;
+
+  const route = resolveFreshRoute(payload, AppCore, Router, {
+    ...safeObject(options),
+    reason,
+  });
+
+  return {
+    ...safeObject(payload),
+    reason,
+    route,
+    publicPath: route,
+    path: route,
+    canonicalPath: stripQuery(route),
+    currentPublicPath: route,
+    browserPublicPath: getBrowserPath(),
+    routerPublicPath: getRouterPath(Router),
+    appPublicPath: getAppStatePath(AppCore),
+  };
 }
 
 /* ======================================================
@@ -503,10 +815,7 @@ function isPrimaryClick(event) {
     return true;
   }
 
-  if (
-    "button" in event &&
-    event.button !== 0
-  ) {
+  if ("button" in event && event.button !== 0) {
     return false;
   }
 
@@ -514,81 +823,7 @@ function isPrimaryClick(event) {
 }
 
 function isModifiedClick(event) {
-  return Boolean(
-    event?.metaKey ||
-      event?.ctrlKey ||
-      event?.shiftKey ||
-      event?.altKey
-  );
-}
-
-function getBaseOrigin() {
-  try {
-    if (isBrowser() && window.location?.origin) {
-      return window.location.origin;
-    }
-  } catch {}
-
-  return "http://localhost";
-}
-
-function isUnsafeHref(value = "") {
-  const href =
-    safeText(value, "").toLowerCase();
-
-  return (
-    href.startsWith("javascript:") ||
-    href.startsWith("data:") ||
-    href.startsWith("vbscript:") ||
-    href.startsWith("file:")
-  );
-}
-
-function isProtocolHref(value = "") {
-  return /^[a-z][a-z0-9+.-]*:/i.test(
-    safeText(value, "")
-  );
-}
-
-function isExternalHref(value = "") {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return false;
-  }
-
-  if (!isProtocolHref(raw)) {
-    return false;
-  }
-
-  try {
-    const url = new URL(
-      raw,
-      getBaseOrigin()
-    );
-
-    if (
-      url.protocol === "http:" ||
-      url.protocol === "https:"
-    ) {
-      return url.origin !== getBaseOrigin();
-    }
-
-    return true;
-  } catch {
-    return true;
-  }
-}
-
-function isHashOnlyHref(value = "") {
-  const href =
-    safeText(value, "");
-
-  return (
-    href.startsWith("#") &&
-    !href.startsWith("#/")
-  );
+  return Boolean(event?.metaKey || event?.ctrlKey || event?.shiftKey || event?.altKey);
 }
 
 function isDisabledInteractive(element = null) {
@@ -608,23 +843,15 @@ function shouldLetBrowserHandleNavigation(element = null, event = null) {
     return true;
   }
 
-  if (
-    !isPrimaryClick(event) ||
-    isModifiedClick(event)
-  ) {
+  if (!isPrimaryClick(event) || isModifiedClick(event)) {
     return true;
   }
 
-  if (
-    isDisabledInteractive(element) ||
-    element.hasAttribute?.("download")
-  ) {
+  if (isDisabledInteractive(element) || element.hasAttribute?.("download")) {
     return true;
   }
 
-  const target =
-    safeText(element.getAttribute?.("target"), "")
-      .toLowerCase();
+  const target = safeText(element.getAttribute?.("target"), "").toLowerCase();
 
   return target === "_blank";
 }
@@ -643,45 +870,29 @@ function getRouteFromElement(element = null) {
 }
 
 function normalizeSidebarTarget(AppCore, Router, value = "") {
-  let raw =
-    safeText(value, "");
+  let raw = safeText(value, "");
 
   if (!raw) {
     return "";
   }
 
-  if (
-    isUnsafeHref(raw) ||
-    isExternalHref(raw) ||
-    isHashOnlyHref(raw)
-  ) {
+  if (isUnsafeRouteValue(raw) || isExternalHref(raw) || isHashOnlyHref(raw)) {
     return "";
   }
 
   try {
     if (isFn(Router?.resolveSpaHref)) {
-      raw = safeText(
-        Router.resolveSpaHref(raw),
-        raw
-      );
+      raw = safeText(Router.resolveSpaHref(raw), raw);
     }
   } catch {}
 
-  if (
-    !raw ||
-    isUnsafeHref(raw) ||
-    isExternalHref(raw) ||
-    isHashOnlyHref(raw)
-  ) {
+  if (!raw || isUnsafeRouteValue(raw) || isExternalHref(raw) || isHashOnlyHref(raw)) {
     return "";
   }
 
   try {
     if (/^https?:\/\//i.test(raw)) {
-      const url = new URL(
-        raw,
-        getBaseOrigin()
-      );
+      const url = new URL(raw, getBaseOrigin());
 
       if (url.origin !== getBaseOrigin()) {
         return "";
@@ -699,15 +910,7 @@ function normalizeSidebarTarget(AppCore, Router, value = "") {
     }
   } catch {}
 
-  if (raw.startsWith("#/")) {
-    return raw.replace(/^#\/?/, "/");
-  }
-
-  return normalizeRoutePath(
-    raw.startsWith("/")
-      ? raw
-      : `/${raw}`
-  );
+  return normalizeRoutePath(raw.startsWith("/") || raw.startsWith("#") ? raw : `/${raw}`);
 }
 
 async function navigateFromSidebar({
@@ -716,17 +919,9 @@ async function navigateFromSidebar({
   target = "",
   source = "sidebar",
 } = {}) {
-  const finalRouter =
-    Router ||
-    AppCore?.Router ||
-    AppCore?.router;
+  const finalRouter = Router || AppCore?.Router || AppCore?.router;
 
-  const cleanTarget =
-    normalizeSidebarTarget(
-      AppCore,
-      finalRouter,
-      target
-    );
+  const cleanTarget = normalizeSidebarTarget(AppCore, finalRouter, target);
 
   if (!cleanTarget) {
     return false;
@@ -766,15 +961,11 @@ async function navigateFromSidebar({
       return true;
     }
   } catch (error) {
-    safeWarn(
-      AppCore,
-      "Navegación Router falló desde sidebar.",
-      {
-        target: cleanTarget,
-        source,
-        error,
-      }
-    );
+    safeWarn(AppCore, "Navegación Router falló desde sidebar.", {
+      target: cleanTarget,
+      source,
+      error,
+    });
   }
 
   try {
@@ -800,20 +991,22 @@ function getSidebarNavigationElement(target = null) {
     return null;
   }
 
-  return target.closest?.(
-    [
-      "[data-sidebar-nav='true']",
-      "a[data-sidebar-item='true']",
-      "a[data-spa]",
-      "a[data-route]",
-      "a[data-href]",
-      "a[data-to]",
-      "a[href]",
-      ".menu-item[data-route]",
-      ".menu-item[data-href]",
-      ".menu-item[data-to]",
-    ].join(",")
-  ) || null;
+  return (
+    target.closest?.(
+      [
+        "[data-sidebar-nav='true']",
+        "a[data-sidebar-item='true']",
+        "a[data-spa]",
+        "a[data-route]",
+        "a[data-href]",
+        "a[data-to]",
+        "a[href]",
+        ".menu-item[data-route]",
+        ".menu-item[data-href]",
+        ".menu-item[data-to]",
+      ].join(",")
+    ) || null
+  );
 }
 
 function getDropdownNavigationElement(target = null) {
@@ -821,20 +1014,202 @@ function getDropdownNavigationElement(target = null) {
     return null;
   }
 
-  return target.closest?.(
-    [
-      "a[data-spa]",
-      "a[data-route]",
-      "a[data-href]",
-      "a[data-to]",
-      "a[href]",
-      "button[data-route]",
-      "button[data-href]",
-      "button[data-to]",
-      "[data-sidebar-action='profile']",
-      "[data-sidebar-action='settings']",
-    ].join(",")
-  ) || null;
+  return (
+    target.closest?.(
+      [
+        "a[data-spa]",
+        "a[data-route]",
+        "a[data-href]",
+        "a[data-to]",
+        "a[href]",
+        "button[data-route]",
+        "button[data-href]",
+        "button[data-to]",
+        "[data-sidebar-action='profile']",
+        "[data-sidebar-action='settings']",
+      ].join(",")
+    ) || null
+  );
+}
+
+/* ======================================================
+   LOCAL ACTIVE MATCHER · STALE ROUTE OVERRIDE
+====================================================== */
+
+function getMenuItems(sidebarMenu = null) {
+  if (!sidebarMenu) {
+    return [];
+  }
+
+  try {
+    return Array.from(
+      sidebarMenu.querySelectorAll(
+        [
+          ".menu-item",
+          "[data-sidebar-nav='true']",
+          "a[data-sidebar-item='true']",
+          "a[data-spa]",
+          "a[data-route]",
+          "a[data-href]",
+          "a[data-to]",
+          "a[href]",
+        ].join(",")
+      )
+    ).filter((item, index, array) => item && array.indexOf(item) === index);
+  } catch {
+    return [];
+  }
+}
+
+function getMenuItemRoute(item = null) {
+  return normalizeRoutePath(getRouteFromElement(item));
+}
+
+function isVisibleMenuItem(item = null) {
+  if (!item || !isConnectedElement(item)) {
+    return false;
+  }
+
+  try {
+    if (item.hidden) return false;
+
+    if (
+      item.closest?.(
+        [
+          "[hidden]",
+          "[inert]",
+          "[aria-hidden='true']",
+          "[data-role-visible='false']",
+          "[data-admin-visible='false']",
+          "[data-sidebar-visible='false']",
+        ].join(",")
+      )
+    ) {
+      return false;
+    }
+
+    const style = window.getComputedStyle(item);
+
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      safeNumber(style.opacity, 1) === 0
+    ) {
+      return false;
+    }
+
+    const rect = item.getBoundingClientRect();
+
+    return rect.width > 0 && rect.height > 0;
+  } catch {
+    return true;
+  }
+}
+
+function clearActiveItemClasses(sidebarMenu = null) {
+  const items = getMenuItems(sidebarMenu);
+
+  for (const item of items) {
+    try {
+      item.classList?.remove?.("active", "is-active", "router-active");
+      item.removeAttribute?.("aria-current");
+
+      if (item.dataset) {
+        delete item.dataset.active;
+      }
+    } catch {}
+  }
+
+  return true;
+}
+
+function setActiveItemClasses(item = null, matchedRoute = "") {
+  if (!item) {
+    return false;
+  }
+
+  try {
+    item.classList?.add?.("active", "is-active", "router-active");
+    item.setAttribute?.("aria-current", ROUTE_CURRENT_VALUE);
+
+    if (item.dataset) {
+      item.dataset.active = "true";
+      item.dataset.matchedRoute = safeText(matchedRoute, "");
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function scoreRouteMatch(routePath = "/", currentPath = "/") {
+  const route = normalizeRoutePath(routePath);
+  const current = normalizeRoutePath(currentPath);
+
+  const routeClean = stripQuery(route);
+  const currentClean = stripQuery(current);
+
+  if (!route || !current) {
+    return -1;
+  }
+
+  if (route === current) {
+    return 10000 + route.length;
+  }
+
+  if (routeClean === currentClean) {
+    return 9000 + routeClean.length;
+  }
+
+  if (routeClean !== "/" && currentClean.startsWith(`${routeClean}/`)) {
+    return 5000 + routeClean.length;
+  }
+
+  if (routeClean === "/" && currentClean === "/") {
+    return 1000;
+  }
+
+  return -1;
+}
+
+function findBestMenuItemForRoute(sidebarMenu = null, route = "/") {
+  const targetRoute = normalizeRoutePath(route || "/");
+  const items = getMenuItems(sidebarMenu);
+
+  let best = null;
+  let bestScore = -1;
+  let bestRoute = "";
+
+  for (const item of items) {
+    if (!isVisibleMenuItem(item)) {
+      continue;
+    }
+
+    const itemRoute = getMenuItemRoute(item);
+
+    if (!itemRoute) {
+      continue;
+    }
+
+    const score = scoreRouteMatch(itemRoute, targetRoute);
+
+    if (score > bestScore) {
+      best = item;
+      bestScore = score;
+      bestRoute = itemRoute;
+    }
+  }
+
+  if (bestScore < 0) {
+    return null;
+  }
+
+  try {
+    best.dataset.matchedRoute = bestRoute;
+  } catch {}
+
+  return best;
 }
 
 function setOptimisticSidebarActiveItem(sidebarMenu = null, item = null) {
@@ -842,50 +1217,31 @@ function setOptimisticSidebarActiveItem(sidebarMenu = null, item = null) {
     return false;
   }
 
-  try {
-    const items = Array.from(
-      sidebarMenu.querySelectorAll(
-        [
-          ".menu-item",
-          "[data-sidebar-nav='true']",
-          "a[data-spa]",
-          "a[data-route]",
-        ].join(",")
-      )
-    );
+  clearActiveItemClasses(sidebarMenu);
+  return setActiveItemClasses(item, getMenuItemRoute(item));
+}
 
-    for (const candidate of items) {
-      try {
-        candidate.classList?.remove?.(
-          "active",
-          "is-active",
-          "router-active"
-        );
+function syncLocalActiveMenuItem(ctx = {}, route = "/", options = {}) {
+  const AppCore = ctx.AppCore;
 
-        candidate.removeAttribute?.("aria-current");
+  const { sidebarMenu } = resolveElements(AppCore, ctx.getElements);
 
-        if (candidate.dataset) {
-          delete candidate.dataset.active;
-        }
-      } catch {}
-    }
-
-    item.classList?.add?.(
-      "active",
-      "is-active",
-      "router-active"
-    );
-
-    item.setAttribute?.("aria-current", "page");
-
-    if (item.dataset) {
-      item.dataset.active = "true";
-    }
-
-    return true;
-  } catch {
-    return false;
+  if (!sidebarMenu) {
+    return null;
   }
+
+  const activeItem = findBestMenuItemForRoute(sidebarMenu, route);
+
+  if (!activeItem) {
+    return null;
+  }
+
+  if (options.mutate !== false) {
+    clearActiveItemClasses(sidebarMenu);
+    setActiveItemClasses(activeItem, route);
+  }
+
+  return activeItem;
 }
 
 /* ======================================================
@@ -907,10 +1263,7 @@ function markSidebarEventHandled(event, reason = "") {
 }
 
 function wasSidebarEventHandled(event) {
-  return Boolean(
-    event?.[HANDLED_FLAG] ||
-      event?.[LOCAL_HANDLED_FLAG]
-  );
+  return Boolean(event?.[HANDLED_FLAG] || event?.[LOCAL_HANDLED_FLAG]);
 }
 
 /* ======================================================
@@ -919,7 +1272,6 @@ function wasSidebarEventHandled(event) {
 
 function getScopeEpoch(scope) {
   const scopeName = resolveScope(scope);
-
   return Number(scopeEpochs.get(scopeName) || 0);
 }
 
@@ -981,13 +1333,7 @@ function disposeLocalScope(scope) {
   return true;
 }
 
-function makeSafeHandler(
-  AppCore,
-  scope,
-  epoch,
-  label = "handler",
-  handler
-) {
+function makeSafeHandler(AppCore, scope, epoch, label = "handler", handler) {
   if (!isFn(handler)) {
     return () => {};
   }
@@ -1002,28 +1348,15 @@ function makeSafeHandler(
     try {
       const result = handler(...args);
 
-      if (
-        result &&
-        typeof result === "object" &&
-        isFn(result.catch)
-      ) {
+      if (result && typeof result === "object" && isFn(result.catch)) {
         result.catch((error) => {
-          safeWarn(
-            AppCore,
-            `${label} falló async`,
-            error
-          );
+          safeWarn(AppCore, `${label} falló async`, error);
         });
       }
 
       return result;
     } catch (error) {
-      safeWarn(
-        AppCore,
-        `${label} falló`,
-        error
-      );
-
+      safeWarn(AppCore, `${label} falló`, error);
       return undefined;
     }
   };
@@ -1033,23 +1366,10 @@ function makeSafeHandler(
    DOM BIND LOW LEVEL
 ====================================================== */
 
-function bindDom(
-  AppCore,
-  scope,
-  epoch,
-  target,
-  eventName,
-  handler,
-  options = undefined
-) {
+function bindDom(AppCore, scope, epoch, target, eventName, handler, options = undefined) {
   const scopeName = resolveScope(scope);
 
-  if (
-    !target ||
-    !eventName ||
-    !isFn(handler) ||
-    !isFn(target.addEventListener)
-  ) {
+  if (!target || !eventName || !isFn(handler) || !isFn(target.addEventListener)) {
     return () => {};
   }
 
@@ -1063,35 +1383,16 @@ function bindDom(
 
   const cleanup = () => {
     try {
-      target.removeEventListener(
-        eventName,
-        safeHandler,
-        options
-      );
+      target.removeEventListener(eventName, safeHandler, options);
     } catch {}
   };
 
-  /*
-    No usamos AppCore.cleanup.on aquí.
-    El sidebar tiene cleanup local propio.
-  */
   try {
-    target.addEventListener(
-      eventName,
-      safeHandler,
-      options
-    );
-
+    target.addEventListener(eventName, safeHandler, options);
     pushLocalCleanup(scopeName, cleanup);
-
     return cleanup;
   } catch (error) {
-    safeWarn(
-      AppCore,
-      `addEventListener falló para DOM "${eventName}"`,
-      error
-    );
-
+    safeWarn(AppCore, `addEventListener falló para DOM "${eventName}"`, error);
     return () => {};
   }
 }
@@ -1100,13 +1401,7 @@ function bindDom(
    CORE EVENT BIND LOW LEVEL
 ====================================================== */
 
-function bindCoreEvent(
-  AppCore,
-  scope,
-  epoch,
-  eventName,
-  handler
-) {
+function bindCoreEvent(AppCore, scope, epoch, eventName, handler) {
   const scopeName = resolveScope(scope);
   const cleanEventName = safeText(eventName, "");
 
@@ -1125,26 +1420,16 @@ function bindCoreEvent(
   let busOff = null;
   let boundToBus = false;
 
-  /*
-    Preferimos AppCore.events.
-    NO nos suscribimos también a window si el bus existe.
-  */
   try {
     if (isFn(AppCore?.events?.on)) {
-      const maybeOff = AppCore.events.on(
-        cleanEventName,
-        safeHandler
-      );
+      const maybeOff = AppCore.events.on(cleanEventName, safeHandler);
 
       if (isFn(maybeOff)) {
         busOff = maybeOff;
       } else {
         busOff = () => {
           try {
-            AppCore?.events?.off?.(
-              cleanEventName,
-              safeHandler
-            );
+            AppCore?.events?.off?.(cleanEventName, safeHandler);
           } catch {}
         };
       }
@@ -1152,11 +1437,7 @@ function bindCoreEvent(
       boundToBus = true;
     }
   } catch (error) {
-    safeWarn(
-      AppCore,
-      `AppCore.events.on falló para "${cleanEventName}"`,
-      error
-    );
+    safeWarn(AppCore, `AppCore.events.on falló para "${cleanEventName}"`, error);
   }
 
   if (boundToBus) {
@@ -1171,10 +1452,6 @@ function bindCoreEvent(
     return cleanup;
   }
 
-  /*
-    Fallback real:
-    Solo usamos window si no existe AppCore.events.
-  */
   const windowHandler = (event) => {
     safeHandler(event);
   };
@@ -1183,28 +1460,17 @@ function bindCoreEvent(
 
   try {
     if (hasWindow()) {
-      window.addEventListener(
-        cleanEventName,
-        windowHandler
-      );
-
+      window.addEventListener(cleanEventName, windowHandler);
       windowBound = true;
     }
   } catch (error) {
-    safeWarn(
-      AppCore,
-      `window.addEventListener falló para "${cleanEventName}"`,
-      error
-    );
+    safeWarn(AppCore, `window.addEventListener falló para "${cleanEventName}"`, error);
   }
 
   const cleanup = () => {
     if (windowBound) {
       try {
-        window.removeEventListener(
-          cleanEventName,
-          windowHandler
-        );
+        window.removeEventListener(cleanEventName, windowHandler);
       } catch {}
     }
   };
@@ -1222,118 +1488,152 @@ function bindCoreEvent(
 
 function syncActiveMenuItem(ctx = {}, payload = {}) {
   const AppCore = ctx.AppCore;
-  const Router =
-    ctx.Router ||
-    AppCore?.Router ||
-    AppCore?.router;
+  const Router = ctx.Router || AppCore?.Router || AppCore?.router;
 
-  const route = normalizeRoutePath(
-    getRouteFromPayload(payload, AppCore, Router)
+  const reason = safeText(
+    payload?.reason || payload?.type || payload?.event || "sidebar-events:active-sync",
+    "sidebar-events:active-sync"
   );
 
+  const routePayload = buildRoutePayload(
+    {
+      ...ctx,
+      AppCore,
+      Router,
+    },
+    payload,
+    reason,
+    payload
+  );
+
+  let baseItem = null;
+
   try {
-    return syncActiveMenuItemBase(AppCore, {
-      ...safeObject(payload),
-      reason:
-        safeText(
-          payload?.reason ||
-            payload?.type ||
-            payload?.event ||
-            "sidebar-events:active-sync",
-          "sidebar-events:active-sync"
-        ),
-      route,
-      publicPath: route,
-      path: route,
+    baseItem = syncActiveMenuItemBase(AppCore, {
+      ...routePayload,
       mutate: true,
     });
   } catch (error) {
-    safeWarn(
-      AppCore,
-      "syncActiveMenuItemBase falló",
-      error
-    );
-
-    return null;
+    safeWarn(AppCore, "syncActiveMenuItemBase falló", error);
   }
+
+  /*
+    FIX CRÍTICO:
+    state.js puede recibir candidatos stale desde AppCore/router.
+    Esta corrección local fuerza el item correcto con la ruta fresca.
+  */
+  const fixedItem = syncLocalActiveMenuItem(
+    {
+      ...ctx,
+      AppCore,
+      Router,
+    },
+    routePayload.route,
+    {
+      mutate: true,
+    }
+  );
+
+  if (fixedItem && fixedItem !== baseItem) {
+    safeEmit(AppCore, "sidebar:active:item:overridden", {
+      source: "SidebarEvents",
+      reason,
+      route: routePayload.route,
+      previousRoute: getMenuItemRoute(baseItem),
+      fixedRoute: getMenuItemRoute(fixedItem),
+    });
+  }
+
+  return fixedItem || baseItem || null;
 }
 
 function syncActiveMenuIndicator(ctx = {}, options = {}) {
   const AppCore = ctx.AppCore;
-  const Router =
-    ctx.Router ||
-    AppCore?.Router ||
-    AppCore?.router;
+  const Router = ctx.Router || AppCore?.Router || AppCore?.router;
 
-  const route = normalizeRoutePath(
-    getRouteFromPayload(options, AppCore, Router)
+  const reason = safeText(options.reason, "sidebar-events:indicator-sync");
+
+  const routePayload = buildRoutePayload(
+    {
+      ...ctx,
+      AppCore,
+      Router,
+    },
+    options,
+    reason,
+    options
   );
+
+  const activeItem =
+    options.activeItem ||
+    syncLocalActiveMenuItem(
+      {
+        ...ctx,
+        AppCore,
+        Router,
+      },
+      routePayload.route,
+      {
+        mutate: true,
+      }
+    );
 
   try {
     return syncActiveMenuIndicatorBase(AppCore, {
-      ...safeObject(options),
-      reason:
-        safeText(
-          options.reason,
-          "sidebar-events:indicator-sync"
-        ),
-      route,
-      publicPath: route,
-      path: route,
-      reveal:
-        options.reveal !== false,
-      force:
-        options.force === true,
+      ...routePayload,
+      activeItem,
+      reveal: options.reveal !== false,
+      force: options.force === true,
     });
   } catch (error) {
-    safeWarn(
-      AppCore,
-      "syncActiveMenuIndicatorBase falló",
-      error
-    );
-
+    safeWarn(AppCore, "syncActiveMenuIndicatorBase falló", error);
     return false;
   }
 }
 
 function scheduleActiveMenuIndicator(ctx = {}, options = {}) {
   const AppCore = ctx.AppCore;
-  const Router =
-    ctx.Router ||
-    AppCore?.Router ||
-    AppCore?.router;
+  const Router = ctx.Router || AppCore?.Router || AppCore?.router;
 
-  const route = normalizeRoutePath(
-    getRouteFromPayload(options, AppCore, Router)
+  const reason = safeText(options.reason, "sidebar-events:indicator-scheduled");
+
+  const routePayload = buildRoutePayload(
+    {
+      ...ctx,
+      AppCore,
+      Router,
+    },
+    options,
+    reason,
+    options
   );
+
+  const activeItem =
+    options.activeItem ||
+    syncLocalActiveMenuItem(
+      {
+        ...ctx,
+        AppCore,
+        Router,
+      },
+      routePayload.route,
+      {
+        mutate: true,
+      }
+    );
 
   try {
     return scheduleActiveMenuIndicatorBase(AppCore, {
-      ...safeObject(options),
-      reason:
-        safeText(
-          options.reason,
-          "sidebar-events:indicator-scheduled"
-        ),
-      route,
-      publicPath: route,
-      path: route,
-      delayMs:
-        Number.isFinite(Number(options.delayMs))
-          ? Number(options.delayMs)
-          : INDICATOR_DEFAULT_DELAY,
-      reveal:
-        options.reveal !== false,
-      force:
-        options.force === true,
+      ...routePayload,
+      activeItem,
+      delayMs: Number.isFinite(Number(options.delayMs))
+        ? Number(options.delayMs)
+        : INDICATOR_DEFAULT_DELAY,
+      reveal: options.reveal !== false,
+      force: options.force === true,
     });
   } catch (error) {
-    safeWarn(
-      AppCore,
-      "scheduleActiveMenuIndicatorBase falló",
-      error
-    );
-
+    safeWarn(AppCore, "scheduleActiveMenuIndicatorBase falló", error);
     return false;
   }
 }
@@ -1343,18 +1643,12 @@ function hideActiveMenuIndicator(ctx = {}, reason = "hide") {
 
   try {
     return syncActiveMenuIndicatorBase(AppCore, {
-      reason:
-        safeText(reason, "hide"),
+      reason: safeText(reason, "hide"),
       reveal: false,
       force: true,
     });
   } catch {
-    const {
-      sidebarMenu,
-    } = resolveElements(
-      AppCore,
-      ctx.getElements
-    );
+    const { sidebarMenu } = resolveElements(AppCore, ctx.getElements);
 
     if (!sidebarMenu) {
       return false;
@@ -1372,14 +1666,7 @@ function hideActiveMenuIndicator(ctx = {}, reason = "hide") {
 function beginSidebarLayoutTransition(ctx = {}, reason = "transition") {
   const AppCore = ctx.AppCore;
 
-  const {
-    sidebar,
-    body,
-    sidebarMenu,
-  } = resolveElements(
-    AppCore,
-    ctx.getElements
-  );
+  const { sidebar, body, sidebarMenu } = resolveElements(AppCore, ctx.getElements);
 
   hideActiveMenuIndicator(ctx, `${reason}:begin`);
 
@@ -1399,14 +1686,7 @@ function beginSidebarLayoutTransition(ctx = {}, reason = "transition") {
 function endSidebarLayoutTransition(ctx = {}, reason = "transition") {
   const AppCore = ctx.AppCore;
 
-  const {
-    sidebar,
-    body,
-    sidebarMenu,
-  } = resolveElements(
-    AppCore,
-    ctx.getElements
-  );
+  const { sidebar, body, sidebarMenu } = resolveElements(AppCore, ctx.getElements);
 
   try {
     sidebar?.classList?.remove?.("is-transitioning");
@@ -1414,10 +1694,9 @@ function endSidebarLayoutTransition(ctx = {}, reason = "transition") {
     sidebarMenu?.classList?.remove?.("is-transitioning");
   } catch {}
 
-  const activeItem =
-    syncActiveMenuItem(ctx, {
-      reason: `${reason}:end`,
-    });
+  const activeItem = syncActiveMenuItem(ctx, {
+    reason: `${reason}:end`,
+  });
 
   scheduleActiveMenuIndicator(ctx, {
     reason: `${reason}:end`,
@@ -1463,10 +1742,7 @@ function createSidebarVisualCommitter(ctx = {}) {
 
     committing = true;
 
-    const reason = safeText(
-      options.reason,
-      "visual-commit"
-    );
+    const reason = safeText(options.reason, "visual-commit");
 
     lastReason = reason;
 
@@ -1475,11 +1751,7 @@ function createSidebarVisualCommitter(ctx = {}) {
         try {
           ctx.closeDropdown?.();
         } catch (error) {
-          safeWarn(
-            AppCore,
-            `closeDropdown falló en ${reason}`,
-            error
-          );
+          safeWarn(AppCore, `closeDropdown falló en ${reason}`, error);
         }
       }
 
@@ -1487,40 +1759,21 @@ function createSidebarVisualCommitter(ctx = {}) {
         try {
           ctx.renderUser?.();
         } catch (error) {
-          safeWarn(
-            AppCore,
-            `renderUser falló en ${reason}`,
-            error
-          );
+          safeWarn(AppCore, `renderUser falló en ${reason}`, error);
         }
 
         try {
           ctx.applyRoleVisibility?.();
         } catch (error) {
-          safeWarn(
-            AppCore,
-            `applyRoleVisibility falló en ${reason}`,
-            error
-          );
+          safeWarn(AppCore, `applyRoleVisibility falló en ${reason}`, error);
         }
       }
 
-      /*
-        syncState solo se usa en arranque/estado explícito.
-        No se usa en navegación normal para evitar bucles con state events.
-      */
-      if (
-        options.syncState === true &&
-        !safeIsShellHidden(AppCore)
-      ) {
+      if (options.syncState === true && !safeIsShellHidden(AppCore)) {
         try {
           ctx.syncSidebarState?.();
         } catch (error) {
-          safeWarn(
-            AppCore,
-            `syncSidebarState falló en ${reason}`,
-            error
-          );
+          safeWarn(AppCore, `syncSidebarState falló en ${reason}`, error);
         }
       }
 
@@ -1528,40 +1781,32 @@ function createSidebarVisualCommitter(ctx = {}) {
         try {
           sanitizeFooterTooltipState(AppCore);
         } catch (error) {
-          safeWarn(
-            AppCore,
-            `sanitizeFooterTooltipState falló en ${reason}`,
-            error
-          );
+          safeWarn(AppCore, `sanitizeFooterTooltipState falló en ${reason}`, error);
         }
       }
 
-      const payload = {
-        ...(safeObject(options.payload)),
-        reason,
-      };
+      const payload = buildRoutePayload(ctx, safeObject(options.payload), reason, options);
 
-      const activeItem =
-        syncActiveMenuItem(ctx, payload);
+      const activeItem = syncActiveMenuItem(ctx, payload);
 
       if (options.indicator !== false) {
         scheduleActiveMenuIndicator(ctx, {
           ...payload,
           reason,
           activeItem,
-          delayMs:
-            options.indicatorDelayMs ??
-            INDICATOR_DEFAULT_DELAY,
-          reveal:
-            options.reveal !== false,
-          force:
-            options.force === true,
+          delayMs: options.indicatorDelayMs ?? INDICATOR_DEFAULT_DELAY,
+          reveal: options.reveal !== false,
+          force: options.force === true,
         });
       }
 
       safeEmit(AppCore, "sidebar:visual:committed", {
         reason,
         lastReason,
+        route: payload.route,
+        browserPublicPath: payload.browserPublicPath,
+        routerPublicPath: payload.routerPublicPath,
+        appPublicPath: payload.appPublicPath,
       });
 
       return true;
@@ -1571,17 +1816,13 @@ function createSidebarVisualCommitter(ctx = {}) {
   };
 
   const schedule = (options = {}) => {
-    const key = safeText(
-      options.key,
-      "default"
-    );
+    const key = safeText(options.key, "default");
 
     clearTimer(key);
 
-    const delayMs =
-      Number.isFinite(Number(options.delayMs))
-        ? Number(options.delayMs)
-        : 0;
+    const delayMs = Number.isFinite(Number(options.delayMs))
+      ? Number(options.delayMs)
+      : 0;
 
     const timer = safeWindowTimeout(() => {
       timers.delete(key);
@@ -1629,21 +1870,17 @@ function createSidebarVisualCommitter(ctx = {}) {
     schedule,
     cancelAll,
 
-    hideIndicator:
-      (reason = "hide") =>
-        hideActiveMenuIndicator(ctx, reason),
+    hideIndicator: (reason = "hide") => hideActiveMenuIndicator(ctx, reason),
 
     beginTransition,
 
-    endTransition:
-      (reason = "transition") => {
-        clearWindowTimeout(transitionTimer);
-        transitionTimer = null;
-        return endSidebarLayoutTransition(ctx, reason);
-      },
+    endTransition: (reason = "transition") => {
+      clearWindowTimeout(transitionTimer);
+      transitionTimer = null;
+      return endSidebarLayoutTransition(ctx, reason);
+    },
 
-    getLastReason:
-      () => lastReason,
+    getLastReason: () => lastReason,
   };
 }
 
@@ -1710,10 +1947,7 @@ function shouldIgnoreHiddenTarget(target = null) {
     ].join(",")
   );
 
-  if (
-    interactiveParent &&
-    interactiveParent.contains(ariaHidden)
-  ) {
+  if (interactiveParent && interactiveParent.contains(ariaHidden)) {
     if (ariaHidden === interactiveParent) {
       return true;
     }
@@ -1759,8 +1993,7 @@ export function handleDocumentClick({
     return;
   }
 
-  const elements =
-    resolveElements(AppCore, resolver);
+  const elements = resolveElements(AppCore, resolver);
 
   const {
     toggleBtn,
@@ -1777,17 +2010,9 @@ export function handleDocumentClick({
     return;
   }
 
-  const insideSidebar =
-    isInsideSidebarArea(elements, target);
+  const insideSidebar = isInsideSidebarArea(elements, target);
 
-  /*
-    No bloqueamos clicks hidden/inert fuera del sidebar.
-    Este módulo solo debe proteger su propia UI.
-  */
-  if (
-    insideSidebar &&
-    preventHiddenTargetClick(event)
-  ) {
+  if (insideSidebar && preventHiddenTargetClick(event)) {
     return;
   }
 
@@ -1819,66 +2044,64 @@ export function handleDocumentClick({
     return;
   }
 
-  /*
-    Fallback delegado:
-    Como este listener va en capture, gana al Router global.
-    Así el menú nunca depende del listener SPA externo.
-  */
-  const sidebarNav =
-    getSidebarNavigationElement(target);
+  const sidebarNav = getSidebarNavigationElement(target);
 
-  if (
-    sidebarNav &&
-    sidebarMenu?.contains?.(sidebarNav)
-  ) {
-    if (
-      shouldLetBrowserHandleNavigation(sidebarNav, event)
-    ) {
+  if (sidebarNav && sidebarMenu?.contains?.(sidebarNav)) {
+    if (shouldLetBrowserHandleNavigation(sidebarNav, event)) {
       return;
     }
 
-    const finalRouter =
-      Router ||
-      AppCore?.Router ||
-      AppCore?.router;
+    const finalRouter = Router || AppCore?.Router || AppCore?.router;
 
-    const targetPath =
-      normalizeSidebarTarget(
-        AppCore,
-        finalRouter,
-        getRouteFromElement(sidebarNav)
-      );
+    const targetPath = normalizeSidebarTarget(
+      AppCore,
+      finalRouter,
+      getRouteFromElement(sidebarNav)
+    );
 
     if (!targetPath) {
       return;
     }
 
-    markSidebarEventHandled(
-      event,
-      "document-sidebar-menu:navigate"
-    );
-
+    markSidebarEventHandled(event, "document-sidebar-menu:navigate");
     preventDefaultAndStop(event);
 
     try {
       closeDropdown?.();
     } catch {}
 
-    safeEmit(
-      AppCore,
-      "sidebar:navigation:request",
-      {
-        target: targetPath,
-        route: targetPath,
-        publicPath: targetPath,
-        source: "sidebar-menu",
-      }
-    );
+    safeEmit(AppCore, "sidebar:navigation:request", {
+      target: targetPath,
+      route: targetPath,
+      publicPath: targetPath,
+      path: targetPath,
+      preferExplicitRoute: true,
+      source: "sidebar-menu",
+    });
 
-    setOptimisticSidebarActiveItem(
-      sidebarMenu,
-      sidebarNav
-    );
+    setOptimisticSidebarActiveItem(sidebarMenu, sidebarNav);
+
+    const ctx = {
+      AppCore,
+      Router: finalRouter,
+      getElements: resolver,
+    };
+
+    const activeItem = syncLocalActiveMenuItem(ctx, targetPath, {
+      mutate: true,
+    });
+
+    scheduleActiveMenuIndicator(ctx, {
+      reason: "sidebar-menu:navigate",
+      route: targetPath,
+      publicPath: targetPath,
+      path: targetPath,
+      preferExplicitRoute: true,
+      activeItem,
+      delayMs: 24,
+      reveal: true,
+      force: true,
+    });
 
     void navigateFromSidebar({
       AppCore,
@@ -1891,56 +2114,43 @@ export function handleDocumentClick({
   }
 
   if (userDropdown?.contains?.(target)) {
-    const routeButton =
-      getDropdownNavigationElement(target);
+    const routeButton = getDropdownNavigationElement(target);
 
     if (!routeButton) {
       return;
     }
 
-    if (
-      shouldLetBrowserHandleNavigation(routeButton, event)
-    ) {
+    if (shouldLetBrowserHandleNavigation(routeButton, event)) {
       return;
     }
 
-    const finalRouter =
-      Router ||
-      AppCore?.Router ||
-      AppCore?.router;
+    const finalRouter = Router || AppCore?.Router || AppCore?.router;
 
-    const targetPath =
-      normalizeSidebarTarget(
-        AppCore,
-        finalRouter,
-        getRouteFromElement(routeButton)
-      );
+    const targetPath = normalizeSidebarTarget(
+      AppCore,
+      finalRouter,
+      getRouteFromElement(routeButton)
+    );
 
     if (!targetPath) {
       return;
     }
 
-    markSidebarEventHandled(
-      event,
-      "sidebar-dropdown:navigate"
-    );
-
+    markSidebarEventHandled(event, "sidebar-dropdown:navigate");
     preventDefaultAndStop(event);
 
     try {
       closeDropdown?.();
     } catch {}
 
-    safeEmit(
-      AppCore,
-      "sidebar:dropdown:navigation:request",
-      {
-        target: targetPath,
-        route: targetPath,
-        publicPath: targetPath,
-        source: "sidebar-dropdown",
-      }
-    );
+    safeEmit(AppCore, "sidebar:dropdown:navigation:request", {
+      target: targetPath,
+      route: targetPath,
+      publicPath: targetPath,
+      path: targetPath,
+      preferExplicitRoute: true,
+      source: "sidebar-dropdown",
+    });
 
     void navigateFromSidebar({
       AppCore,
@@ -1952,14 +2162,7 @@ export function handleDocumentClick({
     return;
   }
 
-  /*
-    Click fuera del dropdown: cerramos solo el dropdown.
-    No tocamos open/close del sidebar por navegación ni por click exterior.
-  */
-  if (
-    !containsElement(userDropdown, target) &&
-    !containsElement(userToggle, target)
-  ) {
+  if (!containsElement(userDropdown, target) && !containsElement(userToggle, target)) {
     closeDropdown?.();
   }
 }
@@ -1975,16 +2178,11 @@ export function handleSidebarMenuClick({
     return;
   }
 
-  if (
-    !isPrimaryClick(event) ||
-    isModifiedClick(event)
-  ) {
+  if (!isPrimaryClick(event) || isModifiedClick(event)) {
     return;
   }
 
-  const {
-    sidebarMenu,
-  } = resolveElements(AppCore, resolver);
+  const { sidebarMenu } = resolveElements(AppCore, resolver);
 
   if (!sidebarMenu) {
     return;
@@ -2000,8 +2198,7 @@ export function handleSidebarMenuClick({
     return;
   }
 
-  const link =
-    getSidebarNavigationElement(target);
+  const link = getSidebarNavigationElement(target);
 
   if (!link) {
     return;
@@ -2011,54 +2208,61 @@ export function handleSidebarMenuClick({
     return;
   }
 
-  if (
-    shouldLetBrowserHandleNavigation(link, event)
-  ) {
+  if (shouldLetBrowserHandleNavigation(link, event)) {
     return;
   }
 
-  const finalRouter =
-    Router ||
-    AppCore?.Router ||
-    AppCore?.router;
+  const finalRouter = Router || AppCore?.Router || AppCore?.router;
 
-  const targetPath =
-    normalizeSidebarTarget(
-      AppCore,
-      finalRouter,
-      getRouteFromElement(link)
-    );
+  const targetPath = normalizeSidebarTarget(
+    AppCore,
+    finalRouter,
+    getRouteFromElement(link)
+  );
 
   if (!targetPath) {
     return;
   }
 
-  markSidebarEventHandled(
-    event,
-    "sidebar-menu:navigate"
-  );
-
+  markSidebarEventHandled(event, "sidebar-menu:navigate");
   preventDefaultAndStop(event);
 
   try {
     closeDropdown?.();
   } catch {}
 
-  safeEmit(
-    AppCore,
-    "sidebar:navigation:request",
-    {
-      target: targetPath,
-      route: targetPath,
-      publicPath: targetPath,
-      source: "sidebar-menu",
-    }
-  );
+  safeEmit(AppCore, "sidebar:navigation:request", {
+    target: targetPath,
+    route: targetPath,
+    publicPath: targetPath,
+    path: targetPath,
+    preferExplicitRoute: true,
+    source: "sidebar-menu",
+  });
 
-  setOptimisticSidebarActiveItem(
-    sidebarMenu,
-    link
-  );
+  setOptimisticSidebarActiveItem(sidebarMenu, link);
+
+  const ctx = {
+    AppCore,
+    Router: finalRouter,
+    getElements: resolver,
+  };
+
+  const activeItem = syncLocalActiveMenuItem(ctx, targetPath, {
+    mutate: true,
+  });
+
+  scheduleActiveMenuIndicator(ctx, {
+    reason: "sidebar-menu:navigate",
+    route: targetPath,
+    publicPath: targetPath,
+    path: targetPath,
+    preferExplicitRoute: true,
+    activeItem,
+    delayMs: 24,
+    reveal: true,
+    force: true,
+  });
 
   void navigateFromSidebar({
     AppCore,
@@ -2080,9 +2284,7 @@ export function handleUserToggleKeydown({
     return;
   }
 
-  const {
-    userToggle,
-  } = resolveElements(AppCore, resolver);
+  const { userToggle } = resolveElements(AppCore, resolver);
 
   if (!userToggle) {
     return;
@@ -2092,10 +2294,7 @@ export function handleUserToggleKeydown({
     return;
   }
 
-  if (
-    event.key === "Enter" ||
-    event.key === " "
-  ) {
+  if (event.key === "Enter" || event.key === " ") {
     markSidebarEventHandled(event, "user-toggle-keyboard-toggle");
     preventDefaultAndStop(event);
     toggleDropdown?.();
@@ -2119,10 +2318,7 @@ export function handleUserToggleKeydown({
   }
 }
 
-export function handleGlobalKeydown({
-  event,
-  closeDropdown,
-}) {
+export function handleGlobalKeydown({ event, closeDropdown }) {
   if (wasSidebarEventHandled(event)) {
     return;
   }
@@ -2149,19 +2345,18 @@ export function handleResize({
 
   const ctx = {
     AppCore,
-    Router:
-      Router ||
-      AppCore?.Router ||
-      AppCore?.router,
+    Router: Router || AppCore?.Router || AppCore?.router,
     getElements: resolver,
   };
 
-  const activeItem =
-    syncActiveMenuItem(ctx, {
-      reason: "resize",
-    });
+  const payload = buildRoutePayload(ctx, {}, "resize", {
+    force: true,
+  });
+
+  const activeItem = syncActiveMenuItem(ctx, payload);
 
   scheduleActiveMenuIndicator(ctx, {
+    ...payload,
     reason: "resize",
     activeItem,
     delayMs: 96,
@@ -2196,12 +2391,6 @@ export function bindDomEvents(ctx = {}) {
   const localScope = resolveLocalScope(scopeName, "dom");
   const epoch = resetLocalScope(localScope);
 
-  /*
-    Capture:
-    - gana al listener global del Router
-    - evita doble navegación
-    - permite marcar el evento antes del bubble
-  */
   bindDom(
     AppCore,
     localScope,
@@ -2245,35 +2434,91 @@ export function bindDomEvents(ctx = {}) {
     }
   );
 
-  const resizeHandler =
-    isFn(AppCore?.utils?.debounce)
-      ? AppCore.utils.debounce(
-          () =>
-            handleResize({
-              AppCore,
-              Router,
-              syncSidebarState,
-              closeDropdown,
-              getElements: resolver,
-            }),
-          RESIZE_DEBOUNCE_MS
-        )
-      : () =>
+  const resizeHandler = isFn(AppCore?.utils?.debounce)
+    ? AppCore.utils.debounce(
+        () =>
           handleResize({
             AppCore,
             Router,
             syncSidebarState,
             closeDropdown,
             getElements: resolver,
-          });
+          }),
+        RESIZE_DEBOUNCE_MS
+      )
+    : () =>
+        handleResize({
+          AppCore,
+          Router,
+          syncSidebarState,
+          closeDropdown,
+          getElements: resolver,
+        });
+
+  bindDom(AppCore, localScope, epoch, window, "resize", resizeHandler);
+
+  /*
+    Fallback nativo:
+    Si el router no emite bien, popstate/hashchange todavía corrigen el activo.
+  */
+  bindDom(
+    AppCore,
+    localScope,
+    epoch,
+    window,
+    "popstate",
+    () => {
+      const localCtx = {
+        AppCore,
+        Router: Router || AppCore?.Router || AppCore?.router,
+        getElements: resolver,
+      };
+
+      const payload = buildRoutePayload(localCtx, {}, "window:popstate", {
+        force: true,
+      });
+
+      const activeItem = syncActiveMenuItem(localCtx, payload);
+
+      scheduleActiveMenuIndicator(localCtx, {
+        ...payload,
+        reason: "window:popstate",
+        activeItem,
+        delayMs: 48,
+        reveal: true,
+        force: true,
+      });
+    }
+  );
 
   bindDom(
     AppCore,
     localScope,
     epoch,
     window,
-    "resize",
-    resizeHandler
+    "hashchange",
+    () => {
+      const localCtx = {
+        AppCore,
+        Router: Router || AppCore?.Router || AppCore?.router,
+        getElements: resolver,
+      };
+
+      const payload = buildRoutePayload(localCtx, {}, "window:hashchange", {
+        force: true,
+      });
+
+      const activeItem = syncActiveMenuItem(localCtx, payload);
+
+      scheduleActiveMenuIndicator(localCtx, {
+        ...payload,
+        reason: "window:hashchange",
+        activeItem,
+        delayMs: 48,
+        reveal: true,
+        force: true,
+      });
+    }
   );
 
   bindDom(
@@ -2293,10 +2538,7 @@ export function bindDomEvents(ctx = {}) {
         return;
       }
 
-      const propertyName = safeText(
-        event?.propertyName,
-        ""
-      );
+      const propertyName = safeText(event?.propertyName, "");
 
       if (
         propertyName &&
@@ -2314,31 +2556,17 @@ export function bindDomEvents(ctx = {}) {
 
       const localCtx = {
         AppCore,
-        Router:
-          Router ||
-          AppCore?.Router ||
-          AppCore?.router,
+        Router: Router || AppCore?.Router || AppCore?.router,
         getElements: resolver,
       };
 
-      endSidebarLayoutTransition(
-        localCtx,
-        "transitionend"
-      );
+      endSidebarLayoutTransition(localCtx, "transitionend");
     },
     true
   );
 
-  const {
-    userToggle,
-    sidebarMenu,
-  } = resolveElements(AppCore, resolver);
+  const { userToggle, sidebarMenu } = resolveElements(AppCore, resolver);
 
-  /*
-    Direct binds:
-    - se mantienen por precisión cuando el DOM existe
-    - document capture sigue siendo el fallback robusto si el DOM cambia
-  */
   if (userToggle) {
     bindDom(
       AppCore,
@@ -2412,10 +2640,7 @@ export function bindCoreEvents(ctx = {}) {
   const visualCtx = {
     ...ctx,
     AppCore,
-    Router:
-      Router ||
-      AppCore?.Router ||
-      AppCore?.router,
+    Router: Router || AppCore?.Router || AppCore?.router,
     renderUser,
     applyRoleVisibility,
     syncSidebarState,
@@ -2423,18 +2648,11 @@ export function bindCoreEvents(ctx = {}) {
     getElements: resolver,
   };
 
-  const visualCommitter =
-    createSidebarVisualCommitter(visualCtx);
+  const visualCommitter = createSidebarVisualCommitter(visualCtx);
 
   const bindMany = (eventNames = [], handler) => {
     eventNames.forEach((eventName) => {
-      bindCoreEvent(
-        AppCore,
-        localScope,
-        epoch,
-        eventName,
-        handler
-      );
+      bindCoreEvent(AppCore, localScope, epoch, eventName, handler);
     });
   };
 
@@ -2443,14 +2661,10 @@ export function bindCoreEvents(ctx = {}) {
 
     visualCommitter.schedule({
       key: "identity",
-      reason:
-        safeText(
-          detail.reason ||
-            detail.type ||
-            detail.event ||
-            "identity",
-          "identity"
-        ),
+      reason: safeText(
+        detail.reason || detail.type || detail.event || "identity",
+        "identity"
+      ),
       payload: detail,
       renderIdentity: true,
       syncState: false,
@@ -2467,14 +2681,10 @@ export function bindCoreEvents(ctx = {}) {
 
     visualCommitter.schedule({
       key: "identity-state",
-      reason:
-        safeText(
-          detail.reason ||
-            detail.type ||
-            detail.event ||
-            "identity-state",
-          "identity-state"
-        ),
+      reason: safeText(
+        detail.reason || detail.type || detail.event || "identity-state",
+        "identity-state"
+      ),
       payload: detail,
       renderIdentity: true,
       syncState: true,
@@ -2491,14 +2701,10 @@ export function bindCoreEvents(ctx = {}) {
 
     visualCommitter.schedule({
       key: "session-cleared",
-      reason:
-        safeText(
-          detail.reason ||
-            detail.type ||
-            detail.event ||
-            "session-cleared",
-          "session-cleared"
-        ),
+      reason: safeText(
+        detail.reason || detail.type || detail.event || "session-cleared",
+        "session-cleared"
+      ),
       payload: detail,
       renderIdentity: true,
       syncState: true,
@@ -2513,25 +2719,21 @@ export function bindCoreEvents(ctx = {}) {
   const commitRoute = (eventName) => {
     return (eventOrPayload = {}) => {
       const detail = getEventDetail(eventOrPayload);
-      const route = normalizeRoutePath(
-        getRouteFromPayload(
-          detail,
-          AppCore,
-          Router ||
-            AppCore?.Router ||
-            AppCore?.router
-        )
-      );
+
+      const payload = buildRoutePayload(visualCtx, detail, eventName, {
+        /*
+          FIX:
+          En eventos de router normales NO preferimos payload explícito.
+          La URL visible gana para evitar activos viejos.
+        */
+        preferExplicitRoute: false,
+        force: true,
+      });
 
       visualCommitter.schedule({
         key: "route",
         reason: eventName,
-        payload: {
-          ...detail,
-          route,
-          publicPath: route,
-          path: route,
-        },
+        payload,
         renderIdentity: false,
         syncState: false,
         closeDropdown: false,
@@ -2545,25 +2747,16 @@ export function bindCoreEvents(ctx = {}) {
 
   const commitRouterRendered = (eventOrPayload = {}) => {
     const detail = getEventDetail(eventOrPayload);
-    const route = normalizeRoutePath(
-      getRouteFromPayload(
-        detail,
-        AppCore,
-        Router ||
-          AppCore?.Router ||
-          AppCore?.router
-      )
-    );
+
+    const payload = buildRoutePayload(visualCtx, detail, "router:rendered", {
+      preferExplicitRoute: false,
+      force: true,
+    });
 
     visualCommitter.schedule({
       key: "router-rendered",
       reason: "router:rendered",
-      payload: {
-        ...detail,
-        route,
-        publicPath: route,
-        path: route,
-      },
+      payload,
       renderIdentity: false,
       syncState: false,
       closeDropdown: true,
@@ -2576,12 +2769,7 @@ export function bindCoreEvents(ctx = {}) {
     visualCommitter.schedule({
       key: "router-rendered-settled",
       reason: "router:rendered:settled",
-      payload: {
-        ...detail,
-        route,
-        publicPath: route,
-        path: route,
-      },
+      payload,
       renderIdentity: false,
       syncState: false,
       closeDropdown: false,
@@ -2624,11 +2812,6 @@ export function bindCoreEvents(ctx = {}) {
     };
   };
 
-  /*
-    Identidad / sesión.
-    NO escuchamos app:user-ui:sync para evitar bucle:
-      syncUserUI -> event -> SidebarEvents -> renderUser/applyRole -> syncUserUI...
-  */
   bindMany(
     [
       "app:user:change",
@@ -2666,11 +2849,6 @@ export function bindCoreEvents(ctx = {}) {
     commitSessionCleared
   );
 
-  /*
-    Cambios manuales del sidebar.
-    NO escuchamos sidebar:state:synced / sidebar:refreshed / sidebar:repaired,
-    porque esos pueden salir de los propios commits visuales.
-  */
   bindMany(
     [
       "app:sidebar:change",
@@ -2706,25 +2884,10 @@ export function bindCoreEvents(ctx = {}) {
     "router:route:change",
     "router:navigation:complete",
     "router:render:async-complete",
+    "router:rendered:complete",
   ].forEach((eventName) => {
-    bindCoreEvent(
-      AppCore,
-      localScope,
-      epoch,
-      eventName,
-      commitRoute(eventName)
-    );
+    bindCoreEvent(AppCore, localScope, epoch, eventName, commitRoute(eventName));
   });
-
-  /*
-    NO escuchamos:
-      - router:shell:state
-      - router:shell:repair
-      - router:shell:change
-
-    El shell lo gestiona App/Shell/Router.
-    Escucharlo aquí creaba bucles con repairShell().
-  */
 
   bindCoreEvent(
     AppCore,
@@ -2734,10 +2897,6 @@ export function bindCoreEvents(ctx = {}) {
     (eventOrPayload = {}) => {
       const detail = getEventDetail(eventOrPayload);
 
-      /*
-        Solo commit visual local.
-        No repair(), no rebind(), no hard sync.
-      */
       visualCommitter.schedule({
         key: "ui-repair-request",
         reason: "app:ui:repair-request",
@@ -2765,14 +2924,10 @@ export function bindCoreEvents(ctx = {}) {
 
       visualCommitter.schedule({
         key: "app-ready",
-        reason:
-          safeText(
-            detail.reason ||
-              detail.type ||
-              detail.event ||
-              "app-ready",
-            "app-ready"
-          ),
+        reason: safeText(
+          detail.reason || detail.type || detail.event || "app-ready",
+          "app-ready"
+        ),
         payload: detail,
         renderIdentity: true,
         syncState: false,
@@ -2795,17 +2950,23 @@ export function bindCoreEvents(ctx = {}) {
     (eventOrPayload = {}) => {
       const detail = getEventDetail(eventOrPayload);
 
+      /*
+        FIX:
+        Cambio de idioma/tema NO debe activar una ruta vieja que venga en payload.
+        Forzamos ruta visible.
+      */
+      const payload = buildRoutePayload(visualCtx, detail, "visual-env-change", {
+        preferExplicitRoute: false,
+        force: true,
+      });
+
       visualCommitter.schedule({
         key: "visual-env-change",
-        reason:
-          safeText(
-            detail.reason ||
-              detail.type ||
-              detail.event ||
-              "visual-env-change",
-            "visual-env-change"
-          ),
-        payload: detail,
+        reason: safeText(
+          detail.reason || detail.type || detail.event || "visual-env-change",
+          "visual-env-change"
+        ),
+        payload,
         renderIdentity: true,
         syncState: false,
         closeDropdown: false,

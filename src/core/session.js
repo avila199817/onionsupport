@@ -12,17 +12,21 @@
    - preservar currentResolvedUsername cuando procede
    - sincronizar UI base
 
-   HARDENING PRO:
+   HARDENING EXTREMO:
    - zero ghost auth
    - persistencia robusta
    - setters idempotentes
    - sync UI estable
    - eventos consistentes
    - no emitir token real en eventos/snapshots
+   - no pintar usuario antiguo si no hay token válido
    - preserve currentResolvedUsername
    - route/publicPath sync sin degradar contexto
    - canonical sin query/hash
    - publicPath con query/hash
+   - auth alineada con state.computeAuthenticated()
+   - una sola mutación lógica por setter
+   - no dobles setState innecesarios
 ========================================================= */
 
 import { config } from "./config.js";
@@ -80,6 +84,9 @@ const SESSION_EVENTS =
     tokenChange:
       "app:token:change",
 
+    authChange:
+      "app:auth:change",
+
     sessionState:
       "app:session:state",
 
@@ -108,6 +115,9 @@ const SESSION_EVENTS =
       "app:error",
   });
 
+const SENSITIVE_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|session|jwt|bearer/i;
+
 /* =========================================================
    BASICS
 ========================================================= */
@@ -119,6 +129,14 @@ function isObject(value) {
   );
 }
 
+function isPlainObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
 function isFunction(value) {
   return typeof value === "function";
 }
@@ -126,7 +144,10 @@ function isFunction(value) {
 function localSafeText(value, fallback = "") {
   try {
     if (typeof safeText === "function") {
-      return safeText(value, fallback);
+      return safeText(
+        value,
+        fallback
+      );
     }
   } catch {}
 
@@ -146,6 +167,8 @@ function localSafeText(value, fallback = "") {
 function safeBool(value, fallback = false) {
   if (value === true) return true;
   if (value === false) return false;
+  if (value === "true") return true;
+  if (value === "false") return false;
 
   return Boolean(fallback);
 }
@@ -154,6 +177,14 @@ function safeObject(value, fallback = {}) {
   return isObject(value)
     ? value
     : fallback;
+}
+
+function safeNowIso() {
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
 }
 
 function safeEmit(events, name, payload = {}) {
@@ -169,15 +200,22 @@ function safeEmit(events, name, payload = {}) {
   return false;
 }
 
-function safeSetState(setState, patch = {}) {
+function safeSetState(setState, patch = {}, options = undefined) {
   if (!isFunction(setState)) {
     return false;
   }
 
   try {
-    setState(
-      safeObject(patch)
-    );
+    if (options !== undefined) {
+      setState(
+        safeObject(patch),
+        options
+      );
+    } else {
+      setState(
+        safeObject(patch)
+      );
+    }
 
     return true;
   } catch {}
@@ -245,8 +283,10 @@ function safeCloneError(cloneError, error = null) {
     return {
       name:
         error.name,
+
       message:
         error.message,
+
       stack:
         error.stack || null,
     };
@@ -263,6 +303,197 @@ function safeRedact(value = "") {
   }
 }
 
+function safeHasValidToken(token = null) {
+  try {
+    return Boolean(
+      hasValidToken(token)
+    );
+  } catch {
+    return Boolean(
+      localSafeText(token, "")
+    );
+  }
+}
+
+function safeNormalizeUser(user = null) {
+  try {
+    return normalizeUser(user);
+  } catch {
+    return user || null;
+  }
+}
+
+function safeGetUserUsername(user = null) {
+  try {
+    return getUserUsername(user) || null;
+  } catch {
+    return null;
+  }
+}
+
+function safeGetUserDisplayName(user = null) {
+  try {
+    return getUserDisplayName(user) || null;
+  } catch {
+    return null;
+  }
+}
+
+function safeGetUserAvatarUrl(user = null) {
+  try {
+    return getUserAvatarUrl(user) || null;
+  } catch {
+    return null;
+  }
+}
+
+function safeSanitizeUsername(value = "") {
+  try {
+    return sanitizeUsername(value) || null;
+  } catch {
+    return null;
+  }
+}
+
+function hasOwn(obj, key) {
+  return Boolean(
+    obj &&
+      typeof obj === "object" &&
+      Object.prototype.hasOwnProperty.call(
+        obj,
+        key
+      )
+  );
+}
+
+/* =========================================================
+   REDACTION / SNAPSHOT SAFETY
+========================================================= */
+
+function sanitizeForEvent(value, depth = 0, keyHint = "") {
+  if (SENSITIVE_KEY_RE.test(localSafeText(keyHint, ""))) {
+    return null;
+  }
+
+  if (depth > 3) {
+    return "[depth-limit]";
+  }
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return value;
+  }
+
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return typeof value === "string"
+      ? safeRedact(value)
+      : value;
+  }
+
+  if (typeof value === "function") {
+    return "[function]";
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 50)
+      .map((item) =>
+        sanitizeForEvent(
+          item,
+          depth + 1,
+          keyHint
+        )
+      );
+  }
+
+  if (isPlainObject(value)) {
+    const output =
+      {};
+
+    for (const [key, item] of Object.entries(value)) {
+      output[key] =
+        SENSITIVE_KEY_RE.test(key)
+          ? null
+          : sanitizeForEvent(
+              item,
+              depth + 1,
+              key
+            );
+    }
+
+    return output;
+  }
+
+  try {
+    return safeRedact(
+      String(value)
+    );
+  } catch {
+    return "[unserializable]";
+  }
+}
+
+function createUserSnapshot(user = null) {
+  if (!user || !isObject(user)) {
+    return null;
+  }
+
+  const normalized =
+    safeNormalizeUser(user);
+
+  return sanitizeForEvent(
+    normalized
+  );
+}
+
+/* =========================================================
+   PATH HELPERS
+========================================================= */
+
+function safeCanonicalPath(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
+  try {
+    return normalizeCanonicalPath(
+      value || fallback || DEFAULT_ROUTE
+    );
+  } catch {
+    return fallback || DEFAULT_ROUTE;
+  }
+}
+
+function safePublicPath(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
+  try {
+    if (typeof normalizePublicPath === "function") {
+      return normalizePublicPath(
+        value || fallback || DEFAULT_ROUTE
+      );
+    }
+  } catch {}
+
+  try {
+    return normalizePath(
+      value || fallback || DEFAULT_ROUTE
+    );
+  } catch {
+    return fallback || DEFAULT_ROUTE;
+  }
+}
+
+function extractUsernameFromPublicPath(publicPath = DEFAULT_ROUTE) {
+  const match =
+    String(publicPath || "")
+      .match(/^\/@([^/]+)(?:\/|$)/i);
+
+  return safeSanitizeUsername(
+    match?.[1] || ""
+  );
+}
+
 /* =========================================================
    AUTH DERIVED STATE
 ========================================================= */
@@ -274,22 +505,12 @@ function resolveRole(user = null) {
       user?.type ||
       user?.userType ||
       user?.user_type ||
+      user?.profile?.role ||
+      user?.raw?.role ||
+      user?.raw?.rol ||
       "",
     ""
   ).toLowerCase() || null;
-}
-
-function resolveResolvedUsername(state = {}, user = null) {
-  const candidate =
-    sanitizeUsername(
-      state?.currentResolvedUsername ||
-        state?.resolvedUsername ||
-        getUserUsername(user) ||
-        getUserUsername(state?.user) ||
-        ""
-    );
-
-  return candidate || null;
 }
 
 function hasUsableUser(user = null) {
@@ -316,17 +537,72 @@ function computeAuthSafe(user = null, token = null) {
     );
   } catch {}
 
-  return Boolean(
-    hasUsableUser(user) &&
-    hasValidToken(token)
+  /*
+    Fallback alineado con state.js:
+    token válido requerido.
+    Si hay usuario y está desactivado, no autentica.
+  */
+  if (!safeHasValidToken(token)) {
+    return false;
+  }
+
+  if (
+    user &&
+    isObject(user) &&
+    user.active === false
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function resolveResolvedUsername({
+  state = {},
+  user = null,
+  publicPath = "",
+  authenticated = false,
+} = {}) {
+  if (!authenticated) {
+    return null;
+  }
+
+  const fromPath =
+    extractUsernameFromPublicPath(
+      publicPath ||
+        state?.publicPath ||
+        DEFAULT_ROUTE
+    );
+
+  const fromUser =
+    safeSanitizeUsername(
+      safeGetUserUsername(user) ||
+        user?.username ||
+        user?.userName ||
+        user?.nick ||
+        user?.alias ||
+        user?.login ||
+        user?.slug ||
+        user?.email ||
+        ""
+    );
+
+  const fromPrevious =
+    safeSanitizeUsername(
+      state?.currentResolvedUsername ||
+        state?.resolvedUsername ||
+        ""
+    );
+
+  return (
+    fromPath ||
+    fromUser ||
+    fromPrevious ||
+    null
   );
 }
 
-function syncAuthState(state, options = {}) {
-  if (!state || !isObject(state)) {
-    return state;
-  }
-
+function buildAuthPatch(state, options = {}) {
   const forceUnauthenticated =
     options.forceUnauthenticated === true;
 
@@ -334,40 +610,120 @@ function syncAuthState(state, options = {}) {
     forceUnauthenticated
       ? false
       : computeAuthSafe(
-          state.user,
-          state.token
+          state?.user,
+          state?.token
         );
 
-  state.authenticated =
-    authenticated;
-
-  state.hasToken =
-    hasValidToken(
-      state.token
+  const hasToken =
+    safeHasValidToken(
+      state?.token
     );
 
-  state.role =
+  const currentResolvedUsername =
     authenticated
-      ? resolveRole(state.user)
+      ? resolveResolvedUsername({
+          state,
+          user:
+            state?.user,
+          publicPath:
+            state?.publicPath,
+          authenticated,
+        })
       : null;
 
-  state.username =
-    authenticated
-      ? getUserUsername(state.user) || null
-      : null;
+  return {
+    authenticated,
 
-  if (!authenticated) {
-    state.currentResolvedUsername =
-      null;
-  } else {
-    state.currentResolvedUsername =
-      resolveResolvedUsername(
-        state,
-        state.user
-      );
+    hasToken,
+
+    role:
+      authenticated
+        ? resolveRole(state?.user)
+        : null,
+
+    username:
+      authenticated
+        ? safeGetUserUsername(state?.user)
+        : null,
+
+    currentResolvedUsername,
+
+    resolvedUsername:
+      currentResolvedUsername,
+  };
+}
+
+function syncAuthState(state, options = {}) {
+  if (!state || !isObject(state)) {
+    return state;
   }
 
+  const patch =
+    buildAuthPatch(
+      state,
+      options
+    );
+
+  Object.assign(
+    state,
+    patch
+  );
+
   return state;
+}
+
+function emitAuthChangeIfNeeded(events, previousSnapshot, state, cause = "unknown") {
+  const previousAuth =
+    Boolean(previousSnapshot?.authenticated);
+
+  const nextAuth =
+    Boolean(state?.authenticated);
+
+  const previousHasToken =
+    Boolean(previousSnapshot?.hasToken);
+
+  const nextHasToken =
+    Boolean(state?.hasToken);
+
+  const previousUsername =
+    previousSnapshot?.username || null;
+
+  const nextUsername =
+    state?.username || null;
+
+  if (
+    previousAuth === nextAuth &&
+    previousHasToken === nextHasToken &&
+    previousUsername === nextUsername
+  ) {
+    return false;
+  }
+
+  return safeEmit(
+    events,
+    SESSION_EVENTS.authChange,
+    {
+      authenticated:
+        nextAuth,
+
+      hasToken:
+        nextHasToken,
+
+      role:
+        state?.role || null,
+
+      username:
+        nextUsername,
+
+      currentResolvedUsername:
+        state?.currentResolvedUsername || null,
+
+      cause,
+
+      changedAt:
+        safeNowIso(),
+    }
+  );
 }
 
 /* =========================================================
@@ -436,17 +792,6 @@ function setAttribute(el, name, value) {
   } catch {}
 
   return false;
-}
-
-function hasOwn(obj, key) {
-  return Boolean(
-    obj &&
-      typeof obj === "object" &&
-      Object.prototype.hasOwnProperty.call(
-        obj,
-        key
-      )
-  );
 }
 
 /* =========================================================
@@ -547,6 +892,29 @@ function resolveThemeFromUser(user = null) {
    SNAPSHOTS / FINGERPRINTS
 ========================================================= */
 
+function createAuthSnapshot(state) {
+  return {
+    authenticated:
+      Boolean(state?.authenticated),
+
+    hasToken:
+      Boolean(
+        safeHasValidToken(state?.token)
+      ),
+
+    role:
+      state?.role || null,
+
+    username:
+      state?.username ||
+      safeGetUserUsername(state?.user) ||
+      null,
+
+    currentResolvedUsername:
+      state?.currentResolvedUsername || null,
+  };
+}
+
 function createSessionSnapshot(state, cause = "unknown") {
   return {
     authenticated:
@@ -554,42 +922,55 @@ function createSessionSnapshot(state, cause = "unknown") {
 
     hasToken:
       Boolean(
-        hasValidToken(state?.token)
+        safeHasValidToken(state?.token)
       ),
 
     token:
       null,
 
     user:
-      state?.user || null,
+      createUserSnapshot(
+        state?.user || null
+      ),
 
     role:
       state?.role || null,
 
     username:
-      getUserUsername(state?.user) || null,
+      state?.username ||
+      safeGetUserUsername(state?.user) ||
+      null,
 
     displayName:
-      getUserDisplayName(state?.user) || null,
+      safeGetUserDisplayName(state?.user),
 
     avatarUrl:
-      getUserAvatarUrl(state?.user) || null,
+      safeGetUserAvatarUrl(state?.user),
 
     currentResolvedUsername:
       state?.currentResolvedUsername || null,
 
+    resolvedUsername:
+      state?.resolvedUsername || null,
+
     route:
-      state?.route || DEFAULT_ROUTE,
+      safeCanonicalPath(
+        state?.route || DEFAULT_ROUTE
+      ),
 
     publicPath:
-      state?.publicPath ||
-      state?.route ||
-      DEFAULT_ROUTE,
+      safeRedact(
+        safePublicPath(
+          state?.publicPath ||
+            state?.route ||
+            DEFAULT_ROUTE
+        )
+      ),
 
     cause,
 
     changedAt:
-      new Date().toISOString(),
+      safeNowIso(),
   };
 }
 
@@ -599,7 +980,7 @@ function userFingerprint(user = null) {
   }
 
   const normalized =
-    normalizeUser(user);
+    safeNormalizeUser(user);
 
   try {
     return JSON.stringify({
@@ -624,6 +1005,11 @@ function userFingerprint(user = null) {
         normalized?.avatarUrl ||
         null,
 
+      avatarUrl:
+        normalized?.avatarUrl ||
+        normalized?.avatar ||
+        null,
+
       avatarUpdatedAt:
         normalized?.avatarUpdatedAt ||
         null,
@@ -636,6 +1022,17 @@ function userFingerprint(user = null) {
   }
 }
 
+function tokenFingerprint(token = null) {
+  if (!safeHasValidToken(token)) {
+    return "";
+  }
+
+  const value =
+    String(token).trim();
+
+  return `${value.length}:${value.slice(0, 8)}:${value.slice(-8)}`;
+}
+
 function syncRouteFields({
   state,
   setState,
@@ -646,63 +1043,65 @@ function syncRouteFields({
     return {
       route:
         DEFAULT_ROUTE,
+
       publicPath:
         DEFAULT_ROUTE,
+
       currentResolvedUsername:
         null,
     };
   }
 
   const nextCanonical =
-    normalizeCanonicalPath(
+    safeCanonicalPath(
       route ||
         state?.route ||
-        DEFAULT_ROUTE
+        DEFAULT_ROUTE,
+      DEFAULT_ROUTE
     );
 
   const nextPublicPath =
-    normalizePublicPath
-      ? normalizePublicPath(
-          publicPath ||
-            state?.publicPath ||
-            nextCanonical
-        )
-      : normalizePath(
-          publicPath ||
-            state?.publicPath ||
-            nextCanonical
-        );
+    safePublicPath(
+      publicPath ||
+        state?.publicPath ||
+        nextCanonical,
+      nextCanonical
+    );
 
-  const resolvedUsername =
-    state.authenticated
-      ? resolveResolvedUsername(
-          state,
-          state.user
-        )
-      : null;
-
-  safeSetState(
-    setState,
-    {
+  const authPatch =
+    buildAuthPatch({
+      ...state,
       route:
         nextCanonical,
-
       publicPath:
         nextPublicPath,
+    });
 
-      currentResolvedUsername:
-        resolvedUsername,
-    }
-  );
+  const patch = {
+    route:
+      nextCanonical,
 
-  state.route =
-    nextCanonical;
+    publicPath:
+      nextPublicPath,
 
-  state.publicPath =
-    nextPublicPath;
+    currentResolvedUsername:
+      authPatch.currentResolvedUsername,
 
-  state.currentResolvedUsername =
-    resolvedUsername;
+    resolvedUsername:
+      authPatch.resolvedUsername,
+  };
+
+  if (
+    !safeSetState(
+      setState,
+      patch
+    )
+  ) {
+    Object.assign(
+      state,
+      patch
+    );
+  }
 
   return {
     route:
@@ -712,7 +1111,7 @@ function syncRouteFields({
       nextPublicPath,
 
     currentResolvedUsername:
-      resolvedUsername,
+      authPatch.currentResolvedUsername,
   };
 }
 
@@ -727,10 +1126,12 @@ export function setRoute({
   route = DEFAULT_ROUTE,
 } = {}) {
   const previousRoute =
-    state?.route || DEFAULT_ROUTE;
+    safeCanonicalPath(
+      state?.route || DEFAULT_ROUTE
+    );
 
   const normalized =
-    normalizeCanonicalPath(
+    safeCanonicalPath(
       route || DEFAULT_ROUTE
     );
 
@@ -740,23 +1141,25 @@ export function setRoute({
     return normalized;
   }
 
-  safeSetState(
-    setState,
-    {
-      lastRoute:
-        previousRoute,
+  const patch = {
+    lastRoute:
+      previousRoute,
 
-      route:
-        normalized,
-    }
-  );
+    route:
+      normalized,
+  };
 
-  if (state) {
-    state.lastRoute =
-      previousRoute;
-
-    state.route =
-      normalized;
+  if (
+    !safeSetState(
+      setState,
+      patch
+    ) &&
+    state
+  ) {
+    Object.assign(
+      state,
+      patch
+    );
   }
 
   safeEmit(
@@ -769,7 +1172,9 @@ export function setRoute({
       previousRoute,
 
       publicPath:
-        state?.publicPath || normalized,
+        safeRedact(
+          state?.publicPath || normalized
+        ),
     }
   );
 
@@ -784,12 +1189,14 @@ export function setPublicPath({
   path = DEFAULT_ROUTE,
 } = {}) {
   const previousPublicPath =
-    state?.publicPath || DEFAULT_ROUTE;
+    safePublicPath(
+      state?.publicPath || DEFAULT_ROUTE
+    );
 
   const normalized =
-    normalizePublicPath
-      ? normalizePublicPath(path || DEFAULT_ROUTE)
-      : normalizePath(path || DEFAULT_ROUTE);
+    safePublicPath(
+      path || DEFAULT_ROUTE
+    );
 
   if (
     previousPublicPath === normalized
@@ -797,17 +1204,25 @@ export function setPublicPath({
     return normalized;
   }
 
-  safeSetState(
-    setState,
-    {
-      publicPath:
-        normalized,
-    }
-  );
+  const patch = {
+    lastPublicPath:
+      previousPublicPath,
 
-  if (state) {
-    state.publicPath =
-      normalized;
+    publicPath:
+      normalized,
+  };
+
+  if (
+    !safeSetState(
+      setState,
+      patch
+    ) &&
+    state
+  ) {
+    Object.assign(
+      state,
+      patch
+    );
   }
 
   safeStorageSet(
@@ -827,7 +1242,9 @@ export function setPublicPath({
         safeRedact(previousPublicPath),
 
       route:
-        state?.route || DEFAULT_ROUTE,
+        safeCanonicalPath(
+          state?.route || DEFAULT_ROUTE
+        ),
     }
   );
 
@@ -847,7 +1264,12 @@ export function setUser({
   user = null,
 } = {}) {
   const normalizedUser =
-    normalizeUser(user);
+    user
+      ? safeNormalizeUser(user)
+      : null;
+
+  const previousAuth =
+    createAuthSnapshot(state);
 
   const previousUserFingerprint =
     userFingerprint(
@@ -862,43 +1284,41 @@ export function setUser({
   if (
     previousUserFingerprint === nextUserFingerprint
   ) {
+    if (normalizedUser) {
+      safeStorageSet(
+        storage,
+        config.storageKeys.user,
+        normalizedUser
+      );
+    } else {
+      safeStorageRemove(
+        storage,
+        config.storageKeys.user
+      );
+    }
+
+    syncAuthState(state);
+
     return normalizedUser;
   }
 
-  safeSetState(
-    setState,
-    {
-      user:
-        normalizedUser,
-    }
-  );
+  const patch = {
+    user:
+      normalizedUser,
+  };
 
-  if (state) {
+  if (
+    !safeSetState(
+      setState,
+      patch
+    ) &&
+    state
+  ) {
     state.user =
       normalizedUser;
+
+    syncAuthState(state);
   }
-
-  syncAuthState(state);
-
-  safeSetState(
-    setState,
-    {
-      role:
-        state?.role || null,
-
-      authenticated:
-        Boolean(state?.authenticated),
-
-      hasToken:
-        Boolean(state?.hasToken),
-
-      username:
-        state?.username || null,
-
-      currentResolvedUsername:
-        state?.currentResolvedUsername || null,
-    }
-  );
 
   if (normalizedUser) {
     safeStorageSet(
@@ -917,12 +1337,19 @@ export function setUser({
     syncUserUI?.();
   } catch {}
 
+  emitAuthChangeIfNeeded(
+    events,
+    previousAuth,
+    state,
+    "setUser"
+  );
+
   safeEmit(
     events,
     SESSION_EVENTS.userChange,
     {
       user:
-        normalizedUser,
+        createUserSnapshot(normalizedUser),
 
       authenticated:
         Boolean(state?.authenticated),
@@ -930,17 +1357,21 @@ export function setUser({
       hasToken:
         Boolean(state?.hasToken),
 
+      role:
+        state?.role || null,
+
       username:
-        normalizedUser?.username || null,
+        state?.username ||
+        safeGetUserUsername(normalizedUser),
 
       displayName:
-        getUserDisplayName(normalizedUser),
+        safeGetUserDisplayName(normalizedUser),
 
       currentResolvedUsername:
         state?.currentResolvedUsername || null,
 
       avatarUrl:
-        getUserAvatarUrl(normalizedUser) || null,
+        safeGetUserAvatarUrl(normalizedUser),
     }
   );
 
@@ -964,56 +1395,77 @@ export function setToken({
   token = null,
 } = {}) {
   const normalized =
-    hasValidToken(token)
+    safeHasValidToken(token)
       ? String(token).trim()
       : null;
 
+  const previousAuth =
+    createAuthSnapshot(state);
+
+  const previousTokenFingerprint =
+    tokenFingerprint(
+      state?.token
+    );
+
+  const nextTokenFingerprint =
+    tokenFingerprint(
+      normalized
+    );
+
   if (
-    state?.token === normalized
+    previousTokenFingerprint === nextTokenFingerprint
   ) {
+    if (normalized) {
+      safeStorageSet(
+        storage,
+        config.storageKeys.token,
+        normalized
+      );
+    } else {
+      safeStorageRemove(
+        storage,
+        config.storageKeys.token
+      );
+    }
+
+    syncAuthState(
+      state,
+      {
+        forceUnauthenticated:
+          !normalized,
+      }
+    );
+
     return normalized;
   }
 
-  safeSetState(
-    setState,
-    {
-      token:
-        normalized,
-    }
-  );
+  const patch = {
+    token:
+      normalized,
+  };
 
-  if (state) {
+  if (
+    !safeSetState(
+      setState,
+      patch,
+      {
+        forceUnauthenticated:
+          !normalized,
+      }
+    ) &&
+    state
+  ) {
     state.token =
       normalized;
+
+    syncAuthState(
+      state,
+      {
+        forceUnauthenticated:
+          !normalized,
+      }
+    );
   }
-
-  syncAuthState(
-    state,
-    {
-      forceUnauthenticated:
-        !normalized,
-    }
-  );
-
-  safeSetState(
-    setState,
-    {
-      role:
-        state?.role || null,
-
-      authenticated:
-        Boolean(state?.authenticated),
-
-      hasToken:
-        Boolean(state?.hasToken),
-
-      username:
-        state?.username || null,
-
-      currentResolvedUsername:
-        state?.currentResolvedUsername || null,
-    }
-  );
 
   if (normalized) {
     safeStorageSet(
@@ -1028,6 +1480,13 @@ export function setToken({
     );
   }
 
+  emitAuthChangeIfNeeded(
+    events,
+    previousAuth,
+    state,
+    "setToken"
+  );
+
   safeEmit(
     events,
     SESSION_EVENTS.tokenChange,
@@ -1040,6 +1499,12 @@ export function setToken({
 
       authenticated:
         Boolean(state?.authenticated),
+
+      role:
+        state?.role || null,
+
+      username:
+        state?.username || null,
 
       currentResolvedUsername:
         state?.currentResolvedUsername || null,
@@ -1096,6 +1561,9 @@ export function applySession({
   route = undefined,
   publicPath = undefined,
 } = {}) {
+  const previousAuth =
+    createAuthSnapshot(state);
+
   if (token !== undefined) {
     callFlexibleSetter(
       setToken,
@@ -1122,11 +1590,14 @@ export function applySession({
     state,
     {
       forceUnauthenticated:
-        token === null
+        token === null,
     }
   );
 
-  if (isFunction(setState)) {
+  if (
+    route !== undefined ||
+    publicPath !== undefined
+  ) {
     syncRouteFields({
       state,
       setState,
@@ -1135,22 +1606,18 @@ export function applySession({
     });
   }
 
-  const snapshot = {
-    ...createSessionSnapshot(
+  emitAuthChangeIfNeeded(
+    events,
+    previousAuth,
+    state,
+    "applySession"
+  );
+
+  const snapshot =
+    createSessionSnapshot(
       state,
       "applySession"
-    ),
-
-    route:
-      state?.route || DEFAULT_ROUTE,
-
-    publicPath:
-      safeRedact(
-        state?.publicPath ||
-          state?.route ||
-          DEFAULT_ROUTE
-      ),
-  };
+    );
 
   safeEmit(
     events,
@@ -1182,6 +1649,9 @@ export function clearSession({
 } = {}) {
   const opts =
     safeObject(options);
+
+  const previousAuth =
+    createAuthSnapshot(state);
 
   safeStorageRemove(
     storage,
@@ -1219,72 +1689,67 @@ export function clearSession({
     );
   } catch {}
 
-  safeSetState(
-    setState,
-    {
-      user:
-        null,
+  const patch = {
+    user:
+      null,
 
-      token:
-        null,
+    token:
+      null,
 
-      role:
-        null,
+    role:
+      null,
 
-      username:
-        null,
+    username:
+      null,
 
-      authenticated:
-        false,
+    authenticated:
+      false,
 
-      hasToken:
-        false,
+    hasToken:
+      false,
 
-      currentResolvedUsername:
-        null,
+    currentResolvedUsername:
+      null,
 
-      resolvedUsername:
-        null,
-    }
-  );
+    resolvedUsername:
+      null,
+  };
 
-  if (state) {
-    state.user =
-      null;
+  if (
+    !safeSetState(
+      setState,
+      patch,
+      {
+        forceUnauthenticated:
+          true,
+      }
+    ) &&
+    state
+  ) {
+    Object.assign(
+      state,
+      patch
+    );
 
-    state.token =
-      null;
-
-    state.role =
-      null;
-
-    state.username =
-      null;
-
-    state.authenticated =
-      false;
-
-    state.hasToken =
-      false;
-
-    state.currentResolvedUsername =
-      null;
-
-    state.resolvedUsername =
-      null;
+    syncAuthState(
+      state,
+      {
+        forceUnauthenticated:
+          true,
+      }
+    );
   }
-
-  syncAuthState(
-    state,
-    {
-      forceUnauthenticated:
-        true,
-    }
-  );
 
   try {
     syncUserUI?.();
   } catch {}
+
+  emitAuthChangeIfNeeded(
+    events,
+    previousAuth,
+    state,
+    "clearSession"
+  );
 
   const payload = {
     authenticated:
@@ -1382,6 +1847,13 @@ export function loadPreferences({
   const lang =
     normalizeLang(savedLang);
 
+  /*
+    Regla UX:
+    por defecto abierto. Evita residuos legacy tipo sidebar-collapsed.
+  */
+  const sidebarOpen =
+    true;
+
   if (state) {
     state.theme =
       theme;
@@ -1389,13 +1861,8 @@ export function loadPreferences({
     state.lang =
       lang;
 
-    /*
-      Regla UX:
-      estado natural por defecto = abierto.
-      Evitamos arrancar colapsado por residuos legacy de storage.
-    */
     state.sidebarOpen =
-      true;
+      sidebarOpen;
   }
 
   setAttribute(
@@ -1418,54 +1885,53 @@ export function loadPreferences({
   toggleClass(
     dom?.body,
     "sidebar-open",
-    true
+    sidebarOpen
   );
 
   toggleClass(
     dom?.body,
     "sidebar-collapsed",
-    false
+    !sidebarOpen
   );
 
   toggleClass(
     dom?.sidebar,
     "open",
-    true
+    sidebarOpen
   );
 
   toggleClass(
     dom?.sidebar,
     "collapsed",
-    false
+    !sidebarOpen
   );
 
   toggleClass(
     dom?.sidebar,
     "is-open",
-    true
+    sidebarOpen
   );
 
   toggleClass(
     dom?.sidebar,
     "is-collapsed",
-    false
+    !sidebarOpen
   );
 
   setAriaExpanded(
     dom?.sidebarToggle,
-    true
+    sidebarOpen
   );
 
   setAriaExpanded(
     dom?.sidebarMobileToggle,
-    true
+    sidebarOpen
   );
 
   return {
     theme,
     lang,
-    sidebarOpen:
-      true,
+    sidebarOpen,
   };
 }
 
@@ -1479,15 +1945,6 @@ export function loadSession({
   dom,
   events,
 } = {}) {
-  const savedUser =
-    normalizeUser(
-      safeStorageGet(
-        storage,
-        config.storageKeys.user,
-        null
-      )
-    );
-
   const savedTokenRaw =
     safeStorageGet(
       storage,
@@ -1496,16 +1953,34 @@ export function loadSession({
     );
 
   const savedToken =
-    hasValidToken(savedTokenRaw)
+    safeHasValidToken(savedTokenRaw)
       ? String(savedTokenRaw).trim()
       : null;
 
-  if (state) {
-    state.user =
-      savedUser;
+  const savedUser =
+    savedToken
+      ? safeNormalizeUser(
+          safeStorageGet(
+            storage,
+            config.storageKeys.user,
+            null
+          )
+        )
+      : null;
 
+  if (state) {
     state.token =
       savedToken;
+
+    /*
+      Punto crítico:
+      si no hay token válido, no hidratamos usuario antiguo.
+      Esto evita avatar fantasma/topbar con usuario viejo.
+    */
+    state.user =
+      savedToken
+        ? savedUser
+        : null;
   }
 
   syncAuthState(
@@ -1516,20 +1991,10 @@ export function loadSession({
     }
   );
 
-  if (state) {
-    state.currentResolvedUsername =
-      state.authenticated
-        ? resolveResolvedUsername(
-            state,
-            savedUser
-          )
-        : null;
-  }
-
   const userTheme =
-    resolveThemeFromUser(
-      savedUser
-    );
+    savedToken
+      ? resolveThemeFromUser(savedUser)
+      : null;
 
   if (
     userTheme === "light" ||
@@ -1559,13 +2024,22 @@ export function loadSession({
     });
   }
 
-  safeEmit(
-    events,
-    SESSION_EVENTS.sessionLoaded,
+  const snapshot =
     createSessionSnapshot(
       state,
       "loadSession"
-    )
+    );
+
+  safeEmit(
+    events,
+    SESSION_EVENTS.sessionLoaded,
+    snapshot
+  );
+
+  safeEmit(
+    events,
+    SESSION_EVENTS.sessionState,
+    snapshot
   );
 
   return state;
@@ -1884,7 +2358,7 @@ export function getSessionDebugSnapshot(state) {
 
     hasToken:
       Boolean(
-        hasValidToken(state?.token)
+        safeHasValidToken(state?.token)
       ),
 
     token:
@@ -1894,23 +2368,33 @@ export function getSessionDebugSnapshot(state) {
       state?.role || null,
 
     username:
-      getUserUsername(state?.user) || null,
+      state?.username ||
+      safeGetUserUsername(state?.user),
 
     displayName:
-      getUserDisplayName(state?.user) || null,
+      safeGetUserDisplayName(state?.user),
 
     avatarUrl:
-      getUserAvatarUrl(state?.user) || null,
+      safeGetUserAvatarUrl(state?.user),
 
     currentResolvedUsername:
       state?.currentResolvedUsername || null,
 
+    resolvedUsername:
+      state?.resolvedUsername || null,
+
     route:
-      state?.route || DEFAULT_ROUTE,
+      safeCanonicalPath(
+        state?.route || DEFAULT_ROUTE
+      ),
 
     publicPath:
       safeRedact(
-        state?.publicPath || null
+        safePublicPath(
+          state?.publicPath ||
+            state?.route ||
+            DEFAULT_ROUTE
+        )
       ),
 
     theme:

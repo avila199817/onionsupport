@@ -2,7 +2,7 @@
    Onion SPA - Cuenta View
    Archivo: src/views/cuenta/cuentaView.js
 
-   EXTREME PRO SYSTEM · VIEW REAL · FULL PATCH 12/10
+   EXTREME PRO SYSTEM · VIEW REAL · FULL PATCH 13/10
    ACCOUNT EXPERIENCE MODE · TEMPLATE GOD LEVEL COMPATIBLE
    PROFILE / THEME / LANGUAGE / SECURITY READY
    CONFIRM PASSWORD SUPPORT
@@ -28,14 +28,14 @@
    - leer inputs nuevos: nombre / teléfono / confirm password
    - registrar bridge público estable en AppCore.modules/window
 
-   HARDENING EXTREME:
-   - namespace imports para no romper por named exports ausentes
-   - fallback local si bindings no existe
-   - render route-safe para /cuenta y /@usuario/cuenta
-   - anti-race por token de render/carga
-   - inflight guards por init/reload/save/theme/language/password
-   - side effects optimistas con rollback best-effort
-   - snapshot debug estable
+   FIX CRÍTICO 13/10:
+   - applyCuentaLanguageToDom soporta silent / force / reason
+   - NO dispara app:lang:change en hidratación/carga/sync
+   - NO llama I18n.setLanguage en sync silencioso
+   - elimina toast fantasma "Idioma actualizado"
+   - evita eventos globales si theme/lang no cambian
+   - rollback de idioma/theme sin toast
+   - side effects controlados por intención real
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -58,7 +58,7 @@ export const CuentaView = (() => {
   const SCOPE = "view:cuenta";
   const MODULE = "cuenta";
   const VIEW_NAME = "CuentaView";
-  const VERSION = "12.0.0";
+  const VERSION = "13.0.0";
   const CANONICAL_PATH = "/cuenta";
 
   const PASSWORD_MIN_LENGTH = 8;
@@ -88,6 +88,7 @@ export const CuentaView = (() => {
       view: {
         form: {},
       },
+      action: {},
     };
 
   /* =========================================================
@@ -676,7 +677,13 @@ export const CuentaView = (() => {
     ).toLowerCase();
 
     const username = safeText(
-      first(source.username, source.usernameLower, source.userName, source.raw?.username, ""),
+      first(
+        source.username,
+        source.usernameLower,
+        source.userName,
+        source.raw?.username,
+        ""
+      ),
       ""
     );
 
@@ -708,6 +715,17 @@ export const CuentaView = (() => {
       ""
     );
 
+    const privacyMode = safeBoolean(
+      first(
+        source.privacyMode,
+        source.privateMode,
+        source.preferences?.privacyMode,
+        source.settings?.privacyMode,
+        false
+      ),
+      false
+    );
+
     return {
       ...source,
 
@@ -732,16 +750,7 @@ export const CuentaView = (() => {
       status: safeText(first(source.status, source.estado, "active"), "active"),
 
       darkMode,
-      privacyMode: safeBoolean(
-        first(
-          source.privacyMode,
-          source.privateMode,
-          source.preferences?.privacyMode,
-          source.settings?.privacyMode,
-          false
-        ),
-        false
-      ),
+      privacyMode,
 
       theme,
       mode: theme,
@@ -758,16 +767,7 @@ export const CuentaView = (() => {
       preferences: {
         ...safeObject(source.preferences),
         darkMode,
-        privacyMode: safeBoolean(
-          first(
-            source.privacyMode,
-            source.privateMode,
-            source.preferences?.privacyMode,
-            source.settings?.privacyMode,
-            false
-          ),
-          false
-        ),
+        privacyMode,
         theme,
         mode: theme,
         appearance: theme,
@@ -1458,9 +1458,74 @@ export const CuentaView = (() => {
     return safeBoolean(value, false) ? "dark" : "light";
   }
 
-  function applyCuentaThemeToDom(darkMode = true) {
+  function getCurrentThemeValue() {
+    let storedTheme = "";
+    let storedDarkMode = "";
+
+    try {
+      if (isBrowser()) {
+        storedTheme = localStorage.getItem(STORAGE_KEYS.theme) || "";
+        storedDarkMode = localStorage.getItem(STORAGE_KEYS.darkMode) || "";
+      }
+    } catch {}
+
+    const rawTheme = first(
+      AppCore?.state?.theme,
+      AppCore?.state?.appearance,
+      isBrowser() ? document.documentElement?.dataset?.theme : "",
+      isBrowser() ? document.body?.getAttribute?.("data-theme") : "",
+      storedTheme,
+      ""
+    );
+
+    if (rawTheme) {
+      return normalizeTheme(
+        rawTheme,
+        safeBoolean(first(AppCore?.state?.darkMode, storedDarkMode), false)
+      );
+    }
+
+    return safeBoolean(first(AppCore?.state?.darkMode, storedDarkMode), false)
+      ? "dark"
+      : "light";
+  }
+
+  function getCurrentLanguageValue() {
+    let storedLang = "";
+
+    try {
+      if (isBrowser()) {
+        storedLang =
+          localStorage.getItem(STORAGE_KEYS.lang) ||
+          localStorage.getItem(STORAGE_KEYS.language) ||
+          "";
+      }
+    } catch {}
+
+    return normalizeLang(
+      first(
+        AppCore?.state?.lang,
+        AppCore?.state?.language,
+        AppCore?.state?.locale,
+        isBrowser() ? document.documentElement?.dataset?.lang : "",
+        isBrowser() ? document.documentElement?.lang : "",
+        storedLang,
+        "es"
+      )
+    );
+  }
+
+  function applyCuentaThemeToDom(darkMode = true, options = {}) {
+    const opts = safeObject(options);
+
     const theme = resolveThemeMode(darkMode);
     const isDark = theme === "dark";
+    const previousTheme = getCurrentThemeValue();
+
+    const changed = previousTheme !== theme;
+    const silent = opts.silent === true;
+    const force = opts.force === true;
+    const reason = safeText(opts.reason, "theme-sync");
 
     try {
       document.documentElement.dataset.theme = theme;
@@ -1493,10 +1558,6 @@ export const CuentaView = (() => {
     } catch {}
 
     try {
-      AppCore?.setTheme?.(theme);
-    } catch {}
-
-    try {
       AppCore?.prefs?.set?.("theme", theme);
       AppCore?.prefs?.set?.("darkMode", isDark);
     } catch {}
@@ -1506,26 +1567,40 @@ export const CuentaView = (() => {
       localStorage.setItem(STORAGE_KEYS.darkMode, String(isDark));
     } catch {}
 
-    safeEmit("app:theme:change", {
-      theme,
-      appearance: theme,
-      darkMode: isDark,
-      source: MODULE,
-      view: VIEW_NAME,
-    });
+    if ((changed || force) && !silent) {
+      try {
+        AppCore?.setTheme?.(theme);
+      } catch {}
 
-    safeEmit("cuenta:theme:applied", {
-      theme,
-      darkMode: isDark,
-      source: MODULE,
-      view: VIEW_NAME,
-    });
+      const payload = {
+        theme,
+        appearance: theme,
+        darkMode: isDark,
+        previousTheme,
+        changed,
+        silent,
+        reason,
+        source: MODULE,
+        view: VIEW_NAME,
+      };
+
+      safeEmit("app:theme:change", payload);
+      safeEmit("cuenta:theme:applied", payload);
+    }
 
     return theme;
   }
 
-  function applyCuentaLanguageToDom(lang = "es") {
+  function applyCuentaLanguageToDom(lang = "es", options = {}) {
+    const opts = safeObject(options);
+
     const nextLang = normalizeLang(lang);
+    const previousLang = getCurrentLanguageValue();
+
+    const changed = previousLang !== nextLang;
+    const silent = opts.silent === true;
+    const force = opts.force === true;
+    const reason = safeText(opts.reason, "language-sync");
 
     try {
       document.documentElement.lang = nextLang;
@@ -1544,54 +1619,87 @@ export const CuentaView = (() => {
     } catch {}
 
     try {
-      AppCore?.setLang?.(nextLang);
-    } catch {}
-
-    try {
-      AppCore?.setLanguage?.(nextLang);
-    } catch {}
-
-    try {
-      AppCore?.i18n?.setLanguage?.(nextLang);
-    } catch {}
-
-    try {
-      AppCore?.i18n?.setLang?.(nextLang);
-    } catch {}
-
-    try {
-      window?.I18n?.setLanguage?.(nextLang);
-    } catch {}
-
-    try {
-      window?.I18n?.setLang?.(nextLang);
-    } catch {}
-
-    try {
       localStorage.setItem(STORAGE_KEYS.lang, nextLang);
       localStorage.setItem(STORAGE_KEYS.language, nextLang);
     } catch {}
 
-    safeEmit("app:lang:change", {
-      lang: nextLang,
-      language: nextLang,
-      locale: nextLang,
-      source: MODULE,
-      view: VIEW_NAME,
-    });
+    /*
+      FIX CRÍTICO:
+      - En hidratación/carga/sync NO se invoca I18n.
+      - En hidratación/carga/sync NO se emite app:lang:change.
+      - Evita toast fantasma "Idioma actualizado".
+    */
+    if ((changed || force) && !silent) {
+      try {
+        AppCore?.setLang?.(nextLang, {
+          silent: true,
+          noToast: true,
+          source: MODULE,
+        });
+      } catch {}
 
-    safeEmit("cuenta:language:applied", {
-      lang: nextLang,
-      language: nextLang,
-      locale: nextLang,
-      source: MODULE,
-      view: VIEW_NAME,
-    });
+      try {
+        AppCore?.setLanguage?.(nextLang, {
+          silent: true,
+          noToast: true,
+          source: MODULE,
+        });
+      } catch {}
+
+      try {
+        AppCore?.i18n?.setLanguage?.(nextLang, {
+          silent: true,
+          noToast: true,
+          source: MODULE,
+        });
+      } catch {}
+
+      try {
+        AppCore?.i18n?.setLang?.(nextLang, {
+          silent: true,
+          noToast: true,
+          source: MODULE,
+        });
+      } catch {}
+
+      try {
+        window?.I18n?.setLanguage?.(nextLang, {
+          silent: true,
+          noToast: true,
+          source: MODULE,
+        });
+      } catch {}
+
+      try {
+        window?.I18n?.setLang?.(nextLang, {
+          silent: true,
+          noToast: true,
+          source: MODULE,
+        });
+      } catch {}
+
+      const payload = {
+        lang: nextLang,
+        language: nextLang,
+        locale: nextLang,
+        previousLang,
+        changed,
+        silent,
+        noToast: true,
+        reason,
+        source: MODULE,
+        view: VIEW_NAME,
+      };
+
+      safeEmit("app:lang:change", payload);
+      safeEmit("cuenta:language:applied", payload);
+    }
 
     return nextLang;
   }
 
-  function applyCuentaPreferencesSideEffects(detail = null) {
+  function applyCuentaPreferencesSideEffects(detail = null, options = {}) {
+    const opts = safeObject(options);
     const item = normalizeCuentaModelSafe(detail || getCurrentItem());
 
     if (!item) return null;
@@ -1620,8 +1728,19 @@ export const CuentaView = (() => {
       )
     );
 
-    applyCuentaThemeToDom(darkMode);
-    applyCuentaLanguageToDom(lang);
+    const silent = opts.silent !== false;
+
+    applyCuentaThemeToDom(darkMode, {
+      silent,
+      force: opts.forceTheme === true,
+      reason: safeText(opts.reason, "preferences-theme-sync"),
+    });
+
+    applyCuentaLanguageToDom(lang, {
+      silent,
+      force: opts.forceLanguage === true,
+      reason: safeText(opts.reason, "preferences-language-sync"),
+    });
 
     return item;
   }
@@ -1649,7 +1768,11 @@ export const CuentaView = (() => {
 
       if (item) {
         syncFormFromDetail(item);
-        applyCuentaPreferencesSideEffects(item);
+
+        applyCuentaPreferencesSideEffects(item, {
+          silent: true,
+          reason: "hydrate",
+        });
 
         callSafe(State.setHydrated, true);
 
@@ -2065,7 +2188,11 @@ export const CuentaView = (() => {
       const normalized = normalizeCuentaModelSafe(detail || getCurrentItem());
 
       markLoadedOk(normalized);
-      applyCuentaPreferencesSideEffects(normalized);
+
+      applyCuentaPreferencesSideEffects(normalized, {
+        silent: true,
+        reason: "load-data",
+      });
 
       try {
         State.syncViewFormFromItem?.();
@@ -2242,7 +2369,11 @@ export const CuentaView = (() => {
 
         const normalized = normalizeCuentaModelSafe(detail || getCurrentItem());
 
-        applyCuentaPreferencesSideEffects(normalized);
+        applyCuentaPreferencesSideEffects(normalized, {
+          silent: true,
+          reason: "save-preferences-success",
+        });
+
         syncFormFromDetail(normalized);
 
         try {
@@ -2321,6 +2452,7 @@ export const CuentaView = (() => {
       const nextDarkMode = safeBoolean(darkMode, false);
       const previousItem = getCurrentItem();
       const previousDarkMode = safeBoolean(previousItem?.darkMode, false);
+
       const currentPayload = buildPreferenceUpdatePayload({
         darkMode: nextDarkMode,
       });
@@ -2347,7 +2479,11 @@ export const CuentaView = (() => {
       callSafe(State.setSaving, true);
       callSafe(State.setSavingTheme, true);
 
-      applyCuentaThemeToDom(nextDarkMode);
+      applyCuentaThemeToDom(nextDarkMode, {
+        silent: false,
+        force: true,
+        reason: "manual-theme-optimistic",
+      });
 
       rerender();
       await waitForPaint();
@@ -2364,7 +2500,10 @@ export const CuentaView = (() => {
 
         const normalized = normalizeCuentaModelSafe(detail || getCurrentItem());
 
-        applyCuentaPreferencesSideEffects(normalized);
+        applyCuentaPreferencesSideEffects(normalized, {
+          silent: true,
+          reason: "manual-theme-success",
+        });
 
         patchFormSafe({
           darkMode: safeBoolean(
@@ -2418,8 +2557,17 @@ export const CuentaView = (() => {
         safeWarn("handleUpdateTheme falló:", error);
 
         syncFormFromCurrentItem();
-        applyCuentaThemeToDom(previousDarkMode);
-        applyCuentaPreferencesSideEffects(getCurrentItem());
+
+        applyCuentaThemeToDom(previousDarkMode, {
+          silent: true,
+          force: true,
+          reason: "manual-theme-rollback",
+        });
+
+        applyCuentaPreferencesSideEffects(getCurrentItem(), {
+          silent: true,
+          reason: "manual-theme-error-sync",
+        });
 
         try {
           State.setViewServerError?.(message);
@@ -2469,7 +2617,13 @@ export const CuentaView = (() => {
     inflightLanguage = (async () => {
       const nextLang = normalizeLang(lang);
       const previousItem = getCurrentItem();
-      const previousLang = normalizeLang(previousItem?.lang || previousItem?.language || "es");
+      const previousLang = normalizeLang(
+        previousItem?.lang ||
+        previousItem?.language ||
+        getCurrentLanguageValue() ||
+        "es"
+      );
+
       const currentPayload = buildPreferenceUpdatePayload({
         lang: nextLang,
         language: nextLang,
@@ -2499,7 +2653,17 @@ export const CuentaView = (() => {
       callSafe(State.setSaving, true);
       callSafe(State.setSavingLanguage, true);
 
-      applyCuentaLanguageToDom(nextLang);
+      /*
+        Manual, pero silencioso:
+        - actualiza DOM/storage/AppCore.state
+        - NO dispara toast global
+        - NO dispara app:lang:change
+      */
+      applyCuentaLanguageToDom(nextLang, {
+        silent: true,
+        force: true,
+        reason: "manual-language-optimistic",
+      });
 
       rerender();
       await waitForPaint();
@@ -2517,7 +2681,11 @@ export const CuentaView = (() => {
 
         const normalized = normalizeCuentaModelSafe(detail || getCurrentItem());
 
-        applyCuentaPreferencesSideEffects(normalized);
+        applyCuentaPreferencesSideEffects(normalized, {
+          silent: true,
+          reason: "manual-language-success",
+        });
+
         syncFormFromDetail(normalized);
 
         try {
@@ -2533,9 +2701,8 @@ export const CuentaView = (() => {
           language: nextLang,
           source: MODULE,
           view: VIEW_NAME,
+          noToast: true,
         });
-
-        showToast("Idioma actualizado", "success");
 
         return normalized;
       } catch (error) {
@@ -2544,8 +2711,17 @@ export const CuentaView = (() => {
         safeWarn("handleUpdateLanguage falló:", error);
 
         syncFormFromCurrentItem();
-        applyCuentaLanguageToDom(previousLang);
-        applyCuentaPreferencesSideEffects(getCurrentItem());
+
+        applyCuentaLanguageToDom(previousLang, {
+          silent: true,
+          force: true,
+          reason: "manual-language-rollback",
+        });
+
+        applyCuentaPreferencesSideEffects(getCurrentItem(), {
+          silent: true,
+          reason: "manual-language-error-sync",
+        });
 
         try {
           State.setViewServerError?.(message);
@@ -3158,7 +3334,10 @@ export const CuentaView = (() => {
         syncFormFromCurrentItem();
       }
 
-      applyCuentaPreferencesSideEffects(getCurrentItem());
+      applyCuentaPreferencesSideEffects(getCurrentItem(), {
+        silent: true,
+        reason: "init-final-sync",
+      });
 
       if (!destroyed) {
         bind();

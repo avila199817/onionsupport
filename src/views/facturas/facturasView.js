@@ -2,12 +2,17 @@
    Onion SPA - Facturas View
    Archivo: src/views/facturas/facturasView.js
 
-   EXTREME PRO SYSTEM · VIEW REAL · FULL PATCH 12/10
+   EXTREME PRO SYSTEM · VIEW REAL · FULL PATCH 13/10
    PORTAL MODAL · SEARCH BRIDGE · URL AUTOPEN · TOPBAR READY
    DETAIL STORE MERGE · INCIDENCIA MODAL BRIDGE · CREATE MODAL
    PAGINATION 5 · ACTION STATE SYNC · RERENDER SAFE · CLEANUP PRO
    FISCAL PRESERVER · IVA/IRPF/TOTALES/IMPUESTOS HARDENED
    FILTER PILLS + SEARCH · FACTURAS CONTROL CENTER 10/10
+   PATCH · SORT PILLS REAL BINDING · TEMPLATE V16 READY
+   PATCH · getFacturaDisplayId FIX · NO MORE UNDEFINED TOAST
+   PATCH · COMPANY-FIRST SEARCH/LIST CONSISTENCY
+   PATCH · DATE_DESC REAL SORT · INVOICE_DESC REAL SORT
+   PATCH · FILTER/SEARCH/SORT STATE BRIDGE HARDENED
 
    RESPONSABILIDADES:
    - render principal de facturas
@@ -29,9 +34,11 @@
    - refrescar listado tras enviar / crear factura
    - preservar fiscalidad en detalle: impuestos, IVA, IRPF, totales y líneas
    - manejar filtros visuales del template:
-     todas / pendientes / pagadas / vencidas / enviadas / con PDF / con incidencia
-   - manejar búsqueda por factura, cliente, email, importe, forma de pago e incidencia
-   - resetear página a 1 al filtrar/buscar
+     todas / pendientes / pagadas / vencidas
+   - manejar búsqueda por factura, cliente, empresa, email, importe, forma de pago e incidencia
+   - manejar orden visual del template:
+     fecha mayor a menor / nº factura mayor a menor
+   - resetear página a 1 al filtrar/buscar/ordenar
    - exportar CSV filtrado cuando haya filtro activo
 
    FIX CLAVE:
@@ -43,7 +50,10 @@
    - openFactura() sigue aceptando ID; el bridge externo normaliza payload.
    - Si el detalle remoto viene pobre, no pisa IVA/IRPF/impuestos/totales
      existentes en store/raw.
-   - El template puede pintar filtros; esta vista les da estado y bindings reales.
+   - El template puede pintar filtros y sort pills; esta vista les da estado
+     y bindings reales.
+   - getFacturaDisplayId existe en la vista para evitar el error:
+     "getFacturaDisplayId is not defined".
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -204,14 +214,24 @@ export const FacturasView = (() => {
       let normalized = value
         .trim()
         .replace(/€/g, "")
+        .replace(/\$/g, "")
+        .replace(/£/g, "")
         .replace(/%/g, "")
+        .replace(/[^\d.,+\-\s]/g, "")
         .replace(/\s/g, "");
 
       const hasComma = normalized.includes(",");
       const hasDot = normalized.includes(".");
 
       if (hasComma && hasDot) {
-        normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
+        const lastComma = normalized.lastIndexOf(",");
+        const lastDot = normalized.lastIndexOf(".");
+
+        if (lastComma > lastDot) {
+          normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
+        } else {
+          normalized = normalized.replace(/,/g, "");
+        }
       } else if (hasComma) {
         normalized = normalized.replace(/,/g, ".");
       }
@@ -270,6 +290,7 @@ export const FacturasView = (() => {
 
   function normalizeKey(value = "") {
     return normalizeText(value)
+      .replace(/[\s-]+/g, "_")
       .replace(/[^\w]+/g, "_")
       .replace(/^_+|_+$/g, "");
   }
@@ -278,8 +299,54 @@ export const FacturasView = (() => {
     return safeText(value, "").replace(/\s+/g, " ").trim();
   }
 
+  function toTimestamp(value = null) {
+    if (!value) return 0;
+
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? 0 : value.getTime();
+    }
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value > 9999999999 ? value : value * 1000;
+    }
+
+    const raw = safeText(value, "");
+    if (!raw) return 0;
+
+    const numeric = Number(raw);
+
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return numeric > 9999999999 ? numeric : numeric * 1000;
+    }
+
+    const esMatch = raw.match(
+      /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:,\s*|\s+)?(?:(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/
+    );
+
+    if (esMatch) {
+      const [, dd, mm, yyyy, hh = "0", min = "0", ss = "0"] = esMatch;
+
+      const date = new Date(
+        Number(yyyy),
+        Number(mm) - 1,
+        Number(dd),
+        Number(hh),
+        Number(min),
+        Number(ss)
+      );
+
+      return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+    }
+
+    const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
+
+    if (Number.isNaN(date.getTime())) return 0;
+
+    return date.getTime();
+  }
+
   /* =====================================================
-     FILTER / SEARCH STATE · FACTURAS 10/10
+     FILTER / SEARCH / SORT STATE · FACTURAS 10/10
   ===================================================== */
 
   function normalizeFacturaFilter(value = "") {
@@ -338,9 +405,21 @@ export const FacturasView = (() => {
 
   function normalizeFacturaSort(value = "") {
     const key = normalizeKey(value);
-    if (["invoice_desc", "factura_desc", "numero_desc", "n_factura_desc"].includes(key)) {
+
+    if (
+      [
+        "invoice_desc",
+        "factura_desc",
+        "numero_desc",
+        "n_factura_desc",
+        "num_factura_desc",
+        "number_desc",
+        "invoice_number_desc",
+      ].includes(key)
+    ) {
       return "invoice_desc";
     }
+
     return "date_desc";
   }
 
@@ -388,8 +467,12 @@ export const FacturasView = (() => {
         source._id,
         source.entityId,
         source.numero,
+        source.numeroFactura,
         source.numeroFacturaLegal,
         source.numeroFacturaSistema,
+        source.legalInvoiceNumber,
+        source.systemInvoiceNumber,
+        source.invoiceNumber,
         source.value,
         source.key,
         source.code
@@ -725,6 +808,7 @@ export const FacturasView = (() => {
         DEFAULT_FACTURAS_SORT
       )
     );
+
     state.view.sort = state.view.facturasSort;
     state.view.sortBy = state.view.facturasSort;
     state.view.orderBy = state.view.facturasSort;
@@ -765,6 +849,7 @@ export const FacturasView = (() => {
 
   function getViewSort() {
     ensureBaseState();
+
     return normalizeFacturaSort(
       first(
         state.view.facturasSort,
@@ -806,6 +891,7 @@ export const FacturasView = (() => {
     safeEmit("facturas:filter:change", {
       filter: nextFilter,
       search: getViewSearch(),
+      sort: getViewSort(),
     });
 
     return nextFilter;
@@ -829,6 +915,7 @@ export const FacturasView = (() => {
     safeEmit("facturas:search:change", {
       filter: getViewFilter(),
       search: nextSearch,
+      sort: getViewSort(),
     });
 
     return nextSearch;
@@ -836,14 +923,23 @@ export const FacturasView = (() => {
 
   function setViewSort(sort = DEFAULT_FACTURAS_SORT) {
     ensureBaseState();
+
     const nextSort = normalizeFacturaSort(sort);
+
     state.view.facturasSort = nextSort;
     state.view.sort = nextSort;
     state.view.sortBy = nextSort;
     state.view.orderBy = nextSort;
     state.view.sortMode = nextSort;
+
     resetViewPage();
-    safeEmit("facturas:sort:change", { sort: nextSort, filter: getViewFilter(), search: getViewSearch() });
+
+    safeEmit("facturas:sort:change", {
+      sort: nextSort,
+      filter: getViewFilter(),
+      search: getViewSearch(),
+    });
+
     return nextSort;
   }
 
@@ -863,6 +959,7 @@ export const FacturasView = (() => {
     state.view.q = "";
     state.view.term = "";
     state.view.keyword = "";
+
     state.view.facturasSort = DEFAULT_FACTURAS_SORT;
     state.view.sort = DEFAULT_FACTURAS_SORT;
     state.view.sortBy = DEFAULT_FACTURAS_SORT;
@@ -966,10 +1063,15 @@ export const FacturasView = (() => {
         first(
           item.pdfAvailable,
           item.hasPdf,
+          item.document?.available,
           item.meta?.hasPdf,
+          item.meta?.hasBlob,
+
           raw.pdfAvailable,
           raw.hasPdf,
-          raw.meta?.hasPdf
+          raw.document?.available,
+          raw.meta?.hasPdf,
+          raw.meta?.hasBlob
         )
       )
     ) {
@@ -985,6 +1087,8 @@ export const FacturasView = (() => {
         item.downloadUrl,
         item.viewUrl,
         item.pdf,
+        item.document?.blobPath,
+        item.document?.fileName,
 
         raw.blobPath,
         raw.blobName,
@@ -992,7 +1096,9 @@ export const FacturasView = (() => {
         raw.pdfUrl,
         raw.downloadUrl,
         raw.viewUrl,
-        raw.pdf
+        raw.pdf,
+        raw.document?.blobPath,
+        raw.document?.fileName
       )
     ) {
       return true;
@@ -1033,48 +1139,125 @@ export const FacturasView = (() => {
         item.fechaEnvio,
         item.sentAt,
         item.mailSentAt,
+        item.email?.sent,
+        item.email?.sentAt,
         item.delivery?.lastSentAt,
+        item.lifecycle?.sentAt,
         item.meta?.lastSentAt,
         item.meta?.isSent,
+        item.meta?.hasEmailSent,
 
         raw.fechaEnvio,
         raw.sentAt,
         raw.mailSentAt,
+        raw.email?.sent,
+        raw.email?.sentAt,
         raw.delivery?.lastSentAt,
+        raw.lifecycle?.sentAt,
         raw.meta?.lastSentAt,
-        raw.meta?.isSent
+        raw.meta?.isSent,
+        raw.meta?.hasEmailSent
       )
     );
   }
 
-  function getClientNameForView(item = {}) {
+  function getCompanyNameForView(item = {}) {
+    const raw = safeObject(item?.raw);
+
+    return safeText(
+      first(
+        item.clienteEmpresa,
+        item.empresa,
+        item.company,
+        item.companyName,
+        item.razonSocial,
+        item.cliente?.razonSocial,
+        item.cliente?.companyName,
+        item.cliente?.empresa,
+        item.cliente?.company,
+        item.clienteSnapshot?.razonSocial,
+        item.clienteSnapshot?.companyName,
+        item.clienteSnapshot?.empresa,
+        item.client?.razonSocial,
+        item.client?.companyName,
+        item.client?.empresa,
+        item.client?.company,
+        item.customer?.razonSocial,
+        item.customer?.companyName,
+        item.customer?.empresa,
+        item.customer?.company,
+
+        raw.clienteEmpresa,
+        raw.empresa,
+        raw.company,
+        raw.companyName,
+        raw.razonSocial,
+        raw.cliente?.razonSocial,
+        raw.cliente?.companyName,
+        raw.cliente?.empresa,
+        raw.cliente?.company,
+        raw.clienteSnapshot?.razonSocial,
+        raw.clienteSnapshot?.companyName,
+        raw.clienteSnapshot?.empresa,
+        raw.client?.razonSocial,
+        raw.client?.companyName,
+        raw.client?.empresa,
+        raw.client?.company,
+        raw.customer?.razonSocial,
+        raw.customer?.companyName,
+        raw.customer?.empresa,
+        raw.customer?.company
+      ),
+      ""
+    );
+  }
+
+  function getContactNameForView(item = {}) {
     const raw = safeObject(item?.raw);
 
     return safeText(
       first(
         item.clienteNombre,
+        item.nombreContacto,
+        item.contactName,
         item.clientName,
         item.cliente?.nombreContacto,
         item.cliente?.nombre,
         item.cliente?.name,
         item.cliente?.displayName,
+        item.clienteSnapshot?.nombreContacto,
+        item.client?.nombreContacto,
         item.client?.name,
+        item.customer?.nombreContacto,
         item.customer?.name,
         item.name,
         item.nombre,
-        item.company,
 
         raw.clienteNombre,
+        raw.nombreContacto,
+        raw.contactName,
         raw.clientName,
         raw.cliente?.nombreContacto,
         raw.cliente?.nombre,
         raw.cliente?.name,
         raw.cliente?.displayName,
+        raw.clienteSnapshot?.nombreContacto,
+        raw.client?.nombreContacto,
         raw.client?.name,
+        raw.customer?.nombreContacto,
         raw.customer?.name,
         raw.name,
-        raw.nombre,
-        raw.company
+        raw.nombre
+      ),
+      ""
+    );
+  }
+
+  function getClientNameForView(item = {}) {
+    return safeText(
+      first(
+        getCompanyNameForView(item),
+        getContactNameForView(item)
       ),
       ""
     );
@@ -1091,6 +1274,7 @@ export const FacturasView = (() => {
         item.email,
         item.cliente?.email,
         item.cliente?.emailLower,
+        item.clienteSnapshot?.email,
         item.client?.email,
         item.customer?.email,
 
@@ -1100,6 +1284,7 @@ export const FacturasView = (() => {
         raw.email,
         raw.cliente?.email,
         raw.cliente?.emailLower,
+        raw.clienteSnapshot?.email,
         raw.client?.email,
         raw.customer?.email
       ),
@@ -1117,7 +1302,10 @@ export const FacturasView = (() => {
       item.importeTotal,
       item.totalFactura,
       item.facturaTotal,
+      item.facturaImporte,
+      item.importeFactura,
       item.invoiceAmount,
+      item.totales?.total,
 
       raw.total,
       raw.amount,
@@ -1125,7 +1313,10 @@ export const FacturasView = (() => {
       raw.importeTotal,
       raw.totalFactura,
       raw.facturaTotal,
-      raw.invoiceAmount
+      raw.facturaImporte,
+      raw.importeFactura,
+      raw.invoiceAmount,
+      raw.totales?.total
     );
   }
 
@@ -1137,14 +1328,165 @@ export const FacturasView = (() => {
         item.formaPago,
         item.metodoPago,
         item.paymentMethod,
+        item.payment?.methodLabel,
         item.payment?.method,
 
         raw.formaPago,
         raw.metodoPago,
         raw.paymentMethod,
+        raw.payment?.methodLabel,
         raw.payment?.method
       ),
       ""
+    );
+  }
+
+  function getFacturaDisplayId(item = {}) {
+    if (typeof item === "string" || typeof item === "number") {
+      return safeText(item, "");
+    }
+
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    return safeText(
+      first(
+        source.numeroFacturaLegal,
+        source.numeroFactura,
+        source.legalInvoiceNumber,
+        source.numero,
+        source.invoiceNumber,
+        source.code,
+        source.facturaId,
+        source.invoiceId,
+        source.numeroFacturaSistema,
+        source.systemInvoiceNumber,
+        source.id,
+
+        raw.numeroFacturaLegal,
+        raw.numeroFactura,
+        raw.legalInvoiceNumber,
+        raw.numero,
+        raw.invoiceNumber,
+        raw.code,
+        raw.facturaId,
+        raw.invoiceId,
+        raw.numeroFacturaSistema,
+        raw.systemInvoiceNumber,
+        raw.id
+      ),
+      ""
+    );
+  }
+
+  function getFacturaSystemDisplayId(item = {}) {
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    return safeText(
+      first(
+        source.numeroFacturaSistema,
+        source.systemInvoiceNumber,
+        raw.numeroFacturaSistema,
+        raw.systemInvoiceNumber
+      ),
+      ""
+    );
+  }
+
+  function getFacturaEmissionDateForView(item = {}) {
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    return first(
+      source.fechaFactura,
+      source.fechaFacturaISO,
+      source.lifecycle?.issuedAt,
+      source.issueDate,
+      source.issuedAt,
+      source.fecha,
+
+      raw.fechaFactura,
+      raw.fechaFacturaISO,
+      raw.lifecycle?.issuedAt,
+      raw.issueDate,
+      raw.issuedAt,
+      raw.fecha,
+
+      source.createdAt,
+      source.lifecycle?.createdAt,
+      source.fechaCreacion,
+
+      raw.createdAt,
+      raw.lifecycle?.createdAt,
+      raw.fechaCreacion
+    );
+  }
+
+  function getFacturaUpdatedDateForView(item = {}) {
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    return first(
+      source.updatedAt,
+      source.lifecycle?.updatedAt,
+      source.lastActivityAt,
+      source.lifecycle?.lastActivityAt,
+      source.fechaEnvio,
+      source.sentAt,
+      source.mailSentAt,
+      source.delivery?.lastSentAt,
+
+      raw.updatedAt,
+      raw.lifecycle?.updatedAt,
+      raw.lastActivityAt,
+      raw.lifecycle?.lastActivityAt,
+      raw.fechaEnvio,
+      raw.sentAt,
+      raw.mailSentAt,
+      raw.delivery?.lastSentAt
+    );
+  }
+
+  function getFacturaDateSortValue(item = {}) {
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    return (
+      toTimestamp(getFacturaEmissionDateForView(source)) ||
+      toTimestamp(getFacturaUpdatedDateForView(source)) ||
+      safeNumber(source.meta?.updatedAtMs, 0) ||
+      safeNumber(source.meta?.timestampMs, 0) ||
+      safeNumber(raw.meta?.updatedAtMs, 0) ||
+      safeNumber(raw.meta?.timestampMs, 0) ||
+      toTimestamp(raw._ts) ||
+      0
+    );
+  }
+
+  function compareFacturasByDateDesc(a = {}, b = {}) {
+    const diff = getFacturaDateSortValue(b) - getFacturaDateSortValue(a);
+
+    if (diff !== 0) return diff;
+
+    return safeText(getFacturaDisplayId(b), "").localeCompare(
+      safeText(getFacturaDisplayId(a), ""),
+      "es",
+      {
+        numeric: true,
+        sensitivity: "base",
+      }
+    );
+  }
+
+  function compareFacturasByInvoiceDesc(a = {}, b = {}) {
+    return safeText(getFacturaDisplayId(b), "").localeCompare(
+      safeText(getFacturaDisplayId(a), ""),
+      "es",
+      {
+        numeric: true,
+        sensitivity: "base",
+      }
     );
   }
 
@@ -1178,9 +1520,18 @@ export const FacturasView = (() => {
     return [
       ...identities,
 
+      getFacturaDisplayId(item),
+      getFacturaSystemDisplayId(item),
+
+      getCompanyNameForView(item),
+      getContactNameForView(item),
       getClientNameForView(item),
       getClientEmailForView(item),
       getFormaPagoForView(item),
+
+      getPaymentStatusKeyForView(item),
+      hasPdfForView(item) ? "pdf con pdf documento" : "",
+      isFacturaSentForView(item) ? "enviada enviada email sent" : "",
 
       amount,
       Number.isFinite(safeNumber(amount, NaN))
@@ -1237,16 +1588,10 @@ export const FacturasView = (() => {
     });
 
     if (sort === "invoice_desc") {
-      return [...filtered].sort((a, b) =>
-        safeText(getFacturaDisplayId(b), "").localeCompare(
-          safeText(getFacturaDisplayId(a), ""),
-          "es",
-          { numeric: true, sensitivity: "base" }
-        )
-      );
+      return [...filtered].sort(compareFacturasByInvoiceDesc);
     }
 
-    return filtered;
+    return [...filtered].sort(compareFacturasByDateDesc);
   }
 
   /* =====================================================
@@ -1313,8 +1658,11 @@ export const FacturasView = (() => {
         item?.facturaId,
         item?.invoiceId,
         item?.numero,
+        item?.numeroFactura,
         item?.numeroFacturaLegal,
         item?.numeroFacturaSistema,
+        item?.legalInvoiceNumber,
+        item?.systemInvoiceNumber,
         item?.invoiceNumber,
         item?.code,
 
@@ -1323,8 +1671,11 @@ export const FacturasView = (() => {
         item?.raw?.facturaId,
         item?.raw?.invoiceId,
         item?.raw?.numero,
+        item?.raw?.numeroFactura,
         item?.raw?.numeroFacturaLegal,
         item?.raw?.numeroFacturaSistema,
+        item?.raw?.legalInvoiceNumber,
+        item?.raw?.systemInvoiceNumber,
         item?.raw?.invoiceNumber,
         item?.raw?.code,
 
@@ -1332,6 +1683,7 @@ export const FacturasView = (() => {
         item?.data?.facturaId,
         item?.data?.invoiceId,
         item?.data?.numero,
+        item?.data?.numeroFactura,
         item?.data?.numeroFacturaLegal,
         item?.data?.numeroFacturaSistema,
 
@@ -1339,6 +1691,7 @@ export const FacturasView = (() => {
         item?.payload?.facturaId,
         item?.payload?.invoiceId,
         item?.payload?.numero,
+        item?.payload?.numeroFactura,
         item?.payload?.numeroFacturaLegal,
         item?.payload?.numeroFacturaSistema,
 
@@ -1346,6 +1699,7 @@ export const FacturasView = (() => {
         item?.result?.facturaId,
         item?.result?.invoiceId,
         item?.result?.numero,
+        item?.result?.numeroFactura,
         item?.result?.numeroFacturaLegal,
         item?.result?.numeroFacturaSistema
       ),
@@ -1367,8 +1721,11 @@ export const FacturasView = (() => {
       source.facturaId,
       source.invoiceId,
       source.numero,
+      source.numeroFactura,
       source.numeroFacturaLegal,
       source.numeroFacturaSistema,
+      source.legalInvoiceNumber,
+      source.systemInvoiceNumber,
       source.invoiceNumber,
       source.code,
 
@@ -1377,8 +1734,11 @@ export const FacturasView = (() => {
       raw.facturaId,
       raw.invoiceId,
       raw.numero,
+      raw.numeroFactura,
       raw.numeroFacturaLegal,
       raw.numeroFacturaSistema,
+      raw.legalInvoiceNumber,
+      raw.systemInvoiceNumber,
       raw.invoiceNumber,
       raw.code,
     ]
@@ -1414,6 +1774,7 @@ export const FacturasView = (() => {
         detail.id,
         detail._id,
         detail.numero,
+        detail.numeroFactura,
         detail.numeroFacturaLegal,
         detail.numeroFacturaSistema,
 
@@ -1422,6 +1783,7 @@ export const FacturasView = (() => {
         factura.id,
         factura._id,
         factura.numero,
+        factura.numeroFactura,
         factura.numeroFacturaLegal,
         factura.numeroFacturaSistema,
 
@@ -1430,6 +1792,7 @@ export const FacturasView = (() => {
         invoice.id,
         invoice._id,
         invoice.numero,
+        invoice.numeroFactura,
         invoice.numeroFacturaLegal,
         invoice.numeroFacturaSistema,
 
@@ -1447,6 +1810,7 @@ export const FacturasView = (() => {
         raw.id,
         raw._id,
         raw.numero,
+        raw.numeroFactura,
         raw.numeroFacturaLegal,
         raw.numeroFacturaSistema
       ),
@@ -1587,6 +1951,7 @@ export const FacturasView = (() => {
         source.caseId,
 
         source.meta?.ticketId,
+        source.meta?.linkedTicketId,
         source.meta?.incidenciaId,
 
         pickTicketIdFromArray(source.ticketIds),
@@ -1636,6 +2001,7 @@ export const FacturasView = (() => {
         raw.caseId,
 
         raw.meta?.ticketId,
+        raw.meta?.linkedTicketId,
         raw.meta?.incidenciaId,
 
         pickTicketIdFromArray(raw.ticketIds),
@@ -1854,8 +2220,10 @@ export const FacturasView = (() => {
       meta: {
         ...safeObject(source.meta),
         hasIncidencia: true,
+        hasLinkedTicket: true,
         incidenciaId,
         ticketId: incidenciaId,
+        linkedTicketId: incidenciaId,
       },
 
       raw: {
@@ -1884,8 +2252,10 @@ export const FacturasView = (() => {
         meta: {
           ...safeObject(raw.meta),
           hasIncidencia: true,
+          hasLinkedTicket: true,
           incidenciaId,
           ticketId: incidenciaId,
+          linkedTicketId: incidenciaId,
         },
       },
     };
@@ -2303,6 +2673,10 @@ export const FacturasView = (() => {
   }
 
   /* =====================================================
+     CONTINÚA EN PARTE 2/2
+  ===================================================== */
+
+       /* =====================================================
      STORE / DETAIL MERGE
   ===================================================== */
 
@@ -2926,6 +3300,7 @@ export const FacturasView = (() => {
       clienteNombre: safeText(
         first(
           incidenciaPayload?.clienteNombre,
+          getClientNameForView(factura),
           factura?.cliente?.nombre,
           factura?.cliente?.nombreContacto,
           factura?.clienteNombre,
@@ -3254,6 +3629,7 @@ export const FacturasView = (() => {
       term: getViewSearch(),
       keyword: getViewSearch(),
       facturasSearch: getViewSearch(),
+
       sort: getViewSort(),
       sortBy: getViewSort(),
       orderBy: getViewSort(),
@@ -3321,6 +3697,12 @@ export const FacturasView = (() => {
       keyword: getViewSearch(),
       facturasSearch: getViewSearch(),
 
+      sort: getViewSort(),
+      sortBy: getViewSort(),
+      orderBy: getViewSort(),
+      sortMode: getViewSort(),
+      facturasSort: getViewSort(),
+
       loading: isFacturasLoading(state),
       refreshing: isFacturasRefreshing(state),
 
@@ -3351,9 +3733,11 @@ export const FacturasView = (() => {
 
       view: {
         ...safeObject(state.view),
+
         page: getCurrentPage(),
         currentPage: getCurrentPage(),
         facturasPage: getCurrentPage(),
+
         pageSize: getPageSize(),
         facturasPageSize: getPageSize(),
 
@@ -3370,6 +3754,7 @@ export const FacturasView = (() => {
         term: getViewSearch(),
         keyword: getViewSearch(),
         facturasSearch: getViewSearch(),
+
         sort: getViewSort(),
         sortBy: getViewSort(),
         orderBy: getViewSort(),
@@ -3852,6 +4237,7 @@ export const FacturasView = (() => {
           asRefresh,
           filter: getViewFilter(),
           search: getViewSearch(),
+          sort: getViewSort(),
         });
 
         return getItems();
@@ -4147,7 +4533,11 @@ export const FacturasView = (() => {
   function exportFacturasCsv() {
     const items = getItems();
     const filteredItems = getFilteredFacturasItems(items);
-    const hasActiveCriteria = getViewFilter() !== "all" || Boolean(getViewSearch());
+    const hasActiveCriteria =
+      getViewFilter() !== "all" ||
+      Boolean(getViewSearch()) ||
+      getViewSort() !== DEFAULT_FACTURAS_SORT;
+
     const exportingItems = hasActiveCriteria ? filteredItems : items;
 
     return exportFacturasCsvAction({
@@ -4297,6 +4687,7 @@ export const FacturasView = (() => {
         rerender();
         return next;
       },
+
       setSort(sort = DEFAULT_FACTURAS_SORT) {
         const next = setViewSort(sort);
         rerender();
@@ -4416,15 +4807,23 @@ export const FacturasView = (() => {
 
         return;
       }
+
       if (["sort", "sort_facturas"].includes(action)) {
         event.preventDefault();
+
         const nextSort = first(
           target.dataset.sort,
+          target.dataset.sortMode,
+          target.dataset.facturasSort,
           target.getAttribute("data-sort"),
+          target.getAttribute("data-sort-mode"),
+          target.getAttribute("data-facturas-sort"),
           DEFAULT_FACTURAS_SORT
         );
+
         setViewSort(nextSort);
         rerender();
+
         return;
       }
 
@@ -4496,10 +4895,29 @@ export const FacturasView = (() => {
     };
 
     const onChange = (event) => {
-      const select = event.target.closest?.("[data-sort-control='true'], #facturas-sort-select");
-      if (!select || !container.contains(select)) return;
-      setViewSort(select.value || DEFAULT_FACTURAS_SORT);
-      rerender();
+      const sortSelect = event.target.closest?.(
+        "[data-sort-control='true'], #facturas-sort-select"
+      );
+
+      if (sortSelect && container.contains(sortSelect)) {
+        setViewSort(sortSelect.value || DEFAULT_FACTURAS_SORT);
+        rerender();
+        return;
+      }
+
+      const searchInput = event.target.closest?.(
+        "[data-facturas-search-input='true'], #facturas-search-input"
+      );
+
+      if (searchInput && container.contains(searchInput)) {
+        const next = normalizeWhitespace(searchInput.value || "");
+        setViewSearch(next);
+        rerender();
+
+        if (next) {
+          focusFacturasSearchInput(searchInput.value.length);
+        }
+      }
     };
 
     const onSearch = (event) => {
@@ -4523,7 +4941,6 @@ export const FacturasView = (() => {
     container.addEventListener("input", onInput);
     container.addEventListener("change", onChange);
     container.addEventListener("search", onSearch);
-    container.addEventListener("change", onSearch);
 
     filterControlsCleanup = () => {
       try {
@@ -4531,7 +4948,6 @@ export const FacturasView = (() => {
         container.removeEventListener("input", onInput);
         container.removeEventListener("change", onChange);
         container.removeEventListener("search", onSearch);
-        container.removeEventListener("change", onSearch);
       } catch {}
 
       try {
@@ -4589,6 +5005,7 @@ export const FacturasView = (() => {
         setViewSearch(query);
         rerender();
       },
+
       setSort(sort = DEFAULT_FACTURAS_SORT) {
         setViewSort(sort);
         rerender();
@@ -4751,6 +5168,7 @@ export const FacturasView = (() => {
       rerender();
       return next;
     },
+
     setSort(sort = DEFAULT_FACTURAS_SORT) {
       const next = setViewSort(sort);
       rerender();
@@ -4770,6 +5188,7 @@ export const FacturasView = (() => {
     getSearch() {
       return getViewSearch();
     },
+
     getSort() {
       return getViewSort();
     },
@@ -4792,6 +5211,10 @@ export const FacturasView = (() => {
     },
 
     findFacturaById,
+
+    getFacturaDisplayId,
+    getFacturaIdentityList,
+    getRelatedIncidenciaId,
 
     getState() {
       return {
@@ -4820,4 +5243,4 @@ export const FacturasView = (() => {
   return api;
 })();
 
-export default FacturasView;
+export default FacturasView;                        

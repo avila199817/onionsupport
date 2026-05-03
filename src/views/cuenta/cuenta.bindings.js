@@ -2,9 +2,8 @@
    Onion SPA - Cuenta Bindings
    Archivo: src/views/cuenta/cuenta.bindings.js
 
-   EXTREME PRO SYSTEM · DOM BINDINGS · FULL PATCH 13/10
-   NATIVE-FIRST EVENTS · DELEGATION SAFE · CLEANUP SAFE
-   CUENTAVIEW COMPAT · TEMPLATE GOD LEVEL READY
+   EXTREME PRO SYSTEM · DOM BINDINGS · FULL PATCH 14/10
+   NATIVE-FIRST EVENTS · CAPTURE SAFE · VIEW COMPAT READY
 
    RESPONSABILIDADES:
    - bind DOM robusto por delegación
@@ -14,20 +13,18 @@
    - change language
    - change password
    - open cuenta modal
-   - rebind limpio tras rerender
    - cleanup sólido por scope
-   - compatibilidad con actions antiguas y nuevas
    - compatibilidad con cuentaView.js
+   - compatibilidad con template premium
    - compatibilidad con bridges window.OnionCuenta / CuentaView
-   - no romper si un callback no existe
+   - fallback total por IDs directos
 
    FIX CRÍTICO:
-   - NO depende de AppCore.cleanup.on para enganchar eventos
    - addEventListener nativo siempre
-   - cleanup local siempre
-   - fallback por data-action, data-cuenta-action e IDs directos
-   - soporta confirm password
-   - soporta save con name / phone / privacy / lang / theme
+   - captura en click para evitar que otros handlers se lo traguen
+   - normalización de acciones
+   - root seguro
+   - diagnóstico por evento cuenta:bindings:ready
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -37,13 +34,18 @@ import { AppCore } from "../../core/index.js";
 ========================================================= */
 
 export const CUENTA_BINDINGS_SCOPE = "view:cuenta";
-export const CUENTA_BINDINGS_VERSION = "13.0.0";
+export const CUENTA_BINDINGS_VERSION = "14.0.0";
 
 const DEFAULT_SCOPE = CUENTA_BINDINGS_SCOPE;
 const PASSWORD_MIN_LENGTH = 8;
 
+const BIND_OPTIONS = {
+  capture: true,
+  passive: false,
+};
+
 const ACTIONS = {
-  refresh: new Set([
+  refresh: [
     "refresh-cuenta",
     "reload-cuenta",
     "cuenta-refresh",
@@ -51,9 +53,9 @@ const ACTIONS = {
     "reload",
     "retry",
     "retry-cuenta",
-  ]),
+  ],
 
-  save: new Set([
+  save: [
     "save-cuenta",
     "update-cuenta",
     "cuenta-save",
@@ -61,60 +63,60 @@ const ACTIONS = {
     "guardar",
     "preferences-save",
     "save-preferences",
-  ]),
+  ],
 
-  theme: new Set([
+  theme: [
     "toggle-theme",
     "change-theme",
     "update-theme",
     "cuenta-theme",
     "theme-toggle",
     "set-theme",
-  ]),
+  ],
 
-  language: new Set([
+  language: [
     "change-language",
     "update-language",
     "apply-language",
     "cuenta-language",
     "language-change",
     "set-language",
-  ]),
+  ],
 
-  password: new Set([
+  password: [
     "change-password",
     "update-password",
     "cuenta-password",
     "password-change",
-  ]),
+  ],
 
-  open: new Set([
+  open: [
     "open-cuenta-modal",
     "open-modal",
     "cuenta-detail",
     "detail",
     "view-cuenta",
     "open-cuenta",
-  ]),
+  ],
 };
 
 const DIRECT_IDS = {
-  refresh: new Set([
+  refresh: [
     "cuenta-refresh-btn",
     "cuenta-retry-btn",
-  ]),
+  ],
 
-  save: new Set([
+  save: [
     "cuenta-save-btn",
-  ]),
+  ],
 
-  password: new Set([
+  password: [
     "cuenta-password-btn",
-  ]),
+  ],
 
-  open: new Set([
+  open: [
     "cuenta-open-modal-btn",
-  ]),
+  ],
 };
 
 const INPUT_SELECTORS = {
@@ -273,6 +275,23 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "")
     .trim();
 }
+
+function normalizeAction(value = "") {
+  return normalizeKey(value).replace(/_/g, "-");
+}
+
+function normalizeActionSet(values = []) {
+  return new Set(values.map(normalizeAction).filter(Boolean));
+}
+
+const ACTION_SETS = {
+  refresh: normalizeActionSet(ACTIONS.refresh),
+  save: normalizeActionSet(ACTIONS.save),
+  theme: normalizeActionSet(ACTIONS.theme),
+  language: normalizeActionSet(ACTIONS.language),
+  password: normalizeActionSet(ACTIONS.password),
+  open: normalizeActionSet(ACTIONS.open),
+};
 
 function normalizeBoolean(value = undefined, fallback = false) {
   if (typeof value === "boolean") return value;
@@ -611,38 +630,26 @@ function getActionName(element = null) {
   );
 }
 
-function hasDirectId(element = null, idSet = new Set()) {
-  if (!element || !idSet?.size) return false;
+function findDirectIdElement(root, target, ids = []) {
+  if (!target || !ids?.length) return null;
 
-  try {
-    const directId = safeText(element.id, "");
-    if (directId && idSet.has(directId)) return true;
-  } catch {}
-
-  try {
-    for (const id of idSet) {
-      if (element.closest?.(`#${id}`)) return true;
-    }
-  } catch {}
-
-  return false;
-}
-
-function getActionElement(root, target, actionSet, idSet = new Set()) {
-  const byId = (() => {
+  for (const id of ids) {
     try {
-      for (const id of idSet) {
-        const match = target?.closest?.(`#${id}`);
-        if (match && isElementInsideRoot(root, match) && !isDisabledElement(match)) {
-          return match;
-        }
+      const match = target.closest?.(`#${id}`);
+
+      if (match && isElementInsideRoot(root, match) && !isDisabledElement(match)) {
+        return match;
       }
     } catch {}
+  }
 
-    return null;
-  })();
+  return null;
+}
 
-  if (byId) return byId;
+function getActionElement(root, target, actionSet, ids = []) {
+  const direct = findDirectIdElement(root, target, ids);
+
+  if (direct) return direct;
 
   const actionElement = closestInside(
     root,
@@ -651,10 +658,9 @@ function getActionElement(root, target, actionSet, idSet = new Set()) {
   );
 
   if (!actionElement) return null;
-
   if (isDisabledElement(actionElement)) return null;
 
-  const action = getActionName(actionElement);
+  const action = normalizeAction(getActionName(actionElement));
 
   if (!action || !actionSet.has(action)) return null;
 
@@ -731,9 +737,11 @@ function readCuentaForm(root = getContainer()) {
     name,
     displayName: name,
     fullName: name,
+    nombre: name,
 
     phone,
     telefono: phone,
+    mobile: phone,
 
     email,
     username,
@@ -775,7 +783,10 @@ function clearPasswordFields(root = getContainer()) {
   ].forEach((selector) => {
     try {
       const input = getField(root, selector);
-      if (input && "value" in input) input.value = "";
+
+      if (input && "value" in input) {
+        input.value = "";
+      }
     } catch {}
   });
 }
@@ -805,7 +816,9 @@ async function runBusy(key = "", element = null, task = null) {
 
   if (!finalKey || typeof task !== "function") return null;
 
-  if (busyKeys.has(finalKey)) return null;
+  if (busyKeys.has(finalKey)) {
+    return null;
+  }
 
   busyKeys.add(finalKey);
   setElementBusy(element, true);
@@ -1472,6 +1485,10 @@ export function bindCuentaEvents({
     return () => {};
   }
 
+  try {
+    root.setAttribute?.("data-cuenta-bindings", CUENTA_BINDINGS_VERSION);
+  } catch {}
+
   const refreshAfterMutation = (event) => {
     const payload = event?.detail || event || {};
 
@@ -1482,14 +1499,11 @@ export function bindCuentaEvents({
     });
   };
 
-  /* =======================================================
-     CLICK DELEGATION
-  ======================================================= */
-
   bindDomEvent({
     scopeName,
     target: root,
     eventName: "click",
+    options: BIND_OPTIONS,
     handler: async (event) => {
       const target = event.target;
 
@@ -1498,7 +1512,7 @@ export function bindCuentaEvents({
       const refreshAction = getActionElement(
         root,
         target,
-        ACTIONS.refresh,
+        ACTION_SETS.refresh,
         DIRECT_IDS.refresh
       );
 
@@ -1518,7 +1532,7 @@ export function bindCuentaEvents({
       const saveAction = getActionElement(
         root,
         target,
-        ACTIONS.save,
+        ACTION_SETS.save,
         DIRECT_IDS.save
       );
 
@@ -1536,7 +1550,11 @@ export function bindCuentaEvents({
         return;
       }
 
-      const themeAction = getActionElement(root, target, ACTIONS.theme);
+      const themeAction = getActionElement(
+        root,
+        target,
+        ACTION_SETS.theme
+      );
 
       if (themeAction) {
         event.preventDefault();
@@ -1552,7 +1570,11 @@ export function bindCuentaEvents({
         return;
       }
 
-      const languageAction = getActionElement(root, target, ACTIONS.language);
+      const languageAction = getActionElement(
+        root,
+        target,
+        ACTION_SETS.language
+      );
 
       if (languageAction) {
         event.preventDefault();
@@ -1571,7 +1593,7 @@ export function bindCuentaEvents({
       const passwordAction = getActionElement(
         root,
         target,
-        ACTIONS.password,
+        ACTION_SETS.password,
         DIRECT_IDS.password
       );
 
@@ -1591,7 +1613,7 @@ export function bindCuentaEvents({
       const openAction = getActionElement(
         root,
         target,
-        ACTIONS.open,
+        ACTION_SETS.open,
         DIRECT_IDS.open
       );
 
@@ -1607,14 +1629,11 @@ export function bindCuentaEvents({
     },
   });
 
-  /* =======================================================
-     CHANGE DELEGATION
-  ======================================================= */
-
   bindDomEvent({
     scopeName,
     target: root,
     eventName: "change",
+    options: BIND_OPTIONS,
     handler: async (event) => {
       const target = event.target;
 
@@ -1656,14 +1675,11 @@ export function bindCuentaEvents({
     },
   });
 
-  /* =======================================================
-     KEYBOARD ACCESSIBILITY
-  ======================================================= */
-
   bindDomEvent({
     scopeName,
     target: root,
     eventName: "keydown",
+    options: BIND_OPTIONS,
     handler: async (event) => {
       const key = safeText(event.key, "");
 
@@ -1705,10 +1721,6 @@ export function bindCuentaEvents({
     },
   });
 
-  /* =======================================================
-     BUS / WINDOW EVENTS
-  ======================================================= */
-
   bindBusEvent({
     scopeName,
     eventName: "cuenta:modal:updated",
@@ -1737,6 +1749,7 @@ export function bindCuentaEvents({
     scope: scopeName,
     version: CUENTA_BINDINGS_VERSION,
     nativeFirst: true,
+    root: root?.id || root?.dataset?.view || root?.className || "document",
   });
 
   return () => {

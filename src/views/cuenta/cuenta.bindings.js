@@ -2,7 +2,8 @@
    Onion SPA - Cuenta Bindings
    Archivo: src/views/cuenta/cuenta.bindings.js
 
-   CLIENT EXPERIENCE PRO · DOM BINDINGS · 10/10
+   EXTREME PRO SYSTEM · DOM BINDINGS · FULL PATCH 12/10
+   CLIENT EXPERIENCE MODE · DELEGATION SAFE · CLEANUP SAFE
 
    RESPONSABILIDADES:
    - bind DOM robusto por delegación
@@ -15,20 +16,39 @@
    - rebind limpio tras rerender
    - cleanup sólido por scope
    - compatibilidad con actions antiguas y nuevas
+   - compatibilidad con cuentaView.js
+   - compatibilidad con cuenta.api.js
+   - compatibilidad con bridges window.OnionCuenta / CuentaView
+   - compatibilidad con AppCore.events y CustomEvent
+   - no romper si un callback no existe
 
-   FIX CRÍTICO:
+   HARDENING EXTREME:
    - evita doble click handlers
    - soporta botones dinámicos
    - soporta callbacks modernos y legacy
    - soporta updateCuenta(payload)
-   - soporta updateCuentaTheme(darkMode) y updateCuentaTheme({ darkMode })
-   - soporta updateCuentaLanguage(lang) y updateCuenta(payload)
+   - soporta updateCuentaTheme(darkMode)
+   - soporta updateCuentaTheme({ darkMode })
+   - soporta updateCuentaLanguage(lang)
+   - soporta updateCuentaLanguage({ lang })
    - emite bridges si un handler no existe
+   - busy lock por acción
+   - cleanup fallback si AppCore.cleanup no existe
+   - lectura de DOM tolerante
+   - normalización theme/lang/privacy
+   - password validation local
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
-const DEFAULT_SCOPE = "view:cuenta";
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+export const CUENTA_BINDINGS_SCOPE = "view:cuenta";
+export const CUENTA_BINDINGS_VERSION = "12.0.0";
+
+const DEFAULT_SCOPE = CUENTA_BINDINGS_SCOPE;
 const PASSWORD_MIN_LENGTH = 8;
 
 const ACTIONS = {
@@ -49,6 +69,7 @@ const ACTIONS = {
     "save",
     "guardar",
     "preferences-save",
+    "save-preferences",
   ]),
 
   theme: new Set([
@@ -57,6 +78,7 @@ const ACTIONS = {
     "update-theme",
     "cuenta-theme",
     "theme-toggle",
+    "set-theme",
   ]),
 
   language: new Set([
@@ -65,6 +87,7 @@ const ACTIONS = {
     "apply-language",
     "cuenta-language",
     "language-change",
+    "set-language",
   ]),
 
   password: new Set([
@@ -80,6 +103,7 @@ const ACTIONS = {
     "cuenta-detail",
     "detail",
     "view-cuenta",
+    "open-cuenta",
   ]),
 };
 
@@ -89,6 +113,8 @@ const INPUT_SELECTORS = {
     "#cuenta-darkmode-input",
     '[data-cuenta-field="darkMode"]',
     '[data-field="darkMode"]',
+    '[name="darkMode"]',
+    '[name="theme"]',
   ].join(","),
 
   privacyMode: [
@@ -98,6 +124,7 @@ const INPUT_SELECTORS = {
     "#cuenta-privacy-input",
     '[data-cuenta-field="privacyMode"]',
     '[data-field="privacyMode"]',
+    '[name="privacyMode"]',
   ].join(","),
 
   language: [
@@ -106,6 +133,8 @@ const INPUT_SELECTORS = {
     '[data-cuenta-field="lang"]',
     '[data-field="lang"]',
     '[data-field="language"]',
+    '[name="lang"]',
+    '[name="language"]',
   ].join(","),
 
   currentPassword: [
@@ -113,6 +142,7 @@ const INPUT_SELECTORS = {
     "#cuenta-current-password",
     '[data-cuenta-field="currentPassword"]',
     '[data-field="currentPassword"]',
+    '[name="currentPassword"]',
   ].join(","),
 
   newPassword: [
@@ -120,21 +150,23 @@ const INPUT_SELECTORS = {
     "#cuenta-new-password",
     '[data-cuenta-field="newPassword"]',
     '[data-field="newPassword"]',
+    '[name="newPassword"]',
   ].join(","),
 };
 
-const INTERACTIVE_SELECTOR = [
-  "button",
-  "a",
-  "input",
-  "select",
-  "textarea",
-  "label",
-  "summary",
-  "[role='button']",
-  "[data-action]",
-  "[data-cuenta-action]",
-  "[data-spa]",
+const ROOT_SELECTORS = [
+  '[data-view="cuenta"]',
+  ".cuenta-view",
+  ".cuenta-panel",
+  ".content-wrapper",
+  "#view-container",
+].join(",");
+
+const DISABLED_SELECTOR = [
+  "[disabled]",
+  "[aria-disabled='true']",
+  "[data-disabled='true']",
+  ".is-disabled",
 ].join(",");
 
 const fallbackCleanups = new Map();
@@ -146,26 +178,35 @@ let reloadScheduled = false;
    SAFE HELPERS
 ========================================================= */
 
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
+
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
   return text || fallback;
 }
 
-function safeObject(value) {
+function safeObject(value, fallback = {}) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
-    : {};
+    : fallback;
 }
 
 function first(...values) {
   for (const value of values) {
     if (value === null || value === undefined) continue;
-
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
 
     return value;
   }
@@ -179,6 +220,8 @@ function normalizeKey(value = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[\s-]+/g, "_")
+    .replace(/[^\w]+/g, "_")
+    .replace(/^_+|_+$/g, "")
     .trim();
 }
 
@@ -186,16 +229,44 @@ function normalizeBoolean(value = undefined, fallback = false) {
   if (typeof value === "boolean") return value;
 
   if (typeof value === "number") {
-    return value === 1;
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return value !== 0;
   }
 
   const key = normalizeKey(value);
 
-  if (["true", "1", "yes", "si", "sí", "on", "dark", "enabled"].includes(key)) {
+  if (
+    [
+      "true",
+      "1",
+      "yes",
+      "y",
+      "si",
+      "sí",
+      "on",
+      "dark",
+      "enabled",
+      "activo",
+      "activa",
+    ].includes(key)
+  ) {
     return true;
   }
 
-  if (["false", "0", "no", "off", "light", "disabled"].includes(key)) {
+  if (
+    [
+      "false",
+      "0",
+      "no",
+      "n",
+      "off",
+      "light",
+      "disabled",
+      "inactivo",
+      "inactiva",
+    ].includes(key)
+  ) {
     return false;
   }
 
@@ -205,10 +276,19 @@ function normalizeBoolean(value = undefined, fallback = false) {
 function normalizeLang(value = "es") {
   const key = normalizeKey(value);
 
-  if (["en", "eng", "english"].includes(key)) return "en";
-  if (["ca", "cat", "catala", "catalan"].includes(key)) return "ca";
+  if (["en", "eng", "english", "en_us", "en_gb"].includes(key)) {
+    return "en";
+  }
+
+  if (["ca", "cat", "catala", "catalan", "ca_es"].includes(key)) {
+    return "ca";
+  }
 
   return "es";
+}
+
+function normalizeThemeFromDarkMode(darkMode = false) {
+  return Boolean(darkMode) ? "dark" : "light";
 }
 
 function safeWarn(...args) {
@@ -235,23 +315,53 @@ function safeError(...args) {
 
 function showToast(message = "", type = "info") {
   const text = safeText(message, "");
-  if (!text) return;
+  if (!text) return false;
 
   try {
     if (typeof AppCore?.toast?.[type] === "function") {
       AppCore.toast[type](text);
-      return;
+      return true;
     }
   } catch {}
 
   try {
-    AppCore?.toast?.show?.(text, type);
-    return;
+    if (typeof AppCore?.toast?.show === "function") {
+      AppCore.toast.show(text, type);
+      return true;
+    }
   } catch {}
 
   try {
-    AppCore?.ui?.toast?.[type]?.(text);
+    if (typeof AppCore?.ui?.toast?.[type] === "function") {
+      AppCore.ui.toast[type](text);
+      return true;
+    }
   } catch {}
+
+  try {
+    if (typeof AppCore?.ui?.toast?.show === "function") {
+      AppCore.ui.toast.show({
+        message: text,
+        type,
+      });
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (
+      isBrowser() &&
+      typeof window.Toast?.show === "function"
+    ) {
+      window.Toast.show({
+        message: text,
+        type,
+      });
+      return true;
+    }
+  } catch {}
+
+  return false;
 }
 
 function safeEmit(event = "", payload = {}) {
@@ -266,12 +376,15 @@ function safeEmit(event = "", payload = {}) {
   } catch {}
 
   try {
-    window.dispatchEvent(
-      new CustomEvent(eventName, {
-        detail: payload,
-      })
-    );
-    emitted = true;
+    if (isBrowser()) {
+      window.dispatchEvent(
+        new CustomEvent(eventName, {
+          detail: payload,
+        })
+      );
+
+      emitted = true;
+    }
   } catch {}
 
   return emitted;
@@ -342,7 +455,9 @@ function bindDomEvent({
   handler = null,
   options = undefined,
 } = {}) {
-  if (!target || !eventName || typeof handler !== "function") return false;
+  if (!target || !eventName || typeof handler !== "function") {
+    return false;
+  }
 
   try {
     if (typeof AppCore?.cleanup?.on === "function") {
@@ -388,10 +503,10 @@ function bindBusEvent({
     }
   } catch {}
 
-  if (!bound) {
-    const windowHandler = (event) => handler(event);
+  try {
+    if (isBrowser()) {
+      const windowHandler = (event) => handler(event);
 
-    try {
       window.addEventListener(eventName, windowHandler);
       bound = true;
 
@@ -400,8 +515,8 @@ function bindBusEvent({
           window.removeEventListener(eventName, windowHandler);
         } catch {}
       });
-    } catch {}
-  }
+    }
+  } catch {}
 
   return bound;
 }
@@ -410,12 +525,21 @@ function bindBusEvent({
    DOM HELPERS
 ========================================================= */
 
-function getContainer() {
-  return (
-    AppCore?.dom?.viewContainer ||
-    document.getElementById("view-container") ||
-    document
-  );
+function getContainer(customRoot = null) {
+  if (customRoot) return customRoot;
+
+  if (!isBrowser()) return null;
+
+  try {
+    return (
+      AppCore?.dom?.viewContainer ||
+      document.querySelector(ROOT_SELECTORS) ||
+      document.getElementById("view-container") ||
+      document
+    );
+  } catch {
+    return null;
+  }
 }
 
 function isElementInsideRoot(root, element) {
@@ -433,13 +557,51 @@ function closestInside(root, target, selector = "") {
     return null;
   }
 
-  const match = target.closest(selector);
+  let match = null;
+
+  try {
+    match = target.closest(selector);
+  } catch {
+    match = null;
+  }
 
   if (!match || !isElementInsideRoot(root, match)) {
     return null;
   }
 
   return match;
+}
+
+function isDisabledElement(element = null) {
+  if (!element) return false;
+
+  try {
+    if (element.matches?.(DISABLED_SELECTOR)) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (element.closest?.(DISABLED_SELECTOR)) {
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function getActionName(element = null) {
+  if (!element) return "";
+
+  return safeText(
+    first(
+      element.dataset?.cuentaAction,
+      element.dataset?.action,
+      element.getAttribute?.("data-cuenta-action"),
+      element.getAttribute?.("data-action")
+    ),
+    ""
+  );
 }
 
 function getActionElement(root, target, actionSet) {
@@ -451,29 +613,44 @@ function getActionElement(root, target, actionSet) {
 
   if (!actionElement) return null;
 
-  const action = safeText(
-    first(
-      actionElement.dataset?.cuentaAction,
-      actionElement.dataset?.action,
-      actionElement.getAttribute?.("data-cuenta-action"),
-      actionElement.getAttribute?.("data-action")
-    ),
-    ""
-  );
+  if (isDisabledElement(actionElement)) {
+    return null;
+  }
 
-  if (!action || !actionSet.has(action)) return null;
+  const action = getActionName(actionElement);
+
+  if (!action || !actionSet.has(action)) {
+    return null;
+  }
 
   return actionElement;
 }
 
 function getField(root, selector = "") {
-  if (!root || !selector) return null;
+  if (!selector || !isBrowser()) return null;
 
   try {
-    return root.querySelector?.(selector) || document.querySelector?.(selector) || null;
+    return root?.querySelector?.(selector) || document.querySelector?.(selector) || null;
   } catch {
     return null;
   }
+}
+
+function readInputBoolean(input = null, fallback = false) {
+  if (!input) return Boolean(fallback);
+
+  if (typeof input.checked === "boolean") {
+    return Boolean(input.checked);
+  }
+
+  return normalizeBoolean(
+    first(
+      input.value,
+      input.dataset?.value,
+      input.getAttribute?.("value")
+    ),
+    fallback
+  );
 }
 
 function readCuentaForm(root = getContainer()) {
@@ -481,29 +658,8 @@ function readCuentaForm(root = getContainer()) {
   const privacyInput = getField(root, INPUT_SELECTORS.privacyMode);
   const languageInput = getField(root, INPUT_SELECTORS.language);
 
-  const darkMode =
-    typeof darkInput?.checked === "boolean"
-      ? Boolean(darkInput.checked)
-      : normalizeBoolean(
-          first(
-            darkInput?.value,
-            darkInput?.dataset?.value,
-            false
-          ),
-          false
-        );
-
-  const privacyMode =
-    typeof privacyInput?.checked === "boolean"
-      ? Boolean(privacyInput.checked)
-      : normalizeBoolean(
-          first(
-            privacyInput?.value,
-            privacyInput?.dataset?.value,
-            false
-          ),
-          false
-        );
+  const darkMode = readInputBoolean(darkInput, false);
+  const privacyMode = readInputBoolean(privacyInput, false);
 
   const lang = normalizeLang(
     first(
@@ -514,13 +670,19 @@ function readCuentaForm(root = getContainer()) {
     )
   );
 
+  const theme = normalizeThemeFromDarkMode(darkMode);
+
   return {
     darkMode,
     privacyMode,
+
     lang,
     language: lang,
     locale: lang,
-    theme: darkMode ? "dark" : "light",
+
+    theme,
+    mode: theme,
+    appearance: theme,
   };
 }
 
@@ -543,6 +705,10 @@ function setElementBusy(element, busy = false) {
     element.setAttribute("aria-busy", busy ? "true" : "false");
   } catch {}
 
+  try {
+    element.classList?.toggle?.("is-loading", Boolean(busy));
+  } catch {}
+
   const tagName = safeText(element.tagName, "").toLowerCase();
 
   if (["button", "input", "select", "textarea"].includes(tagName)) {
@@ -555,7 +721,9 @@ function setElementBusy(element, busy = false) {
 async function runBusy(key = "", element = null, task = null) {
   const finalKey = safeText(key, "");
 
-  if (!finalKey || typeof task !== "function") return null;
+  if (!finalKey || typeof task !== "function") {
+    return null;
+  }
 
   if (busyKeys.has(finalKey)) {
     return null;
@@ -576,46 +744,16 @@ async function runBusy(key = "", element = null, task = null) {
    CALLBACK COMPAT
 ========================================================= */
 
-async function callFlexibleReload({
-  reload,
-  loadCuenta,
-  force = true,
-  source = "bindings",
-} = {}) {
-  const payload = {
-    force,
-    asRefresh: true,
-    source,
-  };
-
-  const candidates = [];
-
-  if (typeof reload === "function") {
-    candidates.push(() => reload(payload));
-    candidates.push(() => reload(force));
-  }
-
-  if (typeof loadCuenta === "function") {
-    candidates.push(() => loadCuenta(payload));
-    candidates.push(() => loadCuenta({ force }));
-  }
-
-  const globalReload =
-    window?.OnionCuenta?.reload ||
-    window?.CuentaView?.reload ||
-    null;
-
-  if (typeof globalReload === "function" && globalReload !== reload) {
-    candidates.push(() => globalReload(payload));
-  }
-
+async function callCandidates(candidates = []) {
   let lastError = null;
 
   for (const attempt of candidates) {
+    if (typeof attempt !== "function") continue;
+
     try {
       const result = await attempt();
 
-      if (result !== null && result !== undefined) {
+      if (result !== undefined) {
         return result;
       }
     } catch (error) {
@@ -630,51 +768,91 @@ async function callFlexibleReload({
   return null;
 }
 
+function getGlobalCuentaApi() {
+  if (!isBrowser()) return {};
+
+  try {
+    return {
+      OnionCuenta: window.OnionCuenta || null,
+      CuentaView: window.CuentaView || null,
+      OnionCuentaView: window.OnionCuentaView || null,
+      OnionCuentaPassword: window.OnionCuentaPassword || null,
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function callFlexibleReload({
+  reload,
+  loadCuenta,
+  force = true,
+  source = "bindings",
+} = {}) {
+  const payload = {
+    force,
+    asRefresh: true,
+    silent: false,
+    source,
+  };
+
+  const globalApi = getGlobalCuentaApi();
+
+  return callCandidates([
+    typeof reload === "function" ? () => reload(payload) : null,
+    typeof reload === "function" ? () => reload(force) : null,
+
+    typeof loadCuenta === "function" ? () => loadCuenta(payload) : null,
+    typeof loadCuenta === "function" ? () => loadCuenta({ force }) : null,
+
+    typeof globalApi.OnionCuenta?.reload === "function" && globalApi.OnionCuenta.reload !== reload
+      ? () => globalApi.OnionCuenta.reload(payload)
+      : null,
+
+    typeof globalApi.CuentaView?.reload === "function" && globalApi.CuentaView.reload !== reload
+      ? () => globalApi.CuentaView.reload(payload)
+      : null,
+
+    typeof globalApi.OnionCuentaView?.reload === "function" && globalApi.OnionCuentaView.reload !== reload
+      ? () => globalApi.OnionCuentaView.reload(payload)
+      : null,
+  ]);
+}
+
 async function callFlexibleSave({
   saveCuenta,
   updateCuenta,
   payload = {},
 } = {}) {
   const body = safeObject(payload);
-  const candidates = [];
+  const globalApi = getGlobalCuentaApi();
 
-  if (typeof saveCuenta === "function") {
-    candidates.push(() => saveCuenta(body));
-  }
+  const result = await callCandidates([
+    typeof saveCuenta === "function" ? () => saveCuenta(body) : null,
 
-  if (typeof updateCuenta === "function" && updateCuenta !== saveCuenta) {
-    candidates.push(() => updateCuenta(body));
-  }
+    typeof updateCuenta === "function" && updateCuenta !== saveCuenta
+      ? () => updateCuenta(body)
+      : null,
 
-  const globalSave =
-    window?.OnionCuenta?.saveCuenta ||
-    window?.OnionCuenta?.save ||
-    window?.CuentaView?.saveCuenta ||
-    null;
+    typeof globalApi.OnionCuenta?.saveCuenta === "function" && globalApi.OnionCuenta.saveCuenta !== saveCuenta
+      ? () => globalApi.OnionCuenta.saveCuenta(body)
+      : null,
 
-  if (typeof globalSave === "function" && globalSave !== saveCuenta) {
-    candidates.push(() => globalSave(body));
-  }
+    typeof globalApi.OnionCuenta?.save === "function" && globalApi.OnionCuenta.save !== saveCuenta
+      ? () => globalApi.OnionCuenta.save(body)
+      : null,
 
-  let lastError = null;
+    typeof globalApi.CuentaView?.saveCuenta === "function" && globalApi.CuentaView.saveCuenta !== saveCuenta
+      ? () => globalApi.CuentaView.saveCuenta(body)
+      : null,
+  ]);
 
-  for (const attempt of candidates) {
-    try {
-      const result = await attempt();
-
-      if (result !== null && result !== undefined) {
-        return result;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  if (lastError) {
-    throw lastError;
+  if (result !== null) {
+    return result;
   }
 
   safeEmit("cuenta:update-preferences", body);
+  safeEmit("cuenta:modal:update-preferences", body);
 
   return null;
 }
@@ -685,53 +863,50 @@ async function callFlexibleTheme({
   darkMode = true,
   payload = {},
 } = {}) {
+  const nextDarkMode = Boolean(darkMode);
+
   const body = {
     ...safeObject(payload),
-    darkMode: Boolean(darkMode),
-    theme: Boolean(darkMode) ? "dark" : "light",
+    darkMode: nextDarkMode,
+    theme: nextDarkMode ? "dark" : "light",
+    mode: nextDarkMode ? "dark" : "light",
+    appearance: nextDarkMode ? "dark" : "light",
   };
 
-  const candidates = [];
+  const globalApi = getGlobalCuentaApi();
 
-  if (typeof updateCuentaTheme === "function") {
-    candidates.push(() => updateCuentaTheme(Boolean(darkMode)));
-    candidates.push(() => updateCuentaTheme(body));
-  }
+  const result = await callCandidates([
+    typeof updateCuentaTheme === "function"
+      ? () => updateCuentaTheme(nextDarkMode)
+      : null,
 
-  if (typeof updateCuenta === "function") {
-    candidates.push(() => updateCuenta(body));
-  }
+    typeof updateCuentaTheme === "function"
+      ? () => updateCuentaTheme(body)
+      : null,
 
-  const globalTheme =
-    window?.OnionCuenta?.updateTheme ||
-    window?.OnionCuenta?.updateCuentaTheme ||
-    window?.CuentaView?.updateTheme ||
-    null;
+    typeof updateCuenta === "function"
+      ? () => updateCuenta(body)
+      : null,
 
-  if (typeof globalTheme === "function" && globalTheme !== updateCuentaTheme) {
-    candidates.push(() => globalTheme(Boolean(darkMode)));
-    candidates.push(() => globalTheme(body));
-  }
+    typeof globalApi.OnionCuenta?.updateTheme === "function" && globalApi.OnionCuenta.updateTheme !== updateCuentaTheme
+      ? () => globalApi.OnionCuenta.updateTheme(nextDarkMode)
+      : null,
 
-  let lastError = null;
+    typeof globalApi.OnionCuenta?.updateCuentaTheme === "function" && globalApi.OnionCuenta.updateCuentaTheme !== updateCuentaTheme
+      ? () => globalApi.OnionCuenta.updateCuentaTheme(body)
+      : null,
 
-  for (const attempt of candidates) {
-    try {
-      const result = await attempt();
+    typeof globalApi.CuentaView?.updateTheme === "function" && globalApi.CuentaView.updateTheme !== updateCuentaTheme
+      ? () => globalApi.CuentaView.updateTheme(nextDarkMode)
+      : null,
+  ]);
 
-      if (result !== null && result !== undefined) {
-        return result;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  if (lastError) {
-    throw lastError;
+  if (result !== null) {
+    return result;
   }
 
   safeEmit("cuenta:modal:update-theme", body);
+  safeEmit("cuenta:theme:update", body);
 
   return null;
 }
@@ -751,47 +926,40 @@ async function callFlexibleLanguage({
     locale: nextLang,
   };
 
-  const candidates = [];
+  const globalApi = getGlobalCuentaApi();
 
-  if (typeof updateCuentaLanguage === "function") {
-    candidates.push(() => updateCuentaLanguage(nextLang));
-    candidates.push(() => updateCuentaLanguage(body));
-  }
+  const result = await callCandidates([
+    typeof updateCuentaLanguage === "function"
+      ? () => updateCuentaLanguage(nextLang)
+      : null,
 
-  if (typeof updateCuenta === "function") {
-    candidates.push(() => updateCuenta(body));
-  }
+    typeof updateCuentaLanguage === "function"
+      ? () => updateCuentaLanguage(body)
+      : null,
 
-  const globalLanguage =
-    window?.OnionCuenta?.updateLanguage ||
-    window?.OnionCuenta?.updateCuentaLanguage ||
-    window?.CuentaView?.updateLanguage ||
-    null;
+    typeof updateCuenta === "function"
+      ? () => updateCuenta(body)
+      : null,
 
-  if (typeof globalLanguage === "function" && globalLanguage !== updateCuentaLanguage) {
-    candidates.push(() => globalLanguage(nextLang));
-    candidates.push(() => globalLanguage(body));
-  }
+    typeof globalApi.OnionCuenta?.updateLanguage === "function" && globalApi.OnionCuenta.updateLanguage !== updateCuentaLanguage
+      ? () => globalApi.OnionCuenta.updateLanguage(nextLang)
+      : null,
 
-  let lastError = null;
+    typeof globalApi.OnionCuenta?.updateCuentaLanguage === "function" && globalApi.OnionCuenta.updateCuentaLanguage !== updateCuentaLanguage
+      ? () => globalApi.OnionCuenta.updateCuentaLanguage(body)
+      : null,
 
-  for (const attempt of candidates) {
-    try {
-      const result = await attempt();
+    typeof globalApi.CuentaView?.updateLanguage === "function" && globalApi.CuentaView.updateLanguage !== updateCuentaLanguage
+      ? () => globalApi.CuentaView.updateLanguage(nextLang)
+      : null,
+  ]);
 
-      if (result !== null && result !== undefined) {
-        return result;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  if (lastError) {
-    throw lastError;
+  if (result !== null) {
+    return result;
   }
 
   safeEmit("cuenta:modal:update-language", body);
+  safeEmit("cuenta:language:update", body);
 
   return null;
 }
@@ -801,45 +969,36 @@ async function callFlexiblePassword({
   payload = {},
 } = {}) {
   const body = safeObject(payload);
-  const candidates = [];
+  const globalApi = getGlobalCuentaApi();
 
-  if (typeof changePassword === "function") {
-    candidates.push(() => changePassword(body));
-    candidates.push(() =>
-      changePassword(body.currentPassword, body.newPassword, body)
-    );
-  }
+  const result = await callCandidates([
+    typeof changePassword === "function"
+      ? () => changePassword(body)
+      : null,
 
-  const globalPassword =
-    window?.OnionCuenta?.changePassword ||
-    window?.CuentaView?.changePassword ||
-    window?.OnionCuentaPassword?.change ||
-    window?.OnionCuentaPassword?.update ||
-    null;
+    typeof changePassword === "function"
+      ? () => changePassword(body.currentPassword, body.newPassword, body)
+      : null,
 
-  if (typeof globalPassword === "function" && globalPassword !== changePassword) {
-    candidates.push(() => globalPassword(body));
-    candidates.push(() =>
-      globalPassword(body.currentPassword, body.newPassword, body)
-    );
-  }
+    typeof globalApi.OnionCuenta?.changePassword === "function" && globalApi.OnionCuenta.changePassword !== changePassword
+      ? () => globalApi.OnionCuenta.changePassword(body)
+      : null,
 
-  let lastError = null;
+    typeof globalApi.CuentaView?.changePassword === "function" && globalApi.CuentaView.changePassword !== changePassword
+      ? () => globalApi.CuentaView.changePassword(body)
+      : null,
 
-  for (const attempt of candidates) {
-    try {
-      const result = await attempt();
+    typeof globalApi.OnionCuentaPassword?.change === "function"
+      ? () => globalApi.OnionCuentaPassword.change(body)
+      : null,
 
-      if (result !== null && result !== undefined) {
-        return result;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-  }
+    typeof globalApi.OnionCuentaPassword?.update === "function"
+      ? () => globalApi.OnionCuentaPassword.update(body)
+      : null,
+  ]);
 
-  if (lastError) {
-    throw lastError;
+  if (result !== null) {
+    return result;
   }
 
   safeEmit("cuenta:password:change", body);
@@ -855,15 +1014,41 @@ function openModalBridge(detail = null) {
   const payload = safeObject(detail);
 
   try {
-    if (typeof window?.OnionCuentaModal?.open === "function") {
+    if (
+      isBrowser() &&
+      typeof window.OnionCuentaModal?.open === "function"
+    ) {
       window.OnionCuentaModal.open(payload);
       return true;
     }
   } catch {}
 
   try {
-    if (typeof window?.renderCuentaModal === "function") {
+    if (
+      isBrowser() &&
+      typeof window.OnionCuentaModal?.render === "function"
+    ) {
+      window.OnionCuentaModal.render(payload);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (
+      isBrowser() &&
+      typeof window.renderCuentaModal === "function"
+    ) {
       window.renderCuentaModal(payload);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (
+      isBrowser() &&
+      typeof window.openCuentaModal === "function"
+    ) {
+      window.openCuentaModal(payload);
       return true;
     }
   } catch {}
@@ -904,6 +1089,8 @@ async function safeReload(reload, loadCuenta, meta = {}) {
       error,
     });
 
+    showToast("No se pudo actualizar la cuenta.", "error");
+
     return null;
   }
 }
@@ -932,8 +1119,8 @@ async function handleRefresh({
   reload,
   loadCuenta,
 } = {}) {
-  await runBusy("cuenta:refresh", element, async () => {
-    await safeReload(reload, loadCuenta, {
+  return runBusy("cuenta:refresh", element, async () => {
+    return safeReload(reload, loadCuenta, {
       source: "manual",
     });
   });
@@ -947,8 +1134,12 @@ async function handleSave({
 } = {}) {
   const payload = readCuentaForm(root);
 
-  await runBusy("cuenta:save", element, async () => {
+  return runBusy("cuenta:save", element, async () => {
     try {
+      safeEmit("cuenta:bindings:save:start", {
+        payload,
+      });
+
       const result = await callFlexibleSave({
         saveCuenta,
         updateCuenta,
@@ -992,8 +1183,12 @@ async function handleTheme({
       ? !Boolean(payload.darkMode)
       : Boolean(explicitDarkMode);
 
-  await runBusy("cuenta:theme", element, async () => {
+  return runBusy("cuenta:theme", element, async () => {
     try {
+      safeEmit("cuenta:bindings:theme:start", {
+        darkMode,
+      });
+
       const result = await callFlexibleTheme({
         updateCuentaTheme,
         updateCuenta,
@@ -1035,8 +1230,12 @@ async function handleLanguage({
   const payload = readCuentaForm(root);
   const lang = normalizeLang(payload.lang);
 
-  await runBusy("cuenta:language", element, async () => {
+  return runBusy("cuenta:language", element, async () => {
     try {
+      safeEmit("cuenta:bindings:language:start", {
+        lang,
+      });
+
       const result = await callFlexibleLanguage({
         updateCuentaLanguage,
         updateCuenta,
@@ -1048,6 +1247,8 @@ async function handleLanguage({
         lang,
         result,
       });
+
+      showToast("Idioma actualizado", "success");
 
       return result;
     } catch (error) {
@@ -1110,8 +1311,12 @@ async function handlePassword({
     return false;
   }
 
-  await runBusy("cuenta:password", element, async () => {
+  return runBusy("cuenta:password", element, async () => {
     try {
+      safeEmit("cuenta:bindings:password:start", {
+        source: "cuenta.bindings",
+      });
+
       const result = await callFlexiblePassword({
         changePassword,
         payload: {
@@ -1127,6 +1332,11 @@ async function handlePassword({
 
       if (result) {
         showToast("Contraseña actualizada", "success");
+      } else {
+        showToast(
+          "Solicitud de cambio de contraseña enviada.",
+          "info"
+        );
       }
 
       return result;
@@ -1142,8 +1352,6 @@ async function handlePassword({
       return false;
     }
   });
-
-  return true;
 }
 
 function handleOpenModal({
@@ -1166,7 +1374,7 @@ function handleOpenModal({
     } catch {}
   }
 
-  openModalBridge(detail || {});
+  return openModalBridge(detail || {});
 }
 
 /* =========================================================
@@ -1184,125 +1392,29 @@ export function bindCuentaEvents({
   getItem,
   getSnapshot,
   scope = DEFAULT_SCOPE,
+  root: customRoot = null,
 } = {}) {
   const scopeName = resolveScopeName(scope);
   const scopeRef = getScope(scopeName);
-  const root = getContainer();
+  const root = getContainer(customRoot);
 
   if (!root) {
     safeWarn("No se encontró contenedor para bindings.");
     return () => {};
   }
 
-  /* =======================================================
-     DIRECT BUTTONS BY ID
-     Compatibilidad con templates actuales.
-  ======================================================= */
+  const refreshAfterMutation = (event) => {
+    const payload = event?.detail || event || {};
 
-  const refreshBtn = document.getElementById("cuenta-refresh-btn");
-  const retryBtn = document.getElementById("cuenta-retry-btn");
-  const saveBtn = document.getElementById("cuenta-save-btn");
-  const passwordBtn = document.getElementById("cuenta-password-btn");
-  const openModalBtn = document.getElementById("cuenta-open-modal-btn");
-
-  if (refreshBtn) {
-    bindDomEvent({
-      scopeName,
-      scopeRef,
-      target: refreshBtn,
-      eventName: "click",
-      handler: async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        await handleRefresh({
-          element: refreshBtn,
-          reload,
-          loadCuenta,
-        });
-      },
+    scheduleReload(reload, loadCuenta, {
+      source: "mutation-event",
+      eventName: safeText(event?.type, ""),
+      payload,
     });
-  }
-
-  if (retryBtn) {
-    bindDomEvent({
-      scopeName,
-      scopeRef,
-      target: retryBtn,
-      eventName: "click",
-      handler: async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        await handleRefresh({
-          element: retryBtn,
-          reload,
-          loadCuenta,
-        });
-      },
-    });
-  }
-
-  if (saveBtn) {
-    bindDomEvent({
-      scopeName,
-      scopeRef,
-      target: saveBtn,
-      eventName: "click",
-      handler: async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        await handleSave({
-          root,
-          element: saveBtn,
-          saveCuenta,
-          updateCuenta,
-        });
-      },
-    });
-  }
-
-  if (passwordBtn) {
-    bindDomEvent({
-      scopeName,
-      scopeRef,
-      target: passwordBtn,
-      eventName: "click",
-      handler: async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        await handlePassword({
-          root,
-          element: passwordBtn,
-          changePassword,
-        });
-      },
-    });
-  }
-
-  if (openModalBtn) {
-    bindDomEvent({
-      scopeName,
-      scopeRef,
-      target: openModalBtn,
-      eventName: "click",
-      handler: (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        handleOpenModal({
-          getItem,
-          getSnapshot,
-        });
-      },
-    });
-  }
+  };
 
   /* =======================================================
-     DELEGATED ACTIONS
-     Soporta contenido dinámico tras rerender.
+     DELEGATED CLICK ACTIONS
   ======================================================= */
 
   bindDomEvent({
@@ -1409,8 +1521,6 @@ export function bindCuentaEvents({
 
   /* =======================================================
      CHANGE EVENTS
-     - checkbox dark mode
-     - select idioma
   ======================================================= */
 
   bindDomEvent({
@@ -1421,7 +1531,7 @@ export function bindCuentaEvents({
     handler: async (event) => {
       const target = event.target;
 
-      if (!target) return;
+      if (!target || isDisabledElement(target)) return;
 
       const darkInput = closestInside(root, target, INPUT_SELECTORS.darkMode);
 
@@ -1440,8 +1550,20 @@ export function bindCuentaEvents({
       const languageInput = closestInside(root, target, INPUT_SELECTORS.language);
 
       if (languageInput) {
+        const lang = normalizeLang(languageInput.value);
+
         safeEmit("cuenta:bindings:language:changed", {
-          lang: normalizeLang(languageInput.value),
+          lang,
+        });
+
+        return;
+      }
+
+      const privacyInput = closestInside(root, target, INPUT_SELECTORS.privacyMode);
+
+      if (privacyInput) {
+        safeEmit("cuenta:bindings:privacy:changed", {
+          privacyMode: Boolean(privacyInput.checked),
         });
       }
     },
@@ -1465,7 +1587,7 @@ export function bindCuentaEvents({
 
       const target = event.target;
 
-      if (!target) return;
+      if (!target || isDisabledElement(target)) return;
 
       const passwordInput =
         closestInside(root, target, INPUT_SELECTORS.currentPassword) ||
@@ -1499,19 +1621,8 @@ export function bindCuentaEvents({
   });
 
   /* =======================================================
-     MODAL / MUTATION EVENTS
-     Cuando otro módulo actualiza cuenta, refrescamos.
+     BUS / WINDOW EVENTS
   ======================================================= */
-
-  const refreshAfterMutation = (event) => {
-    const payload = event?.detail || event || {};
-
-    scheduleReload(reload, loadCuenta, {
-      source: "mutation-event",
-      event,
-      payload,
-    });
-  };
 
   bindBusEvent({
     scopeName,
@@ -1537,8 +1648,29 @@ export function bindCuentaEvents({
     handler: refreshAfterMutation,
   });
 
+  bindBusEvent({
+    scopeName,
+    eventName: "app:theme:change",
+    handler: () => {
+      safeEmit("cuenta:bindings:external-theme-change", {
+        source: "app:theme:change",
+      });
+    },
+  });
+
+  bindBusEvent({
+    scopeName,
+    eventName: "app:lang:change",
+    handler: () => {
+      safeEmit("cuenta:bindings:external-lang-change", {
+        source: "app:lang:change",
+      });
+    },
+  });
+
   safeEmit("cuenta:bindings:ready", {
     scope: scopeName,
+    version: CUENTA_BINDINGS_VERSION,
   });
 
   /* =======================================================
@@ -1550,10 +1682,34 @@ export function bindCuentaEvents({
 
     safeEmit("cuenta:bindings:destroyed", {
       scope: scopeName,
+      version: CUENTA_BINDINGS_VERSION,
     });
   };
 }
 
+/* =========================================================
+   ALIASES
+========================================================= */
+
+export const bindCuentaView = bindCuentaEvents;
+export const bindCuentaBindings = bindCuentaEvents;
+
+export function destroyCuentaBindings(scope = DEFAULT_SCOPE) {
+  runScopeCleanup(scope);
+
+  return true;
+}
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
+
 export default {
+  CUENTA_BINDINGS_SCOPE,
+  CUENTA_BINDINGS_VERSION,
+
   bindCuentaEvents,
+  bindCuentaView,
+  bindCuentaBindings,
+  destroyCuentaBindings,
 };

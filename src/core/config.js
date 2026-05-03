@@ -18,7 +18,9 @@
    - rutas públicas/token centralizadas
    - storage keys namespaced
    - flags enterprise
-   - helpers de lectura
+   - publicApiPaths estrictas: /me NO es público
+   - runtime overrides defensivos
+   - snapshots seguros
 ========================================================= */
 
 /* =========================================================
@@ -31,6 +33,10 @@ function isObject(value) {
     typeof value === "object" &&
     !Array.isArray(value)
   );
+}
+
+function isArray(value) {
+  return Array.isArray(value);
 }
 
 function deepFreeze(value) {
@@ -89,23 +95,28 @@ function safeNumber(value, fallback = 0) {
 }
 
 function safeBool(value, fallback = false) {
-  if (value === true) {
-    return true;
-  }
-
-  if (value === false) {
-    return false;
-  }
-
-  if (value === "true") {
-    return true;
-  }
-
-  if (value === "false") {
-    return false;
-  }
+  if (value === true) return true;
+  if (value === false) return false;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  if (value === "1") return true;
+  if (value === "0") return false;
+  if (value === 1) return true;
+  if (value === 0) return false;
 
   return Boolean(fallback);
+}
+
+function uniqueArray(values = []) {
+  return Array.from(
+    new Set(
+      values.filter((item) =>
+        item !== undefined &&
+        item !== null &&
+        item !== ""
+      )
+    )
+  );
 }
 
 function normalizePath(path = "/") {
@@ -115,7 +126,8 @@ function normalizePath(path = "/") {
       .replace(/\/{2,}/g, "/");
 
   if (!value.startsWith("/")) {
-    value = `/${value}`;
+    value =
+      `/${value}`;
   }
 
   if (
@@ -130,6 +142,13 @@ function normalizePath(path = "/") {
   return value;
 }
 
+function stripSearchAndHash(path = "/") {
+  return normalizePath(path)
+    .split("?")[0]
+    .split("#")[0] ||
+    "/";
+}
+
 function normalizeBaseUrl(value = "") {
   const raw =
     safeText(value, "");
@@ -139,6 +158,13 @@ function normalizeBaseUrl(value = "") {
   }
 
   return raw.replace(/\/+$/g, "");
+}
+
+function normalizeStoragePrefix(value = "onion") {
+  return safeText(value, "onion")
+    .replace(/[^a-zA-Z0-9:_-]/g, "")
+    .replace(/:+$/g, "") ||
+    "onion";
 }
 
 function getGlobalObject() {
@@ -232,15 +258,29 @@ function getEnvValue(keys = [], fallback = "") {
 }
 
 function mergeObject(base = {}, override = {}) {
-  const output = {
-    ...base,
-  };
+  const output =
+    isArray(base)
+      ? [...base]
+      : {
+          ...base,
+        };
 
-  if (!isObject(override)) {
+  if (!isObject(override) && !isArray(override)) {
     return output;
   }
 
+  if (isArray(base) && isArray(override)) {
+    return uniqueArray([
+      ...base,
+      ...override,
+    ]);
+  }
+
   for (const [key, value] of Object.entries(override)) {
+    if (value === undefined) {
+      continue;
+    }
+
     if (
       isObject(value) &&
       isObject(output[key])
@@ -250,13 +290,36 @@ function mergeObject(base = {}, override = {}) {
           output[key],
           value
         );
-    } else if (value !== undefined) {
-      output[key] =
-        value;
+      continue;
     }
+
+    if (
+      isArray(value) &&
+      isArray(output[key])
+    ) {
+      output[key] =
+        uniqueArray([
+          ...output[key],
+          ...value,
+        ]);
+      continue;
+    }
+
+    output[key] =
+      value;
   }
 
   return output;
+}
+
+function normalizePathList(list = []) {
+  return uniqueArray(
+    (Array.isArray(list) ? list : [])
+      .map((item) =>
+        stripSearchAndHash(item)
+      )
+      .filter(Boolean)
+  );
 }
 
 /* =========================================================
@@ -330,22 +393,21 @@ const API_BASE =
   );
 
 const STORAGE_PREFIX =
-  safeText(
+  normalizeStoragePrefix(
     getEnvValue(
       [
         "ONION_STORAGE_PREFIX",
         "VITE_ONION_STORAGE_PREFIX",
       ],
       runtimeConfig.storagePrefix || "onion"
-    ),
-    "onion"
+    )
   );
 
 /* =========================================================
    ROUTES
 ========================================================= */
 
-const routes = deepFreeze({
+const routes = {
   home:
     "/",
 
@@ -370,13 +432,25 @@ const routes = deepFreeze({
   tickets:
     "/tickets",
 
+  incidencias:
+    "/tickets",
+
   invoices:
+    "/facturas",
+
+  facturas:
     "/facturas",
 
   users:
     "/users",
 
+  usuarios:
+    "/users",
+
   clients:
+    "/clients",
+
+  clientes:
     "/clients",
 
   activateAccount:
@@ -390,9 +464,9 @@ const routes = deepFreeze({
 
   resetPasswordConfirm:
     "/reset-password/confirm",
-});
+};
 
-const publicRoutes = deepFreeze([
+const publicRoutes = normalizePathList([
   routes.login,
   routes.activateAccount,
   routes.resetPassword,
@@ -402,7 +476,7 @@ const publicRoutes = deepFreeze([
   routes.notFound,
 ]);
 
-const authLikeRoutes = deepFreeze([
+const authLikeRoutes = normalizePathList([
   routes.login,
   routes.activateAccount,
   routes.resetPassword,
@@ -410,7 +484,7 @@ const authLikeRoutes = deepFreeze([
   routes.resetPasswordConfirm,
 ]);
 
-const protectedPublicTokenRoutes = deepFreeze([
+const protectedPublicTokenRoutes = [
   {
     key:
       "activation",
@@ -450,13 +524,13 @@ const protectedPublicTokenRoutes = deepFreeze([
         "t",
       ],
   },
-]);
+];
 
 /* =========================================================
    STORAGE
 ========================================================= */
 
-const storageKeys = deepFreeze({
+const storageKeys = {
   token:
     "token",
 
@@ -501,11 +575,14 @@ const storageKeys = deepFreeze({
 
   settings:
     "settings",
-});
+};
 
-const legacyStorageKeys = deepFreeze({
+const legacyStorageKeys = {
   token:
     "onion_token",
+
+  accessToken:
+    "onion_access_token",
 
   refreshToken:
     "onion_refresh_token",
@@ -539,13 +616,39 @@ const legacyStorageKeys = deepFreeze({
 
   lang:
     "onion_lang",
-});
+
+  postLoginTarget:
+    "onion_post_login_target",
+};
 
 /* =========================================================
    AUTH / API
 ========================================================= */
 
-const auth = deepFreeze({
+/*
+  IMPORTANTE:
+  /me NO va en publicApiPaths.
+  Si /me es público para request.js, no se inyecta Authorization.
+  Eso puede romper restore/avatar/token tras refresh.
+*/
+const publicApiPaths = normalizePathList([
+  "/api/auth/login",
+  "/api/auth/refresh",
+
+  "/api/auth/reset-password-request",
+  "/api/auth/reset-password-confirm",
+
+  "/api/auth/activate",
+  "/api/auth/activate/first-user",
+
+  "/api/auth/2fa/login",
+
+  "/api/auth/_health",
+  "/api/_health",
+  "/health",
+]);
+
+const auth = {
   bearerPrefix:
     "Bearer",
 
@@ -570,27 +673,48 @@ const auth = deepFreeze({
   loginRoute:
     routes.login,
 
+  logoutRoute:
+    routes.logout,
+
   homeRoute:
     routes.home,
 
   postLoginFallback:
     routes.home,
 
-  publicApiPaths:
-    [
+  endpoints: {
+    login:
       "/api/auth/login",
+
+    logout:
       "/api/auth/logout",
-      "/api/auth/refresh",
+
+    me:
       "/api/auth/me",
+
+    refresh:
+      "/api/auth/refresh",
+
+    resetPasswordRequest:
       "/api/auth/reset-password-request",
+
+    resetPasswordConfirm:
       "/api/auth/reset-password-confirm",
+
+    activate:
       "/api/auth/activate",
+
+    activateFirstUser:
       "/api/auth/activate/first-user",
+
+    twoFactorLogin:
       "/api/auth/2fa/login",
+
+    health:
       "/api/auth/_health",
-      "/api/_health",
-      "/health",
-    ],
+  },
+
+  publicApiPaths,
 
   technicalPublicRoutes:
     [
@@ -607,10 +731,19 @@ const auth = deepFreeze({
     agent:
       "agent",
 
+    tecnico:
+      "agent",
+
     user:
       "user",
 
+    usuario:
+      "user",
+
     client:
+      "client",
+
+    cliente:
       "client",
   },
 
@@ -632,10 +765,16 @@ const auth = deepFreeze({
 
     allowRefreshContext:
       true,
-  },
-});
 
-const api = deepFreeze({
+    requireTokenForAuthenticated:
+      true,
+
+    allowTechnicalAuthenticatedWithoutUser:
+      true,
+  },
+};
+
+const api = {
   base:
     API_BASE,
 
@@ -660,6 +799,12 @@ const api = deepFreeze({
       350
     ),
 
+  retryMaxDelayMs:
+    safeNumber(
+      runtimeConfig.requestRetryMaxDelayMs,
+      4000
+    ),
+
   withCredentials:
     safeBool(
       runtimeConfig.withCredentials,
@@ -673,13 +818,13 @@ const api = deepFreeze({
     "Content-Type":
       "application/json",
   },
-});
+};
 
 /* =========================================================
    UI / I18N / ROUTER / LOADER
 ========================================================= */
 
-const ui = deepFreeze({
+const ui = {
   defaultTheme:
     "dark",
 
@@ -724,9 +869,9 @@ const ui = deepFreeze({
 
   syncUserUIOnLangChange:
     true,
-});
+};
 
-const i18n = deepFreeze({
+const i18n = {
   defaultLang:
     "es",
 
@@ -748,9 +893,9 @@ const i18n = deepFreeze({
 
   eventName:
     "app:lang:change",
-});
+};
 
-const router = deepFreeze({
+const router = {
   mode:
     "history",
 
@@ -762,6 +907,9 @@ const router = deepFreeze({
 
   loginRoute:
     routes.login,
+
+  logoutRoute:
+    routes.logout,
 
   notFoundRoute:
     routes.notFound,
@@ -794,12 +942,15 @@ const router = deepFreeze({
     asyncComplete:
       "router:render:async-complete",
 
+    navigationComplete:
+      "router:navigation:complete",
+
     shellState:
       "router:shell:state",
   },
-});
+};
 
-const loader = deepFreeze({
+const loader = {
   staticLoaderId:
     "app-loader",
 
@@ -829,13 +980,13 @@ const loader = deepFreeze({
 
   hideOnlyOnFinalize:
     true,
-});
+};
 
 /* =========================================================
    EVENTS / FLAGS
 ========================================================= */
 
-const events = deepFreeze({
+const events = {
   ready:
     "app:ready",
 
@@ -845,26 +996,53 @@ const events = deepFreeze({
   bootReady:
     "app:boot:ready",
 
+  bootComplete:
+    "app:boot:complete",
+
   bootError:
     "app:boot:error",
+
+  coreReady:
+    "app:core:ready",
+
+  stateChange:
+    "app:state:change",
 
   routeChange:
     "app:route:change",
 
+  publicPathChange:
+    "app:public-path:change",
+
   userChange:
     "app:user:change",
+
+  tokenChange:
+    "app:token:change",
+
+  authChange:
+    "app:auth:change",
 
   langChange:
     "app:lang:change",
 
+  themeChange:
+    "app:theme:change",
+
   sessionRestored:
     "app:session:restored",
 
+  sessionApplied:
+    "app:session:applied",
+
+  sessionLoaded:
+    "app:session:loaded",
+
   sessionCleared:
     "app:session:cleared",
-});
+};
 
-const featureFlags = deepFreeze({
+const featureFlags = {
   restoreSessionOnBoot:
     true,
 
@@ -894,9 +1072,15 @@ const featureFlags = deepFreeze({
 
   enableDebugSnapshots:
     true,
-});
 
-const diagnostics = deepFreeze({
+  clearGhostUserWithoutToken:
+    true,
+
+  requireAuthorizationForMe:
+    true,
+};
+
+const diagnostics = {
   enabled:
     DEBUG,
 
@@ -914,7 +1098,7 @@ const diagnostics = deepFreeze({
 
   maxRecentEvents:
     25,
-});
+};
 
 /* =========================================================
    CONFIG
@@ -951,6 +1135,9 @@ const baseConfig = {
   requestRetryDelayMs:
     api.retryDelayMs,
 
+  requestRetryMaxDelayMs:
+    api.retryMaxDelayMs,
+
   defaultLang:
     i18n.defaultLang,
 
@@ -982,13 +1169,106 @@ const baseConfig = {
   diagnostics,
 };
 
+function normalizeFinalConfig(source = {}) {
+  const output =
+    mergeObject(
+      source,
+      {}
+    );
+
+  output.apiBase =
+    normalizeBaseUrl(
+      output.apiBase || output.api?.base || ""
+    );
+
+  output.storagePrefix =
+    normalizeStoragePrefix(
+      output.storagePrefix || "onion"
+    );
+
+  output.defaultLang =
+    safeText(
+      output.defaultLang,
+      "es"
+    ).toLowerCase();
+
+  output.fallbackLang =
+    safeText(
+      output.fallbackLang,
+      output.defaultLang || "es"
+    ).toLowerCase();
+
+  output.defaultTheme =
+    safeText(
+      output.defaultTheme,
+      "dark"
+    ).toLowerCase() === "light"
+      ? "light"
+      : "dark";
+
+  output.publicRoutes =
+    normalizePathList(
+      output.publicRoutes || []
+    );
+
+  output.authLikeRoutes =
+    normalizePathList(
+      output.authLikeRoutes || []
+    );
+
+  if (output.auth) {
+    output.auth.publicApiPaths =
+      normalizePathList(
+        output.auth.publicApiPaths || []
+      ).filter((path) =>
+        path !== "/api/auth/me" &&
+        path !== "/auth/me"
+      );
+
+    output.auth.technicalPublicRoutes =
+      normalizePathList(
+        output.auth.technicalPublicRoutes || []
+      );
+  }
+
+  if (output.api) {
+    output.api.base =
+      output.apiBase;
+
+    output.api.baseUrl =
+      output.apiBase;
+
+    output.api.timeout =
+      safeNumber(
+        output.api.timeout,
+        output.requestTimeout || 15000
+      );
+
+    output.api.retries =
+      safeNumber(
+        output.api.retries,
+        output.requestRetries || 0
+      );
+
+    output.api.retryDelayMs =
+      safeNumber(
+        output.api.retryDelayMs,
+        output.requestRetryDelayMs || 350
+      );
+  }
+
+  return output;
+}
+
 export const config =
   deepFreeze(
-    mergeObject(
-      baseConfig,
-      isObject(runtimeConfig.override)
-        ? runtimeConfig.override
-        : {}
+    normalizeFinalConfig(
+      mergeObject(
+        baseConfig,
+        isObject(runtimeConfig.override)
+          ? runtimeConfig.override
+          : {}
+      )
     )
   );
 
@@ -1028,33 +1308,61 @@ export function getStorageKey(key = "", fallback = "") {
 
 export function getNamespacedStorageKey(key = "") {
   const cleanKey =
-    getStorageKey(key, key);
+    getStorageKey(
+      key,
+      key
+    );
 
   return `${config.storagePrefix}:${cleanKey}`;
 }
 
 export function isPublicApiPath(path = "") {
   const cleanPath =
-    normalizePath(path);
+    stripSearchAndHash(
+      normalizePath(path)
+    );
 
-  return config.auth.publicApiPaths.some((publicPath) =>
-    cleanPath === publicPath ||
-    cleanPath.startsWith(`${publicPath}/`)
-  );
+  return config.auth.publicApiPaths.some((publicPath) => {
+    const current =
+      stripSearchAndHash(
+        normalizePath(publicPath)
+      );
+
+    return (
+      cleanPath === current ||
+      cleanPath.startsWith(`${current}/`)
+    );
+  });
 }
 
 export function isTechnicalPublicRoute(path = "") {
   const cleanPath =
-    normalizePath(path).split("?")[0].split("#")[0];
+    stripSearchAndHash(
+      normalizePath(path)
+    );
 
-  return config.auth.technicalPublicRoutes.some((publicPath) =>
-    cleanPath === publicPath ||
-    cleanPath.startsWith(`${publicPath}/`)
-  );
+  return config.auth.technicalPublicRoutes.some((publicPath) => {
+    const current =
+      stripSearchAndHash(
+        normalizePath(publicPath)
+      );
+
+    return (
+      cleanPath === current ||
+      cleanPath.startsWith(`${current}/`)
+    );
+  });
 }
 
 export function getProtectedPublicTokenRoutes() {
   return config.protectedPublicTokenRoutes;
+}
+
+export function getAuthEndpoint(key = "") {
+  const cleanKey =
+    safeText(key, "");
+
+  return config.auth?.endpoints?.[cleanKey] || "";
 }
 
 export function getConfigSnapshot() {
@@ -1080,6 +1388,9 @@ export function getConfigSnapshot() {
     requestRetries:
       config.requestRetries,
 
+    requestRetryDelayMs:
+      config.requestRetryDelayMs,
+
     defaultLang:
       config.defaultLang,
 
@@ -1100,6 +1411,12 @@ export function getConfigSnapshot() {
 
     technicalPublicRoutes:
       config.auth.technicalPublicRoutes,
+
+    publicApiPaths:
+      config.auth.publicApiPaths,
+
+    authEndpoints:
+      config.auth.endpoints,
 
     loader:
       config.loader,

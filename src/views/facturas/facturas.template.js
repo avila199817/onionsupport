@@ -9,6 +9,11 @@
    PATCH · LIGHT/DARK TOKEN PERFECT FIT · ACTIONS COMPACT GRID
    PATCH · FILTER PILLS + SEARCH · FACTURAS CONTROL CENTER 10/10
    PATCH · SORT PILLS INLINE · NO ORDENAR LABEL · FILTER-ALIGNED UI
+   PATCH · EMISSION DATE WITHOUT FAKE 00:00 TIME
+   PATCH · COMPANY-FIRST CLIENT DISPLAY
+   PATCH · TABLE SPACE DISTRIBUTION PRO REBALANCE
+   PATCH · PAYMENT BADGE CENTERED
+   PATCH · SORT BUTTONS DATA-CONTRACT READY FOR VIEW.JS
 
    RESPONSABILIDADES:
    - render premium de vista de facturas
@@ -48,6 +53,16 @@
    - Los botones de orden se renderizan como pills homogéneas.
    - El bloque de orden queda integrado con los filtros y no como subgrupo roto.
    - Mismo lenguaje visual: altura, borde, radios, estados hover/focus/active.
+   - Los botones de orden quedan preparados con data-sort y data-sort-mode
+     para conectarlos desde facturas.view.js.
+
+   PATCH FECHA:
+   - La columna "Fecha de emisión" pinta SOLO fecha.
+   - No pinta hora/minutos falsos 00:00 cuando la BD solo tiene fecha fiscal.
+
+   PATCH CLIENTE:
+   - El nombre principal prioriza empresa/razón social.
+   - Si no hay empresa, cae a nombre de contacto/cliente.
 ========================================================= */
 
 /* =========================================================
@@ -66,7 +81,7 @@ const ADMIN_ROLES = new Set([
   "owner",
 ]);
 
-const STYLE_ID = "onion-facturas-template-styles-v15";
+const STYLE_ID = "onion-facturas-template-styles-v16";
 
 const FILTERS = Object.freeze([
   { key: "all", label: "Todas" },
@@ -79,7 +94,7 @@ const SORT_OPTIONS = Object.freeze([
   {
     key: "date_desc",
     label: "Fecha ↓",
-    title: "Ordenar por fecha de mayor a menor",
+    title: "Ordenar por fecha de emisión de mayor a menor",
   },
   {
     key: "invoice_desc",
@@ -563,6 +578,8 @@ function getFacturaNumero(item = {}) {
   return safeText(
     first(
       item.numeroFacturaLegal,
+      item.numeroFactura,
+      item.legalInvoiceNumber,
       item.numero,
       item.invoiceNumber,
       item.code,
@@ -571,6 +588,8 @@ function getFacturaNumero(item = {}) {
       item.numeroFacturaSistema,
       item.id,
       raw.numeroFacturaLegal,
+      raw.numeroFactura,
+      raw.legalInvoiceNumber,
       raw.numero,
       raw.invoiceNumber,
       raw.code,
@@ -581,6 +600,10 @@ function getFacturaNumero(item = {}) {
     ),
     "Factura sin número"
   );
+}
+
+function getFacturaDisplayId(item = {}) {
+  return getFacturaNumero(item);
 }
 
 function getFacturaSistema(item = {}) {
@@ -598,42 +621,109 @@ function getFacturaSistema(item = {}) {
   );
 }
 
-function getClientName(item = {}) {
+function getCompanyName(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.clienteEmpresa,
+      item.empresa,
+      item.company,
+      item.companyName,
+      item.razonSocial,
+      item.cliente?.razonSocial,
+      item.cliente?.companyName,
+      item.cliente?.empresa,
+      item.cliente?.company,
+      item.client?.razonSocial,
+      item.client?.companyName,
+      item.client?.empresa,
+      item.client?.company,
+      item.customer?.razonSocial,
+      item.customer?.companyName,
+      item.customer?.empresa,
+      item.customer?.company,
+      item.clienteSnapshot?.razonSocial,
+      item.clienteSnapshot?.companyName,
+      item.clienteSnapshot?.empresa,
+      raw.clienteEmpresa,
+      raw.empresa,
+      raw.company,
+      raw.companyName,
+      raw.razonSocial,
+      raw.cliente?.razonSocial,
+      raw.cliente?.companyName,
+      raw.cliente?.empresa,
+      raw.cliente?.company,
+      raw.client?.razonSocial,
+      raw.client?.companyName,
+      raw.client?.empresa,
+      raw.client?.company,
+      raw.customer?.razonSocial,
+      raw.customer?.companyName,
+      raw.customer?.empresa,
+      raw.customer?.company,
+      raw.clienteSnapshot?.razonSocial,
+      raw.clienteSnapshot?.companyName,
+      raw.clienteSnapshot?.empresa
+    ),
+    ""
+  );
+}
+
+function getContactName(item = {}) {
   const raw = safeObject(item?.raw);
 
   return safeText(
     first(
       item.clienteNombre,
+      item.nombreContacto,
+      item.contactName,
       item.cliente?.nombreContacto,
       item.cliente?.nombre,
       item.cliente?.name,
       item.cliente?.displayName,
+      item.clienteSnapshot?.nombreContacto,
       item.clientName,
+      item.client?.nombreContacto,
       item.client?.name,
+      item.customer?.nombreContacto,
       item.customer?.name,
       item.name,
       item.nombre,
-      item.clienteEmpresa,
-      item.cliente?.empresa,
-      item.cliente?.razonSocial,
-      item.company,
       raw.clienteNombre,
+      raw.nombreContacto,
+      raw.contactName,
       raw.cliente?.nombreContacto,
       raw.cliente?.nombre,
       raw.cliente?.name,
       raw.cliente?.displayName,
+      raw.clienteSnapshot?.nombreContacto,
       raw.clientName,
+      raw.client?.nombreContacto,
       raw.client?.name,
+      raw.customer?.nombreContacto,
       raw.customer?.name,
       raw.name,
-      raw.nombre,
-      raw.clienteEmpresa,
-      raw.cliente?.empresa,
-      raw.cliente?.razonSocial,
-      raw.company
+      raw.nombre
     ),
-    "Cliente"
+    ""
   );
+}
+
+function getClientName(item = {}) {
+  return safeText(first(getCompanyName(item), getContactName(item)), "Cliente");
+}
+
+function getClientSecondaryName(item = {}) {
+  const company = getCompanyName(item);
+  const contact = getContactName(item);
+
+  if (company && contact && normalizeText(company) !== normalizeText(contact)) {
+    return contact;
+  }
+
+  return "";
 }
 
 function getClientEmail(item = {}) {
@@ -642,10 +732,11 @@ function getClientEmail(item = {}) {
   return safeText(
     first(
       item.clienteEmail,
+      item.emailCliente,
       item.cliente?.email,
       item.cliente?.emailLower,
+      item.clienteSnapshot?.email,
       item.email,
-      item.emailCliente,
       item.clientEmail,
       item.client?.email,
       item.customer?.email,
@@ -653,6 +744,7 @@ function getClientEmail(item = {}) {
       raw.emailCliente,
       raw.cliente?.email,
       raw.cliente?.emailLower,
+      raw.clienteSnapshot?.email,
       raw.email,
       raw.clientEmail,
       raw.client?.email,
@@ -835,6 +927,7 @@ function getIncidenciaId(item = {}) {
       item.supportTicketId,
       item.caseId,
       item.meta?.ticketId,
+      item.meta?.linkedTicketId,
       item.meta?.incidenciaId,
       pickTicketIdFromArray(item.ticketIds),
       pickTicketIdFromArray(item.incidenciaIds),
@@ -863,6 +956,7 @@ function getIncidenciaId(item = {}) {
       raw.supportTicketId,
       raw.caseId,
       raw.meta?.ticketId,
+      raw.meta?.linkedTicketId,
       raw.meta?.incidenciaId,
       pickTicketIdFromArray(raw.ticketIds),
       pickTicketIdFromArray(raw.incidenciaIds),
@@ -920,6 +1014,7 @@ function getTotalRaw(item = {}) {
     item.totalFactura,
     item.facturaTotal,
     item.invoiceAmount,
+    item.totales?.total,
     raw.total,
     raw.amount,
     raw.importe,
@@ -927,6 +1022,7 @@ function getTotalRaw(item = {}) {
     raw.totalFactura,
     raw.facturaTotal,
     raw.invoiceAmount,
+    raw.totales?.total,
     0
   );
 }
@@ -939,9 +1035,15 @@ function getCurrency(item = {}) {
       item.moneda,
       item.currency,
       item.facturaCurrency,
+      item.totales?.currency,
+      item.payment?.currency,
+      item.meta?.currency,
       raw.moneda,
       raw.currency,
       raw.facturaCurrency,
+      raw.totales?.currency,
+      raw.payment?.currency,
+      raw.meta?.currency,
       DEFAULT_CURRENCY
     ),
     DEFAULT_CURRENCY
@@ -977,10 +1079,12 @@ function getFormaPago(item = {}) {
       item.formaPago,
       item.metodoPago,
       item.paymentMethod,
+      item.payment?.methodLabel,
       item.payment?.method,
       raw.formaPago,
       raw.metodoPago,
       raw.paymentMethod,
+      raw.payment?.methodLabel,
       raw.payment?.method
     ),
     "—"
@@ -992,14 +1096,22 @@ function getCreatedAt(item = {}) {
 
   return first(
     item.fechaFactura,
-    item.fecha,
+    item.fechaFacturaISO,
+    item.lifecycle?.issuedAt,
     item.issueDate,
-    item.createdAt,
-    item.fechaCreacion,
+    item.issuedAt,
+    item.fecha,
     raw.fechaFactura,
-    raw.fecha,
+    raw.fechaFacturaISO,
+    raw.lifecycle?.issuedAt,
     raw.issueDate,
+    raw.issuedAt,
+    raw.fecha,
+    item.createdAt,
+    item.lifecycle?.createdAt,
+    item.fechaCreacion,
     raw.createdAt,
+    raw.lifecycle?.createdAt,
     raw.fechaCreacion
   );
 }
@@ -1009,6 +1121,9 @@ function getUpdatedAt(item = {}) {
 
   return first(
     item.updatedAt,
+    item.lifecycle?.updatedAt,
+    item.lastActivityAt,
+    item.lifecycle?.lastActivityAt,
     item.fechaEnvio,
     item.delivery?.lastSentAt,
     item.sentAt,
@@ -1016,6 +1131,9 @@ function getUpdatedAt(item = {}) {
     item.fechaActualizacion,
     item.lastUpdateAt,
     raw.updatedAt,
+    raw.lifecycle?.updatedAt,
+    raw.lastActivityAt,
+    raw.lifecycle?.lastActivityAt,
     raw.fechaEnvio,
     raw.delivery?.lastSentAt,
     raw.sentAt,
@@ -1032,12 +1150,16 @@ function getSentAt(item = {}) {
     item.fechaEnvio,
     item.sentAt,
     item.mailSentAt,
+    item.email?.sentAt,
     item.delivery?.lastSentAt,
+    item.lifecycle?.sentAt,
     item.meta?.lastSentAt,
     raw.fechaEnvio,
     raw.sentAt,
     raw.mailSentAt,
+    raw.email?.sentAt,
     raw.delivery?.lastSentAt,
+    raw.lifecycle?.sentAt,
     raw.meta?.lastSentAt
   );
 }
@@ -1057,8 +1179,12 @@ function getSortTimestamp(item = {}) {
   );
 }
 
+function getEmissionTimestamp(item = {}) {
+  return toTimestamp(getCreatedAt(item)) || getSortTimestamp(item);
+}
+
 function compareFacturasNewestFirst(a = {}, b = {}) {
-  const diff = getSortTimestamp(b) - getSortTimestamp(a);
+  const diff = getEmissionTimestamp(b) - getEmissionTimestamp(a);
 
   if (diff !== 0) return diff;
 
@@ -1093,9 +1219,11 @@ function hasPdf(item = {}) {
       first(
         item.pdfAvailable,
         item.hasPdf,
+        item.document?.available,
         item.meta?.hasPdf,
         raw.pdfAvailable,
         raw.hasPdf,
+        raw.document?.available,
         raw.meta?.hasPdf
       ),
       false
@@ -1113,13 +1241,17 @@ function hasPdf(item = {}) {
       item.downloadUrl,
       item.viewUrl,
       item.pdf,
+      item.document?.blobPath,
+      item.document?.fileName,
       raw.blobPath,
       raw.blobName,
       raw.pdfPath,
       raw.pdfUrl,
       raw.downloadUrl,
       raw.viewUrl,
-      raw.pdf
+      raw.pdf,
+      raw.document?.blobPath,
+      raw.document?.fileName
     )
   ) {
     return true;
@@ -1160,15 +1292,23 @@ function isFacturaSent(item = {}) {
       item.fechaEnvio,
       item.sentAt,
       item.mailSentAt,
+      item.email?.sent,
+      item.email?.sentAt,
       item.delivery?.lastSentAt,
+      item.lifecycle?.sentAt,
       item.meta?.lastSentAt,
       item.meta?.isSent,
+      item.meta?.hasEmailSent,
       raw.fechaEnvio,
       raw.sentAt,
       raw.mailSentAt,
+      raw.email?.sent,
+      raw.email?.sentAt,
       raw.delivery?.lastSentAt,
+      raw.lifecycle?.sentAt,
       raw.meta?.lastSentAt,
-      raw.meta?.isSent
+      raw.meta?.isSent,
+      raw.meta?.hasEmailSent
     )
   );
 }
@@ -1321,10 +1461,12 @@ function getSortMode(input = {}) {
       data.sortBy,
       data.orderBy,
       data.sortMode,
+      data.facturasSort,
       runtime.sort,
       runtime.sortBy,
       runtime.orderBy,
       runtime.sortMode,
+      runtime.facturasSort,
       "date_desc"
     )
   );
@@ -1349,7 +1491,10 @@ function getSearchHaystack(item = {}) {
     getFacturaId(item),
     getFacturaNumero(item),
     getFacturaSistema(item),
+    getCompanyName(item),
+    getContactName(item),
     getClientName(item),
+    getClientSecondaryName(item),
     getClientEmail(item),
     getClientEmailLabel(item),
     getEstadoPagoLabel(getPaymentRaw(item)),
@@ -1574,6 +1719,7 @@ function getPagination(items = [], input = {}) {
     filtering,
     activeFilter: getActiveFilter(data),
     searchQuery: getSearchQuery(data),
+    sortMode: getSortMode(data),
   };
 }
 
@@ -1895,6 +2041,8 @@ function renderFilters(input = {}, pagination = {}) {
               data-facturas-action="sort"
               data-action="sort-facturas"
               data-sort="${escapeHtml(option.key)}"
+              data-sort-mode="${escapeHtml(option.key)}"
+              data-facturas-sort="${escapeHtml(option.key)}"
               title="${escapeHtml(option.title)}"
               data-tooltip="${escapeHtml(option.title)}"
               aria-label="${escapeHtml(option.title)}"
@@ -1954,12 +2102,14 @@ function renderRow(item = {}, state = {}) {
   const busy = resolveBusyMeta(item, state);
 
   const facturaId = busy.facturaId;
-  const numero = getFacturaNumero(item);
+  const numero = getFacturaDisplayId(item);
   const numeroSistema = getFacturaSistema(item);
   const clientName = getClientName(item);
+  const secondaryName = getClientSecondaryName(item);
   const clientEmail = getClientEmailLabel(item);
   const createdAtRaw = getCreatedAt(item);
-  const createdAt = formatDateTime(createdAtRaw);
+  const createdAt = formatDateShort(createdAtRaw);
+  const createdAtTitle = formatDateTime(createdAtRaw);
   const total = getTotalLabel(item);
   const totalCaption = getTotalCaption(item);
   const formaPago = getFormaPago(item);
@@ -2002,6 +2152,12 @@ function renderRow(item = {}, state = {}) {
 
             <div class="facturas-factura-client">${escapeHtml(clientName)}</div>
 
+            ${
+              secondaryName
+                ? `<div class="facturas-factura-contact">${escapeHtml(secondaryName)}</div>`
+                : ""
+            }
+
             <div class="facturas-factura-email">
               ${escapeHtml(clientEmail)}
             </div>
@@ -2021,8 +2177,8 @@ function renderRow(item = {}, state = {}) {
       <td class="facturas-cell facturas-cell--date">
         <span
           class="facturas-date-inline"
-          title="${escapeHtml(createdAt)}"
-          data-tooltip="${escapeHtml(createdAt)}"
+          title="${escapeHtml(createdAtTitle)}"
+          data-tooltip="${escapeHtml(createdAtTitle)}"
         >
           ${escapeHtml(createdAt)}
         </span>
@@ -2181,6 +2337,10 @@ function renderEmptyState({ hasError = false, filtering = false, searchQuery = "
     </div>
   `;
 }
+
+/* =========================================================
+   CONTINÚA EN PARTE 2/2
+========================================================= */
 
 /* =========================================================
    STYLES
@@ -2614,7 +2774,7 @@ function renderStyles() {
         min-block-size:calc(34px * var(--ui-scale, 1));
         padding-inline:11px 8px;
         border-radius:999px;
-        border:1px solid var(--badge-border, rgba(255,255,255,.07));
+        border:1px solid transparent;
         background:var(--badge-bg, rgba(255,255,255,.048));
         color:var(--badge-text, var(--text-muted, rgba(245,245,245,.70)));
         display:inline-flex;
@@ -2657,14 +2817,14 @@ function renderStyles() {
       .facturas-filter-pill:hover,
       .facturas-sort-pill:hover{
         transform:translateY(-1px);
-        border-color:var(--border-strong, rgba(255,255,255,.12));
+        border-color:transparent;
         background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
         color:var(--text-strong, #ffffff);
       }
 
       .facturas-filter-pill.is-active,
       .facturas-sort-pill.is-active{
-        border-color:color-mix(in srgb, var(--accent, #6f59d9) 42%, var(--border-strong, rgba(255,255,255,.12)));
+        border-color:transparent;
         background:color-mix(in srgb, var(--accent, #6f59d9) 14%, var(--badge-bg, rgba(255,255,255,.048)));
         color:var(--accent-active, var(--text-strong, #ffffff));
         box-shadow:0 8px 20px color-mix(in srgb, var(--accent, #6f59d9), transparent 88%);
@@ -2856,6 +3016,15 @@ function renderStyles() {
         background:var(--data-table-head-bg, var(--table-head-bg, rgba(255,255,255,.020)));
         border-bottom:1px solid var(--table-head-border, var(--border-default, rgba(255,255,255,.082)));
         white-space:nowrap;
+      }
+
+      .facturas-table thead th:nth-child(2),
+      .facturas-table thead th:nth-child(3){
+        text-align:center;
+      }
+
+      .facturas-table thead th:nth-child(6){
+        text-align:end;
       }
 
       .facturas-table tbody td{
@@ -3056,6 +3225,16 @@ function renderStyles() {
         -webkit-box-orient:vertical;
       }
 
+      .facturas-factura-contact{
+        font-size:var(--font-xs, 11px);
+        line-height:1.2;
+        color:var(--text-muted, rgba(245,245,245,.70));
+        font-weight:var(--weight-bold, 700);
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
+
       .facturas-factura-email{
         font-size:var(--font-md, 13px);
         line-height:1.3;
@@ -3114,6 +3293,14 @@ function renderStyles() {
         border-color:var(--border-error, rgba(239,68,68,.30));
       }
 
+      .facturas-cell--status{
+        text-align:center;
+      }
+
+      .facturas-cell--status .facturas-chip{
+        margin-inline:auto;
+      }
+
       .facturas-chip{
         min-block-size:var(--chip-height, calc(26px * var(--ui-scale, 1)));
         padding-inline:var(--space-sm, 12px);
@@ -3163,6 +3350,10 @@ function renderStyles() {
         color:var(--error, #ef4444);
         background:color-mix(in srgb, var(--error-bg, rgba(239,68,68,.10)) 78%, var(--surface-active, transparent));
         border-color:var(--border-error, rgba(239,68,68,.30));
+      }
+
+      .facturas-cell--date{
+        text-align:center;
       }
 
       .facturas-date-inline{
@@ -3608,7 +3799,7 @@ function renderStyles() {
       [data-theme="light"] .facturas-sort-pill.is-active{
         color:var(--accent-active, #533cb6);
         background:var(--accent-soft, rgba(111,89,217,.125));
-        border-color:var(--accent-border-strong, rgba(111,89,217,.36));
+        border-color:transparent;
       }
 
       [data-theme="light"] .facturas-search-input{
@@ -4041,12 +4232,12 @@ export function renderCards(input = {}) {
                     <div class="facturas-table-shell">
                       <table class="facturas-table" role="table" aria-label="Listado de facturas">
                         <colgroup>
-                          <col style="width:33%;">
-                          <col style="width:10%;">
-                          <col style="width:14%;">
+                          <col style="width:31%;">
                           <col style="width:12%;">
+                          <col style="width:13%;">
+                          <col style="width:11%;">
                           <col style="width:16%;">
-                          <col style="width:15%;">
+                          <col style="width:17%;">
                         </colgroup>
 
                         <thead>
@@ -4093,7 +4284,7 @@ export function renderFacturasTemplate(input = {}) {
   const data = safeObject(input);
 
   const items = safeArray(first(data.items, data.rows, data.facturas, data.invoices));
-  const rows = sortFacturasNewestFirst(items);
+  const rows = filterAndSortFacturas(items, data);
   const runtime = safeObject(data.state);
 
   if (runtime.error && !rows.length) {

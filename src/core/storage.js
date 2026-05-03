@@ -15,10 +15,12 @@
    - guard browser robusto
    - JSON seguro
    - fallback silencioso ante quota/private mode
-   - protección contra "undefined"/"null" corruptos
+   - protección contra "undefined"/"null"/"[object Object]" corruptos
    - namespace estable
    - aliases remove/delete/del
-   - limpieza legacy ampliada
+   - limpieza legacy ampliada pero segura
+   - no borra claves namespaced actuales al limpiar legacy
+   - snapshots con redacción de tokens/secrets
    - cero throws accidentales
 ========================================================= */
 
@@ -28,6 +30,7 @@ import {
   isBrowser,
   buildStorageKey,
   safeParse,
+  safeStringify,
   redactTokenInText,
 } from "./helpers.js";
 
@@ -36,7 +39,7 @@ import {
 ========================================================= */
 
 const STORAGE_VERSION =
-  "10.0.0";
+  "10.1.0";
 
 const CORRUPTED_RAW_VALUES =
   Object.freeze([
@@ -46,7 +49,10 @@ const CORRUPTED_RAW_VALUES =
   ]);
 
 const SENSITIVE_KEY_RE =
-  /(token|authorization|password|secret|session|otp|code)/i;
+  /(token|authorization|password|secret|session|otp|code|jwt|bearer|credential)/i;
+
+const STORAGE_TEST_KEY =
+  "__storage_test__";
 
 /* =========================================================
    MODULE MEMORY FALLBACK
@@ -99,6 +105,15 @@ function safeIsoDate(ms = Date.now()) {
   }
 }
 
+function safeNumber(value, fallback = 0) {
+  const number =
+    Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : fallback;
+}
+
 function safeWarn(utils, ...args) {
   try {
     utils?.warn?.(
@@ -132,6 +147,15 @@ function safeString(value) {
 
 function safeJsonStringify(value, fallback = "") {
   try {
+    if (typeof safeStringify === "function") {
+      return safeStringify(
+        value,
+        fallback
+      );
+    }
+  } catch {}
+
+  try {
     return JSON.stringify(value);
   } catch {
     return fallback;
@@ -146,11 +170,20 @@ function isCorruptedRawValue(raw) {
 }
 
 function getPrefix() {
-  return `${safeText(config?.storagePrefix, "onion")}:`;
+  const prefix =
+    safeText(
+      config?.storagePrefix,
+      "onion"
+    )
+      .replace(/:+$/g, "");
+
+  return `${prefix || "onion"}:`;
 }
 
 function normalizeStorageKey(key = "") {
-  return safeText(key, "");
+  return safeText(key, "")
+    .replace(/^:+/g, "")
+    .trim();
 }
 
 function isNamespacedKey(key = "") {
@@ -206,7 +239,7 @@ function testStorageAvailability(storage) {
   }
 
   const testKey =
-    `${getPrefix()}__storage_test__`;
+    `${getPrefix()}${STORAGE_TEST_KEY}`;
 
   try {
     storage.setItem(
@@ -231,6 +264,13 @@ function testStorageAvailability(storage) {
 
     return false;
   }
+}
+
+function resetStorageAvailabilityCache() {
+  storageAvailableCache =
+    null;
+
+  return true;
 }
 
 function getUsableStorage() {
@@ -311,15 +351,35 @@ function removeFromMemory(namespacedKey) {
   return true;
 }
 
+function getRawLocalStorageKey(key = "") {
+  return safeText(key, "");
+}
+
+function isCurrentNamespacedKey(key = "") {
+  return isNamespacedKey(
+    safeText(key, "")
+  );
+}
+
 function getLegacyKeys() {
   const fromConfig =
     Object.values(
       config?.legacyStorageKeys || {}
-    ).filter(Boolean);
+    )
+      .map((item) =>
+        safeText(item, "")
+      )
+      .filter(Boolean);
 
+  /*
+    Importante:
+    Estas claves son legacy NO namespaced.
+    No se añaden onion:token / onion:user porque esas son claves actuales.
+  */
   const extra =
     [
       "onion_token",
+      "onion_access_token",
       "onion_refresh_token",
       "onion_temp_token",
       "onion_user",
@@ -331,12 +391,17 @@ function getLegacyKeys() {
       "onion_session_user_id",
       "onion_theme",
       "onion_lang",
+      "onion_post_login_target",
+
       "token",
-      "user",
+      "accessToken",
       "refreshToken",
       "tempToken",
+      "user",
+      "role",
       "sessionId",
       "sessionUserId",
+      "postLoginTarget",
     ];
 
   return Array.from(
@@ -344,6 +409,67 @@ function getLegacyKeys() {
       ...fromConfig,
       ...extra,
     ])
+  ).filter((key) =>
+    key &&
+    !isCurrentNamespacedKey(key)
+  );
+}
+
+function getStorageLength(storage) {
+  try {
+    return safeNumber(
+      storage?.length,
+      0
+    );
+  } catch {
+    return 0;
+  }
+}
+
+function collectStorageKeys(storage, predicate) {
+  const output =
+    [];
+
+  if (!storage) {
+    return output;
+  }
+
+  const length =
+    getStorageLength(storage);
+
+  try {
+    for (
+      let i = 0;
+      i < length;
+      i += 1
+    ) {
+      const currentKey =
+        storage.key(i);
+
+      if (
+        currentKey &&
+        predicate(currentKey)
+      ) {
+        output.push(currentKey);
+      }
+    }
+  } catch {}
+
+  return output;
+}
+
+function parseStoredRaw(raw, fallback = null) {
+  if (
+    raw === null ||
+    raw === undefined ||
+    isCorruptedRawValue(raw)
+  ) {
+    return fallback;
+  }
+
+  return safeParse(
+    raw,
+    fallback
   );
 }
 
@@ -363,8 +489,18 @@ export function removeLegacySessionKeys(utils) {
 
   try {
     if (storage) {
-      for (const key of keys) {
+      for (const legacyKey of keys) {
+        const key =
+          getRawLocalStorageKey(legacyKey);
+
         if (!key) {
+          continue;
+        }
+
+        /*
+          No tocar las claves actuales namespaced.
+        */
+        if (isCurrentNamespacedKey(key)) {
           continue;
         }
 
@@ -409,6 +545,15 @@ export function createStorage(utils) {
     remove:
       0,
 
+    has:
+      0,
+
+    keys:
+      0,
+
+    clear:
+      0,
+
     errors:
       0,
 
@@ -416,6 +561,12 @@ export function createStorage(utils) {
       0,
 
     memoryFallbackReads:
+      0,
+
+    localStorageWrites:
+      0,
+
+    localStorageReads:
       0,
 
     lastOperation:
@@ -476,12 +627,23 @@ export function createStorage(utils) {
         const raw =
           storage.getItem(namespacedKey);
 
+        stats.localStorageReads += 1;
+
         if (
           raw === null ||
+          raw === undefined ||
           isCorruptedRawValue(raw)
         ) {
           return fallback;
         }
+
+        /*
+          Mantener memoria sincronizada con localStorage válido.
+        */
+        writeRawToMemory(
+          namespacedKey,
+          raw
+        );
 
         return raw;
       } catch (error) {
@@ -508,15 +670,7 @@ export function createStorage(utils) {
         null
       );
 
-    if (
-      raw === null ||
-      raw === undefined ||
-      isCorruptedRawValue(raw)
-    ) {
-      return fallback;
-    }
-
-    return safeParse(
+    return parseStoredRaw(
       raw,
       fallback
     );
@@ -536,7 +690,10 @@ export function createStorage(utils) {
     const raw =
       safeString(value);
 
-    if (isCorruptedRawValue(raw)) {
+    if (
+      !raw ||
+      isCorruptedRawValue(raw)
+    ) {
       return remove(name);
     }
 
@@ -549,6 +706,8 @@ export function createStorage(utils) {
           namespacedKey,
           raw
         );
+
+        stats.localStorageWrites += 1;
 
         writeRawToMemory(
           namespacedKey,
@@ -590,7 +749,10 @@ export function createStorage(utils) {
         ""
       );
 
-    if (!raw || isCorruptedRawValue(raw)) {
+    if (
+      !raw ||
+      isCorruptedRawValue(raw)
+    ) {
       return false;
     }
 
@@ -603,6 +765,8 @@ export function createStorage(utils) {
           namespacedKey,
           raw
         );
+
+        stats.localStorageWrites += 1;
 
         writeRawToMemory(
           namespacedKey,
@@ -660,6 +824,7 @@ export function createStorage(utils) {
     const namespacedKey =
       key(name);
 
+    stats.has += 1;
     touch("has", namespacedKey);
 
     const storage =
@@ -670,8 +835,11 @@ export function createStorage(utils) {
         const raw =
           storage.getItem(namespacedKey);
 
+        stats.localStorageReads += 1;
+
         return (
           raw !== null &&
+          raw !== undefined &&
           !isCorruptedRawValue(raw)
         );
       } catch (error) {
@@ -694,6 +862,8 @@ export function createStorage(utils) {
         ? options
         : {};
 
+    stats.keys += 1;
+
     const prefix =
       opts.prefix
         ? getNamespacedKey(opts.prefix)
@@ -710,32 +880,27 @@ export function createStorage(utils) {
 
     try {
       if (storage) {
-        for (
-          let i = 0;
-          i < storage.length;
-          i += 1
-        ) {
-          const currentKey =
-            storage.key(i);
+        const storageKeys =
+          collectStorageKeys(
+            storage,
+            (currentKey) =>
+              currentKey.startsWith(prefix)
+          );
 
-          if (
-            currentKey &&
-            currentKey.startsWith(prefix)
-          ) {
-            if (includeValues) {
-              output.push({
-                key:
+        for (const currentKey of storageKeys) {
+          if (includeValues) {
+            output.push({
+              key:
+                currentKey,
+
+              value:
+                sanitizeSnapshotValue(
                   currentKey,
-
-                value:
-                  sanitizeSnapshotValue(
-                    currentKey,
-                    storage.getItem(currentKey)
-                  ),
-              });
-            } else {
-              output.push(currentKey);
-            }
+                  storage.getItem(currentKey)
+                ),
+            });
+          } else {
+            output.push(currentKey);
           }
         }
       }
@@ -773,10 +938,23 @@ export function createStorage(utils) {
       }
     }
 
+    touch(
+      "keys",
+      prefix
+    );
+
     return output;
   }
 
-  function clearAll() {
+  function clearAll(options = {}) {
+    const opts =
+      isObject(options)
+        ? options
+        : {};
+
+    const includeLegacy =
+      opts.includeLegacy !== false;
+
     const storage =
       getStorage();
 
@@ -786,28 +964,16 @@ export function createStorage(utils) {
     let removed =
       0;
 
+    stats.clear += 1;
+
     try {
       if (storage) {
         const keysToRemove =
-          [];
-
-        for (
-          let i = 0;
-          i < storage.length;
-          i += 1
-        ) {
-          const currentKey =
-            storage.key(i);
-
-          if (
-            currentKey &&
-            currentKey.startsWith(prefix)
-          ) {
-            keysToRemove.push(
-              currentKey
-            );
-          }
-        }
+          collectStorageKeys(
+            storage,
+            (currentKey) =>
+              currentKey.startsWith(prefix)
+          );
 
         for (const currentKey of keysToRemove) {
           storage.removeItem(
@@ -832,16 +998,27 @@ export function createStorage(utils) {
       }
     }
 
-    removeLegacySessionKeys(
-      utils
-    );
+    if (includeLegacy) {
+      removed += removeLegacySessionKeys(
+        utils
+      );
+    }
 
     touch(
       "clearAll",
       prefix
     );
 
-    return true;
+    return {
+      ok:
+        true,
+
+      removed,
+
+      prefix,
+
+      includeLegacy,
+    };
   }
 
   function clearNamespace(namespace = "") {
@@ -858,33 +1035,26 @@ export function createStorage(utils) {
     const storage =
       getStorage();
 
+    let removed =
+      0;
+
+    stats.clear += 1;
+
     try {
       if (storage) {
         const keysToRemove =
-          [];
-
-        for (
-          let i = 0;
-          i < storage.length;
-          i += 1
-        ) {
-          const currentKey =
-            storage.key(i);
-
-          if (
-            currentKey &&
-            currentKey.startsWith(prefix)
-          ) {
-            keysToRemove.push(
-              currentKey
-            );
-          }
-        }
+          collectStorageKeys(
+            storage,
+            (currentKey) =>
+              currentKey.startsWith(prefix)
+          );
 
         for (const currentKey of keysToRemove) {
           storage.removeItem(
             currentKey
           );
+
+          removed += 1;
         }
       }
     } catch (error) {
@@ -898,6 +1068,7 @@ export function createStorage(utils) {
     for (const currentKey of Array.from(memoryStorage.keys())) {
       if (currentKey.startsWith(prefix)) {
         memoryStorage.delete(currentKey);
+        removed += 1;
       }
     }
 
@@ -906,7 +1077,83 @@ export function createStorage(utils) {
       prefix
     );
 
-    return true;
+    return {
+      ok:
+        true,
+
+      removed,
+
+      prefix,
+    };
+  }
+
+  function repairCorrupted(options = {}) {
+    const opts =
+      isObject(options)
+        ? options
+        : {};
+
+    const prefix =
+      opts.prefix
+        ? getNamespacedKey(opts.prefix)
+        : getPrefix();
+
+    const storage =
+      getStorage();
+
+    let repaired =
+      0;
+
+    try {
+      if (storage) {
+        const keysToCheck =
+          collectStorageKeys(
+            storage,
+            (currentKey) =>
+              currentKey.startsWith(prefix)
+          );
+
+        for (const currentKey of keysToCheck) {
+          const raw =
+            storage.getItem(currentKey);
+
+          if (isCorruptedRawValue(raw)) {
+            storage.removeItem(currentKey);
+            repaired += 1;
+          }
+        }
+      }
+    } catch (error) {
+      recordError(
+        error,
+        "repairCorrupted",
+        prefix
+      );
+    }
+
+    for (const [currentKey, raw] of Array.from(memoryStorage.entries())) {
+      if (
+        currentKey.startsWith(prefix) &&
+        isCorruptedRawValue(raw)
+      ) {
+        memoryStorage.delete(currentKey);
+        repaired += 1;
+      }
+    }
+
+    touch(
+      "repairCorrupted",
+      prefix
+    );
+
+    return {
+      ok:
+        true,
+
+      repaired,
+
+      prefix,
+    };
   }
 
   function getSnapshot(options = {}) {
@@ -1003,11 +1250,15 @@ export function createStorage(utils) {
 
     clearNamespace,
 
+    repairCorrupted,
+
     removeLegacySessionKeys() {
       return removeLegacySessionKeys(
         utils
       );
     },
+
+    resetStorageAvailabilityCache,
 
     getSnapshot,
     getDebugSnapshot:

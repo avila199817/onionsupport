@@ -21,13 +21,18 @@
    - no duplicar sidebar
    - no romper si document/window no existen
 
-   FIX CRÍTICO RACE:
+   HARDENING EXTREMO:
    - no usa selectores genéricos globales para elementos internos
    - valida node.isConnected antes de reutilizar cache
    - getElements() no captura navs/logos/dropdowns de una vista
    - mountSidebar() no reemplaza mount si ya contiene sidebar válido
    - no monta nunca dentro de #view-container
    - deduplica sidebars duplicados si un repair anterior dejó clones
+   - resuelve toggles externos solo fuera del view-container
+   - preserva AppCore.dom sin contaminar refs con nodos muertos
+   - separa shell hidden legacy de shell hidden real
+   - evita que sidebar.hidden stale bloquee reparación posterior
+   - expone snapshots útiles para depuración
 ========================================================= */
 
 import { getSidebarTemplate } from "./template.js";
@@ -52,20 +57,23 @@ const SIDEBAR_TOGGLE_ID = "toggleSidebar";
 const SIDEBAR_MOBILE_TOGGLE_ID = "toggleSidebarMobile";
 const SIDEBAR_LOGO_ID = "homeLink";
 
-const DOM_CACHE_VERSION = "sidebar-dom-v5-race-safe";
+const DOM_CACHE_VERSION = "sidebar-dom-v6-final-extreme";
+
+const ORIGINAL_NONE = "__none__";
 
 /* =========================================================
    SELECTOR FALLBACKS
 ========================================================= */
 
-const VIEW_CONTAINER_SELECTORS = [
+const VIEW_CONTAINER_SELECTORS = Object.freeze([
   "#view-container",
   "[data-view-root]",
   "[data-router-view]",
   "[data-view-container]",
-];
+  "[data-view-container='true']",
+]);
 
-const APP_SHELL_SELECTORS = [
+const APP_SHELL_SELECTORS = Object.freeze([
   "#app-shell",
   "[data-app-shell='true']",
   "[data-app-shell]",
@@ -73,18 +81,18 @@ const APP_SHELL_SELECTORS = [
   ".app-layout",
   ".layout-shell",
   ".layout",
-];
+]);
 
-const MAIN_CONTENT_SELECTORS = [
+const MAIN_CONTENT_SELECTORS = Object.freeze([
   "#main-content",
   ".main-content",
   "main[role='main']",
   "main:not(#view-container)",
   "[data-main-content]",
   "[data-app-main]",
-];
+]);
 
-const SIDEBAR_SELECTORS = [
+const SIDEBAR_SELECTORS = Object.freeze([
   `#${SIDEBAR_ROOT_ID}`,
   "aside.sidebar",
   ".sidebar[data-sidebar-root='true']",
@@ -92,23 +100,23 @@ const SIDEBAR_SELECTORS = [
   "[data-sidebar-root='true']",
   "[data-sidebar-root]",
   "[data-sidebar='true']",
-];
+]);
 
-const SIDEBAR_MENU_SELECTORS = [
+const SIDEBAR_MENU_SELECTORS = Object.freeze([
   `#${SIDEBAR_MENU_ID}`,
   ".sidebar-menu",
   "[data-sidebar-menu]",
   "nav.sidebar-menu",
-];
+]);
 
-const SIDEBAR_RECENTS_SELECTORS = [
+const SIDEBAR_RECENTS_SELECTORS = Object.freeze([
   `#${SIDEBAR_RECENTS_ID}`,
   ".sidebar-recents",
   "[data-sidebar-recents]",
   "[data-sidebar-recent]",
-];
+]);
 
-const SIDEBAR_TOGGLE_SELECTORS = [
+const SIDEBAR_TOGGLE_SELECTORS = Object.freeze([
   `#${SIDEBAR_TOGGLE_ID}`,
   ".sidebar-toggle",
   "[data-sidebar-action='toggle-sidebar']",
@@ -116,9 +124,9 @@ const SIDEBAR_TOGGLE_SELECTORS = [
   "[data-sidebar-toggle]",
   "[data-action='toggle-sidebar']",
   "[data-action='sidebar-toggle']",
-];
+]);
 
-const SIDEBAR_MOBILE_TOGGLE_SELECTORS = [
+const SIDEBAR_MOBILE_TOGGLE_SELECTORS = Object.freeze([
   `#${SIDEBAR_MOBILE_TOGGLE_ID}`,
   ".sidebar-mobile-toggle",
   "[data-sidebar-mobile-toggle]",
@@ -126,9 +134,9 @@ const SIDEBAR_MOBILE_TOGGLE_SELECTORS = [
   "[data-sidebar-action='toggle-mobile-sidebar']",
   "[data-action='mobile-sidebar-toggle']",
   "[data-action='toggle-mobile-sidebar']",
-];
+]);
 
-const USER_TOGGLE_SELECTORS = [
+const USER_TOGGLE_SELECTORS = Object.freeze([
   `#${USER_TOGGLE_ID}`,
   "#sidebarUserToggle",
   "#sidebar-user-toggle",
@@ -156,9 +164,9 @@ const USER_TOGGLE_SELECTORS = [
   "[data-dropdown-target='user']",
 
   `[aria-controls='${USER_DROPDOWN_ID}']`,
-];
+]);
 
-const USER_DROPDOWN_SELECTORS = [
+const USER_DROPDOWN_SELECTORS = Object.freeze([
   `#${USER_DROPDOWN_ID}`,
   "#sidebarUserDropdown",
   "#sidebar-user-dropdown",
@@ -187,9 +195,9 @@ const USER_DROPDOWN_SELECTORS = [
   "[data-dropdown='user']",
   "[data-dropdown-menu='user']",
   "[data-sidebar-dropdown='user']",
-];
+]);
 
-const LOGOUT_SELECTORS = [
+const LOGOUT_SELECTORS = Object.freeze([
   `#${LOGOUT_BUTTON_ID}`,
   "#logoutBtn",
   "#logoutButton",
@@ -204,9 +212,9 @@ const LOGOUT_SELECTORS = [
   "[data-action='logout']",
   "[data-logout]",
   "[data-sidebar-logout]",
-];
+]);
 
-const AVATAR_SELECTORS = [
+const AVATAR_SELECTORS = Object.freeze([
   `#${SIDEBAR_AVATAR_ID}`,
   "#sidebarAvatar",
   "#sidebar-avatar",
@@ -215,9 +223,9 @@ const AVATAR_SELECTORS = [
   ".sidebar-user-avatar",
   "[data-sidebar-avatar]",
   "[data-user-avatar]",
-];
+]);
 
-const NAME_SELECTORS = [
+const NAME_SELECTORS = Object.freeze([
   `#${SIDEBAR_NAME_ID}`,
   "#sidebarName",
   "#sidebar-name",
@@ -228,9 +236,9 @@ const NAME_SELECTORS = [
   ".user-info .name",
   "[data-sidebar-name]",
   "[data-user-name]",
-];
+]);
 
-const LOGO_SELECTORS = [
+const LOGO_SELECTORS = Object.freeze([
   `#${SIDEBAR_LOGO_ID}`,
   "#sidebarLogo",
   "#sidebar-logo",
@@ -238,7 +246,18 @@ const LOGO_SELECTORS = [
   ".logo",
   ".sidebar-logo",
   "[data-sidebar-logo]",
-];
+]);
+
+const SHELL_HIDDEN_BODY_CLASSES = Object.freeze([
+  "route-shell-hidden",
+  "auth-screen",
+  "route-auth",
+]);
+
+const SHELL_VISIBLE_BODY_CLASSES = Object.freeze([
+  "route-shell-visible",
+  "route-app",
+]);
 
 /* =========================================================
    SAFE HELPERS
@@ -293,6 +312,55 @@ function isConnectedNode(value = null) {
   } catch {
     return true;
   }
+}
+
+function safeNow() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+function safeWarn(AppCore, ...args) {
+  try {
+    AppCore?.utils?.warn?.("[SidebarDOM]", ...args);
+  } catch {}
+
+  try {
+    console.warn("[SidebarDOM]", ...args);
+  } catch {}
+}
+
+function safeEmit(AppCore, eventName = "", payload = {}) {
+  const name = safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  try {
+    if (isFunction(AppCore?.events?.emit)) {
+      AppCore.events.emit(name, payload);
+      return true;
+    }
+  } catch (error) {
+    safeWarn(AppCore, `AppCore.events.emit("${name}") falló.`, error);
+  }
+
+  try {
+    if (hasDocument() && typeof CustomEvent !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent(name, {
+          detail: payload,
+        })
+      );
+
+      return true;
+    }
+  } catch {}
+
+  return false;
 }
 
 function ensureDomBag(AppCore) {
@@ -355,6 +423,48 @@ function containsElement(parent = null, child = null) {
   }
 }
 
+function matchesAny(element = null, selectors = []) {
+  if (!isConnectedNode(element)) {
+    return false;
+  }
+
+  const selector = Array.isArray(selectors)
+    ? selectors.join(",")
+    : safeText(selectors, "");
+
+  if (!selector) {
+    return false;
+  }
+
+  try {
+    return Boolean(element.matches?.(selector));
+  } catch {
+    return false;
+  }
+}
+
+function closestAny(element = null, selectors = []) {
+  if (!isConnectedNode(element)) {
+    return null;
+  }
+
+  const selector = Array.isArray(selectors)
+    ? selectors.join(",")
+    : safeText(selectors, "");
+
+  if (!selector) {
+    return null;
+  }
+
+  try {
+    const closest = element.closest?.(selector);
+
+    return isConnectedNode(closest) ? closest : null;
+  } catch {
+    return null;
+  }
+}
+
 function isViewContainer(element = null) {
   if (!isElement(element)) {
     return false;
@@ -363,7 +473,7 @@ function isViewContainer(element = null) {
   try {
     return Boolean(
       element.id === "view-container" ||
-        element.matches?.(VIEW_CONTAINER_SELECTORS.join(","))
+        matchesAny(element, VIEW_CONTAINER_SELECTORS)
     );
   } catch {
     return false;
@@ -378,7 +488,7 @@ function isInsideViewContainer(element = null) {
   try {
     return Boolean(
       isViewContainer(element) ||
-        element.closest?.(VIEW_CONTAINER_SELECTORS.join(","))
+        closestAny(element, VIEW_CONTAINER_SELECTORS)
     );
   } catch {
     return false;
@@ -408,9 +518,10 @@ function query(selector = "", root = null) {
     return null;
   }
 
-  const scope = root && isConnectedNode(root)
-    ? root
-    : document;
+  const scope =
+    root && isConnectedNode(root)
+      ? root
+      : document;
 
   try {
     const element = scope.querySelector(cleanSelector);
@@ -432,9 +543,10 @@ function queryAll(selector = "", root = null) {
     return [];
   }
 
-  const scope = root && isConnectedNode(root)
-    ? root
-    : document;
+  const scope =
+    root && isConnectedNode(root)
+      ? root
+      : document;
 
   try {
     return Array.from(scope.querySelectorAll(cleanSelector))
@@ -456,10 +568,6 @@ function queryFirst(selectors = [], root = null) {
   return null;
 }
 
-function queryFirstDocument(selectors = []) {
-  return queryFirst(selectors, document);
-}
-
 function queryFirstInsideSidebar(selectors = [], sidebar = null) {
   if (!sidebar || !isConnectedNode(sidebar)) {
     return null;
@@ -478,6 +586,60 @@ function getCachedElement(AppCore, key = "") {
   const element = dom[key];
 
   return isConnectedNode(element) ? element : null;
+}
+
+function clearDeadDomRef(AppCore, key = "") {
+  try {
+    if (
+      AppCore?.dom &&
+      Object.prototype.hasOwnProperty.call(AppCore.dom, key) &&
+      AppCore.dom[key] &&
+      !isConnectedNode(AppCore.dom[key])
+    ) {
+      AppCore.dom[key] = null;
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function clearDeadDomRefs(AppCore) {
+  const dom = AppCore?.dom;
+
+  if (!dom || typeof dom !== "object") {
+    return false;
+  }
+
+  [
+    "body",
+    "appShell",
+    "shell",
+    "layout",
+    "mainContent",
+    "main",
+    "viewContainer",
+    "sidebarMount",
+    "sidebar",
+    "sidebarRoot",
+    "sidebarMenu",
+    "sidebarRecents",
+    "sidebarToggle",
+    "mobileSidebarToggle",
+    "sidebarMobileToggle",
+    "userToggle",
+    "userDropdown",
+    "logoutBtn",
+    "sidebarAvatar",
+    "sidebarName",
+    "sidebarLogo",
+    "routerViewHost",
+    "viewHost",
+  ].forEach((key) => {
+    clearDeadDomRef(AppCore, key);
+  });
+
+  return true;
 }
 
 function getScopedId(id = "", root = null) {
@@ -506,34 +668,6 @@ function resolveScopedElement(id = "", selectors = [], root = null) {
   );
 }
 
-function resolveSafeDocumentControl(id = "", selectors = [], AppCore = null) {
-  /*
-    Usado solo para controles que pueden vivir fuera del sidebar
-    —por ejemplo el toggle mobile en topbar—.
-    Nunca aceptamos controles dentro de #view-container.
-  */
-  const appShell = getAppShellEl(AppCore);
-  const root = appShell && !isUnsafeMountTarget(appShell)
-    ? appShell
-    : document;
-
-  const byIdResult = byId(id);
-
-  if (byIdResult && !isInsideViewContainer(byIdResult)) {
-    return byIdResult;
-  }
-
-  for (const selector of selectors) {
-    const element = query(selector, root);
-
-    if (element && !isInsideViewContainer(element)) {
-      return element;
-    }
-  }
-
-  return null;
-}
-
 function setHidden(element = null, hidden = false) {
   if (!element) {
     return false;
@@ -553,6 +687,24 @@ function setHidden(element = null, hidden = false) {
   return true;
 }
 
+function setDataset(element = null, key = "", value = "") {
+  if (!element || !key) {
+    return false;
+  }
+
+  try {
+    if (value === null || value === undefined || value === "") {
+      delete element.dataset[key];
+      return true;
+    }
+
+    element.dataset[key] = String(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function removeTooltipAttributes(element = null) {
   if (!element) {
     return false;
@@ -568,6 +720,53 @@ function removeTooltipAttributes(element = null) {
   return true;
 }
 
+function rememberAttribute(element = null, datasetKey = "", attrName = "") {
+  if (!element || !datasetKey || !attrName) {
+    return false;
+  }
+
+  try {
+    if (Object.prototype.hasOwnProperty.call(element.dataset, datasetKey)) {
+      return true;
+    }
+
+    const value = element.getAttribute(attrName);
+
+    element.dataset[datasetKey] =
+      value === null
+        ? ORIGINAL_NONE
+        : value;
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function restoreAttribute(element = null, datasetKey = "", attrName = "") {
+  if (!element || !datasetKey || !attrName) {
+    return false;
+  }
+
+  try {
+    if (!Object.prototype.hasOwnProperty.call(element.dataset, datasetKey)) {
+      return false;
+    }
+
+    const value = element.dataset[datasetKey];
+
+    if (!value || value === ORIGINAL_NONE) {
+      element.removeAttribute(attrName);
+      return true;
+    }
+
+    element.setAttribute(attrName, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function toFragment(html = "") {
   if (!hasDocument()) {
     return null;
@@ -580,14 +779,6 @@ function toFragment(html = "") {
     return template.content;
   } catch {
     return null;
-  }
-}
-
-function safeNow() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
   }
 }
 
@@ -607,7 +798,7 @@ function isSidebarCandidate(element = null) {
   try {
     return Boolean(
       element.id === SIDEBAR_ROOT_ID ||
-        element.matches?.(SIDEBAR_SELECTORS.join(","))
+        matchesAny(element, SIDEBAR_SELECTORS)
     );
   } catch {
     return false;
@@ -629,8 +820,9 @@ function resolveSidebarRoot(AppCore = null) {
     return idMatch;
   }
 
-  const candidates = queryAll(SIDEBAR_SELECTORS.join(","), document)
-    .filter(isSidebarCandidate);
+  const candidates =
+    queryAll(SIDEBAR_SELECTORS.join(","), document)
+      .filter(isSidebarCandidate);
 
   return candidates[0] || null;
 }
@@ -640,8 +832,9 @@ function getAllSidebarRoots() {
     return [];
   }
 
-  const items = queryAll(SIDEBAR_SELECTORS.join(","), document)
-    .filter(isSidebarCandidate);
+  const items =
+    queryAll(SIDEBAR_SELECTORS.join(","), document)
+      .filter(isSidebarCandidate);
 
   return Array.from(new Set(items));
 }
@@ -659,16 +852,18 @@ function cleanupDuplicateSidebars(primary = null) {
       return;
     }
 
-    /*
-      Solo eliminamos clones inequívocos del sidebar.
-      No tocamos nodos que no parezcan raíz real del sidebar.
-    */
-    const sameHardId = candidate.id === SIDEBAR_ROOT_ID;
+    const sameHardId =
+      candidate.id === SIDEBAR_ROOT_ID;
+
     const markedRoot =
       candidate.getAttribute?.("data-sidebar-root") !== null ||
       candidate.getAttribute?.("data-sidebar") === "true";
 
-    if (!sameHardId && !markedRoot) {
+    const templateClone =
+      candidate.getAttribute?.("data-component") === "sidebar" ||
+      candidate.classList?.contains?.("sidebar");
+
+    if (!sameHardId && !markedRoot && !templateClone) {
       return;
     }
 
@@ -718,17 +913,13 @@ function resolveControlledDropdownFromToggle(userToggle = null, sidebar = null) 
 }
 
 function resolveUserToggle(sidebar = null) {
-  const local = queryFirstInsideSidebar(USER_TOGGLE_SELECTORS, sidebar);
+  const local =
+    queryFirstInsideSidebar(USER_TOGGLE_SELECTORS, sidebar);
 
   if (local) {
     return local;
   }
 
-  /*
-    Fallback controlado:
-    solo dentro del sidebar.
-    Nunca global, porque una vista puede tener .user-toggle o role button.
-  */
   return query(
     [
       ".sidebar-footer button[aria-expanded]",
@@ -741,22 +932,20 @@ function resolveUserToggle(sidebar = null) {
 }
 
 function resolveUserDropdown(sidebar = null, userToggle = null) {
-  const byControl = resolveControlledDropdownFromToggle(userToggle, sidebar);
+  const byControl =
+    resolveControlledDropdownFromToggle(userToggle, sidebar);
 
   if (byControl) {
     return byControl;
   }
 
-  const local = queryFirstInsideSidebar(USER_DROPDOWN_SELECTORS, sidebar);
+  const local =
+    queryFirstInsideSidebar(USER_DROPDOWN_SELECTORS, sidebar);
 
   if (local) {
     return local;
   }
 
-  /*
-    Fallback final:
-    menú cercano dentro del footer.
-  */
   return query(
     [
       ".sidebar-footer [role='menu']",
@@ -772,12 +961,35 @@ function resolveUserDropdown(sidebar = null, userToggle = null) {
    SHELL HELPERS
 ========================================================= */
 
+export function getViewContainerEl(AppCore) {
+  if (!hasDocument()) {
+    return null;
+  }
+
+  const cached =
+    getCachedElement(AppCore, "viewContainer");
+
+  if (cached && isViewContainer(cached)) {
+    return cached;
+  }
+
+  return (
+    byId("view-container") ||
+    query("[data-view-root]") ||
+    query("[data-router-view]") ||
+    query("[data-view-container='true']") ||
+    query("[data-view-container]") ||
+    null
+  );
+}
+
 export function getSidebarMountEl(AppCore) {
   if (!hasDocument()) {
     return null;
   }
 
-  const cached = getCachedElement(AppCore, "sidebarMount");
+  const cached =
+    getCachedElement(AppCore, "sidebarMount");
 
   if (cached && !isUnsafeMountTarget(cached)) {
     return cached;
@@ -793,26 +1005,6 @@ export function getSidebarMountEl(AppCore) {
     : null;
 }
 
-export function getViewContainerEl(AppCore) {
-  if (!hasDocument()) {
-    return null;
-  }
-
-  const cached = getCachedElement(AppCore, "viewContainer");
-
-  if (cached && isViewContainer(cached)) {
-    return cached;
-  }
-
-  return (
-    byId("view-container") ||
-    query("[data-view-root]") ||
-    query("[data-router-view]") ||
-    query("[data-view-container]") ||
-    null
-  );
-}
-
 export function getMainContentEl(AppCore) {
   if (!hasDocument()) {
     return null;
@@ -822,19 +1014,22 @@ export function getMainContentEl(AppCore) {
     getCachedElement(AppCore, "mainContent") ||
     getCachedElement(AppCore, "main");
 
-  if (cached && !isViewContainer(cached) && !isInsideViewContainer(cached)) {
+  if (
+    cached &&
+    !isViewContainer(cached) &&
+    !isInsideViewContainer(cached)
+  ) {
     return cached;
   }
 
-  /*
-    Importante:
-    NO usar #view-container como mainContent.
-    El sidebar jamás debe montarse pegado al view.
-  */
   for (const selector of MAIN_CONTENT_SELECTORS) {
     const element = query(selector);
 
-    if (element && !isViewContainer(element) && !isInsideViewContainer(element)) {
+    if (
+      element &&
+      !isViewContainer(element) &&
+      !isInsideViewContainer(element)
+    ) {
       return element;
     }
   }
@@ -865,6 +1060,31 @@ export function getAppShellEl(AppCore) {
   }
 
   return document.body || null;
+}
+
+function resolveSafeDocumentControl(id = "", selectors = [], AppCore = null) {
+  const appShell = getAppShellEl(AppCore);
+
+  const root =
+    appShell && !isUnsafeMountTarget(appShell)
+      ? appShell
+      : document;
+
+  const byIdResult = byId(id);
+
+  if (byIdResult && !isInsideViewContainer(byIdResult)) {
+    return byIdResult;
+  }
+
+  for (const selector of selectors) {
+    const element = query(selector, root);
+
+    if (element && !isInsideViewContainer(element)) {
+      return element;
+    }
+  }
+
+  return null;
 }
 
 /* =========================================================
@@ -904,8 +1124,11 @@ export function sanitizeFooterTooltipState(AppCore) {
     return false;
   }
 
-  const userToggle = resolveUserToggle(sidebar);
-  const userDropdown = resolveUserDropdown(sidebar, userToggle);
+  const userToggle =
+    resolveUserToggle(sidebar);
+
+  const userDropdown =
+    resolveUserDropdown(sidebar, userToggle);
 
   const avatarEl =
     resolveScopedElement(SIDEBAR_AVATAR_ID, AVATAR_SELECTORS, sidebar);
@@ -944,8 +1167,11 @@ export function sanitizeFooterTooltipState(AppCore) {
 }
 
 export function sanitizeSidebarTooltipState(AppCore) {
-  const logoOk = sanitizeLogoTooltipState(AppCore);
-  const footerOk = sanitizeFooterTooltipState(AppCore);
+  const logoOk =
+    sanitizeLogoTooltipState(AppCore);
+
+  const footerOk =
+    sanitizeFooterTooltipState(AppCore);
 
   return Boolean(logoOk || footerOk);
 }
@@ -1008,19 +1234,52 @@ function insertSidebarBeforeMain(appShell = null, mainContent = null, html = "")
   }
 }
 
+function ensureSidebarStaticAttrs(sidebar = null) {
+  if (!sidebar) {
+    return false;
+  }
+
+  try {
+    if (!sidebar.id) {
+      sidebar.id = SIDEBAR_ROOT_ID;
+    }
+
+    sidebar.setAttribute("data-sidebar-root", "true");
+    sidebar.setAttribute("data-sidebar", "true");
+    sidebar.setAttribute("data-component", "sidebar");
+
+    if (!sidebar.getAttribute("aria-label")) {
+      sidebar.setAttribute("aria-label", "Barra lateral principal");
+    }
+  } catch {}
+
+  return true;
+}
+
 export function mountSidebar(AppCore) {
   if (!hasDocument()) {
     return null;
   }
+
+  clearDeadDomRefs(AppCore);
 
   const dom = ensureDomBag(AppCore);
 
   let sidebar = resolveSidebarRoot(AppCore);
 
   if (sidebar) {
+    ensureSidebarStaticAttrs(sidebar);
     cleanupDuplicateSidebars(sidebar);
     cacheDomRefs(AppCore);
     sanitizeSidebarTooltipState(AppCore);
+
+    safeEmit(AppCore, "sidebar:dom:mounted", {
+      source: "SidebarDOM",
+      reused: true,
+      hasSidebar: true,
+      version: DOM_CACHE_VERSION,
+    });
+
     return sidebar;
   }
 
@@ -1030,19 +1289,9 @@ export function mountSidebar(AppCore) {
   const appShell = getAppShellEl(AppCore);
   const mainContent = getMainContentEl(AppCore);
 
-  /*
-    Orden correcto:
-    1. #sidebar-mount si existe y no es #view-container.
-    2. app-shell antes del main.
-    3. app-shell prepend.
-    4. body prepend.
-
-    Importante:
-    Si #sidebar-mount existe pero contiene sidebar válido,
-    no se reemplaza. Evita carreras con reparaciones de UI.
-  */
   if (mount && !isUnsafeMountTarget(mount)) {
-    const existingInMount = queryFirst(SIDEBAR_SELECTORS, mount);
+    const existingInMount =
+      queryFirst(SIDEBAR_SELECTORS, mount);
 
     if (!existingInMount) {
       appendSidebarHtml(mount, html, "replace");
@@ -1063,6 +1312,7 @@ export function mountSidebar(AppCore) {
   sidebar = resolveSidebarRoot(AppCore);
 
   if (sidebar) {
+    ensureSidebarStaticAttrs(sidebar);
     cleanupDuplicateSidebars(sidebar);
   }
 
@@ -1073,6 +1323,13 @@ export function mountSidebar(AppCore) {
 
   cacheDomRefs(AppCore);
   sanitizeSidebarTooltipState(AppCore);
+
+  safeEmit(AppCore, "sidebar:dom:mounted", {
+    source: "SidebarDOM",
+    reused: false,
+    hasSidebar: Boolean(sidebar),
+    version: DOM_CACHE_VERSION,
+  });
 
   return sidebar || null;
 }
@@ -1092,19 +1349,17 @@ export function cacheDomRefs(AppCore) {
     return null;
   }
 
-  const body = document.body || null;
+  clearDeadDomRefs(AppCore);
+
+  const body =
+    document.body || null;
 
   const sidebarMount =
-    getSidebarMountEl(AppCore) ||
-    null;
+    getSidebarMountEl(AppCore) || null;
 
   const sidebar =
     resolveSidebarRoot(AppCore);
 
-  /*
-    Sin sidebar no cacheamos elementos internos genéricos.
-    Esto evita capturar navegación, logo o dropdown de una vista.
-  */
   const sidebarMenu = sidebar
     ? resolveScopedElement(SIDEBAR_MENU_ID, SIDEBAR_MENU_SELECTORS, sidebar)
     : null;
@@ -1113,11 +1368,6 @@ export function cacheDomRefs(AppCore) {
     ? resolveScopedElement(SIDEBAR_RECENTS_ID, SIDEBAR_RECENTS_SELECTORS, sidebar)
     : null;
 
-  /*
-    Toggle desktop:
-    - preferimos dentro del sidebar
-    - permitimos control externo con ID/selectores seguros fuera del view
-  */
   const sidebarToggle = sidebar
     ? (
         resolveScopedElement(SIDEBAR_TOGGLE_ID, SIDEBAR_TOGGLE_SELECTORS, sidebar) ||
@@ -1125,10 +1375,6 @@ export function cacheDomRefs(AppCore) {
       )
     : null;
 
-  /*
-    Toggle mobile:
-    puede vivir en topbar, por eso se permite externo controlado.
-  */
   const mobileToggleBtn = sidebar
     ? (
         resolveScopedElement(SIDEBAR_MOBILE_TOGGLE_ID, SIDEBAR_MOBILE_TOGGLE_SELECTORS, sidebar) ||
@@ -1166,9 +1412,14 @@ export function cacheDomRefs(AppCore) {
     ? resolveScopedElement(SIDEBAR_LOGO_ID, LOGO_SELECTORS, sidebar)
     : null;
 
-  const appShell = getAppShellEl(AppCore);
-  const mainContent = getMainContentEl(AppCore);
-  const viewContainer = getViewContainerEl(AppCore);
+  const appShell =
+    getAppShellEl(AppCore);
+
+  const mainContent =
+    getMainContentEl(AppCore);
+
+  const viewContainer =
+    getViewContainerEl(AppCore);
 
   dom.__sidebarDomCacheVersion = DOM_CACHE_VERSION;
   dom.__sidebarDomCachedAt = safeNow();
@@ -1192,9 +1443,6 @@ export function cacheDomRefs(AppCore) {
   dom.sidebarToggle = sidebarToggle || null;
   dom.sidebarLogo = logoEl || null;
 
-  /*
-    Compatibilidad doble naming.
-  */
   dom.mobileSidebarToggle = mobileToggleBtn || null;
   dom.sidebarMobileToggle = mobileToggleBtn || null;
 
@@ -1431,10 +1679,14 @@ export function getElements(AppCore) {
 export function hasSidebarShell(AppCore) {
   const { sidebar } = getElements(AppCore);
 
-  return Boolean(sidebar);
+  return Boolean(sidebar && isConnectedNode(sidebar));
 }
 
-export function isShellHidden(AppCore) {
+/* =========================================================
+   SHELL HIDDEN
+========================================================= */
+
+export function isRealShellHidden(AppCore) {
   if (!hasDocument()) {
     return false;
   }
@@ -1444,20 +1696,19 @@ export function isShellHidden(AppCore) {
     appShell,
     shell,
     layout,
-    sidebar,
   } = getElements(AppCore);
 
   const html = document.documentElement || null;
 
-  /*
-    Ojo:
-    Esta función mantiene compat legacy e incluye sidebar.hidden.
-    Para decisiones interactivas críticas, state.js usa isRealShellHidden()
-    y evita bloquearse por sidebar.hidden stale.
-  */
   return Boolean(
-    body?.classList?.contains?.("route-shell-hidden") ||
-      body?.classList?.contains?.("auth-screen") ||
+    AppCore?.state?.shellVisible === false ||
+      AppCore?.state?.routeShellHidden === true ||
+      AppCore?.state?.authScreen === true ||
+
+      SHELL_HIDDEN_BODY_CLASSES.some((className) =>
+        body?.classList?.contains?.(className)
+      ) ||
+
       body?.dataset?.shell === "hidden" ||
       body?.dataset?.shellVisible === "false" ||
       body?.dataset?.routeMode === "auth" ||
@@ -1476,15 +1727,29 @@ export function isShellHidden(AppCore) {
 
       appShell?.getAttribute?.("aria-hidden") === "true" ||
       shell?.getAttribute?.("aria-hidden") === "true" ||
-      layout?.getAttribute?.("aria-hidden") === "true" ||
+      layout?.getAttribute?.("aria-hidden") === "true"
+  );
+}
 
+export function isShellHidden(AppCore) {
+  if (!hasDocument()) {
+    return false;
+  }
+
+  const {
+    sidebar,
+  } = getElements(AppCore);
+
+  /*
+    Compat legacy:
+    Esta función conserva sidebar.hidden como señal adicional.
+    Para decisiones críticas/interactivas usar isRealShellHidden().
+  */
+  return Boolean(
+    isRealShellHidden(AppCore) ||
       sidebar?.hidden === true ||
       sidebar?.dataset?.mode === "hidden" ||
-      sidebar?.getAttribute?.("aria-hidden") === "true" ||
-
-      AppCore?.state?.shellVisible === false ||
-      AppCore?.state?.routeShellHidden === true ||
-      AppCore?.state?.authScreen === true
+      sidebar?.getAttribute?.("aria-hidden") === "true"
   );
 }
 
@@ -1511,6 +1776,66 @@ export function setSidebarHidden(AppCore, hidden = false) {
     setHidden(element, hidden);
   });
 
+  try {
+    if (sidebar) {
+      sidebar.dataset.mode = hidden ? "hidden" : (sidebar.dataset.mode || "desktop");
+    }
+  } catch {}
+
+  return true;
+}
+
+export function revealSidebarShell(AppCore, reason = "reveal-sidebar-shell") {
+  const {
+    body,
+    sidebar,
+    toggleBtn,
+    mobileToggleBtn,
+    userToggle,
+    userDropdown,
+  } = getElements(AppCore);
+
+  [
+    sidebar,
+    toggleBtn,
+    mobileToggleBtn,
+    userToggle,
+    userDropdown,
+  ].forEach((element) => {
+    if (!element) {
+      return;
+    }
+
+    try {
+      element.hidden = false;
+      element.removeAttribute("hidden");
+      element.setAttribute("aria-hidden", "false");
+    } catch {}
+  });
+
+  try {
+    if (sidebar) {
+      if (sidebar.dataset.mode === "hidden") {
+        sidebar.dataset.mode = "desktop";
+      }
+
+      if (!sidebar.dataset.open) {
+        sidebar.dataset.open = "true";
+      }
+
+      if (!sidebar.dataset.collapsed) {
+        sidebar.dataset.collapsed = "false";
+      }
+    }
+
+    body?.classList?.remove?.("sidebar-hidden");
+  } catch {}
+
+  safeEmit(AppCore, "sidebar:dom:revealed", {
+    source: "SidebarDOM",
+    reason,
+  });
+
   return true;
 }
 
@@ -1526,7 +1851,12 @@ export function blurIfInside(element) {
   try {
     const activeEl = document.activeElement;
 
-    if (element && activeEl && element.contains(activeEl)) {
+    if (
+      element &&
+      activeEl &&
+      activeEl !== document.body &&
+      element.contains(activeEl)
+    ) {
       activeEl.blur?.();
       return true;
     }
@@ -1579,6 +1909,8 @@ export function focusSidebar(AppCore) {
   }
 
   try {
+    rememberAttribute(sidebar, "sidebarOriginalTabindex", "tabindex");
+
     if (!sidebar.hasAttribute("tabindex")) {
       sidebar.setAttribute("tabindex", "-1");
     }
@@ -1591,6 +1923,16 @@ export function focusSidebar(AppCore) {
   } catch {
     return focusFirstInteractive(sidebar);
   }
+}
+
+export function restoreSidebarFocusAttrs(AppCore) {
+  const { sidebar } = getElements(AppCore);
+
+  if (!sidebar) {
+    return false;
+  }
+
+  return restoreAttribute(sidebar, "sidebarOriginalTabindex", "tabindex");
 }
 
 /* =========================================================
@@ -1616,6 +1958,12 @@ function getElementDebug(element = null) {
       element.getAttribute?.("data-action") ||
       element.getAttribute?.("data-sidebar-action") ||
       "",
+    dataMode:
+      element.dataset?.mode || "",
+    dataOpen:
+      element.dataset?.open || "",
+    dataCollapsed:
+      element.dataset?.collapsed || "",
     insideViewContainer: isInsideViewContainer(element),
     parentHidden: Boolean(
       element.closest?.("[hidden],[inert],[aria-hidden='true']")
@@ -1658,11 +2006,28 @@ export function getSidebarDomSnapshot(AppCore) {
     hasViewContainer: Boolean(elements.viewContainer),
 
     shellHidden: isShellHidden(AppCore),
+    realShellHidden: isRealShellHidden(AppCore),
 
     sidebarHidden: Boolean(elements.sidebar?.hidden),
     sidebarConnected: isConnectedNode(elements.sidebar),
     sidebarClasses: elements.sidebar?.className || "",
     bodyClasses: elements.body?.className || "",
+
+    bodyRouteMode:
+      elements.body?.dataset?.routeMode || "",
+
+    bodyShell:
+      elements.body?.dataset?.shell || "",
+
+    htmlRouteMode:
+      hasDocument()
+        ? document.documentElement?.dataset?.routeMode || ""
+        : "",
+
+    htmlShell:
+      hasDocument()
+        ? document.documentElement?.dataset?.shell || ""
+        : "",
 
     cache: {
       version: AppCore?.dom?.__sidebarDomCacheVersion || "",
@@ -1672,6 +2037,7 @@ export function getSidebarDomSnapshot(AppCore) {
     mount: getElementDebug(elements.sidebarMount),
     sidebar: getElementDebug(elements.sidebar),
     sidebarMenu: getElementDebug(elements.sidebarMenu),
+    sidebarRecents: getElementDebug(elements.sidebarRecents),
     appShell: getElementDebug(elements.appShell),
     mainContent: getElementDebug(elements.mainContent),
     viewContainer: getElementDebug(elements.viewContainer),
@@ -1705,11 +2071,14 @@ export default {
 
   hasSidebarShell,
   isShellHidden,
+  isRealShellHidden,
   setSidebarHidden,
+  revealSidebarShell,
 
   blurIfInside,
   focusFirstInteractive,
   focusSidebar,
+  restoreSidebarFocusAttrs,
 
   sanitizeLogoTooltipState,
   sanitizeFooterTooltipState,

@@ -1,16 +1,16 @@
 /* =========================================================
    Onion SPA - Home View
-   Archivo: src/views/home/homeView.js
+   Archivo: src/views/home/HomeView.js
 
    HOME EXPERIENCE MODE · USER + ADMIN · DASHBOARD API FIRST
-   EXTREME PRO SYSTEM · FINAL PATCH 12/10
+   EXTREME PRO SYSTEM · FINAL PATCH 13/10
 
    RESPONSABILIDADES:
    - punto de entrada real de la vista Home
    - render principal con template unificado home.template.js
    - usar home.api.js como fuente principal de datos
    - consumir /api/dashboard/summary normalizado por HomeApi
-   - mantener fallback elegante a incidencias si dashboard no trae tickets
+   - fallback fuerte a incidencias/clientes/usuarios/facturas si dashboard viene parcial
    - Home para user/admin con la misma lógica
    - paginación visual fija a 5 incidencias por vista
    - render inicial inmediato
@@ -24,22 +24,21 @@
    - soportar destroy limpio del router
    - permitir reload con rerender seguro
    - registrar bridge público para topbar/global search
-   - preservar datos de dashboard y fallback de incidencias
+   - preservar datos de dashboard y fallback de colecciones
    - evitar que refresh empobrezca el Home si API devuelve parcial
    - trabajar alineado con el template Home premium
 
    HARDENING PRO:
-   - View = UX, render, eventos y bridges
+   - View = UX, render, eventos, bridges y fallbacks de módulo
    - API = request, normalización, dashboard summary y collections
    - estado local autocontenido
    - anti-race token
    - cleanup total
    - click delegation sólida
-   - fallback si /api/dashboard/summary no entrega tickets
+   - fallback si /api/dashboard/summary no entrega tickets/clientes/usuarios/facturas
    - anti spam click en crear incidencia
    - anti spam apertura rápida de tickets
    - compatible con template data-home-action y data-action
-   - no escanea endpoints opcionales desde la vista
    - reload con cola segura
    - eventos AppCore + window
    - bridge AppCore.modules + window
@@ -95,8 +94,10 @@ export const HomeView = (() => {
   const CREATE_CLICK_THROTTLE_MS = 450;
   const OPEN_TICKET_THROTTLE_MS = 350;
 
-  const HOME_CACHE_KEY = "onion.home.view.cache.v3";
+  const HOME_CACHE_KEY = "onion.home.view.cache.v4";
   const HOME_CACHE_TTL_MS = 1000 * 60 * 10;
+
+  const OPTIONAL_IMPORT_TIMEOUT_MS = 7000;
 
   const ROUTES = Object.freeze({
     HOME: "/",
@@ -216,6 +217,8 @@ export const HomeView = (() => {
 
   let inflightOpenTicketId = "";
 
+  const optionalModulesCache = new Map();
+
   const homeState = {
     hydrated: false,
     loaded: false,
@@ -258,18 +261,11 @@ export const HomeView = (() => {
   ========================================================= */
 
   function isBrowser() {
-    return (
-      typeof window !== "undefined" &&
-      typeof document !== "undefined"
-    );
+    return typeof window !== "undefined" && typeof document !== "undefined";
   }
 
   function isObject(value) {
-    return (
-      value !== null &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-    );
+    return value !== null && typeof value === "object" && !Array.isArray(value);
   }
 
   function isFunction(value) {
@@ -277,9 +273,7 @@ export const HomeView = (() => {
   }
 
   function safeText(value, fallback = "") {
-    if (value === null || value === undefined) {
-      return fallback;
-    }
+    if (value === null || value === undefined) return fallback;
 
     const text = String(value)
       .replace(/[\r\n\t]/g, " ")
@@ -290,9 +284,7 @@ export const HomeView = (() => {
   }
 
   function safeNumber(value, fallback = 0) {
-    if (value === null || value === undefined || value === "") {
-      return fallback;
-    }
+    if (value === null || value === undefined || value === "") return fallback;
 
     if (typeof value === "string") {
       let normalized = value
@@ -321,12 +313,10 @@ export const HomeView = (() => {
       }
 
       const parsed = Number(normalized);
-
       return Number.isFinite(parsed) ? parsed : fallback;
     }
 
     const n = Number(value);
-
     return Number.isFinite(n) ? n : fallback;
   }
 
@@ -334,32 +324,21 @@ export const HomeView = (() => {
     return Array.isArray(value) ? value : [];
   }
 
-  function safeObject(value) {
-    return isObject(value) ? value : {};
+  function safeObject(value, fallback = {}) {
+    return isObject(value) ? value : fallback;
   }
 
   function hasOwnKeys(value = {}) {
-    return Boolean(
-      isObject(value) &&
-        Object.keys(value).length
-    );
+    return Boolean(isObject(value) && Object.keys(value).length);
   }
 
   function first(...values) {
     for (const value of values) {
       if (value === undefined || value === null) continue;
 
-      if (typeof value === "string" && value.trim() === "") {
-        continue;
-      }
-
-      if (Array.isArray(value) && value.length === 0) {
-        continue;
-      }
-
-      if (isObject(value) && Object.keys(value).length === 0) {
-        continue;
-      }
+      if (typeof value === "string" && value.trim() === "") continue;
+      if (Array.isArray(value) && value.length === 0) continue;
+      if (isObject(value) && Object.keys(value).length === 0) continue;
 
       return value;
     }
@@ -463,10 +442,7 @@ export const HomeView = (() => {
   }
 
   function getEventPayload(eventOrPayload = {}) {
-    if (
-      typeof eventOrPayload === "string" ||
-      typeof eventOrPayload === "number"
-    ) {
+    if (typeof eventOrPayload === "string" || typeof eventOrPayload === "number") {
       return {
         ticketId: safeText(eventOrPayload, ""),
       };
@@ -487,6 +463,19 @@ export const HomeView = (() => {
     const right = normalizeText(b);
 
     return Boolean(left && right && left === right);
+  }
+
+  function timeoutPromise(ms = OPTIONAL_IMPORT_TIMEOUT_MS, label = "timeout") {
+    return new Promise((_, reject) => {
+      const timeoutId = setTimeout(() => {
+        clearTimeout(timeoutId);
+        reject(new Error(label));
+      }, ms);
+    });
+  }
+
+  async function withTimeout(promise, ms = OPTIONAL_IMPORT_TIMEOUT_MS, label = "timeout") {
+    return Promise.race([promise, timeoutPromise(ms, label)]);
   }
 
   /* =========================================================
@@ -593,15 +582,7 @@ export const HomeView = (() => {
 
     if (key === "warn") return "warning";
 
-    if (
-      [
-        "success",
-        "error",
-        "warning",
-        "info",
-        "loading",
-      ].includes(key)
-    ) {
+    if (["success", "error", "warning", "info", "loading"].includes(key)) {
       return key;
     }
 
@@ -727,6 +708,9 @@ export const HomeView = (() => {
       "root",
       "staff",
       "support",
+      "soporte",
+      "tecnico",
+      "técnico",
     ].includes(key);
   }
 
@@ -765,11 +749,7 @@ export const HomeView = (() => {
   }
 
   function canInteract() {
-    return (
-      !destroyed &&
-      isDomReady() &&
-      isAppReady()
-    );
+    return !destroyed && isDomReady() && isAppReady();
   }
 
   function throttleCreateClick() {
@@ -924,9 +904,7 @@ export const HomeView = (() => {
   ========================================================= */
 
   function readCachePayload() {
-    if (!isBrowser()) {
-      return null;
-    }
+    if (!isBrowser()) return null;
 
     try {
       const raw = window.localStorage.getItem(HOME_CACHE_KEY);
@@ -946,9 +924,7 @@ export const HomeView = (() => {
   }
 
   function writeCachePayload() {
-    if (!isBrowser()) {
-      return false;
-    }
+    if (!isBrowser()) return false;
 
     try {
       const payload = {
@@ -1032,6 +1008,8 @@ export const HomeView = (() => {
     homeState.requestId = safeText(state.requestId, "");
     homeState.lastSyncAt = safeText(state.lastSyncAt, "");
 
+    ensureSummaryAliases();
+
     homeState.hydrated = true;
 
     homeState.loaded = Boolean(
@@ -1045,62 +1023,6 @@ export const HomeView = (() => {
     );
 
     return homeState.loaded;
-  }
-
-  function hydrateBestEffort() {
-    let hydrated = false;
-
-    try {
-      const apiCache = hydrateHomeApiFromCache?.();
-
-      if (apiCache?.dashboard || hasOwnKeys(apiCache)) {
-        syncDashboardPayload(
-          apiCache.dashboard || apiCache,
-          {
-            requestId: apiCache.requestId || "",
-            lastSyncAt: apiCache.lastSyncAt || "",
-            writeCache: false,
-            preserveExisting: true,
-          }
-        );
-
-        hydrated = true;
-      }
-    } catch {}
-
-    try {
-      hydrated = hydrateLocalHomeCache() || hydrated;
-    } catch {}
-
-    try {
-      hydrateIncidenciasFromCache?.();
-      hydrated = true;
-    } catch {}
-
-    try {
-      const tickets = getTicketsFromStore();
-
-      if (tickets.length && !homeState.tickets.length) {
-        homeState.tickets = tickets;
-
-        homeState.ticketsRemoteCount = Math.max(
-          homeState.ticketsRemoteCount,
-          tickets.length
-        );
-
-        homeState.remoteCount = Math.max(
-          homeState.remoteCount,
-          tickets.length
-        );
-
-        homeState.hydrated = true;
-        homeState.loaded = true;
-
-        hydrated = true;
-      }
-    } catch {}
-
-    return hydrated;
   }
 
   /* =========================================================
@@ -1150,10 +1072,13 @@ export const HomeView = (() => {
       object.incidencias,
       object.facturas,
       object.invoices,
+      object.bills,
+      object.billing,
       object.users,
       object.usuarios,
       object.clients,
       object.clientes,
+      object.customers,
       object.activity,
       object.activities,
       object.recent,
@@ -1259,6 +1184,252 @@ export const HomeView = (() => {
       count: list.length,
       totalCount: total,
       remoteCount: total,
+    };
+  }
+
+  /* =========================================================
+     OPTIONAL MODULE FALLBACKS
+  ========================================================= */
+
+  async function importOptionalModule(key = "", path = "") {
+    const cacheKey = safeText(key || path, "");
+    const modulePath = safeText(path, "");
+
+    if (!cacheKey || !modulePath) return null;
+
+    if (optionalModulesCache.has(cacheKey)) {
+      return optionalModulesCache.get(cacheKey);
+    }
+
+    try {
+      const module = await withTimeout(
+        import(modulePath),
+        OPTIONAL_IMPORT_TIMEOUT_MS,
+        `OPTIONAL_IMPORT_TIMEOUT:${cacheKey}`
+      );
+
+      optionalModulesCache.set(cacheKey, module || null);
+      return module || null;
+    } catch (error) {
+      optionalModulesCache.set(cacheKey, null);
+      safeWarn(`Módulo opcional no disponible: ${cacheKey}`, error);
+      return null;
+    }
+  }
+
+  async function loadOptionalUsuarios({ force = false } = {}) {
+    try {
+      const apiModule = await importOptionalModule(
+        "usuarios.api",
+        "../usuarios/usuarios.api.js"
+      );
+
+      const storeModule = await importOptionalModule(
+        "usuarios.store",
+        "../usuarios/usuarios.store.js"
+      );
+
+      try {
+        if (isFunction(apiModule?.hydrateFromCache)) {
+          apiModule.hydrateFromCache({
+            freshOnly: true,
+          });
+        }
+      } catch {}
+
+      if (isFunction(apiModule?.loadUsuarios)) {
+        await apiModule.loadUsuarios({
+          force,
+          silent: true,
+        });
+      }
+
+      const items = safeArray(
+        first(
+          storeModule?.getUsuarios?.(),
+          apiModule?.getUsuarios?.(),
+          apiModule?.usuariosState?.items,
+          []
+        )
+      );
+
+      if (items.length) {
+        homeState.users = uniqueBy(
+          [
+            ...homeState.users,
+            ...items,
+          ],
+          getUserId
+        );
+
+        homeState.usersRemoteCount = Math.max(
+          homeState.usersRemoteCount,
+          items.length
+        );
+
+        return homeState.users;
+      }
+    } catch (error) {
+      safeWarn("Fallback usuarios falló:", error);
+    }
+
+    return safeArray(homeState.users);
+  }
+
+  async function loadOptionalClientes({ force = false } = {}) {
+    try {
+      const apiModule = await importOptionalModule(
+        "clientes.api",
+        "../clientes/clientes.api.js"
+      );
+
+      const storeModule = await importOptionalModule(
+        "clientes.store",
+        "../clientes/clientes.store.js"
+      );
+
+      try {
+        if (isFunction(apiModule?.hydrateFromCache)) {
+          apiModule.hydrateFromCache();
+        }
+      } catch {}
+
+      if (isFunction(apiModule?.loadClientes)) {
+        await apiModule.loadClientes({
+          force,
+        });
+      }
+
+      const items = safeArray(
+        first(
+          storeModule?.getClientes?.(),
+          apiModule?.getClientes?.(),
+          apiModule?.clientesState?.items,
+          []
+        )
+      );
+
+      if (items.length) {
+        homeState.clients = uniqueBy(
+          [
+            ...homeState.clients,
+            ...items,
+          ],
+          getClientId
+        );
+
+        homeState.clientsRemoteCount = Math.max(
+          homeState.clientsRemoteCount,
+          items.length
+        );
+
+        return homeState.clients;
+      }
+    } catch (error) {
+      safeWarn("Fallback clientes falló:", error);
+    }
+
+    return safeArray(homeState.clients);
+  }
+
+  async function loadOptionalFacturas({ force = false } = {}) {
+    try {
+      const apiModule = await importOptionalModule(
+        "facturas.api",
+        "../facturas/facturas.api.js"
+      );
+
+      const storeModule = await importOptionalModule(
+        "facturas.store",
+        "../facturas/facturas.store.js"
+      );
+
+      try {
+        if (isFunction(apiModule?.hydrateFromCache)) {
+          apiModule.hydrateFromCache();
+        }
+      } catch {}
+
+      const loadFn =
+        apiModule?.loadFacturas ||
+        apiModule?.loadInvoices ||
+        apiModule?.fetchFacturas ||
+        apiModule?.fetchInvoices;
+
+      if (isFunction(loadFn)) {
+        await loadFn({
+          force,
+          silent: true,
+        });
+      }
+
+      const items = safeArray(
+        first(
+          storeModule?.getFacturas?.(),
+          storeModule?.getInvoices?.(),
+          apiModule?.getFacturas?.(),
+          apiModule?.getInvoices?.(),
+          apiModule?.facturasState?.items,
+          []
+        )
+      );
+
+      if (items.length) {
+        homeState.invoices = uniqueBy(
+          [
+            ...homeState.invoices,
+            ...items,
+          ],
+          getInvoiceId
+        );
+
+        homeState.invoicesRemoteCount = Math.max(
+          homeState.invoicesRemoteCount,
+          items.length
+        );
+
+        return homeState.invoices;
+      }
+    } catch (error) {
+      safeWarn("Fallback facturas falló:", error);
+    }
+
+    return safeArray(homeState.invoices);
+  }
+
+  async function loadSecondaryCollections({ force = false } = {}) {
+    const before = {
+      users: homeState.users.length,
+      clients: homeState.clients.length,
+      invoices: homeState.invoices.length,
+    };
+
+    await Promise.allSettled([
+      loadOptionalClientes({ force }),
+      loadOptionalUsuarios({ force }),
+      loadOptionalFacturas({ force }),
+    ]);
+
+    ensureSummaryAliases();
+
+    const after = {
+      users: homeState.users.length,
+      clients: homeState.clients.length,
+      invoices: homeState.invoices.length,
+    };
+
+    safeLog("secondary collections sync", {
+      before,
+      after,
+      usersRemoteCount: homeState.usersRemoteCount,
+      clientsRemoteCount: homeState.clientsRemoteCount,
+      invoicesRemoteCount: homeState.invoicesRemoteCount,
+    });
+
+    return {
+      users: homeState.users,
+      clients: homeState.clients,
+      invoices: homeState.invoices,
     };
   }
 
@@ -1472,6 +1643,7 @@ export const HomeView = (() => {
         item.numero,
         item.numeroFacturaLegal,
         item.numeroFactura,
+        item.invoiceNumber,
         item.code,
         item.id,
         item._id,
@@ -1482,6 +1654,7 @@ export const HomeView = (() => {
         item.raw?.numero,
         item.raw?.numeroFacturaLegal,
         item.raw?.numeroFactura,
+        item.raw?.invoiceNumber,
         item.raw?.code,
         item.raw?.id,
         item.raw?._id
@@ -1499,6 +1672,11 @@ export const HomeView = (() => {
         item.price,
         item.subtotal,
         item.base,
+        item.totalFactura,
+        item.importeTotal,
+        item.facturaTotal,
+        item.facturaImporte,
+        item.invoiceAmount,
 
         item.raw?.total,
         item.raw?.amount,
@@ -1506,6 +1684,11 @@ export const HomeView = (() => {
         item.raw?.price,
         item.raw?.subtotal,
         item.raw?.base,
+        item.raw?.totalFactura,
+        item.raw?.importeTotal,
+        item.raw?.facturaTotal,
+        item.raw?.facturaImporte,
+        item.raw?.invoiceAmount,
 
         0
       ),
@@ -1523,6 +1706,83 @@ export const HomeView = (() => {
         "EUR"
       ),
       "EUR"
+    );
+  }
+
+  function getInvoiceStatusKey(item = {}) {
+    const key = normalizeKey(
+      first(
+        item.paymentStatus,
+        item.estadoPago,
+        item.status,
+        item.estado,
+        item.raw?.paymentStatus,
+        item.raw?.estadoPago,
+        item.raw?.status,
+        item.raw?.estado,
+        "pending"
+      )
+    );
+
+    if (["paid", "pagada", "pagado", "cobrada", "cobrado"].includes(key)) return "paid";
+    if (["pending", "pendiente", "unpaid"].includes(key)) return "pending";
+    if (["overdue", "vencida", "vencido"].includes(key)) return "overdue";
+    if (["partial", "parcial", "pago_parcial"].includes(key)) return "partial";
+    if (["cancelled", "cancelada", "cancelado"].includes(key)) return "cancelled";
+    if (["draft", "borrador"].includes(key)) return "draft";
+
+    return "pending";
+  }
+
+  function isInvoicePendingLike(item = {}) {
+    return ["pending", "overdue", "partial"].includes(getInvoiceStatusKey(item));
+  }
+
+  function getUserId(item = {}) {
+    return safeText(
+      first(
+        item.userId,
+        item.usuarioId,
+        item.id,
+        item._id,
+        item.email,
+        item.mail,
+        item.username,
+        item.raw?.userId,
+        item.raw?.usuarioId,
+        item.raw?.id,
+        item.raw?._id,
+        item.raw?.email,
+        item.raw?.mail,
+        item.raw?.username
+      ),
+      ""
+    );
+  }
+
+  function getClientId(item = {}) {
+    return safeText(
+      first(
+        item.clienteId,
+        item.clientId,
+        item.customerId,
+        item.id,
+        item._id,
+        item.email,
+        item.mail,
+        item.nif,
+        item.cif,
+        item.raw?.clienteId,
+        item.raw?.clientId,
+        item.raw?.customerId,
+        item.raw?.id,
+        item.raw?._id,
+        item.raw?.email,
+        item.raw?.mail,
+        item.raw?.nif,
+        item.raw?.cif
+      ),
+      ""
     );
   }
 
@@ -1593,10 +1853,7 @@ export const HomeView = (() => {
   }
 
   function getTicketIdFromPayload(payload = {}) {
-    if (
-      typeof payload === "string" ||
-      typeof payload === "number"
-    ) {
+    if (typeof payload === "string" || typeof payload === "number") {
       return safeText(payload, "");
     }
 
@@ -1716,10 +1973,14 @@ export const HomeView = (() => {
             item.name,
             item.nombre,
             item.razonSocial,
+            item.company,
+            item.nombreContacto,
             item.email,
             item.raw?.name,
             item.raw?.nombre,
             item.raw?.razonSocial,
+            item.raw?.company,
+            item.raw?.nombreContacto,
             item.raw?.email
           ),
           "Cliente"
@@ -1733,23 +1994,7 @@ export const HomeView = (() => {
         ),
         route: ROUTES.CLIENTES,
         action: "navigate-home",
-        entityId: safeText(
-          first(
-            item.clienteId,
-            item.clientId,
-            item.customerId,
-            item.id,
-            item._id,
-            item.email,
-            item.raw?.clienteId,
-            item.raw?.clientId,
-            item.raw?.customerId,
-            item.raw?.id,
-            item.raw?._id,
-            item.raw?.email
-          ),
-          ""
-        ),
+        entityId: getClientId(item),
       }));
 
     const userActivity = safeArray(homeState.users)
@@ -1760,10 +2005,14 @@ export const HomeView = (() => {
           first(
             item.name,
             item.nombre,
+            item.displayName,
+            item.fullName,
             item.username,
             item.email,
             item.raw?.name,
             item.raw?.nombre,
+            item.raw?.displayName,
+            item.raw?.fullName,
             item.raw?.username,
             item.raw?.email
           ),
@@ -1780,21 +2029,7 @@ export const HomeView = (() => {
         ),
         route: ROUTES.USUARIOS,
         action: "navigate-home",
-        entityId: safeText(
-          first(
-            item.userId,
-            item.id,
-            item._id,
-            item.email,
-            item.username,
-            item.raw?.userId,
-            item.raw?.id,
-            item.raw?._id,
-            item.raw?.email,
-            item.raw?.username
-          ),
-          ""
-        ),
+        entityId: getUserId(item),
       }));
 
     return [
@@ -1810,6 +2045,241 @@ export const HomeView = (() => {
 
         return db - da;
       });
+  }
+
+  function getSummaryCount(keys = [], fallback = 0) {
+    const summary = safeObject(homeState.summary);
+    const dashboard = safeObject(homeState.dashboard);
+
+    return Math.max(
+      fallback,
+      safeNumber(
+        first(
+          ...safeArray(keys).flatMap((key) => [
+            summary?.[key],
+            dashboard?.[key],
+          ]),
+          fallback
+        ),
+        fallback
+      )
+    );
+  }
+
+  function computeInvoiceAmount() {
+    return safeArray(homeState.invoices).reduce(
+      (sum, item) => sum + getInvoiceAmount(item),
+      0
+    );
+  }
+
+  function computePendingInvoices() {
+    return safeArray(homeState.invoices).filter((item) => isInvoicePendingLike(item)).length;
+  }
+
+  function ensureSummaryAliases() {
+    const summary = safeObject(homeState.summary);
+
+    const ticketsCount = Math.max(
+      homeState.tickets.length,
+      homeState.ticketsRemoteCount,
+      getSummaryCount(
+        [
+          "totalTickets",
+          "ticketsTotal",
+          "incidenciasTotal",
+          "totalIncidencias",
+          "ticketsCount",
+          "incidenciasCount",
+        ],
+        0
+      )
+    );
+
+    const invoicesCount = Math.max(
+      homeState.invoices.length,
+      homeState.invoicesRemoteCount,
+      getSummaryCount(
+        [
+          "totalInvoices",
+          "invoicesTotal",
+          "facturasTotal",
+          "totalFacturas",
+          "invoicesCount",
+          "facturasCount",
+        ],
+        0
+      )
+    );
+
+    const usersCount = Math.max(
+      homeState.users.length,
+      homeState.usersRemoteCount,
+      getSummaryCount(
+        [
+          "usersCount",
+          "usuariosCount",
+          "totalUsers",
+          "totalUsuarios",
+          "activeUsers",
+          "usuariosActivos",
+        ],
+        0
+      )
+    );
+
+    const clientsCount = Math.max(
+      homeState.clients.length,
+      homeState.clientsRemoteCount,
+      getSummaryCount(
+        [
+          "clientsCount",
+          "clientesCount",
+          "customersCount",
+          "totalClients",
+          "totalClientes",
+          "totalCustomers",
+          "activeClients",
+          "clientesActivos",
+        ],
+        0
+      )
+    );
+
+    const invoiceAmount = Math.max(
+      computeInvoiceAmount(),
+      safeNumber(
+        first(
+          summary.invoiceAmount,
+          summary.billingTotal,
+          summary.totalBilling,
+          summary.totalFacturado,
+          summary.importeFacturas,
+          summary.facturacionVisible,
+          summary.facturacionTotal,
+          0
+        ),
+        0
+      )
+    );
+
+    const pendingInvoices = Math.max(
+      computePendingInvoices(),
+      safeNumber(
+        first(
+          summary.pendingInvoices,
+          summary.pendingFacturas,
+          summary.facturasPendientes,
+          summary.invoicesPending,
+          summary.facturasVencidas,
+          summary.overdueInvoices,
+          0
+        ),
+        0
+      )
+    );
+
+    homeState.summary = {
+      ...summary,
+
+      totalTickets: ticketsCount,
+      ticketsTotal: ticketsCount,
+      incidenciasTotal: ticketsCount,
+      totalIncidencias: ticketsCount,
+      ticketsCount,
+      incidenciasCount: ticketsCount,
+
+      totalInvoices: invoicesCount,
+      invoicesTotal: invoicesCount,
+      facturasTotal: invoicesCount,
+      totalFacturas: invoicesCount,
+      invoicesCount,
+      facturasCount: invoicesCount,
+
+      pendingInvoices,
+      pendingFacturas: pendingInvoices,
+      facturasPendientes: pendingInvoices,
+      invoicesPending: pendingInvoices,
+
+      invoiceAmount,
+      billingTotal: invoiceAmount,
+      totalBilling: invoiceAmount,
+      totalFacturado: invoiceAmount,
+      importeFacturas: invoiceAmount,
+      facturacionVisible: invoiceAmount,
+      facturacionTotal: invoiceAmount,
+
+      usersCount,
+      usuariosCount: usersCount,
+      totalUsers: usersCount,
+      totalUsuarios: usersCount,
+      activeUsers: Math.max(
+        usersCount,
+        safeNumber(first(summary.activeUsers, summary.usuariosActivos, 0), 0)
+      ),
+      usuariosActivos: Math.max(
+        usersCount,
+        safeNumber(first(summary.activeUsers, summary.usuariosActivos, 0), 0)
+      ),
+
+      clientsCount,
+      clientesCount: clientsCount,
+      customersCount: clientsCount,
+      totalClients: clientsCount,
+      totalClientes: clientsCount,
+      totalCustomers: clientsCount,
+      activeClients: Math.max(
+        clientsCount,
+        safeNumber(first(summary.activeClients, summary.clientesActivos, 0), 0)
+      ),
+      clientesActivos: Math.max(
+        clientsCount,
+        safeNumber(first(summary.activeClients, summary.clientesActivos, 0), 0)
+      ),
+    };
+
+    homeState.ticketsRemoteCount = Math.max(homeState.ticketsRemoteCount, ticketsCount);
+    homeState.invoicesRemoteCount = Math.max(homeState.invoicesRemoteCount, invoicesCount);
+    homeState.usersRemoteCount = Math.max(homeState.usersRemoteCount, usersCount);
+    homeState.clientsRemoteCount = Math.max(homeState.clientsRemoteCount, clientsCount);
+
+    homeState.dashboard = {
+      ...safeObject(homeState.dashboard),
+
+      summary: homeState.summary,
+      stats: homeState.summary,
+      metrics: homeState.summary,
+      totals: homeState.summary,
+      counts: homeState.summary,
+
+      ticketsTotal: ticketsCount,
+      incidenciasTotal: ticketsCount,
+      totalTickets: ticketsCount,
+      totalIncidencias: ticketsCount,
+
+      invoicesTotal: invoicesCount,
+      facturasTotal: invoicesCount,
+      totalInvoices: invoicesCount,
+      totalFacturas: invoicesCount,
+
+      usersTotal: usersCount,
+      usuariosTotal: usersCount,
+      totalUsers: usersCount,
+      totalUsuarios: usersCount,
+      usersCount,
+      usuariosCount: usersCount,
+
+      clientsTotal: clientsCount,
+      clientesTotal: clientsCount,
+      customersTotal: clientsCount,
+      totalClients: clientsCount,
+      totalClientes: clientsCount,
+      totalCustomers: clientsCount,
+      clientsCount,
+      clientesCount: clientsCount,
+    };
+
+    return homeState.summary;
   }
 
   function syncDashboardPayload(payload = null, options = {}) {
@@ -2035,11 +2505,15 @@ export const HomeView = (() => {
           dashboard.usuariosTotal,
           dashboard.totalUsers,
           dashboard.totalUsuarios,
+          dashboard.usersCount,
+          dashboard.usuariosCount,
 
           homeState.summary.usersCount,
           homeState.summary.usuariosCount,
           homeState.summary.totalUsers,
           homeState.summary.totalUsuarios,
+          homeState.summary.activeUsers,
+          homeState.summary.usuariosActivos,
           homeState.summary.users?.total,
           homeState.summary.usuarios?.total
         ),
@@ -2057,12 +2531,16 @@ export const HomeView = (() => {
           dashboard.customersTotal,
           dashboard.totalClients,
           dashboard.totalClientes,
+          dashboard.clientsCount,
+          dashboard.clientesCount,
 
           homeState.summary.clientsCount,
           homeState.summary.clientesCount,
           homeState.summary.customersCount,
           homeState.summary.totalClients,
           homeState.summary.totalClientes,
+          homeState.summary.activeClients,
+          homeState.summary.clientesActivos,
           homeState.summary.clients?.total,
           homeState.summary.clientes?.total
         ),
@@ -2115,6 +2593,8 @@ export const HomeView = (() => {
       nowIso()
     );
 
+    ensureSummaryAliases();
+
     homeState.loaded = true;
     homeState.hydrated = true;
     homeState.error = "";
@@ -2123,7 +2603,73 @@ export const HomeView = (() => {
       writeCachePayload();
     }
 
+    safeLog("dashboard synced", {
+      tickets: homeState.tickets.length,
+      invoices: homeState.invoices.length,
+      users: homeState.users.length,
+      clients: homeState.clients.length,
+      summary: homeState.summary,
+    });
+
     return homeState.dashboard;
+  }
+
+  function hydrateBestEffort() {
+    let hydrated = false;
+
+    try {
+      const apiCache = hydrateHomeApiFromCache?.();
+
+      if (apiCache?.dashboard || hasOwnKeys(apiCache)) {
+        syncDashboardPayload(
+          apiCache.dashboard || apiCache,
+          {
+            requestId: apiCache.requestId || "",
+            lastSyncAt: apiCache.lastSyncAt || "",
+            writeCache: false,
+            preserveExisting: true,
+          }
+        );
+
+        hydrated = true;
+      }
+    } catch {}
+
+    try {
+      hydrated = hydrateLocalHomeCache() || hydrated;
+    } catch {}
+
+    try {
+      hydrateIncidenciasFromCache?.();
+      hydrated = true;
+    } catch {}
+
+    try {
+      const tickets = getTicketsFromStore();
+
+      if (tickets.length && !homeState.tickets.length) {
+        homeState.tickets = tickets;
+
+        homeState.ticketsRemoteCount = Math.max(
+          homeState.ticketsRemoteCount,
+          tickets.length
+        );
+
+        homeState.remoteCount = Math.max(
+          homeState.remoteCount,
+          tickets.length
+        );
+
+        homeState.hydrated = true;
+        homeState.loaded = true;
+
+        hydrated = true;
+      }
+    } catch {}
+
+    ensureSummaryAliases();
+
+    return hydrated;
   }
 
   /* =========================================================
@@ -2178,6 +2724,8 @@ export const HomeView = (() => {
     homeState.requestId = safeText(homeState.requestId, "");
     homeState.lastSyncAt = safeText(homeState.lastSyncAt, "");
 
+    ensureSummaryAliases();
+
     return homeState;
   }
 
@@ -2204,6 +2752,8 @@ export const HomeView = (() => {
     if (!homeState.activity.length) {
       homeState.activity = buildActivityFromData();
     }
+
+    ensureSummaryAliases();
 
     homeState.loaded = true;
     homeState.hydrated = true;
@@ -2511,9 +3061,7 @@ export const HomeView = (() => {
   ========================================================= */
 
   function getContainer() {
-    if (!isBrowser()) {
-      return null;
-    }
+    if (!isBrowser()) return null;
 
     return (
       AppCore?.dom?.viewContainer ||
@@ -2612,6 +3160,73 @@ export const HomeView = (() => {
     return !destroyed && token === renderToken;
   }
 
+  function buildDashboardForTemplate({
+    ticketsInput,
+    invoicesInput,
+    usersInput,
+    clientsInput,
+    activityInput,
+  } = {}) {
+    ensureSummaryAliases();
+
+    return {
+      ...safeObject(homeState.dashboard),
+
+      summary: homeState.summary,
+      stats: homeState.summary,
+      metrics: homeState.summary,
+      totals: homeState.summary,
+      counts: homeState.summary,
+
+      widgets: homeState.widgets,
+      cards: homeState.widgets,
+      kpis: homeState.widgets,
+
+      tickets: ticketsInput,
+      incidencias: ticketsInput,
+
+      facturas: invoicesInput,
+      invoices: invoicesInput,
+
+      users: usersInput,
+      usuarios: usersInput,
+
+      clients: clientsInput,
+      clientes: clientsInput,
+      customers: clientsInput,
+
+      activity: activityInput,
+      activities: activityInput,
+      recent: activityInput,
+      recentActivity: activityInput,
+
+      ticketsTotal: homeState.ticketsRemoteCount,
+      incidenciasTotal: homeState.ticketsRemoteCount,
+      totalTickets: homeState.ticketsRemoteCount,
+      totalIncidencias: homeState.ticketsRemoteCount,
+
+      invoicesTotal: homeState.invoicesRemoteCount,
+      facturasTotal: homeState.invoicesRemoteCount,
+      totalInvoices: homeState.invoicesRemoteCount,
+      totalFacturas: homeState.invoicesRemoteCount,
+
+      usersTotal: homeState.usersRemoteCount,
+      usuariosTotal: homeState.usersRemoteCount,
+      totalUsers: homeState.usersRemoteCount,
+      totalUsuarios: homeState.usersRemoteCount,
+
+      clientsTotal: homeState.clientsRemoteCount,
+      clientesTotal: homeState.clientsRemoteCount,
+      customersTotal: homeState.clientsRemoteCount,
+      totalClients: homeState.clientsRemoteCount,
+      totalClientes: homeState.clientsRemoteCount,
+      totalCustomers: homeState.clientsRemoteCount,
+
+      updatedAt: homeState.lastSyncAt || homeState.dashboard?.updatedAt || "",
+      generatedAt: homeState.dashboard?.generatedAt || homeState.lastSyncAt || "",
+    };
+  }
+
   function buildHtml() {
     ensureBaseState();
 
@@ -2630,6 +3245,8 @@ export const HomeView = (() => {
     homeState.tickets = tickets;
     homeState.remoteCount = remoteCount;
     homeState.ticketsRemoteCount = remoteCount;
+
+    ensureSummaryAliases();
 
     const activity = homeState.activity.length
       ? homeState.activity
@@ -2650,6 +3267,14 @@ export const HomeView = (() => {
     );
     const activityInput = buildCollectionInput(activity, activity.length);
 
+    const dashboardForTemplate = buildDashboardForTemplate({
+      ticketsInput,
+      invoicesInput,
+      usersInput,
+      clientsInput,
+      activityInput,
+    });
+
     return `
       <section
         class="panel-content dashboard ready"
@@ -2661,8 +3286,12 @@ export const HomeView = (() => {
             user,
             role,
 
-            dashboard: homeState.dashboard,
+            dashboard: dashboardForTemplate,
             summary: homeState.summary,
+            stats: homeState.summary,
+            metrics: homeState.summary,
+            totals: homeState.summary,
+
             widgets: homeState.widgets,
 
             tickets: ticketsInput,
@@ -2676,9 +3305,11 @@ export const HomeView = (() => {
 
             clients: clientsInput,
             clientes: clientsInput,
+            customers: clientsInput,
 
             activity: activityInput,
             recentActivity: activityInput,
+            recent: activityInput,
 
             totalCount: remoteCount,
             remoteCount,
@@ -2695,6 +3326,12 @@ export const HomeView = (() => {
               user,
               role,
 
+              dashboard: dashboardForTemplate,
+              summary: homeState.summary,
+              stats: homeState.summary,
+              metrics: homeState.summary,
+              totals: homeState.summary,
+
               items: tickets,
               tickets: ticketsInput,
               incidencias: ticketsInput,
@@ -2707,9 +3344,11 @@ export const HomeView = (() => {
 
               clients: clientsInput,
               clientes: clientsInput,
+              customers: clientsInput,
 
               activity: activityInput,
               recentActivity: activityInput,
+              recent: activityInput,
 
               totalCount: remoteCount,
               remoteCount,
@@ -2767,9 +3406,7 @@ export const HomeView = (() => {
      DATA
   ========================================================= */
 
-  async function loadTicketsFallback({
-    force = false,
-  } = {}) {
+  async function loadTicketsFallback({ force = false } = {}) {
     try {
       await loadIncidencias({
         force,
@@ -2791,6 +3428,7 @@ export const HomeView = (() => {
         );
 
         homeState.activity = buildActivityFromData();
+        ensureSummaryAliases();
       }
 
       return tickets;
@@ -2852,6 +3490,10 @@ export const HomeView = (() => {
         preserveExisting: true,
       });
 
+      await loadSecondaryCollections({
+        force,
+      });
+
       if (!getTickets().length) {
         await loadTicketsFallback({
           force,
@@ -2871,33 +3513,65 @@ export const HomeView = (() => {
         dashboard: homeState.dashboard,
         summary: homeState.summary,
         tickets: getTickets(),
+        facturas: homeState.invoices,
+        users: homeState.users,
+        usuarios: homeState.users,
+        clients: homeState.clients,
+        clientes: homeState.clients,
         force,
         silent,
         asRefresh,
+      });
+
+      safeLog("loaded", {
+        tickets: getTickets().length,
+        invoices: homeState.invoices.length,
+        users: homeState.users.length,
+        clients: homeState.clients.length,
+        summary: homeState.summary,
       });
 
       return getTickets();
     } catch (error) {
       const message = safeErrorMessage(error);
 
-      await loadTicketsFallback({
-        force,
-      });
+      await Promise.allSettled([
+        loadTicketsFallback({
+          force,
+        }),
+        loadSecondaryCollections({
+          force,
+        }),
+      ]);
 
       const recoveredTickets = getTickets();
 
-      if (recoveredTickets.length) {
+      if (
+        recoveredTickets.length ||
+        homeState.invoices.length ||
+        homeState.users.length ||
+        homeState.clients.length ||
+        hasOwnKeys(homeState.summary)
+      ) {
         homeState.error = "";
         homeState.loaded = true;
         homeState.hydrated = true;
-        homeState.activity = buildActivityFromData();
+        homeState.activity = homeState.activity.length
+          ? homeState.activity
+          : buildActivityFromData();
         homeState.lastSyncAt = homeState.lastSyncAt || nowIso();
 
         markIdle();
+        ensureSummaryAliases();
         writeCachePayload();
 
         safeEmit("home:loaded:fallback", {
           tickets: recoveredTickets,
+          facturas: homeState.invoices,
+          users: homeState.users,
+          usuarios: homeState.users,
+          clients: homeState.clients,
+          clientes: homeState.clients,
           error,
           message,
         });
@@ -4000,8 +4674,11 @@ export const HomeView = (() => {
     getItems: () => getTickets(),
     getTickets: () => getTickets(),
     getInvoices: () => safeArray(homeState.invoices),
+    getFacturas: () => safeArray(homeState.invoices),
     getUsers: () => safeArray(homeState.users),
+    getUsuarios: () => safeArray(homeState.users),
     getClients: () => safeArray(homeState.clients),
+    getClientes: () => safeArray(homeState.clients),
     getActivity: () => safeArray(homeState.activity),
     getDashboard: () => safeObject(homeState.dashboard),
     getSummary: () => safeObject(homeState.summary),
@@ -4017,30 +4694,47 @@ export const HomeView = (() => {
 
     getHomeApiSnapshot,
 
-    getState: () => ({
-      ...homeState,
+    getState: () => {
+      ensureBaseState();
 
-      user: getCurrentUser(),
-      role: getCurrentRole(),
-      isAdmin: isAdminRole(getCurrentRole()),
+      return {
+        ...homeState,
 
-      initialized,
-      destroyed,
+        user: getCurrentUser(),
+        role: getCurrentRole(),
+        isAdmin: isAdminRole(getCurrentRole()),
 
-      hasInflightInit: Boolean(inflightInit),
-      hasInflightReload: Boolean(inflightReload),
-      hasQueuedReload: Boolean(queuedReloadOptions),
-      hasInflightOpenTicket: Boolean(inflightOpenTicket),
-      inflightOpenTicketId,
+        initialized,
+        destroyed,
 
-      pendingCreateRequest,
+        hasInflightInit: Boolean(inflightInit),
+        hasInflightReload: Boolean(inflightReload),
+        hasQueuedReload: Boolean(queuedReloadOptions),
+        hasInflightOpenTicket: Boolean(inflightOpenTicket),
+        inflightOpenTicketId,
 
-      itemsCount: getTickets().length,
-      pageItems: getPaginationMeta(getTickets()).items,
-      pagination: getPaginationMeta(getTickets()),
+        pendingCreateRequest,
 
-      apiSnapshot: getHomeApiSnapshot?.(),
-    }),
+        itemsCount: getTickets().length,
+        ticketsCount: getTickets().length,
+        invoicesCount: homeState.invoices.length,
+        facturasCount: homeState.invoices.length,
+        usersCount: homeState.users.length,
+        usuariosCount: homeState.users.length,
+        clientsCount: homeState.clients.length,
+        clientesCount: homeState.clients.length,
+
+        ticketsRemoteCount: homeState.ticketsRemoteCount,
+        invoicesRemoteCount: homeState.invoicesRemoteCount,
+        usersRemoteCount: homeState.usersRemoteCount,
+        clientsRemoteCount: homeState.clientsRemoteCount,
+
+        pageItems: getPaginationMeta(getTickets()).items,
+        pagination: getPaginationMeta(getTickets()),
+
+        apiSnapshot: getHomeApiSnapshot?.(),
+      };
+    },
 
     get initialized() {
       return initialized;

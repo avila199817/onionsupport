@@ -3,6 +3,12 @@
    Archivo: src/ui/sidebar/template.js
 
    FINAL EXTREME SYSTEM · SIDEBAR TEMPLATE · I18N/A11Y/DOM SAFE · 10/10
+   PATCH · ROUTES CANÓNICAS · ACTIVE STATE READY · APPLE INDICATOR READY
+   PATCH · FACTURAS / INCIDENCIAS ROUTE HARDENED
+   PATCH · DROPDOWN ROUTE BUTTONS SAFE
+   PATCH · ADMIN ITEMS HIDDEN-BUT-RECOVERABLE
+   PATCH · NO NATIVE TITLE · CUSTOM TOOLTIP ONLY
+   PATCH · DATA-ROUTE / DATA-HREF / DATA-TO CONSISTENTES
 
    RESPONSABILIDADES:
    - generar el HTML base del sidebar
@@ -36,6 +42,9 @@
    - rutas admin ocultas de inicio hasta applyRoleVisibility()
    - avatar image sin src inicial para evitar request vacío
    - menú preparado para indicador activo tipo Apple desde state.js
+   - cada item declara ruta canónica única
+   - Facturas SIEMPRE /facturas
+   - Incidencias SIEMPRE /incidencias
 ========================================================= */
 
 import { I18n } from "../../i18n/index.js";
@@ -55,17 +64,17 @@ import {
    LOCAL CONSTANTS
 ========================================================= */
 
-const SIDEBAR_TEMPLATE_VERSION = "sidebar-template-v5-final-pro";
+export const SIDEBAR_TEMPLATE_VERSION = "sidebar-template-v6-route-hardened";
 
-const SIDEBAR_LOGO_ID = "homeLink";
-const SIDEBAR_TOGGLE_ID = "toggleSidebar";
-const SIDEBAR_MOBILE_TOGGLE_ID = "toggleSidebarMobile";
+export const SIDEBAR_LOGO_ID = "homeLink";
+export const SIDEBAR_TOGGLE_ID = "toggleSidebar";
+export const SIDEBAR_MOBILE_TOGGLE_ID = "toggleSidebarMobile";
 
-const SIDEBAR_AVATAR_IMAGE_ID = "sidebarAvatarImage";
-const SIDEBAR_AVATAR_FALLBACK_ID = "sidebarAvatarFallback";
-const SIDEBAR_USER_PLAN_ID = "sidebarUserPlan";
+export const SIDEBAR_AVATAR_IMAGE_ID = "sidebarAvatarImage";
+export const SIDEBAR_AVATAR_FALLBACK_ID = "sidebarAvatarFallback";
+export const SIDEBAR_USER_PLAN_ID = "sidebarUserPlan";
 
-const ROUTES = Object.freeze({
+export const SIDEBAR_ROUTES = Object.freeze({
   home: "/",
   tickets: "/incidencias",
   invoices: "/facturas",
@@ -74,6 +83,36 @@ const ROUTES = Object.freeze({
   account: "/cuenta",
   settings: "/ajustes",
   server: "/servidor",
+});
+
+export const SIDEBAR_ROUTE_ALIASES = Object.freeze({
+  "/home": SIDEBAR_ROUTES.home,
+  "/dashboard": SIDEBAR_ROUTES.home,
+
+  "/tickets": SIDEBAR_ROUTES.tickets,
+  "/ticket": SIDEBAR_ROUTES.tickets,
+  "/incidents": SIDEBAR_ROUTES.tickets,
+  "/incident": SIDEBAR_ROUTES.tickets,
+
+  "/invoices": SIDEBAR_ROUTES.invoices,
+  "/invoice": SIDEBAR_ROUTES.invoices,
+  "/billing": SIDEBAR_ROUTES.invoices,
+
+  "/users": SIDEBAR_ROUTES.users,
+  "/user": SIDEBAR_ROUTES.users,
+
+  "/clients": SIDEBAR_ROUTES.clients,
+  "/client": SIDEBAR_ROUTES.clients,
+  "/customers": SIDEBAR_ROUTES.clients,
+  "/customer": SIDEBAR_ROUTES.clients,
+
+  "/account": SIDEBAR_ROUTES.account,
+  "/profile": SIDEBAR_ROUTES.account,
+
+  "/settings": SIDEBAR_ROUTES.settings,
+  "/config": SIDEBAR_ROUTES.settings,
+
+  "/server": SIDEBAR_ROUTES.server,
 });
 
 /* =========================================================
@@ -117,22 +156,6 @@ function escapeAttr(value = "") {
   return escapeHtml(value);
 }
 
-function normalizeRoute(value = "/") {
-  const text = safeText(value, "/");
-
-  if (/^https?:\/\//i.test(text)) {
-    return text;
-  }
-
-  if (text.startsWith("#")) {
-    return text;
-  }
-
-  return text.startsWith("/")
-    ? text
-    : `/${text}`;
-}
-
 function normalizeKey(value = "") {
   return safeText(value, "")
     .toLowerCase()
@@ -140,6 +163,55 @@ function normalizeKey(value = "") {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9:_-]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function isUnsafeHref(value = "") {
+  const raw = safeText(value, "").toLowerCase();
+
+  return Boolean(
+    raw.startsWith("javascript:") ||
+      raw.startsWith("data:") ||
+      raw.startsWith("vbscript:") ||
+      raw.startsWith("file:")
+  );
+}
+
+function normalizeRoute(value = "/") {
+  let text = safeText(value, "/");
+
+  if (!text) return "/";
+
+  if (isUnsafeHref(text)) return "/";
+
+  if (/^https?:\/\//i.test(text)) {
+    return text;
+  }
+
+  if (text.startsWith("#/")) {
+    text = text.replace(/^#\/?/, "/");
+  } else if (text.startsWith("#!")) {
+    text = text.replace(/^#!\/?/, "/");
+  } else if (text.startsWith("#")) {
+    return text;
+  }
+
+  text = text.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+
+  if (!text.startsWith("/")) {
+    text = `/${text}`;
+  }
+
+  const [pathname, query = ""] = text.split("?");
+
+  let cleanPathname = pathname || "/";
+
+  if (cleanPathname.length > 1) {
+    cleanPathname = cleanPathname.replace(/\/+$/g, "") || "/";
+  }
+
+  const aliased = SIDEBAR_ROUTE_ALIASES[cleanPathname] || cleanPathname;
+
+  return query ? `${aliased}?${query}` : aliased;
 }
 
 function attrIf(name = "", enabled = false) {
@@ -201,6 +273,8 @@ const Icons = Object.freeze({
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" focusable="false" aria-hidden="true">
               <path d="M6 2h9l5 5v15H6z" stroke="currentColor" stroke-width="1.6"/>
               <path d="M14 2v6h6" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M8.5 12h7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              <path d="M8.5 16h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
             </svg>
   `,
 
@@ -427,15 +501,101 @@ function getSidebarLabels() {
 }
 
 /* =========================================================
+   MENU CONFIG
+========================================================= */
+
+function getMainMenuItems(labels) {
+  return [
+    {
+      key: "home",
+      route: SIDEBAR_ROUTES.home,
+      label: labels.home,
+      i18nKey: "sidebar.menu.home",
+      icon: Icons.home,
+      adminOnly: false,
+    },
+
+    {
+      key: "tickets",
+      route: SIDEBAR_ROUTES.tickets,
+      label: labels.tickets,
+      i18nKey: "sidebar.menu.tickets",
+      icon: Icons.tickets,
+      adminOnly: false,
+    },
+
+    {
+      key: "invoices",
+      route: SIDEBAR_ROUTES.invoices,
+      label: labels.invoices,
+      i18nKey: "sidebar.menu.invoices",
+      icon: Icons.invoices,
+      adminOnly: false,
+    },
+
+    {
+      key: "users",
+      route: SIDEBAR_ROUTES.users,
+      label: labels.users,
+      i18nKey: "sidebar.menu.users",
+      icon: Icons.users,
+      adminOnly: true,
+    },
+
+    {
+      key: "clients",
+      route: SIDEBAR_ROUTES.clients,
+      label: labels.clients,
+      i18nKey: "sidebar.menu.clients",
+      icon: Icons.clients,
+      adminOnly: true,
+    },
+
+    {
+      key: "account",
+      route: SIDEBAR_ROUTES.account,
+      label: labels.account,
+      i18nKey: "sidebar.menu.account",
+      icon: Icons.account,
+      adminOnly: false,
+    },
+
+    {
+      key: "settings",
+      route: SIDEBAR_ROUTES.settings,
+      label: labels.settings,
+      i18nKey: "sidebar.menu.settings",
+      icon: Icons.settings,
+      adminOnly: false,
+    },
+
+    {
+      key: "server",
+      route: SIDEBAR_ROUTES.server,
+      label: labels.server,
+      i18nKey: "sidebar.menu.server",
+      icon: Icons.server,
+      adminOnly: true,
+    },
+  ];
+}
+
+/* =========================================================
    MENU ITEM
 ========================================================= */
 
 function renderAdminVisibilityAttrs(adminOnly = false) {
   if (!adminOnly) {
     return `
+          data-role="user"
+          data-required-role=""
+          data-requires-role=""
+          data-admin-only="false"
+          data-sidebar-admin-only="false"
           data-sidebar-visible="true"
           data-role-visible="true"
           data-admin-visible="true"
+          data-hidden-default="false"
         `;
   }
 
@@ -448,6 +608,7 @@ function renderAdminVisibilityAttrs(adminOnly = false) {
           data-sidebar-visible="false"
           data-role-visible="false"
           data-admin-visible="false"
+          data-hidden-default="true"
           aria-hidden="true"
           tabindex="-1"
           hidden
@@ -464,26 +625,34 @@ function renderMenuItem({
   extraAttrs = "",
 } = {}) {
   const route = normalizeRoute(href);
-  const cleanHref = escapeAttr(route);
+  const routeKey = normalizeKey(key || label || route);
+  const cleanRoute = escapeAttr(route);
   const cleanLabel = escapeAttr(label);
   const cleanI18nKey = escapeAttr(i18nKey);
-  const itemKey = escapeAttr(normalizeKey(key || label || route));
+  const cleanRouteKey = escapeAttr(routeKey);
 
   return `
         <a
-          href="${cleanHref}"
-          data-spa
-          data-route="${cleanHref}"
-          data-href="${cleanHref}"
-          data-to="${cleanHref}"
+          href="${cleanRoute}"
+          data-spa="true"
+          data-route="${cleanRoute}"
+          data-href="${cleanRoute}"
+          data-to="${cleanRoute}"
+          data-public-path="${cleanRoute}"
+          data-canonical-path="${cleanRoute}"
+          data-sidebar-route="${cleanRoute}"
+          data-sidebar-route-canonical="${cleanRoute}"
           data-sidebar-nav="true"
           data-sidebar-item="true"
-          data-sidebar-item-key="${itemKey}"
-          data-nav-key="${itemKey}"
-          data-route-key="${itemKey}"
+          data-sidebar-item-key="${cleanRouteKey}"
+          data-nav-key="${cleanRouteKey}"
+          data-route-key="${cleanRouteKey}"
+          data-menu-key="${cleanRouteKey}"
           data-action="navigate"
           data-sidebar-action="navigate"
+          data-nav-action="navigate"
           data-active="false"
+          data-current="false"
           class="menu-item"
           data-tooltip="${cleanLabel}"
           ${i18nKey ? `data-i18n-data-tooltip="${cleanI18nKey}"` : ""}
@@ -524,7 +693,8 @@ function renderDropdownButton({
   const cleanLabel = escapeHtml(label);
   const cleanI18nKey = escapeAttr(i18nKey);
   const cleanAction = escapeAttr(action || "dropdown-action");
-  const cleanRoute = escapeAttr(route ? normalizeRoute(route) : "");
+  const normalizedRoute = route ? normalizeRoute(route) : "";
+  const cleanRoute = escapeAttr(normalizedRoute);
 
   return `
           <button
@@ -535,7 +705,7 @@ function renderDropdownButton({
             tabindex="-1"
             data-sidebar-action="${cleanAction}"
             data-action="${cleanAction}"
-            ${cleanRoute ? `data-route="${cleanRoute}" data-href="${cleanRoute}" data-to="${cleanRoute}"` : ""}
+            ${cleanRoute ? `data-route="${cleanRoute}" data-href="${cleanRoute}" data-to="${cleanRoute}" data-public-path="${cleanRoute}" data-canonical-path="${cleanRoute}"` : ""}
             aria-label="${escapeAttr(label)}"
             ${i18nKey ? `data-i18n-aria-label="${cleanI18nKey}"` : ""}
             ${attrIf("disabled", disabled)}
@@ -562,11 +732,13 @@ ${icon}
 function renderLogo(labels) {
   return `
         <a
-          href="${ROUTES.home}"
-          data-spa
-          data-route="${ROUTES.home}"
-          data-href="${ROUTES.home}"
-          data-to="${ROUTES.home}"
+          href="${SIDEBAR_ROUTES.home}"
+          data-spa="true"
+          data-route="${SIDEBAR_ROUTES.home}"
+          data-href="${SIDEBAR_ROUTES.home}"
+          data-to="${SIDEBAR_ROUTES.home}"
+          data-public-path="${SIDEBAR_ROUTES.home}"
+          data-canonical-path="${SIDEBAR_ROUTES.home}"
           data-sidebar-logo="true"
           data-sidebar-action="navigate"
           data-action="navigate"
@@ -647,6 +819,8 @@ ${Icons.mobileToggle}
 }
 
 function renderMainMenu(labels) {
+  const items = getMainMenuItems(labels);
+
   return `
       <nav
         class="sidebar-menu"
@@ -655,76 +829,20 @@ function renderMainMenu(labels) {
         data-i18n-aria-label="sidebar.aria.navigation"
         data-sidebar-menu="true"
         data-nav-area="sidebar"
+        data-active-route=""
+        data-active-key=""
         data-indicator-ready="false"
         data-indicator-route=""
         data-indicator-reason="initial"
       >
-${renderMenuItem({
-  href: ROUTES.home,
-  label: labels.home,
-  i18nKey: "sidebar.menu.home",
-  key: "home",
-  icon: Icons.home,
-})}
-
-${renderMenuItem({
-  href: ROUTES.tickets,
-  label: labels.tickets,
-  i18nKey: "sidebar.menu.tickets",
-  key: "tickets",
-  icon: Icons.tickets,
-})}
-
-${renderMenuItem({
-  href: ROUTES.invoices,
-  label: labels.invoices,
-  i18nKey: "sidebar.menu.invoices",
-  key: "invoices",
-  icon: Icons.invoices,
-})}
-
-${renderMenuItem({
-  href: ROUTES.users,
-  label: labels.users,
-  i18nKey: "sidebar.menu.users",
-  key: "users",
-  adminOnly: true,
-  icon: Icons.users,
-})}
-
-${renderMenuItem({
-  href: ROUTES.clients,
-  label: labels.clients,
-  i18nKey: "sidebar.menu.clients",
-  key: "clients",
-  adminOnly: true,
-  icon: Icons.clients,
-})}
-
-${renderMenuItem({
-  href: ROUTES.account,
-  label: labels.account,
-  i18nKey: "sidebar.menu.account",
-  key: "account",
-  icon: Icons.account,
-})}
-
-${renderMenuItem({
-  href: ROUTES.settings,
-  label: labels.settings,
-  i18nKey: "sidebar.menu.settings",
-  key: "settings",
-  icon: Icons.settings,
-})}
-
-${renderMenuItem({
-  href: ROUTES.server,
-  label: labels.server,
-  i18nKey: "sidebar.menu.server",
-  key: "server",
-  adminOnly: true,
-  icon: Icons.server,
-})}
+${items.map((item) => renderMenuItem({
+  href: item.route,
+  label: item.label,
+  i18nKey: item.i18nKey,
+  key: item.key,
+  icon: item.icon,
+  adminOnly: item.adminOnly,
+})).join("\n")}
       </nav>
   `;
 }
@@ -851,7 +969,7 @@ ${renderDropdownButton({
   label: labels.profile,
   i18nKey: "sidebar.user.profile",
   action: "profile",
-  route: ROUTES.account,
+  route: SIDEBAR_ROUTES.account,
   icon: Icons.account,
 })}
 
@@ -859,7 +977,7 @@ ${renderDropdownButton({
   label: labels.userSettings,
   i18nKey: "sidebar.user.settings",
   action: "settings",
-  route: ROUTES.settings,
+  route: SIDEBAR_ROUTES.settings,
   icon: Icons.settings,
 })}
 
@@ -940,6 +1058,38 @@ ${renderRecents(labels)}
 ${renderFooter(labels)}
     </aside>
   `;
+}
+
+/* =========================================================
+   DEBUG
+========================================================= */
+
+export function getSidebarTemplateSnapshot() {
+  return {
+    version: SIDEBAR_TEMPLATE_VERSION,
+    routes: {
+      ...SIDEBAR_ROUTES,
+    },
+    aliases: {
+      ...SIDEBAR_ROUTE_ALIASES,
+    },
+    ids: {
+      sidebarRootId: SIDEBAR_ROOT_ID,
+      sidebarMenuId: SIDEBAR_MENU_ID,
+      sidebarRecentsId: SIDEBAR_RECENTS_ID,
+      userToggleId: USER_TOGGLE_ID,
+      userDropdownId: USER_DROPDOWN_ID,
+      logoutButtonId: LOGOUT_BUTTON_ID,
+      sidebarAvatarId: SIDEBAR_AVATAR_ID,
+      sidebarNameId: SIDEBAR_NAME_ID,
+      logoId: SIDEBAR_LOGO_ID,
+      desktopToggleId: SIDEBAR_TOGGLE_ID,
+      mobileToggleId: SIDEBAR_MOBILE_TOGGLE_ID,
+      avatarImageId: SIDEBAR_AVATAR_IMAGE_ID,
+      avatarFallbackId: SIDEBAR_AVATAR_FALLBACK_ID,
+      userPlanId: SIDEBAR_USER_PLAN_ID,
+    },
+  };
 }
 
 /* =========================================================

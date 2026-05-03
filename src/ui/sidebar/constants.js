@@ -15,19 +15,24 @@
    - scope de cleanup / eventos
    - eventos públicos del sidebar
    - clases visuales compartidas
-   - flags de rol/admin
+   - flags de rol/admin/permisos
    - orden canónico del menú
    - aliases legacy controlados
+   - compatibilidad con template.js / dom.js / state.js / events.js
+   - compatibilidad con visibility.js / user.js / actions.js
 
-   HARDENING:
+   HARDENING EXTREMO:
    - ids únicos y estables
    - rutas canónicas sin query/hash
    - storage key versionada / namespaced
    - compatibilidad legacy con sidebar-collapsed/sidebarOpen
-   - constantes listas para i18n / template / eventos / estado
    - desktop toggle alineado con DOM real: toggleSidebar
    - sidebarToggle queda solo como legacy selector
+   - constantes listas para i18n / template / eventos / estado
+   - eventos ampliados sin romper builds anteriores
+   - permisos admin-like centralizados
    - no se fuerzan imports circulares
+   - solo constantes puras
 ========================================================= */
 
 /* =========================================================
@@ -37,7 +42,7 @@
 export const SIDEBAR_MODULE_NAME = "SidebarUI";
 export const SIDEBAR_MODULE_KEY = "sidebar";
 export const SIDEBAR_COMPONENT_NAME = "sidebar";
-export const SIDEBAR_CONSTANTS_VERSION = "sidebar-constants-v5-final-pro";
+export const SIDEBAR_CONSTANTS_VERSION = "sidebar-constants-v6-final-extreme";
 
 /* =========================================================
    SCOPE
@@ -48,28 +53,43 @@ export const SIDEBAR_SCOPE = SCOPE;
 
 export const SIDEBAR_DOM_SCOPE = `${SCOPE}:dom`;
 export const SIDEBAR_CORE_SCOPE = `${SCOPE}:core`;
+export const SIDEBAR_EVENTS_SCOPE = `${SCOPE}:events`;
 export const SIDEBAR_FALLBACK_SCOPE = `${SCOPE}:fallback`;
+export const SIDEBAR_STATE_SCOPE = `${SCOPE}:state`;
+export const SIDEBAR_DROPDOWN_SCOPE = `${SCOPE}:dropdown`;
+export const SIDEBAR_VISIBILITY_SCOPE = `${SCOPE}:visibility`;
+export const SIDEBAR_ACTIONS_SCOPE = `${SCOPE}:actions`;
 
 /* =========================================================
    RESPONSIVE
 ========================================================= */
 
 export const MOBILE_BREAKPOINT = 900;
+export const SIDEBAR_MOBILE_BREAKPOINT = MOBILE_BREAKPOINT;
 
 /* =========================================================
    TIMINGS
 ========================================================= */
 
 export const SIDEBAR_TRANSITION_MS = 380;
+
 export const SIDEBAR_VISUAL_SYNC_DELAY_MS = 32;
 export const SIDEBAR_VISUAL_SYNC_AFTER_NAV_MS = 80;
+export const SIDEBAR_VISUAL_SYNC_AFTER_TRANSITION_MS =
+  SIDEBAR_TRANSITION_MS + 50;
+
 export const SIDEBAR_HOVER_FLUSH_MS = 96;
+
 export const SIDEBAR_BIND_DEDUP_WINDOW_MS = 250;
+export const SIDEBAR_REPAIR_DEDUP_WINDOW_MS = 180;
 
 export const SIDEBAR_INDICATOR_DEFAULT_DELAY_MS = 40;
 export const SIDEBAR_INDICATOR_RECALC_DELAY_MS = 32;
 export const SIDEBAR_INDICATOR_SETTLED_DELAY_MS =
   SIDEBAR_TRANSITION_MS + 36;
+
+export const SIDEBAR_DROPDOWN_CLOSE_DELAY_MS = 0;
+export const SIDEBAR_DROPDOWN_FOCUS_DELAY_MS = 24;
 
 /* =========================================================
    DOM IDS
@@ -131,6 +151,33 @@ export const AJUSTES_ROUTE = "/ajustes";
 export const SERVER_ROUTE = "/servidor";
 export const LOGIN_ROUTE = "/login";
 
+export const SIDEBAR_ROUTE_KEYS = Object.freeze({
+  home: "home",
+
+  tickets: "tickets",
+  incidencias: "incidencias",
+
+  invoices: "invoices",
+  facturas: "facturas",
+
+  users: "users",
+  usuarios: "usuarios",
+
+  clients: "clients",
+  clientes: "clientes",
+
+  account: "account",
+  cuenta: "cuenta",
+
+  settings: "settings",
+  ajustes: "ajustes",
+
+  server: "server",
+  servidor: "servidor",
+
+  login: "login",
+});
+
 export const SIDEBAR_ROUTES = Object.freeze({
   home: HOME_ROUTE,
 
@@ -159,36 +206,51 @@ export const SIDEBAR_ROUTES = Object.freeze({
 });
 
 export const SIDEBAR_ROUTE_ALIASES = Object.freeze({
+  "/": HOME_ROUTE,
   "/home": HOME_ROUTE,
   "/inicio": HOME_ROUTE,
+  "/dashboard": HOME_ROUTE,
+  "/panel": HOME_ROUTE,
 
   "/tickets": INCIDENCIAS_ROUTE,
   "/ticket": INCIDENCIAS_ROUTE,
   "/incidencia": INCIDENCIAS_ROUTE,
+  "/incidencias": INCIDENCIAS_ROUTE,
+  "/soporte": INCIDENCIAS_ROUTE,
+  "/support": INCIDENCIAS_ROUTE,
 
   "/invoices": FACTURAS_ROUTE,
   "/invoice": FACTURAS_ROUTE,
   "/factura": FACTURAS_ROUTE,
+  "/facturas": FACTURAS_ROUTE,
+  "/billing": FACTURAS_ROUTE,
+  "/facturacion": FACTURAS_ROUTE,
+  "/facturación": FACTURAS_ROUTE,
 
   "/users": USUARIOS_ROUTE,
   "/user": USUARIOS_ROUTE,
   "/usuario": USUARIOS_ROUTE,
+  "/usuarios": USUARIOS_ROUTE,
 
   "/clients": CLIENTES_ROUTE,
   "/client": CLIENTES_ROUTE,
   "/customers": CLIENTES_ROUTE,
   "/customer": CLIENTES_ROUTE,
   "/cliente": CLIENTES_ROUTE,
+  "/clientes": CLIENTES_ROUTE,
 
   "/account": CUENTA_ROUTE,
   "/profile": CUENTA_ROUTE,
   "/perfil": CUENTA_ROUTE,
+  "/cuenta": CUENTA_ROUTE,
 
   "/settings": AJUSTES_ROUTE,
+  "/ajustes": AJUSTES_ROUTE,
   "/configuracion": AJUSTES_ROUTE,
   "/configuración": AJUSTES_ROUTE,
 
   "/server": SERVER_ROUTE,
+  "/servidor": SERVER_ROUTE,
 });
 
 /* =========================================================
@@ -222,64 +284,83 @@ export const SIDEBAR_NAV_ITEMS = Object.freeze([
     key: SIDEBAR_MENU_KEYS.home,
     route: HOME_ROUTE,
     i18nKey: "sidebar.menu.home",
+    labelFallback: "Inicio",
     icon: "home",
     adminOnly: false,
+    order: 10,
   }),
 
   Object.freeze({
     key: SIDEBAR_MENU_KEYS.tickets,
     route: INCIDENCIAS_ROUTE,
     i18nKey: "sidebar.menu.tickets",
+    labelFallback: "Incidencias",
     icon: "tickets",
     adminOnly: false,
+    order: 20,
   }),
 
   Object.freeze({
     key: SIDEBAR_MENU_KEYS.invoices,
     route: FACTURAS_ROUTE,
     i18nKey: "sidebar.menu.invoices",
+    labelFallback: "Facturas",
     icon: "invoices",
     adminOnly: false,
+    order: 30,
   }),
 
   Object.freeze({
     key: SIDEBAR_MENU_KEYS.users,
     route: USUARIOS_ROUTE,
     i18nKey: "sidebar.menu.users",
+    labelFallback: "Usuarios",
     icon: "users",
     adminOnly: true,
+    requiredRole: "admin",
+    order: 40,
   }),
 
   Object.freeze({
     key: SIDEBAR_MENU_KEYS.clients,
     route: CLIENTES_ROUTE,
     i18nKey: "sidebar.menu.clients",
+    labelFallback: "Clientes",
     icon: "clients",
     adminOnly: true,
+    requiredRole: "admin",
+    order: 50,
   }),
 
   Object.freeze({
     key: SIDEBAR_MENU_KEYS.account,
     route: CUENTA_ROUTE,
     i18nKey: "sidebar.menu.account",
+    labelFallback: "Cuenta",
     icon: "account",
     adminOnly: false,
+    order: 60,
   }),
 
   Object.freeze({
     key: SIDEBAR_MENU_KEYS.settings,
     route: AJUSTES_ROUTE,
     i18nKey: "sidebar.menu.settings",
+    labelFallback: "Ajustes",
     icon: "settings",
     adminOnly: false,
+    order: 70,
   }),
 
   Object.freeze({
     key: SIDEBAR_MENU_KEYS.server,
     route: SERVER_ROUTE,
     i18nKey: "sidebar.menu.server",
+    labelFallback: "Servidor",
     icon: "server",
     adminOnly: true,
+    requiredRole: "admin",
+    order: 80,
   }),
 ]);
 
@@ -308,8 +389,14 @@ export const SIDEBAR_ACTIONS = Object.freeze({
 
   toggle: SIDEBAR_ACTION_TOGGLE,
   toggleSidebar: SIDEBAR_ACTION_TOGGLE,
+  sidebarToggle: SIDEBAR_ACTION_TOGGLE,
+
   toggleMobile: SIDEBAR_ACTION_TOGGLE_MOBILE,
+  mobileSidebarToggle: SIDEBAR_ACTION_TOGGLE_MOBILE,
+
   toggleUser: SIDEBAR_ACTION_TOGGLE_USER,
+  toggleUserDropdown: SIDEBAR_ACTION_TOGGLE_USER,
+  userDropdown: SIDEBAR_ACTION_TOGGLE_USER,
 
   openUserMenu: SIDEBAR_ACTION_OPEN_USER_MENU,
   closeUserMenu: SIDEBAR_ACTION_CLOSE_USER_MENU,
@@ -322,6 +409,35 @@ export const SIDEBAR_ACTIONS = Object.freeze({
   logout: SIDEBAR_ACTION_LOGOUT,
 });
 
+export const SIDEBAR_ACTION_ALIASES = Object.freeze({
+  "navigate": SIDEBAR_ACTION_NAVIGATE,
+  "go": SIDEBAR_ACTION_NAVIGATE,
+  "route": SIDEBAR_ACTION_NAVIGATE,
+
+  "toggle": SIDEBAR_ACTION_TOGGLE,
+  "collapse": SIDEBAR_ACTION_TOGGLE,
+  "toggle-collapse": SIDEBAR_ACTION_TOGGLE,
+  "sidebar-toggle": SIDEBAR_ACTION_TOGGLE,
+  "toggle-sidebar": SIDEBAR_ACTION_TOGGLE,
+
+  "mobile-toggle": SIDEBAR_ACTION_TOGGLE_MOBILE,
+  "toggle-mobile": SIDEBAR_ACTION_TOGGLE_MOBILE,
+  "mobile-sidebar-toggle": SIDEBAR_ACTION_TOGGLE_MOBILE,
+  "toggle-mobile-sidebar": SIDEBAR_ACTION_TOGGLE_MOBILE,
+
+  "user-menu": SIDEBAR_ACTION_TOGGLE_USER,
+  "user-dropdown": SIDEBAR_ACTION_TOGGLE_USER,
+  "toggle-dropdown": SIDEBAR_ACTION_TOGGLE_USER,
+  "toggle-user-menu": SIDEBAR_ACTION_TOGGLE_USER,
+  "toggle-user-dropdown": SIDEBAR_ACTION_TOGGLE_USER,
+
+  "signout": SIDEBAR_ACTION_LOGOUT,
+  "sign-out": SIDEBAR_ACTION_LOGOUT,
+  "logout": SIDEBAR_ACTION_LOGOUT,
+  "log-out": SIDEBAR_ACTION_LOGOUT,
+  "cerrar-sesion": SIDEBAR_ACTION_LOGOUT,
+});
+
 /* =========================================================
    DATA ATTRIBUTES
 ========================================================= */
@@ -329,6 +445,8 @@ export const SIDEBAR_ACTIONS = Object.freeze({
 export const SIDEBAR_DATA_ATTRS = Object.freeze({
   root: "data-sidebar",
   rootFlag: "data-sidebar-root",
+  component: "data-component",
+  templateVersion: "data-template-version",
 
   mount: "data-sidebar-mount",
 
@@ -339,32 +457,57 @@ export const SIDEBAR_DATA_ATTRS = Object.freeze({
   item: "data-sidebar-item",
   itemKey: "data-sidebar-item-key",
   nav: "data-sidebar-nav",
+  navKey: "data-nav-key",
+  routeKey: "data-route-key",
 
   action: "data-sidebar-action",
+  genericAction: "data-action",
+
   route: "data-route",
   href: "data-href",
   to: "data-to",
   spa: "data-spa",
 
   role: "data-role",
+  roles: "data-roles",
   adminOnly: "data-admin-only",
+  sidebarAdminOnly: "data-sidebar-admin-only",
   requiresRole: "data-requires-role",
+  requiresRoles: "data-requires-roles",
   requiredRole: "data-required-role",
+  requiredRoles: "data-required-roles",
+
+  permission: "data-permission",
+  permissions: "data-permissions",
+  sidebarPermission: "data-sidebar-permission",
+  sidebarPermissions: "data-sidebar-permissions",
 
   sidebarVisible: "data-sidebar-visible",
   roleVisible: "data-role-visible",
   adminVisible: "data-admin-visible",
 
   userToggle: "data-user-toggle",
+  sidebarUserToggle: "data-sidebar-user-toggle",
   userDropdown: "data-user-dropdown",
   userMenu: "data-user-menu",
+  sidebarUserDropdown: "data-sidebar-user-dropdown",
+  sidebarUserMenu: "data-sidebar-user-menu",
 
   dropdown: "data-dropdown",
   dropdownMenu: "data-dropdown-menu",
+  dropdownToggle: "data-dropdown-toggle",
+  dropdownTarget: "data-dropdown-target",
+
+  avatarRoot: "data-avatar-root",
+  sidebarAvatar: "data-sidebar-avatar",
+  userAvatar: "data-user-avatar",
+  sidebarName: "data-sidebar-name",
+  userName: "data-user-name",
 
   tooltip: "data-tooltip",
   i18n: "data-i18n",
   i18nAriaLabel: "data-i18n-aria-label",
+  i18nAlt: "data-i18n-alt",
   i18nDataTooltip: "data-i18n-data-tooltip",
 });
 
@@ -435,6 +578,7 @@ export const SIDEBAR_SELECTORS = Object.freeze({
     "#sidebar-user-toggle",
     "#sidebarUserMenuToggle",
     "#sidebar-user-menu-toggle",
+    "#user-toggle",
     ".user[role='button']",
     ".sidebar-user-toggle",
     ".sidebar-user__toggle",
@@ -444,6 +588,7 @@ export const SIDEBAR_SELECTORS = Object.freeze({
     ".user-menu-toggle",
     `[aria-controls="${USER_DROPDOWN_ID}"]`,
     "[data-user-toggle]",
+    "[data-user-menu-toggle]",
     "[data-sidebar-user-toggle]",
     `[data-sidebar-action="${SIDEBAR_ACTION_TOGGLE_USER}"]`,
     `[data-action="${SIDEBAR_ACTION_TOGGLE_USER}"]`,
@@ -455,6 +600,10 @@ export const SIDEBAR_SELECTORS = Object.freeze({
     "#sidebar-user-dropdown",
     "#sidebarUserMenu",
     "#sidebar-user-menu",
+    "#userDropdown",
+    "#user-dropdown",
+    "#userMenu",
+    "#user-menu",
     ".user-dropdown",
     ".user-menu",
     ".sidebar-user-dropdown",
@@ -522,11 +671,21 @@ export const SIDEBAR_SELECTORS = Object.freeze({
     "[data-user-name]",
   ].join(", "),
 
+  plan: [
+    `#${SIDEBAR_USER_PLAN_ID}`,
+    ".plan",
+    ".sidebar-user-plan",
+    "[data-sidebar-user-plan]",
+  ].join(", "),
+
   serverLink: [
     `#${SERVER_NAV_ID}`,
     `[data-sidebar-item-key="server"]`,
     `[data-nav-key="server"]`,
+    `[data-route-key="server"]`,
     `[data-route="${SERVER_ROUTE}"]`,
+    `[data-href="${SERVER_ROUTE}"]`,
+    `[data-to="${SERVER_ROUTE}"]`,
     `[href="${SERVER_ROUTE}"]`,
   ].join(", "),
 
@@ -549,6 +708,25 @@ export const SIDEBAR_SELECTORS = Object.freeze({
     "[data-required-role='admin']",
   ].join(", "),
 
+  roleManaged: [
+    "[data-role]",
+    "[data-roles]",
+    "[data-admin-only]",
+    "[data-sidebar-admin-only]",
+    "[data-requires-role]",
+    "[data-requires-roles]",
+    "[data-required-role]",
+    "[data-required-roles]",
+    "[data-sidebar-role]",
+    "[data-sidebar-roles]",
+    "[data-permission]",
+    "[data-permissions]",
+    "[data-sidebar-permission]",
+    "[data-sidebar-permissions]",
+    "[data-scope]",
+    "[data-scopes]",
+  ].join(", "),
+
   hiddenOrDisabled: [
     "[hidden]",
     "[inert]",
@@ -557,6 +735,29 @@ export const SIDEBAR_SELECTORS = Object.freeze({
     "[data-sidebar-visible='false']",
     "[data-role-visible='false']",
     "[data-admin-visible='false']",
+  ].join(", "),
+
+  tooltipBearing: [
+    "[title]",
+    "[data-tooltip]",
+    "[data-i18n-data-tooltip]",
+    "[aria-describedby]",
+  ].join(", "),
+
+  focusable: [
+    "a[href]",
+    "button",
+    "input",
+    "select",
+    "textarea",
+    "summary",
+    "details",
+    "audio[controls]",
+    "video[controls]",
+    "[tabindex]",
+    "[role='button']",
+    "[role='link']",
+    "[contenteditable='true']",
   ].join(", "),
 });
 
@@ -596,6 +797,9 @@ export const SIDEBAR_STORAGE_KEYS = Object.freeze({
   onionDesktopCollapsed: `${SIDEBAR_STORAGE_NAMESPACE_ONION}.desktopCollapsed`,
   onionDesktopOpen: `${SIDEBAR_STORAGE_NAMESPACE_ONION}.desktopOpen`,
   onionMobileOpen: `${SIDEBAR_STORAGE_NAMESPACE_ONION}.mobileOpen`,
+
+  lastActiveRoute: `${SIDEBAR_STORAGE_NAMESPACE}.lastActiveRoute`,
+  lastActivePublicPath: `${SIDEBAR_STORAGE_NAMESPACE}.lastActivePublicPath`,
 });
 
 /* =========================================================
@@ -622,10 +826,12 @@ export const SIDEBAR_CLASSES = Object.freeze({
   routerActive: "router-active",
 
   disabled: "is-disabled",
+  loading: "is-loading",
 
   dropdownOpen: "open",
   dropdownIsOpen: "is-open",
 
+  roleHidden: "is-role-hidden",
   adminHidden: "is-admin-hidden",
 
   transitioning: "is-transitioning",
@@ -656,6 +862,10 @@ export const SIDEBAR_DATASET_VALUES = Object.freeze({
   user: "user",
 
   page: "page",
+
+  ready: "ready",
+  pending: "pending",
+  error: "error",
 });
 
 /* =========================================================
@@ -667,6 +877,7 @@ export const SIDEBAR_EVENTS = Object.freeze({
   destroyed: "sidebar:destroyed",
 
   repaired: "sidebar:repaired",
+  repairDeduped: "sidebar:repair:deduped",
   refreshed: "sidebar:refreshed",
 
   eventsBound: "sidebar:events:bound",
@@ -687,10 +898,12 @@ export const SIDEBAR_EVENTS = Object.freeze({
 
   activeItemSynced: "sidebar:active:item:synced",
   activeRouteSynced: "sidebar:active-route:synced",
+  activeInvalidated: "sidebar:active:invalidated",
 
   indicatorSynced: "sidebar:indicator:synced",
   indicatorDisabled: "sidebar:indicator:disabled",
   indicatorCleared: "sidebar:indicator:cleared",
+  indicatorRefreshRequest: "sidebar:indicator:refresh-request",
 
   visualCommitted: "sidebar:visual:committed",
 
@@ -700,8 +913,12 @@ export const SIDEBAR_EVENTS = Object.freeze({
   transitionFinish: "sidebar:transition:finish",
 
   userRendered: "sidebar:user:rendered",
+  userAvatarLoaded: "sidebar:user:avatar:loaded",
+  userAvatarError: "sidebar:user:avatar:error",
 
   roleVisibilityApplied: "sidebar:role-visibility:applied",
+  visibilityApplied: "sidebar:visibility:applied",
+  rolesAppliedLegacy: "sidebar:roles:applied",
 
   dropdownOpen: "sidebar:dropdown:open",
   dropdownClose: "sidebar:dropdown:close",
@@ -716,8 +933,16 @@ export const SIDEBAR_EVENTS = Object.freeze({
   menuInteractionRestored: "sidebar:menu:interaction-restored",
 
   logoutStart: "sidebar:logout:start",
+  logoutRemoteStart: "sidebar:logout:remote:start",
+  logoutRemoteSuccess: "sidebar:logout:remote:success",
+  logoutRemoteError: "sidebar:logout:remote:error",
+  logoutRemoteSkipped: "sidebar:logout:remote:skipped",
+  logoutLocalCleared: "sidebar:logout:local-cleared",
+  logoutNavigateStart: "sidebar:logout:navigate:start",
+  logoutNavigateComplete: "sidebar:logout:navigate:complete",
   logoutComplete: "sidebar:logout:complete",
   logoutError: "sidebar:logout:error",
+  logoutFinally: "sidebar:logout:finally",
 });
 
 /* =========================================================
@@ -731,10 +956,13 @@ export const SIDEBAR_OBSERVED_APP_EVENTS = Object.freeze([
 
   "app:user:change",
   "app:user:updated",
+  "app:user-ui:sync",
+
   "app:session:change",
   "app:session:restored",
   "app:session:cleared",
   "app:auth:change",
+  "app:auth:ready",
 
   "app:route:change",
   "app:ui:repair-request",
@@ -749,6 +977,7 @@ export const SIDEBAR_OBSERVED_APP_EVENTS = Object.freeze([
 export const SIDEBAR_OBSERVED_AUTH_EVENTS = Object.freeze([
   "auth:change",
   "auth:updated",
+
   "auth:restore:success",
   "auth:session:restored",
   "auth:session:applied",
@@ -770,6 +999,8 @@ export const SIDEBAR_OBSERVED_ROUTER_EVENTS = Object.freeze([
   "router:route:change",
   "router:navigation:complete",
   "router:render:async-complete",
+  "router:shell:repair",
+  "router:shell:state",
 ]);
 
 /* =========================================================
@@ -782,7 +1013,9 @@ export const SIDEBAR_ADMIN_ROLE_KEYS = Object.freeze([
   "administrador",
   "superadmin",
   "super_admin",
+  "super-admin",
   "super_administrador",
+  "super-administrador",
   "owner",
   "root",
   "staff",
@@ -794,23 +1027,82 @@ export const SIDEBAR_ADMIN_PERMISSION_KEYS = Object.freeze([
   "admin.all",
   "admin.full",
   "admin.manage",
+  "admin:manage",
+  "admin.write",
+  "admin:write",
+  "admin.read",
+  "admin:read",
 
   "users.manage",
   "users:manage",
   "users.write",
   "users:write",
   "users.admin",
+  "users:admin",
+  "users.access",
+  "users:access",
 
   "usuarios.manage",
   "usuarios:manage",
   "usuarios.write",
   "usuarios:write",
   "usuarios.admin",
+  "usuarios:admin",
+  "usuarios.access",
+  "usuarios:access",
 
   "manage_users",
   "can_manage_users",
   "access_users",
   "can_access_users",
+
+  "clients.manage",
+  "clients:manage",
+  "clients.write",
+  "clients:write",
+  "clients.admin",
+  "clients:admin",
+
+  "clientes.manage",
+  "clientes:manage",
+  "clientes.write",
+  "clientes:write",
+  "clientes.admin",
+  "clientes:admin",
+
+  "server.manage",
+  "server:manage",
+  "server.admin",
+  "server:admin",
+  "server.access",
+  "server:access",
+
+  "servidor.manage",
+  "servidor:manage",
+  "servidor.admin",
+  "servidor:admin",
+  "servidor.access",
+  "servidor:access",
+
+  "tickets.manage",
+  "tickets:manage",
+  "tickets.admin",
+  "tickets:admin",
+
+  "incidencias.manage",
+  "incidencias:manage",
+  "incidencias.admin",
+  "incidencias:admin",
+
+  "facturas.manage",
+  "facturas:manage",
+  "facturas.admin",
+  "facturas:admin",
+
+  "invoices.manage",
+  "invoices:manage",
+  "invoices.admin",
+  "invoices:admin",
 ]);
 
 export const SIDEBAR_ADMIN_FLAG_KEYS = Object.freeze([
@@ -827,6 +1119,12 @@ export const SIDEBAR_ADMIN_FLAG_KEYS = Object.freeze([
 
   "canAccessUsers",
   "can_access_users",
+
+  "canManageClients",
+  "can_manage_clients",
+
+  "canAccessServer",
+  "can_access_server",
 ]);
 
 /* =========================================================
@@ -836,6 +1134,48 @@ export const SIDEBAR_ADMIN_FLAG_KEYS = Object.freeze([
 export const SIDEBAR_HANDLED_FLAG = "__onionSidebarHandled";
 export const SIDEBAR_EVENTS_HANDLED_FLAG = "__onionSidebarEventsHandled";
 export const SIDEBAR_HANDLED_REASON_FLAG = "__onionSidebarReason";
+
+/* =========================================================
+   I18N KEYS
+========================================================= */
+
+export const SIDEBAR_I18N_KEYS = Object.freeze({
+  ariaMain: "sidebar.aria.main",
+  ariaNavigation: "sidebar.aria.navigation",
+
+  logoAriaLabel: "sidebar.logo.ariaLabel",
+  logoAlt: "sidebar.logo.alt",
+
+  toggleCollapse: "sidebar.toggle.collapse",
+  toggleExpand: "sidebar.toggle.expand",
+  toggleOpen: "sidebar.toggle.open",
+  toggleClose: "sidebar.toggle.close",
+
+  menuHome: "sidebar.menu.home",
+  menuTickets: "sidebar.menu.tickets",
+  menuInvoices: "sidebar.menu.invoices",
+  menuUsers: "sidebar.menu.users",
+  menuClients: "sidebar.menu.clients",
+  menuAccount: "sidebar.menu.account",
+  menuSettings: "sidebar.menu.settings",
+  menuServer: "sidebar.menu.server",
+
+  recentsAriaLabel: "sidebar.recents.ariaLabel",
+  recentsTitle: "sidebar.recents.title",
+
+  userToggleAriaLabel: "sidebar.user.toggleAriaLabel",
+  userAvatarAriaLabel: "sidebar.user.avatarAriaLabel",
+  userDefaultName: "sidebar.user.defaultName",
+  userPlan: "sidebar.user.plan",
+  userDropdownAriaLabel: "sidebar.user.dropdownAriaLabel",
+
+  userAddAccount: "sidebar.user.addAccount",
+  userChangePlan: "sidebar.user.changePlan",
+  userProfile: "sidebar.user.profile",
+  userSettings: "sidebar.user.settings",
+  userHelp: "sidebar.user.help",
+  userLogout: "sidebar.user.logout",
+});
 
 /* =========================================================
    DEFAULT EXPORT
@@ -851,18 +1191,28 @@ export default {
   SIDEBAR_SCOPE,
   SIDEBAR_DOM_SCOPE,
   SIDEBAR_CORE_SCOPE,
+  SIDEBAR_EVENTS_SCOPE,
   SIDEBAR_FALLBACK_SCOPE,
+  SIDEBAR_STATE_SCOPE,
+  SIDEBAR_DROPDOWN_SCOPE,
+  SIDEBAR_VISIBILITY_SCOPE,
+  SIDEBAR_ACTIONS_SCOPE,
 
   MOBILE_BREAKPOINT,
+  SIDEBAR_MOBILE_BREAKPOINT,
 
   SIDEBAR_TRANSITION_MS,
   SIDEBAR_VISUAL_SYNC_DELAY_MS,
   SIDEBAR_VISUAL_SYNC_AFTER_NAV_MS,
+  SIDEBAR_VISUAL_SYNC_AFTER_TRANSITION_MS,
   SIDEBAR_HOVER_FLUSH_MS,
   SIDEBAR_BIND_DEDUP_WINDOW_MS,
+  SIDEBAR_REPAIR_DEDUP_WINDOW_MS,
   SIDEBAR_INDICATOR_DEFAULT_DELAY_MS,
   SIDEBAR_INDICATOR_RECALC_DELAY_MS,
   SIDEBAR_INDICATOR_SETTLED_DELAY_MS,
+  SIDEBAR_DROPDOWN_CLOSE_DELAY_MS,
+  SIDEBAR_DROPDOWN_FOCUS_DELAY_MS,
 
   SIDEBAR_ROOT_ID,
   SIDEBAR_MENU_ID,
@@ -907,6 +1257,7 @@ export default {
   SERVER_ROUTE,
   LOGIN_ROUTE,
 
+  SIDEBAR_ROUTE_KEYS,
   SIDEBAR_ROUTES,
   SIDEBAR_ROUTE_ALIASES,
 
@@ -927,6 +1278,7 @@ export default {
   SIDEBAR_ACTION_HELP,
   SIDEBAR_ACTION_LOGOUT,
   SIDEBAR_ACTIONS,
+  SIDEBAR_ACTION_ALIASES,
 
   SIDEBAR_DATA_ATTRS,
   SIDEBAR_SELECTORS,
@@ -952,4 +1304,6 @@ export default {
   SIDEBAR_HANDLED_FLAG,
   SIDEBAR_EVENTS_HANDLED_FLAG,
   SIDEBAR_HANDLED_REASON_FLAG,
+
+  SIDEBAR_I18N_KEYS,
 };

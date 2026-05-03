@@ -2,7 +2,7 @@
    Onion SPA - Sidebar Visibility
    Archivo: src/ui/sidebar/visibility.js
 
-   FINAL EXTREME SYSTEM · SIDEBAR ROLE VISIBILITY · 10/10
+   FINAL EXTREME SYSTEM · SIDEBAR ROLE VISIBILITY · 12/10
 
    RESPONSABILIDADES:
    - aplicar visibilidad por rol dentro del sidebar
@@ -34,7 +34,17 @@
    - no destruye permanentemente tooltips i18n
    - evita estado visual fantasma tras login/logout/restore
    - restaura correctamente items admin ocultos inicialmente por template
+   - repara items normales si quedaron ocultos por estado legacy
+   - NO usa data-admin-visible como regla de permisos
+   - NO usa data-role-visible como regla de permisos
+   - NO usa data-sidebar-visible como regla de permisos
    - safeEmit usa AppCore.events si existe; window solo fallback
+
+   FIX CRÍTICO:
+   - Un usuario admin debe ver items normales + items admin.
+   - Un usuario no admin debe ver items normales y ocultar solo admin.
+   - data-admin-visible/data-role-visible/data-sidebar-visible son estado,
+     nunca criterio para decidir si un item requiere admin.
 ========================================================= */
 
 import {
@@ -54,7 +64,17 @@ import {
    CONSTANTS
 ========================================================= */
 
-const ROLE_SELECTOR = [
+/*
+  Selectores que representan REGLAS reales de acceso.
+  Importante:
+  NO incluir aquí:
+    [data-admin-visible]
+    [data-role-visible]
+    [data-sidebar-visible]
+
+  Esos son estado visual, no reglas de permisos.
+*/
+const ACCESS_RULE_SELECTOR = [
   "[data-role]",
   "[data-roles]",
   "[data-admin-only]",
@@ -71,6 +91,16 @@ const ROLE_SELECTOR = [
   "[data-sidebar-permissions]",
   "[data-scope]",
   "[data-scopes]",
+].join(",");
+
+const MENU_REPAIR_SELECTOR = [
+  ".menu-item",
+  "[data-sidebar-nav='true']",
+  "[data-sidebar-item='true']",
+  "a[data-spa]",
+  "a[data-route]",
+  "a[data-href]",
+  "a[data-to]",
 ].join(",");
 
 const FOCUSABLE_SELECTOR = [
@@ -95,6 +125,7 @@ const DEFAULT_ADMIN_ROLE_KEYS = [
   "administrador",
   "superadmin",
   "super_admin",
+  "super-administrador",
   "super_administrador",
   "owner",
   "root",
@@ -105,12 +136,10 @@ const DEFAULT_ADMIN_ROLE_KEYS = [
 const ADMIN_ROLE_KEYS = new Set(
   [
     ...DEFAULT_ADMIN_ROLE_KEYS,
-    ...(
-      Array.isArray(SIDEBAR_ADMIN_ROLE_KEYS)
-        ? SIDEBAR_ADMIN_ROLE_KEYS
-        : []
-    ),
-  ].map(normalizeRole)
+    ...(Array.isArray(SIDEBAR_ADMIN_ROLE_KEYS) ? SIDEBAR_ADMIN_ROLE_KEYS : []),
+  ]
+    .map((role) => normalizeRole(role))
+    .filter(Boolean)
 );
 
 const ADMIN_FLAG_KEYS = [
@@ -239,18 +268,6 @@ function isFn(value) {
   return typeof value === "function";
 }
 
-function toArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (value === null || value === undefined) {
-    return [];
-  }
-
-  return [value];
-}
-
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
@@ -323,11 +340,6 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
     return false;
   }
 
-  /*
-    Importante:
-    No emitir por AppCore.events y window a la vez.
-    events.js puede escuchar ambos canales en fallback.
-  */
   try {
     if (isFn(AppCore?.events?.emit)) {
       AppCore.events.emit(name, payload);
@@ -813,7 +825,7 @@ function resolveAdminFlag(AppCore, isAdminFn, userRoles = []) {
 }
 
 /* =========================================================
-   ELEMENT ROLE RESOLUTION
+   ELEMENT ACCESS RULE RESOLUTION
 ========================================================= */
 
 function getAttrValues(element = null, attrs = []) {
@@ -826,6 +838,31 @@ function getAttrValues(element = null, attrs = []) {
 
     return splitRoleList(value);
   });
+}
+
+function hasAnyAccessRuleAttr(element = null) {
+  if (!element) {
+    return false;
+  }
+
+  return Boolean(
+    element.hasAttribute?.("data-role") ||
+      element.hasAttribute?.("data-roles") ||
+      element.hasAttribute?.("data-admin-only") ||
+      element.hasAttribute?.("data-sidebar-admin-only") ||
+      element.hasAttribute?.("data-requires-role") ||
+      element.hasAttribute?.("data-requires-roles") ||
+      element.hasAttribute?.("data-required-role") ||
+      element.hasAttribute?.("data-required-roles") ||
+      element.hasAttribute?.("data-sidebar-role") ||
+      element.hasAttribute?.("data-sidebar-roles") ||
+      element.hasAttribute?.("data-permission") ||
+      element.hasAttribute?.("data-permissions") ||
+      element.hasAttribute?.("data-sidebar-permission") ||
+      element.hasAttribute?.("data-sidebar-permissions") ||
+      element.hasAttribute?.("data-scope") ||
+      element.hasAttribute?.("data-scopes")
+  );
 }
 
 function isElementAdminOnly(element = null) {
@@ -851,7 +888,7 @@ function isElementAdminOnly(element = null) {
   );
 }
 
-function getElementRequiredRoles(element = null) {
+function getElementRequiredRolesRaw(element = null) {
   if (!element) {
     return [];
   }
@@ -882,7 +919,13 @@ function getElementRequiredRoles(element = null) {
     roles.push("admin");
   }
 
-  return expandRoleAliases(roles);
+  return roles;
+}
+
+function getElementRequiredRoles(element = null) {
+  return expandRoleAliases(
+    getElementRequiredRolesRaw(element)
+  );
 }
 
 function elementRequiresAdmin(element = null) {
@@ -899,11 +942,31 @@ function elementRequiresAdmin(element = null) {
   });
 }
 
+function isElementAccessControlled(element = null) {
+  if (!element) {
+    return false;
+  }
+
+  if (isElementAdminOnly(element)) {
+    return true;
+  }
+
+  if (!hasAnyAccessRuleAttr(element)) {
+    return false;
+  }
+
+  return getElementRequiredRolesRaw(element).length > 0;
+}
+
 function shouldShowElementForRoles(
   element = null,
   userRoles = [],
   admin = false
 ) {
+  if (!isElementAccessControlled(element)) {
+    return true;
+  }
+
   const requiredRoles =
     getElementRequiredRoles(element);
 
@@ -928,12 +991,7 @@ function shouldShowElementForRoles(
   return requiredRoles.some((role) => {
     const normalized = normalizeRole(role);
 
-    return (
-      userRoleSet.has(normalized) ||
-      userRoles.some((candidate) =>
-        normalizeRole(candidate) === normalized
-      )
-    );
+    return userRoleSet.has(normalized);
   });
 }
 
@@ -943,6 +1001,14 @@ function shouldShowElementForRoles(
 
 function isInitiallyTemplateHiddenRoleElement(element = null) {
   if (!element) {
+    return false;
+  }
+
+  /*
+    Solo tratamos como bloqueo inicial anti-flash si el elemento
+    tiene regla real de acceso. No por data-admin-visible suelto.
+  */
+  if (!isElementAccessControlled(element)) {
     return false;
   }
 
@@ -983,15 +1049,6 @@ function rememberOriginalTabIndex(element = null) {
   const tabIndex =
     element.getAttribute("tabindex");
 
-  /*
-    Caso crítico:
-    El template puede nacer con admin items en:
-      data-admin-visible="false" + aria-hidden="true" + tabindex="-1"
-
-    Ese tabindex="-1" NO es el tabindex original real.
-    Es el bloqueo inicial anti-flash. Al mostrar el item, un <a> debe volver
-    a su foco natural, sin tabindex.
-  */
   const shouldTreatMinusOneAsNoOriginal =
     tabIndex === "-1" &&
     isInitiallyTemplateHiddenRoleElement(element);
@@ -1129,10 +1186,6 @@ function restoreTooltipAttrs(element = null) {
     "data-i18n-data-tooltip"
   );
 
-  /*
-    aria-describedby suele pertenecer a una instancia runtime del tooltip.
-    Restaurarlo puede dejar referencias rotas.
-  */
   try {
     element.removeAttribute("aria-describedby");
   } catch {}
@@ -1295,11 +1348,11 @@ function setVisibilityDatasets(
 ) {
   if (!element) return;
 
-  const isAdminManaged =
-    elementRequiresAdmin(element) ||
-    hasDatasetKey(element, "adminVisible") ||
-    hasDatasetKey(element, "adminOnly") ||
-    hasDatasetKey(element, "sidebarAdminOnly");
+  const accessControlled =
+    isElementAccessControlled(element);
+
+  const adminManaged =
+    elementRequiresAdmin(element);
 
   try {
     element.dataset.sidebarVisible =
@@ -1308,9 +1361,20 @@ function setVisibilityDatasets(
     element.dataset.roleVisible =
       visible ? "true" : "false";
 
-    if (isAdminManaged) {
+    /*
+      CRÍTICO:
+      data-admin-visible solo se escribe para elementos realmente admin.
+      No se usa como regla.
+    */
+    if (adminManaged) {
       element.dataset.adminVisible =
         visible ? "true" : "false";
+    } else if (!accessControlled && hasDatasetKey(element, "adminVisible")) {
+      /*
+        Reparación legacy:
+        si un item normal heredó data-admin-visible=false, lo saneamos.
+      */
+      element.dataset.adminVisible = "true";
     }
   } catch {}
 }
@@ -1345,10 +1409,6 @@ function setElementVisible(element = null, visible = true) {
     return true;
   }
 
-  /*
-    Guardamos tooltip actual justo antes de ocultar.
-    Así, si i18n lo cambió en caliente, no restauramos texto viejo.
-  */
   rememberOriginalTooltipAttrs(element, {
     force: true,
   });
@@ -1381,6 +1441,10 @@ function setElementVisible(element = null, visible = true) {
 
     element.removeAttribute("aria-current");
 
+    try {
+      delete element.dataset.active;
+    } catch {}
+
     disableDescendantFocus(element);
     removeTooltipAttrsDeep(element);
 
@@ -1395,15 +1459,34 @@ function isRoleElementVisible(element = null) {
     return false;
   }
 
-  return !(
+  const adminManaged =
+    elementRequiresAdmin(element);
+
+  const hardHidden =
     element.hidden === true ||
     element.getAttribute?.("aria-hidden") === "true" ||
     element.hasAttribute?.("hidden") ||
     element.hasAttribute?.("inert") ||
     element.dataset?.sidebarVisible === "false" ||
-    element.dataset?.roleVisible === "false" ||
+    element.dataset?.roleVisible === "false";
+
+  if (hardHidden) {
+    return false;
+  }
+
+  /*
+    CRÍTICO:
+    data-admin-visible solo invalida visibilidad si el elemento realmente
+    requiere admin. En items normales no cuenta.
+  */
+  if (
+    adminManaged &&
     element.dataset?.adminVisible === "false"
-  );
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 function clearHiddenActiveState(sidebar = null) {
@@ -1442,6 +1525,17 @@ function clearHiddenActiveState(sidebar = null) {
         ].join(",")
       )
       .forEach((element) => {
+        if (
+          element.dataset?.adminVisible === "false" &&
+          !elementRequiresAdmin(element)
+        ) {
+          /*
+            Item normal con estado admin legacy: lo reparamos,
+            no le borramos activo si realmente está visible.
+          */
+          return;
+        }
+
         element.classList.remove(
           "active",
           "is-active",
@@ -1468,11 +1562,100 @@ function getRoleManagedElements(sidebar = null) {
 
   try {
     return Array.from(
-      sidebar.querySelectorAll(ROLE_SELECTOR)
+      sidebar.querySelectorAll(ACCESS_RULE_SELECTOR)
+    ).filter(isElementAccessControlled);
+  } catch {
+    return [];
+  }
+}
+
+function getMenuRepairElements(sidebar = null) {
+  if (!sidebar) {
+    return [];
+  }
+
+  try {
+    return Array.from(
+      sidebar.querySelectorAll(MENU_REPAIR_SELECTOR)
     );
   } catch {
     return [];
   }
+}
+
+function repairNormalSidebarItems(sidebar = null) {
+  if (!sidebar) {
+    return {
+      repairedCount: 0,
+      repairedItems: [],
+    };
+  }
+
+  let repairedCount = 0;
+  const repairedItems = [];
+
+  const elements =
+    getMenuRepairElements(sidebar);
+
+  elements.forEach((element) => {
+    if (isElementAccessControlled(element)) {
+      return;
+    }
+
+    const wasBroken =
+      element.hidden === true ||
+      element.hasAttribute?.("hidden") ||
+      element.hasAttribute?.("inert") ||
+      element.getAttribute?.("aria-hidden") === "true" ||
+      element.dataset?.sidebarVisible === "false" ||
+      element.dataset?.roleVisible === "false" ||
+      element.dataset?.adminVisible === "false" ||
+      element.classList?.contains?.("is-role-hidden") ||
+      element.classList?.contains?.("is-admin-hidden");
+
+    /*
+      Los items normales del menú deben estar visibles siempre.
+      Esto repara el caso exacto: admin ve solo Usuarios/Clientes/Servidor.
+    */
+    setElementVisible(element, true);
+
+    try {
+      element.dataset.sidebarVisible = "true";
+      element.dataset.roleVisible = "true";
+
+      if (hasDatasetKey(element, "adminVisible")) {
+        element.dataset.adminVisible = "true";
+      }
+
+      element.classList.remove(
+        "is-hidden",
+        "is-role-hidden",
+        "is-admin-hidden"
+      );
+    } catch {}
+
+    if (wasBroken) {
+      repairedCount += 1;
+
+      repairedItems.push({
+        id:
+          element.id || "",
+
+        route:
+          element.getAttribute?.("data-route") ||
+          element.getAttribute?.("href") ||
+          "",
+
+        text:
+          safeText(element.textContent, ""),
+      });
+    }
+  });
+
+  return {
+    repairedCount,
+    repairedItems,
+  };
 }
 
 /* =========================================================
@@ -1490,11 +1673,6 @@ function runLegacyServerNavEnsure({
   }
 
   try {
-    /*
-      Forma compatible:
-      - segundo arg como función isAdmin legacy
-      - tercer arg con roles por si el callback nuevo lo usa
-    */
     ensureServerNavItem(
       AppCore,
       () => Boolean(admin),
@@ -1544,6 +1722,10 @@ function normalizeServerItemIfPresent(sidebar = null) {
       item.dataset.requiresRole = "admin";
     }
 
+    if (!item.dataset.sidebarAdminOnly) {
+      item.dataset.sidebarAdminOnly = "true";
+    }
+
     if (!item.dataset.adminVisible) {
       item.dataset.adminVisible = "false";
     }
@@ -1577,6 +1759,9 @@ function getElementSnapshot(element = null) {
       element.getAttribute?.("data-route") ||
       element.getAttribute?.("href") ||
       "",
+
+    accessControlled:
+      isElementAccessControlled(element),
 
     requiredRoles:
       getElementRequiredRoles(element),
@@ -1624,14 +1809,17 @@ export function getRoleVisibilitySnapshot(AppCore, isAdminFn) {
       userRoles
     );
 
-  const elements =
+  const roleElements =
     getRoleManagedElements(sidebar);
 
+  const menuElements =
+    getMenuRepairElements(sidebar);
+
   const visibleElements =
-    elements.filter(isRoleElementVisible);
+    roleElements.filter(isRoleElementVisible);
 
   const hiddenElements =
-    elements.filter((element) => !isRoleElementVisible(element));
+    roleElements.filter((element) => !isRoleElementVisible(element));
 
   return {
     ok: Boolean(sidebar),
@@ -1639,12 +1827,17 @@ export function getRoleVisibilitySnapshot(AppCore, isAdminFn) {
     roles: userRoles,
 
     counts: {
-      total: elements.length,
-      visible: visibleElements.length,
-      hidden: hiddenElements.length,
+      roleManagedTotal: roleElements.length,
+      roleManagedVisible: visibleElements.length,
+      roleManagedHidden: hiddenElements.length,
+      menuTotal: menuElements.length,
     },
 
-    items: elements.map(getElementSnapshot),
+    roleItems:
+      roleElements.map(getElementSnapshot),
+
+    menuItems:
+      menuElements.map(getElementSnapshot),
   };
 }
 
@@ -1687,6 +1880,7 @@ export function applyRoleVisibility(
       hiddenCount: 0,
       visibleCount: 0,
       totalCount: 0,
+      normalRepairedCount: 0,
       legacyEnsured,
       serverNormalized: false,
     };
@@ -1709,6 +1903,16 @@ export function applyRoleVisibility(
   const serverNormalized =
     normalizeServerItemIfPresent(sidebar);
 
+  /*
+    1. Primero se reparan los items normales.
+       Esto impide que un admin vea solo Usuarios/Clientes/Servidor.
+  */
+  const normalRepair =
+    repairNormalSidebarItems(sidebar);
+
+  /*
+    2. Luego se aplican reglas reales sobre elementos controlados por rol.
+  */
   const roleElements =
     getRoleManagedElements(sidebar);
 
@@ -1750,6 +1954,9 @@ export function applyRoleVisibility(
 
       adminManaged:
         elementRequiresAdmin(element),
+
+      accessControlled:
+        isElementAccessControlled(element),
     };
 
     if (visible) {
@@ -1783,6 +1990,12 @@ export function applyRoleVisibility(
     visibleCount,
     totalCount: roleElements.length,
 
+    normalRepairedCount:
+      normalRepair.repairedCount,
+
+    normalRepairedItems:
+      normalRepair.repairedItems,
+
     hiddenItems,
     visibleItems,
 
@@ -1803,22 +2016,25 @@ export function applyRoleVisibility(
     payload
   );
 
-  /*
-    Legacy event: se mantiene por compatibilidad con builds previos.
-  */
   safeEmit(
     AppCore,
     EVENT_ROLES_APPLIED_LEGACY,
     payload
   );
 
-  if (clearedActiveCount > 0 || hiddenCount > 0) {
+  if (
+    clearedActiveCount > 0 ||
+    hiddenCount > 0 ||
+    normalRepair.repairedCount > 0
+  ) {
     safeEmit(
       AppCore,
       EVENT_ACTIVE_INVALIDATED,
       {
         reason: "role-visibility",
         clearedActiveCount,
+        normalRepairedCount:
+          normalRepair.repairedCount,
       }
     );
 

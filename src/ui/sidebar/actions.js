@@ -31,6 +31,9 @@
    - safeEmit usa AppCore.events si existe; window solo fallback
    - no deja loader global colgado
    - no deja avatar/rol/token fantasma tras fallo remoto
+   - corta carreras de doble click / doble evento / reentrada
+   - limpia headers Authorization en clientes HTTP conocidos
+   - emite snapshot estable para debug
 ========================================================= */
 
 /* =========================================================
@@ -38,14 +41,18 @@
 ========================================================= */
 
 let logoutPromise = null;
+let logoutGeneration = 0;
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
+const ACTIONS_VERSION = "sidebar-actions-v6-final-extreme";
+
 const LOGIN_ROUTE = "/login";
 
 const REMOTE_LOGOUT_TIMEOUT_MS = 9000;
+const LOCAL_CLEAR_SETTLE_MS = 0;
 
 const LOG_PREFIX = "[SidebarActions]";
 
@@ -54,7 +61,10 @@ const EVENTS = Object.freeze({
   logoutRemoteStart: "sidebar:logout:remote:start",
   logoutRemoteSuccess: "sidebar:logout:remote:success",
   logoutRemoteError: "sidebar:logout:remote:error",
+  logoutRemoteSkipped: "sidebar:logout:remote:skipped",
   logoutLocalCleared: "sidebar:logout:local-cleared",
+  logoutNavigateStart: "sidebar:logout:navigate:start",
+  logoutNavigateComplete: "sidebar:logout:navigate:complete",
   logoutComplete: "sidebar:logout:complete",
   logoutError: "sidebar:logout:error",
   logoutFinally: "sidebar:logout:finally",
@@ -69,6 +79,59 @@ const EVENTS = Object.freeze({
   sidebarStateChange: "sidebar:state:change",
   appSidebarChange: "app:sidebar:change",
 });
+
+const AUTH_STATE_KEYS_TO_NULL = Object.freeze([
+  "token",
+  "accessToken",
+  "access_token",
+  "refreshToken",
+  "refresh_token",
+  "tempToken",
+  "temp_token",
+  "session",
+  "sessionId",
+  "session_id",
+  "sessionUserId",
+  "session_user_id",
+  "user",
+  "currentUser",
+  "sessionUser",
+  "authUser",
+  "profile",
+]);
+
+const AUTH_STATE_KEYS_TO_EMPTY_STRING = Object.freeze([
+  "role",
+  "rol",
+  "userRole",
+  "user_role",
+]);
+
+const AUTH_STATE_KEYS_TO_EMPTY_ARRAY = Object.freeze([
+  "roles",
+  "permissions",
+  "scopes",
+  "groups",
+  "authorities",
+]);
+
+const AUTH_STATE_KEYS_TO_FALSE = Object.freeze([
+  "authenticated",
+  "isAuthenticated",
+  "isAdmin",
+  "admin",
+  "isSuperAdmin",
+  "superAdmin",
+  "isSupport",
+  "support",
+  "isManager",
+  "manager",
+  "loginInProgress",
+  "authLoginInProgress",
+  "isLoggingIn",
+  "restoreInProgress",
+  "sessionRestoreInProgress",
+]);
 
 /* =========================================================
    BASICS
@@ -123,11 +186,11 @@ function safeBoolean(value, fallback = false) {
   if (typeof value === "string") {
     const key = value.trim().toLowerCase();
 
-    if (["true", "1", "yes", "si", "sí", "ok", "on"].includes(key)) {
+    if (["true", "1", "yes", "si", "sí", "ok", "on", "y"].includes(key)) {
       return true;
     }
 
-    if (["false", "0", "no", "off"].includes(key)) {
+    if (["false", "0", "no", "off", "n"].includes(key)) {
       return false;
     }
   }
@@ -168,11 +231,6 @@ function safeError(AppCore, ...args) {
   } catch {}
 }
 
-/*
-  Importante:
-  No emitimos por AppCore.events Y window a la vez.
-  Si el bus existe, usamos bus. Window solo fallback.
-*/
 function safeEmit(AppCore, eventName = "", payload = {}) {
   const name = safeText(eventName, "");
   if (!name) return false;
@@ -217,27 +275,38 @@ function sleep(ms = 0) {
       }
     } catch {}
 
+    try {
+      setTimeout(resolve, Math.max(0, Number(ms) || 0));
+      return;
+    } catch {}
+
     resolve();
   });
 }
 
-async function withTimeout(promise, ms = REMOTE_LOGOUT_TIMEOUT_MS, label = "timeout") {
-  const timeoutMs = Math.max(1000, Number(ms) || REMOTE_LOGOUT_TIMEOUT_MS);
+async function withTimeout(
+  promise,
+  ms = REMOTE_LOGOUT_TIMEOUT_MS,
+  label = "timeout"
+) {
+  const timeoutMs =
+    Math.max(1000, Number(ms) || REMOTE_LOGOUT_TIMEOUT_MS);
 
   let timer = null;
 
-  const timeoutPromise = new Promise((_, reject) => {
-    try {
-      timer = setTimeout(() => {
-        const error = new Error(`${label}:${timeoutMs}ms`);
-        error.code = "SIDEBAR_ACTION_TIMEOUT";
-        error.timeout = true;
-        reject(error);
-      }, timeoutMs);
-    } catch {
-      reject(new Error(`${label}:timeout`));
-    }
-  });
+  const timeoutPromise =
+    new Promise((_, reject) => {
+      try {
+        timer = setTimeout(() => {
+          const error = new Error(`${label}:${timeoutMs}ms`);
+          error.code = "SIDEBAR_ACTION_TIMEOUT";
+          error.timeout = true;
+          reject(error);
+        }, timeoutMs);
+      } catch {
+        reject(new Error(`${label}:timeout`));
+      }
+    });
 
   try {
     return await Promise.race([
@@ -253,11 +322,23 @@ async function withTimeout(promise, ms = REMOTE_LOGOUT_TIMEOUT_MS, label = "time
 
 function cloneError(error = null) {
   return {
-    name: safeText(error?.name, ""),
-    message: safeText(error?.message, ""),
-    code: safeText(error?.code, ""),
-    status: error?.status ?? error?.statusCode ?? error?.response?.status ?? null,
-    timeout: Boolean(error?.timeout),
+    name:
+      safeText(error?.name, ""),
+
+    message:
+      safeText(error?.message, ""),
+
+    code:
+      safeText(error?.code, ""),
+
+    status:
+      error?.status ??
+      error?.statusCode ??
+      error?.response?.status ??
+      null,
+
+    timeout:
+      Boolean(error?.timeout),
   };
 }
 
@@ -289,6 +370,50 @@ function safeSetLoading(AppCore, value = false) {
   } catch {}
 
   return false;
+}
+
+function getModule(AppCore = null, name = "") {
+  const cleanName = safeText(name, "");
+
+  if (!AppCore || !cleanName) {
+    return null;
+  }
+
+  try {
+    if (isFunction(AppCore?.modules?.get)) {
+      const value = AppCore.modules.get(cleanName);
+      if (value) return value;
+    }
+  } catch {}
+
+  try {
+    return AppCore?.modules?.[cleanName] || null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveAuth(Auth, AppCore) {
+  return (
+    Auth ||
+    AppCore?.Auth ||
+    AppCore?.auth ||
+    AppCore?.features?.auth ||
+    getModule(AppCore, "Auth") ||
+    getModule(AppCore, "auth") ||
+    null
+  );
+}
+
+function resolveRouter(Router, AppCore) {
+  return (
+    Router ||
+    AppCore?.Router ||
+    AppCore?.router ||
+    getModule(AppCore, "Router") ||
+    getModule(AppCore, "router") ||
+    null
+  );
 }
 
 /* =========================================================
@@ -362,8 +487,11 @@ function captureControlState(element) {
   } catch {}
 
   try {
-    hadIsDisabledClass = Boolean(element.classList?.contains?.("is-disabled"));
-    hadIsLoadingClass = Boolean(element.classList?.contains?.("is-loading"));
+    hadIsDisabledClass =
+      Boolean(element.classList?.contains?.("is-disabled"));
+
+    hadIsLoadingClass =
+      Boolean(element.classList?.contains?.("is-loading"));
   } catch {}
 
   return {
@@ -434,6 +562,7 @@ function setControlDisabled(element, disabled = false) {
 
   try {
     element.dataset.busy = value ? "true" : "false";
+    element.dataset.sidebarActionBusy = value ? "true" : "false";
   } catch {}
 
   return true;
@@ -486,6 +615,8 @@ function restoreControlsState(snapshot = []) {
       } else {
         delete element.dataset.busy;
       }
+
+      delete element.dataset.sidebarActionBusy;
     } catch {}
 
     try {
@@ -524,7 +655,9 @@ function restoreControlsState(snapshot = []) {
 
 function getStoragePrefix(AppCore) {
   return safeText(
-    AppCore?.config?.storagePrefix,
+    AppCore?.config?.storagePrefix ||
+      AppCore?.config?.storageKeyPrefix ||
+      AppCore?.config?.appKey,
     "onion"
   );
 }
@@ -543,6 +676,8 @@ function getKnownAuthStorageKeys(AppCore) {
     "auth.user",
     "auth.role",
     "auth.roles",
+    "auth.permissions",
+    "auth.scopes",
 
     "session.token",
     "session.accessToken",
@@ -550,6 +685,8 @@ function getKnownAuthStorageKeys(AppCore) {
     "session.user",
     "session.role",
     "session.roles",
+    "session.permissions",
+    "session.scopes",
     "session.id",
     "session.userId",
 
@@ -561,8 +698,11 @@ function getKnownAuthStorageKeys(AppCore) {
     "onion_session_user_id",
     "onion_user_id",
     "onion_user_name",
+    "onion_user",
     "onion_role",
     "onion_roles",
+    "onion_permissions",
+    "onion_scopes",
 
     "auth_token",
     "access_token",
@@ -927,45 +1067,25 @@ function clearKnownAuthCookies(AppCore) {
 ========================================================= */
 
 function buildClearedAuthPatch() {
-  return {
-    authenticated: false,
-    isAuthenticated: false,
+  const patch = {};
 
-    token: null,
-    accessToken: null,
-    refreshToken: null,
-    tempToken: null,
+  AUTH_STATE_KEYS_TO_FALSE.forEach((key) => {
+    patch[key] = false;
+  });
 
-    user: null,
-    currentUser: null,
-    sessionUser: null,
-    authUser: null,
-    profile: null,
+  AUTH_STATE_KEYS_TO_NULL.forEach((key) => {
+    patch[key] = null;
+  });
 
-    role: "",
-    rol: "",
-    userRole: "",
-    roles: [],
-    permissions: [],
-    scopes: [],
+  AUTH_STATE_KEYS_TO_EMPTY_STRING.forEach((key) => {
+    patch[key] = "";
+  });
 
-    isAdmin: false,
-    admin: false,
-    isSuperAdmin: false,
-    superAdmin: false,
-    isSupport: false,
-    isManager: false,
+  AUTH_STATE_KEYS_TO_EMPTY_ARRAY.forEach((key) => {
+    patch[key] = [];
+  });
 
-    session: null,
-    sessionId: null,
-    sessionUserId: null,
-
-    loginInProgress: false,
-    authLoginInProgress: false,
-    isLoggingIn: false,
-    restoreInProgress: false,
-    sessionRestoreInProgress: false,
-  };
+  return patch;
 }
 
 function patchNestedAuthObjects(AppCore) {
@@ -982,6 +1102,7 @@ function patchNestedAuthObjects(AppCore) {
       state.auth,
       state.sessionAuth,
       state.authState,
+      state.session,
     ].filter((value) => value && typeof value === "object");
 
     nestedCandidates.forEach((target) => {
@@ -989,15 +1110,25 @@ function patchNestedAuthObjects(AppCore) {
         Object.assign(target, {
           authenticated: false,
           isAuthenticated: false,
+
           token: null,
           accessToken: null,
           refreshToken: null,
           tempToken: null,
+
           user: null,
+          currentUser: null,
+          profile: null,
+
           role: "",
           roles: [],
           permissions: [],
           scopes: [],
+
+          isAdmin: false,
+          admin: false,
+          isSuperAdmin: false,
+          superAdmin: false,
         });
 
         patched = true;
@@ -1006,6 +1137,69 @@ function patchNestedAuthObjects(AppCore) {
   } catch {}
 
   return patched;
+}
+
+function clearAuthHeaders(AppCore, Auth) {
+  let cleared = false;
+
+  const candidates = [
+    AppCore?.http,
+    AppCore?.Http,
+    AppCore?.request,
+    AppCore?.apiClient,
+    AppCore?.client,
+    AppCore?.services?.http,
+    AppCore?.services?.api,
+    Auth?.http,
+    Auth?.api,
+    Auth?.client,
+  ].filter(Boolean);
+
+  candidates.forEach((client) => {
+    try {
+      if (client.defaults?.headers?.common?.Authorization) {
+        delete client.defaults.headers.common.Authorization;
+        cleared = true;
+      }
+    } catch {}
+
+    try {
+      if (client.defaults?.headers?.Authorization) {
+        delete client.defaults.headers.Authorization;
+        cleared = true;
+      }
+    } catch {}
+
+    try {
+      if (client.headers?.Authorization) {
+        delete client.headers.Authorization;
+        cleared = true;
+      }
+    } catch {}
+
+    try {
+      if (isFunction(client.setAuthToken)) {
+        client.setAuthToken(null);
+        cleared = true;
+      }
+    } catch {}
+
+    try {
+      if (isFunction(client.setToken)) {
+        client.setToken(null);
+        cleared = true;
+      }
+    } catch {}
+
+    try {
+      if (isFunction(client.clearAuth)) {
+        client.clearAuth();
+        cleared = true;
+      }
+    } catch {}
+  });
+
+  return cleared;
 }
 
 async function callClearCandidate(Auth, AppCore, candidate, clearOptions) {
@@ -1141,15 +1335,24 @@ async function clearSessionEverywhere({
   Auth,
   AppCore,
 } = {}) {
+  const resolvedAuth =
+    resolveAuth(Auth, AppCore);
+
   const authCleared =
     await clearAuthLocal(
-      Auth,
+      resolvedAuth,
       AppCore
     );
 
   const coreCleared =
     clearAppCoreSession(
       AppCore
+    );
+
+  const authHeadersCleared =
+    clearAuthHeaders(
+      AppCore,
+      resolvedAuth
     );
 
   const storageResult =
@@ -1165,6 +1368,7 @@ async function clearSessionEverywhere({
   const result = {
     authCleared,
     coreCleared,
+    authHeadersCleared,
 
     storageRemoved:
       storageResult.removed || 0,
@@ -1216,8 +1420,82 @@ async function clearSessionEverywhere({
 }
 
 /* =========================================================
-   UI SYNC
+   LOADER / UI SYNC
 ========================================================= */
+
+function hideGlobalLoader(AppCore, reason = "sidebar:logout") {
+  safeSetLoading(AppCore, false);
+
+  if (!isBrowser()) {
+    return false;
+  }
+
+  let changed = false;
+
+  try {
+    document.documentElement?.classList?.remove?.(
+      "app-loading",
+      "app-booting",
+      "loading"
+    );
+
+    document.body?.classList?.remove?.(
+      "app-loading",
+      "app-booting",
+      "loading"
+    );
+  } catch {}
+
+  const selectors = [
+    "#app-loader",
+    ".app-loader",
+    "[data-app-loader='true']",
+    "[data-loader='app']",
+  ];
+
+  selectors.forEach((selector) => {
+    let loader = null;
+
+    try {
+      loader = document.querySelector(selector);
+    } catch {}
+
+    if (!loader) {
+      return;
+    }
+
+    try {
+      loader.classList.remove(
+        "is-visible",
+        "is-leaving",
+        "app-loader--visible"
+      );
+
+      loader.classList.add(
+        "is-hidden",
+        "has-hidden"
+      );
+
+      loader.setAttribute("aria-hidden", "true");
+      loader.setAttribute("aria-busy", "false");
+      loader.dataset.loaderVisible = "false";
+      loader.hidden = true;
+
+      changed = true;
+    } catch {}
+  });
+
+  safeEmit(
+    AppCore,
+    "app:loader:hidden",
+    {
+      reason,
+      source: "sidebar.actions",
+    }
+  );
+
+  return changed;
+}
 
 function syncSidebarAfterLogout({
   AppCore,
@@ -1315,10 +1593,37 @@ function syncSidebarAfterLogout({
    NAVIGATION
 ========================================================= */
 
+function dispatchPopStateSafe() {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    window.dispatchEvent(
+      new PopStateEvent("popstate")
+    );
+
+    return true;
+  } catch {}
+
+  try {
+    window.dispatchEvent(
+      new Event("popstate")
+    );
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
 async function navigateToLogin({
   AppCore,
   Router,
 } = {}) {
+  const resolvedRouter =
+    resolveRouter(Router, AppCore);
+
   const target = LOGIN_ROUTE;
 
   const options = {
@@ -1330,23 +1635,38 @@ async function navigateToLogin({
     fromLogout: true,
   };
 
+  safeEmit(
+    AppCore,
+    EVENTS.logoutNavigateStart,
+    {
+      target,
+      options,
+    }
+  );
+
   const candidates = [
     {
-      name: "Router.navigate",
-      fn: Router?.navigate,
-      ctx: Router,
+      name: "Router.replace",
+      fn: resolvedRouter?.replace,
+      ctx: resolvedRouter,
       args: [target, options],
     },
     {
-      name: "Router.replace",
-      fn: Router?.replace,
-      ctx: Router,
+      name: "Router.navigate",
+      fn: resolvedRouter?.navigate,
+      ctx: resolvedRouter,
       args: [target, options],
     },
     {
       name: "Router.go",
-      fn: Router?.go,
-      ctx: Router,
+      fn: resolvedRouter?.go,
+      ctx: resolvedRouter,
+      args: [target, options],
+    },
+    {
+      name: "AppCore.router.replace",
+      fn: AppCore?.router?.replace,
+      ctx: AppCore?.router,
       args: [target, options],
     },
     {
@@ -1376,6 +1696,16 @@ async function navigateToLogin({
         )
       );
 
+      safeEmit(
+        AppCore,
+        EVENTS.logoutNavigateComplete,
+        {
+          ok: true,
+          method: candidate.name,
+          target,
+        }
+      );
+
       return true;
     } catch (error) {
       safeWarn(
@@ -1387,6 +1717,17 @@ async function navigateToLogin({
   }
 
   if (!isBrowser()) {
+    safeEmit(
+      AppCore,
+      EVENTS.logoutNavigateComplete,
+      {
+        ok: false,
+        method: "",
+        target,
+        reason: "not-browser",
+      }
+    );
+
     return false;
   }
 
@@ -1403,8 +1744,16 @@ async function navigateToLogin({
       target
     );
 
-    window.dispatchEvent(
-      new PopStateEvent("popstate")
+    dispatchPopStateSafe();
+
+    safeEmit(
+      AppCore,
+      EVENTS.logoutNavigateComplete,
+      {
+        ok: true,
+        method: "history.replaceState",
+        target,
+      }
     );
 
     return true;
@@ -1412,8 +1761,29 @@ async function navigateToLogin({
 
   try {
     window.location.replace(target);
+
+    safeEmit(
+      AppCore,
+      EVENTS.logoutNavigateComplete,
+      {
+        ok: true,
+        method: "window.location.replace",
+        target,
+      }
+    );
+
     return true;
   } catch {}
+
+  safeEmit(
+    AppCore,
+    EVENTS.logoutNavigateComplete,
+    {
+      ok: false,
+      method: "",
+      target,
+    }
+  );
 
   return false;
 }
@@ -1423,22 +1793,26 @@ async function navigateToLogin({
 ========================================================= */
 
 function getRemoteLogoutCandidates(Auth) {
-  const candidates = [
+  const primary = [
     {
       name: "Auth.logoutRemote",
       fn: Auth?.logoutRemote,
+      ctx: Auth,
     },
     {
       name: "Auth.remoteLogout",
       fn: Auth?.remoteLogout,
+      ctx: Auth,
     },
     {
       name: "Auth.signOutRemote",
       fn: Auth?.signOutRemote,
+      ctx: Auth,
     },
     {
       name: "Auth.revokeSession",
       fn: Auth?.revokeSession,
+      ctx: Auth,
     },
     {
       name: "Auth.api.logout",
@@ -1446,30 +1820,63 @@ function getRemoteLogoutCandidates(Auth) {
       ctx: Auth?.api,
     },
     {
-      name: "Auth.logout",
-      fn: Auth?.logout,
+      name: "Auth.client.logout",
+      fn: Auth?.client?.logout,
+      ctx: Auth?.client,
     },
-  ];
-
-  return candidates.filter((item) =>
+  ].filter((item) =>
     isFunction(item.fn)
   );
+
+  /*
+    Auth.logout puede tener efectos locales/navegación en builds legacy.
+    Lo dejamos como fallback final si no hay método remoto explícito.
+  */
+  const fallback = [
+    {
+      name: "Auth.logout",
+      fn: Auth?.logout,
+      ctx: Auth,
+    },
+    {
+      name: "Auth.signOut",
+      fn: Auth?.signOut,
+      ctx: Auth,
+    },
+  ].filter((item) =>
+    isFunction(item.fn)
+  );
+
+  return primary.length
+    ? primary
+    : fallback;
 }
 
 async function runRemoteLogout({
   Auth,
   AppCore,
 } = {}) {
+  const resolvedAuth =
+    resolveAuth(Auth, AppCore);
+
   const candidates =
-    getRemoteLogoutCandidates(Auth);
+    getRemoteLogoutCandidates(resolvedAuth);
 
   if (!candidates.length) {
-    return {
+    const result = {
       attempted: false,
       ok: false,
       method: "",
       error: null,
     };
+
+    safeEmit(
+      AppCore,
+      EVENTS.logoutRemoteSkipped,
+      result
+    );
+
+    return result;
   }
 
   safeEmit(
@@ -1489,10 +1896,6 @@ async function runRemoteLogout({
     source: "sidebar",
     reason: "sidebar-logout",
 
-    /*
-      Si Auth.logout soporta estas flags, evitamos que navegue o que
-      haga doble mutación visual. Si las ignora, no pasa nada.
-    */
     local: false,
     clearLocal: false,
     navigate: false,
@@ -1511,7 +1914,7 @@ async function runRemoteLogout({
       await withTimeout(
         Promise.resolve(
           candidate.fn.call(
-            candidate.ctx || Auth,
+            candidate.ctx || resolvedAuth,
             options
           )
         ),
@@ -1575,7 +1978,16 @@ async function runLogoutFlow({
   getElements,
   setLogoutInFlight,
 } = {}) {
+  const generation =
+    ++logoutGeneration;
+
   const startedAt = nowTs();
+
+  const resolvedAuth =
+    resolveAuth(Auth, AppCore);
+
+  const resolvedRouter =
+    resolveRouter(Router, AppCore);
 
   const elements =
     isFunction(getElements)
@@ -1615,7 +2027,9 @@ async function runLogoutFlow({
     EVENTS.logoutStart,
     {
       source: "sidebar",
+      generation,
       timestamp: startedAt,
+      version: ACTIONS_VERSION,
     }
   );
 
@@ -1629,6 +2043,7 @@ async function runLogoutFlow({
   let localResult = {
     authCleared: false,
     coreCleared: false,
+    authHeadersCleared: false,
     storageRemoved: 0,
     appCoreStorageRemoved: 0,
     scannedStorageRemoved: 0,
@@ -1644,7 +2059,7 @@ async function runLogoutFlow({
     */
     remoteResult =
       await runRemoteLogout({
-        Auth,
+        Auth: resolvedAuth,
         AppCore,
       });
 
@@ -1654,7 +2069,7 @@ async function runLogoutFlow({
     */
     localResult =
       await clearSessionEverywhere({
-        Auth,
+        Auth: resolvedAuth,
         AppCore,
       });
 
@@ -1666,25 +2081,24 @@ async function runLogoutFlow({
       closeSidebarOnMobileAfterNavigation,
     });
 
-    safeSetLoading(
+    hideGlobalLoader(
       AppCore,
-      false
+      "sidebar:logout:local-cleared"
     );
 
-    /*
-      Deja respirar al bus un tick para que AppCore/Auth/Router lean
-      la sesión ya limpia antes de renderizar login.
-    */
-    await sleep(0);
+    if (LOCAL_CLEAR_SETTLE_MS >= 0) {
+      await sleep(LOCAL_CLEAR_SETTLE_MS);
+    }
 
     navigationOk =
       await navigateToLogin({
         AppCore,
-        Router,
+        Router: resolvedRouter,
       });
 
     const result = {
       ok: true,
+      generation,
       remote: remoteResult,
       local: localResult,
       navigationOk,
@@ -1705,14 +2119,10 @@ async function runLogoutFlow({
       error
     );
 
-    /*
-      Último intento: aunque haya fallado algo arriba,
-      no dejamos auth fantasma.
-    */
     try {
       localResult =
         await clearSessionEverywhere({
-          Auth,
+          Auth: resolvedAuth,
           AppCore,
         });
     } catch (clearError) {
@@ -1734,9 +2144,9 @@ async function runLogoutFlow({
     } catch {}
 
     try {
-      safeSetLoading(
+      hideGlobalLoader(
         AppCore,
-        false
+        "sidebar:logout:error"
       );
     } catch {}
 
@@ -1744,12 +2154,13 @@ async function runLogoutFlow({
       navigationOk =
         await navigateToLogin({
           AppCore,
-          Router,
+          Router: resolvedRouter,
         });
     } catch {}
 
     const result = {
       ok: false,
+      generation,
       error: cloneError(error),
       message:
         safeText(
@@ -1778,15 +2189,16 @@ async function runLogoutFlow({
       controlsSnapshot
     );
 
-    safeSetLoading(
+    hideGlobalLoader(
       AppCore,
-      false
+      "sidebar:logout:finally"
     );
 
     safeEmit(
       AppCore,
       EVENTS.logoutFinally,
       {
+        generation,
         durationMs: nowTs() - startedAt,
       }
     );
@@ -1850,8 +2262,13 @@ export async function handleLogout({
 
 export function getSidebarActionsSnapshot() {
   return {
+    version:
+      ACTIONS_VERSION,
+
     logoutInFlight:
       Boolean(logoutPromise),
+
+    logoutGeneration,
 
     remoteTimeoutMs:
       REMOTE_LOGOUT_TIMEOUT_MS,

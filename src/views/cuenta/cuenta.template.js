@@ -2,24 +2,22 @@
    Onion SPA - Cuenta Template
    Archivo: src/views/cuenta/cuenta.template.js
 
-   FINAL PRO SYSTEM · ACCOUNT SETTINGS MODE · GOD LEVEL UI
-   PATCH · PREMIUM ACCOUNT COMMAND CENTER
-   PATCH · REAL AVATAR + FALLBACK
-   PATCH · PROFILE / THEME / LANGUAGE / SECURITY CARDS
-   PATCH · ROUTE/BINDINGS SAFE DATA-ACTION + DATA-ROLE
-   PATCH · LIGHT/DARK VARIABLES.CSS + UI.CSS ALIGNED
+   EXTREME PRO SYSTEM · ACCOUNT SETTINGS COMMAND CENTER · 14/10
+   PREMIUM SETTINGS PANEL · REAL AVATAR · PROFILE/THEME/LANG/SECURITY
+   VARIABLES.CSS + UI.CSS ALIGNED · BINDINGS SAFE · RESPONSIVE GOD MODE
 
    RESPONSABILIDADES:
    - render header premium de cuenta
-   - render panel productivo de preferencias
-   - render perfil / apariencia / idioma / seguridad
+   - render panel productivo de ajustes
+   - render perfil / apariencia / idioma / seguridad / actividad
    - render loading / error / empty
+   - soportar avatar real + fallback por iniciales
    - soportar darkMode / idioma / cambio de contraseña
    - mantener compatibilidad con cuentaView.js
    - mantener compatibilidad con cuenta.bindings.js
    - acciones compatibles con data-action
    - inputs compatibles con data-role
-   - dark/light mode 100% conectado a variables.css + ui.css
+   - dark/light mode conectado a variables.css + ui.css
    - estilos encapsulados sin :root local
    - responsive robusto
 ========================================================= */
@@ -35,7 +33,10 @@ import { normalizeCuentaModel } from "./cuenta.model.js";
 function safeText(value, fallback = "—") {
   if (value === null || value === undefined) return fallback;
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -73,25 +74,48 @@ function safeBoolean(value, fallback = false) {
   if (typeof value === "number") {
     if (value === 1) return true;
     if (value === 0) return false;
+    return value !== 0;
   }
 
   if (typeof value === "string") {
-    const normalized = normalizeKey(value);
+    const key = normalizeKey(value);
 
-    if (["true", "1", "yes", "si", "sí", "on", "dark", "enabled"].includes(normalized)) {
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "y",
+        "si",
+        "sí",
+        "on",
+        "dark",
+        "enabled",
+        "activo",
+        "activa",
+      ].includes(key)
+    ) {
       return true;
     }
 
-    if (["false", "0", "no", "off", "light", "disabled"].includes(normalized)) {
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "n",
+        "off",
+        "light",
+        "disabled",
+        "inactivo",
+        "inactiva",
+      ].includes(key)
+    ) {
       return false;
     }
   }
 
-  return fallback;
-}
-
-function safeArray(value, fallback = []) {
-  return Array.isArray(value) ? value : fallback;
+  return Boolean(fallback);
 }
 
 function safeObject(value, fallback = {}) {
@@ -103,14 +127,8 @@ function safeObject(value, fallback = {}) {
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
-
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
-
-    if (Array.isArray(value) && value.length === 0) {
-      continue;
-    }
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
 
     return value;
   }
@@ -144,7 +162,7 @@ function normalizeKey(value = "") {
 
 function truncate(value = "", max = 120) {
   const text = safeText(value, "");
-  const limit = safeNumber(max, 120);
+  const limit = Math.max(1, safeNumber(max, 120));
 
   if (!text) return "";
   if (text.length <= limit) return text;
@@ -152,10 +170,15 @@ function truncate(value = "", max = 120) {
   return `${text.slice(0, limit).trim()}…`;
 }
 
-function isHttpUrl(value = "") {
+function isRenderableImageUrl(value = "") {
   const raw = safeText(value, "");
-
   if (!raw) return false;
+
+  if (raw.startsWith("data:image/")) return true;
+  if (raw.startsWith("blob:")) return true;
+  if (raw.startsWith("/")) return true;
+  if (raw.startsWith("./")) return true;
+  if (raw.startsWith("../")) return true;
 
   try {
     const url = new URL(raw);
@@ -289,12 +312,18 @@ function getDisplayName(detail = {}) {
       detail.profile?.fullName,
       detail.profile?.displayName,
 
+      detail.user?.name,
+      detail.user?.fullName,
+      detail.user?.displayName,
+
       detail.raw?.name,
       detail.raw?.fullName,
       detail.raw?.displayName,
       detail.raw?.nombre,
       detail.raw?.username,
-      detail.raw?.email
+      detail.raw?.email,
+      detail.raw?.user?.name,
+      detail.raw?.user?.displayName
     ),
     "Usuario Onion"
   );
@@ -306,10 +335,13 @@ function getEmail(detail = {}) {
       detail.email,
       detail.emailLower,
       detail.mail,
+      detail.userEmail,
       detail.profile?.email,
+      detail.user?.email,
       detail.raw?.email,
       detail.raw?.emailLower,
-      detail.raw?.mail
+      detail.raw?.mail,
+      detail.raw?.user?.email
     ),
     "Sin email"
   );
@@ -320,12 +352,16 @@ function getUsername(detail = {}) {
     first(
       detail.username,
       detail.usernameLower,
+      detail.userName,
       detail.slug,
       detail.handle,
+      detail.profile?.username,
+      detail.user?.username,
       detail.raw?.username,
       detail.raw?.usernameLower,
       detail.raw?.slug,
-      detail.raw?.handle
+      detail.raw?.handle,
+      detail.raw?.user?.username
     ),
     "sin-usuario"
   );
@@ -338,10 +374,16 @@ function getUserId(detail = {}) {
       detail.id,
       detail.uid,
       detail.sub,
+      detail.accountId,
+      detail.profileId,
+      detail.user?.userId,
+      detail.user?.id,
       detail.raw?.userId,
       detail.raw?.id,
       detail.raw?.uid,
-      detail.raw?.sub
+      detail.raw?.sub,
+      detail.raw?.user?.userId,
+      detail.raw?.user?.id
     ),
     "—"
   );
@@ -355,6 +397,8 @@ function getClienteId(detail = {}) {
       detail.customerId,
       detail.cliente?.clienteId,
       detail.cliente?.id,
+      detail.client?.id,
+      detail.customer?.id,
       detail.raw?.clienteId,
       detail.raw?.clientId,
       detail.raw?.customerId,
@@ -366,15 +410,23 @@ function getClienteId(detail = {}) {
 }
 
 function getRoleValue(detail = {}) {
-  return normalizeKey(
-    first(
-      detail.role,
-      detail.rol,
-      detail.raw?.role,
-      detail.raw?.rol,
-      "user"
-    )
+  const role = first(
+    detail.role,
+    detail.rol,
+    detail.accountRole,
+    detail.profileRole,
+    detail.user?.role,
+    detail.raw?.role,
+    detail.raw?.rol,
+    detail.raw?.user?.role,
+    "user"
   );
+
+  if (role && typeof role === "object") {
+    return normalizeKey(first(role.name, role.nombre, role.code, role.id, "user"));
+  }
+
+  return normalizeKey(role);
 }
 
 function getRole(detail = {}) {
@@ -382,9 +434,10 @@ function getRole(detail = {}) {
 
   if (role === "admin" || role === "administrator") return "Administrador";
   if (role === "superadmin" || role === "super_admin" || role === "root") return "Super admin";
-  if (role === "support") return "Soporte";
-  if (role === "technician" || role === "tecnico") return "Técnico";
+  if (role === "support" || role === "soporte") return "Soporte";
+  if (role === "technician" || role === "tecnico" || role === "técnico") return "Técnico";
   if (role === "owner") return "Owner";
+  if (role === "client" || role === "cliente") return "Cliente";
   if (role === "user") return "Usuario";
 
   return safeText(role, "Usuario");
@@ -396,11 +449,14 @@ function getPhone(detail = {}) {
       detail.phone,
       detail.telefono,
       detail.mobile,
+      detail.telefonoMovil,
       detail.profile?.phone,
       detail.profile?.telefono,
+      detail.user?.phone,
       detail.raw?.phone,
       detail.raw?.telefono,
-      detail.raw?.mobile
+      detail.raw?.mobile,
+      detail.raw?.user?.phone
     ),
     "No configurado"
   );
@@ -430,15 +486,44 @@ function getAvatarUrl(detail = {}) {
       detail.profile?.photo,
       detail.profile?.imageUrl,
       detail.profile?.image,
+      detail.profile?.picture,
+
+      detail.user?.avatarUrl,
+      detail.user?.avatar,
+      detail.user?.photoUrl,
+      detail.user?.photo,
+      detail.user?.imageUrl,
+      detail.user?.image,
+      detail.user?.picture,
 
       detail.raw?.avatarUrl,
+      detail.raw?.avatarURL,
+      detail.raw?.avatar_url,
       detail.raw?.avatar,
       detail.raw?.photoUrl,
+      detail.raw?.photoURL,
+      detail.raw?.photo_url,
       detail.raw?.photo,
       detail.raw?.imageUrl,
       detail.raw?.image,
       detail.raw?.picture,
-      detail.raw?.pictureUrl
+      detail.raw?.pictureUrl,
+      detail.raw?.profilePicture,
+      detail.raw?.profilePictureUrl,
+
+      detail.raw?.profile?.avatarUrl,
+      detail.raw?.profile?.avatar,
+      detail.raw?.profile?.photoUrl,
+      detail.raw?.profile?.photo,
+      detail.raw?.profile?.imageUrl,
+      detail.raw?.profile?.image,
+      detail.raw?.user?.avatarUrl,
+      detail.raw?.user?.avatar,
+      detail.raw?.user?.photoUrl,
+      detail.raw?.user?.photo,
+      detail.raw?.user?.imageUrl,
+      detail.raw?.user?.image,
+      detail.raw?.user?.picture
     ),
     ""
   );
@@ -447,23 +532,35 @@ function getAvatarUrl(detail = {}) {
 function getCreatedAt(detail = {}) {
   return first(
     detail.createdAt,
+    detail.created_at,
     detail.created,
     detail.registeredAt,
+    detail.user?.createdAt,
     detail.raw?.createdAt,
+    detail.raw?.created_at,
     detail.raw?.created,
-    detail.raw?.registeredAt
+    detail.raw?.registeredAt,
+    detail.raw?.user?.createdAt
   );
 }
 
 function getUpdatedAt(detail = {}) {
   return first(
     detail.updatedAt,
+    detail.updated_at,
     detail.modifiedAt,
     detail.lastUpdatedAt,
+    detail.preferences?.updatedAt,
+    detail.settings?.updatedAt,
+    detail.user?.updatedAt,
     detail.createdAt,
     detail.raw?.updatedAt,
+    detail.raw?.updated_at,
     detail.raw?.modifiedAt,
     detail.raw?.lastUpdatedAt,
+    detail.raw?.preferences?.updatedAt,
+    detail.raw?.settings?.updatedAt,
+    detail.raw?.user?.updatedAt,
     detail.raw?.createdAt
   );
 }
@@ -471,10 +568,12 @@ function getUpdatedAt(detail = {}) {
 function getLastLoginAt(detail = {}) {
   return first(
     detail.lastLoginAt,
+    detail.lastLogin,
     detail.lastSeenAt,
     detail.lastAccessAt,
     detail.session?.lastLoginAt,
     detail.raw?.lastLoginAt,
+    detail.raw?.lastLogin,
     detail.raw?.lastSeenAt,
     detail.raw?.lastAccessAt,
     detail.raw?.session?.lastLoginAt
@@ -487,20 +586,26 @@ function getLangValue(detail = {}) {
       detail.lang,
       detail.language,
       detail.locale,
+      detail.idioma,
       detail.preferences?.lang,
       detail.preferences?.language,
+      detail.preferences?.locale,
       detail.settings?.lang,
       detail.settings?.language,
+      detail.settings?.locale,
       detail.raw?.lang,
       detail.raw?.language,
       detail.raw?.locale,
+      detail.raw?.idioma,
       detail.raw?.preferences?.lang,
+      detail.raw?.preferences?.language,
       detail.raw?.settings?.lang,
+      detail.raw?.settings?.language,
       "es"
     )
   );
 
-  if (["en", "english", "en_us", "en_gb"].includes(lang)) return "en";
+  if (["en", "eng", "english", "en_us", "en_gb"].includes(lang)) return "en";
   if (["ca", "cat", "catala", "catalan", "ca_es"].includes(lang)) return "ca";
 
   return "es";
@@ -519,11 +624,17 @@ function getThemeValue(detail = {}) {
   const explicitTheme = normalizeKey(
     first(
       detail.theme,
+      detail.mode,
       detail.appearance,
+      detail.colorMode,
       detail.preferences?.theme,
+      detail.preferences?.mode,
       detail.preferences?.appearance,
       detail.settings?.theme,
+      detail.settings?.mode,
+      detail.settings?.appearance,
       detail.raw?.theme,
+      detail.raw?.mode,
       detail.raw?.appearance,
       detail.raw?.preferences?.theme,
       detail.raw?.settings?.theme,
@@ -531,8 +642,8 @@ function getThemeValue(detail = {}) {
     )
   );
 
-  if (["dark", "oscuro", "night"].includes(explicitTheme)) return "dark";
-  if (["light", "claro", "day"].includes(explicitTheme)) return "light";
+  if (["dark", "oscuro", "night", "theme_dark"].includes(explicitTheme)) return "dark";
+  if (["light", "claro", "day", "theme_light"].includes(explicitTheme)) return "light";
 
   return safeBoolean(
     first(
@@ -541,6 +652,7 @@ function getThemeValue(detail = {}) {
       detail.preferences?.darkMode,
       detail.settings?.darkMode,
       detail.raw?.darkMode,
+      detail.raw?.isDark,
       detail.raw?.preferences?.darkMode,
       detail.raw?.settings?.darkMode
     ),
@@ -562,6 +674,26 @@ function getThemeStatusLabel(detail = {}) {
   return isDarkMode(detail) ? "Tema oscuro activo" : "Tema claro activo";
 }
 
+function getPrivacyMode(detail = {}) {
+  return safeBoolean(
+    first(
+      detail.privacyMode,
+      detail.privateMode,
+      detail.preferences?.privacyMode,
+      detail.settings?.privacyMode,
+      detail.raw?.privacyMode,
+      detail.raw?.privateMode,
+      detail.raw?.preferences?.privacyMode,
+      detail.raw?.settings?.privacyMode
+    ),
+    false
+  );
+}
+
+function getPrivacyLabel(detail = {}) {
+  return getPrivacyMode(detail) ? "Privacidad activa" : "Privacidad estándar";
+}
+
 function getSecurityStatusLabel(detail = {}) {
   const lastLogin = getLastLoginAt(detail);
 
@@ -578,6 +710,7 @@ function getAccountStatus(detail = {}) {
       detail.status,
       detail.estado,
       detail.accountStatus,
+      detail.profileStatus,
       detail.raw?.status,
       detail.raw?.estado,
       detail.raw?.accountStatus,
@@ -587,7 +720,8 @@ function getAccountStatus(detail = {}) {
 
   if (["active", "activo", "enabled"].includes(status)) return "Activa";
   if (["pending", "pendiente"].includes(status)) return "Pendiente";
-  if (["blocked", "bloqueada", "disabled", "inactive"].includes(status)) return "Bloqueada";
+  if (["blocked", "bloqueada", "disabled", "inactive", "inactivo"].includes(status)) return "Bloqueada";
+  if (["suspended", "suspendida"].includes(status)) return "Suspendida";
 
   return safeText(status, "Activa");
 }
@@ -597,7 +731,7 @@ function getAccountStatusTone(detail = {}) {
 
   if (["activa", "active"].includes(status)) return "success";
   if (["pendiente", "pending"].includes(status)) return "warning";
-  if (["bloqueada", "blocked", "disabled"].includes(status)) return "danger";
+  if (["bloqueada", "blocked", "disabled", "suspendida", "suspended"].includes(status)) return "danger";
 
   return "default";
 }
@@ -645,7 +779,7 @@ function renderAvatar(detail = {}, size = "hero") {
   const name = getDisplayName(detail);
   const initials = getInitials(name);
   const avatarUrl = getAvatarUrl(detail);
-  const hasImage = isHttpUrl(avatarUrl);
+  const hasImage = isRenderableImageUrl(avatarUrl);
 
   return `
     <div
@@ -653,6 +787,7 @@ function renderAvatar(detail = {}, size = "hero") {
       title="${escapeHtml(name)}"
       aria-label="${escapeHtml(name)}"
       data-tooltip="${escapeHtml(name)}"
+      ${hasImage ? 'data-has-avatar="true"' : 'data-has-avatar="false"'}
     >
       ${
         hasImage
@@ -661,6 +796,7 @@ function renderAvatar(detail = {}, size = "hero") {
               src="${escapeHtml(avatarUrl)}"
               alt="${escapeHtml(name)}"
               loading="lazy"
+              decoding="async"
               referrerpolicy="no-referrer"
               onerror="this.style.display='none'; this.parentNode.setAttribute('data-fallback','true');"
             />
@@ -695,6 +831,7 @@ function renderField({
   label = "",
   value = "",
   dataRole = "",
+  id = "",
   type = "text",
   placeholder = "",
   readonly = false,
@@ -706,6 +843,7 @@ function renderField({
       <span class="cuenta-field-label">${escapeHtml(label)}</span>
 
       <input
+        ${id ? `id="${escapeHtml(id)}"` : ""}
         data-role="${escapeHtml(dataRole)}"
         type="${escapeHtml(type)}"
         value="${escapeHtml(safeText(value, ""))}"
@@ -852,7 +990,7 @@ function renderPasswordRow({ disabled = false } = {}) {
           />
         </label>
 
-        <label class="cuenta-field">
+        <label class="cuenta-field cuenta-field--wide">
           <span class="cuenta-field-label">Confirmar contraseña</span>
           <input
             id="cuenta-confirm-password"
@@ -898,11 +1036,11 @@ function renderStyles() {
       @keyframes cuentaFloatIn{
         from{
           opacity:0;
-          transform:translateY(10px);
+          transform:translateY(10px) scale(.995);
         }
         to{
           opacity:1;
-          transform:translateY(0);
+          transform:translateY(0) scale(1);
         }
       }
 
@@ -924,12 +1062,12 @@ function renderStyles() {
       .cuenta-state{
         position:relative;
         overflow:hidden;
-        border-radius:var(--view-hero-radius, var(--card-radius-lg, 24px));
+        border-radius:var(--view-hero-radius, var(--card-radius-lg, 26px));
         border:1px solid var(--view-hero-border, var(--panel-border, var(--border-default, rgba(255,255,255,.08))));
         background:
-          radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent, #6f59d9) 18%, transparent), transparent 34%),
-          radial-gradient(circle at 100% 0, rgba(255,255,255,.08), transparent 28%),
-          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
+          radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent, #6f59d9) 20%, transparent), transparent 36%),
+          radial-gradient(circle at 100% 0, rgba(255,255,255,.10), transparent 32%),
+          linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,0) 38%),
           var(--view-hero-bg, var(--panel-bg, var(--card-bg, var(--surface-elevated, #262626))));
         box-shadow:var(--view-hero-shadow, var(--panel-shadow, var(--shadow-md, 0 14px 30px rgba(0,0,0,.22))));
         animation:cuentaFloatIn .28s ease both;
@@ -942,9 +1080,9 @@ function renderStyles() {
         inset:0;
         pointer-events:none;
         background:
-          linear-gradient(135deg, rgba(255,255,255,.070), transparent 32%),
-          linear-gradient(180deg, rgba(255,255,255,.030), transparent 44%);
-        opacity:.72;
+          linear-gradient(135deg, rgba(255,255,255,.075), transparent 30%),
+          linear-gradient(180deg, rgba(255,255,255,.030), transparent 48%);
+        opacity:.76;
       }
 
       .cuenta-hero-inner{
@@ -973,12 +1111,12 @@ function renderStyles() {
         min-height:calc(30px * var(--ui-scale, 1));
         padding:0 var(--space-sm, 12px);
         border-radius:var(--radius-pill, 999px);
-        border:1px solid color-mix(in srgb, var(--accent, #6f59d9) 28%, var(--badge-border, rgba(255,255,255,.08)));
-        background:color-mix(in srgb, var(--accent, #6f59d9) 12%, transparent);
+        border:1px solid color-mix(in srgb, var(--accent, #6f59d9) 30%, var(--badge-border, rgba(255,255,255,.08)));
+        background:color-mix(in srgb, var(--accent, #6f59d9) 13%, transparent);
         color:var(--accent-active, var(--text-strong, #ffffff));
         font-size:var(--font-xs, 11px);
-        font-weight:var(--weight-black, 800);
-        letter-spacing:var(--letter-wider, .09em);
+        font-weight:var(--weight-black, 900);
+        letter-spacing:var(--letter-wider, .095em);
         text-transform:uppercase;
         display:inline-flex;
         align-items:center;
@@ -997,7 +1135,7 @@ function renderStyles() {
 
       .cuenta-subtitle{
         margin:0;
-        max-width:900px;
+        max-width:920px;
         font-size:var(--font-lg, 15px);
         line-height:var(--line-relaxed, 1.62);
         color:var(--view-subtitle-color, var(--text-muted, rgba(245,245,245,.70)));
@@ -1014,7 +1152,7 @@ function renderStyles() {
       .cuenta-btn{
         min-height:var(--btn-height, 42px);
         padding:0 var(--space-md, 16px);
-        border-radius:var(--btn-radius, var(--radius-md, 13px));
+        border-radius:var(--btn-radius, var(--radius-md, 14px));
         border:1px solid var(--btn-secondary-border, var(--border-default, rgba(255,255,255,.09)));
         background:var(--btn-secondary-bg, rgba(255,255,255,.045));
         color:var(--btn-secondary-text, var(--text, #f5f5f5));
@@ -1039,7 +1177,7 @@ function renderStyles() {
       .cuenta-btn:hover{
         transform:translateY(var(--ui-hover-lift, -1px));
         background:var(--btn-secondary-bg-hover, rgba(255,255,255,.062));
-        border-color:color-mix(in srgb, var(--accent, #6f59d9) 24%, var(--btn-secondary-border, rgba(255,255,255,.09)));
+        border-color:color-mix(in srgb, var(--accent, #6f59d9) 26%, var(--btn-secondary-border, rgba(255,255,255,.09)));
         box-shadow:var(--shadow-md, 0 14px 30px rgba(0,0,0,.22));
       }
 
@@ -1048,10 +1186,6 @@ function renderStyles() {
         background:var(--btn-primary-bg, var(--accent, #6f59d9));
         color:var(--btn-primary-text, var(--text-on-accent, #ffffff));
         box-shadow:var(--btn-primary-shadow, 0 14px 30px color-mix(in srgb, var(--accent, #6f59d9) 22%, transparent));
-      }
-
-      .cuenta-btn--primary:hover{
-        box-shadow:0 18px 40px color-mix(in srgb, var(--accent, #6f59d9) 28%, transparent);
       }
 
       .cuenta-btn--soft{
@@ -1069,16 +1203,17 @@ function renderStyles() {
         box-shadow:none;
       }
 
-      .cuenta-account-strip{
+      .cuenta-command-strip{
         display:grid;
         grid-template-columns:auto minmax(0, 1fr) auto;
         gap:var(--space-md, 16px);
         align-items:center;
         padding:var(--space-md, 16px);
-        border-radius:var(--card-radius, 20px);
-        border:1px solid color-mix(in srgb, var(--accent, #6f59d9) 18%, var(--card-border, rgba(255,255,255,.08)));
+        border-radius:var(--card-radius, 22px);
+        border:1px solid color-mix(in srgb, var(--accent, #6f59d9) 20%, var(--card-border, rgba(255,255,255,.08)));
         background:
-          radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent, #6f59d9) 16%, transparent), transparent 42%),
+          radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent, #6f59d9) 18%, transparent), transparent 44%),
+          linear-gradient(180deg, rgba(255,255,255,.050), rgba(255,255,255,.015)),
           var(--card-bg, var(--surface-elevated, rgba(39,39,42,.88)));
         box-shadow:var(--shadow-card, var(--card-shadow, 0 16px 36px rgba(0,0,0,.24)));
       }
@@ -1091,19 +1226,19 @@ function renderStyles() {
         border-radius:var(--radius-pill, 999px);
         background:
           radial-gradient(circle at 30% 20%, rgba(255,255,255,.42), transparent 30%),
-          linear-gradient(135deg, var(--accent, #6f59d9), color-mix(in srgb, var(--accent, #6f59d9) 46%, #111827));
+          linear-gradient(135deg, var(--accent, #6f59d9), color-mix(in srgb, var(--accent, #6f59d9) 42%, #111827));
         color:var(--avatar-text, #ffffff);
         isolation:isolate;
         box-shadow:
-          0 14px 30px color-mix(in srgb, var(--accent, #6f59d9) 22%, transparent),
-          0 0 0 3px color-mix(in srgb, var(--accent-ring, rgba(113,113,122,.30)) 68%, transparent),
-          var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.04));
+          0 16px 34px color-mix(in srgb, var(--accent, #6f59d9) 24%, transparent),
+          0 0 0 4px color-mix(in srgb, var(--accent-ring, rgba(113,113,122,.30)) 72%, transparent),
+          var(--shadow-inner, inset 0 1px 0 rgba(255,255,255,.06));
       }
 
       .cuenta-avatar--hero{
-        width:calc(58px * var(--ui-scale, 1));
-        height:calc(58px * var(--ui-scale, 1));
-        min-width:calc(58px * var(--ui-scale, 1));
+        width:calc(72px * var(--ui-scale, 1));
+        height:calc(72px * var(--ui-scale, 1));
+        min-width:calc(72px * var(--ui-scale, 1));
       }
 
       .cuenta-avatar--small{
@@ -1112,14 +1247,30 @@ function renderStyles() {
         min-width:calc(42px * var(--ui-scale, 1));
       }
 
+      .cuenta-avatar::before{
+        content:"";
+        position:absolute;
+        inset:-34%;
+        z-index:0;
+        background:conic-gradient(
+          from 120deg,
+          transparent,
+          color-mix(in srgb, var(--accent, #6f59d9) 32%, transparent),
+          transparent,
+          rgba(255,255,255,.18),
+          transparent
+        );
+        opacity:.92;
+      }
+
       .cuenta-avatar::after{
         content:"";
         position:absolute;
         inset:0;
-        z-index:2;
+        z-index:3;
         background:
           radial-gradient(circle at 30% 22%, rgba(255,255,255,.42), transparent 34%),
-          linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.10));
+          linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.12));
         pointer-events:none;
         mix-blend-mode:screen;
       }
@@ -1127,19 +1278,20 @@ function renderStyles() {
       .cuenta-avatar img{
         position:absolute;
         inset:0;
-        z-index:1;
+        z-index:2;
         width:100%;
         height:100%;
         object-fit:cover;
+        border-radius:inherit;
       }
 
       .cuenta-avatar-fallback{
         position:relative;
-        z-index:3;
-        font-size:var(--font-2xl, 20px);
+        z-index:2;
+        font-size:var(--font-3xl, 25px);
         font-weight:var(--weight-black, 900);
-        letter-spacing:-.045em;
-        text-shadow:0 1px 2px rgba(0,0,0,.24);
+        letter-spacing:-.055em;
+        text-shadow:0 1px 2px rgba(0,0,0,.26);
       }
 
       .cuenta-avatar.has-image .cuenta-avatar-fallback{
@@ -1156,7 +1308,7 @@ function renderStyles() {
 
       .cuenta-account-copy{
         display:grid;
-        gap:var(--space-3xs, 3px);
+        gap:var(--space-3xs, 4px);
         min-width:0;
       }
 
@@ -1165,9 +1317,10 @@ function renderStyles() {
         text-overflow:ellipsis;
         white-space:nowrap;
         color:var(--text-strong, #ffffff);
-        font-size:var(--font-xl, 17px);
+        font-size:clamp(var(--font-xl, 17px), 1.6vw, var(--font-3xl, 24px));
+        line-height:1.05;
         font-weight:var(--weight-black, 900);
-        letter-spacing:-.035em;
+        letter-spacing:-.045em;
       }
 
       .cuenta-account-line{
@@ -1187,7 +1340,7 @@ function renderStyles() {
       }
 
       .cuenta-mini-stat{
-        min-width:120px;
+        min-width:124px;
         display:grid;
         gap:var(--space-3xs, 3px);
         padding:var(--space-xs, 10px) var(--space-sm, 12px);
@@ -1200,7 +1353,7 @@ function renderStyles() {
         color:var(--text-dim, rgba(245,245,245,.55));
         font-size:var(--font-xs, 11px);
         font-weight:var(--weight-bold, 800);
-        letter-spacing:.07em;
+        letter-spacing:.075em;
         text-transform:uppercase;
       }
 
@@ -1253,7 +1406,7 @@ function renderStyles() {
       .cuenta-chip--accent{
         color:var(--accent-active, var(--text-strong, #ffffff));
         background:color-mix(in srgb, var(--accent, #6f59d9) 16%, transparent);
-        border-color:color-mix(in srgb, var(--accent, #6f59d9) 32%, transparent);
+        border-color:color-mix(in srgb, var(--accent, #6f59d9) 34%, transparent);
       }
 
       .cuenta-chip--success{
@@ -1278,7 +1431,7 @@ function renderStyles() {
         position:relative;
         z-index:1;
         display:grid;
-        grid-template-columns:1.08fr .92fr;
+        grid-template-columns:minmax(0, 1.08fr) minmax(360px, .92fr);
         gap:var(--space-md, 16px);
         padding:var(--space-md, 16px);
       }
@@ -1287,6 +1440,7 @@ function renderStyles() {
         display:grid;
         gap:var(--space-md, 16px);
         min-width:0;
+        align-content:start;
       }
 
       .cuenta-card{
@@ -1294,10 +1448,10 @@ function renderStyles() {
         align-content:start;
         gap:var(--space-md, 16px);
         padding:var(--space-lg, 18px);
-        border-radius:var(--card-radius, 20px);
+        border-radius:var(--card-radius, 22px);
         border:1px solid var(--card-border, var(--border-default, rgba(255,255,255,.082)));
         background:
-          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%)),
+          linear-gradient(180deg, rgba(255,255,255,.050), rgba(255,255,255,.012)),
           var(--card-bg, var(--surface-elevated, rgba(39,39,42,.88)));
         box-shadow:var(--shadow-card, var(--card-shadow, 0 16px 36px rgba(0,0,0,.24)));
         transition:
@@ -1309,12 +1463,12 @@ function renderStyles() {
 
       .cuenta-card:hover{
         transform:translateY(-1px);
-        border-color:color-mix(in srgb, var(--accent, #6f59d9) 18%, var(--card-border, rgba(255,255,255,.082)));
+        border-color:color-mix(in srgb, var(--accent, #6f59d9) 20%, var(--card-border, rgba(255,255,255,.082)));
         box-shadow:var(--shadow-lg, 0 22px 48px rgba(0,0,0,.24));
       }
 
       .cuenta-card--accent{
-        border-color:color-mix(in srgb, var(--accent, #6f59d9) 28%, var(--card-border, rgba(255,255,255,.082)));
+        border-color:color-mix(in srgb, var(--accent, #6f59d9) 30%, var(--card-border, rgba(255,255,255,.082)));
       }
 
       .cuenta-card--success{
@@ -1355,16 +1509,17 @@ function renderStyles() {
       }
 
       .cuenta-card-icon{
-        width:42px;
-        height:42px;
+        width:44px;
+        height:44px;
         border-radius:var(--radius-lg, 16px);
         display:grid;
         place-items:center;
         border:1px solid color-mix(in srgb, var(--accent, #6f59d9) 24%, transparent);
         background:color-mix(in srgb, var(--accent, #6f59d9) 12%, transparent);
         color:var(--accent-active, var(--text-strong, #ffffff));
-        font-size:18px;
+        font-size:13px;
         font-weight:900;
+        letter-spacing:-.03em;
       }
 
       .cuenta-profile-grid{
@@ -1379,10 +1534,6 @@ function renderStyles() {
         gap:var(--space-sm, 12px);
         padding:var(--space-sm, 12px) 0;
         border-top:1px solid var(--border-soft, rgba(255,255,255,.05));
-      }
-
-      .cuenta-control-row--select{
-        border-bottom:none;
       }
 
       .cuenta-control-copy{
@@ -1531,7 +1682,7 @@ function renderStyles() {
         gap:var(--space-sm, 12px);
       }
 
-      .cuenta-password-grid .cuenta-field:last-child{
+      .cuenta-field--wide{
         grid-column:1 / -1;
       }
 
@@ -1733,7 +1884,7 @@ function renderStyles() {
         background:
           radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent, #6f59d9) 9%, transparent), transparent 34%),
           radial-gradient(circle at 100% 0, rgba(255,255,255,.90), transparent 28%),
-          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.86), rgba(255,255,255,0) 34%)),
+          linear-gradient(180deg, rgba(255,255,255,.88), rgba(255,255,255,0) 34%),
           var(--view-hero-bg, var(--panel-bg, var(--card-bg, var(--surface-elevated, #ffffff))));
         box-shadow:
           0 24px 60px rgba(15,23,42,.10),
@@ -1741,10 +1892,10 @@ function renderStyles() {
       }
 
       [data-theme="light"] .cuenta-card,
-      [data-theme="light"] .cuenta-account-strip,
+      [data-theme="light"] .cuenta-command-strip,
       [data-theme="light"] .cuenta-skeleton-card{
         background:
-          var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.88), rgba(255,255,255,0) 34%)),
+          linear-gradient(180deg, rgba(255,255,255,.88), rgba(255,255,255,0) 34%),
           var(--card-bg, var(--surface-elevated, #ffffff));
         box-shadow:0 18px 42px rgba(15,23,42,.08);
       }
@@ -1793,7 +1944,7 @@ function renderStyles() {
 
       @media (max-width: 1180px){
         .cuenta-hero-top,
-        .cuenta-account-strip,
+        .cuenta-command-strip,
         .cuenta-cards-grid{
           grid-template-columns:1fr;
         }
@@ -1854,7 +2005,7 @@ function renderStyles() {
           grid-template-columns:1fr;
         }
 
-        .cuenta-password-grid .cuenta-field:last-child{
+        .cuenta-field--wide{
           grid-column:auto;
         }
 
@@ -1867,6 +2018,12 @@ function renderStyles() {
         .cuenta-meta-value{
           text-align:left;
           white-space:normal;
+        }
+
+        .cuenta-avatar--hero{
+          width:62px;
+          height:62px;
+          min-width:62px;
         }
       }
 
@@ -1906,18 +2063,21 @@ export function renderHeader({ item = null, state = {} } = {}) {
   const statusTone = detail ? getAccountStatusTone(detail) : "success";
 
   return `
-    ${renderStyles()}
+    ${render";
+
+  const status = detail ? getAccountStatus(detail) : "Activa";
+  const statusTone = detail ? getAccountStatusTone(detail) : "Styles()}
 
     <section class="cuenta-hero">
       <div class="cuenta-hero-inner">
         <div class="cuenta-hero-top">
           <div class="cuenta-hero-copy">
-            <span class="cuenta-eyebrow">Cuenta</span>
+            <span class="cuenta-eyebrow">Ajustes de cuenta</span>
 
-            <h1 class="cuenta-title">Centro de control de cuenta</h1>
+            <h1 class="cuenta-title">Centro de control personal</h1>
 
             <p class="cuenta-subtitle">
-              Gestiona identidad, apariencia, idioma y seguridad desde un panel premium conectado al sistema visual de Onion Support.
+              Gestiona identidad, apariencia, idioma y seguridad desde un panel premium sincronizado con Onion Support.
             </p>
           </div>
 
@@ -1944,7 +2104,7 @@ export function renderHeader({ item = null, state = {} } = {}) {
           </div>
         </div>
 
-        <div class="cuenta-account-strip">
+        <div class="cuenta-command-strip">
           ${renderAvatar(detail || {}, "hero")}
 
           <div class="cuenta-account-copy">
@@ -1978,6 +2138,7 @@ export function renderHeader({ item = null, state = {} } = {}) {
           ${renderChip(`Rol · ${role}`, "accent")}
           ${renderChip(`Tema · ${detail ? getThemeLabel(detail) : "Light mode"}`, "default")}
           ${renderChip(`Idioma · ${detail ? getLangLabel(detail) : "Español"}`, "default")}
+          ${renderChip(`Privacidad · ${detail ? getPrivacyLabel(detail) : "Estándar"}`, detail && getPrivacyMode(detail) ? "success" : "default")}
           ${renderChip(`Estado · ${status}`, statusTone)}
           ${renderChip(`Sync · ${updatedText}`, refreshing || loading ? "warning" : "default")}
           ${saving ? renderChip("Guardando cambios", "accent") : ""}
@@ -2067,7 +2228,7 @@ function renderProfileCard(detail = {}, { disabled = false } = {}) {
         <div class="cuenta-card-copy">
           <h2 class="cuenta-card-title">Identidad</h2>
           <p class="cuenta-card-text">
-            Datos principales asociados a la sesión y al perfil visible en Onion Support.
+            Datos principales asociados a la sesión, al perfil visible y al usuario autenticado.
           </p>
         </div>
 
@@ -2076,6 +2237,7 @@ function renderProfileCard(detail = {}, { disabled = false } = {}) {
 
       <div class="cuenta-profile-grid">
         ${renderField({
+          id: "cuenta-name-input",
           label: "Nombre visible",
           value: getDisplayName(detail),
           dataRole: "cuenta-name-input",
@@ -2085,6 +2247,7 @@ function renderProfileCard(detail = {}, { disabled = false } = {}) {
         })}
 
         ${renderField({
+          id: "cuenta-username-input",
           label: "Usuario",
           value: getUsername(detail),
           dataRole: "cuenta-username-input",
@@ -2095,6 +2258,7 @@ function renderProfileCard(detail = {}, { disabled = false } = {}) {
         })}
 
         ${renderField({
+          id: "cuenta-email-input",
           label: "Email",
           value: getEmail(detail),
           dataRole: "cuenta-email-input",
@@ -2106,6 +2270,7 @@ function renderProfileCard(detail = {}, { disabled = false } = {}) {
         })}
 
         ${renderField({
+          id: "cuenta-phone-input",
           label: "Teléfono",
           value: getPhone(detail) === "No configurado" ? "" : getPhone(detail),
           dataRole: "cuenta-phone-input",
@@ -2135,7 +2300,7 @@ function renderAppearanceCard(detail = {}, { disabled = false } = {}) {
         <div class="cuenta-card-copy">
           <h2 class="cuenta-card-title">Apariencia</h2>
           <p class="cuenta-card-text">
-            Ajusta el modo visual principal de la SPA. El cambio debe sincronizarse con Core, variables CSS y almacenamiento.
+            Ajusta el modo visual principal. El cambio sincroniza DOM, AppCore, storage y variables CSS.
           </p>
         </div>
 
@@ -2200,6 +2365,43 @@ function renderLanguageCard(detail = {}, { disabled = false } = {}) {
   `;
 }
 
+function renderPrivacyCard(detail = {}, { disabled = false } = {}) {
+  const privacy = getPrivacyMode(detail);
+
+  return `
+    <article class="cuenta-card">
+      <div class="cuenta-card-head">
+        <div class="cuenta-card-copy">
+          <h2 class="cuenta-card-title">Privacidad</h2>
+          <p class="cuenta-card-text">
+            Control local para preferencias de privacidad del perfil y futuras reglas de visibilidad.
+          </p>
+        </div>
+
+        <div class="cuenta-card-icon" aria-hidden="true">PV</div>
+      </div>
+
+      ${renderSwitchRow({
+        title: "Modo privacidad",
+        description: "Activa una preferencia de privacidad para vistas y módulos compatibles.",
+        checked: privacy,
+        inputId: "cuenta-privacymode-input",
+        dataRole: "cuenta-privacymode-input",
+        action: "save-cuenta",
+        disabled,
+        checkedLabel: "Activo",
+        uncheckedLabel: "Estándar",
+        buttonLabel: "Guardar privacidad",
+      })}
+
+      <div class="cuenta-meta-list">
+        ${renderMetaRow("Privacidad", getPrivacyLabel(detail))}
+        ${renderMetaRow("Valor técnico", privacy ? "true" : "false")}
+      </div>
+    </article>
+  `;
+}
+
 function renderSecurityCard(detail = {}, { disabled = false } = {}) {
   return `
     <article class="cuenta-card cuenta-card--warning">
@@ -2207,11 +2409,11 @@ function renderSecurityCard(detail = {}, { disabled = false } = {}) {
         <div class="cuenta-card-copy">
           <h2 class="cuenta-card-title">Seguridad</h2>
           <p class="cuenta-card-text">
-            Actualiza la contraseña de acceso de la cuenta. La acción queda delegada a cuenta.bindings.js.
+            Actualiza la contraseña de acceso. La mutación queda delegada al bridge de cuenta.
           </p>
         </div>
 
-        <div class="cuenta-card-icon" aria-hidden="true">●</div>
+        <div class="cuenta-card-icon" aria-hidden="true">SC</div>
       </div>
 
       ${renderPasswordRow({
@@ -2231,6 +2433,7 @@ function renderAuditCard(detail = {}) {
   const updatedAt = getUpdatedAt(detail);
   const createdAt = getCreatedAt(detail);
   const lastLoginAt = getLastLoginAt(detail);
+  const avatar = getAvatarUrl(detail);
 
   return `
     <article class="cuenta-card cuenta-card--success">
@@ -2238,7 +2441,7 @@ function renderAuditCard(detail = {}) {
         <div class="cuenta-card-copy">
           <h2 class="cuenta-card-title">Actividad</h2>
           <p class="cuenta-card-text">
-            Resumen técnico de sincronización y metadatos de la cuenta.
+            Resumen técnico de sincronización, sesión y metadatos visibles de cuenta.
           </p>
         </div>
 
@@ -2250,6 +2453,7 @@ function renderAuditCard(detail = {}) {
         ${renderMetaRow("Actualizado relativo", updatedAt ? formatRelativeDate(updatedAt) : "Sin fecha")}
         ${renderMetaRow("Creado", createdAt ? formatDate(createdAt) : "—")}
         ${renderMetaRow("Último login", lastLoginAt ? formatDate(lastLoginAt) : "—")}
+        ${renderMetaRow("Avatar", avatar ? "Imagen detectada" : "Iniciales fallback", avatar ? "success" : "default")}
         ${renderMetaRow("Email", truncate(getEmail(detail), 42))}
         ${renderMetaRow("Username", `@${getUsername(detail)}`)}
       </div>
@@ -2299,6 +2503,10 @@ export function renderPanel({ item = null, state = {} } = {}) {
           })}
 
           ${renderLanguageCard(detail, {
+            disabled: busy,
+          })}
+
+          ${renderPrivacyCard(detail, {
             disabled: busy,
           })}
 

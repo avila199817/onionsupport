@@ -4,6 +4,7 @@
 
    EXTREME PRO SYSTEM · STATE LAYER · FULL PATCH 12/10
    SINGLE RESOURCE MODE · ACCOUNT PREFS · RACE SAFE
+   DUPLICATE EXPORT SAFE · ROUTER/INDEX COMPATIBLE
 
    RESPONSABILIDADES:
    - estado local centralizado del módulo cuenta
@@ -26,7 +27,7 @@
    - estado preparado para preferencias parciales
    - acepta timestamps number / string / ISO
    - normaliza lang/theme/boolean
-   - expone aliases legacy
+   - expone aliases legacy sin redeclarar identifiers
    - default export estable
 ========================================================= */
 
@@ -142,6 +143,7 @@ function safeBoolean(value, fallback = false) {
       "on",
       "enabled",
       "activo",
+      "activa",
       "dark",
       "oscuro",
     ].includes(key)
@@ -158,6 +160,7 @@ function safeBoolean(value, fallback = false) {
       "off",
       "disabled",
       "inactivo",
+      "inactiva",
       "light",
       "claro",
     ].includes(key)
@@ -194,11 +197,11 @@ function normalizeLang(value = DEFAULT_LANG) {
 function normalizeTheme(value = "", fallbackDarkMode = false) {
   const key = normalizeKey(value);
 
-  if (["dark", "oscuro", "night", "theme_dark"].includes(key)) {
+  if (["dark", "oscuro", "night", "theme_dark", "dark_mode"].includes(key)) {
     return "dark";
   }
 
-  if (["light", "claro", "day", "theme_light"].includes(key)) {
+  if (["light", "claro", "day", "theme_light", "light_mode"].includes(key)) {
     return "light";
   }
 
@@ -310,9 +313,11 @@ export function createDefaultCuentaDraft() {
   return {
     darkMode: false,
     privacyMode: false,
+
     lang: DEFAULT_LANG,
     language: DEFAULT_LANG,
     locale: DEFAULT_LANG,
+
     theme: DEFAULT_THEME,
     mode: DEFAULT_THEME,
     appearance: DEFAULT_THEME,
@@ -336,6 +341,16 @@ export function createDefaultCuentaViewState() {
 
     activeSection: "preferences",
     lastAction: "",
+  };
+}
+
+export function createDefaultCuentaActionState() {
+  return {
+    savingPreferences: false,
+    savingTheme: false,
+    savingLanguage: false,
+    changingPassword: false,
+    openingModal: false,
   };
 }
 
@@ -368,17 +383,11 @@ export function createInitialCuentaState() {
 
     meta: null,
 
-    action: {
-      savingPreferences: false,
-      savingTheme: false,
-      savingLanguage: false,
-      changingPassword: false,
-      openingModal: false,
-    },
+    action: createDefaultCuentaActionState(),
 
     debug: {
       source: "cuenta.state",
-      version: "12.0.0",
+      version: "12.0.1",
       createdAt: nowIso(),
       lastMutationAt: "",
     },
@@ -456,6 +465,7 @@ function normalizeCuentaDraft(value = {}) {
   );
 
   const theme = normalizeTheme(rawTheme, darkMode);
+
   const lang = normalizeLang(
     first(
       draft.lang,
@@ -547,6 +557,17 @@ function normalizeCuentaItem(value = null) {
   );
 
   const theme = normalizeTheme(rawTheme, darkMode);
+
+  const privacyMode = safeBoolean(
+    first(
+      item.privacyMode,
+      item.privateMode,
+      item.preferences?.privacyMode,
+      item.settings?.privacyMode,
+      false
+    ),
+    false
+  );
 
   const lang = normalizeLang(
     first(
@@ -677,16 +698,7 @@ function normalizeCuentaItem(value = null) {
     active: safeBoolean(first(item.active, item.enabled, true), true),
 
     darkMode,
-    privacyMode: safeBoolean(
-      first(
-        item.privacyMode,
-        item.privateMode,
-        item.preferences?.privacyMode,
-        item.settings?.privacyMode,
-        false
-      ),
-      false
-    ),
+    privacyMode,
 
     theme,
     mode: theme,
@@ -703,45 +715,35 @@ function normalizeCuentaItem(value = null) {
 
     preferences: {
       ...safeObject(item.preferences),
+
       darkMode,
-      privacyMode: safeBoolean(
-        first(
-          item.privacyMode,
-          item.privateMode,
-          item.preferences?.privacyMode,
-          item.settings?.privacyMode,
-          false
-        ),
-        false
-      ),
+      privacyMode,
+
       theme,
       mode: theme,
       appearance: theme,
+
       lang,
       language: lang,
       locale: lang,
+
       updatedAt: updatedAt || null,
     },
 
     settings: {
       ...safeObject(item.settings),
+
       darkMode,
-      privacyMode: safeBoolean(
-        first(
-          item.privacyMode,
-          item.privateMode,
-          item.preferences?.privacyMode,
-          item.settings?.privacyMode,
-          false
-        ),
-        false
-      ),
+      privacyMode,
+
       theme,
       mode: theme,
       appearance: theme,
+
       lang,
       language: lang,
       locale: lang,
+
       updatedAt: updatedAt || null,
     },
   };
@@ -761,9 +763,11 @@ function buildDraftFromItem(item = null) {
   return normalizeCuentaDraft({
     darkMode: detail.darkMode,
     privacyMode: detail.privacyMode,
+
     lang: detail.lang,
     language: detail.language,
     locale: detail.locale,
+
     theme: detail.theme,
     mode: detail.mode,
     appearance: detail.appearance,
@@ -779,6 +783,7 @@ function syncDraftAndViewFromItem(item = null) {
     cuentaState.view = normalizeCuentaViewState({
       ...cuentaState.view,
       form: cuentaState.draft,
+      dirty: false,
       updatedAt: "",
       updatedAtMs: 0,
     });
@@ -794,6 +799,7 @@ function syncDraftAndViewFromItem(item = null) {
   cuentaState.view = normalizeCuentaViewState({
     ...cuentaState.view,
     form: draft,
+    dirty: false,
     updatedAt,
     updatedAtMs: getSyncMs(updatedAt),
   });
@@ -925,6 +931,9 @@ export function resetCuentaViewState() {
   return cuentaState.view;
 }
 
+export const resetViewState = resetCuentaViewState;
+export const resetCuentaDetailState = resetCuentaViewState;
+
 export function resetCuentaInflightState() {
   clearAllInflight();
   markMutation();
@@ -933,14 +942,7 @@ export function resetCuentaInflightState() {
 }
 
 export function resetCuentaActionState() {
-  cuentaState.action = {
-    savingPreferences: false,
-    savingTheme: false,
-    savingLanguage: false,
-    changingPassword: false,
-    openingModal: false,
-  };
-
+  cuentaState.action = createDefaultCuentaActionState();
   markMutation();
 
   return cuentaState.action;
@@ -1148,11 +1150,12 @@ export function setItem(item = null) {
   cuentaState.error = "";
 
   cuentaState.items = normalized ? [normalized] : [];
-
   cuentaState.remoteCount = normalized ? 1 : 0;
 
   if (normalized) {
     syncDraftAndViewFromItem(normalized);
+  } else {
+    syncDraftAndViewFromItem(null);
   }
 
   markMutation();
@@ -1601,13 +1604,6 @@ export function setViewLastAction(value = "") {
   return cuentaState.view.lastAction;
 }
 
-export function resetViewState() {
-  cuentaState.view = createDefaultCuentaViewState();
-  markMutation();
-
-  return cuentaState.view;
-}
-
 export function syncViewFormFromItem() {
   const item = getItem();
 
@@ -1626,11 +1622,14 @@ export function getCachePayload() {
     savedAt: Date.now(),
     item: getItem(),
     items: getItems(),
+
     lastSyncAt: cuentaState.lastSyncAt,
     lastSyncAtMs: getLastSyncAtMs(),
+
     page: cuentaState.page,
     pageSize: cuentaState.pageSize,
     remoteCount: cuentaState.remoteCount,
+
     meta: cuentaState.meta ? { ...safeObject(cuentaState.meta) } : null,
   };
 }
@@ -1832,11 +1831,15 @@ export function getCuentaInflightState() {
 }
 
 /* =========================================================
-   LEGACY ALIASES
+   LEGACY ALIASES · SAFE
+   IMPORTANTE:
+   - NO redeclarar resetCuentaViewState.
+   - resetViewState ya apunta a resetCuentaViewState.
 ========================================================= */
 
 export const clearCuentaError = clearError;
 export const setCuentaError = setError;
+export const getCuentaError = getError;
 
 export const setCuentaItem = setItem;
 export const getCuentaItemState = getItem;
@@ -1849,6 +1852,12 @@ export const setCuentaRefreshing = setRefreshing;
 export const setCuentaSaving = setSaving;
 export const setCuentaHydrated = setHydrated;
 
+export const getCuentaLoaded = isCuentaLoaded;
+export const getCuentaLoading = isCuentaLoading;
+export const getCuentaRefreshing = isCuentaRefreshing;
+export const getCuentaSaving = isCuentaSaving;
+export const getCuentaHydrated = isCuentaHydrated;
+
 export const setCuentaPage = setPage;
 export const setCuentaPageSize = setPageSize;
 export const setCuentaRemoteCount = setRemoteCount;
@@ -1857,16 +1866,38 @@ export const getCuentaPage = getPage;
 export const getCuentaPageSize = getPageSize;
 export const getCuentaRemoteCount = getRemoteCount;
 
+export const setCuentaItems = setItems;
+export const getCuentaItems = getItems;
+export const clearCuentaItems = clearItems;
+
+export const setCuentaMeta = setMeta;
+export const getCuentaMeta = getMeta;
+export const clearCuentaMeta = clearMeta;
+
 export const setCuentaDraft = setDraft;
 export const patchCuentaDraft = patchDraft;
+export const getCuentaDraft = getDraft;
 export const clearCuentaDraft = clearDraft;
 
 export const setCuentaViewState = setViewState;
 export const patchCuentaViewState = patchViewState;
-export const resetCuentaViewState = resetViewState;
 
 export const setCuentaViewForm = setViewForm;
 export const patchCuentaViewForm = patchViewForm;
+export const getCuentaViewForm = getViewForm;
+
+export const setCuentaViewErrors = setViewErrors;
+export const patchCuentaViewErrors = patchViewErrors;
+export const getCuentaViewErrors = getViewErrors;
+export const clearCuentaViewErrors = clearViewErrors;
+
+export const setCuentaViewServerError = setViewServerError;
+export const getCuentaViewServerError = getViewServerError;
+export const clearCuentaViewServerError = clearViewServerError;
+
+export const setCuentaViewSuccess = setViewSuccess;
+export const getCuentaViewSuccessMessage = getViewSuccessMessage;
+export const clearCuentaViewSuccess = clearViewSuccess;
 
 export const getCuentaState = () => cuentaState;
 export const getState = () => cuentaState;
@@ -1888,6 +1919,7 @@ export default {
 
   createDefaultCuentaDraft,
   createDefaultCuentaViewState,
+  createDefaultCuentaActionState,
   createInitialCuentaState,
 
   getInflightLoad,
@@ -1918,6 +1950,8 @@ export default {
 
   resetCuentaState,
   resetCuentaViewState,
+  resetViewState,
+  resetCuentaDetailState,
   resetCuentaInflightState,
   resetCuentaActionState,
 
@@ -2008,7 +2042,6 @@ export default {
   setViewActiveSection,
   setViewLastAction,
 
-  resetViewState,
   syncViewFormFromItem,
 
   getCachePayload,
@@ -2026,6 +2059,7 @@ export default {
 
   clearCuentaError,
   setCuentaError,
+  getCuentaError,
 
   setCuentaItem,
   getCuentaItemState,
@@ -2038,6 +2072,12 @@ export default {
   setCuentaSaving,
   setCuentaHydrated,
 
+  getCuentaLoaded,
+  getCuentaLoading,
+  getCuentaRefreshing,
+  getCuentaSaving,
+  getCuentaHydrated,
+
   setCuentaPage,
   setCuentaPageSize,
   setCuentaRemoteCount,
@@ -2046,8 +2086,17 @@ export default {
   getCuentaPageSize,
   getCuentaRemoteCount,
 
+  setCuentaItems,
+  getCuentaItems,
+  clearCuentaItems,
+
+  setCuentaMeta,
+  getCuentaMeta,
+  clearCuentaMeta,
+
   setCuentaDraft,
   patchCuentaDraft,
+  getCuentaDraft,
   clearCuentaDraft,
 
   setCuentaViewState,
@@ -2055,6 +2104,20 @@ export default {
 
   setCuentaViewForm,
   patchCuentaViewForm,
+  getCuentaViewForm,
+
+  setCuentaViewErrors,
+  patchCuentaViewErrors,
+  getCuentaViewErrors,
+  clearCuentaViewErrors,
+
+  setCuentaViewServerError,
+  getCuentaViewServerError,
+  clearCuentaViewServerError,
+
+  setCuentaViewSuccess,
+  getCuentaViewSuccessMessage,
+  clearCuentaViewSuccess,
 
   getCuentaState,
   getState,

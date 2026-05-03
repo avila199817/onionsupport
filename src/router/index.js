@@ -36,7 +36,8 @@
    - /@cristian/incidencias -> publicPath
    - /incidencias           -> canonicalPath
    - Router.render(path, options) respeta options.canonicalPath/options.publicPath
-   - getRequestedData() no permite que /@usuario/ruta caiga a "/"
+   - getRequestedData() no permite que /@usuario/ruta caiga a "/" salvo HOME real
+   - /@usuario y /@usuario/ sí son HOME válido
    - navigate() conserva canonicalPath/publicPath en el render encolado
 ========================================================= */
 
@@ -710,6 +711,44 @@ export const Router = (() => {
         .filter(Boolean)[0] || "";
 
     return isUsernameSegment(first);
+  }
+
+  function getUsernameScopedSegments(path = "") {
+    const {
+      pathname,
+    } = splitFullPath(path || "/");
+
+    return pathname
+      .split("/")
+      .filter(Boolean);
+  }
+
+  function isUsernameHomePublicPath(path = "") {
+    const segments =
+      getUsernameScopedSegments(path);
+
+    return Boolean(
+      segments.length === 1 &&
+        isUsernameSegment(segments[0])
+    );
+  }
+
+  function shouldBlockUsernameHomeFallback({
+    publicPath = "/",
+    canonicalPath = "/",
+  } = {}) {
+    const cleanPublicPath =
+      stripSearchAndHash(publicPath);
+
+    const cleanCanonicalPath =
+      stripSearchAndHash(canonicalPath);
+
+    return Boolean(
+      isUsernameScopedPath(cleanPublicPath) &&
+        !isUsernameHomePublicPath(cleanPublicPath) &&
+        cleanCanonicalPath === "/" &&
+        cleanPublicPath !== "/"
+    );
   }
 
   function stripUsernamePrefixLocal(path = "/") {
@@ -1866,8 +1905,11 @@ export const Router = (() => {
     const explicitCanonicalPath =
       safeText(
         opts.canonicalPath ||
-          opts.route ||
-          "",
+          (
+            typeof opts.route === "string"
+              ? opts.route
+              : opts.route?.path || ""
+          ),
         ""
       );
 
@@ -1963,6 +2005,83 @@ export const Router = (() => {
             requestedPath ||
             publicPath
         );
+    }
+
+    if (
+      isUsernameHomePublicPath(publicPath) &&
+      stripSearchAndHash(canonicalPath) === "/"
+    ) {
+      return {
+        requestedPath,
+        canonicalPath: "/",
+        rawCanonicalPath:
+          rawCanonicalPath || "/",
+        publicPath,
+        route,
+        username,
+        matchedBy:
+          match.matchedBy === "none"
+            ? "username-home"
+            : `username-home:${match.matchedBy}`,
+      };
+    }
+
+    if (
+      shouldBlockUsernameHomeFallback({
+        publicPath,
+        canonicalPath,
+      })
+    ) {
+      const repairedCanonical =
+        stripSearchAndHash(
+          safeCanonicalPath(publicPath)
+        );
+
+      const repairedMatch =
+        getRouteMatch(repairedCanonical);
+
+      if (repairedMatch.route) {
+        return {
+          requestedPath,
+          canonicalPath:
+            repairedMatch.canonicalPath,
+          rawCanonicalPath:
+            repairedMatch.rawCanonicalPath,
+          publicPath,
+          route:
+            repairedMatch.route,
+          username,
+          matchedBy:
+            `repaired-username-scope:${repairedMatch.matchedBy}`,
+        };
+      }
+
+      safeWarn(
+        "Ruta pública con @usuario habría caído a HOME. Se bloquea fallback incorrecto.",
+        {
+          requestedPath,
+          canonicalPath,
+          rawCanonicalPath,
+          publicPath,
+          repairedCanonical,
+          username,
+          matchedBy:
+            match.matchedBy,
+        }
+      );
+
+      return {
+        requestedPath,
+        canonicalPath:
+          repairedCanonical || canonicalPath,
+        rawCanonicalPath:
+          repairedCanonical || rawCanonicalPath || canonicalPath,
+        publicPath,
+        route: null,
+        username,
+        matchedBy:
+          "blocked-username-home-fallback",
+      };
     }
 
     if (

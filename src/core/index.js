@@ -24,6 +24,7 @@
    - boot serializado
    - compat total con router/auth/app bootstrap
    - sync auth derivada robusta
+   - auth alineada con state.computeAuthenticated()
    - fallback si factories parciales fallan
    - no ReferenceError server-side
    - API congelada estable
@@ -56,6 +57,7 @@ import {
   cloneState,
   setState as setStateBase,
   getState as getStateBase,
+  computeAuthenticated,
 } from "./state.js";
 
 import {
@@ -1068,30 +1070,64 @@ export const AppCore = (() => {
     );
   }
 
-  function hasUserValue(user) {
-    if (!user || !isObject(user)) {
-      return false;
-    }
-
-    return Boolean(
-      safeText(user.id, "") ||
-      safeText(user.userId, "") ||
-      safeText(user.username, "") ||
-      safeText(user.email, "") ||
-      safeText(user.name, "")
-    );
-  }
-
   function normalizeRoleValue(user = null, explicitRole = "") {
     return safeText(
       explicitRole ||
         user?.role ||
         user?.rol ||
         user?.profile?.role ||
+        user?.raw?.role ||
+        user?.raw?.rol ||
         "",
       ""
     )
       .toLowerCase();
+  }
+
+  function resolveUsernameValue(user = null) {
+    return (
+      safeText(
+        getUserUsername(user) ||
+          user?.username ||
+          user?.userName ||
+          user?.email ||
+          user?.name ||
+          "",
+        ""
+      ) || null
+    );
+  }
+
+  function resolveCurrentUsernameValue(root) {
+    if (!root?.authenticated) {
+      return null;
+    }
+
+    const fromPrevious =
+      sanitizeUsername(
+        root.currentResolvedUsername ||
+          root.resolvedUsername ||
+          ""
+      ) || null;
+
+    const fromUser =
+      sanitizeUsername(
+        getUserUsername(root.user) ||
+          root.user?.username ||
+          root.user?.userName ||
+          root.user?.nick ||
+          root.user?.alias ||
+          root.user?.login ||
+          root.user?.slug ||
+          root.user?.email ||
+          ""
+      ) || null;
+
+    return (
+      fromPrevious ||
+      fromUser ||
+      null
+    );
   }
 
   function syncDerivedAuthState(options = {}) {
@@ -1104,29 +1140,26 @@ export const AppCore = (() => {
     const tokenValid =
       hasTokenValue(root.token);
 
-    const userPresent =
-      hasUserValue(root.user);
-
-    const explicitAuthenticated =
-      root.authenticated === true;
-
     const forceUnauthenticated =
       opts.forceUnauthenticated === true;
 
-    const allowExplicitAuthenticated =
-      opts.allowExplicitAuthenticated !== false;
+    let authenticated =
+      false;
 
-    const authenticated =
-      forceUnauthenticated
-        ? false
-        : Boolean(
-            tokenValid ||
-              (
-                allowExplicitAuthenticated &&
-                explicitAuthenticated &&
-                userPresent
-              )
+    if (!forceUnauthenticated) {
+      try {
+        authenticated =
+          Boolean(
+            computeAuthenticated(
+              root.user,
+              root.token
+            )
           );
+      } catch {
+        authenticated =
+          Boolean(tokenValid);
+      }
+    }
 
     root.authenticated =
       authenticated;
@@ -1139,18 +1172,23 @@ export const AppCore = (() => {
         ? normalizeRoleValue(
             root.user,
             root.role
-          )
-        : "";
+          ) || null
+        : null;
 
     root.username =
       authenticated
-        ? safeText(
-            root.user?.username ||
-              root.user?.email ||
-              root.user?.name,
-            ""
+        ? resolveUsernameValue(
+            root.user
           )
-        : "";
+        : null;
+
+    root.currentResolvedUsername =
+      authenticated
+        ? resolveCurrentUsernameValue(root)
+        : null;
+
+    root.resolvedUsername =
+      root.currentResolvedUsername || null;
 
     return root;
   }
@@ -1238,24 +1276,21 @@ export const AppCore = (() => {
 
     const cleanPatch =
       patch &&
-      typeof patch === "object"
+      typeof patch === "object" &&
+      !Array.isArray(patch)
         ? patch
         : {};
 
-    let next =
-      root;
-
     try {
-      next =
-        setStateBase({
-          state:
-            root,
+      setStateBase({
+        state:
+          root,
 
-          events,
+        events,
 
-          patch:
-            cleanPatch,
-        }) || root;
+        patch:
+          cleanPatch,
+      });
     } catch (error) {
       try {
         Object.assign(
@@ -1264,9 +1299,6 @@ export const AppCore = (() => {
         );
       } catch {}
 
-      next =
-        root;
-
       safeWarn(
         "setStateBase falló; aplicado fallback.",
         error
@@ -1274,14 +1306,11 @@ export const AppCore = (() => {
     }
 
     syncDerivedAuthState({
-      allowExplicitAuthenticated:
-        options.allowExplicitAuthenticated !== false,
-
       forceUnauthenticated:
         options.forceUnauthenticated === true,
     });
 
-    return next;
+    return clonePublicState();
   }
 
   function getState() {
@@ -1487,10 +1516,7 @@ export const AppCore = (() => {
         state.user;
     }
 
-    syncDerivedAuthState({
-      allowExplicitAuthenticated:
-        true,
-    });
+    syncDerivedAuthState();
 
     return result;
   }
@@ -1532,8 +1558,6 @@ export const AppCore = (() => {
     syncDerivedAuthState({
       forceUnauthenticated:
         !token,
-      allowExplicitAuthenticated:
-        Boolean(token),
     });
 
     return result;
@@ -1598,8 +1622,8 @@ export const AppCore = (() => {
     }
 
     syncDerivedAuthState({
-      allowExplicitAuthenticated:
-        true,
+      forceUnauthenticated:
+        token === null,
     });
 
     safeEmit(
@@ -1612,7 +1636,10 @@ export const AppCore = (() => {
           Boolean(state.hasToken),
 
         username:
-          state.username || "",
+          state.username || null,
+
+        currentResolvedUsername:
+          state.currentResolvedUsername || null,
       }
     );
 
@@ -1647,11 +1674,20 @@ export const AppCore = (() => {
           authenticated:
             false,
 
+          hasToken:
+            false,
+
           role:
-            "",
+            null,
 
           username:
-            "",
+            null,
+
+          currentResolvedUsername:
+            null,
+
+          resolvedUsername:
+            null,
         },
         {
           forceUnauthenticated:
@@ -2141,6 +2177,7 @@ export const AppCore = (() => {
         state,
         storage,
         dom,
+        events,
       });
 
       return true;
@@ -2244,10 +2281,7 @@ export const AppCore = (() => {
       safeLoadPreferences();
       safeLoadSession();
 
-      syncDerivedAuthState({
-        allowExplicitAuthenticated:
-          true,
-      });
+      syncDerivedAuthState();
 
       safeSyncBaseUI();
       safeBindNetworkEvents();
@@ -2342,10 +2376,7 @@ export const AppCore = (() => {
         state.initialized
       )
     ) {
-      syncDerivedAuthState({
-        allowExplicitAuthenticated:
-          true,
-      });
+      syncDerivedAuthState();
 
       return api;
     }
@@ -2370,28 +2401,22 @@ export const AppCore = (() => {
     networkEventsBound =
       false;
 
-    setState(
-      {
-        initialized:
-          false,
+    setState({
+      initialized:
+        false,
 
-        ready:
-          false,
+      ready:
+        false,
 
-        booting:
-          false,
+      booting:
+        false,
 
-        coreReady:
-          false,
+      coreReady:
+        false,
 
-        coreInitializing:
-          false,
-      },
-      {
-        allowExplicitAuthenticated:
-          true,
-      }
-    );
+      coreInitializing:
+        false,
+    });
 
     return init({
       force:
@@ -2404,10 +2429,7 @@ export const AppCore = (() => {
   ======================================================= */
 
   function getSnapshot() {
-    syncDerivedAuthState({
-      allowExplicitAuthenticated:
-        true,
-      });
+    syncDerivedAuthState();
 
     return {
       appName:
@@ -2447,10 +2469,13 @@ export const AppCore = (() => {
           Boolean(state.hasToken),
 
         role:
-          state.role || "",
+          state.role || null,
 
         username:
-          state.username || "",
+          state.username || null,
+
+        currentResolvedUsername:
+          state.currentResolvedUsername || null,
 
         route:
           state.route || "/",

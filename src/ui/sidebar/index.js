@@ -2,15 +2,10 @@
    Onion SPA - Sidebar UI
    Archivo: src/ui/sidebar/index.js
 
-   FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · DROPDOWN SAFE · BIND DEDUPE · CLICK SAFE · 12/10
-   PATCH · MENU INTERACTION LOCKED
-   PATCH · ROUTER/AUTH REPAIR SAFE
-   PATCH · DROPDOWN DIRECT GUARD
-   PATCH · ACTIVE INDICATOR APPLE MODE
-   PATCH · USER/ROLE SYNC HARDENED
-   PATCH · NO POINTER-EVENTS NONE
-   PATCH · NO CLEANUP STORM
-   PATCH · NO DOUBLE TOGGLE
+   FINAL EXTREME SYSTEM · SIDEBAR UI ORCHESTRATOR · 13/10
+   DESKTOP/MOBILE STABLE · DROPDOWN SAFE · BIND DEDUPE
+   ACTIVE ROUTE HARDENED · APPLE INDICATOR · NO STALE ROUTE
+   NO DOUBLE TOGGLE · NO POINTER-EVENTS NONE · ROUTER SAFE
 
    RESPONSABILIDADES:
    - montar sidebar
@@ -36,9 +31,12 @@
    - NO matar clicks del menú durante sync visual
 
    FIX CRÍTICO:
-   - flushMenuHoverState() ya NO pone pointer-events:none
+   - URL visible prioritaria para active item salvo navegación explícita
+   - aliases /invoices -> /facturas, /tickets -> /incidencias
+   - click del userToggle no puede hacer doble toggle
+   - flushMenuHoverState() no usa pointer-events:none
    - restoreMenuHoverState() nunca restaura pointer-events:none
-   - ensureMenuInteractive() repara un menú muerto si quedó legacy
+   - ensureMenuInteractive() repara menú muerto legacy
    - mount/repair/bind/navegación aseguran interacción del menú
    - init() repetido no fuerza rebind destructivo
    - repair() solo rebindea si no hay eventos vivos o si se fuerza
@@ -142,6 +140,34 @@ export const SidebarUI = (() => {
   const runtimeState = {
     dropdownOpen: false,
   };
+
+  const ROUTE_ALIASES = Object.freeze({
+    "/home": "/",
+    "/dashboard": "/",
+
+    "/tickets": "/incidencias",
+    "/ticket": "/incidencias",
+    "/incidents": "/incidencias",
+    "/incident": "/incidencias",
+
+    "/invoices": "/facturas",
+    "/invoice": "/facturas",
+    "/billing": "/facturas",
+
+    "/users": "/usuarios",
+    "/user": "/usuarios",
+
+    "/clients": "/clientes",
+    "/client": "/clientes",
+    "/customers": "/clientes",
+    "/customer": "/clientes",
+
+    "/account": "/cuenta",
+    "/profile": "/cuenta",
+
+    "/settings": "/ajustes",
+    "/config": "/ajustes",
+  });
 
   /* ======================================================
      SAFE HELPERS
@@ -1101,11 +1127,6 @@ export const SidebarUI = (() => {
 
     refreshSidebarDomRefs();
 
-    /*
-      FIX:
-      Si un build anterior dejó .sidebar-menu con pointer-events:none,
-      lo reparamos al montar/refrescar.
-    */
     ensureMenuInteractive("mount-and-refresh");
 
     return hasSidebarShell(AppCore);
@@ -1310,6 +1331,25 @@ export const SidebarUI = (() => {
       .split("#")[0] || "/";
   }
 
+  function applyRouteAlias(pathname = "/") {
+    const clean = safeText(pathname, "/") || "/";
+
+    if (ROUTE_ALIASES[clean]) {
+      return ROUTE_ALIASES[clean];
+    }
+
+    for (const [from, to] of Object.entries(ROUTE_ALIASES)) {
+      if (
+        from !== "/" &&
+        clean.startsWith(`${from}/`)
+      ) {
+        return `${to}${clean.slice(from.length)}`;
+      }
+    }
+
+    return clean;
+  }
+
   function normalizeRoutePath(path = "/") {
     let value = safeText(path, "/");
 
@@ -1354,6 +1394,8 @@ export const SidebarUI = (() => {
       value = value.replace(/\/+$/g, "") || "/";
     }
 
+    value = applyRouteAlias(value);
+
     return value || "/";
   }
 
@@ -1377,36 +1419,80 @@ export const SidebarUI = (() => {
     );
   }
 
-  function getCurrentRoutePath(preferred = "") {
-    const normalizedPreferred = normalizeRoutePath(preferred || "");
+  function shouldTrustExplicitRoute(options = {}) {
+    const opts = safeObject(options);
+    const reason = safeText(opts.reason, "").toLowerCase();
 
-    if (preferred && normalizedPreferred) {
-      return normalizedPreferred;
+    if (opts.preferExplicitRoute === true || opts.forceRoute === true) {
+      return true;
     }
 
-    /*
-      Para active menu, la URL visible es la fuente más estable.
-      Corrige el caso:
-        /@cristian/usuarios
-      donde AppCore.state.publicPath puede quedar un tick tarde.
-    */
-    const browserPath =
-      normalizeRoutePath(getBrowserPath());
+    return Boolean(
+      reason.includes("navigation") ||
+        reason.includes("navigate") ||
+        reason.includes("router:rendered") ||
+        reason.includes("router:navigation") ||
+        reason.includes("router:route") ||
+        reason.includes("app:route") ||
+        reason.includes("sidebar-ui:active-route") ||
+        reason.includes("sync-active-route") ||
+        reason.includes("window-popstate") ||
+        reason.includes("window-hashchange")
+    );
+  }
 
-    const candidates = [
-      browserPath,
+  function getRouterPathCandidates() {
+    const candidates = [];
 
-      Router?.getCurrentPublicPath?.(),
-      Router?.getCurrentCanonicalPath?.(),
-      Router?.getCurrentPath?.(),
+    try { candidates.push(Router?.getCurrentPublicPath?.()); } catch {}
+    try { candidates.push(Router?.getCurrentCanonicalPath?.()); } catch {}
+    try { candidates.push(Router?.getCurrentPath?.()); } catch {}
 
+    candidates.push(
       AppCore?.state?.publicPath,
       AppCore?.state?.route,
       AppCore?.state?.canonicalPath,
-
       Router?.getPath?.(),
-      Router?.currentPath,
-    ];
+      Router?.currentPath
+    );
+
+    return candidates;
+  }
+
+  function getCurrentRoutePath(preferred = "", options = {}) {
+    const opts = safeObject(options);
+    const preferredRoute = preferred || resolvePreferredRouteFromOptions(opts);
+
+    const browserPath =
+      normalizeRoutePath(getBrowserPath());
+
+    const normalizedPreferred =
+      preferredRoute
+        ? normalizeRoutePath(preferredRoute)
+        : "";
+
+    /*
+      Regla dura:
+      - En navegación explícita / router event confiable, puede mandar payload.
+      - En refresh/init/repair genérico, manda la URL visible.
+      Esto evita que /facturas siga pintando /incidencias por estado AppCore stale.
+    */
+    if (
+      normalizedPreferred &&
+      shouldTrustExplicitRoute(opts)
+    ) {
+      return normalizedPreferred;
+    }
+
+    if (browserPath) {
+      return browserPath;
+    }
+
+    if (normalizedPreferred) {
+      return normalizedPreferred;
+    }
+
+    const candidates = getRouterPathCandidates();
 
     for (const candidate of candidates) {
       const value = normalizeRoutePath(candidate || "");
@@ -1491,11 +1577,6 @@ export const SidebarUI = (() => {
       delete sidebarMenu.dataset.visualSyncing;
       delete sidebarMenu.dataset.visualSyncReason;
 
-      /*
-        FIX CRÍTICO:
-        Nunca restauramos "none".
-        Si quedó "none", el menú muere y solo funciona el dropdown.
-      */
       const previous =
         safeText(sidebarMenu.dataset.previousPointerEvents, "");
 
@@ -1578,9 +1659,8 @@ export const SidebarUI = (() => {
       sidebarMenu.dataset.visualSyncReason = reason;
 
       /*
-        FIX CRÍTICO:
-        NO usamos pointer-events:none.
-        Eso bloqueaba todos los enlaces de .sidebar-menu si una carrera impedía restaurarlo.
+        No se usa pointer-events:none.
+        Guardamos estado previo solo para limpiar legacy.
       */
       if (!sidebarMenu.dataset.previousPointerEventsSet) {
         sidebarMenu.dataset.previousPointerEvents =
@@ -1663,23 +1743,30 @@ export const SidebarUI = (() => {
     refreshSidebarDomRefs();
     ensureMenuInteractive("sync-active-route-markers");
 
+    const opts = safeObject(options);
+
     const currentPath =
-      normalizeRoutePath(route || getCurrentRoutePath());
+      normalizeRoutePath(
+        route ||
+          getCurrentRoutePath("", opts)
+      );
 
     const activeItem =
       syncActiveMenuItem(
         AppCore,
         {
-          ...safeObject(options),
+          ...opts,
           route: currentPath,
           publicPath: currentPath,
           path: currentPath,
           reason:
             safeText(
-              options?.reason,
+              opts.reason,
               "sidebar-ui:active-route"
             ),
           mutate: true,
+          preferExplicitRoute: true,
+          forceRoute: true,
         }
       );
 
@@ -1750,13 +1837,18 @@ export const SidebarUI = (() => {
         ensureMenuInteractive(`schedule:${reason}:paint`);
 
         const resolvedRoute =
-          route || getCurrentRoutePath();
+          getCurrentRoutePath(route, {
+            ...opts,
+            reason,
+          });
 
         const activeItem =
           syncActiveRouteMarkers(
             resolvedRoute,
             {
               reason,
+              preferExplicitRoute: true,
+              forceRoute: true,
             }
           );
 
@@ -1765,10 +1857,13 @@ export const SidebarUI = (() => {
           reason,
           route: resolvedRoute,
           publicPath: resolvedRoute,
+          path: resolvedRoute,
           activeItem,
           delayMs: 0,
           reveal: opts.reveal !== false,
           force: opts.force === true,
+          preferExplicitRoute: true,
+          forceRoute: true,
         });
       });
     }, delayMs);
@@ -1782,9 +1877,12 @@ export const SidebarUI = (() => {
     ensureMenuInteractive(`sync-route-and-indicator:${reason}`);
 
     const route =
-      normalizeRoutePath(
-        resolvePreferredRouteFromOptions(opts) ||
-          getCurrentRoutePath()
+      getCurrentRoutePath(
+        resolvePreferredRouteFromOptions(opts) || "",
+        {
+          ...opts,
+          reason,
+        }
       );
 
     const activeItem =
@@ -1792,6 +1890,8 @@ export const SidebarUI = (() => {
         route,
         {
           reason,
+          preferExplicitRoute: true,
+          forceRoute: true,
         }
       );
 
@@ -1799,6 +1899,7 @@ export const SidebarUI = (() => {
       ...opts,
       route,
       publicPath: route,
+      path: route,
       activeItem,
       reason,
       delayMs:
@@ -1807,6 +1908,8 @@ export const SidebarUI = (() => {
           : 16,
       reveal: opts.reveal !== false,
       force: opts.force === true,
+      preferExplicitRoute: true,
+      forceRoute: true,
     });
 
     return true;
@@ -1952,10 +2055,6 @@ export const SidebarUI = (() => {
         closeDropdown
       );
 
-    /*
-      Evento informativo solo UI.
-      No emitir sidebar:open:set para no reactivar transición paralela.
-    */
     safeEmit("sidebar:ui:open:set", {
       source: "SidebarUI",
       open: nextOpen,
@@ -2067,6 +2166,18 @@ export const SidebarUI = (() => {
 
       route:
         getCurrentRoutePath(),
+
+      browserRoute:
+        normalizeRoutePath(getBrowserPath()),
+
+      stateRoute:
+        normalizeRoutePath(AppCore?.state?.route || ""),
+
+      statePublicPath:
+        normalizeRoutePath(AppCore?.state?.publicPath || ""),
+
+      routerPublicPath:
+        normalizeRoutePath(Router?.getCurrentPublicPath?.() || ""),
 
       dom: {
         hasSidebar:
@@ -2247,13 +2358,6 @@ export const SidebarUI = (() => {
     });
     clearRepairTimer();
 
-    /*
-      Importante:
-      NO usamos AppCore.cleanup.run(SCOPE) en cada rebind.
-      Eso dispara cleanup:disposed y puede activar el firebreak del bus.
-      events.js ya devuelve cleanups locales y limpia sus scopes internos.
-    */
-
     try {
       domEventsCleanup?.();
     } catch {}
@@ -2314,7 +2418,7 @@ export const SidebarUI = (() => {
   }
 
   async function navigateTo(route = "", options = {}) {
-    const target = safeText(route, "");
+    const target = normalizeRoutePath(route);
     if (!target) return false;
 
     const opts = safeObject(options);
@@ -2330,6 +2434,8 @@ export const SidebarUI = (() => {
           delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
           force: true,
           flushHover: true,
+          preferExplicitRoute: true,
+          forceRoute: true,
         });
 
         return true;
@@ -2345,6 +2451,8 @@ export const SidebarUI = (() => {
           delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
           force: true,
           flushHover: true,
+          preferExplicitRoute: true,
+          forceRoute: true,
         });
 
         return true;
@@ -2360,6 +2468,8 @@ export const SidebarUI = (() => {
           delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
           force: true,
           flushHover: true,
+          preferExplicitRoute: true,
+          forceRoute: true,
         });
 
         return true;
@@ -2375,6 +2485,8 @@ export const SidebarUI = (() => {
           delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
           force: true,
           flushHover: true,
+          preferExplicitRoute: true,
+          forceRoute: true,
         });
 
         return true;
@@ -2390,6 +2502,8 @@ export const SidebarUI = (() => {
           delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
           force: true,
           flushHover: true,
+          preferExplicitRoute: true,
+          forceRoute: true,
         });
 
         return true;
@@ -2411,6 +2525,8 @@ export const SidebarUI = (() => {
         delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
         force: true,
         flushHover: true,
+        preferExplicitRoute: true,
+        forceRoute: true,
       });
 
       return true;
@@ -2435,13 +2551,9 @@ export const SidebarUI = (() => {
       return false;
     }
 
-    /*
-      FIX:
-      Garantiza que el menú no esté bloqueado por un estado visual anterior.
-    */
     ensureMenuInteractive("before-navigation");
 
-    const route = getRouteFromElement(element);
+    const route = normalizeRoutePath(getRouteFromElement(element));
 
     if (
       !route ||
@@ -2451,12 +2563,6 @@ export const SidebarUI = (() => {
       return false;
     }
 
-    /*
-      Clave:
-      Marcamos y cortamos ANTES del await.
-      Si esperamos a navigateTo(), otros listeners globales pueden capturar
-      el mismo click y provocar doble navegación / carrera.
-    */
     markSidebarEventHandled(event, "navigation:pre");
     preventAndStop(event);
 
@@ -2467,6 +2573,8 @@ export const SidebarUI = (() => {
         route,
         {
           reason: "navigation:pre",
+          preferExplicitRoute: true,
+          forceRoute: true,
         }
       );
 
@@ -2479,10 +2587,13 @@ export const SidebarUI = (() => {
       reason: "navigation:pre",
       route,
       publicPath: route,
+      path: route,
       activeItem,
       delayMs: 0,
       force: true,
       reveal: true,
+      preferExplicitRoute: true,
+      forceRoute: true,
     });
 
     if (!skipNavigation) {
@@ -2496,6 +2607,8 @@ export const SidebarUI = (() => {
         delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
         force: true,
         flushHover: true,
+        preferExplicitRoute: true,
+        forceRoute: true,
       });
     }
 
@@ -2712,6 +2825,15 @@ export const SidebarUI = (() => {
         return;
       }
 
+      /*
+        FIX CRÍTICO:
+        events.js escucha document en capture. Si ya gestionó el click,
+        este guard directo NO debe volver a toggle.
+      */
+      if (wasSidebarEventHandled(event)) {
+        return;
+      }
+
       if (!initialized && !hasSidebarShell(AppCore)) {
         return;
       }
@@ -2720,13 +2842,6 @@ export const SidebarUI = (() => {
         return;
       }
 
-      /*
-        Listener en capture sobre el botón real.
-        Evita doble toggle entre:
-        - events.js document click
-        - fallback delegado
-        - bubbling del propio botón
-      */
       markSidebarEventHandled(event, "direct-user-toggle");
 
       preventAndStop(event);
@@ -2745,6 +2860,10 @@ export const SidebarUI = (() => {
 
     const onUserToggleKeydown = (event) => {
       if (generation !== bindGeneration) {
+        return;
+      }
+
+      if (wasSidebarEventHandled(event)) {
         return;
       }
 
@@ -2833,11 +2952,6 @@ export const SidebarUI = (() => {
         return;
       }
 
-      /*
-        Primer guard de reparación:
-        Si la primera pulsación llega con el menú bloqueado por legacy,
-        al menos lo deja operativo para la siguiente.
-      */
       ensureMenuInteractive("fallback-document-click");
 
       if (wasSidebarEventHandled(event)) {
@@ -2864,10 +2978,6 @@ export const SidebarUI = (() => {
 
       const defaultWasPrevented = Boolean(event.defaultPrevented);
 
-      /*
-        Si events.js ya procesó un control, no repetimos acción.
-        Mata abrir/cerrar dropdown en el mismo click.
-      */
       if (
         defaultWasPrevented &&
         (
@@ -2997,6 +3107,8 @@ export const SidebarUI = (() => {
         delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
         force: true,
         flushHover: true,
+        preferExplicitRoute: true,
+        forceRoute: true,
       });
     };
 
@@ -3011,6 +3123,8 @@ export const SidebarUI = (() => {
         delayMs: VISUAL_SYNC_AFTER_NAV_DELAY,
         force: true,
         flushHover: true,
+        preferExplicitRoute: true,
+        forceRoute: true,
       });
     };
 
@@ -3118,12 +3232,6 @@ export const SidebarUI = (() => {
 
     const ts = nowTs();
 
-    /*
-      Dedupe fuerte:
-      Si ya está bindeado, no volvemos a limpiar/bindear salvo rebind explícito.
-      Esto corta la tormenta:
-        init -> repair -> bind -> event -> repair -> bind...
-    */
     if (
       eventsBound &&
       opts.force !== true
@@ -3175,10 +3283,6 @@ export const SidebarUI = (() => {
     bindingEvents = true;
 
     try {
-      /*
-        Primero invalidamos generación vieja.
-        Luego limpiamos listeners antiguos.
-      */
       bindGeneration += 1;
 
       cleanupBoundEvents();
@@ -3353,11 +3457,6 @@ export const SidebarUI = (() => {
     renderUser();
     applyRoleVisibility();
 
-    /*
-      Repair no debe rebindeaer siempre.
-      Si ya hay eventos vivos, solo resincroniza visualmente.
-      Solo rebind() o repair(..., { rebind:true }) fuerzan limpieza/rebind.
-    */
     if (opts.rebind === true) {
       bindEvents(cleanReason, {
         force: true,
@@ -3491,11 +3590,6 @@ export const SidebarUI = (() => {
 
   function init() {
     if (initialized) {
-      /*
-        Idempotente:
-        init() repetido NO debe hacer repair + rebind.
-        Solo refresca visual/usuario/roles.
-      */
       registerModule();
       exposeGlobalBridge();
 
@@ -3520,12 +3614,6 @@ export const SidebarUI = (() => {
     renderUser();
     applyRoleVisibility();
     closeDropdown();
-
-    /*
-      No llamamos AppCore.syncUserUI() aquí.
-      App UI ya coordina la sincronización global.
-      Si se llama desde aquí, puede reentrar en SidebarUI durante init.
-    */
 
     initialized = true;
 

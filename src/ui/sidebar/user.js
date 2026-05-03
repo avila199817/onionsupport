@@ -23,7 +23,7 @@
 
    HARDENING EXTREMO:
    - no depende de una única forma de user
-   - soporta user/profile/account/meta/claims/raw/account/customer
+   - soporta user/profile/account/meta/claims/raw/customer/cliente
    - soporta avatarUrl/photoUrl/picture/profileImage anidados
    - bloquea protocolos peligrosos
    - cache bust con avatarUpdatedAt/avatarVersion
@@ -32,6 +32,9 @@
    - admin por rol, permiso o flags
    - safeEmit no duplica bus + window
    - no deja avatar viejo si cambia usuario
+   - resuelve Auth aunque esté en AppCore.modules o window
+   - soporta payloads de sesión heterogéneos
+   - evita false positives de usuario vacío
    - cero throws hacia la UI
 ========================================================= */
 
@@ -61,6 +64,7 @@ const EVENTS = Object.freeze({
   userRendered: "sidebar:user:rendered",
   userAvatarLoaded: "sidebar:user:avatar:loaded",
   userAvatarError: "sidebar:user:avatar:error",
+  userFallbackRendered: "sidebar:user:avatar:fallback",
 });
 
 const ADMIN_ROLE_KEYS = new Set([
@@ -70,18 +74,26 @@ const ADMIN_ROLE_KEYS = new Set([
   "superadmin",
   "super_admin",
   "super_administrador",
+  "super-administrador",
   "owner",
   "root",
   "staff",
   "support",
+  "soporte",
 ]);
 
 const ADMIN_PERMISSION_KEYS = new Set([
+  "*",
+
   "admin:*",
   "admin.all",
   "admin.full",
   "admin.manage",
   "admin:manage",
+  "admin.write",
+  "admin:write",
+  "admin.read",
+  "admin:read",
 
   "users.manage",
   "users:manage",
@@ -89,6 +101,8 @@ const ADMIN_PERMISSION_KEYS = new Set([
   "users:write",
   "users.admin",
   "users:admin",
+  "users.access",
+  "users:access",
 
   "usuarios.manage",
   "usuarios:manage",
@@ -96,6 +110,8 @@ const ADMIN_PERMISSION_KEYS = new Set([
   "usuarios:write",
   "usuarios.admin",
   "usuarios:admin",
+  "usuarios.access",
+  "usuarios:access",
 
   "manage_users",
   "can_manage_users",
@@ -104,23 +120,95 @@ const ADMIN_PERMISSION_KEYS = new Set([
 
   "clients.manage",
   "clients:manage",
+  "clients.write",
+  "clients:write",
+  "clients.admin",
+  "clients:admin",
+
   "clientes.manage",
   "clientes:manage",
+  "clientes.write",
+  "clientes:write",
+  "clientes.admin",
+  "clientes:admin",
 
   "server.manage",
   "server:manage",
+  "server.admin",
+  "server:admin",
+  "server.access",
+  "server:access",
+
   "servidor.manage",
   "servidor:manage",
+  "servidor.admin",
+  "servidor:admin",
+  "servidor.access",
+  "servidor:access",
 
   "tickets.manage",
   "tickets:manage",
+  "tickets.admin",
+  "tickets:admin",
+
   "incidencias.manage",
   "incidencias:manage",
+  "incidencias.admin",
+  "incidencias:admin",
 
   "facturas.manage",
   "facturas:manage",
+  "facturas.admin",
+  "facturas:admin",
+
   "invoices.manage",
   "invoices:manage",
+  "invoices.admin",
+  "invoices:admin",
+]);
+
+const ADMIN_FLAG_KEYS = Object.freeze([
+  "isAdmin",
+  "admin",
+  "is_admin",
+
+  "isSuperAdmin",
+  "superAdmin",
+  "is_super_admin",
+
+  "canManageUsers",
+  "can_manage_users",
+
+  "canAccessUsers",
+  "can_access_users",
+
+  "canManageClients",
+  "can_manage_clients",
+
+  "canAccessServer",
+  "can_access_server",
+
+  "canManageServer",
+  "can_manage_server",
+]);
+
+const STORAGE_USER_KEYS = Object.freeze([
+  "user",
+  "currentUser",
+  "auth.user",
+  "session.user",
+  "auth:user",
+  "session:user",
+
+  "onion:user",
+  "onion_user",
+  "onion:auth:user",
+  "onion:session:user",
+
+  "app:user",
+  "app_user",
+  "app:auth:user",
+  "app:session:user",
 ]);
 
 /* =========================================================
@@ -160,10 +248,13 @@ function safeObject(value) {
     : {};
 }
 
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+function isNonEmptyObject(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length > 0
+  );
 }
 
 function first(...values) {
@@ -193,11 +284,11 @@ function safeBoolean(value, fallback = false) {
   if (typeof value === "string") {
     const key = value.trim().toLowerCase();
 
-    if (["true", "1", "yes", "si", "sí", "ok", "on"].includes(key)) {
+    if (["true", "1", "yes", "si", "sí", "ok", "on", "y"].includes(key)) {
       return true;
     }
 
-    if (["false", "0", "no", "off"].includes(key)) {
+    if (["false", "0", "no", "off", "n"].includes(key)) {
       return false;
     }
   }
@@ -220,11 +311,6 @@ function safeWarn(AppCore, ...args) {
   } catch {}
 }
 
-/*
-  Importante:
-  No emitimos por AppCore.events Y window a la vez.
-  Si el bus existe, usamos bus. Window solo fallback.
-*/
 function safeEmit(AppCore, eventName = "", payload = {}) {
   const name = safeText(eventName, "");
   if (!name) return false;
@@ -347,7 +433,7 @@ function setDatasetValue(element = null, key = "", value = "") {
    MODULE / AUTH-LIKE SOURCES
 ========================================================= */
 
-function callUserGetter(source = null, methodName = "") {
+function callGetter(source = null, methodName = "") {
   if (!source || !methodName) {
     return null;
   }
@@ -376,14 +462,58 @@ function getModule(AppCore = null, name = "") {
   } catch {}
 
   try {
+    if (isFn(AppCore?.modules?.has) && AppCore.modules.has(cleanName)) {
+      return AppCore.modules[cleanName] || null;
+    }
+  } catch {}
+
+  try {
     return AppCore?.modules?.[cleanName] || null;
   } catch {
     return null;
   }
 }
 
+function getGlobalCandidate(name = "") {
+  if (!hasWindow()) {
+    return null;
+  }
+
+  const cleanName = safeText(name, "");
+
+  if (!cleanName) {
+    return null;
+  }
+
+  try {
+    return window?.[cleanName] || null;
+  } catch {
+    return null;
+  }
+}
+
+function uniqueObjects(values = []) {
+  const seen = new Set();
+  const result = [];
+
+  values.forEach((value) => {
+    if (!value || typeof value !== "object") {
+      return;
+    }
+
+    if (seen.has(value)) {
+      return;
+    }
+
+    seen.add(value);
+    result.push(value);
+  });
+
+  return result;
+}
+
 function getAuthLikeSources(AppCore = null) {
-  return [
+  return uniqueObjects([
     AppCore?.Auth,
     AppCore?.auth,
     AppCore?.features?.auth,
@@ -393,7 +523,38 @@ function getAuthLikeSources(AppCore = null) {
     getModule(AppCore, "auth"),
     getModule(AppCore, "Session"),
     getModule(AppCore, "session"),
-  ].filter(Boolean);
+
+    getGlobalCandidate("Auth"),
+    getGlobalCandidate("OnionAuth"),
+    getGlobalCandidate("Session"),
+    getGlobalCandidate("OnionSession"),
+  ]);
+}
+
+function unwrapUserPayload(payload = null) {
+  const value = safeObject(payload);
+
+  if (!isNonEmptyObject(value)) {
+    return {};
+  }
+
+  const candidate = first(
+    value.user,
+    value.currentUser,
+    value.profile,
+    value.account?.user,
+    value.session?.user,
+    value.data?.user,
+    value.data?.currentUser,
+    value.data?.profile,
+    value.payload?.user,
+    value.payload?.currentUser,
+    value.result?.user,
+    value.result?.currentUser,
+    value
+  );
+
+  return safeObject(candidate);
 }
 
 function getUserFromAuthLikeSources(AppCore = null) {
@@ -401,19 +562,27 @@ function getUserFromAuthLikeSources(AppCore = null) {
 
   for (const source of sources) {
     const user = first(
-      callUserGetter(source, "getUser"),
-      callUserGetter(source, "getCurrentUser"),
-      callUserGetter(source, "currentUser"),
+      callGetter(source, "getUser"),
+      callGetter(source, "getCurrentUser"),
+      callGetter(source, "currentUser"),
+      callGetter(source, "getProfile"),
+      callGetter(source, "getSessionUser"),
 
       source?.user,
       source?.currentUser,
+      source?.profile,
       source?.state?.user,
       source?.state?.currentUser,
-      source?.session?.user
+      source?.state?.profile,
+      source?.session?.user,
+      source?.session?.currentUser,
+      source?.session?.profile
     );
 
-    if (user && typeof user === "object") {
-      return safeObject(user);
+    const unwrapped = unwrapUserPayload(user);
+
+    if (isNonEmptyObject(unwrapped)) {
+      return unwrapped;
     }
   }
 
@@ -450,11 +619,13 @@ function readStorageValue(key = "") {
   }
 
   try {
-    return safeText(window.localStorage?.getItem?.(cleanKey), "");
+    const value = window.localStorage?.getItem?.(cleanKey);
+    if (value) return safeText(value, "");
   } catch {}
 
   try {
-    return safeText(window.sessionStorage?.getItem?.(cleanKey), "");
+    const value = window.sessionStorage?.getItem?.(cleanKey);
+    if (value) return safeText(value, "");
   } catch {}
 
   return "";
@@ -462,7 +633,10 @@ function readStorageValue(key = "") {
 
 function getStoragePrefix(AppCore = null) {
   return safeText(
-    AppCore?.config?.storagePrefix,
+    AppCore?.config?.storagePrefix ||
+      AppCore?.config?.storageKeyPrefix ||
+      AppCore?.config?.appKey ||
+      "onion",
     "onion"
   );
 }
@@ -470,35 +644,26 @@ function getStoragePrefix(AppCore = null) {
 function getStoredUserFallback(AppCore = null) {
   const prefix = getStoragePrefix(AppCore);
 
-  const keys = [
-    "user",
-    "currentUser",
-    "auth.user",
-    "session.user",
-    "auth:user",
-    "session:user",
+  const keys = Array.from(
+    new Set([
+      ...STORAGE_USER_KEYS,
 
-    "onion:user",
-    "onion_user",
-    "onion:auth:user",
-    "onion:session:user",
-
-    `${prefix}:user`,
-    `${prefix}_user`,
-    `${prefix}:auth:user`,
-    `${prefix}:session:user`,
-  ];
+      `${prefix}:user`,
+      `${prefix}_user`,
+      `${prefix}:auth:user`,
+      `${prefix}:session:user`,
+      `${prefix}:currentUser`,
+      `${prefix}_currentUser`,
+    ])
+  );
 
   for (const key of keys) {
     const raw = readStorageValue(key);
     const parsed = tryParseJson(raw);
+    const unwrapped = unwrapUserPayload(parsed);
 
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      !Array.isArray(parsed)
-    ) {
-      return parsed;
+    if (isNonEmptyObject(unwrapped)) {
+      return unwrapped;
     }
   }
 
@@ -511,6 +676,7 @@ function getStoredUserFallback(AppCore = null) {
 
 export function getUser(AppCore) {
   const state = safeObject(AppCore?.state);
+  const session = safeObject(state.session);
 
   let user = first(
     state.user,
@@ -519,29 +685,34 @@ export function getUser(AppCore) {
     state.authUser,
     state.profile,
 
-    state.session?.user,
-    state.session?.currentUser,
-    state.session?.profile,
+    session.user,
+    session.currentUser,
+    session.profile,
+    session.data?.user,
 
     state.auth?.user,
-    state.auth?.currentUser
+    state.auth?.currentUser,
+    state.auth?.profile
   );
 
-  if (!user || typeof user !== "object") {
-    try {
-      user = first(
-        callUserGetter(AppCore, "getUser"),
-        callUserGetter(AppCore, "getCurrentUser"),
-        callUserGetter(AppCore, "currentUser")
-      );
-    } catch {}
+  user = unwrapUserPayload(user);
+
+  if (!isNonEmptyObject(user)) {
+    user = unwrapUserPayload(
+      first(
+        callGetter(AppCore, "getUser"),
+        callGetter(AppCore, "getCurrentUser"),
+        callGetter(AppCore, "currentUser"),
+        callGetter(AppCore, "getProfile")
+      )
+    );
   }
 
-  if (!user || typeof user !== "object") {
+  if (!isNonEmptyObject(user)) {
     user = getUserFromAuthLikeSources(AppCore);
   }
 
-  if (!user || typeof user !== "object") {
+  if (!isNonEmptyObject(user)) {
     user = getStoredUserFallback(AppCore);
   }
 
@@ -562,6 +733,7 @@ function getProfileLikeBranches(user = null) {
     safeObject(current.meta),
     safeObject(current.claims),
     safeObject(current.permissions),
+    safeObject(current.billing),
 
     safeObject(current.raw),
     safeObject(current.raw?.profile),
@@ -572,12 +744,39 @@ function getProfileLikeBranches(user = null) {
     safeObject(current.raw?.meta),
     safeObject(current.raw?.claims),
     safeObject(current.raw?.permissions),
+    safeObject(current.raw?.billing),
 
     safeObject(current.profile?.account),
     safeObject(current.account?.profile),
     safeObject(current.meta?.profile),
     safeObject(current.claims?.profile),
-  ];
+  ].filter((branch) => branch && typeof branch === "object");
+}
+
+function hasUsableUserIdentity(user = null) {
+  const current = safeObject(user);
+  const branches = getProfileLikeBranches(current);
+
+  return branches.some((branch) => {
+    return Boolean(
+      safeText(branch.id, "") ||
+        safeText(branch.userId, "") ||
+        safeText(branch.user_id, "") ||
+        safeText(branch._id, "") ||
+        safeText(branch.uid, "") ||
+        safeText(branch.sub, "") ||
+        safeText(branch.username, "") ||
+        safeText(branch.userName, "") ||
+        safeText(branch.user_name, "") ||
+        safeText(branch.email, "") ||
+        safeText(branch.mail, "") ||
+        safeText(branch.phone, "") ||
+        safeText(branch.telefono, "") ||
+        safeText(branch.displayName, "") ||
+        safeText(branch.name, "") ||
+        safeText(branch.nombre, "")
+    );
+  });
 }
 
 /* =========================================================
@@ -710,6 +909,8 @@ export function getUsername(AppCore, user = null) {
         branch.handle,
         branch.userId,
         branch.user_id,
+        branch.uid,
+        branch.sub,
       ])
     )
   );
@@ -758,17 +959,16 @@ function extractInitialsFromText(value = "") {
 
 export function getAvatarText(AppCore, user = null) {
   const currentUser = safeObject(user || getUser(AppCore));
+  const branches = getProfileLikeBranches(currentUser);
 
   const explicit = safeText(
     first(
-      currentUser.avatarText,
-      currentUser.avatar_text,
-      currentUser.initials,
-      currentUser.iniciales,
-      currentUser.raw?.avatarText,
-      currentUser.raw?.initials,
-      currentUser.profile?.avatarText,
-      currentUser.profile?.initials
+      ...branches.flatMap((branch) => [
+        branch.avatarText,
+        branch.avatar_text,
+        branch.initials,
+        branch.iniciales,
+      ])
     ),
     ""
   );
@@ -792,11 +992,11 @@ export function getAvatarText(AppCore, user = null) {
 
   const email = safeText(
     first(
-      currentUser.email,
-      currentUser.mail,
-      currentUser.raw?.email,
-      currentUser.profile?.email,
-      currentUser.claims?.email
+      ...branches.flatMap((branch) => [
+        branch.email,
+        branch.mail,
+        branch.upn,
+      ])
     ),
     ""
   );
@@ -918,9 +1118,6 @@ function sanitizeAvatarUrl(value = "") {
     return raw;
   }
 
-  /*
-    Ruta relativa simple tipo "uploads/avatar.png".
-  */
   if (/^[a-zA-Z0-9._~:/?#@!$&'()*+,;=%-]+$/.test(raw)) {
     return raw.startsWith("/")
       ? raw
@@ -1136,6 +1333,7 @@ function isAdminPermission(value = "") {
   }
 
   return (
+    key === "*" ||
     key.startsWith("admin:") ||
     key.startsWith("admin.") ||
     key.includes(":admin") ||
@@ -1145,7 +1343,7 @@ function isAdminPermission(value = "") {
   );
 }
 
-function collectRoleCandidates(AppCore, user = null) {
+export function getUserRoles(AppCore, user = null) {
   const state = safeObject(AppCore?.state);
   const session = safeObject(state.session);
   const current = safeObject(user || getUser(AppCore));
@@ -1166,11 +1364,11 @@ function collectRoleCandidates(AppCore, user = null) {
       source?.state?.roles,
       source?.state?.permissions,
 
-      callUserGetter(source, "getRole"),
-      callUserGetter(source, "getCurrentRole"),
-      callUserGetter(source, "getRoles"),
-      callUserGetter(source, "getPermissions"),
-      callUserGetter(source, "getScopes"),
+      callGetter(source, "getRole"),
+      callGetter(source, "getCurrentRole"),
+      callGetter(source, "getRoles"),
+      callGetter(source, "getPermissions"),
+      callGetter(source, "getScopes"),
     ];
   });
 
@@ -1244,11 +1442,26 @@ function collectRoleCandidates(AppCore, user = null) {
     ]),
   ];
 
-  return normalizeRoles([
+  const roles = normalizeRoles([
     ...directRoles,
     ...arrayRoles,
     ...authRoleCandidates,
   ]);
+
+  const expanded = new Set(roles);
+
+  if (
+    roles.some(isAdminRole) ||
+    roles.some(isAdminPermission)
+  ) {
+    expanded.add("admin");
+
+    for (const role of ADMIN_ROLE_KEYS) {
+      expanded.add(role);
+    }
+  }
+
+  return Array.from(expanded).filter(Boolean);
 }
 
 function hasAdminFlag(AppCore, user = null) {
@@ -1259,50 +1472,37 @@ function hasAdminFlag(AppCore, user = null) {
 
   const authLikeSources = getAuthLikeSources(AppCore);
 
-  const authFlags = authLikeSources.flatMap((source) => [
-    source?.isAdmin,
-    source?.admin,
-    source?.isSuperAdmin,
-    source?.superAdmin,
-    source?.canManageUsers,
-    source?.canAccessUsers,
-
-    callUserGetter(source, "isAdmin"),
-    callUserGetter(source, "isCurrentUserAdmin"),
-    callUserGetter(source, "canManageUsers"),
-    callUserGetter(source, "canAccessUsers"),
-  ]);
-
-  return [
-    state.isAdmin,
-    state.admin,
-    state.isSuperAdmin,
-    state.superAdmin,
-    state.canManageUsers,
-    state.canAccessUsers,
-
-    session.isAdmin,
-    session.admin,
-    session.isSuperAdmin,
-    session.superAdmin,
-    session.canManageUsers,
-    session.canAccessUsers,
-
-    ...branches.flatMap((branch) => [
-      branch.isAdmin,
-      branch.admin,
-      branch.is_admin,
-      branch.isSuperAdmin,
-      branch.superAdmin,
-      branch.is_super_admin,
-      branch.canManageUsers,
-      branch.can_manage_users,
-      branch.canAccessUsers,
-      branch.can_access_users,
+  const flagValues = [
+    ...ADMIN_FLAG_KEYS.flatMap((key) => [
+      state?.[key],
+      session?.[key],
+      current?.[key],
     ]),
 
-    ...authFlags,
-  ].some((value) => safeBoolean(value, false));
+    ...branches.flatMap((branch) => {
+      return ADMIN_FLAG_KEYS.map((key) => branch?.[key]);
+    }),
+
+    ...authLikeSources.flatMap((source) => [
+      source?.isAdmin,
+      source?.admin,
+      source?.isSuperAdmin,
+      source?.superAdmin,
+      source?.canManageUsers,
+      source?.canAccessUsers,
+      source?.canManageServer,
+      source?.canAccessServer,
+
+      callGetter(source, "isAdmin"),
+      callGetter(source, "isCurrentUserAdmin"),
+      callGetter(source, "canManageUsers"),
+      callGetter(source, "canAccessUsers"),
+      callGetter(source, "canManageServer"),
+      callGetter(source, "canAccessServer"),
+    ]),
+  ];
+
+  return flagValues.some((value) => safeBoolean(value, false));
 }
 
 export function isAdmin(AppCore, user = null) {
@@ -1312,7 +1512,9 @@ export function isAdmin(AppCore, user = null) {
     return true;
   }
 
-  return collectRoleCandidates(AppCore, currentUser).some((role) => {
+  const roles = getUserRoles(AppCore, currentUser);
+
+  return roles.some((role) => {
     return isAdminRole(role) || isAdminPermission(role);
   });
 }
@@ -1417,10 +1619,6 @@ function setFallbackNode({
     return true;
   }
 
-  /*
-    Solo escribimos textContent directo si no hay nodos hijos estructurales.
-    Evita destruir <img> + <span> del template.
-  */
   if (avatarEl && visible) {
     try {
       if (!avatarEl.querySelector?.("img,.avatar-fallback")) {
@@ -1507,9 +1705,12 @@ function isCurrentAvatarRenderSeq(avatarEl = null, seq = "") {
 export function renderAvatarFallback(
   avatarEl,
   displayName = DEFAULT_DISPLAY_NAME,
-  avatarText = DEFAULT_AVATAR_TEXT
+  avatarText = DEFAULT_AVATAR_TEXT,
+  options = {}
 ) {
   if (!avatarEl) return false;
+
+  const AppCore = options?.AppCore || null;
 
   const finalDisplayName = safeText(
     displayName,
@@ -1548,6 +1749,15 @@ export function renderAvatarFallback(
     error: false,
   });
 
+  safeEmit(
+    AppCore,
+    EVENTS.userFallbackRendered,
+    {
+      displayName: finalDisplayName,
+      avatarText: finalAvatarText,
+    }
+  );
+
   return true;
 }
 
@@ -1567,7 +1777,10 @@ export function renderAvatarImage(
     return renderAvatarFallback(
       avatarEl,
       displayName,
-      avatarText
+      avatarText,
+      {
+        AppCore,
+      }
     );
   }
 
@@ -1589,7 +1802,10 @@ export function renderAvatarImage(
     return renderAvatarFallback(
       avatarEl,
       finalDisplayName,
-      finalAvatarText
+      finalAvatarText,
+      {
+        AppCore,
+      }
     );
   }
 
@@ -1601,10 +1817,6 @@ export function renderAvatarImage(
     finalDisplayName
   );
 
-  /*
-    Fallback visible mientras carga.
-    Así una imagen lenta/rota no deja avatar vacío.
-  */
   setFallbackNode({
     avatarEl,
     fallbackEl,
@@ -1626,10 +1838,6 @@ export function renderAvatarImage(
     imgEl.decoding = "async";
     imgEl.draggable = false;
 
-    /*
-      Evita mandar referrer a avatares externos.
-      No rompe rutas internas.
-    */
     try {
       imgEl.referrerPolicy = "no-referrer";
     } catch {}
@@ -1693,23 +1901,19 @@ export function renderAvatarImage(
       renderAvatarFallback(
         avatarEl,
         finalDisplayName,
-        finalAvatarText
+        finalAvatarText,
+        {
+          AppCore,
+        }
       );
     };
 
-    /*
-      Limpiamos primero para forzar recarga si cambia token SAS/cache-bust.
-    */
     try {
       imgEl.removeAttribute("src");
     } catch {}
 
     imgEl.src = safeUrl;
 
-    /*
-      Si la imagen ya está en caché y naturalWidth existe,
-      forzamos commit sin esperar evento.
-    */
     if (
       imgEl.complete === true &&
       Number(imgEl.naturalWidth || 0) > 0
@@ -1720,7 +1924,10 @@ export function renderAvatarImage(
     return renderAvatarFallback(
       avatarEl,
       finalDisplayName,
-      finalAvatarText
+      finalAvatarText,
+      {
+        AppCore,
+      }
     );
   }
 
@@ -1778,6 +1985,7 @@ function setUserDataset(element = null, {
   displayName = "",
   admin = false,
   avatarUrl = "",
+  hasUser = false,
 } = {}) {
   if (!element) {
     return false;
@@ -1787,6 +1995,7 @@ function setUserDataset(element = null, {
   setDatasetValue(element, "displayName", displayName || "");
   setDatasetValue(element, "admin", admin ? "true" : "false");
   setDatasetValue(element, "avatarUrl", avatarUrl || "");
+  setDatasetValue(element, "hasUser", hasUser ? "true" : "false");
 
   return true;
 }
@@ -1804,6 +2013,9 @@ export function renderUser(AppCore) {
   } = getElements(AppCore);
 
   const user = getUser(AppCore);
+
+  const hasUser =
+    hasUsableUserIdentity(user);
 
   const displayName = getDisplayName(
     AppCore,
@@ -1824,6 +2036,8 @@ export function renderUser(AppCore) {
 
   const admin = isAdmin(AppCore, user);
 
+  const roles = getUserRoles(AppCore, user);
+
   const planLabel = getPlanLabel(
     AppCore,
     user
@@ -1838,6 +2052,7 @@ export function renderUser(AppCore) {
         displayName,
         admin,
         avatarUrl,
+        hasUser,
       });
 
       removeTooltipAttributes(nameEl);
@@ -1859,7 +2074,10 @@ export function renderUser(AppCore) {
       renderAvatarFallback(
         avatarEl,
         displayName,
-        avatarText
+        avatarText,
+        {
+          AppCore,
+        }
       );
     }
 
@@ -1869,6 +2087,7 @@ export function renderUser(AppCore) {
         displayName,
         admin,
         avatarUrl,
+        hasUser,
       });
 
       removeTooltipAttributesDeep(avatarEl);
@@ -1896,6 +2115,7 @@ export function renderUser(AppCore) {
         displayName,
         admin,
         avatarUrl,
+        hasUser,
       });
 
       removeTooltipAttributes(userToggle);
@@ -1917,6 +2137,7 @@ export function renderUser(AppCore) {
         displayName,
         admin,
         avatarUrl,
+        hasUser,
       });
 
       removeTooltipAttributes(userDropdown);
@@ -1935,13 +2156,14 @@ export function renderUser(AppCore) {
 
   const snapshot = {
     user,
+    hasUser,
     displayName,
     avatarText,
     avatarUrl: avatarUrl || null,
     username: username || null,
     planLabel,
     isAdmin: admin,
-    roles: collectRoleCandidates(AppCore, user),
+    roles,
   };
 
   safeEmit(
@@ -1970,14 +2192,13 @@ export function getSidebarUserSnapshot(AppCore) {
   const username = getUsername(AppCore, user);
   const avatarText = getAvatarText(AppCore, user);
   const avatarUrl = getAvatarUrl(user);
-
-  const roles = collectRoleCandidates(AppCore, user);
+  const roles = getUserRoles(AppCore, user);
 
   return {
     hasWindow: hasWindow(),
 
     hasUser:
-      Boolean(Object.keys(user).length),
+      hasUsableUserIdentity(user),
 
     user,
 
@@ -1985,6 +2206,7 @@ export function getSidebarUserSnapshot(AppCore) {
     username: username || null,
     avatarText,
     avatarUrl: avatarUrl || null,
+
     planLabel:
       getPlanLabel(AppCore, user),
 
@@ -1992,6 +2214,9 @@ export function getSidebarUserSnapshot(AppCore) {
       isAdmin(AppCore, user),
 
     roles,
+
+    authSourcesCount:
+      getAuthLikeSources(AppCore).length,
 
     dom: {
       hasName:
@@ -2058,6 +2283,7 @@ export default {
   getUsername,
   getAvatarText,
   getAvatarUrl,
+  getUserRoles,
   isAdmin,
 
   renderAvatarFallback,

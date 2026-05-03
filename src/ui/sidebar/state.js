@@ -2,7 +2,13 @@
    Onion SPA - Sidebar State
    Archivo: src/ui/sidebar/state.js
 
-   FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · APPLE INDICATOR · 10/10
+   FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · APPLE INDICATOR · 11/10
+   PATCH · ACTIVE ROUTE PRIORITY FIX
+   PATCH · /@usuario/facturas SAFE
+   PATCH · NO STALE ACTIVE ITEM
+   PATCH · ROUTE CANDIDATES ORDERED BY TRUST
+   PATCH · CATALAN/ENGLISH/SPANISH ROUTE ALIASES
+   PATCH · INDICATOR RACE SAFE
 
    Responsabilidades:
    - resolver estado visual del sidebar
@@ -21,6 +27,13 @@
    - ocultar indicador durante transición para evitar burbuja flotante
    - evitar carreras entre router render, resize, auth restore y collapse
    - state.js es el único dueño autorizado de las CSS vars del indicador
+
+   FIX CRÍTICO ACTIVE ROUTE:
+   - la URL visible /@usuario/facturas tiene prioridad sobre AppCore stale
+   - los candidatos se evalúan por orden de fiabilidad
+   - /incidencias ya no puede ganar a /facturas por ser string más largo
+   - resolveActiveMenuItem recalcula por ruta antes de confiar en .active viejo
+   - aliases: factures/facturas/invoices, incidencies/incidencias/tickets, etc.
 
    REGLAS:
    - Desktop:
@@ -76,32 +89,64 @@ const ROUTE_CURRENT_VALUE = "page";
 
 const STATE_EMIT_MIN_INTERVAL_MS = 24;
 
+const SOURCE = "SidebarState";
+
+/*
+  Canonicalización de rutas.
+  Importante:
+  - La clave izquierda puede venir de href/data-route.
+  - La derecha debe ser la ruta canónica interna.
+*/
 const ROUTE_ALIASES = Object.freeze({
   "/home": "/",
   "/dashboard": "/",
+  "/inicio": "/",
+  "/inici": "/",
 
   "/tickets": "/incidencias",
   "/ticket": "/incidencias",
   "/incidents": "/incidencias",
   "/incident": "/incidencias",
+  "/incidencia": "/incidencias",
+  "/incidencies": "/incidencias",
+  "/incidencia-client": "/incidencias",
 
   "/invoices": "/facturas",
   "/invoice": "/facturas",
   "/billing": "/facturas",
+  "/factura": "/facturas",
+  "/factures": "/facturas",
+  "/facturacio": "/facturas",
+  "/facturación": "/facturas",
+  "/facturacion": "/facturas",
 
   "/users": "/usuarios",
   "/user": "/usuarios",
+  "/usuario": "/usuarios",
+  "/usuaris": "/usuarios",
+  "/usuari": "/usuarios",
 
   "/clients": "/clientes",
   "/client": "/clientes",
   "/customers": "/clientes",
   "/customer": "/clientes",
+  "/cliente": "/clientes",
 
   "/account": "/cuenta",
   "/profile": "/cuenta",
+  "/perfil": "/cuenta",
+  "/compte": "/cuenta",
 
   "/settings": "/ajustes",
   "/config": "/ajustes",
+  "/configuration": "/ajustes",
+  "/configuracion": "/ajustes",
+  "/configuración": "/ajustes",
+  "/configuracio": "/ajustes",
+  "/configuració": "/ajustes",
+
+  "/server": "/servidor",
+  "/servidor": "/servidor",
 });
 
 /* =========================================================
@@ -156,7 +201,10 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -686,7 +734,7 @@ function emitStateSynced(AppCore, payload = {}, options = {}) {
     "sidebar:state:synced",
     {
       ...payload,
-      source: "SidebarState",
+      source: SOURCE,
       owner: "state.js",
       ts,
     }
@@ -1196,7 +1244,9 @@ function normalizePathLike(path = "/") {
 
   value = value.replace(/\/{2,}/g, "/");
 
-  const [pathname, query = ""] = value.split("?");
+  const queryIndex = value.indexOf("?");
+  const pathname = queryIndex >= 0 ? value.slice(0, queryIndex) : value;
+  const query = queryIndex >= 0 ? value.slice(queryIndex + 1) : "";
 
   let cleanPathname =
     stripPublicUsernamePrefix(pathname || "/");
@@ -1249,12 +1299,31 @@ function getBrowserPublicPath() {
 function getExplicitPathCandidates(options = {}) {
   const opts = safeObject(options);
   const payload = safeObject(opts.payload);
+  const detail = safeObject(opts.detail);
+  const route = safeObject(opts.route);
 
   return [
-    opts.route,
+    opts.currentPath,
+    opts.routePath,
     opts.path,
     opts.publicPath,
     opts.canonicalPath,
+    opts.href,
+    opts.url,
+    opts.to,
+
+    route.publicPath,
+    route.canonicalPath,
+    route.path,
+    route.href,
+    route.url,
+
+    detail.publicPath,
+    detail.canonicalPath,
+    detail.path,
+    detail.href,
+    detail.url,
+    detail.to,
 
     payload.publicPath,
     payload.path,
@@ -1290,7 +1359,8 @@ function shouldPreferExplicitRoute(options = {}) {
     reason.includes("sidebar-ui:active-route") ||
     reason.includes("sync-active-route") ||
     reason.includes("open-activity") ||
-    reason.includes("route-marker")
+    reason.includes("route-marker") ||
+    reason.includes("click")
   ) {
     return true;
   }
@@ -1322,10 +1392,11 @@ function getCurrentPublicPathCandidates(AppCore, options = {}) {
     getBrowserPublicPath();
 
   /*
-    Regla:
-    - Navegación explícita/sidebar: ruta explícita primero.
-    - Eventos de router/render/auth normales: URL visible primero.
-      Evita que payloads atrasados de 1 tick dejen activo el item viejo.
+    FIX CRÍTICO:
+    - En navegación explícita: explicit first.
+    - En sync normal tras router/render: browser first.
+    Esto evita que AppCore.state.publicPath stale (/incidencias)
+    gane sobre window.location (/@cristian/facturas).
   */
   if (shouldPreferExplicitRoute(opts)) {
     explicitCandidates.forEach((value) => pushUniquePath(candidates, value));
@@ -1480,6 +1551,9 @@ function clearActiveItemClasses(sidebarMenu = null) {
 
       item.removeAttribute("aria-current");
       delete item.dataset.active;
+      delete item.dataset.matchedRoute;
+      delete item.dataset.matchedCurrent;
+      delete item.dataset.matchCandidateIndex;
     } catch {}
   }
 
@@ -1514,11 +1588,11 @@ function scoreRouteMatch(routePath = "/", currentPath = "/") {
   }
 
   if (route === current) {
-    return 10000 + route.length;
+    return 10000;
   }
 
   if (routeClean === currentClean) {
-    return 9000 + routeClean.length;
+    return 9000;
   }
 
   if (
@@ -1538,17 +1612,7 @@ function scoreRouteMatch(routePath = "/", currentPath = "/") {
   return -1;
 }
 
-function findBestMenuItemForCurrentPath(AppCore, sidebarMenu = null, options = {}) {
-  if (!sidebarMenu) {
-    return null;
-  }
-
-  const currentPaths =
-    getCurrentPublicPathCandidates(
-      AppCore,
-      options
-    );
-
+function findBestMenuItemForSinglePath(sidebarMenu = null, current = "/") {
   const items = getMenuItems(sidebarMenu);
 
   let best = null;
@@ -1572,33 +1636,76 @@ function findBestMenuItemForCurrentPath(AppCore, sidebarMenu = null, options = {
       continue;
     }
 
-    for (let i = 0; i < currentPaths.length; i += 1) {
-      const current = currentPaths[i];
+    const score = scoreRouteMatch(routePath, current);
 
-      /*
-        Penalización por orden:
-        el primer candidato es el más fiable según contexto.
-      */
-      const score =
-        scoreRouteMatch(routePath, current) - i;
-
-      if (score > bestScore) {
-        best = item;
-        bestScore = score;
-        bestRoute = routePath;
-      }
+    if (score > bestScore) {
+      best = item;
+      bestScore = score;
+      bestRoute = routePath;
     }
   }
 
-  if (bestScore < 0) {
+  if (!best || bestScore < 0) {
     return null;
   }
 
   try {
     best.dataset.matchedRoute = bestRoute;
+    best.dataset.matchedCurrent = normalizePathLike(current);
   } catch {}
 
   return best;
+}
+
+function findBestMenuItemForCurrentPath(AppCore, sidebarMenu = null, options = {}) {
+  if (!sidebarMenu) {
+    return null;
+  }
+
+  const currentPaths =
+    getCurrentPublicPathCandidates(
+      AppCore,
+      options
+    )
+      .map((path) => normalizePathLike(path || ""))
+      .filter(Boolean);
+
+  if (!currentPaths.length) {
+    return null;
+  }
+
+  /*
+    FIX CRÍTICO:
+    Los candidatos de ruta tienen prioridad absoluta por orden.
+
+    Antes:
+      /incidencias podía ganar a /facturas porque era más largo.
+
+    Ahora:
+      - Se prueba primero el candidato más fiable.
+      - Si encuentra match, se devuelve inmediatamente.
+      - Solo si no hay match se prueba el siguiente candidato.
+
+    Ejemplo:
+      currentPaths[0] = /facturas
+      currentPaths[1] = /incidencias stale
+
+      Gana /facturas siempre.
+  */
+  for (let index = 0; index < currentPaths.length; index += 1) {
+    const current = currentPaths[index];
+    const best = findBestMenuItemForSinglePath(sidebarMenu, current);
+
+    if (best) {
+      try {
+        best.dataset.matchCandidateIndex = String(index);
+      } catch {}
+
+      return best;
+    }
+  }
+
+  return null;
 }
 
 /* =========================================================
@@ -1633,11 +1740,15 @@ export function syncActiveMenuItem(AppCore, options = {}) {
   }
 
   safeEmit(AppCore, "sidebar:active:item:synced", {
-    source: "SidebarState",
+    source: SOURCE,
     reason: safeText(opts.reason, "sync-active-item"),
     matched: Boolean(best),
     route: getMenuItemRoute(best),
+    matchedRoute: best?.dataset?.matchedRoute || "",
+    matchedCurrent: best?.dataset?.matchedCurrent || "",
+    matchCandidateIndex: best?.dataset?.matchCandidateIndex || "",
     currentPublicPath: getCurrentPublicPath(AppCore),
+    candidates: getCurrentPublicPathCandidates(AppCore, opts),
   });
 
   return best;
@@ -1646,6 +1757,25 @@ export function syncActiveMenuItem(AppCore, options = {}) {
 function resolveActiveMenuItem(AppCore, sidebarMenu = null, options = {}) {
   if (!sidebarMenu) {
     return null;
+  }
+
+  /*
+    FIX CRÍTICO:
+    Primero recalculamos por ruta.
+    No confiamos en .active / aria-current porque puede venir stale
+    de una navegación anterior.
+  */
+  const synced = syncActiveMenuItem(AppCore, {
+    ...safeObject(options),
+    mutate: true,
+    reason: safeText(
+      options?.reason,
+      "resolve-active-menu-item:route-sync"
+    ),
+  });
+
+  if (synced && isElementVisible(synced)) {
+    return synced;
   }
 
   const directSelectors = [
@@ -1669,11 +1799,7 @@ function resolveActiveMenuItem(AppCore, sidebarMenu = null, options = {}) {
     } catch {}
   }
 
-  return syncActiveMenuItem(AppCore, {
-    ...safeObject(options),
-    mutate: true,
-    reason: "resolve-active-menu-item",
-  });
+  return null;
 }
 
 function isSidebarTransitioning(AppCore) {
@@ -1715,7 +1841,7 @@ function disableActiveMenuIndicator(AppCore, reason = "disabled") {
   lastIndicatorReason = reason;
 
   safeEmit(AppCore, "sidebar:indicator:disabled", {
-    source: "SidebarState",
+    source: SOURCE,
     reason,
   });
 
@@ -1747,7 +1873,7 @@ function clearActiveMenuIndicator(AppCore, reason = "clear") {
   lastIndicatorReason = reason;
 
   safeEmit(AppCore, "sidebar:indicator:cleared", {
-    source: "SidebarState",
+    source: SOURCE,
     reason,
   });
 
@@ -1756,6 +1882,7 @@ function clearActiveMenuIndicator(AppCore, reason = "clear") {
 
 function buildIndicatorSignature({
   route = "",
+  current = "",
   x = 0,
   y = 0,
   width = 0,
@@ -1764,6 +1891,7 @@ function buildIndicatorSignature({
 } = {}) {
   return [
     route,
+    current,
     Math.round(x),
     Math.round(y),
     Math.round(width),
@@ -1880,13 +2008,20 @@ export function syncActiveMenuIndicator(AppCore, options = {}) {
 
     const route =
       normalizePathLike(
-        getMenuItemRoute(activeItem) ||
-          activeItem.dataset?.matchedRoute ||
+        activeItem.dataset?.matchedRoute ||
+          getMenuItemRoute(activeItem) ||
           ""
+      );
+
+    const current =
+      normalizePathLike(
+        activeItem.dataset?.matchedCurrent ||
+          getCurrentPublicPath(AppCore)
       );
 
     const signature = buildIndicatorSignature({
       route,
+      current,
       x,
       y,
       width,
@@ -1913,15 +2048,17 @@ export function syncActiveMenuIndicator(AppCore, options = {}) {
 
     setDataset(sidebarMenu, "indicatorReady", INDICATOR_READY_TRUE);
     setDataset(sidebarMenu, "indicatorRoute", route);
+    setDataset(sidebarMenu, "indicatorCurrent", current);
     setDataset(sidebarMenu, "indicatorReason", reason);
 
     lastIndicatorSignature = signature;
     lastIndicatorReason = reason;
 
     safeEmit(AppCore, "sidebar:indicator:synced", {
-      source: "SidebarState",
+      source: SOURCE,
       reason,
       route,
+      current,
       x: Math.round(x),
       y: Math.round(y),
       width: Math.round(width),
@@ -2103,9 +2240,10 @@ function finishSidebarTransition(AppCore, reason = "finish") {
     reason
   );
 
-  syncActiveMenuItem(AppCore, {
+  const activeItem = syncActiveMenuItem(AppCore, {
     reason: `${reason}:active-final`,
     mutate: true,
+    forceRoute: true,
   });
 
   scheduleActiveMenuIndicator(AppCore, {
@@ -2113,10 +2251,11 @@ function finishSidebarTransition(AppCore, reason = "finish") {
     delayMs: INDICATOR_RECALC_DELAY_MS,
     reveal: true,
     force: true,
+    activeItem,
   });
 
   safeEmit(AppCore, "sidebar:transition:finish", {
-    source: "SidebarState",
+    source: SOURCE,
     reason,
   });
 
@@ -2201,7 +2340,7 @@ function beginSidebarTransition(AppCore, reason = "state-change", durationMs = S
   );
 
   safeEmit(AppCore, "sidebar:transition:start", {
-    source: "SidebarState",
+    source: SOURCE,
     reason,
     durationMs: clampNumber(durationMs, 80, 2000),
   });
@@ -2567,9 +2706,9 @@ function syncSidebarStateInternal(AppCore, closeDropdown, options = {}) {
   });
 
   const activeItem = syncActiveMenuItem(AppCore, {
+    ...opts,
     reason: opts.reason || "sync-sidebar-state",
     mutate: true,
-    ...opts,
   });
 
   if (isSidebarTransitioning(AppCore)) {
@@ -2579,12 +2718,12 @@ function syncSidebarStateInternal(AppCore, closeDropdown, options = {}) {
     );
   } else {
     scheduleActiveMenuIndicator(AppCore, {
+      ...opts,
       reason: opts.reason || "sync-sidebar-state",
       delayMs: opts.indicatorDelayMs ?? INDICATOR_RECALC_DELAY_MS,
       reveal: true,
       force: opts.forceIndicator === true,
       activeItem,
-      ...opts,
     });
   }
 
@@ -2636,7 +2775,7 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
     syncHiddenShellState(AppCore, closeDropdown);
 
     safeEmit(AppCore, "sidebar:state:change:blocked", {
-      source: "SidebarState",
+      source: SOURCE,
       reason: "shell-hidden",
       requestedOpen: nextOpen,
       previousOpen,
@@ -2657,7 +2796,7 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
     );
 
     safeEmit(AppCore, "sidebar:state:unchanged", {
-      source: "SidebarState",
+      source: SOURCE,
       open: nextOpen,
       previousOpen,
       changed: false,
@@ -2669,7 +2808,7 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
   }
 
   safeEmit(AppCore, "sidebar:state:change:start", {
-    source: "SidebarState",
+    source: SOURCE,
     open: nextOpen,
     previousOpen,
     changed,
@@ -2716,7 +2855,7 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
   });
 
   safeEmit(AppCore, "sidebar:state:change", {
-    source: "SidebarState",
+    source: SOURCE,
     owner: "state.js",
     transitionManaged: true,
     open: nextOpen,
@@ -2782,7 +2921,7 @@ export function repairSidebarState(AppCore, closeDropdown) {
     );
 
   safeEmit(AppCore, "sidebar:state:repaired", {
-    source: "SidebarState",
+    source: SOURCE,
     mobile,
     open: Boolean(state.sidebarOpen),
     desktopOpen: Boolean(state.sidebarDesktopOpen),
@@ -2812,7 +2951,9 @@ export function getSidebarStateSnapshot(AppCore) {
 
   const activeItem =
     sidebarMenu
-      ? resolveActiveMenuItem(AppCore, sidebarMenu)
+      ? resolveActiveMenuItem(AppCore, sidebarMenu, {
+          reason: "snapshot",
+        })
       : null;
 
   return {
@@ -2852,6 +2993,9 @@ export function getSidebarStateSnapshot(AppCore) {
 
       canonicalPath:
         AppCore?.state?.canonicalPath ?? null,
+
+      lastRoute:
+        AppCore?.state?.lastRoute ?? null,
     },
 
     storage: {
@@ -2927,6 +3071,18 @@ export function getSidebarStateSnapshot(AppCore) {
 
       candidates:
         getCurrentPublicPathCandidates(AppCore),
+
+      activeRoute:
+        getMenuItemRoute(activeItem),
+
+      activeMatchedRoute:
+        activeItem?.dataset?.matchedRoute || "",
+
+      activeMatchedCurrent:
+        activeItem?.dataset?.matchedCurrent || "",
+
+      activeCandidateIndex:
+        activeItem?.dataset?.matchCandidateIndex || "",
     },
 
     indicator: {
@@ -2938,6 +3094,9 @@ export function getSidebarStateSnapshot(AppCore) {
 
       route:
         sidebarMenu?.dataset?.indicatorRoute || null,
+
+      current:
+        sidebarMenu?.dataset?.indicatorCurrent || null,
 
       activeRoute:
         getMenuItemRoute(activeItem),

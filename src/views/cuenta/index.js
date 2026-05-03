@@ -2,7 +2,11 @@
    Onion SPA - Cuenta View
    Archivo: src/views/cuenta/index.js
 
-   FINAL PRO SYSTEM · ENTRYPOINT REAL · CUENTA · ROUTE SAFE · 10/10
+   FINAL PRO SYSTEM · ENTRYPOINT REAL · CUENTA · ROUTE SAFE · 10/10 EXTREME
+   PATCH · ROUTER SAFE · LEGACY SAFE · NAMESPACE EXPORT SAFE
+   PATCH · VIEW/ACTIONS/LOADERS FALLBACK CHAIN
+   PATCH · PUBLIC API STABLE · GLOBAL BRIDGE SAFE
+   PATCH · ACCOUNT SETTINGS / THEME / LANGUAGE / PASSWORD SAFE
 
    RESPONSABILIDADES:
    - punto de entrada único del módulo cuenta
@@ -12,24 +16,25 @@
    - init / mount / render / reload / destroy seguros
    - exponer save / theme / language / password / modal / helpers públicos
    - evitar duplicidad de lógica en index.js
-   - registrar bridge global estable
+   - mantener superficie pública estable aunque cambien exports internos
+   - registrar bridge global estable window.OnionCuenta / window.CuentaView
+   - registrar AppCore.modules.Cuenta si AppCore está disponible
 
    HARDENING PRO:
-   - fallback si cambia nombre del módulo
-   - re-export default + named
-   - superficie pública estable
+   - fallback si cambia nombre del método en CuentaView
+   - wrappers seguros contra métodos ausentes
+   - no lanza errores por métodos ausentes
+   - no sobreescribe brutalmente window.OnionCuenta
    - compatible con imports antiguos
-   - lazy wrappers seguros
-   - no rompe si un método no existe
-   - bridge global opcional window.OnionCuenta
-   - bridge AppCore.modules si AppCore está expuesto
+   - compatible con router que consume default, named, view o component
+   - bridge con Proxy cuando el runtime lo soporta
 
    FIX ROUTE SAFE:
    - CuentaView.init/render/mount/reload/refresh solo corren en /cuenta
    - acepta /@usuario/cuenta como publicPath válido
    - bloquea renders tardíos si la ruta actual ya no es cuenta
    - destroy/unmount/dispose siempre permitidos
-   - getters/snapshot siguen disponibles
+   - getters/snapshot/debug siguen disponibles
 ========================================================= */
 
 import RawCuentaView from "./cuentaView.js";
@@ -40,19 +45,120 @@ import RawCuentaView from "./cuentaView.js";
 
 export const CUENTA_MODULE_NAME = "cuenta";
 export const CUENTA_VIEW_NAME = "CuentaView";
-export const CUENTA_MODULE_VERSION = "11.0.0";
+export const CUENTA_MODULE_VERSION = "12.0.0";
 export const CUENTA_CANONICAL_PATH = "/cuenta";
 export const CUENTA_INDEX_SOURCE = "views:cuenta:index";
 
 /* =========================================================
-   BASICS
+   LOCAL FALLBACK HELPERS
+========================================================= */
+
+function localSafeText(value, fallback = "") {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return text || fallback;
+}
+
+function localSafeNumber(value, fallback = 0) {
+  const n = Number(value);
+
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function localSafeArray(value, fallback = []) {
+  return Array.isArray(value) ? value : fallback;
+}
+
+function localSafeObject(value, fallback = {}) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : fallback;
+}
+
+function localSafeBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+
+    if (["true", "1", "yes", "si", "sí", "on"].includes(normalized)) {
+      return true;
+    }
+
+    if (["false", "0", "no", "off"].includes(normalized)) {
+      return false;
+    }
+  }
+
+  return fallback;
+}
+
+function localFirst(...values) {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
+    }
+
+    if (Array.isArray(value) && value.length === 0) {
+      continue;
+    }
+
+    return value;
+  }
+
+  return null;
+}
+
+function localNormalizeWhitespace(value = "") {
+  return localSafeText(value, "").replace(/\s+/g, " ").trim();
+}
+
+function localEscapeHtml(value = "") {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function localTruncate(value = "", max = 140) {
+  const text = localSafeText(value, "");
+  const limit = Number(max);
+
+  if (!text) return "";
+
+  if (!Number.isFinite(limit) || limit <= 0) {
+    return text;
+  }
+
+  if (text.length <= limit) {
+    return text;
+  }
+
+  return `${text.slice(0, limit).trim()}…`;
+}
+
+/* =========================================================
+   INTERNAL SAFE HELPERS
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 function isFn(value) {
@@ -60,20 +166,14 @@ function isFn(value) {
 }
 
 function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function isProxyable(value) {
   return Boolean(
     value &&
-      (
-        typeof value === "object" ||
-        typeof value === "function"
-      )
+      (typeof value === "object" ||
+        typeof value === "function")
   );
 }
 
@@ -85,30 +185,11 @@ function isNodeLike(value) {
   );
 }
 
-function safeObject(value, fallback = {}) {
-  return isObject(value)
-    ? value
-    : fallback;
+function internalSafeObject(value, fallback = {}) {
+  return isObject(value) ? value : fallback;
 }
 
-function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value)
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  return text || fallback;
-}
-
-function getGlobalObject() {
+function getGlobalRoot() {
   try {
     if (typeof globalThis !== "undefined") {
       return globalThis;
@@ -126,56 +207,42 @@ function getGlobalObject() {
 
 function safeWarn(...args) {
   try {
-    const root =
-      getGlobalObject();
+    const root = getGlobalRoot();
 
-    root?.AppCore?.utils?.warn?.(
-      "[CuentaIndex]",
-      ...args
-    );
+    root?.AppCore?.utils?.warn?.("[CuentaIndex]", ...args);
   } catch {}
 
   try {
-    console.warn(
-      "[CuentaIndex]",
-      ...args
-    );
+    if (
+      typeof console !== "undefined" &&
+      typeof console.warn === "function"
+    ) {
+      console.warn("[CuentaIndex]", ...args);
+    }
   } catch {}
 }
 
 function safeEmit(event = "", payload = {}) {
-  const eventName =
-    safeText(event, "");
+  const eventName = localSafeText(event, "");
 
-  if (!eventName) {
-    return false;
-  }
+  if (!eventName) return false;
 
-  const root =
-    getGlobalObject();
+  const root = getGlobalRoot();
 
   let emitted = false;
 
   try {
     if (isFn(root?.AppCore?.events?.emit)) {
-      root.AppCore.events.emit(
-        eventName,
-        payload
-      );
-
+      root.AppCore.events.emit(eventName, payload);
       emitted = true;
     }
   } catch {}
 
   try {
-    if (
-      !emitted &&
-      typeof window !== "undefined"
-    ) {
+    if (!emitted && typeof window !== "undefined") {
       window.dispatchEvent(
         new CustomEvent(eventName, {
-          detail:
-            payload,
+          detail: payload,
         })
       );
 
@@ -198,21 +265,35 @@ const GUARDED_VIEW_METHODS = new Set([
   "refresh",
   "bootstrap",
 
-  "saveCuenta",
+  "loadCuenta",
+  "refreshCuenta",
+
   "save",
+  "saveCuenta",
+  "saveProfile",
+  "savePerfil",
+  "updateProfile",
+  "updatePerfil",
+  "updateCuenta",
 
   "updateTheme",
   "updateCuentaTheme",
+  "setTheme",
+  "setCuentaTheme",
 
   "updateLanguage",
   "updateCuentaLanguage",
-
-  "refreshCuenta",
+  "setLanguage",
+  "setCuentaLanguage",
 
   "changePassword",
+  "updatePassword",
+  "savePassword",
 
   "openModal",
   "openCuentaModal",
+  "closeModal",
+  "closeCuentaModal",
 ]);
 
 const ALWAYS_ALLOWED_VIEW_METHODS = new Set([
@@ -222,9 +303,13 @@ const ALWAYS_ALLOWED_VIEW_METHODS = new Set([
 
   "getItem",
   "getCuenta",
+  "getUser",
+  "getProfile",
+  "getPerfil",
+
+  "getState",
   "getSnapshot",
   "getCuentaSnapshot",
-  "getState",
 
   "isInitialized",
   "isDestroyed",
@@ -232,10 +317,7 @@ const ALWAYS_ALLOWED_VIEW_METHODS = new Set([
 ]);
 
 function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
+  if (isBrowser() && window.location?.origin) {
     return window.location.origin;
   }
 
@@ -243,11 +325,10 @@ function getBaseOrigin() {
 }
 
 function normalizePathnameOnly(pathname = "/") {
-  let value =
-    String(pathname || "/")
-      .trim()
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
+  let value = String(pathname || "/")
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
   if (!value) {
     value = "/";
@@ -258,31 +339,22 @@ function normalizePathnameOnly(pathname = "/") {
   }
 
   if (value.length > 1) {
-    value =
-      value.replace(/\/+$/g, "") ||
-      "/";
+    value = value.replace(/\/+$/g, "") || "/";
   }
 
   return value;
 }
 
 function isHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = localSafeText(value, "");
 
-  return (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  );
+  return raw.startsWith("#/") || raw.startsWith("#!");
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = localSafeText(value, "");
 
-  if (!raw) {
-    return "/";
-  }
+  if (!raw) return "/";
 
   if (raw.startsWith("#!")) {
     return raw.replace(/^#!\/?/, "/");
@@ -292,80 +364,52 @@ function normalizeHashRouterPath(value = "") {
 }
 
 function splitPath(value = "/") {
-  const raw =
-    safeText(value, "/");
+  const raw = localSafeText(value, "/");
 
   if (isHashRouterPath(raw)) {
-    return splitPath(
-      normalizeHashRouterPath(raw)
-    );
+    return splitPath(normalizeHashRouterPath(raw));
   }
 
   let pathname = raw;
   let search = "";
   let hash = "";
 
-  const hashIndex =
-    pathname.indexOf("#");
+  const hashIndex = pathname.indexOf("#");
 
   if (hashIndex >= 0) {
-    hash =
-      pathname.slice(hashIndex);
-
-    pathname =
-      pathname.slice(0, hashIndex) ||
-      "/";
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || "/";
   }
 
-  const searchIndex =
-    pathname.indexOf("?");
+  const searchIndex = pathname.indexOf("?");
 
   if (searchIndex >= 0) {
-    search =
-      pathname.slice(searchIndex);
-
-    pathname =
-      pathname.slice(0, searchIndex) ||
-      "/";
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || "/";
   }
 
   return {
-    pathname:
-      normalizePathnameOnly(pathname),
+    pathname: normalizePathnameOnly(pathname),
     search,
     hash,
   };
 }
 
 function normalizeFullPath(path = "/") {
-  const raw =
-    safeText(path, "/");
+  const raw = localSafeText(path, "/");
 
-  if (!raw) {
-    return "/";
-  }
+  if (!raw) return "/";
 
   if (isHashRouterPath(raw)) {
-    return normalizeFullPath(
-      normalizeHashRouterPath(raw)
-    );
+    return normalizeFullPath(normalizeHashRouterPath(raw));
   }
 
   try {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed =
-        new URL(
-          raw,
-          getBaseOrigin()
-        );
+      const parsed = new URL(raw, getBaseOrigin());
 
-      if (
-        parsed.hash &&
-        isHashRouterPath(parsed.hash)
-      ) {
-        return normalizeFullPath(
-          normalizeHashRouterPath(parsed.hash)
-        );
+      if (parsed.hash && isHashRouterPath(parsed.hash)) {
+        return normalizeFullPath(normalizeHashRouterPath(parsed.hash));
       }
 
       return normalizeFullPath(
@@ -374,57 +418,28 @@ function normalizeFullPath(path = "/") {
     }
   } catch {}
 
-  const {
-    pathname,
-    search,
-    hash,
-  } = splitPath(raw);
+  const { pathname, search, hash } = splitPath(raw);
 
   return `${pathname}${search}${hash}`;
 }
 
 function stripSearchAndHash(path = "/") {
-  return (
-    normalizeFullPath(path)
-      .split("?")[0]
-      .split("#")[0] ||
-    "/"
-  );
+  return normalizeFullPath(path).split("?")[0].split("#")[0] || "/";
 }
 
 function isUsernameSegment(segment = "") {
-  return /^@[A-Za-z0-9._-]{1,80}$/.test(
-    safeText(segment, "")
-  );
+  return /^@[A-Za-z0-9._-]{1,80}$/.test(localSafeText(segment, ""));
 }
 
 function stripUsernamePrefix(path = "/") {
-  const {
-    pathname,
-    search,
-    hash,
-  } = splitPath(
-    normalizeFullPath(path)
-  );
+  const { pathname, search, hash } = splitPath(normalizeFullPath(path));
 
-  const segments =
-    pathname
-      .split("/")
-      .filter(Boolean);
+  const segments = pathname.split("/").filter(Boolean);
 
-  if (
-    segments.length > 0 &&
-    isUsernameSegment(segments[0])
-  ) {
-    const rest =
-      segments
-        .slice(1)
-        .join("/");
+  if (segments.length > 0 && isUsernameSegment(segments[0])) {
+    const rest = segments.slice(1).join("/");
 
-    const cleanPathname =
-      rest
-        ? normalizePathnameOnly(`/${rest}`)
-        : "/";
+    const cleanPathname = rest ? normalizePathnameOnly(`/${rest}`) : "/";
 
     return `${cleanPathname}${search}${hash}`;
   }
@@ -433,59 +448,37 @@ function stripUsernamePrefix(path = "/") {
 }
 
 function canonicalizePath(path = "/") {
-  return normalizeFullPath(
-    stripUsernamePrefix(path || "/")
-  );
+  return normalizeFullPath(stripUsernamePrefix(path || "/"));
 }
 
 function getCleanCanonicalPath(path = "/") {
-  return stripSearchAndHash(
-    canonicalizePath(path || "/")
-  );
+  return stripSearchAndHash(canonicalizePath(path || "/"));
 }
 
 function isCuentaPath(path = "") {
-  return (
-    getCleanCanonicalPath(path || "/") ===
-    CUENTA_CANONICAL_PATH
-  );
+  return getCleanCanonicalPath(path || "/") === CUENTA_CANONICAL_PATH;
 }
 
 function getBrowserPath() {
-  if (!isBrowser()) {
-    return "";
-  }
+  if (!isBrowser()) return "";
 
   try {
-    const pathname =
-      window.location.pathname || "/";
+    const pathname = window.location.pathname || "/";
+    const search = window.location.search || "";
+    const hash = window.location.hash || "";
 
-    const search =
-      window.location.search || "";
-
-    const hash =
-      window.location.hash || "";
-
-    if (
-      hash &&
-      isHashRouterPath(hash)
-    ) {
-      return normalizeFullPath(
-        normalizeHashRouterPath(hash)
-      );
+    if (hash && isHashRouterPath(hash)) {
+      return normalizeFullPath(normalizeHashRouterPath(hash));
     }
 
-    return normalizeFullPath(
-      `${pathname}${search}${hash}`
-    );
+    return normalizeFullPath(`${pathname}${search}${hash}`);
   } catch {
     return "";
   }
 }
 
 function getWindowAppCore() {
-  const root =
-    getGlobalObject();
+  const root = getGlobalRoot();
 
   try {
     return (
@@ -500,11 +493,10 @@ function getWindowAppCore() {
 }
 
 function getAppStatePath() {
-  const AppCore =
-    getWindowAppCore();
+  const AppCore = getWindowAppCore();
 
   try {
-    return safeText(
+    return localSafeText(
       AppCore?.state?.route ||
         AppCore?.state?.canonicalPath ||
         "",
@@ -516,197 +508,110 @@ function getAppStatePath() {
 }
 
 function getAppPublicPath() {
-  const AppCore =
-    getWindowAppCore();
+  const AppCore = getWindowAppCore();
 
   try {
-    return safeText(
-      AppCore?.state?.publicPath ||
-        "",
-      ""
-    );
+    return localSafeText(AppCore?.state?.publicPath || "", "");
   } catch {
     return "";
   }
 }
 
 function pushPathSignal(signals, label, value) {
-  const text =
-    safeText(value, "");
+  const text = localSafeText(value, "");
 
-  if (!text) {
-    return;
-  }
+  if (!text) return;
 
   signals.push({
-    type:
-      "path",
+    type: "path",
     label,
-    value:
-      text,
-    canonical:
-      getCleanCanonicalPath(text),
-    isCuenta:
-      isCuentaPath(text),
+    value: text,
+    canonical: getCleanCanonicalPath(text),
+    isCuenta: isCuentaPath(text),
   });
 }
 
 function pushViewSignal(signals, label, value) {
-  const text =
-    safeText(value, "");
+  const text = localSafeText(value, "");
 
-  if (!text) {
-    return;
-  }
+  if (!text) return;
 
-  const normalized =
-    text.toLowerCase();
+  const normalized = text.toLowerCase();
 
   signals.push({
-    type:
-      "view",
+    type: "view",
     label,
-    value:
-      normalized,
+    value: normalized,
     isCuenta:
       normalized === "cuenta" ||
       normalized === "cuentaview" ||
-      normalized === "cuenta-view",
+      normalized === "cuenta-view" ||
+      normalized === "account" ||
+      normalized === "accountview" ||
+      normalized === "account-view",
   });
 }
 
 function collectRouteSignalsFromObject(signals, value, label = "arg") {
-  if (
-    !isObject(value) ||
-    isNodeLike(value)
-  ) {
+  if (!isObject(value) || isNodeLike(value)) {
     return;
   }
 
-  pushViewSignal(
-    signals,
-    `${label}.viewKey`,
-    value.viewKey
-  );
+  pushViewSignal(signals, `${label}.viewKey`, value.viewKey);
+  pushViewSignal(signals, `${label}.route.viewKey`, value.route?.viewKey);
 
-  pushViewSignal(
-    signals,
-    `${label}.route.viewKey`,
-    value.route?.viewKey
-  );
+  pushViewSignal(signals, `${label}.viewName`, value.viewName);
+  pushViewSignal(signals, `${label}.route.viewName`, value.route?.viewName);
 
-  pushViewSignal(
-    signals,
-    `${label}.viewName`,
-    value.viewName
-  );
+  pushViewSignal(signals, `${label}.name`, value.name);
+  pushViewSignal(signals, `${label}.route.name`, value.route?.name);
 
-  pushViewSignal(
-    signals,
-    `${label}.route.viewName`,
-    value.route?.viewName
-  );
+  pushPathSignal(signals, `${label}.canonicalPath`, value.canonicalPath);
+  pushPathSignal(signals, `${label}.routePath`, value.routePath);
+  pushPathSignal(signals, `${label}.route.path`, value.route?.path);
+  pushPathSignal(signals, `${label}.publicPath`, value.publicPath);
+  pushPathSignal(signals, `${label}.requestedPath`, value.requestedPath);
+  pushPathSignal(signals, `${label}.path`, value.path);
+  pushPathSignal(signals, `${label}.href`, value.href);
+  pushPathSignal(signals, `${label}.url`, value.url);
 
-  pushPathSignal(
-    signals,
-    `${label}.canonicalPath`,
-    value.canonicalPath
-  );
-
-  pushPathSignal(
-    signals,
-    `${label}.routePath`,
-    value.routePath
-  );
-
-  pushPathSignal(
-    signals,
-    `${label}.route.path`,
-    value.route?.path
-  );
-
-  pushPathSignal(
-    signals,
-    `${label}.publicPath`,
-    value.publicPath
-  );
-
-  pushPathSignal(
-    signals,
-    `${label}.requestedPath`,
-    value.requestedPath
-  );
-
-  pushPathSignal(
-    signals,
-    `${label}.path`,
-    value.path
-  );
-
-  collectRouteSignalsFromObject(
-    signals,
-    value.options,
-    `${label}.options`
-  );
+  collectRouteSignalsFromObject(signals, value.options, `${label}.options`);
+  collectRouteSignalsFromObject(signals, value.payload, `${label}.payload`);
+  collectRouteSignalsFromObject(signals, value.detail, `${label}.detail`);
 }
 
 function collectRouteSignals(args = []) {
   const signals = [];
 
-  const list =
-    Array.isArray(args)
-      ? args
-      : [];
+  const list = Array.isArray(args) ? args : [];
 
   list.forEach((arg, index) => {
-    collectRouteSignalsFromObject(
-      signals,
-      arg,
-      `args[${index}]`
-    );
+    collectRouteSignalsFromObject(signals, arg, `args[${index}]`);
   });
 
-  const statePath =
-    getAppStatePath();
+  const statePath = getAppStatePath();
 
   if (statePath) {
-    pushPathSignal(
-      signals,
-      "AppCore.state.route",
-      statePath
-    );
+    pushPathSignal(signals, "AppCore.state.route", statePath);
   }
 
-  const publicPath =
-    getAppPublicPath();
+  const publicPath = getAppPublicPath();
 
   if (publicPath) {
-    pushPathSignal(
-      signals,
-      "AppCore.state.publicPath",
-      publicPath
-    );
+    pushPathSignal(signals, "AppCore.state.publicPath", publicPath);
   }
 
-  const browserPath =
-    getBrowserPath();
+  const browserPath = getBrowserPath();
 
   if (browserPath) {
-    pushPathSignal(
-      signals,
-      "window.location",
-      browserPath
-    );
+    pushPathSignal(signals, "window.location", browserPath);
   }
 
   return signals;
 }
 
 function getBlockingSignal(signals = []) {
-  return (
-    signals.find((signal) => signal.isCuenta === false) ||
-    null
-  );
+  return signals.find((signal) => signal.isCuenta === false) || null;
 }
 
 function hasPositiveCuentaSignal(signals = []) {
@@ -714,12 +619,9 @@ function hasPositiveCuentaSignal(signals = []) {
 }
 
 function shouldAllowCuentaMethod(method = "", args = []) {
-  const cleanMethod =
-    safeText(method, "");
+  const cleanMethod = localSafeText(method, "");
 
-  if (!cleanMethod) {
-    return true;
-  }
+  if (!cleanMethod) return true;
 
   if (ALWAYS_ALLOWED_VIEW_METHODS.has(cleanMethod)) {
     return true;
@@ -729,18 +631,8 @@ function shouldAllowCuentaMethod(method = "", args = []) {
     return true;
   }
 
-  const browserPath =
-    getBrowserPath();
-
-  if (browserPath) {
-    return isCuentaPath(browserPath);
-  }
-
-  const signals =
-    collectRouteSignals(args);
-
-  const blockingSignal =
-    getBlockingSignal(signals);
+  const signals = collectRouteSignals(args);
+  const blockingSignal = getBlockingSignal(signals);
 
   if (blockingSignal) {
     return false;
@@ -750,43 +642,27 @@ function shouldAllowCuentaMethod(method = "", args = []) {
     return true;
   }
 
-  const appRoute =
-    getAppStatePath();
+  const browserPath = getBrowserPath();
 
-  const appPublicPath =
-    getAppPublicPath();
-
-  if (appRoute || appPublicPath) {
-    return (
-      isCuentaPath(appRoute || "") ||
-      isCuentaPath(appPublicPath || "")
-    );
+  if (browserPath) {
+    return isCuentaPath(browserPath);
   }
 
   return true;
 }
 
 function logBlockedCuentaMethod(method = "", args = []) {
-  const signals =
-    collectRouteSignals(args);
+  const signals = collectRouteSignals(args);
 
-  safeWarn(
-    `CuentaView.${method} bloqueado: ruta actual no es Cuenta.`,
-    {
-      method,
-      browserPath:
-        getBrowserPath(),
-      browserCanonicalPath:
-        getCleanCanonicalPath(getBrowserPath() || "/"),
-      appRoute:
-        getAppStatePath(),
-      appPublicPath:
-        getAppPublicPath(),
-      signals,
-      blockingSignal:
-        getBlockingSignal(signals),
-    }
-  );
+  safeWarn(`CuentaView.${method} bloqueado: ruta actual no es Cuenta.`, {
+    method,
+    browserPath: getBrowserPath(),
+    browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
+    appRoute: getAppStatePath(),
+    appPublicPath: getAppPublicPath(),
+    signals,
+    blockingSignal: getBlockingSignal(signals),
+  });
 }
 
 function getDefaultFallback(method = "") {
@@ -798,21 +674,37 @@ function getDefaultFallback(method = "") {
 
     case "saveCuenta":
     case "save":
+    case "saveProfile":
+    case "savePerfil":
+    case "updateProfile":
+    case "updatePerfil":
+    case "updateCuenta":
     case "updateTheme":
     case "updateCuentaTheme":
+    case "setTheme":
+    case "setCuentaTheme":
     case "updateLanguage":
     case "updateCuentaLanguage":
+    case "setLanguage":
+    case "setCuentaLanguage":
     case "refreshCuenta":
     case "changePassword":
+    case "updatePassword":
+    case "savePassword":
     case "openModal":
     case "openCuentaModal":
+    case "closeModal":
+    case "closeCuentaModal":
       return false;
 
     case "getItem":
     case "getCuenta":
+    case "getUser":
+    case "getProfile":
+    case "getPerfil":
+    case "getState":
     case "getSnapshot":
     case "getCuentaSnapshot":
-    case "getState":
       return null;
 
     default:
@@ -826,69 +718,38 @@ function getDefaultFallback(method = "") {
 
 function safeCall(target, method, args = [], fallback = undefined) {
   try {
-    const fn =
-      target?.[method];
+    const fn = target?.[method];
 
     if (typeof fn === "function") {
-      return fn.apply(
-        target,
-        Array.isArray(args) ? args : []
-      );
+      return fn.apply(target, Array.isArray(args) ? args : []);
     }
   } catch (error) {
-    safeWarn(
-      `safeCall falló: ${method}`,
-      error
-    );
+    safeWarn(`Error calling ${method}`, error);
   }
 
   return fallback;
 }
 
 function guardedCall(target, method, args = [], fallback = undefined) {
-  const callArgs =
-    Array.isArray(args)
-      ? args
-      : [];
+  const callArgs = Array.isArray(args) ? args : [];
 
-  if (
-    !shouldAllowCuentaMethod(
-      method,
-      callArgs
-    )
-  ) {
-    logBlockedCuentaMethod(
-      method,
-      callArgs
-    );
+  if (!shouldAllowCuentaMethod(method, callArgs)) {
+    logBlockedCuentaMethod(method, callArgs);
 
-    return fallback !== undefined
-      ? fallback
-      : getDefaultFallback(method);
+    return fallback !== undefined ? fallback : getDefaultFallback(method);
   }
 
-  return safeCall(
-    target,
-    method,
-    callArgs,
-    fallback
-  );
+  return safeCall(target, method, callArgs, fallback);
 }
 
 function callAny(candidates = [], args = [], fallback = undefined, options = {}) {
-  const opts =
-    safeObject(options);
+  const opts = internalSafeObject(options);
 
   for (const candidate of candidates) {
-    const target =
-      candidate?.[0];
+    const target = candidate?.[0];
+    const method = candidate?.[1];
 
-    const method =
-      candidate?.[1];
-
-    if (!target || !method) {
-      continue;
-    }
+    if (!target || !method) continue;
 
     const result =
       opts.guarded === true
@@ -905,15 +766,9 @@ function callAny(candidates = [], args = [], fallback = undefined, options = {})
 
 function asyncCallAny(candidates = [], args = [], fallback = undefined, options = {}) {
   try {
-    return Promise.resolve(
-      callAny(
-        candidates,
-        args,
-        fallback,
-        options
-      )
-    );
-  } catch {
+    return Promise.resolve(callAny(candidates, args, fallback, options));
+  } catch (error) {
+    safeWarn("asyncCallAny falló.", error);
     return Promise.resolve(fallback);
   }
 }
@@ -923,16 +778,10 @@ function asyncCallAny(candidates = [], args = [], fallback = undefined, options 
 ========================================================= */
 
 function createGuardedCuentaViewBridge(view) {
-  const source =
-    view || {};
+  const source = view || {};
+  const cache = new Map();
 
-  const cache =
-    new Map();
-
-  if (
-    typeof Proxy !== "function" ||
-    !isProxyable(source)
-  ) {
+  if (typeof Proxy !== "function" || !isProxyable(source)) {
     return source;
   }
 
@@ -946,106 +795,67 @@ function createGuardedCuentaViewBridge(view) {
         return CUENTA_INDEX_SOURCE;
       }
 
-      const value =
-        Reflect.get(
-          target,
-          prop,
-          receiver
-        );
+      if (prop === "__module") {
+        return CUENTA_MODULE_NAME;
+      }
+
+      const value = Reflect.get(target, prop, receiver);
 
       if (!isFn(value)) {
         return value;
       }
 
-      const method =
-        String(prop);
+      const method = String(prop);
 
       if (cache.has(method)) {
         return cache.get(method);
       }
 
-      const wrapped =
-        function guardedCuentaViewMethod(...args) {
-          if (
-            !shouldAllowCuentaMethod(
-              method,
-              args
-            )
-          ) {
-            logBlockedCuentaMethod(
-              method,
-              args
-            );
+      const wrapped = function guardedCuentaViewMethod(...args) {
+        if (!shouldAllowCuentaMethod(method, args)) {
+          logBlockedCuentaMethod(method, args);
 
-            return getDefaultFallback(method);
-          }
+          return getDefaultFallback(method);
+        }
 
-          try {
-            return value.apply(
-              target,
-              args
-            );
-          } catch (error) {
-            safeWarn(
-              `CuentaView.${method} falló.`,
-              error
-            );
-
-            throw error;
-          }
-        };
+        try {
+          return value.apply(target, args);
+        } catch (error) {
+          safeWarn(`CuentaView.${method} falló.`, error);
+          throw error;
+        }
+      };
 
       try {
         Object.defineProperties(wrapped, {
           name: {
-            value:
-              `guardedCuenta_${method}`,
+            value: `guardedCuenta_${method}`,
           },
 
           routeViewKey: {
-            value:
-              "cuenta",
-            enumerable:
-              true,
+            value: "cuenta",
+            enumerable: true,
           },
 
           routeViewName: {
-            value:
-              CUENTA_VIEW_NAME,
-            enumerable:
-              true,
+            value: CUENTA_VIEW_NAME,
+            enumerable: true,
           },
         });
       } catch {}
 
-      cache.set(
-        method,
-        wrapped
-      );
+      cache.set(method, wrapped);
 
       return wrapped;
     },
 
     apply(target, thisArg, args) {
-      if (
-        !shouldAllowCuentaMethod(
-          "render",
-          args
-        )
-      ) {
-        logBlockedCuentaMethod(
-          "render",
-          args
-        );
-
+      if (!shouldAllowCuentaMethod("render", args)) {
+        logBlockedCuentaMethod("render", args);
         return null;
       }
 
-      return Reflect.apply(
-        target,
-        thisArg,
-        args
-      );
+      return Reflect.apply(target, thisArg, args);
     },
 
     set(target, prop, value) {
@@ -1059,19 +869,17 @@ function createGuardedCuentaViewBridge(view) {
   });
 }
 
-export const CuentaView =
-  createGuardedCuentaViewBridge(
-    RawCuentaView
-  );
+export const CuentaView = createGuardedCuentaViewBridge(RawCuentaView);
 
-export const view =
-  CuentaView;
+/* =========================================================
+   CORE EXPORTS
+========================================================= */
 
-export const component =
-  CuentaView;
+export { CuentaView as View };
 
-export const page =
-  CuentaView;
+export const view = CuentaView;
+export const component = CuentaView;
+export const page = CuentaView;
 
 export default CuentaView;
 
@@ -1092,7 +900,16 @@ export const init = (...args) =>
   );
 
 export const mount = (...args) =>
-  init(...args);
+  asyncCallAny(
+    [
+      [RawCuentaView, "mount"],
+      [RawCuentaView, "init"],
+      [RawCuentaView, "render"],
+    ],
+    args,
+    CuentaView,
+    { guarded: true }
+  );
 
 export const render = (...args) =>
   callAny(
@@ -1113,11 +930,15 @@ export const reload = (...args) =>
       [RawCuentaView, "refresh"],
       [RawCuentaView, "refreshCuenta"],
       [RawCuentaView, "loadCuenta"],
+      [RawCuentaView, "load"],
     ],
     args,
     CuentaView,
     { guarded: true }
   );
+
+export const refresh = (...args) =>
+  reload(...args);
 
 export const destroy = (...args) =>
   callAny(
@@ -1131,50 +952,113 @@ export const destroy = (...args) =>
   );
 
 export const unmount = (...args) =>
-  destroy(...args);
+  callAny(
+    [
+      [RawCuentaView, "unmount"],
+      [RawCuentaView, "destroy"],
+      [RawCuentaView, "dispose"],
+    ],
+    args,
+    true
+  );
 
-export const dispose =
-  destroy;
-
-export const bootstrap =
-  init;
+export const dispose = destroy;
+export const bootstrap = init;
 
 /* =========================================================
-   ACTIONS API
+   ACTIONS API · VIEW FIRST + ALIAS FALLBACK
 ========================================================= */
+
+export const loadCuenta = (...args) =>
+  asyncCallAny(
+    [
+      [RawCuentaView, "loadCuenta"],
+      [RawCuentaView, "reload"],
+      [RawCuentaView, "refresh"],
+      [RawCuentaView, "load"],
+    ],
+    args,
+    CuentaView,
+    { guarded: true }
+  );
 
 export const saveCuenta = (...args) =>
   asyncCallAny(
     [
       [RawCuentaView, "saveCuenta"],
       [RawCuentaView, "save"],
+      [RawCuentaView, "saveProfile"],
+      [RawCuentaView, "savePerfil"],
+      [RawCuentaView, "updateProfile"],
+      [RawCuentaView, "updatePerfil"],
+      [RawCuentaView, "updateCuenta"],
     ],
     args,
     false,
     { guarded: true }
   );
+
+export const save = (...args) =>
+  saveCuenta(...args);
+
+export const saveProfile = (...args) =>
+  saveCuenta(...args);
+
+export const savePerfil = (...args) =>
+  saveCuenta(...args);
+
+export const updateProfile = (...args) =>
+  saveCuenta(...args);
+
+export const updatePerfil = (...args) =>
+  saveCuenta(...args);
+
+export const updateCuenta = (...args) =>
+  saveCuenta(...args);
 
 export const updateTheme = (...args) =>
   asyncCallAny(
     [
       [RawCuentaView, "updateTheme"],
       [RawCuentaView, "updateCuentaTheme"],
+      [RawCuentaView, "setTheme"],
+      [RawCuentaView, "setCuentaTheme"],
     ],
     args,
     false,
     { guarded: true }
   );
 
+export const updateCuentaTheme = (...args) =>
+  updateTheme(...args);
+
+export const setTheme = (...args) =>
+  updateTheme(...args);
+
+export const setCuentaTheme = (...args) =>
+  updateTheme(...args);
+
 export const updateLanguage = (...args) =>
   asyncCallAny(
     [
       [RawCuentaView, "updateLanguage"],
       [RawCuentaView, "updateCuentaLanguage"],
+      [RawCuentaView, "setLanguage"],
+      [RawCuentaView, "setCuentaLanguage"],
     ],
     args,
     false,
     { guarded: true }
   );
+
+export const updateCuentaLanguage = (...args) =>
+  updateLanguage(...args);
+
+export const setLanguage = (...args) =>
+  updateLanguage(...args);
+
+export const setCuentaLanguage = (...args) =>
+  updateLanguage(...args);
 
 export const refreshCuenta = (...args) =>
   asyncCallAny(
@@ -1182,6 +1066,7 @@ export const refreshCuenta = (...args) =>
       [RawCuentaView, "refreshCuenta"],
       [RawCuentaView, "refresh"],
       [RawCuentaView, "reload"],
+      [RawCuentaView, "loadCuenta"],
     ],
     args,
     false,
@@ -1193,22 +1078,48 @@ export const changePassword = (...args) =>
     [
       [RawCuentaView, "changePassword"],
       [RawCuentaView, "updatePassword"],
+      [RawCuentaView, "savePassword"],
     ],
     args,
     false,
     { guarded: true }
   );
 
+export const updatePassword = (...args) =>
+  changePassword(...args);
+
+export const savePassword = (...args) =>
+  changePassword(...args);
+
 export const openModal = (...args) =>
   callAny(
     [
       [RawCuentaView, "openModal"],
+      [RawCuentaView, "openCuentaModal"],
       [RawCuentaView, "open"],
     ],
     args,
     false,
     { guarded: true }
   );
+
+export const openCuentaModal = (...args) =>
+  openModal(...args);
+
+export const closeModal = (...args) =>
+  callAny(
+    [
+      [RawCuentaView, "closeModal"],
+      [RawCuentaView, "closeCuentaModal"],
+      [RawCuentaView, "close"],
+    ],
+    args,
+    false,
+    { guarded: true }
+  );
+
+export const closeCuentaModal = (...args) =>
+  closeModal(...args);
 
 /* =========================================================
    DATA API
@@ -1220,107 +1131,155 @@ export const getItem = (...args) =>
       [RawCuentaView, "getItem"],
       [RawCuentaView, "getCuenta"],
       [RawCuentaView, "getUser"],
+      [RawCuentaView, "getProfile"],
+      [RawCuentaView, "getPerfil"],
     ],
     args,
     null
   );
 
-export const getSnapshot = (...args) => {
-  const base =
-    callAny(
-      [
-        [RawCuentaView, "getSnapshot"],
-        [RawCuentaView, "getState"],
-      ],
-      args,
-      null
-    );
+export const getCuenta = (...args) =>
+  getItem(...args);
 
-  return {
-    ...(isObject(base) ? base : {}),
+export const getUser = (...args) =>
+  getItem(...args);
 
-    module:
-      CUENTA_MODULE_NAME,
+export const getProfile = (...args) =>
+  getItem(...args);
 
-    viewName:
-      CUENTA_VIEW_NAME,
-
-    version:
-      CUENTA_MODULE_VERSION,
-
-    source:
-      CUENTA_INDEX_SOURCE,
-
-    initialized:
-      isInitialized(),
-
-    destroyed:
-      isDestroyed(),
-
-    mounted:
-      isMounted(),
-
-    hasView:
-      Boolean(CuentaView),
-
-    hasRawView:
-      Boolean(RawCuentaView),
-
-    browserPath:
-      getBrowserPath(),
-
-    browserCanonicalPath:
-      getCleanCanonicalPath(
-        getBrowserPath() || "/"
-      ),
-
-    appRoute:
-      getAppStatePath(),
-
-    appPublicPath:
-      getAppPublicPath(),
-
-    cuentaAllowedNow:
-      canRenderCuentaNow(...args),
-  };
-};
+export const getPerfil = (...args) =>
+  getItem(...args);
 
 export const getState = (...args) =>
   callAny(
     [
+      [RawCuentaView, "getState"],
+      [RawCuentaView, "getSnapshot"],
+      [RawCuentaView, "getCuentaSnapshot"],
+    ],
+    args,
+    null
+  );
+
+export const getCuentaView = () =>
+  CuentaView;
+
+export const getRawCuentaView = () =>
+  RawCuentaView;
+
+export const canRenderCuentaNow = (...args) =>
+  shouldAllowCuentaMethod("render", args);
+
+export const getCuentaRouteDebug = (...args) => {
+  const signals = collectRouteSignals(args);
+
+  return {
+    source: CUENTA_INDEX_SOURCE,
+
+    allowed: shouldAllowCuentaMethod("render", args),
+
+    browserPath: getBrowserPath(),
+
+    browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
+
+    appRoute: getAppStatePath(),
+
+    appPublicPath: getAppPublicPath(),
+
+    signals,
+
+    blockingSignal: getBlockingSignal(signals),
+  };
+};
+
+export const getSnapshot = (...args) => {
+  const base = callAny(
+    [
+      [RawCuentaView, "getSnapshot"],
+      [RawCuentaView, "getCuentaSnapshot"],
       [RawCuentaView, "getState"],
     ],
     args,
     null
   );
 
-/* =========================================================
-   ALIASES API
-========================================================= */
+  return {
+    ...(isObject(base) ? base : {}),
 
-export const save = (...args) =>
-  saveCuenta(...args);
+    module: CUENTA_MODULE_NAME,
 
-export const refresh = (...args) =>
-  refreshCuenta(...args);
+    viewName: CUENTA_VIEW_NAME,
 
-export const updateCuentaTheme = (...args) =>
-  updateTheme(...args);
+    version: CUENTA_MODULE_VERSION,
 
-export const updateCuentaLanguage = (...args) =>
-  updateLanguage(...args);
+    source: CUENTA_INDEX_SOURCE,
 
-export const openCuentaModal = (...args) =>
-  openModal(...args);
+    initialized: isInitialized(),
 
-export const getCuenta = (...args) =>
-  getItem(...args);
+    destroyed: isDestroyed(),
+
+    mounted: isMounted(),
+
+    item: getItem(),
+
+    hasView: Boolean(CuentaView),
+
+    hasRawView: Boolean(RawCuentaView),
+
+    browserPath: getBrowserPath(),
+
+    browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
+
+    appRoute: getAppStatePath(),
+
+    appPublicPath: getAppPublicPath(),
+
+    cuentaAllowedNow: canRenderCuentaNow(...args),
+  };
+};
 
 export const getCuentaSnapshot = (...args) =>
   getSnapshot(...args);
 
+export const getModuleSnapshot = (...args) =>
+  getSnapshot(...args);
+
 /* =========================================================
-   FLAGS / DEBUG
+   UTILS REUTILIZABLES
+========================================================= */
+
+export const safeText = (...args) =>
+  localSafeText(...args);
+
+export const safeNumber = (...args) =>
+  localSafeNumber(...args);
+
+export const safeArray = (...args) =>
+  localSafeArray(...args);
+
+export const safeObject = (...args) =>
+  localSafeObject(...args);
+
+export const safeBoolean = (...args) =>
+  localSafeBoolean(...args);
+
+export const first = (...args) =>
+  localFirst(...args);
+
+export const normalizeWhitespace = (...args) =>
+  localNormalizeWhitespace(...args);
+
+export const escapeHtml = (...args) =>
+  localEscapeHtml(...args);
+
+export const truncate = (...args) =>
+  localTruncate(...args);
+
+export const truncateText = (...args) =>
+  localTruncate(...args);
+
+/* =========================================================
+   FLAGS
 ========================================================= */
 
 export const isInitialized = () =>
@@ -1344,72 +1303,26 @@ export const isMounted = () =>
       safeCall(RawCuentaView, "isMounted", [], false)
   );
 
-export const canRenderCuentaNow = (...args) =>
-  shouldAllowCuentaMethod(
-    "render",
-    args
-  );
-
-export const getCuentaRouteDebug = (...args) => {
-  const signals =
-    collectRouteSignals(args);
-
-  return {
-    source:
-      CUENTA_INDEX_SOURCE,
-
-    allowed:
-      shouldAllowCuentaMethod(
-        "render",
-        args
-      ),
-
-    browserPath:
-      getBrowserPath(),
-
-    browserCanonicalPath:
-      getCleanCanonicalPath(
-        getBrowserPath() || "/"
-      ),
-
-    appRoute:
-      getAppStatePath(),
-
-    appPublicPath:
-      getAppPublicPath(),
-
-    signals,
-
-    blockingSignal:
-      getBlockingSignal(signals),
-  };
-};
-
 /* =========================================================
-   PUBLIC MODULE SHAPE
+   PUBLIC API OBJECT
 ========================================================= */
 
 export const CuentaModule = Object.freeze({
-  name:
-    CUENTA_MODULE_NAME,
+  name: CUENTA_MODULE_NAME,
 
-  viewName:
-    CUENTA_VIEW_NAME,
+  viewName: CUENTA_VIEW_NAME,
 
-  version:
-    CUENTA_MODULE_VERSION,
+  version: CUENTA_MODULE_VERSION,
 
-  source:
-    CUENTA_INDEX_SOURCE,
+  source: CUENTA_INDEX_SOURCE,
+
+  View: CuentaView,
+
+  RawView: RawCuentaView,
 
   CuentaView,
+
   RawCuentaView,
-
-  View:
-    CuentaView,
-
-  RawView:
-    RawCuentaView,
 
   view,
   component,
@@ -1425,50 +1338,80 @@ export const CuentaModule = Object.freeze({
   dispose,
   bootstrap,
 
+  loadCuenta,
+
   saveCuenta,
   save,
+  saveProfile,
+  savePerfil,
+  updateProfile,
+  updatePerfil,
+  updateCuenta,
 
   updateTheme,
   updateCuentaTheme,
+  setTheme,
+  setCuentaTheme,
 
   updateLanguage,
   updateCuentaLanguage,
+  setLanguage,
+  setCuentaLanguage,
 
   refreshCuenta,
 
   changePassword,
+  updatePassword,
+  savePassword,
 
   openModal,
   openCuentaModal,
+  closeModal,
+  closeCuentaModal,
 
   getItem,
   getCuenta,
-
-  getSnapshot,
-  getCuentaSnapshot,
+  getUser,
+  getProfile,
+  getPerfil,
 
   getState,
+  getSnapshot,
+  getCuentaSnapshot,
+  getModuleSnapshot,
+
+  getCuentaView,
+  getRawCuentaView,
+
+  canRenderCuentaNow,
+  getCuentaRouteDebug,
 
   isInitialized,
   isDestroyed,
   isMounted,
 
-  canRenderCuentaNow,
-  getCuentaRouteDebug,
+  safeText,
+  safeNumber,
+  safeArray,
+  safeObject,
+  safeBoolean,
+  first,
+  normalizeWhitespace,
+  escapeHtml,
+  truncate,
+  truncateText,
 });
 
 /* =========================================================
-   LEGACY GLOBAL BRIDGE OPTIONAL
+   LEGACY GLOBAL BRIDGE
 ========================================================= */
 
 export function registerGlobalBridge() {
-  const root =
-    getGlobalObject();
+  const root = getGlobalRoot();
 
   try {
     const previous =
-      root.OnionCuenta &&
-      typeof root.OnionCuenta === "object"
+      root.OnionCuenta && typeof root.OnionCuenta === "object"
         ? root.OnionCuenta
         : {};
 
@@ -1478,85 +1421,55 @@ export function registerGlobalBridge() {
     };
 
     root.OnionCuentaView =
-      root.OnionCuentaView &&
-      typeof root.OnionCuentaView === "object"
+      root.OnionCuentaView && typeof root.OnionCuentaView === "object"
         ? {
             ...root.OnionCuentaView,
             ...CuentaModule,
-            view:
-              CuentaView,
+            view: CuentaView,
           }
         : CuentaView;
 
     root.CuentaView =
-      root.CuentaView &&
-      typeof root.CuentaView === "object"
+      root.CuentaView && typeof root.CuentaView === "object"
         ? {
             ...root.CuentaView,
             ...CuentaModule,
-            view:
-              CuentaView,
+            view: CuentaView,
           }
         : CuentaView;
   } catch (error) {
-    safeWarn(
-      "No se pudo registrar bridge global.",
-      error
-    );
+    safeWarn("No se pudo registrar bridge global.", error);
   }
 
   try {
-    const appCore =
-      root?.AppCore;
+    const appCore = root?.AppCore;
 
     if (appCore) {
-      if (
-        !appCore.modules ||
-        typeof appCore.modules !== "object"
-      ) {
+      if (!appCore.modules || typeof appCore.modules !== "object") {
         appCore.modules = {};
       }
 
-      appCore.modules.Cuenta =
-        CuentaModule;
-
-      appCore.modules.CuentaView =
-        CuentaModule;
-
-      appCore.modules.OnionCuenta =
-        CuentaModule;
+      appCore.modules.Cuenta = CuentaModule;
+      appCore.modules.CuentaView = CuentaModule;
+      appCore.modules.OnionCuenta = CuentaModule;
     }
   } catch (error) {
-    safeWarn(
-      "No se pudo registrar bridge en AppCore.modules.",
-      error
-    );
+    safeWarn("No se pudo registrar bridge en AppCore.modules.", error);
   }
 
-  safeEmit(
-    "cuenta:index:ready",
-    {
-      source:
-        CUENTA_INDEX_SOURCE,
+  safeEmit("cuenta:index:ready", {
+    source: CUENTA_INDEX_SOURCE,
 
-      hasView:
-        Boolean(CuentaView),
+    hasView: Boolean(CuentaView),
 
-      hasRawView:
-        Boolean(RawCuentaView),
+    hasRawView: Boolean(RawCuentaView),
 
-      browserPath:
-        getBrowserPath(),
+    browserPath: getBrowserPath(),
 
-      browserCanonicalPath:
-        getCleanCanonicalPath(
-          getBrowserPath() || "/"
-        ),
+    browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
 
-      allowedNow:
-        canRenderCuentaNow(),
-    }
-  );
+    allowedNow: canRenderCuentaNow(),
+  });
 
   return CuentaModule;
 }
@@ -1565,8 +1478,6 @@ export function registerGlobalBridge() {
    READY
 ========================================================= */
 
-export const bridge =
-  registerGlobalBridge();
+export const bridge = registerGlobalBridge();
 
-export const ready =
-  true;
+export const ready = true;

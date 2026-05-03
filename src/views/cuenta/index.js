@@ -2,11 +2,11 @@
    Onion SPA - Cuenta View
    Archivo: src/views/cuenta/index.js
 
-   FINAL PRO SYSTEM · ENTRYPOINT REAL · CUENTA · ROUTE SAFE · 10/10 EXTREME
-   PATCH · ROUTER SAFE · LEGACY SAFE · NAMESPACE EXPORT SAFE
-   PATCH · VIEW/ACTIONS/LOADERS FALLBACK CHAIN
-   PATCH · PUBLIC API STABLE · GLOBAL BRIDGE SAFE
-   PATCH · ACCOUNT SETTINGS / THEME / LANGUAGE / PASSWORD SAFE
+   EXTREME PRO SYSTEM · ENTRYPOINT REAL · CUENTA · ROUTE SAFE · 13/10
+   ROUTER SAFE · LEGACY SAFE · NAMESPACE EXPORT SAFE
+   VIEW/ACTIONS/LOADERS FALLBACK CHAIN
+   PUBLIC API STABLE · GLOBAL BRIDGE SAFE
+   ACCOUNT SETTINGS / THEME / LANGUAGE / PASSWORD SAFE
 
    RESPONSABILIDADES:
    - punto de entrada único del módulo cuenta
@@ -20,21 +20,16 @@
    - registrar bridge global estable window.OnionCuenta / window.CuentaView
    - registrar AppCore.modules.Cuenta si AppCore está disponible
 
-   HARDENING PRO:
-   - fallback si cambia nombre del método en CuentaView
-   - wrappers seguros contra métodos ausentes
-   - no lanza errores por métodos ausentes
-   - no sobreescribe brutalmente window.OnionCuenta
-   - compatible con imports antiguos
-   - compatible con router que consume default, named, view o component
-   - bridge con Proxy cuando el runtime lo soporta
-
-   FIX ROUTE SAFE:
-   - CuentaView.init/render/mount/reload/refresh solo corren en /cuenta
-   - acepta /@usuario/cuenta como publicPath válido
-   - bloquea renders tardíos si la ruta actual ya no es cuenta
-   - destroy/unmount/dispose siempre permitidos
-   - getters/snapshot/debug siguen disponibles
+   HARDENING EXTREME:
+   - route guard por evaluación ponderada, no por primer falso
+   - prioridad a señales explícitas del router
+   - soporta /cuenta y /@usuario/cuenta
+   - soporta hash router #/cuenta y #!/cuenta
+   - no bloquea por rutas antiguas de AppCore si browser/publicPath es cuenta
+   - destroy/unmount/dispose/close siempre permitidos
+   - getters/snapshot/debug siempre disponibles
+   - flags booleanos corregidos: no confunde función con valor
+   - bridge global estable sin romper imports antiguos
 ========================================================= */
 
 import RawCuentaView from "./cuentaView.js";
@@ -45,18 +40,16 @@ import RawCuentaView from "./cuentaView.js";
 
 export const CUENTA_MODULE_NAME = "cuenta";
 export const CUENTA_VIEW_NAME = "CuentaView";
-export const CUENTA_MODULE_VERSION = "12.0.0";
+export const CUENTA_MODULE_VERSION = "13.0.0";
 export const CUENTA_CANONICAL_PATH = "/cuenta";
 export const CUENTA_INDEX_SOURCE = "views:cuenta:index";
 
 /* =========================================================
-   LOCAL FALLBACK HELPERS
+   LOCAL SAFE HELPERS
 ========================================================= */
 
 function localSafeText(value, fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
   const text = String(value)
     .replace(/[\r\n\t]/g, " ")
@@ -67,6 +60,8 @@ function localSafeText(value, fallback = "") {
 }
 
 function localSafeNumber(value, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback;
+
   const n = Number(value);
 
   return Number.isFinite(n) ? n : fallback;
@@ -88,34 +83,30 @@ function localSafeBoolean(value, fallback = false) {
   if (typeof value === "number") {
     if (value === 1) return true;
     if (value === 0) return false;
+    return value !== 0;
   }
 
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
+  const normalized = localSafeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 
-    if (["true", "1", "yes", "si", "sí", "on"].includes(normalized)) {
-      return true;
-    }
-
-    if (["false", "0", "no", "off"].includes(normalized)) {
-      return false;
-    }
+  if (["true", "1", "yes", "y", "si", "sí", "on", "enabled", "activo"].includes(normalized)) {
+    return true;
   }
 
-  return fallback;
+  if (["false", "0", "no", "n", "off", "disabled", "inactivo"].includes(normalized)) {
+    return false;
+  }
+
+  return Boolean(fallback);
 }
 
 function localFirst(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
-
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
-
-    if (Array.isArray(value) && value.length === 0) {
-      continue;
-    }
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
 
     return value;
   }
@@ -138,23 +129,17 @@ function localEscapeHtml(value = "") {
 
 function localTruncate(value = "", max = 140) {
   const text = localSafeText(value, "");
-  const limit = Number(max);
+  const limit = localSafeNumber(max, 140);
 
   if (!text) return "";
-
-  if (!Number.isFinite(limit) || limit <= 0) {
-    return text;
-  }
-
-  if (text.length <= limit) {
-    return text;
-  }
+  if (limit <= 0) return text;
+  if (text.length <= limit) return text;
 
   return `${text.slice(0, limit).trim()}…`;
 }
 
 /* =========================================================
-   INTERNAL SAFE HELPERS
+   INTERNAL HELPERS
 ========================================================= */
 
 function isBrowser() {
@@ -170,11 +155,7 @@ function isObject(value) {
 }
 
 function isProxyable(value) {
-  return Boolean(
-    value &&
-      (typeof value === "object" ||
-        typeof value === "function")
-  );
+  return Boolean(value && (typeof value === "object" || typeof value === "function"));
 }
 
 function isNodeLike(value) {
@@ -191,44 +172,46 @@ function internalSafeObject(value, fallback = {}) {
 
 function getGlobalRoot() {
   try {
-    if (typeof globalThis !== "undefined") {
-      return globalThis;
-    }
+    if (typeof globalThis !== "undefined") return globalThis;
   } catch {}
 
   try {
-    if (typeof window !== "undefined") {
-      return window;
-    }
+    if (typeof window !== "undefined") return window;
   } catch {}
 
   return {};
 }
 
+function getWindowAppCore() {
+  const root = getGlobalRoot();
+
+  try {
+    return (
+      root?.AppCore ||
+      root?.OnionApp?.AppCore ||
+      root?.Onion?.AppCore ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
 function safeWarn(...args) {
   try {
-    const root = getGlobalRoot();
-
-    root?.AppCore?.utils?.warn?.("[CuentaIndex]", ...args);
+    getWindowAppCore()?.utils?.warn?.("[CuentaIndex]", ...args);
   } catch {}
 
   try {
-    if (
-      typeof console !== "undefined" &&
-      typeof console.warn === "function"
-    ) {
-      console.warn("[CuentaIndex]", ...args);
-    }
+    console.warn("[CuentaIndex]", ...args);
   } catch {}
 }
 
 function safeEmit(event = "", payload = {}) {
   const eventName = localSafeText(event, "");
-
   if (!eventName) return false;
 
   const root = getGlobalRoot();
-
   let emitted = false;
 
   try {
@@ -239,7 +222,7 @@ function safeEmit(event = "", payload = {}) {
   } catch {}
 
   try {
-    if (!emitted && typeof window !== "undefined") {
+    if (isBrowser()) {
       window.dispatchEvent(
         new CustomEvent(eventName, {
           detail: payload,
@@ -254,7 +237,7 @@ function safeEmit(event = "", payload = {}) {
 }
 
 /* =========================================================
-   ROUTE GUARD
+   ROUTE GUARD CONFIG
 ========================================================= */
 
 const GUARDED_VIEW_METHODS = new Set([
@@ -292,14 +275,16 @@ const GUARDED_VIEW_METHODS = new Set([
 
   "openModal",
   "openCuentaModal",
-  "closeModal",
-  "closeCuentaModal",
 ]);
 
 const ALWAYS_ALLOWED_VIEW_METHODS = new Set([
   "destroy",
   "unmount",
   "dispose",
+
+  "closeModal",
+  "closeCuentaModal",
+  "close",
 
   "getItem",
   "getCuenta",
@@ -310,11 +295,19 @@ const ALWAYS_ALLOWED_VIEW_METHODS = new Set([
   "getState",
   "getSnapshot",
   "getCuentaSnapshot",
+  "getModuleSnapshot",
+
+  "getRouteDebug",
+  "getCuentaRouteDebug",
 
   "isInitialized",
   "isDestroyed",
   "isMounted",
 ]);
+
+/* =========================================================
+   PATH NORMALIZATION
+========================================================= */
 
 function getBaseOrigin() {
   if (isBrowser() && window.location?.origin) {
@@ -330,13 +323,8 @@ function normalizePathnameOnly(pathname = "/") {
     .replace(/\\/g, "/")
     .replace(/\/{2,}/g, "/");
 
-  if (!value) {
-    value = "/";
-  }
-
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
-  }
+  if (!value) value = "/";
+  if (!value.startsWith("/")) value = `/${value}`;
 
   if (value.length > 1) {
     value = value.replace(/\/+$/g, "") || "/";
@@ -347,7 +335,6 @@ function normalizePathnameOnly(pathname = "/") {
 
 function isHashRouterPath(value = "") {
   const raw = localSafeText(value, "");
-
   return raw.startsWith("#/") || raw.startsWith("#!");
 }
 
@@ -433,12 +420,10 @@ function isUsernameSegment(segment = "") {
 
 function stripUsernamePrefix(path = "/") {
   const { pathname, search, hash } = splitPath(normalizeFullPath(path));
-
   const segments = pathname.split("/").filter(Boolean);
 
   if (segments.length > 0 && isUsernameSegment(segments[0])) {
     const rest = segments.slice(1).join("/");
-
     const cleanPathname = rest ? normalizePathnameOnly(`/${rest}`) : "/";
 
     return `${cleanPathname}${search}${hash}`;
@@ -477,29 +462,17 @@ function getBrowserPath() {
   }
 }
 
-function getWindowAppCore() {
-  const root = getGlobalRoot();
-
-  try {
-    return (
-      root?.AppCore ||
-      root?.OnionApp?.AppCore ||
-      root?.Onion?.AppCore ||
-      null
-    );
-  } catch {
-    return null;
-  }
-}
-
 function getAppStatePath() {
   const AppCore = getWindowAppCore();
 
   try {
     return localSafeText(
-      AppCore?.state?.route ||
-        AppCore?.state?.canonicalPath ||
-        "",
+      localFirst(
+        AppCore?.state?.canonicalPath,
+        AppCore?.state?.route,
+        AppCore?.state?.path,
+        ""
+      ),
       ""
     );
   } catch {
@@ -517,13 +490,17 @@ function getAppPublicPath() {
   }
 }
 
-function pushPathSignal(signals, label, value) {
-  const text = localSafeText(value, "");
+/* =========================================================
+   ROUTE SIGNALS
+========================================================= */
 
+function pushPathSignal(signals, label, value, origin = "explicit") {
+  const text = localSafeText(value, "");
   if (!text) return;
 
   signals.push({
     type: "path",
+    origin,
     label,
     value: text,
     canonical: getCleanCanonicalPath(text),
@@ -531,17 +508,21 @@ function pushPathSignal(signals, label, value) {
   });
 }
 
-function pushViewSignal(signals, label, value) {
+function pushViewSignal(signals, label, value, origin = "explicit") {
   const text = localSafeText(value, "");
-
   if (!text) return;
 
-  const normalized = text.toLowerCase();
+  const normalized = text
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-")
+    .trim();
 
   signals.push({
     type: "view",
+    origin,
     label,
     value: normalized,
+    canonical: normalized,
     isCuenta:
       normalized === "cuenta" ||
       normalized === "cuentaview" ||
@@ -552,70 +533,139 @@ function pushViewSignal(signals, label, value) {
   });
 }
 
-function collectRouteSignalsFromObject(signals, value, label = "arg") {
-  if (!isObject(value) || isNodeLike(value)) {
-    return;
-  }
+function collectRouteSignalsFromObject(signals, value, label = "arg", origin = "explicit", depth = 0) {
+  if (!isObject(value) || isNodeLike(value) || depth > 2) return;
 
-  pushViewSignal(signals, `${label}.viewKey`, value.viewKey);
-  pushViewSignal(signals, `${label}.route.viewKey`, value.route?.viewKey);
+  pushViewSignal(signals, `${label}.viewKey`, value.viewKey, origin);
+  pushViewSignal(signals, `${label}.route.viewKey`, value.route?.viewKey, origin);
 
-  pushViewSignal(signals, `${label}.viewName`, value.viewName);
-  pushViewSignal(signals, `${label}.route.viewName`, value.route?.viewName);
+  pushViewSignal(signals, `${label}.viewName`, value.viewName, origin);
+  pushViewSignal(signals, `${label}.route.viewName`, value.route?.viewName, origin);
 
-  pushViewSignal(signals, `${label}.name`, value.name);
-  pushViewSignal(signals, `${label}.route.name`, value.route?.name);
+  pushViewSignal(signals, `${label}.name`, value.name, origin);
+  pushViewSignal(signals, `${label}.route.name`, value.route?.name, origin);
 
-  pushPathSignal(signals, `${label}.canonicalPath`, value.canonicalPath);
-  pushPathSignal(signals, `${label}.routePath`, value.routePath);
-  pushPathSignal(signals, `${label}.route.path`, value.route?.path);
-  pushPathSignal(signals, `${label}.publicPath`, value.publicPath);
-  pushPathSignal(signals, `${label}.requestedPath`, value.requestedPath);
-  pushPathSignal(signals, `${label}.path`, value.path);
-  pushPathSignal(signals, `${label}.href`, value.href);
-  pushPathSignal(signals, `${label}.url`, value.url);
+  pushPathSignal(signals, `${label}.canonicalPath`, value.canonicalPath, origin);
+  pushPathSignal(signals, `${label}.routePath`, value.routePath, origin);
+  pushPathSignal(signals, `${label}.route.path`, value.route?.path, origin);
+  pushPathSignal(signals, `${label}.publicPath`, value.publicPath, origin);
+  pushPathSignal(signals, `${label}.requestedPath`, value.requestedPath, origin);
+  pushPathSignal(signals, `${label}.path`, value.path, origin);
+  pushPathSignal(signals, `${label}.href`, value.href, origin);
+  pushPathSignal(signals, `${label}.url`, value.url, origin);
 
-  collectRouteSignalsFromObject(signals, value.options, `${label}.options`);
-  collectRouteSignalsFromObject(signals, value.payload, `${label}.payload`);
-  collectRouteSignalsFromObject(signals, value.detail, `${label}.detail`);
+  collectRouteSignalsFromObject(signals, value.options, `${label}.options`, origin, depth + 1);
+  collectRouteSignalsFromObject(signals, value.payload, `${label}.payload`, origin, depth + 1);
+  collectRouteSignalsFromObject(signals, value.detail, `${label}.detail`, origin, depth + 1);
+  collectRouteSignalsFromObject(signals, value.route, `${label}.route`, origin, depth + 1);
 }
 
 function collectRouteSignals(args = []) {
   const signals = [];
-
   const list = Array.isArray(args) ? args : [];
 
   list.forEach((arg, index) => {
-    collectRouteSignalsFromObject(signals, arg, `args[${index}]`);
+    collectRouteSignalsFromObject(signals, arg, `args[${index}]`, "explicit");
   });
 
-  const statePath = getAppStatePath();
-
-  if (statePath) {
-    pushPathSignal(signals, "AppCore.state.route", statePath);
-  }
-
-  const publicPath = getAppPublicPath();
-
-  if (publicPath) {
-    pushPathSignal(signals, "AppCore.state.publicPath", publicPath);
-  }
-
-  const browserPath = getBrowserPath();
-
-  if (browserPath) {
-    pushPathSignal(signals, "window.location", browserPath);
-  }
+  pushPathSignal(signals, "AppCore.state.route", getAppStatePath(), "ambient");
+  pushPathSignal(signals, "AppCore.state.publicPath", getAppPublicPath(), "ambient");
+  pushPathSignal(signals, "window.location", getBrowserPath(), "ambient");
 
   return signals;
 }
 
+function getExplicitSignals(signals = []) {
+  return signals.filter((signal) => signal.origin === "explicit");
+}
+
+function getAmbientSignals(signals = []) {
+  return signals.filter((signal) => signal.origin === "ambient");
+}
+
 function getBlockingSignal(signals = []) {
-  return signals.find((signal) => signal.isCuenta === false) || null;
+  const explicit = getExplicitSignals(signals);
+  const ambient = getAmbientSignals(signals);
+
+  const explicitPositive = explicit.find((signal) => signal.isCuenta === true);
+  if (explicitPositive) return null;
+
+  const explicitNegative = explicit.find((signal) => signal.isCuenta === false);
+  if (explicitNegative) return explicitNegative;
+
+  const ambientPositive = ambient.find((signal) => signal.isCuenta === true);
+  if (ambientPositive) return null;
+
+  if (ambient.length > 0) {
+    return ambient.find((signal) => signal.isCuenta === false) || null;
+  }
+
+  return null;
 }
 
 function hasPositiveCuentaSignal(signals = []) {
   return signals.some((signal) => signal.isCuenta === true);
+}
+
+function evaluateCuentaRoute(args = []) {
+  const signals = collectRouteSignals(args);
+  const explicit = getExplicitSignals(signals);
+  const ambient = getAmbientSignals(signals);
+
+  const explicitPositive = explicit.find((signal) => signal.isCuenta === true);
+  const explicitNegative = explicit.find((signal) => signal.isCuenta === false);
+
+  if (explicitPositive) {
+    return {
+      allowed: true,
+      reason: "explicit-positive",
+      signals,
+      blockingSignal: null,
+      positiveSignal: explicitPositive,
+    };
+  }
+
+  if (explicitNegative) {
+    return {
+      allowed: false,
+      reason: "explicit-negative",
+      signals,
+      blockingSignal: explicitNegative,
+      positiveSignal: null,
+    };
+  }
+
+  const ambientPositive = ambient.find((signal) => signal.isCuenta === true);
+
+  if (ambientPositive) {
+    return {
+      allowed: true,
+      reason: "ambient-positive",
+      signals,
+      blockingSignal: null,
+      positiveSignal: ambientPositive,
+    };
+  }
+
+  if (ambient.length > 0) {
+    const blockingSignal = ambient.find((signal) => signal.isCuenta === false) || null;
+
+    return {
+      allowed: false,
+      reason: "ambient-negative",
+      signals,
+      blockingSignal,
+      positiveSignal: null,
+    };
+  }
+
+  return {
+    allowed: true,
+    reason: "no-route-signal",
+    signals,
+    blockingSignal: null,
+    positiveSignal: null,
+  };
 }
 
 function shouldAllowCuentaMethod(method = "", args = []) {
@@ -631,45 +681,43 @@ function shouldAllowCuentaMethod(method = "", args = []) {
     return true;
   }
 
-  const signals = collectRouteSignals(args);
-  const blockingSignal = getBlockingSignal(signals);
-
-  if (blockingSignal) {
-    return false;
-  }
-
-  if (hasPositiveCuentaSignal(signals)) {
-    return true;
-  }
-
-  const browserPath = getBrowserPath();
-
-  if (browserPath) {
-    return isCuentaPath(browserPath);
-  }
-
-  return true;
+  return evaluateCuentaRoute(args).allowed;
 }
 
 function logBlockedCuentaMethod(method = "", args = []) {
-  const signals = collectRouteSignals(args);
+  const evaluation = evaluateCuentaRoute(args);
 
   safeWarn(`CuentaView.${method} bloqueado: ruta actual no es Cuenta.`, {
     method,
+    reason: evaluation.reason,
     browserPath: getBrowserPath(),
     browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
     appRoute: getAppStatePath(),
     appPublicPath: getAppPublicPath(),
-    signals,
-    blockingSignal: getBlockingSignal(signals),
+    signals: evaluation.signals,
+    blockingSignal: evaluation.blockingSignal,
   });
 }
 
 function getDefaultFallback(method = "") {
   switch (method) {
+    case "init":
+    case "mount":
+    case "bootstrap":
+    case "reload":
+    case "refresh":
+    case "loadCuenta":
+      return CuentaView;
+
+    case "render":
+      return null;
+
     case "destroy":
     case "unmount":
     case "dispose":
+    case "closeModal":
+    case "closeCuentaModal":
+    case "close":
       return true;
 
     case "saveCuenta":
@@ -693,8 +741,6 @@ function getDefaultFallback(method = "") {
     case "savePassword":
     case "openModal":
     case "openCuentaModal":
-    case "closeModal":
-    case "closeCuentaModal":
       return false;
 
     case "getItem":
@@ -705,6 +751,7 @@ function getDefaultFallback(method = "") {
     case "getState":
     case "getSnapshot":
     case "getCuentaSnapshot":
+    case "getModuleSnapshot":
       return null;
 
     default:
@@ -787,17 +834,9 @@ function createGuardedCuentaViewBridge(view) {
 
   return new Proxy(source, {
     get(target, prop, receiver) {
-      if (prop === "__raw") {
-        return target;
-      }
-
-      if (prop === "__source") {
-        return CUENTA_INDEX_SOURCE;
-      }
-
-      if (prop === "__module") {
-        return CUENTA_MODULE_NAME;
-      }
+      if (prop === "__raw") return target;
+      if (prop === "__source") return CUENTA_INDEX_SOURCE;
+      if (prop === "__module") return CUENTA_MODULE_NAME;
 
       const value = Reflect.get(target, prop, receiver);
 
@@ -814,7 +853,6 @@ function createGuardedCuentaViewBridge(view) {
       const wrapped = function guardedCuentaViewMethod(...args) {
         if (!shouldAllowCuentaMethod(method, args)) {
           logBlockedCuentaMethod(method, args);
-
           return getDefaultFallback(method);
         }
 
@@ -831,12 +869,10 @@ function createGuardedCuentaViewBridge(view) {
           name: {
             value: `guardedCuenta_${method}`,
           },
-
           routeViewKey: {
             value: "cuenta",
             enumerable: true,
           },
-
           routeViewName: {
             value: CUENTA_VIEW_NAME,
             enumerable: true,
@@ -880,8 +916,6 @@ export { CuentaView as View };
 export const view = CuentaView;
 export const component = CuentaView;
 export const page = CuentaView;
-
-export default CuentaView;
 
 /* =========================================================
    VIEW API
@@ -966,7 +1000,7 @@ export const dispose = destroy;
 export const bootstrap = init;
 
 /* =========================================================
-   ACTIONS API · VIEW FIRST + ALIAS FALLBACK
+   ACTIONS API
 ========================================================= */
 
 export const loadCuenta = (...args) =>
@@ -1114,8 +1148,7 @@ export const closeModal = (...args) =>
       [RawCuentaView, "close"],
     ],
     args,
-    false,
-    { guarded: true }
+    true
   );
 
 export const closeCuentaModal = (...args) =>
@@ -1171,24 +1204,25 @@ export const canRenderCuentaNow = (...args) =>
   shouldAllowCuentaMethod("render", args);
 
 export const getCuentaRouteDebug = (...args) => {
-  const signals = collectRouteSignals(args);
+  const evaluation = evaluateCuentaRoute(args);
 
   return {
     source: CUENTA_INDEX_SOURCE,
-
-    allowed: shouldAllowCuentaMethod("render", args),
+    allowed: evaluation.allowed,
+    reason: evaluation.reason,
 
     browserPath: getBrowserPath(),
-
     browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
 
     appRoute: getAppStatePath(),
+    appRouteCanonicalPath: getCleanCanonicalPath(getAppStatePath() || "/"),
 
     appPublicPath: getAppPublicPath(),
+    appPublicCanonicalPath: getCleanCanonicalPath(getAppPublicPath() || "/"),
 
-    signals,
-
-    blockingSignal: getBlockingSignal(signals),
+    signals: evaluation.signals,
+    positiveSignal: evaluation.positiveSignal,
+    blockingSignal: evaluation.blockingSignal,
   };
 };
 
@@ -1207,33 +1241,20 @@ export const getSnapshot = (...args) => {
     ...(isObject(base) ? base : {}),
 
     module: CUENTA_MODULE_NAME,
-
     viewName: CUENTA_VIEW_NAME,
-
     version: CUENTA_MODULE_VERSION,
-
     source: CUENTA_INDEX_SOURCE,
 
     initialized: isInitialized(),
-
     destroyed: isDestroyed(),
-
     mounted: isMounted(),
 
     item: getItem(),
 
     hasView: Boolean(CuentaView),
-
     hasRawView: Boolean(RawCuentaView),
 
-    browserPath: getBrowserPath(),
-
-    browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
-
-    appRoute: getAppStatePath(),
-
-    appPublicPath: getAppPublicPath(),
-
+    route: getCuentaRouteDebug(...args),
     cuentaAllowedNow: canRenderCuentaNow(...args),
   };
 };
@@ -1279,29 +1300,37 @@ export const truncateText = (...args) =>
   localTruncate(...args);
 
 /* =========================================================
-   FLAGS
+   FLAGS · CORREGIDOS
 ========================================================= */
 
+function readViewBooleanFlag(propName = "", methodName = "") {
+  try {
+    if (methodName && typeof RawCuentaView?.[methodName] === "function") {
+      return Boolean(RawCuentaView[methodName]());
+    }
+  } catch {}
+
+  try {
+    const value = RawCuentaView?.[propName];
+
+    if (typeof value === "function") {
+      return Boolean(value.call(RawCuentaView));
+    }
+
+    return Boolean(value);
+  } catch {
+    return false;
+  }
+}
+
 export const isInitialized = () =>
-  Boolean(
-    RawCuentaView?.initialized ||
-      RawCuentaView?.isInitialized ||
-      safeCall(RawCuentaView, "isInitialized", [], false)
-  );
+  readViewBooleanFlag("initialized", "isInitialized");
 
 export const isDestroyed = () =>
-  Boolean(
-    RawCuentaView?.destroyed ||
-      RawCuentaView?.isDestroyed ||
-      safeCall(RawCuentaView, "isDestroyed", [], false)
-  );
+  readViewBooleanFlag("destroyed", "isDestroyed");
 
 export const isMounted = () =>
-  Boolean(
-    RawCuentaView?.mounted ||
-      RawCuentaView?.isMounted ||
-      safeCall(RawCuentaView, "isMounted", [], false)
-  );
+  readViewBooleanFlag("mounted", "isMounted");
 
 /* =========================================================
    PUBLIC API OBJECT
@@ -1309,19 +1338,14 @@ export const isMounted = () =>
 
 export const CuentaModule = Object.freeze({
   name: CUENTA_MODULE_NAME,
-
   viewName: CUENTA_VIEW_NAME,
-
   version: CUENTA_MODULE_VERSION,
-
   source: CUENTA_INDEX_SOURCE,
 
   View: CuentaView,
-
   RawView: RawCuentaView,
 
   CuentaView,
-
   RawCuentaView,
 
   view,
@@ -1410,33 +1434,19 @@ export function registerGlobalBridge() {
   const root = getGlobalRoot();
 
   try {
-    const previous =
+    const previousOnionCuenta =
       root.OnionCuenta && typeof root.OnionCuenta === "object"
         ? root.OnionCuenta
         : {};
 
     root.OnionCuenta = {
-      ...previous,
+      ...previousOnionCuenta,
       ...CuentaModule,
     };
 
-    root.OnionCuentaView =
-      root.OnionCuentaView && typeof root.OnionCuentaView === "object"
-        ? {
-            ...root.OnionCuentaView,
-            ...CuentaModule,
-            view: CuentaView,
-          }
-        : CuentaView;
-
-    root.CuentaView =
-      root.CuentaView && typeof root.CuentaView === "object"
-        ? {
-            ...root.CuentaView,
-            ...CuentaModule,
-            view: CuentaView,
-          }
-        : CuentaView;
+    root.CuentaView = CuentaView;
+    root.OnionCuentaView = CuentaView;
+    root.CuentaModule = CuentaModule;
   } catch (error) {
     safeWarn("No se pudo registrar bridge global.", error);
   }
@@ -1452,6 +1462,18 @@ export function registerGlobalBridge() {
       appCore.modules.Cuenta = CuentaModule;
       appCore.modules.CuentaView = CuentaModule;
       appCore.modules.OnionCuenta = CuentaModule;
+
+      if (typeof appCore.modules.set === "function") {
+        try { appCore.modules.set("Cuenta", CuentaModule); } catch {}
+        try { appCore.modules.set("CuentaView", CuentaModule); } catch {}
+        try { appCore.modules.set("OnionCuenta", CuentaModule); } catch {}
+      }
+
+      if (typeof appCore.modules.register === "function") {
+        try { appCore.modules.register("Cuenta", CuentaModule); } catch {}
+        try { appCore.modules.register("CuentaView", CuentaModule); } catch {}
+        try { appCore.modules.register("OnionCuenta", CuentaModule); } catch {}
+      }
     }
   } catch (error) {
     safeWarn("No se pudo registrar bridge en AppCore.modules.", error);
@@ -1459,15 +1481,12 @@ export function registerGlobalBridge() {
 
   safeEmit("cuenta:index:ready", {
     source: CUENTA_INDEX_SOURCE,
+    version: CUENTA_MODULE_VERSION,
 
     hasView: Boolean(CuentaView),
-
     hasRawView: Boolean(RawCuentaView),
 
-    browserPath: getBrowserPath(),
-
-    browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
-
+    route: getCuentaRouteDebug(),
     allowedNow: canRenderCuentaNow(),
   });
 
@@ -1481,3 +1500,5 @@ export function registerGlobalBridge() {
 export const bridge = registerGlobalBridge();
 
 export const ready = true;
+
+export default CuentaView;

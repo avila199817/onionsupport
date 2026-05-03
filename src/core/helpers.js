@@ -12,14 +12,21 @@
    - redacción segura de tokens para logs/snapshots
    - soporte hash-router y hashbang
 
-   HARDENING PRO:
+   HARDENING EXTREMO:
    - sanitize estricto de username
    - paths robustos con query/hash
    - canonical consistente SIN query/hash
    - public path consistente CON query/hash
+   - soporte hash-router real: #/ruta y #!/ruta
    - helpers seguros ante inputs raros
    - preserve contexto público/canónico
-   - server/browser safe
+   - API base robusta
+   - detección public API compatible con /api prefix
+   - normalización de usuario backend heterogéneo
+   - avatar robusto desde payload /me
+   - AbortController server/browser safe
+   - headers normalizados sin valores vacíos
+   - redacción de JWT, bearer y query tokens
    - cero throws accidentales
 ========================================================= */
 
@@ -47,12 +54,19 @@ const TOKEN_PARAM_NAMES =
     "access_token",
     "refresh_token",
     "id_token",
+    "jwt",
+    "bearer",
+    "auth",
+    "authorization",
   ]);
 
 const TECHNICAL_TOKEN_PATHS =
   Object.freeze([
     "/activate-account",
     "/reset-password/confirm",
+    "/password/reset",
+    "/auth/activate",
+    "/auth/reset",
   ]);
 
 const SAFE_USERNAME_MAX =
@@ -60,6 +74,25 @@ const SAFE_USERNAME_MAX =
 
 const SAFE_SLUG_MAX =
   96;
+
+const BAD_TOKEN_VALUES =
+  Object.freeze([
+    "",
+    "null",
+    "undefined",
+    "false",
+    "true",
+    "nan",
+    "none",
+    "empty",
+    "[object object]",
+  ]);
+
+const JWT_RE =
+  /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g;
+
+const BEARER_RE =
+  /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi;
 
 /* =========================================================
    BASE
@@ -123,8 +156,16 @@ export function safeBool(value, fallback = false) {
   if (value === false) return false;
   if (value === "true") return true;
   if (value === "false") return false;
+  if (value === 1) return true;
+  if (value === 0) return false;
 
   return Boolean(fallback);
+}
+
+export function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 export function isDomScope(scope) {
@@ -175,7 +216,8 @@ export function buildStorageKey(key = "") {
 
   const prefix =
     safeText(
-      config?.storagePrefix,
+      config?.storagePrefix ||
+        config?.appKey,
       "onion"
     );
 
@@ -267,6 +309,11 @@ export function cloneError(error = null) {
 
       data:
         safeClone(error.data, null),
+
+      cause:
+        error.cause
+          ? safeText(error.cause?.message || error.cause, "")
+          : null,
     };
   }
 
@@ -290,6 +337,11 @@ export function cloneError(error = null) {
    TOKEN REDACTION
 ========================================================= */
 
+function escapeRegExp(value = "") {
+  return String(value)
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export function redactTokenInText(value = "") {
   let output =
     safeText(value, "");
@@ -301,7 +353,7 @@ export function redactTokenInText(value = "") {
   for (const name of TOKEN_PARAM_NAMES) {
     try {
       output = output.replace(
-        new RegExp(`([?&#]${name}=)([^&#\\s]+)`, "gi"),
+        new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi"),
         "$1***"
       );
     } catch {}
@@ -310,7 +362,7 @@ export function redactTokenInText(value = "") {
   for (const path of TECHNICAL_TOKEN_PATHS) {
     try {
       const escapedPath =
-        path.replace(/\//g, "\\/");
+        escapeRegExp(path);
 
       output = output.replace(
         new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
@@ -321,8 +373,15 @@ export function redactTokenInText(value = "") {
 
   try {
     output = output.replace(
-      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+      BEARER_RE,
       "$1***"
+    );
+  } catch {}
+
+  try {
+    output = output.replace(
+      JWT_RE,
+      "***"
     );
   } catch {}
 
@@ -342,6 +401,12 @@ function getBaseOrigin() {
   }
 
   return LOCAL_ORIGIN;
+}
+
+function isAbsoluteUrl(value = "") {
+  return /^[a-z][a-z\d+.-]*:\/\//i.test(
+    safeText(value, "")
+  );
 }
 
 function isHashRouterPath(value = "") {
@@ -463,9 +528,30 @@ export function getSearchAndHash(path = DEFAULT_ROUTE) {
 ========================================================= */
 
 export function sanitizeUsername(value = "") {
-  return String(value || "")
-    .trim()
-    .replace(/^@+/, "")
+  let raw =
+    String(value || "")
+      .trim();
+
+  if (!raw) {
+    return "";
+  }
+
+  raw =
+    raw.replace(/^@+/, "");
+
+  /*
+    Si llega un email como username, usamos la parte local.
+    Evita rutas públicas tipo /@correo.comdominio.
+  */
+  if (
+    raw.includes("@") &&
+    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(raw)
+  ) {
+    raw =
+      raw.split("@")[0] || raw;
+  }
+
+  return raw
     .replace(/\s+/g, "")
     .replace(/[^a-zA-Z0-9._-]/g, "")
     .replace(/^[._-]+|[._-]+$/g, "")
@@ -559,6 +645,11 @@ export function normalizePath(path = DEFAULT_ROUTE) {
     return DEFAULT_ROUTE;
   }
 
+  /*
+    Hash-router directo:
+    "#/tickets" -> "/tickets"
+    "#!/tickets" -> "/tickets"
+  */
   if (isHashRouterPath(raw)) {
     return normalizePath(
       normalizeHashRouterPath(raw)
@@ -566,7 +657,7 @@ export function normalizePath(path = DEFAULT_ROUTE) {
   }
 
   try {
-    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
+    if (isAbsoluteUrl(raw)) {
       const url =
         new URL(raw, getBaseOrigin());
 
@@ -594,6 +685,20 @@ export function normalizePath(path = DEFAULT_ROUTE) {
     search,
     hash,
   } = splitPathParts(raw);
+
+  /*
+    Hash-router combinado:
+    "/index.html#/tickets" -> "/tickets"
+    "/app?x=1#/tickets?y=2" -> "/tickets?y=2"
+  */
+  if (
+    hash &&
+    isHashRouterPath(hash)
+  ) {
+    return normalizePath(
+      normalizeHashRouterPath(hash)
+    );
+  }
 
   const cleanPathname =
     normalizePathnameOnly(pathname);
@@ -659,13 +764,19 @@ export function normalizePublicPath(path = DEFAULT_ROUTE) {
 ========================================================= */
 
 export function joinUrl(base = "", path = "") {
+  const rawPath =
+    String(path || "")
+      .trim();
+
+  if (isAbsoluteUrl(rawPath)) {
+    return rawPath;
+  }
+
   const cleanBase =
     normalizeApiBase(base);
 
   const cleanPath =
-    String(path || "")
-      .trim()
-      .replace(/^\/+/, "");
+    rawPath.replace(/^\/+/, "");
 
   if (!cleanPath) {
     return cleanBase;
@@ -678,43 +789,13 @@ export function joinUrl(base = "", path = "") {
   return `${cleanBase}/${cleanPath}`;
 }
 
-export function buildUrl(path = "", query = null) {
-  const rawPath =
-    String(path || "").trim();
-
-  const apiBase =
-    normalizeApiBase(
-      config?.apiBase || ""
-    );
-
-  const baseUrl =
-    /^[a-z][a-z\d+.-]*:\/\//i.test(rawPath)
-      ? rawPath
-      : joinUrl(
-          apiBase,
-          rawPath
-        );
-
+function appendQueryToUrl(baseUrl = "", query = null) {
   if (!query) {
     return baseUrl;
   }
 
-  const origin =
-    getBaseOrigin();
-
-  let url;
-
-  try {
-    url =
-      new URL(
-        baseUrl,
-        origin
-      );
-  } catch {
-    return baseUrl;
-  }
-
   const queryEntries =
+    typeof URLSearchParams !== "undefined" &&
     query instanceof URLSearchParams
       ? Array.from(query.entries())
       : Array.isArray(query)
@@ -724,6 +805,18 @@ export function buildUrl(path = "", query = null) {
           : [];
 
   if (!queryEntries.length) {
+    return baseUrl;
+  }
+
+  let url;
+
+  try {
+    url =
+      new URL(
+        baseUrl,
+        getBaseOrigin()
+      );
+  } catch {
     return baseUrl;
   }
 
@@ -787,18 +880,59 @@ export function buildUrl(path = "", query = null) {
   return url.toString();
 }
 
+export function buildUrl(path = "", query = null) {
+  const rawPath =
+    String(path || "").trim();
+
+  const apiBase =
+    normalizeApiBase(
+      config?.apiBase || ""
+    );
+
+  const baseUrl =
+    isAbsoluteUrl(rawPath)
+      ? rawPath
+      : joinUrl(
+          apiBase,
+          rawPath
+        );
+
+  return appendQueryToUrl(
+    baseUrl,
+    query
+  );
+}
+
+/* =========================================================
+   TOKEN / PUBLIC API
+========================================================= */
+
+export function stripBearerPrefix(token = "") {
+  return safeText(token, "")
+    .replace(/^Bearer\s+/i, "")
+    .trim();
+}
+
 export function hasValidToken(token = null) {
   const value =
-    safeText(token, "");
+    stripBearerPrefix(token);
 
   if (!value) {
     return false;
   }
 
+  const lower =
+    value.toLowerCase();
+
+  if (BAD_TOKEN_VALUES.includes(lower)) {
+    return false;
+  }
+
   if (
-    value === "null" ||
-    value === "undefined" ||
-    value === "false"
+    value.includes(" ") ||
+    value.includes("\n") ||
+    value.includes("\r") ||
+    value.includes("\t")
   ) {
     return false;
   }
@@ -806,24 +940,82 @@ export function hasValidToken(token = null) {
   return true;
 }
 
+function getApiBasePath() {
+  const apiBase =
+    normalizeApiBase(
+      config?.apiBase || ""
+    );
+
+  if (!apiBase) {
+    return "";
+  }
+
+  try {
+    if (isAbsoluteUrl(apiBase)) {
+      return normalizeCanonicalPath(
+        new URL(apiBase, getBaseOrigin()).pathname || ""
+      );
+    }
+
+    return normalizeCanonicalPath(
+      apiBase
+    );
+  } catch {
+    return "";
+  }
+}
+
+function stripApiBasePrefix(path = DEFAULT_ROUTE) {
+  const normalized =
+    normalizeCanonicalPath(path);
+
+  const apiBasePath =
+    getApiBasePath();
+
+  if (
+    !apiBasePath ||
+    apiBasePath === DEFAULT_ROUTE
+  ) {
+    return normalized;
+  }
+
+  if (normalized === apiBasePath) {
+    return DEFAULT_ROUTE;
+  }
+
+  if (normalized.startsWith(`${apiBasePath}/`)) {
+    return normalizeCanonicalPath(
+      normalized.slice(apiBasePath.length) || DEFAULT_ROUTE
+    );
+  }
+
+  return normalized;
+}
+
 export function isPublicApiPath(path = "") {
   const normalized =
-    stripSearchAndHash(
-      normalizeCanonicalPath(path)
-    );
+    normalizeCanonicalPath(path);
+
+  const withoutApiBase =
+    stripApiBasePrefix(normalized);
 
   const list =
     config?.auth?.publicApiPaths || [];
 
   return list.some((publicPath) => {
     const current =
-      stripSearchAndHash(
-        normalizeCanonicalPath(publicPath)
-      );
+      normalizeCanonicalPath(publicPath);
+
+    const currentWithoutApiBase =
+      stripApiBasePrefix(current);
 
     return (
       normalized === current ||
-      normalized.startsWith(`${current}/`)
+      normalized.startsWith(`${current}/`) ||
+      withoutApiBase === current ||
+      withoutApiBase.startsWith(`${current}/`) ||
+      normalized === currentWithoutApiBase ||
+      normalized.startsWith(`${currentWithoutApiBase}/`)
     );
   });
 }
@@ -850,6 +1042,112 @@ function normalizeRole(value = "") {
     .toLowerCase();
 }
 
+function normalizeActive(user = {}) {
+  const candidate =
+    user.active ??
+    user.is_active ??
+    user.isActive ??
+    user.enabled ??
+    user.isEnabled ??
+    user.disabled ??
+    user.isDisabled;
+
+  if (
+    user.disabled === true ||
+    user.isDisabled === true
+  ) {
+    return false;
+  }
+
+  if (candidate === undefined || candidate === null) {
+    return true;
+  }
+
+  if (
+    candidate === "0" ||
+    candidate === 0 ||
+    candidate === "false" ||
+    candidate === false
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function resolveAvatarCandidate(user = {}) {
+  const profile =
+    isPlainObject(user.profile)
+      ? user.profile
+      : {};
+
+  const raw =
+    isPlainObject(user.raw)
+      ? user.raw
+      : {};
+
+  const rawProfile =
+    isPlainObject(raw.profile)
+      ? raw.profile
+      : {};
+
+  return firstNonEmpty(
+    user.avatarUrl,
+    user.avatar_url,
+    user.avatar,
+    user.photo,
+    user.photoUrl,
+    user.photo_url,
+    user.image,
+    user.imageUrl,
+    user.image_url,
+    user.profileImage,
+    user.profile_image,
+    user.picture,
+    user.pictureUrl,
+    user.picture_url,
+
+    profile.avatarUrl,
+    profile.avatar_url,
+    profile.avatar,
+    profile.photo,
+    profile.photoUrl,
+    profile.photo_url,
+    profile.image,
+    profile.imageUrl,
+    profile.image_url,
+    profile.picture,
+    profile.pictureUrl,
+    profile.picture_url,
+
+    raw.avatarUrl,
+    raw.avatar_url,
+    raw.avatar,
+    raw.photo,
+    raw.photoUrl,
+    raw.photo_url,
+    raw.image,
+    raw.imageUrl,
+    raw.image_url,
+    raw.picture,
+    raw.pictureUrl,
+    raw.picture_url,
+
+    rawProfile.avatarUrl,
+    rawProfile.avatar_url,
+    rawProfile.avatar,
+    rawProfile.photo,
+    rawProfile.photoUrl,
+    rawProfile.photo_url,
+    rawProfile.image,
+    rawProfile.imageUrl,
+    rawProfile.image_url,
+    rawProfile.picture,
+    rawProfile.pictureUrl,
+    rawProfile.picture_url
+  );
+}
+
 export function normalizeUser(user = null) {
   if (
     !user ||
@@ -858,13 +1156,37 @@ export function normalizeUser(user = null) {
     return null;
   }
 
+  const profile =
+    isPlainObject(user.profile)
+      ? user.profile
+      : {};
+
+  const raw =
+    isPlainObject(user.raw)
+      ? user.raw
+      : {};
+
   const id =
     user.id ??
     user.userId ??
     user.user_id ??
     user.uuid ??
     user._id ??
+    profile.id ??
+    profile.userId ??
+    raw.id ??
+    raw.userId ??
     null;
+
+  const email =
+    firstNonEmpty(
+      user.email,
+      user.mail,
+      profile.email,
+      profile.mail,
+      raw.email,
+      raw.mail
+    );
 
   const rawName =
     firstNonEmpty(
@@ -874,8 +1196,20 @@ export function normalizeUser(user = null) {
       user.fullName,
       user.display_name,
       user.displayName,
+      profile.name,
+      profile.nombre,
+      profile.full_name,
+      profile.fullName,
+      profile.display_name,
+      profile.displayName,
+      raw.name,
+      raw.nombre,
+      raw.full_name,
+      raw.fullName,
+      raw.display_name,
+      raw.displayName,
       user.username,
-      user.email,
+      email,
       "Usuario"
     );
 
@@ -888,7 +1222,19 @@ export function normalizeUser(user = null) {
         user.alias,
         user.login,
         user.slug,
-        user.email
+        profile.username,
+        profile.userName,
+        profile.nick,
+        profile.alias,
+        profile.login,
+        profile.slug,
+        raw.username,
+        raw.userName,
+        raw.nick,
+        raw.alias,
+        raw.login,
+        raw.slug,
+        email
       )
     );
 
@@ -896,6 +1242,8 @@ export function normalizeUser(user = null) {
     sanitizeUsername(
       firstNonEmpty(
         user.slug,
+        profile.slug,
+        raw.slug,
         username,
         slugify(rawName || "usuario")
       )
@@ -908,7 +1256,11 @@ export function normalizeUser(user = null) {
         user.rol,
         user.type,
         user.user_type,
-        user.userType
+        user.userType,
+        profile.role,
+        profile.rol,
+        raw.role,
+        raw.rol
       )
     );
 
@@ -916,25 +1268,17 @@ export function normalizeUser(user = null) {
     user.hasAvatar ??
     user.has_avatar ??
     user.avatarEnabled ??
-    user.avatar_enabled;
+    user.avatar_enabled ??
+    profile.hasAvatar ??
+    profile.has_avatar ??
+    raw.hasAvatar ??
+    raw.has_avatar;
 
   const avatar =
-    firstNonEmpty(
-      user.avatar,
-      user.avatarUrl,
-      user.avatar_url,
-      user.photo,
-      user.photoUrl,
-      user.photo_url,
-      user.image,
-      user.imageUrl,
-      user.image_url,
-      user.profileImage,
-      user.profile_image,
-      user.picture,
-      user.pictureUrl,
-      user.picture_url
-    );
+    resolveAvatarCandidate(user);
+
+  const active =
+    normalizeActive(user);
 
   return {
     ...user,
@@ -943,6 +1287,7 @@ export function normalizeUser(user = null) {
 
     userId:
       user.userId ??
+      user.user_id ??
       id,
 
     username,
@@ -955,14 +1300,14 @@ export function normalizeUser(user = null) {
       firstNonEmpty(
         user.displayName,
         user.display_name,
+        profile.displayName,
+        profile.display_name,
+        raw.displayName,
+        raw.display_name,
         rawName
       ),
 
-    email:
-      firstNonEmpty(
-        user.email,
-        user.mail
-      ),
+    email,
 
     role,
 
@@ -984,13 +1329,13 @@ export function normalizeUser(user = null) {
     avatarUpdatedAt:
       user.avatarUpdatedAt ??
       user.avatar_updated_at ??
+      profile.avatarUpdatedAt ??
+      profile.avatar_updated_at ??
+      raw.avatarUpdatedAt ??
+      raw.avatar_updated_at ??
       null,
 
-    active:
-      user.active ??
-      user.is_active ??
-      user.isActive ??
-      true,
+    active,
   };
 }
 
@@ -1000,6 +1345,14 @@ export function getUserDisplayName(user = null) {
     user?.display_name,
     user?.name,
     user?.nombre,
+    user?.fullName,
+    user?.full_name,
+    user?.profile?.displayName,
+    user?.profile?.display_name,
+    user?.profile?.name,
+    user?.raw?.displayName,
+    user?.raw?.display_name,
+    user?.raw?.name,
     user?.username,
     user?.email,
     "Usuario"
@@ -1015,6 +1368,12 @@ export function getUserUsername(user = null) {
       user?.alias,
       user?.login,
       user?.slug,
+      user?.profile?.username,
+      user?.profile?.userName,
+      user?.profile?.slug,
+      user?.raw?.username,
+      user?.raw?.userName,
+      user?.raw?.slug,
       user?.email
     )
   );
@@ -1023,28 +1382,17 @@ export function getUserUsername(user = null) {
 export function getUserAvatarUrl(user = null) {
   const hasAvatar =
     user?.hasAvatar ??
-    user?.has_avatar;
+    user?.has_avatar ??
+    user?.profile?.hasAvatar ??
+    user?.profile?.has_avatar ??
+    user?.raw?.hasAvatar ??
+    user?.raw?.has_avatar;
 
   if (hasAvatar === false) {
     return "";
   }
 
-  return firstNonEmpty(
-    user?.avatarUrl,
-    user?.avatar_url,
-    user?.avatar,
-    user?.photo,
-    user?.photoUrl,
-    user?.photo_url,
-    user?.image,
-    user?.imageUrl,
-    user?.image_url,
-    user?.profileImage,
-    user?.profile_image,
-    user?.picture,
-    user?.pictureUrl,
-    user?.picture_url
-  );
+  return resolveAvatarCandidate(user || {});
 }
 
 export function getInitials(value = "") {
@@ -1075,8 +1423,15 @@ export function getCurrentLocationPath() {
     return DEFAULT_ROUTE;
   }
 
+  const hash =
+    window.location.hash || "";
+
+  if (isHashRouterPath(hash)) {
+    return normalizePath(hash);
+  }
+
   return normalizePath(
-    `${window.location.pathname || DEFAULT_ROUTE}${window.location.search || ""}${window.location.hash || ""}`
+    `${window.location.pathname || DEFAULT_ROUTE}${window.location.search || ""}${hash}`
   );
 }
 
@@ -1085,9 +1440,64 @@ export function getCurrentLocationCanonicalPath() {
     return DEFAULT_ROUTE;
   }
 
+  const hash =
+    window.location.hash || "";
+
+  if (isHashRouterPath(hash)) {
+    return normalizeCanonicalPath(hash);
+  }
+
   return normalizeCanonicalPath(
-    `${window.location.pathname || DEFAULT_ROUTE}${window.location.search || ""}${window.location.hash || ""}`
+    `${window.location.pathname || DEFAULT_ROUTE}${window.location.search || ""}${hash}`
   );
+}
+
+/* =========================================================
+   HREF SAFETY
+========================================================= */
+
+export function isHashOnlyHref(href = "") {
+  const value =
+    safeText(href, "");
+
+  return (
+    value.startsWith("#") &&
+    !isHashRouterPath(value)
+  );
+}
+
+export function isUnsafeHref(href = "") {
+  const value =
+    safeText(href, "");
+
+  if (!value) {
+    return true;
+  }
+
+  return /^(javascript|data|vbscript):/i.test(value);
+}
+
+export function isExternalHref(href = "") {
+  const value =
+    safeText(href, "");
+
+  if (!value || isUnsafeHref(value)) {
+    return false;
+  }
+
+  if (!isAbsoluteUrl(value)) {
+    return false;
+  }
+
+  if (!isBrowser()) {
+    return true;
+  }
+
+  try {
+    return new URL(value).origin !== window.location.origin;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -1098,7 +1508,7 @@ export async function runHookSeries(hooks = [], payload) {
   let current =
     payload;
 
-  for (const hook of hooks) {
+  for (const hook of safeArray(hooks)) {
     if (typeof hook !== "function") {
       continue;
     }
@@ -1137,6 +1547,22 @@ export function getThemeColor(theme = config?.defaultTheme) {
 ========================================================= */
 
 export function createAbortTimeout(ms = config?.requestTimeout) {
+  if (typeof AbortController === "undefined") {
+    return {
+      controller:
+        null,
+
+      timeoutId:
+        null,
+
+      signal:
+        null,
+
+      clear:
+        () => {},
+    };
+  }
+
   const controller =
     new AbortController();
 
@@ -1184,12 +1610,27 @@ export function createAbortTimeout(ms = config?.requestTimeout) {
 }
 
 export function normalizeHeaders(headers = {}) {
-  const source =
-    headers instanceof Headers
-      ? Array.from(headers.entries())
-      : Array.isArray(headers)
-        ? headers
-        : Object.entries(headers || {});
+  let source =
+    [];
+
+  try {
+    if (
+      typeof Headers !== "undefined" &&
+      headers instanceof Headers
+    ) {
+      source =
+        Array.from(headers.entries());
+    } else if (Array.isArray(headers)) {
+      source =
+        headers;
+    } else {
+      source =
+        Object.entries(headers || {});
+    }
+  } catch {
+    source =
+      [];
+  }
 
   return source.reduce((acc, [key, value]) => {
     const normalizedKey =
@@ -1214,7 +1655,7 @@ export function normalizeHeaders(headers = {}) {
 
 export function mergeAbortSignals(signals = []) {
   const validSignals =
-    signals.filter(Boolean);
+    safeArray(signals).filter(Boolean);
 
   if (!validSignals.length) {
     return null;
@@ -1222,6 +1663,10 @@ export function mergeAbortSignals(signals = []) {
 
   if (validSignals.length === 1) {
     return validSignals[0];
+  }
+
+  if (typeof AbortController === "undefined") {
+    return validSignals[0] || null;
   }
 
   const controller =
@@ -1296,8 +1741,12 @@ export function isAbortError(error) {
     String(error?.message || "")
       .toLowerCase();
 
+  const name =
+    String(error?.name || "")
+      .toLowerCase();
+
   return (
-    error?.name === "AbortError" ||
+    name === "aborterror" ||
     error?.code === 20 ||
     message.includes("aborted") ||
     message.includes("abort")
@@ -1413,6 +1862,9 @@ export function getHelpersSnapshot() {
         config?.apiBase || ""
       ),
 
+    apiBasePath:
+      getApiBasePath(),
+
     defaultLang:
       config?.defaultLang || "es",
 
@@ -1420,3 +1872,70 @@ export function getHelpersSnapshot() {
       config?.defaultTheme || "dark",
   };
 }
+
+export default {
+  isBrowser,
+  isDocumentReady,
+  now,
+
+  isPlainObject,
+  isFunction,
+  safeText,
+  safeNumber,
+  safeBool,
+  safeArray,
+  isDomScope,
+  normalizeListenerOptions,
+
+  buildStorageKey,
+  safeParse,
+  safeStringify,
+  safeClone,
+  cloneError,
+
+  redactTokenInText,
+
+  stripSearchAndHash,
+  getSearchAndHash,
+
+  sanitizeUsername,
+  slugify,
+
+  normalizeApiBase,
+  normalizePath,
+  stripUsernamePrefix,
+  normalizeCanonicalPath,
+  normalizePublicPath,
+
+  joinUrl,
+  buildUrl,
+
+  stripBearerPrefix,
+  hasValidToken,
+  isPublicApiPath,
+
+  normalizeUser,
+  getUserDisplayName,
+  getUserUsername,
+  getUserAvatarUrl,
+  getInitials,
+
+  getCurrentLocationPath,
+  getCurrentLocationCanonicalPath,
+
+  isHashOnlyHref,
+  isUnsafeHref,
+  isExternalHref,
+
+  runHookSeries,
+  getThemeColor,
+
+  createAbortTimeout,
+  normalizeHeaders,
+  mergeAbortSignals,
+  isAbortError,
+  isProbablyTimeoutError,
+  detectNetworkHints,
+
+  getHelpersSnapshot,
+};

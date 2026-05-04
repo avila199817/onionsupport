@@ -1,0 +1,73 @@
+/* =========================================================
+   ONION SUPPORT — APP.CSS
+   Archivo: /src/css/app.css
+
+   CSS ENTRYPOINT · TOKEN PRO SYSTEM · SPA PRIVATE APP
+   - Punto único de entrada CSS
+   - Orden de cascada controlado
+   - Sin CSS inline
+   - Sin Google Fonts
+   - Sin estilos inyectados por JS
+   - Compatible CSP real
+========================================================= */
+
+
+/* =========================================================
+   CASCADE LAYERS
+   Orden de menor a mayor prioridad:
+   tokens < reset < core < layout < components < views < auth
+========================================================= */
+
+@layer tokens, reset, core, layout, components, views, auth;
+
+
+/* =========================================================
+   TOKENS · DESIGN SYSTEM
+========================================================= */
+
+@import url("./tokens/variables.css") layer(tokens);
+@import url("./tokens/light.css") layer(tokens);
+
+
+/* =========================================================
+   CORE
+========================================================= */
+
+@import url("./core/reset.css") layer(reset);
+@import url("./core/layout.css") layer(core);
+@import url("./core/core.css") layer(core);
+@import url("./core/loader.css") layer(core);
+
+
+/* =========================================================
+   LAYOUT
+========================================================= */
+
+@import url("./layout/sidebar.css") layer(layout);
+@import url("./layout/topbar.css") layer(layout);
+
+
+/* =========================================================
+   COMPONENTS
+========================================================= */
+
+@import url("./components/ui.css") layer(components);
+
+
+/* =========================================================
+   VIEWS
+========================================================= */
+
+@import url("./views/facturas.css") layer(views);
+
+
+/* Cuando montemos incidencias.css:
+@import url("./views/incidencias.css") layer(views);
+*/
+
+
+/* =========================================================
+   AUTH / PUBLIC TECHNICAL VIEWS
+========================================================= */
+
+@import url("./auth/login.css") layer(auth);

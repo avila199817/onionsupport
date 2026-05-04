@@ -1,0 +1,17 @@
+{
+  "name": "Onion Support",
+  "short_name": "Onion",
+  "description": "Onion Support SaaS Panel",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b1020",
+  "theme_color": "#6f59d9",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

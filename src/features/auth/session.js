@@ -18,24 +18,17 @@
    - normalizar roles admin/superadmin/owner/root para guards/sidebar/vistas
 
    HARDENING EXTREMO:
-   - estado derivado robusto
-   - persistencia ordenada
-   - sync UI seguro
-   - helpers enterprise
-   - cero estados partidos
-   - emisiones sólo cuando cambian datos
-   - fingerprint robusto
+   - authenticated sólo true con token usable + user usable
    - token/user desacoplados sin corrupción
-   - clearSessionLocal compatible con preserveRoute
-   - AppCore.state.role + AppCore.state.roles coherentes
-
-   FIX 10/10:
-   - authenticated sólo puede ser true con token usable + user usable
-   - applySession no reutiliza usuario viejo si se pasa user:null
-   - applySession no marca sesión válida sólo por token explícito
+   - no reutiliza usuario viejo si llega token explícito sin user
    - clearSessionLocal limpia token/user/role/session/accessToken/currentUser
    - clearSessionLocal limpia storage legacy adicional
-   - evita avatar/dashboard cacheado tras login fallido
+   - preservación de rutas públicas técnicas
+   - eventos sin tokens reales
+   - sync UI seguro
+   - roles alias coherentes
+   - snapshots útiles para restore/debug
+   - cero throws accidentales en operaciones laterales
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -63,71 +56,100 @@ import {
    CONSTANTS
 ========================================================= */
 
+const AUTH_SESSION_VERSION =
+  "10.2.0";
+
 const ACTIVATION_PATH =
   "/activate-account";
 
 const RESET_CONFIRM_PATH =
   "/reset-password/confirm";
 
-const PUBLIC_TECHNICAL_ROUTES = Object.freeze([
-  "/activate-account",
-  "/reset-password",
-  "/reset-password/confirm",
-  "/forgot-password",
-  "/recover-password",
-  "/password-reset",
-]);
+const PUBLIC_TECHNICAL_ROUTES =
+  Object.freeze([
+    "/activate-account",
+    "/reset-password",
+    "/reset-password/confirm",
+    "/forgot-password",
+    "/recover-password",
+    "/password-reset",
+  ]);
 
-const ADMIN_ROLE_KEYS = new Set([
-  "admin",
-  "administrator",
-  "administrador",
-  "superadmin",
-  "super_admin",
-  "super_administrador",
-  "owner",
-  "root",
-]);
+const ADMIN_ROLE_KEYS =
+  new Set([
+    "admin",
+    "administrator",
+    "administrador",
+    "superadmin",
+    "super_admin",
+    "super_administrador",
+    "owner",
+    "root",
+  ]);
 
-const SUPPORT_ROLE_KEYS = new Set([
-  "support",
-  "soporte",
-  "agent",
-  "agente",
-  "helpdesk",
-  "operator",
-  "operador",
-]);
+const SUPPORT_ROLE_KEYS =
+  new Set([
+    "support",
+    "soporte",
+    "agent",
+    "agente",
+    "helpdesk",
+    "operator",
+    "operador",
+    "tecnico",
+    "technician",
+  ]);
 
-const MANAGER_ROLE_KEYS = new Set([
-  "manager",
-  "gestor",
-  "gerente",
-  "lead",
-]);
+const MANAGER_ROLE_KEYS =
+  new Set([
+    "manager",
+    "gestor",
+    "gerente",
+    "lead",
+    "team_lead",
+    "supervisor",
+  ]);
 
-const LEGACY_AUTH_STORAGE_KEYS = Object.freeze([
-  "onion_token",
-  "onion_access_token",
-  "onion_refresh_token",
-  "onion_temp_token",
-  "onion_session_id",
-  "onion_session_user_id",
-  "onion_user_id",
-  "onion_user_name",
-  "onion_role",
+const CLIENT_ROLE_KEYS =
+  new Set([
+    "client",
+    "cliente",
+    "customer",
+    "usuario",
+    "user",
+  ]);
 
-  "auth_token",
-  "access_token",
-  "refresh_token",
-  "temp_token",
-  "temporary_token",
-  "two_factor_token",
-  "mfa_token",
-  "token",
-  "session",
-  "user",
-]);
+const LEGACY_AUTH_STORAGE_KEYS =
+  Object.freeze([
+    "onion_token",
+    "onion_access_token",
+    "onion_refresh_token",
+    "onion_temp_token",
+    "onion_session_id",
+    "onion_session_user_id",
+    "onion_user",
+    "onion_user_id",
+    "onion_user_slug",
+    "onion_user_name",
+    "onion_role",
+
+    "auth_token",
+    "access_token",
+    "refresh_token",
+    "temp_token",
+    "temporary_token",
+    "two_factor_token",
+    "mfa_token",
+
+    "token",
+    "session",
+    "user",
+    "role",
+    "refreshToken",
+    "tempToken",
+    "sessionId",
+    "sessionUserId",
+  ]);
 
 /* =========================================================
    BASICS
@@ -138,6 +160,18 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
+}
+
+function isPlainObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function isFunction(value) {
+  return typeof value === "function";
 }
 
 function safeText(value, fallback = "") {
@@ -204,21 +238,9 @@ function safeArray(value) {
 }
 
 function safeObject(value) {
-  return (
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  )
+  return isPlainObject(value)
     ? value
     : {};
-}
-
-function isPlainObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  );
 }
 
 function toArray(value) {
@@ -269,52 +291,23 @@ function nowMs() {
   return Date.now();
 }
 
-function safeEmit(eventName, payload = {}) {
-  const name =
-    safeText(eventName, "");
-
-  if (!name) {
-    return false;
+function safeIsoDate(ms = Date.now()) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
   }
-
-  let emitted = false;
-
-  try {
-    AppCore?.events?.emit?.(
-      name,
-      payload
-    );
-    emitted = true;
-  } catch {}
-
-  try {
-    if (isBrowser()) {
-      window.dispatchEvent(
-        new CustomEvent(name, {
-          detail: payload,
-        })
-      );
-      emitted = true;
-    }
-  } catch {}
-
-  return emitted;
 }
 
-function safeWarn(...args) {
-  try {
-    AppCore?.utils?.warn?.(
-      "[AuthSession]",
-      ...args
-    );
-  } catch {}
-
-  try {
-    console.warn(
-      "[AuthSession]",
-      ...args
-    );
-  } catch {}
+function hasOwn(obj, key) {
+  return Boolean(
+    obj &&
+      typeof obj === "object" &&
+      Object.prototype.hasOwnProperty.call(
+        obj,
+        key
+      )
+  );
 }
 
 function ensureCoreState() {
@@ -330,7 +323,69 @@ function ensureCoreState() {
   return {};
 }
 
-function safeSetState(patch = {}) {
+function safeWarn(...args) {
+  try {
+    AppCore?.utils?.warn?.(
+      "[AuthSession]",
+      ...args
+    );
+  } catch {}
+
+  try {
+    if (AppCore?.config?.debug) {
+      console.warn(
+        "[AuthSession]",
+        ...args
+      );
+    }
+  } catch {}
+}
+
+/*
+  Importante:
+  No duplicamos con window.dispatchEvent si AppCore.events existe.
+  El event bus central ya decide si emite en document/window/custom target.
+*/
+function safeEmit(eventName, payload = {}) {
+  const name =
+    safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  try {
+    if (isFunction(AppCore?.events?.emit)) {
+      AppCore.events.emit(
+        name,
+        payload
+      );
+
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (isBrowser()) {
+      document.dispatchEvent(
+        new CustomEvent(name, {
+          detail:
+            payload,
+          bubbles:
+            false,
+          cancelable:
+            false,
+        })
+      );
+
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function safeSetState(patch = {}, options = {}) {
   const safePatch =
     isPlainObject(patch)
       ? patch
@@ -338,7 +393,8 @@ function safeSetState(patch = {}) {
 
   try {
     AppCore?.setState?.(
-      safePatch
+      safePatch,
+      options
     );
   } catch {}
 
@@ -352,25 +408,35 @@ function safeSetState(patch = {}) {
   return ensureCoreState();
 }
 
-function hasOwn(obj, key) {
-  return Boolean(
-    obj &&
-      typeof obj === "object" &&
-      Object.prototype.hasOwnProperty.call(
-        obj,
-        key
-      )
-  );
-}
-
 /* =========================================================
    USER / TOKEN VALIDATION
 ========================================================= */
 
 function hasUsableToken(token = "") {
-  return Boolean(
-    safeText(token, "")
-  );
+  const value =
+    safeText(token, "");
+
+  if (!value) {
+    return false;
+  }
+
+  if (
+    value === "null" ||
+    value === "undefined" ||
+    value === "false"
+  ) {
+    return false;
+  }
+
+  try {
+    if (isFunction(AppCore?.utils?.hasValidToken)) {
+      return Boolean(
+        AppCore.utils.hasValidToken(value)
+      );
+    }
+  } catch {}
+
+  return true;
 }
 
 function hasUsableUser(user = {}) {
@@ -428,6 +494,7 @@ function normalizeRole(value = "") {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[\s-]+/g, "_")
     .replace(/[^a-z0-9_:.]/g, "")
+    .replace(/^_+|_+$/g, "")
     .trim();
 }
 
@@ -450,6 +517,18 @@ function normalizeRoles(value) {
     .filter(Boolean);
 }
 
+function unique(values = []) {
+  return Array.from(
+    new Set(
+      safeArray(values)
+        .map((item) =>
+          safeText(item, "")
+        )
+        .filter(Boolean)
+    )
+  );
+}
+
 function isAdminRole(value = "") {
   return ADMIN_ROLE_KEYS.has(
     normalizeRole(value)
@@ -468,9 +547,9 @@ function isManagerRole(value = "") {
   );
 }
 
-function unique(values = []) {
-  return Array.from(
-    new Set(values.filter(Boolean))
+function isClientRole(value = "") {
+  return CLIENT_ROLE_KEYS.has(
+    normalizeRole(value)
   );
 }
 
@@ -505,6 +584,14 @@ function expandRoleAliases(roles = []) {
     result.add("manager");
   }
 
+  if (normalized.some(isClientRole)) {
+    for (const role of CLIENT_ROLE_KEYS) {
+      result.add(role);
+    }
+
+    result.add("client");
+  }
+
   return unique(
     Array.from(result)
   );
@@ -524,6 +611,10 @@ function resolveCanonicalRole(roles = []) {
 
   if (expanded.some(isManagerRole)) {
     return "manager";
+  }
+
+  if (expanded.some(isClientRole)) {
+    return "client";
   }
 
   return expanded[0] || "";
@@ -765,11 +856,13 @@ function normalizePathnameOnly(pathname = "/") {
       .replace(/\/{2,}/g, "/");
 
   if (!value) {
-    value = "/";
+    value =
+      "/";
   }
 
   if (!value.startsWith("/")) {
-    value = `/${value}`;
+    value =
+      `/${value}`;
   }
 
   if (
@@ -777,7 +870,8 @@ function normalizePathnameOnly(pathname = "/") {
     value.endsWith("/")
   ) {
     value =
-      value.replace(/\/+$/g, "") || "/";
+      value.replace(/\/+$/g, "") ||
+      "/";
   }
 
   return value;
@@ -788,7 +882,8 @@ function stripSearchAndHash(path = "/") {
     safeText(path, "/");
 
   return normalizePathnameOnly(
-    raw.split("?")[0].split("#")[0] || "/"
+    raw.split("?")[0].split("#")[0] ||
+      "/"
   );
 }
 
@@ -1033,7 +1128,9 @@ function getCoreStorageKey(name = "") {
 
 function writeCoreToken(token = null) {
   const cleanToken =
-    safeText(token, "") || null;
+    hasUsableToken(token)
+      ? safeText(token, "")
+      : null;
 
   const tokenKey =
     getCoreStorageKey("token");
@@ -1051,19 +1148,36 @@ function writeCoreToken(token = null) {
     }
   } catch {}
 
-  safeSetState({
-    token:
-      cleanToken,
-    accessToken:
-      cleanToken,
-  });
+  try {
+    AppCore?.setToken?.(
+      cleanToken
+    );
+  } catch {}
+
+  safeSetState(
+    {
+      token:
+        cleanToken,
+
+      accessToken:
+        cleanToken,
+    },
+    {
+      forceUnauthenticated:
+        !cleanToken,
+      allowExplicitAuthenticated:
+        Boolean(cleanToken),
+    }
+  );
 
   return cleanToken;
 }
 
 function writeCoreUser(user = null) {
   const finalUser =
-    user || null;
+    hasUsableUser(user)
+      ? user
+      : null;
 
   const userKey =
     getCoreStorageKey("user");
@@ -1081,13 +1195,22 @@ function writeCoreUser(user = null) {
     }
   } catch {}
 
+  try {
+    AppCore?.setUser?.(
+      finalUser
+    );
+  } catch {}
+
   safeSetState({
     user:
       finalUser,
+
     currentUser:
       finalUser,
+
     authUser:
       finalUser,
+
     sessionUser:
       finalUser,
   });
@@ -1115,14 +1238,10 @@ function resolveAuthenticated(state) {
     state?.user ||
     state?.currentUser ||
     state?.authUser ||
+    state?.sessionUser ||
     state?.session?.user ||
     null;
 
-  /*
-    Regla dura:
-    token sin usuario NO es sesión autenticada.
-    Evita avatar/dashboard fantasma.
-  */
   return (
     hasUsableToken(token) &&
     hasUsableUser(user)
@@ -1134,6 +1253,7 @@ function buildDerivedAuthState(state = ensureCoreState()) {
     state.user ||
     state.currentUser ||
     state.authUser ||
+    state.sessionUser ||
     state?.session?.user ||
     null;
 
@@ -1169,6 +1289,9 @@ function buildDerivedAuthState(state = ensureCoreState()) {
 
     isManager:
       roles.some(isManagerRole),
+
+    isClient:
+      roles.some(isClientRole),
   };
 }
 
@@ -1181,6 +1304,16 @@ function syncDerivedState() {
 
   state.authenticated =
     derived.authenticated;
+
+  state.hasToken =
+    hasUsableToken(
+      first(
+        state.token,
+        state.accessToken,
+        state.session?.token,
+        state.session?.accessToken
+      )
+    );
 
   state.role =
     derived.authenticated
@@ -1208,6 +1341,15 @@ function syncDerivedState() {
   state.isManager =
     derived.authenticated &&
     derived.isManager;
+
+  state.isClient =
+    derived.authenticated &&
+    derived.isClient;
+
+  if (!derived.authenticated) {
+    state.currentResolvedUsername =
+      null;
+  }
 
   return state;
 }
@@ -1246,23 +1388,46 @@ function resolveThemeFromUser(user = null) {
     return explicitTheme;
   }
 
+  const candidates = [
+    user.darkMode,
+    user.dark_mode,
+    user?.raw?.darkMode,
+    user?.raw?.dark_mode,
+    user?.preferences?.darkMode,
+    user?.preferences?.dark_mode,
+    user?.settings?.darkMode,
+    user?.settings?.dark_mode,
+    user?.raw?.preferences?.darkMode,
+    user?.raw?.preferences?.dark_mode,
+    user?.raw?.settings?.darkMode,
+    user?.raw?.settings?.dark_mode,
+  ];
+
   const hasExplicitDarkMode =
     hasOwn(user, "darkMode") ||
     hasOwn(user, "dark_mode") ||
     hasOwn(user?.raw, "darkMode") ||
     hasOwn(user?.raw, "dark_mode") ||
     hasOwn(user?.preferences, "darkMode") ||
+    hasOwn(user?.preferences, "dark_mode") ||
     hasOwn(user?.settings, "darkMode") ||
+    hasOwn(user?.settings, "dark_mode") ||
     hasOwn(user?.raw?.preferences, "darkMode") ||
-    hasOwn(user?.raw?.settings, "darkMode");
+    hasOwn(user?.raw?.preferences, "dark_mode") ||
+    hasOwn(user?.raw?.settings, "darkMode") ||
+    hasOwn(user?.raw?.settings, "dark_mode");
 
-  if (
-    hasExplicitDarkMode &&
-    typeof user.darkMode === "boolean"
-  ) {
-    return user.darkMode
-      ? "dark"
-      : "light";
+  if (hasExplicitDarkMode) {
+    const darkValue =
+      candidates.find((item) =>
+        typeof item === "boolean"
+      );
+
+    if (typeof darkValue === "boolean") {
+      return darkValue
+        ? "dark"
+        : "light";
+    }
   }
 
   return null;
@@ -1313,56 +1478,105 @@ function clearLegacyAuthStorage() {
 }
 
 function clearCoreAuthStorage() {
-  try {
-    AppCore?.storage?.remove?.(
-      getCoreStorageKey("token")
-    );
-  } catch {}
+  const keys = [
+    "token",
+    "user",
+    "refreshToken",
+    "tempToken",
+    "sessionId",
+    "sessionUserId",
+    "authContext",
+  ];
 
-  try {
-    AppCore?.storage?.remove?.(
-      getCoreStorageKey("user")
-    );
-  } catch {}
+  keys.forEach((name) => {
+    try {
+      AppCore?.storage?.remove?.(
+        getCoreStorageKey(name)
+      );
+    } catch {}
+  });
 }
 
 function clearAuthStatePatch() {
   return {
-    token: null,
-    accessToken: null,
+    token:
+      null,
 
-    user: null,
-    currentUser: null,
-    authUser: null,
-    sessionUser: null,
+    accessToken:
+      null,
 
-    role: "",
-    userRole: "",
-    roles: [],
+    user:
+      null,
 
-    authenticated: false,
+    currentUser:
+      null,
 
-    isAdmin: false,
-    isSupport: false,
-    isManager: false,
+    authUser:
+      null,
 
-    session: null,
-    sessionId: null,
-    sessionUserId: null,
+    sessionUser:
+      null,
 
-    currentResolvedUsername: null,
+    role:
+      "",
+
+    userRole:
+      "",
+
+    roles:
+      [],
+
+    authenticated:
+      false,
+
+    hasToken:
+      false,
+
+    isAdmin:
+      false,
+
+    isSupport:
+      false,
+
+    isManager:
+      false,
+
+    isClient:
+      false,
+
+    session:
+      null,
+
+    sessionId:
+      null,
+
+    sessionUserId:
+      null,
+
+    currentResolvedUsername:
+      null,
+
+    resolvedUsername:
+      null,
   };
 }
 
 function safeClearSession(context = {}) {
   try {
     if (typeof AppCore?.clearSession === "function") {
-      AppCore.clearSession();
+      AppCore.clearSession({
+        silent:
+          true,
+      });
 
       restoreRouteContext(context);
 
       safeSetState(
-        clearAuthStatePatch()
+        clearAuthStatePatch(),
+        {
+          forceUnauthenticated:
+            true,
+        }
       );
 
       return true;
@@ -1375,7 +1589,11 @@ function safeClearSession(context = {}) {
   }
 
   safeSetState(
-    clearAuthStatePatch()
+    clearAuthStatePatch(),
+    {
+      forceUnauthenticated:
+        true,
+    }
   );
 
   restoreRouteContext(context);
@@ -1397,6 +1615,7 @@ function getCurrentStateSnapshotBase() {
     state.user ||
     state.currentUser ||
     state.authUser ||
+    state.sessionUser ||
     state.session?.user ||
     null;
 
@@ -1407,30 +1626,56 @@ function getCurrentStateSnapshotBase() {
     state.session?.accessToken ||
     null;
 
+  const authenticated =
+    Boolean(
+      hasUsableToken(token) &&
+      hasUsableUser(user) &&
+      state.authenticated === true
+    );
+
   return {
-    authenticated:
-      Boolean(state.authenticated),
+    authenticated,
 
-    token,
+    token:
+      authenticated || hasUsableToken(token)
+        ? token
+        : null,
+
     accessToken:
-      state.accessToken || token,
+      authenticated || hasUsableToken(token)
+        ? state.accessToken || token
+        : null,
 
-    user,
+    user:
+      hasUsableUser(user)
+        ? user
+        : null,
 
     role:
-      state.role || null,
+      authenticated
+        ? state.role || null
+        : null,
 
     roles:
-      normalizeRoles(state.roles),
+      authenticated
+        ? normalizeRoles(state.roles)
+        : [],
 
     isAdmin:
+      authenticated &&
       Boolean(state.isAdmin),
 
     isSupport:
+      authenticated &&
       Boolean(state.isSupport),
 
     isManager:
+      authenticated &&
       Boolean(state.isManager),
+
+    isClient:
+      authenticated &&
+      Boolean(state.isClient),
 
     route:
       state.route || "/",
@@ -1445,6 +1690,9 @@ export function buildSessionSnapshot(extra = {}) {
     getCurrentStateSnapshotBase();
 
   return {
+    version:
+      AUTH_SESSION_VERSION,
+
     ...base,
 
     refreshToken:
@@ -1457,6 +1705,52 @@ export function buildSessionSnapshot(extra = {}) {
       getStoredSessionUserId() || null,
 
     ...extra,
+  };
+}
+
+function buildPublicSnapshot(snapshot = {}) {
+  return {
+    version:
+      AUTH_SESSION_VERSION,
+
+    authenticated:
+      Boolean(snapshot.authenticated),
+
+    hasToken:
+      hasUsableToken(snapshot.token),
+
+    token:
+      null,
+
+    user:
+      snapshot.user || null,
+
+    role:
+      snapshot.role || null,
+
+    roles:
+      normalizeRoles(snapshot.roles),
+
+    isAdmin:
+      Boolean(snapshot.isAdmin),
+
+    isSupport:
+      Boolean(snapshot.isSupport),
+
+    isManager:
+      Boolean(snapshot.isManager),
+
+    isClient:
+      Boolean(snapshot.isClient),
+
+    route:
+      snapshot.route || "/",
+
+    publicPath:
+      snapshot.publicPath || "/",
+
+    source:
+      snapshot.source || "",
   };
 }
 
@@ -1486,6 +1780,15 @@ function buildSessionFingerprint(snapshot = {}) {
 
     isAdmin:
       Boolean(snapshot.isAdmin),
+
+    isSupport:
+      Boolean(snapshot.isSupport),
+
+    isManager:
+      Boolean(snapshot.isManager),
+
+    isClient:
+      Boolean(snapshot.isClient),
 
     hasRefreshToken:
       Boolean(snapshot.refreshToken),
@@ -1520,49 +1823,74 @@ function emitSessionState({
   after = null,
   durationMs = 0,
 } = {}) {
-  safeEmit("auth:session:state", {
-    reason,
-    before,
-    after,
-    changed:
-      buildSessionFingerprint(before) !==
-      buildSessionFingerprint(after),
-    durationMs,
-    timestamp:
-      nowMs(),
-    at:
-      new Date().toISOString(),
-  });
+  const publicBefore =
+    before
+      ? buildPublicSnapshot(before)
+      : null;
+
+  const publicAfter =
+    after
+      ? buildPublicSnapshot(after)
+      : null;
+
+  safeEmit(
+    "auth:session:state",
+    {
+      reason,
+
+      before:
+        publicBefore,
+
+      after:
+        publicAfter,
+
+      changed:
+        buildSessionFingerprint(before) !==
+        buildSessionFingerprint(after),
+
+      durationMs,
+
+      timestamp:
+        nowMs(),
+
+      at:
+        safeIsoDate(),
+    }
+  );
 }
 
 function emitSessionAppliedEvents(after = {}, before = null) {
+  const publicAfter =
+    buildPublicSnapshot(after);
+
   const changed =
     !before ||
     buildSessionFingerprint(before) !==
       buildSessionFingerprint(after);
 
-  safeEmit("auth:session:applied", after);
-  safeEmit("auth:session:restored", after);
-  safeEmit("app:session:restored", after);
-  safeEmit("app:session:change", after);
-  safeEmit("app:auth:change", after);
-  safeEmit("auth:change", after);
+  safeEmit("auth:session:applied", publicAfter);
+  safeEmit("auth:session:restored", publicAfter);
+  safeEmit("app:session:restored", publicAfter);
+  safeEmit("app:session:change", publicAfter);
+  safeEmit("app:auth:change", publicAfter);
+  safeEmit("auth:change", publicAfter);
 
   if (changed) {
-    safeEmit("app:user:change", after);
-    safeEmit("app:user:updated", after);
-    safeEmit("app:user-ui:sync", after);
+    safeEmit("app:user:change", publicAfter);
+    safeEmit("app:user:updated", publicAfter);
   }
 }
 
 function emitSessionClearedEvents(after = {}) {
-  safeEmit("auth:session:cleared", after);
-  safeEmit("app:session:cleared", after);
-  safeEmit("app:session:change", after);
-  safeEmit("app:auth:change", after);
-  safeEmit("auth:change", after);
-  safeEmit("app:user:change", after);
-  safeEmit("app:user-ui:sync", after);
+  const publicAfter =
+    buildPublicSnapshot(after);
+
+  safeEmit("auth:session:cleared", publicAfter);
+  safeEmit("app:session:cleared", publicAfter);
+  safeEmit("app:session:change", publicAfter);
+  safeEmit("app:auth:change", publicAfter);
+  safeEmit("auth:change", publicAfter);
+  safeEmit("app:user:change", publicAfter);
 }
 
 /* =========================================================
@@ -1686,7 +2014,8 @@ export function applySession({
       ""
     );
 
-  let effectiveUser = null;
+  let effectiveUser =
+    null;
 
   if (userProvided) {
     effectiveUser =
@@ -1695,6 +2024,10 @@ export function applySession({
     tokenProvided &&
     preserveExistingUser !== true
   ) {
+    /*
+      Token nuevo explícito sin user explícito:
+      se borra user para forzar /me.
+    */
     effectiveUser =
       null;
   } else {
@@ -1705,9 +2038,11 @@ export function applySession({
           ? currentState.currentUser
           : hasUsableUser(currentState.authUser)
             ? currentState.authUser
-            : hasUsableUser(currentState.session?.user)
-              ? currentState.session.user
-              : null;
+            : hasUsableUser(currentState.sessionUser)
+              ? currentState.sessionUser
+              : hasUsableUser(currentState.session?.user)
+                ? currentState.session.user
+                : null;
   }
 
   const usableToken =
@@ -1809,14 +2144,24 @@ export function applySession({
     authenticated:
       nextAuthenticated,
 
+    hasToken:
+      usableToken,
+
     isAdmin:
+      nextAuthenticated &&
       nextRoles.some(isAdminRole),
 
     isSupport:
+      nextAuthenticated &&
       nextRoles.some(isSupportRole),
 
     isManager:
+      nextAuthenticated &&
       nextRoles.some(isManagerRole),
+
+    isClient:
+      nextAuthenticated &&
+      nextRoles.some(isClientRole),
 
     session:
       nextAuthenticated
@@ -1858,7 +2203,15 @@ export function applySession({
         : null,
   };
 
-  safeSetState(nextPatch);
+  safeSetState(
+    nextPatch,
+    {
+      forceUnauthenticated:
+        !nextAuthenticated,
+      allowExplicitAuthenticated:
+        nextAuthenticated,
+    }
+  );
 
   syncDerivedState();
 
@@ -1944,7 +2297,11 @@ export function clearSessionLocal(options = {}) {
   safePersistSessionContext(null, null);
 
   safeSetState(
-    clearAuthStatePatch()
+    clearAuthStatePatch(),
+    {
+      forceUnauthenticated:
+        true,
+    }
   );
 
   restoreRouteContext(
@@ -1998,13 +2355,16 @@ export function isAuthenticated() {
       hasUsableToken(
         first(
           state.token,
-          state.accessToken
+          state.accessToken,
+          state.session?.token,
+          state.session?.accessToken
         )
       ) &&
       hasUsableUser(
         state.user ||
         state.currentUser ||
         state.authUser ||
+        state.sessionUser ||
         state.session?.user
       )
   );
@@ -2032,6 +2392,22 @@ export function isCurrentUserAdmin() {
 
   return Boolean(
     ensureCoreState().isAdmin
+  );
+}
+
+export function isCurrentUserSupport() {
+  syncDerivedState();
+
+  return Boolean(
+    ensureCoreState().isSupport
+  );
+}
+
+export function isCurrentUserManager() {
+  syncDerivedState();
+
+  return Boolean(
+    ensureCoreState().isManager
   );
 }
 
@@ -2091,12 +2467,19 @@ export function getAuthHeader() {
       ""
     );
 
-  if (!token) {
+  if (!hasUsableToken(token)) {
     return {};
   }
 
+  const prefix =
+    safeText(
+      AppCore?.config?.auth?.bearerPrefix,
+      "Bearer"
+    );
+
   return {
-    Authorization: `Bearer ${token}`,
+    Authorization:
+      `${prefix} ${token}`,
   };
 }
 
@@ -2109,6 +2492,9 @@ export function getSessionDebugSnapshot() {
     buildSessionSnapshot();
 
   return {
+    version:
+      AUTH_SESSION_VERSION,
+
     authenticated:
       Boolean(snapshot.authenticated),
 
@@ -2126,6 +2512,9 @@ export function getSessionDebugSnapshot() {
 
     isManager:
       Boolean(snapshot.isManager),
+
+    isClient:
+      Boolean(snapshot.isClient),
 
     username:
       snapshot.user?.username ||
@@ -2177,7 +2566,26 @@ export function getSessionDebugSnapshot() {
 
 export function buildAuthErrorPayload(error) {
   return {
-    error,
+    error:
+      error
+        ? {
+            name:
+              safeText(error.name, "Error"),
+
+            status:
+              error.status ||
+              error.response?.status ||
+              error.data?.status ||
+              null,
+
+            code:
+              error.code ||
+              error.data?.code ||
+              error.response?.data?.code ||
+              null,
+          }
+        : null,
+
     message:
       extractMessage(error),
   };
@@ -2192,6 +2600,8 @@ export default {
   getCurrentRole,
   getCurrentRoles,
   isCurrentUserAdmin,
+  isCurrentUserSupport,
+  isCurrentUserManager,
   hasRole,
   requireRole,
 

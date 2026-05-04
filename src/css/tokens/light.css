@@ -1,23 +1,29 @@
-[data-theme="light"]{
+/* =========================================================
+   ONION SUPPORT — LIGHT THEME
+   Archivo: src/css/themes/light.css
+
+   PREMIUM WHITE UI · APPLE STYLE · PRO SAAS PANEL · 10/10
+
+   IMPORTANTE:
+   - Este archivo se carga DESPUÉS de variables.css.
+   - Aquí SOLO viven overrides [data-theme="light"].
+   - variables.css mantiene el dark/base.
+   - Los componentes consumen tokens, no redefinen sistema global.
+
+   OBJETIVO:
+   - white UI premium
+   - contraste limpio
+   - capas flotantes claras
+   - dropdown sidebar visible y elegante
+   - sombras tipo Apple/SaaS
+   - topbar/sidebar integrados
+   - cards e inputs más nítidos
+========================================================= */
+
+[data-theme="light"] {
   /* =========================================================
-     ONION SUPPORT — LIGHT THEME / PRO SAAS PANEL
-     EXTREME PREMIUM WHITE UI · FINAL 10/10
-
-     REFINADO PARA:
-     - enterprise clarity
-     - premium white UI
-     - densidad operativa
-     - contraste limpio
-     - shell más profesional
-     - tarjetas más nítidas
-     - inputs/botones más SaaS
-     - sidebar/topbar más integrados
-     - alineado con dark refinado
+     BRAND SYSTEM
   ========================================================= */
-
-  /* =========================
-     BRAND
-  ========================= */
   --accent: #6f59d9;
   --accent-hover: #624acb;
   --accent-active: #533cb6;
@@ -58,9 +64,10 @@
   --brand-5: #c45a86;
   --brand-5-soft: rgba(196,90,134,.12);
 
-  /* =========================
-     TEXT
-  ========================= */
+
+  /* =========================================================
+     TEXT SYSTEM
+  ========================================================= */
   --text: #172033;
   --text-strong: #07111f;
   --text-soft: rgba(23,32,51,.89);
@@ -83,9 +90,10 @@
   --muted: var(--text-muted);
   --dim: var(--text-dim);
 
-  /* =========================
+
+  /* =========================================================
      BASE / BACKDROP
-  ========================= */
+  ========================================================= */
   --main-bg: #f3f6fa;
   --main-bg-2: #edf2f7;
   --main-bg-3: #e7edf4;
@@ -127,9 +135,10 @@
   --glass-shine:
     linear-gradient(180deg, rgba(255,255,255,.82), rgba(255,255,255,0) 34%);
 
-  /* =========================
+
+  /* =========================================================
      SURFACE SYSTEM
-  ========================= */
+  ========================================================= */
   --surface-0: #f3f6fa;
   --surface-1: #f8fafc;
   --surface-2: #ffffff;
@@ -157,19 +166,36 @@
   --surface-selected: rgba(111,89,217,.092);
   --surface-disabled: rgba(23,32,51,.018);
 
-  --dropdown-bg: rgba(255,255,255,.975);
-  --tooltip-bg: #111827;
-  --tooltip-text: #ffffff;
-  --popover-bg: rgba(255,255,255,.975);
-  --modal-bg: rgba(255,255,255,.955);
-  --backdrop-bg: rgba(15,23,42,.25);
+  --dropdown-bg:
+    radial-gradient(circle at 16% 0%, rgba(111,89,217,.060), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.990) 0%, rgba(246,248,252,.980) 100%),
+    #ffffff;
 
-  --sb-bg: rgba(255,255,255,.90);
   --dropdown-bg-legacy: var(--dropdown-bg);
 
-  /* =========================
+  --popover-bg:
+    radial-gradient(circle at 16% 0%, rgba(111,89,217,.050), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.985), rgba(247,249,252,.975)),
+    #ffffff;
+
+  --modal-bg:
+    radial-gradient(circle at 0% 0%, rgba(111,89,217,.050), transparent 30%),
+    linear-gradient(180deg, rgba(255,255,255,.970), rgba(248,250,252,.955)),
+    #ffffff;
+
+  --drawer-bg:
+    radial-gradient(circle at 0% 0%, rgba(111,89,217,.050), transparent 30%),
+    linear-gradient(180deg, rgba(255,255,255,.970), rgba(248,250,252,.955)),
+    #ffffff;
+
+  --tooltip-bg: #111827;
+  --tooltip-text: #ffffff;
+  --backdrop-bg: rgba(15,23,42,.25);
+
+
+  /* =========================================================
      BORDER SYSTEM
-  ========================= */
+  ========================================================= */
   --border-soft: rgba(23,32,51,.055);
   --border-default: rgba(23,32,51,.095);
   --border-strong: rgba(23,32,51,.145);
@@ -183,9 +209,10 @@
   --border-error: rgba(220,38,38,.245);
   --border-info: rgba(59,130,166,.245);
 
-  /* =========================
-     STATUS
-  ========================= */
+
+  /* =========================================================
+     STATUS SYSTEM
+  ========================================================= */
   --success: #1f9d68;
   --success-hover: #157a4f;
   --success-soft: rgba(31,157,104,.12);
@@ -230,18 +257,23 @@
   --warning-bg-legacy: var(--warning-soft);
   --info-bg-legacy: var(--info-soft);
 
-  /* =========================
+
+  /* =========================================================
      CARD / PANEL / BLOCK
-  ========================= */
+  ========================================================= */
   --card-bg:
-    linear-gradient(180deg, rgba(255,255,255,.98) 0%, rgba(248,250,252,.985) 100%);
+    radial-gradient(circle at 0% 0%, rgba(111,89,217,.030), transparent 28%),
+    linear-gradient(180deg, rgba(255,255,255,.990) 0%, rgba(248,250,252,.985) 100%);
 
   --card-bg-hover:
+    radial-gradient(circle at 0% 0%, rgba(111,89,217,.042), transparent 30%),
     linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(249,251,253,1) 100%);
 
   --card-border: rgba(23,32,51,.074);
   --card-border-hover: rgba(23,32,51,.115);
-  --card-highlight: inset 0 1px 0 rgba(255,255,255,.84);
+
+  --card-highlight:
+    inset 0 1px 0 rgba(255,255,255,.86);
 
   --card-shadow:
     0 10px 26px rgba(15,23,42,.055),
@@ -250,9 +282,11 @@
   --shadow-card: var(--card-shadow);
 
   --panel-bg:
-    linear-gradient(180deg, rgba(255,255,255,.96) 0%, rgba(248,250,252,.985) 100%);
+    radial-gradient(circle at 0% 0%, rgba(111,89,217,.024), transparent 30%),
+    linear-gradient(180deg, rgba(255,255,255,.970) 0%, rgba(248,250,252,.985) 100%);
 
   --panel-bg-hover:
+    radial-gradient(circle at 0% 0%, rgba(111,89,217,.034), transparent 30%),
     linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(249,251,253,1) 100%);
 
   --panel-border: rgba(23,32,51,.074);
@@ -268,14 +302,18 @@
   --block-bg-hover: rgba(23,32,51,.042);
   --block-border: rgba(23,32,51,.074);
 
-  /* =========================
+
+  /* =========================================================
      INPUT SYSTEM
-  ========================= */
+  ========================================================= */
   --input-height: calc(46px * var(--ui-scale));
   --input-height-sm: calc(38px * var(--ui-scale));
   --input-height-lg: calc(52px * var(--ui-scale));
 
-  --input-bg: rgba(255,255,255,.97);
+  --input-bg:
+    linear-gradient(180deg, rgba(255,255,255,.985), rgba(248,250,252,.960)),
+    #ffffff;
+
   --input-bg-hover: #ffffff;
   --input-bg-focus: #ffffff;
   --input-disabled-bg: rgba(23,32,51,.028);
@@ -294,15 +332,17 @@
     inset 0 1px 0 rgba(255,255,255,.88);
 
   --input-shadow-hover:
-    inset 0 1px 0 rgba(255,255,255,.96);
+    inset 0 1px 0 rgba(255,255,255,.96),
+    0 6px 14px rgba(15,23,42,.030);
 
   --input-shadow-focus:
     0 0 0 4px rgba(111,89,217,.105),
     0 10px 22px rgba(111,89,217,.065);
 
-  /* =========================
-     BUTTONS
-  ========================= */
+
+  /* =========================================================
+     BUTTON SYSTEM
+  ========================================================= */
   --btn-height: calc(44px * var(--ui-scale));
   --btn-height-sm: calc(36px * var(--ui-scale));
   --btn-height-lg: calc(50px * var(--ui-scale));
@@ -323,9 +363,18 @@
     0 10px 20px rgba(111,89,217,.17),
     inset 0 1px 0 rgba(255,255,255,.20);
 
-  --btn-secondary-bg: rgba(23,32,51,.038);
-  --btn-secondary-bg-hover: rgba(23,32,51,.058);
-  --btn-secondary-bg-active: rgba(23,32,51,.082);
+  --btn-secondary-bg:
+    linear-gradient(180deg, rgba(255,255,255,.820), rgba(246,248,252,.760)),
+    rgba(23,32,51,.032);
+
+  --btn-secondary-bg-hover:
+    linear-gradient(180deg, rgba(255,255,255,.940), rgba(246,248,252,.860)),
+    rgba(23,32,51,.050);
+
+  --btn-secondary-bg-active:
+    linear-gradient(180deg, rgba(246,248,252,.960), rgba(238,242,247,.900)),
+    rgba(23,32,51,.075);
+
   --btn-secondary-text: var(--text);
   --btn-secondary-border: rgba(23,32,51,.078);
   --btn-secondary-shadow: 0 5px 12px rgba(15,23,42,.05);
@@ -351,26 +400,46 @@
     0 8px 18px rgba(230,75,93,.15),
     inset 0 1px 0 rgba(255,255,255,.14);
 
-  /* =========================
-     SIDEBAR
-  ========================= */
-  --sidebar-bg: rgba(255,255,255,.88);
-  --sidebar-bg-strong: rgba(255,255,255,.96);
-  --sidebar-border: rgba(23,32,51,.064);
-  --sidebar-shadow: 0 16px 34px rgba(15,23,42,.07);
 
-  --sidebar-hover: rgba(23,32,51,.035);
-  --sidebar-active: rgba(111,89,217,.092);
-  --sidebar-active-hover: rgba(111,89,217,.125);
-  --sidebar-active-border: rgba(111,89,217,.19);
+  /* =========================================================
+     SIDEBAR · PREMIUM WHITE GLASS
+  ========================================================= */
+  --sidebar-bg:
+    linear-gradient(180deg, rgba(255,255,255,.810), rgba(248,250,252,.740)),
+    rgba(255,255,255,.84);
+
+  --sidebar-bg-strong:
+    linear-gradient(180deg, rgba(255,255,255,.960), rgba(248,250,252,.920)),
+    rgba(255,255,255,.96);
+
+  --sidebar-border: rgba(23,32,51,.070);
+
+  --sidebar-shadow:
+    0 16px 34px rgba(15,23,42,.070),
+    inset -1px 0 0 rgba(255,255,255,.74);
+
+  --sidebar-hover:
+    linear-gradient(180deg, rgba(23,32,51,.040), rgba(23,32,51,.026));
+
+  --sidebar-active:
+    linear-gradient(180deg, rgba(111,89,217,.112), rgba(111,89,217,.070));
+
+  --sidebar-active-hover:
+    linear-gradient(180deg, rgba(111,89,217,.145), rgba(111,89,217,.092));
+
+  --sidebar-active-border: rgba(111,89,217,.250);
 
   --sidebar-text: rgba(23,32,51,.72);
   --sidebar-text-active: #0f172a;
   --sidebar-icon: rgba(23,32,51,.54);
   --sidebar-icon-active: var(--accent);
 
-  --sidebar-footer-bg: rgba(23,32,51,.020);
-  --sidebar-footer-border: var(--sidebar-border);
+  --sidebar-footer-bg:
+    linear-gradient(180deg, rgba(255,255,255,.880), rgba(248,250,252,.810)),
+    rgba(255,255,255,.80);
+
+  --sidebar-footer-border: rgba(23,32,51,.070);
+
   --sidebar-tooltip-bg: var(--tooltip-bg);
   --sidebar-tooltip-text: var(--tooltip-text);
   --sidebar-mobile-backdrop: rgba(15,23,42,.22);
@@ -380,10 +449,49 @@
   --sb-active: var(--sidebar-active);
   --sb-border: var(--sidebar-border);
 
-  /* =========================
-     TOPBAR
-  ========================= */
-  --topbar-bg: rgba(255,255,255,.78);
+
+  /* =========================================================
+     SIDEBAR USER DROPDOWN · LIGHT CONTRAST FIX · GOD MODE
+  ========================================================= */
+  --sidebar-dropdown-bg:
+    radial-gradient(circle at 12% 0%, rgba(111,89,217,.092), transparent 34%),
+    radial-gradient(circle at 92% 12%, rgba(59,130,166,.045), transparent 28%),
+    linear-gradient(180deg, rgba(255,255,255,.998) 0%, rgba(246,248,252,.992) 100%),
+    #ffffff;
+
+  --sidebar-dropdown-border: rgba(15,23,42,.140);
+
+  --sidebar-dropdown-shadow:
+    0 34px 82px rgba(15,23,42,.180),
+    0 16px 32px rgba(15,23,42,.105),
+    0 3px 10px rgba(15,23,42,.060),
+    0 0 0 1px rgba(255,255,255,.90) inset;
+
+  --sidebar-dropdown-text: rgba(23,32,51,.76);
+  --sidebar-dropdown-text-strong: #07111f;
+  --sidebar-dropdown-text-muted: rgba(23,32,51,.54);
+  --sidebar-dropdown-icon: rgba(23,32,51,.58);
+
+  --sidebar-dropdown-item-hover:
+    linear-gradient(180deg, rgba(111,89,217,.100), rgba(111,89,217,.060));
+
+  --sidebar-dropdown-item-active:
+    linear-gradient(180deg, rgba(111,89,217,.142), rgba(111,89,217,.086));
+
+  --sidebar-dropdown-separator: rgba(15,23,42,.095);
+
+  --sidebar-dropdown-danger: #e3364a;
+  --sidebar-dropdown-danger-bg: rgba(227,54,74,.085);
+  --sidebar-dropdown-danger-hover: rgba(227,54,74,.132);
+
+
+  /* =========================================================
+     TOPBAR · PREMIUM WHITE GLASS
+  ========================================================= */
+  --topbar-bg:
+    linear-gradient(180deg, rgba(255,255,255,.800), rgba(248,250,252,.700)),
+    rgba(255,255,255,.76);
+
   --topbar-border: rgba(23,32,51,.055);
   --topbar-shadow: 0 8px 18px rgba(15,23,42,.045);
   --topbar-blur: blur(16px);
@@ -392,8 +500,14 @@
   --topbar-button-bg-hover: rgba(23,32,51,.048);
   --topbar-button-border: rgba(23,32,51,.070);
 
-  --topbar-search-bg: rgba(255,255,255,.76);
-  --topbar-search-bg-hover: rgba(255,255,255,.90);
+  --topbar-search-bg:
+    linear-gradient(180deg, rgba(255,255,255,.880), rgba(248,250,252,.760)),
+    rgba(255,255,255,.76);
+
+  --topbar-search-bg-hover:
+    linear-gradient(180deg, rgba(255,255,255,.960), rgba(248,250,252,.860)),
+    rgba(255,255,255,.90);
+
   --topbar-search-bg-focus: #ffffff;
   --topbar-search-border: rgba(23,32,51,.080);
 
@@ -401,9 +515,10 @@
   --topbar-search-result-border: var(--border-default);
   --topbar-search-result-shadow: var(--shadow-xl);
 
-  /* =========================
+
+  /* =========================================================
      TABLES / DATA UI
-  ========================= */
+  ========================================================= */
   --table-bg: transparent;
   --table-head-bg: rgba(23,32,51,.022);
   --table-row-bg: transparent;
@@ -416,15 +531,17 @@
   --data-table-bg: var(--card-bg);
   --data-table-border: var(--card-border);
   --data-table-shadow: var(--shadow-sm);
+
   --data-table-head-bg: var(--table-head-bg);
   --data-table-head-text: var(--text-dim);
   --data-table-row-border: var(--table-border);
   --data-table-row-hover: var(--table-row-hover);
   --data-table-row-selected: var(--table-row-selected);
 
-  /* =========================
+
+  /* =========================================================
      KPI COLORS
-  ========================= */
+  ========================================================= */
   --color-iva: #c07a16;
   --color-iva-glow: rgba(192,122,22,.16);
 
@@ -440,9 +557,10 @@
   --color-facturacion: #3b82a6;
   --color-facturacion-glow: rgba(59,130,166,.16);
 
-  /* =========================
+
+  /* =========================================================
      AVATAR / BADGES / CHIPS
-  ========================= */
+  ========================================================= */
   --avatar-bg:
     linear-gradient(180deg, #7c6ae6 0%, #6f59d9 100%);
 
@@ -450,6 +568,11 @@
     linear-gradient(180deg, #57a7c9 0%, #3b82a6 100%);
 
   --avatar-text: #ffffff;
+
+  --sidebar-avatar-bg: var(--avatar-bg);
+  --sidebar-avatar-text: var(--avatar-text);
+  --user-avatar-bg: var(--avatar-bg);
+  --user-avatar-text: var(--avatar-text);
 
   --badge-bg: rgba(23,32,51,.040);
   --badge-border: rgba(23,32,51,.075);
@@ -459,9 +582,10 @@
   --chip-border: rgba(23,32,51,.075);
   --chip-text: var(--text-soft);
 
-  /* =========================
+
+  /* =========================================================
      SHADOW SYSTEM
-  ========================= */
+  ========================================================= */
   --shadow-xs: 0 2px 8px rgba(15,23,42,.035);
   --shadow-sm: 0 6px 16px rgba(15,23,42,.050);
   --shadow-md: 0 10px 24px rgba(15,23,42,.070);
@@ -471,7 +595,11 @@
   --shadow-soft: 0 8px 18px rgba(15,23,42,.050);
   --shadow-strong: 0 20px 44px rgba(15,23,42,.105);
 
-  --shadow-dropdown: var(--shadow-lg);
+  --shadow-dropdown:
+    0 28px 64px rgba(15,23,42,.140),
+    0 12px 24px rgba(15,23,42,.075),
+    0 2px 8px rgba(15,23,42,.045);
+
   --shadow-modal: var(--shadow-xl);
 
   --shadow-glow:
@@ -485,36 +613,44 @@
   --shadow-inner:
     inset 0 1px 0 rgba(255,255,255,.72);
 
-  /* =========================
+
+  /* =========================================================
      BLUR
-  ========================= */
+  ========================================================= */
   --blur-sm: blur(8px);
   --blur-md: blur(12px);
   --blur-lg: blur(18px);
   --blur-xl: blur(24px);
 
-  /* =========================
+
+  /* =========================================================
      FOCUS / ACCESSIBILITY
-  ========================= */
-  --focus-ring: 0 0 0 4px rgba(111,89,217,.105);
-  --focus-ring-strong: 0 0 0 4px rgba(111,89,217,.165);
+  ========================================================= */
+  --focus-ring:
+    0 0 0 4px rgba(111,89,217,.105);
+
+  --focus-ring-strong:
+    0 0 0 4px rgba(111,89,217,.165);
 
   --selection-bg: rgba(111,89,217,.16);
   --selection-text: #111827;
 
-  /* =========================
+
+  /* =========================================================
      SCROLLBAR
-  ========================= */
+  ========================================================= */
   --scrollbar-size: 10px;
   --scrollbar-track: transparent;
   --scrollbar-thumb: rgba(23,32,51,.12);
   --scrollbar-thumb-hover: rgba(23,32,51,.20);
 
-  /* =========================
+
+  /* =========================================================
      AUTH / LOGIN
-  ========================= */
+  ========================================================= */
   --auth-card-bg:
-    linear-gradient(180deg, rgba(255,255,255,.965) 0%, rgba(248,250,252,.985) 100%);
+    radial-gradient(circle at 0% 0%, rgba(111,89,217,.050), transparent 32%),
+    linear-gradient(180deg, rgba(255,255,255,.970) 0%, rgba(248,250,252,.985) 100%);
 
   --auth-card-border: rgba(23,32,51,.075);
 
@@ -529,9 +665,24 @@
 
   --auth-logo-glow: 0 0 24px rgba(111,89,217,.08);
 
-  /* =========================
+
+  /* =========================================================
+     SHELL
+  ========================================================= */
+  --shell-app-bg: var(--body-bg);
+  --shell-app-color: var(--text);
+
+  --shell-route-auth-bg:
+    radial-gradient(circle at 18% 14%, rgba(111,89,217,.105), transparent 30%),
+    radial-gradient(circle at 82% 18%, rgba(59,130,166,.080), transparent 30%),
+    var(--body-bg);
+
+  --shell-route-app-bg: var(--body-bg);
+
+
+  /* =========================================================
      LOADER
-  ========================= */
+  ========================================================= */
   --loader-bg: rgba(243,246,250,.92);
   --loader-text: var(--text);
   --loader-ring: rgba(23,32,51,.12);
@@ -551,9 +702,10 @@
     linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.96)),
     rgba(255,255,255,.94);
 
-  /* =========================
+
+  /* =========================================================
      SKELETON / STATES
-  ========================= */
+  ========================================================= */
   --skeleton-bg: rgba(23,32,51,.055);
   --skeleton-bg-strong: rgba(23,32,51,.075);
   --skeleton-shine: rgba(255,255,255,.72);
@@ -578,9 +730,10 @@
   --state-warning-border: var(--border-warning);
   --state-warning-icon: var(--warning);
 
-  /* =========================
+
+  /* =========================================================
      CHARTS
-  ========================= */
+  ========================================================= */
   --chart-1: var(--accent);
   --chart-2: var(--info);
   --chart-3: var(--success);
@@ -594,9 +747,10 @@
   --chart-tooltip-bg: var(--popover-bg);
   --chart-tooltip-border: var(--border-default);
 
-  /* =========================
+
+  /* =========================================================
      APP STATUS
-  ========================= */
+  ========================================================= */
   --status-online: var(--success);
   --status-online-bg: var(--success-bg);
   --status-online-border: var(--border-success);
@@ -612,4 +766,25 @@
   --status-idle: var(--text-faint);
   --status-idle-bg: rgba(100,116,139,.08);
   --status-idle-border: rgba(100,116,139,.16);
+
+
+  /* =========================================================
+     INCIDENCIAS MODAL · LIGHT OVERRIDES
+  ========================================================= */
+  --incidencias-modal-overlay-bg: rgba(15,23,42,.28);
+
+  --incidencias-modal-bg:
+    radial-gradient(circle at top left, rgba(111,89,217,.095), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.970), rgba(250,251,255,.945));
+
+  --incidencias-modal-shadow:
+    0 30px 70px rgba(15,23,42,.14),
+    0 0 0 1px rgba(255,255,255,.65) inset;
+
+  --incidencias-modal-lift-shadow:
+    0 16px 34px rgba(15,23,42,.085),
+    0 0 0 1px rgba(255,255,255,.72) inset;
+
+  --incidencias-modal-thumb-shadow:
+    0 14px 28px rgba(15,23,42,.10);
 }

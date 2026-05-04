@@ -21,9 +21,11 @@
    - soporte Retry-After
    - protección hooks
    - cleanup total de inflight map
+   - abort in-flight opcional
    - errores consistentes
    - eventos sin tokens reales
    - compat con registry.hooks como funciones o entradas { handler }
+   - /api/auth/me recibe Authorization si config lo marca como privado
 
    NOTA IMPORTANTE:
    - este módulo NO decide qué endpoints existen.
@@ -63,6 +65,9 @@ const DEFAULT_RETRY_DELAY_MS =
 const DEFAULT_RETRY_MAX_DELAY_MS =
   4000;
 
+const REQUEST_VERSION =
+  "10.2.0";
+
 const RETRYABLE_HTTP_STATUSES =
   Object.freeze([
     408,
@@ -96,16 +101,12 @@ const TEXT_CONTENT_TYPES =
     "application/x-javascript",
   ]);
 
+const SENSITIVE_HEADER_RE =
+  /authorization|cookie|set-cookie|token|secret|password|credential|session|jwt|bearer/i;
+
 /* =========================================================
    BASICS
 ========================================================= */
-
-function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
-}
 
 function isFunction(value) {
   return typeof value === "function";
@@ -145,6 +146,8 @@ function safeText(value, fallback = "") {
 function safeBoolean(value, fallback = false) {
   if (value === true) return true;
   if (value === false) return false;
+  if (value === "true") return true;
+  if (value === "false") return false;
 
   return Boolean(fallback);
 }
@@ -174,6 +177,14 @@ function safeClone(value, fallback = null) {
     );
   } catch {
     return fallback;
+  }
+}
+
+function safeIsoDate(ms = Date.now()) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
   }
 }
 
@@ -207,10 +218,12 @@ function safeWarn(utils, ...args) {
   } catch {}
 
   try {
-    console.warn(
-      "[Request]",
-      ...args
-    );
+    if (config?.debug) {
+      console.warn(
+        "[Request]",
+        ...args
+      );
+    }
   } catch {}
 }
 
@@ -323,21 +336,44 @@ function sanitizeHeadersForLog(headers = {}) {
     const lower =
       safeText(key).toLowerCase();
 
-    if (
-      lower === "authorization" ||
-      lower === "cookie" ||
-      lower === "set-cookie" ||
-      lower.includes("token")
-    ) {
-      output[key] =
-        "***";
-    } else {
-      output[key] =
-        value;
-    }
+    output[key] =
+      SENSITIVE_HEADER_RE.test(lower)
+        ? "***"
+        : value;
   }
 
   return output;
+}
+
+function readResponseHeaders(response = null) {
+  const output =
+    {};
+
+  try {
+    response?.headers?.forEach?.((value, key) => {
+      output[key] =
+        value;
+    });
+  } catch {}
+
+  return output;
+}
+
+function getHeaderFromObject(headers = {}, name = "") {
+  const target =
+    safeText(name, "").toLowerCase();
+
+  if (!target) {
+    return "";
+  }
+
+  for (const [key, value] of Object.entries(headers || {})) {
+    if (safeText(key, "").toLowerCase() === target) {
+      return value;
+    }
+  }
+
+  return "";
 }
 
 /* =========================================================
@@ -520,16 +556,44 @@ function extractDataMessage(data = null) {
   );
 }
 
-function readResponseHeaders(response = null) {
+function sanitizeErrorForEvent(error = {}) {
   const output =
-    {};
+    safeClone(
+      error,
+      {}
+    ) || {};
 
-  try {
-    response?.headers?.forEach?.((value, key) => {
-      output[key] =
-        value;
-    });
-  } catch {}
+  output.url =
+    safeRedact(
+      output.url || ""
+    );
+
+  output.redactedUrl =
+    safeRedact(
+      output.redactedUrl ||
+        output.url ||
+        ""
+    );
+
+  output.message =
+    safeRedact(
+      output.message || ""
+    );
+
+  output.statusText =
+    safeRedact(
+      output.statusText || ""
+    );
+
+  output.raw =
+    undefined;
+
+  if (output.headers) {
+    output.headers =
+      sanitizeHeadersForLog(
+        output.headers
+      );
+  }
 
   return output;
 }
@@ -593,7 +657,8 @@ export function buildRequestError({
 
     status,
 
-    statusText,
+    statusText:
+      safeRedact(statusText),
 
     url,
 
@@ -621,7 +686,8 @@ export function buildRequestError({
         ? detectNetworkHints(url)
         : null,
 
-    message,
+    message:
+      safeRedact(message),
 
     requestId:
       safeText(requestId, ""),
@@ -633,7 +699,7 @@ export function buildRequestError({
       safeNumber(attempts, 0),
 
     at:
-      new Date().toISOString(),
+      safeIsoDate(),
   };
 }
 
@@ -730,15 +796,17 @@ function computeRetryDelayMs(error, attempt, requestConfig = {}) {
     safeNumber(
       requestConfig?.retryMaxDelay ??
         requestConfig?.retryMaxDelayMs ??
+        config.requestRetryMaxDelayMs ??
         DEFAULT_RETRY_MAX_DELAY_MS,
       DEFAULT_RETRY_MAX_DELAY_MS
     );
 
   const retryAfterMs =
     parseRetryAfterMs(
-      error?.headers?.["retry-after"] ||
-      error?.headers?.["Retry-After"] ||
-      ""
+      getHeaderFromObject(
+        error?.headers,
+        "retry-after"
+      )
     );
 
   if (retryAfterMs > 0) {
@@ -845,7 +913,7 @@ export async function executeFetchWithRetry(url, fetchFactory, requestConfig = {
           redactedUrl:
             safeRedact(url),
           error:
-            normalized,
+            sanitizeErrorForEvent(normalized),
           attempt,
           nextAttempt:
             attempt + 1,
@@ -918,8 +986,10 @@ async function safeRunHooks(hooks, payload, context = {}) {
       }
 
       if (item?.once === true) {
-        item.enabled =
-          false;
+        try {
+          item.enabled =
+            false;
+        } catch {}
       }
     } catch (error) {
       safeWarn(
@@ -967,10 +1037,6 @@ function isArrayBufferBody(value) {
     typeof ArrayBuffer !== "undefined" &&
     value instanceof ArrayBuffer
   );
-}
-
-function isPlainObject(value) {
-  return isObject(value);
 }
 
 function serializeBody({
@@ -1036,7 +1102,7 @@ function serializeBody({
     ).toLowerCase();
 
   if (
-    isPlainObject(body) ||
+    isObject(body) ||
     Array.isArray(body)
   ) {
     if (
@@ -1056,11 +1122,89 @@ function serializeBody({
       contentType.includes("application/json") ||
       !contentType
     ) {
-      return JSON.stringify(body);
+      try {
+        return JSON.stringify(body);
+      } catch {
+        return undefined;
+      }
     }
   }
 
   return body;
+}
+
+/* =========================================================
+   FETCH INIT
+========================================================= */
+
+function createAbortControllerSafe() {
+  try {
+    if (typeof AbortController !== "undefined") {
+      return new AbortController();
+    }
+  } catch {}
+
+  return null;
+}
+
+function buildFetchInit({
+  method,
+  headers,
+  body,
+  credentials,
+  signal,
+  cache,
+  mode,
+  redirect,
+  referrerPolicy,
+  keepalive,
+} = {}) {
+  const init = {
+    method,
+    headers,
+  };
+
+  if (body !== undefined) {
+    init.body =
+      body;
+  }
+
+  if (credentials !== undefined) {
+    init.credentials =
+      credentials;
+  }
+
+  if (signal) {
+    init.signal =
+      signal;
+  }
+
+  if (cache !== undefined) {
+    init.cache =
+      cache;
+  }
+
+  if (mode !== undefined) {
+    init.mode =
+      mode;
+  }
+
+  if (redirect !== undefined) {
+    init.redirect =
+      redirect;
+  }
+
+  if (referrerPolicy !== undefined) {
+    init.referrerPolicy =
+      referrerPolicy;
+  }
+
+  if (keepalive !== undefined) {
+    init.keepalive =
+      keepalive;
+  }
+
+  return init;
 }
 
 /* =========================================================
@@ -1080,7 +1224,16 @@ export function createRequest({
   const inFlightRequests =
     new Map();
 
+  const inFlightMeta =
+    new Map();
+
+  const inFlightControllers =
+    new Map();
+
   const stats = {
+    version:
+      REQUEST_VERSION,
+
     total:
       0,
 
@@ -1094,6 +1247,9 @@ export function createRequest({
       0,
 
     retry:
+      0,
+
+    aborted:
       0,
 
     lastRequestAt:
@@ -1148,9 +1304,27 @@ export function createRequest({
     ].join("::");
   }
 
+  function resolveAuthDefault(path = "", opts = {}) {
+    if (opts.public === true || opts.skipAuth === true) {
+      return false;
+    }
+
+    if (opts.auth !== undefined && opts.auth !== null) {
+      return Boolean(opts.auth);
+    }
+
+    return !isPublicApiPath(path);
+  }
+
   function buildBaseConfig(path, options = {}) {
     const opts =
       safeObject(options);
+
+    const authDefault =
+      resolveAuthDefault(
+        path,
+        opts
+      );
 
     return {
       method:
@@ -1163,7 +1337,13 @@ export function createRequest({
         null,
 
       auth:
-        !isPublicApiPath(path),
+        authDefault,
+
+      public:
+        false,
+
+      skipAuth:
+        false,
 
       timeout:
         config.requestTimeout,
@@ -1176,6 +1356,9 @@ export function createRequest({
 
       query:
         opts.query ?? opts.params ?? null,
+
+      params:
+        opts.params ?? null,
 
       credentials:
         config?.api?.withCredentials
@@ -1193,6 +1376,7 @@ export function createRequest({
         DEFAULT_RETRY_DELAY_MS,
 
       retryMaxDelay:
+        config.requestRetryMaxDelayMs ??
         DEFAULT_RETRY_MAX_DELAY_MS,
 
       dedupe:
@@ -1231,6 +1415,86 @@ export function createRequest({
     };
   }
 
+  function normalizeFinalRequestConfig(requestConfig, baseConfig) {
+    const merged = {
+      ...baseConfig,
+      ...safeObject(
+        requestConfig,
+        baseConfig
+      ),
+    };
+
+    merged.method =
+      normalizeMethod(
+        merged.method
+      );
+
+    merged.path =
+      safeText(
+        merged.path,
+        baseConfig.path
+      );
+
+    merged.query =
+      merged.query ??
+      merged.params ??
+      null;
+
+    if (
+      merged.public === true ||
+      merged.skipAuth === true
+    ) {
+      merged.auth =
+        false;
+    } else if (
+      merged.auth === undefined ||
+      merged.auth === null
+    ) {
+      merged.auth =
+        !isPublicApiPath(
+          merged.path
+        );
+    } else {
+      merged.auth =
+        Boolean(merged.auth);
+    }
+
+    merged.timeout =
+      safeNumber(
+        merged.timeout,
+        config.requestTimeout
+      );
+
+    merged.retries =
+      safeNumber(
+        merged.retries,
+        config.requestRetries
+      );
+
+    merged.retryDelay =
+      safeNumber(
+        merged.retryDelay ??
+          merged.retryDelayMs,
+        config.requestRetryDelayMs ??
+          DEFAULT_RETRY_DELAY_MS
+      );
+
+    merged.retryMaxDelay =
+      safeNumber(
+        merged.retryMaxDelay ??
+          merged.retryMaxDelayMs,
+        config.requestRetryMaxDelayMs ??
+          DEFAULT_RETRY_MAX_DELAY_MS
+      );
+
+    merged.expectedStatuses =
+      safeArray(
+        merged.expectedStatuses
+      );
+
+    return merged;
+  }
+
   async function request(path, options = {}) {
     const startedAt =
       Date.now();
@@ -1256,18 +1520,14 @@ export function createRequest({
         }
       );
 
-    requestConfig = {
-      ...baseConfig,
-      ...safeObject(
+    requestConfig =
+      normalizeFinalRequestConfig(
         requestConfig,
         baseConfig
-      ),
-    };
+      );
 
     const method =
-      normalizeMethod(
-        requestConfig.method
-      );
+      requestConfig.method;
 
     const url =
       buildUrl(
@@ -1293,8 +1553,8 @@ export function createRequest({
     ) {
       setHeader(
         finalHeaders,
-        "Authorization",
-        `${config.auth.bearerPrefix} ${state.token}`
+        config?.auth?.tokenHeader || "Authorization",
+        `${config?.auth?.bearerPrefix || "Bearer"} ${state.token}`
       );
     }
 
@@ -1339,7 +1599,10 @@ export function createRequest({
             url:
               redactedUrl,
             method,
-            dedupeKey,
+            auth:
+              Boolean(requestConfig.auth),
+            dedupeKey:
+              safeRedact(dedupeKey),
           }
         );
       }
@@ -1352,6 +1615,16 @@ export function createRequest({
       startedAt;
     stats.lastUrl =
       redactedUrl;
+
+    const requestAbortController =
+      createAbortControllerSafe();
+
+    if (requestAbortController) {
+      inFlightControllers.set(
+        requestId,
+        requestAbortController
+      );
+    }
 
     if (requestConfig.emitEvents !== false) {
       safeEmit(
@@ -1366,6 +1639,8 @@ export function createRequest({
             Boolean(requestConfig.auth),
           headers:
             sanitizeHeadersForLog(finalHeaders),
+          at:
+            safeIsoDate(startedAt),
         }
       );
     }
@@ -1407,6 +1682,7 @@ export function createRequest({
                     timeout.signal ||
                       timeout.controller?.signal,
                     requestConfig.signal,
+                    requestAbortController?.signal,
                   ]);
 
                 try {
@@ -1416,29 +1692,32 @@ export function createRequest({
                     );
                   }
 
+                  const fetchInit =
+                    buildFetchInit({
+                      method,
+                      headers:
+                        finalHeaders,
+                      body:
+                        payload,
+                      credentials:
+                        requestConfig.credentials,
+                      signal,
+                      cache:
+                        requestConfig.cache,
+                      mode:
+                        requestConfig.mode,
+                      redirect:
+                        requestConfig.redirect,
+                      referrerPolicy:
+                        requestConfig.referrerPolicy,
+                      keepalive:
+                        requestConfig.keepalive,
+                    });
+
                   const currentResponse =
                     await fetch(
                       url,
-                      {
-                        method,
-                        headers:
-                          finalHeaders,
-                        body:
-                          payload,
-                        credentials:
-                          requestConfig.credentials,
-                        signal,
-                        cache:
-                          requestConfig.cache,
-                        mode:
-                          requestConfig.mode,
-                        redirect:
-                          requestConfig.redirect,
-                        referrerPolicy:
-                          requestConfig.referrerPolicy,
-                        keepalive:
-                          requestConfig.keepalive,
-                      }
+                      fetchInit
                     );
 
                   const allowedStatus =
@@ -1477,15 +1756,21 @@ export function createRequest({
                     throw error;
                   }
 
+                  const timeoutAborted =
+                    timeout.controller?.signal?.aborted === true &&
+                    String(timeout.controller?.signal?.reason || "")
+                      .toLowerCase()
+                      .includes("timeout");
+
                   throw buildRequestError({
                     url,
                     method,
                     timeout:
                       isProbablyTimeoutError(error) ||
-                      timeout.controller?.signal?.aborted === true &&
-                        String(timeout.controller?.signal?.reason || "").includes("timeout"),
+                      timeoutAborted,
                     aborted:
-                      isAbortError(error),
+                      isAbortError(error) ||
+                      requestAbortController?.signal?.aborted === true,
                     raw:
                       error?.message ||
                       error,
@@ -1508,6 +1793,10 @@ export function createRequest({
               {
                 ...requestConfig,
                 method,
+                retryDelay:
+                  requestConfig.retryDelay,
+                retryMaxDelay:
+                  requestConfig.retryMaxDelay,
                 onRetry:
                   (retryMeta) => {
                     stats.retry += 1;
@@ -1535,7 +1824,9 @@ export function createRequest({
                         status:
                           retryMeta.error?.status || 0,
                         message:
-                          retryMeta.error?.message || "",
+                          safeRedact(
+                            retryMeta.error?.message || ""
+                          ),
                       }
                     );
                   },
@@ -1676,16 +1967,19 @@ export function createRequest({
               requestConfig
             );
 
+          if (normalized.aborted) {
+            stats.aborted += 1;
+          }
+
           stats.error += 1;
 
           stats.lastError =
-            {
+            sanitizeErrorForEvent({
               ...normalized,
               url:
                 redactedUrl,
-              raw:
-                undefined,
-            };
+              redactedUrl,
+            });
 
           const silent =
             safeBoolean(
@@ -1698,7 +1992,9 @@ export function createRequest({
             requestConfig.storeError !== false
           ) {
             try {
-              setError?.(normalized);
+              setError?.(
+                sanitizeErrorForEvent(normalized)
+              );
             } catch {}
           }
 
@@ -1730,12 +2026,12 @@ export function createRequest({
             safeEmit(
               events,
               "app:request:error",
-              {
+              sanitizeErrorForEvent({
                 ...normalized,
                 url:
                   redactedUrl,
                 redactedUrl,
-              }
+              })
             );
           }
 
@@ -1748,25 +2044,60 @@ export function createRequest({
         dedupeKey,
         promise
       );
+
+      inFlightMeta.set(
+        dedupeKey,
+        {
+          requestId,
+          url:
+            redactedUrl,
+          method,
+          auth:
+            Boolean(requestConfig.auth),
+          startedAt:
+            safeIsoDate(startedAt),
+        }
+      );
     }
 
     try {
       return await promise;
     } finally {
       if (dedupeKey) {
-        inFlightRequests.delete(dedupeKey);
+        inFlightRequests.delete(
+          dedupeKey
+        );
+
+        inFlightMeta.delete(
+          dedupeKey
+        );
       }
+
+      inFlightControllers.delete(
+        requestId
+      );
     }
   }
 
   request.getSnapshot =
-    function getRequestSnapshot() {
+    function getRequestSnapshot(options = {}) {
+      const opts =
+        safeObject(options);
+
       return {
+        version:
+          REQUEST_VERSION,
+
         sequence:
           requestSequence,
 
         inFlight:
           inFlightRequests.size,
+
+        inFlightRequests:
+          opts.includeInFlight === true
+            ? Array.from(inFlightMeta.values())
+            : [],
 
         stats:
           safeClone(
@@ -1775,16 +2106,45 @@ export function createRequest({
           ),
 
         at:
-          new Date().toISOString(),
+          safeIsoDate(),
       };
     };
 
   request.clearInFlight =
-    function clearInFlight() {
+    function clearInFlight(options = {}) {
+      const opts =
+        safeObject(options);
+
       const count =
         inFlightRequests.size;
 
+      if (opts.abort === true) {
+        for (const controller of inFlightControllers.values()) {
+          try {
+            controller.abort(
+              opts.reason || "clearInFlight"
+            );
+          } catch {}
+        }
+      }
+
       inFlightRequests.clear();
+      inFlightMeta.clear();
+
+      return count;
+    };
+
+  request.abortInFlight =
+    function abortInFlight(reason = "abortInFlight") {
+      let count =
+        0;
+
+      for (const controller of inFlightControllers.values()) {
+        try {
+          controller.abort(reason);
+          count += 1;
+        } catch {}
+      }
 
       return count;
     };
@@ -1898,12 +2258,16 @@ export function createApiClient(request) {
 
     request,
 
-    getSnapshot() {
-      return request.getSnapshot?.() || null;
+    getSnapshot(options = {}) {
+      return request.getSnapshot?.(options) || null;
     },
 
-    clearInFlight() {
-      return request.clearInFlight?.() || 0;
+    clearInFlight(options = {}) {
+      return request.clearInFlight?.(options) || 0;
+    },
+
+    abortInFlight(reason = "abortInFlight") {
+      return request.abortInFlight?.(reason) || 0;
     },
   };
 }

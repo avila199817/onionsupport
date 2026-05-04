@@ -12,21 +12,26 @@
    - nunca asumir success por defecto si backend no lo declara
    - endurecer urls / timeout / payload / redirects
    - soportar confirmación de nueva contraseña
+   - soportar validación opcional de token reset
    - api pública estable para Auth module
 
    HARDENING EXTREMO:
-   - transporte compatible con AppCore.apiClient, AppCore.http, Http service y fetch
+   - transporte compatible con AppCore.apiClient, AppCore.request,
+     AppCore.http, AppCore.Http, services.http y fetch
    - timeout real en fetch
    - redirects anti open-redirect
    - token/password/identifier con límites
    - respuestas nested: data / payload / result / body / response.data
-   - rate-limit: 429 / retryAfter / cooldownSeconds
+   - rate-limit: 429 / Retry-After / retryAfter / cooldownSeconds
    - errores normalizados sin throws hacia la UI pública
    - confirm password estricto
+   - eventos sin tokens ni passwords reales
+   - no toca sesión auth ni rutas públicas técnicas
+   - no llama refresh
+   - no asume éxito por HTTP 200 si backend no declara ok/success/accepted/valid
 
    FIX CRÍTICO:
-   - eliminado conflicto SyntaxError:
-       Identifier 'response' has already been declared
+   - sin conflicto SyntaxError por Identifier 'response'
    - getNode() expone responseNode en lugar de response
    - todos los resolvers usan responseNode
 ========================================================= */
@@ -36,16 +41,173 @@ import { AppCore } from "../../core/index.js";
 import {
   AUTH_ENDPOINTS,
   AUTH_CONSTANTS,
+  AUTH_STORAGE_KEYS,
+  AUTH_TOKEN_PARAM_NAMES,
   getRequestPasswordResetEndpoint as getRequestPasswordResetEndpointFromConstants,
   getConfirmPasswordResetEndpoint as getConfirmPasswordResetEndpointFromConstants,
+  getValidateResetTokenEndpoint as getValidateResetTokenEndpointFromConstants,
 } from "./constants.js";
 
+import {
+  normalizeTokenValue,
+  normalizeSessionValue,
+  sanitizeRedirectPath,
+  redactTokenInText,
+} from "./helpers.js";
+
 /* =========================================================
-   VERSION / DEBUG MARKER
+   VERSION
 ========================================================= */
 
 export const PASSWORD_RESET_MODULE_VERSION =
-  "password-reset.2026-04-27.response-node-fix";
+  "password-reset.10.0.0.extreme";
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const DEFAULT_REQUEST_ENDPOINT =
+  "/api/auth/reset-password-request";
+
+const DEFAULT_CONFIRM_ENDPOINT =
+  "/api/auth/reset-password-confirm";
+
+const DEFAULT_VALIDATE_ENDPOINT =
+  "/api/auth/reset-password/validate";
+
+const DEFAULT_LOGIN_REDIRECT =
+  "/login";
+
+const LOCAL_ORIGIN =
+  "http://localhost";
+
+const SUCCESS_STATUS_TEXTS =
+  Object.freeze([
+    "ok",
+    "success",
+    "succeeded",
+    "accepted",
+    "valid",
+    "sent",
+    "email_sent",
+    "reset_sent",
+    "password_reset_sent",
+    "password_updated",
+    "password_changed",
+    "completed",
+    "done",
+  ]);
+
+const FAILURE_STATUS_TEXTS =
+  Object.freeze([
+    "error",
+    "failed",
+    "failure",
+    "invalid",
+    "unauthorized",
+    "forbidden",
+    "expired",
+    "rate_limited",
+    "too_many_requests",
+  ]);
+
+const FAILURE_CODES =
+  Object.freeze([
+    "INVALID_TOKEN",
+    "TOKEN_INVALID",
+    "TOKEN_EXPIRED",
+    "RESET_TOKEN_EXPIRED",
+    "RESET_TOKEN_INVALID",
+    "PASSWORD_RESET_TOKEN_INVALID",
+    "PASSWORD_RESET_TOKEN_EXPIRED",
+    "INVALID_IDENTIFIER",
+    "MISSING_IDENTIFIER",
+    "MISSING_TOKEN",
+    "MISSING_PASSWORD",
+    "PASSWORD_MISMATCH",
+    "RATE_LIMITED",
+    "TOO_MANY_REQUESTS",
+    "UNAUTHORIZED",
+    "FORBIDDEN",
+  ]);
+
+const CORRUPTED_TEXT_VALUES =
+  Object.freeze([
+    "undefined",
+    "null",
+    "false",
+    "[object object]",
+    "{}",
+    "[]",
+    "\"undefined\"",
+    "\"null\"",
+  ]);
+
+const PASSWORD_FIELD_NAMES =
+  Object.freeze([
+    "password",
+    "newPassword",
+    "new_password",
+    "confirmPassword",
+    "passwordConfirmation",
+    "password_confirmation",
+    "repeatPassword",
+    "repeat_password",
+  ]);
+
+const TOKEN_FIELD_NAMES =
+  Object.freeze([
+    "token",
+    "code",
+    "t",
+    "resetToken",
+    "reset_token",
+    "reset_code",
+    "passwordResetToken",
+    "password_reset_token",
+  ]);
+
+/* =========================================================
+   RUNTIME STATE
+========================================================= */
+
+const runtime = {
+  requestInFlight:
+    null,
+
+  confirmInFlight:
+    null,
+
+  validateInFlight:
+    null,
+
+  lastRequestAt:
+    0,
+
+  lastConfirmAt:
+    0,
+
+  lastValidateAt:
+    0,
+
+  requestCount:
+    0,
+
+  confirmCount:
+    0,
+
+  validateCount:
+    0,
+
+  cooldownUntil:
+    0,
+
+  lastError:
+    null,
+
+  lastResult:
+    null,
+};
 
 /* =========================================================
    BASICS
@@ -56,6 +218,18 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
+}
+
+function nowMs() {
+  return Date.now();
+}
+
+function isoNow() {
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
 }
 
 function safeText(value, fallback = "") {
@@ -79,6 +253,64 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(numeric)
     ? numeric
     : fallback;
+}
+
+function safeInt(value, fallback = 0) {
+  return Math.trunc(
+    safeNumber(value, fallback)
+  );
+}
+
+function clampNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
+  const numeric =
+    safeNumber(value, min);
+
+  return Math.min(
+    Math.max(numeric, min),
+    max
+  );
+}
+
+function safeBool(value, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  const text =
+    safeText(value, "")
+      .toLowerCase();
+
+  if (
+    [
+      "true",
+      "1",
+      "yes",
+      "si",
+      "sí",
+      "ok",
+      "on",
+    ].includes(text)
+  ) {
+    return true;
+  }
+
+  if (
+    [
+      "false",
+      "0",
+      "no",
+      "off",
+    ].includes(text)
+  ) {
+    return false;
+  }
+
+  return Boolean(fallback);
 }
 
 function isObject(value) {
@@ -105,22 +337,15 @@ function isAbsoluteUrl(value = "") {
   );
 }
 
-function looksLikeEmail(value = "") {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-    safeText(value)
+function isCorruptedTextValue(value = "") {
+  const text =
+    safeText(value, "")
+      .toLowerCase();
+
+  return (
+    !text ||
+    CORRUPTED_TEXT_VALUES.includes(text)
   );
-}
-
-function normalizeEmail(value = "") {
-  return safeText(value).toLowerCase();
-}
-
-function normalizeUsername(value = "") {
-  return safeText(value)
-    .replace(/^@+/, "")
-    .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "")
-    .toLowerCase();
 }
 
 function pickFirst(...values) {
@@ -152,44 +377,139 @@ function pickFirstText(...values) {
   );
 }
 
-function getNode(input = {}) {
-  const root =
-    safeObject(input);
+function safeClone(value, fallback = null) {
+  try {
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
+    }
+  } catch {}
 
-  const data =
-    safeObject(root.data);
+  try {
+    return JSON.parse(
+      JSON.stringify(value)
+    );
+  } catch {
+    return fallback;
+  }
+}
 
-  const payload =
-    safeObject(root.payload);
+/* =========================================================
+   EVENT SAFETY
+========================================================= */
 
-  const result =
-    safeObject(root.result);
+function redactSafe(value = "") {
+  try {
+    return redactTokenInText(value);
+  } catch {
+    return safeText(value, "")
+      .replace(
+        /([?&](?:token|activationToken|activateToken|resetToken|passwordResetToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
+        "$1***"
+      )
+      .replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
+  }
+}
 
-  const body =
-    safeObject(root.body);
+function sanitizeEventPayload(payload = {}, depth = 0) {
+  if (depth > 5) {
+    return "[MaxDepth]";
+  }
 
-  const responseNode =
-    safeObject(root.response);
+  if (Array.isArray(payload)) {
+    return payload.map((item) =>
+      sanitizeEventPayload(
+        item,
+        depth + 1
+      )
+    );
+  }
 
-  const responseData =
-    safeObject(responseNode.data);
+  if (!isObject(payload)) {
+    return typeof payload === "string"
+      ? redactSafe(payload)
+      : payload;
+  }
 
-  return {
-    root,
-    data,
-    payload,
-    result,
-    body,
-    responseNode,
-    responseData,
-  };
+  const output = {};
+
+  for (const [key, value] of Object.entries(payload)) {
+    const lower =
+      safeText(key, "")
+        .toLowerCase();
+
+    if (
+      lower.includes("token") ||
+      lower.includes("password") ||
+      lower.includes("authorization") ||
+      lower === "code" ||
+      lower === "t"
+    ) {
+      output[key] =
+        value ? "***" : value;
+      continue;
+    }
+
+    if (
+      lower.includes("url") ||
+      lower.includes("path") ||
+      lower.includes("redirect") ||
+      lower.includes("endpoint")
+    ) {
+      output[key] =
+        typeof value === "string"
+          ? redactSafe(value)
+          : sanitizeEventPayload(value, depth + 1);
+      continue;
+    }
+
+    output[key] =
+      sanitizeEventPayload(
+        value,
+        depth + 1
+      );
+  }
+
+  return output;
 }
 
 function safeEmit(eventName, payload = {}) {
+  const cleanEvent =
+    safeText(eventName, "");
+
+  if (!cleanEvent) {
+    return false;
+  }
+
+  const cleanPayload =
+    sanitizeEventPayload(payload);
+
   try {
     AppCore?.events?.emit?.(
-      eventName,
-      payload
+      cleanEvent,
+      cleanPayload
+    );
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function safeWarn(...args) {
+  try {
+    AppCore?.utils?.warn?.(
+      "[PasswordReset]",
+      ...args
+    );
+  } catch {}
+
+  try {
+    console.warn(
+      "[PasswordReset]",
+      ...args
     );
   } catch {}
 }
@@ -199,56 +519,71 @@ function safeEmit(eventName, payload = {}) {
 ========================================================= */
 
 function getResetIdentifierMaxLength() {
-  return safeNumber(
+  return clampNumber(
     AUTH_CONSTANTS?.resetIdentifierMaxLength ??
       AUTH_CONSTANTS?.identifierMaxLength ??
       160,
-    160
+    1,
+    512
   );
 }
 
 function getResetTokenMinLength() {
-  return safeNumber(
+  return clampNumber(
     AUTH_CONSTANTS?.resetTokenMinLength ??
       AUTH_CONSTANTS?.tokenMinLength ??
       8,
-    8
-  );
-}
-
-function getResetTokenMaxLength() {
-  return safeNumber(
-    AUTH_CONSTANTS?.resetTokenMaxLength ??
-      AUTH_CONSTANTS?.tokenMaxLength ??
-      4096,
+    1,
     4096
   );
 }
 
-function getResetPasswordMinLength() {
-  return safeNumber(
-    AUTH_CONSTANTS?.resetPasswordMinLength ??
-      AUTH_CONSTANTS?.passwordMinLength ??
-      8,
-    8
+function getResetTokenMaxLength() {
+  return clampNumber(
+    AUTH_CONSTANTS?.resetTokenMaxLength ??
+      AUTH_CONSTANTS?.tokenMaxLength ??
+      4096,
+    getResetTokenMinLength(),
+    32768
   );
 }
 
-function getResetPasswordMaxLength() {
-  return safeNumber(
-    AUTH_CONSTANTS?.resetPasswordMaxLength ??
-      AUTH_CONSTANTS?.passwordMaxLength ??
-      1024,
+function getResetPasswordMinLength() {
+  return clampNumber(
+    AUTH_CONSTANTS?.resetPasswordMinLength ??
+      AUTH_CONSTANTS?.passwordMinLength ??
+      8,
+    1,
     1024
   );
 }
 
+function getResetPasswordMaxLength() {
+  return clampNumber(
+    AUTH_CONSTANTS?.resetPasswordMaxLength ??
+      AUTH_CONSTANTS?.passwordMaxLength ??
+      1024,
+    getResetPasswordMinLength(),
+    8192
+  );
+}
+
 function getRequestTimeout() {
-  return safeNumber(
+  return clampNumber(
     AUTH_CONSTANTS?.requestTimeout ??
       AppCore?.config?.requestTimeout ??
       15000,
-    15000
+    1000,
+    120000
+  );
+}
+
+function getDefaultCooldownSeconds() {
+  return clampNumber(
+    AUTH_CONSTANTS?.resetCooldownDefaultSeconds ??
+      60,
+    0,
+    3600
   );
 }
 
@@ -272,6 +607,14 @@ function getDefaultConfirmErrorMessage() {
   return "No se pudo restablecer la contraseña.";
 }
 
+function getDefaultValidateSuccessMessage() {
+  return "El token de recuperación es válido.";
+}
+
+function getDefaultValidateErrorMessage() {
+  return "El token de recuperación no es válido.";
+}
+
 function getRateLimitMessage() {
   return "Espera un momento antes de volver a intentarlo.";
 }
@@ -280,54 +623,71 @@ function getRateLimitMessage() {
    ENDPOINTS
 ========================================================= */
 
-function getConfiguredRequestEndpoint() {
-  const candidates = [
-    isFunction(getRequestPasswordResetEndpointFromConstants)
-      ? getRequestPasswordResetEndpointFromConstants()
-      : "",
-    AUTH_ENDPOINTS?.requestPasswordReset,
-    AUTH_ENDPOINTS?.resetPasswordRequest,
-    AUTH_ENDPOINTS?.forgotPassword,
-    AUTH_ENDPOINTS?.recoverPassword,
-    "/api/auth/reset-password-request",
-  ];
-
+function firstEndpoint(candidates = [], fallback = "") {
   for (const candidate of candidates) {
     const value =
-      safeText(candidate);
+      safeText(candidate, "");
 
     if (value) {
       return value;
     }
   }
 
-  return "/api/auth/reset-password-request";
+  return fallback;
+}
+
+function getConfiguredRequestEndpoint() {
+  return firstEndpoint(
+    [
+      isFunction(getRequestPasswordResetEndpointFromConstants)
+        ? getRequestPasswordResetEndpointFromConstants()
+        : "",
+      AUTH_ENDPOINTS?.requestPasswordReset,
+      AUTH_ENDPOINTS?.resetPasswordRequest,
+      AUTH_ENDPOINTS?.forgotPassword,
+      AUTH_ENDPOINTS?.recoverPassword,
+      AUTH_ENDPOINTS?.recover,
+      AUTH_ENDPOINTS?.forgot,
+      AUTH_ENDPOINTS?.passwordResetRequest,
+      DEFAULT_REQUEST_ENDPOINT,
+    ],
+    DEFAULT_REQUEST_ENDPOINT
+  );
 }
 
 function getConfiguredConfirmEndpoint() {
-  const candidates = [
-    isFunction(getConfirmPasswordResetEndpointFromConstants)
-      ? getConfirmPasswordResetEndpointFromConstants()
-      : "",
-    AUTH_ENDPOINTS?.confirmResetPassword,
-    AUTH_ENDPOINTS?.confirmPasswordReset,
-    AUTH_ENDPOINTS?.resetPasswordConfirm,
-    AUTH_ENDPOINTS?.passwordResetConfirm,
-    AUTH_ENDPOINTS?.resetPasswordUpdate,
-    AUTH_ENDPOINTS?.resetPasswordFinalize,
-    "/api/auth/reset-password-confirm",
-  ];
+  return firstEndpoint(
+    [
+      isFunction(getConfirmPasswordResetEndpointFromConstants)
+        ? getConfirmPasswordResetEndpointFromConstants()
+        : "",
+      AUTH_ENDPOINTS?.confirmResetPassword,
+      AUTH_ENDPOINTS?.confirmPasswordReset,
+      AUTH_ENDPOINTS?.resetPasswordConfirm,
+      AUTH_ENDPOINTS?.passwordResetConfirm,
+      AUTH_ENDPOINTS?.resetPasswordUpdate,
+      AUTH_ENDPOINTS?.resetPasswordFinalize,
+      AUTH_ENDPOINTS?.changeForgottenPassword,
+      DEFAULT_CONFIRM_ENDPOINT,
+    ],
+    DEFAULT_CONFIRM_ENDPOINT
+  );
+}
 
-  for (const candidate of candidates) {
-    const value =
-      safeText(candidate);
-
-    if (value) {
-      return value;
-    }
-  }
-
-  return "/api/auth/reset-password-confirm";
+function getConfiguredValidateEndpoint() {
+  return firstEndpoint(
+    [
+      isFunction(getValidateResetTokenEndpointFromConstants)
+        ? getValidateResetTokenEndpointFromConstants()
+        : "",
+      AUTH_ENDPOINTS?.validateResetToken,
+      AUTH_ENDPOINTS?.resetPasswordValidate,
+      AUTH_ENDPOINTS?.validatePasswordReset,
+      AUTH_ENDPOINTS?.passwordResetValidate,
+      DEFAULT_VALIDATE_ENDPOINT,
+    ],
+    DEFAULT_VALIDATE_ENDPOINT
+  );
 }
 
 export function getRequestPasswordResetEndpoint() {
@@ -336,6 +696,10 @@ export function getRequestPasswordResetEndpoint() {
 
 export function getConfirmResetPasswordEndpoint() {
   return getConfiguredConfirmEndpoint();
+}
+
+export function getValidateResetPasswordTokenEndpoint() {
+  return getConfiguredValidateEndpoint();
 }
 
 /* =========================================================
@@ -362,6 +726,32 @@ function normalizeRelativePath(path = "") {
     return "";
   }
 
+  if (
+    value.toLowerCase().includes("%0d") ||
+    value.toLowerCase().includes("%0a") ||
+    value.toLowerCase().includes("%09") ||
+    value.toLowerCase().includes("%5c") ||
+    value.includes("\\")
+  ) {
+    return "";
+  }
+
+  try {
+    const decoded =
+      decodeURIComponent(value)
+        .replace(/\\/g, "/");
+
+    if (
+      decoded.startsWith("//") ||
+      /^[a-z][a-z0-9+.-]*:/i.test(decoded) ||
+      /[\r\n\t]/.test(decoded)
+    ) {
+      return "";
+    }
+  } catch {
+    return "";
+  }
+
   if (!value.startsWith("/")) {
     value = `/${value}`;
   }
@@ -374,12 +764,12 @@ function normalizeRelativePath(path = "") {
   return value || "";
 }
 
-function sanitizeRedirect(value = "") {
+function sanitizeRedirect(value = "", fallback = "") {
   const raw =
     safeText(value, "");
 
   if (!raw) {
-    return "";
+    return fallback;
   }
 
   if (isAbsoluteUrl(raw)) {
@@ -393,21 +783,255 @@ function sanitizeRedirect(value = "") {
       ) {
         return normalizeRelativePath(
           `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
-        );
+        ) || fallback;
       }
 
-      return "";
+      return fallback;
     } catch {
-      return "";
+      return fallback;
     }
   }
 
-  return normalizeRelativePath(raw);
+  try {
+    return sanitizeRedirectPath(
+      raw,
+      fallback || ""
+    );
+  } catch {
+    return normalizeRelativePath(raw) || fallback;
+  }
+}
+
+/* =========================================================
+   PATH / TOKEN RESOLUTION
+========================================================= */
+
+function getBaseOrigin() {
+  if (
+    isBrowser() &&
+    window.location?.origin
+  ) {
+    return window.location.origin;
+  }
+
+  return LOCAL_ORIGIN;
+}
+
+function getCurrentPath() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  try {
+    return `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`;
+  } catch {
+    return "";
+  }
+}
+
+function getTokenParamNames(type = "reset") {
+  const names =
+    AUTH_TOKEN_PARAM_NAMES?.[type];
+
+  if (Array.isArray(names)) {
+    return names;
+  }
+
+  return [
+    "token",
+    "resetToken",
+    "passwordResetToken",
+    "code",
+    "t",
+  ];
+}
+
+function extractTokenFromSearch(search = "", names = getTokenParamNames("reset")) {
+  try {
+    const params =
+      new URLSearchParams(search || "");
+
+    for (const name of names) {
+      const token =
+        normalizeTokenValue(
+          params.get(name),
+          getResetTokenMaxLength()
+        );
+
+      if (token) {
+        return token;
+      }
+    }
+  } catch {}
+
+  return "";
+}
+
+function extractTokenFromPath(path = "") {
+  const raw =
+    safeText(path, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    const parsed =
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
+
+    const pathname =
+      parsed.pathname || "";
+
+    const marker =
+      "/reset-password/confirm/";
+
+    if (pathname.startsWith(marker)) {
+      const token =
+        pathname
+          .slice(marker.length)
+          .split("/")[0];
+
+      try {
+        return normalizeTokenValue(
+          decodeURIComponent(token || ""),
+          getResetTokenMaxLength()
+        ) || "";
+      } catch {
+        return normalizeTokenValue(
+          token,
+          getResetTokenMaxLength()
+        ) || "";
+      }
+    }
+  } catch {}
+
+  return "";
+}
+
+function extractResetTokenFromUrl(pathOrUrl = getCurrentPath()) {
+  const raw =
+    safeText(pathOrUrl, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  const pathToken =
+    extractTokenFromPath(raw);
+
+  if (pathToken) {
+    return pathToken;
+  }
+
+  try {
+    const parsed =
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
+
+    const fromSearch =
+      extractTokenFromSearch(
+        parsed.search,
+        getTokenParamNames("reset")
+      );
+
+    if (fromSearch) {
+      return fromSearch;
+    }
+
+    if (
+      parsed.hash &&
+      parsed.hash.includes("?")
+    ) {
+      const query =
+        parsed.hash
+          .split("?")
+          .slice(1)
+          .join("?");
+
+      return extractTokenFromSearch(
+        query ? `?${query}` : "",
+        getTokenParamNames("reset")
+      );
+    }
+  } catch {}
+
+  return "";
 }
 
 /* =========================================================
    IDENTIFIER / TOKEN / PASSWORD
 ========================================================= */
+
+function looksLikeEmail(value = "") {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+    safeText(value)
+  );
+}
+
+function looksLikePhone(value = "") {
+  const clean =
+    safeText(value)
+      .replace(/[^\d+]/g, "");
+
+  return /^\+?\d{6,20}$/.test(clean);
+}
+
+function normalizeEmail(value = "") {
+  return safeText(value)
+    .toLowerCase()
+    .slice(0, 254);
+}
+
+function normalizePhone(value = "") {
+  return safeText(value)
+    .replace(/[^\d+]/g, "")
+    .slice(0, 32);
+}
+
+function normalizeUsername(value = "") {
+  return safeText(value)
+    .normalize("NFKC")
+    .replace(/^@+/, "")
+    .replace(/\s+/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "")
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .toLowerCase()
+    .slice(0, 80);
+}
+
+function normalizeIdentifier(value = "") {
+  const identifier =
+    safeText(value)
+      .normalize("NFKC")
+      .replace(/\s+/g, " ")
+      .slice(0, getResetIdentifierMaxLength());
+
+  if (isCorruptedTextValue(identifier)) {
+    return "";
+  }
+
+  return identifier;
+}
+
+function normalizeResetToken(value = "") {
+  const token =
+    normalizeTokenValue(
+      value,
+      getResetTokenMaxLength()
+    );
+
+  return token || "";
+}
+
+function normalizePasswordValue(value = "") {
+  return String(value ?? "")
+    .slice(0, getResetPasswordMaxLength());
+}
 
 export function resolveResetPasswordIdentifier(payload = {}) {
   return safeText(
@@ -418,12 +1042,13 @@ export function resolveResetPasswordIdentifier(payload = {}) {
       payload?.user ??
       payload?.phone ??
       payload?.telefono ??
+      payload?.mobile ??
       ""
   );
 }
 
 export function resolveResetPasswordToken(payload = {}) {
-  return safeText(
+  return normalizeResetToken(
     payload?.token ??
       payload?.code ??
       payload?.resetToken ??
@@ -432,39 +1057,57 @@ export function resolveResetPasswordToken(payload = {}) {
       payload?.passwordResetToken ??
       payload?.password_reset_token ??
       payload?.t ??
-      ""
-  ).slice(0, getResetTokenMaxLength());
+      extractResetTokenFromUrl()
+  );
 }
 
 export function normalizeResetPasswordPayload(payload = {}) {
   const identifier =
-    resolveResetPasswordIdentifier(payload)
-      .replace(/\s+/g, " ")
-      .slice(0, getResetIdentifierMaxLength());
+    normalizeIdentifier(
+      resolveResetPasswordIdentifier(payload)
+    );
 
   const email =
     looksLikeEmail(identifier)
       ? normalizeEmail(identifier)
       : "";
 
+  const phone =
+    !email && looksLikePhone(identifier)
+      ? normalizePhone(identifier)
+      : "";
+
   const username =
-    email
-      ? ""
-      : normalizeUsername(identifier);
+    !email && !phone
+      ? normalizeUsername(identifier)
+      : "";
 
   const redirect =
     sanitizeRedirect(
       payload?.redirect ??
         payload?.redirectTo ??
         payload?.returnTo ??
-        ""
+        "",
+      ""
     );
+
+  const lang =
+    safeText(
+      payload?.lang ??
+        payload?.language ??
+        AppCore?.state?.lang ??
+        AppCore?.config?.defaultLang ??
+        "es",
+      "es"
+    ).slice(0, 8);
 
   return {
     identifier,
     email,
+    phone,
     username,
     redirect,
+    lang,
   };
 }
 
@@ -472,33 +1115,31 @@ export function normalizeConfirmResetPasswordPayload(payload = {}) {
   const token =
     resolveResetPasswordToken(payload);
 
-  const maxPassword =
-    getResetPasswordMaxLength();
-
   const password =
-    String(
+    normalizePasswordValue(
       payload?.password ??
         payload?.newPassword ??
         payload?.new_password ??
         ""
-    ).slice(0, maxPassword);
+    );
 
   const confirmPassword =
-    String(
+    normalizePasswordValue(
       payload?.confirmPassword ??
         payload?.passwordConfirmation ??
         payload?.password_confirmation ??
         payload?.repeatPassword ??
         payload?.repeat_password ??
         ""
-    ).slice(0, maxPassword);
+    );
 
   const redirect =
     sanitizeRedirect(
       payload?.redirect ??
         payload?.redirectTo ??
         payload?.returnTo ??
-        ""
+        DEFAULT_LOGIN_REDIRECT,
+      DEFAULT_LOGIN_REDIRECT
     );
 
   return {
@@ -509,6 +1150,15 @@ export function normalizeConfirmResetPasswordPayload(payload = {}) {
   };
 }
 
+export function normalizeValidateResetTokenPayload(payload = {}) {
+  const token =
+    resolveResetPasswordToken(payload);
+
+  return {
+    token,
+  };
+}
+
 /* =========================================================
    REQUEST BODY
 ========================================================= */
@@ -516,7 +1166,7 @@ export function normalizeConfirmResetPasswordPayload(payload = {}) {
 function stripEmptyValues(obj = {}) {
   const output = {};
 
-  for (const [key, value] of Object.entries(obj)) {
+  for (const [key, value] of Object.entries(obj || {})) {
     if (
       value === null ||
       value === undefined ||
@@ -551,11 +1201,26 @@ export function buildResetPasswordRequestBody(payload = {}) {
     login:
       normalized.identifier,
 
+    phone:
+      normalized.phone,
+
+    telefono:
+      normalized.phone,
+
     redirect:
       normalized.redirect,
 
     redirectTo:
       normalized.redirect,
+
+    returnTo:
+      normalized.redirect,
+
+    lang:
+      normalized.lang,
+
+    language:
+      normalized.lang,
   });
 }
 
@@ -570,10 +1235,16 @@ export function buildConfirmResetPasswordBody(payload = {}) {
     code:
       normalized.token,
 
+    t:
+      normalized.token,
+
     resetToken:
       normalized.token,
 
     reset_token:
+      normalized.token,
+
+    reset_code:
       normalized.token,
 
     passwordResetToken:
@@ -600,16 +1271,94 @@ export function buildConfirmResetPasswordBody(payload = {}) {
     password_confirmation:
       normalized.confirmPassword,
 
+    repeatPassword:
+      normalized.confirmPassword,
+
+    repeat_password:
+      normalized.confirmPassword,
+
     redirect:
       normalized.redirect,
 
     redirectTo:
       normalized.redirect,
+
+    returnTo:
+      normalized.redirect,
+  });
+}
+
+export function buildValidateResetTokenBody(payload = {}) {
+  const normalized =
+    normalizeValidateResetTokenPayload(payload);
+
+  return stripEmptyValues({
+    token:
+      normalized.token,
+
+    code:
+      normalized.token,
+
+    t:
+      normalized.token,
+
+    resetToken:
+      normalized.token,
+
+    reset_token:
+      normalized.token,
+
+    passwordResetToken:
+      normalized.token,
+
+    password_reset_token:
+      normalized.token,
   });
 }
 
 /* =========================================================
-   RESPONSE NORMALIZATION
+   RESPONSE NODE
+========================================================= */
+
+function getNode(input = {}) {
+  const root =
+    safeObject(input);
+
+  const data =
+    safeObject(root.data);
+
+  const payload =
+    safeObject(root.payload);
+
+  const result =
+    safeObject(root.result);
+
+  const body =
+    safeObject(root.body);
+
+  const responseNode =
+    safeObject(root.response);
+
+  const responseData =
+    safeObject(responseNode.data);
+
+  const meta =
+    safeObject(root.meta);
+
+  return {
+    root,
+    data,
+    payload,
+    result,
+    body,
+    responseNode,
+    responseData,
+    meta,
+  };
+}
+
+/* =========================================================
+   RESPONSE RESOLUTION
 ========================================================= */
 
 function resolveExplicitOk(input = {}) {
@@ -621,6 +1370,7 @@ function resolveExplicitOk(input = {}) {
     body,
     responseNode,
     responseData,
+    meta,
   } = getNode(input);
 
   const values = [
@@ -628,36 +1378,49 @@ function resolveExplicitOk(input = {}) {
     root.success,
     root.valid,
     root.accepted,
+    root.completed,
 
     data.ok,
     data.success,
     data.valid,
     data.accepted,
+    data.completed,
 
     payload.ok,
     payload.success,
     payload.valid,
     payload.accepted,
+    payload.completed,
 
     result.ok,
     result.success,
     result.valid,
     result.accepted,
+    result.completed,
 
     body.ok,
     body.success,
     body.valid,
     body.accepted,
+    body.completed,
 
     responseNode.ok,
     responseNode.success,
     responseNode.valid,
     responseNode.accepted,
+    responseNode.completed,
 
     responseData.ok,
     responseData.success,
     responseData.valid,
     responseData.accepted,
+    responseData.completed,
+
+    meta.ok,
+    meta.success,
+    meta.valid,
+    meta.accepted,
+    meta.completed,
   ];
 
   for (const value of values) {
@@ -678,6 +1441,7 @@ function resolveStatus(input = {}) {
     body,
     responseNode,
     responseData,
+    meta,
   } = getNode(input);
 
   return safeNumber(
@@ -708,10 +1472,153 @@ function resolveStatus(input = {}) {
 
       responseData.status,
       responseData.statusCode,
-      responseData.status_code
+      responseData.status_code,
+
+      meta.status,
+      meta.statusCode,
+      meta.status_code
     ),
     0
   );
+}
+
+function resolveStatusText(input = {}) {
+  const {
+    root,
+    data,
+    payload,
+    result,
+    body,
+    responseNode,
+    responseData,
+    meta,
+  } = getNode(input);
+
+  return safeText(
+    pickFirst(
+      root.statusText,
+      root.status_text,
+      root.state,
+
+      data.statusText,
+      data.status_text,
+      data.state,
+
+      payload.statusText,
+      payload.status_text,
+      payload.state,
+
+      result.statusText,
+      result.status_text,
+      result.state,
+
+      body.statusText,
+      body.status_text,
+      body.state,
+
+      responseNode.statusText,
+      responseNode.status_text,
+      responseNode.state,
+
+      responseData.statusText,
+      responseData.status_text,
+      responseData.state,
+
+      meta.statusText,
+      meta.status_text,
+      meta.state
+    ),
+    ""
+  ).toLowerCase();
+}
+
+function resolveCode(input = {}) {
+  const {
+    root,
+    data,
+    payload,
+    result,
+    body,
+    responseNode,
+    responseData,
+    meta,
+  } = getNode(input);
+
+  return safeText(
+    pickFirst(
+      root.code,
+      root.errorCode,
+      root.error_code,
+      root.error,
+
+      data.code,
+      data.errorCode,
+      data.error_code,
+      data.error,
+
+      payload.code,
+      payload.errorCode,
+      payload.error_code,
+      payload.error,
+
+      result.code,
+      result.errorCode,
+      result.error_code,
+      result.error,
+
+      body.code,
+      body.errorCode,
+      body.error_code,
+      body.error,
+
+      responseNode.code,
+      responseNode.errorCode,
+      responseNode.error_code,
+      responseNode.error,
+
+      responseData.code,
+      responseData.errorCode,
+      responseData.error_code,
+      responseData.error,
+
+      meta.code,
+      meta.errorCode,
+      meta.error_code,
+      meta.error
+    ),
+    ""
+  );
+}
+
+function parseRetryAfterToSeconds(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return 0;
+  }
+
+  const numeric =
+    Number(raw);
+
+  if (Number.isFinite(numeric)) {
+    return Math.max(
+      0,
+      Math.ceil(numeric)
+    );
+  }
+
+  const dateMs =
+    Date.parse(raw);
+
+  if (Number.isFinite(dateMs)) {
+    return Math.max(
+      0,
+      Math.ceil((dateMs - Date.now()) / 1000)
+    );
+  }
+
+  return 0;
 }
 
 function resolveRetryAfter(input = {}) {
@@ -723,6 +1630,7 @@ function resolveRetryAfter(input = {}) {
     body,
     responseNode,
     responseData,
+    meta,
   } = getNode(input);
 
   return Math.max(
@@ -733,11 +1641,15 @@ function resolveRetryAfter(input = {}) {
         root.retry_after,
         root.cooldownSeconds,
         root.cooldown_seconds,
+        root.rateLimitSeconds,
+        root.rate_limit_seconds,
 
         data.retryAfter,
         data.retry_after,
         data.cooldownSeconds,
         data.cooldown_seconds,
+        data.rateLimitSeconds,
+        data.rate_limit_seconds,
 
         payload.retryAfter,
         payload.retry_after,
@@ -762,7 +1674,12 @@ function resolveRetryAfter(input = {}) {
         responseData.retryAfter,
         responseData.retry_after,
         responseData.cooldownSeconds,
-        responseData.cooldown_seconds
+        responseData.cooldown_seconds,
+
+        meta.retryAfter,
+        meta.retry_after,
+        meta.cooldownSeconds,
+        meta.cooldown_seconds
       ),
       0
     )
@@ -778,43 +1695,57 @@ function resolveMessage(input = {}, fallback = "") {
     body,
     responseNode,
     responseData,
+    meta,
   } = getNode(input);
 
   return pickFirstText(
     root.message,
     root.mensaje,
     root.detail,
+    root.description,
     root.error,
 
     data.message,
     data.mensaje,
     data.detail,
+    data.description,
     data.error,
 
     payload.message,
     payload.mensaje,
     payload.detail,
+    payload.description,
     payload.error,
 
     result.message,
     result.mensaje,
     result.detail,
+    result.description,
     result.error,
 
     body.message,
     body.mensaje,
     body.detail,
+    body.description,
     body.error,
 
     responseNode.message,
     responseNode.mensaje,
     responseNode.detail,
+    responseNode.description,
     responseNode.error,
 
     responseData.message,
     responseData.mensaje,
     responseData.detail,
+    responseData.description,
     responseData.error,
+
+    meta.message,
+    meta.mensaje,
+    meta.detail,
+    meta.description,
+    meta.error,
 
     fallback
   );
@@ -829,6 +1760,7 @@ function resolveRedirectTo(input = {}, fallback = "") {
     body,
     responseNode,
     responseData,
+    meta,
   } = getNode(input);
 
   return sanitizeRedirect(
@@ -836,33 +1768,60 @@ function resolveRedirectTo(input = {}, fallback = "") {
       root.redirectTo,
       root.redirect_to,
       root.redirect,
+      root.next,
+      root.nextPath,
+      root.next_path,
 
       data.redirectTo,
       data.redirect_to,
       data.redirect,
+      data.next,
+      data.nextPath,
+      data.next_path,
 
       payload.redirectTo,
       payload.redirect_to,
       payload.redirect,
+      payload.next,
+      payload.nextPath,
+      payload.next_path,
 
       result.redirectTo,
       result.redirect_to,
       result.redirect,
+      result.next,
+      result.nextPath,
+      result.next_path,
 
       body.redirectTo,
       body.redirect_to,
       body.redirect,
+      body.next,
+      body.nextPath,
+      body.next_path,
 
       responseNode.redirectTo,
       responseNode.redirect_to,
       responseNode.redirect,
+      responseNode.next,
+      responseNode.nextPath,
+      responseNode.next_path,
 
       responseData.redirectTo,
       responseData.redirect_to,
       responseData.redirect,
+      responseData.next,
+      responseData.nextPath,
+      responseData.next_path,
+
+      meta.redirectTo,
+      meta.redirect_to,
+      meta.redirect,
+      meta.next,
 
       fallback
-    )
+    ),
+    fallback
   );
 }
 
@@ -875,6 +1834,7 @@ function resolveEmailMasked(input = {}) {
     body,
     responseNode,
     responseData,
+    meta,
   } = getNode(input);
 
   return pickFirstText(
@@ -904,7 +1864,74 @@ function resolveEmailMasked(input = {}) {
 
     responseData.emailMasked,
     responseData.maskedEmail,
-    responseData.masked_email
+    responseData.masked_email,
+
+    meta.emailMasked,
+    meta.maskedEmail,
+    meta.masked_email
+  );
+}
+
+function isExplicitFailure(input = {}) {
+  const explicitOk =
+    resolveExplicitOk(input);
+
+  if (explicitOk === false) {
+    return true;
+  }
+
+  const status =
+    resolveStatus(input);
+
+  if (
+    Number.isFinite(status) &&
+    status >= 400
+  ) {
+    return true;
+  }
+
+  const statusText =
+    resolveStatusText(input);
+
+  if (
+    statusText &&
+    FAILURE_STATUS_TEXTS.includes(statusText)
+  ) {
+    return true;
+  }
+
+  const code =
+    resolveCode(input)
+      .toUpperCase();
+
+  if (
+    code &&
+    FAILURE_CODES.includes(code)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function isDeclaredSuccess(input = {}) {
+  const explicitOk =
+    resolveExplicitOk(input);
+
+  if (explicitOk === true) {
+    return true;
+  }
+
+  if (explicitOk === false) {
+    return false;
+  }
+
+  const statusText =
+    resolveStatusText(input);
+
+  return Boolean(
+    statusText &&
+      SUCCESS_STATUS_TEXTS.includes(statusText)
   );
 }
 
@@ -915,6 +1942,13 @@ function isCooldownResponse(input = {}) {
   const retryAfter =
     resolveRetryAfter(input);
 
+  const code =
+    resolveCode(input)
+      .toUpperCase();
+
+  const statusText =
+    resolveStatusText(input);
+
   const {
     root,
     data,
@@ -923,51 +1957,64 @@ function isCooldownResponse(input = {}) {
     body,
     responseNode,
     responseData,
+    meta,
   } = getNode(input);
 
   return Boolean(
     status === 429 ||
       retryAfter > 0 ||
+      code === "RATE_LIMITED" ||
+      code === "TOO_MANY_REQUESTS" ||
+      statusText === "rate_limited" ||
+      statusText === "too_many_requests" ||
       root.cooldown === true ||
       data.cooldown === true ||
       payload.cooldown === true ||
       result.cooldown === true ||
       body.cooldown === true ||
       responseNode.cooldown === true ||
-      responseData.cooldown === true
+      responseData.cooldown === true ||
+      meta.cooldown === true
   );
 }
 
-export function normalizeResetPasswordResponse(input = {}) {
-  const explicitOk =
-    resolveExplicitOk(input);
+/* =========================================================
+   RESPONSE NORMALIZATION
+========================================================= */
 
-  const status =
-    resolveStatus(input);
+function buildBaseNormalizedResponse({
+  input = {},
+  successMessage = "",
+  errorMessage = "",
+  redirectFallback = "",
+} = {}) {
+  const cooldown =
+    isCooldownResponse(input);
 
   const retryAfter =
     resolveRetryAfter(input);
 
-  const cooldown =
-    isCooldownResponse(input);
+  const explicitFailure =
+    isExplicitFailure(input);
 
   /*
     Regla estricta:
-    No asumimos éxito por status 200 si el backend no declara ok/success true.
+    - HTTP 200 sin ok/success/valid/accepted/completed NO es éxito.
+    - status text declarativo tipo "success" sí cuenta como success.
   */
   const ok =
-    explicitOk === null
+    explicitFailure
       ? false
-      : Boolean(explicitOk);
+      : isDeclaredSuccess(input);
 
   const message =
     resolveMessage(
       input,
       ok
-        ? getDefaultSuccessMessage()
+        ? successMessage
         : cooldown
           ? getRateLimitMessage()
-          : getDefaultErrorMessage()
+          : errorMessage
     );
 
   return {
@@ -980,7 +2027,17 @@ export function normalizeResetPasswordResponse(input = {}) {
     error:
       !ok,
 
-    status,
+    status:
+      resolveStatus(input),
+
+    statusText:
+      resolveStatusText(input) || null,
+
+    code:
+      resolveCode(input) || null,
+
+    explicitFailure,
+
     cooldown,
     rateLimited:
       cooldown,
@@ -992,65 +2049,62 @@ export function normalizeResetPasswordResponse(input = {}) {
     message,
 
     redirectTo:
-      resolveRedirectTo(input, ""),
+      resolveRedirectTo(
+        input,
+        redirectFallback
+      ),
 
     emailMasked:
       resolveEmailMasked(input),
+
+    at:
+      isoNow(),
   };
 }
 
+export function normalizeResetPasswordResponse(input = {}) {
+  return buildBaseNormalizedResponse({
+    input,
+    successMessage:
+      getDefaultSuccessMessage(),
+    errorMessage:
+      getDefaultErrorMessage(),
+    redirectFallback:
+      "",
+  });
+}
+
 export function normalizeConfirmResetPasswordResponse(input = {}) {
-  const explicitOk =
-    resolveExplicitOk(input);
-
-  const status =
-    resolveStatus(input);
-
-  const retryAfter =
-    resolveRetryAfter(input);
-
-  const cooldown =
-    isCooldownResponse(input);
-
-  const ok =
-    explicitOk === null
-      ? false
-      : Boolean(explicitOk);
-
-  const message =
-    resolveMessage(
+  const normalized =
+    buildBaseNormalizedResponse({
       input,
-      ok
-        ? getDefaultConfirmSuccessMessage()
-        : cooldown
-          ? getRateLimitMessage()
-          : getDefaultConfirmErrorMessage()
-    );
+      successMessage:
+        getDefaultConfirmSuccessMessage(),
+      errorMessage:
+        getDefaultConfirmErrorMessage(),
+      redirectFallback:
+        DEFAULT_LOGIN_REDIRECT,
+    });
 
   return {
-    raw:
-      input,
-
-    ok,
-    success:
-      ok,
-    error:
-      !ok,
-
-    status,
-    cooldown,
-    rateLimited:
-      cooldown,
-
-    retryAfter,
-    cooldownSeconds:
-      retryAfter,
-
-    message,
+    ...normalized,
 
     redirectTo:
-      resolveRedirectTo(input, "/login") || "/login",
+      normalized.redirectTo ||
+      DEFAULT_LOGIN_REDIRECT,
   };
+}
+
+export function normalizeValidateResetTokenResponse(input = {}) {
+  return buildBaseNormalizedResponse({
+    input,
+    successMessage:
+      getDefaultValidateSuccessMessage(),
+    errorMessage:
+      getDefaultValidateErrorMessage(),
+    redirectFallback:
+      "",
+  });
 }
 
 /* =========================================================
@@ -1059,10 +2113,10 @@ export function normalizeConfirmResetPasswordResponse(input = {}) {
 
 function buildFinalUrl(endpoint = "") {
   const clean =
-    safeText(endpoint);
+    safeText(endpoint, "");
 
   if (!clean) {
-    return "/api/auth/reset-password-request";
+    return DEFAULT_REQUEST_ENDPOINT;
   }
 
   if (isAbsoluteUrl(clean)) {
@@ -1070,7 +2124,7 @@ function buildFinalUrl(endpoint = "") {
   }
 
   const apiBase =
-    safeText(AppCore?.config?.apiBase);
+    safeText(AppCore?.config?.apiBase, "");
 
   if (!apiBase) {
     return clean;
@@ -1095,6 +2149,7 @@ function normalizeTransportError(
   const status =
     safeNumber(
       error?.status ??
+        error?.statusCode ??
         error?.response?.status ??
         error?.data?.status ??
         error?.response?.data?.status ??
@@ -1147,11 +2202,23 @@ function normalizeTransportError(
 
     status,
 
+    statusText:
+      error?.statusText || null,
+
+    code:
+      error?.code ||
+      error?.data?.code ||
+      error?.response?.data?.code ||
+      null,
+
     retryAfter,
     cooldownSeconds:
       retryAfter,
 
     cooldown:
+      status === 429 || retryAfter > 0,
+
+    rateLimited:
       status === 429 || retryAfter > 0,
 
     message,
@@ -1166,15 +2233,73 @@ function normalizeTransportError(
   };
 }
 
+function rememberError(type = "unknown", error = null) {
+  runtime.lastError = {
+    type,
+    message:
+      safeText(error?.message, ""),
+    status:
+      error?.status || 0,
+    code:
+      error?.code || null,
+    at:
+      isoNow(),
+  };
+}
+
 /* =========================================================
    FETCH WITH TIMEOUT
 ========================================================= */
+
+async function parseFetchBody(httpResponse) {
+  const contentType =
+    safeText(
+      httpResponse?.headers?.get?.("content-type"),
+      ""
+    ).toLowerCase();
+
+  try {
+    if (contentType.includes("application/json")) {
+      return await httpResponse.json();
+    }
+
+    const text =
+      await httpResponse.text();
+
+    if (!text) {
+      return {};
+    }
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return {
+        message:
+          text,
+      };
+    }
+  } catch {
+    return {};
+  }
+}
 
 async function fetchJsonWithTimeout(
   url,
   body,
   timeoutMs = getRequestTimeout()
 ) {
+  if (typeof fetch !== "function") {
+    const error =
+      new Error("Fetch API no disponible.");
+
+    error.status =
+      500;
+    error.code =
+      "FETCH_MISSING";
+
+    throw error;
+  }
+
   const controller =
     typeof AbortController !== "undefined"
       ? new AbortController()
@@ -1198,39 +2323,60 @@ async function fetchJsonWithTimeout(
       await fetch(url, {
         method:
           "POST",
+
         headers: {
           "Content-Type":
             "application/json",
+
           Accept:
             "application/json",
         },
+
         credentials:
           "omit",
+
         body:
           JSON.stringify(body),
+
         signal:
           controller?.signal,
       });
 
-    let data = null;
-
-    try {
-      data =
-        await httpResponse.json();
-    } catch {
-      data = null;
-    }
-
     const payload =
-      isObject(data)
-        ? data
-        : {};
+      safeObject(
+        await parseFetchBody(httpResponse)
+      );
+
+    const retryAfterHeader =
+      parseRetryAfterToSeconds(
+        httpResponse.headers?.get?.("retry-after") || ""
+      );
+
+    const enrichedPayload = {
+      ...payload,
+
+      status:
+        payload.status ??
+        payload.statusCode ??
+        httpResponse.status,
+
+      statusCode:
+        payload.statusCode ??
+        payload.status ??
+        httpResponse.status,
+
+      retryAfter:
+        payload.retryAfter ??
+        payload.retry_after ??
+        payload.cooldownSeconds ??
+        retryAfterHeader,
+    };
 
     if (!httpResponse.ok) {
       const error =
         new Error(
           resolveMessage(
-            payload,
+            enrichedPayload,
             httpResponse.statusText || getDefaultErrorMessage()
           )
         );
@@ -1240,22 +2386,14 @@ async function fetchJsonWithTimeout(
       error.statusText =
         httpResponse.statusText;
       error.data =
-        payload;
+        enrichedPayload;
       error.retryAfter =
-        resolveRetryAfter(payload);
+        enrichedPayload.retryAfter || 0;
 
       throw error;
     }
 
-    return {
-      ...payload,
-      status:
-        payload.status ??
-        httpResponse.status,
-      statusCode:
-        payload.statusCode ??
-        httpResponse.status,
-    };
+    return enrichedPayload;
   } finally {
     if (timer) {
       clearTimeout(timer);
@@ -1269,7 +2407,7 @@ async function fetchJsonWithTimeout(
 
 async function requestWithApiClient(endpoint, body, options = {}) {
   const apiClient =
-    AppCore?.apiClient;
+    AppCore?.apiClient || null;
 
   if (!apiClient) {
     return null;
@@ -1290,6 +2428,8 @@ async function requestWithApiClient(endpoint, body, options = {}) {
           true,
         storeError:
           false,
+        _skipAuthRefresh:
+          true,
         ...options,
       }
     );
@@ -1312,12 +2452,42 @@ async function requestWithApiClient(endpoint, body, options = {}) {
           true,
         storeError:
           false,
+        _skipAuthRefresh:
+          true,
         ...options,
       }
     );
   }
 
   return null;
+}
+
+async function requestWithAppCoreRequest(endpoint, body, options = {}) {
+  if (!isFunction(AppCore?.request)) {
+    return null;
+  }
+
+  return AppCore.request(
+    endpoint,
+    {
+      method:
+        "POST",
+      body,
+      auth:
+        false,
+      public:
+        true,
+      timeout:
+        getRequestTimeout(),
+      silent:
+        true,
+      storeError:
+        false,
+      _skipAuthRefresh:
+        true,
+      ...options,
+    }
+  );
 }
 
 async function requestWithHttpService(endpoint, body, options = {}) {
@@ -1345,6 +2515,10 @@ async function requestWithHttpService(endpoint, body, options = {}) {
           options.useLoader !== false,
         timeout:
           getRequestTimeout(),
+        silent:
+          true,
+        storeError:
+          false,
         _skipAuthRefresh:
           true,
         ...options,
@@ -1370,6 +2544,10 @@ async function requestWithHttpService(endpoint, body, options = {}) {
           options.useLoader !== false,
         timeout:
           getRequestTimeout(),
+        silent:
+          true,
+        storeError:
+          false,
         _skipAuthRefresh:
           true,
         ...options,
@@ -1378,36 +2556,6 @@ async function requestWithHttpService(endpoint, body, options = {}) {
   }
 
   return null;
-}
-
-async function requestWithAppCoreRequest(endpoint, body, options = {}) {
-  if (!isFunction(AppCore?.request)) {
-    return null;
-  }
-
-  /*
-    AppCore.request/core request suele ser:
-      request(path, options)
-  */
-  return AppCore.request(
-    endpoint,
-    {
-      method:
-        "POST",
-      body,
-      auth:
-        false,
-      public:
-        true,
-      timeout:
-        getRequestTimeout(),
-      silent:
-        true,
-      storeError:
-        false,
-      ...options,
-    }
-  );
 }
 
 async function requestWithFetch(endpoint, body) {
@@ -1423,9 +2571,9 @@ async function requestWithFetch(endpoint, body) {
 
 async function executePasswordResetRequest(endpoint, body, options = {}) {
   const transports = [
-    requestWithHttpService,
     requestWithApiClient,
     requestWithAppCoreRequest,
+    requestWithHttpService,
   ];
 
   for (const transport of transports) {
@@ -1452,6 +2600,148 @@ async function executePasswordResetRequest(endpoint, body, options = {}) {
     endpoint,
     body
   );
+}
+
+/* =========================================================
+   COOLDOWN
+========================================================= */
+
+function getCooldownStorageKey() {
+  return safeText(
+    AUTH_STORAGE_KEYS?.resetCooldownUntil,
+    "reset_cooldown_until"
+  );
+}
+
+function readCooldownFromStorage() {
+  try {
+    const key =
+      getCooldownStorageKey();
+
+    const value =
+      AppCore?.storage?.getRaw?.(key) ??
+      AppCore?.storage?.get?.(key) ??
+      "";
+
+    return safeNumber(value, 0);
+  } catch {
+    return 0;
+  }
+}
+
+function writeCooldownToStorage(untilMs = 0) {
+  try {
+    const key =
+      getCooldownStorageKey();
+
+    if (untilMs > 0) {
+      AppCore?.storage?.setRaw?.(
+        key,
+        String(untilMs)
+      );
+
+      AppCore?.storage?.set?.(
+        key,
+        String(untilMs)
+      );
+    } else {
+      AppCore?.storage?.remove?.(key);
+    }
+  } catch {}
+}
+
+function getCooldownUntil() {
+  return Math.max(
+    safeNumber(runtime.cooldownUntil, 0),
+    readCooldownFromStorage()
+  );
+}
+
+function getRemainingCooldownSeconds() {
+  const remainingMs =
+    getCooldownUntil() - nowMs();
+
+  return Math.max(
+    0,
+    Math.ceil(remainingMs / 1000)
+  );
+}
+
+function setCooldown(seconds = 0) {
+  const finalSeconds =
+    clampNumber(
+      seconds || getDefaultCooldownSeconds(),
+      0,
+      3600
+    );
+
+  if (finalSeconds <= 0) {
+    runtime.cooldownUntil = 0;
+    writeCooldownToStorage(0);
+    return 0;
+  }
+
+  const until =
+    nowMs() + finalSeconds * 1000;
+
+  runtime.cooldownUntil =
+    until;
+
+  writeCooldownToStorage(until);
+
+  return finalSeconds;
+}
+
+function clearCooldown() {
+  runtime.cooldownUntil =
+    0;
+
+  writeCooldownToStorage(0);
+}
+
+function buildCooldownResponse(message = getRateLimitMessage()) {
+  const retryAfter =
+    getRemainingCooldownSeconds();
+
+  return {
+    ok:
+      false,
+    success:
+      false,
+    error:
+      true,
+
+    status:
+      429,
+
+    code:
+      "RATE_LIMITED",
+
+    cooldown:
+      true,
+
+    rateLimited:
+      true,
+
+    retryAfter,
+
+    cooldownSeconds:
+      retryAfter,
+
+    message,
+
+    raw: {
+      ok:
+        false,
+      status:
+        429,
+      retryAfter,
+      message,
+    },
+
+    at:
+      isoNow(),
+  };
 }
 
 /* =========================================================
@@ -1503,6 +2793,10 @@ function validateConfirmPayload(normalized = {}) {
     return "La contraseña es demasiado larga.";
   }
 
+  if (!normalized.confirmPassword) {
+    return "La confirmación de contraseña es obligatoria.";
+  }
+
   if (
     normalized.password !==
     normalized.confirmPassword
@@ -1513,11 +2807,72 @@ function validateConfirmPayload(normalized = {}) {
   return "";
 }
 
+function validateTokenPayload(normalized = {}) {
+  if (!normalized.token) {
+    return "No se recibió token de recuperación.";
+  }
+
+  if (
+    normalized.token.length <
+    getResetTokenMinLength()
+  ) {
+    return "El token de recuperación no es válido.";
+  }
+
+  return "";
+}
+
+/* =========================================================
+   RESULT BOOKKEEPING
+========================================================= */
+
+function rememberResult(type = "unknown", result = {}) {
+  runtime.lastResult = {
+    type,
+    ok:
+      Boolean(result?.ok),
+    status:
+      result?.status || 0,
+    code:
+      result?.code || null,
+    cooldown:
+      Boolean(result?.cooldown),
+    retryAfter:
+      result?.retryAfter || 0,
+    at:
+      isoNow(),
+  };
+
+  if (
+    result?.cooldown &&
+    result?.retryAfter
+  ) {
+    setCooldown(result.retryAfter);
+  }
+
+  if (result?.ok) {
+    clearCooldown();
+  }
+}
+
 /* =========================================================
    ACTIONS
 ========================================================= */
 
 export async function requestPasswordReset(payload = {}, options = {}) {
+  if (runtime.requestInFlight) {
+    return runtime.requestInFlight;
+  }
+
+  const activeCooldown =
+    getRemainingCooldownSeconds();
+
+  if (activeCooldown > 0) {
+    return normalizeResetPasswordResponse(
+      buildCooldownResponse()
+    );
+  }
+
   const normalized =
     normalizeResetPasswordPayload(payload);
 
@@ -1541,6 +2896,10 @@ export async function requestPasswordReset(payload = {}, options = {}) {
   const body =
     buildResetPasswordRequestBody(normalized);
 
+  runtime.requestCount += 1;
+  runtime.lastRequestAt =
+    nowMs();
+
   safeEmit(
     "auth:password-reset:request:start",
     {
@@ -1548,72 +2907,110 @@ export async function requestPasswordReset(payload = {}, options = {}) {
       identifierType:
         normalized.email
           ? "email"
-          : normalized.username
-            ? "username"
-            : "identifier",
+          : normalized.phone
+            ? "phone"
+            : normalized.username
+              ? "username"
+              : "identifier",
     }
   );
 
-  try {
-    const raw =
-      await executePasswordResetRequest(
-        endpoint,
-        body,
-        {
-          ...safeObject(options),
-          _skipAuthRefresh:
-            true,
-          auth:
-            false,
-          public:
-            true,
-        }
-      );
+  runtime.requestInFlight =
+    (async () => {
+      try {
+        const raw =
+          await executePasswordResetRequest(
+            endpoint,
+            body,
+            {
+              ...safeObject(options),
+              _skipAuthRefresh:
+                true,
+              auth:
+                false,
+              public:
+                true,
+              silent:
+                true,
+              storeError:
+                false,
+            }
+          );
 
-    const normalizedResponse =
-      normalizeResetPasswordResponse(raw);
+        const normalizedResponse =
+          normalizeResetPasswordResponse(raw);
 
-    safeEmit(
-      "auth:password-reset:request:complete",
-      {
-        ok:
-          normalizedResponse.ok,
-        status:
-          normalizedResponse.status,
-        cooldown:
-          normalizedResponse.cooldown,
-        retryAfter:
-          normalizedResponse.retryAfter,
+        rememberResult(
+          "request",
+          normalizedResponse
+        );
+
+        safeEmit(
+          "auth:password-reset:request:complete",
+          {
+            ok:
+              normalizedResponse.ok,
+            status:
+              normalizedResponse.status,
+            cooldown:
+              normalizedResponse.cooldown,
+            retryAfter:
+              normalizedResponse.retryAfter,
+          }
+        );
+
+        return normalizedResponse;
+      } catch (error) {
+        rememberError(
+          "request",
+          error
+        );
+
+        const normalizedError =
+          normalizeTransportError(
+            error,
+            getDefaultErrorMessage()
+          );
+
+        const normalizedResponse =
+          normalizeResetPasswordResponse(
+            normalizedError
+          );
+
+        rememberResult(
+          "request:error",
+          normalizedResponse
+        );
+
+        safeEmit(
+          "auth:password-reset:request:error",
+          {
+            status:
+              normalizedResponse.status,
+            cooldown:
+              normalizedResponse.cooldown,
+            retryAfter:
+              normalizedResponse.retryAfter,
+            message:
+              normalizedResponse.message,
+          }
+        );
+
+        return normalizedResponse;
+      } finally {
+        runtime.requestInFlight =
+          null;
       }
-    );
+    })();
 
-    return normalizedResponse;
-  } catch (error) {
-    const normalizedError =
-      normalizeTransportError(
-        error,
-        getDefaultErrorMessage()
-      );
-
-    safeEmit(
-      "auth:password-reset:request:error",
-      {
-        status:
-          normalizedError.status,
-        cooldown:
-          normalizedError.cooldown,
-        retryAfter:
-          normalizedError.retryAfter,
-        message:
-          normalizedError.message,
-      }
-    );
-
-    return normalizeResetPasswordResponse(normalizedError);
-  }
+  return runtime.requestInFlight;
 }
 
 export async function confirmResetPassword(payload = {}, options = {}) {
+  if (runtime.confirmInFlight) {
+    return runtime.confirmInFlight;
+  }
+
   const normalized =
     normalizeConfirmResetPasswordPayload(payload);
 
@@ -1637,6 +3034,10 @@ export async function confirmResetPassword(payload = {}, options = {}) {
   const body =
     buildConfirmResetPasswordBody(normalized);
 
+  runtime.confirmCount += 1;
+  runtime.lastConfirmAt =
+    nowMs();
+
   safeEmit(
     "auth:password-reset:confirm:start",
     {
@@ -1644,65 +3045,219 @@ export async function confirmResetPassword(payload = {}, options = {}) {
     }
   );
 
-  try {
-    const raw =
-      await executePasswordResetRequest(
-        endpoint,
-        body,
-        {
-          ...safeObject(options),
-          _skipAuthRefresh:
-            true,
-          auth:
-            false,
-          public:
-            true,
-        }
-      );
+  runtime.confirmInFlight =
+    (async () => {
+      try {
+        const raw =
+          await executePasswordResetRequest(
+            endpoint,
+            body,
+            {
+              ...safeObject(options),
+              _skipAuthRefresh:
+                true,
+              auth:
+                false,
+              public:
+                true,
+              silent:
+                true,
+              storeError:
+                false,
+            }
+          );
 
-    const normalizedResponse =
-      normalizeConfirmResetPasswordResponse(raw);
+        const normalizedResponse =
+          normalizeConfirmResetPasswordResponse(raw);
 
-    safeEmit(
-      "auth:password-reset:confirm:complete",
-      {
-        ok:
-          normalizedResponse.ok,
-        status:
-          normalizedResponse.status,
-        cooldown:
-          normalizedResponse.cooldown,
-        retryAfter:
-          normalizedResponse.retryAfter,
-        redirectTo:
-          normalizedResponse.redirectTo,
+        rememberResult(
+          "confirm",
+          normalizedResponse
+        );
+
+        safeEmit(
+          "auth:password-reset:confirm:complete",
+          {
+            ok:
+              normalizedResponse.ok,
+            status:
+              normalizedResponse.status,
+            cooldown:
+              normalizedResponse.cooldown,
+            retryAfter:
+              normalizedResponse.retryAfter,
+            redirectTo:
+              normalizedResponse.redirectTo,
+          }
+        );
+
+        return normalizedResponse;
+      } catch (error) {
+        rememberError(
+          "confirm",
+          error
+        );
+
+        const normalizedError =
+          normalizeTransportError(
+            error,
+            getDefaultConfirmErrorMessage()
+          );
+
+        const normalizedResponse =
+          normalizeConfirmResetPasswordResponse(
+            normalizedError
+          );
+
+        rememberResult(
+          "confirm:error",
+          normalizedResponse
+        );
+
+        safeEmit(
+          "auth:password-reset:confirm:error",
+          {
+            status:
+              normalizedResponse.status,
+            cooldown:
+              normalizedResponse.cooldown,
+            retryAfter:
+              normalizedResponse.retryAfter,
+            message:
+              normalizedResponse.message,
+          }
+        );
+
+        return normalizedResponse;
+      } finally {
+        runtime.confirmInFlight =
+          null;
       }
-    );
+    })();
 
-    return normalizedResponse;
-  } catch (error) {
-    const normalizedError =
-      normalizeTransportError(
-        error,
-        getDefaultConfirmErrorMessage()
-      );
+  return runtime.confirmInFlight;
+}
 
-    safeEmit(
-      "auth:password-reset:confirm:error",
-      {
-        status:
-          normalizedError.status,
-        cooldown:
-          normalizedError.cooldown,
-        retryAfter:
-          normalizedError.retryAfter,
-        message:
-          normalizedError.message,
-      }
-    );
-
-    return normalizeConfirmResetPasswordResponse(normalizedError);
+export async function validateResetPasswordToken(payload = {}, options = {}) {
+  if (runtime.validateInFlight) {
+    return runtime.validateInFlight;
   }
+
+  const normalized =
+    normalizeValidateResetTokenPayload(payload);
+
+  const validationError =
+    validateTokenPayload(normalized);
+
+  if (validationError) {
+    return normalizeValidateResetTokenResponse({
+      ok:
+        false,
+      status:
+        400,
+      message:
+        validationError,
+    });
+  }
+
+  const endpoint =
+    getValidateResetPasswordTokenEndpoint();
+
+  const body =
+    buildValidateResetTokenBody(normalized);
+
+  runtime.validateCount += 1;
+  runtime.lastValidateAt =
+    nowMs();
+
+  safeEmit(
+    "auth:password-reset:validate:start",
+    {
+      endpoint,
+    }
+  );
+
+  runtime.validateInFlight =
+    (async () => {
+      try {
+        const raw =
+          await executePasswordResetRequest(
+            endpoint,
+            body,
+            {
+              ...safeObject(options),
+              _skipAuthRefresh:
+                true,
+              auth:
+                false,
+              public:
+                true,
+              silent:
+                true,
+              storeError:
+                false,
+            }
+          );
+
+        const normalizedResponse =
+          normalizeValidateResetTokenResponse(raw);
+
+        rememberResult(
+          "validate",
+          normalizedResponse
+        );
+
+        safeEmit(
+          "auth:password-reset:validate:complete",
+          {
+            ok:
+              normalizedResponse.ok,
+            status:
+              normalizedResponse.status,
+          }
+        );
+
+        return normalizedResponse;
+      } catch (error) {
+        rememberError(
+          "validate",
+          error
+        );
+
+        const normalizedError =
+          normalizeTransportError(
+            error,
+            getDefaultValidateErrorMessage()
+          );
+
+        const normalizedResponse =
+          normalizeValidateResetTokenResponse(
+            normalizedError
+          );
+
+        rememberResult(
+          "validate:error",
+          normalizedResponse
+        );
+
+        safeEmit(
+          "auth:password-reset:validate:error",
+          {
+            status:
+              normalizedResponse.status,
+            message:
+              normalizedResponse.message,
+          }
+        );
+
+        return normalizedResponse;
+      } finally {
+        runtime.validateInFlight =
+          null;
+      }
+    })();
+
+  return runtime.validateInFlight;
 }
 
 /* =========================================================
@@ -1744,9 +3299,52 @@ export async function confirmPasswordReset(payload = {}, options = {}) {
   );
 }
 
+export async function validateResetToken(payload = {}, options = {}) {
+  return validateResetPasswordToken(
+    payload,
+    options
+  );
+}
+
+export async function resetPasswordValidate(payload = {}, options = {}) {
+  return validateResetPasswordToken(
+    payload,
+    options
+  );
+}
+
+export async function validatePasswordReset(payload = {}, options = {}) {
+  return validateResetPasswordToken(
+    payload,
+    options
+  );
+}
+
 /* =========================================================
    DEBUG
 ========================================================= */
+
+function sanitizeBodyForSnapshot(body = {}) {
+  const output = {};
+
+  for (const [key, value] of Object.entries(body || {})) {
+    if (
+      PASSWORD_FIELD_NAMES.includes(key) ||
+      TOKEN_FIELD_NAMES.includes(key)
+    ) {
+      output[key] =
+        value ? "***" : value;
+      continue;
+    }
+
+    output[key] =
+      typeof value === "string"
+        ? redactSafe(value)
+        : value;
+  }
+
+  return output;
+}
 
 export function getPasswordResetSnapshot() {
   return {
@@ -1758,6 +3356,9 @@ export function getPasswordResetSnapshot() {
 
     confirmEndpoint:
       getConfirmResetPasswordEndpoint(),
+
+    validateEndpoint:
+      getValidateResetPasswordTokenEndpoint(),
 
     limits: {
       identifierMaxLength:
@@ -1777,6 +3378,54 @@ export function getPasswordResetSnapshot() {
 
       timeout:
         getRequestTimeout(),
+
+      defaultCooldownSeconds:
+        getDefaultCooldownSeconds(),
+    },
+
+    runtime: {
+      requestInFlight:
+        Boolean(runtime.requestInFlight),
+
+      confirmInFlight:
+        Boolean(runtime.confirmInFlight),
+
+      validateInFlight:
+        Boolean(runtime.validateInFlight),
+
+      lastRequestAt:
+        runtime.lastRequestAt,
+
+      lastConfirmAt:
+        runtime.lastConfirmAt,
+
+      lastValidateAt:
+        runtime.lastValidateAt,
+
+      requestCount:
+        runtime.requestCount,
+
+      confirmCount:
+        runtime.confirmCount,
+
+      validateCount:
+        runtime.validateCount,
+
+      cooldownUntil:
+        getCooldownUntil(),
+
+      remainingCooldownSeconds:
+        getRemainingCooldownSeconds(),
+
+      lastError:
+        runtime.lastError
+          ? safeClone(runtime.lastError, null)
+          : null,
+
+      lastResult:
+        runtime.lastResult
+          ? safeClone(runtime.lastResult, null)
+          : null,
     },
 
     transports: {
@@ -1799,5 +3448,28 @@ export function getPasswordResetSnapshot() {
     },
   };
 }
+
+export function getPasswordResetDebugPayload(payload = {}) {
+  return {
+    request:
+      sanitizeBodyForSnapshot(
+        buildResetPasswordRequestBody(payload)
+      ),
+
+    confirm:
+      sanitizeBodyForSnapshot(
+        buildConfirmResetPasswordBody(payload)
+      ),
+
+    validate:
+      sanitizeBodyForSnapshot(
+        buildValidateResetTokenBody(payload)
+      ),
+  };
+}
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default requestPasswordReset;

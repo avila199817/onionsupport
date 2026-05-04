@@ -1,5 +1,8 @@
 name: Azure Static Web Apps CI/CD
 
+run-name: >-
+  SWA · ${{ github.event_name }} · ${{ github.head_ref || github.ref_name || 'manual' }}
+
 on:
   push:
     branches:
@@ -17,8 +20,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: azure-static-web-apps-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: >-
+    azure-static-web-apps-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   APP_LOCATION: "/"
@@ -33,10 +40,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    if: >
+    if: >-
       github.event_name == 'push' ||
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && github.event.action != 'closed')
+      (
+        github.event_name == 'pull_request' &&
+        github.event.action != 'closed' &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
 
     permissions:
       contents: read
@@ -49,28 +60,130 @@ jobs:
           submodules: false
           lfs: false
           fetch-depth: 1
+          persist-credentials: false
 
-      - name: Validate static app files
+      - name: Validate deployment token
         shell: bash
         run: |
           set -euo pipefail
 
-          APP_ROOT="${APP_LOCATION%/}"
+          if [ -z "${AZURE_STATIC_WEB_APPS_API_TOKEN:-}" ]; then
+            echo "::error::Falta el secret AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E o está vacío."
+            exit 1
+          fi
 
-          if [ -z "$APP_ROOT" ]; then
+          echo "Deployment token detected."
+
+      - name: Validate Static Web App package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APP_ROOT="${APP_LOCATION:-/}"
+          APP_ROOT="${APP_ROOT%/}"
+
+          if [ -z "$APP_ROOT" ] || [ "$APP_ROOT" = "/" ]; then
             APP_ROOT="."
           fi
 
           echo "App root: $APP_ROOT"
+          echo "API location: ${API_LOCATION:-<empty>}"
+          echo "Output location: ${OUTPUT_LOCATION:-<empty>}"
+          echo "Production branch: ${PRODUCTION_BRANCH:-main}"
+
+          if [ ! -d "$APP_ROOT" ]; then
+            echo "::error file=$APP_ROOT::No existe APP_LOCATION."
+            exit 1
+          fi
 
           if [ ! -f "$APP_ROOT/index.html" ]; then
-            echo "::error file=$APP_ROOT/index.html::No se encontró index.html. Azure Static Web Apps necesita un archivo index.html en app_location cuando skip_app_build=true."
+            echo "::error file=$APP_ROOT/index.html::No se encontró index.html. Con skip_app_build=true, Azure Static Web Apps despliega directamente APP_LOCATION."
             exit 1
           fi
 
           if [ ! -f "$APP_ROOT/staticwebapp.config.json" ]; then
-            echo "::warning file=$APP_ROOT/staticwebapp.config.json::No se encontró staticwebapp.config.json. Para una SPA con rutas internas, conviene añadir navigationFallback."
+            echo "::error file=$APP_ROOT/staticwebapp.config.json::No se encontró staticwebapp.config.json. Para Onion SPA es obligatorio para navigationFallback, headers y MIME types."
+            exit 1
           fi
+
+          export APP_ROOT
+
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
+          import xml.etree.ElementTree as ET
+
+          app_root = pathlib.Path(os.environ["APP_ROOT"])
+          config_path = app_root / "staticwebapp.config.json"
+          index_path = app_root / "index.html"
+          robots_path = app_root / "robots.txt"
+          sitemap_path = app_root / "sitemap.xml"
+
+          try:
+              config = json.loads(config_path.read_text(encoding="utf-8"))
+          except Exception as exc:
+              print(f"::error file={config_path}::staticwebapp.config.json no es JSON válido: {exc}")
+              sys.exit(1)
+
+          navigation = config.get("navigationFallback") or {}
+          rewrite = navigation.get("rewrite")
+
+          if rewrite != "/index.html":
+              print("::error file=staticwebapp.config.json::navigationFallback.rewrite debe ser /index.html para Onion SPA.")
+              sys.exit(1)
+
+          excludes = navigation.get("exclude") or []
+
+          required_excludes = [
+              "/api/*",
+              "/robots.txt",
+              "/sitemap.xml",
+              "/manifest.json",
+              "/site.webmanifest",
+              "/favicon.ico",
+              "/src/*",
+              "/assets/*",
+          ]
+
+          missing_excludes = [
+              item for item in required_excludes
+              if item not in excludes
+          ]
+
+          if missing_excludes:
+              print(
+                  "::warning file=staticwebapp.config.json::Faltan excludes recomendados en navigationFallback: "
+                  + ", ".join(missing_excludes)
+              )
+
+          index_text = index_path.read_text(encoding="utf-8", errors="replace")
+
+          if "<!DOCTYPE html>" not in index_text[:100].upper():
+              print("::warning file=index.html::index.html debería empezar con <!DOCTYPE html>.")
+
+          if 'type="module"' not in index_text and "type='module'" not in index_text:
+              print("::warning file=index.html::No se detectó script type=module. Revisa que /src/main.js cargue como módulo.")
+
+          if robots_path.exists():
+              robots_text = robots_path.read_text(encoding="utf-8", errors="replace")
+              if "Sitemap:" not in robots_text:
+                  print("::warning file=robots.txt::robots.txt no declara Sitemap.")
+          else:
+              print("::warning file=robots.txt::No se encontró robots.txt.")
+
+          if sitemap_path.exists():
+              try:
+                  ET.parse(sitemap_path)
+              except Exception as exc:
+                  print(f"::error file=sitemap.xml::sitemap.xml no es XML válido: {exc}")
+                  sys.exit(1)
+          else:
+              print("::warning file=sitemap.xml::No se encontró sitemap.xml.")
+
+          print("Static Web App package validated.")
+          PY
 
       - name: Deploy to Azure Static Web Apps
         id: deploy
@@ -94,13 +207,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
 
     permissions:
       contents: read
       pull-requests: write
 
     steps:
+      - name: Validate deployment token
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${AZURE_STATIC_WEB_APPS_API_TOKEN:-}" ]; then
+            echo "::error::Falta el secret AZURE_STATIC_WEB_APPS_API_TOKEN_POLITE_BAY_086469A1E o está vacío."
+            exit 1
+          fi
+
+          echo "Deployment token detected."
+
       - name: Close Azure Static Web Apps preview environment
         id: close_preview
         uses: Azure/static-web-apps-deploy@v1

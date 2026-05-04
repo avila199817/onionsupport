@@ -1,17 +1,24 @@
 /* =========================================================
    ONION SUPPORT — RESET
-   PRO SAAS PANEL / CLEAN FOUNDATION / EXTREME LEVEL
    Archivo: src/css/core/reset.css
 
-   REFINADO PRO 10/10:
-   - reset base limpio y no invasivo
-   - foundation robusta para SPA enterprise
-   - cero decisiones visuales fuertes en esta capa
-   - mejor convivencia con variables.css + core.css + layout.css
-   - base segura para loader, shell, sidebar, topbar y vistas
-   - forms normalizados sin romper estilos posteriores
-   - media/table/dialog/autofill hardened
-   - accesibilidad y reducción de movimiento controladas
+   CLEAN FOUNDATION · EXTREME LEVEL · PRO SAAS PANEL · 10/10
+
+   ARQUITECTURA:
+   - reset.css     = normalización base no visual
+   - variables.css = tokens
+   - core.css      = tipografía, helpers, accesibilidad visual
+   - layout.css    = shell, scroll, stacking, mounts
+   - ui.css        = componentes
+
+   REGLAS:
+   - Sin :root.
+   - Sin [data-theme].
+   - Sin paletas.
+   - Sin z-index.
+   - Sin scrollbars visuales globales.
+   - Sin layout de app.
+   - Sin decisiones visuales fuertes.
 ========================================================= */
 
 
@@ -21,68 +28,46 @@
 
 *,
 *::before,
-*::after{
-  box-sizing:border-box;
+*::after {
+  box-sizing: border-box;
 }
 
 
 /* =========================================================
-   ROOT DEFAULTS
+   ROOT / DOCUMENT
 ========================================================= */
 
-html{
-  inline-size:100%;
-  min-inline-size:320px;
-  min-block-size:100%;
+html {
+  inline-size: 100%;
+  min-inline-size: 320px;
+  min-block-size: 100%;
 
-  line-height:1.15;
+  line-height: 1.15;
 
-  -webkit-text-size-adjust:100%;
-  text-size-adjust:100%;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 
-  tab-size:4;
-
-  scroll-behavior:smooth;
+  tab-size: 4;
 }
 
-body{
-  inline-size:100%;
-  min-inline-size:320px;
-  min-block-size:100%;
+body {
+  inline-size: 100%;
+  min-inline-size: 320px;
+  min-block-size: 100%;
 
-  margin:0;
+  margin: 0;
 
-  text-rendering:optimizeLegibility;
-  -webkit-font-smoothing:antialiased;
-  -moz-osx-font-smoothing:grayscale;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body,
 button,
 input,
 textarea,
-select{
-  font-family:inherit;
-}
-
-
-/* =========================================================
-   DOCUMENT / APP ROOT SAFETY
-========================================================= */
-
-#app,
-#app-shell,
-#app-content,
-#view-container,
-#main-content{
-  min-inline-size:0;
-}
-
-#app-shell,
-#main-content,
-#app-content,
-#view-container{
-  position:relative;
+select {
+  font-family: inherit;
 }
 
 
@@ -100,43 +85,43 @@ p,
 figure,
 blockquote,
 dl,
-dd{
-  margin:0;
+dd {
+  margin: 0;
 }
 
 ul,
-ol{
-  margin:0;
-  padding:0;
+ol {
+  margin: 0;
+  padding: 0;
 }
 
-li{
-  margin:0;
+li {
+  margin: 0;
 }
 
 b,
-strong{
-  font-weight:bolder;
+strong {
+  font-weight: bolder;
 }
 
-small{
-  font-size:80%;
+small {
+  font-size: 80%;
 }
 
-address{
-  font-style:normal;
+address {
+  font-style: normal;
 }
 
 blockquote,
-q{
-  quotes:none;
+q {
+  quotes: none;
 }
 
 blockquote::before,
 blockquote::after,
 q::before,
-q::after{
-  content:"";
+q::after {
+  content: "";
 }
 
 p,
@@ -149,42 +134,51 @@ h6,
 li,
 figcaption,
 blockquote,
-dd{
-  overflow-wrap:break-word;
-}
-
-h1,
-h2,
-h3,
-h4,
-h5,
-h6{
-  text-wrap:balance;
+dd {
+  overflow-wrap: break-word;
 }
 
 
 /* =========================================================
-   INLINE / TEXT HELPERS
+   INLINE TEXT
 ========================================================= */
 
-abbr[title]{
-  text-decoration:underline dotted;
-  text-decoration-skip-ink:auto;
+abbr[title] {
+  text-decoration: underline dotted;
+  text-decoration-skip-ink: auto;
 }
 
-mark{
-  color:inherit;
-  background-color:transparent;
+mark {
+  color: inherit;
+  background-color: transparent;
 }
 
 del,
-s{
-  text-decoration-thickness:from-font;
+s {
+  text-decoration-thickness: from-font;
 }
 
-ins{
-  text-decoration-thickness:from-font;
-  text-underline-offset:.14em;
+ins {
+  text-decoration-thickness: from-font;
+  text-underline-offset: .14em;
+}
+
+sub,
+sup {
+  position: relative;
+
+  font-size: 75%;
+  line-height: 0;
+
+  vertical-align: baseline;
+}
+
+sub {
+  bottom: -.25em;
+}
+
+sup {
+  top: -.5em;
 }
 
 
@@ -192,14 +186,14 @@ ins{
    LINKS
 ========================================================= */
 
-a{
-  color:inherit;
-  text-decoration:none;
-  background-color:transparent;
+a {
+  color: inherit;
+  text-decoration: none;
+  background-color: transparent;
 }
 
-a:not([href]){
-  cursor:default;
+a:not([href]) {
+  cursor: default;
 }
 
 
@@ -211,45 +205,45 @@ img,
 picture,
 video,
 canvas,
-svg{
-  display:block;
-  max-inline-size:100%;
+svg {
+  display: block;
+  max-inline-size: 100%;
 }
 
 img,
 picture,
 video,
-canvas{
-  block-size:auto;
+canvas {
+  block-size: auto;
 }
 
-img{
-  border-style:none;
+img {
+  border-style: none;
 }
 
-svg{
-  overflow:visible;
+svg {
+  overflow: visible;
 }
 
 audio,
-video{
-  display:block;
+video {
+  display: block;
 }
 
-audio:not([controls]){
-  display:none;
-  block-size:0;
+audio:not([controls]) {
+  display: none;
+  block-size: 0;
 }
 
 object,
 embed,
-iframe{
-  display:block;
-  max-inline-size:100%;
+iframe {
+  display: block;
+  max-inline-size: 100%;
 }
 
-iframe{
-  border:0;
+iframe {
+  border: 0;
 }
 
 
@@ -257,126 +251,121 @@ iframe{
    TABLES
 ========================================================= */
 
-table{
-  inline-size:100%;
+table {
+  inline-size: 100%;
 
-  border-collapse:collapse;
-  border-spacing:0;
+  border-collapse: collapse;
+  border-spacing: 0;
 
-  text-indent:0;
+  text-indent: 0;
 }
 
-caption{
-  text-align:start;
+caption {
+  text-align: start;
 }
 
-th{
-  text-align:inherit;
-  font-weight:inherit;
+th {
+  text-align: inherit;
+  font-weight: inherit;
 }
 
 td,
-th{
-  padding:0;
+th {
+  padding: 0;
 }
 
 
 /* =========================================================
-   FORM ELEMENTS
+   FORMS
 ========================================================= */
 
 input,
 button,
 textarea,
-select{
-  margin:0;
+select {
+  margin: 0;
 
-  font:inherit;
-  color:inherit;
-  letter-spacing:inherit;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
 }
 
 button,
-select{
-  text-transform:none;
+select {
+  text-transform: none;
 }
 
 button,
 [type="button"],
 [type="reset"],
-[type="submit"]{
-  -webkit-appearance:none;
-  appearance:none;
+[type="submit"] {
+  appearance: none;
+  -webkit-appearance: none;
 }
 
-button{
-  padding:0;
-  border:0;
-  background:none;
-  color:inherit;
+button {
+  padding: 0;
+
+  border: 0;
+  background: none;
+  color: inherit;
 }
 
 button,
 [type="button"],
 [type="reset"],
 [type="submit"],
-[role="button"]{
-  cursor:pointer;
+[role="button"] {
+  cursor: pointer;
 }
 
 input,
 textarea,
-select{
-  border-radius:0;
-  background:transparent;
+select {
+  border-radius: 0;
+  background: transparent;
 }
 
-textarea{
-  resize:vertical;
+textarea {
+  resize: vertical;
 }
 
-select{
-  cursor:pointer;
+select {
+  cursor: pointer;
 }
 
-fieldset{
-  min-inline-size:0;
-  margin:0;
-  padding:0;
-  border:0;
+fieldset {
+  min-inline-size: 0;
+
+  margin: 0;
+  padding: 0;
+
+  border: 0;
 }
 
-legend{
-  display:table;
+legend {
+  display: table;
 
-  max-inline-size:100%;
-  padding:0;
+  max-inline-size: 100%;
+  padding: 0;
 
-  color:inherit;
+  color: inherit;
 
-  white-space:normal;
+  white-space: normal;
 }
 
-label{
-  display:inline-block;
+label {
+  display: inline-block;
 }
 
-progress{
-  vertical-align:baseline;
+progress,
+meter {
+  vertical-align: baseline;
 }
 
-meter{
-  vertical-align:baseline;
-}
-
-
-/* =========================================================
-   PLACEHOLDER
-========================================================= */
-
-::placeholder{
-  color:inherit;
-  opacity:1;
+::placeholder {
+  color: inherit;
+  opacity: 1;
 }
 
 
@@ -384,18 +373,18 @@ meter{
    SEARCH INPUT
 ========================================================= */
 
-[type="search"]{
-  -webkit-appearance:textfield;
-  appearance:textfield;
+[type="search"] {
+  appearance: textfield;
+  -webkit-appearance: textfield;
 
-  outline-offset:-2px;
+  outline-offset: -2px;
 }
 
 [type="search"]::-webkit-search-decoration,
 [type="search"]::-webkit-search-cancel-button,
 [type="search"]::-webkit-search-results-button,
-[type="search"]::-webkit-search-results-decoration{
-  -webkit-appearance:none;
+[type="search"]::-webkit-search-results-decoration {
+  -webkit-appearance: none;
 }
 
 
@@ -404,8 +393,8 @@ meter{
 ========================================================= */
 
 [type="number"]::-webkit-outer-spin-button,
-[type="number"]::-webkit-inner-spin-button{
-  height:auto;
+[type="number"]::-webkit-inner-spin-button {
+  height: auto;
 }
 
 
@@ -413,13 +402,13 @@ meter{
    FILE INPUT
 ========================================================= */
 
-::-webkit-file-upload-button{
-  -webkit-appearance:button;
-  font:inherit;
+::-webkit-file-upload-button {
+  -webkit-appearance: button;
+  font: inherit;
 }
 
-::file-selector-button{
-  font:inherit;
+::file-selector-button {
+  font: inherit;
 }
 
 
@@ -428,8 +417,8 @@ meter{
 ========================================================= */
 
 [type="checkbox"],
-[type="radio"]{
-  padding:0;
+[type="radio"] {
+  padding: 0;
 }
 
 
@@ -441,12 +430,12 @@ button:disabled,
 input:disabled,
 select:disabled,
 textarea:disabled,
-[aria-disabled="true"]{
-  cursor:not-allowed;
+[aria-disabled="true"] {
+  cursor: not-allowed;
 }
 
-[aria-disabled="true"]{
-  user-select:none;
+[aria-disabled="true"] {
+  user-select: none;
 }
 
 
@@ -454,13 +443,13 @@ textarea:disabled,
    DETAILS / SUMMARY
 ========================================================= */
 
-details{
-  display:block;
+details {
+  display: block;
 }
 
-summary{
-  display:list-item;
-  cursor:pointer;
+summary {
+  display: list-item;
+  cursor: pointer;
 }
 
 
@@ -468,12 +457,12 @@ summary{
    HIDDEN / TEMPLATE
 ========================================================= */
 
-[hidden]{
-  display:none !important;
+[hidden] {
+  display: none !important;
 }
 
-template{
-  display:none;
+template {
+  display: none;
 }
 
 
@@ -481,17 +470,17 @@ template{
    HR
 ========================================================= */
 
-hr{
-  block-size:0;
+hr {
+  block-size: 0;
 
-  margin:0;
+  margin: 0;
 
-  color:inherit;
+  color: inherit;
 
-  border:0;
-  border-block-start:1px solid currentColor;
+  border: 0;
+  border-block-start: 1px solid currentColor;
 
-  opacity:.12;
+  opacity: .12;
 }
 
 
@@ -502,7 +491,7 @@ hr{
 code,
 kbd,
 samp,
-pre{
+pre {
   font-family:
     ui-monospace,
     SFMono-Regular,
@@ -513,35 +502,13 @@ pre{
     "Courier New",
     monospace;
 
-  font-size:1em;
+  font-size: 1em;
 }
 
-pre{
-  margin:0;
-  overflow:auto;
-}
+pre {
+  margin: 0;
 
-
-/* =========================================================
-   SUB / SUP
-========================================================= */
-
-sub,
-sup{
-  position:relative;
-
-  font-size:75%;
-  line-height:0;
-
-  vertical-align:baseline;
-}
-
-sub{
-  bottom:-0.25em;
-}
-
-sup{
-  top:-0.5em;
+  overflow: auto;
 }
 
 
@@ -549,20 +516,20 @@ sup{
    DIALOG
 ========================================================= */
 
-dialog{
-  padding:0;
+dialog {
+  padding: 0;
 
-  border:0;
-  background:transparent;
-  color:inherit;
+  border: 0;
+  background: transparent;
+  color: inherit;
 }
 
-dialog:not([open]){
-  display:none;
+dialog:not([open]) {
+  display: none;
 }
 
-dialog::backdrop{
-  background:rgba(0,0,0,.4);
+dialog::backdrop {
+  background: rgba(0, 0, 0, .4);
 }
 
 
@@ -570,12 +537,12 @@ dialog::backdrop{
    INTERACTIVE CONSISTENCY
 ========================================================= */
 
-[role="button"]{
-  cursor:pointer;
+[role="button"] {
+  cursor: pointer;
 }
 
-[aria-busy="true"]{
-  cursor:progress;
+[aria-busy="true"] {
+  cursor: progress;
 }
 
 button,
@@ -585,41 +552,43 @@ input,
 label,
 select,
 textarea,
-summary{
-  -webkit-tap-highlight-color:transparent;
+summary {
+  -webkit-tap-highlight-color: transparent;
 }
 
 button,
 a,
 [role="button"],
-summary{
-  touch-action:manipulation;
+summary {
+  touch-action: manipulation;
 }
 
 
 /* =========================================================
    FOCUS BASE
-   Nota:
-   - core.css define el focus visual real.
-   - aquí solo evitamos comportamientos inconsistentes.
+   El foco visual real vive en core.css.
 ========================================================= */
 
-:focus{
-  outline-offset:2px;
+:focus {
+  outline-offset: 2px;
 }
 
-:focus:not(:focus-visible){
-  outline:none;
+:focus:not(:focus-visible) {
+  outline: none;
 }
 
 
 /* =========================================================
-   SELECTION
+   APP ROOT MIN-SIZE SAFETY
+   Sin posicionamiento. El layout vive en layout.css.
 ========================================================= */
 
-::selection{
-  background:var(--selection-bg, rgba(113,113,122,.28));
-  color:var(--selection-text, inherit);
+#app,
+#app-shell,
+#app-content,
+#view-container,
+#main-content {
+  min-inline-size: 0;
 }
 
 
@@ -640,45 +609,8 @@ summary{
   .section,
   .page-header,
   .section-header
-) > *{
-  min-inline-size:0;
-}
-
-
-/* =========================================================
-   SCROLLBAR BASE
-   Nota:
-   - layout.css/core.css pueden especializar .main-content,
-     .table-container, etc.
-========================================================= */
-
-*{
-  scrollbar-width:thin;
-  scrollbar-color:
-    var(--scrollbar-thumb, rgba(255,255,255,.12))
-    var(--scrollbar-track, transparent);
-}
-
-::-webkit-scrollbar{
-  inline-size:var(--scrollbar-size, 10px);
-  block-size:var(--scrollbar-size, 10px);
-}
-
-::-webkit-scrollbar-track{
-  background:var(--scrollbar-track, transparent);
-}
-
-::-webkit-scrollbar-thumb{
-  border:2px solid transparent;
-  border-radius:999px;
-
-  background:var(--scrollbar-thumb, rgba(255,255,255,.12));
-  background-clip:padding-box;
-}
-
-::-webkit-scrollbar-thumb:hover{
-  background:var(--scrollbar-thumb-hover, rgba(255,255,255,.18));
-  background-clip:padding-box;
+) > * {
+  min-inline-size: 0;
 }
 
 
@@ -694,16 +626,16 @@ textarea:-webkit-autofill:hover,
 textarea:-webkit-autofill:focus,
 select:-webkit-autofill,
 select:-webkit-autofill:hover,
-select:-webkit-autofill:focus{
-  -webkit-text-fill-color:inherit;
+select:-webkit-autofill:focus {
+  -webkit-text-fill-color: inherit;
 
-  box-shadow:0 0 0 1000px transparent inset;
+  box-shadow: 0 0 0 1000px transparent inset;
 
   transition:
     background-color 9999s ease-in-out 0s,
     color 9999s ease-in-out 0s;
 
-  font:inherit;
+  font: inherit;
 }
 
 
@@ -711,12 +643,12 @@ select:-webkit-autofill:focus{
    MOBILE TEXT SIZE / TAP POLISH
 ========================================================= */
 
-@media (hover:none) and (pointer:coarse){
+@media (hover: none) and (pointer: coarse) {
   input,
   textarea,
   select,
-  button{
-    font-size:max(16px, 1em);
+  button {
+    font-size: max(16px, 1em);
   }
 }
 
@@ -725,19 +657,19 @@ select:-webkit-autofill:focus{
    REDUCED MOTION BASE
 ========================================================= */
 
-@media (prefers-reduced-motion:reduce){
+@media (prefers-reduced-motion: reduce) {
   html,
-  html:focus-within{
-    scroll-behavior:auto;
+  html:focus-within {
+    scroll-behavior: auto;
   }
 
   *,
   *::before,
-  *::after{
-    animation-duration:.01ms !important;
-    animation-iteration-count:1 !important;
-    transition-duration:.01ms !important;
-    scroll-behavior:auto !important;
+  *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
@@ -746,43 +678,43 @@ select:-webkit-autofill:focus{
    PRINT BASE
 ========================================================= */
 
-@media print{
+@media print {
   *,
   *::before,
-  *::after{
-    background:transparent !important;
-    box-shadow:none !important;
-    text-shadow:none !important;
+  *::after {
+    background: transparent !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
   }
 
   html,
-  body{
-    block-size:auto;
-    min-block-size:0;
-    overflow:visible;
+  body {
+    block-size: auto;
+    min-block-size: 0;
+    overflow: visible;
   }
 
   a,
-  a:visited{
-    text-decoration:underline;
+  a:visited {
+    text-decoration: underline;
   }
 
   img,
-  svg{
-    break-inside:avoid;
+  svg {
+    break-inside: avoid;
   }
 
   p,
   h1,
   h2,
-  h3{
-    orphans:3;
-    widows:3;
+  h3 {
+    orphans: 3;
+    widows: 3;
   }
 
   h1,
   h2,
-  h3{
-    break-after:avoid;
+  h3 {
+    break-after: avoid;
   }
 }

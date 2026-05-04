@@ -11,7 +11,7 @@
    - exponer aliases públicos estables para auth flows
    - integrar reset-password / forgot-password
    - integrar confirmación de reset-password
-   - ofrecer api pública coherente y endurecida
+   - ofrecer API pública coherente y endurecida
    - preservar rutas públicas técnicas durante restore
    - no romper /activate-account?token=...
    - no romper /activate-account/<token>
@@ -38,6 +38,8 @@
    - login emite eventos post-login para reparar Sidebar/Topbar/Shell
    - login NO emite eventos de restore
    - login NO duplica auth:login:success en afterPaint
+   - eventos públicos sin tokens reales
+   - restore/refresh/me delegan eventos canónicos en restore.js
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -64,6 +66,7 @@ import {
   getStoredSessionUserId,
   hasRefreshToken,
   hasRefreshContext,
+  persistTempToken,
 } from "./storage.js";
 
 import {
@@ -72,6 +75,8 @@ import {
   clearSessionLocal,
   isAuthenticated,
   getCurrentRole,
+  getCurrentRoles,
+  isCurrentUserAdmin,
   hasRole,
   requireRole,
   getAuthHeader,
@@ -110,7 +115,7 @@ import {
 ========================================================= */
 
 const AUTH_MODULE_VERSION =
-  "10.0.1";
+  "10.2.0";
 
 /* =========================================================
    PUBLIC TECHNICAL ROUTES
@@ -170,6 +175,8 @@ const AUTH_FAILURE_CODES =
       "INVALID_LOGIN_SESSION",
       "LOGIN_FAILED",
       "AUTH_FAILED",
+      "BAD_CREDENTIALS",
+      "CREDENTIALS_INVALID",
     ])
   );
 
@@ -422,9 +429,11 @@ function safeText(value, fallback = "") {
 }
 
 function safeObject(value) {
-  return value &&
+  return (
+    value &&
     typeof value === "object" &&
     !Array.isArray(value)
+  )
     ? value
     : {};
 }
@@ -484,7 +493,8 @@ function normalizeBoolean(value, fallback = false) {
   }
 
   if (typeof value === "number") {
-    return value === 1;
+    if (value === 1) return true;
+    if (value === 0) return false;
   }
 
   const text =
@@ -498,6 +508,7 @@ function normalizeBoolean(value, fallback = false) {
       "si",
       "sí",
       "ok",
+      "on",
     ].includes(text)
   ) {
     return true;
@@ -508,6 +519,7 @@ function normalizeBoolean(value, fallback = false) {
       "false",
       "0",
       "no",
+      "off",
     ].includes(text)
   ) {
     return false;
@@ -549,10 +561,12 @@ function safeWarn(...args) {
   } catch {}
 
   try {
-    console.warn(
-      "[Auth]",
-      ...args
-    );
+    if (AppCore?.config?.debug) {
+      console.warn(
+        "[Auth]",
+        ...args
+      );
+    }
   } catch {}
 }
 
@@ -573,29 +587,45 @@ function safeError(...args) {
 }
 
 function emit(eventName, payload = {}) {
+  const name =
+    safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
   const cleanPayload =
     sanitizeEventPayload(payload);
 
   try {
-    AppCore?.events?.emit?.(
-      eventName,
-      cleanPayload
-    );
+    if (isFunction(AppCore?.events?.emit)) {
+      AppCore.events.emit(
+        name,
+        cleanPayload
+      );
+
+      return true;
+    }
   } catch {}
 
   try {
-    globalThis?.window?.AppCore?.events?.emit?.(
-      eventName,
-      cleanPayload
-    );
+    if (isBrowser()) {
+      document.dispatchEvent(
+        new CustomEvent(name, {
+          detail:
+            cleanPayload,
+          bubbles:
+            false,
+          cancelable:
+            false,
+        })
+      );
+
+      return true;
+    }
   } catch {}
 
-  try {
-    globalThis?.AppCore?.events?.emit?.(
-      eventName,
-      cleanPayload
-    );
-  } catch {}
+  return false;
 }
 
 function afterPaint(callback) {
@@ -643,11 +673,15 @@ function createRuntimeErrorSnapshot(type, error) {
       error?.name || "Error",
 
     status:
-      error?.status || 0,
+      error?.status ||
+      error?.response?.status ||
+      error?.data?.status ||
+      0,
 
     code:
       error?.code ||
       error?.data?.code ||
+      error?.response?.data?.code ||
       null,
 
     at:
@@ -695,6 +729,30 @@ function redactTokenInText(value = "") {
   return output;
 }
 
+function sanitizeRouteContext(context = {}) {
+  const safe =
+    safeObject(context);
+
+  return {
+    ...safe,
+
+    publicPath:
+      redactTokenInText(safe.publicPath || ""),
+
+    browserPath:
+      redactTokenInText(safe.browserPath || ""),
+
+    initialUrl:
+      redactTokenInText(safe.initialUrl || ""),
+
+    activationInitialUrl:
+      redactTokenInText(safe.activationInitialUrl || ""),
+
+    resetConfirmInitialUrl:
+      redactTokenInText(safe.resetConfirmInitialUrl || ""),
+  };
+}
+
 function sanitizeEventPayload(payload = {}) {
   if (!isPlainObject(payload)) {
     return payload;
@@ -732,28 +790,12 @@ function sanitizeEventPayload(payload = {}) {
       sanitizeRouteContext(output.routeContext);
   }
 
+  if (output.raw) {
+    output.raw =
+      undefined;
+  }
+
   return output;
-}
-
-function sanitizeRouteContext(context = {}) {
-  return {
-    ...safeObject(context),
-
-    publicPath:
-      redactTokenInText(context.publicPath || ""),
-
-    browserPath:
-      redactTokenInText(context.browserPath || ""),
-
-    initialUrl:
-      redactTokenInText(context.initialUrl || ""),
-
-    activationInitialUrl:
-      redactTokenInText(context.activationInitialUrl || ""),
-
-    resetConfirmInitialUrl:
-      redactTokenInText(context.resetConfirmInitialUrl || ""),
-  };
 }
 
 /* =========================================================
@@ -940,6 +982,7 @@ function getActivationInitialUrl() {
 function getResetConfirmInitialUrl() {
   if (!isBrowser()) {
     return "";
+;
   }
 
   try {
@@ -1298,6 +1341,22 @@ function getCurrentRouteContext() {
   };
 }
 
+function looksLikeRuntimeSession(value) {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    (
+      Object.prototype.hasOwnProperty.call(value, "checking") ||
+      Object.prototype.hasOwnProperty.call(value, "refreshing") ||
+      Object.prototype.hasOwnProperty.call(value, "restoring") ||
+      Object.prototype.hasOwnProperty.call(value, "restorePromise") ||
+      Object.prototype.hasOwnProperty.call(value, "refreshPromise") ||
+      Object.prototype.hasOwnProperty.call(value, "mePromise") ||
+      Object.prototype.hasOwnProperty.call(value, "loginPromise")
+    )
+  );
+}
+
 function normalizeRestoreOptions(...args) {
   const first =
     args[0];
@@ -1305,23 +1364,8 @@ function normalizeRestoreOptions(...args) {
   const second =
     args[1];
 
-  const firstLooksRuntimeSession =
-    Boolean(
-      first &&
-      typeof first === "object" &&
-      (
-        Object.prototype.hasOwnProperty.call(first, "checking") ||
-        Object.prototype.hasOwnProperty.call(first, "refreshing") ||
-        Object.prototype.hasOwnProperty.call(first, "restoring") ||
-        Object.prototype.hasOwnProperty.call(first, "restorePromise") ||
-        Object.prototype.hasOwnProperty.call(first, "refreshPromise") ||
-        Object.prototype.hasOwnProperty.call(first, "mePromise") ||
-        Object.prototype.hasOwnProperty.call(first, "loginPromise")
-      )
-    );
-
   const baseOptions =
-    firstLooksRuntimeSession
+    looksLikeRuntimeSession(first)
       ? safeObject(second)
       : safeObject(first);
 
@@ -1389,22 +1433,31 @@ function normalizeRestoreOptions(...args) {
 ========================================================= */
 
 function getNestedAuthData(raw = {}) {
+  const source =
+    safeObject(raw);
+
   const data =
-    safeObject(raw.data);
+    safeObject(source.data);
 
   const payload =
-    safeObject(raw.payload);
+    safeObject(source.payload);
 
   const result =
-    safeObject(raw.result);
+    safeObject(source.result);
 
   const body =
-    safeObject(raw.body);
+    safeObject(source.body);
+
+  const response =
+    safeObject(source.response);
+
+  const responseData =
+    safeObject(response.data);
 
   const sessionData =
     pickFirstObject(
-      raw.session,
-      raw.sessionData,
+      source.session,
+      source.sessionData,
       data.session,
       data.sessionData,
       payload.session,
@@ -1412,13 +1465,15 @@ function getNestedAuthData(raw = {}) {
       result.session,
       result.sessionData,
       body.session,
-      body.sessionData
+      body.sessionData,
+      responseData.session,
+      responseData.sessionData
     ) || {};
 
   const authData =
     pickFirstObject(
-      raw.auth,
-      raw.authData,
+      source.auth,
+      source.authData,
       data.auth,
       data.authData,
       payload.auth,
@@ -1426,7 +1481,9 @@ function getNestedAuthData(raw = {}) {
       result.auth,
       result.authData,
       body.auth,
-      body.authData
+      body.authData,
+      responseData.auth,
+      responseData.authData
     ) || {};
 
   const nestedSessionData =
@@ -1440,6 +1497,8 @@ function getNestedAuthData(raw = {}) {
     payload,
     result,
     body,
+    response,
+    responseData,
     sessionData,
     authData,
     nestedSessionData,
@@ -1451,16 +1510,8 @@ function extractLoginToken(result = {}) {
   const raw =
     safeObject(result);
 
-  const {
-    data,
-    payload,
-    result: resultData,
-    body,
-    sessionData,
-    authData,
-    nestedSessionData,
-    nestedAuthData,
-  } = getNestedAuthData(raw);
+  const nodes =
+    getNestedAuthData(raw);
 
   return pickFirstText(
     raw.token,
@@ -1472,59 +1523,64 @@ function extractLoginToken(result = {}) {
     raw.idToken,
     raw.id_token,
 
-    data.token,
-    data.accessToken,
-    data.access_token,
-    data.authToken,
-    data.auth_token,
-    data.jwt,
-    data.idToken,
-    data.id_token,
+    nodes.data.token,
+    nodes.data.accessToken,
+    nodes.data.access_token,
+    nodes.data.authToken,
+    nodes.data.auth_token,
+    nodes.data.jwt,
+    nodes.data.idToken,
+    nodes.data.id_token,
 
-    payload.token,
-    payload.accessToken,
-    payload.access_token,
-    payload.authToken,
-    payload.auth_token,
-    payload.jwt,
+    nodes.payload.token,
+    nodes.payload.accessToken,
+    nodes.payload.access_token,
+    nodes.payload.authToken,
+    nodes.payload.auth_token,
+    nodes.payload.jwt,
 
-    resultData.token,
-    resultData.accessToken,
-    resultData.access_token,
-    resultData.authToken,
-    resultData.auth_token,
-    resultData.jwt,
+    nodes.result.token,
+    nodes.result.accessToken,
+    nodes.result.access_token,
+    nodes.result.authToken,
+    nodes.result.auth_token,
+    nodes.result.jwt,
 
-    body.token,
-    body.accessToken,
-    body.access_token,
-    body.authToken,
-    body.auth_token,
-    body.jwt,
+    nodes.body.token,
+    nodes.body.accessToken,
+    nodes.body.access_token,
+    nodes.body.authToken,
+    nodes.body.auth_token,
+    nodes.body.jwt,
 
-    sessionData.token,
-    sessionData.accessToken,
-    sessionData.access_token,
-    sessionData.authToken,
-    sessionData.auth_token,
-    sessionData.jwt,
+    nodes.responseData.token,
+    nodes.responseData.accessToken,
+    nodes.responseData.access_token,
+    nodes.responseData.jwt,
 
-    authData.token,
-    authData.accessToken,
-    authData.access_token,
-    authData.authToken,
-    authData.auth_token,
-    authData.jwt,
+    nodes.sessionData.token,
+    nodes.sessionData.accessToken,
+    nodes.sessionData.access_token,
+    nodes.sessionData.authToken,
+    nodes.sessionData.auth_token,
+    nodes.sessionData.jwt,
 
-    nestedSessionData.token,
-    nestedSessionData.accessToken,
-    nestedSessionData.access_token,
-    nestedSessionData.jwt,
+    nodes.authData.token,
+    nodes.authData.accessToken,
+    nodes.authData.access_token,
+    nodes.authData.authToken,
+    nodes.authData.auth_token,
+    nodes.authData.jwt,
 
-    nestedAuthData.token,
-    nestedAuthData.accessToken,
-    nestedAuthData.access_token,
-    nestedAuthData.jwt
+    nodes.nestedSessionData.token,
+    nodes.nestedSessionData.accessToken,
+    nodes.nestedSessionData.access_token,
+    nodes.nestedSessionData.jwt,
+
+    nodes.nestedAuthData.token,
+    nodes.nestedAuthData.accessToken,
+    nodes.nestedAuthData.access_token,
+    nodes.nestedAuthData.jwt
   );
 }
 
@@ -1532,44 +1588,39 @@ function extractLoginRefreshToken(result = {}) {
   const raw =
     safeObject(result);
 
-  const {
-    data,
-    payload,
-    result: resultData,
-    body,
-    sessionData,
-    authData,
-    nestedSessionData,
-    nestedAuthData,
-  } = getNestedAuthData(raw);
+  const nodes =
+    getNestedAuthData(raw);
 
   return pickFirstText(
     raw.refreshToken,
     raw.refresh_token,
 
-    data.refreshToken,
-    data.refresh_token,
+    nodes.data.refreshToken,
+    nodes.data.refresh_token,
 
-    payload.refreshToken,
-    payload.refresh_token,
+    nodes.payload.refreshToken,
+    nodes.payload.refresh_token,
 
-    resultData.refreshToken,
-    resultData.refresh_token,
+    nodes.result.refreshToken,
+    nodes.result.refresh_token,
 
-    body.refreshToken,
-    body.refresh_token,
+    nodes.body.refreshToken,
+    nodes.body.refresh_token,
 
-    sessionData.refreshToken,
-    sessionData.refresh_token,
+    nodes.responseData.refreshToken,
+    nodes.responseData.refresh_token,
 
-    authData.refreshToken,
-    authData.refresh_token,
+    nodes.sessionData.refreshToken,
+    nodes.sessionData.refresh_token,
 
-    nestedSessionData.refreshToken,
-    nestedSessionData.refresh_token,
+    nodes.authData.refreshToken,
+    nodes.authData.refresh_token,
 
-    nestedAuthData.refreshToken,
-    nestedAuthData.refresh_token
+    nodes.nestedSessionData.refreshToken,
+    nodes.nestedSessionData.refresh_token,
+
+    nodes.nestedAuthData.refreshToken,
+    nodes.nestedAuthData.refresh_token
   );
 }
 
@@ -1577,16 +1628,8 @@ function extractLoginUser(result = {}) {
   const raw =
     safeObject(result);
 
-  const {
-    data,
-    payload,
-    result: resultData,
-    body,
-    sessionData,
-    authData,
-    nestedSessionData,
-    nestedAuthData,
-  } = getNestedAuthData(raw);
+  const nodes =
+    getNestedAuthData(raw);
 
   return pickFirstObject(
     raw.user,
@@ -1595,53 +1638,59 @@ function extractLoginUser(result = {}) {
     raw.profile,
     raw.me,
 
-    data.user,
-    data.usuario,
-    data.account,
-    data.profile,
-    data.me,
+    nodes.data.user,
+    nodes.data.usuario,
+    nodes.data.account,
+    nodes.data.profile,
+    nodes.data.me,
 
-    payload.user,
-    payload.usuario,
-    payload.account,
-    payload.profile,
-    payload.me,
+    nodes.payload.user,
+    nodes.payload.usuario,
+    nodes.payload.account,
+    nodes.payload.profile,
+    nodes.payload.me,
 
-    resultData.user,
-    resultData.usuario,
-    resultData.account,
-    resultData.profile,
-    resultData.me,
+    nodes.result.user,
+    nodes.result.usuario,
+    nodes.result.account,
+    nodes.result.profile,
+    nodes.result.me,
 
-    body.user,
-    body.usuario,
-    body.account,
-    body.profile,
-    body.me,
+    nodes.body.user,
+    nodes.body.usuario,
+    nodes.body.account,
+    nodes.body.profile,
+    nodes.body.me,
 
-    sessionData.user,
-    sessionData.usuario,
-    sessionData.account,
-    sessionData.profile,
-    sessionData.me,
+    nodes.responseData.user,
+    nodes.responseData.usuario,
+    nodes.responseData.account,
+    nodes.responseData.profile,
+    nodes.responseData.me,
 
-    authData.user,
-    authData.usuario,
-    authData.account,
-    authData.profile,
-    authData.me,
+    nodes.sessionData.user,
+    nodes.sessionData.usuario,
+    nodes.sessionData.account,
+    nodes.sessionData.profile,
+    nodes.sessionData.me,
 
-    nestedSessionData.user,
-    nestedSessionData.usuario,
-    nestedSessionData.account,
-    nestedSessionData.profile,
-    nestedSessionData.me,
+    nodes.authData.user,
+    nodes.authData.usuario,
+    nodes.authData.account,
+    nodes.authData.profile,
+    nodes.authData.me,
 
-    nestedAuthData.user,
-    nestedAuthData.usuario,
-    nestedAuthData.account,
-    nestedAuthData.profile,
-    nestedAuthData.me
+    nodes.nestedSessionData.user,
+    nodes.nestedSessionData.usuario,
+    nodes.nestedSessionData.account,
+    nodes.nestedSessionData.profile,
+    nodes.nestedSessionData.me,
+
+    nodes.nestedAuthData.user,
+    nodes.nestedAuthData.usuario,
+    nodes.nestedAuthData.account,
+    nodes.nestedAuthData.profile,
+    nodes.nestedAuthData.me
   );
 }
 
@@ -1649,53 +1698,53 @@ function extractLoginStatus(result = {}) {
   const raw =
     safeObject(result);
 
-  const {
-    data,
-    payload,
-    result: resultData,
-    body,
-    sessionData,
-    authData,
-    nestedSessionData,
-    nestedAuthData,
-  } = getNestedAuthData(raw);
+  const nodes =
+    getNestedAuthData(raw);
 
   return pickFirstValue(
     raw.status,
     raw.statusCode,
     raw.status_code,
 
-    data.status,
-    data.statusCode,
-    data.status_code,
+    nodes.data.status,
+    nodes.data.statusCode,
+    nodes.data.status_code,
 
-    payload.status,
-    payload.statusCode,
-    payload.status_code,
+    nodes.payload.status,
+    nodes.payload.statusCode,
+    nodes.payload.status_code,
 
-    resultData.status,
-    resultData.statusCode,
-    resultData.status_code,
+    nodes.result.status,
+    nodes.result.statusCode,
+    nodes.result.status_code,
 
-    body.status,
-    body.statusCode,
-    body.status_code,
+    nodes.body.status,
+    nodes.body.statusCode,
+    nodes.body.status_code,
 
-    sessionData.status,
-    sessionData.statusCode,
-    sessionData.status_code,
+    nodes.response.status,
+    nodes.response.statusCode,
+    nodes.response.status_code,
 
-    authData.status,
-    authData.statusCode,
-    authData.status_code,
+    nodes.responseData.status,
+    nodes.responseData.statusCode,
+    nodes.responseData.status_code,
 
-    nestedSessionData.status,
-    nestedSessionData.statusCode,
-    nestedSessionData.status_code,
+    nodes.sessionData.status,
+    nodes.sessionData.statusCode,
+    nodes.sessionData.status_code,
 
-    nestedAuthData.status,
-    nestedAuthData.statusCode,
-    nestedAuthData.status_code
+    nodes.authData.status,
+    nodes.authData.statusCode,
+    nodes.authData.status_code,
+
+    nodes.nestedSessionData.status,
+    nodes.nestedSessionData.statusCode,
+    nodes.nestedSessionData.status_code,
+
+    nodes.nestedAuthData.status,
+    nodes.nestedAuthData.statusCode,
+    nodes.nestedAuthData.status_code
   );
 }
 
@@ -1703,16 +1752,8 @@ function extractLoginCode(result = {}) {
   const raw =
     safeObject(result);
 
-  const {
-    data,
-    payload,
-    result: resultData,
-    body,
-    sessionData,
-    authData,
-    nestedSessionData,
-    nestedAuthData,
-  } = getNestedAuthData(raw);
+  const nodes =
+    getNestedAuthData(raw);
 
   return pickFirstText(
     raw.code,
@@ -1720,45 +1761,48 @@ function extractLoginCode(result = {}) {
     raw.error_code,
     raw.error,
 
-    data.code,
-    data.errorCode,
-    data.error_code,
-    data.error,
+    nodes.data.code,
+    nodes.data.errorCode,
+    nodes.data.error_code,
+    nodes.data.error,
 
-    payload.code,
-    payload.errorCode,
-    payload.error_code,
-    payload.error,
+    nodes.payload.code,
+    nodes.payload.errorCode,
+    nodes.payload.error_code,
+    nodes.payload.error,
 
-    resultData.code,
-    resultData.errorCode,
-    resultData.error_code,
-    resultData.error,
+    nodes.result.code,
+    nodes.result.errorCode,
+    nodes.result.error_code,
+    nodes.result.error,
 
-    body.code,
-    body.errorCode,
-    body.error_code,
-    body.error,
+    nodes.body.code,
+    nodes.body.errorCode,
+    nodes.body.error_code,
+    nodes.body.error,
 
-    sessionData.code,
-    sessionData.errorCode,
-    sessionData.error_code,
-    sessionData.error,
+    nodes.responseData.code,
+    nodes.responseData.errorCode,
+    nodes.responseData.error_code,
+    nodes.responseData.error,
 
-    authData.code,
-    authData.errorCode,
-    authData.error_code,
-    authData.error,
+    nodes.sessionData.code,
+    nodes.sessionData.errorCode,
+    nodes.sessionData.error_code,
+    nodes.sessionData.error,
 
-    nestedSessionData.code,
-    nestedSessionData.errorCode,
-    nestedSessionData.error_code,
-    nestedSessionData.error,
+    nodes.authData.code,
+    nodes.authData.errorCode,
+    nodes.authData.error_code,
+    nodes.authData.error,
 
-    nestedAuthData.code,
-    nestedAuthData.errorCode,
-    nestedAuthData.error_code,
-    nestedAuthData.error
+    nodes.nestedSessionData.code,
+    nodes.nestedSessionData.errorCode,
+    nodes.nestedSessionData.error_code,
+
+    nodes.nestedAuthData.code,
+    nodes.nestedAuthData.errorCode,
+    nodes.nestedAuthData.error_code
   );
 }
 
@@ -1766,58 +1810,61 @@ function extractLoginMessage(result = {}) {
   const raw =
     safeObject(result);
 
-  const {
-    data,
-    payload,
-    result: resultData,
-    body,
-    sessionData,
-    authData,
-    nestedSessionData,
-    nestedAuthData,
-  } = getNestedAuthData(raw);
+  const nodes =
+    getNestedAuthData(raw);
 
   return pickFirstText(
     raw.message,
     raw.mensaje,
     raw.errorMessage,
     raw.error_message,
+    raw.detail,
 
-    data.message,
-    data.mensaje,
-    data.errorMessage,
-    data.error_message,
+    nodes.data.message,
+    nodes.data.mensaje,
+    nodes.data.errorMessage,
+    nodes.data.error_message,
+    nodes.data.detail,
 
-    payload.message,
-    payload.mensaje,
-    payload.errorMessage,
-    payload.error_message,
+    nodes.payload.message,
+    nodes.payload.mensaje,
+    nodes.payload.errorMessage,
+    nodes.payload.error_message,
+    nodes.payload.detail,
 
-    resultData.message,
-    resultData.mensaje,
-    resultData.errorMessage,
-    resultData.error_message,
+    nodes.result.message,
+    nodes.result.mensaje,
+    nodes.result.errorMessage,
+    nodes.result.error_message,
+    nodes.result.detail,
 
-    body.message,
-    body.mensaje,
-    body.errorMessage,
-    body.error_message,
+    nodes.body.message,
+    nodes.body.mensaje,
+    nodes.body.errorMessage,
+    nodes.body.error_message,
+    nodes.body.detail,
 
-    sessionData.message,
-    sessionData.mensaje,
-    sessionData.errorMessage,
-    sessionData.error_message,
+    nodes.responseData.message,
+    nodes.responseData.mensaje,
+    nodes.responseData.errorMessage,
+    nodes.responseData.error_message,
+    nodes.responseData.detail,
 
-    authData.message,
-    authData.mensaje,
-    authData.errorMessage,
-    authData.error_message,
+    nodes.sessionData.message,
+    nodes.sessionData.mensaje,
+    nodes.sessionData.errorMessage,
+    nodes.sessionData.error_message,
 
-    nestedSessionData.message,
-    nestedSessionData.mensaje,
+    nodes.authData.message,
+    nodes.authData.mensaje,
+    nodes.authData.errorMessage,
+    nodes.authData.error_message,
 
-    nestedAuthData.message,
-    nestedAuthData.mensaje
+    nodes.nestedSessionData.message,
+    nodes.nestedSessionData.mensaje,
+
+    nodes.nestedAuthData.message,
+    nodes.nestedAuthData.mensaje
   );
 }
 
@@ -1825,16 +1872,8 @@ function extractLoginTempToken(result = {}) {
   const raw =
     safeObject(result);
 
-  const {
-    data,
-    payload,
-    result: resultData,
-    body,
-    sessionData,
-    authData,
-    nestedSessionData,
-    nestedAuthData,
-  } = getNestedAuthData(raw);
+  const nodes =
+    getNestedAuthData(raw);
 
   return pickFirstText(
     raw.tempToken,
@@ -1846,69 +1885,70 @@ function extractLoginTempToken(result = {}) {
     raw.mfaToken,
     raw.mfa_token,
 
-    data.tempToken,
-    data.temp_token,
-    data.temporaryToken,
-    data.temporary_token,
-    data.twoFactorToken,
-    data.two_factor_token,
-    data.mfaToken,
-    data.mfa_token,
+    nodes.data.tempToken,
+    nodes.data.temp_token,
+    nodes.data.temporaryToken,
+    nodes.data.temporary_token,
+    nodes.data.twoFactorToken,
+    nodes.data.two_factor_token,
+    nodes.data.mfaToken,
+    nodes.data.mfa_token,
 
-    payload.tempToken,
-    payload.temp_token,
-    payload.temporaryToken,
-    payload.temporary_token,
-    payload.twoFactorToken,
-    payload.two_factor_token,
-    payload.mfaToken,
-    payload.mfa_token,
+    nodes.payload.tempToken,
+    nodes.payload.temp_token,
+    nodes.payload.temporaryToken,
+    nodes.payload.temporary_token,
+    nodes.payload.twoFactorToken,
+    nodes.payload.two_factor_token,
+    nodes.payload.mfaToken,
+    nodes.payload.mfa_token,
 
-    resultData.tempToken,
-    resultData.temp_token,
-    resultData.temporaryToken,
-    resultData.temporary_token,
-    resultData.twoFactorToken,
-    resultData.two_factor_token,
-    resultData.mfaToken,
-    resultData.mfa_token,
+    nodes.result.tempToken,
+    nodes.result.temp_token,
+    nodes.result.temporaryToken,
+    nodes.result.temporary_token,
+    nodes.result.twoFactorToken,
+    nodes.result.two_factor_token,
+    nodes.result.mfaToken,
+    nodes.result.mfa_token,
 
-    body.tempToken,
-    body.temp_token,
-    body.temporaryToken,
-    body.temporary_token,
-    body.twoFactorToken,
-    body.two_factor_token,
-    body.mfaToken,
-    body.mfa_token,
+    nodes.body.tempToken,
+    nodes.body.temp_token,
+    nodes.body.temporaryToken,
+    nodes.body.temporary_token,
+    nodes.body.twoFactorToken,
+    nodes.body.two_factor_token,
+    nodes.body.mfaToken,
+    nodes.body.mfa_token,
 
-    sessionData.tempToken,
-    sessionData.temp_token,
-    sessionData.temporaryToken,
-    sessionData.temporary_token,
-    sessionData.twoFactorToken,
-    sessionData.two_factor_token,
-    sessionData.mfaToken,
-    sessionData.mfa_token,
+    nodes.responseData.tempToken,
+    nodes.responseData.temp_token,
+    nodes.responseData.temporaryToken,
+    nodes.responseData.temporary_token,
+    nodes.responseData.twoFactorToken,
+    nodes.responseData.two_factor_token,
+    nodes.responseData.mfaToken,
+    nodes.responseData.mfa_token,
 
-    authData.tempToken,
-    authData.temp_token,
-    authData.temporaryToken,
-    authData.temporary_token,
-    authData.twoFactorToken,
-    authData.two_factor_token,
-    authData.mfaToken,
-    authData.mfa_token,
+    nodes.sessionData.tempToken,
+    nodes.sessionData.temp_token,
+    nodes.sessionData.temporaryToken,
+    nodes.sessionData.temporary_token,
 
-    nestedSessionData.tempToken,
-    nestedSessionData.temp_token,
-    nestedSessionData.temporaryToken,
-    nestedSessionData.temporary_token,
+    nodes.authData.tempToken,
+    nodes.authData.temp_token,
+    nodes.authData.temporaryToken,
+    nodes.authData.temporary_token,
 
-    nestedAuthData.tempToken,
-    nestedAuthData.temp_token,
-    nestedAuthData.temporaryToken,
-    nestedAuthData.temporary_token
+    nodes.nestedSessionData.tempToken,
+    nodes.nestedSessionData.temp_token,
+    nodes.nestedSessionData.temporaryToken,
+    nodes.nestedSessionData.temporary_token,
+
+    nodes.nestedAuthData.tempToken,
+    nodes.nestedAuthData.temp_token,
+    nodes.nestedAuthData.temporaryToken,
+    nodes.nestedAuthData.temporary_token
   );
 }
 
@@ -1916,16 +1956,8 @@ function extractLoginRedirectTo(result = {}) {
   const raw =
     safeObject(result);
 
-  const {
-    data,
-    payload,
-    result: resultData,
-    body,
-    sessionData,
-    authData,
-    nestedSessionData,
-    nestedAuthData,
-  } = getNestedAuthData(raw);
+  const nodes =
+    getNestedAuthData(raw);
 
   return pickFirstText(
     raw.redirectTo,
@@ -1935,56 +1967,81 @@ function extractLoginRedirectTo(result = {}) {
     raw.nextPath,
     raw.next_path,
 
-    data.redirectTo,
-    data.redirect_to,
-    data.redirect,
-    data.next,
-    data.nextPath,
-    data.next_path,
+    nodes.data.redirectTo,
+    nodes.data.redirect_to,
+    nodes.data.redirect,
+    nodes.data.next,
+    nodes.data.nextPath,
+    nodes.data.next_path,
 
-    payload.redirectTo,
-    payload.redirect_to,
-    payload.redirect,
-    payload.next,
-    payload.nextPath,
-    payload.next_path,
+    nodes.payload.redirectTo,
+    nodes.payload.redirect_to,
+    nodes.payload.redirect,
+    nodes.payload.next,
+    nodes.payload.nextPath,
+    nodes.payload.next_path,
 
-    resultData.redirectTo,
-    resultData.redirect_to,
-    resultData.redirect,
-    resultData.next,
-    resultData.nextPath,
-    resultData.next_path,
+    nodes.result.redirectTo,
+    nodes.result.redirect_to,
+    nodes.result.redirect,
+    nodes.result.next,
+    nodes.result.nextPath,
+    nodes.result.next_path,
 
-    body.redirectTo,
-    body.redirect_to,
-    body.redirect,
-    body.next,
-    body.nextPath,
-    body.next_path,
+    nodes.body.redirectTo,
+    nodes.body.redirect_to,
+    nodes.body.redirect,
+    nodes.body.next,
+    nodes.body.nextPath,
+    nodes.body.next_path,
 
-    sessionData.redirectTo,
-    sessionData.redirect_to,
-    sessionData.redirect,
+    nodes.responseData.redirectTo,
+    nodes.responseData.redirect_to,
+    nodes.responseData.redirect,
 
-    authData.redirectTo,
-    authData.redirect_to,
-    authData.redirect,
+    nodes.sessionData.redirectTo,
+    nodes.sessionData.redirect_to,
+    nodes.sessionData.redirect,
 
-    nestedSessionData.redirectTo,
-    nestedSessionData.redirect_to,
-    nestedSessionData.redirect,
+    nodes.authData.redirectTo,
+    nodes.authData.redirect_to,
+    nodes.authData.redirect,
 
-    nestedAuthData.redirectTo,
-    nestedAuthData.redirect_to,
-    nestedAuthData.redirect
+    nodes.nestedSessionData.redirectTo,
+    nodes.nestedSessionData.redirect_to,
+    nodes.nestedSessionData.redirect,
+
+    nodes.nestedAuthData.redirectTo,
+    nodes.nestedAuthData.redirect_to,
+    nodes.nestedAuthData.redirect
   );
 }
 
 function hasUsableToken(token = "") {
-  return Boolean(
-    safeText(token, "")
-  );
+  const value =
+    safeText(token, "");
+
+  if (!value) {
+    return false;
+  }
+
+  if (
+    value === "null" ||
+    value === "undefined" ||
+    value === "false"
+  ) {
+    return false;
+  }
+
+  try {
+    if (isFunction(AppCore?.utils?.hasValidToken)) {
+      return Boolean(
+        AppCore.utils.hasValidToken(value)
+      );
+    }
+  } catch {}
+
+  return true;
 }
 
 function hasUsableUser(user = {}) {
@@ -1995,10 +2052,14 @@ function hasUsableUser(user = {}) {
   return Boolean(
     safeText(user.id, "") ||
     safeText(user.userId, "") ||
+    safeText(user.user_id, "") ||
     safeText(user._id, "") ||
     safeText(user.uid, "") ||
     safeText(user.username, "") ||
+    safeText(user.userName, "") ||
+    safeText(user.user_name, "") ||
     safeText(user.email, "") ||
+    safeText(user.mail, "") ||
     safeText(user.phone, "") ||
     safeText(user.telefono, "")
   );
@@ -2019,6 +2080,12 @@ function isExplicitLoginFailure(result = {}) {
 
   const body =
     safeObject(raw.body);
+
+  const response =
+    safeObject(raw.response);
+
+  const responseData =
+    safeObject(response.data);
 
   const statusValue =
     extractLoginStatus(raw);
@@ -2056,7 +2123,9 @@ function isExplicitLoginFailure(result = {}) {
     resultData.ok === false ||
     resultData.success === false ||
     body.ok === false ||
-    body.success === false
+    body.success === false ||
+    responseData.ok === false ||
+    responseData.success === false
   ) {
     return true;
   }
@@ -2068,16 +2137,8 @@ function isLogin2FARequired(result = {}, tempToken = "") {
   const raw =
     safeObject(result);
 
-  const {
-    data,
-    payload,
-    result: resultData,
-    body,
-    sessionData,
-    authData,
-    nestedSessionData,
-    nestedAuthData,
-  } = getNestedAuthData(raw);
+  const nodes =
+    getNestedAuthData(raw);
 
   const status =
     safeText(
@@ -2095,47 +2156,51 @@ function isLogin2FARequired(result = {}, tempToken = "") {
     normalizeBoolean(raw.mfaRequired, false) ||
     normalizeBoolean(raw.requiresMfa, false) ||
 
-    normalizeBoolean(data.requires2FA, false) ||
-    normalizeBoolean(data.require2FA, false) ||
-    normalizeBoolean(data.requiresTwoFactor, false) ||
-    normalizeBoolean(data.twoFactorRequired, false) ||
-    normalizeBoolean(data.mfaRequired, false) ||
-    normalizeBoolean(data.requiresMfa, false) ||
+    normalizeBoolean(nodes.data.requires2FA, false) ||
+    normalizeBoolean(nodes.data.require2FA, false) ||
+    normalizeBoolean(nodes.data.requiresTwoFactor, false) ||
+    normalizeBoolean(nodes.data.twoFactorRequired, false) ||
+    normalizeBoolean(nodes.data.mfaRequired, false) ||
+    normalizeBoolean(nodes.data.requiresMfa, false) ||
 
-    normalizeBoolean(payload.requires2FA, false) ||
-    normalizeBoolean(payload.require2FA, false) ||
-    normalizeBoolean(payload.requiresTwoFactor, false) ||
-    normalizeBoolean(payload.twoFactorRequired, false) ||
-    normalizeBoolean(payload.mfaRequired, false) ||
-    normalizeBoolean(payload.requiresMfa, false) ||
+    normalizeBoolean(nodes.payload.requires2FA, false) ||
+    normalizeBoolean(nodes.payload.require2FA, false) ||
+    normalizeBoolean(nodes.payload.requiresTwoFactor, false) ||
+    normalizeBoolean(nodes.payload.twoFactorRequired, false) ||
+    normalizeBoolean(nodes.payload.mfaRequired, false) ||
+    normalizeBoolean(nodes.payload.requiresMfa, false) ||
 
-    normalizeBoolean(resultData.requires2FA, false) ||
-    normalizeBoolean(resultData.require2FA, false) ||
-    normalizeBoolean(resultData.requiresTwoFactor, false) ||
-    normalizeBoolean(resultData.twoFactorRequired, false) ||
-    normalizeBoolean(resultData.mfaRequired, false) ||
-    normalizeBoolean(resultData.requiresMfa, false) ||
+    normalizeBoolean(nodes.result.requires2FA, false) ||
+    normalizeBoolean(nodes.result.require2FA, false) ||
+    normalizeBoolean(nodes.result.requiresTwoFactor, false) ||
+    normalizeBoolean(nodes.result.twoFactorRequired, false) ||
+    normalizeBoolean(nodes.result.mfaRequired, false) ||
+    normalizeBoolean(nodes.result.requiresMfa, false) ||
 
-    normalizeBoolean(body.requires2FA, false) ||
-    normalizeBoolean(body.require2FA, false) ||
-    normalizeBoolean(body.requiresTwoFactor, false) ||
-    normalizeBoolean(body.twoFactorRequired, false) ||
-    normalizeBoolean(body.mfaRequired, false) ||
-    normalizeBoolean(body.requiresMfa, false) ||
+    normalizeBoolean(nodes.body.requires2FA, false) ||
+    normalizeBoolean(nodes.body.require2FA, false) ||
+    normalizeBoolean(nodes.body.requiresTwoFactor, false) ||
+    normalizeBoolean(nodes.body.twoFactorRequired, false) ||
+    normalizeBoolean(nodes.body.mfaRequired, false) ||
+    normalizeBoolean(nodes.body.requiresMfa, false) ||
 
-    normalizeBoolean(sessionData.requires2FA, false) ||
-    normalizeBoolean(sessionData.twoFactorRequired, false) ||
-    normalizeBoolean(sessionData.mfaRequired, false) ||
+    normalizeBoolean(nodes.responseData.requires2FA, false) ||
+    normalizeBoolean(nodes.responseData.twoFactorRequired, false) ||
+    normalizeBoolean(nodes.responseData.mfaRequired, false) ||
 
-    normalizeBoolean(authData.requires2FA, false) ||
-    normalizeBoolean(authData.twoFactorRequired, false) ||
-    normalizeBoolean(authData.mfaRequired, false) ||
+    normalizeBoolean(nodes.sessionData.requires2FA, false) ||
+    normalizeBoolean(nodes.sessionData.twoFactorRequired, false) ||
+    normalizeBoolean(nodes.sessionData.mfaRequired, false) ||
 
-    normalizeBoolean(nestedSessionData.requires2FA, false) ||
-    normalizeBoolean(nestedSessionData.twoFactorRequired, false) ||
+    normalizeBoolean(nodes.authData.requires2FA, false) ||
+    normalizeBoolean(nodes.authData.twoFactorRequired, false) ||
+    normalizeBoolean(nodes.authData.mfaRequired, false) ||
 
-    normalizeBoolean(nestedAuthData.requires2FA, false) ||
-    normalizeBoolean(nestedAuthData.twoFactorRequired, false) ||
+    normalizeBoolean(nodes.nestedSessionData.requires2FA, false) ||
+    normalizeBoolean(nodes.nestedSessionData.twoFactorRequired, false) ||
+
+    normalizeBoolean(nodes.nestedAuthData.requires2FA, false) ||
+    normalizeBoolean(nodes.nestedAuthData.twoFactorRequired, false) ||
 
     status === "2fa_required" ||
     status === "mfa_required" ||
@@ -2249,9 +2314,13 @@ function createLoginErrorFromResult(
   error.name =
     "AuthLoginError";
 
+  const statusAsNumber =
+    Number(normalized.status);
+
   error.status =
-    Number(normalized.status) >= 400
-      ? Number(normalized.status)
+    Number.isFinite(statusAsNumber) &&
+    statusAsNumber >= 400
+      ? statusAsNumber
       : 401;
 
   error.code =
@@ -2292,8 +2361,10 @@ function extractRoleFromUser(user = {}) {
     clean.role,
     clean.rol,
     clean.userRole,
+    clean.user_role,
     clean.type,
     clean.userType,
+    clean.user_type,
     roles[0],
     AppCore?.state?.role,
     AppCore?.state?.rol,
@@ -2329,7 +2400,7 @@ function applyAcceptedLoginSession(normalized = {}) {
   const token =
     safeText(
       normalized.token ||
-        normalized.accessToken,
+      normalized.accessToken,
       ""
     );
 
@@ -2377,13 +2448,20 @@ function applyAcceptedLoginSession(normalized = {}) {
     rol:
       role,
 
+    preserveExistingUser:
+      false,
+
     source:
       "Auth.login",
   };
 
+  let snapshot =
+    null;
+
   try {
     if (isFunction(applySession)) {
-      applySession(sessionPayload);
+      snapshot =
+        applySession(sessionPayload);
     }
   } catch (error) {
     safeWarn(
@@ -2415,9 +2493,36 @@ function applyAcceptedLoginSession(normalized = {}) {
       authUser:
         user,
 
-      role,
-      userRole:
+      role:
+        snapshot?.role ||
         role,
+
+      userRole:
+        snapshot?.role ||
+        role,
+
+      roles:
+        snapshot?.roles ||
+        AppCore?.state?.roles ||
+        [],
+
+      isAdmin:
+        Boolean(
+          snapshot?.isAdmin ||
+          AppCore?.state?.isAdmin
+        ),
+
+      isSupport:
+        Boolean(
+          snapshot?.isSupport ||
+          AppCore?.state?.isSupport
+        ),
+
+      isManager:
+        Boolean(
+          snapshot?.isManager ||
+          AppCore?.state?.isManager
+        ),
 
       token,
       accessToken:
@@ -2428,7 +2533,9 @@ function applyAcceptedLoginSession(normalized = {}) {
         authenticated:
           true,
         user,
-        role,
+        role:
+          snapshot?.role ||
+          role,
         token,
         accessToken:
           token,
@@ -2454,15 +2561,15 @@ function applyAcceptedLoginSession(normalized = {}) {
         AppCore.state.currentUser = user;
         AppCore.state.sessionUser = user;
         AppCore.state.authUser = user;
-        AppCore.state.role = role;
-        AppCore.state.userRole = role;
+        AppCore.state.role = snapshot?.role || role;
+        AppCore.state.userRole = snapshot?.role || role;
         AppCore.state.token = token;
         AppCore.state.accessToken = token;
         AppCore.state.session = {
           ...(safeObject(AppCore.state.session)),
           authenticated: true,
           user,
-          role,
+          role: snapshot?.role || role,
           token,
           accessToken: token,
           refreshToken:
@@ -2472,12 +2579,23 @@ function applyAcceptedLoginSession(normalized = {}) {
     } catch {}
   }
 
+  try {
+    AppCore?.syncUserUI?.();
+  } catch {}
+
   return {
     user,
-    role,
+    role:
+      snapshot?.role ||
+      role,
+    roles:
+      snapshot?.roles ||
+      AppCore?.state?.roles ||
+      [],
     token,
     refreshToken:
       sessionPayload.refreshToken || null,
+    snapshot,
     sessionPayload,
   };
 }
@@ -2502,6 +2620,8 @@ function buildAcceptedLoginPayload({
     durationMs,
     user,
     role,
+    roles:
+      committed.roles || [],
     authenticated:
       true,
     source:
@@ -2536,9 +2656,7 @@ function emitAcceptedLoginEvents({
     - auth:session:restored
     - app:session:restored
 
-    Esos eventos deben quedar reservados para restoreSession().
-    Emitirlos desde login provoca listeners de restore/refresh,
-    doble reparación UI y potencial doble toast.
+    Esos eventos quedan reservados para restoreSession().
   */
   emit("auth:login:success", payload);
 
@@ -2589,15 +2707,8 @@ function schedulePostLoginRepair({
       });
 
     /*
-      Post-login visual repair únicamente.
-
-      No reemitimos:
-      - auth:login:success
-      - auth:session:applied
-      - auth:session:restored
-      - app:session:restored
-
-      Esto evita que un login correcto genere dos cadenas de eventos.
+      Reparación visual únicamente.
+      No reemitimos auth:login:success.
     */
     emit("app:ui:repair-request", {
       ...payload,
@@ -2608,7 +2719,7 @@ function schedulePostLoginRepair({
       rebind:
         false,
       afterPaint:
-        false,
+        true,
     });
 
     emit("app:ui:repair", {
@@ -2649,6 +2760,7 @@ function clearKnownAuthStorageAfterRejectedLogin() {
     "onion:tempToken",
     "onion:sessionId",
     "onion:sessionUserId",
+    "onion:authContext",
 
     "auth_token",
     "access_token",
@@ -2670,21 +2782,29 @@ function clearKnownAuthStorageAfterRejectedLogin() {
   });
 }
 
-function clearRejectedLoginState(reason = "login_rejected") {
+function clearRejectedLoginState(reason = "login_rejected", options = {}) {
   try {
     clearSessionLocal?.({
       silent:
         true,
       reason,
+      ...safeObject(options),
     });
   } catch {
     try {
-      clearSessionLocal?.();
+      clearSessionLocal?.({
+        silent:
+          true,
+      });
     } catch {}
   }
 
   try {
-    AppCore?.clearSession?.();
+    AppCore?.clearSession?.({
+      silent:
+        true,
+      reason,
+    });
   } catch {}
 
   try {
@@ -2692,46 +2812,67 @@ function clearRejectedLoginState(reason = "login_rejected") {
   } catch {}
 
   try {
-    AppCore?.setState?.({
-      authenticated:
-        false,
+    AppCore?.setState?.(
+      {
+        authenticated:
+          false,
 
-      hasToken:
-        false,
+        hasToken:
+          false,
 
-      user:
-        null,
+        user:
+          null,
 
-      currentUser:
-        null,
+        currentUser:
+          null,
 
-      sessionUser:
-        null,
+        sessionUser:
+          null,
 
-      authUser:
-        null,
+        authUser:
+          null,
 
-      role:
-        null,
+        role:
+          null,
 
-      userRole:
-        null,
+        userRole:
+          null,
 
-      token:
-        null,
+        roles:
+          [],
 
-      accessToken:
-        null,
+        isAdmin:
+          false,
 
-      session:
-        null,
+        isSupport:
+          false,
 
-      sessionId:
-        null,
+        isManager:
+          false,
 
-      currentResolvedUsername:
-        null,
-    });
+        token:
+          null,
+
+        accessToken:
+          null,
+
+        session:
+          null,
+
+        sessionId:
+          null,
+
+        currentResolvedUsername:
+          null,
+
+        twoFactorPending:
+          false,
+      },
+      {
+        forceUnauthenticated:
+          true,
+      }
+    );
   } catch {
     try {
       if (AppCore?.state) {
@@ -2743,16 +2884,25 @@ function clearRejectedLoginState(reason = "login_rejected") {
         AppCore.state.authUser = null;
         AppCore.state.role = null;
         AppCore.state.userRole = null;
+        AppCore.state.roles = [];
+        AppCore.state.isAdmin = false;
+        AppCore.state.isSupport = false;
+        AppCore.state.isManager = false;
         AppCore.state.token = null;
         AppCore.state.accessToken = null;
         AppCore.state.session = null;
         AppCore.state.sessionId = null;
         AppCore.state.currentResolvedUsername = null;
+        AppCore.state.twoFactorPending = false;
       }
     } catch {}
   }
 
   clearKnownAuthStorageAfterRejectedLogin();
+
+  try {
+    AppCore?.syncUserUI?.();
+  } catch {}
 
   emit("auth:login:rejected", {
     reason,
@@ -2783,18 +2933,26 @@ function clearRejectedLoginState(reason = "login_rejected") {
 }
 
 function prepareLoginAttemptState() {
-  /*
-    Evita que un login fallido conserve avatar/dashboard de una sesión antigua.
-    No se usa en restore ni en rutas técnicas públicas.
-  */
   clearRejectedLoginState(
     "login_attempt_start"
   );
 }
 
+function safePersistTempToken(value) {
+  try {
+    persistTempToken?.(
+      value || null
+    );
+  } catch {}
+}
+
 function markTwoFactorPending(normalized = {}) {
   session.twoFactorPending =
     true;
+
+  safePersistTempToken(
+    normalized.tempToken || null
+  );
 
   try {
     AppCore?.setState?.({
@@ -2806,11 +2964,29 @@ function markTwoFactorPending(normalized = {}) {
         null,
       accessToken:
         null,
+      user:
+        null,
+      currentUser:
+        null,
+      sessionUser:
+        null,
+      authUser:
+        null,
+      role:
+        null,
+      userRole:
+        null,
+      roles:
+        [],
       twoFactorPending:
         true,
       tempToken:
         normalized.tempToken || null,
     });
+  } catch {}
+
+  try {
+    AppCore?.syncUserUI?.();
   } catch {}
 
   emit("auth:login:2fa-required", {
@@ -2916,7 +3092,7 @@ function markRuntimeError(sessionState, type, error) {
   }
 }
 
-async function runMetric(sessionState, type, executor, args = []) {
+async function runRuntimeMetric(sessionState, type, executor, args = []) {
   const startedAt =
     nowMs();
 
@@ -2926,7 +3102,12 @@ async function runMetric(sessionState, type, executor, args = []) {
     true
   );
 
-  emit(`auth:${type}:start`, {});
+  /*
+    No emitimos auth:${type}:start/success/error para me/refresh/restore.
+    Esos eventos canónicos los emiten restore.js y los flujos internos.
+    Aquí se usa namespace runtime para evitar duplicidades.
+  */
+  emit(`auth:runtime:${type}:start`, {});
 
   try {
     const result =
@@ -2939,7 +3120,7 @@ async function runMetric(sessionState, type, executor, args = []) {
       type
     );
 
-    emit(`auth:${type}:success`, {
+    emit(`auth:runtime:${type}:success`, {
       durationMs:
         nowMs() - startedAt,
       ok:
@@ -2954,7 +3135,7 @@ async function runMetric(sessionState, type, executor, args = []) {
       error
     );
 
-    emit(`auth:${type}:error`, {
+    emit(`auth:runtime:${type}:error`, {
       durationMs:
         nowMs() - startedAt,
       error:
@@ -3049,7 +3230,7 @@ async function executeRefreshSession(runtimeSession) {
   return refreshSession(runtimeSession);
 }
 
-async function executeRestoreSession(options = {}) {
+async function executeRestoreSession(runtimeSession, options = {}) {
   if (!isFunction(restoreSessionCore)) {
     return {
       ok:
@@ -3059,7 +3240,18 @@ async function executeRestoreSession(options = {}) {
     };
   }
 
-  return restoreSessionCore(options);
+  /*
+    restore.js acepta dos firmas:
+    - restoreSession(options)
+    - restoreSession(runtimeSession, options)
+
+    Usamos la segunda para que el snapshot de Auth.session refleje
+    checking/restoring/refreshing con precisión.
+  */
+  return restoreSessionCore(
+    runtimeSession,
+    options
+  );
 }
 
 /* =========================================================
@@ -3082,7 +3274,7 @@ export const Auth = (() => {
     }
 
     session.mePromise =
-      runMetric(
+      runRuntimeMetric(
         session,
         "me",
         executeFetchMe,
@@ -3103,7 +3295,7 @@ export const Auth = (() => {
     }
 
     session.refreshPromise =
-      runMetric(
+      runRuntimeMetric(
         session,
         "refresh",
         executeRefreshSession,
@@ -3148,11 +3340,12 @@ export const Auth = (() => {
       );
 
     session.restorePromise =
-      runMetric(
+      runRuntimeMetric(
         session,
         "restore",
         executeRestoreSession,
         [
+          session,
           options,
         ]
       ).finally(() => {
@@ -3225,7 +3418,7 @@ export const Auth = (() => {
             );
 
             return {
-              ...result,
+              ...safeObject(result),
               ok:
                 true,
               authenticated:
@@ -3301,7 +3494,7 @@ export const Auth = (() => {
           });
 
           return {
-            ...result,
+            ...safeObject(result),
             ok:
               true,
             authenticated:
@@ -3310,6 +3503,8 @@ export const Auth = (() => {
               committed.user,
             role:
               committed.role,
+            roles:
+              committed.roles || [],
             redirectTo:
               normalized.redirectTo || undefined,
           };
@@ -3397,7 +3592,8 @@ export const Auth = (() => {
   function clearSessionPublic(options = {}) {
     clearRejectedLoginState(
       options?.reason ||
-      "manual_clear"
+      "manual_clear",
+      options
     );
 
     return true;
@@ -3443,6 +3639,20 @@ export const Auth = (() => {
           null
         ),
 
+      roles:
+        safeCall(
+          getCurrentRoles,
+          []
+        ),
+
+      isAdmin:
+        Boolean(
+          safeCall(
+            isCurrentUserAdmin,
+            false
+          )
+        ),
+
       sessionDebug:
         safeCall(
           getSessionDebugSnapshot,
@@ -3470,10 +3680,6 @@ export const Auth = (() => {
         hasSessionUserId:
           Boolean(getStoredSessionUserId()),
 
-        /*
-          No exponemos valores reales aquí.
-          El snapshot es para debug seguro.
-        */
         refreshToken:
           null,
 
@@ -3557,6 +3763,8 @@ export const Auth = (() => {
     guardAuthenticated,
     guardRole,
     getCurrentRole,
+    getCurrentRoles,
+    isCurrentUserAdmin,
 
     /* SESSION HELPERS */
     getAuthHeader,
@@ -3597,6 +3805,8 @@ export const Auth = (() => {
 
     /* DEBUG */
     getAuthModuleSnapshot,
+    getDebugSnapshot:
+      getAuthModuleSnapshot,
   });
 })();
 

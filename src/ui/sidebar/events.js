@@ -762,7 +762,10 @@ function resolveFreshRoute(payload = {}, AppCore = null, Router = null, options 
 
   const candidates = [];
 
-  if (preferExplicit) {
+  const hasNonRootExplicit = explicit.some((value) => value && stripQuery(value) !== "/");
+  const shouldPrioritizeExplicit = preferExplicit && (hasNonRootExplicit || opts.forceRoute === true || detail.forceRoute === true);
+
+  if (shouldPrioritizeExplicit) {
     explicit.forEach((value) => pushUniqueRoute(candidates, value));
     pushUniqueRoute(candidates, router);
     pushUniqueRoute(candidates, appState);

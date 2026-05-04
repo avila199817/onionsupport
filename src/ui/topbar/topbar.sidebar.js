@@ -416,6 +416,37 @@ function isDesktopContext() {
   return !isMobileOnlyContext();
 }
 
+function isVisibleElement(element) {
+  if (!isElement(element)) {
+    return false;
+  }
+
+  try {
+    if (element.hidden === true) return false;
+
+    const style = window.getComputedStyle?.(element);
+    if (!style) return true;
+
+    return style.display !== "none" && style.visibility !== "hidden";
+  } catch {
+    return true;
+  }
+}
+
+function shouldUseMobileSidebarMode(getDom) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  if (isMobileOnlyContext()) {
+    return true;
+  }
+
+  const { mobileToggle } = safeGetDom(getDom);
+
+  return isVisibleElement(mobileToggle);
+}
+
 /* =========================================================
    DOM RESOLUTION
 ========================================================= */
@@ -884,7 +915,7 @@ export function openSidebarMobile({
   AppCore,
   getDom,
 } = {}) {
-  if (isDesktopContext()) {
+  if (!shouldUseMobileSidebarMode(getDom)) {
     forceCloseSidebarVisualState(getDom);
     return false;
   }
@@ -946,7 +977,7 @@ export function closeSidebarMobile({
   AppCore,
   getDom,
 } = {}) {
-  if (isDesktopContext()) {
+  if (!shouldUseMobileSidebarMode(getDom)) {
     forceCloseSidebarVisualState(getDom);
     return false;
   }
@@ -1008,7 +1039,7 @@ export function toggleSidebarMobile({
   AppCore,
   getDom,
 } = {}) {
-  if (isDesktopContext()) {
+  if (!shouldUseMobileSidebarMode(getDom)) {
     forceCloseSidebarVisualState(getDom);
     return false;
   }

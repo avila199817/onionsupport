@@ -24,10 +24,11 @@
    - fallback token -> /me -> refresh si procede
    - limpieza auth protegida
    - preservación route/publicPath en activation/reset
-   - eventos enterprise
+   - eventos enterprise sin tokens reales
    - tolerancia backend heterogéneo
    - snapshot consistente
    - no romper boot aunque backend falle
+   - no borrar sesión local válida ante error transitorio de red/API
 
    FIX 10/10:
    - restore no marca sesión autenticada sin token + user válido
@@ -73,31 +74,53 @@ import {
 } from "./session.js";
 
 /* =========================================================
-   INTERNAL DEFAULT SESSION
+   INTERNAL RUNTIME SESSION
 ========================================================= */
 
 const runtimeSession = {
-  checking: false,
-  refreshing: false,
-  restoring: false,
+  checking:
+    false,
 
-  mePromise: null,
-  refreshPromise: null,
-  restorePromise: null,
+  refreshing:
+    false,
 
-  lastCheckAt: 0,
-  lastRefreshAt: 0,
-  lastRestoreAt: 0,
+  restoring:
+    false,
 
-  refreshFailCount: 0,
-  refreshBlockedUntil: 0,
+  mePromise:
+    null,
 
-  lastError: null,
+  refreshPromise:
+    null,
+
+  restorePromise:
+    null,
+
+  lastCheckAt:
+    0,
+
+  lastRefreshAt:
+    0,
+
+  lastRestoreAt:
+    0,
+
+  refreshFailCount:
+    0,
+
+  refreshBlockedUntil:
+    0,
+
+  lastError:
+    null,
 };
 
 /* =========================================================
-   PUBLIC TECHNICAL ROUTES
+   CONSTANTS
 ========================================================= */
+
+const RESTORE_VERSION =
+  "10.2.0";
 
 const ACTIVATION_PATH =
   "/activate-account";
@@ -105,79 +128,136 @@ const ACTIVATION_PATH =
 const RESET_CONFIRM_PATH =
   "/reset-password/confirm";
 
-const PUBLIC_TECHNICAL_ROUTES = Object.freeze([
-  "/activate-account",
-  "/reset-password",
-  "/reset-password/confirm",
-  "/forgot-password",
-  "/recover-password",
-  "/password-reset",
-]);
+const PUBLIC_TECHNICAL_ROUTES =
+  Object.freeze([
+    "/activate-account",
+    "/reset-password",
+    "/reset-password/confirm",
+    "/forgot-password",
+    "/recover-password",
+    "/password-reset",
+  ]);
 
-const ACTIVATION_TOKEN_PARAM_NAMES = Object.freeze([
-  "token",
-  "activationToken",
-  "activateToken",
-  "code",
-  "t",
-]);
+const ACTIVATION_TOKEN_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "code",
+    "t",
+  ]);
 
-const RESET_TOKEN_PARAM_NAMES = Object.freeze([
-  "token",
-  "resetToken",
-  "passwordResetToken",
-  "code",
-  "t",
-]);
+const RESET_TOKEN_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "resetToken",
+    "passwordResetToken",
+    "code",
+    "t",
+  ]);
 
-const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
-  Object.freeze({
-    key: "activation",
-    path: ACTIVATION_PATH,
-    stateFlag: "activationBoot",
-    scrubFlag: "scrubbedActivationToken",
-    windowKey: "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-    bootUrlKey: "bootActivationInitialUrl",
-    bootPathKey: "bootActivationInitialPath",
-    bootIsKey: "bootIsActivation",
-    bootHasKey: "bootHasActivationToken",
-    tokenParamNames: ACTIVATION_TOKEN_PARAM_NAMES,
-  }),
+const PROTECTED_PUBLIC_TOKEN_ROUTES =
+  Object.freeze([
+    Object.freeze({
+      key:
+        "activation",
 
-  Object.freeze({
-    key: "resetConfirm",
-    path: RESET_CONFIRM_PATH,
-    stateFlag: "resetConfirmBoot",
-    scrubFlag: "scrubbedResetToken",
-    windowKey: "__ONION_RESET_CONFIRM_INITIAL_URL__",
-    bootUrlKey: "bootResetConfirmInitialUrl",
-    bootPathKey: "bootResetConfirmInitialPath",
-    bootIsKey: "bootIsResetConfirm",
-    bootHasKey: "bootHasResetToken",
-    tokenParamNames: RESET_TOKEN_PARAM_NAMES,
-  }),
-]);
+      path:
+        ACTIVATION_PATH,
 
-const AUTH_FAILURE_CODES = new Set([
-  "INVALID_CREDENTIALS",
-  "MISSING_CREDENTIALS",
-  "ACCOUNT_TEMPORARILY_LOCKED",
-  "ACCOUNT_DISABLED",
-  "USER_DISABLED",
-  "UNAUTHORIZED",
-  "FORBIDDEN",
-  "TOKEN_INVALID",
-  "INVALID_TOKEN",
-  "SESSION_EXPIRED",
-  "INVALID_LOGIN_SESSION",
-  "AUTH_RESTORE_FAILED",
-  "REFRESH_CONTEXT_MISSING",
-  "REFRESH_INVALID_SESSION",
-  "REFRESH_EMPTY_RESPONSE",
-  "REFRESH_USER_WITHOUT_TOKEN",
-  "REFRESH_UNUSABLE_RESPONSE",
-  "ME_INVALID_SESSION",
-]);
+      stateFlag:
+        "activationBoot",
+
+      scrubFlag:
+        "scrubbedActivationToken",
+
+      windowKey:
+        "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+
+      bootUrlKey:
+        "bootActivationInitialUrl",
+
+      bootPathKey:
+        "bootActivationInitialPath",
+
+      bootIsKey:
+        "bootIsActivation",
+
+      bootHasKey:
+        "bootHasActivationToken",
+
+      tokenParamNames:
+        ACTIVATION_TOKEN_PARAM_NAMES,
+    }),
+
+    Object.freeze({
+      key:
+        "resetConfirm",
+
+      path:
+        RESET_CONFIRM_PATH,
+
+      stateFlag:
+        "resetConfirmBoot",
+
+      scrubFlag:
+        "scrubbedResetToken",
+
+      windowKey:
+        "__ONION_RESET_CONFIRM_INITIAL_URL__",
+
+      bootUrlKey:
+        "bootResetConfirmInitialUrl",
+
+      bootPathKey:
+        "bootResetConfirmInitialPath",
+
+      bootIsKey:
+        "bootIsResetConfirm",
+
+      bootHasKey:
+        "bootHasResetToken",
+
+      tokenParamNames:
+        RESET_TOKEN_PARAM_NAMES,
+    }),
+  ]);
+
+const AUTH_FAILURE_CODES =
+  new Set([
+    "INVALID_CREDENTIALS",
+    "MISSING_CREDENTIALS",
+    "ACCOUNT_TEMPORARILY_LOCKED",
+    "ACCOUNT_DISABLED",
+    "USER_DISABLED",
+    "UNAUTHORIZED",
+    "FORBIDDEN",
+    "TOKEN_INVALID",
+    "INVALID_TOKEN",
+    "TOKEN_EXPIRED",
+    "SESSION_EXPIRED",
+    "INVALID_LOGIN_SESSION",
+    "AUTH_RESTORE_FAILED",
+    "REFRESH_CONTEXT_MISSING",
+    "REFRESH_INVALID_SESSION",
+    "REFRESH_EMPTY_RESPONSE",
+    "REFRESH_USER_WITHOUT_TOKEN",
+    "REFRESH_UNUSABLE_RESPONSE",
+    "ME_INVALID_SESSION",
+    "ME_USER_MISSING",
+  ]);
+
+const TRANSIENT_STATUS_CODES =
+  new Set([
+    0,
+    408,
+    425,
+    429,
+    500,
+    502,
+    503,
+    504,
+  ]);
 
 /* =========================================================
    BASICS
@@ -229,6 +309,23 @@ function safeText(value, fallback = "") {
     String(value).trim();
 
   return text || fallback;
+}
+
+function safeBool(value, fallback = false) {
+  if (value === true) return true;
+  if (value === false) return false;
+  if (value === "true") return true;
+  if (value === "false") return false;
+
+  return Boolean(fallback);
+}
+
+function safeIsoDate(ms = Date.now()) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
+  }
 }
 
 function pickFirst(...values) {
@@ -310,10 +407,12 @@ function warn(...args) {
   } catch {}
 
   try {
-    console.warn(
-      "[AuthRestore]",
-      ...args
-    );
+    if (AppCore?.config?.debug) {
+      console.warn(
+        "[AuthRestore]",
+        ...args
+      );
+    }
   } catch {}
 }
 
@@ -328,6 +427,122 @@ function getRefreshRetryCooldownMs() {
   return safeNumber(
     AUTH_CONSTANTS?.refreshRetryCooldownMs,
     60000
+  );
+}
+
+/* =========================================================
+   SAFE EVENT PAYLOADS
+========================================================= */
+
+function getErrorStatus(error = null) {
+  return safeNumber(
+    error?.status ||
+      error?.response?.status ||
+      error?.data?.status ||
+      error?.raw?.status ||
+      0,
+    0
+  );
+}
+
+function getErrorCode(error = null) {
+  return safeText(
+    error?.code ||
+      error?.data?.code ||
+      error?.response?.data?.code ||
+      error?.response?.data?.error ||
+      error?.raw?.code ||
+      error?.raw?.error ||
+      "",
+    ""
+  ).toUpperCase();
+}
+
+function buildErrorPayload(error = null) {
+  return {
+    name:
+      safeText(
+        error?.name,
+        "Error"
+      ),
+
+    status:
+      getErrorStatus(error) || null,
+
+    code:
+      getErrorCode(error) || null,
+
+    message:
+      extractMessage(error) ||
+      safeText(
+        error?.message,
+        "Error"
+      ),
+
+    timeout:
+      Boolean(error?.timeout),
+
+    aborted:
+      Boolean(error?.aborted),
+
+    at:
+      safeIsoDate(),
+  };
+}
+
+function buildPublicSessionPayload(snapshot = {}) {
+  const user =
+    snapshot?.user ||
+    getCurrentUser() ||
+    null;
+
+  const token =
+    snapshot?.token ||
+    getCurrentToken() ||
+    "";
+
+  return {
+    authenticated:
+      Boolean(
+        snapshot?.authenticated &&
+        hasUsableToken(token) &&
+        hasUsableUser(user)
+      ),
+
+    hasToken:
+      hasUsableToken(token),
+
+    token:
+      null,
+
+    user,
+
+    role:
+      snapshot?.role ||
+      user?.role ||
+      user?.rol ||
+      getState().role ||
+      null,
+
+    username:
+      snapshot?.username ||
+      user?.username ||
+      user?.email ||
+      getState().username ||
+      null,
+  };
+}
+
+function emitError(eventName, error, extra = {}) {
+  return emit(
+    eventName,
+    {
+      ...extra,
+      error:
+        buildErrorPayload(error),
+      message:
+        extractMessage(error),
+    }
   );
 }
 
@@ -351,7 +566,8 @@ function getApiClient() {
 
 function resolveEndpoint(key, fallback = "") {
   return safeText(
-    AUTH_ENDPOINTS?.[key],
+    AUTH_ENDPOINTS?.[key] ||
+      AppCore?.config?.auth?.endpoints?.[key],
     fallback
   );
 }
@@ -378,7 +594,8 @@ async function apiGet(path, options = {}) {
       path,
       {
         ...options,
-        method: "GET",
+        method:
+          "GET",
       }
     );
   }
@@ -410,8 +627,10 @@ async function apiGet(path, options = {}) {
   throw createRestoreError(
     "No hay cliente API disponible para GET.",
     {
-      status: 500,
-      code: "API_CLIENT_GET_MISSING",
+      status:
+        500,
+      code:
+        "API_CLIENT_GET_MISSING",
     }
   );
 }
@@ -439,7 +658,8 @@ async function apiPost(path, body = {}, options = {}) {
       path,
       {
         ...options,
-        method: "POST",
+        method:
+          "POST",
         body,
       }
     );
@@ -476,8 +696,10 @@ async function apiPost(path, body = {}, options = {}) {
   throw createRestoreError(
     "No hay cliente API disponible para POST.",
     {
-      status: 500,
-      code: "API_CLIENT_POST_MISSING",
+      status:
+        500,
+      code:
+        "API_CLIENT_POST_MISSING",
     }
   );
 }
@@ -487,9 +709,30 @@ async function apiPost(path, body = {}, options = {}) {
 ========================================================= */
 
 function hasUsableToken(token = "") {
-  return Boolean(
-    safeText(token, "")
-  );
+  const value =
+    safeText(token, "");
+
+  if (!value) {
+    return false;
+  }
+
+  if (
+    value === "null" ||
+    value === "undefined" ||
+    value === "false"
+  ) {
+    return false;
+  }
+
+  try {
+    if (isFunction(AppCore?.utils?.hasValidToken)) {
+      return Boolean(
+        AppCore.utils.hasValidToken(value)
+      );
+    }
+  } catch {}
+
+  return true;
 }
 
 function hasUsableUser(user = {}) {
@@ -826,13 +1069,23 @@ function createRestoreError(
 function normalizeAuthResponse(response = null) {
   if (isExplicitAuthFailure(response)) {
     return {
-      ok: false,
-      explicitFailure: true,
+      ok:
+        false,
 
-      token: "",
-      user: null,
-      refreshToken: "",
-      sessionData: null,
+      explicitFailure:
+        true,
+
+      token:
+        "",
+
+      user:
+        null,
+
+      refreshToken:
+        "",
+
+      sessionData:
+        null,
 
       status:
         getResponseStatus(response) ||
@@ -889,6 +1142,7 @@ function normalizeAuthResponse(response = null) {
         : null,
 
     refreshToken,
+
     sessionData,
 
     status:
@@ -924,9 +1178,11 @@ function assertNoExplicitFailure(auth = {}) {
       {
         status:
           Number(auth.status) || 401,
+
         code:
           auth.code ||
           "AUTH_RESTORE_FAILED",
+
         response:
           auth.response,
       }
@@ -970,6 +1226,7 @@ function resolveRestoreArgs(...args) {
     return {
       session:
         first,
+
       options:
         safeObject(second),
     };
@@ -978,6 +1235,7 @@ function resolveRestoreArgs(...args) {
   return {
     session:
       runtimeSession,
+
     options:
       safeObject(first),
   };
@@ -991,19 +1249,19 @@ function normalizeRestoreOptions(options = {}) {
     ...opts,
 
     silent:
-      Boolean(opts.silent),
+      safeBool(opts.silent),
 
     skipNavigation:
-      Boolean(opts.skipNavigation),
+      safeBool(opts.skipNavigation),
 
     publicRoute:
-      Boolean(opts.publicRoute),
+      safeBool(opts.publicRoute),
 
     preserveCurrentRoute:
-      Boolean(opts.preserveCurrentRoute),
+      safeBool(opts.preserveCurrentRoute),
 
     preserveRoute:
-      Boolean(opts.preserveRoute),
+      safeBool(opts.preserveRoute),
 
     route:
       opts.route,
@@ -1012,10 +1270,10 @@ function normalizeRestoreOptions(options = {}) {
       opts.publicPath,
 
     activationBoot:
-      Boolean(opts.activationBoot),
+      safeBool(opts.activationBoot),
 
     resetConfirmBoot:
-      Boolean(opts.resetConfirmBoot),
+      safeBool(opts.resetConfirmBoot),
   };
 }
 
@@ -1024,13 +1282,23 @@ function clearRuntimeFlags(session) {
     return;
   }
 
-  session.checking = false;
-  session.refreshing = false;
-  session.restoring = false;
+  session.checking =
+    false;
 
-  session.mePromise = null;
-  session.refreshPromise = null;
-  session.restorePromise = null;
+  session.refreshing =
+    false;
+
+  session.restoring =
+    false;
+
+  session.mePromise =
+    null;
+
+  session.refreshPromise =
+    null;
+
+  session.restorePromise =
+    null;
 }
 
 /* =========================================================
@@ -1070,11 +1338,13 @@ function normalizePathnameOnly(pathname = "/") {
       .replace(/\/{2,}/g, "/");
 
   if (!value) {
-    value = "/";
+    value =
+      "/";
   }
 
   if (!value.startsWith("/")) {
-    value = `/${value}`;
+    value =
+      `/${value}`;
   }
 
   if (
@@ -1082,7 +1352,8 @@ function normalizePathnameOnly(pathname = "/") {
     value.endsWith("/")
   ) {
     value =
-      value.replace(/\/+$/g, "") || "/";
+      value.replace(/\/+$/g, "") ||
+      "/";
   }
 
   return value;
@@ -1093,7 +1364,8 @@ function stripSearchAndHash(path = "/") {
     safeText(path, "/");
 
   return normalizePathnameOnly(
-    raw.split("?")[0].split("#")[0] || "/"
+    raw.split("?")[0].split("#")[0] ||
+      "/"
   );
 }
 
@@ -1186,17 +1458,17 @@ function getInitialUrl() {
   );
 }
 
-function getStoredTechnicalInitialUrl(config) {
+function getStoredTechnicalInitialUrl(routeConfig) {
   if (
     !isBrowser() ||
-    !config?.windowKey
+    !routeConfig?.windowKey
   ) {
     return "";
   }
 
   try {
     return safeText(
-      window[config.windowKey],
+      window[routeConfig.windowKey],
       ""
     );
   } catch {
@@ -1206,7 +1478,9 @@ function getStoredTechnicalInitialUrl(config) {
 
 function getCanonicalPathFromAny(value = "/") {
   return stripSearchAndHash(
-    pathFromUrlLike(value) || value || "/"
+    pathFromUrlLike(value) ||
+      value ||
+      "/"
   );
 }
 
@@ -1223,8 +1497,8 @@ function isPublicTechnicalCanonical(path = "/") {
   });
 }
 
-function matchesTechnicalRoute(config, value = "") {
-  if (!config) {
+function matchesTechnicalRoute(routeConfig, value = "") {
+  if (!routeConfig) {
     return false;
   }
 
@@ -1232,29 +1506,31 @@ function matchesTechnicalRoute(config, value = "") {
     getCanonicalPathFromAny(value);
 
   return (
-    clean === config.path ||
-    clean.startsWith(`${config.path}/`)
+    clean === routeConfig.path ||
+    clean.startsWith(`${routeConfig.path}/`)
   );
 }
 
-function extractRoutePathToken(config, value = "") {
-  if (!config) {
+function extractRoutePathToken(routeConfig, value = "") {
+  if (!routeConfig) {
     return "";
   }
 
   const path =
-    pathFromUrlLike(value) || value || "";
+    pathFromUrlLike(value) ||
+    value ||
+    "";
 
   const pathname =
     stripSearchAndHash(path);
 
-  if (!pathname.startsWith(`${config.path}/`)) {
+  if (!pathname.startsWith(`${routeConfig.path}/`)) {
     return "";
   }
 
   const token =
     pathname
-      .slice(`${config.path}/`.length)
+      .slice(`${routeConfig.path}/`.length)
       .split("/")[0];
 
   try {
@@ -1263,7 +1539,10 @@ function extractRoutePathToken(config, value = "") {
       ""
     );
   } catch {
-    return safeText(token, "");
+    return safeText(
+      token,
+      ""
+    );
   }
 }
 
@@ -1285,8 +1564,8 @@ function hasTokenInSearch(search = "", names = []) {
   }
 }
 
-function hasTechnicalRouteToken(config, value = "") {
-  if (!config) {
+function hasTechnicalRouteToken(routeConfig, value = "") {
+  if (!routeConfig) {
     return false;
   }
 
@@ -1298,11 +1577,12 @@ function hasTechnicalRouteToken(config, value = "") {
   }
 
   const path =
-    pathFromUrlLike(raw) || raw;
+    pathFromUrlLike(raw) ||
+    raw;
 
   if (
-    matchesTechnicalRoute(config, path) &&
-    extractRoutePathToken(config, path)
+    matchesTechnicalRoute(routeConfig, path) &&
+    extractRoutePathToken(routeConfig, path)
   ) {
     return true;
   }
@@ -1314,7 +1594,7 @@ function hasTechnicalRouteToken(config, value = "") {
     if (
       hasTokenInSearch(
         parsed.search,
-        config.tokenParamNames
+        routeConfig.tokenParamNames
       )
     ) {
       return true;
@@ -1332,7 +1612,7 @@ function hasTechnicalRouteToken(config, value = "") {
 
       return hasTokenInSearch(
         query ? `?${query}` : "",
-        config.tokenParamNames
+        routeConfig.tokenParamNames
       );
     }
   } catch {
@@ -1347,7 +1627,7 @@ function hasTechnicalRouteToken(config, value = "") {
       if (
         hasTokenInSearch(
           query ? `?${query}` : "",
-          config.tokenParamNames
+          routeConfig.tokenParamNames
         )
       ) {
         return true;
@@ -1367,7 +1647,7 @@ function hasTechnicalRouteToken(config, value = "") {
       if (
         hasTokenInSearch(
           query ? `?${query}` : "",
-          config.tokenParamNames
+          routeConfig.tokenParamNames
         )
       ) {
         return true;
@@ -1395,53 +1675,56 @@ function isHistoryStateFlagEnabled(flag = "") {
   }
 }
 
-function isTechnicalTokenScrubbed(config) {
+function isTechnicalTokenScrubbed(routeConfig) {
   return isHistoryStateFlagEnabled(
-    config?.scrubFlag || ""
+    routeConfig?.scrubFlag || ""
   );
 }
 
-function detectProtectedTokenBoot(config) {
+function detectProtectedTokenBoot(routeConfig) {
   const state =
     getState();
 
   if (
-    state?.[config.bootIsKey] === true &&
-    state?.[config.bootHasKey] === true
+    state?.[routeConfig.bootIsKey] === true &&
+    state?.[routeConfig.bootHasKey] === true
   ) {
     return true;
   }
 
-  if (isTechnicalTokenScrubbed(config)) {
+  if (isTechnicalTokenScrubbed(routeConfig)) {
     return false;
   }
 
-  const candidates = [
-    state?.bootProtectedInitialUrl,
-    state?.[config.bootUrlKey],
-    state?.[config.bootPathKey],
-    getStoredTechnicalInitialUrl(config),
-    state?.bootInitialUrl,
-    getInitialUrl(),
-    getBrowserPublicPath(),
-    state?.publicPath,
-    state?.route,
-  ]
-    .map((value) => safeText(value, ""))
-    .filter(Boolean);
+  const candidates =
+    [
+      state?.bootProtectedInitialUrl,
+      state?.[routeConfig.bootUrlKey],
+      state?.[routeConfig.bootPathKey],
+      getStoredTechnicalInitialUrl(routeConfig),
+      state?.bootInitialUrl,
+      getInitialUrl(),
+      getBrowserPublicPath(),
+      state?.publicPath,
+      state?.route,
+    ]
+      .map((value) =>
+        safeText(value, "")
+      )
+      .filter(Boolean);
 
   return candidates.some((candidate) => {
     return (
-      matchesTechnicalRoute(config, candidate) &&
-      hasTechnicalRouteToken(config, candidate)
+      matchesTechnicalRoute(routeConfig, candidate) &&
+      hasTechnicalRouteToken(routeConfig, candidate)
     );
   });
 }
 
 function detectAnyProtectedTokenBoot() {
   const found =
-    PROTECTED_PUBLIC_TOKEN_ROUTES.find((config) =>
-      detectProtectedTokenBoot(config)
+    PROTECTED_PUBLIC_TOKEN_ROUTES.find((routeConfig) =>
+      detectProtectedTokenBoot(routeConfig)
     );
 
   return found || null;
@@ -1473,7 +1756,10 @@ function captureRouteContext(options = {}) {
 
   const canonical =
     getCanonicalPathFromAny(
-      publicPath || route || browserPath || "/"
+      publicPath ||
+        route ||
+        browserPath ||
+        "/"
     );
 
   const protectedBootConfig =
@@ -1482,17 +1768,13 @@ function captureRouteContext(options = {}) {
   const activationBoot =
     Boolean(
       options.activationBoot ||
-      (
-        protectedBootConfig?.key === "activation"
-      )
+      protectedBootConfig?.key === "activation"
     );
 
   const resetConfirmBoot =
     Boolean(
       options.resetConfirmBoot ||
-      (
-        protectedBootConfig?.key === "resetConfirm"
-      )
+      protectedBootConfig?.key === "resetConfirm"
     );
 
   const publicTechnical =
@@ -1519,10 +1801,17 @@ function captureRouteContext(options = {}) {
     resetConfirmBoot,
 
     route:
-      getCanonicalPathFromAny(route || canonical || "/"),
+      getCanonicalPathFromAny(
+        route ||
+        canonical ||
+        "/"
+      ),
 
     publicPath:
-      publicPath || browserPath || route || "/",
+      publicPath ||
+      browserPath ||
+      route ||
+      "/",
 
     browserPath,
 
@@ -1574,25 +1863,25 @@ function restoreRouteContext(routeContext = {}) {
       bootIsActivation:
         Boolean(
           routeContext.activationBoot ||
-            getState().bootIsActivation
+          getState().bootIsActivation
         ),
 
       bootHasActivationToken:
         Boolean(
           routeContext.activationBoot ||
-            getState().bootHasActivationToken
+          getState().bootHasActivationToken
         ),
 
       bootIsResetConfirm:
         Boolean(
           routeContext.resetConfirmBoot ||
-            getState().bootIsResetConfirm
+          getState().bootIsResetConfirm
         ),
 
       bootHasResetToken:
         Boolean(
           routeContext.resetConfirmBoot ||
-            getState().bootHasResetToken
+          getState().bootHasResetToken
         ),
 
       bootProtectedRouteKey:
@@ -1616,50 +1905,81 @@ function clearSessionLocalProtected({
 
   try {
     clearSessionLocal({
-      silent: true,
+      silent:
+        true,
+
       preserveRoute:
         ctx.shouldProtect,
+
       preserveCurrentRoute:
         ctx.shouldProtect,
+
       route:
         ctx.route,
+
       publicPath:
         ctx.publicPath,
+
       reason,
     });
   } catch {
     try {
       clearSessionLocal({
-        silent: true,
+        silent:
+          true,
       });
     } catch {}
   }
 
   try {
-    AppCore?.setState?.({
-      authenticated:
-        false,
-      hasToken:
-        false,
-      user:
-        null,
-      currentUser:
-        null,
-      authUser:
-        null,
-      sessionUser:
-        null,
-      role:
-        null,
-      userRole:
-        null,
-      token:
-        null,
-      accessToken:
-        null,
-      session:
-        null,
+    AppCore?.clearSession?.({
+      silent:
+        true,
+      reason,
     });
+  } catch {}
+
+  try {
+    AppCore?.setState?.(
+      {
+        authenticated:
+          false,
+
+        hasToken:
+          false,
+
+        user:
+          null,
+
+        currentUser:
+          null,
+
+        authUser:
+          null,
+
+        sessionUser:
+          null,
+
+        role:
+          null,
+
+        userRole:
+          null,
+
+        token:
+          null,
+
+        accessToken:
+          null,
+
+        session:
+          null,
+      },
+      {
+        forceUnauthenticated:
+          true,
+      }
+    );
   } catch {}
 
   restoreRouteContext(ctx);
@@ -1716,11 +2036,6 @@ function hasUsableRefreshPayload(payload = getStoredRefreshPayload()) {
   const userId =
     safeText(payload.userId, "");
 
-  /*
-    Contexto fuerte:
-    - refreshToken real, o
-    - sessionId + userId si el backend soporta refresh por contexto.
-  */
   return Boolean(
     refreshToken ||
       (
@@ -1752,14 +2067,41 @@ function shouldPreferMeBeforeRefresh() {
   );
 }
 
+function isTransientError(error = null) {
+  const status =
+    getErrorStatus(error);
+
+  if (TRANSIENT_STATUS_CODES.has(status)) {
+    return true;
+  }
+
+  if (
+    error?.timeout === true ||
+    error?.aborted === true
+  ) {
+    return true;
+  }
+
+  const message =
+    safeText(
+      extractMessage(error) ||
+      error?.message,
+      ""
+    ).toLowerCase();
+
+  return Boolean(
+    message.includes("network") ||
+      message.includes("timeout") ||
+      message.includes("fetch") ||
+      message.includes("cors") ||
+      message.includes("offline") ||
+      message.includes("failed to fetch")
+  );
+}
+
 function shouldClearForError(error) {
   const status =
-    Number(
-      error?.status ||
-        error?.response?.status ||
-        error?.data?.status ||
-        0
-    );
+    getErrorStatus(error);
 
   if (
     status === 401 ||
@@ -1769,14 +2111,7 @@ function shouldClearForError(error) {
   }
 
   const code =
-    safeText(
-      error?.data?.code ||
-        error?.code ||
-        error?.response?.data?.code ||
-        error?.response?.data?.error ||
-        "",
-      ""
-    ).toUpperCase();
+    getErrorCode(error);
 
   return Boolean(
     code &&
@@ -1789,34 +2124,95 @@ function shouldClearForError(error) {
 ========================================================= */
 
 function getSafeSessionSnapshot() {
+  let snapshot =
+    null;
+
   try {
-    return buildSessionSnapshot();
+    snapshot =
+      buildSessionSnapshot();
   } catch {
-    return {
-      authenticated:
-        Boolean(
-          getState().authenticated
-        ),
-      token:
-        getCurrentToken() || null,
-      user:
-        getCurrentUser() || null,
-      role:
-        getState().role || null,
-    };
+    snapshot =
+      null;
   }
+
+  const state =
+    getState();
+
+  const token =
+    safeText(
+      snapshot?.token ||
+        state.token ||
+        state.accessToken ||
+        state.session?.token ||
+        state.session?.accessToken ||
+        "",
+      ""
+    );
+
+  const user =
+    snapshot?.user ||
+    state.user ||
+    state.currentUser ||
+    state.authUser ||
+    state.sessionUser ||
+    state.session?.user ||
+    null;
+
+  const authenticated =
+    Boolean(
+      hasUsableToken(token) &&
+      hasUsableUser(user) &&
+      (
+        snapshot?.authenticated === true ||
+        state.authenticated === true
+      )
+    );
+
+  return {
+    ...(snapshot || {}),
+
+    authenticated,
+
+    token:
+      token || null,
+
+    user:
+      user || null,
+
+    role:
+      snapshot?.role ||
+      state.role ||
+      user?.role ||
+      user?.rol ||
+      null,
+  };
 }
 
 function assertCompleteSnapshot(snapshot = {}, code = "INVALID_SESSION") {
+  const token =
+    snapshot?.token ||
+    getCurrentToken();
+
+  const user =
+    snapshot?.user ||
+    getCurrentUser();
+
+  const authenticated =
+    Boolean(
+      snapshot?.authenticated ||
+      getState().authenticated
+    );
+
   if (
-    !snapshot?.authenticated ||
-    !hasUsableToken(snapshot.token) ||
-    !hasUsableUser(snapshot.user)
+    !authenticated ||
+    !hasUsableToken(token) ||
+    !hasUsableUser(user)
   ) {
     throw createRestoreError(
       "La sesión restaurada no es válida.",
       {
-        status: 401,
+        status:
+          401,
         code,
       }
     );
@@ -1826,9 +2222,32 @@ function assertCompleteSnapshot(snapshot = {}, code = "INVALID_SESSION") {
 }
 
 function applyAuthenticatedSession(payload = {}) {
+  const token =
+    safeText(payload.token, "");
+
+  const user =
+    payload.user || null;
+
+  if (
+    !hasUsableToken(token) ||
+    !hasUsableUser(user)
+  ) {
+    throw createRestoreError(
+      "No se puede aplicar sesión autenticada incompleta.",
+      {
+        status:
+          401,
+        code:
+          "APPLY_AUTH_SESSION_INCOMPLETE",
+      }
+    );
+  }
+
   const snapshot =
     applySession({
       ...payload,
+      token,
+      user,
       authenticated:
         true,
     });
@@ -1836,6 +2255,8 @@ function applyAuthenticatedSession(payload = {}) {
   try {
     AppCore?.applySession?.({
       ...payload,
+      token,
+      user,
       authenticated:
         true,
     });
@@ -1845,36 +2266,66 @@ function applyAuthenticatedSession(payload = {}) {
     AppCore?.setState?.({
       authenticated:
         true,
+
       hasToken:
         true,
+
       user:
-        snapshot?.user || payload.user || null,
+        snapshot?.user ||
+        user,
+
       currentUser:
-        snapshot?.user || payload.user || null,
+        snapshot?.user ||
+        user,
+
       authUser:
-        snapshot?.user || payload.user || null,
+        snapshot?.user ||
+        user,
+
       sessionUser:
-        snapshot?.user || payload.user || null,
+        snapshot?.user ||
+        user,
+
       role:
         snapshot?.role ||
         payload.role ||
-        payload.user?.role ||
-        payload.user?.rol ||
+        user?.role ||
+        user?.rol ||
         null,
+
       token:
-        snapshot?.token || payload.token || null,
+        snapshot?.token ||
+        token,
+
       accessToken:
-        snapshot?.token || payload.token || null,
+        snapshot?.token ||
+        token,
     });
   } catch {}
 
-  return snapshot;
+  return getSafeSessionSnapshot();
 }
 
 function applyProvisionalTokenSession(payload = {}) {
+  const token =
+    safeText(payload.token, "");
+
+  if (!hasUsableToken(token)) {
+    throw createRestoreError(
+      "No se puede aplicar token provisional vacío.",
+      {
+        status:
+          401,
+        code:
+          "PROVISIONAL_TOKEN_MISSING",
+      }
+    );
+  }
+
   const snapshot =
     applySession({
       ...payload,
+      token,
       user:
         null,
       authenticated:
@@ -1885,22 +2336,29 @@ function applyProvisionalTokenSession(payload = {}) {
     AppCore?.setState?.({
       authenticated:
         false,
+
       hasToken:
-        hasUsableToken(payload.token),
+        true,
+
       user:
         null,
+
       currentUser:
         null,
+
       authUser:
         null,
+
       sessionUser:
         null,
+
       role:
         null,
-      token:
-        payload.token || null,
+
+      token,
+
       accessToken:
-        payload.token || null,
+        token,
     });
   } catch {}
 
@@ -1919,8 +2377,10 @@ export async function fetchMe(sessionArg = {}) {
     throw createRestoreError(
       "No hay token disponible para /me.",
       {
-        status: 401,
-        code: "TOKEN_MISSING",
+        status:
+          401,
+        code:
+          "TOKEN_MISSING",
       }
     );
   }
@@ -1929,12 +2389,16 @@ export async function fetchMe(sessionArg = {}) {
     return session.mePromise;
   }
 
-  session.checking = true;
+  session.checking =
+    true;
 
-  emit("auth:me:start", {
-    hasToken:
-      true,
-  });
+  emit(
+    "auth:me:start",
+    {
+      hasToken:
+        true,
+    }
+  );
 
   session.mePromise =
     (async () => {
@@ -1945,11 +2409,20 @@ export async function fetchMe(sessionArg = {}) {
             {
               auth:
                 true,
+
               public:
                 false,
+
+              skipAuth:
+                false,
+
               silent:
                 true,
+
               storeError:
+                false,
+
+              dedupe:
                 false,
             }
           );
@@ -1962,14 +2435,19 @@ export async function fetchMe(sessionArg = {}) {
         const user =
           auth.user ||
           extractUser(response?.data) ||
+          extractUser(response?.payload) ||
+          extractUser(response?.result) ||
+          extractUser(response) ||
           null;
 
         if (!hasUsableUser(user)) {
           throw createRestoreError(
             "No se pudo resolver usuario válido desde /me.",
             {
-              status: 401,
-              code: "ME_USER_MISSING",
+              status:
+                401,
+              code:
+                "ME_USER_MISSING",
               response,
             }
           );
@@ -1983,11 +2461,15 @@ export async function fetchMe(sessionArg = {}) {
           applyAuthenticatedSession({
             token:
               nextToken,
+
             user,
+
             refreshToken:
               auth.refreshToken || undefined,
+
             sessionData:
               auth.sessionData || undefined,
+
             source:
               "fetchMe",
           });
@@ -2000,29 +2482,40 @@ export async function fetchMe(sessionArg = {}) {
         session.lastCheckAt =
           Date.now();
 
+        session.lastError =
+          null;
+
         emit(
           "auth:me:success",
           {
-            user:
-              snapshot.user,
+            ...buildPublicSessionPayload(snapshot),
+            source:
+              "fetchMe",
           }
         );
 
         return snapshot.user;
       } catch (error) {
-        emit(
-          "auth:me:error",
+        session.lastError =
           {
-            error,
-            message:
-              extractMessage(error),
-          }
+            type:
+              "me",
+
+            ...buildErrorPayload(error),
+          };
+
+        emitError(
+          "auth:me:error",
+          error
         );
 
         throw error;
       } finally {
-        session.checking = false;
-        session.mePromise = null;
+        session.checking =
+          false;
+
+        session.mePromise =
+          null;
       }
     })();
 
@@ -2047,8 +2540,10 @@ export async function refreshSession(sessionArg = {}) {
     throw createRestoreError(
       "No hay contexto refresh útil.",
       {
-        status: 401,
-        code: "REFRESH_CONTEXT_MISSING",
+        status:
+          401,
+        code:
+          "REFRESH_CONTEXT_MISSING",
       }
     );
   }
@@ -2069,25 +2564,33 @@ export async function refreshSession(sessionArg = {}) {
     throw createRestoreError(
       "Refresh temporalmente bloqueado.",
       {
-        status: 429,
-        code: "REFRESH_BLOCKED",
+        status:
+          429,
+        code:
+          "REFRESH_BLOCKED",
       }
     );
   }
 
-  session.refreshing = true;
+  session.refreshing =
+    true;
 
-  emit("auth:refresh:start", {
-    hasRefreshContext:
-      true,
-    hasRefreshToken:
-      hasStrongRefreshToken(requestBody),
-    hasSessionContext:
-      Boolean(
-        requestBody.sessionId &&
+  emit(
+    "auth:refresh:start",
+    {
+      hasRefreshContext:
+        true,
+
+      hasRefreshToken:
+        hasStrongRefreshToken(requestBody),
+
+      hasSessionContext:
+        Boolean(
+          requestBody.sessionId &&
           requestBody.userId
-      ),
-  });
+        ),
+    }
+  );
 
   session.refreshPromise =
     (async () => {
@@ -2099,12 +2602,22 @@ export async function refreshSession(sessionArg = {}) {
             {
               auth:
                 false,
+
               public:
                 true,
+
+              skipAuth:
+                true,
+
               silent:
                 true,
+
               storeError:
                 false,
+
+              dedupe:
+                false,
+
               _skipAuthRefresh:
                 true,
             }
@@ -2122,8 +2635,10 @@ export async function refreshSession(sessionArg = {}) {
           throw createRestoreError(
             "Refresh sin datos de sesión.",
             {
-              status: 401,
-              code: "REFRESH_EMPTY_RESPONSE",
+              status:
+                401,
+              code:
+                "REFRESH_EMPTY_RESPONSE",
               response,
             }
           );
@@ -2141,18 +2656,23 @@ export async function refreshSession(sessionArg = {}) {
             applyAuthenticatedSession({
               token:
                 auth.token,
+
               user:
                 auth.user,
+
               refreshToken:
                 auth.refreshToken ||
                 requestBody.refreshToken,
+
               sessionData:
                 auth.sessionData || {
                   sessionId:
                     requestBody.sessionId,
+
                   userId:
                     requestBody.userId,
                 },
+
               source:
                 "refresh:token-user",
             });
@@ -2165,23 +2685,33 @@ export async function refreshSession(sessionArg = {}) {
           session.lastRefreshAt =
             Date.now();
 
-          session.refreshFailCount = 0;
-          session.refreshBlockedUntil = 0;
+          session.refreshFailCount =
+            0;
+
+          session.refreshBlockedUntil =
+            0;
+
+          session.lastError =
+            null;
 
           emit(
             "auth:refresh:success",
             {
-              ...snapshot,
+              ...buildPublicSessionPayload(snapshot),
               source:
                 "refresh:token-user",
             }
           );
 
           return {
-            ok: true,
+            ok:
+              true,
+
             ...snapshot,
+
             source:
               "refresh:token-user",
+
             response,
           };
         }
@@ -2198,16 +2728,20 @@ export async function refreshSession(sessionArg = {}) {
           applyProvisionalTokenSession({
             token:
               auth.token,
+
             refreshToken:
               auth.refreshToken ||
               requestBody.refreshToken,
+
             sessionData:
               auth.sessionData || {
                 sessionId:
                   requestBody.sessionId,
+
                 userId:
                   requestBody.userId,
               },
+
             source:
               "refresh:token-only",
           });
@@ -2226,13 +2760,19 @@ export async function refreshSession(sessionArg = {}) {
           session.lastRefreshAt =
             Date.now();
 
-          session.refreshFailCount = 0;
-          session.refreshBlockedUntil = 0;
+          session.refreshFailCount =
+            0;
+
+          session.refreshBlockedUntil =
+            0;
+
+          session.lastError =
+            null;
 
           emit(
             "auth:refresh:success",
             {
-              ...snapshot,
+              ...buildPublicSessionPayload(snapshot),
               user,
               source:
                 "refresh:token-only+me",
@@ -2240,11 +2780,16 @@ export async function refreshSession(sessionArg = {}) {
           );
 
           return {
-            ok: true,
+            ok:
+              true,
+
             ...snapshot,
+
             user,
+
             source:
               "refresh:token-only+me",
+
             response,
           };
         }
@@ -2265,8 +2810,10 @@ export async function refreshSession(sessionArg = {}) {
             throw createRestoreError(
               "Refresh devolvió usuario sin token disponible.",
               {
-                status: 401,
-                code: "REFRESH_USER_WITHOUT_TOKEN",
+                status:
+                  401,
+                code:
+                  "REFRESH_USER_WITHOUT_TOKEN",
                 response,
               }
             );
@@ -2276,18 +2823,23 @@ export async function refreshSession(sessionArg = {}) {
             applyAuthenticatedSession({
               token:
                 currentToken,
+
               user:
                 auth.user,
+
               refreshToken:
                 auth.refreshToken ||
                 requestBody.refreshToken,
+
               sessionData:
                 auth.sessionData || {
                   sessionId:
                     requestBody.sessionId,
+
                   userId:
                     requestBody.userId,
                 },
+
               source:
                 "refresh:user-only",
             });
@@ -2300,23 +2852,33 @@ export async function refreshSession(sessionArg = {}) {
           session.lastRefreshAt =
             Date.now();
 
-          session.refreshFailCount = 0;
-          session.refreshBlockedUntil = 0;
+          session.refreshFailCount =
+            0;
+
+          session.refreshBlockedUntil =
+            0;
+
+          session.lastError =
+            null;
 
           emit(
             "auth:refresh:success",
             {
-              ...snapshot,
+              ...buildPublicSessionPayload(snapshot),
               source:
                 "refresh:user-only",
             }
           );
 
           return {
-            ok: true,
+            ok:
+              true,
+
             ...snapshot,
+
             source:
               "refresh:user-only",
+
             response,
           };
         }
@@ -2324,8 +2886,10 @@ export async function refreshSession(sessionArg = {}) {
         throw createRestoreError(
           "Refresh no produjo sesión recuperable.",
           {
-            status: 401,
-            code: "REFRESH_UNUSABLE_RESPONSE",
+            status:
+              401,
+            code:
+              "REFRESH_UNUSABLE_RESPONSE",
             response,
           }
         );
@@ -2336,22 +2900,13 @@ export async function refreshSession(sessionArg = {}) {
             0
           ) + 1;
 
-        session.lastError = {
-          type:
-            "refresh",
-          message:
-            extractMessage(error),
-          status:
-            error?.status ||
-            error?.response?.status ||
-            null,
-          code:
-            error?.code ||
-            error?.data?.code ||
-            null,
-          at:
-            new Date().toISOString(),
-        };
+        session.lastError =
+          {
+            type:
+              "refresh",
+
+            ...buildErrorPayload(error),
+          };
 
         if (
           session.refreshFailCount >=
@@ -2362,14 +2917,13 @@ export async function refreshSession(sessionArg = {}) {
             getRefreshRetryCooldownMs();
         }
 
-        emit(
+        emitError(
           "auth:refresh:error",
+          error,
           {
-            error,
-            message:
-              extractMessage(error),
             refreshFailCount:
               session.refreshFailCount,
+
             refreshBlockedUntil:
               session.refreshBlockedUntil || null,
           }
@@ -2377,8 +2931,11 @@ export async function refreshSession(sessionArg = {}) {
 
         throw error;
       } finally {
-        session.refreshing = false;
-        session.refreshPromise = null;
+        session.refreshing =
+          false;
+
+        session.refreshPromise =
+          null;
       }
     })();
 
@@ -2404,6 +2961,7 @@ export async function restoreUsingMe(session = {}) {
   emit(
     "auth:restore:success",
     {
+      ...buildPublicSessionPayload(snapshot),
       source:
         "me",
       user,
@@ -2411,9 +2969,13 @@ export async function restoreUsingMe(session = {}) {
   );
 
   return {
-    ok: true,
+    ok:
+      true,
+
     user,
-    source: "me",
+
+    source:
+      "me",
   };
 }
 
@@ -2439,24 +3001,117 @@ export async function restoreUsingRefreshOnly(session = {}) {
   emit(
     "auth:restore:success",
     {
+      ...buildPublicSessionPayload(snapshot),
       source:
         "refresh-only",
-      user:
-        snapshot.user || null,
     }
   );
 
   return {
-    ok: true,
-    source: "refresh-only",
+    ok:
+      true,
+
+    source:
+      "refresh-only",
+
     user:
       snapshot.user || null,
+
     refreshed,
   };
 }
 
 export async function restoreUsingRefreshPreferred(session = {}) {
   return restoreUsingRefreshOnly(session);
+}
+
+function keepCachedSessionAfterTransientFailure({
+  error,
+  routeContext,
+  source = "cached-after-transient-failure",
+} = {}) {
+  const snapshot =
+    getSafeSessionSnapshot();
+
+  if (
+    !isTransientError(error) ||
+    !hasUsableToken(snapshot.token) ||
+    !hasUsableUser(snapshot.user)
+  ) {
+    return null;
+  }
+
+  try {
+    AppCore?.setState?.({
+      authenticated:
+        true,
+
+      hasToken:
+        true,
+
+      user:
+        snapshot.user,
+
+      currentUser:
+        snapshot.user,
+
+      authUser:
+        snapshot.user,
+
+      sessionUser:
+        snapshot.user,
+
+      token:
+        snapshot.token,
+
+      accessToken:
+        snapshot.token,
+
+      role:
+        snapshot.role ||
+        snapshot.user?.role ||
+        snapshot.user?.rol ||
+        null,
+    });
+  } catch {}
+
+  restoreRouteContext(routeContext);
+
+  emit(
+    "auth:restore:transient-kept",
+    {
+      ...buildPublicSessionPayload(snapshot),
+      source,
+      protectedRoute:
+        Boolean(routeContext?.shouldProtect),
+      protectedRouteKey:
+        routeContext?.protectedRouteKey || "",
+      error:
+        buildErrorPayload(error),
+    }
+  );
+
+  return {
+    ok:
+      true,
+
+    user:
+      snapshot.user,
+
+    source,
+
+    provisional:
+      true,
+
+    transientError:
+      buildErrorPayload(error),
+
+    protectedRoute:
+      Boolean(routeContext?.shouldProtect),
+
+    protectedRouteKey:
+      routeContext?.protectedRouteKey || "",
+  };
 }
 
 export async function restoreAfterMeFailure(
@@ -2470,30 +3125,57 @@ export async function restoreAfterMeFailure(
     meError
   );
 
-  if (!canAttemptRefresh()) {
-    clearSessionLocalProtected({
-      options,
+  const cached =
+    keepCachedSessionAfterTransientFailure({
+      error:
+        meError,
+
       routeContext,
-      reason:
-        "me-failed-no-usable-refresh-context",
+
+      source:
+        "cached-after-me-transient-failure",
     });
 
-    emit(
+  if (cached) {
+    return cached;
+  }
+
+  if (!canAttemptRefresh()) {
+    if (shouldClearForError(meError)) {
+      clearSessionLocalProtected({
+        options,
+        routeContext,
+        reason:
+          "me-failed-clearable-no-usable-refresh-context",
+      });
+    } else {
+      restoreRouteContext(routeContext);
+    }
+
+    emitError(
       "auth:restore:error",
+      meError,
       {
-        error:
-          meError,
-        message:
-          extractMessage(meError),
+        protectedRoute:
+          Boolean(routeContext?.shouldProtect),
       }
     );
 
     return {
-      ok: false,
-      user: null,
-      error: meError,
+      ok:
+        false,
+
+      user:
+        null,
+
+      error:
+        meError,
+
       protectedRoute:
         Boolean(routeContext?.shouldProtect),
+
+      protectedRouteKey:
+        routeContext?.protectedRouteKey || "",
     };
   }
 
@@ -2502,29 +3184,59 @@ export async function restoreAfterMeFailure(
       session
     );
   } catch (refreshError) {
-    clearSessionLocalProtected({
-      options,
-      routeContext,
-      reason:
-        "refresh-after-me-failed",
-    });
-
-    emit(
-      "auth:restore:error",
-      {
+    const cachedAfterRefresh =
+      keepCachedSessionAfterTransientFailure({
         error:
           refreshError,
-        message:
-          extractMessage(refreshError),
+
+        routeContext,
+
+        source:
+          "cached-after-me-refresh-transient-failure",
+      });
+
+    if (cachedAfterRefresh) {
+      return cachedAfterRefresh;
+    }
+
+    if (
+      shouldClearForError(meError) ||
+      shouldClearForError(refreshError)
+    ) {
+      clearSessionLocalProtected({
+        options,
+        routeContext,
+        reason:
+          "refresh-after-me-failed-clearable",
+      });
+    } else {
+      restoreRouteContext(routeContext);
+    }
+
+    emitError(
+      "auth:restore:error",
+      refreshError,
+      {
+        protectedRoute:
+          Boolean(routeContext?.shouldProtect),
       }
     );
 
     return {
-      ok: false,
-      user: null,
-      error: refreshError,
+      ok:
+        false,
+
+      user:
+        null,
+
+      error:
+        refreshError,
+
       protectedRoute:
         Boolean(routeContext?.shouldProtect),
+
+      protectedRouteKey:
+        routeContext?.protectedRouteKey || "",
     };
   }
 }
@@ -2539,11 +3251,20 @@ async function restoreUsingMeAfterRefreshFailure(
     restoreRouteContext(routeContext);
 
     return {
-      ok: false,
-      user: null,
-      error: refreshError,
+      ok:
+        false,
+
+      user:
+        null,
+
+      error:
+        refreshError,
+
       protectedRoute:
         Boolean(routeContext?.shouldProtect),
+
+      protectedRouteKey:
+        routeContext?.protectedRouteKey || "",
     };
   }
 
@@ -2555,7 +3276,25 @@ async function restoreUsingMeAfterRefreshFailure(
 
     return result;
   } catch (meError) {
-    if (shouldClearForError(meError)) {
+    const cached =
+      keepCachedSessionAfterTransientFailure({
+        error:
+          meError,
+
+        routeContext,
+
+        source:
+          "cached-after-refresh-me-transient-failure",
+      });
+
+    if (cached) {
+      return cached;
+    }
+
+    if (
+      shouldClearForError(meError) ||
+      shouldClearForError(refreshError)
+    ) {
       clearSessionLocalProtected({
         options,
         routeContext,
@@ -2566,22 +3305,30 @@ async function restoreUsingMeAfterRefreshFailure(
       restoreRouteContext(routeContext);
     }
 
-    emit(
+    emitError(
       "auth:restore:error",
+      meError,
       {
-        error:
-          meError,
-        message:
-          extractMessage(meError),
+        protectedRoute:
+          Boolean(routeContext?.shouldProtect),
       }
     );
 
     return {
-      ok: false,
-      user: null,
-      error: meError,
+      ok:
+        false,
+
+      user:
+        null,
+
+      error:
+        meError,
+
       protectedRoute:
         Boolean(routeContext?.shouldProtect),
+
+      protectedRouteKey:
+        routeContext?.protectedRouteKey || "",
     };
   }
 }
@@ -2609,41 +3356,54 @@ export async function restoreSession(...args) {
     return session.restorePromise;
   }
 
-  session.restoring = true;
+  session.restoring =
+    true;
 
   emit(
     "auth:restore:start",
     {
+      version:
+        RESTORE_VERSION,
+
       hasToken:
         hasUsableToken(getCurrentToken()),
+
       hasUser:
         hasUsableUser(getCurrentUser()),
+
       hasCompleteAuthState:
         hasCompleteAuthState(),
+
       hasRefreshContext:
         hasRefreshContext(),
+
       hasUsableRefreshPayload:
         canAttemptRefresh(),
 
       publicRoute:
         Boolean(options.publicRoute),
+
       preserveCurrentRoute:
         Boolean(options.preserveCurrentRoute),
+
       preserveRoute:
         Boolean(options.preserveRoute),
 
       activationBoot:
         routeContext.activationBoot,
+
       resetConfirmBoot:
         routeContext.resetConfirmBoot,
 
       protectedRoute:
         routeContext.shouldProtect,
+
       protectedRouteKey:
         routeContext.protectedRouteKey,
 
       route:
         routeContext.route,
+
       publicPath:
         routeContext.publicPath,
     }
@@ -2674,18 +3434,25 @@ export async function restoreSession(...args) {
             {
               reason:
                 "missing-token-and-usable-refresh",
+
               protectedRoute:
                 routeContext.shouldProtect,
+
               protectedRouteKey:
                 routeContext.protectedRouteKey,
             }
           );
 
           return {
-            ok: false,
-            user: null,
+            ok:
+              false,
+
+            user:
+              null,
+
             protectedRoute:
               routeContext.shouldProtect,
+
             protectedRouteKey:
               routeContext.protectedRouteKey,
           };
@@ -2694,8 +3461,8 @@ export async function restoreSession(...args) {
         /*
           CRÍTICO:
           Si hay token, primero /me.
-          Esto evita que, después de login, el boot/restore dispare
-          /auth/refresh con contexto viejo o débil.
+          Esto evita que, después de login o refresh de página,
+          el boot dispare /auth/refresh con contexto viejo o débil.
         */
         if (
           tokenAvailable &&
@@ -2707,10 +3474,13 @@ export async function restoreSession(...args) {
               {
                 hasCompleteAuthState:
                   hasCompleteAuthState(),
+
                 protectedRoute:
                   routeContext.shouldProtect,
+
                 protectedRouteKey:
                   routeContext.protectedRouteKey,
+
                 publicPath:
                   routeContext.publicPath,
               }
@@ -2736,12 +3506,16 @@ export async function restoreSession(...args) {
 
             restoreRouteContext(routeContext);
 
+            session.lastRestoreAt =
+              Date.now();
+
             return result;
           }
         }
 
         /*
-          Sin token, sólo intentamos refresh si hay payload útil.
+          Sin token:
+          sólo intentamos refresh si hay payload útil.
         */
         if (refreshAvailable) {
           try {
@@ -2750,8 +3524,10 @@ export async function restoreSession(...args) {
               {
                 protectedRoute:
                   routeContext.shouldProtect,
+
                 protectedRouteKey:
                   routeContext.protectedRouteKey,
+
                 publicPath:
                   routeContext.publicPath,
               }
@@ -2783,11 +3559,18 @@ export async function restoreSession(...args) {
               });
 
               return {
-                ok: false,
-                user: null,
-                error: refreshError,
+                ok:
+                  false,
+
+                user:
+                  null,
+
+                error:
+                  refreshError,
+
                 protectedRoute:
                   routeContext.shouldProtect,
+
                 protectedRouteKey:
                   routeContext.protectedRouteKey,
               };
@@ -2808,6 +3591,9 @@ export async function restoreSession(...args) {
 
             restoreRouteContext(routeContext);
 
+            session.lastRestoreAt =
+              Date.now();
+
             return result;
           }
         }
@@ -2820,10 +3606,15 @@ export async function restoreSession(...args) {
         });
 
         return {
-          ok: false,
-          user: null,
+          ok:
+            false,
+
+          user:
+            null,
+
           protectedRoute:
             routeContext.shouldProtect,
+
           protectedRouteKey:
             routeContext.protectedRouteKey,
         };
@@ -2833,32 +3624,55 @@ export async function restoreSession(...args) {
           error
         );
 
-        clearSessionLocalProtected({
-          options,
-          routeContext,
-          reason:
-            "restore-fatal",
-        });
-
-        emit(
-          "auth:restore:error",
-          {
+        const cached =
+          keepCachedSessionAfterTransientFailure({
             error,
-            message:
-              extractMessage(error),
+
+            routeContext,
+
+            source:
+              "cached-after-restore-fatal-transient",
+          });
+
+        if (cached) {
+          return cached;
+        }
+
+        if (shouldClearForError(error)) {
+          clearSessionLocalProtected({
+            options,
+            routeContext,
+            reason:
+              "restore-fatal-clearable",
+          });
+        } else {
+          restoreRouteContext(routeContext);
+        }
+
+        emitError(
+          "auth:restore:error",
+          error,
+          {
             protectedRoute:
               routeContext.shouldProtect,
+
             protectedRouteKey:
               routeContext.protectedRouteKey,
           }
         );
 
         return {
-          ok: false,
-          user: null,
+          ok:
+            false,
+
+          user:
+            null,
+
           error,
+
           protectedRoute:
             routeContext.shouldProtect,
+
           protectedRouteKey:
             routeContext.protectedRouteKey,
         };
@@ -2881,15 +3695,24 @@ export function getRestoreSnapshot(sessionArg = {}) {
 
   const routeContext =
     captureRouteContext({
-      publicRoute: false,
-      preserveCurrentRoute: false,
+      publicRoute:
+        false,
+
+      preserveCurrentRoute:
+        false,
     });
 
   const refreshPayload =
     getStoredRefreshPayload();
 
+  const safeSession =
+    getSafeSessionSnapshot();
+
   return {
-    ...getSafeSessionSnapshot(),
+    version:
+      RESTORE_VERSION,
+
+    ...buildPublicSessionPayload(safeSession),
 
     checking:
       Boolean(session.checking),
@@ -2939,6 +3762,9 @@ export function getRestoreSnapshot(sessionArg = {}) {
         0
       ),
 
+    lastError:
+      session.lastError || null,
+
     hasValidToken:
       hasUsableToken(
         getCurrentToken()
@@ -2963,7 +3789,7 @@ export function getRestoreSnapshot(sessionArg = {}) {
     hasStoredSessionContext:
       Boolean(
         refreshPayload.sessionId &&
-          refreshPayload.userId
+        refreshPayload.userId
       ),
 
     protectedRoute:
@@ -3009,8 +3835,10 @@ export function getRestoreSnapshot(sessionArg = {}) {
     transports: {
       hasApiClient:
         Boolean(getApiClient()),
+
       hasHttpService:
         Boolean(getHttpService()),
+
       hasApiGet:
         Boolean(
           getApiClient()?.get ||
@@ -3018,6 +3846,7 @@ export function getRestoreSnapshot(sessionArg = {}) {
           getHttpService()?.get ||
           getHttpService()?.request
         ),
+
       hasApiPost:
         Boolean(
           getApiClient()?.post ||

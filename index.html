@@ -1,39 +1,41 @@
 <!DOCTYPE html>
 <html
   lang="es"
+  data-app="onion"
+  data-app-name="Onion Support"
   data-theme="dark"
   data-theme-mode="system"
   data-theme-source="initial"
+  data-route-mode="boot"
   class="app-booting app-loading theme-dark"
 >
 <head>
   <!-- =========================================================
        ONION SUPPORT — INDEX / SPA SHELL
-       PRO SAAS PANEL · BOOT LOADER READY · CSP CLEAN · FINAL
+       Archivo: /index.html
+
+       PRO SAAS PANEL · SPA PRIVATE APP · BOOT LOADER READY
+       CSP CLEAN · ZERO INLINE JS/CSS · FINAL 10/10
 
        OBJETIVOS:
-       - CSP clean
-       - cero scripts inline
-       - cero CSS inline
-       - modo tema por defecto: system / navegador
-       - dark si el sistema/navegador está en oscuro
-       - light si el sistema/navegador está en claro
-       - favicon real de pestaña: favicon_black_circle.png
-       - NO preload del favicon real para evitar warning Chrome
-       - loader estático inicial para refresh sin parpadeos
-       - logo del loader dependiente del tema resuelto por preboot
-       - theme preboot externo antes del CSS final
-       - shell SPA limpio
-       - sidebar / topbar montados por JS
-       - slot tablehead preparado
-       - sesión restaurada sin flash visual
-       - rutas SPA resueltas por router/staticwebapp.config.json
-       - base sólida enterprise
+       - shell SPA privado, no landing pública
+       - sin scripts inline
+       - sin CSS inline
+       - theme system-first con preboot externo
+       - loader estático visible desde refresh
+       - sidebar/topbar montados por JS
+       - tablehead dinámico preparado
+       - restore de sesión sin flash visual
+       - URLs SPA resueltas por Azure Static Web Apps
+       - no indexar rutas privadas/auth/técnicas
+       - favicon real sin preload innecesario
+       - base enterprise estable
 
        IMPORTANTE:
-       - /src/preboot/theme.js NO debe contener <script>
-       - /src/preboot/theme.js NO debe contener HTML
-       - index.html debe empezar siempre por <!DOCTYPE html>
+       - /src/preboot/theme.js debe ser JS puro.
+       - /src/preboot/theme.js no debe contener <script>.
+       - /src/preboot/theme.js no debe contener HTML.
+       - index.html debe empezar siempre por <!DOCTYPE html>.
   ========================================================= -->
 
   <!-- =========================
@@ -59,18 +61,39 @@
   >
 
   <meta
-    name="description"
-    content="Onion Support · Panel SaaS de soporte, incidencias, facturación y gestión interna."
+    name="apple-mobile-web-app-title"
+    content="Onion Support"
   >
 
   <meta
+    name="description"
+    content="Onion Support · Panel privado SaaS de soporte, incidencias, facturación y gestión interna."
+  >
+
+  <!-- App privada: no indexar panel/auth/rutas SPA -->
+  <meta
     name="robots"
-    content="noindex, nofollow"
+    content="noindex, nofollow, noarchive, noimageindex"
+  >
+
+  <meta
+    name="googlebot"
+    content="noindex, nofollow, noarchive, noimageindex"
+  >
+
+  <meta
+    name="bingbot"
+    content="noindex, nofollow, noarchive, noimageindex"
   >
 
   <meta
     name="referrer"
     content="strict-origin-when-cross-origin"
+  >
+
+  <meta
+    name="format-detection"
+    content="telephone=no, date=no, address=no, email=no"
   >
 
   <meta
@@ -85,6 +108,11 @@
   >
 
   <meta
+    name="msapplication-TileColor"
+    content="#0a0c11"
+  >
+
+  <meta
     name="mobile-web-app-capable"
     content="yes"
   >
@@ -95,18 +123,8 @@
   >
 
   <meta
-    name="apple-mobile-web-app-title"
-    content="Onion Support"
-  >
-
-  <meta
     name="apple-mobile-web-app-status-bar-style"
     content="black-translucent"
-  >
-
-  <meta
-    name="format-detection"
-    content="telephone=no"
   >
 
   <!-- =========================
@@ -115,12 +133,25 @@
   <base href="/">
 
   <!-- =========================
+       PWA / MANIFEST
+       Mantener si existen estos ficheros.
+  ========================= -->
+  <link
+    rel="manifest"
+    href="/site.webmanifest"
+  >
+
+  <link
+    rel="alternate"
+    type="application/xml"
+    href="/sitemap.xml"
+    title="Onion Support Sitemap"
+  >
+
+  <!-- =========================
        FAVICON REAL DE PESTAÑA
-       IMPORTANTE:
-       - no usar rel="preload" aquí
-       - Chrome puede advertir que no se usa
-         porque el favicon no cuenta como imagen
-         consumida inmediatamente por el DOM
+       No preload del favicon real:
+       Chrome puede advertir que no se usa inmediatamente.
   ========================= -->
   <link
     rel="icon"
@@ -140,7 +171,7 @@
   >
 
   <!-- =========================
-       PERFORMANCE
+       PERFORMANCE · CONNECTIONS
   ========================= -->
   <link
     rel="preconnect"
@@ -153,12 +184,23 @@
     crossorigin
   >
 
-  <!-- Loader logos: sí se usan como <img> reales -->
+  <link
+    rel="dns-prefetch"
+    href="https://fonts.googleapis.com"
+  >
+
+  <link
+    rel="dns-prefetch"
+    href="https://fonts.gstatic.com"
+  >
+
+  <!-- Loader logos: sí se usan como imágenes reales -->
   <link
     rel="preload"
     href="/src/media/img/favicon_white.png"
     as="image"
     type="image/png"
+    fetchpriority="high"
   >
 
   <link
@@ -166,6 +208,7 @@
     href="/src/media/img/favicon_black.png"
     as="image"
     type="image/png"
+    fetchpriority="high"
   >
 
   <link
@@ -182,14 +225,13 @@
   >
 
   <!-- =========================
-       PREBOOT THEME FIX
+       PREBOOT THEME
        CSP CLEAN:
        - externo
        - síncrono
        - antes del CSS final
        - resuelve data-theme real:
-           dark  si system dark
-           light si system light
+         dark/light según system o storage
   ========================= -->
   <script src="/src/preboot/theme.js"></script>
 
@@ -246,7 +288,7 @@
     href="/src/css/components/ui.css"
   >
 
-  <!-- VIEWS -->
+  <!-- AUTH / PUBLIC TECHNICAL VIEWS -->
   <link
     rel="stylesheet"
     href="/src/css/auth/login.css"
@@ -270,23 +312,27 @@
   data-app="onion"
   data-density="default"
   data-app-loading="true"
+  data-authenticated="false"
+  data-route-mode="boot"
+  data-shell-state="booting"
   data-theme="dark"
   data-theme-mode="system"
   data-theme-source="initial"
 >
   <!-- =========================================================
        BOOT LOADER ESTÁTICO
-       - visible desde refresh antes de que cargue JS
-       - controlado después por src/app/loader.js / src/main.js
+       - visible desde refresh antes de JS
+       - controlado después por loader.js / main.js
        - sin inline script
        - sin inline style
-       - logo dependiente de html[data-theme]
+       - logos dependientes de html[data-theme]
   ========================================================= -->
   <div
     id="app-loader"
     class="app-loader is-visible"
     data-app-loader="true"
     data-loader-visible="true"
+    data-loader-state="booting"
     role="status"
     aria-live="polite"
     aria-busy="true"
@@ -298,9 +344,13 @@
       aria-hidden="true"
     ></div>
 
-    <div class="app-loader__card">
+    <div
+      class="app-loader__card"
+      data-loader-card="true"
+    >
       <div
         class="app-loader__brand"
+        data-loader-brand="true"
         aria-hidden="true"
       >
         <img
@@ -327,7 +377,11 @@
           draggable="false"
         >
 
-        <div class="app-loader__logo-fallback">
+        <div
+          class="app-loader__logo-fallback"
+          data-loader-logo-fallback="true"
+          aria-hidden="true"
+        >
           O
         </div>
       </div>
@@ -370,9 +424,8 @@
             <h1>JavaScript es necesario</h1>
 
             <p>
-              Onion Support necesita JavaScript
-              para cargar la navegación SPA,
-              el panel, las vistas y la autenticación.
+              Onion Support necesita JavaScript para cargar
+              la navegación SPA, el panel, las vistas y la autenticación.
             </p>
           </section>
         </div>
@@ -385,57 +438,66 @@
        - Sidebar montado por JS
        - Topbar montado por JS
        - Tablehead dinámico preparado
+       - View root estable para Router
        - Loader inicial ya existe y lo controla JS
   ========================================================= -->
   <div
-    class="layout app-shell"
     id="app-shell"
+    class="layout app-shell"
     data-app-shell="true"
+    data-shell="booting"
+    data-route-mode="boot"
     aria-busy="true"
+    aria-hidden="false"
   >
     <!-- SIDEBAR MOUNT -->
     <div
       id="sidebar-mount"
-      data-sidebar-mount
+      data-sidebar-mount="true"
+      aria-hidden="false"
     ></div>
 
     <!-- TOPBAR MOUNT -->
     <div
       id="topbar-mount"
-      data-topbar-mount
+      data-topbar-mount="true"
+      aria-hidden="false"
     ></div>
 
     <!-- MAIN CONTENT -->
     <main
-      class="main-content"
       id="main-content"
+      class="main-content"
       role="main"
       aria-label="Contenido principal"
       tabindex="-1"
       aria-busy="true"
+      data-main-content="true"
+      data-route-mode="boot"
     >
       <!-- TABLEHEAD DYNAMIC SLOT -->
       <div
         id="table-head"
         class="table-head"
-        data-tablehead
+        data-tablehead="true"
         hidden
         aria-hidden="true"
       >
         <div
           id="tablehead-container"
-          data-tablehead-container
+          data-tablehead-container="true"
         ></div>
       </div>
 
       <!-- VIEW ROOT -->
       <div
         id="app-content"
-        data-app-content
+        data-app-content="true"
       >
         <div
           id="view-container"
-          data-view-root
+          data-view-root="true"
+          data-router-view="true"
           aria-live="polite"
           aria-busy="true"
         ></div>
@@ -445,6 +507,9 @@
 
   <!-- =========================
        APP ENTRY
+       CSP CLEAN:
+       - módulo externo
+       - sin inline bootstrap
   ========================= -->
   <script
     type="module"

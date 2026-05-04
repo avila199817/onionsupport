@@ -8,8 +8,9 @@
    - resolver usuario actual desde AppCore/Auth-like sources
    - obtener display name robusto
    - obtener username normalizado
-   - construir iniciales del avatar
+   - construir iniciales del avatar preservando acentos Unicode
    - resolver URL de avatar
+   - aplicar color RNG estable por sesión al avatar fallback
    - detectar rol admin con aliases/flags/permisos
    - renderizar usuario en el footer
    - pintar avatar real o fallback
@@ -60,11 +61,33 @@ const SIDEBAR_AVATAR_IMAGE_ID = "sidebarAvatarImage";
 const SIDEBAR_AVATAR_FALLBACK_ID = "sidebarAvatarFallback";
 const SIDEBAR_USER_PLAN_ID = "sidebarUserPlan";
 
+const AVATAR_COLOR_STORAGE_KEY = "onion:sidebar:avatar:color";
+const AVATAR_COLOR_SCOPE_STORAGE_KEY = "onion:sidebar:avatar:color:scope";
+
+const AVATAR_GRADIENTS = Object.freeze([
+  "linear-gradient(135deg, #6f59d9, #38bdf8)",
+  "linear-gradient(135deg, #ec4899, #8b5cf6)",
+  "linear-gradient(135deg, #22c55e, #14b8a6)",
+  "linear-gradient(135deg, #f97316, #ef4444)",
+  "linear-gradient(135deg, #0ea5e9, #6366f1)",
+  "linear-gradient(135deg, #a855f7, #f43f5e)",
+  "linear-gradient(135deg, #14b8a6, #6366f1)",
+  "linear-gradient(135deg, #f59e0b, #ec4899)",
+  "linear-gradient(135deg, #06b6d4, #8b5cf6)",
+  "linear-gradient(135deg, #84cc16, #10b981)",
+  "linear-gradient(135deg, #fb7185, #f97316)",
+  "linear-gradient(135deg, #64748b, #0f172a)",
+]);
+
+let memoryAvatarGradient = "";
+let memoryAvatarGradientScope = "";
+
 const EVENTS = Object.freeze({
   userRendered: "sidebar:user:rendered",
   userAvatarLoaded: "sidebar:user:avatar:loaded",
   userAvatarError: "sidebar:user:avatar:error",
   userFallbackRendered: "sidebar:user:avatar:fallback",
+  userAvatarColorReset: "sidebar:user:avatar:color:reset",
 });
 
 const ADMIN_ROLE_KEYS = new Set([
@@ -380,6 +403,13 @@ function removeTooltipAttributesDeep(element = null) {
   }
 }
 
+/**
+ * Normalizador ASCII.
+ *
+ * IMPORTANTE:
+ * - Se usa para username/roles.
+ * - NO se usa para iniciales del avatar, porque eliminaría acentos.
+ */
 function normalizeString(value = "") {
   return safeText(value, "")
     .normalize("NFD")
@@ -426,6 +456,27 @@ function setDatasetValue(element = null, key = "", value = "") {
     return true;
   } catch {
     return false;
+  }
+}
+
+function hashString(value = "") {
+  const text = safeText(value, "");
+
+  if (!text) {
+    return "";
+  }
+
+  let hash = 2166136261;
+
+  try {
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+
+    return `h${(hash >>> 0).toString(36)}`;
+  } catch {
+    return `h${Math.abs(text.length || 0).toString(36)}`;
   }
 }
 
@@ -931,30 +982,62 @@ export function getUsername(AppCore, user = null) {
 }
 
 /* =========================================================
-   AVATAR TEXT
+   AVATAR TEXT · UNICODE SAFE
 ========================================================= */
 
-function extractInitialsFromText(value = "") {
+function keepAvatarLettersAndNumbers(value = "") {
   const text = safeText(value, "");
 
   if (!text) {
     return "";
   }
 
-  const parts = normalizeString(text)
+  try {
+    return Array.from(text)
+      .filter((char) => /[\p{L}\p{N}]/u.test(char))
+      .join("");
+  } catch {
+    return text.replace(/[^a-zA-Z0-9À-ÖØ-öø-ÿĀ-ſ]/g, "");
+  }
+}
+
+function normalizeAvatarText(value = "") {
+  const clean = keepAvatarLettersAndNumbers(
+    safeText(value, DEFAULT_AVATAR_TEXT)
+  );
+
+  const compact = Array.from(clean)
+    .slice(0, 2)
+    .join("");
+
+  try {
+    return compact.toLocaleUpperCase("es-ES") || DEFAULT_AVATAR_TEXT;
+  } catch {
+    return compact.toUpperCase() || DEFAULT_AVATAR_TEXT;
+  }
+}
+
+function extractInitialsFromText(value = "") {
+  const text = safeText(value, "")
     .replace(/@.*/, "")
-    .split(/[\s._-]+/)
-    .map((part) => part.trim())
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!text) {
+    return "";
+  }
+
+  const parts = text
+    .split(/[\s._-]+/u)
+    .map((part) => keepAvatarLettersAndNumbers(part))
     .filter(Boolean);
 
   const initials = parts
     .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() || "")
-    .join("")
-    .replace(/[^A-Z0-9]/g, "")
-    .slice(0, 2);
+    .map((part) => Array.from(part)[0] || "")
+    .join("");
 
-  return initials;
+  return normalizeAvatarText(initials);
 }
 
 export function getAvatarText(AppCore, user = null) {
@@ -974,10 +1057,7 @@ export function getAvatarText(AppCore, user = null) {
   );
 
   if (explicit) {
-    return explicit
-      .replace(/[^a-zA-Z0-9]/g, "")
-      .slice(0, 2)
-      .toUpperCase() || DEFAULT_AVATAR_TEXT;
+    return normalizeAvatarText(explicit);
   }
 
   const displayName = getDisplayName(
@@ -1520,6 +1600,250 @@ export function isAdmin(AppCore, user = null) {
 }
 
 /* =========================================================
+   AVATAR RNG COLOR
+========================================================= */
+
+function pickRandomAvatarGradient(previous = "") {
+  const previousValue = safeText(previous, "");
+  const available = AVATAR_GRADIENTS.filter(
+    (gradient) => gradient !== previousValue
+  );
+
+  const list = available.length ? available : AVATAR_GRADIENTS;
+
+  return list[
+    Math.floor(Math.random() * list.length)
+  ] || AVATAR_GRADIENTS[0];
+}
+
+function getAuthTokenFingerprint(AppCore = null) {
+  const state = safeObject(AppCore?.state);
+  const session = safeObject(state.session);
+
+  const authLikeSources = getAuthLikeSources(AppCore);
+
+  const token = first(
+    state.token,
+    state.accessToken,
+    state.access_token,
+    state.authToken,
+    state.auth_token,
+    state.jwt,
+
+    session.token,
+    session.accessToken,
+    session.access_token,
+    session.authToken,
+    session.auth_token,
+    session.jwt,
+
+    state.auth?.token,
+    state.auth?.accessToken,
+    state.auth?.access_token,
+    state.auth?.authToken,
+    state.auth?.jwt,
+
+    ...authLikeSources.flatMap((source) => [
+      source?.token,
+      source?.accessToken,
+      source?.access_token,
+      source?.authToken,
+      source?.auth_token,
+      source?.jwt,
+
+      source?.state?.token,
+      source?.state?.accessToken,
+      source?.state?.access_token,
+      source?.state?.authToken,
+      source?.state?.jwt,
+
+      source?.session?.token,
+      source?.session?.accessToken,
+      source?.session?.access_token,
+      source?.session?.authToken,
+      source?.session?.jwt,
+
+      callGetter(source, "getToken"),
+      callGetter(source, "getAccessToken"),
+      callGetter(source, "getAuthToken"),
+    ])
+  );
+
+  const cleanToken = safeText(token, "");
+
+  if (!cleanToken) {
+    return "";
+  }
+
+  return hashString(cleanToken);
+}
+
+function getAvatarColorScope(AppCore = null, user = null) {
+  const state = safeObject(AppCore?.state);
+  const session = safeObject(state.session);
+  const currentUser = safeObject(user || getUser(AppCore));
+  const branches = getProfileLikeBranches(currentUser);
+  const tokenFingerprint = getAuthTokenFingerprint(AppCore);
+
+  const scope = first(
+    state.sessionId,
+    state.session_id,
+    state.authSessionId,
+    state.auth_session_id,
+
+    session.id,
+    session.sessionId,
+    session.session_id,
+    session.sid,
+
+    state.loginAt,
+    state.loggedAt,
+    state.authenticatedAt,
+    session.loginAt,
+    session.loggedAt,
+    session.authenticatedAt,
+
+    tokenFingerprint ? `token:${tokenFingerprint}` : "",
+
+    ...branches.flatMap((branch) => [
+      branch.sessionId,
+      branch.session_id,
+      branch.sid,
+      branch.loginAt,
+      branch.loggedAt,
+      branch.authenticatedAt,
+      branch.authTime,
+      branch.auth_time,
+      branch.iat,
+      branch.exp,
+    ]),
+
+    ...branches.flatMap((branch) => [
+      branch.userId,
+      branch.user_id,
+      branch.id,
+      branch.uid,
+      branch.sub,
+      branch.username,
+      branch.userName,
+      branch.user_name,
+      branch.email,
+      branch.mail,
+    ])
+  );
+
+  return safeText(scope, "anonymous");
+}
+
+export function getSessionAvatarGradient(AppCore = null, user = null) {
+  const scope = getAvatarColorScope(AppCore, user);
+
+  try {
+    if (!isBrowser()) {
+      throw new Error("Browser storage unavailable.");
+    }
+
+    const storedScope = window.sessionStorage?.getItem?.(
+      AVATAR_COLOR_SCOPE_STORAGE_KEY
+    );
+
+    const storedGradient = window.sessionStorage?.getItem?.(
+      AVATAR_COLOR_STORAGE_KEY
+    );
+
+    if (
+      storedGradient &&
+      storedScope === scope &&
+      AVATAR_GRADIENTS.includes(storedGradient)
+    ) {
+      memoryAvatarGradient = storedGradient;
+      memoryAvatarGradientScope = scope;
+      return storedGradient;
+    }
+
+    const nextGradient = pickRandomAvatarGradient(storedGradient || "");
+
+    window.sessionStorage?.setItem?.(
+      AVATAR_COLOR_STORAGE_KEY,
+      nextGradient
+    );
+
+    window.sessionStorage?.setItem?.(
+      AVATAR_COLOR_SCOPE_STORAGE_KEY,
+      scope
+    );
+
+    memoryAvatarGradient = nextGradient;
+    memoryAvatarGradientScope = scope;
+
+    return nextGradient;
+  } catch {
+    if (
+      memoryAvatarGradient &&
+      memoryAvatarGradientScope === scope
+    ) {
+      return memoryAvatarGradient;
+    }
+
+    memoryAvatarGradient = pickRandomAvatarGradient(memoryAvatarGradient);
+    memoryAvatarGradientScope = scope;
+
+    return memoryAvatarGradient;
+  }
+}
+
+function applyAvatarSessionColor(
+  avatarEl = null,
+  fallbackEl = null,
+  AppCore = null,
+  user = null
+) {
+  const gradient = getSessionAvatarGradient(AppCore, user);
+
+  [avatarEl, fallbackEl].forEach((node) => {
+    if (!node) return;
+
+    try {
+      node.style.setProperty("--sidebar-avatar-bg", gradient);
+      node.style.setProperty("--avatar-bg", gradient);
+      node.style.setProperty("--user-avatar-bg", gradient);
+      node.style.background = gradient;
+    } catch {}
+  });
+
+  try {
+    if (avatarEl) {
+      avatarEl.dataset.avatarColor = gradient;
+    }
+  } catch {}
+
+  return gradient;
+}
+
+export function resetSidebarAvatarColor(AppCore = null) {
+  memoryAvatarGradient = "";
+  memoryAvatarGradientScope = "";
+
+  try {
+    if (isBrowser()) {
+      window.sessionStorage?.removeItem?.(AVATAR_COLOR_STORAGE_KEY);
+      window.sessionStorage?.removeItem?.(AVATAR_COLOR_SCOPE_STORAGE_KEY);
+    }
+  } catch {}
+
+  safeEmit(
+    AppCore,
+    EVENTS.userAvatarColorReset,
+    {
+      reset: true,
+      at: nowMs(),
+    }
+  );
+
+  return true;
+}
+
+/* =========================================================
    AVATAR DOM HELPERS
 ========================================================= */
 
@@ -1591,13 +1915,6 @@ function clearImageNode(imgEl = null) {
     imgEl.removeAttribute("data-i18n-data-tooltip");
     imgEl.removeAttribute("aria-describedby");
   } catch {}
-}
-
-function normalizeAvatarText(value = "") {
-  return safeText(value, DEFAULT_AVATAR_TEXT)
-    .replace(/[^a-zA-Z0-9]/g, "")
-    .slice(0, 2)
-    .toUpperCase() || DEFAULT_AVATAR_TEXT;
 }
 
 function setFallbackNode({
@@ -1711,6 +2028,7 @@ export function renderAvatarFallback(
   if (!avatarEl) return false;
 
   const AppCore = options?.AppCore || null;
+  const user = options?.user || null;
 
   const finalDisplayName = safeText(
     displayName,
@@ -1725,6 +2043,13 @@ export function renderAvatarFallback(
     imgEl,
     fallbackEl,
   } = getAvatarNodes(avatarEl);
+
+  const avatarColor = applyAvatarSessionColor(
+    avatarEl,
+    fallbackEl,
+    AppCore,
+    user
+  );
 
   nextAvatarRenderSeq(avatarEl);
 
@@ -1755,6 +2080,7 @@ export function renderAvatarFallback(
     {
       displayName: finalDisplayName,
       avatarText: finalAvatarText,
+      avatarColor,
     }
   );
 
@@ -1771,6 +2097,7 @@ export function renderAvatarImage(
   if (!avatarEl) return false;
 
   const AppCore = options?.AppCore || null;
+  const user = options?.user || null;
   const safeUrl = sanitizeAvatarUrl(avatarUrl);
 
   if (!safeUrl) {
@@ -1780,6 +2107,7 @@ export function renderAvatarImage(
       avatarText,
       {
         AppCore,
+        user,
       }
     );
   }
@@ -1798,6 +2126,13 @@ export function renderAvatarImage(
     fallbackEl,
   } = getAvatarNodes(avatarEl);
 
+  const avatarColor = applyAvatarSessionColor(
+    avatarEl,
+    fallbackEl,
+    AppCore,
+    user
+  );
+
   if (!imgEl) {
     return renderAvatarFallback(
       avatarEl,
@@ -1805,6 +2140,7 @@ export function renderAvatarImage(
       finalAvatarText,
       {
         AppCore,
+        user,
       }
     );
   }
@@ -1873,6 +2209,7 @@ export function renderAvatarImage(
         {
           url: safeUrl,
           displayName: finalDisplayName,
+          avatarColor,
         }
       );
     };
@@ -1895,6 +2232,7 @@ export function renderAvatarImage(
         {
           url: safeUrl,
           displayName: finalDisplayName,
+          avatarColor,
         }
       );
 
@@ -1904,6 +2242,7 @@ export function renderAvatarImage(
         finalAvatarText,
         {
           AppCore,
+          user,
         }
       );
     };
@@ -1927,6 +2266,7 @@ export function renderAvatarImage(
       finalAvatarText,
       {
         AppCore,
+        user,
       }
     );
   }
@@ -1985,6 +2325,8 @@ function setUserDataset(element = null, {
   displayName = "",
   admin = false,
   avatarUrl = "",
+  avatarText = "",
+  avatarColor = "",
   hasUser = false,
 } = {}) {
   if (!element) {
@@ -1995,6 +2337,8 @@ function setUserDataset(element = null, {
   setDatasetValue(element, "displayName", displayName || "");
   setDatasetValue(element, "admin", admin ? "true" : "false");
   setDatasetValue(element, "avatarUrl", avatarUrl || "");
+  setDatasetValue(element, "avatarText", avatarText || "");
+  setDatasetValue(element, "avatarColor", avatarColor || "");
   setDatasetValue(element, "hasUser", hasUser ? "true" : "false");
 
   return true;
@@ -2043,6 +2387,11 @@ export function renderUser(AppCore) {
     user
   );
 
+  const avatarColor = getSessionAvatarGradient(
+    AppCore,
+    user
+  );
+
   if (nameEl) {
     try {
       nameEl.textContent = displayName;
@@ -2052,6 +2401,8 @@ export function renderUser(AppCore) {
         displayName,
         admin,
         avatarUrl,
+        avatarText,
+        avatarColor,
         hasUser,
       });
 
@@ -2068,6 +2419,7 @@ export function renderUser(AppCore) {
         avatarText,
         {
           AppCore,
+          user,
         }
       );
     } else {
@@ -2077,6 +2429,7 @@ export function renderUser(AppCore) {
         avatarText,
         {
           AppCore,
+          user,
         }
       );
     }
@@ -2087,6 +2440,8 @@ export function renderUser(AppCore) {
         displayName,
         admin,
         avatarUrl,
+        avatarText,
+        avatarColor,
         hasUser,
       });
 
@@ -2115,6 +2470,8 @@ export function renderUser(AppCore) {
         displayName,
         admin,
         avatarUrl,
+        avatarText,
+        avatarColor,
         hasUser,
       });
 
@@ -2137,6 +2494,8 @@ export function renderUser(AppCore) {
         displayName,
         admin,
         avatarUrl,
+        avatarText,
+        avatarColor,
         hasUser,
       });
 
@@ -2160,6 +2519,7 @@ export function renderUser(AppCore) {
     displayName,
     avatarText,
     avatarUrl: avatarUrl || null,
+    avatarColor,
     username: username || null,
     planLabel,
     isAdmin: admin,
@@ -2192,6 +2552,7 @@ export function getSidebarUserSnapshot(AppCore) {
   const username = getUsername(AppCore, user);
   const avatarText = getAvatarText(AppCore, user);
   const avatarUrl = getAvatarUrl(user);
+  const avatarColor = getSessionAvatarGradient(AppCore, user);
   const roles = getUserRoles(AppCore, user);
 
   return {
@@ -2206,6 +2567,7 @@ export function getSidebarUserSnapshot(AppCore) {
     username: username || null,
     avatarText,
     avatarUrl: avatarUrl || null,
+    avatarColor,
 
     planLabel:
       getPlanLabel(AppCore, user),
@@ -2246,6 +2608,12 @@ export function getSidebarUserSnapshot(AppCore) {
       avatarUrl:
         avatarEl?.dataset?.avatarUrl || "",
 
+      avatarText:
+        avatarEl?.dataset?.avatarText || "",
+
+      avatarColor:
+        avatarEl?.dataset?.avatarColor || "",
+
       avatarSeq:
         avatarEl?.dataset?.[AVATAR_RENDER_SEQ_DATASET_KEY] || "",
 
@@ -2283,6 +2651,7 @@ export default {
   getUsername,
   getAvatarText,
   getAvatarUrl,
+  getSessionAvatarGradient,
   getUserRoles,
   isAdmin,
 
@@ -2290,5 +2659,6 @@ export default {
   renderAvatarImage,
   renderUser,
 
+  resetSidebarAvatarColor,
   getSidebarUserSnapshot,
 };

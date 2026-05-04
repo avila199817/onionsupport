@@ -1,12 +1,18 @@
 # =====================================================
 # ONION SUPPORT · ROBOTS.TXT
 # Producción · Azure Static Web Apps · SPA Ready
+#
+# REGLA:
+# - Sólo se indexa la raíz pública.
+# - No se indexan rutas privadas/auth/técnicas.
+# - No se bloquean assets necesarios para renderizar la SPA.
+# - robots.txt NO protege datos privados; la API y los guards sí.
 # =====================================================
 
 User-agent: *
 
 # =====================================================
-# PERMITIR RECURSOS PÚBLICOS NECESARIOS
+# PERMITIR DOCUMENTOS PÚBLICOS NECESARIOS
 # =====================================================
 Allow: /
 Allow: /robots.txt
@@ -15,61 +21,187 @@ Allow: /BingSiteAuth.xml
 Allow: /manifest.json
 Allow: /site.webmanifest
 Allow: /favicon.ico
-Allow: /src/media/img/
+Allow: /favicon.svg
+Allow: /apple-touch-icon.png
 
 # =====================================================
-# BLOQUEAR API / ZONAS TÉCNICAS
+# PERMITIR ASSETS NECESARIOS PARA RENDER SEO / SPA
+# =====================================================
+Allow: /assets/
+Allow: /media/
+Allow: /fonts/
+Allow: /css/
+Allow: /js/
+Allow: /img/
+Allow: /src/
+Allow: /*.css$
+Allow: /*.js$
+Allow: /*.mjs$
+Allow: /*.png$
+Allow: /*.jpg$
+Allow: /*.jpeg$
+Allow: /*.gif$
+Allow: /*.svg$
+Allow: /*.webp$
+Allow: /*.avif$
+Allow: /*.ico$
+Allow: /*.woff$
+Allow: /*.woff2$
+
+# =====================================================
+# BLOQUEAR API / AUTH TÉCNICA / CONFIG / DEV
 # =====================================================
 Disallow: /api/
 Disallow: /.auth/
 Disallow: /.github/
+Disallow: /.well-known/
 Disallow: /staticwebapp.config.json
+Disallow: /package.json
+Disallow: /package-lock.json
+Disallow: /pnpm-lock.yaml
+Disallow: /yarn.lock
+Disallow: /vite.config
+Disallow: /*.map$
 
 # =====================================================
-# BLOQUEAR RUTAS AUTH / SESIÓN
+# BLOQUEAR RUTAS FALSAS / LANDINGS NO EXISTENTES
+# =====================================================
+Disallow: /es
+Disallow: /es/
+Disallow: /es/*
+
+# =====================================================
+# BLOQUEAR AUTH / SESIÓN
 # =====================================================
 Disallow: /login
+Disallow: /login/
+Disallow: /login/*
 Disallow: /signin
+Disallow: /signin/
+Disallow: /signin/*
+Disallow: /sign-in
+Disallow: /sign-in/
+Disallow: /sign-in/*
 Disallow: /auth
+Disallow: /auth/
+Disallow: /auth/*
+Disallow: /logout
+Disallow: /logout/
+Disallow: /logout/*
 Disallow: /2fa
+Disallow: /2fa/
+Disallow: /2fa/*
 Disallow: /otp
+Disallow: /otp/
+Disallow: /otp/*
 
 # =====================================================
 # BLOQUEAR ACTIVACIÓN / RESET PASSWORD
+# Tokens en URL nunca deben indexarse.
 # =====================================================
 Disallow: /activate-account
 Disallow: /activate-account/
+Disallow: /activate-account/*
 Disallow: /forgot-password
+Disallow: /forgot-password/
+Disallow: /forgot-password/*
 Disallow: /recover-password
+Disallow: /recover-password/
+Disallow: /recover-password/*
 Disallow: /password-reset
+Disallow: /password-reset/
+Disallow: /password-reset/*
 Disallow: /reset-password
 Disallow: /reset-password/
+Disallow: /reset-password/*
 Disallow: /reset-password/confirm
 Disallow: /reset-password/confirm/
+Disallow: /reset-password/confirm/*
 
 # =====================================================
-# BLOQUEAR PANEL PRIVADO SPA
+# BLOQUEAR PANEL PRIVADO SPA · ES
 # =====================================================
 Disallow: /incidencias
 Disallow: /incidencias/
+Disallow: /incidencias/*
 Disallow: /facturas
 Disallow: /facturas/
+Disallow: /facturas/*
 Disallow: /usuarios
 Disallow: /usuarios/
+Disallow: /usuarios/*
 Disallow: /clientes
 Disallow: /clientes/
+Disallow: /clientes/*
 Disallow: /cuenta
 Disallow: /cuenta/
+Disallow: /cuenta/*
 Disallow: /ajustes
 Disallow: /ajustes/
+Disallow: /ajustes/*
 Disallow: /servidor
 Disallow: /servidor/
+Disallow: /servidor/*
+Disallow: /hardware
+Disallow: /hardware/
+Disallow: /hardware/*
+
+# =====================================================
+# BLOQUEAR PANEL PRIVADO SPA · EN / ALIASES
+# =====================================================
+Disallow: /tickets
+Disallow: /tickets/
+Disallow: /tickets/*
+Disallow: /invoices
+Disallow: /invoices/
+Disallow: /invoices/*
+Disallow: /users
+Disallow: /users/
+Disallow: /users/*
+Disallow: /clients
+Disallow: /clients/
+Disallow: /clients/*
+Disallow: /account
+Disallow: /account/
+Disallow: /account/*
+Disallow: /settings
+Disallow: /settings/
+Disallow: /settings/*
 
 # =====================================================
 # BLOQUEAR RUTAS CONTEXTUALES DE USUARIO
-# Ejemplo: /@cristian/facturas
+# Ejemplo:
+# - /@cristian
+# - /@cristian/facturas
+# - /@cliente/incidencias
 # =====================================================
-Disallow: /@*/
+Disallow: /@
+Disallow: /@/
+Disallow: /@*
+
+# =====================================================
+# BLOQUEAR URLS CON TOKENS / PARÁMETROS SENSIBLES
+# =====================================================
+Disallow: /*?token=
+Disallow: /*&token=
+Disallow: /*?activationToken=
+Disallow: /*&activationToken=
+Disallow: /*?activateToken=
+Disallow: /*&activateToken=
+Disallow: /*?resetToken=
+Disallow: /*&resetToken=
+Disallow: /*?passwordResetToken=
+Disallow: /*&passwordResetToken=
+Disallow: /*?access_token=
+Disallow: /*&access_token=
+Disallow: /*?refresh_token=
+Disallow: /*&refresh_token=
+Disallow: /*?id_token=
+Disallow: /*&id_token=
+Disallow: /*?code=
+Disallow: /*&code=
+Disallow: /*?t=
+Disallow: /*&t=
 
 # =====================================================
 # SITEMAP

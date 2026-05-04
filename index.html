@@ -15,12 +15,14 @@
        Archivo: /index.html
 
        PRO SAAS PANEL · SPA PRIVATE APP · BOOT LOADER READY
-       CSP CLEAN · ZERO INLINE JS/CSS · FINAL 10/10
+       CSP CLEAN · ZERO INLINE JS/CSS · NO EXTERNAL FONTS
+       FINAL EXTREME 10/10
 
        OBJETIVOS:
        - shell SPA privado, no landing pública
        - sin scripts inline
        - sin CSS inline
+       - sin Google Fonts / fonts.gstatic / dependencias externas
        - theme system-first con preboot externo
        - loader estático visible desde refresh
        - sidebar/topbar montados por JS
@@ -36,6 +38,7 @@
        - /src/preboot/theme.js no debe contener <script>.
        - /src/preboot/theme.js no debe contener HTML.
        - index.html debe empezar siempre por <!DOCTYPE html>.
+       - Las fuentes se resuelven por variables.css con system-ui.
   ========================================================= -->
 
   <!-- =========================
@@ -133,25 +136,9 @@
   <base href="/">
 
   <!-- =========================
-       PWA / MANIFEST
-       Mantener si existen estos ficheros.
-  ========================= -->
-  <link
-    rel="manifest"
-    href="/site.webmanifest"
-  >
-
-  <link
-    rel="alternate"
-    type="application/xml"
-    href="/sitemap.xml"
-    title="Onion Support Sitemap"
-  >
-
-  <!-- =========================
-       FAVICON REAL DE PESTAÑA
-       No preload del favicon real:
-       Chrome puede advertir que no se usa inmediatamente.
+       FAVICON / APP ICONS
+       Sin manifest hasta crear /site.webmanifest real.
+       Esto evita el 404 visto en consola.
   ========================= -->
   <link
     rel="icon"
@@ -171,30 +158,12 @@
   >
 
   <!-- =========================
-       PERFORMANCE · CONNECTIONS
+       PERFORMANCE · APP ASSETS
+       Sin preconnect/dns-prefetch a Google Fonts.
+       Sin fuentes externas.
   ========================= -->
-  <link
-    rel="preconnect"
-    href="https://fonts.googleapis.com"
-  >
 
-  <link
-    rel="preconnect"
-    href="https://fonts.gstatic.com"
-    crossorigin
-  >
-
-  <link
-    rel="dns-prefetch"
-    href="https://fonts.googleapis.com"
-  >
-
-  <link
-    rel="dns-prefetch"
-    href="https://fonts.gstatic.com"
-  >
-
-  <!-- Loader logos: sí se usan como imágenes reales -->
+  <!-- Loader logos: se usan inmediatamente en el boot loader -->
   <link
     rel="preload"
     href="/src/media/img/favicon_white.png"
@@ -211,17 +180,10 @@
     fetchpriority="high"
   >
 
+  <!-- Entrada principal SPA -->
   <link
     rel="modulepreload"
     href="/src/main.js"
-  >
-
-  <!-- =========================
-       FONTS
-  ========================= -->
-  <link
-    rel="stylesheet"
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
   >
 
   <!-- =========================
@@ -237,6 +199,12 @@
 
   <!-- =========================
        CSS ORDER
+       Orden estable:
+       1. tokens
+       2. theme overrides
+       3. reset/core/layout
+       4. shell components
+       5. auth/public technical views
   ========================= -->
 
   <!-- TOKENS -->

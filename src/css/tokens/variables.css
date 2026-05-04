@@ -1,20 +1,36 @@
-:root{
+/* =========================================================
+   ONION SUPPORT — VARIABLES.CSS
+   DESIGN TOKENS · DARK BASE · FINAL EXTREME 10/10
+   APPLE STYLE / PRO SAAS PANEL / GOD MODE
+
+   Archivo:
+   src/css/variables.css
+
+   OBJETIVO:
+   - Tokens base globales
+   - Dark theme por defecto
+   - Sin [data-theme="light"]
+   - Sin overrides light
+   - Light theme debe vivir en su propio CSS
+   - Sidebar, topbar, cards, tablas, inputs, loader, modal
+   - Sistema centralizado para evitar :root locales
+   - Compatible con tokens legacy usados por módulos existentes
+
+   REGLA:
+   - variables.css = base / dark / aliases / estructura global
+   - light.css     = overrides [data-theme="light"]
+   - component.css = consume tokens, no redefine sistema global
+========================================================= */
+
+
+/* =========================================================
+   ROOT · DARK BASE
+========================================================= */
+
+:root {
   /* =========================================================
-     ONION SUPPORT — DESIGN TOKENS / ULTRA PRO SAAS PANEL
-     FINAL MASTER TOKENS / COPY-PASTE FULL
-
-     CALIBRADO PARA:
-     - 100% visual más cerca de tu 90% ideal
-     - dashboard premium serio
-     - mejor densidad operativa
-     - shell más compacta
-     - lectura limpia
-     - menos hero ui, más control center
-  ========================================================= */
-
-  /* =========================
      APP IDENTITY
-  ========================= */
+  ========================================================= */
   --app-name: "Onion Support";
 
   --app-font-sans:
@@ -24,89 +40,60 @@
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
+    Roboto,
+    Helvetica,
+    Arial,
     sans-serif;
 
   --app-font-mono:
     "SFMono-Regular",
+    "SF Mono",
     Consolas,
     "Liberation Mono",
     Menlo,
     Monaco,
     monospace;
 
-  /* =========================
-     GLOBAL UI SCALE / DENSITY
-     100% visual ~= 90% actual
-  ========================= */
+  --font-family: var(--app-font-sans);
+  --font-family-mono: var(--app-font-mono);
+
+
+  /* =========================================================
+     GLOBAL SCALE / DENSITY
+  ========================================================= */
   --ui-scale: .97;
   --density-factor: .93;
 
-  /* =========================
-     LAYOUT
-  ========================= */
-  --content-max: 1340px;
-  --content-narrow: 1140px;
+  --density-compact-factor: .90;
+  --density-normal-factor: .93;
+  --density-comfortable-factor: 1;
 
-  --content-padding: calc(22px * var(--ui-scale));
-  --content-padding-lg: calc(28px * var(--ui-scale));
-  --content-padding-xl: calc(36px * var(--ui-scale));
 
-  --sidebar-width: calc(252px * var(--ui-scale));
-  --sidebar-collapsed: calc(72px * var(--ui-scale));
-  --sidebar-item-height: calc(40px * var(--ui-scale));
-  --sidebar-icon-size: calc(18px * var(--ui-scale));
-  --sidebar-item-padding-x: calc(11px * var(--ui-scale));
-  --sidebar-icon-offset: calc(
-    var(--sidebar-item-padding-x) + (var(--sidebar-icon-size) / 2)
-  );
-
-  --topbar-height: calc(54px * var(--ui-scale));
-  --page-offset: calc(20px * var(--ui-scale));
-  --tablehead-height: calc(42px * var(--ui-scale));
-
-  --view-radius: calc(20px * var(--ui-scale));
-  --panel-radius: calc(17px * var(--ui-scale));
-  --card-radius: calc(18px * var(--ui-scale));
-  --card-radius-lg: calc(22px * var(--ui-scale));
-  --modal-radius: calc(22px * var(--ui-scale));
-  --dropdown-radius: calc(15px * var(--ui-scale));
-  --input-radius: calc(13px * var(--ui-scale));
-  --btn-radius: calc(13px * var(--ui-scale));
-
-  --app-offset: calc(
-    var(--topbar-height) + var(--tablehead-height)
-  );
-
-  /* =========================
-     SAFE AREAS / SHELL
-  ========================= */
+  /* =========================================================
+     SAFE AREAS
+  ========================================================= */
   --app-safe-top: env(safe-area-inset-top, 0px);
   --app-safe-right: env(safe-area-inset-right, 0px);
   --app-safe-bottom: env(safe-area-inset-bottom, 0px);
   --app-safe-left: env(safe-area-inset-left, 0px);
 
-  --app-sidebar-current-width: var(--sidebar-width);
 
-  --app-offset-topbar: calc(
-    var(--topbar-height) + var(--app-safe-top)
-  );
+  /* =========================================================
+     BREAKPOINTS
+  ========================================================= */
+  --breakpoint-xs: 390px;
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
 
-  --app-offset-tablehead: 0px;
 
-  --content-padding-inline: var(--content-padding);
-  --content-padding-block: var(--space-md);
-
-  --shell-blur: var(--blur-lg);
-  --shell-border: var(--border-soft);
-
-  --shell-surface:
-    linear-gradient(180deg, rgba(255,255,255,.016), rgba(255,255,255,.006)),
-    transparent;
-
-  /* =========================
-     Z-INDEX
-  ========================= */
+  /* =========================================================
+     Z-INDEX SYSTEM
+  ========================================================= */
   --z-base: 1;
+  --z-content: 5;
   --z-topbar: 30;
   --z-sidebar: 40;
   --z-dropdown: 50;
@@ -114,12 +101,141 @@
   --z-overlay: 60;
   --z-tooltip: 70;
   --z-modal: 80;
+  --z-drawer: 85;
   --z-toast: 100;
   --z-loader: 9999;
 
-  /* =========================
-     BRAND SYSTEM
-  ========================= */
+
+  /* =========================================================
+     LAYOUT SYSTEM
+  ========================================================= */
+  --content-max: 1340px;
+  --content-narrow: 1140px;
+  --content-wide: 1480px;
+
+  --content-padding: calc(22px * var(--ui-scale));
+  --content-padding-lg: calc(28px * var(--ui-scale));
+  --content-padding-xl: calc(36px * var(--ui-scale));
+
+  --content-padding-inline: var(--content-padding);
+  --content-padding-block: var(--space-md);
+
+  --page-offset: calc(20px * var(--ui-scale));
+
+  --topbar-height: calc(54px * var(--ui-scale));
+  --tablehead-height: calc(42px * var(--ui-scale));
+
+  --sidebar-width: calc(252px * var(--ui-scale));
+  --sidebar-collapsed: calc(72px * var(--ui-scale));
+  --sidebar-mobile-width: min(86vw, calc(300px * var(--ui-scale)));
+  --sidebar-mobile-width-xs: min(92vw, calc(300px * var(--ui-scale)));
+
+  --app-sidebar-current-width: var(--sidebar-width);
+
+  --app-offset: calc(
+    var(--topbar-height) + var(--tablehead-height)
+  );
+
+  --app-offset-topbar: calc(
+    var(--topbar-height) + var(--app-safe-top)
+  );
+
+  --app-offset-tablehead: 0px;
+
+  --mobile-bottom-nav-height: 0px;
+  --mobile-shell-padding: var(--space-sm);
+  --mobile-content-padding: var(--space-sm);
+
+  --tablet-content-padding: var(--space-md);
+  --desktop-content-padding: var(--content-padding);
+
+
+  /* =========================================================
+     RADIUS SYSTEM
+  ========================================================= */
+  --radius-2xs: calc(5px * var(--ui-scale));
+  --radius-xs: calc(7px * var(--ui-scale));
+  --radius-sm: calc(10px * var(--ui-scale));
+  --radius-md: calc(13px * var(--ui-scale));
+  --radius-lg: calc(16px * var(--ui-scale));
+  --radius-xl: calc(18px * var(--ui-scale));
+  --radius-2xl: calc(22px * var(--ui-scale));
+  --radius-3xl: calc(28px * var(--ui-scale));
+  --radius-4xl: calc(34px * var(--ui-scale));
+  --radius-pill: 999px;
+
+  --view-radius: calc(20px * var(--ui-scale));
+  --panel-radius: calc(17px * var(--ui-scale));
+  --card-radius: calc(18px * var(--ui-scale));
+  --card-radius-lg: calc(22px * var(--ui-scale));
+  --modal-radius: calc(22px * var(--ui-scale));
+  --drawer-radius: calc(22px * var(--ui-scale));
+  --dropdown-radius: calc(15px * var(--ui-scale));
+  --input-radius: calc(13px * var(--ui-scale));
+  --btn-radius: calc(13px * var(--ui-scale));
+
+
+  /* =========================================================
+     SPACING SYSTEM
+  ========================================================= */
+  --space-3xs: calc(2px * var(--density-factor) * var(--ui-scale));
+  --space-2xs: calc(4px * var(--density-factor) * var(--ui-scale));
+  --space-xs: calc(8px * var(--density-factor) * var(--ui-scale));
+  --space-sm: calc(12px * var(--density-factor) * var(--ui-scale));
+  --space-md: calc(16px * var(--density-factor) * var(--ui-scale));
+  --space-lg: calc(20px * var(--density-factor) * var(--ui-scale));
+  --space-xl: calc(24px * var(--density-factor) * var(--ui-scale));
+  --space-2xl: calc(28px * var(--density-factor) * var(--ui-scale));
+  --space-3xl: calc(34px * var(--density-factor) * var(--ui-scale));
+  --space-4xl: calc(44px * var(--density-factor) * var(--ui-scale));
+  --space-5xl: calc(56px * var(--density-factor) * var(--ui-scale));
+
+  --space-dynamic-xs: var(--space-xs);
+  --space-dynamic-sm: var(--space-sm);
+  --space-dynamic-md: var(--space-md);
+  --space-dynamic-lg: var(--space-lg);
+  --space-dynamic-xl: var(--space-xl);
+
+  --section-gap: var(--space-lg);
+  --stack-gap: var(--space-md);
+  --cluster-gap: var(--space-sm);
+
+
+  /* =========================================================
+     TYPOGRAPHY SYSTEM
+  ========================================================= */
+  --font-2xs: calc(10px * var(--ui-scale));
+  --font-xs: calc(11px * var(--ui-scale));
+  --font-sm: calc(12px * var(--ui-scale));
+  --font-md: calc(13px * var(--ui-scale));
+  --font-base: calc(14px * var(--ui-scale));
+  --font-lg: calc(15px * var(--ui-scale));
+  --font-xl: calc(16px * var(--ui-scale));
+  --font-2xl: calc(19px * var(--ui-scale));
+  --font-3xl: calc(24px * var(--ui-scale));
+  --font-4xl: calc(32px * var(--ui-scale));
+  --font-5xl: calc(40px * var(--ui-scale));
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --weight-black: 800;
+
+  --line-tight: 1.08;
+  --line-snug: 1.22;
+  --line-normal: 1.42;
+  --line-relaxed: 1.62;
+
+  --letter-tight: -0.03em;
+  --letter-normal: 0;
+  --letter-wide: 0.02em;
+  --letter-wider: 0.08em;
+
+
+  /* =========================================================
+     BRAND SYSTEM · DARK
+  ========================================================= */
   --accent: #3f3f46;
   --accent-hover: #4b4b52;
   --accent-active: #2f2f35;
@@ -139,6 +255,15 @@
   --accent-glow: rgba(63,63,70,.20);
   --accent-glow-strong: rgba(63,63,70,.30);
 
+  --accent-contrast: #ffffff;
+
+  --brand: var(--accent);
+  --brand-hover: var(--accent-hover);
+  --brand-active: var(--accent-active);
+  --brand-soft: var(--accent-soft);
+  --brand-ring: var(--accent-ring);
+  --brand-border: var(--accent-border);
+
   --brand-2: #3f3f46;
   --brand-2-soft: rgba(63,63,70,.14);
 
@@ -151,9 +276,10 @@
   --brand-5: #a1a1aa;
   --brand-5-soft: rgba(161,161,170,.14);
 
-  /* =========================
-     MAIN BACKGROUND / ATMOSPHERE
-  ========================= */
+
+  /* =========================================================
+     BACKGROUND / ATMOSPHERE · DARK
+  ========================================================= */
   --main-bg: #1f1f1f;
   --main-bg-2: #232323;
   --main-bg-3: #282828;
@@ -196,9 +322,10 @@
   --glass-shine:
     linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,0) 32%);
 
-  /* =========================
-     SURFACE SYSTEM
-  ========================= */
+
+  /* =========================================================
+     SURFACE SYSTEM · DARK
+  ========================================================= */
   --surface-0: #1f1f1f;
   --surface-1: #262626;
   --surface-2: #2b2b2b;
@@ -206,8 +333,15 @@
   --surface-4: #383838;
   --surface-5: #424242;
 
+  --surface: var(--surface-1);
+  --surface-soft: var(--surface-2);
+  --surface-strong: var(--surface-3);
+
   --surface-elevated: rgba(39,39,42,.88);
   --surface-elevated-strong: rgba(44,44,48,.94);
+
+  --surface-raised: var(--surface-elevated);
+  --surface-raised-strong: var(--surface-elevated-strong);
 
   --surface-glass: rgba(255,255,255,.030);
   --surface-glass-strong: rgba(255,255,255,.048);
@@ -220,15 +354,19 @@
   --surface-disabled: rgba(255,255,255,.018);
 
   --dropdown-bg: rgba(38,38,40,.98);
-  --tooltip-bg: #242427;
-  --tooltip-text: #ffffff;
+  --dropdown-bg-legacy: var(--dropdown-bg);
+
   --popover-bg: rgba(38,38,40,.98);
   --modal-bg: rgba(32,32,35,.96);
+  --drawer-bg: rgba(32,32,35,.96);
+  --tooltip-bg: #242427;
+  --tooltip-text: #ffffff;
   --backdrop-bg: rgba(10,10,12,.68);
 
-  /* =========================
-     BORDER SYSTEM
-  ========================= */
+
+  /* =========================================================
+     BORDER SYSTEM · DARK
+  ========================================================= */
   --border-soft: rgba(255,255,255,.05);
   --border-default: rgba(255,255,255,.082);
   --border-strong: rgba(255,255,255,.12);
@@ -242,9 +380,10 @@
   --border-error: rgba(239,68,68,.30);
   --border-info: rgba(148,163,184,.28);
 
-  /* =========================
-     TEXT SYSTEM
-  ========================= */
+
+  /* =========================================================
+     TEXT SYSTEM · DARK
+  ========================================================= */
   --text: #f5f5f5;
   --text-strong: #ffffff;
   --text-soft: rgba(245,245,245,.88);
@@ -252,6 +391,11 @@
   --text-dim: rgba(245,245,245,.50);
   --text-faint: rgba(245,245,245,.34);
   --text-disabled: rgba(245,245,245,.22);
+
+  --text-primary: var(--text);
+  --text-secondary: var(--text-muted);
+  --text-tertiary: var(--text-dim);
+  --text-quaternary: var(--text-faint);
 
   --text-on-accent: #ffffff;
   --text-on-light: #18181b;
@@ -262,32 +406,130 @@
   --muted: var(--text-muted);
   --dim: var(--text-dim);
 
-  /* =========================
-     STATUS SYSTEM
-  ========================= */
+
+  /* =========================================================
+     STATUS SYSTEM · DARK
+  ========================================================= */
   --success: #22c55e;
   --success-hover: #16a34a;
   --success-soft: rgba(34,197,94,.14);
   --success-bg: rgba(34,197,94,.10);
+  --success-strong: var(--success);
 
   --warning: #f59e0b;
   --warning-hover: #d97706;
   --warning-soft: rgba(245,158,11,.14);
   --warning-bg: rgba(245,158,11,.10);
+  --warning-strong: var(--warning);
 
   --error: #ef4444;
   --error-hover: #dc2626;
   --error-soft: rgba(239,68,68,.14);
   --error-bg: rgba(239,68,68,.10);
 
+  --danger: var(--error);
+  --danger-hover: var(--error-hover);
+  --danger-soft: var(--error-soft);
+  --danger-bg: var(--error-bg);
+  --danger-border: var(--border-error);
+  --danger-strong: var(--error);
+
   --info: #94a3b8;
   --info-hover: #cbd5e1;
   --info-soft: rgba(148,163,184,.14);
   --info-bg: rgba(148,163,184,.10);
+  --info-strong: var(--info);
 
-  /* =========================
+  --positive: var(--success);
+  --positive-hover: var(--success-hover);
+  --positive-soft: var(--success-soft);
+  --positive-bg: var(--success-bg);
+  --positive-border: var(--border-success);
+
+  --neutral: var(--accent-3);
+  --neutral-soft: rgba(148,163,184,.14);
+  --neutral-bg: rgba(148,163,184,.10);
+  --neutral-border: rgba(148,163,184,.24);
+
+
+  /* =========================================================
+     SHADOW SYSTEM · DARK
+  ========================================================= */
+  --shadow-xs: 0 2px 8px rgba(0,0,0,.12);
+  --shadow-sm: 0 6px 14px rgba(0,0,0,.16);
+  --shadow-md: 0 14px 30px rgba(0,0,0,.22);
+  --shadow-lg: 0 20px 46px rgba(0,0,0,.28);
+  --shadow-xl: 0 28px 72px rgba(0,0,0,.36);
+
+  --shadow-soft: 0 8px 18px rgba(0,0,0,.13);
+  --shadow-strong: 0 24px 64px rgba(0,0,0,.38);
+
+  --shadow-card:
+    0 16px 36px rgba(0,0,0,.24);
+
+  --shadow-panel:
+    0 8px 20px rgba(0,0,0,.14);
+
+  --shadow-dropdown:
+    0 22px 54px rgba(0,0,0,.34),
+    0 8px 18px rgba(0,0,0,.20);
+
+  --shadow-modal:
+    0 34px 84px rgba(0,0,0,.40);
+
+  --shadow-glow:
+    0 0 0 1px rgba(255,255,255,.025),
+    0 16px 36px rgba(0,0,0,.16);
+
+  --shadow-glow-cyan:
+    0 0 0 1px rgba(255,255,255,.02),
+    0 16px 36px rgba(0,0,0,.14);
+
+  --shadow-inner:
+    inset 0 1px 0 rgba(255,255,255,.04);
+
+
+  /* =========================================================
+     BLUR / MOTION
+  ========================================================= */
+  --blur-sm: blur(8px);
+  --blur-md: blur(12px);
+  --blur-lg: blur(18px);
+  --blur-xl: blur(24px);
+
+  --ease-out: cubic-bezier(.22,1,.36,1);
+  --ease-in: cubic-bezier(.4,0,1,1);
+  --ease-standard: cubic-bezier(.2,.8,.2,1);
+  --ease-emphasis: cubic-bezier(.16,1,.3,1);
+
+  --duration-fast: .12s;
+  --duration-normal: .20s;
+  --duration-slow: .30s;
+  --duration-xslow: .42s;
+
+
+  /* =========================================================
+     FOCUS / SELECTION
+  ========================================================= */
+  --focus-ring: 0 0 0 4px rgba(113,113,122,.16);
+  --focus-ring-strong: 0 0 0 4px rgba(113,113,122,.24);
+
+  --selection-bg: rgba(113,113,122,.28);
+  --selection-text: #ffffff;
+
+
+  /* =========================================================
+     SCROLLBAR
+  ========================================================= */
+  --scrollbar-size: 10px;
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(255,255,255,.12);
+  --scrollbar-thumb-hover: rgba(255,255,255,.18);
+
+
+  /* =========================================================
      CARD / PANEL / BLOCK
-  ========================= */
+  ========================================================= */
   --card-bg:
     linear-gradient(180deg, rgba(255,255,255,.020) 0%, rgba(255,255,255,.008) 100%),
     var(--surface-elevated);
@@ -299,7 +541,7 @@
   --card-border: var(--border-default);
   --card-border-hover: var(--border-strong);
   --card-highlight: inset 0 1px 0 rgba(255,255,255,.045);
-  --card-shadow: 0 16px 36px rgba(0,0,0,.24);
+  --card-shadow: var(--shadow-card);
 
   --panel-bg:
     linear-gradient(180deg, rgba(255,255,255,.018) 0%, rgba(255,255,255,.008) 100%),
@@ -311,15 +553,16 @@
 
   --panel-border: var(--border-soft);
   --panel-border-hover: var(--border-default);
-  --panel-shadow: 0 8px 20px rgba(0,0,0,.14);
+  --panel-shadow: var(--shadow-panel);
 
   --block-bg: rgba(255,255,255,.022);
   --block-bg-hover: rgba(255,255,255,.036);
   --block-border: rgba(255,255,255,.052);
 
-  /* =========================
+
+  /* =========================================================
      INPUT SYSTEM
-  ========================= */
+  ========================================================= */
   --input-height: calc(44px * var(--ui-scale));
   --input-height-sm: calc(36px * var(--ui-scale));
   --input-height-lg: calc(50px * var(--ui-scale));
@@ -349,21 +592,26 @@
     0 0 0 4px rgba(113,113,122,.14),
     0 10px 24px rgba(10,10,12,.22);
 
-  /* =========================
+
+  /* =========================================================
      BUTTON SYSTEM
-  ========================= */
+  ========================================================= */
   --btn-height: calc(42px * var(--ui-scale));
   --btn-height-sm: calc(34px * var(--ui-scale));
   --btn-height-lg: calc(48px * var(--ui-scale));
 
   --btn-primary-bg:
     linear-gradient(180deg, #4a4a51 0%, #3f3f46 100%);
+
   --btn-primary-bg-hover:
     linear-gradient(180deg, #55555d 0%, #48484f 100%);
+
   --btn-primary-bg-active:
     linear-gradient(180deg, #3f3f46 0%, #2f2f35 100%);
+
   --btn-primary-text: #ffffff;
   --btn-primary-border: rgba(255,255,255,.05);
+
   --btn-primary-shadow:
     0 12px 28px rgba(0,0,0,.22),
     inset 0 1px 0 rgba(255,255,255,.10);
@@ -383,53 +631,159 @@
 
   --btn-danger-bg:
     linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+
   --btn-danger-bg-hover:
     linear-gradient(180deg, #f05252 0%, #b91c1c 100%);
+
   --btn-danger-bg-active:
     linear-gradient(180deg, #dc2626 0%, #991b1b 100%);
+
   --btn-danger-text: #ffffff;
+
   --btn-danger-shadow:
     0 10px 24px rgba(239,68,68,.20),
     inset 0 1px 0 rgba(255,255,255,.10);
 
-  /* =========================
-     SIDEBAR
-  ========================= */
-  --sidebar-bg: rgba(30,30,32,.94);
-  --sidebar-bg-strong: rgba(26,26,28,.98);
-  --sidebar-border: rgba(255,255,255,.055);
-  --sidebar-shadow: 0 20px 48px rgba(0,0,0,.30);
 
-  --sidebar-hover: rgba(255,255,255,.038);
-  --sidebar-active: rgba(255,255,255,.062);
-  --sidebar-active-hover: rgba(255,255,255,.080);
-  --sidebar-active-border: rgba(255,255,255,.08);
+  /* =========================================================
+     SIDEBAR SYSTEM · DARK BASE
+  ========================================================= */
+  --sidebar-bg:
+    linear-gradient(180deg, rgba(255,255,255,.018), rgba(255,255,255,.006)),
+    rgba(30,30,32,.94);
+
+  --sidebar-bg-strong:
+    linear-gradient(180deg, rgba(255,255,255,.026), rgba(255,255,255,.008)),
+    rgba(26,26,28,.98);
+
+  --sidebar-border: rgba(255,255,255,.055);
+
+  --sidebar-shadow:
+    0 20px 48px rgba(0,0,0,.30),
+    inset -1px 0 0 rgba(255,255,255,.020);
+
+  --sidebar-hover:
+    linear-gradient(180deg, rgba(255,255,255,.046), rgba(255,255,255,.030));
+
+  --sidebar-active:
+    linear-gradient(180deg, rgba(255,255,255,.072), rgba(255,255,255,.046));
+
+  --sidebar-active-hover:
+    linear-gradient(180deg, rgba(255,255,255,.092), rgba(255,255,255,.060));
+
+  --sidebar-active-border: rgba(255,255,255,.10);
 
   --sidebar-text: rgba(245,245,245,.76);
   --sidebar-text-active: #ffffff;
   --sidebar-icon: rgba(245,245,245,.60);
   --sidebar-icon-active: #ffffff;
 
-  --sidebar-safe-top: env(safe-area-inset-top, 0px);
-  --sidebar-safe-right: env(safe-area-inset-right, 0px);
-  --sidebar-safe-bottom: env(safe-area-inset-bottom, 0px);
-  --sidebar-safe-left: env(safe-area-inset-left, 0px);
+  --sidebar-safe-top: var(--app-safe-top);
+  --sidebar-safe-right: var(--app-safe-right);
+  --sidebar-safe-bottom: var(--app-safe-bottom);
+  --sidebar-safe-left: var(--app-safe-left);
 
   --sidebar-top-height: calc(60px * var(--ui-scale));
   --sidebar-inline-padding: calc(9px * var(--ui-scale));
   --sidebar-section-gap: calc(4px * var(--ui-scale));
 
+  --sidebar-radius: 0;
+  --sidebar-logo-size: calc(34px * var(--ui-scale));
+  --sidebar-logo-radius: calc(12px * var(--ui-scale));
+
+  --sidebar-item-height: calc(40px * var(--ui-scale));
+  --sidebar-item-padding-x: calc(11px * var(--ui-scale));
+  --sidebar-item-radius: calc(12px * var(--ui-scale));
+  --sidebar-item-gap: calc(10px * var(--ui-scale));
+
+  --sidebar-icon-size: calc(18px * var(--ui-scale));
+  --sidebar-icon-offset: calc(
+    var(--sidebar-item-padding-x) + (var(--sidebar-icon-size) / 2)
+  );
+
+  --sidebar-item-font-size: var(--font-md);
+  --sidebar-item-font-weight: var(--weight-medium);
+
+  --sidebar-group-title-size: var(--font-xs);
+  --sidebar-group-title-color: var(--text-faint);
+  --sidebar-group-title-letter: .08em;
+
+  --sidebar-footer-height: calc(68px * var(--ui-scale));
+
+  --sidebar-footer-bg:
+    linear-gradient(180deg, rgba(255,255,255,.020), rgba(255,255,255,.010)),
+    rgba(255,255,255,.018);
+
+  --sidebar-footer-border: var(--sidebar-border);
+
+  --sidebar-user-avatar-size: calc(34px * var(--ui-scale));
+  --sidebar-user-name-size: var(--font-md);
+  --sidebar-user-role-size: var(--font-xs);
+
   --sidebar-tooltip-offset: calc(11px * var(--ui-scale));
   --sidebar-tooltip-arrow-offset: calc(8px * var(--ui-scale));
+  --sidebar-tooltip-bg: var(--tooltip-bg);
+  --sidebar-tooltip-text: var(--tooltip-text);
+  --sidebar-tooltip-shadow: var(--shadow-lg);
 
+  --sidebar-mobile-backdrop: rgba(0,0,0,.46);
+
+  --sb-bg: var(--sidebar-bg);
+  --sb-hover: var(--sidebar-hover);
+  --sb-active: var(--sidebar-active);
+  --sb-border: var(--sidebar-border);
+
+
+  /* =========================================================
+     SIDEBAR USER DROPDOWN · DARK BASE
+  ========================================================= */
   --sidebar-dropdown-bottom: calc(60px * var(--ui-scale));
-  --sidebar-mobile-width: min(86vw, calc(300px * var(--ui-scale)));
-  --sidebar-mobile-width-xs: min(92vw, calc(300px * var(--ui-scale)));
+  --sidebar-dropdown-inset: calc(14px * var(--ui-scale));
+  --sidebar-dropdown-padding: calc(12px * var(--ui-scale));
+  --sidebar-dropdown-radius: calc(var(--dropdown-radius) + 4px);
 
-  /* =========================
-     TOPBAR
-  ========================= */
-  --topbar-bg: rgba(31,31,31,.78);
+  --sidebar-dropdown-bg:
+    radial-gradient(circle at 14% 0%, rgba(255,255,255,.055), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.070), rgba(255,255,255,.026)),
+    rgba(34,34,37,.985);
+
+  --sidebar-dropdown-border: rgba(255,255,255,.085);
+
+  --sidebar-dropdown-shadow:
+    0 22px 54px rgba(0,0,0,.34),
+    0 8px 18px rgba(0,0,0,.20),
+    inset 0 1px 0 rgba(255,255,255,.075);
+
+  --sidebar-dropdown-text: rgba(245,245,245,.86);
+  --sidebar-dropdown-text-strong: #ffffff;
+  --sidebar-dropdown-text-muted: rgba(245,245,245,.58);
+  --sidebar-dropdown-icon: rgba(245,245,245,.62);
+
+  --sidebar-dropdown-item-height: calc(42px * var(--ui-scale));
+  --sidebar-dropdown-item-radius: calc(12px * var(--ui-scale));
+  --sidebar-dropdown-item-padding-x: calc(12px * var(--ui-scale));
+  --sidebar-dropdown-item-gap: calc(12px * var(--ui-scale));
+
+  --sidebar-dropdown-item-hover:
+    linear-gradient(180deg, rgba(255,255,255,.070), rgba(255,255,255,.040));
+
+  --sidebar-dropdown-item-active:
+    linear-gradient(180deg, rgba(255,255,255,.095), rgba(255,255,255,.052));
+
+  --sidebar-dropdown-separator: rgba(255,255,255,.080);
+
+  --sidebar-dropdown-danger: #ff5c6c;
+  --sidebar-dropdown-danger-bg: rgba(255,92,108,.105);
+  --sidebar-dropdown-danger-hover: rgba(255,92,108,.145);
+
+
+  /* =========================================================
+     TOPBAR SYSTEM · DARK BASE
+  ========================================================= */
+  --topbar-bg:
+    linear-gradient(180deg, rgba(255,255,255,.018), rgba(255,255,255,.006)),
+    rgba(31,31,31,.78);
+
   --topbar-border: rgba(255,255,255,.055);
   --topbar-shadow: 0 10px 24px rgba(0,0,0,.16);
   --topbar-blur: blur(16px);
@@ -440,19 +794,38 @@
 
   --topbar-inline-padding: var(--space-sm);
 
+  --topbar-button-size: calc(36px * var(--ui-scale));
+  --topbar-button-radius: calc(12px * var(--ui-scale));
+  --topbar-button-bg: rgba(255,255,255,.026);
+  --topbar-button-bg-hover: rgba(255,255,255,.048);
+  --topbar-button-border: rgba(255,255,255,.060);
+
+  --topbar-title-size: var(--font-lg);
+  --topbar-title-weight: var(--weight-bold);
+  --topbar-subtitle-size: var(--font-xs);
+
   --topbar-search-height: calc(38px * var(--ui-scale));
   --topbar-search-max-width: calc(440px * var(--ui-scale));
   --topbar-search-radius: 999px;
 
+  --topbar-search-bg: rgba(255,255,255,.030);
+  --topbar-search-bg-hover: rgba(255,255,255,.044);
+  --topbar-search-bg-focus: rgba(255,255,255,.052);
+  --topbar-search-border: rgba(255,255,255,.075);
+
   --topbar-search-results-offset: calc(8px * var(--ui-scale));
   --topbar-search-results-max-height: calc(300px * var(--ui-scale));
+  --topbar-search-result-bg: var(--dropdown-bg);
+  --topbar-search-result-border: var(--border-default);
+  --topbar-search-result-shadow: var(--shadow-xl);
 
   --topbar-overlay-accent: rgba(255,255,255,.018);
   --topbar-overlay-shine: rgba(255,255,255,.030);
 
-  /* =========================
-     TABLES / DATA UI
-  ========================= */
+
+  /* =========================================================
+     TABLE / DATA UI
+  ========================================================= */
   --table-bg: transparent;
   --table-head-bg: rgba(255,255,255,.020);
   --table-row-bg: transparent;
@@ -467,9 +840,32 @@
   --table-cell-padding-y-compact: calc(7px * var(--ui-scale));
   --table-cell-padding-x-compact: calc(9px * var(--ui-scale));
 
-  /* =========================
+  --data-table-radius: var(--card-radius);
+  --data-table-bg: var(--card-bg);
+  --data-table-border: var(--card-border);
+  --data-table-shadow: var(--shadow-sm);
+
+  --data-table-head-bg: var(--table-head-bg);
+  --data-table-head-text: var(--text-dim);
+  --data-table-head-font-size: var(--font-xs);
+  --data-table-head-font-weight: var(--weight-bold);
+  --data-table-head-letter: .075em;
+
+  --data-table-row-height: calc(54px * var(--ui-scale));
+  --data-table-row-border: var(--table-border);
+  --data-table-row-hover: var(--table-row-hover);
+  --data-table-row-selected: var(--table-row-selected);
+
+  --data-table-cell-text: var(--text-soft);
+  --data-table-cell-muted: var(--text-dim);
+
+  --data-table-action-size: calc(32px * var(--ui-scale));
+  --data-table-action-radius: calc(10px * var(--ui-scale));
+
+
+  /* =========================================================
      KPI COLORS
-  ========================= */
+  ========================================================= */
   --color-iva: #eab308;
   --color-iva-glow: rgba(234,179,8,.22);
 
@@ -485,14 +881,22 @@
   --color-facturacion: #94a3b8;
   --color-facturacion-glow: rgba(148,163,184,.22);
 
-  /* =========================
+
+  /* =========================================================
      AVATAR / BADGES / CHIPS
-  ========================= */
+  ========================================================= */
   --avatar-bg:
     linear-gradient(180deg, #52525b 0%, #3f3f46 100%);
+
   --avatar-bg-2:
     linear-gradient(180deg, #71717a 0%, #52525b 100%);
+
   --avatar-text: #ffffff;
+
+  --sidebar-avatar-bg: var(--avatar-bg);
+  --sidebar-avatar-text: var(--avatar-text);
+  --user-avatar-bg: var(--avatar-bg);
+  --user-avatar-text: var(--avatar-text);
 
   --avatar-size-xs: calc(22px * var(--ui-scale));
   --avatar-size-sm: calc(28px * var(--ui-scale));
@@ -510,143 +914,40 @@
   --chip-height: calc(26px * var(--ui-scale));
   --chip-height-sm: calc(22px * var(--ui-scale));
 
-  /* =========================
-     TYPOGRAPHY
-  ========================= */
-  --font-family: var(--app-font-sans);
-  --font-family-mono: var(--app-font-mono);
 
-  --font-xs: calc(11px * var(--ui-scale));
-  --font-sm: calc(12px * var(--ui-scale));
-  --font-md: calc(13px * var(--ui-scale));
-  --font-base: calc(14px * var(--ui-scale));
-  --font-lg: calc(15px * var(--ui-scale));
-  --font-xl: calc(16px * var(--ui-scale));
-  --font-2xl: calc(19px * var(--ui-scale));
-  --font-3xl: calc(24px * var(--ui-scale));
-  --font-4xl: calc(32px * var(--ui-scale));
-  --font-5xl: calc(40px * var(--ui-scale));
+  /* =========================================================
+     VIEW / DASHBOARD TOKENS
+  ========================================================= */
+  --view-bg: transparent;
+  --view-header-gap: var(--space-md);
+  --view-section-gap: var(--space-lg);
 
-  --weight-regular: 400;
-  --weight-medium: 500;
-  --weight-semibold: 600;
-  --weight-bold: 700;
-  --weight-black: 800;
+  --view-hero-bg:
+    linear-gradient(180deg, rgba(255,255,255,.024), rgba(255,255,255,.008)),
+    var(--surface-elevated);
 
-  --line-tight: 1.08;
-  --line-snug: 1.22;
-  --line-normal: 1.42;
-  --line-relaxed: 1.62;
+  --view-hero-border: var(--border-default);
+  --view-hero-radius: var(--card-radius-lg);
+  --view-hero-shadow: var(--shadow-md);
 
-  --letter-tight: -0.03em;
-  --letter-normal: 0;
-  --letter-wide: 0.02em;
-  --letter-wider: 0.08em;
+  --view-title-size: var(--font-3xl);
+  --view-title-weight: var(--weight-black);
+  --view-title-letter: -.045em;
 
-  /* =========================
-     SPACING
-  ========================= */
-  --space-3xs: calc(2px * var(--density-factor) * var(--ui-scale));
-  --space-2xs: calc(4px * var(--density-factor) * var(--ui-scale));
-  --space-xs: calc(8px * var(--density-factor) * var(--ui-scale));
-  --space-sm: calc(12px * var(--density-factor) * var(--ui-scale));
-  --space-md: calc(16px * var(--density-factor) * var(--ui-scale));
-  --space-lg: calc(20px * var(--density-factor) * var(--ui-scale));
-  --space-xl: calc(24px * var(--density-factor) * var(--ui-scale));
-  --space-2xl: calc(28px * var(--density-factor) * var(--ui-scale));
-  --space-3xl: calc(34px * var(--density-factor) * var(--ui-scale));
-  --space-4xl: calc(44px * var(--density-factor) * var(--ui-scale));
-  --space-5xl: calc(56px * var(--density-factor) * var(--ui-scale));
+  --view-subtitle-size: var(--font-md);
+  --view-subtitle-color: var(--text-muted);
 
-  /* =========================
-     DENSITY HELPERS
-  ========================= */
-  --space-dynamic-xs: var(--space-xs);
-  --space-dynamic-sm: var(--space-sm);
-  --space-dynamic-md: var(--space-md);
-  --space-dynamic-lg: var(--space-lg);
-  --space-dynamic-xl: var(--space-xl);
+  --section-title-size: var(--font-xl);
+  --section-title-weight: var(--weight-bold);
+  --section-title-color: var(--text-strong);
 
-  --section-gap: var(--space-lg);
-  --stack-gap: var(--space-md);
-  --cluster-gap: var(--space-sm);
+  --section-subtitle-size: var(--font-sm);
+  --section-subtitle-color: var(--text-dim);
 
-  /* =========================
-     RADIUS
-  ========================= */
-  --radius-xs: calc(7px * var(--ui-scale));
-  --radius-sm: calc(10px * var(--ui-scale));
-  --radius-md: calc(13px * var(--ui-scale));
-  --radius-lg: calc(16px * var(--ui-scale));
-  --radius-xl: calc(18px * var(--ui-scale));
-  --radius-2xl: calc(22px * var(--ui-scale));
-  --radius-3xl: calc(28px * var(--ui-scale));
-  --radius-pill: 999px;
 
-  /* =========================
-     SHADOW SYSTEM
-  ========================= */
-  --shadow-xs: 0 2px 8px rgba(0,0,0,.12);
-  --shadow-sm: 0 6px 14px rgba(0,0,0,.16);
-  --shadow-md: 0 14px 30px rgba(0,0,0,.22);
-  --shadow-lg: 0 20px 46px rgba(0,0,0,.28);
-  --shadow-xl: 0 28px 72px rgba(0,0,0,.36);
-
-  --shadow-soft: 0 8px 18px rgba(0,0,0,.13);
-  --shadow-strong: 0 24px 64px rgba(0,0,0,.38);
-
-  --shadow-glow:
-    0 0 0 1px rgba(255,255,255,.025),
-    0 16px 36px rgba(0,0,0,.16);
-
-  --shadow-glow-cyan:
-    0 0 0 1px rgba(255,255,255,.02),
-    0 16px 36px rgba(0,0,0,.14);
-
-  --shadow-inner:
-    inset 0 1px 0 rgba(255,255,255,.04);
-
-  /* =========================
-     BLUR
-  ========================= */
-  --blur-sm: blur(8px);
-  --blur-md: blur(12px);
-  --blur-lg: blur(18px);
-  --blur-xl: blur(24px);
-
-  /* =========================
-     MOTION
-  ========================= */
-  --ease-out: cubic-bezier(.22,1,.36,1);
-  --ease-in: cubic-bezier(.4,0,1,1);
-  --ease-standard: cubic-bezier(.2,.8,.2,1);
-  --ease-emphasis: cubic-bezier(.16,1,.3,1);
-
-  --duration-fast: .12s;
-  --duration-normal: .20s;
-  --duration-slow: .30s;
-  --duration-xslow: .42s;
-
-  /* =========================
-     FOCUS / ACCESSIBILITY
-  ========================= */
-  --focus-ring: 0 0 0 4px rgba(113,113,122,.16);
-  --focus-ring-strong: 0 0 0 4px rgba(113,113,122,.24);
-
-  --selection-bg: rgba(113,113,122,.28);
-  --selection-text: #ffffff;
-
-  /* =========================
-     SCROLLBAR
-  ========================= */
-  --scrollbar-size: 10px;
-  --scrollbar-track: transparent;
-  --scrollbar-thumb: rgba(255,255,255,.12);
-  --scrollbar-thumb-hover: rgba(255,255,255,.18);
-
-  /* =========================
-     AUTH / LOGIN ESPECÍFICAS
-  ========================= */
+  /* =========================================================
+     AUTH / LOGIN TOKENS
+  ========================================================= */
   --auth-max-width: 1080px;
   --auth-card-width: 420px;
 
@@ -667,562 +968,17 @@
 
   --auth-logo-glow: 0 0 36px rgba(255,255,255,.04);
 
-  /* =========================
-     TOAST
-  ========================= */
-  --ui-toast-top: calc(16px * var(--ui-scale));
-  --ui-toast-right: calc(16px * var(--ui-scale));
-  --ui-toast-width: min(460px, calc(100vw - 24px));
-  --ui-toast-padding-y: calc(14px * var(--ui-scale));
-  --ui-toast-padding-x: calc(16px * var(--ui-scale));
-  --ui-toast-gap: calc(12px * var(--ui-scale));
-  --ui-toast-radius: var(--radius-xl);
-  --ui-toast-icon-size: calc(20px * var(--ui-scale));
-  --ui-toast-close-size: calc(24px * var(--ui-scale));
 
-  --ui-toast-loading-ring: rgba(255,255,255,.12);
-  --ui-toast-loading-active: var(--accent);
-  --ui-toast-loading-active-2: rgba(113,113,122,.42);
+  /* =========================================================
+     SHELL TOKENS
+  ========================================================= */
+  --shell-blur: var(--blur-lg);
+  --shell-border: var(--border-soft);
 
-  --ui-toast-overlay:
-    linear-gradient(180deg, rgba(255,255,255,.026), rgba(255,255,255,.010));
+  --shell-surface:
+    linear-gradient(180deg, rgba(255,255,255,.016), rgba(255,255,255,.006)),
+    transparent;
 
-  --ui-toast-shadow:
-    var(--shadow-lg),
-    0 0 0 1px rgba(255,255,255,.03) inset;
-
-  /* =========================
-     LOADER
-  ========================= */
-  --loader-bg: rgba(31,31,31,.96);
-  --loader-text: var(--text);
-  --loader-ring: rgba(255,255,255,.12);
-  --loader-ring-active: var(--accent);
-}
-
-
-/* =========================================================
-   LIGHT THEME
-========================================================= */
-
-[data-theme="light"]{
-  /* =========================
-     BRAND
-  ========================= */
-  --accent: #6f59d9;
-  --accent-hover: #624acb;
-  --accent-active: #533cb6;
-
-  --accent-2: #7c6ae6;
-  --accent-3: #3b82a6;
-  --accent-4: #1f9d68;
-  --accent-5: #c45a86;
-
-  --accent-soft: rgba(111,89,217,.12);
-  --accent-soft-2: rgba(124,106,230,.10);
-  --accent-ghost: rgba(111,89,217,.08);
-  --accent-subtle: rgba(111,89,217,.05);
-  --accent-ring: rgba(111,89,217,.16);
-  --accent-border: rgba(111,89,217,.24);
-  --accent-border-strong: rgba(111,89,217,.34);
-  --accent-glow: rgba(111,89,217,.10);
-  --accent-glow-strong: rgba(111,89,217,.16);
-
-  --brand-2: #1f9d68;
-  --brand-2-soft: rgba(31,157,104,.12);
-
-  --brand-3: #3b82a6;
-  --brand-3-soft: rgba(59,130,166,.12);
-
-  --brand-4: #c07a16;
-  --brand-4-soft: rgba(192,122,22,.12);
-
-  --brand-5: #c45a86;
-  --brand-5-soft: rgba(196,90,134,.12);
-
-  /* =========================
-     TEXT
-  ========================= */
-  --text: #172033;
-  --text-strong: #0b1220;
-  --text-soft: rgba(23,32,51,.88);
-  --text-muted: rgba(23,32,51,.70);
-  --text-dim: rgba(23,32,51,.52);
-  --text-faint: rgba(23,32,51,.36);
-  --text-disabled: rgba(23,32,51,.24);
-
-  --text-on-accent: #ffffff;
-  --text-on-light: #172033;
-
-  --link: var(--accent);
-  --link-hover: var(--accent-hover);
-
-  --muted: var(--text-muted);
-  --dim: var(--text-dim);
-
-  /* =========================
-     BASE / BACKDROP
-  ========================= */
-  --main-bg: #f3f6fa;
-  --main-bg-2: #edf2f7;
-  --main-bg-3: #e7edf4;
-  --body-fallback: #f3f6fa;
-
-  --body-bg:
-    radial-gradient(circle at top left, rgba(111,89,217,.045), transparent 22%),
-    radial-gradient(circle at top right, rgba(59,130,166,.040), transparent 20%),
-    radial-gradient(circle at 50% 100%, rgba(196,90,134,.025), transparent 22%),
-    linear-gradient(180deg, #f8fbfe 0%, #f1f5f9 100%);
-
-  --gradient-main:
-    linear-gradient(180deg, #f8fbfe 0%, #eef3f8 100%);
-
-  --gradient-overlay:
-    radial-gradient(circle at 40% 0%, rgba(15,23,42,.035), transparent 68%);
-
-  --gradient-accent:
-    linear-gradient(135deg, #7c6ae6 0%, #6f59d9 52%, #4c7fa3 100%);
-
-  --gradient-accent-soft:
-    linear-gradient(135deg, rgba(124,106,230,.10) 0%, rgba(59,130,166,.08) 100%);
-
-  --gradient-success:
-    linear-gradient(180deg, #22c55e 0%, #16a34a 100%);
-
-  --gradient-warning:
-    linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
-
-  --gradient-error:
-    linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
-
-  --app-noise:
-    radial-gradient(circle at 50% 0%, rgba(255,255,255,.52), transparent 62%);
-
-  --panel-noise:
-    linear-gradient(180deg, rgba(255,255,255,.40), transparent 36%);
-
-  --glass-shine:
-    linear-gradient(180deg, rgba(255,255,255,.74), rgba(255,255,255,0) 32%);
-
-  /* =========================
-     SURFACE SYSTEM
-  ========================= */
-  --surface-0: #f3f6fa;
-  --surface-1: #f8fafc;
-  --surface-2: #ffffff;
-  --surface-3: #f8fbfd;
-  --surface-4: #eef3f7;
-  --surface-5: #e4ebf2;
-
-  --surface-elevated: rgba(255,255,255,.88);
-  --surface-elevated-strong: rgba(255,255,255,.94);
-
-  --surface-glass: rgba(255,255,255,.70);
-  --surface-glass-strong: rgba(255,255,255,.82);
-  --surface-glass-accent: rgba(111,89,217,.06);
-
-  --surface-hover: rgba(23,32,51,.030);
-  --surface-hover-strong: rgba(23,32,51,.048);
-  --surface-active: rgba(23,32,51,.068);
-  --surface-selected: rgba(111,89,217,.09);
-  --surface-disabled: rgba(23,32,51,.018);
-
-  --dropdown-bg: rgba(255,255,255,.96);
-  --tooltip-bg: #111827;
-  --tooltip-text: #ffffff;
-  --popover-bg: rgba(255,255,255,.97);
-  --modal-bg: rgba(255,255,255,.94);
-  --backdrop-bg: rgba(15,23,42,.24);
-
-  --sb-bg: rgba(255,255,255,.90);
-  --dropdown-bg-legacy: var(--dropdown-bg);
-
-  /* =========================
-     BORDER SYSTEM
-  ========================= */
-  --border-soft: rgba(23,32,51,.055);
-  --border-default: rgba(23,32,51,.095);
-  --border-strong: rgba(23,32,51,.14);
-  --border-stronger: rgba(23,32,51,.20);
-  --border-glass: rgba(255,255,255,.52);
-
-  --border-accent: rgba(111,89,217,.24);
-  --border-accent-strong: rgba(111,89,217,.34);
-  --border-success: rgba(22,163,74,.24);
-  --border-warning: rgba(217,119,6,.24);
-  --border-error: rgba(220,38,38,.24);
-  --border-info: rgba(59,130,166,.24);
-
-  /* =========================
-     CARD / PANEL / BLOCK
-  ========================= */
-  --card-bg:
-    linear-gradient(180deg, rgba(255,255,255,.94) 0%, rgba(248,250,252,.98) 100%);
-  --card-bg-hover:
-    linear-gradient(180deg, rgba(255,255,255,.98) 0%, rgba(248,250,252,.99) 100%);
-
-  --card-border: rgba(23,32,51,.075);
-  --card-border-hover: rgba(23,32,51,.11);
-  --card-highlight: inset 0 1px 0 rgba(255,255,255,.78);
-
-  --card-shadow:
-    0 10px 26px rgba(15,23,42,.055),
-    0 2px 8px rgba(15,23,42,.035);
-
-  --panel-bg:
-    linear-gradient(180deg, rgba(255,255,255,.92) 0%, rgba(248,250,252,.98) 100%);
-  --panel-bg-hover:
-    linear-gradient(180deg, rgba(255,255,255,.96) 0%, rgba(248,250,252,1) 100%);
-
-  --panel-border: rgba(23,32,51,.075);
-  --panel-border-hover: rgba(23,32,51,.11);
-
-  --panel-shadow:
-    0 10px 24px rgba(15,23,42,.055),
-    0 2px 8px rgba(15,23,42,.035);
-
-  --block-bg: rgba(23,32,51,.026);
-  --block-bg-hover: rgba(23,32,51,.040);
-  --block-border: rgba(23,32,51,.075);
-
-  /* =========================
-     INPUT SYSTEM
-  ========================= */
-  --input-bg: rgba(255,255,255,.96);
-  --input-bg-hover: #ffffff;
-  --input-bg-focus: #ffffff;
-  --input-disabled-bg: rgba(23,32,51,.028);
-
-  --input-border: rgba(23,32,51,.10);
-  --input-border-hover: rgba(23,32,51,.16);
-  --input-border-focus: rgba(111,89,217,.42);
-  --input-border-error: rgba(220,38,38,.38);
-  --input-border-success: rgba(22,163,74,.34);
-
-  --input-text: var(--text);
-  --input-placeholder: #8b98ab;
-  --input-icon: rgba(23,32,51,.42);
-
-  --input-shadow:
-    inset 0 1px 0 rgba(255,255,255,.88);
-
-  --input-shadow-hover:
-    inset 0 1px 0 rgba(255,255,255,.96);
-
-  --input-shadow-focus:
-    0 0 0 4px rgba(111,89,217,.10),
-    0 10px 22px rgba(111,89,217,.06);
-
-  /* =========================
-     BUTTONS
-  ========================= */
-  --btn-primary-bg:
-    linear-gradient(180deg, #7864df 0%, #6f59d9 100%);
-  --btn-primary-bg-hover:
-    linear-gradient(180deg, #6f59d9 0%, #624acb 100%);
-  --btn-primary-bg-active:
-    linear-gradient(180deg, #624acb 0%, #533cb6 100%);
-  --btn-primary-text: #ffffff;
-  --btn-primary-border: rgba(255,255,255,.14);
-  --btn-primary-shadow:
-    0 10px 20px rgba(111,89,217,.16),
-    inset 0 1px 0 rgba(255,255,255,.18);
-
-  --btn-secondary-bg: rgba(23,32,51,.038);
-  --btn-secondary-bg-hover: rgba(23,32,51,.055);
-  --btn-secondary-bg-active: rgba(23,32,51,.08);
-  --btn-secondary-text: var(--text);
-  --btn-secondary-border: rgba(23,32,51,.075);
-  --btn-secondary-shadow: 0 5px 12px rgba(15,23,42,.05);
-
-  --btn-ghost-bg: rgba(23,32,51,.024);
-  --btn-ghost-bg-hover: rgba(23,32,51,.050);
-  --btn-ghost-bg-active: rgba(23,32,51,.072);
-  --btn-ghost-text: var(--text-muted);
-  --btn-ghost-border: rgba(23,32,51,.07);
-
-  --btn-danger-bg:
-    linear-gradient(180deg, #f26b7a 0%, #e64b5d 100%);
-  --btn-danger-bg-hover:
-    linear-gradient(180deg, #eb5e6d 0%, #d83c4d 100%);
-  --btn-danger-bg-active:
-    linear-gradient(180deg, #d83c4d 0%, #b52a39 100%);
-  --btn-danger-text: #ffffff;
-  --btn-danger-shadow:
-    0 8px 18px rgba(230,75,93,.14),
-    inset 0 1px 0 rgba(255,255,255,.12);
-
-  /* =========================
-     SIDEBAR
-  ========================= */
-  --sidebar-bg: rgba(255,255,255,.86);
-  --sidebar-bg-strong: rgba(255,255,255,.94);
-  --sidebar-border: rgba(23,32,51,.065);
-  --sidebar-shadow: 0 16px 34px rgba(15,23,42,.07);
-
-  --sidebar-hover: rgba(23,32,51,.035);
-  --sidebar-active: rgba(111,89,217,.09);
-  --sidebar-active-hover: rgba(111,89,217,.12);
-  --sidebar-active-border: rgba(111,89,217,.18);
-
-  --sidebar-text: rgba(23,32,51,.72);
-  --sidebar-text-active: #0f172a;
-  --sidebar-icon: rgba(23,32,51,.54);
-  --sidebar-icon-active: var(--accent);
-
-  --sb-bg: var(--sidebar-bg);
-  --sb-hover: var(--sidebar-hover);
-  --sb-active: var(--sidebar-active);
-  --sb-border: var(--sidebar-border);
-
-  /* =========================
-     TOPBAR
-  ========================= */
-  --topbar-bg: rgba(255,255,255,.74);
-  --topbar-border: rgba(23,32,51,.055);
-  --topbar-shadow: 0 8px 18px rgba(15,23,42,.045);
-  --topbar-blur: blur(16px);
-
-  /* =========================
-     TABLES / DATA UI
-  ========================= */
-  --table-bg: transparent;
-  --table-head-bg: rgba(23,32,51,.022);
-  --table-row-bg: transparent;
-  --table-row-hover: rgba(23,32,51,.022);
-  --table-row-selected: rgba(111,89,217,.07);
-
-  --table-border: rgba(23,32,51,.055);
-  --table-head-border: rgba(23,32,51,.085);
-
-  /* =========================
-     STATUS
-  ========================= */
-  --success: #1f9d68;
-  --success-hover: #157a4f;
-  --success-soft: rgba(31,157,104,.12);
-  --success-bg: rgba(31,157,104,.09);
-
-  --warning: #c07a16;
-  --warning-hover: #9c6110;
-  --warning-soft: rgba(192,122,22,.12);
-  --warning-bg: rgba(192,122,22,.09);
-
-  --error: #d83c4d;
-  --error-hover: #b52a39;
-  --error-soft: rgba(216,60,77,.12);
-  --error-bg: rgba(216,60,77,.09);
-
-  --info: #3b82a6;
-  --info-hover: #2f6d8d;
-  --info-soft: rgba(59,130,166,.12);
-  --info-bg: rgba(59,130,166,.09);
-
-  --warning-bg-legacy: var(--warning-soft);
-  --info-bg-legacy: var(--info-soft);
-
-  /* =========================
-     KPI COLORS
-  ========================= */
-  --color-iva: #c07a16;
-  --color-iva-glow: rgba(192,122,22,.16);
-
-  --color-irpf: #6f59d9;
-  --color-irpf-glow: rgba(111,89,217,.16);
-
-  --color-beneficio: #1f9d68;
-  --color-beneficio-glow: rgba(31,157,104,.16);
-
-  --color-pendiente: #e64b5d;
-  --color-pendiente-glow: rgba(230,75,93,.16);
-
-  --color-facturacion: #3b82a6;
-  --color-facturacion-glow: rgba(59,130,166,.16);
-
-  /* =========================
-     AVATAR / BADGES / CHIPS
-  ========================= */
-  --avatar-bg:
-    linear-gradient(180deg, #7c6ae6 0%, #6f59d9 100%);
-  --avatar-bg-2:
-    linear-gradient(180deg, #57a7c9 0%, #3b82a6 100%);
-  --avatar-text: #ffffff;
-
-  --badge-bg: rgba(23,32,51,.040);
-  --badge-border: rgba(23,32,51,.075);
-  --badge-text: var(--text-muted);
-
-  --chip-bg: rgba(23,32,51,.040);
-  --chip-border: rgba(23,32,51,.075);
-  --chip-text: var(--text-soft);
-
-  /* =========================
-     SHADOW SYSTEM
-  ========================= */
-  --shadow-xs: 0 2px 8px rgba(15,23,42,.035);
-  --shadow-sm: 0 6px 16px rgba(15,23,42,.05);
-  --shadow-md: 0 10px 24px rgba(15,23,42,.07);
-  --shadow-lg: 0 18px 40px rgba(15,23,42,.10);
-  --shadow-xl: 0 28px 64px rgba(15,23,42,.12);
-
-  --shadow-soft: 0 8px 18px rgba(15,23,42,.05);
-  --shadow-strong: 0 20px 44px rgba(15,23,42,.10);
-
-  --shadow-glow:
-    0 0 0 1px rgba(255,255,255,.40),
-    0 16px 38px rgba(111,89,217,.06);
-
-  --shadow-glow-cyan:
-    0 0 0 1px rgba(255,255,255,.44),
-    0 16px 36px rgba(59,130,166,.05);
-
-  --shadow-inner:
-    inset 0 1px 0 rgba(255,255,255,.70);
-
-  /* =========================
-     FOCUS / ACCESSIBILITY
-  ========================= */
-  --focus-ring: 0 0 0 4px rgba(111,89,217,.10);
-  --focus-ring-strong: 0 0 0 4px rgba(111,89,217,.16);
-
-  --selection-bg: rgba(111,89,217,.16);
-  --selection-text: #111827;
-
-  /* =========================
-     SCROLLBAR
-  ========================= */
-  --scrollbar-track: transparent;
-  --scrollbar-thumb: rgba(23,32,51,.12);
-  --scrollbar-thumb-hover: rgba(23,32,51,.20);
-
-  /* =========================
-     AUTH / LOGIN ESPECÍFICAS
-  ========================= */
-  --auth-card-bg:
-    linear-gradient(180deg, rgba(255,255,255,.94) 0%, rgba(248,250,252,.98) 100%);
-  --auth-card-border: rgba(23,32,51,.075);
-  --auth-card-shadow:
-    0 20px 50px rgba(15,23,42,.09),
-    0 0 0 1px rgba(255,255,255,.54),
-    0 14px 36px rgba(111,89,217,.04);
-
-  --auth-input-bg: rgba(255,255,255,.98);
-  --auth-input-border: rgba(23,32,51,.10);
-  --auth-input-border-focus: rgba(111,89,217,.40);
-
-  --auth-logo-glow: 0 0 24px rgba(111,89,217,.08);
-
-  /* =========================
-     LOADER
-  ========================= */
-  --loader-bg: rgba(243,246,250,.92);
-  --loader-text: var(--text);
-  --loader-ring: rgba(23,32,51,.12);
-  --loader-ring-active: var(--accent);
-}
-
-
-/* =========================================================
-   DENSITY PRESETS OPCIONALES
-========================================================= */
-
-:root[data-density="compact"]{
-  --ui-scale: .95;
-  --density-factor: .91;
-}
-
-:root[data-density="normal"]{
-  --ui-scale: .97;
-  --density-factor: .93;
-}
-
-:root[data-density="comfortable"]{
-  --ui-scale: 1.02;
-  --density-factor: 1;
-}
-
-
-/* =========================================================
-   ONION SUPPORT — DESIGN TOKENS LEVEL UP
-   BLOQUE FINAL DE OVERRIDES / ALIASES / HARDENING
-========================================================= */
-
-
-/* =========================================================
-   SEMANTIC ALIASES — COMPAT TOTAL
-========================================================= */
-
-:root {
-  --accent-contrast: var(--text-on-accent, #ffffff);
-  --brand: var(--accent);
-  --brand-hover: var(--accent-hover);
-  --brand-active: var(--accent-active);
-  --brand-soft: var(--accent-soft);
-  --brand-ring: var(--accent-ring);
-  --brand-border: var(--accent-border);
-
-  --danger: var(--error);
-  --danger-hover: var(--error-hover);
-  --danger-soft: var(--error-soft);
-  --danger-bg: var(--error-bg);
-  --danger-border: var(--border-error);
-  --danger-strong: var(--error);
-
-  --positive: var(--success);
-  --positive-hover: var(--success-hover);
-  --positive-soft: var(--success-soft);
-  --positive-bg: var(--success-bg);
-  --positive-border: var(--border-success);
-  --success-strong: var(--success);
-
-  --warning-strong: var(--warning);
-  --warning-border: var(--border-warning);
-
-  --info-strong: var(--info);
-  --info-border: var(--border-info);
-
-  --neutral: var(--accent-3);
-  --neutral-soft: rgba(148, 163, 184, .14);
-  --neutral-bg: rgba(148, 163, 184, .10);
-  --neutral-border: rgba(148, 163, 184, .24);
-
-  --text-primary: var(--text);
-  --text-secondary: var(--text-muted);
-  --text-tertiary: var(--text-dim);
-  --text-quaternary: var(--text-faint);
-
-  --surface: var(--surface-1);
-  --surface-soft: var(--surface-2);
-  --surface-strong: var(--surface-3);
-  --surface-raised: var(--surface-elevated);
-  --surface-raised-strong: var(--surface-elevated-strong);
-
-  --shadow-card: var(--card-shadow);
-  --shadow-panel: var(--panel-shadow);
-  --shadow-dropdown: var(--shadow-lg);
-  --shadow-modal: var(--shadow-xl);
-}
-
-
-/* =========================================================
-   APP LOGOS / ASSET PATH TOKENS
-========================================================= */
-
-:root {
-  --asset-logo-dark: url("/src/media/img/favicon_white.png");
-  --asset-logo-light: url("/src/media/img/favicon_black.png");
-  --asset-favicon-ico: url("/src/media/img/Logo_Intro.ico");
-
-  --loader-logo-dark: var(--asset-logo-dark);
-  --loader-logo-light: var(--asset-logo-light);
-}
-
-
-/* =========================================================
-   SHELL TOKENS — APP BOOT / READY / ROUTE MODES
-========================================================= */
-
-:root {
   --shell-transition:
     opacity var(--duration-normal) var(--ease-standard),
     visibility var(--duration-normal) var(--ease-standard),
@@ -1249,14 +1005,41 @@
 
   --shell-busy-opacity: .72;
   --shell-disabled-opacity: .48;
-}
 
 
-/* =========================================================
-   LOADER TOKENS — CENTRALIZADOS
-========================================================= */
+  /* =========================================================
+     TOAST TOKENS
+  ========================================================= */
+  --ui-toast-top: calc(16px * var(--ui-scale));
+  --ui-toast-right: calc(16px * var(--ui-scale));
+  --ui-toast-width: min(460px, calc(100vw - 24px));
+  --ui-toast-padding-y: calc(14px * var(--ui-scale));
+  --ui-toast-padding-x: calc(16px * var(--ui-scale));
+  --ui-toast-gap: calc(12px * var(--ui-scale));
+  --ui-toast-radius: var(--radius-xl);
+  --ui-toast-icon-size: calc(20px * var(--ui-scale));
+  --ui-toast-close-size: calc(24px * var(--ui-scale));
 
-:root {
+  --ui-toast-loading-ring: rgba(255,255,255,.12);
+  --ui-toast-loading-active: var(--accent);
+  --ui-toast-loading-active-2: rgba(113,113,122,.42);
+
+  --ui-toast-overlay:
+    linear-gradient(180deg, rgba(255,255,255,.026), rgba(255,255,255,.010));
+
+  --ui-toast-shadow:
+    var(--shadow-lg),
+    0 0 0 1px rgba(255,255,255,.03) inset;
+
+
+  /* =========================================================
+     LOADER TOKENS
+  ========================================================= */
+  --loader-bg: rgba(31,31,31,.96);
+  --loader-text: var(--text);
+  --loader-ring: rgba(255,255,255,.12);
+  --loader-ring-active: var(--accent);
+
   --loader-card-width: min(360px, calc(100vw - 48px));
   --loader-card-padding: 28px 26px 24px;
   --loader-card-radius: 28px;
@@ -1280,10 +1063,10 @@
   --loader-duration-orbit: 2.2s;
 
   --loader-dark-bg:
-    radial-gradient(circle at 18% 14%, rgba(99, 102, 241, .15), transparent 28%),
-    radial-gradient(circle at 82% 20%, rgba(14, 165, 233, .10), transparent 26%),
-    radial-gradient(circle at 50% 100%, rgba(168, 85, 247, .08), transparent 28%),
-    linear-gradient(180deg, rgba(2, 6, 23, .975), rgba(3, 7, 18, .985));
+    radial-gradient(circle at 18% 14%, rgba(99,102,241,.15), transparent 28%),
+    radial-gradient(circle at 82% 20%, rgba(14,165,233,.10), transparent 26%),
+    radial-gradient(circle at 50% 100%, rgba(168,85,247,.08), transparent 28%),
+    linear-gradient(180deg, rgba(2,6,23,.975), rgba(3,7,18,.985));
 
   --loader-dark-card:
     linear-gradient(180deg, rgba(255,255,255,.085), rgba(255,255,255,.035)),
@@ -1294,9 +1077,9 @@
     rgba(15,23,42,.82);
 
   --loader-light-bg:
-    radial-gradient(circle at 18% 14%, rgba(111, 89, 217, .12), transparent 28%),
-    radial-gradient(circle at 82% 20%, rgba(59, 130, 166, .09), transparent 26%),
-    radial-gradient(circle at 50% 100%, rgba(196, 90, 134, .07), transparent 28%),
+    radial-gradient(circle at 18% 14%, rgba(111,89,217,.12), transparent 28%),
+    radial-gradient(circle at 82% 20%, rgba(59,130,166,.09), transparent 26%),
+    radial-gradient(circle at 50% 100%, rgba(196,90,134,.07), transparent 28%),
     linear-gradient(180deg, rgba(248,250,252,.96), rgba(241,245,249,.98));
 
   --loader-light-card:
@@ -1306,159 +1089,11 @@
   --loader-light-card-strong:
     linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,250,252,.96)),
     rgba(255,255,255,.94);
-}
 
 
-/* =========================================================
-   SIDEBAR LEVEL UP
-========================================================= */
-
-:root {
-  --sidebar-radius: 0;
-  --sidebar-logo-size: calc(34px * var(--ui-scale));
-  --sidebar-logo-radius: calc(12px * var(--ui-scale));
-
-  --sidebar-item-radius: calc(12px * var(--ui-scale));
-  --sidebar-item-gap: calc(10px * var(--ui-scale));
-
-  --sidebar-item-font-size: var(--font-md);
-  --sidebar-item-font-weight: var(--weight-medium);
-
-  --sidebar-group-title-size: var(--font-xs);
-  --sidebar-group-title-color: var(--text-faint);
-  --sidebar-group-title-letter: .08em;
-
-  --sidebar-footer-height: calc(68px * var(--ui-scale));
-  --sidebar-footer-border: var(--sidebar-border);
-  --sidebar-footer-bg: rgba(255,255,255,.018);
-
-  --sidebar-user-avatar-size: calc(34px * var(--ui-scale));
-  --sidebar-user-name-size: var(--font-md);
-  --sidebar-user-role-size: var(--font-xs);
-
-  --sidebar-tooltip-bg: var(--tooltip-bg);
-  --sidebar-tooltip-text: var(--tooltip-text);
-  --sidebar-tooltip-shadow: var(--shadow-lg);
-
-  --sidebar-mobile-backdrop: rgba(0,0,0,.46);
-}
-
-[data-theme="light"] {
-  --sidebar-footer-bg: rgba(23,32,51,.020);
-  --sidebar-mobile-backdrop: rgba(15,23,42,.22);
-}
-
-
-/* =========================================================
-   TOPBAR LEVEL UP
-========================================================= */
-
-:root {
-  --topbar-button-size: calc(36px * var(--ui-scale));
-  --topbar-button-radius: calc(12px * var(--ui-scale));
-  --topbar-button-bg: rgba(255,255,255,.026);
-  --topbar-button-bg-hover: rgba(255,255,255,.048);
-  --topbar-button-border: rgba(255,255,255,.060);
-
-  --topbar-title-size: var(--font-lg);
-  --topbar-title-weight: var(--weight-bold);
-  --topbar-subtitle-size: var(--font-xs);
-
-  --topbar-search-bg: rgba(255,255,255,.030);
-  --topbar-search-bg-hover: rgba(255,255,255,.044);
-  --topbar-search-bg-focus: rgba(255,255,255,.052);
-  --topbar-search-border: rgba(255,255,255,.075);
-
-  --topbar-search-result-bg: var(--dropdown-bg);
-  --topbar-search-result-border: var(--border-default);
-  --topbar-search-result-shadow: var(--shadow-xl);
-}
-
-[data-theme="light"] {
-  --topbar-button-bg: rgba(23,32,51,.026);
-  --topbar-button-bg-hover: rgba(23,32,51,.046);
-  --topbar-button-border: rgba(23,32,51,.070);
-
-  --topbar-search-bg: rgba(255,255,255,.72);
-  --topbar-search-bg-hover: rgba(255,255,255,.88);
-  --topbar-search-bg-focus: #ffffff;
-  --topbar-search-border: rgba(23,32,51,.080);
-}
-
-
-/* =========================================================
-   VIEW / DASHBOARD TOKENS
-========================================================= */
-
-:root {
-  --view-bg: transparent;
-  --view-header-gap: var(--space-md);
-  --view-section-gap: var(--space-lg);
-
-  --view-hero-bg:
-    linear-gradient(180deg, rgba(255,255,255,.024), rgba(255,255,255,.008)),
-    var(--surface-elevated);
-
-  --view-hero-border: var(--border-default);
-  --view-hero-radius: var(--card-radius-lg);
-  --view-hero-shadow: var(--shadow-md);
-
-  --view-title-size: var(--font-3xl);
-  --view-title-weight: var(--weight-black);
-  --view-title-letter: -.045em;
-
-  --view-subtitle-size: var(--font-md);
-  --view-subtitle-color: var(--text-muted);
-
-  --section-title-size: var(--font-xl);
-  --section-title-weight: var(--weight-bold);
-  --section-title-color: var(--text-strong);
-
-  --section-subtitle-size: var(--font-sm);
-  --section-subtitle-color: var(--text-dim);
-}
-
-[data-theme="light"] {
-  --view-hero-bg:
-    linear-gradient(180deg, rgba(255,255,255,.96), rgba(248,250,252,.98)),
-    var(--surface-elevated);
-}
-
-
-/* =========================================================
-   TABLE / DATA GRID LEVEL UP
-========================================================= */
-
-:root {
-  --data-table-radius: var(--card-radius);
-  --data-table-bg: var(--card-bg);
-  --data-table-border: var(--card-border);
-  --data-table-shadow: var(--shadow-sm);
-
-  --data-table-head-bg: var(--table-head-bg);
-  --data-table-head-text: var(--text-dim);
-  --data-table-head-font-size: var(--font-xs);
-  --data-table-head-font-weight: var(--weight-bold);
-  --data-table-head-letter: .075em;
-
-  --data-table-row-height: calc(54px * var(--ui-scale));
-  --data-table-row-border: var(--table-border);
-  --data-table-row-hover: var(--table-row-hover);
-  --data-table-row-selected: var(--table-row-selected);
-
-  --data-table-cell-text: var(--text-soft);
-  --data-table-cell-muted: var(--text-dim);
-
-  --data-table-action-size: calc(32px * var(--ui-scale));
-  --data-table-action-radius: calc(10px * var(--ui-scale));
-}
-
-
-/* =========================================================
-   SKELETON / LOADING CONTENT
-========================================================= */
-
-:root {
+  /* =========================================================
+     SKELETON / LOADING CONTENT
+  ========================================================= */
   --skeleton-bg: rgba(255,255,255,.050);
   --skeleton-bg-strong: rgba(255,255,255,.070);
   --skeleton-shine: rgba(255,255,255,.095);
@@ -1470,20 +1105,11 @@
 
   --skeleton-animation:
     skeletonShimmer 1.35s var(--ease-standard) infinite;
-}
-
-[data-theme="light"] {
-  --skeleton-bg: rgba(23,32,51,.055);
-  --skeleton-bg-strong: rgba(23,32,51,.075);
-  --skeleton-shine: rgba(255,255,255,.72);
-}
 
 
-/* =========================================================
-   EMPTY / ERROR / SUCCESS STATES
-========================================================= */
-
-:root {
+  /* =========================================================
+     EMPTY / ERROR / SUCCESS STATES
+  ========================================================= */
   --state-card-bg: var(--card-bg);
   --state-card-border: var(--card-border);
   --state-card-radius: var(--card-radius-lg);
@@ -1507,14 +1133,11 @@
   --state-warning-bg: var(--warning-bg);
   --state-warning-border: var(--border-warning);
   --state-warning-icon: var(--warning);
-}
 
 
-/* =========================================================
-   MODAL / DRAWER / OVERLAY
-========================================================= */
-
-:root {
+  /* =========================================================
+     MODAL / DRAWER / OVERLAY
+  ========================================================= */
   --overlay-bg: var(--backdrop-bg);
   --overlay-blur: blur(10px);
   --overlay-enter-duration: var(--duration-normal);
@@ -1532,14 +1155,11 @@
 
   --drawer-width: min(420px, 92vw);
   --drawer-width-lg: min(560px, 94vw);
-}
 
 
-/* =========================================================
-   TOOLTIP / POPOVER / DROPDOWN
-========================================================= */
-
-:root {
+  /* =========================================================
+     TOOLTIP / POPOVER / DROPDOWN
+  ========================================================= */
   --tooltip-radius: calc(10px * var(--ui-scale));
   --tooltip-padding-y: calc(7px * var(--ui-scale));
   --tooltip-padding-x: calc(9px * var(--ui-scale));
@@ -1552,14 +1172,11 @@
   --dropdown-item-radius: calc(10px * var(--ui-scale));
   --dropdown-item-padding-x: calc(10px * var(--ui-scale));
   --dropdown-item-gap: calc(9px * var(--ui-scale));
-}
 
 
-/* =========================================================
-   FORMS EXTENDED
-========================================================= */
-
-:root {
+  /* =========================================================
+     FORM TOKENS EXTENDED
+  ========================================================= */
   --form-label-size: var(--font-sm);
   --form-label-weight: var(--weight-semibold);
   --form-label-color: var(--text-soft);
@@ -1579,18 +1196,11 @@
   --switch-bg: rgba(255,255,255,.12);
   --switch-bg-checked: var(--accent);
   --switch-border: var(--border-default);
-}
-
-[data-theme="light"] {
-  --switch-bg: rgba(23,32,51,.12);
-}
 
 
-/* =========================================================
-   CHART / VISUALIZATION TOKENS
-========================================================= */
-
-:root {
+  /* =========================================================
+     CHART / VISUALIZATION TOKENS
+  ========================================================= */
   --chart-1: var(--accent);
   --chart-2: var(--info);
   --chart-3: var(--success);
@@ -1603,14 +1213,11 @@
   --chart-label: var(--text-dim);
   --chart-tooltip-bg: var(--popover-bg);
   --chart-tooltip-border: var(--border-default);
-}
 
 
-/* =========================================================
-   APP STATUS / NETWORK / BADGES
-========================================================= */
-
-:root {
+  /* =========================================================
+     APP STATUS TOKENS
+  ========================================================= */
   --status-online: var(--success);
   --status-online-bg: var(--success-bg);
   --status-online-border: var(--border-success);
@@ -1626,25 +1233,28 @@
   --status-idle: var(--text-faint);
   --status-idle-bg: rgba(148,163,184,.08);
   --status-idle-border: rgba(148,163,184,.16);
+
+
+  /* =========================================================
+     ASSET TOKENS
+  ========================================================= */
+  --asset-logo-dark: url("/src/media/img/favicon_white.png");
+  --asset-logo-light: url("/src/media/img/favicon_black.png");
+  --asset-favicon-ico: url("/src/media/img/Logo_Intro.ico");
+
+  --loader-logo-dark: var(--asset-logo-dark);
+  --loader-logo-light: var(--asset-logo-light);
 }
 
 
 /* =========================================================
-   INCIDENCIAS MODAL — EXTREME TOKENS
-   Tokens específicos del modal de detalle de incidencias.
-   Objetivo:
-   - miniaturas grandes y clicables
-   - preview amplia
-   - cards con hover lift
-   - títulos sin corte vertical
-   - descripción alineada arriba
-   - adjuntos integrados en composer
+   INCIDENCIAS MODAL · EXTREME TOKENS
 ========================================================= */
 
 :root {
   --incidencias-modal-width: min(1160px, calc(100vw - 40px));
   --incidencias-modal-max-height: 92vh;
-  --incidencias-modal-radius: var(--modal-radius, 22px);
+  --incidencias-modal-radius: var(--modal-radius);
   --incidencias-modal-padding: var(--space-lg);
   --incidencias-modal-body-gap: var(--space-lg);
 
@@ -1656,6 +1266,7 @@
     linear-gradient(180deg, var(--surface-2), var(--surface-1));
 
   --incidencias-modal-border: var(--border-soft);
+
   --incidencias-modal-shadow:
     0 34px 84px rgba(0,0,0,.40),
     0 0 0 1px rgba(255,255,255,.025) inset;
@@ -1680,21 +1291,26 @@
   --incidencias-modal-meta-grid-gap: 10px;
   --incidencias-modal-meta-card-padding: 12px;
   --incidencias-modal-meta-card-radius: 14px;
-  --incidencias-modal-meta-card-bg: var(--surface-1, var(--surface-glass));
+  --incidencias-modal-meta-card-bg: var(--surface-1);
   --incidencias-modal-meta-card-border: var(--border-soft);
 
-  --incidencias-modal-card-radius: var(--radius-xl, 18px);
+  --incidencias-modal-card-radius: var(--radius-xl);
+
   --incidencias-modal-card-bg:
     linear-gradient(180deg, rgba(255,255,255,.035), transparent 95%),
     var(--surface-glass);
+
   --incidencias-modal-card-border: var(--border-soft);
+
   --incidencias-modal-card-hover-border:
     color-mix(in srgb, var(--accent) 24%, var(--border-soft));
+
   --incidencias-modal-card-hover-bg:
     linear-gradient(180deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 95%),
     var(--surface-glass);
 
   --incidencias-modal-lift-transform: translateY(-2px);
+
   --incidencias-modal-lift-shadow:
     0 16px 34px rgba(15,23,42,.075),
     0 0 0 1px rgba(255,255,255,.035) inset;
@@ -1707,11 +1323,13 @@
   --incidencias-modal-composer-radius: 18px;
   --incidencias-modal-composer-padding: 14px;
   --incidencias-modal-composer-gap: 12px;
+
   --incidencias-modal-composer-border:
     color-mix(in srgb, var(--accent) 24%, var(--border-soft));
+
   --incidencias-modal-composer-bg:
     linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 92%),
-    var(--surface-1, var(--surface-glass));
+    var(--surface-1);
 
   --incidencias-modal-textarea-min-height: 138px;
   --incidencias-modal-textarea-padding: 15px 16px;
@@ -1721,8 +1339,10 @@
   --incidencias-modal-upload-radius: 16px;
   --incidencias-modal-upload-padding: 14px;
   --incidencias-modal-upload-gap: 10px;
+
   --incidencias-modal-upload-border:
     color-mix(in srgb, var(--accent) 22%, var(--border-soft));
+
   --incidencias-modal-upload-bg:
     linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, transparent), transparent 90%),
     var(--surface-glass);
@@ -1730,12 +1350,16 @@
   --incidencias-modal-thumb-width: 104px;
   --incidencias-modal-thumb-height: 78px;
   --incidencias-modal-thumb-radius: 16px;
+
   --incidencias-modal-thumb-bg:
     linear-gradient(180deg, rgba(255,255,255,.055), transparent),
-    var(--surface-1, var(--surface-glass));
+    var(--surface-1);
+
   --incidencias-modal-thumb-border: var(--border-soft);
+
   --incidencias-modal-thumb-hover-border:
     color-mix(in srgb, var(--accent) 28%, var(--border-soft));
+
   --incidencias-modal-thumb-shadow:
     0 14px 28px rgba(15,23,42,.10);
 
@@ -1743,11 +1367,13 @@
   --incidencias-modal-preview-min-height: 430px;
   --incidencias-modal-preview-radius: 18px;
   --incidencias-modal-preview-frame-radius: 15px;
+
   --incidencias-modal-preview-border:
     color-mix(in srgb, var(--accent) 22%, var(--border-soft));
+
   --incidencias-modal-preview-bg:
     linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 90%),
-    var(--surface-1, var(--surface-glass));
+    var(--surface-1);
 
   --incidencias-modal-timeline-radius: 18px;
   --incidencias-modal-timeline-padding: 14px 16px 14px 0;
@@ -1764,84 +1390,12 @@
     background var(--duration-normal) var(--ease-standard);
 }
 
-[data-theme="light"] {
-  --incidencias-modal-overlay-bg: rgba(15,23,42,.28);
-  --incidencias-modal-bg:
-    radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 10%, transparent), transparent 34%),
-    linear-gradient(180deg, rgba(255,255,255,.96), rgba(250,251,255,.94));
-
-  --incidencias-modal-shadow:
-    0 30px 70px rgba(15,23,42,.14),
-    0 0 0 1px rgba(255,255,255,.65) inset;
-
-  --incidencias-modal-lift-shadow:
-    0 16px 34px rgba(15,23,42,.085),
-    0 0 0 1px rgba(255,255,255,.72) inset;
-
-  --incidencias-modal-thumb-shadow:
-    0 14px 28px rgba(15,23,42,.10);
-}
-
-@media (max-width: 980px) {
-  :root {
-    --incidencias-modal-width: min(100vw - 24px, 1160px);
-    --incidencias-modal-thumb-width: 82px;
-    --incidencias-modal-thumb-height: 68px;
-  }
-}
-
-@media (max-width: 720px) {
-  :root {
-    --incidencias-modal-width: min(100vw - 20px, 1160px);
-    --incidencias-modal-padding: var(--space-md);
-    --incidencias-modal-avatar-size: 58px;
-    --incidencias-modal-avatar-radius: 17px;
-    --incidencias-modal-title-size: clamp(18px, 5.4vw, 23px);
-    --incidencias-modal-thumb-width: 74px;
-    --incidencias-modal-thumb-height: 62px;
-    --incidencias-modal-thumb-radius: 14px;
-    --incidencias-modal-preview-height: 54vh;
-    --incidencias-modal-preview-min-height: 280px;
-    --incidencias-modal-textarea-min-height: 128px;
-  }
-}
-
-@media (max-width: 420px) {
-  :root {
-    --incidencias-modal-width: min(100vw - 16px, 1160px);
-    --incidencias-modal-thumb-width: 64px;
-    --incidencias-modal-thumb-height: 58px;
-    --incidencias-modal-body-gap: var(--space-md);
-  }
-}
-
 
 /* =========================================================
-   RESPONSIVE TOKENS
+   DENSITY PRESETS
 ========================================================= */
 
-:root {
-  --breakpoint-xs: 390px;
-  --breakpoint-sm: 640px;
-  --breakpoint-md: 768px;
-  --breakpoint-lg: 1024px;
-  --breakpoint-xl: 1280px;
-  --breakpoint-2xl: 1536px;
-
-  --mobile-bottom-nav-height: 0px;
-  --mobile-shell-padding: var(--space-sm);
-  --mobile-content-padding: var(--space-sm);
-
-  --tablet-content-padding: var(--space-md);
-  --desktop-content-padding: var(--content-padding);
-}
-
-
-/* =========================================================
-   DENSITY PRESETS — FIX REAL
-   Tu HTML usa body[data-density="default"].
-========================================================= */
-
+:root[data-density="compact"],
 html[data-density="compact"],
 body[data-density="compact"],
 [data-density="compact"] {
@@ -1853,6 +1407,8 @@ body[data-density="compact"],
   --tablehead-height: calc(40px * var(--ui-scale));
 }
 
+:root[data-density="normal"],
+:root[data-density="default"],
 html[data-density="default"],
 body[data-density="default"],
 html[data-density="normal"],
@@ -1863,6 +1419,7 @@ body[data-density="normal"],
   --density-factor: .93;
 }
 
+:root[data-density="comfortable"],
 html[data-density="comfortable"],
 body[data-density="comfortable"],
 [data-density="comfortable"] {
@@ -1896,8 +1453,16 @@ body[data-route-mode="app"],
 
 
 /* =========================================================
-   MOBILE OVERRIDES
+   RESPONSIVE TOKENS
 ========================================================= */
+
+@media (max-width: 980px) {
+  :root {
+    --incidencias-modal-width: min(100vw - 24px, 1160px);
+    --incidencias-modal-thumb-width: 82px;
+    --incidencias-modal-thumb-height: 68px;
+  }
+}
 
 @media (max-width: 768px) {
   :root {
@@ -1928,6 +1493,22 @@ body[data-route-mode="app"],
   }
 }
 
+@media (max-width: 720px) {
+  :root {
+    --incidencias-modal-width: min(100vw - 20px, 1160px);
+    --incidencias-modal-padding: var(--space-md);
+    --incidencias-modal-avatar-size: 58px;
+    --incidencias-modal-avatar-radius: 17px;
+    --incidencias-modal-title-size: clamp(18px, 5.4vw, 23px);
+    --incidencias-modal-thumb-width: 74px;
+    --incidencias-modal-thumb-height: 62px;
+    --incidencias-modal-thumb-radius: 14px;
+    --incidencias-modal-preview-height: 54vh;
+    --incidencias-modal-preview-min-height: 280px;
+    --incidencias-modal-textarea-min-height: 128px;
+  }
+}
+
 @media (max-width: 420px) {
   :root {
     --ui-scale: .94;
@@ -1938,12 +1519,17 @@ body[data-route-mode="app"],
 
     --font-4xl: calc(28px * var(--ui-scale));
     --font-5xl: calc(34px * var(--ui-scale));
+
+    --incidencias-modal-width: min(100vw - 16px, 1160px);
+    --incidencias-modal-thumb-width: 64px;
+    --incidencias-modal-thumb-height: 58px;
+    --incidencias-modal-body-gap: var(--space-md);
   }
 }
 
 
 /* =========================================================
-   HIGH CONTRAST / REDUCED TRANSPARENCY SAFETY
+   ACCESSIBILITY / USER PREFERENCES
 ========================================================= */
 
 @media (prefers-contrast: more) {
@@ -1955,8 +1541,11 @@ body[data-route-mode="app"],
     --text-muted: color-mix(in srgb, var(--text), transparent 18%);
     --text-dim: color-mix(in srgb, var(--text), transparent 30%);
 
-    --focus-ring: 0 0 0 4px color-mix(in srgb, var(--accent), transparent 50%);
-    --focus-ring-strong: 0 0 0 4px color-mix(in srgb, var(--accent), transparent 34%);
+    --focus-ring:
+      0 0 0 4px color-mix(in srgb, var(--accent), transparent 50%);
+
+    --focus-ring-strong:
+      0 0 0 4px color-mix(in srgb, var(--accent), transparent 34%);
   }
 }
 
@@ -1967,6 +1556,7 @@ body[data-route-mode="app"],
     --dropdown-bg: var(--surface-2);
     --popover-bg: var(--surface-2);
     --modal-bg: var(--surface-2);
+    --drawer-bg: var(--surface-2);
     --topbar-bg: var(--surface-1);
     --sidebar-bg: var(--surface-1);
 
@@ -1977,9 +1567,18 @@ body[data-route-mode="app"],
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 1ms;
+    --duration-normal: 1ms;
+    --duration-slow: 1ms;
+    --duration-xslow: 1ms;
+  }
+}
+
 
 /* =========================================================
-   TOKENIZED KEYFRAMES SUPPORT
+   KEYFRAMES SUPPORT
 ========================================================= */
 
 @keyframes skeletonShimmer {

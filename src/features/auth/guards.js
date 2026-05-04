@@ -2,25 +2,31 @@
    Onion SPA - Auth Guards
    Archivo: src/features/auth/guards.js
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - exponer helpers auth de estado
    - validar acceso por rol
    - bloquear navegación no autenticada
    - construir redirect seguro al login
    - exponer header Authorization
    - no bloquear rutas públicas técnicas
+   - evitar estados auth fantasma
+   - normalizar roles heterogéneos backend
+   - servir como capa estable para Router / vistas / sidebar
 
    HARDENING EXTREMO:
-   - sync auth robusto con token real
+   - authenticated sólo true con token usable + usuario usable + usuario activo
+   - sync auth robusto con AppCore parcial
    - zero ghost auth
    - navegación opcional automática
-   - eventos consistentes
-   - roles normalizados
+   - eventos consistentes y sin tokens reales
+   - roles normalizados con aliases admin/superadmin/owner/root
+   - roles support/agent/helpdesk y manager/lead normalizados
    - guards reutilizables SPA/router
-   - redirects seguros
-   - soporte roles array/string
-   - soporte aliases admin/user/superadmin
-   - no filtrar token en eventos
+   - redirects internos blindados anti open-redirect
+   - soporte roles array/string/CSV
+   - soporte rutas públicas técnicas con tokens
+   - snapshot diagnóstico seguro
+   - compatibilidad legacy con nombres antiguos
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -28,8 +34,16 @@ import { AppCore } from "../../core/index.js";
 import {
   hasValidToken,
   getCurrentCanonicalPath,
+  getCurrentPublicPath,
+  normalizePath,
+  normalizeCanonicalPath,
   extractMessage,
+  redactTokenInText,
 } from "./helpers.js";
+
+import {
+  AUTH_PUBLIC_TECHNICAL_ROUTES,
+} from "./constants.js";
 
 import {
   buildLoginRedirectPath,
@@ -39,20 +53,75 @@ import {
    CONSTANTS
 ========================================================= */
 
+const GUARDS_VERSION =
+  "10.0.0";
+
 const LOGIN_PATH =
   "/login";
 
 const DEFAULT_HOME_PATH =
   "/";
 
+const DEFAULT_FORBIDDEN_PATH =
+  "/403";
+
 const PUBLIC_TECHNICAL_PATHS =
   Object.freeze([
+    ...(Array.isArray(AUTH_PUBLIC_TECHNICAL_ROUTES)
+      ? AUTH_PUBLIC_TECHNICAL_ROUTES
+      : []),
+
     "/activate-account",
     "/reset-password",
     "/reset-password/confirm",
     "/forgot-password",
     "/recover-password",
     "/password-reset",
+  ]);
+
+const ADMIN_ROLE_KEYS =
+  Object.freeze([
+    "admin",
+    "administrator",
+    "administrador",
+    "superadmin",
+    "super_admin",
+    "super-administrador",
+    "super_administrador",
+    "owner",
+    "root",
+  ]);
+
+const SUPPORT_ROLE_KEYS =
+  Object.freeze([
+    "support",
+    "soporte",
+    "agent",
+    "agente",
+    "helpdesk",
+    "operator",
+    "operador",
+  ]);
+
+const MANAGER_ROLE_KEYS =
+  Object.freeze([
+    "manager",
+    "gestor",
+    "gerente",
+    "lead",
+  ]);
+
+const CLIENT_ROLE_KEYS =
+  Object.freeze([
+    "client",
+    "cliente",
+    "customer",
+  ]);
+
+const USER_ROLE_KEYS =
+  Object.freeze([
+    "user",
+    "usuario",
   ]);
 
 const ROLE_ALIASES =
@@ -63,14 +132,53 @@ const ROLE_ALIASES =
     administrator:
       "admin",
 
+    superadmin:
+      "admin",
+
     super_admin:
-      "superadmin",
+      "admin",
 
     "super-admin":
-      "superadmin",
+      "admin",
+
+    super_administrador:
+      "admin",
+
+    "super-administrador":
+      "admin",
 
     owner:
       "admin",
+
+    root:
+      "admin",
+
+    soporte:
+      "support",
+
+    agente:
+      "support",
+
+    agent:
+      "support",
+
+    helpdesk:
+      "support",
+
+    operator:
+      "support",
+
+    operador:
+      "support",
+
+    gestor:
+      "manager",
+
+    gerente:
+      "manager",
+
+    lead:
+      "manager",
 
     cliente:
       "client",
@@ -80,22 +188,28 @@ const ROLE_ALIASES =
 
     usuario:
       "user",
-
-    soporte:
-      "support",
-
-    agent:
-      "support",
   });
 
 /* =========================================================
-   HELPERS
+   BASICS
 ========================================================= */
 
 function isBrowser() {
   return (
     typeof window !== "undefined" &&
     typeof document !== "undefined"
+  );
+}
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
   );
 }
 
@@ -114,26 +228,53 @@ function safeText(value, fallback = "") {
 }
 
 function safeObject(value) {
-  return (
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  )
+  return isObject(value)
     ? value
     : {};
 }
 
-function isFunction(value) {
-  return typeof value === "function";
+function safeArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return [];
+  }
+
+  return [value];
 }
 
-function safeEmit(eventName, payload = {}) {
+function unique(values = []) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) =>
+          safeText(value, "")
+        )
+        .filter(Boolean)
+    )
+  );
+}
+
+function safeClone(value, fallback = null) {
   try {
-    AppCore?.events?.emit?.(
-      eventName,
-      sanitizeGuardPayload(payload)
-    );
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
+    }
   } catch {}
+
+  try {
+    return JSON.parse(
+      JSON.stringify(value)
+    );
+  } catch {
+    return fallback;
+  }
 }
 
 function safeWarn(...args) {
@@ -142,83 +283,165 @@ function safeWarn(...args) {
       "[AuthGuard]",
       ...args
     );
-  } catch {
-    try {
-      console.warn(
-        "[AuthGuard]",
-        ...args
+  } catch {}
+
+  try {
+    console.warn(
+      "[AuthGuard]",
+      ...args
+    );
+  } catch {}
+}
+
+function safeSetState(patch = {}) {
+  const safePatch =
+    safeObject(patch);
+
+  try {
+    AppCore?.setState?.(
+      safePatch
+    );
+  } catch {}
+
+  try {
+    if (
+      AppCore?.state &&
+      typeof AppCore.state === "object"
+    ) {
+      Object.assign(
+        AppCore.state,
+        safePatch
       );
-    } catch {}
+    }
+  } catch {}
+
+  return AppCore?.state || {};
+}
+
+/* =========================================================
+   REDACTION / EVENTS
+========================================================= */
+
+function redactSafe(value = "") {
+  try {
+    return redactTokenInText(value);
+  } catch {
+    return safeText(value, "")
+      .replace(
+        /([?&](?:token|activationToken|activateToken|resetToken|passwordResetToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
+        "$1***"
+      )
+      .replace(
+        /(\/activate-account\/)([^/?#\s]+)/gi,
+        "$1***"
+      )
+      .replace(
+        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      )
+      .replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
   }
 }
 
-function redactTokenInText(value = "") {
-  const raw =
-    safeText(value, "");
-
-  if (!raw) {
-    return "";
+function sanitizeGuardPayload(payload = {}, depth = 0) {
+  if (depth > 5) {
+    return "[MaxDepth]";
   }
 
-  let output =
-    raw;
-
-  try {
-    output = output.replace(
-      /([?&](?:token|activationToken|activateToken|resetToken|passwordResetToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
-      "$1***"
+  if (Array.isArray(payload)) {
+    return payload.map((item) =>
+      sanitizeGuardPayload(
+        item,
+        depth + 1
+      )
     );
+  }
 
-    output = output.replace(
-      /(\/activate-account\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
+  if (!isObject(payload)) {
+    return typeof payload === "string"
+      ? redactSafe(payload)
+      : payload;
+  }
 
-    output = output.replace(
-      /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
+  const output = {};
 
-    output = output.replace(
-      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-      "$1***"
-    );
-  } catch {}
+  for (const [key, value] of Object.entries(payload)) {
+    const lower =
+      safeText(key, "")
+        .toLowerCase();
+
+    if (
+      lower.includes("token") ||
+      lower.includes("authorization") ||
+      lower.includes("password") ||
+      lower === "code" ||
+      lower === "t"
+    ) {
+      output[key] =
+        value ? "***" : value;
+      continue;
+    }
+
+    if (
+      lower.includes("path") ||
+      lower.includes("url") ||
+      lower.includes("redirect")
+    ) {
+      output[key] =
+        typeof value === "string"
+          ? redactSafe(value)
+          : sanitizeGuardPayload(
+              value,
+              depth + 1
+            );
+      continue;
+    }
+
+    output[key] =
+      sanitizeGuardPayload(
+        value,
+        depth + 1
+      );
+  }
 
   return output;
 }
 
-function sanitizeGuardPayload(payload = {}) {
-  const clean =
-    safeObject(payload);
+function safeEmit(eventName, payload = {}) {
+  const cleanEvent =
+    safeText(eventName, "");
 
-  return {
-    ...clean,
+  if (!cleanEvent) {
+    return false;
+  }
 
-    path:
-      redactTokenInText(clean.path || ""),
+  try {
+    AppCore?.events?.emit?.(
+      cleanEvent,
+      sanitizeGuardPayload(payload)
+    );
 
-    publicPath:
-      redactTokenInText(clean.publicPath || ""),
+    return true;
+  } catch {}
 
-    redirectTo:
-      redactTokenInText(clean.redirectTo || ""),
-
-    token:
-      undefined,
-
-    accessToken:
-      undefined,
-
-    refreshToken:
-      undefined,
-  };
+  return false;
 }
 
-function normalizePathname(path = "/") {
+/* =========================================================
+   PATH HELPERS
+========================================================= */
+
+function normalizePathFallback(path = "/") {
   let value =
     safeText(path, "/")
       .replace(/\\/g, "/");
+
+  if (!value) {
+    value = "/";
+  }
 
   if (!value.startsWith("/")) {
     value = `/${value}`;
@@ -226,13 +449,52 @@ function normalizePathname(path = "/") {
 
   value =
     value
-      .split("?")[0]
-      .split("#")[0]
       .replace(/\/{2,}/g, "/")
       .replace(/\/+$/g, "") ||
     "/";
 
   return value;
+}
+
+function normalizePublicPathSafe(path = "/") {
+  const raw =
+    safeText(path, "/");
+
+  try {
+    return normalizePath(raw);
+  } catch {
+    return normalizePathFallback(raw);
+  }
+}
+
+function normalizeCanonicalPathSafe(path = "/") {
+  const raw =
+    safeText(path, "/");
+
+  try {
+    return normalizeCanonicalPath(raw);
+  } catch {
+    return normalizePathFallback(
+      raw
+        .split("?")[0]
+        .split("#")[0] ||
+        "/"
+    );
+  }
+}
+
+function getBrowserPublicPath() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  try {
+    return normalizePublicPathSafe(
+      `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
+    );
+  } catch {
+    return "";
+  }
 }
 
 function getCurrentPath() {
@@ -241,7 +503,16 @@ function getCurrentPath() {
       getCurrentCanonicalPath?.();
 
     if (canonical) {
-      return normalizePathname(canonical);
+      return normalizeCanonicalPathSafe(canonical);
+    }
+  } catch {}
+
+  try {
+    const publicPath =
+      getCurrentPublicPath?.();
+
+    if (publicPath) {
+      return normalizeCanonicalPathSafe(publicPath);
     }
   } catch {}
 
@@ -251,28 +522,49 @@ function getCurrentPath() {
       AppCore?.state?.publicPath;
 
     if (statePath) {
-      return normalizePathname(statePath);
+      return normalizeCanonicalPathSafe(statePath);
     }
   } catch {}
 
-  if (isBrowser()) {
-    try {
-      return normalizePathname(
-        `${window.location.pathname || "/"}${window.location.search || ""}${window.location.hash || ""}`
-      );
-    } catch {}
-  }
+  return normalizeCanonicalPathSafe(
+    getBrowserPublicPath() || "/"
+  );
+}
 
-  return "/";
+function getCurrentPublicPathSafe() {
+  try {
+    const publicPath =
+      getCurrentPublicPath?.();
+
+    if (publicPath) {
+      return normalizePublicPathSafe(publicPath);
+    }
+  } catch {}
+
+  try {
+    const statePath =
+      AppCore?.state?.publicPath ||
+      AppCore?.state?.route;
+
+    if (statePath) {
+      return normalizePublicPathSafe(statePath);
+    }
+  } catch {}
+
+  return normalizePublicPathSafe(
+    getBrowserPublicPath() || "/"
+  );
 }
 
 function isPublicTechnicalPath(path = "") {
   const clean =
-    normalizePathname(path);
+    normalizeCanonicalPathSafe(path)
+      .toLowerCase();
 
-  return PUBLIC_TECHNICAL_PATHS.some((publicPath) => {
+  return unique(PUBLIC_TECHNICAL_PATHS).some((publicPath) => {
     const normalized =
-      normalizePathname(publicPath);
+      normalizeCanonicalPathSafe(publicPath)
+        .toLowerCase();
 
     return (
       clean === normalized ||
@@ -281,29 +573,15 @@ function isPublicTechnicalPath(path = "") {
   });
 }
 
-function getRouter() {
-  try {
-    return (
-      AppCore?.modules?.get?.("router") ||
-      AppCore?.modules?.get?.("Router") ||
-      AppCore?.router ||
-      AppCore?.Router ||
-      null
-    );
-  } catch {
-    return (
-      AppCore?.router ||
-      AppCore?.Router ||
-      null
-    );
-  }
-}
-
 function isSafeInternalPath(path = "") {
   const value =
     safeText(path, "");
 
   if (!value) {
+    return false;
+  }
+
+  if (!value.startsWith("/")) {
     return false;
   }
 
@@ -315,23 +593,137 @@ function isSafeInternalPath(path = "") {
     return false;
   }
 
-  return value.startsWith("/");
+  if (
+    /[\r\n\t]/.test(value) ||
+    value.toLowerCase().includes("%0d") ||
+    value.toLowerCase().includes("%0a") ||
+    value.toLowerCase().includes("%09") ||
+    value.toLowerCase().includes("%5c")
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 function normalizeRedirectPath(path = "/", fallback = DEFAULT_HOME_PATH) {
-  const value =
+  const raw =
     safeText(path, fallback);
 
-  if (!isSafeInternalPath(value)) {
+  let candidate =
+    raw;
+
+  try {
+    candidate =
+      normalizePublicPathSafe(raw);
+  } catch {
+    candidate =
+      normalizePathFallback(raw);
+  }
+
+  if (!isSafeInternalPath(candidate)) {
     return fallback;
   }
 
-  return value;
+  return candidate;
+}
+
+function buildLoginRedirect(currentPath = "/", redirectTo = LOGIN_PATH) {
+  const loginPath =
+    normalizeRedirectPath(
+      redirectTo,
+      LOGIN_PATH
+    );
+
+  const safeCurrent =
+    normalizeRedirectPath(
+      currentPath,
+      DEFAULT_HOME_PATH
+    );
+
+  if (loginPath === LOGIN_PATH) {
+    try {
+      const built =
+        buildLoginRedirectPath(
+          safeCurrent
+        );
+
+      if (
+        built &&
+        isSafeInternalPath(built)
+      ) {
+        return built;
+      }
+    } catch {}
+  }
+
+  try {
+    const url =
+      new URL(
+        loginPath,
+        "http://localhost"
+      );
+
+    url.searchParams.set(
+      "redirect",
+      safeCurrent
+    );
+
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return `${loginPath}?redirect=${encodeURIComponent(safeCurrent)}`;
+  }
+}
+
+/* =========================================================
+   ROUTER / NAVIGATION
+========================================================= */
+
+function getRouter() {
+  const candidates = [];
+
+  try {
+    if (isFunction(AppCore?.modules?.get)) {
+      candidates.push(
+        AppCore.modules.get("router"),
+        AppCore.modules.get("Router")
+      );
+    }
+  } catch {}
+
+  candidates.push(
+    AppCore?.router,
+    AppCore?.Router,
+    AppCore?.modules?.router,
+    AppCore?.modules?.Router
+  );
+
+  if (isBrowser()) {
+    try {
+      candidates.push(
+        window.Router,
+        window.AppRouter,
+        window.AppCore?.router,
+        window.AppCore?.Router
+      );
+    } catch {}
+  }
+
+  return candidates.find((candidate) =>
+    candidate &&
+    (
+      isFunction(candidate.navigate) ||
+      isFunction(candidate.go)
+    )
+  ) || null;
 }
 
 function navigateTo(path = "/", options = {}) {
   const target =
-    normalizeRedirectPath(path, DEFAULT_HOME_PATH);
+    normalizeRedirectPath(
+      path,
+      DEFAULT_HOME_PATH
+    );
 
   const replaceState =
     options.replaceState !== false;
@@ -342,25 +734,69 @@ function navigateTo(path = "/", options = {}) {
   const hardRedirect =
     options.hardRedirect === true;
 
+  safeEmit(
+    "auth:guard:navigate",
+    {
+      target,
+      replaceState,
+      force,
+      hardRedirect,
+      reason:
+        options.reason || "guard",
+    }
+  );
+
   if (!hardRedirect) {
     try {
       const router =
         getRouter();
 
       if (isFunction(router?.navigate)) {
-        router.navigate(target, {
-          replaceState,
-          force,
-        });
+        const result =
+          router.navigate(
+            target,
+            {
+              replaceState,
+              force,
+            }
+          );
+
+        if (
+          result &&
+          isFunction(result.catch)
+        ) {
+          result.catch((error) => {
+            safeWarn(
+              "Router.navigate falló.",
+              error
+            );
+          });
+        }
 
         return true;
       }
 
       if (isFunction(router?.go)) {
-        router.go(target, {
-          replaceState,
-          force,
-        });
+        const result =
+          router.go(
+            target,
+            {
+              replaceState,
+              force,
+            }
+          );
+
+        if (
+          result &&
+          isFunction(result.catch)
+        ) {
+          result.catch((error) => {
+            safeWarn(
+              "Router.go falló.",
+              error
+            );
+          });
+        }
 
         return true;
       }
@@ -417,9 +853,31 @@ function getCurrentUser() {
   );
 }
 
+function hasUsableUser(user = null) {
+  if (!isObject(user)) {
+    return false;
+  }
+
+  return Boolean(
+    safeText(user.id, "") ||
+      safeText(user.userId, "") ||
+      safeText(user.user_id, "") ||
+      safeText(user._id, "") ||
+      safeText(user.uid, "") ||
+      safeText(user.username, "") ||
+      safeText(user.userName, "") ||
+      safeText(user.user_name, "") ||
+      safeText(user.email, "") ||
+      safeText(user.mail, "") ||
+      safeText(user.phone, "") ||
+      safeText(user.telefono, "") ||
+      safeText(user.mobile, "")
+  );
+}
+
 function isUserActive(user = null) {
-  if (!user || typeof user !== "object") {
-    return true;
+  if (!isObject(user)) {
+    return false;
   }
 
   return !(
@@ -427,7 +885,17 @@ function isUserActive(user = null) {
     user.enabled === false ||
     user.disabled === true ||
     user.is_active === false ||
-    user.isActive === false
+    user.isActive === false ||
+    user.blocked === true ||
+    user.locked === true ||
+    user.deleted === true ||
+    user.archived === true ||
+    user.status === "disabled" ||
+    user.status === "blocked" ||
+    user.status === "deleted" ||
+    user.estado === "disabled" ||
+    user.estado === "bloqueado" ||
+    user.estado === "eliminado"
   );
 }
 
@@ -441,31 +909,68 @@ function syncAuthState() {
   const authenticated =
     Boolean(
       hasValidToken(token) &&
-      isUserActive(user)
+        hasUsableUser(user) &&
+        isUserActive(user)
     );
+
+  const roles =
+    authenticated
+      ? getUserRoles(user)
+      : [];
 
   const role =
     authenticated
-      ? getCurrentRole()
+      ? resolveCanonicalRole(roles)
       : "";
 
-  try {
-    if (AppCore?.state) {
-      AppCore.state.authenticated =
-        authenticated;
+  safeSetState({
+    authenticated,
+    hasToken:
+      Boolean(hasValidToken(token)),
 
-      AppCore.state.role =
-        role || null;
-    }
-  } catch {}
+    user:
+      authenticated
+        ? user
+        : null,
 
-  try {
-    AppCore?.setState?.({
-      authenticated,
-      role:
-        role || null,
-    });
-  } catch {}
+    currentUser:
+      authenticated
+        ? user
+        : null,
+
+    authUser:
+      authenticated
+        ? user
+        : null,
+
+    sessionUser:
+      authenticated
+        ? user
+        : null,
+
+    role:
+      role || "",
+
+    userRole:
+      role || "",
+
+    roles:
+      authenticated
+        ? roles
+        : [],
+
+    isAdmin:
+      authenticated &&
+      roles.some(isAdminRole),
+
+    isSupport:
+      authenticated &&
+      roles.some(isSupportRole),
+
+    isManager:
+      authenticated &&
+      roles.some(isManagerRole),
+  });
 
   return authenticated;
 }
@@ -484,45 +989,397 @@ function normalizeRole(value = "") {
   const raw =
     safeText(value, "")
       .toLowerCase()
-      .replace(/\s+/g, "_");
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[\s-]+/g, "_")
+      .replace(/[^a-z0-9_:.]/g, "")
+      .trim();
 
   return ROLE_ALIASES[raw] || raw;
 }
 
-function getUserRoles(user = null) {
+function splitRoleValue(value) {
+  if (Array.isArray(value)) {
+    return value.flatMap(splitRoleValue);
+  }
+
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return [];
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(/[,\s|]+/g)
+      .map(normalizeRole)
+      .filter(Boolean);
+  }
+
+  return [
+    normalizeRole(value),
+  ].filter(Boolean);
+}
+
+function isAdminRole(value = "") {
+  const role =
+    normalizeRole(value);
+
+  return (
+    role === "admin" ||
+    ADMIN_ROLE_KEYS.map(normalizeRole).includes(role)
+  );
+}
+
+function isSupportRole(value = "") {
+  const role =
+    normalizeRole(value);
+
+  return (
+    role === "support" ||
+    SUPPORT_ROLE_KEYS.map(normalizeRole).includes(role)
+  );
+}
+
+function isManagerRole(value = "") {
+  const role =
+    normalizeRole(value);
+
+  return (
+    role === "manager" ||
+    MANAGER_ROLE_KEYS.map(normalizeRole).includes(role)
+  );
+}
+
+function isClientRole(value = "") {
+  const role =
+    normalizeRole(value);
+
+  return (
+    role === "client" ||
+    CLIENT_ROLE_KEYS.map(normalizeRole).includes(role)
+  );
+}
+
+function isUserRole(value = "") {
+  const role =
+    normalizeRole(value);
+
+  return (
+    role === "user" ||
+    USER_ROLE_KEYS.map(normalizeRole).includes(role)
+  );
+}
+
+function expandRoleAliases(roles = []) {
+  const normalized =
+    unique(
+      safeArray(roles)
+        .flat(Infinity)
+        .flatMap(splitRoleValue)
+        .map(normalizeRole)
+        .filter(Boolean)
+    );
+
+  const result =
+    new Set(normalized);
+
+  if (normalized.some(isAdminRole)) {
+    result.add("admin");
+
+    ADMIN_ROLE_KEYS.forEach((role) =>
+      result.add(normalizeRole(role))
+    );
+  }
+
+  if (normalized.some(isSupportRole)) {
+    result.add("support");
+
+    SUPPORT_ROLE_KEYS.forEach((role) =>
+      result.add(normalizeRole(role))
+    );
+  }
+
+  if (normalized.some(isManagerRole)) {
+    result.add("manager");
+
+    MANAGER_ROLE_KEYS.forEach((role) =>
+      result.add(normalizeRole(role))
+    );
+  }
+
+  if (normalized.some(isClientRole)) {
+    result.add("client");
+
+    CLIENT_ROLE_KEYS.forEach((role) =>
+      result.add(normalizeRole(role))
+    );
+  }
+
+  if (normalized.some(isUserRole)) {
+    result.add("user");
+
+    USER_ROLE_KEYS.forEach((role) =>
+      result.add(normalizeRole(role))
+    );
+  }
+
+  return unique(
+    Array.from(result)
+  );
+}
+
+function resolveCanonicalRole(roles = []) {
+  const expanded =
+    expandRoleAliases(roles);
+
+  if (expanded.some(isAdminRole)) {
+    return "admin";
+  }
+
+  if (expanded.some(isSupportRole)) {
+    return "support";
+  }
+
+  if (expanded.some(isManagerRole)) {
+    return "manager";
+  }
+
+  if (expanded.some(isClientRole)) {
+    return "client";
+  }
+
+  if (expanded.some(isUserRole)) {
+    return "user";
+  }
+
+  return expanded[0] || "";
+}
+
+function collectRoleCandidatesFromUser(user = null) {
   const source =
     safeObject(user);
 
-  const roles = [
+  const raw =
+    safeObject(source.raw);
+
+  const profile =
+    safeObject(source.profile);
+
+  const account =
+    safeObject(source.account);
+
+  const permissions =
+    safeObject(source.permissions);
+
+  const meta =
+    safeObject(source.meta);
+
+  const claims =
+    safeObject(source.claims);
+
+  const state =
+    AppCore?.state || {};
+
+  const candidates = [
     source.role,
     source.rol,
     source.userRole,
+    source.user_role,
     source.type,
     source.userType,
-    AppCore?.state?.role,
-    AppCore?.state?.userRole,
-    AppCore?.state?.rol,
+    source.user_type,
+    source.perfil,
+
+    profile.role,
+    profile.rol,
+    profile.userRole,
+    profile.user_role,
+    profile.type,
+    profile.perfil,
+
+    account.role,
+    account.rol,
+    account.userRole,
+    account.user_role,
+    account.type,
+
+    raw.role,
+    raw.rol,
+    raw.userRole,
+    raw.user_role,
+    raw.type,
+    raw.userType,
+    raw.user_type,
+    raw.perfil,
+
+    raw?.profile?.role,
+    raw?.profile?.rol,
+    raw?.profile?.userRole,
+    raw?.profile?.user_role,
+    raw?.profile?.type,
+    raw?.profile?.perfil,
+
+    raw?.account?.role,
+    raw?.account?.rol,
+    raw?.account?.userRole,
+    raw?.account?.type,
+
+    meta.role,
+    meta.rol,
+    meta.userRole,
+    meta.user_role,
+
+    claims.role,
+    claims.rol,
+    claims.userRole,
+    claims.user_role,
+    claims["custom:role"],
+    claims["https://onion/role"],
+
+    state.role,
+    state.rol,
+    state.userRole,
+    state.user_role,
+    state.session?.role,
+    state.session?.rol,
   ];
 
-  if (Array.isArray(source.roles)) {
-    roles.push(...source.roles);
+  const arrays = [
+    source.roles,
+    source.roleList,
+    source.role_list,
+    source.groups,
+    source.authorities,
+    source.scopes,
+
+    profile.roles,
+    profile.groups,
+    profile.authorities,
+    profile.scopes,
+
+    account.roles,
+    account.groups,
+    account.scopes,
+
+    raw.roles,
+    raw.roleList,
+    raw.role_list,
+    raw.groups,
+    raw.authorities,
+    raw.scopes,
+
+    raw?.profile?.roles,
+    raw?.profile?.groups,
+    raw?.profile?.scopes,
+
+    raw?.account?.roles,
+    raw?.account?.groups,
+    raw?.account?.scopes,
+
+    permissions.roles,
+    permissions.scopes,
+    permissions.items,
+    permissions.list,
+
+    meta.roles,
+    meta.groups,
+    meta.scopes,
+
+    claims.roles,
+    claims.groups,
+    claims.scopes,
+
+    state.roles,
+    state.session?.roles,
+  ];
+
+  const adminFlag =
+    [
+      source.isAdmin,
+      source.admin,
+      source.is_admin,
+      source.isSuperAdmin,
+      source.superAdmin,
+      source.is_super_admin,
+      source.canManageUsers,
+      source.can_manage_users,
+      source.canAccessUsers,
+      source.can_access_users,
+
+      profile.isAdmin,
+      profile.admin,
+      profile.isSuperAdmin,
+      profile.superAdmin,
+      profile.canManageUsers,
+      profile.canAccessUsers,
+
+      account.isAdmin,
+      account.admin,
+      account.isSuperAdmin,
+      account.superAdmin,
+
+      raw.isAdmin,
+      raw.admin,
+      raw.is_admin,
+      raw.isSuperAdmin,
+      raw.superAdmin,
+      raw.is_super_admin,
+      raw.canManageUsers,
+      raw.can_manage_users,
+      raw.canAccessUsers,
+      raw.can_access_users,
+
+      meta.isAdmin,
+      meta.admin,
+      meta.isSuperAdmin,
+      meta.superAdmin,
+      meta.canManageUsers,
+      meta.canAccessUsers,
+
+      claims.isAdmin,
+      claims.admin,
+      claims.isSuperAdmin,
+      claims.superAdmin,
+      claims.canManageUsers,
+      claims.canAccessUsers,
+
+      state.isAdmin,
+      state.session?.isAdmin,
+    ].some((value) =>
+      value === true ||
+      value === "true" ||
+      value === 1
+    );
+
+  if (adminFlag) {
+    candidates.push("admin");
   }
 
-  if (Array.isArray(AppCore?.state?.roles)) {
-    roles.push(...AppCore.state.roles);
-  }
+  return [
+    ...candidates,
+    ...arrays.flatMap((value) =>
+      safeArray(value)
+    ),
+  ];
+}
 
-  return roles
-    .flat()
-    .map(normalizeRole)
-    .filter(Boolean);
+function getUserRoles(user = null) {
+  return expandRoleAliases(
+    collectRoleCandidatesFromUser(user)
+  );
 }
 
 export function getCurrentRole() {
-  const roles =
-    getUserRoles(getCurrentUser());
+  const user =
+    getCurrentUser();
 
-  return roles[0] || "";
+  const roles =
+    getUserRoles(user);
+
+  return resolveCanonicalRole(roles);
 }
 
 export function getCurrentRoles() {
@@ -533,24 +1390,29 @@ export function getCurrentRoles() {
 
 export function hasRole(...roles) {
   const requiredRoles =
-    roles
-      .flat()
-      .map(normalizeRole)
-      .filter(Boolean);
+    expandRoleAliases(
+      roles
+        .flat(Infinity)
+        .flatMap(splitRoleValue)
+    );
 
   if (!requiredRoles.length) {
     return true;
   }
 
   const currentRoles =
-    getCurrentRoles();
+    new Set(
+      expandRoleAliases(
+        getCurrentRoles()
+      )
+    );
 
-  if (!currentRoles.length) {
+  if (!currentRoles.size) {
     return false;
   }
 
   return requiredRoles.some((role) =>
-    currentRoles.includes(role)
+    currentRoles.has(role)
   );
 }
 
@@ -576,7 +1438,7 @@ export function getAuthHeader() {
 }
 
 /* =========================================================
-   ROUTE GUARDS
+   GUARD PAYLOADS
 ========================================================= */
 
 function buildBlockedPayload({
@@ -586,6 +1448,9 @@ function buildBlockedPayload({
   extra = {},
 } = {}) {
   return {
+    version:
+      GUARDS_VERSION,
+
     reason:
       safeText(reason, "blocked"),
 
@@ -593,7 +1458,7 @@ function buildBlockedPayload({
       path || getCurrentPath(),
 
     publicPath:
-      AppCore?.state?.publicPath || "",
+      getCurrentPublicPathSafe(),
 
     redirectTo:
       redirectTo || "",
@@ -601,77 +1466,113 @@ function buildBlockedPayload({
     authenticated:
       Boolean(AppCore?.state?.authenticated),
 
+    hasToken:
+      Boolean(hasValidToken(getCurrentToken())),
+
+    hasUser:
+      Boolean(hasUsableUser(getCurrentUser())),
+
+    userActive:
+      Boolean(isUserActive(getCurrentUser())),
+
     currentRole:
       getCurrentRole() || null,
+
+    currentRoles:
+      getCurrentRoles(),
 
     ...extra,
   };
 }
 
-function buildLoginRedirect(currentPath = "/", redirectTo = LOGIN_PATH) {
-  const loginPath =
-    normalizeRedirectPath(redirectTo, LOGIN_PATH);
+function buildAllowedPayload({
+  reason,
+  path,
+  extra = {},
+} = {}) {
+  return {
+    version:
+      GUARDS_VERSION,
 
-  try {
-    return buildLoginRedirectPath(
-      currentPath,
-      loginPath
-    );
-  } catch {}
+    reason:
+      safeText(reason, "allowed"),
 
-  try {
-    return buildLoginRedirectPath(
-      currentPath
-    );
-  } catch {}
+    path:
+      path || getCurrentPath(),
 
-  const safeCurrent =
-    normalizeRedirectPath(currentPath, DEFAULT_HOME_PATH);
+    publicPath:
+      getCurrentPublicPathSafe(),
 
-  return `${loginPath}?redirect=${encodeURIComponent(safeCurrent)}`;
+    authenticated:
+      Boolean(AppCore?.state?.authenticated),
+
+    currentRole:
+      getCurrentRole() || null,
+
+    currentRoles:
+      getCurrentRoles(),
+
+    ...extra,
+  };
 }
+
+/* =========================================================
+   ROUTE GUARDS
+========================================================= */
 
 export function guardAuthenticated(options = {}) {
   const {
+    path = "",
     redirectTo = LOGIN_PATH,
     withRedirectBack = true,
     autoNavigate = false,
     hardRedirect = false,
     allowPublicTechnicalRoutes = true,
-  } = options;
+    emitEvents = true,
+  } = safeObject(options);
 
   const currentPath =
-    getCurrentPath();
+    normalizeCanonicalPathSafe(
+      path || getCurrentPath()
+    );
+
+  const currentPublicPath =
+    getCurrentPublicPathSafe();
 
   if (
     allowPublicTechnicalRoutes &&
-    isPublicTechnicalPath(currentPath)
+    (
+      isPublicTechnicalPath(currentPath) ||
+      isPublicTechnicalPath(currentPublicPath)
+    )
   ) {
-    safeEmit(
-      "auth:guard:allowed",
-      {
-        reason:
-          "public-technical-route",
-        path:
-          currentPath,
-      }
-    );
+    if (emitEvents !== false) {
+      safeEmit(
+        "auth:guard:allowed",
+        buildAllowedPayload({
+          reason:
+            "public-technical-route",
+          path:
+            currentPath,
+        })
+      );
+    }
 
     return true;
   }
 
   if (isAuthenticated()) {
-    safeEmit(
-      "auth:guard:allowed",
-      {
-        reason:
-          "authenticated",
-        path:
-          currentPath,
-        currentRole:
-          getCurrentRole() || null,
-      }
-    );
+    if (emitEvents !== false) {
+      safeEmit(
+        "auth:guard:allowed",
+        buildAllowedPayload({
+          reason:
+            "authenticated",
+          path:
+            currentPath,
+        })
+      );
+    }
 
     return true;
   }
@@ -679,7 +1580,7 @@ export function guardAuthenticated(options = {}) {
   const finalRedirect =
     withRedirectBack
       ? buildLoginRedirect(
-          currentPath,
+          currentPublicPath || currentPath,
           redirectTo
         )
       : normalizeRedirectPath(
@@ -687,8 +1588,7 @@ export function guardAuthenticated(options = {}) {
           LOGIN_PATH
         );
 
-  safeEmit(
-    "auth:guard:blocked",
+  const payload =
     buildBlockedPayload({
       reason:
         "not-authenticated",
@@ -696,8 +1596,14 @@ export function guardAuthenticated(options = {}) {
         currentPath,
       redirectTo:
         finalRedirect,
-    })
-  );
+    });
+
+  if (emitEvents !== false) {
+    safeEmit(
+      "auth:guard:blocked",
+      payload
+    );
+  }
 
   if (
     autoNavigate ||
@@ -712,6 +1618,8 @@ export function guardAuthenticated(options = {}) {
           true,
         hardRedirect:
           Boolean(hardRedirect),
+        reason:
+          "not-authenticated",
       }
     );
   }
@@ -721,34 +1629,46 @@ export function guardAuthenticated(options = {}) {
 
 export function guardRole(roles = [], options = {}) {
   const roleList =
-    Array.isArray(roles)
-      ? roles
-      : [roles];
+    safeArray(roles)
+      .flat(Infinity);
 
   const {
-    redirectTo = DEFAULT_HOME_PATH,
+    path = "",
+    redirectTo = DEFAULT_FORBIDDEN_PATH,
+    fallbackRedirectTo = DEFAULT_HOME_PATH,
     loginRedirectTo = LOGIN_PATH,
     autoNavigate = false,
     hardRedirect = false,
     allowPublicTechnicalRoutes = true,
-  } = options;
+    emitEvents = true,
+  } = safeObject(options);
 
   const currentPath =
-    getCurrentPath();
+    normalizeCanonicalPathSafe(
+      path || getCurrentPath()
+    );
+
+  const currentPublicPath =
+    getCurrentPublicPathSafe();
 
   if (
     allowPublicTechnicalRoutes &&
-    isPublicTechnicalPath(currentPath)
+    (
+      isPublicTechnicalPath(currentPath) ||
+      isPublicTechnicalPath(currentPublicPath)
+    )
   ) {
-    safeEmit(
-      "auth:guard:allowed",
-      {
-        reason:
-          "public-technical-route",
-        path:
-          currentPath,
-      }
-    );
+    if (emitEvents !== false) {
+      safeEmit(
+        "auth:guard:allowed",
+        buildAllowedPayload({
+          reason:
+            "public-technical-route",
+          path:
+            currentPath,
+        })
+      );
+    }
 
     return true;
   }
@@ -756,12 +1676,11 @@ export function guardRole(roles = [], options = {}) {
   if (!isAuthenticated()) {
     const loginRedirect =
       buildLoginRedirect(
-        currentPath,
+        currentPublicPath || currentPath,
         loginRedirectTo
       );
 
-    safeEmit(
-      "auth:guard:blocked",
+    const payload =
       buildBlockedPayload({
         reason:
           "not-authenticated",
@@ -771,13 +1690,16 @@ export function guardRole(roles = [], options = {}) {
           loginRedirect,
         extra: {
           requiredRoles:
-            roleList
-              .flat()
-              .map(normalizeRole)
-              .filter(Boolean),
+            expandRoleAliases(roleList),
         },
-      })
-    );
+      });
+
+    if (emitEvents !== false) {
+      safeEmit(
+        "auth:guard:blocked",
+        payload
+      );
+    }
 
     if (autoNavigate || hardRedirect) {
       navigateTo(
@@ -789,6 +1711,8 @@ export function guardRole(roles = [], options = {}) {
             true,
           hardRedirect:
             Boolean(hardRedirect),
+          reason:
+            "role:not-authenticated",
         }
       );
     }
@@ -797,19 +1721,94 @@ export function guardRole(roles = [], options = {}) {
   }
 
   if (hasRole(...roleList)) {
+    if (emitEvents !== false) {
+      safeEmit(
+        "auth:guard:allowed",
+        buildAllowedPayload({
+          reason:
+            "role-match",
+          path:
+            currentPath,
+          extra: {
+            requiredRoles:
+              expandRoleAliases(roleList),
+          },
+        })
+      );
+    }
+
+    return true;
+  }
+
+  const finalRedirect =
+    normalizeRedirectPath(
+      redirectTo,
+      fallbackRedirectTo
+    );
+
+  const payload =
+    buildBlockedPayload({
+      reason:
+        "insufficient-role",
+      path:
+        currentPath,
+      redirectTo:
+        finalRedirect,
+      extra: {
+        requiredRoles:
+          expandRoleAliases(roleList),
+      },
+    });
+
+  if (emitEvents !== false) {
     safeEmit(
-      "auth:guard:allowed",
+      "auth:guard:blocked",
+      payload
+    );
+  }
+
+  if (autoNavigate || hardRedirect) {
+    navigateTo(
+      finalRedirect,
       {
-        reason:
-          "role-match",
-        path:
-          currentPath,
-        currentRole:
-          getCurrentRole() || null,
-        currentRoles:
-          getCurrentRoles(),
+        replaceState:
+          true,
+        force:
+          true,
+          hardRedirect:
+            Boolean(hardRedirect),
+          reason:
+            "insufficient-role",
       }
     );
+  }
+
+  return false;
+}
+
+export function guardGuest(options = {}) {
+  const {
+    redirectTo = DEFAULT_HOME_PATH,
+    autoNavigate = false,
+    hardRedirect = false,
+    emitEvents = true,
+  } = safeObject(options);
+
+  const currentPath =
+    getCurrentPath();
+
+  if (!isAuthenticated()) {
+    if (emitEvents !== false) {
+      safeEmit(
+        "auth:guard:allowed",
+        buildAllowedPayload({
+          reason:
+            "guest",
+          path:
+            currentPath,
+        })
+      );
+    }
 
     return true;
   }
@@ -820,28 +1819,19 @@ export function guardRole(roles = [], options = {}) {
       DEFAULT_HOME_PATH
     );
 
-  safeEmit(
-    "auth:guard:blocked",
-    buildBlockedPayload({
-      reason:
-        "insufficient-role",
-      path:
-        currentPath,
-      redirectTo:
-        finalRedirect,
-      extra: {
-        currentRole:
-          getCurrentRole() || null,
-        currentRoles:
-          getCurrentRoles(),
-        requiredRoles:
-          roleList
-            .flat()
-            .map(normalizeRole)
-            .filter(Boolean),
-      },
-    })
-  );
+  if (emitEvents !== false) {
+    safeEmit(
+      "auth:guard:blocked",
+      buildBlockedPayload({
+        reason:
+          "already-authenticated",
+        path:
+          currentPath,
+        redirectTo:
+          finalRedirect,
+      })
+    );
+  }
 
   if (autoNavigate || hardRedirect) {
     navigateTo(
@@ -853,11 +1843,50 @@ export function guardRole(roles = [], options = {}) {
           true,
         hardRedirect:
           Boolean(hardRedirect),
+        reason:
+          "already-authenticated",
       }
     );
   }
 
   return false;
+}
+
+export function canAccessRoute({
+  path = "",
+  roles = [],
+  requireAuth = true,
+  allowPublicTechnicalRoutes = true,
+} = {}) {
+  const currentPath =
+    normalizeCanonicalPathSafe(
+      path || getCurrentPath()
+    );
+
+  if (
+    allowPublicTechnicalRoutes &&
+    isPublicTechnicalPath(currentPath)
+  ) {
+    return true;
+  }
+
+  if (
+    requireAuth !== false &&
+    !isAuthenticated()
+  ) {
+    return false;
+  }
+
+  const roleList =
+    safeArray(roles)
+      .flat(Infinity)
+      .filter(Boolean);
+
+  if (!roleList.length) {
+    return true;
+  }
+
+  return hasRole(...roleList);
 }
 
 /* =========================================================
@@ -875,8 +1904,18 @@ export function buildGuardErrorPayload(error) {
     })();
 
   return {
-    error,
     message,
+
+    name:
+      error?.name || "Error",
+
+    status:
+      error?.status || 0,
+
+    code:
+      error?.code ||
+      error?.data?.code ||
+      null,
   };
 }
 
@@ -888,18 +1927,32 @@ export function getAuthGuardsSnapshot() {
   const currentPath =
     getCurrentPath();
 
+  const currentPublicPath =
+    getCurrentPublicPathSafe();
+
+  const user =
+    getCurrentUser();
+
+  const token =
+    getCurrentToken();
+
+  syncAuthState();
+
   return {
+    version:
+      GUARDS_VERSION,
+
     authenticated:
       Boolean(AppCore?.state?.authenticated),
 
     hasToken:
-      Boolean(hasValidToken(getCurrentToken())),
+      Boolean(hasValidToken(token)),
 
     hasUser:
-      Boolean(getCurrentUser()),
+      Boolean(hasUsableUser(user)),
 
     userActive:
-      isUserActive(getCurrentUser()),
+      Boolean(isUserActive(user)),
 
     currentRole:
       getCurrentRole() || null,
@@ -907,16 +1960,55 @@ export function getAuthGuardsSnapshot() {
     currentRoles:
       getCurrentRoles(),
 
+    isAdmin:
+      getCurrentRoles().some(isAdminRole),
+
+    isSupport:
+      getCurrentRoles().some(isSupportRole),
+
+    isManager:
+      getCurrentRoles().some(isManagerRole),
+
     currentPath:
-      redactTokenInText(currentPath),
+      redactSafe(currentPath),
+
+    currentPublicPath:
+      redactSafe(currentPublicPath),
 
     publicTechnical:
-      isPublicTechnicalPath(currentPath),
+      isPublicTechnicalPath(currentPath) ||
+      isPublicTechnicalPath(currentPublicPath),
 
     hasRouter:
       Boolean(getRouter()),
+
+    routerCapabilities: {
+      navigate:
+        Boolean(isFunction(getRouter()?.navigate)),
+
+      go:
+        Boolean(isFunction(getRouter()?.go)),
+    },
+
+    state: {
+      route:
+        redactSafe(AppCore?.state?.route || ""),
+
+      publicPath:
+        redactSafe(AppCore?.state?.publicPath || ""),
+
+      role:
+        AppCore?.state?.role || null,
+
+      roles:
+        safeClone(AppCore?.state?.roles || [], []),
+    },
   };
 }
+
+/* =========================================================
+   EXPORT
+========================================================= */
 
 export default {
   isAuthenticated,
@@ -929,6 +2021,8 @@ export default {
 
   guardAuthenticated,
   guardRole,
+  guardGuest,
+  canAccessRoute,
 
   buildGuardErrorPayload,
 

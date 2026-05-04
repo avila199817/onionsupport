@@ -21,6 +21,7 @@
    - soporte hashbang #!/...
    - canonical sin query/hash
    - publicPath con query/hash
+   - strip seguro de /@username
    - redacción de tokens en logs/eventos
    - token/session values limitados
    - cero throws accidentales
@@ -33,6 +34,75 @@ import {
   AUTH_PUBLIC_TECHNICAL_ROUTES,
   AUTH_TOKEN_PARAM_NAMES,
 } from "./constants.js";
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const DEFAULT_ROUTE =
+  "/";
+
+const LOCAL_ORIGIN =
+  "http://localhost";
+
+const SAFE_USERNAME_FALLBACK_MAX =
+  80;
+
+const SAFE_SLUG_MAX =
+  160;
+
+const SAFE_TOKEN_FALLBACK_MAX =
+  8192;
+
+const SAFE_SESSION_VALUE_FALLBACK_MAX =
+  200;
+
+const AUTH_ROUTE_CANDIDATES =
+  Object.freeze([
+    "/login",
+    "/signin",
+    "/sign-in",
+    "/auth",
+    "/auth/login",
+    "/forgot-password",
+    "/reset-password",
+    "/reset-password/confirm",
+    "/recover",
+    "/recover-password",
+    "/password-reset",
+    "/activate-account",
+    "/2fa",
+    "/otp",
+    "/mfa",
+  ]);
+
+const DEFAULT_PUBLIC_TECHNICAL_ROUTES =
+  Object.freeze([
+    "/activate-account",
+    "/reset-password",
+    "/reset-password/confirm",
+    "/forgot-password",
+    "/recover-password",
+    "/password-reset",
+  ]);
+
+const CORRUPTED_TEXT_VALUES =
+  Object.freeze([
+    "undefined",
+    "null",
+    "false",
+    "[object object]",
+    "{}",
+    "[]",
+    "\"undefined\"",
+    "\"null\"",
+  ]);
+
+const TECHNICAL_TOKEN_PATHS =
+  Object.freeze([
+    "/activate-account",
+    "/reset-password/confirm",
+  ]);
 
 /* =========================================================
    BASE
@@ -90,11 +160,13 @@ export function safeBool(value, fallback = false) {
   }
 
   if (typeof value === "number") {
-    return value === 1;
+    if (value === 1) return true;
+    if (value === 0) return false;
   }
 
   const text =
-    safeText(value, "").toLowerCase();
+    safeText(value, "")
+      .toLowerCase();
 
   if (
     [
@@ -104,6 +176,7 @@ export function safeBool(value, fallback = false) {
       "si",
       "sí",
       "ok",
+      "on",
     ].includes(text)
   ) {
     return true;
@@ -114,6 +187,7 @@ export function safeBool(value, fallback = false) {
       "false",
       "0",
       "no",
+      "off",
     ].includes(text)
   ) {
     return false;
@@ -130,8 +204,18 @@ export function isObject(value) {
   );
 }
 
+export function isPlainObject(value) {
+  return isObject(value);
+}
+
 export function isFn(value) {
   return typeof value === "function";
+}
+
+export function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 export function safeClone(value, fallback = null) {
@@ -165,6 +249,49 @@ export function safeClone(value, fallback = null) {
   }
 }
 
+function hasOwn(obj, key) {
+  return Boolean(
+    obj &&
+      typeof obj === "object" &&
+      Object.prototype.hasOwnProperty.call(
+        obj,
+        key
+      )
+  );
+}
+
+function safeLower(value = "") {
+  return safeText(value, "")
+    .toLowerCase();
+}
+
+function isCorruptedTextValue(value = "") {
+  const text =
+    safeLower(value);
+
+  return (
+    !text ||
+    CORRUPTED_TEXT_VALUES.includes(text)
+  );
+}
+
+function unique(values = []) {
+  return Array.from(
+    new Set(
+      safeArray(values)
+        .map((value) =>
+          safeText(value, "")
+        )
+        .filter(Boolean)
+    )
+  );
+}
+
+function escapeRegExp(value = "") {
+  return safeText(value, "")
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /* =========================================================
    APPCORE DELEGATES
 ========================================================= */
@@ -187,6 +314,18 @@ function coreNormalizeCanonicalPath(value) {
       typeof AppCore?.utils?.normalizeCanonicalPath === "function"
     ) {
       return AppCore.utils.normalizeCanonicalPath(value);
+    }
+  } catch {}
+
+  return null;
+}
+
+function coreNormalizePublicPath(value) {
+  try {
+    if (
+      typeof AppCore?.utils?.normalizePublicPath === "function"
+    ) {
+      return AppCore.utils.normalizePublicPath(value);
     }
   } catch {}
 
@@ -229,7 +368,7 @@ function getBaseOrigin() {
     return window.location.origin;
   }
 
-  return "http://localhost";
+  return LOCAL_ORIGIN;
 }
 
 export function isHashRouterPath(value = "") {
@@ -247,14 +386,14 @@ export function normalizeHashRouterPath(value = "") {
     safeText(value, "");
 
   if (!raw) {
-    return "/";
+    return DEFAULT_ROUTE;
   }
 
   if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/") || "/";
+    return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
   }
 
-  return raw.replace(/^#\/?/, "/") || "/";
+  return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
 }
 
 function normalizeSearch(search = "") {
@@ -283,15 +422,15 @@ function normalizeHash(hash = "") {
     : `#${value.replace(/^#+/, "")}`;
 }
 
-export function normalizePathnameOnly(pathname = "/") {
+export function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
   let value =
-    String(pathname || "/")
+    String(pathname || DEFAULT_ROUTE)
       .trim()
       .replace(/\\/g, "/")
       .replace(/\/{2,}/g, "/");
 
   if (!value) {
-    value = "/";
+    value = DEFAULT_ROUTE;
   }
 
   if (!value.startsWith("/")) {
@@ -301,7 +440,8 @@ export function normalizePathnameOnly(pathname = "/") {
   const segments =
     value.split("/");
 
-  const normalizedSegments = [];
+  const normalizedSegments =
+    [];
 
   for (const segment of segments) {
     if (
@@ -320,22 +460,22 @@ export function normalizePathnameOnly(pathname = "/") {
   }
 
   value =
-    `/${normalizedSegments.join("/")}` || "/";
+    `/${normalizedSegments.join("/")}` || DEFAULT_ROUTE;
 
   if (
     value.length > 1 &&
     value.endsWith("/")
   ) {
     value =
-      value.replace(/\/+$/g, "") || "/";
+      value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
   }
 
   return value;
 }
 
-export function splitPath(path = "/") {
+export function splitPath(path = DEFAULT_ROUTE) {
   const raw =
-    safeText(path, "/") || "/";
+    safeText(path, DEFAULT_ROUTE) || DEFAULT_ROUTE;
 
   if (isHashRouterPath(raw)) {
     return splitPath(
@@ -360,7 +500,7 @@ export function splitPath(path = "/") {
       pathname.slice(hashIndex);
 
     pathname =
-      pathname.slice(0, hashIndex) || "/";
+      pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
   }
 
   const searchIndex =
@@ -371,7 +511,7 @@ export function splitPath(path = "/") {
       pathname.slice(searchIndex);
 
     pathname =
-      pathname.slice(0, searchIndex) || "/";
+      pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
   }
 
   return {
@@ -383,12 +523,15 @@ export function splitPath(path = "/") {
 
     hash:
       normalizeHash(hash),
+
+    suffix:
+      `${normalizeSearch(search)}${normalizeHash(hash)}`,
   };
 }
 
-export function fallbackNormalizePath(value = "/") {
+export function fallbackNormalizePath(value = DEFAULT_ROUTE) {
   const raw =
-    safeText(value, "/") || "/";
+    safeText(value, DEFAULT_ROUTE) || DEFAULT_ROUTE;
 
   if (isHashRouterPath(raw)) {
     return fallbackNormalizePath(
@@ -399,7 +542,10 @@ export function fallbackNormalizePath(value = "/") {
   try {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
       const parsed =
-        new URL(raw, getBaseOrigin());
+        new URL(
+          raw,
+          getBaseOrigin()
+        );
 
       if (
         parsed.hash &&
@@ -411,7 +557,7 @@ export function fallbackNormalizePath(value = "/") {
       }
 
       return fallbackNormalizePath(
-        `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
+        `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`
       );
     }
   } catch {}
@@ -425,17 +571,17 @@ export function fallbackNormalizePath(value = "/") {
   return `${pathname}${search}${hash}`;
 }
 
-export function stripSearchAndHash(path = "/") {
+export function stripSearchAndHash(path = DEFAULT_ROUTE) {
   const {
     pathname,
   } = splitPath(
     fallbackNormalizePath(path)
   );
 
-  return pathname || "/";
+  return pathname || DEFAULT_ROUTE;
 }
 
-export function getSearchAndHash(path = "/") {
+export function getSearchAndHash(path = DEFAULT_ROUTE) {
   const {
     search,
     hash,
@@ -446,9 +592,30 @@ export function getSearchAndHash(path = "/") {
   return `${search || ""}${hash || ""}`;
 }
 
-export function normalizePath(path = "/") {
+export function stripUsernamePrefix(path = DEFAULT_ROUTE) {
+  const normalized =
+    fallbackNormalizePath(path);
+
+  const {
+    pathname,
+    search,
+    hash,
+  } = splitPath(normalized);
+
+  const stripped =
+    pathname.replace(
+      /^\/@[^/]+(?=\/|$)/i,
+      ""
+    ) || DEFAULT_ROUTE;
+
+  return fallbackNormalizePath(
+    `${normalizePathnameOnly(stripped)}${search}${hash}`
+  );
+}
+
+export function normalizePath(path = DEFAULT_ROUTE) {
   const raw =
-    safeText(path, "/") || "/";
+    safeText(path, DEFAULT_ROUTE) || DEFAULT_ROUTE;
 
   const fallback =
     fallbackNormalizePath(raw);
@@ -472,13 +639,39 @@ export function normalizePath(path = "/") {
     : fallback;
 }
 
-export function normalizeCanonicalPath(path = "/") {
+export function normalizePublicPath(path = DEFAULT_ROUTE) {
   const raw =
-    safeText(path, "/") || "/";
+    safeText(path, DEFAULT_ROUTE) || DEFAULT_ROUTE;
+
+  const fallback =
+    stripUsernamePrefix(
+      fallbackNormalizePath(raw)
+    );
+
+  if (
+    raw.includes("?") ||
+    raw.includes("#")
+  ) {
+    return fallback;
+  }
+
+  const delegated =
+    coreNormalizePublicPath(raw);
+
+  return delegated
+    ? stripUsernamePrefix(
+        fallbackNormalizePath(delegated)
+      )
+    : fallback;
+}
+
+export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
+  const raw =
+    safeText(path, DEFAULT_ROUTE) || DEFAULT_ROUTE;
 
   const fallback =
     stripSearchAndHash(
-      fallbackNormalizePath(raw)
+      normalizePublicPath(raw)
     );
 
   if (
@@ -494,7 +687,7 @@ export function normalizeCanonicalPath(path = "/") {
 
   return delegated
     ? stripSearchAndHash(
-        fallbackNormalizePath(delegated)
+        normalizePublicPath(delegated)
       )
     : fallback;
 }
@@ -515,7 +708,10 @@ export function pathFromUrlLike(value = "") {
 
   try {
     const parsed =
-      new URL(raw, getBaseOrigin());
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
 
     if (
       parsed.hash &&
@@ -527,7 +723,7 @@ export function pathFromUrlLike(value = "") {
     }
 
     return fallbackNormalizePath(
-      `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
+      `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`
     );
   } catch {
     return fallbackNormalizePath(raw);
@@ -540,16 +736,16 @@ export function pathFromUrlLike(value = "") {
 
 export function getCurrentPublicPath() {
   if (!isBrowser()) {
-    return normalizePath(
+    return normalizePublicPath(
       AppCore?.state?.publicPath ||
-      AppCore?.state?.route ||
-      "/"
+        AppCore?.state?.route ||
+        DEFAULT_ROUTE
     );
   }
 
   try {
     const pathname =
-      window.location.pathname || "/";
+      window.location.pathname || DEFAULT_ROUTE;
 
     const search =
       window.location.search || "";
@@ -561,19 +757,19 @@ export function getCurrentPublicPath() {
       hash &&
       isHashRouterPath(hash)
     ) {
-      return normalizePath(
+      return normalizePublicPath(
         normalizeHashRouterPath(hash)
       );
     }
 
-    return normalizePath(
+    return normalizePublicPath(
       `${pathname}${search}${hash}`
     );
   } catch {
-    return normalizePath(
+    return normalizePublicPath(
       AppCore?.state?.publicPath ||
-      AppCore?.state?.route ||
-      "/"
+        AppCore?.state?.route ||
+        DEFAULT_ROUTE
     );
   }
 }
@@ -584,97 +780,137 @@ export function getCurrentCanonicalPath() {
   );
 }
 
-export function configLikeRoute(path = "/") {
-  return normalizePath(path || "/");
+export function configLikeRoute(path = DEFAULT_ROUTE) {
+  return normalizePath(path || DEFAULT_ROUTE);
 }
 
 /* =========================================================
    ROUTE DETECTION
 ========================================================= */
 
+function routeStartsWith(path = DEFAULT_ROUTE, candidate = DEFAULT_ROUTE) {
+  const cleanPath =
+    normalizeCanonicalPath(path)
+      .toLowerCase();
+
+  const cleanCandidate =
+    normalizeCanonicalPath(candidate)
+      .toLowerCase();
+
+  return (
+    cleanPath === cleanCandidate ||
+    cleanPath.startsWith(`${cleanCandidate}/`)
+  );
+}
+
 export function isAuthRoute(
   pathname = isBrowser()
     ? window.location.pathname
-    : "/"
+    : DEFAULT_ROUTE
 ) {
-  const path =
-    normalizeCanonicalPath(pathname)
-      .toLowerCase();
-
-  return [
-    "/login",
-    "/signin",
-    "/sign-in",
-    "/auth",
-    "/auth/login",
-    "/forgot-password",
-    "/reset-password",
-    "/reset-password/confirm",
-    "/recover",
-    "/recover-password",
-    "/password-reset",
-    "/2fa",
-    "/otp",
-  ].some((candidate) =>
-    path === candidate ||
-    path.startsWith(`${candidate}/`)
+  return AUTH_ROUTE_CANDIDATES.some((candidate) =>
+    routeStartsWith(
+      pathname,
+      candidate
+    )
   );
 }
 
 export function isPublicTechnicalRoute(path = getCurrentPublicPath()) {
-  const normalized =
-    normalizeCanonicalPath(path)
-      .toLowerCase();
-
   const routes =
     Array.isArray(AUTH_PUBLIC_TECHNICAL_ROUTES)
       ? AUTH_PUBLIC_TECHNICAL_ROUTES
-      : [
-          "/activate-account",
-          "/reset-password",
-          "/reset-password/confirm",
-          "/forgot-password",
-          "/recover-password",
-          "/password-reset",
-        ];
+      : DEFAULT_PUBLIC_TECHNICAL_ROUTES;
 
-  return routes.some((route) => {
-    const cleanRoute =
-      normalizeCanonicalPath(route)
-        .toLowerCase();
-
-    return (
-      normalized === cleanRoute ||
-      normalized.startsWith(`${cleanRoute}/`)
-    );
-  });
+  return routes.some((route) =>
+    routeStartsWith(
+      path,
+      route
+    )
+  );
 }
 
 export function isActivationRoute(path = getCurrentPublicPath()) {
-  const normalized =
-    normalizeCanonicalPath(path)
-      .toLowerCase();
+  return routeStartsWith(
+    path,
+    "/activate-account"
+  );
+}
 
-  return (
-    normalized === "/activate-account" ||
-    normalized.startsWith("/activate-account/")
+export function isResetPasswordRoute(path = getCurrentPublicPath()) {
+  return routeStartsWith(
+    path,
+    "/reset-password"
   );
 }
 
 export function isResetPasswordConfirmRoute(path = getCurrentPublicPath()) {
-  const normalized =
-    normalizeCanonicalPath(path)
-      .toLowerCase();
+  return routeStartsWith(
+    path,
+    "/reset-password/confirm"
+  );
+}
 
+export function isForgotPasswordRoute(path = getCurrentPublicPath()) {
   return (
-    normalized === "/reset-password/confirm" ||
-    normalized.startsWith("/reset-password/confirm/")
+    routeStartsWith(path, "/forgot-password") ||
+    routeStartsWith(path, "/recover-password") ||
+    routeStartsWith(path, "/password-reset")
+  );
+}
+
+export function isTwoFactorRoute(path = getCurrentPublicPath()) {
+  return (
+    routeStartsWith(path, "/2fa") ||
+    routeStartsWith(path, "/otp") ||
+    routeStartsWith(path, "/mfa")
   );
 }
 
 /* =========================================================
    REDIRECT SAFETY
 ========================================================= */
+
+function hasEncodedOpenRedirectRisk(path = "") {
+  const raw =
+    safeText(path, "");
+
+  if (!raw) {
+    return true;
+  }
+
+  const lower =
+    raw.toLowerCase();
+
+  if (
+    lower.includes("%0d") ||
+    lower.includes("%0a") ||
+    lower.includes("%09") ||
+    lower.includes("\\") ||
+    lower.includes("%5c")
+  ) {
+    return true;
+  }
+
+  try {
+    const decoded =
+      decodeURIComponent(raw)
+        .trim()
+        .replace(/\\/g, "/");
+
+    if (
+      decoded.startsWith("//") ||
+      /^[a-z][a-z0-9+.-]*:/i.test(decoded) ||
+      /[\r\n\t]/.test(decoded)
+    ) {
+      return true;
+    }
+  } catch {
+    return true;
+  }
+
+  return false;
+}
 
 export function isSafeRelativePath(path = "") {
   const raw =
@@ -700,23 +936,42 @@ export function isSafeRelativePath(path = "") {
     return false;
   }
 
+  if (hasEncodedOpenRedirectRisk(raw)) {
+    return false;
+  }
+
   return true;
 }
 
-export function sanitizeRedirectPath(path = "/", fallback = "/") {
-  const candidate =
-    normalizePath(path || fallback);
+export function sanitizeRedirectPath(path = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
+  const raw =
+    safeText(path, "");
 
-  if (isSafeRelativePath(candidate)) {
-    return candidate;
+  const fallbackPath =
+    isSafeRelativePath(fallback)
+      ? normalizePublicPath(fallback)
+      : DEFAULT_ROUTE;
+
+  if (!isSafeRelativePath(raw)) {
+    return fallbackPath;
   }
 
-  return normalizePath(fallback || "/");
+  const candidate =
+    normalizePublicPath(raw);
+
+  if (!isSafeRelativePath(candidate)) {
+    return fallbackPath;
+  }
+
+  return candidate;
 }
 
-export function buildSafeRedirectParam(path = "/") {
+export function buildSafeRedirectParam(path = DEFAULT_ROUTE) {
   return encodeURIComponent(
-    sanitizeRedirectPath(path, "/")
+    sanitizeRedirectPath(
+      path,
+      DEFAULT_ROUTE
+    )
   );
 }
 
@@ -732,21 +987,24 @@ export function sanitizeUsername(value = "") {
     return delegated;
   }
 
+  const max =
+    clampNumber(
+      AUTH_CONSTANTS?.usernameMaxLength ??
+        AUTH_CONSTANTS?.identifierMaxLength ??
+        SAFE_USERNAME_FALLBACK_MAX,
+      1,
+      160
+    );
+
   return String(value || "")
     .normalize("NFKC")
     .trim()
     .replace(/^@+/, "")
     .replace(/\s+/g, "")
     .replace(/[^a-zA-Z0-9._-]/g, "")
+    .replace(/^[._-]+|[._-]+$/g, "")
     .toLowerCase()
-    .slice(
-      0,
-      clampNumber(
-        AUTH_CONSTANTS?.identifierMaxLength,
-        1,
-        160
-      )
-    );
+    .slice(0, max);
 }
 
 export function slugify(value = "") {
@@ -765,8 +1023,8 @@ export function slugify(value = "") {
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/-{2,}/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 160);
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .slice(0, SAFE_SLUG_MAX);
 }
 
 /* =========================================================
@@ -786,6 +1044,7 @@ export function normalizeTokenValue(
 
   const normalized =
     String(token)
+      .normalize("NFKC")
       .trim()
       .replace(/[\r\n\t]/g, "")
       .slice(
@@ -794,10 +1053,17 @@ export function normalizeTokenValue(
           maxLength,
           1,
           32768
-        )
+        ) || SAFE_TOKEN_FALLBACK_MAX
       );
 
-  return normalized || null;
+  if (
+    !normalized ||
+    isCorruptedTextValue(normalized)
+  ) {
+    return null;
+  }
+
+  return normalized;
 }
 
 export function normalizeSessionValue(
@@ -821,11 +1087,18 @@ export function normalizeSessionValue(
         clampNumber(
           maxLength,
           1,
-          1024
-        )
+          2048
+        ) || SAFE_SESSION_VALUE_FALLBACK_MAX
       );
 
-  return normalized || null;
+  if (
+    !normalized ||
+    isCorruptedTextValue(normalized)
+  ) {
+    return null;
+  }
+
+  return normalized;
 }
 
 export function hasValidToken(token = AppCore?.state?.token) {
@@ -834,15 +1107,51 @@ export function hasValidToken(token = AppCore?.state?.token) {
   );
 }
 
+function getTokenParamNames(type = "generic") {
+  const cleanType =
+    safeText(type, "generic");
+
+  const names =
+    AUTH_TOKEN_PARAM_NAMES?.[cleanType];
+
+  if (Array.isArray(names)) {
+    return names;
+  }
+
+  return AUTH_TOKEN_PARAM_NAMES?.generic || [
+    "token",
+    "code",
+    "t",
+  ];
+}
+
+function getAllTokenParamNames() {
+  try {
+    return unique(
+      Object.values(AUTH_TOKEN_PARAM_NAMES || {})
+        .flat()
+    );
+  } catch {
+    return [
+      "token",
+      "activationToken",
+      "activateToken",
+      "resetToken",
+      "passwordResetToken",
+      "code",
+      "t",
+      "access_token",
+      "refresh_token",
+      "id_token",
+    ];
+  }
+}
+
 export function hasTokenInSearch(search = "", names = []) {
   const finalNames =
     Array.isArray(names) && names.length
       ? names
-      : AUTH_TOKEN_PARAM_NAMES?.generic || [
-          "token",
-          "code",
-          "t",
-        ];
+      : getTokenParamNames("generic");
 
   try {
     const params =
@@ -865,11 +1174,7 @@ export function extractTokenFromSearch(search = "", names = []) {
   const finalNames =
     Array.isArray(names) && names.length
       ? names
-      : AUTH_TOKEN_PARAM_NAMES?.generic || [
-          "token",
-          "code",
-          "t",
-        ];
+      : getTokenParamNames("generic");
 
   try {
     const params =
@@ -892,7 +1197,7 @@ export function extractTokenFromSearch(search = "", names = []) {
 
 export function extractPathToken(path = "", basePath = "") {
   const normalized =
-    normalizePath(path);
+    normalizePublicPath(path);
 
   const clean =
     normalizeCanonicalPath(normalized);
@@ -900,7 +1205,10 @@ export function extractPathToken(path = "", basePath = "") {
   const base =
     normalizeCanonicalPath(basePath);
 
-  if (!base || !clean.startsWith(`${base}/`)) {
+  if (
+    !base ||
+    !clean.startsWith(`${base}/`)
+  ) {
     return null;
   }
 
@@ -916,6 +1224,29 @@ export function extractPathToken(path = "", basePath = "") {
   } catch {
     return normalizeTokenValue(token);
   }
+}
+
+function extractTokenFromHashQuery(hash = "", names = []) {
+  const cleanHash =
+    safeText(hash, "");
+
+  if (
+    !cleanHash ||
+    !cleanHash.includes("?")
+  ) {
+    return null;
+  }
+
+  const query =
+    cleanHash
+      .split("?")
+      .slice(1)
+      .join("?");
+
+  return extractTokenFromSearch(
+    query ? `?${query}` : "",
+    names
+  );
 }
 
 export function extractActivationToken(pathOrUrl = getCurrentPublicPath()) {
@@ -940,27 +1271,17 @@ export function extractActivationToken(pathOrUrl = getCurrentPublicPath()) {
   const fromSearch =
     extractTokenFromSearch(
       search,
-      AUTH_TOKEN_PARAM_NAMES?.activation
+      getTokenParamNames("activation")
     );
 
   if (fromSearch) {
     return fromSearch;
   }
 
-  if (hash && hash.includes("?")) {
-    const query =
-      hash
-        .split("?")
-        .slice(1)
-        .join("?");
-
-    return extractTokenFromSearch(
-      query ? `?${query}` : "",
-      AUTH_TOKEN_PARAM_NAMES?.activation
-    );
-  }
-
-  return null;
+  return extractTokenFromHashQuery(
+    hash,
+    getTokenParamNames("activation")
+  );
 }
 
 export function extractResetToken(pathOrUrl = getCurrentPublicPath()) {
@@ -985,60 +1306,123 @@ export function extractResetToken(pathOrUrl = getCurrentPublicPath()) {
   const fromSearch =
     extractTokenFromSearch(
       search,
-      AUTH_TOKEN_PARAM_NAMES?.reset
+      getTokenParamNames("reset")
     );
 
   if (fromSearch) {
     return fromSearch;
   }
 
-  if (hash && hash.includes("?")) {
-    const query =
-      hash
-        .split("?")
-        .slice(1)
-        .join("?");
+  return extractTokenFromHashQuery(
+    hash,
+    getTokenParamNames("reset")
+  );
+}
 
-    return extractTokenFromSearch(
-      query ? `?${query}` : "",
-      AUTH_TOKEN_PARAM_NAMES?.reset
-    );
-  }
+export function hasActivationToken(pathOrUrl = getCurrentPublicPath()) {
+  return Boolean(
+    extractActivationToken(pathOrUrl)
+  );
+}
 
-  return null;
+export function hasResetToken(pathOrUrl = getCurrentPublicPath()) {
+  return Boolean(
+    extractResetToken(pathOrUrl)
+  );
 }
 
 /* =========================================================
    REDACTION
 ========================================================= */
 
-export function redactTokenInText(value = "") {
-  const raw =
+function redactQueryTokens(value = "") {
+  let output =
     safeText(value, "");
 
-  if (!raw) {
+  const names =
+    getAllTokenParamNames();
+
+  for (const name of names) {
+    const escapedName =
+      escapeRegExp(name);
+
+    try {
+      output = output.replace(
+        new RegExp(`([?&#]${escapedName}=)([^&#\\s]+)`, "gi"),
+        "$1***"
+      );
+    } catch {}
+  }
+
+  return output;
+}
+
+function redactJsonTokenFields(value = "") {
+  let output =
+    safeText(value, "");
+
+  const names =
+    getAllTokenParamNames();
+
+  for (const name of names) {
+    const escapedName =
+      escapeRegExp(name);
+
+    try {
+      output = output.replace(
+        new RegExp(`("${escapedName}"\\s*:\\s*")([^"]+)(")`, "gi"),
+        "$1***$3"
+      );
+    } catch {}
+
+    try {
+      output = output.replace(
+        new RegExp(`('${escapedName}'\\s*:\\s*')([^']+)(')`, "gi"),
+        "$1***$3"
+      );
+    } catch {}
+  }
+
+  return output;
+}
+
+function redactTechnicalPathTokens(value = "") {
+  let output =
+    safeText(value, "");
+
+  for (const path of TECHNICAL_TOKEN_PATHS) {
+    const escapedPath =
+      escapeRegExp(path);
+
+    try {
+      output = output.replace(
+        new RegExp(`(${escapedPath}/)([^/?#\\s]+)`, "gi"),
+        "$1***"
+      );
+    } catch {}
+  }
+
+  return output;
+}
+
+export function redactTokenInText(value = "") {
+  let output =
+    safeText(value, "");
+
+  if (!output) {
     return "";
   }
 
-  let output =
-    raw;
+  output =
+    redactQueryTokens(output);
+
+  output =
+    redactTechnicalPathTokens(output);
+
+  output =
+    redactJsonTokenFields(output);
 
   try {
-    output = output.replace(
-      /([?&](?:token|activationToken|activateToken|resetToken|passwordResetToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
-      "$1***"
-    );
-
-    output = output.replace(
-      /(\/activate-account\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
-
-    output = output.replace(
-      /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
-
     output = output.replace(
       /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
       "$1***"
@@ -1070,15 +1454,27 @@ export function extractMessage(error) {
     error?.data?.detail,
     error?.data?.error,
     error?.data?.title,
+    error?.data?.description,
 
     error?.response?.data?.message,
     error?.response?.data?.mensaje,
     error?.response?.data?.detail,
     error?.response?.data?.error,
     error?.response?.data?.title,
+    error?.response?.data?.description,
 
     error?.body?.message,
+    error?.body?.mensaje,
+    error?.body?.detail,
     error?.body?.error,
+
+    error?.payload?.message,
+    error?.payload?.mensaje,
+    error?.payload?.error,
+
+    error?.result?.message,
+    error?.result?.mensaje,
+    error?.result?.error,
 
     error?.message,
     error?.statusText,
@@ -1115,11 +1511,16 @@ export function buildSafeErrorPayload(error) {
       error?.name || "Error",
 
     status:
-      error?.status || 0,
+      error?.status ||
+      error?.statusCode ||
+      error?.response?.status ||
+      error?.data?.status ||
+      0,
 
     code:
       error?.code ||
       error?.data?.code ||
+      error?.response?.data?.code ||
       null,
   };
 }
@@ -1150,6 +1551,56 @@ export function compactPayload(payload = {}) {
   );
 }
 
+export function sanitizeAuthPayload(payload = {}, depth = 0) {
+  if (depth > 5) {
+    return "[MaxDepth]";
+  }
+
+  if (Array.isArray(payload)) {
+    return payload.map((item) =>
+      sanitizeAuthPayload(
+        item,
+        depth + 1
+      )
+    );
+  }
+
+  if (!isObject(payload)) {
+    return typeof payload === "string"
+      ? redactTokenInText(payload)
+      : payload;
+  }
+
+  const output = {};
+
+  for (const [key, value] of Object.entries(payload)) {
+    const lower =
+      safeLower(key);
+
+    if (
+      lower.includes("token") ||
+      lower.includes("authorization") ||
+      lower.includes("password") ||
+      lower.includes("secret") ||
+      lower === "code" ||
+      lower === "otp" ||
+      lower === "totp"
+    ) {
+      output[key] =
+        value ? "***" : value;
+      continue;
+    }
+
+    output[key] =
+      sanitizeAuthPayload(
+        value,
+        depth + 1
+      );
+  }
+
+  return output;
+}
+
 export function getAuthHelpersSnapshot() {
   const publicPath =
     getCurrentPublicPath();
@@ -1170,14 +1621,23 @@ export function getAuthHelpersSnapshot() {
     isActivationRoute:
       isActivationRoute(publicPath),
 
+    isResetPasswordRoute:
+      isResetPasswordRoute(publicPath),
+
     isResetPasswordConfirmRoute:
       isResetPasswordConfirmRoute(publicPath),
 
+    isForgotPasswordRoute:
+      isForgotPasswordRoute(publicPath),
+
+    isTwoFactorRoute:
+      isTwoFactorRoute(publicPath),
+
     hasActivationToken:
-      Boolean(extractActivationToken(publicPath)),
+      hasActivationToken(publicPath),
 
     hasResetToken:
-      Boolean(extractResetToken(publicPath)),
+      hasResetToken(publicPath),
 
     hasAppCore:
       Boolean(AppCore),
@@ -1200,7 +1660,9 @@ export default {
   clampNumber,
   safeBool,
   isObject,
+  isPlainObject,
   isFn,
+  safeArray,
   safeClone,
 
   isHashRouterPath,
@@ -1210,8 +1672,10 @@ export default {
   fallbackNormalizePath,
   stripSearchAndHash,
   getSearchAndHash,
+  stripUsernamePrefix,
 
   normalizePath,
+  normalizePublicPath,
   normalizeCanonicalPath,
   pathFromUrlLike,
 
@@ -1222,7 +1686,10 @@ export default {
   isAuthRoute,
   isPublicTechnicalRoute,
   isActivationRoute,
+  isResetPasswordRoute,
   isResetPasswordConfirmRoute,
+  isForgotPasswordRoute,
+  isTwoFactorRoute,
 
   isSafeRelativePath,
   sanitizeRedirectPath,
@@ -1240,6 +1707,8 @@ export default {
   extractPathToken,
   extractActivationToken,
   extractResetToken,
+  hasActivationToken,
+  hasResetToken,
 
   redactTokenInText,
 
@@ -1248,5 +1717,6 @@ export default {
   buildSafeErrorPayload,
 
   compactPayload,
+  sanitizeAuthPayload,
   getAuthHelpersSnapshot,
 };

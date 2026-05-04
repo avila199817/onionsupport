@@ -1,46 +1,331 @@
 {
+  "trailingSlash": "never",
+
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": [
       "/api/*",
+      "/.auth/*",
 
-      "/BingSiteAuth.xml",
       "/robots.txt",
       "/sitemap.xml",
+      "/BingSiteAuth.xml",
       "/manifest.json",
       "/site.webmanifest",
       "/sw.js",
       "/favicon.ico",
+      "/favicon.svg",
+      "/apple-touch-icon.png",
 
-      "/src/*",
       "/assets/*",
       "/media/*",
       "/fonts/*",
       "/css/*",
       "/js/*",
       "/img/*",
+      "/src/*",
 
-      "/*.{js,mjs,css,png,jpg,jpeg,gif,svg,webp,avif,ico,json,txt,xml,webmanifest,map,woff,woff2,ttf,eot,otf,pdf,mp4,webm}"
+      "/.well-known/*",
+
+      "/*.{js,mjs,css,png,jpg,jpeg,gif,svg,webp,avif,bmp,ico,json,txt,xml,webmanifest,map,woff,woff2,ttf,eot,otf,pdf,mp4,webm,wasm}"
     ]
   },
 
   "routes": [
     {
-      "route": "/index.html",
+      "route": "/staticwebapp.config.json",
+      "statusCode": 404,
       "headers": {
-        "Cache-Control": "no-cache, no-store, must-revalidate"
+        "Cache-Control": "no-store",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+
+    {
+      "route": "/es",
+      "statusCode": 404,
+      "headers": {
+        "Cache-Control": "no-store",
+        "X-Robots-Tag": "noindex, nofollow"
       }
     },
     {
-      "route": "/staticwebapp.config.json",
-      "statusCode": 404
+      "route": "/es/*",
+      "statusCode": 404,
+      "headers": {
+        "Cache-Control": "no-store",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
     },
+
+    {
+      "route": "/login",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/login/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/logout",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/logout/*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/activate-account*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/reset-password*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/forgot-password*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/recover-password*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/password-reset*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/2fa*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/otp*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+
+    {
+      "route": "/tickets*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/incidencias*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/facturas*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/invoices*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/users*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/usuarios*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/clients*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/clientes*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/hardware*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/account*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/settings*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+    {
+      "route": "/@*",
+      "rewrite": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-Robots-Tag": "noindex, nofollow"
+      }
+    },
+
+    {
+      "route": "/index.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0"
+      }
+    },
+    {
+      "route": "/*.html",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0"
+      }
+    },
+
     {
       "route": "/src/*",
       "headers": {
-        "Cache-Control": "public, max-age=31536000, immutable"
+        "Cache-Control": "no-cache, must-revalidate"
       }
     },
+    {
+      "route": "/css/*",
+      "headers": {
+        "Cache-Control": "no-cache, must-revalidate"
+      }
+    },
+    {
+      "route": "/js/*",
+      "headers": {
+        "Cache-Control": "no-cache, must-revalidate"
+      }
+    },
+
     {
       "route": "/assets/*",
       "headers": {
@@ -60,13 +345,40 @@
       }
     },
     {
-      "route": "/sitemap.xml",
+      "route": "/img/*",
+      "headers": {
+        "Cache-Control": "public, max-age=31536000, immutable"
+      }
+    },
+
+    {
+      "route": "/manifest.json",
+      "headers": {
+        "Cache-Control": "no-cache, must-revalidate"
+      }
+    },
+    {
+      "route": "/site.webmanifest",
+      "headers": {
+        "Cache-Control": "no-cache, must-revalidate"
+      }
+    },
+    {
+      "route": "/sw.js",
+      "headers": {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0"
+      }
+    },
+    {
+      "route": "/robots.txt",
       "headers": {
         "Cache-Control": "public, max-age=3600"
       }
     },
     {
-      "route": "/robots.txt",
+      "route": "/sitemap.xml",
       "headers": {
         "Cache-Control": "public, max-age=3600"
       }
@@ -80,12 +392,17 @@
   ],
 
   "globalHeaders": {
+    "Strict-Transport-Security": "max-age=31536000",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
+    "X-DNS-Prefetch-Control": "off",
+    "X-Download-Options": "noopen",
+    "X-Permitted-Cross-Domain-Policies": "none",
     "Referrer-Policy": "strict-origin-when-cross-origin",
-    "Permissions-Policy": "accelerometer=(), autoplay=(), camera=(), encrypted-media=(), fullscreen=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
+    "Permissions-Policy": "accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), fullscreen=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()",
     "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
-    "Cross-Origin-Resource-Policy": "same-origin"
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Content-Security-Policy-Report-Only": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob: https:; font-src 'self' data:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.onionit.net https://*.onionit.net https://*.blob.core.windows.net; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests"
   },
 
   "mimeTypes": {
@@ -95,6 +412,7 @@
     ".mjs": "text/javascript",
     ".json": "application/json",
     ".map": "application/json",
+    ".wasm": "application/wasm",
 
     ".xml": "application/xml",
     ".txt": "text/plain",
@@ -107,7 +425,9 @@
     ".gif": "image/gif",
     ".webp": "image/webp",
     ".avif": "image/avif",
+    ".bmp": "image/bmp",
     ".ico": "image/x-icon",
+    ".cur": "image/x-icon",
 
     ".woff": "font/woff",
     ".woff2": "font/woff2",
@@ -117,6 +437,9 @@
 
     ".pdf": "application/pdf",
     ".mp4": "video/mp4",
-    ".webm": "video/webm"
+    ".webm": "video/webm",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".ogg": "audio/ogg"
   }
 }

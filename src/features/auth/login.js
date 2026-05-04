@@ -5,12 +5,11 @@
    RESPONSABILIDADES:
    - preparar credenciales login
    - construir payload robusto
-   - redirects post-login seguros
-   - ejecutar login
-   - soportar 2FA opcional
+   - ejecutar login contra backend heterogéneo
+   - soportar 2FA opcional sin marcar authenticated
+   - aplicar sesión sólo con token + user válidos
+   - navegación SPA consistente tras login real
    - submit desde formularios HTML
-   - endurecer respuestas heterogéneas backend
-   - navegación SPA consistente tras login
    - anti race conditions concurrentes
    - cero estados auth fantasma
    - evitar doble navegación / doble render post-login
@@ -23,26 +22,16 @@
    - redirects blindados
    - sync inmediata AppCore/UI/router
    - tolerancia total backend legacy
-   - eventos enterprise completos
+   - eventos enterprise sin tokens reales
    - errores normalizados
    - fallback post-login siempre a home "/"
    - sin home por rol
    - navegación deduplicada pero render-safe
-   - no aceptar payloads 401/403/ok:false/success:false como éxito
-   - eventos sin tokens reales
+   - no aceptar 401/403/ok:false/success:false como éxito
    - validateAuthResponse no rompe flujo 2FA
-
-   FIX 10/10:
-   - no aplica sesión si falta token usable
-   - no aplica sesión si falta usuario identificable
-   - no navega si el login no es estrictamente válido
    - no reutiliza usuario antiguo de AppCore como fallback
-   - limpia sesión vieja en fallo real o payload inválido
-   - preserva flujo 2FA sin marcar authenticated
-   - espera Router.navigate si devuelve Promise
-   - no usa popstate como primera opción
-   - elimina body.auth-screen/login-no-scroll tras login OK
-   - emite app:ui:repair-request después de navegación
+   - no emite eventos de restore desde login
+   - no duplica auth:login:success por defecto
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -80,76 +69,106 @@ import {
 } from "./session.js";
 
 /* =========================================================
-   INTERNAL STATE
+   VERSION / INTERNAL STATE
 ========================================================= */
 
-let loginPromise = null;
-let loginSequence = 0;
+const LOGIN_VERSION =
+  "10.2.0";
+
+let loginPromise =
+  null;
+
+let loginSequence =
+  0;
 
 /* =========================================================
-   CONST
+   CONSTANTS
 ========================================================= */
 
-const DEFAULT_HOME_PATH = "/";
-const DEFAULT_LOGIN_PATH = "/login";
-const DEFAULT_2FA_PATH = "/2fa";
+const DEFAULT_HOME_PATH =
+  "/";
 
-const ROLE_DEFAULT_REDIRECTS = new Set([
-  "/usuarios",
-  "/clientes",
-  "/facturas",
-  "/incidencias",
-  "/servidor",
-]);
+const DEFAULT_LOGIN_PATH =
+  "/login";
 
-const AUTH_FAILURE_CODES = new Set([
-  "INVALID_CREDENTIALS",
-  "MISSING_CREDENTIALS",
-  "ACCOUNT_TEMPORARILY_LOCKED",
-  "ACCOUNT_DISABLED",
-  "USER_DISABLED",
-  "UNAUTHORIZED",
-  "FORBIDDEN",
-  "TOKEN_INVALID",
-  "INVALID_TOKEN",
-  "SESSION_EXPIRED",
-  "INVALID_LOGIN_SESSION",
-  "LOGIN_FAILED",
-  "AUTH_FAILED",
-]);
+const DEFAULT_2FA_PATH =
+  "/2fa";
 
-const KNOWN_AUTH_STORAGE_KEYS = [
-  "onion_token",
-  "onion_access_token",
-  "onion_refresh_token",
-  "onion_temp_token",
-  "onion_session_id",
-  "onion_session_user_id",
-  "onion_user_id",
-  "onion_user_name",
-  "onion_role",
+const LOGIN_SOURCE =
+  "auth.login";
 
-  "onion:token",
-  "onion:user",
-  "onion:access_token",
-  "onion:refresh_token",
-  "onion:temp_token",
-  "onion:session_id",
-  "onion:session_user_id",
-  "onion:user_name",
-  "onion:role",
+const ROLE_DEFAULT_REDIRECTS =
+  new Set([
+    "/usuarios",
+    "/clientes",
+    "/facturas",
+    "/incidencias",
+    "/servidor",
+    "/users",
+    "/clients",
+    "/tickets",
+    "/invoices",
+  ]);
 
-  "auth_token",
-  "access_token",
-  "refresh_token",
-  "temp_token",
-  "temporary_token",
-  "two_factor_token",
-  "mfa_token",
-  "token",
-  "session",
-  "user",
-];
+const AUTH_FAILURE_CODES =
+  new Set([
+    "INVALID_CREDENTIALS",
+    "MISSING_CREDENTIALS",
+    "ACCOUNT_TEMPORARILY_LOCKED",
+    "ACCOUNT_DISABLED",
+    "USER_DISABLED",
+    "UNAUTHORIZED",
+    "FORBIDDEN",
+    "TOKEN_INVALID",
+    "INVALID_TOKEN",
+    "SESSION_EXPIRED",
+    "INVALID_LOGIN_SESSION",
+    "LOGIN_FAILED",
+    "AUTH_FAILED",
+    "AUTH_RESTORE_FAILED",
+    "ME_INVALID_SESSION",
+    "REFRESH_INVALID_SESSION",
+  ]);
+
+const KNOWN_AUTH_STORAGE_KEYS =
+  Object.freeze([
+    "onion_token",
+    "onion_access_token",
+    "onion_refresh_token",
+    "onion_temp_token",
+    "onion_session_id",
+    "onion_session_user_id",
+    "onion_user_id",
+    "onion_user_name",
+    "onion_role",
+
+    "onion:token",
+    "onion:user",
+    "onion:accessToken",
+    "onion:access_token",
+    "onion:refreshToken",
+    "onion:refresh_token",
+    "onion:tempToken",
+    "onion:temp_token",
+    "onion:sessionId",
+    "onion:session_id",
+    "onion:sessionUserId",
+    "onion:session_user_id",
+    "onion:userName",
+    "onion:user_name",
+    "onion:role",
+
+    "auth_token",
+    "access_token",
+    "refresh_token",
+    "temp_token",
+    "temporary_token",
+    "two_factor_token",
+    "mfa_token",
+    "token",
+    "session",
+    "user",
+  ]);
 
 /* =========================================================
    BASICS
@@ -163,7 +182,9 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value).trim();
+
   return text || fallback;
 }
 
@@ -173,7 +194,8 @@ function safeBool(value, fallback = false) {
   }
 
   if (typeof value === "number") {
-    return value === 1;
+    if (value === 1) return true;
+    if (value === 0) return false;
   }
 
   const text =
@@ -187,6 +209,7 @@ function safeBool(value, fallback = false) {
       "si",
       "sí",
       "ok",
+      "on",
     ].includes(text)
   ) {
     return true;
@@ -197,6 +220,7 @@ function safeBool(value, fallback = false) {
       "false",
       "0",
       "no",
+      "off",
     ].includes(text)
   ) {
     return false;
@@ -206,18 +230,12 @@ function safeBool(value, fallback = false) {
 }
 
 function safeNumber(value, fallback = 0) {
-  const numeric = Number(value);
+  const numeric =
+    Number(value);
+
   return Number.isFinite(numeric)
     ? numeric
     : fallback;
-}
-
-function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-    ? value
-    : {};
 }
 
 function isPlainObject(value) {
@@ -228,13 +246,20 @@ function isPlainObject(value) {
   );
 }
 
+function safeObject(value, fallback = {}) {
+  return isPlainObject(value)
+    ? value
+    : fallback;
+}
+
 function isFunction(value) {
   return typeof value === "function";
 }
 
 function pickFirstText(...values) {
   for (const value of values) {
-    const text = safeText(value, "");
+    const text =
+      safeText(value, "");
 
     if (text) {
       return text;
@@ -273,12 +298,23 @@ function wait(ms = 0) {
     try {
       setTimeout(
         resolve,
-        Math.max(0, safeNumber(ms, 0))
+        Math.max(
+          0,
+          safeNumber(ms, 0)
+        )
       );
     } catch {
       resolve();
     }
   });
+}
+
+function isoNow() {
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
 }
 
 function afterPaint(callback) {
@@ -314,48 +350,37 @@ function afterPaint(callback) {
   } catch {}
 }
 
-function sanitizeEventPayload(payload = {}) {
-  if (!isPlainObject(payload)) {
-    return payload;
+function getState() {
+  try {
+    return AppCore?.state || {};
+  } catch {
+    return {};
   }
+}
 
-  const output = {
-    ...payload,
-  };
+function safeSetState(patch = {}) {
+  const cleanPatch =
+    safeObject(patch);
 
-  if ("token" in output) output.token = null;
-  if ("accessToken" in output) output.accessToken = null;
-  if ("access_token" in output) output.access_token = null;
-  if ("refreshToken" in output) output.refreshToken = null;
-  if ("refresh_token" in output) output.refresh_token = null;
-  if ("tempToken" in output) output.tempToken = null;
-  if ("temp_token" in output) output.temp_token = null;
+  try {
+    AppCore?.setState?.(
+      cleanPatch
+    );
+  } catch {}
 
-  if (output.path) {
-    output.path = redactSafe(output.path);
-  }
+  try {
+    if (
+      AppCore?.state &&
+      typeof AppCore.state === "object"
+    ) {
+      Object.assign(
+        AppCore.state,
+        cleanPatch
+      );
+    }
+  } catch {}
 
-  if (output.route) {
-    output.route = redactSafe(output.route);
-  }
-
-  if (output.publicPath) {
-    output.publicPath = redactSafe(output.publicPath);
-  }
-
-  if (output.redirectTo) {
-    output.redirectTo = redactSafe(output.redirectTo);
-  }
-
-  if (output.navigation?.target) {
-    output.navigation = {
-      ...output.navigation,
-      target:
-        redactSafe(output.navigation.target),
-    };
-  }
-
-  return output;
+  return getState();
 }
 
 function redactSafe(value = "") {
@@ -368,35 +393,154 @@ function redactSafe(value = "") {
         "$1***"
       )
       .replace(
+        /(\/activate-account\/)([^/?#\s]+)/gi,
+        "$1***"
+      )
+      .replace(
+        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      )
+      .replace(
         /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
         "$1***"
       );
   }
 }
 
+function sanitizeEventPayload(payload = {}) {
+  if (!isPlainObject(payload)) {
+    return payload;
+  }
+
+  const output = {
+    ...payload,
+  };
+
+  const tokenKeys = [
+    "token",
+    "accessToken",
+    "access_token",
+    "refreshToken",
+    "refresh_token",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
+  ];
+
+  for (const key of tokenKeys) {
+    if (key in output) {
+      output[key] = null;
+    }
+  }
+
+  for (const key of [
+    "path",
+    "route",
+    "publicPath",
+    "redirectTo",
+    "url",
+    "currentPath",
+    "currentCanonicalPath",
+  ]) {
+    if (output[key]) {
+      output[key] =
+        redactSafe(output[key]);
+    }
+  }
+
+  if (output.navigation?.target) {
+    output.navigation = {
+      ...output.navigation,
+      target:
+        redactSafe(output.navigation.target),
+    };
+  }
+
+  if (output.error?.raw) {
+    output.error = {
+      ...output.error,
+      raw:
+        undefined,
+    };
+  }
+
+  return output;
+}
+
 function safeEmit(eventName, payload = {}) {
+  const name =
+    safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
   const cleanPayload =
     sanitizeEventPayload(payload);
 
+  let emitted =
+    false;
+
   try {
     AppCore?.events?.emit?.(
-      eventName,
+      name,
       cleanPayload
     );
+
+    emitted =
+      true;
   } catch {}
 
   try {
-    window?.AppCore?.events?.emit?.(
-      eventName,
-      cleanPayload
-    );
+    if (
+      isBrowser() &&
+      window?.AppCore?.events?.emit
+    ) {
+      window.AppCore.events.emit(
+        name,
+        cleanPayload
+      );
+
+      emitted =
+        true;
+    }
   } catch {}
+
+  return emitted;
 }
 
-function safeSetError(error) {
+function safeSetError(error = null) {
   try {
-    AppCore?.setError?.(error || null);
+    AppCore?.setError?.(
+      error || null
+    );
   } catch {}
+
+  try {
+    if (error) {
+      safeSetState({
+        error,
+        lastError:
+          error,
+        hasError:
+          true,
+      });
+    } else {
+      safeSetState({
+        error:
+          null,
+        hasError:
+          false,
+      });
+    }
+  } catch {}
+
+  return true;
 }
 
 function safeLog(...args) {
@@ -417,26 +561,26 @@ function safeWarn(...args) {
   } catch {}
 
   try {
-    console.warn("[AuthLogin]", ...args);
+    console.warn(
+      "[AuthLogin]",
+      ...args
+    );
   } catch {}
 }
 
-function getState() {
-  try {
-    return AppCore?.state || {};
-  } catch {
-    return {};
-  }
-}
+/* =========================================================
+   API CLIENT
+========================================================= */
 
 function getApiClient() {
   return (
     AppCore?.apiClient ||
+    AppCore?.services?.apiClient ||
+    AppCore?.services?.api ||
     AppCore?.services?.http ||
     AppCore?.services?.Http ||
     AppCore?.http ||
     AppCore?.Http ||
-    AppCore?.services?.api ||
     null
   );
 }
@@ -451,8 +595,70 @@ function resolveLoginEndpoint() {
   );
 }
 
+async function apiPost(path, body = {}, options = {}) {
+  const apiClient =
+    getApiClient();
+
+  if (!apiClient) {
+    throw createAuthError(
+      "No hay cliente API disponible para login.",
+      {
+        status:
+          500,
+        code:
+          "API_CLIENT_MISSING",
+      }
+    );
+  }
+
+  if (isFunction(apiClient.post)) {
+    return apiClient.post(
+      path,
+      body,
+      options
+    );
+  }
+
+  if (isFunction(apiClient.request)) {
+    try {
+      return await apiClient.request(
+        path,
+        {
+          ...options,
+          method:
+            "POST",
+          body,
+        }
+      );
+    } catch (error) {
+      try {
+        return await apiClient.request(
+          "POST",
+          path,
+          {
+            ...options,
+            body,
+          }
+        );
+      } catch {
+        throw error;
+      }
+    }
+  }
+
+  throw createAuthError(
+    "El cliente API no soporta POST.",
+    {
+      status:
+        500,
+      code:
+        "API_CLIENT_POST_MISSING",
+    }
+  );
+}
+
 /* =========================================================
-   ROUTE HELPERS
+   PATH / ROUTE HELPERS
 ========================================================= */
 
 function normalizeCleanRoute(path = "/") {
@@ -495,18 +701,15 @@ function getHomeRoute() {
   const configured =
     configLikeRoute(
       AppCore?.config?.routes?.home ||
-      AppCore?.config?.homePath ||
-      DEFAULT_HOME_PATH
+        AppCore?.config?.homePath ||
+        DEFAULT_HOME_PATH
     ) || DEFAULT_HOME_PATH;
 
   if (
     isAuthRoute(configured) ||
-    isRoleDefaultRedirect(configured)
+    isRoleDefaultRedirect(configured) ||
+    !isSafeRelativePath(configured)
   ) {
-    return DEFAULT_HOME_PATH;
-  }
-
-  if (!isSafeRelativePath(configured)) {
     return DEFAULT_HOME_PATH;
   }
 
@@ -517,7 +720,7 @@ function getLoginRoute() {
   const loginPath =
     configLikeRoute(
       AppCore?.config?.routes?.login ||
-      DEFAULT_LOGIN_PATH
+        DEFAULT_LOGIN_PATH
     ) || DEFAULT_LOGIN_PATH;
 
   return isSafeRelativePath(loginPath)
@@ -552,8 +755,8 @@ function getBrowserCanonicalPath() {
   try {
     return configLikeRoute(
       getCurrentCanonicalPath() ||
-      getBrowserPath() ||
-      "/"
+        getBrowserPath() ||
+        "/"
     );
   } catch {
     return configLikeRoute(
@@ -591,9 +794,17 @@ function shouldNavigateAfterLogin(options = {}) {
 
 function buildPopStateEvent() {
   try {
-    return new PopStateEvent("popstate");
+    return new PopStateEvent(
+      "popstate"
+    );
   } catch {
-    return new Event("popstate");
+    try {
+      return new Event(
+        "popstate"
+      );
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -607,7 +818,7 @@ function setDocumentAuthFlags({
   ready = false,
 } = {}) {
   if (!isBrowser()) {
-    return;
+    return false;
   }
 
   try {
@@ -619,6 +830,11 @@ function setDocumentAuthFlags({
     document.documentElement?.classList?.toggle(
       "app-ready",
       Boolean(ready)
+    );
+
+    document.documentElement?.setAttribute(
+      "data-authenticated",
+      authenticated ? "true" : "false"
     );
 
     document.body?.classList?.toggle(
@@ -635,7 +851,11 @@ function setDocumentAuthFlags({
       "data-authenticated",
       authenticated ? "true" : "false"
     );
-  } catch {}
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function clearAuthScreenDomState(reason = "login-success") {
@@ -684,11 +904,24 @@ function clearAuthScreenDomState(reason = "login-success") {
       document.getElementById("app-shell");
 
     if (shell) {
-      shell.hidden = false;
-      shell.setAttribute("aria-busy", "false");
-      shell.setAttribute("aria-hidden", "false");
-      shell.dataset.shell = "visible";
-      shell.dataset.routeMode = "app";
+      shell.hidden =
+        false;
+
+      shell.setAttribute(
+        "aria-busy",
+        "false"
+      );
+
+      shell.setAttribute(
+        "aria-hidden",
+        "false"
+      );
+
+      shell.dataset.shell =
+        "visible";
+
+      shell.dataset.routeMode =
+        "app";
     }
   } catch {}
 
@@ -697,9 +930,18 @@ function clearAuthScreenDomState(reason = "login-success") {
       document.getElementById("main-content");
 
     if (main) {
-      main.setAttribute("aria-busy", "false");
-      main.setAttribute("aria-hidden", "false");
-      main.dataset.routeMode = "app";
+      main.setAttribute(
+        "aria-busy",
+        "false"
+      );
+
+      main.setAttribute(
+        "aria-hidden",
+        "false"
+      );
+
+      main.dataset.routeMode =
+        "app";
     }
   } catch {}
 
@@ -708,22 +950,31 @@ function clearAuthScreenDomState(reason = "login-success") {
       document.getElementById("view-container");
 
     if (view) {
-      view.setAttribute("aria-busy", "false");
-      view.dataset.routeMode = "app";
+      view.setAttribute(
+        "aria-busy",
+        "false"
+      );
+
+      view.dataset.routeMode =
+        "app";
     }
   } catch {}
 
   setDocumentAuthFlags({
-    authenticated: true,
-    loading: false,
-    ready: true,
+    authenticated:
+      true,
+    loading:
+      false,
+    ready:
+      true,
   });
 
   safeEmit(
     "app:shell:auth-screen-cleared",
     {
       reason,
-      source: "auth.login",
+      source:
+        LOGIN_SOURCE,
     }
   );
 
@@ -735,7 +986,8 @@ function safeSyncUserUI(reason = "login-sync-user-ui") {
     AppCore?.syncUserUI?.({
       AppCore,
       reason,
-      source: "auth.login",
+      source:
+        LOGIN_SOURCE,
     });
   } catch {}
 
@@ -747,22 +999,29 @@ function safeSyncUserUI(reason = "login-sync-user-ui") {
     "app:ui:repair-request",
     {
       reason,
-      source: "auth.login",
+      source:
+        LOGIN_SOURCE,
       authenticated:
         Boolean(getState().authenticated),
       user:
         getState().user || null,
       role:
         getState().role || null,
+      repairShell:
+        false,
+      hardRepair:
+        false,
+      rebind:
+        false,
     }
   );
 }
 
-function emitAuthenticatedEvents(reason = "login-success", extra = {}) {
+function emitLoginSessionCommitted(reason = "login-session-applied", extra = {}) {
   const payload = {
     reason,
     source:
-      "auth.login",
+      LOGIN_SOURCE,
     authenticated:
       Boolean(getState().authenticated),
     user:
@@ -776,17 +1035,47 @@ function emitAuthenticatedEvents(reason = "login-success", extra = {}) {
     ...extra,
   };
 
-  safeEmit("auth:session:applied", payload);
-  safeEmit("auth:login:session-ready", payload);
-  safeEmit("auth:session:restored", payload);
-  safeEmit("app:session:restored", payload);
-  safeEmit("app:user:change", payload);
-  safeEmit("app:auth:ready", payload);
-  safeEmit("app:ui:repair-request", payload);
+  /*
+    Importante:
+    Login correcto NO emite:
+    - auth:session:restored
+    - app:session:restored
+
+    Esos eventos pertenecen sólo a restoreSession().
+    El auth/index.js público puede emitir auth:login:success.
+  */
+  safeEmit(
+    "auth:login:session-committed",
+    payload
+  );
+
+  safeEmit(
+    "auth:session:applied",
+    {
+      ...payload,
+      reason:
+        `${reason}:session-applied`,
+    }
+  );
+
+  safeEmit(
+    "app:user:change",
+    payload
+  );
+
+  safeEmit(
+    "app:auth:ready",
+    payload
+  );
+
+  safeEmit(
+    "app:ui:repair-request",
+    payload
+  );
 }
 
 /* =========================================================
-   ROUTER RESOLUTION / NAVIGATION
+   ROUTER / NAVIGATION
 ========================================================= */
 
 async function resolveRouter() {
@@ -847,42 +1136,56 @@ function updateCoreRouteState(target = "/") {
       normalizeCanonicalPath(cleanTarget)
     );
 
+  const previousRoute =
+    getState().route || "/";
+
+  const previousPublicPath =
+    getState().publicPath || previousRoute;
+
   try {
     if (isFunction(AppCore?.setRoute)) {
-      AppCore.setRoute(canonical);
+      AppCore.setRoute(
+        canonical
+      );
     }
   } catch {}
 
   try {
     if (isFunction(AppCore?.setPublicPath)) {
-      AppCore.setPublicPath(cleanTarget);
+      AppCore.setPublicPath(
+        cleanTarget
+      );
     }
   } catch {}
 
-  try {
-    AppCore?.setState?.({
-      route:
-        canonical,
-      publicPath:
-        cleanTarget,
-      lastRoute:
-        canonical,
-    });
-  } catch {
-    try {
-      if (AppCore?.state) {
-        AppCore.state.route = canonical;
-        AppCore.state.publicPath = cleanTarget;
-        AppCore.state.lastRoute = canonical;
-      }
-    } catch {}
-  }
+  safeSetState({
+    route:
+      canonical,
+    publicPath:
+      cleanTarget,
+    lastRoute:
+      previousRoute,
+    lastPublicPath:
+      previousPublicPath,
+  });
+
+  return {
+    route:
+      canonical,
+    publicPath:
+      cleanTarget,
+    previousRoute,
+    previousPublicPath,
+  };
 }
 
 async function safeNavigate(path = "/", options = {}) {
   const target =
     normalizePath(
-      safeText(path, getHomeRoute())
+      safeText(
+        path,
+        getHomeRoute()
+      )
     ) || getHomeRoute();
 
   const current =
@@ -905,14 +1208,30 @@ async function safeNavigate(path = "/", options = {}) {
       "login-navigation"
     );
 
+  safeEmit(
+    "auth:login:navigation:start",
+    {
+      reason,
+      target,
+      targetCanonical,
+      replaceState,
+      force,
+      source:
+        LOGIN_SOURCE,
+    }
+  );
+
   if (
     isBrowser() &&
     sameCanonicalPath(
       current,
       targetCanonical
-    )
+    ) &&
+    !force
   ) {
-    updateCoreRouteState(target);
+    updateCoreRouteState(
+      target
+    );
 
     clearAuthScreenDomState(
       `${reason}:same-route`
@@ -922,12 +1241,26 @@ async function safeNavigate(path = "/", options = {}) {
       `${reason}:same-route`
     );
 
-    return {
-      ok: true,
-      skipped: true,
-      reason: "same-route",
+    const result = {
+      ok:
+        true,
+      skipped:
+        true,
+      reason:
+        "same-route",
       target,
     };
+
+    safeEmit(
+      "auth:login:navigation:complete",
+      {
+        ...result,
+        source:
+          LOGIN_SOURCE,
+      }
+    );
+
+    return result;
   }
 
   const router =
@@ -943,7 +1276,8 @@ async function safeNavigate(path = "/", options = {}) {
           target,
           {
             replaceState,
-            force,
+            force:
+              force || true,
           }
         );
 
@@ -954,7 +1288,9 @@ async function safeNavigate(path = "/", options = {}) {
         await result;
       }
 
-      updateCoreRouteState(target);
+      updateCoreRouteState(
+        target
+      );
 
       clearAuthScreenDomState(
         `${reason}:router`
@@ -974,16 +1310,43 @@ async function safeNavigate(path = "/", options = {}) {
         );
       });
 
-      return {
-        ok: true,
-        skipped: false,
-        reason: "router",
+      const navResult = {
+        ok:
+          true,
+        skipped:
+          false,
+        reason:
+          "router",
         target,
       };
+
+      safeEmit(
+        "auth:login:navigation:complete",
+        {
+          ...navResult,
+          source:
+            LOGIN_SOURCE,
+        }
+      );
+
+      return navResult;
     } catch (error) {
       safeWarn(
         "Router.navigate falló.",
         error
+      );
+
+      safeEmit(
+        "auth:login:navigation:error",
+        {
+          reason:
+            "router-error",
+          target,
+          message:
+            extractMessage(error),
+          source:
+            LOGIN_SOURCE,
+        }
       );
     }
   }
@@ -1002,32 +1365,53 @@ async function safeNavigate(path = "/", options = {}) {
           canonicalPath:
             targetCanonical,
           source:
-            "auth.login",
+            LOGIN_SOURCE,
         },
         "",
         target
       );
 
-      updateCoreRouteState(target);
+      updateCoreRouteState(
+        target
+      );
 
       clearAuthScreenDomState(
         `${reason}:history`
       );
 
-      window.dispatchEvent(
-        buildPopStateEvent()
-      );
+      const popStateEvent =
+        buildPopStateEvent();
+
+      if (popStateEvent) {
+        window.dispatchEvent(
+          popStateEvent
+        );
+      }
 
       safeSyncUserUI(
         `${reason}:history`
       );
 
-      return {
-        ok: true,
-        skipped: false,
-        reason: "history",
+      const navResult = {
+        ok:
+          true,
+        skipped:
+          false,
+        reason:
+          "history",
         target,
       };
+
+      safeEmit(
+        "auth:login:navigation:complete",
+        {
+          ...navResult,
+          source:
+            LOGIN_SOURCE,
+        }
+      );
+
+      return navResult;
     }
   } catch (error) {
     safeWarn(
@@ -1038,23 +1422,42 @@ async function safeNavigate(path = "/", options = {}) {
 
   try {
     if (isBrowser()) {
-      window.location.assign(target);
+      window.location.assign(
+        target
+      );
 
       return {
-        ok: true,
-        skipped: false,
-        reason: "location",
+        ok:
+          true,
+        skipped:
+          false,
+        reason:
+          "location",
         target,
       };
     }
   } catch {}
 
-  return {
-    ok: false,
-    skipped: false,
-    reason: "navigation-failed",
+  const failed = {
+    ok:
+      false,
+    skipped:
+      false,
+    reason:
+      "navigation-failed",
     target,
   };
+
+  safeEmit(
+    "auth:login:navigation:error",
+    {
+      ...failed,
+      source:
+        LOGIN_SOURCE,
+    }
+  );
+
+  return failed;
 }
 
 /* =========================================================
@@ -1073,7 +1476,9 @@ function looksLikePhone(value = "") {
       .replace(/[^\d+]/g, "")
       .trim();
 
-  return /^\+?\d{6,20}$/.test(clean);
+  return /^\+?\d{6,20}$/.test(
+    clean
+  );
 }
 
 function normalizePhone(value = "") {
@@ -1098,7 +1503,9 @@ export function resolveLoginIdentifier(credentials = {}) {
 
 export function normalizeLoginPayload(credentials = {}) {
   const rawIdentifier =
-    resolveLoginIdentifier(credentials);
+    resolveLoginIdentifier(
+      credentials
+    );
 
   const maxIdentifier =
     safeNumber(
@@ -1129,7 +1536,10 @@ export function normalizeLoginPayload(credentials = {}) {
     identifier,
     password,
     remember:
-      safeBool(credentials.remember, false),
+      safeBool(
+        credentials.remember,
+        false
+      ),
   };
 }
 
@@ -1139,7 +1549,9 @@ export function buildLoginRequestBody(credentials = {}) {
     password,
     remember,
   } =
-    normalizeLoginPayload(credentials);
+    normalizeLoginPayload(
+      credentials
+    );
 
   const clean =
     safeText(identifier);
@@ -1193,9 +1605,17 @@ function normalizeRedirectCandidate(value = "") {
     candidate =
       sanitizeRedirectPath(raw, "");
   } catch {
-    candidate =
-      normalizePath(raw);
+    try {
+      candidate =
+        normalizePath(raw);
+    } catch {
+      candidate =
+        "";
+    }
   }
+
+  candidate =
+    safeText(candidate, "");
 
   if (!candidate) {
     return "";
@@ -1222,12 +1642,17 @@ function getRedirectFromUrl() {
   }
 
   try {
-    const redirect =
+    const params =
       new URLSearchParams(
         window.location.search
-      ).get("redirect");
+      );
 
-    return normalizeRedirectCandidate(redirect);
+    return normalizeRedirectCandidate(
+      params.get("redirect") ||
+        params.get("next") ||
+        params.get("target") ||
+        ""
+    );
   } catch {
     return "";
   }
@@ -1241,6 +1666,7 @@ function getRedirectFromOptions(options = {}) {
     opts.redirectTo ||
       opts.redirect ||
       opts.target ||
+      opts.next ||
       ""
   );
 }
@@ -1275,18 +1701,22 @@ export function buildLoginRedirectPath(targetPath = null) {
     return `${loginPath}?redirect=${encodeURIComponent(target)}`;
   }
 
-  const url =
-    new URL(
-      loginPath,
-      window.location.origin
+  try {
+    const url =
+      new URL(
+        loginPath,
+        window.location.origin
+      );
+
+    url.searchParams.set(
+      "redirect",
+      target
     );
 
-  url.searchParams.set(
-    "redirect",
-    target
-  );
-
-  return `${url.pathname}${url.search}`;
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return loginPath;
+  }
 }
 
 export function getPostLoginTarget(
@@ -1294,7 +1724,9 @@ export function getPostLoginTarget(
   options = {}
 ) {
   const fromOptions =
-    getRedirectFromOptions(options);
+    getRedirectFromOptions(
+      options
+    );
 
   if (fromOptions) {
     return fromOptions;
@@ -1401,7 +1833,8 @@ function extractAuthToken(raw = {}) {
     authData,
     nestedSessionData,
     nestedAuthData,
-  } = getNestedAuthData(raw);
+  } =
+    getNestedAuthData(raw);
 
   return pickFirstText(
     root.token,
@@ -1488,7 +1921,8 @@ function extractRefreshToken(raw = {}) {
     authData,
     nestedSessionData,
     nestedAuthData,
-  } = getNestedAuthData(raw);
+  } =
+    getNestedAuthData(raw);
 
   return pickFirstText(
     root.refreshToken,
@@ -1535,7 +1969,8 @@ function extractTempToken(raw = {}) {
     authData,
     nestedSessionData,
     nestedAuthData,
-  } = getNestedAuthData(raw);
+  } =
+    getNestedAuthData(raw);
 
   return pickFirstText(
     root.tempToken,
@@ -1634,7 +2069,8 @@ function extractAuthUser(raw = {}) {
     authData,
     nestedSessionData,
     nestedAuthData,
-  } = getNestedAuthData(raw);
+  } =
+    getNestedAuthData(raw);
 
   return pickFirstObject(
     root.user,
@@ -1711,7 +2147,8 @@ function extractRole(raw = {}, user = null) {
     authData,
     nestedSessionData,
     nestedAuthData,
-  } = getNestedAuthData(raw);
+  } =
+    getNestedAuthData(raw);
 
   return pickFirstText(
     root.role,
@@ -1747,7 +2184,9 @@ function extractRole(raw = {}, user = null) {
     user?.role,
     user?.rol,
     user?.type,
-    user?.tipo
+    user?.tipo,
+    user?.userType,
+    user?.user_type
   );
 }
 
@@ -1764,7 +2203,8 @@ function extractStatus(raw = {}) {
     authData,
     nestedSessionData,
     nestedAuthData,
-  } = getNestedAuthData(raw);
+  } =
+    getNestedAuthData(raw);
 
   return pickFirstValue(
     root.status,
@@ -1825,7 +2265,8 @@ function extractCode(raw = {}) {
     authData,
     nestedSessionData,
     nestedAuthData,
-  } = getNestedAuthData(raw);
+  } =
+    getNestedAuthData(raw);
 
   return pickFirstText(
     root.code,
@@ -1892,38 +2333,51 @@ function extractResponseMessage(raw = {}) {
     authData,
     nestedSessionData,
     nestedAuthData,
-  } = getNestedAuthData(raw);
+  } =
+    getNestedAuthData(raw);
 
   return pickFirstText(
     root.message,
     root.mensaje,
     root.errorMessage,
     root.error_message,
+    root.detail,
+    root.description,
 
     data.message,
     data.mensaje,
     data.errorMessage,
     data.error_message,
+    data.detail,
+    data.description,
 
     payload.message,
     payload.mensaje,
     payload.errorMessage,
     payload.error_message,
+    payload.detail,
+    payload.description,
 
     result.message,
     result.mensaje,
     result.errorMessage,
     result.error_message,
+    result.detail,
+    result.description,
 
     body.message,
     body.mensaje,
     body.errorMessage,
     body.error_message,
+    body.detail,
+    body.description,
 
     responseData.message,
     responseData.mensaje,
     responseData.errorMessage,
     responseData.error_message,
+    responseData.detail,
+    responseData.description,
 
     sessionData.message,
     sessionData.mensaje,
@@ -1955,7 +2409,8 @@ function extractRedirectTo(raw = {}) {
     authData,
     nestedSessionData,
     nestedAuthData,
-  } = getNestedAuthData(raw);
+  } =
+    getNestedAuthData(raw);
 
   return pickFirstText(
     root.redirectTo,
@@ -2028,7 +2483,8 @@ function extractSessionData(raw = {}) {
     responseData,
     sessionData,
     authData,
-  } = getNestedAuthData(raw);
+  } =
+    getNestedAuthData(raw);
 
   return (
     pickFirstObject(
@@ -2051,7 +2507,9 @@ function extractSessionData(raw = {}) {
 }
 
 function hasUsableToken(token = "") {
-  return Boolean(safeText(token, ""));
+  return Boolean(
+    safeText(token, "")
+  );
 }
 
 function hasUsableUser(user = {}) {
@@ -2061,13 +2519,18 @@ function hasUsableUser(user = {}) {
 
   return Boolean(
     safeText(user.id, "") ||
-    safeText(user.userId, "") ||
-    safeText(user._id, "") ||
-    safeText(user.uid, "") ||
-    safeText(user.username, "") ||
-    safeText(user.email, "") ||
-    safeText(user.phone, "") ||
-    safeText(user.telefono, "")
+      safeText(user.userId, "") ||
+      safeText(user.user_id, "") ||
+      safeText(user._id, "") ||
+      safeText(user.uid, "") ||
+      safeText(user.username, "") ||
+      safeText(user.userName, "") ||
+      safeText(user.user_name, "") ||
+      safeText(user.email, "") ||
+      safeText(user.mail, "") ||
+      safeText(user.phone, "") ||
+      safeText(user.telefono, "") ||
+      safeText(user.mobile, "")
   );
 }
 
@@ -2081,7 +2544,8 @@ function isExplicitAuthFailure(raw = {}) {
     result,
     body,
     responseData,
-  } = getNestedAuthData(root);
+  } =
+    getNestedAuthData(root);
 
   const statusValue =
     extractStatus(root);
@@ -2109,24 +2573,20 @@ function isExplicitAuthFailure(raw = {}) {
     return true;
   }
 
-  if (
+  return Boolean(
     root.ok === false ||
-    root.success === false ||
-    data.ok === false ||
-    data.success === false ||
-    payload.ok === false ||
-    payload.success === false ||
-    result.ok === false ||
-    result.success === false ||
-    body.ok === false ||
-    body.success === false ||
-    responseData.ok === false ||
-    responseData.success === false
-  ) {
-    return true;
-  }
-
-  return false;
+      root.success === false ||
+      data.ok === false ||
+      data.success === false ||
+      payload.ok === false ||
+      payload.success === false ||
+      result.ok === false ||
+      result.success === false ||
+      body.ok === false ||
+      body.success === false ||
+      responseData.ok === false ||
+      responseData.success === false
+  );
 }
 
 function is2FARequired(raw = {}, tempToken = "") {
@@ -2143,7 +2603,8 @@ function is2FARequired(raw = {}, tempToken = "") {
     authData,
     nestedSessionData,
     nestedAuthData,
-  } = getNestedAuthData(root);
+  } =
+    getNestedAuthData(root);
 
   const status =
     safeText(
@@ -2154,70 +2615,71 @@ function is2FARequired(raw = {}, tempToken = "") {
   return Boolean(
     tempToken ||
 
-    safeBool(root.requires2FA, false) ||
-    safeBool(root.require2FA, false) ||
-    safeBool(root.requiresTwoFactor, false) ||
-    safeBool(root.twoFactorRequired, false) ||
-    safeBool(root.mfaRequired, false) ||
-    safeBool(root.requiresMfa, false) ||
+      safeBool(root.requires2FA, false) ||
+      safeBool(root.require2FA, false) ||
+      safeBool(root.requiresTwoFactor, false) ||
+      safeBool(root.twoFactorRequired, false) ||
+      safeBool(root.mfaRequired, false) ||
+      safeBool(root.requiresMfa, false) ||
 
-    safeBool(data.requires2FA, false) ||
-    safeBool(data.require2FA, false) ||
-    safeBool(data.requiresTwoFactor, false) ||
-    safeBool(data.twoFactorRequired, false) ||
-    safeBool(data.mfaRequired, false) ||
-    safeBool(data.requiresMfa, false) ||
+      safeBool(data.requires2FA, false) ||
+      safeBool(data.require2FA, false) ||
+      safeBool(data.requiresTwoFactor, false) ||
+      safeBool(data.twoFactorRequired, false) ||
+      safeBool(data.mfaRequired, false) ||
+      safeBool(data.requiresMfa, false) ||
 
-    safeBool(payload.requires2FA, false) ||
-    safeBool(payload.require2FA, false) ||
-    safeBool(payload.requiresTwoFactor, false) ||
-    safeBool(payload.twoFactorRequired, false) ||
-    safeBool(payload.mfaRequired, false) ||
-    safeBool(payload.requiresMfa, false) ||
+      safeBool(payload.requires2FA, false) ||
+      safeBool(payload.require2FA, false) ||
+      safeBool(payload.requiresTwoFactor, false) ||
+      safeBool(payload.twoFactorRequired, false) ||
+      safeBool(payload.mfaRequired, false) ||
+      safeBool(payload.requiresMfa, false) ||
 
-    safeBool(result.requires2FA, false) ||
-    safeBool(result.require2FA, false) ||
-    safeBool(result.requiresTwoFactor, false) ||
-    safeBool(result.twoFactorRequired, false) ||
-    safeBool(result.mfaRequired, false) ||
-    safeBool(result.requiresMfa, false) ||
+      safeBool(result.requires2FA, false) ||
+      safeBool(result.require2FA, false) ||
+      safeBool(result.requiresTwoFactor, false) ||
+      safeBool(result.twoFactorRequired, false) ||
+      safeBool(result.mfaRequired, false) ||
+      safeBool(result.requiresMfa, false) ||
 
-    safeBool(body.requires2FA, false) ||
-    safeBool(body.require2FA, false) ||
-    safeBool(body.requiresTwoFactor, false) ||
-    safeBool(body.twoFactorRequired, false) ||
-    safeBool(body.mfaRequired, false) ||
-    safeBool(body.requiresMfa, false) ||
+      safeBool(body.requires2FA, false) ||
+      safeBool(body.require2FA, false) ||
+      safeBool(body.requiresTwoFactor, false) ||
+      safeBool(body.twoFactorRequired, false) ||
+      safeBool(body.mfaRequired, false) ||
+      safeBool(body.requiresMfa, false) ||
 
-    safeBool(responseData.requires2FA, false) ||
-    safeBool(responseData.require2FA, false) ||
-    safeBool(responseData.twoFactorRequired, false) ||
-    safeBool(responseData.mfaRequired, false) ||
+      safeBool(responseData.requires2FA, false) ||
+      safeBool(responseData.require2FA, false) ||
+      safeBool(responseData.twoFactorRequired, false) ||
+      safeBool(responseData.mfaRequired, false) ||
 
-    safeBool(sessionData.requires2FA, false) ||
-    safeBool(sessionData.twoFactorRequired, false) ||
-    safeBool(sessionData.mfaRequired, false) ||
+      safeBool(sessionData.requires2FA, false) ||
+      safeBool(sessionData.twoFactorRequired, false) ||
+      safeBool(sessionData.mfaRequired, false) ||
 
-    safeBool(authData.requires2FA, false) ||
-    safeBool(authData.twoFactorRequired, false) ||
-    safeBool(authData.mfaRequired, false) ||
+      safeBool(authData.requires2FA, false) ||
+      safeBool(authData.twoFactorRequired, false) ||
+      safeBool(authData.mfaRequired, false) ||
 
-    safeBool(nestedSessionData.requires2FA, false) ||
-    safeBool(nestedSessionData.twoFactorRequired, false) ||
+      safeBool(nestedSessionData.requires2FA, false) ||
+      safeBool(nestedSessionData.twoFactorRequired, false) ||
 
-    safeBool(nestedAuthData.requires2FA, false) ||
-    safeBool(nestedAuthData.twoFactorRequired, false) ||
+      safeBool(nestedAuthData.requires2FA, false) ||
+      safeBool(nestedAuthData.twoFactorRequired, false) ||
 
-    status === "2fa_required" ||
-    status === "mfa_required" ||
-    status === "two_factor_required"
+      status === "2fa_required" ||
+      status === "mfa_required" ||
+      status === "two_factor_required"
   );
 }
 
 function validateAuthResponseSoft(response) {
   try {
     return {
-      ok: true,
+      ok:
+        true,
       value:
         validateAuthResponse(response),
       error:
@@ -2225,7 +2687,8 @@ function validateAuthResponseSoft(response) {
     };
   } catch (error) {
     return {
-      ok: false,
+      ok:
+        false,
       value:
         null,
       error,
@@ -2253,6 +2716,16 @@ function normalizeAuthPayload({
       ...safeObject(validatedObject.data),
     },
 
+    payload: {
+      ...safeObject(responseObject.payload),
+      ...safeObject(validatedObject.payload),
+    },
+
+    result: {
+      ...safeObject(responseObject.result),
+      ...safeObject(validatedObject.result),
+    },
+
     session: {
       ...safeObject(responseObject.session),
       ...safeObject(validatedObject.session),
@@ -2277,7 +2750,10 @@ function normalizeAuthPayload({
     extractAuthUser(merged);
 
   const role =
-    extractRole(merged, user);
+    extractRole(
+      merged,
+      user
+    );
 
   const status =
     extractStatus(merged);
@@ -2298,7 +2774,10 @@ function normalizeAuthPayload({
     isExplicitAuthFailure(merged);
 
   const requires2FA =
-    is2FARequired(merged, tempToken);
+    is2FARequired(
+      merged,
+      tempToken
+    );
 
   const authenticated =
     !explicitFailure &&
@@ -2362,10 +2841,13 @@ function normalizeAuthPayload({
       safeText(role, ""),
 
     sessionData,
+
     requires2FA,
 
     redirectTo:
-      normalizeRedirectCandidate(redirectTo),
+      normalizeRedirectCandidate(
+        redirectTo
+      ),
   };
 }
 
@@ -2401,6 +2883,52 @@ function createAuthError(
   return error;
 }
 
+function normalizeThrownLoginError(error) {
+  if (
+    error &&
+    error.name === "AuthLoginError"
+  ) {
+    return error;
+  }
+
+  const status =
+    safeNumber(
+      error?.status ||
+        error?.statusCode ||
+        error?.response?.status ||
+        error?.data?.status,
+      0
+    );
+
+  const code =
+    safeText(
+      error?.code ||
+        error?.data?.code ||
+        error?.response?.data?.code ||
+        "",
+      status === 401
+        ? "UNAUTHORIZED"
+        : status === 403
+          ? "FORBIDDEN"
+          : "LOGIN_FAILED"
+    );
+
+  const message =
+    extractMessage(error) ||
+    "No se pudo iniciar sesión.";
+
+  return createAuthError(
+    message,
+    {
+      status:
+        status || 500,
+      code,
+      raw:
+        error,
+    }
+  );
+}
+
 function assertValidAuthenticatedPayload(authData = {}) {
   if (
     authData.explicitFailure ||
@@ -2425,9 +2953,12 @@ function assertValidAuthenticatedPayload(authData = {}) {
     throw createAuthError(
       "El login no devolvió token de autenticación.",
       {
-        status: 401,
-        code: "INVALID_LOGIN_SESSION",
-        raw: authData.raw,
+        status:
+          401,
+        code:
+          "INVALID_LOGIN_SESSION",
+        raw:
+          authData.raw,
       }
     );
   }
@@ -2436,9 +2967,12 @@ function assertValidAuthenticatedPayload(authData = {}) {
     throw createAuthError(
       "El login no devolvió un usuario válido.",
       {
-        status: 401,
-        code: "INVALID_LOGIN_SESSION",
-        raw: authData.raw,
+        status:
+          401,
+        code:
+          "INVALID_LOGIN_SESSION",
+        raw:
+          authData.raw,
       }
     );
   }
@@ -2452,18 +2986,24 @@ function assertValidAuthenticatedPayload(authData = {}) {
 
 function clearKnownAuthStorage() {
   if (!isBrowser()) {
-    return;
+    return false;
   }
 
-  KNOWN_AUTH_STORAGE_KEYS.forEach((key) => {
+  for (const key of KNOWN_AUTH_STORAGE_KEYS) {
     try {
-      window.localStorage?.removeItem?.(key);
+      window.localStorage?.removeItem?.(
+        key
+      );
     } catch {}
 
     try {
-      window.sessionStorage?.removeItem?.(key);
+      window.sessionStorage?.removeItem?.(
+        key
+      );
     } catch {}
-  });
+  }
+
+  return true;
 }
 
 function clearTempTokenSafe() {
@@ -2476,11 +3016,12 @@ function clearTempTokenSafe() {
   } catch {}
 
   if (!isBrowser()) {
-    return;
+    return true;
   }
 
   [
     "onion_temp_token",
+    "onion:tempToken",
     "onion:temp_token",
     "temp_token",
     "temporary_token",
@@ -2488,20 +3029,38 @@ function clearTempTokenSafe() {
     "mfa_token",
   ].forEach((key) => {
     try {
-      window.localStorage?.removeItem?.(key);
+      window.localStorage?.removeItem?.(
+        key
+      );
     } catch {}
 
     try {
-      window.sessionStorage?.removeItem?.(key);
+      window.sessionStorage?.removeItem?.(
+        key
+      );
     } catch {}
   });
+
+  return true;
 }
 
-function clearAuthRuntimeState(reason = "login_cleanup") {
+function clearAuthRuntimeState(reason = "login_cleanup", options = {}) {
+  const emitCleared =
+    options.emitCleared === true;
+
   try {
     clearSessionLocal({
-      silent: true,
+      silent:
+        true,
       reason,
+      preserveCurrentRoute:
+        true,
+      preserveRoute:
+        true,
+      route:
+        getState().route || getBrowserCanonicalPath(),
+      publicPath:
+        getState().publicPath || getBrowserPath(),
     });
   } catch {
     try {
@@ -2510,87 +3069,86 @@ function clearAuthRuntimeState(reason = "login_cleanup") {
   }
 
   try {
-    AppCore?.clearSession?.();
+    if (options.callCoreClear === true) {
+      AppCore?.clearSession?.();
+    }
   } catch {}
 
   try {
-    AppCore?.session?.clear?.();
+    if (options.callSessionClear === true) {
+      AppCore?.session?.clear?.();
+    }
   } catch {}
 
-  try {
-    AppCore?.setState?.({
-      authenticated:
-        false,
-      hasToken:
-        false,
-      user:
-        null,
-      currentUser:
-        null,
-      authUser:
-        null,
-      sessionUser:
-        null,
-      role:
-        null,
-      userRole:
-        null,
-      token:
-        null,
-      accessToken:
-        null,
-      session:
-        null,
-      sessionId:
-        null,
-      loginInProgress:
-        false,
-    });
-  } catch {
-    try {
-      if (AppCore?.state) {
-        AppCore.state.authenticated = false;
-        AppCore.state.hasToken = false;
-        AppCore.state.user = null;
-        AppCore.state.currentUser = null;
-        AppCore.state.authUser = null;
-        AppCore.state.sessionUser = null;
-        AppCore.state.role = null;
-        AppCore.state.userRole = null;
-        AppCore.state.token = null;
-        AppCore.state.accessToken = null;
-        AppCore.state.session = null;
-        AppCore.state.sessionId = null;
-        AppCore.state.loginInProgress = false;
-      }
-    } catch {}
-  }
+  safeSetState({
+    authenticated:
+      false,
+    hasToken:
+      false,
+
+    user:
+      null,
+    currentUser:
+      null,
+    authUser:
+      null,
+    sessionUser:
+      null,
+
+    role:
+      null,
+    userRole:
+      null,
+    roles:
+      [],
+
+    token:
+      null,
+    accessToken:
+      null,
+
+    session:
+      null,
+    sessionId:
+      null,
+
+    currentResolvedUsername:
+      null,
+    resolvedUsername:
+      null,
+
+    twoFactorPending:
+      false,
+    tempToken:
+      null,
+
+    loginInProgress:
+      false,
+  });
 
   clearKnownAuthStorage();
 
-  safeEmit(
-    "auth:session:cleared",
-    {
-      reason,
-      source: "auth.login",
-    }
-  );
+  if (emitCleared) {
+    safeEmit(
+      "auth:login:auth-state-cleared",
+      {
+        reason,
+        source:
+          LOGIN_SOURCE,
+      }
+    );
+  }
+
+  return true;
 }
 
 function markLoginInProgress(value = false) {
-  try {
-    AppCore?.setState?.({
-      loginInProgress:
-        Boolean(value),
-    });
-  } catch {
-    try {
-      if (AppCore?.state) {
-        AppCore.state.loginInProgress =
-          Boolean(value);
-      }
-    } catch {}
-  }
+  safeSetState({
+    loginInProgress:
+      Boolean(value),
+  });
+
+  return Boolean(value);
 }
 
 /* =========================================================
@@ -2612,64 +3170,51 @@ function enforceAuthenticatedCoreState(snapshot = {}) {
     user?.rol ||
     "";
 
-  try {
-    AppCore?.setState?.({
-      authenticated:
-        true,
-      hasToken:
-        true,
+  safeSetState({
+    authenticated:
+      true,
+    hasToken:
+      true,
 
+    user,
+    currentUser:
       user,
-      currentUser:
-        user,
-      authUser:
-        user,
-      sessionUser:
-        user,
+    authUser:
+      user,
+    sessionUser:
+      user,
 
+    role,
+    userRole:
       role,
-      userRole:
-        role,
 
+    token,
+    accessToken:
+      token,
+
+    twoFactorPending:
+      false,
+    tempToken:
+      null,
+
+    session: {
+      ...(safeObject(getState().session)),
+      user,
+      role,
       token,
       accessToken:
         token,
+      authenticated:
+        true,
+      source:
+        LOGIN_SOURCE,
+    },
 
-      session: {
-        ...(safeObject(getState().session)),
-        user,
-        role,
-        token,
-        accessToken:
-          token,
-        authenticated:
-          true,
-      },
-    });
-  } catch {
-    try {
-      if (AppCore?.state) {
-        AppCore.state.authenticated = true;
-        AppCore.state.hasToken = true;
-        AppCore.state.user = user;
-        AppCore.state.currentUser = user;
-        AppCore.state.authUser = user;
-        AppCore.state.sessionUser = user;
-        AppCore.state.role = role;
-        AppCore.state.userRole = role;
-        AppCore.state.token = token;
-        AppCore.state.accessToken = token;
-        AppCore.state.session = {
-          ...(safeObject(AppCore.state.session)),
-          user,
-          role,
-          token,
-          accessToken: token,
-          authenticated: true,
-        };
-      }
-    } catch {}
-  }
+    lastLoginAt:
+      isoNow(),
+    lastAuthSource:
+      "login",
+  });
 
   return {
     user,
@@ -2710,10 +3255,11 @@ function applyAuthenticatedSession(authData = {}) {
     ok:
       true,
     source:
-      "auth.login",
+      LOGIN_SOURCE,
   };
 
-  let snapshot = null;
+  let snapshot =
+    null;
 
   try {
     snapshot =
@@ -2725,7 +3271,10 @@ function applyAuthenticatedSession(authData = {}) {
     );
   }
 
-  if (!snapshot || typeof snapshot !== "object") {
+  if (
+    !snapshot ||
+    typeof snapshot !== "object"
+  ) {
     snapshot = {
       ...payload,
     };
@@ -2734,6 +3283,11 @@ function applyAuthenticatedSession(authData = {}) {
   if (!snapshot.token) {
     snapshot.token =
       authData.token;
+  }
+
+  if (!snapshot.accessToken) {
+    snapshot.accessToken =
+      snapshot.token;
   }
 
   if (!snapshot.user) {
@@ -2758,7 +3312,9 @@ function applyAuthenticatedSession(authData = {}) {
     });
   } catch {}
 
-  enforceAuthenticatedCoreState(snapshot);
+  enforceAuthenticatedCoreState(
+    snapshot
+  );
 
   return snapshot;
 }
@@ -2768,34 +3324,22 @@ function applyAuthenticatedSession(authData = {}) {
 ========================================================= */
 
 async function executeLogin(credentials = {}, sequence = 0, options = {}) {
-  const payload =
-    normalizeLoginPayload(credentials);
+  const normalizedCredentials =
+    normalizeLoginPayload(
+      credentials
+    );
 
   if (
-    !payload.identifier ||
-    !payload.password
+    !normalizedCredentials.identifier ||
+    !normalizedCredentials.password
   ) {
     throw createAuthError(
       "Usuario/email y contraseña son obligatorios.",
       {
-        status: 400,
-        code: "MISSING_CREDENTIALS",
-      }
-    );
-  }
-
-  const apiClient =
-    getApiClient();
-
-  if (
-    !apiClient ||
-    typeof apiClient.post !== "function"
-  ) {
-    throw createAuthError(
-      "No hay cliente API disponible para login.",
-      {
-        status: 500,
-        code: "API_CLIENT_MISSING",
+        status:
+          400,
+        code:
+          "MISSING_CREDENTIALS",
       }
     );
   }
@@ -2804,22 +3348,25 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
     resolveLoginEndpoint();
 
   safeSetError(null);
-  markLoginInProgress(true);
+
+  markLoginInProgress(
+    true
+  );
 
   safeEmit(
-    "auth:login:start",
+    "auth:login:request:start",
     {
       identifier:
-        payload.identifier,
+        normalizedCredentials.identifier,
       endpoint,
       sequence,
       source:
-        "auth.login",
+        LOGIN_SOURCE,
     }
   );
 
   const response =
-    await apiClient.post(
+    await apiPost(
       endpoint,
       buildLoginRequestBody(credentials),
       {
@@ -2827,6 +3374,10 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
           false,
         public:
           true,
+        silent:
+          options.silentRequest === true,
+        storeError:
+          false,
         _skipAuthRefresh:
           true,
         useLoader:
@@ -2835,7 +3386,9 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
     );
 
   const validation =
-    validateAuthResponseSoft(response);
+    validateAuthResponseSoft(
+      response
+    );
 
   const authData =
     normalizeAuthPayload({
@@ -2846,10 +3399,32 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
         validation.error,
     });
 
+  safeEmit(
+    "auth:login:request:complete",
+    {
+      sequence,
+      status:
+        authData.status,
+      authenticated:
+        authData.authenticated,
+      requires2FA:
+        authData.requires2FA,
+      explicitFailure:
+        authData.explicitFailure,
+      hasUser:
+        hasUsableUser(authData.user),
+      hasToken:
+        hasUsableToken(authData.token),
+      validationOk:
+        validation.ok,
+      source:
+        LOGIN_SOURCE,
+    }
+  );
+
   /*
-    Si validateAuthResponse falla pero el backend está pidiendo 2FA,
-    no se trata como fallo fatal. Para login normal sí se exige
-    token + usuario más abajo.
+    validateAuthResponse puede fallar si el backend responde 2FA
+    sin sesión completa. Eso no es fallo fatal si requires2FA=true.
   */
   if (
     validation.error &&
@@ -2905,25 +3480,45 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
     authData.tempToken
   ) {
     try {
-      persistTempToken(authData.tempToken);
+      persistTempToken(
+        authData.tempToken
+      );
     } catch {}
 
-    try {
-      AppCore?.setState?.({
-        authenticated:
-          false,
-        hasToken:
-          false,
-        token:
-          null,
-        accessToken:
-          null,
-        twoFactorPending:
-          true,
-        tempToken:
-          authData.tempToken,
-      });
-    } catch {}
+    safeSetState({
+      authenticated:
+        false,
+      hasToken:
+        false,
+      token:
+        null,
+      accessToken:
+        null,
+      user:
+        null,
+      currentUser:
+        null,
+      authUser:
+        null,
+      sessionUser:
+        null,
+      role:
+        null,
+      userRole:
+        null,
+      session:
+        null,
+      twoFactorPending:
+        true,
+      tempToken:
+        authData.tempToken,
+    });
+
+    const redirectTo =
+      normalizeRedirectCandidate(
+        authData.redirectTo
+      ) ||
+      DEFAULT_2FA_PATH;
 
     const result = {
       ok:
@@ -2938,12 +3533,10 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
         false,
       tempToken:
         authData.tempToken,
-      redirectTo:
-        safeText(
-          authData.redirectTo,
-          DEFAULT_2FA_PATH
-        ),
+      redirectTo,
       response,
+      navigation:
+        null,
     };
 
     safeEmit(
@@ -2958,7 +3551,8 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
         redirectTo:
           result.redirectTo,
         source:
-          "auth.login",
+          LOGIN_SOURCE,
+        sequence,
       }
     );
 
@@ -2970,7 +3564,7 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
             replaceState:
               true,
             force:
-              false,
+              options.forceNavigate === true,
             reason:
               "login-2fa",
           }
@@ -2987,23 +3581,30 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
     throw createAuthError(
       "Se requiere 2FA pero no se recibió token temporal.",
       {
-        status: 401,
-        code: "MISSING_2FA_TEMP_TOKEN",
-        raw: response,
+        status:
+          401,
+        code:
+          "MISSING_2FA_TEMP_TOKEN",
+        raw:
+          response,
       }
     );
   }
 
   /* =====================================================
-     CLEAN NORMAL LOGIN
+     STRICT NORMAL LOGIN
   ===================================================== */
 
-  assertValidAuthenticatedPayload(authData);
+  assertValidAuthenticatedPayload(
+    authData
+  );
 
   clearTempTokenSafe();
 
   const snapshot =
-    applyAuthenticatedSession(authData);
+    applyAuthenticatedSession(
+      authData
+    );
 
   if (
     !snapshot?.token ||
@@ -3011,15 +3612,22 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
     !hasUsableUser(snapshot.user)
   ) {
     clearAuthRuntimeState(
-      "invalid_snapshot_after_apply_session"
+      "invalid_snapshot_after_apply_session",
+      {
+        emitCleared:
+          true,
+      }
     );
 
     throw createAuthError(
       "El login devolvió sesión inválida.",
       {
-        status: 401,
-        code: "INVALID_LOGIN_SESSION",
-        raw: response,
+        status:
+          401,
+        code:
+          "INVALID_LOGIN_SESSION",
+        raw:
+          response,
       }
     );
   }
@@ -3032,7 +3640,7 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
     "login-session-applied"
   );
 
-  emitAuthenticatedEvents(
+  emitLoginSessionCommitted(
     "login-session-applied",
     {
       sequence,
@@ -3044,7 +3652,15 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
   const redirectTo =
     getPostLoginTarget(
       snapshot.user,
-      options
+      {
+        ...options,
+        redirectTo:
+          authData.redirectTo ||
+          options.redirectTo ||
+          options.redirect ||
+          options.target ||
+          "",
+      }
     );
 
   const result = {
@@ -3059,6 +3675,8 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
     requires2FA:
       false,
     token:
+      snapshot.token,
+    accessToken:
       snapshot.token,
     user:
       snapshot.user,
@@ -3076,25 +3694,32 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
       null,
   };
 
-  safeEmit(
-    "auth:login:success",
-    {
-      status:
-        result.status,
-      authenticated:
-        true,
-      requires2FA:
-        false,
-      user:
-        result.user,
-      role:
-        result.role,
-      redirectTo,
-      source:
-        "auth.login",
-      sequence,
-    }
-  );
+  /*
+    No emitimos auth:login:success por defecto.
+    El Auth/index.js público lo emite una sola vez.
+    Para uso standalone se puede activar con emitLoginSuccessEvent:true.
+  */
+  if (options.emitLoginSuccessEvent === true) {
+    safeEmit(
+      "auth:login:success",
+      {
+        status:
+          result.status,
+        authenticated:
+          true,
+        requires2FA:
+          false,
+        user:
+          result.user,
+        role:
+          result.role,
+        redirectTo,
+        source:
+          LOGIN_SOURCE,
+        sequence,
+      }
+    );
+  }
 
   if (shouldNavigateAfterLogin(options)) {
     result.navigation =
@@ -3104,7 +3729,7 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
           replaceState:
             true,
           force:
-            options.forceNavigate === true,
+            options.forceNavigate !== false,
           reason:
             "login-success",
         }
@@ -3119,7 +3744,7 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
     "login-success-after-navigation"
   );
 
-  emitAuthenticatedEvents(
+  emitLoginSessionCommitted(
     "login-success-after-navigation",
     {
       sequence,
@@ -3144,13 +3769,19 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
         reason:
           "login-success-after-paint",
         source:
-          "auth.login",
+          LOGIN_SOURCE,
         authenticated:
           true,
         user:
           getState().user || null,
         role:
           getState().role || null,
+        repairShell:
+          false,
+        hardRepair:
+          false,
+        rebind:
+          false,
       }
     );
   });
@@ -3174,51 +3805,82 @@ export async function login(credentials = {}, options = {}) {
     (async () => {
       try {
         clearAuthRuntimeState(
-          "before_login"
+          "before_login",
+          {
+            emitCleared:
+              false,
+            callCoreClear:
+              false,
+            callSessionClear:
+              false,
+          }
         );
 
-        markLoginInProgress(true);
-
-        return await executeLogin(
-          credentials,
-          sequence,
-          options
+        markLoginInProgress(
+          true
         );
+
+        const result =
+          await executeLogin(
+            credentials,
+            sequence,
+            options
+          );
+
+        return result;
       } catch (error) {
+        const normalizedError =
+          normalizeThrownLoginError(
+            error
+          );
+
         clearAuthRuntimeState(
-          "login_failed"
+          "login_failed",
+          {
+            emitCleared:
+              true,
+            callCoreClear:
+              false,
+            callSessionClear:
+              false,
+          }
         );
 
-        safeSetError(error);
+        safeSetError(
+          normalizedError
+        );
 
         safeEmit(
           "auth:login:error",
           {
             sequence,
-            error:
-              {
-                name:
-                  error?.name || "Error",
-                message:
-                  extractMessage(error),
-                status:
-                  error?.status || 0,
-                code:
-                  error?.code ||
-                  error?.data?.code ||
-                  null,
-              },
+            error: {
+              name:
+                normalizedError?.name || "Error",
+              message:
+                extractMessage(normalizedError),
+              status:
+                normalizedError?.status || 0,
+              code:
+                normalizedError?.code ||
+                normalizedError?.data?.code ||
+                null,
+            },
             message:
-              extractMessage(error),
+              extractMessage(normalizedError),
             source:
-              "auth.login",
+              LOGIN_SOURCE,
           }
         );
 
-        throw error;
+        throw normalizedError;
       } finally {
-        markLoginInProgress(false);
-        loginPromise = null;
+        markLoginInProgress(
+          false
+        );
+
+        loginPromise =
+          null;
       }
     })();
 
@@ -3245,7 +3907,9 @@ export async function handleLoginFormSubmit(formElement, options = {}) {
   }
 
   const formData =
-    new FormData(formElement);
+    new FormData(
+      formElement
+    );
 
   const credentials = {
     identifier:
@@ -3294,6 +3958,9 @@ export async function handleLoginFormSubmit(formElement, options = {}) {
 
 export function getLoginSnapshot() {
   return {
+    version:
+      LOGIN_VERSION,
+
     loginInFlight:
       Boolean(loginPromise),
 
@@ -3309,10 +3976,14 @@ export function getLoginSnapshot() {
       getHomeRoute(),
 
     currentPath:
-      redactSafe(getBrowserPath()),
+      redactSafe(
+        getBrowserPath()
+      ),
 
     currentCanonicalPath:
-      redactSafe(getBrowserCanonicalPath()),
+      redactSafe(
+        getBrowserCanonicalPath()
+      ),
 
     hasApiClient:
       Boolean(getApiClient()),
@@ -3320,8 +3991,23 @@ export function getLoginSnapshot() {
     authenticated:
       Boolean(getState().authenticated),
 
+    hasToken:
+      Boolean(getState().token || getState().accessToken),
+
+    hasUser:
+      hasUsableUser(
+        getState().user ||
+        getState().currentUser ||
+        getState().authUser ||
+        getState().sessionUser ||
+        null
+      ),
+
     loginInProgress:
       Boolean(getState().loginInProgress),
+
+    twoFactorPending:
+      Boolean(getState().twoFactorPending),
   };
 }
 

@@ -3,51 +3,28 @@
      ONION SUPPORT · SITEMAP
      Archivo: /sitemap.xml
 
-     Uso:
-     - Preparado para SEO / landing pública futura
-     - Mantener sólo URLs públicas indexables
-     - No incluir rutas privadas de la SPA
+     ESTADO ACTUAL:
+     - Onion Support funciona como SPA.
+     - No existen rutas públicas SEO tipo /es/, /es/contacto/, etc.
+     - No se incluyen rutas privadas internas:
+       /tickets, /facturas, /users, /clients, /settings, /account...
+     - No se incluyen rutas auth/técnicas:
+       /login, /logout, /activate-account, /reset-password...
+     - Sólo se declara la URL pública canónica real.
+
+     NOTAS:
+     - Cuando exista una landing pública real, añadir sólo URLs que
+       devuelvan contenido público indexable.
+     - El sitemap no debe usarse para rutas privadas de aplicación.
 ===================================================== -->
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 
-  <!-- HOME -->
+  <!-- SPA PUBLIC CANONICAL -->
   <url>
     <loc>https://onionsupport.com/</loc>
-    <lastmod>2026-04-08</lastmod>
+    <lastmod>2026-05-04</lastmod>
     <changefreq>weekly</changefreq>
     <priority>1.0</priority>
-  </url>
-
-  <!-- LANDING ES -->
-  <url>
-    <loc>https://onionsupport.com/es/</loc>
-    <lastmod>2026-04-08</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.9</priority>
-  </url>
-
-  <!-- SERVICIOS -->
-  <url>
-    <loc>https://onionsupport.com/es/servicios/</loc>
-    <lastmod>2026-04-08</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
-  </url>
-
-  <!-- SOPORTE -->
-  <url>
-    <loc>https://onionsupport.com/es/soporte/</loc>
-    <lastmod>2026-04-08</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.8</priority>
-  </url>
-
-  <!-- CONTACTO -->
-  <url>
-    <loc>https://onionsupport.com/es/contacto/</loc>
-    <lastmod>2026-04-08</lastmod>
-    <changefreq>yearly</changefreq>
-    <priority>0.6</priority>
   </url>
 
 </urlset>

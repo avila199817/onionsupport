@@ -7,6 +7,7 @@
    - mantener estado visual de boot desde el primer tick JS
    - capturar URL inicial antes de que el router normalice
    - preservar rutas públicas técnicas con token
+   - sincronizar boot context con AppCore.state
    - esperar DOM ready de forma segura
    - boot idempotente
    - capturar errores fatales de arranque
@@ -14,14 +15,16 @@
    - no dejar loader pegado ante fallo fatal o timeout
    - exponer diagnóstico mínimo en window.OnionApp.main
 
-   HARDENING PRO:
+   HARDENING EXTREMO:
    - una sola vía de arranque
-   - anti doble boot
+   - anti doble boot / anti doble ready
    - CSP clean: sin innerHTML, sin estilos inline
    - fallback robusto si AppCore.ready falla/no existe
-   - logs limpios
-   - error fatal visible
+   - logs/eventos sin tokens reales
+   - error fatal visible sin destruir seguridad
    - timeout de boot configurable
+   - preservación activation/reset tokens antes del router
+   - sync shell/main/view/loader segura
    - clases html/body coherentes:
      app-booting / app-loading / app-ready / app-fatal
 
@@ -44,61 +47,171 @@ let bootStarted = false;
 let bootSettled = false;
 let bootFailed = false;
 let bootPromise = null;
+
+let startCalled = false;
 let readyBound = false;
+let readyCallbackCalled = false;
 let fatalRendered = false;
 let globalSafetyNetBound = false;
+
+let lastBootContext = null;
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-const DEFAULT_BOOT_TIMEOUT_MS = 45000;
+const MAIN_VERSION =
+  "10.0.0";
 
-const ACTIVATION_PATH = "/activate-account";
-const RESET_CONFIRM_PATH = "/reset-password/confirm";
+const DEFAULT_BOOT_TIMEOUT_MS =
+  45000;
 
-const ACTIVATION_TOKEN_PARAM_NAMES = Object.freeze([
-  "token",
-  "activationToken",
-  "activateToken",
-  "code",
-  "t",
-]);
+const DEFAULT_FATAL_MESSAGE =
+  "No se pudo iniciar la aplicación.";
 
-const RESET_TOKEN_PARAM_NAMES = Object.freeze([
-  "token",
-  "resetToken",
-  "passwordResetToken",
-  "confirmToken",
-  "code",
-  "t",
-]);
+const ACTIVATION_PATH =
+  "/activate-account";
 
-const PROTECTED_PUBLIC_ROUTES = Object.freeze([
-  Object.freeze({
-    path: ACTIVATION_PATH,
-    windowKeys: Object.freeze([
-      "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-    ]),
-    tokenNames: ACTIVATION_TOKEN_PARAM_NAMES,
-    scrubbedFlags: Object.freeze([
-      "scrubbedActivationToken",
-    ]),
-  }),
+const RESET_CONFIRM_PATH =
+  "/reset-password/confirm";
 
-  Object.freeze({
-    path: RESET_CONFIRM_PATH,
-    windowKeys: Object.freeze([
-      "__ONION_RESET_CONFIRM_INITIAL_URL__",
-      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-    ]),
-    tokenNames: RESET_TOKEN_PARAM_NAMES,
-    scrubbedFlags: Object.freeze([
-      "scrubbedResetToken",
-      "scrubbedResetPasswordToken",
-    ]),
-  }),
-]);
+const ACTIVATION_TOKEN_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "code",
+    "t",
+  ]);
+
+const RESET_TOKEN_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
+    "code",
+    "t",
+  ]);
+
+const SENSITIVE_QUERY_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
+    "code",
+    "t",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
+  ]);
+
+const PROTECTED_PUBLIC_ROUTES =
+  Object.freeze([
+    Object.freeze({
+      key:
+        "activation",
+
+      path:
+        ACTIVATION_PATH,
+
+      stateFlag:
+        "activationBoot",
+
+      scrubbedStateFlag:
+        "scrubbedActivationToken",
+
+      bootIsKey:
+        "bootIsActivation",
+
+      bootHasKey:
+        "bootHasActivationToken",
+
+      bootUrlKey:
+        "bootActivationInitialUrl",
+
+      bootPathKey:
+        "bootActivationInitialPath",
+
+      windowKeys:
+        Object.freeze([
+          "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+        ]),
+
+      tokenNames:
+        ACTIVATION_TOKEN_PARAM_NAMES,
+
+      scrubbedFlags:
+        Object.freeze([
+          "scrubbedActivationToken",
+        ]),
+    }),
+
+    Object.freeze({
+      key:
+        "resetConfirm",
+
+      path:
+        RESET_CONFIRM_PATH,
+
+      stateFlag:
+        "resetConfirmBoot",
+
+      scrubbedStateFlag:
+        "scrubbedResetToken",
+
+      bootIsKey:
+        "bootIsResetConfirm",
+
+      bootHasKey:
+        "bootHasResetToken",
+
+      bootUrlKey:
+        "bootResetConfirmInitialUrl",
+
+      bootPathKey:
+        "bootResetConfirmInitialPath",
+
+      windowKeys:
+        Object.freeze([
+          "__ONION_RESET_CONFIRM_INITIAL_URL__",
+          "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+        ]),
+
+      tokenNames:
+        RESET_TOKEN_PARAM_NAMES,
+
+      scrubbedFlags:
+        Object.freeze([
+          "scrubbedResetToken",
+          "scrubbedResetPasswordToken",
+        ]),
+    }),
+  ]);
+
+const ROOT_STATE_CLASSES =
+  Object.freeze([
+    "app-booting",
+    "app-loading",
+    "app-ready",
+    "app-fatal",
+  ]);
+
+const BODY_EXTRA_LOADING_CLASSES =
+  Object.freeze([
+    "loading",
+  ]);
 
 /* =========================================================
    BASIC HELPERS
@@ -109,6 +222,24 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
+}
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function safeObject(value, fallback = {}) {
+  return isObject(value)
+    ? value
+    : fallback;
 }
 
 function safeText(value, fallback = "") {
@@ -134,17 +265,76 @@ function safeNumber(value, fallback = 0) {
     : fallback;
 }
 
-function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-    ? value
-    : {};
+function safeBool(value, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === "string") {
+    const normalized =
+      value.trim().toLowerCase();
+
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "si",
+        "sí",
+        "ok",
+        "on",
+      ].includes(normalized)
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "off",
+      ].includes(normalized)
+    ) {
+      return false;
+    }
+  }
+
+  return Boolean(fallback);
 }
 
-function isFunction(value) {
-  return typeof value === "function";
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
 }
+
+function unique(values = []) {
+  return Array.from(
+    new Set(
+      safeArray(values)
+        .map((value) => safeText(value, ""))
+        .filter(Boolean)
+    )
+  );
+}
+
+function nowIso() {
+  try {
+    return new Date().toISOString();
+  } catch {
+    return "";
+  }
+}
+
+/* =========================================================
+   LOG / EVENTS
+========================================================= */
 
 function safeLog(...args) {
   try {
@@ -164,7 +354,10 @@ function safeWarn(...args) {
   } catch {}
 
   try {
-    console.warn("[Main]", ...args);
+    console.warn(
+      "[Main]",
+      ...args
+    );
   } catch {}
 }
 
@@ -177,8 +370,139 @@ function safeError(...args) {
   } catch {}
 
   try {
-    console.error("[Main]", ...args);
+    console.error(
+      "[Main]",
+      ...args
+    );
   } catch {}
+}
+
+function redactTokenInText(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  let output =
+    raw;
+
+  try {
+    for (const name of SENSITIVE_QUERY_PARAM_NAMES) {
+      const escaped =
+        String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+      output =
+        output.replace(
+          new RegExp(`([?&]${escaped}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
+    }
+
+    output =
+      output.replace(
+        /(\/activate-account\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
+
+    output =
+      output.replace(
+        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
+
+    output =
+      output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
+  } catch {}
+
+  return output;
+}
+
+function sanitizeError(error = null) {
+  if (!error) {
+    return null;
+  }
+
+  return {
+    name:
+      error?.name || "Error",
+
+    message:
+      safeText(
+        error?.message ||
+          error?.reason ||
+          error,
+        "Error"
+      ),
+
+    code:
+      error?.code || null,
+
+    status:
+      error?.status || 0,
+
+    timeout:
+      Boolean(error?.timeout),
+
+    at:
+      nowIso(),
+  };
+}
+
+function sanitizePayload(payload = {}) {
+  if (!isObject(payload)) {
+    return payload;
+  }
+
+  const clean = {
+    ...payload,
+  };
+
+  for (const key of [
+    "href",
+    "url",
+    "path",
+    "publicPath",
+    "initialUrl",
+    "activationInitialUrl",
+    "resetConfirmInitialUrl",
+    "redirectTo",
+  ]) {
+    if (clean[key]) {
+      clean[key] =
+        redactTokenInText(clean[key]);
+    }
+  }
+
+  for (const key of [
+    "token",
+    "accessToken",
+    "access_token",
+    "refreshToken",
+    "refresh_token",
+    "tempToken",
+    "temp_token",
+  ]) {
+    if (key in clean) {
+      clean[key] = null;
+    }
+  }
+
+  if (clean.bootContext) {
+    clean.bootContext =
+      sanitizeBootContext(clean.bootContext);
+  }
+
+  if (clean.error) {
+    clean.error =
+      sanitizeError(clean.error);
+  }
+
+  return clean;
 }
 
 function safeEmit(name = "", payload = {}) {
@@ -189,12 +513,15 @@ function safeEmit(name = "", payload = {}) {
     return false;
   }
 
+  const cleanPayload =
+    sanitizePayload(payload);
+
   let emitted = false;
 
   try {
     AppCore?.events?.emit?.(
       eventName,
-      payload
+      cleanPayload
     );
 
     emitted = true;
@@ -204,7 +531,8 @@ function safeEmit(name = "", payload = {}) {
     if (isBrowser()) {
       window.dispatchEvent(
         new CustomEvent(eventName, {
-          detail: payload,
+          detail:
+            cleanPayload,
         })
       );
 
@@ -214,6 +542,10 @@ function safeEmit(name = "", payload = {}) {
 
   return emitted;
 }
+
+/* =========================================================
+   TIMING
+========================================================= */
 
 function nextFrame() {
   return new Promise((resolve) => {
@@ -244,7 +576,7 @@ async function nextPaint() {
 }
 
 /* =========================================================
-   INITIAL URL / TOKEN PRESERVATION
+   URL / PATH HELPERS
 ========================================================= */
 
 function getBaseOrigin() {
@@ -273,6 +605,30 @@ function normalizePathnameOnly(pathname = "/") {
     value = `/${value}`;
   }
 
+  const segments =
+    value.split("/");
+
+  const normalizedSegments = [];
+
+  for (const segment of segments) {
+    if (
+      !segment ||
+      segment === "."
+    ) {
+      continue;
+    }
+
+    if (segment === "..") {
+      normalizedSegments.pop();
+      continue;
+    }
+
+    normalizedSegments.push(segment);
+  }
+
+  value =
+    `/${normalizedSegments.join("/")}` || "/";
+
   if (
     value.length > 1 &&
     value.endsWith("/")
@@ -284,9 +640,35 @@ function normalizePathnameOnly(pathname = "/") {
   return value;
 }
 
+function normalizeSearch(search = "") {
+  const value =
+    safeText(search, "");
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value =
+    safeText(hash, "");
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
+}
+
 function isHashRouterPath(value = "") {
   const raw =
-    String(value || "").trim();
+    safeText(value, "");
 
   return (
     raw.startsWith("#/") ||
@@ -296,17 +678,70 @@ function isHashRouterPath(value = "") {
 
 function normalizeHashRouterPath(value = "") {
   const raw =
-    String(value || "").trim();
+    safeText(value, "");
 
   if (!raw) {
     return "/";
   }
 
   if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/");
+    return raw.replace(/^#!\/?/, "/") || "/";
   }
 
-  return raw.replace(/^#\/?/, "/");
+  return raw.replace(/^#\/?/, "/") || "/";
+}
+
+function splitPath(path = "/") {
+  const raw =
+    safeText(path, "/") || "/";
+
+  if (isHashRouterPath(raw)) {
+    return splitPath(
+      normalizeHashRouterPath(raw)
+    );
+  }
+
+  let pathname =
+    raw;
+
+  let search =
+    "";
+
+  let hash =
+    "";
+
+  const hashIndex =
+    pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash =
+      pathname.slice(hashIndex);
+
+    pathname =
+      pathname.slice(0, hashIndex) || "/";
+  }
+
+  const searchIndex =
+    pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search =
+      pathname.slice(searchIndex);
+
+    pathname =
+      pathname.slice(0, searchIndex) || "/";
+  }
+
+  return {
+    pathname:
+      normalizePathnameOnly(pathname),
+
+    search:
+      normalizeSearch(search),
+
+    hash:
+      normalizeHash(hash),
+  };
 }
 
 function pathFromUrlLike(value = "") {
@@ -323,7 +758,10 @@ function pathFromUrlLike(value = "") {
 
   try {
     const parsed =
-      new URL(raw, getBaseOrigin());
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
 
     if (
       parsed.hash &&
@@ -357,42 +795,80 @@ function pathFromUrlLike(value = "") {
 }
 
 function stripSearchAndHash(path = "/") {
-  const raw =
-    safeText(path, "/");
+  const resolved =
+    pathFromUrlLike(path) ||
+    path ||
+    "/";
 
-  return normalizePathnameOnly(
-    raw.split("?")[0].split("#")[0] || "/"
-  );
+  const {
+    pathname,
+  } =
+    splitPath(resolved);
+
+  return pathname || "/";
+}
+
+function getCurrentHref() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  try {
+    return window.location.href || "";
+  } catch {
+    return "";
+  }
+}
+
+function getCurrentPublicPath() {
+  if (!isBrowser()) {
+    return "/";
+  }
+
+  try {
+    const href =
+      window.location.href;
+
+    return pathFromUrlLike(href) || "/";
+  } catch {
+    return "/";
+  }
 }
 
 function isPathOrChild(path = "/", basePath = "/") {
   const clean =
-    stripSearchAndHash(
-      pathFromUrlLike(path) || path || "/"
-    );
+    stripSearchAndHash(path);
+
+  const base =
+    normalizePathnameOnly(basePath);
 
   return (
-    clean === basePath ||
-    clean.startsWith(`${basePath}/`)
+    clean === base ||
+    clean.startsWith(`${base}/`)
   );
 }
 
+/* =========================================================
+   TOKEN DETECTION
+========================================================= */
+
 function getPathToken(path = "", basePath = "") {
   const clean =
-    stripSearchAndHash(
-      pathFromUrlLike(path) || path || "/"
-    );
+    stripSearchAndHash(path);
+
+  const base =
+    normalizePathnameOnly(basePath);
 
   if (
-    !basePath ||
-    !clean.startsWith(`${basePath}/`)
+    !base ||
+    !clean.startsWith(`${base}/`)
   ) {
     return "";
   }
 
   const token =
     clean
-      .slice(`${basePath}/`.length)
+      .slice(`${base}/`.length)
       .split("/")[0];
 
   try {
@@ -410,17 +886,40 @@ function hasTokenInSearch(search = "", tokenNames = []) {
     const params =
       new URLSearchParams(search || "");
 
-    return tokenNames.some((name) => {
-      return Boolean(
-        safeText(
-          params.get(name),
-          ""
-        )
-      );
-    });
+    return safeArray(tokenNames)
+      .some((name) => {
+        return Boolean(
+          safeText(
+            params.get(name),
+            ""
+          )
+        );
+      });
   } catch {
     return false;
   }
+}
+
+function getHashQuery(hash = "") {
+  const value =
+    safeText(hash, "");
+
+  if (
+    !value ||
+    !value.includes("?")
+  ) {
+    return "";
+  }
+
+  const query =
+    value
+      .split("?")
+      .slice(1)
+      .join("?");
+
+  return query
+    ? `?${query}`
+    : "";
 }
 
 function hasProtectedRouteToken(value = "", routeConfig = null) {
@@ -447,7 +946,10 @@ function hasProtectedRouteToken(value = "", routeConfig = null) {
 
   try {
     const parsed =
-      new URL(raw, getBaseOrigin());
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
 
     if (
       hasTokenInSearch(
@@ -458,58 +960,43 @@ function hasProtectedRouteToken(value = "", routeConfig = null) {
       return true;
     }
 
-    if (
-      parsed.hash &&
-      parsed.hash.includes("?")
-    ) {
-      const query =
-        parsed.hash
-          .split("?")
-          .slice(1)
-          .join("?");
+    const hashQuery =
+      getHashQuery(parsed.hash);
 
-      return hasTokenInSearch(
-        query ? `?${query}` : "",
+    if (
+      hashQuery &&
+      hasTokenInSearch(
+        hashQuery,
         routeConfig.tokenNames
-      );
+      )
+    ) {
+      return true;
     }
   } catch {
-    if (path.includes("?")) {
-      const query =
-        path
-          .split("?")
-          .slice(1)
-          .join("?")
-          .split("#")[0];
-
-      if (
-        hasTokenInSearch(
-          query ? `?${query}` : "",
-          routeConfig.tokenNames
-        )
-      ) {
-        return true;
-      }
-    }
+    const split =
+      splitPath(path);
 
     if (
-      path.includes("#") &&
-      path.includes("?")
+      split.search &&
+      hasTokenInSearch(
+        split.search,
+        routeConfig.tokenNames
+      )
     ) {
-      const query =
-        path
-          .split("?")
-          .slice(1)
-          .join("?");
+      return true;
+    }
 
-      if (
-        hasTokenInSearch(
-          query ? `?${query}` : "",
-          routeConfig.tokenNames
-        )
-      ) {
-        return true;
-      }
+    const hashQuery =
+      getHashQuery(split.hash);
+
+    if (
+      hashQuery &&
+      hasTokenInSearch(
+        hashQuery,
+        routeConfig.tokenNames
+      )
+    ) {
+      return true;
     }
   }
 
@@ -528,13 +1015,17 @@ function isProtectedRouteScrubbed(routeConfig = null) {
     const state =
       window.history?.state || {};
 
-    return routeConfig.scrubbedFlags.some(
-      (flag) => Boolean(state?.[flag])
+    return routeConfig.scrubbedFlags.some((flag) =>
+      Boolean(state?.[flag])
     );
   } catch {
     return false;
   }
 }
+
+/* =========================================================
+   BOOT CONTEXT
+========================================================= */
 
 function setWindowValueOnce(key = "", value = "") {
   if (
@@ -555,73 +1046,329 @@ function setWindowValueOnce(key = "", value = "") {
   return false;
 }
 
-function captureInitialUrl(reason = "main") {
+function getWindowValue(key = "") {
+  if (
+    !isBrowser() ||
+    !key
+  ) {
+    return "";
+  }
+
+  try {
+    return safeText(
+      window[key],
+      ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+function buildBootContext(reason = "main") {
+  const href =
+    getCurrentHref();
+
+  const publicPath =
+    pathFromUrlLike(href) ||
+    getCurrentPublicPath() ||
+    "/";
+
+  const canonicalPath =
+    stripSearchAndHash(publicPath);
+
+  const matchedProtectedRoutes =
+    PROTECTED_PUBLIC_ROUTES
+      .map((routeConfig) => {
+        const scrubbed =
+          isProtectedRouteScrubbed(routeConfig);
+
+        const matches =
+          isPathOrChild(
+            publicPath,
+            routeConfig.path
+          );
+
+        const hasToken =
+          !scrubbed &&
+          matches &&
+          hasProtectedRouteToken(
+            href || publicPath,
+            routeConfig
+          );
+
+        return {
+          ...routeConfig,
+          scrubbed,
+          matches,
+          hasToken,
+        };
+      })
+      .filter((item) =>
+        item.matches
+      );
+
+  const protectedRoute =
+    matchedProtectedRoutes.find((item) =>
+      item.hasToken
+    ) || null;
+
+  return {
+    version:
+      MAIN_VERSION,
+
+    reason,
+
+    href,
+    publicPath,
+    canonicalPath,
+
+    hasProtectedToken:
+      Boolean(protectedRoute),
+
+    protectedRouteKey:
+      protectedRoute?.key || "",
+
+    protectedRoutePath:
+      protectedRoute?.path || "",
+
+    activationBoot:
+      Boolean(
+        protectedRoute?.key === "activation"
+      ),
+
+    resetConfirmBoot:
+      Boolean(
+        protectedRoute?.key === "resetConfirm"
+      ),
+
+    matchedProtectedRoutes:
+      matchedProtectedRoutes.map((item) => ({
+        key:
+          item.key,
+        path:
+          item.path,
+        scrubbed:
+          item.scrubbed,
+        matches:
+          item.matches,
+        hasToken:
+          item.hasToken,
+      })),
+
+    capturedAt:
+      nowIso(),
+  };
+}
+
+function sanitizeBootContext(context = {}) {
+  const ctx =
+    safeObject(context);
+
+  return {
+    ...ctx,
+
+    href:
+      redactTokenInText(ctx.href || ""),
+
+    publicPath:
+      redactTokenInText(ctx.publicPath || ""),
+
+    initialUrl:
+      redactTokenInText(ctx.initialUrl || ""),
+
+    activationInitialUrl:
+      redactTokenInText(ctx.activationInitialUrl || ""),
+
+    resetConfirmInitialUrl:
+      redactTokenInText(ctx.resetConfirmInitialUrl || ""),
+  };
+}
+
+function writeProtectedWindowKeys(context = {}) {
   if (!isBrowser()) {
     return false;
   }
 
-  let captured = false;
+  let captured =
+    false;
+
+  const href =
+    safeText(context.href, "");
+
+  if (!href) {
+    return false;
+  }
+
+  for (const routeConfig of PROTECTED_PUBLIC_ROUTES) {
+    const active =
+      context.protectedRouteKey === routeConfig.key;
+
+    if (!active) {
+      continue;
+    }
+
+    for (const key of routeConfig.windowKeys) {
+      captured =
+        setWindowValueOnce(
+          key,
+          href
+        ) || captured;
+    }
+  }
+
+  return captured;
+}
+
+function syncBootContextToAppCore(context = {}) {
+  const ctx =
+    safeObject(context);
+
+  const patch = {
+    bootInitialUrl:
+      ctx.href || "",
+
+    bootInitialPath:
+      ctx.publicPath || "/",
+
+    bootCanonicalPath:
+      ctx.canonicalPath || "/",
+
+    bootProtectedInitialUrl:
+      ctx.hasProtectedToken
+        ? ctx.href || ""
+        : "",
+
+    bootProtectedRouteKey:
+      ctx.protectedRouteKey || "",
+
+    bootHasProtectedToken:
+      Boolean(ctx.hasProtectedToken),
+
+    bootCapturedAt:
+      ctx.capturedAt || nowIso(),
+  };
+
+  for (const routeConfig of PROTECTED_PUBLIC_ROUTES) {
+    const isActive =
+      ctx.protectedRouteKey === routeConfig.key &&
+      ctx.hasProtectedToken;
+
+    patch[routeConfig.bootIsKey] =
+      Boolean(isActive);
+
+    patch[routeConfig.bootHasKey] =
+      Boolean(isActive);
+
+    patch[routeConfig.bootUrlKey] =
+      isActive
+        ? ctx.href || ""
+        : getWindowValue(routeConfig.windowKeys[0]) || "";
+
+    patch[routeConfig.bootPathKey] =
+      isActive
+        ? ctx.publicPath || "/"
+        : "";
+  }
 
   try {
-    const href =
-      window.location.href;
+    AppCore?.setState?.(patch);
+  } catch {}
 
-    captured =
-      setWindowValueOnce(
-        "__ONION_INITIAL_URL__",
-        href
-      ) || captured;
-
-    const publicPath =
-      pathFromUrlLike(href);
-
-    for (const routeConfig of PROTECTED_PUBLIC_ROUTES) {
-      if (
-        isProtectedRouteScrubbed(routeConfig)
-      ) {
-        continue;
-      }
-
-      if (
-        !isPathOrChild(publicPath, routeConfig.path) ||
-        !hasProtectedRouteToken(href, routeConfig)
-      ) {
-        continue;
-      }
-
-      routeConfig.windowKeys.forEach((key) => {
-        captured =
-          setWindowValueOnce(
-            key,
-            href
-          ) || captured;
-      });
+  try {
+    if (
+      AppCore?.state &&
+      typeof AppCore.state === "object"
+    ) {
+      Object.assign(
+        AppCore.state,
+        patch
+      );
     }
+  } catch {}
+
+  return patch;
+}
+
+function captureInitialUrl(reason = "main") {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    const context =
+      buildBootContext(reason);
+
+    setWindowValueOnce(
+      "__ONION_INITIAL_URL__",
+      context.href
+    );
+
+    const capturedProtected =
+      writeProtectedWindowKeys(context);
+
+    const syncedPatch =
+      syncBootContextToAppCore(context);
+
+    lastBootContext = {
+      ...context,
+      capturedProtected,
+      synced:
+        Boolean(syncedPatch),
+    };
 
     safeEmit(
       "main:initial-url:capture",
       {
         reason,
-        href,
-        publicPath,
-        captured,
+        bootContext:
+          lastBootContext,
       }
     );
 
-    return captured;
+    return lastBootContext;
   } catch (error) {
     safeWarn(
       "No se pudo capturar URL inicial.",
       error
     );
 
-    return false;
+    return null;
   }
 }
 
 /* =========================================================
-   DOCUMENT STATE
+   DOM RESOLUTION
 ========================================================= */
+
+function qs(selector = "") {
+  if (
+    !isBrowser() ||
+    !selector
+  ) {
+    return null;
+  }
+
+  try {
+    return document.querySelector(selector);
+  } catch {
+    return null;
+  }
+}
+
+function byId(id = "") {
+  if (
+    !isBrowser() ||
+    !id
+  ) {
+    return null;
+  }
+
+  try {
+    return document.getElementById(id);
+  } catch {
+    return null;
+  }
+}
 
 function getHtml() {
   if (!isBrowser()) {
@@ -639,16 +1386,126 @@ function getBody() {
   return document.body || null;
 }
 
+function getShellElement() {
+  return (
+    byId("app-shell") ||
+    qs("[data-app-shell='true']") ||
+    qs("[data-app-shell]") ||
+    qs(".app-shell")
+  );
+}
+
+function getMainElement() {
+  return (
+    byId("main-content") ||
+    qs("[data-main-content='true']") ||
+    qs("[data-main-content]") ||
+    qs("main.main-content") ||
+    qs("main")
+  );
+}
+
+function getViewElement() {
+  return (
+    byId("view-container") ||
+    qs("[data-view-root='true']") ||
+    qs("[data-view-root]") ||
+    qs("[data-router-view='true']") ||
+    qs("[data-router-view]")
+  );
+}
+
+function getLoaderElement() {
+  return (
+    byId("app-loader") ||
+    qs("[data-app-loader='true']") ||
+    qs("[data-app-loader]") ||
+    qs(".app-loader")
+  );
+}
+
+/* =========================================================
+   DOM MUTATORS
+========================================================= */
+
 function addClass(el, className) {
+  if (
+    !el ||
+    !className
+  ) {
+    return false;
+  }
+
   try {
-    el?.classList?.add?.(className);
-  } catch {}
+    el.classList.add(className);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function removeClass(el, className) {
+  if (
+    !el ||
+    !className
+  ) {
+    return false;
+  }
+
   try {
-    el?.classList?.remove?.(className);
-  } catch {}
+    el.classList.remove(className);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function toggleClass(el, className, force) {
+  if (
+    !el ||
+    !className
+  ) {
+    return false;
+  }
+
+  try {
+    el.classList.toggle(
+      className,
+      Boolean(force)
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setAttr(el, name, value) {
+  if (
+    !el ||
+    !name
+  ) {
+    return false;
+  }
+
+  try {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ""
+    ) {
+      el.removeAttribute(name);
+    } else {
+      el.setAttribute(
+        name,
+        String(value)
+      );
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function setDataset(el, key, value) {
@@ -656,7 +1513,7 @@ function setDataset(el, key, value) {
     !el ||
     !key
   ) {
-    return;
+    return false;
   }
 
   try {
@@ -666,34 +1523,272 @@ function setDataset(el, key, value) {
       value === ""
     ) {
       delete el.dataset[key];
-      return;
+    } else {
+      el.dataset[key] =
+        String(value);
     }
 
-    el.dataset[key] = String(value);
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-function markDocumentBooting(reason = "main") {
+function clearNode(node) {
+  if (!node) {
+    return false;
+  }
+
+  try {
+    node.replaceChildren();
+    return true;
+  } catch {}
+
+  try {
+    while (node.firstChild) {
+      node.removeChild(node.firstChild);
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createElement(tag, {
+  className = "",
+  text = "",
+  attrs = {},
+} = {}) {
+  const el =
+    document.createElement(tag);
+
+  if (className) {
+    el.className = className;
+  }
+
+  if (text) {
+    el.textContent = text;
+  }
+
+  Object.entries(
+    safeObject(attrs)
+  ).forEach(([key, value]) => {
+    setAttr(
+      el,
+      key,
+      value
+    );
+  });
+
+  return el;
+}
+
+function setRootStateClasses(state = "booting") {
   const html =
     getHtml();
 
   const body =
     getBody();
 
-  addClass(html, "app-booting");
-  addClass(html, "app-loading");
-  removeClass(html, "app-ready");
-  removeClass(html, "app-fatal");
+  const isBooting =
+    state === "booting";
 
-  addClass(body, "app-booting");
-  addClass(body, "app-loading");
-  addClass(body, "loading");
-  removeClass(body, "app-ready");
-  removeClass(body, "app-fatal");
+  const isReady =
+    state === "ready";
 
-  setDataset(html, "appLoading", "true");
-  setDataset(body, "appLoading", "true");
-  setDataset(body, "bootReason", reason);
+  const isFatal =
+    state === "fatal";
+
+  for (const className of ROOT_STATE_CLASSES) {
+    removeClass(html, className);
+    removeClass(body, className);
+  }
+
+  for (const className of BODY_EXTRA_LOADING_CLASSES) {
+    removeClass(body, className);
+  }
+
+  if (isBooting) {
+    addClass(html, "app-booting");
+    addClass(html, "app-loading");
+
+    addClass(body, "app-booting");
+    addClass(body, "app-loading");
+    addClass(body, "loading");
+  }
+
+  if (isReady) {
+    addClass(html, "app-ready");
+    addClass(body, "app-ready");
+  }
+
+  if (isFatal) {
+    addClass(html, "app-fatal");
+    addClass(body, "app-fatal");
+  }
+
+  return {
+    html,
+    body,
+  };
+}
+
+function syncShellState(state = "booting", reason = "main") {
+  const shell =
+    getShellElement();
+
+  const main =
+    getMainElement();
+
+  const view =
+    getViewElement();
+
+  const isBooting =
+    state === "booting";
+
+  const isReady =
+    state === "ready";
+
+  const isFatal =
+    state === "fatal";
+
+  for (const el of [
+    shell,
+    main,
+    view,
+  ]) {
+    if (!el) {
+      continue;
+    }
+
+    setAttr(
+      el,
+      "aria-busy",
+      isBooting ? "true" : "false"
+    );
+
+    setDataset(
+      el,
+      "routeMode",
+      isBooting
+        ? "boot"
+        : isFatal
+          ? "fatal"
+          : "app"
+    );
+
+    setDataset(
+      el,
+      "bootReason",
+      reason
+    );
+  }
+
+  if (shell) {
+    shell.hidden = false;
+
+    setAttr(
+      shell,
+      "aria-hidden",
+      "false"
+    );
+
+    setDataset(
+      shell,
+      "shell",
+      isBooting
+        ? "booting"
+        : isFatal
+          ? "fatal"
+          : "ready"
+    );
+
+    setDataset(
+      shell,
+      "shellState",
+      isBooting
+        ? "booting"
+        : isFatal
+          ? "fatal"
+          : "ready"
+    );
+  }
+
+  if (main) {
+    setAttr(
+      main,
+      "aria-hidden",
+      "false"
+    );
+  }
+
+  if (view) {
+    setAttr(
+      view,
+      "aria-live",
+      "polite"
+    );
+  }
+
+  return {
+    shell:
+      Boolean(shell),
+    main:
+      Boolean(main),
+    view:
+      Boolean(view),
+    isBooting,
+    isReady,
+    isFatal,
+  };
+}
+
+/* =========================================================
+   DOCUMENT STATE
+========================================================= */
+
+function markDocumentBooting(reason = "main") {
+  const {
+    html,
+    body,
+  } =
+    setRootStateClasses("booting");
+
+  setDataset(
+    html,
+    "appLoading",
+    "true"
+  );
+
+  setDataset(
+    body,
+    "appLoading",
+    "true"
+  );
+
+  setDataset(
+    html,
+    "routeMode",
+    "boot"
+  );
+
+  setDataset(
+    body,
+    "routeMode",
+    "boot"
+  );
+
+  setDataset(
+    body,
+    "bootReason",
+    reason
+  );
+
+  syncShellState(
+    "booting",
+    reason
+  );
 
   safeEmit(
     "main:booting",
@@ -704,26 +1799,46 @@ function markDocumentBooting(reason = "main") {
 }
 
 function markDocumentReady(reason = "boot-complete") {
-  const html =
-    getHtml();
+  const {
+    html,
+    body,
+  } =
+    setRootStateClasses("ready");
 
-  const body =
-    getBody();
+  setDataset(
+    html,
+    "appLoading",
+    "false"
+  );
 
-  removeClass(html, "app-booting");
-  removeClass(html, "app-loading");
-  removeClass(html, "app-fatal");
-  addClass(html, "app-ready");
+  setDataset(
+    body,
+    "appLoading",
+    "false"
+  );
 
-  removeClass(body, "app-booting");
-  removeClass(body, "app-loading");
-  removeClass(body, "loading");
-  removeClass(body, "app-fatal");
-  addClass(body, "app-ready");
+  setDataset(
+    html,
+    "routeMode",
+    "app"
+  );
 
-  setDataset(html, "appLoading", "false");
-  setDataset(body, "appLoading", "false");
-  setDataset(body, "bootReason", reason);
+  setDataset(
+    body,
+    "routeMode",
+    "app"
+  );
+
+  setDataset(
+    body,
+    "bootReason",
+    reason
+  );
+
+  syncShellState(
+    "ready",
+    reason
+  );
 
   safeEmit(
     "main:ready",
@@ -734,26 +1849,46 @@ function markDocumentReady(reason = "boot-complete") {
 }
 
 function markDocumentFatal(reason = "boot-error") {
-  const html =
-    getHtml();
+  const {
+    html,
+    body,
+  } =
+    setRootStateClasses("fatal");
 
-  const body =
-    getBody();
+  setDataset(
+    html,
+    "appLoading",
+    "false"
+  );
 
-  removeClass(html, "app-booting");
-  removeClass(html, "app-loading");
-  removeClass(html, "app-ready");
-  addClass(html, "app-fatal");
+  setDataset(
+    body,
+    "appLoading",
+    "false"
+  );
 
-  removeClass(body, "app-booting");
-  removeClass(body, "app-loading");
-  removeClass(body, "loading");
-  removeClass(body, "app-ready");
-  addClass(body, "app-fatal");
+  setDataset(
+    html,
+    "routeMode",
+    "fatal"
+  );
 
-  setDataset(html, "appLoading", "false");
-  setDataset(body, "appLoading", "false");
-  setDataset(body, "bootReason", reason);
+  setDataset(
+    body,
+    "routeMode",
+    "fatal"
+  );
+
+  setDataset(
+    body,
+    "bootReason",
+    reason
+  );
+
+  syncShellState(
+    "fatal",
+    reason
+  );
 
   safeEmit(
     "main:fatal",
@@ -767,23 +1902,6 @@ function markDocumentFatal(reason = "boot-error") {
    LOADER FALLBACK OPS
 ========================================================= */
 
-function getLoaderElement() {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  try {
-    return (
-      document.getElementById("app-loader") ||
-      document.querySelector("[data-app-loader='true']") ||
-      document.querySelector(".app-loader") ||
-      null
-    );
-  } catch {
-    return null;
-  }
-}
-
 function ensureStaticLoaderVisible(reason = "main") {
   const loader =
     getLoaderElement();
@@ -796,26 +1914,53 @@ function ensureStaticLoaderVisible(reason = "main") {
     loader.hidden = false;
     loader.removeAttribute("hidden");
 
-    loader.setAttribute(
+    setAttr(
+      loader,
       "aria-hidden",
       "false"
     );
 
-    loader.setAttribute(
+    setAttr(
+      loader,
       "aria-busy",
       "true"
     );
 
-    loader.dataset.loaderVisible = "true";
-    loader.dataset.loaderReason = reason;
+    setDataset(
+      loader,
+      "loaderVisible",
+      "true"
+    );
 
-    loader.classList.remove(
-      "is-hidden",
-      "has-hidden",
+    setDataset(
+      loader,
+      "loaderState",
+      "visible"
+    );
+
+    setDataset(
+      loader,
+      "loaderReason",
+      reason
+    );
+
+    removeClass(
+      loader,
+      "is-hidden"
+    );
+
+    removeClass(
+      loader,
+      "has-hidden"
+    );
+
+    removeClass(
+      loader,
       "is-leaving"
     );
 
-    loader.classList.add(
+    addClass(
+      loader,
       "is-visible"
     );
 
@@ -843,26 +1988,53 @@ function forceHideStaticLoader(reason = "main") {
   try {
     loader.hidden = true;
 
-    loader.setAttribute(
+    setAttr(
+      loader,
       "aria-hidden",
       "true"
     );
 
-    loader.setAttribute(
+    setAttr(
+      loader,
       "aria-busy",
       "false"
     );
 
-    loader.dataset.loaderVisible = "false";
-    loader.dataset.loaderReason = reason;
+    setDataset(
+      loader,
+      "loaderVisible",
+      "false"
+    );
 
-    loader.classList.remove(
-      "is-visible",
+    setDataset(
+      loader,
+      "loaderState",
+      "hidden"
+    );
+
+    setDataset(
+      loader,
+      "loaderReason",
+      reason
+    );
+
+    removeClass(
+      loader,
+      "is-visible"
+    );
+
+    removeClass(
+      loader,
       "is-leaving"
     );
 
-    loader.classList.add(
-      "is-hidden",
+    addClass(
+      loader,
+      "is-hidden"
+    );
+
+    addClass(
+      loader,
       "has-hidden"
     );
 
@@ -883,55 +2055,16 @@ function forceHideStaticLoader(reason = "main") {
    FATAL ERROR VIEW
 ========================================================= */
 
-function clearNode(node) {
-  if (!node) {
-    return;
-  }
-
-  try {
-    while (node.firstChild) {
-      node.removeChild(node.firstChild);
-    }
-  } catch {}
-}
-
-function createElement(tag, {
-  className = "",
-  text = "",
-  attrs = {},
-} = {}) {
-  const el =
-    document.createElement(tag);
-
-  if (className) {
-    el.className = className;
-  }
-
-  if (text) {
-    el.textContent = text;
-  }
-
-  Object.entries(
-    safeObject(attrs)
-  ).forEach(([key, value]) => {
-    try {
-      el.setAttribute(
-        key,
-        String(value)
-      );
-    } catch {}
-  });
-
-  return el;
-}
-
 function createReloadButton() {
   const button =
     createElement("button", {
-      className: "fatal-boot-button",
-      text: "Recargar",
+      className:
+        "fatal-boot-button",
+      text:
+        "Recargar",
       attrs: {
-        type: "button",
+        type:
+          "button",
       },
     });
 
@@ -952,10 +2085,13 @@ function createReloadButton() {
 function createDetailsButton(error) {
   const button =
     createElement("button", {
-      className: "fatal-boot-button fatal-boot-button-secondary",
-      text: "Detalles",
+      className:
+        "fatal-boot-button fatal-boot-button-secondary",
+      text:
+        "Detalles",
       attrs: {
-        type: "button",
+        type:
+          "button",
       },
     });
 
@@ -964,8 +2100,12 @@ function createDetailsButton(error) {
       "click",
       () => {
         try {
-          console.group("[Main] Boot fatal details");
+          console.group(
+            "[Main] Boot fatal details"
+          );
+
           console.error(error);
+
           console.groupEnd();
         } catch {}
       }
@@ -983,8 +2123,18 @@ function exposeFatalRoot(root) {
   try {
     root.hidden = false;
     root.removeAttribute("hidden");
-    root.setAttribute("aria-hidden", "false");
-    root.setAttribute("aria-busy", "false");
+
+    setAttr(
+      root,
+      "aria-hidden",
+      "false"
+    );
+
+    setAttr(
+      root,
+      "aria-busy",
+      "false"
+    );
   } catch {}
 
   try {
@@ -993,8 +2143,15 @@ function exposeFatalRoot(root) {
 
     while (node) {
       node.hidden = false;
-      node.setAttribute("aria-hidden", "false");
-      node = node.parentElement;
+
+      setAttr(
+        node,
+        "aria-hidden",
+        "false"
+      );
+
+      node =
+        node.parentElement;
     }
   } catch {}
 
@@ -1002,22 +2159,13 @@ function exposeFatalRoot(root) {
 }
 
 function getFatalRoot() {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  try {
-    return (
-      document.getElementById("view-container") ||
-      document.getElementById("app-content") ||
-      document.getElementById("main-content") ||
-      document.getElementById("app-shell") ||
-      document.body ||
-      null
-    );
-  } catch {
-    return null;
-  }
+  return (
+    getViewElement() ||
+    byId("app-content") ||
+    getMainElement() ||
+    getShellElement() ||
+    getBody()
+  );
 }
 
 function normalizeBootError(error) {
@@ -1030,14 +2178,15 @@ function normalizeBootError(error) {
       error?.message ||
         error?.reason ||
         error,
-      "No se pudo iniciar la aplicación."
+      DEFAULT_FATAL_MESSAGE
     );
 
   const normalized =
     new Error(message);
 
   try {
-    normalized.raw = error;
+    normalized.raw =
+      error;
   } catch {}
 
   return normalized;
@@ -1073,50 +2222,65 @@ function showFatalBootError(error) {
     const message =
       safeText(
         normalizedError?.message,
-        "No se pudo iniciar la aplicación."
+        DEFAULT_FATAL_MESSAGE
       );
 
     const section =
       createElement("section", {
-        className: "fatal-boot",
+        className:
+          "fatal-boot",
         attrs: {
-          role: "alert",
-          "aria-live": "assertive",
+          role:
+            "alert",
+          "aria-live":
+            "assertive",
+          "data-fatal-boot":
+            "true",
         },
       });
 
     const card =
       createElement("div", {
-        className: "fatal-boot-card",
+        className:
+          "fatal-boot-card",
       });
 
     const eyebrow =
       createElement("p", {
-        className: "fatal-boot-eyebrow",
-        text: "Onion Support",
+        className:
+          "fatal-boot-eyebrow",
+        text:
+          "Onion Support",
       });
 
     const title =
       createElement("h1", {
-        className: "fatal-boot-title",
-        text: "Error de arranque",
+        className:
+          "fatal-boot-title",
+        text:
+          "Error de arranque",
       });
 
     const paragraph =
       createElement("p", {
-        className: "fatal-boot-message",
-        text: message,
+        className:
+          "fatal-boot-message",
+        text:
+          message,
       });
 
     const hint =
       createElement("p", {
-        className: "fatal-boot-hint",
-        text: "Recarga la página. Si el problema persiste, revisa la consola del navegador.",
+        className:
+          "fatal-boot-hint",
+        text:
+          "Recarga la página. Si el problema persiste, revisa la consola del navegador.",
       });
 
     const actions =
       createElement("div", {
-        className: "fatal-boot-actions",
+        className:
+          "fatal-boot-actions",
       });
 
     actions.appendChild(
@@ -1142,11 +2306,18 @@ function showFatalBootError(error) {
       "main:boot:fatal-rendered",
       {
         message,
+        error:
+          normalizedError,
       }
     );
 
     return true;
-  } catch {
+  } catch (renderError) {
+    safeError(
+      "No se pudo renderizar fatal boot.",
+      renderError
+    );
+
     return false;
   }
 }
@@ -1184,13 +2355,36 @@ function waitForDomReady() {
         "DOMContentLoaded",
         done,
         {
-          once: true,
+          once:
+            true,
         }
       );
     });
   } catch {
     return Promise.resolve();
   }
+}
+
+function callReadyCallbackOnce(callback) {
+  if (readyCallbackCalled) {
+    return;
+  }
+
+  readyCallbackCalled = true;
+
+  void waitForDomReady()
+    .then(() => {
+      try {
+        callback();
+      } catch (error) {
+        safeError(
+          "Callback de ready falló.",
+          error
+        );
+
+        showFatalBootError(error);
+      }
+    });
 }
 
 function bindReady(callback) {
@@ -1200,29 +2394,11 @@ function bindReady(callback) {
 
   readyBound = true;
 
-  const guardedCallback = () => {
-    void waitForDomReady()
-      .then(() => {
-        try {
-          callback();
-        } catch (error) {
-          safeError(
-            "Callback de ready falló.",
-            error
-          );
-
-          showFatalBootError(error);
-        }
-      });
-  };
-
   try {
-    if (
-      isFunction(AppCore?.ready)
-    ) {
-      AppCore.ready(
-        guardedCallback
-      );
+    if (isFunction(AppCore?.ready)) {
+      AppCore.ready(() => {
+        callReadyCallbackOnce(callback);
+      });
 
       return;
     }
@@ -1234,7 +2410,9 @@ function bindReady(callback) {
   }
 
   void waitForDomReady()
-    .then(guardedCallback);
+    .then(() => {
+      callReadyCallbackOnce(callback);
+    });
 }
 
 /* =========================================================
@@ -1262,27 +2440,39 @@ function createBootTimeoutPromise(timeoutMs = 0) {
     timeoutMs <= 0
   ) {
     return {
-      promise: new Promise(() => {}),
+      promise:
+        new Promise(() => {}),
+
       clear() {},
     };
   }
 
-  let timeoutId = null;
+  let timeoutId =
+    null;
 
   const promise =
     new Promise((_, reject) => {
-      timeoutId = setTimeout(() => {
-        const error =
-          new Error(
-            `El arranque superó el límite de ${timeoutMs}ms.`
-          );
+      timeoutId =
+        setTimeout(() => {
+          const error =
+            new Error(
+              `El arranque superó el límite de ${timeoutMs}ms.`
+            );
 
-        error.code = "BOOT_TIMEOUT";
-        error.status = 408;
-        error.timeout = true;
+          error.name =
+            "BootTimeoutError";
 
-        reject(error);
-      }, timeoutMs);
+          error.code =
+            "BOOT_TIMEOUT";
+
+          error.status =
+            408;
+
+          error.timeout =
+            true;
+
+          reject(error);
+        }, timeoutMs);
     });
 
   return {
@@ -1304,7 +2494,7 @@ function createBootTimeoutPromise(timeoutMs = 0) {
    APP BOOT EXECUTION
 ========================================================= */
 
-async function executeAppBoot() {
+async function executeAppBoot(context = {}) {
   if (
     !App ||
     !isFunction(App.boot)
@@ -1314,12 +2504,36 @@ async function executeAppBoot() {
         "App.boot no está disponible."
       );
 
-    error.code = "APP_BOOT_MISSING";
+    error.code =
+      "APP_BOOT_MISSING";
 
     throw error;
   }
 
-  return App.boot();
+  try {
+    return await App.boot({
+      bootContext:
+        context,
+    });
+  } catch (error) {
+    /*
+      Compatibilidad:
+      Si App.boot no acepta argumentos no debería fallar,
+      pero si alguna versión antigua lo hace, reintentamos
+      sin payload sólo cuando el fallo apunta a firma/parámetros.
+    */
+    const message =
+      safeText(error?.message, "");
+
+    if (
+      message.includes("argument") ||
+      message.includes("parameter")
+    ) {
+      return App.boot();
+    }
+
+    throw error;
+  }
 }
 
 /* =========================================================
@@ -1342,7 +2556,12 @@ async function boot(options = {}) {
   const startedAt =
     Date.now();
 
-  captureInitialUrl("boot-start");
+  const context =
+    captureInitialUrl("boot-start") ||
+    buildBootContext("boot-start");
+
+  lastBootContext =
+    context;
 
   markDocumentBooting("main-boot");
   ensureStaticLoaderVisible("main-boot");
@@ -1367,6 +2586,8 @@ async function boot(options = {}) {
           "Boot iniciando...",
           {
             timeoutMs,
+            context:
+              sanitizeBootContext(context),
           }
         );
 
@@ -1378,17 +2599,19 @@ async function boot(options = {}) {
                 ? document.readyState
                 : "server",
             timeoutMs,
+            bootContext:
+              context,
           }
         );
 
         /*
-          Primer paint con estado app-booting/app-loading aplicado.
+          Primer frame con clases app-booting/app-loading aplicadas.
         */
         await nextFrame();
 
         const result =
           await Promise.race([
-            executeAppBoot(),
+            executeAppBoot(context),
             bootTimeout.promise,
           ]);
 
@@ -1400,7 +2623,7 @@ async function boot(options = {}) {
         /*
           Fallback final:
           App.boot() debería haber sincronizado loader/shell.
-          Main sólo remata clases globales y evita loader pegado.
+          Main remata clases globales y evita loader pegado.
         */
         await nextPaint();
 
@@ -1417,6 +2640,8 @@ async function boot(options = {}) {
           {
             durationMs:
               Date.now() - startedAt,
+            bootContext:
+              context,
             appState:
               isFunction(App?.getState)
                 ? App.getState()
@@ -1464,6 +2689,8 @@ async function boot(options = {}) {
               Boolean(normalizedError?.timeout),
             error:
               normalizedError,
+            bootContext:
+              context,
           }
         );
 
@@ -1504,6 +2731,25 @@ function bindGlobalBootSafetyNet() {
           event?.error ||
             event?.message
         );
+
+        safeEmit(
+          "main:boot:global-error",
+          {
+            message:
+              safeText(
+                event?.message,
+                "Global error"
+              ),
+            filename:
+              redactTokenInText(event?.filename || ""),
+            lineno:
+              event?.lineno || 0,
+            colno:
+              event?.colno || 0,
+            error:
+              event?.error || null,
+          }
+        );
       }
     );
   } catch {}
@@ -1520,6 +2766,20 @@ function bindGlobalBootSafetyNet() {
           "Promise rechazada durante boot:",
           event?.reason
         );
+
+        safeEmit(
+          "main:boot:unhandled-rejection",
+          {
+            error:
+              event?.reason || null,
+            message:
+              safeText(
+                event?.reason?.message ||
+                  event?.reason,
+                "Unhandled rejection"
+              ),
+          }
+        );
       }
     );
   } catch {}
@@ -1530,6 +2790,12 @@ function bindGlobalBootSafetyNet() {
 ========================================================= */
 
 function start() {
+  if (startCalled) {
+    return;
+  }
+
+  startCalled = true;
+
   bindGlobalBootSafetyNet();
 
   bindReady(() => {
@@ -1541,7 +2807,7 @@ function start() {
     void boot().catch(() => {
       /*
         showFatalBootError ya se ejecuta dentro de boot().
-        Evitamos un unhandled rejection adicional en el arranque automático.
+        Evitamos un unhandled rejection adicional en arranque automático.
       */
     });
   });
@@ -1560,14 +2826,122 @@ start();
    DEBUG EXPORT
 ========================================================= */
 
+function getMainSnapshot() {
+  const loader =
+    getLoaderElement();
+
+  const shell =
+    getShellElement();
+
+  const main =
+    getMainElement();
+
+  const view =
+    getViewElement();
+
+  return {
+    version:
+      MAIN_VERSION,
+
+    bootStarted,
+    bootSettled,
+    bootFailed,
+
+    startCalled,
+    readyBound,
+    readyCallbackCalled,
+
+    hasBootPromise:
+      Boolean(bootPromise),
+
+    fatalRendered,
+    globalSafetyNetBound,
+
+    bootTimeoutMs:
+      getBootTimeoutMs(),
+
+    documentReadyState:
+      isBrowser()
+        ? document.readyState
+        : "server",
+
+    htmlClassName:
+      isBrowser()
+        ? document.documentElement?.className || ""
+        : "",
+
+    bodyClassName:
+      isBrowser()
+        ? document.body?.className || ""
+        : "",
+
+    dom: {
+      loaderExists:
+        Boolean(loader),
+
+      loaderHidden:
+        Boolean(loader?.hidden),
+
+      loaderVisible:
+        loader?.dataset?.loaderVisible || null,
+
+      shellExists:
+        Boolean(shell),
+
+      mainExists:
+        Boolean(main),
+
+      viewExists:
+        Boolean(view),
+    },
+
+    urls: {
+      initialUrl:
+        isBrowser()
+          ? redactTokenInText(
+              window.__ONION_INITIAL_URL__ || ""
+            ) || null
+          : null,
+
+      activationInitialUrl:
+        isBrowser()
+          ? redactTokenInText(
+              window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__ || ""
+            ) || null
+          : null,
+
+      resetConfirmInitialUrl:
+        isBrowser()
+          ? redactTokenInText(
+              window.__ONION_RESET_CONFIRM_INITIAL_URL__ ||
+              window.__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__ ||
+              ""
+            ) || null
+          : null,
+    },
+
+    bootContext:
+      lastBootContext
+        ? sanitizeBootContext(lastBootContext)
+        : null,
+
+    appState:
+      isFunction(App?.getState)
+        ? App.getState()
+        : null,
+  };
+}
+
 try {
   if (isBrowser()) {
     window.OnionApp =
       window.OnionApp || {};
 
     window.OnionApp.main = {
-      boot,
+      version:
+        MAIN_VERSION,
 
+      boot,
       start,
 
       captureInitialUrl,
@@ -1579,63 +2953,57 @@ try {
       ensureStaticLoaderVisible,
       forceHideStaticLoader,
 
-      getState() {
-        const loader =
-          getLoaderElement();
-
-        return {
-          bootStarted,
-          bootSettled,
-          bootFailed,
-          hasBootPromise:
-            Boolean(bootPromise),
-          readyBound,
-          fatalRendered,
-          globalSafetyNetBound,
-
-          bootTimeoutMs:
-            getBootTimeoutMs(),
-
-          documentReadyState:
-            document.readyState,
-
-          htmlClassName:
-            document.documentElement?.className || "",
-
-          bodyClassName:
-            document.body?.className || "",
-
-          loaderExists:
-            Boolean(loader),
-
-          loaderHidden:
-            Boolean(loader?.hidden),
-
-          loaderVisible:
-            loader?.dataset?.loaderVisible || null,
-
-          initialUrl:
-            window.__ONION_INITIAL_URL__ || null,
-
-          activationInitialUrl:
-            window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__ || null,
-
-          resetConfirmInitialUrl:
-            window.__ONION_RESET_CONFIRM_INITIAL_URL__ ||
-            window.__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__ ||
-            null,
-
-          appState:
-            isFunction(App?.getState)
-              ? App.getState()
-              : null,
-        };
+      getBootContext() {
+        return lastBootContext
+          ? sanitizeBootContext(lastBootContext)
+          : null;
       },
+
+      getState:
+        getMainSnapshot,
+
+      getSnapshot:
+        getMainSnapshot,
     };
   }
 } catch {}
 
-export default {
+/* =========================================================
+   EXPORT
+========================================================= */
+
+export {
+  MAIN_VERSION,
+
   boot,
   start,
+
+  captureInitialUrl,
+
+  markDocumentBooting,
+  markDocumentReady,
+  markDocumentFatal,
+
+  ensureStaticLoaderVisible,
+  forceHideStaticLoader,
+
+  getMainSnapshot,
+};
+
+export default {
+  MAIN_VERSION,
+
+  boot,
+  start,
+
+  captureInitialUrl,
+
+  markDocumentBooting,
+  markDocumentReady,
+  markDocumentFatal,
+
+  ensureStaticLoaderVisible,
+  forceHideStaticLoader,
+
+  getMainSnapshot,
 };

@@ -2,26 +2,29 @@
    Onion SPA - Auth Constants
    Archivo: src/features/auth/constants.js
 
-   Responsabilidades:
+   AUTH CONTRACT · ENTERPRISE HARDENED · NO APPCORE DEP
+   FINAL EXTREME SYSTEM · 10/10
+
+   RESPONSABILIDADES:
    - centralizar endpoints auth
-   - centralizar endpoint de activación de cuenta
+   - centralizar endpoints de activación de cuenta
+   - centralizar endpoints password-reset request / confirm / validate
    - centralizar claves storage auxiliar
    - centralizar límites y constantes sesión
-   - exponer endpoints password-reset request / confirm
-   - soportar aliases legacy sin romper compatibilidad
-   - endurecer límites comunes del módulo auth
-   - helpers públicos estables del módulo
-   - blindaje enterprise
+   - centralizar rutas SPA públicas técnicas
+   - centralizar nombres de query params de tokens
+   - exponer aliases legacy sin romper compatibilidad
+   - exponer helpers públicos estables del módulo
+   - blindaje enterprise sin dependencia circular con AppCore
 
    HARDENING EXTREMO:
    - deepFreeze real para objetos/arrays
-   - aliases estables
-   - helpers tolerantes
    - endpoints agrupados por intención
    - endpoint candidates para fallback robusto
-   - rutas SPA técnicas públicas
+   - rutas SPA técnicas públicas normalizadas
    - token param names centralizados
    - límites numéricos normalizados
+   - helpers tolerantes y sin throws accidentales
    - snapshot debug seguro
    - sin dependencia circular con AppCore
 ========================================================= */
@@ -31,64 +34,17 @@
 ========================================================= */
 
 export const AUTH_CONSTANTS_VERSION =
-  "10.1.0";
+  "10.2.0";
 
 /* =========================================================
    BASE HELPERS
 ========================================================= */
-
-function isObject(value) {
-  return (
-    value !== null &&
-    typeof value === "object"
-  );
-}
 
 function isPlainObject(value) {
   return (
     value !== null &&
     typeof value === "object" &&
     !Array.isArray(value)
-  );
-}
-
-function deepFreeze(value) {
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Object.isFrozen(value)
-  ) {
-    return value;
-  }
-
-  try {
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        deepFreeze(item);
-      }
-
-      return Object.freeze(value);
-    }
-
-    for (const key of Object.getOwnPropertyNames(value)) {
-      deepFreeze(value[key]);
-    }
-
-    return Object.freeze(value);
-  } catch {
-    return value;
-  }
-}
-
-function unique(values = []) {
-  return Array.from(
-    new Set(
-      values
-        .map((value) =>
-          safeText(value, "")
-        )
-        .filter(Boolean)
-    )
   );
 }
 
@@ -101,7 +57,10 @@ export function safeText(value, fallback = "") {
   }
 
   const text =
-    String(value).trim();
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return text || fallback;
 }
@@ -163,7 +122,11 @@ export function safeBool(value, fallback = false) {
   return Boolean(fallback);
 }
 
-export function clampNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
+export function clampNumber(
+  value,
+  min = 0,
+  max = Number.MAX_SAFE_INTEGER
+) {
   const numeric =
     safeNumber(value, min);
 
@@ -172,6 +135,66 @@ export function clampNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
     max
   );
 }
+
+function hasOwn(obj, key) {
+  return Boolean(
+    obj &&
+      typeof obj === "object" &&
+      Object.prototype.hasOwnProperty.call(
+        obj,
+        key
+      )
+  );
+}
+
+function normalizeKey(key = "") {
+  return safeText(key, "");
+}
+
+function unique(values = []) {
+  return Array.from(
+    new Set(
+      (Array.isArray(values) ? values : [values])
+        .flat(Infinity)
+        .map((value) =>
+          safeText(value, "")
+        )
+        .filter(Boolean)
+    )
+  );
+}
+
+function deepFreeze(value) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Object.isFrozen(value)
+  ) {
+    return value;
+  }
+
+  try {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        deepFreeze(item);
+      }
+
+      return Object.freeze(value);
+    }
+
+    for (const key of Object.getOwnPropertyNames(value)) {
+      deepFreeze(value[key]);
+    }
+
+    return Object.freeze(value);
+  } catch {
+    return value;
+  }
+}
+
+/* =========================================================
+   PATH NORMALIZATION
+========================================================= */
 
 export function normalizeEndpointPath(path = "") {
   const raw =
@@ -188,13 +211,27 @@ export function normalizeEndpointPath(path = "") {
         "http://localhost"
       );
 
-    return safeText(
-      parsed.pathname,
-      raw
-    )
-      .replace(/\/{2,}/g, "/")
-      .replace(/\/+$/g, "") ||
-      "/";
+    const pathname =
+      safeText(
+        parsed.pathname,
+        ""
+      )
+        .replace(/\\/g, "/")
+        .replace(/\/{2,}/g, "/");
+
+    if (!pathname) {
+      return "";
+    }
+
+    const normalized =
+      pathname.startsWith("/")
+        ? pathname
+        : `/${pathname}`;
+
+    return (
+      normalized.replace(/\/+$/g, "") ||
+      "/"
+    );
   } catch {
     const clean =
       raw
@@ -222,21 +259,6 @@ export function normalizeEndpointPath(path = "") {
 
 export function normalizeRoutePath(path = "") {
   return normalizeEndpointPath(path);
-}
-
-function normalizeKey(key = "") {
-  return safeText(key, "");
-}
-
-function hasOwn(obj, key) {
-  return Boolean(
-    obj &&
-      typeof obj === "object" &&
-      Object.prototype.hasOwnProperty.call(
-        obj,
-        key
-      )
-  );
 }
 
 /* =========================================================
@@ -295,10 +317,16 @@ export const AUTH_PUBLIC_TECHNICAL_ROUTES =
     "/forgot-password",
     "/recover-password",
     "/password-reset",
+    "/2fa",
+    "/otp",
+    "/mfa",
   ]);
 
 export const AUTH_TECHNICAL_ROUTE_ALIASES =
   deepFreeze({
+    activate:
+      "/activate-account",
+
     activateAccount:
       "/activate-account",
 
@@ -328,6 +356,21 @@ export const AUTH_TECHNICAL_ROUTE_ALIASES =
 
     passwordResetConfirm:
       "/reset-password/confirm",
+
+    twoFactor:
+      "/2fa",
+
+    twoFactorLogin:
+      "/2fa",
+
+    twoFactorVerify:
+      "/2fa",
+
+    mfa:
+      "/mfa",
+
+    otp:
+      "/otp",
   });
 
 /* =========================================================
@@ -401,14 +444,12 @@ export const AUTH_TOKEN_PARAM_NAMES =
   });
 
 /* =========================================================
-   ENDPOINTS
+   ENDPOINTS · ALIASES ESTABLES
 ========================================================= */
 
 export const AUTH_ENDPOINTS =
   deepFreeze({
-    /* =====================================================
-       SESIÓN
-    ===================================================== */
+    /* SESSION */
     login:
       LOGIN_ENDPOINT,
 
@@ -425,6 +466,9 @@ export const AUTH_ENDPOINTS =
       LOGOUT_ENDPOINT,
 
     signOut:
+      LOGOUT_ENDPOINT,
+
+    signout:
       LOGOUT_ENDPOINT,
 
     me:
@@ -454,9 +498,7 @@ export const AUTH_ENDPOINTS =
     renew:
       REFRESH_ENDPOINT,
 
-    /* =====================================================
-       2FA / MFA
-    ===================================================== */
+    /* 2FA / MFA */
     twoFactorLogin:
       TWO_FACTOR_LOGIN_ENDPOINT,
 
@@ -475,18 +517,14 @@ export const AUTH_ENDPOINTS =
     twoFactorVerify:
       TWO_FACTOR_LOGIN_ENDPOINT,
 
-    /* =====================================================
-       HEALTH
-    ===================================================== */
+    /* HEALTH */
     health:
       HEALTH_ENDPOINT,
 
     authHealth:
       HEALTH_ENDPOINT,
 
-    /* =====================================================
-       ACTIVACIÓN DE CUENTA
-    ===================================================== */
+    /* ACTIVATION */
     activateAccount:
       ACTIVATE_ACCOUNT_ENDPOINT,
 
@@ -517,9 +555,7 @@ export const AUTH_ENDPOINTS =
     firstUserActivation:
       ACTIVATE_FIRST_USER_ENDPOINT,
 
-    /* =====================================================
-       PASSWORD RESET REQUEST
-    ===================================================== */
+    /* PASSWORD RESET REQUEST */
     requestPasswordReset:
       REQUEST_RESET_ENDPOINT,
 
@@ -541,9 +577,7 @@ export const AUTH_ENDPOINTS =
     passwordResetRequest:
       REQUEST_RESET_ENDPOINT,
 
-    /* =====================================================
-       PASSWORD RESET CONFIRM
-    ===================================================== */
+    /* PASSWORD RESET CONFIRM */
     confirmPasswordReset:
       CONFIRM_RESET_ENDPOINT,
 
@@ -565,9 +599,7 @@ export const AUTH_ENDPOINTS =
     changeForgottenPassword:
       CONFIRM_RESET_ENDPOINT,
 
-    /* =====================================================
-       VALIDATE TOKEN
-    ===================================================== */
+    /* PASSWORD RESET VALIDATE */
     validateResetToken:
       VALIDATE_RESET_ENDPOINT,
 
@@ -610,11 +642,15 @@ export const AUTH_ENDPOINT_CANDIDATES =
     twoFactorLogin:
       unique([
         TWO_FACTOR_LOGIN_ENDPOINT,
+        "/api/auth/mfa/login",
+        "/api/auth/2fa/verify",
+        "/api/auth/mfa/verify",
       ]),
 
     health:
       unique([
         HEALTH_ENDPOINT,
+        "/api/auth/health",
         "/api/_health",
         "/health",
       ]),
@@ -635,6 +671,7 @@ export const AUTH_ENDPOINT_CANDIDATES =
         REQUEST_RESET_ENDPOINT,
         "/api/auth/forgot-password",
         "/api/auth/password-reset/request",
+        "/api/auth/reset-password/request",
       ]),
 
     confirmPasswordReset:
@@ -648,7 +685,6 @@ export const AUTH_ENDPOINT_CANDIDATES =
       unique([
         VALIDATE_RESET_ENDPOINT,
         "/api/auth/reset-password-validate",
-        "/api/auth/reset-password/validate",
         "/api/auth/password-reset/validate",
       ]),
   });
@@ -672,6 +708,7 @@ export const AUTH_ENDPOINT_GROUPS =
         ...AUTH_ENDPOINT_CANDIDATES.requestPasswordReset,
         ...AUTH_ENDPOINT_CANDIDATES.confirmPasswordReset,
         ...AUTH_ENDPOINT_CANDIDATES.validateResetToken,
+        ...AUTH_ENDPOINT_CANDIDATES.twoFactorLogin,
       ]),
 
     private:
@@ -703,7 +740,7 @@ export const AUTH_ENDPOINT_GROUPS =
 
     twoFactor:
       unique([
-        AUTH_ENDPOINTS.twoFactorLogin,
+        ...AUTH_ENDPOINT_CANDIDATES.twoFactorLogin,
       ]),
   });
 
@@ -835,12 +872,18 @@ export const AUTH_LEGACY_STORAGE_KEYS =
     userName:
       "onion_user_name",
 
+    username:
+      "onion_username",
+
     role:
       "onion_role",
+
+    roles:
+      "onion_roles",
   });
 
 /* =========================================================
-   CONSTANTS
+   NUMERIC CONSTANTS
 ========================================================= */
 
 export const AUTH_CONSTANTS =
@@ -989,16 +1032,23 @@ export const AUTH_FAILURE_CODES =
     "REFRESH_USER_WITHOUT_TOKEN",
     "REFRESH_UNUSABLE_RESPONSE",
     "ME_INVALID_SESSION",
+    "ME_USER_MISSING",
     "MISSING_2FA_TEMP_TOKEN",
+    "API_CLIENT_MISSING",
+    "API_CLIENT_GET_MISSING",
+    "API_CLIENT_POST_MISSING",
   ]);
 
 export const AUTH_SUCCESS_STATUSES =
   deepFreeze([
     "ok",
     "success",
+    "successful",
     "authenticated",
     "active",
     "valid",
+    "token_only",
+    "user_only",
   ]);
 
 export const AUTH_2FA_STATUSES =
@@ -1053,6 +1103,18 @@ export function getAuthEndpointCandidates(key = "", fallback = "") {
 
   return endpoint
     ? [endpoint]
+    : [];
+}
+
+export function getAuthEndpointGroup(key = "") {
+  const cleanKey =
+    normalizeKey(key);
+
+  const group =
+    AUTH_ENDPOINT_GROUPS[cleanKey];
+
+  return Array.isArray(group)
+    ? [...group]
     : [];
 }
 
@@ -1488,6 +1550,16 @@ export function isActivationRoute(path = "") {
   );
 }
 
+export function isResetPasswordRoute(path = "") {
+  const normalized =
+    normalizeRoutePath(path);
+
+  return (
+    normalized === "/reset-password" ||
+    normalized.startsWith("/reset-password/")
+  );
+}
+
 export function isResetPasswordConfirmRoute(path = "") {
   const normalized =
     normalizeRoutePath(path);
@@ -1495,6 +1567,20 @@ export function isResetPasswordConfirmRoute(path = "") {
   return (
     normalized === "/reset-password/confirm" ||
     normalized.startsWith("/reset-password/confirm/")
+  );
+}
+
+export function isTwoFactorRoute(path = "") {
+  const normalized =
+    normalizeRoutePath(path);
+
+  return (
+    normalized === "/2fa" ||
+    normalized.startsWith("/2fa/") ||
+    normalized === "/otp" ||
+    normalized.startsWith("/otp/") ||
+    normalized === "/mfa" ||
+    normalized.startsWith("/mfa/")
   );
 }
 
@@ -1514,7 +1600,7 @@ export function isAuthEndpoint(path = "") {
   });
 }
 
-export function isPublicAuthEndpoint(path = "") {
+export function isEndpointInGroup(path = "", group = []) {
   const normalized =
     normalizeEndpointPath(path);
 
@@ -1522,76 +1608,52 @@ export function isPublicAuthEndpoint(path = "") {
     return false;
   }
 
-  return AUTH_ENDPOINT_GROUPS.public.some((endpoint) => {
+  const rows =
+    Array.isArray(group)
+      ? group
+      : [];
+
+  return rows.some((endpoint) => {
     const cleanEndpoint =
       normalizeEndpointPath(endpoint);
 
     return normalized === cleanEndpoint;
   });
+}
+
+export function isPublicAuthEndpoint(path = "") {
+  return isEndpointInGroup(
+    path,
+    AUTH_ENDPOINT_GROUPS.public
+  );
 }
 
 export function isPrivateAuthEndpoint(path = "") {
-  const normalized =
-    normalizeEndpointPath(path);
-
-  if (!normalized) {
-    return false;
-  }
-
-  return AUTH_ENDPOINT_GROUPS.private.some((endpoint) => {
-    const cleanEndpoint =
-      normalizeEndpointPath(endpoint);
-
-    return normalized === cleanEndpoint;
-  });
+  return isEndpointInGroup(
+    path,
+    AUTH_ENDPOINT_GROUPS.private
+  );
 }
 
 export function isPasswordResetEndpoint(path = "") {
-  const normalized =
-    normalizeEndpointPath(path);
-
-  if (!normalized) {
-    return false;
-  }
-
-  return AUTH_ENDPOINT_GROUPS.passwordReset.some((endpoint) => {
-    const cleanEndpoint =
-      normalizeEndpointPath(endpoint);
-
-    return normalized === cleanEndpoint;
-  });
+  return isEndpointInGroup(
+    path,
+    AUTH_ENDPOINT_GROUPS.passwordReset
+  );
 }
 
 export function isActivationEndpoint(path = "") {
-  const normalized =
-    normalizeEndpointPath(path);
-
-  if (!normalized) {
-    return false;
-  }
-
-  return AUTH_ENDPOINT_GROUPS.activation.some((endpoint) => {
-    const cleanEndpoint =
-      normalizeEndpointPath(endpoint);
-
-    return normalized === cleanEndpoint;
-  });
+  return isEndpointInGroup(
+    path,
+    AUTH_ENDPOINT_GROUPS.activation
+  );
 }
 
 export function isTwoFactorEndpoint(path = "") {
-  const normalized =
-    normalizeEndpointPath(path);
-
-  if (!normalized) {
-    return false;
-  }
-
-  return AUTH_ENDPOINT_GROUPS.twoFactor.some((endpoint) => {
-    const cleanEndpoint =
-      normalizeEndpointPath(endpoint);
-
-    return normalized === cleanEndpoint;
-  });
+  return isEndpointInGroup(
+    path,
+    AUTH_ENDPOINT_GROUPS.twoFactor
+  );
 }
 
 export function isAuthFailureCode(code = "") {
@@ -1752,6 +1814,7 @@ export default deepFreeze({
 
   getAuthEndpoint,
   getAuthEndpointCandidates,
+  getAuthEndpointGroup,
   getAuthStorageKey,
   getAuthLegacyStorageKey,
   getAuthConstant,
@@ -1805,9 +1868,12 @@ export default deepFreeze({
 
   isPublicTechnicalRoute,
   isActivationRoute,
+  isResetPasswordRoute,
   isResetPasswordConfirmRoute,
+  isTwoFactorRoute,
 
   isAuthEndpoint,
+  isEndpointInGroup,
   isPublicAuthEndpoint,
   isPrivateAuthEndpoint,
   isPasswordResetEndpoint,

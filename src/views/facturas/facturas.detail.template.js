@@ -7,6 +7,7 @@
    PATCH · NO INLINE STYLES · CLASS ONLY TEMPLATE
    PATCH · IVA / IRPF REAL · TAX BREAKDOWN HARDENED
    PATCH · CLASS BASED MODAL · ACTION SAFE · NO ROUTE NAVIGATION
+   PATCH · FORMA DE PAGO HUMAN LABEL · FIRST LETTER UPPERCASE
 
    RESPONSABILIDADES:
    - renderizar modal premium centrado de detalle de factura
@@ -23,9 +24,11 @@
    - tolerar payloads pobres, normalizados, raw, raw.raw, data, payload,
      result, factura e invoice
    - soportar facturas enriquecidas desde incidenciaGet.js
+   - renderizar forma de pago como etiqueta humana:
+     "transferencia bancaria" -> "Transferencia bancaria"
 
    CSS:
-   - Todo el estilo debe vivir en /src/css/views/facturas.css
+   - Todo el estilo debe vivir en /src/css/views/facturas/detail.css
    - Este template solo emite clases y atributos data-*
 ========================================================= */
 
@@ -115,6 +118,69 @@ function normalizeKey(value = "") {
     .replace(/[\s-]+/g, "_")
     .replace(/[^\w]+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+function capitalizeFirst(value = "", fallback = "—") {
+  const text = safeText(value, fallback);
+
+  if (!text || text === fallback) return text;
+
+  const clean = text.replace(/\s+/g, " ").trim();
+
+  if (!clean) return fallback;
+
+  const shouldNormalizeRest =
+    clean === clean.toLocaleLowerCase("es-ES") ||
+    clean === clean.toLocaleUpperCase("es-ES");
+
+  const firstLetter = clean.charAt(0).toLocaleUpperCase("es-ES");
+  const rest = shouldNormalizeRest
+    ? clean.slice(1).toLocaleLowerCase("es-ES")
+    : clean.slice(1);
+
+  return `${firstLetter}${rest}`;
+}
+
+function formatPaymentMethodLabel(value = "", fallback = "—") {
+  const text = safeText(value, fallback);
+
+  if (!text || text === fallback) return text;
+
+  const key = normalizeKey(text);
+
+  switch (key) {
+    case "transferencia_bancaria":
+    case "transferencia":
+    case "bank_transfer":
+    case "wire_transfer":
+    case "sepa_transfer":
+      return "Transferencia bancaria";
+
+    case "efectivo":
+    case "cash":
+      return "Efectivo";
+
+    case "tarjeta":
+    case "tarjeta_bancaria":
+    case "card":
+    case "credit_card":
+    case "debit_card":
+      return "Tarjeta";
+
+    case "bizum":
+      return "Bizum";
+
+    case "paypal":
+      return "PayPal";
+
+    case "domiciliacion":
+    case "domiciliacion_bancaria":
+    case "direct_debit":
+      return "Domiciliación bancaria";
+
+    default:
+      return capitalizeFirst(text, fallback);
+  }
 }
 
 function safeNumber(value, fallback = 0) {
@@ -582,7 +648,7 @@ function getFacturaFechaEnvio(factura = {}) {
 function getFacturaFormaPago(factura = {}) {
   const sources = getPayloadSources(factura);
 
-  return safeText(
+  return formatPaymentMethodLabel(
     firstFromSources(sources, [
       "formaPago",
       "metodoPago",

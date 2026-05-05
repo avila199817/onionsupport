@@ -2,28 +2,35 @@
    Onion SPA - Auth Helpers
    Archivo: src/features/auth/helpers.js
 
-   Responsabilidades:
+   AUTH HELPERS · FINAL EXTREME PRO SYSTEM · 10/10
+
+   RESPONSABILIDADES:
    - helpers base auth
-   - normalización paths
-   - saneado username / slug / tokens
-   - extracción segura mensajes error
+   - normalización de paths públicos/canónicos
+   - saneado username / slug / tokens / session values
+   - extracción segura de mensajes de error
    - detección rutas auth
    - detección rutas públicas técnicas
-   - validación redirects internos
-   - endurecer strings / urls / payloads backend
-
-   HARDENING EXTREMO:
-   - tolerancia total a AppCore parcial
-   - unicode safe
-   - anti open redirect
-   - helpers reutilizables SPA
+   - validación de redirects internos
    - soporte hash-router /#/...
    - soporte hashbang #!/...
    - canonical sin query/hash
    - publicPath con query/hash
    - strip seguro de /@username
    - redacción de tokens en logs/eventos
-   - token/session values limitados
+   - payloads públicos sin secretos
+
+   HARDENING:
+   - tolerancia total a AppCore parcial
+   - unicode safe
+   - anti open redirect
+   - no localStorage.clear
+   - no rompe /activate-account?token=...
+   - no rompe /activate-account/<token>
+   - no rompe /reset-password/confirm?token=...
+   - no rompe /reset-password/confirm/<token>
+   - tokens no se truncan: se invalidan si exceden límite
+   - session values se limitan de forma controlada
    - cero throws accidentales
 ========================================================= */
 
@@ -38,6 +45,9 @@ import {
 /* =========================================================
    CONSTANTS
 ========================================================= */
+
+const AUTH_HELPERS_VERSION =
+  "10.2.0";
 
 const DEFAULT_ROUTE =
   "/";
@@ -56,6 +66,12 @@ const SAFE_TOKEN_FALLBACK_MAX =
 
 const SAFE_SESSION_VALUE_FALLBACK_MAX =
   200;
+
+const SAFE_SESSION_VALUE_ABSOLUTE_MAX =
+  2048;
+
+const SAFE_URL_MAX =
+  4096;
 
 const AUTH_ROUTE_CANDIDATES =
   Object.freeze([
@@ -87,15 +103,19 @@ const DEFAULT_PUBLIC_TECHNICAL_ROUTES =
   ]);
 
 const CORRUPTED_TEXT_VALUES =
-  Object.freeze([
+  new Set([
+    "",
     "undefined",
     "null",
     "false",
+    "none",
+    "nan",
     "[object object]",
     "{}",
     "[]",
     "\"undefined\"",
     "\"null\"",
+    "\"false\"",
   ]);
 
 const TECHNICAL_TOKEN_PATHS =
@@ -103,6 +123,40 @@ const TECHNICAL_TOKEN_PATHS =
     "/activate-account",
     "/reset-password/confirm",
   ]);
+
+const FALLBACK_TOKEN_PARAM_NAMES =
+  Object.freeze({
+    generic: [
+      "token",
+      "code",
+      "t",
+    ],
+
+    activation: [
+      "token",
+      "activationToken",
+      "activateToken",
+      "code",
+      "t",
+    ],
+
+    reset: [
+      "token",
+      "resetToken",
+      "passwordResetToken",
+      "code",
+      "t",
+    ],
+
+    auth: [
+      "token",
+      "access_token",
+      "refresh_token",
+      "id_token",
+      "authToken",
+      "auth_token",
+    ],
+  });
 
 /* =========================================================
    BASE
@@ -144,7 +198,11 @@ export function safeInt(value, fallback = 0) {
   );
 }
 
-export function clampNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
+export function clampNumber(
+  value,
+  min = 0,
+  max = Number.MAX_SAFE_INTEGER
+) {
   const numeric =
     safeNumber(value, min);
 
@@ -220,9 +278,7 @@ export function safeArray(value) {
 
 export function safeClone(value, fallback = null) {
   try {
-    if (
-      typeof AppCore?.utils?.safeClone === "function"
-    ) {
+    if (typeof AppCore?.utils?.safeClone === "function") {
       return AppCore.utils.safeClone(
         value,
         fallback
@@ -231,9 +287,7 @@ export function safeClone(value, fallback = null) {
   } catch {}
 
   try {
-    if (
-      typeof structuredClone === "function"
-    ) {
+    if (typeof structuredClone === "function") {
       return structuredClone(value);
     }
   } catch {}
@@ -247,6 +301,12 @@ export function safeClone(value, fallback = null) {
       ? value
       : fallback;
   }
+}
+
+function safeObject(value) {
+  return isObject(value)
+    ? value
+    : {};
 }
 
 function hasOwn(obj, key) {
@@ -269,16 +329,14 @@ function isCorruptedTextValue(value = "") {
   const text =
     safeLower(value);
 
-  return (
-    !text ||
-    CORRUPTED_TEXT_VALUES.includes(text)
-  );
+  return CORRUPTED_TEXT_VALUES.has(text);
 }
 
 function unique(values = []) {
   return Array.from(
     new Set(
       safeArray(values)
+        .flat(Infinity)
         .map((value) =>
           safeText(value, "")
         )
@@ -298,9 +356,7 @@ function escapeRegExp(value = "") {
 
 function coreNormalizePath(value) {
   try {
-    if (
-      typeof AppCore?.utils?.normalizePath === "function"
-    ) {
+    if (typeof AppCore?.utils?.normalizePath === "function") {
       return AppCore.utils.normalizePath(value);
     }
   } catch {}
@@ -310,9 +366,7 @@ function coreNormalizePath(value) {
 
 function coreNormalizeCanonicalPath(value) {
   try {
-    if (
-      typeof AppCore?.utils?.normalizeCanonicalPath === "function"
-    ) {
+    if (typeof AppCore?.utils?.normalizeCanonicalPath === "function") {
       return AppCore.utils.normalizeCanonicalPath(value);
     }
   } catch {}
@@ -322,9 +376,7 @@ function coreNormalizeCanonicalPath(value) {
 
 function coreNormalizePublicPath(value) {
   try {
-    if (
-      typeof AppCore?.utils?.normalizePublicPath === "function"
-    ) {
+    if (typeof AppCore?.utils?.normalizePublicPath === "function") {
       return AppCore.utils.normalizePublicPath(value);
     }
   } catch {}
@@ -334,9 +386,7 @@ function coreNormalizePublicPath(value) {
 
 function coreSanitizeUsername(value) {
   try {
-    if (
-      typeof AppCore?.utils?.sanitizeUsername === "function"
-    ) {
+    if (typeof AppCore?.utils?.sanitizeUsername === "function") {
       return AppCore.utils.sanitizeUsername(value);
     }
   } catch {}
@@ -346,9 +396,7 @@ function coreSanitizeUsername(value) {
 
 function coreSlugify(value) {
   try {
-    if (
-      typeof AppCore?.utils?.slugify === "function"
-    ) {
+    if (typeof AppCore?.utils?.slugify === "function") {
       return AppCore.utils.slugify(value);
     }
   } catch {}
@@ -369,6 +417,11 @@ function getBaseOrigin() {
   }
 
   return LOCAL_ORIGIN;
+}
+
+function limitUrlLike(value = "") {
+  return safeText(value, "")
+    .slice(0, SAFE_URL_MAX);
 }
 
 export function isHashRouterPath(value = "") {
@@ -437,13 +490,9 @@ export function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
     value = `/${value}`;
   }
 
-  const segments =
-    value.split("/");
+  const normalizedSegments = [];
 
-  const normalizedSegments =
-    [];
-
-  for (const segment of segments) {
+  for (const segment of value.split("/")) {
     if (
       !segment ||
       segment === "."
@@ -475,7 +524,7 @@ export function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
 
 export function splitPath(path = DEFAULT_ROUTE) {
   const raw =
-    safeText(path, DEFAULT_ROUTE) || DEFAULT_ROUTE;
+    limitUrlLike(path) || DEFAULT_ROUTE;
 
   if (isHashRouterPath(raw)) {
     return splitPath(
@@ -531,7 +580,7 @@ export function splitPath(path = DEFAULT_ROUTE) {
 
 export function fallbackNormalizePath(value = DEFAULT_ROUTE) {
   const raw =
-    safeText(value, DEFAULT_ROUTE) || DEFAULT_ROUTE;
+    limitUrlLike(value) || DEFAULT_ROUTE;
 
   if (isHashRouterPath(raw)) {
     return fallbackNormalizePath(
@@ -566,17 +615,17 @@ export function fallbackNormalizePath(value = DEFAULT_ROUTE) {
     pathname,
     search,
     hash,
-  } = splitPath(raw);
+  } =
+    splitPath(raw);
 
   return `${pathname}${search}${hash}`;
 }
 
 export function stripSearchAndHash(path = DEFAULT_ROUTE) {
-  const {
-    pathname,
-  } = splitPath(
-    fallbackNormalizePath(path)
-  );
+  const { pathname } =
+    splitPath(
+      fallbackNormalizePath(path)
+    );
 
   return pathname || DEFAULT_ROUTE;
 }
@@ -585,9 +634,10 @@ export function getSearchAndHash(path = DEFAULT_ROUTE) {
   const {
     search,
     hash,
-  } = splitPath(
-    fallbackNormalizePath(path)
-  );
+  } =
+    splitPath(
+      fallbackNormalizePath(path)
+    );
 
   return `${search || ""}${hash || ""}`;
 }
@@ -600,7 +650,8 @@ export function stripUsernamePrefix(path = DEFAULT_ROUTE) {
     pathname,
     search,
     hash,
-  } = splitPath(normalized);
+  } =
+    splitPath(normalized);
 
   const stripped =
     pathname.replace(
@@ -615,14 +666,14 @@ export function stripUsernamePrefix(path = DEFAULT_ROUTE) {
 
 export function normalizePath(path = DEFAULT_ROUTE) {
   const raw =
-    safeText(path, DEFAULT_ROUTE) || DEFAULT_ROUTE;
+    limitUrlLike(path) || DEFAULT_ROUTE;
 
   const fallback =
     fallbackNormalizePath(raw);
 
   /*
-    Si el path trae query/hash, no delegamos a AppCore:
-    algunos normalizadores internos pueden comerse ?token=...
+    Si trae query/hash, no delegamos a AppCore.
+    Algunos normalizadores globales pueden perder ?token=...
   */
   if (
     raw.includes("?") ||
@@ -641,7 +692,7 @@ export function normalizePath(path = DEFAULT_ROUTE) {
 
 export function normalizePublicPath(path = DEFAULT_ROUTE) {
   const raw =
-    safeText(path, DEFAULT_ROUTE) || DEFAULT_ROUTE;
+    limitUrlLike(path) || DEFAULT_ROUTE;
 
   const fallback =
     stripUsernamePrefix(
@@ -667,7 +718,7 @@ export function normalizePublicPath(path = DEFAULT_ROUTE) {
 
 export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
   const raw =
-    safeText(path, DEFAULT_ROUTE) || DEFAULT_ROUTE;
+    limitUrlLike(path) || DEFAULT_ROUTE;
 
   const fallback =
     stripSearchAndHash(
@@ -694,7 +745,7 @@ export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
 
 export function pathFromUrlLike(value = "") {
   const raw =
-    safeText(value, "");
+    limitUrlLike(value);
 
   if (!raw) {
     return "";
@@ -914,7 +965,7 @@ function hasEncodedOpenRedirectRisk(path = "") {
 
 export function isSafeRelativePath(path = "") {
   const raw =
-    safeText(path, "");
+    limitUrlLike(path);
 
   if (!raw) {
     return false;
@@ -943,9 +994,12 @@ export function isSafeRelativePath(path = "") {
   return true;
 }
 
-export function sanitizeRedirectPath(path = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
+export function sanitizeRedirectPath(
+  path = DEFAULT_ROUTE,
+  fallback = DEFAULT_ROUTE
+) {
   const raw =
-    safeText(path, "");
+    limitUrlLike(path);
 
   const fallbackPath =
     isSafeRelativePath(fallback)
@@ -1031,6 +1085,22 @@ export function slugify(value = "") {
    TOKENS / SESSION VALUES
 ========================================================= */
 
+function getTokenMaxLength(maxLength = AUTH_CONSTANTS?.tokenMaxLength) {
+  return clampNumber(
+    maxLength ?? SAFE_TOKEN_FALLBACK_MAX,
+    1,
+    32768
+  ) || SAFE_TOKEN_FALLBACK_MAX;
+}
+
+function getSessionMaxLength(maxLength = AUTH_CONSTANTS?.sessionValueMaxLength) {
+  return clampNumber(
+    maxLength ?? SAFE_SESSION_VALUE_FALLBACK_MAX,
+    1,
+    SAFE_SESSION_VALUE_ABSOLUTE_MAX
+  ) || SAFE_SESSION_VALUE_FALLBACK_MAX;
+}
+
 export function normalizeTokenValue(
   token = null,
   maxLength = AUTH_CONSTANTS?.tokenMaxLength
@@ -1042,24 +1112,30 @@ export function normalizeTokenValue(
     return null;
   }
 
-  const normalized =
+  let normalized =
     String(token)
       .normalize("NFKC")
       .trim()
-      .replace(/[\r\n\t]/g, "")
-      .slice(
-        0,
-        clampNumber(
-          maxLength,
-          1,
-          32768
-        ) || SAFE_TOKEN_FALLBACK_MAX
-      );
+      .replace(/[\r\n\t]/g, "");
+
+  if (/^bearer\s+/i.test(normalized)) {
+    normalized =
+      normalized.replace(/^bearer\s+/i, "")
+        .trim();
+  }
 
   if (
     !normalized ||
     isCorruptedTextValue(normalized)
   ) {
+    return null;
+  }
+
+  /*
+    Regla dura:
+    no truncamos tokens. Si excede, es corrupto.
+  */
+  if (normalized.length > getTokenMaxLength(maxLength)) {
     return null;
   }
 
@@ -1081,15 +1157,7 @@ export function normalizeSessionValue(
     String(value)
       .normalize("NFKC")
       .trim()
-      .replace(/[\r\n\t]/g, "")
-      .slice(
-        0,
-        clampNumber(
-          maxLength,
-          1,
-          2048
-        ) || SAFE_SESSION_VALUE_FALLBACK_MAX
-      );
+      .replace(/[\r\n\t]/g, "");
 
   if (
     !normalized ||
@@ -1098,7 +1166,10 @@ export function normalizeSessionValue(
     return null;
   }
 
-  return normalized;
+  return normalized.slice(
+    0,
+    getSessionMaxLength(maxLength)
+  );
 }
 
 export function hasValidToken(token = AppCore?.state?.token) {
@@ -1111,39 +1182,30 @@ function getTokenParamNames(type = "generic") {
   const cleanType =
     safeText(type, "generic");
 
-  const names =
+  const fromConstants =
     AUTH_TOKEN_PARAM_NAMES?.[cleanType];
 
-  if (Array.isArray(names)) {
-    return names;
+  if (
+    Array.isArray(fromConstants) &&
+    fromConstants.length
+  ) {
+    return fromConstants;
   }
 
-  return AUTH_TOKEN_PARAM_NAMES?.generic || [
-    "token",
-    "code",
-    "t",
-  ];
+  return FALLBACK_TOKEN_PARAM_NAMES[cleanType] ||
+    FALLBACK_TOKEN_PARAM_NAMES.generic;
 }
 
 function getAllTokenParamNames() {
   try {
-    return unique(
-      Object.values(AUTH_TOKEN_PARAM_NAMES || {})
-        .flat()
-    );
+    return unique([
+      ...Object.values(FALLBACK_TOKEN_PARAM_NAMES).flat(),
+      ...Object.values(AUTH_TOKEN_PARAM_NAMES || {}).flat(),
+    ]);
   } catch {
-    return [
-      "token",
-      "activationToken",
-      "activateToken",
-      "resetToken",
-      "passwordResetToken",
-      "code",
-      "t",
-      "access_token",
-      "refresh_token",
-      "id_token",
-    ];
+    return unique(
+      Object.values(FALLBACK_TOKEN_PARAM_NAMES).flat()
+    );
   }
 }
 
@@ -1266,7 +1328,8 @@ export function extractActivationToken(pathOrUrl = getCurrentPublicPath()) {
   const {
     search,
     hash,
-  } = splitPath(path);
+  } =
+    splitPath(path);
 
   const fromSearch =
     extractTokenFromSearch(
@@ -1301,7 +1364,8 @@ export function extractResetToken(pathOrUrl = getCurrentPublicPath()) {
   const {
     search,
     hash,
-  } = splitPath(path);
+  } =
+    splitPath(path);
 
   const fromSearch =
     extractTokenFromSearch(
@@ -1362,7 +1426,14 @@ function redactJsonTokenFields(value = "") {
     safeText(value, "");
 
   const names =
-    getAllTokenParamNames();
+    unique([
+      ...getAllTokenParamNames(),
+      "authorization",
+      "password",
+      "secret",
+      "otp",
+      "totp",
+    ]);
 
   for (const name of names) {
     const escapedName =
@@ -1443,7 +1514,7 @@ export function extractMessage(error) {
 
   if (typeof error === "string") {
     return safeText(
-      error,
+      redactTokenInText(error),
       "Error de autenticación"
     );
   }
@@ -1487,7 +1558,7 @@ export function extractMessage(error) {
       safeText(item, "");
 
     if (text) {
-      return text;
+      return redactTokenInText(text);
     }
   }
 
@@ -1588,6 +1659,7 @@ export function sanitizeAuthPayload(payload = {}, depth = 0) {
     ) {
       output[key] =
         value ? "***" : value;
+
       continue;
     }
 
@@ -1601,11 +1673,18 @@ export function sanitizeAuthPayload(payload = {}, depth = 0) {
   return output;
 }
 
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
 export function getAuthHelpersSnapshot() {
   const publicPath =
     getCurrentPublicPath();
 
   return {
+    version:
+      AUTH_HELPERS_VERSION,
+
     publicPath:
       redactTokenInText(publicPath),
 

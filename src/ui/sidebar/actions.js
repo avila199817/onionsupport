@@ -2,10 +2,17 @@
    Onion SPA - Sidebar Actions
    Archivo: src/ui/sidebar/actions.js
 
-   FINAL EXTREME SYSTEM · LOGOUT SAFE · LOCAL CLEAR GUARANTEED · 10/10
+   FINAL EXTREME SYSTEM · SIDEBAR ACTIONS · LOGOUT SAFE · 12/10
+   BUSINESS ACTIONS ONLY · STATE.JS OWNER · ZERO VISUAL DUPLICATION
 
    RESPONSABILIDADES:
    - centralizar acciones de negocio del sidebar
+   - delegar estado visual real en state.js
+   - no duplicar CSS ni clases visuales manuales
+   - toggle / open / close / collapse / expand seguros
+   - abrir sidebar antes de dropdown de usuario cuando haga falta
+   - cerrar sidebar móvil tras navegación
+   - navegación robusta por Router/AppCore/window fallback
    - logout robusto aunque falle el endpoint remoto
    - desactivar controles durante acciones críticas
    - restaurar estado previo real de controles
@@ -13,28 +20,27 @@
    - limpiar restos legacy de auth si Auth/AppCore fallan
    - limpiar storage AppCore/localStorage/sessionStorage conocido
    - limpiar cookies auth no HttpOnly conocidas
+   - limpiar headers Authorization en clientes HTTP conocidos
    - resincronizar UI del sidebar tras logout
    - navegar a /login con replaceState
    - evitar doble logout concurrente
    - emitir eventos de diagnóstico
    - cero throws accidentales hacia la UI
 
-   HARDENING EXTREMO:
-   - remote logout best-effort con timeout
-   - local logout obligatorio
-   - fallback AppCore.clearSession / Auth.clearSessionLocal / state patch
-   - limpieza limitada de storage auth conocido
-   - navegación robusta vía Router/AppCore/window fallback
-   - controles bloqueados durante operación y restaurados a su estado previo
-   - no rompe si window/document/storage no existen
-   - no depende de una única API de Auth
-   - safeEmit usa AppCore.events si existe; window solo fallback
-   - no deja loader global colgado
-   - no deja avatar/rol/token fantasma tras fallo remoto
-   - corta carreras de doble click / doble evento / reentrada
-   - limpia headers Authorization en clientes HTTP conocidos
-   - emite snapshot estable para debug
+   REGLAS:
+   - state.js es dueño del estado/clases/indicator.
+   - actions.js solo decide intención.
+   - events.js decide cuándo llamar acciones.
+   - dropdown.js decide estado del dropdown.
+   - template.js decide DOM base.
 ========================================================= */
+
+import {
+  setSidebarOpen as setSidebarOpenState,
+  getDesiredSidebarOpenState,
+  isMobileViewport,
+  syncSidebarState as syncSidebarStateBase,
+} from "./state.js";
 
 /* =========================================================
    MODULE RUNTIME
@@ -47,16 +53,32 @@ let logoutGeneration = 0;
    CONSTANTS
 ========================================================= */
 
-const ACTIONS_VERSION = "sidebar-actions-v6-final-extreme";
+const ACTIONS_VERSION = "sidebar-actions-v7-business-state-logout-extreme";
+
+const SOURCE = "SidebarActions";
+const LOG_PREFIX = "[SidebarActions]";
 
 const LOGIN_ROUTE = "/login";
 
 const REMOTE_LOGOUT_TIMEOUT_MS = 9000;
 const LOCAL_CLEAR_SETTLE_MS = 0;
 
-const LOG_PREFIX = "[SidebarActions]";
-
 const EVENTS = Object.freeze({
+  actionStart: "sidebar:action:start",
+  actionComplete: "sidebar:action:complete",
+  actionError: "sidebar:action:error",
+
+  open: "sidebar:open",
+  close: "sidebar:close",
+  toggle: "sidebar:toggle",
+  collapse: "sidebar:collapse",
+  expand: "sidebar:expand",
+  mobileCloseAfterNavigation: "sidebar:mobile:close-after-navigation",
+
+  navigationStart: "sidebar:navigation:start",
+  navigationComplete: "sidebar:navigation:complete",
+  navigationError: "sidebar:navigation:error",
+
   logoutStart: "sidebar:logout:start",
   logoutRemoteStart: "sidebar:logout:remote:start",
   logoutRemoteSuccess: "sidebar:logout:remote:success",
@@ -78,6 +100,58 @@ const EVENTS = Object.freeze({
 
   sidebarStateChange: "sidebar:state:change",
   appSidebarChange: "app:sidebar:change",
+});
+
+const ROUTE_ALIASES = Object.freeze({
+  "/home": "/",
+  "/dashboard": "/",
+  "/inicio": "/",
+  "/inici": "/",
+
+  "/tickets": "/incidencias",
+  "/ticket": "/incidencias",
+  "/incidents": "/incidencias",
+  "/incident": "/incidencias",
+  "/incidencies": "/incidencias",
+  "/incidencia": "/incidencias",
+  "/incidencia-client": "/incidencias",
+
+  "/invoices": "/facturas",
+  "/invoice": "/facturas",
+  "/billing": "/facturas",
+  "/factures": "/facturas",
+  "/factura": "/facturas",
+  "/facturacio": "/facturas",
+  "/facturación": "/facturas",
+  "/facturacion": "/facturas",
+
+  "/users": "/usuarios",
+  "/user": "/usuarios",
+  "/usuaris": "/usuarios",
+  "/usuari": "/usuarios",
+  "/usuario": "/usuarios",
+
+  "/clients": "/clientes",
+  "/client": "/clientes",
+  "/customers": "/clientes",
+  "/customer": "/clientes",
+  "/cliente": "/clientes",
+
+  "/account": "/cuenta",
+  "/profile": "/cuenta",
+  "/compte": "/cuenta",
+  "/perfil": "/cuenta",
+
+  "/settings": "/ajustes",
+  "/config": "/ajustes",
+  "/configuration": "/ajustes",
+  "/configuracion": "/ajustes",
+  "/configuración": "/ajustes",
+  "/configuracio": "/ajustes",
+  "/configuració": "/ajustes",
+
+  "/server": "/servidor",
+  "/servidor": "/servidor",
 });
 
 const AUTH_STATE_KEYS_TO_NULL = Object.freeze([
@@ -138,10 +212,7 @@ const AUTH_STATE_KEYS_TO_FALSE = Object.freeze([
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 function hasDocument() {
@@ -161,7 +232,10 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -176,31 +250,6 @@ function safeArray(value) {
   return Array.isArray(value)
     ? value
     : [];
-}
-
-function safeBoolean(value, fallback = false) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  if (typeof value === "string") {
-    const key = value.trim().toLowerCase();
-
-    if (["true", "1", "yes", "si", "sí", "ok", "on", "y"].includes(key)) {
-      return true;
-    }
-
-    if (["false", "0", "no", "off", "n"].includes(key)) {
-      return false;
-    }
-  }
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-
-  return fallback;
 }
 
 function nowTs() {
@@ -235,27 +284,25 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
   const name = safeText(eventName, "");
   if (!name) return false;
 
+  const finalPayload = {
+    source: SOURCE,
+    ...safeObject(payload),
+  };
+
   try {
     if (isFunction(AppCore?.events?.emit)) {
-      AppCore.events.emit(name, payload);
+      AppCore.events.emit(name, finalPayload);
       return true;
     }
   } catch (error) {
-    safeWarn(
-      AppCore,
-      `AppCore.events.emit("${name}") falló.`,
-      error
-    );
+    safeWarn(AppCore, `AppCore.events.emit("${name}") falló.`, error);
   }
 
   try {
-    if (
-      isBrowser() &&
-      typeof CustomEvent !== "undefined"
-    ) {
+    if (isBrowser() && typeof CustomEvent !== "undefined") {
       window.dispatchEvent(
         new CustomEvent(name, {
-          detail: payload,
+          detail: finalPayload,
         })
       );
 
@@ -268,15 +315,17 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
 
 function sleep(ms = 0) {
   return new Promise((resolve) => {
+    const delay = Math.max(0, Number(ms) || 0);
+
     try {
       if (hasWindow()) {
-        window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
+        window.setTimeout(resolve, delay);
         return;
       }
     } catch {}
 
     try {
-      setTimeout(resolve, Math.max(0, Number(ms) || 0));
+      setTimeout(resolve, delay);
       return;
     } catch {}
 
@@ -289,24 +338,22 @@ async function withTimeout(
   ms = REMOTE_LOGOUT_TIMEOUT_MS,
   label = "timeout"
 ) {
-  const timeoutMs =
-    Math.max(1000, Number(ms) || REMOTE_LOGOUT_TIMEOUT_MS);
+  const timeoutMs = Math.max(1000, Number(ms) || REMOTE_LOGOUT_TIMEOUT_MS);
 
   let timer = null;
 
-  const timeoutPromise =
-    new Promise((_, reject) => {
-      try {
-        timer = setTimeout(() => {
-          const error = new Error(`${label}:${timeoutMs}ms`);
-          error.code = "SIDEBAR_ACTION_TIMEOUT";
-          error.timeout = true;
-          reject(error);
-        }, timeoutMs);
-      } catch {
-        reject(new Error(`${label}:timeout`));
-      }
-    });
+  const timeoutPromise = new Promise((_, reject) => {
+    try {
+      timer = setTimeout(() => {
+        const error = new Error(`${label}:${timeoutMs}ms`);
+        error.code = "SIDEBAR_ACTION_TIMEOUT";
+        error.timeout = true;
+        reject(error);
+      }, timeoutMs);
+    } catch {
+      reject(new Error(`${label}:timeout`));
+    }
+  });
 
   try {
     return await Promise.race([
@@ -322,23 +369,15 @@ async function withTimeout(
 
 function cloneError(error = null) {
   return {
-    name:
-      safeText(error?.name, ""),
-
-    message:
-      safeText(error?.message, ""),
-
-    code:
-      safeText(error?.code, ""),
-
+    name: safeText(error?.name, ""),
+    message: safeText(error?.message, ""),
+    code: safeText(error?.code, ""),
     status:
       error?.status ??
       error?.statusCode ??
       error?.response?.status ??
       null,
-
-    timeout:
-      Boolean(error?.timeout),
+    timeout: Boolean(error?.timeout),
   };
 }
 
@@ -354,10 +393,7 @@ function safeSetLoading(AppCore, value = false) {
 
   try {
     if (isFunction(AppCore?.setState)) {
-      AppCore.setState({
-        loading,
-      });
-
+      AppCore.setState({ loading });
       return true;
     }
   } catch {}
@@ -414,6 +450,680 @@ function resolveRouter(Router, AppCore) {
     getModule(AppCore, "router") ||
     null
   );
+}
+
+/* =========================================================
+   ROUTE HELPERS
+========================================================= */
+
+function getBaseOrigin() {
+  try {
+    if (isBrowser() && window.location?.origin) {
+      return window.location.origin;
+    }
+  } catch {}
+
+  return "http://localhost";
+}
+
+function isUnsafeRouteValue(value = "") {
+  const raw = safeText(value, "").toLowerCase();
+
+  return Boolean(
+    raw.startsWith("javascript:") ||
+      raw.startsWith("data:") ||
+      raw.startsWith("vbscript:") ||
+      raw.startsWith("file:") ||
+      raw.startsWith("mailto:") ||
+      raw.startsWith("tel:")
+  );
+}
+
+function isProtocolHref(value = "") {
+  return /^[a-z][a-z0-9+.-]*:/i.test(safeText(value, ""));
+}
+
+function isExternalHref(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) {
+    return false;
+  }
+
+  if (!isProtocolHref(raw)) {
+    return false;
+  }
+
+  try {
+    const url = new URL(raw, getBaseOrigin());
+
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      return url.origin !== getBaseOrigin();
+    }
+
+    return true;
+  } catch {
+    return true;
+  }
+}
+
+function isHashOnlyHref(value = "") {
+  const href = safeText(value, "");
+  return href.startsWith("#") && !href.startsWith("#/") && !href.startsWith("#!");
+}
+
+function isHashRouterPath(value = "") {
+  const raw = safeText(value, "");
+  return raw.startsWith("#/") || raw.startsWith("#!");
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/");
+  }
+
+  return raw.replace(/^#\/?/, "/");
+}
+
+function stripPublicUsernamePrefix(pathname = "/") {
+  const value = safeText(pathname, "/").replace(/^\/@[^/]+(?=\/|$)/i, "");
+  return value || "/";
+}
+
+function normalizePathnameOnly(pathname = "/") {
+  let value = safeText(pathname, "/")
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/")
+    .trim();
+
+  if (!value) {
+    value = "/";
+  }
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
+}
+
+function applyRouteAlias(pathname = "/") {
+  const clean = normalizePathnameOnly(pathname || "/");
+
+  if (ROUTE_ALIASES[clean]) {
+    return ROUTE_ALIASES[clean];
+  }
+
+  for (const [from, to] of Object.entries(ROUTE_ALIASES)) {
+    if (from !== "/" && clean.startsWith(`${from}/`)) {
+      return `${to}${clean.slice(from.length)}`;
+    }
+  }
+
+  return clean;
+}
+
+function normalizeRoutePath(path = "/") {
+  let value = safeText(path, "/");
+
+  if (!value) {
+    return "/";
+  }
+
+  if (
+    isUnsafeRouteValue(value) ||
+    isExternalHref(value) ||
+    isHashOnlyHref(value)
+  ) {
+    return "";
+  }
+
+  if (isHashRouterPath(value)) {
+    value = normalizeHashRouterPath(value);
+  }
+
+  try {
+    const parsed = new URL(value, getBaseOrigin());
+
+    if (parsed.hash && isHashRouterPath(parsed.hash)) {
+      value = normalizeHashRouterPath(parsed.hash);
+    } else {
+      value = `${parsed.pathname || "/"}${parsed.search || ""}`;
+    }
+  } catch {
+    value = value.split("#")[0] || "/";
+  }
+
+  value = safeText(value, "/")
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  const queryIndex = value.indexOf("?");
+  const pathname = queryIndex >= 0 ? value.slice(0, queryIndex) : value;
+  const query = queryIndex >= 0 ? value.slice(queryIndex + 1) : "";
+
+  const cleanPathname = applyRouteAlias(
+    stripPublicUsernamePrefix(
+      normalizePathnameOnly(pathname || "/")
+    )
+  );
+
+  return query ? `${cleanPathname}?${query}` : cleanPathname;
+}
+
+function dispatchPopStateSafe() {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    return true;
+  } catch {}
+
+  try {
+    window.dispatchEvent(new Event("popstate"));
+    return true;
+  } catch {}
+
+  return false;
+}
+
+/* =========================================================
+   SIDEBAR STATE ACTIONS
+========================================================= */
+
+function syncStateFallback(AppCore, closeDropdown, syncSidebarState) {
+  try {
+    if (isFunction(syncSidebarState)) {
+      return Boolean(syncSidebarState());
+    }
+  } catch {}
+
+  try {
+    return Boolean(syncSidebarStateBase(AppCore, closeDropdown));
+  } catch {}
+
+  return false;
+}
+
+export function setSidebarOpen({
+  AppCore,
+  open,
+  closeDropdown,
+  syncSidebarState,
+  reason = "set-sidebar-open",
+} = {}) {
+  const nextOpen = Boolean(open);
+
+  safeEmit(AppCore, EVENTS.actionStart, {
+    action: "setSidebarOpen",
+    open: nextOpen,
+    reason,
+  });
+
+  try {
+    const result = setSidebarOpenState(AppCore, nextOpen, closeDropdown);
+
+    syncStateFallback(AppCore, closeDropdown, syncSidebarState);
+
+    safeEmit(AppCore, EVENTS.actionComplete, {
+      action: "setSidebarOpen",
+      open: nextOpen,
+      reason,
+      result: Boolean(result),
+    });
+
+    return Boolean(result);
+  } catch (error) {
+    safeWarn(AppCore, "setSidebarOpen falló.", error);
+
+    safeEmit(AppCore, EVENTS.actionError, {
+      action: "setSidebarOpen",
+      open: nextOpen,
+      reason,
+      error: cloneError(error),
+    });
+
+    return false;
+  }
+}
+
+export function openSidebar({
+  AppCore,
+  closeDropdown,
+  syncSidebarState,
+  reason = "open-sidebar",
+} = {}) {
+  const result = setSidebarOpen({
+    AppCore,
+    open: true,
+    closeDropdown,
+    syncSidebarState,
+    reason,
+  });
+
+  safeEmit(AppCore, EVENTS.open, {
+    open: true,
+    reason,
+    result,
+  });
+
+  return result;
+}
+
+export function closeSidebar({
+  AppCore,
+  closeDropdown,
+  syncSidebarState,
+  reason = "close-sidebar",
+} = {}) {
+  try {
+    closeDropdown?.({
+      force: true,
+      reason,
+    });
+  } catch {
+    try {
+      closeDropdown?.();
+    } catch {}
+  }
+
+  const result = setSidebarOpen({
+    AppCore,
+    open: false,
+    closeDropdown,
+    syncSidebarState,
+    reason,
+  });
+
+  safeEmit(AppCore, EVENTS.close, {
+    open: false,
+    reason,
+    result,
+  });
+
+  return result;
+}
+
+export function toggleSidebar({
+  AppCore,
+  closeDropdown,
+  syncSidebarState,
+  reason = "toggle-sidebar",
+} = {}) {
+  let currentOpen = true;
+
+  try {
+    currentOpen = Boolean(getDesiredSidebarOpenState(AppCore));
+  } catch {
+    currentOpen = Boolean(AppCore?.state?.sidebarOpen);
+  }
+
+  const nextOpen = !currentOpen;
+
+  const result = setSidebarOpen({
+    AppCore,
+    open: nextOpen,
+    closeDropdown,
+    syncSidebarState,
+    reason,
+  });
+
+  safeEmit(AppCore, EVENTS.toggle, {
+    previousOpen: currentOpen,
+    open: nextOpen,
+    reason,
+    result,
+  });
+
+  return result;
+}
+
+export function collapseSidebar({
+  AppCore,
+  closeDropdown,
+  syncSidebarState,
+  reason = "collapse-sidebar",
+} = {}) {
+  if (isMobileViewport()) {
+    return closeSidebar({
+      AppCore,
+      closeDropdown,
+      syncSidebarState,
+      reason: `${reason}:mobile`,
+    });
+  }
+
+  try {
+    closeDropdown?.({
+      force: true,
+      reason,
+    });
+  } catch {
+    try {
+      closeDropdown?.();
+    } catch {}
+  }
+
+  const result = setSidebarOpen({
+    AppCore,
+    open: false,
+    closeDropdown,
+    syncSidebarState,
+    reason,
+  });
+
+  safeEmit(AppCore, EVENTS.collapse, {
+    open: false,
+    collapsed: true,
+    mobile: false,
+    reason,
+    result,
+  });
+
+  return result;
+}
+
+export function expandSidebar({
+  AppCore,
+  closeDropdown,
+  syncSidebarState,
+  reason = "expand-sidebar",
+} = {}) {
+  const result = setSidebarOpen({
+    AppCore,
+    open: true,
+    closeDropdown,
+    syncSidebarState,
+    reason,
+  });
+
+  safeEmit(AppCore, EVENTS.expand, {
+    open: true,
+    collapsed: false,
+    mobile: isMobileViewport(),
+    reason,
+    result,
+  });
+
+  return result;
+}
+
+export function ensureSidebarOpenForUserMenu({
+  AppCore,
+  closeDropdown,
+  syncSidebarState,
+  reason = "ensure-sidebar-open-for-user-menu",
+} = {}) {
+  let currentlyOpen = true;
+
+  try {
+    currentlyOpen = Boolean(getDesiredSidebarOpenState(AppCore));
+  } catch {
+    currentlyOpen = Boolean(AppCore?.state?.sidebarOpen);
+  }
+
+  if (currentlyOpen) {
+    return false;
+  }
+
+  return expandSidebar({
+    AppCore,
+    closeDropdown,
+    syncSidebarState,
+    reason,
+  });
+}
+
+export function closeSidebarOnMobileAfterNavigation({
+  AppCore,
+  closeDropdown,
+  syncSidebarState,
+  reason = "mobile-navigation",
+} = {}) {
+  if (!isMobileViewport()) {
+    return false;
+  }
+
+  const result = closeSidebar({
+    AppCore,
+    closeDropdown,
+    syncSidebarState,
+    reason,
+  });
+
+  safeEmit(AppCore, EVENTS.mobileCloseAfterNavigation, {
+    open: false,
+    mobile: true,
+    reason,
+    result,
+  });
+
+  return result;
+}
+
+/* =========================================================
+   NAVIGATION ACTIONS
+========================================================= */
+
+async function navigateToTarget({
+  AppCore,
+  Router,
+  target = "",
+  replace = false,
+  source = "sidebar",
+  force = false,
+} = {}) {
+  const resolvedRouter = resolveRouter(Router, AppCore);
+  const cleanTarget = normalizeRoutePath(target);
+
+  if (!cleanTarget) {
+    return false;
+  }
+
+  const options = {
+    replaceState: Boolean(replace),
+    replace: Boolean(replace),
+    force: Boolean(force),
+    source,
+  };
+
+  safeEmit(AppCore, EVENTS.navigationStart, {
+    target: cleanTarget,
+    replace: Boolean(replace),
+    force: Boolean(force),
+    source,
+  });
+
+  const candidates = [
+    {
+      name: "Router.replace",
+      enabled: replace,
+      fn: resolvedRouter?.replace,
+      ctx: resolvedRouter,
+      args: [cleanTarget, options],
+    },
+    {
+      name: "Router.navigate",
+      enabled: true,
+      fn: resolvedRouter?.navigate,
+      ctx: resolvedRouter,
+      args: [cleanTarget, options],
+    },
+    {
+      name: "Router.go",
+      enabled: true,
+      fn: resolvedRouter?.go,
+      ctx: resolvedRouter,
+      args: [cleanTarget, options],
+    },
+    {
+      name: "Router.push",
+      enabled: !replace,
+      fn: resolvedRouter?.push,
+      ctx: resolvedRouter,
+      args: [cleanTarget, options],
+    },
+    {
+      name: "AppCore.navigate",
+      enabled: true,
+      fn: AppCore?.navigate,
+      ctx: AppCore,
+      args: [cleanTarget, options],
+    },
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate.enabled || !isFunction(candidate.fn)) {
+      continue;
+    }
+
+    try {
+      await Promise.resolve(
+        candidate.fn.apply(candidate.ctx, candidate.args)
+      );
+
+      safeEmit(AppCore, EVENTS.navigationComplete, {
+        ok: true,
+        method: candidate.name,
+        target: cleanTarget,
+        replace: Boolean(replace),
+        force: Boolean(force),
+        source,
+      });
+
+      return true;
+    } catch (error) {
+      safeWarn(AppCore, `${candidate.name}("${cleanTarget}") falló.`, error);
+    }
+  }
+
+  if (!isBrowser()) {
+    safeEmit(AppCore, EVENTS.navigationComplete, {
+      ok: false,
+      method: "",
+      target: cleanTarget,
+      reason: "not-browser",
+      source,
+    });
+
+    return false;
+  }
+
+  try {
+    if (replace) {
+      window.history.replaceState(
+        {
+          path: cleanTarget,
+          publicPath: cleanTarget,
+          canonicalPath: cleanTarget,
+          source,
+          ts: nowTs(),
+        },
+        "",
+        cleanTarget
+      );
+    } else {
+      window.history.pushState(
+        {
+          path: cleanTarget,
+          publicPath: cleanTarget,
+          canonicalPath: cleanTarget,
+          source,
+          ts: nowTs(),
+        },
+        "",
+        cleanTarget
+      );
+    }
+
+    dispatchPopStateSafe();
+
+    safeEmit(AppCore, EVENTS.navigationComplete, {
+      ok: true,
+      method: replace ? "history.replaceState" : "history.pushState",
+      target: cleanTarget,
+      replace: Boolean(replace),
+      source,
+    });
+
+    return true;
+  } catch (error) {
+    safeEmit(AppCore, EVENTS.navigationError, {
+      target: cleanTarget,
+      error: cloneError(error),
+      source,
+    });
+  }
+
+  try {
+    if (replace) {
+      window.location.replace(cleanTarget);
+    } else {
+      window.location.href = cleanTarget;
+    }
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+export async function navigateFromSidebar({
+  AppCore,
+  Router,
+  target = "",
+  closeDropdown,
+  closeSidebarOnMobile = true,
+  syncSidebarState,
+  replace = false,
+  source = "sidebar",
+} = {}) {
+  try {
+    closeDropdown?.({
+      force: true,
+      reason: "navigate-from-sidebar",
+    });
+  } catch {
+    try {
+      closeDropdown?.();
+    } catch {}
+  }
+
+  const ok = await navigateToTarget({
+    AppCore,
+    Router,
+    target,
+    replace,
+    source,
+    force: false,
+  });
+
+  if (ok && closeSidebarOnMobile) {
+    closeSidebarOnMobileAfterNavigation({
+      AppCore,
+      closeDropdown,
+      syncSidebarState,
+      reason: "navigate-from-sidebar",
+    });
+  }
+
+  return ok;
 }
 
 /* =========================================================
@@ -487,28 +1197,20 @@ function captureControlState(element) {
   } catch {}
 
   try {
-    hadIsDisabledClass =
-      Boolean(element.classList?.contains?.("is-disabled"));
-
-    hadIsLoadingClass =
-      Boolean(element.classList?.contains?.("is-loading"));
+    hadIsDisabledClass = Boolean(element.classList?.contains?.("is-disabled"));
+    hadIsLoadingClass = Boolean(element.classList?.contains?.("is-loading"));
   } catch {}
 
   return {
     element,
-
     disabled,
     inert,
-
     hadDisabledAttr,
     hadAriaDisabled,
     ariaDisabled,
-
     hadBusy,
     busy,
-
     hadInertAttr,
-
     hadIsDisabledClass,
     hadIsLoadingClass,
   };
@@ -542,22 +1244,12 @@ function setControlDisabled(element, disabled = false) {
   } catch {}
 
   try {
-    element.setAttribute(
-      "aria-disabled",
-      value ? "true" : "false"
-    );
+    element.setAttribute("aria-disabled", value ? "true" : "false");
   } catch {}
 
   try {
-    element.classList?.toggle?.(
-      "is-disabled",
-      value
-    );
-
-    element.classList?.toggle?.(
-      "is-loading",
-      value
-    );
+    element.classList?.toggle?.("is-disabled", value);
+    element.classList?.toggle?.("is-loading", value);
   } catch {}
 
   try {
@@ -600,10 +1292,7 @@ function restoreControlsState(snapshot = []) {
 
     try {
       if (item.hadAriaDisabled) {
-        element.setAttribute(
-          "aria-disabled",
-          item.ariaDisabled || "false"
-        );
+        element.setAttribute("aria-disabled", item.ariaDisabled || "false");
       } else {
         element.removeAttribute("aria-disabled");
       }
@@ -634,15 +1323,8 @@ function restoreControlsState(snapshot = []) {
     } catch {}
 
     try {
-      element.classList?.toggle?.(
-        "is-disabled",
-        Boolean(item.hadIsDisabledClass)
-      );
-
-      element.classList?.toggle?.(
-        "is-loading",
-        Boolean(item.hadIsLoadingClass)
-      );
+      element.classList?.toggle?.("is-disabled", Boolean(item.hadIsDisabledClass));
+      element.classList?.toggle?.("is-loading", Boolean(item.hadIsLoadingClass));
     } catch {}
   });
 
@@ -745,11 +1427,7 @@ function getKnownAuthStorageKeys(AppCore) {
     expanded.push(`${prefix}_${underscoreKey}`);
   });
 
-  return Array.from(
-    new Set(
-      expanded.filter(Boolean)
-    )
-  );
+  return Array.from(new Set(expanded.filter(Boolean)));
 }
 
 function removeFromStorage(storage, key) {
@@ -1208,18 +1886,10 @@ async function callClearCandidate(Auth, AppCore, candidate, clearOptions) {
   }
 
   try {
-    await Promise.resolve(
-      candidate.call(Auth, clearOptions)
-    );
-
+    await Promise.resolve(candidate.call(Auth, clearOptions));
     return true;
   } catch (error) {
-    safeWarn(
-      AppCore,
-      "Limpieza local Auth falló.",
-      error
-    );
-
+    safeWarn(AppCore, "Limpieza local Auth falló.", error);
     return false;
   }
 }
@@ -1289,11 +1959,7 @@ function clearAppCoreSession(AppCore) {
       cleared = true;
     }
   } catch (error) {
-    safeWarn(
-      AppCore,
-      "AppCore.clearSession() falló.",
-      error
-    );
+    safeWarn(AppCore, "AppCore.clearSession() falló.", error);
   }
 
   try {
@@ -1335,86 +2001,43 @@ async function clearSessionEverywhere({
   Auth,
   AppCore,
 } = {}) {
-  const resolvedAuth =
-    resolveAuth(Auth, AppCore);
+  const resolvedAuth = resolveAuth(Auth, AppCore);
 
-  const authCleared =
-    await clearAuthLocal(
-      resolvedAuth,
-      AppCore
-    );
-
-  const coreCleared =
-    clearAppCoreSession(
-      AppCore
-    );
-
-  const authHeadersCleared =
-    clearAuthHeaders(
-      AppCore,
-      resolvedAuth
-    );
-
-  const storageResult =
-    clearKnownAuthStorage(
-      AppCore
-    );
-
-  const cookiesCleared =
-    clearKnownAuthCookies(
-      AppCore
-    );
+  const authCleared = await clearAuthLocal(resolvedAuth, AppCore);
+  const coreCleared = clearAppCoreSession(AppCore);
+  const authHeadersCleared = clearAuthHeaders(AppCore, resolvedAuth);
+  const storageResult = clearKnownAuthStorage(AppCore);
+  const cookiesCleared = clearKnownAuthCookies(AppCore);
 
   const result = {
     authCleared,
     coreCleared,
     authHeadersCleared,
 
-    storageRemoved:
-      storageResult.removed || 0,
-
-    appCoreStorageRemoved:
-      storageResult.appCoreRemoved || 0,
-
-    scannedStorageRemoved:
-      storageResult.scannedRemoved || 0,
+    storageRemoved: storageResult.removed || 0,
+    appCoreStorageRemoved: storageResult.appCoreRemoved || 0,
+    scannedStorageRemoved: storageResult.scannedRemoved || 0,
 
     cookiesCleared,
   };
 
-  safeEmit(
-    AppCore,
-    EVENTS.logoutLocalCleared,
-    result
-  );
+  safeEmit(AppCore, EVENTS.logoutLocalCleared, result);
 
-  safeEmit(
-    AppCore,
-    EVENTS.appSessionCleared,
-    {
-      source: "sidebar:logout",
-      local: result,
-    }
-  );
+  safeEmit(AppCore, EVENTS.appSessionCleared, {
+    source: "sidebar:logout",
+    local: result,
+  });
 
-  safeEmit(
-    AppCore,
-    EVENTS.authSessionCleared,
-    {
-      source: "sidebar:logout",
-      local: result,
-    }
-  );
+  safeEmit(AppCore, EVENTS.authSessionCleared, {
+    source: "sidebar:logout",
+    local: result,
+  });
 
-  safeEmit(
-    AppCore,
-    EVENTS.authLogoutSuccess,
-    {
-      source: "sidebar:logout",
-      localOnly: true,
-      local: result,
-    }
-  );
+  safeEmit(AppCore, EVENTS.authLogoutSuccess, {
+    source: "sidebar:logout",
+    localOnly: true,
+    local: result,
+  });
 
   return result;
 }
@@ -1485,14 +2108,10 @@ function hideGlobalLoader(AppCore, reason = "sidebar:logout") {
     } catch {}
   });
 
-  safeEmit(
-    AppCore,
-    "app:loader:hidden",
-    {
-      reason,
-      source: "sidebar.actions",
-    }
-  );
+  safeEmit(AppCore, "app:loader:hidden", {
+    reason,
+    source: "sidebar.actions",
+  });
 
   return changed;
 }
@@ -1502,7 +2121,8 @@ function syncSidebarAfterLogout({
   closeDropdown,
   renderUser,
   applyRoleVisibility,
-  closeSidebarOnMobileAfterNavigation,
+  closeSidebarOnMobileAfterNavigation: closeMobileFn,
+  syncSidebarState,
 } = {}) {
   try {
     closeDropdown?.({
@@ -1526,266 +2146,62 @@ function syncSidebarAfterLogout({
   let shouldCloseMobile = false;
 
   try {
-    shouldCloseMobile =
-      closeSidebarOnMobileAfterNavigation?.() === true;
+    shouldCloseMobile = closeMobileFn?.() === true;
   } catch {}
 
-  if (shouldCloseMobile) {
+  if (!shouldCloseMobile) {
     try {
-      if (isFunction(AppCore?.setState)) {
-        AppCore.setState({
-          sidebarOpen: false,
-          sidebarMobileOpen: false,
-        });
-      }
-    } catch {}
-
-    try {
-      if (AppCore?.state && typeof AppCore.state === "object") {
-        AppCore.state.sidebarOpen = false;
-        AppCore.state.sidebarMobileOpen = false;
-      }
-    } catch {}
-
-    safeEmit(
-      AppCore,
-      EVENTS.appSidebarChange,
-      {
-        open: false,
-        mobile: true,
-        source: "sidebar:logout",
-      }
-    );
-
-    safeEmit(
-      AppCore,
-      EVENTS.sidebarStateChange,
-      {
-        open: false,
-        mobile: true,
-        source: "sidebar:logout",
-      }
-    );
+      shouldCloseMobile = closeSidebarOnMobileAfterNavigation({
+        AppCore,
+        closeDropdown,
+        syncSidebarState,
+        reason: "logout",
+      });
+    } catch {
+      shouldCloseMobile = false;
+    }
   }
 
-  safeEmit(
-    AppCore,
-    EVENTS.userUiSync,
-    {
-      source: "sidebar:logout",
-    }
-  );
+  safeEmit(AppCore, EVENTS.userUiSync, {
+    source: "sidebar:logout",
+  });
 
-  safeEmit(
-    AppCore,
-    EVENTS.uiRepairRequest,
-    {
-      source: "sidebar:logout",
-      reason: "logout",
-      syncState: true,
-    }
-  );
+  safeEmit(AppCore, EVENTS.uiRepairRequest, {
+    source: "sidebar:logout",
+    reason: "logout",
+    syncState: true,
+  });
 
   return true;
 }
 
 /* =========================================================
-   NAVIGATION
+   LOGIN NAVIGATION
 ========================================================= */
-
-function dispatchPopStateSafe() {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  try {
-    window.dispatchEvent(
-      new PopStateEvent("popstate")
-    );
-
-    return true;
-  } catch {}
-
-  try {
-    window.dispatchEvent(
-      new Event("popstate")
-    );
-
-    return true;
-  } catch {}
-
-  return false;
-}
 
 async function navigateToLogin({
   AppCore,
   Router,
 } = {}) {
-  const resolvedRouter =
-    resolveRouter(Router, AppCore);
+  safeEmit(AppCore, EVENTS.logoutNavigateStart, {
+    target: LOGIN_ROUTE,
+  });
 
-  const target = LOGIN_ROUTE;
-
-  const options = {
-    replaceState: true,
+  const ok = await navigateToTarget({
+    AppCore,
+    Router,
+    target: LOGIN_ROUTE,
     replace: true,
     force: true,
-    forceRender: true,
     source: "sidebar:logout",
-    fromLogout: true,
-  };
+  });
 
-  safeEmit(
-    AppCore,
-    EVENTS.logoutNavigateStart,
-    {
-      target,
-      options,
-    }
-  );
+  safeEmit(AppCore, EVENTS.logoutNavigateComplete, {
+    ok,
+    target: LOGIN_ROUTE,
+  });
 
-  const candidates = [
-    {
-      name: "Router.replace",
-      fn: resolvedRouter?.replace,
-      ctx: resolvedRouter,
-      args: [target, options],
-    },
-    {
-      name: "Router.navigate",
-      fn: resolvedRouter?.navigate,
-      ctx: resolvedRouter,
-      args: [target, options],
-    },
-    {
-      name: "Router.go",
-      fn: resolvedRouter?.go,
-      ctx: resolvedRouter,
-      args: [target, options],
-    },
-    {
-      name: "AppCore.router.replace",
-      fn: AppCore?.router?.replace,
-      ctx: AppCore?.router,
-      args: [target, options],
-    },
-    {
-      name: "AppCore.router.navigate",
-      fn: AppCore?.router?.navigate,
-      ctx: AppCore?.router,
-      args: [target, options],
-    },
-    {
-      name: "AppCore.navigate",
-      fn: AppCore?.navigate,
-      ctx: AppCore,
-      args: [target, options],
-    },
-  ];
-
-  for (const candidate of candidates) {
-    if (!isFunction(candidate.fn)) {
-      continue;
-    }
-
-    try {
-      await Promise.resolve(
-        candidate.fn.apply(
-          candidate.ctx,
-          candidate.args
-        )
-      );
-
-      safeEmit(
-        AppCore,
-        EVENTS.logoutNavigateComplete,
-        {
-          ok: true,
-          method: candidate.name,
-          target,
-        }
-      );
-
-      return true;
-    } catch (error) {
-      safeWarn(
-        AppCore,
-        `${candidate.name}('/login') falló.`,
-        error
-      );
-    }
-  }
-
-  if (!isBrowser()) {
-    safeEmit(
-      AppCore,
-      EVENTS.logoutNavigateComplete,
-      {
-        ok: false,
-        method: "",
-        target,
-        reason: "not-browser",
-      }
-    );
-
-    return false;
-  }
-
-  try {
-    window.history.replaceState(
-      {
-        path: target,
-        publicPath: target,
-        canonicalPath: target,
-        source: "sidebar:logout",
-        ts: nowTs(),
-      },
-      "",
-      target
-    );
-
-    dispatchPopStateSafe();
-
-    safeEmit(
-      AppCore,
-      EVENTS.logoutNavigateComplete,
-      {
-        ok: true,
-        method: "history.replaceState",
-        target,
-      }
-    );
-
-    return true;
-  } catch {}
-
-  try {
-    window.location.replace(target);
-
-    safeEmit(
-      AppCore,
-      EVENTS.logoutNavigateComplete,
-      {
-        ok: true,
-        method: "window.location.replace",
-        target,
-      }
-    );
-
-    return true;
-  } catch {}
-
-  safeEmit(
-    AppCore,
-    EVENTS.logoutNavigateComplete,
-    {
-      ok: false,
-      method: "",
-      target,
-    }
-  );
-
-  return false;
+  return ok;
 }
 
 /* =========================================================
@@ -1824,14 +2240,8 @@ function getRemoteLogoutCandidates(Auth) {
       fn: Auth?.client?.logout,
       ctx: Auth?.client,
     },
-  ].filter((item) =>
-    isFunction(item.fn)
-  );
+  ].filter((item) => isFunction(item.fn));
 
-  /*
-    Auth.logout puede tener efectos locales/navegación en builds legacy.
-    Lo dejamos como fallback final si no hay método remoto explícito.
-  */
   const fallback = [
     {
       name: "Auth.logout",
@@ -1843,9 +2253,7 @@ function getRemoteLogoutCandidates(Auth) {
       fn: Auth?.signOut,
       ctx: Auth,
     },
-  ].filter((item) =>
-    isFunction(item.fn)
-  );
+  ].filter((item) => isFunction(item.fn));
 
   return primary.length
     ? primary
@@ -1856,11 +2264,8 @@ async function runRemoteLogout({
   Auth,
   AppCore,
 } = {}) {
-  const resolvedAuth =
-    resolveAuth(Auth, AppCore);
-
-  const candidates =
-    getRemoteLogoutCandidates(resolvedAuth);
+  const resolvedAuth = resolveAuth(Auth, AppCore);
+  const candidates = getRemoteLogoutCandidates(resolvedAuth);
 
   if (!candidates.length) {
     const result = {
@@ -1870,22 +2275,14 @@ async function runRemoteLogout({
       error: null,
     };
 
-    safeEmit(
-      AppCore,
-      EVENTS.logoutRemoteSkipped,
-      result
-    );
+    safeEmit(AppCore, EVENTS.logoutRemoteSkipped, result);
 
     return result;
   }
 
-  safeEmit(
-    AppCore,
-    EVENTS.logoutRemoteStart,
-    {
-      candidates: candidates.map((item) => item.name),
-    }
-  );
+  safeEmit(AppCore, EVENTS.logoutRemoteStart, {
+    candidates: candidates.map((item) => item.name),
+  });
 
   const options = {
     silent: true,
@@ -1907,8 +2304,7 @@ async function runRemoteLogout({
   let lastError = null;
 
   for (const candidate of candidates) {
-    const methodName =
-      candidate.name || candidate.fn?.name || "anonymous";
+    const methodName = candidate.name || candidate.fn?.name || "anonymous";
 
     try {
       await withTimeout(
@@ -1929,21 +2325,12 @@ async function runRemoteLogout({
         error: null,
       };
 
-      safeEmit(
-        AppCore,
-        EVENTS.logoutRemoteSuccess,
-        result
-      );
+      safeEmit(AppCore, EVENTS.logoutRemoteSuccess, result);
 
       return result;
     } catch (error) {
       lastError = error;
-
-      safeWarn(
-        AppCore,
-        `Logout remoto falló en ${methodName}.`,
-        error
-      );
+      safeWarn(AppCore, `Logout remoto falló en ${methodName}.`, error);
     }
   }
 
@@ -1954,17 +2341,13 @@ async function runRemoteLogout({
     error: cloneError(lastError),
   };
 
-  safeEmit(
-    AppCore,
-    EVENTS.logoutRemoteError,
-    result
-  );
+  safeEmit(AppCore, EVENTS.logoutRemoteError, result);
 
   return result;
 }
 
 /* =========================================================
-   MAIN ACTION INTERNAL
+   MAIN LOGOUT FLOW
 ========================================================= */
 
 async function runLogoutFlow({
@@ -1974,37 +2357,28 @@ async function runLogoutFlow({
   closeDropdown,
   renderUser,
   applyRoleVisibility,
-  closeSidebarOnMobileAfterNavigation,
+  closeSidebarOnMobileAfterNavigation: closeMobileFn,
+  syncSidebarState,
   getElements,
   setLogoutInFlight,
 } = {}) {
-  const generation =
-    ++logoutGeneration;
-
+  const generation = ++logoutGeneration;
   const startedAt = nowTs();
 
-  const resolvedAuth =
-    resolveAuth(Auth, AppCore);
+  const resolvedAuth = resolveAuth(Auth, AppCore);
+  const resolvedRouter = resolveRouter(Router, AppCore);
 
-  const resolvedRouter =
-    resolveRouter(Router, AppCore);
+  const elements = isFunction(getElements)
+    ? safeObject(getElements())
+    : {};
 
-  const elements =
-    isFunction(getElements)
-      ? safeObject(getElements())
-      : {};
-
-  const controlsSnapshot =
-    captureControlsState(elements);
+  const controlsSnapshot = captureControlsState(elements);
 
   try {
     setLogoutInFlight?.(true);
   } catch {}
 
-  setControlsDisabled(
-    elements,
-    true
-  );
+  setControlsDisabled(elements, true);
 
   try {
     closeDropdown?.({
@@ -2017,21 +2391,14 @@ async function runLogoutFlow({
     } catch {}
   }
 
-  safeSetLoading(
-    AppCore,
-    true
-  );
+  safeSetLoading(AppCore, true);
 
-  safeEmit(
-    AppCore,
-    EVENTS.logoutStart,
-    {
-      source: "sidebar",
-      generation,
-      timestamp: startedAt,
-      version: ACTIONS_VERSION,
-    }
-  );
+  safeEmit(AppCore, EVENTS.logoutStart, {
+    source: "sidebar",
+    generation,
+    timestamp: startedAt,
+    version: ACTIONS_VERSION,
+  });
 
   let remoteResult = {
     attempted: false,
@@ -2053,48 +2420,35 @@ async function runLogoutFlow({
   let navigationOk = false;
 
   try {
-    /*
-      Remote logout es best-effort.
-      Si falla por red/401/500/timeout, NO bloquea la limpieza local.
-    */
-    remoteResult =
-      await runRemoteLogout({
-        Auth: resolvedAuth,
-        AppCore,
-      });
+    remoteResult = await runRemoteLogout({
+      Auth: resolvedAuth,
+      AppCore,
+    });
 
-    /*
-      La limpieza local es obligatoria.
-      Esto evita avatar/dashboard/token fantasma.
-    */
-    localResult =
-      await clearSessionEverywhere({
-        Auth: resolvedAuth,
-        AppCore,
-      });
+    localResult = await clearSessionEverywhere({
+      Auth: resolvedAuth,
+      AppCore,
+    });
 
     syncSidebarAfterLogout({
       AppCore,
       closeDropdown,
       renderUser,
       applyRoleVisibility,
-      closeSidebarOnMobileAfterNavigation,
+      closeSidebarOnMobileAfterNavigation: closeMobileFn,
+      syncSidebarState,
     });
 
-    hideGlobalLoader(
-      AppCore,
-      "sidebar:logout:local-cleared"
-    );
+    hideGlobalLoader(AppCore, "sidebar:logout:local-cleared");
 
     if (LOCAL_CLEAR_SETTLE_MS >= 0) {
       await sleep(LOCAL_CLEAR_SETTLE_MS);
     }
 
-    navigationOk =
-      await navigateToLogin({
-        AppCore,
-        Router: resolvedRouter,
-      });
+    navigationOk = await navigateToLogin({
+      AppCore,
+      Router: resolvedRouter,
+    });
 
     const result = {
       ok: true,
@@ -2105,32 +2459,19 @@ async function runLogoutFlow({
       durationMs: nowTs() - startedAt,
     };
 
-    safeEmit(
-      AppCore,
-      EVENTS.logoutComplete,
-      result
-    );
+    safeEmit(AppCore, EVENTS.logoutComplete, result);
 
     return result;
   } catch (error) {
-    safeError(
-      AppCore,
-      "Logout fatal inesperado.",
-      error
-    );
+    safeError(AppCore, "Logout fatal inesperado.", error);
 
     try {
-      localResult =
-        await clearSessionEverywhere({
-          Auth: resolvedAuth,
-          AppCore,
-        });
-    } catch (clearError) {
-      safeError(
+      localResult = await clearSessionEverywhere({
+        Auth: resolvedAuth,
         AppCore,
-        "Limpieza local final también falló.",
-        clearError
-      );
+      });
+    } catch (clearError) {
+      safeError(AppCore, "Limpieza local final también falló.", clearError);
     }
 
     try {
@@ -2139,45 +2480,37 @@ async function runLogoutFlow({
         closeDropdown,
         renderUser,
         applyRoleVisibility,
-        closeSidebarOnMobileAfterNavigation,
+        closeSidebarOnMobileAfterNavigation: closeMobileFn,
+        syncSidebarState,
       });
     } catch {}
 
     try {
-      hideGlobalLoader(
-        AppCore,
-        "sidebar:logout:error"
-      );
+      hideGlobalLoader(AppCore, "sidebar:logout:error");
     } catch {}
 
     try {
-      navigationOk =
-        await navigateToLogin({
-          AppCore,
-          Router: resolvedRouter,
-        });
+      navigationOk = await navigateToLogin({
+        AppCore,
+        Router: resolvedRouter,
+      });
     } catch {}
 
     const result = {
       ok: false,
       generation,
       error: cloneError(error),
-      message:
-        safeText(
-          error?.message,
-          "No se pudo cerrar sesión correctamente."
-        ),
+      message: safeText(
+        error?.message,
+        "No se pudo cerrar sesión correctamente."
+      ),
       remote: remoteResult,
       local: localResult,
       navigationOk,
       durationMs: nowTs() - startedAt,
     };
 
-    safeEmit(
-      AppCore,
-      EVENTS.logoutError,
-      result
-    );
+    safeEmit(AppCore, EVENTS.logoutError, result);
 
     return result;
   } finally {
@@ -2185,28 +2518,19 @@ async function runLogoutFlow({
       setLogoutInFlight?.(false);
     } catch {}
 
-    restoreControlsState(
-      controlsSnapshot
-    );
+    restoreControlsState(controlsSnapshot);
 
-    hideGlobalLoader(
-      AppCore,
-      "sidebar:logout:finally"
-    );
+    hideGlobalLoader(AppCore, "sidebar:logout:finally");
 
-    safeEmit(
-      AppCore,
-      EVENTS.logoutFinally,
-      {
-        generation,
-        durationMs: nowTs() - startedAt,
-      }
-    );
+    safeEmit(AppCore, EVENTS.logoutFinally, {
+      generation,
+      durationMs: nowTs() - startedAt,
+    });
   }
 }
 
 /* =========================================================
-   MAIN ACTION
+   MAIN LOGOUT ACTION
 ========================================================= */
 
 export async function handleLogout({
@@ -2217,6 +2541,7 @@ export async function handleLogout({
   renderUser,
   applyRoleVisibility,
   closeSidebarOnMobileAfterNavigation,
+  syncSidebarState,
   getElements,
   setLogoutInFlight,
   isLogoutInFlight,
@@ -2225,10 +2550,7 @@ export async function handleLogout({
     return logoutPromise;
   }
 
-  if (
-    isFunction(isLogoutInFlight) &&
-    isLogoutInFlight()
-  ) {
+  if (isFunction(isLogoutInFlight) && isLogoutInFlight()) {
     return {
       ok: false,
       skipped: true,
@@ -2236,18 +2558,18 @@ export async function handleLogout({
     };
   }
 
-  logoutPromise =
-    runLogoutFlow({
-      AppCore,
-      Auth,
-      Router,
-      closeDropdown,
-      renderUser,
-      applyRoleVisibility,
-      closeSidebarOnMobileAfterNavigation,
-      getElements,
-      setLogoutInFlight,
-    });
+  logoutPromise = runLogoutFlow({
+    AppCore,
+    Auth,
+    Router,
+    closeDropdown,
+    renderUser,
+    applyRoleVisibility,
+    closeSidebarOnMobileAfterNavigation,
+    syncSidebarState,
+    getElements,
+    setLogoutInFlight,
+  });
 
   try {
     return await logoutPromise;
@@ -2262,22 +2584,37 @@ export async function handleLogout({
 
 export function getSidebarActionsSnapshot() {
   return {
-    version:
-      ACTIONS_VERSION,
+    version: ACTIONS_VERSION,
 
-    logoutInFlight:
-      Boolean(logoutPromise),
-
+    logoutInFlight: Boolean(logoutPromise),
     logoutGeneration,
 
-    remoteTimeoutMs:
-      REMOTE_LOGOUT_TIMEOUT_MS,
+    remoteTimeoutMs: REMOTE_LOGOUT_TIMEOUT_MS,
+    loginRoute: LOGIN_ROUTE,
 
-    loginRoute:
-      LOGIN_ROUTE,
+    mobile: (() => {
+      try {
+        return isMobileViewport();
+      } catch {
+        return false;
+      }
+    })(),
 
-    events:
-      EVENTS,
+    events: EVENTS,
+
+    exports: [
+      "setSidebarOpen",
+      "openSidebar",
+      "closeSidebar",
+      "toggleSidebar",
+      "collapseSidebar",
+      "expandSidebar",
+      "ensureSidebarOpenForUserMenu",
+      "closeSidebarOnMobileAfterNavigation",
+      "navigateFromSidebar",
+      "handleLogout",
+      "getSidebarActionsSnapshot",
+    ],
   };
 }
 
@@ -2286,6 +2623,18 @@ export function getSidebarActionsSnapshot() {
 ========================================================= */
 
 export default {
+  setSidebarOpen,
+  openSidebar,
+  closeSidebar,
+  toggleSidebar,
+  collapseSidebar,
+  expandSidebar,
+
+  ensureSidebarOpenForUserMenu,
+  closeSidebarOnMobileAfterNavigation,
+
+  navigateFromSidebar,
+
   handleLogout,
   getSidebarActionsSnapshot,
 };

@@ -6,29 +6,20 @@
    FINAL PRO SYSTEM · CSP CLEAN · CASCADE LAYERS · 10/10
 
    RESPONSABILIDADES:
-   - Punto único de entrada CSS de la SPA privada
+   - Punto único de entrada CSS de Onion Support
    - Orden de cascada controlado por @layer
-   - Cargar tokens antes que cualquier componente/vista
-   - Cargar reset/core/layout antes de componentes
-   - Cargar componentes globales antes de vistas
-   - Cargar vistas privadas mediante entrypoints propios
+   - Cargar tokens antes que reset/core/layout/componentes/vistas
    - Mantener CSP limpio:
      · sin CSS inline
      · sin estilos inyectados por JS
      · sin Google Fonts
-   - Mantener Facturas partido en:
-     · /views/facturas/index.css
-     · /views/facturas/create.css
-     · /views/facturas/detail.css
+   - Mantener Facturas partido en tres archivos:
+     · /src/css/views/facturas/index.css   → vista principal
+     · /src/css/views/facturas/create.css  → modal crear factura
+     · /src/css/views/facturas/detail.css  → modal detalle factura
 
    ORDEN DE CASCADA:
    tokens < reset < core < layout < components < views < auth
-
-   NOTA FACTURAS:
-   app.css solo importa /views/facturas/index.css.
-   El archivo /views/facturas/index.css es el entrypoint interno
-   de la vista Facturas y debe importar create.css/detail.css si
-   esos parciales no se cargan desde otro sitio.
 ========================================================= */
 
 
@@ -52,7 +43,7 @@
 
 /* =========================================================
    CORE
-   Reset, estructura base, shell, loader y reglas base.
+   Reset, estructura base, shell, loader y reglas globales.
 ========================================================= */
 
 @import url("./core/reset.css") layer(reset);
@@ -79,11 +70,20 @@
 
 
 /* =========================================================
-   VIEWS
-   Vistas privadas de la SPA.
+   VIEWS · FACTURAS
+   Orden interno:
+   1. index.css  → vista principal: hero, stats, filtros, tabla
+   2. create.css → modal creación de factura
+   3. detail.css → modal detalle de factura
+
+   Los modales van después de la vista porque comparten tokens,
+   botones y patrones visuales, pero necesitan poder especializar
+   overlay, panel, body lock y estados propios.
 ========================================================= */
 
 @import url("./views/facturas/index.css") layer(views);
+@import url("./views/facturas/create.css") layer(views);
+@import url("./views/facturas/detail.css") layer(views);
 
 
 /* =========================================================

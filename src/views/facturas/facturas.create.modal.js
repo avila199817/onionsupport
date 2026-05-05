@@ -2,40 +2,23 @@
    Onion SPA - Facturas Create Modal
    Archivo: src/views/facturas/facturas.create.modal.js
 
-   FACTURAS EXPERIENCE PRO · CREATE MODAL · COSMOS/BLOB ALIGNED · GOD MODE
-   PATCH FINAL · NO CSS IN JS · CSP CLEAN · TOKEN SYSTEM READY
-   PATCH FINAL · CLIENT + INCIDENCIA CARDS REDESIGN EXTREME
-   PATCH FINAL · MULTI CLIENTE + MULTI INCIDENCIA READY
-   PATCH FINAL · TARGET BLOCK ABOVE SEND EMAIL CHECK
-   PATCH FINAL · JSON v3/v2 COMPATIBLE PAYLOAD
-   PATCH FINAL · REAL AVATAR + FALLBACK INITIALS
-   PATCH FINAL · ONLY TOTAL CARD / NO TOTAL INPUT FIELD
-   PATCH FINAL · BACKEND SAFE PRIMARY CLIENT/TICKET + ARRAYS
+   FACTURAS EXPERIENCE PRO · CREATE MODAL · CSS ALIGNED · 10/10
+   CSP CLEAN · NO CSS IN JS · NO INLINE EVENTS · TOKEN SYSTEM READY
 
    RESPONSABILIDADES:
    - abrir/cerrar modal premium de creación de factura
    - buscar cliente/usuario objetivo
-   - permitir seleccionar uno o varios clientes destino
-   - pintar avatar real si backend lo entrega
-   - fallback de avatar con iniciales sin inline handlers
-   - cargar incidencias vinculadas a cliente/usuario
-   - seleccionar automáticamente la incidencia más reciente
-   - permitir seleccionar una o varias incidencias
-   - mantener cliente/ticket primario para compat backend
-   - enviar arrays clienteIds/userIds/clientes/ticketIds/incidenciaIds/incidencias
-   - crear factura desde panel admin alineada con backend v3
-   - enviar payload compatible con /router/facturas/factura_create_admin.js
-   - NO pedir fecha factura: backend usa fecha real de creación
-   - NO pedir moneda: EUR fija
-   - NO pedir cuenta bancaria
-   - total estimado calculado en tiempo real con IVA/IRPF
-   - forma de pago mediante select
-   - emitir facturas:create:success para refrescar la vista
-   - evitar doble submit y doble binding
-   - exponer bridge global para abrir desde cualquier vista
+   - permitir selección multi-cliente
+   - cargar y seleccionar incidencias/tickets vinculados
+   - permitir selección multi-incidencia
+   - mantener cliente/ticket primario para compatibilidad backend
+   - crear payload v3/v2 compatible para Cosmos/backend
+   - calcular total en tiempo real con IVA/IRPF
+   - emitir eventos de éxito/error para refrescar la vista
+   - exponer bridge global OnionFacturasCreateModal
 
    CSS:
-   - Todo el estilo debe vivir en /src/css/views/facturas.css
+   - Todo el estilo vive en /src/css/views/facturas.css
    - Este módulo solo emite clases y atributos de estado
 ========================================================= */
 
@@ -79,17 +62,20 @@ const DEFAULT_IVA_RATE = 21;
 const DEFAULT_IRPF_RATE = 7;
 
 const PAYMENT_OPTIONS = Object.freeze([
-  {
-    value: "transferencia bancaria",
-    label: "Transferencia bancaria",
-  },
-  {
-    value: "efectivo",
-    label: "Efectivo",
-  },
+  { value: "transferencia bancaria", label: "Transferencia bancaria" },
+  { value: "efectivo", label: "Efectivo" },
 ]);
 
 const DEFAULT_FORM = Object.freeze({
+  concepto: "Servicios de soporte y asistencia técnica informática",
+  descripcion: "",
+  cantidad: 1,
+  precioUnitario: 20,
+  fechaServicio: "",
+  formaPago: "transferencia bancaria",
+  estadoPago: "pendiente",
+  sendEmail: true,
+
   clienteId: "",
   clienteUserId: "",
   clienteNombre: "",
@@ -99,22 +85,10 @@ const DEFAULT_FORM = Object.freeze({
   ticketId: "",
   incidenciaId: "",
   incidenciaSubject: "",
-
-  concepto: "Servicios de soporte y asistencia técnica informática",
-  descripcion: "",
-
-  cantidad: 1,
-  precioUnitario: 20,
-
-  fechaServicio: "",
-  formaPago: "transferencia bancaria",
-  estadoPago: "pendiente",
-
-  sendEmail: true,
 });
 
 /* =========================================================
-   LOCAL STATE
+   STATE
 ========================================================= */
 
 const modalState = {
@@ -142,7 +116,6 @@ const modalState = {
   ticketSearchError: "",
   ticketSearchDebounce: null,
   ticketSearchSeq: 0,
-  ticketAutoSelected: false,
 
   errors: {},
   serverError: "",
@@ -168,7 +141,6 @@ function getGlobal() {
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
-
   const text = String(value).trim();
   return text || fallback;
 }
@@ -200,22 +172,21 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function safeObject(value, fallback = {}) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : fallback;
 }
 
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
 function first(...values) {
   for (const value of values) {
-    if (value === undefined || value === null) continue;
-    if (typeof value === "string" && value.trim() === "") continue;
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && !value.trim()) continue;
     if (Array.isArray(value) && value.length === 0) continue;
-
     return value;
   }
 
@@ -244,12 +215,30 @@ function normalizeText(value = "") {
     .trim();
 }
 
+function compactUnique(values = []) {
+  return Array.from(
+    new Set(
+      safeArray(values)
+        .map((value) => safeText(value, ""))
+        .filter(Boolean)
+    )
+  );
+}
+
 function isAbsoluteUrl(value = "") {
   return /^https?:\/\//i.test(safeText(value, ""));
 }
 
 function round2(value) {
   return Math.round((safeNumber(value, 0) + Number.EPSILON) * 100) / 100;
+}
+
+function todayInputValue() {
+  try {
+    return new Date().toISOString().slice(0, 10);
+  } catch {
+    return "";
+  }
 }
 
 function parseBoolean(value, fallback = false) {
@@ -263,24 +252,11 @@ function parseBoolean(value, fallback = false) {
   if (typeof value === "string") {
     const normalized = normalizeText(value);
 
-    if (["true", "1", "yes", "si", "sí", "on"].includes(normalized)) {
-      return true;
-    }
-
-    if (["false", "0", "no", "off"].includes(normalized)) {
-      return false;
-    }
+    if (["true", "1", "yes", "si", "sí", "on"].includes(normalized)) return true;
+    if (["false", "0", "no", "off"].includes(normalized)) return false;
   }
 
   return fallback;
-}
-
-function todayInputValue() {
-  try {
-    return new Date().toISOString().slice(0, 10);
-  } catch {
-    return "";
-  }
 }
 
 function formatMoney(value = 0) {
@@ -298,14 +274,6 @@ function formatMoney(value = 0) {
   }
 }
 
-function getSortableDate(value = "") {
-  const raw = safeText(value, "");
-  if (!raw) return 0;
-
-  const time = Date.parse(raw);
-  return Number.isFinite(time) ? time : 0;
-}
-
 function getInitials(value = "", fallback = "CL") {
   const text = normalizeWhitespace(value);
 
@@ -320,14 +288,12 @@ function getInitials(value = "", fallback = "CL") {
   return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || fallback;
 }
 
-function compactUnique(values = []) {
-  return Array.from(
-    new Set(
-      safeArray(values)
-        .map((value) => safeText(value, ""))
-        .filter(Boolean)
-    )
-  );
+function getSortableDate(value = "") {
+  const raw = safeText(value, "");
+  if (!raw) return 0;
+
+  const time = Date.parse(raw);
+  return Number.isFinite(time) ? time : 0;
 }
 
 function safeEmit(event = "", payload = {}) {
@@ -349,7 +315,6 @@ function safeEmit(event = "", payload = {}) {
         detail: payload,
       })
     );
-
     emitted = true;
   } catch {}
 
@@ -362,19 +327,15 @@ function safeOn(event = "", handler = null) {
 
   if (!eventName || typeof handler !== "function") return false;
 
-  let attached = false;
-
   try {
     AppCore?.events?.on?.(eventName, handler);
-    attached = true;
   } catch {}
 
   try {
     win?.addEventListener?.(eventName, handler);
-    attached = true;
   } catch {}
 
-  return attached;
+  return true;
 }
 
 function safeOff(event = "", handler = null) {
@@ -446,9 +407,8 @@ function getHttpStatus(error = null) {
   );
 }
 
-function shouldTryNext(error = null) {
+function shouldTryNextEndpoint(error = null) {
   const status = getHttpStatus(error);
-
   if (!status) return true;
 
   return [404, 405, 409, 415, 422, 500, 502, 503, 504].includes(status);
@@ -521,7 +481,6 @@ function getAuthToken() {
       AppCore?.auth?.getToken?.(),
       AppCore?.Auth?.getToken?.(),
       win?.Auth?.getToken?.(),
-
       getStorageValue("token"),
       getStorageValue("accessToken"),
       getStorageValue("authToken"),
@@ -732,7 +691,7 @@ function extractItems(payload = null) {
 }
 
 /* =========================================================
-   AVATAR HELPERS
+   NORMALIZATION
 ========================================================= */
 
 function getAvatarUrlFromObject(raw = null) {
@@ -839,51 +798,6 @@ function getAvatarUrlFromObject(raw = null) {
     ""
   );
 }
-
-function renderAvatar({
-  name = "",
-  email = "",
-  avatarUrl = "",
-  fallback = "CL",
-  className = "fac-create-avatar",
-} = {}) {
-  const displayName = safeText(first(name, email, "Cliente"), "Cliente");
-  const initials = getInitials(displayName, fallback);
-  const url = safeText(avatarUrl, "");
-
-  return `
-    <span
-      class="${escapeHtml(className)}${url ? " has-image" : ""}"
-      title="${escapeHtml(displayName)}"
-      aria-label="${escapeHtml(displayName)}"
-      data-tooltip="${escapeHtml(displayName)}"
-      ${url ? 'data-has-avatar="true"' : 'data-fallback="true"'}
-    >
-      ${
-        url
-          ? `
-            <img
-              class="fac-create-avatar-img"
-              src="${escapeHtml(url)}"
-              alt="${escapeHtml(displayName)}"
-              loading="lazy"
-              referrerpolicy="no-referrer"
-              data-avatar-img="true"
-            />
-          `
-          : ""
-      }
-
-      <span class="fac-create-avatar-fallback">
-        ${escapeHtml(initials)}
-      </span>
-    </span>
-  `;
-}
-
-/* =========================================================
-   CLIENT NORMALIZATION / SELECTION
-========================================================= */
 
 function normalizeClientCandidate(raw = null) {
   const obj = safeObject(raw);
@@ -1055,7 +969,6 @@ function normalizeClientCandidate(raw = null) {
       obj.cif,
       obj.taxId,
       obj.vatId,
-
       cliente.nif,
       cliente.cif,
       cliente.taxId,
@@ -1069,16 +982,12 @@ function normalizeClientCandidate(raw = null) {
       obj.username,
       obj.slug,
       obj.handle,
-
       cliente.username,
       cliente.slug,
-
       user.username,
       user.slug,
-
       usuario.username,
       usuario.slug,
-
       email ? email.split("@")[0] : ""
     ),
     ""
@@ -1112,7 +1021,7 @@ function normalizeClientCandidate(raw = null) {
   return {
     id,
     clienteId: clienteId || id,
-    userId: userId || "",
+    userId,
     name: displayName,
     nombre: displayName,
     nombreContacto: displayName,
@@ -1132,12 +1041,173 @@ function normalizeClientCandidate(raw = null) {
   };
 }
 
+function normalizeTicketCandidate(raw = null) {
+  const obj = safeObject(raw);
+  const ticket = safeObject(obj.ticket);
+  const incidencia = safeObject(obj.incidencia);
+  const cliente = safeObject(obj.cliente);
+  const receptor = safeObject(obj.receptor);
+  const requesterSnapshot = safeObject(obj.requesterSnapshot);
+
+  const id = safeText(
+    first(
+      obj.ticketId,
+      obj.incidenciaId,
+      obj.id,
+      obj.caseId,
+      obj.supportTicketId,
+
+      ticket.ticketId,
+      ticket.incidenciaId,
+      ticket.id,
+
+      incidencia.ticketId,
+      incidencia.incidenciaId,
+      incidencia.id
+    ),
+    ""
+  );
+
+  if (!id) return null;
+
+  const subject = safeText(
+    first(
+      obj.subject,
+      obj.asunto,
+      obj.title,
+      obj.preview,
+      obj.description,
+      obj.descripcion,
+      obj.message,
+
+      ticket.subject,
+      ticket.asunto,
+      ticket.title,
+
+      incidencia.subject,
+      incidencia.asunto,
+      incidencia.title
+    ),
+    id
+  );
+
+  const clienteId = safeText(
+    first(
+      obj.clienteId,
+      ticket.clienteId,
+      incidencia.clienteId,
+      cliente.id,
+      cliente.clienteId,
+      receptor.clienteId,
+      requesterSnapshot.clienteId
+    ),
+    ""
+  );
+
+  const userId = safeText(
+    first(
+      obj.userId,
+      ticket.userId,
+      incidencia.userId,
+      receptor.userId,
+      receptor.id,
+      requesterSnapshot.userId,
+      cliente.userId
+    ),
+    ""
+  );
+
+  const status = safeText(
+    first(
+      obj.status,
+      obj.estado,
+      ticket.status,
+      ticket.estado,
+      incidencia.status,
+      incidencia.estado
+    ),
+    ""
+  );
+
+  const category = safeText(
+    first(
+      obj.category,
+      obj.categoria,
+      obj.tipoLabel,
+      obj.tipo,
+      ticket.category,
+      ticket.categoria,
+      incidencia.category,
+      incidencia.categoria
+    ),
+    ""
+  );
+
+  const createdAt = safeText(first(obj.createdAt, ticket.createdAt, incidencia.createdAt), "");
+  const createdAtES = safeText(first(obj.createdAtES, ticket.createdAtES, incidencia.createdAtES), "");
+  const updatedAt = safeText(first(obj.lastActivityAt, obj.updatedAt, ticket.updatedAt, incidencia.updatedAt), "");
+  const updatedAtES = safeText(first(obj.lastActivityAtES, obj.updatedAtES, ticket.updatedAtES, incidencia.updatedAtES), "");
+
+  const sortDate = Math.max(getSortableDate(updatedAt), getSortableDate(createdAt));
+  const dateLabel = safeText(first(updatedAtES, createdAtES, updatedAt, createdAt), "");
+
+  const facturaLinked = Boolean(
+    obj.facturaLinked ||
+      obj.meta?.facturaLinked ||
+      obj.meta?.hasFactura ||
+      obj.facturaId ||
+      obj.invoiceId ||
+      obj.numeroFacturaLegal
+  );
+
+  const subtitle = [
+    status ? `Estado: ${status}` : "",
+    category ? `Tipo: ${category}` : "",
+    facturaLinked ? "Ya facturada" : "",
+    dateLabel,
+  ]
+    .filter(Boolean)
+    .join(" · ") || id;
+
+  return {
+    id,
+    ticketId: id,
+    incidenciaId: id,
+    subject,
+    asunto: subject,
+    clienteId,
+    userId,
+    status,
+    category,
+    createdAt,
+    createdAtES,
+    updatedAt,
+    updatedAtES,
+    sortDate,
+    facturaLinked,
+    subtitle,
+    raw: obj,
+  };
+}
+
+/* =========================================================
+   SELECTORS / STATE GETTERS
+========================================================= */
+
 function getSelectedClientes() {
   return safeArray(modalState.selectedClientes);
 }
 
+function getSelectedTickets() {
+  return safeArray(modalState.selectedTickets);
+}
+
 function getPrimaryCliente() {
   return getSelectedClientes()[0] || null;
+}
+
+function getPrimaryTicket() {
+  return getSelectedTickets()[0] || null;
 }
 
 function getSelectedClienteIds() {
@@ -1146,6 +1216,10 @@ function getSelectedClienteIds() {
 
 function getSelectedUserIds() {
   return compactUnique(getSelectedClientes().map((item) => item.userId));
+}
+
+function getSelectedTicketIds() {
+  return compactUnique(getSelectedTickets().map((item) => item.ticketId || item.id));
 }
 
 function hasSelectedCliente(cliente = {}) {
@@ -1157,6 +1231,20 @@ function hasSelectedCliente(cliente = {}) {
     (clienteId && (selected.clienteId === clienteId || selected.id === clienteId)) ||
     (userId && selected.userId === userId)
   ));
+}
+
+function hasSelectedTicket(ticket = {}) {
+  const item = normalizeTicketCandidate(ticket) || safeObject(ticket);
+  const id = safeText(first(item.id, item.ticketId, item.incidenciaId), "");
+
+  return Boolean(
+    id &&
+      getSelectedTickets().some((selected) => (
+        selected.id === id ||
+        selected.ticketId === id ||
+        selected.incidenciaId === id
+      ))
+  );
 }
 
 function syncPrimaryClientToForm() {
@@ -1185,19 +1273,31 @@ function syncPrimaryClientToForm() {
   return primary;
 }
 
-/* =========================================================
-   CLIENT SEARCH
-========================================================= */
+function syncPrimaryTicketToForm() {
+  const primary = getPrimaryTicket();
 
-function buildClientSearchUrls(query = "") {
-  const params = new URLSearchParams();
+  if (!primary) {
+    setFormPatch({
+      ticketId: "",
+      incidenciaId: "",
+      incidenciaSubject: "",
+    });
 
-  params.set("q", safeText(query, ""));
-  params.set("search", safeText(query, ""));
-  params.set("limit", String(SEARCH_LIMIT));
+    return null;
+  }
 
-  return CLIENT_SEARCH_ENDPOINTS.map((endpoint) => `${endpoint}?${params.toString()}`);
+  setFormPatch({
+    ticketId: primary.ticketId || primary.id,
+    incidenciaId: primary.incidenciaId || primary.id,
+    incidenciaSubject: primary.subject || primary.asunto || primary.id,
+  });
+
+  return primary;
 }
+
+/* =========================================================
+   SEARCH
+========================================================= */
 
 function dedupeClients(items = []) {
   const map = new Map();
@@ -1216,9 +1316,98 @@ function dedupeClients(items = []) {
   return Array.from(map.values()).slice(0, SEARCH_LIMIT);
 }
 
+function ticketBelongsToSelectedClients(ticket = {}) {
+  const selectedClientes = getSelectedClientes();
+
+  if (!selectedClientes.length) return true;
+
+  const ticketClienteId = safeText(ticket?.clienteId, "");
+  const ticketUserId = safeText(ticket?.userId, "");
+
+  if (!ticketClienteId && !ticketUserId) return true;
+
+  return selectedClientes.some((client) => {
+    const clienteId = safeText(first(client.clienteId, client.id), "");
+    const userId = safeText(client.userId, "");
+
+    return (
+      (clienteId && ticketClienteId === clienteId) ||
+      (userId && ticketUserId === userId)
+    );
+  });
+}
+
+function dedupeTickets(items = []) {
+  const map = new Map();
+
+  safeArray(items).forEach((item) => {
+    const normalized = normalizeTicketCandidate(item);
+    if (!normalized?.id) return;
+    if (!ticketBelongsToSelectedClients(normalized)) return;
+
+    if (!map.has(normalized.id)) {
+      map.set(normalized.id, normalized);
+    }
+  });
+
+  return Array.from(map.values())
+    .sort((a, b) => {
+      const dateA = safeNumber(a?.sortDate, 0);
+      const dateB = safeNumber(b?.sortDate, 0);
+
+      if (dateA !== dateB) return dateB - dateA;
+
+      return safeText(b?.id, "").localeCompare(safeText(a?.id, ""));
+    })
+    .slice(0, TICKET_LIMIT);
+}
+
+function buildClientSearchUrls(query = "") {
+  const params = new URLSearchParams();
+
+  params.set("q", safeText(query, ""));
+  params.set("search", safeText(query, ""));
+  params.set("limit", String(SEARCH_LIMIT));
+
+  return CLIENT_SEARCH_ENDPOINTS.map((endpoint) => `${endpoint}?${params.toString()}`);
+}
+
+function buildTicketSearchUrls(query = "", cliente = null) {
+  const q = normalizeWhitespace(query);
+  const selected = safeObject(cliente || getPrimaryCliente());
+
+  const clienteId = safeText(first(selected.clienteId, selected.id), "");
+  const userId = safeText(selected.userId, "");
+
+  return TICKET_SEARCH_ENDPOINTS.map((endpoint) => {
+    const params = new URLSearchParams();
+
+    if (q) {
+      params.set("q", q);
+      params.set("search", q);
+    }
+
+    params.set("limit", String(TICKET_LIMIT));
+
+    if (clienteId) params.set("clienteId", clienteId);
+    if (userId) params.set("userId", userId);
+
+    const allClienteIds = getSelectedClienteIds();
+    const allUserIds = getSelectedUserIds();
+
+    if (allClienteIds.length) params.set("clienteIds", allClienteIds.join(","));
+    if (allUserIds.length) params.set("userIds", allUserIds.join(","));
+
+    params.set("includeClosed", "true");
+    params.set("includeAll", "true");
+    params.set("onlyMine", "false");
+
+    return `${endpoint}${endpoint.includes("?") ? "&" : "?"}${params.toString()}`;
+  });
+}
+
 async function searchClientesRequest(query = "") {
   const urls = buildClientSearchUrls(query);
-
   let lastError = null;
 
   for (const url of urls) {
@@ -1230,13 +1419,45 @@ async function searchClientesRequest(query = "") {
     } catch (error) {
       lastError = error;
 
-      if (!shouldTryNext(error)) {
+      if (!shouldTryNextEndpoint(error)) {
         throw error;
       }
     }
   }
 
   if (lastError) throw lastError;
+
+  return [];
+}
+
+async function searchTicketsRequest(query = "") {
+  const selectedClientes = getSelectedClientes();
+  const searchTargets = selectedClientes.length ? selectedClientes : [null];
+
+  let lastError = null;
+  let collected = [];
+
+  for (const cliente of searchTargets) {
+    const urls = buildTicketSearchUrls(query, cliente);
+
+    for (const url of urls) {
+      try {
+        const response = await apiGet(url);
+        collected = collected.concat(extractItems(response));
+      } catch (error) {
+        lastError = error;
+
+        if (!shouldTryNextEndpoint(error)) {
+          throw error;
+        }
+      }
+    }
+  }
+
+  const normalized = dedupeTickets(collected);
+
+  if (normalized.length) return normalized;
+  if (lastError && !collected.length) throw lastError;
 
   return [];
 }
@@ -1249,6 +1470,16 @@ function clearClientSearchTimer() {
   } catch {}
 
   modalState.clienteSearchDebounce = null;
+}
+
+function clearTicketSearchTimer() {
+  if (!modalState.ticketSearchDebounce) return;
+
+  try {
+    clearTimeout(modalState.ticketSearchDebounce);
+  } catch {}
+
+  modalState.ticketSearchDebounce = null;
 }
 
 async function performClientSearch(query = "") {
@@ -1314,441 +1545,6 @@ function scheduleClientSearch(query = "") {
   }, SEARCH_DEBOUNCE);
 }
 
-/* =========================================================
-   TICKET NORMALIZATION / SELECTION
-========================================================= */
-
-function normalizeTicketCandidate(raw = null) {
-  const obj = safeObject(raw);
-  const ticket = safeObject(obj.ticket);
-  const incidencia = safeObject(obj.incidencia);
-  const cliente = safeObject(obj.cliente);
-  const receptor = safeObject(obj.receptor);
-  const requesterSnapshot = safeObject(obj.requesterSnapshot);
-
-  const id = safeText(
-    first(
-      obj.ticketId,
-      obj.incidenciaId,
-      obj.id,
-      obj.caseId,
-      obj.supportTicketId,
-
-      ticket.ticketId,
-      ticket.incidenciaId,
-      ticket.id,
-
-      incidencia.ticketId,
-      incidencia.incidenciaId,
-      incidencia.id
-    ),
-    ""
-  );
-
-  if (!id) return null;
-
-  const subject = safeText(
-    first(
-      obj.subject,
-      obj.asunto,
-      obj.title,
-      obj.preview,
-      obj.description,
-      obj.descripcion,
-      obj.message,
-
-      ticket.subject,
-      ticket.asunto,
-      ticket.title,
-
-      incidencia.subject,
-      incidencia.asunto,
-      incidencia.title
-    ),
-    id
-  );
-
-  const clienteId = safeText(
-    first(
-      obj.clienteId,
-      ticket.clienteId,
-      incidencia.clienteId,
-
-      cliente.id,
-      cliente.clienteId,
-
-      receptor.clienteId,
-      requesterSnapshot.clienteId
-    ),
-    ""
-  );
-
-  const userId = safeText(
-    first(
-      obj.userId,
-      ticket.userId,
-      incidencia.userId,
-
-      receptor.userId,
-      receptor.id,
-
-      requesterSnapshot.userId,
-
-      cliente.userId
-    ),
-    ""
-  );
-
-  const status = safeText(
-    first(
-      obj.status,
-      obj.estado,
-      ticket.status,
-      ticket.estado,
-      incidencia.status,
-      incidencia.estado
-    ),
-    ""
-  );
-
-  const category = safeText(
-    first(
-      obj.category,
-      obj.categoria,
-      obj.tipoLabel,
-      obj.tipo,
-      ticket.category,
-      ticket.categoria,
-      incidencia.category,
-      incidencia.categoria
-    ),
-    ""
-  );
-
-  const createdAt = safeText(
-    first(
-      obj.createdAt,
-      ticket.createdAt,
-      incidencia.createdAt
-    ),
-    ""
-  );
-
-  const createdAtES = safeText(
-    first(
-      obj.createdAtES,
-      ticket.createdAtES,
-      incidencia.createdAtES
-    ),
-    ""
-  );
-
-  const updatedAt = safeText(
-    first(
-      obj.lastActivityAt,
-      obj.updatedAt,
-      ticket.updatedAt,
-      incidencia.updatedAt
-    ),
-    ""
-  );
-
-  const updatedAtES = safeText(
-    first(
-      obj.lastActivityAtES,
-      obj.updatedAtES,
-      ticket.updatedAtES,
-      incidencia.updatedAtES
-    ),
-    ""
-  );
-
-  const sortDate = Math.max(
-    getSortableDate(updatedAt),
-    getSortableDate(createdAt)
-  );
-
-  const dateLabel = safeText(
-    first(updatedAtES, createdAtES, updatedAt, createdAt),
-    ""
-  );
-
-  const facturaLinked = Boolean(
-    obj.facturaLinked ||
-      obj.meta?.facturaLinked ||
-      obj.meta?.hasFactura ||
-      obj.facturaId ||
-      obj.invoiceId ||
-      obj.numeroFacturaLegal
-  );
-
-  const subtitle = [
-    status ? `Estado: ${status}` : "",
-    category ? `Tipo: ${category}` : "",
-    facturaLinked ? "Ya facturada" : "",
-    dateLabel,
-  ]
-    .filter(Boolean)
-    .join(" · ") || id;
-
-  return {
-    id,
-    ticketId: id,
-    incidenciaId: id,
-    subject,
-    asunto: subject,
-    clienteId,
-    userId,
-    status,
-    category,
-    createdAt,
-    createdAtES,
-    updatedAt,
-    updatedAtES,
-    sortDate,
-    facturaLinked,
-    subtitle,
-    raw: obj,
-  };
-}
-
-function getSelectedTickets() {
-  return safeArray(modalState.selectedTickets);
-}
-
-function getPrimaryTicket() {
-  return getSelectedTickets()[0] || null;
-}
-
-function getSelectedTicketIds() {
-  return compactUnique(getSelectedTickets().map((item) => item.ticketId || item.id));
-}
-
-function hasSelectedTicket(ticket = {}) {
-  const item = normalizeTicketCandidate(ticket) || safeObject(ticket);
-  const id = safeText(first(item.id, item.ticketId, item.incidenciaId), "");
-
-  return Boolean(
-    id &&
-      getSelectedTickets().some((selected) => (
-        selected.id === id ||
-        selected.ticketId === id ||
-        selected.incidenciaId === id
-      ))
-  );
-}
-
-function syncPrimaryTicketToForm() {
-  const primary = getPrimaryTicket();
-
-  if (!primary) {
-    setFormPatch({
-      ticketId: "",
-      incidenciaId: "",
-      incidenciaSubject: "",
-    });
-
-    return null;
-  }
-
-  setFormPatch({
-    ticketId: primary.ticketId || primary.id,
-    incidenciaId: primary.incidenciaId || primary.id,
-    incidenciaSubject: primary.subject || primary.asunto || primary.id,
-  });
-
-  return primary;
-}
-
-/* =========================================================
-   TICKET SEARCH
-========================================================= */
-
-function buildTicketSearchUrlsForClient(query = "", cliente = null) {
-  const q = normalizeWhitespace(query);
-  const selected = safeObject(cliente || getPrimaryCliente());
-
-  const clienteId = safeText(first(selected.clienteId, selected.id), "");
-  const userId = safeText(selected.userId, "");
-
-  return TICKET_SEARCH_ENDPOINTS.map((endpoint) => {
-    const params = new URLSearchParams();
-
-    if (q) {
-      params.set("q", q);
-      params.set("search", q);
-    }
-
-    params.set("limit", String(TICKET_LIMIT));
-
-    if (clienteId) params.set("clienteId", clienteId);
-    if (userId) params.set("userId", userId);
-
-    const allClienteIds = getSelectedClienteIds();
-    const allUserIds = getSelectedUserIds();
-
-    if (allClienteIds.length) params.set("clienteIds", allClienteIds.join(","));
-    if (allUserIds.length) params.set("userIds", allUserIds.join(","));
-
-    params.set("includeClosed", "true");
-    params.set("includeAll", "true");
-    params.set("onlyMine", "false");
-
-    const separator = endpoint.includes("?") ? "&" : "?";
-    return `${endpoint}${separator}${params.toString()}`;
-  });
-}
-
-function ticketBelongsToSelectedClients(ticket = {}) {
-  const selectedClientes = getSelectedClientes();
-
-  if (!selectedClientes.length) return true;
-
-  const ticketClienteId = safeText(ticket?.clienteId, "");
-  const ticketUserId = safeText(ticket?.userId, "");
-
-  if (!ticketClienteId && !ticketUserId) return true;
-
-  return selectedClientes.some((client) => {
-    const clienteId = safeText(first(client.clienteId, client.id), "");
-    const userId = safeText(client.userId, "");
-
-    return (
-      (clienteId && ticketClienteId === clienteId) ||
-      (userId && ticketUserId === userId)
-    );
-  });
-}
-
-function sortTicketsByLatest(items = []) {
-  return [...safeArray(items)].sort((a, b) => {
-    const dateA = safeNumber(a?.sortDate, 0);
-    const dateB = safeNumber(b?.sortDate, 0);
-
-    if (dateA !== dateB) return dateB - dateA;
-
-    return safeText(b?.id, "").localeCompare(safeText(a?.id, ""));
-  });
-}
-
-function dedupeAndFilterTickets(items = []) {
-  const map = new Map();
-
-  safeArray(items).forEach((item) => {
-    const normalized = normalizeTicketCandidate(item);
-    if (!normalized?.id) return;
-    if (!ticketBelongsToSelectedClients(normalized)) return;
-
-    if (!map.has(normalized.id)) {
-      map.set(normalized.id, normalized);
-    }
-  });
-
-  return sortTicketsByLatest(Array.from(map.values())).slice(0, TICKET_LIMIT);
-}
-
-async function searchTicketsRequest(query = "") {
-  const selectedClientes = getSelectedClientes();
-  const searchTargets = selectedClientes.length ? selectedClientes : [null];
-
-  let lastError = null;
-  let collected = [];
-
-  for (const cliente of searchTargets) {
-    const urls = buildTicketSearchUrlsForClient(query, cliente);
-
-    for (const url of urls) {
-      try {
-        const response = await apiGet(url);
-        const items = extractItems(response);
-
-        if (items.length) {
-          collected = collected.concat(items);
-        }
-      } catch (error) {
-        lastError = error;
-
-        if (!shouldTryNext(error)) {
-          throw error;
-        }
-      }
-    }
-  }
-
-  const normalized = dedupeAndFilterTickets(collected);
-
-  if (normalized.length) return normalized;
-
-  if (lastError && collected.length === 0) throw lastError;
-
-  return [];
-}
-
-function clearTicketSearchTimer() {
-  if (!modalState.ticketSearchDebounce) return;
-
-  try {
-    clearTimeout(modalState.ticketSearchDebounce);
-  } catch {}
-
-  modalState.ticketSearchDebounce = null;
-}
-
-function setSelectedTicketFromItem(item = null, { auto = false, append = true } = {}) {
-  const normalized = normalizeTicketCandidate(item) || safeObject(item);
-  const id = safeText(first(normalized.id, normalized.ticketId, normalized.incidenciaId), "");
-
-  if (!id) return false;
-
-  const nextTicket = {
-    ...normalized,
-    id,
-    ticketId: normalized.ticketId || id,
-    incidenciaId: normalized.incidenciaId || id,
-  };
-
-  if (append) {
-    if (!hasSelectedTicket(nextTicket)) {
-      modalState.selectedTickets = [
-        ...getSelectedTickets(),
-        nextTicket,
-      ];
-    }
-  } else {
-    modalState.selectedTickets = [nextTicket];
-  }
-
-  modalState.ticketAutoSelected = Boolean(auto);
-  syncPrimaryTicketToForm();
-
-  if (modalState.errors.incidenciaId) {
-    const nextErrors = { ...safeObject(modalState.errors) };
-    delete nextErrors.incidenciaId;
-    modalState.errors = nextErrors;
-  }
-
-  return true;
-}
-
-function autoSelectLatestTicketIfPossible({ force = false } = {}) {
-  if (getSelectedTickets().length && !force) return false;
-
-  const latest = safeArray(modalState.ticketSearchResults)[0];
-
-  if (!latest?.id) {
-    modalState.selectedTickets = [];
-    syncPrimaryTicketToForm();
-    return false;
-  }
-
-  modalState.selectedTickets = [];
-
-  return setSelectedTicketFromItem(latest, {
-    auto: true,
-    append: true,
-  });
-}
-
 async function loadTicketsForSelectedClient({
   query = "",
   autoSelectLatest = true,
@@ -1758,7 +1554,6 @@ async function loadTicketsForSelectedClient({
     modalState.ticketSearchLoading = false;
     modalState.ticketSearchError = "";
     modalState.ticketSearchResults = [];
-    modalState.ticketAutoSelected = false;
     modalState.selectedTickets = [];
 
     syncPrimaryTicketToForm();
@@ -1772,7 +1567,6 @@ async function loadTicketsForSelectedClient({
   modalState.ticketSearchLoading = true;
   modalState.ticketSearchError = "";
   modalState.ticketSearchResults = [];
-  modalState.ticketAutoSelected = false;
 
   if (autoSelectLatest) {
     modalState.selectedTickets = [];
@@ -1790,9 +1584,10 @@ async function loadTicketsForSelectedClient({
     modalState.ticketSearchError = "";
     modalState.ticketSearchResults = results;
 
-    if (autoSelectLatest) {
-      autoSelectLatestTicketIfPossible({
-        force: true,
+    if (autoSelectLatest && results[0]?.id) {
+      setSelectedTicketFromItem(results[0], {
+        auto: true,
+        append: true,
       });
     }
 
@@ -1808,7 +1603,6 @@ async function loadTicketsForSelectedClient({
       error,
       "No se pudieron cargar las incidencias del cliente."
     );
-    modalState.ticketAutoSelected = false;
     modalState.selectedTickets = [];
 
     syncPrimaryTicketToForm();
@@ -1818,14 +1612,6 @@ async function loadTicketsForSelectedClient({
   }
 }
 
-async function performTicketSearch(query = "") {
-  return loadTicketsForSelectedClient({
-    query: normalizeWhitespace(query),
-    autoSelectLatest: false,
-    focus: "ticketSearch",
-  });
-}
-
 function scheduleTicketSearch(query = "") {
   clearTicketSearchTimer();
 
@@ -1833,14 +1619,17 @@ function scheduleTicketSearch(query = "") {
     modalState.ticketSearchLoading = false;
     modalState.ticketSearchError = "";
     modalState.ticketSearchResults = [];
-    modalState.ticketAutoSelected = false;
 
     rerenderAndRefocus("ticketSearch");
     return;
   }
 
   modalState.ticketSearchDebounce = setTimeout(() => {
-    performTicketSearch(query);
+    loadTicketsForSelectedClient({
+      query,
+      autoSelectLatest: false,
+      focus: "ticketSearch",
+    });
   }, SEARCH_DEBOUNCE);
 }
 
@@ -1905,20 +1694,17 @@ function validateForm(form = {}) {
   const current = safeObject(form);
   const errors = {};
 
-  const selectedClientes = getSelectedClientes();
-  const selectedTickets = getSelectedTickets();
-
   const concepto = normalizeWhitespace(current.concepto);
   const descripcion = normalizeWhitespace(current.descripcion);
 
   const cantidad = safeNumber(current.cantidad, 0);
   const precioUnitario = safeNumber(current.precioUnitario, 0);
 
-  if (!selectedClientes.length) {
+  if (!getSelectedClientes().length) {
     errors.clienteId = "Selecciona al menos un cliente.";
   }
 
-  if (!selectedTickets.length) {
+  if (!getSelectedTickets().length) {
     errors.incidenciaId = "Selecciona al menos una incidencia vinculada.";
   }
 
@@ -2080,8 +1866,6 @@ function buildCreatePayload(form = {}) {
   const paidAmount = paymentStatus === "paid" ? breakdown.totalFactura : 0;
   const pendingAmount = paymentStatus === "paid" ? 0 : breakdown.totalFactura;
 
-  const direccionServicio = safeObject(primaryClientePayload.direccion, {});
-
   return {
     entityType: "invoice",
     tipoDocumento: "factura",
@@ -2184,7 +1968,7 @@ function buildCreatePayload(form = {}) {
       nif: cliente.nif,
     })),
 
-    direccionServicio,
+    direccionServicio: safeObject(primaryClientePayload.direccion, {}),
 
     ticketId,
     incidenciaId: ticketId,
@@ -2479,39 +2263,48 @@ function getCreatedFacturaId(payload = null) {
 }
 
 /* =========================================================
-   DERIVED UI
-========================================================= */
-
-function syncDerivedUi() {
-  const root = getRoot();
-  if (!root) return false;
-
-  const breakdown = getInvoiceBreakdown(modalState.form);
-
-  root
-    .querySelectorAll('[data-role="total-preview-inline"]')
-    .forEach((node) => {
-      node.textContent = formatMoney(breakdown.totalFactura);
-    });
-
-  root
-    .querySelectorAll('[data-role="base-preview-inline"]')
-    .forEach((node) => {
-      node.textContent = formatMoney(breakdown.base);
-    });
-
-  root
-    .querySelectorAll('[data-role="tax-preview-inline"]')
-    .forEach((node) => {
-      node.textContent = `${formatMoney(breakdown.ivaTotal)} / ${formatMoney(breakdown.irpfTotal)}`;
-    });
-
-  return true;
-}
-
-/* =========================================================
    RENDER HELPERS
 ========================================================= */
+
+function renderAvatar({
+  name = "",
+  email = "",
+  avatarUrl = "",
+  fallback = "CL",
+  className = "fac-create-avatar",
+} = {}) {
+  const displayName = safeText(first(name, email, "Cliente"), "Cliente");
+  const initials = getInitials(displayName, fallback);
+  const url = safeText(avatarUrl, "");
+
+  return `
+    <span
+      class="${escapeHtml(className)}${url ? " has-image" : ""}"
+      aria-label="${escapeHtml(displayName)}"
+      data-tooltip="${escapeHtml(displayName)}"
+      ${url ? 'data-has-avatar="true"' : 'data-fallback="true"'}
+    >
+      ${
+        url
+          ? `
+            <img
+              class="fac-create-avatar-img"
+              src="${escapeHtml(url)}"
+              alt="${escapeHtml(displayName)}"
+              loading="lazy"
+              referrerpolicy="no-referrer"
+              data-avatar-img="true"
+            />
+          `
+          : ""
+      }
+
+      <span class="fac-create-avatar-fallback">
+        ${escapeHtml(initials)}
+      </span>
+    </span>
+  `;
+}
 
 function renderFieldError(message = "") {
   const text = safeText(message, "");
@@ -2896,9 +2689,7 @@ function renderTicketSearchResults() {
     return `<div class="fac-create-search-state">Sin incidencias disponibles para los clientes seleccionados.</div>`;
   }
 
-  const visibleResults = query
-    ? results
-    : results.slice(0, 6);
+  const visibleResults = query ? results : results.slice(0, 6);
 
   return `
     <div class="fac-create-ticket-list">
@@ -2989,7 +2780,6 @@ function renderTargetBlock() {
           </div>
 
           ${renderSelectedClientes()}
-
           ${renderFieldError(errors.clienteId)}
 
           <label class="fac-create-field fac-create-field--search">
@@ -3027,7 +2817,6 @@ function renderTargetBlock() {
           </div>
 
           ${renderSelectedTickets()}
-
           ${renderFieldError(errors.incidenciaId)}
 
           <label class="fac-create-field fac-create-field--search">
@@ -3062,10 +2851,6 @@ function renderLoadingOverlay() {
     </div>
   `;
 }
-
-/* =========================================================
-   MODAL TEMPLATE
-========================================================= */
 
 function renderModalInner() {
   const form = safeObject(modalState.form);
@@ -3243,7 +3028,7 @@ function renderModalInner() {
 }
 
 /* =========================================================
-   ROOT MANAGEMENT
+   ROOT / RENDER CONTROL
 ========================================================= */
 
 function getRoot() {
@@ -3261,6 +3046,7 @@ function ensureRoot() {
 
   root = document.createElement("div");
   root.id = MODAL_ID;
+  root.setAttribute("data-facturas-create-root", "true");
   document.body.appendChild(root);
 
   return root;
@@ -3321,10 +3107,6 @@ function attachEscHandler() {
   } catch {}
 }
 
-/* =========================================================
-   RENDER CONTROL
-========================================================= */
-
 function renderModal() {
   const root = ensureRoot();
 
@@ -3339,6 +3121,33 @@ function renderModal() {
   modalState.bindingsAttached = false;
 
   return root;
+}
+
+function syncDerivedUi() {
+  const root = getRoot();
+  if (!root) return false;
+
+  const breakdown = getInvoiceBreakdown(modalState.form);
+
+  root
+    .querySelectorAll('[data-role="total-preview-inline"]')
+    .forEach((node) => {
+      node.textContent = formatMoney(breakdown.totalFactura);
+    });
+
+  root
+    .querySelectorAll('[data-role="base-preview-inline"]')
+    .forEach((node) => {
+      node.textContent = formatMoney(breakdown.base);
+    });
+
+  root
+    .querySelectorAll('[data-role="tax-preview-inline"]')
+    .forEach((node) => {
+      node.textContent = `${formatMoney(breakdown.ivaTotal)} / ${formatMoney(breakdown.irpfTotal)}`;
+    });
+
+  return true;
 }
 
 function rerenderAndRefocus(fieldName = "") {
@@ -3557,7 +3366,14 @@ function buildDraftTickets(draft = {}) {
     if (!map.has(item.id)) map.set(item.id, item);
   });
 
-  return sortTicketsByLatest(Array.from(map.values()));
+  return Array.from(map.values()).sort((a, b) => {
+    const dateA = safeNumber(a?.sortDate, 0);
+    const dateB = safeNumber(b?.sortDate, 0);
+
+    if (dateA !== dateB) return dateB - dateA;
+
+    return safeText(b?.id, "").localeCompare(safeText(a?.id, ""));
+  });
 }
 
 /* =========================================================
@@ -3582,7 +3398,6 @@ export function openFacturasCreateModal(draft = {}) {
   modalState.ticketSearchResults = [];
   modalState.ticketSearchLoading = false;
   modalState.ticketSearchError = "";
-  modalState.ticketAutoSelected = false;
 
   resetForm();
 
@@ -3811,6 +3626,42 @@ async function handleSubmit() {
    SELECTION ACTIONS
 ========================================================= */
 
+function setSelectedTicketFromItem(item = null, { auto = false, append = true } = {}) {
+  const normalized = normalizeTicketCandidate(item) || safeObject(item);
+  const id = safeText(first(normalized.id, normalized.ticketId, normalized.incidenciaId), "");
+
+  if (!id) return false;
+
+  const nextTicket = {
+    ...normalized,
+    id,
+    ticketId: normalized.ticketId || id,
+    incidenciaId: normalized.incidenciaId || id,
+    autoSelected: Boolean(auto),
+  };
+
+  if (append) {
+    if (!hasSelectedTicket(nextTicket)) {
+      modalState.selectedTickets = [
+        ...getSelectedTickets(),
+        nextTicket,
+      ];
+    }
+  } else {
+    modalState.selectedTickets = [nextTicket];
+  }
+
+  syncPrimaryTicketToForm();
+
+  if (modalState.errors.incidenciaId) {
+    const nextErrors = { ...safeObject(modalState.errors) };
+    delete nextErrors.incidenciaId;
+    modalState.errors = nextErrors;
+  }
+
+  return true;
+}
+
 async function selectCliente(index = -1) {
   const item = safeArray(modalState.clienteSearchResults)[Number(index)];
 
@@ -3870,7 +3721,6 @@ async function removeCliente(index = -1) {
     modalState.ticketSearchResults = [];
     modalState.ticketSearchQuery = "";
     modalState.ticketSearchError = "";
-    modalState.ticketAutoSelected = false;
 
     syncPrimaryTicketToForm();
 
@@ -3945,7 +3795,6 @@ function clearClientes() {
   modalState.ticketSearchResults = [];
   modalState.ticketSearchLoading = false;
   modalState.ticketSearchError = "";
-  modalState.ticketAutoSelected = false;
 
   renderModal();
   attachRootBindings();
@@ -3982,7 +3831,6 @@ function removeTicket(index = -1) {
   if (!Number.isInteger(idx) || idx < 0 || idx >= selected.length) return false;
 
   modalState.selectedTickets = selected.filter((_, itemIndex) => itemIndex !== idx);
-  modalState.ticketAutoSelected = false;
 
   syncPrimaryTicketToForm();
 
@@ -4007,8 +3855,6 @@ function makeTicketPrimary(index = -1) {
     ...selected.filter((_, itemIndex) => itemIndex !== idx),
   ];
 
-  modalState.ticketAutoSelected = false;
-
   syncPrimaryTicketToForm();
 
   renderModal();
@@ -4021,7 +3867,6 @@ function makeTicketPrimary(index = -1) {
 
 function clearTickets() {
   modalState.selectedTickets = [];
-  modalState.ticketAutoSelected = false;
 
   syncPrimaryTicketToForm();
 

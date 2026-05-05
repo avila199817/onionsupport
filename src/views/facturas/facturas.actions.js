@@ -2,39 +2,35 @@
    Onion SPA - Facturas Actions
    Archivo: src/views/facturas/facturas.actions.js
 
-   FINAL PRO SYSTEM · ACTIONS REAL · 10/10 EXTREME
-   PATCH · API ALIGNED · PDF SAS SAFE · CSV PRO · INCIDENCIA SAFE
+   FINAL PRO SYSTEM · FACTURAS ACTIONS · CSP CLEAN · 14/10
+   PATCH · ACTIONS PURE LAYER
+   PATCH · API ALIGNED
+   PATCH · PDF SAS / BLOB SAFE
+   PATCH · NO PRIVATE PDF TAB OPEN
+   PATCH · NO INLINE STYLE
+   PATCH · CSV PRO
+   PATCH · STORE FALLBACK SAFE
+   PATCH · INCIDENCIA EVENT BRIDGE ONLY
+   PATCH · ZERO VIEW/BINDING DUPLICATION
 
    RESPONSABILIDADES:
-   - centralizar acciones operativas del módulo de facturas
-   - resolver detalle desde store + loader/backend
-   - abrir detalle a nivel de datos, no de UI
-   - preservar relación factura ↔ incidencia
-   - abrir PDF inline usando fetch autenticado + URL SAS devuelta por backend
-   - descargar PDF usando fetch autenticado + URL SAS devuelta por backend
-   - bloquear fallback directo a endpoint privado para evitar MISSING_TOKEN
-   - soportar respuestas PDF como URL / Blob / Response / stream adaptado
-   - enviar factura al cliente por endpoint real
-   - copiar identificadores
-   - exportar colección a CSV pro
-   - desacoplar facturasView.js de la lógica operativa
+   - Centralizar acciones operativas del módulo Facturas.
+   - Resolver detalle desde store + loader/backend.
+   - Abrir detalle a nivel de datos, no de UI.
+   - Abrir PDF inline mediante URL pública/SAS o blob autenticado.
+   - Descargar PDF mediante URL pública/SAS o blob autenticado.
+   - Bloquear apertura directa de endpoint privado /api/facturas/:id/pdf.
+   - Enviar factura al cliente por endpoint real.
+   - Copiar identificadores.
+   - Exportar colección a CSV.
+   - Emitir eventos AppCore + window.
+   - Mantener facturasView.js desacoplado de la lógica operativa.
 
    BACKEND ALINEADO:
    - GET  /api/facturas/:id
    - GET  /api/facturas/:id/pdf
    - GET  /api/facturas/:id/descargar
    - POST /api/facturas/:id/enviar
-
-   HARDENING:
-   - no navegación a rutas inexistentes de incidencia
-   - apertura PDF con ventana preabierta para evitar popup blockers
-   - descarga con anchor seguro
-   - NUNCA abrir /api/facturas/:id/pdf directamente en pestaña nueva
-   - el endpoint privado se consume con apiClient autenticado
-   - la pestaña nueva solo abre blob: o SAS/public URL final
-   - eventos AppCore + window
-   - tolerancia a payloads heterogéneos
-   - CSV con BOM + sep=; para Excel ES
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -56,7 +52,6 @@ import {
   safeText,
   safeNumber,
   safeArray,
-  safeObject,
   showToast,
 } from "./facturas.utils.js";
 
@@ -87,39 +82,30 @@ const FACTURA_PDF_EVENTS = Object.freeze({
    BASE HELPERS
 ========================================================= */
 
+function asObject(value, fallback = {}) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : fallback;
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function hasOwnKeys(value = {}) {
+  return Boolean(isObject(value) && Object.keys(value).length);
+}
+
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
-
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
-
-    if (Array.isArray(value) && value.length === 0) {
-      continue;
-    }
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
 
     return value;
   }
 
   return null;
-}
-
-function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
-}
-
-function hasOwnKeys(value = {}) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      Object.keys(value).length
-  );
 }
 
 function normalizeFacturaId(value = "") {
@@ -140,14 +126,16 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
+function round2(value = 0) {
+  return Math.round((safeNumber(value, 0) + Number.EPSILON) * 100) / 100;
+}
+
 function safeDateIso(value = null) {
   if (!value) return "";
 
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
+  if (Number.isNaN(date.getTime())) return "";
 
   return date.toISOString();
 }
@@ -157,9 +145,7 @@ function safeDateLabel(value = null) {
 
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
-    return "";
-  }
+  if (Number.isNaN(date.getTime())) return "";
 
   try {
     return new Intl.DateTimeFormat("es-ES", {
@@ -174,13 +160,8 @@ function safeDateLabel(value = null) {
   }
 }
 
-function round2(value = 0) {
-  return Math.round((safeNumber(value, 0) + Number.EPSILON) * 100) / 100;
-}
-
 function safeEmit(eventName = "", payload = {}) {
   const name = safeText(eventName, "");
-
   if (!name) return false;
 
   let emitted = false;
@@ -217,11 +198,12 @@ function safeLog(...args) {
 function safeWarn(...args) {
   try {
     AppCore?.utils?.warn?.("[FacturasActions]", ...args);
-  } catch {
-    try {
-      console.warn("[FacturasActions]", ...args);
-    } catch {}
-  }
+    return;
+  } catch {}
+
+  try {
+    console.warn("[FacturasActions]", ...args);
+  } catch {}
 }
 
 function safeErrorMessage(error = null, fallback = "") {
@@ -245,7 +227,6 @@ function getErrorStatus(error = null) {
     first(
       error?.status,
       error?.statusCode,
-      error?.code,
       error?.response?.status,
       error?.response?.statusCode,
       error?.data?.status,
@@ -255,16 +236,12 @@ function getErrorStatus(error = null) {
   );
 }
 
-function isFatalHttpError(error = null) {
-  const status = getErrorStatus(error);
-
-  return status >= 400 && status < 600;
-}
+/* =========================================================
+   DETAIL PICKER
+========================================================= */
 
 function isLikelyFactura(value) {
-  if (!isObject(value)) {
-    return false;
-  }
+  if (!isObject(value)) return false;
 
   return Boolean(
     value.id ||
@@ -290,7 +267,7 @@ function isLikelyFactura(value) {
 }
 
 function looksLikeEnvelope(value) {
-  const obj = safeObject(value);
+  const obj = asObject(value);
 
   return Boolean(
     obj.factura ||
@@ -305,15 +282,11 @@ function looksLikeEnvelope(value) {
 }
 
 function pickDetail(payload = null) {
-  if (!payload) {
-    return null;
-  }
+  if (!payload) return null;
 
-  if (isLikelyFactura(payload)) {
-    return payload;
-  }
+  if (isLikelyFactura(payload)) return payload;
 
-  const obj = safeObject(payload);
+  const obj = asObject(payload);
 
   const direct = first(
     obj.factura,
@@ -330,9 +303,7 @@ function pickDetail(payload = null) {
     obj.payload?.record
   );
 
-  if (isLikelyFactura(direct)) {
-    return direct;
-  }
+  if (isLikelyFactura(direct)) return direct;
 
   const nested = first(
     obj.data,
@@ -342,19 +313,14 @@ function pickDetail(payload = null) {
     obj.response
   );
 
-  if (looksLikeEnvelope(nested)) {
-    return pickDetail(nested);
-  }
-
-  if (isLikelyFactura(nested)) {
-    return nested;
-  }
+  if (isLikelyFactura(nested)) return nested;
+  if (looksLikeEnvelope(nested)) return pickDetail(nested);
 
   return null;
 }
 
 /* =========================================================
-   API URL HELPERS
+   API URL / PDF TARGET HELPERS
 ========================================================= */
 
 function getApiBase() {
@@ -381,25 +347,23 @@ function resolveApiUrl(path = "") {
 
   const apiBase = getApiBase();
 
-  if (!apiBase) {
-    return value.startsWith("/") ? value : `/${value}`;
+  if (value.startsWith("/")) {
+    if (apiBase && apiBase.endsWith("/api") && value.startsWith("/api/")) {
+      return `${apiBase}${value.slice(4)}`;
+    }
+
+    return value;
   }
 
-  const normalizedPath = value.startsWith("/") ? value : `/${value}`;
+  if (!apiBase) return `/${value}`;
 
-  if (apiBase.endsWith("/api") && normalizedPath.startsWith("/api/")) {
-    return `${apiBase}${normalizedPath.slice(4)}`;
-  }
-
-  return `${apiBase}${normalizedPath}`;
+  return `${apiBase}/${value.replace(/^\/+/, "")}`;
 }
 
 function isPrivateFacturaPdfEndpoint(url = "") {
   const value = safeText(url, "");
 
-  if (!value || value.startsWith("blob:")) {
-    return false;
-  }
+  if (!value || value.startsWith("blob:")) return false;
 
   try {
     const parsed = new URL(value, window.location.origin);
@@ -431,13 +395,8 @@ function isPrivateFacturaPdfEndpoint(url = "") {
 function assertPublicPdfTarget(url = "") {
   const value = safeText(url, "");
 
-  if (!value) {
-    return "";
-  }
-
-  if (isPrivateFacturaPdfEndpoint(value)) {
-    return "";
-  }
+  if (!value) return "";
+  if (isPrivateFacturaPdfEndpoint(value)) return "";
 
   return value;
 }
@@ -447,13 +406,11 @@ function assertPublicPdfTarget(url = "") {
 ========================================================= */
 
 function getRaw(item = {}) {
-  const source = safeObject(item);
-
-  return safeObject(source.raw);
+  return asObject(asObject(item).raw);
 }
 
 function getFacturaId(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
 
   return safeText(
@@ -485,31 +442,33 @@ function resolveFacturaId(detail = null) {
 }
 
 function getFacturaNumber(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
 
   return safeText(
     first(
+      source.numeroFacturaLegal,
+      source.numeroFactura,
+      source.legalInvoiceNumber,
       source.numero,
+      source.invoiceNumber,
       source.code,
       source.facturaCode,
       source.facturaNumero,
-      source.numeroFacturaLegal,
-      source.numeroFactura,
       source.numeroFacturaSistema,
-      source.invoiceNumber,
       source.facturaId,
       source.invoiceId,
       source.id,
 
+      raw.numeroFacturaLegal,
+      raw.numeroFactura,
+      raw.legalInvoiceNumber,
       raw.numero,
+      raw.invoiceNumber,
       raw.code,
       raw.facturaCode,
       raw.facturaNumero,
-      raw.numeroFacturaLegal,
-      raw.numeroFactura,
       raw.numeroFacturaSistema,
-      raw.invoiceNumber,
       raw.facturaId,
       raw.invoiceId,
       raw.id
@@ -518,8 +477,23 @@ function getFacturaNumber(item = {}) {
   );
 }
 
+function getFacturaSystemNumber(item = {}) {
+  const source = asObject(item);
+  const raw = getRaw(source);
+
+  return safeText(
+    first(
+      source.numeroFacturaSistema,
+      source.systemInvoiceNumber,
+      raw.numeroFacturaSistema,
+      raw.systemInvoiceNumber
+    ),
+    ""
+  );
+}
+
 function getFacturaClientObject(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
 
   const client = first(
@@ -537,7 +511,7 @@ function getFacturaClientObject(item = {}) {
 }
 
 function getFacturaClient(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
   const client = getFacturaClientObject(source);
 
@@ -551,6 +525,7 @@ function getFacturaClient(item = {}) {
         client.nombreContacto,
         client.name,
         client.company,
+        client.companyName,
         client.displayName
       ),
       "Cliente"
@@ -559,12 +534,22 @@ function getFacturaClient(item = {}) {
 
   return safeText(
     first(
+      source.clienteEmpresa,
+      source.empresa,
+      source.company,
+      source.companyName,
+      source.razonSocial,
       source.clienteNombre,
       source.clientName,
       source.customerName,
       source.name,
       source.nombre,
 
+      raw.clienteEmpresa,
+      raw.empresa,
+      raw.company,
+      raw.companyName,
+      raw.razonSocial,
       raw.clienteNombre,
       raw.clientName,
       raw.customerName,
@@ -576,7 +561,7 @@ function getFacturaClient(item = {}) {
 }
 
 function getFacturaEmail(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
   const client = getFacturaClientObject(source);
 
@@ -589,7 +574,7 @@ function getFacturaEmail(item = {}) {
         client.emailFacturacion,
         client.emailAdministracion
       ),
-      "Sin email"
+      ""
     );
   }
 
@@ -607,39 +592,46 @@ function getFacturaEmail(item = {}) {
       raw.clientEmail,
       raw.customerEmail
     ),
-    "Sin email"
+    ""
   );
 }
 
 function getFacturaDate(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
 
   return first(
-    source.fecha,
-    source.date,
     source.fechaFactura,
+    source.fechaFacturaISO,
     source.issueDate,
     source.issuedAt,
+    source.lifecycle?.issuedAt,
+    source.fecha,
+    source.date,
     source.createdAt,
     source.updatedAt,
 
-    raw.fecha,
-    raw.date,
     raw.fechaFactura,
+    raw.fechaFacturaISO,
     raw.issueDate,
     raw.issuedAt,
+    raw.lifecycle?.issuedAt,
+    raw.fecha,
+    raw.date,
     raw.createdAt,
     raw.updatedAt
   );
 }
 
 function getFacturaUpdatedAt(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
 
   return first(
     source.updatedAt,
+    source.lifecycle?.updatedAt,
+    source.lastActivityAt,
+    source.lifecycle?.lastActivityAt,
     source.fechaEnvio,
     source.sentAt,
     source.mailSentAt,
@@ -647,6 +639,9 @@ function getFacturaUpdatedAt(item = {}) {
     source.createdAt,
 
     raw.updatedAt,
+    raw.lifecycle?.updatedAt,
+    raw.lastActivityAt,
+    raw.lifecycle?.lastActivityAt,
     raw.fechaEnvio,
     raw.sentAt,
     raw.mailSentAt,
@@ -656,7 +651,7 @@ function getFacturaUpdatedAt(item = {}) {
 }
 
 function getFacturaEstadoPago(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
 
   return safeText(
@@ -664,16 +659,18 @@ function getFacturaEstadoPago(item = {}) {
       source.estadoPago,
       source.paymentStatus,
       source.payment?.status,
+      source.billing?.paymentStatus,
       raw.estadoPago,
       raw.paymentStatus,
-      raw.payment?.status
+      raw.payment?.status,
+      raw.billing?.paymentStatus
     ),
     "pending"
   );
 }
 
 function getFacturaEstado(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
 
   return safeText(
@@ -688,7 +685,7 @@ function getFacturaEstado(item = {}) {
 }
 
 function getFacturaFormaPago(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
 
   return safeText(
@@ -696,11 +693,13 @@ function getFacturaFormaPago(item = {}) {
       source.formaPago,
       source.metodoPago,
       source.paymentMethod,
+      source.payment?.methodLabel,
       source.payment?.method,
 
       raw.formaPago,
       raw.metodoPago,
       raw.paymentMethod,
+      raw.payment?.methodLabel,
       raw.payment?.method
     ),
     "—"
@@ -708,7 +707,7 @@ function getFacturaFormaPago(item = {}) {
 }
 
 function getFacturaMoneda(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
 
   return safeText(
@@ -716,17 +715,23 @@ function getFacturaMoneda(item = {}) {
       source.moneda,
       source.currency,
       source.facturaCurrency,
+      source.totales?.currency,
+      source.payment?.currency,
+      source.meta?.currency,
 
       raw.moneda,
       raw.currency,
-      raw.facturaCurrency
+      raw.facturaCurrency,
+      raw.totales?.currency,
+      raw.payment?.currency,
+      raw.meta?.currency
     ),
     "EUR"
   );
 }
 
 function getFacturaTotal(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
 
   return round2(
@@ -736,8 +741,11 @@ function getFacturaTotal(item = {}) {
       source.importe,
       source.importeTotal,
       source.totalFactura,
-      source.invoiceAmount,
       source.facturaTotal,
+      source.facturaImporte,
+      source.importeFactura,
+      source.invoiceAmount,
+      source.totales?.total,
       source.totals?.total,
       source.resumen?.total,
 
@@ -746,8 +754,11 @@ function getFacturaTotal(item = {}) {
       raw.importe,
       raw.importeTotal,
       raw.totalFactura,
-      raw.invoiceAmount,
       raw.facturaTotal,
+      raw.facturaImporte,
+      raw.importeFactura,
+      raw.invoiceAmount,
+      raw.totales?.total,
       raw.totals?.total,
       raw.resumen?.total
     )
@@ -755,7 +766,7 @@ function getFacturaTotal(item = {}) {
 }
 
 function getFacturaSentTo(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
 
   return safeText(
@@ -779,49 +790,77 @@ function getFacturaSentTo(item = {}) {
 }
 
 function getFacturaSentAt(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
 
   return first(
     source.fechaEnvio,
     source.sentAt,
     source.mailSentAt,
+    source.email?.sentAt,
     source.delivery?.lastSentAt,
+    source.lifecycle?.sentAt,
+    source.meta?.lastSentAt,
 
     raw.fechaEnvio,
     raw.sentAt,
     raw.mailSentAt,
-    raw.delivery?.lastSentAt
+    raw.email?.sentAt,
+    raw.delivery?.lastSentAt,
+    raw.lifecycle?.sentAt,
+    raw.meta?.lastSentAt
   );
 }
 
 function isFacturaSent(item = {}) {
-  return Boolean(getFacturaSentAt(item) || getFacturaSentTo(item));
+  const source = asObject(item);
+  const raw = getRaw(source);
+
+  return Boolean(
+    getFacturaSentAt(item) ||
+      getFacturaSentTo(item) ||
+      source.email?.sent ||
+      source.meta?.isSent ||
+      source.meta?.hasEmailSent ||
+      raw.email?.sent ||
+      raw.meta?.isSent ||
+      raw.meta?.hasEmailSent
+  );
 }
 
 function hasFacturaPdf(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
 
   if (
     first(
       source.hasPdf,
       source.pdfAvailable,
+      source.document?.available,
+      source.meta?.hasPdf,
+      source.meta?.hasBlob,
       source.blobPath,
       source.blobName,
       source.pdfPath,
       source.pdfUrl,
       source.downloadUrl,
       source.viewUrl,
+      source.document?.blobPath,
+      source.document?.fileName,
 
       raw.hasPdf,
       raw.pdfAvailable,
+      raw.document?.available,
+      raw.meta?.hasPdf,
+      raw.meta?.hasBlob,
       raw.blobPath,
       raw.blobName,
       raw.pdfPath,
       raw.pdfUrl,
       raw.downloadUrl,
-      raw.viewUrl
+      raw.viewUrl,
+      raw.document?.blobPath,
+      raw.document?.fileName
     )
   ) {
     return true;
@@ -839,7 +878,7 @@ function hasFacturaPdf(item = {}) {
   );
 
   return files.some((file) => {
-    const itemFile = safeObject(file);
+    const itemFile = asObject(file);
 
     const type = normalizeText(
       first(
@@ -865,7 +904,7 @@ function hasFacturaPdf(item = {}) {
 }
 
 /* =========================================================
-   INCIDENCIA / TICKET HELPERS
+   INCIDENCIA HELPERS
 ========================================================= */
 
 function pickTicketIdFromArray(value = []) {
@@ -876,9 +915,7 @@ function pickTicketIdFromArray(value = []) {
       return item.trim();
     }
 
-    if (!item || typeof item !== "object") {
-      continue;
-    }
+    if (!item || typeof item !== "object") continue;
 
     const candidate = first(
       item.ticketId,
@@ -900,19 +937,17 @@ function pickTicketIdFromArray(value = []) {
       item.incidencia?.id
     );
 
-    if (candidate) {
-      return safeText(candidate, "");
-    }
+    if (candidate) return safeText(candidate, "");
   }
 
-  return null;
+  return "";
 }
 
 function getRelationObject(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
 
-  return safeObject(
+  return asObject(
     first(
       source.incidencia,
       source.ticket,
@@ -932,14 +967,14 @@ function getRelationObject(item = {}) {
 }
 
 function getFacturaIncidenciaId(item = {}) {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
 
-  const incidencia = safeObject(first(source.incidencia, raw.incidencia));
-  const ticket = safeObject(first(source.ticket, raw.ticket));
-  const linkedTicket = safeObject(first(source.linkedTicket, raw.linkedTicket));
-  const relationTicket = safeObject(first(source.relations?.ticket, raw.relations?.ticket));
-  const relationIncidencia = safeObject(first(source.relations?.incidencia, raw.relations?.incidencia));
+  const incidencia = asObject(first(source.incidencia, raw.incidencia));
+  const ticket = asObject(first(source.ticket, raw.ticket));
+  const linkedTicket = asObject(first(source.linkedTicket, raw.linkedTicket));
+  const relationTicket = asObject(first(source.relations?.ticket, raw.relations?.ticket));
+  const relationIncidencia = asObject(first(source.relations?.incidencia, raw.relations?.incidencia));
 
   return safeText(
     first(
@@ -973,6 +1008,7 @@ function getFacturaIncidenciaId(item = {}) {
 
       source.meta?.ticketId,
       source.meta?.incidenciaId,
+      source.meta?.linkedTicketId,
 
       pickTicketIdFromArray(source.ticketIds),
       pickTicketIdFromArray(source.incidenciaIds),
@@ -1014,6 +1050,7 @@ function getFacturaIncidenciaId(item = {}) {
 
       raw.meta?.ticketId,
       raw.meta?.incidenciaId,
+      raw.meta?.linkedTicketId,
 
       pickTicketIdFromArray(raw.ticketIds),
       pickTicketIdFromArray(raw.incidenciaIds),
@@ -1030,25 +1067,20 @@ function getFacturaIncidenciaId(item = {}) {
 }
 
 function buildIncidenciaPayload(item = {}, forcedId = "") {
-  const source = safeObject(item);
+  const source = asObject(item);
   const raw = getRaw(source);
 
-  const incidencia = safeObject(first(source.incidencia, raw.incidencia));
-  const ticket = safeObject(first(source.ticket, raw.ticket));
-  const linkedTicket = safeObject(first(source.linkedTicket, raw.linkedTicket));
-  const relationTicket = safeObject(first(source.relations?.ticket, raw.relations?.ticket));
+  const incidencia = asObject(first(source.incidencia, raw.incidencia));
+  const ticket = asObject(first(source.ticket, raw.ticket));
+  const linkedTicket = asObject(first(source.linkedTicket, raw.linkedTicket));
+  const relationTicket = asObject(first(source.relations?.ticket, raw.relations?.ticket));
 
   const incidenciaId = safeText(
-    first(
-      forcedId,
-      getFacturaIncidenciaId(source)
-    ),
+    first(forcedId, getFacturaIncidenciaId(source)),
     ""
   );
 
-  if (!incidenciaId) {
-    return null;
-  }
+  if (!incidenciaId) return null;
 
   const subject = safeText(
     first(
@@ -1176,12 +1208,12 @@ function buildIncidenciaPayload(item = {}, forcedId = "") {
 }
 
 function preserveFacturaIncidenciaFields(normalized = {}, original = {}) {
-  const base = safeObject(normalized);
-  const source = safeObject(original);
+  const base = asObject(normalized);
+  const source = asObject(original);
 
   const raw = {
-    ...safeObject(source.raw),
-    ...safeObject(base.raw),
+    ...asObject(source.raw),
+    ...asObject(base.raw),
   };
 
   const probe = {
@@ -1197,24 +1229,14 @@ function preserveFacturaIncidenciaFields(normalized = {}, original = {}) {
       ...base,
       raw,
       meta: {
-        ...safeObject(source.meta),
-        ...safeObject(base.meta),
+        ...asObject(source.meta),
+        ...asObject(base.meta),
         hasIncidencia: Boolean(base.meta?.hasIncidencia),
       },
     };
   }
 
   const incidenciaPayload = buildIncidenciaPayload(probe, incidenciaId);
-
-  const ticketObject = hasOwnKeys(first(base.ticket, source.ticket, raw.ticket))
-    ? safeObject(first(base.ticket, source.ticket, raw.ticket))
-    : incidenciaPayload;
-
-  const linkedTicketObject = hasOwnKeys(
-    first(base.linkedTicket, source.linkedTicket, raw.linkedTicket)
-  )
-    ? safeObject(first(base.linkedTicket, source.linkedTicket, raw.linkedTicket))
-    : incidenciaPayload;
 
   return {
     ...base,
@@ -1223,48 +1245,28 @@ function preserveFacturaIncidenciaFields(normalized = {}, original = {}) {
     incidenciaId,
 
     relatedTicketId: safeText(
-      first(
-        base.relatedTicketId,
-        source.relatedTicketId,
-        raw.relatedTicketId,
-        incidenciaId
-      ),
+      first(base.relatedTicketId, source.relatedTicketId, raw.relatedTicketId, incidenciaId),
       incidenciaId
     ),
 
     relatedIncidentId: safeText(
-      first(
-        base.relatedIncidentId,
-        source.relatedIncidentId,
-        raw.relatedIncidentId,
-        incidenciaId
-      ),
+      first(base.relatedIncidentId, source.relatedIncidentId, raw.relatedIncidentId, incidenciaId),
       incidenciaId
     ),
 
     supportTicketId: safeText(
-      first(
-        base.supportTicketId,
-        source.supportTicketId,
-        raw.supportTicketId,
-        incidenciaId
-      ),
+      first(base.supportTicketId, source.supportTicketId, raw.supportTicketId, incidenciaId),
       incidenciaId
     ),
 
     caseId: safeText(
-      first(
-        base.caseId,
-        source.caseId,
-        raw.caseId,
-        incidenciaId
-      ),
+      first(base.caseId, source.caseId, raw.caseId, incidenciaId),
       incidenciaId
     ),
 
-    incidencia: incidenciaPayload,
-    ticket: ticketObject,
-    linkedTicket: linkedTicketObject,
+    incidencia: asObject(first(base.incidencia, source.incidencia, raw.incidencia, incidenciaPayload)),
+    ticket: asObject(first(base.ticket, source.ticket, raw.ticket, incidenciaPayload)),
+    linkedTicket: asObject(first(base.linkedTicket, source.linkedTicket, raw.linkedTicket, incidenciaPayload)),
 
     relationType: safeText(
       first(
@@ -1278,11 +1280,13 @@ function preserveFacturaIncidenciaFields(normalized = {}, original = {}) {
     ),
 
     meta: {
-      ...safeObject(source.meta),
-      ...safeObject(base.meta),
+      ...asObject(source.meta),
+      ...asObject(base.meta),
       hasIncidencia: true,
+      hasLinkedTicket: true,
       incidenciaId,
       ticketId: incidenciaId,
+      linkedTicketId: incidenciaId,
     },
 
     raw: {
@@ -1290,74 +1294,23 @@ function preserveFacturaIncidenciaFields(normalized = {}, original = {}) {
 
       ticketId: safeText(first(raw.ticketId, incidenciaId), incidenciaId),
       incidenciaId: safeText(first(raw.incidenciaId, incidenciaId), incidenciaId),
+      relatedTicketId: safeText(first(raw.relatedTicketId, incidenciaId), incidenciaId),
+      relatedIncidentId: safeText(first(raw.relatedIncidentId, incidenciaId), incidenciaId),
+      supportTicketId: safeText(first(raw.supportTicketId, incidenciaId), incidenciaId),
+      caseId: safeText(first(raw.caseId, incidenciaId), incidenciaId),
 
-      relatedTicketId: safeText(
-        first(raw.relatedTicketId, incidenciaId),
-        incidenciaId
-      ),
+      incidencia: asObject(first(raw.incidencia, incidenciaPayload)),
+      ticket: asObject(first(raw.ticket, incidenciaPayload)),
+      linkedTicket: asObject(first(raw.linkedTicket, incidenciaPayload)),
 
-      relatedIncidentId: safeText(
-        first(raw.relatedIncidentId, incidenciaId),
-        incidenciaId
-      ),
-
-      supportTicketId: safeText(
-        first(raw.supportTicketId, incidenciaId),
-        incidenciaId
-      ),
-
-      caseId: safeText(
-        first(raw.caseId, incidenciaId),
-        incidenciaId
-      ),
-
-      incidencia: hasOwnKeys(raw.incidencia)
-        ? {
-            ...incidenciaPayload,
-            ...raw.incidencia,
-            id: safeText(first(raw.incidencia?.id, incidenciaId), incidenciaId),
-            ticketId: safeText(
-              first(raw.incidencia?.ticketId, incidenciaId),
-              incidenciaId
-            ),
-            incidenciaId: safeText(
-              first(raw.incidencia?.incidenciaId, incidenciaId),
-              incidenciaId
-            ),
-          }
-        : incidenciaPayload,
-
-      ticket: hasOwnKeys(raw.ticket)
-        ? {
-            ...incidenciaPayload,
-            ...raw.ticket,
-            id: safeText(first(raw.ticket?.id, incidenciaId), incidenciaId),
-            ticketId: safeText(
-              first(raw.ticket?.ticketId, incidenciaId),
-              incidenciaId
-            ),
-            incidenciaId: safeText(
-              first(raw.ticket?.incidenciaId, incidenciaId),
-              incidenciaId
-            ),
-          }
-        : incidenciaPayload,
-
-      linkedTicket: hasOwnKeys(raw.linkedTicket)
-        ? {
-            ...incidenciaPayload,
-            ...raw.linkedTicket,
-            id: safeText(first(raw.linkedTicket?.id, incidenciaId), incidenciaId),
-            ticketId: safeText(
-              first(raw.linkedTicket?.ticketId, incidenciaId),
-              incidenciaId
-            ),
-            incidenciaId: safeText(
-              first(raw.linkedTicket?.incidenciaId, incidenciaId),
-              incidenciaId
-            ),
-          }
-        : incidenciaPayload,
+      meta: {
+        ...asObject(raw.meta),
+        hasIncidencia: true,
+        hasLinkedTicket: true,
+        incidenciaId,
+        ticketId: incidenciaId,
+        linkedTicketId: incidenciaId,
+      },
     },
   };
 }
@@ -1367,29 +1320,39 @@ function preserveFacturaIncidenciaFields(normalized = {}, original = {}) {
 ========================================================= */
 
 function normalizeFacturaDetail(detail = {}) {
-  const source = safeObject(detail);
-
+  const source = asObject(detail);
   const raw = {
-    ...safeObject(source.raw),
+    ...asObject(source.raw),
   };
 
   const facturaId = getFacturaId(source);
+  const clientFromSource = first(
+    source.cliente,
+    source.client,
+    source.customer,
+    source.clienteSnapshot,
+    raw.cliente,
+    raw.client,
+    raw.customer,
+    raw.clienteSnapshot
+  );
 
-  const client =
-    isObject(source.cliente)
-      ? source.cliente
-      : isObject(source.client)
-        ? source.client
-        : isObject(source.customer)
-          ? source.customer
-          : {
-              empresa: getFacturaClient(source),
-              nombre: getFacturaClient(source),
-              nombreContacto: getFacturaClient(source),
-              name: getFacturaClient(source),
-              email: getFacturaEmail(source),
-              emailLower: getFacturaEmail(source),
-            };
+  const client = isObject(clientFromSource)
+    ? clientFromSource
+    : {
+        empresa: getFacturaClient(source),
+        razonSocial: getFacturaClient(source),
+        nombre: getFacturaClient(source),
+        nombreContacto: getFacturaClient(source),
+        name: getFacturaClient(source),
+        email: getFacturaEmail(source),
+        emailLower: getFacturaEmail(source),
+      };
+
+  const total = getFacturaTotal(source);
+  const currency = getFacturaMoneda(source);
+  const hasPdf = hasFacturaPdf(source);
+  const sent = isFacturaSent(source);
 
   const normalized = {
     ...source,
@@ -1399,11 +1362,25 @@ function normalizeFacturaDetail(detail = {}) {
     invoiceId: safeText(first(source.invoiceId, raw.invoiceId, facturaId), facturaId),
 
     numero: getFacturaNumber(source),
-    numeroFactura: safeText(first(source.numeroFactura, source.numeroFacturaLegal, raw.numeroFactura, raw.numeroFacturaLegal, getFacturaNumber(source)), getFacturaNumber(source)),
-    numeroFacturaLegal: safeText(first(source.numeroFacturaLegal, raw.numeroFacturaLegal, getFacturaNumber(source)), getFacturaNumber(source)),
-    numeroFacturaSistema: safeText(first(source.numeroFacturaSistema, raw.numeroFacturaSistema), ""),
+    numeroFactura: safeText(
+      first(
+        source.numeroFactura,
+        source.numeroFacturaLegal,
+        raw.numeroFactura,
+        raw.numeroFacturaLegal,
+        getFacturaNumber(source)
+      ),
+      getFacturaNumber(source)
+    ),
+    numeroFacturaLegal: safeText(
+      first(source.numeroFacturaLegal, raw.numeroFacturaLegal, getFacturaNumber(source)),
+      getFacturaNumber(source)
+    ),
+    numeroFacturaSistema: getFacturaSystemNumber(source),
 
     cliente: client,
+    client,
+    customer: client,
 
     clienteId: safeText(first(source.clienteId, source.cliente?.id, raw.clienteId, raw.cliente?.id), ""),
     userId: safeText(first(source.userId, raw.userId), ""),
@@ -1414,26 +1391,35 @@ function normalizeFacturaDetail(detail = {}) {
 
     estadoPago: getFacturaEstadoPago(source),
     estado: getFacturaEstado(source),
+    status: safeText(first(source.status, raw.status, getFacturaEstado(source)), getFacturaEstado(source)),
 
     formaPago: getFacturaFormaPago(source),
-    metodoPago: safeText(first(source.metodoPago, source.formaPago, raw.metodoPago, raw.formaPago, getFacturaFormaPago(source)), "—"),
+    metodoPago: safeText(
+      first(source.metodoPago, source.formaPago, raw.metodoPago, raw.formaPago, getFacturaFormaPago(source)),
+      "—"
+    ),
 
-    moneda: getFacturaMoneda(source),
-    currency: getFacturaMoneda(source),
+    moneda: currency,
+    currency,
 
-    total: getFacturaTotal(source),
-    amount: getFacturaTotal(source),
-    importe: getFacturaTotal(source),
+    total,
+    amount: total,
+    importe: total,
+    totalFactura: total,
+    facturaTotal: total,
+    invoiceAmount: total,
 
     enviadoA: getFacturaSentTo(source),
     fechaEnvio: getFacturaSentAt(source) || null,
 
-    hasPdf: hasFacturaPdf(source),
+    hasPdf,
+    pdfAvailable: hasPdf,
 
     meta: {
-      ...safeObject(source.meta),
-      hasPdf: hasFacturaPdf(source),
-      isSent: isFacturaSent(source),
+      ...asObject(source.meta),
+      hasPdf,
+      isSent: sent,
+      hasEmailSent: sent,
     },
 
     raw,
@@ -1443,7 +1429,7 @@ function normalizeFacturaDetail(detail = {}) {
 }
 
 /* =========================================================
-   INCIDENCIA OPEN PAYLOAD
+   INCIDENCIA OPEN EVENT PAYLOAD
 ========================================================= */
 
 function buildIncidenciaOpenPayload({
@@ -1464,9 +1450,7 @@ function buildIncidenciaOpenPayload({
     ""
   );
 
-  if (!id) {
-    return null;
-  }
+  if (!id) return null;
 
   const facturaId = getFacturaId(item);
   const facturaNumero = getFacturaNumber(item);
@@ -1496,41 +1480,11 @@ function buildIncidenciaOpenPayload({
     subject,
     asunto: subject,
 
-    status: safeText(
-      first(
-        relation.status,
-        relation.estado,
-        "open"
-      ),
-      "open"
-    ),
+    status: safeText(first(relation.status, relation.estado, "open"), "open"),
+    estado: safeText(first(relation.estado, relation.status, "open"), "open"),
 
-    estado: safeText(
-      first(
-        relation.estado,
-        relation.status,
-        "open"
-      ),
-      "open"
-    ),
-
-    priority: safeText(
-      first(
-        relation.priority,
-        relation.prioridad,
-        "medium"
-      ),
-      "medium"
-    ),
-
-    prioridad: safeText(
-      first(
-        relation.prioridad,
-        relation.priority,
-        "medium"
-      ),
-      "medium"
-    ),
+    priority: safeText(first(relation.priority, relation.prioridad, "medium"), "medium"),
+    prioridad: safeText(first(relation.prioridad, relation.priority, "medium"), "medium"),
 
     description: safeText(
       first(
@@ -1545,15 +1499,7 @@ function buildIncidenciaOpenPayload({
       "Incidencia relacionada con una factura."
     ),
 
-    message: safeText(
-      first(
-        relation.message,
-        relation.description,
-        relation.descripcion,
-        ""
-      ),
-      ""
-    ),
+    message: safeText(first(relation.message, relation.description, relation.descripcion, ""), ""),
 
     clientName,
     clienteNombre: clientName,
@@ -1579,41 +1525,12 @@ function buildIncidenciaOpenPayload({
     invoiceCode: facturaNumero || facturaId,
     facturaRelacionada: facturaNumero || facturaId,
 
-    createdAt: first(
-      relation.createdAt,
-      item.createdAt,
-      item.fecha,
-      null
-    ),
+    createdAt: first(relation.createdAt, item.createdAt, item.fecha, null),
+    updatedAt: first(relation.updatedAt, relation.linkedAt, item.updatedAt, item.fechaEnvio, null),
 
-    updatedAt: first(
-      relation.updatedAt,
-      relation.linkedAt,
-      item.updatedAt,
-      item.fechaEnvio,
-      null
-    ),
-
-    attachments: first(
-      relation.attachments,
-      relation.files,
-      relation.adjuntos,
-      []
-    ),
-
-    comments: first(
-      relation.comments,
-      relation.messages,
-      relation.notes,
-      []
-    ),
-
-    history: first(
-      relation.history,
-      relation.timeline,
-      relation.events,
-      []
-    ),
+    attachments: first(relation.attachments, relation.files, relation.adjuntos, []),
+    comments: first(relation.comments, relation.messages, relation.notes, []),
+    history: first(relation.history, relation.timeline, relation.events, []),
 
     raw: {
       ...relation,
@@ -1644,7 +1561,7 @@ function buildIncidenciaOpenPayload({
 }
 
 /* =========================================================
-   PDF RESPONSE HELPERS
+   BLOB / RESPONSE HELPERS
 ========================================================= */
 
 function isBlob(value) {
@@ -1659,7 +1576,8 @@ function isTypedArray(value) {
   return Boolean(
     value &&
       typeof ArrayBuffer !== "undefined" &&
-      ArrayBuffer.isView?.(value)
+      typeof ArrayBuffer.isView === "function" &&
+      ArrayBuffer.isView(value)
   );
 }
 
@@ -1673,11 +1591,11 @@ function isResponseLike(value) {
 }
 
 function getPayloadCandidates(payload = null) {
-  const obj = safeObject(payload, null);
-
-  if (!obj) {
+  if (!isObject(payload)) {
     return [payload].filter((item) => item !== undefined && item !== null);
   }
+
+  const obj = asObject(payload);
 
   return [
     payload,
@@ -1739,11 +1657,11 @@ async function extractBlobFromPayload(payload = null) {
 }
 
 function extractUrlFromPayload(payload = null) {
-  const direct = safeText(resolveFacturaPdfUrl(payload), "");
+  try {
+    const direct = safeText(resolveFacturaPdfUrl(payload), "");
 
-  if (direct) {
-    return resolveApiUrl(direct);
-  }
+    if (direct) return resolveApiUrl(direct);
+  } catch {}
 
   const candidates = getPayloadCandidates(payload);
 
@@ -1756,14 +1674,14 @@ function extractUrlFromPayload(payload = null) {
         /^https?:\/\//i.test(value) ||
         value.startsWith("/api/") ||
         value.startsWith("/facturas/") ||
-        value.startsWith("/router/")
+        value.startsWith("/router/") ||
+        value.startsWith("/")
       ) {
         return resolveApiUrl(value);
       }
     }
 
-    const obj = safeObject(candidate, null);
-
+    const obj = asObject(candidate, null);
     if (!obj) continue;
 
     const url = safeText(
@@ -1781,9 +1699,7 @@ function extractUrlFromPayload(payload = null) {
       ""
     );
 
-    if (url) {
-      return resolveApiUrl(url);
-    }
+    if (url) return resolveApiUrl(url);
   }
 
   return "";
@@ -1792,9 +1708,7 @@ function extractUrlFromPayload(payload = null) {
 function scheduleObjectUrlRevoke(url = "", delayMs = PDF_OBJECT_URL_REVOKE_MS) {
   const value = safeText(url, "");
 
-  if (!value || !value.startsWith("blob:")) {
-    return false;
-  }
+  if (!value || !value.startsWith("blob:")) return false;
 
   window.setTimeout(() => {
     try {
@@ -1834,31 +1748,20 @@ function buildSafePdfFilename(facturaId = "", detail = null) {
 
 function preopenBlankWindow() {
   try {
-    const popup = window.open("about:blank", "_blank", "noopener,noreferrer");
+    const popup = window.open("about:blank", "_blank");
 
-    if (popup) {
-      try {
-        popup.document.title = "Abriendo factura…";
-        popup.document.body.innerHTML = `
-          <div style="
-            min-height:100vh;
-            display:grid;
-            place-items:center;
-            margin:0;
-            font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-            background:#0f172a;
-            color:#e5e7eb;
-          ">
-            <div style="text-align:center">
-              <div style="font-weight:800;font-size:18px;margin-bottom:8px;">Abriendo factura…</div>
-              <div style="font-size:13px;color:#94a3b8;">Preparando PDF</div>
-            </div>
-          </div>
-        `;
-      } catch {}
-    }
+    if (!popup) return null;
 
-    return popup || null;
+    try {
+      popup.opener = null;
+    } catch {}
+
+    try {
+      popup.document.title = "Abriendo factura…";
+      popup.document.body.textContent = "Abriendo factura… Preparando PDF.";
+    } catch {}
+
+    return popup;
   } catch {
     return null;
   }
@@ -1878,9 +1781,7 @@ function closePreopenedWindow(popup = null) {
 function openUrlInNewTab(url = "", popup = null) {
   const finalUrl = assertPublicPdfTarget(url);
 
-  if (!finalUrl) {
-    return false;
-  }
+  if (!finalUrl) return false;
 
   try {
     if (popup && !popup.closed) {
@@ -1901,9 +1802,7 @@ function triggerDownloadUrl(url = "", filename = "") {
   const finalUrl = assertPublicPdfTarget(url);
   const finalFilename = safeText(filename, "factura.pdf");
 
-  if (!finalUrl) {
-    return false;
-  }
+  if (!finalUrl) return false;
 
   try {
     const anchor = document.createElement("a");
@@ -1935,34 +1834,24 @@ async function resolvePdfActionTarget({
 } = {}) {
   const id = normalizeFacturaId(facturaId);
 
+  if (!id) {
+    throw new Error("FACTURA_ID_REQUIRED");
+  }
+
   const mode =
     disposition === FACTURAS_DISPOSITIONS.INLINE
       ? FACTURAS_DISPOSITIONS.INLINE
       : FACTURAS_DISPOSITIONS.ATTACHMENT;
 
-  const endpoint = buildFacturaPdfEndpoint(id, mode);
-  const directUrl = resolveApiUrl(endpoint);
+  const directEndpoint = buildFacturaPdfEndpoint(id, mode);
+  const directUrl = resolveApiUrl(directEndpoint);
 
-  let response = null;
-  let requestError = null;
-
-  try {
-    response = await fetchFacturaPdfUrlRequest(id, mode, {
-      responseType: "auto",
-      raw: false,
-      cache: "no-store",
-      auth: true,
-    });
-  } catch (error) {
-    requestError = error;
-
-    if (isFatalHttpError(error)) {
-      throw error;
-    }
-
-    safeWarn("PDF apiClient request failed:", error);
-    throw error;
-  }
+  const response = await fetchFacturaPdfUrlRequest(id, mode, {
+    responseType: "auto",
+    raw: false,
+    cache: "no-store",
+    auth: true,
+  });
 
   const extractedUrl = extractUrlFromPayload(response);
   const publicUrl = assertPublicPdfTarget(extractedUrl);
@@ -1972,19 +1861,10 @@ async function resolvePdfActionTarget({
       url: publicUrl,
       directUrl,
       response,
-      requestError,
       isObjectUrl: publicUrl.startsWith("blob:"),
-      from: "sas-url",
+      from: "url",
       filename: buildSafePdfFilename(id, detail),
     };
-  }
-
-  if (extractedUrl && isPrivateFacturaPdfEndpoint(extractedUrl)) {
-    const error = new Error("FACTURA_PDF_PRIVATE_ENDPOINT_FALLBACK_BLOCKED");
-    error.response = response;
-    error.directUrl = directUrl;
-    error.extractedUrl = extractedUrl;
-    throw error;
   }
 
   const blob = await extractBlobFromPayload(response);
@@ -1996,11 +1876,18 @@ async function resolvePdfActionTarget({
       url: objectUrl,
       directUrl,
       response,
-      requestError,
       isObjectUrl: true,
       from: "blob",
       filename: buildSafePdfFilename(id, detail),
     };
+  }
+
+  if (extractedUrl && isPrivateFacturaPdfEndpoint(extractedUrl)) {
+    const error = new Error("FACTURA_PDF_PRIVATE_ENDPOINT_BLOCKED");
+    error.response = response;
+    error.directUrl = directUrl;
+    error.extractedUrl = extractedUrl;
+    throw error;
   }
 
   const error = new Error("FACTURA_PDF_TARGET_MISSING");
@@ -2026,6 +1913,7 @@ function buildCsvRows(items = []) {
   const header = [
     "id",
     "numero",
+    "numeroSistema",
     "cliente",
     "email",
     "fechaFactura",
@@ -2047,7 +1935,7 @@ function buildCsvRows(items = []) {
 
   const rows = safeArray(items).map((item) => {
     const normalized = normalizeFacturaDetail(item);
-    const incidencia = safeObject(normalized.incidencia);
+    const incidencia = asObject(normalized.incidencia);
 
     const fecha = getFacturaDate(normalized);
     const fechaEnvio = getFacturaSentAt(normalized);
@@ -2055,6 +1943,7 @@ function buildCsvRows(items = []) {
     return [
       getFacturaId(normalized),
       getFacturaNumber(normalized),
+      getFacturaSystemNumber(normalized),
       getFacturaClient(normalized),
       getFacturaEmail(normalized),
       safeDateIso(fecha),
@@ -2084,10 +1973,7 @@ function buildCsvRows(items = []) {
 
 async function writeClipboardText(text = "") {
   const value = safeText(text, "");
-
-  if (!value) {
-    return false;
-  }
+  if (!value) return false;
 
   try {
     if (navigator?.clipboard?.writeText) {
@@ -2101,10 +1987,7 @@ async function writeClipboardText(text = "") {
 
     textarea.value = value;
     textarea.setAttribute("readonly", "true");
-    textarea.style.position = "fixed";
-    textarea.style.insetBlockStart = "-9999px";
-    textarea.style.opacity = "0";
-    textarea.style.pointerEvents = "none";
+    textarea.className = "sr-only";
 
     document.body.appendChild(textarea);
     textarea.focus();
@@ -2156,17 +2039,13 @@ export function getFacturaDetailFromStoreAction({
 } = {}) {
   const id = normalizeFacturaId(facturaId);
 
-  if (!id) {
-    return null;
-  }
+  if (!id) return null;
 
   try {
     const detail = getFacturaByIdStore(id);
     const picked = pickDetail(detail);
 
-    if (!picked) {
-      return null;
-    }
+    if (!picked) return null;
 
     return normalizeFacturaDetail(picked);
   } catch (error) {
@@ -2184,10 +2063,7 @@ export async function getFacturaDetailAction({
   const id = normalizeFacturaId(facturaId);
 
   if (!id) {
-    if (!silent) {
-      showToast("No se pudo resolver la factura.", "error");
-    }
-
+    if (!silent) showToast("No se pudo resolver la factura.", "error");
     return null;
   }
 
@@ -2205,13 +2081,10 @@ export async function getFacturaDetailAction({
       source: typeof loadFacturaDetail === "function" ? "loader" : "store",
     });
 
-    let detail = null;
-
-    if (typeof loadFacturaDetail === "function") {
-      detail = await loadFacturaDetail(id);
-    } else {
-      detail = fallbackStoreDetail;
-    }
+    const detail =
+      typeof loadFacturaDetail === "function"
+        ? await loadFacturaDetail(id)
+        : fallbackStoreDetail;
 
     const picked = pickDetail(detail);
 
@@ -2273,10 +2146,7 @@ export async function openFacturaAction({
   const id = normalizeFacturaId(facturaId);
 
   if (!id) {
-    if (!silent) {
-      showToast("Factura inválida.", "error");
-    }
-
+    if (!silent) showToast("Factura inválida.", "error");
     return null;
   }
 
@@ -2322,7 +2192,7 @@ export async function refreshFacturaDetailAction({
 }
 
 /* =========================================================
-   INCIDENCIA ACTION
+   INCIDENCIA EVENT ACTION
 ========================================================= */
 
 export async function openFacturaIncidenciaAction({
@@ -2334,12 +2204,11 @@ export async function openFacturaIncidenciaAction({
 } = {}) {
   const id = normalizeFacturaId(facturaId);
 
-  const factura =
-    isLikelyFactura(detail)
-      ? normalizeFacturaDetail(detail)
-      : id
-        ? getFacturaDetailFromStoreAction({ facturaId: id })
-        : null;
+  const factura = isLikelyFactura(detail)
+    ? normalizeFacturaDetail(detail)
+    : id
+      ? getFacturaDetailFromStoreAction({ facturaId: id })
+      : null;
 
   const finalTicketId = safeText(
     first(
@@ -2352,10 +2221,7 @@ export async function openFacturaIncidenciaAction({
 
   if (!finalTicketId) {
     if (!silent) {
-      showToast(
-        "No se pudo identificar la incidencia relacionada.",
-        "error"
-      );
+      showToast("No se pudo identificar la incidencia relacionada.", "error");
     }
 
     return null;
@@ -2368,10 +2234,7 @@ export async function openFacturaIncidenciaAction({
 
   if (!incidenciaDetail) {
     if (!silent) {
-      showToast(
-        "No se pudo preparar la incidencia relacionada.",
-        "error"
-      );
+      showToast("No se pudo preparar la incidencia relacionada.", "error");
     }
 
     return null;
@@ -2408,10 +2271,7 @@ export async function openFacturaPdfAction({
   const id = normalizeFacturaId(facturaId);
 
   if (!id) {
-    if (!silent) {
-      showToast("Factura inválida.", "error");
-    }
-
+    if (!silent) showToast("Factura inválida.", "error");
     return null;
   }
 
@@ -2425,10 +2285,16 @@ export async function openFacturaPdfAction({
       mode: FACTURAS_DISPOSITIONS.INLINE,
     });
 
+    const storeDetail =
+      detail ||
+      getFacturaDetailFromStoreAction({
+        facturaId: id,
+      });
+
     const target = await resolvePdfActionTarget({
       facturaId: id,
       disposition: FACTURAS_DISPOSITIONS.INLINE,
-      detail,
+      detail: storeDetail,
     });
 
     if (!target?.url) {
@@ -2513,10 +2379,7 @@ export async function downloadFacturaPdfAction({
   const id = normalizeFacturaId(facturaId);
 
   if (!id) {
-    if (!silent) {
-      showToast("Factura inválida.", "error");
-    }
-
+    if (!silent) showToast("Factura inválida.", "error");
     return null;
   }
 
@@ -2627,10 +2490,7 @@ export async function sendFacturaToClientAction({
   const id = normalizeFacturaId(facturaId);
 
   if (!id) {
-    if (!silent) {
-      showToast("Factura inválida.", "error");
-    }
-
+    if (!silent) showToast("Factura inválida.", "error");
     return null;
   }
 
@@ -2646,6 +2506,7 @@ export async function sendFacturaToClientAction({
       factura?.cliente?.email,
       factura?.cliente?.emailLower,
       factura?.emailCliente,
+      factura?.clienteEmail,
       factura?.enviadoA
     ),
     "el cliente"
@@ -2734,16 +2595,11 @@ export async function copyFacturaIdAction({
   numero = "",
   silent = false,
 } = {}) {
-  const value =
-    safeText(numero, "") ||
-    safeText(facturaId, "");
+  const value = safeText(numero, "") || safeText(facturaId, "");
 
   if (!value) {
     if (!silent) {
-      showToast(
-        "No se encontró identificador para copiar.",
-        "info"
-      );
+      showToast("No se encontró identificador para copiar.", "info");
     }
 
     return false;
@@ -2753,10 +2609,7 @@ export async function copyFacturaIdAction({
 
   if (!ok) {
     if (!silent) {
-      showToast(
-        "No se pudo copiar el identificador.",
-        "error"
-      );
+      showToast("No se pudo copiar el identificador.", "error");
     }
 
     return false;
@@ -2815,10 +2668,7 @@ export function exportFacturasCsvAction({
     safeEmit("facturas:exported", {
       total: safeList.length,
       filename,
-      filenamePrefix: safeText(
-        filenamePrefix,
-        CSV_FILENAME_PREFIX
-      ),
+      filenamePrefix: safeText(filenamePrefix, CSV_FILENAME_PREFIX),
     });
 
     if (!silent) {

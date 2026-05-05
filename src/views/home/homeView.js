@@ -3,7 +3,7 @@
    Archivo: src/views/home/HomeView.js
 
    HOME EXPERIENCE MODE · USER + ADMIN · DASHBOARD API FIRST
-   EXTREME PRO SYSTEM · FINAL PATCH 13/10
+   EXTREME PRO SYSTEM · CLEAN VIEW · NO CSS · NO DUPLICATES
 
    RESPONSABILIDADES:
    - punto de entrada real de la vista Home
@@ -28,14 +28,14 @@
    - evitar que refresh empobrezca el Home si API devuelve parcial
    - trabajar alineado con el template Home premium
 
-   HARDENING PRO:
+   HARDENING:
    - View = UX, render, eventos, bridges y fallbacks de módulo
    - API = request, normalización, dashboard summary y collections
    - estado local autocontenido
    - anti-race token
    - cleanup total
    - click delegation sólida
-   - fallback si /api/dashboard/summary no entrega tickets/clientes/usuarios/facturas
+   - fallback si /api/dashboard/summary no entrega colecciones completas
    - anti spam click en crear incidencia
    - anti spam apertura rápida de tickets
    - compatible con template data-home-action y data-action
@@ -43,6 +43,13 @@
    - eventos AppCore + window
    - bridge AppCore.modules + window
    - modal directo por import + fallback global
+
+   CLEAN PATCH:
+   - sin CSS inline
+   - sin <style>
+   - sin Object.assign(style)
+   - sin helpers duplicados con imports
+   - sin imports de selectors que colisionen con helpers locales
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -62,9 +69,7 @@ import {
   hydrateFromCache as hydrateIncidenciasFromCache,
 } from "../incidencias/incidencias.api.js";
 
-import {
-  getIncidencias,
-} from "../incidencias/incidencias.store.js";
+import { getIncidencias } from "../incidencias/incidencias.store.js";
 
 import {
   normalizeIncidenciasCollection,
@@ -94,7 +99,7 @@ export const HomeView = (() => {
   const CREATE_CLICK_THROTTLE_MS = 450;
   const OPEN_TICKET_THROTTLE_MS = 350;
 
-  const HOME_CACHE_KEY = "onion.home.view.cache.v4";
+  const HOME_CACHE_KEY = "onion.home.view.cache.v5";
   const HOME_CACHE_TTL_MS = 1000 * 60 * 10;
 
   const OPTIONAL_IMPORT_TIMEOUT_MS = 7000;
@@ -303,11 +308,10 @@ export const HomeView = (() => {
         const lastComma = normalized.lastIndexOf(",");
         const lastDot = normalized.lastIndexOf(".");
 
-        if (lastComma > lastDot) {
-          normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
-        } else {
-          normalized = normalized.replace(/,/g, "");
-        }
+        normalized =
+          lastComma > lastDot
+            ? normalized.replace(/\./g, "").replace(/,/g, ".")
+            : normalized.replace(/,/g, "");
       } else if (hasComma) {
         normalized = normalized.replace(/,/g, ".");
       }
@@ -335,7 +339,6 @@ export const HomeView = (() => {
   function first(...values) {
     for (const value of values) {
       if (value === undefined || value === null) continue;
-
       if (typeof value === "string" && value.trim() === "") continue;
       if (Array.isArray(value) && value.length === 0) continue;
       if (isObject(value) && Object.keys(value).length === 0) continue;
@@ -374,25 +377,23 @@ export const HomeView = (() => {
   }
 
   function uniqueBy(items = [], picker = (item) => item) {
-    const rows = safeArray(items);
     const seen = new Set();
     const output = [];
 
-    for (const item of rows) {
+    safeArray(items).forEach((item) => {
       const key = safeText(picker(item), "");
 
       if (!key) {
         output.push(item);
-        continue;
+        return;
       }
 
       const normalized = normalizeText(key);
-
-      if (seen.has(normalized)) continue;
+      if (seen.has(normalized)) return;
 
       seen.add(normalized);
       output.push(item);
-    }
+    });
 
     return output;
   }
@@ -694,7 +695,7 @@ export const HomeView = (() => {
     );
   }
 
-  function isAdminRole(role = "") {
+  function isAdminRoleKey(role = "") {
     const key = normalizeKey(role);
 
     return [
@@ -778,7 +779,7 @@ export const HomeView = (() => {
      ROUTES
   ========================================================= */
 
-  function normalizeRoute(route = "") {
+  function normalizeSpaRoute(route = "") {
     const raw = safeText(route, "");
 
     if (!raw) return "";
@@ -803,8 +804,7 @@ export const HomeView = (() => {
         }
 
         const url = new URL(raw);
-
-        return normalizeRoute(`${url.pathname}${url.search || ""}${url.hash || ""}`);
+        return normalizeSpaRoute(`${url.pathname}${url.search || ""}${url.hash || ""}`);
       } catch {
         return raw;
       }
@@ -851,7 +851,7 @@ export const HomeView = (() => {
   }
 
   async function navigateTo(route = "", options = {}) {
-    const target = normalizeRoute(route);
+    const target = normalizeSpaRoute(route);
     if (!target) return false;
 
     const opts = safeObject(options);
@@ -951,10 +951,7 @@ export const HomeView = (() => {
         },
       };
 
-      window.localStorage.setItem(
-        HOME_CACHE_KEY,
-        JSON.stringify(payload)
-      );
+      window.localStorage.setItem(HOME_CACHE_KEY, JSON.stringify(payload));
 
       return true;
     } catch {
@@ -980,30 +977,11 @@ export const HomeView = (() => {
     homeState.clients = safeArray(state.clients);
     homeState.activity = safeArray(state.activity);
 
-    homeState.remoteCount = safeNumber(
-      state.remoteCount,
-      homeState.tickets.length
-    );
-
-    homeState.ticketsRemoteCount = safeNumber(
-      state.ticketsRemoteCount,
-      homeState.tickets.length
-    );
-
-    homeState.invoicesRemoteCount = safeNumber(
-      state.invoicesRemoteCount,
-      homeState.invoices.length
-    );
-
-    homeState.usersRemoteCount = safeNumber(
-      state.usersRemoteCount,
-      homeState.users.length
-    );
-
-    homeState.clientsRemoteCount = safeNumber(
-      state.clientsRemoteCount,
-      homeState.clients.length
-    );
+    homeState.remoteCount = safeNumber(state.remoteCount, homeState.tickets.length);
+    homeState.ticketsRemoteCount = safeNumber(state.ticketsRemoteCount, homeState.tickets.length);
+    homeState.invoicesRemoteCount = safeNumber(state.invoicesRemoteCount, homeState.invoices.length);
+    homeState.usersRemoteCount = safeNumber(state.usersRemoteCount, homeState.users.length);
+    homeState.clientsRemoteCount = safeNumber(state.clientsRemoteCount, homeState.clients.length);
 
     homeState.requestId = safeText(state.requestId, "");
     homeState.lastSyncAt = safeText(state.lastSyncAt, "");
@@ -1170,10 +1148,7 @@ export const HomeView = (() => {
 
   function buildCollectionInput(items = [], remoteCount = 0) {
     const list = safeArray(items);
-    const total = Math.max(
-      list.length,
-      safeNumber(remoteCount, list.length)
-    );
+    const total = Math.max(list.length, safeNumber(remoteCount, list.length));
 
     return {
       items: list,
@@ -1492,7 +1467,7 @@ export const HomeView = (() => {
     ]);
   }
 
-  function getTicketUpdatedAt(item = {}) {
+  function getTicketUpdatedAtLocal(item = {}) {
     return first(
       item.updatedAt,
       item.lastUpdateAt,
@@ -1516,7 +1491,7 @@ export const HomeView = (() => {
     );
   }
 
-  function getTicketCreatedAt(item = {}) {
+  function getTicketCreatedAtLocal(item = {}) {
     return first(
       item.createdAt,
       item.fechaCreacion,
@@ -1532,7 +1507,7 @@ export const HomeView = (() => {
     );
   }
 
-  function getTicketSubject(item = {}) {
+  function getTicketSubjectLocal(item = {}) {
     return safeText(
       first(
         item.subject,
@@ -1551,7 +1526,7 @@ export const HomeView = (() => {
     );
   }
 
-  function getTicketStatus(item = {}) {
+  function getTicketStatusLocal(item = {}) {
     return safeText(
       first(
         item.status,
@@ -1570,8 +1545,8 @@ export const HomeView = (() => {
     );
   }
 
-  function getTicketStatusKey(item = {}) {
-    const key = normalizeKey(getTicketStatus(item));
+  function getTicketStatusKeyLocal(item = {}) {
+    const key = normalizeKey(getTicketStatusLocal(item));
 
     if (["pending", "pendiente", "new", "nueva", "nuevo", "created"].includes(key)) {
       return "pending";
@@ -1622,8 +1597,8 @@ export const HomeView = (() => {
     return "pending";
   }
 
-  function getTicketStatusLabel(item = {}) {
-    const key = getTicketStatusKey(item);
+  function getTicketStatusLabelLocal(item = {}) {
+    const key = getTicketStatusKeyLocal(item);
 
     if (key === "open") return "Abierta";
     if (key === "pending") return "Pendiente";
@@ -1631,7 +1606,7 @@ export const HomeView = (() => {
     if (key === "resolved") return "Resuelta";
     if (key === "closed") return "Cerrada";
 
-    return safeText(getTicketStatus(item), "Pendiente");
+    return safeText(getTicketStatusLocal(item), "Pendiente");
   }
 
   function getInvoiceId(item = {}) {
@@ -1786,7 +1761,7 @@ export const HomeView = (() => {
     );
   }
 
-  function formatMoney(value = 0, currency = "EUR") {
+  function formatMoneyLocal(value = 0, currency = "EUR") {
     const amount = Number(value);
 
     if (!Number.isFinite(amount)) {
@@ -1928,9 +1903,9 @@ export const HomeView = (() => {
 
         return {
           type: "ticket",
-          title: getTicketSubject(item),
-          text: `Incidencia ${ticketId || "sin ID"} · ${getTicketStatusLabel(item)}`,
-          date: getTicketUpdatedAt(item) || getTicketCreatedAt(item),
+          title: getTicketSubjectLocal(item),
+          text: `Incidencia ${ticketId || "sin ID"} · ${getTicketStatusLabelLocal(item)}`,
+          date: getTicketUpdatedAtLocal(item) || getTicketCreatedAtLocal(item),
           route: ROUTES.INCIDENCIAS,
           action: "open-ticket",
           entityId: ticketId,
@@ -1947,7 +1922,7 @@ export const HomeView = (() => {
         return {
           type: "invoice",
           title: invoiceId ? `Factura ${invoiceId}` : "Factura registrada",
-          text: formatMoney(amount, currency),
+          text: formatMoneyLocal(amount, currency),
           date: first(
             item.updatedAt,
             item.modifiedAt,
@@ -2213,10 +2188,12 @@ export const HomeView = (() => {
       usuariosCount: usersCount,
       totalUsers: usersCount,
       totalUsuarios: usersCount,
+
       activeUsers: Math.max(
         usersCount,
         safeNumber(first(summary.activeUsers, summary.usuariosActivos, 0), 0)
       ),
+
       usuariosActivos: Math.max(
         usersCount,
         safeNumber(first(summary.activeUsers, summary.usuariosActivos, 0), 0)
@@ -2228,10 +2205,12 @@ export const HomeView = (() => {
       totalClients: clientsCount,
       totalClientes: clientsCount,
       totalCustomers: clientsCount,
+
       activeClients: Math.max(
         clientsCount,
         safeNumber(first(summary.activeClients, summary.clientesActivos, 0), 0)
       ),
+
       clientesActivos: Math.max(
         clientsCount,
         safeNumber(first(summary.activeClients, summary.clientesActivos, 0), 0)
@@ -2450,7 +2429,7 @@ export const HomeView = (() => {
       homeState.clients = clients;
     }
 
-    const ticketsRemoteCount = Math.max(
+    homeState.ticketsRemoteCount = Math.max(
       homeState.tickets.length,
       getRemoteCountFromCollection(ticketsSource, homeState.tickets.length),
       safeNumber(
@@ -2473,7 +2452,7 @@ export const HomeView = (() => {
       )
     );
 
-    const invoicesRemoteCount = Math.max(
+    homeState.invoicesRemoteCount = Math.max(
       homeState.invoices.length,
       getRemoteCountFromCollection(invoicesSource, homeState.invoices.length),
       safeNumber(
@@ -2496,7 +2475,7 @@ export const HomeView = (() => {
       )
     );
 
-    const usersRemoteCount = Math.max(
+    homeState.usersRemoteCount = Math.max(
       homeState.users.length,
       getRemoteCountFromCollection(usersSource, homeState.users.length),
       safeNumber(
@@ -2521,7 +2500,7 @@ export const HomeView = (() => {
       )
     );
 
-    const clientsRemoteCount = Math.max(
+    homeState.clientsRemoteCount = Math.max(
       homeState.clients.length,
       getRemoteCountFromCollection(clientsSource, homeState.clients.length),
       safeNumber(
@@ -2550,14 +2529,9 @@ export const HomeView = (() => {
 
     homeState.remoteCount = Math.max(
       homeState.remoteCount,
-      ticketsRemoteCount,
+      homeState.ticketsRemoteCount,
       homeState.tickets.length
     );
-
-    homeState.ticketsRemoteCount = ticketsRemoteCount;
-    homeState.invoicesRemoteCount = invoicesRemoteCount;
-    homeState.usersRemoteCount = usersRemoteCount;
-    homeState.clientsRemoteCount = clientsRemoteCount;
 
     if (activity.length || !preserveExisting) {
       homeState.activity = activity.length ? activity : buildActivityFromData();
@@ -3087,27 +3061,18 @@ export const HomeView = (() => {
     const anchor =
       container.querySelector(".home-tickets .home-panel-head") ||
       container.querySelector(".home-panel-head") ||
+      container.querySelector(".home-view-wrapper") ||
       container.querySelector(".content-wrapper");
 
     if (!anchor) return;
 
     const banner = document.createElement("div");
+
+    banner.className = "home-error-banner";
     banner.setAttribute("data-home-error-banner", "true");
-
-    Object.assign(banner.style, {
-      margin: "0 18px 14px",
-      padding: "11px 13px",
-      borderRadius: "14px",
-      border:
-        "1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 22%, var(--border-soft, rgba(15,23,42,.08)))",
-      background:
-        "linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 6%, transparent), transparent), var(--surface-1, rgba(255,255,255,.78))",
-      color: "var(--text-soft, #4b5563)",
-      fontSize: "12px",
-      lineHeight: "1.5",
-    });
-
+    banner.setAttribute("role", "status");
     banner.textContent = message;
+
     anchor.insertAdjacentElement("afterend", banner);
   }
 
@@ -3127,7 +3092,7 @@ export const HomeView = (() => {
         "error",
         () => {
           try {
-            img.style.display = "none";
+            img.hidden = true;
             img.closest("[data-avatar-root='true']")?.setAttribute("data-fallback", "true");
           } catch {}
         },
@@ -3281,7 +3246,7 @@ export const HomeView = (() => {
         data-view="home"
         data-home-scope="${SCOPE}"
       >
-        <div class="content-wrapper" style="display:grid;gap:var(--space-lg);min-width:0;max-width:100%;">
+        <div class="content-wrapper home-view-wrapper">
           ${renderHomeTemplate({
             user,
             role,
@@ -3911,7 +3876,7 @@ export const HomeView = (() => {
 
   async function handleNavigateAction(action = "", route = "") {
     const actionName = safeText(action, "navigate");
-    const target = normalizeRoute(route);
+    const target = normalizeSpaRoute(route);
 
     if (!target) return false;
 
@@ -4084,7 +4049,7 @@ export const HomeView = (() => {
   function getRouteFromElement(element = null) {
     if (!element) return "";
 
-    return normalizeRoute(
+    return normalizeSpaRoute(
       first(
         element.dataset?.route,
         element.dataset?.href,
@@ -4501,11 +4466,11 @@ export const HomeView = (() => {
     cleanups.push(attachExternalListeners());
 
     bindingsCleanup = () => {
-      for (const cleanup of cleanups) {
+      cleanups.forEach((cleanup) => {
         try {
           cleanup?.();
         } catch {}
-      }
+      });
     };
   }
 
@@ -4702,7 +4667,7 @@ export const HomeView = (() => {
 
         user: getCurrentUser(),
         role: getCurrentRole(),
-        isAdmin: isAdminRole(getCurrentRole()),
+        isAdmin: isAdminRoleKey(getCurrentRole()),
 
         initialized,
         destroyed,

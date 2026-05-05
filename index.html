@@ -7,6 +7,7 @@
   data-theme-mode="system"
   data-theme-source="initial"
   data-route-mode="boot"
+  data-shell-state="booting"
   class="app-booting app-loading theme-dark"
 >
 <head>
@@ -14,9 +15,9 @@
        ONION SUPPORT — INDEX / SPA SHELL
        Archivo: /index.html
 
-       PRO SAAS PANEL · SPA PRIVATE APP · BOOT LOADER READY
-       CSP CLEAN · ZERO INLINE JS/CSS · NO EXTERNAL FONTS
-       CSS ENTRYPOINT READY · TOKEN PRO SYSTEM
+       PRO SAAS PANEL · PRIVATE SPA · ENTERPRISE BOOT SHELL
+       CSP READY · ZERO INLINE JS/CSS · NO EXTERNAL FONTS
+       TOKEN PRO SYSTEM · STATIC LOADER · THEME PREBOOT
        FINAL EXTREME 10/10
 
        OBJETIVOS:
@@ -33,8 +34,8 @@
        - restore de sesión sin flash visual
        - URLs SPA resueltas por Azure Static Web Apps
        - no indexar rutas privadas/auth/técnicas
-       - favicon real sin preload innecesario
-       - base enterprise estable
+       - favicon real sin manifest fantasma
+       - preparado para CSP estricta vía headers
 
        IMPORTANTE:
        - /src/preboot/theme.js debe ser JS puro.
@@ -43,6 +44,8 @@
        - /src/css/app.css importa tokens/core/layout/components/views/auth.
        - index.html debe empezar siempre por <!DOCTYPE html>.
        - Las fuentes se resuelven desde variables.css con stack system-ui.
+       - La CSP real debe aplicarse preferentemente desde headers,
+         por ejemplo staticwebapp.config.json en Azure Static Web Apps.
   ========================================================= -->
 
   <!-- =========================
@@ -77,20 +80,28 @@
     content="Onion Support · Panel privado SaaS de soporte, incidencias, facturación y gestión interna."
   >
 
-  <!-- App privada: no indexar panel/auth/rutas SPA -->
+  <meta
+    name="generator"
+    content="Onion Support SPA"
+  >
+
+  <!-- =========================
+       PRIVACY / INDEXING
+       App privada: no indexar panel/auth/rutas SPA.
+  ========================= -->
   <meta
     name="robots"
-    content="noindex, nofollow, noarchive, noimageindex"
+    content="noindex, nofollow, noarchive, noimageindex, nosnippet"
   >
 
   <meta
     name="googlebot"
-    content="noindex, nofollow, noarchive, noimageindex"
+    content="noindex, nofollow, noarchive, noimageindex, nosnippet"
   >
 
   <meta
     name="bingbot"
-    content="noindex, nofollow, noarchive, noimageindex"
+    content="noindex, nofollow, noarchive, noimageindex, nosnippet"
   >
 
   <meta
@@ -103,6 +114,10 @@
     content="telephone=no, date=no, address=no, email=no"
   >
 
+  <!-- =========================
+       THEME / BROWSER CHROME
+       El valor real se puede actualizar desde theme.js / runtime.
+  ========================= -->
   <meta
     name="color-scheme"
     content="dark light"
@@ -136,13 +151,14 @@
 
   <!-- =========================
        BASE SPA
+       Correcto para Azure Static Web Apps sirviendo desde raíz.
   ========================= -->
   <base href="/">
 
   <!-- =========================
        FAVICON / APP ICONS
        Sin manifest hasta crear /site.webmanifest real.
-       Esto evita 404 de manifest en consola.
+       Esto evita 404 innecesarios en consola.
   ========================= -->
   <link
     rel="icon"
@@ -167,18 +183,10 @@
        Sin fuentes externas.
   ========================= -->
 
-  <!-- Loader logos: se usan inmediatamente en el boot loader -->
+  <!-- Loader principal inicial: Onion arranca en dark como estado defensivo -->
   <link
     rel="preload"
     href="/src/media/img/favicon_white.png"
-    as="image"
-    type="image/png"
-    fetchpriority="high"
-  >
-
-  <link
-    rel="preload"
-    href="/src/media/img/favicon_black.png"
     as="image"
     type="image/png"
     fetchpriority="high"
@@ -192,12 +200,17 @@
 
   <!-- =========================
        PREBOOT THEME
-       CSP CLEAN:
+       CSP READY:
        - externo
        - síncrono
        - antes del CSS final
        - resuelve data-theme real:
          dark/light según system o storage
+
+       NOTA:
+       - En head normalmente document.body aún no existe.
+       - theme.js debe actualizar document.documentElement.
+       - main.js/theme runtime debe sincronizar body después.
   ========================= -->
   <script src="/src/preboot/theme.js"></script>
 
@@ -213,7 +226,7 @@
        - layout/sidebar.css
        - layout/topbar.css
        - components/ui.css
-       - views/facturas.css
+       - views/*.css
        - auth/login.css
 
        IMPORTANTE:
@@ -228,7 +241,7 @@
 
   <!-- =========================
        NOSCRIPT CSS EXTERNO
-       CSP CLEAN:
+       CSP READY:
        - sin <style> inline
        - separado porque solo aplica sin JS
   ========================= -->
@@ -243,6 +256,7 @@
 <body
   class="app-booting app-loading theme-dark"
   data-app="onion"
+  data-app-name="Onion Support"
   data-density="default"
   data-app-loading="true"
   data-authenticated="false"
@@ -253,12 +267,26 @@
   data-theme-source="initial"
 >
   <!-- =========================================================
+       ACCESSIBILITY · SKIP LINK
+       Requiere estilos globales tipo .sr-only / .sr-only-focusable.
+       Si no existen, puede añadirse soporte en core.css/layout.css.
+  ========================================================= -->
+  <a
+    class="sr-only sr-only-focusable app-skip-link"
+    href="#main-content"
+    data-skip-link="true"
+  >
+    Saltar al contenido principal
+  </a>
+
+  <!-- =========================================================
        BOOT LOADER ESTÁTICO
        - visible desde refresh antes de JS
        - controlado después por loader.js / main.js
        - sin inline script
        - sin inline style
        - logos dependientes de html[data-theme]
+       - fallback textual/accesible estable
   ========================================================= -->
   <div
     id="app-loader"
@@ -306,7 +334,7 @@
           height="64"
           loading="eager"
           decoding="async"
-          fetchpriority="high"
+          fetchpriority="auto"
           draggable="false"
         >
 
@@ -344,11 +372,14 @@
 
   <!-- =========================================================
        NOSCRIPT FALLBACK
+       Si JS está desactivado, noscript.css debe:
+       - ocultar loader si procede
+       - mostrar layout noscript de forma usable
   ========================================================= -->
   <noscript>
     <div class="layout noscript-layout">
       <main
-        class="main-content"
+        class="main-content noscript-main"
         role="main"
         aria-label="Contenido principal"
       >
@@ -373,6 +404,7 @@
        - Tablehead dinámico preparado
        - View root estable para Router
        - Loader inicial ya existe y lo controla JS
+       - El layout debe reservar ancho sidebar desde CSS/tokens
   ========================================================= -->
   <div
     id="app-shell"
@@ -380,24 +412,31 @@
     data-app-shell="true"
     data-shell="booting"
     data-route-mode="boot"
+    data-shell-interactive="false"
     aria-busy="true"
     aria-hidden="false"
   >
-    <!-- SIDEBAR MOUNT -->
+    <!-- =========================
+         SIDEBAR MOUNT
+    ========================= -->
     <div
       id="sidebar-mount"
       data-sidebar-mount="true"
       aria-hidden="false"
     ></div>
 
-    <!-- TOPBAR MOUNT -->
+    <!-- =========================
+         TOPBAR MOUNT
+    ========================= -->
     <div
       id="topbar-mount"
       data-topbar-mount="true"
       aria-hidden="false"
     ></div>
 
-    <!-- MAIN CONTENT -->
+    <!-- =========================
+         MAIN CONTENT
+    ========================= -->
     <main
       id="main-content"
       class="main-content"
@@ -408,7 +447,9 @@
       data-main-content="true"
       data-route-mode="boot"
     >
-      <!-- TABLEHEAD DYNAMIC SLOT -->
+      <!-- =========================
+           TABLEHEAD DYNAMIC SLOT
+      ========================= -->
       <div
         id="table-head"
         class="table-head"
@@ -422,7 +463,9 @@
         ></div>
       </div>
 
-      <!-- VIEW ROOT -->
+      <!-- =========================
+           VIEW ROOT
+      ========================= -->
       <div
         id="app-content"
         data-app-content="true"
@@ -440,7 +483,7 @@
 
   <!-- =========================
        APP ENTRY
-       CSP CLEAN:
+       CSP READY:
        - módulo externo
        - sin inline bootstrap
   ========================= -->

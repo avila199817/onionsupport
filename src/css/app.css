@@ -3,12 +3,32 @@
    Archivo: /src/css/app.css
 
    CSS ENTRYPOINT · TOKEN PRO SYSTEM · SPA PRIVATE APP
-   - Punto único de entrada CSS
-   - Orden de cascada controlado
-   - Sin CSS inline
-   - Sin Google Fonts
-   - Sin estilos inyectados por JS
-   - Compatible CSP real
+   FINAL PRO SYSTEM · CSP CLEAN · CASCADE LAYERS · 10/10
+
+   RESPONSABILIDADES:
+   - Punto único de entrada CSS de la SPA privada
+   - Orden de cascada controlado por @layer
+   - Cargar tokens antes que cualquier componente/vista
+   - Cargar reset/core/layout antes de componentes
+   - Cargar componentes globales antes de vistas
+   - Cargar vistas privadas mediante entrypoints propios
+   - Mantener CSP limpio:
+     · sin CSS inline
+     · sin estilos inyectados por JS
+     · sin Google Fonts
+   - Mantener Facturas partido en:
+     · /views/facturas/index.css
+     · /views/facturas/create.css
+     · /views/facturas/detail.css
+
+   ORDEN DE CASCADA:
+   tokens < reset < core < layout < components < views < auth
+
+   NOTA FACTURAS:
+   app.css solo importa /views/facturas/index.css.
+   El archivo /views/facturas/index.css es el entrypoint interno
+   de la vista Facturas y debe importar create.css/detail.css si
+   esos parciales no se cargan desde otro sitio.
 ========================================================= */
 
 
@@ -23,6 +43,7 @@
 
 /* =========================================================
    TOKENS · DESIGN SYSTEM
+   Fuente de verdad visual del sistema.
 ========================================================= */
 
 @import url("./tokens/variables.css") layer(tokens);
@@ -31,6 +52,7 @@
 
 /* =========================================================
    CORE
+   Reset, estructura base, shell, loader y reglas base.
 ========================================================= */
 
 @import url("./core/reset.css") layer(reset);
@@ -41,6 +63,7 @@
 
 /* =========================================================
    LAYOUT
+   Chrome privado de la SPA.
 ========================================================= */
 
 @import url("./layout/sidebar.css") layer(layout);
@@ -49,6 +72,7 @@
 
 /* =========================================================
    COMPONENTS
+   Componentes globales reutilizables.
 ========================================================= */
 
 @import url("./components/ui.css") layer(components);
@@ -56,18 +80,25 @@
 
 /* =========================================================
    VIEWS
+   Vistas privadas de la SPA.
 ========================================================= */
 
-@import url("./views/facturas.css") layer(views);
+@import url("./views/facturas/index.css") layer(views);
 
 
-/* Cuando montemos incidencias.css:
-@import url("./views/incidencias.css") layer(views);
+/* =========================================================
+   FUTURE VIEWS
+   Activar cuando exista el archivo definitivo.
+========================================================= */
+
+/*
+@import url("./views/incidencias/index.css") layer(views);
 */
 
 
 /* =========================================================
    AUTH / PUBLIC TECHNICAL VIEWS
+   Login y pantallas públicas/técnicas.
 ========================================================= */
 
 @import url("./auth/login.css") layer(auth);

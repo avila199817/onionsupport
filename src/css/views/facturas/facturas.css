@@ -3,7 +3,7 @@
    Archivo: /src/css/views/facturas.css
 
    FACTURAS VIEW · TOKEN PRO SYSTEM · CSP CLEAN · FULL POWER
-   FINAL EXTREME 10/10 · NO CSS IN JS · NO INLINE STYLE REQUIRED
+   FINAL EXTREME CLEAN 10/10 · NO CSS IN JS · NO INLINE STYLE REQUIRED
 
    - CSS externo de la vista Facturas
    - Sin <style> inyectado desde JS
@@ -14,7 +14,9 @@
    - Avatar tones por clases, no style=""
    - Status / chips por clases, no style=""
    - Compatible con variables.css + light.css
-   - Fix definitivo del recuadro detrás de pills activos
+   - Hover sin cambio de color destructivo
+   - Sin rayas verticales entre columnas
+   - Filtros/sort pills limpios y premium
 ========================================================= */
 
 
@@ -34,36 +36,26 @@
   --fac-avatar-b: var(--info);
   --fac-avatar-bg: linear-gradient(135deg, var(--fac-avatar-a), var(--fac-avatar-b));
 
-  --fac-premium-ring:
-    0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent),
-    0 18px 52px color-mix(in srgb, var(--accent) 8%, transparent);
-
-  --fac-premium-ring-soft:
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
-
-  --fac-row-hover-shadow:
-    inset 3px 0 0 var(--fac-row-accent),
-    inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, #000 5%, transparent);
-
-  --fac-head-blur: blur(14px) saturate(1.12);
-
-  --fac-pill-active-bg:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--accent) 18%, var(--badge-bg)) 0%,
-      color-mix(in srgb, var(--accent) 9%, var(--badge-bg)) 100%
-    );
-
+  --fac-pill-bg: color-mix(in srgb, var(--badge-bg) 92%, var(--surface-elevated));
+  --fac-pill-bg-hover: color-mix(in srgb, var(--badge-bg) 86%, var(--surface-elevated));
+  --fac-pill-border: color-mix(in srgb, var(--badge-border) 88%, transparent);
+  --fac-pill-text: var(--badge-text);
+  --fac-pill-active-bg: var(--accent-soft);
+  --fac-pill-active-border: var(--accent-border);
   --fac-pill-active-text: var(--accent-active);
-  --fac-pill-active-border: color-mix(in srgb, var(--accent) 26%, var(--badge-border));
 
-  --fac-surface-highlight:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, #fff 5%, transparent),
-      transparent 46%
-    );
+  --fac-soft-ring:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
+
+  --fac-control-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent),
+    0 1px 2px color-mix(in srgb, #000 5%, transparent);
+
+  --fac-control-shadow-hover:
+    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
+    0 10px 24px color-mix(in srgb, #000 8%, transparent);
+
+  --fac-head-blur: blur(12px) saturate(1.08);
 
   display: grid;
   gap: var(--view-section-gap, var(--space-lg));
@@ -120,7 +112,7 @@
     var(--view-hero-bg);
   box-shadow:
     var(--view-hero-shadow),
-    0 28px 80px color-mix(in srgb, var(--accent) 7%, transparent);
+    0 24px 68px color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .facturas-hero::before {
@@ -133,15 +125,11 @@
     linear-gradient(
       115deg,
       transparent 0%,
-      color-mix(in srgb, #fff 7%, transparent) 34%,
+      color-mix(in srgb, #fff 6%, transparent) 34%,
       transparent 58%
     );
-  opacity: .42;
-  transform: translateX(-36%);
-}
-
-.facturas-hero:hover::before {
-  animation: facturasHeroSweep 1.4s var(--ease-standard) both;
+  opacity: .36;
+  transform: translateX(-38%);
 }
 
 .facturas-hero::after {
@@ -154,6 +142,10 @@
   background: radial-gradient(circle, color-mix(in srgb, var(--accent) 9%, transparent), transparent 68%);
   filter: blur(10px);
   opacity: .8;
+}
+
+.facturas-hero:hover::before {
+  animation: facturasHeroSweep 1.4s var(--ease-standard) both;
 }
 
 .facturas-hero > * {
@@ -184,7 +176,6 @@
   line-height: var(--line-tight);
   white-space: normal;
   text-wrap: balance;
-  text-shadow: 0 1px 0 color-mix(in srgb, #fff 4%, transparent);
 }
 
 .facturas-page-subtitle {
@@ -243,8 +234,6 @@
     transform var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
     opacity var(--duration-fast) var(--ease-standard),
     filter var(--duration-fast) var(--ease-standard);
 }
@@ -262,7 +251,7 @@
       color-mix(in srgb, #fff 12%, transparent),
       transparent 58%
     );
-  opacity: .58;
+  opacity: .48;
 }
 
 .facturas-btn svg {
@@ -273,11 +262,12 @@
 
 .facturas-btn:hover {
   transform: translateY(-1px);
-  background: var(--btn-secondary-bg-hover);
-  color: var(--text-strong);
+  border-color: color-mix(in srgb, var(--btn-secondary-border) 68%, var(--accent-border));
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
   box-shadow:
-    var(--shadow-md),
-    0 12px 30px color-mix(in srgb, var(--accent) 7%, transparent);
+    var(--btn-secondary-shadow),
+    0 10px 24px color-mix(in srgb, #000 7%, transparent);
 }
 
 .facturas-btn:active {
@@ -292,11 +282,12 @@
 }
 
 .facturas-btn--primary:hover {
-  background: var(--btn-primary-bg-hover);
+  border-color: var(--btn-primary-border);
+  background: var(--btn-primary-bg);
   color: var(--btn-primary-text);
   box-shadow:
     var(--btn-primary-shadow),
-    0 16px 38px color-mix(in srgb, var(--accent) 14%, transparent);
+    0 14px 32px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .facturas-btn--create {
@@ -309,9 +300,12 @@
 }
 
 .facturas-btn--create:hover {
+  border-color: color-mix(in srgb, var(--success) 38%, var(--btn-primary-border));
+  background: var(--gradient-success);
+  color: var(--text-on-accent);
   box-shadow:
-    var(--btn-primary-shadow),
-    0 16px 38px color-mix(in srgb, var(--success) 14%, transparent);
+    0 14px 32px color-mix(in srgb, var(--success), transparent 78%),
+    var(--shadow-inner);
 }
 
 .facturas-btn--danger {
@@ -321,8 +315,12 @@
 }
 
 .facturas-btn--danger:hover {
-  background: color-mix(in srgb, var(--error-bg) 72%, var(--surface-active));
-  color: var(--error-hover, var(--error));
+  border-color: var(--border-error);
+  background: var(--error-bg);
+  color: var(--error);
+  box-shadow:
+    0 12px 28px color-mix(in srgb, var(--error) 10%, transparent),
+    var(--shadow-inner);
 }
 
 .facturas-btn:disabled,
@@ -374,6 +372,7 @@
   border-radius: var(--radius-pill);
   background: var(--badge-bg);
   color: var(--badge-text);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent);
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -436,12 +435,12 @@
   min-block-size: calc(124px * var(--ui-scale));
   padding: var(--space-md) var(--space-lg);
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--card-border) 82%, var(--fac-stat-color));
+  border: 1px solid color-mix(in srgb, var(--card-border) 86%, var(--fac-stat-color));
   border-radius: var(--card-radius);
   background:
     radial-gradient(
       circle at 100% 0%,
-      color-mix(in srgb, var(--fac-stat-color) 10%, transparent),
+      color-mix(in srgb, var(--fac-stat-color) 9%, transparent),
       transparent 34%
     ),
     var(--glass-shine),
@@ -450,16 +449,15 @@
   transition:
     transform var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard);
+    border-color var(--duration-fast) var(--ease-standard);
 }
 
 .facturas-stat-card:hover {
   transform: translateY(-2px);
-  border-color: color-mix(in srgb, var(--fac-stat-color) 34%, var(--card-border));
+  border-color: color-mix(in srgb, var(--fac-stat-color) 30%, var(--card-border));
   box-shadow:
     var(--shadow-card),
-    0 18px 44px color-mix(in srgb, var(--fac-stat-color) 10%, transparent);
+    0 16px 38px color-mix(in srgb, var(--fac-stat-color) 9%, transparent);
 }
 
 .facturas-stat-card::before {
@@ -538,14 +536,14 @@
 .facturas-history {
   min-inline-size: 0;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--data-table-border) 88%, var(--accent-border));
+  border: 1px solid color-mix(in srgb, var(--data-table-border) 90%, var(--accent-border));
   border-radius: var(--data-table-radius);
   background:
     var(--glass-shine),
     var(--data-table-bg);
   box-shadow:
     var(--data-table-shadow),
-    0 24px 70px color-mix(in srgb, #000 8%, transparent);
+    0 22px 62px color-mix(in srgb, #000 7%, transparent);
 }
 
 .facturas-history-head {
@@ -558,7 +556,7 @@
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--surface-elevated) 54%, transparent),
+      color-mix(in srgb, var(--surface-elevated) 48%, transparent),
       transparent
     );
 }
@@ -601,23 +599,14 @@
 
 .facturas-filter-pills,
 .facturas-sort-pills {
-  position: relative;
   display: flex;
   align-items: center;
-  gap: var(--space-2xs);
+  gap: 7px;
   min-inline-size: 0;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
-  padding-block: 4px;
-  mask-image:
-    linear-gradient(
-      90deg,
-      transparent 0,
-      #000 16px,
-      #000 calc(100% - 16px),
-      transparent 100%
-    );
+  padding: 3px;
 }
 
 .facturas-sort-pills {
@@ -638,13 +627,13 @@
   isolation: isolate;
   flex: 0 0 auto;
   min-block-size: calc(34px * var(--ui-scale));
-  padding-inline: 11px 8px;
-  border: 1px solid color-mix(in srgb, var(--badge-border) 86%, transparent);
+  padding-inline: 12px 10px;
+  border: 1px solid var(--fac-pill-border);
   border-radius: var(--radius-pill);
-  background:
-    var(--fac-surface-highlight),
-    var(--badge-bg);
-  color: var(--badge-text);
+  background: var(--fac-pill-bg);
+  color: var(--fac-pill-text);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -658,32 +647,13 @@
   transform: translateZ(0);
   transition:
     transform var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard),
     opacity var(--duration-fast) var(--ease-standard);
 }
 
-.facturas-filter-pill::after,
-.facturas-sort-pill::after {
-  content: "";
-  position: absolute;
-  inset: 1px;
-  z-index: -1;
-  border-radius: inherit;
-  pointer-events: none;
-  background:
-    radial-gradient(
-      circle at 30% 0%,
-      color-mix(in srgb, #fff 14%, transparent),
-      transparent 42%
-    );
-  opacity: .42;
-}
-
 .facturas-sort-pill {
-  padding-inline: 12px;
+  padding-inline: 13px;
 }
 
 .facturas-filter-pill strong {
@@ -703,24 +673,24 @@
 .facturas-filter-pill:hover,
 .facturas-sort-pill:hover {
   transform: translateY(-1px);
-  background:
-    var(--fac-surface-highlight),
-    var(--btn-secondary-bg-hover);
-  border-color: color-mix(in srgb, var(--accent) 22%, var(--border-strong));
-  color: var(--text-strong);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--fac-pill-border));
+  background: var(--fac-pill-bg);
+  color: var(--fac-pill-text);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .facturas-filter-pill.is-active,
 .facturas-sort-pill.is-active,
 .facturas-filter-pill[aria-pressed="true"],
 .facturas-sort-pill[aria-pressed="true"] {
-  border-color: var(--fac-pill-active-border) !important;
-  background: var(--fac-pill-active-bg) !important;
-  color: var(--fac-pill-active-text) !important;
+  border-color: var(--fac-pill-active-border);
+  background: var(--fac-pill-active-bg);
+  color: var(--fac-pill-active-text);
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 13%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, #000 8%, transparent) !important;
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent);
   transform: translateY(0);
 }
 
@@ -729,9 +699,12 @@
 .facturas-filter-pill[aria-pressed="true"]:hover,
 .facturas-sort-pill[aria-pressed="true"]:hover {
   transform: translateY(-1px);
+  border-color: var(--fac-pill-active-border);
+  background: var(--fac-pill-active-bg);
+  color: var(--fac-pill-active-text);
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, #000 10%, transparent) !important;
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
 }
 
 .facturas-filter-pill:disabled,
@@ -770,7 +743,7 @@
   min-inline-size: 0;
   min-block-size: calc(36px * var(--ui-scale));
   padding: 0 38px 0 36px;
-  border: 1px solid color-mix(in srgb, var(--input-border) 86%, var(--accent-border));
+  border: 1px solid color-mix(in srgb, var(--input-border) 88%, var(--accent-border));
   border-radius: var(--radius-pill);
   background: var(--input-bg);
   color: var(--input-text);
@@ -782,8 +755,6 @@
   outline: none;
   transition:
     border-color var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard);
 }
 
@@ -792,13 +763,13 @@
 }
 
 .facturas-search-input:hover {
-  border-color: var(--border-strong);
-  background: var(--input-bg-hover);
+  border-color: color-mix(in srgb, var(--input-border) 70%, var(--accent-border));
+  background: var(--input-bg);
 }
 
 .facturas-search-input:focus {
   border-color: color-mix(in srgb, var(--accent) 42%, var(--border-strong));
-  background: var(--input-bg-focus);
+  background: var(--input-bg);
   box-shadow:
     var(--input-shadow),
     0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
@@ -832,7 +803,7 @@
 .facturas-search-clear:hover {
   opacity: 1;
   color: var(--text-strong);
-  background: var(--btn-secondary-bg-hover);
+  background: var(--btn-secondary-bg);
   border-color: var(--border-default);
 }
 
@@ -861,7 +832,7 @@
 .facturas-pagination-status {
   min-block-size: calc(34px * var(--ui-scale));
   padding-inline: 10px;
-  border: 1px solid color-mix(in srgb, var(--badge-border) 82%, var(--accent-border));
+  border: 1px solid color-mix(in srgb, var(--badge-border) 84%, var(--accent-border));
   border-radius: var(--radius-pill);
   background: var(--badge-bg);
   color: var(--text-dim);
@@ -898,7 +869,6 @@
   text-decoration: none;
   transition:
     transform var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard),
     opacity var(--duration-fast) var(--ease-standard),
@@ -907,9 +877,10 @@
 
 .facturas-pagination-btn:hover {
   transform: translateY(-1px);
-  background: var(--btn-secondary-bg-hover);
-  border-color: var(--border-strong);
-  color: var(--text-strong);
+  background: var(--btn-secondary-bg);
+  border-color: color-mix(in srgb, var(--btn-secondary-border) 70%, var(--accent-border));
+  color: var(--btn-secondary-text);
+  box-shadow: var(--fac-control-shadow-hover);
 }
 
 .facturas-pagination-btn.is-active,
@@ -919,7 +890,7 @@
   color: var(--accent-active);
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, #000 7%, transparent);
+    inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent);
 }
 
 .facturas-pagination-btn[disabled],
@@ -942,8 +913,8 @@
 }
 
 .facturas-table-wrap.is-refreshing .facturas-table-shell {
-  opacity: .48;
-  filter: blur(.9px) saturate(.8);
+  opacity: .50;
+  filter: blur(.8px) saturate(.82);
 }
 
 .facturas-table-shell {
@@ -1057,7 +1028,7 @@
   -webkit-backdrop-filter: var(--fac-head-blur);
   box-shadow:
     inset 0 -1px 0 var(--table-head-border),
-    0 10px 24px color-mix(in srgb, #000 5%, transparent);
+    0 8px 18px color-mix(in srgb, #000 4%, transparent);
 }
 
 .facturas-table thead th:first-child {
@@ -1084,8 +1055,7 @@
   background: transparent;
   vertical-align: middle;
   transition:
-    background var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard);
+    background var(--duration-fast) var(--ease-standard);
 }
 
 .facturas-table tbody tr:last-child td {
@@ -1108,32 +1078,18 @@
 
 .facturas-table-row:hover > td {
   background: var(--data-table-row-hover);
-  box-shadow: var(--fac-row-hover-shadow);
-}
-
-.facturas-table-row:hover > td:first-child {
-  border-start-start-radius: var(--radius-lg);
-  border-end-start-radius: var(--radius-lg);
-}
-
-.facturas-table-row:hover > td:last-child {
-  border-start-end-radius: var(--radius-lg);
-  border-end-end-radius: var(--radius-lg);
+  box-shadow: none;
 }
 
 .facturas-table-row.is-selected > td,
 .facturas-table-row[aria-selected="true"] > td {
-  background: color-mix(in srgb, var(--fac-row-accent) 10%, var(--data-table-row-hover));
-  box-shadow:
-    inset 3px 0 0 var(--fac-row-accent),
-    inset 0 0 0 1px color-mix(in srgb, var(--fac-row-accent) 12%, transparent);
+  background: color-mix(in srgb, var(--fac-row-accent) 9%, var(--data-table-row-hover));
+  box-shadow: none;
 }
 
 .facturas-table-row:focus-within > td {
   background: color-mix(in srgb, var(--accent) 8%, var(--data-table-row-hover));
-  box-shadow:
-    inset 3px 0 0 var(--accent),
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: none;
 }
 
 .facturas-table-row.is-disabled {
@@ -1176,12 +1132,12 @@
   inline-size: 3px;
   border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
   background: var(--fac-row-accent);
-  opacity: .70;
+  opacity: .72;
   transform: scaleY(.76);
   transform-origin: center;
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--fac-row-accent) 12%, transparent),
-    0 0 18px color-mix(in srgb, var(--fac-row-accent) 28%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--fac-row-accent) 10%, transparent),
+    0 0 14px color-mix(in srgb, var(--fac-row-accent) 24%, transparent);
   transition:
     opacity var(--duration-fast) var(--ease-standard),
     transform var(--duration-fast) var(--ease-standard);
@@ -1189,7 +1145,8 @@
 
 .facturas-table-row:hover .facturas-cell--main::before,
 .facturas-table-row.is-selected .facturas-cell--main::before,
-.facturas-table-row[aria-selected="true"] .facturas-cell--main::before {
+.facturas-table-row[aria-selected="true"] .facturas-cell--main::before,
+.facturas-table-row:focus-within .facturas-cell--main::before {
   opacity: 1;
   transform: scaleY(1);
 }
@@ -1213,7 +1170,7 @@
   block-size: var(--avatar-size-lg);
   flex: 0 0 var(--avatar-size-lg);
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, #fff 22%, transparent);
+  border: 1px solid color-mix(in srgb, #fff 20%, transparent);
   border-radius: var(--radius-pill);
   background: var(--fac-avatar-bg);
   box-shadow:
@@ -1223,13 +1180,12 @@
   transform: translateZ(0);
   transition:
     transform var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard),
     filter var(--duration-fast) var(--ease-standard);
 }
 
 .facturas-table-row:hover .facturas-avatar {
-  transform: translateY(-1px) scale(1.025);
-  filter: saturate(1.08) contrast(1.03);
+  transform: translateY(-1px) scale(1.02);
+  filter: saturate(1.06) contrast(1.02);
 }
 
 .facturas-avatar::after {
@@ -1284,6 +1240,7 @@
 
 
 /* Avatar tones: sustituyen style="" dinámico */
+
 .facturas-avatar--tone-0 {
   --fac-avatar-a: #7c3aed;
   --fac-avatar-b: #ec4899;
@@ -1504,7 +1461,7 @@
   border-radius: var(--radius-pill);
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, currentColor 8%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, #000 8%, transparent);
+    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1629,7 +1586,7 @@
   cursor: pointer;
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent),
-    inset 0 -1px 0 color-mix(in srgb, #000 8%, transparent);
+    inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1644,9 +1601,7 @@
   white-space: nowrap;
   transition:
     transform var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
     opacity var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard);
 }
@@ -1665,11 +1620,12 @@
 
 .facturas-incidencia-link:hover {
   transform: translateY(-1px);
-  background: var(--accent-ghost);
+  background: var(--accent-soft);
+  color: var(--text-strong);
   border-color: var(--accent-border-strong);
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent),
-    0 10px 22px color-mix(in srgb, var(--accent) 8%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent),
+    0 8px 20px color-mix(in srgb, var(--accent) 7%, transparent);
 }
 
 .facturas-incidencia-link:disabled,
@@ -1719,13 +1675,10 @@
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--btn-secondary-border) 88%, transparent);
   border-radius: var(--radius-md);
-  background:
-    var(--fac-surface-highlight),
-    var(--btn-secondary-bg);
+  background: var(--btn-secondary-bg);
   color: var(--btn-secondary-text);
   cursor: pointer;
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, #fff 3%, transparent);
+  box-shadow: var(--fac-control-shadow);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1737,10 +1690,8 @@
   white-space: nowrap;
   transition:
     border-color var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard),
     transform var(--duration-fast) var(--ease-standard),
     opacity var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard),
     filter var(--duration-fast) var(--ease-standard);
 }
@@ -1765,14 +1716,10 @@
 
 .facturas-action-btn:hover {
   transform: translateY(-1px);
-  border-color: var(--border-strong);
-  background:
-    var(--fac-surface-highlight),
-    var(--btn-secondary-bg-hover);
-  color: var(--text-strong);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent),
-    0 8px 18px color-mix(in srgb, #000 8%, transparent);
+  border-color: color-mix(in srgb, var(--btn-secondary-border) 70%, var(--accent-border));
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  box-shadow: var(--fac-control-shadow-hover);
 }
 
 .facturas-action-btn:active {
@@ -1802,12 +1749,13 @@
   background: var(--btn-primary-bg);
   color: var(--btn-primary-text);
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, #fff 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent),
     var(--btn-primary-shadow);
 }
 
 .facturas-action-btn--primary:hover {
-  background: var(--btn-primary-bg-hover);
+  border-color: var(--btn-primary-border);
+  background: var(--btn-primary-bg);
   color: var(--btn-primary-text);
   box-shadow:
     var(--btn-primary-shadow),
@@ -1820,6 +1768,15 @@
   color: var(--text-on-accent);
 }
 
+.facturas-action-btn--success:hover {
+  border-color: color-mix(in srgb, var(--success) 38%, var(--btn-primary-border));
+  background: var(--gradient-success);
+  color: var(--text-on-accent);
+  box-shadow:
+    0 12px 28px color-mix(in srgb, var(--success) 14%, transparent),
+    var(--shadow-inner);
+}
+
 .facturas-action-btn--danger {
   border-color: var(--border-error);
   background: var(--error-bg);
@@ -1829,8 +1786,12 @@
 }
 
 .facturas-action-btn--danger:hover {
-  background: color-mix(in srgb, var(--error-bg) 72%, var(--surface-active));
-  color: var(--error-hover, var(--error));
+  border-color: var(--border-error);
+  background: var(--error-bg);
+  color: var(--error);
+  box-shadow:
+    0 10px 24px color-mix(in srgb, var(--error) 10%, transparent),
+    var(--shadow-inner);
 }
 
 
@@ -2123,32 +2084,51 @@
 }
 
 [data-theme="light"] .facturas-table tbody tr:nth-child(even) > td {
-  background: rgba(23,32,51,.012);
+  background: rgba(23, 32, 51, .012);
 }
 
 [data-theme="light"] .facturas-table-row:hover > td {
   background: var(--data-table-row-hover);
+  box-shadow: none;
+}
+
+[data-theme="light"] .facturas-filter-pill,
+[data-theme="light"] .facturas-sort-pill {
+  background: var(--fac-pill-bg);
+  color: var(--fac-pill-text);
   box-shadow:
-    inset 3px 0 0 var(--fac-row-accent),
-    inset 0 1px 0 rgba(255,255,255,.78),
-    inset 0 -1px 0 rgba(32,43,72,.04);
+    inset 0 1px 0 rgba(255, 255, 255, .76),
+    0 1px 2px rgba(32, 43, 72, .035);
+}
+
+[data-theme="light"] .facturas-filter-pill:hover,
+[data-theme="light"] .facturas-sort-pill:hover {
+  background: var(--fac-pill-bg);
+  color: var(--fac-pill-text);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .82),
+    0 4px 12px rgba(32, 43, 72, .045);
 }
 
 [data-theme="light"] .facturas-filter-pill.is-active,
 [data-theme="light"] .facturas-sort-pill.is-active,
 [data-theme="light"] .facturas-filter-pill[aria-pressed="true"],
 [data-theme="light"] .facturas-sort-pill[aria-pressed="true"] {
-  color: var(--accent-active) !important;
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--accent-soft) 92%, #fff),
-      var(--accent-soft)
-    ) !important;
-  border-color: var(--accent-border) !important;
+  color: var(--accent-active);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
   box-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent),
-    inset 0 -1px 0 rgba(32, 43, 72, .045) !important;
+    inset 0 1px 0 rgba(255, 255, 255, .78);
+}
+
+[data-theme="light"] .facturas-filter-pill.is-active:hover,
+[data-theme="light"] .facturas-sort-pill.is-active:hover,
+[data-theme="light"] .facturas-filter-pill[aria-pressed="true"]:hover,
+[data-theme="light"] .facturas-sort-pill[aria-pressed="true"]:hover {
+  color: var(--accent-active);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
 }
 
 [data-theme="light"] .facturas-search-input {
@@ -2164,7 +2144,7 @@
 
 [data-theme="light"] .facturas-search-clear:hover {
   color: var(--text-strong);
-  background: var(--btn-secondary-bg-hover);
+  background: var(--btn-secondary-bg);
 }
 
 [data-theme="light"] .facturas-chip--pending,
@@ -2200,18 +2180,42 @@
   border-color: var(--accent-border-strong);
 }
 
-[data-theme="light"] .facturas-action-btn,
-[data-theme="light"] .facturas-btn {
+[data-theme="light"] .facturas-btn,
+[data-theme="light"] .facturas-action-btn {
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.74),
-    0 1px 2px rgba(32,43,72,.045);
+    inset 0 1px 0 rgba(255, 255, 255, .74),
+    0 1px 2px rgba(32, 43, 72, .045);
 }
 
-[data-theme="light"] .facturas-action-btn:hover,
-[data-theme="light"] .facturas-btn:hover {
+[data-theme="light"] .facturas-btn:hover,
+[data-theme="light"] .facturas-action-btn:hover {
   box-shadow:
-    inset 0 1px 0 rgba(255,255,255,.82),
-    0 10px 22px rgba(32,43,72,.075);
+    inset 0 1px 0 rgba(255, 255, 255, .82),
+    0 10px 22px rgba(32, 43, 72, .075);
+}
+
+[data-theme="light"] .facturas-btn--primary,
+[data-theme="light"] .facturas-btn--primary:hover,
+[data-theme="light"] .facturas-action-btn--primary,
+[data-theme="light"] .facturas-action-btn--primary:hover {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+}
+
+[data-theme="light"] .facturas-btn--create,
+[data-theme="light"] .facturas-btn--create:hover,
+[data-theme="light"] .facturas-action-btn--success,
+[data-theme="light"] .facturas-action-btn--success:hover {
+  background: var(--gradient-success);
+  color: var(--text-on-accent);
+}
+
+[data-theme="light"] .facturas-btn--danger,
+[data-theme="light"] .facturas-btn--danger:hover,
+[data-theme="light"] .facturas-action-btn--danger,
+[data-theme="light"] .facturas-action-btn--danger:hover {
+  background: var(--error-bg);
+  color: var(--error);
 }
 
 
@@ -2225,6 +2229,23 @@
 
 [data-theme="dark"] .facturas-table-row:hover > td {
   background: color-mix(in srgb, var(--data-table-row-hover) 88%, var(--fac-row-accent) 4%);
+  box-shadow: none;
+}
+
+[data-theme="dark"] .facturas-btn--primary,
+[data-theme="dark"] .facturas-btn--primary:hover,
+[data-theme="dark"] .facturas-action-btn--primary,
+[data-theme="dark"] .facturas-action-btn--primary:hover {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+}
+
+[data-theme="dark"] .facturas-btn--create,
+[data-theme="dark"] .facturas-btn--create:hover,
+[data-theme="dark"] .facturas-action-btn--success,
+[data-theme="dark"] .facturas-action-btn--success:hover {
+  background: var(--gradient-success);
+  color: var(--text-on-accent);
 }
 
 
@@ -2341,18 +2362,6 @@
     max-inline-size: none;
   }
 
-  .facturas-filter-pills,
-  .facturas-sort-pills {
-    mask-image:
-      linear-gradient(
-        90deg,
-        transparent 0,
-        #000 10px,
-        #000 calc(100% - 10px),
-        transparent 100%
-      );
-  }
-
   .facturas-table thead th {
     padding-block: calc(10px * var(--ui-scale));
   }
@@ -2380,6 +2389,7 @@
   .facturas-filter-pills,
   .facturas-sort-pills {
     margin-inline: -2px;
+    padding-inline: 2px;
   }
 
   .facturas-filter-pill,
@@ -2490,12 +2500,12 @@
 
 @keyframes facturasHeroSweep {
   from {
-    opacity: .18;
+    opacity: .16;
     transform: translateX(-46%);
   }
 
   to {
-    opacity: .48;
+    opacity: .38;
     transform: translateX(46%);
   }
 }
@@ -2510,4 +2520,3 @@
     box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 7%, transparent);
   }
 }
-

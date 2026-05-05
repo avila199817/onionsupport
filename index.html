@@ -49,6 +49,12 @@
        - Las fuentes se resuelven desde variables.css con stack system-ui.
        - La CSP real debe aplicarse preferentemente desde headers,
          por ejemplo staticwebapp.config.json en Azure Static Web Apps.
+
+       FIX TEMA / LOADER:
+       - El tema inicial vive en <html>.
+       - <body> NO debe nacer con data-theme="dark" ni theme-dark.
+       - theme.js sincroniza body cuando document.body existe.
+       - loader.css debe decidir el logo usando html[data-theme].
   ========================================================= -->
 
   <!-- =========================
@@ -222,7 +228,7 @@
        NOTA:
        - En head normalmente document.body aún no existe.
        - theme.js debe actualizar document.documentElement.
-       - theme.js ya sincroniza body en DOMContentLoaded.
+       - theme.js sincroniza body en DOMContentLoaded si aún no existe.
   ========================= -->
   <script src="/src/preboot/theme.js"></script>
 
@@ -266,7 +272,7 @@
 </head>
 
 <body
-  class="app-booting app-loading theme-dark"
+  class="app-booting app-loading"
   data-app="onion"
   data-app-name="Onion Support"
   data-density="default"
@@ -274,9 +280,6 @@
   data-authenticated="false"
   data-route-mode="boot"
   data-shell-state="booting"
-  data-theme="dark"
-  data-theme-mode="system"
-  data-theme-source="initial"
 >
   <!-- =========================================================
        ACCESSIBILITY · SKIP LINK

@@ -5,6 +5,15 @@
    FACTURAS EXPERIENCE PRO · CREATE MODAL · CSS ALIGNED · 10/10
    CSP CLEAN · NO CSS IN JS · NO INLINE EVENTS · TOKEN SYSTEM READY
 
+   PATCH:
+   - Sin kicker "Facturación admin".
+   - Sin bloque visible "Factura preparada".
+   - Sin re-render completo al buscar cliente/incidencia.
+   - Sin parpadeo agresivo en input/search/select.
+   - Slots dinámicos para clientes/incidencias/resultados/errores.
+   - data-facturas-scope aplicado al root del modal para consumir tokens.
+   - Compatible con facturas.css .fac-create-*.
+
    RESPONSABILIDADES:
    - abrir/cerrar modal premium de creación de factura
    - buscar cliente/usuario objetivo
@@ -53,7 +62,7 @@ const TICKET_SEARCH_ENDPOINTS = Object.freeze([
 
 const SEARCH_LIMIT = 10;
 const TICKET_LIMIT = 60;
-const SEARCH_DEBOUNCE = 240;
+const SEARCH_DEBOUNCE = 260;
 
 const CREATE_TIMEOUT_MS = 90000;
 const SEARCH_TIMEOUT_MS = 15000;
@@ -141,6 +150,7 @@ function getGlobal() {
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
+
   const text = String(value).trim();
   return text || fallback;
 }
@@ -185,8 +195,9 @@ function safeObject(value, fallback = {}) {
 function first(...values) {
   for (const value of values) {
     if (value === null || value === undefined) continue;
-    if (typeof value === "string" && !value.trim()) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
+
     return value;
   }
 
@@ -315,6 +326,7 @@ function safeEmit(event = "", payload = {}) {
         detail: payload,
       })
     );
+
     emitted = true;
   } catch {}
 
@@ -409,6 +421,7 @@ function getHttpStatus(error = null) {
 
 function shouldTryNextEndpoint(error = null) {
   const status = getHttpStatus(error);
+
   if (!status) return true;
 
   return [404, 405, 409, 415, 422, 500, 502, 503, 504].includes(status);
@@ -481,6 +494,7 @@ function getAuthToken() {
       AppCore?.auth?.getToken?.(),
       AppCore?.Auth?.getToken?.(),
       win?.Auth?.getToken?.(),
+
       getStorageValue("token"),
       getStorageValue("accessToken"),
       getStorageValue("authToken"),
@@ -691,7 +705,7 @@ function extractItems(payload = null) {
 }
 
 /* =========================================================
-   NORMALIZATION
+   AVATAR / CLIENT NORMALIZATION
 ========================================================= */
 
 function getAvatarUrlFromObject(raw = null) {
@@ -969,6 +983,7 @@ function normalizeClientCandidate(raw = null) {
       obj.cif,
       obj.taxId,
       obj.vatId,
+
       cliente.nif,
       cliente.cif,
       cliente.taxId,
@@ -982,12 +997,16 @@ function normalizeClientCandidate(raw = null) {
       obj.username,
       obj.slug,
       obj.handle,
+
       cliente.username,
       cliente.slug,
+
       user.username,
       user.slug,
+
       usuario.username,
       usuario.slug,
+
       email ? email.split("@")[0] : ""
     ),
     ""
@@ -1021,7 +1040,7 @@ function normalizeClientCandidate(raw = null) {
   return {
     id,
     clienteId: clienteId || id,
-    userId,
+    userId: userId || "",
     name: displayName,
     nombre: displayName,
     nombreContacto: displayName,
@@ -1040,6 +1059,10 @@ function normalizeClientCandidate(raw = null) {
     raw: obj,
   };
 }
+
+/* =========================================================
+   TICKET NORMALIZATION
+========================================================= */
 
 function normalizeTicketCandidate(raw = null) {
   const obj = safeObject(raw);
@@ -1096,8 +1119,10 @@ function normalizeTicketCandidate(raw = null) {
       obj.clienteId,
       ticket.clienteId,
       incidencia.clienteId,
+
       cliente.id,
       cliente.clienteId,
+
       receptor.clienteId,
       requesterSnapshot.clienteId
     ),
@@ -1109,9 +1134,12 @@ function normalizeTicketCandidate(raw = null) {
       obj.userId,
       ticket.userId,
       incidencia.userId,
+
       receptor.userId,
       receptor.id,
+
       requesterSnapshot.userId,
+
       cliente.userId
     ),
     ""
@@ -1191,7 +1219,7 @@ function normalizeTicketCandidate(raw = null) {
 }
 
 /* =========================================================
-   SELECTORS / STATE GETTERS
+   SELECTED HELPERS
 ========================================================= */
 
 function getSelectedClientes() {
@@ -1296,71 +1324,8 @@ function syncPrimaryTicketToForm() {
 }
 
 /* =========================================================
-   SEARCH
+   SEARCH HELPERS
 ========================================================= */
-
-function dedupeClients(items = []) {
-  const map = new Map();
-
-  safeArray(items).forEach((item) => {
-    const normalized = normalizeClientCandidate(item);
-    if (!normalized?.id) return;
-
-    const key = normalized.clienteId || normalized.userId || normalized.id;
-
-    if (!map.has(key)) {
-      map.set(key, normalized);
-    }
-  });
-
-  return Array.from(map.values()).slice(0, SEARCH_LIMIT);
-}
-
-function ticketBelongsToSelectedClients(ticket = {}) {
-  const selectedClientes = getSelectedClientes();
-
-  if (!selectedClientes.length) return true;
-
-  const ticketClienteId = safeText(ticket?.clienteId, "");
-  const ticketUserId = safeText(ticket?.userId, "");
-
-  if (!ticketClienteId && !ticketUserId) return true;
-
-  return selectedClientes.some((client) => {
-    const clienteId = safeText(first(client.clienteId, client.id), "");
-    const userId = safeText(client.userId, "");
-
-    return (
-      (clienteId && ticketClienteId === clienteId) ||
-      (userId && ticketUserId === userId)
-    );
-  });
-}
-
-function dedupeTickets(items = []) {
-  const map = new Map();
-
-  safeArray(items).forEach((item) => {
-    const normalized = normalizeTicketCandidate(item);
-    if (!normalized?.id) return;
-    if (!ticketBelongsToSelectedClients(normalized)) return;
-
-    if (!map.has(normalized.id)) {
-      map.set(normalized.id, normalized);
-    }
-  });
-
-  return Array.from(map.values())
-    .sort((a, b) => {
-      const dateA = safeNumber(a?.sortDate, 0);
-      const dateB = safeNumber(b?.sortDate, 0);
-
-      if (dateA !== dateB) return dateB - dateA;
-
-      return safeText(b?.id, "").localeCompare(safeText(a?.id, ""));
-    })
-    .slice(0, TICKET_LIMIT);
-}
 
 function buildClientSearchUrls(query = "") {
   const params = new URLSearchParams();
@@ -1406,6 +1371,71 @@ function buildTicketSearchUrls(query = "", cliente = null) {
   });
 }
 
+function dedupeClients(items = []) {
+  const map = new Map();
+
+  safeArray(items).forEach((item) => {
+    const normalized = normalizeClientCandidate(item);
+    if (!normalized?.id) return;
+
+    const key = normalized.clienteId || normalized.userId || normalized.id;
+
+    if (!map.has(key)) {
+      map.set(key, normalized);
+    }
+  });
+
+  return Array.from(map.values()).slice(0, SEARCH_LIMIT);
+}
+
+function ticketBelongsToSelectedClients(ticket = {}) {
+  const selectedClientes = getSelectedClientes();
+
+  if (!selectedClientes.length) return true;
+
+  const ticketClienteId = safeText(ticket?.clienteId, "");
+  const ticketUserId = safeText(ticket?.userId, "");
+
+  if (!ticketClienteId && !ticketUserId) return true;
+
+  return selectedClientes.some((client) => {
+    const clienteId = safeText(first(client.clienteId, client.id), "");
+    const userId = safeText(client.userId, "");
+
+    return (
+      (clienteId && ticketClienteId === clienteId) ||
+      (userId && ticketUserId === userId)
+    );
+  });
+}
+
+function sortTicketsByLatest(items = []) {
+  return [...safeArray(items)].sort((a, b) => {
+    const dateA = safeNumber(a?.sortDate, 0);
+    const dateB = safeNumber(b?.sortDate, 0);
+
+    if (dateA !== dateB) return dateB - dateA;
+
+    return safeText(b?.id, "").localeCompare(safeText(a?.id, ""));
+  });
+}
+
+function dedupeTickets(items = []) {
+  const map = new Map();
+
+  safeArray(items).forEach((item) => {
+    const normalized = normalizeTicketCandidate(item);
+    if (!normalized?.id) return;
+    if (!ticketBelongsToSelectedClients(normalized)) return;
+
+    if (!map.has(normalized.id)) {
+      map.set(normalized.id, normalized);
+    }
+  });
+
+  return sortTicketsByLatest(Array.from(map.values())).slice(0, TICKET_LIMIT);
+}
+
 async function searchClientesRequest(query = "") {
   const urls = buildClientSearchUrls(query);
   let lastError = null;
@@ -1443,7 +1473,11 @@ async function searchTicketsRequest(query = "") {
     for (const url of urls) {
       try {
         const response = await apiGet(url);
-        collected = collected.concat(extractItems(response));
+        const items = extractItems(response);
+
+        if (items.length) {
+          collected = collected.concat(items);
+        }
       } catch (error) {
         lastError = error;
 
@@ -1457,7 +1491,7 @@ async function searchTicketsRequest(query = "") {
   const normalized = dedupeTickets(collected);
 
   if (normalized.length) return normalized;
-  if (lastError && !collected.length) throw lastError;
+  if (lastError && collected.length === 0) throw lastError;
 
   return [];
 }
@@ -1480,157 +1514,6 @@ function clearTicketSearchTimer() {
   } catch {}
 
   modalState.ticketSearchDebounce = null;
-}
-
-async function performClientSearch(query = "") {
-  const normalized = normalizeWhitespace(query);
-  const seq = ++modalState.clienteSearchSeq;
-
-  if (normalized.length < 2) {
-    modalState.clienteSearchLoading = false;
-    modalState.clienteSearchError = "";
-    modalState.clienteSearchResults = [];
-
-    rerenderAndRefocus("clienteSearch");
-    return [];
-  }
-
-  modalState.clienteSearchLoading = true;
-  modalState.clienteSearchError = "";
-  modalState.clienteSearchResults = [];
-
-  rerenderAndRefocus("clienteSearch");
-
-  try {
-    const results = await searchClientesRequest(normalized);
-
-    if (seq !== modalState.clienteSearchSeq) return [];
-
-    modalState.clienteSearchLoading = false;
-    modalState.clienteSearchError = "";
-    modalState.clienteSearchResults = results;
-
-    rerenderAndRefocus("clienteSearch");
-
-    return results;
-  } catch (error) {
-    if (seq !== modalState.clienteSearchSeq) return [];
-
-    modalState.clienteSearchLoading = false;
-    modalState.clienteSearchResults = [];
-    modalState.clienteSearchError = safeErrorMessage(error, "No se pudo buscar cliente.");
-
-    rerenderAndRefocus("clienteSearch");
-
-    return [];
-  }
-}
-
-function scheduleClientSearch(query = "") {
-  clearClientSearchTimer();
-
-  const normalized = normalizeWhitespace(query);
-
-  if (normalized.length < 2) {
-    modalState.clienteSearchLoading = false;
-    modalState.clienteSearchError = "";
-    modalState.clienteSearchResults = [];
-
-    rerenderAndRefocus("clienteSearch");
-    return;
-  }
-
-  modalState.clienteSearchDebounce = setTimeout(() => {
-    performClientSearch(normalized);
-  }, SEARCH_DEBOUNCE);
-}
-
-async function loadTicketsForSelectedClient({
-  query = "",
-  autoSelectLatest = true,
-  focus = "ticketSearch",
-} = {}) {
-  if (!getSelectedClientes().length) {
-    modalState.ticketSearchLoading = false;
-    modalState.ticketSearchError = "";
-    modalState.ticketSearchResults = [];
-    modalState.selectedTickets = [];
-
-    syncPrimaryTicketToForm();
-    rerenderAndRefocus(focus);
-
-    return [];
-  }
-
-  const seq = ++modalState.ticketSearchSeq;
-
-  modalState.ticketSearchLoading = true;
-  modalState.ticketSearchError = "";
-  modalState.ticketSearchResults = [];
-
-  if (autoSelectLatest) {
-    modalState.selectedTickets = [];
-    syncPrimaryTicketToForm();
-  }
-
-  rerenderAndRefocus(focus);
-
-  try {
-    const results = await searchTicketsRequest(query);
-
-    if (seq !== modalState.ticketSearchSeq) return [];
-
-    modalState.ticketSearchLoading = false;
-    modalState.ticketSearchError = "";
-    modalState.ticketSearchResults = results;
-
-    if (autoSelectLatest && results[0]?.id) {
-      setSelectedTicketFromItem(results[0], {
-        auto: true,
-        append: true,
-      });
-    }
-
-    rerenderAndRefocus(focus);
-
-    return results;
-  } catch (error) {
-    if (seq !== modalState.ticketSearchSeq) return [];
-
-    modalState.ticketSearchLoading = false;
-    modalState.ticketSearchResults = [];
-    modalState.ticketSearchError = safeErrorMessage(
-      error,
-      "No se pudieron cargar las incidencias del cliente."
-    );
-    modalState.selectedTickets = [];
-
-    syncPrimaryTicketToForm();
-    rerenderAndRefocus(focus);
-
-    return [];
-  }
-}
-
-function scheduleTicketSearch(query = "") {
-  clearTicketSearchTimer();
-
-  if (!getSelectedClientes().length) {
-    modalState.ticketSearchLoading = false;
-    modalState.ticketSearchError = "";
-    modalState.ticketSearchResults = [];
-
-    rerenderAndRefocus("ticketSearch");
-    return;
-  }
-
-  modalState.ticketSearchDebounce = setTimeout(() => {
-    loadTicketsForSelectedClient({
-      query,
-      autoSelectLatest: false,
-      focus: "ticketSearch",
-    });
-  }, SEARCH_DEBOUNCE);
 }
 
 /* =========================================================
@@ -2454,7 +2337,7 @@ function renderCheckbox({
 }
 
 /* =========================================================
-   TARGET BLOCK RENDER
+   DYNAMIC RENDER BLOCKS
 ========================================================= */
 
 function renderClientSearchResults() {
@@ -2729,7 +2612,6 @@ function renderTargetBlock() {
 
   const clienteCount = getSelectedClientes().length;
   const ticketCount = getSelectedTickets().length;
-
   const ticketLoading = Boolean(modalState.ticketSearchLoading);
 
   return `
@@ -2746,11 +2628,11 @@ function renderTargetBlock() {
 
         <div class="fac-create-target-metrics">
           <div>
-            <strong>${escapeHtml(String(clienteCount))}</strong>
+            <strong data-client-count="true">${escapeHtml(String(clienteCount))}</strong>
             <span>Clientes</span>
           </div>
           <div>
-            <strong>${escapeHtml(String(ticketCount))}</strong>
+            <strong data-ticket-count="true">${escapeHtml(String(ticketCount))}</strong>
             <span>Incidencias</span>
           </div>
         </div>
@@ -2763,24 +2645,24 @@ function renderTargetBlock() {
               <span>Clientes destino</span>
               <strong>Selecciona uno o varios</strong>
             </div>
-            ${
-              clienteCount
-                ? `
-                  <button
-                    type="button"
-                    class="fac-create-mini-button"
-                    data-clear-clientes="true"
-                    ${modalState.submitting ? "disabled" : ""}
-                  >
-                    Limpiar clientes
-                  </button>
-                `
-                : ""
-            }
+
+            <button
+              type="button"
+              class="fac-create-mini-button"
+              data-clear-clientes="true"
+              ${modalState.submitting || !clienteCount ? "disabled" : ""}
+            >
+              Limpiar clientes
+            </button>
           </div>
 
-          ${renderSelectedClientes()}
-          ${renderFieldError(errors.clienteId)}
+          <div data-slot="selected-clientes">
+            ${renderSelectedClientes()}
+          </div>
+
+          <div data-error-slot="clienteId">
+            ${renderFieldError(errors.clienteId)}
+          </div>
 
           <label class="fac-create-field fac-create-field--search">
             <span class="fac-create-label">${clienteCount ? "Añadir otro cliente" : "Buscar cliente"}</span>
@@ -2796,7 +2678,9 @@ function renderTargetBlock() {
             />
           </label>
 
-          ${renderClientSearchResults()}
+          <div data-slot="client-search-results">
+            ${renderClientSearchResults()}
+          </div>
         </article>
 
         <article class="fac-create-pro-card fac-create-pro-card--tickets">
@@ -2816,13 +2700,18 @@ function renderTargetBlock() {
             </button>
           </div>
 
-          ${renderSelectedTickets()}
-          ${renderFieldError(errors.incidenciaId)}
+          <div data-slot="selected-tickets">
+            ${renderSelectedTickets()}
+          </div>
+
+          <div data-error-slot="incidenciaId">
+            ${renderFieldError(errors.incidenciaId)}
+          </div>
 
           <label class="fac-create-field fac-create-field--search">
             <span class="fac-create-label">Filtrar incidencias</span>
             <input
-              class="fac-create-input"
+              class="fac-create-input ${errors.incidenciaId ? "is-error" : ""}"
               data-field="ticketSearch"
               name="ticketSearch"
               type="text"
@@ -2833,7 +2722,9 @@ function renderTargetBlock() {
             />
           </label>
 
-          ${renderTicketSearchResults()}
+          <div data-slot="ticket-search-results">
+            ${renderTicketSearchResults()}
+          </div>
         </article>
       </div>
     </section>
@@ -2872,7 +2763,6 @@ function renderModalInner() {
 
         <div class="fac-create-header">
           <div class="fac-create-header-copy">
-            <span class="fac-create-kicker">Facturación admin</span>
             <h2 id="facturas-create-modal-title">Crear factura</h2>
             <p>
               Genera una factura vinculada a clientes e incidencias reales.
@@ -2995,11 +2885,8 @@ function renderModalInner() {
               help: "Adjunta el PDF generado y utiliza el envío configurado para facturas.",
             })}
 
-            <div class="fac-create-actions">
-              <div class="fac-create-submit-summary">
-                <span>Factura preparada</span>
-                <strong data-role="total-preview-inline">${escapeHtml(formatMoney(breakdown.totalFactura))}</strong>
-              </div>
+            <div class="fac-create-actions fac-create-actions--compact">
+              <div aria-hidden="true"></div>
 
               <div class="fac-create-action-buttons">
                 <button
@@ -3042,10 +2929,18 @@ function getRoot() {
 function ensureRoot() {
   let root = getRoot();
 
-  if (root) return root;
+  if (root) {
+    try {
+      root.setAttribute("data-facturas-scope", "true");
+      root.setAttribute("data-facturas-create-root", "true");
+    } catch {}
+
+    return root;
+  }
 
   root = document.createElement("div");
   root.id = MODAL_ID;
+  root.setAttribute("data-facturas-scope", "true");
   root.setAttribute("data-facturas-create-root", "true");
   document.body.appendChild(root);
 
@@ -3123,6 +3018,17 @@ function renderModal() {
   return root;
 }
 
+function setSlotHtml(selector = "", html = "") {
+  const root = getRoot();
+  if (!root || !selector) return false;
+
+  const node = root.querySelector(selector);
+  if (!node) return false;
+
+  node.innerHTML = html;
+  return true;
+}
+
 function syncDerivedUi() {
   const root = getRoot();
   if (!root) return false;
@@ -3146,6 +3052,66 @@ function syncDerivedUi() {
     .forEach((node) => {
       node.textContent = `${formatMoney(breakdown.ivaTotal)} / ${formatMoney(breakdown.irpfTotal)}`;
     });
+
+  return true;
+}
+
+function syncDynamicAreas() {
+  const root = getRoot();
+  if (!root) return false;
+
+  const clienteCount = getSelectedClientes().length;
+  const ticketCount = getSelectedTickets().length;
+  const errors = safeObject(modalState.errors);
+
+  root.querySelectorAll("[data-client-count='true']").forEach((node) => {
+    node.textContent = String(clienteCount);
+  });
+
+  root.querySelectorAll("[data-ticket-count='true']").forEach((node) => {
+    node.textContent = String(ticketCount);
+  });
+
+  setSlotHtml('[data-slot="selected-clientes"]', renderSelectedClientes());
+  setSlotHtml('[data-slot="selected-tickets"]', renderSelectedTickets());
+  setSlotHtml('[data-slot="client-search-results"]', renderClientSearchResults());
+  setSlotHtml('[data-slot="ticket-search-results"]', renderTicketSearchResults());
+
+  setSlotHtml('[data-error-slot="clienteId"]', renderFieldError(errors.clienteId));
+  setSlotHtml('[data-error-slot="incidenciaId"]', renderFieldError(errors.incidenciaId));
+
+  const clienteInput = root.querySelector('[data-field="clienteSearch"]');
+  if (clienteInput) {
+    clienteInput.classList.toggle("is-error", Boolean(errors.clienteId));
+    clienteInput.disabled = Boolean(modalState.submitting);
+  }
+
+  const ticketInput = root.querySelector('[data-field="ticketSearch"]');
+  if (ticketInput) {
+    ticketInput.classList.toggle("is-error", Boolean(errors.incidenciaId));
+    ticketInput.disabled = Boolean(
+      modalState.submitting ||
+      modalState.ticketSearchLoading ||
+      !clienteCount
+    );
+  }
+
+  const clearClientesBtn = root.querySelector("[data-clear-clientes='true']");
+  if (clearClientesBtn) {
+    clearClientesBtn.disabled = Boolean(modalState.submitting || !clienteCount);
+  }
+
+  const refreshTicketsBtn = root.querySelector("[data-refresh-tickets='true']");
+  if (refreshTicketsBtn) {
+    refreshTicketsBtn.disabled = Boolean(
+      modalState.submitting ||
+      modalState.ticketSearchLoading ||
+      !clienteCount
+    );
+    refreshTicketsBtn.textContent = modalState.ticketSearchLoading ? "Cargando..." : "Recargar";
+  }
+
+  syncDerivedUi();
 
   return true;
 }
@@ -3200,6 +3166,159 @@ function focusFirstInvalidField() {
 
   focusPanel();
   return false;
+}
+
+/* =========================================================
+   SEARCH EXECUTION · NO FULL RERENDER
+========================================================= */
+
+async function performClientSearch(query = "") {
+  const normalized = normalizeWhitespace(query);
+  const seq = ++modalState.clienteSearchSeq;
+
+  if (normalized.length < 2) {
+    modalState.clienteSearchLoading = false;
+    modalState.clienteSearchError = "";
+    modalState.clienteSearchResults = [];
+
+    syncDynamicAreas();
+    return [];
+  }
+
+  modalState.clienteSearchLoading = true;
+  modalState.clienteSearchError = "";
+  modalState.clienteSearchResults = [];
+
+  syncDynamicAreas();
+
+  try {
+    const results = await searchClientesRequest(normalized);
+
+    if (seq !== modalState.clienteSearchSeq) return [];
+
+    modalState.clienteSearchLoading = false;
+    modalState.clienteSearchError = "";
+    modalState.clienteSearchResults = results;
+
+    syncDynamicAreas();
+
+    return results;
+  } catch (error) {
+    if (seq !== modalState.clienteSearchSeq) return [];
+
+    modalState.clienteSearchLoading = false;
+    modalState.clienteSearchResults = [];
+    modalState.clienteSearchError = safeErrorMessage(error, "No se pudo buscar cliente.");
+
+    syncDynamicAreas();
+
+    return [];
+  }
+}
+
+function scheduleClientSearch(query = "") {
+  clearClientSearchTimer();
+
+  const normalized = normalizeWhitespace(query);
+
+  if (normalized.length < 2) {
+    modalState.clienteSearchLoading = false;
+    modalState.clienteSearchError = "";
+    modalState.clienteSearchResults = [];
+
+    syncDynamicAreas();
+    return;
+  }
+
+  modalState.clienteSearchDebounce = setTimeout(() => {
+    performClientSearch(normalized);
+  }, SEARCH_DEBOUNCE);
+}
+
+async function loadTicketsForSelectedClient({
+  query = "",
+  autoSelectLatest = true,
+} = {}) {
+  if (!getSelectedClientes().length) {
+    modalState.ticketSearchLoading = false;
+    modalState.ticketSearchError = "";
+    modalState.ticketSearchResults = [];
+    modalState.selectedTickets = [];
+
+    syncPrimaryTicketToForm();
+    syncDynamicAreas();
+
+    return [];
+  }
+
+  const seq = ++modalState.ticketSearchSeq;
+
+  modalState.ticketSearchLoading = true;
+  modalState.ticketSearchError = "";
+  modalState.ticketSearchResults = [];
+
+  if (autoSelectLatest) {
+    modalState.selectedTickets = [];
+    syncPrimaryTicketToForm();
+  }
+
+  syncDynamicAreas();
+
+  try {
+    const results = await searchTicketsRequest(query);
+
+    if (seq !== modalState.ticketSearchSeq) return [];
+
+    modalState.ticketSearchLoading = false;
+    modalState.ticketSearchError = "";
+    modalState.ticketSearchResults = results;
+
+    if (autoSelectLatest && results[0]?.id) {
+      setSelectedTicketFromItem(results[0], {
+        auto: true,
+        append: true,
+      });
+    }
+
+    syncDynamicAreas();
+
+    return results;
+  } catch (error) {
+    if (seq !== modalState.ticketSearchSeq) return [];
+
+    modalState.ticketSearchLoading = false;
+    modalState.ticketSearchResults = [];
+    modalState.ticketSearchError = safeErrorMessage(
+      error,
+      "No se pudieron cargar las incidencias del cliente."
+    );
+    modalState.selectedTickets = [];
+
+    syncPrimaryTicketToForm();
+    syncDynamicAreas();
+
+    return [];
+  }
+}
+
+function scheduleTicketSearch(query = "") {
+  clearTicketSearchTimer();
+
+  if (!getSelectedClientes().length) {
+    modalState.ticketSearchLoading = false;
+    modalState.ticketSearchError = "";
+    modalState.ticketSearchResults = [];
+
+    syncDynamicAreas();
+    return;
+  }
+
+  modalState.ticketSearchDebounce = setTimeout(() => {
+    loadTicketsForSelectedClient({
+      query,
+      autoSelectLatest: false,
+    });
+  }, SEARCH_DEBOUNCE);
 }
 
 /* =========================================================
@@ -3366,14 +3485,7 @@ function buildDraftTickets(draft = {}) {
     if (!map.has(item.id)) map.set(item.id, item);
   });
 
-  return Array.from(map.values()).sort((a, b) => {
-    const dateA = safeNumber(a?.sortDate, 0);
-    const dateB = safeNumber(b?.sortDate, 0);
-
-    if (dateA !== dateB) return dateB - dateA;
-
-    return safeText(b?.id, "").localeCompare(safeText(a?.id, ""));
-  });
+  return sortTicketsByLatest(Array.from(map.values()));
 }
 
 /* =========================================================
@@ -3429,13 +3541,11 @@ export function openFacturasCreateModal(draft = {}) {
     loadTicketsForSelectedClient({
       query: "",
       autoSelectLatest: true,
-      focus: "ticketSearch",
     });
   } else {
     loadTicketsForSelectedClient({
       query: "",
       autoSelectLatest: false,
-      focus: "descripcion",
     });
 
     focusField("descripcion");
@@ -3546,9 +3656,7 @@ async function handleSubmit() {
   modalState.errors = validation.errors;
 
   if (!validation.valid) {
-    renderModal();
-    attachRootBindings();
-    syncDerivedUi();
+    syncDynamicAreas();
     focusFirstInvalidField();
 
     showToast("Revisa los campos obligatorios.", "warning");
@@ -3623,7 +3731,7 @@ async function handleSubmit() {
 }
 
 /* =========================================================
-   SELECTION ACTIONS
+   SELECTION ACTIONS · NO FULL RERENDER
 ========================================================= */
 
 function setSelectedTicketFromItem(item = null, { auto = false, append = true } = {}) {
@@ -3692,16 +3800,20 @@ async function selectCliente(index = -1) {
   modalState.ticketSearchError = "";
   modalState.ticketSearchLoading = false;
 
-  renderModal();
-  attachRootBindings();
-  syncDerivedUi();
-  focusField("ticketSearch");
+  const clienteInput = getRoot()?.querySelector?.('[data-field="clienteSearch"]');
+  if (clienteInput) clienteInput.value = "";
+
+  const ticketInput = getRoot()?.querySelector?.('[data-field="ticketSearch"]');
+  if (ticketInput) ticketInput.value = "";
+
+  syncDynamicAreas();
 
   await loadTicketsForSelectedClient({
     query: "",
     autoSelectLatest: getSelectedTickets().length === 0,
-    focus: "ticketSearch",
   });
+
+  focusField("ticketSearch");
 
   return true;
 }
@@ -3724,9 +3836,10 @@ async function removeCliente(index = -1) {
 
     syncPrimaryTicketToForm();
 
-    renderModal();
-    attachRootBindings();
-    syncDerivedUi();
+    const ticketInput = getRoot()?.querySelector?.('[data-field="ticketSearch"]');
+    if (ticketInput) ticketInput.value = "";
+
+    syncDynamicAreas();
     focusField("clienteSearch");
 
     return true;
@@ -3737,15 +3850,11 @@ async function removeCliente(index = -1) {
   ));
 
   syncPrimaryTicketToForm();
-
-  renderModal();
-  attachRootBindings();
-  syncDerivedUi();
+  syncDynamicAreas();
 
   await loadTicketsForSelectedClient({
     query: modalState.ticketSearchQuery,
     autoSelectLatest: getSelectedTickets().length === 0,
-    focus: "ticketSearch",
   });
 
   return true;
@@ -3765,15 +3874,11 @@ async function makeClientePrimary(index = -1) {
   ];
 
   syncPrimaryClientToForm();
-
-  renderModal();
-  attachRootBindings();
-  syncDerivedUi();
+  syncDynamicAreas();
 
   await loadTicketsForSelectedClient({
     query: modalState.ticketSearchQuery,
     autoSelectLatest: getSelectedTickets().length === 0,
-    focus: "ticketSearch",
   });
 
   return true;
@@ -3796,9 +3901,13 @@ function clearClientes() {
   modalState.ticketSearchLoading = false;
   modalState.ticketSearchError = "";
 
-  renderModal();
-  attachRootBindings();
-  syncDerivedUi();
+  const clienteInput = getRoot()?.querySelector?.('[data-field="clienteSearch"]');
+  if (clienteInput) clienteInput.value = "";
+
+  const ticketInput = getRoot()?.querySelector?.('[data-field="ticketSearch"]');
+  if (ticketInput) ticketInput.value = "";
+
+  syncDynamicAreas();
   focusField("clienteSearch");
 
   return true;
@@ -3816,9 +3925,10 @@ function selectTicket(index = -1) {
 
   modalState.ticketSearchQuery = "";
 
-  renderModal();
-  attachRootBindings();
-  syncDerivedUi();
+  const ticketInput = getRoot()?.querySelector?.('[data-field="ticketSearch"]');
+  if (ticketInput) ticketInput.value = "";
+
+  syncDynamicAreas();
   focusField("ticketSearch");
 
   return true;
@@ -3833,10 +3943,7 @@ function removeTicket(index = -1) {
   modalState.selectedTickets = selected.filter((_, itemIndex) => itemIndex !== idx);
 
   syncPrimaryTicketToForm();
-
-  renderModal();
-  attachRootBindings();
-  syncDerivedUi();
+  syncDynamicAreas();
   focusField("ticketSearch");
 
   return true;
@@ -3856,10 +3963,7 @@ function makeTicketPrimary(index = -1) {
   ];
 
   syncPrimaryTicketToForm();
-
-  renderModal();
-  attachRootBindings();
-  syncDerivedUi();
+  syncDynamicAreas();
   focusField("ticketSearch");
 
   return true;
@@ -3869,10 +3973,7 @@ function clearTickets() {
   modalState.selectedTickets = [];
 
   syncPrimaryTicketToForm();
-
-  renderModal();
-  attachRootBindings();
-  syncDerivedUi();
+  syncDynamicAreas();
   focusField("ticketSearch");
 
   return true;
@@ -3969,7 +4070,7 @@ function attachRootBindings() {
   const root = ensureRoot();
 
   const onInput = (event) => {
-    const field = event.target.closest("[data-field]");
+    const field = event.target?.closest?.("[data-field]");
     if (!field) return;
 
     if (field.type === "checkbox") return;
@@ -3979,14 +4080,14 @@ function attachRootBindings() {
   };
 
   const onChange = (event) => {
-    const field = event.target.closest("[data-field]");
+    const field = event.target?.closest?.("[data-field]");
     if (!field) return;
 
     handleFieldInput(field);
   };
 
   const onSubmit = async (event) => {
-    const form = event.target.closest(`#${FORM_ID}`);
+    const form = event.target?.closest?.(`#${FORM_ID}`);
     if (!form) return;
 
     event.preventDefault();
@@ -3994,7 +4095,7 @@ function attachRootBindings() {
   };
 
   const onClick = async (event) => {
-    const closeBtn = event.target.closest("[data-modal-close='true']");
+    const closeBtn = event.target?.closest?.("[data-modal-close='true']");
 
     if (closeBtn) {
       event.preventDefault();
@@ -4002,8 +4103,8 @@ function attachRootBindings() {
       return;
     }
 
-    const overlay = event.target.closest("[data-facturas-create-modal-overlay='true']");
-    const panel = event.target.closest("[data-facturas-create-modal-panel='true']");
+    const overlay = event.target?.closest?.("[data-facturas-create-modal-overlay='true']");
+    const panel = event.target?.closest?.("[data-facturas-create-modal-panel='true']");
 
     if (
       overlay &&
@@ -4015,7 +4116,7 @@ function attachRootBindings() {
       return;
     }
 
-    const selectClienteBtn = event.target.closest("[data-select-cliente]");
+    const selectClienteBtn = event.target?.closest?.("[data-select-cliente]");
 
     if (selectClienteBtn) {
       event.preventDefault();
@@ -4025,7 +4126,7 @@ function attachRootBindings() {
       return;
     }
 
-    const removeClienteBtn = event.target.closest("[data-remove-cliente]");
+    const removeClienteBtn = event.target?.closest?.("[data-remove-cliente]");
 
     if (removeClienteBtn) {
       event.preventDefault();
@@ -4035,7 +4136,7 @@ function attachRootBindings() {
       return;
     }
 
-    const primaryClienteBtn = event.target.closest("[data-primary-cliente]");
+    const primaryClienteBtn = event.target?.closest?.("[data-primary-cliente]");
 
     if (primaryClienteBtn) {
       event.preventDefault();
@@ -4045,7 +4146,7 @@ function attachRootBindings() {
       return;
     }
 
-    const clearClientesBtn = event.target.closest("[data-clear-clientes='true']");
+    const clearClientesBtn = event.target?.closest?.("[data-clear-clientes='true']");
 
     if (clearClientesBtn) {
       event.preventDefault();
@@ -4055,7 +4156,7 @@ function attachRootBindings() {
       return;
     }
 
-    const selectTicketBtn = event.target.closest("[data-select-ticket]");
+    const selectTicketBtn = event.target?.closest?.("[data-select-ticket]");
 
     if (selectTicketBtn) {
       event.preventDefault();
@@ -4065,7 +4166,7 @@ function attachRootBindings() {
       return;
     }
 
-    const removeTicketBtn = event.target.closest("[data-remove-ticket]");
+    const removeTicketBtn = event.target?.closest?.("[data-remove-ticket]");
 
     if (removeTicketBtn) {
       event.preventDefault();
@@ -4075,7 +4176,7 @@ function attachRootBindings() {
       return;
     }
 
-    const primaryTicketBtn = event.target.closest("[data-primary-ticket]");
+    const primaryTicketBtn = event.target?.closest?.("[data-primary-ticket]");
 
     if (primaryTicketBtn) {
       event.preventDefault();
@@ -4085,7 +4186,7 @@ function attachRootBindings() {
       return;
     }
 
-    const clearTicketsBtn = event.target.closest("[data-clear-tickets='true']");
+    const clearTicketsBtn = event.target?.closest?.("[data-clear-tickets='true']");
 
     if (clearTicketsBtn) {
       event.preventDefault();
@@ -4095,7 +4196,7 @@ function attachRootBindings() {
       return;
     }
 
-    const refreshTicketsBtn = event.target.closest("[data-refresh-tickets='true']");
+    const refreshTicketsBtn = event.target?.closest?.("[data-refresh-tickets='true']");
 
     if (refreshTicketsBtn) {
       event.preventDefault();
@@ -4104,7 +4205,6 @@ function attachRootBindings() {
       await loadTicketsForSelectedClient({
         query: modalState.ticketSearchQuery,
         autoSelectLatest: getSelectedTickets().length === 0,
-        focus: "ticketSearch",
       });
     }
   };
@@ -4245,7 +4345,6 @@ export const OnionFacturasCreateModal = {
     return loadTicketsForSelectedClient({
       query: modalState.ticketSearchQuery,
       autoSelectLatest: false,
-      focus: "ticketSearch",
     });
   },
 

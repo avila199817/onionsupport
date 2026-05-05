@@ -2,37 +2,47 @@
    Onion SPA - Sidebar Constants
    Archivo: src/ui/sidebar/constants.js
 
-   FINAL EXTREME SYSTEM · SIDEBAR CONSTANTS · 10/10
+   FINAL EXTREME SYSTEM · SIDEBAR CONSTANTS · 11/10
+   PATCH · REAL SHELL FIREBREAK READY
+   PATCH · ROUTE ALIASES ES/CA/EN CANONICAL
+   PATCH · NO ROUTER SHELL LOOP EVENTS
+   PATCH · DOM IDS SINGLE SOURCE OF TRUTH
+   PATCH · DROPDOWN / INDICATOR / EVENTS READY
+   PATCH · LEGACY SAFE WITHOUT CSS
 
    RESPONSABILIDADES:
    - centralizar constantes del módulo sidebar
    - ids del DOM
    - rutas internas del sidebar
+   - aliases legacy/controlados de rutas
    - acciones semánticas del sidebar
    - selectores DOM estables
    - breakpoint mobile
+   - timings visuales
    - claves de storage
    - scope de cleanup / eventos
    - eventos públicos del sidebar
    - clases visuales compartidas
    - flags de rol/admin/permisos
    - orden canónico del menú
-   - aliases legacy controlados
    - compatibilidad con template.js / dom.js / state.js / events.js
    - compatibilidad con visibility.js / user.js / actions.js
+   - cero imports
+   - cero CSS
+   - solo constantes puras
 
    HARDENING EXTREMO:
    - ids únicos y estables
    - rutas canónicas sin query/hash
+   - aliases ES/CA/EN centralizados
    - storage key versionada / namespaced
    - compatibilidad legacy con sidebar-collapsed/sidebarOpen
    - desktop toggle alineado con DOM real: toggleSidebar
    - sidebarToggle queda solo como legacy selector
-   - constantes listas para i18n / template / eventos / estado
    - eventos ampliados sin romper builds anteriores
+   - no incluye eventos router:shell:* en observed para evitar loops
    - permisos admin-like centralizados
-   - no se fuerzan imports circulares
-   - solo constantes puras
+   - preparado para isRealShellHidden / isLegacyShellHidden
 ========================================================= */
 
 /* =========================================================
@@ -42,7 +52,7 @@
 export const SIDEBAR_MODULE_NAME = "SidebarUI";
 export const SIDEBAR_MODULE_KEY = "sidebar";
 export const SIDEBAR_COMPONENT_NAME = "sidebar";
-export const SIDEBAR_CONSTANTS_VERSION = "sidebar-constants-v6-final-extreme";
+export const SIDEBAR_CONSTANTS_VERSION = "sidebar-constants-v7-firebreak-extreme";
 
 /* =========================================================
    SCOPE
@@ -59,6 +69,7 @@ export const SIDEBAR_STATE_SCOPE = `${SCOPE}:state`;
 export const SIDEBAR_DROPDOWN_SCOPE = `${SCOPE}:dropdown`;
 export const SIDEBAR_VISIBILITY_SCOPE = `${SCOPE}:visibility`;
 export const SIDEBAR_ACTIONS_SCOPE = `${SCOPE}:actions`;
+export const SIDEBAR_TEMPLATE_SCOPE = `${SCOPE}:template`;
 
 /* =========================================================
    RESPONSIVE
@@ -75,6 +86,7 @@ export const SIDEBAR_TRANSITION_MS = 380;
 
 export const SIDEBAR_VISUAL_SYNC_DELAY_MS = 32;
 export const SIDEBAR_VISUAL_SYNC_AFTER_NAV_MS = 80;
+export const SIDEBAR_VISUAL_SYNC_AFTER_RENDER_MS = 96;
 export const SIDEBAR_VISUAL_SYNC_AFTER_TRANSITION_MS =
   SIDEBAR_TRANSITION_MS + 50;
 
@@ -91,6 +103,9 @@ export const SIDEBAR_INDICATOR_SETTLED_DELAY_MS =
 export const SIDEBAR_DROPDOWN_CLOSE_DELAY_MS = 0;
 export const SIDEBAR_DROPDOWN_FOCUS_DELAY_MS = 24;
 
+export const SIDEBAR_RESIZE_DEBOUNCE_MS = 120;
+export const SIDEBAR_ROUTER_SETTLED_DELAY_MS = 140;
+
 /* =========================================================
    DOM IDS
 ========================================================= */
@@ -98,13 +113,12 @@ export const SIDEBAR_DROPDOWN_FOCUS_DELAY_MS = 24;
 export const SIDEBAR_ROOT_ID = "sidebar";
 export const SIDEBAR_MENU_ID = "sidebar-menu";
 export const SIDEBAR_RECENTS_ID = "sidebar-recents";
-
 export const SIDEBAR_MOUNT_ID = "sidebar-mount";
 
 /*
-  IMPORTANTE:
-  El DOM/template actual usa toggleSidebar.
-  sidebarToggle queda como alias legacy.
+  DOM actual:
+  - template.js usa toggleSidebar
+  - sidebarToggle queda como alias legacy
 */
 export const SIDEBAR_TOGGLE_ID = "toggleSidebar";
 export const SIDEBAR_TOGGLE_LEGACY_ID = "sidebarToggle";
@@ -209,28 +223,37 @@ export const SIDEBAR_ROUTE_ALIASES = Object.freeze({
   "/": HOME_ROUTE,
   "/home": HOME_ROUTE,
   "/inicio": HOME_ROUTE,
+  "/inici": HOME_ROUTE,
   "/dashboard": HOME_ROUTE,
   "/panel": HOME_ROUTE,
 
   "/tickets": INCIDENCIAS_ROUTE,
   "/ticket": INCIDENCIAS_ROUTE,
+  "/incidents": INCIDENCIAS_ROUTE,
+  "/incident": INCIDENCIAS_ROUTE,
   "/incidencia": INCIDENCIAS_ROUTE,
   "/incidencias": INCIDENCIAS_ROUTE,
+  "/incidencies": INCIDENCIAS_ROUTE,
   "/soporte": INCIDENCIAS_ROUTE,
   "/support": INCIDENCIAS_ROUTE,
 
   "/invoices": FACTURAS_ROUTE,
   "/invoice": FACTURAS_ROUTE,
+  "/billing": FACTURAS_ROUTE,
   "/factura": FACTURAS_ROUTE,
   "/facturas": FACTURAS_ROUTE,
-  "/billing": FACTURAS_ROUTE,
+  "/factures": FACTURAS_ROUTE,
   "/facturacion": FACTURAS_ROUTE,
   "/facturación": FACTURAS_ROUTE,
+  "/facturacio": FACTURAS_ROUTE,
+  "/facturació": FACTURAS_ROUTE,
 
   "/users": USUARIOS_ROUTE,
   "/user": USUARIOS_ROUTE,
   "/usuario": USUARIOS_ROUTE,
   "/usuarios": USUARIOS_ROUTE,
+  "/usuaris": USUARIOS_ROUTE,
+  "/usuari": USUARIOS_ROUTE,
 
   "/clients": CLIENTES_ROUTE,
   "/client": CLIENTES_ROUTE,
@@ -243,11 +266,16 @@ export const SIDEBAR_ROUTE_ALIASES = Object.freeze({
   "/profile": CUENTA_ROUTE,
   "/perfil": CUENTA_ROUTE,
   "/cuenta": CUENTA_ROUTE,
+  "/compte": CUENTA_ROUTE,
 
   "/settings": AJUSTES_ROUTE,
   "/ajustes": AJUSTES_ROUTE,
+  "/config": AJUSTES_ROUTE,
+  "/configuration": AJUSTES_ROUTE,
   "/configuracion": AJUSTES_ROUTE,
   "/configuración": AJUSTES_ROUTE,
+  "/configuracio": AJUSTES_ROUTE,
+  "/configuració": AJUSTES_ROUTE,
 
   "/server": SERVER_ROUTE,
   "/servidor": SERVER_ROUTE,
@@ -413,6 +441,7 @@ export const SIDEBAR_ACTION_ALIASES = Object.freeze({
   "navigate": SIDEBAR_ACTION_NAVIGATE,
   "go": SIDEBAR_ACTION_NAVIGATE,
   "route": SIDEBAR_ACTION_NAVIGATE,
+  "nav": SIDEBAR_ACTION_NAVIGATE,
 
   "toggle": SIDEBAR_ACTION_TOGGLE,
   "collapse": SIDEBAR_ACTION_TOGGLE,
@@ -430,6 +459,13 @@ export const SIDEBAR_ACTION_ALIASES = Object.freeze({
   "toggle-dropdown": SIDEBAR_ACTION_TOGGLE_USER,
   "toggle-user-menu": SIDEBAR_ACTION_TOGGLE_USER,
   "toggle-user-dropdown": SIDEBAR_ACTION_TOGGLE_USER,
+  "open-user-menu": SIDEBAR_ACTION_OPEN_USER_MENU,
+  "close-user-menu": SIDEBAR_ACTION_CLOSE_USER_MENU,
+
+  "profile": SIDEBAR_ACTION_PROFILE,
+  "account": SIDEBAR_ACTION_PROFILE,
+  "settings": SIDEBAR_ACTION_SETTINGS,
+  "help": SIDEBAR_ACTION_HELP,
 
   "signout": SIDEBAR_ACTION_LOGOUT,
   "sign-out": SIDEBAR_ACTION_LOGOUT,
@@ -459,6 +495,7 @@ export const SIDEBAR_DATA_ATTRS = Object.freeze({
   nav: "data-sidebar-nav",
   navKey: "data-nav-key",
   routeKey: "data-route-key",
+  menuKey: "data-menu-key",
 
   action: "data-sidebar-action",
   genericAction: "data-action",
@@ -466,6 +503,8 @@ export const SIDEBAR_DATA_ATTRS = Object.freeze({
   route: "data-route",
   href: "data-href",
   to: "data-to",
+  publicPath: "data-public-path",
+  canonicalPath: "data-canonical-path",
   spa: "data-spa",
 
   role: "data-role",
@@ -683,6 +722,7 @@ export const SIDEBAR_SELECTORS = Object.freeze({
     `[data-sidebar-item-key="server"]`,
     `[data-nav-key="server"]`,
     `[data-route-key="server"]`,
+    `[data-menu-key="server"]`,
     `[data-route="${SERVER_ROUTE}"]`,
     `[data-href="${SERVER_ROUTE}"]`,
     `[data-to="${SERVER_ROUTE}"]`,
@@ -695,6 +735,8 @@ export const SIDEBAR_SELECTORS = Object.freeze({
     "a.menu-item",
     "a[data-spa]",
     "a[data-route]",
+    "a[data-href]",
+    "a[data-to]",
     ".menu-item[data-route]",
   ].join(", "),
 
@@ -767,18 +809,15 @@ export const SIDEBAR_SELECTORS = Object.freeze({
 
 /*
   Legacy principal:
-  Se mantiene porque state.js y builds anteriores lo leen.
-  Semántica:
-    true  => desktop colapsado
-    false => desktop abierto
+  true  => desktop colapsado
+  false => desktop abierto
 */
 export const DESKTOP_COLLAPSED_STORAGE_KEY = "sidebar-collapsed";
 
 /*
   Legacy secundario:
-  Semántica inversa:
-    true  => sidebar abierto
-    false => sidebar colapsado
+  true  => sidebar abierto
+  false => sidebar colapsado
 */
 export const LEGACY_SIDEBAR_OPEN_STORAGE_KEY = "sidebarOpen";
 
@@ -830,6 +869,7 @@ export const SIDEBAR_CLASSES = Object.freeze({
 
   dropdownOpen: "open",
   dropdownIsOpen: "is-open",
+  dropdownVisible: "is-visible",
 
   roleHidden: "is-role-hidden",
   adminHidden: "is-admin-hidden",
@@ -869,6 +909,29 @@ export const SIDEBAR_DATASET_VALUES = Object.freeze({
 });
 
 /* =========================================================
+   SHELL FLAGS
+========================================================= */
+
+export const SIDEBAR_SHELL_HIDDEN_BODY_CLASSES = Object.freeze([
+  "route-shell-hidden",
+  "auth-screen",
+  "route-auth",
+]);
+
+export const SIDEBAR_SHELL_VISIBLE_BODY_CLASSES = Object.freeze([
+  "route-shell-visible",
+  "route-app",
+]);
+
+export const SIDEBAR_SHELL_DATA_VALUES = Object.freeze({
+  hidden: "hidden",
+  visible: "visible",
+  auth: "auth",
+  app: "app",
+  shell: "shell",
+});
+
+/* =========================================================
    EVENTS
 ========================================================= */
 
@@ -879,6 +942,9 @@ export const SIDEBAR_EVENTS = Object.freeze({
   repaired: "sidebar:repaired",
   repairDeduped: "sidebar:repair:deduped",
   refreshed: "sidebar:refreshed",
+
+  domMounted: "sidebar:dom:mounted",
+  domRevealed: "sidebar:dom:revealed",
 
   eventsBound: "sidebar:events:bound",
   eventsBindSkipped: "sidebar:events:bind-skipped",
@@ -897,6 +963,7 @@ export const SIDEBAR_EVENTS = Object.freeze({
   uiOpenSet: "sidebar:ui:open:set",
 
   activeItemSynced: "sidebar:active:item:synced",
+  activeItemOverridden: "sidebar:active:item:overridden",
   activeRouteSynced: "sidebar:active-route:synced",
   activeInvalidated: "sidebar:active:invalidated",
 
@@ -920,9 +987,12 @@ export const SIDEBAR_EVENTS = Object.freeze({
   visibilityApplied: "sidebar:visibility:applied",
   rolesAppliedLegacy: "sidebar:roles:applied",
 
+  dropdownChange: "sidebar:dropdown:change",
   dropdownOpen: "sidebar:dropdown:open",
   dropdownClose: "sidebar:dropdown:close",
   dropdownToggle: "sidebar:dropdown:toggle",
+  dropdownBlocked: "sidebar:dropdown:blocked",
+  dropdownRepaired: "sidebar:dropdown:repaired",
 
   navigationRequest: "sidebar:navigation:request",
   dropdownNavigationRequest: "sidebar:dropdown:navigation:request",
@@ -956,7 +1026,6 @@ export const SIDEBAR_OBSERVED_APP_EVENTS = Object.freeze([
 
   "app:user:change",
   "app:user:updated",
-  "app:user-ui:sync",
 
   "app:session:change",
   "app:session:restored",
@@ -999,8 +1068,16 @@ export const SIDEBAR_OBSERVED_ROUTER_EVENTS = Object.freeze([
   "router:route:change",
   "router:navigation:complete",
   "router:render:async-complete",
+  "router:rendered:complete",
+]);
+
+export const SIDEBAR_BLOCKED_ROUTER_EVENTS = Object.freeze([
   "router:shell:repair",
   "router:shell:state",
+  "sidebar:refreshed",
+  "sidebar:repaired",
+  "sidebar:state:synced",
+  "app:user-ui:sync",
 ]);
 
 /* =========================================================
@@ -1197,6 +1274,7 @@ export default {
   SIDEBAR_DROPDOWN_SCOPE,
   SIDEBAR_VISIBILITY_SCOPE,
   SIDEBAR_ACTIONS_SCOPE,
+  SIDEBAR_TEMPLATE_SCOPE,
 
   MOBILE_BREAKPOINT,
   SIDEBAR_MOBILE_BREAKPOINT,
@@ -1204,6 +1282,7 @@ export default {
   SIDEBAR_TRANSITION_MS,
   SIDEBAR_VISUAL_SYNC_DELAY_MS,
   SIDEBAR_VISUAL_SYNC_AFTER_NAV_MS,
+  SIDEBAR_VISUAL_SYNC_AFTER_RENDER_MS,
   SIDEBAR_VISUAL_SYNC_AFTER_TRANSITION_MS,
   SIDEBAR_HOVER_FLUSH_MS,
   SIDEBAR_BIND_DEDUP_WINDOW_MS,
@@ -1213,6 +1292,8 @@ export default {
   SIDEBAR_INDICATOR_SETTLED_DELAY_MS,
   SIDEBAR_DROPDOWN_CLOSE_DELAY_MS,
   SIDEBAR_DROPDOWN_FOCUS_DELAY_MS,
+  SIDEBAR_RESIZE_DEBOUNCE_MS,
+  SIDEBAR_ROUTER_SETTLED_DELAY_MS,
 
   SIDEBAR_ROOT_ID,
   SIDEBAR_MENU_ID,
@@ -1292,10 +1373,15 @@ export default {
   SIDEBAR_CLASSES,
   SIDEBAR_DATASET_VALUES,
 
+  SIDEBAR_SHELL_HIDDEN_BODY_CLASSES,
+  SIDEBAR_SHELL_VISIBLE_BODY_CLASSES,
+  SIDEBAR_SHELL_DATA_VALUES,
+
   SIDEBAR_EVENTS,
   SIDEBAR_OBSERVED_APP_EVENTS,
   SIDEBAR_OBSERVED_AUTH_EVENTS,
   SIDEBAR_OBSERVED_ROUTER_EVENTS,
+  SIDEBAR_BLOCKED_ROUTER_EVENTS,
 
   SIDEBAR_ADMIN_ROLE_KEYS,
   SIDEBAR_ADMIN_PERMISSION_KEYS,

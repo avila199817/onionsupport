@@ -2,7 +2,13 @@
    Onion SPA - Sidebar User
    Archivo: src/ui/sidebar/user.js
 
-   FINAL EXTREME SYSTEM · SIDEBAR USER / AVATAR · 10/10
+   FINAL EXTREME SYSTEM · SIDEBAR USER / AVATAR · 11/10
+   PATCH · CONSTANTS SINGLE SOURCE
+   PATCH · NO STALE USER AFTER LOGOUT
+   PATCH · AVATAR ANTI-RACE HARDENED
+   PATCH · AUTH-LIKE SOURCES SAFE
+   PATCH · ADMIN ROLE/PERMISSION FROM CONSTANTS
+   PATCH · ZERO GLOBAL CSS · ZERO THROWS
 
    RESPONSABILIDADES:
    - resolver usuario actual desde AppCore/Auth-like sources
@@ -14,15 +20,15 @@
    - detectar rol admin con aliases/flags/permisos
    - renderizar usuario en el footer
    - pintar avatar real o fallback
-   - soportar hasAvatar / avatarUpdatedAt
-   - evitar que una URL vacía o rota rompa el footer
+   - soportar hasAvatar / avatarUpdatedAt / avatarVersion
+   - evitar URL vacía/rota/peligrosa
    - evitar carreras de carga de avatar
-   - respetar la estructura DOM del template
+   - evitar usuario/avatar fantasma tras logout
+   - respetar estructura DOM del template
    - evitar tooltips nativos en avatar/footer
-   - evitar title/data-tooltip residuales
    - emitir snapshot estable del usuario renderizado
 
-   HARDENING EXTREMO:
+   HARDENING:
    - no depende de una única forma de user
    - soporta user/profile/account/meta/claims/raw/customer/cliente
    - soporta avatarUrl/photoUrl/picture/profileImage anidados
@@ -36,13 +42,22 @@
    - resuelve Auth aunque esté en AppCore.modules o window
    - soporta payloads de sesión heterogéneos
    - evita false positives de usuario vacío
-   - cero throws hacia la UI
 ========================================================= */
 
 import {
   getElements,
   sanitizeFooterTooltipState,
 } from "./dom.js";
+
+import {
+  SIDEBAR_AVATAR_IMAGE_ID,
+  SIDEBAR_AVATAR_FALLBACK_ID,
+  SIDEBAR_USER_PLAN_ID,
+  SIDEBAR_EVENTS,
+  SIDEBAR_ADMIN_ROLE_KEYS,
+  SIDEBAR_ADMIN_PERMISSION_KEYS,
+  SIDEBAR_ADMIN_FLAG_KEYS,
+} from "./constants.js";
 
 /* =========================================================
    CONSTANTS
@@ -56,10 +71,6 @@ const LOG_PREFIX = "[SidebarUser]";
 
 const AVATAR_CACHE_PARAM = "v";
 const AVATAR_RENDER_SEQ_DATASET_KEY = "avatarRenderSeq";
-
-const SIDEBAR_AVATAR_IMAGE_ID = "sidebarAvatarImage";
-const SIDEBAR_AVATAR_FALLBACK_ID = "sidebarAvatarFallback";
-const SIDEBAR_USER_PLAN_ID = "sidebarUserPlan";
 
 const AVATAR_COLOR_STORAGE_KEY = "onion:sidebar:avatar:color";
 const AVATAR_COLOR_SCOPE_STORAGE_KEY = "onion:sidebar:avatar:color:scope";
@@ -79,141 +90,25 @@ const AVATAR_GRADIENTS = Object.freeze([
   "linear-gradient(135deg, #64748b, #0f172a)",
 ]);
 
-let memoryAvatarGradient = "";
-let memoryAvatarGradientScope = "";
-
 const EVENTS = Object.freeze({
-  userRendered: "sidebar:user:rendered",
-  userAvatarLoaded: "sidebar:user:avatar:loaded",
-  userAvatarError: "sidebar:user:avatar:error",
-  userFallbackRendered: "sidebar:user:avatar:fallback",
-  userAvatarColorReset: "sidebar:user:avatar:color:reset",
+  userRendered:
+    SIDEBAR_EVENTS?.userRendered ||
+    "sidebar:user:rendered",
+
+  userAvatarLoaded:
+    SIDEBAR_EVENTS?.userAvatarLoaded ||
+    "sidebar:user:avatar:loaded",
+
+  userAvatarError:
+    SIDEBAR_EVENTS?.userAvatarError ||
+    "sidebar:user:avatar:error",
+
+  userFallbackRendered:
+    "sidebar:user:avatar:fallback",
+
+  userAvatarColorReset:
+    "sidebar:user:avatar:color:reset",
 });
-
-const ADMIN_ROLE_KEYS = new Set([
-  "admin",
-  "administrator",
-  "administrador",
-  "superadmin",
-  "super_admin",
-  "super_administrador",
-  "super-administrador",
-  "owner",
-  "root",
-  "staff",
-  "support",
-  "soporte",
-]);
-
-const ADMIN_PERMISSION_KEYS = new Set([
-  "*",
-
-  "admin:*",
-  "admin.all",
-  "admin.full",
-  "admin.manage",
-  "admin:manage",
-  "admin.write",
-  "admin:write",
-  "admin.read",
-  "admin:read",
-
-  "users.manage",
-  "users:manage",
-  "users.write",
-  "users:write",
-  "users.admin",
-  "users:admin",
-  "users.access",
-  "users:access",
-
-  "usuarios.manage",
-  "usuarios:manage",
-  "usuarios.write",
-  "usuarios:write",
-  "usuarios.admin",
-  "usuarios:admin",
-  "usuarios.access",
-  "usuarios:access",
-
-  "manage_users",
-  "can_manage_users",
-  "access_users",
-  "can_access_users",
-
-  "clients.manage",
-  "clients:manage",
-  "clients.write",
-  "clients:write",
-  "clients.admin",
-  "clients:admin",
-
-  "clientes.manage",
-  "clientes:manage",
-  "clientes.write",
-  "clientes:write",
-  "clientes.admin",
-  "clientes:admin",
-
-  "server.manage",
-  "server:manage",
-  "server.admin",
-  "server:admin",
-  "server.access",
-  "server:access",
-
-  "servidor.manage",
-  "servidor:manage",
-  "servidor.admin",
-  "servidor:admin",
-  "servidor.access",
-  "servidor:access",
-
-  "tickets.manage",
-  "tickets:manage",
-  "tickets.admin",
-  "tickets:admin",
-
-  "incidencias.manage",
-  "incidencias:manage",
-  "incidencias.admin",
-  "incidencias:admin",
-
-  "facturas.manage",
-  "facturas:manage",
-  "facturas.admin",
-  "facturas:admin",
-
-  "invoices.manage",
-  "invoices:manage",
-  "invoices.admin",
-  "invoices:admin",
-]);
-
-const ADMIN_FLAG_KEYS = Object.freeze([
-  "isAdmin",
-  "admin",
-  "is_admin",
-
-  "isSuperAdmin",
-  "superAdmin",
-  "is_super_admin",
-
-  "canManageUsers",
-  "can_manage_users",
-
-  "canAccessUsers",
-  "can_access_users",
-
-  "canManageClients",
-  "can_manage_clients",
-
-  "canAccessServer",
-  "can_access_server",
-
-  "canManageServer",
-  "can_manage_server",
-]);
 
 const STORAGE_USER_KEYS = Object.freeze([
   "user",
@@ -233,6 +128,48 @@ const STORAGE_USER_KEYS = Object.freeze([
   "app:auth:user",
   "app:session:user",
 ]);
+
+const STORAGE_AUTH_EVIDENCE_KEYS = Object.freeze([
+  "token",
+  "accessToken",
+  "access_token",
+  "authToken",
+  "auth_token",
+  "refreshToken",
+  "refresh_token",
+  "tempToken",
+  "temp_token",
+  "sessionId",
+  "session_id",
+  "sessionUserId",
+  "session_user_id",
+
+  "onion_token",
+  "onion_access_token",
+  "onion_refresh_token",
+  "onion_temp_token",
+  "onion_session_id",
+  "onion_session_user_id",
+
+  "auth.token",
+  "auth.accessToken",
+  "auth.refreshToken",
+  "auth.tempToken",
+  "auth.sessionId",
+  "auth.sessionUserId",
+
+  "auth:token",
+  "auth:accessToken",
+  "auth:refreshToken",
+  "auth:tempToken",
+  "auth:sessionId",
+  "auth:sessionUserId",
+]);
+
+let memoryAvatarGradient = "";
+let memoryAvatarGradientScope = "";
+let cachedAdminRoleSet = null;
+let cachedAdminPermissionSet = null;
 
 /* =========================================================
    BASIC HELPERS
@@ -344,11 +281,7 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
       return true;
     }
   } catch (error) {
-    safeWarn(
-      AppCore,
-      `AppCore.events.emit("${name}") falló.`,
-      error
-    );
+    safeWarn(AppCore, `AppCore.events.emit("${name}") falló.`, error);
   }
 
   try {
@@ -367,6 +300,68 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
   } catch {}
 
   return false;
+}
+
+function nowMs() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+function normalizeString(value = "") {
+  return safeText(value, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function getBaseOrigin() {
+  try {
+    if (isBrowser() && window.location?.origin) {
+      return window.location.origin;
+    }
+  } catch {}
+
+  return "http://localhost";
+}
+
+function hashString(value = "") {
+  const text = safeText(value, "");
+  if (!text) return "";
+
+  let hash = 2166136261;
+
+  try {
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+
+    return `h${(hash >>> 0).toString(36)}`;
+  } catch {
+    return `h${Math.abs(text.length || 0).toString(36)}`;
+  }
+}
+
+function setDatasetValue(element = null, key = "", value = "") {
+  if (!element || !key) return false;
+
+  try {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ""
+    ) {
+      delete element.dataset[key];
+      return true;
+    }
+
+    element.dataset[key] = String(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function removeTooltipAttributes(element = null) {
@@ -403,91 +398,12 @@ function removeTooltipAttributesDeep(element = null) {
   }
 }
 
-/**
- * Normalizador ASCII.
- *
- * IMPORTANTE:
- * - Se usa para username/roles.
- * - NO se usa para iniciales del avatar, porque eliminaría acentos.
- */
-function normalizeString(value = "") {
-  return safeText(value, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-}
-
-function getBaseOrigin() {
-  try {
-    if (
-      isBrowser() &&
-      window.location?.origin
-    ) {
-      return window.location.origin;
-    }
-  } catch {}
-
-  return "http://localhost";
-}
-
-function nowMs() {
-  try {
-    return Date.now();
-  } catch {
-    return 0;
-  }
-}
-
-function setDatasetValue(element = null, key = "", value = "") {
-  if (!element || !key) {
-    return false;
-  }
-
-  try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
-      delete element.dataset[key];
-      return true;
-    }
-
-    element.dataset[key] = String(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function hashString(value = "") {
-  const text = safeText(value, "");
-
-  if (!text) {
-    return "";
-  }
-
-  let hash = 2166136261;
-
-  try {
-    for (let index = 0; index < text.length; index += 1) {
-      hash ^= text.charCodeAt(index);
-      hash = Math.imul(hash, 16777619);
-    }
-
-    return `h${(hash >>> 0).toString(36)}`;
-  } catch {
-    return `h${Math.abs(text.length || 0).toString(36)}`;
-  }
-}
-
 /* =========================================================
-   MODULE / AUTH-LIKE SOURCES
+   MODULE / AUTH SOURCES
 ========================================================= */
 
 function callGetter(source = null, methodName = "") {
-  if (!source || !methodName) {
-    return null;
-  }
+  if (!source || !methodName) return null;
 
   try {
     if (isFn(source?.[methodName])) {
@@ -500,21 +416,12 @@ function callGetter(source = null, methodName = "") {
 
 function getModule(AppCore = null, name = "") {
   const cleanName = safeText(name, "");
-
-  if (!AppCore || !cleanName) {
-    return null;
-  }
+  if (!AppCore || !cleanName) return null;
 
   try {
     if (isFn(AppCore?.modules?.get)) {
       const value = AppCore.modules.get(cleanName);
       if (value) return value;
-    }
-  } catch {}
-
-  try {
-    if (isFn(AppCore?.modules?.has) && AppCore.modules.has(cleanName)) {
-      return AppCore.modules[cleanName] || null;
     }
   } catch {}
 
@@ -526,15 +433,10 @@ function getModule(AppCore = null, name = "") {
 }
 
 function getGlobalCandidate(name = "") {
-  if (!hasWindow()) {
-    return null;
-  }
+  if (!hasWindow()) return null;
 
   const cleanName = safeText(name, "");
-
-  if (!cleanName) {
-    return null;
-  }
+  if (!cleanName) return null;
 
   try {
     return window?.[cleanName] || null;
@@ -548,13 +450,8 @@ function uniqueObjects(values = []) {
   const result = [];
 
   values.forEach((value) => {
-    if (!value || typeof value !== "object") {
-      return;
-    }
-
-    if (seen.has(value)) {
-      return;
-    }
+    if (!value || typeof value !== "object") return;
+    if (seen.has(value)) return;
 
     seen.add(value);
     result.push(value);
@@ -641,15 +538,12 @@ function getUserFromAuthLikeSources(AppCore = null) {
 }
 
 /* =========================================================
-   STORAGE USER FALLBACK
+   STORAGE / AUTH EVIDENCE
 ========================================================= */
 
 function tryParseJson(value = "") {
   const text = safeText(value, "");
-
-  if (!text) {
-    return null;
-  }
+  if (!text) return null;
 
   try {
     return JSON.parse(text);
@@ -659,15 +553,10 @@ function tryParseJson(value = "") {
 }
 
 function readStorageValue(key = "") {
-  if (!isBrowser()) {
-    return "";
-  }
+  if (!isBrowser()) return "";
 
   const cleanKey = safeText(key, "");
-
-  if (!cleanKey) {
-    return "";
-  }
+  if (!cleanKey) return "";
 
   try {
     const value = window.localStorage?.getItem?.(cleanKey);
@@ -692,20 +581,144 @@ function getStoragePrefix(AppCore = null) {
   );
 }
 
-function getStoredUserFallback(AppCore = null) {
+function buildPrefixedKeys(AppCore = null, baseKeys = []) {
   const prefix = getStoragePrefix(AppCore);
 
-  const keys = Array.from(
-    new Set([
-      ...STORAGE_USER_KEYS,
+  const result = [];
 
-      `${prefix}:user`,
-      `${prefix}_user`,
-      `${prefix}:auth:user`,
-      `${prefix}:session:user`,
-      `${prefix}:currentUser`,
-      `${prefix}_currentUser`,
-    ])
+  baseKeys.forEach((key) => {
+    const cleanKey = safeText(key, "");
+    if (!cleanKey) return;
+
+    result.push(cleanKey);
+    result.push(`${prefix}:${cleanKey}`);
+    result.push(`${prefix}_${cleanKey.replace(/[.:]/g, "_")}`);
+  });
+
+  return Array.from(new Set(result));
+}
+
+function hasStoredAuthEvidence(AppCore = null) {
+  const keys = buildPrefixedKeys(
+    AppCore,
+    STORAGE_AUTH_EVIDENCE_KEYS
+  );
+
+  return keys.some((key) => Boolean(readStorageValue(key)));
+}
+
+function hasRuntimeAuthEvidence(AppCore = null) {
+  const state = safeObject(AppCore?.state);
+  const session = safeObject(state.session);
+  const authLikeSources = getAuthLikeSources(AppCore);
+
+  const direct = first(
+    state.token,
+    state.accessToken,
+    state.access_token,
+    state.authToken,
+    state.auth_token,
+    state.jwt,
+    state.refreshToken,
+    state.refresh_token,
+    state.tempToken,
+    state.temp_token,
+    state.sessionId,
+    state.session_id,
+    state.sessionUserId,
+    state.session_user_id,
+
+    session.token,
+    session.accessToken,
+    session.access_token,
+    session.authToken,
+    session.auth_token,
+    session.jwt,
+    session.refreshToken,
+    session.refresh_token,
+    session.sessionId,
+    session.session_id,
+    session.userId,
+    session.user_id,
+
+    state.auth?.token,
+    state.auth?.accessToken,
+    state.auth?.access_token,
+    state.auth?.refreshToken,
+    state.auth?.refresh_token,
+    state.auth?.sessionId,
+    state.auth?.session_id
+  );
+
+  if (safeText(direct, "")) {
+    return true;
+  }
+
+  return authLikeSources.some((source) => {
+    try {
+      if (safeBoolean(callGetter(source, "isAuthenticated"), false)) {
+        return true;
+      }
+
+      if (safeBoolean(callGetter(source, "hasValidToken"), false)) {
+        return true;
+      }
+
+      if (safeBoolean(callGetter(source, "hasRefreshContext"), false)) {
+        return true;
+      }
+    } catch {}
+
+    return Boolean(
+      safeText(source?.token, "") ||
+        safeText(source?.accessToken, "") ||
+        safeText(source?.access_token, "") ||
+        safeText(source?.refreshToken, "") ||
+        safeText(source?.refresh_token, "") ||
+        safeText(source?.session?.token, "") ||
+        safeText(source?.session?.accessToken, "")
+    );
+  });
+}
+
+function isExplicitlyUnauthenticated(AppCore = null) {
+  const state = safeObject(AppCore?.state);
+  const session = safeObject(state.session);
+
+  const authValues = [
+    state.authenticated,
+    state.isAuthenticated,
+    state.auth?.authenticated,
+    state.auth?.isAuthenticated,
+    session.authenticated,
+    session.isAuthenticated,
+  ];
+
+  const hasTrue = authValues.some((value) => value === true);
+  const hasFalse = authValues.some((value) => value === false);
+
+  return hasFalse && !hasTrue;
+}
+
+function shouldUseStoredUserFallback(AppCore = null) {
+  if (!isExplicitlyUnauthenticated(AppCore)) {
+    return true;
+  }
+
+  return Boolean(
+    hasRuntimeAuthEvidence(AppCore) ||
+      hasStoredAuthEvidence(AppCore)
+  );
+}
+
+function getStoredUserFallback(AppCore = null) {
+  if (!shouldUseStoredUserFallback(AppCore)) {
+    return {};
+  }
+
+  const keys = buildPrefixedKeys(
+    AppCore,
+    STORAGE_USER_KEYS
   );
 
   for (const key of keys) {
@@ -728,6 +741,14 @@ function getStoredUserFallback(AppCore = null) {
 export function getUser(AppCore) {
   const state = safeObject(AppCore?.state);
   const session = safeObject(state.session);
+
+  if (
+    isExplicitlyUnauthenticated(AppCore) &&
+    !hasRuntimeAuthEvidence(AppCore) &&
+    !hasStoredAuthEvidence(AppCore)
+  ) {
+    return {};
+  }
 
   let user = first(
     state.user,
@@ -801,7 +822,7 @@ function getProfileLikeBranches(user = null) {
     safeObject(current.account?.profile),
     safeObject(current.meta?.profile),
     safeObject(current.claims?.profile),
-  ].filter((branch) => branch && typeof branch === "object");
+  ].filter(isNonEmptyObject);
 }
 
 function hasUsableUserIdentity(user = null) {
@@ -897,10 +918,7 @@ export function getDisplayName(AppCore, user = null) {
     ])
   );
 
-  return safeText(
-    value,
-    DEFAULT_DISPLAY_NAME
-  );
+  return safeText(value, DEFAULT_DISPLAY_NAME);
 }
 
 function sanitizeUsername(value = "") {
@@ -1060,15 +1078,8 @@ export function getAvatarText(AppCore, user = null) {
     return normalizeAvatarText(explicit);
   }
 
-  const displayName = getDisplayName(
-    AppCore,
-    currentUser
-  );
-
-  const username = getUsername(
-    AppCore,
-    currentUser
-  );
+  const displayName = getDisplayName(AppCore, currentUser);
+  const username = getUsername(AppCore, currentUser);
 
   const email = safeText(
     first(
@@ -1081,16 +1092,12 @@ export function getAvatarText(AppCore, user = null) {
     ""
   );
 
-  const initials =
+  return (
     extractInitialsFromText(displayName) ||
     extractInitialsFromText(username) ||
-    extractInitialsFromText(email);
-
-  if (initials) {
-    return initials;
-  }
-
-  return DEFAULT_AVATAR_TEXT;
+    extractInitialsFromText(email) ||
+    DEFAULT_AVATAR_TEXT
+  );
 }
 
 /* =========================================================
@@ -1225,10 +1232,7 @@ function appendAvatarCacheBust(url = "", updatedAt = "") {
   }
 
   try {
-    const parsed = new URL(
-      cleanUrl,
-      getBaseOrigin()
-    );
+    const parsed = new URL(cleanUrl, getBaseOrigin());
 
     parsed.searchParams.set(
       AVATAR_CACHE_PARAM,
@@ -1321,6 +1325,30 @@ function normalizeRole(value = "") {
     .trim();
 }
 
+function getAdminRoleSet() {
+  if (!cachedAdminRoleSet) {
+    cachedAdminRoleSet = new Set(
+      SIDEBAR_ADMIN_ROLE_KEYS
+        .map(normalizeRole)
+        .filter(Boolean)
+    );
+  }
+
+  return cachedAdminRoleSet;
+}
+
+function getAdminPermissionSet() {
+  if (!cachedAdminPermissionSet) {
+    cachedAdminPermissionSet = new Set(
+      SIDEBAR_ADMIN_PERMISSION_KEYS
+        .map(normalizeRole)
+        .filter(Boolean)
+    );
+  }
+
+  return cachedAdminPermissionSet;
+}
+
 function flattenRoleValue(value, depth = 0) {
   if (depth > 8) {
     return [];
@@ -1398,7 +1426,9 @@ function normalizeRoles(value) {
 }
 
 function isAdminRole(value = "") {
-  return ADMIN_ROLE_KEYS.has(normalizeRole(value));
+  return getAdminRoleSet().has(
+    normalizeRole(value)
+  );
 }
 
 function isAdminPermission(value = "") {
@@ -1408,7 +1438,7 @@ function isAdminPermission(value = "") {
     return false;
   }
 
-  if (ADMIN_PERMISSION_KEYS.has(key)) {
+  if (getAdminPermissionSet().has(key)) {
     return true;
   }
 
@@ -1536,7 +1566,7 @@ export function getUserRoles(AppCore, user = null) {
   ) {
     expanded.add("admin");
 
-    for (const role of ADMIN_ROLE_KEYS) {
+    for (const role of getAdminRoleSet()) {
       expanded.add(role);
     }
   }
@@ -1549,29 +1579,22 @@ function hasAdminFlag(AppCore, user = null) {
   const session = safeObject(state.session);
   const current = safeObject(user || getUser(AppCore));
   const branches = getProfileLikeBranches(current);
-
   const authLikeSources = getAuthLikeSources(AppCore);
 
   const flagValues = [
-    ...ADMIN_FLAG_KEYS.flatMap((key) => [
+    ...SIDEBAR_ADMIN_FLAG_KEYS.flatMap((key) => [
       state?.[key],
       session?.[key],
       current?.[key],
     ]),
 
     ...branches.flatMap((branch) => {
-      return ADMIN_FLAG_KEYS.map((key) => branch?.[key]);
+      return SIDEBAR_ADMIN_FLAG_KEYS.map((key) => branch?.[key]);
     }),
 
     ...authLikeSources.flatMap((source) => [
-      source?.isAdmin,
-      source?.admin,
-      source?.isSuperAdmin,
-      source?.superAdmin,
-      source?.canManageUsers,
-      source?.canAccessUsers,
-      source?.canManageServer,
-      source?.canAccessServer,
+      ...SIDEBAR_ADMIN_FLAG_KEYS.map((key) => source?.[key]),
+      ...SIDEBAR_ADMIN_FLAG_KEYS.map((key) => source?.state?.[key]),
 
       callGetter(source, "isAdmin"),
       callGetter(source, "isCurrentUserAdmin"),
@@ -1605,11 +1628,14 @@ export function isAdmin(AppCore, user = null) {
 
 function pickRandomAvatarGradient(previous = "") {
   const previousValue = safeText(previous, "");
+
   const available = AVATAR_GRADIENTS.filter(
     (gradient) => gradient !== previousValue
   );
 
-  const list = available.length ? available : AVATAR_GRADIENTS;
+  const list = available.length
+    ? available
+    : AVATAR_GRADIENTS;
 
   return list[
     Math.floor(Math.random() * list.length)
@@ -1619,7 +1645,6 @@ function pickRandomAvatarGradient(previous = "") {
 function getAuthTokenFingerprint(AppCore = null) {
   const state = safeObject(AppCore?.state);
   const session = safeObject(state.session);
-
   const authLikeSources = getAuthLikeSources(AppCore);
 
   const token = first(
@@ -1988,13 +2013,13 @@ function nextAvatarRenderSeq(avatarEl = null) {
     return "0";
   }
 
-  const current =
-    Number(avatarEl.dataset?.[AVATAR_RENDER_SEQ_DATASET_KEY] || 0);
+  const current = Number(
+    avatarEl.dataset?.[AVATAR_RENDER_SEQ_DATASET_KEY] || 0
+  );
 
-  const next =
-    Number.isFinite(current)
-      ? current + 1
-      : nowMs();
+  const next = Number.isFinite(current)
+    ? current + 1
+    : nowMs();
 
   try {
     avatarEl.dataset[AVATAR_RENDER_SEQ_DATASET_KEY] = String(next);
@@ -2145,8 +2170,7 @@ export function renderAvatarImage(
     );
   }
 
-  const renderSeq =
-    nextAvatarRenderSeq(avatarEl);
+  const renderSeq = nextAvatarRenderSeq(avatarEl);
 
   syncAvatarBaseAttrs(
     avatarEl,
@@ -2344,6 +2368,82 @@ function setUserDataset(element = null, {
   return true;
 }
 
+function buildPublicUserSnapshot({
+  user,
+  hasUser,
+  displayName,
+  avatarText,
+  avatarUrl,
+  avatarColor,
+  username,
+  planLabel,
+  admin,
+  roles,
+} = {}) {
+  const current = safeObject(user);
+
+  return {
+    hasUser: Boolean(hasUser),
+
+    user: {
+      id:
+        safeText(
+          first(
+            current.id,
+            current.userId,
+            current.user_id,
+            current.uid,
+            current.sub
+          ),
+          ""
+        ) || null,
+
+      email:
+        safeText(
+          first(
+            current.email,
+            current.mail,
+            current.profile?.email,
+            current.raw?.email
+          ),
+          ""
+        ) || null,
+
+      username:
+        username || null,
+
+      displayName:
+        displayName || DEFAULT_DISPLAY_NAME,
+    },
+
+    displayName:
+      displayName || DEFAULT_DISPLAY_NAME,
+
+    avatarText:
+      avatarText || DEFAULT_AVATAR_TEXT,
+
+    avatarUrl:
+      avatarUrl || null,
+
+    avatarColor:
+      avatarColor || "",
+
+    username:
+      username || null,
+
+    planLabel:
+      planLabel || DEFAULT_PLAN_LABEL,
+
+    isAdmin:
+      Boolean(admin),
+
+    roles:
+      Array.isArray(roles)
+        ? roles
+        : [],
+  };
+}
+
 /* =========================================================
    USER UI
 ========================================================= */
@@ -2358,8 +2458,7 @@ export function renderUser(AppCore) {
 
   const user = getUser(AppCore);
 
-  const hasUser =
-    hasUsableUserIdentity(user);
+  const hasUser = hasUsableUserIdentity(user);
 
   const displayName = getDisplayName(
     AppCore,
@@ -2477,8 +2576,7 @@ export function renderUser(AppCore) {
 
       removeTooltipAttributes(userToggle);
 
-      const planEl =
-        getPlanElement(userToggle);
+      const planEl = getPlanElement(userToggle);
 
       if (planEl) {
         planEl.textContent = planLabel;
@@ -2513,18 +2611,18 @@ export function renderUser(AppCore) {
     );
   }
 
-  const snapshot = {
+  const snapshot = buildPublicUserSnapshot({
     user,
     hasUser,
     displayName,
     avatarText,
-    avatarUrl: avatarUrl || null,
+    avatarUrl,
     avatarColor,
-    username: username || null,
+    username,
     planLabel,
-    isAdmin: admin,
+    admin,
     roles,
-  };
+  });
 
   safeEmit(
     AppCore,
@@ -2554,6 +2652,7 @@ export function getSidebarUserSnapshot(AppCore) {
   const avatarUrl = getAvatarUrl(user);
   const avatarColor = getSessionAvatarGradient(AppCore, user);
   const roles = getUserRoles(AppCore, user);
+  const admin = isAdmin(AppCore, user);
 
   return {
     hasWindow: hasWindow(),
@@ -2561,7 +2660,28 @@ export function getSidebarUserSnapshot(AppCore) {
     hasUser:
       hasUsableUserIdentity(user),
 
-    user,
+    explicitUnauthenticated:
+      isExplicitlyUnauthenticated(AppCore),
+
+    hasRuntimeAuthEvidence:
+      hasRuntimeAuthEvidence(AppCore),
+
+    hasStoredAuthEvidence:
+      hasStoredAuthEvidence(AppCore),
+
+    user:
+      buildPublicUserSnapshot({
+        user,
+        hasUser: hasUsableUserIdentity(user),
+        displayName,
+        avatarText,
+        avatarUrl,
+        avatarColor,
+        username,
+        planLabel: getPlanLabel(AppCore, user),
+        admin,
+        roles,
+      }).user,
 
     displayName,
     username: username || null,
@@ -2573,7 +2693,7 @@ export function getSidebarUserSnapshot(AppCore) {
       getPlanLabel(AppCore, user),
 
     isAdmin:
-      isAdmin(AppCore, user),
+      admin,
 
     roles,
 

@@ -13,12 +13,16 @@
      · sin CSS inline
      · sin estilos inyectados por JS
      · sin Google Fonts
+   - Mantener Home separado en:
+     · /src/css/views/home/index.css       → vista principal Home/Dashboard
    - Mantener Facturas partido en tres archivos:
      · /src/css/views/facturas/index.css   → vista principal
      · /src/css/views/facturas/create.css  → modal crear factura
      · /src/css/views/facturas/detail.css  → modal detalle factura
    - Mantener Incidencias separado en:
      · /src/css/views/incidencias/index.css → vista principal de incidencias
+     · /src/css/views/incidencias/create.css → modal crear incidencia
+     · /src/css/views/incidencias/detail.css → modal detalle incidencia
 
    ORDEN DE CASCADA:
    tokens < reset < core < layout < components < views < auth
@@ -72,6 +76,31 @@
 
 
 /* =========================================================
+   VIEWS · HOME
+   Vista principal Home/Dashboard:
+   - hero role-aware user/admin
+   - stats
+   - widgets
+   - accesos rápidos
+   - actividad reciente
+   - tabla de incidencias
+   - loading/empty/error states
+   - responsive
+   - light/dark token aligned
+
+   IMPORTANTE:
+   - El CSS vive fuera de home.template.js.
+   - No usar CSS inline ni estilos inyectados por JS.
+   - El template debe emitir solo clases/atributos.
+   - Este CSS debe cargarse antes de Facturas/Incidencias
+     para que las vistas específicas puedan especializar patrones
+     si comparten nombres/token behavior.
+========================================================= */
+
+@import url("./views/home/index.css") layer(views);
+
+
+/* =========================================================
    VIEWS · FACTURAS
    Orden interno:
    1. index.css  → vista principal: hero, stats, filtros, tabla
@@ -90,6 +119,11 @@
 
 /* =========================================================
    VIEWS · INCIDENCIAS
+   Orden interno:
+   1. index.css  → vista principal de incidencias
+   2. create.css → modal creación de incidencia
+   3. detail.css → modal detalle de incidencia
+
    Vista principal de incidencias:
    - hero
    - stats

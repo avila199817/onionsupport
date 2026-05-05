@@ -2,7 +2,13 @@
    Onion SPA - Sidebar DOM
    Archivo: src/ui/sidebar/dom.js
 
-   FINAL EXTREME SYSTEM · SIDEBAR DOM · RACE SAFE · 10/10
+   FINAL EXTREME SYSTEM · SIDEBAR DOM · RACE SAFE · 11/10
+   PATCH · REAL SHELL HIDDEN FIREBREAK
+   PATCH · SIDEBAR.HIDDEN STALE NO BLOCK
+   PATCH · DROPDOWN CLOSED PRESERVED ON REVEAL
+   PATCH · NO GLOBAL VIEW POLLUTION
+   PATCH · NO DUPLICATE SIDEBARS
+   PATCH · CACHE CONNECTED ONLY
 
    Responsabilidades:
    - montar el HTML del sidebar en el shell
@@ -30,8 +36,9 @@
    - deduplica sidebars duplicados si un repair anterior dejó clones
    - resuelve toggles externos solo fuera del view-container
    - preserva AppCore.dom sin contaminar refs con nodos muertos
-   - separa shell hidden legacy de shell hidden real
-   - evita que sidebar.hidden stale bloquee reparación posterior
+   - separa shell hidden real de sidebar DOM hidden
+   - isShellHidden() devuelve shell real, NO sidebar.hidden stale
+   - revealSidebarShell() no abre el dropdown por accidente
    - expone snapshots útiles para depuración
 ========================================================= */
 
@@ -57,7 +64,7 @@ const SIDEBAR_TOGGLE_ID = "toggleSidebar";
 const SIDEBAR_MOBILE_TOGGLE_ID = "toggleSidebarMobile";
 const SIDEBAR_LOGO_ID = "homeLink";
 
-const DOM_CACHE_VERSION = "sidebar-dom-v6-final-extreme";
+const DOM_CACHE_VERSION = "sidebar-dom-v7-real-shell-firebreak";
 
 const ORIGINAL_NONE = "__none__";
 
@@ -275,7 +282,10 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -339,9 +349,14 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
     return false;
   }
 
+  const finalPayload = {
+    source: "SidebarDOM",
+    ...safeObject(payload),
+  };
+
   try {
     if (isFunction(AppCore?.events?.emit)) {
-      AppCore.events.emit(name, payload);
+      AppCore.events.emit(name, finalPayload);
       return true;
     }
   } catch (error) {
@@ -352,7 +367,7 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
     if (hasDocument() && typeof CustomEvent !== "undefined") {
       window.dispatchEvent(
         new CustomEvent(name, {
-          detail: payload,
+          detail: finalPayload,
         })
       );
 
@@ -668,21 +683,42 @@ function resolveScopedElement(id = "", selectors = [], root = null) {
   );
 }
 
-function setHidden(element = null, hidden = false) {
+function setAriaHidden(element = null, hidden = false) {
   if (!element) {
     return false;
   }
-
-  try {
-    element.hidden = Boolean(hidden);
-  } catch {}
 
   try {
     element.setAttribute(
       "aria-hidden",
       hidden ? "true" : "false"
     );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setHidden(element = null, hidden = false) {
+  if (!element) {
+    return false;
+  }
+
+  const value = Boolean(hidden);
+
+  try {
+    element.hidden = value;
   } catch {}
+
+  try {
+    if (value) {
+      element.setAttribute("hidden", "");
+    } else {
+      element.removeAttribute("hidden");
+    }
+  } catch {}
+
+  setAriaHidden(element, value);
 
   return true;
 }
@@ -699,6 +735,19 @@ function setDataset(element = null, key = "", value = "") {
     }
 
     element.dataset[key] = String(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeAttr(element = null, name = "") {
+  if (!element || !name) {
+    return false;
+  }
+
+  try {
+    element.removeAttribute(name);
     return true;
   } catch {
     return false;
@@ -757,10 +806,12 @@ function restoreAttribute(element = null, datasetKey = "", attrName = "") {
 
     if (!value || value === ORIGINAL_NONE) {
       element.removeAttribute(attrName);
-      return true;
+    } else {
+      element.setAttribute(attrName, value);
     }
 
-    element.setAttribute(attrName, value);
+    delete element.dataset[datasetKey];
+
     return true;
   } catch {
     return false;
@@ -1274,7 +1325,6 @@ export function mountSidebar(AppCore) {
     sanitizeSidebarTooltipState(AppCore);
 
     safeEmit(AppCore, "sidebar:dom:mounted", {
-      source: "SidebarDOM",
       reused: true,
       hasSidebar: true,
       version: DOM_CACHE_VERSION,
@@ -1325,7 +1375,6 @@ export function mountSidebar(AppCore) {
   sanitizeSidebarTooltipState(AppCore);
 
   safeEmit(AppCore, "sidebar:dom:mounted", {
-    source: "SidebarDOM",
     reused: false,
     hasSidebar: Boolean(sidebar),
     version: DOM_CACHE_VERSION,
@@ -1686,6 +1735,28 @@ export function hasSidebarShell(AppCore) {
    SHELL HIDDEN
 ========================================================= */
 
+function hasExplicitShellVisibleSignal(AppCore, body = null, html = null) {
+  return Boolean(
+    AppCore?.state?.shellVisible === true ||
+      AppCore?.state?.routeShellHidden === false ||
+      AppCore?.state?.authScreen === false ||
+
+      SHELL_VISIBLE_BODY_CLASSES.some((className) =>
+        body?.classList?.contains?.(className)
+      ) ||
+
+      body?.dataset?.shell === "visible" ||
+      body?.dataset?.shellVisible === "true" ||
+      body?.dataset?.routeMode === "app" ||
+      body?.dataset?.routeMode === "shell" ||
+
+      html?.dataset?.shell === "visible" ||
+      html?.dataset?.shellVisible === "true" ||
+      html?.dataset?.routeMode === "app" ||
+      html?.dataset?.routeMode === "shell"
+  );
+}
+
 export function isRealShellHidden(AppCore) {
   if (!hasDocument()) {
     return false;
@@ -1700,38 +1771,66 @@ export function isRealShellHidden(AppCore) {
 
   const html = document.documentElement || null;
 
-  return Boolean(
+  /*
+    No usamos sidebar.hidden aquí.
+    sidebar.hidden puede quedar stale tras login/router/repair.
+  */
+  const hiddenByState =
     AppCore?.state?.shellVisible === false ||
-      AppCore?.state?.routeShellHidden === true ||
-      AppCore?.state?.authScreen === true ||
+    AppCore?.state?.routeShellHidden === true ||
+    AppCore?.state?.authScreen === true;
 
-      SHELL_HIDDEN_BODY_CLASSES.some((className) =>
-        body?.classList?.contains?.(className)
-      ) ||
+  const hiddenByBody =
+    SHELL_HIDDEN_BODY_CLASSES.some((className) =>
+      body?.classList?.contains?.(className)
+    ) ||
+    body?.dataset?.shell === "hidden" ||
+    body?.dataset?.shellVisible === "false" ||
+    body?.dataset?.routeMode === "auth";
 
-      body?.dataset?.shell === "hidden" ||
-      body?.dataset?.shellVisible === "false" ||
-      body?.dataset?.routeMode === "auth" ||
+  const hiddenByHtml =
+    html?.dataset?.shell === "hidden" ||
+    html?.dataset?.shellVisible === "false" ||
+    html?.dataset?.routeMode === "auth";
 
-      html?.dataset?.shell === "hidden" ||
-      html?.dataset?.shellVisible === "false" ||
-      html?.dataset?.routeMode === "auth" ||
+  const hiddenByShellNode =
+    appShell?.classList?.contains?.("route-shell-hidden") ||
+    shell?.classList?.contains?.("route-shell-hidden") ||
+    layout?.classList?.contains?.("route-shell-hidden") ||
 
-      appShell?.classList?.contains?.("route-shell-hidden") ||
-      shell?.classList?.contains?.("route-shell-hidden") ||
-      layout?.classList?.contains?.("route-shell-hidden") ||
+    appShell?.hidden === true ||
+    shell?.hidden === true ||
+    layout?.hidden === true ||
 
-      appShell?.hidden === true ||
-      shell?.hidden === true ||
-      layout?.hidden === true ||
+    appShell?.getAttribute?.("aria-hidden") === "true" ||
+    shell?.getAttribute?.("aria-hidden") === "true" ||
+    layout?.getAttribute?.("aria-hidden") === "true";
 
-      appShell?.getAttribute?.("aria-hidden") === "true" ||
-      shell?.getAttribute?.("aria-hidden") === "true" ||
-      layout?.getAttribute?.("aria-hidden") === "true"
+  const visibleSignal =
+    hasExplicitShellVisibleSignal(AppCore, body, html);
+
+  /*
+    La señal visible solo evita falsos positivos suaves.
+    No pisa señales fuertes de auth/shell hidden reales.
+  */
+  if (
+    visibleSignal &&
+    !hiddenByState &&
+    !hiddenByBody &&
+    !hiddenByShellNode
+  ) {
+    return false;
+  }
+
+  return Boolean(
+    hiddenByState ||
+      hiddenByBody ||
+      hiddenByHtml ||
+      hiddenByShellNode
   );
 }
 
-export function isShellHidden(AppCore) {
+export function isSidebarDomHidden(AppCore) {
   if (!hasDocument()) {
     return false;
   }
@@ -1740,17 +1839,29 @@ export function isShellHidden(AppCore) {
     sidebar,
   } = getElements(AppCore);
 
-  /*
-    Compat legacy:
-    Esta función conserva sidebar.hidden como señal adicional.
-    Para decisiones críticas/interactivas usar isRealShellHidden().
-  */
   return Boolean(
-    isRealShellHidden(AppCore) ||
-      sidebar?.hidden === true ||
+    sidebar?.hidden === true ||
       sidebar?.dataset?.mode === "hidden" ||
       sidebar?.getAttribute?.("aria-hidden") === "true"
   );
+}
+
+export function isLegacyShellHidden(AppCore) {
+  return Boolean(
+    isRealShellHidden(AppCore) ||
+      isSidebarDomHidden(AppCore)
+  );
+}
+
+export function isShellHidden(AppCore) {
+  /*
+    FIREBREAK:
+    En versiones antiguas esto mezclaba shell real + sidebar.hidden.
+    Eso bloqueaba reparaciones si el sidebar quedaba hidden stale.
+    Ahora isShellHidden() equivale a shell real.
+    Para diagnóstico legacy usar isLegacyShellHidden().
+  */
+  return isRealShellHidden(AppCore);
 }
 
 /* =========================================================
@@ -1758,6 +1869,8 @@ export function isShellHidden(AppCore) {
 ========================================================= */
 
 export function setSidebarHidden(AppCore, hidden = false) {
+  const shouldHide = Boolean(hidden);
+
   const {
     sidebar,
     toggleBtn,
@@ -1766,19 +1879,69 @@ export function setSidebarHidden(AppCore, hidden = false) {
     userDropdown,
   } = getElements(AppCore);
 
+  if (shouldHide) {
+    [
+      sidebar,
+      toggleBtn,
+      mobileToggleBtn,
+      userToggle,
+      userDropdown,
+    ].forEach((element) => {
+      setHidden(element, true);
+    });
+
+    try {
+      if (sidebar) {
+        sidebar.dataset.mode = "hidden";
+        sidebar.dataset.open = "false";
+        sidebar.dataset.collapsed = "false";
+      }
+
+      if (userDropdown) {
+        userDropdown.dataset.state = "closed";
+        userDropdown.dataset.open = "false";
+      }
+    } catch {}
+
+    return true;
+  }
+
+  /*
+    Al revelar la shell NO abrimos el dropdown.
+    Solo reactivamos sidebar/toggles/userToggle.
+  */
   [
     sidebar,
     toggleBtn,
     mobileToggleBtn,
     userToggle,
-    userDropdown,
   ].forEach((element) => {
-    setHidden(element, hidden);
+    setHidden(element, false);
   });
+
+  if (userDropdown) {
+    setHidden(userDropdown, true);
+
+    try {
+      userDropdown.dataset.state = "closed";
+      userDropdown.dataset.open = "false";
+      userDropdown.setAttribute("aria-hidden", "true");
+    } catch {}
+  }
 
   try {
     if (sidebar) {
-      sidebar.dataset.mode = hidden ? "hidden" : (sidebar.dataset.mode || "desktop");
+      if (sidebar.dataset.mode === "hidden") {
+        sidebar.dataset.mode = "desktop";
+      }
+
+      if (!sidebar.dataset.open) {
+        sidebar.dataset.open = "true";
+      }
+
+      if (!sidebar.dataset.collapsed) {
+        sidebar.dataset.collapsed = "false";
+      }
     }
   } catch {}
 
@@ -1800,7 +1963,6 @@ export function revealSidebarShell(AppCore, reason = "reveal-sidebar-shell") {
     toggleBtn,
     mobileToggleBtn,
     userToggle,
-    userDropdown,
   ].forEach((element) => {
     if (!element) {
       return;
@@ -1810,8 +1972,23 @@ export function revealSidebarShell(AppCore, reason = "reveal-sidebar-shell") {
       element.hidden = false;
       element.removeAttribute("hidden");
       element.setAttribute("aria-hidden", "false");
+      element.removeAttribute("inert");
     } catch {}
   });
+
+  /*
+    Dropdown queda cerrado. No debe abrirse por una reparación de shell.
+  */
+  if (userDropdown) {
+    try {
+      userDropdown.hidden = true;
+      userDropdown.setAttribute("hidden", "");
+      userDropdown.setAttribute("aria-hidden", "true");
+      userDropdown.dataset.state = "closed";
+      userDropdown.dataset.open = "false";
+      userDropdown.removeAttribute("inert");
+    } catch {}
+  }
 
   try {
     if (sidebar) {
@@ -1826,13 +2003,14 @@ export function revealSidebarShell(AppCore, reason = "reveal-sidebar-shell") {
       if (!sidebar.dataset.collapsed) {
         sidebar.dataset.collapsed = "false";
       }
+
+      sidebar.dataset.ready = sidebar.dataset.ready || "true";
     }
 
     body?.classList?.remove?.("sidebar-hidden");
   } catch {}
 
   safeEmit(AppCore, "sidebar:dom:revealed", {
-    source: "SidebarDOM",
     reason,
   });
 
@@ -1953,7 +2131,7 @@ function getElementDebug(element = null) {
     ariaHidden: element.getAttribute?.("aria-hidden") || "",
     ariaExpanded: element.getAttribute?.("aria-expanded") || "",
     ariaControls: element.getAttribute?.("aria-controls") || "",
-    className: element.className || "",
+    className: safeText(element.className, ""),
     dataAction:
       element.getAttribute?.("data-action") ||
       element.getAttribute?.("data-sidebar-action") ||
@@ -2007,6 +2185,8 @@ export function getSidebarDomSnapshot(AppCore) {
 
     shellHidden: isShellHidden(AppCore),
     realShellHidden: isRealShellHidden(AppCore),
+    legacyShellHidden: isLegacyShellHidden(AppCore),
+    sidebarDomHidden: isSidebarDomHidden(AppCore),
 
     sidebarHidden: Boolean(elements.sidebar?.hidden),
     sidebarConnected: isConnectedNode(elements.sidebar),
@@ -2019,6 +2199,9 @@ export function getSidebarDomSnapshot(AppCore) {
     bodyShell:
       elements.body?.dataset?.shell || "",
 
+    bodyShellVisible:
+      elements.body?.dataset?.shellVisible || "",
+
     htmlRouteMode:
       hasDocument()
         ? document.documentElement?.dataset?.routeMode || ""
@@ -2027,6 +2210,11 @@ export function getSidebarDomSnapshot(AppCore) {
     htmlShell:
       hasDocument()
         ? document.documentElement?.dataset?.shell || ""
+        : "",
+
+    htmlShellVisible:
+      hasDocument()
+        ? document.documentElement?.dataset?.shellVisible || ""
         : "",
 
     cache: {
@@ -2072,6 +2260,9 @@ export default {
   hasSidebarShell,
   isShellHidden,
   isRealShellHidden,
+  isLegacyShellHidden,
+  isSidebarDomHidden,
+
   setSidebarHidden,
   revealSidebarShell,
 

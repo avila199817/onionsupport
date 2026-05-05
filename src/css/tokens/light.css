@@ -433,6 +433,12 @@
   --sidebar-text-active: #0f172a;
   --sidebar-icon: rgba(23,32,51,.54);
   --sidebar-icon-active: var(--accent);
+   
+  /* Sidebar logo · light mode */
+  --sidebar-logo-dark-display: none;
+  --sidebar-logo-light-display: block;
+  --sidebar-logo-opacity: .98;
+  --sidebar-logo-filter: none;
 
   --sidebar-footer-bg:
     linear-gradient(180deg, rgba(255,255,255,.880), rgba(248,250,252,.810)),

@@ -2,42 +2,38 @@
    Onion SPA - Facturas Bindings
    Archivo: src/views/facturas/facturas.bindings.js
 
-   FINAL PRO SYSTEM · BINDINGS REAL · 10/10 EXTREME
-   PATCH · SINGLE DELEGATION · NO DOUBLE BIND · ACTION LOCKS
-   PATCH · CREATE FACTURA MODAL · OPEN INCIDENCIA MODAL · NO ROUTE NAVIGATION
-   PATCH · PAGINATION SUPPORT · CLEANUP ENTERPRISE
+   FINAL PRO SYSTEM · FACTURAS BINDINGS · CSP CLEAN · 14/10
+   PATCH · SINGLE DELEGATION
+   PATCH · NO API FALLBACKS
+   PATCH · NO STORE ACCESS
+   PATCH · NO FILTER/SEARCH/SORT DUPLICATION
+   PATCH · ACTION LOCKS
+   PATCH · PAGINATION SUPPORT
+   PATCH · CREATE FACTURA MODAL BRIDGE
+   PATCH · OPEN INCIDENCIA VIA VIEW BRIDGE ONLY
+   PATCH · CLEANUP ENTERPRISE
 
    RESPONSABILIDADES:
-   - registrar eventos UI del módulo de facturas
-   - bind de crear factura / refresh / retry / export
-   - delegación única sobre tabla/cards y acciones de colección
-   - abrir incidencia relacionada mediante bridge externo o modal fallback
-   - soportar paginación visual: prev / next / page
-   - evitar dobles listeners por re-render
-   - evitar dobles clicks por acción/factura
-   - re-evaluar estado vivo en cada interacción
-   - mantener facturasView.js limpio
-
-   HARDENING PRO:
-   - cleanup sólido por scope
-   - no navega a rutas inexistentes de incidencia
-   - importa lazy el modal de incidencias solo si no hay bridge superior
-   - abre fallback inmediato y actualiza con detalle remoto si existe
-   - tolera ausencia parcial de acciones
-   - soporta refresh explícito con asRefresh
-   - no ejecuta bootstrap inicial: eso pertenece a la vista
+   - Registrar eventos UI del módulo Facturas.
+   - Delegar acciones de colección y fila.
+   - No cargar datos directamente.
+   - No abrir modales de incidencia directamente.
+   - No importar store.
+   - No duplicar filtros, búsqueda ni orden.
+   - No ejecutar bootstrap inicial.
+   - Evitar dobles listeners por rerender.
+   - Evitar dobles clicks por acción/factura.
+   - Mantener facturasView.js como owner del estado real.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import { safeText } from "./facturas.utils.js";
-import { getFacturaByIdStore } from "./facturas.store.js";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
 const DEFAULT_SCOPE = "view:facturas";
-const INCIDENCIA_DETAIL_TIMEOUT = 90000;
 
 const ACTION_ALIASES = Object.freeze({
   "create-factura": "create-factura",
@@ -86,6 +82,20 @@ const ACTION_ALIASES = Object.freeze({
   "close-factura-detail": "close-detail",
 });
 
+const VIEW_OWNED_ACTIONS = new Set([
+  "filter",
+  "filter-facturas",
+  "sort",
+  "sort-facturas",
+  "search",
+  "search-facturas",
+  "clear-search",
+  "clear-filters",
+  "clear-facturas-search",
+  "clear-facturas-filters",
+  "reset-filters",
+]);
+
 const INTERACTIVE_SELECTOR = [
   "button",
   "a",
@@ -101,15 +111,6 @@ const INTERACTIVE_SELECTOR = [
    BASE HELPERS
 ========================================================= */
 
-function safeNumber(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
 function safeObject(value, fallback = {}) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
@@ -121,6 +122,7 @@ function first(...values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
+
     return value;
   }
 
@@ -133,16 +135,15 @@ function normalizeKey(value = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[\s_]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
     .trim();
 }
 
 function normalizeActionName(value = "") {
   const key = normalizeKey(value);
-  return ACTION_ALIASES[key] || key;
-}
 
-function encodeSegment(value = "") {
-  return encodeURIComponent(safeText(value, ""));
+  return ACTION_ALIASES[key] || key;
 }
 
 function resolveScopeName(scopeName = DEFAULT_SCOPE) {
@@ -163,7 +164,9 @@ function getRoot(container, scopeName = DEFAULT_SCOPE) {
   return (
     container.querySelector(
       `[data-facturas-scope="${resolveScopeName(scopeName)}"]`
-    ) || container
+    ) ||
+    container.querySelector("[data-facturas-panel='true']") ||
+    container
   );
 }
 
@@ -291,7 +294,15 @@ function isActionBusyForFactura(state = {}, facturaId = "") {
 }
 
 function canCreateFacturaFromState(state = {}) {
-  const role = normalizeKey(first(state?.role, state?.view?.role, ""));
+  const role = normalizeKey(
+    first(
+      state?.role,
+      state?.rawRole,
+      state?.view?.role,
+      state?.view?.rawRole,
+      ""
+    )
+  );
 
   return Boolean(
     state?.canCreateFactura ||
@@ -299,11 +310,33 @@ function canCreateFacturaFromState(state = {}) {
       state?.view?.canCreateFactura ||
       state?.view?.isAdmin ||
       role === "admin" ||
+      role === "administrator" ||
       role === "superadmin" ||
+      role === "super-admin" ||
       role === "super-admin" ||
       role === "root" ||
       role === "owner"
   );
+}
+
+function resolveCurrentPage(state = {}) {
+  const candidates = [
+    state?.page,
+    state?.currentPage,
+    state?.facturasPage,
+    state?.view?.page,
+    state?.view?.currentPage,
+    state?.view?.facturasPage,
+    state?.pagination?.page,
+    state?.pagination?.currentPage,
+  ];
+
+  for (const candidate of candidates) {
+    const n = Number.parseInt(candidate, 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  return 1;
 }
 
 /* =========================================================
@@ -369,9 +402,7 @@ function runScopeCleanup(scopeName = DEFAULT_SCOPE) {
 }
 
 function addScopedListener(cleanups, scopeName, target, eventName, handler, options) {
-  if (!target || !eventName || typeof handler !== "function") {
-    return;
-  }
+  if (!target || !eventName || typeof handler !== "function") return;
 
   const scope = resolveScopeName(scopeName);
 
@@ -423,926 +454,32 @@ async function runLocked(action = "", payload = "", callback = null) {
 }
 
 /* =========================================================
-   API FALLBACK FOR INCIDENCIA DETAIL
+   ACTION HELPERS
 ========================================================= */
 
-function getStorageValue(key = "") {
-  const finalKey = safeText(key, "");
-  if (!finalKey) return "";
-
-  try {
-    return localStorage.getItem(finalKey) || "";
-  } catch {}
-
-  try {
-    return sessionStorage.getItem(finalKey) || "";
-  } catch {}
-
-  return "";
-}
-
-function getAuthToken() {
-  return safeText(
-    first(
-      AppCore?.state?.token,
-      AppCore?.state?.accessToken,
-      AppCore?.auth?.getToken?.(),
-      AppCore?.Auth?.getToken?.(),
-      window?.Auth?.getToken?.(),
-      getStorageValue("token"),
-      getStorageValue("accessToken")
-    ),
-    ""
-  );
-}
-
-function getApiClient() {
-  return (
-    AppCore?.apiClient ||
-    AppCore?.modules?.Http ||
-    AppCore?.Http ||
-    window?.Http ||
-    null
-  );
-}
-
-function getApiBase() {
-  return safeText(
-    first(
-      AppCore?.config?.apiBase,
-      AppCore?.config?.api?.baseUrl,
-      AppCore?.state?.apiBase,
-      window?.ONION_API_BASE,
-      window?.API_BASE
-    ),
-    ""
-  ).replace(/\/+$/, "");
-}
-
-function resolveApiUrl(path = "") {
-  const value = safeText(path, "");
-  if (!value) return "";
-
-  if (/^https?:\/\//i.test(value)) {
-    return value;
-  }
-
-  const apiBase = getApiBase();
-
-  if (!apiBase) {
-    return value.startsWith("/") ? value : `/${value}`;
-  }
-
-  const normalizedPath = value.startsWith("/") ? value : `/${value}`;
-
-  if (apiBase.endsWith("/api") && normalizedPath.startsWith("/api/")) {
-    return `${apiBase}${normalizedPath.slice(4)}`;
-  }
-
-  return `${apiBase}${normalizedPath}`;
-}
-
-function createTimeoutSignal(timeoutMs = INCIDENCIA_DETAIL_TIMEOUT) {
-  const controller = new AbortController();
-
-  const timer = setTimeout(() => {
-    try {
-      controller.abort();
-    } catch {}
-  }, timeoutMs);
-
-  return {
-    signal: controller.signal,
-    clear() {
-      clearTimeout(timer);
-    },
-  };
-}
-
-function isRecoverableDetailError(error = null) {
-  const status = safeNumber(
-    first(error?.status, error?.statusCode, error?.response?.status),
-    0
-  );
-
-  return status === 404 || status === 405;
-}
-
-async function apiGet(path = "") {
-  const finalPath = safeText(path, "");
-  const client = getApiClient();
-
-  if (!finalPath) {
-    throw new Error("API_PATH_REQUIRED");
-  }
-
-  if (typeof client?.get === "function") {
-    return client.get(finalPath, {
-      timeout: INCIDENCIA_DETAIL_TIMEOUT,
-      auth: true,
-    });
-  }
-
-  if (typeof client?.request === "function") {
-    return client.request(finalPath, {
-      method: "GET",
-      timeout: INCIDENCIA_DETAIL_TIMEOUT,
-      auth: true,
-    });
-  }
-
-  const url = resolveApiUrl(finalPath);
-  const token = getAuthToken();
-  const timeout = createTimeoutSignal(INCIDENCIA_DETAIL_TIMEOUT);
-
-  try {
-    const response = await fetch(url, {
-      method: "GET",
-      credentials: "include",
-      headers: {
-        Accept: "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      signal: timeout.signal,
-    });
-
-    const text = await response.text();
-
-    let payload = null;
-
-    try {
-      payload = text ? JSON.parse(text) : null;
-    } catch {
-      payload = text;
-    }
-
-    if (!response.ok) {
-      const error = new Error(
-        safeText(
-          first(payload?.message, payload?.error, `HTTP ${response.status}`),
-          `HTTP ${response.status}`
-        )
-      );
-
-      error.status = response.status;
-      error.statusCode = response.status;
-      error.response = payload;
-
-      throw error;
-    }
-
-    return payload;
-  } finally {
-    timeout.clear();
-  }
-}
-
-function extractDetailPayload(response = null) {
-  const obj = safeObject(response);
-
-  return (
-    obj.detail ||
-    obj.ticket ||
-    obj.incidencia ||
-    obj.item ||
-    obj.data?.detail ||
-    obj.data?.ticket ||
-    obj.data?.incidencia ||
-    obj.data?.item ||
-    obj.data ||
-    obj.result?.detail ||
-    obj.result?.ticket ||
-    obj.result?.incidencia ||
-    obj.result?.item ||
-    obj.result ||
-    obj.payload?.detail ||
-    obj.payload?.ticket ||
-    obj.payload?.incidencia ||
-    obj.payload?.item ||
-    obj.payload ||
-    obj ||
-    null
-  );
-}
-
-async function fetchIncidenciaDetail(ticketId = "") {
-  const id = safeText(ticketId, "");
-
-  if (!id) {
-    throw new Error("INCIDENCIA_ID_REQUIRED");
-  }
-
-  const encodedId = encodeSegment(id);
-
-  const candidates = [
-    `/api/tickets/${encodedId}`,
-    `/api/incidencias/${encodedId}`,
-  ];
-
-  let lastError = null;
-
-  for (const path of candidates) {
-    try {
-      const response = await apiGet(path);
-      return extractDetailPayload(response);
-    } catch (error) {
-      lastError = error;
-
-      if (!isRecoverableDetailError(error)) {
-        throw error;
-      }
-    }
-  }
-
-  throw lastError || new Error("INCIDENCIA_DETAIL_NOT_FOUND");
-}
-
-/* =========================================================
-   INCIDENCIA FALLBACK BUILDERS
-========================================================= */
-
-async function loadIncidenciasModal() {
-  const module = await import("../incidencias/incidencias.modal.js");
-
-  const modal =
-    module?.OnionIncidenciasModal ||
-    module?.default ||
-    window?.OnionIncidenciasModal ||
-    null;
-
-  if (!modal || typeof modal.open !== "function") {
-    throw new Error("INCIDENCIAS_MODAL_UNAVAILABLE");
-  }
-
-  return modal;
-}
-
-function getFacturaByIdSafe(facturaId = "") {
-  const id = safeText(facturaId, "");
-
-  if (!id) return null;
-
-  try {
-    return getFacturaByIdStore(id) || null;
-  } catch {
-    return null;
-  }
-}
-
-function getRelationObject(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
-
-  return safeObject(
-    first(
-      item.incidencia,
-      item.ticket,
-      item.linkedTicket,
-      raw.incidencia,
-      raw.ticket,
-      raw.linkedTicket
-    )
-  );
-}
-
-function getFacturaNumberFromItem(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
-
-  return safeText(
-    first(
-      item.numero,
-      item.invoiceNumber,
-      item.code,
-      item.numeroFacturaLegal,
-      item.numeroFacturaSistema,
-      item.id,
-      raw.numero,
-      raw.invoiceNumber,
-      raw.code,
-      raw.numeroFacturaLegal,
-      raw.numeroFacturaSistema,
-      raw.id
-    ),
-    ""
-  );
-}
-
-function getFacturaIdFromItem(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
-
-  return safeText(
-    first(
-      item.id,
-      item._id,
-      item.facturaId,
-      item.invoiceId,
-      item.numero,
-      item.numeroFacturaLegal,
-      item.numeroFacturaSistema,
-      raw.id,
-      raw._id,
-      raw.facturaId,
-      raw.invoiceId,
-      raw.numero,
-      raw.numeroFacturaLegal,
-      raw.numeroFacturaSistema
-    ),
-    ""
-  );
-}
-
-function getClientNameFromFactura(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
-
-  return safeText(
-    first(
-      item.clienteNombre,
-      item.cliente?.nombre,
-      item.cliente?.nombreContacto,
-      item.clientName,
-      item.client?.name,
-      raw.clienteNombre,
-      raw.cliente?.nombre,
-      raw.cliente?.nombreContacto,
-      raw.clientName,
-      raw.client?.name
-    ),
-    "Cliente"
-  );
-}
-
-function getClientEmailFromFactura(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
-
-  return safeText(
-    first(
-      item.clienteEmail,
-      item.emailCliente,
-      item.cliente?.email,
-      item.clientEmail,
-      item.client?.email,
-      raw.clienteEmail,
-      raw.emailCliente,
-      raw.cliente?.email,
-      raw.clientEmail,
-      raw.client?.email
-    ),
-    ""
-  );
-}
-
-function getClienteIdFromFactura(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
-
-  return safeText(
-    first(
-      item.clienteId,
-      item.cliente?.id,
-      item.clientId,
-      item.client?.id,
-      raw.clienteId,
-      raw.cliente?.id,
-      raw.clientId,
-      raw.client?.id
-    ),
-    ""
-  );
-}
-
-function getIncidenciaIdFromFactura(factura = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
-  const relation = getRelationObject(item);
-
-  return safeText(
-    first(
-      item.ticketId,
-      item.incidenciaId,
-
-      relation.ticketId,
-      relation.incidenciaId,
-      relation.id,
-
-      item.relatedTicketId,
-      item.relatedIncidentId,
-      item.supportTicketId,
-      item.caseId,
-
-      item.meta?.ticketId,
-      item.meta?.incidenciaId,
-
-      raw.ticketId,
-      raw.incidenciaId,
-
-      raw.incidencia?.ticketId,
-      raw.incidencia?.incidenciaId,
-      raw.incidencia?.id,
-
-      raw.ticket?.ticketId,
-      raw.ticket?.incidenciaId,
-      raw.ticket?.id,
-
-      raw.relatedTicketId,
-      raw.relatedIncidentId,
-      raw.supportTicketId,
-      raw.caseId,
-
-      raw.meta?.ticketId,
-      raw.meta?.incidenciaId
-    ),
-    ""
-  );
-}
-
-function buildFallbackIncidenciaDetail({
-  ticketId = "",
-  factura = {},
+async function safeRefresh({
+  loadFacturas,
+  silent = true,
+  asRefresh = true,
+  force = true,
 } = {}) {
-  const item = safeObject(factura);
-  const raw = safeObject(item.raw);
-  const relation = getRelationObject(item);
-
-  const id = safeText(
-    first(
-      ticketId,
-      getIncidenciaIdFromFactura(item),
-      relation.ticketId,
-      relation.incidenciaId,
-      relation.id
-    ),
-    ""
-  );
-
-  const facturaId = getFacturaIdFromItem(item);
-  const facturaNumero = getFacturaNumberFromItem(item);
-  const clientName = getClientNameFromFactura(item);
-  const clientEmail = getClientEmailFromFactura(item);
-  const clienteId = getClienteIdFromFactura(item);
-
-  const subject = safeText(
-    first(
-      relation.subject,
-      relation.asunto,
-      relation.title,
-      relation.nombre,
-      item.subject,
-      item.asunto,
-      raw.subject,
-      raw.asunto,
-      facturaNumero
-        ? `Incidencia vinculada a factura ${facturaNumero}`
-        : `Incidencia ${id}`
-    ),
-    `Incidencia ${id}`
-  );
-
-  return {
-    id,
-    ticketId: id,
-    incidenciaId: id,
-    code: id,
-    ticketCode: id,
-
-    title: subject,
-    subject,
-    asunto: subject,
-
-    status: safeText(
-      first(
-        relation.status,
-        relation.estado,
-        raw.incidencia?.status,
-        raw.incidencia?.estado,
-        "open"
-      ),
-      "open"
-    ),
-
-    estado: safeText(
-      first(
-        relation.estado,
-        relation.status,
-        raw.incidencia?.estado,
-        raw.incidencia?.status,
-        "open"
-      ),
-      "open"
-    ),
-
-    priority: safeText(
-      first(
-        relation.priority,
-        relation.prioridad,
-        raw.incidencia?.priority,
-        raw.incidencia?.prioridad,
-        "medium"
-      ),
-      "medium"
-    ),
-
-    prioridad: safeText(
-      first(
-        relation.prioridad,
-        relation.priority,
-        raw.incidencia?.prioridad,
-        raw.incidencia?.priority,
-        "medium"
-      ),
-      "medium"
-    ),
-
-    description: safeText(
-      first(
-        relation.description,
-        relation.descripcion,
-        relation.message,
-        relation.preview,
-        raw.incidencia?.description,
-        raw.incidencia?.descripcion,
-        raw.incidencia?.message,
-        raw.incidencia?.preview,
-        facturaNumero
-          ? `Incidencia relacionada con la factura ${facturaNumero}.`
-          : "Incidencia relacionada con una factura."
-      ),
-      "Incidencia relacionada con una factura."
-    ),
-
-    message: safeText(
-      first(
-        relation.message,
-        relation.description,
-        relation.descripcion,
-        ""
-      ),
-      ""
-    ),
-
-    clientName,
-    clienteId,
-    clienteNombre: clientName,
-
-    cliente: {
-      id: clienteId || null,
-      nombre: clientName,
-      name: clientName,
-      email: clientEmail,
-      avatar: safeText(
-        first(item.cliente?.avatar, raw.cliente?.avatar, relation.clienteAvatar),
-        ""
-      ),
-    },
-
-    client: {
-      id: clienteId || null,
-      name: clientName,
-      email: clientEmail,
-      avatar: safeText(
-        first(item.cliente?.avatar, raw.cliente?.avatar, relation.clienteAvatar),
-        ""
-      ),
-    },
-
-    facturaId,
-    invoiceId: facturaId,
-    factura: facturaNumero || facturaId,
-    invoiceCode: facturaNumero || facturaId,
-    facturaRelacionada: facturaNumero || facturaId,
-
-    createdAt: first(
-      relation.createdAt,
-      raw.incidencia?.createdAt,
-      item.createdAt,
-      raw.createdAt,
-      item.fecha,
-      raw.fecha,
-      null
-    ),
-
-    updatedAt: first(
-      relation.updatedAt,
-      relation.linkedAt,
-      raw.incidencia?.updatedAt,
-      raw.incidencia?.linkedAt,
-      item.updatedAt,
-      raw.updatedAt,
-      null
-    ),
-
-    attachments: first(
-      relation.attachments,
-      relation.files,
-      relation.adjuntos,
-      raw.incidencia?.attachments,
-      raw.incidencia?.files,
-      raw.incidencia?.adjuntos,
-      []
-    ),
-
-    comments: first(
-      relation.comments,
-      relation.messages,
-      relation.notes,
-      raw.incidencia?.comments,
-      raw.incidencia?.messages,
-      raw.incidencia?.notes,
-      []
-    ),
-
-    history: first(
-      relation.history,
-      relation.timeline,
-      relation.events,
-      raw.incidencia?.history,
-      raw.incidencia?.timeline,
-      raw.incidencia?.events,
-      []
-    ),
-
-    raw: {
-      ...relation,
-
-      id,
-      ticketId: id,
-      incidenciaId: id,
-      code: id,
-      ticketCode: id,
-
-      facturaId,
-      invoiceId: facturaId,
-      facturaRelacionada: facturaNumero || facturaId,
-
-      clienteId,
-      clienteNombre: clientName,
-
-      factura: {
-        ...safeObject(raw.factura),
-        id: facturaId,
-        numero: facturaNumero,
-      },
-
-      invoice: {
-        ...safeObject(raw.invoice),
-        id: facturaId,
-        code: facturaNumero,
-      },
-    },
-  };
-}
-
-function mergeIncidenciaDetailWithFallback(fallback = {}, remote = {}) {
-  const base = safeObject(fallback);
-  const next = safeObject(remote);
-
-  const id = safeText(
-    first(
-      next.ticketId,
-      next.id,
-      next.code,
-      next.ticketCode,
-      next.incidenciaId,
-      base.ticketId,
-      base.id
-    ),
-    ""
-  );
-
-  const facturaId = safeText(
-    first(next.facturaId, next.invoiceId, base.facturaId, base.invoiceId),
-    ""
-  );
-
-  const facturaLabel = safeText(
-    first(
-      next.factura,
-      next.facturaRelacionada,
-      next.invoiceCode,
-      base.factura,
-      base.facturaRelacionada,
-      base.invoiceCode,
-      facturaId
-    ),
-    ""
-  );
-
-  return {
-    ...base,
-    ...next,
-
-    id,
-    ticketId: id,
-    incidenciaId: safeText(first(next.incidenciaId, id), id),
-    code: safeText(first(next.code, next.ticketCode, id), id),
-    ticketCode: safeText(first(next.ticketCode, next.code, id), id),
-
-    facturaId,
-    invoiceId: safeText(first(next.invoiceId, next.facturaId, facturaId), facturaId),
-    factura: facturaLabel,
-    facturaRelacionada: facturaLabel,
-    invoiceCode: safeText(first(next.invoiceCode, facturaLabel), facturaLabel),
-
-    raw: {
-      ...safeObject(base.raw),
-      ...safeObject(next.raw || next),
-
-      id,
-      ticketId: id,
-      incidenciaId: safeText(first(next.incidenciaId, id), id),
-
-      facturaId,
-      invoiceId: safeText(first(next.invoiceId, next.facturaId, facturaId), facturaId),
-      facturaRelacionada: facturaLabel,
-    },
-  };
-}
-
-async function openIncidenciaModalFromFacturas({
-  incidenciaId = "",
-  ticketId = "",
-  facturaId = "",
-  openIncidencia = null,
-  openRelatedIncidencia = null,
-} = {}) {
-  const finalFacturaId = safeText(facturaId, "");
-  const factura = finalFacturaId ? getFacturaByIdSafe(finalFacturaId) : null;
-
-  const finalTicketId = safeText(
-    first(ticketId, incidenciaId, getIncidenciaIdFromFactura(factura)),
-    ""
-  );
-
-  if (!finalTicketId) {
-    showBindingToast(
-      "No se pudo identificar la incidencia relacionada.",
-      "error"
-    );
-
+  if (typeof loadFacturas !== "function") {
     return false;
   }
 
-  const delegatedOpen = openIncidencia || openRelatedIncidencia;
-
-  if (typeof delegatedOpen === "function") {
-    try {
-      const result = await delegatedOpen(finalTicketId);
-
-      if (result !== false) {
-        return true;
-      }
-    } catch {}
-  }
-
-  let modal = null;
-
-  try {
-    modal = await loadIncidenciasModal();
-  } catch {
-    showBindingToast("No se pudo cargar el modal de incidencias.", "error");
-    return false;
-  }
-
-  const fallbackDetail = buildFallbackIncidenciaDetail({
-    ticketId: finalTicketId,
-    factura: factura || {},
+  await loadFacturas({
+    silent,
+    asRefresh,
+    force,
   });
 
-  try {
-    modal.open(fallbackDetail);
-  } catch {
-    showBindingToast("No se pudo abrir el modal de incidencias.", "error");
-    return false;
-  }
-
-  try {
-    AppCore?.events?.emit?.("facturas:incidencia:opening", {
-      ticketId: finalTicketId,
-      incidenciaId: finalTicketId,
-      facturaId: finalFacturaId,
-      factura,
-    });
-  } catch {}
-
-  try {
-    const remoteDetail = await fetchIncidenciaDetail(finalTicketId);
-
-    const nextDetail = mergeIncidenciaDetailWithFallback(
-      fallbackDetail,
-      remoteDetail
-    );
-
-    if (typeof modal.update === "function") {
-      modal.update(nextDetail);
-    } else {
-      modal.open(nextDetail);
-    }
-
-    try {
-      AppCore?.events?.emit?.("incidencias:open:success", {
-        ticketId: finalTicketId,
-        incidenciaId: finalTicketId,
-        detail: nextDetail,
-      });
-    } catch {}
-
-    return true;
-  } catch (error) {
-    try {
-      if (typeof modal.setFeedback === "function") {
-        modal.setFeedback(
-          "La incidencia se ha abierto con la información vinculada a la factura, pero no se pudo cargar el detalle completo desde la API.",
-          "info"
-        );
-      }
-    } catch {}
-
-    try {
-      AppCore?.events?.emit?.("facturas:incidencia:open:fallback", {
-        ticketId: finalTicketId,
-        incidenciaId: finalTicketId,
-        facturaId: finalFacturaId,
-        error,
-      });
-    } catch {}
-
-    return true;
-  }
-}
-
-/* =========================================================
-   PAGINATION HELPERS
-========================================================= */
-
-function resolveCurrentPage(state = {}) {
-  const candidates = [
-    state?.page,
-    state?.currentPage,
-    state?.facturasPage,
-    state?.view?.page,
-    state?.view?.currentPage,
-    state?.view?.facturasPage,
-    state?.pagination?.page,
-    state?.pagination?.currentPage,
-  ];
-
-  for (const candidate of candidates) {
-    const n = Number.parseInt(candidate, 10);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-
-  return 1;
-}
-
-function runRender(render) {
-  try {
-    if (typeof render === "function") {
-      render();
-      return true;
-    }
-  } catch {}
-
-  return false;
-}
-
-function trySetPageOnState(state = {}, page = 1) {
-  const nextPage = Math.max(1, Number.parseInt(page, 10) || 1);
-
-  try {
-    if (state?.view && typeof state.view === "object") {
-      state.view.page = nextPage;
-      state.view.currentPage = nextPage;
-      state.view.facturasPage = nextPage;
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (state?.pagination && typeof state.pagination === "object") {
-      state.pagination.page = nextPage;
-      state.pagination.currentPage = nextPage;
-      return true;
-    }
-  } catch {}
-
-  try {
-    state.page = nextPage;
-    state.currentPage = nextPage;
-    state.facturasPage = nextPage;
-    return true;
-  } catch {}
-
-  return false;
+  return true;
 }
 
 async function handlePagination({
   action = "",
   page = 1,
   state = {},
-  render,
   goToPage,
   goPrevPage,
   goNextPage,
@@ -1378,14 +515,6 @@ async function handlePagination({
 
   if (typeof setPage === "function") {
     await setPage(targetPage);
-    runRender(render);
-    return true;
-  }
-
-  const patched = trySetPageOnState(state, targetPage);
-
-  if (patched) {
-    runRender(render);
     return true;
   }
 
@@ -1397,27 +526,10 @@ async function handlePagination({
   return false;
 }
 
-/* =========================================================
-   COLLECTION ACTIONS
-========================================================= */
+function shouldIgnoreAction(action = "") {
+  const key = normalizeActionName(action);
 
-async function safeRefresh({
-  loadFacturas,
-  silent = true,
-  asRefresh = true,
-  force = true,
-} = {}) {
-  if (typeof loadFacturas !== "function") {
-    return false;
-  }
-
-  await loadFacturas({
-    silent,
-    asRefresh,
-    force,
-  });
-
-  return true;
+  return VIEW_OWNED_ACTIONS.has(key);
 }
 
 /* =========================================================
@@ -1428,8 +540,6 @@ async function dispatchFacturasAction({
   event,
   actionEl,
   state,
-
-  render,
 
   loadFacturas,
   openFactura,
@@ -1452,6 +562,10 @@ async function dispatchFacturasAction({
   const action = getActionName(actionEl);
 
   if (!action) {
+    return false;
+  }
+
+  if (shouldIgnoreAction(action)) {
     return false;
   }
 
@@ -1491,6 +605,7 @@ async function dispatchFacturasAction({
 
     await runLocked(action, "global", async () => {
       markElementBusy(actionEl, true);
+
       try {
         await createFactura();
       } finally {
@@ -1560,7 +675,12 @@ async function dispatchFacturasAction({
 
     await runLocked(action, "global", async () => {
       try {
-        exportFacturasCsv?.();
+        if (typeof exportFacturasCsv !== "function") {
+          showBindingToast("La exportación CSV no está conectada.", "error");
+          return;
+        }
+
+        await exportFacturasCsv();
       } catch {
         showBindingToast("No se pudo exportar el CSV.", "error");
       }
@@ -1579,7 +699,6 @@ async function dispatchFacturasAction({
         action,
         page,
         state,
-        render,
         goToPage,
         goPrevPage,
         goNextPage,
@@ -1593,28 +712,43 @@ async function dispatchFacturasAction({
   if (action === "open-incidencia") {
     prevent(event);
 
-    if (!incidenciaId || isBusyState(state)) {
+    const finalIncidenciaId = safeText(incidenciaId, "");
+
+    if (!finalIncidenciaId || isBusyState(state)) {
       return true;
     }
 
-    await runLocked(action, incidenciaId, async () => {
+    const delegatedOpen = openIncidencia || openRelatedIncidencia;
+
+    if (typeof delegatedOpen !== "function") {
+      showBindingToast(
+        "El bridge de incidencias no está conectado.",
+        "error"
+      );
+      return true;
+    }
+
+    await runLocked(action, finalIncidenciaId, async () => {
       markElementBusy(actionEl, true);
 
       try {
-        const opened = await openIncidenciaModalFromFacturas({
-          incidenciaId,
-          ticketId: incidenciaId,
+        const opened = await delegatedOpen(finalIncidenciaId, {
+          ticketId: finalIncidenciaId,
+          incidenciaId: finalIncidenciaId,
           facturaId,
-          openIncidencia,
-          openRelatedIncidencia,
         });
 
-        if (!opened) {
+        if (opened === false) {
           showBindingToast(
             "No se pudo abrir la incidencia relacionada.",
             "error"
           );
         }
+      } catch {
+        showBindingToast(
+          "No se pudo abrir la incidencia relacionada.",
+          "error"
+        );
       } finally {
         markElementBusy(actionEl, false);
       }
@@ -1630,11 +764,16 @@ async function dispatchFacturasAction({
       return true;
     }
 
+    if (typeof openFactura !== "function") {
+      showBindingToast("La apertura de factura no está conectada.", "error");
+      return true;
+    }
+
     await runLocked(action, facturaId, async () => {
       markElementBusy(actionEl, true);
 
       try {
-        await openFactura?.(facturaId);
+        await openFactura(facturaId);
       } finally {
         markElementBusy(actionEl, false);
       }
@@ -1650,11 +789,16 @@ async function dispatchFacturasAction({
       return true;
     }
 
+    if (typeof openFacturaPdf !== "function") {
+      showBindingToast("La visualización del PDF no está conectada.", "error");
+      return true;
+    }
+
     await runLocked(action, facturaId, async () => {
       markElementBusy(actionEl, true);
 
       try {
-        await openFacturaPdf?.(facturaId);
+        await openFacturaPdf(facturaId);
       } finally {
         markElementBusy(actionEl, false);
       }
@@ -1670,11 +814,16 @@ async function dispatchFacturasAction({
       return true;
     }
 
+    if (typeof downloadFacturaPdf !== "function") {
+      showBindingToast("La descarga del PDF no está conectada.", "error");
+      return true;
+    }
+
     await runLocked(action, facturaId, async () => {
       markElementBusy(actionEl, true);
 
       try {
-        await downloadFacturaPdf?.(facturaId);
+        await downloadFacturaPdf(facturaId);
       } finally {
         markElementBusy(actionEl, false);
       }
@@ -1690,11 +839,16 @@ async function dispatchFacturasAction({
       return true;
     }
 
+    if (typeof sendFacturaToClient !== "function") {
+      showBindingToast("El envío de factura no está conectado.", "error");
+      return true;
+    }
+
     await runLocked(action, facturaId, async () => {
       markElementBusy(actionEl, true);
 
       try {
-        await sendFacturaToClient?.(facturaId);
+        await sendFacturaToClient(facturaId);
       } finally {
         markElementBusy(actionEl, false);
       }
@@ -1705,7 +859,11 @@ async function dispatchFacturasAction({
 
   if (action === "close-detail") {
     prevent(event);
-    closeDetail?.();
+
+    try {
+      closeDetail?.();
+    } catch {}
+
     return true;
   }
 
@@ -1721,8 +879,6 @@ export function bindFacturasView({
 
   getContainer,
   getState,
-
-  render,
 
   loadFacturas,
   openFactura,
@@ -1772,8 +928,6 @@ export function bindFacturasView({
         actionEl,
         state,
 
-        render,
-
         loadFacturas,
         openFactura,
         openFacturaPdf,
@@ -1793,12 +947,10 @@ export function bindFacturasView({
         setPage,
       });
 
-      if (handled) {
-        return;
-      }
+      if (handled) return;
     }
 
-    const cardEl =
+    const rowEl =
       event.target?.closest?.(".factura-card") ||
       event.target?.closest?.(".facturas-mobile-card") ||
       event.target?.closest?.(".facturas-row") ||
@@ -1806,26 +958,18 @@ export function bindFacturasView({
       event.target?.closest?.("[data-factura-id]") ||
       null;
 
-    if (!cardEl || !root.contains(cardEl)) {
-      return;
-    }
+    if (!rowEl || !root.contains(rowEl)) return;
 
-    if (event.target?.closest?.(INTERACTIVE_SELECTOR)) {
-      return;
-    }
+    if (event.target?.closest?.(INTERACTIVE_SELECTOR)) return;
 
     const rowClickDisabled =
-      safeText(cardEl?.dataset?.rowClickDisabled, "") === "true";
+      safeText(rowEl?.dataset?.rowClickDisabled, "") === "true";
 
-    if (rowClickDisabled) {
-      return;
-    }
+    if (rowClickDisabled) return;
 
-    const facturaId = getFacturaId(cardEl);
+    const facturaId = getFacturaId(rowEl);
 
-    if (!facturaId || isOpenBusyState(state)) {
-      return;
-    }
+    if (!facturaId || isOpenBusyState(state)) return;
 
     prevent(event);
 
@@ -1835,18 +979,14 @@ export function bindFacturasView({
   };
 
   const onKeydown = async (event) => {
-    if (event.key !== "Enter" && event.key !== " ") {
-      return;
-    }
+    if (event.key !== "Enter" && event.key !== " ") return;
 
     const actionEl =
       event.target?.closest?.("[data-facturas-action]") ||
       event.target?.closest?.("[data-action]") ||
       null;
 
-    if (!actionEl || !root.contains(actionEl)) {
-      return;
-    }
+    if (!actionEl || !root.contains(actionEl)) return;
 
     if (
       actionEl.tagName === "BUTTON" ||
@@ -1862,8 +1002,6 @@ export function bindFacturasView({
       event,
       actionEl,
       state,
-
-      render,
 
       loadFacturas,
       openFactura,

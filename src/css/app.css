@@ -108,6 +108,7 @@
 
 @import url("./views/incidencias/index.css") layer(views);
 @import url("./views/incidencias/create.css") layer(views);
+@import url("./views/incidencias/detail.css") layer(views);
 
 
 /* =========================================================

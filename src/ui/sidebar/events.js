@@ -2,67 +2,55 @@
    Onion SPA - Sidebar Events
    Archivo: src/ui/sidebar/events.js
 
-   FINAL EXTREME SYSTEM · SIDEBAR EVENTS / VISUAL COMMIT · BIND SAFE · 12/10
-   PATCH · STALE ROUTE FIREBREAK
-   PATCH · ACTIVE MENU LOCAL OVERRIDE
-   PATCH · FACTURAS/INCIDENCIAS WRONG ACTIVE FIX
-   PATCH · USERNAME PUBLIC PATH READY /@usuario/ruta
-   PATCH · CATALAN/SPANISH/ENGLISH ROUTE ALIASES
-   PATCH · ROUTER PAYLOAD STALE SAFE
+   FINAL EXTREME SYSTEM · SIDEBAR EVENTS / VISUAL COMMIT · 12/10
+   ROUTER SAFE · STALE ROUTE FIREBREAK · ACTIVE LOCAL OVERRIDE
+   USERNAME PUBLIC PATH READY · ZERO DOUBLE DISPATCH · CLEANUP LOCAL
 
    Responsabilidades:
-   - bind de eventos DOM del sidebar
-   - bind de eventos core/auth/router
-   - sidebar manual: nunca abrir/cerrar por navegación
-   - cerrar dropdown en navegación/render
-   - recalcular usuario / roles tras login/logout/restore/session/user change
-   - bloquear clicks sobre elementos hidden/inert/admin ocultos
-   - cleanup local idempotente por scope
-   - tolerar DOM re-renderizado
-   - cero throws accidentales
-   - sincronizar item activo del menú delegando en state.js
-   - corregir item activo localmente si state/router payload llega stale
-   - sincronizar indicador visual tipo Apple delegando en state.js
-   - evitar indicador colgado al colapsar/expandir
-   - centralizar commit visual post-router/post-resize/post-auth
-   - evitar tormentas AppCore.cleanup.run / cleanup:disposed / firebreak
-   - evitar doble suscripción AppCore.events + window
-   - evitar doble cleanup AppCore.cleanup + cleanup local
+   - Bind de eventos DOM del sidebar.
+   - Bind de eventos core/auth/router.
+   - Sidebar manual: nunca abrir/cerrar por navegación.
+   - Cerrar dropdown en navegación/render.
+   - Recalcular usuario / roles tras login/logout/restore/session/user change.
+   - Bloquear clicks sobre elementos hidden/inert/admin ocultos.
+   - Cleanup local idempotente por scope.
+   - Tolerar DOM re-renderizado.
+   - Sincronizar item activo del menú delegando en state.js.
+   - Corregir item activo localmente si state/router payload llega stale.
+   - Sincronizar indicador visual tipo Apple delegando en state.js.
+   - Evitar indicador colgado al colapsar/expandir.
+   - Centralizar commit visual post-router/post-resize/post-auth.
+   - Evitar doble suscripción AppCore.events + window.
+   - Evitar doble cleanup AppCore.cleanup + cleanup local.
 
    FIX REAL:
-   - NO usa AppCore.cleanup.on/event para eventos del sidebar.
+   - No usa AppCore.cleanup.on/event para eventos del sidebar.
    - Usa cleanup local propio por scope.
    - Usa AppCore.events como fuente principal para eventos core.
    - Solo usa window.addEventListener como fallback si no existe AppCore.events.
-   - safeEmit NO emite por AppCore.events y window a la vez.
-   - NO escucha sidebar:refreshed/sidebar:repaired/sidebar:state:synced.
-   - NO escucha app:user-ui:sync para evitar bucles de sync visual.
-   - NO escucha router:shell:state para evitar loops con repairShell().
-   - router rendered NO fuerza open/close del sidebar.
-   - active item se recalcula tras router:rendered/app:route:change.
-   - indicador se recalcula después del layout final.
-   - durante transición se oculta el indicador para evitar burbuja flotante.
-   - handlers viejos quedan invalidados por epoch aunque el bus no permita off().
+   - safeEmit no emite por AppCore.events y window a la vez.
+   - No escucha sidebar:refreshed/sidebar:repaired/sidebar:state:synced.
+   - No escucha app:user-ui:sync para evitar bucles de sync visual.
+   - No escucha router:shell:state para evitar loops con repairShell().
+   - router:rendered no fuerza open/close del sidebar.
+   - Active item se recalcula tras router:rendered/app:route:change.
+   - Indicador se recalcula después del layout final.
+   - Durante transición se oculta el indicador.
+   - Handlers viejos quedan invalidados por epoch aunque el bus no permita off().
 
-   FIX CLICK SIDEBAR:
-   - Los clicks del menú navegan explícitamente con Router.navigate().
-   - El listener document click va en capture para ganar al Router global.
-   - Ya no depende solo del listener global del Router.
+   CLICK SIDEBAR:
+   - Clicks del menú navegan explícitamente con Router.navigate().
+   - Listener document click en capture para ganar al Router global.
    - Soporta data-route / data-href / data-to / href.
    - Respeta Ctrl/Cmd/Shift/Alt click.
    - Respeta target="_blank", download, URLs externas y href inseguros.
-   - Los botones del dropdown con data-route también navegan.
+   - Botones del dropdown con data-route también navegan.
 
-   FIX ACTIVE WRONG:
+   ACTIVE WRONG:
    - En commits de router, la URL visible tiene prioridad.
    - Payloads viejos de router/app state no pisan el activo.
    - /@usuario/facturas se normaliza a /facturas.
-   - Alias ES/CA/EN:
-     /factures, /invoices => /facturas
-     /incidencies, /tickets => /incidencias
-     /usuaris, /users => /usuarios
-     /clients, /customers => /clientes
-     /compte, /account => /cuenta
+   - Alias ES/CA/EN sincronizados con template.js/state.js.
 ========================================================= */
 
 import {
@@ -89,6 +77,8 @@ const scopeEpochs = new Map();
    CONSTANTS
 ====================================================== */
 
+const SOURCE = "SidebarEvents";
+
 const DEFAULT_SCOPE = "ui:sidebar";
 
 const INDICATOR_DEFAULT_DELAY = 40;
@@ -100,6 +90,15 @@ const HANDLED_FLAG = "__onionSidebarHandled";
 const LOCAL_HANDLED_FLAG = "__onionSidebarEventsHandled";
 
 const ROUTE_CURRENT_VALUE = "page";
+
+const TRANSITION_PROPERTIES = new Set([
+  "inline-size",
+  "width",
+  "transform",
+  "margin-inline-start",
+  "margin-left",
+  "max-inline-size",
+]);
 
 const ROUTE_ALIASES = Object.freeze({
   "/home": "/",
@@ -113,12 +112,16 @@ const ROUTE_ALIASES = Object.freeze({
   "/incident": "/incidencias",
   "/incidencies": "/incidencias",
   "/incidencia": "/incidencias",
+  "/incidencia-client": "/incidencias",
 
   "/invoices": "/facturas",
   "/invoice": "/facturas",
   "/billing": "/facturas",
   "/factures": "/facturas",
   "/factura": "/facturas",
+  "/facturacio": "/facturas",
+  "/facturación": "/facturas",
+  "/facturacion": "/facturas",
 
   "/users": "/usuarios",
   "/user": "/usuarios",
@@ -139,6 +142,7 @@ const ROUTE_ALIASES = Object.freeze({
 
   "/settings": "/ajustes",
   "/config": "/ajustes",
+  "/configuration": "/ajustes",
   "/configuracion": "/ajustes",
   "/configuración": "/ajustes",
   "/configuracio": "/ajustes",
@@ -147,6 +151,57 @@ const ROUTE_ALIASES = Object.freeze({
   "/server": "/servidor",
   "/servidor": "/servidor",
 });
+
+const SIDEBAR_NAV_SELECTOR = [
+  "[data-sidebar-nav='true']",
+  "a[data-sidebar-item='true']",
+  "a[data-spa]",
+  "a[data-route]",
+  "a[data-href]",
+  "a[data-to]",
+  "a[href]",
+  ".menu-item[data-route]",
+  ".menu-item[data-href]",
+  ".menu-item[data-to]",
+].join(",");
+
+const DROPDOWN_NAV_SELECTOR = [
+  "a[data-spa]",
+  "a[data-route]",
+  "a[data-href]",
+  "a[data-to]",
+  "a[href]",
+  "button[data-route]",
+  "button[data-href]",
+  "button[data-to]",
+].join(",");
+
+const INTERACTIVE_SELECTOR = [
+  "a[data-spa]",
+  "a[href]",
+  "button",
+  "[role='button']",
+  "[data-route]",
+  "[data-action]",
+  "[data-sidebar-action]",
+].join(",");
+
+const HIDDEN_TARGET_SELECTOR = [
+  "[hidden]",
+  "[inert]",
+  "[data-sidebar-visible='false']",
+  "[data-role-visible='false']",
+  "[data-admin-visible='false']",
+].join(",");
+
+const HIDDEN_VISIBLE_SELECTOR = [
+  "[hidden]",
+  "[inert]",
+  "[aria-hidden='true']",
+  "[data-role-visible='false']",
+  "[data-admin-visible='false']",
+  "[data-sidebar-visible='false']",
+].join(",");
 
 /* ======================================================
    BASICS
@@ -160,16 +215,15 @@ function hasWindow() {
   return typeof window !== "undefined";
 }
 
-function hasDocument() {
-  return typeof document !== "undefined";
-}
-
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -178,10 +232,6 @@ function safeObject(value) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
 }
 
 function safeNumber(value, fallback = 0) {
@@ -239,9 +289,8 @@ function safeLog(AppCore, ...args) {
 }
 
 /*
-  Importante:
   No emitimos por AppCore.events Y window a la vez.
-  Si el bus existe, usamos el bus. Si no existe, fallback a window.
+  Bus primero. Window solo fallback.
 */
 function safeEmit(AppCore, eventName = "", payload = {}) {
   const name = safeText(eventName, "");
@@ -250,9 +299,14 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
     return false;
   }
 
+  const finalPayload = {
+    source: SOURCE,
+    ...safeObject(payload),
+  };
+
   try {
     if (isFn(AppCore?.events?.emit)) {
-      AppCore.events.emit(name, payload);
+      AppCore.events.emit(name, finalPayload);
       return true;
     }
   } catch (error) {
@@ -260,10 +314,10 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
   }
 
   try {
-    if (isBrowser()) {
+    if (isBrowser() && typeof CustomEvent !== "undefined") {
       window.dispatchEvent(
         new CustomEvent(name, {
-          detail: payload,
+          detail: finalPayload,
         })
       );
 
@@ -279,6 +333,8 @@ function safeWindowTimeout(fn, ms = 0) {
     return null;
   }
 
+  const delay = Math.max(0, Number(ms) || 0);
+
   const safeFn = () => {
     try {
       fn();
@@ -287,7 +343,7 @@ function safeWindowTimeout(fn, ms = 0) {
 
   try {
     if (hasWindow()) {
-      return window.setTimeout(safeFn, Math.max(0, Number(ms) || 0));
+      return window.setTimeout(safeFn, delay);
     }
   } catch {}
 
@@ -583,7 +639,11 @@ function normalizeRoutePath(path = "/") {
     return "/";
   }
 
-  if (isUnsafeRouteValue(value) || isExternalHref(value) || isHashOnlyHref(value)) {
+  if (
+    isUnsafeRouteValue(value) ||
+    isExternalHref(value) ||
+    isHashOnlyHref(value)
+  ) {
     return "";
   }
 
@@ -611,7 +671,9 @@ function normalizeRoutePath(path = "/") {
     value = `/${value}`;
   }
 
-  const [pathname, query = ""] = value.split("?");
+  const queryIndex = value.indexOf("?");
+  const pathname = queryIndex >= 0 ? value.slice(0, queryIndex) : value;
+  const query = queryIndex >= 0 ? value.slice(queryIndex + 1) : "";
 
   const cleanPathname = applyRouteAlias(
     stripPublicUsernamePrefix(
@@ -762,8 +824,16 @@ function resolveFreshRoute(payload = {}, AppCore = null, Router = null, options 
 
   const candidates = [];
 
-  const hasNonRootExplicit = explicit.some((value) => value && stripQuery(value) !== "/");
-  const shouldPrioritizeExplicit = preferExplicit && (hasNonRootExplicit || opts.forceRoute === true || detail.forceRoute === true);
+  const hasNonRootExplicit =
+    explicit.some((value) => value && stripQuery(value) !== "/");
+
+  const shouldPrioritizeExplicit =
+    preferExplicit &&
+    (
+      hasNonRootExplicit ||
+      opts.forceRoute === true ||
+      detail.forceRoute === true
+    );
 
   if (shouldPrioritizeExplicit) {
     explicit.forEach((value) => pushUniqueRoute(candidates, value));
@@ -772,10 +842,8 @@ function resolveFreshRoute(payload = {}, AppCore = null, Router = null, options 
     pushUniqueRoute(candidates, browser);
   } else {
     /*
-      FIX CRÍTICO:
       En commits de router/render/theme/lang, la URL visible gana.
-      Esto evita que un payload atrasado de /incidencias marque el menú
-      cuando el navegador ya está en /@usuario/facturas.
+      Evita que un payload atrasado marque otra vista.
     */
     pushUniqueRoute(candidates, browser);
     pushUniqueRoute(candidates, router);
@@ -879,7 +947,11 @@ function normalizeSidebarTarget(AppCore, Router, value = "") {
     return "";
   }
 
-  if (isUnsafeRouteValue(raw) || isExternalHref(raw) || isHashOnlyHref(raw)) {
+  if (
+    isUnsafeRouteValue(raw) ||
+    isExternalHref(raw) ||
+    isHashOnlyHref(raw)
+  ) {
     return "";
   }
 
@@ -889,7 +961,12 @@ function normalizeSidebarTarget(AppCore, Router, value = "") {
     }
   } catch {}
 
-  if (!raw || isUnsafeRouteValue(raw) || isExternalHref(raw) || isHashOnlyHref(raw)) {
+  if (
+    !raw ||
+    isUnsafeRouteValue(raw) ||
+    isExternalHref(raw) ||
+    isHashOnlyHref(raw)
+  ) {
     return "";
   }
 
@@ -909,11 +986,16 @@ function normalizeSidebarTarget(AppCore, Router, value = "") {
 
   try {
     if (isFn(AppCore?.utils?.normalizePath)) {
-      return AppCore.utils.normalizePath(raw || "/");
+      const normalized = AppCore.utils.normalizePath(raw || "/");
+      return normalizeRoutePath(normalized);
     }
   } catch {}
 
-  return normalizeRoutePath(raw.startsWith("/") || raw.startsWith("#") ? raw : `/${raw}`);
+  return normalizeRoutePath(
+    raw.startsWith("/") || raw.startsWith("#")
+      ? raw
+      : `/${raw}`
+  );
 }
 
 async function navigateFromSidebar({
@@ -994,22 +1076,7 @@ function getSidebarNavigationElement(target = null) {
     return null;
   }
 
-  return (
-    target.closest?.(
-      [
-        "[data-sidebar-nav='true']",
-        "a[data-sidebar-item='true']",
-        "a[data-spa]",
-        "a[data-route]",
-        "a[data-href]",
-        "a[data-to]",
-        "a[href]",
-        ".menu-item[data-route]",
-        ".menu-item[data-href]",
-        ".menu-item[data-to]",
-      ].join(",")
-    ) || null
-  );
+  return target.closest?.(SIDEBAR_NAV_SELECTOR) || null;
 }
 
 function getDropdownNavigationElement(target = null) {
@@ -1017,22 +1084,7 @@ function getDropdownNavigationElement(target = null) {
     return null;
   }
 
-  return (
-    target.closest?.(
-      [
-        "a[data-spa]",
-        "a[data-route]",
-        "a[data-href]",
-        "a[data-to]",
-        "a[href]",
-        "button[data-route]",
-        "button[data-href]",
-        "button[data-to]",
-        "[data-sidebar-action='profile']",
-        "[data-sidebar-action='settings']",
-      ].join(",")
-    ) || null
-  );
+  return target.closest?.(DROPDOWN_NAV_SELECTOR) || null;
 }
 
 /* ======================================================
@@ -1045,20 +1097,8 @@ function getMenuItems(sidebarMenu = null) {
   }
 
   try {
-    return Array.from(
-      sidebarMenu.querySelectorAll(
-        [
-          ".menu-item",
-          "[data-sidebar-nav='true']",
-          "a[data-sidebar-item='true']",
-          "a[data-spa]",
-          "a[data-route]",
-          "a[data-href]",
-          "a[data-to]",
-          "a[href]",
-        ].join(",")
-      )
-    ).filter((item, index, array) => item && array.indexOf(item) === index);
+    return Array.from(sidebarMenu.querySelectorAll(SIDEBAR_NAV_SELECTOR))
+      .filter((item, index, array) => item && array.indexOf(item) === index);
   } catch {
     return [];
   }
@@ -1076,18 +1116,7 @@ function isVisibleMenuItem(item = null) {
   try {
     if (item.hidden) return false;
 
-    if (
-      item.closest?.(
-        [
-          "[hidden]",
-          "[inert]",
-          "[aria-hidden='true']",
-          "[data-role-visible='false']",
-          "[data-admin-visible='false']",
-          "[data-sidebar-visible='false']",
-        ].join(",")
-      )
-    ) {
+    if (item.closest?.(HIDDEN_VISIBLE_SELECTOR)) {
       return false;
     }
 
@@ -1119,6 +1148,9 @@ function clearActiveItemClasses(sidebarMenu = null) {
 
       if (item.dataset) {
         delete item.dataset.active;
+        delete item.dataset.matchedRoute;
+        delete item.dataset.matchedCurrent;
+        delete item.dataset.matchCandidateIndex;
       }
     } catch {}
   }
@@ -1126,7 +1158,7 @@ function clearActiveItemClasses(sidebarMenu = null) {
   return true;
 }
 
-function setActiveItemClasses(item = null, matchedRoute = "") {
+function setActiveItemClasses(item = null, matchedRoute = "", currentRoute = "") {
   if (!item) {
     return false;
   }
@@ -1138,6 +1170,7 @@ function setActiveItemClasses(item = null, matchedRoute = "") {
     if (item.dataset) {
       item.dataset.active = "true";
       item.dataset.matchedRoute = safeText(matchedRoute, "");
+      item.dataset.matchedCurrent = safeText(currentRoute || matchedRoute, "");
     }
 
     return true;
@@ -1210,18 +1243,19 @@ function findBestMenuItemForRoute(sidebarMenu = null, route = "/") {
 
   try {
     best.dataset.matchedRoute = bestRoute;
+    best.dataset.matchedCurrent = targetRoute;
   } catch {}
 
   return best;
 }
 
-function setOptimisticSidebarActiveItem(sidebarMenu = null, item = null) {
+function setOptimisticSidebarActiveItem(sidebarMenu = null, item = null, currentRoute = "") {
   if (!sidebarMenu || !item) {
     return false;
   }
 
   clearActiveItemClasses(sidebarMenu);
-  return setActiveItemClasses(item, getMenuItemRoute(item));
+  return setActiveItemClasses(item, getMenuItemRoute(item), currentRoute);
 }
 
 function syncLocalActiveMenuItem(ctx = {}, route = "/", options = {}) {
@@ -1233,7 +1267,8 @@ function syncLocalActiveMenuItem(ctx = {}, route = "/", options = {}) {
     return null;
   }
 
-  const activeItem = findBestMenuItemForRoute(sidebarMenu, route);
+  const currentRoute = normalizeRoutePath(route || "/");
+  const activeItem = findBestMenuItemForRoute(sidebarMenu, currentRoute);
 
   if (!activeItem) {
     return null;
@@ -1241,7 +1276,7 @@ function syncLocalActiveMenuItem(ctx = {}, route = "/", options = {}) {
 
   if (options.mutate !== false) {
     clearActiveItemClasses(sidebarMenu);
-    setActiveItemClasses(activeItem, route);
+    setActiveItemClasses(activeItem, getMenuItemRoute(activeItem), currentRoute);
   }
 
   return activeItem;
@@ -1521,9 +1556,8 @@ function syncActiveMenuItem(ctx = {}, payload = {}) {
   }
 
   /*
-    FIX CRÍTICO:
-    state.js puede recibir candidatos stale desde AppCore/router.
-    Esta corrección local fuerza el item correcto con la ruta fresca.
+    Firebreak local:
+    si AppCore/router venía stale, forzamos el item de la ruta fresca.
   */
   const fixedItem = syncLocalActiveMenuItem(
     {
@@ -1539,7 +1573,6 @@ function syncActiveMenuItem(ctx = {}, payload = {}) {
 
   if (fixedItem && fixedItem !== baseItem) {
     safeEmit(AppCore, "sidebar:active:item:overridden", {
-      source: "SidebarEvents",
       reason,
       route: routePayload.route,
       previousRoute: getMenuItemRoute(baseItem),
@@ -1659,6 +1692,7 @@ function hideActiveMenuIndicator(ctx = {}, reason = "hide") {
 
     try {
       sidebarMenu.dataset.indicatorReady = "false";
+      sidebarMenu.dataset.indicatorReason = safeText(reason, "hide");
       sidebarMenu.style.setProperty("--sidebar-indicator-opacity", "0");
     } catch {}
 
@@ -1677,6 +1711,10 @@ function beginSidebarLayoutTransition(ctx = {}, reason = "transition") {
     sidebar?.classList?.add?.("is-transitioning");
     body?.classList?.add?.("sidebar-transitioning");
     sidebarMenu?.classList?.add?.("is-transitioning");
+
+    if (sidebar?.dataset) sidebar.dataset.transitioning = "true";
+    if (sidebarMenu?.dataset) sidebarMenu.dataset.transitioning = "true";
+    if (body?.dataset) body.dataset.sidebarTransitioning = "true";
   } catch {}
 
   safeEmit(AppCore, "sidebar:transition:begin", {
@@ -1695,6 +1733,10 @@ function endSidebarLayoutTransition(ctx = {}, reason = "transition") {
     sidebar?.classList?.remove?.("is-transitioning");
     body?.classList?.remove?.("sidebar-transitioning");
     sidebarMenu?.classList?.remove?.("is-transitioning");
+
+    if (sidebar?.dataset) delete sidebar.dataset.transitioning;
+    if (sidebarMenu?.dataset) delete sidebarMenu.dataset.transitioning;
+    if (body?.dataset) delete body.dataset.sidebarTransitioning;
   } catch {}
 
   const activeItem = syncActiveMenuItem(ctx, {
@@ -1918,15 +1960,7 @@ function shouldIgnoreHiddenTarget(target = null) {
     return false;
   }
 
-  const hardHidden = target.closest(
-    [
-      "[hidden]",
-      "[inert]",
-      "[data-sidebar-visible='false']",
-      "[data-role-visible='false']",
-      "[data-admin-visible='false']",
-    ].join(",")
-  );
+  const hardHidden = target.closest(HIDDEN_TARGET_SELECTOR);
 
   if (hardHidden) {
     return true;
@@ -1938,24 +1972,10 @@ function shouldIgnoreHiddenTarget(target = null) {
     return false;
   }
 
-  const interactiveParent = target.closest(
-    [
-      "a[data-spa]",
-      "a[href]",
-      "button",
-      "[role='button']",
-      "[data-route]",
-      "[data-action]",
-      "[data-sidebar-action]",
-    ].join(",")
-  );
+  const interactiveParent = target.closest(INTERACTIVE_SELECTOR);
 
   if (interactiveParent && interactiveParent.contains(ariaHidden)) {
-    if (ariaHidden === interactiveParent) {
-      return true;
-    }
-
-    return false;
+    return ariaHidden === interactiveParent;
   }
 
   return true;
@@ -2082,7 +2102,7 @@ export function handleDocumentClick({
       source: "sidebar-menu",
     });
 
-    setOptimisticSidebarActiveItem(sidebarMenu, sidebarNav);
+    setOptimisticSidebarActiveItem(sidebarMenu, sidebarNav, targetPath);
 
     const ctx = {
       AppCore,
@@ -2243,7 +2263,7 @@ export function handleSidebarMenuClick({
     source: "sidebar-menu",
   });
 
-  setOptimisticSidebarActiveItem(sidebarMenu, link);
+  setOptimisticSidebarActiveItem(sidebarMenu, link, targetPath);
 
   const ctx = {
     AppCore,
@@ -2460,10 +2480,6 @@ export function bindDomEvents(ctx = {}) {
 
   bindDom(AppCore, localScope, epoch, window, "resize", resizeHandler);
 
-  /*
-    Fallback nativo:
-    Si el router no emite bien, popstate/hashchange todavía corrigen el activo.
-  */
   bindDom(
     AppCore,
     localScope,
@@ -2543,17 +2559,7 @@ export function bindDomEvents(ctx = {}) {
 
       const propertyName = safeText(event?.propertyName, "");
 
-      if (
-        propertyName &&
-        ![
-          "inline-size",
-          "width",
-          "transform",
-          "margin-inline-start",
-          "margin-left",
-          "max-inline-size",
-        ].includes(propertyName)
-      ) {
+      if (propertyName && !TRANSITION_PROPERTIES.has(propertyName)) {
         return;
       }
 
@@ -2567,8 +2573,6 @@ export function bindDomEvents(ctx = {}) {
     },
     true
   );
-  // Document-level handlers already process keydown/click for userToggle and menu navigation.
-  // Avoid double-binding local handlers that can cause duplicated navigation/visual commits.
 
   safeEmit(AppCore, "sidebar:dom-events:bound", {
     scope: scopeName,
@@ -2685,11 +2689,6 @@ export function bindCoreEvents(ctx = {}) {
       const detail = getEventDetail(eventOrPayload);
 
       const payload = buildRoutePayload(visualCtx, detail, eventName, {
-        /*
-          FIX:
-          En eventos de router normales NO preferimos payload explícito.
-          La URL visible gana para evitar activos viejos.
-        */
         preferExplicitRoute: false,
         force: true,
       });
@@ -2914,11 +2913,6 @@ export function bindCoreEvents(ctx = {}) {
     (eventOrPayload = {}) => {
       const detail = getEventDetail(eventOrPayload);
 
-      /*
-        FIX:
-        Cambio de idioma/tema NO debe activar una ruta vieja que venga en payload.
-        Forzamos ruta visible.
-      */
       const payload = buildRoutePayload(visualCtx, detail, "visual-env-change", {
         preferExplicitRoute: false,
         force: true,

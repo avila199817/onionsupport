@@ -2,67 +2,45 @@
    Onion SPA - Facturas View
    Archivo: src/views/facturas/facturasView.js
 
-   EXTREME PRO SYSTEM · VIEW REAL · FULL PATCH 13/10
-   PORTAL MODAL · SEARCH BRIDGE · URL AUTOPEN · TOPBAR READY
-   DETAIL STORE MERGE · INCIDENCIA MODAL BRIDGE · CREATE MODAL
-   PAGINATION 5 · ACTION STATE SYNC · RERENDER SAFE · CLEANUP PRO
-   FISCAL PRESERVER · IVA/IRPF/TOTALES/IMPUESTOS HARDENED
-   FILTER PILLS + SEARCH · FACTURAS CONTROL CENTER 10/10
-   PATCH · SORT PILLS REAL BINDING · TEMPLATE V16 READY
-   PATCH · getFacturaDisplayId FIX · NO MORE UNDEFINED TOAST
-   PATCH · COMPANY-FIRST SEARCH/LIST CONSISTENCY
-   PATCH · DATE_DESC REAL SORT · INVOICE_DESC REAL SORT
-   PATCH · FILTER/SEARCH/SORT STATE BRIDGE HARDENED
+   EXTREME PRO SYSTEM · FACTURAS VIEW · CSP CLEAN · 14/10
+   PATCH · SINGLE TEMPLATE OWNER
+   PATCH · NO INLINE STYLE
+   PATCH · NO TEMPLATE STYLE INJECTION
+   PATCH · TEMPLATE DOM BIND · AVATAR FALLBACK CSP SAFE
+   PATCH · FILTER / SEARCH / SORT STATE BRIDGE
+   PATCH · PAGINATION 5
+   PATCH · DETAIL PORTAL
+   PATCH · CREATE MODAL BRIDGE
+   PATCH · INCIDENCIA MODAL BRIDGE
+   PATCH · URL AUTOPEN
+   PATCH · TOPBAR SEARCH BRIDGE
+   PATCH · ACTION LOADERS SYNC
+   PATCH · FISCAL + RELATION PRESERVER
+   PATCH · RERENDER SAFE
+   PATCH · CLEANUP ENTERPRISE
 
    RESPONSABILIDADES:
-   - render principal de facturas
-   - render desacoplado de header/cards/template
-   - modal detail en portal global body
-   - modal create global vía facturas.create.modal.js
-   - rerender estable y coalescido
-   - bindings de vista + bindings de portal modal
-   - cero conflicto con shell SPA
-   - cleanup enterprise
-   - preservar relación factura ↔ incidencia en listado y detalle
-   - abrir incidencia relacionada en modal real
-   - cerrar modal detalle por X, Escape y overlay
-   - paginación visual real a 5 facturas por página
-   - abrir factura desde topbar search por bridge directo
-   - abrir factura desde URL /facturas?factura=... / ?id=...
-   - registrar bridge público window/AppCore.modules para search
-   - sincronizar loaders de acciones sin romper tabla
-   - refrescar listado tras enviar / crear factura
-   - preservar fiscalidad en detalle: impuestos, IVA, IRPF, totales y líneas
-   - manejar filtros visuales del template:
-     todas / pendientes / pagadas / vencidas
-   - manejar búsqueda por factura, cliente, empresa, email, importe, forma de pago e incidencia
-   - manejar orden visual del template:
-     fecha mayor a menor / nº factura mayor a menor
-   - resetear página a 1 al filtrar/buscar/ordenar
-   - exportar CSV filtrado cuando haya filtro activo
-
-   FIX CLAVE:
-   - El listado recibe facturas enriquecidas desde store.
-   - El detalle remoto puede venir sin ticketId/incidenciaId.
-   - Antes de renderizar detalle se fusiona el payload remoto con la
-     factura enriquecida del store por id/número/facturaId/invoiceId.
-   - El search puede pasar detail completo, payload de evento, string o ID.
-   - openFactura() sigue aceptando ID; el bridge externo normaliza payload.
-   - Si el detalle remoto viene pobre, no pisa IVA/IRPF/impuestos/totales
-     existentes en store/raw.
-   - El template puede pintar filtros y sort pills; esta vista les da estado
-     y bindings reales.
-   - getFacturaDisplayId existe en la vista para evitar el error:
-     "getFacturaDisplayId is not defined".
+   - Montar la vista real de facturas.
+   - Renderizar mediante renderFacturasTemplate().
+   - No duplicar renderHeader/renderCards en la vista.
+   - Mantener estado de filtro, búsqueda, orden y paginación.
+   - Delegar markup al template.
+   - Delegar estilos al CSS externo /src/css/views/facturas.css.
+   - Abrir detalle de factura en portal global.
+   - Abrir modal de creación.
+   - Abrir incidencia relacionada.
+   - Sin style="".
+   - Sin eventos inline.
+   - Sin <style> inyectado desde JS.
+   - Soportar apertura desde URL y topbar/global search.
+   - Sin pisar IVA/IRPF/impuestos/totales/relación con incidencia.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
 import {
-  renderHeader,
-  renderCards,
-  renderLoadingState,
-  renderErrorState,
+  renderFacturasTemplate,
+  bindFacturasTemplateDom,
 } from "./facturas.template.js";
 
 import {
@@ -117,7 +95,6 @@ import {
 import { bindFacturasView } from "./facturas.bindings.js";
 
 import {
-  escapeHtml,
   safeText,
   showToast,
 } from "./facturas.utils.js";
@@ -131,11 +108,13 @@ export const FacturasView = (() => {
 
   const SCOPE = "view:facturas";
   const DETAIL_MODAL_ID = "facturas-detail-root";
+
   const PAGE_SIZE = 5;
+  const SEARCH_DEBOUNCE_MS = 120;
   const INCIDENCIA_DETAIL_TIMEOUT = 90000;
-  const DEFAULT_FACTURAS_FILTER = "all";
-  const FACTURAS_SEARCH_DEBOUNCE_MS = 120;
-  const DEFAULT_FACTURAS_SORT = "date_desc";
+
+  const DEFAULT_FILTER = "all";
+  const DEFAULT_SORT = "date_desc";
 
   const ADMIN_ROLES = Object.freeze([
     "admin",
@@ -180,6 +159,10 @@ export const FacturasView = (() => {
     "global-search:open-factura",
   ]);
 
+  /* =====================================================
+     MODULE STATE
+  ===================================================== */
+
   const state = createFacturasState();
 
   let initialized = false;
@@ -196,15 +179,14 @@ export const FacturasView = (() => {
   let searchOpenCleanup = null;
   let filterControlsCleanup = null;
 
-  let facturasSearchTimer = 0;
-
+  let searchTimer = 0;
+  let renderFrame = 0;
   let renderToken = 0;
-  let pendingRenderFrame = 0;
 
   let lastAutoOpenedFacturaId = "";
 
   /* =====================================================
-     LOCAL HELPERS
+     PRIMITIVES
   ===================================================== */
 
   function safeNumber(value, fallback = 0) {
@@ -227,11 +209,9 @@ export const FacturasView = (() => {
         const lastComma = normalized.lastIndexOf(",");
         const lastDot = normalized.lastIndexOf(".");
 
-        if (lastComma > lastDot) {
-          normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
-        } else {
-          normalized = normalized.replace(/,/g, "");
-        }
+        normalized = lastComma > lastDot
+          ? normalized.replace(/\./g, "").replace(/,/g, ".")
+          : normalized.replace(/,/g, "");
       } else if (hasComma) {
         normalized = normalized.replace(/,/g, ".");
       }
@@ -259,6 +239,7 @@ export const FacturasView = (() => {
       if (value === undefined || value === null) continue;
       if (typeof value === "string" && value.trim() === "") continue;
       if (Array.isArray(value) && value.length === 0) continue;
+
       return value;
     }
 
@@ -276,11 +257,12 @@ export const FacturasView = (() => {
 
   function clampNumber(value, min = 1, max = Number.MAX_SAFE_INTEGER) {
     const n = safeNumber(value, min);
+
     return Math.min(Math.max(n, min), max);
   }
 
   function normalizeText(value = "") {
-    return String(value || "")
+    return safeText(value, "")
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
@@ -340,13 +322,249 @@ export const FacturasView = (() => {
 
     const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
 
-    if (Number.isNaN(date.getTime())) return 0;
+    return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+  }
 
-    return date.getTime();
+  function escapeHtml(value = "") {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function normalizeTokenList(value) {
+    if (Array.isArray(value)) {
+      return value.map((item) => normalizeKey(item)).filter(Boolean);
+    }
+
+    if (value && typeof value === "object") {
+      return Object.entries(value)
+        .filter(([, enabled]) => Boolean(enabled))
+        .map(([key]) => normalizeKey(key))
+        .filter(Boolean);
+    }
+
+    if (typeof value === "string") {
+      return value
+        .split(/[,\s|;]+/g)
+        .map((item) => normalizeKey(item))
+        .filter(Boolean);
+    }
+
+    return [];
   }
 
   /* =====================================================
-     FILTER / SEARCH / SORT STATE · FACTURAS 10/10
+     CORE / EVENTS
+  ===================================================== */
+
+  function safeLog(...args) {
+    try {
+      AppCore?.utils?.log?.("[FacturasView]", ...args);
+    } catch {}
+  }
+
+  function safeWarn(...args) {
+    try {
+      AppCore?.utils?.warn?.("[FacturasView]", ...args);
+    } catch {}
+
+    try {
+      console.warn("[FacturasView]", ...args);
+    } catch {}
+  }
+
+  function safeEmit(event = "", payload = {}) {
+    const eventName = safeText(event, "");
+    if (!eventName) return false;
+
+    try {
+      AppCore?.events?.emit?.(eventName, payload);
+    } catch {}
+
+    try {
+      window.dispatchEvent(
+        new CustomEvent(eventName, {
+          detail: payload,
+        })
+      );
+    } catch {}
+
+    return true;
+  }
+
+  function safeOn(event = "", handler = null) {
+    const eventName = safeText(event, "");
+
+    if (!eventName || typeof handler !== "function") {
+      return () => {};
+    }
+
+    let busCleanup = null;
+    let busAttached = false;
+    let windowAttached = false;
+
+    const windowHandler = (domEvent) => handler(domEvent);
+
+    try {
+      const maybeCleanup = AppCore?.events?.on?.(eventName, handler);
+
+      if (typeof maybeCleanup === "function") {
+        busCleanup = maybeCleanup;
+      }
+
+      busAttached = true;
+    } catch {}
+
+    try {
+      window.addEventListener(eventName, windowHandler);
+      windowAttached = true;
+    } catch {}
+
+    return () => {
+      if (busCleanup) {
+        try {
+          busCleanup();
+        } catch {}
+      } else if (busAttached) {
+        try {
+          AppCore?.events?.off?.(eventName, handler);
+        } catch {}
+      }
+
+      if (windowAttached) {
+        try {
+          window.removeEventListener(eventName, windowHandler);
+        } catch {}
+      }
+    };
+  }
+
+  function getContainer() {
+    return (
+      AppCore?.dom?.viewContainer ||
+      document.getElementById("view-container") ||
+      null
+    );
+  }
+
+  function safeErrorMessage(error = null) {
+    return safeText(
+      first(
+        error?.message,
+        error?.response?.message,
+        error?.response?.data?.message,
+        error?.data?.message,
+        "No se pudieron cargar las facturas."
+      ),
+      "No se pudieron cargar las facturas."
+    );
+  }
+
+  /* =====================================================
+     FRAME / RENDER TOKEN
+  ===================================================== */
+
+  function nextRenderToken() {
+    renderToken += 1;
+    return renderToken;
+  }
+
+  function isActiveToken(token) {
+    return !destroyed && token === renderToken;
+  }
+
+  function requestFrame(callback) {
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      return window.requestAnimationFrame(callback);
+    }
+
+    return window.setTimeout(callback, 0);
+  }
+
+  function cancelFrame(frameId) {
+    if (!frameId) return;
+
+    try {
+      if (typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
+        window.cancelAnimationFrame(frameId);
+        return;
+      }
+
+      window.clearTimeout(frameId);
+    } catch {}
+  }
+
+  function cancelScheduledRender() {
+    if (!renderFrame) return;
+
+    cancelFrame(renderFrame);
+    renderFrame = 0;
+  }
+
+  /* =====================================================
+     CLEANUP
+  ===================================================== */
+
+  function cleanupCreateSuccessListener() {
+    try {
+      createSuccessCleanup?.();
+    } catch {}
+
+    createSuccessCleanup = null;
+  }
+
+  function cleanupSearchOpenListener() {
+    try {
+      searchOpenCleanup?.();
+    } catch {}
+
+    searchOpenCleanup = null;
+  }
+
+  function cleanupFilterControls() {
+    try {
+      filterControlsCleanup?.();
+    } catch {}
+
+    filterControlsCleanup = null;
+
+    try {
+      window.clearTimeout(searchTimer);
+    } catch {}
+
+    searchTimer = 0;
+  }
+
+  function cleanupModalBindings() {
+    try {
+      modalBindingsCleanup?.();
+    } catch {}
+
+    modalBindingsCleanup = null;
+  }
+
+  function cleanupBindings() {
+    cleanupFilterControls();
+
+    try {
+      bindingsCleanup?.();
+    } catch {}
+
+    bindingsCleanup = null;
+
+    cleanupCreateSuccessListener();
+    cleanupSearchOpenListener();
+
+    try {
+      AppCore?.cleanup?.run?.(SCOPE);
+    } catch {}
+  }
+
+  /* =====================================================
+     VIEW STATE · FILTER / SEARCH / SORT / PAGE
   ===================================================== */
 
   function normalizeFacturaFilter(value = "") {
@@ -423,316 +641,6 @@ export const FacturasView = (() => {
     return "date_desc";
   }
 
-  function normalizeTokenList(value) {
-    if (Array.isArray(value)) {
-      return value.map((item) => normalizeKey(item)).filter(Boolean);
-    }
-
-    if (value && typeof value === "object") {
-      return Object.entries(value)
-        .filter(([, enabled]) => Boolean(enabled))
-        .map(([key]) => normalizeKey(key))
-        .filter(Boolean);
-    }
-
-    if (typeof value === "string") {
-      return value
-        .split(/[,\s|;]+/g)
-        .map((item) => normalizeKey(item))
-        .filter(Boolean);
-    }
-
-    return [];
-  }
-
-  function sameFacturaIdentity(a = "", b = "") {
-    const left = normalizeText(a);
-    const right = normalizeText(b);
-
-    return Boolean(left && right && left === right);
-  }
-
-  function getValueFromMaybeObject(value = {}) {
-    if (typeof value === "string" || typeof value === "number") {
-      return safeText(value, "");
-    }
-
-    const source = safeObject(value);
-
-    return safeText(
-      first(
-        source.facturaId,
-        source.invoiceId,
-        source.id,
-        source._id,
-        source.entityId,
-        source.numero,
-        source.numeroFactura,
-        source.numeroFacturaLegal,
-        source.numeroFacturaSistema,
-        source.legalInvoiceNumber,
-        source.systemInvoiceNumber,
-        source.invoiceNumber,
-        source.value,
-        source.key,
-        source.code
-      ),
-      ""
-    );
-  }
-
-  function pickTicketIdFromArray(value = []) {
-    const items = safeArray(value);
-
-    for (const item of items) {
-      if (typeof item === "string" && item.trim()) {
-        return item.trim();
-      }
-
-      if (!item || typeof item !== "object") {
-        continue;
-      }
-
-      const candidate = first(
-        item.ticketId,
-        item.incidenciaId,
-        item.id,
-        item.code,
-        item.numero,
-        item.relatedTicketId,
-        item.relatedIncidentId,
-        item.supportTicketId,
-        item.caseId,
-
-        item.ticket?.ticketId,
-        item.ticket?.incidenciaId,
-        item.ticket?.id,
-
-        item.incidencia?.ticketId,
-        item.incidencia?.incidenciaId,
-        item.incidencia?.id,
-
-        item.linkedTicket?.ticketId,
-        item.linkedTicket?.incidenciaId,
-        item.linkedTicket?.id
-      );
-
-      if (candidate) {
-        return safeText(candidate, "");
-      }
-    }
-
-    return null;
-  }
-
-  function nextRenderToken() {
-    renderToken += 1;
-    return renderToken;
-  }
-
-  function isActiveToken(token) {
-    return !destroyed && token === renderToken;
-  }
-
-  function requestFrame(callback) {
-    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
-      return window.requestAnimationFrame(callback);
-    }
-
-    return window.setTimeout(callback, 0);
-  }
-
-  function cancelFrame(frameId) {
-    if (!frameId) return;
-
-    try {
-      if (typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
-        window.cancelAnimationFrame(frameId);
-        return;
-      }
-
-      window.clearTimeout(frameId);
-    } catch {}
-  }
-
-  /* =====================================================
-     CORE HELPERS
-  ===================================================== */
-
-  function safeLog(...args) {
-    try {
-      AppCore?.utils?.log?.("[FacturasView]", ...args);
-    } catch {}
-  }
-
-  function safeWarn(...args) {
-    try {
-      AppCore?.utils?.warn?.("[FacturasView]", ...args);
-    } catch {}
-
-    try {
-      console.warn("[FacturasView]", ...args);
-    } catch {}
-  }
-
-  function safeEmit(event = "", payload = {}) {
-    const eventName = safeText(event, "");
-
-    if (!eventName) return false;
-
-    try {
-      AppCore?.events?.emit?.(eventName, payload);
-    } catch {}
-
-    try {
-      window.dispatchEvent(
-        new CustomEvent(eventName, {
-          detail: payload,
-        })
-      );
-    } catch {}
-
-    return true;
-  }
-
-  function safeOn(event = "", handler = null) {
-    const eventName = safeText(event, "");
-
-    if (!eventName || typeof handler !== "function") {
-      return () => {};
-    }
-
-    let busAttached = false;
-    let windowAttached = false;
-    let busCleanup = null;
-
-    const windowHandler = (domEvent) => handler(domEvent);
-
-    try {
-      const maybeCleanup = AppCore?.events?.on?.(eventName, handler);
-
-      if (typeof maybeCleanup === "function") {
-        busCleanup = maybeCleanup;
-      }
-
-      busAttached = true;
-    } catch {}
-
-    try {
-      window.addEventListener(eventName, windowHandler);
-      windowAttached = true;
-    } catch {}
-
-    return () => {
-      if (busCleanup) {
-        try {
-          busCleanup();
-        } catch {}
-      } else if (busAttached) {
-        try {
-          AppCore?.events?.off?.(eventName, handler);
-        } catch {}
-      }
-
-      if (windowAttached) {
-        try {
-          window.removeEventListener(eventName, windowHandler);
-        } catch {}
-      }
-    };
-  }
-
-  function getContainer() {
-    return (
-      AppCore?.dom?.viewContainer ||
-      document.getElementById("view-container") ||
-      null
-    );
-  }
-
-  function safeErrorMessage(error = null) {
-    return safeText(
-      first(
-        error?.message,
-        error?.response?.message,
-        error?.response?.data?.message,
-        error?.data?.message,
-        "No se pudieron cargar las facturas."
-      ),
-      "No se pudieron cargar las facturas."
-    );
-  }
-
-  /* =====================================================
-     CLEANUP HELPERS
-  ===================================================== */
-
-  function cleanupCreateSuccessListener() {
-    try {
-      createSuccessCleanup?.();
-    } catch {}
-
-    createSuccessCleanup = null;
-  }
-
-  function cleanupSearchOpenListener() {
-    try {
-      searchOpenCleanup?.();
-    } catch {}
-
-    searchOpenCleanup = null;
-  }
-
-  function cleanupFilterControls() {
-    try {
-      filterControlsCleanup?.();
-    } catch {}
-
-    filterControlsCleanup = null;
-
-    try {
-      window.clearTimeout(facturasSearchTimer);
-    } catch {}
-
-    facturasSearchTimer = 0;
-  }
-
-  function cleanupBindings() {
-    cleanupFilterControls();
-
-    try {
-      bindingsCleanup?.();
-    } catch {}
-
-    bindingsCleanup = null;
-
-    cleanupCreateSuccessListener();
-    cleanupSearchOpenListener();
-
-    try {
-      AppCore?.cleanup?.run?.(SCOPE);
-    } catch {}
-  }
-
-  function cleanupModalBindings() {
-    try {
-      modalBindingsCleanup?.();
-    } catch {}
-
-    modalBindingsCleanup = null;
-  }
-
-  function cancelPendingRender() {
-    if (!pendingRenderFrame) return;
-
-    cancelFrame(pendingRenderFrame);
-    pendingRenderFrame = 0;
-  }
-
-  /* =====================================================
-     STATE BASE
-  ===================================================== */
-
   function ensureBaseState() {
     if (!state.view) state.view = {};
     if (!state.detail) state.detail = {};
@@ -751,6 +659,41 @@ export const FacturasView = (() => {
       Number.MAX_SAFE_INTEGER
     );
 
+    const filter = normalizeFacturaFilter(
+      first(
+        state.view.facturasFilter,
+        state.view.paymentFilter,
+        state.view.statusFilter,
+        state.view.activeFilter,
+        state.view.filter,
+        DEFAULT_FILTER
+      )
+    );
+
+    const search = normalizeWhitespace(
+      first(
+        state.view.facturasSearch,
+        state.view.searchQuery,
+        state.view.search,
+        state.view.query,
+        state.view.q,
+        state.view.term,
+        state.view.keyword,
+        ""
+      )
+    );
+
+    const sort = normalizeFacturaSort(
+      first(
+        state.view.facturasSort,
+        state.view.sort,
+        state.view.sortBy,
+        state.view.orderBy,
+        state.view.sortMode,
+        DEFAULT_SORT
+      )
+    );
+
     state.view.pageSize = pageSize;
     state.view.facturasPageSize = pageSize;
 
@@ -758,108 +701,65 @@ export const FacturasView = (() => {
     state.view.currentPage = page;
     state.view.facturasPage = page;
 
-    if (typeof state.view.error !== "string") {
-      state.view.error = safeText(state.view.error, "");
-    }
+    state.view.facturasFilter = filter;
+    state.view.paymentFilter = filter;
+    state.view.statusFilter = filter;
+    state.view.activeFilter = filter;
+    state.view.filter = filter;
 
-    state.view.facturasFilter = normalizeFacturaFilter(
-      first(
-        state.view.facturasFilter,
-        state.view.paymentFilter,
-        state.view.statusFilter,
-        state.view.activeFilter,
-        state.view.filter,
-        DEFAULT_FACTURAS_FILTER
-      )
+    state.view.facturasSearch = search;
+    state.view.searchQuery = search;
+    state.view.search = search;
+    state.view.query = search;
+    state.view.q = search;
+    state.view.term = search;
+    state.view.keyword = search;
+
+    state.view.facturasSort = sort;
+    state.view.sort = sort;
+    state.view.sortBy = sort;
+    state.view.orderBy = sort;
+    state.view.sortMode = sort;
+
+    state.view.error = safeText(state.view.error, "");
+  }
+
+  function getPageSize() {
+    ensureBaseState();
+
+    return clampNumber(
+      first(state.view.pageSize, state.view.facturasPageSize, PAGE_SIZE),
+      1,
+      100
     );
+  }
 
-    state.view.paymentFilter = state.view.facturasFilter;
-    state.view.statusFilter = state.view.facturasFilter;
-    state.view.activeFilter = state.view.facturasFilter;
-    state.view.filter = state.view.facturasFilter;
+  function getCurrentPage() {
+    ensureBaseState();
 
-    state.view.facturasSearch = normalizeWhitespace(
-      first(
-        state.view.facturasSearch,
-        state.view.searchQuery,
-        state.view.search,
-        state.view.query,
-        state.view.q,
-        state.view.term,
-        state.view.keyword,
-        ""
-      )
+    return clampNumber(
+      first(state.view.page, state.view.currentPage, state.view.facturasPage, 1),
+      1,
+      Number.MAX_SAFE_INTEGER
     );
-
-    state.view.searchQuery = state.view.facturasSearch;
-    state.view.search = state.view.facturasSearch;
-    state.view.query = state.view.facturasSearch;
-    state.view.q = state.view.facturasSearch;
-    state.view.term = state.view.facturasSearch;
-    state.view.keyword = state.view.facturasSearch;
-
-    state.view.facturasSort = normalizeFacturaSort(
-      first(
-        state.view.facturasSort,
-        state.view.sort,
-        state.view.sortBy,
-        state.view.orderBy,
-        state.view.sortMode,
-        DEFAULT_FACTURAS_SORT
-      )
-    );
-
-    state.view.sort = state.view.facturasSort;
-    state.view.sortBy = state.view.facturasSort;
-    state.view.orderBy = state.view.facturasSort;
-    state.view.sortMode = state.view.facturasSort;
   }
 
   function getViewFilter() {
     ensureBaseState();
 
-    return normalizeFacturaFilter(
-      first(
-        state.view.facturasFilter,
-        state.view.paymentFilter,
-        state.view.statusFilter,
-        state.view.activeFilter,
-        state.view.filter,
-        DEFAULT_FACTURAS_FILTER
-      )
-    );
+    return normalizeFacturaFilter(state.view.facturasFilter);
   }
 
   function getViewSearch() {
     ensureBaseState();
 
-    return normalizeWhitespace(
-      first(
-        state.view.facturasSearch,
-        state.view.searchQuery,
-        state.view.search,
-        state.view.query,
-        state.view.q,
-        state.view.term,
-        state.view.keyword,
-        ""
-      )
-    );
+    return normalizeWhitespace(state.view.facturasSearch);
   }
 
   function getViewSort() {
     ensureBaseState();
 
-    return normalizeFacturaSort(
-      first(
-        state.view.facturasSort,
-        state.view.sort,
-        state.view.sortBy,
-        state.view.orderBy,
-        state.view.sortMode,
-        DEFAULT_FACTURAS_SORT
-      )
-    );
+    return normalizeFacturaSort(state.view.facturasSort);
   }
 
   function resetViewPage() {
@@ -869,13 +769,23 @@ export const FacturasView = (() => {
     state.view.currentPage = 1;
     state.view.facturasPage = 1;
 
-    state.view.pageSize = getPageSize();
-    state.view.facturasPageSize = getPageSize();
-
     return 1;
   }
 
-  function setViewFilter(filter = DEFAULT_FACTURAS_FILTER) {
+  function setViewPage(page = 1) {
+    ensureBaseState();
+
+    const totalPages = getTotalPages(getItems());
+    const nextPage = clampNumber(page, 1, totalPages);
+
+    state.view.page = nextPage;
+    state.view.currentPage = nextPage;
+    state.view.facturasPage = nextPage;
+
+    return nextPage;
+  }
+
+  function setViewFilter(filter = DEFAULT_FILTER) {
     ensureBaseState();
 
     const nextFilter = normalizeFacturaFilter(filter);
@@ -921,7 +831,7 @@ export const FacturasView = (() => {
     return nextSearch;
   }
 
-  function setViewSort(sort = DEFAULT_FACTURAS_SORT) {
+  function setViewSort(sort = DEFAULT_SORT) {
     ensureBaseState();
 
     const nextSort = normalizeFacturaSort(sort);
@@ -946,11 +856,11 @@ export const FacturasView = (() => {
   function clearViewFilters() {
     ensureBaseState();
 
-    state.view.facturasFilter = DEFAULT_FACTURAS_FILTER;
-    state.view.paymentFilter = DEFAULT_FACTURAS_FILTER;
-    state.view.statusFilter = DEFAULT_FACTURAS_FILTER;
-    state.view.activeFilter = DEFAULT_FACTURAS_FILTER;
-    state.view.filter = DEFAULT_FACTURAS_FILTER;
+    state.view.facturasFilter = DEFAULT_FILTER;
+    state.view.paymentFilter = DEFAULT_FILTER;
+    state.view.statusFilter = DEFAULT_FILTER;
+    state.view.activeFilter = DEFAULT_FILTER;
+    state.view.filter = DEFAULT_FILTER;
 
     state.view.facturasSearch = "";
     state.view.searchQuery = "";
@@ -960,11 +870,11 @@ export const FacturasView = (() => {
     state.view.term = "";
     state.view.keyword = "";
 
-    state.view.facturasSort = DEFAULT_FACTURAS_SORT;
-    state.view.sort = DEFAULT_FACTURAS_SORT;
-    state.view.sortBy = DEFAULT_FACTURAS_SORT;
-    state.view.orderBy = DEFAULT_FACTURAS_SORT;
-    state.view.sortMode = DEFAULT_FACTURAS_SORT;
+    state.view.facturasSort = DEFAULT_SORT;
+    state.view.sort = DEFAULT_SORT;
+    state.view.sortBy = DEFAULT_SORT;
+    state.view.orderBy = DEFAULT_SORT;
+    state.view.sortMode = DEFAULT_SORT;
 
     resetViewPage();
 
@@ -973,678 +883,45 @@ export const FacturasView = (() => {
     return true;
   }
 
-  function getPaymentStatusKeyForView(item = {}) {
-    const raw = safeObject(item?.raw);
+  /* =====================================================
+     FACTURA IDENTITY / DOMAIN HELPERS
+  ===================================================== */
 
-    const key = normalizeKey(
-      first(
-        item.estadoPago,
-        item.paymentStatus,
-        item.payment?.status,
-        item.billing?.paymentStatus,
+  function sameFacturaIdentity(a = "", b = "") {
+    const left = normalizeText(a);
+    const right = normalizeText(b);
 
-        raw.estadoPago,
-        raw.paymentStatus,
-        raw.payment?.status,
-        raw.billing?.paymentStatus
-      )
-    );
-
-    if (
-      [
-        "paid",
-        "pagada",
-        "pagado",
-        "cobrada",
-        "cobrado",
-        "abonada",
-        "abonado",
-      ].includes(key)
-    ) {
-      return "paid";
-    }
-
-    if (
-      [
-        "pending",
-        "pendiente",
-        "unpaid",
-        "sin_pagar",
-      ].includes(key)
-    ) {
-      return "pending";
-    }
-
-    if (
-      [
-        "partial",
-        "parcial",
-        "pago_parcial",
-      ].includes(key)
-    ) {
-      return "partial";
-    }
-
-    if (
-      [
-        "overdue",
-        "vencida",
-        "vencido",
-      ].includes(key)
-    ) {
-      return "overdue";
-    }
-
-    if (
-      [
-        "cancelled",
-        "canceled",
-        "cancelada",
-        "cancelado",
-        "anulada",
-        "anulado",
-      ].includes(key)
-    ) {
-      return "cancelled";
-    }
-
-    if (["draft", "borrador"].includes(key)) {
-      return "draft";
-    }
-
-    return "pending";
+    return Boolean(left && right && left === right);
   }
 
-  function hasPdfForView(item = {}) {
-    const raw = safeObject(item?.raw);
-
-    if (
-      Boolean(
-        first(
-          item.pdfAvailable,
-          item.hasPdf,
-          item.document?.available,
-          item.meta?.hasPdf,
-          item.meta?.hasBlob,
-
-          raw.pdfAvailable,
-          raw.hasPdf,
-          raw.document?.available,
-          raw.meta?.hasPdf,
-          raw.meta?.hasBlob
-        )
-      )
-    ) {
-      return true;
+  function getValueFromMaybeObject(value = {}) {
+    if (typeof value === "string" || typeof value === "number") {
+      return safeText(value, "");
     }
 
-    if (
-      first(
-        item.blobPath,
-        item.blobName,
-        item.pdfPath,
-        item.pdfUrl,
-        item.downloadUrl,
-        item.viewUrl,
-        item.pdf,
-        item.document?.blobPath,
-        item.document?.fileName,
-
-        raw.blobPath,
-        raw.blobName,
-        raw.pdfPath,
-        raw.pdfUrl,
-        raw.downloadUrl,
-        raw.viewUrl,
-        raw.pdf,
-        raw.document?.blobPath,
-        raw.document?.fileName
-      )
-    ) {
-      return true;
-    }
-
-    const files = safeArray(
-      first(
-        item.attachments,
-        item.files,
-        item.adjuntos,
-        raw.attachments,
-        raw.files,
-        raw.adjuntos,
-        []
-      )
-    );
-
-    return files.some((file) => {
-      const value = safeObject(file);
-
-      const type = normalizeText(
-        first(value.contentType, value.mimeType, value.mimetype, value.type)
-      );
-
-      const name = normalizeText(
-        first(value.name, value.filename, value.fileName, value.url)
-      );
-
-      return type.includes("pdf") || name.endsWith(".pdf");
-    });
-  }
-
-  function isFacturaSentForView(item = {}) {
-    const raw = safeObject(item?.raw);
-
-    return Boolean(
-      first(
-        item.fechaEnvio,
-        item.sentAt,
-        item.mailSentAt,
-        item.email?.sent,
-        item.email?.sentAt,
-        item.delivery?.lastSentAt,
-        item.lifecycle?.sentAt,
-        item.meta?.lastSentAt,
-        item.meta?.isSent,
-        item.meta?.hasEmailSent,
-
-        raw.fechaEnvio,
-        raw.sentAt,
-        raw.mailSentAt,
-        raw.email?.sent,
-        raw.email?.sentAt,
-        raw.delivery?.lastSentAt,
-        raw.lifecycle?.sentAt,
-        raw.meta?.lastSentAt,
-        raw.meta?.isSent,
-        raw.meta?.hasEmailSent
-      )
-    );
-  }
-
-  function getCompanyNameForView(item = {}) {
-    const raw = safeObject(item?.raw);
+    const source = safeObject(value);
 
     return safeText(
       first(
-        item.clienteEmpresa,
-        item.empresa,
-        item.company,
-        item.companyName,
-        item.razonSocial,
-        item.cliente?.razonSocial,
-        item.cliente?.companyName,
-        item.cliente?.empresa,
-        item.cliente?.company,
-        item.clienteSnapshot?.razonSocial,
-        item.clienteSnapshot?.companyName,
-        item.clienteSnapshot?.empresa,
-        item.client?.razonSocial,
-        item.client?.companyName,
-        item.client?.empresa,
-        item.client?.company,
-        item.customer?.razonSocial,
-        item.customer?.companyName,
-        item.customer?.empresa,
-        item.customer?.company,
-
-        raw.clienteEmpresa,
-        raw.empresa,
-        raw.company,
-        raw.companyName,
-        raw.razonSocial,
-        raw.cliente?.razonSocial,
-        raw.cliente?.companyName,
-        raw.cliente?.empresa,
-        raw.cliente?.company,
-        raw.clienteSnapshot?.razonSocial,
-        raw.clienteSnapshot?.companyName,
-        raw.clienteSnapshot?.empresa,
-        raw.client?.razonSocial,
-        raw.client?.companyName,
-        raw.client?.empresa,
-        raw.client?.company,
-        raw.customer?.razonSocial,
-        raw.customer?.companyName,
-        raw.customer?.empresa,
-        raw.customer?.company
-      ),
-      ""
-    );
-  }
-
-  function getContactNameForView(item = {}) {
-    const raw = safeObject(item?.raw);
-
-    return safeText(
-      first(
-        item.clienteNombre,
-        item.nombreContacto,
-        item.contactName,
-        item.clientName,
-        item.cliente?.nombreContacto,
-        item.cliente?.nombre,
-        item.cliente?.name,
-        item.cliente?.displayName,
-        item.clienteSnapshot?.nombreContacto,
-        item.client?.nombreContacto,
-        item.client?.name,
-        item.customer?.nombreContacto,
-        item.customer?.name,
-        item.name,
-        item.nombre,
-
-        raw.clienteNombre,
-        raw.nombreContacto,
-        raw.contactName,
-        raw.clientName,
-        raw.cliente?.nombreContacto,
-        raw.cliente?.nombre,
-        raw.cliente?.name,
-        raw.cliente?.displayName,
-        raw.clienteSnapshot?.nombreContacto,
-        raw.client?.nombreContacto,
-        raw.client?.name,
-        raw.customer?.nombreContacto,
-        raw.customer?.name,
-        raw.name,
-        raw.nombre
-      ),
-      ""
-    );
-  }
-
-  function getClientNameForView(item = {}) {
-    return safeText(
-      first(
-        getCompanyNameForView(item),
-        getContactNameForView(item)
-      ),
-      ""
-    );
-  }
-
-  function getClientEmailForView(item = {}) {
-    const raw = safeObject(item?.raw);
-
-    return safeText(
-      first(
-        item.clienteEmail,
-        item.emailCliente,
-        item.clientEmail,
-        item.email,
-        item.cliente?.email,
-        item.cliente?.emailLower,
-        item.clienteSnapshot?.email,
-        item.client?.email,
-        item.customer?.email,
-
-        raw.clienteEmail,
-        raw.emailCliente,
-        raw.clientEmail,
-        raw.email,
-        raw.cliente?.email,
-        raw.cliente?.emailLower,
-        raw.clienteSnapshot?.email,
-        raw.client?.email,
-        raw.customer?.email
-      ),
-      ""
-    );
-  }
-
-  function getFacturaAmountForView(item = {}) {
-    const raw = safeObject(item?.raw);
-
-    return first(
-      item.total,
-      item.amount,
-      item.importe,
-      item.importeTotal,
-      item.totalFactura,
-      item.facturaTotal,
-      item.facturaImporte,
-      item.importeFactura,
-      item.invoiceAmount,
-      item.totales?.total,
-
-      raw.total,
-      raw.amount,
-      raw.importe,
-      raw.importeTotal,
-      raw.totalFactura,
-      raw.facturaTotal,
-      raw.facturaImporte,
-      raw.importeFactura,
-      raw.invoiceAmount,
-      raw.totales?.total
-    );
-  }
-
-  function getFormaPagoForView(item = {}) {
-    const raw = safeObject(item?.raw);
-
-    return safeText(
-      first(
-        item.formaPago,
-        item.metodoPago,
-        item.paymentMethod,
-        item.payment?.methodLabel,
-        item.payment?.method,
-
-        raw.formaPago,
-        raw.metodoPago,
-        raw.paymentMethod,
-        raw.payment?.methodLabel,
-        raw.payment?.method
-      ),
-      ""
-    );
-  }
-
-  function getFacturaDisplayId(item = {}) {
-    if (typeof item === "string" || typeof item === "number") {
-      return safeText(item, "");
-    }
-
-    const source = safeObject(item);
-    const raw = safeObject(source.raw);
-
-    return safeText(
-      first(
-        source.numeroFacturaLegal,
-        source.numeroFactura,
-        source.legalInvoiceNumber,
-        source.numero,
-        source.invoiceNumber,
-        source.code,
         source.facturaId,
         source.invoiceId,
-        source.numeroFacturaSistema,
-        source.systemInvoiceNumber,
         source.id,
-
-        raw.numeroFacturaLegal,
-        raw.numeroFactura,
-        raw.legalInvoiceNumber,
-        raw.numero,
-        raw.invoiceNumber,
-        raw.code,
-        raw.facturaId,
-        raw.invoiceId,
-        raw.numeroFacturaSistema,
-        raw.systemInvoiceNumber,
-        raw.id
-      ),
-      ""
-    );
-  }
-
-  function getFacturaSystemDisplayId(item = {}) {
-    const source = safeObject(item);
-    const raw = safeObject(source.raw);
-
-    return safeText(
-      first(
+        source._id,
+        source.entityId,
+        source.numero,
+        source.numeroFactura,
+        source.numeroFacturaLegal,
         source.numeroFacturaSistema,
+        source.legalInvoiceNumber,
         source.systemInvoiceNumber,
-        raw.numeroFacturaSistema,
-        raw.systemInvoiceNumber
+        source.invoiceNumber,
+        source.value,
+        source.key,
+        source.code
       ),
       ""
     );
   }
-
-  function getFacturaEmissionDateForView(item = {}) {
-    const source = safeObject(item);
-    const raw = safeObject(source.raw);
-
-    return first(
-      source.fechaFactura,
-      source.fechaFacturaISO,
-      source.lifecycle?.issuedAt,
-      source.issueDate,
-      source.issuedAt,
-      source.fecha,
-
-      raw.fechaFactura,
-      raw.fechaFacturaISO,
-      raw.lifecycle?.issuedAt,
-      raw.issueDate,
-      raw.issuedAt,
-      raw.fecha,
-
-      source.createdAt,
-      source.lifecycle?.createdAt,
-      source.fechaCreacion,
-
-      raw.createdAt,
-      raw.lifecycle?.createdAt,
-      raw.fechaCreacion
-    );
-  }
-
-  function getFacturaUpdatedDateForView(item = {}) {
-    const source = safeObject(item);
-    const raw = safeObject(source.raw);
-
-    return first(
-      source.updatedAt,
-      source.lifecycle?.updatedAt,
-      source.lastActivityAt,
-      source.lifecycle?.lastActivityAt,
-      source.fechaEnvio,
-      source.sentAt,
-      source.mailSentAt,
-      source.delivery?.lastSentAt,
-
-      raw.updatedAt,
-      raw.lifecycle?.updatedAt,
-      raw.lastActivityAt,
-      raw.lifecycle?.lastActivityAt,
-      raw.fechaEnvio,
-      raw.sentAt,
-      raw.mailSentAt,
-      raw.delivery?.lastSentAt
-    );
-  }
-
-  function getFacturaDateSortValue(item = {}) {
-    const source = safeObject(item);
-    const raw = safeObject(source.raw);
-
-    return (
-      toTimestamp(getFacturaEmissionDateForView(source)) ||
-      toTimestamp(getFacturaUpdatedDateForView(source)) ||
-      safeNumber(source.meta?.updatedAtMs, 0) ||
-      safeNumber(source.meta?.timestampMs, 0) ||
-      safeNumber(raw.meta?.updatedAtMs, 0) ||
-      safeNumber(raw.meta?.timestampMs, 0) ||
-      toTimestamp(raw._ts) ||
-      0
-    );
-  }
-
-  function compareFacturasByDateDesc(a = {}, b = {}) {
-    const diff = getFacturaDateSortValue(b) - getFacturaDateSortValue(a);
-
-    if (diff !== 0) return diff;
-
-    return safeText(getFacturaDisplayId(b), "").localeCompare(
-      safeText(getFacturaDisplayId(a), ""),
-      "es",
-      {
-        numeric: true,
-        sensitivity: "base",
-      }
-    );
-  }
-
-  function compareFacturasByInvoiceDesc(a = {}, b = {}) {
-    return safeText(getFacturaDisplayId(b), "").localeCompare(
-      safeText(getFacturaDisplayId(a), ""),
-      "es",
-      {
-        numeric: true,
-        sensitivity: "base",
-      }
-    );
-  }
-
-  function itemMatchesFacturaFilterForView(item = {}, filter = DEFAULT_FACTURAS_FILTER) {
-    const key = normalizeFacturaFilter(filter);
-    const paymentKey = getPaymentStatusKeyForView(item);
-
-    if (key === "all") return true;
-
-    if (key === "pending") {
-      return ["pending", "partial", "draft"].includes(paymentKey);
-    }
-
-    if (key === "paid") {
-      return paymentKey === "paid";
-    }
-
-    if (key === "overdue") {
-      return paymentKey === "overdue";
-    }
-
-    return true;
-  }
-
-  function getFacturaSearchHaystackForView(item = {}) {
-    const raw = safeObject(item?.raw);
-    const identities = getFacturaIdentityList(item);
-    const incidenciaId = getRelatedIncidenciaId(item);
-    const amount = getFacturaAmountForView(item);
-
-    return [
-      ...identities,
-
-      getFacturaDisplayId(item),
-      getFacturaSystemDisplayId(item),
-
-      getCompanyNameForView(item),
-      getContactNameForView(item),
-      getClientNameForView(item),
-      getClientEmailForView(item),
-      getFormaPagoForView(item),
-
-      getPaymentStatusKeyForView(item),
-      hasPdfForView(item) ? "pdf con pdf documento" : "",
-      isFacturaSentForView(item) ? "enviada enviada email sent" : "",
-
-      amount,
-      Number.isFinite(safeNumber(amount, NaN))
-        ? String(safeNumber(amount, 0)).replace(".", ",")
-        : "",
-
-      incidenciaId,
-
-      item.clienteId,
-      item.clientId,
-      item.customerId,
-      item.userId,
-      item.uid,
-      item.blobPath,
-      item.blobName,
-      item.pdfPath,
-
-      raw.clienteId,
-      raw.clientId,
-      raw.customerId,
-      raw.userId,
-      raw.uid,
-      raw.blobPath,
-      raw.blobName,
-      raw.pdfPath,
-    ]
-      .map((value) => normalizeText(value))
-      .filter(Boolean)
-      .join(" · ");
-  }
-
-  function itemMatchesFacturaSearchForView(item = {}, query = "") {
-    const normalizedQuery = normalizeText(query);
-
-    if (!normalizedQuery) return true;
-
-    const terms = normalizedQuery.split(" ").filter(Boolean);
-    const haystack = getFacturaSearchHaystackForView(item);
-
-    return terms.every((term) => haystack.includes(term));
-  }
-
-  function getFilteredFacturasItems(items = []) {
-    const rows = safeArray(items);
-    const filter = getViewFilter();
-    const search = getViewSearch();
-    const sort = getViewSort();
-
-    const filtered = rows.filter((item) => {
-      return (
-        itemMatchesFacturaFilterForView(item, filter) &&
-        itemMatchesFacturaSearchForView(item, search)
-      );
-    });
-
-    if (sort === "invoice_desc") {
-      return [...filtered].sort(compareFacturasByInvoiceDesc);
-    }
-
-    return [...filtered].sort(compareFacturasByDateDesc);
-  }
-
-  /* =====================================================
-     AUTH / PERMISSIONS
-  ===================================================== */
-
-  function getCurrentRole() {
-    return normalizeKey(
-      first(
-        AppCore?.state?.user?.role,
-        AppCore?.state?.user?.rol,
-        AppCore?.state?.role,
-        AppCore?.state?.rol,
-        AppCore?.auth?.getRole?.(),
-        AppCore?.Auth?.getRole?.()
-      )
-    );
-  }
-
-  function isAdminUser() {
-    return ADMIN_ROLES.includes(getCurrentRole());
-  }
-
-  function canCreateFactura() {
-    if (isAdminUser()) {
-      return true;
-    }
-
-    const permissions = [
-      ...normalizeTokenList(AppCore?.state?.permissions),
-      ...normalizeTokenList(AppCore?.state?.user?.permissions),
-      ...normalizeTokenList(AppCore?.auth?.getPermissions?.()),
-      ...normalizeTokenList(AppCore?.Auth?.getPermissions?.()),
-    ];
-
-    return permissions.some((permission) =>
-      CREATE_PERMISSIONS.includes(permission)
-    );
-  }
-
-  function getTemplateRoleForCreate() {
-    /*
-       Compatibilidad con templates que calculan el botón "Crear factura"
-       únicamente desde role. Si hay permiso explícito de creación,
-       se fuerza un role visual equivalente sin alterar AppCore.state.
-    */
-    if (canCreateFactura()) return "admin";
-    return getCurrentRole();
-  }
-
-  /* =====================================================
-     FACTURA ID / SEARCH HELPERS
-  ===================================================== */
 
   function getStableFacturaId(item = {}) {
     if (typeof item === "string" || typeof item === "number") {
@@ -1707,6 +984,59 @@ export const FacturasView = (() => {
     );
   }
 
+  function getFacturaDisplayId(item = {}) {
+    if (typeof item === "string" || typeof item === "number") {
+      return safeText(item, "");
+    }
+
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    return safeText(
+      first(
+        source.numeroFacturaLegal,
+        source.numeroFactura,
+        source.legalInvoiceNumber,
+        source.numero,
+        source.invoiceNumber,
+        source.code,
+        source.facturaId,
+        source.invoiceId,
+        source.numeroFacturaSistema,
+        source.systemInvoiceNumber,
+        source.id,
+
+        raw.numeroFacturaLegal,
+        raw.numeroFactura,
+        raw.legalInvoiceNumber,
+        raw.numero,
+        raw.invoiceNumber,
+        raw.code,
+        raw.facturaId,
+        raw.invoiceId,
+        raw.numeroFacturaSistema,
+        raw.systemInvoiceNumber,
+        raw.id
+      ),
+      ""
+    );
+  }
+
+  function getFacturaSystemDisplayId(item = {}) {
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    return safeText(
+      first(
+        source.numeroFacturaSistema,
+        source.systemInvoiceNumber,
+        raw.numeroFacturaSistema,
+        raw.systemInvoiceNumber
+      ),
+      ""
+    );
+  }
+
   function getFacturaIdentityList(item = {}) {
     if (typeof item === "string" || typeof item === "number") {
       return [safeText(item, "")].filter(Boolean);
@@ -1746,204 +1076,78 @@ export const FacturasView = (() => {
       .filter(Boolean);
   }
 
-  function getFacturaIdFromSearchPayload(payload = {}) {
-    if (typeof payload === "string" || typeof payload === "number") {
-      return safeText(payload, "");
-    }
+  function pickTicketIdFromArray(value = []) {
+    const items = safeArray(value);
 
-    const source = safeObject(payload);
-    const item = safeObject(source.item);
-    const detail = safeObject(source.detail);
-    const factura = safeObject(source.factura);
-    const invoice = safeObject(source.invoice);
-    const raw = safeObject(first(source.raw, item.raw, factura.raw, invoice.raw));
-
-    const direct = safeText(
-      first(
-        source.facturaId,
-        source.invoiceId,
-        source.id,
-        source._id,
-        source.entityId,
-        source.value,
-        source.key,
-        source.code,
-
-        detail.facturaId,
-        detail.invoiceId,
-        detail.id,
-        detail._id,
-        detail.numero,
-        detail.numeroFactura,
-        detail.numeroFacturaLegal,
-        detail.numeroFacturaSistema,
-
-        factura.facturaId,
-        factura.invoiceId,
-        factura.id,
-        factura._id,
-        factura.numero,
-        factura.numeroFactura,
-        factura.numeroFacturaLegal,
-        factura.numeroFacturaSistema,
-
-        invoice.facturaId,
-        invoice.invoiceId,
-        invoice.id,
-        invoice._id,
-        invoice.numero,
-        invoice.numeroFactura,
-        invoice.numeroFacturaLegal,
-        invoice.numeroFacturaSistema,
-
-        item.entityId,
-        item.facturaId,
-        item.invoiceId,
-        item.id,
-        item._id,
-        item.value,
-        item.key,
-        item.code,
-
-        raw.facturaId,
-        raw.invoiceId,
-        raw.id,
-        raw._id,
-        raw.numero,
-        raw.numeroFactura,
-        raw.numeroFacturaLegal,
-        raw.numeroFacturaSistema
-      ),
-      ""
-    );
-
-    if (direct) return direct;
-
-    try {
-      const href = safeText(first(source.href, source.url, item.href, item.url), "");
-
-      if (href) {
-        const url = new URL(href, window.location.origin);
-        for (const key of FACTURA_QUERY_KEYS) {
-          const value = safeText(url.searchParams.get(key), "");
-          if (value) return value;
-        }
+    for (const item of items) {
+      if (typeof item === "string" && item.trim()) {
+        return item.trim();
       }
-    } catch {}
+
+      if (!item || typeof item !== "object") continue;
+
+      const candidate = first(
+        item.ticketId,
+        item.incidenciaId,
+        item.id,
+        item.code,
+        item.numero,
+        item.relatedTicketId,
+        item.relatedIncidentId,
+        item.supportTicketId,
+        item.caseId,
+
+        item.ticket?.ticketId,
+        item.ticket?.incidenciaId,
+        item.ticket?.id,
+
+        item.incidencia?.ticketId,
+        item.incidencia?.incidenciaId,
+        item.incidencia?.id,
+
+        item.linkedTicket?.ticketId,
+        item.linkedTicket?.incidenciaId,
+        item.linkedTicket?.id
+      );
+
+      if (candidate) return safeText(candidate, "");
+    }
 
     return "";
   }
 
-  function getFacturaIdFromLocation() {
-    try {
-      const params = new URLSearchParams(window.location.search || "");
-
-      for (const key of FACTURA_QUERY_KEYS) {
-        const value = safeText(params.get(key), "");
-        if (value) return value;
-      }
-
-      return "";
-    } catch {
-      return "";
-    }
-  }
-
-  function clearFacturaIdFromLocation() {
-    try {
-      const url = new URL(window.location.href);
-      const params = url.searchParams;
-
-      FACTURA_QUERY_KEYS.forEach((key) => {
-        params.delete(key);
-      });
-
-      const nextSearch = params.toString();
-
-      const nextUrl = [
-        url.pathname,
-        nextSearch ? `?${nextSearch}` : "",
-        url.hash || "",
-      ].join("");
-
-      window.history.replaceState(
-        window.history.state || {},
-        "",
-        nextUrl
-      );
-
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function extractExternalOpenPayload(eventOrPayload = {}) {
-    if (typeof eventOrPayload === "string" || typeof eventOrPayload === "number") {
-      return {
-        facturaId: safeText(eventOrPayload, ""),
-      };
-    }
-
-    const value = eventOrPayload;
-
-    if (value?.detail?.payload) return safeObject(value.detail.payload);
-
-    if (value?.detail?.detail || value?.detail?.factura || value?.detail?.item) {
-      return safeObject(value.detail);
-    }
-
-    if (value?.detail && typeof value.detail === "object") {
-      return safeObject(value.detail);
-    }
-
-    return safeObject(value);
-  }
-
-  /* =====================================================
-     INCIDENCIA RELATION HELPERS
-  ===================================================== */
-
   function getRelatedIncidenciaId(item = {}) {
     const source = safeObject(item);
     const raw = safeObject(source.raw);
-
-    const incidencia = safeObject(first(source.incidencia, raw.incidencia));
-    const ticket = safeObject(first(source.ticket, raw.ticket));
-    const linkedTicket = safeObject(first(source.linkedTicket, raw.linkedTicket));
-    const relatedTicket = safeObject(first(source.relatedTicket, raw.relatedTicket));
-    const relatedIncident = safeObject(first(source.relatedIncident, raw.relatedIncident));
-    const relations = safeObject(first(source.relations, raw.relations));
-    const relationTicket = safeObject(relations.ticket);
 
     return safeText(
       first(
         source.ticketId,
         source.incidenciaId,
 
-        incidencia.ticketId,
-        incidencia.id,
-        incidencia.incidenciaId,
+        source.incidencia?.ticketId,
+        source.incidencia?.id,
+        source.incidencia?.incidenciaId,
 
-        ticket.ticketId,
-        ticket.id,
-        ticket.incidenciaId,
+        source.ticket?.ticketId,
+        source.ticket?.id,
+        source.ticket?.incidenciaId,
 
-        linkedTicket.ticketId,
-        linkedTicket.id,
-        linkedTicket.incidenciaId,
+        source.linkedTicket?.ticketId,
+        source.linkedTicket?.id,
+        source.linkedTicket?.incidenciaId,
 
-        relatedTicket.ticketId,
-        relatedTicket.id,
-        relatedTicket.incidenciaId,
+        source.relatedTicket?.ticketId,
+        source.relatedTicket?.id,
+        source.relatedTicket?.incidenciaId,
 
-        relatedIncident.ticketId,
-        relatedIncident.id,
-        relatedIncident.incidenciaId,
+        source.relatedIncident?.ticketId,
+        source.relatedIncident?.id,
+        source.relatedIncident?.incidenciaId,
 
-        relationTicket.ticketId,
-        relationTicket.id,
-        relationTicket.incidenciaId,
+        source.relations?.ticket?.ticketId,
+        source.relations?.ticket?.id,
+        source.relations?.ticket?.incidenciaId,
 
         source.relatedTicketId,
         source.relatedIncidentId,
@@ -2022,6 +1226,860 @@ export const FacturasView = (() => {
     );
   }
 
+  /* =====================================================
+     LIST FILTER / SEARCH / SORT FOR VIEW
+  ===================================================== */
+
+  function getPaymentStatusKey(item = {}) {
+    const raw = safeObject(item?.raw);
+
+    const key = normalizeKey(
+      first(
+        item.estadoPago,
+        item.paymentStatus,
+        item.payment?.status,
+        item.billing?.paymentStatus,
+        raw.estadoPago,
+        raw.paymentStatus,
+        raw.payment?.status,
+        raw.billing?.paymentStatus
+      )
+    );
+
+    if (
+      [
+        "paid",
+        "pagada",
+        "pagado",
+        "cobrada",
+        "cobrado",
+        "abonada",
+        "abonado",
+      ].includes(key)
+    ) {
+      return "paid";
+    }
+
+    if (["pending", "pendiente", "unpaid", "sin_pagar"].includes(key)) {
+      return "pending";
+    }
+
+    if (["partial", "parcial", "pago_parcial"].includes(key)) {
+      return "partial";
+    }
+
+    if (["overdue", "vencida", "vencido"].includes(key)) {
+      return "overdue";
+    }
+
+    if (
+      [
+        "cancelled",
+        "canceled",
+        "cancelada",
+        "cancelado",
+        "anulada",
+        "anulado",
+      ].includes(key)
+    ) {
+      return "cancelled";
+    }
+
+    if (["draft", "borrador"].includes(key)) {
+      return "draft";
+    }
+
+    return "pending";
+  }
+
+  function getFacturaEmissionDate(item = {}) {
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    return first(
+      source.fechaFactura,
+      source.fechaFacturaISO,
+      source.lifecycle?.issuedAt,
+      source.issueDate,
+      source.issuedAt,
+      source.fecha,
+
+      raw.fechaFactura,
+      raw.fechaFacturaISO,
+      raw.lifecycle?.issuedAt,
+      raw.issueDate,
+      raw.issuedAt,
+      raw.fecha,
+
+      source.createdAt,
+      source.lifecycle?.createdAt,
+      source.fechaCreacion,
+
+      raw.createdAt,
+      raw.lifecycle?.createdAt,
+      raw.fechaCreacion
+    );
+  }
+
+  function getFacturaUpdatedDate(item = {}) {
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    return first(
+      source.updatedAt,
+      source.lifecycle?.updatedAt,
+      source.lastActivityAt,
+      source.lifecycle?.lastActivityAt,
+      source.fechaEnvio,
+      source.sentAt,
+      source.mailSentAt,
+      source.delivery?.lastSentAt,
+
+      raw.updatedAt,
+      raw.lifecycle?.updatedAt,
+      raw.lastActivityAt,
+      raw.lifecycle?.lastActivityAt,
+      raw.fechaEnvio,
+      raw.sentAt,
+      raw.mailSentAt,
+      raw.delivery?.lastSentAt
+    );
+  }
+
+  function getFacturaDateSortValue(item = {}) {
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    return (
+      toTimestamp(getFacturaEmissionDate(source)) ||
+      toTimestamp(getFacturaUpdatedDate(source)) ||
+      safeNumber(source.meta?.updatedAtMs, 0) ||
+      safeNumber(source.meta?.timestampMs, 0) ||
+      safeNumber(raw.meta?.updatedAtMs, 0) ||
+      safeNumber(raw.meta?.timestampMs, 0) ||
+      toTimestamp(raw._ts) ||
+      0
+    );
+  }
+
+  function compareByDateDesc(a = {}, b = {}) {
+    const diff = getFacturaDateSortValue(b) - getFacturaDateSortValue(a);
+
+    if (diff !== 0) return diff;
+
+    return safeText(getFacturaDisplayId(b), "").localeCompare(
+      safeText(getFacturaDisplayId(a), ""),
+      "es",
+      {
+        numeric: true,
+        sensitivity: "base",
+      }
+    );
+  }
+
+  function compareByInvoiceDesc(a = {}, b = {}) {
+    return safeText(getFacturaDisplayId(b), "").localeCompare(
+      safeText(getFacturaDisplayId(a), ""),
+      "es",
+      {
+        numeric: true,
+        sensitivity: "base",
+      }
+    );
+  }
+
+  function getCompanyName(item = {}) {
+    const raw = safeObject(item?.raw);
+
+    return safeText(
+      first(
+        item.clienteEmpresa,
+        item.empresa,
+        item.company,
+        item.companyName,
+        item.razonSocial,
+        item.cliente?.razonSocial,
+        item.cliente?.companyName,
+        item.cliente?.empresa,
+        item.cliente?.company,
+        item.clienteSnapshot?.razonSocial,
+        item.clienteSnapshot?.companyName,
+        item.clienteSnapshot?.empresa,
+        item.client?.razonSocial,
+        item.client?.companyName,
+        item.client?.empresa,
+        item.client?.company,
+        item.customer?.razonSocial,
+        item.customer?.companyName,
+        item.customer?.empresa,
+        item.customer?.company,
+
+        raw.clienteEmpresa,
+        raw.empresa,
+        raw.company,
+        raw.companyName,
+        raw.razonSocial,
+        raw.cliente?.razonSocial,
+        raw.cliente?.companyName,
+        raw.cliente?.empresa,
+        raw.cliente?.company,
+        raw.clienteSnapshot?.razonSocial,
+        raw.clienteSnapshot?.companyName,
+        raw.clienteSnapshot?.empresa,
+        raw.client?.razonSocial,
+        raw.client?.companyName,
+        raw.client?.empresa,
+        raw.client?.company,
+        raw.customer?.razonSocial,
+        raw.customer?.companyName,
+        raw.customer?.empresa,
+        raw.customer?.company
+      ),
+      ""
+    );
+  }
+
+  function getContactName(item = {}) {
+    const raw = safeObject(item?.raw);
+
+    return safeText(
+      first(
+        item.clienteNombre,
+        item.nombreContacto,
+        item.contactName,
+        item.clientName,
+        item.cliente?.nombreContacto,
+        item.cliente?.nombre,
+        item.cliente?.name,
+        item.cliente?.displayName,
+        item.clienteSnapshot?.nombreContacto,
+        item.client?.nombreContacto,
+        item.client?.name,
+        item.customer?.nombreContacto,
+        item.customer?.name,
+        item.name,
+        item.nombre,
+
+        raw.clienteNombre,
+        raw.nombreContacto,
+        raw.contactName,
+        raw.clientName,
+        raw.cliente?.nombreContacto,
+        raw.cliente?.nombre,
+        raw.cliente?.name,
+        raw.cliente?.displayName,
+        raw.clienteSnapshot?.nombreContacto,
+        raw.client?.nombreContacto,
+        raw.client?.name,
+        raw.customer?.nombreContacto,
+        raw.customer?.name,
+        raw.name,
+        raw.nombre
+      ),
+      ""
+    );
+  }
+
+  function getClientName(item = {}) {
+    return safeText(first(getCompanyName(item), getContactName(item)), "");
+  }
+
+  function getClientEmail(item = {}) {
+    const raw = safeObject(item?.raw);
+
+    return safeText(
+      first(
+        item.clienteEmail,
+        item.emailCliente,
+        item.clientEmail,
+        item.email,
+        item.cliente?.email,
+        item.cliente?.emailLower,
+        item.clienteSnapshot?.email,
+        item.client?.email,
+        item.customer?.email,
+
+        raw.clienteEmail,
+        raw.emailCliente,
+        raw.clientEmail,
+        raw.email,
+        raw.cliente?.email,
+        raw.cliente?.emailLower,
+        raw.clienteSnapshot?.email,
+        raw.client?.email,
+        raw.customer?.email
+      ),
+      ""
+    );
+  }
+
+  function getFacturaAmount(item = {}) {
+    const raw = safeObject(item?.raw);
+
+    return first(
+      item.total,
+      item.amount,
+      item.importe,
+      item.importeTotal,
+      item.totalFactura,
+      item.facturaTotal,
+      item.facturaImporte,
+      item.importeFactura,
+      item.invoiceAmount,
+      item.totales?.total,
+
+      raw.total,
+      raw.amount,
+      raw.importe,
+      raw.importeTotal,
+      raw.totalFactura,
+      raw.facturaTotal,
+      raw.facturaImporte,
+      raw.importeFactura,
+      raw.invoiceAmount,
+      raw.totales?.total
+    );
+  }
+
+  function getFormaPago(item = {}) {
+    const raw = safeObject(item?.raw);
+
+    return safeText(
+      first(
+        item.formaPago,
+        item.metodoPago,
+        item.paymentMethod,
+        item.payment?.methodLabel,
+        item.payment?.method,
+
+        raw.formaPago,
+        raw.metodoPago,
+        raw.paymentMethod,
+        raw.payment?.methodLabel,
+        raw.payment?.method
+      ),
+      ""
+    );
+  }
+
+  function hasPdf(item = {}) {
+    const raw = safeObject(item?.raw);
+
+    if (
+      Boolean(
+        first(
+          item.pdfAvailable,
+          item.hasPdf,
+          item.document?.available,
+          item.meta?.hasPdf,
+          item.meta?.hasBlob,
+
+          raw.pdfAvailable,
+          raw.hasPdf,
+          raw.document?.available,
+          raw.meta?.hasPdf,
+          raw.meta?.hasBlob
+        )
+      )
+    ) {
+      return true;
+    }
+
+    if (
+      first(
+        item.blobPath,
+        item.blobName,
+        item.pdfPath,
+        item.pdfUrl,
+        item.downloadUrl,
+        item.viewUrl,
+        item.pdf,
+        item.document?.blobPath,
+        item.document?.fileName,
+
+        raw.blobPath,
+        raw.blobName,
+        raw.pdfPath,
+        raw.pdfUrl,
+        raw.downloadUrl,
+        raw.viewUrl,
+        raw.pdf,
+        raw.document?.blobPath,
+        raw.document?.fileName
+      )
+    ) {
+      return true;
+    }
+
+    const files = safeArray(
+      first(
+        item.attachments,
+        item.files,
+        item.adjuntos,
+        raw.attachments,
+        raw.files,
+        raw.adjuntos,
+        []
+      )
+    );
+
+    return files.some((file) => {
+      const source = safeObject(file);
+
+      const type = normalizeText(
+        first(source.contentType, source.mimeType, source.mimetype, source.type)
+      );
+
+      const name = normalizeText(
+        first(source.name, source.filename, source.fileName, source.url)
+      );
+
+      return type.includes("pdf") || name.endsWith(".pdf");
+    });
+  }
+
+  function isFacturaSent(item = {}) {
+    const raw = safeObject(item?.raw);
+
+    return Boolean(
+      first(
+        item.fechaEnvio,
+        item.sentAt,
+        item.mailSentAt,
+        item.email?.sent,
+        item.email?.sentAt,
+        item.delivery?.lastSentAt,
+        item.lifecycle?.sentAt,
+        item.meta?.lastSentAt,
+        item.meta?.isSent,
+        item.meta?.hasEmailSent,
+
+        raw.fechaEnvio,
+        raw.sentAt,
+        raw.mailSentAt,
+        raw.email?.sent,
+        raw.email?.sentAt,
+        raw.delivery?.lastSentAt,
+        raw.lifecycle?.sentAt,
+        raw.meta?.lastSentAt,
+        raw.meta?.isSent,
+        raw.meta?.hasEmailSent
+      )
+    );
+  }
+
+  function itemMatchesFilter(item = {}, filter = DEFAULT_FILTER) {
+    const key = normalizeFacturaFilter(filter);
+    const paymentKey = getPaymentStatusKey(item);
+
+    if (key === "all") return true;
+    if (key === "pending") return ["pending", "partial", "draft"].includes(paymentKey);
+    if (key === "paid") return paymentKey === "paid";
+    if (key === "overdue") return paymentKey === "overdue";
+
+    return true;
+  }
+
+  function getSearchHaystack(item = {}) {
+    const raw = safeObject(item?.raw);
+    const amount = getFacturaAmount(item);
+
+    return [
+      ...getFacturaIdentityList(item),
+
+      getFacturaDisplayId(item),
+      getFacturaSystemDisplayId(item),
+
+      getCompanyName(item),
+      getContactName(item),
+      getClientName(item),
+      getClientEmail(item),
+      getFormaPago(item),
+
+      getPaymentStatusKey(item),
+      hasPdf(item) ? "pdf con pdf documento" : "",
+      isFacturaSent(item) ? "enviada email sent" : "",
+
+      amount,
+      Number.isFinite(safeNumber(amount, NaN))
+        ? String(safeNumber(amount, 0)).replace(".", ",")
+        : "",
+
+      getRelatedIncidenciaId(item),
+
+      item.clienteId,
+      item.clientId,
+      item.customerId,
+      item.userId,
+      item.uid,
+      item.blobPath,
+      item.blobName,
+      item.pdfPath,
+
+      raw.clienteId,
+      raw.clientId,
+      raw.customerId,
+      raw.userId,
+      raw.uid,
+      raw.blobPath,
+      raw.blobName,
+      raw.pdfPath,
+    ]
+      .map((value) => normalizeText(value))
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  function itemMatchesSearch(item = {}, query = "") {
+    const normalizedQuery = normalizeText(query);
+
+    if (!normalizedQuery) return true;
+
+    const terms = normalizedQuery.split(" ").filter(Boolean);
+    const haystack = getSearchHaystack(item);
+
+    return terms.every((term) => haystack.includes(term));
+  }
+
+  function getFilteredFacturasItems(items = []) {
+    const filter = getViewFilter();
+    const search = getViewSearch();
+    const sort = getViewSort();
+
+    const filtered = safeArray(items).filter((item) => {
+      return itemMatchesFilter(item, filter) && itemMatchesSearch(item, search);
+    });
+
+    return sort === "invoice_desc"
+      ? [...filtered].sort(compareByInvoiceDesc)
+      : [...filtered].sort(compareByDateDesc);
+  }
+
+  function getTotalPages(items = []) {
+    const total = getFilteredFacturasItems(items).length;
+    const pageSize = getPageSize();
+
+    return Math.max(1, Math.ceil((total || 1) / pageSize));
+  }
+
+  function clampPageAgainstItems(items = []) {
+    ensureBaseState();
+
+    const rows = safeArray(items);
+    const filteredRows = getFilteredFacturasItems(rows);
+    const totalPages = getTotalPages(rows);
+    const nextPage = clampNumber(getCurrentPage(), 1, totalPages);
+
+    state.view.page = nextPage;
+    state.view.currentPage = nextPage;
+    state.view.facturasPage = nextPage;
+
+    const remoteCount = safeNumber(
+      first(state.view.remoteCount, state.view.totalCount),
+      rows.length
+    );
+
+    return {
+      page: nextPage,
+      currentPage: nextPage,
+      facturasPage: nextPage,
+
+      pageSize: getPageSize(),
+      facturasPageSize: getPageSize(),
+
+      totalPages,
+
+      totalCount: filteredRows.length,
+      totalMatched: filteredRows.length,
+      filteredCount: filteredRows.length,
+      unfilteredCount: rows.length,
+      remoteCount,
+
+      filter: getViewFilter(),
+      paymentFilter: getViewFilter(),
+      statusFilter: getViewFilter(),
+      activeFilter: getViewFilter(),
+      facturasFilter: getViewFilter(),
+
+      search: getViewSearch(),
+      searchQuery: getViewSearch(),
+      query: getViewSearch(),
+      q: getViewSearch(),
+      term: getViewSearch(),
+      keyword: getViewSearch(),
+      facturasSearch: getViewSearch(),
+
+      sort: getViewSort(),
+      sortBy: getViewSort(),
+      orderBy: getViewSort(),
+      sortMode: getViewSort(),
+      facturasSort: getViewSort(),
+    };
+  }
+
+  function goToPage(page = 1) {
+    if (isFacturasLoading(state) || isFacturasRefreshing(state)) {
+      return getCurrentPage();
+    }
+
+    const nextPage = setViewPage(page);
+    rerender();
+
+    return nextPage;
+  }
+
+  function goPrevPage() {
+    return goToPage(getCurrentPage() - 1);
+  }
+
+  function goNextPage() {
+    return goToPage(getCurrentPage() + 1);
+  }
+
+  /* =====================================================
+     AUTH / PERMISSIONS
+  ===================================================== */
+
+  function getCurrentRole() {
+    return normalizeKey(
+      first(
+        AppCore?.state?.user?.role,
+        AppCore?.state?.user?.rol,
+        AppCore?.state?.role,
+        AppCore?.state?.rol,
+        AppCore?.auth?.getRole?.(),
+        AppCore?.Auth?.getRole?.()
+      )
+    );
+  }
+
+  function isAdminUser() {
+    return ADMIN_ROLES.includes(getCurrentRole());
+  }
+
+  function canCreateFactura() {
+    if (isAdminUser()) return true;
+
+    const permissions = [
+      ...normalizeTokenList(AppCore?.state?.permissions),
+      ...normalizeTokenList(AppCore?.state?.user?.permissions),
+      ...normalizeTokenList(AppCore?.auth?.getPermissions?.()),
+      ...normalizeTokenList(AppCore?.Auth?.getPermissions?.()),
+    ];
+
+    return permissions.some((permission) =>
+      CREATE_PERMISSIONS.includes(permission)
+    );
+  }
+
+  function getTemplateRoleForCreate() {
+    if (canCreateFactura()) return "admin";
+
+    return getCurrentRole();
+  }
+
+  /* =====================================================
+     FISCAL + RELATION PRESERVER
+  ===================================================== */
+
+  function hasFiscalEvidence(item = {}) {
+    const source = safeObject(item);
+    const raw = safeObject(source.raw);
+
+    return Boolean(
+      safeArray(source.impuestos).length ||
+        safeArray(raw.impuestos).length ||
+        safeArray(source.taxes).length ||
+        safeArray(raw.taxes).length ||
+        safeArray(source.taxLines).length ||
+        safeArray(raw.taxLines).length ||
+        safeArray(source.desgloseImpuestos).length ||
+        safeArray(raw.desgloseImpuestos).length ||
+        safeArray(source.lineas).length ||
+        safeArray(raw.lineas).length ||
+        safeArray(source.conceptos).length ||
+        safeArray(raw.conceptos).length ||
+        hasOwnKeys(source.iva) ||
+        hasOwnKeys(raw.iva) ||
+        hasOwnKeys(source.irpf) ||
+        hasOwnKeys(raw.irpf) ||
+        hasOwnKeys(source.totales) ||
+        hasOwnKeys(raw.totales) ||
+        hasOwnKeys(source.totals) ||
+        hasOwnKeys(raw.totals) ||
+        source.meta?.hasIva ||
+        raw.meta?.hasIva ||
+        source.meta?.hasIrpf ||
+        raw.meta?.hasIrpf ||
+        source.meta?.displayIva ||
+        raw.meta?.displayIva ||
+        source.meta?.displayIrpf ||
+        raw.meta?.displayIrpf
+    );
+  }
+
+  function firstArrayFrom(source = {}, raw = {}, keys = []) {
+    for (const key of safeArray(keys)) {
+      if (Array.isArray(source?.[key]) && source[key].length) return source[key];
+      if (Array.isArray(raw?.[key]) && raw[key].length) return raw[key];
+    }
+
+    return [];
+  }
+
+  function mergeObjectField(preferred = {}, fallback = {}, key = "") {
+    return {
+      ...safeObject(fallback?.raw?.[key]),
+      ...safeObject(fallback?.[key]),
+      ...safeObject(preferred?.raw?.[key]),
+      ...safeObject(preferred?.[key]),
+    };
+  }
+
+  function preserveFiscalFields(item = {}, fallback = {}) {
+    const source = safeObject(item);
+    const base = safeObject(fallback);
+
+    if (!hasFiscalEvidence(source) && !hasFiscalEvidence(base)) {
+      return source;
+    }
+
+    const sourceRaw = safeObject(source.raw);
+    const baseRaw = safeObject(base.raw);
+
+    const impuestos = safeArray(
+      first(
+        firstArrayFrom(source, sourceRaw, [
+          "impuestos",
+          "taxes",
+          "taxLines",
+          "desgloseImpuestos",
+          "taxBreakdown",
+        ]),
+        firstArrayFrom(base, baseRaw, [
+          "impuestos",
+          "taxes",
+          "taxLines",
+          "desgloseImpuestos",
+          "taxBreakdown",
+        ])
+      )
+    );
+
+    const lineas = safeArray(
+      first(
+        firstArrayFrom(source, sourceRaw, [
+          "lineas",
+          "items",
+          "conceptos",
+          "lines",
+          "invoiceLines",
+        ]),
+        firstArrayFrom(base, baseRaw, [
+          "lineas",
+          "items",
+          "conceptos",
+          "lines",
+          "invoiceLines",
+        ])
+      )
+    );
+
+    const iva = mergeObjectField(source, base, "iva");
+    const irpf = mergeObjectField(source, base, "irpf");
+    const totales = mergeObjectField(source, base, "totales");
+    const totals = mergeObjectField(source, base, "totals");
+    const summary = mergeObjectField(source, base, "summary");
+
+    const meta = {
+      ...safeObject(base.meta),
+      ...safeObject(baseRaw.meta),
+      ...safeObject(source.meta),
+      ...safeObject(sourceRaw.meta),
+    };
+
+    const hasIva = Boolean(
+      meta.hasIva ||
+        hasOwnKeys(iva) ||
+        impuestos.some((tax) => {
+          const label = normalizeText(first(tax?.tipo, tax?.taxType, tax?.name, tax?.label));
+          return label.includes("iva") || label.includes("vat");
+        })
+    );
+
+    const hasIrpf = Boolean(
+      meta.hasIrpf ||
+        hasOwnKeys(irpf) ||
+        impuestos.some((tax) => {
+          const label = normalizeText(first(tax?.tipo, tax?.taxType, tax?.name, tax?.label));
+          return (
+            label.includes("irpf") ||
+            label.includes("retencion") ||
+            label.includes("retención") ||
+            label.includes("withholding")
+          );
+        })
+    );
+
+    const finalMeta = {
+      ...meta,
+      hasIva,
+      hasIrpf,
+      hasFiscalData: Boolean(
+        meta.hasFiscalData ||
+          hasIva ||
+          hasIrpf ||
+          impuestos.length ||
+          hasOwnKeys(totales) ||
+          hasOwnKeys(totals)
+      ),
+    };
+
+    return {
+      ...base,
+      ...source,
+
+      impuestos,
+      taxes: safeArray(first(source.taxes, impuestos)),
+      taxLines: safeArray(first(source.taxLines, impuestos)),
+      desgloseImpuestos: safeArray(first(source.desgloseImpuestos, impuestos)),
+
+      iva,
+      irpf,
+      totales,
+      totals,
+      summary,
+      lineas,
+
+      meta: finalMeta,
+
+      raw: {
+        ...baseRaw,
+        ...sourceRaw,
+
+        impuestos,
+        taxes: safeArray(first(sourceRaw.taxes, source.taxes, impuestos)),
+        taxLines: safeArray(first(sourceRaw.taxLines, source.taxLines, impuestos)),
+        desgloseImpuestos: safeArray(
+          first(sourceRaw.desgloseImpuestos, source.desgloseImpuestos, impuestos)
+        ),
+
+        iva,
+        irpf,
+        totales,
+        totals,
+        summary,
+        lineas,
+
+        meta: {
+          ...safeObject(baseRaw.meta),
+          ...safeObject(sourceRaw.meta),
+          ...finalMeta,
+        },
+      },
+    };
+  }
+
   function buildIncidenciaPayload(item = {}) {
     const source = safeObject(item);
     const raw = safeObject(source.raw);
@@ -2034,9 +2092,7 @@ export const FacturasView = (() => {
 
     const incidenciaId = getRelatedIncidenciaId(source);
 
-    if (!incidenciaId) {
-      return null;
-    }
+    if (!incidenciaId) return null;
 
     const subject = safeText(
       first(
@@ -2055,8 +2111,6 @@ export const FacturasView = (() => {
         relationTicket.subject,
         relationTicket.asunto,
         relationTicket.title,
-        raw.subject,
-        raw.asunto,
         "Incidencia relacionada"
       ),
       "Incidencia relacionada"
@@ -2080,8 +2134,6 @@ export const FacturasView = (() => {
           incidencia.clienteId,
           ticket.clienteId,
           linkedTicket.clienteId,
-          relatedTicket.clienteId,
-          relationTicket.clienteId,
           source.clienteId,
           source.cliente?.id,
           raw.clienteId,
@@ -2094,22 +2146,9 @@ export const FacturasView = (() => {
       clienteNombre: safeText(
         first(
           incidencia.clienteNombre,
-          incidencia.name,
-          incidencia.nombre,
           ticket.clienteNombre,
-          ticket.name,
-          ticket.nombre,
           linkedTicket.clienteNombre,
-          linkedTicket.name,
-          linkedTicket.nombre,
-          relatedTicket.clienteNombre,
-          relationTicket.clienteNombre,
-          source.cliente?.nombre,
-          source.cliente?.name,
-          source.clienteNombre,
-          raw.cliente?.nombre,
-          raw.cliente?.name,
-          raw.clienteNombre,
+          getClientName(source),
           ""
         ),
         ""
@@ -2120,105 +2159,55 @@ export const FacturasView = (() => {
           incidencia.relationType,
           ticket.relationType,
           linkedTicket.relationType,
-          relatedTicket.relationType,
-          relationTicket.relationType,
           source.relationType,
           raw.relationType,
           "linked_ticket"
         ),
         "linked_ticket"
-      ),
-
-      linkedAt: safeText(
-        first(
-          incidencia.linkedAt,
-          ticket.linkedAt,
-          linkedTicket.linkedAt,
-          relatedTicket.linkedAt,
-          relationTicket.linkedAt,
-          source.linkedAt,
-          raw.linkedAt,
-          ""
-        ),
-        ""
-      ),
-
-      linkedAtES: safeText(
-        first(
-          incidencia.linkedAtES,
-          ticket.linkedAtES,
-          linkedTicket.linkedAtES,
-          relatedTicket.linkedAtES,
-          relationTicket.linkedAtES,
-          source.linkedAtES,
-          raw.linkedAtES,
-          ""
-        ),
-        ""
       ),
     };
   }
 
-  function buildRelationPatch(item = {}) {
+  function preserveIncidenciaFields(item = {}, fallbackRaw = {}) {
     const source = safeObject(item);
-    const raw = safeObject(source.raw);
+    const embeddedRaw = safeObject(source.raw);
+    const externalRaw = safeObject(fallbackRaw);
+    const raw = hasOwnKeys(embeddedRaw) ? embeddedRaw : externalRaw;
 
-    const incidenciaId = getRelatedIncidenciaId(source);
-    const incidenciaPayload = buildIncidenciaPayload(source);
+    const base = {
+      ...source,
+      raw,
+    };
 
-    if (!incidenciaId) {
-      return {};
-    }
+    const incidenciaId = getRelatedIncidenciaId(base);
+    const incidenciaPayload = buildIncidenciaPayload(base);
+
+    if (!incidenciaId) return base;
 
     return {
+      ...base,
+
       ticketId: incidenciaId,
       incidenciaId,
+      relatedTicketId: safeText(first(base.relatedTicketId, raw.relatedTicketId, incidenciaId), incidenciaId),
+      relatedIncidentId: safeText(first(base.relatedIncidentId, raw.relatedIncidentId, incidenciaId), incidenciaId),
+      supportTicketId: safeText(first(base.supportTicketId, raw.supportTicketId, incidenciaId), incidenciaId),
+      caseId: safeText(first(base.caseId, raw.caseId, incidenciaId), incidenciaId),
 
-      relatedTicketId: safeText(
-        first(source.relatedTicketId, raw.relatedTicketId, incidenciaId),
-        incidenciaId
-      ),
-
-      relatedIncidentId: safeText(
-        first(source.relatedIncidentId, raw.relatedIncidentId, incidenciaId),
-        incidenciaId
-      ),
-
-      supportTicketId: safeText(
-        first(source.supportTicketId, raw.supportTicketId, incidenciaId),
-        incidenciaId
-      ),
-
-      caseId: safeText(
-        first(source.caseId, raw.caseId, incidenciaId),
-        incidenciaId
-      ),
-
-      incidencia: incidenciaPayload,
-      ticket: safeObject(first(source.ticket, raw.ticket, incidenciaPayload)),
-      linkedTicket: safeObject(first(source.linkedTicket, raw.linkedTicket, incidenciaPayload)),
-      relatedTicket: safeObject(first(source.relatedTicket, raw.relatedTicket, incidenciaPayload)),
+      incidencia: safeObject(first(base.incidencia, raw.incidencia, incidenciaPayload)),
+      ticket: safeObject(first(base.ticket, raw.ticket, incidenciaPayload)),
+      linkedTicket: safeObject(first(base.linkedTicket, raw.linkedTicket, incidenciaPayload)),
 
       relations: {
-        ...safeObject(source.relations),
+        ...safeObject(base.relations),
         ticket: {
-          ...safeObject(source.relations?.ticket),
+          ...safeObject(base.relations?.ticket),
           ...safeObject(incidenciaPayload),
         },
       },
 
-      relationType: safeText(
-        first(
-          source.relationType,
-          raw.relationType,
-          incidenciaPayload?.relationType,
-          "linked_ticket"
-        ),
-        "linked_ticket"
-      ),
-
       meta: {
-        ...safeObject(source.meta),
+        ...safeObject(base.meta),
         hasIncidencia: true,
         hasLinkedTicket: true,
         incidenciaId,
@@ -2239,7 +2228,6 @@ export const FacturasView = (() => {
         incidencia: safeObject(first(raw.incidencia, incidenciaPayload)),
         ticket: safeObject(first(raw.ticket, incidenciaPayload)),
         linkedTicket: safeObject(first(raw.linkedTicket, incidenciaPayload)),
-        relatedTicket: safeObject(first(raw.relatedTicket, incidenciaPayload)),
 
         relations: {
           ...safeObject(raw.relations),
@@ -2261,422 +2249,7 @@ export const FacturasView = (() => {
     };
   }
 
-  function preserveIncidenciaFields(item = {}, fallbackRaw = {}) {
-    const source = safeObject(item);
-
-    const embeddedRaw = safeObject(source.raw);
-    const externalRaw = safeObject(fallbackRaw);
-    const raw = hasOwnKeys(embeddedRaw) ? embeddedRaw : externalRaw;
-
-    const merged = {
-      ...source,
-      raw,
-    };
-
-    const relationPatch = buildRelationPatch(merged);
-
-    if (!hasOwnKeys(relationPatch)) {
-      return merged;
-    }
-
-    return {
-      ...merged,
-      ...relationPatch,
-
-      raw: {
-        ...safeObject(merged.raw),
-        ...safeObject(relationPatch.raw),
-      },
-
-      meta: {
-        ...safeObject(merged.meta),
-        ...safeObject(relationPatch.meta),
-      },
-    };
-  }
-
   /* =====================================================
-     FISCAL PRESERVER · IVA / IRPF / IMPUESTOS / TOTALES
-  ===================================================== */
-
-  function readFiscalObject(source = {}, raw = {}, key = "") {
-    const k = safeText(key, "");
-
-    if (!k) return {};
-
-    return {
-      ...safeObject(raw?.[k]),
-      ...safeObject(source?.[k]),
-    };
-  }
-
-  function readFiscalArray(source = {}, raw = {}, keys = []) {
-    for (const key of safeArray(keys)) {
-      const direct = source?.[key];
-      const rawDirect = raw?.[key];
-
-      if (Array.isArray(direct) && direct.length) {
-        return direct;
-      }
-
-      if (Array.isArray(rawDirect) && rawDirect.length) {
-        return rawDirect;
-      }
-    }
-
-    return [];
-  }
-
-  function hasFiscalEvidence(item = {}) {
-    const source = safeObject(item);
-    const raw = safeObject(source.raw);
-
-    return Boolean(
-      safeArray(source.impuestos).length ||
-        safeArray(raw.impuestos).length ||
-        safeArray(source.taxes).length ||
-        safeArray(raw.taxes).length ||
-        safeArray(source.taxLines).length ||
-        safeArray(raw.taxLines).length ||
-        safeArray(source.desgloseImpuestos).length ||
-        safeArray(raw.desgloseImpuestos).length ||
-        hasOwnKeys(source.iva) ||
-        hasOwnKeys(raw.iva) ||
-        hasOwnKeys(source.irpf) ||
-        hasOwnKeys(raw.irpf) ||
-        hasOwnKeys(source.totales) ||
-        hasOwnKeys(raw.totales) ||
-        hasOwnKeys(source.totals) ||
-        hasOwnKeys(raw.totals) ||
-        source.meta?.hasIva ||
-        raw.meta?.hasIva ||
-        source.meta?.hasIrpf ||
-        raw.meta?.hasIrpf ||
-        source.meta?.displayIva ||
-        raw.meta?.displayIva ||
-        source.meta?.displayIrpf ||
-        raw.meta?.displayIrpf
-    );
-  }
-
-  function buildFiscalPatch(storeItem = {}, remoteItem = {}) {
-    const store = safeObject(storeItem);
-    const remote = safeObject(remoteItem);
-
-    const storeRaw = safeObject(store.raw);
-    const remoteRaw = safeObject(remote.raw);
-
-    const impuestos = safeArray(
-      first(
-        remote.impuestos,
-        remote.taxes,
-        remote.taxLines,
-        remote.desgloseImpuestos,
-        remoteRaw.impuestos,
-        remoteRaw.taxes,
-        remoteRaw.taxLines,
-        remoteRaw.desgloseImpuestos,
-
-        store.impuestos,
-        store.taxes,
-        store.taxLines,
-        store.desgloseImpuestos,
-        storeRaw.impuestos,
-        storeRaw.taxes,
-        storeRaw.taxLines,
-        storeRaw.desgloseImpuestos
-      )
-    );
-
-    const lineas = safeArray(
-      first(
-        remote.lineas,
-        remote.items,
-        remote.conceptos,
-        remote.lines,
-        remote.invoiceLines,
-        remoteRaw.lineas,
-        remoteRaw.items,
-        remoteRaw.conceptos,
-        remoteRaw.lines,
-        remoteRaw.invoiceLines,
-
-        store.lineas,
-        store.items,
-        store.conceptos,
-        store.lines,
-        store.invoiceLines,
-        storeRaw.lineas,
-        storeRaw.items,
-        storeRaw.conceptos,
-        storeRaw.lines,
-        storeRaw.invoiceLines
-      )
-    );
-
-    const iva = {
-      ...readFiscalObject(store, storeRaw, "iva"),
-      ...readFiscalObject(remote, remoteRaw, "iva"),
-    };
-
-    const irpf = {
-      ...readFiscalObject(store, storeRaw, "irpf"),
-      ...readFiscalObject(remote, remoteRaw, "irpf"),
-    };
-
-    const totales = {
-      ...readFiscalObject(store, storeRaw, "totales"),
-      ...readFiscalObject(remote, remoteRaw, "totales"),
-    };
-
-    const totals = {
-      ...readFiscalObject(store, storeRaw, "totals"),
-      ...readFiscalObject(remote, remoteRaw, "totals"),
-    };
-
-    const summary = {
-      ...readFiscalObject(store, storeRaw, "summary"),
-      ...readFiscalObject(remote, remoteRaw, "summary"),
-    };
-
-    const taxes = readFiscalArray(
-      { ...store, ...remote },
-      { ...storeRaw, ...remoteRaw },
-      ["taxes", "taxLines", "desgloseImpuestos", "taxBreakdown"]
-    );
-
-    const meta = {
-      ...safeObject(store.meta),
-      ...safeObject(storeRaw.meta),
-      ...safeObject(remote.meta),
-      ...safeObject(remoteRaw.meta),
-    };
-
-    const hasIva = Boolean(
-      meta.hasIva ||
-        hasOwnKeys(iva) ||
-        impuestos.some((tax) => {
-          const tipo = normalizeText(first(tax?.tipo, tax?.taxType, tax?.name, tax?.label));
-          return tipo.includes("iva") || tipo.includes("vat");
-        })
-    );
-
-    const hasIrpf = Boolean(
-      meta.hasIrpf ||
-        hasOwnKeys(irpf) ||
-        impuestos.some((tax) => {
-          const tipo = normalizeText(first(tax?.tipo, tax?.taxType, tax?.name, tax?.label));
-          return tipo.includes("irpf") ||
-            tipo.includes("retencion") ||
-            tipo.includes("retención") ||
-            tipo.includes("withholding");
-        })
-    );
-
-    return {
-      impuestos,
-      taxes,
-      taxLines: taxes.length ? taxes : impuestos,
-      desgloseImpuestos: taxes.length ? taxes : impuestos,
-
-      iva,
-      irpf,
-      totales,
-      totals,
-      summary,
-      lineas,
-
-      meta: {
-        ...meta,
-
-        hasFiscalData: Boolean(
-          meta.hasFiscalData ||
-            hasIva ||
-            hasIrpf ||
-            impuestos.length ||
-            taxes.length ||
-            hasOwnKeys(totales) ||
-            hasOwnKeys(totals)
-        ),
-
-        hasIva,
-        hasIrpf,
-
-        displayIva: safeText(
-          first(
-            remote.meta?.displayIva,
-            remoteRaw.meta?.displayIva,
-            store.meta?.displayIva,
-            storeRaw.meta?.displayIva,
-            meta.displayIva,
-            ""
-          ),
-          ""
-        ),
-
-        displayIrpf: safeText(
-          first(
-            remote.meta?.displayIrpf,
-            remoteRaw.meta?.displayIrpf,
-            store.meta?.displayIrpf,
-            storeRaw.meta?.displayIrpf,
-            meta.displayIrpf,
-            ""
-          ),
-          ""
-        ),
-
-        taxProfile: safeText(
-          first(
-            remote.meta?.taxProfile,
-            remoteRaw.meta?.taxProfile,
-            store.meta?.taxProfile,
-            storeRaw.meta?.taxProfile,
-            meta.taxProfile,
-            ""
-          ),
-          ""
-        ),
-      },
-
-      raw: {
-        impuestos,
-        taxes,
-        taxLines: taxes.length ? taxes : impuestos,
-        desgloseImpuestos: taxes.length ? taxes : impuestos,
-
-        iva,
-        irpf,
-        totales,
-        totals,
-        summary,
-        lineas,
-
-        meta: {
-          ...meta,
-          hasIva,
-          hasIrpf,
-          hasFiscalData: Boolean(
-            meta.hasFiscalData ||
-              hasIva ||
-              hasIrpf ||
-              impuestos.length ||
-              taxes.length ||
-              hasOwnKeys(totales) ||
-              hasOwnKeys(totals)
-          ),
-        },
-      },
-    };
-  }
-
-  function preserveFiscalFields(item = {}, fallback = {}) {
-    const source = safeObject(item);
-    const fallbackSource = safeObject(fallback);
-
-    if (!hasFiscalEvidence(source) && !hasFiscalEvidence(fallbackSource)) {
-      return source;
-    }
-
-    const patch = buildFiscalPatch(fallbackSource, source);
-
-    return {
-      ...source,
-
-      impuestos: safeArray(first(source.impuestos, patch.impuestos)),
-      taxes: safeArray(first(source.taxes, patch.taxes)),
-      taxLines: safeArray(first(source.taxLines, patch.taxLines)),
-      desgloseImpuestos: safeArray(first(source.desgloseImpuestos, patch.desgloseImpuestos)),
-
-      iva: {
-        ...safeObject(patch.iva),
-        ...safeObject(source.iva),
-      },
-
-      irpf: {
-        ...safeObject(patch.irpf),
-        ...safeObject(source.irpf),
-      },
-
-      totales: {
-        ...safeObject(patch.totales),
-        ...safeObject(source.totales),
-      },
-
-      totals: {
-        ...safeObject(patch.totals),
-        ...safeObject(source.totals),
-      },
-
-      summary: {
-        ...safeObject(patch.summary),
-        ...safeObject(source.summary),
-      },
-
-      lineas: safeArray(first(source.lineas, patch.lineas)),
-
-      raw: {
-        ...safeObject(patch.raw),
-        ...safeObject(source.raw),
-
-        impuestos: safeArray(first(source.raw?.impuestos, source.impuestos, patch.raw.impuestos)),
-        taxes: safeArray(first(source.raw?.taxes, source.taxes, patch.raw.taxes)),
-        taxLines: safeArray(first(source.raw?.taxLines, source.taxLines, patch.raw.taxLines)),
-        desgloseImpuestos: safeArray(
-          first(source.raw?.desgloseImpuestos, source.desgloseImpuestos, patch.raw.desgloseImpuestos)
-        ),
-
-        iva: {
-          ...safeObject(patch.raw.iva),
-          ...safeObject(source.raw?.iva),
-          ...safeObject(source.iva),
-        },
-
-        irpf: {
-          ...safeObject(patch.raw.irpf),
-          ...safeObject(source.raw?.irpf),
-          ...safeObject(source.irpf),
-        },
-
-        totales: {
-          ...safeObject(patch.raw.totales),
-          ...safeObject(source.raw?.totales),
-          ...safeObject(source.totales),
-        },
-
-        totals: {
-          ...safeObject(patch.raw.totals),
-          ...safeObject(source.raw?.totals),
-          ...safeObject(source.totals),
-        },
-
-        summary: {
-          ...safeObject(patch.raw.summary),
-          ...safeObject(source.raw?.summary),
-          ...safeObject(source.summary),
-        },
-
-        lineas: safeArray(first(source.raw?.lineas, source.lineas, patch.raw.lineas)),
-
-        meta: {
-          ...safeObject(patch.raw.meta),
-          ...safeObject(source.raw?.meta),
-          ...safeObject(source.meta),
-        },
-      },
-
-      meta: {
-        ...safeObject(patch.meta),
-        ...safeObject(source.meta),
-      },
-    };
-  }
-
-  /* =====================================================
-     CONTINÚA EN PARTE 2/2
-  ===================================================== */
-
-       /* =====================================================
      STORE / DETAIL MERGE
   ===================================================== */
 
@@ -2703,9 +2276,10 @@ export const FacturasView = (() => {
           storeItems[index] ||
           {};
 
-        const withFiscal = preserveFiscalFields(item, fallbackRaw);
-
-        return preserveIncidenciaFields(withFiscal, fallbackRaw);
+        return preserveIncidenciaFields(
+          preserveFiscalFields(item, fallbackRaw),
+          fallbackRaw
+        );
       });
     } catch (error) {
       safeWarn("getItems falló:", error);
@@ -2718,10 +2292,8 @@ export const FacturasView = (() => {
 
     if (!id) return null;
 
-    const items = getItems();
-
     return (
-      items.find((item) =>
+      getItems().find((item) =>
         getFacturaIdentityList(item).some((candidate) =>
           sameFacturaIdentity(candidate, id)
         )
@@ -2731,16 +2303,14 @@ export const FacturasView = (() => {
 
   function findFacturaForDetail(detail = {}, preferredId = "") {
     const remote = safeObject(detail);
-
     const preferred = safeText(preferredId, "");
+
     if (preferred) {
       const byPreferred = findFacturaById(preferred);
       if (byPreferred) return byPreferred;
     }
 
-    const remoteIds = getFacturaIdentityList(remote);
-
-    for (const id of remoteIds) {
+    for (const id of getFacturaIdentityList(remote)) {
       const found = findFacturaById(id);
       if (found) return found;
     }
@@ -2748,11 +2318,10 @@ export const FacturasView = (() => {
     const remoteIncidenciaId = getRelatedIncidenciaId(remote);
 
     if (remoteIncidenciaId) {
-      const byIncidencia = getItems().find(
-        (item) => getRelatedIncidenciaId(item) === remoteIncidenciaId
+      return (
+        getItems().find((item) => getRelatedIncidenciaId(item) === remoteIncidenciaId) ||
+        null
       );
-
-      if (byIncidencia) return byIncidencia;
     }
 
     return null;
@@ -2761,318 +2330,50 @@ export const FacturasView = (() => {
   function mergeFacturaDetailWithStoreSnapshot(detail = {}, preferredFacturaId = "") {
     const remote = safeObject(detail);
 
-    if (!hasOwnKeys(remote)) {
-      return null;
-    }
+    if (!hasOwnKeys(remote)) return null;
 
     const storeItem = findFacturaForDetail(remote, preferredFacturaId);
 
     if (!storeItem) {
-      const fiscalOnly = preserveFiscalFields(remote, remote.raw || remote);
-      return preserveIncidenciaFields(fiscalOnly, fiscalOnly.raw || fiscalOnly);
+      return preserveIncidenciaFields(
+        preserveFiscalFields(remote, remote.raw || remote),
+        remote.raw || remote
+      );
     }
 
     const storeEnriched = preserveIncidenciaFields(
-      preserveFiscalFields(storeItem, storeItem?.raw || storeItem),
-      storeItem?.raw || storeItem
+      preserveFiscalFields(storeItem, storeItem.raw || storeItem),
+      storeItem.raw || storeItem
     );
 
-    const fiscalPatch = buildFiscalPatch(storeEnriched, remote);
-
-    const preliminary = {
+    const merged = {
       ...storeEnriched,
       ...remote,
-
-      impuestos: safeArray(first(
-        remote.impuestos,
-        remote.taxes,
-        remote.taxLines,
-        remote.desgloseImpuestos,
-        remote.raw?.impuestos,
-        remote.raw?.taxes,
-        fiscalPatch.impuestos,
-        storeEnriched.impuestos
-      )),
-
-      taxes: safeArray(first(
-        remote.taxes,
-        remote.taxLines,
-        remote.desgloseImpuestos,
-        remote.raw?.taxes,
-        fiscalPatch.taxes,
-        storeEnriched.taxes
-      )),
-
-      taxLines: safeArray(first(
-        remote.taxLines,
-        remote.taxes,
-        remote.desgloseImpuestos,
-        remote.raw?.taxLines,
-        fiscalPatch.taxLines,
-        storeEnriched.taxLines
-      )),
-
-      desgloseImpuestos: safeArray(first(
-        remote.desgloseImpuestos,
-        remote.taxBreakdown,
-        remote.taxes,
-        remote.raw?.desgloseImpuestos,
-        fiscalPatch.desgloseImpuestos,
-        storeEnriched.desgloseImpuestos
-      )),
-
-      iva: {
-        ...safeObject(storeEnriched.iva),
-        ...safeObject(storeEnriched.raw?.iva),
-        ...safeObject(fiscalPatch.iva),
-        ...safeObject(remote.raw?.iva),
-        ...safeObject(remote.iva),
-      },
-
-      irpf: {
-        ...safeObject(storeEnriched.irpf),
-        ...safeObject(storeEnriched.raw?.irpf),
-        ...safeObject(fiscalPatch.irpf),
-        ...safeObject(remote.raw?.irpf),
-        ...safeObject(remote.irpf),
-      },
-
-      totales: {
-        ...safeObject(storeEnriched.totales),
-        ...safeObject(storeEnriched.raw?.totales),
-        ...safeObject(fiscalPatch.totales),
-        ...safeObject(remote.raw?.totales),
-        ...safeObject(remote.totales),
-      },
-
-      totals: {
-        ...safeObject(storeEnriched.totals),
-        ...safeObject(storeEnriched.raw?.totals),
-        ...safeObject(fiscalPatch.totals),
-        ...safeObject(remote.raw?.totals),
-        ...safeObject(remote.totals),
-      },
-
-      summary: {
-        ...safeObject(storeEnriched.summary),
-        ...safeObject(storeEnriched.raw?.summary),
-        ...safeObject(fiscalPatch.summary),
-        ...safeObject(remote.raw?.summary),
-        ...safeObject(remote.summary),
-      },
-
-      lineas: safeArray(first(
-        remote.lineas,
-        remote.items,
-        remote.conceptos,
-        remote.lines,
-        remote.invoiceLines,
-        remote.raw?.lineas,
-        remote.raw?.items,
-        remote.raw?.conceptos,
-        fiscalPatch.lineas,
-        storeEnriched.lineas
-      )),
 
       raw: {
         ...safeObject(storeEnriched.raw),
         ...safeObject(remote.raw),
-
-        impuestos: safeArray(first(
-          remote.raw?.impuestos,
-          remote.raw?.taxes,
-          remote.impuestos,
-          remote.taxes,
-          remote.taxLines,
-          fiscalPatch.raw.impuestos,
-          storeEnriched.raw?.impuestos,
-          storeEnriched.impuestos
-        )),
-
-        taxes: safeArray(first(
-          remote.raw?.taxes,
-          remote.taxes,
-          remote.taxLines,
-          fiscalPatch.raw.taxes,
-          storeEnriched.raw?.taxes,
-          storeEnriched.taxes
-        )),
-
-        taxLines: safeArray(first(
-          remote.raw?.taxLines,
-          remote.taxLines,
-          remote.taxes,
-          fiscalPatch.raw.taxLines,
-          storeEnriched.raw?.taxLines,
-          storeEnriched.taxLines
-        )),
-
-        desgloseImpuestos: safeArray(first(
-          remote.raw?.desgloseImpuestos,
-          remote.desgloseImpuestos,
-          remote.taxBreakdown,
-          fiscalPatch.raw.desgloseImpuestos,
-          storeEnriched.raw?.desgloseImpuestos,
-          storeEnriched.desgloseImpuestos
-        )),
-
-        iva: {
-          ...safeObject(storeEnriched.raw?.iva),
-          ...safeObject(storeEnriched.iva),
-          ...safeObject(fiscalPatch.raw.iva),
-          ...safeObject(remote.raw?.iva),
-          ...safeObject(remote.iva),
-        },
-
-        irpf: {
-          ...safeObject(storeEnriched.raw?.irpf),
-          ...safeObject(storeEnriched.irpf),
-          ...safeObject(fiscalPatch.raw.irpf),
-          ...safeObject(remote.raw?.irpf),
-          ...safeObject(remote.irpf),
-        },
-
-        totales: {
-          ...safeObject(storeEnriched.raw?.totales),
-          ...safeObject(storeEnriched.totales),
-          ...safeObject(fiscalPatch.raw.totales),
-          ...safeObject(remote.raw?.totales),
-          ...safeObject(remote.totales),
-        },
-
-        totals: {
-          ...safeObject(storeEnriched.raw?.totals),
-          ...safeObject(storeEnriched.totals),
-          ...safeObject(fiscalPatch.raw.totals),
-          ...safeObject(remote.raw?.totals),
-          ...safeObject(remote.totals),
-        },
-
-        summary: {
-          ...safeObject(storeEnriched.raw?.summary),
-          ...safeObject(storeEnriched.summary),
-          ...safeObject(fiscalPatch.raw.summary),
-          ...safeObject(remote.raw?.summary),
-          ...safeObject(remote.summary),
-        },
-
-        lineas: safeArray(first(
-          remote.raw?.lineas,
-          remote.raw?.items,
-          remote.lineas,
-          remote.items,
-          fiscalPatch.raw.lineas,
-          storeEnriched.raw?.lineas,
-          storeEnriched.lineas
-        )),
       },
 
       meta: {
         ...safeObject(storeEnriched.meta),
         ...safeObject(storeEnriched.raw?.meta),
-        ...safeObject(fiscalPatch.meta),
         ...safeObject(remote.raw?.meta),
         ...safeObject(remote.meta),
-
-        hasIva: Boolean(
-          remote.meta?.hasIva ||
-            remote.raw?.meta?.hasIva ||
-            fiscalPatch.meta?.hasIva ||
-            storeEnriched.meta?.hasIva ||
-            storeEnriched.raw?.meta?.hasIva ||
-            hasOwnKeys(remote.iva) ||
-            hasOwnKeys(remote.raw?.iva) ||
-            hasOwnKeys(storeEnriched.iva)
-        ),
-
-        hasIrpf: Boolean(
-          remote.meta?.hasIrpf ||
-            remote.raw?.meta?.hasIrpf ||
-            fiscalPatch.meta?.hasIrpf ||
-            storeEnriched.meta?.hasIrpf ||
-            storeEnriched.raw?.meta?.hasIrpf ||
-            hasOwnKeys(remote.irpf) ||
-            hasOwnKeys(remote.raw?.irpf) ||
-            hasOwnKeys(storeEnriched.irpf)
-        ),
-
-        displayIva: safeText(
-          first(
-            remote.meta?.displayIva,
-            remote.raw?.meta?.displayIva,
-            fiscalPatch.meta?.displayIva,
-            storeEnriched.meta?.displayIva,
-            storeEnriched.raw?.meta?.displayIva,
-            ""
-          ),
-          ""
-        ),
-
-        displayIrpf: safeText(
-          first(
-            remote.meta?.displayIrpf,
-            remote.raw?.meta?.displayIrpf,
-            fiscalPatch.meta?.displayIrpf,
-            storeEnriched.meta?.displayIrpf,
-            storeEnriched.raw?.meta?.displayIrpf,
-            ""
-          ),
-          ""
-        ),
       },
     };
-
-    preliminary.raw = {
-      ...safeObject(preliminary.raw),
-      meta: {
-        ...safeObject(preliminary.raw?.meta),
-        ...safeObject(preliminary.meta),
-      },
-    };
-
-    const withFiscal = preserveFiscalFields(preliminary, storeEnriched);
-    const withRemoteRelation = preserveIncidenciaFields(
-      withFiscal,
-      withFiscal.raw || withFiscal
-    );
-
-    if (getRelatedIncidenciaId(withRemoteRelation)) {
-      return withRemoteRelation;
-    }
-
-    const forcedRelationPatch = buildRelationPatch(storeEnriched);
-
-    if (!hasOwnKeys(forcedRelationPatch)) {
-      return withRemoteRelation;
-    }
 
     return preserveIncidenciaFields(
-      preserveFiscalFields(
-        {
-          ...preliminary,
-          ...forcedRelationPatch,
-
-          raw: {
-            ...safeObject(preliminary.raw),
-            ...safeObject(forcedRelationPatch.raw),
-          },
-
-          meta: {
-            ...safeObject(preliminary.meta),
-            ...safeObject(forcedRelationPatch.meta),
-          },
-        },
-        storeEnriched
-      ),
+      preserveFiscalFields(merged, storeEnriched),
       {
-        ...safeObject(preliminary.raw),
-        ...safeObject(forcedRelationPatch.raw),
+        ...safeObject(storeEnriched.raw),
+        ...safeObject(remote.raw),
       }
     );
   }
 
   /* =====================================================
-     API HELPERS FOR INCIDENCIA DETAIL
+     INCIDENCIA MODAL BRIDGE
   ===================================================== */
 
   async function apiGet(endpoint = "") {
@@ -3138,19 +2439,17 @@ export const FacturasView = (() => {
 
   async function fetchIncidenciaDetail(ticketId = "") {
     const id = safeText(ticketId, "");
-
     if (!id) return null;
 
     const encodedId = encodeURIComponent(id);
-
-    const candidates = [
+    const endpoints = [
       `/api/tickets/${encodedId}`,
       `/api/incidencias/${encodedId}`,
     ];
 
     let lastError = null;
 
-    for (const endpoint of candidates) {
+    for (const endpoint of endpoints) {
       try {
         const response = await apiGet(endpoint);
         const detail = pickIncidenciaDetail(response);
@@ -3184,10 +2483,7 @@ export const FacturasView = (() => {
 
     if (!id) return null;
 
-    return (
-      getItems().find((item) => getRelatedIncidenciaId(item) === id) ||
-      null
-    );
+    return getItems().find((item) => getRelatedIncidenciaId(item) === id) || null;
   }
 
   function buildIncidenciaFallback(ticketId = "") {
@@ -3233,41 +2529,11 @@ export const FacturasView = (() => {
         "Incidencia relacionada"
       ),
 
-      status: safeText(
-        first(
-          incidenciaPayload?.status,
-          incidenciaPayload?.estado,
-          "open"
-        ),
-        "open"
-      ),
+      status: safeText(first(incidenciaPayload?.status, incidenciaPayload?.estado, "open"), "open"),
+      estado: safeText(first(incidenciaPayload?.estado, incidenciaPayload?.status, "open"), "open"),
 
-      estado: safeText(
-        first(
-          incidenciaPayload?.estado,
-          incidenciaPayload?.status,
-          "open"
-        ),
-        "open"
-      ),
-
-      priority: safeText(
-        first(
-          incidenciaPayload?.priority,
-          incidenciaPayload?.prioridad,
-          "medium"
-        ),
-        "medium"
-      ),
-
-      prioridad: safeText(
-        first(
-          incidenciaPayload?.prioridad,
-          incidenciaPayload?.priority,
-          "medium"
-        ),
-        "medium"
-      ),
+      priority: safeText(first(incidenciaPayload?.priority, incidenciaPayload?.prioridad, "medium"), "medium"),
+      prioridad: safeText(first(incidenciaPayload?.prioridad, incidenciaPayload?.priority, "medium"), "medium"),
 
       description: safeText(
         first(
@@ -3300,12 +2566,9 @@ export const FacturasView = (() => {
       clienteNombre: safeText(
         first(
           incidenciaPayload?.clienteNombre,
-          getClientNameForView(factura),
-          factura?.cliente?.nombre,
-          factura?.cliente?.nombreContacto,
+          getClientName(factura),
           factura?.clienteNombre,
-          factura?.raw?.cliente?.nombre,
-          factura?.raw?.cliente?.nombreContacto,
+          factura?.raw?.clienteNombre,
           ""
         ),
         ""
@@ -3459,7 +2722,6 @@ export const FacturasView = (() => {
 
   function setIncidenciaModalFeedback(modal = null, message = "", type = "info") {
     const text = safeText(message, "");
-
     if (!text) return false;
 
     try {
@@ -3532,133 +2794,6 @@ export const FacturasView = (() => {
   }
 
   /* =====================================================
-     PAGINATION
-  ===================================================== */
-
-  function getPageSize() {
-    ensureBaseState();
-
-    return clampNumber(
-      first(state.view.pageSize, state.view.facturasPageSize, PAGE_SIZE),
-      1,
-      100
-    );
-  }
-
-  function getCurrentPage() {
-    ensureBaseState();
-
-    return clampNumber(
-      first(state.view.page, state.view.currentPage, state.view.facturasPage, 1),
-      1,
-      Number.MAX_SAFE_INTEGER
-    );
-  }
-
-  function getTotalPages(items = []) {
-    const rows = getFilteredFacturasItems(items);
-    const pageSize = getPageSize();
-
-    return Math.max(1, Math.ceil((rows.length || 1) / pageSize));
-  }
-
-  function setViewPage(page = 1) {
-    ensureBaseState();
-
-    const items = getItems();
-    const totalPages = getTotalPages(items);
-    const nextPage = clampNumber(page, 1, totalPages);
-
-    state.view.page = nextPage;
-    state.view.currentPage = nextPage;
-    state.view.facturasPage = nextPage;
-
-    state.view.pageSize = getPageSize();
-    state.view.facturasPageSize = getPageSize();
-
-    return nextPage;
-  }
-
-  function clampPageAgainstItems(items = []) {
-    ensureBaseState();
-
-    const rows = safeArray(items);
-    const filteredRows = getFilteredFacturasItems(rows);
-
-    const totalPages = getTotalPages(rows);
-    const currentPage = getCurrentPage();
-    const nextPage = clampNumber(currentPage, 1, totalPages);
-
-    state.view.page = nextPage;
-    state.view.currentPage = nextPage;
-    state.view.facturasPage = nextPage;
-
-    state.view.pageSize = getPageSize();
-    state.view.facturasPageSize = getPageSize();
-
-    return {
-      page: nextPage,
-      currentPage: nextPage,
-      facturasPage: nextPage,
-
-      pageSize: getPageSize(),
-      facturasPageSize: getPageSize(),
-
-      totalPages,
-
-      totalCount: filteredRows.length,
-      totalMatched: filteredRows.length,
-      filteredCount: filteredRows.length,
-      unfilteredCount: rows.length,
-
-      remoteCount: safeNumber(
-        first(state.view.remoteCount, state.view.totalCount),
-        rows.length
-      ),
-
-      filter: getViewFilter(),
-      paymentFilter: getViewFilter(),
-      statusFilter: getViewFilter(),
-      activeFilter: getViewFilter(),
-      facturasFilter: getViewFilter(),
-
-      search: getViewSearch(),
-      searchQuery: getViewSearch(),
-      query: getViewSearch(),
-      q: getViewSearch(),
-      term: getViewSearch(),
-      keyword: getViewSearch(),
-      facturasSearch: getViewSearch(),
-
-      sort: getViewSort(),
-      sortBy: getViewSort(),
-      orderBy: getViewSort(),
-      sortMode: getViewSort(),
-      facturasSort: getViewSort(),
-    };
-  }
-
-  function goToPage(page = 1) {
-    if (isFacturasLoading(state) || isFacturasRefreshing(state)) {
-      return getCurrentPage();
-    }
-
-    const nextPage = setViewPage(page);
-
-    rerender();
-
-    return nextPage;
-  }
-
-  function goPrevPage() {
-    return goToPage(getCurrentPage() - 1);
-  }
-
-  function goNextPage() {
-    return goToPage(getCurrentPage() + 1);
-  }
-
-  /* =====================================================
      TEMPLATE STATE
   ===================================================== */
 
@@ -3671,7 +2806,6 @@ export const FacturasView = (() => {
       ...getFacturasTemplateState(state),
 
       error: safeText(state?.view?.error, ""),
-
       lastSyncAt: getFacturasLastSyncAt(state),
 
       selectedFacturaId: safeText(state?.view?.selectedFacturaId, ""),
@@ -3717,6 +2851,7 @@ export const FacturasView = (() => {
       rawRole: getCurrentRole(),
       isAdmin: isAdminUser(),
       canCreateFactura: canCreate,
+
       creating: Boolean(state?.actions?.creatingFacturaId || state?.actions?.creating),
       creatingFactura: Boolean(state?.actions?.creatingFacturaId || state?.actions?.creating),
     };
@@ -3733,33 +2868,7 @@ export const FacturasView = (() => {
 
       view: {
         ...safeObject(state.view),
-
-        page: getCurrentPage(),
-        currentPage: getCurrentPage(),
-        facturasPage: getCurrentPage(),
-
-        pageSize: getPageSize(),
-        facturasPageSize: getPageSize(),
-
-        filter: getViewFilter(),
-        paymentFilter: getViewFilter(),
-        statusFilter: getViewFilter(),
-        activeFilter: getViewFilter(),
-        facturasFilter: getViewFilter(),
-
-        search: getViewSearch(),
-        searchQuery: getViewSearch(),
-        query: getViewSearch(),
-        q: getViewSearch(),
-        term: getViewSearch(),
-        keyword: getViewSearch(),
-        facturasSearch: getViewSearch(),
-
-        sort: getViewSort(),
-        sortBy: getViewSort(),
-        orderBy: getViewSort(),
-        sortMode: getViewSort(),
-        facturasSort: getViewSort(),
+        ...templateState,
       },
 
       actions: {
@@ -3771,6 +2880,10 @@ export const FacturasView = (() => {
       },
     };
   }
+
+  /* =====================================================
+     DETAIL STATE
+  ===================================================== */
 
   function setDetail(data = null, preferredFacturaId = "") {
     const patchedDetail = data
@@ -3804,7 +2917,7 @@ export const FacturasView = (() => {
   }
 
   /* =====================================================
-     CREATE FACTURA BRIDGE
+     CREATE FACTURA
   ===================================================== */
 
   async function createFactura(draft = {}) {
@@ -3872,7 +2985,7 @@ export const FacturasView = (() => {
   }
 
   /* =====================================================
-     PORTAL MODAL
+     DETAIL PORTAL
   ===================================================== */
 
   function getDetailRoot() {
@@ -3910,7 +3023,6 @@ export const FacturasView = (() => {
 
   function renderDetailPortal() {
     const root = ensureDetailRoot();
-
     const rawDetail = getFacturasDetailData(state);
 
     const detail = rawDetail
@@ -3935,9 +3047,7 @@ export const FacturasView = (() => {
 
     root.innerHTML = renderFacturasDetailModal({
       detailOpen,
-
       detailLoading: Boolean(state?.detail?.loading),
-
       factura: detail,
 
       sendingFacturaId: safeText(state?.actions?.sendingFacturaId, ""),
@@ -4008,7 +3118,6 @@ export const FacturasView = (() => {
         event.preventDefault();
 
         const facturaId = safeText(pdfBtn.dataset.facturaId, "");
-
         if (!facturaId) return;
 
         await openFacturaPdf(facturaId);
@@ -4023,7 +3132,6 @@ export const FacturasView = (() => {
         event.preventDefault();
 
         const facturaId = safeText(downloadBtn.dataset.facturaId, "");
-
         if (!facturaId) return;
 
         await downloadFacturaPdf(facturaId);
@@ -4036,7 +3144,6 @@ export const FacturasView = (() => {
         event.preventDefault();
 
         const facturaId = safeText(sendBtn.dataset.facturaId, "");
-
         if (!facturaId) return;
 
         await sendFacturaToClient(facturaId);
@@ -4065,28 +3172,17 @@ export const FacturasView = (() => {
     };
   }
 
-  /* =====================================================
-     TEMPLATE
-  ===================================================== */
+  function renderDetailOnly() {
+    if (!isFacturasHydrated(state)) return null;
 
-  function renderBody({
-    items = [],
-    templateState = {},
-  } = {}) {
-    if (templateState.loading && !items.length) {
-      return renderLoadingState({ includeStyles: false });
-    }
+    renderDetailPortal();
 
-    if (templateState.error && !items.length) {
-      return renderErrorState(templateState.error, { includeStyles: false });
-    }
-
-    return renderCards({
-      items,
-      state: templateState,
-      includeStyles: false,
-    });
+    return true;
   }
+
+  /* =====================================================
+     RENDER
+  ===================================================== */
 
   function buildHtml() {
     ensureBaseState();
@@ -4102,33 +3198,46 @@ export const FacturasView = (() => {
     return `
       <section
         class="panel-content dashboard ready"
+        data-facturas-panel="true"
         data-facturas-scope="${escapeHtml(SCOPE)}"
       >
-        <div
-          class="content-wrapper"
-          style="
-            display:grid;
-            gap:var(--space-lg);
-          "
-        >
-          ${renderHeader({
+        <div class="content-wrapper facturas-view__content">
+          ${renderFacturasTemplate({
             items,
             state: templateState,
-            includeStyles: true,
-          })}
 
-          ${renderBody({
-            items,
-            templateState,
+            totalCount: templateState.totalCount,
+            totalMatched: templateState.totalMatched,
+            remoteCount: templateState.remoteCount,
+            totalPages: templateState.totalPages,
+
+            page: templateState.page,
+            pageSize: templateState.pageSize,
+
+            filter: templateState.filter,
+            paymentFilter: templateState.paymentFilter,
+            statusFilter: templateState.statusFilter,
+            activeFilter: templateState.activeFilter,
+            facturasFilter: templateState.facturasFilter,
+
+            search: templateState.search,
+            searchQuery: templateState.searchQuery,
+            query: templateState.query,
+            q: templateState.q,
+            term: templateState.term,
+            keyword: templateState.keyword,
+            facturasSearch: templateState.facturasSearch,
+
+            sort: templateState.sort,
+            sortBy: templateState.sortBy,
+            orderBy: templateState.orderBy,
+            sortMode: templateState.sortMode,
+            facturasSort: templateState.facturasSort,
           })}
         </div>
       </section>
     `;
   }
-
-  /* =====================================================
-     RENDER
-  ===================================================== */
 
   function render() {
     const container = getContainer();
@@ -4139,6 +3248,7 @@ export const FacturasView = (() => {
 
     container.innerHTML = buildHtml();
 
+    bindFacturasTemplateDom(container);
     renderDetailPortal();
 
     setFacturasHydrated(state, true);
@@ -4149,7 +3259,7 @@ export const FacturasView = (() => {
   function rerender() {
     if (destroyed) return null;
 
-    cancelPendingRender();
+    cancelScheduledRender();
 
     const result = render();
 
@@ -4163,30 +3273,18 @@ export const FacturasView = (() => {
   function scheduleRerender() {
     if (destroyed) return null;
 
-    if (pendingRenderFrame) {
-      return pendingRenderFrame;
-    }
+    if (renderFrame) return renderFrame;
 
-    pendingRenderFrame = requestFrame(() => {
-      pendingRenderFrame = 0;
+    renderFrame = requestFrame(() => {
+      renderFrame = 0;
       rerender();
     });
 
-    return pendingRenderFrame;
-  }
-
-  function renderDetailOnly() {
-    if (!isFacturasHydrated(state)) {
-      return null;
-    }
-
-    renderDetailPortal();
-
-    return true;
+    return renderFrame;
   }
 
   /* =====================================================
-     DATA LOADERS
+     LOADERS
   ===================================================== */
 
   async function loadFacturas({
@@ -4196,9 +3294,7 @@ export const FacturasView = (() => {
   } = {}) {
     if (destroyed) return getItems();
 
-    if (inflightLoad) {
-      return inflightLoad;
-    }
+    if (inflightLoad) return inflightLoad;
 
     inflightLoad = (async () => {
       const hasData = getItems().length > 0;
@@ -4220,10 +3316,8 @@ export const FacturasView = (() => {
 
         setFacturasLoading(state, false);
         setFacturasRefreshing(state, false);
-
         setFacturasLoaded(state, true);
         setFacturasBootstrapped(state, true);
-
         setFacturasLastSyncAt(state, new Date().toISOString());
 
         clampPageAgainstItems(getItems());
@@ -4273,7 +3367,6 @@ export const FacturasView = (() => {
 
   async function loadFacturaDetail(id = "") {
     const facturaId = safeText(id, "");
-
     if (!facturaId) return null;
 
     state.view.selectedFacturaId = facturaId;
@@ -4401,6 +3494,7 @@ export const FacturasView = (() => {
       });
 
       showToast("No se pudo abrir la factura.", "error");
+
       return null;
     } finally {
       setFacturasOpeningFacturaId(state, "");
@@ -4533,15 +3627,14 @@ export const FacturasView = (() => {
   function exportFacturasCsv() {
     const items = getItems();
     const filteredItems = getFilteredFacturasItems(items);
-    const hasActiveCriteria =
-      getViewFilter() !== "all" ||
-      Boolean(getViewSearch()) ||
-      getViewSort() !== DEFAULT_FACTURAS_SORT;
 
-    const exportingItems = hasActiveCriteria ? filteredItems : items;
+    const hasActiveCriteria =
+      getViewFilter() !== DEFAULT_FILTER ||
+      Boolean(getViewSearch()) ||
+      getViewSort() !== DEFAULT_SORT;
 
     return exportFacturasCsvAction({
-      items: exportingItems,
+      items: hasActiveCriteria ? filteredItems : items,
       filenamePrefix: hasActiveCriteria
         ? "facturas-filtradas"
         : "facturas",
@@ -4549,8 +3642,165 @@ export const FacturasView = (() => {
   }
 
   /* =====================================================
-     SEARCH / GLOBAL OPEN BRIDGE
+     EXTERNAL OPEN / URL / SEARCH BRIDGE
   ===================================================== */
+
+  function getFacturaIdFromSearchPayload(payload = {}) {
+    if (typeof payload === "string" || typeof payload === "number") {
+      return safeText(payload, "");
+    }
+
+    const source = safeObject(payload);
+    const item = safeObject(source.item);
+    const detail = safeObject(source.detail);
+    const factura = safeObject(source.factura);
+    const invoice = safeObject(source.invoice);
+    const raw = safeObject(first(source.raw, item.raw, factura.raw, invoice.raw));
+
+    const direct = safeText(
+      first(
+        source.facturaId,
+        source.invoiceId,
+        source.id,
+        source._id,
+        source.entityId,
+        source.value,
+        source.key,
+        source.code,
+
+        detail.facturaId,
+        detail.invoiceId,
+        detail.id,
+        detail._id,
+        detail.numero,
+        detail.numeroFactura,
+        detail.numeroFacturaLegal,
+        detail.numeroFacturaSistema,
+
+        factura.facturaId,
+        factura.invoiceId,
+        factura.id,
+        factura._id,
+        factura.numero,
+        factura.numeroFactura,
+        factura.numeroFacturaLegal,
+        factura.numeroFacturaSistema,
+
+        invoice.facturaId,
+        invoice.invoiceId,
+        invoice.id,
+        invoice._id,
+        invoice.numero,
+        invoice.numeroFactura,
+        invoice.numeroFacturaLegal,
+        invoice.numeroFacturaSistema,
+
+        item.entityId,
+        item.facturaId,
+        item.invoiceId,
+        item.id,
+        item._id,
+        item.value,
+        item.key,
+        item.code,
+
+        raw.facturaId,
+        raw.invoiceId,
+        raw.id,
+        raw._id,
+        raw.numero,
+        raw.numeroFactura,
+        raw.numeroFacturaLegal,
+        raw.numeroFacturaSistema
+      ),
+      ""
+    );
+
+    if (direct) return direct;
+
+    try {
+      const href = safeText(first(source.href, source.url, item.href, item.url), "");
+
+      if (href) {
+        const url = new URL(href, window.location.origin);
+
+        for (const key of FACTURA_QUERY_KEYS) {
+          const value = safeText(url.searchParams.get(key), "");
+          if (value) return value;
+        }
+      }
+    } catch {}
+
+    return "";
+  }
+
+  function getFacturaIdFromLocation() {
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+
+      for (const key of FACTURA_QUERY_KEYS) {
+        const value = safeText(params.get(key), "");
+        if (value) return value;
+      }
+    } catch {}
+
+    return "";
+  }
+
+  function clearFacturaIdFromLocation() {
+    try {
+      const url = new URL(window.location.href);
+      const params = url.searchParams;
+
+      FACTURA_QUERY_KEYS.forEach((key) => {
+        params.delete(key);
+      });
+
+      const nextSearch = params.toString();
+
+      const nextUrl = [
+        url.pathname,
+        nextSearch ? `?${nextSearch}` : "",
+        url.hash || "",
+      ].join("");
+
+      window.history.replaceState(
+        window.history.state || {},
+        "",
+        nextUrl
+      );
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function extractExternalOpenPayload(eventOrPayload = {}) {
+    if (typeof eventOrPayload === "string" || typeof eventOrPayload === "number") {
+      return {
+        facturaId: safeText(eventOrPayload, ""),
+      };
+    }
+
+    if (eventOrPayload?.detail?.payload) {
+      return safeObject(eventOrPayload.detail.payload);
+    }
+
+    if (
+      eventOrPayload?.detail?.detail ||
+      eventOrPayload?.detail?.factura ||
+      eventOrPayload?.detail?.item
+    ) {
+      return safeObject(eventOrPayload.detail);
+    }
+
+    if (eventOrPayload?.detail && typeof eventOrPayload.detail === "object") {
+      return safeObject(eventOrPayload.detail);
+    }
+
+    return safeObject(eventOrPayload);
+  }
 
   async function openFacturaFromExternalRequest(payload = {}) {
     const source = extractExternalOpenPayload(payload);
@@ -4676,7 +3926,7 @@ export const FacturasView = (() => {
         return createFactura(draft);
       },
 
-      setFilter(filter = DEFAULT_FACTURAS_FILTER) {
+      setFilter(filter = DEFAULT_FILTER) {
         const next = setViewFilter(filter);
         rerender();
         return next;
@@ -4688,7 +3938,7 @@ export const FacturasView = (() => {
         return next;
       },
 
-      setSort(sort = DEFAULT_FACTURAS_SORT) {
+      setSort(sort = DEFAULT_SORT) {
         const next = setViewSort(sort);
         rerender();
         return next;
@@ -4746,15 +3996,11 @@ export const FacturasView = (() => {
     requestFrame(() => {
       try {
         const input = document.getElementById("facturas-search-input");
-
         if (!input) return;
 
         input.focus({ preventScroll: true });
 
-        if (
-          caret !== null &&
-          typeof input.setSelectionRange === "function"
-        ) {
+        if (caret !== null && typeof input.setSelectionRange === "function") {
           const nextCaret = Math.min(
             Math.max(Number(caret) || 0, 0),
             input.value.length
@@ -4799,7 +4045,7 @@ export const FacturasView = (() => {
           target.getAttribute("data-filter"),
           target.getAttribute("data-filter-status"),
           target.getAttribute("data-payment-filter"),
-          DEFAULT_FACTURAS_FILTER
+          DEFAULT_FILTER
         );
 
         setViewFilter(nextFilter);
@@ -4818,7 +4064,7 @@ export const FacturasView = (() => {
           target.getAttribute("data-sort"),
           target.getAttribute("data-sort-mode"),
           target.getAttribute("data-facturas-sort"),
-          DEFAULT_FACTURAS_SORT
+          DEFAULT_SORT
         );
 
         setViewSort(nextSort);
@@ -4838,7 +4084,6 @@ export const FacturasView = (() => {
 
         setViewSearch("");
         rerender();
-
         focusFacturasSearchInput(0);
 
         return;
@@ -4874,16 +4119,14 @@ export const FacturasView = (() => {
         : value.length;
 
       try {
-        window.clearTimeout(facturasSearchTimer);
+        window.clearTimeout(searchTimer);
       } catch {}
 
-      facturasSearchTimer = window.setTimeout(() => {
+      searchTimer = window.setTimeout(() => {
         const previous = getViewSearch();
         const next = normalizeWhitespace(value);
 
-        if (previous === next) {
-          return;
-        }
+        if (previous === next) return;
 
         setViewSearch(next);
         rerender();
@@ -4891,7 +4134,7 @@ export const FacturasView = (() => {
         if (next) {
           focusFacturasSearchInput(caret);
         }
-      }, FACTURAS_SEARCH_DEBOUNCE_MS);
+      }, SEARCH_DEBOUNCE_MS);
     };
 
     const onChange = (event) => {
@@ -4900,7 +4143,7 @@ export const FacturasView = (() => {
       );
 
       if (sortSelect && container.contains(sortSelect)) {
-        setViewSort(sortSelect.value || DEFAULT_FACTURAS_SORT);
+        setViewSort(sortSelect.value || DEFAULT_SORT);
         rerender();
         return;
       }
@@ -4951,10 +4194,10 @@ export const FacturasView = (() => {
       } catch {}
 
       try {
-        window.clearTimeout(facturasSearchTimer);
+        window.clearTimeout(searchTimer);
       } catch {}
 
-      facturasSearchTimer = 0;
+      searchTimer = 0;
     };
   }
 
@@ -4969,7 +4212,6 @@ export const FacturasView = (() => {
       scopeName: SCOPE,
 
       getContainer,
-
       getState: getBindingState,
 
       render: rerender,
@@ -4996,7 +4238,7 @@ export const FacturasView = (() => {
         rerender();
       },
 
-      setFilter(filter = DEFAULT_FACTURAS_FILTER) {
+      setFilter(filter = DEFAULT_FILTER) {
         setViewFilter(filter);
         rerender();
       },
@@ -5006,7 +4248,7 @@ export const FacturasView = (() => {
         rerender();
       },
 
-      setSort(sort = DEFAULT_FACTURAS_SORT) {
+      setSort(sort = DEFAULT_SORT) {
         setViewSort(sort);
         rerender();
       },
@@ -5025,9 +4267,12 @@ export const FacturasView = (() => {
     bindingsCleanup = typeof cleanup === "function" ? cleanup : null;
 
     bindFacturasFilterControls();
-
     attachCreateSuccessListener();
     attachSearchOpenListener();
+
+    try {
+      bindFacturasTemplateDom(getContainer());
+    } catch {}
   }
 
   /* =====================================================
@@ -5035,9 +4280,7 @@ export const FacturasView = (() => {
   ===================================================== */
 
   async function init() {
-    if (inflightInit) {
-      return inflightInit;
-    }
+    if (inflightInit) return inflightInit;
 
     if (initialized && !destroyed) {
       registerFacturasBridge();
@@ -5094,7 +4337,7 @@ export const FacturasView = (() => {
     initialized = false;
 
     nextRenderToken();
-    cancelPendingRender();
+    cancelScheduledRender();
 
     cleanupBindings();
     cleanupModalBindings();
@@ -5119,6 +4362,7 @@ export const FacturasView = (() => {
     inflightInit = null;
     inflightExternalOpen = null;
     inflightExternalOpenFacturaId = "";
+    lastAutoOpenedFacturaId = "";
 
     safeLog("destroy");
   }
@@ -5137,6 +4381,7 @@ export const FacturasView = (() => {
     scheduleRender: scheduleRerender,
 
     loadFacturas,
+
     openFactura,
     openFacturaFromExternalRequest,
     openFacturaFromLocationOnce,
@@ -5157,7 +4402,7 @@ export const FacturasView = (() => {
     goPrevPage,
     goNextPage,
 
-    setFilter(filter = DEFAULT_FACTURAS_FILTER) {
+    setFilter(filter = DEFAULT_FILTER) {
       const next = setViewFilter(filter);
       rerender();
       return next;
@@ -5169,7 +4414,7 @@ export const FacturasView = (() => {
       return next;
     },
 
-    setSort(sort = DEFAULT_FACTURAS_SORT) {
+    setSort(sort = DEFAULT_SORT) {
       const next = setViewSort(sort);
       rerender();
       return next;
@@ -5219,8 +4464,10 @@ export const FacturasView = (() => {
     getState() {
       return {
         ...getBindingState(),
+
         initialized,
         destroyed,
+
         hasInflightInit: Boolean(inflightInit),
         hasInflightLoad: Boolean(inflightLoad),
         hasInflightExternalOpen: Boolean(inflightExternalOpen),
@@ -5243,4 +4490,4 @@ export const FacturasView = (() => {
   return api;
 })();
 
-export default FacturasView;                        
+export default FacturasView;

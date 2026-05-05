@@ -4,6 +4,9 @@
 
    FINAL EXTREME SYSTEM · APPLE STYLE · PRO SAAS PANEL · 10/10
    TOKEN DRIVEN · ROUTER SAFE · DROPDOWN SAFE · TOOLTIP SAFE
+   PATCH · LOGO TOKEN SWITCH READY
+   PATCH · DROPDOWN TEXT DESCENDER SAFE
+   PATCH · LIGHT/DARK CLEAN CONTRACT
 
    ARQUITECTURA:
    - variables.css = tokens base / dark
@@ -409,14 +412,15 @@ body.app-navigating .sidebar-menu::before,
   position: relative;
   z-index: 2;
 
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-grid;
+  place-items: center;
 
   inline-size: var(--sidebar-logo-size);
   block-size: var(--sidebar-logo-size);
 
   flex: 0 0 auto;
+
+  overflow: hidden;
 
   border: 1px solid transparent;
   border-radius: var(--sidebar-logo-radius, var(--radius-md));
@@ -440,13 +444,28 @@ body.app-navigating .sidebar-menu::before,
 
 .logo img,
 .logo svg {
-  inline-size: 24px;
-  block-size: 24px;
+  display: block;
+
+  inline-size: var(--sidebar-logo-img-size, 24px);
+  block-size: var(--sidebar-logo-img-size, 24px);
 
   object-fit: contain;
+  object-position: center;
+
+  opacity: var(--sidebar-logo-opacity, .96);
+  filter: var(--sidebar-logo-filter, none);
 
   user-select: none;
+  pointer-events: none;
+
   -webkit-user-drag: none;
+
+  transform: translateZ(0);
+
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    filter var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-out);
 }
 
 .logo .logo-dark {
@@ -463,6 +482,12 @@ body.app-navigating .sidebar-menu::before,
   background: var(--sidebar-hover);
   border-color: color-mix(in srgb, var(--text-strong), transparent 96%);
   box-shadow: var(--shadow-xs);
+}
+
+.logo:hover img,
+.logo:hover svg {
+  opacity: 1;
+  transform: translateZ(0) scale(1.035);
 }
 
 .logo:active {
@@ -1660,7 +1685,7 @@ body.sidebar-collapsed .sidebar .avatar {
 
   clip-path: none;
   contain: none;
-  overflow: hidden;
+  overflow: visible;
   isolation: isolate;
 
   transition:
@@ -1745,9 +1770,13 @@ body.sidebar-collapsed .sidebar .user-dropdown {
   gap: var(--sidebar-dropdown-item-gap, 12px);
 
   inline-size: 100%;
-  min-block-size: var(--sidebar-dropdown-item-height, 40px);
+  min-inline-size: 0;
+  min-block-size: var(--sidebar-dropdown-item-height, 42px);
 
-  padding-inline: var(--sidebar-dropdown-item-padding-x, 12px);
+  padding:
+    var(--sidebar-dropdown-item-padding-y, 8px)
+    var(--sidebar-dropdown-item-padding-x, 12px)
+    calc(var(--sidebar-dropdown-item-padding-y, 8px) + 1px);
 
   border: 1px solid transparent;
   border-radius: var(--sidebar-dropdown-item-radius, 12px);
@@ -1758,7 +1787,7 @@ body.sidebar-collapsed .sidebar .user-dropdown {
   font: inherit;
   font-size: var(--font-md);
   font-weight: var(--weight-medium);
-  line-height: 1.15;
+  line-height: var(--sidebar-dropdown-item-line-height, 1.35);
   text-align: start;
   text-decoration: none;
 
@@ -1775,11 +1804,24 @@ body.sidebar-collapsed .sidebar .user-dropdown {
     opacity var(--duration-fast) var(--ease-standard);
 }
 
-.dropdown-item svg {
+.dropdown-item > span {
+  min-inline-size: 0;
+}
+
+.dropdown-item-icon {
+  display: inline-grid;
+  place-items: center;
+
   inline-size: 18px;
+  min-inline-size: 18px;
   block-size: 18px;
 
   flex: 0 0 auto;
+}
+
+.dropdown-item svg {
+  inline-size: 18px;
+  block-size: 18px;
 
   color: var(--sidebar-dropdown-icon);
   opacity: .94;
@@ -1790,12 +1832,23 @@ body.sidebar-collapsed .sidebar .user-dropdown {
     transform var(--duration-fast) var(--ease-out);
 }
 
-.dropdown-item span {
+.dropdown-item-label {
+  display: block;
+
+  flex: 1 1 auto;
+
   min-inline-size: 0;
+  max-inline-size: 100%;
 
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+
+  line-height: var(--sidebar-dropdown-item-label-line-height, 1.38);
+
+  padding-block:
+    var(--sidebar-dropdown-item-label-padding-start, 1px)
+    var(--sidebar-dropdown-item-label-padding-end, 2px);
 }
 
 .dropdown-item:hover {
@@ -1830,7 +1883,8 @@ body.sidebar-collapsed .sidebar .user-dropdown {
 }
 
 .dropdown-item-danger,
-.dropdown-item-danger span,
+.dropdown-item-danger .dropdown-item-label,
+.dropdown-item-danger .dropdown-item-icon,
 .dropdown-item-danger svg,
 .dropdown-item[data-action="logout"],
 .dropdown-item[data-sidebar-action="logout"] {
@@ -1845,11 +1899,14 @@ body.sidebar-collapsed .sidebar .user-dropdown {
   color: var(--sidebar-dropdown-danger);
 }
 
-.dropdown-item-danger:hover span,
+.dropdown-item-danger:hover .dropdown-item-label,
+.dropdown-item-danger:hover .dropdown-item-icon,
 .dropdown-item-danger:hover svg,
-.dropdown-item[data-action="logout"]:hover span,
+.dropdown-item[data-action="logout"]:hover .dropdown-item-label,
+.dropdown-item[data-action="logout"]:hover .dropdown-item-icon,
 .dropdown-item[data-action="logout"]:hover svg,
-.dropdown-item[data-sidebar-action="logout"]:hover span,
+.dropdown-item[data-sidebar-action="logout"]:hover .dropdown-item-label,
+.dropdown-item[data-sidebar-action="logout"]:hover .dropdown-item-icon,
 .dropdown-item[data-sidebar-action="logout"]:hover svg {
   color: var(--sidebar-dropdown-danger);
 }
@@ -1975,7 +2032,7 @@ body.sidebar-open [data-sidebar-overlay] {
     position: relative;
     inset: auto;
 
-    display: inline-flex !important;
+    display: inline-grid !important;
 
     opacity: 1 !important;
 

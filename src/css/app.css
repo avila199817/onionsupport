@@ -58,7 +58,7 @@
    VIEWS
 ========================================================= */
 
-@import url("./views/facturas/facturas.css") layer(views);
+@import url("./views/facturas.css") layer(views);
 
 
 /* Cuando montemos incidencias.css:

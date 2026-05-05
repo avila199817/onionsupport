@@ -25,16 +25,19 @@
    - soporte skip remote
    - soporte await Router.navigate()
    - limpieza auth namespaced + legacy
-   - limpieza AppCore/session/storage redundante
-   - eventos saneados sin tokens/passwords
+   - limpieza AppCore/session/storage redundante pero controlada
+   - eventos saneados sin tokens/passwords/secrets
    - fallback fetch compatible con apiBase
    - remote logout acepta 401/403/404 como sesión ya inválida
+   - no hace localStorage.clear()
+   - no toca theme/lang/rutas públicas técnicas/initial URLs
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 
 import {
   AUTH_ENDPOINTS,
+  AUTH_CONSTANTS,
 } from "./constants.js";
 
 import {
@@ -62,23 +65,29 @@ import {
 ========================================================= */
 
 export const AUTH_LOGOUT_VERSION =
-  "10.0.0";
+  "10.2.0";
 
-let logoutPromise = null;
-let logoutSequence = 0;
+let logoutPromise =
+  null;
+
+let logoutSequence =
+  0;
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-const DEFAULT_LOGOUT_TIMEOUT_MS =
-  6000;
-
 const DEFAULT_LOGIN_PATH =
   "/login";
 
+const DEFAULT_LOGOUT_TIMEOUT_MS =
+  6000;
+
+const LOGOUT_SOURCE =
+  "auth.logout";
+
 const ACCEPTED_REMOTE_LOGOUT_STATUSES =
-  Object.freeze([
+  new Set([
     200,
     202,
     204,
@@ -140,6 +149,8 @@ const KNOWN_AUTH_STORAGE_KEYS =
     "tempToken",
     "temporary_token",
     "temporaryToken",
+    "challenge_token",
+    "challengeToken",
     "two_factor_token",
     "twoFactorToken",
     "mfa_token",
@@ -149,6 +160,7 @@ const KNOWN_AUTH_STORAGE_KEYS =
     "session",
     "user",
     "role",
+    "rol",
     "session_id",
     "sessionId",
     "session_user_id",
@@ -196,12 +208,33 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
-function isObject(value) {
+function isPlainObject(value) {
   return (
     value !== null &&
     typeof value === "object" &&
     !Array.isArray(value)
   );
+}
+
+function safeObject(value) {
+  return isPlainObject(value)
+    ? value
+    : {};
+}
+
+function safeArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return [];
+  }
+
+  return [value];
 }
 
 function safeText(value, fallback = "") {
@@ -218,6 +251,15 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
+function safeNumber(value, fallback = 0) {
+  const numeric =
+    Number(value);
+
+  return Number.isFinite(numeric)
+    ? numeric
+    : fallback;
+}
+
 function safeBool(value, fallback = false) {
   if (typeof value === "boolean") {
     return value;
@@ -229,7 +271,8 @@ function safeBool(value, fallback = false) {
   }
 
   const text =
-    safeText(value, "").toLowerCase();
+    safeText(value, "")
+      .toLowerCase();
 
   if (
     [
@@ -259,36 +302,6 @@ function safeBool(value, fallback = false) {
   return Boolean(fallback);
 }
 
-function safeNumber(value, fallback = 0) {
-  const numeric =
-    Number(value);
-
-  return Number.isFinite(numeric)
-    ? numeric
-    : fallback;
-}
-
-function safeObject(value) {
-  return isObject(value)
-    ? value
-    : {};
-}
-
-function safeArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return [];
-  }
-
-  return [value];
-}
-
 function unique(values = []) {
   return Array.from(
     new Set(
@@ -302,6 +315,10 @@ function unique(values = []) {
   );
 }
 
+function nowMs() {
+  return Date.now();
+}
+
 function safeIsoDate(ms = Date.now()) {
   try {
     return new Date(ms).toISOString();
@@ -310,20 +327,48 @@ function safeIsoDate(ms = Date.now()) {
   }
 }
 
-function safeClone(value, fallback = null) {
+function getState() {
   try {
-    if (typeof structuredClone === "function") {
-      return structuredClone(value);
-    }
+    return AppCore?.state || {};
+  } catch {
+    return {};
+  }
+}
+
+function safeSetState(patch = {}, options = {}) {
+  const cleanPatch =
+    safeObject(patch);
+
+  try {
+    AppCore?.setState?.(
+      cleanPatch,
+      options
+    );
   } catch {}
 
   try {
-    return JSON.parse(
-      JSON.stringify(value)
+    if (
+      AppCore?.state &&
+      typeof AppCore.state === "object"
+    ) {
+      Object.assign(
+        AppCore.state,
+        cleanPatch
+      );
+    }
+  } catch {}
+
+  return getState();
+}
+
+function safeSetError(error = null) {
+  try {
+    AppCore?.setError?.(
+      error || null
     );
-  } catch {
-    return fallback;
-  }
+  } catch {}
+
+  return true;
 }
 
 function safeWarn(...args) {
@@ -335,46 +380,17 @@ function safeWarn(...args) {
   } catch {}
 
   try {
-    console.warn(
-      "[AuthLogout]",
-      ...args
-    );
-  } catch {}
-}
-
-function safeSetError(error = null) {
-  try {
-    AppCore?.setError?.(error);
-  } catch {}
-}
-
-function safeSetState(patch = {}) {
-  const safePatch =
-    safeObject(patch);
-
-  try {
-    AppCore?.setState?.(
-      safePatch
-    );
-  } catch {}
-
-  try {
-    if (
-      AppCore?.state &&
-      typeof AppCore.state === "object"
-    ) {
-      Object.assign(
-        AppCore.state,
-        safePatch
+    if (AppCore?.config?.debug) {
+      console.warn(
+        "[AuthLogout]",
+        ...args
       );
     }
   } catch {}
-
-  return AppCore?.state || {};
 }
 
 /* =========================================================
-   REDACTION / EVENTS
+   REDACTION / PUBLIC SNAPSHOTS
 ========================================================= */
 
 function redactSafe(value = "") {
@@ -402,7 +418,7 @@ function redactSafe(value = "") {
 }
 
 function sanitizeUser(user = null) {
-  if (!isObject(user)) {
+  if (!isPlainObject(user)) {
     return null;
   }
 
@@ -439,12 +455,13 @@ function sanitizeUser(user = null) {
       user.role ||
       user.rol ||
       user.userRole ||
+      user.user_role ||
       null,
 
     roles:
       Array.isArray(user.roles)
         ? user.roles
-        : undefined,
+        : [],
   };
 }
 
@@ -452,26 +469,34 @@ function sanitizeSnapshot(snapshot = {}) {
   const source =
     safeObject(snapshot);
 
+  const session =
+    safeObject(source.session);
+
   const user =
     source.user ||
     source.currentUser ||
     source.authUser ||
     source.sessionUser ||
-    source.session?.user ||
+    session.user ||
     null;
+
+  const token =
+    source.token ||
+    source.accessToken ||
+    source.access_token ||
+    session.token ||
+    session.accessToken ||
+    "";
 
   return {
     authenticated:
       Boolean(source.authenticated),
 
     hasToken:
-      Boolean(
-        source.token ||
-        source.accessToken ||
-        source.access_token ||
-        source.session?.token ||
-        source.session?.accessToken
-      ),
+      Boolean(token),
+
+    token:
+      null,
 
     user:
       sanitizeUser(user),
@@ -492,11 +517,13 @@ function sanitizeSnapshot(snapshot = {}) {
       source.username ||
       user?.username ||
       user?.userName ||
+      user?.user_name ||
       user?.email ||
       null,
 
     currentResolvedUsername:
       source.currentResolvedUsername ||
+      source.resolvedUsername ||
       null,
 
     route:
@@ -530,6 +557,7 @@ function sanitizeError(error = null) {
 
     status:
       error?.status ||
+      error?.statusCode ||
       error?.response?.status ||
       error?.data?.status ||
       0,
@@ -543,7 +571,7 @@ function sanitizeError(error = null) {
 }
 
 function sanitizeEventPayload(payload = {}, depth = 0) {
-  if (depth > 5) {
+  if (depth > 6) {
     return "[MaxDepth]";
   }
 
@@ -556,19 +584,10 @@ function sanitizeEventPayload(payload = {}, depth = 0) {
     );
   }
 
-  if (!isObject(payload)) {
+  if (!isPlainObject(payload)) {
     return typeof payload === "string"
       ? redactSafe(payload)
       : payload;
-  }
-
-  if (
-    payload.authenticated !== undefined ||
-    payload.token !== undefined ||
-    payload.accessToken !== undefined ||
-    payload.user !== undefined
-  ) {
-    return sanitizeSnapshot(payload);
   }
 
   const output = {};
@@ -582,7 +601,10 @@ function sanitizeEventPayload(payload = {}, depth = 0) {
       lower.includes("token") ||
       lower.includes("authorization") ||
       lower.includes("password") ||
+      lower.includes("secret") ||
       lower === "code" ||
+      lower === "otp" ||
+      lower === "totp" ||
       lower === "t"
     ) {
       output[key] =
@@ -601,7 +623,19 @@ function sanitizeEventPayload(payload = {}, depth = 0) {
     }
 
     if (
+      lower === "user" ||
+      lower === "currentuser" ||
+      lower === "sessionuser" ||
+      lower === "authuser"
+    ) {
+      output[key] =
+        sanitizeUser(value);
+      continue;
+    }
+
+    if (
       lower === "error" ||
+      lower.endsWith("error") ||
       lower.includes("error")
     ) {
       output[key] =
@@ -635,43 +669,72 @@ function sanitizeEventPayload(payload = {}, depth = 0) {
 }
 
 function safeEmit(eventName, payload = {}) {
-  const cleanEvent =
+  const name =
     safeText(eventName, "");
 
-  if (!cleanEvent) {
+  if (!name) {
     return false;
   }
 
   const cleanPayload =
     sanitizeEventPayload(payload);
 
+  let emitted =
+    false;
+
   try {
     AppCore?.events?.emit?.(
-      cleanEvent,
+      name,
       cleanPayload
     );
+
+    emitted =
+      true;
   } catch {}
 
   try {
-    globalThis?.window?.AppCore?.events?.emit?.(
-      cleanEvent,
-      cleanPayload
-    );
+    if (
+      isBrowser() &&
+      window?.AppCore?.events?.emit &&
+      window.AppCore !== AppCore
+    ) {
+      window.AppCore.events.emit(
+        name,
+        cleanPayload
+      );
+
+      emitted =
+        true;
+    }
   } catch {}
 
-  return true;
+  try {
+    if (
+      isBrowser() &&
+      !emitted
+    ) {
+      document.dispatchEvent(
+        new CustomEvent(name, {
+          detail:
+            cleanPayload,
+          bubbles:
+            false,
+          cancelable:
+            false,
+        })
+      );
+
+      emitted =
+        true;
+    }
+  } catch {}
+
+  return emitted;
 }
 
 /* =========================================================
-   RESOLUTION
+   PATH / ROUTER RESOLUTION
 ========================================================= */
-
-function resolveLogoutEndpoint() {
-  return safeText(
-    AUTH_ENDPOINTS?.logout,
-    "/api/auth/logout"
-  );
-}
 
 function normalizePathSafe(path = "/") {
   try {
@@ -683,7 +746,8 @@ function normalizePathSafe(path = "/") {
         .replace(/\/{2,}/g, "/");
 
     if (!value.startsWith("/")) {
-      value = `/${value}`;
+      value =
+        `/${value}`;
     }
 
     return value || "/";
@@ -694,9 +758,11 @@ function normalizeCanonicalPathSafe(path = "/") {
   try {
     return normalizeCanonicalPath(path);
   } catch {
-    return normalizePathSafe(path)
-      .split("?")[0]
-      .split("#")[0] || "/";
+    return (
+      normalizePathSafe(path)
+        .split("?")[0]
+        .split("#")[0] || "/"
+    );
   }
 }
 
@@ -717,15 +783,25 @@ function isSafeRelativePathSafe(path = "") {
   }
 }
 
+function resolveLogoutEndpoint() {
+  return safeText(
+    AUTH_ENDPOINTS?.logout,
+    "/api/auth/logout"
+  );
+}
+
 function resolveLoginPath() {
   const configured =
     safeText(
-      AppCore?.config?.routes?.login,
+      AppCore?.config?.routes?.login ||
+        AppCore?.config?.loginPath,
       DEFAULT_LOGIN_PATH
     );
 
   const normalized =
-    normalizePathSafe(configured || DEFAULT_LOGIN_PATH);
+    normalizePathSafe(
+      configured || DEFAULT_LOGIN_PATH
+    );
 
   return isSafeRelativePathSafe(normalized)
     ? normalized
@@ -736,40 +812,15 @@ function resolveRedirect(target = "") {
   const fallback =
     resolveLoginPath();
 
+  const raw =
+    safeText(target, "");
+
   const candidate =
-    normalizePathSafe(
-      safeText(target || fallback, fallback)
-    );
+    normalizePathSafe(raw || fallback);
 
-  if (isSafeRelativePathSafe(candidate)) {
-    return candidate;
-  }
-
-  return fallback;
-}
-
-function buildLogoutBody() {
-  return {
-    refreshToken:
-      safeText(getStoredRefreshToken(), ""),
-
-    sessionId:
-      safeText(getStoredSessionId(), ""),
-
-    userId:
-      safeText(getStoredSessionUserId(), ""),
-  };
-}
-
-function getCurrentToken() {
-  return safeText(
-    AppCore?.state?.token ||
-      AppCore?.state?.accessToken ||
-      AppCore?.state?.session?.token ||
-      AppCore?.state?.session?.accessToken ||
-      "",
-    ""
-  );
+  return isSafeRelativePathSafe(candidate)
+    ? candidate
+    : fallback;
 }
 
 function getRouter() {
@@ -802,77 +853,65 @@ function getRouter() {
     } catch {}
   }
 
-  return candidates.find((candidate) =>
-    candidate &&
-    (
-      isFunction(candidate.navigate) ||
-      isFunction(candidate.go)
-    )
-  ) || null;
+  return (
+    candidates.find((candidate) =>
+      candidate &&
+      (
+        isFunction(candidate.navigate) ||
+        isFunction(candidate.go)
+      )
+    ) || null
+  );
 }
-
-function buildFinalUrl(endpoint = "") {
-  const clean =
-    safeText(endpoint, "");
-
-  if (!clean) {
-    return "/api/auth/logout";
-  }
-
-  if (/^https?:\/\//i.test(clean)) {
-    return clean;
-  }
-
-  const apiBase =
-    safeText(
-      AppCore?.config?.apiBase ||
-      AppCore?.config?.api?.baseUrl ||
-      AppCore?.config?.api?.base ||
-      "",
-      ""
-    );
-
-  if (!apiBase) {
-    return clean;
-  }
-
-  return `${apiBase.replace(/\/+$/g, "")}${clean.startsWith("/") ? clean : `/${clean}`}`;
-}
-
-/* =========================================================
-   NAVIGATION
-========================================================= */
 
 function updateCoreRouteState(path = DEFAULT_LOGIN_PATH) {
   const publicPath =
     resolveRedirect(path);
 
-  const canonicalPath =
+  const route =
     normalizeCanonicalPathSafe(publicPath);
 
   try {
-    AppCore?.setRoute?.(canonicalPath);
+    AppCore?.setRoute?.(
+      route
+    );
   } catch {}
 
   try {
-    AppCore?.setPublicPath?.(publicPath);
+    AppCore?.setPublicPath?.(
+      publicPath
+    );
   } catch {}
 
   safeSetState({
-    route:
-      canonicalPath,
+    route,
     publicPath,
   });
 
   return {
-    route:
-      canonicalPath,
+    route,
     publicPath,
   };
 }
 
+function buildPopStateEvent() {
+  try {
+    return new PopStateEvent(
+      "popstate"
+    );
+  } catch {
+    try {
+      return new Event(
+        "popstate"
+      );
+    } catch {
+      return null;
+    }
+  }
+}
+
 async function navigateTo(path = DEFAULT_LOGIN_PATH, options = {}) {
-  const finalPath =
+  const target =
     resolveRedirect(path);
 
   const replaceState =
@@ -892,7 +931,7 @@ async function navigateTo(path = DEFAULT_LOGIN_PATH, options = {}) {
       if (isFunction(router?.navigate)) {
         const result =
           router.navigate(
-            finalPath,
+            target,
             {
               replaceState,
               force,
@@ -906,22 +945,22 @@ async function navigateTo(path = DEFAULT_LOGIN_PATH, options = {}) {
           await result;
         }
 
-        updateCoreRouteState(finalPath);
+        updateCoreRouteState(target);
 
         return {
           ok:
             true,
           reason:
-            "router",
+            "router.navigate",
           path:
-            finalPath,
+            target,
         };
       }
 
       if (isFunction(router?.go)) {
         const result =
           router.go(
-            finalPath,
+            target,
             {
               replaceState,
               force,
@@ -935,15 +974,15 @@ async function navigateTo(path = DEFAULT_LOGIN_PATH, options = {}) {
           await result;
         }
 
-        updateCoreRouteState(finalPath);
+        updateCoreRouteState(target);
 
         return {
           ok:
             true,
           reason:
-            "router-go",
+            "router.go",
           path:
-            finalPath,
+            target,
         };
       }
     } catch (error) {
@@ -956,7 +995,13 @@ async function navigateTo(path = DEFAULT_LOGIN_PATH, options = {}) {
     try {
       if (isFunction(AppCore?.navigate)) {
         const result =
-          AppCore.navigate(finalPath);
+          AppCore.navigate(
+            target,
+            {
+              replaceState,
+              force,
+            }
+          );
 
         if (
           result &&
@@ -965,15 +1010,15 @@ async function navigateTo(path = DEFAULT_LOGIN_PATH, options = {}) {
           await result;
         }
 
-        updateCoreRouteState(finalPath);
+        updateCoreRouteState(target);
 
         return {
           ok:
             true,
           reason:
-            "appcore-navigate",
+            "AppCore.navigate",
           path:
-            finalPath,
+            target,
         };
       }
     } catch (error) {
@@ -982,14 +1027,76 @@ async function navigateTo(path = DEFAULT_LOGIN_PATH, options = {}) {
         error
       );
     }
+
+    try {
+      if (
+        isBrowser() &&
+        window.history?.replaceState
+      ) {
+        if (replaceState) {
+          window.history.replaceState(
+            {
+              path:
+                target,
+              publicPath:
+                target,
+              canonicalPath:
+                normalizeCanonicalPathSafe(target),
+              source:
+                LOGOUT_SOURCE,
+            },
+            "",
+            target
+          );
+        } else {
+          window.history.pushState(
+            {
+              path:
+                target,
+              publicPath:
+                target,
+              canonicalPath:
+                normalizeCanonicalPathSafe(target),
+              source:
+                LOGOUT_SOURCE,
+            },
+            "",
+            target
+          );
+        }
+
+        updateCoreRouteState(target);
+
+        const event =
+          buildPopStateEvent();
+
+        if (event) {
+          window.dispatchEvent(event);
+        }
+
+        return {
+          ok:
+            true,
+          reason:
+            "history",
+          path:
+            target,
+        };
+      }
+    } catch (error) {
+      safeWarn(
+        "history logout navigation falló.",
+        error
+      );
+    }
   }
 
   if (isBrowser()) {
     try {
       if (replaceState) {
-        window.location.replace(finalPath);
+        window.location.replace(target);
       } else {
-        window.location.assign(finalPath);
+        window.location.assign(target);
       }
 
       return {
@@ -998,26 +1105,26 @@ async function navigateTo(path = DEFAULT_LOGIN_PATH, options = {}) {
         reason:
           "browser",
         path:
-          finalPath,
+          target,
       };
     } catch {
       try {
         window.location.href =
-          finalPath;
+          target;
 
         return {
           ok:
             true,
           reason:
-            "browser-href",
+            "browser.href",
           path:
-            finalPath,
+            target,
         };
       } catch {}
     }
   }
 
-  updateCoreRouteState(finalPath);
+  updateCoreRouteState(target);
 
   return {
     ok:
@@ -1025,31 +1132,146 @@ async function navigateTo(path = DEFAULT_LOGIN_PATH, options = {}) {
     reason:
       "navigation-failed",
     path:
-      finalPath,
+      target,
   };
 }
 
 /* =========================================================
-   FETCH WITH TIMEOUT
+   REMOTE LOGOUT · TRANSPORT
 ========================================================= */
 
-async function fetchWithTimeout(url, options = {}, timeout = DEFAULT_LOGOUT_TIMEOUT_MS) {
+function getConfiguredTimeout(options = {}) {
+  return safeNumber(
+    options.timeout ??
+      options.timeoutMs ??
+      AUTH_CONSTANTS?.requestTimeout ??
+      DEFAULT_LOGOUT_TIMEOUT_MS,
+    DEFAULT_LOGOUT_TIMEOUT_MS
+  );
+}
+
+function buildLogoutBody() {
+  return {
+    refreshToken:
+      safeText(
+        getStoredRefreshToken(),
+        ""
+      ),
+
+    sessionId:
+      safeText(
+        getStoredSessionId(),
+        ""
+      ),
+
+    userId:
+      safeText(
+        getStoredSessionUserId(),
+        ""
+      ),
+  };
+}
+
+function getCurrentToken() {
+  const state =
+    getState();
+
+  return safeText(
+    state.token ||
+      state.accessToken ||
+      state.session?.token ||
+      state.session?.accessToken ||
+      "",
+    ""
+  );
+}
+
+function getApiBase() {
+  return safeText(
+    AppCore?.config?.apiBase ||
+      AppCore?.config?.api?.baseUrl ||
+      AppCore?.config?.api?.base ||
+      "",
+    ""
+  );
+}
+
+function joinApiUrl(apiBase = "", endpoint = "") {
+  const cleanEndpoint =
+    safeText(endpoint, "");
+
+  if (!cleanEndpoint) {
+    return "/api/auth/logout";
+  }
+
+  if (/^https?:\/\//i.test(cleanEndpoint)) {
+    return cleanEndpoint;
+  }
+
+  const base =
+    safeText(apiBase, "");
+
+  if (!base) {
+    return cleanEndpoint;
+  }
+
+  const normalizedBase =
+    base.replace(/\/+$/g, "");
+
+  let normalizedEndpoint =
+    cleanEndpoint.startsWith("/")
+      ? cleanEndpoint
+      : `/${cleanEndpoint}`;
+
+  /*
+    Evita /api/api/auth/logout si apiBase ya termina en /api.
+  */
+  if (
+    /\/api$/i.test(normalizedBase) &&
+    normalizedEndpoint.startsWith("/api/")
+  ) {
+    normalizedEndpoint =
+      normalizedEndpoint.replace(/^\/api/i, "");
+  }
+
+  return `${normalizedBase}${normalizedEndpoint}`;
+}
+
+function buildFinalUrl(endpoint = "") {
+  return joinApiUrl(
+    getApiBase(),
+    endpoint
+  );
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_LOGOUT_TIMEOUT_MS) {
   const controller =
     typeof AbortController !== "undefined"
       ? new AbortController()
       : null;
 
+  const ms =
+    Math.max(
+      0,
+      safeNumber(
+        timeoutMs,
+        DEFAULT_LOGOUT_TIMEOUT_MS
+      )
+    );
+
   const timer =
     controller
       ? setTimeout(() => {
           try {
-            controller.abort("logout-timeout");
+            controller.abort(
+              "logout-timeout"
+            );
           } catch {
             try {
               controller.abort();
             } catch {}
           }
-        }, Math.max(0, safeNumber(timeout, DEFAULT_LOGOUT_TIMEOUT_MS)))
+        }, ms)
       : null;
 
   try {
@@ -1065,19 +1287,28 @@ async function fetchWithTimeout(url, options = {}, timeout = DEFAULT_LOGOUT_TIME
   }
 }
 
-/* =========================================================
-   REMOTE LOGOUT
-========================================================= */
+function getHttpService() {
+  return (
+    AppCore?.http ||
+    AppCore?.Http ||
+    AppCore?.services?.http ||
+    AppCore?.services?.Http ||
+    null
+  );
+}
 
 function normalizeRemoteLogoutResult(result = null) {
-  if (result === null || result === undefined) {
+  if (
+    result === null ||
+    result === undefined
+  ) {
     return {
       ok:
         false,
-      status:
-        0,
       skipped:
         true,
+      status:
+        0,
     };
   }
 
@@ -1087,6 +1318,7 @@ function normalizeRemoteLogoutResult(result = null) {
         result?.statusCode ||
         result?.status_code ||
         result?.response?.status ||
+        result?.data?.status ||
         0,
       0
     );
@@ -1098,70 +1330,42 @@ function normalizeRemoteLogoutResult(result = null) {
         ? result.success
         : null;
 
+  const acceptedStatus =
+    ACCEPTED_REMOTE_LOGOUT_STATUSES.has(status);
+
   const ok =
     explicitOk !== null
-      ? explicitOk ||
-        ACCEPTED_REMOTE_LOGOUT_STATUSES.includes(status)
+      ? Boolean(explicitOk || acceptedStatus)
       : status === 0
         ? true
-        : ACCEPTED_REMOTE_LOGOUT_STATUSES.includes(status);
+        : acceptedStatus;
 
   return {
     ok,
-    status,
     skipped:
       false,
+    status,
     raw:
       result,
   };
 }
 
-async function requestRemoteLogout(options = {}) {
-  const endpoint =
-    resolveLogoutEndpoint();
-
-  const body =
-    buildLogoutBody();
-
-  const timeout =
-    safeNumber(
-      options.timeout ??
-        options.timeoutMs,
-      DEFAULT_LOGOUT_TIMEOUT_MS
-    );
-
-  const auth =
-    options.auth !== false;
-
-  const requestOptions = {
-    auth,
-    timeout,
-    silent:
-      true,
-    emitEvents:
-      options.emitRequestEvents === true,
-    storeError:
-      false,
-    expectedStatuses:
-      [...ACCEPTED_REMOTE_LOGOUT_STATUSES],
-    _skipAuthRefresh:
-      true,
-  };
-
-  if (isFunction(AppCore?.apiClient?.post)) {
-    const result =
-      await AppCore.apiClient.post(
-        endpoint,
-        body,
-        requestOptions
-      );
-
-    return normalizeRemoteLogoutResult(result);
+async function callApiClientRequest(apiClient, endpoint, body, requestOptions) {
+  if (!apiClient) {
+    return null;
   }
 
-  if (isFunction(AppCore?.apiClient?.request)) {
-    const result =
-      await AppCore.apiClient.request(
+  if (isFunction(apiClient.post)) {
+    return apiClient.post(
+      endpoint,
+      body,
+      requestOptions
+    );
+  }
+
+  if (isFunction(apiClient.request)) {
+    try {
+      return await apiClient.request(
         endpoint,
         {
           ...requestOptions,
@@ -1170,40 +1374,146 @@ async function requestRemoteLogout(options = {}) {
           body,
         }
       );
-
-    return normalizeRemoteLogoutResult(result);
+    } catch (firstError) {
+      try {
+        return await apiClient.request(
+          "POST",
+          endpoint,
+          {
+            ...requestOptions,
+            body,
+          }
+        );
+      } catch {
+        throw firstError;
+      }
+    }
   }
 
-  const http =
-    AppCore?.http ||
-    AppCore?.Http ||
-    AppCore?.services?.http ||
-    AppCore?.services?.Http ||
-    null;
+  return null;
+}
 
-  if (isFunction(http?.post)) {
-    const result =
-      await http.post(
-        endpoint,
-        body,
-        requestOptions
-      );
-
-    return normalizeRemoteLogoutResult(result);
+async function callHttpRequest(http, endpoint, body, requestOptions) {
+  if (!http) {
+    return null;
   }
 
-  if (isFunction(http?.request)) {
-    const result =
-      await http.request(
-        "POST",
+  if (isFunction(http.post)) {
+    return http.post(
+      endpoint,
+      body,
+      requestOptions
+    );
+  }
+
+  if (isFunction(http.request)) {
+    try {
+      return await http.request(
         endpoint,
         {
           ...requestOptions,
+          method:
+            "POST",
           body,
         }
       );
+    } catch (firstError) {
+      try {
+        return await http.request(
+          "POST",
+          endpoint,
+          {
+            ...requestOptions,
+            body,
+          }
+        );
+      } catch {
+        throw firstError;
+      }
+    }
+  }
 
-    return normalizeRemoteLogoutResult(result);
+  return null;
+}
+
+async function requestRemoteLogout(options = {}) {
+  const opts =
+    safeObject(options);
+
+  const endpoint =
+    resolveLogoutEndpoint();
+
+  const body =
+    buildLogoutBody();
+
+  const timeout =
+    getConfiguredTimeout(opts);
+
+  const auth =
+    opts.auth !== false;
+
+  const requestOptions = {
+    auth,
+    timeout,
+    timeoutMs:
+      timeout,
+
+    silent:
+      true,
+
+    storeError:
+      false,
+
+    emitEvents:
+      opts.emitRequestEvents === true,
+
+    expectedStatuses:
+      Array.from(
+        ACCEPTED_REMOTE_LOGOUT_STATUSES
+      ),
+
+    _skipAuthRefresh:
+      true,
+
+    skipAuthRefresh:
+      true,
+  };
+
+  const apiClient =
+    AppCore?.apiClient ||
+    AppCore?.services?.apiClient ||
+    AppCore?.services?.api ||
+    null;
+
+  const fromApiClient =
+    await callApiClientRequest(
+      apiClient,
+      endpoint,
+      body,
+      requestOptions
+    );
+
+  if (fromApiClient !== null) {
+    return normalizeRemoteLogoutResult(
+      fromApiClient
+    );
+  }
+
+  const http =
+    getHttpService();
+
+  const fromHttp =
+    await callHttpRequest(
+      http,
+      endpoint,
+      body,
+      requestOptions
+    );
+
+  if (fromHttp !== null) {
+    return normalizeRemoteLogoutResult(
+      fromHttp
+    );
   }
 
   if (isFunction(AppCore?.request)) {
@@ -1218,7 +1528,9 @@ async function requestRemoteLogout(options = {}) {
         }
       );
 
-    return normalizeRemoteLogoutResult(result);
+    return normalizeRemoteLogoutResult(
+      result
+    );
   }
 
   if (typeof fetch === "function") {
@@ -1261,7 +1573,10 @@ async function requestRemoteLogout(options = {}) {
     return normalizeRemoteLogoutResult({
       ok:
         response?.ok === true ||
-        ACCEPTED_REMOTE_LOGOUT_STATUSES.includes(response?.status),
+        ACCEPTED_REMOTE_LOGOUT_STATUSES.has(
+          response?.status
+        ),
+
       status:
         response?.status || 0,
     });
@@ -1271,7 +1586,7 @@ async function requestRemoteLogout(options = {}) {
 }
 
 /* =========================================================
-   LOCAL CLEAR
+   LOCAL CLEAR · STORAGE
 ========================================================= */
 
 function getStoragePrefixCandidates() {
@@ -1291,10 +1606,8 @@ function buildStorageClearCandidates() {
   const prefixes =
     getStoragePrefixCandidates();
 
-  const baseKeys =
-    unique([
-      ...KNOWN_AUTH_STORAGE_KEYS,
-
+  const configuredKeys =
+    [
       AppCore?.config?.storageKeys?.token,
       AppCore?.config?.storageKeys?.user,
       AppCore?.config?.storageKeys?.refreshToken,
@@ -1302,9 +1615,16 @@ function buildStorageClearCandidates() {
       AppCore?.config?.storageKeys?.sessionId,
       AppCore?.config?.storageKeys?.sessionUserId,
       AppCore?.config?.storageKeys?.role,
+    ];
+
+  const baseKeys =
+    unique([
+      ...KNOWN_AUTH_STORAGE_KEYS,
+      ...configuredKeys,
     ]);
 
-  const expanded = [];
+  const expanded =
+    [];
 
   for (const key of baseKeys) {
     expanded.push(key);
@@ -1315,7 +1635,9 @@ function buildStorageClearCandidates() {
       }
 
       if (!key.startsWith(`${prefix}_`)) {
-        expanded.push(`${prefix}_${key.replace(/[:.]/g, "_")}`);
+        expanded.push(
+          `${prefix}_${key.replace(/[:.]/g, "_")}`
+        );
       }
     }
 
@@ -1345,7 +1667,7 @@ function clearWebStorageKey(storage, key) {
   }
 }
 
-function clearKnownAuthStorage() {
+function clearKnownAuthWebStorage() {
   if (!isBrowser()) {
     return false;
   }
@@ -1378,18 +1700,18 @@ function clearKnownAuthStorage() {
 }
 
 function clearAppCoreStorage() {
+  const storage =
+    AppCore?.storage || null;
+
+  if (!storage) {
+    return false;
+  }
+
   const keys =
     buildStorageClearCandidates();
 
   let changed =
     false;
-
-  const storage =
-    AppCore?.storage || null;
-
-  if (!storage) {
-    return changed;
-  }
 
   for (const key of keys) {
     try {
@@ -1418,7 +1740,10 @@ function clearAppCoreStorage() {
 
     try {
       if (isFunction(storage.setRaw)) {
-        storage.setRaw(key, "");
+        storage.setRaw(
+          key,
+          ""
+        );
         changed = true;
         continue;
       }
@@ -1426,7 +1751,10 @@ function clearAppCoreStorage() {
 
     try {
       if (isFunction(storage.set)) {
-        storage.set(key, null);
+        storage.set(
+          key,
+          null
+        );
         changed = true;
       }
     } catch {}
@@ -1454,7 +1782,92 @@ function clearInFlightRequests() {
       AppCore?.http?.clearInFlight?.() || 0;
   } catch {}
 
+  try {
+    cleared +=
+      AppCore?.Http?.clearInFlight?.() || 0;
+  } catch {}
+
   return cleared;
+}
+
+/* =========================================================
+   LOCAL CLEAR · STATE / DOM
+========================================================= */
+
+function getClearAuthStatePatch(reason = "logout") {
+  return {
+    authenticated:
+      false,
+
+    hasToken:
+      false,
+
+    token:
+      null,
+
+    accessToken:
+      null,
+
+    user:
+      null,
+
+    currentUser:
+      null,
+
+    authUser:
+      null,
+
+    sessionUser:
+      null,
+
+    role:
+      "",
+
+    userRole:
+      "",
+
+    roles:
+      [],
+
+    isAdmin:
+      false,
+
+    isSupport:
+      false,
+
+    isManager:
+      false,
+
+    isClient:
+      false,
+
+    session:
+      null,
+
+    sessionId:
+      null,
+
+    sessionUserId:
+      null,
+
+    currentResolvedUsername:
+      null,
+
+    resolvedUsername:
+      null,
+
+    loginInProgress:
+      false,
+
+    twoFactorPending:
+      false,
+
+    tempToken:
+      null,
+
+    lastAuthSource:
+      reason,
+  };
 }
 
 function clearDomAuthState() {
@@ -1463,23 +1876,28 @@ function clearDomAuthState() {
   }
 
   try {
-    document.body?.setAttribute?.(
-      "data-authenticated",
-      "false"
-    );
-
     document.documentElement?.setAttribute?.(
       "data-authenticated",
       "false"
     );
 
-    document.body?.classList?.remove?.(
-      "route-app",
-      "app-authenticated"
+    document.body?.setAttribute?.(
+      "data-authenticated",
+      "false"
     );
 
     document.documentElement?.classList?.remove?.(
-      "app-authenticated"
+      "app-authenticated",
+      "route-app"
+    );
+
+    document.body?.classList?.remove?.(
+      "app-authenticated",
+      "route-app"
+    );
+
+    document.documentElement?.classList?.add?.(
+      "route-auth"
     );
 
     document.body?.classList?.add?.(
@@ -1502,72 +1920,65 @@ function clearDomAuthState() {
     }
   } catch {}
 
+  try {
+    const main =
+      document.getElementById("main-content");
+
+    if (main) {
+      main.setAttribute(
+        "aria-busy",
+        "false"
+      );
+    }
+  } catch {}
+
+  try {
+    const view =
+      document.getElementById("view-container");
+
+    if (view) {
+      view.setAttribute(
+        "aria-busy",
+        "false"
+      );
+    }
+  } catch {}
+
   return true;
 }
 
 function clearAppCoreSessionState(reason = "logout") {
   try {
-    AppCore?.clearSession?.();
-  } catch {}
+    AppCore?.clearSession?.({
+      silent:
+        true,
+      reason,
+    });
+  } catch {
+    try {
+      AppCore?.clearSession?.();
+    } catch {}
+  }
 
   try {
-    AppCore?.session?.clear?.();
-  } catch {}
-
-  safeSetState({
-    authenticated:
-      false,
-    hasToken:
-      false,
-
-    user:
-      null,
-    currentUser:
-      null,
-    authUser:
-      null,
-    sessionUser:
-      null,
-
-    role:
-      "",
-    userRole:
-      "",
-    roles:
-      [],
-
-    isAdmin:
-      false,
-    isSupport:
-      false,
-    isManager:
-      false,
-
-    token:
-      null,
-    accessToken:
-      null,
-
-    session:
-      null,
-    sessionId:
-      null,
-    sessionUserId:
-      null,
-
-    loginInProgress:
-      false,
-    twoFactorPending:
-      false,
-    tempToken:
-      null,
-
-    currentResolvedUsername:
-      null,
-
-    lastAuthSource:
+    AppCore?.session?.clear?.({
+      silent:
+        true,
       reason,
-  });
+    });
+  } catch {
+    try {
+      AppCore?.session?.clear?.();
+    } catch {}
+  }
+
+  safeSetState(
+    getClearAuthStatePatch(reason),
+    {
+      forceUnauthenticated:
+        true,
+    }
+  );
 
   try {
     AppCore?.syncUserUI?.();
@@ -1577,21 +1988,49 @@ function clearAppCoreSessionState(reason = "logout") {
 }
 
 function clearLocalSessionGuaranteed(options = {}) {
+  const opts =
+    safeObject(options);
+
   const reason =
-    safeText(options.reason, "logout");
+    safeText(
+      opts.reason,
+      "logout"
+    );
 
   const silent =
-    safeBool(options.silent, false);
+    safeBool(
+      opts.silent,
+      false
+    );
 
   try {
     clearSessionLocal({
       silent:
         true,
       reason,
+
+      /*
+        clearSessionLocal ya protege rutas técnicas públicas.
+        Aquí no forzamos preserveRoute salvo que venga explícito.
+      */
+      preserveRoute:
+        opts.preserveRoute === true,
+
+      preserveCurrentRoute:
+        opts.preserveCurrentRoute === true,
+
+      route:
+        opts.route,
+
+      publicPath:
+        opts.publicPath,
     });
   } catch {
     try {
-      clearSessionLocal();
+      clearSessionLocal({
+        silent:
+          true,
+      });
     } catch {}
   }
 
@@ -1606,9 +2045,9 @@ function clearLocalSessionGuaranteed(options = {}) {
 
   clearAppCoreSessionState(reason);
   clearAppCoreStorage();
-  clearKnownAuthStorage();
+  clearKnownAuthWebStorage();
 
-  if (options.clearInFlightRequests !== false) {
+  if (opts.clearInFlightRequests !== false) {
     clearInFlightRequests();
   }
 
@@ -1617,12 +2056,11 @@ function clearLocalSessionGuaranteed(options = {}) {
 
   if (!silent) {
     safeEmit(
-      "app:ui:repair-request",
+      "auth:logout:local-cleared",
       {
-        reason:
-          "logout-local-clear",
+        reason,
         source:
-          "auth.logout",
+          LOGOUT_SOURCE,
         authenticated:
           false,
         user:
@@ -1631,9 +2069,87 @@ function clearLocalSessionGuaranteed(options = {}) {
           null,
       }
     );
+
+    safeEmit(
+      "app:ui:repair-request",
+      {
+        reason:
+          "logout-local-clear",
+        source:
+          LOGOUT_SOURCE,
+        authenticated:
+          false,
+        user:
+          null,
+        role:
+          null,
+        repairShell:
+          false,
+        hardRepair:
+          false,
+        rebind:
+          false,
+      }
+    );
   }
 
   return true;
+}
+
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
+function buildSafeSessionSnapshot(extra = {}) {
+  try {
+    return buildSessionSnapshot({
+      ...extra,
+    });
+  } catch {
+    const state =
+      getState();
+
+    return {
+      authenticated:
+        Boolean(state.authenticated),
+
+      token:
+        state.token ||
+        state.accessToken ||
+        null,
+
+      accessToken:
+        state.accessToken ||
+        state.token ||
+        null,
+
+      user:
+        state.user ||
+        state.currentUser ||
+        state.authUser ||
+        state.sessionUser ||
+        state.session?.user ||
+        null,
+
+      role:
+        state.role ||
+        state.userRole ||
+        null,
+
+      roles:
+        Array.isArray(state.roles)
+          ? state.roles
+          : [],
+
+      route:
+        state.route || "/",
+
+      publicPath:
+        state.publicPath || "/",
+
+      ...extra,
+    };
+  }
 }
 
 /* =========================================================
@@ -1645,7 +2161,7 @@ async function executeLogout(options = {}) {
     ++logoutSequence;
 
   const startedAt =
-    Date.now();
+    nowMs();
 
   const opts =
     safeObject(options);
@@ -1656,46 +2172,31 @@ async function executeLogout(options = {}) {
     opts.target ??
     "";
 
-  const navigate =
+  const shouldNavigate =
     opts.navigate !== false &&
     opts.skipNavigate !== true;
 
-  const remote =
+  const shouldRemote =
     opts.remote !== false &&
     opts.skipRemote !== true;
 
   const silent =
-    safeBool(opts.silent, false);
+    safeBool(
+      opts.silent,
+      false
+    );
 
   const hardRedirect =
-    safeBool(opts.hardRedirect, false);
+    safeBool(
+      opts.hardRedirect,
+      false
+    );
 
-  let before =
-    null;
-
-  try {
-    before =
-      buildSessionSnapshot({
-        cause:
-          "logout",
-      });
-  } catch {
-    before =
-      {
-        authenticated:
-          Boolean(AppCore?.state?.authenticated),
-        token:
-          AppCore?.state?.token || null,
-        user:
-          AppCore?.state?.user || null,
-        role:
-          AppCore?.state?.role || null,
-        route:
-          AppCore?.state?.route || "",
-        publicPath:
-          AppCore?.state?.publicPath || "",
-      };
-  }
+  const before =
+    buildSafeSessionSnapshot({
+      cause:
+        "logout",
+    });
 
   if (!silent) {
     safeEmit(
@@ -1704,7 +2205,7 @@ async function executeLogout(options = {}) {
         sequence,
         before,
         source:
-          "auth.logout",
+          LOGOUT_SOURCE,
         at:
           safeIsoDate(),
       }
@@ -1717,7 +2218,7 @@ async function executeLogout(options = {}) {
   let remoteResult =
     null;
 
-  if (remote) {
+  if (shouldRemote) {
     try {
       remoteResult =
         await requestRemoteLogout(opts);
@@ -1729,12 +2230,12 @@ async function executeLogout(options = {}) {
             : "auth:logout:remote-soft-failure",
           {
             sequence,
-            status:
-              remoteResult?.status || null,
             ok:
               Boolean(remoteResult?.ok),
+            status:
+              remoteResult?.status || null,
             source:
-              "auth.logout",
+              LOGOUT_SOURCE,
           }
         );
       }
@@ -1743,7 +2244,7 @@ async function executeLogout(options = {}) {
         error;
 
       safeWarn(
-        "Logout remoto falló; logout local continuará.",
+        "Logout remoto falló; la limpieza local continúa.",
         error
       );
 
@@ -1756,7 +2257,7 @@ async function executeLogout(options = {}) {
             message:
               extractMessage(error),
             source:
-              "auth.logout",
+              LOGOUT_SOURCE,
           }
         );
       }
@@ -1769,14 +2270,14 @@ async function executeLogout(options = {}) {
         reason:
           "remote-disabled",
         source:
-          "auth.logout",
+          LOGOUT_SOURCE,
       }
     );
   }
 
   /*
-    Limpieza local SIEMPRE.
-    Aunque el backend falle, el cliente no debe conservar sesión.
+    Limpieza local garantizada.
+    El cliente no conserva sesión aunque el backend falle.
   */
   clearLocalSessionGuaranteed({
     ...opts,
@@ -1785,40 +2286,23 @@ async function executeLogout(options = {}) {
       "logout",
   });
 
-  let after =
-    null;
-
-  try {
-    after =
-      buildSessionSnapshot({
-        cause:
-          "logout",
-      });
-  } catch {
-    after =
-      {
-        authenticated:
-          false,
-        token:
-          null,
-        user:
-          null,
-        role:
-          null,
-        route:
-          AppCore?.state?.route || "",
-        publicPath:
-          AppCore?.state?.publicPath || "",
-      };
-  }
+  const after =
+    buildSafeSessionSnapshot({
+      cause:
+        "logout",
+    });
 
   const finalRedirect =
-    navigate
+    shouldNavigate
       ? resolveRedirect(redirectTo)
       : null;
 
-  let navigation =
-    null;
+  const remoteOk =
+    !remoteError &&
+    (
+      !shouldRemote ||
+      remoteResult?.ok !== false
+    );
 
   if (!silent) {
     safeEmit(
@@ -1827,19 +2311,19 @@ async function executeLogout(options = {}) {
         sequence,
         hadSession:
           Boolean(before?.authenticated),
-        remoteOk:
-          !remoteError &&
-          remoteResult?.ok !== false,
+        remoteOk,
         remoteStatus:
           remoteResult?.status || null,
+        remoteSkipped:
+          !shouldRemote,
         before,
         after,
         redirectTo:
           finalRedirect,
         durationMs:
-          Date.now() - startedAt,
+          nowMs() - startedAt,
         source:
-          "auth.logout",
+          LOGOUT_SOURCE,
       }
     );
 
@@ -1849,13 +2333,13 @@ async function executeLogout(options = {}) {
         sequence,
         hadSession:
           Boolean(before?.authenticated),
-        remoteOk:
-          !remoteError &&
-          remoteResult?.ok !== false,
+        remoteOk,
+        remoteSkipped:
+          !shouldRemote,
         redirectTo:
           finalRedirect,
         source:
-          "auth.logout",
+          LOGOUT_SOURCE,
       }
     );
 
@@ -1872,7 +2356,7 @@ async function executeLogout(options = {}) {
         role:
           null,
         source:
-          "auth.logout",
+          LOGOUT_SOURCE,
       }
     );
 
@@ -1887,7 +2371,22 @@ async function executeLogout(options = {}) {
         role:
           null,
         source:
-          "auth.logout",
+          LOGOUT_SOURCE,
+      }
+    );
+
+    safeEmit(
+      "auth:change",
+      {
+        sequence,
+        authenticated:
+          false,
+        user:
+          null,
+        role:
+          null,
+        source:
+          LOGOUT_SOURCE,
       }
     );
 
@@ -1902,13 +2401,16 @@ async function executeLogout(options = {}) {
         role:
           null,
         source:
-          "auth.logout",
+          LOGOUT_SOURCE,
       }
     );
   }
 
+  let navigation =
+    null;
+
   if (
-    navigate &&
+    shouldNavigate &&
     finalRedirect
   ) {
     navigation =
@@ -1917,8 +2419,10 @@ async function executeLogout(options = {}) {
         {
           replaceState:
             opts.replaceState !== false,
+
           force:
             opts.force !== false,
+
           hardRedirect,
         }
       );
@@ -1932,7 +2436,7 @@ async function executeLogout(options = {}) {
           redirectTo:
             finalRedirect,
           source:
-            "auth.logout",
+            LOGOUT_SOURCE,
         }
       );
     }
@@ -1942,15 +2446,16 @@ async function executeLogout(options = {}) {
     ok:
       true,
 
-    remoteOk:
-      !remoteError &&
-      remoteResult?.ok !== false,
+    recovered:
+      false,
+
+    remoteOk,
 
     remoteStatus:
       remoteResult?.status || null,
 
     remoteSkipped:
-      !remote,
+      !shouldRemote,
 
     error:
       sanitizeError(remoteError),
@@ -1967,7 +2472,7 @@ async function executeLogout(options = {}) {
     navigation,
 
     durationMs:
-      Date.now() - startedAt,
+      nowMs() - startedAt,
 
     sequence,
 
@@ -1991,8 +2496,8 @@ export async function logout(options = {}) {
         return await executeLogout(options);
       } catch (error) {
         /*
-          Última línea defensiva:
-          logout nunca debe dejar sesión viva por fallo accidental.
+          Última defensa:
+          logout nunca debe dejar sesión viva por un fallo accidental.
         */
         safeWarn(
           "Logout fatal recuperado con limpieza local.",
@@ -2016,20 +2521,23 @@ export async function logout(options = {}) {
             message:
               extractMessage(error),
             source:
-              "auth.logout",
+              LOGOUT_SOURCE,
           }
         );
 
+        const shouldNavigate =
+          options?.navigate !== false &&
+          options?.skipNavigate !== true;
+
         const redirectTo =
-          options?.navigate === false ||
-          options?.skipNavigate === true
-            ? null
-            : resolveRedirect(
+          shouldNavigate
+            ? resolveRedirect(
                 options?.redirectTo ||
                 options?.redirect ||
                 options?.target ||
                 ""
-              );
+              )
+            : null;
 
         let navigation =
           null;
@@ -2054,14 +2562,27 @@ export async function logout(options = {}) {
         return {
           ok:
             true,
+
           recovered:
             true,
+
           remoteOk:
             false,
+
+          remoteStatus:
+            null,
+
+          remoteSkipped:
+            options?.remote === false ||
+            options?.skipRemote === true,
+
           error:
             sanitizeError(error),
+
           redirectTo,
+
           navigation,
+
           version:
             AUTH_LOGOUT_VERSION,
         };
@@ -2082,6 +2603,12 @@ export function getLogoutSnapshot() {
   const body =
     buildLogoutBody();
 
+  const router =
+    getRouter();
+
+  const state =
+    getState();
+
   return {
     version:
       AUTH_LOGOUT_VERSION,
@@ -2095,16 +2622,25 @@ export function getLogoutSnapshot() {
     endpoint:
       resolveLogoutEndpoint(),
 
+    finalEndpointUrl:
+      redactSafe(
+        buildFinalUrl(
+          resolveLogoutEndpoint()
+        )
+      ),
+
     loginPath:
       resolveLoginPath(),
 
     authenticated:
-      Boolean(AppCore?.state?.authenticated),
+      Boolean(state.authenticated),
 
     hasToken:
       Boolean(
-        AppCore?.state?.token ||
-        AppCore?.state?.accessToken
+        state.token ||
+        state.accessToken ||
+        state.session?.token ||
+        state.session?.accessToken
       ),
 
     hasRefreshToken:
@@ -2117,24 +2653,31 @@ export function getLogoutSnapshot() {
       Boolean(body.userId),
 
     route:
-      redactSafe(AppCore?.state?.route || ""),
+      redactSafe(state.route || ""),
 
     publicPath:
-      redactSafe(AppCore?.state?.publicPath || ""),
+      redactSafe(state.publicPath || ""),
 
     hasRouter:
-      Boolean(getRouter()),
+      Boolean(router),
 
     routerCapabilities: {
       navigate:
-        Boolean(isFunction(getRouter()?.navigate)),
+        Boolean(
+          isFunction(router?.navigate)
+        ),
 
       go:
-        Boolean(isFunction(getRouter()?.go)),
+        Boolean(
+          isFunction(router?.go)
+        ),
     },
 
     storageClearKeys:
       buildStorageClearCandidates(),
+
+    at:
+      safeIsoDate(),
   };
 }
 

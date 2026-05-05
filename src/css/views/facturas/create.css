@@ -1,23 +1,22 @@
 /* =========================================================
    ONION SUPPORT — FACTURAS CREATE MODAL.CSS
-   Archivo: /src/css/views/facturas.create.css
+   Archivo: /src/css/views/facturas/create.css
 
    FACTURAS CREATE MODAL · TOKEN PRO SYSTEM · CSP CLEAN
    FINAL EXTREME 12/10 · MODO DIOS · NO CSS IN JS
+
    COMPATIBLE CON:
    - src/views/facturas/facturas.create.modal.js
 
-   OBJETIVO:
-   - modal premium de creación de factura
-   - scroll único en .fac-create-panel
-   - selección multi-cliente
-   - selección multi-incidencia
-   - búsqueda dinámica sin parpadeo visual
-   - total strip en tiempo real
-   - loading overlay pro
-   - diseño light/dark blindado
-   - responsive full power
-   - sin .facturas-detail-*
+   PATCH 10/10:
+   - Bloque Clientes/Incidencias primero sin tocar JS
+   - Header "Crear factura" más compacto y premium
+   - Footer NO sticky: queda debajo del contenido
+   - Botón final alineado dentro del modal
+   - Scroll único en .fac-create-panel
+   - Sin CSS inline
+   - Sin estilos inyectados por JS
+   - Tokens globales respetados
 ========================================================= */
 
 
@@ -120,6 +119,7 @@ body:has(.fac-create-overlay) {
 
   --fc-avatar-a: var(--accent);
   --fc-avatar-b: var(--info);
+
   --fc-avatar-bg:
     linear-gradient(
       135deg,
@@ -255,7 +255,7 @@ body:has(.fac-create-overlay) {
 
 
 /* =========================================================
-   HEADER
+   HEADER · COMPACT PREMIUM
 ========================================================= */
 
 .fac-create-header {
@@ -266,7 +266,10 @@ body:has(.fac-create-overlay) {
   gap: var(--space-lg);
   align-items: start;
   min-inline-size: 0;
-  padding: clamp(24px, 2.4vw, var(--space-xl));
+  padding:
+    clamp(18px, 1.8vw, 26px)
+    clamp(24px, 2.4vw, var(--space-xl))
+    clamp(16px, 1.7vw, 24px);
   border-bottom: 1px solid var(--fc-border-soft);
   background: var(--fc-hero-bg);
 }
@@ -276,38 +279,38 @@ body:has(.fac-create-overlay) {
   position: absolute;
   inset: auto -8% -42% 42%;
   z-index: -1;
-  block-size: 220px;
+  block-size: 180px;
   pointer-events: none;
   background:
     radial-gradient(
       circle,
-      color-mix(in srgb, var(--accent) 10%, transparent),
+      color-mix(in srgb, var(--accent) 8%, transparent),
       transparent 68%
     );
   filter: blur(12px);
-  opacity: .82;
+  opacity: .72;
 }
 
 .fac-create-header-copy {
   display: grid;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
   min-inline-size: 0;
 }
 
 .fac-create-header h2 {
   margin: 0;
-  max-inline-size: 980px;
+  max-inline-size: 760px;
   color: var(--text-strong);
-  font-size: clamp(42px, 5vw, 70px);
+  font-size: clamp(30px, 3.15vw, 44px);
   font-weight: var(--weight-black);
-  letter-spacing: -.058em;
-  line-height: .92;
+  letter-spacing: -.052em;
+  line-height: .96;
   text-wrap: balance;
 }
 
 .fac-create-header p {
   margin: 0;
-  max-inline-size: 86ch;
+  max-inline-size: 78ch;
   color: var(--text-muted);
   font-size: var(--font-sm);
   font-weight: var(--weight-semibold);
@@ -317,8 +320,8 @@ body:has(.fac-create-overlay) {
 
 .fac-create-close {
   appearance: none;
-  inline-size: calc(50px * var(--ui-scale));
-  block-size: calc(50px * var(--ui-scale));
+  inline-size: calc(46px * var(--ui-scale));
+  block-size: calc(46px * var(--ui-scale));
   padding: 0;
   border: 1px solid var(--btn-secondary-border);
   border-radius: var(--radius-xl);
@@ -368,13 +371,35 @@ body:has(.fac-create-overlay) {
   padding:
     var(--space-lg)
     clamp(24px, 2.4vw, var(--space-xl))
-    clamp(30px, 2.8vw, var(--space-xl));
+    clamp(24px, 2.6vw, var(--space-xl));
 }
 
 .fac-create-form {
   display: grid;
   gap: var(--space-lg);
   min-inline-size: 0;
+}
+
+/* Reorden visual sin tocar JS:
+   1) Clientes/incidencias
+   2) Campos de factura
+   3) Totales
+   4) Email
+   5) Footer */
+.fac-create-form > * {
+  order: 20;
+}
+
+.fac-create-form > .fac-create-target {
+  order: 1;
+}
+
+.fac-create-form > .fac-create-check {
+  order: 70;
+}
+
+.fac-create-form > .fac-create-actions {
+  order: 90;
 }
 
 .fac-create-grid {
@@ -599,7 +624,7 @@ body:has(.fac-create-overlay) {
 .fac-create-total-strip > div {
   position: relative;
   overflow: hidden;
-  min-block-size: calc(126px * var(--ui-scale));
+  min-block-size: calc(118px * var(--ui-scale));
   padding: var(--space-lg);
   border: 1px solid var(--card-border);
   border-radius: var(--radius-xl);
@@ -642,7 +667,7 @@ body:has(.fac-create-overlay) {
   min-inline-size: 0;
   overflow: hidden;
   color: var(--text-strong);
-  font-size: clamp(34px, 4vw, 52px);
+  font-size: clamp(32px, 3.5vw, 48px);
   font-weight: var(--weight-black);
   letter-spacing: var(--letter-tight);
   line-height: .92;
@@ -665,7 +690,7 @@ body:has(.fac-create-overlay) {
 
 
 /* =========================================================
-   TARGET SECTION
+   TARGET SECTION · FIRST BLOCK
 ========================================================= */
 
 .fac-create-target {
@@ -675,7 +700,7 @@ body:has(.fac-create-overlay) {
   display: grid;
   gap: var(--space-md);
   min-inline-size: 0;
-  padding: var(--space-xl);
+  padding: clamp(var(--space-lg), 2vw, var(--space-xl));
   border: 1px solid color-mix(in srgb, var(--card-border) 88%, transparent);
   border-radius: var(--radius-2xl, 26px);
   background:
@@ -742,9 +767,9 @@ body:has(.fac-create-overlay) {
 .fac-create-target-title-block h3 {
   margin: 0;
   color: var(--text-strong);
-  font-size: clamp(var(--font-xl), 2.2vw, var(--font-3xl));
+  font-size: clamp(21px, 1.7vw, 28px);
   font-weight: var(--weight-black);
-  letter-spacing: var(--letter-tight);
+  letter-spacing: -.04em;
   line-height: var(--line-tight);
 }
 
@@ -816,7 +841,7 @@ body:has(.fac-create-overlay) {
   align-content: start;
   gap: var(--space-md);
   min-inline-size: 0;
-  min-block-size: calc(360px * var(--ui-scale));
+  min-block-size: calc(340px * var(--ui-scale));
   padding: var(--space-md);
   border: 1px solid color-mix(in srgb, var(--card-border) 88%, transparent);
   border-radius: var(--radius-xl);
@@ -1464,30 +1489,27 @@ body:has(.fac-create-overlay) {
 
 
 /* =========================================================
-   STICKY ACTIONS / SUBMIT
+   FOOTER ACTIONS · STATIC / NO STICKY
 ========================================================= */
 
 .fac-create-actions {
-  position: sticky;
-  inset-block-end: calc(-1 * clamp(30px, 2.8vw, var(--space-xl)));
-  z-index: 8;
+  position: relative;
+  inset: auto;
+  z-index: 3;
   display: grid;
   grid-template-columns: 1fr;
   justify-items: end;
   gap: var(--space-md);
   align-items: center;
-  margin-inline: calc(-1 * clamp(24px, 2.4vw, var(--space-xl)));
-  margin-block-end: calc(-1 * clamp(30px, 2.8vw, var(--space-xl)));
-  padding: var(--space-md) clamp(24px, 2.4vw, var(--space-xl));
+  margin: 0;
+  padding:
+    var(--space-md)
+    0
+    0;
   border-top: 1px solid var(--fc-border-soft);
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--panel-bg) 74%, transparent),
-      var(--panel-bg)
-    );
-  backdrop-filter: blur(14px) saturate(1.08);
-  -webkit-backdrop-filter: blur(14px) saturate(1.08);
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .fac-create-action-buttons {
@@ -1669,12 +1691,7 @@ body:has(.fac-create-overlay) {
 }
 
 [data-theme="light"] .fac-create-actions {
-  background:
-    linear-gradient(
-      180deg,
-      rgba(255,255,255,.74),
-      var(--panel-bg)
-    );
+  background: transparent;
 }
 
 [data-theme="light"] .fac-create-submit,
@@ -1769,8 +1786,8 @@ body:has(.fac-create-overlay) {
   }
 
   .fac-create-header h2 {
-    font-size: clamp(34px, 10vw, 48px);
-    line-height: .96;
+    font-size: clamp(28px, 8vw, 38px);
+    line-height: .98;
   }
 
   .fac-create-header p {
@@ -1794,6 +1811,10 @@ body:has(.fac-create-overlay) {
 
   .fac-create-target-head {
     grid-template-columns: 1fr;
+  }
+
+  .fac-create-target-title-block h3 {
+    font-size: clamp(20px, 6vw, 26px);
   }
 
   .fac-create-target-metrics {
@@ -1823,13 +1844,9 @@ body:has(.fac-create-overlay) {
   }
 
   .fac-create-actions {
-    grid-template-columns: 1fr;
     justify-items: stretch;
     align-items: stretch;
-    margin-inline: calc(-1 * var(--space-md));
-    margin-block-end: calc(-1 * var(--space-lg));
-    inset-block-end: calc(-1 * var(--space-lg));
-    padding: var(--space-md);
+    padding-block-start: var(--space-md);
   }
 
   .fac-create-action-buttons,

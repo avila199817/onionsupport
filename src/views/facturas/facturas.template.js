@@ -2,9 +2,10 @@
    Onion SPA - Facturas Template
    Archivo: src/views/facturas/facturas.template.js
 
-   FINAL PRO SAAS PANEL · FACTURAS TEMPLATE · CSP CLEAN · 10/10
+   FINAL PRO SAAS PANEL · FACTURAS TEMPLATE · CSP CLEAN · 10/10 EXTREME
    PATCH · EXTERNAL CSS ONLY · NO STYLE INJECTION
    PATCH · NO INLINE STYLE · NO INLINE EVENTS
+   PATCH · NO NATIVE TITLE TOOLTIP · DATA-TOOLTIP ONLY
    PATCH · REAL TABLE LOCK · NO ::BEFORE ON <TR>
    PATCH · FILTERS + SORT + SEARCH · SINGLE DATA FLOW
    PATCH · AVATAR TONES VIA CSS CLASSES
@@ -16,6 +17,8 @@
    - No inyectar <style> desde JS.
    - No usar style="" dinámico.
    - No usar eventos inline.
+   - No usar title="" nativo.
+   - Usar data-tooltip + aria-label.
    - Tabla real blindada.
    - Filtros visuales: todas / pendientes / pagadas / vencidas.
    - Orden visual: fecha descendente / número de factura descendente.
@@ -67,12 +70,12 @@ const SORT_OPTIONS = Object.freeze([
   {
     key: "date_desc",
     label: "Fecha ↓",
-    title: "Ordenar por fecha de emisión de mayor a menor",
+    tooltip: "Ordenar por fecha de emisión de mayor a menor",
   },
   {
     key: "invoice_desc",
     label: "Nº factura ↓",
-    title: "Ordenar por número de factura de mayor a menor",
+    tooltip: "Ordenar por número de factura de mayor a menor",
   },
 ]);
 
@@ -84,7 +87,6 @@ function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
 
   const text = String(value).trim();
-
   return text || fallback;
 }
 
@@ -108,22 +110,19 @@ function safeNumber(value, fallback = 0) {
       const lastComma = normalized.lastIndexOf(",");
       const lastDot = normalized.lastIndexOf(".");
 
-      if (lastComma > lastDot) {
-        normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
-      } else {
-        normalized = normalized.replace(/,/g, "");
-      }
+      normalized =
+        lastComma > lastDot
+          ? normalized.replace(/\./g, "").replace(/,/g, ".")
+          : normalized.replace(/,/g, "");
     } else if (hasComma) {
       normalized = normalized.replace(/,/g, ".");
     }
 
     const n = Number(normalized);
-
     return Number.isFinite(n) ? n : fallback;
   }
 
   const n = Number(value);
-
   return Number.isFinite(n) ? n : fallback;
 }
 
@@ -184,7 +183,6 @@ function normalizeRole(value = "") {
 
 function isValidEmail(value = "") {
   const email = safeText(value, "").toLowerCase();
-
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
@@ -221,16 +219,77 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+function htmlAttrs(attrs = {}) {
+  return Object.entries(safeObject(attrs))
+    .map(([key, value]) => {
+      if (value === false || value === null || value === undefined) return "";
+      if (value === true) return escapeHtml(key);
+
+      return `${escapeHtml(key)}="${escapeHtml(value)}"`;
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
+function tooltipAttrs(tooltip = "", ariaLabel = "") {
+  const cleanTooltip = safeText(tooltip, "");
+  const cleanAria = safeText(ariaLabel, cleanTooltip);
+
+  return htmlAttrs({
+    "aria-label": cleanAria || false,
+    "data-tooltip": cleanTooltip || false,
+  });
+}
+
+function disabledAttrs(disabled = false, busy = false) {
+  return htmlAttrs({
+    disabled: Boolean(disabled),
+    "aria-disabled": disabled ? "true" : false,
+    "aria-busy": busy ? "true" : false,
+  });
+}
+
+function actionAttrs(action = "", facturaId = "") {
+  const cleanAction = safeText(action, "");
+  const cleanFacturaId = safeText(facturaId, "");
+
+  return htmlAttrs({
+    "data-action": cleanAction,
+    "data-facturas-action": cleanAction,
+    "data-factura-id": cleanFacturaId || false,
+  });
+}
+
 function getInputItems(input = {}) {
   const data = safeObject(input);
 
-  return safeArray(first(data.items, data.rows, data.facturas, data.invoices, []));
+  return safeArray(
+    first(
+      data.items,
+      data.rows,
+      data.facturas,
+      data.invoices,
+      data.data?.items,
+      data.data?.facturas,
+      data.payload?.items,
+      data.payload?.facturas,
+      []
+    )
+  );
 }
 
 function getRuntimeState(input = {}) {
   const data = safeObject(input);
 
-  return safeObject(data.state);
+  return safeObject(
+    first(
+      data.state,
+      data.viewState,
+      data.runtime,
+      data.meta?.state,
+      {}
+    )
+  );
 }
 
 /* =========================================================
@@ -238,11 +297,7 @@ function getRuntimeState(input = {}) {
 ========================================================= */
 
 function isDateOnlyValue(value = null) {
-  if (value === null || value === undefined) return false;
-
   const raw = safeText(value, "");
-
-  if (!raw) return false;
 
   return (
     /^\d{4}-\d{2}-\d{2}$/.test(raw) ||
@@ -291,9 +346,7 @@ function toTimestamp(value = null) {
 
   const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
 
-  if (Number.isNaN(date.getTime())) return 0;
-
-  return date.getTime();
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
 }
 
 /* =========================================================
@@ -396,11 +449,8 @@ function formatDateShort(value = null) {
   }
 }
 
-function formatDateTitle(value = null) {
-  if (isDateOnlyValue(value)) {
-    return formatDateShort(value);
-  }
-
+function formatDateTooltip(value = null) {
+  if (isDateOnlyValue(value)) return formatDateShort(value);
   return formatDateTime(value);
 }
 
@@ -531,9 +581,7 @@ function isAdminState(state = {}) {
 ========================================================= */
 
 function pickTicketIdFromArray(value = []) {
-  const items = safeArray(value);
-
-  for (const item of items) {
+  for (const item of safeArray(value)) {
     if (typeof item === "string" && item.trim()) {
       return item.trim();
     }
@@ -558,8 +606,12 @@ function pickTicketIdFromArray(value = []) {
   return "";
 }
 
+function getRaw(item = {}) {
+  return safeObject(item?.raw);
+}
+
 function getFacturaId(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -583,7 +635,7 @@ function getFacturaId(item = {}) {
 }
 
 function getFacturaNumero(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -617,7 +669,7 @@ function getFacturaDisplayId(item = {}) {
 }
 
 function getFacturaSistema(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -632,7 +684,7 @@ function getFacturaSistema(item = {}) {
 }
 
 function getCompanyName(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -682,7 +734,7 @@ function getCompanyName(item = {}) {
 }
 
 function getContactName(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -737,7 +789,7 @@ function getClientSecondaryName(item = {}) {
 }
 
 function getClientEmail(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -769,7 +821,7 @@ function getClientEmailLabel(item = {}) {
 }
 
 function getClientAvatar(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -777,25 +829,45 @@ function getClientAvatar(item = {}) {
       item.clientAvatar,
       item.avatar,
       item.avatarUrl,
+      item.logo,
+      item.logoUrl,
+      item.photo,
+      item.photoUrl,
+      item.picture,
+      item.pictureUrl,
       item.cliente?.avatar,
       item.cliente?.avatarUrl,
+      item.cliente?.logo,
+      item.cliente?.logoUrl,
       item.client?.avatar,
       item.client?.avatarUrl,
+      item.customer?.avatar,
+      item.customer?.avatarUrl,
       raw.clienteAvatar,
       raw.clientAvatar,
       raw.avatar,
       raw.avatarUrl,
+      raw.logo,
+      raw.logoUrl,
+      raw.photo,
+      raw.photoUrl,
+      raw.picture,
+      raw.pictureUrl,
       raw.cliente?.avatar,
       raw.cliente?.avatarUrl,
+      raw.cliente?.logo,
+      raw.cliente?.logoUrl,
       raw.client?.avatar,
-      raw.client?.avatarUrl
+      raw.client?.avatarUrl,
+      raw.customer?.avatar,
+      raw.customer?.avatarUrl
     ),
     ""
   );
 }
 
 function getClientStableKey(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return normalizeKey(
     first(
@@ -856,9 +928,7 @@ function getInitials(value = "") {
 
 function getAvatarToneClass(item = {}) {
   const seed = getClientStableKey(item);
-  const index = hashString(seed) % 10;
-
-  return `facturas-avatar--tone-${index}`;
+  return `facturas-avatar--tone-${hashString(seed) % 10}`;
 }
 
 function getEstadoPagoKey(value = "") {
@@ -917,7 +987,7 @@ function getEstadoPagoChipClass(value = "") {
 }
 
 function getPaymentRaw(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return first(
     item.estadoPago,
@@ -932,7 +1002,7 @@ function getPaymentRaw(item = {}) {
 }
 
 function getIncidenciaId(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -1000,7 +1070,7 @@ function getIncidenciaId(item = {}) {
 }
 
 function getIncidenciaSubject(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -1029,7 +1099,7 @@ function getIncidenciaSubject(item = {}) {
 }
 
 function getTotalRaw(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return first(
     item.total,
@@ -1053,7 +1123,7 @@ function getTotalRaw(item = {}) {
 }
 
 function getCurrency(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -1080,7 +1150,7 @@ function getTotalLabel(item = {}) {
 }
 
 function getTotalCaption(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   const taxIncluded = first(
     item.taxIncluded,
@@ -1092,12 +1162,11 @@ function getTotalCaption(item = {}) {
   );
 
   if (taxIncluded === false) return "Impuestos no incl.";
-
   return "Impuestos incl.";
 }
 
 function getFormaPago(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -1117,7 +1186,7 @@ function getFormaPago(item = {}) {
 }
 
 function getCreatedAt(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return first(
     item.fechaFactura,
@@ -1142,7 +1211,7 @@ function getCreatedAt(item = {}) {
 }
 
 function getUpdatedAt(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return first(
     item.updatedAt,
@@ -1169,7 +1238,7 @@ function getUpdatedAt(item = {}) {
 }
 
 function getSentAt(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return first(
     item.fechaEnvio,
@@ -1190,7 +1259,7 @@ function getSentAt(item = {}) {
 }
 
 function getSortTimestamp(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return (
     safeNumber(item?.meta?.updatedAtMs, 0) ||
@@ -1241,7 +1310,7 @@ function sortFacturasByInvoiceDesc(items = []) {
 }
 
 function hasPdf(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   if (
     bool(
@@ -1314,7 +1383,7 @@ function hasPdf(item = {}) {
 }
 
 function isFacturaSent(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   const sentDate = first(
     item.fechaEnvio,
@@ -1396,7 +1465,7 @@ function normalizeFilter(value = "") {
 
 function getActiveFilter(input = {}) {
   const data = safeObject(input);
-  const runtime = safeObject(data.state);
+  const runtime = getRuntimeState(data);
 
   return normalizeFilter(
     first(
@@ -1417,13 +1486,12 @@ function getActiveFilter(input = {}) {
 
 function getFilterLabel(filter = "all") {
   const key = normalizeFilter(filter);
-
   return FILTERS.find((item) => item.key === key)?.label || "Todas";
 }
 
 function getSearchQuery(input = {}) {
   const data = safeObject(input);
-  const runtime = safeObject(data.state);
+  const runtime = getRuntimeState(data);
 
   return normalizeWhitespace(
     first(
@@ -1467,7 +1535,7 @@ function normalizeSort(value = "") {
 
 function getSortMode(input = {}) {
   const data = safeObject(input);
-  const runtime = safeObject(data.state);
+  const runtime = getRuntimeState(data);
 
   return normalizeSort(
     first(
@@ -1499,7 +1567,7 @@ function itemMatchesFilter(item = {}, filter = "all") {
 }
 
 function getSearchHaystack(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return [
     getFacturaId(item),
@@ -1557,9 +1625,9 @@ function filterFacturas(items = [], input = {}) {
   const activeFilter = getActiveFilter(input);
   const searchQuery = getSearchQuery(input);
 
-  return safeArray(items).filter((item) => {
-    return itemMatchesFilter(item, activeFilter) && itemMatchesSearch(item, searchQuery);
-  });
+  return safeArray(items).filter((item) => (
+    itemMatchesFilter(item, activeFilter) && itemMatchesSearch(item, searchQuery)
+  ));
 }
 
 function sortFacturas(items = [], input = {}) {
@@ -1581,7 +1649,6 @@ function isFilterActive(input = {}) {
 function computeFilterCounts(items = [], input = {}) {
   const rows = safeArray(items);
   const searchQuery = getSearchQuery(input);
-
   const searchableRows = rows.filter((item) => itemMatchesSearch(item, searchQuery));
 
   return FILTERS.reduce((acc, filter) => {
@@ -1598,9 +1665,7 @@ function computeFilterCounts(items = [], input = {}) {
 ========================================================= */
 
 function computeStats(items = []) {
-  const rows = safeArray(items);
-
-  return rows.reduce(
+  return safeArray(items).reduce(
     (acc, item) => {
       const total = safeNumber(getTotalRaw(item), 0);
       const paymentKey = getEstadoPagoKey(getPaymentRaw(item));
@@ -1647,7 +1712,7 @@ function computeStats(items = []) {
 
 function normalizePageSize(input = {}) {
   const data = safeObject(input);
-  const runtime = safeObject(data.state);
+  const runtime = getRuntimeState(data);
 
   return clamp(
     safeNumber(
@@ -1667,7 +1732,7 @@ function normalizePageSize(input = {}) {
 
 function getPagination(items = [], input = {}) {
   const data = safeObject(input);
-  const runtime = safeObject(data.state);
+  const runtime = getRuntimeState(data);
 
   const rawItems = safeArray(items);
   const filteredAndSortedItems = filterAndSortFacturas(rawItems, data);
@@ -1778,9 +1843,7 @@ function renderLoaderOnly(label = "Cargando") {
     <span
       class="facturas-loader-only"
       role="status"
-      aria-label="${escapeHtml(label)}"
-      title="${escapeHtml(label)}"
-      data-tooltip="${escapeHtml(label)}"
+      ${tooltipAttrs(label, label)}
     >
       <span class="facturas-inline-spinner" aria-hidden="true"></span>
     </span>
@@ -1796,10 +1859,8 @@ function renderAvatar(item = {}) {
   if (avatarUrl) {
     return `
       <div
-        class="facturas-avatar ${escapeHtml(toneClass)}"
-        title="${escapeHtml(fullName)}"
-        aria-label="${escapeHtml(fullName)}"
-        data-tooltip="${escapeHtml(fullName)}"
+        class="facturas-avatar has-image ${escapeHtml(toneClass)}"
+        ${tooltipAttrs(fullName, fullName)}
         data-fallback="false"
         data-facturas-avatar="true"
       >
@@ -1819,9 +1880,7 @@ function renderAvatar(item = {}) {
   return `
     <div
       class="facturas-avatar facturas-avatar--fallback ${escapeHtml(toneClass)}"
-      title="${escapeHtml(fullName)}"
-      aria-label="${escapeHtml(fullName)}"
-      data-tooltip="${escapeHtml(fullName)}"
+      ${tooltipAttrs(fullName, fullName)}
       data-fallback="true"
       data-facturas-avatar="true"
     >
@@ -1848,15 +1907,14 @@ function renderDeliveryBadge(item = {}) {
   const sentAt = getSentAt(item);
 
   if (sent) {
-    const title = sentAt
-      ? `Enviada · ${formatDateTitle(sentAt)}`
+    const tooltip = sentAt
+      ? `Enviada · ${formatDateTooltip(sentAt)}`
       : "Factura enviada";
 
     return `
       <span
         class="facturas-mini-badge facturas-mini-badge--sent"
-        title="${escapeHtml(title)}"
-        data-tooltip="${escapeHtml(title)}"
+        ${tooltipAttrs(tooltip, tooltip)}
       >
         ${icon("check")}
         Enviada
@@ -1867,8 +1925,7 @@ function renderDeliveryBadge(item = {}) {
   return `
     <span
       class="facturas-mini-badge facturas-mini-badge--idle"
-      title="Factura no enviada todavía"
-      data-tooltip="Factura no enviada todavía"
+      ${tooltipAttrs("Factura no enviada todavía", "Factura no enviada todavía")}
     >
       ${icon("mail")}
       No enviada
@@ -1881,8 +1938,7 @@ function renderPdfBadge(item = {}) {
     return `
       <span
         class="facturas-mini-badge facturas-mini-badge--pdf"
-        title="PDF disponible"
-        data-tooltip="PDF disponible"
+        ${tooltipAttrs("PDF disponible", "PDF disponible")}
       >
         ${icon("pdf")}
         PDF
@@ -1893,8 +1949,7 @@ function renderPdfBadge(item = {}) {
   return `
     <span
       class="facturas-mini-badge facturas-mini-badge--blocked"
-      title="PDF no disponible"
-      data-tooltip="PDF no disponible"
+      ${tooltipAttrs("PDF no disponible", "PDF no disponible")}
     >
       ${icon("lock")}
       Sin PDF
@@ -1919,13 +1974,10 @@ function renderIncidenciaLink(item = {}) {
     <button
       type="button"
       class="facturas-incidencia-link"
-      data-action="open-incidencia"
-      data-facturas-action="open-incidencia"
+      ${actionAttrs("open-incidencia", facturaId)}
       data-ticket-id="${escapeHtml(incidenciaId)}"
       data-incidencia-id="${escapeHtml(incidenciaId)}"
-      data-factura-id="${escapeHtml(facturaId)}"
-      title="${escapeHtml(tooltip)}"
-      data-tooltip="${escapeHtml(tooltip)}"
+      ${tooltipAttrs(tooltip, tooltip)}
     >
       ${icon("ticket")}
       <span>${escapeHtml(incidenciaId)}</span>
@@ -1938,15 +1990,17 @@ function renderPagination(pagination = {}, state = {}) {
   const loading = Boolean(runtime.loading);
   const refreshing = Boolean(runtime.refreshing);
 
+  const prevDisabled = !pagination.hasPrev || loading || refreshing;
+  const nextDisabled = !pagination.hasNext || loading || refreshing;
+
   return `
     <div class="facturas-pagination" aria-label="Paginación de facturas">
       <button
         type="button"
         class="facturas-pagination-btn"
-        data-action="prev-page"
-        data-facturas-action="prev-page"
+        ${actionAttrs("prev-page")}
         data-page="${escapeHtml(String(Math.max(1, pagination.currentPage - 1)))}"
-        ${!pagination.hasPrev || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
+        ${disabledAttrs(prevDisabled)}
       >
         Anterior
       </button>
@@ -1958,12 +2012,11 @@ function renderPagination(pagination = {}, state = {}) {
       <button
         type="button"
         class="facturas-pagination-btn facturas-pagination-btn--next"
-        data-action="next-page"
-        data-facturas-action="next-page"
+        ${actionAttrs("next-page")}
         data-page="${escapeHtml(
           String(Math.min(pagination.totalPages, pagination.currentPage + 1))
         )}"
-        ${!pagination.hasNext || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
+        ${disabledAttrs(nextDisabled)}
       >
         Siguiente
       </button>
@@ -2002,9 +2055,7 @@ function renderSearch(input = {}) {
               class="facturas-search-clear"
               data-facturas-action="clear-search"
               data-action="clear-search"
-              title="Limpiar búsqueda"
-              data-tooltip="Limpiar búsqueda"
-              aria-label="Limpiar búsqueda"
+              ${tooltipAttrs("Limpiar búsqueda", "Limpiar búsqueda")}
             >
               ${icon("close")}
             </button>
@@ -2024,7 +2075,11 @@ function renderFilters(input = {}, pagination = {}) {
 
   return `
     <div class="facturas-filters" aria-label="Filtros, orden y búsqueda de facturas">
-      <div class="facturas-filter-pills" aria-label="Filtrar facturas por estado de pago">
+      <div
+        class="facturas-filter-pills"
+        role="group"
+        aria-label="Filtrar facturas por estado de pago"
+      >
         ${FILTERS.map((filter) => {
           const isActive = filter.key === activeFilter;
           const count = counts[filter.key] ?? 0;
@@ -2060,9 +2115,7 @@ function renderFilters(input = {}, pagination = {}) {
               data-sort="${escapeHtml(option.key)}"
               data-sort-mode="${escapeHtml(option.key)}"
               data-facturas-sort="${escapeHtml(option.key)}"
-              title="${escapeHtml(option.title)}"
-              data-tooltip="${escapeHtml(option.title)}"
-              aria-label="${escapeHtml(option.title)}"
+              ${tooltipAttrs(option.tooltip, option.tooltip)}
               aria-pressed="${isActive ? "true" : "false"}"
             >
               <span>${escapeHtml(option.label)}</span>
@@ -2088,8 +2141,10 @@ function renderActionButton({
   tooltip = "",
   ariaBusy = false,
 } = {}) {
-  const finalDisabled = disabled || loading;
+  const finalDisabled = Boolean(disabled || loading);
+  const finalBusy = Boolean(ariaBusy || loading);
   const finalTooltip = tooltip || label;
+
   const classes = ["facturas-action-btn", klass, loading ? "is-loading" : ""]
     .map((item) => safeText(item, ""))
     .filter(Boolean)
@@ -2099,13 +2154,9 @@ function renderActionButton({
     <button
       type="button"
       class="${escapeHtml(classes)}"
-      data-action="${escapeHtml(action)}"
-      data-facturas-action="${escapeHtml(action)}"
-      data-factura-id="${escapeHtml(facturaId)}"
-      title="${escapeHtml(finalTooltip)}"
-      data-tooltip="${escapeHtml(finalTooltip)}"
-      ${finalDisabled ? 'disabled aria-disabled="true"' : ""}
-      ${ariaBusy || loading ? 'aria-busy="true"' : ""}
+      ${actionAttrs(action, facturaId)}
+      ${tooltipAttrs(finalTooltip, finalTooltip)}
+      ${disabledAttrs(finalDisabled, finalBusy)}
     >
       ${
         loading
@@ -2130,7 +2181,7 @@ function renderRow(item = {}, state = {}) {
   const clientEmail = getClientEmailLabel(item);
   const createdAtRaw = getCreatedAt(item);
   const createdAt = formatDateShort(createdAtRaw);
-  const createdAtTitle = formatDateTitle(createdAtRaw);
+  const createdAtTooltip = formatDateTooltip(createdAtRaw);
   const total = getTotalLabel(item);
   const totalCaption = getTotalCaption(item);
   const formaPago = getFormaPago(item);
@@ -2198,8 +2249,7 @@ function renderRow(item = {}, state = {}) {
       <td class="facturas-cell facturas-cell--date">
         <span
           class="facturas-date-inline"
-          title="${escapeHtml(createdAtTitle)}"
-          data-tooltip="${escapeHtml(createdAtTitle)}"
+          ${tooltipAttrs(createdAtTooltip, `Fecha de emisión ${createdAtTooltip}`)}
         >
           ${escapeHtml(createdAt)}
         </span>
@@ -2416,7 +2466,7 @@ export function renderHeader(input = {}) {
             class="facturas-btn"
             data-action="export"
             data-facturas-action="export"
-            ${loading || refreshing || !rows.length ? 'disabled aria-disabled="true"' : ""}
+            ${disabledAttrs(loading || refreshing || !rows.length)}
           >
             ${icon("export")}
             <span class="facturas-btn-text">Exportar CSV</span>
@@ -2432,7 +2482,7 @@ export function renderHeader(input = {}) {
                   data-action="create-factura"
                   data-facturas-action="create-factura"
                   aria-label="Crear nueva factura"
-                  ${creating ? 'disabled aria-disabled="true" aria-busy="true"' : ""}
+                  ${disabledAttrs(creating, creating)}
                 >
                   ${
                     creating
@@ -2450,7 +2500,7 @@ export function renderHeader(input = {}) {
             class="facturas-btn facturas-btn--primary${refreshing ? " is-loading" : ""}"
             data-action="refresh"
             data-facturas-action="refresh"
-            ${refreshing || loading ? 'disabled aria-disabled="true" aria-busy="true"' : ""}
+            ${disabledAttrs(refreshing || loading, refreshing)}
           >
             ${
               refreshing
@@ -2689,7 +2739,7 @@ export function bindFacturasTemplateDom(root = null) {
       : null);
 
   if (!scope || typeof scope.querySelectorAll !== "function") {
-    return;
+    return false;
   }
 
   const images = scope.querySelectorAll("[data-facturas-avatar-img='true']");
@@ -2705,7 +2755,12 @@ export function bindFacturasTemplateDom(root = null) {
       if (avatar) {
         avatar.setAttribute("data-fallback", "true");
         avatar.classList.add("facturas-avatar--fallback");
+        avatar.classList.remove("has-image");
       }
+
+      try {
+        img.hidden = true;
+      } catch {}
     };
 
     img.addEventListener("error", setFallback, { passive: true });
@@ -2714,6 +2769,8 @@ export function bindFacturasTemplateDom(root = null) {
       setFallback();
     }
   });
+
+  return true;
 }
 
 /* =========================================================

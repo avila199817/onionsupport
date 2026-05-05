@@ -5,26 +5,28 @@
    FINAL PRO SAAS PANEL · FACTURAS MODEL · 10/10
    PATCH · ID SAFE · INCIDENCIA PRESERVER · COSMOS ALIGNED
    PATCH · NO TICKET ID AS FACTURA ID
+   PATCH · NO CSS IN JS · CLASS HELPERS ONLY
 
    RESPONSABILIDADES:
    - helpers seguros de datos
    - formatters de facturas
    - normalización del backend
-   - labels y estilos de estado
+   - labels, tones y clases CSS de estado
    - extracción robusta de payloads
-   - utilidades de ordenación / métricas
+   - utilidades de ordenación / métricas / filtrado
    - mantener paridad operativa con facturasView.js
    - preservar relación factura ↔ incidencia sin contaminar id de factura
 
    HARDENING PRO:
    - tolerancia a payloads heterogéneos
-   - normalización estable para store / actions / template
+   - normalización estable para store / api / actions / template
    - soporte para envelope backend legacy y API normalizada actual
    - métricas robustas
    - ordenación sin mutar origen
    - filtros seguros y predecibles
    - compat con Cosmos DB facturas partition key /clienteId
    - compat con facturas legacy + normalizadas v2/v3
+   - sin style="" ni CSS embebido en JS
 ========================================================= */
 
 /* =========================================================
@@ -38,6 +40,24 @@ export const DEFAULT_FACTURAS_SORT = Object.freeze({
 
 export const DEFAULT_FACTURA_CURRENCY = "EUR";
 
+export const FACTURA_STATUS = Object.freeze({
+  ISSUED: "issued",
+  SENT: "sent",
+  VOID: "void",
+  DRAFT: "draft",
+  CANCELLED: "cancelled",
+  PAID: "paid",
+});
+
+export const FACTURA_PAYMENT_STATUS = Object.freeze({
+  PAID: "paid",
+  PENDING: "pending",
+  PARTIAL: "partial",
+  OVERDUE: "overdue",
+  DRAFT: "draft",
+  CANCELLED: "cancelled",
+});
+
 const OVERDUE_DAYS = 30;
 
 const FACTURA_DOC_TYPES = new Set([
@@ -49,22 +69,121 @@ const NON_FACTURA_IDS_PREFIXES = Object.freeze([
   "FACTURA_COUNTER_",
   "INVOICE_COUNTER_",
   "COUNTER_",
+  "LOCK_",
+  "SEQUENCE_",
+  "SEQ_",
 ]);
 
+const PAYMENT_STATUS_ALIASES = Object.freeze({
+  pagada: "paid",
+  pagado: "paid",
+  paid: "paid",
+  cobrada: "paid",
+  cobrado: "paid",
+  abonada: "paid",
+  abonado: "paid",
+
+  pendiente: "pending",
+  pending: "pending",
+  unpaid: "pending",
+
+  parcial: "partial",
+  partial: "partial",
+
+  vencida: "overdue",
+  vencido: "overdue",
+  overdue: "overdue",
+
+  borrador: "draft",
+  draft: "draft",
+
+  cancelada: "cancelled",
+  cancelado: "cancelled",
+  cancelled: "cancelled",
+  canceled: "cancelled",
+});
+
+const FACTURA_STATUS_ALIASES = Object.freeze({
+  emitida: "issued",
+  emitido: "issued",
+  issued: "issued",
+
+  enviada: "sent",
+  enviado: "sent",
+  sent: "sent",
+
+  anulada: "void",
+  anulado: "void",
+  void: "void",
+  voided: "void",
+
+  borrador: "draft",
+  draft: "draft",
+
+  cancelada: "cancelled",
+  cancelado: "cancelled",
+  cancelled: "cancelled",
+  canceled: "cancelled",
+
+  abonada: "paid",
+  abonado: "paid",
+  pagada: "paid",
+  pagado: "paid",
+  paid: "paid",
+});
+
+const PAYMENT_STATUS_LABELS = Object.freeze({
+  paid: "Pagada",
+  pending: "Pendiente",
+  partial: "Pago parcial",
+  overdue: "Vencida",
+  draft: "Borrador",
+  cancelled: "Cancelada",
+});
+
+const FACTURA_STATUS_LABELS = Object.freeze({
+  issued: "Emitida",
+  sent: "Enviada",
+  void: "Anulada",
+  draft: "Borrador",
+  cancelled: "Cancelada",
+  paid: "Abonada",
+});
+
 /* =========================================================
-   HELPERS BASE
+   BASE HELPERS
 ========================================================= */
 
 function safeString(value, fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
   const text = String(value).trim();
   return text || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
+  if (value === null || value === undefined || value === "") return fallback;
+
+  if (typeof value === "string") {
+    let text = value
+      .trim()
+      .replace(/€/g, "")
+      .replace(/%/g, "")
+      .replace(/\s+/g, "");
+
+    const hasComma = text.includes(",");
+    const hasDot = text.includes(".");
+
+    if (hasComma && hasDot) {
+      text = text.replace(/\./g, "").replace(/,/g, ".");
+    } else if (hasComma) {
+      text = text.replace(/,/g, ".");
+    }
+
+    const parsed = Number(text);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
@@ -102,25 +221,32 @@ function safeObject(value, fallback = {}) {
     : fallback;
 }
 
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 function hasOwnKeys(value = {}) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      Object.keys(value).length
-  );
+  return Boolean(isObject(value) && Object.keys(value).length);
 }
 
 function normalizeText(value = "") {
-  return String(value || "")
-    .trim()
+  return safeString(value, "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
-function round2(value) {
-  return Math.round((safeNumber(value, 0) + Number.EPSILON) * 100) / 100;
+function normalizeKey(value = "") {
+  return normalizeText(value)
+    .replace(/[^\w]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function round2(value = 0) {
+  const n = safeNumber(value, 0);
+  return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
 function toMs(value) {
@@ -133,14 +259,8 @@ function toMs(value) {
 function pickFirst(...values) {
   for (const value of values) {
     if (value === null || value === undefined) continue;
-
-    if (typeof value === "string" && !value.trim()) {
-      continue;
-    }
-
-    if (Array.isArray(value) && value.length === 0) {
-      continue;
-    }
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
 
     return value;
   }
@@ -148,17 +268,41 @@ function pickFirst(...values) {
   return undefined;
 }
 
-function uniqueList(values = []) {
+function getPath(source = {}, path = "") {
+  const parts = safeString(path, "").split(".").filter(Boolean);
+  let cursor = source;
+
+  for (const part of parts) {
+    if (!cursor || typeof cursor !== "object") return undefined;
+    cursor = cursor[part];
+  }
+
+  return cursor;
+}
+
+function pickPath(source = {}, paths = []) {
+  for (const path of safeArray(paths)) {
+    const value = getPath(source, path);
+
+    if (value === null || value === undefined) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+
+    return value;
+  }
+
+  return undefined;
+}
+
+function uniqueStrings(values = []) {
   const seen = new Set();
   const out = [];
 
-  for (const value of values) {
+  for (const value of safeArray(values).flat()) {
     const text = safeString(value, "");
     const key = normalizeText(text);
 
-    if (!text || !key || seen.has(key)) {
-      continue;
-    }
+    if (!text || !key || seen.has(key)) continue;
 
     seen.add(key);
     out.push(text);
@@ -185,116 +329,169 @@ function compareText(a, b) {
   );
 }
 
-function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+function hashString(value = "") {
+  const text = safeString(value, "");
+  let hash = 0;
+
+  for (let i = 0; i < text.length; i += 1) {
+    hash = ((hash << 5) - hash) + text.charCodeAt(i);
+    hash |= 0;
+  }
+
+  return Math.abs(hash);
 }
 
 /* =========================================================
-   PAYLOAD / ENVELOPE HELPERS
+   RAW / ENVELOPE HELPERS
 ========================================================= */
 
+function getRaw(item = {}) {
+  const source = safeObject(item);
+  return hasOwnKeys(source.raw) ? safeObject(source.raw) : {};
+}
+
+function buildProbe(item = {}) {
+  const source = safeObject(item);
+  const raw = getRaw(source);
+
+  return {
+    ...raw,
+    ...source,
+    raw,
+  };
+}
+
+function hasFacturaIdentitySignal(value = {}) {
+  const source = safeObject(value);
+
+  return Boolean(
+    safeString(
+      pickFirst(
+        source.id,
+        source._id,
+        source.facturaId,
+        source.invoiceId,
+        source.numeroFacturaLegal,
+        source.numeroFacturaSistema,
+        source.numeroFactura,
+        source.invoiceNumber,
+        source.facturaNumero,
+        source.facturaCode,
+        source.numero,
+        source.code
+      ),
+      ""
+    )
+  );
+}
+
+function hasFacturaAmountSignal(value = {}) {
+  const source = safeObject(value);
+
+  return Boolean(
+    source.total !== undefined ||
+      source.totalFactura !== undefined ||
+      source.importeTotal !== undefined ||
+      source.amount !== undefined ||
+      source.invoiceAmount !== undefined ||
+      source.importe !== undefined ||
+      source.facturaTotal !== undefined ||
+      source.totals?.total !== undefined ||
+      source.resumen?.total !== undefined
+  );
+}
+
 function isLikelyFactura(value) {
-  if (!isObject(value)) {
-    return false;
+  if (!isObject(value)) return false;
+
+  const source = safeObject(value);
+
+  return Boolean(
+    hasFacturaIdentitySignal(source) ||
+      hasFacturaAmountSignal(source) ||
+      source.tipoDocumento ||
+      source.entityType ||
+      source.cliente ||
+      source.client ||
+      source.customer ||
+      source.clienteSnapshot ||
+      source.lineas ||
+      source.lines ||
+      source.impuestos ||
+      source.taxes
+  );
+}
+
+function getPayloadCandidates(payload = null) {
+  if (!payload) return [];
+
+  const obj = safeObject(payload, null);
+
+  if (!obj) {
+    return [payload].filter((item) => item !== undefined && item !== null);
   }
 
-  return Boolean(
-    value.id ||
-      value._id ||
-      value.facturaId ||
-      value.invoiceId ||
-      value.numero ||
-      value.code ||
-      value.invoiceNumber ||
-      value.numeroFacturaLegal ||
-      value.numeroFacturaSistema ||
-      value.tipoDocumento ||
-      value.entityType ||
-      value.total !== undefined ||
-      value.totalFactura !== undefined ||
-      value.importeTotal !== undefined ||
-      value.amount !== undefined ||
-      value.invoiceAmount !== undefined ||
-      value.cliente ||
-      value.client ||
-      value.customer ||
-      value.clienteSnapshot ||
-      value.ticketId ||
-      value.incidenciaId ||
-      value.ticket ||
-      value.incidencia
-  );
+  return [
+    payload,
+
+    obj.data,
+    obj.body,
+    obj.result,
+    obj.payload,
+    obj.response,
+    obj.resource,
+
+    obj.data?.data,
+    obj.data?.body,
+    obj.data?.result,
+    obj.data?.payload,
+    obj.data?.resource,
+
+    obj.result?.data,
+    obj.result?.payload,
+    obj.result?.resource,
+
+    obj.payload?.data,
+    obj.payload?.result,
+    obj.payload?.resource,
+  ].filter((item) => item !== undefined && item !== null);
 }
 
-function looksLikeFacturasEnvelope(value) {
-  const obj = safeObject(value);
-
-  return Boolean(
-    Array.isArray(obj.facturas) ||
-      Array.isArray(obj.items) ||
-      Array.isArray(obj.data) ||
-      Array.isArray(obj.results) ||
-      Array.isArray(obj.rows) ||
-      Array.isArray(obj.records) ||
-      Array.isArray(obj.list) ||
-      Array.isArray(obj.collection) ||
-      Array.isArray(obj.payload?.facturas) ||
-      Array.isArray(obj.result?.facturas) ||
-      Array.isArray(obj.data?.facturas)
-  );
-}
-
-function resolveNestedArrayEnvelope(value) {
-  const obj = safeObject(value);
-
-  if (Array.isArray(value)) return value;
+function pickArrayEnvelope(obj = {}) {
+  const source = safeObject(obj);
 
   const direct = pickFirst(
-    obj.facturas,
-    obj.items,
-    obj.data,
-    obj.results,
-    obj.rows,
-    obj.records,
-    obj.list,
-    obj.collection,
+    Array.isArray(source) ? source : null,
 
-    obj.data?.facturas,
-    obj.data?.items,
-    obj.data?.results,
-    obj.data?.rows,
-    obj.data?.records,
+    source.facturas,
+    source.items,
+    source.data,
+    source.results,
+    source.rows,
+    source.records,
+    source.list,
+    source.collection,
 
-    obj.result?.facturas,
-    obj.result?.items,
-    obj.result?.results,
-    obj.result?.rows,
-    obj.result?.records,
+    source.data?.facturas,
+    source.data?.items,
+    source.data?.results,
+    source.data?.rows,
+    source.data?.records,
 
-    obj.payload?.facturas,
-    obj.payload?.items,
-    obj.payload?.results,
-    obj.payload?.rows,
-    obj.payload?.records
+    source.result?.facturas,
+    source.result?.items,
+    source.result?.results,
+    source.result?.rows,
+    source.result?.records,
+
+    source.payload?.facturas,
+    source.payload?.items,
+    source.payload?.results,
+    source.payload?.rows,
+    source.payload?.records
   );
 
-  if (Array.isArray(direct)) {
-    return direct;
-  }
-
-  if (looksLikeFacturasEnvelope(obj.data)) {
-    return resolveNestedArrayEnvelope(obj.data);
-  }
-
-  if (looksLikeFacturasEnvelope(obj.payload)) {
-    return resolveNestedArrayEnvelope(obj.payload);
-  }
-
-  if (looksLikeFacturasEnvelope(obj.result)) {
-    return resolveNestedArrayEnvelope(obj.result);
-  }
-
-  return [];
+  return Array.isArray(direct) ? direct : null;
 }
 
 function unwrapFacturaPayload(value = {}) {
@@ -302,52 +499,44 @@ function unwrapFacturaPayload(value = {}) {
     return safeObject(value);
   }
 
-  const obj = safeObject(value);
+  const candidates = getPayloadCandidates(value);
 
-  const direct = pickFirst(
-    obj.factura,
-    obj.invoice,
-    obj.item,
-    obj.record,
+  for (const candidate of candidates) {
+    if (isLikelyFactura(candidate)) {
+      return safeObject(candidate);
+    }
 
-    obj.data?.factura,
-    obj.data?.invoice,
-    obj.data?.item,
-    obj.data?.record,
+    const obj = safeObject(candidate, null);
+    if (!obj) continue;
 
-    obj.result?.factura,
-    obj.result?.invoice,
-    obj.result?.item,
-    obj.result?.record,
+    const direct = pickFirst(
+      obj.factura,
+      obj.invoice,
+      obj.item,
+      obj.record,
 
-    obj.payload?.factura,
-    obj.payload?.invoice,
-    obj.payload?.item,
-    obj.payload?.record
-  );
+      obj.data?.factura,
+      obj.data?.invoice,
+      obj.data?.item,
+      obj.data?.record,
 
-  if (isLikelyFactura(direct)) {
-    return safeObject(direct);
+      obj.result?.factura,
+      obj.result?.invoice,
+      obj.result?.item,
+      obj.result?.record,
+
+      obj.payload?.factura,
+      obj.payload?.invoice,
+      obj.payload?.item,
+      obj.payload?.record
+    );
+
+    if (isLikelyFactura(direct)) {
+      return safeObject(direct);
+    }
   }
 
-  if (isLikelyFactura(obj.data)) {
-    return safeObject(obj.data);
-  }
-
-  if (isLikelyFactura(obj.result)) {
-    return safeObject(obj.result);
-  }
-
-  if (isLikelyFactura(obj.payload)) {
-    return safeObject(obj.payload);
-  }
-
-  return obj;
-}
-
-function getRaw(item = {}) {
-  const source = safeObject(item);
-  return hasOwnKeys(source.raw) ? safeObject(source.raw) : source;
+  return safeObject(value);
 }
 
 /* =========================================================
@@ -358,9 +547,7 @@ export function truncate(value = "", max = 140) {
   const text = safeString(value, "");
   const size = Math.max(1, safeNumber(max, 140));
 
-  if (text.length <= size) {
-    return text;
-  }
+  if (text.length <= size) return text;
 
   return `${text.slice(0, size).trim()}…`;
 }
@@ -386,11 +573,15 @@ export function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
 
-  return new Intl.DateTimeFormat("es-ES", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(date);
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(date);
+  } catch {
+    return "—";
+  }
 }
 
 export function formatDateTime(value) {
@@ -399,13 +590,17 @@ export function formatDateTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
 
-  return new Intl.DateTimeFormat("es-ES", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  } catch {
+    return formatDate(value);
+  }
 }
 
 export function formatRelativeDate(value) {
@@ -443,7 +638,7 @@ export function formatRelativeDate(value) {
 
 export function getInitials(value = "") {
   return (
-    String(value || "")
+    safeString(value, "")
       .split(/\s+/)
       .filter(Boolean)
       .slice(0, 2)
@@ -454,172 +649,80 @@ export function getInitials(value = "") {
 }
 
 /* =========================================================
-   ESTADOS
+   ESTADOS / CLASES CSS
 ========================================================= */
 
 export function normalizeEstadoPago(value = "pending") {
-  const map = {
-    pagada: "paid",
-    pagado: "paid",
-    paid: "paid",
-    cobrada: "paid",
-    abonada: "paid",
-
-    pendiente: "pending",
-    pending: "pending",
-    unpaid: "pending",
-
-    parcial: "partial",
-    partial: "partial",
-
-    vencida: "overdue",
-    vencido: "overdue",
-    overdue: "overdue",
-
-    borrador: "draft",
-    draft: "draft",
-
-    cancelada: "cancelled",
-    cancelado: "cancelled",
-    cancelled: "cancelled",
-    canceled: "cancelled",
-  };
-
-  return map[normalizeText(value)] || "pending";
+  return PAYMENT_STATUS_ALIASES[normalizeText(value)] || "pending";
 }
 
 export function normalizeEstado(value = "issued") {
-  const map = {
-    emitida: "issued",
-    emitido: "issued",
-    issued: "issued",
-
-    enviada: "sent",
-    enviado: "sent",
-    sent: "sent",
-
-    anulada: "void",
-    anulado: "void",
-    void: "void",
-
-    borrador: "draft",
-    draft: "draft",
-
-    cancelada: "cancelled",
-    cancelado: "cancelled",
-    cancelled: "cancelled",
-    canceled: "cancelled",
-
-    abonada: "paid",
-    pagada: "paid",
-    paid: "paid",
-  };
-
-  return map[normalizeText(value)] || "issued";
+  return FACTURA_STATUS_ALIASES[normalizeText(value)] || "issued";
 }
 
 export function getEstadoPagoLabel(value = "pending") {
-  const labels = {
-    paid: "Pagada",
-    pending: "Pendiente",
-    partial: "Pago parcial",
-    overdue: "Vencida",
-    draft: "Borrador",
-    cancelled: "Cancelada",
-  };
-
-  return labels[normalizeEstadoPago(value)] || "Pendiente";
+  return PAYMENT_STATUS_LABELS[normalizeEstadoPago(value)] || PAYMENT_STATUS_LABELS.pending;
 }
 
 export function getEstadoLabel(value = "issued") {
-  const labels = {
-    issued: "Emitida",
-    sent: "Enviada",
-    void: "Anulada",
-    draft: "Borrador",
-    cancelled: "Cancelada",
-    paid: "Abonada",
-  };
-
-  return labels[normalizeEstado(value)] || "Emitida";
+  return FACTURA_STATUS_LABELS[normalizeEstado(value)] || FACTURA_STATUS_LABELS.issued;
 }
 
-export function getEstadoPagoChipStyle(value = "pending") {
-  const normalized = normalizeEstadoPago(value);
-
-  const tones = {
-    paid: `
-      color:var(--success-strong, #36c690);
-      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
-    `,
-    pending: `
-      color:var(--warning-strong, #ffbc42);
-      background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
-    `,
-    partial: `
-      color:var(--warning-strong, #ffbc42);
-      background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
-    `,
-    overdue: `
-      color:var(--danger-strong, #ff6b6b);
-      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
-    `,
-    draft: `
-      color:var(--accent-strong, var(--accent, #7c5cff));
-      background:color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, transparent);
-    `,
-    cancelled: `
-      color:var(--text-dim);
-      background:var(--surface-glass);
-      border:1px solid var(--border-soft);
-    `,
-  };
-
-  return tones[normalized] || tones.pending;
+export function getEstadoPagoTone(value = "pending") {
+  return normalizeEstadoPago(value);
 }
 
-export function getEstadoChipStyle(value = "issued") {
-  const normalized = normalizeEstado(value);
+export function getEstadoTone(value = "issued") {
+  return normalizeEstado(value);
+}
 
-  const tones = {
-    issued: `
-      color:var(--accent-strong, var(--accent, #7c5cff));
-      background:color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, transparent);
-    `,
-    sent: `
-      color:var(--success-strong, #36c690);
-      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
-    `,
-    void: `
-      color:var(--danger-strong, #ff6b6b);
-      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
-    `,
-    cancelled: `
-      color:var(--danger-strong, #ff6b6b);
-      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
-    `,
-    draft: `
-      color:var(--warning-strong, #ffbc42);
-      background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
-    `,
-    paid: `
-      color:var(--success-strong, #36c690);
-      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
-    `,
-  };
+export function getEstadoPagoChipClass(value = "pending") {
+  return `facturas-chip facturas-chip--${getEstadoPagoTone(value)}`;
+}
 
-  return tones[normalized] || tones.issued;
+export function getEstadoChipClass(value = "issued") {
+  return `facturas-chip facturas-chip--${getEstadoTone(value)}`;
+}
+
+export function getFacturaRowStatusClass(item = {}) {
+  const status = getEffectiveEstadoPago(item);
+  return `facturas-table-row--${status}`;
+}
+
+export function getFacturaAvatarToneIndex(item = {}) {
+  const factura = buildProbe(item);
+
+  const seed = safeString(
+    pickFirst(
+      factura.clienteNombre,
+      factura.cliente?.empresa,
+      factura.cliente?.nombre,
+      factura.cliente?.email,
+      factura.numero,
+      factura.id,
+      "ON"
+    ),
+    "ON"
+  );
+
+  return hashString(seed) % 10;
+}
+
+export function getFacturaAvatarToneClass(item = {}) {
+  return `facturas-avatar--tone-${getFacturaAvatarToneIndex(item)}`;
+}
+
+/*
+  Compatibilidad temporal:
+  No devuelve CSS. Si algún template antiguo todavía importa estas funciones,
+  no rompe, pero debe migrarse a getEstadoPagoChipClass/getEstadoChipClass.
+*/
+export function getEstadoPagoChipStyle() {
+  return "";
+}
+
+export function getEstadoChipStyle() {
+  return "";
 }
 
 /* =========================================================
@@ -627,55 +730,45 @@ export function getEstadoChipStyle(value = "issued") {
 ========================================================= */
 
 export function isFacturaDocument(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
 
-  const id = safeString(
-    pickFirst(source.id, raw.id),
-    ""
-  );
-
-  const tipoDocumento = normalizeText(
-    pickFirst(source.tipoDocumento, raw.tipoDocumento)
-  );
-
-  const entityType = normalizeText(
-    pickFirst(source.entityType, raw.entityType)
-  );
-
-  const tipo = normalizeText(
-    pickFirst(source.tipo, raw.tipo)
-  );
+  const id = safeString(source.id, "");
+  const tipoDocumento = normalizeText(source.tipoDocumento);
+  const entityType = normalizeText(source.entityType);
+  const tipo = normalizeText(source.tipo);
 
   if (NON_FACTURA_IDS_PREFIXES.some((prefix) => id.startsWith(prefix))) {
     return false;
   }
 
-  if (tipo === "contador" || tipo === "counter" || entityType === "counter") {
+  if (
+    tipo === "contador" ||
+    tipo === "counter" ||
+    entityType === "counter" ||
+    tipoDocumento === "counter"
+  ) {
     return false;
   }
 
-  if (!tipoDocumento && !entityType) {
+  if (FACTURA_DOC_TYPES.has(tipoDocumento) || FACTURA_DOC_TYPES.has(entityType)) {
     return true;
   }
 
-  return FACTURA_DOC_TYPES.has(tipoDocumento) || FACTURA_DOC_TYPES.has(entityType);
+  return Boolean(hasFacturaIdentitySignal(source) || hasFacturaAmountSignal(source));
 }
 
 /* =========================================================
-   FACTURA IDENTITY HELPERS
+   FACTURA IDENTITY
 ========================================================= */
 
 export function getFacturaIdentityList(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
 
-  return uniqueList([
+  return uniqueStrings([
     source.id,
     source._id,
     source.facturaId,
     source.invoiceId,
-
     source.numeroFacturaLegal,
     source.numeroFacturaSistema,
     source.numeroFactura,
@@ -684,41 +777,11 @@ export function getFacturaIdentityList(item = {}) {
     source.facturaCode,
     source.code,
     source.numero,
-
-    raw.id,
-    raw._id,
-    raw.facturaId,
-    raw.invoiceId,
-
-    raw.numeroFacturaLegal,
-    raw.numeroFacturaSistema,
-    raw.numeroFactura,
-    raw.invoiceNumber,
-    raw.facturaNumero,
-    raw.facturaCode,
-    raw.code,
-    raw.numero,
-
-    source.data?.id,
-    source.data?.facturaId,
-    source.data?.invoiceId,
-    source.data?.numero,
-
-    source.payload?.id,
-    source.payload?.facturaId,
-    source.payload?.invoiceId,
-    source.payload?.numero,
-
-    source.result?.id,
-    source.result?.facturaId,
-    source.result?.invoiceId,
-    source.result?.numero,
   ]);
 }
 
 export function getFacturaPrimaryId(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
 
   return safeString(
     pickFirst(
@@ -726,23 +789,11 @@ export function getFacturaPrimaryId(item = {}) {
       source._id,
       source.facturaId,
       source.invoiceId,
-
-      raw.id,
-      raw._id,
-      raw.facturaId,
-      raw.invoiceId,
-
       source.numeroFacturaLegal,
       source.numeroFacturaSistema,
       source.numeroFactura,
       source.invoiceNumber,
-      source.numero,
-
-      raw.numeroFacturaLegal,
-      raw.numeroFacturaSistema,
-      raw.numeroFactura,
-      raw.invoiceNumber,
-      raw.numero
+      source.numero
     ),
     ""
   );
@@ -753,223 +804,201 @@ export function sameFacturaIdentity(a = "", b = "") {
 }
 
 /* =========================================================
-   HELPERS FACTURA
+   FACTURA FIELD HELPERS
 ========================================================= */
 
 export function getFacturaNumero(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
 
-  return (
-    safeString(source.numero) ||
-    safeString(source.numeroFacturaLegal) ||
-    safeString(source.numeroFacturaSistema) ||
-    safeString(source.numeroFactura) ||
-    safeString(source.invoiceNumber) ||
-    safeString(source.facturaNumero) ||
-    safeString(source.facturaCode) ||
-    safeString(source.code) ||
-
-    safeString(raw.numero) ||
-    safeString(raw.numeroFacturaLegal) ||
-    safeString(raw.numeroFacturaSistema) ||
-    safeString(raw.numeroFactura) ||
-    safeString(raw.invoiceNumber) ||
-    safeString(raw.facturaNumero) ||
-    safeString(raw.facturaCode) ||
-    safeString(raw.code) ||
-
-    safeString(source.id) ||
-    safeString(source._id) ||
-    safeString(source.facturaId) ||
-    safeString(source.invoiceId) ||
+  return safeString(
+    pickFirst(
+      source.numero,
+      source.numeroFacturaLegal,
+      source.numeroFacturaSistema,
+      source.numeroFactura,
+      source.invoiceNumber,
+      source.facturaNumero,
+      source.facturaCode,
+      source.code,
+      source.facturaId,
+      source.invoiceId,
+      source.id
+    ),
     "—"
   );
 }
 
 export function getFacturaFecha(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
 
   return (
-    safeString(source.fecha) ||
-    safeString(source.fechaFactura) ||
-    safeString(source.invoiceDate) ||
-    safeString(source.issueDate) ||
-    safeString(source.issuedAt) ||
-    safeString(source.fechaServicio) ||
-    safeString(source.createdAt) ||
-    safeString(source.auditoria?.createdAt) ||
-
-    safeString(raw.fecha) ||
-    safeString(raw.fechaFactura) ||
-    safeString(raw.invoiceDate) ||
-    safeString(raw.issueDate) ||
-    safeString(raw.issuedAt) ||
-    safeString(raw.fechaServicio) ||
-    safeString(raw.createdAt) ||
-    safeString(raw.auditoria?.createdAt) ||
-    null
+    safeString(
+      pickFirst(
+        source.fecha,
+        source.fechaFactura,
+        source.invoiceDate,
+        source.issueDate,
+        source.issuedAt,
+        source.fechaServicio,
+        source.createdAt,
+        source.auditoria?.createdAt
+      ),
+      ""
+    ) || null
   );
 }
 
 export function getFacturaUpdatedAt(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
 
   return (
-    safeString(source.updatedAt) ||
-    safeString(source.modifiedAt) ||
-    safeString(source.fechaEnvio) ||
-    safeString(source.sentAt) ||
-    safeString(source.mailSentAt) ||
-    safeString(source.delivery?.sentAt) ||
-    safeString(source.auditoria?.updatedAt) ||
-
-    safeString(raw.updatedAt) ||
-    safeString(raw.modifiedAt) ||
-    safeString(raw.fechaEnvio) ||
-    safeString(raw.sentAt) ||
-    safeString(raw.mailSentAt) ||
-    safeString(raw.delivery?.sentAt) ||
-    safeString(raw.auditoria?.updatedAt) ||
-
-    getFacturaFecha(source) ||
-    null
+    safeString(
+      pickFirst(
+        source.updatedAt,
+        source.modifiedAt,
+        source.fechaEnvio,
+        source.sentAt,
+        source.mailSentAt,
+        source.delivery?.sentAt,
+        source.delivery?.lastSentAt,
+        source.auditoria?.updatedAt,
+        getFacturaFecha(source)
+      ),
+      ""
+    ) || null
   );
 }
 
 export function getFacturaClienteObject(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
 
   return safeObject(
     pickFirst(
       source.cliente,
       source.client,
       source.customer,
-      source.clienteSnapshot,
-      raw.cliente,
-      raw.client,
-      raw.customer,
-      raw.clienteSnapshot
+      source.clienteSnapshot
     )
   );
 }
 
+export function getFacturaClienteId(item = {}) {
+  const source = buildProbe(item);
+
+  return safeString(
+    pickFirst(
+      source.clienteId,
+      source.clientId,
+      source.customerId,
+      source.cliente?.id,
+      source.cliente?.clienteId,
+      source.client?.id,
+      source.client?.clienteId,
+      source.customer?.id,
+      source.clienteSnapshot?.id,
+      source.clienteSnapshot?.clienteId,
+      source.userId
+    ),
+    ""
+  );
+}
+
 export function getFacturaClienteNombre(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
   const cliente = getFacturaClienteObject(source);
 
-  return (
-    safeString(cliente.nombre) ||
-    safeString(cliente.nombreContacto) ||
-    safeString(cliente.empresa) ||
-    safeString(cliente.razonSocial) ||
-    safeString(cliente.nombreFiscal) ||
-    safeString(cliente.name) ||
-    safeString(cliente.company) ||
+  return safeString(
+    pickFirst(
+      cliente.nombre,
+      cliente.nombreContacto,
+      cliente.empresa,
+      cliente.razonSocial,
+      cliente.nombreFiscal,
+      cliente.name,
+      cliente.company,
+      cliente.displayName,
 
-    safeString(source.clienteNombre) ||
-    safeString(source.clientName) ||
-    safeString(source.customerName) ||
-    safeString(source.nombreCliente) ||
-    safeString(source.owner?.name) ||
-    safeString(source.name) ||
-
-    safeString(raw.clienteNombre) ||
-    safeString(raw.clientName) ||
-    safeString(raw.customerName) ||
-    safeString(raw.nombreCliente) ||
-    safeString(raw.owner?.name) ||
-    safeString(raw.name) ||
+      source.clienteNombre,
+      source.clientName,
+      source.customerName,
+      source.nombreCliente,
+      source.owner?.name,
+      source.name
+    ),
     "Cliente"
   );
 }
 
 export function getFacturaClienteEmpresa(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
   const cliente = getFacturaClienteObject(source);
 
-  return (
-    safeString(cliente.empresa) ||
-    safeString(cliente.razonSocial) ||
-    safeString(cliente.nombreFiscal) ||
-    safeString(cliente.company) ||
-    safeString(cliente.nombre) ||
-    safeString(cliente.nombreContacto) ||
+  return safeString(
+    pickFirst(
+      cliente.empresa,
+      cliente.razonSocial,
+      cliente.nombreFiscal,
+      cliente.company,
+      cliente.nombre,
+      cliente.nombreContacto,
 
-    safeString(source.clienteEmpresa) ||
-    safeString(source.empresaCliente) ||
-    safeString(source.clientCompany) ||
-
-    safeString(raw.clienteEmpresa) ||
-    safeString(raw.empresaCliente) ||
-    safeString(raw.clientCompany) ||
+      source.clienteEmpresa,
+      source.empresaCliente,
+      source.clientCompany
+    ),
     "-"
   );
 }
 
 export function getFacturaClienteEmail(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
   const cliente = getFacturaClienteObject(source);
 
-  return (
-    safeString(cliente.email) ||
-    safeString(cliente.emailLower) ||
-    safeString(cliente.mail) ||
+  return safeString(
+    pickFirst(
+      cliente.email,
+      cliente.emailLower,
+      cliente.mail,
+      cliente.emailFacturacion,
+      cliente.emailAdministracion,
 
-    safeString(source.email) ||
-    safeString(source.emailCliente) ||
-    safeString(source.clienteEmail) ||
-    safeString(source.clientEmail) ||
-    safeString(source.customerEmail) ||
-    safeString(source.owner?.email) ||
-
-    safeString(raw.email) ||
-    safeString(raw.emailCliente) ||
-    safeString(raw.clienteEmail) ||
-    safeString(raw.clientEmail) ||
-    safeString(raw.customerEmail) ||
-    safeString(raw.owner?.email) ||
+      source.email,
+      source.emailCliente,
+      source.clienteEmail,
+      source.clientEmail,
+      source.customerEmail,
+      source.owner?.email
+    ),
     "-"
   );
 }
 
 export function getFacturaPreview(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
 
   const lineas = safeArray(
-    pickFirst(source.lineas, source.lines, source.items, raw.lineas, raw.lines, raw.items)
+    pickFirst(source.lineas, source.lines, source.items)
   );
 
   const firstLinea = safeObject(lineas[0]);
 
-  return (
-    safeString(source.preview) ||
-    safeString(source.descripcion) ||
-    safeString(source.description) ||
-    safeString(source.concepto) ||
+  return safeString(
+    pickFirst(
+      source.preview,
+      source.descripcion,
+      source.description,
+      source.concepto,
 
-    safeString(raw.preview) ||
-    safeString(raw.descripcion) ||
-    safeString(raw.description) ||
-    safeString(raw.concepto) ||
-
-    safeString(firstLinea.descripcion) ||
-    safeString(firstLinea.description) ||
-    safeString(firstLinea.concepto) ||
+      firstLinea.descripcion,
+      firstLinea.description,
+      firstLinea.concepto
+    ),
     "Sin detalle"
   );
 }
 
 export function getFacturaCurrency(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
 
   return safeString(
     pickFirst(
@@ -977,21 +1006,14 @@ export function getFacturaCurrency(item = {}) {
       source.currency,
       source.facturaCurrency,
       source.payment?.currency,
-
-      raw.moneda,
-      raw.currency,
-      raw.facturaCurrency,
-      raw.payment?.currency,
-
       DEFAULT_FACTURA_CURRENCY
     ),
     DEFAULT_FACTURA_CURRENCY
-  ) || DEFAULT_FACTURA_CURRENCY;
+  ).toUpperCase();
 }
 
 export function getFacturaTotal(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
 
   return round2(
     pickFirst(
@@ -1004,24 +1026,13 @@ export function getFacturaTotal(item = {}) {
       source.facturaTotal,
       source.totals?.total,
       source.resumen?.total,
-
-      raw.total,
-      raw.totalFactura,
-      raw.importeTotal,
-      raw.amount,
-      raw.invoiceAmount,
-      raw.importe,
-      raw.facturaTotal,
-      raw.totals?.total,
-      raw.resumen?.total,
       0
     )
   );
 }
 
 export function getFacturaBaseImponible(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
 
   return round2(
     pickFirst(
@@ -1030,20 +1041,53 @@ export function getFacturaBaseImponible(item = {}) {
       source.taxableBase,
       source.resumen?.baseImponible,
       source.resumen?.subtotal,
-
-      raw.baseImponible,
-      raw.subtotal,
-      raw.taxableBase,
-      raw.resumen?.baseImponible,
-      raw.resumen?.subtotal,
       0
     )
   );
 }
 
+export function getFacturaTaxAmount(item = {}, targetType = "") {
+  const source = buildProbe(item);
+  const target = normalizeText(targetType);
+
+  if (target === "iva") {
+    const direct = pickFirst(
+      source.ivaTotal,
+      source.iva,
+      source.cuotaIVA,
+      source.resumen?.ivaTotal
+    );
+
+    if (direct !== undefined) return round2(direct);
+  }
+
+  if (target === "irpf") {
+    const direct = pickFirst(
+      source.irpfTotal,
+      source.irpf,
+      source.retencionesTotal,
+      source.retencionIRPF,
+      source.retencion,
+      source.resumen?.irpfTotal
+    );
+
+    if (direct !== undefined) return round2(direct);
+  }
+
+  const impuestos = safeArray(pickFirst(source.impuestos, source.taxes));
+
+  const found = impuestos.find((tax) => {
+    const item = safeObject(tax);
+    const type = normalizeText(pickFirst(item.tipo, item.type, item.nombre, item.name));
+
+    return Boolean(type && (type === target || type.includes(target)));
+  });
+
+  return round2(found?.importe ?? found?.amount ?? 0);
+}
+
 export function getFacturaImpuestosTotal(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
 
   return round2(
     pickFirst(
@@ -1053,48 +1097,32 @@ export function getFacturaImpuestosTotal(item = {}) {
       source.iva,
       source.cuotaIVA,
       source.resumen?.impuestosTotal,
-
-      raw.impuestosTotal,
-      raw.taxTotal,
-      raw.ivaTotal,
-      raw.iva,
-      raw.cuotaIVA,
-      raw.resumen?.impuestosTotal,
+      getFacturaTaxAmount(source, "iva"),
       0
     )
   );
 }
 
 export function getFacturaDescuentoTotal(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
 
   return round2(
     pickFirst(
       source.descuentoTotal,
       source.discountTotal,
       source.resumen?.descuentoTotal,
-
-      raw.descuentoTotal,
-      raw.discountTotal,
-      raw.resumen?.descuentoTotal,
       0
     )
   );
 }
 
 export function getFacturaPaidAmount(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
 
   const direct = pickFirst(
     source.paidAmount,
     source.payment?.paidAmount,
-    source.billing?.paidAmount,
-
-    raw.paidAmount,
-    raw.payment?.paidAmount,
-    raw.billing?.paidAmount
+    source.billing?.paidAmount
   );
 
   if (direct !== undefined) {
@@ -1102,31 +1130,19 @@ export function getFacturaPaidAmount(item = {}) {
   }
 
   const estadoPago = normalizeEstadoPago(
-    pickFirst(
-      source.estadoPago,
-      source.paymentStatus,
-      source.payment?.status,
-      raw.estadoPago,
-      raw.paymentStatus,
-      raw.payment?.status
-    )
+    pickFirst(source.estadoPago, source.paymentStatus, source.payment?.status)
   );
 
   return estadoPago === "paid" ? getFacturaTotal(source) : 0;
 }
 
 export function getFacturaPendingAmount(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
 
   const direct = pickFirst(
     source.pendingAmount,
     source.payment?.pendingAmount,
-    source.billing?.pendingAmount,
-
-    raw.pendingAmount,
-    raw.payment?.pendingAmount,
-    raw.billing?.pendingAmount
+    source.billing?.pendingAmount
   );
 
   if (direct !== undefined) {
@@ -1137,18 +1153,13 @@ export function getFacturaPendingAmount(item = {}) {
 }
 
 export function getEffectiveEstadoPago(item = {}, now = new Date()) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
+  const source = buildProbe(item);
 
   const estadoPago = normalizeEstadoPago(
     pickFirst(
       source.estadoPago,
       source.paymentStatus,
       source.payment?.status,
-
-      raw.estadoPago,
-      raw.paymentStatus,
-      raw.payment?.status,
       "pending"
     )
   );
@@ -1157,8 +1168,7 @@ export function getEffectiveEstadoPago(item = {}, now = new Date()) {
     return estadoPago;
   }
 
-  const fechaFactura = getFacturaFecha(source);
-  const fechaMs = toMs(fechaFactura);
+  const fechaMs = toMs(getFacturaFecha(source));
 
   if (fechaMs) {
     const diffDays = (now.getTime() - fechaMs) / (1000 * 60 * 60 * 24);
@@ -1172,186 +1182,198 @@ export function getEffectiveEstadoPago(item = {}, now = new Date()) {
 }
 
 export function isFacturaPaid(item = {}) {
-  return normalizeEstadoPago(item?.estadoPago) === "paid";
+  return getEffectiveEstadoPago(item) === "paid";
 }
 
 export function isFacturaPending(item = {}) {
-  const status = normalizeEstadoPago(item?.estadoPago);
+  const status = getEffectiveEstadoPago(item);
   return status === "pending" || status === "partial";
 }
 
 export function isFacturaOverdue(item = {}) {
-  return normalizeEstadoPago(item?.estadoPago) === "overdue";
+  return getEffectiveEstadoPago(item) === "overdue";
+}
+
+export function isFacturaSent(item = {}) {
+  const source = buildProbe(item);
+
+  return Boolean(
+    safeString(
+      pickFirst(
+        source.fechaEnvio,
+        source.sentAt,
+        source.mailSentAt,
+        source.delivery?.sentAt,
+        source.delivery?.lastSentAt,
+        source.enviadoA,
+        source.sentTo
+      ),
+      ""
+    ) ||
+      source.delivery?.sent === true ||
+      source.meta?.isSent === true
+  );
+}
+
+export function hasFacturaPdf(item = {}) {
+  const source = buildProbe(item);
+
+  if (
+    safeBoolean(source.hasPdf, false) ||
+    safeBoolean(source.pdfAvailable, false) ||
+    safeString(source.pdfUrl, "") ||
+    safeString(source.url, "") ||
+    safeString(source.viewUrl, "") ||
+    safeString(source.downloadUrl, "") ||
+    safeString(source.blobPath, "") ||
+    safeString(source.pdfBlobPath, "") ||
+    safeString(source.file?.url, "") ||
+    safeString(source.file?.blobPath, "")
+  ) {
+    return true;
+  }
+
+  const attachments = safeArray(
+    pickFirst(source.attachments, source.files, source.adjuntos)
+  );
+
+  return attachments.some((entry) => {
+    const file = safeObject(entry);
+
+    const type = normalizeText(
+      pickFirst(file.mimeType, file.contentType, file.mimetype, file.type)
+    );
+
+    const name = normalizeText(
+      pickFirst(file.name, file.filename, file.fileName, file.url, file.path)
+    );
+
+    return type.includes("pdf") || name.endsWith(".pdf");
+  });
 }
 
 /* =========================================================
    INCIDENCIA / TICKET PRESERVER
 ========================================================= */
 
+const INCIDENCIA_DIRECT_PATHS = Object.freeze([
+  "ticketId",
+  "incidenciaId",
+  "relatedTicketId",
+  "relatedIncidentId",
+  "supportTicketId",
+  "caseId",
+
+  "incidencia.ticketId",
+  "incidencia.id",
+  "incidencia.incidenciaId",
+
+  "ticket.ticketId",
+  "ticket.id",
+  "ticket.incidenciaId",
+
+  "linkedTicket.ticketId",
+  "linkedTicket.id",
+  "linkedTicket.incidenciaId",
+
+  "relatedTicket.ticketId",
+  "relatedTicket.id",
+  "relatedTicket.incidenciaId",
+
+  "relatedIncident.ticketId",
+  "relatedIncident.id",
+  "relatedIncident.incidenciaId",
+
+  "relations.ticket.ticketId",
+  "relations.ticket.id",
+  "relations.ticket.incidenciaId",
+
+  "relations.incidencia.ticketId",
+  "relations.incidencia.id",
+  "relations.incidencia.incidenciaId",
+
+  "meta.ticketId",
+  "meta.incidenciaId",
+]);
+
+const INCIDENCIA_ARRAY_PATHS = Object.freeze([
+  "ticketIds",
+  "incidenciaIds",
+  "supportTicketIds",
+  "relatedTicketIds",
+  "relatedIncidentIds",
+  "linkedTickets",
+  "incidencias",
+  "tickets",
+  "relatedTickets",
+  "relations",
+  "relations.tickets",
+  "relations.incidencias",
+  "facturasRelacionadas",
+  "linkedInvoices.tickets",
+  "invoiceLinks",
+  "invoiceRelations",
+]);
+
 function pickTicketIdFromArray(value = []) {
   const items = safeArray(value);
 
-  for (const item of items) {
-    if (typeof item === "string" && item.trim()) {
-      return item.trim();
+  for (const entry of items) {
+    if (typeof entry === "string" && entry.trim()) {
+      return entry.trim();
     }
 
-    if (!item || typeof item !== "object") {
-      continue;
-    }
+    if (!isObject(entry)) continue;
 
-    const candidate = pickFirst(
-      item.ticketId,
-      item.incidenciaId,
-      item.id,
-      item.code,
-      item.numero,
-      item.relatedTicketId,
-      item.relatedIncidentId,
-      item.supportTicketId,
-      item.caseId,
-
-      item.ticket?.ticketId,
-      item.ticket?.incidenciaId,
-      item.ticket?.id,
-
-      item.incidencia?.ticketId,
-      item.incidencia?.incidenciaId,
-      item.incidencia?.id,
-
-      item.linkedTicket?.ticketId,
-      item.linkedTicket?.incidenciaId,
-      item.linkedTicket?.id
-    );
+    const item = safeObject(entry);
+    const candidate = pickPath(item, INCIDENCIA_DIRECT_PATHS);
 
     if (candidate) {
       return safeString(candidate, "");
     }
   }
 
-  return null;
+  return "";
+}
+
+function pickTicketIdFromArrays(source = {}) {
+  for (const path of INCIDENCIA_ARRAY_PATHS) {
+    const value = getPath(source, path);
+    const found = pickTicketIdFromArray(value);
+
+    if (found) return found;
+  }
+
+  return "";
+}
+
+function getFacturaRelationObject(item = {}) {
+  const source = buildProbe(item);
+
+  const relation = pickFirst(
+    source.incidencia,
+    source.ticket,
+    source.linkedTicket,
+    source.relatedTicket,
+    source.relatedIncident,
+    source.relations?.ticket,
+    source.relations?.incidencia,
+    safeArray(source.tickets)[0],
+    safeArray(source.incidencias)[0],
+    safeArray(source.relations?.tickets)[0],
+    safeArray(source.relations?.incidencias)[0]
+  );
+
+  return safeObject(relation);
 }
 
 export function getFacturaIncidenciaId(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
-
-  const incidencia = safeObject(pickFirst(source.incidencia, raw.incidencia));
-  const ticket = safeObject(pickFirst(source.ticket, raw.ticket));
-  const linkedTicket = safeObject(pickFirst(source.linkedTicket, raw.linkedTicket));
-  const relatedTicket = safeObject(pickFirst(source.relatedTicket, raw.relatedTicket));
-  const relatedIncident = safeObject(pickFirst(source.relatedIncident, raw.relatedIncident));
-
-  const relationTicket = safeObject(pickFirst(source.relations?.ticket, raw.relations?.ticket));
-  const relationIncidencia = safeObject(pickFirst(source.relations?.incidencia, raw.relations?.incidencia));
+  const source = buildProbe(item);
 
   return safeString(
     pickFirst(
-      source.ticketId,
-      source.incidenciaId,
-
-      incidencia.ticketId,
-      incidencia.id,
-      incidencia.incidenciaId,
-
-      ticket.ticketId,
-      ticket.id,
-      ticket.incidenciaId,
-
-      linkedTicket.ticketId,
-      linkedTicket.id,
-      linkedTicket.incidenciaId,
-
-      relatedTicket.ticketId,
-      relatedTicket.id,
-      relatedTicket.incidenciaId,
-
-      relatedIncident.ticketId,
-      relatedIncident.id,
-      relatedIncident.incidenciaId,
-
-      relationTicket.ticketId,
-      relationTicket.id,
-      relationTicket.incidenciaId,
-
-      relationIncidencia.ticketId,
-      relationIncidencia.id,
-      relationIncidencia.incidenciaId,
-
-      source.relatedTicketId,
-      source.relatedIncidentId,
-      source.supportTicketId,
-      source.caseId,
-
-      source.meta?.ticketId,
-      source.meta?.incidenciaId,
-
-      pickTicketIdFromArray(source.ticketIds),
-      pickTicketIdFromArray(source.incidenciaIds),
-      pickTicketIdFromArray(source.relatedTicketIds),
-      pickTicketIdFromArray(source.relatedIncidentIds),
-      pickTicketIdFromArray(source.linkedTickets),
-      pickTicketIdFromArray(source.incidencias),
-      pickTicketIdFromArray(source.tickets),
-      pickTicketIdFromArray(source.relatedTickets),
-      pickTicketIdFromArray(source.relations),
-      pickTicketIdFromArray(source.facturasRelacionadas),
-      pickTicketIdFromArray(source.linkedInvoices?.tickets),
-      pickTicketIdFromArray(source.invoiceLinks),
-      pickTicketIdFromArray(source.invoiceRelations),
-
-      raw.ticketId,
-      raw.incidenciaId,
-
-      raw.incidencia?.ticketId,
-      raw.incidencia?.id,
-      raw.incidencia?.incidenciaId,
-
-      raw.ticket?.ticketId,
-      raw.ticket?.id,
-      raw.ticket?.incidenciaId,
-
-      raw.linkedTicket?.ticketId,
-      raw.linkedTicket?.id,
-      raw.linkedTicket?.incidenciaId,
-
-      raw.relatedTicket?.ticketId,
-      raw.relatedTicket?.id,
-      raw.relatedTicket?.incidenciaId,
-
-      raw.relatedIncident?.ticketId,
-      raw.relatedIncident?.id,
-      raw.relatedIncident?.incidenciaId,
-
-      raw.relations?.ticket?.ticketId,
-      raw.relations?.ticket?.id,
-      raw.relations?.ticket?.incidenciaId,
-
-      raw.relations?.incidencia?.ticketId,
-      raw.relations?.incidencia?.id,
-      raw.relations?.incidencia?.incidenciaId,
-
-      raw.relatedTicketId,
-      raw.relatedIncidentId,
-      raw.supportTicketId,
-      raw.caseId,
-
-      raw.meta?.ticketId,
-      raw.meta?.incidenciaId,
-
-      pickTicketIdFromArray(raw.ticketIds),
-      pickTicketIdFromArray(raw.incidenciaIds),
-      pickTicketIdFromArray(raw.relatedTicketIds),
-      pickTicketIdFromArray(raw.relatedIncidentIds),
-      pickTicketIdFromArray(raw.linkedTickets),
-      pickTicketIdFromArray(raw.incidencias),
-      pickTicketIdFromArray(raw.tickets),
-      pickTicketIdFromArray(raw.relatedTickets),
-      pickTicketIdFromArray(raw.relations),
-      pickTicketIdFromArray(raw.facturasRelacionadas),
-      pickTicketIdFromArray(raw.linkedInvoices?.tickets),
-      pickTicketIdFromArray(raw.invoiceLinks),
-      pickTicketIdFromArray(raw.invoiceRelations)
+      pickPath(source, INCIDENCIA_DIRECT_PATHS),
+      pickTicketIdFromArrays(source)
     ),
     ""
   );
@@ -1362,100 +1384,59 @@ export function hasFacturaIncidencia(item = {}) {
 }
 
 export function buildFacturaIncidenciaPayload(item = {}) {
-  const source = safeObject(item);
-  const raw = getRaw(source);
-
-  const incidencia = safeObject(pickFirst(source.incidencia, raw.incidencia));
-  const ticket = safeObject(pickFirst(source.ticket, raw.ticket));
-  const linkedTicket = safeObject(pickFirst(source.linkedTicket, raw.linkedTicket));
-  const relatedTicket = safeObject(pickFirst(source.relatedTicket, raw.relatedTicket));
-  const relationTicket = safeObject(pickFirst(source.relations?.ticket, raw.relations?.ticket));
-
+  const source = buildProbe(item);
+  const relation = getFacturaRelationObject(source);
   const incidenciaId = getFacturaIncidenciaId(source);
 
-  if (!incidenciaId) {
-    return null;
-  }
+  if (!incidenciaId) return null;
 
   const subject = safeString(
     pickFirst(
-      incidencia.subject,
-      incidencia.asunto,
-      incidencia.title,
-
-      ticket.subject,
-      ticket.asunto,
-      ticket.title,
-
-      linkedTicket.subject,
-      linkedTicket.asunto,
-      linkedTicket.title,
-
-      relatedTicket.subject,
-      relatedTicket.asunto,
-      relatedTicket.title,
-
-      relationTicket.subject,
-      relationTicket.asunto,
-      relationTicket.title,
-
+      relation.subject,
+      relation.asunto,
+      relation.title,
+      source.subject,
+      source.asunto,
+      source.title,
       "Incidencia relacionada"
     ),
     "Incidencia relacionada"
   );
 
   return {
-    ...incidencia,
+    ...relation,
 
     id: incidenciaId,
     ticketId: incidenciaId,
     incidenciaId,
 
     code: safeString(
-      pickFirst(
-        incidencia.code,
-        ticket.code,
-        linkedTicket.code,
-        relatedTicket.code,
-        relationTicket.code,
-        incidenciaId
-      ),
+      pickFirst(relation.code, relation.ticketCode, incidenciaId),
       incidenciaId
     ),
 
     ticketCode: safeString(
-      pickFirst(
-        incidencia.ticketCode,
-        ticket.ticketCode,
-        linkedTicket.ticketCode,
-        relatedTicket.ticketCode,
-        relationTicket.ticketCode,
-        incidenciaId
-      ),
+      pickFirst(relation.ticketCode, relation.code, incidenciaId),
       incidenciaId
     ),
 
     subject,
-    asunto: safeString(pickFirst(incidencia.asunto, subject), subject),
-    title: safeString(pickFirst(incidencia.title, subject), subject),
+    asunto: safeString(pickFirst(relation.asunto, subject), subject),
+    title: safeString(pickFirst(relation.title, subject), subject),
+
+    status: safeString(pickFirst(relation.status, relation.estado, "open"), "open"),
+    estado: safeString(pickFirst(relation.estado, relation.status, "open"), "open"),
+
+    priority: safeString(pickFirst(relation.priority, relation.prioridad, "medium"), "medium"),
+    prioridad: safeString(pickFirst(relation.prioridad, relation.priority, "medium"), "medium"),
 
     clienteId: safeString(
       pickFirst(
-        incidencia.clienteId,
-        ticket.clienteId,
-        linkedTicket.clienteId,
-        relatedTicket.clienteId,
-        relationTicket.clienteId,
-
+        relation.clienteId,
         source.clienteId,
         source.cliente?.id,
         source.clientId,
         source.client?.id,
-
-        raw.clienteId,
-        raw.cliente?.id,
-        raw.clientId,
-        raw.client?.id,
         ""
       ),
       ""
@@ -1463,26 +1444,9 @@ export function buildFacturaIncidenciaPayload(item = {}) {
 
     clienteNombre: safeString(
       pickFirst(
-        incidencia.clienteNombre,
-        incidencia.name,
-        incidencia.nombre,
-
-        ticket.clienteNombre,
-        ticket.name,
-        ticket.nombre,
-
-        linkedTicket.clienteNombre,
-        linkedTicket.name,
-        linkedTicket.nombre,
-
-        relatedTicket.clienteNombre,
-        relatedTicket.name,
-        relatedTicket.nombre,
-
-        relationTicket.clienteNombre,
-        relationTicket.name,
-        relationTicket.nombre,
-
+        relation.clienteNombre,
+        relation.name,
+        relation.nombre,
         getFacturaClienteNombre(source),
         ""
       ),
@@ -1490,115 +1454,65 @@ export function buildFacturaIncidenciaPayload(item = {}) {
     ),
 
     relationType: safeString(
-      pickFirst(
-        incidencia.relationType,
-        ticket.relationType,
-        linkedTicket.relationType,
-        relatedTicket.relationType,
-        relationTicket.relationType,
-        source.relationType,
-        raw.relationType,
-        "linked_ticket"
-      ),
+      pickFirst(relation.relationType, source.relationType, "linked_ticket"),
       "linked_ticket"
     ),
 
     linkedAt: safeString(
-      pickFirst(
-        incidencia.linkedAt,
-        ticket.linkedAt,
-        linkedTicket.linkedAt,
-        relatedTicket.linkedAt,
-        relationTicket.linkedAt,
-        source.linkedAt,
-        raw.linkedAt,
-        source.updatedAt,
-        raw.updatedAt,
-        ""
-      ),
+      pickFirst(relation.linkedAt, source.linkedAt, source.updatedAt, ""),
       ""
     ),
 
     linkedAtES: safeString(
-      pickFirst(
-        incidencia.linkedAtES,
-        ticket.linkedAtES,
-        linkedTicket.linkedAtES,
-        relatedTicket.linkedAtES,
-        relationTicket.linkedAtES,
-        source.linkedAtES,
-        raw.linkedAtES,
-        source.updatedAtES,
-        raw.updatedAtES,
-        ""
-      ),
+      pickFirst(relation.linkedAtES, source.linkedAtES, source.updatedAtES, ""),
       ""
     ),
+  };
+}
+
+function mergeRelationObject(existing = {}, payload = {}, incidenciaId = "") {
+  const current = safeObject(existing);
+  const next = safeObject(payload);
+
+  return {
+    ...next,
+    ...current,
+
+    id: safeString(pickFirst(current.id, current.ticketId, incidenciaId), incidenciaId),
+    ticketId: safeString(pickFirst(current.ticketId, current.id, incidenciaId), incidenciaId),
+    incidenciaId: safeString(pickFirst(current.incidenciaId, incidenciaId), incidenciaId),
   };
 }
 
 function mergeRawIncidencia(raw = {}, incidenciaId = "", incidenciaPayload = null) {
   const base = safeObject(raw);
 
-  if (!incidenciaId) {
-    return base;
-  }
+  if (!incidenciaId) return base;
+
+  const payload = safeObject(incidenciaPayload, {
+    id: incidenciaId,
+    ticketId: incidenciaId,
+    incidenciaId,
+  });
 
   return {
     ...base,
 
     ticketId: safeString(pickFirst(base.ticketId, incidenciaId), incidenciaId),
     incidenciaId: safeString(pickFirst(base.incidenciaId, incidenciaId), incidenciaId),
+    relatedTicketId: safeString(pickFirst(base.relatedTicketId, incidenciaId), incidenciaId),
+    relatedIncidentId: safeString(pickFirst(base.relatedIncidentId, incidenciaId), incidenciaId),
+    supportTicketId: safeString(pickFirst(base.supportTicketId, incidenciaId), incidenciaId),
+    caseId: safeString(pickFirst(base.caseId, incidenciaId), incidenciaId),
 
-    relatedTicketId: safeString(
-      pickFirst(base.relatedTicketId, incidenciaId),
-      incidenciaId
-    ),
+    incidencia: mergeRelationObject(base.incidencia, payload, incidenciaId),
+    ticket: mergeRelationObject(base.ticket, payload, incidenciaId),
+    linkedTicket: mergeRelationObject(base.linkedTicket, payload, incidenciaId),
 
-    relatedIncidentId: safeString(
-      pickFirst(base.relatedIncidentId, incidenciaId),
-      incidenciaId
-    ),
-
-    supportTicketId: safeString(
-      pickFirst(base.supportTicketId, incidenciaId),
-      incidenciaId
-    ),
-
-    caseId: safeString(
-      pickFirst(base.caseId, incidenciaId),
-      incidenciaId
-    ),
-
-    incidencia: hasOwnKeys(base.incidencia)
-      ? {
-          ...incidenciaPayload,
-          ...base.incidencia,
-          id: safeString(pickFirst(base.incidencia?.id, incidenciaId), incidenciaId),
-          ticketId: safeString(pickFirst(base.incidencia?.ticketId, incidenciaId), incidenciaId),
-          incidenciaId: safeString(pickFirst(base.incidencia?.incidenciaId, incidenciaId), incidenciaId),
-        }
-      : incidenciaPayload,
-
-    ticket: hasOwnKeys(base.ticket)
-      ? {
-          ...incidenciaPayload,
-          ...base.ticket,
-          id: safeString(pickFirst(base.ticket?.id, incidenciaId), incidenciaId),
-          ticketId: safeString(pickFirst(base.ticket?.ticketId, incidenciaId), incidenciaId),
-          incidenciaId: safeString(pickFirst(base.ticket?.incidenciaId, incidenciaId), incidenciaId),
-        }
-      : incidenciaPayload,
-
-    linkedTicket: hasOwnKeys(base.linkedTicket)
-      ? {
-          ...incidenciaPayload,
-          ...base.linkedTicket,
-          id: safeString(pickFirst(base.linkedTicket?.id, incidenciaId), incidenciaId),
-          ticketId: safeString(pickFirst(base.linkedTicket?.ticketId, incidenciaId), incidenciaId),
-          incidenciaId: safeString(pickFirst(base.linkedTicket?.incidenciaId, incidenciaId), incidenciaId),
-        }
-      : incidenciaPayload,
+    relations: {
+      ...safeObject(base.relations),
+      ticket: mergeRelationObject(base.relations?.ticket, payload, incidenciaId),
+    },
 
     meta: {
       ...safeObject(base.meta),
@@ -1613,12 +1527,9 @@ function preserveFacturaIncidenciaFields(normalized = {}, original = {}) {
   const base = safeObject(normalized);
   const source = safeObject(original);
 
-  const sourceRaw = getRaw(source);
-  const baseRaw = getRaw(base);
-
   const raw = {
-    ...sourceRaw,
-    ...baseRaw,
+    ...getRaw(source),
+    ...getRaw(base),
   };
 
   const probe = {
@@ -1660,60 +1571,37 @@ function preserveFacturaIncidenciaFields(normalized = {}, original = {}) {
     incidenciaId,
 
     relatedTicketId: safeString(
-      pickFirst(
-        base.relatedTicketId,
-        source.relatedTicketId,
-        nextRaw.relatedTicketId,
-        incidenciaId
-      ),
+      pickFirst(base.relatedTicketId, source.relatedTicketId, nextRaw.relatedTicketId, incidenciaId),
       incidenciaId
     ),
 
     relatedIncidentId: safeString(
-      pickFirst(
-        base.relatedIncidentId,
-        source.relatedIncidentId,
-        nextRaw.relatedIncidentId,
-        incidenciaId
-      ),
+      pickFirst(base.relatedIncidentId, source.relatedIncidentId, nextRaw.relatedIncidentId, incidenciaId),
       incidenciaId
     ),
 
     supportTicketId: safeString(
-      pickFirst(
-        base.supportTicketId,
-        source.supportTicketId,
-        nextRaw.supportTicketId,
-        incidenciaId
-      ),
+      pickFirst(base.supportTicketId, source.supportTicketId, nextRaw.supportTicketId, incidenciaId),
       incidenciaId
     ),
 
     caseId: safeString(
-      pickFirst(
-        base.caseId,
-        source.caseId,
-        nextRaw.caseId,
-        incidenciaId
-      ),
+      pickFirst(base.caseId, source.caseId, nextRaw.caseId, incidenciaId),
       incidenciaId
     ),
 
     incidencia: incidenciaPayload,
+    ticket: mergeRelationObject(pickFirst(base.ticket, source.ticket, nextRaw.ticket), incidenciaPayload, incidenciaId),
+    linkedTicket: mergeRelationObject(
+      pickFirst(base.linkedTicket, source.linkedTicket, nextRaw.linkedTicket),
+      incidenciaPayload,
+      incidenciaId
+    ),
 
-    ticket: hasOwnKeys(pickFirst(base.ticket, source.ticket, nextRaw.ticket))
-      ? {
-          ...incidenciaPayload,
-          ...safeObject(pickFirst(base.ticket, source.ticket, nextRaw.ticket)),
-        }
-      : incidenciaPayload,
-
-    linkedTicket: hasOwnKeys(pickFirst(base.linkedTicket, source.linkedTicket, nextRaw.linkedTicket))
-      ? {
-          ...incidenciaPayload,
-          ...safeObject(pickFirst(base.linkedTicket, source.linkedTicket, nextRaw.linkedTicket)),
-        }
-      : incidenciaPayload,
+    relations: {
+      ...safeObject(base.relations),
+      ticket: mergeRelationObject(base.relations?.ticket, incidenciaPayload, incidenciaId),
+    },
 
     relationType: safeString(
       pickFirst(
@@ -1746,103 +1634,67 @@ function preserveFacturaIncidenciaFields(normalized = {}, original = {}) {
 export function normalizeFactura(item = {}) {
   const source = unwrapFacturaPayload(item);
   const raw = getRaw(source);
+  const probe = buildProbe(source);
 
-  const facturaId = getFacturaPrimaryId(source);
-  const numero = getFacturaNumero(source);
+  const facturaId = getFacturaPrimaryId(probe);
+  const numero = getFacturaNumero(probe);
 
-  const estadoPago = getEffectiveEstadoPago(source);
+  const estadoPago = getEffectiveEstadoPago(probe);
 
   const estado = normalizeEstado(
     pickFirst(
-      source.estado,
-      source.status,
-      raw.estado,
-      raw.status,
-      "issued"
+      probe.estado,
+      probe.status,
+      estadoPago === "paid" ? "paid" : "issued"
     )
   );
 
-  const clienteNombre = getFacturaClienteNombre(source);
-  const clienteEmpresa = getFacturaClienteEmpresa(source);
-  const clienteEmail = getFacturaClienteEmail(source);
+  const clienteId = getFacturaClienteId(probe);
+  const clienteNombre = getFacturaClienteNombre(probe);
+  const clienteEmpresa = getFacturaClienteEmpresa(probe);
+  const clienteEmail = getFacturaClienteEmail(probe);
 
-  const currency = getFacturaCurrency(source);
-  const fecha = getFacturaFecha(source);
+  const currency = getFacturaCurrency(probe);
+  const fecha = getFacturaFecha(probe);
+  const updatedAt = getFacturaUpdatedAt(probe);
 
-  const fechaEnvio =
-    safeString(source.fechaEnvio) ||
-    safeString(source.sentAt) ||
-    safeString(source.mailSentAt) ||
-    safeString(source.delivery?.sentAt) ||
-    safeString(raw.fechaEnvio) ||
-    safeString(raw.sentAt) ||
-    safeString(raw.mailSentAt) ||
-    safeString(raw.delivery?.sentAt) ||
-    null;
-
-  const updatedAt = getFacturaUpdatedAt(source);
+  const fechaEnvio = (
+    safeString(
+      pickFirst(
+        probe.fechaEnvio,
+        probe.sentAt,
+        probe.mailSentAt,
+        probe.delivery?.sentAt,
+        probe.delivery?.lastSentAt
+      ),
+      ""
+    ) || null
+  );
 
   const lineas = safeArray(
-    pickFirst(source.lineas, source.lines, raw.lineas, raw.lines)
+    pickFirst(probe.lineas, probe.lines)
   );
 
   const impuestos = safeArray(
-    pickFirst(source.impuestos, source.taxes, raw.impuestos, raw.taxes)
+    pickFirst(probe.impuestos, probe.taxes)
   );
 
   const attachments = safeArray(
-    pickFirst(
-      source.attachments,
-      source.files,
-      source.adjuntos,
-      raw.attachments,
-      raw.files,
-      raw.adjuntos
-    )
+    pickFirst(probe.attachments, probe.files, probe.adjuntos)
   );
 
-  const clienteId = pickFirst(
-    source.clienteId,
-    source.clientId,
-    source.customerId,
-    source.cliente?.id,
-    source.client?.id,
-    source.customer?.id,
-    source.clienteSnapshot?.id,
-    source.clienteSnapshot?.clienteId,
-
-    raw.clienteId,
-    raw.clientId,
-    raw.customerId,
-    raw.cliente?.id,
-    raw.client?.id,
-    raw.customer?.id,
-    raw.clienteSnapshot?.id,
-    raw.clienteSnapshot?.clienteId,
-
-    source.userId,
-    raw.userId,
-    null
-  );
-
-  const total = getFacturaTotal(source);
-  const baseImponible = getFacturaBaseImponible(source);
-  const impuestosTotal = getFacturaImpuestosTotal(source);
-  const descuentoTotal = getFacturaDescuentoTotal(source);
+  const total = getFacturaTotal(probe);
+  const baseImponible = getFacturaBaseImponible(probe);
+  const impuestosTotal = getFacturaImpuestosTotal(probe);
+  const descuentoTotal = getFacturaDescuentoTotal(probe);
 
   const pdfUrl = safeString(
     pickFirst(
-      source.pdfUrl,
-      source.file?.url,
-      source.url,
-      source.downloadUrl,
-      source.viewUrl,
-
-      raw.pdfUrl,
-      raw.file?.url,
-      raw.url,
-      raw.downloadUrl,
-      raw.viewUrl,
+      probe.pdfUrl,
+      probe.file?.url,
+      probe.url,
+      probe.downloadUrl,
+      probe.viewUrl,
       ""
     ),
     ""
@@ -1850,77 +1702,64 @@ export function normalizeFactura(item = {}) {
 
   const blobPath = safeString(
     pickFirst(
-      source.blobPath,
-      source.pdfBlobPath,
-      source.file?.blobPath,
-      raw.blobPath,
-      raw.pdfBlobPath,
-      raw.file?.blobPath,
+      probe.blobPath,
+      probe.pdfBlobPath,
+      probe.file?.blobPath,
       ""
     ),
     ""
   );
 
-  const hasPdf = Boolean(
-    safeBoolean(source.hasPdf, false) ||
-      safeBoolean(source.pdfAvailable, false) ||
-      safeBoolean(raw.hasPdf, false) ||
-      safeBoolean(raw.pdfAvailable, false) ||
-      pdfUrl ||
-      blobPath
-  );
+  const hasPdf = hasFacturaPdf(probe);
 
   const normalized = {
     ...source,
 
     id: facturaId || numero || "",
-    _id: safeString(pickFirst(source._id, raw._id), "") || null,
+    _id: safeString(pickFirst(probe._id, facturaId), "") || null,
+
     facturaId: facturaId || numero || "",
-    invoiceId: safeString(pickFirst(source.invoiceId, raw.invoiceId, facturaId || numero), facturaId || numero),
+    invoiceId: safeString(pickFirst(probe.invoiceId, facturaId, numero), facturaId || numero),
 
     numero,
-
-    numeroFacturaLegal: safeString(
-      pickFirst(source.numeroFacturaLegal, raw.numeroFacturaLegal),
-      ""
-    ),
-
-    numeroFacturaSistema: safeString(
-      pickFirst(source.numeroFacturaSistema, raw.numeroFacturaSistema),
-      ""
-    ),
-
-    invoiceNumber: safeString(
-      pickFirst(source.invoiceNumber, raw.invoiceNumber, numero),
-      numero
-    ),
-
-    code: safeString(
-      pickFirst(source.code, raw.code, numero),
-      numero
-    ),
+    numeroFactura: safeString(pickFirst(probe.numeroFactura, probe.numeroFacturaLegal, numero), numero),
+    numeroFacturaLegal: safeString(pickFirst(probe.numeroFacturaLegal, numero), ""),
+    numeroFacturaSistema: safeString(probe.numeroFacturaSistema, ""),
+    invoiceNumber: safeString(pickFirst(probe.invoiceNumber, numero), numero),
+    code: safeString(pickFirst(probe.code, numero), numero),
 
     fecha,
-    fechaFactura: safeString(
-      pickFirst(source.fechaFactura, raw.fechaFactura, fecha),
-      fecha || ""
-    ) || null,
-
+    fechaFactura: safeString(pickFirst(probe.fechaFactura, fecha), fecha || "") || null,
     fechaEnvio,
     updatedAt,
 
     createdAt:
-      safeString(source.createdAt) ||
-      safeString(source.auditoria?.createdAt) ||
-      safeString(raw.createdAt) ||
-      safeString(raw.auditoria?.createdAt) ||
-      null,
+      safeString(
+        pickFirst(
+          probe.createdAt,
+          probe.auditoria?.createdAt
+        ),
+        ""
+      ) || null,
 
     estadoPago,
     paymentStatus: estadoPago,
-
     estado,
     status: estado,
+
+    estadoPagoLabel: getEstadoPagoLabel(estadoPago),
+    estadoLabel: getEstadoLabel(estado),
+
+    estadoPagoTone: getEstadoPagoTone(estadoPago),
+    estadoTone: getEstadoTone(estado),
+
+    estadoPagoChipClass: getEstadoPagoChipClass(estadoPago),
+    estadoChipClass: getEstadoChipClass(estado),
+
+    rowStatusClass: getFacturaRowStatusClass({
+      ...probe,
+      estadoPago,
+    }),
 
     total,
     amount: total,
@@ -1929,10 +1768,8 @@ export function normalizeFactura(item = {}) {
 
     subtotal: round2(
       pickFirst(
-        source.subtotal,
-        source.resumen?.subtotal,
-        raw.subtotal,
-        raw.resumen?.subtotal,
+        probe.subtotal,
+        probe.resumen?.subtotal,
         0
       )
     ),
@@ -1941,89 +1778,52 @@ export function normalizeFactura(item = {}) {
     descuentoTotal,
     impuestosTotal,
 
-    iva: round2(
-      pickFirst(
-        source.iva,
-        source.ivaTotal,
-        source.cuotaIVA,
-        raw.iva,
-        raw.ivaTotal,
-        raw.cuotaIVA,
-        0
-      )
-    ),
+    iva: getFacturaTaxAmount(probe, "iva"),
+    ivaTotal: getFacturaTaxAmount(probe, "iva"),
 
-    ivaTotal: round2(
-      pickFirst(
-        source.ivaTotal,
-        source.iva,
-        source.cuotaIVA,
-        raw.ivaTotal,
-        raw.iva,
-        raw.cuotaIVA,
-        0
-      )
-    ),
-
-    irpf: round2(
-      pickFirst(
-        source.irpf,
-        source.irpfTotal,
-        source.retencionIRPF,
-        source.retencion,
-        raw.irpf,
-        raw.irpfTotal,
-        raw.retencionIRPF,
-        raw.retencion,
-        0
-      )
-    ),
-
-    irpfTotal: round2(
-      pickFirst(
-        source.irpfTotal,
-        source.irpf,
-        source.retencionIRPF,
-        source.retencion,
-        raw.irpfTotal,
-        raw.irpf,
-        raw.retencionIRPF,
-        raw.retencion,
-        0
-      )
-    ),
+    irpf: getFacturaTaxAmount(probe, "irpf"),
+    irpfTotal: getFacturaTaxAmount(probe, "irpf"),
 
     moneda: currency,
     currency,
 
-    paidAmount: getFacturaPaidAmount(source),
-    pendingAmount: getFacturaPendingAmount(source),
+    paidAmount: getFacturaPaidAmount(probe),
+    pendingAmount: getFacturaPendingAmount(probe),
 
-    formaPago:
-      safeString(source.formaPago) ||
-      safeString(source.metodoPago) ||
-      safeString(source.paymentMethod) ||
-      safeString(raw.formaPago) ||
-      safeString(raw.metodoPago) ||
-      safeString(raw.paymentMethod) ||
-      "—",
+    formaPago: safeString(
+      pickFirst(
+        probe.formaPago,
+        probe.metodoPago,
+        probe.paymentMethod,
+        probe.payment?.method
+      ),
+      "—"
+    ),
 
-    cuentaPago:
-      safeString(source.cuentaPago) ||
-      safeString(source.paymentAccount) ||
-      safeString(raw.cuentaPago) ||
-      safeString(raw.paymentAccount) ||
-      "",
+    metodoPago: safeString(
+      pickFirst(
+        probe.metodoPago,
+        probe.formaPago,
+        probe.paymentMethod,
+        probe.payment?.method
+      ),
+      "—"
+    ),
 
-    preview: getFacturaPreview(source),
+    cuentaPago: safeString(
+      pickFirst(probe.cuentaPago, probe.paymentAccount),
+      ""
+    ),
+
+    preview: getFacturaPreview(probe),
 
     lineasCount: safeNumber(
-      pickFirst(source.lineasCount, raw.lineasCount),
+      pickFirst(probe.lineasCount),
       lineas.length
     ),
 
     attachmentsCount: safeNumber(
-      pickFirst(source.attachmentsCount, raw.attachmentsCount),
+      pickFirst(probe.attachmentsCount),
       attachments.length
     ),
 
@@ -2032,8 +1832,9 @@ export function normalizeFactura(item = {}) {
     pdfUrl,
     blobPath,
 
-    clienteId,
+    isSent: isFacturaSent(probe),
 
+    clienteId,
     clienteNombre,
     clienteEmpresa,
     clienteEmail,
@@ -2042,145 +1843,180 @@ export function normalizeFactura(item = {}) {
       ...safeObject(pickFirst(raw.cliente, raw.client, raw.customer, raw.clienteSnapshot)),
       ...safeObject(pickFirst(source.cliente, source.client, source.customer, source.clienteSnapshot)),
 
-      id: clienteId ?? null,
+      id: clienteId || null,
+      clienteId: clienteId || null,
 
       nombre: clienteNombre,
 
-      nombreContacto:
-        safeString(source?.cliente?.nombreContacto) ||
-        safeString(source?.client?.contactName) ||
-        safeString(raw?.cliente?.nombreContacto) ||
-        safeString(raw?.client?.contactName) ||
-        clienteNombre,
+      nombreContacto: safeString(
+        pickFirst(
+          probe.cliente?.nombreContacto,
+          probe.client?.contactName,
+          clienteNombre
+        ),
+        clienteNombre
+      ),
 
       empresa: clienteEmpresa,
 
-      razonSocial:
-        safeString(source?.cliente?.razonSocial) ||
-        safeString(source?.client?.company) ||
-        safeString(raw?.cliente?.razonSocial) ||
-        safeString(raw?.client?.company) ||
-        clienteEmpresa,
+      razonSocial: safeString(
+        pickFirst(
+          probe.cliente?.razonSocial,
+          probe.client?.company,
+          clienteEmpresa
+        ),
+        clienteEmpresa
+      ),
 
       email: clienteEmail,
+      emailLower: clienteEmail !== "-" ? normalizeText(clienteEmail) : "",
 
-      telefono:
-        safeString(source?.cliente?.telefono) ||
-        safeString(source?.client?.phone) ||
-        safeString(source?.telefonoCliente) ||
-        safeString(raw?.cliente?.telefono) ||
-        safeString(raw?.client?.phone) ||
-        safeString(raw?.telefonoCliente) ||
-        "",
+      telefono: safeString(
+        pickFirst(
+          probe.cliente?.telefono,
+          probe.client?.phone,
+          probe.telefonoCliente
+        ),
+        ""
+      ),
 
-      nif:
-        safeString(source?.cliente?.nif) ||
-        safeString(source?.cliente?.vatId) ||
-        safeString(raw?.cliente?.nif) ||
-        safeString(raw?.cliente?.vatId) ||
-        "",
+      nif: safeString(
+        pickFirst(
+          probe.cliente?.nif,
+          probe.cliente?.vatId,
+          probe.client?.nif,
+          probe.client?.vatId
+        ),
+        ""
+      ),
 
       avatar:
-        source?.cliente?.avatar ??
-        source?.client?.avatar ??
-        source?.customer?.avatar ??
-        source?.owner?.avatar ??
-        raw?.cliente?.avatar ??
-        raw?.client?.avatar ??
-        raw?.customer?.avatar ??
-        raw?.owner?.avatar ??
+        probe.cliente?.avatar ??
+        probe.client?.avatar ??
+        probe.customer?.avatar ??
+        probe.owner?.avatar ??
         null,
 
       initials: getInitials(
-        clienteEmpresa && clienteEmpresa !== "-" ? clienteEmpresa : clienteNombre
+        clienteEmpresa && clienteEmpresa !== "-"
+          ? clienteEmpresa
+          : clienteNombre
       ),
 
+      avatarToneIndex: getFacturaAvatarToneIndex(probe),
+      avatarToneClass: getFacturaAvatarToneClass(probe),
+
       direccion: {
-        calle:
-          safeString(source?.cliente?.direccion?.calle) ||
-          safeString(source?.client?.address?.street) ||
-          safeString(raw?.cliente?.direccion?.calle) ||
-          safeString(raw?.client?.address?.street),
+        calle: safeString(
+          pickFirst(
+            probe.cliente?.direccion?.calle,
+            probe.client?.address?.street
+          ),
+          ""
+        ),
 
-        linea2:
-          safeString(source?.cliente?.direccion?.linea2) ||
-          safeString(source?.client?.address?.line2) ||
-          safeString(raw?.cliente?.direccion?.linea2) ||
-          safeString(raw?.client?.address?.line2),
+        linea2: safeString(
+          pickFirst(
+            probe.cliente?.direccion?.linea2,
+            probe.client?.address?.line2
+          ),
+          ""
+        ),
 
-        cp:
-          safeString(source?.cliente?.direccion?.cp) ||
-          safeString(source?.client?.address?.zip) ||
-          safeString(raw?.cliente?.direccion?.cp) ||
-          safeString(raw?.client?.address?.zip),
+        cp: safeString(
+          pickFirst(
+            probe.cliente?.direccion?.cp,
+            probe.client?.address?.zip
+          ),
+          ""
+        ),
 
-        ciudad:
-          safeString(source?.cliente?.direccion?.ciudad) ||
-          safeString(source?.client?.address?.city) ||
-          safeString(raw?.cliente?.direccion?.ciudad) ||
-          safeString(raw?.client?.address?.city),
+        ciudad: safeString(
+          pickFirst(
+            probe.cliente?.direccion?.ciudad,
+            probe.client?.address?.city
+          ),
+          ""
+        ),
 
-        provincia:
-          safeString(source?.cliente?.direccion?.provincia) ||
-          safeString(source?.client?.address?.state) ||
-          safeString(raw?.cliente?.direccion?.provincia) ||
-          safeString(raw?.client?.address?.state),
+        provincia: safeString(
+          pickFirst(
+            probe.cliente?.direccion?.provincia,
+            probe.client?.address?.state
+          ),
+          ""
+        ),
 
-        pais:
-          safeString(source?.cliente?.direccion?.pais) ||
-          safeString(source?.client?.address?.country) ||
-          safeString(raw?.cliente?.direccion?.pais) ||
-          safeString(raw?.client?.address?.country),
+        pais: safeString(
+          pickFirst(
+            probe.cliente?.direccion?.pais,
+            probe.client?.address?.country
+          ),
+          ""
+        ),
       },
     },
 
     owner: {
-      id: source?.owner?.id ?? raw?.owner?.id ?? source?.userId ?? raw?.userId ?? null,
+      id: probe.owner?.id ?? probe.userId ?? null,
 
-      name:
-        safeString(source?.owner?.name) ||
-        safeString(raw?.owner?.name) ||
-        safeString(source?.name) ||
-        safeString(raw?.name) ||
-        "",
+      name: safeString(
+        pickFirst(probe.owner?.name, probe.name),
+        ""
+      ),
 
-      email:
-        safeString(source?.owner?.email) ||
-        safeString(raw?.owner?.email) ||
-        "",
-
-      avatar: source?.owner?.avatar ?? raw?.owner?.avatar ?? null,
+      email: safeString(probe.owner?.email, ""),
+      avatar: probe.owner?.avatar ?? null,
     },
 
-    concepto:
-      safeString(source.concepto) ||
-      safeString(raw.concepto) ||
-      safeString(lineas[0]?.concepto) ||
-      "Factura",
+    concepto: safeString(
+      pickFirst(
+        probe.concepto,
+        lineas[0]?.concepto,
+        "Factura"
+      ),
+      "Factura"
+    ),
 
-    descripcion:
-      safeString(source.descripcion) ||
-      safeString(source.description) ||
-      safeString(raw.descripcion) ||
-      safeString(raw.description) ||
-      safeString(lineas[0]?.descripcion) ||
-      "",
+    descripcion: safeString(
+      pickFirst(
+        probe.descripcion,
+        probe.description,
+        lineas[0]?.descripcion,
+        lineas[0]?.description
+      ),
+      ""
+    ),
 
     lineas: lineas.map((entry, index) => {
       const linea = safeObject(entry);
 
       return {
         id: linea.id ?? `linea-${index + 1}`,
-        concepto: safeString(linea.concepto),
-        descripcion: safeString(linea.descripcion || linea.description),
+
+        concepto: safeString(linea.concepto, ""),
+
+        descripcion: safeString(
+          pickFirst(linea.descripcion, linea.description),
+          ""
+        ),
+
         cantidad: safeNumber(linea.cantidad ?? linea.quantity, 0),
         precioUnitario: round2(linea.precioUnitario ?? linea.unitPrice),
         subtotal: round2(linea.subtotal),
         descuento: round2(linea.descuento ?? linea.discount),
         impuesto: round2(linea.impuesto ?? linea.tax),
+
         totalLinea: round2(
-          pickFirst(linea.totalLinea, linea.total, linea.importe, linea.amount, 0)
+          pickFirst(
+            linea.totalLinea,
+            linea.total,
+            linea.importe,
+            linea.amount,
+            0
+          )
         ),
+
         raw: linea,
       };
     }),
@@ -2189,11 +2025,24 @@ export function normalizeFactura(item = {}) {
       const impuesto = safeObject(entry);
 
       return {
-        tipo: safeString(impuesto.tipo || impuesto.type),
-        nombre: safeString(impuesto.nombre || impuesto.name || impuesto.tipo || impuesto.type),
-        porcentaje: safeNumber(impuesto.porcentaje ?? impuesto.percent ?? impuesto.rate, 0),
+        tipo: safeString(
+          pickFirst(impuesto.tipo, impuesto.type),
+          ""
+        ),
+
+        nombre: safeString(
+          pickFirst(impuesto.nombre, impuesto.name, impuesto.tipo, impuesto.type),
+          ""
+        ),
+
+        porcentaje: safeNumber(
+          impuesto.porcentaje ?? impuesto.percent ?? impuesto.rate,
+          0
+        ),
+
         base: round2(impuesto.base),
         importe: round2(impuesto.importe ?? impuesto.amount),
+
         raw: impuesto,
       };
     }),
@@ -2204,89 +2053,88 @@ export function normalizeFactura(item = {}) {
       return {
         id: file.id ?? file.blobName ?? file.path ?? `attachment-${index + 1}`,
 
-        name:
-          safeString(file.name) ||
-          safeString(file.filename) ||
-          safeString(file.fileName) ||
-          safeString(file.originalName) ||
-          `archivo_${index + 1}`,
+        name: safeString(
+          pickFirst(
+            file.name,
+            file.filename,
+            file.fileName,
+            file.originalName,
+            `archivo_${index + 1}`
+          ),
+          `archivo_${index + 1}`
+        ),
 
-        url:
-          safeString(file.url) ||
-          safeString(file.href) ||
-          safeString(file.path) ||
-          safeString(file.downloadUrl) ||
-          "#",
+        url: safeString(
+          pickFirst(
+            file.url,
+            file.href,
+            file.path,
+            file.downloadUrl,
+            "#"
+          ),
+          "#"
+        ),
 
         size: safeNumber(file.size ?? file.sizeBytes, 0),
 
-        mimeType:
-          safeString(file.mimeType) ||
-          safeString(file.contentType) ||
-          "",
+        mimeType: safeString(
+          pickFirst(file.mimeType, file.contentType),
+          ""
+        ),
 
         raw: file,
       };
     }),
 
-    notas:
-      safeString(source.notas) ||
-      safeString(source.observaciones) ||
-      safeString(raw.notas) ||
-      safeString(raw.observaciones) ||
-      "",
+    notas: safeString(
+      pickFirst(probe.notas, probe.observaciones),
+      ""
+    ),
 
-    enviadoA:
-      safeString(source.enviadoA) ||
-      safeString(source.sentTo) ||
-      safeString(raw.enviadoA) ||
-      safeString(raw.sentTo) ||
-      "",
+    enviadoA: safeString(
+      pickFirst(
+        probe.enviadoA,
+        probe.sentTo,
+        probe.delivery?.lastSentTo
+      ),
+      ""
+    ),
 
-    sendHistory: safeArray(
-      pickFirst(source.sendHistory, raw.sendHistory)
-    ).map((entry) => {
-      const itemHistory = safeObject(entry);
+    sendHistory: safeArray(probe.sendHistory).map((entry) => {
+      const history = safeObject(entry);
 
       return {
-        at: safeString(itemHistory?.at) || null,
-        to: safeString(itemHistory?.to),
-        byUserId: safeString(itemHistory?.byUserId),
-        byRole: safeString(itemHistory?.byRole),
-        channel: safeString(itemHistory?.channel, "email"),
-        requestId: safeString(itemHistory?.requestId),
-        raw: itemHistory,
+        at: safeString(history.at, "") || null,
+        to: safeString(history.to, ""),
+        byUserId: safeString(history.byUserId, ""),
+        byRole: safeString(history.byRole, ""),
+        channel: safeString(history.channel, "email"),
+        requestId: safeString(history.requestId, ""),
+        raw: history,
       };
     }),
 
-    updatedBy:
-      safeString(source.updatedBy) ||
-      safeString(source?.auditoria?.updatedBy) ||
-      safeString(raw.updatedBy) ||
-      safeString(raw?.auditoria?.updatedBy) ||
-      "",
+    updatedBy: safeString(
+      pickFirst(probe.updatedBy, probe.auditoria?.updatedBy),
+      ""
+    ),
 
-    createdBy:
-      safeString(source.createdBy) ||
-      safeString(source?.auditoria?.createdBy) ||
-      safeString(raw.createdBy) ||
-      safeString(raw?.auditoria?.createdBy) ||
-      "",
+    createdBy: safeString(
+      pickFirst(probe.createdBy, probe.auditoria?.createdBy),
+      ""
+    ),
 
-    estadoDetalle:
-      safeString(source.estadoDetalle) ||
-      safeString(raw.estadoDetalle) ||
-      "",
+    estadoDetalle: safeString(probe.estadoDetalle, ""),
 
-    tipoDocumento:
-      safeString(source.tipoDocumento) ||
-      safeString(raw.tipoDocumento) ||
-      "factura",
+    tipoDocumento: safeString(
+      pickFirst(probe.tipoDocumento, "factura"),
+      "factura"
+    ),
 
-    entityType:
-      safeString(source.entityType) ||
-      safeString(raw.entityType) ||
-      "invoice",
+    entityType: safeString(
+      pickFirst(probe.entityType, "invoice"),
+      "invoice"
+    ),
 
     meta: {
       ...safeObject(raw.meta),
@@ -2299,8 +2147,10 @@ export function normalizeFactura(item = {}) {
       isPaid: estadoPago === "paid",
       isPending: estadoPago === "pending" || estadoPago === "partial",
       isOverdue: estadoPago === "overdue",
+      isSent: isFacturaSent(probe),
 
-      identities: getFacturaIdentityList(source),
+      hasPdf,
+      identities: getFacturaIdentityList(probe),
     },
 
     raw: {
@@ -2313,7 +2163,7 @@ export function normalizeFactura(item = {}) {
 }
 
 /* =========================================================
-   EXTRACCIÓN DE RESPUESTAS
+   RESPONSE EXTRACTION
 ========================================================= */
 
 export function extractFacturas(response) {
@@ -2321,41 +2171,21 @@ export function extractFacturas(response) {
     return response;
   }
 
-  if (looksLikeFacturasEnvelope(response)) {
-    return resolveNestedArrayEnvelope(response);
+  const candidates = getPayloadCandidates(response);
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+
+    const found = pickArrayEnvelope(candidate);
+
+    if (Array.isArray(found)) {
+      return found;
+    }
   }
 
-  const obj = safeObject(response);
-
-  const direct = pickFirst(
-    obj.facturas,
-    obj.items,
-    obj.rows,
-    obj.results,
-    obj.records,
-    obj.list,
-    obj.collection,
-
-    obj.data?.facturas,
-    obj.data?.items,
-    obj.data?.rows,
-    obj.data?.results,
-    obj.data?.records,
-
-    obj.result?.facturas,
-    obj.result?.items,
-    obj.result?.rows,
-    obj.result?.results,
-    obj.result?.records,
-
-    obj.payload?.facturas,
-    obj.payload?.items,
-    obj.payload?.rows,
-    obj.payload?.results,
-    obj.payload?.records
-  );
-
-  return safeArray(direct);
+  return [];
 }
 
 export function extractNormalizedFacturas(response) {
@@ -2365,60 +2195,66 @@ export function extractNormalizedFacturas(response) {
 }
 
 export function getRemoteCount(response, fallback = 0) {
-  const obj = safeObject(response);
+  const candidates = getPayloadCandidates(response);
 
-  return safeNumber(
-    pickFirst(
+  for (const candidate of candidates) {
+    const obj = safeObject(candidate, null);
+
+    if (!obj) continue;
+
+    const count = pickFirst(
       obj.total,
       obj.count,
       obj.remoteCount,
       obj.totalCount,
+      obj.totalMatched,
 
       obj.meta?.total,
       obj.meta?.count,
       obj.meta?.remoteCount,
       obj.meta?.totalCount,
+      obj.meta?.totalMatched,
 
       obj.pagination?.total,
       obj.pagination?.count,
       obj.pagination?.totalItems,
+      obj.pagination?.totalMatched
+    );
 
-      obj.data?.total,
-      obj.data?.count,
-      obj.data?.remoteCount,
-      obj.data?.totalCount,
+    if (count !== undefined) {
+      return safeNumber(count, fallback);
+    }
+  }
 
-      obj.result?.total,
-      obj.result?.count,
-      obj.result?.remoteCount,
-      obj.result?.totalCount,
-
-      obj.payload?.total,
-      obj.payload?.count,
-      obj.payload?.remoteCount,
-      obj.payload?.totalCount,
-
-      fallback
-    ),
-    fallback
-  );
+  return fallback;
 }
 
 export function extractStats(response) {
-  const obj = safeObject(response);
+  const candidates = getPayloadCandidates(response);
 
-  return (
-    obj.stats ||
-    obj.data?.stats ||
-    obj.result?.stats ||
-    obj.payload?.stats ||
-    obj.meta?.stats ||
-    null
-  );
+  for (const candidate of candidates) {
+    const obj = safeObject(candidate, null);
+
+    if (!obj) continue;
+
+    const stats = pickFirst(
+      obj.stats,
+      obj.data?.stats,
+      obj.result?.stats,
+      obj.payload?.stats,
+      obj.meta?.stats
+    );
+
+    if (hasOwnKeys(stats)) {
+      return safeObject(stats);
+    }
+  }
+
+  return null;
 }
 
 /* =========================================================
-   MÉTRICAS
+   METRICS
 ========================================================= */
 
 export function sumFacturasTotal(items = []) {
@@ -2444,7 +2280,7 @@ export function countFacturasByEstadoPago(items = [], target = "pending") {
 
   return safeArray(items).reduce((acc, item) => {
     const factura = normalizeFactura(item);
-    return acc + (normalizeEstadoPago(factura?.estadoPago) === normalizedTarget ? 1 : 0);
+    return acc + (normalizeEstadoPago(factura.estadoPago) === normalizedTarget ? 1 : 0);
   }, 0);
 }
 
@@ -2453,7 +2289,7 @@ export function countFacturasByEstado(items = [], target = "issued") {
 
   return safeArray(items).reduce((acc, item) => {
     const factura = normalizeFactura(item);
-    return acc + (normalizeEstado(factura?.estado) === normalizedTarget ? 1 : 0);
+    return acc + (normalizeEstado(factura.estado) === normalizedTarget ? 1 : 0);
   }, 0);
 }
 
@@ -2464,13 +2300,15 @@ export function computeFacturasStats(items = []) {
   const totalImporte = sumFacturasTotal(facturas);
   const totalBase = sumFacturasBase(facturas);
 
-  const paidCount = countFacturasByEstadoPago(facturas, "paid");
+  const paidCount = facturas.filter(isFacturaPaid).length;
   const pendingCount = facturas.filter(isFacturaPending).length;
   const overdueCount = facturas.filter(isFacturaOverdue).length;
   const partialCount = countFacturasByEstadoPago(facturas, "partial");
   const draftCount = countFacturasByEstadoPago(facturas, "draft");
   const cancelledCount = countFacturasByEstadoPago(facturas, "cancelled");
+  const sentCount = facturas.filter(isFacturaSent).length;
   const linkedTicketCount = facturas.filter(hasFacturaIncidencia).length;
+  const withPdfCount = facturas.filter(hasFacturaPdf).length;
 
   return {
     totalFacturas,
@@ -2483,13 +2321,17 @@ export function computeFacturasStats(items = []) {
     partialCount,
     draftCount,
     cancelledCount,
+    sentCount,
     linkedTicketCount,
+    withPdfCount,
 
     countTotal: totalFacturas,
     countPagadas: paidCount,
     countPendientes: pendingCount,
     countVencidas: overdueCount,
+    countEnviadas: sentCount,
     countConIncidencia: linkedTicketCount,
+    countWithPdf: withPdfCount,
 
     byStatus: {
       paid: paidCount,
@@ -2503,7 +2345,7 @@ export function computeFacturasStats(items = []) {
 }
 
 /* =========================================================
-   ORDENACIÓN
+   SORT
 ========================================================= */
 
 export function sortFacturas(items = [], sort = DEFAULT_FACTURAS_SORT) {
@@ -2518,37 +2360,38 @@ export function sortFacturas(items = [], sort = DEFAULT_FACTURAS_SORT) {
   list.sort((a, b) => {
     if (field === "cliente") {
       const av = normalizeText(
-        pickFirst(a?.cliente?.empresa, a?.cliente?.nombre, a?.clienteNombre)
+        pickFirst(a.cliente?.empresa, a.cliente?.nombre, a.clienteNombre)
       );
+
       const bv = normalizeText(
-        pickFirst(b?.cliente?.empresa, b?.cliente?.nombre, b?.clienteNombre)
+        pickFirst(b.cliente?.empresa, b.cliente?.nombre, b.clienteNombre)
       );
 
       return compareText(av, bv) * direction;
     }
 
     if (field === "numero") {
-      return compareText(a?.numero, b?.numero) * direction;
+      return compareText(a.numero, b.numero) * direction;
     }
 
     if (field === "total") {
-      return (safeNumber(a?.total, 0) - safeNumber(b?.total, 0)) * direction;
+      return (safeNumber(a.total, 0) - safeNumber(b.total, 0)) * direction;
     }
 
     if (field === "fecha") {
-      return (toMs(a?.fecha) - toMs(b?.fecha)) * direction;
+      return (toMs(a.fecha) - toMs(b.fecha)) * direction;
     }
 
     if (field === "updatedAt") {
-      return (toMs(a?.updatedAt) - toMs(b?.updatedAt)) * direction;
+      return (toMs(a.updatedAt) - toMs(b.updatedAt)) * direction;
     }
 
     if (field === "estadoPago") {
-      return compareText(a?.estadoPago, b?.estadoPago) * direction;
+      return compareText(a.estadoPago, b.estadoPago) * direction;
     }
 
     if (field === "estado") {
-      return compareText(a?.estado, b?.estado) * direction;
+      return compareText(a.estado, b.estado) * direction;
     }
 
     const av = normalizeText(a?.[field]);
@@ -2561,16 +2404,21 @@ export function sortFacturas(items = [], sort = DEFAULT_FACTURAS_SORT) {
 }
 
 /* =========================================================
-   FILTRADO
+   FILTER
 ========================================================= */
 
 export function filterFacturas(items = [], filters = {}) {
-  const query = normalizeText(filters?.query || filters?.search);
-  const estadoPago = normalizeText(filters?.estadoPago);
-  const estado = normalizeText(filters?.estado);
-  const formaPago = normalizeText(filters?.formaPago);
-  const clienteId = normalizeText(filters?.clienteId);
-  const incidenciaId = normalizeText(filters?.incidenciaId || filters?.ticketId);
+  const query = normalizeText(filters?.query || filters?.search || filters?.q);
+  const estadoPago = normalizeText(filters?.estadoPago || filters?.paymentStatus);
+  const estado = normalizeText(filters?.estado || filters?.status);
+  const formaPago = normalizeText(filters?.formaPago || filters?.paymentMethod);
+  const clienteId = normalizeText(filters?.clienteId || filters?.clientId);
+  const incidenciaId = normalizeText(
+    filters?.incidenciaId ||
+      filters?.ticketId ||
+      filters?.relatedTicketId ||
+      filters?.relatedIncidentId
+  );
 
   return safeArray(items)
     .map(normalizeFactura)
@@ -2633,6 +2481,8 @@ export function filterFacturas(items = [], filters = {}) {
 export default {
   DEFAULT_FACTURAS_SORT,
   DEFAULT_FACTURA_CURRENCY,
+  FACTURA_STATUS,
+  FACTURA_PAYMENT_STATUS,
 
   truncate,
   formatMoney,
@@ -2645,6 +2495,14 @@ export default {
   normalizeEstado,
   getEstadoPagoLabel,
   getEstadoLabel,
+  getEstadoPagoTone,
+  getEstadoTone,
+  getEstadoPagoChipClass,
+  getEstadoChipClass,
+  getFacturaRowStatusClass,
+  getFacturaAvatarToneIndex,
+  getFacturaAvatarToneClass,
+
   getEstadoPagoChipStyle,
   getEstadoChipStyle,
 
@@ -2658,6 +2516,7 @@ export default {
   getFacturaFecha,
   getFacturaUpdatedAt,
   getFacturaClienteObject,
+  getFacturaClienteId,
   getFacturaClienteNombre,
   getFacturaClienteEmpresa,
   getFacturaClienteEmail,
@@ -2665,6 +2524,7 @@ export default {
   getFacturaCurrency,
   getFacturaTotal,
   getFacturaBaseImponible,
+  getFacturaTaxAmount,
   getFacturaImpuestosTotal,
   getFacturaDescuentoTotal,
   getFacturaPaidAmount,
@@ -2674,6 +2534,8 @@ export default {
   isFacturaPaid,
   isFacturaPending,
   isFacturaOverdue,
+  isFacturaSent,
+  hasFacturaPdf,
 
   getFacturaIncidenciaId,
   hasFacturaIncidencia,

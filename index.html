@@ -29,6 +29,9 @@
        - variables.css como Token Pro System / fuente de verdad
        - theme system-first con preboot externo
        - loader estático visible desde refresh
+       - logos del loader theme-aware:
+         · dark  -> /src/media/img/favicon_white.png
+         · light -> /src/media/img/favicon_black.png
        - sidebar/topbar montados por JS
        - tablehead dinámico preparado
        - restore de sesión sin flash visual
@@ -183,13 +186,22 @@
        Sin fuentes externas.
   ========================= -->
 
-  <!-- Loader principal inicial: Onion arranca en dark como estado defensivo -->
+  <!-- Loader inicial para tema dark / fondo oscuro -->
   <link
     rel="preload"
     href="/src/media/img/favicon_white.png"
     as="image"
     type="image/png"
     fetchpriority="high"
+  >
+
+  <!-- Loader inicial para tema light / fondo claro -->
+  <link
+    rel="preload"
+    href="/src/media/img/favicon_black.png"
+    as="image"
+    type="image/png"
+    fetchpriority="low"
   >
 
   <!-- Entrada principal SPA -->
@@ -210,7 +222,7 @@
        NOTA:
        - En head normalmente document.body aún no existe.
        - theme.js debe actualizar document.documentElement.
-       - main.js/theme runtime debe sincronizar body después.
+       - theme.js ya sincroniza body en DOMContentLoaded.
   ========================= -->
   <script src="/src/preboot/theme.js"></script>
 
@@ -231,7 +243,7 @@
 
        IMPORTANTE:
        - No meter <style> inline.
-       - No meter CSS dinámico desde JS.
+       - No meter CSS dinámico desde JS salvo fallback extremo.
        - Las vistas viven en /src/css/views/.
   ========================= -->
   <link
@@ -282,11 +294,15 @@
   <!-- =========================================================
        BOOT LOADER ESTÁTICO
        - visible desde refresh antes de JS
-       - controlado después por loader.js / main.js
+       - controlado después por src/app/loader.js / main.js
        - sin inline script
        - sin inline style
        - logos dependientes de html[data-theme]
        - fallback textual/accesible estable
+       - app-loader__logo--dark:
+         logo blanco para fondos oscuros
+       - app-loader__logo--light:
+         logo negro para fondos claros
   ========================================================= -->
   <div
     id="app-loader"
@@ -334,7 +350,7 @@
           height="64"
           loading="eager"
           decoding="async"
-          fetchpriority="auto"
+          fetchpriority="low"
           draggable="false"
         >
 

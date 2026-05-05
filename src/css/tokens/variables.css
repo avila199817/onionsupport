@@ -768,6 +768,11 @@
   --sidebar-dropdown-item-radius: calc(12px * var(--ui-scale));
   --sidebar-dropdown-item-padding-x: calc(12px * var(--ui-scale));
   --sidebar-dropdown-item-gap: calc(12px * var(--ui-scale));
+  --sidebar-dropdown-item-padding-y: calc(8px * var(--ui-scale));
+  --sidebar-dropdown-item-line-height: 1.35;
+  --sidebar-dropdown-item-label-line-height: 1.38;
+  --sidebar-dropdown-item-label-padding-start: 1px;
+  --sidebar-dropdown-item-label-padding-end: 2px;
 
   --sidebar-dropdown-item-hover:
     linear-gradient(180deg, rgba(255,255,255,.070), rgba(255,255,255,.040));

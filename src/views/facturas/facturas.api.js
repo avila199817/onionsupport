@@ -2,31 +2,41 @@
    Onion SPA - Facturas API
    Archivo: src/views/facturas/facturas.api.js
 
-   EXTREME PRODUCTION API · FACTURAS 10/10
+   EXTREME PRODUCTION API · FACTURAS · 14/10
    COSMOS ALIGNED · ROUTER ALIGNED · INCIDENCIA SAFE
    PDF INLINE / DOWNLOAD · SEND · CREATE · STATS · HEALTH
-   PATCH · PDF SAS SAFE · NO PRIVATE ENDPOINT FALLBACK
+   PATCH · PDF SAS/BLOB SAFE
+   PATCH · NO PRIVATE ENDPOINT FALLBACK
+   PATCH · RESPONSE SHAPES HARDENED
+   PATCH · BACKEND ROUTER COMPATIBLE
+   PATCH · ZERO DUPLICATION SURFACE
 
    RESPONSABILIDADES:
-   - centralizar llamadas HTTP del módulo de facturas
-   - alinear endpoints con /router/facturas/index.js
-   - exponer listado, detalle, stats, health, PDF, descarga, envío y CRUD base
-   - aislar la vista del acceso directo a AppCore.apiClient
-   - reutilizar shared/api/collectionApi para mutaciones base
-   - mantener endpoints y timeouts en un único punto
-   - tolerar distintos shapes del cliente HTTP
-   - preservar ticket/incidencia tras normalizeFactura()
-   - soportar respuestas legacy + normalizadas v2/v3
-   - preparar PDF para clientes HTTP que devuelven blob, response, url o payload JSON
-   - consumir endpoint PDF privado con auth y abrir solo SAS/blob público
-   - NUNCA devolver /api/facturas/:id/pdf como fallback visible
-   - normalizar create admin con factura + file + email + counter
-   - mantener surface pública estable
+   - Centralizar llamadas HTTP del módulo Facturas.
+   - Alinear endpoints con /router/facturas/index.js.
+   - Exponer listado, detalle, stats, health, PDF, descarga, envío y CRUD base.
+   - Aislar la vista del acceso directo a AppCore.apiClient.
+   - Reutilizar shared/api/collectionApi cuando esté disponible.
+   - Mantener endpoints/timeouts en un único punto.
+   - Tolerar distintos shapes del cliente HTTP.
+   - Preservar ticket/incidencia tras normalizeFactura().
+   - Soportar respuestas legacy + normalizadas v2/v3.
+   - Preparar PDF para clientes HTTP que devuelven blob, Response, URL o payload JSON.
+   - Consumir endpoint PDF privado con auth.
+   - NUNCA devolver /api/facturas/:id/pdf como fallback visible.
+   - Normalizar create admin con factura + file + email + counter.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
 import { createCollectionApi } from "../../shared/api/index.js";
 import { normalizeFactura } from "./facturas.model.js";
+
+import {
+  safeText,
+  safeNumber,
+  safeArray,
+  safeObject,
+} from "./facturas.utils.js";
 
 /* =========================================================
    CONSTANTS
@@ -55,6 +65,7 @@ export const FACTURAS_DISPOSITIONS = Object.freeze({
 export const FACTURAS_PDF_MODES = Object.freeze({
   INLINE: "inline",
   VIEW: "view",
+  VER: "ver",
   DOWNLOAD: "download",
   ATTACHMENT: "attachment",
 });
@@ -64,6 +75,7 @@ export const FACTURAS_ENDPOINTS = Object.freeze({
 
   health: () => `${FACTURAS_ENDPOINT}/health`,
   healthPing: () => `${FACTURAS_ENDPOINT}/health/ping`,
+  healthPrivate: () => `${FACTURAS_ENDPOINT}/_health`,
   stats: () => `${FACTURAS_ENDPOINT}/stats`,
 
   detail: (id) => getFacturaEndpoint(id),
@@ -83,75 +95,8 @@ export const FACTURAS_ENDPOINTS = Object.freeze({
 });
 
 /* =========================================================
-   SAFE HELPERS
+   BASE HELPERS
 ========================================================= */
-
-function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
-
-  const text = String(value).trim();
-  return text || fallback;
-}
-
-function safeNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
-
-  if (typeof value === "string") {
-    let text = value
-      .trim()
-      .replace(/€/g, "")
-      .replace(/%/g, "")
-      .replace(/\s+/g, "");
-
-    const hasComma = text.includes(",");
-    const hasDot = text.includes(".");
-
-    if (hasComma && hasDot) {
-      text = text.replace(/\./g, "").replace(/,/g, ".");
-    } else if (hasComma) {
-      text = text.replace(/,/g, ".");
-    }
-
-    const parsed = Number(text);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  }
-
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function safeBoolean(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-
-    if (["true", "1", "yes", "si", "sí", "on"].includes(normalized)) {
-      return true;
-    }
-
-    if (["false", "0", "no", "off"].includes(normalized)) {
-      return false;
-    }
-  }
-
-  return fallback;
-}
-
-function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function safeObject(value, fallback = {}) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
-    : fallback;
-}
 
 function first(...values) {
   for (const value of values) {
@@ -164,13 +109,18 @@ function first(...values) {
   return null;
 }
 
-function isNonEmptyObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value) &&
-      Object.keys(value).length
-  );
+function asObject(value, fallback = {}) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : fallback;
+}
+
+function isObject(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function hasOwnKeys(value = {}) {
+  return Boolean(isObject(value) && Object.keys(value).length);
 }
 
 function normalizeText(value = "") {
@@ -207,21 +157,301 @@ function round2(value = 0) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
+function safeWarn(...args) {
+  try {
+    AppCore?.utils?.warn?.("[FacturasApi]", ...args);
+    return;
+  } catch {}
+
+  try {
+    console.warn("[FacturasApi]", ...args);
+  } catch {}
+}
+
 /* =========================================================
-   RELATION / INCIDENCIA HELPERS
+   CLIENT RESOLUTION
+========================================================= */
+
+export function getApiClient() {
+  const globalHttp =
+    typeof globalThis !== "undefined" ? globalThis.Http : null;
+
+  const client =
+    AppCore?.apiClient ||
+    AppCore?.modules?.Http ||
+    AppCore?.Http ||
+    globalHttp ||
+    null;
+
+  if (!client) {
+    throw new Error("FACTURAS_API_CLIENT_UNAVAILABLE");
+  }
+
+  return client;
+}
+
+function buildRequestOptions({
+  timeout = FACTURAS_TIMEOUT,
+  auth = true,
+  responseType = "json",
+  raw = false,
+  cache = undefined,
+  extra = null,
+} = {}) {
+  return {
+    timeout,
+    auth,
+    responseType,
+    raw,
+    ...(cache ? { cache } : {}),
+    ...safeObject(extra),
+  };
+}
+
+async function apiRequest(method = "GET", endpoint = "", body = undefined, options = {}) {
+  const client = getApiClient();
+  const finalMethod = safeText(method, "GET").toUpperCase();
+  const requestOptions = buildRequestOptions(options);
+
+  if (!endpoint) {
+    throw new Error("FACTURAS_API_ENDPOINT_REQUIRED");
+  }
+
+  if (finalMethod === "GET" && typeof client?.get === "function") {
+    return client.get(endpoint, requestOptions);
+  }
+
+  if (finalMethod === "POST" && typeof client?.post === "function") {
+    return client.post(endpoint, body, requestOptions);
+  }
+
+  if (finalMethod === "PUT" && typeof client?.put === "function") {
+    return client.put(endpoint, body, requestOptions);
+  }
+
+  if (finalMethod === "PATCH" && typeof client?.patch === "function") {
+    return client.patch(endpoint, body, requestOptions);
+  }
+
+  if (finalMethod === "DELETE") {
+    if (typeof client?.delete === "function") {
+      return client.delete(endpoint, requestOptions);
+    }
+
+    if (typeof client?.remove === "function") {
+      return client.remove(endpoint, requestOptions);
+    }
+  }
+
+  if (typeof client?.request === "function") {
+    return client.request(endpoint, {
+      method: finalMethod,
+      ...(body !== undefined ? { body } : {}),
+      ...requestOptions,
+    });
+  }
+
+  throw new Error(`FACTURAS_API_METHOD_UNAVAILABLE:${finalMethod.toLowerCase()}`);
+}
+
+function apiGet(endpoint = "", options = {}) {
+  return apiRequest("GET", endpoint, undefined, options);
+}
+
+function apiPost(endpoint = "", body = {}, options = {}) {
+  return apiRequest("POST", endpoint, body, options);
+}
+
+function apiPut(endpoint = "", body = {}, options = {}) {
+  return apiRequest("PUT", endpoint, body, options);
+}
+
+function apiPatch(endpoint = "", body = {}, options = {}) {
+  return apiRequest("PATCH", endpoint, body, options);
+}
+
+function apiDelete(endpoint = "", options = {}) {
+  return apiRequest("DELETE", endpoint, undefined, options);
+}
+
+/* =========================================================
+   ENDPOINT HELPERS
+========================================================= */
+
+export function normalizeFacturaId(id = "") {
+  const facturaId = safeText(id, "");
+
+  if (!facturaId) {
+    throw new Error("FACTURA_ID_REQUIRED");
+  }
+
+  return facturaId;
+}
+
+export function getFacturaEndpoint(id = "") {
+  return `${FACTURAS_ENDPOINT}/${encodeURIComponent(normalizeFacturaId(id))}`;
+}
+
+export function normalizeFacturaPdfDisposition(disposition = "") {
+  const value = normalizeKey(
+    safeText(disposition, FACTURAS_DISPOSITIONS.ATTACHMENT)
+  );
+
+  if (
+    value === FACTURAS_DISPOSITIONS.INLINE ||
+    value === FACTURAS_PDF_MODES.INLINE ||
+    value === FACTURAS_PDF_MODES.VIEW ||
+    value === FACTURAS_PDF_MODES.VER ||
+    value === "pdf_inline"
+  ) {
+    return FACTURAS_DISPOSITIONS.INLINE;
+  }
+
+  return FACTURAS_DISPOSITIONS.ATTACHMENT;
+}
+
+export function buildFacturaPdfEndpoint(
+  id = "",
+  disposition = FACTURAS_DISPOSITIONS.ATTACHMENT
+) {
+  const finalDisposition = normalizeFacturaPdfDisposition(disposition);
+
+  if (finalDisposition === FACTURAS_DISPOSITIONS.INLINE) {
+    return `${getFacturaEndpoint(id)}/pdf?disposition=inline`;
+  }
+
+  return `${getFacturaEndpoint(id)}/descargar?disposition=attachment`;
+}
+
+export function buildFacturaPdfViewEndpoint(id = "") {
+  return `${getFacturaEndpoint(id)}/pdf?disposition=inline`;
+}
+
+export function buildFacturaDownloadEndpoint(id = "") {
+  return `${getFacturaEndpoint(id)}/descargar?disposition=attachment`;
+}
+
+function appendParam(params, name, value) {
+  const key = safeText(name, "");
+  if (!key) return;
+
+  if (Array.isArray(value)) {
+    const cleanValues = value
+      .map((item) => normalizeQueryValue(item))
+      .filter(Boolean);
+
+    if (cleanValues.length) {
+      params.set(key, cleanValues.join(","));
+    }
+
+    return;
+  }
+
+  const normalizedValue = normalizeQueryValue(value);
+
+  if (normalizedValue) {
+    params.set(key, normalizedValue);
+  }
+}
+
+export function buildFacturasListEndpoint({
+  page = FACTURAS_DEFAULT_PAGE,
+  limit = FACTURAS_DEFAULT_LIMIT,
+
+  search = "",
+  q = "",
+
+  sort = "",
+  direction = "",
+  sortBy = "",
+  sortDir = "",
+
+  filters = {},
+} = {}) {
+  const params = new URLSearchParams();
+
+  const finalPage = Math.max(1, safeNumber(page, FACTURAS_DEFAULT_PAGE));
+  const finalLimit = Math.min(
+    Math.max(1, safeNumber(limit, FACTURAS_DEFAULT_LIMIT)),
+    FACTURAS_MAX_LIMIT
+  );
+
+  if (finalPage !== FACTURAS_DEFAULT_PAGE) {
+    params.set("page", String(finalPage));
+  }
+
+  params.set("limit", String(finalLimit));
+
+  const finalSearch = safeText(first(search, q), "");
+
+  if (finalSearch) {
+    params.set("q", finalSearch);
+    params.set("search", finalSearch);
+  }
+
+  const finalSort = safeText(first(sort, sortBy), "");
+  const finalDirection = safeText(first(direction, sortDir), "");
+
+  if (finalSort) {
+    params.set("sort", finalSort);
+    params.set("sortBy", finalSort);
+  }
+
+  if (finalDirection) {
+    params.set("direction", finalDirection);
+    params.set("sortDir", finalDirection);
+  }
+
+  const aliases = {
+    paymentStatus: "estadoPago",
+    estadoPago: "paymentStatus",
+
+    status: "estado",
+    estado: "status",
+
+    incidenciaId: "ticketId",
+    relatedTicketId: "ticketId",
+    relatedIncidentId: "ticketId",
+
+    month: "mes",
+    mes: "month",
+
+    fechaDesde: "from",
+    fechaHasta: "to",
+
+    hasIncidencia: "withIncidencia",
+    hasPdf: "withPdf",
+  };
+
+  for (const [rawKey, value] of Object.entries(safeObject(filters))) {
+    const key = safeText(rawKey, "");
+    if (!key) continue;
+
+    appendParam(params, key, value);
+
+    const alias = aliases[key];
+
+    if (alias) {
+      appendParam(params, alias, value);
+    }
+  }
+
+  const query = params.toString();
+
+  return query ? `${FACTURAS_ENDPOINT}?${query}` : FACTURAS_ENDPOINT;
+}
+
+/* =========================================================
+   INCIDENCIA / RELATION HELPERS
 ========================================================= */
 
 function pickTicketIdFromArray(value = []) {
-  const items = safeArray(value);
-
-  for (const item of items) {
+  for (const item of safeArray(value)) {
     if (typeof item === "string" && item.trim()) {
       return item.trim();
     }
 
-    if (!item || typeof item !== "object") {
-      continue;
-    }
+    if (!isObject(item)) continue;
 
     const candidate = first(
       item.ticketId,
@@ -251,12 +481,10 @@ function pickTicketIdFromArray(value = []) {
       item.relations?.ticket?.id
     );
 
-    if (candidate) {
-      return safeText(candidate, "");
-    }
+    if (candidate) return safeText(candidate, "");
   }
 
-  return null;
+  return "";
 }
 
 function getIncidenciaIdFromFactura(item = {}) {
@@ -298,6 +526,7 @@ function getIncidenciaIdFromFactura(item = {}) {
 
       factura.meta?.ticketId,
       factura.meta?.incidenciaId,
+      factura.meta?.linkedTicketId,
 
       pickTicketIdFromArray(factura.ticketIds),
       pickTicketIdFromArray(factura.incidenciaIds),
@@ -346,6 +575,7 @@ function getIncidenciaIdFromFactura(item = {}) {
 
       raw.meta?.ticketId,
       raw.meta?.incidenciaId,
+      raw.meta?.linkedTicketId,
 
       pickTicketIdFromArray(raw.ticketIds),
       pickTicketIdFromArray(raw.incidenciaIds),
@@ -385,13 +615,13 @@ function getRelationObjectFromFactura(item = {}) {
     raw.relations?.incidencia
   );
 
-  return isNonEmptyObject(candidate) ? safeObject(candidate) : null;
+  return hasOwnKeys(candidate) ? safeObject(candidate) : {};
 }
 
 function buildIncidenciaPayload(item = {}, incidenciaId = "") {
   const factura = safeObject(item);
   const raw = safeObject(factura.raw);
-  const relation = getRelationObjectFromFactura(factura) || {};
+  const relation = getRelationObjectFromFactura(factura);
 
   const finalId = safeText(
     first(
@@ -440,6 +670,8 @@ function buildIncidenciaPayload(item = {}, incidenciaId = "") {
     id: finalId,
     ticketId: finalId,
     incidenciaId: finalId,
+    code: safeText(first(relation.code, relation.ticketCode, finalId), finalId),
+    ticketCode: safeText(first(relation.ticketCode, relation.code, finalId), finalId),
 
     subject,
     asunto: safeText(first(relation.asunto, subject), subject),
@@ -516,9 +748,7 @@ function buildIncidenciaPayload(item = {}, incidenciaId = "") {
 function mergeIncidenciaIntoRaw(raw = {}, incidenciaId = "", incidenciaPayload = null) {
   const base = safeObject(raw);
 
-  if (!incidenciaId) {
-    return base;
-  }
+  if (!incidenciaId) return base;
 
   const payload = safeObject(incidenciaPayload, {
     id: incidenciaId,
@@ -536,7 +766,7 @@ function mergeIncidenciaIntoRaw(raw = {}, incidenciaId = "", incidenciaPayload =
     supportTicketId: safeText(first(base.supportTicketId, incidenciaId), incidenciaId),
     caseId: safeText(first(base.caseId, incidenciaId), incidenciaId),
 
-    incidencia: isNonEmptyObject(base.incidencia)
+    incidencia: hasOwnKeys(base.incidencia)
       ? {
           ...payload,
           ...base.incidencia,
@@ -546,7 +776,7 @@ function mergeIncidenciaIntoRaw(raw = {}, incidenciaId = "", incidenciaPayload =
         }
       : payload,
 
-    ticket: isNonEmptyObject(base.ticket)
+    ticket: hasOwnKeys(base.ticket)
       ? {
           ...payload,
           ...base.ticket,
@@ -556,7 +786,7 @@ function mergeIncidenciaIntoRaw(raw = {}, incidenciaId = "", incidenciaPayload =
         }
       : payload,
 
-    linkedTicket: isNonEmptyObject(base.linkedTicket)
+    linkedTicket: hasOwnKeys(base.linkedTicket)
       ? {
           ...payload,
           ...base.linkedTicket,
@@ -573,18 +803,17 @@ function mergeIncidenciaIntoRaw(raw = {}, incidenciaId = "", incidenciaPayload =
         ...safeObject(base.relations?.ticket),
         id: safeText(first(base.relations?.ticket?.id, incidenciaId), incidenciaId),
         ticketId: safeText(first(base.relations?.ticket?.ticketId, incidenciaId), incidenciaId),
-        incidenciaId: safeText(
-          first(base.relations?.ticket?.incidenciaId, incidenciaId),
-          incidenciaId
-        ),
+        incidenciaId: safeText(first(base.relations?.ticket?.incidenciaId, incidenciaId), incidenciaId),
       },
     },
 
     meta: {
       ...safeObject(base.meta),
       hasIncidencia: true,
+      hasLinkedTicket: true,
       incidenciaId,
       ticketId: incidenciaId,
+      linkedTicketId: incidenciaId,
     },
   };
 }
@@ -598,9 +827,8 @@ function normalizeFacturaSafe(source = {}) {
   try {
     normalized = normalizeFactura(original);
   } catch (error) {
-    console.error("❌ FACTURAS NORMALIZE ERROR:", {
+    safeWarn("normalizeFactura() falló; se conserva payload original:", {
       message: error?.message || "UNKNOWN_ERROR",
-      stack: error?.stack || null,
       source: original,
     });
 
@@ -651,8 +879,17 @@ function normalizeFacturaSafe(source = {}) {
       )
     ),
 
+    hasLinkedTicket: Boolean(
+      first(
+        model.meta?.hasLinkedTicket,
+        original.meta?.hasLinkedTicket,
+        incidenciaId
+      )
+    ),
+
     incidenciaId: incidenciaId || model.meta?.incidenciaId || null,
     ticketId: incidenciaId || model.meta?.ticketId || null,
+    linkedTicketId: incidenciaId || model.meta?.linkedTicketId || null,
   };
 
   if (!incidenciaId) {
@@ -679,20 +916,17 @@ function normalizeFacturaSafe(source = {}) {
     supportTicketId: safeText(first(model.supportTicketId, incidenciaId), incidenciaId),
     caseId: safeText(first(model.caseId, incidenciaId), incidenciaId),
 
-    incidencia: isNonEmptyObject(model.incidencia)
+    incidencia: hasOwnKeys(model.incidencia)
       ? {
           ...payload,
           ...model.incidencia,
           id: safeText(first(model.incidencia?.id, incidenciaId), incidenciaId),
           ticketId: safeText(first(model.incidencia?.ticketId, incidenciaId), incidenciaId),
-          incidenciaId: safeText(
-            first(model.incidencia?.incidenciaId, incidenciaId),
-            incidenciaId
-          ),
+          incidenciaId: safeText(first(model.incidencia?.incidenciaId, incidenciaId), incidenciaId),
         }
       : payload,
 
-    ticket: isNonEmptyObject(model.ticket)
+    ticket: hasOwnKeys(model.ticket)
       ? {
           ...payload,
           ...model.ticket,
@@ -702,19 +936,13 @@ function normalizeFacturaSafe(source = {}) {
         }
       : payload,
 
-    linkedTicket: isNonEmptyObject(model.linkedTicket)
+    linkedTicket: hasOwnKeys(model.linkedTicket)
       ? {
           ...payload,
           ...model.linkedTicket,
           id: safeText(first(model.linkedTicket?.id, incidenciaId), incidenciaId),
-          ticketId: safeText(
-            first(model.linkedTicket?.ticketId, incidenciaId),
-            incidenciaId
-          ),
-          incidenciaId: safeText(
-            first(model.linkedTicket?.incidenciaId, incidenciaId),
-            incidenciaId
-          ),
+          ticketId: safeText(first(model.linkedTicket?.ticketId, incidenciaId), incidenciaId),
+          incidenciaId: safeText(first(model.linkedTicket?.incidenciaId, incidenciaId), incidenciaId),
         }
       : payload,
 
@@ -724,14 +952,8 @@ function normalizeFacturaSafe(source = {}) {
         ...payload,
         ...safeObject(model.relations?.ticket),
         id: safeText(first(model.relations?.ticket?.id, incidenciaId), incidenciaId),
-        ticketId: safeText(
-          first(model.relations?.ticket?.ticketId, incidenciaId),
-          incidenciaId
-        ),
-        incidenciaId: safeText(
-          first(model.relations?.ticket?.incidenciaId, incidenciaId),
-          incidenciaId
-        ),
+        ticketId: safeText(first(model.relations?.ticket?.ticketId, incidenciaId), incidenciaId),
+        incidenciaId: safeText(first(model.relations?.ticket?.incidenciaId, incidenciaId), incidenciaId),
       },
     },
 
@@ -826,29 +1048,20 @@ function pickArrayFromObject(obj = {}) {
 }
 
 function extractFacturasList(payload = null) {
-  const candidates = getPayloadCandidates(payload);
-
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) {
-      return candidate;
-    }
+  for (const candidate of getPayloadCandidates(payload)) {
+    if (Array.isArray(candidate)) return candidate;
 
     const found = pickArrayFromObject(candidate);
 
-    if (Array.isArray(found)) {
-      return found;
-    }
+    if (Array.isArray(found)) return found;
   }
 
   return [];
 }
 
 function extractFacturasTotal(payload = null, fallback = 0) {
-  const candidates = getPayloadCandidates(payload);
-
-  for (const candidate of candidates) {
+  for (const candidate of getPayloadCandidates(payload)) {
     const obj = safeObject(candidate, null);
-
     if (!obj) continue;
 
     const total = first(
@@ -892,11 +1105,8 @@ function extractFacturasTotal(payload = null, fallback = 0) {
 }
 
 function extractFacturaDetail(payload = null) {
-  const candidates = getPayloadCandidates(payload);
-
-  for (const candidate of candidates) {
+  for (const candidate of getPayloadCandidates(payload)) {
     const obj = safeObject(candidate, null);
-
     if (!obj) continue;
 
     const detail = first(
@@ -934,11 +1144,8 @@ function extractFacturaDetail(payload = null) {
 }
 
 function extractOk(payload = null, fallback = true) {
-  const candidates = getPayloadCandidates(payload);
-
-  for (const candidate of candidates) {
+  for (const candidate of getPayloadCandidates(payload)) {
     const obj = safeObject(candidate, null);
-
     if (!obj) continue;
 
     if (typeof obj.ok === "boolean") return obj.ok;
@@ -949,17 +1156,13 @@ function extractOk(payload = null, fallback = true) {
 }
 
 function extractMeta(payload = null) {
-  const candidates = getPayloadCandidates(payload);
-
-  for (const candidate of candidates) {
+  for (const candidate of getPayloadCandidates(payload)) {
     const obj = safeObject(candidate, null);
-
     if (!obj) continue;
 
     const meta = first(
       obj.meta,
       obj.pagination,
-      obj.filters,
 
       obj.data?.meta,
       obj.data?.pagination,
@@ -971,20 +1174,34 @@ function extractMeta(payload = null) {
       obj.payload?.pagination
     );
 
-    if (isNonEmptyObject(meta)) {
-      return safeObject(meta);
-    }
+    if (hasOwnKeys(meta)) return safeObject(meta);
+  }
+
+  return {};
+}
+
+function extractFilters(payload = null) {
+  for (const candidate of getPayloadCandidates(payload)) {
+    const obj = safeObject(candidate, null);
+    if (!obj) continue;
+
+    const filters = first(
+      obj.filters,
+      obj.data?.filters,
+      obj.result?.filters,
+      obj.payload?.filters,
+      obj.meta?.filters
+    );
+
+    if (hasOwnKeys(filters)) return safeObject(filters);
   }
 
   return {};
 }
 
 function extractStats(payload = null) {
-  const candidates = getPayloadCandidates(payload);
-
-  for (const candidate of candidates) {
+  for (const candidate of getPayloadCandidates(payload)) {
     const obj = safeObject(candidate, null);
-
     if (!obj) continue;
 
     const stats = first(
@@ -994,20 +1211,15 @@ function extractStats(payload = null) {
       obj.payload?.stats
     );
 
-    if (isNonEmptyObject(stats)) {
-      return safeObject(stats);
-    }
+    if (hasOwnKeys(stats)) return safeObject(stats);
   }
 
   return {};
 }
 
 function extractRequestId(payload = null) {
-  const candidates = getPayloadCandidates(payload);
-
-  for (const candidate of candidates) {
+  for (const candidate of getPayloadCandidates(payload)) {
     const obj = safeObject(candidate, null);
-
     if (!obj) continue;
 
     const requestId = safeText(
@@ -1032,11 +1244,8 @@ function extractNamedObject(payload = null, name = "") {
 
   if (!key) return null;
 
-  const candidates = getPayloadCandidates(payload);
-
-  for (const candidate of candidates) {
+  for (const candidate of getPayloadCandidates(payload)) {
     const obj = safeObject(candidate, null);
-
     if (!obj) continue;
 
     const found = first(
@@ -1047,319 +1256,10 @@ function extractNamedObject(payload = null, name = "") {
       obj.response?.[key]
     );
 
-    if (isNonEmptyObject(found)) {
-      return safeObject(found);
-    }
+    if (hasOwnKeys(found)) return safeObject(found);
   }
 
   return null;
-}
-
-/* =========================================================
-   CLIENT RESOLUTION
-========================================================= */
-
-export function getApiClient() {
-  const globalHttp =
-    typeof globalThis !== "undefined" ? globalThis.Http : null;
-
-  const client =
-    AppCore?.apiClient ||
-    AppCore?.modules?.Http ||
-    AppCore?.Http ||
-    globalHttp ||
-    null;
-
-  if (!client) {
-    throw new Error("FACTURAS_API_CLIENT_UNAVAILABLE");
-  }
-
-  return client;
-}
-
-function assertMethod(client, method = "") {
-  const name = safeText(method, "").toLowerCase();
-
-  if (!name || typeof client?.[name] !== "function") {
-    throw new Error(`FACTURAS_API_METHOD_UNAVAILABLE:${name || "unknown"}`);
-  }
-
-  return client[name].bind(client);
-}
-
-/* =========================================================
-   ENDPOINT HELPERS
-========================================================= */
-
-export function normalizeFacturaId(id = "") {
-  const facturaId = safeText(id, "");
-
-  if (!facturaId) {
-    throw new Error("FACTURA_ID_REQUIRED");
-  }
-
-  return facturaId;
-}
-
-export function getFacturaEndpoint(id = "") {
-  const facturaId = normalizeFacturaId(id);
-  return `${FACTURAS_ENDPOINT}/${encodeURIComponent(facturaId)}`;
-}
-
-export function normalizeFacturaPdfDisposition(disposition = "") {
-  const value = normalizeKey(
-    safeText(disposition, FACTURAS_DISPOSITIONS.ATTACHMENT)
-  );
-
-  if (
-    value === FACTURAS_DISPOSITIONS.INLINE ||
-    value === FACTURAS_PDF_MODES.INLINE ||
-    value === FACTURAS_PDF_MODES.VIEW ||
-    value === "ver"
-  ) {
-    return FACTURAS_DISPOSITIONS.INLINE;
-  }
-
-  return FACTURAS_DISPOSITIONS.ATTACHMENT;
-}
-
-export function buildFacturaPdfEndpoint(
-  id = "",
-  disposition = FACTURAS_DISPOSITIONS.ATTACHMENT
-) {
-  const facturaId = normalizeFacturaId(id);
-  const finalDisposition = normalizeFacturaPdfDisposition(disposition);
-
-  if (finalDisposition === FACTURAS_DISPOSITIONS.INLINE) {
-    return `${getFacturaEndpoint(facturaId)}/pdf?disposition=inline`;
-  }
-
-  return `${getFacturaEndpoint(facturaId)}/descargar?disposition=attachment`;
-}
-
-export function buildFacturaPdfViewEndpoint(id = "") {
-  return `${getFacturaEndpoint(id)}/pdf?disposition=inline`;
-}
-
-export function buildFacturaDownloadEndpoint(id = "") {
-  return `${getFacturaEndpoint(id)}/descargar?disposition=attachment`;
-}
-
-function appendParam(params, name, value) {
-  const key = safeText(name, "");
-  if (!key) return;
-
-  if (Array.isArray(value)) {
-    const cleanValues = value
-      .map((item) => normalizeQueryValue(item))
-      .filter(Boolean);
-
-    if (cleanValues.length) {
-      params.set(key, cleanValues.join(","));
-    }
-
-    return;
-  }
-
-  const normalizedValue = normalizeQueryValue(value);
-
-  if (normalizedValue) {
-    params.set(key, normalizedValue);
-  }
-}
-
-export function buildFacturasListEndpoint({
-  page = FACTURAS_DEFAULT_PAGE,
-  limit = FACTURAS_DEFAULT_LIMIT,
-
-  search = "",
-  q = "",
-
-  sort = "",
-  direction = "",
-  sortBy = "",
-  sortDir = "",
-
-  filters = {},
-} = {}) {
-  const params = new URLSearchParams();
-
-  const finalPage = Math.max(1, safeNumber(page, FACTURAS_DEFAULT_PAGE));
-  const finalLimit = Math.min(
-    Math.max(1, safeNumber(limit, FACTURAS_DEFAULT_LIMIT)),
-    FACTURAS_MAX_LIMIT
-  );
-
-  if (finalPage !== FACTURAS_DEFAULT_PAGE) {
-    params.set("page", String(finalPage));
-  }
-
-  if (finalLimit) {
-    params.set("limit", String(finalLimit));
-  }
-
-  const finalSearch = safeText(first(search, q), "");
-
-  if (finalSearch) {
-    params.set("q", finalSearch);
-    params.set("search", finalSearch);
-  }
-
-  const finalSort = safeText(first(sort, sortBy), "");
-  const finalDirection = safeText(first(direction, sortDir), "");
-
-  if (finalSort) {
-    params.set("sort", finalSort);
-    params.set("sortBy", finalSort);
-  }
-
-  if (finalDirection) {
-    params.set("direction", finalDirection);
-    params.set("sortDir", finalDirection);
-  }
-
-  const finalFilters = safeObject(filters);
-
-  const aliases = {
-    paymentStatus: "estadoPago",
-    status: "estado",
-    incidenciaId: "ticketId",
-    relatedTicketId: "ticketId",
-    relatedIncidentId: "ticketId",
-    month: "mes",
-    fechaDesde: "from",
-    fechaHasta: "to",
-    hasIncidencia: "withIncidencia",
-    hasPdf: "withPdf",
-  };
-
-  for (const [rawKey, value] of Object.entries(finalFilters)) {
-    const key = safeText(rawKey, "");
-    if (!key) continue;
-
-    appendParam(params, key, value);
-
-    const alias = aliases[key];
-    if (alias) {
-      appendParam(params, alias, value);
-    }
-  }
-
-  const query = params.toString();
-
-  return query ? `${FACTURAS_ENDPOINT}?${query}` : FACTURAS_ENDPOINT;
-}
-
-/* =========================================================
-   REQUEST HELPERS
-========================================================= */
-
-function buildRequestOptions({
-  timeout = FACTURAS_TIMEOUT,
-  auth = true,
-  responseType = "auto",
-  raw = false,
-  extra = null,
-} = {}) {
-  return {
-    timeout,
-    auth,
-    responseType,
-    raw,
-    ...safeObject(extra),
-  };
-}
-
-async function apiGet(endpoint = "", options = {}) {
-  const client = getApiClient();
-
-  if (typeof client?.get === "function") {
-    return client.get(endpoint, buildRequestOptions(options));
-  }
-
-  if (typeof client?.request === "function") {
-    return client.request(endpoint, {
-      method: "GET",
-      ...buildRequestOptions(options),
-    });
-  }
-
-  throw new Error("FACTURAS_API_METHOD_UNAVAILABLE:get");
-}
-
-async function apiPost(endpoint = "", body = {}, options = {}) {
-  const client = getApiClient();
-
-  if (typeof client?.post === "function") {
-    return client.post(endpoint, body, buildRequestOptions(options));
-  }
-
-  if (typeof client?.request === "function") {
-    return client.request(endpoint, {
-      method: "POST",
-      body,
-      ...buildRequestOptions(options),
-    });
-  }
-
-  throw new Error("FACTURAS_API_METHOD_UNAVAILABLE:post");
-}
-
-async function apiPut(endpoint = "", body = {}, options = {}) {
-  const client = getApiClient();
-
-  if (typeof client?.put === "function") {
-    return client.put(endpoint, body, buildRequestOptions(options));
-  }
-
-  if (typeof client?.request === "function") {
-    return client.request(endpoint, {
-      method: "PUT",
-      body,
-      ...buildRequestOptions(options),
-    });
-  }
-
-  throw new Error("FACTURAS_API_METHOD_UNAVAILABLE:put");
-}
-
-async function apiPatch(endpoint = "", body = {}, options = {}) {
-  const client = getApiClient();
-
-  if (typeof client?.patch === "function") {
-    return client.patch(endpoint, body, buildRequestOptions(options));
-  }
-
-  if (typeof client?.request === "function") {
-    return client.request(endpoint, {
-      method: "PATCH",
-      body,
-      ...buildRequestOptions(options),
-    });
-  }
-
-  throw new Error("FACTURAS_API_METHOD_UNAVAILABLE:patch");
-}
-
-async function apiDelete(endpoint = "", options = {}) {
-  const client = getApiClient();
-
-  if (typeof client?.delete === "function") {
-    return client.delete(endpoint, buildRequestOptions(options));
-  }
-
-  if (typeof client?.remove === "function") {
-    return client.remove(endpoint, buildRequestOptions(options));
-  }
-
-  if (typeof client?.request === "function") {
-    return client.request(endpoint, {
-      method: "DELETE",
-      ...buildRequestOptions(options),
-    });
-  }
-
-  throw new Error("FACTURAS_API_METHOD_UNAVAILABLE:delete");
 }
 
 /* =========================================================
@@ -1372,6 +1272,7 @@ export function normalizeFacturasListResponse(payload = null, requestMeta = {}) 
 
   const total = extractFacturasTotal(payload, items.length);
   const meta = extractMeta(payload);
+  const requestId = extractRequestId(payload);
 
   const page = safeNumber(
     first(
@@ -1396,11 +1297,8 @@ export function normalizeFacturasListResponse(payload = null, requestMeta = {}) 
     items.length || FACTURAS_DEFAULT_LIMIT
   );
 
-  const ok = extractOk(payload, true);
-  const requestId = extractRequestId(payload);
-
   return {
-    ok,
+    ok: extractOk(payload, true),
     requestId,
 
     items,
@@ -1418,11 +1316,10 @@ export function normalizeFacturasListResponse(payload = null, requestMeta = {}) 
     hasItems: items.length > 0,
     isEmpty: items.length === 0,
 
+    filters: extractFilters(payload),
+    stats: extractStats(payload),
+
     raw: payload,
-
-    filters: safeObject(first(payload?.filters, payload?.data?.filters, {})),
-
-    stats: safeObject(first(payload?.stats, payload?.data?.stats, {})),
 
     meta: {
       ...meta,
@@ -1443,33 +1340,38 @@ export function normalizeFacturaDetailResponse(payload = null) {
   return {
     ok: extractOk(payload, Boolean(item)),
     requestId: extractRequestId(payload),
+
     item,
     factura: item,
     data: item,
+
     raw: payload,
     meta: extractMeta(payload),
   };
 }
 
 export function normalizeFacturasStatsResponse(payload = null) {
-  const stats = extractStats(payload);
-
   return {
     ok: extractOk(payload, true),
     requestId: extractRequestId(payload),
-    stats,
+
+    stats: extractStats(payload),
+
     raw: payload,
     meta: extractMeta(payload),
   };
 }
 
 export function normalizeFacturasHealthResponse(payload = null) {
-  const obj = safeObject(extractFacturaDetail(payload), safeObject(payload));
+  const obj = safeObject(payload);
 
   return {
     ok: extractOk(payload, true),
     requestId: extractRequestId(payload),
+
     health: obj,
+    data: obj,
+
     raw: payload,
     meta: extractMeta(payload),
   };
@@ -1477,7 +1379,12 @@ export function normalizeFacturasHealthResponse(payload = null) {
 
 export function normalizeFacturaSendResponse(payload = null) {
   const obj = safeObject(extractFacturaDetail(payload), safeObject(payload));
-  const factura = first(obj.factura, obj.data?.factura, obj.result?.factura);
+  const factura = first(
+    obj.factura,
+    obj.data?.factura,
+    obj.result?.factura,
+    obj.payload?.factura
+  );
 
   return {
     ok: extractOk(payload, true),
@@ -1544,6 +1451,47 @@ function isArrayBufferLike(value) {
   );
 }
 
+function isResponseLike(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      typeof value.blob === "function" &&
+      typeof value.headers === "object"
+  );
+}
+
+function isPrivateFacturaPdfEndpoint(url = "") {
+  const value = safeText(url, "");
+
+  if (!value || value.startsWith("blob:")) return false;
+
+  try {
+    const parsed = new URL(value, window.location.origin);
+    const pathname = parsed.pathname || "";
+
+    return (
+      pathname.includes("/api/facturas/") &&
+      (
+        pathname.endsWith("/pdf") ||
+        pathname.includes("/pdf/") ||
+        pathname.endsWith("/descargar") ||
+        pathname.includes("/descargar/") ||
+        pathname.endsWith("/download") ||
+        pathname.includes("/download/")
+      )
+    );
+  } catch {
+    return (
+      value.includes("/api/facturas/") &&
+      (
+        value.includes("/pdf") ||
+        value.includes("/descargar") ||
+        value.includes("/download")
+      )
+    );
+  }
+}
+
 function extractBlobFromResponse(response = null) {
   if (!response) return null;
 
@@ -1552,6 +1500,7 @@ function extractBlobFromResponse(response = null) {
   if (isBlobLike(response.body)) return response.body;
   if (isBlobLike(response.result)) return response.result;
   if (isBlobLike(response.payload)) return response.payload;
+  if (isBlobLike(response.blob)) return response.blob;
 
   if (isArrayBufferLike(response)) {
     return new Blob([response], { type: "application/pdf" });
@@ -1571,15 +1520,10 @@ function extractBlobFromResponse(response = null) {
 function extractPdfFileObject(response = null) {
   const directFile = extractNamedObject(response, "file");
 
-  if (directFile) {
-    return directFile;
-  }
+  if (directFile) return directFile;
 
-  const candidates = getPayloadCandidates(response);
-
-  for (const candidate of candidates) {
+  for (const candidate of getPayloadCandidates(response)) {
     const obj = safeObject(candidate, null);
-
     if (!obj) continue;
 
     const file = first(
@@ -1589,9 +1533,7 @@ function extractPdfFileObject(response = null) {
       obj.payload?.file
     );
 
-    if (isNonEmptyObject(file)) {
-      return safeObject(file);
-    }
+    if (hasOwnKeys(file)) return safeObject(file);
   }
 
   return {};
@@ -1602,11 +1544,8 @@ export function resolveFacturaPdfUrl(response = null) {
     return response;
   }
 
-  const candidates = getPayloadCandidates(response);
-
-  for (const candidate of candidates) {
+  for (const candidate of getPayloadCandidates(response)) {
     const obj = safeObject(candidate, null);
-
     if (!obj) continue;
 
     const url = safeText(
@@ -1625,6 +1564,7 @@ export function resolveFacturaPdfUrl(response = null) {
         obj?.publicUrl,
         obj?.sasUrl,
         obj?.signedUrl,
+        obj?.location,
 
         obj?.data?.file?.url,
         obj?.data?.file?.viewUrl,
@@ -1688,20 +1628,23 @@ export function createObjectUrlFromPdfResponse(response = null) {
 
 export function normalizeFacturaPdfResponse(response = null, fallbackUrl = "") {
   const file = extractPdfFileObject(response);
-
-  const explicitUrl = resolveFacturaPdfUrl(response);
-  const objectUrl = explicitUrl ? "" : createObjectUrlFromPdfResponse(response);
   const blob = extractBlobFromResponse(response);
 
-  const finalUrl = explicitUrl || objectUrl || "";
+  const explicitUrl = resolveFacturaPdfUrl(response);
+  const publicExplicitUrl = explicitUrl && !isPrivateFacturaPdfEndpoint(explicitUrl)
+    ? explicitUrl
+    : "";
+
+  const objectUrl = publicExplicitUrl ? "" : createObjectUrlFromPdfResponse(response);
+  const finalUrl = publicExplicitUrl || objectUrl || "";
 
   return {
-    ok: extractOk(response, Boolean(finalUrl || blob)),
+    ok: extractOk(response, Boolean(finalUrl || blob || isResponseLike(response))),
     requestId: extractRequestId(response),
 
     url: finalUrl,
-    viewUrl: safeText(first(file?.viewUrl, explicitUrl, finalUrl), ""),
-    downloadUrl: safeText(first(file?.downloadUrl, explicitUrl, finalUrl), ""),
+    viewUrl: safeText(first(file?.viewUrl, finalUrl), ""),
+    downloadUrl: safeText(first(file?.downloadUrl, finalUrl), ""),
 
     objectUrl,
     blob,
@@ -1713,8 +1656,16 @@ export function normalizeFacturaPdfResponse(response = null, fallbackUrl = "") {
       downloadUrl: safeText(first(file?.downloadUrl, finalUrl), ""),
     },
 
-    fallbackUrl: safeText(fallbackUrl, ""),
+    response,
     raw: response,
+
+    fallbackUrl: safeText(
+      fallbackUrl && !isPrivateFacturaPdfEndpoint(fallbackUrl)
+        ? fallbackUrl
+        : "",
+      ""
+    ),
+
     meta: extractMeta(response),
   };
 }
@@ -1723,75 +1674,83 @@ export function normalizeFacturaPdfResponse(response = null, fallbackUrl = "") {
    COLLECTION API BASE
 ========================================================= */
 
-const baseCollectionApi = createCollectionApi(FACTURAS_RESOURCE, {
-  client: {
-    get: (...args) => getApiClient().get(...args),
-    post: (...args) => getApiClient().post(...args),
-    put: (...args) => getApiClient().put(...args),
-    patch: (...args) => getApiClient().patch(...args),
-    delete: (...args) => getApiClient().delete(...args),
-  },
+const collectionClient = {
+  get: (...args) => apiGet(...args),
+  post: (...args) => apiPost(...args),
+  put: (...args) => apiPut(...args),
+  patch: (...args) => apiPatch(...args),
+  delete: (...args) => apiDelete(...args),
+};
 
-  basePath: FACTURAS_ENDPOINT,
+const baseCollectionApi = (() => {
+  try {
+    return createCollectionApi(FACTURAS_RESOURCE, {
+      client: collectionClient,
+      basePath: FACTURAS_ENDPOINT,
 
-  mapItem: normalizeFacturaSafe,
-  mapDetail: normalizeFacturaSafe,
+      mapItem: normalizeFacturaSafe,
+      mapDetail: normalizeFacturaSafe,
 
-  normalizeListResponse(payload) {
-    return normalizeFacturasListResponse(payload);
-  },
+      normalizeListResponse(payload) {
+        return normalizeFacturasListResponse(payload);
+      },
 
-  normalizeDetail(payload) {
-    return normalizeFacturaDetailResponse(payload);
-  },
+      normalizeDetail(payload) {
+        return normalizeFacturaDetailResponse(payload);
+      },
 
-  listQueryConfig: {
-    pageParam: "page",
-    limitParam: "limit",
-    searchParam: "q",
-    sortByParam: "sort",
-    sortDirParam: "direction",
-    defaultPage: FACTURAS_DEFAULT_PAGE,
-    defaultLimit: FACTURAS_DEFAULT_LIMIT,
-    includeDefaults: false,
-  },
+      listQueryConfig: {
+        pageParam: "page",
+        limitParam: "limit",
+        searchParam: "q",
+        sortByParam: "sort",
+        sortDirParam: "direction",
+        defaultPage: FACTURAS_DEFAULT_PAGE,
+        defaultLimit: FACTURAS_DEFAULT_LIMIT,
+        includeDefaults: false,
+      },
 
-  buildListOptions: ({ requestOptions }) => ({
-    timeout: FACTURAS_LIST_TIMEOUT,
-    auth: true,
-    ...safeObject(requestOptions),
-  }),
+      buildListOptions: ({ requestOptions } = {}) => ({
+        timeout: FACTURAS_LIST_TIMEOUT,
+        auth: true,
+        ...safeObject(requestOptions),
+      }),
 
-  buildDetailOptions: ({ requestOptions }) => ({
-    timeout: FACTURAS_DETAIL_TIMEOUT,
-    auth: true,
-    ...safeObject(requestOptions),
-  }),
+      buildDetailOptions: ({ requestOptions } = {}) => ({
+        timeout: FACTURAS_DETAIL_TIMEOUT,
+        auth: true,
+        ...safeObject(requestOptions),
+      }),
 
-  buildCreateOptions: ({ requestOptions }) => ({
-    timeout: FACTURAS_CREATE_TIMEOUT,
-    auth: true,
-    ...safeObject(requestOptions),
-  }),
+      buildCreateOptions: ({ requestOptions } = {}) => ({
+        timeout: FACTURAS_CREATE_TIMEOUT,
+        auth: true,
+        ...safeObject(requestOptions),
+      }),
 
-  buildUpdateOptions: ({ requestOptions }) => ({
-    timeout: FACTURAS_TIMEOUT,
-    auth: true,
-    ...safeObject(requestOptions),
-  }),
+      buildUpdateOptions: ({ requestOptions } = {}) => ({
+        timeout: FACTURAS_TIMEOUT,
+        auth: true,
+        ...safeObject(requestOptions),
+      }),
 
-  buildPatchOptions: ({ requestOptions }) => ({
-    timeout: FACTURAS_TIMEOUT,
-    auth: true,
-    ...safeObject(requestOptions),
-  }),
+      buildPatchOptions: ({ requestOptions } = {}) => ({
+        timeout: FACTURAS_TIMEOUT,
+        auth: true,
+        ...safeObject(requestOptions),
+      }),
 
-  buildRemoveOptions: ({ requestOptions }) => ({
-    timeout: FACTURAS_TIMEOUT,
-    auth: true,
-    ...safeObject(requestOptions),
-  }),
-});
+      buildRemoveOptions: ({ requestOptions } = {}) => ({
+        timeout: FACTURAS_TIMEOUT,
+        auth: true,
+        ...safeObject(requestOptions),
+      }),
+    }) || {};
+  } catch (error) {
+    safeWarn("createCollectionApi no disponible para facturas:", error);
+    return {};
+  }
+})();
 
 /* =========================================================
    PUBLIC REQUESTS
@@ -1799,6 +1758,16 @@ const baseCollectionApi = createCollectionApi(FACTURAS_RESOURCE, {
 
 export async function fetchFacturasHealthRequest(requestOptions = {}) {
   const response = await apiGet(FACTURAS_ENDPOINTS.health(), {
+    timeout: FACTURAS_TIMEOUT,
+    auth: true,
+    ...safeObject(requestOptions),
+  });
+
+  return normalizeFacturasHealthResponse(response);
+}
+
+export async function fetchFacturasHealthPingRequest(requestOptions = {}) {
+  const response = await apiGet(FACTURAS_ENDPOINTS.healthPing(), {
     timeout: FACTURAS_TIMEOUT,
     auth: true,
     ...safeObject(requestOptions),
@@ -1887,6 +1856,7 @@ export async function fetchFacturaPdfRequest(
     auth = true,
     responseType = "auto",
     raw = false,
+    cache = "no-store",
     ...rest
   } = {}
 ) {
@@ -1897,6 +1867,7 @@ export async function fetchFacturaPdfRequest(
     auth,
     responseType,
     raw,
+    cache,
     ...rest,
   });
 
@@ -1913,10 +1884,21 @@ export async function fetchFacturaPdfUrlRequest(
     responseType: "auto",
     raw: false,
     auth: true,
+    cache: "no-store",
   });
 
-  if (result?.url) {
+  /*
+    Compatibilidad:
+    - Si backend devuelve SAS/public URL: devolvemos string.
+    - Si backend devuelve blob/Response: devolvemos objeto normalizado.
+    - Nunca devolvemos endpoint privado /api/facturas/:id/pdf como fallback visible.
+  */
+  if (result?.url && !isPrivateFacturaPdfEndpoint(result.url)) {
     return result.url;
+  }
+
+  if (result?.blob || result?.objectUrl || result?.response || result?.raw) {
+    return result;
   }
 
   throw new Error("FACTURA_PDF_URL_MISSING");
@@ -1928,6 +1910,7 @@ export async function viewFacturaPdfRequest(id, options = {}) {
     responseType: "auto",
     raw: false,
     auth: true,
+    cache: "no-store",
   });
 }
 
@@ -1937,6 +1920,7 @@ export async function downloadFacturaPdfRequest(id, options = {}) {
     responseType: "auto",
     raw: false,
     auth: true,
+    cache: "no-store",
   });
 }
 
@@ -1950,6 +1934,24 @@ export async function sendFacturaRequest(
   } = {}
 ) {
   const response = await apiPost(FACTURAS_ENDPOINTS.send(id), safeObject(payload), {
+    timeout,
+    auth,
+    ...rest,
+  });
+
+  return normalizeFacturaSendResponse(response);
+}
+
+export async function sendFacturaAliasRequest(
+  id,
+  payload = {},
+  {
+    timeout = FACTURAS_SEND_TIMEOUT,
+    auth = true,
+    ...rest
+  } = {}
+) {
+  const response = await apiPost(FACTURAS_ENDPOINTS.sendAlias(id), safeObject(payload), {
     timeout,
     auth,
     ...rest,
@@ -2050,12 +2052,14 @@ export function getFacturaStableId(item = {}) {
       factura.numero,
       factura.numeroFacturaLegal,
       factura.numeroFacturaSistema,
+      factura.invoiceNumber,
       raw.id,
       raw.facturaId,
       raw.invoiceId,
       raw.numero,
       raw.numeroFacturaLegal,
-      raw.numeroFacturaSistema
+      raw.numeroFacturaSistema,
+      raw.invoiceNumber
     ),
     ""
   );
@@ -2074,6 +2078,9 @@ export function getFacturaAmount(item = {}) {
       factura.totalFactura,
       factura.invoiceAmount,
       factura.facturaTotal,
+      factura.facturaImporte,
+      factura.importeFactura,
+      factura.totales?.total,
       factura.totals?.total,
       factura.resumen?.total,
 
@@ -2084,6 +2091,9 @@ export function getFacturaAmount(item = {}) {
       raw.totalFactura,
       raw.invoiceAmount,
       raw.facturaTotal,
+      raw.facturaImporte,
+      raw.importeFactura,
+      raw.totales?.total,
       raw.totals?.total,
       raw.resumen?.total,
 
@@ -2108,6 +2118,12 @@ export const FacturasApi = Object.freeze({
     pdf: FACTURAS_PDF_TIMEOUT,
     send: FACTURAS_SEND_TIMEOUT,
     create: FACTURAS_CREATE_TIMEOUT,
+  }),
+
+  defaults: Object.freeze({
+    page: FACTURAS_DEFAULT_PAGE,
+    limit: FACTURAS_DEFAULT_LIMIT,
+    maxLimit: FACTURAS_MAX_LIMIT,
   }),
 
   dispositions: FACTURAS_DISPOSITIONS,
@@ -2144,6 +2160,7 @@ export const FacturasApi = Object.freeze({
   getFacturaAmount,
 
   health: fetchFacturasHealthRequest,
+  healthPing: fetchFacturasHealthPingRequest,
   stats: fetchFacturasStatsRequest,
 
   list: fetchFacturasRequest,
@@ -2154,12 +2171,13 @@ export const FacturasApi = Object.freeze({
   patch: patchFacturaRequest,
   remove: removeFacturaRequest,
 
-  baseCreate: baseCollectionApi.create,
-  baseUpdate: baseCollectionApi.update,
-  basePatch: baseCollectionApi.patch,
-  baseRemove: baseCollectionApi.remove,
+  baseCreate: baseCollectionApi?.create,
+  baseUpdate: baseCollectionApi?.update,
+  basePatch: baseCollectionApi?.patch,
+  baseRemove: baseCollectionApi?.remove,
 
   fetchFacturasHealthRequest,
+  fetchFacturasHealthPingRequest,
   fetchFacturasStatsRequest,
   fetchFacturasRequest,
   fetchFacturaDetailRequest,
@@ -2170,6 +2188,7 @@ export const FacturasApi = Object.freeze({
   downloadFacturaPdfRequest,
 
   sendFacturaRequest,
+  sendFacturaAliasRequest,
   createFacturaRequest,
   updateFacturaRequest,
   patchFacturaRequest,

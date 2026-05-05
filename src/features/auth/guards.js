@@ -20,10 +20,10 @@
    - navegación opcional automática
    - eventos consistentes y sin tokens reales
    - roles normalizados con aliases admin/superadmin/owner/root
-   - roles support/agent/helpdesk y manager/lead normalizados
+   - roles support/agent/helpdesk/tecnico y manager/lead normalizados
    - guards reutilizables SPA/router
    - redirects internos blindados anti open-redirect
-   - soporte roles array/string/CSV
+   - soporte roles array/string/CSV/boolean-map
    - soporte rutas públicas técnicas con tokens
    - snapshot diagnóstico seguro
    - compatibilidad legacy con nombres antiguos
@@ -32,7 +32,6 @@
 import { AppCore } from "../../core/index.js";
 
 import {
-  hasValidToken,
   getCurrentCanonicalPath,
   getCurrentPublicPath,
   normalizePath,
@@ -43,6 +42,7 @@ import {
 
 import {
   AUTH_PUBLIC_TECHNICAL_ROUTES,
+  AUTH_CONSTANTS,
 } from "./constants.js";
 
 import {
@@ -54,7 +54,7 @@ import {
 ========================================================= */
 
 const GUARDS_VERSION =
-  "10.0.0";
+  "10.2.0";
 
 const LOGIN_PATH =
   "/login";
@@ -64,6 +64,9 @@ const DEFAULT_HOME_PATH =
 
 const DEFAULT_FORBIDDEN_PATH =
   "/403";
+
+const DEFAULT_TOKEN_MAX_LENGTH =
+  8192;
 
 const PUBLIC_TECHNICAL_PATHS =
   Object.freeze([
@@ -79,6 +82,22 @@ const PUBLIC_TECHNICAL_PATHS =
     "/password-reset",
   ]);
 
+const TOKEN_FALSE_VALUES =
+  new Set([
+    "",
+    "null",
+    "undefined",
+    "false",
+    "none",
+    "nan",
+    "[object object]",
+    "{}",
+    "[]",
+    "\"null\"",
+    "\"undefined\"",
+    "\"false\"",
+  ]);
+
 const ADMIN_ROLE_KEYS =
   Object.freeze([
     "admin",
@@ -86,8 +105,10 @@ const ADMIN_ROLE_KEYS =
     "administrador",
     "superadmin",
     "super_admin",
-    "super-administrador",
+    "super-admin",
+    "superadministrador",
     "super_administrador",
+    "super-administrador",
     "owner",
     "root",
   ]);
@@ -101,6 +122,9 @@ const SUPPORT_ROLE_KEYS =
     "helpdesk",
     "operator",
     "operador",
+    "technician",
+    "tecnico",
+    "técnico",
   ]);
 
 const MANAGER_ROLE_KEYS =
@@ -109,6 +133,9 @@ const MANAGER_ROLE_KEYS =
     "gestor",
     "gerente",
     "lead",
+    "team_lead",
+    "team-lead",
+    "supervisor",
   ]);
 
 const CLIENT_ROLE_KEYS =
@@ -126,10 +153,10 @@ const USER_ROLE_KEYS =
 
 const ROLE_ALIASES =
   Object.freeze({
-    administrador:
+    administrator:
       "admin",
 
-    administrator:
+    administrador:
       "admin",
 
     superadmin:
@@ -139,6 +166,9 @@ const ROLE_ALIASES =
       "admin",
 
     "super-admin":
+      "admin",
+
+    superadministrador:
       "admin",
 
     super_administrador:
@@ -171,6 +201,15 @@ const ROLE_ALIASES =
     operador:
       "support",
 
+    technician:
+      "support",
+
+    tecnico:
+      "support",
+
+    "técnico":
+      "support",
+
     gestor:
       "manager",
 
@@ -178,6 +217,15 @@ const ROLE_ALIASES =
       "manager",
 
     lead:
+      "manager",
+
+    team_lead:
+      "manager",
+
+    "team-lead":
+      "manager",
+
+    supervisor:
       "manager",
 
     cliente:
@@ -227,6 +275,57 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
+function safeNumber(value, fallback = 0) {
+  const numeric =
+    Number(value);
+
+  return Number.isFinite(numeric)
+    ? numeric
+    : fallback;
+}
+
+function safeBool(value, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  const text =
+    safeText(value, "")
+      .toLowerCase();
+
+  if (
+    [
+      "true",
+      "1",
+      "yes",
+      "si",
+      "sí",
+      "ok",
+      "on",
+    ].includes(text)
+  ) {
+    return true;
+  }
+
+  if (
+    [
+      "false",
+      "0",
+      "no",
+      "off",
+    ].includes(text)
+  ) {
+    return false;
+  }
+
+  return Boolean(fallback);
+}
+
 function safeObject(value) {
   return isObject(value)
     ? value
@@ -252,7 +351,8 @@ function safeArray(value) {
 function unique(values = []) {
   return Array.from(
     new Set(
-      values
+      safeArray(values)
+        .flat(Infinity)
         .map((value) =>
           safeText(value, "")
         )
@@ -277,6 +377,14 @@ function safeClone(value, fallback = null) {
   }
 }
 
+function safeIsoDate(ms = Date.now()) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
+  }
+}
+
 function safeWarn(...args) {
   try {
     AppCore?.utils?.warn?.(
@@ -286,20 +394,31 @@ function safeWarn(...args) {
   } catch {}
 
   try {
-    console.warn(
-      "[AuthGuard]",
-      ...args
-    );
+    if (AppCore?.config?.debug) {
+      console.warn(
+        "[AuthGuard]",
+        ...args
+      );
+    }
   } catch {}
 }
 
-function safeSetState(patch = {}) {
-  const safePatch =
+function getState() {
+  try {
+    return AppCore?.state || {};
+  } catch {
+    return {};
+  }
+}
+
+function safeSetState(patch = {}, options = {}) {
+  const cleanPatch =
     safeObject(patch);
 
   try {
     AppCore?.setState?.(
-      safePatch
+      cleanPatch,
+      options
     );
   } catch {}
 
@@ -310,12 +429,12 @@ function safeSetState(patch = {}) {
     ) {
       Object.assign(
         AppCore.state,
-        safePatch
+        cleanPatch
       );
     }
   } catch {}
 
-  return AppCore?.state || {};
+  return getState();
 }
 
 /* =========================================================
@@ -346,8 +465,55 @@ function redactSafe(value = "") {
   }
 }
 
+function sanitizeUserForEvent(user = null) {
+  if (!isObject(user)) {
+    return null;
+  }
+
+  return {
+    id:
+      user.id ??
+      user.userId ??
+      user.user_id ??
+      user._id ??
+      user.uid ??
+      null,
+
+    userId:
+      user.userId ??
+      user.user_id ??
+      user.id ??
+      user._id ??
+      user.uid ??
+      null,
+
+    username:
+      user.username ||
+      user.userName ||
+      user.user_name ||
+      user.slug ||
+      null,
+
+    email:
+      user.email ||
+      user.mail ||
+      null,
+
+    role:
+      user.role ||
+      user.rol ||
+      user.userRole ||
+      null,
+
+    roles:
+      Array.isArray(user.roles)
+        ? user.roles
+        : [],
+  };
+}
+
 function sanitizeGuardPayload(payload = {}, depth = 0) {
-  if (depth > 5) {
+  if (depth > 6) {
     return "[MaxDepth]";
   }
 
@@ -378,10 +544,18 @@ function sanitizeGuardPayload(payload = {}, depth = 0) {
       lower.includes("authorization") ||
       lower.includes("password") ||
       lower === "code" ||
+      lower === "otp" ||
+      lower === "totp" ||
       lower === "t"
     ) {
       output[key] =
         value ? "***" : value;
+      continue;
+    }
+
+    if (lower === "user") {
+      output[key] =
+        sanitizeUserForEvent(value);
       continue;
     }
 
@@ -418,16 +592,120 @@ function safeEmit(eventName, payload = {}) {
     return false;
   }
 
+  const cleanPayload =
+    sanitizeGuardPayload(payload);
+
+  let emitted =
+    false;
+
   try {
     AppCore?.events?.emit?.(
       cleanEvent,
-      sanitizeGuardPayload(payload)
+      cleanPayload
     );
 
-    return true;
+    emitted =
+      true;
   } catch {}
 
-  return false;
+  try {
+    if (
+      isBrowser() &&
+      !emitted
+    ) {
+      document.dispatchEvent(
+        new CustomEvent(cleanEvent, {
+          detail:
+            cleanPayload,
+          bubbles:
+            false,
+          cancelable:
+            false,
+        })
+      );
+
+      emitted =
+        true;
+    }
+  } catch {}
+
+  return emitted;
+}
+
+/* =========================================================
+   TOKEN VALIDATION
+========================================================= */
+
+function getTokenMaxLength() {
+  return safeNumber(
+    AUTH_CONSTANTS?.tokenMaxLength,
+    DEFAULT_TOKEN_MAX_LENGTH
+  ) || DEFAULT_TOKEN_MAX_LENGTH;
+}
+
+function normalizeTokenValue(token = null) {
+  if (
+    token === null ||
+    token === undefined
+  ) {
+    return "";
+  }
+
+  let value =
+    String(token)
+      .trim();
+
+  if (!value) {
+    return "";
+  }
+
+  if (/^bearer\s+/i.test(value)) {
+    value =
+      value.replace(/^bearer\s+/i, "")
+        .trim();
+  }
+
+  if (
+    /[\r\n\t]/.test(value) ||
+    TOKEN_FALSE_VALUES.has(value.toLowerCase())
+  ) {
+    return "";
+  }
+
+  const max =
+    getTokenMaxLength();
+
+  /*
+    Regla dura:
+    no truncamos tokens. Si excede el límite, se considera corrupto.
+  */
+  if (
+    max > 0 &&
+    value.length > max
+  ) {
+    return "";
+  }
+
+  return value;
+}
+
+function hasUsableToken(token = null) {
+  const value =
+    normalizeTokenValue(token);
+
+  if (!value) {
+    return false;
+  }
+
+  try {
+    if (isFunction(AppCore?.utils?.hasValidToken)) {
+      return Boolean(
+        AppCore.utils.hasValidToken(value)
+      );
+    }
+  } catch {}
+
+  return true;
 }
 
 /* =========================================================
@@ -518,8 +796,8 @@ function getCurrentPath() {
 
   try {
     const statePath =
-      AppCore?.state?.route ||
-      AppCore?.state?.publicPath;
+      getState().route ||
+      getState().publicPath;
 
     if (statePath) {
       return normalizeCanonicalPathSafe(statePath);
@@ -543,8 +821,8 @@ function getCurrentPublicPathSafe() {
 
   try {
     const statePath =
-      AppCore?.state?.publicPath ||
-      AppCore?.state?.route;
+      getState().publicPath ||
+      getState().route;
 
     if (statePath) {
       return normalizePublicPathSafe(statePath);
@@ -573,6 +851,47 @@ function isPublicTechnicalPath(path = "") {
   });
 }
 
+function hasEncodedOpenRedirectRisk(path = "") {
+  const raw =
+    safeText(path, "");
+
+  if (!raw) {
+    return true;
+  }
+
+  const lower =
+    raw.toLowerCase();
+
+  if (
+    lower.includes("%0d") ||
+    lower.includes("%0a") ||
+    lower.includes("%09") ||
+    lower.includes("\\") ||
+    lower.includes("%5c")
+  ) {
+    return true;
+  }
+
+  try {
+    const decoded =
+      decodeURIComponent(raw)
+        .trim()
+        .replace(/\\/g, "/");
+
+    if (
+      decoded.startsWith("//") ||
+      /^[a-z][a-z0-9+.-]*:/i.test(decoded) ||
+      /[\r\n\t]/.test(decoded)
+    ) {
+      return true;
+    }
+  } catch {
+    return true;
+  }
+
+  return false;
+}
+
 function isSafeInternalPath(path = "") {
   const value =
     safeText(path, "");
@@ -593,13 +912,11 @@ function isSafeInternalPath(path = "") {
     return false;
   }
 
-  if (
-    /[\r\n\t]/.test(value) ||
-    value.toLowerCase().includes("%0d") ||
-    value.toLowerCase().includes("%0a") ||
-    value.toLowerCase().includes("%09") ||
-    value.toLowerCase().includes("%5c")
-  ) {
+  if (/[\r\n\t]/.test(value)) {
+    return false;
+  }
+
+  if (hasEncodedOpenRedirectRisk(value)) {
     return false;
   }
 
@@ -607,8 +924,13 @@ function isSafeInternalPath(path = "") {
 }
 
 function normalizeRedirectPath(path = "/", fallback = DEFAULT_HOME_PATH) {
+  const fallbackPath =
+    isSafeInternalPath(fallback)
+      ? normalizePublicPathSafe(fallback)
+      : DEFAULT_HOME_PATH;
+
   const raw =
-    safeText(path, fallback);
+    safeText(path, fallbackPath);
 
   let candidate =
     raw;
@@ -622,7 +944,7 @@ function normalizeRedirectPath(path = "/", fallback = DEFAULT_HOME_PATH) {
   }
 
   if (!isSafeInternalPath(candidate)) {
-    return fallback;
+    return fallbackPath;
   }
 
   return candidate;
@@ -635,11 +957,27 @@ function buildLoginRedirect(currentPath = "/", redirectTo = LOGIN_PATH) {
       LOGIN_PATH
     );
 
-  const safeCurrent =
+  let safeCurrent =
     normalizeRedirectPath(
       currentPath,
       DEFAULT_HOME_PATH
     );
+
+  const currentCanonical =
+    normalizeCanonicalPathSafe(
+      safeCurrent
+    );
+
+  if (
+    currentCanonical === LOGIN_PATH ||
+    currentCanonical === "/signin" ||
+    currentCanonical === "/sign-in" ||
+    currentCanonical === "/auth" ||
+    currentCanonical === "/auth/login"
+  ) {
+    safeCurrent =
+      DEFAULT_HOME_PATH;
+  }
 
   if (loginPath === LOGIN_PATH) {
     try {
@@ -669,7 +1007,12 @@ function buildLoginRedirect(currentPath = "/", redirectTo = LOGIN_PATH) {
       safeCurrent
     );
 
-    return `${url.pathname}${url.search}`;
+    const finalPath =
+      `${url.pathname}${url.search}`;
+
+    return isSafeInternalPath(finalPath)
+      ? finalPath
+      : LOGIN_PATH;
   } catch {
     return `${loginPath}?redirect=${encodeURIComponent(safeCurrent)}`;
   }
@@ -819,7 +1162,9 @@ function navigateTo(path = "/", options = {}) {
       return true;
     } catch {
       try {
-        window.location.href = target;
+        window.location.href =
+          target;
+
         return true;
       } catch {}
     }
@@ -833,22 +1178,30 @@ function navigateTo(path = "/", options = {}) {
 ========================================================= */
 
 function getCurrentToken() {
+  const state =
+    getState();
+
   return (
-    AppCore?.state?.token ||
-    AppCore?.state?.accessToken ||
-    AppCore?.state?.session?.token ||
-    AppCore?.state?.session?.accessToken ||
+    state.token ||
+    state.accessToken ||
+    state.access_token ||
+    state.session?.token ||
+    state.session?.accessToken ||
+    state.session?.access_token ||
     null
   );
 }
 
 function getCurrentUser() {
+  const state =
+    getState();
+
   return (
-    AppCore?.state?.user ||
-    AppCore?.state?.currentUser ||
-    AppCore?.state?.sessionUser ||
-    AppCore?.state?.authUser ||
-    AppCore?.state?.session?.user ||
+    state.user ||
+    state.currentUser ||
+    state.sessionUser ||
+    state.authUser ||
+    state.session?.user ||
     null
   );
 }
@@ -864,6 +1217,8 @@ function hasUsableUser(user = null) {
       safeText(user.user_id, "") ||
       safeText(user._id, "") ||
       safeText(user.uid, "") ||
+      safeText(user.uuid, "") ||
+      safeText(user.sub, "") ||
       safeText(user.username, "") ||
       safeText(user.userName, "") ||
       safeText(user.user_name, "") ||
@@ -875,8 +1230,48 @@ function hasUsableUser(user = null) {
   );
 }
 
+function normalizeStatus(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .trim();
+}
+
 function isUserActive(user = null) {
   if (!isObject(user)) {
+    return false;
+  }
+
+  const status =
+    normalizeStatus(
+      user.status ??
+      user.estado ??
+      user.state ??
+      user.accountStatus ??
+      user.account_status ??
+      ""
+    );
+
+  if (
+    [
+      "disabled",
+      "blocked",
+      "deleted",
+      "archived",
+      "inactive",
+      "suspended",
+      "locked",
+      "banned",
+      "deactivated",
+      "bloqueado",
+      "eliminado",
+      "inactivo",
+      "suspendido",
+      "desactivado",
+    ].includes(status)
+  ) {
     return false;
   }
 
@@ -886,31 +1281,41 @@ function isUserActive(user = null) {
     user.disabled === true ||
     user.is_active === false ||
     user.isActive === false ||
+    user.is_enabled === false ||
+    user.isEnabled === false ||
     user.blocked === true ||
     user.locked === true ||
     user.deleted === true ||
     user.archived === true ||
-    user.status === "disabled" ||
-    user.status === "blocked" ||
-    user.status === "deleted" ||
-    user.estado === "disabled" ||
-    user.estado === "bloqueado" ||
-    user.estado === "eliminado"
+    user.suspended === true ||
+    user.banned === true
   );
 }
 
-function syncAuthState() {
+export function syncAuthState() {
   const token =
     getCurrentToken();
+
+  const cleanToken =
+    normalizeTokenValue(token);
 
   const user =
     getCurrentUser();
 
+  const hasToken =
+    hasUsableToken(cleanToken);
+
+  const hasUser =
+    hasUsableUser(user);
+
+  const userActive =
+    isUserActive(user);
+
   const authenticated =
     Boolean(
-      hasValidToken(token) &&
-        hasUsableUser(user) &&
-        isUserActive(user)
+      hasToken &&
+      hasUser &&
+      userActive
     );
 
   const roles =
@@ -923,54 +1328,75 @@ function syncAuthState() {
       ? resolveCanonicalRole(roles)
       : "";
 
-  safeSetState({
-    authenticated,
-    hasToken:
-      Boolean(hasValidToken(token)),
+  safeSetState(
+    {
+      authenticated,
+      hasToken,
 
-    user:
-      authenticated
-        ? user
-        : null,
+      token:
+        hasToken
+          ? cleanToken
+          : null,
 
-    currentUser:
-      authenticated
-        ? user
-        : null,
+      accessToken:
+        hasToken
+          ? cleanToken
+          : null,
 
-    authUser:
-      authenticated
-        ? user
-        : null,
+      user:
+        authenticated
+          ? user
+          : null,
 
-    sessionUser:
-      authenticated
-        ? user
-        : null,
+      currentUser:
+        authenticated
+          ? user
+          : null,
 
-    role:
-      role || "",
+      authUser:
+        authenticated
+          ? user
+          : null,
 
-    userRole:
-      role || "",
+      sessionUser:
+        authenticated
+          ? user
+          : null,
 
-    roles:
-      authenticated
-        ? roles
-        : [],
+      role:
+        role || "",
 
-    isAdmin:
-      authenticated &&
-      roles.some(isAdminRole),
+      userRole:
+        role || "",
 
-    isSupport:
-      authenticated &&
-      roles.some(isSupportRole),
+      roles:
+        authenticated
+          ? roles
+          : [],
 
-    isManager:
-      authenticated &&
-      roles.some(isManagerRole),
-  });
+      isAdmin:
+        authenticated &&
+        roles.some(isAdminRole),
+
+      isSupport:
+        authenticated &&
+        roles.some(isSupportRole),
+
+      isManager:
+        authenticated &&
+        roles.some(isManagerRole),
+
+      isClient:
+        authenticated &&
+        roles.some(isClientRole),
+    },
+    {
+      forceUnauthenticated:
+        !authenticated,
+      allowExplicitAuthenticated:
+        authenticated,
+    }
+  );
 
   return authenticated;
 }
@@ -993,9 +1419,63 @@ function normalizeRole(value = "") {
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[\s-]+/g, "_")
       .replace(/[^a-z0-9_:.]/g, "")
+      .replace(/^_+|_+$/g, "")
       .trim();
 
   return ROLE_ALIASES[raw] || raw;
+}
+
+const ADMIN_ROLE_SET =
+  new Set(
+    ADMIN_ROLE_KEYS.map(normalizeRole)
+  );
+
+const SUPPORT_ROLE_SET =
+  new Set(
+    SUPPORT_ROLE_KEYS.map(normalizeRole)
+  );
+
+const MANAGER_ROLE_SET =
+  new Set(
+    MANAGER_ROLE_KEYS.map(normalizeRole)
+  );
+
+const CLIENT_ROLE_SET =
+  new Set(
+    CLIENT_ROLE_KEYS.map(normalizeRole)
+  );
+
+const USER_ROLE_SET =
+  new Set(
+    USER_ROLE_KEYS.map(normalizeRole)
+  );
+
+function isTruthyPermission(value) {
+  return (
+    value === true ||
+    value === 1 ||
+    value === "1" ||
+    value === "true" ||
+    value === "yes" ||
+    value === "si" ||
+    value === "sí" ||
+    value === "ok" ||
+    value === "on"
+  );
+}
+
+function extractTruthyKeys(value = {}) {
+  if (!isObject(value)) {
+    return [];
+  }
+
+  return Object.entries(value)
+    .filter(([, itemValue]) =>
+      isTruthyPermission(itemValue)
+    )
+    .map(([key]) =>
+      key
+    );
 }
 
 function splitRoleValue(value) {
@@ -1009,6 +1489,12 @@ function splitRoleValue(value) {
     value === ""
   ) {
     return [];
+  }
+
+  if (isObject(value)) {
+    return extractTruthyKeys(value)
+      .map(normalizeRole)
+      .filter(Boolean);
   }
 
   if (typeof value === "string") {
@@ -1029,7 +1515,7 @@ function isAdminRole(value = "") {
 
   return (
     role === "admin" ||
-    ADMIN_ROLE_KEYS.map(normalizeRole).includes(role)
+    ADMIN_ROLE_SET.has(role)
   );
 }
 
@@ -1039,7 +1525,7 @@ function isSupportRole(value = "") {
 
   return (
     role === "support" ||
-    SUPPORT_ROLE_KEYS.map(normalizeRole).includes(role)
+    SUPPORT_ROLE_SET.has(role)
   );
 }
 
@@ -1049,7 +1535,7 @@ function isManagerRole(value = "") {
 
   return (
     role === "manager" ||
-    MANAGER_ROLE_KEYS.map(normalizeRole).includes(role)
+    MANAGER_ROLE_SET.has(role)
   );
 }
 
@@ -1059,7 +1545,7 @@ function isClientRole(value = "") {
 
   return (
     role === "client" ||
-    CLIENT_ROLE_KEYS.map(normalizeRole).includes(role)
+    CLIENT_ROLE_SET.has(role)
   );
 }
 
@@ -1069,7 +1555,7 @@ function isUserRole(value = "") {
 
   return (
     role === "user" ||
-    USER_ROLE_KEYS.map(normalizeRole).includes(role)
+    USER_ROLE_SET.has(role)
   );
 }
 
@@ -1089,40 +1575,40 @@ function expandRoleAliases(roles = []) {
   if (normalized.some(isAdminRole)) {
     result.add("admin");
 
-    ADMIN_ROLE_KEYS.forEach((role) =>
-      result.add(normalizeRole(role))
+    ADMIN_ROLE_SET.forEach((role) =>
+      result.add(role)
     );
   }
 
   if (normalized.some(isSupportRole)) {
     result.add("support");
 
-    SUPPORT_ROLE_KEYS.forEach((role) =>
-      result.add(normalizeRole(role))
+    SUPPORT_ROLE_SET.forEach((role) =>
+      result.add(role)
     );
   }
 
   if (normalized.some(isManagerRole)) {
     result.add("manager");
 
-    MANAGER_ROLE_KEYS.forEach((role) =>
-      result.add(normalizeRole(role))
+    MANAGER_ROLE_SET.forEach((role) =>
+      result.add(role)
     );
   }
 
   if (normalized.some(isClientRole)) {
     result.add("client");
 
-    CLIENT_ROLE_KEYS.forEach((role) =>
-      result.add(normalizeRole(role))
+    CLIENT_ROLE_SET.forEach((role) =>
+      result.add(role)
     );
   }
 
   if (normalized.some(isUserRole)) {
     result.add("user");
 
-    USER_ROLE_KEYS.forEach((role) =>
-      result.add(normalizeRole(role))
+    USER_ROLE_SET.forEach((role) =>
+      result.add(role)
     );
   }
 
@@ -1159,6 +1645,10 @@ function resolveCanonicalRole(roles = []) {
 }
 
 function collectRoleCandidatesFromUser(user = null) {
+  if (!hasUsableUser(user)) {
+    return [];
+  }
+
   const source =
     safeObject(user);
 
@@ -1181,7 +1671,7 @@ function collectRoleCandidatesFromUser(user = null) {
     safeObject(source.claims);
 
   const state =
-    AppCore?.state || {};
+    getState();
 
   const candidates = [
     source.role,
@@ -1205,6 +1695,7 @@ function collectRoleCandidatesFromUser(user = null) {
     account.userRole,
     account.user_role,
     account.type,
+    account.perfil,
 
     raw.role,
     raw.rol,
@@ -1262,6 +1753,7 @@ function collectRoleCandidatesFromUser(user = null) {
 
     account.roles,
     account.groups,
+    account.authorities,
     account.scopes,
 
     raw.roles,
@@ -1273,10 +1765,12 @@ function collectRoleCandidatesFromUser(user = null) {
 
     raw?.profile?.roles,
     raw?.profile?.groups,
+    raw?.profile?.authorities,
     raw?.profile?.scopes,
 
     raw?.account?.roles,
     raw?.account?.groups,
+    raw?.account?.authorities,
     raw?.account?.scopes,
 
     permissions.roles,
@@ -1320,6 +1814,8 @@ function collectRoleCandidatesFromUser(user = null) {
       account.admin,
       account.isSuperAdmin,
       account.superAdmin,
+      account.canManageUsers,
+      account.canAccessUsers,
 
       raw.isAdmin,
       raw.admin,
@@ -1331,6 +1827,20 @@ function collectRoleCandidatesFromUser(user = null) {
       raw.can_manage_users,
       raw.canAccessUsers,
       raw.can_access_users,
+
+      raw?.profile?.isAdmin,
+      raw?.profile?.admin,
+      raw?.profile?.isSuperAdmin,
+      raw?.profile?.superAdmin,
+      raw?.profile?.canManageUsers,
+      raw?.profile?.canAccessUsers,
+
+      raw?.account?.isAdmin,
+      raw?.account?.admin,
+      raw?.account?.isSuperAdmin,
+      raw?.account?.superAdmin,
+      raw?.account?.canManageUsers,
+      raw?.account?.canAccessUsers,
 
       meta.isAdmin,
       meta.admin,
@@ -1349,9 +1859,7 @@ function collectRoleCandidatesFromUser(user = null) {
       state.isAdmin,
       state.session?.isAdmin,
     ].some((value) =>
-      value === true ||
-      value === "true" ||
-      value === 1
+      isTruthyPermission(value)
     );
 
   if (adminFlag) {
@@ -1367,6 +1875,10 @@ function collectRoleCandidatesFromUser(user = null) {
 }
 
 function getUserRoles(user = null) {
+  if (!hasUsableUser(user)) {
+    return [];
+  }
+
   return expandRoleAliases(
     collectRoleCandidatesFromUser(user)
   );
@@ -1376,6 +1888,10 @@ export function getCurrentRole() {
   const user =
     getCurrentUser();
 
+  if (!hasUsableUser(user)) {
+    return "";
+  }
+
   const roles =
     getUserRoles(user);
 
@@ -1383,9 +1899,34 @@ export function getCurrentRole() {
 }
 
 export function getCurrentRoles() {
-  return getUserRoles(
-    getCurrentUser()
-  );
+  const user =
+    getCurrentUser();
+
+  if (!hasUsableUser(user)) {
+    return [];
+  }
+
+  return getUserRoles(user);
+}
+
+export function isCurrentUserAdmin() {
+  return getCurrentRoles()
+    .some(isAdminRole);
+}
+
+export function isCurrentUserSupport() {
+  return getCurrentRoles()
+    .some(isSupportRole);
+}
+
+export function isCurrentUserManager() {
+  return getCurrentRoles()
+    .some(isManagerRole);
+}
+
+export function isCurrentUserClient() {
+  return getCurrentRoles()
+    .some(isClientRole);
 }
 
 export function hasRole(...roles) {
@@ -1424,16 +1965,28 @@ export function requireRole(...roles) {
 }
 
 export function getAuthHeader() {
-  const token =
-    getCurrentToken();
-
-  if (!hasValidToken(token)) {
+  if (!isAuthenticated()) {
     return {};
   }
 
+  const token =
+    normalizeTokenValue(
+      getCurrentToken()
+    );
+
+  if (!hasUsableToken(token)) {
+    return {};
+  }
+
+  const prefix =
+    safeText(
+      AppCore?.config?.auth?.bearerPrefix,
+      "Bearer"
+    );
+
   return {
     Authorization:
-      `Bearer ${String(token).trim()}`,
+      `${prefix} ${token}`,
   };
 }
 
@@ -1447,6 +2000,12 @@ function buildBlockedPayload({
   redirectTo,
   extra = {},
 } = {}) {
+  const user =
+    getCurrentUser();
+
+  const token =
+    getCurrentToken();
+
   return {
     version:
       GUARDS_VERSION,
@@ -1464,22 +2023,28 @@ function buildBlockedPayload({
       redirectTo || "",
 
     authenticated:
-      Boolean(AppCore?.state?.authenticated),
+      Boolean(getState().authenticated),
 
     hasToken:
-      Boolean(hasValidToken(getCurrentToken())),
+      Boolean(hasUsableToken(token)),
 
     hasUser:
-      Boolean(hasUsableUser(getCurrentUser())),
+      Boolean(hasUsableUser(user)),
 
     userActive:
-      Boolean(isUserActive(getCurrentUser())),
+      Boolean(isUserActive(user)),
 
     currentRole:
       getCurrentRole() || null,
 
     currentRoles:
       getCurrentRoles(),
+
+    user:
+      sanitizeUserForEvent(user),
+
+    at:
+      safeIsoDate(),
 
     ...extra,
   };
@@ -1504,13 +2069,16 @@ function buildAllowedPayload({
       getCurrentPublicPathSafe(),
 
     authenticated:
-      Boolean(AppCore?.state?.authenticated),
+      Boolean(getState().authenticated),
 
     currentRole:
       getCurrentRole() || null,
 
     currentRoles:
       getCurrentRoles(),
+
+    at:
+      safeIsoDate(),
 
     ...extra,
   };
@@ -1529,7 +2097,8 @@ export function guardAuthenticated(options = {}) {
     hardRedirect = false,
     allowPublicTechnicalRoutes = true,
     emitEvents = true,
-  } = safeObject(options);
+  } =
+    safeObject(options);
 
   const currentPath =
     normalizeCanonicalPathSafe(
@@ -1641,7 +2210,8 @@ export function guardRole(roles = [], options = {}) {
     hardRedirect = false,
     allowPublicTechnicalRoutes = true,
     emitEvents = true,
-  } = safeObject(options);
+  } =
+    safeObject(options);
 
   const currentPath =
     normalizeCanonicalPathSafe(
@@ -1673,6 +2243,9 @@ export function guardRole(roles = [], options = {}) {
     return true;
   }
 
+  const requiredRoles =
+    expandRoleAliases(roleList);
+
   if (!isAuthenticated()) {
     const loginRedirect =
       buildLoginRedirect(
@@ -1689,8 +2262,7 @@ export function guardRole(roles = [], options = {}) {
         redirectTo:
           loginRedirect,
         extra: {
-          requiredRoles:
-            expandRoleAliases(roleList),
+          requiredRoles,
         },
       });
 
@@ -1720,7 +2292,7 @@ export function guardRole(roles = [], options = {}) {
     return false;
   }
 
-  if (hasRole(...roleList)) {
+  if (hasRole(...requiredRoles)) {
     if (emitEvents !== false) {
       safeEmit(
         "auth:guard:allowed",
@@ -1730,8 +2302,7 @@ export function guardRole(roles = [], options = {}) {
           path:
             currentPath,
           extra: {
-            requiredRoles:
-              expandRoleAliases(roleList),
+            requiredRoles,
           },
         })
       );
@@ -1755,8 +2326,7 @@ export function guardRole(roles = [], options = {}) {
       redirectTo:
         finalRedirect,
       extra: {
-        requiredRoles:
-          expandRoleAliases(roleList),
+        requiredRoles,
       },
     });
 
@@ -1775,10 +2345,10 @@ export function guardRole(roles = [], options = {}) {
           true,
         force:
           true,
-          hardRedirect:
-            Boolean(hardRedirect),
-          reason:
-            "insufficient-role",
+        hardRedirect:
+          Boolean(hardRedirect),
+        reason:
+          "insufficient-role",
       }
     );
   }
@@ -1791,11 +2361,38 @@ export function guardGuest(options = {}) {
     redirectTo = DEFAULT_HOME_PATH,
     autoNavigate = false,
     hardRedirect = false,
+    allowPublicTechnicalRoutes = true,
     emitEvents = true,
-  } = safeObject(options);
+  } =
+    safeObject(options);
 
   const currentPath =
     getCurrentPath();
+
+  const currentPublicPath =
+    getCurrentPublicPathSafe();
+
+  if (
+    allowPublicTechnicalRoutes &&
+    (
+      isPublicTechnicalPath(currentPath) ||
+      isPublicTechnicalPath(currentPublicPath)
+    )
+  ) {
+    if (emitEvents !== false) {
+      safeEmit(
+        "auth:guard:allowed",
+        buildAllowedPayload({
+          reason:
+            "public-technical-route",
+          path:
+            currentPath,
+        })
+      );
+    }
+
+    return true;
+  }
 
   if (!isAuthenticated()) {
     if (emitEvents !== false) {
@@ -1850,6 +2447,27 @@ export function guardGuest(options = {}) {
   }
 
   return false;
+}
+
+export function guardAdmin(options = {}) {
+  return guardRole(
+    ["admin"],
+    options
+  );
+}
+
+export function guardSupport(options = {}) {
+  return guardRole(
+    ["support", "admin"],
+    options
+  );
+}
+
+export function guardManager(options = {}) {
+  return guardRole(
+    ["manager", "admin"],
+    options
+  );
 }
 
 export function canAccessRoute({
@@ -1910,11 +2528,16 @@ export function buildGuardErrorPayload(error) {
       error?.name || "Error",
 
     status:
-      error?.status || 0,
+      error?.status ||
+      error?.statusCode ||
+      error?.response?.status ||
+      error?.data?.status ||
+      0,
 
     code:
       error?.code ||
       error?.data?.code ||
+      error?.response?.data?.code ||
       null,
   };
 }
@@ -1938,15 +2561,18 @@ export function getAuthGuardsSnapshot() {
 
   syncAuthState();
 
+  const currentRoles =
+    getCurrentRoles();
+
   return {
     version:
       GUARDS_VERSION,
 
     authenticated:
-      Boolean(AppCore?.state?.authenticated),
+      Boolean(getState().authenticated),
 
     hasToken:
-      Boolean(hasValidToken(token)),
+      Boolean(hasUsableToken(token)),
 
     hasUser:
       Boolean(hasUsableUser(user)),
@@ -1957,17 +2583,19 @@ export function getAuthGuardsSnapshot() {
     currentRole:
       getCurrentRole() || null,
 
-    currentRoles:
-      getCurrentRoles(),
+    currentRoles,
 
     isAdmin:
-      getCurrentRoles().some(isAdminRole),
+      currentRoles.some(isAdminRole),
 
     isSupport:
-      getCurrentRoles().some(isSupportRole),
+      currentRoles.some(isSupportRole),
 
     isManager:
-      getCurrentRoles().some(isManagerRole),
+      currentRoles.some(isManagerRole),
+
+    isClient:
+      currentRoles.some(isClientRole),
 
     currentPath:
       redactSafe(currentPath),
@@ -1992,16 +2620,22 @@ export function getAuthGuardsSnapshot() {
 
     state: {
       route:
-        redactSafe(AppCore?.state?.route || ""),
+        redactSafe(getState().route || ""),
 
       publicPath:
-        redactSafe(AppCore?.state?.publicPath || ""),
+        redactSafe(getState().publicPath || ""),
 
       role:
-        AppCore?.state?.role || null,
+        getState().role || null,
 
       roles:
-        safeClone(AppCore?.state?.roles || [], []),
+        safeClone(getState().roles || [], []),
+
+      authenticated:
+        Boolean(getState().authenticated),
+
+      hasToken:
+        Boolean(getState().hasToken),
     },
   };
 }
@@ -2011,10 +2645,18 @@ export function getAuthGuardsSnapshot() {
 ========================================================= */
 
 export default {
+  syncAuthState,
+
   isAuthenticated,
 
   getCurrentRole,
   getCurrentRoles,
+
+  isCurrentUserAdmin,
+  isCurrentUserSupport,
+  isCurrentUserManager,
+  isCurrentUserClient,
+
   hasRole,
   requireRole,
   getAuthHeader,
@@ -2022,6 +2664,10 @@ export default {
   guardAuthenticated,
   guardRole,
   guardGuest,
+  guardAdmin,
+  guardSupport,
+  guardManager,
+
   canAccessRoute,
 
   buildGuardErrorPayload,

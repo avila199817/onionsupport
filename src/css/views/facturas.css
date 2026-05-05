@@ -3,12 +3,16 @@
    Archivo: /src/css/views/facturas.css
 
    FACTURAS VIEW · TOKEN PRO SYSTEM · CSP CLEAN · FULL POWER
+   FINAL 10/10 · NO CSS IN JS · NO INLINE STYLE REQUIRED
+
    - CSS externo de la vista Facturas
    - Sin <style> inyectado desde JS
    - Sin inline styles necesarios en template
    - Sin ::before sobre <tr>
    - Tabla real blindada
    - Dark/light por tokens
+   - Avatar tones por clases, no style=""
+   - Status / chips por clases, no style=""
    - Compatible con variables.css + light.css
 ========================================================= */
 
@@ -20,8 +24,14 @@
 :where(.facturas-view, .facturas-view-root, [data-facturas-scope]) {
   --fac-row-accent: var(--accent);
   --fac-row-accent-soft: var(--accent-soft);
-  --fac-table-min-width: 1040px;
-  --fac-actions-width: 178px;
+  --fac-row-accent-bg: color-mix(in srgb, var(--fac-row-accent) 10%, transparent);
+
+  --fac-table-min-width: 1080px;
+  --fac-actions-width: 184px;
+
+  --fac-avatar-a: var(--accent);
+  --fac-avatar-b: var(--info);
+  --fac-avatar-bg: linear-gradient(135deg, var(--fac-avatar-a), var(--fac-avatar-b));
 
   display: grid;
   gap: var(--view-section-gap, var(--space-lg));
@@ -45,6 +55,19 @@
   min-inline-size: 0;
 }
 
+.facturas-hidden,
+.facturas-visually-hidden {
+  position: absolute !important;
+  inline-size: 1px !important;
+  block-size: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border: 0 !important;
+  clip: rect(0 0 0 0) !important;
+  white-space: nowrap !important;
+}
+
 
 /* =========================================================
    HERO
@@ -55,7 +78,7 @@
   overflow: hidden;
   isolation: isolate;
   min-inline-size: 0;
-  padding: var(--space-xl) var(--space-xl);
+  padding: var(--space-xl);
   border: 1px solid var(--view-hero-border);
   border-radius: var(--view-hero-radius);
   background:
@@ -169,6 +192,7 @@
 .facturas-btn svg {
   inline-size: 16px;
   block-size: 16px;
+  flex: 0 0 auto;
 }
 
 .facturas-btn:hover {
@@ -203,14 +227,28 @@
     var(--shadow-inner);
 }
 
+.facturas-btn--danger {
+  border-color: var(--border-error);
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.facturas-btn--danger:hover {
+  background: color-mix(in srgb, var(--error-bg) 72%, var(--surface-active));
+  color: var(--error-hover, var(--error));
+}
+
 .facturas-btn:disabled,
+.facturas-btn[disabled],
 .facturas-btn[aria-disabled="true"] {
   pointer-events: none;
   opacity: .54;
   filter: saturate(.75);
 }
 
-.facturas-btn.is-loading {
+.facturas-btn.is-loading,
+.facturas-btn.is-binding-busy,
+.facturas-btn[aria-busy="true"] {
   cursor: wait;
   opacity: .94;
 }
@@ -227,7 +265,8 @@
 .facturas-filter-pill:focus-visible,
 .facturas-sort-pill:focus-visible,
 .facturas-search-input:focus-visible,
-.facturas-search-clear:focus-visible {
+.facturas-search-clear:focus-visible,
+.facturas-row-button:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);
 }
@@ -257,6 +296,31 @@
 .facturas-meta-pill svg {
   inline-size: 14px;
   block-size: 14px;
+  flex: 0 0 auto;
+}
+
+.facturas-meta-pill--success {
+  color: var(--success);
+  background: var(--success-bg);
+  border-color: var(--border-success);
+}
+
+.facturas-meta-pill--warning {
+  color: var(--warning);
+  background: var(--warning-bg);
+  border-color: var(--border-warning);
+}
+
+.facturas-meta-pill--danger {
+  color: var(--error);
+  background: var(--error-bg);
+  border-color: var(--border-error);
+}
+
+.facturas-meta-pill--info {
+  color: var(--info);
+  background: var(--info-bg);
+  border-color: var(--border-info);
 }
 
 
@@ -451,7 +515,8 @@
     background var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard);
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
 }
 
 .facturas-sort-pill {
@@ -480,11 +545,19 @@
 }
 
 .facturas-filter-pill.is-active,
-.facturas-sort-pill.is-active {
+.facturas-sort-pill.is-active,
+.facturas-filter-pill[aria-pressed="true"],
+.facturas-sort-pill[aria-pressed="true"] {
   border-color: transparent;
   background: color-mix(in srgb, var(--accent) 14%, var(--badge-bg));
   color: var(--accent-active);
   box-shadow: 0 8px 20px color-mix(in srgb, var(--accent), transparent 88%);
+}
+
+.facturas-filter-pill:disabled,
+.facturas-sort-pill:disabled {
+  pointer-events: none;
+  opacity: .48;
 }
 
 .facturas-search {
@@ -568,7 +641,8 @@
   transition:
     background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard);
+    border-color var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
 }
 
 .facturas-search-clear:hover {
@@ -580,6 +654,10 @@
 .facturas-search-clear svg {
   inline-size: 13px;
   block-size: 13px;
+}
+
+.facturas-search-clear[hidden] {
+  display: none !important;
 }
 
 
@@ -607,6 +685,14 @@
   justify-content: center;
   font-size: var(--font-xs);
   font-weight: var(--weight-bold);
+  white-space: nowrap;
+}
+
+.facturas-pagination-pages {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3xs);
+  flex-wrap: wrap;
 }
 
 .facturas-pagination-btn {
@@ -629,6 +715,7 @@
     transform var(--duration-fast) var(--ease-standard),
     background var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
     opacity var(--duration-fast) var(--ease-standard);
 }
 
@@ -636,6 +723,14 @@
   transform: translateY(-1px);
   background: var(--btn-secondary-bg-hover);
   border-color: var(--border-strong);
+  color: var(--text-strong);
+}
+
+.facturas-pagination-btn.is-active,
+.facturas-pagination-btn[aria-current="page"] {
+  border-color: var(--accent-border-strong);
+  background: var(--accent-soft);
+  color: var(--accent-active);
 }
 
 .facturas-pagination-btn[disabled],
@@ -660,9 +755,6 @@
 .facturas-table-wrap.is-refreshing .facturas-table-shell {
   opacity: .56;
   filter: blur(.7px);
-  transition:
-    opacity var(--duration-fast) var(--ease-standard),
-    filter var(--duration-fast) var(--ease-standard);
 }
 
 .facturas-table-shell {
@@ -802,25 +894,40 @@
 
 .facturas-table-row {
   --fac-row-accent: var(--accent);
+  --fac-row-accent-soft: var(--accent-soft);
+  cursor: pointer;
 }
 
 .facturas-table-row:hover > td {
   background: var(--data-table-row-hover);
 }
 
+.facturas-table-row.is-selected > td,
+.facturas-table-row[aria-selected="true"] > td {
+  background: color-mix(in srgb, var(--fac-row-accent) 10%, var(--data-table-row-hover));
+}
+
+.facturas-table-row.is-disabled {
+  cursor: not-allowed;
+  opacity: .64;
+}
+
 .facturas-table-row--paid {
   --fac-row-accent: var(--success);
+  --fac-row-accent-soft: var(--success-bg);
 }
 
 .facturas-table-row--pending,
 .facturas-table-row--partial,
 .facturas-table-row--draft {
   --fac-row-accent: var(--warning);
+  --fac-row-accent-soft: var(--warning-bg);
 }
 
 .facturas-table-row--overdue,
 .facturas-table-row--cancelled {
   --fac-row-accent: var(--error);
+  --fac-row-accent-soft: var(--error-bg);
 }
 
 .facturas-cell {
@@ -848,7 +955,9 @@
     transform var(--duration-fast) var(--ease-standard);
 }
 
-.facturas-table-row:hover .facturas-cell--main::before {
+.facturas-table-row:hover .facturas-cell--main::before,
+.facturas-table-row.is-selected .facturas-cell--main::before,
+.facturas-table-row[aria-selected="true"] .facturas-cell--main::before {
   opacity: 1;
   transform: scaleY(1);
 }
@@ -873,10 +982,10 @@
   flex: 0 0 var(--avatar-size-lg);
   overflow: hidden;
   border-radius: var(--radius-pill);
-  background: var(--fac-avatar-bg, var(--avatar-bg));
+  background: var(--fac-avatar-bg);
   box-shadow:
-    0 10px 22px color-mix(in srgb, var(--fac-avatar-b, #000000) 22%, transparent),
-    0 0 0 3px color-mix(in srgb, var(--fac-avatar-a, var(--accent-5)) 24%, transparent),
+    0 10px 22px color-mix(in srgb, var(--fac-avatar-b) 22%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--fac-avatar-a) 24%, transparent),
     var(--shadow-inner);
   transform: translateZ(0);
 }
@@ -925,7 +1034,9 @@
 }
 
 .facturas-avatar[data-fallback="true"] img,
-.facturas-avatar[data-fallback="true"] .facturas-avatar-img {
+.facturas-avatar[data-fallback="true"] .facturas-avatar-img,
+.facturas-avatar--fallback img,
+.facturas-avatar--fallback .facturas-avatar-img {
   display: none !important;
 }
 
@@ -1122,6 +1233,12 @@
   border-color: var(--border-error);
 }
 
+.facturas-mini-badge--incidencia {
+  color: var(--accent-active);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+
 .facturas-cell--status {
   text-align: center;
 }
@@ -1178,6 +1295,19 @@
 .facturas-chip--cancelled {
   color: var(--error);
   background: color-mix(in srgb, var(--error-bg) 78%, var(--surface-active));
+  border-color: var(--border-error);
+}
+
+.facturas-chip--issued,
+.facturas-chip--sent {
+  color: var(--accent-active);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+
+.facturas-chip--void {
+  color: var(--error);
+  background: var(--error-bg);
   border-color: var(--border-error);
 }
 
@@ -1257,7 +1387,8 @@
     transform var(--duration-fast) var(--ease-standard),
     background var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard);
+    color var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
 }
 
 .facturas-incidencia-link svg {
@@ -1276,6 +1407,12 @@
   transform: translateY(-1px);
   background: var(--accent-ghost);
   border-color: var(--accent-border-strong);
+}
+
+.facturas-incidencia-link:disabled,
+.facturas-incidencia-link[aria-disabled="true"] {
+  pointer-events: none;
+  opacity: .55;
 }
 
 .facturas-incidencia-empty {
@@ -1368,7 +1505,9 @@
   transform: translateY(0) scale(.985);
 }
 
-.facturas-action-btn.is-loading {
+.facturas-action-btn.is-loading,
+.facturas-action-btn.is-binding-busy,
+.facturas-action-btn[aria-busy="true"] {
   min-block-size: var(--btn-height-sm);
   block-size: var(--btn-height-sm);
   justify-content: center;
@@ -1377,6 +1516,7 @@
 }
 
 .facturas-action-btn:disabled,
+.facturas-action-btn[disabled],
 .facturas-action-btn[aria-disabled="true"] {
   pointer-events: none;
   opacity: .54;
@@ -1399,6 +1539,17 @@
   border-color: color-mix(in srgb, var(--success) 32%, var(--btn-primary-border));
   background: var(--gradient-success);
   color: var(--text-on-accent);
+}
+
+.facturas-action-btn--danger {
+  border-color: var(--border-error);
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.facturas-action-btn--danger:hover {
+  background: color-mix(in srgb, var(--error-bg) 72%, var(--surface-active));
+  color: var(--error-hover, var(--error));
 }
 
 
@@ -1607,7 +1758,7 @@
   display: grid;
   justify-items: start;
   gap: var(--space-xs);
-  padding: var(--space-xl) var(--space-xl);
+  padding: var(--space-xl);
   border: 1px solid var(--border-error);
   border-radius: var(--card-radius-lg);
   background:
@@ -1659,7 +1810,9 @@
 }
 
 [data-theme="light"] .facturas-filter-pill.is-active,
-[data-theme="light"] .facturas-sort-pill.is-active {
+[data-theme="light"] .facturas-sort-pill.is-active,
+[data-theme="light"] .facturas-filter-pill[aria-pressed="true"],
+[data-theme="light"] .facturas-sort-pill[aria-pressed="true"] {
   color: var(--accent-active);
   background: var(--accent-soft);
   border-color: transparent;
@@ -1701,7 +1854,8 @@
 }
 
 [data-theme="light"] .facturas-chip--overdue,
-[data-theme="light"] .facturas-chip--cancelled {
+[data-theme="light"] .facturas-chip--cancelled,
+[data-theme="light"] .facturas-chip--void {
   color: var(--error-hover);
   background: var(--error-soft);
   border-color: var(--border-error);
@@ -1833,6 +1987,50 @@
   .facturas-filter-pills,
   .facturas-sort-pills {
     margin-inline: -2px;
+  }
+}
+
+
+/* =========================================================
+   CONTAINER QUERIES
+========================================================= */
+
+@container (max-width: 760px) {
+  .facturas-history-head {
+    grid-template-columns: 1fr;
+  }
+
+  .facturas-pagination {
+    justify-content: flex-start;
+  }
+}
+
+
+/* =========================================================
+   PRINT
+========================================================= */
+
+@media print {
+  .facturas-hero-actions,
+  .facturas-filters,
+  .facturas-pagination,
+  .facturas-cell--actions,
+  .facturas-refresh-overlay {
+    display: none !important;
+  }
+
+  .facturas-hero,
+  .facturas-history,
+  .facturas-stat-card {
+    box-shadow: none !important;
+  }
+
+  .facturas-table-shell {
+    overflow: visible !important;
+  }
+
+  .facturas-table {
+    min-inline-size: 0;
   }
 }
 

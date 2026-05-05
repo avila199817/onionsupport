@@ -3,62 +3,41 @@
    Archivo: src/ui/sidebar/state.js
 
    FINAL EXTREME SYSTEM · DESKTOP/MOBILE STABLE · APPLE INDICATOR · 11/10
-   PATCH · ACTIVE ROUTE PRIORITY FIX
-   PATCH · /@usuario/facturas SAFE
-   PATCH · NO STALE ACTIVE ITEM
-   PATCH · ROUTE CANDIDATES ORDERED BY TRUST
-   PATCH · CATALAN/ENGLISH/SPANISH ROUTE ALIASES
-   PATCH · INDICATOR RACE SAFE
+   ROUTE SAFE · INDICATOR RACE SAFE · NO STALE ACTIVE ITEM
+   TOKEN DRIVEN · CSS VAR OWNER · ZERO DUPLICATE DISPATCH
 
    Responsabilidades:
-   - resolver estado visual del sidebar
-   - separar estado desktop y mobile
-   - persistir estado desktop colapsado
-   - no mezclar sidebarOpen mobile con desktop
-   - sincronizar clases / aria / data attrs
-   - mantener tooltips coherentes
-   - evitar auto-collapse fantasma al navegar
-   - soportar fallback DOM / storage seguro
-   - no alterar estado si el shell real está oculto
-   - evitar que sidebar.hidden stale deje el sidebar bloqueado
-   - emitir eventos mínimos, deduplicados y sin doble dispatch
-   - activar indicador activo deslizante tipo Apple
-   - recalcular indicador al cambiar vista / colapsar / expandir / reparar
-   - ocultar indicador durante transición para evitar burbuja flotante
-   - evitar carreras entre router render, resize, auth restore y collapse
-   - state.js es el único dueño autorizado de las CSS vars del indicador
+   - Resolver estado visual del sidebar.
+   - Separar estado desktop y mobile.
+   - Persistir solo estado desktop colapsado.
+   - No mezclar sidebarOpen mobile con desktop.
+   - Sincronizar clases / aria / data attrs.
+   - Mantener tooltips coherentes.
+   - No auto-colapsar al navegar.
+   - No cerrar dropdown salvo shell real oculta.
+   - Evitar que sidebar.hidden stale bloquee el sidebar tras login/router repair.
+   - Emitir eventos mínimos y deduplicados.
+   - Resolver item activo por ruta real antes que por clases stale.
+   - Posicionar indicador Apple mediante CSS vars en .sidebar-menu.
+   - state.js es el único dueño de:
+     --sidebar-indicator-x/y/w/h/opacity.
 
-   FIX CRÍTICO ACTIVE ROUTE:
-   - la URL visible /@usuario/facturas tiene prioridad sobre AppCore stale
-   - los candidatos se evalúan por orden de fiabilidad
-   - /incidencias ya no puede ganar a /facturas por ser string más largo
-   - resolveActiveMenuItem recalcula por ruta antes de confiar en .active viejo
-   - aliases: factures/facturas/invoices, incidencies/incidencias/tickets, etc.
-
-   REGLAS:
+   Reglas:
    - Desktop:
-     - estado fuente: AppCore.state.sidebarDesktopOpen
-     - fallback: storage sidebar-collapsed / sidebarOpen legacy
+     - fuente real: AppCore.state.sidebarDesktopOpen
+     - persistencia: sidebar-collapsed
      - default: abierto
    - Mobile:
-     - estado fuente real: AppCore.state.sidebarMobileOpen
+     - fuente real: AppCore.state.sidebarMobileOpen
      - compat visible: AppCore.state.sidebarOpen
-     - fallback: DOM mobile
      - default: cerrado
    - Navegación:
-     - NO debe abrir/cerrar sidebar
-     - solo resincroniza clases visuales y activo
-   - Dropdown:
-     - syncSidebarState no cierra dropdown salvo shell real oculto
-     - sidebar.hidden stale no debe bloquear apertura posterior
-   - Indicador:
-     - se posiciona con CSS vars sobre .sidebar-menu
-     - usa [aria-current="page"] / data-active="true" / ruta actual
-     - se desactiva si no hay item activo visible
-     - se recalcula con doble frame para esperar layout final
+     - no abre/cierra sidebar
+     - solo resincroniza activo e indicador
    - Eventos:
-     - safeEmit usa AppCore.events si existe; window solo como fallback
-     - evita doble recepción en events.js cuando escucha bus + window
+     - AppCore.events si existe
+     - window solo fallback
+     - nunca doble dispatch
 ========================================================= */
 
 import {
@@ -73,8 +52,10 @@ import {
 } from "./dom.js";
 
 /* =========================================================
-   LOCAL CONSTANTS
+   CONSTANTS
 ========================================================= */
+
+const SOURCE = "SidebarState";
 
 const LEGACY_SIDEBAR_OPEN_STORAGE_KEY = "sidebarOpen";
 
@@ -82,20 +63,54 @@ const SIDEBAR_TRANSITION_MS = 380;
 const INDICATOR_RECALC_DELAY_MS = 32;
 const INDICATOR_SETTLED_DELAY_MS = SIDEBAR_TRANSITION_MS + 36;
 
-const INDICATOR_READY_TRUE = "true";
-const INDICATOR_READY_FALSE = "false";
-
 const ROUTE_CURRENT_VALUE = "page";
 
 const STATE_EMIT_MIN_INTERVAL_MS = 24;
+const ACTIVE_EMIT_MIN_INTERVAL_MS = 24;
 
-const SOURCE = "SidebarState";
+const DATA_TRUE = "true";
+const DATA_FALSE = "false";
+
+const TRANSITION_PROPS = new Set([
+  "inline-size",
+  "width",
+  "max-inline-size",
+  "transform",
+  "margin-inline-start",
+]);
+
+const MENU_ITEM_SELECTOR = [
+  ".menu-item",
+  "a[data-spa]",
+  "a[data-route]",
+  "a[data-href]",
+  "a[data-to]",
+  "[data-sidebar-nav='true']",
+].join(",");
+
+const ACTIVE_ITEM_SELECTOR = [
+  ".menu-item[aria-current='page']",
+  ".menu-item[data-active='true']",
+  ".menu-item.active",
+  ".menu-item.is-active",
+  "[data-sidebar-nav='true'][aria-current='page']",
+  "[data-sidebar-nav='true'][data-active='true']",
+  "[data-sidebar-nav='true'].active",
+  "[data-sidebar-nav='true'].is-active",
+].join(",");
+
+const HIDDEN_ANCESTOR_SELECTOR = [
+  "[hidden]",
+  "[inert]",
+  "[aria-hidden='true']",
+  "[data-role-visible='false']",
+  "[data-admin-visible='false']",
+  "[data-sidebar-visible='false']",
+].join(",");
 
 /*
-  Canonicalización de rutas.
-  Importante:
-  - La clave izquierda puede venir de href/data-route.
-  - La derecha debe ser la ruta canónica interna.
+  La clave izquierda puede venir de href/data-route.
+  La derecha debe ser la ruta canónica interna.
 */
 const ROUTE_ALIASES = Object.freeze({
   "/home": "/",
@@ -150,7 +165,7 @@ const ROUTE_ALIASES = Object.freeze({
 });
 
 /* =========================================================
-   MODULE RUNTIME
+   RUNTIME
 ========================================================= */
 
 let sidebarTransitionTimer = null;
@@ -164,20 +179,19 @@ let indicatorGeneration = 0;
 let lastStateSignature = "";
 let lastStateEmitAt = 0;
 
+let lastActiveSignature = "";
+let lastActiveEmitAt = 0;
+
 let lastIndicatorSignature = "";
 let lastIndicatorReason = "";
-
 let lastTransitionReason = "";
 
 /* =========================================================
-   SAFE HELPERS
+   BASE HELPERS
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 function hasWindow() {
@@ -197,9 +211,7 @@ function nowTs() {
 }
 
 function safeText(value, fallback = "") {
-  if (value === null || value === undefined) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
   const text = String(value)
     .replace(/[\r\n\t]/g, " ")
@@ -220,9 +232,7 @@ function isFunction(value) {
 }
 
 function safeBoolean(value, fallback = null) {
-  if (typeof value === "boolean") {
-    return value;
-  }
+  if (typeof value === "boolean") return value;
 
   if (typeof value === "string") {
     const key = value.trim().toLowerCase();
@@ -246,25 +256,20 @@ function safeBoolean(value, fallback = null) {
 
 function safeNumber(value, fallback = 0) {
   const n = Number(value);
-
-  return Number.isFinite(n)
-    ? n
-    : fallback;
+  return Number.isFinite(n) ? n : fallback;
 }
 
 function clampNumber(value, min = 0, max = Number.POSITIVE_INFINITY) {
   const n = safeNumber(value, min);
+  return Math.min(Math.max(n, min), max);
+}
 
-  return Math.min(
-    Math.max(n, min),
-    max
-  );
+function uniqueArray(values = []) {
+  return Array.from(new Set(values.filter(Boolean)));
 }
 
 function ensureStateBag(AppCore) {
-  if (!AppCore || typeof AppCore !== "object") {
-    return null;
-  }
+  if (!AppCore || typeof AppCore !== "object") return null;
 
   if (!AppCore.state || typeof AppCore.state !== "object") {
     AppCore.state = {};
@@ -283,26 +288,9 @@ function safeWarn(AppCore, ...args) {
   } catch {}
 }
 
-function safeLog(AppCore, ...args) {
-  try {
-    AppCore?.utils?.log?.("[SidebarState]", ...args);
-  } catch {}
-}
-
-/*
-  Importante:
-  No emitimos por AppCore.events Y window a la vez.
-  events.js puede escuchar bus o window; doble dispatch provoca:
-  - doble transición
-  - doble cálculo de indicador
-  - parpadeos
-*/
 function safeEmit(AppCore, eventName = "", payload = {}) {
   const name = safeText(eventName, "");
-
-  if (!name) {
-    return false;
-  }
+  if (!name) return false;
 
   try {
     if (isFunction(AppCore?.events?.emit)) {
@@ -310,11 +298,7 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
       return true;
     }
   } catch (error) {
-    safeWarn(
-      AppCore,
-      `AppCore.events.emit("${name}") falló.`,
-      error
-    );
+    safeWarn(AppCore, `AppCore.events.emit("${name}") falló.`, error);
   }
 
   try {
@@ -324,7 +308,6 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
           detail: payload,
         })
       );
-
       return true;
     }
   } catch {}
@@ -332,110 +315,65 @@ function safeEmit(AppCore, eventName = "", payload = {}) {
   return false;
 }
 
-function getStorage(AppCore = null) {
-  try {
-    const storage = AppCore?.storage;
-
-    if (
-      storage &&
-      (
-        isFunction(storage.get) ||
-        isFunction(storage.set) ||
-        isFunction(storage.remove) ||
-        isFunction(storage.getItem) ||
-        isFunction(storage.setItem) ||
-        isFunction(storage.removeItem)
-      )
-    ) {
-      return storage;
-    }
-  } catch {}
-
-  return null;
-}
-
-function readFromAppStorage(AppCore, key = "") {
-  const cleanKey = safeText(key, "");
-  if (!cleanKey) return null;
+function getHtmlElement() {
+  if (!hasDocument()) return null;
 
   try {
-    const storage = getStorage(AppCore);
-
-    if (isFunction(storage?.get)) {
-      const value = storage.get(cleanKey);
-      const parsed = safeBoolean(value, null);
-
-      if (typeof parsed === "boolean") {
-        return parsed;
-      }
-    }
-
-    if (isFunction(storage?.getItem)) {
-      const value = storage.getItem(cleanKey);
-      const parsed = safeBoolean(value, null);
-
-      if (typeof parsed === "boolean") {
-        return parsed;
-      }
-    }
-  } catch {}
-
-  return null;
-}
-
-function writeToAppStorage(AppCore, key = "", value = false) {
-  const cleanKey = safeText(key, "");
-  if (!cleanKey) return false;
-
-  try {
-    const storage = getStorage(AppCore);
-
-    if (isFunction(storage?.set)) {
-      storage.set(cleanKey, String(Boolean(value)));
-      return true;
-    }
-
-    if (isFunction(storage?.setItem)) {
-      storage.setItem(cleanKey, String(Boolean(value)));
-      return true;
-    }
-  } catch {}
-
-  return false;
-}
-
-function readFromLocalStorage(key = "") {
-  const cleanKey = safeText(key, "");
-
-  if (!cleanKey || !isBrowser()) {
+    return document.documentElement || null;
+  } catch {
     return null;
   }
-
-  try {
-    const value = window.localStorage?.getItem?.(cleanKey);
-    const parsed = safeBoolean(value, null);
-
-    if (typeof parsed === "boolean") {
-      return parsed;
-    }
-  } catch {}
-
-  return null;
 }
 
-function writeToLocalStorage(key = "", value = false) {
-  const cleanKey = safeText(key, "");
-
-  if (!cleanKey || !isBrowser()) {
-    return false;
-  }
+function getBodyElement() {
+  if (!hasDocument()) return null;
 
   try {
-    window.localStorage?.setItem?.(
-      cleanKey,
-      String(Boolean(value))
-    );
+    return document.body || null;
+  } catch {
+    return null;
+  }
+}
 
+function isElement(value) {
+  if (!value) return false;
+
+  try {
+    return typeof Element !== "undefined" && value instanceof Element;
+  } catch {
+    return Boolean(value && isFunction(value.getBoundingClientRect));
+  }
+}
+
+function isConnectedElement(value) {
+  if (!isElement(value)) return false;
+
+  try {
+    return value.isConnected !== false;
+  } catch {
+    return true;
+  }
+}
+
+/* =========================================================
+   DOM MUTATION HELPERS
+========================================================= */
+
+function hasClass(element, className = "") {
+  if (!element || !className) return false;
+
+  try {
+    return element.classList.contains(className);
+  } catch {
+    return false;
+  }
+}
+
+function addClass(element, ...classes) {
+  if (!element) return false;
+
+  try {
+    element.classList.add(...classes.filter(Boolean));
     return true;
   } catch {
     return false;
@@ -446,10 +384,7 @@ function removeClass(element, ...classes) {
   if (!element) return false;
 
   try {
-    element.classList.remove(
-      ...classes.filter(Boolean)
-    );
-
+    element.classList.remove(...classes.filter(Boolean));
     return true;
   } catch {
     return false;
@@ -460,15 +395,21 @@ function toggleClass(element, className = "", enabled = false) {
   if (!element || !className) return false;
 
   try {
-    element.classList.toggle(
-      className,
-      Boolean(enabled)
-    );
-
+    element.classList.toggle(className, Boolean(enabled));
     return true;
   } catch {
     return false;
   }
+}
+
+function toggleClasses(element, classMap = {}) {
+  if (!element) return false;
+
+  for (const [className, enabled] of Object.entries(safeObject(classMap))) {
+    toggleClass(element, className, enabled);
+  }
+
+  return true;
 }
 
 function setAttr(element, name = "", value = "") {
@@ -497,11 +438,7 @@ function setDataset(element, key = "", value = "") {
   if (!element || !key) return false;
 
   try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === ""
-    ) {
+    if (value === null || value === undefined || value === "") {
       delete element.dataset[key];
       return true;
     }
@@ -535,62 +472,24 @@ function removeStyleVar(element, name = "") {
   }
 }
 
-function getHtmlElement() {
-  if (!hasDocument()) return null;
+function setHiddenState(element, hidden = false) {
+  if (!element) return false;
 
   try {
-    return document.documentElement || null;
-  } catch {
-    return null;
-  }
-}
-
-function getBodyElement() {
-  if (!hasDocument()) return null;
-
-  try {
-    return document.body || null;
-  } catch {
-    return null;
-  }
-}
-
-function isElement(value = null) {
-  if (!value) return false;
-
-  try {
-    return typeof Element !== "undefined" && value instanceof Element;
-  } catch {
-    return Boolean(value && typeof value.getBoundingClientRect === "function");
-  }
-}
-
-function isConnectedElement(value = null) {
-  if (!isElement(value)) {
-    return false;
-  }
-
-  try {
-    return value.isConnected !== false;
-  } catch {
+    element.hidden = Boolean(hidden);
+    setAttr(element, "aria-hidden", hidden ? "true" : "false");
     return true;
-  }
-}
-
-function hasClass(element, className = "") {
-  if (!element || !className) return false;
-
-  try {
-    return element.classList.contains(className);
   } catch {
     return false;
   }
 }
+
+/* =========================================================
+   TIMER / RAF HELPERS
+========================================================= */
 
 function safeRequestAnimationFrame(callback) {
-  if (!isFunction(callback)) {
-    return 0;
-  }
+  if (!isFunction(callback)) return 0;
 
   if (!isBrowser()) {
     try {
@@ -620,9 +519,7 @@ function safeRequestAnimationFrame(callback) {
 }
 
 function safeCancelAnimationFrame(id = 0) {
-  if (!id || !isBrowser()) {
-    return false;
-  }
+  if (!id || !isBrowser()) return false;
 
   try {
     window.cancelAnimationFrame(id);
@@ -633,9 +530,7 @@ function safeCancelAnimationFrame(id = 0) {
 }
 
 function safeSetTimeout(callback, ms = 0) {
-  if (!isFunction(callback)) {
-    return null;
-  }
+  if (!isFunction(callback)) return null;
 
   const delay = clampNumber(ms, 0, 60000);
 
@@ -657,9 +552,7 @@ function safeSetTimeout(callback, ms = 0) {
 }
 
 function safeClearTimeout(timer) {
-  if (!timer) {
-    return false;
-  }
+  if (!timer) return false;
 
   try {
     if (hasWindow()) {
@@ -672,73 +565,141 @@ function safeClearTimeout(timer) {
 }
 
 function afterNextPaint(callback) {
-  if (!isFunction(callback)) {
-    return;
-  }
+  if (!isFunction(callback)) return;
 
   safeRequestAnimationFrame(() => {
     safeRequestAnimationFrame(callback);
   });
 }
 
-function clearIndicatorSchedule() {
-  indicatorGeneration += 1;
+/* =========================================================
+   STORAGE
+========================================================= */
 
-  if (indicatorRafA) {
-    safeCancelAnimationFrame(indicatorRafA);
-    indicatorRafA = 0;
-  }
+function getStorage(AppCore = null) {
+  try {
+    const storage = AppCore?.storage;
 
-  if (indicatorRafB) {
-    safeCancelAnimationFrame(indicatorRafB);
-    indicatorRafB = 0;
-  }
+    if (
+      storage &&
+      (
+        isFunction(storage.get) ||
+        isFunction(storage.set) ||
+        isFunction(storage.remove) ||
+        isFunction(storage.getItem) ||
+        isFunction(storage.setItem) ||
+        isFunction(storage.removeItem)
+      )
+    ) {
+      return storage;
+    }
+  } catch {}
 
-  if (indicatorTimer) {
-    safeClearTimeout(indicatorTimer);
-    indicatorTimer = null;
-  }
+  return null;
 }
 
-function buildStateSignature(payload = {}) {
-  const data = safeObject(payload);
+function readFromAppStorage(AppCore, key = "") {
+  const cleanKey = safeText(key, "");
+  if (!cleanKey) return null;
 
-  return [
-    data.open,
-    data.mobile,
-    data.hidden,
-    data.collapsed,
-    data.realShellHidden,
-    data.transitioning,
-  ].map((value) => String(value)).join("|");
+  try {
+    const storage = getStorage(AppCore);
+
+    if (isFunction(storage?.get)) {
+      const parsed = safeBoolean(storage.get(cleanKey), null);
+      if (typeof parsed === "boolean") return parsed;
+    }
+
+    if (isFunction(storage?.getItem)) {
+      const parsed = safeBoolean(storage.getItem(cleanKey), null);
+      if (typeof parsed === "boolean") return parsed;
+    }
+  } catch {}
+
+  return null;
 }
 
-function emitStateSynced(AppCore, payload = {}, options = {}) {
-  const opts = safeObject(options);
-  const signature = buildStateSignature(payload);
-  const ts = nowTs();
+function writeToAppStorage(AppCore, key = "", value = false) {
+  const cleanKey = safeText(key, "");
+  if (!cleanKey) return false;
 
-  const repeated =
-    signature === lastStateSignature &&
-    ts - lastStateEmitAt < STATE_EMIT_MIN_INTERVAL_MS;
+  try {
+    const storage = getStorage(AppCore);
 
-  if (repeated && opts.force !== true) {
+    if (isFunction(storage?.set)) {
+      storage.set(cleanKey, String(Boolean(value)));
+      return true;
+    }
+
+    if (isFunction(storage?.setItem)) {
+      storage.setItem(cleanKey, String(Boolean(value)));
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function readFromLocalStorage(key = "") {
+  const cleanKey = safeText(key, "");
+  if (!cleanKey || !isBrowser()) return null;
+
+  try {
+    const parsed = safeBoolean(window.localStorage?.getItem?.(cleanKey), null);
+    if (typeof parsed === "boolean") return parsed;
+  } catch {}
+
+  return null;
+}
+
+function writeToLocalStorage(key = "", value = false) {
+  const cleanKey = safeText(key, "");
+  if (!cleanKey || !isBrowser()) return false;
+
+  try {
+    window.localStorage?.setItem?.(cleanKey, String(Boolean(value)));
+    return true;
+  } catch {
     return false;
   }
+}
 
-  lastStateSignature = signature;
-  lastStateEmitAt = ts;
+function readSavedSidebarCollapsed(AppCore = null) {
+  const fromAppStorage = readFromAppStorage(AppCore, DESKTOP_COLLAPSED_STORAGE_KEY);
+  if (typeof fromAppStorage === "boolean") return fromAppStorage;
 
-  return safeEmit(
-    AppCore,
-    "sidebar:state:synced",
-    {
-      ...payload,
-      source: SOURCE,
-      owner: "state.js",
-      ts,
-    }
-  );
+  const fromLocalStorage = readFromLocalStorage(DESKTOP_COLLAPSED_STORAGE_KEY);
+  if (typeof fromLocalStorage === "boolean") return fromLocalStorage;
+
+  /*
+    Legacy:
+    sidebarOpen=true  => desktop abierto
+    sidebarOpen=false => desktop colapsado
+  */
+  const legacyFromAppStorage = readFromAppStorage(AppCore, LEGACY_SIDEBAR_OPEN_STORAGE_KEY);
+  if (typeof legacyFromAppStorage === "boolean") return !legacyFromAppStorage;
+
+  const legacyFromLocalStorage = readFromLocalStorage(LEGACY_SIDEBAR_OPEN_STORAGE_KEY);
+  if (typeof legacyFromLocalStorage === "boolean") return !legacyFromLocalStorage;
+
+  return null;
+}
+
+export function getSavedSidebarCollapsed(AppCore = null) {
+  const saved = readSavedSidebarCollapsed(AppCore);
+  return typeof saved === "boolean" ? saved : false;
+}
+
+export function saveSidebarCollapsed(value, AppCore = null) {
+  const collapsed = Boolean(value);
+
+  const appOk = writeToAppStorage(AppCore, DESKTOP_COLLAPSED_STORAGE_KEY, collapsed);
+  const localOk = writeToLocalStorage(DESKTOP_COLLAPSED_STORAGE_KEY, collapsed);
+
+  writeToAppStorage(AppCore, LEGACY_SIDEBAR_OPEN_STORAGE_KEY, !collapsed);
+  writeToLocalStorage(LEGACY_SIDEBAR_OPEN_STORAGE_KEY, !collapsed);
+
+  return Boolean(appOk || localOk);
 }
 
 /* =========================================================
@@ -746,9 +707,7 @@ function emitStateSynced(AppCore, payload = {}, options = {}) {
 ========================================================= */
 
 export function isMobileViewport(breakpoint = MOBILE_BREAKPOINT) {
-  if (!isBrowser()) {
-    return false;
-  }
+  if (!isBrowser()) return false;
 
   try {
     return window.matchMedia(
@@ -760,13 +719,11 @@ export function isMobileViewport(breakpoint = MOBILE_BREAKPOINT) {
 }
 
 /* =========================================================
-   REAL SHELL HIDDEN RESOLUTION
+   SHELL HIDDEN
 ========================================================= */
 
 export function isRealShellHidden(AppCore) {
-  if (!isBrowser()) {
-    return false;
-  }
+  if (!isBrowser()) return false;
 
   const {
     body,
@@ -778,10 +735,8 @@ export function isRealShellHidden(AppCore) {
   const html = getHtmlElement();
 
   /*
-    Importante:
-    NO usamos sidebar.hidden como fuente real.
-    dom.js/isShellHidden() puede considerar sidebar.hidden === true,
-    y eso deja el sidebar bloqueado después de login/auth/router repair.
+    No usamos sidebar.hidden como fuente real.
+    sidebar.hidden puede quedar stale después de login/auth/router repair.
   */
   return Boolean(
     AppCore?.state?.shellVisible === false ||
@@ -821,99 +776,7 @@ function isDomShellHiddenOnly(AppCore) {
 }
 
 /* =========================================================
-   PERSISTENCE
-========================================================= */
-
-function readSavedSidebarCollapsed(AppCore = null) {
-  /*
-    Nueva clave:
-      true  => desktop colapsado
-      false => desktop abierto
-  */
-  const fromAppStorage = readFromAppStorage(
-    AppCore,
-    DESKTOP_COLLAPSED_STORAGE_KEY
-  );
-
-  if (typeof fromAppStorage === "boolean") {
-    return fromAppStorage;
-  }
-
-  const fromLocalStorage = readFromLocalStorage(
-    DESKTOP_COLLAPSED_STORAGE_KEY
-  );
-
-  if (typeof fromLocalStorage === "boolean") {
-    return fromLocalStorage;
-  }
-
-  /*
-    Legacy:
-      sidebarOpen=true  => NO collapsed
-      sidebarOpen=false => collapsed
-  */
-  const legacyFromAppStorage = readFromAppStorage(
-    AppCore,
-    LEGACY_SIDEBAR_OPEN_STORAGE_KEY
-  );
-
-  if (typeof legacyFromAppStorage === "boolean") {
-    return !legacyFromAppStorage;
-  }
-
-  const legacyFromLocalStorage = readFromLocalStorage(
-    LEGACY_SIDEBAR_OPEN_STORAGE_KEY
-  );
-
-  if (typeof legacyFromLocalStorage === "boolean") {
-    return !legacyFromLocalStorage;
-  }
-
-  return null;
-}
-
-export function getSavedSidebarCollapsed(AppCore = null) {
-  const saved = readSavedSidebarCollapsed(AppCore);
-
-  return typeof saved === "boolean"
-    ? saved
-    : false;
-}
-
-export function saveSidebarCollapsed(value, AppCore = null) {
-  const collapsed = Boolean(value);
-
-  const appOk = writeToAppStorage(
-    AppCore,
-    DESKTOP_COLLAPSED_STORAGE_KEY,
-    collapsed
-  );
-
-  const localOk = writeToLocalStorage(
-    DESKTOP_COLLAPSED_STORAGE_KEY,
-    collapsed
-  );
-
-  /*
-    Legacy compat:
-      sidebarOpen = !collapsed
-  */
-  writeToAppStorage(
-    AppCore,
-    LEGACY_SIDEBAR_OPEN_STORAGE_KEY,
-    !collapsed
-  );
-
-  writeToLocalStorage(
-    LEGACY_SIDEBAR_OPEN_STORAGE_KEY,
-    !collapsed
-  );
-
-  return Boolean(appOk || localOk);
-}
-
-/* =========================================================
-   INTERNAL MEMORY
+   STATE MEMORY
 ========================================================= */
 
 function setModeMemory(AppCore, mode = "") {
@@ -921,11 +784,10 @@ function setModeMemory(AppCore, mode = "") {
   if (!state) return false;
 
   const cleanMode = safeText(mode, "");
+  if (!cleanMode) return false;
 
-  if (cleanMode) {
-    state.sidebarMode = cleanMode;
-    state.sidebarLastMode = cleanMode;
-  }
+  state.sidebarMode = cleanMode;
+  state.sidebarLastMode = cleanMode;
 
   return true;
 }
@@ -946,10 +808,6 @@ function setMobileMemory(AppCore, open) {
   const state = ensureStateBag(AppCore);
   if (!state) return false;
 
-  /*
-    Fuente real mobile.
-    sidebarOpen queda como compat visible actual.
-  */
   state.sidebarMobileOpen = Boolean(open);
   state.sidebarOpen = Boolean(open);
 
@@ -962,12 +820,6 @@ function syncSharedState(AppCore, open) {
   const state = ensureStateBag(AppCore);
   if (!state) return false;
 
-  /*
-    Compatibilidad:
-    sidebarOpen representa estado visible actual.
-    Desktop real vive en sidebarDesktopOpen.
-    Mobile real vive en sidebarMobileOpen.
-  */
   state.sidebarOpen = Boolean(open);
 
   return true;
@@ -983,9 +835,7 @@ function resolveDomSidebarOpenState(AppCore) {
     body,
   } = getElements(AppCore);
 
-  if (!sidebar && !body) {
-    return null;
-  }
+  if (!sidebar && !body) return null;
 
   const mobile = isMobileViewport();
 
@@ -994,7 +844,7 @@ function resolveDomSidebarOpenState(AppCore) {
       hasClass(sidebar, "open") ||
       hasClass(sidebar, "is-open") ||
       hasClass(body, "sidebar-open") ||
-      sidebar?.dataset?.open === "true"
+      sidebar?.dataset?.open === DATA_TRUE
     ) {
       return true;
     }
@@ -1006,28 +856,14 @@ function resolveDomSidebarOpenState(AppCore) {
     hasClass(sidebar, "collapsed") ||
     hasClass(sidebar, "is-collapsed") ||
     hasClass(body, "sidebar-collapsed") ||
-    sidebar?.dataset?.collapsed === "true"
+    sidebar?.dataset?.collapsed === DATA_TRUE ||
+    sidebar?.dataset?.open === DATA_FALSE
   ) {
     return false;
   }
 
-  if (
-    sidebar?.dataset?.open === "false" ||
-    sidebar?.dataset?.collapsed === "true"
-  ) {
-    return false;
-  }
-
-  if (sidebar) {
-    return true;
-  }
-
-  return null;
+  return sidebar ? true : null;
 }
-
-/* =========================================================
-   DESIRED OPEN STATE
-========================================================= */
 
 function getDesktopDesiredOpenState(AppCore) {
   const state = ensureStateBag(AppCore);
@@ -1040,10 +876,8 @@ function getDesktopDesiredOpenState(AppCore) {
 
   if (typeof savedCollapsed === "boolean") {
     const open = !savedCollapsed;
-
     setDesktopMemory(AppCore, open);
     syncSharedState(AppCore, open);
-
     return open;
   }
 
@@ -1052,13 +886,9 @@ function getDesktopDesiredOpenState(AppCore) {
   if (typeof fromDom === "boolean") {
     setDesktopMemory(AppCore, fromDom);
     syncSharedState(AppCore, fromDom);
-
     return fromDom;
   }
 
-  /*
-    Default natural desktop.
-  */
   setDesktopMemory(AppCore, true);
   syncSharedState(AppCore, true);
 
@@ -1068,17 +898,13 @@ function getDesktopDesiredOpenState(AppCore) {
 function getMobileDesiredOpenState(AppCore) {
   const state = ensureStateBag(AppCore);
 
-  /*
-    Fuente real mobile. Evita heredar desktopOpen/sidebarOpen
-    cuando cambia el viewport.
-  */
   if (typeof state?.sidebarMobileOpen === "boolean") {
     return state.sidebarMobileOpen;
   }
 
   /*
-    Compat legacy solo si el último modo conocido fue mobile.
-    Así no heredamos sidebarOpen=true de desktop.
+    Solo aceptamos sidebarOpen legacy si el último modo fue mobile.
+    Evita heredar desktopOpen=true al entrar en viewport mobile.
   */
   if (
     state?.sidebarLastMode === "mobile" &&
@@ -1095,9 +921,6 @@ function getMobileDesiredOpenState(AppCore) {
     return fromDom;
   }
 
-  /*
-    Default natural mobile.
-  */
   setMobileMemory(AppCore, false);
 
   return false;
@@ -1110,22 +933,16 @@ export function getDesiredSidebarOpenState(AppCore) {
 }
 
 export function isSidebarCollapsedDesktop(AppCore) {
-  if (isMobileViewport()) {
-    return false;
-  }
-
+  if (isMobileViewport()) return false;
   return !getDesktopDesiredOpenState(AppCore);
 }
 
 /* =========================================================
-   ROUTE / MENU HELPERS
+   ROUTE HELPERS
 ========================================================= */
 
 function stripPublicUsernamePrefix(pathname = "/") {
-  const value =
-    safeText(pathname, "/")
-      .replace(/^\/@[^/]+(?=\/|$)/i, "");
-
+  const value = safeText(pathname, "/").replace(/^\/@[^/]+(?=\/|$)/i, "");
   return value || "/";
 }
 
@@ -1142,18 +959,18 @@ function isUnsafeRouteValue(value = "") {
   );
 }
 
+function isHashOnlyRouteValue(value = "") {
+  const raw = safeText(value, "");
+  return raw === "#" || /^#[A-Za-z0-9_-]+$/.test(raw);
+}
+
 function isExternalHttpUrl(value = "") {
   const raw = safeText(value, "");
 
-  if (!/^https?:\/\//i.test(raw)) {
-    return false;
-  }
+  if (!/^https?:\/\//i.test(raw)) return false;
 
   try {
-    const origin = isBrowser()
-      ? window.location.origin
-      : "http://localhost";
-
+    const origin = isBrowser() ? window.location.origin : "http://localhost";
     return new URL(raw, origin).origin !== origin;
   } catch {
     return true;
@@ -1168,10 +985,7 @@ function applyRouteAlias(pathname = "/") {
   }
 
   for (const [from, to] of Object.entries(ROUTE_ALIASES)) {
-    if (
-      from !== "/" &&
-      clean.startsWith(`${from}/`)
-    ) {
+    if (from !== "/" && clean.startsWith(`${from}/`)) {
       return `${to}${clean.slice(from.length)}`;
     }
   }
@@ -1180,18 +994,14 @@ function applyRouteAlias(pathname = "/") {
 }
 
 function normalizePathLike(path = "/") {
-  let value =
-    safeText(path, "/")
-      .replace(/\\/g, "/")
-      .trim();
+  let value = safeText(path, "/").replace(/\\/g, "/").trim();
 
-  if (!value) {
-    return "/";
-  }
+  if (!value) return "/";
 
   if (
     isUnsafeRouteValue(value) ||
-    isExternalHttpUrl(value)
+    isExternalHttpUrl(value) ||
+    isHashOnlyRouteValue(value)
   ) {
     return "";
   }
@@ -1199,9 +1009,7 @@ function normalizePathLike(path = "/") {
   try {
     const url = new URL(
       value,
-      isBrowser()
-        ? window.location.origin
-        : "http://localhost"
+      isBrowser() ? window.location.origin : "http://localhost"
     );
 
     if (
@@ -1212,13 +1020,7 @@ function normalizePathLike(path = "/") {
       return "";
     }
 
-    if (
-      url.hash &&
-      (
-        url.hash.startsWith("#/") ||
-        url.hash.startsWith("#!")
-      )
-    ) {
+    if (url.hash && (url.hash.startsWith("#/") || url.hash.startsWith("#!"))) {
       value = url.hash
         .replace(/^#!\/?/, "/")
         .replace(/^#\/?/, "/");
@@ -1226,10 +1028,7 @@ function normalizePathLike(path = "/") {
       value = `${url.pathname || "/"}${url.search || ""}`;
     }
   } catch {
-    if (
-      value.startsWith("#/") ||
-      value.startsWith("#!")
-    ) {
+    if (value.startsWith("#/") || value.startsWith("#!")) {
       value = value
         .replace(/^#!\/?/, "/")
         .replace(/^#\/?/, "/");
@@ -1245,42 +1044,32 @@ function normalizePathLike(path = "/") {
   value = value.replace(/\/{2,}/g, "/");
 
   const queryIndex = value.indexOf("?");
-  const pathname = queryIndex >= 0 ? value.slice(0, queryIndex) : value;
+  const rawPathname = queryIndex >= 0 ? value.slice(0, queryIndex) : value;
   const query = queryIndex >= 0 ? value.slice(queryIndex + 1) : "";
 
-  let cleanPathname =
-    stripPublicUsernamePrefix(pathname || "/");
+  let pathname = stripPublicUsernamePrefix(rawPathname || "/");
 
-  if (
-    cleanPathname.length > 1 &&
-    cleanPathname.endsWith("/")
-  ) {
-    cleanPathname = cleanPathname.replace(/\/+$/g, "") || "/";
+  if (pathname.length > 1 && pathname.endsWith("/")) {
+    pathname = pathname.replace(/\/+$/g, "") || "/";
   }
 
-  cleanPathname = applyRouteAlias(cleanPathname);
+  pathname = applyRouteAlias(pathname);
 
-  return query
-    ? `${cleanPathname}?${query}`
-    : cleanPathname;
+  return query ? `${pathname}?${query}` : pathname;
 }
 
 function stripQuery(path = "/") {
-  return normalizePathLike(path).split("?")[0] || "/";
+  const normalized = normalizePathLike(path);
+  return normalized.split("?")[0] || "/";
 }
 
 function getBrowserPublicPath() {
-  if (!isBrowser()) {
-    return "/";
-  }
+  if (!isBrowser()) return "/";
 
   try {
     const hash = safeText(window.location.hash, "");
 
-    if (
-      hash.startsWith("#/") ||
-      hash.startsWith("#!")
-    ) {
+    if (hash.startsWith("#/") || hash.startsWith("#!")) {
       return normalizePathLike(
         hash
           .replace(/^#!\/?/, "/")
@@ -1341,40 +1130,24 @@ function shouldPreferExplicitRoute(options = {}) {
   const opts = safeObject(options);
   const reason = safeText(opts.reason, "").toLowerCase();
 
-  if (opts.preferExplicitRoute === true) {
-    return true;
-  }
-
-  if (opts.forceRoute === true) {
-    return true;
-  }
-
-  if (opts.activeItem) {
-    return true;
-  }
-
-  if (
-    reason.includes("navigation") ||
-    reason.includes("navigate") ||
-    reason.includes("sidebar-ui:active-route") ||
-    reason.includes("sync-active-route") ||
-    reason.includes("open-activity") ||
-    reason.includes("route-marker") ||
-    reason.includes("click")
-  ) {
-    return true;
-  }
-
-  return false;
+  return Boolean(
+    opts.preferExplicitRoute === true ||
+      opts.forceRoute === true ||
+      opts.activeItem ||
+      reason.includes("navigation") ||
+      reason.includes("navigate") ||
+      reason.includes("sidebar-ui:active-route") ||
+      reason.includes("sync-active-route") ||
+      reason.includes("open-activity") ||
+      reason.includes("route-marker") ||
+      reason.includes("click")
+  );
 }
 
 function pushUniquePath(list, value) {
   const normalized = normalizePathLike(value || "");
 
-  if (
-    normalized &&
-    !list.includes(normalized)
-  ) {
+  if (normalized && !list.includes(normalized)) {
     list.push(normalized);
   }
 
@@ -1385,25 +1158,21 @@ function getCurrentPublicPathCandidates(AppCore, options = {}) {
   const opts = safeObject(options);
   const candidates = [];
 
-  const explicitCandidates =
-    getExplicitPathCandidates(opts);
-
-  const browserPath =
-    getBrowserPublicPath();
+  const explicit = getExplicitPathCandidates(opts);
+  const browserPath = getBrowserPublicPath();
 
   /*
-    FIX CRÍTICO:
-    - En navegación explícita: explicit first.
-    - En sync normal tras router/render: browser first.
-    Esto evita que AppCore.state.publicPath stale (/incidencias)
-    gane sobre window.location (/@cristian/facturas).
+    Orden crítico:
+    - navegación explícita: payload primero
+    - sync normal: window.location primero
+    - AppCore.state al final porque puede venir stale
   */
   if (shouldPreferExplicitRoute(opts)) {
-    explicitCandidates.forEach((value) => pushUniquePath(candidates, value));
+    explicit.forEach((value) => pushUniquePath(candidates, value));
     pushUniquePath(candidates, browserPath);
   } else {
     pushUniquePath(candidates, browserPath);
-    explicitCandidates.forEach((value) => pushUniquePath(candidates, value));
+    explicit.forEach((value) => pushUniquePath(candidates, value));
   }
 
   pushUniquePath(candidates, AppCore?.state?.publicPath);
@@ -1423,19 +1192,15 @@ function getCurrentPublicPathCandidates(AppCore, options = {}) {
     pushUniquePath(candidates, AppCore?.router?.getCurrentPath?.());
   } catch {}
 
-  return candidates.length
-    ? candidates
-    : ["/"];
+  return uniqueArray(candidates).length ? uniqueArray(candidates) : ["/"];
 }
 
-function getCurrentPublicPath(AppCore) {
-  return getCurrentPublicPathCandidates(AppCore)[0] || "/";
+function getCurrentPublicPath(AppCore, options = {}) {
+  return getCurrentPublicPathCandidates(AppCore, options)[0] || "/";
 }
 
 function getMenuItemRoute(item = null) {
-  if (!item) {
-    return "";
-  }
+  if (!item) return "";
 
   const raw = safeText(
     item.dataset?.route ||
@@ -1452,7 +1217,8 @@ function getMenuItemRoute(item = null) {
   if (
     !raw ||
     isUnsafeRouteValue(raw) ||
-    isExternalHttpUrl(raw)
+    isExternalHttpUrl(raw) ||
+    isHashOnlyRouteValue(raw)
   ) {
     return "";
   }
@@ -1461,33 +1227,12 @@ function getMenuItemRoute(item = null) {
 }
 
 function isElementVisible(element = null) {
-  if (!element || !isBrowser()) {
-    return false;
-  }
+  if (!element || !isBrowser()) return false;
 
   try {
-    if (!isConnectedElement(element)) {
-      return false;
-    }
-
-    if (element.hidden) {
-      return false;
-    }
-
-    if (
-      element.closest?.(
-        [
-          "[hidden]",
-          "[inert]",
-          "[aria-hidden='true']",
-          "[data-role-visible='false']",
-          "[data-admin-visible='false']",
-          "[data-sidebar-visible='false']",
-        ].join(",")
-      )
-    ) {
-      return false;
-    }
+    if (!isConnectedElement(element)) return false;
+    if (element.hidden) return false;
+    if (element.closest?.(HIDDEN_ANCESTOR_SELECTOR)) return false;
 
     const style = window.getComputedStyle(element);
 
@@ -1501,38 +1246,18 @@ function isElementVisible(element = null) {
 
     const rect = element.getBoundingClientRect();
 
-    return (
-      rect.width > 0 &&
-      rect.height > 0
-    );
+    return rect.width > 0 && rect.height > 0;
   } catch {
     return true;
   }
 }
 
 function getMenuItems(sidebarMenu = null) {
-  if (!sidebarMenu) {
-    return [];
-  }
+  if (!sidebarMenu) return [];
 
   try {
-    return Array.from(
-      sidebarMenu.querySelectorAll(
-        [
-          ".menu-item",
-          "a[data-spa]",
-          "a[data-route]",
-          "a[data-href]",
-          "a[data-to]",
-          "[data-sidebar-nav='true']",
-        ].join(",")
-      )
-    ).filter((item, index, array) => {
-      return (
-        item &&
-        array.indexOf(item) === index
-      );
-    });
+    return Array.from(sidebarMenu.querySelectorAll(MENU_ITEM_SELECTOR))
+      .filter((item, index, array) => item && array.indexOf(item) === index);
   } catch {
     return [];
   }
@@ -1543,12 +1268,7 @@ function clearActiveItemClasses(sidebarMenu = null) {
 
   for (const item of items) {
     try {
-      item.classList.remove(
-        "active",
-        "is-active",
-        "router-active"
-      );
-
+      item.classList.remove("active", "is-active", "router-active");
       item.removeAttribute("aria-current");
       delete item.dataset.active;
       delete item.dataset.matchedRoute;
@@ -1561,15 +1281,12 @@ function clearActiveItemClasses(sidebarMenu = null) {
 }
 
 function setActiveItemClasses(item = null) {
-  if (!item) {
-    return false;
-  }
+  if (!item) return false;
 
   try {
     item.classList.add("active", "is-active", "router-active");
     item.setAttribute("aria-current", ROUTE_CURRENT_VALUE);
-    item.dataset.active = "true";
-
+    item.dataset.active = DATA_TRUE;
     return true;
   } catch {
     return false;
@@ -1580,32 +1297,19 @@ function scoreRouteMatch(routePath = "/", currentPath = "/") {
   const route = normalizePathLike(routePath);
   const current = normalizePathLike(currentPath);
 
+  if (!route || !current) return -1;
+
   const routeClean = stripQuery(route);
   const currentClean = stripQuery(current);
 
-  if (!route || !current) {
-    return -1;
-  }
+  if (route === current) return 10000;
+  if (routeClean === currentClean) return 9000;
 
-  if (route === current) {
-    return 10000;
-  }
-
-  if (routeClean === currentClean) {
-    return 9000;
-  }
-
-  if (
-    routeClean !== "/" &&
-    currentClean.startsWith(`${routeClean}/`)
-  ) {
+  if (routeClean !== "/" && currentClean.startsWith(`${routeClean}/`)) {
     return 5000 + routeClean.length;
   }
 
-  if (
-    routeClean === "/" &&
-    currentClean === "/"
-  ) {
+  if (routeClean === "/" && currentClean === "/") {
     return 1000;
   }
 
@@ -1620,21 +1324,13 @@ function findBestMenuItemForSinglePath(sidebarMenu = null, current = "/") {
   let bestRoute = "";
 
   for (const item of items) {
-    if (!isElementVisible(item)) {
-      continue;
-    }
+    if (!isElementVisible(item)) continue;
 
     const route = getMenuItemRoute(item);
-
-    if (!route) {
-      continue;
-    }
+    if (!route) continue;
 
     const routePath = normalizePathLike(route);
-
-    if (!routePath) {
-      continue;
-    }
+    if (!routePath) continue;
 
     const score = scoreRouteMatch(routePath, current);
 
@@ -1645,9 +1341,7 @@ function findBestMenuItemForSinglePath(sidebarMenu = null, current = "/") {
     }
   }
 
-  if (!best || bestScore < 0) {
-    return null;
-  }
+  if (!best || bestScore < 0) return null;
 
   try {
     best.dataset.matchedRoute = bestRoute;
@@ -1658,43 +1352,21 @@ function findBestMenuItemForSinglePath(sidebarMenu = null, current = "/") {
 }
 
 function findBestMenuItemForCurrentPath(AppCore, sidebarMenu = null, options = {}) {
-  if (!sidebarMenu) {
-    return null;
-  }
+  if (!sidebarMenu) return null;
 
-  const currentPaths =
-    getCurrentPublicPathCandidates(
-      AppCore,
-      options
-    )
-      .map((path) => normalizePathLike(path || ""))
-      .filter(Boolean);
+  const paths = getCurrentPublicPathCandidates(AppCore, options)
+    .map((path) => normalizePathLike(path || ""))
+    .filter(Boolean);
 
-  if (!currentPaths.length) {
-    return null;
-  }
+  if (!paths.length) return null;
 
   /*
-    FIX CRÍTICO:
-    Los candidatos de ruta tienen prioridad absoluta por orden.
-
-    Antes:
-      /incidencias podía ganar a /facturas porque era más largo.
-
-    Ahora:
-      - Se prueba primero el candidato más fiable.
-      - Si encuentra match, se devuelve inmediatamente.
-      - Solo si no hay match se prueba el siguiente candidato.
-
-    Ejemplo:
-      currentPaths[0] = /facturas
-      currentPaths[1] = /incidencias stale
-
-      Gana /facturas siempre.
+    No elegimos el match global más largo.
+    Probamos candidatos por fiabilidad y devolvemos el primer match.
+    Así /facturas visible gana a AppCore stale /incidencias.
   */
-  for (let index = 0; index < currentPaths.length; index += 1) {
-    const current = currentPaths[index];
-    const best = findBestMenuItemForSinglePath(sidebarMenu, current);
+  for (let index = 0; index < paths.length; index += 1) {
+    const best = findBestMenuItemForSinglePath(sidebarMenu, paths[index]);
 
     if (best) {
       try {
@@ -1709,7 +1381,79 @@ function findBestMenuItemForCurrentPath(AppCore, sidebarMenu = null, options = {
 }
 
 /* =========================================================
-   ACTIVE ROUTE / MENU INDICATOR
+   DEDUPED EVENT EMITTERS
+========================================================= */
+
+function buildStateSignature(payload = {}) {
+  const data = safeObject(payload);
+
+  return [
+    data.open,
+    data.mobile,
+    data.hidden,
+    data.collapsed,
+    data.realShellHidden,
+    data.transitioning,
+  ].map((value) => String(value)).join("|");
+}
+
+function emitStateSynced(AppCore, payload = {}, options = {}) {
+  const opts = safeObject(options);
+  const signature = buildStateSignature(payload);
+  const ts = nowTs();
+
+  const repeated =
+    signature === lastStateSignature &&
+    ts - lastStateEmitAt < STATE_EMIT_MIN_INTERVAL_MS;
+
+  if (repeated && opts.force !== true) return false;
+
+  lastStateSignature = signature;
+  lastStateEmitAt = ts;
+
+  return safeEmit(AppCore, "sidebar:state:synced", {
+    ...payload,
+    source: SOURCE,
+    owner: "state.js",
+    ts,
+  });
+}
+
+function buildActiveSignature(payload = {}) {
+  const data = safeObject(payload);
+
+  return [
+    data.matched,
+    data.route,
+    data.matchedRoute,
+    data.matchedCurrent,
+    data.matchCandidateIndex,
+  ].map((value) => String(value)).join("|");
+}
+
+function emitActiveSynced(AppCore, payload = {}, options = {}) {
+  const opts = safeObject(options);
+  const signature = buildActiveSignature(payload);
+  const ts = nowTs();
+
+  const repeated =
+    signature === lastActiveSignature &&
+    ts - lastActiveEmitAt < ACTIVE_EMIT_MIN_INTERVAL_MS;
+
+  if (repeated && opts.force !== true) return false;
+
+  lastActiveSignature = signature;
+  lastActiveEmitAt = ts;
+
+  return safeEmit(AppCore, "sidebar:active:item:synced", {
+    ...payload,
+    source: SOURCE,
+    ts,
+  });
+}
+
+/* =========================================================
+   ACTIVE ITEM
 ========================================================= */
 
 export function syncActiveMenuItem(AppCore, options = {}) {
@@ -1717,21 +1461,14 @@ export function syncActiveMenuItem(AppCore, options = {}) {
     sidebarMenu,
   } = getElements(AppCore);
 
-  if (!sidebarMenu) {
-    return null;
-  }
+  if (!sidebarMenu) return null;
 
   const opts = safeObject(options);
-  const shouldMutate = opts.mutate !== false;
+  const mutate = opts.mutate !== false;
 
-  const best =
-    findBestMenuItemForCurrentPath(
-      AppCore,
-      sidebarMenu,
-      opts
-    );
+  const best = findBestMenuItemForCurrentPath(AppCore, sidebarMenu, opts);
 
-  if (shouldMutate) {
+  if (mutate) {
     clearActiveItemClasses(sidebarMenu);
 
     if (best) {
@@ -1739,145 +1476,66 @@ export function syncActiveMenuItem(AppCore, options = {}) {
     }
   }
 
-  safeEmit(AppCore, "sidebar:active:item:synced", {
-    source: SOURCE,
+  const payload = {
     reason: safeText(opts.reason, "sync-active-item"),
     matched: Boolean(best),
     route: getMenuItemRoute(best),
     matchedRoute: best?.dataset?.matchedRoute || "",
     matchedCurrent: best?.dataset?.matchedCurrent || "",
     matchCandidateIndex: best?.dataset?.matchCandidateIndex || "",
-    currentPublicPath: getCurrentPublicPath(AppCore),
+    currentPublicPath: getCurrentPublicPath(AppCore, opts),
     candidates: getCurrentPublicPathCandidates(AppCore, opts),
+  };
+
+  emitActiveSynced(AppCore, payload, {
+    force: opts.forceEmit === true,
   });
 
   return best;
 }
 
 function resolveActiveMenuItem(AppCore, sidebarMenu = null, options = {}) {
-  if (!sidebarMenu) {
-    return null;
-  }
+  if (!sidebarMenu) return null;
 
-  /*
-    FIX CRÍTICO:
-    Primero recalculamos por ruta.
-    No confiamos en .active / aria-current porque puede venir stale
-    de una navegación anterior.
-  */
   const synced = syncActiveMenuItem(AppCore, {
     ...safeObject(options),
     mutate: true,
-    reason: safeText(
-      options?.reason,
-      "resolve-active-menu-item:route-sync"
-    ),
+    reason: safeText(options?.reason, "resolve-active-menu-item"),
   });
 
   if (synced && isElementVisible(synced)) {
     return synced;
   }
 
-  const directSelectors = [
-    ".menu-item[aria-current='page']",
-    ".menu-item[data-active='true']",
-    ".menu-item.active",
-    ".menu-item.is-active",
-    "[data-sidebar-nav='true'][aria-current='page']",
-    "[data-sidebar-nav='true'][data-active='true']",
-    "[data-sidebar-nav='true'].active",
-    "[data-sidebar-nav='true'].is-active",
-  ];
-
-  for (const selector of directSelectors) {
-    try {
-      const candidate = sidebarMenu.querySelector(selector);
-
-      if (candidate && isElementVisible(candidate)) {
-        return candidate;
-      }
-    } catch {}
+  try {
+    const candidate = sidebarMenu.querySelector(ACTIVE_ITEM_SELECTOR);
+    return candidate && isElementVisible(candidate) ? candidate : null;
+  } catch {
+    return null;
   }
-
-  return null;
 }
 
-function isSidebarTransitioning(AppCore) {
-  const {
-    sidebar,
-    sidebarMenu,
-    body,
-  } = getElements(AppCore);
+/* =========================================================
+   INDICATOR SCHEDULING
+========================================================= */
 
-  const html = getHtmlElement();
+function clearIndicatorSchedule() {
+  indicatorGeneration += 1;
 
-  return Boolean(
-    sidebarTransitionTimer ||
-      hasClass(sidebar, "is-transitioning") ||
-      hasClass(sidebarMenu, "is-transitioning") ||
-      hasClass(body, "sidebar-transitioning") ||
-      hasClass(html, "sidebar-transitioning") ||
-      sidebar?.dataset?.transitioning === "true" ||
-      sidebarMenu?.dataset?.transitioning === "true" ||
-      body?.dataset?.sidebarTransitioning === "true"
-  );
-}
-
-function disableActiveMenuIndicator(AppCore, reason = "disabled") {
-  clearIndicatorSchedule();
-
-  const {
-    sidebarMenu,
-  } = getElements(AppCore);
-
-  if (!sidebarMenu) {
-    return false;
+  if (indicatorRafA) {
+    safeCancelAnimationFrame(indicatorRafA);
+    indicatorRafA = 0;
   }
 
-  setDataset(sidebarMenu, "indicatorReady", INDICATOR_READY_FALSE);
-  setDataset(sidebarMenu, "indicatorReason", reason);
-  setStyleVar(sidebarMenu, "--sidebar-indicator-opacity", "0");
-
-  lastIndicatorReason = reason;
-
-  safeEmit(AppCore, "sidebar:indicator:disabled", {
-    source: SOURCE,
-    reason,
-  });
-
-  return true;
-}
-
-function clearActiveMenuIndicator(AppCore, reason = "clear") {
-  clearIndicatorSchedule();
-
-  const {
-    sidebarMenu,
-  } = getElements(AppCore);
-
-  if (!sidebarMenu) {
-    return false;
+  if (indicatorRafB) {
+    safeCancelAnimationFrame(indicatorRafB);
+    indicatorRafB = 0;
   }
 
-  setDataset(sidebarMenu, "indicatorReady", INDICATOR_READY_FALSE);
-  setDataset(sidebarMenu, "indicatorReason", reason);
-  setDataset(sidebarMenu, "indicatorRoute", "");
-
-  removeStyleVar(sidebarMenu, "--sidebar-indicator-x");
-  removeStyleVar(sidebarMenu, "--sidebar-indicator-y");
-  removeStyleVar(sidebarMenu, "--sidebar-indicator-w");
-  removeStyleVar(sidebarMenu, "--sidebar-indicator-h");
-  setStyleVar(sidebarMenu, "--sidebar-indicator-opacity", "0");
-
-  lastIndicatorSignature = "";
-  lastIndicatorReason = reason;
-
-  safeEmit(AppCore, "sidebar:indicator:cleared", {
-    source: SOURCE,
-    reason,
-  });
-
-  return true;
+  if (indicatorTimer) {
+    safeClearTimeout(indicatorTimer);
+    indicatorTimer = null;
+  }
 }
 
 function buildIndicatorSignature({
@@ -1900,14 +1558,85 @@ function buildIndicatorSignature({
   ].join("|");
 }
 
+function isSidebarTransitioning(AppCore) {
+  const {
+    sidebar,
+    sidebarMenu,
+    body,
+  } = getElements(AppCore);
+
+  const html = getHtmlElement();
+
+  return Boolean(
+    sidebarTransitionTimer ||
+      hasClass(sidebar, "is-transitioning") ||
+      hasClass(sidebarMenu, "is-transitioning") ||
+      hasClass(body, "sidebar-transitioning") ||
+      hasClass(html, "sidebar-transitioning") ||
+      sidebar?.dataset?.transitioning === DATA_TRUE ||
+      sidebarMenu?.dataset?.transitioning === DATA_TRUE ||
+      body?.dataset?.sidebarTransitioning === DATA_TRUE
+  );
+}
+
+function disableActiveMenuIndicator(AppCore, reason = "disabled") {
+  clearIndicatorSchedule();
+
+  const {
+    sidebarMenu,
+  } = getElements(AppCore);
+
+  if (!sidebarMenu) return false;
+
+  setDataset(sidebarMenu, "indicatorReady", DATA_FALSE);
+  setDataset(sidebarMenu, "indicatorReason", reason);
+  setStyleVar(sidebarMenu, "--sidebar-indicator-opacity", "0");
+
+  lastIndicatorReason = reason;
+
+  safeEmit(AppCore, "sidebar:indicator:disabled", {
+    source: SOURCE,
+    reason,
+  });
+
+  return true;
+}
+
+function clearActiveMenuIndicator(AppCore, reason = "clear") {
+  clearIndicatorSchedule();
+
+  const {
+    sidebarMenu,
+  } = getElements(AppCore);
+
+  if (!sidebarMenu) return false;
+
+  setDataset(sidebarMenu, "indicatorReady", DATA_FALSE);
+  setDataset(sidebarMenu, "indicatorReason", reason);
+  setDataset(sidebarMenu, "indicatorRoute", "");
+  setDataset(sidebarMenu, "indicatorCurrent", "");
+
+  removeStyleVar(sidebarMenu, "--sidebar-indicator-x");
+  removeStyleVar(sidebarMenu, "--sidebar-indicator-y");
+  removeStyleVar(sidebarMenu, "--sidebar-indicator-w");
+  removeStyleVar(sidebarMenu, "--sidebar-indicator-h");
+  setStyleVar(sidebarMenu, "--sidebar-indicator-opacity", "0");
+
+  lastIndicatorSignature = "";
+  lastIndicatorReason = reason;
+
+  safeEmit(AppCore, "sidebar:indicator:cleared", {
+    source: SOURCE,
+    reason,
+  });
+
+  return true;
+}
+
 export function syncActiveMenuIndicator(AppCore, options = {}) {
   const opts = safeObject(options);
-
-  const reason =
-    safeText(opts.reason, "sync");
-
-  const reveal =
-    opts.reveal !== false;
+  const reason = safeText(opts.reason, "sync");
+  const reveal = opts.reveal !== false;
 
   const {
     sidebar,
@@ -1920,20 +1649,11 @@ export function syncActiveMenuIndicator(AppCore, options = {}) {
     !sidebarMenu ||
     isRealShellHidden(AppCore)
   ) {
-    return clearActiveMenuIndicator(
-      AppCore,
-      `${reason}:unavailable`
-    );
+    return clearActiveMenuIndicator(AppCore, `${reason}:unavailable`);
   }
 
-  if (
-    isSidebarTransitioning(AppCore) &&
-    opts.force !== true
-  ) {
-    return disableActiveMenuIndicator(
-      AppCore,
-      `${reason}:transitioning`
-    );
+  if (isSidebarTransitioning(AppCore) && opts.force !== true) {
+    return disableActiveMenuIndicator(AppCore, `${reason}:transitioning`);
   }
 
   let activeItem = opts.activeItem || null;
@@ -1943,19 +1663,11 @@ export function syncActiveMenuIndicator(AppCore, options = {}) {
     !isConnectedElement(activeItem) ||
     !isElementVisible(activeItem)
   ) {
-    activeItem =
-      resolveActiveMenuItem(
-        AppCore,
-        sidebarMenu,
-        opts
-      );
+    activeItem = resolveActiveMenuItem(AppCore, sidebarMenu, opts);
   }
 
   if (!activeItem || !isElementVisible(activeItem)) {
-    return disableActiveMenuIndicator(
-      AppCore,
-      `${reason}:no-active-item`
-    );
+    return disableActiveMenuIndicator(AppCore, `${reason}:no-active-item`);
   }
 
   try {
@@ -1969,55 +1681,45 @@ export function syncActiveMenuIndicator(AppCore, options = {}) {
       itemRect.width <= 0 ||
       itemRect.height <= 0
     ) {
-      return disableActiveMenuIndicator(
-        AppCore,
-        `${reason}:bad-rect`
-      );
+      return disableActiveMenuIndicator(AppCore, `${reason}:bad-rect`);
     }
 
-    const menuWidth =
-      clampNumber(menuRect.width, 0, 10000);
+    const menuWidth = clampNumber(menuRect.width, 0, 10000);
 
-    const x =
-      clampNumber(
-        itemRect.left - menuRect.left,
-        0,
-        Math.max(menuWidth, itemRect.width)
-      );
+    const x = clampNumber(
+      itemRect.left - menuRect.left,
+      0,
+      Math.max(menuWidth, itemRect.width)
+    );
 
-    const y =
-      clampNumber(
-        itemRect.top - menuRect.top,
-        0,
-        100000
-      );
+    const y = clampNumber(
+      itemRect.top - menuRect.top,
+      0,
+      100000
+    );
 
-    const width =
-      clampNumber(
-        itemRect.width,
-        1,
-        Math.max(menuWidth, itemRect.width)
-      );
+    const width = clampNumber(
+      itemRect.width,
+      1,
+      Math.max(menuWidth, itemRect.width)
+    );
 
-    const height =
-      clampNumber(
-        itemRect.height,
-        1,
-        1000
-      );
+    const height = clampNumber(
+      itemRect.height,
+      1,
+      1000
+    );
 
-    const route =
-      normalizePathLike(
-        activeItem.dataset?.matchedRoute ||
-          getMenuItemRoute(activeItem) ||
-          ""
-      );
+    const route = normalizePathLike(
+      activeItem.dataset?.matchedRoute ||
+        getMenuItemRoute(activeItem) ||
+        ""
+    );
 
-    const current =
-      normalizePathLike(
-        activeItem.dataset?.matchedCurrent ||
-          getCurrentPublicPath(AppCore)
-      );
+    const current = normalizePathLike(
+      activeItem.dataset?.matchedCurrent ||
+        getCurrentPublicPath(AppCore, opts)
+    );
 
     const signature = buildIndicatorSignature({
       route,
@@ -2029,10 +1731,6 @@ export function syncActiveMenuIndicator(AppCore, options = {}) {
       reveal,
     });
 
-    /*
-      Si no cambió nada, no reescribimos vars.
-      Reduce parpadeo cuando router/events/index piden sync seguido.
-    */
     if (
       signature === lastIndicatorSignature &&
       reason === lastIndicatorReason
@@ -2046,7 +1744,7 @@ export function syncActiveMenuIndicator(AppCore, options = {}) {
     setStyleVar(sidebarMenu, "--sidebar-indicator-h", `${Math.round(height)}px`);
     setStyleVar(sidebarMenu, "--sidebar-indicator-opacity", reveal ? "1" : "0");
 
-    setDataset(sidebarMenu, "indicatorReady", INDICATOR_READY_TRUE);
+    setDataset(sidebarMenu, "indicatorReady", DATA_TRUE);
     setDataset(sidebarMenu, "indicatorRoute", route);
     setDataset(sidebarMenu, "indicatorCurrent", current);
     setDataset(sidebarMenu, "indicatorReason", reason);
@@ -2068,63 +1766,34 @@ export function syncActiveMenuIndicator(AppCore, options = {}) {
 
     return true;
   } catch (error) {
-    safeWarn(
-      AppCore,
-      "No se pudo sincronizar indicador activo.",
-      error
-    );
-
-    return disableActiveMenuIndicator(
-      AppCore,
-      `${reason}:error`
-    );
+    safeWarn(AppCore, "No se pudo sincronizar indicador activo.", error);
+    return disableActiveMenuIndicator(AppCore, `${reason}:error`);
   }
 }
 
 export function scheduleActiveMenuIndicator(AppCore, options = {}) {
   const opts = safeObject(options);
 
-  const reason =
-    safeText(opts.reason, "scheduled");
+  const reason = safeText(opts.reason, "scheduled");
+  const delay = clampNumber(opts.delayMs, 0, 5000);
+  const reveal = opts.reveal !== false;
+  const force = opts.force === true;
 
-  const delay =
-    clampNumber(
-      opts.delayMs,
-      0,
-      5000
-    );
-
-  const reveal =
-    opts.reveal !== false;
-
-  const force =
-    opts.force === true;
-
-  const generation =
-    indicatorGeneration + 1;
+  const generation = indicatorGeneration + 1;
 
   clearIndicatorSchedule();
-
   indicatorGeneration = generation;
 
   const run = () => {
-    if (generation !== indicatorGeneration) {
-      return;
-    }
+    if (generation !== indicatorGeneration) return;
 
     indicatorRafA = safeRequestAnimationFrame(() => {
       indicatorRafA = 0;
-
-      if (generation !== indicatorGeneration) {
-        return;
-      }
+      if (generation !== indicatorGeneration) return;
 
       indicatorRafB = safeRequestAnimationFrame(() => {
         indicatorRafB = 0;
-
-        if (generation !== indicatorGeneration) {
-          return;
-        }
+        if (generation !== indicatorGeneration) return;
 
         syncActiveMenuIndicator(AppCore, {
           ...opts,
@@ -2151,7 +1820,7 @@ export function scheduleActiveMenuIndicator(AppCore, options = {}) {
 }
 
 /* =========================================================
-   SIDEBAR TRANSITION GUARD
+   TRANSITION GUARD
 ========================================================= */
 
 function cleanupSidebarTransitionListener() {
@@ -2178,53 +1847,28 @@ function setSidebarTransitioning(AppCore, enabled = false, reason = "") {
 
   const html = getHtmlElement();
 
-  toggleClass(
-    sidebar,
-    "is-transitioning",
-    enabled
-  );
+  toggleClasses(sidebar, {
+    "is-transitioning": enabled,
+  });
 
-  toggleClass(
-    sidebarMenu,
-    "is-transitioning",
-    enabled
-  );
+  toggleClasses(sidebarMenu, {
+    "is-transitioning": enabled,
+  });
 
-  toggleClass(
-    body,
-    "sidebar-transitioning",
-    enabled
-  );
+  toggleClasses(body, {
+    "sidebar-transitioning": enabled,
+  });
 
-  toggleClass(
-    html,
-    "sidebar-transitioning",
-    enabled
-  );
+  toggleClasses(html, {
+    "sidebar-transitioning": enabled,
+  });
 
-  setDataset(
-    sidebar,
-    "transitioning",
-    enabled ? "true" : ""
-  );
-
-  setDataset(
-    sidebarMenu,
-    "transitioning",
-    enabled ? "true" : ""
-  );
-
-  setDataset(
-    body,
-    "sidebarTransitioning",
-    enabled ? "true" : ""
-  );
+  setDataset(sidebar, "transitioning", enabled ? DATA_TRUE : "");
+  setDataset(sidebarMenu, "transitioning", enabled ? DATA_TRUE : "");
+  setDataset(body, "sidebarTransitioning", enabled ? DATA_TRUE : "");
 
   if (enabled) {
-    disableActiveMenuIndicator(
-      AppCore,
-      `${reason || "transition"}:start`
-    );
+    disableActiveMenuIndicator(AppCore, `${reason || "transition"}:start`);
   }
 
   return true;
@@ -2234,16 +1878,13 @@ function finishSidebarTransition(AppCore, reason = "finish") {
   clearSidebarTransitionTimer();
   cleanupSidebarTransitionListener();
 
-  setSidebarTransitioning(
-    AppCore,
-    false,
-    reason
-  );
+  setSidebarTransitioning(AppCore, false, reason);
 
   const activeItem = syncActiveMenuItem(AppCore, {
     reason: `${reason}:active-final`,
     mutate: true,
     forceRoute: true,
+    forceEmit: true,
   });
 
   scheduleActiveMenuIndicator(AppCore, {
@@ -2263,17 +1904,13 @@ function finishSidebarTransition(AppCore, reason = "finish") {
 }
 
 function beginSidebarTransition(AppCore, reason = "state-change", durationMs = SIDEBAR_TRANSITION_MS) {
-  if (!isBrowser()) {
-    return false;
-  }
+  if (!isBrowser()) return false;
 
   const {
     sidebar,
   } = getElements(AppCore);
 
-  if (!sidebar) {
-    return false;
-  }
+  if (!sidebar) return false;
 
   lastTransitionReason = reason;
 
@@ -2281,34 +1918,18 @@ function beginSidebarTransition(AppCore, reason = "state-change", durationMs = S
   clearSidebarTransitionTimer();
   cleanupSidebarTransitionListener();
 
-  setSidebarTransitioning(
-    AppCore,
-    true,
-    reason
-  );
+  setSidebarTransitioning(AppCore, true, reason);
 
   const finish = () => {
-    finishSidebarTransition(
-      AppCore,
-      reason
-    );
+    finishSidebarTransition(AppCore, reason);
   };
 
   const onTransitionEnd = (event) => {
-    const propertyName = safeText(
-      event?.propertyName,
-      ""
-    );
+    const propertyName = safeText(event?.propertyName, "");
 
     if (
       event?.target !== sidebar ||
-      ![
-        "inline-size",
-        "width",
-        "max-inline-size",
-        "transform",
-        "margin-inline-start",
-      ].includes(propertyName)
+      !TRANSITION_PROPS.has(propertyName)
     ) {
       return;
     }
@@ -2317,17 +1938,11 @@ function beginSidebarTransition(AppCore, reason = "state-change", durationMs = S
   };
 
   try {
-    sidebar.addEventListener(
-      "transitionend",
-      onTransitionEnd
-    );
+    sidebar.addEventListener("transitionend", onTransitionEnd);
 
     sidebarTransitionEndCleanup = () => {
       try {
-        sidebar.removeEventListener(
-          "transitionend",
-          onTransitionEnd
-        );
+        sidebar.removeEventListener("transitionend", onTransitionEnd);
       } catch {}
     };
   } catch {
@@ -2349,7 +1964,7 @@ function beginSidebarTransition(AppCore, reason = "state-change", durationMs = S
 }
 
 /* =========================================================
-   TOOLTIPS
+   TOOLTIPS / LABELS
 ========================================================= */
 
 export function syncTooltipMode(AppCore, isOpen = null) {
@@ -2358,9 +1973,7 @@ export function syncTooltipMode(AppCore, isOpen = null) {
     body,
   } = getElements(AppCore);
 
-  if (!sidebar || !body) {
-    return false;
-  }
+  if (!sidebar || !body) return false;
 
   const open =
     typeof isOpen === "boolean"
@@ -2375,29 +1988,11 @@ export function syncTooltipMode(AppCore, isOpen = null) {
     !isRealShellHidden(AppCore) &&
     !isSidebarTransitioning(AppCore);
 
-  toggleClass(
-    sidebar,
-    "sidebar-tooltips-active",
-    enabled
-  );
+  toggleClass(sidebar, "sidebar-tooltips-active", enabled);
+  toggleClass(body, "sidebar-tooltips-active", enabled);
 
-  toggleClass(
-    body,
-    "sidebar-tooltips-active",
-    enabled
-  );
-
-  setDataset(
-    sidebar,
-    "tooltipMode",
-    enabled ? "compact" : "off"
-  );
-
-  setDataset(
-    body,
-    "sidebarTooltipMode",
-    enabled ? "compact" : "off"
-  );
+  setDataset(sidebar, "tooltipMode", enabled ? "compact" : "off");
+  setDataset(body, "sidebarTooltipMode", enabled ? "compact" : "off");
 
   try {
     sanitizeFooterTooltipState(AppCore);
@@ -2405,10 +2000,6 @@ export function syncTooltipMode(AppCore, isOpen = null) {
 
   return enabled;
 }
-
-/* =========================================================
-   TOGGLE LABELS
-========================================================= */
 
 export function updateToggleLabel(AppCore, isOpen = null) {
   const {
@@ -2422,11 +2013,8 @@ export function updateToggleLabel(AppCore, isOpen = null) {
       ? isOpen
       : getDesiredSidebarOpenState(AppCore);
 
-  const mobile =
-    isMobileViewport();
-
-  const collapsed =
-    !mobile && !open;
+  const mobile = isMobileViewport();
+  const collapsed = !mobile && !open;
 
   const desktopText = open
     ? "Contraer barra lateral"
@@ -2442,21 +2030,14 @@ export function updateToggleLabel(AppCore, isOpen = null) {
     setAttr(toggleBtn, "type", "button");
 
     setDataset(toggleBtn, "state", open ? "open" : "closed");
-
-    toggleClass(toggleBtn, "is-active", open);
-
-    /*
-      Solo tooltip custom. Nunca title nativo.
-    */
     setDataset(toggleBtn, "tooltip", desktopText);
     setDataset(
       toggleBtn,
       "i18nDataTooltip",
-      open
-        ? "sidebar.toggle.collapse"
-        : "sidebar.toggle.expand"
+      open ? "sidebar.toggle.collapse" : "sidebar.toggle.expand"
     );
 
+    toggleClass(toggleBtn, "is-active", open);
     removeAttr(toggleBtn, "title");
   }
 
@@ -2466,24 +2047,20 @@ export function updateToggleLabel(AppCore, isOpen = null) {
     setAttr(mobileToggleBtn, "type", "button");
 
     setDataset(mobileToggleBtn, "state", open ? "open" : "closed");
-
-    toggleClass(mobileToggleBtn, "is-active", open);
-
     setDataset(mobileToggleBtn, "tooltip", mobileText);
     setDataset(
       mobileToggleBtn,
       "i18nDataTooltip",
-      open
-        ? "sidebar.toggle.close"
-        : "sidebar.toggle.open"
+      open ? "sidebar.toggle.close" : "sidebar.toggle.open"
     );
 
+    toggleClass(mobileToggleBtn, "is-active", open);
     removeAttr(mobileToggleBtn, "title");
   }
 
   if (sidebar) {
-    setDataset(sidebar, "open", open ? "true" : "false");
-    setDataset(sidebar, "collapsed", collapsed ? "true" : "false");
+    setDataset(sidebar, "open", open ? DATA_TRUE : DATA_FALSE);
+    setDataset(sidebar, "collapsed", collapsed ? DATA_TRUE : DATA_FALSE);
     setDataset(sidebar, "viewport", mobile ? "mobile" : "desktop");
   }
 
@@ -2503,23 +2080,13 @@ function syncHiddenShellState(AppCore, closeDropdown) {
     body,
   } = getElements(AppCore);
 
-  if (!sidebar) {
-    return false;
-  }
+  if (!sidebar) return false;
 
   clearSidebarTransitionTimer();
   cleanupSidebarTransitionListener();
 
-  setSidebarTransitioning(
-    AppCore,
-    false,
-    "hidden-shell"
-  );
-
-  clearActiveMenuIndicator(
-    AppCore,
-    "hidden-shell"
-  );
+  setSidebarTransitioning(AppCore, false, "hidden-shell");
+  clearActiveMenuIndicator(AppCore, "hidden-shell");
 
   try {
     closeDropdown?.();
@@ -2551,13 +2118,10 @@ function syncHiddenShellState(AppCore, closeDropdown) {
     "sidebar-visual-syncing"
   );
 
-  try {
-    sidebar.hidden = true;
-    sidebar.setAttribute("aria-hidden", "true");
-  } catch {}
+  setHiddenState(sidebar, true);
 
-  setDataset(sidebar, "open", "false");
-  setDataset(sidebar, "collapsed", "false");
+  setDataset(sidebar, "open", DATA_FALSE);
+  setDataset(sidebar, "collapsed", DATA_FALSE);
   setDataset(sidebar, "mode", "hidden");
   setDataset(sidebar, "viewport", "");
   setDataset(sidebar, "transitioning", "");
@@ -2569,12 +2133,8 @@ function syncHiddenShellState(AppCore, closeDropdown) {
 
   updateToggleLabel(AppCore, false);
 
-  /*
-    updateToggleLabel toca data-open/data-collapsed.
-    Reafirmamos modo hidden al final.
-  */
   setDataset(sidebar, "mode", "hidden");
-  setDataset(sidebar, "collapsed", "false");
+  setDataset(sidebar, "collapsed", DATA_FALSE);
   setDataset(sidebar, "viewport", "");
   setDataset(body, "sidebarMode", "hidden");
 
@@ -2603,36 +2163,26 @@ function syncVisibleSidebarBase(AppCore, {
   mobile,
   open,
 } = {}) {
-  if (!sidebar) {
-    return false;
-  }
+  if (!sidebar) return false;
 
-  const collapsed =
-    !mobile && !open;
+  const collapsed = !mobile && !open;
 
-  try {
-    sidebar.hidden = false;
-    sidebar.setAttribute("aria-hidden", "false");
-  } catch {}
+  setHiddenState(sidebar, false);
 
   if (mobile) {
     setMobileMemory(AppCore, open);
 
-    toggleClass(sidebar, "open", open);
-    toggleClass(sidebar, "is-open", open);
+    toggleClasses(sidebar, {
+      open,
+      "is-open": open,
+      collapsed: false,
+      "is-collapsed": false,
+    });
 
-    removeClass(
-      sidebar,
-      "collapsed",
-      "is-collapsed"
-    );
-
-    toggleClass(body, "sidebar-open", open);
-
-    removeClass(
-      body,
-      "sidebar-collapsed"
-    );
+    toggleClasses(body, {
+      "sidebar-open": open,
+      "sidebar-collapsed": false,
+    });
 
     setDataset(sidebar, "mode", "mobile");
     setDataset(body, "sidebarMode", "mobile");
@@ -2640,28 +2190,24 @@ function syncVisibleSidebarBase(AppCore, {
     setDesktopMemory(AppCore, open);
     syncSharedState(AppCore, open);
 
-    toggleClass(sidebar, "collapsed", collapsed);
-    toggleClass(sidebar, "is-collapsed", collapsed);
+    toggleClasses(sidebar, {
+      open: false,
+      "is-open": false,
+      collapsed,
+      "is-collapsed": collapsed,
+    });
 
-    removeClass(
-      sidebar,
-      "open",
-      "is-open"
-    );
-
-    toggleClass(body, "sidebar-collapsed", collapsed);
-
-    removeClass(
-      body,
-      "sidebar-open"
-    );
+    toggleClasses(body, {
+      "sidebar-open": false,
+      "sidebar-collapsed": collapsed,
+    });
 
     setDataset(sidebar, "mode", "desktop");
     setDataset(body, "sidebarMode", "desktop");
   }
 
-  setDataset(sidebar, "open", open ? "true" : "false");
-  setDataset(sidebar, "collapsed", collapsed ? "true" : "false");
+  setDataset(sidebar, "open", open ? DATA_TRUE : DATA_FALSE);
+  setDataset(sidebar, "collapsed", collapsed ? DATA_TRUE : DATA_FALSE);
   setDataset(sidebar, "viewport", mobile ? "mobile" : "desktop");
 
   updateToggleLabel(AppCore, open);
@@ -2677,21 +2223,10 @@ function syncSidebarStateInternal(AppCore, closeDropdown, options = {}) {
     body,
   } = getElements(AppCore);
 
-  if (!sidebar) {
-    return false;
-  }
+  if (!sidebar) return false;
 
-  /*
-    Fix crítico:
-    No usar isShellHidden(AppCore) aquí directamente.
-    dom.js puede considerar sidebar.hidden === true como shell hidden.
-    Eso puede dejar el sidebar bloqueado tras login/auth route/router repair.
-  */
   if (isRealShellHidden(AppCore)) {
-    return syncHiddenShellState(
-      AppCore,
-      closeDropdown
-    );
+    return syncHiddenShellState(AppCore, closeDropdown);
   }
 
   const mobile = isMobileViewport();
@@ -2747,13 +2282,9 @@ function syncSidebarStateInternal(AppCore, closeDropdown, options = {}) {
 }
 
 export function syncSidebarState(AppCore, closeDropdown) {
-  return syncSidebarStateInternal(
-    AppCore,
-    closeDropdown,
-    {
-      reason: "sync-sidebar-state",
-    }
-  );
+  return syncSidebarStateInternal(AppCore, closeDropdown, {
+    reason: "sync-sidebar-state",
+  });
 }
 
 /* =========================================================
@@ -2767,10 +2298,6 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
   const changed = previousOpen !== nextOpen;
   const collapsed = !nextOpen && !mobile;
 
-  /*
-    Si la shell real está oculta, no persistimos ni mezclamos estado.
-    Solo resincronizamos oculto.
-  */
   if (isRealShellHidden(AppCore)) {
     syncHiddenShellState(AppCore, closeDropdown);
 
@@ -2786,14 +2313,11 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
   }
 
   if (!changed) {
-    const synced = syncSidebarStateInternal(
-      AppCore,
-      closeDropdown,
-      {
-        reason: "set-sidebar-open:no-change",
-        forceIndicator: true,
-      }
-    );
+    const synced = syncSidebarStateInternal(AppCore, closeDropdown, {
+      reason: "set-sidebar-open:no-change",
+      forceIndicator: true,
+      forceEmit: true,
+    });
 
     safeEmit(AppCore, "sidebar:state:unchanged", {
       source: SOURCE,
@@ -2818,9 +2342,7 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
 
   beginSidebarTransition(
     AppCore,
-    mobile
-      ? "mobile-open-change"
-      : "desktop-collapse-change",
+    mobile ? "mobile-open-change" : "desktop-collapse-change",
     SIDEBAR_TRANSITION_MS
   );
 
@@ -2829,21 +2351,13 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
   } else {
     setDesktopMemory(AppCore, nextOpen);
     syncSharedState(AppCore, nextOpen);
-
-    saveSidebarCollapsed(
-      !nextOpen,
-      AppCore
-    );
+    saveSidebarCollapsed(!nextOpen, AppCore);
   }
 
-  const synced = syncSidebarStateInternal(
-    AppCore,
-    closeDropdown,
-    {
-      reason: "set-sidebar-open",
-      forceEmit: true,
-    }
-  );
+  const synced = syncSidebarStateInternal(AppCore, closeDropdown, {
+    reason: "set-sidebar-open",
+    forceEmit: true,
+  });
 
   afterNextPaint(() => {
     scheduleActiveMenuIndicator(AppCore, {
@@ -2870,15 +2384,12 @@ export function setSidebarOpen(AppCore, open, closeDropdown) {
 }
 
 /* =========================================================
-   REPAIR HELPERS
+   REPAIR
 ========================================================= */
 
 export function repairSidebarState(AppCore, closeDropdown) {
   const state = ensureStateBag(AppCore);
-
-  if (!state) {
-    return false;
-  }
+  if (!state) return false;
 
   const mobile = isMobileViewport();
 
@@ -2905,20 +2416,14 @@ export function repairSidebarState(AppCore, closeDropdown) {
     state.sidebarLastMode = "desktop";
   }
 
-  const synced =
-    syncSidebarStateInternal(
-      AppCore,
-      closeDropdown,
-      {
-        reason: "repair-sidebar-state",
-        forceEmit: true,
-        forceIndicator: true,
-        indicatorDelayMs:
-          isSidebarTransitioning(AppCore)
-            ? INDICATOR_SETTLED_DELAY_MS
-            : INDICATOR_RECALC_DELAY_MS,
-      }
-    );
+  const synced = syncSidebarStateInternal(AppCore, closeDropdown, {
+    reason: "repair-sidebar-state",
+    forceEmit: true,
+    forceIndicator: true,
+    indicatorDelayMs: isSidebarTransitioning(AppCore)
+      ? INDICATOR_SETTLED_DELAY_MS
+      : INDICATOR_RECALC_DELAY_MS,
+  });
 
   safeEmit(AppCore, "sidebar:state:repaired", {
     source: SOURCE,
@@ -2932,7 +2437,7 @@ export function repairSidebarState(AppCore, closeDropdown) {
 }
 
 /* =========================================================
-   DEBUG
+   DEBUG SNAPSHOT
 ========================================================= */
 
 export function getSidebarStateSnapshot(AppCore) {
@@ -2949,12 +2454,11 @@ export function getSidebarStateSnapshot(AppCore) {
   const open = getDesiredSidebarOpenState(AppCore);
   const collapsed = !open && !mobile;
 
-  const activeItem =
-    sidebarMenu
-      ? resolveActiveMenuItem(AppCore, sidebarMenu, {
-          reason: "snapshot",
-        })
-      : null;
+  const activeItem = sidebarMenu
+    ? resolveActiveMenuItem(AppCore, sidebarMenu, {
+        reason: "snapshot",
+      })
+    : null;
 
   return {
     mobile,
@@ -2967,166 +2471,77 @@ export function getSidebarStateSnapshot(AppCore) {
     realShellHidden: isRealShellHidden(AppCore),
 
     state: {
-      sidebarOpen:
-        AppCore?.state?.sidebarOpen ?? null,
-
-      sidebarDesktopOpen:
-        AppCore?.state?.sidebarDesktopOpen ?? null,
-
-      sidebarMobileOpen:
-        AppCore?.state?.sidebarMobileOpen ?? null,
-
-      sidebarMode:
-        AppCore?.state?.sidebarMode ?? null,
-
-      sidebarLastMode:
-        AppCore?.state?.sidebarLastMode ?? null,
-
-      shellVisible:
-        AppCore?.state?.shellVisible ?? null,
-
-      route:
-        AppCore?.state?.route ?? null,
-
-      publicPath:
-        AppCore?.state?.publicPath ?? null,
-
-      canonicalPath:
-        AppCore?.state?.canonicalPath ?? null,
-
-      lastRoute:
-        AppCore?.state?.lastRoute ?? null,
+      sidebarOpen: AppCore?.state?.sidebarOpen ?? null,
+      sidebarDesktopOpen: AppCore?.state?.sidebarDesktopOpen ?? null,
+      sidebarMobileOpen: AppCore?.state?.sidebarMobileOpen ?? null,
+      sidebarMode: AppCore?.state?.sidebarMode ?? null,
+      sidebarLastMode: AppCore?.state?.sidebarLastMode ?? null,
+      shellVisible: AppCore?.state?.shellVisible ?? null,
+      route: AppCore?.state?.route ?? null,
+      publicPath: AppCore?.state?.publicPath ?? null,
+      canonicalPath: AppCore?.state?.canonicalPath ?? null,
+      lastRoute: AppCore?.state?.lastRoute ?? null,
     },
 
     storage: {
-      savedCollapsed:
-        readSavedSidebarCollapsed(AppCore),
-
-      collapsedKey:
-        DESKTOP_COLLAPSED_STORAGE_KEY,
-
-      legacyOpenKey:
-        LEGACY_SIDEBAR_OPEN_STORAGE_KEY,
+      savedCollapsed: readSavedSidebarCollapsed(AppCore),
+      collapsedKey: DESKTOP_COLLAPSED_STORAGE_KEY,
+      legacyOpenKey: LEGACY_SIDEBAR_OPEN_STORAGE_KEY,
     },
 
     dom: {
-      hasSidebar:
-        Boolean(sidebar),
+      hasSidebar: Boolean(sidebar),
+      hasSidebarMenu: Boolean(sidebarMenu),
 
-      hasSidebarMenu:
-        Boolean(sidebarMenu),
+      sidebarHidden: Boolean(sidebar?.hidden),
+      sidebarAriaHidden: sidebar?.getAttribute?.("aria-hidden") || null,
 
-      sidebarHidden:
-        Boolean(sidebar?.hidden),
+      sidebarClasses: sidebar?.className || "",
+      sidebarMenuClasses: sidebarMenu?.className || "",
+      bodyClasses: body?.className || "",
 
-      sidebarAriaHidden:
-        sidebar?.getAttribute?.("aria-hidden") || null,
+      appShellHidden: Boolean(appShell?.hidden),
+      shellHidden: Boolean(shell?.hidden),
+      layoutHidden: Boolean(layout?.hidden),
 
-      sidebarClasses:
-        sidebar?.className || "",
-
-      sidebarMenuClasses:
-        sidebarMenu?.className || "",
-
-      bodyClasses:
-        body?.className || "",
-
-      appShellHidden:
-        Boolean(appShell?.hidden),
-
-      shellHidden:
-        Boolean(shell?.hidden),
-
-      layoutHidden:
-        Boolean(layout?.hidden),
-
-      sidebarOpenDataset:
-        sidebar?.dataset?.open || null,
-
-      sidebarCollapsedDataset:
-        sidebar?.dataset?.collapsed || null,
-
-      sidebarMode:
-        sidebar?.dataset?.mode || null,
-
-      sidebarViewport:
-        sidebar?.dataset?.viewport || null,
-
-      sidebarTransitioning:
-        sidebar?.dataset?.transitioning || null,
-
-      sidebarMenuTransitioning:
-        sidebarMenu?.dataset?.transitioning || null,
-
-      bodySidebarMode:
-        body?.dataset?.sidebarMode || null,
+      sidebarOpenDataset: sidebar?.dataset?.open || null,
+      sidebarCollapsedDataset: sidebar?.dataset?.collapsed || null,
+      sidebarMode: sidebar?.dataset?.mode || null,
+      sidebarViewport: sidebar?.dataset?.viewport || null,
+      sidebarTransitioning: sidebar?.dataset?.transitioning || null,
+      sidebarMenuTransitioning: sidebarMenu?.dataset?.transitioning || null,
+      bodySidebarMode: body?.dataset?.sidebarMode || null,
     },
 
     route: {
-      currentPublicPath:
-        getCurrentPublicPath(AppCore),
+      currentPublicPath: getCurrentPublicPath(AppCore),
+      browserPublicPath: getBrowserPublicPath(),
+      candidates: getCurrentPublicPathCandidates(AppCore),
 
-      browserPublicPath:
-        getBrowserPublicPath(),
-
-      candidates:
-        getCurrentPublicPathCandidates(AppCore),
-
-      activeRoute:
-        getMenuItemRoute(activeItem),
-
-      activeMatchedRoute:
-        activeItem?.dataset?.matchedRoute || "",
-
-      activeMatchedCurrent:
-        activeItem?.dataset?.matchedCurrent || "",
-
-      activeCandidateIndex:
-        activeItem?.dataset?.matchCandidateIndex || "",
+      activeRoute: getMenuItemRoute(activeItem),
+      activeMatchedRoute: activeItem?.dataset?.matchedRoute || "",
+      activeMatchedCurrent: activeItem?.dataset?.matchedCurrent || "",
+      activeCandidateIndex: activeItem?.dataset?.matchCandidateIndex || "",
     },
 
     indicator: {
-      ready:
-        sidebarMenu?.dataset?.indicatorReady || null,
+      ready: sidebarMenu?.dataset?.indicatorReady || null,
+      reason: sidebarMenu?.dataset?.indicatorReason || null,
+      route: sidebarMenu?.dataset?.indicatorRoute || null,
+      current: sidebarMenu?.dataset?.indicatorCurrent || null,
 
-      reason:
-        sidebarMenu?.dataset?.indicatorReason || null,
+      activeRoute: getMenuItemRoute(activeItem),
+      currentPublicPath: getCurrentPublicPath(AppCore),
 
-      route:
-        sidebarMenu?.dataset?.indicatorRoute || null,
+      lastSignature: lastIndicatorSignature,
+      lastReason: lastIndicatorReason,
+      generation: indicatorGeneration,
 
-      current:
-        sidebarMenu?.dataset?.indicatorCurrent || null,
-
-      activeRoute:
-        getMenuItemRoute(activeItem),
-
-      currentPublicPath:
-        getCurrentPublicPath(AppCore),
-
-      lastSignature:
-        lastIndicatorSignature,
-
-      lastReason:
-        lastIndicatorReason,
-
-      generation:
-        indicatorGeneration,
-
-      x:
-        sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
-
-      y:
-        sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-y") || "",
-
-      width:
-        sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-w") || "",
-
-      height:
-        sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-h") || "",
-
-      opacity:
-        sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-opacity") || "",
+      x: sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
+      y: sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-y") || "",
+      width: sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-w") || "",
+      height: sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-h") || "",
+      opacity: sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-opacity") || "",
     },
   };
 }
@@ -3137,7 +2552,6 @@ export function getSidebarStateSnapshot(AppCore) {
 
 export default {
   isMobileViewport,
-
   isRealShellHidden,
 
   getSavedSidebarCollapsed,

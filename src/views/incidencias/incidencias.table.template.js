@@ -22,6 +22,8 @@
    - acciones compatibles con data-incidencias-action y data-action
    - pintar importe total de facturas asociadas al ticket
    - avatares fallback con tono pseudo-RNG estable por data-avatar-tone
+   - avatar real del técnico actual en badge de asignación
+   - fila completa clicable para abrir modal de detalle
    - dark/light mode 100% delegado a CSS externo
    - chips de estado alineados con tokens globales
    - tabla blindada por clases, no por CSS inline
@@ -37,6 +39,9 @@
    - importe blindado contra normalizadores intermedios
    - loading inline icon-only centrado sin cambiar tamaño del botón
    - CSS aplicable a .incidencias-view-root y [data-incidencias-scope]
+   - no usa eventos inline
+   - no usa style=""
+   - avatar de técnico compatible con payload rico o fallback local
 
    IMPORTANTE:
    - El CSS debe vivir en:
@@ -51,6 +56,19 @@
 const DEFAULT_PAGE_SIZE = 5;
 const DEFAULT_CURRENCY = "EUR";
 const AVATAR_TONE_COUNT = 10;
+
+const CURRENT_TECHNICIAN_NAME = "Cristian Ávila Luque";
+const CURRENT_TECHNICIAN_EMAIL = "avila199817@gmail.com";
+const CURRENT_TECHNICIAN_USERNAME = "avila199817";
+const CURRENT_TECHNICIAN_AVATAR_URL = "/src/media/img/Usuario.png";
+
+const CURRENT_TECHNICIAN_MATCH_VALUES = Object.freeze([
+  CURRENT_TECHNICIAN_NAME,
+  "Cristian Avila Luque",
+  CURRENT_TECHNICIAN_EMAIL,
+  CURRENT_TECHNICIAN_USERNAME,
+  "CA",
+]);
 
 const FILTERS = Object.freeze([
   { key: "all", label: "Todas" },
@@ -776,6 +794,188 @@ function getAssignedTo(item = {}) {
   );
 }
 
+function getAssignedEmail(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.assignedTo?.email,
+      item.assignedTo?.mail,
+      item.assignment?.agentEmail,
+      item.assignment?.email,
+      item.tecnico?.email,
+      item.tecnico?.mail,
+      item.agentEmail,
+      item.agent?.email,
+      raw.assignedTo?.email,
+      raw.assignedTo?.mail,
+      raw.assignment?.agentEmail,
+      raw.assignment?.email,
+      raw.tecnico?.email,
+      raw.tecnico?.mail,
+      raw.agentEmail,
+      raw.agent?.email
+    ),
+    ""
+  ).toLowerCase();
+}
+
+function getAssignedId(item = {}) {
+  const raw = safeObject(item?.raw);
+
+  return safeText(
+    first(
+      item.assignedTo?.id,
+      item.assignedTo?.userId,
+      item.assignedTo?.username,
+      item.assignment?.agentId,
+      item.assignment?.userId,
+      item.tecnico?.id,
+      item.tecnico?.userId,
+      item.tecnico?.username,
+      item.agentId,
+      item.agent?.id,
+      item.agent?.userId,
+      raw.assignedTo?.id,
+      raw.assignedTo?.userId,
+      raw.assignedTo?.username,
+      raw.assignment?.agentId,
+      raw.assignment?.userId,
+      raw.tecnico?.id,
+      raw.tecnico?.userId,
+      raw.tecnico?.username,
+      raw.agentId,
+      raw.agent?.id,
+      raw.agent?.userId
+    ),
+    ""
+  );
+}
+
+function getRuntimeUserAvatar(state = {}) {
+  const runtime = safeObject(state);
+  const user = safeObject(first(runtime.user, runtime.currentUser, runtime.sessionUser));
+  const raw = safeObject(user.raw);
+
+  return safeText(
+    first(
+      runtime.avatar,
+      runtime.avatarUrl,
+      runtime.userAvatar,
+      runtime.userAvatarUrl,
+      user.avatar,
+      user.avatarUrl,
+      user.photo,
+      user.photoUrl,
+      user.picture,
+      user.image,
+      raw.avatar,
+      raw.avatarUrl,
+      raw.photo,
+      raw.photoUrl,
+      raw.picture,
+      raw.image
+    ),
+    ""
+  );
+}
+
+function getAssignedAvatarUrl(item = {}, state = {}) {
+  const raw = safeObject(item?.raw);
+
+  const explicitAvatar = safeText(
+    first(
+      item.assignedTo?.avatar,
+      item.assignedTo?.avatarUrl,
+      item.assignedTo?.photo,
+      item.assignedTo?.photoUrl,
+      item.assignment?.agentAvatar,
+      item.assignment?.avatar,
+      item.assignment?.avatarUrl,
+      item.tecnico?.avatar,
+      item.tecnico?.avatarUrl,
+      item.tecnico?.photo,
+      item.tecnico?.photoUrl,
+      item.agentAvatar,
+      item.agent?.avatar,
+      item.agent?.avatarUrl,
+      raw.assignedTo?.avatar,
+      raw.assignedTo?.avatarUrl,
+      raw.assignedTo?.photo,
+      raw.assignedTo?.photoUrl,
+      raw.assignment?.agentAvatar,
+      raw.assignment?.avatar,
+      raw.assignment?.avatarUrl,
+      raw.tecnico?.avatar,
+      raw.tecnico?.avatarUrl,
+      raw.tecnico?.photo,
+      raw.tecnico?.photoUrl,
+      raw.agentAvatar,
+      raw.agent?.avatar,
+      raw.agent?.avatarUrl
+    ),
+    ""
+  );
+
+  if (explicitAvatar) {
+    return explicitAvatar;
+  }
+
+  if (isCurrentTechnicianAssigned(item, state)) {
+    return safeText(getRuntimeUserAvatar(state), CURRENT_TECHNICIAN_AVATAR_URL);
+  }
+
+  return "";
+}
+
+function isCurrentTechnicianAssigned(item = {}, state = {}) {
+  const assigned = normalizeText(getAssignedTo(item));
+  const assignedEmail = normalizeText(getAssignedEmail(item));
+  const assignedId = normalizeText(getAssignedId(item));
+
+  const runtime = safeObject(state);
+  const user = safeObject(first(runtime.user, runtime.currentUser, runtime.sessionUser));
+
+  const runtimeValues = [
+    user.name,
+    user.displayName,
+    user.fullName,
+    user.email,
+    user.username,
+    user.userId,
+    user.id,
+    runtime.username,
+    runtime.email,
+    runtime.userId,
+  ].map((value) => normalizeText(value));
+
+  const knownValues = CURRENT_TECHNICIAN_MATCH_VALUES.map((value) => normalizeText(value));
+
+  const candidates = [
+    assigned,
+    assignedEmail,
+    assignedId,
+  ].filter(Boolean);
+
+  const matchesKnown = candidates.some((candidate) => {
+    return knownValues.some((known) => {
+      return known && (candidate === known || candidate.includes(known) || known.includes(candidate));
+    });
+  });
+
+  if (matchesKnown) {
+    return true;
+  }
+
+  const matchesRuntime = candidates.some((candidate) => {
+    return runtimeValues.some((runtimeValue) => {
+      return runtimeValue && (candidate === runtimeValue || candidate.includes(runtimeValue) || runtimeValue.includes(candidate));
+    });
+  });
+
+  return matchesRuntime;
+}
+
 function getImporteAmount(item = {}) {
   const raw = safeObject(item?.raw);
 
@@ -1134,6 +1334,7 @@ function getSearchHaystack(item = {}) {
     getClientEmail(item),
     getCategory(item),
     getAssignedTo(item),
+    getAssignedEmail(item),
     getStatusLabel(getStatusRaw(item)),
     getPriorityLabel(item),
     getImporteLabel(item),
@@ -1422,16 +1623,63 @@ function renderPriorityBadge(item = {}) {
   `;
 }
 
-function renderAssignedBadge(item = {}) {
+function renderAssignedAvatar(item = {}, state = {}) {
   const assigned = getAssignedTo(item);
+  const assignedEmail = getAssignedEmail(item);
+  const assignedAvatar = getAssignedAvatarUrl(item, state);
+  const assignedInitials = getInitials(assigned);
+
+  if (!assignedAvatar) {
+    return `
+      <span
+        class="incidencias-agent-avatar incidencias-agent-avatar--icon"
+        aria-hidden="true"
+      >
+        ${icon("users")}
+      </span>
+    `;
+  }
 
   return `
     <span
-      class="incidencias-mini-badge incidencias-mini-badge--agent"
-      title="${escapeHtml(`Técnico · ${assigned}`)}"
-      data-tooltip="${escapeHtml(`Técnico · ${assigned}`)}"
+      class="incidencias-agent-avatar incidencias-agent-avatar--image"
+      title="${escapeHtml(assignedEmail || assigned)}"
+      data-tooltip="${escapeHtml(assignedEmail || assigned)}"
+      data-technician-avatar="true"
+      data-current-technician="${isCurrentTechnicianAssigned(item, state) ? "true" : "false"}"
+      aria-hidden="true"
     >
-      ${icon("users")}
+      <img
+        class="incidencias-agent-avatar-img"
+        src="${escapeHtml(assignedAvatar)}"
+        alt=""
+        loading="lazy"
+        decoding="async"
+        referrerpolicy="no-referrer"
+        draggable="false"
+      />
+      <span class="incidencias-agent-avatar-fallback">
+        ${escapeHtml(assignedInitials)}
+      </span>
+    </span>
+  `;
+}
+
+function renderAssignedBadge(item = {}, state = {}) {
+  const assigned = getAssignedTo(item);
+  const assignedEmail = getAssignedEmail(item);
+  const isCurrent = isCurrentTechnicianAssigned(item, state);
+
+  return `
+    <span
+      class="incidencias-mini-badge incidencias-mini-badge--agent${isCurrent ? " incidencias-mini-badge--current-agent" : ""}"
+      title="${escapeHtml(`Técnico · ${assigned}${assignedEmail ? ` · ${assignedEmail}` : ""}`)}"
+      data-tooltip="${escapeHtml(`Técnico · ${assigned}${assignedEmail ? ` · ${assignedEmail}` : ""}`)}"
+      data-assigned-technician="${escapeHtml(assigned)}"
+      data-assigned-email="${escapeHtml(assignedEmail)}"
+      data-current-technician="${isCurrent ? "true" : "false"}"
+    >
+      ${renderAssignedAvatar(item, state)}
       ${escapeHtml(assigned)}
     </span>
   `;
@@ -1478,6 +1726,7 @@ function renderActionButton({
       data-incidencias-action="${escapeHtml(action)}"
       data-action="${escapeHtml(action === "detail" ? "open-ticket" : action)}"
       data-ticket-id="${escapeHtml(ticketId)}"
+      data-incidencia-id="${escapeHtml(ticketId)}"
       title="${escapeHtml(finalTooltip)}"
       data-tooltip="${escapeHtml(finalTooltip)}"
       ${finalDisabled ? 'disabled aria-disabled="true"' : ""}
@@ -1530,10 +1779,19 @@ function renderRow(item = {}, state = {}) {
 
   return `
     <tr
-      class="incidencias-row incidencias-row--${escapeHtml(statusKey)}"
+      class="incidencias-row incidencias-row--${escapeHtml(statusKey)} incidencias-row--clickable"
       data-ticket-row="true"
       data-ticket-id="${escapeHtml(ticketId)}"
       data-incidencia-id="${escapeHtml(ticketId)}"
+      data-incidencias-action="detail"
+      data-action="open-ticket"
+      data-row-action="open-ticket"
+      data-detail-target="true"
+      role="button"
+      tabindex="0"
+      aria-label="${escapeHtml(`Abrir detalle de incidencia ${ticketId}`)}"
+      title="${escapeHtml(`Abrir detalle de incidencia ${ticketId}`)}"
+      data-tooltip="${escapeHtml(`Abrir detalle de incidencia ${ticketId}`)}"
     >
       <td class="incidencias-cell incidencias-cell--main">
         <div class="incidencias-main">
@@ -1556,7 +1814,7 @@ function renderRow(item = {}, state = {}) {
 
             <div class="incidencias-row-badges">
               ${renderPriorityBadge(item)}
-              ${renderAssignedBadge(item)}
+              ${renderAssignedBadge(item, runtime)}
             </div>
           </div>
         </div>

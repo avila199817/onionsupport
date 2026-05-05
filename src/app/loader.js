@@ -36,11 +36,22 @@
    - loader visible desde boot/refresco si existe en index.html
    - fallback loader con logo si no existe #app-loader
    - ocultación suave + limpieza final
+   - logo fallback theme-aware:
+     · dark  -> favicon_white.png
+     · light -> favicon_black.png
 
    FIX CONSOLA:
    - no duplica warnings por AppCore.utils.warn + console.warn
    - no dispara failsafe antes de 8s
    - no marca failsafe como warning si el boot ya terminó
+
+   FIX LOGO:
+   - no usa /assets/logo.svg como fallback principal
+   - usa los assets reales:
+     · ../media/img/favicon_white.png
+     · ../media/img/favicon_black.png
+   - compatible con ESM nativo mediante new URL(..., import.meta.url)
+   - si ya existe #app-loader en index.html, NO inyecta CSS fallback
 ========================================================= */
 
 import {
@@ -61,6 +72,18 @@ const DEFAULT_MIN_VISIBLE_MS = 320;
 const DEFAULT_FAILSAFE_MS = 12000;
 const MIN_FAILSAFE_MS = 8000;
 const FAILSAFE_WARN_DEDUPE_MS = 30000;
+
+const DEFAULT_LOADER_LOGO_WHITE_URL =
+  resolveModuleAssetUrl(
+    "../media/img/favicon_white.png",
+    "/src/media/img/favicon_white.png"
+  );
+
+const DEFAULT_LOADER_LOGO_BLACK_URL =
+  resolveModuleAssetUrl(
+    "../media/img/favicon_black.png",
+    "/src/media/img/favicon_black.png"
+  );
 
 const BODY_LOADING_CLASSES = [
   "loading",
@@ -103,6 +126,20 @@ function isBrowser() {
     typeof window !== "undefined" &&
     typeof document !== "undefined"
   );
+}
+
+function resolveModuleAssetUrl(
+  relativePath,
+  fallbackPath = ""
+) {
+  try {
+    return new URL(
+      relativePath,
+      import.meta.url
+    ).href;
+  } catch {
+    return fallbackPath;
+  }
 }
 
 function safeText(value, fallback = "") {
@@ -375,11 +412,176 @@ function safeSetBooting(
 }
 
 /* =========================================================
+   THEME / LOGO
+========================================================= */
+
+function normalizeTheme(value) {
+  const theme =
+    safeText(value, "")
+      .toLowerCase();
+
+  if (
+    theme === "light" ||
+    theme === "claro"
+  ) {
+    return "light";
+  }
+
+  if (
+    theme === "dark" ||
+    theme === "oscuro"
+  ) {
+    return "dark";
+  }
+
+  if (
+    theme === "system" ||
+    theme === "auto"
+  ) {
+    return "system";
+  }
+
+  return "";
+}
+
+function getStoredTheme() {
+  if (!isBrowser()) {
+    return "";
+  }
+
+  const keys = [
+    "theme",
+    "app:theme",
+    "onion:theme",
+    "onion-theme",
+    "onionsupport:theme",
+  ];
+
+  for (const key of keys) {
+    try {
+      const value =
+        localStorage.getItem(key);
+
+      const theme =
+        normalizeTheme(value);
+
+      if (theme) {
+        return theme;
+      }
+    } catch {}
+  }
+
+  return "";
+}
+
+function getSystemTheme() {
+  if (!isBrowser()) {
+    return "dark";
+  }
+
+  try {
+    if (
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-color-scheme: light)").matches
+    ) {
+      return "light";
+    }
+  } catch {}
+
+  return "dark";
+}
+
+function getCurrentTheme(AppCore) {
+  try {
+    const htmlTheme =
+      normalizeTheme(
+        document.documentElement?.dataset?.theme
+      );
+
+    if (htmlTheme && htmlTheme !== "system") {
+      return htmlTheme;
+    }
+
+    if (htmlTheme === "system") {
+      return getSystemTheme();
+    }
+  } catch {}
+
+  try {
+    const bodyTheme =
+      normalizeTheme(
+        document.body?.dataset?.theme
+      );
+
+    if (bodyTheme && bodyTheme !== "system") {
+      return bodyTheme;
+    }
+
+    if (bodyTheme === "system") {
+      return getSystemTheme();
+    }
+  } catch {}
+
+  try {
+    const stateTheme =
+      normalizeTheme(
+        AppCore?.state?.theme
+      );
+
+    if (stateTheme && stateTheme !== "system") {
+      return stateTheme;
+    }
+
+    if (stateTheme === "system") {
+      return getSystemTheme();
+    }
+  } catch {}
+
+  const storedTheme =
+    getStoredTheme();
+
+  if (storedTheme && storedTheme !== "system") {
+    return storedTheme;
+  }
+
+  if (storedTheme === "system") {
+    return getSystemTheme();
+  }
+
+  return "dark";
+}
+
+function getDefaultLoaderLogoUrl(AppCore) {
+  const theme =
+    getCurrentTheme(AppCore);
+
+  return theme === "light"
+    ? DEFAULT_LOADER_LOGO_BLACK_URL
+    : DEFAULT_LOADER_LOGO_WHITE_URL;
+}
+
+function getDefaultLoaderLogoPair() {
+  return {
+    white:
+      DEFAULT_LOADER_LOGO_WHITE_URL,
+
+    black:
+      DEFAULT_LOADER_LOGO_BLACK_URL,
+  };
+}
+
+/* =========================================================
    CONFIG
 ========================================================= */
 
 function getLoaderConfig(AppCore) {
   const cfg = safeObject(AppCore?.config);
+
+  const defaultLogoUrl =
+    getDefaultLoaderLogoUrl(AppCore);
+
+  const defaultLogoPair =
+    getDefaultLoaderLogoPair();
 
   return {
     logoUrl:
@@ -389,15 +591,35 @@ function getLoaderConfig(AppCore) {
           cfg.logo ||
           cfg.brandLogo ||
           cfg.appLogo ||
-          "/assets/logo.svg",
-        "/assets/logo.svg"
+          defaultLogoUrl,
+        defaultLogoUrl
+      ),
+
+    logoWhiteUrl:
+      safeText(
+        cfg.loaderLogoWhiteUrl ||
+          cfg.logoWhiteUrl ||
+          cfg.brandLogoWhite ||
+          cfg.appLogoWhite ||
+          defaultLogoPair.white,
+        defaultLogoPair.white
+      ),
+
+    logoBlackUrl:
+      safeText(
+        cfg.loaderLogoBlackUrl ||
+          cfg.logoBlackUrl ||
+          cfg.brandLogoBlack ||
+          cfg.appLogoBlack ||
+          defaultLogoPair.black,
+        defaultLogoPair.black
       ),
 
     appName:
       safeText(
         cfg.appName ||
           cfg.brandName ||
-          "Onion"
+          "Onion Support"
       ),
 
     text:
@@ -561,6 +783,12 @@ function getFallbackLoaderHtml(AppCore) {
   const logoUrl =
     escapeHtml(cfg.logoUrl);
 
+  const logoWhiteUrl =
+    escapeHtml(cfg.logoWhiteUrl);
+
+  const logoBlackUrl =
+    escapeHtml(cfg.logoBlackUrl);
+
   const appName =
     escapeHtml(cfg.appName);
 
@@ -570,25 +798,50 @@ function getFallbackLoaderHtml(AppCore) {
   const subtext =
     escapeHtml(cfg.subtext);
 
+  const fallbackInitial =
+    escapeHtml(
+      cfg.appName.slice(0, 1).toUpperCase() || "O"
+    );
+
   return `
     <div class="app-loader__backdrop" data-loader-backdrop="true"></div>
 
     <div class="app-loader__card" role="status" aria-live="polite">
       <div class="app-loader__brand">
         <img
-          class="app-loader__logo"
+          class="app-loader__logo app-loader__logo--default"
           src="${logoUrl}"
           alt="${appName}"
           draggable="false"
-          onerror="this.style.display='none';this.nextElementSibling.style.display='grid';"
+          data-loader-logo-default="true"
+          onerror="this.style.display='none';"
+        />
+
+        <img
+          class="app-loader__logo app-loader__logo--dark"
+          src="${logoWhiteUrl}"
+          alt=""
+          draggable="false"
+          aria-hidden="true"
+          data-loader-logo-dark="true"
+          onerror="this.style.display='none';"
+        />
+
+        <img
+          class="app-loader__logo app-loader__logo--light"
+          src="${logoBlackUrl}"
+          alt=""
+          draggable="false"
+          aria-hidden="true"
+          data-loader-logo-light="true"
+          onerror="this.style.display='none';"
         />
 
         <div
           class="app-loader__logo-fallback"
           aria-hidden="true"
-          style="display:none;"
         >
-          ${escapeHtml(appName.slice(0, 1).toUpperCase() || "O")}
+          ${fallbackInitial}
         </div>
       </div>
 
@@ -677,6 +930,14 @@ function injectFallbackLoaderStyles() {
           linear-gradient(180deg, rgba(3, 7, 18, .96), rgba(2, 6, 23, .98));
       }
 
+      [data-theme="light"] .app-loader__backdrop,
+      html[data-theme="light"] .app-loader__backdrop,
+      body[data-theme="light"] .app-loader__backdrop {
+        background:
+          radial-gradient(circle at 50% 0%, rgba(111, 89, 217, .16), transparent 38%),
+          linear-gradient(180deg, rgba(248, 250, 252, .98), rgba(241, 245, 249, .98));
+      }
+
       .app-loader__card {
         position: relative;
         z-index: 1;
@@ -698,6 +959,18 @@ function injectFallbackLoaderStyles() {
         text-align: center;
       }
 
+      [data-theme="light"] .app-loader__card,
+      html[data-theme="light"] .app-loader__card,
+      body[data-theme="light"] .app-loader__card {
+        border-color: rgba(15, 23, 42, .1);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, .92), rgba(255, 255, 255, .78));
+        box-shadow:
+          0 26px 80px rgba(15, 23, 42, .14),
+          inset 0 1px 0 rgba(255, 255, 255, .9);
+        color: #0f172a;
+      }
+
       .app-loader__brand {
         width: 74px;
         height: 74px;
@@ -711,17 +984,61 @@ function injectFallbackLoaderStyles() {
         overflow: hidden;
       }
 
+      [data-theme="light"] .app-loader__brand,
+      html[data-theme="light"] .app-loader__brand,
+      body[data-theme="light"] .app-loader__brand {
+        background: rgba(15, 23, 42, .035);
+        box-shadow:
+          inset 0 0 0 1px rgba(15, 23, 42, .08),
+          0 16px 38px rgba(15, 23, 42, .12);
+      }
+
       .app-loader__logo {
+        grid-area: 1 / 1;
         width: 52px;
         height: 52px;
         object-fit: contain;
         display: block;
       }
 
+      .app-loader__logo--dark,
+      .app-loader__logo--light {
+        display: none;
+      }
+
+      .app-loader__logo--default {
+        display: block;
+      }
+
+      html[data-theme="dark"] .app-loader__logo--default,
+      body[data-theme="dark"] .app-loader__logo--default,
+      [data-theme="dark"] .app-loader__logo--default {
+        display: none;
+      }
+
+      html[data-theme="dark"] .app-loader__logo--dark,
+      body[data-theme="dark"] .app-loader__logo--dark,
+      [data-theme="dark"] .app-loader__logo--dark {
+        display: block;
+      }
+
+      html[data-theme="light"] .app-loader__logo--default,
+      body[data-theme="light"] .app-loader__logo--default,
+      [data-theme="light"] .app-loader__logo--default {
+        display: none;
+      }
+
+      html[data-theme="light"] .app-loader__logo--light,
+      body[data-theme="light"] .app-loader__logo--light,
+      [data-theme="light"] .app-loader__logo--light {
+        display: block;
+      }
+
       .app-loader__logo-fallback {
+        grid-area: 1 / 1;
         width: 52px;
         height: 52px;
-        display: grid;
+        display: none;
         place-items: center;
         border-radius: 18px;
         font-size: 24px;
@@ -747,9 +1064,21 @@ function injectFallbackLoaderStyles() {
         color: rgba(226, 232, 240, .8);
       }
 
+      [data-theme="light"] .app-loader__text,
+      html[data-theme="light"] .app-loader__text,
+      body[data-theme="light"] .app-loader__text {
+        color: rgba(51, 65, 85, .82);
+      }
+
       .app-loader__subtext {
         font-size: 11px;
         color: rgba(148, 163, 184, .86);
+      }
+
+      [data-theme="light"] .app-loader__subtext,
+      html[data-theme="light"] .app-loader__subtext,
+      body[data-theme="light"] .app-loader__subtext {
+        color: rgba(100, 116, 139, .86);
       }
 
       .app-loader__bar {
@@ -817,6 +1146,7 @@ function createFallbackLoader(AppCore) {
     loader.id = LOADER_ID;
     loader.className = "app-loader is-visible";
     loader.dataset.appLoader = "true";
+    loader.dataset.loaderGenerated = "true";
     loader.setAttribute("aria-hidden", "false");
     loader.innerHTML =
       getFallbackLoaderHtml(AppCore);
@@ -887,8 +1217,12 @@ function ensureLoaderElement(
   const existing =
     getLoaderElement(AppCore);
 
+  /*
+    Importante:
+    Si index.html ya trae #app-loader, NO inyectamos estilos fallback.
+    El loader real debe quedar controlado por index.html + loader.css + tokens.
+  */
   if (existing) {
-    injectFallbackLoaderStyles();
     return existing;
   }
 
@@ -1936,6 +2270,18 @@ export function getLoaderSnapshot(
     failsafeArmSequence,
     lastFailsafeWarnKey,
     lastFailsafeWarnAt,
+
+    theme:
+      getCurrentTheme(AppCore),
+
+    logoUrl:
+      getDefaultLoaderLogoUrl(AppCore),
+
+    logoWhiteUrl:
+      DEFAULT_LOADER_LOGO_WHITE_URL,
+
+    logoBlackUrl:
+      DEFAULT_LOADER_LOGO_BLACK_URL,
   };
 }
 

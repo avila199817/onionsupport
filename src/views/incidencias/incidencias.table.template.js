@@ -2,51 +2,47 @@
    Onion SPA - Incidencias Table Template
    Archivo: src/views/incidencias/incidencias.table.template.js
 
-   FINAL PRODUCTION TEMPLATE · LIST VIEW · EXTREME SAAS MODE · 12/10
-   JS ONLY · NO CSS INLINE · NO <style> · CSP CLEAN · TOKEN READY
+   FINAL PRO SAAS PANEL · INCIDENCIAS TEMPLATE · CSP CLEAN · 12/10 EXTREME
+   PATCH · EXTERNAL CSS ONLY · NO STYLE INJECTION
+   PATCH · NO INLINE STYLE · NO INLINE EVENTS
+   PATCH · NO NATIVE TITLE TOOLTIP · DATA-TOOLTIP ONLY
+   PATCH · REAL TABLE LOCK · NO ::BEFORE ON <TR>
+   PATCH · FILTERS + SEARCH · SINGLE DATA FLOW
+   PATCH · AVATAR TONES VIA DATA ATTRIBUTES
+   PATCH · TECHNICIAN REAL AVATAR VIA STATE / APPCORE / FALLBACK ASSET
+   PATCH · DATA-CONTRACT READY FOR VIEW.JS
+   PATCH · ROW CLICK READY FOR DETAIL MODAL
+   PATCH · DOM BINDINGS CSP CLEAN
 
    RESPONSABILIDADES:
-   - render del hero/header de incidencias
-   - render de tabla productiva con paginación real
-   - render de filtros visuales compatibles con state/props/bindings
-   - render de búsqueda compatible con state/props/bindings
-   - compatibilidad con IncidenciasView.js
-   - estado loading visual en "Ver detalle" sin mover tabla
-   - estado loading visual en "Crear nueva incidencia"
-   - estado loading visual en refresh / retry / export
-   - título compacto y responsive
-   - fechas siempre en una sola línea
-   - botón "Detalle" mantiene tamaño fijo durante loading
-   - loader centrado dentro del botón sin cambiar layout
-   - loading de tabla suave en carga / refresh
-   - acciones compatibles con data-incidencias-action y data-action
-   - pintar importe total de facturas asociadas al ticket
-   - avatares fallback con tono pseudo-RNG estable por data-avatar-tone
-   - avatar real del técnico actual en badge de asignación
-   - fila completa clicable para abrir modal de detalle
-   - dark/light mode 100% delegado a CSS externo
-   - chips de estado alineados con tokens globales
-   - tabla blindada por clases, no por CSS inline
-   - diseño premium coherente con Facturas
+   - Render premium de vista de incidencias.
+   - Consumir CSS externo /src/css/views/incidencias/index.css.
+   - No inyectar <style> desde JS.
+   - No usar style="" dinámico.
+   - No usar eventos inline.
+   - No usar title="" nativo.
+   - Usar data-tooltip + aria-label.
+   - Tabla real blindada.
+   - Filtros visuales: todas / abiertas / cerradas.
+   - Búsqueda por incidencia, cliente, email, asunto, técnico, estado e importe.
+   - Paginación real de 5 items por defecto sobre resultados filtrados.
+   - Acciones compatibles con data-incidencias-action y data-action.
+   - Fila completa preparada para abrir modal de detalle.
+   - Botón "Detalle" compatible con bindings existentes.
+   - Estado loading visual en "Detalle" sin mover tabla.
+   - Refresh overlay sin desplazar columnas.
+   - Avatares fallback con tono estable por cliente/ticket.
+   - Avatar real del técnico actual en badge de asignación.
+   - Chips de estado con contraste real dark/light.
+   - Importe de facturas asociadas blindado contra normalizadores intermedios.
+   - Estados loading/error/empty blindados.
+   - HTML endurecido con escape/fallbacks.
+   - DOM binding opcional para fallback de imágenes y fila clicable.
 
-   HARDENING PRO:
-   - no depende de imports externos
-   - tolera payload heterogéneo
-   - soporta state + props directas
-   - paginación defensiva
-   - responsive delegado al CSS externo
-   - prioridad eliminada como columna, badge interno conservado
-   - importe blindado contra normalizadores intermedios
-   - loading inline icon-only centrado sin cambiar tamaño del botón
-   - CSS aplicable a .incidencias-view-root y [data-incidencias-scope]
-   - no usa eventos inline
-   - no usa style=""
-   - avatar de técnico compatible con payload rico o fallback local
-
-   IMPORTANTE:
-   - El CSS debe vivir en:
-     src/css/views/incidencias.css
-   - Este módulo no emite <style>, style="", ni eventos inline.
+   NOTA CSP:
+   - Para fallback de imagen y fila clicable, llamar a:
+     bindIncidenciasTemplateDom(root)
+     desde incidencias.view.js después de pintar la vista.
 ========================================================= */
 
 /* =========================================================
@@ -60,7 +56,19 @@ const AVATAR_TONE_COUNT = 10;
 const CURRENT_TECHNICIAN_NAME = "Cristian Ávila Luque";
 const CURRENT_TECHNICIAN_EMAIL = "avila199817@gmail.com";
 const CURRENT_TECHNICIAN_USERNAME = "avila199817";
-const CURRENT_TECHNICIAN_AVATAR_URL = "/src/media/img/Usuario.png";
+
+/*
+  Orden intencional:
+  1) avatar recibido en state/AppCore
+  2) asset local principal
+  3) alternativas por casing/nombre
+*/
+const CURRENT_TECHNICIAN_AVATAR_FALLBACKS = Object.freeze([
+  "/src/media/img/Usuario.png",
+  "/src/media/img/usuario.png",
+  "/src/media/img/avatar.png",
+  "/src/media/img/user.png",
+]);
 
 const CURRENT_TECHNICIAN_MATCH_VALUES = Object.freeze([
   CURRENT_TECHNICIAN_NAME,
@@ -77,7 +85,7 @@ const FILTERS = Object.freeze([
 ]);
 
 /* =========================================================
-   SAFE HELPERS
+   BASE HELPERS
 ========================================================= */
 
 function safeText(value, fallback = "") {
@@ -108,11 +116,10 @@ function safeNumber(value, fallback = 0) {
       const lastComma = normalized.lastIndexOf(",");
       const lastDot = normalized.lastIndexOf(".");
 
-      if (lastComma > lastDot) {
-        normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
-      } else {
-        normalized = normalized.replace(/,/g, "");
-      }
+      normalized =
+        lastComma > lastDot
+          ? normalized.replace(/\./g, "").replace(/,/g, ".")
+          : normalized.replace(/,/g, "");
     } else if (hasComma) {
       normalized = normalized.replace(/,/g, ".");
     }
@@ -178,6 +185,18 @@ function normalizeKey(value = "") {
     .replace(/^_+|_+$/g, "");
 }
 
+function bool(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+
+  const key = normalizeText(value);
+
+  if (["true", "1", "yes", "si", "sí", "on"].includes(key)) return true;
+  if (["false", "0", "no", "off"].includes(key)) return false;
+
+  return fallback;
+}
+
 function hashString(value = "") {
   const text = safeText(value, "onion");
   let hash = 2166136261;
@@ -193,6 +212,144 @@ function hashString(value = "") {
   }
 
   return Math.abs(hash >>> 0);
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function htmlAttrs(attrs = {}) {
+  return Object.entries(safeObject(attrs))
+    .map(([key, value]) => {
+      if (value === false || value === null || value === undefined) return "";
+      if (value === true) return escapeHtml(key);
+
+      return `${escapeHtml(key)}="${escapeHtml(value)}"`;
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
+function tooltipAttrs(tooltip = "", ariaLabel = "") {
+  const cleanTooltip = safeText(tooltip, "");
+  const cleanAria = safeText(ariaLabel, cleanTooltip);
+
+  return htmlAttrs({
+    "aria-label": cleanAria || false,
+    "data-tooltip": cleanTooltip || false,
+  });
+}
+
+function disabledAttrs(disabled = false, busy = false) {
+  return htmlAttrs({
+    disabled: Boolean(disabled),
+    "aria-disabled": disabled ? "true" : false,
+    "aria-busy": busy ? "true" : false,
+  });
+}
+
+function actionAttrs(action = "", ticketId = "") {
+  const cleanAction = safeText(action, "");
+  const cleanTicketId = safeText(ticketId, "");
+
+  return htmlAttrs({
+    "data-action": cleanAction,
+    "data-incidencias-action": cleanAction,
+    "data-ticket-id": cleanTicketId || false,
+    "data-incidencia-id": cleanTicketId || false,
+  });
+}
+
+function getInputItems(input = {}) {
+  const data = safeObject(input);
+
+  return safeArray(
+    first(
+      data.items,
+      data.rows,
+      data.tickets,
+      data.incidencias,
+      data.data?.items,
+      data.data?.tickets,
+      data.data?.incidencias,
+      data.payload?.items,
+      data.payload?.tickets,
+      data.payload?.incidencias,
+      []
+    )
+  );
+}
+
+function getRuntimeState(input = {}) {
+  const data = safeObject(input);
+
+  return safeObject(
+    first(
+      data.state,
+      data.viewState,
+      data.runtime,
+      data.meta?.state,
+      {}
+    )
+  );
+}
+
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+/* =========================================================
+   GLOBAL STATE HELPERS
+========================================================= */
+
+function getGlobalAppCoreState() {
+  if (!isBrowser()) return {};
+
+  try {
+    const candidates = [
+      window.AppCore?.state,
+      window.App?.state,
+      window.Onion?.state,
+      window.__APP_CORE__?.state,
+      window.__ONION_APP__?.state,
+      window.__ONION_STATE__,
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate && typeof candidate === "object") {
+        return candidate;
+      }
+    }
+  } catch {}
+
+  return {};
+}
+
+function getGlobalCurrentUser() {
+  const state = getGlobalAppCoreState();
+
+  return safeObject(
+    first(
+      state.user,
+      state.currentUser,
+      state.sessionUser,
+      state.auth?.user,
+      {}
+    )
+  );
+}
+
+/* =========================================================
+   DATE HELPERS
+========================================================= */
+
+function isDateOnlyValue(value = null) {
+  const raw = safeText(value, "");
+
+  return (
+    /^\d{4}-\d{2}-\d{2}$/.test(raw) ||
+    /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw)
+  );
 }
 
 function toTimestamp(value = null) {
@@ -237,10 +394,6 @@ function toTimestamp(value = null) {
   const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
 
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
-}
-
-function clamp(value, min, max) {
-  return Math.min(Math.max(value, min), max);
 }
 
 /* =========================================================
@@ -322,8 +475,6 @@ function getDateFormatter() {
 }
 
 function formatDateTime(value = null) {
-  if (!value) return "—";
-
   const ts = toTimestamp(value);
   if (!ts) return "—";
 
@@ -335,8 +486,6 @@ function formatDateTime(value = null) {
 }
 
 function formatDateShort(value = null) {
-  if (!value) return "—";
-
   const ts = toTimestamp(value);
   if (!ts) return "—";
 
@@ -347,9 +496,12 @@ function formatDateShort(value = null) {
   }
 }
 
-function formatRelativeDate(value = null) {
-  if (!value) return "Sin fecha";
+function formatDateTooltip(value = null) {
+  if (isDateOnlyValue(value)) return formatDateShort(value);
+  return formatDateTime(value);
+}
 
+function formatRelativeDate(value = null) {
   const ts = toTimestamp(value);
   if (!ts) return "Sin fecha";
 
@@ -381,8 +533,6 @@ function formatRelativeDate(value = null) {
 }
 
 function formatLastUpdate(value = null) {
-  if (!value) return "Sin fecha";
-
   const ts = toTimestamp(value);
   if (!ts) return "Sin fecha";
 
@@ -413,10 +563,11 @@ function icon(name = "") {
     alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
     close: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
     search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
-    clock: `<svg ${common}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`,
     euro: `<svg ${common}><path d="M4 10h10"/><path d="M4 14h9"/><path d="M19 5a7.7 7.7 0 0 0-5.2-2C8.4 3 4 7 4 12s4.4 9 9.8 9a7.7 7.7 0 0 0 5.2-2"/></svg>`,
     activity: `<svg ${common}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
     users: `<svg ${common}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+    lock: `<svg ${common}><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`,
+    filter: `<svg ${common}><path d="M22 3H2l8 9.46V19l4 2v-8.54Z"/></svg>`,
   };
 
   return icons[name] || "";
@@ -426,8 +577,12 @@ function icon(name = "") {
    DATA PICKERS
 ========================================================= */
 
+function getRaw(item = {}) {
+  return safeObject(item?.raw);
+}
+
 function getTicketId(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -451,7 +606,7 @@ function getTicketId(item = {}) {
 }
 
 function getSubject(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -471,7 +626,7 @@ function getSubject(item = {}) {
 }
 
 function getDescription(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -493,7 +648,7 @@ function getDescription(item = {}) {
 }
 
 function getClientName(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -533,7 +688,7 @@ function getClientName(item = {}) {
 }
 
 function getClientEmail(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -565,7 +720,7 @@ function getClientEmail(item = {}) {
 }
 
 function getAvatarUrl(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -618,8 +773,12 @@ function getAvatarTone(item = {}) {
   return String(hashString(seed) % AVATAR_TONE_COUNT);
 }
 
+/* =========================================================
+   STATUS / PRIORITY
+========================================================= */
+
 function getStatusRaw(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return first(
     item.status,
@@ -696,7 +855,7 @@ function getStatusLabel(value = "") {
 }
 
 function getPriorityRaw(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return first(
     item.priority,
@@ -747,7 +906,7 @@ function getPriorityLabel(item = {}) {
 }
 
 function getCategory(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -768,8 +927,12 @@ function getCategory(item = {}) {
   );
 }
 
+/* =========================================================
+   ASSIGNMENT / TECHNICIAN AVATAR
+========================================================= */
+
 function getAssignedTo(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -780,6 +943,8 @@ function getAssignedTo(item = {}) {
       item.tecnico?.name,
       item.tecnico?.displayName,
       item.tecnico,
+      item.agent?.name,
+      item.agent?.displayName,
       item.agent,
       raw.assignedTo?.name,
       raw.assignedTo?.displayName,
@@ -788,6 +953,8 @@ function getAssignedTo(item = {}) {
       raw.tecnico?.name,
       raw.tecnico?.displayName,
       raw.tecnico,
+      raw.agent?.name,
+      raw.agent?.displayName,
       raw.agent
     ),
     "Sin asignar"
@@ -795,7 +962,7 @@ function getAssignedTo(item = {}) {
 }
 
 function getAssignedEmail(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -807,6 +974,7 @@ function getAssignedEmail(item = {}) {
       item.tecnico?.mail,
       item.agentEmail,
       item.agent?.email,
+      item.agent?.mail,
       raw.assignedTo?.email,
       raw.assignedTo?.mail,
       raw.assignment?.agentEmail,
@@ -814,14 +982,15 @@ function getAssignedEmail(item = {}) {
       raw.tecnico?.email,
       raw.tecnico?.mail,
       raw.agentEmail,
-      raw.agent?.email
+      raw.agent?.email,
+      raw.agent?.mail
     ),
     ""
   ).toLowerCase();
 }
 
 function getAssignedId(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -836,6 +1005,7 @@ function getAssignedId(item = {}) {
       item.agentId,
       item.agent?.id,
       item.agent?.userId,
+      item.agent?.username,
       raw.assignedTo?.id,
       raw.assignedTo?.userId,
       raw.assignedTo?.username,
@@ -846,15 +1016,31 @@ function getAssignedId(item = {}) {
       raw.tecnico?.username,
       raw.agentId,
       raw.agent?.id,
-      raw.agent?.userId
+      raw.agent?.userId,
+      raw.agent?.username
     ),
     ""
   );
 }
 
-function getRuntimeUserAvatar(state = {}) {
+function getCurrentUserFromRuntime(state = {}) {
   const runtime = safeObject(state);
-  const user = safeObject(first(runtime.user, runtime.currentUser, runtime.sessionUser));
+
+  return safeObject(
+    first(
+      runtime.user,
+      runtime.currentUser,
+      runtime.sessionUser,
+      runtime.auth?.user,
+      getGlobalCurrentUser(),
+      {}
+    )
+  );
+}
+
+function getCurrentUserAvatar(state = {}) {
+  const runtime = safeObject(state);
+  const user = getCurrentUserFromRuntime(runtime);
   const raw = safeObject(user.raw);
 
   return safeText(
@@ -863,32 +1049,46 @@ function getRuntimeUserAvatar(state = {}) {
       runtime.avatarUrl,
       runtime.userAvatar,
       runtime.userAvatarUrl,
+      runtime.photo,
+      runtime.photoUrl,
+      runtime.picture,
+      runtime.image,
       user.avatar,
       user.avatarUrl,
       user.photo,
       user.photoUrl,
       user.picture,
+      user.pictureUrl,
       user.image,
+      user.imageUrl,
+      user.profileImage,
+      user.profileImageUrl,
       raw.avatar,
       raw.avatarUrl,
       raw.photo,
       raw.photoUrl,
       raw.picture,
-      raw.image
+      raw.pictureUrl,
+      raw.image,
+      raw.imageUrl,
+      raw.profileImage,
+      raw.profileImageUrl
     ),
     ""
   );
 }
 
-function getAssignedAvatarUrl(item = {}, state = {}) {
-  const raw = safeObject(item?.raw);
+function getAssignedExplicitAvatar(item = {}) {
+  const raw = getRaw(item);
 
-  const explicitAvatar = safeText(
+  return safeText(
     first(
       item.assignedTo?.avatar,
       item.assignedTo?.avatarUrl,
       item.assignedTo?.photo,
       item.assignedTo?.photoUrl,
+      item.assignedTo?.picture,
+      item.assignedTo?.image,
       item.assignment?.agentAvatar,
       item.assignment?.avatar,
       item.assignment?.avatarUrl,
@@ -896,13 +1096,21 @@ function getAssignedAvatarUrl(item = {}, state = {}) {
       item.tecnico?.avatarUrl,
       item.tecnico?.photo,
       item.tecnico?.photoUrl,
+      item.tecnico?.picture,
+      item.tecnico?.image,
       item.agentAvatar,
       item.agent?.avatar,
       item.agent?.avatarUrl,
+      item.agent?.photo,
+      item.agent?.photoUrl,
+      item.agent?.picture,
+      item.agent?.image,
       raw.assignedTo?.avatar,
       raw.assignedTo?.avatarUrl,
       raw.assignedTo?.photo,
       raw.assignedTo?.photoUrl,
+      raw.assignedTo?.picture,
+      raw.assignedTo?.image,
       raw.assignment?.agentAvatar,
       raw.assignment?.avatar,
       raw.assignment?.avatarUrl,
@@ -910,22 +1118,18 @@ function getAssignedAvatarUrl(item = {}, state = {}) {
       raw.tecnico?.avatarUrl,
       raw.tecnico?.photo,
       raw.tecnico?.photoUrl,
+      raw.tecnico?.picture,
+      raw.tecnico?.image,
       raw.agentAvatar,
       raw.agent?.avatar,
-      raw.agent?.avatarUrl
+      raw.agent?.avatarUrl,
+      raw.agent?.photo,
+      raw.agent?.photoUrl,
+      raw.agent?.picture,
+      raw.agent?.image
     ),
     ""
   );
-
-  if (explicitAvatar) {
-    return explicitAvatar;
-  }
-
-  if (isCurrentTechnicianAssigned(item, state)) {
-    return safeText(getRuntimeUserAvatar(state), CURRENT_TECHNICIAN_AVATAR_URL);
-  }
-
-  return "";
 }
 
 function isCurrentTechnicianAssigned(item = {}, state = {}) {
@@ -934,7 +1138,8 @@ function isCurrentTechnicianAssigned(item = {}, state = {}) {
   const assignedId = normalizeText(getAssignedId(item));
 
   const runtime = safeObject(state);
-  const user = safeObject(first(runtime.user, runtime.currentUser, runtime.sessionUser));
+  const user = getCurrentUserFromRuntime(runtime);
+  const raw = safeObject(user.raw);
 
   const runtimeValues = [
     user.name,
@@ -944,12 +1149,24 @@ function isCurrentTechnicianAssigned(item = {}, state = {}) {
     user.username,
     user.userId,
     user.id,
+    raw.name,
+    raw.displayName,
+    raw.fullName,
+    raw.email,
+    raw.username,
+    raw.userId,
+    raw.id,
     runtime.username,
     runtime.email,
     runtime.userId,
-  ].map((value) => normalizeText(value));
+    runtime.id,
+  ]
+    .map((value) => normalizeText(value))
+    .filter(Boolean);
 
-  const knownValues = CURRENT_TECHNICIAN_MATCH_VALUES.map((value) => normalizeText(value));
+  const knownValues = CURRENT_TECHNICIAN_MATCH_VALUES
+    .map((value) => normalizeText(value))
+    .filter(Boolean);
 
   const candidates = [
     assigned,
@@ -959,25 +1176,66 @@ function isCurrentTechnicianAssigned(item = {}, state = {}) {
 
   const matchesKnown = candidates.some((candidate) => {
     return knownValues.some((known) => {
-      return known && (candidate === known || candidate.includes(known) || known.includes(candidate));
+      return (
+        candidate === known ||
+        candidate.includes(known) ||
+        known.includes(candidate)
+      );
     });
   });
 
-  if (matchesKnown) {
-    return true;
-  }
+  if (matchesKnown) return true;
 
-  const matchesRuntime = candidates.some((candidate) => {
+  return candidates.some((candidate) => {
     return runtimeValues.some((runtimeValue) => {
-      return runtimeValue && (candidate === runtimeValue || candidate.includes(runtimeValue) || runtimeValue.includes(candidate));
+      return (
+        candidate === runtimeValue ||
+        candidate.includes(runtimeValue) ||
+        runtimeValue.includes(candidate)
+      );
     });
   });
-
-  return matchesRuntime;
 }
 
+function getTechnicianAvatarCandidates(item = {}, state = {}) {
+  const explicitAvatar = getAssignedExplicitAvatar(item);
+  const currentUserAvatar = getCurrentUserAvatar(state);
+  const isCurrent = isCurrentTechnicianAssigned(item, state);
+
+  const candidates = [
+    explicitAvatar,
+    isCurrent ? currentUserAvatar : "",
+    isCurrent ? CURRENT_TECHNICIAN_AVATAR_FALLBACKS[0] : "",
+    ...CURRENT_TECHNICIAN_AVATAR_FALLBACKS,
+  ]
+    .map((value) => safeText(value, ""))
+    .filter(Boolean);
+
+  return Array.from(new Set(candidates));
+}
+
+function getAssignedAvatarUrl(item = {}, state = {}) {
+  const explicitAvatar = getAssignedExplicitAvatar(item);
+
+  if (explicitAvatar) return explicitAvatar;
+
+  if (isCurrentTechnicianAssigned(item, state)) {
+    return first(
+      getCurrentUserAvatar(state),
+      CURRENT_TECHNICIAN_AVATAR_FALLBACKS[0],
+      ""
+    );
+  }
+
+  return "";
+}
+
+/* =========================================================
+   INVOICING / DATES / ATTACHMENTS
+========================================================= */
+
 function getImporteAmount(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return first(
     item.total,
@@ -1010,7 +1268,7 @@ function getImporteAmount(item = {}) {
 }
 
 function getImporteCurrency(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return safeText(
     first(
@@ -1035,7 +1293,7 @@ function getImporteCurrency(item = {}) {
 }
 
 function getPaymentStatusKey(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   const key = normalizeKey(
     first(
@@ -1080,7 +1338,7 @@ function getImporteLabel(item = {}) {
 }
 
 function getCreatedAt(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return first(
     item.createdAt,
@@ -1097,7 +1355,7 @@ function getCreatedAt(item = {}) {
 }
 
 function getUpdatedAt(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return first(
     item.updatedAt,
@@ -1122,7 +1380,7 @@ function getUpdatedAt(item = {}) {
 }
 
 function getSortTimestamp(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return (
     safeNumber(item?.meta?.updatedAtMs, 0) ||
@@ -1137,7 +1395,7 @@ function getSortTimestamp(item = {}) {
 }
 
 function getAttachmentsCount(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   const attachments = first(
     item.attachments,
@@ -1269,7 +1527,7 @@ function normalizeFilter(value = "") {
 
 function getActiveFilter(input = {}) {
   const data = safeObject(input);
-  const runtime = safeObject(data.state);
+  const runtime = getRuntimeState(data);
 
   return normalizeFilter(
     first(
@@ -1292,7 +1550,7 @@ function getFilterLabel(filter = "all") {
 
 function getSearchQuery(input = {}) {
   const data = safeObject(input);
-  const runtime = safeObject(data.state);
+  const runtime = getRuntimeState(data);
 
   return normalizeWhitespace(
     first(
@@ -1324,7 +1582,7 @@ function itemMatchesFilter(item = {}, filter = "all") {
 }
 
 function getSearchHaystack(item = {}) {
-  const raw = safeObject(item?.raw);
+  const raw = getRaw(item);
 
   return [
     getTicketId(item),
@@ -1335,6 +1593,7 @@ function getSearchHaystack(item = {}) {
     getCategory(item),
     getAssignedTo(item),
     getAssignedEmail(item),
+    getAssignedId(item),
     getStatusLabel(getStatusRaw(item)),
     getPriorityLabel(item),
     getImporteLabel(item),
@@ -1432,7 +1691,7 @@ function computeStats(items = []) {
 
 function normalizePageSize(input = {}) {
   const data = safeObject(input);
-  const runtime = safeObject(data.state);
+  const runtime = getRuntimeState(data);
 
   return clamp(
     safeNumber(
@@ -1452,9 +1711,10 @@ function normalizePageSize(input = {}) {
 
 function getPagination(items = [], input = {}) {
   const data = safeObject(input);
-  const runtime = safeObject(data.state);
+  const runtime = getRuntimeState(data);
 
-  const allItems = filterAndSortIncidencias(items, data);
+  const rawItems = safeArray(items);
+  const allItems = filterAndSortIncidencias(rawItems, data);
   const pageSize = normalizePageSize(data);
   const filtering = isFilterActive(data);
 
@@ -1466,11 +1726,11 @@ function getPagination(items = [], input = {}) {
         runtime.totalCount,
         runtime.remoteCount,
         runtime.total,
-        allItems.length
+        rawItems.length
       ),
-      allItems.length
+      rawItems.length
     ),
-    allItems.length
+    rawItems.length
   );
 
   const reportedTotal = filtering ? allItems.length : remoteTotal;
@@ -1508,7 +1768,7 @@ function getPagination(items = [], input = {}) {
     currentPage,
     totalPages,
     totalCount: reportedTotal,
-    unfilteredCount: safeArray(items).length,
+    unfilteredCount: rawItems.length,
     remoteTotal,
     rangeStart,
     rangeEnd,
@@ -1517,6 +1777,29 @@ function getPagination(items = [], input = {}) {
     filtering,
     activeFilter: getActiveFilter(data),
     searchQuery: getSearchQuery(data),
+  };
+}
+
+/* =========================================================
+   BUSY STATE
+========================================================= */
+
+function resolveBusyMeta(item = {}, state = {}) {
+  const runtime = safeObject(state);
+  const ticketId = getTicketId(item);
+
+  return {
+    ticketId,
+    isOpening:
+      safeText(
+        first(
+          runtime.openingTicketId,
+          runtime.openingIncidenciaId,
+          runtime.detailTicketId,
+          runtime.loadingTicketId
+        ),
+        ""
+      ) === ticketId,
   };
 }
 
@@ -1542,9 +1825,7 @@ function renderLoaderOnly(label = "Cargando") {
     <span
       class="incidencias-loader-only"
       role="status"
-      aria-label="${escapeHtml(label)}"
-      title="${escapeHtml(label)}"
-      data-tooltip="${escapeHtml(label)}"
+      ${tooltipAttrs(label, label)}
     >
       <span class="incidencias-inline-spinner" aria-hidden="true"></span>
     </span>
@@ -1561,11 +1842,11 @@ function renderAvatar(item = {}) {
     return `
       <div
         class="incidencias-avatar"
-        title="${escapeHtml(fullName)}"
-        aria-label="${escapeHtml(fullName)}"
-        data-tooltip="${escapeHtml(fullName)}"
+        ${tooltipAttrs(fullName, fullName)}
         data-avatar-tone="${escapeHtml(tone)}"
         data-has-avatar="true"
+        data-fallback="false"
+        data-incidencias-avatar="true"
       >
         <img
           class="incidencias-avatar-img"
@@ -1583,11 +1864,10 @@ function renderAvatar(item = {}) {
   return `
     <div
       class="incidencias-avatar incidencias-avatar--fallback"
-      title="${escapeHtml(fullName)}"
-      aria-label="${escapeHtml(fullName)}"
-      data-tooltip="${escapeHtml(fullName)}"
+      ${tooltipAttrs(fullName, fullName)}
       data-avatar-tone="${escapeHtml(tone)}"
       data-fallback="true"
+      data-incidencias-avatar="true"
     >
       <span class="incidencias-avatar-fallback">${escapeHtml(initials)}</span>
     </div>
@@ -1610,12 +1890,12 @@ function renderStatusChip(item = {}) {
 function renderPriorityBadge(item = {}) {
   const key = getPriorityKey(item);
   const label = getPriorityLabel(item);
+  const tooltip = `Prioridad ${label}`;
 
   return `
     <span
       class="incidencias-mini-badge incidencias-mini-badge--${escapeHtml(key)}"
-      title="${escapeHtml(`Prioridad ${label}`)}"
-      data-tooltip="${escapeHtml(`Prioridad ${label}`)}"
+      ${tooltipAttrs(tooltip, tooltip)}
     >
       ${key === "critical" || key === "urgent" ? icon("alert") : icon("activity")}
       ${escapeHtml(label)}
@@ -1626,10 +1906,12 @@ function renderPriorityBadge(item = {}) {
 function renderAssignedAvatar(item = {}, state = {}) {
   const assigned = getAssignedTo(item);
   const assignedEmail = getAssignedEmail(item);
-  const assignedAvatar = getAssignedAvatarUrl(item, state);
   const assignedInitials = getInitials(assigned);
+  const avatarUrl = getAssignedAvatarUrl(item, state);
+  const candidates = getTechnicianAvatarCandidates(item, state);
+  const isCurrent = isCurrentTechnicianAssigned(item, state);
 
-  if (!assignedAvatar) {
+  if (!avatarUrl) {
     return `
       <span
         class="incidencias-agent-avatar incidencias-agent-avatar--icon"
@@ -1643,20 +1925,23 @@ function renderAssignedAvatar(item = {}, state = {}) {
   return `
     <span
       class="incidencias-agent-avatar incidencias-agent-avatar--image"
-      title="${escapeHtml(assignedEmail || assigned)}"
-      data-tooltip="${escapeHtml(assignedEmail || assigned)}"
+      ${tooltipAttrs(assignedEmail || assigned, assignedEmail || assigned)}
       data-technician-avatar="true"
-      data-current-technician="${isCurrentTechnicianAssigned(item, state) ? "true" : "false"}"
+      data-current-technician="${isCurrent ? "true" : "false"}"
+      data-avatar-fallback-index="0"
+      data-avatar-fallback-srcs="${escapeHtml(candidates.join("|"))}"
+      data-fallback="false"
       aria-hidden="true"
     >
       <img
         class="incidencias-agent-avatar-img"
-        src="${escapeHtml(assignedAvatar)}"
+        src="${escapeHtml(avatarUrl)}"
         alt=""
         loading="lazy"
         decoding="async"
         referrerpolicy="no-referrer"
         draggable="false"
+        data-incidencias-agent-avatar-img="true"
       />
       <span class="incidencias-agent-avatar-fallback">
         ${escapeHtml(assignedInitials)}
@@ -1670,11 +1955,12 @@ function renderAssignedBadge(item = {}, state = {}) {
   const assignedEmail = getAssignedEmail(item);
   const isCurrent = isCurrentTechnicianAssigned(item, state);
 
+  const tooltip = `Técnico · ${assigned}${assignedEmail ? ` · ${assignedEmail}` : ""}`;
+
   return `
     <span
       class="incidencias-mini-badge incidencias-mini-badge--agent${isCurrent ? " incidencias-mini-badge--current-agent" : ""}"
-      title="${escapeHtml(`Técnico · ${assigned}${assignedEmail ? ` · ${assignedEmail}` : ""}`)}"
-      data-tooltip="${escapeHtml(`Técnico · ${assigned}${assignedEmail ? ` · ${assignedEmail}` : ""}`)}"
+      ${tooltipAttrs(tooltip, tooltip)}
       data-assigned-technician="${escapeHtml(assigned)}"
       data-assigned-email="${escapeHtml(assignedEmail)}"
       data-current-technician="${isCurrent ? "true" : "false"}"
@@ -1723,14 +2009,9 @@ function renderActionButton({
     <button
       type="button"
       class="incidencias-detail-btn${loading ? " is-loading" : ""}"
-      data-incidencias-action="${escapeHtml(action)}"
-      data-action="${escapeHtml(action === "detail" ? "open-ticket" : action)}"
-      data-ticket-id="${escapeHtml(ticketId)}"
-      data-incidencia-id="${escapeHtml(ticketId)}"
-      title="${escapeHtml(finalTooltip)}"
-      data-tooltip="${escapeHtml(finalTooltip)}"
-      ${finalDisabled ? 'disabled aria-disabled="true"' : ""}
-      ${loading ? 'aria-busy="true"' : ""}
+      ${actionAttrs(action === "detail" ? "open-ticket" : action, ticketId)}
+      ${tooltipAttrs(finalTooltip, finalTooltip)}
+      ${disabledAttrs(finalDisabled, loading)}
     >
       ${
         loading
@@ -1750,8 +2031,9 @@ function renderActionButton({
 
 function renderRow(item = {}, state = {}) {
   const runtime = safeObject(state);
+  const busy = resolveBusyMeta(item, runtime);
 
-  const ticketId = getTicketId(item);
+  const ticketId = busy.ticketId;
   const subject = getSubject(item);
   const description = getDescription(item);
   const clientName = getClientName(item);
@@ -1760,22 +2042,10 @@ function renderRow(item = {}, state = {}) {
   const updatedAtRaw = getUpdatedAt(item);
   const createdAt = formatDateTime(createdAtRaw);
   const updatedAt = formatLastUpdate(updatedAtRaw);
-  const updatedAtFull = formatDateTime(updatedAtRaw);
+  const updatedAtFull = formatDateTooltip(updatedAtRaw);
   const attachmentsCount = getAttachmentsCount(item);
   const category = getCategory(item);
   const statusKey = getStatusKey(getStatusRaw(item));
-
-  const openingTicketId = safeText(
-    first(
-      runtime.openingTicketId,
-      runtime.openingIncidenciaId,
-      runtime.detailTicketId,
-      runtime.loadingTicketId
-    ),
-    ""
-  );
-
-  const isOpening = openingTicketId === ticketId;
 
   return `
     <tr
@@ -1783,15 +2053,14 @@ function renderRow(item = {}, state = {}) {
       data-ticket-row="true"
       data-ticket-id="${escapeHtml(ticketId)}"
       data-incidencia-id="${escapeHtml(ticketId)}"
-      data-incidencias-action="detail"
+      data-incidencias-action="open-ticket"
       data-action="open-ticket"
       data-row-action="open-ticket"
       data-detail-target="true"
+      data-row-click-disabled="false"
       role="button"
       tabindex="0"
-      aria-label="${escapeHtml(`Abrir detalle de incidencia ${ticketId}`)}"
-      title="${escapeHtml(`Abrir detalle de incidencia ${ticketId}`)}"
-      data-tooltip="${escapeHtml(`Abrir detalle de incidencia ${ticketId}`)}"
+      ${tooltipAttrs(`Abrir detalle de incidencia ${ticketId}`, `Abrir detalle de incidencia ${ticketId}`)}
     >
       <td class="incidencias-cell incidencias-cell--main">
         <div class="incidencias-main">
@@ -1827,8 +2096,7 @@ function renderRow(item = {}, state = {}) {
       <td class="incidencias-cell incidencias-cell--date">
         <span
           class="incidencias-date-inline"
-          title="${escapeHtml(createdAt)}"
-          data-tooltip="${escapeHtml(createdAt)}"
+          ${tooltipAttrs(createdAt, `Fecha de creación ${createdAt}`)}
         >
           ${escapeHtml(createdAt)}
         </span>
@@ -1837,8 +2105,7 @@ function renderRow(item = {}, state = {}) {
       <td class="incidencias-cell incidencias-cell--date">
         <span
           class="incidencias-date-inline"
-          title="${escapeHtml(updatedAtFull)}"
-          data-tooltip="${escapeHtml(updatedAtFull)}"
+          ${tooltipAttrs(updatedAtFull, `Última novedad ${updatedAtFull}`)}
         >
           ${escapeHtml(updatedAt)}
         </span>
@@ -1851,8 +2118,10 @@ function renderRow(item = {}, state = {}) {
       <td class="incidencias-cell incidencias-cell--attachments">
         <span
           class="incidencias-attachments-pill"
-          title="${escapeHtml(`${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`)}"
-          data-tooltip="${escapeHtml(`${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`)}"
+          ${tooltipAttrs(
+            `${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`,
+            `${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`
+          )}
         >
           ${icon("paperclip")}
           ${escapeHtml(String(attachmentsCount))}
@@ -1862,7 +2131,7 @@ function renderRow(item = {}, state = {}) {
       <td class="incidencias-cell incidencias-cell--actions">
         ${renderActionButton({
           ticketId,
-          loading: isOpening,
+          loading: busy.isOpening,
           label: "Detalle",
           loadingLabel: "Cargando detalle",
           iconName: "eye",
@@ -1878,15 +2147,17 @@ function renderPagination(pagination = {}, state = {}) {
   const loading = Boolean(runtime.loading);
   const refreshing = Boolean(runtime.refreshing);
 
+  const prevDisabled = !pagination.hasPrev || loading || refreshing;
+  const nextDisabled = !pagination.hasNext || loading || refreshing;
+
   return `
     <div class="incidencias-pagination" aria-label="Paginación de incidencias">
       <button
         type="button"
         class="incidencias-pagination-btn"
-        data-incidencias-action="prev-page"
-        data-action="prev-page"
+        ${actionAttrs("prev-page")}
         data-page="${escapeHtml(String(Math.max(1, pagination.currentPage - 1)))}"
-        ${!pagination.hasPrev || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
+        ${disabledAttrs(prevDisabled)}
       >
         Anterior
       </button>
@@ -1898,10 +2169,9 @@ function renderPagination(pagination = {}, state = {}) {
       <button
         type="button"
         class="incidencias-pagination-btn incidencias-pagination-btn--next"
-        data-incidencias-action="next-page"
-        data-action="next-page"
+        ${actionAttrs("next-page")}
         data-page="${escapeHtml(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
-        ${!pagination.hasNext || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
+        ${disabledAttrs(nextDisabled)}
       >
         Siguiente
       </button>
@@ -1940,9 +2210,7 @@ function renderSearch(input = {}) {
               class="incidencias-search-clear"
               data-incidencias-action="clear-search"
               data-action="clear-search"
-              title="Limpiar búsqueda"
-              data-tooltip="Limpiar búsqueda"
-              aria-label="Limpiar búsqueda"
+              ${tooltipAttrs("Limpiar búsqueda", "Limpiar búsqueda")}
             >
               ${icon("close")}
             </button>
@@ -1955,13 +2223,17 @@ function renderSearch(input = {}) {
 
 function renderFilters(input = {}, pagination = {}) {
   const data = safeObject(input);
-  const items = safeArray(first(data.items, data.rows, data.tickets, data.incidencias));
+  const items = getInputItems(data);
   const counts = computeFilterCounts(items, data);
   const activeFilter = normalizeFilter(pagination.activeFilter || getActiveFilter(data));
 
   return `
     <div class="incidencias-filters" aria-label="Filtros y búsqueda de incidencias">
-      <div class="incidencias-filter-pills">
+      <div
+        class="incidencias-filter-pills"
+        role="group"
+        aria-label="Filtrar incidencias por estado"
+      >
         ${FILTERS.map((filter) => {
           const isActive = filter.key === activeFilter;
           const count = counts[filter.key] ?? 0;
@@ -1992,7 +2264,7 @@ function renderEmptyState({ hasError = false, filtering = false, searchQuery = "
   return `
     <div class="incidencias-empty">
       <div class="incidencias-empty-icon" aria-hidden="true">
-        ${hasError ? icon("alert") : icon("ticket")}
+        ${hasError ? icon("alert") : filtering ? icon("filter") : icon("ticket")}
       </div>
 
       <h3 class="incidencias-empty-title">
@@ -2093,47 +2365,51 @@ function renderRefreshOverlay() {
 
 export function renderHeader(input = {}) {
   const data = safeObject(input);
+  const rows = sortIncidenciasNewestFirst(getInputItems(data));
+  const runtime = getRuntimeState(data);
 
-  const items = sortIncidenciasNewestFirst(
-    safeArray(first(data.items, data.rows, data.tickets, data.incidencias))
-  );
-
-  const state = safeObject(data.state);
-  const stats = computeStats(items);
+  const stats = computeStats(rows);
 
   const remoteCount = Math.max(
     stats.total,
     safeNumber(
-      first(data.remoteCount, data.totalCount, state.remoteCount, state.totalCount, stats.total),
+      first(
+        data.remoteCount,
+        data.totalCount,
+        runtime.remoteCount,
+        runtime.totalCount,
+        runtime.total,
+        stats.total
+      ),
       stats.total
     )
   );
 
   const updatedAt = first(
     data.lastUpdatedAt,
-    state.lastSyncAt,
+    runtime.lastSyncAt,
     data.updatedAt,
-    state.updatedAt,
-    ...items.map((item) => getUpdatedAt(item))
+    runtime.updatedAt,
+    ...rows.map((item) => getUpdatedAt(item))
   );
 
   const title = safeText(
-    first(data.title, state.title, "Tus incidencias y solicitudes"),
+    first(data.title, runtime.title, "Tus incidencias y solicitudes"),
     "Tus incidencias y solicitudes"
   );
 
   const subtitle = safeText(
     first(
       data.subtitle,
-      state.subtitle,
+      runtime.subtitle,
       "Consulta el estado de tus incidencias, revisa las actualizaciones más recientes y crea nuevas solicitudes desde una vista clara, cercana y fácil de seguir."
     ),
     ""
   );
 
-  const creating = Boolean(first(state.creating, state.creatingIncidencia, data.creating));
-  const refreshing = Boolean(first(state.refreshing, data.refreshing));
-  const loading = Boolean(first(state.loading, data.loading));
+  const creating = Boolean(first(runtime.creating, runtime.creatingIncidencia, data.creating));
+  const refreshing = Boolean(first(runtime.refreshing, data.refreshing));
+  const loading = Boolean(first(runtime.loading, data.loading));
 
   return `
     <section class="incidencias-hero">
@@ -2150,7 +2426,7 @@ export function renderHeader(input = {}) {
             class="incidencias-btn${refreshing ? " is-loading" : ""}"
             data-incidencias-action="refresh"
             data-action="refresh"
-            ${refreshing || loading ? 'disabled aria-busy="true"' : ""}
+            ${disabledAttrs(refreshing || loading, refreshing)}
           >
             ${
               refreshing
@@ -2165,7 +2441,7 @@ export function renderHeader(input = {}) {
             class="incidencias-btn"
             data-incidencias-action="export"
             data-action="export-csv"
-            ${loading || refreshing || !items.length ? "disabled" : ""}
+            ${disabledAttrs(loading || refreshing || !rows.length)}
           >
             ${icon("export")}
             <span class="incidencias-btn-text">Exportar historial</span>
@@ -2177,7 +2453,7 @@ export function renderHeader(input = {}) {
             class="incidencias-btn incidencias-btn--primary incidencias-btn--create${creating ? " is-loading" : ""}"
             data-incidencias-action="create"
             data-action="create-incidencia"
-            ${creating ? 'disabled aria-busy="true"' : ""}
+            ${disabledAttrs(creating, creating)}
           >
             ${
               creating
@@ -2267,20 +2543,19 @@ export function renderErrorState(message = "No se pudieron cargar las incidencia
 }
 
 /* =========================================================
-   TABLE
+   MAIN TABLE
 ========================================================= */
 
 export function renderTable(input = {}) {
   const data = safeObject(input);
-
-  const items = safeArray(first(data.items, data.rows, data.tickets, data.incidencias));
-  const state = safeObject(data.state);
+  const items = getInputItems(data);
+  const runtime = getRuntimeState(data);
 
   const pagination = getPagination(items, data);
 
-  const loading = Boolean(first(state.loading, data.loading));
-  const refreshing = Boolean(first(state.refreshing, data.refreshing));
-  const hasError = Boolean(safeText(first(state.error, data.error), ""));
+  const loading = Boolean(first(runtime.loading, data.loading));
+  const refreshing = Boolean(first(runtime.refreshing, data.refreshing));
+  const hasError = Boolean(safeText(first(runtime.error, data.error), ""));
 
   const showInitialLoading = loading && !pagination.pageItems.length;
   const showRefreshOverlay = refreshing && pagination.pageItems.length;
@@ -2309,7 +2584,7 @@ export function renderTable(input = {}) {
           </p>
         </div>
 
-        ${renderPagination(pagination, state)}
+        ${renderPagination(pagination, runtime)}
         ${renderFilters(data, pagination)}
       </div>
 
@@ -2348,7 +2623,7 @@ export function renderTable(input = {}) {
                         </thead>
 
                         <tbody>
-                          ${pagination.pageItems.map((item) => renderRow(item, state)).join("")}
+                          ${pagination.pageItems.map((item) => renderRow(item, runtime)).join("")}
                         </tbody>
                       </table>
                     </div>
@@ -2378,14 +2653,13 @@ export const renderCards = renderTable;
 
 export function renderIncidenciasTableTemplate(input = {}) {
   const data = safeObject(input);
+  const items = getInputItems(data);
+  const runtime = getRuntimeState(data);
 
-  const items = safeArray(first(data.items, data.rows, data.tickets, data.incidencias));
-  const state = safeObject(data.state);
-
-  if (state.error && !items.length) {
+  if (runtime.error && !items.length) {
     return `
       <section class="incidencias-view-root" data-incidencias-scope="true">
-        ${renderErrorState(state.error)}
+        ${renderErrorState(runtime.error)}
       </section>
     `;
   }
@@ -2393,7 +2667,7 @@ export function renderIncidenciasTableTemplate(input = {}) {
   const payload = {
     ...data,
     items,
-    state,
+    state: runtime,
   };
 
   return `
@@ -2402,6 +2676,230 @@ export function renderIncidenciasTableTemplate(input = {}) {
       ${renderTable(payload)}
     </section>
   `;
+}
+
+/* =========================================================
+   DOM BINDINGS · CSP CLEAN
+========================================================= */
+
+function isInteractiveTarget(target = null) {
+  if (!target || typeof target.closest !== "function") return false;
+
+  return Boolean(
+    target.closest(
+      [
+        "button",
+        "a",
+        "input",
+        "select",
+        "textarea",
+        "[role='button']:not(.incidencias-row)",
+        "[data-row-click-stop='true']",
+        "[data-incidencias-action]:not(.incidencias-row)",
+      ].join(",")
+    )
+  );
+}
+
+function bindImageFallback({
+  img,
+  container,
+  fallbackClass = "",
+  hasImageClass = "",
+  fallbackSources = [],
+} = {}) {
+  if (!img || img.dataset.incImageFallbackBound === "true") return false;
+
+  img.dataset.incImageFallbackBound = "true";
+
+  const sources = Array.from(
+    new Set(
+      safeArray(fallbackSources)
+        .map((value) => safeText(value, ""))
+        .filter(Boolean)
+    )
+  );
+
+  const markFallback = () => {
+    try {
+      if (container) {
+        container.setAttribute("data-fallback", "true");
+        container.setAttribute("data-has-avatar", "false");
+        if (fallbackClass) container.classList.add(fallbackClass);
+        if (hasImageClass) container.classList.remove(hasImageClass);
+      }
+
+      img.hidden = true;
+    } catch {}
+  };
+
+  const tryNextSource = () => {
+    try {
+      const currentSrc = safeText(img.getAttribute("src"), "");
+      const currentIndex = safeNumber(container?.dataset?.avatarFallbackIndex, 0);
+      const nextIndex = currentIndex + 1;
+
+      const nextSource = sources[nextIndex];
+
+      if (nextSource && nextSource !== currentSrc) {
+        if (container) {
+          container.dataset.avatarFallbackIndex = String(nextIndex);
+        }
+
+        img.hidden = false;
+        img.setAttribute("src", nextSource);
+        return true;
+      }
+    } catch {}
+
+    markFallback();
+    return false;
+  };
+
+  img.addEventListener("error", tryNextSource, { passive: true });
+
+  if (img.complete && img.naturalWidth === 0) {
+    tryNextSource();
+  }
+
+  return true;
+}
+
+function bindClientAvatarFallbacks(scope) {
+  const images = scope.querySelectorAll("[data-incidencias-avatar-img='true']");
+
+  images.forEach((img) => {
+    const avatar = img.closest("[data-incidencias-avatar='true']");
+
+    bindImageFallback({
+      img,
+      container: avatar,
+      fallbackClass: "incidencias-avatar--fallback",
+      hasImageClass: "has-image",
+      fallbackSources: [safeText(img.getAttribute("src"), "")],
+    });
+  });
+}
+
+function bindAgentAvatarFallbacks(scope) {
+  const images = scope.querySelectorAll("[data-incidencias-agent-avatar-img='true']");
+
+  images.forEach((img) => {
+    const avatar = img.closest("[data-technician-avatar='true']");
+
+    const fallbackSources = safeText(avatar?.dataset?.avatarFallbackSrcs, "")
+      .split("|")
+      .map((value) => safeText(value, ""))
+      .filter(Boolean);
+
+    bindImageFallback({
+      img,
+      container: avatar,
+      fallbackClass: "incidencias-agent-avatar--fallback",
+      hasImageClass: "incidencias-agent-avatar--image",
+      fallbackSources,
+    });
+  });
+}
+
+function bindClickableRows(scope) {
+  if (scope.dataset.incidenciasRowsBound === "true") return true;
+
+  scope.dataset.incidenciasRowsBound = "true";
+
+  const openRow = (row) => {
+    if (!row || row.dataset.rowClickDisabled === "true") return false;
+
+    const ticketId = safeText(
+      first(
+        row.dataset.ticketId,
+        row.dataset.incidenciaId
+      ),
+      ""
+    );
+
+    if (!ticketId) return false;
+
+    const detailButton =
+      row.querySelector(
+        "button[data-incidencias-action='open-ticket'], button[data-action='open-ticket'], button[data-incidencias-action='detail']"
+      );
+
+    if (detailButton && typeof detailButton.click === "function") {
+      detailButton.click();
+      return true;
+    }
+
+    try {
+      scope.dispatchEvent(
+        new CustomEvent("incidencias:open-detail", {
+          bubbles: true,
+          detail: {
+            ticketId,
+            incidenciaId: ticketId,
+            source: "row",
+          },
+        })
+      );
+
+      return true;
+    } catch {}
+
+    return false;
+  };
+
+  scope.addEventListener(
+    "click",
+    (event) => {
+      const row = event.target?.closest?.(
+        ".incidencias-row[data-detail-target='true'], .incidencias-row--clickable"
+      );
+
+      if (!row) return;
+      if (isInteractiveTarget(event.target)) return;
+
+      openRow(row);
+    },
+    {
+      passive: true,
+    }
+  );
+
+  scope.addEventListener("keydown", (event) => {
+    const key = event.key;
+
+    if (key !== "Enter" && key !== " ") return;
+
+    const row = event.target?.closest?.(
+      ".incidencias-row[data-detail-target='true'], .incidencias-row--clickable"
+    );
+
+    if (!row) return;
+    if (isInteractiveTarget(event.target) && event.target !== row) return;
+
+    event.preventDefault();
+    openRow(row);
+  });
+
+  return true;
+}
+
+export function bindIncidenciasTemplateDom(root = null) {
+  const scope =
+    root ||
+    (typeof document !== "undefined"
+      ? document.querySelector(".incidencias-view-root, [data-incidencias-scope]")
+      : null);
+
+  if (!scope || typeof scope.querySelectorAll !== "function") {
+    return false;
+  }
+
+  bindClientAvatarFallbacks(scope);
+  bindAgentAvatarFallbacks(scope);
+  bindClickableRows(scope);
+
+  return true;
 }
 
 /* =========================================================

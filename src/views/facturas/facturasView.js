@@ -2,7 +2,7 @@
    Onion SPA - Facturas View
    Archivo: src/views/facturas/facturasView.js
 
-   EXTREME PRO SYSTEM · FACTURAS VIEW · CSP CLEAN · 15/10
+   EXTREME PRO SYSTEM · FACTURAS VIEW · CSP CLEAN · 16/10
    PATCH · SINGLE TEMPLATE OWNER
    PATCH · NO INLINE STYLE
    PATCH · NO TEMPLATE STYLE INJECTION
@@ -11,7 +11,10 @@
    PATCH · SORT ÚNICO: FECHA DESC ⇄ FECHA ASC
    PATCH · INVOICE NUMBER INTERNAL TIEBREAKER ONLY
    PATCH · PAGINATION 5
-   PATCH · DETAIL PORTAL
+   PATCH · DETAIL PORTAL STABLE · ANTI FLICKER
+   PATCH · DETAIL DATA ONLY LOADER
+   PATCH · DUPLICATE OPEN GUARD
+   PATCH · NO FULL RERENDER ON DETAIL/PDF ACTIONS
    PATCH · CREATE MODAL BRIDGE
    PATCH · INCIDENCIA MODAL BRIDGE
    PATCH · URL AUTOPEN
@@ -31,7 +34,8 @@
    - Usar número de factura solo como desempate interno.
    - Delegar markup al template.
    - Delegar estilos al CSS externo /src/css/views/facturas.css.
-   - Abrir detalle de factura en portal global.
+   - Abrir detalle de factura en portal global estable.
+   - Evitar parpadeo al abrir/cargar detalle.
    - Abrir modal de creación.
    - Abrir incidencia relacionada.
    - Sin style="".
@@ -49,7 +53,7 @@ import {
 } from "./facturas.template.js";
 
 import {
-  renderFacturasDetailModal,
+  renderFacturasDetailContent,
 } from "./facturas.detail.template.js";
 
 import FacturasCreateModal from "./facturas.create.modal.js";
@@ -183,8 +187,12 @@ export const FacturasView = (() => {
 
   let inflightInit = null;
   let inflightLoad = null;
+
   let inflightExternalOpen = null;
   let inflightExternalOpenFacturaId = "";
+
+  let inflightOpenFactura = null;
+  let inflightOpenFacturaId = "";
 
   let bindingsCleanup = null;
   let modalBindingsCleanup = null;
@@ -270,7 +278,6 @@ export const FacturasView = (() => {
 
   function clampNumber(value, min = 1, max = Number.MAX_SAFE_INTEGER) {
     const n = safeNumber(value, min);
-
     return Math.min(Math.max(n, min), max);
   }
 
@@ -334,7 +341,6 @@ export const FacturasView = (() => {
     }
 
     const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
-
     return Number.isNaN(date.getTime()) ? 0 : date.getTime();
   }
 
@@ -490,7 +496,10 @@ export const FacturasView = (() => {
   }
 
   function requestFrame(callback) {
-    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+    if (
+      typeof window !== "undefined" &&
+      typeof window.requestAnimationFrame === "function"
+    ) {
       return window.requestAnimationFrame(callback);
     }
 
@@ -501,7 +510,10 @@ export const FacturasView = (() => {
     if (!frameId) return;
 
     try {
-      if (typeof window !== "undefined" && typeof window.cancelAnimationFrame === "function") {
+      if (
+        typeof window !== "undefined" &&
+        typeof window.cancelAnimationFrame === "function"
+      ) {
         window.cancelAnimationFrame(frameId);
         return;
       }
@@ -652,13 +664,6 @@ export const FacturasView = (() => {
         "oldest_first",
         "menor_fecha",
         "asc",
-
-        /*
-          Legacy compat:
-          El template definitivo ya no muestra orden por Nº factura.
-          Si entra invoice_asc desde un estado viejo o query externa,
-          se mapea a date_asc para mantener una única semántica visual.
-        */
         "invoice_asc",
         "factura_asc",
         "numero_asc",
@@ -672,11 +677,6 @@ export const FacturasView = (() => {
       return SORT_DATE_ASC;
     }
 
-    /*
-      Legacy compat:
-      invoice_desc se mapea a date_desc porque en este sistema la numeración
-      es correlativa con fecha y el usuario solo debe ver un criterio: Fecha.
-    */
     return SORT_DATE_DESC;
   }
 
@@ -791,19 +791,16 @@ export const FacturasView = (() => {
 
   function getViewFilter() {
     ensureBaseState();
-
     return normalizeFacturaFilter(state.view.facturasFilter);
   }
 
   function getViewSearch() {
     ensureBaseState();
-
     return normalizeWhitespace(state.view.facturasSearch);
   }
 
   function getViewSort() {
     ensureBaseState();
-
     return normalizeFacturaSort(state.view.facturasSort);
   }
 
@@ -1931,7 +1928,6 @@ export const FacturasView = (() => {
 
   function getTemplateRoleForCreate() {
     if (canCreateFactura()) return "admin";
-
     return getCurrentRole();
   }
 
@@ -2537,7 +2533,6 @@ export const FacturasView = (() => {
 
   function findFacturaByIncidenciaId(ticketId = "") {
     const id = safeText(ticketId, "");
-
     if (!id) return null;
 
     return getItems().find((item) => getRelatedIncidenciaId(item) === id) || null;
@@ -2968,7 +2963,6 @@ export const FacturasView = (() => {
 
     syncDetailBodyState();
     renderDetailPortal();
-    rerender();
 
     safeEmit("facturas:detail:close", {});
   }
@@ -3042,7 +3036,7 @@ export const FacturasView = (() => {
   }
 
   /* =====================================================
-     DETAIL PORTAL
+     DETAIL PORTAL · STABLE SHELL
   ===================================================== */
 
   function getDetailRoot() {
@@ -3078,41 +3072,77 @@ export const FacturasView = (() => {
     } catch {}
   }
 
-  function renderDetailPortal() {
-    const root = ensureDetailRoot();
+  function getDetailForRender() {
     const rawDetail = getFacturasDetailData(state);
 
-    const detail = rawDetail
-      ? mergeFacturaDetailWithStoreSnapshot(
-          rawDetail,
-          first(
-            state?.view?.selectedFacturaId,
-            getStableFacturaId(rawDetail)
-          )
-        )
-      : null;
+    if (!rawDetail) return null;
 
+    return mergeFacturaDetailWithStoreSnapshot(
+      rawDetail,
+      first(
+        state?.view?.selectedFacturaId,
+        getStableFacturaId(rawDetail)
+      )
+    );
+  }
+
+  function clearDetailPortal(root = null) {
+    const target = root || getDetailRoot();
+
+    if (!target) return null;
+
+    target.innerHTML = "";
+    cleanupModalBindings();
+
+    return target;
+  }
+
+  function renderDetailPortal() {
+    const root = ensureDetailRoot();
     const detailOpen = isFacturasDetailOpen(state);
+    const detail = getDetailForRender();
 
     syncDetailBodyState();
 
-    if (!detailOpen && !detail) {
-      root.innerHTML = "";
-      cleanupModalBindings();
+    if (!detailOpen) {
+      clearDetailPortal(root);
       return root;
     }
 
-    root.innerHTML = renderFacturasDetailModal({
-      detailOpen,
-      detailLoading: Boolean(state?.detail?.loading),
-      factura: detail,
+    let overlay = root.querySelector("[data-facturas-detail-overlay='true']");
+    let modal = root.querySelector("[data-role='facturas-detail-modal']");
 
+    if (!overlay || !modal) {
+      root.innerHTML = `
+        <div
+          class="facturas-detail-overlay"
+          data-facturas-detail-overlay="true"
+        >
+          <div
+            class="facturas-detail-modal"
+            data-role="facturas-detail-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Detalle factura"
+          ></div>
+        </div>
+      `;
+
+      overlay = root.querySelector("[data-facturas-detail-overlay='true']");
+      modal = root.querySelector("[data-role='facturas-detail-modal']");
+
+      bindModalPortal();
+    }
+
+    if (!modal) return root;
+
+    modal.innerHTML = renderFacturasDetailContent({
+      factura: detail,
+      loading: Boolean(state?.detail?.loading),
       sendingFacturaId: safeText(state?.actions?.sendingFacturaId, ""),
       viewingFacturaId: safeText(state?.actions?.viewingFacturaId, ""),
       downloadingFacturaId: safeText(state?.actions?.downloadingFacturaId, ""),
     });
-
-    bindModalPortal();
 
     return root;
   }
@@ -3422,6 +3452,29 @@ export const FacturasView = (() => {
     }
   }
 
+  async function loadFacturaDetailDataOnly(id = "") {
+    const facturaId = safeText(id, "");
+
+    if (!facturaId) return null;
+
+    const detail = await loadFacturaDetailById({
+      state,
+      render: () => {},
+      facturaId,
+      force: true,
+    });
+
+    const patchedDetail = detail
+      ? mergeFacturaDetailWithStoreSnapshot(detail, facturaId)
+      : null;
+
+    if (!patchedDetail) {
+      throw new Error("EMPTY_FACTURA_DETAIL");
+    }
+
+    return patchedDetail;
+  }
+
   async function loadFacturaDetail(id = "") {
     const facturaId = safeText(id, "");
     if (!facturaId) return null;
@@ -3434,22 +3487,10 @@ export const FacturasView = (() => {
     renderDetailOnly();
 
     try {
-      const detail = await loadFacturaDetailById({
-        state,
-        render: () => {},
-        facturaId,
-        force: true,
-      });
-
-      const patchedDetail = detail
-        ? mergeFacturaDetailWithStoreSnapshot(detail, facturaId)
-        : null;
+      const patchedDetail = await loadFacturaDetailDataOnly(facturaId);
 
       setFacturasDetailLoading(state, false);
-
-      if (patchedDetail) {
-        setDetail(patchedDetail, facturaId);
-      }
+      setDetail(patchedDetail, facturaId);
 
       renderDetailOnly();
 
@@ -3479,86 +3520,109 @@ export const FacturasView = (() => {
 
     if (!facturaId) return null;
 
-    state.view.selectedFacturaId = facturaId;
-
-    setFacturasOpeningFacturaId(state, facturaId);
-    setFacturasDetailOpen(state, true);
-    setFacturasDetailLoading(state, true);
-
-    const storeSnapshot = findFacturaById(facturaId);
-
-    if (storeSnapshot) {
-      setFacturasDetailData(
-        state,
-        mergeFacturaDetailWithStoreSnapshot(storeSnapshot, facturaId)
-      );
+    if (
+      inflightOpenFactura &&
+      inflightOpenFacturaId &&
+      sameFacturaIdentity(inflightOpenFacturaId, facturaId)
+    ) {
+      return inflightOpenFactura;
     }
 
-    renderDetailOnly();
-    scheduleRerender();
+    inflightOpenFacturaId = facturaId;
 
-    try {
-      const detail = await openFacturaAction({
-        facturaId,
-        loadFacturaDetail,
-        preferFresh: true,
-        silent: true,
-      });
+    inflightOpenFactura = (async () => {
+      state.view.selectedFacturaId = facturaId;
 
-      const patchedDetail = detail
-        ? mergeFacturaDetailWithStoreSnapshot(detail, facturaId)
-        : mergeFacturaDetailWithStoreSnapshot(storeSnapshot || {}, facturaId);
+      setFacturasOpeningFacturaId(state, facturaId);
+      setFacturasDetailOpen(state, true);
 
-      if (!patchedDetail) {
-        throw new Error("EMPTY_FACTURA_DETAIL");
-      }
-
-      setDetail(patchedDetail, facturaId);
-
-      safeEmit("facturas:open:success", {
-        facturaId,
-        detail: patchedDetail,
-      });
-
-      renderDetailOnly();
-
-      return patchedDetail;
-    } catch (error) {
-      const fallbackDetail = storeSnapshot
+      const storeSnapshot = findFacturaById(facturaId);
+      const localDetail = storeSnapshot
         ? mergeFacturaDetailWithStoreSnapshot(storeSnapshot, facturaId)
         : null;
 
-      if (fallbackDetail) {
-        setDetail(fallbackDetail, facturaId);
+      if (localDetail) {
+        setFacturasDetailData(state, localDetail);
+        setFacturasDetailLoading(state, false);
+      } else {
+        setFacturasDetailLoading(state, true);
+      }
 
-        safeEmit("facturas:open:fallback", {
+      renderDetailOnly();
+
+      try {
+        const detail = await openFacturaAction({
           facturaId,
-          detail: fallbackDetail,
+          loadFacturaDetail: loadFacturaDetailDataOnly,
+          preferFresh: true,
+          silent: true,
+        });
+
+        const patchedDetail = detail
+          ? mergeFacturaDetailWithStoreSnapshot(detail, facturaId)
+          : localDetail;
+
+        if (!patchedDetail) {
+          throw new Error("EMPTY_FACTURA_DETAIL");
+        }
+
+        setFacturasDetailLoading(state, false);
+        setDetail(patchedDetail, facturaId);
+
+        safeEmit("facturas:open:success", {
+          facturaId,
+          detail: patchedDetail,
+        });
+
+        renderDetailOnly();
+
+        return patchedDetail;
+      } catch (error) {
+        if (localDetail) {
+          setFacturasDetailLoading(state, false);
+          setDetail(localDetail, facturaId);
+
+          safeEmit("facturas:open:fallback", {
+            facturaId,
+            detail: localDetail,
+            error,
+          });
+
+          showToast(
+            "Factura abierta con datos locales. No se pudo cargar el detalle remoto.",
+            "warning"
+          );
+
+          renderDetailOnly();
+
+          return localDetail;
+        }
+
+        setFacturasDetailLoading(state, false);
+
+        safeEmit("facturas:open:error", {
+          facturaId,
           error,
         });
 
-        showToast(
-          "Factura abierta con datos locales. No se pudo cargar el detalle remoto.",
-          "warning"
-        );
+        showToast("No se pudo abrir la factura.", "error");
 
-        return fallbackDetail;
+        renderDetailOnly();
+
+        return null;
+      } finally {
+        setFacturasOpeningFacturaId(state, "");
+        setFacturasDetailLoading(state, false);
+
+        renderDetailOnly();
       }
+    })();
 
-      safeEmit("facturas:open:error", {
-        facturaId,
-        error,
-      });
-
-      showToast("No se pudo abrir la factura.", "error");
-
-      return null;
+    try {
+      return await inflightOpenFactura;
     } finally {
-      setFacturasOpeningFacturaId(state, "");
-      setFacturasDetailLoading(state, false);
-
-      renderDetailOnly();
-      rerender();
+      inflightOpenFactura = null;
+      inflightOpenFacturaId = "";
     }
   }
 
@@ -3575,16 +3639,12 @@ export const FacturasView = (() => {
 
       onStart(value) {
         setFacturasViewingFacturaId(state, value);
-
         renderDetailOnly();
-        rerender();
       },
 
       onEnd() {
         setFacturasViewingFacturaId(state, "");
-
         renderDetailOnly();
-        rerender();
       },
     });
   }
@@ -3602,16 +3662,12 @@ export const FacturasView = (() => {
 
       onStart(value) {
         setFacturasDownloadingFacturaId(state, value);
-
         renderDetailOnly();
-        rerender();
       },
 
       onEnd() {
         setFacturasDownloadingFacturaId(state, "");
-
         renderDetailOnly();
-        rerender();
       },
     });
   }
@@ -3630,16 +3686,12 @@ export const FacturasView = (() => {
 
       onStart(value) {
         setFacturasSendingFacturaId(state, value);
-
         renderDetailOnly();
-        rerender();
       },
 
       onEnd() {
         setFacturasSendingFacturaId(state, "");
-
         renderDetailOnly();
-        rerender();
       },
     });
 
@@ -4133,14 +4185,8 @@ export const FacturasView = (() => {
           DEFAULT_FILTER
         );
 
-        const previous = getViewFilter();
-        const next = setViewFilter(nextFilter);
-
-        if (previous !== next || getCurrentPage() !== 1) {
-          rerender();
-        } else {
-          rerender();
-        }
+        setViewFilter(nextFilter);
+        rerender();
 
         return;
       }
@@ -4149,15 +4195,10 @@ export const FacturasView = (() => {
         event.preventDefault();
         event.stopPropagation();
 
-        const previous = getViewSort();
         const nextSort = resolveSortFromControl(target);
-        const next = setViewSort(nextSort);
 
-        if (previous !== next || getCurrentPage() !== 1) {
-          rerender();
-        } else {
-          rerender();
-        }
+        setViewSort(nextSort);
+        rerender();
 
         return;
       }
@@ -4451,8 +4492,13 @@ export const FacturasView = (() => {
 
     inflightLoad = null;
     inflightInit = null;
+
     inflightExternalOpen = null;
     inflightExternalOpenFacturaId = "";
+
+    inflightOpenFactura = null;
+    inflightOpenFacturaId = "";
+
     lastAutoOpenedFacturaId = "";
 
     safeLog("destroy");
@@ -4472,6 +4518,7 @@ export const FacturasView = (() => {
     scheduleRender: scheduleRerender,
 
     loadFacturas,
+    loadFacturaDetail,
 
     openFactura,
     openFacturaFromExternalRequest,
@@ -4567,8 +4614,13 @@ export const FacturasView = (() => {
 
         hasInflightInit: Boolean(inflightInit),
         hasInflightLoad: Boolean(inflightLoad),
+
         hasInflightExternalOpen: Boolean(inflightExternalOpen),
         inflightExternalOpenFacturaId,
+
+        hasInflightOpenFactura: Boolean(inflightOpenFactura),
+        inflightOpenFacturaId,
+
         lastAutoOpenedFacturaId,
       };
     },

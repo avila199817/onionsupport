@@ -11,6 +11,8 @@
    PATCH · SEARCH INPUT CONNECTED WITH TEMPLATE V13
    PATCH · OPEN FILTER GROUPS OPEN/PENDING/PROGRESS
    PATCH · CLOSED FILTER GROUPS RESOLVED/CLOSED/CANCELLED/ARCHIVED
+   PATCH · NO INLINE CSS · VIEW CSS EXTERNALIZED
+   PATCH · CLEAN BIND / CLEANUP FLOW · NO DUPLICATED RENDER BINDINGS
 
    RESPONSABILIDADES:
    - punto de entrada real de la vista de incidencias
@@ -2617,10 +2619,10 @@ export const IncidenciasView = (() => {
 
     try {
       if (typeof OnionIncidenciasModal?.getState === "function") {
-        const modalState = OnionIncidenciasModal.getState();
+        const modalStateSnapshot = OnionIncidenciasModal.getState();
 
         if (
-          modalState?.isOpen &&
+          modalStateSnapshot?.isOpen &&
           typeof OnionIncidenciasModal.update === "function"
         ) {
           OnionIncidenciasModal.update(payload);
@@ -2794,32 +2796,23 @@ export const IncidenciasView = (() => {
     const message = safeText(incidenciasState.error, "");
     if (!message) return;
 
-    const historyHead =
+    const anchor =
       container.querySelector(".incidencias-history-head") ||
       container.querySelector("[data-incidencias-history-head='true']") ||
       container.querySelector("[data-incidencias-table-head='true']") ||
       container.querySelector(".content-wrapper");
 
-    if (!historyHead) return;
+    if (!anchor) return;
 
     const banner = document.createElement("div");
+
+    banner.className = "incidencias-error-banner";
     banner.setAttribute("data-incidencias-error-banner", "true");
-
-    Object.assign(banner.style, {
-      margin: "0 18px 14px",
-      padding: "11px 13px",
-      borderRadius: "14px",
-      border:
-        "1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 22%, var(--border-soft, rgba(15,23,42,.08)))",
-      background:
-        "linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 6%, transparent), transparent), var(--surface-1, rgba(255,255,255,.78))",
-      color: "var(--text-soft, #4b5563)",
-      fontSize: "12px",
-      lineHeight: "1.5",
-    });
-
+    banner.setAttribute("role", "status");
+    banner.setAttribute("aria-live", "polite");
     banner.textContent = message;
-    historyHead.insertAdjacentElement("afterend", banner);
+
+    anchor.insertAdjacentElement("afterend", banner);
   }
 
   function decorateDom(container) {
@@ -2862,7 +2855,7 @@ export const IncidenciasView = (() => {
         data-view="incidencias"
         data-incidencias-scope="${SCOPE}"
       >
-        <div class="content-wrapper" style="display:grid;gap:var(--space-lg);min-width:0;max-width:100%;">
+        <div class="content-wrapper incidencias-view-shell">
           ${renderIncidenciasTableTemplate({
             items: allItems,
             totalCount,
@@ -4132,10 +4125,6 @@ export const IncidenciasView = (() => {
 
         await renderAndLoad(currentOptions);
 
-        if (!destroyed) {
-          bind();
-        }
-
         currentOptions = queuedReloadOptions;
       } while (currentOptions && !destroyed);
 
@@ -4193,10 +4182,6 @@ export const IncidenciasView = (() => {
         silent: false,
       });
 
-      if (!destroyed) {
-        bind();
-      }
-
       flushPendingCreate();
 
       await openTicketFromLocationOnce();
@@ -4220,10 +4205,6 @@ export const IncidenciasView = (() => {
     clearFilterSearchTimer();
 
     cleanupBindings();
-    cleanupExternalOpenListener();
-    cleanupMutationListeners();
-    cleanupCreateSuccessListener();
-    cleanupReadyListeners();
 
     try {
       setOpeningTicketId("");

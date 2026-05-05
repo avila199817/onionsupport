@@ -2,7 +2,12 @@
    Onion SPA - Sidebar Visibility
    Archivo: src/ui/sidebar/visibility.js
 
-   FINAL EXTREME SYSTEM · SIDEBAR ROLE VISIBILITY · 12/10
+   FINAL EXTREME SYSTEM · SIDEBAR ROLE VISIBILITY · 13/10
+   PATCH · CONSTANTS SINGLE SOURCE
+   PATCH · NORMAL ITEMS REPAIR
+   PATCH · ADMIN ITEMS RECOVERABLE
+   PATCH · NO STATE-AS-RULE BUG
+   PATCH · ACTIVE / INDICATOR INVALIDATION SAFE
 
    RESPONSABILIDADES:
    - aplicar visibilidad por rol dentro del sidebar
@@ -12,7 +17,9 @@
    - soportar data-roles="admin,support"
    - soportar data-sidebar-role / data-sidebar-roles
    - soportar data-requires-role / data-requires-roles
+   - soportar data-required-role / data-required-roles
    - soportar data-permission / data-permissions
+   - soportar data-sidebar-permission / data-sidebar-permissions
    - sincronizar aria-hidden / hidden / inert / tabindex
    - preservar/restaurar display original
    - preservar/restaurar tabindex original
@@ -55,6 +62,7 @@ import {
 import {
   SIDEBAR_EVENTS,
   SIDEBAR_ADMIN_ROLE_KEYS,
+  SIDEBAR_ADMIN_PERMISSION_KEYS,
   SIDEBAR_ADMIN_FLAG_KEYS,
   SERVER_NAV_ID,
   SERVER_ROUTE,
@@ -119,48 +127,24 @@ const FOCUSABLE_SELECTOR = [
   "[contenteditable='true']",
 ].join(",");
 
-const DEFAULT_ADMIN_ROLE_KEYS = [
+const DEFAULT_ADMIN_ROLE_KEYS = Object.freeze([
   "admin",
   "administrator",
   "administrador",
   "superadmin",
   "super_admin",
-  "super-administrador",
+  "super-admin",
   "super_administrador",
+  "super-administrador",
   "owner",
   "root",
   "staff",
   "support",
-];
+]);
 
-const ADMIN_ROLE_KEYS = new Set(
-  [
-    ...DEFAULT_ADMIN_ROLE_KEYS,
-    ...(Array.isArray(SIDEBAR_ADMIN_ROLE_KEYS) ? SIDEBAR_ADMIN_ROLE_KEYS : []),
-  ]
-    .map((role) => normalizeRole(role))
-    .filter(Boolean)
-);
+const DEFAULT_ADMIN_PERMISSION_KEYS = Object.freeze([
+  "*",
 
-const ADMIN_FLAG_KEYS = [
-  "isAdmin",
-  "admin",
-  "is_admin",
-
-  "isSuperAdmin",
-  "superAdmin",
-  "is_super_admin",
-
-  "canManageUsers",
-  "can_manage_users",
-
-  "canAccessUsers",
-  "can_access_users",
-
-  ...(Array.isArray(SIDEBAR_ADMIN_FLAG_KEYS) ? SIDEBAR_ADMIN_FLAG_KEYS : []),
-];
-
-const ADMIN_PERMISSION_KEYS = new Set([
   "admin:*",
   "admin.all",
   "admin.full",
@@ -223,6 +207,31 @@ const ADMIN_PERMISSION_KEYS = new Set([
   "servidor:access",
 ]);
 
+const DEFAULT_ADMIN_FLAG_KEYS = Object.freeze([
+  "isAdmin",
+  "admin",
+  "is_admin",
+
+  "isSuperAdmin",
+  "superAdmin",
+  "is_super_admin",
+
+  "canManageUsers",
+  "can_manage_users",
+
+  "canAccessUsers",
+  "can_access_users",
+
+  "canManageClients",
+  "can_manage_clients",
+
+  "canAccessServer",
+  "can_access_server",
+
+  "canManageServer",
+  "can_manage_server",
+]);
+
 const ORIGINAL_NONE = "__none__";
 const ORIGINAL_EMPTY = "__empty__";
 
@@ -230,10 +239,21 @@ const EVENT_ROLE_VISIBILITY_APPLIED =
   SIDEBAR_EVENTS?.roleVisibilityApplied ||
   "sidebar:role-visibility:applied";
 
-const EVENT_VISIBILITY_APPLIED = "sidebar:visibility:applied";
-const EVENT_ROLES_APPLIED_LEGACY = "sidebar:roles:applied";
-const EVENT_ACTIVE_INVALIDATED = "sidebar:active:invalidated";
-const EVENT_INDICATOR_REFRESH_REQUEST = "sidebar:indicator:refresh-request";
+const EVENT_VISIBILITY_APPLIED =
+  SIDEBAR_EVENTS?.visibilityApplied ||
+  "sidebar:visibility:applied";
+
+const EVENT_ROLES_APPLIED_LEGACY =
+  SIDEBAR_EVENTS?.rolesAppliedLegacy ||
+  "sidebar:roles:applied";
+
+const EVENT_ACTIVE_INVALIDATED =
+  SIDEBAR_EVENTS?.activeInvalidated ||
+  "sidebar:active:invalidated";
+
+const EVENT_INDICATOR_REFRESH_REQUEST =
+  SIDEBAR_EVENTS?.indicatorRefreshRequest ||
+  "sidebar:indicator:refresh-request";
 
 /* =========================================================
    SAFE HELPERS
@@ -396,17 +416,6 @@ function splitRoleList(value = "") {
     .filter(Boolean);
 }
 
-function unique(values = []) {
-  return Array.from(
-    new Set(
-      values
-        .flat(Infinity)
-        .map((value) => safeText(value, ""))
-        .filter(Boolean)
-    )
-  );
-}
-
 function flattenRoleValue(value, depth = 0) {
   if (depth > 8) {
     return [];
@@ -482,6 +491,42 @@ function normalizeRoles(value) {
     .map(normalizeRole)
     .filter(Boolean);
 }
+
+function toNormalizedSet(values = []) {
+  return new Set(
+    values
+      .flat(Infinity)
+      .map(normalizeRole)
+      .filter(Boolean)
+  );
+}
+
+/* =========================================================
+   ADMIN REGISTRY
+========================================================= */
+
+const ADMIN_ROLE_KEYS = toNormalizedSet([
+  ...DEFAULT_ADMIN_ROLE_KEYS,
+  ...(Array.isArray(SIDEBAR_ADMIN_ROLE_KEYS)
+    ? SIDEBAR_ADMIN_ROLE_KEYS
+    : []),
+]);
+
+const ADMIN_PERMISSION_KEYS = toNormalizedSet([
+  ...DEFAULT_ADMIN_PERMISSION_KEYS,
+  ...(Array.isArray(SIDEBAR_ADMIN_PERMISSION_KEYS)
+    ? SIDEBAR_ADMIN_PERMISSION_KEYS
+    : []),
+]);
+
+const ADMIN_FLAG_KEYS = Array.from(
+  new Set([
+    ...DEFAULT_ADMIN_FLAG_KEYS,
+    ...(Array.isArray(SIDEBAR_ADMIN_FLAG_KEYS)
+      ? SIDEBAR_ADMIN_FLAG_KEYS
+      : []),
+  ].filter(Boolean))
+);
 
 /* =========================================================
    ROLE / PERMISSION RESOLUTION
@@ -571,6 +616,32 @@ function getAuthCandidate(AppCore = null) {
   );
 }
 
+function unwrapUserPayload(payload = null) {
+  const value = safeObject(payload);
+
+  if (!Object.keys(value).length) {
+    return {};
+  }
+
+  const candidate = first(
+    value.user,
+    value.currentUser,
+    value.profile,
+    value.account?.user,
+    value.session?.user,
+    value.data?.user,
+    value.data?.currentUser,
+    value.data?.profile,
+    value.payload?.user,
+    value.payload?.currentUser,
+    value.result?.user,
+    value.result?.currentUser,
+    value
+  );
+
+  return safeObject(candidate);
+}
+
 function getCurrentUser(AppCore = null) {
   const state = safeObject(AppCore?.state);
   const auth = getAuthCandidate(AppCore);
@@ -595,7 +666,7 @@ function getCurrentUser(AppCore = null) {
     }
   } catch {}
 
-  return safeObject(
+  return unwrapUserPayload(
     first(
       state.user,
       state.currentUser,
@@ -603,6 +674,7 @@ function getCurrentUser(AppCore = null) {
       state.authUser,
       state.profile,
       state.session?.user,
+      state.auth?.user,
       authUser,
       auth?.user,
       {}
@@ -633,7 +705,9 @@ function getUserBranches(user = null) {
     safeObject(current.account?.permissions),
     safeObject(current.meta?.permissions),
     safeObject(current.claims?.permissions),
-  ];
+  ].filter((branch) => {
+    return branch && typeof branch === "object" && Object.keys(branch).length > 0;
+  });
 }
 
 function getRoleCandidatesFromAppCore(AppCore = null) {
@@ -745,6 +819,12 @@ function getRoleCandidatesFromAppCore(AppCore = null) {
     }
   } catch {}
 
+  try {
+    if (isFn(auth?.getScopes)) {
+      collectionCandidates.push(auth.getScopes());
+    }
+  } catch {}
+
   return [
     ...scalarCandidates,
     ...collectionCandidates,
@@ -754,6 +834,7 @@ function getRoleCandidatesFromAppCore(AppCore = null) {
 function hasAdminFlag(AppCore = null) {
   const state = safeObject(AppCore?.state);
   const session = safeObject(state.session);
+  const auth = getAuthCandidate(AppCore);
   const user = getCurrentUser(AppCore);
   const branches = getUserBranches(user);
 
@@ -761,13 +842,28 @@ function hasAdminFlag(AppCore = null) {
     ...ADMIN_FLAG_KEYS.flatMap((key) => [
       state?.[key],
       session?.[key],
+      state.auth?.[key],
       user?.[key],
+      auth?.[key],
+      auth?.state?.[key],
     ]),
 
     ...branches.flatMap((branch) => {
       return ADMIN_FLAG_KEYS.map((key) => branch?.[key]);
     }),
   ];
+
+  try {
+    if (isFn(auth?.isAdmin)) {
+      values.push(auth.isAdmin());
+    }
+  } catch {}
+
+  try {
+    if (isFn(auth?.isCurrentUserAdmin)) {
+      values.push(auth.isCurrentUserAdmin());
+    }
+  } catch {}
 
   return values.some((value) => safeBoolean(value, false));
 }
@@ -805,6 +901,12 @@ function resolveAdminFlag(AppCore, isAdminFn, userRoles = []) {
 
   try {
     if (isFn(auth?.isCurrentUserAdmin) && auth.isCurrentUserAdmin()) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (isFn(auth?.isAdmin) && auth.isAdmin()) {
       return true;
     }
   } catch {}
@@ -870,12 +972,8 @@ function isElementAdminOnly(element = null) {
     return false;
   }
 
-  const direct =
-    element.getAttribute("data-admin-only");
-
-  const sidebar =
-    element.getAttribute("data-sidebar-admin-only");
-
+  const direct = element.getAttribute("data-admin-only");
+  const sidebar = element.getAttribute("data-sidebar-admin-only");
   const value = first(direct, sidebar);
 
   if (value === null || value === undefined) {
@@ -937,7 +1035,7 @@ function elementRequiresAdmin(element = null) {
     return true;
   }
 
-  return getElementRequiredRoles(element).some((role) => {
+  return getElementRequiredRolesRaw(element).some((role) => {
     return isAdminRole(role) || isAdminPermission(role);
   });
 }
@@ -967,17 +1065,18 @@ function shouldShowElementForRoles(
     return true;
   }
 
-  const requiredRoles =
-    getElementRequiredRoles(element);
+  const requiredRoles = getElementRequiredRolesRaw(element);
 
   if (!requiredRoles.length) {
     return true;
   }
 
-  if (
+  const requiresAdmin =
     requiredRoles.some(isAdminRole) ||
-    requiredRoles.some(isAdminPermission)
-  ) {
+    requiredRoles.some(isAdminPermission) ||
+    isElementAdminOnly(element);
+
+  if (requiresAdmin) {
     return (
       Boolean(admin) ||
       userRoles.some(isAdminRole) ||
@@ -985,8 +1084,7 @@ function shouldShowElementForRoles(
     );
   }
 
-  const userRoleSet =
-    new Set(normalizeRoles(userRoles));
+  const userRoleSet = new Set(normalizeRoles(userRoles));
 
   return requiredRoles.some((role) => {
     const normalized = normalizeRole(role);
@@ -1029,14 +1127,12 @@ function rememberOriginalDisplay(element = null) {
     return;
   }
 
-  const currentDisplay =
-    element.style.display || "";
+  const currentDisplay = element.style.display || "";
 
   element.dataset.sidebarOriginalDisplay =
     currentDisplay || ORIGINAL_EMPTY;
 
-  element.dataset.sidebarOriginalDisplaySet =
-    "true";
+  element.dataset.sidebarOriginalDisplaySet = "true";
 }
 
 function rememberOriginalTabIndex(element = null) {
@@ -1046,8 +1142,7 @@ function rememberOriginalTabIndex(element = null) {
     return;
   }
 
-  const tabIndex =
-    element.getAttribute("tabindex");
+  const tabIndex = element.getAttribute("tabindex");
 
   const shouldTreatMinusOneAsNoOriginal =
     tabIndex === "-1" &&
@@ -1058,8 +1153,7 @@ function rememberOriginalTabIndex(element = null) {
       ? ORIGINAL_NONE
       : tabIndex;
 
-  element.dataset.sidebarOriginalTabindexSet =
-    "true";
+  element.dataset.sidebarOriginalTabindexSet = "true";
 }
 
 function rememberOriginalTooltipAttrs(
@@ -1077,14 +1171,9 @@ function rememberOriginalTooltipAttrs(
     return;
   }
 
-  const title =
-    element.getAttribute("title");
-
-  const tooltip =
-    element.getAttribute("data-tooltip");
-
-  const i18nTooltip =
-    element.getAttribute("data-i18n-data-tooltip");
+  const title = element.getAttribute("title");
+  const tooltip = element.getAttribute("data-tooltip");
+  const i18nTooltip = element.getAttribute("data-i18n-data-tooltip");
 
   element.dataset.sidebarOriginalTitle =
     title === null
@@ -1101,8 +1190,7 @@ function rememberOriginalTooltipAttrs(
       ? ORIGINAL_NONE
       : i18nTooltip;
 
-  element.dataset.sidebarOriginalTooltipSet =
-    "true";
+  element.dataset.sidebarOriginalTooltipSet = "true";
 }
 
 function rememberOriginalState(element = null) {
@@ -1116,8 +1204,7 @@ function rememberOriginalState(element = null) {
 function restoreDisplay(element = null) {
   if (!element) return;
 
-  const value =
-    element.dataset.sidebarOriginalDisplay;
+  const value = element.dataset.sidebarOriginalDisplay;
 
   if (!value || value === ORIGINAL_EMPTY) {
     element.style.display = "";
@@ -1130,8 +1217,7 @@ function restoreDisplay(element = null) {
 function restoreTabIndex(element = null) {
   if (!element) return;
 
-  const value =
-    element.dataset.sidebarOriginalTabindex;
+  const value = element.dataset.sidebarOriginalTabindex;
 
   if (!value || value === ORIGINAL_NONE) {
     element.removeAttribute("tabindex");
@@ -1154,8 +1240,7 @@ function restoreAttributeFromDataset(
     return;
   }
 
-  const value =
-    element.dataset?.[datasetKey];
+  const value = element.dataset?.[datasetKey];
 
   if (!value || value === ORIGINAL_NONE) {
     element.removeAttribute(attrName);
@@ -1245,23 +1330,20 @@ function rememberChildTabIndex(element = null) {
     return;
   }
 
-  const tabIndex =
-    element.getAttribute("tabindex");
+  const tabIndex = element.getAttribute("tabindex");
 
   element.dataset.sidebarChildOriginalTabindex =
     tabIndex === null
       ? ORIGINAL_NONE
       : tabIndex;
 
-  element.dataset.sidebarChildOriginalTabindexSet =
-    "true";
+  element.dataset.sidebarChildOriginalTabindexSet = "true";
 }
 
 function restoreChildTabIndex(element = null) {
   if (!element) return;
 
-  const value =
-    element.dataset.sidebarChildOriginalTabindex;
+  const value = element.dataset.sidebarChildOriginalTabindex;
 
   if (!value || value === ORIGINAL_NONE) {
     element.removeAttribute("tabindex");
@@ -1342,17 +1424,11 @@ function blurIfFocusInside(element = null) {
    DOM STATE
 ========================================================= */
 
-function setVisibilityDatasets(
-  element = null,
-  visible = true
-) {
+function setVisibilityDatasets(element = null, visible = true) {
   if (!element) return;
 
-  const accessControlled =
-    isElementAccessControlled(element);
-
-  const adminManaged =
-    elementRequiresAdmin(element);
+  const accessControlled = isElementAccessControlled(element);
+  const adminManaged = elementRequiresAdmin(element);
 
   try {
     element.dataset.sidebarVisible =
@@ -1431,9 +1507,7 @@ function setElementVisible(element = null, visible = true) {
       "router-active"
     );
 
-    element.classList.add(
-      "is-role-hidden"
-    );
+    element.classList.add("is-role-hidden");
 
     if (elementRequiresAdmin(element)) {
       element.classList.add("is-admin-hidden");
@@ -1459,8 +1533,7 @@ function isRoleElementVisible(element = null) {
     return false;
   }
 
-  const adminManaged =
-    elementRequiresAdmin(element);
+  const adminManaged = elementRequiresAdmin(element);
 
   const hardHidden =
     element.hidden === true ||
@@ -1529,10 +1602,6 @@ function clearHiddenActiveState(sidebar = null) {
           element.dataset?.adminVisible === "false" &&
           !elementRequiresAdmin(element)
         ) {
-          /*
-            Item normal con estado admin legacy: lo reparamos,
-            no le borramos activo si realmente está visible.
-          */
           return;
         }
 
@@ -1594,8 +1663,7 @@ function repairNormalSidebarItems(sidebar = null) {
   let repairedCount = 0;
   const repairedItems = [];
 
-  const elements =
-    getMenuRepairElements(sidebar);
+  const elements = getMenuRepairElements(sidebar);
 
   elements.forEach((element) => {
     if (isElementAccessControlled(element)) {
@@ -1796,24 +1864,18 @@ function getElementSnapshot(element = null) {
 }
 
 export function getRoleVisibilitySnapshot(AppCore, isAdminFn) {
-  const { sidebar } =
-    getElements(AppCore);
+  const { sidebar } = getElements(AppCore);
 
-  const userRoles =
-    getUserRolesFallback(AppCore);
+  const userRoles = getUserRolesFallback(AppCore);
 
-  const admin =
-    resolveAdminFlag(
-      AppCore,
-      isAdminFn,
-      userRoles
-    );
+  const admin = resolveAdminFlag(
+    AppCore,
+    isAdminFn,
+    userRoles
+  );
 
-  const roleElements =
-    getRoleManagedElements(sidebar);
-
-  const menuElements =
-    getMenuRepairElements(sidebar);
+  const roleElements = getRoleManagedElements(sidebar);
+  const menuElements = getMenuRepairElements(sidebar);
 
   const visibleElements =
     roleElements.filter(isRoleElementVisible);
@@ -1850,26 +1912,22 @@ export function applyRoleVisibility(
   ensureServerNavItem,
   isAdminFn
 ) {
-  const userRoles =
-    getUserRolesFallback(AppCore);
+  const userRoles = getUserRolesFallback(AppCore);
 
-  const admin =
-    resolveAdminFlag(
-      AppCore,
-      isAdminFn,
-      userRoles
-    );
+  const admin = resolveAdminFlag(
+    AppCore,
+    isAdminFn,
+    userRoles
+  );
 
-  const legacyEnsured =
-    runLegacyServerNavEnsure({
-      AppCore,
-      ensureServerNavItem,
-      admin,
-      userRoles,
-    });
+  const legacyEnsured = runLegacyServerNavEnsure({
+    AppCore,
+    ensureServerNavItem,
+    admin,
+    userRoles,
+  });
 
-  const { sidebar } =
-    getElements(AppCore);
+  const { sidebar } = getElements(AppCore);
 
   if (!sidebar) {
     const payload = {

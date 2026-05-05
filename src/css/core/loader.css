@@ -17,6 +17,13 @@
    - Theme switch solo para elegir logo.
    - Compatible con markup nuevo app-loader__*
    - Compatible con markup legacy loader-*
+
+   FIX CRÍTICO LOGO:
+   - Durante boot, la fuente de verdad del tema es html[data-theme].
+   - body puede no existir aún cuando corre preboot/theme.js.
+   - body NO debe competir con html para decidir el logo.
+   - dark  -> favicon_white.png
+   - light -> favicon_black.png
 ========================================================= */
 
 
@@ -470,47 +477,57 @@ body.app-ready #app-loader.is-hidden {
    dark  -> favicon_white.png
    light -> favicon_black.png
 
+   Fuente de verdad durante preboot:
+   - html[data-theme]
+   - html.theme-dark / html.theme-light como respaldo de clase.
+   - body[data-theme] NO participa para evitar conflicto en boot.
+
    Nota:
    - Esto no redefine paleta.
    - Solo decide qué asset mostrar según theme.
 ========================================================= */
 
+#app-loader .app-loader__logo--default,
+.app-loader .app-loader__logo--default {
+  display: none !important;
+}
+
 #app-loader .app-loader__logo--light,
 .app-loader .app-loader__logo--light {
-  display: none;
+  display: none !important;
 }
 
 #app-loader .app-loader__logo--dark,
 .app-loader .app-loader__logo--dark {
-  display: block;
+  display: block !important;
 }
 
 html[data-theme="light"] #app-loader .app-loader__logo--dark,
 html[data-theme="light"] .app-loader .app-loader__logo--dark,
-body[data-theme="light"] #app-loader .app-loader__logo--dark,
-body[data-theme="light"] .app-loader .app-loader__logo--dark {
-  display: none;
+html.theme-light #app-loader .app-loader__logo--dark,
+html.theme-light .app-loader .app-loader__logo--dark {
+  display: none !important;
 }
 
 html[data-theme="light"] #app-loader .app-loader__logo--light,
 html[data-theme="light"] .app-loader .app-loader__logo--light,
-body[data-theme="light"] #app-loader .app-loader__logo--light,
-body[data-theme="light"] .app-loader .app-loader__logo--light {
-  display: block;
+html.theme-light #app-loader .app-loader__logo--light,
+html.theme-light .app-loader .app-loader__logo--light {
+  display: block !important;
 }
 
 html[data-theme="dark"] #app-loader .app-loader__logo--light,
 html[data-theme="dark"] .app-loader .app-loader__logo--light,
-body[data-theme="dark"] #app-loader .app-loader__logo--light,
-body[data-theme="dark"] .app-loader .app-loader__logo--light {
-  display: none;
+html.theme-dark #app-loader .app-loader__logo--light,
+html.theme-dark .app-loader .app-loader__logo--light {
+  display: none !important;
 }
 
 html[data-theme="dark"] #app-loader .app-loader__logo--dark,
 html[data-theme="dark"] .app-loader .app-loader__logo--dark,
-body[data-theme="dark"] #app-loader .app-loader__logo--dark,
-body[data-theme="dark"] .app-loader .app-loader__logo--dark {
-  display: block;
+html.theme-dark #app-loader .app-loader__logo--dark,
+html.theme-dark .app-loader .app-loader__logo--dark {
+  display: block !important;
 }
 
 #app-loader .app-loader__logo-fallback,

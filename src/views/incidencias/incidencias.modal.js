@@ -3,27 +3,8 @@
    Archivo: src/views/incidencias/incidencias.modal.js
 
    CLIENT EXPERIENCE PRO · DETAIL MODAL · EXTREME GOD MODE
-   CSP CLEAN · NO CSS IN JS · NO INLINE STYLE · 10/10
-
-   CIERRE DEFINITIVO:
-   - sin <style> inyectado
-   - sin style="" inline
-   - todo el visual vive en /src/css/views/incidencias/detail.css
-   - imágenes previsualizadas en miniatura grande
-   - click sobre miniatura abre preview grande
-   - preview amplia para imágenes/PDF
-   - sin botón de descarga sobre imagen previsualizada
-   - archivos no previsualizables con acciones claras
-   - subida multipart con progreso real mediante XHR
-   - textarea de actualización con presencia visual clara
-   - adjuntos integrados dentro del card de actualización
-   - header compacto sin cortar títulos ni letras bajas
-   - descripción colocada arriba
-   - factura/importe alineado con lógica de tabla
-   - captura numeroFacturaLegal + total
-   - soporte para URLs protegidas mediante hidratación Blob/ObjectURL
-   - cards con hover lift premium mediante CSS externo
-   - timeline saneado sin saltos absurdos
+   CSP CLEAN · NO CSS IN JS · NO INLINE STYLE · NO INLINE EVENTS
+   PATCH · SINGLETON · DEDUPE OPEN · NO DOUBLE MODAL · NO FLICKER
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -43,9 +24,14 @@ import {
 const MODAL_ID = "incidencias-detail-modal-root";
 const PANEL_ID = "incidencias-detail-modal-panel";
 
+const MODAL_VERSION = "incidencias-modal-dedupe-2026-05-06";
+const INSTANCE_KEY = "__ONION_INCIDENCIAS_MODAL_SINGLETON__";
+
 const REQUEST_TIMEOUT_MS = 90000;
 const ATTACHMENT_TIMEOUT_MS = 90000;
 const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000;
+
+const DUPLICATE_OPEN_WINDOW_MS = 900;
 
 /* =========================================================
    LOCAL STATE
@@ -55,7 +41,13 @@ const modalState = {
   detail: null,
   isOpen: false,
   isSubmitting: false,
+
   bindingsAttached: false,
+  rootAbortController: null,
+
+  busAttached: false,
+  busDisposers: [],
+
   lastActiveElement: null,
   escHandler: null,
 
@@ -79,70 +71,24 @@ const modalState = {
 
   previewFile: null,
   previewObjectUrl: "",
-  bodyLockDepth: 0,
+
+  bodyLocked: false,
   bodyOverflowBeforeLock: "",
 
   thumbnailObjectUrls: new Map(),
   thumbnailLoadingIds: new Set(),
   thumbnailFailedIds: new Set(),
+
+  openTicketId: "",
+  lastOpenAt: 0,
+  lastOpenHash: "",
+  lastRenderedHash: "",
+  renderQueued: false,
 };
 
 /* =========================================================
-   HELPERS CORE
+   BASIC HELPERS
 ========================================================= */
-
-function safeEmit(event = "", payload = {}) {
-  const eventName = safeText(event, "");
-  if (!eventName) return false;
-
-  try {
-    AppCore?.events?.emit?.(eventName, payload);
-    return true;
-  } catch {}
-
-  try {
-    window.dispatchEvent(
-      new CustomEvent(eventName, {
-        detail: payload,
-      })
-    );
-    return true;
-  } catch {}
-
-  return false;
-}
-
-function safeOn(event = "", handler = null) {
-  const eventName = safeText(event, "");
-  if (!eventName || typeof handler !== "function") return false;
-
-  try {
-    AppCore?.events?.on?.(eventName, handler);
-    return true;
-  } catch {}
-
-  try {
-    window.addEventListener(eventName, handler);
-    return true;
-  } catch {}
-
-  return false;
-}
-
-function safeOff(event = "", handler = null) {
-  const eventName = safeText(event, "");
-  if (!eventName || typeof handler !== "function") return false;
-
-  try {
-    AppCore?.events?.off?.(eventName, handler);
-  } catch {}
-
-  try {
-    window.removeEventListener(eventName, handler);
-  } catch {}
-
-  return true;
-}
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
@@ -169,14 +115,8 @@ function safeObject(value) {
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
-
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
-
-    if (Array.isArray(value) && value.length === 0) {
-      continue;
-    }
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
 
     return value;
   }
@@ -207,7 +147,147 @@ function normalizeKey(value = "") {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[\s-]+/g, "_")
+    .replace(/[^\w]+/g, "_")
+    .replace(/^_+|_+$/g, "")
     .trim();
+}
+
+function bool(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+
+  const key = normalizeKey(value);
+
+  if (["true", "1", "yes", "si", "sí", "on"].includes(key)) return true;
+  if (["false", "0", "no", "off"].includes(key)) return false;
+
+  return fallback;
+}
+
+function isBrowser() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+function isFile(value) {
+  return typeof File !== "undefined" && value instanceof File;
+}
+
+function isBlob(value) {
+  return typeof Blob !== "undefined" && value instanceof Blob;
+}
+
+function isFormData(value) {
+  return typeof FormData !== "undefined" && value instanceof FormData;
+}
+
+function isArrayBuffer(value) {
+  return typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer;
+}
+
+function htmlAttrs(attrs = {}) {
+  return Object.entries(safeObject(attrs))
+    .map(([key, value]) => {
+      if (value === false || value === null || value === undefined) return "";
+      if (value === true) return escapeHtml(key);
+
+      return `${escapeHtml(key)}="${escapeHtml(value)}"`;
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
+function tooltipAttrs(tooltip = "", ariaLabel = "") {
+  const cleanTooltip = safeText(tooltip, "");
+  const cleanAria = safeText(ariaLabel, cleanTooltip);
+
+  return htmlAttrs({
+    "aria-label": cleanAria || false,
+    "data-tooltip": cleanTooltip || false,
+  });
+}
+
+function getObjectHash(value = {}) {
+  try {
+    const obj = safeObject(value);
+
+    return JSON.stringify({
+      id: first(obj.ticketId, obj.id, obj.raw?.ticketId, obj.raw?.id),
+      status: first(obj.status, obj.estado, obj.raw?.status, obj.raw?.estado),
+      updatedAt: first(obj.updatedAt, obj.raw?.updatedAt, obj.raw?._ts),
+      attachmentsCount: safeArray(first(obj.attachments, obj.raw?.attachments)).length,
+      commentsCount: safeArray(first(obj.comments, obj.raw?.comments)).length,
+    });
+  } catch {
+    return String(Date.now());
+  }
+}
+
+/* =========================================================
+   EVENT HELPERS
+========================================================= */
+
+function safeEmit(event = "", payload = {}) {
+  const eventName = safeText(event, "");
+  if (!eventName) return false;
+
+  try {
+    if (AppCore?.events?.emit) {
+      AppCore.events.emit(eventName, payload);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (isBrowser()) {
+      window.dispatchEvent(
+        new CustomEvent(eventName, {
+          detail: payload,
+        })
+      );
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function safeOn(event = "", handler = null) {
+  const eventName = safeText(event, "");
+  if (!eventName || typeof handler !== "function") return () => {};
+
+  const disposers = [];
+
+  try {
+    if (AppCore?.events?.on) {
+      AppCore.events.on(eventName, handler);
+
+      disposers.push(() => {
+        try {
+          AppCore?.events?.off?.(eventName, handler);
+        } catch {}
+      });
+    }
+  } catch {}
+
+  try {
+    if (isBrowser()) {
+      window.addEventListener(eventName, handler);
+
+      disposers.push(() => {
+        try {
+          window.removeEventListener(eventName, handler);
+        } catch {}
+      });
+    }
+  } catch {}
+
+  return () => {
+    disposers.forEach((dispose) => {
+      try {
+        dispose();
+      } catch {}
+    });
+  };
 }
 
 function showToast(message = "", type = "info") {
@@ -233,6 +313,10 @@ function showToast(message = "", type = "info") {
 
   return false;
 }
+
+/* =========================================================
+   STATE HELPERS
+========================================================= */
 
 function setFeedback(message = "", type = "info") {
   modalState.feedbackMessage = safeText(message, "");
@@ -311,23 +395,9 @@ function revokeAttachmentThumbnails() {
     });
   } catch {}
 
-  try {
-    modalState.thumbnailObjectUrls.clear();
-  } catch {
-    modalState.thumbnailObjectUrls = new Map();
-  }
-
-  try {
-    modalState.thumbnailLoadingIds.clear();
-  } catch {
-    modalState.thumbnailLoadingIds = new Set();
-  }
-
-  try {
-    modalState.thumbnailFailedIds.clear();
-  } catch {
-    modalState.thumbnailFailedIds = new Set();
-  }
+  modalState.thumbnailObjectUrls = new Map();
+  modalState.thumbnailLoadingIds = new Set();
+  modalState.thumbnailFailedIds = new Set();
 }
 
 function getStoredThumbnailUrl(attachmentId = "") {
@@ -335,8 +405,7 @@ function getStoredThumbnailUrl(attachmentId = "") {
   if (!id) return "";
 
   try {
-    const entry = modalState.thumbnailObjectUrls.get(id);
-    return safeText(entry?.url, "");
+    return safeText(modalState.thumbnailObjectUrls.get(id)?.url, "");
   } catch {
     return "";
   }
@@ -368,17 +437,30 @@ function setStoredThumbnailUrl(attachmentId = "", url = "", managed = false) {
   }
 }
 
+function resetTransientStateForNewTicket() {
+  modalState.isSubmitting = false;
+  modalState.commentDraft = "";
+  modalState.pendingFiles = [];
+
+  clearUploadProgress();
+  clearAttachmentPreview();
+  clearFeedback();
+  clearAttachmentBusyState();
+  clearAttachmentActionKey();
+  revokeAttachmentThumbnails();
+}
+
+/* =========================================================
+   FORMAT HELPERS
+========================================================= */
+
 function formatBytes(bytes = 0) {
   const size = Number(bytes);
 
   if (!Number.isFinite(size) || size <= 0) return "";
-
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-
-  if (size < 1024 * 1024 * 1024) {
-    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-  }
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
@@ -386,9 +468,7 @@ function formatBytes(bytes = 0) {
 function formatMoney(value = 0, currency = "EUR") {
   const amount = Number(value);
 
-  if (!Number.isFinite(amount)) {
-    return "";
-  }
+  if (!Number.isFinite(amount)) return "";
 
   try {
     return new Intl.NumberFormat("es-ES", {
@@ -401,20 +481,56 @@ function formatMoney(value = 0, currency = "EUR") {
   }
 }
 
-function isFile(value) {
-  return typeof File !== "undefined" && value instanceof File;
+function formatDate(value = null) {
+  if (!value) return "—";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  } catch {
+    return "—";
+  }
 }
 
-function isBlob(value) {
-  return typeof Blob !== "undefined" && value instanceof Blob;
-}
+function formatRelativeDate(value = null) {
+  if (!value) return "Sin fecha";
 
-function isFormData(value) {
-  return typeof FormData !== "undefined" && value instanceof FormData;
-}
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Sin fecha";
 
-function isArrayBuffer(value) {
-  return typeof ArrayBuffer !== "undefined" && value instanceof ArrayBuffer;
+  const diffMs = date.getTime() - Date.now();
+  const diffMin = Math.round(diffMs / 60000);
+  const absMin = Math.abs(diffMin);
+
+  if (absMin < 1) return "Ahora mismo";
+
+  if (absMin < 60) {
+    return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
+  }
+
+  const diffHours = Math.round(absMin / 60);
+
+  if (diffHours < 24) {
+    return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
+  }
+
+  const diffDays = Math.round(diffHours / 24);
+
+  if (diffDays <= 7) {
+    return diffMin > 0
+      ? `En ${diffDays} día${diffDays === 1 ? "" : "s"}`
+      : `Hace ${diffDays} día${diffDays === 1 ? "" : "s"}`;
+  }
+
+  return formatDate(value);
 }
 
 function dedupeFiles(files = []) {
@@ -430,16 +546,40 @@ function dedupeFiles(files = []) {
       safeText(file.type, ""),
     ].join("::");
 
-    if (!map.has(key)) {
-      map.set(key, file);
-    }
+    if (!map.has(key)) map.set(key, file);
   });
 
   return Array.from(map.values());
 }
 
+function safeErrorMessage(error = null, fallback = "No se pudo completar la acción.") {
+  const rawMessage = safeText(
+    first(
+      error?.message,
+      error?.response?.message,
+      error?.response?.data?.message,
+      error?.data?.message,
+      error?.error,
+      fallback
+    ),
+    fallback
+  );
+
+  const lower = rawMessage.toLowerCase();
+
+  if (
+    rawMessage === "AbortError" ||
+    lower.includes("aborted") ||
+    lower.includes("abort")
+  ) {
+    return "La operación ha tardado demasiado y se ha cancelado. Revisa si el archivo es muy pesado o si el servidor sigue procesando la subida.";
+  }
+
+  return rawMessage;
+}
+
 /* =========================================================
-   URL / API HELPERS
+   API HELPERS
 ========================================================= */
 
 function isAbsoluteUrl(value = "") {
@@ -471,8 +611,8 @@ function getApiBase() {
       AppCore?.config?.apiBase,
       AppCore?.config?.api?.baseUrl,
       AppCore?.state?.apiBase,
-      window?.ONION_API_BASE,
-      window?.API_BASE
+      isBrowser() ? window.ONION_API_BASE : "",
+      isBrowser() ? window.API_BASE : ""
     ),
     ""
   ).replace(/\/+$/, "");
@@ -499,10 +639,6 @@ function resolveApiUrl(path = "") {
   return `${apiBase}${normalizedPath}`;
 }
 
-function buildApiUrl(path = "") {
-  return resolveApiUrl(path);
-}
-
 function getAuthToken() {
   return safeText(
     first(
@@ -510,17 +646,11 @@ function getAuthToken() {
       AppCore?.state?.accessToken,
       AppCore?.auth?.getToken?.(),
       AppCore?.Auth?.getToken?.(),
-      window?.Auth?.getToken?.(),
-      typeof localStorage !== "undefined" ? localStorage.getItem("token") : "",
-      typeof localStorage !== "undefined"
-        ? localStorage.getItem("accessToken")
-        : "",
-      typeof sessionStorage !== "undefined"
-        ? sessionStorage.getItem("token")
-        : "",
-      typeof sessionStorage !== "undefined"
-        ? sessionStorage.getItem("accessToken")
-        : ""
+      isBrowser() ? window.Auth?.getToken?.() : "",
+      isBrowser() ? localStorage.getItem("token") : "",
+      isBrowser() ? localStorage.getItem("accessToken") : "",
+      isBrowser() ? sessionStorage.getItem("token") : "",
+      isBrowser() ? sessionStorage.getItem("accessToken") : ""
     ),
     ""
   );
@@ -536,11 +666,11 @@ function isAzureBlobUrl(value = "") {
 }
 
 function getApiOrigin() {
+  if (!isBrowser()) return "";
+
   const apiBase = getApiBase();
 
-  if (!apiBase) {
-    return window.location.origin;
-  }
+  if (!apiBase) return window.location.origin;
 
   try {
     return new URL(apiBase, window.location.origin).origin;
@@ -551,11 +681,9 @@ function getApiOrigin() {
 
 function looksLikeProtectedApiUrl(value = "") {
   const text = safeText(value, "");
-  if (!text) return false;
+  if (!text || !isBrowser()) return false;
 
-  if (isAzureBlobUrl(text)) {
-    return false;
-  }
+  if (isAzureBlobUrl(text)) return false;
 
   try {
     const url = new URL(text, window.location.origin);
@@ -595,18 +723,6 @@ function createTimeoutSignal(timeoutMs = REQUEST_TIMEOUT_MS) {
   };
 }
 
-function waitForPaint() {
-  return new Promise((resolve) => {
-    try {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(resolve);
-      });
-    } catch {
-      setTimeout(resolve, 0);
-    }
-  });
-}
-
 function getFilenameFromContentDisposition(value = "", fallback = "archivo") {
   const text = safeText(value, "");
   if (!text) return fallback;
@@ -627,39 +743,6 @@ function getFilenameFromContentDisposition(value = "", fallback = "archivo") {
 
   return fallback;
 }
-
-function safeErrorMessage(
-  error = null,
-  fallback = "No se pudo completar la acción."
-) {
-  const rawMessage = safeText(
-    first(
-      error?.message,
-      error?.response?.message,
-      error?.response?.data?.message,
-      error?.data?.message,
-      error?.error,
-      fallback
-    ),
-    fallback
-  );
-
-  const lower = rawMessage.toLowerCase();
-
-  if (
-    rawMessage === "AbortError" ||
-    lower.includes("aborted") ||
-    lower.includes("abort")
-  ) {
-    return "La operación ha tardado demasiado y se ha cancelado. Revisa si el archivo es muy pesado o si el servidor sigue procesando la subida.";
-  }
-
-  return rawMessage;
-}
-
-/* =========================================================
-   FETCH HELPERS
-========================================================= */
 
 async function readResponsePayload(response, fallbackFilename = "archivo") {
   const contentType = safeText(response.headers.get("content-type"), "");
@@ -720,9 +803,7 @@ async function requestJson(path = "", options = {}) {
   const finalUrl = resolveApiUrl(path);
   const token = getAuthToken();
 
-  if (!finalUrl) {
-    throw new Error("API_URL_REQUIRED");
-  }
+  if (!finalUrl) throw new Error("API_URL_REQUIRED");
 
   const method = safeText(options?.method, "GET").toUpperCase();
   const body = options?.body ?? null;
@@ -783,9 +864,7 @@ async function requestJson(path = "", options = {}) {
       throw error;
     }
 
-    if (parsed.kind === "json") {
-      return parsed.payload;
-    }
+    if (parsed.kind === "json") return parsed.payload;
 
     return {
       ok: true,
@@ -801,9 +880,7 @@ async function fetchAttachmentResource(url = "", fallbackFilename = "archivo") {
   const protectedApiUrl = looksLikeProtectedApiUrl(finalUrl);
   const token = protectedApiUrl ? getAuthToken() : "";
 
-  if (!finalUrl) {
-    throw new Error("No hay URL para obtener el adjunto.");
-  }
+  if (!finalUrl) throw new Error("No hay URL para obtener el adjunto.");
 
   const timeout = createTimeoutSignal(ATTACHMENT_TIMEOUT_MS);
 
@@ -884,8 +961,7 @@ function requestMultipartWithProgress(path = "", formData = null, options = {}) 
           label: "Subiendo archivos...",
         };
 
-        renderModal();
-        attachRootBindings();
+        scheduleModalRender();
         return;
       }
 
@@ -903,8 +979,7 @@ function requestMultipartWithProgress(path = "", formData = null, options = {}) 
         label: `Subiendo archivos... ${percent}%`,
       };
 
-      renderModal();
-      attachRootBindings();
+      scheduleModalRender();
     };
 
     xhr.onload = () => {
@@ -930,12 +1005,7 @@ function requestMultipartWithProgress(path = "", formData = null, options = {}) 
 
       if (status < 200 || status >= 300) {
         const message = safeText(
-          first(
-            payload?.message,
-            payload?.error,
-            raw,
-            `HTTP ${status}`
-          ),
+          first(payload?.message, payload?.error, raw, `HTTP ${status}`),
           `HTTP ${status}`
         );
 
@@ -971,416 +1041,6 @@ function requestMultipartWithProgress(path = "", formData = null, options = {}) 
 }
 
 /* =========================================================
-   BLOB / DOWNLOAD / PREVIEW NORMALIZATION
-========================================================= */
-
-function downloadBlob(blob, filename = "archivo") {
-  const objectUrl = URL.createObjectURL(blob);
-
-  try {
-    const anchor = document.createElement("a");
-    anchor.href = objectUrl;
-    anchor.download = safeText(filename, "archivo");
-    anchor.rel = "noopener";
-    anchor.className = "incidencias-modal-hidden-download-link";
-
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-
-    return true;
-  } finally {
-    setTimeout(() => {
-      try {
-        URL.revokeObjectURL(objectUrl);
-      } catch {}
-    }, 60000);
-  }
-}
-
-function downloadUrlDirect(url = "", filename = "archivo") {
-  const finalUrl = safeText(url, "");
-
-  if (!finalUrl) {
-    throw new Error("No hay URL disponible para descargar el archivo.");
-  }
-
-  const anchor = document.createElement("a");
-  anchor.href = finalUrl;
-  anchor.download = safeText(filename, "archivo");
-  anchor.rel = "noopener noreferrer";
-  anchor.className = "incidencias-modal-hidden-download-link";
-
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-
-  return true;
-}
-
-function extractFileUrlFromPayload(payload = {}, mode = "open") {
-  const obj = safeObject(payload);
-  const file = safeObject(obj.file);
-  const data = safeObject(obj.data);
-
-  if (mode === "download") {
-    return safeText(
-      first(
-        file.downloadUrl,
-        file.url,
-        file.signedUrl,
-        data.downloadUrl,
-        data.url,
-        data.signedUrl,
-        obj.downloadUrl,
-        obj.url,
-        obj.signedUrl
-      ),
-      ""
-    );
-  }
-
-  return safeText(
-    first(
-      file.viewUrl,
-      file.openUrl,
-      file.url,
-      file.signedUrl,
-      data.viewUrl,
-      data.openUrl,
-      data.url,
-      data.signedUrl,
-      obj.viewUrl,
-      obj.openUrl,
-      obj.url,
-      obj.signedUrl
-    ),
-    ""
-  );
-}
-
-function extractFilenameFromPayload(payload = {}, fallback = "archivo") {
-  const obj = safeObject(payload);
-  const file = safeObject(obj.file);
-  const data = safeObject(obj.data);
-
-  return safeText(
-    first(
-      file.filename,
-      file.name,
-      data.filename,
-      data.name,
-      obj.filename,
-      obj.name
-    ),
-    fallback
-  );
-}
-
-function extractContentTypeFromPayload(payload = {}, fallback = "") {
-  const obj = safeObject(payload);
-  const file = safeObject(obj.file);
-  const data = safeObject(obj.data);
-
-  return safeText(
-    first(
-      file.contentType,
-      file.mimeType,
-      file.mimetype,
-      file.type,
-      data.contentType,
-      data.mimeType,
-      data.mimetype,
-      data.type,
-      obj.contentType,
-      obj.mimeType,
-      obj.mimetype,
-      obj.type,
-      fallback
-    ),
-    fallback
-  );
-}
-
-function normalizeAttachmentActionFile(payload = null, attachment = {}, mode = "open") {
-  const fallbackFilename = safeText(
-    first(attachment?.filename, attachment?.name),
-    "archivo"
-  );
-
-  const blob =
-    isBlob(payload?.blob)
-      ? payload.blob
-      : payload?.kind === "blob" && isBlob(payload?.blob)
-        ? payload.blob
-        : null;
-
-  if (blob) {
-    const objectUrl = URL.createObjectURL(blob);
-
-    return {
-      ...safeObject(attachment),
-      url: objectUrl,
-      filename: safeText(payload?.filename, fallbackFilename),
-      name: safeText(payload?.filename, fallbackFilename),
-      contentType: safeText(
-        first(payload?.contentType, blob.type, attachment?.contentType, attachment?.type),
-        ""
-      ),
-      size: safeNumber(first(blob.size, attachment?.size), 0),
-      blob,
-      managedObjectUrl: true,
-      source: "blob",
-    };
-  }
-
-  const source =
-    payload?.kind === "json"
-      ? payload.payload
-      : payload;
-
-  const sourceObj = safeObject(source);
-
-  const url = safeText(
-    first(
-      extractFileUrlFromPayload(sourceObj, mode),
-      sourceObj.url,
-      sourceObj.viewUrl,
-      sourceObj.openUrl,
-      sourceObj.downloadUrl,
-      sourceObj.signedUrl
-    ),
-    ""
-  );
-
-  if (!url) return null;
-
-  const filename = extractFilenameFromPayload(sourceObj, fallbackFilename);
-
-  return {
-    ...safeObject(attachment),
-    ...sourceObj,
-    url,
-    viewUrl: safeText(first(sourceObj.viewUrl, sourceObj.openUrl, url), url),
-    openUrl: safeText(first(sourceObj.openUrl, sourceObj.viewUrl, url), url),
-    downloadUrl: safeText(first(sourceObj.downloadUrl, url), url),
-    signedUrl: safeText(first(sourceObj.signedUrl, url), url),
-    filename,
-    name: safeText(first(sourceObj.name, filename), filename),
-    contentType: extractContentTypeFromPayload(
-      sourceObj,
-      safeText(first(attachment?.contentType, attachment?.type), "")
-    ),
-    size: safeNumber(first(sourceObj.size, attachment?.size), 0),
-    managedObjectUrl: false,
-    source: "url",
-  };
-}
-
-function downloadResolvedAttachmentFile(file = {}) {
-  const item = safeObject(file);
-  const filename = safeText(first(item.filename, item.name), "archivo");
-
-  if (isBlob(item.blob)) {
-    return downloadBlob(item.blob, filename);
-  }
-
-  return downloadUrlDirect(item.downloadUrl || item.url, filename);
-}
-
-async function openOrDownloadPayload(payload, attachment = {}, mode = "open") {
-  const finalMode = mode === "download" ? "download" : "open";
-
-  const file = normalizeAttachmentActionFile(
-    payload,
-    attachment,
-    finalMode
-  );
-
-  if (!file?.url) {
-    return false;
-  }
-
-  if (finalMode === "download") {
-    return downloadResolvedAttachmentFile(file);
-  }
-
-  return setAttachmentPreview(file);
-}
-
-function getAttachmentPreviewType(file = {}) {
-  return safeText(
-    first(
-      file.contentType,
-      file.type,
-      file.mimeType,
-      file.mimetype,
-      file.raw?.contentType,
-      file.raw?.type,
-      file.raw?.mimeType,
-      file.raw?.mimetype
-    ),
-    ""
-  ).toLowerCase();
-}
-
-function isPreviewImage(file = {}) {
-  return getAttachmentPreviewType(file).startsWith("image/");
-}
-
-function isPreviewPdf(file = {}) {
-  const type = getAttachmentPreviewType(file);
-  const name = safeText(first(file.filename, file.name), "").toLowerCase();
-
-  return type.includes("application/pdf") || name.endsWith(".pdf");
-}
-
-function isImageLikeAttachment(file = {}) {
-  const item = safeObject(file);
-
-  const type = safeText(
-    first(
-      item.contentType,
-      item.type,
-      item.mimeType,
-      item.mimetype,
-      item.raw?.contentType,
-      item.raw?.type,
-      item.raw?.mimeType,
-      item.raw?.mimetype
-    ),
-    ""
-  ).toLowerCase();
-
-  const name = safeText(
-    first(
-      item.filename,
-      item.fileName,
-      item.name,
-      item.raw?.filename,
-      item.raw?.fileName,
-      item.raw?.name
-    ),
-    ""
-  ).toLowerCase();
-
-  return (
-    type.startsWith("image/") ||
-    /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(name)
-  );
-}
-
-function getAttachmentDownloadIconSvg() {
-  return `
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-      focusable="false"
-      class="incidencias-modal-svg-icon"
-    >
-      <path
-        d="M12 3v11m0 0 4-4m-4 4-4-4"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-      />
-    </svg>
-  `;
-}
-
-function getAttachmentViewIconSvg() {
-  return `
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-      focusable="false"
-      class="incidencias-modal-svg-icon"
-    >
-      <path
-        d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linejoin="round"
-      />
-      <path
-        d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
-        stroke="currentColor"
-        stroke-width="2"
-      />
-    </svg>
-  `;
-}
-
-/* =========================================================
-   DATE HELPERS
-========================================================= */
-
-function formatDate(value = null) {
-  if (!value) return "—";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-
-  try {
-    return new Intl.DateTimeFormat("es-ES", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(date);
-  } catch {
-    return "—";
-  }
-}
-
-function formatRelativeDate(value = null) {
-  if (!value) return "Sin fecha";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Sin fecha";
-
-  const diffMs = date.getTime() - Date.now();
-  const diffMin = Math.round(diffMs / 60000);
-  const absMin = Math.abs(diffMin);
-
-  if (absMin < 1) return "Ahora mismo";
-
-  if (absMin < 60) {
-    return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
-  }
-
-  const diffHours = Math.round(absMin / 60);
-
-  if (diffHours < 24) {
-    return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
-  }
-
-  const diffDays = Math.round(diffHours / 24);
-
-  if (diffDays <= 7) {
-    return diffMin > 0
-      ? `En ${diffDays} día${diffDays === 1 ? "" : "s"}`
-      : `Hace ${diffDays} día${diffDays === 1 ? "" : "s"}`;
-  }
-
-  return formatDate(value);
-}
-
-/* =========================================================
    DETAIL NORMALIZATION
 ========================================================= */
 
@@ -1397,19 +1057,13 @@ function preserveRawDetailFields(input = {}, normalized = {}) {
 
   return {
     ...normalized,
-
     raw,
 
     facturaId: first(normalized.facturaId, source.facturaId, raw.facturaId),
     invoiceId: first(normalized.invoiceId, source.invoiceId, raw.invoiceId),
 
-    facturaIds: safeArray(
-      first(normalized.facturaIds, source.facturaIds, raw.facturaIds)
-    ),
-
-    invoiceIds: safeArray(
-      first(normalized.invoiceIds, source.invoiceIds, raw.invoiceIds)
-    ),
+    facturaIds: safeArray(first(normalized.facturaIds, source.facturaIds, raw.facturaIds)),
+    invoiceIds: safeArray(first(normalized.invoiceIds, source.invoiceIds, raw.invoiceIds)),
 
     facturasCount: safeNumber(
       first(normalized.facturasCount, source.facturasCount, raw.facturasCount),
@@ -1435,39 +1089,13 @@ function preserveRawDetailFields(input = {}, normalized = {}) {
     importe: first(normalized.importe, source.importe, raw.importe),
     price: first(normalized.price, source.price, raw.price),
 
-    facturasTotal: first(
-      normalized.facturasTotal,
-      source.facturasTotal,
-      raw.facturasTotal
-    ),
+    facturasTotal: first(normalized.facturasTotal, source.facturasTotal, raw.facturasTotal),
+    invoicesTotal: first(normalized.invoicesTotal, source.invoicesTotal, raw.invoicesTotal),
+    importeFacturas: first(normalized.importeFacturas, source.importeFacturas, raw.importeFacturas),
+    invoiceTotal: first(normalized.invoiceTotal, source.invoiceTotal, raw.invoiceTotal),
 
-    invoicesTotal: first(
-      normalized.invoicesTotal,
-      source.invoicesTotal,
-      raw.invoicesTotal
-    ),
-
-    importeFacturas: first(
-      normalized.importeFacturas,
-      source.importeFacturas,
-      raw.importeFacturas
-    ),
-
-    invoiceTotal: first(
-      normalized.invoiceTotal,
-      source.invoiceTotal,
-      raw.invoiceTotal
-    ),
-
-    currency: safeText(
-      first(normalized.currency, source.currency, raw.currency, "EUR"),
-      "EUR"
-    ),
-
-    moneda: safeText(
-      first(normalized.moneda, source.moneda, raw.moneda, "EUR"),
-      "EUR"
-    ),
+    currency: safeText(first(normalized.currency, source.currency, raw.currency, "EUR"), "EUR"),
+    moneda: safeText(first(normalized.moneda, source.moneda, raw.moneda, "EUR"), "EUR"),
 
     meta: {
       ...safeObject(raw.meta),
@@ -1524,13 +1152,19 @@ function getTicketId(detail = {}) {
       detail.id,
       detail.code,
       detail.ticketCode,
+      detail.incidenciaId,
       detail?.raw?.ticketId,
       detail?.raw?.id,
       detail?.raw?.code,
-      detail?.raw?.ticketCode
+      detail?.raw?.ticketCode,
+      detail?.raw?.incidenciaId
     ),
-    "—"
+    ""
   );
+}
+
+function getDisplayTicketId(detail = {}) {
+  return safeText(getTicketId(detail), "—");
 }
 
 function getClientAvatar(detail = {}) {
@@ -1543,13 +1177,17 @@ function getClientAvatar(detail = {}) {
       detail?.cliente?.avatarUrl,
       detail?.client?.avatar,
       detail?.client?.avatarUrl,
+      detail?.requesterSnapshot?.avatar,
+      detail?.requesterSnapshot?.avatarUrl,
       detail?.raw?.clientAvatar,
       detail?.raw?.avatar,
       detail?.raw?.avatarUrl,
       detail?.raw?.client?.avatar,
       detail?.raw?.client?.avatarUrl,
       detail?.raw?.cliente?.avatar,
-      detail?.raw?.cliente?.avatarUrl
+      detail?.raw?.cliente?.avatarUrl,
+      detail?.raw?.requesterSnapshot?.avatar,
+      detail?.raw?.requesterSnapshot?.avatarUrl
     ),
     ""
   );
@@ -1565,13 +1203,15 @@ function getClientName(detail = {}) {
       detail?.client?.name,
       detail?.receptor?.name,
       detail?.createdBy?.name,
+      detail?.requesterSnapshot?.name,
       detail?.raw?.clientName,
       detail?.raw?.name,
       detail?.raw?.cliente?.nombre,
       detail?.raw?.cliente?.name,
       detail?.raw?.client?.name,
       detail?.raw?.receptor?.name,
-      detail?.raw?.createdBy?.name
+      detail?.raw?.createdBy?.name,
+      detail?.raw?.requesterSnapshot?.name
     ),
     "Cliente"
   );
@@ -1598,16 +1238,19 @@ function getTecnico(detail = {}) {
     first(
       detail.tecnico?.name,
       detail.assignedToName,
+      detail.assignedTo?.name,
+      detail.assignment?.agentName,
       detail?.raw?.tecnico?.name,
       detail?.raw?.assignedTo?.name,
-      detail?.raw?.assignedToName
+      detail?.raw?.assignedToName,
+      detail?.raw?.assignment?.agentName
     ),
     "No asignado"
   );
 }
 
 /* =========================================================
-   FACTURA LINKED DATA
+   FACTURA DATA
 ========================================================= */
 
 function collectInvoiceObjects(detail = {}) {
@@ -1674,15 +1317,7 @@ function extractInvoiceAmountFromObject(invoice = {}) {
 function extractInvoiceCurrencyFromObject(invoice = {}) {
   const item = safeObject(invoice);
 
-  return safeText(
-    first(
-      item.currency,
-      item.moneda,
-      item.divisa,
-      "EUR"
-    ),
-    "EUR"
-  );
+  return safeText(first(item.currency, item.moneda, item.divisa, "EUR"), "EUR");
 }
 
 function getFacturaRelacionada(detail = {}) {
@@ -1693,10 +1328,7 @@ function getFacturaRelacionada(detail = {}) {
   const invoiceObjects = collectInvoiceObjects(detail);
 
   const primaryInvoice = invoiceObjects.find((invoice) =>
-    Boolean(
-      extractInvoiceCodeFromObject(invoice) ||
-        extractInvoiceAmountFromObject(invoice)
-    )
+    Boolean(extractInvoiceCodeFromObject(invoice) || extractInvoiceAmountFromObject(invoice))
   );
 
   const invoiceCode = safeText(
@@ -1817,22 +1449,14 @@ function getFacturaRelacionada(detail = {}) {
   );
 
   const numericAmount = Number(amount);
-  const safeInvoiceCode =
-    invoiceCode === "[object Object]"
-      ? ""
-      : invoiceCode;
+  const safeInvoiceCode = invoiceCode === "[object Object]" ? "" : invoiceCode;
 
   if (safeInvoiceCode && Number.isFinite(numericAmount)) {
     return `${safeInvoiceCode} · ${formatMoney(numericAmount, currency)}`;
   }
 
-  if (safeInvoiceCode) {
-    return safeInvoiceCode;
-  }
-
-  if (Number.isFinite(numericAmount)) {
-    return formatMoney(numericAmount, currency);
-  }
+  if (safeInvoiceCode) return safeInvoiceCode;
+  if (Number.isFinite(numericAmount)) return formatMoney(numericAmount, currency);
 
   const paymentStatus = normalizeKey(
     first(
@@ -1847,27 +1471,16 @@ function getFacturaRelacionada(detail = {}) {
     )
   );
 
-  if (["paid", "pagada", "pagado", "cobrada"].includes(paymentStatus)) {
-    return "Pagado";
-  }
-
-  if (["pending", "pendiente"].includes(paymentStatus)) {
-    return "Pendiente";
-  }
-
-  if (["partial", "parcial"].includes(paymentStatus)) {
-    return "Parcial";
-  }
-
-  if (["overdue", "vencida"].includes(paymentStatus)) {
-    return "Vencido";
-  }
+  if (["paid", "pagada", "pagado", "cobrada"].includes(paymentStatus)) return "Pagado";
+  if (["pending", "pendiente"].includes(paymentStatus)) return "Pendiente";
+  if (["partial", "parcial"].includes(paymentStatus)) return "Parcial";
+  if (["overdue", "vencida"].includes(paymentStatus)) return "Vencido";
 
   return "No vinculada";
 }
 
 /* =========================================================
-   ATTACHMENTS / URL RESOLVE
+   ATTACHMENTS
 ========================================================= */
 
 function pickAttachmentUrlByMode(item = {}, mode = "open") {
@@ -1935,9 +1548,7 @@ function resolveAttachmentUrl(item = {}, detail = {}, mode = "open") {
 
   const directUrl = pickAttachmentUrlByMode(file, mode);
 
-  if (isAbsoluteUrl(directUrl)) {
-    return directUrl;
-  }
+  if (isAbsoluteUrl(directUrl)) return directUrl;
 
   const ticketId = getTicketId(detail);
 
@@ -1962,9 +1573,7 @@ function resolveAttachmentUrl(item = {}, detail = {}, mode = "open") {
     ""
   );
 
-  if (isAbsoluteUrl(candidatePath)) {
-    return candidatePath;
-  }
+  if (isAbsoluteUrl(candidatePath)) return candidatePath;
 
   const blobBaseUrl = safeText(
     first(
@@ -1978,9 +1587,7 @@ function resolveAttachmentUrl(item = {}, detail = {}, mode = "open") {
     ""
   );
 
-  if (blobBaseUrl && candidatePath) {
-    return buildUrl(blobBaseUrl, candidatePath);
-  }
+  if (blobBaseUrl && candidatePath) return buildUrl(blobBaseUrl, candidatePath);
 
   const attachmentId = safeText(
     first(
@@ -1996,7 +1603,7 @@ function resolveAttachmentUrl(item = {}, detail = {}, mode = "open") {
   );
 
   if (ticketId && attachmentId) {
-    return buildApiUrl(
+    return resolveApiUrl(
       joinApiPath(
         "api",
         "tickets",
@@ -2072,14 +1679,6 @@ function getAttachments(detail = {}) {
         name
       ),
 
-      url: "",
-      viewUrl: "",
-      openUrl: "",
-      downloadUrl: "",
-      signedUrl: "",
-      blobUrl: "",
-      publicUrl: "",
-
       path: safeText(
         first(
           item.path,
@@ -2150,11 +1749,7 @@ function getAttachments(detail = {}) {
     attachment.openUrl = attachment.viewUrl;
     attachment.downloadUrl = resolveAttachmentUrl(attachment, detail, "download");
 
-    attachment.signedUrl = safeText(
-      first(item.signedUrl, raw.signedUrl, attachment.viewUrl),
-      ""
-    );
-
+    attachment.signedUrl = safeText(first(item.signedUrl, raw.signedUrl, attachment.viewUrl), "");
     attachment.blobUrl = safeText(first(item.blobUrl, raw.blobUrl), "");
     attachment.publicUrl = safeText(first(item.publicUrl, raw.publicUrl), "");
 
@@ -2207,10 +1802,7 @@ function buildAttachmentCandidates(detail = {}, attachment = {}, mode = "open") 
     ""
   );
 
-  const name = safeText(
-    first(file.name, raw.name, raw.filename, raw.fileName),
-    "archivo"
-  );
+  const name = safeText(first(file.name, raw.name, raw.filename, raw.fileName), "archivo");
 
   const blobBaseUrl = safeText(
     first(
@@ -2340,10 +1932,8 @@ function buildAttachmentCandidates(detail = {}, attachment = {}, mode = "open") 
     ].filter(Boolean);
 
     routes.forEach((route) => {
-      const built = buildApiUrl(route);
-      if (built) {
-        absoluteCandidates.push(built);
-      }
+      const built = resolveApiUrl(route);
+      if (built) absoluteCandidates.push(built);
     });
   }
 
@@ -2361,6 +1951,68 @@ function buildAttachmentCandidates(detail = {}, attachment = {}, mode = "open") 
     });
 
   return unique;
+}
+
+function getAttachmentPreviewType(file = {}) {
+  return safeText(
+    first(
+      file.contentType,
+      file.type,
+      file.mimeType,
+      file.mimetype,
+      file.raw?.contentType,
+      file.raw?.type,
+      file.raw?.mimeType,
+      file.raw?.mimetype
+    ),
+    ""
+  ).toLowerCase();
+}
+
+function isPreviewImage(file = {}) {
+  return getAttachmentPreviewType(file).startsWith("image/");
+}
+
+function isPreviewPdf(file = {}) {
+  const type = getAttachmentPreviewType(file);
+  const name = safeText(first(file.filename, file.name), "").toLowerCase();
+
+  return type.includes("application/pdf") || name.endsWith(".pdf");
+}
+
+function isImageLikeAttachment(file = {}) {
+  const item = safeObject(file);
+
+  const type = safeText(
+    first(
+      item.contentType,
+      item.type,
+      item.mimeType,
+      item.mimetype,
+      item.raw?.contentType,
+      item.raw?.type,
+      item.raw?.mimeType,
+      item.raw?.mimetype
+    ),
+    ""
+  ).toLowerCase();
+
+  const name = safeText(
+    first(
+      item.filename,
+      item.fileName,
+      item.name,
+      item.raw?.filename,
+      item.raw?.fileName,
+      item.raw?.name
+    ),
+    ""
+  ).toLowerCase();
+
+  return (
+    type.startsWith("image/") ||
+    /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(name)
+  );
 }
 
 function getBestThumbnailCandidate(file = {}) {
@@ -2389,7 +2041,6 @@ async function hydrateAttachmentThumbnails() {
   if (!modalState.isOpen || !modalState.detail) return false;
 
   const files = getAttachments(modalState.detail).filter(isImageLikeAttachment);
-
   if (!files.length) return false;
 
   files.forEach(async (file) => {
@@ -2406,22 +2057,19 @@ async function hydrateAttachmentThumbnails() {
     const candidate = getBestThumbnailCandidate(file);
 
     if (!candidate) {
-      try {
-        modalState.thumbnailFailedIds.add(attachmentId);
-      } catch {}
+      modalState.thumbnailFailedIds.add(attachmentId);
       return;
     }
 
     if (!looksLikeProtectedApiUrl(candidate)) {
       setStoredThumbnailUrl(attachmentId, candidate, false);
+      scheduleModalRender();
       return;
     }
 
     try {
       modalState.thumbnailLoadingIds.add(attachmentId);
-    } catch {}
 
-    try {
       const payload = await fetchAttachmentResource(
         candidate,
         safeText(first(file.filename, file.name), "imagen")
@@ -2433,47 +2081,19 @@ async function hydrateAttachmentThumbnails() {
         const type = safeText(first(payload.contentType, payload.blob.type), "");
 
         if (type && !type.startsWith("image/")) {
-          try {
-            modalState.thumbnailFailedIds.add(attachmentId);
-          } catch {}
+          modalState.thumbnailFailedIds.add(attachmentId);
           return;
         }
 
         const objectUrl = URL.createObjectURL(payload.blob);
         setStoredThumbnailUrl(attachmentId, objectUrl, true);
-
-        renderModal();
-        attachRootBindings();
-
+        scheduleModalRender();
         return;
       }
-
-      if (payload?.kind === "json") {
-        const fileFromPayload = normalizeAttachmentActionFile(
-          payload,
-          file,
-          "open"
-        );
-
-        if (fileFromPayload?.url) {
-          setStoredThumbnailUrl(
-            attachmentId,
-            fileFromPayload.url,
-            Boolean(fileFromPayload.managedObjectUrl)
-          );
-
-          renderModal();
-          attachRootBindings();
-        }
-      }
     } catch {
-      try {
-        modalState.thumbnailFailedIds.add(attachmentId);
-      } catch {}
+      modalState.thumbnailFailedIds.add(attachmentId);
     } finally {
-      try {
-        modalState.thumbnailLoadingIds.delete(attachmentId);
-      } catch {}
+      modalState.thumbnailLoadingIds.delete(attachmentId);
     }
   });
 
@@ -2481,13 +2101,256 @@ async function hydrateAttachmentThumbnails() {
 }
 
 /* =========================================================
-   INTERNAL API ACTIONS
+   DOWNLOAD / PREVIEW
 ========================================================= */
 
-async function uploadTicketAttachmentsInternal({
-  ticketId = "",
-  files = [],
-} = {}) {
+function downloadBlob(blob, filename = "archivo") {
+  const objectUrl = URL.createObjectURL(blob);
+
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = safeText(filename, "archivo");
+    anchor.rel = "noopener";
+    anchor.className = "incidencias-modal-hidden-download-link";
+
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+
+    return true;
+  } finally {
+    setTimeout(() => {
+      try {
+        URL.revokeObjectURL(objectUrl);
+      } catch {}
+    }, 60000);
+  }
+}
+
+function downloadUrlDirect(url = "", filename = "archivo") {
+  const finalUrl = safeText(url, "");
+  if (!finalUrl) throw new Error("No hay URL disponible para descargar el archivo.");
+
+  const anchor = document.createElement("a");
+  anchor.href = finalUrl;
+  anchor.download = safeText(filename, "archivo");
+  anchor.rel = "noopener noreferrer";
+  anchor.className = "incidencias-modal-hidden-download-link";
+
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+
+  return true;
+}
+
+function extractFileUrlFromPayload(payload = {}, mode = "open") {
+  const obj = safeObject(payload);
+  const file = safeObject(obj.file);
+  const data = safeObject(obj.data);
+
+  if (mode === "download") {
+    return safeText(
+      first(
+        file.downloadUrl,
+        file.url,
+        file.signedUrl,
+        data.downloadUrl,
+        data.url,
+        data.signedUrl,
+        obj.downloadUrl,
+        obj.url,
+        obj.signedUrl
+      ),
+      ""
+    );
+  }
+
+  return safeText(
+    first(
+      file.viewUrl,
+      file.openUrl,
+      file.url,
+      file.signedUrl,
+      data.viewUrl,
+      data.openUrl,
+      data.url,
+      data.signedUrl,
+      obj.viewUrl,
+      obj.openUrl,
+      obj.url,
+      obj.signedUrl
+    ),
+    ""
+  );
+}
+
+function extractFilenameFromPayload(payload = {}, fallback = "archivo") {
+  const obj = safeObject(payload);
+  const file = safeObject(obj.file);
+  const data = safeObject(obj.data);
+
+  return safeText(
+    first(file.filename, file.name, data.filename, data.name, obj.filename, obj.name),
+    fallback
+  );
+}
+
+function extractContentTypeFromPayload(payload = {}, fallback = "") {
+  const obj = safeObject(payload);
+  const file = safeObject(obj.file);
+  const data = safeObject(obj.data);
+
+  return safeText(
+    first(
+      file.contentType,
+      file.mimeType,
+      file.mimetype,
+      file.type,
+      data.contentType,
+      data.mimeType,
+      data.mimetype,
+      data.type,
+      obj.contentType,
+      obj.mimeType,
+      obj.mimetype,
+      obj.type,
+      fallback
+    ),
+    fallback
+  );
+}
+
+function normalizeAttachmentActionFile(payload = null, attachment = {}, mode = "open") {
+  const fallbackFilename = safeText(
+    first(attachment?.filename, attachment?.name),
+    "archivo"
+  );
+
+  const blob =
+    isBlob(payload?.blob)
+      ? payload.blob
+      : payload?.kind === "blob" && isBlob(payload?.blob)
+        ? payload.blob
+        : null;
+
+  if (blob) {
+    const objectUrl = URL.createObjectURL(blob);
+
+    return {
+      ...safeObject(attachment),
+      url: objectUrl,
+      filename: safeText(payload?.filename, fallbackFilename),
+      name: safeText(payload?.filename, fallbackFilename),
+      contentType: safeText(
+        first(payload?.contentType, blob.type, attachment?.contentType, attachment?.type),
+        ""
+      ),
+      size: safeNumber(first(blob.size, attachment?.size), 0),
+      blob,
+      managedObjectUrl: true,
+      source: "blob",
+    };
+  }
+
+  const source = payload?.kind === "json" ? payload.payload : payload;
+  const sourceObj = safeObject(source);
+
+  const url = safeText(
+    first(
+      extractFileUrlFromPayload(sourceObj, mode),
+      sourceObj.url,
+      sourceObj.viewUrl,
+      sourceObj.openUrl,
+      sourceObj.downloadUrl,
+      sourceObj.signedUrl
+    ),
+    ""
+  );
+
+  if (!url) return null;
+
+  const filename = extractFilenameFromPayload(sourceObj, fallbackFilename);
+
+  return {
+    ...safeObject(attachment),
+    ...sourceObj,
+    url,
+    viewUrl: safeText(first(sourceObj.viewUrl, sourceObj.openUrl, url), url),
+    openUrl: safeText(first(sourceObj.openUrl, sourceObj.viewUrl, url), url),
+    downloadUrl: safeText(first(sourceObj.downloadUrl, url), url),
+    signedUrl: safeText(first(sourceObj.signedUrl, url), url),
+    filename,
+    name: safeText(first(sourceObj.name, filename), filename),
+    contentType: extractContentTypeFromPayload(
+      sourceObj,
+      safeText(first(attachment?.contentType, attachment?.type), "")
+    ),
+    size: safeNumber(first(sourceObj.size, attachment?.size), 0),
+    managedObjectUrl: false,
+    source: "url",
+  };
+}
+
+function downloadResolvedAttachmentFile(file = {}) {
+  const item = safeObject(file);
+  const filename = safeText(first(item.filename, item.name), "archivo");
+
+  if (isBlob(item.blob)) return downloadBlob(item.blob, filename);
+
+  return downloadUrlDirect(item.downloadUrl || item.url, filename);
+}
+
+async function openOrDownloadPayload(payload, attachment = {}, mode = "open") {
+  const finalMode = mode === "download" ? "download" : "open";
+  const file = normalizeAttachmentActionFile(payload, attachment, finalMode);
+
+  if (!file?.url) return false;
+
+  if (finalMode === "download") {
+    return downloadResolvedAttachmentFile(file);
+  }
+
+  return setAttachmentPreview(file);
+}
+
+/* =========================================================
+   API ACTIONS
+========================================================= */
+
+async function fetchTicketDetailInternal(ticketId = "") {
+  const id = safeText(ticketId, "");
+  if (!id) throw new Error("No se pudo identificar la incidencia.");
+
+  const encodedTicketId = encodeUrlPathSegment(id);
+
+  const candidates = [
+    `/api/tickets/${encodedTicketId}`,
+    `/api/incidencias/${encodedTicketId}`,
+  ];
+
+  let lastError = null;
+
+  for (const path of candidates) {
+    try {
+      return await requestJson(path, {
+        method: "GET",
+        timeoutMs: REQUEST_TIMEOUT_MS,
+      });
+    } catch (error) {
+      lastError = error;
+
+      if (![404, 405].includes(Number(error?.status || error?.statusCode))) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error("No se pudo cargar la incidencia.");
+}
+
+async function uploadTicketAttachmentsInternal({ ticketId = "", files = [] } = {}) {
   const id = safeText(ticketId, "");
   const list = dedupeFiles(files);
 
@@ -2524,8 +2387,7 @@ async function uploadTicketAttachmentsInternal({
         label: "Preparando subida...",
       };
 
-      renderModal();
-      attachRootBindings();
+      scheduleModalRender();
 
       return await requestMultipartWithProgress(path, formData, {
         method: "POST",
@@ -2563,30 +2425,12 @@ async function commentTicketInternal({ ticketId = "", message = "" } = {}) {
   };
 
   const candidates = [
-    {
-      method: "POST",
-      path: `/api/tickets/${encodedTicketId}/comments`,
-    },
-    {
-      method: "POST",
-      path: `/api/incidencias/${encodedTicketId}/comments`,
-    },
-    {
-      method: "POST",
-      path: `/api/tickets/${encodedTicketId}/messages`,
-    },
-    {
-      method: "POST",
-      path: `/api/incidencias/${encodedTicketId}/messages`,
-    },
-    {
-      method: "PATCH",
-      path: `/api/tickets/${encodedTicketId}`,
-    },
-    {
-      method: "PATCH",
-      path: `/api/incidencias/${encodedTicketId}`,
-    },
+    { method: "POST", path: `/api/tickets/${encodedTicketId}/comments` },
+    { method: "POST", path: `/api/incidencias/${encodedTicketId}/comments` },
+    { method: "POST", path: `/api/tickets/${encodedTicketId}/messages` },
+    { method: "POST", path: `/api/incidencias/${encodedTicketId}/messages` },
+    { method: "PATCH", path: `/api/tickets/${encodedTicketId}` },
+    { method: "PATCH", path: `/api/incidencias/${encodedTicketId}` },
   ];
 
   let lastError = null;
@@ -2612,10 +2456,7 @@ async function commentTicketInternal({ ticketId = "", message = "" } = {}) {
 
 async function reopenTicketInternal(ticketId = "") {
   const id = safeText(ticketId, "");
-
-  if (!id) {
-    throw new Error("No se pudo identificar la incidencia.");
-  }
+  if (!id) throw new Error("No se pudo identificar la incidencia.");
 
   const encodedTicketId = encodeUrlPathSegment(id);
 
@@ -2625,22 +2466,10 @@ async function reopenTicketInternal(ticketId = "") {
   };
 
   const candidates = [
-    {
-      method: "POST",
-      path: `/api/tickets/${encodedTicketId}/reopen`,
-    },
-    {
-      method: "POST",
-      path: `/api/incidencias/${encodedTicketId}/reopen`,
-    },
-    {
-      method: "PATCH",
-      path: `/api/tickets/${encodedTicketId}`,
-    },
-    {
-      method: "PATCH",
-      path: `/api/incidencias/${encodedTicketId}`,
-    },
+    { method: "POST", path: `/api/tickets/${encodedTicketId}/reopen` },
+    { method: "POST", path: `/api/incidencias/${encodedTicketId}/reopen` },
+    { method: "PATCH", path: `/api/tickets/${encodedTicketId}` },
+    { method: "PATCH", path: `/api/incidencias/${encodedTicketId}` },
   ];
 
   let lastError = null;
@@ -2664,71 +2493,10 @@ async function reopenTicketInternal(ticketId = "") {
   throw lastError || new Error("No se pudo reabrir la incidencia.");
 }
 
-async function fetchTicketDetailInternal(ticketId = "") {
-  const id = safeText(ticketId, "");
-
-  if (!id) {
-    throw new Error("No se pudo identificar la incidencia.");
-  }
-
-  const encodedTicketId = encodeUrlPathSegment(id);
-
-  const candidates = [
-    `/api/tickets/${encodedTicketId}`,
-    `/api/incidencias/${encodedTicketId}`,
-  ];
-
-  let lastError = null;
-
-  for (const path of candidates) {
-    try {
-      return await requestJson(path, {
-        method: "GET",
-        timeoutMs: REQUEST_TIMEOUT_MS,
-      });
-    } catch (error) {
-      lastError = error;
-
-      if (![404, 405].includes(Number(error?.status || error?.statusCode))) {
-        throw error;
-      }
-    }
-  }
-
-  throw lastError || new Error("No se pudo cargar la incidencia.");
-}
-
-/* =========================================================
-   EXTERNAL ACTION BRIDGE
-========================================================= */
-
-async function callExternalAction(action = "", payload = {}) {
-  const actionName = safeText(action, "");
-  if (!actionName) return null;
-
-  const candidates = [
-    AppCore?.modules?.IncidenciasModalActions?.[actionName],
-    AppCore?.modules?.IncidenciasActions?.[actionName],
-    AppCore?.modules?.Incidencias?.[actionName],
-    window?.OnionIncidenciasModalActions?.[actionName],
-    window?.OnionIncidenciasActions?.[actionName],
-    window?.IncidenciasActions?.[actionName],
-  ];
-
-  for (const candidate of candidates) {
-    if (typeof candidate !== "function") continue;
-    return await candidate(payload);
-  }
-
-  return null;
-}
-
 async function refreshCurrentDetail(ticketId = "", fallback = {}) {
   const id = safeText(ticketId, "");
 
-  if (!id) {
-    return getDetail(fallback);
-  }
+  if (!id) return getDetail(fallback);
 
   try {
     const internal = await fetchTicketDetailInternal(id);
@@ -2756,8 +2524,29 @@ function mergeDetailWithOpenStatus(detail = {}, response = null) {
   });
 }
 
+async function callExternalAction(action = "", payload = {}) {
+  const actionName = safeText(action, "");
+  if (!actionName) return null;
+
+  const candidates = [
+    AppCore?.modules?.IncidenciasModalActions?.[actionName],
+    AppCore?.modules?.IncidenciasActions?.[actionName],
+    AppCore?.modules?.Incidencias?.[actionName],
+    isBrowser() ? window.OnionIncidenciasModalActions?.[actionName] : null,
+    isBrowser() ? window.OnionIncidenciasActions?.[actionName] : null,
+    isBrowser() ? window.IncidenciasActions?.[actionName] : null,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== "function") continue;
+    return await candidate(payload);
+  }
+
+  return null;
+}
+
 /* =========================================================
-   TIMELINE NORMALIZATION / CLEANUP
+   TIMELINE
 ========================================================= */
 
 function cleanTimelineText(value = "") {
@@ -2777,16 +2566,7 @@ function formatChange(change = {}) {
   const field = safeText(item.field, "").toLowerCase();
   const action = safeText(item.action, "").toLowerCase();
 
-  if (
-    [
-      "comments",
-      "comment",
-      "messages",
-      "message",
-      "notes",
-      "note",
-    ].includes(field)
-  ) {
+  if (["comments", "comment", "messages", "message", "notes", "note"].includes(field)) {
     return "";
   }
 
@@ -2795,15 +2575,11 @@ function formatChange(change = {}) {
     const removed = safeNumber(item.removed, 0);
 
     if (action === "remove" || removed > 0) {
-      return removed === 1
-        ? "Se eliminó 1 adjunto."
-        : `Se eliminaron ${removed} adjuntos.`;
+      return removed === 1 ? "Se eliminó 1 adjunto." : `Se eliminaron ${removed} adjuntos.`;
     }
 
     if (added > 0) {
-      return added === 1
-        ? "Se añadió 1 adjunto."
-        : `Se añadieron ${added} adjuntos.`;
+      return added === 1 ? "Se añadió 1 adjunto." : `Se añadieron ${added} adjuntos.`;
     }
 
     return "Adjuntos actualizados.";
@@ -2818,13 +2594,6 @@ function formatChange(change = {}) {
   }
 
   if (field === "message" || field === "descripcion" || field === "description") {
-    const from = normalizeWhitespace(item.from);
-    const to = normalizeWhitespace(item.to);
-
-    if (from && to && from === to) {
-      return "";
-    }
-
     return "Descripción actualizada.";
   }
 
@@ -2832,9 +2601,7 @@ function formatChange(change = {}) {
     return `Categoría actualizada: ${safeText(item.from, "—")} → ${safeText(item.to, "—")}.`;
   }
 
-  if (field) {
-    return `${field} actualizado.`;
-  }
+  if (field) return `${field} actualizado.`;
 
   return "";
 }
@@ -2864,11 +2631,7 @@ function normalizeTimelineEntries(detail = {}) {
       const type = safeText(first(item.type, item.action), "update");
       const changes = safeArray(item.changes);
 
-      let title = safeText(
-        first(item.title, item.action, item.type),
-        "Actualización"
-      );
-
+      let title = safeText(first(item.title, item.action, item.type), "Actualización");
       let body = cleanTimelineText(
         first(item.description, item.detail, item.body, item.message, item.text, "")
       );
@@ -2899,10 +2662,7 @@ function normalizeTimelineEntries(detail = {}) {
         type,
         title,
         body,
-        author: safeText(
-          first(item.byName, item.user, item.author, item.name),
-          "Sistema"
-        ),
+        author: safeText(first(item.byName, item.user, item.author, item.name), "Sistema"),
         createdAt: first(item.createdAt, item.date, item.timestamp),
       };
     })
@@ -2921,13 +2681,6 @@ function normalizeTimelineEntries(detail = {}) {
         return false;
       }
 
-      if (
-        entry.type === "update" &&
-        ["comments actualizado.", "messages actualizado.", "notes actualizado."].includes(body)
-      ) {
-        return false;
-      }
-
       return true;
     });
 
@@ -2940,13 +2693,8 @@ function normalizeTimelineEntries(detail = {}) {
         kind: "comment",
         type: "comment",
         title: "Comentario",
-        body: cleanTimelineText(
-          first(item.message, item.text, item.body, item.comment, "")
-        ),
-        author: safeText(
-          first(item.byName, item.user, item.author, item.name),
-          "Usuario"
-        ),
+        body: cleanTimelineText(first(item.message, item.text, item.body, item.comment, "")),
+        author: safeText(first(item.byName, item.user, item.author, item.name), "Usuario"),
         createdAt: first(item.createdAt, item.date, item.timestamp),
       };
     })
@@ -2964,7 +2712,7 @@ function getTimeline(detail = {}) {
 }
 
 /* =========================================================
-   VISUAL CLASS HELPERS · NO INLINE STYLE
+   VISUAL CLASS HELPERS
 ========================================================= */
 
 function getStatusClassKey(value = "") {
@@ -2974,26 +2722,14 @@ function getStatusClassKey(value = "") {
   if (["pending", "pendiente"].includes(key)) return "pending";
 
   if (
-    [
-      "progress",
-      "in_progress",
-      "inprogress",
-      "en_proceso",
-      "proceso",
-      "working",
-      "trabajando",
-    ].includes(key)
+    ["progress", "in_progress", "inprogress", "en_proceso", "proceso", "working", "trabajando"]
+      .includes(key)
   ) {
     return "progress";
   }
 
-  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) {
-    return "resolved";
-  }
-
-  if (["closed", "cerrada", "cerrado", "archived", "archivada"].includes(key)) {
-    return "closed";
-  }
+  if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) return "resolved";
+  if (["closed", "cerrada", "cerrado", "archived", "archivada"].includes(key)) return "closed";
 
   return "neutral";
 }
@@ -3005,16 +2741,7 @@ function getPriorityClassKey(value = "") {
   if (["medium", "media", "normal", "p2"].includes(key)) return "medium";
   if (["high", "alta", "urgent", "urgente", "p1"].includes(key)) return "high";
 
-  if (
-    [
-      "critical",
-      "critica",
-      "critico",
-      "crítica",
-      "crítico",
-      "p0",
-    ].includes(key)
-  ) {
+  if (["critical", "critica", "critico", "crítica", "crítico", "p0"].includes(key)) {
     return "critical";
   }
 
@@ -3041,31 +2768,94 @@ function renderChip(label = "", modifier = "neutral") {
   `;
 }
 
+/* =========================================================
+   SVG ICONS
+========================================================= */
+
+function getAttachmentDownloadIconSvg() {
+  return `
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+      class="incidencias-modal-svg-icon"
+    >
+      <path
+        d="M12 3v11m0 0 4-4m-4 4-4-4"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+      />
+    </svg>
+  `;
+}
+
+function getAttachmentViewIconSvg() {
+  return `
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+      class="incidencias-modal-svg-icon"
+    >
+      <path
+        d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linejoin="round"
+      />
+      <path
+        d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"
+        stroke="currentColor"
+        stroke-width="2"
+      />
+    </svg>
+  `;
+}
+
+/* =========================================================
+   RENDER PARTIALS
+========================================================= */
+
 function renderAvatar(detail = {}) {
   const clientName = getClientName(detail);
-
-  const initials = safeText(
-    detail.initials,
-    getInitials(clientName || "ON")
-  );
-
+  const initials = safeText(detail.initials, getInitials(clientName || "ON"));
   const avatarUrl = getClientAvatar(detail);
-  const theme = safeText(getAvatarTheme(safeText(first(detail.ticketId, clientName), "onion")), "violet");
+  const theme = safeText(
+    getAvatarTheme(safeText(first(detail.ticketId, clientName), "onion")),
+    "violet"
+  );
 
   if (avatarUrl) {
     return `
       <div
         class="incidencias-modal-avatar incidencias-modal-avatar--${escapeHtml(theme)}"
-        data-tooltip="${escapeHtml(clientName)}"
-        aria-label="${escapeHtml(clientName)}"
+        ${tooltipAttrs(clientName, clientName)}
       >
-        <div class="incidencias-modal-avatar-frame">
+        <div
+          class="incidencias-modal-avatar-frame"
+          data-modal-avatar-frame="true"
+          data-fallback="false"
+        >
           <img
             src="${escapeHtml(avatarUrl)}"
             alt="${escapeHtml(clientName)}"
             loading="lazy"
             referrerpolicy="no-referrer"
-            onerror="this.style.display='none'; this.parentNode.setAttribute('data-modal-avatar-fallback','true');"
+            data-modal-avatar-img="true"
           />
 
           <span class="incidencias-modal-avatar-fallback">
@@ -3079,10 +2869,13 @@ function renderAvatar(detail = {}) {
   return `
     <div
       class="incidencias-modal-avatar incidencias-modal-avatar--${escapeHtml(theme)}"
-      data-tooltip="${escapeHtml(clientName)}"
-      aria-label="${escapeHtml(clientName)}"
+      ${tooltipAttrs(clientName, clientName)}
     >
-      <div class="incidencias-modal-avatar-frame incidencias-modal-avatar-frame--fallback">
+      <div
+        class="incidencias-modal-avatar-frame incidencias-modal-avatar-frame--fallback"
+        data-modal-avatar-frame="true"
+        data-fallback="true"
+      >
         <span class="incidencias-modal-avatar-fallback">
           ${escapeHtml(initials)}
         </span>
@@ -3090,10 +2883,6 @@ function renderAvatar(detail = {}) {
     </div>
   `;
 }
-
-/* =========================================================
-   RENDER PARTIALS
-========================================================= */
 
 function renderMetaField(label = "", value = "") {
   return `
@@ -3126,6 +2915,15 @@ function renderFeedbackBox() {
 
       <span>${escapeHtml(message)}</span>
     </div>
+  `;
+}
+
+function renderInlineSpinner(label = "") {
+  return `
+    <span class="incidencias-modal-inline-spinner">
+      <span aria-hidden="true"></span>
+      ${escapeHtml(label)}
+    </span>
   `;
 }
 
@@ -3215,27 +3013,69 @@ function renderPendingFiles() {
   `;
 }
 
+function renderComposer() {
+  const draft = safeText(modalState.commentDraft, "");
+
+  return `
+    <section class="incidencias-modal-composer">
+      <div class="incidencias-modal-composer-head">
+        <div class="incidencias-modal-composer-icon" aria-hidden="true">
+          +
+        </div>
+
+        <div class="incidencias-modal-composer-copy">
+          <h3>Añadir comentario y adjuntos</h3>
+          <span>
+            Redacta la actualización y adjunta archivos en este mismo bloque.
+          </span>
+        </div>
+      </div>
+
+      <textarea
+        id="incidencias-modal-comment-input"
+        data-modal-field="comment"
+        placeholder="Ejemplo: He probado de nuevo, el error sigue apareciendo al iniciar sesión. Adjunto captura..."
+        ${modalState.isSubmitting ? "disabled" : ""}
+        class="incidencias-modal-comment-textarea"
+      >${escapeHtml(draft)}</textarea>
+
+      <div class="incidencias-modal-composer-foot">
+        <span>
+          Al pulsar “Actualizar incidencia”, se enviará esta información y la incidencia volverá a estado abierta.
+        </span>
+      </div>
+
+      ${renderUploadProgress()}
+
+      <label
+        for="incidencias-modal-attachments-input"
+        class="incidencias-modal-dropzone"
+      >
+        <input
+          id="incidencias-modal-attachments-input"
+          type="file"
+          data-modal-field="attachments"
+          multiple
+          ${modalState.isSubmitting ? "disabled" : ""}
+        />
+
+        <span>Seleccionar archivos</span>
+        <small>Imágenes, PDFs y documentos de soporte</small>
+      </label>
+
+      ${renderPendingFiles()}
+    </section>
+  `;
+}
+
 function getAttachmentBusyMeta(file = {}) {
   const attachmentId = safeText(file.id, "");
 
   return {
     attachmentId,
-    isOpening: Boolean(
-      attachmentId && modalState.openingAttachmentId === attachmentId
-    ),
-    isDownloading: Boolean(
-      attachmentId && modalState.downloadingAttachmentId === attachmentId
-    ),
+    isOpening: Boolean(attachmentId && modalState.openingAttachmentId === attachmentId),
+    isDownloading: Boolean(attachmentId && modalState.downloadingAttachmentId === attachmentId),
   };
-}
-
-function renderInlineSpinner(label = "") {
-  return `
-    <span class="incidencias-modal-inline-spinner">
-      <span aria-hidden="true"></span>
-      ${escapeHtml(label)}
-    </span>
-  `;
 }
 
 function renderAttachmentActionButtons(file = {}) {
@@ -3250,8 +3090,7 @@ function renderAttachmentActionButtons(file = {}) {
         data-attachment-id="${escapeHtml(file.id)}"
         ${busy.isOpening || modalState.isSubmitting ? "disabled" : ""}
         class="incidencias-modal-view-btn"
-        title="${isImage ? "Ampliar imagen" : "Ver documento"}"
-        aria-label="${isImage ? "Ampliar imagen" : "Ver documento"} ${escapeHtml(file.name || file.filename || "archivo")}"
+        ${tooltipAttrs(isImage ? "Ampliar imagen" : "Ver documento", `${isImage ? "Ampliar imagen" : "Ver documento"} ${file.name || file.filename || "archivo"}`)}
       >
         ${
           busy.isOpening
@@ -3271,8 +3110,7 @@ function renderAttachmentActionButtons(file = {}) {
         data-attachment-id="${escapeHtml(file.id)}"
         ${busy.isDownloading || modalState.isSubmitting ? "disabled" : ""}
         class="incidencias-modal-download-btn"
-        title="Descargar"
-        aria-label="Descargar ${escapeHtml(file.name || file.filename || "archivo")}"
+        ${tooltipAttrs("Descargar", `Descargar ${file.name || file.filename || "archivo"}`)}
       >
         ${
           busy.isDownloading
@@ -3350,7 +3188,8 @@ function renderAttachmentPreviewSquare(file = {}) {
       data-attachment-id="${escapeHtml(file.id)}"
       class="incidencias-modal-image-thumb-wrap"
       aria-label="Ampliar ${escapeHtml(file.name || file.filename || "imagen adjunta")}"
-      title="Click para ampliar"
+      data-modal-thumb-frame="true"
+      data-thumb-error="false"
     >
       <img
         src="${escapeHtml(directUrl)}"
@@ -3358,7 +3197,7 @@ function renderAttachmentPreviewSquare(file = {}) {
         loading="lazy"
         referrerpolicy="no-referrer"
         class="incidencias-modal-image-thumb"
-        onerror="this.style.display='none'; this.parentNode.setAttribute('data-thumb-error','true');"
+        data-modal-thumb-img="true"
       />
 
       <span class="incidencias-modal-image-thumb-fallback">IMG</span>
@@ -3433,20 +3272,12 @@ function renderAttachmentPreview() {
 
   if (!url) return "";
 
-  const filename = safeText(
-    first(file.filename, file.name),
-    "Documento"
-  );
-
+  const filename = safeText(first(file.filename, file.name), "Documento");
   const type = getAttachmentPreviewType(file);
   const size = formatBytes(file.size);
   const image = isPreviewImage(file);
   const pdf = isPreviewPdf(file);
-
-  const meta = [
-    type || "Vista previa",
-    size,
-  ].filter(Boolean).join(" · ");
+  const meta = [type || "Vista previa", size].filter(Boolean).join(" · ");
 
   return `
     <section class="incidencias-modal-preview">
@@ -3580,61 +3411,6 @@ function renderTimeline(detail = {}) {
   `;
 }
 
-function renderComposer() {
-  const draft = safeText(modalState.commentDraft, "");
-
-  return `
-    <section class="incidencias-modal-composer">
-      <div class="incidencias-modal-composer-head">
-        <div class="incidencias-modal-composer-icon" aria-hidden="true">
-          +
-        </div>
-
-        <div class="incidencias-modal-composer-copy">
-          <h3>Añadir comentario y adjuntos</h3>
-          <span>
-            Redacta la actualización y adjunta archivos en este mismo bloque.
-          </span>
-        </div>
-      </div>
-
-      <textarea
-        id="incidencias-modal-comment-input"
-        data-modal-field="comment"
-        placeholder="Ejemplo: He probado de nuevo, el error sigue apareciendo al iniciar sesión. Adjunto captura..."
-        ${modalState.isSubmitting ? "disabled" : ""}
-        class="incidencias-modal-comment-textarea"
-      >${escapeHtml(draft)}</textarea>
-
-      <div class="incidencias-modal-composer-foot">
-        <span>
-          Al pulsar “Actualizar incidencia”, se enviará esta información y la incidencia volverá a estado abierta.
-        </span>
-      </div>
-
-      ${renderUploadProgress()}
-
-      <label
-        for="incidencias-modal-attachments-input"
-        class="incidencias-modal-dropzone"
-      >
-        <input
-          id="incidencias-modal-attachments-input"
-          type="file"
-          data-modal-field="attachments"
-          multiple
-          ${modalState.isSubmitting ? "disabled" : ""}
-        />
-
-        <span>Seleccionar archivos</span>
-        <small>Imágenes, PDFs y documentos de soporte</small>
-      </label>
-
-      ${renderPendingFiles()}
-    </section>
-  `;
-}
-
 function renderLoadingOverlay(label = "Procesando...") {
   return `
     <div class="incidencias-modal-loading-overlay">
@@ -3647,7 +3423,7 @@ function renderLoadingOverlay(label = "Procesando...") {
 }
 
 function renderFooter(detail = {}) {
-  const ticketId = getTicketId(detail);
+  const ticketId = getDisplayTicketId(detail);
 
   return `
     <footer class="incidencias-modal-footer">
@@ -3674,8 +3450,7 @@ function renderFooter(detail = {}) {
 
 function renderModalInner(detail = {}) {
   const item = getDetail(detail);
-
-  const ticketId = getTicketId(item);
+  const ticketId = getDisplayTicketId(item);
 
   const title = safeText(
     first(
@@ -3743,8 +3518,8 @@ function renderModalInner(detail = {}) {
                   type="button"
                   data-modal-action="copy"
                   data-ticket-id="${escapeHtml(ticketId)}"
-                  title="Copiar ID"
                   class="incidencias-modal-id-chip"
+                  ${tooltipAttrs("Copiar ID", "Copiar ID")}
                 >
                   ${escapeHtml(ticketId)}
                 </button>
@@ -3823,11 +3598,21 @@ function renderModalInner(detail = {}) {
 ========================================================= */
 
 function getRoot() {
+  if (!isBrowser()) return null;
   return document.getElementById(MODAL_ID);
 }
 
 function ensureRoot() {
-  let root = getRoot();
+  if (!isBrowser()) return null;
+
+  const existing = Array.from(document.querySelectorAll(`#${MODAL_ID}`));
+  let root = existing[0];
+
+  existing.slice(1).forEach((duplicate) => {
+    try {
+      duplicate.remove();
+    } catch {}
+  });
 
   if (root) return root;
 
@@ -3839,28 +3624,14 @@ function ensureRoot() {
 }
 
 function lockBody() {
-  if (
-    typeof document === "undefined" ||
-    !document?.body
-  ) {
-    return false;
-  }
+  if (!isBrowser() || !document.body) return false;
+  if (modalState.bodyLocked) return true;
 
-  if (modalState.bodyLockDepth <= 0) {
-    try {
-      modalState.bodyOverflowBeforeLock = safeText(
-        document.body.style?.overflow,
-        ""
-      );
-    } catch {
-      modalState.bodyOverflowBeforeLock = "";
-    }
+  try {
+    modalState.bodyOverflowBeforeLock = safeText(document.body.style?.overflow, "");
+  } catch {
+    modalState.bodyOverflowBeforeLock = "";
   }
-
-  modalState.bodyLockDepth = Math.max(
-    1,
-    safeNumber(modalState.bodyLockDepth, 0) + 1
-  );
 
   try {
     document.body.classList.add("modal-open");
@@ -3871,27 +3642,14 @@ function lockBody() {
     document.body.style.overflow = "hidden";
   } catch {}
 
+  modalState.bodyLocked = true;
+
   return true;
 }
 
 function unlockBody() {
-  if (
-    typeof document === "undefined" ||
-    !document?.body
-  ) {
-    return false;
-  }
-
-  const nextDepth = Math.max(
-    0,
-    safeNumber(modalState.bodyLockDepth, 0) - 1
-  );
-
-  modalState.bodyLockDepth = nextDepth;
-
-  if (nextDepth > 0) {
-    return true;
-  }
+  if (!isBrowser() || !document.body) return false;
+  if (!modalState.bodyLocked) return true;
 
   try {
     document.body.classList.remove("modal-open");
@@ -3899,14 +3657,11 @@ function unlockBody() {
   } catch {}
 
   try {
-    document.body.style.overflow =
-      safeText(
-        modalState.bodyOverflowBeforeLock,
-        ""
-      );
+    document.body.style.overflow = safeText(modalState.bodyOverflowBeforeLock, "");
   } catch {}
 
   modalState.bodyOverflowBeforeLock = "";
+  modalState.bodyLocked = false;
 
   return true;
 }
@@ -3918,7 +3673,7 @@ function restoreFocus() {
 }
 
 function detachEscHandler() {
-  if (!modalState.escHandler) return;
+  if (!modalState.escHandler || !isBrowser()) return;
 
   try {
     document.removeEventListener("keydown", modalState.escHandler);
@@ -3928,6 +3683,8 @@ function detachEscHandler() {
 }
 
 function attachEscHandler() {
+  if (!isBrowser()) return;
+
   detachEscHandler();
 
   modalState.escHandler = (event) => {
@@ -3941,26 +3698,6 @@ function attachEscHandler() {
   } catch {}
 }
 
-/* =========================================================
-   RENDER CONTROL
-========================================================= */
-
-function renderModal() {
-  const root = ensureRoot();
-
-  if (!modalState.detail) {
-    detachRootBindings();
-    root.innerHTML = "";
-    return root;
-  }
-
-  detachRootBindings();
-  root.innerHTML = renderModalInner(modalState.detail);
-  modalState.bindingsAttached = false;
-
-  return root;
-}
-
 function focusPanel() {
   try {
     const panel = document.getElementById(PANEL_ID);
@@ -3969,49 +3706,162 @@ function focusPanel() {
 }
 
 /* =========================================================
-   OPEN / CLOSE
+   RENDER CONTROL
 ========================================================= */
 
-export function openIncidenciasModal(detail = {}) {
-  if (
-    !modalState.isOpen &&
-    typeof document !== "undefined"
-  ) {
-    modalState.lastActiveElement =
-      document.activeElement || null;
+function renderModal({ preserveFocus = true } = {}) {
+  const root = ensureRoot();
+
+  if (!root) return null;
+
+  if (!modalState.detail) {
+    detachRootBindings();
+    root.innerHTML = "";
+    modalState.lastRenderedHash = "";
+    return root;
   }
 
-  modalState.detail = getDetail(detail);
+  const detailHash = getObjectHash(modalState.detail);
+  const renderHash = [
+    detailHash,
+    modalState.isSubmitting ? "submitting" : "idle",
+    modalState.feedbackType,
+    modalState.feedbackMessage,
+    modalState.commentDraft,
+    modalState.pendingFiles.length,
+    modalState.uploadProgress.active,
+    modalState.uploadProgress.percent,
+    modalState.openingAttachmentId,
+    modalState.downloadingAttachmentId,
+    safeText(modalState.previewFile?.url, ""),
+    Array.from(modalState.thumbnailObjectUrls.keys()).join("|"),
+  ].join("::");
+
+  if (renderHash === modalState.lastRenderedHash && root.innerHTML) {
+    attachRootBindings();
+    return root;
+  }
+
+  const activeId = preserveFocus ? safeText(document.activeElement?.id, "") : "";
+
+  detachRootBindings();
+  root.innerHTML = renderModalInner(modalState.detail);
+  modalState.lastRenderedHash = renderHash;
+  modalState.bindingsAttached = false;
+
+  attachRootBindings();
+
+  if (activeId) {
+    try {
+      document.getElementById(activeId)?.focus?.();
+    } catch {}
+  }
+
+  return root;
+}
+
+function scheduleModalRender() {
+  if (modalState.renderQueued) return;
+
+  modalState.renderQueued = true;
+
+  const run = () => {
+    modalState.renderQueued = false;
+
+    if (!modalState.isOpen) return;
+
+    renderModal({
+      preserveFocus: true,
+    });
+  };
+
+  try {
+    requestAnimationFrame(run);
+  } catch {
+    setTimeout(run, 0);
+  }
+}
+
+/* =========================================================
+   OPEN / CLOSE / UPDATE
+========================================================= */
+
+function shouldIgnoreDuplicateOpen(ticketId = "", detail = {}) {
+  const id = safeText(ticketId, "");
+  if (!id || !modalState.isOpen) return false;
+
+  const now = Date.now();
+  const hash = getObjectHash(detail);
+
+  const sameTicket = id === modalState.openTicketId;
+  const sameHash = hash === modalState.lastOpenHash;
+  const tooSoon = now - safeNumber(modalState.lastOpenAt, 0) < DUPLICATE_OPEN_WINDOW_MS;
+
+  return sameTicket && (sameHash || tooSoon);
+}
+
+export function openIncidenciasModal(detail = {}, options = {}) {
+  if (!isBrowser()) return false;
+
+  const nextDetail = getDetail(detail);
+  const ticketId = getTicketId(nextDetail);
+  const now = Date.now();
+  const hash = getObjectHash(nextDetail);
+
+  if (shouldIgnoreDuplicateOpen(ticketId, nextDetail)) {
+    if (modalState.isOpen && ticketId === modalState.openTicketId) {
+      updateIncidenciasModal(nextDetail, {
+        silent: true,
+        preserveTransient: true,
+        preserveFocus: true,
+      });
+    }
+
+    return true;
+  }
+
+  const wasOpen = modalState.isOpen;
+  const previousTicketId = modalState.openTicketId;
+
+  if (!wasOpen) {
+    modalState.lastActiveElement = document.activeElement || null;
+  }
+
+  const newTicket = ticketId && ticketId !== previousTicketId;
+
+  modalState.detail = nextDetail;
   modalState.isOpen = true;
-  modalState.isSubmitting = false;
-  modalState.commentDraft = "";
-  modalState.pendingFiles = [];
+  modalState.openTicketId = ticketId;
+  modalState.lastOpenAt = now;
+  modalState.lastOpenHash = hash;
 
-  clearUploadProgress();
-  clearAttachmentPreview();
-  clearFeedback();
-  clearAttachmentBusyState();
-  clearAttachmentActionKey();
-  revokeAttachmentThumbnails();
+  if (!wasOpen || newTicket) {
+    resetTransientStateForNewTicket();
+  }
 
-  renderModal();
+  renderModal({
+    preserveFocus: wasOpen,
+  });
+
   lockBody();
   attachEscHandler();
-  attachRootBindings();
-  focusPanel();
 
-  safeEmit("incidencias:modal:opened", {
-    detail: modalState.detail,
-    ticketId: getTicketId(modalState.detail),
-  });
+  if (!wasOpen) {
+    focusPanel();
+  }
+
+  if (!options.silent && !wasOpen) {
+    safeEmit("incidencias:modal:opened", {
+      detail: modalState.detail,
+      ticketId,
+    });
+  }
 
   return true;
 }
 
-export function closeIncidenciasModal() {
-  if (modalState.isSubmitting) {
-    return false;
-  }
+export function closeIncidenciasModal(options = {}) {
+  if (modalState.isSubmitting && !options.force) return false;
 
   const root = getRoot();
 
@@ -4020,6 +3870,9 @@ export function closeIncidenciasModal() {
   modalState.detail = null;
   modalState.commentDraft = "";
   modalState.pendingFiles = [];
+  modalState.openTicketId = "";
+  modalState.lastOpenHash = "";
+  modalState.lastRenderedHash = "";
 
   clearUploadProgress();
   clearAttachmentPreview();
@@ -4036,35 +3889,69 @@ export function closeIncidenciasModal() {
 
   unlockBody();
   detachEscHandler();
-  restoreFocus();
 
-  safeEmit("incidencias:modal:closed", {});
+  if (!options.skipFocusRestore) {
+    restoreFocus();
+  }
+
+  if (!options.silent) {
+    safeEmit("incidencias:modal:closed", {});
+  }
 
   return true;
 }
 
-export function updateIncidenciasModal(detail = {}) {
+export function updateIncidenciasModal(detail = {}, options = {}) {
+  const nextDetail = getDetail(detail);
+  const ticketId = getTicketId(nextDetail);
+
   if (!modalState.isOpen) {
-    return openIncidenciasModal(detail);
+    return openIncidenciasModal(nextDetail, options);
   }
 
-  modalState.detail = getDetail(detail);
-  modalState.isSubmitting = false;
+  const sameTicket = ticketId && ticketId === modalState.openTicketId;
 
-  clearAttachmentBusyState();
-  clearAttachmentActionKey();
-  revokeAttachmentThumbnails();
+  modalState.detail = nextDetail;
+  modalState.openTicketId = ticketId || modalState.openTicketId;
+  modalState.lastOpenHash = getObjectHash(nextDetail);
 
-  renderModal();
-  attachRootBindings();
-  focusPanel();
+  if (!options.preserveTransient && !sameTicket) {
+    resetTransientStateForNewTicket();
+  } else {
+    clearAttachmentBusyState();
+    clearAttachmentActionKey();
+  }
+
+  if (!sameTicket) {
+    revokeAttachmentThumbnails();
+  }
+
+  renderModal({
+    preserveFocus: options.preserveFocus !== false,
+  });
+
+  if (options.focus !== false) {
+    focusPanel();
+  }
 
   return true;
 }
 
 /* =========================================================
-   ACTIONS
+   ACTION HANDLERS
 ========================================================= */
+
+async function waitForPaint() {
+  return new Promise((resolve) => {
+    try {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(resolve);
+      });
+    } catch {
+      setTimeout(resolve, 0);
+    }
+  });
+}
 
 async function handleCopy(ticketId = "") {
   const id = safeText(ticketId, "");
@@ -4072,7 +3959,6 @@ async function handleCopy(ticketId = "") {
   if (!id) {
     setFeedback("No hay ID disponible para copiar.", "error");
     renderModal();
-    attachRootBindings();
     return false;
   }
 
@@ -4085,9 +3971,7 @@ async function handleCopy(ticketId = "") {
     }
   } catch {}
 
-  safeEmit("incidencias:modal:copy", {
-    ticketId: id,
-  });
+  safeEmit("incidencias:modal:copy", { ticketId: id });
 
   if (copied) {
     setFeedback(`ID ${id} copiado al portapapeles.`, "success");
@@ -4098,15 +3982,11 @@ async function handleCopy(ticketId = "") {
   }
 
   renderModal();
-  attachRootBindings();
-
   return true;
 }
 
 async function handleSubmitUpdate(ticketId = "") {
-  if (modalState.isSubmitting) {
-    return false;
-  }
+  if (modalState.isSubmitting) return false;
 
   const id = safeText(ticketId, "");
   const message = normalizeWhitespace(modalState.commentDraft);
@@ -4115,7 +3995,6 @@ async function handleSubmitUpdate(ticketId = "") {
   if (!id) {
     setFeedback("No se ha podido identificar la incidencia.", "error");
     renderModal();
-    attachRootBindings();
     return false;
   }
 
@@ -4125,26 +4004,18 @@ async function handleSubmitUpdate(ticketId = "") {
       "error"
     );
     renderModal();
-    attachRootBindings();
     return false;
   }
 
   if (message && message.length < 4) {
-    setFeedback(
-      "Añade un poco más de detalle antes de enviar la actualización.",
-      "error"
-    );
+    setFeedback("Añade un poco más de detalle antes de enviar la actualización.", "error");
     renderModal();
-    attachRootBindings();
     return false;
   }
 
   modalState.isSubmitting = true;
   clearFeedback();
-
   renderModal();
-  attachRootBindings();
-  focusPanel();
 
   await waitForPaint();
 
@@ -4232,9 +4103,7 @@ async function handleSubmitUpdate(ticketId = "") {
   } finally {
     modalState.isSubmitting = false;
     clearUploadProgress();
-
     renderModal();
-    attachRootBindings();
     focusPanel();
   }
 }
@@ -4242,9 +4111,7 @@ async function handleSubmitUpdate(ticketId = "") {
 function getAttachmentById(attachmentId = "") {
   const files = getAttachments(modalState.detail);
 
-  return files.find(
-    (file) => safeText(file.id, "") === safeText(attachmentId, "")
-  );
+  return files.find((file) => safeText(file.id, "") === safeText(attachmentId, ""));
 }
 
 async function handleAttachmentAction(attachmentId = "", mode = "download") {
@@ -4256,7 +4123,6 @@ async function handleAttachmentAction(attachmentId = "", mode = "download") {
     setFeedback("No se ha encontrado el adjunto solicitado.", "error");
     showToast("Adjunto no encontrado.", "error");
     renderModal();
-    attachRootBindings();
     return false;
   }
 
@@ -4266,9 +4132,7 @@ async function handleAttachmentAction(attachmentId = "", mode = "download") {
     finalMode,
   ].join("::");
 
-  if (modalState.attachmentActionKey === actionKey) {
-    return false;
-  }
+  if (modalState.attachmentActionKey === actionKey) return false;
 
   modalState.attachmentActionKey = actionKey;
 
@@ -4279,7 +4143,6 @@ async function handleAttachmentAction(attachmentId = "", mode = "download") {
   }
 
   renderModal();
-  attachRootBindings();
 
   try {
     const externalActionName =
@@ -4317,11 +4180,7 @@ async function handleAttachmentAction(attachmentId = "", mode = "download") {
       }
     } catch {}
 
-    const candidates = buildAttachmentCandidates(
-      modalState.detail,
-      attachment,
-      finalMode
-    );
+    const candidates = buildAttachmentCandidates(modalState.detail, attachment, finalMode);
 
     if (!candidates.length) {
       throw new Error(
@@ -4373,9 +4232,7 @@ async function handleAttachmentAction(attachmentId = "", mode = "download") {
             finalMode
           );
 
-          if (!file?.url) {
-            throw new Error("ATTACHMENT_URL_EMPTY");
-          }
+          if (!file?.url) throw new Error("ATTACHMENT_URL_EMPTY");
 
           if (finalMode === "download") {
             downloadResolvedAttachmentFile(file);
@@ -4429,7 +4286,6 @@ async function handleAttachmentAction(attachmentId = "", mode = "download") {
     clearAttachmentBusyState();
     clearAttachmentActionKey();
     renderModal();
-    attachRootBindings();
     focusPanel();
   }
 }
@@ -4438,16 +4294,84 @@ async function handleAttachmentAction(attachmentId = "", mode = "download") {
    ROOT BINDINGS
 ========================================================= */
 
+function bindImageFallbacks(root) {
+  root.querySelectorAll("[data-modal-avatar-img='true']").forEach((img) => {
+    if (img.dataset.modalFallbackBound === "true") return;
+
+    img.dataset.modalFallbackBound = "true";
+
+    const frame = img.closest("[data-modal-avatar-frame='true']");
+
+    const setFallback = () => {
+      if (frame) {
+        frame.setAttribute("data-fallback", "true");
+        frame.classList.add("incidencias-modal-avatar-frame--fallback");
+      }
+
+      try {
+        img.hidden = true;
+      } catch {}
+    };
+
+    img.addEventListener("error", setFallback, {
+      passive: true,
+      signal: modalState.rootAbortController?.signal,
+    });
+
+    if (img.complete && img.naturalWidth === 0) {
+      setFallback();
+    }
+  });
+
+  root.querySelectorAll("[data-modal-thumb-img='true']").forEach((img) => {
+    if (img.dataset.modalThumbFallbackBound === "true") return;
+
+    img.dataset.modalThumbFallbackBound = "true";
+
+    const frame = img.closest("[data-modal-thumb-frame='true']");
+
+    const setFallback = () => {
+      if (frame) {
+        frame.setAttribute("data-thumb-error", "true");
+      }
+
+      try {
+        img.hidden = true;
+      } catch {}
+    };
+
+    img.addEventListener("error", setFallback, {
+      passive: true,
+      signal: modalState.rootAbortController?.signal,
+    });
+
+    if (img.complete && img.naturalWidth === 0) {
+      setFallback();
+    }
+  });
+}
+
 function attachRootBindings() {
   if (modalState.bindingsAttached) {
+    const root = getRoot();
+    if (root) bindImageFallbacks(root);
     hydrateAttachmentThumbnails();
     return;
   }
 
   const root = ensureRoot();
+  if (!root) return;
+
+  detachRootBindings();
+
+  const controller = new AbortController();
+  modalState.rootAbortController = controller;
 
   const onInput = (event) => {
-    const field = event.target.closest("[data-modal-field]");
+    const target = event.target;
+    if (!target?.closest) return;
+
+    const field = target.closest("[data-modal-field]");
     if (!field) return;
 
     const fieldName = safeText(field.dataset.modalField, "");
@@ -4458,7 +4382,10 @@ function attachRootBindings() {
   };
 
   const onChange = (event) => {
-    const field = event.target.closest("[data-modal-field]");
+    const target = event.target;
+    if (!target?.closest) return;
+
+    const field = target.closest("[data-modal-field]");
     if (!field) return;
 
     const fieldName = safeText(field.dataset.modalField, "");
@@ -4470,13 +4397,15 @@ function attachRootBindings() {
       ]);
 
       renderModal();
-      attachRootBindings();
       focusPanel();
     }
   };
 
   const onClick = async (event) => {
-    const closeBtn = event.target.closest("[data-modal-close='true']");
+    const target = event.target;
+    if (!target?.closest) return;
+
+    const closeBtn = target.closest("[data-modal-close='true']");
 
     if (closeBtn) {
       event.preventDefault();
@@ -4488,7 +4417,7 @@ function attachRootBindings() {
       return;
     }
 
-    const copyBtn = event.target.closest('[data-modal-action="copy"]');
+    const copyBtn = target.closest('[data-modal-action="copy"]');
 
     if (copyBtn) {
       event.preventDefault();
@@ -4496,9 +4425,7 @@ function attachRootBindings() {
       return;
     }
 
-    const submitBtn = event.target.closest(
-      '[data-modal-action="submit-update"]'
-    );
+    const submitBtn = target.closest('[data-modal-action="submit-update"]');
 
     if (submitBtn) {
       event.preventDefault();
@@ -4506,9 +4433,7 @@ function attachRootBindings() {
       return;
     }
 
-    const openAttachmentBtn = event.target.closest(
-      '[data-modal-action="open-attachment"]'
-    );
+    const openAttachmentBtn = target.closest('[data-modal-action="open-attachment"]');
 
     if (openAttachmentBtn) {
       event.preventDefault();
@@ -4521,9 +4446,7 @@ function attachRootBindings() {
       return;
     }
 
-    const downloadAttachmentBtn = event.target.closest(
-      '[data-modal-action="download-attachment"]'
-    );
+    const downloadAttachmentBtn = target.closest('[data-modal-action="download-attachment"]');
 
     if (downloadAttachmentBtn) {
       event.preventDefault();
@@ -4536,24 +4459,19 @@ function attachRootBindings() {
       return;
     }
 
-    const closePreviewBtn = event.target.closest(
-      '[data-modal-action="close-preview"]'
-    );
+    const closePreviewBtn = target.closest('[data-modal-action="close-preview"]');
 
     if (closePreviewBtn) {
       event.preventDefault();
 
       clearAttachmentPreview();
       renderModal();
-      attachRootBindings();
       focusPanel();
 
       return;
     }
 
-    const downloadPreviewBtn = event.target.closest(
-      '[data-modal-action="download-preview"]'
-    );
+    const downloadPreviewBtn = target.closest('[data-modal-action="download-preview"]');
 
     if (downloadPreviewBtn) {
       event.preventDefault();
@@ -4561,9 +4479,7 @@ function attachRootBindings() {
       try {
         const file = safeObject(modalState.previewFile);
 
-        if (!file?.url) {
-          throw new Error("PREVIEW_FILE_EMPTY");
-        }
+        if (!file?.url) throw new Error("PREVIEW_FILE_EMPTY");
 
         downloadResolvedAttachmentFile(file);
         showToast("Descarga iniciada.", "success");
@@ -4574,9 +4490,7 @@ function attachRootBindings() {
       return;
     }
 
-    const removePendingBtn = event.target.closest(
-      '[data-modal-action="remove-pending-file"]'
-    );
+    const removePendingBtn = target.closest('[data-modal-action="remove-pending-file"]');
 
     if (removePendingBtn) {
       event.preventDefault();
@@ -4589,76 +4503,49 @@ function attachRootBindings() {
         );
 
         renderModal();
-        attachRootBindings();
         focusPanel();
       }
 
       return;
     }
 
-    const overlay = event.target.closest(
-      "[data-incidencias-modal-overlay='true']"
-    );
-
-    const panel = event.target.closest(
-      "[data-incidencias-modal-panel='true']"
-    );
+    const overlay = target.closest("[data-incidencias-modal-overlay='true']");
+    const panel = target.closest("[data-incidencias-modal-panel='true']");
 
     if (
       overlay &&
       !panel &&
-      event.target === overlay &&
+      target === overlay &&
       !modalState.isSubmitting
     ) {
       closeIncidenciasModal();
     }
   };
 
-  root.__incidenciasModalInputHandler = onInput;
-  root.__incidenciasModalChangeHandler = onChange;
-  root.__incidenciasModalClickHandler = onClick;
+  root.addEventListener("input", onInput, {
+    signal: controller.signal,
+  });
 
-  root.addEventListener("input", onInput);
-  root.addEventListener("change", onChange);
-  root.addEventListener("click", onClick);
+  root.addEventListener("change", onChange, {
+    signal: controller.signal,
+  });
+
+  root.addEventListener("click", onClick, {
+    signal: controller.signal,
+  });
 
   modalState.bindingsAttached = true;
 
+  bindImageFallbacks(root);
   hydrateAttachmentThumbnails();
 }
 
 function detachRootBindings() {
-  const root = getRoot();
+  try {
+    modalState.rootAbortController?.abort?.();
+  } catch {}
 
-  if (!root) {
-    modalState.bindingsAttached = false;
-    return;
-  }
-
-  if (root.__incidenciasModalInputHandler) {
-    try {
-      root.removeEventListener("input", root.__incidenciasModalInputHandler);
-    } catch {}
-
-    delete root.__incidenciasModalInputHandler;
-  }
-
-  if (root.__incidenciasModalChangeHandler) {
-    try {
-      root.removeEventListener("change", root.__incidenciasModalChangeHandler);
-    } catch {}
-
-    delete root.__incidenciasModalChangeHandler;
-  }
-
-  if (root.__incidenciasModalClickHandler) {
-    try {
-      root.removeEventListener("click", root.__incidenciasModalClickHandler);
-    } catch {}
-
-    delete root.__incidenciasModalClickHandler;
-  }
-
+  modalState.rootAbortController = null;
   modalState.bindingsAttached = false;
 }
 
@@ -4666,15 +4553,61 @@ function detachRootBindings() {
    EVENT BUS BRIDGE
 ========================================================= */
 
-function extractEventDetail(event) {
-  return event?.detail?.detail || event?.detail || event || null;
+function extractEventPayload(event) {
+  return event?.detail || event || null;
 }
 
-function handleOpenEvent(event) {
-  const detail = extractEventDetail(event);
+function extractDetailFromEvent(event) {
+  const payload = extractEventPayload(event);
+
+  return (
+    payload?.detail ||
+    payload?.ticket ||
+    payload?.item ||
+    payload?.data ||
+    payload?.incidencia ||
+    payload
+  );
+}
+
+async function handleOpenEvent(event) {
+  const detail = extractDetailFromEvent(event);
   if (!detail) return;
 
-  openIncidenciasModal(detail);
+  const normalized = getDetail(detail);
+  const ticketId = getTicketId(normalized);
+
+  openIncidenciasModal(normalized, {
+    source: "event",
+  });
+
+  const hasUsefulDetail = Boolean(
+    first(
+      normalized.subject,
+      normalized.title,
+      normalized.description,
+      normalized.descripcion,
+      normalized.message,
+      normalized.raw?.subject,
+      normalized.raw?.title,
+      normalized.raw?.description,
+      normalized.raw?.message
+    )
+  );
+
+  if (ticketId && !hasUsefulDetail) {
+    try {
+      const response = await fetchTicketDetailInternal(ticketId);
+      const nextDetail = coerceDetailResponse(response, normalized);
+
+      updateIncidenciasModal(nextDetail, {
+        silent: true,
+        preserveTransient: true,
+        preserveFocus: true,
+        focus: false,
+      });
+    } catch {}
+  }
 }
 
 function handleCloseEvent() {
@@ -4684,28 +4617,47 @@ function handleCloseEvent() {
 function handleOpenedDetailEvent(event) {
   if (modalState.isSubmitting) return;
 
-  const detail = extractEventDetail(event);
+  const detail = extractDetailFromEvent(event);
   if (!detail) return;
 
-  if (modalState.isOpen) {
-    updateIncidenciasModal(detail);
+  const normalized = getDetail(detail);
+  const ticketId = getTicketId(normalized);
+
+  if (!ticketId) return;
+
+  if (!modalState.isOpen) {
+    openIncidenciasModal(normalized, {
+      source: "open-success",
+      silent: true,
+    });
+    return;
   }
+
+  updateIncidenciasModal(normalized, {
+    silent: true,
+    preserveTransient: ticketId === modalState.openTicketId,
+    preserveFocus: true,
+    focus: false,
+  });
 }
 
 function handleUpdateEvent(event) {
   if (modalState.isSubmitting) return;
 
-  const detail = extractEventDetail(event);
+  const detail = extractDetailFromEvent(event);
   if (!detail) return;
 
-  updateIncidenciasModal(detail);
+  updateIncidenciasModal(detail, {
+    preserveTransient: true,
+    preserveFocus: true,
+    focus: false,
+  });
 }
 
 function handleCommentSuccess(event) {
   if (modalState.isSubmitting) return;
 
-  const detail = extractEventDetail(event);
-
+  const detail = extractDetailFromEvent(event);
   if (!detail || !modalState.isOpen) return;
 
   modalState.commentDraft = "";
@@ -4727,15 +4679,13 @@ function handleCommentSuccess(event) {
   );
 
   renderModal();
-  attachRootBindings();
   focusPanel();
 }
 
 function handleUploadSuccess(event) {
   if (modalState.isSubmitting) return;
 
-  const detail = extractEventDetail(event);
-
+  const detail = extractDetailFromEvent(event);
   if (!detail || !modalState.isOpen) return;
 
   modalState.pendingFiles = [];
@@ -4746,36 +4696,35 @@ function handleUploadSuccess(event) {
   setFeedback("Los documentos se han añadido correctamente.", "success");
 
   renderModal();
-  attachRootBindings();
   focusPanel();
 }
 
-let busAttached = false;
-
 function attachBus() {
-  if (busAttached) return;
+  if (modalState.busAttached) return;
 
-  safeOn("incidencias:modal:open", handleOpenEvent);
-  safeOn("incidencias:modal:close", handleCloseEvent);
-  safeOn("incidencias:modal:update", handleUpdateEvent);
-  safeOn("incidencias:open:success", handleOpenedDetailEvent);
-  safeOn("incidencias:comment:success", handleCommentSuccess);
-  safeOn("incidencias:upload:success", handleUploadSuccess);
+  modalState.busDisposers = [
+    safeOn("incidencias:modal:open", handleOpenEvent),
+    safeOn("incidencias:modal:close", handleCloseEvent),
+    safeOn("incidencias:modal:update", handleUpdateEvent),
+    safeOn("incidencias:open:success", handleOpenedDetailEvent),
+    safeOn("incidencias:comment:success", handleCommentSuccess),
+    safeOn("incidencias:upload:success", handleUploadSuccess),
+  ];
 
-  busAttached = true;
+  modalState.busAttached = true;
 }
 
 function detachBus() {
-  if (!busAttached) return;
+  if (!modalState.busAttached) return;
 
-  safeOff("incidencias:modal:open", handleOpenEvent);
-  safeOff("incidencias:modal:close", handleCloseEvent);
-  safeOff("incidencias:modal:update", handleUpdateEvent);
-  safeOff("incidencias:open:success", handleOpenedDetailEvent);
-  safeOff("incidencias:comment:success", handleCommentSuccess);
-  safeOff("incidencias:upload:success", handleUploadSuccess);
+  safeArray(modalState.busDisposers).forEach((dispose) => {
+    try {
+      dispose();
+    } catch {}
+  });
 
-  busAttached = false;
+  modalState.busDisposers = [];
+  modalState.busAttached = false;
 }
 
 /* =========================================================
@@ -4783,16 +4732,18 @@ function detachBus() {
 ========================================================= */
 
 export const OnionIncidenciasModal = {
-  open(detail = {}) {
-    return openIncidenciasModal(detail);
+  version: MODAL_VERSION,
+
+  open(detail = {}, options = {}) {
+    return openIncidenciasModal(detail, options);
   },
 
-  close() {
-    return closeIncidenciasModal();
+  close(options = {}) {
+    return closeIncidenciasModal(options);
   },
 
-  update(detail = {}) {
-    return updateIncidenciasModal(detail);
+  update(detail = {}, options = {}) {
+    return updateIncidenciasModal(detail, options);
   },
 
   setFeedback(message = "", type = "info") {
@@ -4800,7 +4751,6 @@ export const OnionIncidenciasModal = {
 
     if (modalState.isOpen) {
       renderModal();
-      attachRootBindings();
     }
 
     return true;
@@ -4819,8 +4769,13 @@ export const OnionIncidenciasModal = {
     };
   },
 
-  destroy() {
-    closeIncidenciasModal();
+  destroy(options = {}) {
+    closeIncidenciasModal({
+      force: true,
+      silent: Boolean(options.silent),
+      skipFocusRestore: true,
+    });
+
     clearAttachmentPreview();
     revokeAttachmentThumbnails();
     detachEscHandler();
@@ -4837,14 +4792,29 @@ export const OnionIncidenciasModal = {
   },
 };
 
-try {
-  window.OnionIncidenciasModal = OnionIncidenciasModal;
-  window.renderIncidenciaTicketModal = OnionIncidenciasModal.open;
-} catch {}
-
 /* =========================================================
-   AUTO BOOT
+   SINGLETON BOOT
 ========================================================= */
+
+try {
+  if (isBrowser()) {
+    const previous = window[INSTANCE_KEY];
+
+    if (
+      previous &&
+      previous.version !== MODAL_VERSION &&
+      typeof previous.destroy === "function"
+    ) {
+      previous.destroy({
+        silent: true,
+      });
+    }
+
+    window[INSTANCE_KEY] = OnionIncidenciasModal;
+    window.OnionIncidenciasModal = OnionIncidenciasModal;
+    window.renderIncidenciaTicketModal = OnionIncidenciasModal.open;
+  }
+} catch {}
 
 attachBus();
 

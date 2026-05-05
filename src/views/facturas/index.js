@@ -2,36 +2,26 @@
    Onion SPA - Facturas Module Index
    Archivo: src/views/facturas/index.js
 
-   FINAL PRO SYSTEM · ENTRYPOINT REAL · ROUTE SAFE · 10/10 EXTREME
-   PATCH · ROUTER SAFE · LEGACY SAFE · NAMESPACE EXPORT SAFE
-   PATCH · VIEW/ACTIONS/LOADERS FALLBACK CHAIN
+   FINAL PRO SYSTEM · MODULE ENTRYPOINT · 10/10 EXTREME
+   PATCH · ROUTE SAFE · LEGACY SAFE · NO DUPLICATED HELPERS
    PATCH · PUBLIC API STABLE · GLOBAL BRIDGE SAFE
+   PATCH · NAMESPACE EXPORT SAFE · ROUTER COMPAT
 
    RESPONSABILIDADES:
-   - punto de entrada único del módulo facturas
-   - export limpio del módulo principal
-   - compatibilidad router legacy y moderna
-   - puente entre router y facturasView.js
-   - init / mount / render / reload / destroy seguros
-   - exponer modal / helpers públicos
-   - evitar duplicidad de lógica en index.js
-   - mantener superficie pública estable aunque cambien exports internos
+   - punto de entrada único del módulo Facturas
+   - exportar vista principal para router moderno y legacy
+   - proteger render/init/mount/reload contra rutas incorrectas
+   - aceptar /facturas y /@usuario/facturas
+   - exponer namespaces internos sin duplicar lógica
+   - exponer API pública estable aunque cambien exports internos
+   - registrar bridge global sin sobreescritura destructiva
 
-   HARDENING PRO:
-   - fallback si cambia nombre del método en FacturasView
-   - wrappers seguros contra exports ausentes
-   - namespace imports para no romper por named exports inexistentes
-   - no lanza errores por métodos ausentes
-   - no sobreescribe brutalmente window.OnionFacturas
-   - compatible con imports antiguos
-   - compatible con router que consume default, named, view o component
-
-   FIX ROUTE SAFE:
-   - FacturasView.init/render/mount/reload/refresh solo corren en /facturas
-   - acepta /@usuario/facturas como publicPath válido
-   - bloquea renders tardíos si la ruta actual ya no es facturas
-   - destroy/unmount/dispose siempre permitidos
-   - exports de modelo/state/store/api siguen disponibles
+   IMPORTANTE:
+   - Este archivo NO contiene CSS.
+   - Este archivo NO normaliza facturas.
+   - Este archivo NO contiene lógica de dominio.
+   - La lógica de dominio vive en facturas.model.js.
+   - Los helpers base viven en facturas.utils.js.
 ========================================================= */
 
 import RawFacturasView from "./facturasView.js";
@@ -46,6 +36,8 @@ import * as Actions from "./facturas.actions.js";
 import * as Bindings from "./facturas.bindings.js";
 import * as Template from "./facturas.template.js";
 import * as DetailTemplate from "./facturas.detail.template.js";
+import * as CreateModal from "./facturas.create.modal.js";
+import * as IncidenciasBridge from "./facturas.incidencias.js";
 
 /* =========================================================
    MODULE META
@@ -53,7 +45,7 @@ import * as DetailTemplate from "./facturas.detail.template.js";
 
 export const FACTURAS_MODULE_NAME = "facturas";
 export const FACTURAS_VIEW_NAME = "FacturasView";
-export const FACTURAS_MODULE_VERSION = "11.0.0";
+export const FACTURAS_MODULE_VERSION = "12.0.0";
 export const FACTURAS_CANONICAL_PATH = "/facturas";
 export const FACTURAS_INDEX_SOURCE = "views:facturas:index";
 
@@ -72,76 +64,40 @@ export {
   Bindings,
   Template,
   DetailTemplate,
+  CreateModal,
+  IncidenciasBridge,
 };
 
 /* =========================================================
-   LOCAL FALLBACK HELPERS
+   INTERNAL HELPERS · FROM UTILS
 ========================================================= */
 
-function localSafeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value).trim();
-
+const safeText = Utils.safeText || ((value, fallback = "") => {
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
   return text || fallback;
-}
+});
 
-function localSafeNumber(value, fallback = 0) {
-  const n =
-    Number(value);
-
-  return Number.isFinite(n)
-    ? n
-    : fallback;
-}
-
-function localSafeArray(value, fallback = []) {
-  return Array.isArray(value)
+const safeObject = Utils.safeObject || ((value, fallback = {}) => (
+  value && typeof value === "object" && !Array.isArray(value)
     ? value
-    : fallback;
-}
+    : fallback
+));
 
-function localSafeObject(value, fallback = {}) {
-  return (
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  )
-    ? value
-    : fallback;
-}
+const safeArray = Utils.safeArray || ((value, fallback = []) => (
+  Array.isArray(value) ? value : fallback
+));
 
-function localSafeBoolean(value, fallback = false) {
-  return typeof value === "boolean"
-    ? value
-    : fallback;
-}
-
-function localFirst(...values) {
+const first = Utils.first || ((...values) => {
   for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
     if (
-      value === undefined ||
-      value === null
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === 0
     ) {
       continue;
     }
@@ -150,57 +106,22 @@ function localFirst(...values) {
   }
 
   return null;
-}
+});
 
-function localNormalizeWhitespace(value = "") {
-  return localSafeText(value, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function localEscapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function localTruncate(value = "", max = 140) {
-  const text =
-    localSafeText(value, "");
-
-  const limit =
-    Number(max);
-
-  if (!text) {
-    return "";
-  }
-
-  if (
-    !Number.isFinite(limit) ||
-    limit <= 0
-  ) {
-    return text;
-  }
-
-  if (text.length <= limit) {
-    return text;
-  }
-
-  return `${text.slice(0, limit).trim()}…`;
-}
+const normalizeText = Utils.normalizeText || ((value = "") => (
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+));
 
 /* =========================================================
    INTERNAL SAFE HELPERS
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 function isFn(value) {
@@ -208,21 +129,11 @@ function isFn(value) {
 }
 
 function isObject(value) {
-  return Boolean(
-    value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-  );
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function isProxyable(value) {
-  return Boolean(
-    value &&
-      (
-        typeof value === "object" ||
-        typeof value === "function"
-      )
-  );
+  return Boolean(value && (typeof value === "object" || typeof value === "function"));
 }
 
 function isNodeLike(value) {
@@ -233,23 +144,13 @@ function isNodeLike(value) {
   );
 }
 
-function internalSafeObject(value, fallback = {}) {
-  return isObject(value)
-    ? value
-    : fallback;
-}
-
 function getGlobalRoot() {
   try {
-    if (typeof globalThis !== "undefined") {
-      return globalThis;
-    }
+    if (typeof globalThis !== "undefined") return globalThis;
   } catch {}
 
   try {
-    if (typeof window !== "undefined") {
-      return window;
-    }
+    if (typeof window !== "undefined") return window;
   } catch {}
 
   return {};
@@ -257,61 +158,47 @@ function getGlobalRoot() {
 
 function safeWarn(...args) {
   try {
-    const root =
-      getGlobalRoot();
-
-    root?.AppCore?.utils?.warn?.(
-      "[FacturasIndex]",
-      ...args
-    );
+    Utils.safeWarn?.("[FacturasIndex]", ...args);
+    return true;
   } catch {}
 
   try {
-    if (
-      typeof console !== "undefined" &&
-      typeof console.warn === "function"
-    ) {
-      console.warn(
-        "[FacturasIndex]",
-        ...args
-      );
-    }
+    const root = getGlobalRoot();
+    root?.AppCore?.utils?.warn?.("[FacturasIndex]", ...args);
+    return true;
   } catch {}
+
+  try {
+    console.warn("[FacturasIndex]", ...args);
+    return true;
+  } catch {}
+
+  return false;
 }
 
-function safeEmit(event = "", payload = {}) {
-  const eventName =
-    localSafeText(event, "");
+function safeEmit(eventName = "", payload = {}) {
+  const name = safeText(eventName, "");
+  if (!name) return false;
 
-  if (!eventName) {
-    return false;
-  }
+  try {
+    if (typeof Utils.safeEmit === "function") {
+      return Utils.safeEmit(name, payload);
+    }
+  } catch {}
 
-  const root =
-    getGlobalRoot();
-
+  const root = getGlobalRoot();
   let emitted = false;
 
   try {
-    if (isFn(root?.AppCore?.events?.emit)) {
-      root.AppCore.events.emit(
-        eventName,
-        payload
-      );
-
-      emitted = true;
-    }
+    root?.AppCore?.events?.emit?.(name, payload);
+    emitted = true;
   } catch {}
 
   try {
-    if (
-      !emitted &&
-      typeof window !== "undefined"
-    ) {
+    if (typeof window !== "undefined") {
       window.dispatchEvent(
-        new CustomEvent(eventName, {
-          detail:
-            payload,
+        new CustomEvent(name, {
+          detail: payload,
         })
       );
 
@@ -320,6 +207,45 @@ function safeEmit(event = "", payload = {}) {
   } catch {}
 
   return emitted;
+}
+
+function safeCall(target, method, args = [], fallback = undefined) {
+  try {
+    const fn = target?.[method];
+
+    if (typeof fn === "function") {
+      return fn.apply(target, Array.isArray(args) ? args : []);
+    }
+  } catch (error) {
+    safeWarn(`Error calling ${method}`, error);
+  }
+
+  return fallback;
+}
+
+function callAny(candidates = [], args = [], fallback = undefined, options = {}) {
+  const opts = safeObject(options);
+
+  for (const candidate of safeArray(candidates)) {
+    const target = candidate?.[0];
+    const method = candidate?.[1];
+
+    if (!target || !method) continue;
+
+    const result = opts.guarded === true
+      ? guardedCall(target, method, args, undefined)
+      : safeCall(target, method, args, undefined);
+
+    if (result !== undefined) {
+      return result;
+    }
+  }
+
+  return fallback;
+}
+
+function moduleMethod(moduleRef, method, fallback = undefined) {
+  return (...args) => safeCall(moduleRef, method, args, fallback);
 }
 
 /* =========================================================
@@ -338,8 +264,9 @@ const GUARDED_VIEW_METHODS = new Set([
   "openFacturaPdf",
   "viewFacturaPdf",
   "downloadFacturaPdf",
+  "downloadFactura",
   "sendFacturaToClient",
-  "closeDetail",
+  "sendFactura",
   "exportFacturasCsv",
 ]);
 
@@ -347,6 +274,8 @@ const ALWAYS_ALLOWED_VIEW_METHODS = new Set([
   "destroy",
   "unmount",
   "dispose",
+  "closeDetail",
+  "closeFacturaDetail",
   "getItems",
   "getFacturas",
   "getState",
@@ -357,10 +286,7 @@ const ALWAYS_ALLOWED_VIEW_METHODS = new Set([
 ]);
 
 function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
+  if (isBrowser() && window.location?.origin) {
     return window.location.origin;
   }
 
@@ -368,46 +294,30 @@ function getBaseOrigin() {
 }
 
 function normalizePathnameOnly(pathname = "/") {
-  let value =
-    String(pathname || "/")
-      .trim()
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
+  let value = String(pathname || "/")
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
-  if (!value) {
-    value = "/";
-  }
-
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
-  }
+  if (!value) value = "/";
+  if (!value.startsWith("/")) value = `/${value}`;
 
   if (value.length > 1) {
-    value =
-      value.replace(/\/+$/g, "") ||
-      "/";
+    value = value.replace(/\/+$/g, "") || "/";
   }
 
   return value;
 }
 
 function isHashRouterPath(value = "") {
-  const raw =
-    localSafeText(value, "");
-
-  return (
-    raw.startsWith("#/") ||
-    raw.startsWith("#!")
-  );
+  const raw = safeText(value, "");
+  return raw.startsWith("#/") || raw.startsWith("#!");
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw =
-    localSafeText(value, "");
+  const raw = safeText(value, "");
 
-  if (!raw) {
-    return "/";
-  }
+  if (!raw) return "/";
 
   if (raw.startsWith("#!")) {
     return raw.replace(/^#!\/?/, "/");
@@ -417,80 +327,52 @@ function normalizeHashRouterPath(value = "") {
 }
 
 function splitPath(value = "/") {
-  const raw =
-    localSafeText(value, "/");
+  const raw = safeText(value, "/");
 
   if (isHashRouterPath(raw)) {
-    return splitPath(
-      normalizeHashRouterPath(raw)
-    );
+    return splitPath(normalizeHashRouterPath(raw));
   }
 
   let pathname = raw;
   let search = "";
   let hash = "";
 
-  const hashIndex =
-    pathname.indexOf("#");
+  const hashIndex = pathname.indexOf("#");
 
   if (hashIndex >= 0) {
-    hash =
-      pathname.slice(hashIndex);
-
-    pathname =
-      pathname.slice(0, hashIndex) ||
-      "/";
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || "/";
   }
 
-  const searchIndex =
-    pathname.indexOf("?");
+  const searchIndex = pathname.indexOf("?");
 
   if (searchIndex >= 0) {
-    search =
-      pathname.slice(searchIndex);
-
-    pathname =
-      pathname.slice(0, searchIndex) ||
-      "/";
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || "/";
   }
 
   return {
-    pathname:
-      normalizePathnameOnly(pathname),
+    pathname: normalizePathnameOnly(pathname),
     search,
     hash,
   };
 }
 
 function normalizeFullPath(path = "/") {
-  const raw =
-    localSafeText(path, "/");
+  const raw = safeText(path, "/");
 
-  if (!raw) {
-    return "/";
-  }
+  if (!raw) return "/";
 
   if (isHashRouterPath(raw)) {
-    return normalizeFullPath(
-      normalizeHashRouterPath(raw)
-    );
+    return normalizeFullPath(normalizeHashRouterPath(raw));
   }
 
   try {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed =
-        new URL(
-          raw,
-          getBaseOrigin()
-        );
+      const parsed = new URL(raw, getBaseOrigin());
 
-      if (
-        parsed.hash &&
-        isHashRouterPath(parsed.hash)
-      ) {
-        return normalizeFullPath(
-          normalizeHashRouterPath(parsed.hash)
-        );
+      if (parsed.hash && isHashRouterPath(parsed.hash)) {
+        return normalizeFullPath(normalizeHashRouterPath(parsed.hash));
       }
 
       return normalizeFullPath(
@@ -499,57 +381,28 @@ function normalizeFullPath(path = "/") {
     }
   } catch {}
 
-  const {
-    pathname,
-    search,
-    hash,
-  } = splitPath(raw);
+  const { pathname, search, hash } = splitPath(raw);
 
   return `${pathname}${search}${hash}`;
 }
 
 function stripSearchAndHash(path = "/") {
-  return (
-    normalizeFullPath(path)
-      .split("?")[0]
-      .split("#")[0] ||
-    "/"
-  );
+  return normalizeFullPath(path)
+    .split("?")[0]
+    .split("#")[0] || "/";
 }
 
 function isUsernameSegment(segment = "") {
-  return /^@[A-Za-z0-9._-]{1,80}$/.test(
-    localSafeText(segment, "")
-  );
+  return /^@[A-Za-z0-9._-]{1,80}$/.test(safeText(segment, ""));
 }
 
 function stripUsernamePrefix(path = "/") {
-  const {
-    pathname,
-    search,
-    hash,
-  } = splitPath(
-    normalizeFullPath(path)
-  );
+  const { pathname, search, hash } = splitPath(normalizeFullPath(path));
+  const segments = pathname.split("/").filter(Boolean);
 
-  const segments =
-    pathname
-      .split("/")
-      .filter(Boolean);
-
-  if (
-    segments.length > 0 &&
-    isUsernameSegment(segments[0])
-  ) {
-    const rest =
-      segments
-        .slice(1)
-        .join("/");
-
-    const cleanPathname =
-      rest
-        ? normalizePathnameOnly(`/${rest}`)
-        : "/";
+  if (segments.length > 0 && isUsernameSegment(segments[0])) {
+    const rest = segments.slice(1).join("/");
+    const cleanPathname = rest ? normalizePathnameOnly(`/${rest}`) : "/";
 
     return `${cleanPathname}${search}${hash}`;
   }
@@ -558,59 +411,37 @@ function stripUsernamePrefix(path = "/") {
 }
 
 function canonicalizePath(path = "/") {
-  return normalizeFullPath(
-    stripUsernamePrefix(path || "/")
-  );
+  return normalizeFullPath(stripUsernamePrefix(path || "/"));
 }
 
 function getCleanCanonicalPath(path = "/") {
-  return stripSearchAndHash(
-    canonicalizePath(path || "/")
-  );
+  return stripSearchAndHash(canonicalizePath(path || "/"));
 }
 
 function isFacturasPath(path = "") {
-  return (
-    getCleanCanonicalPath(path || "/") ===
-    FACTURAS_CANONICAL_PATH
-  );
+  return getCleanCanonicalPath(path || "/") === FACTURAS_CANONICAL_PATH;
 }
 
 function getBrowserPath() {
-  if (!isBrowser()) {
-    return "";
-  }
+  if (!isBrowser()) return "";
 
   try {
-    const pathname =
-      window.location.pathname || "/";
+    const pathname = window.location.pathname || "/";
+    const search = window.location.search || "";
+    const hash = window.location.hash || "";
 
-    const search =
-      window.location.search || "";
-
-    const hash =
-      window.location.hash || "";
-
-    if (
-      hash &&
-      isHashRouterPath(hash)
-    ) {
-      return normalizeFullPath(
-        normalizeHashRouterPath(hash)
-      );
+    if (hash && isHashRouterPath(hash)) {
+      return normalizeFullPath(normalizeHashRouterPath(hash));
     }
 
-    return normalizeFullPath(
-      `${pathname}${search}${hash}`
-    );
+    return normalizeFullPath(`${pathname}${search}${hash}`);
   } catch {
     return "";
   }
 }
 
-function getWindowAppCore() {
-  const root =
-    getGlobalRoot();
+function getAppCore() {
+  const root = getGlobalRoot();
 
   try {
     return (
@@ -624,75 +455,56 @@ function getWindowAppCore() {
   }
 }
 
-function getAppStatePath() {
-  const AppCore =
-    getWindowAppCore();
+function getAppRoutePath() {
+  const AppCore = getAppCore();
 
-  try {
-    return localSafeText(
-      AppCore?.state?.route ||
-        AppCore?.state?.canonicalPath ||
-        "",
+  return safeText(
+    first(
+      AppCore?.state?.route,
+      AppCore?.state?.canonicalPath,
+      AppCore?.state?.path,
       ""
-    );
-  } catch {
-    return "";
-  }
+    ),
+    ""
+  );
 }
 
 function getAppPublicPath() {
-  const AppCore =
-    getWindowAppCore();
+  const AppCore = getAppCore();
 
-  try {
-    return localSafeText(
-      AppCore?.state?.publicPath ||
-        "",
+  return safeText(
+    first(
+      AppCore?.state?.publicPath,
+      AppCore?.state?.resolvedPath,
       ""
-    );
-  } catch {
-    return "";
-  }
+    ),
+    ""
+  );
 }
 
 function pushPathSignal(signals, label, value) {
-  const text =
-    localSafeText(value, "");
-
-  if (!text) {
-    return;
-  }
+  const text = safeText(value, "");
+  if (!text) return;
 
   signals.push({
-    type:
-      "path",
+    type: "path",
     label,
-    value:
-      text,
-    canonical:
-      getCleanCanonicalPath(text),
-    isFacturas:
-      isFacturasPath(text),
+    value: text,
+    canonical: getCleanCanonicalPath(text),
+    isFacturas: isFacturasPath(text),
   });
 }
 
 function pushViewSignal(signals, label, value) {
-  const text =
-    localSafeText(value, "");
+  const text = safeText(value, "");
+  if (!text) return;
 
-  if (!text) {
-    return;
-  }
-
-  const normalized =
-    text.toLowerCase();
+  const normalized = normalizeText(text);
 
   signals.push({
-    type:
-      "view",
+    type: "view",
     label,
-    value:
-      normalized,
+    value: normalized,
     isFacturas:
       normalized === "facturas" ||
       normalized === "facturasview" ||
@@ -701,204 +513,112 @@ function pushViewSignal(signals, label, value) {
 }
 
 function collectRouteSignalsFromObject(signals, value, label = "arg") {
-  if (
-    !isObject(value) ||
-    isNodeLike(value)
-  ) {
-    return;
-  }
+  if (!isObject(value) || isNodeLike(value)) return;
 
-  pushViewSignal(
-    signals,
-    `${label}.viewKey`,
-    value.viewKey
-  );
+  pushViewSignal(signals, `${label}.viewKey`, value.viewKey);
+  pushViewSignal(signals, `${label}.viewName`, value.viewName);
+  pushViewSignal(signals, `${label}.name`, value.name);
 
-  pushViewSignal(
-    signals,
-    `${label}.route.viewKey`,
-    value.route?.viewKey
-  );
+  pushViewSignal(signals, `${label}.route.viewKey`, value.route?.viewKey);
+  pushViewSignal(signals, `${label}.route.viewName`, value.route?.viewName);
+  pushViewSignal(signals, `${label}.route.name`, value.route?.name);
 
-  pushViewSignal(
-    signals,
-    `${label}.viewName`,
-    value.viewName
-  );
+  pushPathSignal(signals, `${label}.canonicalPath`, value.canonicalPath);
+  pushPathSignal(signals, `${label}.routePath`, value.routePath);
+  pushPathSignal(signals, `${label}.publicPath`, value.publicPath);
+  pushPathSignal(signals, `${label}.requestedPath`, value.requestedPath);
+  pushPathSignal(signals, `${label}.path`, value.path);
 
-  pushViewSignal(
-    signals,
-    `${label}.route.viewName`,
-    value.route?.viewName
-  );
+  pushPathSignal(signals, `${label}.route.path`, value.route?.path);
+  pushPathSignal(signals, `${label}.route.canonicalPath`, value.route?.canonicalPath);
+  pushPathSignal(signals, `${label}.route.publicPath`, value.route?.publicPath);
 
-  pushPathSignal(
-    signals,
-    `${label}.canonicalPath`,
-    value.canonicalPath
-  );
-
-  pushPathSignal(
-    signals,
-    `${label}.routePath`,
-    value.routePath
-  );
-
-  pushPathSignal(
-    signals,
-    `${label}.route.path`,
-    value.route?.path
-  );
-
-  pushPathSignal(
-    signals,
-    `${label}.publicPath`,
-    value.publicPath
-  );
-
-  pushPathSignal(
-    signals,
-    `${label}.requestedPath`,
-    value.requestedPath
-  );
-
-  pushPathSignal(
-    signals,
-    `${label}.path`,
-    value.path
-  );
-
-  collectRouteSignalsFromObject(
-    signals,
-    value.options,
-    `${label}.options`
-  );
+  collectRouteSignalsFromObject(signals, value.options, `${label}.options`);
+  collectRouteSignalsFromObject(signals, value.meta, `${label}.meta`);
 }
 
-function collectRouteSignals(args = []) {
+function collectExplicitRouteSignals(args = []) {
   const signals = [];
 
-  const list =
-    Array.isArray(args)
-      ? args
-      : [];
-
-  list.forEach((arg, index) => {
-    collectRouteSignalsFromObject(
-      signals,
-      arg,
-      `args[${index}]`
-    );
+  safeArray(args).forEach((arg, index) => {
+    collectRouteSignalsFromObject(signals, arg, `args[${index}]`);
   });
 
-  const statePath =
-    getAppStatePath();
+  return signals;
+}
 
-  if (statePath) {
-    pushPathSignal(
-      signals,
-      "AppCore.state.route",
-      statePath
-    );
-  }
+function collectRuntimeRouteSignals() {
+  const signals = [];
 
-  const publicPath =
-    getAppPublicPath();
-
-  if (publicPath) {
-    pushPathSignal(
-      signals,
-      "AppCore.state.publicPath",
-      publicPath
-    );
-  }
-
-  const browserPath =
-    getBrowserPath();
-
+  const browserPath = getBrowserPath();
   if (browserPath) {
-    pushPathSignal(
-      signals,
-      "window.location",
-      browserPath
-    );
+    pushPathSignal(signals, "window.location", browserPath);
+  }
+
+  const appRoute = getAppRoutePath();
+  if (appRoute) {
+    pushPathSignal(signals, "AppCore.state.route", appRoute);
+  }
+
+  const publicPath = getAppPublicPath();
+  if (publicPath) {
+    pushPathSignal(signals, "AppCore.state.publicPath", publicPath);
   }
 
   return signals;
 }
 
 function getBlockingSignal(signals = []) {
-  return (
-    signals.find((signal) => signal.isFacturas === false) ||
-    null
-  );
+  return safeArray(signals).find((signal) => signal.isFacturas === false) || null;
 }
 
 function hasPositiveFacturasSignal(signals = []) {
-  return signals.some((signal) => signal.isFacturas === true);
+  return safeArray(signals).some((signal) => signal.isFacturas === true);
 }
 
 function shouldAllowFacturasMethod(method = "", args = []) {
-  const cleanMethod =
-    localSafeText(method, "");
+  const cleanMethod = safeText(method, "");
 
-  if (!cleanMethod) {
-    return true;
+  if (!cleanMethod) return true;
+  if (ALWAYS_ALLOWED_VIEW_METHODS.has(cleanMethod)) return true;
+  if (!GUARDED_VIEW_METHODS.has(cleanMethod)) return true;
+
+  const explicitSignals = collectExplicitRouteSignals(args);
+
+  if (explicitSignals.length) {
+    return hasPositiveFacturasSignal(explicitSignals) && !getBlockingSignal(explicitSignals);
   }
 
-  if (ALWAYS_ALLOWED_VIEW_METHODS.has(cleanMethod)) {
-    return true;
-  }
-
-  if (!GUARDED_VIEW_METHODS.has(cleanMethod)) {
-    return true;
-  }
-
-  const signals =
-    collectRouteSignals(args);
-
-  const blockingSignal =
-    getBlockingSignal(signals);
-
-  if (blockingSignal) {
-    return false;
-  }
-
-  if (hasPositiveFacturasSignal(signals)) {
-    return true;
-  }
-
-  const browserPath =
-    getBrowserPath();
+  const browserPath = getBrowserPath();
 
   if (browserPath) {
     return isFacturasPath(browserPath);
+  }
+
+  const runtimeSignals = collectRuntimeRouteSignals();
+
+  if (runtimeSignals.length) {
+    return hasPositiveFacturasSignal(runtimeSignals) && !getBlockingSignal(runtimeSignals);
   }
 
   return true;
 }
 
 function logBlockedFacturasMethod(method = "", args = []) {
-  const signals =
-    collectRouteSignals(args);
+  const explicitSignals = collectExplicitRouteSignals(args);
+  const runtimeSignals = collectRuntimeRouteSignals();
+  const signals = [...explicitSignals, ...runtimeSignals];
 
-  safeWarn(
-    `FacturasView.${method} bloqueado: ruta actual no es Facturas.`,
-    {
-      method,
-      browserPath:
-        getBrowserPath(),
-      browserCanonicalPath:
-        getCleanCanonicalPath(getBrowserPath() || "/"),
-      appRoute:
-        getAppStatePath(),
-      appPublicPath:
-        getAppPublicPath(),
-      signals,
-      blockingSignal:
-        getBlockingSignal(signals),
-    }
-  );
+  safeWarn(`FacturasView.${method} bloqueado: ruta actual no es Facturas.`, {
+    method,
+    browserPath: getBrowserPath(),
+    browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
+    appRoute: getAppRoutePath(),
+    appPublicPath: getAppPublicPath(),
+    explicitSignals,
+    runtimeSignals,
+    blockingSignal: getBlockingSignal(signals),
+  });
 }
 
 function getDefaultFallback(method = "") {
@@ -906,10 +626,14 @@ function getDefaultFallback(method = "") {
     case "destroy":
     case "unmount":
     case "dispose":
+    case "closeDetail":
+    case "closeFacturaDetail":
       return true;
 
     case "downloadFacturaPdf":
+    case "downloadFactura":
     case "sendFacturaToClient":
+    case "sendFactura":
     case "exportFacturasCsv":
     case "copyFacturaIdAction":
       return false;
@@ -927,227 +651,93 @@ function getDefaultFallback(method = "") {
   }
 }
 
-/* =========================================================
-   SAFE CALL
-========================================================= */
-
-function safeCall(target, method, args = [], fallback = undefined) {
-  try {
-    const fn =
-      target?.[method];
-
-    if (typeof fn === "function") {
-      return fn.apply(
-        target,
-        Array.isArray(args) ? args : []
-      );
-    }
-  } catch (error) {
-    safeWarn(
-      `Error calling ${method}`,
-      error
-    );
-  }
-
-  return fallback;
-}
-
 function guardedCall(target, method, args = [], fallback = undefined) {
-  const callArgs =
-    Array.isArray(args)
-      ? args
-      : [];
+  const callArgs = Array.isArray(args) ? args : [];
 
-  if (
-    !shouldAllowFacturasMethod(
-      method,
-      callArgs
-    )
-  ) {
-    logBlockedFacturasMethod(
-      method,
-      callArgs
-    );
+  if (!shouldAllowFacturasMethod(method, callArgs)) {
+    logBlockedFacturasMethod(method, callArgs);
 
     return fallback !== undefined
       ? fallback
       : getDefaultFallback(method);
   }
 
-  return safeCall(
-    target,
-    method,
-    callArgs,
-    fallback
-  );
-}
-
-function callAny(candidates = [], args = [], fallback = undefined, options = {}) {
-  const opts =
-    internalSafeObject(options);
-
-  for (const candidate of candidates) {
-    const target =
-      candidate?.[0];
-
-    const method =
-      candidate?.[1];
-
-    if (!target || !method) {
-      continue;
-    }
-
-    const result =
-      opts.guarded === true
-        ? guardedCall(target, method, args, undefined)
-        : safeCall(target, method, args, undefined);
-
-    if (result !== undefined) {
-      return result;
-    }
-  }
-
-  return fallback;
-}
-
-function moduleMethod(moduleRef, method, fallback = undefined) {
-  return (...args) =>
-    safeCall(
-      moduleRef,
-      method,
-      args,
-      fallback
-    );
+  return safeCall(target, method, callArgs, fallback);
 }
 
 /* =========================================================
    GUARDED VIEW BRIDGE
 ========================================================= */
 
-function createGuardedFacturasViewBridge(view) {
-  const source =
-    view || {};
+function createGuardedFacturasViewBridge(viewRef) {
+  const source = viewRef || {};
+  const cache = new Map();
 
-  const cache =
-    new Map();
-
-  if (
-    typeof Proxy !== "function" ||
-    !isProxyable(source)
-  ) {
+  if (typeof Proxy !== "function" || !isProxyable(source)) {
     return source;
   }
 
   return new Proxy(source, {
     get(target, prop, receiver) {
-      if (prop === "__raw") {
-        return target;
-      }
+      if (prop === "__raw") return target;
+      if (prop === "__source") return FACTURAS_INDEX_SOURCE;
+      if (prop === "routeViewKey") return "facturas";
+      if (prop === "routeViewName") return FACTURAS_VIEW_NAME;
 
-      if (prop === "__source") {
-        return FACTURAS_INDEX_SOURCE;
-      }
-
-      const value =
-        Reflect.get(
-          target,
-          prop,
-          receiver
-        );
+      const value = Reflect.get(target, prop, receiver);
 
       if (!isFn(value)) {
         return value;
       }
 
-      const method =
-        String(prop);
+      const method = String(prop);
 
       if (cache.has(method)) {
         return cache.get(method);
       }
 
-      const wrapped =
-        function guardedFacturasViewMethod(...args) {
-          if (
-            !shouldAllowFacturasMethod(
-              method,
-              args
-            )
-          ) {
-            logBlockedFacturasMethod(
-              method,
-              args
-            );
+      const wrapped = function guardedFacturasViewMethod(...args) {
+        if (!shouldAllowFacturasMethod(method, args)) {
+          logBlockedFacturasMethod(method, args);
+          return getDefaultFallback(method);
+        }
 
-            return getDefaultFallback(method);
-          }
-
-          try {
-            return value.apply(
-              target,
-              args
-            );
-          } catch (error) {
-            safeWarn(
-              `FacturasView.${method} falló.`,
-              error
-            );
-
-            throw error;
-          }
-        };
+        try {
+          return value.apply(target, args);
+        } catch (error) {
+          safeWarn(`FacturasView.${method} falló.`, error);
+          throw error;
+        }
+      };
 
       try {
         Object.defineProperties(wrapped, {
           name: {
-            value:
-              `guardedFacturas_${method}`,
+            value: `guardedFacturas_${method}`,
           },
-
           routeViewKey: {
-            value:
-              "facturas",
-            enumerable:
-              true,
+            value: "facturas",
+            enumerable: true,
           },
-
           routeViewName: {
-            value:
-              FACTURAS_VIEW_NAME,
-            enumerable:
-              true,
+            value: FACTURAS_VIEW_NAME,
+            enumerable: true,
           },
         });
       } catch {}
 
-      cache.set(
-        method,
-        wrapped
-      );
+      cache.set(method, wrapped);
 
       return wrapped;
     },
 
     apply(target, thisArg, args) {
-      if (
-        !shouldAllowFacturasMethod(
-          "render",
-          args
-        )
-      ) {
-        logBlockedFacturasMethod(
-          "render",
-          args
-        );
-
+      if (!shouldAllowFacturasMethod("render", args)) {
+        logBlockedFacturasMethod("render", args);
         return null;
       }
 
-      return Reflect.apply(
-        target,
-        thisArg,
-        args
-      );
+      return Reflect.apply(target, thisArg, args);
     },
 
     set(target, prop, value) {
@@ -1161,14 +751,7 @@ function createGuardedFacturasViewBridge(view) {
   });
 }
 
-export const FacturasView =
-  createGuardedFacturasViewBridge(
-    RawFacturasView
-  );
-
-/* =========================================================
-   CORE EXPORTS
-========================================================= */
+export const FacturasView = createGuardedFacturasViewBridge(RawFacturasView);
 
 export { FacturasView as View };
 
@@ -1231,8 +814,8 @@ export const reload = (...args) =>
     { guarded: true }
   );
 
-export const refresh = (...args) =>
-  reload(...args);
+export const refresh = (...args) => reload(...args);
+export const bootstrap = (...args) => init(...args);
 
 export const destroy = (...args) =>
   callAny(
@@ -1256,11 +839,10 @@ export const unmount = (...args) =>
     true
   );
 
-export const dispose = destroy;
-export const bootstrap = init;
+export const dispose = (...args) => destroy(...args);
 
 /* =========================================================
-   ACTIONS API · VIEW FIRST + ACTION FALLBACK
+   ACTION API · VIEW FIRST + FALLBACKS
 ========================================================= */
 
 export const loadFacturas = (...args) =>
@@ -1298,12 +880,13 @@ export const openFacturaPdf = (...args) =>
     { guarded: true }
   );
 
-export const viewFacturaPdf = openFacturaPdf;
+export const viewFacturaPdf = (...args) => openFacturaPdf(...args);
 
 export const downloadFacturaPdf = (...args) =>
   callAny(
     [
       [RawFacturasView, "downloadFacturaPdf"],
+      [RawFacturasView, "downloadFactura"],
       [Actions, "downloadFacturaPdfAction"],
     ],
     args,
@@ -1346,7 +929,64 @@ export const exportFacturasCsv = (...args) =>
   );
 
 /* =========================================================
-   DATA API
+   CREATE MODAL API
+========================================================= */
+
+export const openFacturasCreateModal = (...args) =>
+  callAny(
+    [
+      [CreateModal, "openFacturasCreateModal"],
+      [CreateModal.OnionFacturasCreateModal, "open"],
+      [CreateModal.default, "open"],
+    ],
+    args,
+    false
+  );
+
+export const closeFacturasCreateModal = (...args) =>
+  callAny(
+    [
+      [CreateModal, "closeFacturasCreateModal"],
+      [CreateModal.OnionFacturasCreateModal, "close"],
+      [CreateModal.default, "close"],
+    ],
+    args,
+    false
+  );
+
+export const updateFacturasCreateModal = (...args) =>
+  callAny(
+    [
+      [CreateModal, "updateFacturasCreateModal"],
+      [CreateModal.OnionFacturasCreateModal, "update"],
+      [CreateModal.default, "update"],
+    ],
+    args,
+    false
+  );
+
+export const OnionFacturasCreateModal =
+  CreateModal.OnionFacturasCreateModal ||
+  CreateModal.default ||
+  null;
+
+/* =========================================================
+   INCIDENCIAS BRIDGE API
+========================================================= */
+
+export const openFacturaIncidenciaModal = (...args) =>
+  callAny(
+    [
+      [IncidenciasBridge, "openFacturaIncidenciaModal"],
+      [IncidenciasBridge.default, "openFacturaIncidenciaModal"],
+    ],
+    args,
+    false,
+    { guarded: true }
+  );
+
+/* =========================================================
+   DATA / DEBUG API
 ========================================================= */
 
 export const getItems = (...args) =>
@@ -1360,267 +1000,170 @@ export const getItems = (...args) =>
     []
   );
 
-export const getFacturasView = () =>
-  FacturasView;
-
-export const getRawFacturasView = () =>
-  RawFacturasView;
+export const getFacturasView = () => FacturasView;
+export const getRawFacturasView = () => RawFacturasView;
 
 export const canRenderFacturasNow = (...args) =>
-  shouldAllowFacturasMethod(
-    "render",
-    args
-  );
+  shouldAllowFacturasMethod("render", args);
 
 export const getFacturasRouteDebug = (...args) => {
-  const signals =
-    collectRouteSignals(args);
+  const explicitSignals = collectExplicitRouteSignals(args);
+  const runtimeSignals = collectRuntimeRouteSignals();
+  const signals = [...explicitSignals, ...runtimeSignals];
 
   return {
-    source:
-      FACTURAS_INDEX_SOURCE,
-
-    allowed:
-      shouldAllowFacturasMethod(
-        "render",
-        args
-      ),
-
-    browserPath:
-      getBrowserPath(),
-
-    browserCanonicalPath:
-      getCleanCanonicalPath(
-        getBrowserPath() || "/"
-      ),
-
-    appRoute:
-      getAppStatePath(),
-
-    appPublicPath:
-      getAppPublicPath(),
-
+    source: FACTURAS_INDEX_SOURCE,
+    allowed: shouldAllowFacturasMethod("render", args),
+    browserPath: getBrowserPath(),
+    browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
+    appRoute: getAppRoutePath(),
+    appPublicPath: getAppPublicPath(),
+    explicitSignals,
+    runtimeSignals,
     signals,
-
-    blockingSignal:
-      getBlockingSignal(signals),
+    blockingSignal: getBlockingSignal(signals),
   };
 };
 
+export const isInitialized = () =>
+  Boolean(
+    RawFacturasView?.initialized ||
+      RawFacturasView?.isInitialized ||
+      safeCall(RawFacturasView, "isInitialized", [], false)
+  );
+
+export const isDestroyed = () =>
+  Boolean(
+    RawFacturasView?.destroyed ||
+      RawFacturasView?.isDestroyed ||
+      safeCall(RawFacturasView, "isDestroyed", [], false)
+  );
+
+export const isMounted = () =>
+  Boolean(
+    RawFacturasView?.mounted ||
+      RawFacturasView?.isMounted ||
+      safeCall(RawFacturasView, "isMounted", [], false)
+  );
+
 export const getModuleSnapshot = (...args) => {
-  const base =
-    callAny(
-      [
-        [RawFacturasView, "getSnapshot"],
-        [RawFacturasView, "getState"],
-      ],
-      args,
-      null
-    );
+  const base = callAny(
+    [
+      [RawFacturasView, "getSnapshot"],
+      [RawFacturasView, "getState"],
+    ],
+    args,
+    null
+  );
 
   return {
     ...(isObject(base) ? base : {}),
 
-    module:
-      FACTURAS_MODULE_NAME,
+    module: FACTURAS_MODULE_NAME,
+    viewName: FACTURAS_VIEW_NAME,
+    version: FACTURAS_MODULE_VERSION,
+    source: FACTURAS_INDEX_SOURCE,
 
-    viewName:
-      FACTURAS_VIEW_NAME,
+    initialized: isInitialized(),
+    destroyed: isDestroyed(),
+    mounted: isMounted(),
 
-    version:
-      FACTURAS_MODULE_VERSION,
+    items: getItems(),
 
-    source:
-      FACTURAS_INDEX_SOURCE,
-
-    initialized:
-      isInitialized(),
-
-    destroyed:
-      isDestroyed(),
-
-    mounted:
-      isMounted(),
-
-    items:
-      getItems(),
-
-    browserPath:
-      getBrowserPath(),
-
-    browserCanonicalPath:
-      getCleanCanonicalPath(
-        getBrowserPath() || "/"
-      ),
-
-    appRoute:
-      getAppStatePath(),
-
-    appPublicPath:
-      getAppPublicPath(),
-
-    facturasAllowedNow:
-      canRenderFacturasNow(...args),
+    browserPath: getBrowserPath(),
+    browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
+    appRoute: getAppRoutePath(),
+    appPublicPath: getAppPublicPath(),
+    facturasAllowedNow: canRenderFacturasNow(...args),
   };
 };
 
 /* =========================================================
-   MODEL PÚBLICO
+   MODEL PUBLIC WRAPPERS
 ========================================================= */
 
-export const truncate = (...args) =>
-  callAny([[Model, "truncate"]], args, localTruncate(...args));
+export const DEFAULT_FACTURAS_SORT = Model.DEFAULT_FACTURAS_SORT;
+export const DEFAULT_FACTURA_CURRENCY = Model.DEFAULT_FACTURA_CURRENCY;
 
-export const formatMoney = (...args) =>
-  callAny([[Model, "formatMoney"]], args, undefined);
+export const truncate = moduleMethod(Model, "truncate", "");
+export const formatMoney = moduleMethod(Model, "formatMoney", "");
+export const formatDate = moduleMethod(Model, "formatDate", "—");
+export const formatDateTime = moduleMethod(Model, "formatDateTime", "—");
+export const formatRelativeDate = moduleMethod(Model, "formatRelativeDate", "Sin fecha");
+export const getInitials = moduleMethod(Model, "getInitials", "ON");
 
-export const formatDate = (...args) =>
-  callAny([[Model, "formatDate"]], args, undefined);
+export const normalizeEstadoPago = moduleMethod(Model, "normalizeEstadoPago", "pending");
+export const normalizeEstado = moduleMethod(Model, "normalizeEstado", "issued");
+export const getEstadoPagoLabel = moduleMethod(Model, "getEstadoPagoLabel", "Pendiente");
+export const getEstadoLabel = moduleMethod(Model, "getEstadoLabel", "Emitida");
 
-export const formatDateTime = (...args) =>
-  callAny([[Model, "formatDateTime"]], args, undefined);
+export const isFacturaDocument = moduleMethod(Model, "isFacturaDocument", true);
+export const getFacturaIdentityList = moduleMethod(Model, "getFacturaIdentityList", []);
+export const getFacturaPrimaryId = moduleMethod(Model, "getFacturaPrimaryId", "");
+export const sameFacturaIdentity = moduleMethod(Model, "sameFacturaIdentity", false);
 
-export const formatRelativeDate = (...args) =>
-  callAny([[Model, "formatRelativeDate"]], args, undefined);
+export const getFacturaNumero = moduleMethod(Model, "getFacturaNumero", "—");
+export const getFacturaFecha = moduleMethod(Model, "getFacturaFecha", null);
+export const getFacturaUpdatedAt = moduleMethod(Model, "getFacturaUpdatedAt", null);
+export const getFacturaClienteObject = moduleMethod(Model, "getFacturaClienteObject", {});
+export const getFacturaClienteNombre = moduleMethod(Model, "getFacturaClienteNombre", "Cliente");
+export const getFacturaClienteEmpresa = moduleMethod(Model, "getFacturaClienteEmpresa", "-");
+export const getFacturaClienteEmail = moduleMethod(Model, "getFacturaClienteEmail", "-");
+export const getFacturaPreview = moduleMethod(Model, "getFacturaPreview", "Sin detalle");
+export const getFacturaCurrency = moduleMethod(Model, "getFacturaCurrency", "EUR");
+export const getFacturaTotal = moduleMethod(Model, "getFacturaTotal", 0);
+export const getFacturaBaseImponible = moduleMethod(Model, "getFacturaBaseImponible", 0);
+export const getFacturaImpuestosTotal = moduleMethod(Model, "getFacturaImpuestosTotal", 0);
+export const getFacturaDescuentoTotal = moduleMethod(Model, "getFacturaDescuentoTotal", 0);
+export const getFacturaPaidAmount = moduleMethod(Model, "getFacturaPaidAmount", 0);
+export const getFacturaPendingAmount = moduleMethod(Model, "getFacturaPendingAmount", 0);
+export const getEffectiveEstadoPago = moduleMethod(Model, "getEffectiveEstadoPago", "pending");
 
-export const getInitials = (...args) =>
-  callAny([[Model, "getInitials"]], args, undefined);
+export const isFacturaPaid = moduleMethod(Model, "isFacturaPaid", false);
+export const isFacturaPending = moduleMethod(Model, "isFacturaPending", false);
+export const isFacturaOverdue = moduleMethod(Model, "isFacturaOverdue", false);
 
-export const normalizeEstadoPago = (...args) =>
-  callAny([[Model, "normalizeEstadoPago"]], args, undefined);
+export const getFacturaIncidenciaId = moduleMethod(Model, "getFacturaIncidenciaId", "");
+export const hasFacturaIncidencia = moduleMethod(Model, "hasFacturaIncidencia", false);
+export const buildFacturaIncidenciaPayload = moduleMethod(Model, "buildFacturaIncidenciaPayload", null);
 
-export const normalizeEstado = (...args) =>
-  callAny([[Model, "normalizeEstado"]], args, undefined);
+export const normalizeFactura = moduleMethod(Model, "normalizeFactura", {});
+export const extractFacturas = moduleMethod(Model, "extractFacturas", []);
+export const extractNormalizedFacturas = moduleMethod(Model, "extractNormalizedFacturas", []);
+export const getRemoteCount = moduleMethod(Model, "getRemoteCount", 0);
+export const extractStats = moduleMethod(Model, "extractStats", null);
 
-export const getEstadoPagoLabel = (...args) =>
-  callAny([[Model, "getEstadoPagoLabel"]], args, undefined);
-
-export const getEstadoLabel = (...args) =>
-  callAny([[Model, "getEstadoLabel"]], args, undefined);
-
-export const getEstadoPagoChipStyle = (...args) =>
-  callAny([[Model, "getEstadoPagoChipStyle"]], args, undefined);
-
-export const getEstadoChipStyle = (...args) =>
-  callAny([[Model, "getEstadoChipStyle"]], args, undefined);
-
-export const getFacturaNumero = (...args) =>
-  callAny([[Model, "getFacturaNumero"]], args, undefined);
-
-export const getFacturaFecha = (...args) =>
-  callAny([[Model, "getFacturaFecha"]], args, undefined);
-
-export const getFacturaUpdatedAt = (...args) =>
-  callAny([[Model, "getFacturaUpdatedAt"]], args, undefined);
-
-export const getFacturaClienteNombre = (...args) =>
-  callAny([[Model, "getFacturaClienteNombre"]], args, undefined);
-
-export const getFacturaClienteEmpresa = (...args) =>
-  callAny([[Model, "getFacturaClienteEmpresa"]], args, undefined);
-
-export const getFacturaClienteEmail = (...args) =>
-  callAny([[Model, "getFacturaClienteEmail"]], args, undefined);
-
-export const getFacturaPreview = (...args) =>
-  callAny([[Model, "getFacturaPreview"]], args, undefined);
-
-export const getFacturaCurrency = (...args) =>
-  callAny([[Model, "getFacturaCurrency"]], args, undefined);
-
-export const getFacturaTotal = (...args) =>
-  callAny([[Model, "getFacturaTotal"]], args, undefined);
-
-export const getFacturaBaseImponible = (...args) =>
-  callAny([[Model, "getFacturaBaseImponible"]], args, undefined);
-
-export const getFacturaImpuestosTotal = (...args) =>
-  callAny([[Model, "getFacturaImpuestosTotal"]], args, undefined);
-
-export const getFacturaDescuentoTotal = (...args) =>
-  callAny([[Model, "getFacturaDescuentoTotal"]], args, undefined);
-
-export const isFacturaPaid = (...args) =>
-  callAny([[Model, "isFacturaPaid"]], args, false);
-
-export const isFacturaPending = (...args) =>
-  callAny([[Model, "isFacturaPending"]], args, false);
-
-export const isFacturaOverdue = (...args) =>
-  callAny([[Model, "isFacturaOverdue"]], args, false);
-
-export const normalizeFactura = (...args) =>
-  callAny([[Model, "normalizeFactura"]], args, undefined);
-
-export const extractFacturas = (...args) =>
-  callAny([[Model, "extractFacturas"]], args, []);
-
-export const extractNormalizedFacturas = (...args) =>
-  callAny([[Model, "extractNormalizedFacturas"]], args, []);
-
-export const getRemoteCount = (...args) =>
-  callAny([[Model, "getRemoteCount"]], args, 0);
-
-export const extractStats = (...args) =>
-  callAny([[Model, "extractStats"]], args, undefined);
-
-export const sumFacturasTotal = (...args) =>
-  callAny([[Model, "sumFacturasTotal"]], args, 0);
-
-export const sumFacturasBase = (...args) =>
-  callAny([[Model, "sumFacturasBase"]], args, 0);
-
-export const countFacturasByEstadoPago = (...args) =>
-  callAny([[Model, "countFacturasByEstadoPago"]], args, 0);
-
-export const countFacturasByEstado = (...args) =>
-  callAny([[Model, "countFacturasByEstado"]], args, 0);
-
-export const sortFacturas = (...args) =>
-  callAny([[Model, "sortFacturas"]], args, localSafeArray(args[0], []));
-
-export const filterFacturas = (...args) =>
-  callAny([[Model, "filterFacturas"]], args, localSafeArray(args[0], []));
+export const sumFacturasTotal = moduleMethod(Model, "sumFacturasTotal", 0);
+export const sumFacturasBase = moduleMethod(Model, "sumFacturasBase", 0);
+export const countFacturasByEstadoPago = moduleMethod(Model, "countFacturasByEstadoPago", 0);
+export const countFacturasByEstado = moduleMethod(Model, "countFacturasByEstado", 0);
+export const computeFacturasStats = moduleMethod(Model, "computeFacturasStats", {});
+export const sortFacturas = moduleMethod(Model, "sortFacturas", []);
+export const filterFacturas = moduleMethod(Model, "filterFacturas", []);
 
 /* =========================================================
-   UTILS REUTILIZABLES
+   UTILS PUBLIC WRAPPERS
 ========================================================= */
 
-export const safeText = (...args) =>
-  callAny([[Utils, "safeText"]], args, localSafeText(...args));
-
-export const safeNumber = (...args) =>
-  callAny([[Utils, "safeNumber"]], args, localSafeNumber(...args));
-
-export const safeArray = (...args) =>
-  callAny([[Utils, "safeArray"]], args, localSafeArray(...args));
-
-export const safeObject = (...args) =>
-  callAny([[Utils, "safeObject"]], args, localSafeObject(...args));
-
-export const safeBoolean = (...args) =>
-  callAny([[Utils, "safeBoolean"]], args, localSafeBoolean(...args));
-
-export const first = (...args) =>
-  callAny([[Utils, "first"]], args, localFirst(...args));
-
-export const normalizeWhitespace = (...args) =>
-  callAny([[Utils, "normalizeWhitespace"]], args, localNormalizeWhitespace(...args));
-
-export const escapeHtml = (...args) =>
-  callAny([[Utils, "escapeHtml"]], args, localEscapeHtml(...args));
-
-export const truncateText = (...args) =>
-  callAny([[Utils, "truncate"]], args, localTruncate(...args));
-
-export const showToast = (...args) =>
-  callAny([[Utils, "showToast"]], args, false);
+export const safeString = moduleMethod(Utils, "safeString", "");
+export const safeNumber = moduleMethod(Utils, "safeNumber", 0);
+export const safeArrayExport = moduleMethod(Utils, "safeArray", []);
+export const safeObjectExport = moduleMethod(Utils, "safeObject", {});
+export const safeBoolean = moduleMethod(Utils, "safeBoolean", false);
+export const escapeHtml = moduleMethod(Utils, "escapeHtml", "");
+export const normalizeWhitespace = moduleMethod(Utils, "normalizeWhitespace", "");
+export const normalizeKey = moduleMethod(Utils, "normalizeKey", "");
+export const normalizeIdentity = moduleMethod(Utils, "normalizeIdentity", "");
+export const showToast = moduleMethod(Utils, "showToast", false);
+export const safeEmitEvent = moduleMethod(Utils, "safeEmit", false);
 
 /* =========================================================
-   STATE
+   STATE PUBLIC WRAPPERS
 ========================================================= */
 
-export const createFacturasState = moduleMethod(State, "createFacturasState");
+export const DEFAULT_PAGE_SIZE = State.DEFAULT_PAGE_SIZE || 5;
+
+export const createFacturasState = moduleMethod(State, "createFacturasState", {});
 export const resetFacturasViewState = moduleMethod(State, "resetFacturasViewState");
 export const resetFacturasDetailState = moduleMethod(State, "resetFacturasDetailState");
 export const resetFacturasInflightState = moduleMethod(State, "resetFacturasInflightState");
@@ -1639,9 +1182,9 @@ export const isFacturasBootstrapped = moduleMethod(State, "isFacturasBootstrappe
 
 export const getFacturasError = moduleMethod(State, "getFacturasError", null);
 export const getFacturasRemoteCount = moduleMethod(State, "getFacturasRemoteCount", 0);
-export const getFacturasLastSyncAt = moduleMethod(State, "getFacturasLastSyncAt", null);
+export const getFacturasLastSyncAt = moduleMethod(State, "getFacturasLastSyncAt", "");
 export const getFacturasPage = moduleMethod(State, "getFacturasPage", 1);
-export const getFacturasPageSize = moduleMethod(State, "getFacturasPageSize", 5);
+export const getFacturasPageSize = moduleMethod(State, "getFacturasPageSize", DEFAULT_PAGE_SIZE);
 
 export const isFacturasDetailOpen = moduleMethod(State, "isFacturasDetailOpen", false);
 export const isFacturasDetailLoading = moduleMethod(State, "isFacturasDetailLoading", false);
@@ -1651,9 +1194,13 @@ export const getFacturasSendingFacturaId = moduleMethod(State, "getFacturasSendi
 export const getFacturasDownloadingFacturaId = moduleMethod(State, "getFacturasDownloadingFacturaId", "");
 export const getFacturasViewingFacturaId = moduleMethod(State, "getFacturasViewingFacturaId", "");
 export const getFacturasOpeningFacturaId = moduleMethod(State, "getFacturasOpeningFacturaId", "");
+export const getFacturasSelectedFacturaId = moduleMethod(State, "getFacturasSelectedFacturaId", "");
 
 export const getFacturasInflightLoad = moduleMethod(State, "getFacturasInflightLoad", null);
 export const getFacturasInflightDetail = moduleMethod(State, "getFacturasInflightDetail", null);
+export const getFacturasCollectionToken = moduleMethod(State, "getFacturasCollectionToken", 0);
+export const getFacturasDetailToken = moduleMethod(State, "getFacturasDetailToken", 0);
+export const getFacturasDetailFacturaId = moduleMethod(State, "getFacturasDetailFacturaId", "");
 
 export const setFacturasHydrated = moduleMethod(State, "setFacturasHydrated");
 export const setFacturasLoading = moduleMethod(State, "setFacturasLoading");
@@ -1677,82 +1224,70 @@ export const setFacturasSendingFacturaId = moduleMethod(State, "setFacturasSendi
 export const setFacturasDownloadingFacturaId = moduleMethod(State, "setFacturasDownloadingFacturaId");
 export const setFacturasViewingFacturaId = moduleMethod(State, "setFacturasViewingFacturaId");
 export const setFacturasOpeningFacturaId = moduleMethod(State, "setFacturasOpeningFacturaId");
+export const setFacturasSelectedFacturaId = moduleMethod(State, "setFacturasSelectedFacturaId");
 export const clearFacturasActionIds = moduleMethod(State, "clearFacturasActionIds");
 
 export const setFacturasInflightLoad = moduleMethod(State, "setFacturasInflightLoad");
 export const setFacturasInflightDetail = moduleMethod(State, "setFacturasInflightDetail");
+export const setFacturasCollectionToken = moduleMethod(State, "setFacturasCollectionToken");
+export const setFacturasDetailToken = moduleMethod(State, "setFacturasDetailToken");
+export const setFacturasDetailFacturaId = moduleMethod(State, "setFacturasDetailFacturaId");
+export const clearFacturasCollectionInflight = moduleMethod(State, "clearFacturasCollectionInflight");
+export const clearFacturasDetailInflight = moduleMethod(State, "clearFacturasDetailInflight");
 
 export const patchFacturasViewState = moduleMethod(State, "patchFacturasViewState");
 export const patchFacturasDetailState = moduleMethod(State, "patchFacturasDetailState");
+export const patchFacturasActionsState = moduleMethod(State, "patchFacturasActionsState");
+export const patchFacturasInflightState = moduleMethod(State, "patchFacturasInflightState");
 
 export const getFacturasTemplateState = moduleMethod(State, "getFacturasTemplateState", {});
 export const getFacturasStateSnapshot = moduleMethod(State, "getFacturasStateSnapshot", {});
 
 /* =========================================================
-   STORE
+   STORE PUBLIC WRAPPERS
 ========================================================= */
 
 export const getFacturasStore = moduleMethod(Store, "getFacturasStore", []);
 export const getSortedFacturasStore = moduleMethod(Store, "getSortedFacturasStore", []);
 export const getFacturaByIdStore = moduleMethod(Store, "getFacturaByIdStore", null);
+export const getFacturaByIncidenciaIdStore = moduleMethod(Store, "getFacturaByIncidenciaIdStore", null);
 export const hasFacturasStore = moduleMethod(Store, "hasFacturasStore", false);
 export const countFacturasStore = moduleMethod(Store, "countFacturasStore", 0);
-export const setFacturasStore = moduleMethod(Store, "setFacturasStore");
-export const appendFacturasStore = moduleMethod(Store, "appendFacturasStore");
-export const upsertFacturaStore = moduleMethod(Store, "upsertFacturaStore");
-export const removeFacturaByIdStore = moduleMethod(Store, "removeFacturaByIdStore");
-export const clearFacturasStore = moduleMethod(Store, "clearFacturasStore");
+
+export const setFacturasStore = moduleMethod(Store, "setFacturasStore", false);
+export const appendFacturasStore = moduleMethod(Store, "appendFacturasStore", false);
+export const upsertFacturaStore = moduleMethod(Store, "upsertFacturaStore", false);
+export const removeFacturaByIdStore = moduleMethod(Store, "removeFacturaByIdStore", false);
+export const clearFacturasStore = moduleMethod(Store, "clearFacturasStore", false);
+
+export const debugFacturasIncidenciasStore = moduleMethod(Store, "debugFacturasIncidenciasStore", []);
 
 /* =========================================================
-   API
+   API / LOADERS / ACTIONS PUBLIC WRAPPERS
 ========================================================= */
 
-export const fetchFacturasRequest = moduleMethod(Api, "fetchFacturasRequest");
-export const fetchFacturaDetailRequest = moduleMethod(Api, "fetchFacturaDetailRequest");
-export const fetchFacturaPdfUrlRequest = moduleMethod(Api, "fetchFacturaPdfUrlRequest");
-export const sendFacturaRequest = moduleMethod(Api, "sendFacturaRequest");
+export const fetchFacturasRequest = moduleMethod(Api, "fetchFacturasRequest", null);
+export const fetchFacturaDetailRequest = moduleMethod(Api, "fetchFacturaDetailRequest", null);
+export const fetchFacturaPdfUrlRequest = moduleMethod(Api, "fetchFacturaPdfUrlRequest", null);
+export const sendFacturaRequest = moduleMethod(Api, "sendFacturaRequest", null);
+
+export const loadFacturasCollection = moduleMethod(Loaders, "loadFacturasCollection", null);
+export const loadFacturaDetailById = moduleMethod(Loaders, "loadFacturaDetailById", null);
+
+export const getFacturaDetailFromStoreAction = moduleMethod(Actions, "getFacturaDetailFromStoreAction", null);
+export const getFacturaDetailAction = moduleMethod(Actions, "getFacturaDetailAction", null);
+export const openFacturaAction = moduleMethod(Actions, "openFacturaAction", null);
+export const refreshFacturaDetailAction = moduleMethod(Actions, "refreshFacturaDetailAction", null);
+export const openFacturaPdfAction = moduleMethod(Actions, "openFacturaPdfAction", false);
+export const downloadFacturaPdfAction = moduleMethod(Actions, "downloadFacturaPdfAction", false);
+export const sendFacturaToClientAction = moduleMethod(Actions, "sendFacturaToClientAction", false);
+export const copyFacturaIdAction = moduleMethod(Actions, "copyFacturaIdAction", false);
+export const exportFacturasCsvAction = moduleMethod(Actions, "exportFacturasCsvAction", false);
+
+export const bindFacturasView = moduleMethod(Bindings, "bindFacturasView", null);
 
 /* =========================================================
-   LOADERS
-========================================================= */
-
-export const loadFacturasCollection = moduleMethod(Loaders, "loadFacturasCollection");
-export const loadFacturaDetailById = moduleMethod(Loaders, "loadFacturaDetailById");
-
-/* =========================================================
-   ACTIONS
-========================================================= */
-
-export const getFacturaDetailFromStoreAction = moduleMethod(Actions, "getFacturaDetailFromStoreAction");
-export const getFacturaDetailAction = moduleMethod(Actions, "getFacturaDetailAction");
-export const openFacturaAction = moduleMethod(Actions, "openFacturaAction");
-export const refreshFacturaDetailAction = moduleMethod(Actions, "refreshFacturaDetailAction");
-export const openFacturaPdfAction = moduleMethod(Actions, "openFacturaPdfAction");
-export const downloadFacturaPdfAction = moduleMethod(Actions, "downloadFacturaPdfAction");
-export const sendFacturaToClientAction = moduleMethod(Actions, "sendFacturaToClientAction");
-export const copyFacturaIdAction = moduleMethod(Actions, "copyFacturaIdAction");
-export const exportFacturasCsvAction = moduleMethod(Actions, "exportFacturasCsvAction");
-
-export const getFacturaIdAction = moduleMethod(Actions, "getFacturaIdAction");
-export const getFacturaNumberAction = moduleMethod(Actions, "getFacturaNumberAction");
-export const getFacturaClientAction = moduleMethod(Actions, "getFacturaClientAction");
-export const getFacturaEmailAction = moduleMethod(Actions, "getFacturaEmailAction");
-export const getFacturaDateAction = moduleMethod(Actions, "getFacturaDateAction");
-export const getFacturaEstadoPagoAction = moduleMethod(Actions, "getFacturaEstadoPagoAction");
-export const getFacturaEstadoAction = moduleMethod(Actions, "getFacturaEstadoAction");
-export const getFacturaFormaPagoAction = moduleMethod(Actions, "getFacturaFormaPagoAction");
-export const getFacturaMonedaAction = moduleMethod(Actions, "getFacturaMonedaAction");
-export const getFacturaTotalAction = moduleMethod(Actions, "getFacturaTotalAction");
-export const normalizeFacturaDetailAction = moduleMethod(Actions, "normalizeFacturaDetailAction");
-
-/* =========================================================
-   BINDINGS
-========================================================= */
-
-export const bindFacturasView = moduleMethod(Bindings, "bindFacturasView");
-
-/* =========================================================
-   TEMPLATES
+   TEMPLATE PUBLIC WRAPPERS
 ========================================================= */
 
 export const renderHeader = moduleMethod(Template, "renderHeader", "");
@@ -1769,68 +1304,46 @@ export const renderFacturasDetailContent = moduleMethod(DetailTemplate, "renderF
 export const renderFacturasDetailModal = moduleMethod(DetailTemplate, "renderFacturasDetailModal", "");
 
 /* =========================================================
-   FLAGS
-========================================================= */
-
-export const isInitialized = () =>
-  Boolean(
-    RawFacturasView?.initialized ||
-      RawFacturasView?.isInitialized ||
-      safeCall(RawFacturasView, "isInitialized", [], false)
-  );
-
-export const isDestroyed = () =>
-  Boolean(
-    RawFacturasView?.destroyed ||
-      RawFacturasView?.isDestroyed ||
-      safeCall(RawFacturasView, "isDestroyed", [], false)
-  );
-
-export const isMounted = () =>
-  Boolean(
-    RawFacturasView?.mounted ||
-      RawFacturasView?.isMounted ||
-      safeCall(RawFacturasView, "isMounted", [], false)
-  );
-
-/* =========================================================
-   PUBLIC API OBJECT
+   PUBLIC MODULE OBJECT
 ========================================================= */
 
 export const FacturasModule = Object.freeze({
-  name:
-    FACTURAS_MODULE_NAME,
+  name: FACTURAS_MODULE_NAME,
+  viewName: FACTURAS_VIEW_NAME,
+  version: FACTURAS_MODULE_VERSION,
+  canonicalPath: FACTURAS_CANONICAL_PATH,
+  source: FACTURAS_INDEX_SOURCE,
 
-  viewName:
-    FACTURAS_VIEW_NAME,
-
-  version:
-    FACTURAS_MODULE_VERSION,
-
-  source:
-    FACTURAS_INDEX_SOURCE,
-
-  View:
-    FacturasView,
-
-  RawView:
-    RawFacturasView,
-
+  View: FacturasView,
+  RawView: RawFacturasView,
   FacturasView,
 
   view,
   component,
   page,
 
+  Model,
+  Utils,
+  State,
+  Store,
+  Api,
+  Loaders,
+  Actions,
+  Bindings,
+  Template,
+  DetailTemplate,
+  CreateModal,
+  IncidenciasBridge,
+
   init,
   mount,
   render,
   reload,
   refresh,
+  bootstrap,
   destroy,
   unmount,
   dispose,
-  bootstrap,
 
   loadFacturas,
   openFactura,
@@ -1841,11 +1354,17 @@ export const FacturasModule = Object.freeze({
   closeDetail,
   exportFacturasCsv,
 
+  openFacturasCreateModal,
+  closeFacturasCreateModal,
+  updateFacturasCreateModal,
+  OnionFacturasCreateModal,
+
+  openFacturaIncidenciaModal,
+
   getItems,
   getFacturasView,
   getRawFacturasView,
   getModuleSnapshot,
-
   canRenderFacturasNow,
   getFacturasRouteDebug,
 
@@ -1855,12 +1374,11 @@ export const FacturasModule = Object.freeze({
 });
 
 /* =========================================================
-   LEGACY GLOBAL BRIDGE
+   GLOBAL BRIDGE
 ========================================================= */
 
 export function registerGlobalBridge() {
-  const root =
-    getGlobalRoot();
+  const root = getGlobalRoot();
 
   try {
     const previous =
@@ -1874,86 +1392,47 @@ export function registerGlobalBridge() {
       ...FacturasModule,
     };
 
-    root.OnionFacturasView =
-      root.OnionFacturasView &&
-      typeof root.OnionFacturasView === "object"
-        ? {
-            ...root.OnionFacturasView,
-            ...FacturasModule,
-            view:
-              FacturasView,
-          }
-        : FacturasView;
+    root.OnionFacturasView = FacturasView;
+    root.FacturasView = FacturasView;
 
-    root.FacturasView =
-      root.FacturasView &&
-      typeof root.FacturasView === "object"
-        ? {
-            ...root.FacturasView,
-            ...FacturasModule,
-            view:
-              FacturasView,
-          }
-        : FacturasView;
+    if (OnionFacturasCreateModal && !root.OnionFacturasCreateModal) {
+      root.OnionFacturasCreateModal = OnionFacturasCreateModal;
+    }
   } catch (error) {
-    safeWarn(
-      "No se pudo registrar bridge global.",
-      error
-    );
+    safeWarn("No se pudo registrar bridge global.", error);
   }
 
   try {
-    const appCore =
-      root?.AppCore;
+    const appCore = root?.AppCore;
 
     if (appCore) {
-      if (
-        !appCore.modules ||
-        typeof appCore.modules !== "object"
-      ) {
+      if (!appCore.modules || typeof appCore.modules !== "object") {
         appCore.modules = {};
       }
 
-      appCore.modules.Facturas =
-        FacturasModule;
+      appCore.modules.facturas = FacturasModule;
+      appCore.modules.Facturas = FacturasModule;
+      appCore.modules.FacturasView = FacturasModule;
+      appCore.modules.OnionFacturas = FacturasModule;
 
-      appCore.modules.FacturasView =
-        FacturasModule;
-
-      appCore.modules.OnionFacturas =
-        FacturasModule;
+      if (typeof appCore.registerModule === "function") {
+        appCore.registerModule("facturas", FacturasModule);
+      }
     }
   } catch (error) {
-    safeWarn(
-      "No se pudo registrar bridge en AppCore.modules.",
-      error
-    );
+    safeWarn("No se pudo registrar bridge en AppCore.modules.", error);
   }
 
-  safeEmit(
-    "facturas:index:ready",
-    {
-      source:
-        FACTURAS_INDEX_SOURCE,
-
-      hasView:
-        Boolean(FacturasView),
-
-      hasRawView:
-        Boolean(RawFacturasView),
-
-      browserPath:
-        getBrowserPath(),
-
-      browserCanonicalPath:
-        getCleanCanonicalPath(
-          getBrowserPath() || "/"
-        ),
-
-      allowedNow:
-        canRenderFacturasNow(),
-    }
-  );
+  safeEmit("facturas:index:ready", {
+    source: FACTURAS_INDEX_SOURCE,
+    hasView: Boolean(FacturasView),
+    hasRawView: Boolean(RawFacturasView),
+    browserPath: getBrowserPath(),
+    browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || "/"),
+    appRoute: getAppRoutePath(),
+    appPublicPath: getAppPublicPath(),
+    allowedNow: canRenderFacturasNow(),
+  });
 
   return FacturasModule;
 }
@@ -1962,8 +1441,5 @@ export function registerGlobalBridge() {
    READY
 ========================================================= */
 
-export const bridge =
-  registerGlobalBridge();
-
-export const ready =
-  true;
+export const bridge = registerGlobalBridge();
+export const ready = true;

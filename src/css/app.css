@@ -17,6 +17,8 @@
      · /src/css/views/facturas/index.css   → vista principal
      · /src/css/views/facturas/create.css  → modal crear factura
      · /src/css/views/facturas/detail.css  → modal detalle factura
+   - Mantener Incidencias separado en:
+     · /src/css/views/incidencias/index.css → vista principal de incidencias
 
    ORDEN DE CASCADA:
    tokens < reset < core < layout < components < views < auth
@@ -87,13 +89,24 @@
 
 
 /* =========================================================
-   FUTURE VIEWS
-   Activar cuando exista el archivo definitivo.
+   VIEWS · INCIDENCIAS
+   Vista principal de incidencias:
+   - hero
+   - stats
+   - filtros
+   - búsqueda
+   - tabla
+   - estados loading/empty/error
+   - responsive
+   - light/dark token aligned
+
+   IMPORTANTE:
+   - El CSS vive fuera del template JS.
+   - No usar CSS inline ni estilos inyectados por JS.
+   - El template debe emitir solo clases/atributos.
 ========================================================= */
 
-/*
 @import url("./views/incidencias/index.css") layer(views);
-*/
 
 
 /* =========================================================

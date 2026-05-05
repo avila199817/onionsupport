@@ -3,35 +3,40 @@
    Archivo: src/views/facturas/facturas.create.modal.js
 
    FACTURAS EXPERIENCE PRO · CREATE MODAL · COSMOS/BLOB ALIGNED · GOD MODE
+   PATCH FINAL · NO CSS IN JS · CSP CLEAN · TOKEN SYSTEM READY
    PATCH FINAL · CLIENT + INCIDENCIA CARDS REDESIGN EXTREME
    PATCH FINAL · MULTI CLIENTE + MULTI INCIDENCIA READY
-   PATCH FINAL · TARGET BLOCK MOVED ABOVE SEND EMAIL CHECK
+   PATCH FINAL · TARGET BLOCK ABOVE SEND EMAIL CHECK
    PATCH FINAL · JSON v3/v2 COMPATIBLE PAYLOAD
    PATCH FINAL · REAL AVATAR + FALLBACK INITIALS
    PATCH FINAL · ONLY TOTAL CARD / NO TOTAL INPUT FIELD
    PATCH FINAL · BACKEND SAFE PRIMARY CLIENT/TICKET + ARRAYS
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - abrir/cerrar modal premium de creación de factura
    - buscar cliente/usuario objetivo
    - permitir seleccionar uno o varios clientes destino
-   - pintar avatar real del cliente/usuario si backend lo entrega
-   - fallback de avatar con iniciales si no hay imagen
-   - al seleccionar cliente, cargar incidencias vinculadas a ese cliente/usuario
+   - pintar avatar real si backend lo entrega
+   - fallback de avatar con iniciales sin inline handlers
+   - cargar incidencias vinculadas a cliente/usuario
    - seleccionar automáticamente la incidencia más reciente
    - permitir seleccionar una o varias incidencias
-   - mantener cliente/ticket primario para compatibilidad backend
+   - mantener cliente/ticket primario para compat backend
    - enviar arrays clienteIds/userIds/clientes/ticketIds/incidenciaIds/incidencias
    - crear factura desde panel admin alineada con backend v3
    - enviar payload compatible con /router/facturas/factura_create_admin.js
-   - NO pedir fecha factura: el backend usa fecha de creación real
+   - NO pedir fecha factura: backend usa fecha real de creación
    - NO pedir moneda: EUR fija
-   - NO pedir cuenta bancaria: no se solicita en UI
+   - NO pedir cuenta bancaria
    - total estimado calculado en tiempo real con IVA/IRPF
    - forma de pago mediante select
    - emitir facturas:create:success para refrescar la vista
    - evitar doble submit y doble binding
    - exponer bridge global para abrir desde cualquier vista
+
+   CSS:
+   - Todo el estilo debe vivir en /src/css/views/facturas.css
+   - Este módulo solo emite clases y atributos de estado
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -42,6 +47,7 @@ import { AppCore } from "../../core/index.js";
 
 const MODAL_ID = "facturas-create-modal-root";
 const PANEL_ID = "facturas-create-modal-panel";
+const FORM_ID = "facturas-create-form";
 
 const FACTURAS_CREATE_ENDPOINT = "/api/facturas";
 
@@ -115,6 +121,7 @@ const modalState = {
   isOpen: false,
   submitting: false,
   bindingsAttached: false,
+
   escHandler: null,
   lastActiveElement: null,
   previousBodyOverflow: "",
@@ -148,11 +155,20 @@ const modalState = {
 };
 
 /* =========================================================
-   HELPERS
+   SAFE HELPERS
 ========================================================= */
+
+function getGlobal() {
+  try {
+    return typeof window !== "undefined" ? window : null;
+  } catch {
+    return null;
+  }
+}
 
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
+
   const text = String(value).trim();
   return text || fallback;
 }
@@ -199,6 +215,7 @@ function first(...values) {
     if (value === undefined || value === null) continue;
     if (typeof value === "string" && value.trim() === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
+
     return value;
   }
 
@@ -315,6 +332,8 @@ function compactUnique(values = []) {
 
 function safeEmit(event = "", payload = {}) {
   const eventName = safeText(event, "");
+  const win = getGlobal();
+
   if (!eventName) return false;
 
   let emitted = false;
@@ -325,11 +344,12 @@ function safeEmit(event = "", payload = {}) {
   } catch {}
 
   try {
-    window.dispatchEvent(
+    win?.dispatchEvent?.(
       new CustomEvent(eventName, {
         detail: payload,
       })
     );
+
     emitted = true;
   } catch {}
 
@@ -338,6 +358,8 @@ function safeEmit(event = "", payload = {}) {
 
 function safeOn(event = "", handler = null) {
   const eventName = safeText(event, "");
+  const win = getGlobal();
+
   if (!eventName || typeof handler !== "function") return false;
 
   let attached = false;
@@ -348,7 +370,7 @@ function safeOn(event = "", handler = null) {
   } catch {}
 
   try {
-    window.addEventListener(eventName, handler);
+    win?.addEventListener?.(eventName, handler);
     attached = true;
   } catch {}
 
@@ -357,6 +379,8 @@ function safeOn(event = "", handler = null) {
 
 function safeOff(event = "", handler = null) {
   const eventName = safeText(event, "");
+  const win = getGlobal();
+
   if (!eventName || typeof handler !== "function") return false;
 
   try {
@@ -364,7 +388,7 @@ function safeOff(event = "", handler = null) {
   } catch {}
 
   try {
-    window.removeEventListener(eventName, handler);
+    win?.removeEventListener?.(eventName, handler);
   } catch {}
 
   return true;
@@ -392,90 +416,6 @@ function showToast(message = "", type = "info") {
   } catch {}
 
   return false;
-}
-
-function getApiBase() {
-  return safeText(
-    first(
-      AppCore?.config?.apiBase,
-      AppCore?.config?.api?.baseUrl,
-      AppCore?.state?.apiBase,
-      window?.ONION_API_BASE,
-      window?.API_BASE
-    ),
-    ""
-  ).replace(/\/+$/, "");
-}
-
-function buildUrl(endpoint = "") {
-  const path = safeText(endpoint, "");
-  if (!path) return "";
-
-  if (isAbsoluteUrl(path)) return path;
-
-  const apiBase = getApiBase();
-
-  if (!apiBase) {
-    return path.startsWith("/") ? path : `/${path}`;
-  }
-
-  if (apiBase.endsWith("/api") && path.startsWith("/api/")) {
-    return `${apiBase}${path.slice(4)}`;
-  }
-
-  return `${apiBase}${path.startsWith("/") ? path : `/${path}`}`;
-}
-
-function getStorageValue(key = "") {
-  const cleanKey = safeText(key, "");
-  if (!cleanKey) return "";
-
-  try {
-    const value = localStorage.getItem(cleanKey);
-    if (value) return value;
-  } catch {}
-
-  try {
-    const value = sessionStorage.getItem(cleanKey);
-    if (value) return value;
-  } catch {}
-
-  return "";
-}
-
-function getAuthToken() {
-  return safeText(
-    first(
-      AppCore?.state?.token,
-      AppCore?.state?.accessToken,
-      AppCore?.auth?.getToken?.(),
-      AppCore?.Auth?.getToken?.(),
-      window?.Auth?.getToken?.(),
-
-      getStorageValue("token"),
-      getStorageValue("accessToken"),
-      getStorageValue("authToken"),
-      getStorageValue("onion.token")
-    ),
-    ""
-  );
-}
-
-function createTimeoutController(timeoutMs = 15000) {
-  const controller = new AbortController();
-
-  const timer = setTimeout(() => {
-    try {
-      controller.abort();
-    } catch {}
-  }, timeoutMs);
-
-  return {
-    signal: controller.signal,
-    clear() {
-      clearTimeout(timer);
-    },
-  };
 }
 
 function safeErrorMessage(error = null, fallback = "No se pudo completar la operación.") {
@@ -517,6 +457,96 @@ function shouldTryNext(error = null) {
 /* =========================================================
    API HELPERS
 ========================================================= */
+
+function getApiBase() {
+  const win = getGlobal();
+
+  return safeText(
+    first(
+      AppCore?.config?.apiBase,
+      AppCore?.config?.api?.baseUrl,
+      AppCore?.state?.apiBase,
+      win?.ONION_API_BASE,
+      win?.API_BASE
+    ),
+    ""
+  ).replace(/\/+$/, "");
+}
+
+function buildUrl(endpoint = "") {
+  const path = safeText(endpoint, "");
+  if (!path) return "";
+
+  if (isAbsoluteUrl(path)) return path;
+
+  const apiBase = getApiBase();
+
+  if (!apiBase) {
+    return path.startsWith("/") ? path : `/${path}`;
+  }
+
+  if (apiBase.endsWith("/api") && path.startsWith("/api/")) {
+    return `${apiBase}${path.slice(4)}`;
+  }
+
+  return `${apiBase}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function getStorageValue(key = "") {
+  const cleanKey = safeText(key, "");
+  const win = getGlobal();
+
+  if (!cleanKey || !win) return "";
+
+  try {
+    const value = win.localStorage?.getItem?.(cleanKey);
+    if (value) return value;
+  } catch {}
+
+  try {
+    const value = win.sessionStorage?.getItem?.(cleanKey);
+    if (value) return value;
+  } catch {}
+
+  return "";
+}
+
+function getAuthToken() {
+  const win = getGlobal();
+
+  return safeText(
+    first(
+      AppCore?.state?.token,
+      AppCore?.state?.accessToken,
+      AppCore?.auth?.getToken?.(),
+      AppCore?.Auth?.getToken?.(),
+      win?.Auth?.getToken?.(),
+
+      getStorageValue("token"),
+      getStorageValue("accessToken"),
+      getStorageValue("authToken"),
+      getStorageValue("onion.token")
+    ),
+    ""
+  );
+}
+
+function createTimeoutController(timeoutMs = 15000) {
+  const controller = new AbortController();
+
+  const timer = setTimeout(() => {
+    try {
+      controller.abort();
+    } catch {}
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    clear() {
+      clearTimeout(timer);
+    },
+  };
+}
 
 async function requestJsonFetch(endpoint = "", options = {}) {
   const url = buildUrl(endpoint);
@@ -577,11 +607,13 @@ async function requestJsonFetch(endpoint = "", options = {}) {
 }
 
 async function apiGet(endpoint = "") {
+  const win = getGlobal();
+
   const client =
     AppCore?.apiClient ||
     AppCore?.modules?.Http ||
     AppCore?.Http ||
-    window?.Http;
+    win?.Http;
 
   if (typeof client?.get === "function") {
     return client.get(endpoint, {
@@ -605,11 +637,13 @@ async function apiGet(endpoint = "") {
 }
 
 async function apiPost(endpoint = "", body = {}) {
+  const win = getGlobal();
+
   const client =
     AppCore?.apiClient ||
     AppCore?.modules?.Http ||
     AppCore?.Http ||
-    window?.Http;
+    win?.Http;
 
   if (typeof client?.post === "function") {
     return client.post(endpoint, body, {
@@ -635,7 +669,7 @@ async function apiPost(endpoint = "", body = {}) {
 }
 
 /* =========================================================
-   GENERIC RESPONSE HELPERS
+   RESPONSE HELPERS
 ========================================================= */
 
 function extractItems(payload = null) {
@@ -823,16 +857,18 @@ function renderAvatar({
       title="${escapeHtml(displayName)}"
       aria-label="${escapeHtml(displayName)}"
       data-tooltip="${escapeHtml(displayName)}"
+      ${url ? 'data-has-avatar="true"' : 'data-fallback="true"'}
     >
       ${
         url
           ? `
             <img
+              class="fac-create-avatar-img"
               src="${escapeHtml(url)}"
               alt="${escapeHtml(displayName)}"
               loading="lazy"
               referrerpolicy="no-referrer"
-              onerror="this.style.display='none'; this.parentNode.setAttribute('data-fallback','true');"
+              data-avatar-img="true"
             />
           `
           : ""
@@ -911,9 +947,7 @@ function normalizeClientCandidate(raw = null) {
       cliente.nombreFiscal,
       cliente.empresa,
       cliente.company,
-      cliente.businessName,
-
-      ""
+      cliente.businessName
     ),
     ""
   );
@@ -1119,12 +1153,10 @@ function hasSelectedCliente(cliente = {}) {
   const clienteId = safeText(item.clienteId || item.id, "");
   const userId = safeText(item.userId, "");
 
-  return getSelectedClientes().some((selected) => {
-    return (
-      (clienteId && (selected.clienteId === clienteId || selected.id === clienteId)) ||
-      (userId && selected.userId === userId)
-    );
-  });
+  return getSelectedClientes().some((selected) => (
+    (clienteId && (selected.clienteId === clienteId || selected.id === clienteId)) ||
+    (userId && selected.userId === userId)
+  ));
 }
 
 function syncPrimaryClientToForm() {
@@ -1228,10 +1260,7 @@ async function performClientSearch(query = "") {
     modalState.clienteSearchError = "";
     modalState.clienteSearchResults = [];
 
-    renderModal();
-    attachRootBindings();
-    focusField("clienteSearch");
-
+    rerenderAndRefocus("clienteSearch");
     return [];
   }
 
@@ -1239,9 +1268,7 @@ async function performClientSearch(query = "") {
   modalState.clienteSearchError = "";
   modalState.clienteSearchResults = [];
 
-  renderModal();
-  attachRootBindings();
-  focusField("clienteSearch");
+  rerenderAndRefocus("clienteSearch");
 
   try {
     const results = await searchClientesRequest(normalized);
@@ -1252,9 +1279,7 @@ async function performClientSearch(query = "") {
     modalState.clienteSearchError = "";
     modalState.clienteSearchResults = results;
 
-    renderModal();
-    attachRootBindings();
-    focusField("clienteSearch");
+    rerenderAndRefocus("clienteSearch");
 
     return results;
   } catch (error) {
@@ -1264,9 +1289,7 @@ async function performClientSearch(query = "") {
     modalState.clienteSearchResults = [];
     modalState.clienteSearchError = safeErrorMessage(error, "No se pudo buscar cliente.");
 
-    renderModal();
-    attachRootBindings();
-    focusField("clienteSearch");
+    rerenderAndRefocus("clienteSearch");
 
     return [];
   }
@@ -1282,10 +1305,7 @@ function scheduleClientSearch(query = "") {
     modalState.clienteSearchError = "";
     modalState.clienteSearchResults = [];
 
-    renderModal();
-    attachRootBindings();
-    focusField("clienteSearch");
-
+    rerenderAndRefocus("clienteSearch");
     return;
   }
 
@@ -1510,9 +1530,11 @@ function hasSelectedTicket(ticket = {}) {
 
   return Boolean(
     id &&
-      getSelectedTickets().some((selected) => {
-        return selected.id === id || selected.ticketId === id || selected.incidenciaId === id;
-      })
+      getSelectedTickets().some((selected) => (
+        selected.id === id ||
+        selected.ticketId === id ||
+        selected.incidenciaId === id
+      ))
   );
 }
 
@@ -1615,7 +1637,6 @@ function dedupeAndFilterTickets(items = []) {
   safeArray(items).forEach((item) => {
     const normalized = normalizeTicketCandidate(item);
     if (!normalized?.id) return;
-
     if (!ticketBelongsToSelectedClients(normalized)) return;
 
     if (!map.has(normalized.id)) {
@@ -1679,29 +1700,22 @@ function setSelectedTicketFromItem(item = null, { auto = false, append = true } 
 
   if (!id) return false;
 
-  if (append) {
-    const exists = hasSelectedTicket(normalized);
+  const nextTicket = {
+    ...normalized,
+    id,
+    ticketId: normalized.ticketId || id,
+    incidenciaId: normalized.incidenciaId || id,
+  };
 
-    if (!exists) {
+  if (append) {
+    if (!hasSelectedTicket(nextTicket)) {
       modalState.selectedTickets = [
         ...getSelectedTickets(),
-        {
-          ...normalized,
-          id,
-          ticketId: normalized.ticketId || id,
-          incidenciaId: normalized.incidenciaId || id,
-        },
+        nextTicket,
       ];
     }
   } else {
-    modalState.selectedTickets = [
-      {
-        ...normalized,
-        id,
-        ticketId: normalized.ticketId || id,
-        incidenciaId: normalized.incidenciaId || id,
-      },
-    ];
+    modalState.selectedTickets = [nextTicket];
   }
 
   modalState.ticketAutoSelected = Boolean(auto);
@@ -1748,9 +1762,7 @@ async function loadTicketsForSelectedClient({
     modalState.selectedTickets = [];
 
     syncPrimaryTicketToForm();
-
-    renderModal();
-    attachRootBindings();
+    rerenderAndRefocus(focus);
 
     return [];
   }
@@ -1767,10 +1779,7 @@ async function loadTicketsForSelectedClient({
     syncPrimaryTicketToForm();
   }
 
-  renderModal();
-  attachRootBindings();
-
-  if (focus) focusField(focus);
+  rerenderAndRefocus(focus);
 
   try {
     const results = await searchTicketsRequest(query);
@@ -1787,10 +1796,7 @@ async function loadTicketsForSelectedClient({
       });
     }
 
-    renderModal();
-    attachRootBindings();
-
-    if (focus) focusField(focus);
+    rerenderAndRefocus(focus);
 
     return results;
   } catch (error) {
@@ -1806,11 +1812,7 @@ async function loadTicketsForSelectedClient({
     modalState.selectedTickets = [];
 
     syncPrimaryTicketToForm();
-
-    renderModal();
-    attachRootBindings();
-
-    if (focus) focusField(focus);
+    rerenderAndRefocus(focus);
 
     return [];
   }
@@ -1833,9 +1835,7 @@ function scheduleTicketSearch(query = "") {
     modalState.ticketSearchResults = [];
     modalState.ticketAutoSelected = false;
 
-    renderModal();
-    attachRootBindings();
-
+    rerenderAndRefocus("ticketSearch");
     return;
   }
 
@@ -1899,10 +1899,6 @@ function getInvoiceBreakdown(form = {}) {
     irpfTotal,
     totalFactura,
   };
-}
-
-function getFormTotal(form = {}) {
-  return getInvoiceBreakdown(form).totalFactura;
 }
 
 function validateForm(form = {}) {
@@ -2038,7 +2034,10 @@ function buildCreatePayload(form = {}) {
   const userIds = compactUnique(clientePayloads.map((item) => item.userId));
 
   const ticketId = safeText(first(primaryTicket?.ticketId, primaryTicket?.incidenciaId, primaryTicket?.id), "");
-  const incidenciaSubject = safeText(first(primaryTicket?.subject, primaryTicket?.asunto, current.incidenciaSubject, ticketId), ticketId);
+  const incidenciaSubject = safeText(
+    first(primaryTicket?.subject, primaryTicket?.asunto, current.incidenciaSubject, ticketId),
+    ticketId
+  );
 
   const ticketIds = compactUnique(
     selectedTickets.length
@@ -2480,7 +2479,7 @@ function getCreatedFacturaId(payload = null) {
 }
 
 /* =========================================================
-   DERIVED UI SYNC
+   DERIVED UI
 ========================================================= */
 
 function syncDerivedUi() {
@@ -2489,20 +2488,23 @@ function syncDerivedUi() {
 
   const breakdown = getInvoiceBreakdown(modalState.form);
 
-  const totalInline = root.querySelector('[data-role="total-preview-inline"]');
-  if (totalInline) {
-    totalInline.textContent = formatMoney(breakdown.totalFactura);
-  }
+  root
+    .querySelectorAll('[data-role="total-preview-inline"]')
+    .forEach((node) => {
+      node.textContent = formatMoney(breakdown.totalFactura);
+    });
 
-  const baseInline = root.querySelector('[data-role="base-preview-inline"]');
-  if (baseInline) {
-    baseInline.textContent = formatMoney(breakdown.base);
-  }
+  root
+    .querySelectorAll('[data-role="base-preview-inline"]')
+    .forEach((node) => {
+      node.textContent = formatMoney(breakdown.base);
+    });
 
-  const taxInline = root.querySelector('[data-role="tax-preview-inline"]');
-  if (taxInline) {
-    taxInline.textContent = `${formatMoney(breakdown.ivaTotal)} / ${formatMoney(breakdown.irpfTotal)}`;
-  }
+  root
+    .querySelectorAll('[data-role="tax-preview-inline"]')
+    .forEach((node) => {
+      node.textContent = `${formatMoney(breakdown.ivaTotal)} / ${formatMoney(breakdown.irpfTotal)}`;
+    });
 
   return true;
 }
@@ -3123,7 +3125,7 @@ function renderModalInner() {
               : ""
           }
 
-          <form id="facturas-create-form" class="fac-create-form" novalidate>
+          <form id="${FORM_ID}" class="fac-create-form" novalidate>
             <div class="fac-create-grid fac-create-grid--2">
               ${renderInput({
                 label: "Fecha servicio",
@@ -3235,1183 +3237,8 @@ function renderModalInner() {
             </div>
           </form>
         </div>
-
-        ${renderStyles()}
       </div>
     </div>
-  `;
-}
-
-/* =========================================================
-   STYLES
-========================================================= */
-
-function renderStyles() {
-  return `
-    <style>
-      @keyframes facturasCreateSpin {
-        to { transform: rotate(360deg); }
-      }
-
-      .fac-create-overlay{
-        position:fixed;
-        inset:0;
-        z-index:9999;
-        display:grid;
-        place-items:center;
-        padding:16px;
-        background:rgba(10,14,24,.42);
-        backdrop-filter:blur(14px);
-        -webkit-backdrop-filter:blur(14px);
-      }
-
-      .fac-create-panel{
-        position:relative;
-        width:min(1040px, 100%);
-        max-height:92vh;
-        overflow:auto;
-        border-radius:30px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.12));
-        background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent), transparent 34%),
-          radial-gradient(circle at 92% 3%, rgba(255,255,255,.13), transparent 30%),
-          linear-gradient(180deg, var(--surface-2, #171717), var(--surface-1, #111));
-        box-shadow:
-          0 38px 96px rgba(0,0,0,.44),
-          0 1px 0 rgba(255,255,255,.055) inset;
-        color:var(--text, #f5f5f5);
-      }
-
-      .fac-create-panel *,
-      .fac-create-panel *::before,
-      .fac-create-panel *::after{
-        box-sizing:border-box;
-      }
-
-      .fac-create-panel.is-submitting{
-        overflow:hidden;
-      }
-
-      .fac-create-loading-overlay{
-        position:absolute;
-        inset:0;
-        z-index:20;
-        display:grid;
-        place-items:center;
-        padding:22px;
-        background:color-mix(in srgb, var(--surface-1, #111) 84%, transparent);
-        backdrop-filter:blur(10px);
-        -webkit-backdrop-filter:blur(10px);
-      }
-
-      .fac-create-loading-card{
-        display:grid;
-        justify-items:center;
-        gap:10px;
-        padding:25px 30px;
-        border-radius:22px;
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft, rgba(255,255,255,.12)));
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent),
-          var(--surface-2, #171717);
-        box-shadow:0 30px 76px rgba(0,0,0,.36);
-      }
-
-      .fac-create-loading-card strong{
-        color:var(--text-strong, #fff);
-        font-size:14px;
-      }
-
-      .fac-create-loading-card small{
-        color:var(--text-dim, rgba(255,255,255,.62));
-        font-size:12px;
-      }
-
-      .fac-create-loading-spinner,
-      .fac-create-spinner{
-        border-radius:999px;
-        border:2px solid rgba(255,255,255,.28);
-        border-top-color:#fff;
-        animation:facturasCreateSpin .8s linear infinite;
-      }
-
-      .fac-create-loading-spinner{
-        width:34px;
-        height:34px;
-        border-width:3px;
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
-        border-top-color:var(--accent, #7c5cff);
-      }
-
-      .fac-create-header{
-        display:flex;
-        justify-content:space-between;
-        align-items:flex-start;
-        gap:16px;
-        padding:26px 26px 19px;
-        border-bottom:1px solid var(--border-soft, rgba(255,255,255,.10));
-      }
-
-      .fac-create-header-copy{
-        display:grid;
-        gap:8px;
-        min-width:0;
-      }
-
-      .fac-create-kicker{
-        width:max-content;
-        padding:6px 10px;
-        border-radius:999px;
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft, rgba(255,255,255,.12)));
-        background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-        color:var(--text-soft, rgba(255,255,255,.76));
-        font-size:10px;
-        font-weight:900;
-        letter-spacing:.08em;
-        text-transform:uppercase;
-      }
-
-      .fac-create-header-copy h2{
-        margin:0;
-        color:var(--text-strong, #fff);
-        font-size:clamp(32px, 4vw, 46px);
-        line-height:.94;
-        letter-spacing:-.065em;
-      }
-
-      .fac-create-header-copy p{
-        max-width:760px;
-        margin:0;
-        color:var(--text-dim, rgba(255,255,255,.64));
-        font-size:13px;
-        line-height:1.62;
-      }
-
-      .fac-create-close{
-        width:44px;
-        height:44px;
-        flex:0 0 auto;
-        border-radius:16px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.12));
-        background:var(--surface-glass, rgba(255,255,255,.05));
-        color:var(--text-strong, #fff);
-        cursor:pointer;
-        font-size:18px;
-        transition:
-          transform .18s ease,
-          border-color .18s ease,
-          background .18s ease,
-          box-shadow .18s ease;
-      }
-
-      .fac-create-close:hover{
-        transform:translateY(-1px);
-        background:color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent);
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft, rgba(255,255,255,.12)));
-        box-shadow:0 10px 24px color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent);
-      }
-
-      .fac-create-body{
-        display:grid;
-        gap:15px;
-        padding:19px 26px 26px;
-      }
-
-      .fac-create-form{
-        display:grid;
-        gap:15px;
-      }
-
-      .fac-create-alert{
-        display:grid;
-        gap:4px;
-        padding:12px 14px;
-        border-radius:15px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.12));
-        background:var(--surface-glass, rgba(255,255,255,.05));
-      }
-
-      .fac-create-alert strong{
-        color:var(--text-strong, #fff);
-        font-size:13px;
-      }
-
-      .fac-create-alert span{
-        color:var(--text-dim, rgba(255,255,255,.62));
-        font-size:12px;
-      }
-
-      .fac-create-alert.is-success{
-        border-color:color-mix(in srgb, var(--success-strong, #36c690) 30%, var(--border-soft, rgba(255,255,255,.12)));
-      }
-
-      .fac-create-alert.is-error{
-        border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 34%, var(--border-soft, rgba(255,255,255,.12)));
-      }
-
-      .fac-create-field{
-        display:grid;
-        gap:7px;
-        min-width:0;
-      }
-
-      .fac-create-field--search{
-        margin-top:2px;
-      }
-
-      .fac-create-grid{
-        display:grid;
-        gap:12px;
-      }
-
-      .fac-create-grid--2{
-        grid-template-columns:repeat(2, minmax(0, 1fr));
-      }
-
-      .fac-create-grid--3{
-        grid-template-columns:repeat(3, minmax(0, 1fr));
-      }
-
-      .fac-create-label{
-        color:var(--text-soft, rgba(255,255,255,.74));
-        font-size:11px;
-        font-weight:900;
-        letter-spacing:.07em;
-        text-transform:uppercase;
-      }
-
-      .fac-create-input,
-      .fac-create-textarea,
-      .fac-create-select{
-        width:100%;
-        outline:none;
-        color:var(--text-strong, #fff);
-        background:var(--surface-1, rgba(255,255,255,.04));
-        border:1px solid var(--border-soft, rgba(255,255,255,.12));
-        font-size:14px;
-        transition:
-          transform .16s ease,
-          border-color .18s ease,
-          box-shadow .18s ease,
-          background .18s ease;
-      }
-
-      .fac-create-input:hover,
-      .fac-create-textarea:hover,
-      .fac-create-select:hover{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft, rgba(255,255,255,.12)));
-      }
-
-      .fac-create-input,
-      .fac-create-select{
-        min-height:46px;
-        padding:0 14px;
-        border-radius:15px;
-      }
-
-      .fac-create-select{
-        appearance:auto;
-      }
-
-      .fac-create-textarea{
-        min-height:116px;
-        padding:13px 14px;
-        border-radius:15px;
-        resize:vertical;
-        line-height:1.55;
-      }
-
-      .fac-create-input::placeholder,
-      .fac-create-textarea::placeholder{
-        color:var(--text-faint, rgba(255,255,255,.36));
-      }
-
-      .fac-create-input:focus,
-      .fac-create-textarea:focus,
-      .fac-create-select:focus{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 34%, var(--border-soft, rgba(255,255,255,.12)));
-        box-shadow:0 0 0 4px color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-      }
-
-      .fac-create-input.is-error,
-      .fac-create-textarea.is-error,
-      .fac-create-select.is-error{
-        border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 42%, var(--border-soft, rgba(255,255,255,.12)));
-        box-shadow:0 0 0 4px color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent);
-      }
-
-      .fac-create-input.is-readonly{
-        opacity:.92;
-        cursor:default;
-        font-weight:800;
-      }
-
-      .fac-create-error{
-        color:var(--danger-strong, #ff6b6b);
-        font-size:11px;
-        line-height:1.35;
-        font-weight:800;
-      }
-
-      .fac-create-total-strip{
-        display:grid;
-        grid-template-columns:repeat(3, minmax(0, 1fr));
-        gap:10px;
-        padding:12px;
-        border-radius:22px;
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 13%, var(--border-soft, rgba(255,255,255,.12)));
-        background:
-          radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent, #7c5cff) 9%, transparent), transparent 38%),
-          var(--surface-glass, rgba(255,255,255,.045));
-      }
-
-      .fac-create-total-strip > div{
-        display:grid;
-        gap:5px;
-        padding:13px 14px;
-        border-radius:17px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.10));
-        background:color-mix(in srgb, var(--surface-1, #111) 68%, transparent);
-      }
-
-      .fac-create-total-strip span{
-        color:var(--text-dim, rgba(255,255,255,.58));
-        font-size:10px;
-        font-weight:900;
-        letter-spacing:.07em;
-        text-transform:uppercase;
-      }
-
-      .fac-create-total-strip strong{
-        color:var(--text-strong, #fff);
-        font-size:15px;
-        line-height:1.1;
-        letter-spacing:-.03em;
-      }
-
-      .fac-create-total-strip .is-total{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft, rgba(255,255,255,.10)));
-        background:
-          linear-gradient(135deg, color-mix(in srgb, var(--accent, #7c5cff) 13%, transparent), transparent),
-          color-mix(in srgb, var(--surface-1, #111) 72%, transparent);
-      }
-
-      .fac-create-total-strip .is-total strong{
-        font-size:19px;
-      }
-
-      .fac-create-target{
-        display:grid;
-        gap:15px;
-        padding:16px;
-        border-radius:26px;
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 17%, var(--border-soft, rgba(255,255,255,.12)));
-        background:
-          radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 42%),
-          radial-gradient(circle at 100% 4%, rgba(255,255,255,.08), transparent 34%),
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 5%, transparent), transparent),
-          var(--surface-glass, rgba(255,255,255,.04));
-        box-shadow:
-          0 18px 42px rgba(0,0,0,.10),
-          inset 0 1px 0 rgba(255,255,255,.045);
-      }
-
-      .fac-create-target-head{
-        display:flex;
-        align-items:flex-start;
-        justify-content:space-between;
-        gap:14px;
-      }
-
-      .fac-create-target-title-block{
-        display:grid;
-        gap:5px;
-        min-width:0;
-      }
-
-      .fac-create-target-title-block > span,
-      .fac-create-pro-card-head span{
-        color:var(--text-soft, rgba(255,255,255,.74));
-        font-size:11px;
-        font-weight:900;
-        letter-spacing:.07em;
-        text-transform:uppercase;
-      }
-
-      .fac-create-target-title-block h3{
-        margin:0;
-        color:var(--text-strong, #fff);
-        font-size:22px;
-        line-height:1.08;
-        letter-spacing:-.04em;
-      }
-
-      .fac-create-target-title-block p{
-        max-width:700px;
-        margin:0;
-        color:var(--text-dim, rgba(255,255,255,.60));
-        font-size:12px;
-        line-height:1.56;
-      }
-
-      .fac-create-target-metrics{
-        display:flex;
-        gap:8px;
-        flex:0 0 auto;
-      }
-
-      .fac-create-target-metrics > div{
-        display:grid;
-        justify-items:center;
-        gap:2px;
-        min-width:82px;
-        padding:10px 12px;
-        border-radius:16px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.10));
-        background:color-mix(in srgb, var(--surface-1, #111) 70%, transparent);
-      }
-
-      .fac-create-target-metrics strong{
-        color:var(--text-strong, #fff);
-        font-size:18px;
-        line-height:1;
-      }
-
-      .fac-create-target-metrics span{
-        color:var(--text-dim, rgba(255,255,255,.58));
-        font-size:10px;
-        font-weight:900;
-        letter-spacing:.06em;
-        text-transform:uppercase;
-      }
-
-      .fac-create-pro-grid{
-        display:grid;
-        grid-template-columns:minmax(0, 1fr) minmax(0, 1.05fr);
-        gap:12px;
-      }
-
-      .fac-create-pro-card{
-        display:grid;
-        align-content:start;
-        gap:12px;
-        min-width:0;
-        min-height:360px;
-        padding:15px;
-        border-radius:22px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.11));
-        background:
-          linear-gradient(180deg, rgba(255,255,255,.045), transparent),
-          color-mix(in srgb, var(--surface-1, #111) 74%, transparent);
-        box-shadow:
-          0 16px 34px rgba(0,0,0,.10),
-          inset 0 1px 0 rgba(255,255,255,.035);
-        transition:
-          transform .18s ease,
-          border-color .18s ease,
-          box-shadow .18s ease,
-          background .18s ease;
-      }
-
-      .fac-create-pro-card:hover{
-        transform:translateY(-1px);
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft, rgba(255,255,255,.11)));
-        box-shadow:
-          0 20px 42px rgba(0,0,0,.12),
-          inset 0 1px 0 rgba(255,255,255,.045);
-      }
-
-      .fac-create-pro-card-head{
-        display:flex;
-        justify-content:space-between;
-        align-items:flex-start;
-        gap:10px;
-        min-width:0;
-      }
-
-      .fac-create-pro-card-head > div{
-        display:grid;
-        gap:4px;
-        min-width:0;
-      }
-
-      .fac-create-pro-card-head strong{
-        color:var(--text-strong, #fff);
-        font-size:15px;
-        line-height:1.2;
-        letter-spacing:-.025em;
-      }
-
-      .fac-create-empty-pro{
-        display:grid;
-        gap:4px;
-        min-height:82px;
-        padding:15px;
-        border-radius:18px;
-        border:1px dashed color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft, rgba(255,255,255,.13)));
-        background:
-          radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent, #7c5cff) 7%, transparent), transparent 42%),
-          color-mix(in srgb, var(--surface-1, #111) 62%, transparent);
-      }
-
-      .fac-create-empty-pro strong{
-        color:var(--text-soft, rgba(255,255,255,.82));
-        font-size:13px;
-      }
-
-      .fac-create-empty-pro span{
-        color:var(--text-dim, rgba(255,255,255,.58));
-        font-size:12px;
-        line-height:1.42;
-      }
-
-      .fac-create-empty-pro.is-locked{
-        opacity:.88;
-      }
-
-      .fac-create-selected-stack{
-        display:grid;
-        gap:8px;
-      }
-
-      .fac-create-selected-card{
-        display:grid;
-        grid-template-columns:minmax(0, 1fr) auto;
-        align-items:center;
-        gap:12px;
-        min-width:0;
-        padding:12px;
-        border-radius:19px;
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 17%, var(--border-soft, rgba(255,255,255,.12)));
-        background:
-          radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 44%),
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 5%, transparent), transparent),
-          var(--surface-glass, rgba(255,255,255,.05));
-        box-shadow:
-          0 14px 30px color-mix(in srgb, var(--accent, #7c5cff) 6%, transparent),
-          inset 0 1px 0 rgba(255,255,255,.04);
-      }
-
-      .fac-create-selected-card.is-primary{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 34%, var(--border-soft, rgba(255,255,255,.12)));
-        box-shadow:
-          0 16px 34px color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent),
-          inset 0 1px 0 rgba(255,255,255,.05);
-      }
-
-      .fac-create-selected-main{
-        display:grid;
-        grid-template-columns:auto minmax(0, 1fr);
-        align-items:center;
-        gap:12px;
-        min-width:0;
-      }
-
-      .fac-create-selected-copy{
-        display:grid;
-        gap:4px;
-        min-width:0;
-      }
-
-      .fac-create-selected-copy span{
-        color:var(--text-dim, rgba(255,255,255,.56));
-        font-size:10px;
-        font-weight:900;
-        letter-spacing:.065em;
-        text-transform:uppercase;
-      }
-
-      .fac-create-selected-copy strong{
-        color:var(--text-strong, #fff);
-        font-size:14px;
-        line-height:1.25;
-        overflow:hidden;
-        text-overflow:ellipsis;
-        white-space:nowrap;
-      }
-
-      .fac-create-selected-copy small{
-        color:var(--text-dim, rgba(255,255,255,.62));
-        font-size:12px;
-        line-height:1.35;
-        overflow:hidden;
-        text-overflow:ellipsis;
-        white-space:nowrap;
-      }
-
-      .fac-create-selected-actions{
-        display:flex;
-        align-items:center;
-        gap:7px;
-        flex-wrap:wrap;
-        justify-content:flex-end;
-      }
-
-      .fac-create-icon-button,
-      .fac-create-mini-button{
-        min-height:34px;
-        padding:0 11px;
-        border-radius:13px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.12));
-        background:var(--surface-glass, rgba(255,255,255,.05));
-        color:var(--text-soft, rgba(255,255,255,.76));
-        font-size:11px;
-        font-weight:900;
-        cursor:pointer;
-        white-space:nowrap;
-        transition:
-          transform .18s ease,
-          border-color .18s ease,
-          background .18s ease,
-          box-shadow .18s ease,
-          opacity .18s ease;
-      }
-
-      .fac-create-mini-button{
-        min-height:38px;
-      }
-
-      .fac-create-icon-button:hover,
-      .fac-create-mini-button:hover{
-        transform:translateY(-1px);
-        background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft, rgba(255,255,255,.12)));
-        box-shadow:0 10px 24px color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-      }
-
-      .fac-create-icon-button.is-danger:hover{
-        background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 9%, transparent);
-        border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 28%, var(--border-soft, rgba(255,255,255,.12)));
-        box-shadow:0 10px 24px color-mix(in srgb, var(--danger-strong, #ff6b6b) 9%, transparent);
-      }
-
-      .fac-create-search-state{
-        padding:10px 12px;
-        border-radius:13px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.12));
-        background:var(--surface-glass, rgba(255,255,255,.05));
-        color:var(--text-dim, rgba(255,255,255,.62));
-        font-size:12px;
-      }
-
-      .fac-create-search-state.is-error{
-        color:var(--danger-strong, #ff6b6b);
-        border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 30%, var(--border-soft, rgba(255,255,255,.12)));
-      }
-
-      .fac-create-search-results,
-      .fac-create-ticket-list{
-        display:grid;
-        gap:7px;
-        max-height:260px;
-        overflow:auto;
-        padding-right:2px;
-      }
-
-      .fac-create-search-item,
-      .fac-create-ticket-option{
-        width:100%;
-        min-width:0;
-        padding:11px 12px;
-        border-radius:16px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.12));
-        background:var(--surface-glass, rgba(255,255,255,.05));
-        color:inherit;
-        text-align:left;
-        cursor:pointer;
-        transition:
-          transform .18s ease,
-          border-color .18s ease,
-          background .18s ease,
-          box-shadow .18s ease,
-          opacity .18s ease;
-      }
-
-      .fac-create-search-item--client,
-      .fac-create-ticket-option{
-        display:grid;
-        grid-template-columns:auto minmax(0, 1fr) auto;
-        align-items:center;
-        gap:11px;
-      }
-
-      .fac-create-search-item:hover,
-      .fac-create-ticket-option:hover{
-        transform:translateY(-1px);
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 26%, var(--border-soft, rgba(255,255,255,.12)));
-        background:color-mix(in srgb, var(--accent, #7c5cff) 8%, var(--surface-glass, rgba(255,255,255,.05)));
-        box-shadow:0 12px 26px rgba(0,0,0,.08);
-      }
-
-      .fac-create-search-item.is-selected,
-      .fac-create-ticket-option.is-selected{
-        border-color:color-mix(in srgb, var(--success-strong, #36c690) 30%, var(--border-soft, rgba(255,255,255,.12)));
-        background:color-mix(in srgb, var(--success-strong, #36c690) 8%, var(--surface-glass, rgba(255,255,255,.05)));
-      }
-
-      .fac-create-search-copy,
-      .fac-create-ticket-option-copy{
-        display:grid;
-        gap:3px;
-        min-width:0;
-      }
-
-      .fac-create-search-item strong,
-      .fac-create-ticket-option strong{
-        color:var(--text-strong, #fff);
-        font-size:13px;
-        line-height:1.35;
-        overflow:hidden;
-        text-overflow:ellipsis;
-        white-space:nowrap;
-      }
-
-      .fac-create-search-item span,
-      .fac-create-ticket-option small{
-        color:var(--text-dim, rgba(255,255,255,.62));
-        font-size:11px;
-        line-height:1.35;
-      }
-
-      .fac-create-search-copy > span{
-        overflow:hidden;
-        text-overflow:ellipsis;
-        white-space:nowrap;
-      }
-
-      .fac-create-add-pill{
-        display:inline-grid;
-        place-items:center;
-        min-height:28px;
-        padding:0 10px;
-        border-radius:999px;
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft, rgba(255,255,255,.12)));
-        background:color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent);
-        color:var(--text-soft, rgba(255,255,255,.78)) !important;
-        font-size:10px !important;
-        font-weight:900;
-        letter-spacing:.04em;
-        text-transform:uppercase;
-      }
-
-      .fac-create-avatar{
-        position:relative;
-        display:grid;
-        place-items:center;
-        overflow:hidden;
-        border-radius:999px;
-        background:linear-gradient(135deg, var(--accent, #7c5cff), color-mix(in srgb, var(--accent, #7c5cff) 45%, #ec4899));
-        color:#fff;
-        font-weight:900;
-        letter-spacing:-.03em;
-        isolation:isolate;
-        transform:translateZ(0);
-        box-shadow:
-          0 10px 22px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent),
-          0 0 0 3px color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
-      }
-
-      .fac-create-avatar--search{
-        width:42px;
-        height:42px;
-        min-width:42px;
-        min-height:42px;
-        font-size:13px;
-      }
-
-      .fac-create-avatar--selected{
-        width:50px;
-        height:50px;
-        min-width:50px;
-        min-height:50px;
-        font-size:15px;
-      }
-
-      .fac-create-avatar::after{
-        content:"";
-        position:absolute;
-        inset:0;
-        z-index:2;
-        pointer-events:none;
-        border-radius:inherit;
-        background:
-          radial-gradient(circle at 30% 22%, rgba(255,255,255,.42), transparent 34%),
-          linear-gradient(180deg, rgba(255,255,255,.11), rgba(0,0,0,.10));
-        mix-blend-mode:screen;
-      }
-
-      .fac-create-avatar img{
-        position:absolute;
-        inset:0;
-        z-index:1;
-        width:100%;
-        height:100%;
-        object-fit:cover;
-      }
-
-      .fac-create-avatar-fallback{
-        position:relative;
-        z-index:3;
-        display:grid;
-        place-items:center;
-        width:100%;
-        height:100%;
-        color:#fff;
-        text-shadow:
-          0 1px 2px rgba(0,0,0,.24),
-          0 0 18px rgba(255,255,255,.20);
-      }
-
-      .fac-create-avatar.has-image .fac-create-avatar-fallback{
-        display:none;
-      }
-
-      .fac-create-avatar[data-fallback="true"] .fac-create-avatar-fallback{
-        display:grid;
-      }
-
-      .fac-create-avatar[data-fallback="true"] img{
-        display:none !important;
-      }
-
-      .fac-create-ticket-badge{
-        display:grid;
-        place-items:center;
-        width:50px;
-        height:50px;
-        min-width:50px;
-        min-height:50px;
-        border-radius:16px;
-        color:#fff;
-        background:
-          radial-gradient(circle at 26% 22%, rgba(255,255,255,.34), transparent 34%),
-          linear-gradient(135deg, var(--accent, #7c5cff), color-mix(in srgb, var(--accent, #7c5cff) 44%, #111827));
-        box-shadow:
-          0 12px 28px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent),
-          0 0 0 3px color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
-      }
-
-      .fac-create-ticket-badge span{
-        color:#fff;
-        font-size:15px;
-        line-height:1;
-        font-weight:900;
-        letter-spacing:-.03em;
-      }
-
-      .fac-create-ticket-mini-badge{
-        display:grid;
-        place-items:center;
-        width:38px;
-        height:38px;
-        min-width:38px;
-        min-height:38px;
-        border-radius:14px;
-        color:#fff !important;
-        font-size:13px !important;
-        font-weight:900;
-        background:linear-gradient(135deg, var(--accent, #7c5cff), color-mix(in srgb, var(--accent, #7c5cff) 50%, #111827));
-        box-shadow:0 10px 22px color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
-      }
-
-      .fac-create-check{
-        display:flex;
-        align-items:flex-start;
-        gap:10px;
-        padding:14px 14px;
-        border-radius:16px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.12));
-        background:var(--surface-glass, rgba(255,255,255,.05));
-        cursor:pointer;
-        transition:
-          transform .18s ease,
-          border-color .18s ease,
-          background .18s ease,
-          box-shadow .18s ease;
-      }
-
-      .fac-create-check:hover{
-        transform:translateY(-1px);
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft, rgba(255,255,255,.12)));
-        box-shadow:0 12px 28px rgba(0,0,0,.08);
-      }
-
-      .fac-create-check input{
-        margin-top:2px;
-        accent-color:var(--accent, #7c5cff);
-      }
-
-      .fac-create-check span{
-        display:grid;
-        gap:3px;
-      }
-
-      .fac-create-check strong{
-        color:var(--text-strong, #fff);
-        font-size:13px;
-      }
-
-      .fac-create-check small{
-        color:var(--text-dim, rgba(255,255,255,.62));
-        font-size:11px;
-        line-height:1.35;
-      }
-
-      .fac-create-actions{
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:12px;
-        padding-top:2px;
-      }
-
-      .fac-create-submit-summary{
-        display:grid;
-        gap:4px;
-        min-width:190px;
-        padding:13px 15px;
-        border-radius:17px;
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 14%, var(--border-soft, rgba(255,255,255,.12)));
-        background:
-          radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent, #7c5cff) 9%, transparent), transparent 42%),
-          var(--surface-glass, rgba(255,255,255,.045));
-        color:var(--text-dim, rgba(255,255,255,.62));
-        font-size:11px;
-        box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
-      }
-
-      .fac-create-submit-summary span{
-        color:var(--text-dim, rgba(255,255,255,.62));
-        font-size:11px;
-        line-height:1.25;
-      }
-
-      .fac-create-submit-summary strong{
-        color:var(--text-strong, #fff);
-        font-size:18px;
-        line-height:1.1;
-        letter-spacing:-.035em;
-      }
-
-      .fac-create-action-buttons{
-        display:flex;
-        justify-content:flex-end;
-        gap:10px;
-      }
-
-      .fac-create-submit{
-        min-height:46px;
-        padding:0 22px;
-        border-radius:14px;
-        font-size:13px;
-        font-weight:900;
-        cursor:pointer;
-        transition:
-          transform .18s ease,
-          border-color .18s ease,
-          background .18s ease,
-          box-shadow .18s ease,
-          opacity .18s ease;
-        border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 30%, transparent));
-        background:var(--btn-primary-bg, var(--accent, #7c5cff));
-        color:var(--btn-primary-text, #fff);
-        box-shadow:0 12px 26px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
-      }
-
-      .fac-create-submit:hover{
-        transform:translateY(-1px);
-        filter:saturate(1.03) brightness(1.02);
-        box-shadow:0 16px 32px color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent);
-      }
-
-      .fac-create-submit:disabled,
-      .fac-create-mini-button:disabled,
-      .fac-create-icon-button:disabled,
-      .fac-create-search-item:disabled,
-      .fac-create-ticket-option:disabled,
-      .fac-create-close:disabled{
-        opacity:.78;
-        cursor:wait;
-        transform:none;
-        box-shadow:none;
-      }
-
-      .fac-create-submit-inner{
-        display:inline-flex;
-        align-items:center;
-        gap:8px;
-      }
-
-      .fac-create-spinner{
-        width:14px;
-        height:14px;
-      }
-
-      [data-theme="light"] .fac-create-panel{
-        background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
-          radial-gradient(circle at 95% 0%, rgba(255,255,255,.70), transparent 30%),
-          linear-gradient(180deg, rgba(255,255,255,.99), rgba(248,250,255,.97));
-        box-shadow:
-          0 28px 72px rgba(15,23,42,.14),
-          0 0 0 1px rgba(255,255,255,.72) inset;
-      }
-
-      [data-theme="light"] .fac-create-header-copy h2,
-      [data-theme="light"] .fac-create-target-title-block h3,
-      [data-theme="light"] .fac-create-pro-card-head strong,
-      [data-theme="light"] .fac-create-alert strong,
-      [data-theme="light"] .fac-create-input,
-      [data-theme="light"] .fac-create-textarea,
-      [data-theme="light"] .fac-create-select,
-      [data-theme="light"] .fac-create-search-item strong,
-      [data-theme="light"] .fac-create-ticket-option strong,
-      [data-theme="light"] .fac-create-selected-copy strong,
-      [data-theme="light"] .fac-create-check strong,
-      [data-theme="light"] .fac-create-submit-summary strong,
-      [data-theme="light"] .fac-create-total-strip strong,
-      [data-theme="light"] .fac-create-empty-pro strong,
-      [data-theme="light"] .fac-create-target-metrics strong{
-        color:var(--text-strong, #111827);
-      }
-
-      [data-theme="light"] .fac-create-header-copy p,
-      [data-theme="light"] .fac-create-target-title-block p,
-      [data-theme="light"] .fac-create-alert span,
-      [data-theme="light"] .fac-create-label,
-      [data-theme="light"] .fac-create-kicker,
-      [data-theme="light"] .fac-create-target-title-block > span,
-      [data-theme="light"] .fac-create-pro-card-head span,
-      [data-theme="light"] .fac-create-search-state,
-      [data-theme="light"] .fac-create-search-item span,
-      [data-theme="light"] .fac-create-ticket-option small,
-      [data-theme="light"] .fac-create-selected-copy span,
-      [data-theme="light"] .fac-create-selected-copy small,
-      [data-theme="light"] .fac-create-check small,
-      [data-theme="light"] .fac-create-submit-summary,
-      [data-theme="light"] .fac-create-submit-summary span,
-      [data-theme="light"] .fac-create-total-strip span,
-      [data-theme="light"] .fac-create-empty-pro span,
-      [data-theme="light"] .fac-create-target-metrics span{
-        color:var(--text-dim, #6b7280);
-      }
-
-      [data-theme="light"] .fac-create-close,
-      [data-theme="light"] .fac-create-target,
-      [data-theme="light"] .fac-create-pro-card,
-      [data-theme="light"] .fac-create-alert,
-      [data-theme="light"] .fac-create-input,
-      [data-theme="light"] .fac-create-textarea,
-      [data-theme="light"] .fac-create-select,
-      [data-theme="light"] .fac-create-search-state,
-      [data-theme="light"] .fac-create-search-item,
-      [data-theme="light"] .fac-create-ticket-option,
-      [data-theme="light"] .fac-create-selected-card,
-      [data-theme="light"] .fac-create-check,
-      [data-theme="light"] .fac-create-mini-button,
-      [data-theme="light"] .fac-create-icon-button,
-      [data-theme="light"] .fac-create-submit-summary,
-      [data-theme="light"] .fac-create-empty-pro,
-      [data-theme="light"] .fac-create-total-strip,
-      [data-theme="light"] .fac-create-total-strip > div,
-      [data-theme="light"] .fac-create-target-metrics > div{
-        background:rgba(255,255,255,.76);
-        border-color:rgba(15,23,42,.08);
-      }
-
-      [data-theme="light"] .fac-create-pro-card{
-        background:
-          linear-gradient(180deg, rgba(255,255,255,.86), rgba(255,255,255,.62));
-      }
-
-      [data-theme="light"] .fac-create-total-strip .is-total{
-        background:
-          linear-gradient(135deg, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent),
-          rgba(255,255,255,.82);
-      }
-
-      @media (max-width: 920px){
-        .fac-create-pro-grid,
-        .fac-create-grid--2,
-        .fac-create-grid--3,
-        .fac-create-total-strip{
-          grid-template-columns:1fr;
-        }
-
-        .fac-create-target-head{
-          flex-direction:column;
-        }
-
-        .fac-create-target-metrics{
-          width:100%;
-        }
-
-        .fac-create-target-metrics > div{
-          flex:1;
-        }
-
-        .fac-create-actions{
-          align-items:stretch;
-          flex-direction:column;
-        }
-
-        .fac-create-action-buttons{
-          flex-direction:column;
-          width:100%;
-        }
-
-        .fac-create-submit{
-          width:100%;
-        }
-
-        .fac-create-submit-summary{
-          width:100%;
-        }
-
-        .fac-create-selected-card{
-          grid-template-columns:1fr;
-        }
-
-        .fac-create-selected-actions{
-          justify-content:flex-start;
-        }
-      }
-
-      @media (max-width: 560px){
-        .fac-create-overlay{
-          padding:8px;
-        }
-
-        .fac-create-panel{
-          border-radius:24px;
-          max-height:96vh;
-        }
-
-        .fac-create-header,
-        .fac-create-body{
-          padding-inline:16px;
-        }
-
-        .fac-create-search-item--client,
-        .fac-create-ticket-option{
-          grid-template-columns:auto minmax(0, 1fr);
-        }
-
-        .fac-create-add-pill{
-          grid-column:1 / -1;
-          justify-self:start;
-        }
-      }
-
-      @media (prefers-reduced-motion: reduce){
-        .fac-create-panel *,
-        .fac-create-panel *::before,
-        .fac-create-panel *::after{
-          animation:none !important;
-          transition:none !important;
-        }
-      }
-    </style>
   `;
 }
 
@@ -4420,7 +3247,11 @@ function renderStyles() {
 ========================================================= */
 
 function getRoot() {
-  return document.getElementById(MODAL_ID);
+  try {
+    return document.getElementById(MODAL_ID);
+  } catch {
+    return null;
+  }
 }
 
 function ensureRoot() {
@@ -4441,7 +3272,7 @@ function lockBody() {
   } catch {}
 
   try {
-    document.body.classList.add("modal-open");
+    document.body.classList.add("modal-open", "facturas-create-modal-open");
   } catch {}
 
   try {
@@ -4451,7 +3282,7 @@ function lockBody() {
 
 function unlockBody() {
   try {
-    document.body.classList.remove("modal-open");
+    document.body.classList.remove("modal-open", "facturas-create-modal-open");
   } catch {}
 
   try {
@@ -4508,6 +3339,18 @@ function renderModal() {
   modalState.bindingsAttached = false;
 
   return root;
+}
+
+function rerenderAndRefocus(fieldName = "") {
+  renderModal();
+  attachRootBindings();
+  syncDerivedUi();
+
+  if (fieldName) {
+    focusField(fieldName);
+  }
+
+  return true;
 }
 
 function focusPanel() {
@@ -4664,6 +3507,7 @@ function buildDraftTickets(draft = {}) {
       incidenciaId: id,
       subject: id,
     });
+
     if (normalized?.id) collected.push(normalized);
   });
 
@@ -4674,6 +3518,7 @@ function buildDraftTickets(draft = {}) {
       incidenciaId: id,
       subject: id,
     });
+
     if (normalized?.id) collected.push(normalized);
   });
 
@@ -4743,45 +3588,14 @@ export function openFacturasCreateModal(draft = {}) {
 
   const normalizedDraft = safeObject(draft);
 
-  const draftClientes = buildDraftClientes(normalizedDraft);
-  const draftTickets = buildDraftTickets(normalizedDraft);
+  modalState.selectedClientes = buildDraftClientes(normalizedDraft);
+  modalState.selectedTickets = buildDraftTickets(normalizedDraft);
 
-  modalState.selectedClientes = draftClientes;
-  modalState.selectedTickets = draftTickets;
-
-  syncPrimaryClientToForm();
-  syncPrimaryTicketToForm();
-
-  modalState.form = {
-    ...modalState.form,
+  setFormPatch({
     ...normalizedDraft,
-    clienteId: modalState.form.clienteId || safeText(normalizedDraft.clienteId, ""),
-    clienteUserId: modalState.form.clienteUserId || safeText(normalizedDraft.clienteUserId, ""),
-    clienteNombre: modalState.form.clienteNombre || safeText(normalizedDraft.clienteNombre, ""),
-    clienteEmail: modalState.form.clienteEmail || safeText(normalizedDraft.clienteEmail, ""),
-    clienteAvatar: modalState.form.clienteAvatar || safeText(
-      first(
-        normalizedDraft.clienteAvatar,
-        normalizedDraft.avatarUrl,
-        normalizedDraft.avatar,
-        getAvatarUrlFromObject(normalizedDraft)
-      ),
-      ""
-    ),
-    ticketId: modalState.form.ticketId || safeText(first(normalizedDraft.ticketId, normalizedDraft.incidenciaId), ""),
-    incidenciaId: modalState.form.incidenciaId || safeText(first(normalizedDraft.incidenciaId, normalizedDraft.ticketId), ""),
-    incidenciaSubject: modalState.form.incidenciaSubject || safeText(
-      first(
-        normalizedDraft.incidenciaSubject,
-        normalizedDraft.ticketSubject,
-        normalizedDraft.subject,
-        normalizedDraft.asunto
-      ),
-      ""
-    ),
     fechaServicio: safeText(normalizedDraft.fechaServicio, modalState.form.fechaServicio),
     formaPago: safeText(normalizedDraft.formaPago, modalState.form.formaPago),
-  };
+  });
 
   syncPrimaryClientToForm();
   syncPrimaryTicketToForm();
@@ -4886,10 +3700,7 @@ export function updateFacturasCreateModal(draft = {}) {
     modalState.selectedTickets = Array.from(existing.values());
   }
 
-  modalState.form = {
-    ...safeObject(modalState.form),
-    ...normalizedDraft,
-  };
+  setFormPatch(normalizedDraft);
 
   syncPrimaryClientToForm();
   syncPrimaryTicketToForm();
@@ -5071,9 +3882,9 @@ async function removeCliente(index = -1) {
     return true;
   }
 
-  modalState.selectedTickets = getSelectedTickets().filter((ticket) => {
-    return ticketBelongsToSelectedClients(ticket);
-  });
+  modalState.selectedTickets = getSelectedTickets().filter((ticket) => (
+    ticketBelongsToSelectedClients(ticket)
+  ));
 
   syncPrimaryTicketToForm();
 
@@ -5283,6 +4094,26 @@ function handleFieldInput(field) {
   syncDerivedUi();
 }
 
+function handleAvatarImageError(img = null) {
+  if (!img) return false;
+
+  const avatar = img.closest?.(".fac-create-avatar");
+
+  if (!avatar) return false;
+
+  try {
+    img.hidden = true;
+  } catch {}
+
+  try {
+    avatar.classList.remove("has-image");
+    avatar.setAttribute("data-fallback", "true");
+    avatar.removeAttribute("data-has-avatar");
+  } catch {}
+
+  return true;
+}
+
 /* =========================================================
    BINDINGS
 ========================================================= */
@@ -5310,7 +4141,7 @@ function attachRootBindings() {
   };
 
   const onSubmit = async (event) => {
-    const form = event.target.closest("#facturas-create-form");
+    const form = event.target.closest(`#${FORM_ID}`);
     if (!form) return;
 
     event.preventDefault();
@@ -5343,7 +4174,6 @@ function attachRootBindings() {
 
     if (selectClienteBtn) {
       event.preventDefault();
-
       if (modalState.submitting) return;
 
       await selectCliente(selectClienteBtn.dataset.selectCliente);
@@ -5354,7 +4184,6 @@ function attachRootBindings() {
 
     if (removeClienteBtn) {
       event.preventDefault();
-
       if (modalState.submitting) return;
 
       await removeCliente(removeClienteBtn.dataset.removeCliente);
@@ -5365,7 +4194,6 @@ function attachRootBindings() {
 
     if (primaryClienteBtn) {
       event.preventDefault();
-
       if (modalState.submitting) return;
 
       await makeClientePrimary(primaryClienteBtn.dataset.primaryCliente);
@@ -5376,7 +4204,6 @@ function attachRootBindings() {
 
     if (clearClientesBtn) {
       event.preventDefault();
-
       if (modalState.submitting) return;
 
       clearClientes();
@@ -5387,7 +4214,6 @@ function attachRootBindings() {
 
     if (selectTicketBtn) {
       event.preventDefault();
-
       if (modalState.submitting) return;
 
       selectTicket(selectTicketBtn.dataset.selectTicket);
@@ -5398,7 +4224,6 @@ function attachRootBindings() {
 
     if (removeTicketBtn) {
       event.preventDefault();
-
       if (modalState.submitting) return;
 
       removeTicket(removeTicketBtn.dataset.removeTicket);
@@ -5409,7 +4234,6 @@ function attachRootBindings() {
 
     if (primaryTicketBtn) {
       event.preventDefault();
-
       if (modalState.submitting) return;
 
       makeTicketPrimary(primaryTicketBtn.dataset.primaryTicket);
@@ -5420,7 +4244,6 @@ function attachRootBindings() {
 
     if (clearTicketsBtn) {
       event.preventDefault();
-
       if (modalState.submitting) return;
 
       clearTickets();
@@ -5431,7 +4254,6 @@ function attachRootBindings() {
 
     if (refreshTicketsBtn) {
       event.preventDefault();
-
       if (modalState.submitting) return;
 
       await loadTicketsForSelectedClient({
@@ -5442,15 +4264,24 @@ function attachRootBindings() {
     }
   };
 
+  const onError = (event) => {
+    const img = event.target?.closest?.("[data-avatar-img='true']");
+    if (!img) return;
+
+    handleAvatarImageError(img);
+  };
+
   root.__facturasCreateModalInputHandler = onInput;
   root.__facturasCreateModalChangeHandler = onChange;
   root.__facturasCreateModalSubmitHandler = onSubmit;
   root.__facturasCreateModalClickHandler = onClick;
+  root.__facturasCreateModalErrorHandler = onError;
 
   root.addEventListener("input", onInput);
   root.addEventListener("change", onChange);
   root.addEventListener("submit", onSubmit);
   root.addEventListener("click", onClick);
+  root.addEventListener("error", onError, true);
 
   modalState.bindingsAttached = true;
 }
@@ -5493,6 +4324,14 @@ function detachRootBindings() {
     } catch {}
 
     delete root.__facturasCreateModalClickHandler;
+  }
+
+  if (root.__facturasCreateModalErrorHandler) {
+    try {
+      root.removeEventListener("error", root.__facturasCreateModalErrorHandler, true);
+    } catch {}
+
+    delete root.__facturasCreateModalErrorHandler;
   }
 
   modalState.bindingsAttached = false;
@@ -5614,9 +4453,13 @@ export const OnionFacturasCreateModal = {
 };
 
 try {
-  window.OnionFacturasCreateModal = OnionFacturasCreateModal;
-  window.renderFacturasCreateModal = OnionFacturasCreateModal.open;
-  window.renderFacturaCreateModal = OnionFacturasCreateModal.open;
+  const win = getGlobal();
+
+  if (win) {
+    win.OnionFacturasCreateModal = OnionFacturasCreateModal;
+    win.renderFacturasCreateModal = OnionFacturasCreateModal.open;
+    win.renderFacturaCreateModal = OnionFacturasCreateModal.open;
+  }
 } catch {}
 
 /* =========================================================

@@ -3,7 +3,7 @@
    Archivo: /src/css/views/facturas.css
 
    FACTURAS VIEW · TOKEN PRO SYSTEM · CSP CLEAN · FULL POWER
-   FINAL EXTREME 10/10 · NO CSS IN JS · NO INLINE STYLE REQUIRED
+   FINAL EXTREME 11/10 · NO CSS IN JS · NO INLINE STYLE REQUIRED
 
    ARQUITECTURA:
    - variables.css define tokens globales/base/dark.
@@ -15,12 +15,18 @@
    - vista principal de Facturas
    - tabla real blindada
    - filtros/sort/search/paginación
-   - create modal .fac-create-*
+   - create modal .fac-create-* alineado 1:1 con detail modal
    - detail modal .facturas-detail-*
-   - scroll único/full modal para detalle factura
+   - scroll único/full modal para create/detail
    - guards contra hovers destructivos
    - guards contra rayas verticales
    - guards contra colisión con ui.css
+
+   REGLA MODALES:
+   - .fac-create-overlay y .facturas-detail-overlay comparten geometría visual
+   - .fac-create-panel y .facturas-detail-modal comparten shell visual
+   - scroll único en el panel modal
+   - body interno sin scroll propio
 ========================================================= */
 
 
@@ -67,6 +73,19 @@
   --fac-segment-active-shadow:
     inset 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent),
     inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent);
+
+  --fac-modal-width: min(1380px, calc(100vw - 32px));
+  --fac-modal-height: min(94dvh, 1040px);
+  --fac-modal-border: color-mix(in srgb, var(--card-border) 86%, var(--accent-border));
+  --fac-modal-card-bg: color-mix(in srgb, var(--card-bg) 96%, transparent);
+
+  --fac-modal-control-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent),
+    0 1px 2px color-mix(in srgb, #000 5%, transparent);
+
+  --fac-modal-control-shadow-hover:
+    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
+    0 10px 24px color-mix(in srgb, #000 8%, transparent);
 
   display: grid;
   gap: var(--view-section-gap, var(--space-lg));
@@ -597,7 +616,7 @@
   align-items: center;
   justify-content: center;
   font-size: 10px;
-  font-weight: var(--weight-black);
+  font-weight: 800;
 }
 
 .facturas-filter-pill:hover,
@@ -1872,10 +1891,11 @@
 
 
 /* =========================================================
-   CREATE MODAL ROOT / BODY LOCK
+   MODAL ROOTS / BODY LOCK
 ========================================================= */
 
-#facturas-create-modal-root {
+#facturas-create-modal-root,
+#facturas-detail-root {
   position: fixed;
   inset: 0;
   z-index: calc(var(--z-modal, 9000) + 20);
@@ -1883,11 +1903,13 @@
   font-family: var(--font-family);
 }
 
-#facturas-create-modal-root:empty {
+#facturas-create-modal-root:empty,
+#facturas-detail-root:empty {
   display: none;
 }
 
 body.facturas-create-modal-open,
+body.facturas-detail-open,
 body.modal-open {
   overflow: hidden;
 }
@@ -1899,10 +1921,11 @@ body.modal-open {
 
 
 /* =========================================================
-   CREATE MODAL OVERLAY / PANEL
+   SHARED MODAL OVERLAY · CREATE + DETAIL
 ========================================================= */
 
-.fac-create-overlay {
+.fac-create-overlay,
+.facturas-detail-overlay {
   position: fixed;
   inset: 0;
   z-index: calc(var(--z-modal, 9000) + 20);
@@ -1912,44 +1935,80 @@ body.modal-open {
     max(var(--space-lg), env(safe-area-inset-bottom))
     max(var(--space-lg), env(safe-area-inset-left));
   background:
-    radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 34%),
-    radial-gradient(circle at 82% 16%, color-mix(in srgb, var(--info) 12%, transparent), transparent 32%),
-    color-mix(in srgb, var(--backdrop-bg, rgba(2, 6, 23, .68)) 82%, transparent);
+    radial-gradient(circle at 18% 10%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 34%),
+    radial-gradient(circle at 84% 12%, color-mix(in srgb, var(--info) 12%, transparent), transparent 32%),
+    color-mix(in srgb, var(--backdrop-bg, rgba(2, 6, 23, .72)) 84%, transparent);
   backdrop-filter: blur(18px) saturate(1.12);
   -webkit-backdrop-filter: blur(18px) saturate(1.12);
   display: grid;
   place-items: center;
+  overflow: hidden;
+  font-family: var(--font-family);
+  color: var(--text);
   pointer-events: auto;
-  animation: facCreateOverlayIn .18s var(--ease-standard) both;
+  animation: facturasModalOverlayIn .18s var(--ease-standard) both;
 }
 
-.fac-create-panel {
-  --fac-create-panel-width: min(1120px, calc(100vw - 32px));
-  --fac-create-panel-height: min(94dvh, 980px);
-  --fac-create-card-bg: color-mix(in srgb, var(--card-bg) 94%, transparent);
-  --fac-create-border: color-mix(in srgb, var(--card-border) 86%, var(--accent-border));
+
+/* =========================================================
+   SHARED MODAL PANEL · CREATE + DETAIL
+========================================================= */
+
+.fac-create-panel,
+.facturas-detail-modal {
+  --fd-modal-width: var(--fac-modal-width);
+  --fd-modal-height: var(--fac-modal-height);
+  --fd-border: var(--fac-modal-border);
+  --fd-card-bg: var(--fac-modal-card-bg);
+  --fd-control-shadow: var(--fac-modal-control-shadow);
+  --fd-control-shadow-hover: var(--fac-modal-control-shadow-hover);
+
+  --fac-create-panel-width: var(--fac-modal-width);
+  --fac-create-panel-height: var(--fac-modal-height);
+  --fac-create-card-bg: var(--fac-modal-card-bg);
+  --fac-create-border: var(--fac-modal-border);
 
   position: relative;
-  inline-size: var(--fac-create-panel-width);
-  max-block-size: var(--fac-create-panel-height);
-  overflow: hidden;
-  border: 1px solid var(--fac-create-border);
+  inline-size: var(--fac-modal-width);
+  max-block-size: var(--fac-modal-height);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  border: 1px solid var(--fac-modal-border);
   border-radius: var(--radius-2xl, 28px);
   background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 34%),
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 11%, transparent), transparent 34%),
     radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 8%, transparent), transparent 32%),
     var(--glass-shine),
     var(--panel-bg);
   box-shadow:
-    0 30px 90px color-mix(in srgb, #000 24%, transparent),
+    0 32px 96px color-mix(in srgb, #000 24%, transparent),
     0 0 0 1px color-mix(in srgb, #fff 5%, transparent),
     inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
   color: var(--text);
   outline: none;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
   pointer-events: auto;
-  animation: facCreatePanelIn .22s var(--ease-standard) both;
+  animation: facturasModalPanelIn .22s var(--ease-standard) both;
+}
+
+.fac-create-panel::-webkit-scrollbar,
+.facturas-detail-modal::-webkit-scrollbar {
+  inline-size: var(--scrollbar-size);
+}
+
+.fac-create-panel::-webkit-scrollbar-track,
+.facturas-detail-modal::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.fac-create-panel::-webkit-scrollbar-thumb,
+.facturas-detail-modal::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
 }
 
 .fac-create-panel.is-submitting {
@@ -1958,7 +2017,7 @@ body.modal-open {
 
 
 /* =========================================================
-   CREATE MODAL HEADER
+   CREATE MODAL HEADER · 1:1 DETAIL STYLE
 ========================================================= */
 
 .fac-create-header {
@@ -1968,7 +2027,7 @@ body.modal-open {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-lg);
   align-items: start;
-  padding: clamp(22px, 2.2vw, var(--space-xl)) var(--space-xl) var(--space-md);
+  padding: clamp(24px, 2.4vw, var(--space-xl));
   border-bottom: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent);
   background:
     linear-gradient(
@@ -1986,33 +2045,35 @@ body.modal-open {
 
 .fac-create-header h2 {
   margin: 0;
+  max-inline-size: 980px;
   color: var(--text-strong);
-  font-size: clamp(42px, 5vw, 68px);
+  font-size: clamp(42px, 5vw, 70px);
   font-weight: var(--weight-black);
-  letter-spacing: -.055em;
+  letter-spacing: -.058em;
   line-height: .92;
   text-wrap: balance;
 }
 
 .fac-create-header p {
   margin: 0;
-  max-inline-size: 76ch;
+  max-inline-size: 86ch;
   color: var(--text-muted);
-  font-size: var(--font-md);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-semibold);
   line-height: var(--line-relaxed);
   text-wrap: pretty;
 }
 
 .fac-create-close {
   appearance: none;
-  inline-size: calc(42px * var(--ui-scale));
-  block-size: calc(42px * var(--ui-scale));
+  inline-size: calc(50px * var(--ui-scale));
+  block-size: calc(50px * var(--ui-scale));
   padding: 0;
   border: 1px solid var(--btn-secondary-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   background: var(--btn-secondary-bg);
   color: var(--btn-secondary-text);
-  box-shadow: var(--btn-secondary-shadow);
+  box-shadow: var(--fac-modal-control-shadow);
   cursor: pointer;
   display: inline-grid;
   place-items: center;
@@ -2032,9 +2093,7 @@ body.modal-open {
   border-color: color-mix(in srgb, var(--btn-secondary-border) 66%, var(--accent-border));
   background: var(--btn-secondary-bg);
   color: var(--btn-secondary-text);
-  box-shadow:
-    var(--btn-secondary-shadow),
-    0 10px 24px color-mix(in srgb, #000 8%, transparent);
+  box-shadow: var(--fac-modal-control-shadow-hover);
 }
 
 .fac-create-close:disabled {
@@ -2044,31 +2103,13 @@ body.modal-open {
 
 
 /* =========================================================
-   CREATE MODAL BODY / FORM / FIELDS
+   CREATE MODAL BODY / FORM / FIELDS · FULL PANEL SCROLL
 ========================================================= */
 
 .fac-create-body {
-  min-block-size: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-  padding: var(--space-lg) var(--space-xl) var(--space-xl);
-}
-
-.fac-create-body::-webkit-scrollbar {
-  inline-size: var(--scrollbar-size);
-}
-
-.fac-create-body::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.fac-create-body::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: var(--radius-pill);
-  background: var(--scrollbar-thumb);
-  background-clip: padding-box;
+  min-block-size: auto;
+  overflow: visible;
+  padding: var(--space-lg) clamp(24px, 2.4vw, var(--space-xl)) clamp(28px, 2.6vw, var(--space-xl));
 }
 
 .fac-create-form {
@@ -2266,12 +2307,12 @@ body.modal-open {
 .fac-create-total-strip > div {
   position: relative;
   overflow: hidden;
-  min-block-size: calc(96px * var(--ui-scale));
-  padding: var(--space-md);
+  min-block-size: calc(126px * var(--ui-scale));
+  padding: var(--space-lg);
   border: 1px solid var(--card-border);
   border-radius: var(--radius-xl);
   background:
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 44%),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 42%),
     var(--glass-shine),
     var(--card-bg);
   box-shadow: var(--shadow-card);
@@ -2307,10 +2348,10 @@ body.modal-open {
   position: relative;
   z-index: 1;
   color: var(--text-strong);
-  font-size: clamp(var(--font-xl), 2.1vw, var(--font-3xl));
+  font-size: clamp(34px, 4vw, 52px);
   font-weight: var(--weight-black);
   letter-spacing: var(--letter-tight);
-  line-height: 1;
+  line-height: .92;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2335,17 +2376,16 @@ body.modal-open {
   display: grid;
   gap: var(--space-md);
   min-inline-size: 0;
-  padding: var(--space-lg);
-  border: 1px solid color-mix(in srgb, var(--card-border) 86%, var(--accent-border));
+  padding: var(--space-xl);
+  border: 1px solid color-mix(in srgb, var(--card-border) 88%, transparent);
   border-radius: var(--radius-2xl, 26px);
   background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 34%),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 7%, transparent), transparent 32%),
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 38%),
     var(--glass-shine),
-    color-mix(in srgb, var(--card-bg) 96%, transparent);
+    var(--fac-modal-card-bg);
   box-shadow:
     var(--shadow-card),
-    inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
+    inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent);
 }
 
 .fac-create-target-head {
@@ -3016,16 +3056,16 @@ body.modal-open {
 
 .fac-create-actions {
   position: sticky;
-  inset-block-end: calc(-1 * var(--space-xl));
-  z-index: 2;
+  inset-block-end: calc(-1 * clamp(28px, 2.6vw, var(--space-xl)));
+  z-index: 6;
   display: grid;
   grid-template-columns: 1fr;
   justify-items: end;
   gap: var(--space-md);
   align-items: center;
-  margin-inline: calc(-1 * var(--space-xl));
-  margin-block-end: calc(-1 * var(--space-xl));
-  padding: var(--space-md) var(--space-xl);
+  margin-inline: calc(-1 * clamp(24px, 2.4vw, var(--space-xl)));
+  margin-block-end: calc(-1 * clamp(28px, 2.6vw, var(--space-xl)));
+  padding: var(--space-md) clamp(24px, 2.4vw, var(--space-xl));
   border-top: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent);
   background:
     linear-gradient(
@@ -3046,7 +3086,7 @@ body.modal-open {
 
 .fac-create-submit {
   appearance: none;
-  min-block-size: calc(48px * var(--ui-scale));
+  min-block-size: calc(50px * var(--ui-scale));
   padding-inline: var(--space-xl);
   border: 1px solid var(--btn-primary-border);
   border-radius: var(--radius-xl);
@@ -3157,83 +3197,6 @@ body.modal-open {
   color: var(--text-muted);
   font-size: var(--font-sm);
   line-height: var(--line-normal);
-}
-
-
-/* =========================================================
-   DETAIL MODAL OVERLAY / PANEL · FULL SCROLL
-========================================================= */
-
-.facturas-detail-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: calc(var(--z-modal, 9000) + 20);
-  padding:
-    max(var(--space-lg), env(safe-area-inset-top))
-    max(var(--space-lg), env(safe-area-inset-right))
-    max(var(--space-lg), env(safe-area-inset-bottom))
-    max(var(--space-lg), env(safe-area-inset-left));
-  background:
-    radial-gradient(circle at 18% 10%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 34%),
-    radial-gradient(circle at 84% 12%, color-mix(in srgb, var(--info) 12%, transparent), transparent 32%),
-    color-mix(in srgb, var(--backdrop-bg, rgba(2, 6, 23, .72)) 84%, transparent);
-  backdrop-filter: blur(18px) saturate(1.12);
-  -webkit-backdrop-filter: blur(18px) saturate(1.12);
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  font-family: var(--font-family);
-  color: var(--text);
-  animation: facturasDetailOverlayIn .18s var(--ease-standard) both;
-}
-
-.facturas-detail-modal {
-  --fd-modal-width: min(1380px, calc(100vw - 32px));
-  --fd-modal-height: min(94dvh, 1040px);
-  --fd-border: color-mix(in srgb, var(--card-border) 86%, var(--accent-border));
-  --fd-card-bg: color-mix(in srgb, var(--card-bg) 96%, transparent);
-  --fd-control-shadow:
-    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent),
-    0 1px 2px color-mix(in srgb, #000 5%, transparent);
-  --fd-control-shadow-hover:
-    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
-    0 10px 24px color-mix(in srgb, #000 8%, transparent);
-
-  position: relative;
-  inline-size: var(--fd-modal-width);
-  max-block-size: var(--fd-modal-height);
-  overflow-y: auto;
-  overflow-x: hidden;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-  border: 1px solid var(--fd-border);
-  border-radius: var(--radius-2xl, 28px);
-  background:
-    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 11%, transparent), transparent 34%),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 8%, transparent), transparent 32%),
-    var(--glass-shine),
-    var(--panel-bg);
-  box-shadow:
-    0 32px 96px color-mix(in srgb, #000 24%, transparent),
-    0 0 0 1px color-mix(in srgb, #fff 5%, transparent),
-    inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
-  animation: facturasDetailModalIn .22s var(--ease-standard) both;
-}
-
-.facturas-detail-modal::-webkit-scrollbar {
-  inline-size: var(--scrollbar-size);
-}
-
-.facturas-detail-modal::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.facturas-detail-modal::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: var(--radius-pill);
-  background: var(--scrollbar-thumb);
-  background-clip: padding-box;
 }
 
 
@@ -3438,7 +3401,7 @@ body.modal-open {
   border-radius: var(--radius-xl);
   background: var(--btn-secondary-bg);
   color: var(--btn-secondary-text);
-  box-shadow: var(--fd-control-shadow);
+  box-shadow: var(--fac-modal-control-shadow);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -3463,7 +3426,7 @@ body.modal-open {
   border-color: color-mix(in srgb, var(--btn-secondary-border) 66%, var(--accent-border));
   background: var(--btn-secondary-bg);
   color: var(--btn-secondary-text);
-  box-shadow: var(--fd-control-shadow-hover);
+  box-shadow: var(--fac-modal-control-shadow-hover);
 }
 
 .facturas-detail-btn:active {
@@ -3630,7 +3593,7 @@ body.modal-open {
   background:
     radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 38%),
     var(--glass-shine),
-    var(--fd-card-bg);
+    var(--fac-modal-card-bg);
   box-shadow:
     var(--shadow-card),
     inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent);
@@ -4105,6 +4068,7 @@ body.modal-open {
     );
 }
 
+[data-theme="light"] .fac-create-header,
 [data-theme="light"] .facturas-detail-header {
   background:
     linear-gradient(
@@ -4198,6 +4162,8 @@ body.modal-open {
   :where(.facturas-view, .facturas-view-root, [data-facturas-scope]) {
     --fac-table-min-width: 1010px;
     --fac-actions-width: 170px;
+    --fac-modal-width: min(100%, calc(100vw - 24px));
+    --fac-modal-height: 94dvh;
   }
 
   .facturas-hero {
@@ -4223,14 +4189,6 @@ body.modal-open {
   .fac-create-overlay,
   .facturas-detail-overlay {
     padding: var(--space-md);
-  }
-
-  .fac-create-panel,
-  .facturas-detail-modal {
-    --fac-create-panel-width: min(100%, calc(100vw - 24px));
-    --fd-modal-width: min(100%, calc(100vw - 24px));
-    --fac-create-panel-height: 94dvh;
-    --fd-modal-height: 94dvh;
   }
 
   .fac-create-pro-grid,
@@ -4260,6 +4218,8 @@ body.modal-open {
   :where(.facturas-view, .facturas-view-root, [data-facturas-scope]) {
     --fac-table-min-width: 980px;
     --fac-actions-width: 164px;
+    --fac-modal-width: 100%;
+    --fac-modal-height: 94dvh;
     gap: var(--space-md);
   }
 
@@ -4329,11 +4289,6 @@ body.modal-open {
 
   .fac-create-panel,
   .facturas-detail-modal {
-    --fac-create-panel-width: 100%;
-    --fd-modal-width: 100%;
-    --fac-create-panel-height: 94dvh;
-    --fd-modal-height: 94dvh;
-
     border-radius: var(--radius-2xl, 24px) var(--radius-2xl, 24px) 0 0;
   }
 
@@ -4408,6 +4363,7 @@ body.modal-open {
     align-items: stretch;
     margin-inline: calc(-1 * var(--space-md));
     margin-block-end: calc(-1 * var(--space-lg));
+    inset-block-end: calc(-1 * var(--space-lg));
     padding: var(--space-md);
   }
 
@@ -4490,6 +4446,11 @@ body.modal-open {
 }
 
 @media (max-width: 460px) {
+  :where(.facturas-view, .facturas-view-root, [data-facturas-scope]) {
+    --fac-modal-width: 100vw;
+    --fac-modal-height: 96dvh;
+  }
+
   .fac-create-overlay,
   .facturas-detail-overlay {
     padding-inline: 0;
@@ -4498,11 +4459,6 @@ body.modal-open {
 
   .fac-create-panel,
   .facturas-detail-modal {
-    --fac-create-panel-width: 100vw;
-    --fd-modal-width: 100vw;
-    --fac-create-panel-height: 96dvh;
-    --fd-modal-height: 96dvh;
-
     border-inline: 0;
     border-block-end: 0;
   }
@@ -4578,11 +4534,15 @@ body.modal-open {
   .facturas-detail-stat,
   .facturas-detail-mini,
   .facturas-detail-tax-card,
-  .facturas-detail-linea {
+  .facturas-detail-linea,
+  .fac-create-target,
+  .fac-create-pro-card,
+  .fac-create-total-strip > div {
     box-shadow: none !important;
   }
 
   .facturas-table-shell,
+  .fac-create-panel,
   .facturas-detail-modal,
   .facturas-detail-layout,
   .facturas-detail-body-shell {
@@ -4594,6 +4554,7 @@ body.modal-open {
     min-inline-size: 0;
   }
 
+  .fac-create-overlay,
   .facturas-detail-overlay {
     position: static !important;
     inset: auto !important;
@@ -4603,6 +4564,7 @@ body.modal-open {
     -webkit-backdrop-filter: none !important;
   }
 
+  .fac-create-panel,
   .facturas-detail-modal {
     inline-size: 100% !important;
     border: 0 !important;
@@ -4610,6 +4572,7 @@ body.modal-open {
     box-shadow: none !important;
   }
 
+  .fac-create-actions,
   .facturas-detail-actions {
     display: none !important;
   }
@@ -4668,6 +4631,28 @@ body.modal-open {
 @keyframes facturasSkeleton {
   to {
     transform: translateX(100%);
+  }
+}
+
+@keyframes facturasModalOverlayIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes facturasModalPanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 

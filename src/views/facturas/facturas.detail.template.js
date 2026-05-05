@@ -3,6 +3,8 @@
    Archivo: src/views/facturas/facturas.detail.template.js
 
    FINAL PRO SYSTEM · FACTURAS DETAIL MODAL · EXTREME 10/10
+   PATCH · NO CSS IN JS · CSP CLEAN · TOKEN SYSTEM READY
+   PATCH · NO INLINE STYLES · CLASS ONLY TEMPLATE
    PATCH · IVA / IRPF REAL · TAX BREAKDOWN HARDENED
    PATCH · CLASS BASED MODAL · ACTION SAFE · NO ROUTE NAVIGATION
 
@@ -21,13 +23,16 @@
    - tolerar payloads pobres, normalizados, raw, raw.raw, data, payload,
      result, factura e invoice
    - soportar facturas enriquecidas desde incidenciaGet.js
+
+   CSS:
+   - Todo el estilo debe vivir en /src/css/views/facturas.css
+   - Este template solo emite clases y atributos data-*
 ========================================================= */
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-const STYLE_ID = "onion-facturas-detail-template-styles-v3";
 const DEFAULT_CURRENCY = "EUR";
 
 /* =========================================================
@@ -870,6 +875,7 @@ function getRelationSources(factura = {}) {
       safeObject(source.supportTicket),
       safeObject(source.case),
       safeObject(source.relations?.ticket),
+      safeObject(source.relations?.incidencia),
       safeObject(source.meta)
     );
   });
@@ -902,6 +908,10 @@ function getFacturaIncidenciaId(factura = {}) {
 
       "relations.ticket.ticketId",
       "relations.ticket.id",
+      "relations.ticket.incidenciaId",
+      "relations.incidencia.ticketId",
+      "relations.incidencia.id",
+      "relations.incidencia.incidenciaId",
 
       "relatedTicket.ticketId",
       "relatedTicket.id",
@@ -1579,684 +1589,14 @@ function getImpuestosBreakdown(factura = {}) {
 }
 
 /* =========================================================
-   STYLES
-========================================================= */
-
-function renderStyles() {
-  return `
-    <style id="${STYLE_ID}">
-      .facturas-detail-overlay,
-      .facturas-detail-overlay *,
-      .facturas-detail-overlay *::before,
-      .facturas-detail-overlay *::after{
-        box-sizing:border-box;
-      }
-
-      .facturas-detail-overlay{
-        position:fixed;
-        inset:0;
-        z-index:9999;
-        padding:20px;
-        display:grid;
-        place-items:center;
-        background:rgba(0,0,0,.64);
-        backdrop-filter:blur(10px);
-        -webkit-backdrop-filter:blur(10px);
-      }
-
-      .facturas-detail-modal{
-        position:relative;
-        width:min(1120px, 100%);
-        max-height:92vh;
-        overflow:hidden;
-        border-radius:24px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.08));
-        background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
-          linear-gradient(180deg, var(--surface-2, #151515), var(--surface-1, #121212));
-        box-shadow:0 34px 84px rgba(0,0,0,.40);
-        color:var(--text-soft, rgba(245,245,245,.88));
-      }
-
-      .facturas-detail-layout{
-        display:flex;
-        flex-direction:column;
-        min-height:0;
-        height:100%;
-        max-height:92vh;
-      }
-
-      .facturas-detail-header{
-        position:sticky;
-        top:0;
-        z-index:4;
-        display:grid;
-        gap:16px;
-        padding:22px 22px 18px;
-        border-bottom:1px solid var(--border-soft, rgba(255,255,255,.08));
-        background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
-          linear-gradient(180deg, var(--surface-2, #151515), var(--surface-1, #121212));
-      }
-
-      .facturas-detail-hero{
-        display:flex;
-        justify-content:space-between;
-        gap:16px;
-        flex-wrap:wrap;
-        align-items:flex-start;
-      }
-
-      .facturas-detail-identity{
-        display:flex;
-        gap:16px;
-        align-items:center;
-        min-width:0;
-        flex:1 1 620px;
-      }
-
-      .facturas-detail-avatar{
-        position:relative;
-        flex:0 0 76px;
-        width:76px;
-        height:76px;
-        border-radius:22px;
-        display:grid;
-        place-items:center;
-        background:
-          radial-gradient(circle at 25% 20%, rgba(255,255,255,.24), transparent 35%),
-          linear-gradient(135deg, rgba(124,92,255,.42), rgba(88,72,200,.18));
-        border:1px solid rgba(124,92,255,.28);
-        color:#efeaff;
-        font-size:22px;
-        font-weight:850;
-        letter-spacing:.03em;
-        box-shadow:0 12px 28px rgba(124,92,255,.18);
-      }
-
-      .facturas-detail-title-stack{
-        display:grid;
-        gap:7px;
-        min-width:0;
-        flex:1 1 auto;
-      }
-
-      .facturas-detail-chip-row{
-        display:flex;
-        align-items:center;
-        gap:8px;
-        flex-wrap:wrap;
-        min-width:0;
-      }
-
-      .facturas-detail-number{
-        display:inline-flex;
-        align-items:center;
-        max-width:230px;
-        min-height:28px;
-        padding:0 10px;
-        border-radius:999px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.08));
-        background:var(--surface-glass, rgba(255,255,255,.045));
-        color:var(--text-dim, rgba(245,245,245,.58));
-        font-size:11px;
-        font-weight:800;
-        letter-spacing:.045em;
-        text-transform:uppercase;
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-      }
-
-      .facturas-detail-system-number{
-        display:inline-flex;
-        align-items:center;
-        max-width:210px;
-        min-height:28px;
-        padding:0 10px;
-        border-radius:999px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.08));
-        background:rgba(255,255,255,.026);
-        color:var(--text-faint, rgba(245,245,245,.42));
-        font-size:10px;
-        font-weight:800;
-        letter-spacing:.045em;
-        text-transform:uppercase;
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-      }
-
-      .facturas-detail-chip{
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        min-height:30px;
-        padding:0 10px;
-        border-radius:999px;
-        font-size:11px;
-        font-weight:800;
-        letter-spacing:.05em;
-        text-transform:uppercase;
-        white-space:nowrap;
-        border:1px solid var(--border-soft, rgba(255,255,255,.08));
-        background:var(--surface-glass, rgba(255,255,255,.045));
-        color:var(--text-soft, rgba(245,245,245,.88));
-      }
-
-      .facturas-detail-chip--success{
-        color:var(--success-strong, #36c690);
-        background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
-        border-color:color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
-      }
-
-      .facturas-detail-chip--warning{
-        color:var(--warning-strong, #ffbc42);
-        background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
-        border-color:color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
-      }
-
-      .facturas-detail-chip--danger{
-        color:var(--danger-strong, #ff6b6b);
-        background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
-        border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
-      }
-
-      .facturas-detail-chip--accent{
-        color:var(--accent-strong, var(--accent, #7c5cff));
-        background:color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 26%, transparent);
-      }
-
-      .facturas-detail-chip--muted{
-        color:var(--text-dim, rgba(245,245,245,.58));
-        background:var(--surface-glass, rgba(255,255,255,.045));
-        border-color:var(--border-soft, rgba(255,255,255,.08));
-      }
-
-      .facturas-detail-title{
-        margin:0;
-        color:var(--text-strong, #ffffff);
-        font-size:clamp(22px, 2.35vw, 32px);
-        line-height:.98;
-        letter-spacing:-.055em;
-        font-weight:var(--weight-black, 850);
-        word-break:break-word;
-      }
-
-      .facturas-detail-subtitle{
-        color:var(--text-dim, rgba(245,245,245,.58));
-        font-size:13px;
-        line-height:1.42;
-        word-break:break-word;
-      }
-
-      .facturas-detail-actions{
-        display:flex;
-        gap:8px;
-        flex-wrap:wrap;
-        align-items:flex-start;
-        justify-content:flex-end;
-      }
-
-      .facturas-detail-btn{
-        appearance:none;
-        min-height:38px;
-        padding:0 12px;
-        border-radius:12px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.08));
-        background:var(--surface-glass, rgba(255,255,255,.045));
-        color:var(--text-soft, rgba(245,245,245,.88));
-        font-size:12px;
-        font-weight:800;
-        cursor:pointer;
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        gap:8px;
-        white-space:nowrap;
-      }
-
-      .facturas-detail-btn:hover{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 30%, var(--border-soft));
-        background:color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent);
-      }
-
-      .facturas-detail-btn:disabled,
-      .facturas-detail-btn[aria-disabled="true"]{
-        opacity:.56;
-        cursor:not-allowed;
-        pointer-events:none;
-      }
-
-      .facturas-detail-btn--primary{
-        border-color:color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent);
-        background:var(--accent, #7c5cff);
-        color:#fff;
-        box-shadow:0 12px 28px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
-      }
-
-      .facturas-detail-btn--close{
-        width:38px;
-        height:38px;
-        padding:0;
-        background:transparent;
-        color:var(--text-dim, rgba(245,245,245,.58));
-        font-size:18px;
-        font-weight:850;
-      }
-
-      .facturas-detail-meta-grid,
-      .facturas-detail-stats-grid{
-        display:grid;
-        grid-template-columns:repeat(4, minmax(0, 1fr));
-        gap:10px;
-      }
-
-      .facturas-detail-body-shell{
-        flex:1 1 auto;
-        min-height:0;
-        overflow:auto;
-        scrollbar-width:thin;
-      }
-
-      .facturas-detail-body{
-        padding:16px 18px 18px;
-        display:grid;
-        gap:16px;
-      }
-
-      .facturas-detail-section{
-        display:grid;
-        gap:12px;
-        padding:16px;
-        border-radius:18px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.08));
-        background:var(--surface-glass, rgba(255,255,255,.045));
-      }
-
-      .facturas-detail-section-head{
-        display:grid;
-        gap:4px;
-      }
-
-      .facturas-detail-section-title{
-        margin:0;
-        color:var(--text-strong, #ffffff);
-        font-size:18px;
-        letter-spacing:-.02em;
-      }
-
-      .facturas-detail-section-subtitle{
-        margin:0;
-        color:var(--text-dim, rgba(245,245,245,.58));
-        line-height:1.55;
-        font-size:12px;
-      }
-
-      .facturas-detail-mini{
-        display:grid;
-        gap:6px;
-        padding:12px;
-        border-radius:14px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.08));
-        background:var(--surface-1, rgba(255,255,255,.035));
-        min-width:0;
-      }
-
-      .facturas-detail-mini-label{
-        font-size:10px;
-        color:var(--text-faint, rgba(245,245,245,.42));
-        text-transform:uppercase;
-        font-weight:800;
-        letter-spacing:.08em;
-      }
-
-      .facturas-detail-mini-value{
-        color:var(--text-strong, #ffffff);
-        font-size:13px;
-        line-height:1.4;
-        word-break:break-word;
-      }
-
-      .facturas-detail-stat{
-        display:grid;
-        gap:8px;
-        min-height:92px;
-        padding:16px;
-        border-radius:18px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.08));
-        background:var(--surface-1, rgba(255,255,255,.035));
-      }
-
-      .facturas-detail-stat-label{
-        font-size:11px;
-        color:var(--text-faint, rgba(245,245,245,.42));
-        text-transform:uppercase;
-        letter-spacing:.05em;
-        font-weight:800;
-      }
-
-      .facturas-detail-stat-value{
-        font-size:24px;
-        line-height:1.05;
-        color:var(--text-strong, #ffffff);
-        word-break:break-word;
-      }
-
-      .facturas-detail-tax-grid{
-        display:grid;
-        grid-template-columns:repeat(auto-fit, minmax(190px, 1fr));
-        gap:12px;
-      }
-
-      .facturas-detail-tax-card{
-        position:relative;
-        display:grid;
-        gap:8px;
-        min-height:112px;
-        padding:16px;
-        border-radius:18px;
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, var(--border-soft));
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 7%, transparent), transparent),
-          var(--surface-1, rgba(255,255,255,.035));
-        overflow:hidden;
-      }
-
-      .facturas-detail-tax-card::after{
-        content:"";
-        position:absolute;
-        inset:auto -18% -42% auto;
-        width:120px;
-        height:120px;
-        border-radius:50%;
-        background:color-mix(in srgb, var(--fac-tax-color, var(--accent, #7c5cff)) 16%, transparent);
-        filter:blur(8px);
-        pointer-events:none;
-      }
-
-      .facturas-detail-tax-card--iva{
-        --fac-tax-color:var(--success-strong, #36c690);
-        border-color:color-mix(in srgb, var(--success-strong, #36c690) 26%, var(--border-soft));
-      }
-
-      .facturas-detail-tax-card--irpf{
-        --fac-tax-color:var(--danger-strong, #ff6b6b);
-        border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, var(--border-soft));
-      }
-
-      .facturas-detail-tax-label{
-        position:relative;
-        z-index:1;
-        font-size:11px;
-        color:var(--text-faint, rgba(245,245,245,.42));
-        text-transform:uppercase;
-        letter-spacing:.05em;
-        font-weight:850;
-      }
-
-      .facturas-detail-tax-value{
-        position:relative;
-        z-index:1;
-        font-size:25px;
-        line-height:1.05;
-        color:var(--text-strong, #ffffff);
-        word-break:break-word;
-      }
-
-      .facturas-detail-tax-caption{
-        position:relative;
-        z-index:1;
-        color:var(--text-dim, rgba(245,245,245,.58));
-        font-size:12px;
-        line-height:1.35;
-      }
-
-      .facturas-detail-description{
-        padding:14px;
-        border-radius:16px;
-        background:var(--surface-1, rgba(255,255,255,.035));
-        border:1px solid var(--border-soft, rgba(255,255,255,.08));
-        color:var(--text-soft, rgba(245,245,245,.88));
-        font-size:13px;
-        line-height:1.65;
-        white-space:pre-wrap;
-        word-break:break-word;
-      }
-
-      .facturas-detail-lineas{
-        display:grid;
-        gap:12px;
-      }
-
-      .facturas-detail-linea{
-        display:grid;
-        gap:12px;
-        padding:14px;
-        border-radius:16px;
-        border:1px solid var(--border-soft, rgba(255,255,255,.08));
-        background:var(--surface-1, rgba(255,255,255,.035));
-      }
-
-      .facturas-detail-linea-top{
-        display:flex;
-        justify-content:space-between;
-        gap:12px;
-        flex-wrap:wrap;
-        align-items:flex-start;
-      }
-
-      .facturas-detail-linea-title{
-        color:var(--text-strong, #ffffff);
-        line-height:1.4;
-        word-break:break-word;
-        font-size:14px;
-      }
-
-      .facturas-detail-linea-desc{
-        color:var(--text-dim, rgba(245,245,245,.58));
-        font-size:12px;
-        line-height:1.5;
-        word-break:break-word;
-      }
-
-      .facturas-detail-linea-amount{
-        color:var(--text-strong, #ffffff);
-        line-height:1.4;
-        white-space:nowrap;
-        font-size:14px;
-      }
-
-      .facturas-detail-linea-grid{
-        display:grid;
-        grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
-        gap:10px;
-      }
-
-      .facturas-detail-incidencia-btn{
-        appearance:none;
-        justify-self:start;
-        max-width:100%;
-        min-height:28px;
-        padding:0 10px;
-        border-radius:999px;
-        border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
-        background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-        color:var(--accent-strong, var(--accent, #7c5cff));
-        font-size:11px;
-        font-weight:850;
-        letter-spacing:.04em;
-        text-transform:uppercase;
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-        cursor:pointer;
-      }
-
-      .facturas-detail-loading{
-        padding:18px;
-        display:grid;
-        gap:16px;
-      }
-
-      .facturas-detail-skeleton{
-        border-radius:18px;
-        background:var(--surface-glass, rgba(255,255,255,.045));
-        border:1px solid var(--border-soft, rgba(255,255,255,.08));
-        overflow:hidden;
-        position:relative;
-      }
-
-      .facturas-detail-skeleton::after{
-        content:"";
-        position:absolute;
-        inset:0;
-        transform:translateX(-100%);
-        background:linear-gradient(90deg, transparent, rgba(255,255,255,.08), transparent);
-        animation:facturasDetailSkeleton 1.2s ease-in-out infinite;
-      }
-
-      .facturas-detail-spinner{
-        width:14px;
-        height:14px;
-        border-radius:999px;
-        border:2px solid color-mix(in srgb, currentColor 24%, transparent);
-        border-top-color:currentColor;
-        animation:facturasDetailSpin .8s linear infinite;
-      }
-
-      @keyframes facturasDetailSpin{
-        to{ transform:rotate(360deg); }
-      }
-
-      @keyframes facturasDetailSkeleton{
-        to{ transform:translateX(100%); }
-      }
-
-      [data-theme="light"] .facturas-detail-modal{
-        background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
-          linear-gradient(180deg, rgba(255,255,255,.98), rgba(250,251,255,.96));
-        box-shadow:
-          0 30px 70px rgba(15,23,42,.14),
-          0 0 0 1px rgba(255,255,255,.65) inset;
-      }
-
-      [data-theme="light"] .facturas-detail-header{
-        background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
-          linear-gradient(180deg, rgba(255,255,255,.98), rgba(250,251,255,.96));
-      }
-
-      [data-theme="light"] .facturas-detail-chip--success{
-        color:var(--success-hover, #157a4f);
-      }
-
-      [data-theme="light"] .facturas-detail-chip--warning{
-        color:var(--warning-hover, #9c6110);
-      }
-
-      [data-theme="light"] .facturas-detail-chip--danger{
-        color:var(--error-hover, #b52a39);
-      }
-
-      @media (max-width: 980px){
-        .facturas-detail-meta-grid,
-        .facturas-detail-stats-grid{
-          grid-template-columns:repeat(2, minmax(0, 1fr));
-        }
-      }
-
-      @media (max-width: 900px){
-        .facturas-detail-overlay{
-          padding:14px;
-        }
-
-        .facturas-detail-modal{
-          width:100%;
-          max-height:94vh;
-          border-radius:22px;
-        }
-
-        .facturas-detail-layout{
-          max-height:94vh;
-        }
-      }
-
-      @media (max-width: 720px){
-        .facturas-detail-hero{
-          align-items:flex-start;
-        }
-
-        .facturas-detail-actions{
-          justify-content:flex-start;
-          width:100%;
-        }
-      }
-
-      @media (max-width: 640px){
-        .facturas-detail-overlay{
-          padding:10px;
-        }
-
-        .facturas-detail-modal{
-          width:100%;
-          max-height:96vh;
-          border-radius:18px;
-        }
-
-        .facturas-detail-layout{
-          max-height:96vh;
-        }
-
-        .facturas-detail-header{
-          padding:16px;
-        }
-
-        .facturas-detail-body{
-          padding:14px;
-        }
-
-        .facturas-detail-identity{
-          align-items:flex-start;
-        }
-
-        .facturas-detail-avatar{
-          width:58px;
-          height:58px;
-          flex-basis:58px;
-          border-radius:18px;
-          font-size:18px;
-        }
-
-        .facturas-detail-meta-grid,
-        .facturas-detail-stats-grid{
-          grid-template-columns:1fr;
-        }
-      }
-
-      @media (prefers-reduced-motion: reduce){
-        .facturas-detail-overlay *,
-        .facturas-detail-overlay *::before,
-        .facturas-detail-overlay *::after{
-          animation:none !important;
-          transition:none !important;
-        }
-      }
-    </style>
-  `;
-}
-
-/* =========================================================
    UI PARTIALS
 ========================================================= */
 
 function renderActionSpinner(label = "") {
   return `
-    <span style="display:inline-flex; align-items:center; gap:8px;">
+    <span class="facturas-detail-action-loading">
       <span class="facturas-detail-spinner" aria-hidden="true"></span>
-      ${escapeHtml(label)}
+      <span>${escapeHtml(label)}</span>
     </span>
   `;
 }
@@ -2566,7 +1906,7 @@ function renderLineaItem(linea = {}, moneda = DEFAULT_CURRENCY) {
   return `
     <article class="facturas-detail-linea">
       <div class="facturas-detail-linea-top">
-        <div style="display:grid; gap:4px; min-width:0;">
+        <div class="facturas-detail-linea-copy">
           <strong class="facturas-detail-linea-title">
             ${escapeHtml(getLineaConcepto(item))}
           </strong>
@@ -2652,9 +1992,9 @@ export function renderFacturasDetailContent({
   if (loading) {
     return `
       <div class="facturas-detail-loading">
-        <div class="facturas-detail-skeleton" style="height:88px;"></div>
-        <div class="facturas-detail-skeleton" style="height:120px;"></div>
-        <div class="facturas-detail-skeleton" style="height:240px;"></div>
+        <div class="facturas-detail-skeleton facturas-detail-skeleton--hero"></div>
+        <div class="facturas-detail-skeleton facturas-detail-skeleton--summary"></div>
+        <div class="facturas-detail-skeleton facturas-detail-skeleton--body"></div>
       </div>
     `;
   }
@@ -2677,6 +2017,7 @@ export function renderFacturasDetailContent({
   const numeroSistema = getFacturaSistema(factura);
   const clienteEmail = getClienteEmail(factura);
   const empresa = getClienteEmpresa(factura);
+  const clienteNombre = getClienteNombre(factura);
 
   return `
     <div class="facturas-detail-layout">
@@ -2708,14 +2049,14 @@ export function renderFacturasDetailContent({
                 )}
               </div>
 
-              <div style="display:grid; gap:4px; min-width:0;">
+              <div class="facturas-detail-title-extra">
                 <h2 class="facturas-detail-title">
-                  ${escapeHtml(empresa || getClienteNombre(factura))}
+                  ${escapeHtml(empresa || clienteNombre)}
                 </h2>
 
                 ${
-                  empresa && empresa !== getClienteNombre(factura)
-                    ? `<span class="facturas-detail-subtitle">${escapeHtml(getClienteNombre(factura))}</span>`
+                  empresa && empresa !== clienteNombre
+                    ? `<span class="facturas-detail-subtitle">${escapeHtml(clienteNombre)}</span>`
                     : ""
                 }
 
@@ -2771,8 +2112,6 @@ export function renderFacturasDetailModal({
   if (!detailOpen) return "";
 
   return `
-    ${renderStyles()}
-
     <div
       class="facturas-detail-overlay"
       data-facturas-detail-overlay="true"

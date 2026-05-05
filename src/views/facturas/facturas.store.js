@@ -2,29 +2,19 @@
    Onion SPA - Facturas Store
    Archivo: src/views/facturas/facturas.store.js
 
-   FINAL PRO SYSTEM · STORE REAL · 10/10 EXTREME
-   PATCH · ID RESOLUTION HARDENED · INCIDENCIA PRESERVER
-   PATCH · STORE MULTISHAPE COMPAT · SORT SAFE · UPSERT SAFE
+   FINAL PRO SYSTEM · FACTURAS STORE · 10/10 EXTREME
+   PATCH · STORE MULTISHAPE · ID SAFE · UPSERT SAFE
+   PATCH · NO TICKET ID AS FACTURA ID · INCIDENCIA PRESERVER VIA MODEL
+   PATCH · DEDUPE POR IDENTIDADES · SORT SAFE · STORE COMPAT
 
    RESPONSABILIDADES:
-   - centralizar el acceso al Store del módulo de facturas
-   - leer y escribir la colección normalizada
-   - exponer helpers de consulta por id y ordenación
-   - aislar la vista del shape interno del Store
-   - mantener paridad operativa con facturasView / facturas.model
-   - preservar relación factura ↔ incidencia para columna Incidencia
-   - permitir lookup por id, _id, facturaId, invoiceId, numero y códigos legales
-   - evitar duplicados cuando el backend cambia de id visible
-
-   HARDENING PRO:
-   - lectura tolerante a múltiples shapes del Store
-   - escritura consistente por path y colección
-   - sort robusto sin mutar origen
-   - upsert por identidad flexible
-   - deduplicación defensiva al append/set
-   - compat con colección normalizada actual
-   - no pierde ticketId / incidenciaId / incidencia / ticket / linkedTicket
-   - no pierde raw.meta ni meta.hasIncidencia
+   - centralizar acceso al Store de facturas
+   - leer/escribir colección normalizada
+   - tolerar múltiples shapes internos del Store
+   - lookup por id/_id/facturaId/invoiceId/número legal/sistema/código
+   - deduplicar facturas aunque cambie el id visible del backend
+   - preservar relación factura ↔ incidencia delegando en facturas.model.js
+   - mantener compatibilidad con facturasView / loaders / actions
 ========================================================= */
 
 import { Store } from "../../store/index.js";
@@ -36,9 +26,13 @@ import {
 } from "./facturas.utils.js";
 
 import {
+  DEFAULT_FACTURAS_SORT,
   normalizeFactura,
   sortFacturas,
-  DEFAULT_FACTURAS_SORT,
+  getFacturaIdentityList as getModelFacturaIdentityList,
+  getFacturaPrimaryId,
+  getFacturaIncidenciaId,
+  buildFacturaIncidenciaPayload,
 } from "./facturas.model.js";
 
 /* =========================================================
@@ -50,7 +44,6 @@ const FACTURAS_COLLECTION_NAME = "facturas";
 
 const STORE_READ_PATHS = Object.freeze([
   FACTURAS_STORE_PATH,
-  FACTURAS_COLLECTION_NAME,
   "collections.facturas",
   "data.facturas",
   "facturas",
@@ -66,102 +59,16 @@ const FALLBACK_SORT = Object.freeze({
   direction: "desc",
 });
 
-/* =========================================================
-   SAFE STORE ACCESS
-========================================================= */
-
-function safeGet(path, fallback = null) {
-  try {
-    if (typeof Store?.get === "function") {
-      const value = Store.get(path);
-      return value === undefined || value === null ? fallback : value;
-    }
-  } catch {}
-
-  try {
-    const parts = String(path || "")
-      .split(".")
-      .map((part) => part.trim())
-      .filter(Boolean);
-
-    let cursor = Store?.state || Store?.data || Store;
-
-    for (const part of parts) {
-      if (!cursor || typeof cursor !== "object") {
-        return fallback;
-      }
-
-      cursor = cursor[part];
-    }
-
-    return cursor === undefined || cursor === null ? fallback : cursor;
-  } catch {}
-
-  return fallback;
-}
-
-function safeSet(path, value) {
-  try {
-    if (typeof Store?.set === "function") {
-      Store.set(path, value);
-      return true;
-    }
-  } catch {}
-
-  try {
-    const parts = String(path || "")
-      .split(".")
-      .map((part) => part.trim())
-      .filter(Boolean);
-
-    if (!parts.length) return false;
-
-    const root = Store?.state || Store?.data || Store;
-
-    if (!root || typeof root !== "object") {
-      return false;
-    }
-
-    let cursor = root;
-
-    for (let index = 0; index < parts.length - 1; index += 1) {
-      const part = parts[index];
-
-      if (!cursor[part] || typeof cursor[part] !== "object") {
-        cursor[part] = {};
-      }
-
-      cursor = cursor[part];
-    }
-
-    cursor[parts[parts.length - 1]] = value;
-
-    return true;
-  } catch {}
-
-  return false;
-}
-
-function safeSetCollection(name, value) {
-  try {
-    if (typeof Store?.actions?.setCollection === "function") {
-      Store.actions.setCollection(name, value);
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (typeof Store?.setCollection === "function") {
-      Store.setCollection(name, value);
-      return true;
-    }
-  } catch {}
-
-  return false;
-}
+const TICKET_ID_PREFIXES = Object.freeze([
+  "INC-",
+  "TCK-",
+  "TICKET-",
+  "CASE-",
+  "SUPPORT-",
+]);
 
 /* =========================================================
-   BASE HELPERS
+   SAFE BASE
 ========================================================= */
 
 function safeObject(value, fallback = {}) {
@@ -173,14 +80,8 @@ function safeObject(value, fallback = {}) {
 function first(...values) {
   for (const value of values) {
     if (value === undefined || value === null) continue;
-
-    if (typeof value === "string" && value.trim() === "") {
-      continue;
-    }
-
-    if (Array.isArray(value) && value.length === 0) {
-      continue;
-    }
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
 
     return value;
   }
@@ -216,11 +117,11 @@ function uniqueList(values = []) {
   const seen = new Set();
   const out = [];
 
-  for (const value of values) {
+  for (const value of safeArray(values)) {
     const text = safeText(value, "");
     const key = normalizeText(text);
 
-    if (!text || !key || seen.has(key)) {
+    if (!text || !key || key === "—" || seen.has(key)) {
       continue;
     }
 
@@ -232,18 +133,10 @@ function uniqueList(values = []) {
 }
 
 function compareText(a, b) {
-  return safeText(a, "").localeCompare(
-    safeText(b, ""),
-    "es",
-    {
-      sensitivity: "base",
-      numeric: true,
-    }
-  );
-}
-
-function compareNumber(a, b) {
-  return safeNumber(a, 0) - safeNumber(b, 0);
+  return safeText(a, "").localeCompare(safeText(b, ""), "es", {
+    sensitivity: "base",
+    numeric: true,
+  });
 }
 
 function compareDate(a, b) {
@@ -253,44 +146,284 @@ function compareDate(a, b) {
   return safeNumber(left, 0) - safeNumber(right, 0);
 }
 
+function isTicketLikeId(value = "") {
+  const text = safeText(value, "").toUpperCase();
+  return TICKET_ID_PREFIXES.some((prefix) => text.startsWith(prefix));
+}
+
 /* =========================================================
-   FACTURA ID HELPERS
+   STORE ACCESS
+========================================================= */
+
+function safeGet(path = "", fallback = null) {
+  const cleanPath = safeText(path, "");
+
+  if (!cleanPath) return fallback;
+
+  try {
+    if (typeof Store?.get === "function") {
+      const value = Store.get(cleanPath);
+      return value === undefined || value === null ? fallback : value;
+    }
+  } catch {}
+
+  try {
+    const parts = cleanPath
+      .split(".")
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    let cursor = Store?.state || Store?.data || Store;
+
+    for (const part of parts) {
+      if (!cursor || typeof cursor !== "object") {
+        return fallback;
+      }
+
+      cursor = cursor[part];
+    }
+
+    return cursor === undefined || cursor === null ? fallback : cursor;
+  } catch {}
+
+  return fallback;
+}
+
+function safeSet(path = "", value = null) {
+  const cleanPath = safeText(path, "");
+
+  if (!cleanPath) return false;
+
+  try {
+    if (typeof Store?.set === "function") {
+      Store.set(cleanPath, value);
+      return true;
+    }
+  } catch {}
+
+  try {
+    const parts = cleanPath
+      .split(".")
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (!parts.length) return false;
+
+    const root = Store?.state || Store?.data || Store;
+
+    if (!root || typeof root !== "object") {
+      return false;
+    }
+
+    let cursor = root;
+
+    for (let index = 0; index < parts.length - 1; index += 1) {
+      const part = parts[index];
+
+      if (!cursor[part] || typeof cursor[part] !== "object") {
+        cursor[part] = {};
+      }
+
+      cursor = cursor[part];
+    }
+
+    cursor[parts[parts.length - 1]] = value;
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function safeGetCollection(name = "") {
+  const collectionName = safeText(name, "");
+
+  if (!collectionName) return null;
+
+  try {
+    if (typeof Store?.actions?.getCollection === "function") {
+      return Store.actions.getCollection(collectionName);
+    }
+  } catch {}
+
+  try {
+    if (typeof Store?.getCollection === "function") {
+      return Store.getCollection(collectionName);
+    }
+  } catch {}
+
+  return null;
+}
+
+function safeSetCollection(name = "", value = []) {
+  const collectionName = safeText(name, "");
+
+  if (!collectionName) return false;
+
+  try {
+    if (typeof Store?.actions?.setCollection === "function") {
+      Store.actions.setCollection(collectionName, value);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof Store?.setCollection === "function") {
+      Store.setCollection(collectionName, value);
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+/* =========================================================
+   STORE SHAPE RESOLUTION
+========================================================= */
+
+function resolveCollectionShape(value = null) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  const obj = safeObject(value);
+
+  return safeArray(
+    first(
+      obj.items,
+      obj.facturas,
+      obj.invoices,
+      obj.data,
+      obj.results,
+      obj.rows,
+      obj.records,
+      obj.list,
+      obj.collection,
+
+      obj.data?.items,
+      obj.data?.facturas,
+      obj.data?.invoices,
+      obj.data?.results,
+      obj.data?.rows,
+      obj.data?.records,
+
+      obj.result?.items,
+      obj.result?.facturas,
+      obj.result?.invoices,
+      obj.result?.results,
+      obj.result?.rows,
+      obj.result?.records,
+
+      obj.payload?.items,
+      obj.payload?.facturas,
+      obj.payload?.invoices,
+      obj.payload?.results,
+      obj.payload?.rows,
+      obj.payload?.records,
+
+      []
+    )
+  );
+}
+
+function readRawFacturasStore() {
+  const collectionValue = safeGetCollection(FACTURAS_COLLECTION_NAME);
+  const collection = resolveCollectionShape(collectionValue);
+
+  if (collection.length) {
+    return collection;
+  }
+
+  for (const path of STORE_READ_PATHS) {
+    const value = safeGet(path, null);
+    const items = resolveCollectionShape(value);
+
+    if (items.length) {
+      return items;
+    }
+  }
+
+  return [];
+}
+
+function persistFacturasStore(items = []) {
+  const normalized = dedupeFacturas(items);
+  let written = false;
+
+  if (safeSetCollection(FACTURAS_COLLECTION_NAME, normalized)) {
+    written = true;
+  }
+
+  for (const path of STORE_WRITE_PATHS) {
+    if (safeSet(path, normalized)) {
+      written = true;
+    }
+  }
+
+  return written;
+}
+
+/* =========================================================
+   FACTURA NORMALIZATION / IDENTITIES
 ========================================================= */
 
 function getFacturaRaw(item = {}) {
-  return safeObject(item?.raw);
+  const source = safeObject(item);
+  return safeObject(source.raw);
 }
 
-function getFacturaIdentityList(item = {}) {
+function normalizeFacturaSafe(item = {}) {
+  const source = safeObject(item);
+
+  try {
+    return normalizeFactura(source);
+  } catch {
+    return source;
+  }
+}
+
+function getStrongFacturaIdentityList(item = {}) {
   const source = safeObject(item);
   const raw = getFacturaRaw(source);
 
   return uniqueList([
-    source.id,
-    source._id,
     source.facturaId,
     source.invoiceId,
-    source.numero,
-    source.code,
+    source.numeroFacturaLegal,
+    source.numeroFacturaSistema,
+    source.numeroFactura,
     source.invoiceNumber,
     source.facturaNumero,
     source.facturaCode,
-    source.numeroFactura,
-    source.numeroFacturaLegal,
-    source.numeroFacturaSistema,
+    source.numero,
+    source.code,
 
-    raw.id,
-    raw._id,
     raw.facturaId,
     raw.invoiceId,
-    raw.numero,
-    raw.code,
+    raw.numeroFacturaLegal,
+    raw.numeroFacturaSistema,
+    raw.numeroFactura,
     raw.invoiceNumber,
     raw.facturaNumero,
     raw.facturaCode,
-    raw.numeroFactura,
-    raw.numeroFacturaLegal,
-    raw.numeroFacturaSistema,
+    raw.numero,
+    raw.code,
+  ]);
+}
+
+export function getFacturaStoreIdentityList(item = {}) {
+  const source = safeObject(item);
+  const raw = getFacturaRaw(source);
+
+  const incidenciaId = safeText(getFacturaIncidenciaId(source), "");
+  const strongIds = getStrongFacturaIdentityList(source);
+
+  const weakIds = uniqueList([
+    source.id,
+    source._id,
+
+    raw.id,
+    raw._id,
 
     source.data?.id,
     source.data?.facturaId,
@@ -307,38 +440,78 @@ function getFacturaIdentityList(item = {}) {
     source.result?.invoiceId,
     source.result?.numero,
   ]);
+
+  let modelIds = [];
+
+  try {
+    modelIds = getModelFacturaIdentityList(source);
+  } catch {
+    modelIds = [];
+  }
+
+  return uniqueList([
+    ...strongIds,
+    ...weakIds,
+    ...modelIds,
+  ]).filter((candidate) => {
+    if (!candidate) return false;
+
+    /*
+      Seguridad:
+      si un id coincide con la incidencia vinculada y parece código de ticket,
+      no se usa como identidad primaria de factura.
+    */
+    if (
+      incidenciaId &&
+      sameIdentity(candidate, incidenciaId) &&
+      isTicketLikeId(candidate)
+    ) {
+      return false;
+    }
+
+    return true;
+  });
 }
 
-function getFacturaStoreId(item = {}) {
-  return safeText(
-    first(...getFacturaIdentityList(item)),
-    ""
-  );
+export function getFacturaStoreId(item = {}) {
+  const source = safeObject(item);
+
+  const primaryId = safeText(getFacturaPrimaryId(source), "");
+  const incidenciaId = safeText(getFacturaIncidenciaId(source), "");
+
+  if (
+    primaryId &&
+    !(incidenciaId && sameIdentity(primaryId, incidenciaId) && isTicketLikeId(primaryId))
+  ) {
+    return primaryId;
+  }
+
+  return safeText(first(...getFacturaStoreIdentityList(source)), "");
 }
 
-function getFacturaStoreNumber(item = {}) {
+export function getFacturaStoreNumber(item = {}) {
   const source = safeObject(item);
   const raw = getFacturaRaw(source);
 
   return safeText(
     first(
-      source.numero,
-      source.code,
+      source.numeroFacturaLegal,
+      source.numeroFacturaSistema,
+      source.numeroFactura,
       source.invoiceNumber,
       source.facturaNumero,
       source.facturaCode,
-      source.numeroFactura,
-      source.numeroFacturaLegal,
-      source.numeroFacturaSistema,
+      source.numero,
+      source.code,
 
-      raw.numero,
-      raw.code,
+      raw.numeroFacturaLegal,
+      raw.numeroFacturaSistema,
+      raw.numeroFactura,
       raw.invoiceNumber,
       raw.facturaNumero,
       raw.facturaCode,
-      raw.numeroFactura,
-      raw.numeroFacturaLegal,
-      raw.numeroFacturaSistema
+      raw.numero,
+      raw.code
     ),
     ""
   );
@@ -349,624 +522,56 @@ function facturaMatchesId(item = {}, id = "") {
 
   if (!target) return false;
 
-  return getFacturaIdentityList(item).some((candidate) =>
+  return getFacturaStoreIdentityList(item).some((candidate) =>
     sameIdentity(candidate, target)
   );
 }
 
 function getFacturaDedupeKey(item = {}) {
-  const identities = getFacturaIdentityList(item);
+  const source = safeObject(item);
 
   const preferred = first(
-    item?.id,
-    item?._id,
-    item?.facturaId,
-    item?.invoiceId,
-    item?.raw?.id,
-    item?.raw?._id,
-    item?.raw?.facturaId,
-    item?.raw?.invoiceId,
-    identities[0]
+    source.facturaId,
+    source.invoiceId,
+    source.numeroFacturaLegal,
+    source.numeroFacturaSistema,
+    source.numeroFactura,
+    source.invoiceNumber,
+    source.numero,
+    source.code,
+    source.id,
+    source._id,
+    ...getFacturaStoreIdentityList(source)
   );
 
   return normalizeText(preferred);
 }
 
 /* =========================================================
-   INCIDENCIA / TICKET HELPERS
+   INCIDENCIA HELPERS
 ========================================================= */
 
-function pickTicketIdFromArray(value = []) {
-  const items = safeArray(value);
+function facturaMatchesIncidenciaId(item = {}, id = "") {
+  const target = safeText(id, "");
 
-  for (const item of items) {
-    if (typeof item === "string" && item.trim()) {
-      return item.trim();
-    }
+  if (!target) return false;
 
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-
-    const candidate = first(
-      item.ticketId,
-      item.incidenciaId,
-      item.id,
-      item.code,
-      item.numero,
-      item.relatedTicketId,
-      item.relatedIncidentId,
-      item.supportTicketId,
-      item.caseId,
-
-      item.ticket?.ticketId,
-      item.ticket?.incidenciaId,
-      item.ticket?.id,
-
-      item.incidencia?.ticketId,
-      item.incidencia?.incidenciaId,
-      item.incidencia?.id,
-
-      item.linkedTicket?.ticketId,
-      item.linkedTicket?.incidenciaId,
-      item.linkedTicket?.id
-    );
-
-    if (candidate) {
-      return safeText(candidate, "");
-    }
-  }
-
-  return null;
+  return sameIdentity(getFacturaIncidenciaId(item), target);
 }
 
-function getRelatedIncidenciaId(item = {}) {
-  const source = safeObject(item);
-  const raw = getFacturaRaw(source);
-
-  const incidencia = safeObject(first(source.incidencia, raw.incidencia));
-  const ticket = safeObject(first(source.ticket, raw.ticket));
-  const linkedTicket = safeObject(first(source.linkedTicket, raw.linkedTicket));
-  const relatedTicket = safeObject(first(source.relatedTicket, raw.relatedTicket));
-  const relatedIncident = safeObject(first(source.relatedIncident, raw.relatedIncident));
-
-  const relationTicket = safeObject(first(source.relations?.ticket, raw.relations?.ticket));
-  const relationIncidencia = safeObject(first(source.relations?.incidencia, raw.relations?.incidencia));
-
-  return safeText(
-    first(
-      source.ticketId,
-      source.incidenciaId,
-
-      incidencia.ticketId,
-      incidencia.id,
-      incidencia.incidenciaId,
-
-      ticket.ticketId,
-      ticket.id,
-      ticket.incidenciaId,
-
-      linkedTicket.ticketId,
-      linkedTicket.id,
-      linkedTicket.incidenciaId,
-
-      relatedTicket.ticketId,
-      relatedTicket.id,
-      relatedTicket.incidenciaId,
-
-      relatedIncident.ticketId,
-      relatedIncident.id,
-      relatedIncident.incidenciaId,
-
-      relationTicket.ticketId,
-      relationTicket.id,
-      relationTicket.incidenciaId,
-
-      relationIncidencia.ticketId,
-      relationIncidencia.id,
-      relationIncidencia.incidenciaId,
-
-      source.relatedTicketId,
-      source.relatedIncidentId,
-      source.supportTicketId,
-      source.caseId,
-
-      source.meta?.ticketId,
-      source.meta?.incidenciaId,
-
-      pickTicketIdFromArray(source.ticketIds),
-      pickTicketIdFromArray(source.incidenciaIds),
-      pickTicketIdFromArray(source.relatedTicketIds),
-      pickTicketIdFromArray(source.relatedIncidentIds),
-      pickTicketIdFromArray(source.linkedTickets),
-      pickTicketIdFromArray(source.incidencias),
-      pickTicketIdFromArray(source.tickets),
-      pickTicketIdFromArray(source.relatedTickets),
-      pickTicketIdFromArray(source.relations),
-      pickTicketIdFromArray(source.facturasRelacionadas),
-      pickTicketIdFromArray(source.linkedInvoices?.tickets),
-      pickTicketIdFromArray(source.invoiceLinks),
-      pickTicketIdFromArray(source.invoiceRelations),
-
-      raw.ticketId,
-      raw.incidenciaId,
-
-      raw.incidencia?.ticketId,
-      raw.incidencia?.id,
-      raw.incidencia?.incidenciaId,
-
-      raw.ticket?.ticketId,
-      raw.ticket?.id,
-      raw.ticket?.incidenciaId,
-
-      raw.linkedTicket?.ticketId,
-      raw.linkedTicket?.id,
-      raw.linkedTicket?.incidenciaId,
-
-      raw.relatedTicket?.ticketId,
-      raw.relatedTicket?.id,
-      raw.relatedTicket?.incidenciaId,
-
-      raw.relatedIncident?.ticketId,
-      raw.relatedIncident?.id,
-      raw.relatedIncident?.incidenciaId,
-
-      raw.relations?.ticket?.ticketId,
-      raw.relations?.ticket?.id,
-      raw.relations?.ticket?.incidenciaId,
-
-      raw.relations?.incidencia?.ticketId,
-      raw.relations?.incidencia?.id,
-      raw.relations?.incidencia?.incidenciaId,
-
-      raw.relatedTicketId,
-      raw.relatedIncidentId,
-      raw.supportTicketId,
-      raw.caseId,
-
-      raw.meta?.ticketId,
-      raw.meta?.incidenciaId,
-
-      pickTicketIdFromArray(raw.ticketIds),
-      pickTicketIdFromArray(raw.incidenciaIds),
-      pickTicketIdFromArray(raw.relatedTicketIds),
-      pickTicketIdFromArray(raw.relatedIncidentIds),
-      pickTicketIdFromArray(raw.linkedTickets),
-      pickTicketIdFromArray(raw.incidencias),
-      pickTicketIdFromArray(raw.tickets),
-      pickTicketIdFromArray(raw.relatedTickets),
-      pickTicketIdFromArray(raw.relations),
-      pickTicketIdFromArray(raw.facturasRelacionadas),
-      pickTicketIdFromArray(raw.linkedInvoices?.tickets),
-      pickTicketIdFromArray(raw.invoiceLinks),
-      pickTicketIdFromArray(raw.invoiceRelations)
-    ),
-    ""
-  );
-}
-
-function buildIncidenciaPayload(item = {}) {
-  const source = safeObject(item);
-  const raw = getFacturaRaw(source);
-
-  const incidencia = safeObject(first(source.incidencia, raw.incidencia));
-  const ticket = safeObject(first(source.ticket, raw.ticket));
-  const linkedTicket = safeObject(first(source.linkedTicket, raw.linkedTicket));
-  const relatedTicket = safeObject(first(source.relatedTicket, raw.relatedTicket));
-
-  const relationTicket = safeObject(first(source.relations?.ticket, raw.relations?.ticket));
-
-  const incidenciaId = getRelatedIncidenciaId(source);
-
-  if (!incidenciaId) {
+function getFacturaIncidenciaPayloadSafe(item = {}) {
+  try {
+    return buildFacturaIncidenciaPayload(item);
+  } catch {
     return null;
   }
-
-  const subject = safeText(
-    first(
-      incidencia.subject,
-      incidencia.asunto,
-      incidencia.title,
-
-      ticket.subject,
-      ticket.asunto,
-      ticket.title,
-
-      linkedTicket.subject,
-      linkedTicket.asunto,
-      linkedTicket.title,
-
-      relatedTicket.subject,
-      relatedTicket.asunto,
-      relatedTicket.title,
-
-      relationTicket.subject,
-      relationTicket.asunto,
-      relationTicket.title,
-
-      source.subject,
-      source.asunto,
-      source.title,
-
-      raw.subject,
-      raw.asunto,
-      raw.title,
-
-      "Incidencia relacionada"
-    ),
-    "Incidencia relacionada"
-  );
-
-  return {
-    ...incidencia,
-
-    id: incidenciaId,
-    ticketId: incidenciaId,
-    incidenciaId,
-
-    code: safeText(
-      first(
-        incidencia.code,
-        ticket.code,
-        linkedTicket.code,
-        relatedTicket.code,
-        relationTicket.code,
-        incidenciaId
-      ),
-      incidenciaId
-    ),
-
-    ticketCode: safeText(
-      first(
-        incidencia.ticketCode,
-        ticket.ticketCode,
-        linkedTicket.ticketCode,
-        relatedTicket.ticketCode,
-        relationTicket.ticketCode,
-        incidenciaId
-      ),
-      incidenciaId
-    ),
-
-    subject,
-    asunto: safeText(first(incidencia.asunto, subject), subject),
-    title: safeText(first(incidencia.title, subject), subject),
-
-    clienteId: safeText(
-      first(
-        incidencia.clienteId,
-        ticket.clienteId,
-        linkedTicket.clienteId,
-        relatedTicket.clienteId,
-        relationTicket.clienteId,
-
-        source.clienteId,
-        source.cliente?.id,
-        source.clientId,
-        source.client?.id,
-
-        raw.clienteId,
-        raw.cliente?.id,
-        raw.clientId,
-        raw.client?.id,
-        ""
-      ),
-      ""
-    ),
-
-    clienteNombre: safeText(
-      first(
-        incidencia.clienteNombre,
-        incidencia.name,
-        incidencia.nombre,
-
-        ticket.clienteNombre,
-        ticket.name,
-        ticket.nombre,
-
-        linkedTicket.clienteNombre,
-        linkedTicket.name,
-        linkedTicket.nombre,
-
-        relatedTicket.clienteNombre,
-        relatedTicket.name,
-        relatedTicket.nombre,
-
-        relationTicket.clienteNombre,
-        relationTicket.name,
-        relationTicket.nombre,
-
-        source.clienteNombre,
-        source.cliente?.nombre,
-        source.cliente?.nombreContacto,
-        source.cliente?.name,
-        source.clientName,
-        source.client?.name,
-
-        raw.clienteNombre,
-        raw.cliente?.nombre,
-        raw.cliente?.nombreContacto,
-        raw.cliente?.name,
-        raw.clientName,
-        raw.client?.name,
-        ""
-      ),
-      ""
-    ),
-
-    relationType: safeText(
-      first(
-        incidencia.relationType,
-        ticket.relationType,
-        linkedTicket.relationType,
-        relatedTicket.relationType,
-        relationTicket.relationType,
-        source.relationType,
-        raw.relationType,
-        "linked_ticket"
-      ),
-      "linked_ticket"
-    ),
-
-    linkedAt: safeText(
-      first(
-        incidencia.linkedAt,
-        ticket.linkedAt,
-        linkedTicket.linkedAt,
-        relatedTicket.linkedAt,
-        relationTicket.linkedAt,
-        source.linkedAt,
-        raw.linkedAt,
-        source.updatedAt,
-        raw.updatedAt,
-        ""
-      ),
-      ""
-    ),
-
-    linkedAtES: safeText(
-      first(
-        incidencia.linkedAtES,
-        ticket.linkedAtES,
-        linkedTicket.linkedAtES,
-        relatedTicket.linkedAtES,
-        relationTicket.linkedAtES,
-        source.linkedAtES,
-        raw.linkedAtES,
-        source.updatedAtES,
-        raw.updatedAtES,
-        ""
-      ),
-      ""
-    ),
-  };
-}
-
-function mergeRawIncidencia(raw = {}, incidenciaId = "", incidenciaPayload = null) {
-  const base = safeObject(raw);
-
-  if (!incidenciaId) {
-    return base;
-  }
-
-  return {
-    ...base,
-
-    ticketId: safeText(first(base.ticketId, incidenciaId), incidenciaId),
-    incidenciaId: safeText(first(base.incidenciaId, incidenciaId), incidenciaId),
-
-    relatedTicketId: safeText(
-      first(base.relatedTicketId, incidenciaId),
-      incidenciaId
-    ),
-
-    relatedIncidentId: safeText(
-      first(base.relatedIncidentId, incidenciaId),
-      incidenciaId
-    ),
-
-    supportTicketId: safeText(
-      first(base.supportTicketId, incidenciaId),
-      incidenciaId
-    ),
-
-    caseId: safeText(
-      first(base.caseId, incidenciaId),
-      incidenciaId
-    ),
-
-    incidencia: hasOwnKeys(base.incidencia)
-      ? {
-          ...incidenciaPayload,
-          ...base.incidencia,
-          id: safeText(first(base.incidencia?.id, incidenciaId), incidenciaId),
-          ticketId: safeText(first(base.incidencia?.ticketId, incidenciaId), incidenciaId),
-          incidenciaId: safeText(first(base.incidencia?.incidenciaId, incidenciaId), incidenciaId),
-        }
-      : incidenciaPayload,
-
-    ticket: hasOwnKeys(base.ticket)
-      ? {
-          ...incidenciaPayload,
-          ...base.ticket,
-          id: safeText(first(base.ticket?.id, incidenciaId), incidenciaId),
-          ticketId: safeText(first(base.ticket?.ticketId, incidenciaId), incidenciaId),
-          incidenciaId: safeText(first(base.ticket?.incidenciaId, incidenciaId), incidenciaId),
-        }
-      : incidenciaPayload,
-
-    linkedTicket: hasOwnKeys(base.linkedTicket)
-      ? {
-          ...incidenciaPayload,
-          ...base.linkedTicket,
-          id: safeText(first(base.linkedTicket?.id, incidenciaId), incidenciaId),
-          ticketId: safeText(first(base.linkedTicket?.ticketId, incidenciaId), incidenciaId),
-          incidenciaId: safeText(first(base.linkedTicket?.incidenciaId, incidenciaId), incidenciaId),
-        }
-      : incidenciaPayload,
-
-    meta: {
-      ...safeObject(base.meta),
-      hasIncidencia: true,
-      incidenciaId,
-      ticketId: incidenciaId,
-    },
-  };
-}
-
-function preserveIncidenciaFields(normalized = {}, original = {}) {
-  const base = safeObject(normalized);
-  const source = safeObject(original);
-
-  const baseRaw = getFacturaRaw(base);
-  const sourceRaw = getFacturaRaw(source);
-
-  const raw = {
-    ...(hasOwnKeys(sourceRaw) ? sourceRaw : source),
-    ...(hasOwnKeys(baseRaw) ? baseRaw : {}),
-  };
-
-  const probe = {
-    ...source,
-    ...base,
-    raw,
-  };
-
-  const incidenciaId = getRelatedIncidenciaId(probe);
-  const incidenciaPayload = buildIncidenciaPayload(probe);
-
-  if (!incidenciaId) {
-    return {
-      ...base,
-
-      raw,
-
-      meta: {
-        ...safeObject(source.meta),
-        ...safeObject(base.meta),
-        hasIncidencia: Boolean(
-          first(
-            base.meta?.hasIncidencia,
-            source.meta?.hasIncidencia,
-            raw.meta?.hasIncidencia,
-            false
-          )
-        ),
-      },
-    };
-  }
-
-  const nextRaw = mergeRawIncidencia(
-    raw,
-    incidenciaId,
-    incidenciaPayload
-  );
-
-  return {
-    ...base,
-
-    ticketId: incidenciaId,
-    incidenciaId,
-
-    relatedTicketId: safeText(
-      first(
-        base.relatedTicketId,
-        source.relatedTicketId,
-        nextRaw.relatedTicketId,
-        incidenciaId
-      ),
-      incidenciaId
-    ),
-
-    relatedIncidentId: safeText(
-      first(
-        base.relatedIncidentId,
-        source.relatedIncidentId,
-        nextRaw.relatedIncidentId,
-        incidenciaId
-      ),
-      incidenciaId
-    ),
-
-    supportTicketId: safeText(
-      first(
-        base.supportTicketId,
-        source.supportTicketId,
-        nextRaw.supportTicketId,
-        incidenciaId
-      ),
-      incidenciaId
-    ),
-
-    caseId: safeText(
-      first(
-        base.caseId,
-        source.caseId,
-        nextRaw.caseId,
-        incidenciaId
-      ),
-      incidenciaId
-    ),
-
-    incidencia: incidenciaPayload,
-
-    ticket: hasOwnKeys(first(base.ticket, source.ticket, nextRaw.ticket))
-      ? {
-          ...incidenciaPayload,
-          ...safeObject(first(base.ticket, source.ticket, nextRaw.ticket)),
-        }
-      : incidenciaPayload,
-
-    linkedTicket: hasOwnKeys(first(base.linkedTicket, source.linkedTicket, nextRaw.linkedTicket))
-      ? {
-          ...incidenciaPayload,
-          ...safeObject(first(base.linkedTicket, source.linkedTicket, nextRaw.linkedTicket)),
-        }
-      : incidenciaPayload,
-
-    relationType: safeText(
-      first(
-        base.relationType,
-        source.relationType,
-        nextRaw.relationType,
-        incidenciaPayload?.relationType,
-        "linked_ticket"
-      ),
-      "linked_ticket"
-    ),
-
-    meta: {
-      ...safeObject(source.meta),
-      ...safeObject(base.meta),
-      ...safeObject(nextRaw.meta),
-      hasIncidencia: true,
-      incidenciaId,
-      ticketId: incidenciaId,
-    },
-
-    raw: nextRaw,
-  };
 }
 
 /* =========================================================
-   FACTURA NORMALIZATION
+   MERGE / DEDUPE
 ========================================================= */
 
-function normalizeFacturaPreservingLinks(item = {}) {
-  const original = safeObject(item);
-
-  let normalized = original;
-
-  try {
-    normalized = normalizeFactura(original);
-  } catch {
-    normalized = original;
-  }
-
-  return preserveIncidenciaFields(normalized, original);
-}
-
-function mergeFacturaPreservingLinks(current = {}, incoming = {}) {
+function mergeFactura(current = {}, incoming = {}) {
   const currentSafe = safeObject(current);
   const incomingSafe = safeObject(incoming);
 
@@ -984,33 +589,71 @@ function mergeFacturaPreservingLinks(current = {}, incoming = {}) {
     meta: {
       ...safeObject(currentSafe.meta),
       ...safeObject(incomingSafe.meta),
+      ...safeObject(mergedRaw.meta),
     },
   };
 
-  return preserveIncidenciaFields(merged, {
-    ...currentSafe,
-    ...incomingSafe,
-    raw: mergedRaw,
-  });
+  const normalized = normalizeFacturaSafe(merged);
+
+  /*
+    El model ya preserva incidencia. Este bloque solo asegura que, si el merge
+    dejó una relación visible, los flags meta quedan coherentes.
+  */
+  const incidenciaId = safeText(getFacturaIncidenciaId(normalized), "");
+
+  if (!incidenciaId) {
+    return normalized;
+  }
+
+  const incidenciaPayload = getFacturaIncidenciaPayloadSafe(normalized);
+
+  return {
+    ...normalized,
+
+    ticketId: safeText(first(normalized.ticketId, incidenciaId), incidenciaId),
+    incidenciaId: safeText(first(normalized.incidenciaId, incidenciaId), incidenciaId),
+
+    incidencia: safeObject(first(normalized.incidencia, incidenciaPayload), incidenciaPayload || {}),
+    ticket: safeObject(first(normalized.ticket, incidenciaPayload), incidenciaPayload || {}),
+    linkedTicket: safeObject(first(normalized.linkedTicket, incidenciaPayload), incidenciaPayload || {}),
+
+    meta: {
+      ...safeObject(normalized.meta),
+      hasIncidencia: true,
+      ticketId: incidenciaId,
+      incidenciaId,
+    },
+
+    raw: {
+      ...safeObject(normalized.raw),
+      ticketId: safeText(first(normalized.raw?.ticketId, incidenciaId), incidenciaId),
+      incidenciaId: safeText(first(normalized.raw?.incidenciaId, incidenciaId), incidenciaId),
+
+      meta: {
+        ...safeObject(normalized.raw?.meta),
+        hasIncidencia: true,
+        ticketId: incidenciaId,
+        incidenciaId,
+      },
+    },
+  };
 }
 
-function normalizeFacturaCollection(items = []) {
-  return safeArray(items)
-    .map((item) => normalizeFacturaPreservingLinks(item))
-    .filter((item) => Boolean(getFacturaStoreId(item)));
-}
+function findMatchingMapKey(map = new Map(), factura = {}) {
+  const identities = getFacturaStoreIdentityList(factura);
 
-function findMatchingMapKey(map = new Map(), item = {}) {
-  const identities = getFacturaIdentityList(item);
+  if (!identities.length) {
+    return "";
+  }
 
-  for (const [key, existing] of map.entries()) {
-    if (
-      identities.some((identity) =>
-        getFacturaIdentityList(existing).some((candidate) =>
-          sameIdentity(identity, candidate)
-        )
-      )
-    ) {
+  for (const [key, current] of map.entries()) {
+    const currentIdentities = getFacturaStoreIdentityList(current);
+
+    const matches = identities.some((identity) =>
+      currentIdentities.some((candidate) => sameIdentity(identity, candidate))
+    );
+
+    if (matches) {
       return key;
     }
   }
@@ -1018,158 +661,106 @@ function findMatchingMapKey(map = new Map(), item = {}) {
   return "";
 }
 
+function normalizeFacturaCollection(items = []) {
+  return safeArray(items)
+    .map((item) => normalizeFacturaSafe(item))
+    .filter((item) => hasOwnKeys(item))
+    .filter((item) => Boolean(getFacturaStoreId(item)));
+}
+
 function dedupeFacturas(items = []) {
   const map = new Map();
 
   for (const item of safeArray(items)) {
-    const normalized = normalizeFacturaPreservingLinks(item);
-    const primaryKey = getFacturaDedupeKey(normalized);
+    const normalized = normalizeFacturaSafe(item);
+    const key = getFacturaDedupeKey(normalized);
 
-    if (!primaryKey) {
+    if (!key) {
       continue;
     }
 
     const matchingKey = findMatchingMapKey(map, normalized);
-    const finalKey = matchingKey || primaryKey;
+    const finalKey = matchingKey || key;
     const current = map.get(finalKey) || {};
 
-    map.set(
-      finalKey,
-      mergeFacturaPreservingLinks(current, normalized)
-    );
+    map.set(finalKey, mergeFactura(current, normalized));
   }
 
   return Array.from(map.values());
 }
 
 /* =========================================================
-   STORE COLLECTION SHAPE
-========================================================= */
-
-function resolveStoreCollectionShape(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  const obj = safeObject(value);
-
-  return safeArray(
-    first(
-      obj.items,
-      obj.facturas,
-      obj.data,
-      obj.results,
-      obj.rows,
-      obj.records,
-      obj.collection,
-
-      obj.data?.items,
-      obj.data?.facturas,
-      obj.data?.results,
-      obj.data?.rows,
-
-      obj.result?.items,
-      obj.result?.facturas,
-      obj.result?.results,
-      obj.result?.rows,
-
-      obj.payload?.items,
-      obj.payload?.facturas,
-      obj.payload?.results,
-      obj.payload?.rows,
-
-      []
-    )
-  );
-}
-
-function readRawFacturasStore() {
-  for (const path of STORE_READ_PATHS) {
-    const value = safeGet(path, null);
-    const collection = resolveStoreCollectionShape(value);
-
-    if (collection.length) {
-      return collection;
-    }
-  }
-
-  return [];
-}
-
-function persistFacturasStore(items = []) {
-  const normalized = dedupeFacturas(items);
-
-  let written = false;
-
-  if (safeSetCollection(FACTURAS_COLLECTION_NAME, normalized)) {
-    written = true;
-  }
-
-  for (const path of STORE_WRITE_PATHS) {
-    if (safeSet(path, normalized)) {
-      written = true;
-    }
-  }
-
-  return written;
-}
-
-/* =========================================================
-   READ
+   READ API
 ========================================================= */
 
 export function getFacturasStore() {
-  const raw = readRawFacturasStore();
-  return normalizeFacturaCollection(raw);
+  return normalizeFacturaCollection(readRawFacturasStore());
 }
 
-export function getSortedFacturasStore({
-  sortBy = DEFAULT_FACTURAS_SORT?.field || FALLBACK_SORT.field,
-  direction = DEFAULT_FACTURAS_SORT?.direction || FALLBACK_SORT.direction,
-} = {}) {
-  const items = getFacturasStore();
-  const field = safeText(sortBy, FALLBACK_SORT.field);
-  const dir = safeText(direction, FALLBACK_SORT.direction).toLowerCase() === "asc"
+export function getSortedFacturasStore(options = {}) {
+  const opts = safeObject(options);
+
+  const field = safeText(
+    first(
+      opts.field,
+      opts.sortBy,
+      opts.sort?.field,
+      DEFAULT_FACTURAS_SORT?.field,
+      FALLBACK_SORT.field
+    ),
+    FALLBACK_SORT.field
+  );
+
+  const direction = safeText(
+    first(
+      opts.direction,
+      opts.sortDirection,
+      opts.sort?.direction,
+      DEFAULT_FACTURAS_SORT?.direction,
+      FALLBACK_SORT.direction
+    ),
+    FALLBACK_SORT.direction
+  ).toLowerCase() === "asc"
     ? "asc"
     : "desc";
 
+  const items = getFacturasStore();
+
   try {
-    if (typeof sortFacturas === "function") {
-      return sortFacturas([...items], {
-        field,
-        direction: dir,
-      });
-    }
+    return sortFacturas(items, {
+      field,
+      direction,
+    });
   } catch {}
 
-  const factor = dir === "asc" ? 1 : -1;
+  const factor = direction === "asc" ? 1 : -1;
   const list = [...items];
 
   list.sort((a, b) => {
     if (field === "timestampMs") {
-      return compareNumber(a?.meta?.timestampMs, b?.meta?.timestampMs) * factor;
+      return (safeNumber(a?.meta?.timestampMs, 0) - safeNumber(b?.meta?.timestampMs, 0)) * factor;
     }
 
     if (field === "fechaMs") {
-      return compareNumber(a?.meta?.fechaMs, b?.meta?.fechaMs) * factor;
+      return (safeNumber(a?.meta?.fechaMs, 0) - safeNumber(b?.meta?.fechaMs, 0)) * factor;
     }
 
     if (field === "updatedAtMs") {
-      return compareNumber(a?.meta?.updatedAtMs, b?.meta?.updatedAtMs) * factor;
+      return (safeNumber(a?.meta?.updatedAtMs, 0) - safeNumber(b?.meta?.updatedAtMs, 0)) * factor;
     }
 
-    if (field === "fecha" || field === "createdAt" || field === "updatedAt") {
+    if (["fecha", "createdAt", "updatedAt"].includes(field)) {
       return compareDate(a?.[field], b?.[field]) * factor;
     }
 
-    if (field === "total" || field === "importe" || field === "amount") {
-      return compareNumber(a?.[field], b?.[field]) * factor;
+    if (["total", "importe", "amount", "importeTotal", "totalFactura"].includes(field)) {
+      return (safeNumber(a?.[field], 0) - safeNumber(b?.[field], 0)) * factor;
     }
 
     if (field === "cliente") {
       return compareText(
-        first(a?.cliente?.nombre, a?.cliente?.nombreContacto, a?.clienteNombre, a?.clientName),
-        first(b?.cliente?.nombre, b?.cliente?.nombreContacto, b?.clienteNombre, b?.clientName)
+        first(a?.cliente?.empresa, a?.cliente?.nombre, a?.clienteNombre, a?.clientName),
+        first(b?.cliente?.empresa, b?.cliente?.nombre, b?.clienteNombre, b?.clientName)
       ) * factor;
     }
 
@@ -1190,11 +781,7 @@ export function getFacturaByIdStore(id = "") {
     return null;
   }
 
-  return (
-    getFacturasStore().find((item) =>
-      facturaMatchesId(item, facturaId)
-    ) || null
-  );
+  return getFacturasStore().find((item) => facturaMatchesId(item, facturaId)) || null;
 }
 
 export function getFacturaByIncidenciaIdStore(id = "") {
@@ -1204,11 +791,7 @@ export function getFacturaByIncidenciaIdStore(id = "") {
     return null;
   }
 
-  return (
-    getFacturasStore().find((item) =>
-      sameIdentity(getRelatedIncidenciaId(item), incidenciaId)
-    ) || null
-  );
+  return getFacturasStore().find((item) => facturaMatchesIncidenciaId(item, incidenciaId)) || null;
 }
 
 export function hasFacturasStore() {
@@ -1220,7 +803,7 @@ export function countFacturasStore() {
 }
 
 /* =========================================================
-   WRITE
+   WRITE API
 ========================================================= */
 
 export function setFacturasStore(items = []) {
@@ -1228,39 +811,38 @@ export function setFacturasStore(items = []) {
 }
 
 export function appendFacturasStore(items = []) {
-  const merged = dedupeFacturas([
+  return persistFacturasStore([
     ...getFacturasStore(),
     ...safeArray(items),
   ]);
-
-  return persistFacturasStore(merged);
 }
 
 export function upsertFacturaStore(factura = null) {
-  const normalized = normalizeFacturaPreservingLinks(factura);
+  const normalized = normalizeFacturaSafe(factura);
   const facturaId = getFacturaStoreId(normalized);
 
   if (!facturaId) {
     return false;
   }
 
-  const current = [...getFacturasStore()];
+  const current = getFacturasStore();
+  const incomingIdentities = getFacturaStoreIdentityList(normalized);
+
   const index = current.findIndex((item) =>
-    getFacturaIdentityList(normalized).some((identity) =>
-      facturaMatchesId(item, identity)
-    )
+    incomingIdentities.some((identity) => facturaMatchesId(item, identity))
   );
 
-  if (index === -1) {
-    current.unshift(normalized);
-  } else {
-    current[index] = mergeFacturaPreservingLinks(
-      current[index],
-      normalized
-    );
+  if (index < 0) {
+    return persistFacturasStore([
+      normalized,
+      ...current,
+    ]);
   }
 
-  return persistFacturasStore(current);
+  const next = [...current];
+  next[index] = mergeFactura(next[index], normalized);
+
+  return persistFacturasStore(next);
 }
 
 export function removeFacturaByIdStore(id = "") {
@@ -1270,11 +852,9 @@ export function removeFacturaByIdStore(id = "") {
     return false;
   }
 
-  const filtered = getFacturasStore().filter((item) =>
-    !facturaMatchesId(item, facturaId)
+  return persistFacturasStore(
+    getFacturasStore().filter((item) => !facturaMatchesId(item, facturaId))
   );
-
-  return persistFacturasStore(filtered);
 }
 
 export function clearFacturasStore() {
@@ -1282,40 +862,45 @@ export function clearFacturasStore() {
 }
 
 /* =========================================================
-   DEBUG HELPERS
+   DEBUG
 ========================================================= */
 
 export function debugFacturasIncidenciasStore() {
-  return getFacturasStore().map((item) => ({
-    id: getFacturaStoreId(item),
-    numero: getFacturaStoreNumber(item),
+  return getFacturasStore().map((item) => {
+    const incidenciaPayload = getFacturaIncidenciaPayloadSafe(item);
 
-    identities: getFacturaIdentityList(item),
+    return {
+      id: getFacturaStoreId(item),
+      numero: getFacturaStoreNumber(item),
+      identities: getFacturaStoreIdentityList(item),
 
-    ticketId: item.ticketId || null,
-    incidenciaId: item.incidenciaId || null,
-    relatedTicketId: item.relatedTicketId || null,
-    relatedIncidentId: item.relatedIncidentId || null,
+      ticketId: item.ticketId || null,
+      incidenciaId: item.incidenciaId || null,
+      relatedTicketId: item.relatedTicketId || null,
+      relatedIncidentId: item.relatedIncidentId || null,
 
-    rawTicketId: item.raw?.ticketId || null,
-    rawIncidenciaId: item.raw?.incidenciaId || null,
-    rawRelatedTicketId: item.raw?.relatedTicketId || null,
-    rawRelatedIncidentId: item.raw?.relatedIncidentId || null,
+      rawTicketId: item.raw?.ticketId || null,
+      rawIncidenciaId: item.raw?.incidenciaId || null,
+      rawRelatedTicketId: item.raw?.relatedTicketId || null,
+      rawRelatedIncidentId: item.raw?.relatedIncidentId || null,
 
-    hasIncidencia: Boolean(item.meta?.hasIncidencia),
-    metaTicketId: item.meta?.ticketId || null,
-    metaIncidenciaId: item.meta?.incidenciaId || null,
+      hasIncidencia: Boolean(item.meta?.hasIncidencia),
+      metaTicketId: item.meta?.ticketId || null,
+      metaIncidenciaId: item.meta?.incidenciaId || null,
 
-    incidenciaSubject: safeText(
-      first(
-        item.incidencia?.subject,
-        item.incidencia?.asunto,
-        item.ticket?.subject,
-        item.ticket?.asunto
+      incidenciaSubject: safeText(
+        first(
+          item.incidencia?.subject,
+          item.incidencia?.asunto,
+          item.ticket?.subject,
+          item.ticket?.asunto,
+          incidenciaPayload?.subject,
+          incidenciaPayload?.asunto
+        ),
+        ""
       ),
-      ""
-    ),
-  }));
+    };
+  });
 }
 
 /* =========================================================
@@ -1335,6 +920,10 @@ export default {
   upsertFacturaStore,
   removeFacturaByIdStore,
   clearFacturasStore,
+
+  getFacturaStoreIdentityList,
+  getFacturaStoreId,
+  getFacturaStoreNumber,
 
   debugFacturasIncidenciasStore,
 };

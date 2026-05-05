@@ -2,13 +2,14 @@
    Onion SPA - Facturas Template
    Archivo: src/views/facturas/facturas.template.js
 
-   FINAL PRO SAAS PANEL · FACTURAS TEMPLATE · CSP CLEAN · 11/10 EXTREME
+   FINAL PRO SAAS PANEL · FACTURAS TEMPLATE · CSP CLEAN · 12/10 EXTREME
    PATCH · EXTERNAL CSS ONLY · NO STYLE INJECTION
    PATCH · NO INLINE STYLE · NO INLINE EVENTS
    PATCH · NO NATIVE TITLE TOOLTIP · DATA-TOOLTIP ONLY
    PATCH · REAL TABLE LOCK · NO ::BEFORE ON <TR>
-   PATCH · FILTERS + SORT BIDIRECTIONAL + SEARCH · SINGLE DATA FLOW
-   PATCH · SORT 2-CLICK TOGGLE: DESC ⇄ ASC
+   PATCH · FILTERS + DATE SORT TOGGLE + SEARCH · SINGLE DATA FLOW
+   PATCH · SORT ÚNICO: FECHA DESC ⇄ FECHA ASC
+   PATCH · INVOICE NUMBER AS INTERNAL TIEBREAKER ONLY
    PATCH · AVATAR TONES VIA CSS CLASSES
    PATCH · DATA-CONTRACT READY FOR VIEW.JS
    PATCH · ROW CLICK READY FOR DETAIL VIEW
@@ -23,9 +24,10 @@
    - Usar data-tooltip + aria-label.
    - Tabla real blindada.
    - Filtros visuales: todas / pendientes / pagadas / vencidas.
-   - Orden visual bidireccional: fecha desc/asc y número de factura desc/asc.
-   - Primer click ordena de mayor a menor.
-   - Segundo click sobre el mismo criterio ordena de menor a mayor.
+   - Orden visual único por fecha: más recientes / más antiguas.
+   - Primer click: Fecha ↓, mayor a menor.
+   - Segundo click: Fecha ↑, menor a mayor.
+   - Número de factura usado solo como desempate interno.
    - Búsqueda por factura, cliente, email, importe, forma de pago e incidencia.
    - Paginación real de 5 items por defecto sobre resultados filtrados.
    - Acciones compatibles con data-facturas-action y data-action.
@@ -78,17 +80,8 @@ const SORT_OPTIONS = Object.freeze([
     desc: "date_desc",
     asc: "date_asc",
     modes: ["date_desc", "date_asc"],
-    tooltipDesc: "Ordenar por fecha de emisión de mayor a menor",
-    tooltipAsc: "Ordenar por fecha de emisión de menor a mayor",
-  },
-  {
-    key: "invoice",
-    label: "Nº factura",
-    desc: "invoice_desc",
-    asc: "invoice_asc",
-    modes: ["invoice_desc", "invoice_asc"],
-    tooltipDesc: "Ordenar por número de factura de mayor a menor",
-    tooltipAsc: "Ordenar por número de factura de menor a mayor",
+    tooltipDesc: "Ordenar facturas de más recientes a más antiguas",
+    tooltipAsc: "Ordenar facturas de más antiguas a más recientes",
   },
 ]);
 
@@ -1334,14 +1327,6 @@ function sortFacturasOldestFirst(items = []) {
   return [...safeArray(items)].sort(compareFacturasDateAsc);
 }
 
-function sortFacturasByInvoiceDesc(items = []) {
-  return [...safeArray(items)].sort(compareFacturaNumeroDesc);
-}
-
-function sortFacturasByInvoiceAsc(items = []) {
-  return [...safeArray(items)].sort(compareFacturaNumeroAsc);
-}
-
 function hasPdf(item = {}) {
   const raw = getRaw(item);
 
@@ -1560,28 +1545,8 @@ function normalizeSort(value = "") {
       "oldest",
       "oldest_first",
       "menor_fecha",
-    ].includes(key)
-  ) {
-    return "date_asc";
-  }
 
-  if (
-    [
-      "invoice_desc",
-      "factura_desc",
-      "numero_desc",
-      "n_factura_desc",
-      "num_factura_desc",
-      "number_desc",
-      "invoice_number_desc",
-      "mayor_factura",
-    ].includes(key)
-  ) {
-    return "invoice_desc";
-  }
-
-  if (
-    [
+      /* Legacy compat: invoice asc now maps to date asc */
       "invoice_asc",
       "factura_asc",
       "numero_asc",
@@ -1592,7 +1557,7 @@ function normalizeSort(value = "") {
       "menor_factura",
     ].includes(key)
   ) {
-    return "invoice_asc";
+    return "date_asc";
   }
 
   return "date_desc";
@@ -1734,9 +1699,9 @@ function filterFacturas(items = [], input = {}) {
 function sortFacturas(items = [], input = {}) {
   const sortMode = getSortMode(input);
 
-  if (sortMode === "date_asc") return sortFacturasOldestFirst(items);
-  if (sortMode === "invoice_desc") return sortFacturasByInvoiceDesc(items);
-  if (sortMode === "invoice_asc") return sortFacturasByInvoiceAsc(items);
+  if (sortMode === "date_asc") {
+    return sortFacturasOldestFirst(items);
+  }
 
   return sortFacturasNewestFirst(items);
 }
@@ -1887,6 +1852,8 @@ function getPagination(items = [], input = {}) {
     ? Math.min(startIndex + pageItems.length, reportedTotal)
     : 0;
 
+  const sortMode = getSortMode(data);
+
   return {
     allItems: filteredAndSortedItems,
     pageItems,
@@ -1903,9 +1870,9 @@ function getPagination(items = [], input = {}) {
     filtering,
     activeFilter: getActiveFilter(data),
     searchQuery: getSearchQuery(data),
-    sortMode: getSortMode(data),
-    sortDirection: getSortDirection(getSortMode(data)),
-    sortOption: getSortOption(getSortMode(data)),
+    sortMode,
+    sortDirection: getSortDirection(sortMode),
+    sortOption: getSortOption(sortMode),
   };
 }
 
@@ -2734,11 +2701,11 @@ export function renderCards(input = {}) {
 
   const activeFilterLabel = getFilterLabel(pagination.activeFilter);
   const searchQuery = pagination.searchQuery;
-  const activeSortOption = getSortOption(pagination.sortMode);
   const activeSortDirection = getSortDirection(pagination.sortMode);
-  const activeSortLabel = `${activeSortOption.label} ${
-    activeSortDirection === "asc" ? "ascendente" : "descendente"
-  }`;
+  const activeSortLabel =
+    activeSortDirection === "asc"
+      ? "fecha ascendente"
+      : "fecha descendente";
 
   const activeCriteria = [
     pagination.activeFilter !== "all" ? activeFilterLabel : "",

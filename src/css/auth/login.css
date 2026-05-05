@@ -3,6 +3,7 @@
    Archivo: /src/css/auth/login.css
 
    FINAL EXTREME SYSTEM · APPLE STYLE · PRO SAAS AUTH · 10/10
+   TOKEN PRO SYSTEM ALIGNED · CSP CLEAN · NO INLINE · NO PALETTE LOCAL
 
    ARQUITECTURA:
    - variables.css = tokens base / dark
@@ -13,16 +14,18 @@
 
    REGLAS:
    - Sin paletas externas.
-   - Sin bloque [data-theme="light"] visual.
-   - Sin duplicidades pesadas con layout/core/ui.
+   - Sin bloque visual [data-theme="light"].
    - Dark/light salen por tokens.
+   - Sin duplicidades pesadas con layout/core/ui.
    - Login desktop con side panel + card derecha.
    - Mobile limpio: solo card.
+   - CSP friendly: sin estilos inline ni JS-injected styles.
 ========================================================= */
 
 
 /* =========================================================
    AUTH SCREEN COMPAT
+   Mantiene el shell limpio cuando body.auth-screen está activo.
 ========================================================= */
 
 body.auth-screen {
@@ -111,25 +114,37 @@ body.auth-screen.login-no-scroll #view-container {
 
   overflow: hidden;
 
+  color: var(--text);
+  font-family: var(--font-family);
+
   background:
     radial-gradient(
       circle at 12% 18%,
-      color-mix(in srgb, var(--accent), transparent 93%),
-      transparent 28%
+      color-mix(in srgb, var(--accent) 8%, transparent),
+      transparent 30%
     ),
     radial-gradient(
       circle at 88% 14%,
-      color-mix(in srgb, var(--info), transparent 94%),
-      transparent 24%
+      color-mix(in srgb, var(--info) 7%, transparent),
+      transparent 26%
     ),
     radial-gradient(
-      circle at 50% 100%,
-      color-mix(in srgb, var(--text-strong), transparent 98%),
-      transparent 26%
+      circle at 54% 106%,
+      color-mix(in srgb, var(--text-strong) 4%, transparent),
+      transparent 30%
     ),
     var(--gradient-overlay),
     var(--app-noise),
     var(--body-bg);
+
+  container-type: inline-size;
+}
+
+.login-view,
+.login-view *,
+.login-view *::before,
+.login-view *::after {
+  box-sizing: border-box;
 }
 
 .login-view::before {
@@ -142,21 +157,21 @@ body.auth-screen.login-no-scroll #view-container {
 
   background:
     linear-gradient(
-      color-mix(in srgb, var(--text-strong), transparent 98%) 1px,
+      color-mix(in srgb, var(--text-strong) 2%, transparent) 1px,
       transparent 1px
     ),
     linear-gradient(
       90deg,
-      color-mix(in srgb, var(--text-strong), transparent 98%) 1px,
+      color-mix(in srgb, var(--text-strong) 2%, transparent) 1px,
       transparent 1px
     );
 
   background-size: 34px 34px;
 
-  mask-image: linear-gradient(180deg, rgba(0,0,0,.25), transparent 84%);
-  -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,.25), transparent 84%);
+  mask-image: linear-gradient(180deg, rgb(0 0 0 / .28), transparent 84%);
+  -webkit-mask-image: linear-gradient(180deg, rgb(0 0 0 / .28), transparent 84%);
 
-  opacity: .08;
+  opacity: .46;
 }
 
 .login-view::after {
@@ -170,11 +185,61 @@ body.auth-screen.login-no-scroll #view-container {
   background:
     radial-gradient(
       circle at 50% 0%,
-      color-mix(in srgb, var(--text-strong), transparent 98%),
+      color-mix(in srgb, var(--text-strong) 3%, transparent),
       transparent 58%
     );
 
   opacity: .72;
+}
+
+
+/* =========================================================
+   SCENE
+========================================================= */
+
+.login-scene {
+  position: relative;
+  z-index: 1;
+  isolation: isolate;
+
+  inline-size: 100%;
+
+  min-block-size: 100vh;
+  min-block-size: 100dvh;
+
+  block-size: 100%;
+}
+
+
+/* =========================================================
+   GRID PRINCIPAL
+========================================================= */
+
+.login-grid {
+  position: relative;
+  z-index: 1;
+
+  inline-size: min(100%, 1520px);
+
+  min-block-size: 100vh;
+  min-block-size: 100dvh;
+
+  block-size: 100%;
+
+  margin-inline: auto;
+
+  padding:
+    clamp(16px, 2vh, 22px)
+    clamp(20px, 3vw, 40px);
+
+  display: grid;
+  grid-template-columns:
+    minmax(400px, 520px)
+    minmax(520px, 1fr);
+
+  align-items: center;
+
+  gap: clamp(26px, 3vw, 46px);
 }
 
 
@@ -185,8 +250,8 @@ body.auth-screen.login-no-scroll #view-container {
 .login-toast-stack {
   position: absolute;
 
-  inset-block-start: max(16px, var(--app-safe-top));
-  inset-inline-end: max(16px, var(--app-safe-right));
+  inset-block-start: max(16px, var(--app-safe-top, 0px));
+  inset-inline-end: max(16px, var(--app-safe-right, 0px));
 
   z-index: var(--z-toast);
 
@@ -228,10 +293,10 @@ body.auth-screen.login-no-scroll #view-container {
   pointer-events: auto;
 
   transition:
-    opacity .24s var(--ease-standard),
-    transform .24s var(--ease-standard),
-    border-color .24s var(--ease-standard),
-    box-shadow .24s var(--ease-standard);
+    opacity var(--duration-normal) var(--ease-standard),
+    transform var(--duration-normal) var(--ease-standard),
+    border-color var(--duration-normal) var(--ease-standard),
+    box-shadow var(--duration-normal) var(--ease-standard);
 }
 
 .login-toast::before {
@@ -248,7 +313,7 @@ body.auth-screen.login-no-scroll #view-container {
   background:
     radial-gradient(
       circle,
-      color-mix(in srgb, var(--accent), transparent 86%),
+      color-mix(in srgb, var(--accent) 14%, transparent),
       transparent 70%
     );
 
@@ -264,25 +329,28 @@ body.auth-screen.login-no-scroll #view-container {
 
 .login-toast.is-success {
   border-color: var(--border-success);
+
   box-shadow:
     var(--shadow-lg),
-    0 10px 22px color-mix(in srgb, var(--success), transparent 92%),
+    0 10px 22px color-mix(in srgb, var(--success) 8%, transparent),
     var(--shadow-inner);
 }
 
 .login-toast.is-error {
   border-color: var(--border-error);
+
   box-shadow:
     var(--shadow-lg),
-    0 10px 22px color-mix(in srgb, var(--error), transparent 92%),
+    0 10px 22px color-mix(in srgb, var(--error) 8%, transparent),
     var(--shadow-inner);
 }
 
 .login-toast.is-warning {
   border-color: var(--border-warning);
+
   box-shadow:
     var(--shadow-lg),
-    0 10px 22px color-mix(in srgb, var(--warning), transparent 92%),
+    0 10px 22px color-mix(in srgb, var(--warning) 8%, transparent),
     var(--shadow-inner);
 }
 
@@ -299,7 +367,7 @@ body.auth-screen.login-no-scroll #view-container {
   z-index: 1;
 
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: start;
 
   gap: 12px;
@@ -357,8 +425,8 @@ body.auth-screen.login-no-scroll #view-container {
   background: var(--info);
 
   box-shadow:
-    0 0 0 0 color-mix(in srgb, var(--info), transparent 92%),
-    0 0 14px color-mix(in srgb, var(--info), transparent 80%);
+    0 0 0 0 color-mix(in srgb, var(--info) 8%, transparent),
+    0 0 14px color-mix(in srgb, var(--info) 20%, transparent);
 
   animation: loginToastPulseDot .95s ease-in-out infinite;
 }
@@ -442,7 +510,7 @@ body.auth-screen.login-no-scroll #view-container {
     linear-gradient(
       90deg,
       var(--accent),
-      color-mix(in srgb, var(--accent-3), var(--text-strong) 16%)
+      color-mix(in srgb, var(--accent-3, var(--accent)) 84%, var(--text-strong) 16%)
     );
 
   transform-origin: left center;
@@ -471,8 +539,8 @@ body.auth-screen.login-no-scroll #view-container {
     transform: scale(.74);
 
     box-shadow:
-      0 0 0 0 color-mix(in srgb, var(--info), transparent 94%),
-      0 0 8px color-mix(in srgb, var(--info), transparent 88%);
+      0 0 0 0 color-mix(in srgb, var(--info) 6%, transparent),
+      0 0 8px color-mix(in srgb, var(--info) 12%, transparent);
   }
 
   50% {
@@ -480,59 +548,9 @@ body.auth-screen.login-no-scroll #view-container {
     transform: scale(1);
 
     box-shadow:
-      0 0 0 6px color-mix(in srgb, var(--info), transparent 90%),
-      0 0 16px color-mix(in srgb, var(--info), transparent 78%);
+      0 0 0 6px color-mix(in srgb, var(--info) 10%, transparent),
+      0 0 16px color-mix(in srgb, var(--info) 22%, transparent);
   }
-}
-
-
-/* =========================================================
-   SCENE
-========================================================= */
-
-.login-scene {
-  position: relative;
-  z-index: 1;
-  isolation: isolate;
-
-  inline-size: 100%;
-
-  min-block-size: 100vh;
-  min-block-size: 100dvh;
-
-  block-size: 100%;
-}
-
-
-/* =========================================================
-   GRID PRINCIPAL
-========================================================= */
-
-.login-grid {
-  position: relative;
-  z-index: 1;
-
-  inline-size: min(100%, 1520px);
-
-  min-block-size: 100vh;
-  min-block-size: 100dvh;
-
-  block-size: 100%;
-
-  margin-inline: auto;
-
-  padding:
-    clamp(16px, 2vh, 22px)
-    clamp(20px, 3vw, 40px);
-
-  display: grid;
-  grid-template-columns:
-    minmax(400px, 520px)
-    minmax(520px, 1fr);
-
-  align-items: center;
-
-  gap: clamp(26px, 3vw, 46px);
 }
 
 
@@ -591,16 +609,39 @@ body.auth-screen.login-no-scroll #view-container {
   background:
     radial-gradient(
       circle at top right,
-      color-mix(in srgb, var(--text-strong), transparent 95%),
+      color-mix(in srgb, var(--text-strong) 5%, transparent),
       transparent 28%
     ),
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--text-strong), transparent 98%),
+      color-mix(in srgb, var(--text-strong) 2%, transparent),
       transparent 32%
     );
 
   opacity: .86;
+}
+
+.login-side-panel::after {
+  content: "";
+  position: absolute;
+  inset: auto -18% -42% 42%;
+
+  inline-size: 220px;
+  block-size: 220px;
+
+  border-radius: 50%;
+
+  background:
+    radial-gradient(
+      circle,
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      transparent 70%
+    );
+
+  filter: blur(18px);
+  opacity: .84;
+
+  pointer-events: none;
 }
 
 .login-side-panel--status {
@@ -643,8 +684,8 @@ body.auth-screen.login-no-scroll #view-container {
   background: var(--gradient-success);
 
   box-shadow:
-    0 0 0 4px color-mix(in srgb, var(--success), transparent 92%),
-    0 0 10px color-mix(in srgb, var(--success), transparent 86%);
+    0 0 0 4px color-mix(in srgb, var(--success) 8%, transparent),
+    0 0 10px color-mix(in srgb, var(--success) 14%, transparent);
 }
 
 .login-side-panel--status h3 {
@@ -704,8 +745,8 @@ body.auth-screen.login-no-scroll #view-container {
   background: var(--gradient-success);
 
   box-shadow:
-    0 0 0 5px color-mix(in srgb, var(--success), transparent 92%),
-    0 0 14px color-mix(in srgb, var(--success), transparent 84%);
+    0 0 0 5px color-mix(in srgb, var(--success) 8%, transparent),
+    0 0 14px color-mix(in srgb, var(--success) 16%, transparent);
 
   animation: loginPilotPulse 2.6s ease-in-out infinite;
 }
@@ -777,7 +818,8 @@ body.auth-screen.login-no-scroll #view-container {
 
   transition:
     border-color var(--duration-normal) var(--ease-standard),
-    box-shadow var(--duration-normal) var(--ease-standard);
+    box-shadow var(--duration-normal) var(--ease-standard),
+    background var(--duration-normal) var(--ease-standard);
 }
 
 .login-card::-webkit-scrollbar {
@@ -822,17 +864,17 @@ body.auth-screen.login-no-scroll #view-container {
   background:
     radial-gradient(
       circle at top right,
-      color-mix(in srgb, var(--text-strong), transparent 94%),
+      color-mix(in srgb, var(--text-strong) 6%, transparent),
       transparent 28%
     ),
     radial-gradient(
       circle at 0% 100%,
-      color-mix(in srgb, var(--accent), transparent 94%),
+      color-mix(in srgb, var(--accent) 6%, transparent),
       transparent 24%
     ),
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--text-strong), transparent 98%),
+      color-mix(in srgb, var(--text-strong) 2%, transparent),
       transparent 32%
     );
 
@@ -849,8 +891,8 @@ body.auth-screen.login-no-scroll #view-container {
   pointer-events: none;
 
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 94%),
-    inset 0 -1px 0 color-mix(in srgb, var(--text-strong), transparent 98%);
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 6%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--text-strong) 2%, transparent);
 }
 
 .login-side-panel--status,
@@ -875,16 +917,18 @@ body.auth-screen.login-no-scroll #view-container {
 
   25% {
     border-color: var(--border-error);
+
     box-shadow:
       var(--auth-card-shadow),
-      0 0 0 4px color-mix(in srgb, var(--error), transparent 90%);
+      0 0 0 4px color-mix(in srgb, var(--error) 10%, transparent);
   }
 
   50% {
-    border-color: color-mix(in srgb, var(--error), var(--border-error) 35%);
+    border-color: color-mix(in srgb, var(--error) 65%, var(--border-error));
+
     box-shadow:
       var(--auth-card-shadow),
-      0 0 0 6px color-mix(in srgb, var(--error), transparent 88%);
+      0 0 0 6px color-mix(in srgb, var(--error) 12%, transparent);
   }
 
   100% {
@@ -939,6 +983,8 @@ body.auth-screen.login-no-scroll #view-container {
 
 /* =========================================================
    LOGO
+   Nota: los selectores de theme solo cambian asset visible.
+   No redefinen paleta ni tema visual.
 ========================================================= */
 
 .logo-fade {
@@ -975,9 +1021,9 @@ body.auth-screen.login-no-scroll #view-container {
     conic-gradient(
       from 180deg,
       transparent 0deg,
-      color-mix(in srgb, var(--accent), transparent 86%) 72deg,
+      color-mix(in srgb, var(--accent) 14%, transparent) 72deg,
       transparent 144deg,
-      color-mix(in srgb, var(--text-strong), transparent 94%) 220deg,
+      color-mix(in srgb, var(--text-strong) 6%, transparent) 220deg,
       transparent 360deg
     );
 
@@ -996,7 +1042,7 @@ body.auth-screen.login-no-scroll #view-container {
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--text-strong), transparent 92%),
+      color-mix(in srgb, var(--text-strong) 8%, transparent),
       transparent 34%
     );
 
@@ -1015,7 +1061,7 @@ body.auth-screen.login-no-scroll #view-container {
   filter:
     drop-shadow(
       0 4px 12px
-      color-mix(in srgb, var(--shadow-strong), transparent 48%)
+      color-mix(in srgb, var(--shadow-strong) 52%, transparent)
     );
 }
 
@@ -1132,8 +1178,8 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
   border-color: var(--input-border-error);
 
   box-shadow:
-    0 0 0 4px color-mix(in srgb, var(--error), transparent 90%),
-    0 8px 20px color-mix(in srgb, var(--error), transparent 92%);
+    0 0 0 4px color-mix(in srgb, var(--error) 10%, transparent),
+    0 8px 20px color-mix(in srgb, var(--error) 8%, transparent);
 }
 
 
@@ -1243,7 +1289,7 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
 
   box-shadow:
     var(--shadow-inner),
-    0 6px 16px color-mix(in srgb, var(--warning), transparent 92%);
+    0 6px 16px color-mix(in srgb, var(--warning) 8%, transparent);
 
   pointer-events: none;
 
@@ -1269,7 +1315,7 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
   filter:
     drop-shadow(
       0 0 8px
-      color-mix(in srgb, var(--warning), transparent 82%)
+      color-mix(in srgb, var(--warning) 18%, transparent)
     );
 
   pointer-events: none;
@@ -1405,8 +1451,8 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
   background: var(--gradient-success);
 
   box-shadow:
-    0 0 0 5px color-mix(in srgb, var(--success), transparent 92%),
-    0 0 12px color-mix(in srgb, var(--success), transparent 84%);
+    0 0 0 5px color-mix(in srgb, var(--success) 8%, transparent),
+    0 0 12px color-mix(in srgb, var(--success) 16%, transparent);
 
   animation: loginPilotPulse 2.6s ease-in-out infinite;
 }
@@ -1418,8 +1464,8 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
     transform: scale(1);
 
     box-shadow:
-      0 0 0 5px color-mix(in srgb, var(--success), transparent 94%),
-      0 0 8px color-mix(in srgb, var(--success), transparent 88%);
+      0 0 0 5px color-mix(in srgb, var(--success) 6%, transparent),
+      0 0 8px color-mix(in srgb, var(--success) 12%, transparent);
   }
 
   50% {
@@ -1427,8 +1473,8 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
     transform: scale(1.08);
 
     box-shadow:
-      0 0 0 7px color-mix(in srgb, var(--success), transparent 90%),
-      0 0 16px color-mix(in srgb, var(--success), transparent 80%);
+      0 0 0 7px color-mix(in srgb, var(--success) 10%, transparent),
+      0 0 16px color-mix(in srgb, var(--success) 20%, transparent);
   }
 }
 
@@ -1472,8 +1518,8 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
 
   transition:
     transform .18s var(--ease-standard),
-    filter .24s var(--ease-standard),
-    box-shadow .24s var(--ease-standard),
+    filter var(--duration-normal) var(--ease-standard),
+    box-shadow var(--duration-normal) var(--ease-standard),
     opacity var(--duration-normal) var(--ease-standard);
 }
 
@@ -1486,7 +1532,7 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--text-on-accent), transparent 88%),
+      color-mix(in srgb, var(--text-on-accent) 12%, transparent),
       transparent 38%
     );
 
@@ -1504,19 +1550,19 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
   background:
     linear-gradient(
       135deg,
-      color-mix(in srgb, var(--text-on-accent), transparent 86%) 0%,
-      color-mix(in srgb, var(--text-on-accent), transparent 95%) 24%,
+      color-mix(in srgb, var(--text-on-accent) 14%, transparent) 0%,
+      color-mix(in srgb, var(--text-on-accent) 5%, transparent) 24%,
       transparent 42%,
       transparent 58%,
-      color-mix(in srgb, var(--text-on-accent), transparent 95%) 78%,
-      color-mix(in srgb, var(--text-on-accent), transparent 90%) 100%
+      color-mix(in srgb, var(--text-on-accent) 5%, transparent) 78%,
+      color-mix(in srgb, var(--text-on-accent) 10%, transparent) 100%
     );
 
   opacity: 0;
 
   pointer-events: none;
 
-  transition: opacity .24s var(--ease-standard);
+  transition: opacity var(--duration-normal) var(--ease-standard);
 }
 
 .login-button:hover {
@@ -1525,7 +1571,7 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
 
   box-shadow:
     var(--btn-primary-shadow),
-    0 14px 32px color-mix(in srgb, var(--accent), transparent 82%);
+    0 14px 32px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .login-button:hover::after {
@@ -1568,7 +1614,7 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
 
 
 /* =========================================================
-   ERROR / FEEDBACK LEGACY
+   FEEDBACK LEGACY
 ========================================================= */
 
 .login-error {
@@ -1633,7 +1679,7 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
   opacity: 1;
 
   text-shadow:
-    0 0 10px color-mix(in srgb, var(--text-strong), transparent 96%);
+    0 0 10px color-mix(in srgb, var(--text-strong) 4%, transparent);
 }
 
 .login-reset a:hover::after {
@@ -1789,6 +1835,7 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
 
   .login-view {
     block-size: auto;
+
     min-block-size: 100vh;
     min-block-size: 100dvh;
 
@@ -1852,8 +1899,8 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
   }
 
   .login-toast-stack {
-    inset-block-start: max(12px, var(--app-safe-top));
-    inset-inline-end: max(12px, var(--app-safe-right));
+    inset-block-start: max(12px, var(--app-safe-top, 0px));
+    inset-inline-end: max(12px, var(--app-safe-right, 0px));
   }
 }
 
@@ -1885,7 +1932,7 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
     padding:
       14px
       14px
-      max(14px, var(--app-safe-bottom));
+      max(14px, var(--app-safe-bottom, 0px));
 
     grid-template-columns: 1fr;
     align-content: center;
@@ -2115,8 +2162,8 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
 @media print {
   body.auth-screen,
   .login-view {
-    background: #ffffff !important;
-    color: #000000 !important;
+    background: Canvas !important;
+    color: CanvasText !important;
   }
 
   .login-side,

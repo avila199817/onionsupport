@@ -2,76 +2,32 @@
    Onion SPA - Incidencias View
    Archivo: src/views/incidencias/incidenciasView.js
 
-   EXTREME PRO SYSTEM · VIEW REAL · FULL PATCH 13/10
-   FILTERS CONNECTED · SEARCH BRIDGE · URL AUTOPEN · TOPBAR READY
-   DETAIL STORE MERGE · CREATE MODAL BRIDGE
-   PAGINATION 5 · ACTION STATE SYNC · RERENDER SAFE · CLEANUP PRO
-   FACTURAS LINKED PRESERVER · MODAL DIRECT IMPORT HARDENED
-   PATCH · FILTERS SIMPLIFIED: TODAS / ABIERTAS / CERRADAS
-   PATCH · SEARCH INPUT CONNECTED WITH TEMPLATE V13
-   PATCH · OPEN FILTER GROUPS OPEN/PENDING/PROGRESS
-   PATCH · CLOSED FILTER GROUPS RESOLVED/CLOSED/CANCELLED/ARCHIVED
-   PATCH · NO INLINE CSS · VIEW CSS EXTERNALIZED
-   PATCH · CLEAN BIND / CLEANUP FLOW · NO DUPLICATED RENDER BINDINGS
-
-   RESPONSABILIDADES:
-   - punto de entrada real de la vista de incidencias
-   - render principal con template final unificado
-   - paginación visual fija a 5 incidencias por vista
-   - filtros visuales conectados al estado real del View
-   - búsqueda local conectada al template por input/debounce
-   - carga inicial robusta con fallback a cache
-   - refresh con loader SOLO en historial / tabla
-   - apertura de incidencia con estado visual de loading
-   - apertura de modal de creación de incidencia
-   - bind de eventos de pantalla
-   - evitar doble bind de listeners
-   - soportar destroy limpio del router
-   - permitir reload con rerender seguro
-   - coordinar acciones y modales sin mezclar responsabilidades
-   - preservar importes de facturas asociadas para tabla
-   - preservar numeroFacturaLegal para tabla/modal
-   - cargar el modal de detalle por import directo
-   - abrir incidencia desde topbar search por bridge directo
-   - abrir incidencia desde URL /incidencias?ticketId=... / ?id=...
-   - registrar bridge público window/AppCore.modules para search
-   - sincronizar loaders de acciones sin romper tabla
-   - refrescar listado tras crear / modificar incidencia
-   - fusionar detalle remoto con snapshot enriquecido del store
-
-   HARDENING EXTREME:
-   - render inicial inmediato
-   - bind inmediato tras primer render para evitar pérdida de clicks
-   - cola segura para crear incidencia antes de app ready
-   - carga posterior segura
-   - anti-race token
-   - cleanup total
-   - click delegation sólida
-   - fallback elegante si los modales aún no existen
-   - bloqueo de acciones antes de app ready sin perder intención del usuario
-   - anti spam click en apertura rápida
-   - anti spam apertura rápida de tickets
-   - compatibilidad con template nuevo data-incidencias-action
-   - compatibilidad con data-action legacy
-   - template controlado por state real
-   - blindaje contra normalizadores que descartan total/importe/linkedInvoices
-   - blindaje contra normalizadores que descartan numeroFacturaLegal
-   - bridge fuerte con incidencias.modal.js
-   - soporte backend aliases: tickets/items/data/incidencias/results
+   EXTREME PRO SYSTEM · INCIDENCIAS VIEW · CSP CLEAN · 16/10
+   PATCH · FACTURAS VIEW PARITY
+   PATCH · SINGLE TEMPLATE OWNER
+   PATCH · NO INLINE STYLE
+   PATCH · FILTER / SEARCH STATE BRIDGE
+   PATCH · PAGINATION 5
+   PATCH · DETAIL MODAL STABLE · ANTI FLICKER
+   PATCH · DETAIL DATA ONLY LOADER
+   PATCH · DUPLICATE OPEN GUARD
+   PATCH · NO DOUBLE EVENT OPEN
+   PATCH · NO FULL RERENDER ON DETAIL ACTIONS
+   PATCH · CREATE MODAL BRIDGE
+   PATCH · URL AUTOPEN
+   PATCH · TOPBAR SEARCH BRIDGE
+   PATCH · ACTION LOADERS SYNC
+   PATCH · FACTURAS LINKED PRESERVER
+   PATCH · RERENDER SAFE
+   PATCH · CLEANUP ENTERPRISE
 
    FIX CLAVE:
-   - El listado recibe incidencias enriquecidas desde store.
-   - El detalle remoto puede venir sin facturas asociadas.
-   - Antes de abrir modal se fusiona el payload remoto con la
-     incidencia enriquecida del store por id/ticketId/code.
-   - El search puede pasar detail completo, payload de evento, string o ID.
-   - openTicket() sigue aceptando ID; el bridge externo normaliza payload.
-   - Si el detalle remoto viene pobre, no pisa importe/factura/legal number
-     existentes en store/raw.
-   - Los filtros del template funcionan desde el View real.
-   - La paginación usa la colección filtrada.
-   - El filtro "Abiertas" incluye abiertas, pendientes y en proceso.
-   - El filtro "Cerradas" incluye resueltas, cerradas, canceladas y archivadas.
+   - La View abre el modal una sola vez con snapshot local.
+   - El detalle remoto solo actualiza el modal.
+   - La View NO emite incidencias:open:success para no reactivar
+     el listener interno del modal.
+   - Se emite incidencias:view:open:success como evento no destructivo.
+   - Anti doble click, anti doble evento, anti doble búsqueda.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -140,11 +96,10 @@ export const IncidenciasView = (() => {
 
   const CREATE_CLICK_THROTTLE_MS = 450;
   const OPEN_TICKET_THROTTLE_MS = 350;
+  const FILTER_SEARCH_DEBOUNCE_MS = 180;
 
   const DEFAULT_CURRENCY = "EUR";
-
   const DEFAULT_FILTER = "all";
-  const FILTER_SEARCH_DEBOUNCE_MS = 180;
 
   const FILTER_ALIASES = Object.freeze({
     all: "all",
@@ -199,6 +154,7 @@ export const IncidenciasView = (() => {
     cerrado: "closed",
     cerrados: "closed",
     cancelled: "closed",
+    canceled: "closed",
     cancelada: "closed",
     cancelado: "closed",
     archived: "closed",
@@ -267,6 +223,7 @@ export const IncidenciasView = (() => {
     cerrado: "closed",
     cerrados: "closed",
     cancelled: "closed",
+    canceled: "closed",
     cancelada: "closed",
     cancelado: "closed",
     archived: "closed",
@@ -318,7 +275,7 @@ export const IncidenciasView = (() => {
   ]);
 
   /* =========================================================
-     LOCAL RUNTIME
+     MODULE STATE
   ========================================================= */
 
   let initialized = false;
@@ -326,9 +283,13 @@ export const IncidenciasView = (() => {
 
   let inflightInit = null;
   let inflightReload = null;
-  let inflightExternalOpen = null;
-
   let queuedReloadOptions = null;
+
+  let inflightExternalOpen = null;
+  let inflightExternalOpenTicketId = "";
+
+  let inflightOpenTicket = null;
+  let inflightOpenTicketId = "";
 
   let bindingsCleanup = null;
   let externalOpenCleanup = null;
@@ -343,17 +304,15 @@ export const IncidenciasView = (() => {
   let lastCreateClickAt = 0;
   let lastOpenTicketClickAt = 0;
 
-  let inflightExternalOpenTicketId = "";
   let lastAutoOpenedTicketId = "";
-
   let lastApiPayload = null;
 
   let activeFilter = DEFAULT_FILTER;
   let filterQuery = "";
-  let filterSearchTimer = null;
+  let filterSearchTimer = 0;
 
   /* =========================================================
-     SAFE HELPERS
+     PRIMITIVES
   ========================================================= */
 
   function safeText(value, fallback = "") {
@@ -387,11 +346,9 @@ export const IncidenciasView = (() => {
         const lastComma = normalized.lastIndexOf(",");
         const lastDot = normalized.lastIndexOf(".");
 
-        if (lastComma > lastDot) {
-          normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
-        } else {
-          normalized = normalized.replace(/,/g, "");
-        }
+        normalized = lastComma > lastDot
+          ? normalized.replace(/\./g, "").replace(/,/g, ".")
+          : normalized.replace(/,/g, "");
       } else if (hasComma) {
         normalized = normalized.replace(/,/g, ".");
       }
@@ -460,8 +417,338 @@ export const IncidenciasView = (() => {
       .replace(/^_+|_+$/g, "");
   }
 
+  function normalizeWhitespace(value = "") {
+    return safeText(value, "").replace(/\s+/g, " ").trim();
+  }
+
+  function normalizeMoney(value, fallback = null) {
+    if (value === null || value === undefined || value === "") return fallback;
+
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : fallback;
+    }
+
+    let normalized = String(value)
+      .trim()
+      .replace(/€/g, "")
+      .replace(/\$/g, "")
+      .replace(/£/g, "")
+      .replace(/[^\d.,+\-\s]/g, "")
+      .replace(/\s/g, "");
+
+    const hasComma = normalized.includes(",");
+    const hasDot = normalized.includes(".");
+
+    if (hasComma && hasDot) {
+      const lastComma = normalized.lastIndexOf(",");
+      const lastDot = normalized.lastIndexOf(".");
+
+      normalized = lastComma > lastDot
+        ? normalized.replace(/\./g, "").replace(/,/g, ".")
+        : normalized.replace(/,/g, "");
+    } else if (hasComma) {
+      normalized = normalized.replace(/,/g, ".");
+    }
+
+    const amount = Number(normalized);
+    return Number.isFinite(amount) ? amount : fallback;
+  }
+
+  function roundMoney(value) {
+    const amount = normalizeMoney(value, null);
+
+    if (!Number.isFinite(amount)) return null;
+
+    return Math.round((amount + Number.EPSILON) * 100) / 100;
+  }
+
+  function escapeHtml(value = "") {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   /* =========================================================
-     FILTER STATE / MATCHERS
+     CORE / EVENTS
+  ========================================================= */
+
+  function safeLog(...args) {
+    try {
+      AppCore?.utils?.log?.("[IncidenciasView]", ...args);
+    } catch {}
+  }
+
+  function safeWarn(...args) {
+    try {
+      AppCore?.utils?.warn?.("[IncidenciasView]", ...args);
+    } catch {}
+
+    try {
+      console.warn("[IncidenciasView]", ...args);
+    } catch {}
+  }
+
+  function safeEmit(event = "", payload = {}) {
+    const eventName = safeText(event, "");
+    if (!eventName) return false;
+
+    let emitted = false;
+
+    try {
+      AppCore?.events?.emit?.(eventName, payload);
+      emitted = true;
+    } catch {}
+
+    try {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent(eventName, {
+            detail: payload,
+          })
+        );
+        emitted = true;
+      }
+    } catch {}
+
+    return emitted;
+  }
+
+  function safeOn(event = "", handler = null) {
+    const eventName = safeText(event, "");
+
+    if (!eventName || typeof handler !== "function") {
+      return () => {};
+    }
+
+    let busCleanup = null;
+    let busAttached = false;
+    let windowAttached = false;
+
+    const windowHandler = (domEvent) => handler(domEvent);
+
+    try {
+      const maybeCleanup = AppCore?.events?.on?.(eventName, handler);
+
+      if (typeof maybeCleanup === "function") {
+        busCleanup = maybeCleanup;
+      }
+
+      busAttached = true;
+    } catch {}
+
+    try {
+      if (typeof window !== "undefined") {
+        window.addEventListener(eventName, windowHandler);
+        windowAttached = true;
+      }
+    } catch {}
+
+    return () => {
+      if (busCleanup) {
+        try {
+          busCleanup();
+        } catch {}
+      } else if (busAttached) {
+        try {
+          AppCore?.events?.off?.(eventName, handler);
+        } catch {}
+      }
+
+      if (windowAttached) {
+        try {
+          window.removeEventListener(eventName, windowHandler);
+        } catch {}
+      }
+    };
+  }
+
+  function showToast(message = "", type = "info") {
+    const text = safeText(message, "");
+    if (!text) return;
+
+    try {
+      if (typeof AppCore?.toast?.[type] === "function") {
+        AppCore.toast[type](text);
+        return;
+      }
+    } catch {}
+
+    try {
+      AppCore?.toast?.show?.(text, type);
+      return;
+    } catch {}
+
+    try {
+      AppCore?.ui?.toast?.[type]?.(text);
+      return;
+    } catch {}
+
+    try {
+      AppCore?.ui?.toast?.show?.(text, type);
+    } catch {}
+  }
+
+  function safeErrorMessage(error = null) {
+    return safeText(
+      first(
+        error?.message,
+        error?.response?.message,
+        error?.response?.data?.message,
+        error?.data?.message,
+        error?.error,
+        "No se pudo cargar el historial de incidencias."
+      ),
+      "No se pudo cargar el historial de incidencias."
+    );
+  }
+
+  function getContainer() {
+    return (
+      AppCore?.dom?.viewContainer ||
+      document.getElementById("view-container") ||
+      null
+    );
+  }
+
+  /* =========================================================
+     FRAME / TOKEN
+  ========================================================= */
+
+  function nextRenderToken() {
+    renderToken += 1;
+    return renderToken;
+  }
+
+  function isActiveToken(token) {
+    return !destroyed && token === renderToken;
+  }
+
+  function requestFrame(callback) {
+    if (
+      typeof window !== "undefined" &&
+      typeof window.requestAnimationFrame === "function"
+    ) {
+      return window.requestAnimationFrame(callback);
+    }
+
+    return window.setTimeout(callback, 0);
+  }
+
+  function cancelFrame(frameId) {
+    if (!frameId) return;
+
+    try {
+      if (
+        typeof window !== "undefined" &&
+        typeof window.cancelAnimationFrame === "function"
+      ) {
+        window.cancelAnimationFrame(frameId);
+        return;
+      }
+
+      window.clearTimeout(frameId);
+    } catch {}
+  }
+
+  function cancelPendingRender() {
+    if (!pendingRenderFrame) return;
+
+    cancelFrame(pendingRenderFrame);
+    pendingRenderFrame = 0;
+  }
+
+  function waitForPaint() {
+    return new Promise((resolve) => {
+      try {
+        if (typeof window === "undefined") {
+          resolve();
+          return;
+        }
+
+        if (typeof window.requestAnimationFrame !== "function") {
+          window.setTimeout(resolve, 0);
+          return;
+        }
+
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(resolve);
+        });
+      } catch {
+        resolve();
+      }
+    });
+  }
+
+  /* =========================================================
+     CLEANUP
+  ========================================================= */
+
+  function cleanupExternalOpenListener() {
+    try {
+      externalOpenCleanup?.();
+    } catch {}
+
+    externalOpenCleanup = null;
+  }
+
+  function cleanupMutationListeners() {
+    try {
+      mutationCleanup?.();
+    } catch {}
+
+    mutationCleanup = null;
+  }
+
+  function cleanupCreateSuccessListener() {
+    try {
+      createSuccessCleanup?.();
+    } catch {}
+
+    createSuccessCleanup = null;
+  }
+
+  function cleanupReadyListeners() {
+    try {
+      readyCleanup?.();
+    } catch {}
+
+    readyCleanup = null;
+  }
+
+  function clearFilterSearchTimer() {
+    if (!filterSearchTimer) return;
+
+    try {
+      window.clearTimeout(filterSearchTimer);
+    } catch {}
+
+    filterSearchTimer = 0;
+  }
+
+  function cleanupBindings() {
+    clearFilterSearchTimer();
+
+    try {
+      bindingsCleanup?.();
+    } catch {}
+
+    bindingsCleanup = null;
+
+    cleanupExternalOpenListener();
+    cleanupMutationListeners();
+    cleanupCreateSuccessListener();
+    cleanupReadyListeners();
+
+    try {
+      AppCore?.cleanup?.run?.(SCOPE);
+    } catch {}
+  }
+
+  /* =========================================================
+     FILTERS
   ========================================================= */
 
   function normalizeFilter(value = DEFAULT_FILTER) {
@@ -522,16 +809,6 @@ export const IncidenciasView = (() => {
     };
   }
 
-  function clearFilterSearchTimer() {
-    if (!filterSearchTimer) return;
-
-    try {
-      clearTimeout(filterSearchTimer);
-    } catch {}
-
-    filterSearchTimer = null;
-  }
-
   function getItemStatusRaw(item = {}) {
     return first(
       item.status,
@@ -548,122 +825,6 @@ export const IncidenciasView = (() => {
 
   function getItemStatusKey(item = {}) {
     return normalizeStatusKey(getItemStatusRaw(item));
-  }
-
-  function getItemPriorityKey(item = {}) {
-    const key = normalizeKey(
-      first(
-        item.priority,
-        item.prioridad,
-        item.severity,
-        item.urgency,
-        item.sla?.priority,
-        item.raw?.priority,
-        item.raw?.prioridad,
-        item.raw?.severity,
-        item.raw?.urgency,
-        item.raw?.sla?.priority,
-        ""
-      )
-    );
-
-    if (
-      [
-        "critical",
-        "critica",
-        "crítica",
-        "critico",
-        "crítico",
-        "urgent",
-        "urgente",
-        "high",
-        "alta",
-        "p0",
-        "p1",
-      ].includes(key)
-    ) {
-      return "urgent";
-    }
-
-    return key || "medium";
-  }
-
-  function getItemAttachmentsCount(item = {}) {
-    const attachments = first(
-      item.attachments,
-      item.files,
-      item.adjuntos,
-      item.raw?.attachments,
-      item.raw?.files,
-      item.raw?.adjuntos
-    );
-
-    if (Array.isArray(attachments)) return attachments.length;
-
-    return safeNumber(
-      first(
-        item.attachmentsCount,
-        item.filesCount,
-        item.adjuntosCount,
-        item.raw?.attachmentsCount,
-        item.raw?.filesCount,
-        item.raw?.adjuntosCount,
-        0
-      ),
-      0
-    );
-  }
-
-  function getItemAmount(item = {}) {
-    return roundMoney(
-      first(
-        item.total,
-        item.amount,
-        item.importe,
-        item.price,
-
-        item.facturasTotal,
-        item.invoicesTotal,
-        item.importeFacturas,
-        item.invoiceTotal,
-
-        item.facturaTotal,
-        item.facturaImporte,
-        item.importeFactura,
-        item.totalFactura,
-        item.invoiceAmount,
-
-        item.linkedInvoices?.total,
-        item.linkedInvoices?.amount,
-        item.linkedInvoices?.importe,
-
-        item.meta?.invoicesTotal,
-        item.meta?.invoiceTotal,
-
-        item.raw?.total,
-        item.raw?.amount,
-        item.raw?.importe,
-        item.raw?.price,
-
-        item.raw?.facturasTotal,
-        item.raw?.invoicesTotal,
-        item.raw?.importeFacturas,
-        item.raw?.invoiceTotal,
-
-        item.raw?.facturaTotal,
-        item.raw?.facturaImporte,
-        item.raw?.importeFactura,
-        item.raw?.totalFactura,
-        item.raw?.invoiceAmount,
-
-        item.raw?.linkedInvoices?.total,
-        item.raw?.linkedInvoices?.amount,
-        item.raw?.linkedInvoices?.importe,
-
-        item.raw?.meta?.invoicesTotal,
-        item.raw?.meta?.invoiceTotal
-      )
-    );
   }
 
   function getItemSearchText(item = {}) {
@@ -869,14 +1030,14 @@ export const IncidenciasView = (() => {
 
     const value = safeText(query, "");
 
-    filterSearchTimer = setTimeout(() => {
-      filterSearchTimer = null;
+    filterSearchTimer = window.setTimeout(() => {
+      filterSearchTimer = 0;
       setSearchQuery(value);
     }, FILTER_SEARCH_DEBOUNCE_MS);
   }
 
   /* =========================================================
-     GENERIC HELPERS
+     TICKET ID HELPERS
   ========================================================= */
 
   function sameTicketIdentity(a = "", b = "") {
@@ -885,376 +1046,6 @@ export const IncidenciasView = (() => {
 
     return Boolean(left && right && left === right);
   }
-
-  function normalizeMoney(value, fallback = null) {
-    if (value === null || value === undefined || value === "") {
-      return fallback;
-    }
-
-    if (typeof value === "number") {
-      return Number.isFinite(value) ? value : fallback;
-    }
-
-    const normalized = String(value)
-      .replace(/\s+/g, "")
-      .replace(/\./g, "")
-      .replace(",", ".");
-
-    const amount = Number(normalized);
-
-    if (!Number.isFinite(amount)) {
-      return fallback;
-    }
-
-    return amount;
-  }
-
-  function roundMoney(value) {
-    const amount = normalizeMoney(value, null);
-
-    if (!Number.isFinite(amount)) {
-      return null;
-    }
-
-    return Math.round((amount + Number.EPSILON) * 100) / 100;
-  }
-
-  function getContainer() {
-    return (
-      AppCore?.dom?.viewContainer ||
-      document.getElementById("view-container") ||
-      null
-    );
-  }
-
-  function nextRenderToken() {
-    renderToken += 1;
-    return renderToken;
-  }
-
-  function isActiveToken(token) {
-    return !destroyed && token === renderToken;
-  }
-
-  function requestFrame(callback) {
-    if (
-      typeof window !== "undefined" &&
-      typeof window.requestAnimationFrame === "function"
-    ) {
-      return window.requestAnimationFrame(callback);
-    }
-
-    return window.setTimeout(callback, 0);
-  }
-
-  function cancelFrame(frameId) {
-    if (!frameId) return;
-
-    try {
-      if (
-        typeof window !== "undefined" &&
-        typeof window.cancelAnimationFrame === "function"
-      ) {
-        window.cancelAnimationFrame(frameId);
-        return;
-      }
-
-      window.clearTimeout(frameId);
-    } catch {}
-  }
-
-  function waitForPaint() {
-    return new Promise((resolve) => {
-      try {
-        if (typeof window === "undefined") {
-          resolve();
-          return;
-        }
-
-        if (typeof window.requestAnimationFrame !== "function") {
-          window.setTimeout(resolve, 0);
-          return;
-        }
-
-        window.requestAnimationFrame(() => {
-          window.requestAnimationFrame(resolve);
-        });
-      } catch {
-        resolve();
-      }
-    });
-  }
-
-  /* =========================================================
-     CORE HELPERS
-  ========================================================= */
-
-  function safeLog(...args) {
-    try {
-      AppCore?.utils?.log?.("[IncidenciasView]", ...args);
-    } catch {}
-  }
-
-  function safeWarn(...args) {
-    try {
-      AppCore?.utils?.warn?.("[IncidenciasView]", ...args);
-    } catch {}
-
-    try {
-      console.warn("[IncidenciasView]", ...args);
-    } catch {}
-  }
-
-  function safeEmit(event = "", payload = {}) {
-    const eventName = safeText(event, "");
-    if (!eventName) return false;
-
-    let emitted = false;
-
-    try {
-      AppCore?.events?.emit?.(eventName, payload);
-      emitted = true;
-    } catch {}
-
-    try {
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(
-          new CustomEvent(eventName, {
-            detail: payload,
-          })
-        );
-        emitted = true;
-      }
-    } catch {}
-
-    return emitted;
-  }
-
-  function safeOn(event = "", handler = null) {
-    const eventName = safeText(event, "");
-
-    if (!eventName || typeof handler !== "function") {
-      return () => {};
-    }
-
-    let busAttached = false;
-    let windowAttached = false;
-    let busCleanup = null;
-
-    const windowHandler = (domEvent) => handler(domEvent);
-
-    try {
-      const maybeCleanup = AppCore?.events?.on?.(eventName, handler);
-
-      if (typeof maybeCleanup === "function") {
-        busCleanup = maybeCleanup;
-      }
-
-      busAttached = true;
-    } catch {}
-
-    try {
-      if (typeof window !== "undefined") {
-        window.addEventListener(eventName, windowHandler);
-        windowAttached = true;
-      }
-    } catch {}
-
-    return () => {
-      if (busCleanup) {
-        try {
-          busCleanup();
-        } catch {}
-      } else if (busAttached) {
-        try {
-          AppCore?.events?.off?.(eventName, handler);
-        } catch {}
-      }
-
-      if (windowAttached) {
-        try {
-          window.removeEventListener(eventName, windowHandler);
-        } catch {}
-      }
-    };
-  }
-
-  function showToast(message = "", type = "info") {
-    const text = safeText(message, "");
-    if (!text) return;
-
-    try {
-      if (typeof AppCore?.toast?.[type] === "function") {
-        AppCore.toast[type](text);
-        return;
-      }
-    } catch {}
-
-    try {
-      AppCore?.toast?.show?.(text, type);
-      return;
-    } catch {}
-
-    try {
-      AppCore?.ui?.toast?.[type]?.(text);
-      return;
-    } catch {}
-
-    try {
-      AppCore?.ui?.toast?.show?.(text, type);
-    } catch {}
-  }
-
-  function safeErrorMessage(error = null) {
-    return safeText(
-      first(
-        error?.message,
-        error?.response?.message,
-        error?.response?.data?.message,
-        error?.data?.message,
-        error?.error,
-        "No se pudo cargar el historial de incidencias."
-      ),
-      "No se pudo cargar el historial de incidencias."
-    );
-  }
-
-  /* =========================================================
-     CLEANUP HELPERS
-  ========================================================= */
-
-  function cleanupBindings() {
-    try {
-      bindingsCleanup?.();
-    } catch {}
-
-    bindingsCleanup = null;
-
-    cleanupExternalOpenListener();
-    cleanupMutationListeners();
-    cleanupCreateSuccessListener();
-    cleanupReadyListeners();
-
-    try {
-      AppCore?.cleanup?.run?.(SCOPE);
-    } catch {}
-  }
-
-  function cleanupExternalOpenListener() {
-    try {
-      externalOpenCleanup?.();
-    } catch {}
-
-    externalOpenCleanup = null;
-  }
-
-  function cleanupMutationListeners() {
-    try {
-      mutationCleanup?.();
-    } catch {}
-
-    mutationCleanup = null;
-  }
-
-  function cleanupCreateSuccessListener() {
-    try {
-      createSuccessCleanup?.();
-    } catch {}
-
-    createSuccessCleanup = null;
-  }
-
-  function cleanupReadyListeners() {
-    try {
-      readyCleanup?.();
-    } catch {}
-
-    readyCleanup = null;
-  }
-
-  function cancelPendingRender() {
-    if (!pendingRenderFrame) return;
-
-    cancelFrame(pendingRenderFrame);
-    pendingRenderFrame = 0;
-  }
-
-  /* =========================================================
-     BACKEND PAYLOAD HELPERS
-  ========================================================= */
-
-  function extractItemsFromPayload(payload = null) {
-    if (Array.isArray(payload)) {
-      return payload;
-    }
-
-    const data = safeObject(payload);
-
-    return safeArray(
-      first(
-        data.tickets,
-        data.items,
-        data.data,
-        data.incidencias,
-        data.results,
-        data.rows,
-        data.list,
-        data.payload?.tickets,
-        data.payload?.items,
-        data.payload?.data,
-        data.payload?.incidencias,
-        data.result?.tickets,
-        data.result?.items,
-        data.result?.data,
-        data.result?.incidencias
-      )
-    );
-  }
-
-  function extractRemoteCountFromPayload(payload = null, fallback = 0) {
-    const data = safeObject(payload);
-
-    return Math.max(
-      0,
-      safeNumber(
-        first(
-          data.total,
-          data.count,
-          data.remoteCount,
-          data.totalCount,
-          data.meta?.total,
-          data.meta?.count,
-          data.pagination?.total,
-          data.payload?.total,
-          data.payload?.count,
-          data.result?.total,
-          data.result?.count,
-          fallback
-        ),
-        fallback
-      )
-    );
-  }
-
-  function makeRawMap(...collections) {
-    const map = new Map();
-
-    for (const collection of collections) {
-      safeArray(collection).forEach((item) => {
-        const id = getStableTicketId(item);
-
-        if (id && !map.has(id)) {
-          map.set(id, item);
-        }
-      });
-    }
-
-    return map;
-  }
-
-  /* =========================================================
-     TICKET ID / SEARCH HELPERS
-  ========================================================= */
 
   function getStableTicketId(item = {}) {
     if (typeof item === "string" || typeof item === "number") {
@@ -1506,6 +1297,77 @@ export const IncidenciasView = (() => {
   }
 
   /* =========================================================
+     PAYLOAD HELPERS
+  ========================================================= */
+
+  function extractItemsFromPayload(payload = null) {
+    if (Array.isArray(payload)) return payload;
+
+    const data = safeObject(payload);
+
+    return safeArray(
+      first(
+        data.tickets,
+        data.items,
+        data.data,
+        data.incidencias,
+        data.results,
+        data.rows,
+        data.list,
+        data.payload?.tickets,
+        data.payload?.items,
+        data.payload?.data,
+        data.payload?.incidencias,
+        data.result?.tickets,
+        data.result?.items,
+        data.result?.data,
+        data.result?.incidencias
+      )
+    );
+  }
+
+  function extractRemoteCountFromPayload(payload = null, fallback = 0) {
+    const data = safeObject(payload);
+
+    return Math.max(
+      0,
+      safeNumber(
+        first(
+          data.total,
+          data.count,
+          data.remoteCount,
+          data.totalCount,
+          data.meta?.total,
+          data.meta?.count,
+          data.pagination?.total,
+          data.payload?.total,
+          data.payload?.count,
+          data.result?.total,
+          data.result?.count,
+          fallback
+        ),
+        fallback
+      )
+    );
+  }
+
+  function makeRawMap(...collections) {
+    const map = new Map();
+
+    for (const collection of collections) {
+      safeArray(collection).forEach((item) => {
+        const id = getStableTicketId(item);
+
+        if (id && !map.has(id)) {
+          map.set(id, item);
+        }
+      });
+    }
+
+    return map;
+  }
+
+  /* =========================================================
      INVOICE FIELD PRESERVER
   ========================================================= */
 
@@ -1527,17 +1389,17 @@ export const IncidenciasView = (() => {
       ...safeArray(source?.invoices),
       ...safeArray(source?.facturasRelacionadas),
       ...safeArray(source?.linkedInvoices?.invoices),
+      ...safeArray(source?.linkedInvoices?.facturas),
 
       ...safeArray(raw?.facturas),
       ...safeArray(raw?.invoices),
       ...safeArray(raw?.facturasRelacionadas),
       ...safeArray(raw?.linkedInvoices?.invoices),
+      ...safeArray(raw?.linkedInvoices?.facturas),
     ];
 
     candidates.forEach((candidate) => {
-      if (hasOwnKeys(candidate)) {
-        output.push(candidate);
-      }
+      if (hasOwnKeys(candidate)) output.push(candidate);
     });
 
     return output;
@@ -1870,9 +1732,7 @@ export const IncidenciasView = (() => {
     for (const candidate of candidates) {
       const amount = roundMoney(candidate);
 
-      if (amount !== null) {
-        return amount;
-      }
+      if (amount !== null) return amount;
     }
 
     const invoiceNumber = resolveInvoiceNumber(source, raw);
@@ -1919,14 +1779,8 @@ export const IncidenciasView = (() => {
       invoiceId: safeText(first(invoice.invoiceId, id), id),
 
       numeroFacturaLegal,
-      numeroFactura: safeText(
-        first(invoice.numeroFactura, numeroFacturaLegal),
-        numeroFacturaLegal
-      ),
-      invoiceNumber: safeText(
-        first(invoice.invoiceNumber, numeroFacturaLegal),
-        numeroFacturaLegal
-      ),
+      numeroFactura: safeText(first(invoice.numeroFactura, numeroFacturaLegal), numeroFacturaLegal),
+      invoiceNumber: safeText(first(invoice.invoiceNumber, numeroFacturaLegal), numeroFacturaLegal),
 
       total: total === null ? 0 : total,
       amount: total === null ? 0 : total,
@@ -2007,47 +1861,25 @@ export const IncidenciasView = (() => {
         hasInvoiceEvidence ? 1 : 0
       ),
 
-      ids: uniqueStrings(
-        first(
-          linkedInvoices.ids,
-          rawLinkedInvoices.ids,
-          invoiceIds
-        )
-      ),
+      ids: uniqueStrings(first(linkedInvoices.ids, rawLinkedInvoices.ids, invoiceIds)),
 
       primaryInvoiceId: safeText(
-        first(
-          linkedInvoices.primaryInvoiceId,
-          rawLinkedInvoices.primaryInvoiceId,
-          primaryInvoiceId
-        ),
+        first(linkedInvoices.primaryInvoiceId, rawLinkedInvoices.primaryInvoiceId, primaryInvoiceId),
         primaryInvoiceId
       ),
 
       numeroFacturaLegal: safeText(
-        first(
-          linkedInvoices.numeroFacturaLegal,
-          rawLinkedInvoices.numeroFacturaLegal,
-          numeroFacturaLegal
-        ),
+        first(linkedInvoices.numeroFacturaLegal, rawLinkedInvoices.numeroFacturaLegal, numeroFacturaLegal),
         numeroFacturaLegal
       ),
 
       numeroFactura: safeText(
-        first(
-          linkedInvoices.numeroFactura,
-          rawLinkedInvoices.numeroFactura,
-          numeroFacturaLegal
-        ),
+        first(linkedInvoices.numeroFactura, rawLinkedInvoices.numeroFactura, numeroFacturaLegal),
         numeroFacturaLegal
       ),
 
       invoiceNumber: safeText(
-        first(
-          linkedInvoices.invoiceNumber,
-          rawLinkedInvoices.invoiceNumber,
-          numeroFacturaLegal
-        ),
+        first(linkedInvoices.invoiceNumber, rawLinkedInvoices.invoiceNumber, numeroFacturaLegal),
         numeroFacturaLegal
       ),
 
@@ -2055,22 +1887,11 @@ export const IncidenciasView = (() => {
       amount: first(linkedInvoices.amount, rawLinkedInvoices.amount, finalAmount),
       importe: first(linkedInvoices.importe, rawLinkedInvoices.importe, finalAmount),
 
-      currency: safeText(
-        first(linkedInvoices.currency, rawLinkedInvoices.currency, currency),
-        currency
-      ),
-      moneda: safeText(
-        first(linkedInvoices.moneda, rawLinkedInvoices.moneda, currency),
-        currency
-      ),
+      currency: safeText(first(linkedInvoices.currency, rawLinkedInvoices.currency, currency), currency),
+      moneda: safeText(first(linkedInvoices.moneda, rawLinkedInvoices.moneda, currency), currency),
 
-      invoices: safeArray(
-        first(
-          linkedInvoices.invoices,
-          rawLinkedInvoices.invoices,
-          normalizedInvoices
-        )
-      ),
+      invoices: safeArray(first(linkedInvoices.invoices, rawLinkedInvoices.invoices, normalizedInvoices)),
+      facturas: safeArray(first(linkedInvoices.facturas, rawLinkedInvoices.facturas, normalizedInvoices)),
     };
 
     const nextMeta = {
@@ -2091,33 +1912,16 @@ export const IncidenciasView = (() => {
         normalizedInvoices.length
       ),
 
-      invoicesTotal: first(
-        sourceMeta.invoicesTotal,
-        rawMeta.invoicesTotal,
-        finalAmount
-      ),
-
-      invoiceTotal: first(
-        sourceMeta.invoiceTotal,
-        rawMeta.invoiceTotal,
-        finalAmount
-      ),
+      invoicesTotal: first(sourceMeta.invoicesTotal, rawMeta.invoicesTotal, finalAmount),
+      invoiceTotal: first(sourceMeta.invoiceTotal, rawMeta.invoiceTotal, finalAmount),
 
       invoiceCurrency: safeText(
-        first(
-          sourceMeta.invoiceCurrency,
-          rawMeta.invoiceCurrency,
-          currency
-        ),
+        first(sourceMeta.invoiceCurrency, rawMeta.invoiceCurrency, currency),
         currency
       ),
 
       numeroFacturaLegal: safeText(
-        first(
-          sourceMeta.numeroFacturaLegal,
-          rawMeta.numeroFacturaLegal,
-          numeroFacturaLegal
-        ),
+        first(sourceMeta.numeroFacturaLegal, rawMeta.numeroFacturaLegal, numeroFacturaLegal),
         numeroFacturaLegal
       ),
     };
@@ -2128,46 +1932,21 @@ export const IncidenciasView = (() => {
       raw: hasOwnKeys(source.raw) ? source.raw : raw,
 
       facturaId: safeText(
-        first(
-          source.facturaId,
-          raw.facturaId,
-          source.invoiceId,
-          raw.invoiceId,
-          primaryInvoiceId
-        ),
+        first(source.facturaId, raw.facturaId, source.invoiceId, raw.invoiceId, primaryInvoiceId),
         ""
       ),
 
       invoiceId: safeText(
-        first(
-          source.invoiceId,
-          raw.invoiceId,
-          source.facturaId,
-          raw.facturaId,
-          primaryInvoiceId
-        ),
+        first(source.invoiceId, raw.invoiceId, source.facturaId, raw.facturaId, primaryInvoiceId),
         ""
       ),
 
-      linkedFacturaId: safeText(
-        first(source.linkedFacturaId, raw.linkedFacturaId, primaryInvoiceId),
-        ""
-      ),
-
-      linkedInvoiceId: safeText(
-        first(source.linkedInvoiceId, raw.linkedInvoiceId, primaryInvoiceId),
-        ""
-      ),
+      linkedFacturaId: safeText(first(source.linkedFacturaId, raw.linkedFacturaId, primaryInvoiceId), ""),
+      linkedInvoiceId: safeText(first(source.linkedInvoiceId, raw.linkedInvoiceId, primaryInvoiceId), ""),
 
       numeroFacturaLegal,
-      numeroFactura: safeText(
-        first(source.numeroFactura, raw.numeroFactura, numeroFacturaLegal),
-        numeroFacturaLegal
-      ),
-      invoiceNumber: safeText(
-        first(source.invoiceNumber, raw.invoiceNumber, numeroFacturaLegal),
-        numeroFacturaLegal
-      ),
+      numeroFactura: safeText(first(source.numeroFactura, raw.numeroFactura, numeroFacturaLegal), numeroFacturaLegal),
+      invoiceNumber: safeText(first(source.invoiceNumber, raw.invoiceNumber, numeroFacturaLegal), numeroFacturaLegal),
 
       facturaIds: uniqueStrings(first(source.facturaIds, raw.facturaIds, invoiceIds)),
       invoiceIds: uniqueStrings(first(source.invoiceIds, raw.invoiceIds, invoiceIds)),
@@ -2194,6 +1973,7 @@ export const IncidenciasView = (() => {
 
       factura: first(source.factura, raw.factura, normalizedInvoices[0], null),
       invoice: first(source.invoice, raw.invoice, normalizedInvoices[0], null),
+
       billing: first(
         source.billing,
         raw.billing,
@@ -2211,9 +1991,7 @@ export const IncidenciasView = (() => {
 
       invoices: safeArray(first(source.invoices, raw.invoices, normalizedInvoices)),
       facturas: safeArray(first(source.facturas, raw.facturas, normalizedInvoices)),
-      facturasRelacionadas: safeArray(
-        first(source.facturasRelacionadas, raw.facturasRelacionadas, normalizedInvoices)
-      ),
+      facturasRelacionadas: safeArray(first(source.facturasRelacionadas, raw.facturasRelacionadas, normalizedInvoices)),
 
       facturasTotal: finalAmount,
       invoicesTotal: finalAmount,
@@ -2283,9 +2061,7 @@ export const IncidenciasView = (() => {
         return preserveInvoiceAmountFields(item, matchingRaw);
       });
 
-      const sorted = sortIncidenciasByUpdatedDesc(patchedItems);
-
-      return safeArray(sorted);
+      return safeArray(sortIncidenciasByUpdatedDesc(patchedItems));
     } catch (error) {
       safeWarn("getItems falló:", error);
       return [];
@@ -2308,8 +2084,8 @@ export const IncidenciasView = (() => {
 
   function findTicketForDetail(detail = {}, preferredId = "") {
     const remote = safeObject(detail);
-
     const preferred = safeText(preferredId, "");
+
     if (preferred) {
       const byPreferred = findTicketById(preferred);
       if (byPreferred) return byPreferred;
@@ -2328,9 +2104,7 @@ export const IncidenciasView = (() => {
   function mergeTicketDetailWithStoreSnapshot(detail = {}, preferredTicketId = "") {
     const remote = safeObject(detail);
 
-    if (!hasOwnKeys(remote)) {
-      return null;
-    }
+    if (!hasOwnKeys(remote)) return null;
 
     const storeItem = findTicketForDetail(remote, preferredTicketId);
 
@@ -2375,15 +2149,9 @@ export const IncidenciasView = (() => {
 
         id: safeText(first(remote.raw?.id, remote.id, id), id),
         ticketId: safeText(first(remote.raw?.ticketId, remote.ticketId, id), id),
-        incidenciaId: safeText(
-          first(remote.raw?.incidenciaId, remote.incidenciaId, id),
-          id
-        ),
+        incidenciaId: safeText(first(remote.raw?.incidenciaId, remote.incidenciaId, id), id),
         code: safeText(first(remote.raw?.code, remote.code, id), id),
-        ticketCode: safeText(
-          first(remote.raw?.ticketCode, remote.ticketCode, id),
-          id
-        ),
+        ticketCode: safeText(first(remote.raw?.ticketCode, remote.ticketCode, id), id),
       },
 
       meta: {
@@ -2437,20 +2205,9 @@ export const IncidenciasView = (() => {
       incidenciasState.creating = false;
     }
 
-    incidenciasState.openingTicketId = safeText(
-      incidenciasState.openingTicketId,
-      ""
-    );
-
-    incidenciasState.selectedTicketId = safeText(
-      incidenciasState.selectedTicketId,
-      ""
-    );
-
-    incidenciasState.error = safeText(
-      incidenciasState.error,
-      ""
-    );
+    incidenciasState.openingTicketId = safeText(incidenciasState.openingTicketId, "");
+    incidenciasState.selectedTicketId = safeText(incidenciasState.selectedTicketId, "");
+    incidenciasState.error = safeText(incidenciasState.error, "");
 
     incidenciasState.remoteCount = Math.max(
       0,
@@ -2560,7 +2317,7 @@ export const IncidenciasView = (() => {
   }
 
   /* =========================================================
-     APP READY HARDENING
+     APP READY
   ========================================================= */
 
   function isDomReady() {
@@ -2587,9 +2344,7 @@ export const IncidenciasView = (() => {
   function throttleCreateClick() {
     const now = Date.now();
 
-    if (now - lastCreateClickAt < CREATE_CLICK_THROTTLE_MS) {
-      return false;
-    }
+    if (now - lastCreateClickAt < CREATE_CLICK_THROTTLE_MS) return false;
 
     lastCreateClickAt = now;
     return true;
@@ -2598,9 +2353,7 @@ export const IncidenciasView = (() => {
   function throttleOpenTicketClick() {
     const now = Date.now();
 
-    if (now - lastOpenTicketClickAt < OPEN_TICKET_THROTTLE_MS) {
-      return false;
-    }
+    if (now - lastOpenTicketClickAt < OPEN_TICKET_THROTTLE_MS) return false;
 
     lastOpenTicketClickAt = now;
     return true;
@@ -2610,51 +2363,37 @@ export const IncidenciasView = (() => {
      MODAL BRIDGES
   ========================================================= */
 
-  function openTicketModalBridge(detail = null) {
+  function openTicketModalBridge(detail = null, options = {}) {
     const payload = safeObject(detail);
 
-    if (!hasOwnKeys(payload)) {
-      return false;
-    }
+    if (!hasOwnKeys(payload)) return false;
+
+    const opts = safeObject(options);
 
     try {
-      if (typeof OnionIncidenciasModal?.getState === "function") {
-        const modalStateSnapshot = OnionIncidenciasModal.getState();
-
-        if (
-          modalStateSnapshot?.isOpen &&
-          typeof OnionIncidenciasModal.update === "function"
-        ) {
-          OnionIncidenciasModal.update(payload);
-          return true;
-        }
-
-        if (typeof OnionIncidenciasModal.open === "function") {
-          OnionIncidenciasModal.open(payload);
-          return true;
-        }
+      if (typeof OnionIncidenciasModal?.open === "function") {
+        OnionIncidenciasModal.open(payload, {
+          source: "incidenciasView",
+          silent: Boolean(opts.silent),
+        });
+        return true;
       }
     } catch (error) {
-      safeWarn("OnionIncidenciasModal import directo falló:", error);
+      safeWarn("OnionIncidenciasModal import directo open falló:", error);
     }
 
     try {
       const modal = window?.OnionIncidenciasModal;
 
-      if (
-        modal?.getState?.()?.isOpen &&
-        typeof modal.update === "function"
-      ) {
-        modal.update(payload);
-        return true;
-      }
-
       if (typeof modal?.open === "function") {
-        modal.open(payload);
+        modal.open(payload, {
+          source: "incidenciasView",
+          silent: Boolean(opts.silent),
+        });
         return true;
       }
     } catch (error) {
-      safeWarn("OnionIncidenciasModal hook global falló:", error);
+      safeWarn("OnionIncidenciasModal global open falló:", error);
     }
 
     try {
@@ -2679,6 +2418,48 @@ export const IncidenciasView = (() => {
     return true;
   }
 
+  function updateTicketModalBridge(detail = {}, options = {}) {
+    const payload = safeObject(detail);
+
+    if (!hasOwnKeys(payload)) return false;
+
+    const opts = safeObject(options);
+
+    try {
+      if (typeof OnionIncidenciasModal?.update === "function") {
+        OnionIncidenciasModal.update(payload, {
+          source: "incidenciasView",
+          silent: Boolean(opts.silent),
+          preserveTransient: opts.preserveTransient !== false,
+          preserveFocus: opts.preserveFocus !== false,
+          focus: opts.focus !== false,
+        });
+        return true;
+      }
+    } catch (error) {
+      safeWarn("OnionIncidenciasModal import directo update falló:", error);
+    }
+
+    try {
+      const modal = window?.OnionIncidenciasModal;
+
+      if (typeof modal?.update === "function") {
+        modal.update(payload, {
+          source: "incidenciasView",
+          silent: Boolean(opts.silent),
+          preserveTransient: opts.preserveTransient !== false,
+          preserveFocus: opts.preserveFocus !== false,
+          focus: opts.focus !== false,
+        });
+        return true;
+      }
+    } catch (error) {
+      safeWarn("OnionIncidenciasModal global update falló:", error);
+    }
+
+    return openTicketModalBridge(payload, opts);
+  }
+
   function closeTicketModalBridge() {
     try {
       if (typeof OnionIncidenciasModal?.close === "function") {
@@ -2699,26 +2480,6 @@ export const IncidenciasView = (() => {
     });
 
     return true;
-  }
-
-  function updateTicketModalBridge(detail = {}) {
-    const payload = safeObject(detail);
-
-    try {
-      if (typeof OnionIncidenciasModal?.update === "function") {
-        OnionIncidenciasModal.update(payload);
-        return true;
-      }
-    } catch {}
-
-    try {
-      if (typeof window?.OnionIncidenciasModal?.update === "function") {
-        window.OnionIncidenciasModal.update(payload);
-        return true;
-      }
-    } catch {}
-
-    return openTicketModalBridge(payload);
   }
 
   function openCreateModalBridge(draft = {}) {
@@ -2779,19 +2540,15 @@ export const IncidenciasView = (() => {
   }
 
   /* =========================================================
-     DOM POST-RENDER
+     DOM
   ========================================================= */
 
   function applyErrorStateToDom(container) {
     if (!container) return;
 
-    const oldBanner = container.querySelector(
-      "[data-incidencias-error-banner='true']"
-    );
+    const oldBanner = container.querySelector("[data-incidencias-error-banner='true']");
 
-    if (oldBanner) {
-      oldBanner.remove();
-    }
+    if (oldBanner) oldBanner.remove();
 
     const message = safeText(incidenciasState.error, "");
     if (!message) return;
@@ -2853,7 +2610,7 @@ export const IncidenciasView = (() => {
       <section
         class="panel-content dashboard ready"
         data-view="incidencias"
-        data-incidencias-scope="${SCOPE}"
+        data-incidencias-scope="${escapeHtml(SCOPE)}"
       >
         <div class="content-wrapper incidencias-view-shell">
           ${renderIncidenciasTableTemplate({
@@ -2905,10 +2662,6 @@ export const IncidenciasView = (() => {
     `;
   }
 
-  /* =========================================================
-     RENDER
-  ========================================================= */
-
   function render() {
     const container = getContainer();
 
@@ -2957,10 +2710,7 @@ export const IncidenciasView = (() => {
 
   function scheduleRerender() {
     if (destroyed) return null;
-
-    if (pendingRenderFrame) {
-      return pendingRenderFrame;
-    }
+    if (pendingRenderFrame) return pendingRenderFrame;
 
     pendingRenderFrame = requestFrame(() => {
       pendingRenderFrame = 0;
@@ -2998,9 +2748,7 @@ export const IncidenciasView = (() => {
       incidenciasState.refreshing = hasVisibleData && asRefresh;
     }
 
-    if (!destroyed) {
-      rerender();
-    }
+    if (!destroyed) rerender();
 
     try {
       const payload = await loadIncidencias({
@@ -3087,9 +2835,7 @@ export const IncidenciasView = (() => {
 
     render();
 
-    if (!destroyed) {
-      bind();
-    }
+    if (!destroyed) bind();
 
     flushPendingCreate();
 
@@ -3099,15 +2845,11 @@ export const IncidenciasView = (() => {
       asRefresh,
     });
 
-    if (!isActiveToken(token)) {
-      return api;
-    }
+    if (!isActiveToken(token)) return api;
 
     render();
 
-    if (!destroyed) {
-      bind();
-    }
+    if (!destroyed) bind();
 
     flushPendingCreate();
 
@@ -3172,134 +2914,175 @@ export const IncidenciasView = (() => {
 
     if (!id) return null;
 
+    if (
+      inflightOpenTicket &&
+      inflightOpenTicketId &&
+      sameTicketIdentity(inflightOpenTicketId, id)
+    ) {
+      return inflightOpenTicket;
+    }
+
     if (!opts.skipThrottle && !throttleOpenTicketClick()) {
       return null;
     }
 
-    if (
-      incidenciasState.openingTicketId &&
-      !sameTicketIdentity(incidenciasState.openingTicketId, id)
-    ) {
-      return null;
-    }
+    inflightOpenTicketId = id;
 
-    incidenciasState.selectedTicketId = id;
-
-    try {
-      setOpeningTicketId(id);
-    } catch {
-      incidenciasState.openingTicketId = id;
-    }
-
-    const payloadDetail = safeObject(
-      first(
-        opts.detail,
-        opts.payload?.detail,
-        opts.payload?.ticket,
-        opts.payload?.incidencia,
-        opts.payload?.item,
-        opts.payload
-      )
-    );
-
-    const storeSnapshot = findTicketById(id);
-    const immediateDetail = mergeTicketDetailWithStoreSnapshot(
-      hasOwnKeys(payloadDetail) ? payloadDetail : storeSnapshot || {},
-      id
-    );
-
-    if (immediateDetail && opts.openImmediate !== false) {
-      openTicketModalBridge({
-        ...immediateDetail,
-        meta: {
-          ...safeObject(immediateDetail.meta),
-          openingFromView: true,
-          detailLoading: true,
-        },
-      });
-    }
-
-    rerender();
-    await waitForPaint();
-
-    try {
-      const detail = await openTicketAction({
-        ticketId: id,
-        preferFresh: opts.preferFresh !== false,
-        silent: opts.silent !== false,
-      });
-
-      const patchedDetail = detail
-        ? mergeTicketDetailWithStoreSnapshot(detail, id)
-        : immediateDetail;
-
-      if (!patchedDetail) {
-        showToast("No se pudo abrir la incidencia.", "error");
+    inflightOpenTicket = (async () => {
+      if (
+        incidenciasState.openingTicketId &&
+        !sameTicketIdentity(incidenciasState.openingTicketId, id)
+      ) {
         return null;
       }
 
-      updateTicketModalBridge({
-        ...patchedDetail,
-        meta: {
-          ...safeObject(patchedDetail.meta),
-          openingFromView: false,
-          detailLoading: false,
-        },
-      });
+      incidenciasState.selectedTicketId = id;
 
-      safeEmit("incidencias:open:success", {
-        ticketId: id,
-        incidenciaId: id,
-        detail: patchedDetail,
-        source: safeText(opts.source, "view"),
-      });
+      try {
+        setOpeningTicketId(id);
+      } catch {
+        incidenciasState.openingTicketId = id;
+      }
 
-      return patchedDetail;
-    } catch (error) {
-      safeWarn("handleOpenTicket falló:", error);
+      const payloadDetail = safeObject(
+        first(
+          opts.detail,
+          opts.payload?.detail,
+          opts.payload?.ticket,
+          opts.payload?.incidencia,
+          opts.payload?.item,
+          opts.payload
+        )
+      );
 
-      if (immediateDetail) {
-        updateTicketModalBridge({
-          ...immediateDetail,
-          meta: {
-            ...safeObject(immediateDetail.meta),
-            openingFromView: false,
-            detailLoading: false,
-            detailFallback: true,
+      const storeSnapshot = findTicketById(id);
+
+      const immediateDetail = mergeTicketDetailWithStoreSnapshot(
+        hasOwnKeys(payloadDetail) ? payloadDetail : storeSnapshot || {},
+        id
+      );
+
+      if (immediateDetail && opts.openImmediate !== false) {
+        openTicketModalBridge(
+          {
+            ...immediateDetail,
+            meta: {
+              ...safeObject(immediateDetail.meta),
+              openingFromView: true,
+              detailLoading: true,
+            },
           },
+          {
+            silent: true,
+          }
+        );
+      }
+
+      rerender();
+      await waitForPaint();
+
+      try {
+        const detail = await openTicketAction({
+          ticketId: id,
+          preferFresh: opts.preferFresh !== false,
+          silent: opts.silent !== false,
         });
 
-        safeEmit("incidencias:open:fallback", {
+        const patchedDetail = detail
+          ? mergeTicketDetailWithStoreSnapshot(detail, id)
+          : immediateDetail;
+
+        if (!patchedDetail) {
+          showToast("No se pudo abrir la incidencia.", "error");
+          return null;
+        }
+
+        updateTicketModalBridge(
+          {
+            ...patchedDetail,
+            meta: {
+              ...safeObject(patchedDetail.meta),
+              openingFromView: false,
+              detailLoading: false,
+            },
+          },
+          {
+            silent: true,
+            preserveTransient: true,
+            preserveFocus: true,
+            focus: false,
+          }
+        );
+
+        safeEmit("incidencias:view:open:success", {
           ticketId: id,
           incidenciaId: id,
-          detail: immediateDetail,
+          detail: patchedDetail,
+          source: safeText(opts.source, "view"),
+        });
+
+        return patchedDetail;
+      } catch (error) {
+        safeWarn("handleOpenTicket falló:", error);
+
+        if (immediateDetail) {
+          updateTicketModalBridge(
+            {
+              ...immediateDetail,
+              meta: {
+                ...safeObject(immediateDetail.meta),
+                openingFromView: false,
+                detailLoading: false,
+                detailFallback: true,
+              },
+            },
+            {
+              silent: true,
+              preserveTransient: true,
+              preserveFocus: true,
+              focus: false,
+            }
+          );
+
+          safeEmit("incidencias:view:open:fallback", {
+            ticketId: id,
+            incidenciaId: id,
+            detail: immediateDetail,
+            error,
+          });
+
+          showToast(
+            "Incidencia abierta con datos locales. No se pudo cargar el detalle remoto.",
+            "warning"
+          );
+
+          return immediateDetail;
+        }
+
+        safeEmit("incidencias:view:open:error", {
+          ticketId: id,
+          incidenciaId: id,
           error,
         });
 
-        showToast(
-          "Incidencia abierta con datos locales. No se pudo cargar el detalle remoto.",
-          "warning"
-        );
+        showToast("No se pudo abrir la incidencia.", "error");
+        return null;
+      } finally {
+        try {
+          setOpeningTicketId("");
+        } catch {
+          incidenciasState.openingTicketId = "";
+        }
 
-        return immediateDetail;
+        if (!destroyed) rerender();
       }
+    })();
 
-      safeEmit("incidencias:open:error", {
-        ticketId: id,
-        incidenciaId: id,
-        error,
-      });
-
-      showToast("No se pudo abrir la incidencia.", "error");
-      return null;
+    try {
+      return await inflightOpenTicket;
     } finally {
-      try {
-        setOpeningTicketId("");
-      } catch {
-        incidenciasState.openingTicketId = "";
-      }
-
-      if (!destroyed) rerender();
+      inflightOpenTicket = null;
+      inflightOpenTicketId = "";
     }
   }
 
@@ -3316,9 +3099,14 @@ export const IncidenciasView = (() => {
       if (detail) {
         const patchedDetail = mergeTicketDetailWithStoreSnapshot(detail, id);
 
-        updateTicketModalBridge(patchedDetail);
+        updateTicketModalBridge(patchedDetail, {
+          silent: true,
+          preserveTransient: true,
+          preserveFocus: true,
+          focus: false,
+        });
 
-        safeEmit("incidencias:modal:refresh:success", {
+        safeEmit("incidencias:view:modal:refresh:success", {
           ticketId: id,
           incidenciaId: id,
           detail: patchedDetail,
@@ -3332,7 +3120,7 @@ export const IncidenciasView = (() => {
       safeWarn("handleRefreshTicketFromModal falló:", error);
       showToast("No se pudo actualizar la incidencia.", "error");
 
-      safeEmit("incidencias:modal:refresh:error", {
+      safeEmit("incidencias:view:modal:refresh:error", {
         ticketId: id,
         incidenciaId: id,
         error,
@@ -3396,7 +3184,6 @@ export const IncidenciasView = (() => {
       }
 
       rerender();
-
       showToast("Preparando formulario...", "info");
 
       return false;
@@ -3437,7 +3224,7 @@ export const IncidenciasView = (() => {
   }
 
   /* =========================================================
-     SEARCH / GLOBAL OPEN BRIDGE
+     EXTERNAL OPEN / URL / BRIDGE
   ========================================================= */
 
   async function openTicketFromExternalRequest(payload = {}) {
@@ -3627,9 +3414,7 @@ export const IncidenciasView = (() => {
 
         const payload = extractExternalOpenPayload(eventOrPayload);
 
-        if (payload.source === "incidenciasView:fallback") {
-          return;
-        }
+        if (payload.source === "incidenciasView:fallback") return;
 
         await openTicketFromExternalRequest({
           ...payload,
@@ -3679,26 +3464,8 @@ export const IncidenciasView = (() => {
       );
     };
 
-    const onCopy = async (eventOrPayload = {}) => {
-      if (destroyed) return;
-
-      const payload = extractExternalOpenPayload(eventOrPayload);
-
-      await handleCopyTicketId(
-        first(
-          payload.ticketId,
-          payload.incidenciaId,
-          payload.id,
-          payload.detail?.ticketId,
-          payload.detail?.id,
-          ""
-        )
-      );
-    };
-
     const cleanups = [
       safeOn("incidencias:modal:refresh", onRefresh),
-      safeOn("incidencias:modal:copy", onCopy),
       ...MUTATION_EVENTS.map((eventName) => safeOn(eventName, onMutated)),
     ];
 
@@ -3830,9 +3597,7 @@ export const IncidenciasView = (() => {
   }
 
   function bindNativeActions(container) {
-    if (!container) {
-      return () => {};
-    }
+    if (!container) return () => {};
 
     const onClick = async (event) => {
       if (destroyed) return;
@@ -4027,7 +3792,6 @@ export const IncidenciasView = (() => {
       if (destroyed) return;
 
       const searchField = getSearchFieldTarget(event);
-
       if (!searchField) return;
 
       scheduleSearchQuery(searchField.value);
@@ -4079,11 +3843,11 @@ export const IncidenciasView = (() => {
     cleanups.push(bindNativeActions(container));
 
     bindingsCleanup = () => {
-      for (const cleanup of cleanups) {
+      cleanups.forEach((cleanup) => {
         try {
           cleanup?.();
         } catch {}
-      }
+      });
     };
 
     attachExternalOpenListener();
@@ -4093,7 +3857,7 @@ export const IncidenciasView = (() => {
   }
 
   /* =========================================================
-     PUBLIC
+     PUBLIC LIFECYCLE
   ========================================================= */
 
   async function reload(options = {}) {
@@ -4144,9 +3908,7 @@ export const IncidenciasView = (() => {
       destroyed = false;
     }
 
-    if (inflightInit) {
-      return inflightInit;
-    }
+    if (inflightInit) return inflightInit;
 
     if (initialized && !destroyed) {
       registerIncidenciasBridge();
@@ -4168,6 +3930,7 @@ export const IncidenciasView = (() => {
     }
 
     initialized = true;
+    destroyed = false;
 
     registerIncidenciasBridge();
 
@@ -4225,8 +3988,12 @@ export const IncidenciasView = (() => {
 
     inflightReload = null;
     inflightInit = null;
+
     inflightExternalOpen = null;
     inflightExternalOpenTicketId = "";
+
+    inflightOpenTicket = null;
+    inflightOpenTicketId = "";
 
     try {
       IncidenciasCreateView?.close?.();
@@ -4296,8 +4063,12 @@ export const IncidenciasView = (() => {
         hasInflightInit: Boolean(inflightInit),
         hasInflightReload: Boolean(inflightReload),
         hasQueuedReload: Boolean(queuedReloadOptions),
+
         hasInflightExternalOpen: Boolean(inflightExternalOpen),
         inflightExternalOpenTicketId,
+
+        hasInflightOpenTicket: Boolean(inflightOpenTicket),
+        inflightOpenTicketId,
 
         pendingCreateRequest,
         lastAutoOpenedTicketId,

@@ -690,6 +690,11 @@
   --sidebar-radius: 0;
   --sidebar-logo-size: calc(34px * var(--ui-scale));
   --sidebar-logo-radius: calc(12px * var(--ui-scale));
+  --sidebar-logo-img-size: calc(24px * var(--ui-scale));
+  --sidebar-logo-dark-display: block;
+  --sidebar-logo-light-display: none;
+  --sidebar-logo-opacity: .96;
+  --sidebar-logo-filter: none;
 
   --sidebar-item-height: calc(40px * var(--ui-scale));
   --sidebar-item-padding-x: calc(11px * var(--ui-scale));

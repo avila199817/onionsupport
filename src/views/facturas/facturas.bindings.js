@@ -2,8 +2,10 @@
    Onion SPA - Facturas Bindings
    Archivo: src/views/facturas/facturas.bindings.js
 
-   FINAL PRO SYSTEM · FACTURAS BINDINGS · CSP CLEAN · 14/10
+   FINAL PRO SYSTEM · FACTURAS BINDINGS · CSP CLEAN · 15/10
    PATCH · SINGLE DELEGATION
+   PATCH · ROW CLICK OPENS DETAIL VIEW
+   PATCH · IGNORE LEGACY data-row-click-disabled
    PATCH · NO API FALLBACKS
    PATCH · NO STORE ACCESS
    PATCH · NO FILTER/SEARCH/SORT DUPLICATION
@@ -16,6 +18,8 @@
    RESPONSABILIDADES:
    - Registrar eventos UI del módulo Facturas.
    - Delegar acciones de colección y fila.
+   - Abrir detalle al pinchar en cualquier zona no interactiva de la fila.
+   - No abrir detalle al pinchar botones, inputs, enlaces o acciones internas.
    - No cargar datos directamente.
    - No abrir modales de incidencia directamente.
    - No importar store.
@@ -51,11 +55,15 @@ const ACTION_ALIASES = Object.freeze({
 
   "open-factura": "open-factura",
   detail: "open-factura",
+  details: "open-factura",
   "open-detail": "open-factura",
+  "view-factura": "open-factura",
+  "view-invoice": "open-factura",
 
   "view-factura-pdf": "view-factura-pdf",
   "view-pdf": "view-factura-pdf",
   "ver-pdf": "view-factura-pdf",
+  pdf: "view-factura-pdf",
 
   "download-factura": "download-factura",
   "download-pdf": "download-factura",
@@ -68,6 +76,8 @@ const ACTION_ALIASES = Object.freeze({
   "open-incidencia": "open-incidencia",
   "open-ticket": "open-incidencia",
   "open-related-incidencia": "open-incidencia",
+  incidencia: "open-incidencia",
+  ticket: "open-incidencia",
 
   "prev-page": "prev-page",
   "pagination-prev": "prev-page",
@@ -96,13 +106,28 @@ const VIEW_OWNED_ACTIONS = new Set([
   "reset-filters",
 ]);
 
+const ROW_SELECTOR = [
+  ".facturas-table-row",
+  ".facturas-row",
+  ".factura-card",
+  ".facturas-mobile-card",
+  "[data-facturas-row='true']",
+  "[data-factura-id]",
+].join(",");
+
 const INTERACTIVE_SELECTOR = [
   "button",
   "a",
   "input",
   "select",
   "textarea",
+  "summary",
+  "label",
+  "[contenteditable='true']",
   "[role='button']",
+  "[role='link']",
+  "[role='menuitem']",
+  "[tabindex]:not(.facturas-table-row):not(.facturas-row):not(.factura-card):not(.facturas-mobile-card)",
   "[data-action]",
   "[data-facturas-action]",
 ].join(",");
@@ -161,10 +186,13 @@ function getLiveState(getState) {
 function getRoot(container, scopeName = DEFAULT_SCOPE) {
   if (!container) return null;
 
+  const finalScopeName = resolveScopeName(scopeName);
+
   return (
-    container.querySelector(
-      `[data-facturas-scope="${resolveScopeName(scopeName)}"]`
-    ) ||
+    container.querySelector(`[data-facturas-scope="${finalScopeName}"]`) ||
+    container.querySelector(".facturas-view-root[data-facturas-scope]") ||
+    container.querySelector("[data-facturas-scope='true']") ||
+    container.querySelector(".facturas-view-root") ||
     container.querySelector("[data-facturas-panel='true']") ||
     container
   );
@@ -264,6 +292,72 @@ function prevent(event) {
   } catch {}
 }
 
+function isElementInsideRoot(root, element) {
+  try {
+    return Boolean(root && element && root.contains(element));
+  } catch {
+    return false;
+  }
+}
+
+/* =========================================================
+   ROW HELPERS
+========================================================= */
+
+function getRowElementFromEvent(event, root) {
+  const rowEl = event?.target?.closest?.(ROW_SELECTOR) || null;
+
+  if (!rowEl || !isElementInsideRoot(root, rowEl)) return null;
+
+  const facturaId = getFacturaId(rowEl);
+  if (!facturaId) return null;
+
+  return rowEl;
+}
+
+function isInsideInteractiveElement(event, rowEl) {
+  const target = event?.target;
+  if (!target || !rowEl) return false;
+
+  const interactiveEl = target.closest?.(INTERACTIVE_SELECTOR) || null;
+
+  if (!interactiveEl) return false;
+
+  return rowEl.contains(interactiveEl);
+}
+
+function prepareClickableRows(root) {
+  if (!root || typeof root.querySelectorAll !== "function") return;
+
+  const rows = root.querySelectorAll(ROW_SELECTOR);
+
+  rows.forEach((row) => {
+    const facturaId = getFacturaId(row);
+    if (!facturaId) return;
+
+    try {
+      row.dataset.facturasRowClickable = "true";
+      row.classList?.add?.("is-clickable");
+
+      if (!row.hasAttribute("tabindex")) {
+        row.setAttribute("tabindex", "0");
+      }
+
+      if (!row.hasAttribute("aria-label")) {
+        row.setAttribute("aria-label", `Abrir detalle de factura ${facturaId}`);
+      }
+    } catch {}
+  });
+}
+
+function shouldOpenRowByKeyboard(event, rowEl) {
+  if (!rowEl) return false;
+  if (event.key !== "Enter" && event.key !== " ") return false;
+  if (isInsideInteractiveElement(event, rowEl)) return false;
+
+  return true;
+}
+
 /* =========================================================
    STATE HELPERS
 ========================================================= */
@@ -312,7 +406,6 @@ function canCreateFacturaFromState(state = {}) {
       role === "admin" ||
       role === "administrator" ||
       role === "superadmin" ||
-      role === "super-admin" ||
       role === "super-admin" ||
       role === "root" ||
       role === "owner"
@@ -533,6 +626,53 @@ function shouldIgnoreAction(action = "") {
 }
 
 /* =========================================================
+   OPEN ROW DETAIL
+========================================================= */
+
+async function openFacturaFromRow({
+  event,
+  rowEl,
+  state = {},
+  openFactura,
+} = {}) {
+  if (!rowEl) return false;
+
+  const facturaId = getFacturaId(rowEl);
+  if (!facturaId) return false;
+
+  if (isOpenBusyState(state)) {
+    prevent(event);
+    return true;
+  }
+
+  if (typeof openFactura !== "function") {
+    prevent(event);
+    showBindingToast("La apertura de factura no está conectada.", "error");
+    return true;
+  }
+
+  prevent(event);
+
+  await runLocked("row-open-factura", facturaId, async () => {
+    try {
+      rowEl.setAttribute("aria-busy", "true");
+      rowEl.classList?.add?.("is-row-opening");
+    } catch {}
+
+    try {
+      await openFactura(facturaId);
+    } finally {
+      try {
+        rowEl.removeAttribute("aria-busy");
+        rowEl.classList?.remove?.("is-row-opening");
+      } catch {}
+    }
+  });
+
+  return true;
+}
+
+/* =========================================================
    ACTION DISPATCHER
 ========================================================= */
 
@@ -569,7 +709,7 @@ async function dispatchFacturasAction({
     return false;
   }
 
-  const rowEl = actionEl.closest?.("[data-factura-id]") || null;
+  const rowEl = actionEl.closest?.(ROW_SELECTOR) || null;
 
   const facturaId = safeText(
     getFacturaId(actionEl) ||
@@ -914,6 +1054,8 @@ export function bindFacturasView({
     return () => {};
   }
 
+  prepareClickableRows(root);
+
   const onClick = async (event) => {
     const state = getLiveState(getState);
 
@@ -950,76 +1092,84 @@ export function bindFacturasView({
       if (handled) return;
     }
 
-    const rowEl =
-      event.target?.closest?.(".factura-card") ||
-      event.target?.closest?.(".facturas-mobile-card") ||
-      event.target?.closest?.(".facturas-row") ||
-      event.target?.closest?.(".facturas-table-row") ||
-      event.target?.closest?.("[data-factura-id]") ||
-      null;
+    const rowEl = getRowElementFromEvent(event, root);
+    if (!rowEl) return;
 
-    if (!rowEl || !root.contains(rowEl)) return;
+    /*
+      IMPORTANTE:
+      No se respeta data-row-click-disabled="true" porque el template legacy
+      lo está pintando en el <tr> y bloqueaba la apertura de detalle.
+      La protección correcta está en INTERACTIVE_SELECTOR:
+      botones, enlaces, inputs y acciones internas no abren la fila.
+    */
+    if (isInsideInteractiveElement(event, rowEl)) return;
 
-    if (event.target?.closest?.(INTERACTIVE_SELECTOR)) return;
-
-    const rowClickDisabled =
-      safeText(rowEl?.dataset?.rowClickDisabled, "") === "true";
-
-    if (rowClickDisabled) return;
-
-    const facturaId = getFacturaId(rowEl);
-
-    if (!facturaId || isOpenBusyState(state)) return;
-
-    prevent(event);
-
-    await runLocked("row-open", facturaId, async () => {
-      await openFactura?.(facturaId);
+    await openFacturaFromRow({
+      event,
+      rowEl,
+      state,
+      openFactura,
     });
   };
 
   const onKeydown = async (event) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-
     const actionEl =
       event.target?.closest?.("[data-facturas-action]") ||
       event.target?.closest?.("[data-action]") ||
       null;
 
-    if (!actionEl || !root.contains(actionEl)) return;
+    if (actionEl && root.contains(actionEl)) {
+      if (
+        actionEl.tagName === "BUTTON" ||
+        actionEl.tagName === "A" ||
+        actionEl.getAttribute?.("role") === "button"
+      ) {
+        return;
+      }
 
-    if (
-      actionEl.tagName === "BUTTON" ||
-      actionEl.tagName === "A" ||
-      actionEl.getAttribute?.("role") === "button"
-    ) {
-      return;
+      if (event.key !== "Enter" && event.key !== " ") return;
+
+      const state = getLiveState(getState);
+
+      const handled = await dispatchFacturasAction({
+        event,
+        actionEl,
+        state,
+
+        loadFacturas,
+        openFactura,
+        openFacturaPdf,
+        downloadFacturaPdf,
+        sendFacturaToClient,
+        closeDetail,
+        exportFacturasCsv,
+
+        createFactura,
+
+        openIncidencia,
+        openRelatedIncidencia,
+
+        goToPage,
+        goPrevPage,
+        goNextPage,
+        setPage,
+      });
+
+      if (handled) return;
     }
+
+    const rowEl = getRowElementFromEvent(event, root);
+    if (!rowEl) return;
+
+    if (!shouldOpenRowByKeyboard(event, rowEl)) return;
 
     const state = getLiveState(getState);
 
-    await dispatchFacturasAction({
+    await openFacturaFromRow({
       event,
-      actionEl,
+      rowEl,
       state,
-
-      loadFacturas,
       openFactura,
-      openFacturaPdf,
-      downloadFacturaPdf,
-      sendFacturaToClient,
-      closeDetail,
-      exportFacturasCsv,
-
-      createFactura,
-
-      openIncidencia,
-      openRelatedIncidencia,
-
-      goToPage,
-      goPrevPage,
-      goNextPage,
-      setPage,
     });
   };
 

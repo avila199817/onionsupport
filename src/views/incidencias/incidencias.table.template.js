@@ -2,14 +2,19 @@
    Onion SPA - Incidencias Table Template
    Archivo: src/views/incidencias/incidencias.table.template.js
 
-   FINAL PRO SAAS PANEL · INCIDENCIAS TEMPLATE · CSP CLEAN · 12/10 EXTREME
+   FINAL PRO SAAS PANEL · INCIDENCIAS TEMPLATE · CSP CLEAN · 13/10 EXTREME
+   PATCH · HEADER ACTIONS 1:1 FACTURAS ORDER
+   PATCH · EXPORT / CREATE / REFRESH BUTTON ORDER
+   PATCH · TECHNICIAN AVATAR CONTRACT HARDENED
+   PATCH · assignment.assignedToName / assignedToEmail READY
+   PATCH · tecnico.avatar / assignedTo.avatar / meta.technicianAvatar READY
+   PATCH · CURRENT USER AVATAR BRIDGE READY
    PATCH · EXTERNAL CSS ONLY · NO STYLE INJECTION
    PATCH · NO INLINE STYLE · NO INLINE EVENTS
    PATCH · NO NATIVE TITLE TOOLTIP · DATA-TOOLTIP ONLY
    PATCH · REAL TABLE LOCK · NO ::BEFORE ON <TR>
    PATCH · FILTERS + SEARCH · SINGLE DATA FLOW
    PATCH · AVATAR TONES VIA DATA ATTRIBUTES
-   PATCH · TECHNICIAN REAL AVATAR VIA STATE / APPCORE / FALLBACK ASSET
    PATCH · DATA-CONTRACT READY FOR VIEW.JS
    PATCH · ROW CLICK READY FOR DETAIL MODAL
    PATCH · DOM BINDINGS CSP CLEAN
@@ -32,7 +37,7 @@
    - Estado loading visual en "Detalle" sin mover tabla.
    - Refresh overlay sin desplazar columnas.
    - Avatares fallback con tono estable por cliente/ticket.
-   - Avatar real del técnico actual en badge de asignación.
+   - Avatar real del técnico por payload backend, AppCore o asset local.
    - Chips de estado con contraste real dark/light.
    - Importe de facturas asociadas blindado contra normalizadores intermedios.
    - Estados loading/error/empty blindados.
@@ -54,14 +59,20 @@ const DEFAULT_CURRENCY = "EUR";
 const AVATAR_TONE_COUNT = 10;
 
 const CURRENT_TECHNICIAN_NAME = "Cristian Ávila Luque";
-const CURRENT_TECHNICIAN_EMAIL = "avila199817@gmail.com";
-const CURRENT_TECHNICIAN_USERNAME = "avila199817";
+const CURRENT_TECHNICIAN_EMAIL = "cristian@onionsupport.com";
+const CURRENT_TECHNICIAN_USERNAME = "cristian";
+
+const CURRENT_TECHNICIAN_EMAIL_ALIASES = Object.freeze([
+  "cristian@onionsupport.com",
+  "avila199817@gmail.com",
+]);
 
 /*
   Orden intencional:
-  1) avatar recibido en state/AppCore
-  2) asset local principal
-  3) alternativas por casing/nombre
+  1) avatar recibido en ticket/backend
+  2) avatar recibido en state/AppCore
+  3) asset local principal
+  4) alternativas por casing/nombre
 */
 const CURRENT_TECHNICIAN_AVATAR_FALLBACKS = Object.freeze([
   "/src/media/img/Usuario.png",
@@ -75,7 +86,9 @@ const CURRENT_TECHNICIAN_MATCH_VALUES = Object.freeze([
   "Cristian Avila Luque",
   CURRENT_TECHNICIAN_EMAIL,
   CURRENT_TECHNICIAN_USERNAME,
+  "cristian",
   "CA",
+  ...CURRENT_TECHNICIAN_EMAIL_ALIASES,
 ]);
 
 const FILTERS = Object.freeze([
@@ -830,10 +843,12 @@ function getStatusKey(value = "") {
       "cerrada",
       "cerrado",
       "cancelled",
+      "canceled",
       "cancelada",
       "cancelado",
       "archived",
       "archivada",
+      "archivado",
     ].includes(key)
   ) {
     return "closed";
@@ -936,26 +951,63 @@ function getAssignedTo(item = {}) {
 
   return safeText(
     first(
-      item.assignedTo?.name,
-      item.assignedTo?.displayName,
+      item.assignedToName,
+      item.technicianName,
+      item.tecnicoName,
+
+      item.assignment?.assignedToName,
       item.assignment?.agentName,
+      item.assignment?.technicianName,
+      item.assignment?.displayName,
       item.assignment?.name,
+
       item.tecnico?.name,
+      item.tecnico?.nombre,
       item.tecnico?.displayName,
-      item.tecnico,
+      typeof item.tecnico === "string" ? item.tecnico : "",
+
+      item.assignedTo?.name,
+      item.assignedTo?.nombre,
+      item.assignedTo?.displayName,
+      typeof item.assignedTo === "string" ? item.assignedTo : "",
+
       item.agent?.name,
       item.agent?.displayName,
-      item.agent,
-      raw.assignedTo?.name,
-      raw.assignedTo?.displayName,
+      typeof item.agent === "string" ? item.agent : "",
+
+      item.meta?.technicianName,
+      item.meta?.lastTechnicianName,
+      item.resolution?.closedBy?.name,
+      item.audit?.by?.name,
+
+      raw.assignedToName,
+      raw.technicianName,
+      raw.tecnicoName,
+
+      raw.assignment?.assignedToName,
       raw.assignment?.agentName,
+      raw.assignment?.technicianName,
+      raw.assignment?.displayName,
       raw.assignment?.name,
+
       raw.tecnico?.name,
+      raw.tecnico?.nombre,
       raw.tecnico?.displayName,
-      raw.tecnico,
+      typeof raw.tecnico === "string" ? raw.tecnico : "",
+
+      raw.assignedTo?.name,
+      raw.assignedTo?.nombre,
+      raw.assignedTo?.displayName,
+      typeof raw.assignedTo === "string" ? raw.assignedTo : "",
+
       raw.agent?.name,
       raw.agent?.displayName,
-      raw.agent
+      typeof raw.agent === "string" ? raw.agent : "",
+
+      raw.meta?.technicianName,
+      raw.meta?.lastTechnicianName,
+      raw.resolution?.closedBy?.name,
+      raw.audit?.by?.name
     ),
     "Sin asignar"
   );
@@ -966,24 +1018,55 @@ function getAssignedEmail(item = {}) {
 
   return safeText(
     first(
-      item.assignedTo?.email,
-      item.assignedTo?.mail,
+      item.assignedToEmail,
+      item.technicianEmail,
+      item.tecnicoEmail,
+
+      item.assignment?.assignedToEmail,
       item.assignment?.agentEmail,
+      item.assignment?.technicianEmail,
       item.assignment?.email,
+      item.assignment?.mail,
+
       item.tecnico?.email,
       item.tecnico?.mail,
+
+      item.assignedTo?.email,
+      item.assignedTo?.mail,
+
       item.agentEmail,
       item.agent?.email,
       item.agent?.mail,
-      raw.assignedTo?.email,
-      raw.assignedTo?.mail,
+
+      item.meta?.technicianEmail,
+      item.meta?.lastTechnicianEmail,
+      item.resolution?.closedBy?.email,
+      item.audit?.by?.email,
+
+      raw.assignedToEmail,
+      raw.technicianEmail,
+      raw.tecnicoEmail,
+
+      raw.assignment?.assignedToEmail,
       raw.assignment?.agentEmail,
+      raw.assignment?.technicianEmail,
       raw.assignment?.email,
+      raw.assignment?.mail,
+
       raw.tecnico?.email,
       raw.tecnico?.mail,
+
+      raw.assignedTo?.email,
+      raw.assignedTo?.mail,
+
       raw.agentEmail,
       raw.agent?.email,
-      raw.agent?.mail
+      raw.agent?.mail,
+
+      raw.meta?.technicianEmail,
+      raw.meta?.lastTechnicianEmail,
+      raw.resolution?.closedBy?.email,
+      raw.audit?.by?.email
     ),
     ""
   ).toLowerCase();
@@ -994,30 +1077,55 @@ function getAssignedId(item = {}) {
 
   return safeText(
     first(
-      item.assignedTo?.id,
-      item.assignedTo?.userId,
-      item.assignedTo?.username,
+      item.assignedToUserId,
+      item.technicianUserId,
+      item.tecnicoUserId,
+
+      item.assignment?.assignedToUserId,
       item.assignment?.agentId,
       item.assignment?.userId,
+      item.assignment?.technicianUserId,
+
       item.tecnico?.id,
       item.tecnico?.userId,
       item.tecnico?.username,
+
+      item.assignedTo?.id,
+      item.assignedTo?.userId,
+      item.assignedTo?.username,
+
       item.agentId,
       item.agent?.id,
       item.agent?.userId,
       item.agent?.username,
-      raw.assignedTo?.id,
-      raw.assignedTo?.userId,
-      raw.assignedTo?.username,
+
+      item.meta?.technicianUserId,
+      item.meta?.lastTechnicianUserId,
+
+      raw.assignedToUserId,
+      raw.technicianUserId,
+      raw.tecnicoUserId,
+
+      raw.assignment?.assignedToUserId,
       raw.assignment?.agentId,
       raw.assignment?.userId,
+      raw.assignment?.technicianUserId,
+
       raw.tecnico?.id,
       raw.tecnico?.userId,
       raw.tecnico?.username,
+
+      raw.assignedTo?.id,
+      raw.assignedTo?.userId,
+      raw.assignedTo?.username,
+
       raw.agentId,
       raw.agent?.id,
       raw.agent?.userId,
-      raw.agent?.username
+      raw.agent?.username,
+
+      raw.meta?.technicianUserId,
+      raw.meta?.lastTechnicianUserId
     ),
     ""
   );
@@ -1053,6 +1161,7 @@ function getCurrentUserAvatar(state = {}) {
       runtime.photoUrl,
       runtime.picture,
       runtime.image,
+
       user.avatar,
       user.avatarUrl,
       user.photo,
@@ -1063,6 +1172,7 @@ function getCurrentUserAvatar(state = {}) {
       user.imageUrl,
       user.profileImage,
       user.profileImageUrl,
+
       raw.avatar,
       raw.avatarUrl,
       raw.photo,
@@ -1083,50 +1193,91 @@ function getAssignedExplicitAvatar(item = {}) {
 
   return safeText(
     first(
-      item.assignedTo?.avatar,
-      item.assignedTo?.avatarUrl,
-      item.assignedTo?.photo,
-      item.assignedTo?.photoUrl,
-      item.assignedTo?.picture,
-      item.assignedTo?.image,
+      item.assignedToAvatar,
+      item.tecnicoAvatar,
+      item.technicianAvatar,
+      item.agentAvatar,
+
+      item.assignment?.assignedToAvatar,
       item.assignment?.agentAvatar,
+      item.assignment?.technicianAvatar,
       item.assignment?.avatar,
       item.assignment?.avatarUrl,
+      item.assignment?.photo,
+      item.assignment?.photoUrl,
+      item.assignment?.picture,
+      item.assignment?.image,
+
       item.tecnico?.avatar,
       item.tecnico?.avatarUrl,
       item.tecnico?.photo,
       item.tecnico?.photoUrl,
       item.tecnico?.picture,
       item.tecnico?.image,
-      item.agentAvatar,
+
+      item.assignedTo?.avatar,
+      item.assignedTo?.avatarUrl,
+      item.assignedTo?.photo,
+      item.assignedTo?.photoUrl,
+      item.assignedTo?.picture,
+      item.assignedTo?.image,
+
       item.agent?.avatar,
       item.agent?.avatarUrl,
       item.agent?.photo,
       item.agent?.photoUrl,
       item.agent?.picture,
       item.agent?.image,
-      raw.assignedTo?.avatar,
-      raw.assignedTo?.avatarUrl,
-      raw.assignedTo?.photo,
-      raw.assignedTo?.photoUrl,
-      raw.assignedTo?.picture,
-      raw.assignedTo?.image,
+
+      item.meta?.technicianAvatar,
+      item.meta?.technicianAvatarUrl,
+      item.meta?.lastTechnicianAvatar,
+      item.meta?.lastTechnicianAvatarUrl,
+      item.resolution?.closedBy?.avatar,
+      item.resolution?.closedBy?.avatarUrl,
+
+      raw.assignedToAvatar,
+      raw.tecnicoAvatar,
+      raw.technicianAvatar,
+      raw.agentAvatar,
+
+      raw.assignment?.assignedToAvatar,
       raw.assignment?.agentAvatar,
+      raw.assignment?.technicianAvatar,
       raw.assignment?.avatar,
       raw.assignment?.avatarUrl,
+      raw.assignment?.photo,
+      raw.assignment?.photoUrl,
+      raw.assignment?.picture,
+      raw.assignment?.image,
+
       raw.tecnico?.avatar,
       raw.tecnico?.avatarUrl,
       raw.tecnico?.photo,
       raw.tecnico?.photoUrl,
       raw.tecnico?.picture,
       raw.tecnico?.image,
-      raw.agentAvatar,
+
+      raw.assignedTo?.avatar,
+      raw.assignedTo?.avatarUrl,
+      raw.assignedTo?.photo,
+      raw.assignedTo?.photoUrl,
+      raw.assignedTo?.picture,
+      raw.assignedTo?.image,
+
       raw.agent?.avatar,
       raw.agent?.avatarUrl,
       raw.agent?.photo,
       raw.agent?.photoUrl,
       raw.agent?.picture,
-      raw.agent?.image
+      raw.agent?.image,
+
+      raw.meta?.technicianAvatar,
+      raw.meta?.technicianAvatarUrl,
+      raw.meta?.lastTechnicianAvatar,
+      raw.meta?.lastTechnicianAvatarUrl,
+      raw.resolution?.closedBy?.avatar,
+      raw.resolution?.closedBy?.avatarUrl
     ),
     ""
   );
@@ -1146,18 +1297,23 @@ function isCurrentTechnicianAssigned(item = {}, state = {}) {
     user.displayName,
     user.fullName,
     user.email,
+    user.emailLower,
     user.username,
+    user.usernameLower,
     user.userId,
     user.id,
     raw.name,
     raw.displayName,
     raw.fullName,
     raw.email,
+    raw.emailLower,
     raw.username,
+    raw.usernameLower,
     raw.userId,
     raw.id,
     runtime.username,
     runtime.email,
+    runtime.emailLower,
     runtime.userId,
     runtime.id,
   ]
@@ -1220,9 +1376,12 @@ function getAssignedAvatarUrl(item = {}, state = {}) {
   if (explicitAvatar) return explicitAvatar;
 
   if (isCurrentTechnicianAssigned(item, state)) {
-    return first(
-      getCurrentUserAvatar(state),
-      CURRENT_TECHNICIAN_AVATAR_FALLBACKS[0],
+    return safeText(
+      first(
+        getCurrentUserAvatar(state),
+        CURRENT_TECHNICIAN_AVATAR_FALLBACKS[0],
+        ""
+      ),
       ""
     );
   }
@@ -1512,6 +1671,7 @@ function normalizeFilter(value = "") {
       "resueltos",
       "solved",
       "cancelled",
+      "canceled",
       "cancelada",
       "cancelado",
       "archived",
@@ -2402,7 +2562,7 @@ export function renderHeader(input = {}) {
     first(
       data.subtitle,
       runtime.subtitle,
-      "Consulta el estado de tus incidencias, revisa las actualizaciones más recientes y crea nuevas solicitudes desde una vista clara, cercana y fácil de seguir."
+      "Consulta el estado de tus incidencias, revisa las actualizaciones más recientes y crea nuevas solicitudes desde una vista clara, premium y conectada con facturación."
     ),
     ""
   );
@@ -2419,38 +2579,23 @@ export function renderHeader(input = {}) {
           <p class="incidencias-page-subtitle">${escapeHtml(subtitle)}</p>
         </div>
 
-        <div class="incidencias-hero-actions">
-          <button
-            type="button"
-            id="incidencias-refresh-btn"
-            class="incidencias-btn${refreshing ? " is-loading" : ""}"
-            data-incidencias-action="refresh"
-            data-action="refresh"
-            ${disabledAttrs(refreshing || loading, refreshing)}
-          >
-            ${
-              refreshing
-                ? renderSpinner("Actualizando...")
-                : `${icon("refresh")}<span class="incidencias-btn-text">Actualizar</span>`
-            }
-          </button>
-
+        <div class="incidencias-hero-actions incidencias-hero-actions--facturas-order">
           <button
             type="button"
             id="incidencias-export-btn"
-            class="incidencias-btn"
+            class="incidencias-btn incidencias-btn--ghost incidencias-btn--export"
             data-incidencias-action="export"
             data-action="export-csv"
             ${disabledAttrs(loading || refreshing || !rows.length)}
           >
             ${icon("export")}
-            <span class="incidencias-btn-text">Exportar historial</span>
+            <span class="incidencias-btn-text">Exportar CSV</span>
           </button>
 
           <button
             type="button"
             id="incidencias-create-btn"
-            class="incidencias-btn incidencias-btn--primary incidencias-btn--create${creating ? " is-loading" : ""}"
+            class="incidencias-btn incidencias-btn--primary incidencias-btn--success incidencias-btn--create${creating ? " is-loading" : ""}"
             data-incidencias-action="create"
             data-action="create-incidencia"
             ${disabledAttrs(creating, creating)}
@@ -2459,6 +2604,21 @@ export function renderHeader(input = {}) {
               creating
                 ? renderSpinner("Abriendo...")
                 : `${icon("plus")}<span class="incidencias-btn-text">Crear incidencia</span>`
+            }
+          </button>
+
+          <button
+            type="button"
+            id="incidencias-refresh-btn"
+            class="incidencias-btn incidencias-btn--accent incidencias-btn--refresh${refreshing ? " is-loading" : ""}"
+            data-incidencias-action="refresh"
+            data-action="refresh"
+            ${disabledAttrs(refreshing || loading, refreshing)}
+          >
+            ${
+              refreshing
+                ? renderSpinner("Actualizando...")
+                : `${icon("refresh")}<span class="incidencias-btn-text">Actualizar</span>`
             }
           </button>
         </div>

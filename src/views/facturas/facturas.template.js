@@ -2,14 +2,16 @@
    Onion SPA - Facturas Template
    Archivo: src/views/facturas/facturas.template.js
 
-   FINAL PRO SAAS PANEL · FACTURAS TEMPLATE · CSP CLEAN · 10/10 EXTREME
+   FINAL PRO SAAS PANEL · FACTURAS TEMPLATE · CSP CLEAN · 11/10 EXTREME
    PATCH · EXTERNAL CSS ONLY · NO STYLE INJECTION
    PATCH · NO INLINE STYLE · NO INLINE EVENTS
    PATCH · NO NATIVE TITLE TOOLTIP · DATA-TOOLTIP ONLY
    PATCH · REAL TABLE LOCK · NO ::BEFORE ON <TR>
-   PATCH · FILTERS + SORT + SEARCH · SINGLE DATA FLOW
+   PATCH · FILTERS + SORT BIDIRECTIONAL + SEARCH · SINGLE DATA FLOW
+   PATCH · SORT 2-CLICK TOGGLE: DESC ⇄ ASC
    PATCH · AVATAR TONES VIA CSS CLASSES
    PATCH · DATA-CONTRACT READY FOR VIEW.JS
+   PATCH · ROW CLICK READY FOR DETAIL VIEW
 
    RESPONSABILIDADES:
    - Render premium de vista de facturas.
@@ -21,7 +23,9 @@
    - Usar data-tooltip + aria-label.
    - Tabla real blindada.
    - Filtros visuales: todas / pendientes / pagadas / vencidas.
-   - Orden visual: fecha descendente / número de factura descendente.
+   - Orden visual bidireccional: fecha desc/asc y número de factura desc/asc.
+   - Primer click ordena de mayor a menor.
+   - Segundo click sobre el mismo criterio ordena de menor a mayor.
    - Búsqueda por factura, cliente, email, importe, forma de pago e incidencia.
    - Paginación real de 5 items por defecto sobre resultados filtrados.
    - Acciones compatibles con data-facturas-action y data-action.
@@ -36,6 +40,7 @@
    - Incidencia relacionada lista para modal.
    - Estados loading/error/empty blindados.
    - HTML endurecido con escape/fallbacks.
+   - Filas preparadas para apertura de detalle vía bindings.
 
    NOTA CSP:
    - Para fallback de imagen sin onerror inline, llamar a:
@@ -68,14 +73,22 @@ const FILTERS = Object.freeze([
 
 const SORT_OPTIONS = Object.freeze([
   {
-    key: "date_desc",
-    label: "Fecha ↓",
-    tooltip: "Ordenar por fecha de emisión de mayor a menor",
+    key: "date",
+    label: "Fecha",
+    desc: "date_desc",
+    asc: "date_asc",
+    modes: ["date_desc", "date_asc"],
+    tooltipDesc: "Ordenar por fecha de emisión de mayor a menor",
+    tooltipAsc: "Ordenar por fecha de emisión de menor a mayor",
   },
   {
-    key: "invoice_desc",
-    label: "Nº factura ↓",
-    tooltip: "Ordenar por número de factura de mayor a menor",
+    key: "invoice",
+    label: "Nº factura",
+    desc: "invoice_desc",
+    asc: "invoice_asc",
+    modes: ["invoice_desc", "invoice_asc"],
+    tooltipDesc: "Ordenar por número de factura de mayor a menor",
+    tooltipAsc: "Ordenar por número de factura de menor a mayor",
   },
 ]);
 
@@ -1277,11 +1290,18 @@ function getEmissionTimestamp(item = {}) {
   return toTimestamp(getCreatedAt(item)) || getSortTimestamp(item);
 }
 
-function compareFacturasNewestFirst(a = {}, b = {}) {
-  const diff = getEmissionTimestamp(b) - getEmissionTimestamp(a);
+function compareFacturaNumeroAsc(a = {}, b = {}) {
+  return safeText(getFacturaNumero(a), "").localeCompare(
+    safeText(getFacturaNumero(b), ""),
+    "es",
+    {
+      numeric: true,
+      sensitivity: "base",
+    }
+  );
+}
 
-  if (diff !== 0) return diff;
-
+function compareFacturaNumeroDesc(a = {}, b = {}) {
   return safeText(getFacturaNumero(b), "").localeCompare(
     safeText(getFacturaNumero(a), ""),
     "es",
@@ -1292,21 +1312,34 @@ function compareFacturasNewestFirst(a = {}, b = {}) {
   );
 }
 
+function compareFacturasDateDesc(a = {}, b = {}) {
+  const diff = getEmissionTimestamp(b) - getEmissionTimestamp(a);
+  if (diff !== 0) return diff;
+
+  return compareFacturaNumeroDesc(a, b);
+}
+
+function compareFacturasDateAsc(a = {}, b = {}) {
+  const diff = getEmissionTimestamp(a) - getEmissionTimestamp(b);
+  if (diff !== 0) return diff;
+
+  return compareFacturaNumeroAsc(a, b);
+}
+
 function sortFacturasNewestFirst(items = []) {
-  return [...safeArray(items)].sort(compareFacturasNewestFirst);
+  return [...safeArray(items)].sort(compareFacturasDateDesc);
+}
+
+function sortFacturasOldestFirst(items = []) {
+  return [...safeArray(items)].sort(compareFacturasDateAsc);
 }
 
 function sortFacturasByInvoiceDesc(items = []) {
-  return [...safeArray(items)].sort((a, b) =>
-    safeText(getFacturaNumero(b), "").localeCompare(
-      safeText(getFacturaNumero(a), ""),
-      "es",
-      {
-        numeric: true,
-        sensitivity: "base",
-      }
-    )
-  );
+  return [...safeArray(items)].sort(compareFacturaNumeroDesc);
+}
+
+function sortFacturasByInvoiceAsc(items = []) {
+  return [...safeArray(items)].sort(compareFacturaNumeroAsc);
 }
 
 function hasPdf(item = {}) {
@@ -1426,7 +1459,7 @@ function canSendFactura(item = {}) {
 }
 
 /* =========================================================
-   FILTERS / SEARCH
+   FILTERS / SEARCH / SORT
 ========================================================= */
 
 function normalizeFilter(value = "") {
@@ -1519,15 +1552,47 @@ function normalizeSort(value = "") {
 
   if (
     [
+      "date_asc",
+      "fecha_asc",
+      "emission_asc",
+      "issue_date_asc",
+      "fecha_emision_asc",
+      "oldest",
+      "oldest_first",
+      "menor_fecha",
+    ].includes(key)
+  ) {
+    return "date_asc";
+  }
+
+  if (
+    [
       "invoice_desc",
       "factura_desc",
       "numero_desc",
       "n_factura_desc",
       "num_factura_desc",
       "number_desc",
+      "invoice_number_desc",
+      "mayor_factura",
     ].includes(key)
   ) {
     return "invoice_desc";
+  }
+
+  if (
+    [
+      "invoice_asc",
+      "factura_asc",
+      "numero_asc",
+      "n_factura_asc",
+      "num_factura_asc",
+      "number_asc",
+      "invoice_number_asc",
+      "menor_factura",
+    ].includes(key)
+  ) {
+    return "invoice_asc";
   }
 
   return "date_desc";
@@ -1552,6 +1617,42 @@ function getSortMode(input = {}) {
       "date_desc"
     )
   );
+}
+
+function getSortDirection(sortMode = "date_desc") {
+  return normalizeSort(sortMode).endsWith("_asc") ? "asc" : "desc";
+}
+
+function getSortOption(sortMode = "date_desc") {
+  const mode = normalizeSort(sortMode);
+
+  return (
+    SORT_OPTIONS.find((option) => option.modes.includes(mode)) ||
+    SORT_OPTIONS[0]
+  );
+}
+
+function getNextSortMode(option = SORT_OPTIONS[0], currentSortMode = "date_desc") {
+  const mode = normalizeSort(currentSortMode);
+  const isActive = option.modes.includes(mode);
+
+  if (!isActive) return option.desc;
+
+  return mode.endsWith("_desc") ? option.asc : option.desc;
+}
+
+function getSortButtonLabel(option = SORT_OPTIONS[0], currentSortMode = "date_desc") {
+  const mode = normalizeSort(currentSortMode);
+  const isActive = option.modes.includes(mode);
+
+  if (!isActive) return `${option.label} ↓`;
+
+  return `${option.label} ${mode.endsWith("_asc") ? "↑" : "↓"}`;
+}
+
+function getSortButtonTooltip(option = SORT_OPTIONS[0], currentSortMode = "date_desc") {
+  const nextMode = getNextSortMode(option, currentSortMode);
+  return nextMode.endsWith("_asc") ? option.tooltipAsc : option.tooltipDesc;
 }
 
 function itemMatchesFilter(item = {}, filter = "all") {
@@ -1633,9 +1734,11 @@ function filterFacturas(items = [], input = {}) {
 function sortFacturas(items = [], input = {}) {
   const sortMode = getSortMode(input);
 
-  return sortMode === "invoice_desc"
-    ? sortFacturasByInvoiceDesc(items)
-    : sortFacturasNewestFirst(items);
+  if (sortMode === "date_asc") return sortFacturasOldestFirst(items);
+  if (sortMode === "invoice_desc") return sortFacturasByInvoiceDesc(items);
+  if (sortMode === "invoice_asc") return sortFacturasByInvoiceAsc(items);
+
+  return sortFacturasNewestFirst(items);
 }
 
 function filterAndSortFacturas(items = [], input = {}) {
@@ -1801,6 +1904,8 @@ function getPagination(items = [], input = {}) {
     activeFilter: getActiveFilter(data),
     searchQuery: getSearchQuery(data),
     sortMode: getSortMode(data),
+    sortDirection: getSortDirection(getSortMode(data)),
+    sortOption: getSortOption(getSortMode(data)),
   };
 }
 
@@ -2102,9 +2207,18 @@ function renderFilters(input = {}, pagination = {}) {
         }).join("")}
       </div>
 
-      <div class="facturas-sort-pills" role="group" aria-label="Ordenar listado de facturas">
+      <div
+        class="facturas-sort-pills"
+        role="group"
+        aria-label="Ordenar listado de facturas"
+        data-current-sort="${escapeHtml(sortMode)}"
+      >
         ${SORT_OPTIONS.map((option) => {
-          const isActive = option.key === sortMode;
+          const isActive = option.modes.includes(sortMode);
+          const nextSortMode = getNextSortMode(option, sortMode);
+          const nextDirection = getSortDirection(nextSortMode);
+          const label = getSortButtonLabel(option, sortMode);
+          const tooltip = getSortButtonTooltip(option, sortMode);
 
           return `
             <button
@@ -2112,13 +2226,17 @@ function renderFilters(input = {}, pagination = {}) {
               class="facturas-sort-pill${isActive ? " is-active" : ""}"
               data-facturas-action="sort"
               data-action="sort-facturas"
-              data-sort="${escapeHtml(option.key)}"
-              data-sort-mode="${escapeHtml(option.key)}"
-              data-facturas-sort="${escapeHtml(option.key)}"
-              ${tooltipAttrs(option.tooltip, option.tooltip)}
+              data-sort="${escapeHtml(nextSortMode)}"
+              data-sort-mode="${escapeHtml(nextSortMode)}"
+              data-facturas-sort="${escapeHtml(nextSortMode)}"
+              data-current-sort="${escapeHtml(sortMode)}"
+              data-next-sort="${escapeHtml(nextSortMode)}"
+              data-sort-key="${escapeHtml(option.key)}"
+              data-sort-direction="${escapeHtml(nextDirection)}"
+              ${tooltipAttrs(tooltip, tooltip)}
               aria-pressed="${isActive ? "true" : "false"}"
             >
-              <span>${escapeHtml(option.label)}</span>
+              <span>${escapeHtml(label)}</span>
             </button>
           `;
         }).join("")}
@@ -2203,10 +2321,13 @@ function renderRow(item = {}, state = {}) {
   return `
     <tr
       class="facturas-table-row facturas-table-row--${escapeHtml(paymentKey)}"
+      data-facturas-row="true"
       data-factura-id="${escapeHtml(facturaId)}"
       data-sent="${sent ? "true" : "false"}"
       data-has-pdf="${pdfAvailable ? "true" : "false"}"
-      data-row-click-disabled="true"
+      data-row-click-disabled="false"
+      tabindex="0"
+      aria-label="Abrir detalle de factura ${escapeHtml(numero)}"
     >
       <td class="facturas-cell facturas-cell--main">
         <div class="facturas-main">
@@ -2613,17 +2734,23 @@ export function renderCards(input = {}) {
 
   const activeFilterLabel = getFilterLabel(pagination.activeFilter);
   const searchQuery = pagination.searchQuery;
+  const activeSortOption = getSortOption(pagination.sortMode);
+  const activeSortDirection = getSortDirection(pagination.sortMode);
+  const activeSortLabel = `${activeSortOption.label} ${
+    activeSortDirection === "asc" ? "ascendente" : "descendente"
+  }`;
 
   const activeCriteria = [
     pagination.activeFilter !== "all" ? activeFilterLabel : "",
     searchQuery ? `búsqueda “${searchQuery}”` : "",
+    activeSortLabel ? `orden ${activeSortLabel}` : "",
   ].filter(Boolean);
 
   const subtitle = showInitialLoading
     ? "Cargando facturas..."
     : pagination.filtering
       ? `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · ${activeCriteria.join(" · ")}`
-      : `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages}`;
+      : `Mostrando ${pagination.rangeStart}-${pagination.rangeEnd} de ${pagination.totalCount} · página ${pagination.currentPage} de ${pagination.totalPages} · orden ${activeSortLabel}`;
 
   return `
     <section class="facturas-history">

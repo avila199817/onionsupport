@@ -1,0 +1,1988 @@
+/* =========================================================
+   ONION SUPPORT — FACTURAS CREATE MODAL.CSS
+   Archivo: /src/css/views/facturas.create.css
+
+   FACTURAS CREATE MODAL · TOKEN PRO SYSTEM · CSP CLEAN
+   FINAL EXTREME 12/10 · MODO DIOS · NO CSS IN JS
+   COMPATIBLE CON:
+   - src/views/facturas/facturas.create.modal.js
+
+   OBJETIVO:
+   - modal premium de creación de factura
+   - scroll único en .fac-create-panel
+   - selección multi-cliente
+   - selección multi-incidencia
+   - búsqueda dinámica sin parpadeo visual
+   - total strip en tiempo real
+   - loading overlay pro
+   - diseño light/dark blindado
+   - responsive full power
+   - sin .facturas-detail-*
+========================================================= */
+
+
+/* =========================================================
+   MODAL ROOT / BODY LOCK
+========================================================= */
+
+#facturas-create-modal-root {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-modal, 9000) + 30);
+  pointer-events: none;
+  font-family: var(--font-family);
+}
+
+#facturas-create-modal-root:empty {
+  display: none !important;
+}
+
+body.facturas-create-modal-open,
+body.facturas-modal-open,
+body.modal-open {
+  overflow: hidden;
+}
+
+body:has(.fac-create-overlay) {
+  overflow: hidden;
+}
+
+.fac-create-kicker,
+.fac-create-submit-summary {
+  display: none !important;
+}
+
+
+/* =========================================================
+   CREATE MODAL TOKENS
+========================================================= */
+
+#facturas-create-modal-root,
+.fac-create-overlay,
+.fac-create-panel {
+  --fc-modal-width: min(1380px, calc(100vw - 32px));
+  --fc-modal-height: min(94dvh, 1040px);
+
+  --fc-radius: var(--radius-2xl, 28px);
+  --fc-radius-inner: var(--radius-xl, 20px);
+
+  --fc-border:
+    color-mix(in srgb, var(--card-border) 86%, var(--accent-border));
+
+  --fc-border-soft:
+    color-mix(in srgb, var(--border-default) 72%, transparent);
+
+  --fc-card-bg:
+    color-mix(in srgb, var(--card-bg) 96%, transparent);
+
+  --fc-section-bg:
+    color-mix(in srgb, var(--card-bg) 94%, transparent);
+
+  --fc-mini-bg:
+    color-mix(in srgb, var(--badge-bg) 92%, transparent);
+
+  --fc-hero-bg:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--surface-elevated) 64%, transparent),
+      color-mix(in srgb, var(--surface-elevated) 18%, transparent) 62%,
+      transparent
+    );
+
+  --fc-control-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent),
+    0 1px 2px color-mix(in srgb, #000 5%, transparent);
+
+  --fc-control-shadow-hover:
+    inset 0 1px 0 color-mix(in srgb, #fff 15%, transparent),
+    0 12px 26px color-mix(in srgb, #000 8%, transparent);
+
+  --fc-panel-shadow:
+    0 34px 108px color-mix(in srgb, #000 28%, transparent),
+    0 0 0 1px color-mix(in srgb, #fff 5%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
+
+  --fc-section-shadow:
+    0 18px 54px color-mix(in srgb, #000 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent);
+
+  --fc-mini-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
+
+  --fc-glow-accent:
+    color-mix(in srgb, var(--accent) 14%, transparent);
+
+  --fc-glow-info:
+    color-mix(in srgb, var(--info) 10%, transparent);
+
+  --fc-glow-success:
+    color-mix(in srgb, var(--success) 8%, transparent);
+
+  --fc-avatar-a: var(--accent);
+  --fc-avatar-b: var(--info);
+  --fc-avatar-bg:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--fc-avatar-a) 94%, #2563eb),
+      color-mix(in srgb, var(--fc-avatar-b) 90%, #ec4899)
+    );
+
+  --fc-line:
+    color-mix(in srgb, var(--border-default) 76%, transparent);
+}
+
+
+/* =========================================================
+   OVERLAY
+========================================================= */
+
+.fac-create-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-modal, 9000) + 30);
+  padding:
+    max(var(--space-lg), env(safe-area-inset-top))
+    max(var(--space-lg), env(safe-area-inset-right))
+    max(var(--space-lg), env(safe-area-inset-bottom))
+    max(var(--space-lg), env(safe-area-inset-left));
+  background:
+    radial-gradient(circle at 16% 10%, color-mix(in srgb, var(--accent) 17%, transparent), transparent 35%),
+    radial-gradient(circle at 84% 14%, color-mix(in srgb, var(--info) 13%, transparent), transparent 34%),
+    radial-gradient(circle at 50% 110%, color-mix(in srgb, var(--success) 8%, transparent), transparent 40%),
+    color-mix(in srgb, var(--backdrop-bg, rgba(2, 6, 23, .74)) 86%, transparent);
+  backdrop-filter: blur(20px) saturate(1.14);
+  -webkit-backdrop-filter: blur(20px) saturate(1.14);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-family);
+  pointer-events: auto;
+  animation: facCreateOverlayIn .18s var(--ease-standard) both;
+}
+
+.fac-create-overlay::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, #fff 4%, transparent),
+      transparent 28%,
+      color-mix(in srgb, #000 8%, transparent) 100%
+    );
+  opacity: .9;
+}
+
+
+/* =========================================================
+   PANEL · SINGLE SCROLL
+========================================================= */
+
+.fac-create-panel {
+  position: relative;
+  isolation: isolate;
+  inline-size: var(--fc-modal-width);
+  max-inline-size: 100%;
+  max-block-size: var(--fc-modal-height);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+  border: 1px solid var(--fc-border);
+  border-radius: var(--fc-radius);
+  background:
+    radial-gradient(circle at 0% 0%, var(--fc-glow-accent), transparent 34%),
+    radial-gradient(circle at 100% 0%, var(--fc-glow-info), transparent 32%),
+    radial-gradient(circle at 100% 100%, var(--fc-glow-success), transparent 42%),
+    var(--glass-shine),
+    var(--panel-bg);
+  box-shadow: var(--fc-panel-shadow);
+  color: var(--text);
+  outline: none;
+  pointer-events: auto;
+  transform-origin: center;
+  animation: facCreatePanelIn .22s var(--ease-standard) both;
+}
+
+.fac-create-panel::before {
+  content: "";
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  display: block;
+  block-size: 1px;
+  margin-block-end: -1px;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--accent) 34%, transparent),
+      color-mix(in srgb, var(--info) 22%, transparent),
+      transparent
+    );
+  opacity: .85;
+}
+
+.fac-create-panel::-webkit-scrollbar,
+.fac-create-search-results::-webkit-scrollbar,
+.fac-create-ticket-list::-webkit-scrollbar {
+  inline-size: var(--scrollbar-size);
+}
+
+.fac-create-panel::-webkit-scrollbar-track,
+.fac-create-search-results::-webkit-scrollbar-track,
+.fac-create-ticket-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.fac-create-panel::-webkit-scrollbar-thumb,
+.fac-create-search-results::-webkit-scrollbar-thumb,
+.fac-create-ticket-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.fac-create-panel.is-submitting {
+  pointer-events: auto;
+}
+
+
+/* =========================================================
+   HEADER
+========================================================= */
+
+.fac-create-header {
+  position: relative;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-lg);
+  align-items: start;
+  min-inline-size: 0;
+  padding: clamp(24px, 2.4vw, var(--space-xl));
+  border-bottom: 1px solid var(--fc-border-soft);
+  background: var(--fc-hero-bg);
+}
+
+.fac-create-header::after {
+  content: "";
+  position: absolute;
+  inset: auto -8% -42% 42%;
+  z-index: -1;
+  block-size: 220px;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      circle,
+      color-mix(in srgb, var(--accent) 10%, transparent),
+      transparent 68%
+    );
+  filter: blur(12px);
+  opacity: .82;
+}
+
+.fac-create-header-copy {
+  display: grid;
+  gap: var(--space-sm);
+  min-inline-size: 0;
+}
+
+.fac-create-header h2 {
+  margin: 0;
+  max-inline-size: 980px;
+  color: var(--text-strong);
+  font-size: clamp(42px, 5vw, 70px);
+  font-weight: var(--weight-black);
+  letter-spacing: -.058em;
+  line-height: .92;
+  text-wrap: balance;
+}
+
+.fac-create-header p {
+  margin: 0;
+  max-inline-size: 86ch;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-relaxed);
+  text-wrap: pretty;
+}
+
+.fac-create-close {
+  appearance: none;
+  inline-size: calc(50px * var(--ui-scale));
+  block-size: calc(50px * var(--ui-scale));
+  padding: 0;
+  border: 1px solid var(--btn-secondary-border);
+  border-radius: var(--radius-xl);
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  box-shadow: var(--fc-control-shadow);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  font-family: var(--font-family);
+  font-size: var(--font-lg);
+  font-weight: var(--weight-black);
+  line-height: 1;
+  transition:
+    transform var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.fac-create-close:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--btn-secondary-border) 66%, var(--accent-border));
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  box-shadow: var(--fc-control-shadow-hover);
+}
+
+.fac-create-close:active {
+  transform: translateY(0) scale(.985);
+}
+
+.fac-create-close:disabled {
+  pointer-events: none;
+  opacity: .48;
+}
+
+
+/* =========================================================
+   BODY / FORM
+========================================================= */
+
+.fac-create-body {
+  min-inline-size: 0;
+  min-block-size: auto;
+  overflow: visible;
+  padding:
+    var(--space-lg)
+    clamp(24px, 2.4vw, var(--space-xl))
+    clamp(30px, 2.8vw, var(--space-xl));
+}
+
+.fac-create-form {
+  display: grid;
+  gap: var(--space-lg);
+  min-inline-size: 0;
+}
+
+.fac-create-grid {
+  display: grid;
+  gap: var(--space-md);
+  min-inline-size: 0;
+}
+
+.fac-create-grid--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+
+/* =========================================================
+   FIELDS
+========================================================= */
+
+.fac-create-field {
+  display: grid;
+  gap: var(--space-2xs);
+  min-inline-size: 0;
+}
+
+.fac-create-label {
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-wider);
+  line-height: var(--line-snug);
+  text-transform: uppercase;
+}
+
+.fac-create-input,
+.fac-create-select,
+.fac-create-textarea {
+  appearance: none;
+  inline-size: 100%;
+  min-inline-size: 0;
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-lg);
+  background: var(--input-bg);
+  color: var(--input-text);
+  box-shadow: var(--input-shadow);
+  font-family: var(--font-family);
+  font-size: var(--font-md);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-normal);
+  outline: none;
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.fac-create-input,
+.fac-create-select {
+  min-block-size: calc(46px * var(--ui-scale));
+  padding-inline: var(--space-md);
+}
+
+.fac-create-textarea {
+  min-block-size: calc(112px * var(--ui-scale));
+  padding: var(--space-sm) var(--space-md);
+  resize: vertical;
+}
+
+.fac-create-select {
+  cursor: pointer;
+  padding-inline-end: calc(var(--space-xl) + 10px);
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 18px) 50%,
+    calc(100% - 13px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+
+.fac-create-input::placeholder,
+.fac-create-textarea::placeholder {
+  color: var(--input-placeholder);
+}
+
+.fac-create-input:hover,
+.fac-create-select:hover,
+.fac-create-textarea:hover {
+  background: var(--input-bg-hover);
+  border-color: var(--input-border-hover);
+  box-shadow: var(--input-shadow-hover);
+}
+
+.fac-create-input:focus,
+.fac-create-select:focus,
+.fac-create-textarea:focus {
+  background: var(--input-bg-focus);
+  border-color: var(--input-border-focus);
+  box-shadow: var(--input-shadow-focus);
+}
+
+.fac-create-input:focus-visible,
+.fac-create-select:focus-visible,
+.fac-create-textarea:focus-visible,
+.fac-create-close:focus-visible,
+.fac-create-mini-button:focus-visible,
+.fac-create-icon-button:focus-visible,
+.fac-create-search-item:focus-visible,
+.fac-create-ticket-option:focus-visible,
+.fac-create-submit:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--focus-ring),
+    0 0 0 5px color-mix(in srgb, var(--accent) 10%, transparent) !important;
+}
+
+.fac-create-input.is-error,
+.fac-create-select.is-error,
+.fac-create-textarea.is-error {
+  border-color: var(--input-border-error, var(--border-error));
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--error) 12%, transparent),
+    var(--input-shadow);
+}
+
+.fac-create-input.is-readonly,
+.fac-create-input[readonly] {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--input-bg) 72%, var(--surface-muted));
+  cursor: default;
+}
+
+.fac-create-input:disabled,
+.fac-create-select:disabled,
+.fac-create-textarea:disabled {
+  opacity: .58;
+  cursor: not-allowed;
+}
+
+.fac-create-error {
+  color: var(--error);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-bold);
+  line-height: var(--line-snug);
+}
+
+
+/* =========================================================
+   ALERTS
+========================================================= */
+
+.fac-create-alert {
+  display: grid;
+  gap: var(--space-3xs);
+  padding: var(--space-md);
+  border: 1px solid var(--border-info);
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--info) 8%, transparent), transparent 42%),
+    var(--glass-shine),
+    var(--info-bg);
+  color: var(--info);
+  box-shadow:
+    var(--shadow-sm),
+    inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
+}
+
+.fac-create-alert strong {
+  color: var(--text-strong);
+  font-size: var(--font-md);
+  font-weight: var(--weight-black);
+  line-height: var(--line-snug);
+}
+
+.fac-create-alert span {
+  color: currentColor;
+  font-size: var(--font-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-normal);
+}
+
+.fac-create-alert.is-success {
+  border-color: var(--border-success);
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--success) 10%, transparent), transparent 42%),
+    var(--glass-shine),
+    var(--success-bg);
+  color: var(--success);
+}
+
+.fac-create-alert.is-error {
+  border-color: var(--border-error);
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--error) 10%, transparent), transparent 42%),
+    var(--glass-shine),
+    var(--error-bg);
+  color: var(--error);
+}
+
+.fac-create-alert.is-warning {
+  border-color: var(--border-warning);
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--warning) 10%, transparent), transparent 42%),
+    var(--glass-shine),
+    var(--warning-bg);
+  color: var(--warning);
+}
+
+
+/* =========================================================
+   TOTAL STRIP
+========================================================= */
+
+.fac-create-total-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-sm);
+  min-inline-size: 0;
+}
+
+.fac-create-total-strip > div {
+  position: relative;
+  overflow: hidden;
+  min-block-size: calc(126px * var(--ui-scale));
+  padding: var(--space-lg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 42%),
+    var(--glass-shine),
+    var(--card-bg);
+  box-shadow: var(--shadow-card);
+  display: grid;
+  align-content: center;
+  gap: var(--space-3xs);
+}
+
+.fac-create-total-strip > div::after {
+  content: "";
+  position: absolute;
+  inset: auto -28px -38px auto;
+  inline-size: 108px;
+  block-size: 108px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  filter: blur(8px);
+}
+
+.fac-create-total-strip span {
+  position: relative;
+  z-index: 1;
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-wider);
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.fac-create-total-strip strong {
+  position: relative;
+  z-index: 1;
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: clamp(34px, 4vw, 52px);
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-tight);
+  line-height: .92;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.fac-create-total-strip .is-total {
+  border-color: var(--accent-border);
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 45%),
+    var(--glass-shine),
+    var(--accent-soft);
+}
+
+.fac-create-total-strip .is-total strong {
+  color: var(--accent-active);
+}
+
+
+/* =========================================================
+   TARGET SECTION
+========================================================= */
+
+.fac-create-target {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  display: grid;
+  gap: var(--space-md);
+  min-inline-size: 0;
+  padding: var(--space-xl);
+  border: 1px solid color-mix(in srgb, var(--card-border) 88%, transparent);
+  border-radius: var(--radius-2xl, 26px);
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 38%),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 4%, transparent), transparent 42%),
+    var(--glass-shine),
+    var(--fc-section-bg);
+  box-shadow: var(--fc-section-shadow);
+}
+
+.fac-create-target::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: 3px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 82%, transparent),
+      color-mix(in srgb, var(--info) 62%, transparent)
+    );
+  opacity: .78;
+}
+
+.fac-create-target::after {
+  content: "";
+  position: absolute;
+  inset: auto -36px -46px auto;
+  inline-size: 150px;
+  block-size: 150px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  filter: blur(12px);
+  opacity: .72;
+}
+
+.fac-create-target-head {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-md);
+  align-items: start;
+  min-inline-size: 0;
+}
+
+.fac-create-target-title-block {
+  display: grid;
+  gap: var(--space-3xs);
+  min-inline-size: 0;
+}
+
+.fac-create-target-title-block > span {
+  color: var(--accent-active);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-wider);
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.fac-create-target-title-block h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(var(--font-xl), 2.2vw, var(--font-3xl));
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-tight);
+  line-height: var(--line-tight);
+}
+
+.fac-create-target-title-block p {
+  margin: 0;
+  max-inline-size: 78ch;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-relaxed);
+}
+
+.fac-create-target-metrics {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-xs);
+}
+
+.fac-create-target-metrics > div {
+  min-inline-size: 104px;
+  padding: var(--space-sm);
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-xl);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 4%, transparent), transparent),
+    var(--badge-bg);
+  box-shadow: var(--fc-mini-shadow);
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 2px;
+}
+
+.fac-create-target-metrics strong {
+  color: var(--text-strong);
+  font-size: var(--font-2xl);
+  font-weight: var(--weight-black);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.fac-create-target-metrics span {
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-wider);
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+
+/* =========================================================
+   PRO CARDS
+========================================================= */
+
+.fac-create-pro-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-md);
+  min-inline-size: 0;
+}
+
+.fac-create-pro-card {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  align-content: start;
+  gap: var(--space-md);
+  min-inline-size: 0;
+  min-block-size: calc(360px * var(--ui-scale));
+  padding: var(--space-md);
+  border: 1px solid color-mix(in srgb, var(--card-border) 88%, transparent);
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 38%),
+    var(--glass-shine),
+    color-mix(in srgb, var(--card-bg) 94%, transparent);
+  box-shadow:
+    0 18px 52px color-mix(in srgb, #000 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent);
+}
+
+.fac-create-pro-card::after {
+  content: "";
+  position: absolute;
+  inset: auto -30px -42px auto;
+  inline-size: 116px;
+  block-size: 116px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  filter: blur(9px);
+  opacity: .72;
+}
+
+.fac-create-pro-card--tickets {
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--info) 7%, transparent), transparent 38%),
+    var(--glass-shine),
+    color-mix(in srgb, var(--card-bg) 94%, transparent);
+}
+
+.fac-create-pro-card--tickets::after {
+  background: color-mix(in srgb, var(--info) 7%, transparent);
+}
+
+.fac-create-pro-card-head {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  min-inline-size: 0;
+}
+
+.fac-create-pro-card-head > div {
+  display: grid;
+  gap: 3px;
+  min-inline-size: 0;
+}
+
+.fac-create-pro-card-head span {
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-wider);
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.fac-create-pro-card-head strong {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--font-lg);
+  font-weight: var(--weight-black);
+  line-height: var(--line-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* =========================================================
+   MINI / ICON BUTTONS
+========================================================= */
+
+.fac-create-mini-button,
+.fac-create-icon-button {
+  appearance: none;
+  position: relative;
+  z-index: 1;
+  border: 1px solid var(--btn-secondary-border);
+  border-radius: var(--radius-pill);
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-family);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-black);
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    transform var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.fac-create-mini-button {
+  min-block-size: calc(32px * var(--ui-scale));
+  padding-inline: var(--space-sm);
+}
+
+.fac-create-icon-button {
+  min-block-size: calc(30px * var(--ui-scale));
+  padding-inline: 10px;
+}
+
+.fac-create-mini-button:hover,
+.fac-create-icon-button:hover {
+  transform: translateY(-1px);
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  border-color: color-mix(in srgb, var(--btn-secondary-border) 66%, var(--accent-border));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
+    0 8px 18px color-mix(in srgb, #000 7%, transparent);
+}
+
+.fac-create-mini-button:active,
+.fac-create-icon-button:active {
+  transform: translateY(0) scale(.985);
+}
+
+.fac-create-icon-button.is-danger,
+.fac-create-icon-button.is-danger:hover {
+  border-color: var(--border-error);
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.fac-create-mini-button:disabled,
+.fac-create-icon-button:disabled {
+  pointer-events: none;
+  opacity: .48;
+}
+
+
+/* =========================================================
+   AVATARS
+========================================================= */
+
+.fac-create-avatar {
+  position: relative;
+  inline-size: calc(44px * var(--ui-scale));
+  block-size: calc(44px * var(--ui-scale));
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, #fff 20%, transparent);
+  border-radius: var(--radius-pill);
+  background: var(--fc-avatar-bg);
+  box-shadow:
+    0 10px 22px color-mix(in srgb, var(--accent) 18%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent),
+    var(--shadow-inner);
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  transform: translateZ(0);
+}
+
+.fac-create-avatar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 30% 22%, rgba(255,255,255,.42), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.08));
+  mix-blend-mode: screen;
+}
+
+.fac-create-avatar--search {
+  inline-size: calc(38px * var(--ui-scale));
+  block-size: calc(38px * var(--ui-scale));
+}
+
+.fac-create-avatar--selected {
+  inline-size: calc(48px * var(--ui-scale));
+  block-size: calc(48px * var(--ui-scale));
+}
+
+.fac-create-avatar-img {
+  position: relative;
+  z-index: 1;
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.fac-create-avatar-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--avatar-text, #fff);
+  font-size: var(--font-lg);
+  font-weight: var(--weight-black);
+  letter-spacing: -.035em;
+  text-shadow:
+    0 1px 2px rgba(0,0,0,.22),
+    0 0 16px rgba(255,255,255,.20);
+}
+
+.fac-create-avatar[data-fallback="true"] .fac-create-avatar-fallback,
+.fac-create-avatar:not(.has-image) .fac-create-avatar-fallback {
+  display: flex;
+}
+
+.fac-create-avatar[data-fallback="true"] .fac-create-avatar-img,
+.fac-create-avatar:not(.has-image) .fac-create-avatar-img {
+  display: none !important;
+}
+
+
+/* =========================================================
+   SELECTED CARDS
+========================================================= */
+
+.fac-create-selected-stack {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: var(--space-xs);
+  min-inline-size: 0;
+}
+
+.fac-create-selected-card {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-sm);
+  align-items: center;
+  min-inline-size: 0;
+  padding: var(--space-sm);
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-xl);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 4%, transparent), transparent),
+    var(--badge-bg);
+  box-shadow: var(--fc-mini-shadow);
+}
+
+.fac-create-selected-card::before {
+  content: "";
+  position: absolute;
+  inset-block: var(--space-sm);
+  inset-inline-start: 0;
+  inline-size: 3px;
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+  background: var(--text-dim);
+  opacity: .32;
+}
+
+.fac-create-selected-card.is-primary {
+  border-color: var(--accent-border);
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 11%, transparent), transparent 48%),
+    var(--accent-soft);
+}
+
+.fac-create-selected-card.is-primary::before {
+  background: var(--accent);
+  opacity: .92;
+}
+
+.fac-create-selected-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-sm);
+  align-items: center;
+  min-inline-size: 0;
+}
+
+.fac-create-selected-copy {
+  display: grid;
+  gap: 3px;
+  min-inline-size: 0;
+}
+
+.fac-create-selected-copy span {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-wider);
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.fac-create-selected-copy strong {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--font-md);
+  font-weight: var(--weight-black);
+  line-height: var(--line-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fac-create-selected-copy small {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fac-create-selected-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3xs);
+  flex-wrap: wrap;
+}
+
+
+/* =========================================================
+   EMPTY STATES
+========================================================= */
+
+.fac-create-empty-pro {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3xs);
+  padding: var(--space-lg);
+  border: 1px dashed color-mix(in srgb, var(--border-default) 82%, var(--accent-border));
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 46%),
+    color-mix(in srgb, var(--surface-elevated) 54%, transparent);
+}
+
+.fac-create-empty-pro strong {
+  color: var(--text-strong);
+  font-size: var(--font-md);
+  font-weight: var(--weight-black);
+}
+
+.fac-create-empty-pro span {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-normal);
+}
+
+.fac-create-empty-pro.is-locked {
+  opacity: .74;
+}
+
+
+/* =========================================================
+   SEARCH / RESULTS
+========================================================= */
+
+.fac-create-field--search {
+  position: relative;
+  z-index: 1;
+  margin-block-start: var(--space-2xs);
+}
+
+.fac-create-search-state {
+  position: relative;
+  z-index: 1;
+  padding: var(--space-sm);
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-lg);
+  background: var(--badge-bg);
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-bold);
+  line-height: var(--line-normal);
+}
+
+.fac-create-search-state.is-error {
+  border-color: var(--border-error);
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.fac-create-search-results,
+.fac-create-ticket-list {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: var(--space-xs);
+  min-inline-size: 0;
+  max-block-size: 280px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-inline-end: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.fac-create-search-item,
+.fac-create-ticket-option {
+  appearance: none;
+  inline-size: 100%;
+  min-inline-size: 0;
+  padding: var(--space-sm);
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-xl);
+  background: var(--badge-bg);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: var(--fc-mini-shadow);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-sm);
+  font-family: var(--font-family);
+  text-align: start;
+  transition:
+    transform var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.fac-create-search-item:hover,
+.fac-create-ticket-option:hover {
+  transform: translateY(-1px);
+  background: var(--badge-bg);
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--badge-border) 62%, var(--accent-border));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent),
+    0 8px 20px color-mix(in srgb, #000 7%, transparent);
+}
+
+.fac-create-search-item:active,
+.fac-create-ticket-option:active {
+  transform: translateY(0) scale(.99);
+}
+
+.fac-create-search-item.is-selected,
+.fac-create-search-item.is-selected:hover,
+.fac-create-ticket-option.is-selected,
+.fac-create-ticket-option.is-selected:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-active);
+}
+
+.fac-create-search-item:disabled,
+.fac-create-ticket-option:disabled {
+  cursor: default;
+  opacity: .72;
+  transform: none;
+}
+
+.fac-create-search-copy,
+.fac-create-ticket-option-copy {
+  display: grid;
+  gap: 3px;
+  min-inline-size: 0;
+}
+
+.fac-create-search-copy strong,
+.fac-create-ticket-option-copy strong {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-black);
+  line-height: var(--line-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fac-create-search-copy span,
+.fac-create-ticket-option-copy small {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fac-create-add-pill {
+  min-block-size: calc(28px * var(--ui-scale));
+  padding-inline: 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent-active);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-wider);
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+
+/* =========================================================
+   TICKET BADGES
+========================================================= */
+
+.fac-create-ticket-badge,
+.fac-create-ticket-mini-badge {
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-pill);
+  background:
+    radial-gradient(circle at 30% 20%, color-mix(in srgb, #fff 26%, transparent), transparent 38%),
+    var(--accent-soft);
+  color: var(--accent-active);
+  box-shadow:
+    0 8px 18px color-mix(in srgb, var(--accent) 14%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  font-weight: var(--weight-black);
+}
+
+.fac-create-ticket-badge {
+  inline-size: calc(48px * var(--ui-scale));
+  block-size: calc(48px * var(--ui-scale));
+  font-size: var(--font-lg);
+}
+
+.fac-create-ticket-mini-badge {
+  inline-size: calc(34px * var(--ui-scale));
+  block-size: calc(34px * var(--ui-scale));
+  font-size: var(--font-sm);
+}
+
+
+/* =========================================================
+   CHECKBOX
+========================================================= */
+
+.fac-create-check {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-sm);
+  align-items: start;
+  padding: var(--space-md);
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-xl);
+  background:
+    var(--glass-shine),
+    var(--badge-bg);
+  box-shadow: var(--fc-mini-shadow);
+  cursor: pointer;
+}
+
+.fac-create-check input {
+  appearance: none;
+  inline-size: calc(22px * var(--ui-scale));
+  block-size: calc(22px * var(--ui-scale));
+  margin: 1px 0 0;
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  box-shadow: var(--input-shadow);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.fac-create-check input::after {
+  content: "";
+  inline-size: 10px;
+  block-size: 6px;
+  border: solid var(--text-on-accent);
+  border-width: 0 0 2px 2px;
+  opacity: 0;
+  transform: rotate(-45deg) translateY(-1px);
+}
+
+.fac-create-check input:checked {
+  border-color: var(--btn-primary-border);
+  background: var(--btn-primary-bg);
+}
+
+.fac-create-check input:checked::after {
+  opacity: 1;
+}
+
+.fac-create-check input:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--focus-ring),
+    0 0 0 5px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.fac-create-check input:disabled {
+  opacity: .48;
+  cursor: not-allowed;
+}
+
+.fac-create-check span {
+  display: grid;
+  gap: 3px;
+  min-inline-size: 0;
+}
+
+.fac-create-check strong {
+  color: var(--text-strong);
+  font-size: var(--font-md);
+  font-weight: var(--weight-black);
+  line-height: var(--line-snug);
+}
+
+.fac-create-check small {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-normal);
+}
+
+
+/* =========================================================
+   STICKY ACTIONS / SUBMIT
+========================================================= */
+
+.fac-create-actions {
+  position: sticky;
+  inset-block-end: calc(-1 * clamp(30px, 2.8vw, var(--space-xl)));
+  z-index: 8;
+  display: grid;
+  grid-template-columns: 1fr;
+  justify-items: end;
+  gap: var(--space-md);
+  align-items: center;
+  margin-inline: calc(-1 * clamp(24px, 2.4vw, var(--space-xl)));
+  margin-block-end: calc(-1 * clamp(30px, 2.8vw, var(--space-xl)));
+  padding: var(--space-md) clamp(24px, 2.4vw, var(--space-xl));
+  border-top: 1px solid var(--fc-border-soft);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--panel-bg) 74%, transparent),
+      var(--panel-bg)
+    );
+  backdrop-filter: blur(14px) saturate(1.08);
+  -webkit-backdrop-filter: blur(14px) saturate(1.08);
+}
+
+.fac-create-action-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+}
+
+.fac-create-submit {
+  appearance: none;
+  min-block-size: calc(50px * var(--ui-scale));
+  padding-inline: var(--space-xl);
+  border: 1px solid var(--btn-primary-border);
+  border-radius: var(--radius-xl);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  box-shadow:
+    var(--btn-primary-shadow),
+    inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  font-family: var(--font-family);
+  font-size: var(--font-md);
+  font-weight: var(--weight-black);
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    transform var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard),
+    filter var(--duration-fast) var(--ease-standard);
+}
+
+.fac-create-submit:hover {
+  transform: translateY(-1px);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  box-shadow:
+    var(--btn-primary-shadow),
+    0 16px 38px color-mix(in srgb, var(--accent) 16%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
+}
+
+.fac-create-submit:active {
+  transform: translateY(0) scale(.985);
+}
+
+.fac-create-submit:disabled {
+  pointer-events: none;
+  opacity: .62;
+}
+
+.fac-create-submit-inner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+}
+
+.fac-create-spinner,
+.fac-create-loading-spinner {
+  inline-size: 16px;
+  block-size: 16px;
+  border: 2px solid color-mix(in srgb, currentColor 26%, transparent);
+  border-top-color: currentColor;
+  border-radius: var(--radius-pill);
+  animation: facCreateSpin .78s linear infinite;
+  flex: 0 0 auto;
+}
+
+
+/* =========================================================
+   SUBMIT LOADING OVERLAY
+========================================================= */
+
+.fac-create-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: var(--space-lg);
+  background:
+    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 48%),
+    color-mix(in srgb, var(--backdrop-bg) 72%, transparent);
+  backdrop-filter: blur(16px) saturate(1.06);
+  -webkit-backdrop-filter: blur(16px) saturate(1.06);
+}
+
+.fac-create-loading-card {
+  min-inline-size: min(360px, 100%);
+  padding: var(--space-xl);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-2xl, 24px);
+  background:
+    var(--glass-shine),
+    var(--popover-bg);
+  color: var(--text);
+  box-shadow:
+    var(--shadow-lg),
+    0 22px 62px color-mix(in srgb, var(--accent) 13%, transparent);
+  display: grid;
+  justify-items: center;
+  gap: var(--space-xs);
+  text-align: center;
+  animation: facCreateLoadingCardIn .18s var(--ease-standard) both;
+}
+
+.fac-create-loading-card .fac-create-loading-spinner {
+  inline-size: 28px;
+  block-size: 28px;
+  color: var(--accent-active);
+}
+
+.fac-create-loading-card strong {
+  color: var(--text-strong);
+  font-size: var(--font-xl);
+  font-weight: var(--weight-black);
+  line-height: var(--line-snug);
+}
+
+.fac-create-loading-card small {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-normal);
+}
+
+
+/* =========================================================
+   LIGHT THEME FIT
+========================================================= */
+
+[data-theme="light"] .fac-create-overlay {
+  background:
+    radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 34%),
+    radial-gradient(circle at 82% 16%, color-mix(in srgb, var(--info) 9%, transparent), transparent 32%),
+    radial-gradient(circle at 50% 110%, color-mix(in srgb, var(--success) 6%, transparent), transparent 40%),
+    rgba(246, 248, 252, .78);
+}
+
+[data-theme="light"] .fac-create-panel {
+  box-shadow:
+    0 30px 90px rgba(32, 43, 72, .16),
+    0 0 0 1px rgba(255,255,255,.72),
+    inset 0 1px 0 rgba(255,255,255,.82);
+}
+
+[data-theme="light"] .fac-create-header {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.76),
+      rgba(255,255,255,.36) 58%,
+      transparent
+    );
+}
+
+[data-theme="light"] .fac-create-input,
+[data-theme="light"] .fac-create-select,
+[data-theme="light"] .fac-create-textarea,
+[data-theme="light"] .fac-create-search-item,
+[data-theme="light"] .fac-create-ticket-option,
+[data-theme="light"] .fac-create-selected-card,
+[data-theme="light"] .fac-create-check,
+[data-theme="light"] .fac-create-pro-card,
+[data-theme="light"] .fac-create-target,
+[data-theme="light"] .fac-create-total-strip > div,
+[data-theme="light"] .fac-create-mini-button,
+[data-theme="light"] .fac-create-icon-button,
+[data-theme="light"] .fac-create-close {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.78),
+    0 1px 2px rgba(32,43,72,.045);
+}
+
+[data-theme="light"] .fac-create-actions {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.74),
+      var(--panel-bg)
+    );
+}
+
+[data-theme="light"] .fac-create-submit,
+[data-theme="light"] .fac-create-submit:hover {
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+}
+
+
+/* =========================================================
+   DARK THEME FIT
+========================================================= */
+
+[data-theme="dark"] .fac-create-panel {
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 34%),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 9%, transparent), transparent 32%),
+    var(--glass-shine),
+    color-mix(in srgb, var(--panel-bg) 94%, #000);
+}
+
+[data-theme="dark"] .fac-create-input,
+[data-theme="dark"] .fac-create-select,
+[data-theme="dark"] .fac-create-textarea {
+  background: color-mix(in srgb, var(--input-bg) 92%, #000);
+}
+
+[data-theme="dark"] .fac-create-target,
+[data-theme="dark"] .fac-create-pro-card,
+[data-theme="dark"] .fac-create-linea,
+[data-theme="dark"] .fac-create-description {
+  background:
+    var(--glass-shine),
+    color-mix(in srgb, var(--card-bg) 92%, #000);
+}
+
+[data-theme="dark"] .fac-create-selected-card,
+[data-theme="dark"] .fac-create-search-item,
+[data-theme="dark"] .fac-create-ticket-option,
+[data-theme="dark"] .fac-create-check,
+[data-theme="dark"] .fac-create-search-state {
+  background:
+    var(--glass-shine),
+    color-mix(in srgb, var(--badge-bg) 88%, #000);
+}
+
+
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+
+@media (max-width: 1180px) {
+  #facturas-create-modal-root,
+  .fac-create-overlay,
+  .fac-create-panel {
+    --fc-modal-width: min(100%, calc(100vw - 24px));
+    --fc-modal-height: 94dvh;
+  }
+
+  .fac-create-overlay {
+    padding: var(--space-md);
+  }
+
+  .fac-create-pro-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fac-create-pro-card {
+    min-block-size: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  #facturas-create-modal-root,
+  .fac-create-overlay,
+  .fac-create-panel {
+    --fc-modal-width: 100%;
+    --fc-modal-height: 94dvh;
+  }
+
+  .fac-create-overlay {
+    padding: var(--space-sm);
+    align-items: end;
+  }
+
+  .fac-create-panel {
+    border-radius: var(--radius-2xl, 24px) var(--radius-2xl, 24px) 0 0;
+  }
+
+  .fac-create-header {
+    padding: var(--space-lg) var(--space-md) var(--space-md);
+  }
+
+  .fac-create-header h2 {
+    font-size: clamp(34px, 10vw, 48px);
+    line-height: .96;
+  }
+
+  .fac-create-header p {
+    font-size: var(--font-sm);
+  }
+
+  .fac-create-body {
+    padding: var(--space-md) var(--space-md) var(--space-lg);
+  }
+
+  .fac-create-grid--2,
+  .fac-create-total-strip,
+  .fac-create-pro-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fac-create-target {
+    padding: var(--space-md);
+    border-radius: var(--radius-xl);
+  }
+
+  .fac-create-target-head {
+    grid-template-columns: 1fr;
+  }
+
+  .fac-create-target-metrics {
+    inline-size: 100%;
+  }
+
+  .fac-create-target-metrics > div {
+    flex: 1 1 0;
+  }
+
+  .fac-create-selected-card {
+    grid-template-columns: 1fr;
+  }
+
+  .fac-create-selected-actions {
+    justify-content: flex-start;
+  }
+
+  .fac-create-search-item,
+  .fac-create-ticket-option {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .fac-create-add-pill {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .fac-create-actions {
+    grid-template-columns: 1fr;
+    justify-items: stretch;
+    align-items: stretch;
+    margin-inline: calc(-1 * var(--space-md));
+    margin-block-end: calc(-1 * var(--space-lg));
+    inset-block-end: calc(-1 * var(--space-lg));
+    padding: var(--space-md);
+  }
+
+  .fac-create-action-buttons,
+  .fac-create-submit {
+    inline-size: 100%;
+  }
+}
+
+@media (max-width: 460px) {
+  #facturas-create-modal-root,
+  .fac-create-overlay,
+  .fac-create-panel {
+    --fc-modal-width: 100vw;
+    --fc-modal-height: 96dvh;
+  }
+
+  .fac-create-overlay {
+    padding-inline: 0;
+    padding-block-end: 0;
+  }
+
+  .fac-create-panel {
+    border-inline: 0;
+    border-block-end: 0;
+  }
+
+  .fac-create-close {
+    inline-size: 38px;
+    block-size: 38px;
+  }
+
+  .fac-create-target-metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .fac-create-pro-card-head {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .fac-create-mini-button {
+    justify-self: start;
+  }
+}
+
+
+/* =========================================================
+   PRINT
+========================================================= */
+
+@media print {
+  #facturas-create-modal-root,
+  .fac-create-overlay {
+    position: static !important;
+    inset: auto !important;
+    padding: 0 !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .fac-create-panel {
+    inline-size: 100% !important;
+    max-block-size: none !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .fac-create-close,
+  .fac-create-actions,
+  .fac-create-loading-overlay {
+    display: none !important;
+  }
+
+  .fac-create-header,
+  .fac-create-target,
+  .fac-create-pro-card,
+  .fac-create-total-strip > div,
+  .fac-create-selected-card,
+  .fac-create-check {
+    box-shadow: none !important;
+  }
+}
+
+
+/* =========================================================
+   MOTION
+========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  .fac-create-overlay,
+  .fac-create-panel,
+  .fac-create-overlay *,
+  .fac-create-overlay *::before,
+  .fac-create-overlay *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .fac-create-close:hover,
+  .fac-create-mini-button:hover,
+  .fac-create-icon-button:hover,
+  .fac-create-search-item:hover,
+  .fac-create-ticket-option:hover,
+  .fac-create-submit:hover {
+    transform: none !important;
+  }
+}
+
+
+/* =========================================================
+   KEYFRAMES
+========================================================= */
+
+@keyframes facCreateOverlayIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes facCreatePanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(.982);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes facCreateLoadingCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes facCreateSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}

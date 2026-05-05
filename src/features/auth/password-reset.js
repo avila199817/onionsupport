@@ -22,18 +22,21 @@
    - redirects anti open-redirect
    - token/password/identifier con límites
    - respuestas nested: data / payload / result / body / response.data
+   - status textual robusto: status/statusText/state
    - rate-limit: 429 / Retry-After / retryAfter / cooldownSeconds
    - errores normalizados sin throws hacia la UI pública
    - confirm password estricto
    - eventos sin tokens ni passwords reales
    - no toca sesión auth ni rutas públicas técnicas
    - no llama refresh
-   - no asume éxito por HTTP 200 si backend no declara ok/success/accepted/valid
+   - no asume éxito por HTTP 200 si backend no declara ok/success/accepted/valid/completed
+   - default export callable + métodos públicos colgados
 
    FIX CRÍTICO:
    - sin conflicto SyntaxError por Identifier 'response'
    - getNode() expone responseNode en lugar de response
    - todos los resolvers usan responseNode
+   - status:"success" / status:"valid" / status:"error" se interpretan correctamente
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -50,7 +53,6 @@ import {
 
 import {
   normalizeTokenValue,
-  normalizeSessionValue,
   sanitizeRedirectPath,
   redactTokenInText,
 } from "./helpers.js";
@@ -60,7 +62,7 @@ import {
 ========================================================= */
 
 export const PASSWORD_RESET_MODULE_VERSION =
-  "password-reset.10.0.0.extreme";
+  "password-reset.10.2.0.extreme";
 
 /* =========================================================
    CONSTANTS
@@ -141,6 +143,7 @@ const CORRUPTED_TEXT_VALUES =
     "[]",
     "\"undefined\"",
     "\"null\"",
+    "\"false\"",
   ]);
 
 const PASSWORD_FIELD_NAMES =
@@ -255,12 +258,6 @@ function safeNumber(value, fallback = 0) {
     : fallback;
 }
 
-function safeInt(value, fallback = 0) {
-  return Math.trunc(
-    safeNumber(value, fallback)
-  );
-}
-
 function clampNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
   const numeric =
     safeNumber(value, min);
@@ -269,48 +266,6 @@ function clampNumber(value, min = 0, max = Number.MAX_SAFE_INTEGER) {
     Math.max(numeric, min),
     max
   );
-}
-
-function safeBool(value, fallback = false) {
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-
-  const text =
-    safeText(value, "")
-      .toLowerCase();
-
-  if (
-    [
-      "true",
-      "1",
-      "yes",
-      "si",
-      "sí",
-      "ok",
-      "on",
-    ].includes(text)
-  ) {
-    return true;
-  }
-
-  if (
-    [
-      "false",
-      "0",
-      "no",
-      "off",
-    ].includes(text)
-  ) {
-    return false;
-  }
-
-  return Boolean(fallback);
 }
 
 function isObject(value) {
@@ -407,6 +362,10 @@ function redactSafe(value = "") {
         "$1***"
       )
       .replace(
+        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      )
+      .replace(
         /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
         "$1***"
       );
@@ -414,7 +373,7 @@ function redactSafe(value = "") {
 }
 
 function sanitizeEventPayload(payload = {}, depth = 0) {
-  if (depth > 5) {
+  if (depth > 6) {
     return "[MaxDepth]";
   }
 
@@ -445,6 +404,8 @@ function sanitizeEventPayload(payload = {}, depth = 0) {
       lower.includes("password") ||
       lower.includes("authorization") ||
       lower === "code" ||
+      lower === "otp" ||
+      lower === "totp" ||
       lower === "t"
     ) {
       output[key] =
@@ -461,7 +422,10 @@ function sanitizeEventPayload(payload = {}, depth = 0) {
       output[key] =
         typeof value === "string"
           ? redactSafe(value)
-          : sanitizeEventPayload(value, depth + 1);
+          : sanitizeEventPayload(
+              value,
+              depth + 1
+            );
       continue;
     }
 
@@ -486,16 +450,41 @@ function safeEmit(eventName, payload = {}) {
   const cleanPayload =
     sanitizeEventPayload(payload);
 
+  let emitted =
+    false;
+
   try {
     AppCore?.events?.emit?.(
       cleanEvent,
       cleanPayload
     );
 
-    return true;
+    emitted =
+      true;
   } catch {}
 
-  return false;
+  try {
+    if (
+      isBrowser() &&
+      !emitted
+    ) {
+      document.dispatchEvent(
+        new CustomEvent(cleanEvent, {
+          detail:
+            cleanPayload,
+          bubbles:
+            false,
+          cancelable:
+            false,
+        })
+      );
+
+      emitted =
+        true;
+    }
+  } catch {}
+
+  return emitted;
 }
 
 function safeWarn(...args) {
@@ -507,10 +496,12 @@ function safeWarn(...args) {
   } catch {}
 
   try {
-    console.warn(
-      "[PasswordReset]",
-      ...args
-    );
+    if (AppCore?.config?.debug) {
+      console.warn(
+        "[PasswordReset]",
+        ...args
+      );
+    }
   } catch {}
 }
 
@@ -542,7 +533,7 @@ function getResetTokenMaxLength() {
   return clampNumber(
     AUTH_CONSTANTS?.resetTokenMaxLength ??
       AUTH_CONSTANTS?.tokenMaxLength ??
-      4096,
+      8192,
     getResetTokenMinLength(),
     32768
   );
@@ -694,11 +685,23 @@ export function getRequestPasswordResetEndpoint() {
   return getConfiguredRequestEndpoint();
 }
 
+export function getResetPasswordRequestEndpoint() {
+  return getConfiguredRequestEndpoint();
+}
+
 export function getConfirmResetPasswordEndpoint() {
   return getConfiguredConfirmEndpoint();
 }
 
+export function getConfirmPasswordResetEndpoint() {
+  return getConfiguredConfirmEndpoint();
+}
+
 export function getValidateResetPasswordTokenEndpoint() {
+  return getConfiguredValidateEndpoint();
+}
+
+export function getValidateResetTokenEndpoint() {
   return getConfiguredValidateEndpoint();
 }
 
@@ -1482,6 +1485,26 @@ function resolveStatus(input = {}) {
   );
 }
 
+function normalizeStatusText(value = "") {
+  const text =
+    safeText(value, "")
+      .toLowerCase()
+      .trim();
+
+  if (!text) {
+    return "";
+  }
+
+  const numeric =
+    Number(text);
+
+  if (Number.isFinite(numeric)) {
+    return "";
+  }
+
+  return text;
+}
+
 function resolveStatusText(input = {}) {
   const {
     root,
@@ -1494,42 +1517,58 @@ function resolveStatusText(input = {}) {
     meta,
   } = getNode(input);
 
-  return safeText(
-    pickFirst(
-      root.statusText,
-      root.status_text,
-      root.state,
+  const candidates = [
+    root.statusText,
+    root.status_text,
+    root.state,
+    root.status,
 
-      data.statusText,
-      data.status_text,
-      data.state,
+    data.statusText,
+    data.status_text,
+    data.state,
+    data.status,
 
-      payload.statusText,
-      payload.status_text,
-      payload.state,
+    payload.statusText,
+    payload.status_text,
+    payload.state,
+    payload.status,
 
-      result.statusText,
-      result.status_text,
-      result.state,
+    result.statusText,
+    result.status_text,
+    result.state,
+    result.status,
 
-      body.statusText,
-      body.status_text,
-      body.state,
+    body.statusText,
+    body.status_text,
+    body.state,
+    body.status,
 
-      responseNode.statusText,
-      responseNode.status_text,
-      responseNode.state,
+    responseNode.statusText,
+    responseNode.status_text,
+    responseNode.state,
+    responseNode.status,
 
-      responseData.statusText,
-      responseData.status_text,
-      responseData.state,
+    responseData.statusText,
+    responseData.status_text,
+    responseData.state,
+    responseData.status,
 
-      meta.statusText,
-      meta.status_text,
-      meta.state
-    ),
-    ""
-  ).toLowerCase();
+    meta.statusText,
+    meta.status_text,
+    meta.state,
+    meta.status,
+  ];
+
+  for (const candidate of candidates) {
+    const text =
+      normalizeStatusText(candidate);
+
+    if (text) {
+      return text;
+    }
+  }
+
+  return "";
 }
 
 function resolveCode(input = {}) {
@@ -1999,8 +2038,8 @@ function buildBaseNormalizedResponse({
 
   /*
     Regla estricta:
-    - HTTP 200 sin ok/success/valid/accepted/completed NO es éxito.
-    - status text declarativo tipo "success" sí cuenta como success.
+    - HTTP 200/202/204 sin ok/success/valid/accepted/completed NO es éxito.
+    - status/statusText/state declarativo tipo "success" sí cuenta como éxito.
   */
   const ok =
     explicitFailure
@@ -2107,6 +2146,9 @@ export function normalizeValidateResetTokenResponse(input = {}) {
   });
 }
 
+export const normalizeValidateResetPasswordTokenResponse =
+  normalizeValidateResetTokenResponse;
+
 /* =========================================================
    URL RESOLUTION
 ========================================================= */
@@ -2124,18 +2166,34 @@ function buildFinalUrl(endpoint = "") {
   }
 
   const apiBase =
-    safeText(AppCore?.config?.apiBase, "");
+    safeText(
+      AppCore?.config?.apiBase ||
+        AppCore?.config?.api?.baseUrl ||
+        AppCore?.config?.api?.base ||
+        "",
+      ""
+    );
 
   if (!apiBase) {
     return clean;
   }
 
-  return (
-    apiBase.replace(/\/+$/, "") +
-    (clean.startsWith("/")
+  const base =
+    apiBase.replace(/\/+$/g, "");
+
+  const path =
+    clean.startsWith("/")
       ? clean
-      : `/${clean}`)
-  );
+      : `/${clean}`;
+
+  if (
+    base.endsWith("/api") &&
+    path.startsWith("/api/")
+  ) {
+    return `${base}${path.slice(4)}`;
+  }
+
+  return `${base}${path}`;
 }
 
 /* =========================================================
@@ -3271,6 +3329,20 @@ export async function resetPasswordRequest(payload = {}, options = {}) {
   );
 }
 
+export async function requestResetPassword(payload = {}, options = {}) {
+  return requestPasswordReset(
+    payload,
+    options
+  );
+}
+
+export async function passwordResetRequest(payload = {}, options = {}) {
+  return requestPasswordReset(
+    payload,
+    options
+  );
+}
+
 export async function forgotPassword(payload = {}, options = {}) {
   return requestPasswordReset(
     payload,
@@ -3299,6 +3371,13 @@ export async function confirmPasswordReset(payload = {}, options = {}) {
   );
 }
 
+export async function passwordResetConfirm(payload = {}, options = {}) {
+  return confirmResetPassword(
+    payload,
+    options
+  );
+}
+
 export async function validateResetToken(payload = {}, options = {}) {
   return validateResetPasswordToken(
     payload,
@@ -3314,6 +3393,13 @@ export async function resetPasswordValidate(payload = {}, options = {}) {
 }
 
 export async function validatePasswordReset(payload = {}, options = {}) {
+  return validateResetPasswordToken(
+    payload,
+    options
+  );
+}
+
+export async function passwordResetValidate(payload = {}, options = {}) {
   return validateResetPasswordToken(
     payload,
     options
@@ -3472,4 +3558,57 @@ export function getPasswordResetDebugPayload(payload = {}) {
    DEFAULT EXPORT
 ========================================================= */
 
-export default requestPasswordReset;
+const PasswordReset =
+  Object.assign(
+    requestPasswordReset,
+    {
+      version:
+        PASSWORD_RESET_MODULE_VERSION,
+
+      requestPasswordReset,
+      resetPasswordRequest,
+      requestResetPassword,
+      passwordResetRequest,
+      forgotPassword,
+      recoverPassword,
+
+      confirmResetPassword,
+      resetPasswordConfirm,
+      confirmPasswordReset,
+      passwordResetConfirm,
+
+      validateResetPasswordToken,
+      validateResetToken,
+      resetPasswordValidate,
+      validatePasswordReset,
+      passwordResetValidate,
+
+      resolveResetPasswordIdentifier,
+      resolveResetPasswordToken,
+
+      normalizeResetPasswordPayload,
+      normalizeConfirmResetPasswordPayload,
+      normalizeValidateResetTokenPayload,
+
+      buildResetPasswordRequestBody,
+      buildConfirmResetPasswordBody,
+      buildValidateResetTokenBody,
+
+      normalizeResetPasswordResponse,
+      normalizeConfirmResetPasswordResponse,
+      normalizeValidateResetTokenResponse,
+      normalizeValidateResetPasswordTokenResponse,
+
+      getRequestPasswordResetEndpoint,
+      getResetPasswordRequestEndpoint,
+      getConfirmResetPasswordEndpoint,
+      getConfirmPasswordResetEndpoint,
+      getValidateResetPasswordTokenEndpoint,
+      getValidateResetTokenEndpoint,
+
+      getPasswordResetSnapshot,
+      getPasswordResetDebugPayload,
+    }
+  );
+
+export default PasswordReset;

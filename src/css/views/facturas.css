@@ -17,6 +17,7 @@
    - filtros/sort/search/paginación
    - create modal .fac-create-*
    - detail modal .facturas-detail-*
+   - scroll único/full modal para detalle factura
    - guards contra hovers destructivos
    - guards contra rayas verticales
    - guards contra colisión con ui.css
@@ -39,10 +40,6 @@
   --fac-avatar-b: var(--info);
   --fac-avatar-bg: linear-gradient(135deg, var(--fac-avatar-a), var(--fac-avatar-b));
 
-  --fac-ui-control-bg: var(--btn-secondary-bg);
-  --fac-ui-control-text: var(--btn-secondary-text);
-  --fac-ui-control-border: var(--btn-secondary-border);
-
   --fac-ui-control-shadow:
     inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent),
     0 1px 2px color-mix(in srgb, #000 5%, transparent);
@@ -59,7 +56,6 @@
 
   --fac-segment-item-bg: transparent;
   --fac-segment-item-text: var(--text-dim);
-
   --fac-segment-item-active-bg: var(--accent-soft);
   --fac-segment-item-active-text: var(--accent-active);
   --fac-segment-item-active-border: var(--accent-border);
@@ -242,7 +238,7 @@
 
 
 /* =========================================================
-   BUTTONS · NO DESTRUCTIVE HOVER
+   BUTTONS
 ========================================================= */
 
 .facturas-btn {
@@ -516,7 +512,7 @@
 
 
 /* =========================================================
-   FILTERS / SORT / SEARCH · SEGMENTED CLEAN
+   FILTERS / SORT / SEARCH
 ========================================================= */
 
 .facturas-filters {
@@ -966,8 +962,7 @@
   background: transparent;
   box-shadow: none !important;
   vertical-align: middle;
-  transition:
-    background var(--duration-fast) var(--ease-standard);
+  transition: background var(--duration-fast) var(--ease-standard);
 }
 
 .facturas-table tbody tr:last-child td {
@@ -981,6 +976,7 @@
 .facturas-table-row {
   --fac-row-accent: var(--accent);
   --fac-row-accent-soft: var(--accent-soft);
+
   cursor: pointer;
 }
 
@@ -1134,8 +1130,6 @@
   display: none !important;
 }
 
-
-/* Avatar tones: sustituyen style="" dinámico */
 .facturas-avatar--tone-0 {
   --fac-avatar-a: #7c3aed;
   --fac-avatar-b: #ec4899;
@@ -1898,6 +1892,11 @@ body.modal-open {
   overflow: hidden;
 }
 
+.fac-create-kicker,
+.fac-create-submit-summary {
+  display: none !important;
+}
+
 
 /* =========================================================
    CREATE MODAL OVERLAY / PANEL
@@ -1926,7 +1925,7 @@ body.modal-open {
 
 .fac-create-panel {
   --fac-create-panel-width: min(1120px, calc(100vw - 32px));
-  --fac-create-panel-height: min(92vh, 980px);
+  --fac-create-panel-height: min(94dvh, 980px);
   --fac-create-card-bg: color-mix(in srgb, var(--card-bg) 94%, transparent);
   --fac-create-border: color-mix(in srgb, var(--card-border) 86%, var(--accent-border));
 
@@ -1969,7 +1968,7 @@ body.modal-open {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-lg);
   align-items: start;
-  padding: var(--space-xl) var(--space-xl) var(--space-lg);
+  padding: clamp(22px, 2.2vw, var(--space-xl)) var(--space-xl) var(--space-md);
   border-bottom: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent);
   background:
     linear-gradient(
@@ -1981,41 +1980,23 @@ body.modal-open {
 
 .fac-create-header-copy {
   display: grid;
-  gap: var(--space-xs);
+  gap: var(--space-sm);
   min-inline-size: 0;
-}
-
-.fac-create-kicker {
-  inline-size: max-content;
-  max-inline-size: 100%;
-  min-block-size: calc(28px * var(--ui-scale));
-  padding-inline: var(--space-sm);
-  border: 1px solid var(--accent-border);
-  border-radius: var(--radius-pill);
-  background: var(--accent-soft);
-  color: var(--accent-active);
-  display: inline-flex;
-  align-items: center;
-  font-size: var(--font-xs);
-  font-weight: var(--weight-black);
-  letter-spacing: var(--letter-wider);
-  text-transform: uppercase;
-  white-space: nowrap;
 }
 
 .fac-create-header h2 {
   margin: 0;
   color: var(--text-strong);
-  font-size: clamp(var(--font-3xl), 3vw, var(--font-5xl));
+  font-size: clamp(42px, 5vw, 68px);
   font-weight: var(--weight-black);
-  letter-spacing: var(--letter-tight);
-  line-height: var(--line-tight);
+  letter-spacing: -.055em;
+  line-height: .92;
   text-wrap: balance;
 }
 
 .fac-create-header p {
   margin: 0;
-  max-inline-size: 84ch;
+  max-inline-size: 76ch;
   color: var(--text-muted);
   font-size: var(--font-md);
   line-height: var(--line-relaxed);
@@ -2220,8 +2201,967 @@ body.modal-open {
   line-height: var(--line-snug);
 }
 
+
 /* =========================================================
-   DETAIL MODAL OVERLAY / PANEL
+   CREATE MODAL ALERTS / TOTAL STRIP
+========================================================= */
+
+.fac-create-alert {
+  display: grid;
+  gap: var(--space-3xs);
+  padding: var(--space-md);
+  border: 1px solid var(--border-info);
+  border-radius: var(--radius-xl);
+  background:
+    var(--glass-shine),
+    var(--info-bg);
+  color: var(--info);
+  box-shadow: var(--shadow-sm);
+}
+
+.fac-create-alert strong {
+  color: var(--text-strong);
+  font-size: var(--font-md);
+  font-weight: var(--weight-black);
+  line-height: var(--line-snug);
+}
+
+.fac-create-alert span {
+  color: currentColor;
+  font-size: var(--font-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-normal);
+}
+
+.fac-create-alert.is-success {
+  border-color: var(--border-success);
+  background:
+    var(--glass-shine),
+    var(--success-bg);
+  color: var(--success);
+}
+
+.fac-create-alert.is-error {
+  border-color: var(--border-error);
+  background:
+    var(--glass-shine),
+    var(--error-bg);
+  color: var(--error);
+}
+
+.fac-create-alert.is-warning {
+  border-color: var(--border-warning);
+  background:
+    var(--glass-shine),
+    var(--warning-bg);
+  color: var(--warning);
+}
+
+.fac-create-total-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-sm);
+}
+
+.fac-create-total-strip > div {
+  position: relative;
+  overflow: hidden;
+  min-block-size: calc(96px * var(--ui-scale));
+  padding: var(--space-md);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 44%),
+    var(--glass-shine),
+    var(--card-bg);
+  box-shadow: var(--shadow-card);
+  display: grid;
+  align-content: center;
+  gap: var(--space-3xs);
+}
+
+.fac-create-total-strip > div::after {
+  content: "";
+  position: absolute;
+  inset: auto -28px -38px auto;
+  inline-size: 108px;
+  block-size: 108px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  filter: blur(8px);
+}
+
+.fac-create-total-strip span {
+  position: relative;
+  z-index: 1;
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-wider);
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.fac-create-total-strip strong {
+  position: relative;
+  z-index: 1;
+  color: var(--text-strong);
+  font-size: clamp(var(--font-xl), 2.1vw, var(--font-3xl));
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-tight);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.fac-create-total-strip .is-total {
+  border-color: var(--accent-border);
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 45%),
+    var(--glass-shine),
+    var(--accent-soft);
+}
+
+.fac-create-total-strip .is-total strong {
+  color: var(--accent-active);
+}
+
+
+/* =========================================================
+   CREATE MODAL TARGET / PRO CARDS
+========================================================= */
+
+.fac-create-target {
+  display: grid;
+  gap: var(--space-md);
+  min-inline-size: 0;
+  padding: var(--space-lg);
+  border: 1px solid color-mix(in srgb, var(--card-border) 86%, var(--accent-border));
+  border-radius: var(--radius-2xl, 26px);
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 34%),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 7%, transparent), transparent 32%),
+    var(--glass-shine),
+    color-mix(in srgb, var(--card-bg) 96%, transparent);
+  box-shadow:
+    var(--shadow-card),
+    inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
+}
+
+.fac-create-target-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-md);
+  align-items: start;
+}
+
+.fac-create-target-title-block {
+  display: grid;
+  gap: var(--space-3xs);
+  min-inline-size: 0;
+}
+
+.fac-create-target-title-block > span {
+  color: var(--accent-active);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-wider);
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.fac-create-target-title-block h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(var(--font-xl), 2.2vw, var(--font-3xl));
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-tight);
+  line-height: var(--line-tight);
+}
+
+.fac-create-target-title-block p {
+  margin: 0;
+  max-inline-size: 78ch;
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  line-height: var(--line-relaxed);
+}
+
+.fac-create-target-metrics {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-xs);
+}
+
+.fac-create-target-metrics > div {
+  min-inline-size: 104px;
+  padding: var(--space-sm);
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-xl);
+  background: var(--badge-bg);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 2px;
+}
+
+.fac-create-target-metrics strong {
+  color: var(--text-strong);
+  font-size: var(--font-2xl);
+  font-weight: var(--weight-black);
+  line-height: 1;
+}
+
+.fac-create-target-metrics span {
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-wider);
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.fac-create-pro-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-md);
+  min-inline-size: 0;
+}
+
+.fac-create-pro-card {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  align-content: start;
+  gap: var(--space-md);
+  min-inline-size: 0;
+  min-block-size: calc(360px * var(--ui-scale));
+  padding: var(--space-md);
+  border: 1px solid color-mix(in srgb, var(--card-border) 88%, transparent);
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 38%),
+    var(--glass-shine),
+    color-mix(in srgb, var(--card-bg) 94%, transparent);
+  box-shadow:
+    0 18px 52px color-mix(in srgb, #000 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent);
+}
+
+.fac-create-pro-card--tickets {
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--info) 7%, transparent), transparent 38%),
+    var(--glass-shine),
+    color-mix(in srgb, var(--card-bg) 94%, transparent);
+}
+
+.fac-create-pro-card-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  min-inline-size: 0;
+}
+
+.fac-create-pro-card-head > div {
+  display: grid;
+  gap: 3px;
+  min-inline-size: 0;
+}
+
+.fac-create-pro-card-head span {
+  color: var(--text-dim);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-wider);
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.fac-create-pro-card-head strong {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--font-lg);
+  font-weight: var(--weight-black);
+  line-height: var(--line-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* =========================================================
+   CREATE MODAL BUTTONS / AVATARS
+========================================================= */
+
+.fac-create-mini-button,
+.fac-create-icon-button {
+  appearance: none;
+  border: 1px solid var(--btn-secondary-border);
+  border-radius: var(--radius-pill);
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-family);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-black);
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    transform var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.fac-create-mini-button {
+  min-block-size: calc(32px * var(--ui-scale));
+  padding-inline: var(--space-sm);
+}
+
+.fac-create-icon-button {
+  min-block-size: calc(30px * var(--ui-scale));
+  padding-inline: 10px;
+}
+
+.fac-create-mini-button:hover,
+.fac-create-icon-button:hover {
+  transform: translateY(-1px);
+  background: var(--btn-secondary-bg);
+  color: var(--btn-secondary-text);
+  border-color: color-mix(in srgb, var(--btn-secondary-border) 66%, var(--accent-border));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
+    0 8px 18px color-mix(in srgb, #000 7%, transparent);
+}
+
+.fac-create-icon-button.is-danger,
+.fac-create-icon-button.is-danger:hover {
+  border-color: var(--border-error);
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.fac-create-mini-button:disabled,
+.fac-create-icon-button:disabled {
+  pointer-events: none;
+  opacity: .48;
+}
+
+.fac-create-avatar {
+  position: relative;
+  inline-size: calc(44px * var(--ui-scale));
+  block-size: calc(44px * var(--ui-scale));
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, #fff 20%, transparent);
+  border-radius: var(--radius-pill);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 92%, #2563eb),
+      color-mix(in srgb, var(--info) 88%, #ec4899)
+    );
+  box-shadow:
+    0 10px 22px color-mix(in srgb, var(--accent) 18%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent),
+    var(--shadow-inner);
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+}
+
+.fac-create-avatar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 30% 22%, rgba(255,255,255,.42), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.10), rgba(0,0,0,.08));
+  mix-blend-mode: screen;
+}
+
+.fac-create-avatar--search {
+  inline-size: calc(38px * var(--ui-scale));
+  block-size: calc(38px * var(--ui-scale));
+}
+
+.fac-create-avatar--selected {
+  inline-size: calc(48px * var(--ui-scale));
+  block-size: calc(48px * var(--ui-scale));
+}
+
+.fac-create-avatar-img {
+  position: relative;
+  z-index: 1;
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.fac-create-avatar-fallback {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--avatar-text, #fff);
+  font-size: var(--font-lg);
+  font-weight: var(--weight-black);
+  letter-spacing: -.035em;
+  text-shadow:
+    0 1px 2px rgba(0,0,0,.22),
+    0 0 16px rgba(255,255,255,.20);
+}
+
+.fac-create-avatar[data-fallback="true"] .fac-create-avatar-fallback,
+.fac-create-avatar:not(.has-image) .fac-create-avatar-fallback {
+  display: flex;
+}
+
+.fac-create-avatar[data-fallback="true"] .fac-create-avatar-img,
+.fac-create-avatar:not(.has-image) .fac-create-avatar-img {
+  display: none !important;
+}
+
+
+/* =========================================================
+   CREATE MODAL SELECTED / SEARCH
+========================================================= */
+
+.fac-create-selected-stack {
+  display: grid;
+  gap: var(--space-xs);
+  min-inline-size: 0;
+}
+
+.fac-create-selected-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-sm);
+  align-items: center;
+  min-inline-size: 0;
+  padding: var(--space-sm);
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-xl);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, #fff 4%, transparent), transparent),
+    var(--badge-bg);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
+}
+
+.fac-create-selected-card.is-primary {
+  border-color: var(--accent-border);
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 11%, transparent), transparent 48%),
+    var(--accent-soft);
+}
+
+.fac-create-selected-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-sm);
+  align-items: center;
+  min-inline-size: 0;
+}
+
+.fac-create-selected-copy {
+  display: grid;
+  gap: 3px;
+  min-inline-size: 0;
+}
+
+.fac-create-selected-copy span {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-wider);
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.fac-create-selected-copy strong {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--font-md);
+  font-weight: var(--weight-black);
+  line-height: var(--line-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fac-create-selected-copy small {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fac-create-selected-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3xs);
+  flex-wrap: wrap;
+}
+
+.fac-create-empty-pro {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3xs);
+  padding: var(--space-lg);
+  border: 1px dashed color-mix(in srgb, var(--border-default) 82%, var(--accent-border));
+  border-radius: var(--radius-xl);
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 46%),
+    color-mix(in srgb, var(--surface-elevated) 54%, transparent);
+}
+
+.fac-create-empty-pro strong {
+  color: var(--text-strong);
+  font-size: var(--font-md);
+  font-weight: var(--weight-black);
+}
+
+.fac-create-empty-pro span {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  line-height: var(--line-normal);
+}
+
+.fac-create-empty-pro.is-locked {
+  opacity: .74;
+}
+
+.fac-create-field--search {
+  margin-block-start: var(--space-2xs);
+}
+
+.fac-create-search-state {
+  padding: var(--space-sm);
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-lg);
+  background: var(--badge-bg);
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-bold);
+  line-height: var(--line-normal);
+}
+
+.fac-create-search-state.is-error {
+  border-color: var(--border-error);
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.fac-create-search-results,
+.fac-create-ticket-list {
+  display: grid;
+  gap: var(--space-xs);
+  min-inline-size: 0;
+  max-block-size: 280px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-inline-end: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+.fac-create-search-results::-webkit-scrollbar,
+.fac-create-ticket-list::-webkit-scrollbar {
+  inline-size: var(--scrollbar-size);
+}
+
+.fac-create-search-results::-webkit-scrollbar-track,
+.fac-create-ticket-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.fac-create-search-results::-webkit-scrollbar-thumb,
+.fac-create-ticket-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+.fac-create-search-item,
+.fac-create-ticket-option {
+  appearance: none;
+  inline-size: 100%;
+  min-inline-size: 0;
+  padding: var(--space-sm);
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-xl);
+  background: var(--badge-bg);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-sm);
+  font-family: var(--font-family);
+  text-align: start;
+  transition:
+    transform var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.fac-create-search-item:hover,
+.fac-create-ticket-option:hover {
+  transform: translateY(-1px);
+  background: var(--badge-bg);
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--badge-border) 62%, var(--accent-border));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent),
+    0 8px 20px color-mix(in srgb, #000 7%, transparent);
+}
+
+.fac-create-search-item.is-selected,
+.fac-create-search-item.is-selected:hover,
+.fac-create-ticket-option.is-selected,
+.fac-create-ticket-option.is-selected:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent-active);
+}
+
+.fac-create-search-item:disabled,
+.fac-create-ticket-option:disabled {
+  cursor: default;
+  opacity: .72;
+  transform: none;
+}
+
+.fac-create-search-copy,
+.fac-create-ticket-option-copy {
+  display: grid;
+  gap: 3px;
+  min-inline-size: 0;
+}
+
+.fac-create-search-copy strong,
+.fac-create-ticket-option-copy strong {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-black);
+  line-height: var(--line-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fac-create-search-copy span,
+.fac-create-ticket-option-copy small {
+  min-inline-size: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--font-xs);
+  font-weight: var(--weight-semibold);
+  line-height: var(--line-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fac-create-add-pill {
+  min-block-size: calc(28px * var(--ui-scale));
+  padding-inline: 10px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent-active);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: var(--weight-black);
+  letter-spacing: var(--letter-wider);
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.fac-create-ticket-badge,
+.fac-create-ticket-mini-badge {
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-pill);
+  background:
+    radial-gradient(circle at 30% 20%, color-mix(in srgb, #fff 26%, transparent), transparent 38%),
+    var(--accent-soft);
+  color: var(--accent-active);
+  box-shadow:
+    0 8px 18px color-mix(in srgb, var(--accent) 14%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  font-weight: var(--weight-black);
+}
+
+.fac-create-ticket-badge {
+  inline-size: calc(48px * var(--ui-scale));
+  block-size: calc(48px * var(--ui-scale));
+  font-size: var(--font-lg);
+}
+
+.fac-create-ticket-mini-badge {
+  inline-size: calc(34px * var(--ui-scale));
+  block-size: calc(34px * var(--ui-scale));
+  font-size: var(--font-sm);
+}
+
+
+/* =========================================================
+   CREATE CHECKBOX / ACTIONS / LOADING
+========================================================= */
+
+.fac-create-check {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-sm);
+  align-items: start;
+  padding: var(--space-md);
+  border: 1px solid var(--badge-border);
+  border-radius: var(--radius-xl);
+  background:
+    var(--glass-shine),
+    var(--badge-bg);
+  cursor: pointer;
+}
+
+.fac-create-check input {
+  appearance: none;
+  inline-size: calc(22px * var(--ui-scale));
+  block-size: calc(22px * var(--ui-scale));
+  margin: 1px 0 0;
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  box-shadow: var(--input-shadow);
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+}
+
+.fac-create-check input::after {
+  content: "";
+  inline-size: 10px;
+  block-size: 6px;
+  border: solid var(--text-on-accent);
+  border-width: 0 0 2px 2px;
+  opacity: 0;
+  transform: rotate(-45deg) translateY(-1px);
+}
+
+.fac-create-check input:checked {
+  border-color: var(--btn-primary-border);
+  background: var(--btn-primary-bg);
+}
+
+.fac-create-check input:checked::after {
+  opacity: 1;
+}
+
+.fac-create-check input:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.fac-create-check input:disabled {
+  opacity: .48;
+  cursor: not-allowed;
+}
+
+.fac-create-check span {
+  display: grid;
+  gap: 3px;
+  min-inline-size: 0;
+}
+
+.fac-create-check strong {
+  color: var(--text-strong);
+  font-size: var(--font-md);
+  font-weight: var(--weight-black);
+  line-height: var(--line-snug);
+}
+
+.fac-create-check small {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  line-height: var(--line-normal);
+}
+
+.fac-create-actions {
+  position: sticky;
+  inset-block-end: calc(-1 * var(--space-xl));
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 1fr;
+  justify-items: end;
+  gap: var(--space-md);
+  align-items: center;
+  margin-inline: calc(-1 * var(--space-xl));
+  margin-block-end: calc(-1 * var(--space-xl));
+  padding: var(--space-md) var(--space-xl);
+  border-top: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--panel-bg) 74%, transparent),
+      var(--panel-bg)
+    );
+  backdrop-filter: blur(14px) saturate(1.08);
+  -webkit-backdrop-filter: blur(14px) saturate(1.08);
+}
+
+.fac-create-action-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+}
+
+.fac-create-submit {
+  appearance: none;
+  min-block-size: calc(48px * var(--ui-scale));
+  padding-inline: var(--space-xl);
+  border: 1px solid var(--btn-primary-border);
+  border-radius: var(--radius-xl);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  box-shadow:
+    var(--btn-primary-shadow),
+    inset 0 1px 0 color-mix(in srgb, #fff 16%, transparent);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  font-family: var(--font-family);
+  font-size: var(--font-md);
+  font-weight: var(--weight-black);
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    transform var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard);
+}
+
+.fac-create-submit:hover {
+  transform: translateY(-1px);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  box-shadow:
+    var(--btn-primary-shadow),
+    0 16px 38px color-mix(in srgb, var(--accent) 16%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
+}
+
+.fac-create-submit:active {
+  transform: translateY(0) scale(.985);
+}
+
+.fac-create-submit:disabled {
+  pointer-events: none;
+  opacity: .62;
+}
+
+.fac-create-submit-inner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+}
+
+.fac-create-spinner,
+.fac-create-loading-spinner {
+  inline-size: 16px;
+  block-size: 16px;
+  border: 2px solid color-mix(in srgb, currentColor 26%, transparent);
+  border-top-color: currentColor;
+  border-radius: var(--radius-pill);
+  animation: facCreateSpin .78s linear infinite;
+  flex: 0 0 auto;
+}
+
+.fac-create-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: var(--space-lg);
+  background:
+    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 48%),
+    color-mix(in srgb, var(--backdrop-bg) 72%, transparent);
+  backdrop-filter: blur(16px) saturate(1.06);
+  -webkit-backdrop-filter: blur(16px) saturate(1.06);
+}
+
+.fac-create-loading-card {
+  min-inline-size: min(360px, 100%);
+  padding: var(--space-xl);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-2xl, 24px);
+  background:
+    var(--glass-shine),
+    var(--popover-bg);
+  color: var(--text);
+  box-shadow:
+    var(--shadow-lg),
+    0 22px 62px color-mix(in srgb, var(--accent) 13%, transparent);
+  display: grid;
+  justify-items: center;
+  gap: var(--space-xs);
+  text-align: center;
+}
+
+.fac-create-loading-card .fac-create-loading-spinner {
+  inline-size: 28px;
+  block-size: 28px;
+  color: var(--accent-active);
+}
+
+.fac-create-loading-card strong {
+  color: var(--text-strong);
+  font-size: var(--font-xl);
+  font-weight: var(--weight-black);
+  line-height: var(--line-snug);
+}
+
+.fac-create-loading-card small {
+  color: var(--text-muted);
+  font-size: var(--font-sm);
+  line-height: var(--line-normal);
+}
+
+
+/* =========================================================
+   DETAIL MODAL OVERLAY / PANEL · FULL SCROLL
 ========================================================= */
 
 .facturas-detail-overlay {
@@ -2241,15 +3181,15 @@ body.modal-open {
   -webkit-backdrop-filter: blur(18px) saturate(1.12);
   display: grid;
   place-items: center;
+  overflow: hidden;
   font-family: var(--font-family);
   color: var(--text);
   animation: facturasDetailOverlayIn .18s var(--ease-standard) both;
 }
 
 .facturas-detail-modal {
-  --fd-modal-width: min(1120px, calc(100vw - 32px));
-  --fd-modal-height: min(92vh, 980px);
-
+  --fd-modal-width: min(1380px, calc(100vw - 32px));
+  --fd-modal-height: min(94dvh, 1040px);
   --fd-border: color-mix(in srgb, var(--card-border) 86%, var(--accent-border));
   --fd-card-bg: color-mix(in srgb, var(--card-bg) 96%, transparent);
   --fd-control-shadow:
@@ -2262,7 +3202,11 @@ body.modal-open {
   position: relative;
   inline-size: var(--fd-modal-width);
   max-block-size: var(--fd-modal-height);
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
   border: 1px solid var(--fd-border);
   border-radius: var(--radius-2xl, 28px);
   background:
@@ -2274,9 +3218,22 @@ body.modal-open {
     0 32px 96px color-mix(in srgb, #000 24%, transparent),
     0 0 0 1px color-mix(in srgb, #fff 5%, transparent),
     inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
   animation: facturasDetailModalIn .22s var(--ease-standard) both;
+}
+
+.facturas-detail-modal::-webkit-scrollbar {
+  inline-size: var(--scrollbar-size);
+}
+
+.facturas-detail-modal::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.facturas-detail-modal::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
 }
 
 
@@ -2285,11 +3242,10 @@ body.modal-open {
 ========================================================= */
 
 .facturas-detail-layout {
-  min-block-size: 0;
-  max-block-size: var(--fd-modal-height);
-  overflow: hidden;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: block;
+  min-block-size: auto;
+  max-block-size: none;
+  overflow: visible;
 }
 
 .facturas-detail-header {
@@ -2297,7 +3253,7 @@ body.modal-open {
   z-index: 2;
   display: grid;
   gap: var(--space-lg);
-  padding: var(--space-xl);
+  padding: clamp(24px, 2.4vw, var(--space-xl));
   border-bottom: 1px solid color-mix(in srgb, var(--border-default) 72%, transparent);
   background:
     linear-gradient(
@@ -2336,11 +3292,12 @@ body.modal-open {
 
 .facturas-detail-title {
   margin: 0;
+  max-inline-size: 980px;
   color: var(--text-strong);
-  font-size: clamp(var(--font-3xl), 3vw, var(--font-5xl));
+  font-size: clamp(42px, 5vw, 70px);
   font-weight: var(--weight-black);
-  letter-spacing: var(--letter-tight);
-  line-height: var(--line-tight);
+  letter-spacing: -.058em;
+  line-height: .92;
   text-wrap: balance;
 }
 
@@ -2349,17 +3306,17 @@ body.modal-open {
   overflow: hidden;
   color: var(--text-muted);
   font-size: var(--font-sm);
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-bold);
   line-height: var(--line-normal);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .facturas-detail-avatar {
-  inline-size: calc(64px * var(--ui-scale));
-  block-size: calc(64px * var(--ui-scale));
+  inline-size: clamp(68px, 6vw, 86px);
+  block-size: clamp(68px, 6vw, 86px);
   border: 1px solid color-mix(in srgb, #fff 20%, transparent);
-  border-radius: var(--radius-2xl, 22px);
+  border-radius: var(--radius-2xl, 24px);
   background:
     radial-gradient(circle at 28% 20%, rgba(255,255,255,.34), transparent 36%),
     linear-gradient(
@@ -2374,7 +3331,7 @@ body.modal-open {
     var(--shadow-inner);
   display: grid;
   place-items: center;
-  font-size: var(--font-2xl);
+  font-size: clamp(var(--font-xl), 2.4vw, var(--font-3xl));
   font-weight: var(--weight-black);
   letter-spacing: -.045em;
   text-shadow:
@@ -2392,15 +3349,15 @@ body.modal-open {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--space-2xs);
+  gap: var(--space-xs);
   min-inline-size: 0;
 }
 
 .facturas-detail-number,
 .facturas-detail-system-number,
 .facturas-detail-chip {
-  min-block-size: calc(30px * var(--ui-scale));
-  padding-inline: var(--space-sm);
+  min-block-size: calc(34px * var(--ui-scale));
+  padding-inline: 14px;
   border-radius: var(--radius-pill);
   display: inline-flex;
   align-items: center;
@@ -2435,19 +3392,19 @@ body.modal-open {
 
 .facturas-detail-chip--success {
   border-color: var(--border-success);
-  background: var(--success-soft);
+  background: var(--success-soft, var(--success-bg));
   color: var(--success);
 }
 
 .facturas-detail-chip--warning {
   border-color: var(--border-warning);
-  background: var(--warning-soft);
+  background: var(--warning-soft, var(--warning-bg));
   color: var(--warning);
 }
 
 .facturas-detail-chip--danger {
   border-color: var(--border-error);
-  background: var(--error-soft);
+  background: var(--error-soft, var(--error-bg));
   color: var(--error);
 }
 
@@ -2475,10 +3432,10 @@ body.modal-open {
 .facturas-detail-btn {
   appearance: none;
   position: relative;
-  min-block-size: calc(42px * var(--ui-scale));
-  padding-inline: var(--space-md);
+  min-block-size: calc(50px * var(--ui-scale));
+  padding-inline: var(--space-lg);
   border: 1px solid var(--btn-secondary-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   background: var(--btn-secondary-bg);
   color: var(--btn-secondary-text);
   box-shadow: var(--fd-control-shadow);
@@ -2532,8 +3489,10 @@ body.modal-open {
 
 .facturas-detail-btn--close,
 .facturas-detail-btn--close:hover {
-  inline-size: calc(42px * var(--ui-scale));
+  inline-size: calc(50px * var(--ui-scale));
+  block-size: calc(50px * var(--ui-scale));
   padding-inline: 0;
+  border-radius: var(--radius-xl);
   font-size: var(--font-lg);
   background: var(--btn-secondary-bg);
   color: var(--btn-secondary-text);
@@ -2570,8 +3529,8 @@ body.modal-open {
 
 .facturas-detail-mini {
   min-inline-size: 0;
-  min-block-size: calc(74px * var(--ui-scale));
-  padding: var(--space-sm);
+  min-block-size: calc(90px * var(--ui-scale));
+  padding: var(--space-md);
   border: 1px solid var(--badge-border);
   border-radius: var(--radius-xl);
   background:
@@ -2586,7 +3545,7 @@ body.modal-open {
 
 .facturas-detail-mini-label {
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: var(--font-xs);
   font-weight: var(--weight-black);
   letter-spacing: var(--letter-wider);
   line-height: 1;
@@ -2597,7 +3556,7 @@ body.modal-open {
   min-inline-size: 0;
   overflow: hidden;
   color: var(--text-strong);
-  font-size: var(--font-sm);
+  font-size: var(--font-md);
   font-weight: var(--weight-black);
   line-height: var(--line-snug);
   text-overflow: ellipsis;
@@ -2648,27 +3607,9 @@ body.modal-open {
 }
 
 .facturas-detail-body-shell {
-  min-block-size: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: var(--space-lg) var(--space-xl) var(--space-xl);
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
-}
-
-.facturas-detail-body-shell::-webkit-scrollbar {
-  inline-size: var(--scrollbar-size);
-}
-
-.facturas-detail-body-shell::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.facturas-detail-body-shell::-webkit-scrollbar-thumb {
-  border: 2px solid transparent;
-  border-radius: var(--radius-pill);
-  background: var(--scrollbar-thumb);
-  background-clip: padding-box;
+  min-block-size: auto;
+  overflow: visible;
+  padding: var(--space-lg) clamp(24px, 2.4vw, var(--space-xl)) clamp(28px, 2.6vw, var(--space-xl));
 }
 
 .facturas-detail-body {
@@ -2683,9 +3624,9 @@ body.modal-open {
   display: grid;
   gap: var(--space-md);
   min-inline-size: 0;
-  padding: var(--space-lg);
+  padding: var(--space-xl);
   border: 1px solid color-mix(in srgb, var(--card-border) 88%, transparent);
-  border-radius: var(--radius-2xl, 24px);
+  border-radius: var(--radius-2xl, 26px);
   background:
     radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 38%),
     var(--glass-shine),
@@ -2704,7 +3645,7 @@ body.modal-open {
 .facturas-detail-section-title {
   margin: 0;
   color: var(--text-strong);
-  font-size: var(--font-2xl);
+  font-size: clamp(var(--font-xl), 2.2vw, var(--font-3xl));
   font-weight: var(--weight-black);
   letter-spacing: var(--letter-tight);
   line-height: var(--line-tight);
@@ -2732,8 +3673,8 @@ body.modal-open {
 .facturas-detail-stat {
   position: relative;
   overflow: hidden;
-  min-block-size: calc(104px * var(--ui-scale));
-  padding: var(--space-md);
+  min-block-size: calc(126px * var(--ui-scale));
+  padding: var(--space-lg);
   border: 1px solid var(--card-border);
   border-radius: var(--radius-xl);
   background:
@@ -2758,10 +3699,10 @@ body.modal-open {
   min-inline-size: 0;
   overflow: hidden;
   color: var(--text-strong);
-  font-size: clamp(var(--font-xl), 2.4vw, var(--font-4xl));
+  font-size: clamp(34px, 4vw, 52px);
   font-weight: var(--weight-black);
   letter-spacing: var(--letter-tight);
-  line-height: 1;
+  line-height: .92;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
@@ -2776,8 +3717,8 @@ body.modal-open {
 .facturas-detail-tax-card {
   position: relative;
   overflow: hidden;
-  min-block-size: calc(112px * var(--ui-scale));
-  padding: var(--space-md);
+  min-block-size: calc(124px * var(--ui-scale));
+  padding: var(--space-lg);
   border: 1px solid var(--badge-border);
   border-radius: var(--radius-xl);
   background:
@@ -3023,12 +3964,6 @@ body.modal-open {
     var(--view-hero-bg);
 }
 
-[data-theme="light"] .facturas-stat-card {
-  background:
-    var(--glass-shine),
-    var(--card-bg);
-}
-
 [data-theme="light"] .facturas-table tbody tr:nth-child(even) > td {
   background: rgba(23,32,51,.012);
 }
@@ -3072,7 +4007,7 @@ body.modal-open {
 [data-theme="light"] .facturas-chip--pending,
 [data-theme="light"] .facturas-chip--partial {
   color: var(--warning-hover);
-  background: var(--warning-soft);
+  background: var(--warning-soft, var(--warning-bg));
   border-color: var(--border-warning);
 }
 
@@ -3084,7 +4019,7 @@ body.modal-open {
 
 [data-theme="light"] .facturas-chip--paid {
   color: var(--success-hover);
-  background: var(--success-soft);
+  background: var(--success-soft, var(--success-bg));
   border-color: var(--border-success);
 }
 
@@ -3092,7 +4027,7 @@ body.modal-open {
 [data-theme="light"] .facturas-chip--cancelled,
 [data-theme="light"] .facturas-chip--void {
   color: var(--error-hover);
-  background: var(--error-soft);
+  background: var(--error-soft, var(--error-bg));
   border-color: var(--border-error);
 }
 
@@ -3146,6 +4081,8 @@ body.modal-open {
 [data-theme="light"] .fac-create-selected-card,
 [data-theme="light"] .fac-create-check,
 [data-theme="light"] .fac-create-pro-card,
+[data-theme="light"] .fac-create-target,
+[data-theme="light"] .fac-create-total-strip > div,
 [data-theme="light"] .facturas-detail-mini,
 [data-theme="light"] .facturas-detail-section,
 [data-theme="light"] .facturas-detail-stat,
@@ -3168,16 +4105,26 @@ body.modal-open {
     );
 }
 
+[data-theme="light"] .facturas-detail-header {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255,255,255,.72),
+      rgba(255,255,255,.32) 58%,
+      transparent
+    );
+}
+
 [data-theme="light"] .facturas-detail-tax-card--iva {
   background:
     radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--success) 8%, transparent), transparent 42%),
-    var(--success-soft);
+    var(--success-soft, var(--success-bg));
 }
 
 [data-theme="light"] .facturas-detail-tax-card--irpf {
   background:
     radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--error) 8%, transparent), transparent 42%),
-    var(--error-soft);
+    var(--error-soft, var(--error-bg));
 }
 
 
@@ -3219,7 +4166,9 @@ body.modal-open {
 
 [data-theme="dark"] .facturas-detail-section,
 [data-theme="dark"] .facturas-detail-linea,
-[data-theme="dark"] .facturas-detail-description {
+[data-theme="dark"] .facturas-detail-description,
+[data-theme="dark"] .fac-create-target,
+[data-theme="dark"] .fac-create-pro-card {
   background:
     var(--glass-shine),
     color-mix(in srgb, var(--card-bg) 92%, #000);
@@ -3280,8 +4229,8 @@ body.modal-open {
   .facturas-detail-modal {
     --fac-create-panel-width: min(100%, calc(100vw - 24px));
     --fd-modal-width: min(100%, calc(100vw - 24px));
-    --fac-create-panel-height: 94vh;
-    --fd-modal-height: 94vh;
+    --fac-create-panel-height: 94dvh;
+    --fd-modal-height: 94dvh;
   }
 
   .fac-create-pro-grid,
@@ -3382,8 +4331,8 @@ body.modal-open {
   .facturas-detail-modal {
     --fac-create-panel-width: 100%;
     --fd-modal-width: 100%;
-    --fac-create-panel-height: 94vh;
-    --fd-modal-height: 94vh;
+    --fac-create-panel-height: 94dvh;
+    --fd-modal-height: 94dvh;
 
     border-radius: var(--radius-2xl, 24px) var(--radius-2xl, 24px) 0 0;
   }
@@ -3395,7 +4344,8 @@ body.modal-open {
 
   .fac-create-header h2,
   .facturas-detail-title {
-    font-size: clamp(var(--font-2xl), 8vw, var(--font-4xl));
+    font-size: clamp(34px, 10vw, 48px);
+    line-height: .96;
   }
 
   .fac-create-header p {
@@ -3409,6 +4359,7 @@ body.modal-open {
 
   .fac-create-grid--2,
   .fac-create-total-strip,
+  .fac-create-pro-grid,
   .facturas-detail-meta-grid,
   .facturas-detail-stats-grid,
   .facturas-detail-tax-grid,
@@ -3453,6 +4404,7 @@ body.modal-open {
 
   .fac-create-actions {
     grid-template-columns: 1fr;
+    justify-items: stretch;
     align-items: stretch;
     margin-inline: calc(-1 * var(--space-md));
     margin-block-end: calc(-1 * var(--space-lg));
@@ -3464,18 +4416,13 @@ body.modal-open {
     inline-size: 100%;
   }
 
-  .fac-create-submit-summary {
-    justify-items: center;
-    text-align: center;
-  }
-
   .facturas-detail-identity {
     grid-template-columns: 1fr;
   }
 
   .facturas-detail-avatar {
-    inline-size: calc(56px * var(--ui-scale));
-    block-size: calc(56px * var(--ui-scale));
+    inline-size: calc(58px * var(--ui-scale));
+    block-size: calc(58px * var(--ui-scale));
     border-radius: var(--radius-xl);
   }
 
@@ -3488,10 +4435,7 @@ body.modal-open {
     grid-template-columns: 1fr 1fr;
   }
 
-  .facturas-detail-btn {
-    inline-size: 100%;
-  }
-
+  .facturas-detail-btn,
   .facturas-detail-btn--close {
     inline-size: 100%;
   }
@@ -3499,6 +4443,14 @@ body.modal-open {
   .facturas-detail-section {
     padding: var(--space-md);
     border-radius: var(--radius-xl);
+  }
+
+  .facturas-detail-stat {
+    min-block-size: 104px;
+  }
+
+  .facturas-detail-stat-value {
+    font-size: clamp(30px, 10vw, 42px);
   }
 
   .facturas-detail-linea-top {
@@ -3548,8 +4500,8 @@ body.modal-open {
   .facturas-detail-modal {
     --fac-create-panel-width: 100vw;
     --fd-modal-width: 100vw;
-    --fac-create-panel-height: 96vh;
-    --fd-modal-height: 96vh;
+    --fac-create-panel-height: 96dvh;
+    --fd-modal-height: 96dvh;
 
     border-inline: 0;
     border-block-end: 0;
@@ -3631,7 +4583,10 @@ body.modal-open {
   }
 
   .facturas-table-shell,
+  .facturas-detail-modal,
+  .facturas-detail-layout,
   .facturas-detail-body-shell {
+    max-block-size: none !important;
     overflow: visible !important;
   }
 
@@ -3650,8 +4605,6 @@ body.modal-open {
 
   .facturas-detail-modal {
     inline-size: 100% !important;
-    max-block-size: none !important;
-    overflow: visible !important;
     border: 0 !important;
     border-radius: 0 !important;
     box-shadow: none !important;

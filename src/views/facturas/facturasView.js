@@ -2,12 +2,14 @@
    Onion SPA - Facturas View
    Archivo: src/views/facturas/facturasView.js
 
-   EXTREME PRO SYSTEM · FACTURAS VIEW · CSP CLEAN · 14/10
+   EXTREME PRO SYSTEM · FACTURAS VIEW · CSP CLEAN · 15/10
    PATCH · SINGLE TEMPLATE OWNER
    PATCH · NO INLINE STYLE
    PATCH · NO TEMPLATE STYLE INJECTION
    PATCH · TEMPLATE DOM BIND · AVATAR FALLBACK CSP SAFE
-   PATCH · FILTER / SEARCH / SORT STATE BRIDGE
+   PATCH · FILTER / SEARCH / DATE SORT STATE BRIDGE
+   PATCH · SORT ÚNICO: FECHA DESC ⇄ FECHA ASC
+   PATCH · INVOICE NUMBER INTERNAL TIEBREAKER ONLY
    PATCH · PAGINATION 5
    PATCH · DETAIL PORTAL
    PATCH · CREATE MODAL BRIDGE
@@ -24,6 +26,9 @@
    - Renderizar mediante renderFacturasTemplate().
    - No duplicar renderHeader/renderCards en la vista.
    - Mantener estado de filtro, búsqueda, orden y paginación.
+   - Usar solo orden por fecha: date_desc / date_asc.
+   - Mapear orden legacy por número a orden por fecha para evitar incoherencias.
+   - Usar número de factura solo como desempate interno.
    - Delegar markup al template.
    - Delegar estilos al CSS externo /src/css/views/facturas.css.
    - Abrir detalle de factura en portal global.
@@ -115,6 +120,14 @@ export const FacturasView = (() => {
 
   const DEFAULT_FILTER = "all";
   const DEFAULT_SORT = "date_desc";
+
+  const SORT_DATE_DESC = "date_desc";
+  const SORT_DATE_ASC = "date_asc";
+
+  const SORT_MODES = Object.freeze([
+    SORT_DATE_DESC,
+    SORT_DATE_ASC,
+  ]);
 
   const ADMIN_ROLES = Object.freeze([
     "admin",
@@ -624,21 +637,53 @@ export const FacturasView = (() => {
   function normalizeFacturaSort(value = "") {
     const key = normalizeKey(value);
 
-    if (
-      [
-        "invoice_desc",
-        "factura_desc",
-        "numero_desc",
-        "n_factura_desc",
-        "num_factura_desc",
-        "number_desc",
-        "invoice_number_desc",
-      ].includes(key)
-    ) {
-      return "invoice_desc";
+    if (SORT_MODES.includes(key)) {
+      return key;
     }
 
-    return "date_desc";
+    if (
+      [
+        "date_asc",
+        "fecha_asc",
+        "emission_asc",
+        "issue_date_asc",
+        "fecha_emision_asc",
+        "oldest",
+        "oldest_first",
+        "menor_fecha",
+        "asc",
+
+        /*
+          Legacy compat:
+          El template definitivo ya no muestra orden por Nº factura.
+          Si entra invoice_asc desde un estado viejo o query externa,
+          se mapea a date_asc para mantener una única semántica visual.
+        */
+        "invoice_asc",
+        "factura_asc",
+        "numero_asc",
+        "n_factura_asc",
+        "num_factura_asc",
+        "number_asc",
+        "invoice_number_asc",
+        "menor_factura",
+      ].includes(key)
+    ) {
+      return SORT_DATE_ASC;
+    }
+
+    /*
+      Legacy compat:
+      invoice_desc se mapea a date_desc porque en este sistema la numeración
+      es correlativa con fecha y el usuario solo debe ver un criterio: Fecha.
+    */
+    return SORT_DATE_DESC;
+  }
+
+  function getNextDateSort(currentSort = DEFAULT_SORT) {
+    return normalizeFacturaSort(currentSort) === SORT_DATE_DESC
+      ? SORT_DATE_ASC
+      : SORT_DATE_DESC;
   }
 
   function ensureBaseState() {
@@ -1362,11 +1407,18 @@ export const FacturasView = (() => {
     );
   }
 
-  function compareByDateDesc(a = {}, b = {}) {
-    const diff = getFacturaDateSortValue(b) - getFacturaDateSortValue(a);
+  function compareFacturaNumberAsc(a = {}, b = {}) {
+    return safeText(getFacturaDisplayId(a), "").localeCompare(
+      safeText(getFacturaDisplayId(b), ""),
+      "es",
+      {
+        numeric: true,
+        sensitivity: "base",
+      }
+    );
+  }
 
-    if (diff !== 0) return diff;
-
+  function compareFacturaNumberDesc(a = {}, b = {}) {
     return safeText(getFacturaDisplayId(b), "").localeCompare(
       safeText(getFacturaDisplayId(a), ""),
       "es",
@@ -1377,15 +1429,20 @@ export const FacturasView = (() => {
     );
   }
 
-  function compareByInvoiceDesc(a = {}, b = {}) {
-    return safeText(getFacturaDisplayId(b), "").localeCompare(
-      safeText(getFacturaDisplayId(a), ""),
-      "es",
-      {
-        numeric: true,
-        sensitivity: "base",
-      }
-    );
+  function compareByDateDesc(a = {}, b = {}) {
+    const diff = getFacturaDateSortValue(b) - getFacturaDateSortValue(a);
+
+    if (diff !== 0) return diff;
+
+    return compareFacturaNumberDesc(a, b);
+  }
+
+  function compareByDateAsc(a = {}, b = {}) {
+    const diff = getFacturaDateSortValue(a) - getFacturaDateSortValue(b);
+
+    if (diff !== 0) return diff;
+
+    return compareFacturaNumberAsc(a, b);
   }
 
   function getCompanyName(item = {}) {
@@ -1750,8 +1807,8 @@ export const FacturasView = (() => {
       return itemMatchesFilter(item, filter) && itemMatchesSearch(item, search);
     });
 
-    return sort === "invoice_desc"
-      ? [...filtered].sort(compareByInvoiceDesc)
+    return sort === SORT_DATE_ASC
+      ? [...filtered].sort(compareByDateAsc)
       : [...filtered].sort(compareByDateDesc);
   }
 
@@ -3944,6 +4001,12 @@ export const FacturasView = (() => {
         return next;
       },
 
+      toggleSort() {
+        const next = setViewSort(getNextDateSort(getViewSort()));
+        rerender();
+        return next;
+      },
+
       clearFilters() {
         clearViewFilters();
         rerender();
@@ -4012,6 +4075,27 @@ export const FacturasView = (() => {
     });
   }
 
+  function resolveSortFromControl(target = null) {
+    if (!target) return getNextDateSort(getViewSort());
+
+    const explicit = first(
+      target.dataset?.nextSort,
+      target.dataset?.sort,
+      target.dataset?.sortMode,
+      target.dataset?.facturasSort,
+      target.getAttribute?.("data-next-sort"),
+      target.getAttribute?.("data-sort"),
+      target.getAttribute?.("data-sort-mode"),
+      target.getAttribute?.("data-facturas-sort")
+    );
+
+    if (explicit) {
+      return normalizeFacturaSort(explicit);
+    }
+
+    return getNextDateSort(getViewSort());
+  }
+
   function bindFacturasFilterControls() {
     cleanupFilterControls();
 
@@ -4037,6 +4121,7 @@ export const FacturasView = (() => {
 
       if (["filter", "filter_facturas"].includes(action)) {
         event.preventDefault();
+        event.stopPropagation();
 
         const nextFilter = first(
           target.dataset.filter,
@@ -4048,27 +4133,31 @@ export const FacturasView = (() => {
           DEFAULT_FILTER
         );
 
-        setViewFilter(nextFilter);
-        rerender();
+        const previous = getViewFilter();
+        const next = setViewFilter(nextFilter);
+
+        if (previous !== next || getCurrentPage() !== 1) {
+          rerender();
+        } else {
+          rerender();
+        }
 
         return;
       }
 
       if (["sort", "sort_facturas"].includes(action)) {
         event.preventDefault();
+        event.stopPropagation();
 
-        const nextSort = first(
-          target.dataset.sort,
-          target.dataset.sortMode,
-          target.dataset.facturasSort,
-          target.getAttribute("data-sort"),
-          target.getAttribute("data-sort-mode"),
-          target.getAttribute("data-facturas-sort"),
-          DEFAULT_SORT
-        );
+        const previous = getViewSort();
+        const nextSort = resolveSortFromControl(target);
+        const next = setViewSort(nextSort);
 
-        setViewSort(nextSort);
-        rerender();
+        if (previous !== next || getCurrentPage() !== 1) {
+          rerender();
+        } else {
+          rerender();
+        }
 
         return;
       }
@@ -4081,6 +4170,7 @@ export const FacturasView = (() => {
         ].includes(action)
       ) {
         event.preventDefault();
+        event.stopPropagation();
 
         setViewSearch("");
         rerender();
@@ -4098,6 +4188,7 @@ export const FacturasView = (() => {
         ].includes(action)
       ) {
         event.preventDefault();
+        event.stopPropagation();
 
         clearViewFilters();
         rerender();
@@ -4416,6 +4507,12 @@ export const FacturasView = (() => {
 
     setSort(sort = DEFAULT_SORT) {
       const next = setViewSort(sort);
+      rerender();
+      return next;
+    },
+
+    toggleSort() {
+      const next = setViewSort(getNextDateSort(getViewSort()));
       rerender();
       return next;
     },

@@ -2,49 +2,45 @@
    Onion SPA - Sidebar Template
    Archivo: src/ui/sidebar/template.js
 
-   FINAL EXTREME SYSTEM · SIDEBAR TEMPLATE · I18N/A11Y/DOM SAFE · 10/10
-   PATCH · ROUTES CANÓNICAS · ACTIVE STATE READY · APPLE INDICATOR READY
-   PATCH · FACTURAS / INCIDENCIAS ROUTE HARDENED
-   PATCH · DROPDOWN ROUTE BUTTONS SAFE
-   PATCH · ADMIN ITEMS HIDDEN-BUT-RECOVERABLE
-   PATCH · NO NATIVE TITLE · CUSTOM TOOLTIP ONLY
-   PATCH · DATA-ROUTE / DATA-HREF / DATA-TO CONSISTENTES
+   FINAL EXTREME SYSTEM · SIDEBAR TEMPLATE · I18N/A11Y/DOM SAFE · 11/10
+   ROUTE HARDENED · APPLE INDICATOR READY · DROPDOWN CONTRACT SAFE
 
    RESPONSABILIDADES:
-   - generar el HTML base del sidebar
-   - centralizar el marcado del módulo
-   - consumir constantes del sidebar
-   - preparado para i18n real
-   - tooltips custom con refresh live
-   - evitar tooltips nativos del navegador
-   - accesibilidad consistente
-   - separar textos estáticos i18n de valores dinámicos de sesión
-   - incluir la vista Servidor en el menú lateral
-   - mantener compatibilidad total con AppCore.syncUserUI()
-   - no pintar tooltip en el logo
-   - no pintar tooltip nativo en avatar/footer
-   - marcar rutas admin para filtrado visual posterior
-   - evitar flash de rutas admin antes de aplicar visibilidad
-   - incluir data-sidebar-action para fallback delegado
-   - incluir data-action para compatibilidad con delegación genérica
-   - incluir data-route / data-href / data-to para navegación robusta
-   - dropdown de usuario con button real, data-user-toggle y data-user-dropdown
-   - estructura DOM compatible con dom.js / events.js / dropdown.js / index.js
-   - SVGs preservados
+   - Generar el HTML base del sidebar.
+   - Centralizar el marcado del módulo.
+   - Consumir constantes del sidebar.
+   - Preparado para i18n real.
+   - Tooltips custom con refresh live.
+   - Evitar tooltips nativos del navegador.
+   - Accesibilidad consistente.
+   - Separar textos estáticos i18n de valores dinámicos de sesión.
+   - Mantener compatibilidad total con AppCore.syncUserUI().
+   - No pintar tooltip en el logo.
+   - No pintar tooltip nativo en avatar/footer.
+   - Marcar rutas admin para filtrado visual posterior.
+   - Evitar flash de rutas admin antes de applyRoleVisibility().
+   - Incluir data-sidebar-action para fallback delegado.
+   - Incluir data-action para compatibilidad con delegación genérica.
+   - Incluir data-route / data-href / data-to para navegación robusta.
+   - Dropdown de usuario con button real, data-user-toggle y data-user-dropdown.
+   - Estructura DOM compatible con dom.js / events.js / dropdown.js / index.js.
+   - SVGs preservados.
 
    HARDENING:
-   - IDs alineados con constants.js
-   - selectores fallback estables
-   - aria-controls / aria-expanded / aria-hidden coherentes
-   - dropdown nace cerrado pero desbloqueable por JS
-   - evita aria-hidden en contenedores interactivos principales
-   - sin title nativo en footer/logo/avatar
-   - rutas admin ocultas de inicio hasta applyRoleVisibility()
-   - avatar image sin src inicial para evitar request vacío
-   - menú preparado para indicador activo tipo Apple desde state.js
-   - cada item declara ruta canónica única
-   - Facturas SIEMPRE /facturas
-   - Incidencias SIEMPRE /incidencias
+   - IDs alineados con constants.js.
+   - Selectores fallback estables.
+   - aria-controls / aria-expanded / aria-hidden coherentes.
+   - Dropdown nace cerrado y desbloqueable por JS.
+   - Sin aria-hidden en contenedores interactivos principales.
+   - Sin title nativo.
+   - Rutas admin ocultas de inicio pero recuperables.
+   - Avatar image sin src inicial para evitar request vacío.
+   - Menú preparado para indicador activo tipo Apple desde state.js.
+   - Cada item declara ruta canónica única.
+   - Facturas siempre /facturas.
+   - Incidencias siempre /incidencias.
+   - No renderiza toggle móvil interno duplicado:
+     el toggle móvil debe vivir en topbar/shell.
 ========================================================= */
 
 import { I18n } from "../../i18n/index.js";
@@ -64,15 +60,26 @@ import {
    LOCAL CONSTANTS
 ========================================================= */
 
-export const SIDEBAR_TEMPLATE_VERSION = "sidebar-template-v6-route-hardened";
+export const SIDEBAR_TEMPLATE_VERSION =
+  "sidebar-template-v7-state-dropdown-contract";
 
-export const SIDEBAR_LOGO_ID = "homeLink";
-export const SIDEBAR_TOGGLE_ID = "toggleSidebar";
-export const SIDEBAR_MOBILE_TOGGLE_ID = "toggleSidebarMobile";
+export const SIDEBAR_LOGO_ID =
+  "homeLink";
 
-export const SIDEBAR_AVATAR_IMAGE_ID = "sidebarAvatarImage";
-export const SIDEBAR_AVATAR_FALLBACK_ID = "sidebarAvatarFallback";
-export const SIDEBAR_USER_PLAN_ID = "sidebarUserPlan";
+export const SIDEBAR_TOGGLE_ID =
+  "toggleSidebar";
+
+export const SIDEBAR_MOBILE_TOGGLE_ID =
+  "toggleSidebarMobile";
+
+export const SIDEBAR_AVATAR_IMAGE_ID =
+  "sidebarAvatarImage";
+
+export const SIDEBAR_AVATAR_FALLBACK_ID =
+  "sidebarAvatarFallback";
+
+export const SIDEBAR_USER_PLAN_ID =
+  "sidebarUserPlan";
 
 export const SIDEBAR_ROUTES = Object.freeze({
   home: "/",
@@ -88,31 +95,53 @@ export const SIDEBAR_ROUTES = Object.freeze({
 export const SIDEBAR_ROUTE_ALIASES = Object.freeze({
   "/home": SIDEBAR_ROUTES.home,
   "/dashboard": SIDEBAR_ROUTES.home,
+  "/inicio": SIDEBAR_ROUTES.home,
+  "/inici": SIDEBAR_ROUTES.home,
 
   "/tickets": SIDEBAR_ROUTES.tickets,
   "/ticket": SIDEBAR_ROUTES.tickets,
   "/incidents": SIDEBAR_ROUTES.tickets,
   "/incident": SIDEBAR_ROUTES.tickets,
+  "/incidencia": SIDEBAR_ROUTES.tickets,
+  "/incidencies": SIDEBAR_ROUTES.tickets,
+  "/incidencia-client": SIDEBAR_ROUTES.tickets,
 
   "/invoices": SIDEBAR_ROUTES.invoices,
   "/invoice": SIDEBAR_ROUTES.invoices,
   "/billing": SIDEBAR_ROUTES.invoices,
+  "/factura": SIDEBAR_ROUTES.invoices,
+  "/factures": SIDEBAR_ROUTES.invoices,
+  "/facturacio": SIDEBAR_ROUTES.invoices,
+  "/facturación": SIDEBAR_ROUTES.invoices,
+  "/facturacion": SIDEBAR_ROUTES.invoices,
 
   "/users": SIDEBAR_ROUTES.users,
   "/user": SIDEBAR_ROUTES.users,
+  "/usuario": SIDEBAR_ROUTES.users,
+  "/usuaris": SIDEBAR_ROUTES.users,
+  "/usuari": SIDEBAR_ROUTES.users,
 
   "/clients": SIDEBAR_ROUTES.clients,
   "/client": SIDEBAR_ROUTES.clients,
   "/customers": SIDEBAR_ROUTES.clients,
   "/customer": SIDEBAR_ROUTES.clients,
+  "/cliente": SIDEBAR_ROUTES.clients,
 
   "/account": SIDEBAR_ROUTES.account,
   "/profile": SIDEBAR_ROUTES.account,
+  "/perfil": SIDEBAR_ROUTES.account,
+  "/compte": SIDEBAR_ROUTES.account,
 
   "/settings": SIDEBAR_ROUTES.settings,
   "/config": SIDEBAR_ROUTES.settings,
+  "/configuration": SIDEBAR_ROUTES.settings,
+  "/configuracion": SIDEBAR_ROUTES.settings,
+  "/configuración": SIDEBAR_ROUTES.settings,
+  "/configuracio": SIDEBAR_ROUTES.settings,
+  "/configuració": SIDEBAR_ROUTES.settings,
 
   "/server": SIDEBAR_ROUTES.server,
+  "/servidor": SIDEBAR_ROUTES.server,
 });
 
 /* =========================================================
@@ -138,18 +167,21 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
 
 function escapeHtml(value = "") {
   return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function escapeAttr(value = "") {
@@ -172,19 +204,21 @@ function isUnsafeHref(value = "") {
     raw.startsWith("javascript:") ||
       raw.startsWith("data:") ||
       raw.startsWith("vbscript:") ||
-      raw.startsWith("file:")
+      raw.startsWith("file:") ||
+      raw.startsWith("mailto:") ||
+      raw.startsWith("tel:")
   );
 }
 
 function normalizeRoute(value = "/") {
   let text = safeText(value, "/");
 
-  if (!text) return "/";
-
-  if (isUnsafeHref(text)) return "/";
+  if (!text || isUnsafeHref(text)) {
+    return "/";
+  }
 
   if (/^https?:\/\//i.test(text)) {
-    return text;
+    return "/";
   }
 
   if (text.startsWith("#/")) {
@@ -192,16 +226,20 @@ function normalizeRoute(value = "/") {
   } else if (text.startsWith("#!")) {
     text = text.replace(/^#!\/?/, "/");
   } else if (text.startsWith("#")) {
-    return text;
+    return "/";
   }
 
-  text = text.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+  text = text
+    .replace(/\\/g, "/")
+    .replace(/\/{2,}/g, "/");
 
   if (!text.startsWith("/")) {
     text = `/${text}`;
   }
 
-  const [pathname, query = ""] = text.split("?");
+  const queryIndex = text.indexOf("?");
+  const pathname = queryIndex >= 0 ? text.slice(0, queryIndex) : text;
+  const query = queryIndex >= 0 ? text.slice(queryIndex + 1) : "";
 
   let cleanPathname = pathname || "/";
 
@@ -209,30 +247,23 @@ function normalizeRoute(value = "/") {
     cleanPathname = cleanPathname.replace(/\/+$/g, "") || "/";
   }
 
-  const aliased = SIDEBAR_ROUTE_ALIASES[cleanPathname] || cleanPathname;
+  const aliased =
+    SIDEBAR_ROUTE_ALIASES[cleanPathname] ||
+    cleanPathname;
 
-  return query ? `${aliased}?${query}` : aliased;
+  return query
+    ? `${aliased}?${query}`
+    : aliased;
 }
 
-function attrIf(name = "", enabled = false) {
+function booleanAttr(name = "", enabled = false) {
   const cleanName = safeText(name, "");
 
   if (!cleanName || !enabled) {
     return "";
   }
 
-  return cleanName;
-}
-
-function attr(name = "", value = "") {
-  const cleanName = safeText(name, "");
-  const cleanValue = safeText(value, "");
-
-  if (!cleanName || !cleanValue) {
-    return "";
-  }
-
-  return `${cleanName}="${escapeAttr(cleanValue)}"`;
+  return ` ${cleanName}`;
 }
 
 /* =========================================================
@@ -424,36 +455,6 @@ const Icons = Object.freeze({
             />
           </svg>
   `,
-
-  mobileToggle: `
-          <svg
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            focusable="false"
-            aria-hidden="true"
-          >
-            <path
-              d="M4 7h16"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-            />
-            <path
-              d="M4 12h16"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-            />
-            <path
-              d="M4 17h16"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-            />
-          </svg>
-  `,
 });
 
 /* =========================================================
@@ -470,8 +471,6 @@ function getSidebarLabels() {
 
     collapseSidebar: t("sidebar.toggle.collapse", "Contraer barra lateral"),
     expandSidebar: t("sidebar.toggle.expand", "Expandir barra lateral"),
-    openSidebar: t("sidebar.toggle.open", "Abrir navegación"),
-    closeSidebar: t("sidebar.toggle.close", "Cerrar navegación"),
 
     home: t("sidebar.menu.home", "Inicio"),
     tickets: t("sidebar.menu.tickets", "Incidencias"),
@@ -514,7 +513,6 @@ function getMainMenuItems(labels) {
       icon: Icons.home,
       adminOnly: false,
     },
-
     {
       key: "tickets",
       route: SIDEBAR_ROUTES.tickets,
@@ -523,7 +521,6 @@ function getMainMenuItems(labels) {
       icon: Icons.tickets,
       adminOnly: false,
     },
-
     {
       key: "invoices",
       route: SIDEBAR_ROUTES.invoices,
@@ -532,7 +529,6 @@ function getMainMenuItems(labels) {
       icon: Icons.invoices,
       adminOnly: false,
     },
-
     {
       key: "users",
       route: SIDEBAR_ROUTES.users,
@@ -541,7 +537,6 @@ function getMainMenuItems(labels) {
       icon: Icons.users,
       adminOnly: true,
     },
-
     {
       key: "clients",
       route: SIDEBAR_ROUTES.clients,
@@ -550,7 +545,6 @@ function getMainMenuItems(labels) {
       icon: Icons.clients,
       adminOnly: true,
     },
-
     {
       key: "account",
       route: SIDEBAR_ROUTES.account,
@@ -559,7 +553,6 @@ function getMainMenuItems(labels) {
       icon: Icons.account,
       adminOnly: false,
     },
-
     {
       key: "settings",
       route: SIDEBAR_ROUTES.settings,
@@ -568,7 +561,6 @@ function getMainMenuItems(labels) {
       icon: Icons.settings,
       adminOnly: false,
     },
-
     {
       key: "server",
       route: SIDEBAR_ROUTES.server,
@@ -587,6 +579,7 @@ function getMainMenuItems(labels) {
 function renderAdminVisibilityAttrs(adminOnly = false) {
   if (!adminOnly) {
     return `
+          data-role=""
           data-required-role=""
           data-requires-role=""
           data-admin-only="false"
@@ -625,6 +618,7 @@ function renderMenuItem({
 } = {}) {
   const route = normalizeRoute(href);
   const routeKey = normalizeKey(key || label || route);
+
   const cleanRoute = escapeAttr(route);
   const cleanLabel = escapeAttr(label);
   const cleanI18nKey = escapeAttr(i18nKey);
@@ -633,6 +627,7 @@ function renderMenuItem({
   return `
         <a
           href="${cleanRoute}"
+          class="menu-item"
           data-spa="true"
           data-route="${cleanRoute}"
           data-href="${cleanRoute}"
@@ -652,7 +647,6 @@ function renderMenuItem({
           data-nav-action="navigate"
           data-active="false"
           data-current="false"
-          class="menu-item"
           data-tooltip="${cleanLabel}"
           ${i18nKey ? `data-i18n-data-tooltip="${cleanI18nKey}"` : ""}
           aria-label="${cleanLabel}"
@@ -670,7 +664,7 @@ ${icon}
           <span
             class="menu-item-label menu-label"
             ${i18nKey ? `data-i18n="${cleanI18nKey}"` : ""}
-          >${cleanLabel}</span>
+          >${escapeHtml(label)}</span>
         </a>`;
 }
 
@@ -690,10 +684,19 @@ function renderDropdownButton({
 } = {}) {
   const cleanId = safeText(id, "");
   const cleanLabel = escapeHtml(label);
+  const cleanLabelAttr = escapeAttr(label);
   const cleanI18nKey = escapeAttr(i18nKey);
-  const cleanAction = escapeAttr(action || "dropdown-action");
-  const normalizedRoute = route ? normalizeRoute(route) : "";
+  const cleanDropdownAction = escapeAttr(action || "dropdown-action");
+
+  const normalizedRoute = route
+    ? normalizeRoute(route)
+    : "";
+
   const cleanRoute = escapeAttr(normalizedRoute);
+
+  const primaryAction = normalizedRoute
+    ? "navigate"
+    : cleanDropdownAction;
 
   return `
           <button
@@ -701,14 +704,15 @@ function renderDropdownButton({
             type="button"
             class="dropdown-item${danger ? " dropdown-item-danger" : ""}"
             role="menuitem"
-            tabindex="-1"
-            data-sidebar-action="${cleanAction}"
-            data-action="${cleanAction}"
-            ${cleanRoute ? `data-route="${cleanRoute}" data-href="${cleanRoute}" data-to="${cleanRoute}" data-public-path="${cleanRoute}" data-canonical-path="${cleanRoute}"` : ""}
-            aria-label="${escapeAttr(label)}"
+            data-dropdown-item="true"
+            data-dropdown-action="${cleanDropdownAction}"
+            data-sidebar-action="${escapeAttr(primaryAction)}"
+            data-action="${escapeAttr(primaryAction)}"
+            ${cleanRoute ? `data-route="${cleanRoute}" data-href="${cleanRoute}" data-to="${cleanRoute}" data-public-path="${cleanRoute}" data-canonical-path="${cleanRoute}" data-sidebar-route="${cleanRoute}"` : ""}
+            aria-label="${cleanLabelAttr}"
             ${i18nKey ? `data-i18n-aria-label="${cleanI18nKey}"` : ""}
-            ${attrIf("disabled", disabled)}
             ${disabled ? `aria-disabled="true"` : ""}
+            ${booleanAttr("disabled", disabled)}
           >
             <span
               class="dropdown-item-icon"
@@ -732,6 +736,8 @@ function renderLogo(labels) {
   return `
         <a
           href="${SIDEBAR_ROUTES.home}"
+          class="logo"
+          id="${SIDEBAR_LOGO_ID}"
           data-spa="true"
           data-route="${SIDEBAR_ROUTES.home}"
           data-href="${SIDEBAR_ROUTES.home}"
@@ -741,8 +747,6 @@ function renderLogo(labels) {
           data-sidebar-logo="true"
           data-sidebar-action="navigate"
           data-action="navigate"
-          class="logo"
-          id="${SIDEBAR_LOGO_ID}"
           aria-label="${escapeAttr(labels.logoLink)}"
           data-i18n-aria-label="sidebar.logo.ariaLabel"
         >
@@ -769,8 +773,7 @@ function renderLogo(labels) {
             decoding="async"
             loading="eager"
           >
-        </a>
-  `;
+        </a>`;
 }
 
 function renderDesktopToggle(labels) {
@@ -791,30 +794,7 @@ function renderDesktopToggle(labels) {
           data-state="open"
         >
 ${Icons.desktopToggle}
-        </button>
-  `;
-}
-
-function renderMobileToggle(labels) {
-  return `
-        <button
-          type="button"
-          class="sidebar-mobile-toggle"
-          id="${SIDEBAR_MOBILE_TOGGLE_ID}"
-          data-sidebar-mobile-toggle="true"
-          data-sidebar-action="mobile-sidebar-toggle"
-          data-action="mobile-sidebar-toggle"
-          data-tooltip="${escapeAttr(labels.openSidebar)}"
-          data-i18n-data-tooltip="sidebar.toggle.open"
-          aria-label="${escapeAttr(labels.openSidebar)}"
-          data-i18n-aria-label="sidebar.toggle.open"
-          aria-controls="${SIDEBAR_ROOT_ID} ${SIDEBAR_MENU_ID}"
-          aria-expanded="false"
-          data-state="closed"
-        >
-${Icons.mobileToggle}
-        </button>
-  `;
+        </button>`;
 }
 
 function renderMainMenu(labels) {
@@ -832,6 +812,7 @@ function renderMainMenu(labels) {
         data-active-key=""
         data-indicator-ready="false"
         data-indicator-route=""
+        data-indicator-current=""
         data-indicator-reason="initial"
       >
 ${items.map((item) => renderMenuItem({
@@ -842,8 +823,7 @@ ${items.map((item) => renderMenuItem({
   icon: item.icon,
   adminOnly: item.adminOnly,
 })).join("\n")}
-      </nav>
-  `;
+      </nav>`;
 }
 
 function renderRecents(labels) {
@@ -860,8 +840,7 @@ function renderRecents(labels) {
           class="section-title"
           data-i18n="sidebar.recents.title"
         >${escapeHtml(labels.recentsTitle)}</span>
-      </section>
-  `;
+      </section>`;
 }
 
 function renderUserToggle(labels) {
@@ -880,6 +859,7 @@ function renderUserToggle(labels) {
           aria-label="${escapeAttr(labels.userToggle)}"
           data-i18n-aria-label="sidebar.user.toggleAriaLabel"
           data-state="closed"
+          data-dropdown-open="false"
         >
           <span
             class="avatar"
@@ -925,8 +905,7 @@ function renderUserToggle(labels) {
           </span>
 
 ${Icons.chevron}
-        </button>
-  `;
+        </button>`;
 }
 
 function renderUserDropdown(labels) {
@@ -945,6 +924,7 @@ function renderUserDropdown(labels) {
           data-dropdown="user"
           data-dropdown-menu="user"
           data-state="closed"
+          data-open="false"
           aria-hidden="true"
           hidden
         >
@@ -997,8 +977,7 @@ ${renderDropdownButton({
   icon: Icons.logout,
   danger: true,
 })}
-        </div>
-  `;
+        </div>`;
 }
 
 function renderFooter(labels) {
@@ -1006,12 +985,13 @@ function renderFooter(labels) {
       <div
         class="sidebar-footer"
         data-sidebar-footer="true"
+        data-state="closed"
+        data-user-dropdown-open="false"
       >
 ${renderUserToggle(labels)}
 
 ${renderUserDropdown(labels)}
-      </div>
-  `;
+      </div>`;
 }
 
 /* =========================================================
@@ -1035,6 +1015,7 @@ export function getSidebarTemplate() {
       data-collapsed="false"
       data-mode="desktop"
       data-viewport="desktop"
+      data-user-dropdown-open="false"
       data-dropdown-open="false"
       data-ready="false"
       aria-hidden="false"
@@ -1046,8 +1027,6 @@ export function getSidebarTemplate() {
 ${renderLogo(labels)}
 
 ${renderDesktopToggle(labels)}
-
-${renderMobileToggle(labels)}
       </div>
 
 ${renderMainMenu(labels)}
@@ -1055,8 +1034,7 @@ ${renderMainMenu(labels)}
 ${renderRecents(labels)}
 
 ${renderFooter(labels)}
-    </aside>
-  `;
+    </aside>`;
 }
 
 /* =========================================================
@@ -1066,12 +1044,15 @@ ${renderFooter(labels)}
 export function getSidebarTemplateSnapshot() {
   return {
     version: SIDEBAR_TEMPLATE_VERSION,
+
     routes: {
       ...SIDEBAR_ROUTES,
     },
+
     aliases: {
       ...SIDEBAR_ROUTE_ALIASES,
     },
+
     ids: {
       sidebarRootId: SIDEBAR_ROOT_ID,
       sidebarMenuId: SIDEBAR_MENU_ID,
@@ -1084,9 +1065,19 @@ export function getSidebarTemplateSnapshot() {
       logoId: SIDEBAR_LOGO_ID,
       desktopToggleId: SIDEBAR_TOGGLE_ID,
       mobileToggleId: SIDEBAR_MOBILE_TOGGLE_ID,
+      mobileToggleRenderedInsideSidebar: false,
       avatarImageId: SIDEBAR_AVATAR_IMAGE_ID,
       avatarFallbackId: SIDEBAR_AVATAR_FALLBACK_ID,
       userPlanId: SIDEBAR_USER_PLAN_ID,
+    },
+
+    contract: {
+      logoTooltip: false,
+      nativeTitle: false,
+      menuIndicatorReady: true,
+      dropdownInitialState: "closed",
+      adminItemsHiddenButRecoverable: true,
+      internalMobileToggleRendered: false,
     },
   };
 }

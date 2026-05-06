@@ -2,29 +2,46 @@
    Onion SPA - App Constants
    Archivo: src/app/constants.js
 
-   Responsabilidades:
+   ONION SUPPORT · APP CONSTANTS
+   EXTREME PRO SYSTEM · BOOT CONTRACT · ROUTER/AUTH SAFE
+   FINAL EXTREME 10/10
+
+   RESPONSABILIDADES:
    - centralizar constantes del bootstrap de la app
    - definir scope global de cleanup
-   - definir timeouts de failsafe del boot
+   - definir timeouts de boot / restore / render / loader
    - centralizar claves internas del runtime
    - centralizar eventos públicos internos
    - centralizar rutas técnicas públicas con token
-   - endurecer configuración global app
+   - centralizar IDs/selectores DOM críticos
+   - mantener contrato estable entre:
+     · src/main.js
+     · src/app/index.js
+     · src/app/router.js
+     · src/app/session.js
+     · src/app/helpers.js
+     · src/app/loader.js
+     · src/app/shell.js
+     · src/app/ui.js
+     · src/app/events.js
+     · src/app/errors.js
    - exponer helpers seguros y snapshots de diagnóstico
 
-   HARDENING PRO:
-   - Object.freeze profundo
-   - aliases públicos estables
-   - configuración sin mutaciones accidentales
+   REGLAS:
+   - sin dependencias externas
+   - sin DOM access
+   - sin localStorage/sessionStorage
+   - sin mutaciones accidentales
+   - Object.freeze profundo con protección de ciclos
+   - aliases estables para compatibilidad
    - tolerancia total a claves desconocidas
-   - escalable para futuros módulos
 ========================================================= */
 
 /* =========================================================
    FREEZE
 ========================================================= */
 
-function deepFreeze(value) {
+function deepFreeze(value, seen = new WeakSet()) {
   if (
     !value ||
     typeof value !== "object" ||
@@ -34,6 +51,12 @@ function deepFreeze(value) {
   }
 
   try {
+    if (seen.has(value)) {
+      return value;
+    }
+
+    seen.add(value);
+
     const keys =
       Object.getOwnPropertyNames(value);
 
@@ -46,7 +69,7 @@ function deepFreeze(value) {
         typeof child === "object" &&
         !Object.isFrozen(child)
       ) {
-        deepFreeze(child);
+        deepFreeze(child, seen);
       }
     }
 
@@ -76,6 +99,15 @@ function safeText(value, fallback = "") {
     String(value).trim();
 
   return text || fallback;
+}
+
+function safeNumber(value, fallback = 0) {
+  const number =
+    Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : fallback;
 }
 
 function hasOwn(object, key) {
@@ -109,6 +141,46 @@ function cloneObject(value) {
   };
 }
 
+function clonePublicTokenRoute(config = {}) {
+  return freeze({
+    ...config,
+
+    tokenParamNames:
+      cloneArray(config.tokenParamNames),
+
+    windowKeys:
+      cloneArray(config.windowKeys),
+
+    scrubbedStateKeys:
+      cloneArray(config.scrubbedStateKeys),
+
+    scrubbedHistoryKeys:
+      cloneArray(config.scrubbedHistoryKeys),
+  });
+}
+
+function findByKey(collection, key = "") {
+  const cleanKey =
+    safeText(key, "");
+
+  if (!cleanKey) {
+    return null;
+  }
+
+  return (
+    collection.find((item) =>
+      item?.key === cleanKey
+    ) || null
+  );
+}
+
+/* =========================================================
+   VERSION
+========================================================= */
+
+export const APP_CONSTANTS_VERSION =
+  "10.0.0";
+
 /* =========================================================
    CLEANUP / SCOPES
 ========================================================= */
@@ -121,15 +193,6 @@ export const APP_SCOPES =
     global:
       APP_SCOPE,
 
-    ui:
-      "app:ui",
-
-    events:
-      "app:events",
-
-    router:
-      "app:router",
-
     boot:
       "app:boot",
 
@@ -139,28 +202,62 @@ export const APP_SCOPES =
     shell:
       "app:shell",
 
+    router:
+      "app:router",
+
     session:
       "app:session",
 
+    auth:
+      "app:auth",
+
+    store:
+      "app:store",
+
+    ui:
+      "app:ui",
+
+    sidebar:
+      "app:ui:sidebar",
+
+    topbar:
+      "app:ui:topbar",
+
+    toast:
+      "app:ui:toast",
+
     i18n:
       "app:i18n",
+
+    events:
+      "app:events",
 
     errors:
       "app:errors",
 
     warmup:
       "app:warmup",
+
+    diagnostics:
+      "app:diagnostics",
   });
 
 /* =========================================================
    BOOT / TIMEOUTS
+
+   IMPORTANTE:
+   - src/app/loader.js ya impone mínimo interno de 8000ms.
+   - aquí dejamos 12000ms para evitar falsos positivos.
 ========================================================= */
 
 export const BOOT_FAILSAFE_LOADER_MS =
-  2500;
+  12000;
 
 export const BOOT_MIN_LOADER_VISIBLE_MS =
   500;
+
+export const BOOT_HIDE_TRANSITION_MS =
+  220;
 
 export const BOOT_RENDER_TIMEOUT_MS =
   10000;
@@ -171,6 +268,18 @@ export const BOOT_RESTORE_TIMEOUT_MS =
 export const BOOT_READY_EVENT_DELAY_MS =
   0;
 
+export const BOOT_MAIN_TIMEOUT_MS =
+  45000;
+
+export const BOOT_SESSION_READY_DEDUPE_MS =
+  160;
+
+export const BOOT_UI_REPAIR_THROTTLE_MS =
+  140;
+
+export const BOOT_UI_SYNC_THROTTLE_MS =
+  100;
+
 export const BOOT_CONSTANTS =
   freeze({
     failsafeLoaderMs:
@@ -178,6 +287,9 @@ export const BOOT_CONSTANTS =
 
     minLoaderVisibleMs:
       BOOT_MIN_LOADER_VISIBLE_MS,
+
+    hideTransitionMs:
+      BOOT_HIDE_TRANSITION_MS,
 
     legacyMinLoaderVisibleMs:
       250,
@@ -190,6 +302,18 @@ export const BOOT_CONSTANTS =
 
     readyEventDelayMs:
       BOOT_READY_EVENT_DELAY_MS,
+
+    mainTimeoutMs:
+      BOOT_MAIN_TIMEOUT_MS,
+
+    sessionReadyDedupeMs:
+      BOOT_SESSION_READY_DEDUPE_MS,
+
+    uiRepairThrottleMs:
+      BOOT_UI_REPAIR_THROTTLE_MS,
+
+    uiSyncThrottleMs:
+      BOOT_UI_SYNC_THROTTLE_MS,
 
     maxBootRetries:
       1,
@@ -219,11 +343,26 @@ export const BOOT_PHASES =
     booting:
       "booting",
 
+    services:
+      "services",
+
+    store:
+      "store",
+
+    i18n:
+      "i18n",
+
+    ui:
+      "ui",
+
     restoring:
       "restoring",
 
     rendering:
       "rendering",
+
+    binding:
+      "binding",
 
     finalizing:
       "finalizing",
@@ -233,6 +372,9 @@ export const BOOT_PHASES =
 
     error:
       "error",
+
+    fatal:
+      "fatal",
 
     rebooting:
       "rebooting",
@@ -248,6 +390,9 @@ export const BOOT_FLAGS =
 
     ready:
       "ready",
+
+    appReady:
+      "appReady",
 
     loading:
       "loading",
@@ -270,6 +415,9 @@ export const BOOT_FLAGS =
     uiMounted:
       "uiMounted",
 
+    uiInitialized:
+      "uiInitialized",
+
     readyEmitted:
       "readyEmitted",
 
@@ -285,8 +433,20 @@ export const BOOT_FLAGS =
     bootNavigationHandled:
       "bootNavigationHandled",
 
+    loginNavigationHandled:
+      "loginNavigationHandled",
+
+    loginInProgress:
+      "loginInProgress",
+
     initialRouteRendered:
       "initialRouteRendered",
+
+    postRestoreNavigationSkipped:
+      "postRestoreNavigationSkipped",
+
+    sessionRestorePromise:
+      "sessionRestorePromise",
   });
 
 /* =========================================================
@@ -304,8 +464,14 @@ export const APP_RUNTIME_KEYS =
     resetConfirmInitialUrl:
       "__ONION_RESET_CONFIRM_INITIAL_URL__",
 
+    resetPasswordConfirmInitialUrl:
+      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+
     bootContext:
       "__ONION_BOOT_CONTEXT__",
+
+    bootTheme:
+      "__ONION_BOOT_THEME__",
 
     appApi:
       "__ONION_APP__",
@@ -313,11 +479,23 @@ export const APP_RUNTIME_KEYS =
     routerApi:
       "__ONION_ROUTER__",
 
+    coreApi:
+      "__ONION_CORE__",
+
     debug:
       "__ONION_DEBUG__",
 
     loader:
       "__ONION_LOADER__",
+
+    setTheme:
+      "__ONION_SET_THEME__",
+
+    getTheme:
+      "__ONION_GET_THEME__",
+
+    clearTheme:
+      "__ONION_CLEAR_THEME__",
   });
 
 export const APP_STATE_KEYS =
@@ -325,17 +503,29 @@ export const APP_STATE_KEYS =
     bootInitialUrl:
       "bootInitialUrl",
 
+    bootInitialPath:
+      "bootInitialPath",
+
+    bootCanonicalPath:
+      "bootCanonicalPath",
+
     bootProtectedInitialUrl:
       "bootProtectedInitialUrl",
 
     bootProtectedInitialPath:
       "bootProtectedInitialPath",
 
+    bootProtectedInitialPublicPath:
+      "bootProtectedInitialPublicPath",
+
     bootIsPublicTokenRoute:
       "bootIsPublicTokenRoute",
 
     bootHasPublicToken:
       "bootHasPublicToken",
+
+    bootHasProtectedToken:
+      "bootHasProtectedToken",
 
     bootProtectedRouteKey:
       "bootProtectedRouteKey",
@@ -345,6 +535,9 @@ export const APP_STATE_KEYS =
 
     bootActivationInitialPath:
       "bootActivationInitialPath",
+
+    bootActivationInitialPublicPath:
+      "bootActivationInitialPublicPath",
 
     bootIsActivation:
       "bootIsActivation",
@@ -358,11 +551,35 @@ export const APP_STATE_KEYS =
     bootResetConfirmInitialPath:
       "bootResetConfirmInitialPath",
 
+    bootResetConfirmInitialPublicPath:
+      "bootResetConfirmInitialPublicPath",
+
     bootIsResetConfirm:
       "bootIsResetConfirm",
 
     bootHasResetToken:
       "bootHasResetToken",
+
+    route:
+      "route",
+
+    publicPath:
+      "publicPath",
+
+    authenticated:
+      "authenticated",
+
+    user:
+      "user",
+
+    role:
+      "role",
+
+    lang:
+      "lang",
+
+    theme:
+      "theme",
   });
 
 /* =========================================================
@@ -377,6 +594,9 @@ export const APP_ROUTES =
     login:
       "/login",
 
+    signin:
+      "/signin",
+
     forbidden:
       "/403",
 
@@ -386,8 +606,20 @@ export const APP_ROUTES =
     activateAccount:
       "/activate-account",
 
+    resetPassword:
+      "/reset-password",
+
     resetPasswordConfirm:
       "/reset-password/confirm",
+
+    forgotPassword:
+      "/forgot-password",
+
+    recoverPassword:
+      "/recover-password",
+
+    passwordReset:
+      "/password-reset",
   });
 
 export const ACTIVATION_PATH =
@@ -395,6 +627,44 @@ export const ACTIVATION_PATH =
 
 export const RESET_CONFIRM_PATH =
   APP_ROUTES.resetPasswordConfirm;
+
+export const LOGIN_PATH =
+  APP_ROUTES.login;
+
+export const DEFAULT_ROUTE =
+  APP_ROUTES.home;
+
+export const AUTH_LIKE_ROUTES =
+  freeze([
+    APP_ROUTES.login,
+    APP_ROUTES.signin,
+    APP_ROUTES.resetPassword,
+    APP_ROUTES.resetPasswordConfirm,
+    APP_ROUTES.forgotPassword,
+    APP_ROUTES.recoverPassword,
+    APP_ROUTES.passwordReset,
+    APP_ROUTES.activateAccount,
+  ]);
+
+export const PUBLIC_TECHNICAL_ROUTES =
+  freeze([
+    APP_ROUTES.activateAccount,
+    APP_ROUTES.resetPassword,
+    APP_ROUTES.resetPasswordConfirm,
+    APP_ROUTES.forgotPassword,
+    APP_ROUTES.recoverPassword,
+    APP_ROUTES.passwordReset,
+  ]);
+
+export const PUBLIC_TECHNICAL_PREFIXES =
+  freeze([
+    `${APP_ROUTES.activateAccount}/`,
+    `${APP_ROUTES.resetPasswordConfirm}/`,
+  ]);
+
+/* =========================================================
+   TOKEN ROUTES
+========================================================= */
 
 export const ACTIVATION_TOKEN_PARAM_NAMES =
   freeze([
@@ -410,8 +680,32 @@ export const RESET_TOKEN_PARAM_NAMES =
     "token",
     "resetToken",
     "passwordResetToken",
+    "confirmToken",
     "code",
     "t",
+  ]);
+
+export const GENERIC_SENSITIVE_PARAM_NAMES =
+  freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
+    "code",
+    "t",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
   ]);
 
 export const PUBLIC_TOKEN_ROUTE_KEYS =
@@ -435,6 +729,11 @@ export const PROTECTED_PUBLIC_TOKEN_ROUTES =
       windowKey:
         APP_RUNTIME_KEYS.activateAccountInitialUrl,
 
+      windowKeys:
+        freeze([
+          APP_RUNTIME_KEYS.activateAccountInitialUrl,
+        ]),
+
       statePrefix:
         "Activation",
 
@@ -444,11 +743,30 @@ export const PROTECTED_PUBLIC_TOKEN_ROUTES =
       statePathKey:
         APP_STATE_KEYS.bootActivationInitialPath,
 
+      statePublicPathKey:
+        APP_STATE_KEYS.bootActivationInitialPublicPath,
+
       stateIsRouteKey:
         APP_STATE_KEYS.bootIsActivation,
 
       stateHasTokenKey:
         APP_STATE_KEYS.bootHasActivationToken,
+
+      scrubbedStateKeys:
+        freeze([
+          "scrubbedActivationToken",
+          "activationTokenScrubbed",
+          "scrubbedActivateAccountToken",
+        ]),
+
+      scrubbedHistoryKeys:
+        freeze([
+          "scrubbedActivationToken",
+          "activationTokenScrubbed",
+          "scrubbedActivateAccountToken",
+          "scrubbedPublicTokenRoute",
+          "scrubbedTokenRoute",
+        ]),
 
       tokenParamNames:
         ACTIVATION_TOKEN_PARAM_NAMES,
@@ -464,6 +782,12 @@ export const PROTECTED_PUBLIC_TOKEN_ROUTES =
       windowKey:
         APP_RUNTIME_KEYS.resetConfirmInitialUrl,
 
+      windowKeys:
+        freeze([
+          APP_RUNTIME_KEYS.resetConfirmInitialUrl,
+          APP_RUNTIME_KEYS.resetPasswordConfirmInitialUrl,
+        ]),
+
       statePrefix:
         "ResetConfirm",
 
@@ -473,11 +797,32 @@ export const PROTECTED_PUBLIC_TOKEN_ROUTES =
       statePathKey:
         APP_STATE_KEYS.bootResetConfirmInitialPath,
 
+      statePublicPathKey:
+        APP_STATE_KEYS.bootResetConfirmInitialPublicPath,
+
       stateIsRouteKey:
         APP_STATE_KEYS.bootIsResetConfirm,
 
       stateHasTokenKey:
         APP_STATE_KEYS.bootHasResetToken,
+
+      scrubbedStateKeys:
+        freeze([
+          "scrubbedResetToken",
+          "resetTokenScrubbed",
+          "scrubbedResetConfirmToken",
+          "scrubbedPasswordResetToken",
+        ]),
+
+      scrubbedHistoryKeys:
+        freeze([
+          "scrubbedResetToken",
+          "resetTokenScrubbed",
+          "scrubbedResetConfirmToken",
+          "scrubbedPasswordResetToken",
+          "scrubbedPublicTokenRoute",
+          "scrubbedTokenRoute",
+        ]),
 
       tokenParamNames:
         RESET_TOKEN_PARAM_NAMES,
@@ -501,6 +846,18 @@ export const APP_EVENTS =
 
     uiRepairRequest:
       "app:ui:repair-request",
+
+    userUiSync:
+      "app:user-ui:sync",
+
+    userUiSyncStart:
+      "app:user-ui:sync:start",
+
+    userUiSyncDone:
+      "app:user-ui:sync:done",
+
+    userUiSyncError:
+      "app:user-ui:sync:error",
 
     bootState:
       "app:boot:state",
@@ -529,17 +886,44 @@ export const APP_EVENTS =
     routeChange:
       "app:route:change",
 
+    routeSynced:
+      "app:events:route-synced",
+
     userChange:
       "app:user:change",
 
     langChange:
       "app:lang:change",
 
+    themeChange:
+      "app:theme:change",
+
     sessionRestored:
       "app:session:restored",
 
+    sessionCleared:
+      "app:session:cleared",
+
     sessionRestoreError:
       "app:session:restore:error",
+
+    authNavigation:
+      "app:auth:navigation",
+
+    shellState:
+      "app:shell:state",
+
+    shellReady:
+      "app:shell:ready",
+
+    shellBusy:
+      "app:shell:busy",
+
+    error:
+      "app:error",
+
+    errorTelemetry:
+      "app:error:telemetry",
   });
 
 export const ROUTER_EVENTS =
@@ -556,11 +940,23 @@ export const ROUTER_EVENTS =
     shellState:
       "router:shell:state",
 
+    shellChange:
+      "router:shell:change",
+
     navigationHandled:
       "router:navigation:handled",
 
     navigationError:
       "router:navigation:error",
+
+    routeChange:
+      "router:route:change",
+
+    notFound:
+      "router:not-found",
+
+    forbidden:
+      "router:forbidden",
   });
 
 export const AUTH_EVENTS =
@@ -574,8 +970,20 @@ export const AUTH_EVENTS =
     logout:
       "auth:logout",
 
+    logoutSuccess:
+      "auth:logout:success",
+
     userChange:
       "auth:user:change",
+
+    tokenRefreshed:
+      "auth:token:refreshed",
+
+    sessionCleared:
+      "auth:session:cleared",
+
+    restoreError:
+      "auth:restore:error",
   });
 
 export const STORE_EVENTS =
@@ -588,6 +996,12 @@ export const STORE_EVENTS =
 
     bootError:
       "store:boot:error",
+
+    change:
+      "store:change",
+
+    ready:
+      "store:ready",
   });
 
 export const DOM_EVENTS =
@@ -612,6 +1026,15 @@ export const DOM_EVENTS =
 
     visibilityChange:
       "visibilitychange",
+
+    storage:
+      "storage",
+
+    online:
+      "online",
+
+    offline:
+      "offline",
   });
 
 /* =========================================================
@@ -626,11 +1049,17 @@ export const UI_CONSTANTS =
     fallbackTheme:
       "dark",
 
+    defaultThemeMode:
+      "system",
+
     fallbackLang:
       "es",
 
     defaultLang:
       "es",
+
+    defaultDensity:
+      "default",
 
     defaultRoute:
       APP_ROUTES.home,
@@ -653,8 +1082,32 @@ export const UI_CONSTANTS =
     loadingClass:
       "app-loading",
 
+    fatalClass:
+      "app-fatal",
+
     errorClass:
       "app-error",
+
+    authScreenClass:
+      "auth-screen",
+
+    routeAuthClass:
+      "route-auth",
+
+    routeAppClass:
+      "route-app",
+
+    chromeHiddenClass:
+      "route-chrome-hidden",
+
+    chromeVisibleClass:
+      "route-chrome-visible",
+
+    shellHiddenRouteClass:
+      "route-shell-hidden",
+
+    shellVisibleRouteClass:
+      "route-shell-visible",
   });
 
 /* =========================================================
@@ -672,6 +1125,12 @@ export const APP_DOM_IDS =
     shell:
       "app-shell",
 
+    mainContent:
+      "main-content",
+
+    appContent:
+      "app-content",
+
     loader:
       "app-loader",
 
@@ -681,8 +1140,20 @@ export const APP_DOM_IDS =
     sidebar:
       "app-sidebar",
 
+    sidebarMount:
+      "sidebar-mount",
+
     topbar:
       "app-topbar",
+
+    topbarMount:
+      "topbar-mount",
+
+    tablehead:
+      "table-head",
+
+    tableheadContainer:
+      "tablehead-container",
   });
 
 export const APP_SELECTORS =
@@ -696,6 +1167,12 @@ export const APP_SELECTORS =
     shell:
       "#app-shell",
 
+    mainContent:
+      "#main-content",
+
+    appContent:
+      "#app-content",
+
     loader:
       "#app-loader",
 
@@ -705,8 +1182,35 @@ export const APP_SELECTORS =
     sidebar:
       "#app-sidebar",
 
+    sidebarMount:
+      "#sidebar-mount",
+
     topbar:
       "#app-topbar",
+
+    topbarMount:
+      "#topbar-mount",
+
+    tablehead:
+      "#table-head",
+
+    tableheadContainer:
+      "#tablehead-container",
+
+    appShell:
+      "[data-app-shell='true']",
+
+    main:
+      "[data-main-content='true']",
+
+    viewRoot:
+      "[data-view-root='true']",
+
+    routerView:
+      "[data-router-view='true']",
+
+    appLoader:
+      "[data-app-loader='true']",
 
     spaLink:
       "[data-spa]",
@@ -747,10 +1251,20 @@ export const APP_MODULES =
 
     i18n:
       "I18n",
+
+    loader:
+      "Loader",
+
+    shell:
+      "Shell",
   });
 
 /* =========================================================
-   REPAIR / LIFECYCLE
+   UI LIFECYCLE / REPAIR
+
+   Importante:
+   - UI_LIGHT_* no debe incluir repair/rebind/bindEvents.
+   - UI_REBIND_METHODS queda separado y solo para petición explícita.
 ========================================================= */
 
 export const UI_REPAIR_REASONS =
@@ -787,20 +1301,64 @@ export const UI_REPAIR_REASONS =
 
     bootAlreadyBooted:
       "boot-already-booted",
+
+    routeChange:
+      "app:route:change",
+
+    routerRendered:
+      "router:rendered",
+
+    langChange:
+      "app:lang:change",
+
+    themeChange:
+      "app:theme:change",
   });
 
-export const UI_REPAIR_METHODS =
+export const UI_LIGHT_USER_METHODS =
+  freeze([
+    "renderUser",
+    "refreshUser",
+    "updateUser",
+    "syncUser",
+  ]);
+
+export const UI_LIGHT_VISUAL_METHODS =
+  freeze([
+    "applyRoleVisibility",
+    "syncRouteAndIndicator",
+    "syncIndicator",
+    "updateToggleLabel",
+    "syncRoute",
+    "updateRoute",
+  ]);
+
+export const UI_LIGHT_FALLBACK_METHODS =
+  freeze([
+    "refresh",
+    "sync",
+  ]);
+
+export const UI_HARD_REPAIR_METHODS =
   freeze([
     "repair",
     "refresh",
     "sync",
-    "syncUser",
-    "refreshUser",
-    "updateUser",
-    "render",
+  ]);
+
+export const UI_REBIND_METHODS =
+  freeze([
     "rebind",
+    "rebindEvents",
     "bindEvents",
     "bind",
+  ]);
+
+export const UI_REPAIR_METHODS =
+  freeze([
+    ...UI_LIGHT_USER_METHODS,
+    ...UI_LIGHT_VISUAL_METHODS,
+    ...UI_LIGHT_FALLBACK_METHODS,
   ]);
 
 export const UI_AFTER_PAINT_REPAIR_METHODS =
@@ -809,8 +1367,8 @@ export const UI_AFTER_PAINT_REPAIR_METHODS =
     "syncUser",
     "refreshUser",
     "updateUser",
-    "rebind",
-    "bindEvents",
+    "syncRouteAndIndicator",
+    "syncIndicator",
   ]);
 
 /* =========================================================
@@ -833,6 +1391,9 @@ export const APP_LOG_LEVELS =
 
     error:
       "error",
+
+    fatal:
+      "fatal",
   });
 
 /* =========================================================
@@ -871,12 +1432,20 @@ export function getBootMinLoaderVisibleMs() {
   return BOOT_CONSTANTS.minLoaderVisibleMs;
 }
 
+export function getBootHideTransitionMs() {
+  return BOOT_CONSTANTS.hideTransitionMs;
+}
+
 export function getBootRenderTimeoutMs() {
   return BOOT_CONSTANTS.renderTimeoutMs;
 }
 
 export function getBootRestoreTimeoutMs() {
   return BOOT_CONSTANTS.restoreTimeoutMs;
+}
+
+export function getBootMainTimeoutMs() {
+  return BOOT_CONSTANTS.mainTimeoutMs;
 }
 
 export function getBootConstant(key = "", fallback = null) {
@@ -911,11 +1480,27 @@ export function getBootPhase(key = "", fallback = BOOT_PHASES.idle) {
   return fallback;
 }
 
+export function getBootFlag(key = "", fallback = "") {
+  const cleanKey =
+    safeText(key, "");
+
+  if (
+    hasOwn(
+      BOOT_FLAGS,
+      cleanKey
+    )
+  ) {
+    return BOOT_FLAGS[cleanKey];
+  }
+
+  return fallback;
+}
+
 /* =========================================================
    HELPERS - EVENTS
 ========================================================= */
 
-export function getAppEvent(key = "") {
+export function getAppEvent(key = "", fallback = "") {
   const cleanKey =
     safeText(key, "");
 
@@ -928,10 +1513,10 @@ export function getAppEvent(key = "") {
     return APP_EVENTS[cleanKey];
   }
 
-  return "";
+  return fallback;
 }
 
-export function getRouterEvent(key = "") {
+export function getRouterEvent(key = "", fallback = "") {
   const cleanKey =
     safeText(key, "");
 
@@ -944,10 +1529,10 @@ export function getRouterEvent(key = "") {
     return ROUTER_EVENTS[cleanKey];
   }
 
-  return "";
+  return fallback;
 }
 
-export function getAuthEvent(key = "") {
+export function getAuthEvent(key = "", fallback = "") {
   const cleanKey =
     safeText(key, "");
 
@@ -960,10 +1545,10 @@ export function getAuthEvent(key = "") {
     return AUTH_EVENTS[cleanKey];
   }
 
-  return "";
+  return fallback;
 }
 
-export function getStoreEvent(key = "") {
+export function getStoreEvent(key = "", fallback = "") {
   const cleanKey =
     safeText(key, "");
 
@@ -976,10 +1561,10 @@ export function getStoreEvent(key = "") {
     return STORE_EVENTS[cleanKey];
   }
 
-  return "";
+  return fallback;
 }
 
-export function getDomEvent(key = "") {
+export function getDomEvent(key = "", fallback = "") {
   const cleanKey =
     safeText(key, "");
 
@@ -992,7 +1577,7 @@ export function getDomEvent(key = "") {
     return DOM_EVENTS[cleanKey];
   }
 
-  return "";
+  return fallback;
 }
 
 /* =========================================================
@@ -1048,7 +1633,7 @@ export function getSelector(key = "", fallback = "") {
 }
 
 /* =========================================================
-   HELPERS - RUNTIME KEYS
+   HELPERS - RUNTIME / STATE KEYS
 ========================================================= */
 
 export function getRuntimeKey(key = "", fallback = "") {
@@ -1104,23 +1689,48 @@ export function getAppRoute(key = "", fallback = "/") {
 }
 
 export function getPublicTokenRouteConfig(key = "") {
-  const cleanKey =
-    safeText(key, "");
+  const config =
+    findByKey(
+      PROTECTED_PUBLIC_TOKEN_ROUTES,
+      key
+    );
 
-  return (
-    PROTECTED_PUBLIC_TOKEN_ROUTES.find((config) =>
-      config.key === cleanKey
-    ) || null
+  return config
+    ? clonePublicTokenRoute(config)
+    : null;
+}
+
+export function getPublicTokenRouteConfigRaw(key = "") {
+  return findByKey(
+    PROTECTED_PUBLIC_TOKEN_ROUTES,
+    key
   );
+}
+
+export function getPublicTokenRouteConfigByPath(path = "") {
+  const cleanPath =
+    safeText(path, "");
+
+  if (!cleanPath) {
+    return null;
+  }
+
+  const config =
+    PROTECTED_PUBLIC_TOKEN_ROUTES.find((item) => {
+      return (
+        cleanPath === item.path ||
+        cleanPath.startsWith(`${item.path}/`)
+      );
+    }) || null;
+
+  return config
+    ? clonePublicTokenRoute(config)
+    : null;
 }
 
 export function getPublicTokenRouteConfigs() {
   return PROTECTED_PUBLIC_TOKEN_ROUTES.map((config) =>
-    freeze({
-      ...config,
-      tokenParamNames:
-        cloneArray(config.tokenParamNames),
-    })
+    clonePublicTokenRoute(config)
   );
 }
 
@@ -1136,12 +1746,38 @@ export function getPublicTokenRouteKeys() {
   );
 }
 
+export function getPublicTechnicalRoutes() {
+  return cloneArray(PUBLIC_TECHNICAL_ROUTES);
+}
+
+export function getPublicTechnicalPrefixes() {
+  return cloneArray(PUBLIC_TECHNICAL_PREFIXES);
+}
+
 export function isKnownPublicTokenRouteKey(key = "") {
   const cleanKey =
     safeText(key, "");
 
   return PROTECTED_PUBLIC_TOKEN_ROUTES.some((config) =>
     config.key === cleanKey
+  );
+}
+
+export function isPublicTechnicalRoute(path = "") {
+  const cleanPath =
+    safeText(path, "/")
+      .split("?")[0]
+      .split("#")[0]
+      .replace(/\/+$/g, "") || "/";
+
+  if (
+    PUBLIC_TECHNICAL_ROUTES.includes(cleanPath)
+  ) {
+    return true;
+  }
+
+  return PUBLIC_TECHNICAL_PREFIXES.some((prefix) =>
+    cleanPath.startsWith(prefix)
   );
 }
 
@@ -1185,8 +1821,97 @@ export function getUiRepairMethods() {
   return cloneArray(UI_REPAIR_METHODS);
 }
 
+export function getUiLightUserMethods() {
+  return cloneArray(UI_LIGHT_USER_METHODS);
+}
+
+export function getUiLightVisualMethods() {
+  return cloneArray(UI_LIGHT_VISUAL_METHODS);
+}
+
+export function getUiLightFallbackMethods() {
+  return cloneArray(UI_LIGHT_FALLBACK_METHODS);
+}
+
+export function getUiHardRepairMethods() {
+  return cloneArray(UI_HARD_REPAIR_METHODS);
+}
+
+export function getUiRebindMethods() {
+  return cloneArray(UI_REBIND_METHODS);
+}
+
 export function getUiAfterPaintRepairMethods() {
   return cloneArray(UI_AFTER_PAINT_REPAIR_METHODS);
+}
+
+/* =========================================================
+   HELPERS - SAFE VALUES
+========================================================= */
+
+export function clampBootTimeoutMs(value, fallback = BOOT_MAIN_TIMEOUT_MS) {
+  const ms =
+    safeNumber(value, fallback);
+
+  if (ms <= 0) {
+    return fallback;
+  }
+
+  return Math.max(
+    1000,
+    Math.min(
+      ms,
+      120000
+    )
+  );
+}
+
+export function redactSensitiveText(value = "") {
+  let output =
+    safeText(value, "");
+
+  if (!output) {
+    return "";
+  }
+
+  for (const name of GENERIC_SENSITIVE_PARAM_NAMES) {
+    try {
+      const escapedName =
+        String(name).replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&"
+        );
+
+      output =
+        output.replace(
+          new RegExp(`([?&#]${escapedName}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
+    } catch {}
+  }
+
+  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+    try {
+      const escapedPath =
+        config.path.replace(/\//g, "\\/");
+
+      output =
+        output.replace(
+          new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
+          "$1/***"
+        );
+    } catch {}
+  }
+
+  try {
+    output =
+      output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
+  } catch {}
+
+  return output;
 }
 
 /* =========================================================
@@ -1195,6 +1920,9 @@ export function getUiAfterPaintRepairMethods() {
 
 export function getAppConstantsSnapshot() {
   return freeze({
+    version:
+      APP_CONSTANTS_VERSION,
+
     scope:
       APP_SCOPE,
 
@@ -1208,11 +1936,20 @@ export function getAppConstantsSnapshot() {
       minLoaderVisibleMs:
         BOOT_MIN_LOADER_VISIBLE_MS,
 
+      hideTransitionMs:
+        BOOT_HIDE_TRANSITION_MS,
+
       renderTimeoutMs:
         BOOT_RENDER_TIMEOUT_MS,
 
       restoreTimeoutMs:
         BOOT_RESTORE_TIMEOUT_MS,
+
+      readyEventDelayMs:
+        BOOT_READY_EVENT_DELAY_MS,
+
+      mainTimeoutMs:
+        BOOT_MAIN_TIMEOUT_MS,
 
       constants:
         BOOT_CONSTANTS,
@@ -1230,11 +1967,25 @@ export function getAppConstantsSnapshot() {
     stateKeys:
       APP_STATE_KEYS,
 
-    routes:
-      APP_ROUTES,
+    routes: {
+      app:
+        APP_ROUTES,
+
+      authLike:
+        AUTH_LIKE_ROUTES,
+
+      publicTechnical:
+        PUBLIC_TECHNICAL_ROUTES,
+
+      publicTechnicalPrefixes:
+        PUBLIC_TECHNICAL_PREFIXES,
+    },
 
     publicTokenRoutes:
       PROTECTED_PUBLIC_TOKEN_ROUTES,
+
+    sensitiveParams:
+      GENERIC_SENSITIVE_PARAM_NAMES,
 
     events: {
       app:
@@ -1274,6 +2025,21 @@ export function getAppConstantsSnapshot() {
       methods:
         UI_REPAIR_METHODS,
 
+      lightUserMethods:
+        UI_LIGHT_USER_METHODS,
+
+      lightVisualMethods:
+        UI_LIGHT_VISUAL_METHODS,
+
+      lightFallbackMethods:
+        UI_LIGHT_FALLBACK_METHODS,
+
+      hardRepairMethods:
+        UI_HARD_REPAIR_METHODS,
+
+      rebindMethods:
+        UI_REBIND_METHODS,
+
       afterPaintMethods:
         UI_AFTER_PAINT_REPAIR_METHODS,
     },
@@ -1293,14 +2059,21 @@ export function getAppConstantsSnapshot() {
 ========================================================= */
 
 export default freeze({
+  APP_CONSTANTS_VERSION,
+
   APP_SCOPE,
   APP_SCOPES,
 
   BOOT_FAILSAFE_LOADER_MS,
   BOOT_MIN_LOADER_VISIBLE_MS,
+  BOOT_HIDE_TRANSITION_MS,
   BOOT_RENDER_TIMEOUT_MS,
   BOOT_RESTORE_TIMEOUT_MS,
   BOOT_READY_EVENT_DELAY_MS,
+  BOOT_MAIN_TIMEOUT_MS,
+  BOOT_SESSION_READY_DEDUPE_MS,
+  BOOT_UI_REPAIR_THROTTLE_MS,
+  BOOT_UI_SYNC_THROTTLE_MS,
   BOOT_CONSTANTS,
   BOOT_PHASES,
   BOOT_FLAGS,
@@ -1311,8 +2084,15 @@ export default freeze({
   APP_ROUTES,
   ACTIVATION_PATH,
   RESET_CONFIRM_PATH,
+  LOGIN_PATH,
+  DEFAULT_ROUTE,
+  AUTH_LIKE_ROUTES,
+  PUBLIC_TECHNICAL_ROUTES,
+  PUBLIC_TECHNICAL_PREFIXES,
+
   ACTIVATION_TOKEN_PARAM_NAMES,
   RESET_TOKEN_PARAM_NAMES,
+  GENERIC_SENSITIVE_PARAM_NAMES,
   PUBLIC_TOKEN_ROUTE_KEYS,
   PROTECTED_PUBLIC_TOKEN_ROUTES,
 
@@ -1330,6 +2110,11 @@ export default freeze({
 
   UI_REPAIR_REASONS,
   UI_REPAIR_METHODS,
+  UI_LIGHT_USER_METHODS,
+  UI_LIGHT_VISUAL_METHODS,
+  UI_LIGHT_FALLBACK_METHODS,
+  UI_HARD_REPAIR_METHODS,
+  UI_REBIND_METHODS,
   UI_AFTER_PAINT_REPAIR_METHODS,
 
   APP_LOG_PREFIX,
@@ -1340,10 +2125,13 @@ export default freeze({
 
   getBootFailsafeMs,
   getBootMinLoaderVisibleMs,
+  getBootHideTransitionMs,
   getBootRenderTimeoutMs,
   getBootRestoreTimeoutMs,
+  getBootMainTimeoutMs,
   getBootConstant,
   getBootPhase,
+  getBootFlag,
 
   getAppEvent,
   getRouterEvent,
@@ -1360,15 +2148,28 @@ export default freeze({
 
   getAppRoute,
   getPublicTokenRouteConfig,
+  getPublicTokenRouteConfigRaw,
+  getPublicTokenRouteConfigByPath,
   getPublicTokenRouteConfigs,
   getPublicTokenRoutePaths,
   getPublicTokenRouteKeys,
+  getPublicTechnicalRoutes,
+  getPublicTechnicalPrefixes,
   isKnownPublicTokenRouteKey,
+  isPublicTechnicalRoute,
 
   getAppModuleName,
   getUiRepairReason,
   getUiRepairMethods,
+  getUiLightUserMethods,
+  getUiLightVisualMethods,
+  getUiLightFallbackMethods,
+  getUiHardRepairMethods,
+  getUiRebindMethods,
   getUiAfterPaintRepairMethods,
+
+  clampBootTimeoutMs,
+  redactSensitiveText,
 
   getAppConstantsSnapshot,
 });

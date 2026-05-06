@@ -1,32 +1,37 @@
 /* =========================================================
-   Onion SPA - Server Template (FINAL PRO OBSERVABILITY GOD MODE)
+   Onion SPA - Server Template
    Archivo: src/views/server/server.template.js
 
-   EXTREME MODE · SERVER SNAPSHOT FIRST · 10/10
+   FINAL PRO SYSTEM · SERVER VIEW TEMPLATE · CSP CLEAN · 12/10
+   NO INLINE CSS · NO STYLE TAGS · TOKEN PRO SYSTEM READY
 
-   Responsabilidades:
-   - renderizar header premium de la vista server
+   RESPONSABILIDADES:
+   - renderizar header premium de la vista Server
    - renderizar estados loading / error / empty
    - renderizar panel premium de servicios / telemetry
    - mostrar loader SOLO en la sección principal
    - mostrar estado visual al abrir detalle lento
    - mantener compatibilidad directa con serverView.js
    - consumir datos reales de /api/dashboard + /health/internal
-   - compartir lenguaje visual y densidad con Facturas / Incidencias
+   - compartir lenguaje visual con Facturas / Incidencias / Usuarios / Clientes
+   - emitir SOLO clases/atributos para que el CSS viva en:
+     /src/css/views/server/index.css
 
    HARDENING PRO:
    - tolerancia a payloads heterogéneos
    - soporte para snapshot normalizado
    - lectura preferente del shape normalizado server
-   - mismo lenguaje visual premium
-   - hero / skeleton / responsive / technical sidebar consistentes
+   - paginación defensiva
+   - cards técnicas consistentes
+   - sin CSS inline
+   - sin estilos inyectados
+   - sin duplicidades visuales
 ========================================================= */
 
 import { serverState } from "./server.state.js";
 
 import {
   getServerSnapshotStore,
-  getSortedServerServicesStore,
 } from "./server.store.js";
 
 import {
@@ -41,29 +46,34 @@ import {
 
 import {
   escapeHtml,
-  formatDate,
   formatRelativeDate,
-  truncate,
   formatMs,
   formatGB,
   formatMB,
-  formatNumber,
+  truncate,
 } from "./server.utils.js";
 
 /* =========================================================
-   SAFE
+   CONSTANTS
 ========================================================= */
 
 const PAGE_SIZE = 6;
 
+/* =========================================================
+   SAFE HELPERS
+========================================================= */
+
 function safeText(value, fallback = "—") {
   if (value === null || value === undefined) return fallback;
+
   const text = String(value).trim();
+
   return text || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
   const n = Number(value);
+
   return Number.isFinite(n) ? n : fallback;
 }
 
@@ -79,16 +89,24 @@ function safeObject(value) {
 
 function first(...values) {
   for (const value of values) {
-    if (
-      value !== undefined &&
-      value !== null &&
-      String(value).trim() !== ""
-    ) {
-      return value;
-    }
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+
+    return value;
   }
 
   return null;
+}
+
+function normalizeKey(value = "") {
+  return safeText(value, "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^\w:.]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 /* =========================================================
@@ -110,9 +128,7 @@ function looksLikeServerSnapshot(value) {
 }
 
 function unwrapServerSnapshot(value) {
-  if (!value) {
-    return {};
-  }
+  if (!value) return {};
 
   if (looksLikeServerSnapshot(value)) {
     return value;
@@ -120,33 +136,42 @@ function unwrapServerSnapshot(value) {
 
   const obj = safeObject(value);
 
-  if (looksLikeServerSnapshot(obj?.data)) {
+  if (looksLikeServerSnapshot(obj.data)) {
     return unwrapServerSnapshot(obj.data);
   }
 
-  if (looksLikeServerSnapshot(obj?.payload)) {
+  if (looksLikeServerSnapshot(obj.payload)) {
     return unwrapServerSnapshot(obj.payload);
   }
 
-  if (looksLikeServerSnapshot(obj?.result)) {
+  if (looksLikeServerSnapshot(obj.result)) {
     return unwrapServerSnapshot(obj.result);
   }
 
-  if (looksLikeServerSnapshot(obj?.snapshot)) {
+  if (looksLikeServerSnapshot(obj.snapshot)) {
     return unwrapServerSnapshot(obj.snapshot);
+  }
+
+  if (looksLikeServerSnapshot(obj.response)) {
+    return unwrapServerSnapshot(obj.response);
+  }
+
+  if (looksLikeServerSnapshot(obj.body)) {
+    return unwrapServerSnapshot(obj.body);
   }
 
   return {};
 }
 
-function getResolvedSnapshot(data) {
-  const normalizedDirect = normalizeServerSnapshotModel(data);
+function getResolvedSnapshot(data = {}) {
+  const direct = normalizeServerSnapshotModel(data);
 
   if (
-    normalizedDirect.servicesCount ||
-    Object.keys(safeObject(normalizedDirect.telemetry)).length
+    direct.servicesCount ||
+    safeArray(direct.services).length ||
+    Object.keys(safeObject(direct.telemetry)).length
   ) {
-    return normalizedDirect;
+    return direct;
   }
 
   const fromEnvelope = normalizeServerSnapshotModel(
@@ -155,6 +180,7 @@ function getResolvedSnapshot(data) {
 
   if (
     fromEnvelope.servicesCount ||
+    safeArray(fromEnvelope.services).length ||
     Object.keys(safeObject(fromEnvelope.telemetry)).length
   ) {
     return fromEnvelope;
@@ -173,6 +199,7 @@ function getResolvedSnapshot(data) {
 
 function clampPage(page = 1, totalPages = 1) {
   const current = safeNumber(page, 1);
+
   return Math.min(Math.max(current, 1), Math.max(totalPages, 1));
 }
 
@@ -180,12 +207,24 @@ function getPagination(items = [], state = {}) {
   const list = safeArray(items);
   const localState = safeObject(state);
 
-  const pageSize = Math.max(1, safeNumber(localState.pageSize, PAGE_SIZE));
+  const pageSize = Math.max(
+    1,
+    safeNumber(
+      first(
+        localState.pageSize,
+        localState.serverPageSize,
+        PAGE_SIZE
+      ),
+      PAGE_SIZE
+    )
+  );
+
   const totalItems = list.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
-  const page = clampPage(localState.page || 1, totalPages);
+  const page = clampPage(first(localState.page, localState.currentPage, 1), totalPages);
   const start = (page - 1) * pageSize;
   const end = start + pageSize;
+  const pageItems = list.slice(start, end);
 
   return {
     page,
@@ -194,9 +233,11 @@ function getPagination(items = [], state = {}) {
     totalPages,
     start,
     end,
-    items: list.slice(start, end),
-    from: totalItems ? start + 1 : 0,
+    items: pageItems,
+    from: totalItems && pageItems.length ? start + 1 : 0,
     to: Math.min(end, totalItems),
+    hasPrev: page > 1,
+    hasNext: page < totalPages,
   };
 }
 
@@ -211,18 +252,21 @@ function computeServerStats(snapshot = {}) {
   const dashboard = safeObject(telemetry.dashboard);
 
   const okCount = services.filter((item) => {
-    const status = safeText(item.status, "").toLowerCase();
-    return ["ok", "up", "healthy", "online", "success"].includes(status);
+    const status = normalizeKey(item.status);
+
+    return ["ok", "up", "healthy", "online", "success", "operativo", "operativa"].includes(status);
   }).length;
 
   const warningCount = services.filter((item) => {
-    const status = safeText(item.status, "").toLowerCase();
-    return ["warning", "pending", "degraded", "slow"].includes(status);
+    const status = normalizeKey(item.status);
+
+    return ["warning", "pending", "degraded", "slow", "revisar"].includes(status);
   }).length;
 
   const errorCount = services.filter((item) => {
-    const status = safeText(item.status, "").toLowerCase();
-    return ["error", "critical", "down", "offline", "failed"].includes(status);
+    const status = normalizeKey(item.status);
+
+    return ["error", "critical", "down", "offline", "failed", "disabled"].includes(status);
   }).length;
 
   const latencyCount = services.filter((item) => {
@@ -248,72 +292,118 @@ function computeServerStats(snapshot = {}) {
   };
 }
 
+/* =========================================================
+   CLASS HELPERS
+========================================================= */
+
+function getStatusClass(value = "") {
+  const key = normalizeKey(value);
+
+  if (["ok", "up", "healthy", "online", "success", "operativo", "operativa"].includes(key)) {
+    return "ok";
+  }
+
+  if (["warning", "pending", "degraded", "slow", "revisar"].includes(key)) {
+    return "warning";
+  }
+
+  if (["error", "critical", "down", "offline", "failed", "disabled"].includes(key)) {
+    return "error";
+  }
+
+  return "unknown";
+}
+
+function getTypeClass(value = "") {
+  const key = normalizeKey(value);
+
+  if (["api", "service", "runtime"].includes(key)) {
+    return "api";
+  }
+
+  if (["db", "database", "cosmos", "storage", "blob"].includes(key)) {
+    return "db";
+  }
+
+  if (["system", "host", "environment"].includes(key)) {
+    return "system";
+  }
+
+  if (["telemetry", "metric", "metrics", "health"].includes(key)) {
+    return "telemetry";
+  }
+
+  return "default";
+}
+
+function getThemeClass(service = {}) {
+  const theme = safeText(
+    first(
+      service.theme,
+      getServerTheme(service.serviceId || service.title || service.name || "server")
+    ),
+    "violet"
+  );
+
+  const key = normalizeKey(theme);
+
+  if (
+    [
+      "violet",
+      "emerald",
+      "blue",
+      "amber",
+      "rose",
+      "purple",
+      "cyan",
+      "orange",
+    ].includes(key)
+  ) {
+    return key;
+  }
+
+  return "violet";
+}
+
+/* =========================================================
+   UI ATOMS
+========================================================= */
+
+function renderInlineLoader(label = "Cargando") {
+  return `
+    <span class="server-inline-loading" role="status" aria-label="${escapeHtml(label)}">
+      <span class="server-inline-spinner" aria-hidden="true"></span>
+      <span class="server-inline-loading-text">${escapeHtml(label)}</span>
+    </span>
+  `;
+}
+
 function renderStatCard({
   label = "",
   value = "0",
   caption = "",
   accent = false,
+  tone = "default",
 } = {}) {
   return `
-    <article
-      class="server-stat-card panel-surface"
-      style="
-        position:relative;
-        overflow:hidden;
-        display:grid;
-        gap:10px;
-        min-height:132px;
-        padding:20px;
-        border-radius:var(--panel-radius);
-        border:1px solid ${
-          accent
-            ? "color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft))"
-            : "var(--border-soft)"
-        };
-        background:${
-          accent
-            ? "linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 72%), var(--surface-1, var(--surface-glass))"
-            : "var(--surface-1, var(--surface-glass))"
-        };
-        box-shadow:var(--shadow-sm);
-      "
-    >
-      <span
-        style="
-          font-size:12px;
-          line-height:1;
-          letter-spacing:.08em;
-          text-transform:uppercase;
-          color:var(--text-dim);
-          font-weight:var(--weight-bold);
-        "
-      >
-        ${escapeHtml(label)}
-      </span>
-
-      <strong
-        style="
-          font-size:clamp(24px, 3vw, 34px);
-          line-height:1;
-          letter-spacing:-.04em;
-          color:var(--text-strong);
-          font-weight:var(--weight-black);
-        "
-      >
-        ${escapeHtml(String(value))}
-      </strong>
-
-      <p
-        style="
-          margin:0;
-          color:var(--text-dim);
-          font-size:var(--font-sm);
-          line-height:1.45;
-        "
-      >
-        ${escapeHtml(caption)}
-      </p>
+    <article class="server-stat-card ${accent ? "server-stat-card--accent" : ""} server-stat-card--${escapeHtml(tone)}">
+      <span class="server-stat-label">${escapeHtml(label)}</span>
+      <strong class="server-stat-value">${escapeHtml(String(value))}</strong>
+      <p class="server-stat-caption">${escapeHtml(caption)}</p>
     </article>
+  `;
+}
+
+function renderChip({
+  label = "",
+  kind = "default",
+  value = "default",
+} = {}) {
+  return `
+    <span class="server-chip server-chip--${escapeHtml(kind)} server-chip--${escapeHtml(kind)}-${escapeHtml(value)}">
+      <span class="server-chip-dot" aria-hidden="true"></span>
+      ${escapeHtml(label)}
+    </span>
   `;
 }
 
@@ -323,352 +413,151 @@ function renderStatCard({
 
 export function renderHeader({ snapshot = {}, state = {} } = {}) {
   const resolvedSnapshot = getResolvedSnapshot(snapshot);
-  const localState = state || serverState || {};
+  const localState = safeObject(state || serverState || {});
   const telemetry = safeObject(resolvedSnapshot.telemetry);
   const global = safeObject(telemetry.global);
   const stats = computeServerStats(resolvedSnapshot);
 
-  const loading = Boolean(localState?.loading);
-  const refreshing = Boolean(localState?.refreshing);
-  const lastSyncText = localState?.lastSyncAt
+  const loading = Boolean(localState.loading);
+  const refreshing = Boolean(localState.refreshing);
+  const autoRefresh = Boolean(localState.autoRefresh);
+
+  const lastSyncText = localState.lastSyncAt
     ? formatRelativeDate(localState.lastSyncAt)
     : "Sin sincronización reciente";
 
   const requestId = safeText(
-    first(localState?.requestId, resolvedSnapshot?.requestId),
+    first(localState.requestId, resolvedSnapshot.requestId),
     ""
   );
 
   const healthStatus = safeText(global.status, "unknown");
   const serviceName = safeText(global.service, "onion-backend");
+  const healthClass = getStatusClass(healthStatus);
 
   return `
-    <section
-      class="server-hero"
-      style="
-        position:relative;
-        overflow:hidden;
-        border-radius:calc(var(--panel-radius) + 6px);
-        border:1px solid var(--border-soft);
-        background:
-          radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent), transparent 34%),
-          linear-gradient(180deg, var(--surface-2, var(--surface-glass)), var(--surface-1, var(--surface-glass)));
-        box-shadow:var(--shadow-md);
-      "
-    >
-      <div
-        style="
-          display:grid;
-          gap:var(--space-lg);
-          padding:clamp(20px, 3vw, 30px);
-        "
-      >
-        <div
-          style="
-            display:flex;
-            align-items:flex-start;
-            justify-content:space-between;
-            gap:18px;
-            flex-wrap:wrap;
-          "
-        >
-          <div style="display:grid; gap:10px; min-width:min(100%, 560px);">
-            <span
-              style="
-                display:inline-flex;
-                align-items:center;
-                width:max-content;
-                min-height:28px;
-                padding:0 12px;
-                border-radius:999px;
-                border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
-                background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-                color:var(--text-soft);
-                font-size:12px;
-                font-weight:var(--weight-bold);
-                letter-spacing:.06em;
-                text-transform:uppercase;
-              "
-            >
-              Observabilidad server
-            </span>
+    <section class="server-view-root" data-server-scope="true">
+      <section class="server-hero">
+        <div class="server-hero-inner">
+          <div class="server-hero-top">
+            <div class="server-hero-copy">
+              <span class="server-kicker">Observabilidad server</span>
 
-            <div style="display:grid; gap:8px;">
-              <h1
-                class="page-title"
-                style="
-                  margin:0;
-                  font-size:clamp(30px, 5vw, 48px);
-                  line-height:.98;
-                  letter-spacing:-.05em;
-                  color:var(--text-strong);
-                "
-              >
-                Centro de control del servidor
-              </h1>
+              <div class="server-title-stack">
+                <h1 class="server-page-title">Centro de control del servidor</h1>
 
-              <p
-                class="page-subtitle"
-                style="
-                  margin:0;
-                  max-width:860px;
-                  color:var(--text-dim);
-                  font-size:clamp(14px, 2vw, 16px);
-                  line-height:1.6;
-                "
+                <p class="server-page-subtitle">
+                  Estado agregado de API, base de datos, host, runtime Node/V8,
+                  latencias reales, health interno y métricas clave del entorno
+                  en un panel premium de supervisión técnica.
+                </p>
+              </div>
+            </div>
+
+            <div class="server-hero-actions">
+              <button
+                id="server-health-btn"
+                type="button"
+                class="server-btn server-btn--secondary"
+                data-action="refresh-health"
+                ${loading || refreshing ? 'aria-busy="true"' : ""}
               >
-                Estado agregado de API, base de datos, host, runtime Node/V8,
-                latencias reales, health interno y métricas clave del entorno
-                en un panel premium de supervisión técnica.
-              </p>
+                Refrescar health
+              </button>
+
+              <button
+                id="server-refresh-btn"
+                type="button"
+                class="server-btn server-btn--primary ${refreshing ? "is-loading" : ""}"
+                data-action="refresh"
+                ${loading || refreshing ? 'aria-busy="true"' : ""}
+              >
+                ${refreshing ? renderInlineLoader("Actualizando") : "Actualizar panel"}
+              </button>
+
+              <button
+                id="server-toggle-live-btn"
+                type="button"
+                class="server-btn server-btn--ghost ${autoRefresh ? "is-active" : ""}"
+                data-action="toggle-live"
+                aria-pressed="${autoRefresh ? "true" : "false"}"
+              >
+                ${autoRefresh ? "Live ON" : "Live OFF"}
+              </button>
             </div>
           </div>
 
-          <div
-            style="
-              display:flex;
-              gap:10px;
-              flex-wrap:wrap;
-              align-items:center;
-            "
-          >
-            <button
-              id="server-health-btn"
-              type="button"
-              style="
-                min-height:42px;
-                padding:0 14px;
-                border-radius:var(--btn-radius);
-                border:1px solid var(--btn-secondary-border, var(--border-soft));
-                background:var(--btn-secondary-bg, var(--surface-glass));
-                color:var(--btn-secondary-text, var(--text-soft));
-                font-weight:var(--weight-bold);
-                cursor:pointer;
-              "
-            >
-              Refrescar health
-            </button>
+          <div class="server-hero-meta">
+            <span class="server-meta-pill">
+              <span class="server-meta-label">Servicio</span>
+              <strong>${escapeHtml(serviceName)}</strong>
+            </span>
 
-            <button
-              id="server-refresh-btn"
-              type="button"
-              style="
-                min-height:42px;
-                padding:0 16px;
-                border-radius:var(--btn-radius);
-                border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-                background:var(--btn-primary-bg, var(--accent, #7c5cff));
-                color:var(--btn-primary-text, #fff);
-                font-weight:var(--weight-bold);
-                cursor:pointer;
-                box-shadow:0 10px 24px color-mix(in srgb, var(--accent, #7c5cff) 22%, transparent);
-              "
-            >
-              Actualizar panel
-            </button>
+            <span class="server-meta-pill server-meta-pill--${escapeHtml(healthClass)}">
+              <span class="server-meta-label">Health</span>
+              <strong>${escapeHtml(healthStatus)}</strong>
+            </span>
 
-            <button
-              id="server-toggle-live-btn"
-              type="button"
-              style="
-                min-height:42px;
-                padding:0 16px;
-                border-radius:var(--btn-radius);
-                border:1px solid var(--border-soft);
-                background:var(--surface-glass);
-                color:var(--text-soft);
-                font-weight:var(--weight-bold);
-                cursor:pointer;
-              "
-            >
-              ${localState?.autoRefresh ? "Live ON" : "Live OFF"}
-            </button>
+            <span class="server-meta-pill">
+              <span class="server-meta-label">Última sync</span>
+              <strong>${escapeHtml(lastSyncText)}</strong>
+            </span>
+
+            ${
+              requestId
+                ? `
+                  <span class="server-meta-pill">
+                    <span class="server-meta-label">Request</span>
+                    <strong>${escapeHtml(requestId)}</strong>
+                  </span>
+                `
+                : ""
+            }
+
+            ${
+              refreshing || loading
+                ? `
+                  <span class="server-meta-pill server-meta-pill--syncing" aria-live="polite">
+                    <span class="server-live-dot" aria-hidden="true"></span>
+                    <strong>Sincronizando</strong>
+                  </span>
+                `
+                : ""
+            }
+          </div>
+
+          <div class="server-hero-stats">
+            ${renderStatCard({
+              label: "Servicios / OK",
+              value: `${stats.servicesTotal} / ${stats.okCount}`,
+              caption: "Servicios técnicos resueltos desde health + telemetry.",
+              accent: true,
+              tone: "accent",
+            })}
+
+            ${renderStatCard({
+              label: "CPU / RAM / disco",
+              value: `${stats.cpuPercent ?? "—"}% / ${stats.ramPercent ?? "—"}% / ${stats.diskPercent ?? "—"}%`,
+              caption: "Snapshot actual del host principal.",
+              tone: "system",
+            })}
+
+            ${renderStatCard({
+              label: "Event loop / alertas",
+              value: `${stats.eventLoopLag ? formatMs(stats.eventLoopLag) : "—"} / ${stats.errorCount}`,
+              caption: "Lag del loop y servicios en error.",
+              tone: stats.errorCount ? "danger" : "success",
+            })}
+
+            ${renderStatCard({
+              label: "Facturas / tickets",
+              value: `${stats.totalFacturas} / ${stats.ticketsActivos}`,
+              caption: "Cruce rápido con el dashboard agregado.",
+              tone: "info",
+            })}
           </div>
         </div>
-
-        <div
-          class="server-hero-meta"
-          style="
-            display:flex;
-            align-items:center;
-            gap:10px;
-            flex-wrap:wrap;
-          "
-        >
-          <span
-            style="
-              display:inline-flex;
-              align-items:center;
-              min-height:30px;
-              padding:0 10px;
-              border-radius:999px;
-              border:1px solid var(--border-soft);
-              background:var(--surface-glass);
-              color:var(--text-dim);
-              font-size:12px;
-              font-weight:var(--weight-bold);
-              letter-spacing:.04em;
-              text-transform:uppercase;
-            "
-          >
-            Servicio · ${escapeHtml(serviceName)}
-          </span>
-
-          <span
-            style="
-              display:inline-flex;
-              align-items:center;
-              min-height:30px;
-              padding:0 10px;
-              border-radius:999px;
-              border:1px solid var(--border-soft);
-              background:var(--surface-glass);
-              color:var(--text-dim);
-              font-size:12px;
-              font-weight:var(--weight-bold);
-              letter-spacing:.04em;
-              text-transform:uppercase;
-            "
-          >
-            Health · ${escapeHtml(healthStatus)}
-          </span>
-
-          <span
-            style="
-              display:inline-flex;
-              align-items:center;
-              min-height:30px;
-              padding:0 10px;
-              border-radius:999px;
-              border:1px solid var(--border-soft);
-              background:var(--surface-glass);
-              color:var(--text-dim);
-              font-size:12px;
-              font-weight:var(--weight-bold);
-              letter-spacing:.04em;
-              text-transform:uppercase;
-            "
-          >
-            Última sync · ${escapeHtml(lastSyncText)}
-          </span>
-
-          ${
-            requestId
-              ? `
-                <span
-                  style="
-                    display:inline-flex;
-                    align-items:center;
-                    min-height:30px;
-                    padding:0 10px;
-                    border-radius:999px;
-                    border:1px solid var(--border-soft);
-                    background:var(--surface-glass);
-                    color:var(--text-dim);
-                    font-size:12px;
-                    font-weight:var(--weight-bold);
-                    letter-spacing:.04em;
-                    text-transform:uppercase;
-                  "
-                >
-                  Request · ${escapeHtml(requestId)}
-                </span>
-              `
-              : ""
-          }
-
-          ${
-            refreshing || loading
-              ? `
-                <span
-                  style="
-                    display:inline-flex;
-                    align-items:center;
-                    gap:8px;
-                    min-height:30px;
-                    padding:0 10px;
-                    border-radius:999px;
-                    border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 24%, var(--border-soft));
-                    background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-                    color:var(--text-soft);
-                    font-size:12px;
-                    font-weight:var(--weight-bold);
-                    letter-spacing:.04em;
-                    text-transform:uppercase;
-                  "
-                >
-                  <span
-                    aria-hidden="true"
-                    style="
-                      width:10px;
-                      height:10px;
-                      border-radius:999px;
-                      background:var(--accent, #7c5cff);
-                      box-shadow:0 0 0 0 color-mix(in srgb, var(--accent, #7c5cff) 30%, transparent);
-                      animation:serverPulse 1.35s ease-in-out infinite;
-                    "
-                  ></span>
-                  Sincronizando
-                </span>
-              `
-              : ""
-          }
-        </div>
-
-        <div
-          class="server-hero-stats"
-          style="
-            display:grid;
-            grid-template-columns:repeat(4, minmax(0, 1fr));
-            gap:var(--space-md);
-          "
-        >
-          ${renderStatCard({
-            label: "Servicios / ok",
-            value: `${stats.servicesTotal} / ${stats.okCount}`,
-            caption: "Servicios técnicos resueltos desde health + telemetry.",
-            accent: true,
-          })}
-
-          ${renderStatCard({
-            label: "CPU / RAM / disco",
-            value: `${stats.cpuPercent ?? "—"}% / ${stats.ramPercent ?? "—"}% / ${stats.diskPercent ?? "—"}%`,
-            caption: "Snapshot actual del host principal.",
-          })}
-
-          ${renderStatCard({
-            label: "Event loop / alertas",
-            value: `${stats.eventLoopLag ? formatMs(stats.eventLoopLag) : "—"} / ${stats.errorCount}`,
-            caption: "Lag del loop y servicios en error.",
-          })}
-
-          ${renderStatCard({
-            label: "Facturas / tickets",
-            value: `${stats.totalFacturas} / ${stats.ticketsActivos}`,
-            caption: "Cruce rápido con el dashboard agregado.",
-          })}
-        </div>
-      </div>
-
-      <style>
-        @keyframes serverPulse {
-          0% { transform:scale(.92); opacity:.75; }
-          50% { transform:scale(1.08); opacity:1; }
-          100% { transform:scale(.92); opacity:.75; }
-        }
-
-        @media (max-width: 1100px) {
-          .server-hero-stats {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-        }
-
-        @media (max-width: 720px) {
-          .server-hero-stats {
-            grid-template-columns: 1fr !important;
-          }
-        }
-      </style>
+      </section>
     </section>
   `;
 }
@@ -679,172 +568,64 @@ export function renderHeader({ snapshot = {}, state = {} } = {}) {
 
 export function renderLoadingState() {
   return `
-    <section
-      class="panel-surface server-shell"
-      style="
-        overflow:hidden;
-        border-radius:var(--panel-radius);
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-      "
-    >
-      <div
-        style="
-          display:grid;
-          gap:18px;
-          padding:18px;
-        "
-      >
-        <div
-          style="
-            height:22px;
-            width:260px;
-            border-radius:999px;
-            background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass));
-            background-size:200% 100%;
-            animation:serverSkeleton 1.25s linear infinite;
-          "
-        ></div>
-
-        <div
-          style="
-            display:grid;
-            grid-template-columns:repeat(3, minmax(0, 1fr));
-            gap:16px;
-          "
-          class="server-skeleton-grid"
-        >
-          ${Array.from({ length: 6 })
-            .map(
-              () => `
-                <article
-                  style="
-                    display:grid;
-                    gap:12px;
-                    min-height:184px;
-                    padding:18px;
-                    border-radius:18px;
-                    border:1px solid var(--border-soft);
-                    background:var(--surface-glass);
-                  "
-                >
-                  <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-                    <div style="height:14px; width:120px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:serverSkeleton 1.25s linear infinite;"></div>
-                    <div style="height:30px; width:78px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:serverSkeleton 1.25s linear infinite;"></div>
-                  </div>
-                  <div style="height:32px; width:84px; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:serverSkeleton 1.25s linear infinite;"></div>
-                  <div style="height:12px; width:90%; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:serverSkeleton 1.25s linear infinite;"></div>
-                  <div style="height:12px; width:72%; border-radius:999px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:serverSkeleton 1.25s linear infinite;"></div>
-                  <div style="margin-top:auto; display:flex; gap:8px;">
-                    <div style="height:38px; width:96px; border-radius:12px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:serverSkeleton 1.25s linear infinite;"></div>
-                    <div style="height:38px; width:82px; border-radius:12px; background:linear-gradient(90deg, var(--surface-glass), color-mix(in srgb, var(--accent, #7c5cff) 10%, var(--surface-glass)), var(--surface-glass)); background-size:200% 100%; animation:serverSkeleton 1.25s linear infinite;"></div>
-                  </div>
-                </article>
-              `
-            )
-            .join("")}
-        </div>
+    <section class="server-shell server-shell--loading" data-server-loading="true">
+      <div class="server-loading-head">
+        <div class="server-skeleton server-skeleton--title"></div>
+        <div class="server-skeleton server-skeleton--pill"></div>
       </div>
 
-      <style>
-        @keyframes serverSkeleton {
-          0% { background-position: 200% 0; }
-          100% { background-position: -200% 0; }
-        }
+      <div class="server-skeleton-grid">
+        ${Array.from({ length: PAGE_SIZE })
+          .map(
+            () => `
+              <article class="server-skeleton-card" aria-hidden="true">
+                <div class="server-skeleton-card-head">
+                  <div class="server-skeleton server-skeleton--avatar"></div>
 
-        @media (max-width: 980px) {
-          .server-skeleton-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-        }
+                  <div class="server-skeleton-copy">
+                    <div class="server-skeleton server-skeleton--line-lg"></div>
+                    <div class="server-skeleton server-skeleton--line-sm"></div>
+                  </div>
 
-        @media (max-width: 680px) {
-          .server-skeleton-grid {
-            grid-template-columns: 1fr !important;
-          }
-        }
-      </style>
+                  <div class="server-skeleton server-skeleton--chip"></div>
+                </div>
+
+                <div class="server-skeleton server-skeleton--metric"></div>
+                <div class="server-skeleton server-skeleton--line-full"></div>
+                <div class="server-skeleton server-skeleton--line-md"></div>
+
+                <div class="server-skeleton-actions">
+                  <div class="server-skeleton server-skeleton--btn"></div>
+                  <div class="server-skeleton server-skeleton--btn-sm"></div>
+                </div>
+              </article>
+            `
+          )
+          .join("")}
+      </div>
     </section>
   `;
 }
 
 export function renderErrorState(message = "No se pudo cargar el panel de servidor.") {
   return `
-    <section
-      class="panel-surface server-error-state"
-      style="
-        display:grid;
-        gap:18px;
-        padding:28px;
-        border-radius:var(--panel-radius);
-        border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, var(--border-soft));
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent), transparent 72%),
-          var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-      "
-    >
-      <div style="display:grid; gap:8px;">
-        <span
-          style="
-            display:inline-flex;
-            width:max-content;
-            min-height:28px;
-            align-items:center;
-            padding:0 12px;
-            border-radius:999px;
-            border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
-            background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 12%, transparent);
-            color:var(--danger-strong, #ff6b6b);
-            font-size:12px;
-            letter-spacing:.06em;
-            text-transform:uppercase;
-            font-weight:var(--weight-bold);
-          "
-        >
-          Error de carga
-        </span>
+    <section class="server-state server-state--error">
+      <div class="server-state-copy">
+        <span class="server-state-kicker">Error de carga</span>
 
-        <h3
-          style="
-            margin:0;
-            font-size:clamp(24px, 3vw, 34px);
-            line-height:1.05;
-            color:var(--text-strong);
-            letter-spacing:-.04em;
-          "
-        >
-          No se pudo renderizar la vista Server
-        </h3>
+        <h3 class="server-state-title">No se pudo renderizar la vista Server</h3>
 
-        <p
-          style="
-            margin:0;
-            color:var(--text-dim);
-            font-size:var(--font-base);
-            line-height:1.65;
-            max-width:780px;
-          "
-        >
+        <p class="server-state-text">
           ${escapeHtml(safeText(message, "Error desconocido al cargar el panel técnico."))}
         </p>
       </div>
 
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <div class="server-state-actions">
         <button
           id="server-retry-btn"
           type="button"
-          style="
-            min-height:42px;
-            padding:0 14px;
-            border-radius:var(--btn-radius);
-            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-            background:var(--btn-primary-bg, var(--accent, #7c5cff));
-            color:var(--btn-primary-text, #fff);
-            font-weight:var(--weight-bold);
-            cursor:pointer;
-          "
+          class="server-btn server-btn--primary"
+          data-action="retry"
         >
           Reintentar
         </button>
@@ -855,79 +636,24 @@ export function renderErrorState(message = "No se pudo cargar el panel de servid
 
 export function renderEmptyState() {
   return `
-    <section
-      class="panel-surface server-empty-state"
-      style="
-        display:grid;
-        gap:18px;
-        padding:28px;
-        border-radius:var(--panel-radius);
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-      "
-    >
-      <div style="display:grid; gap:8px;">
-        <span
-          style="
-            display:inline-flex;
-            width:max-content;
-            min-height:28px;
-            align-items:center;
-            padding:0 12px;
-            border-radius:999px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            color:var(--text-dim);
-            font-size:12px;
-            letter-spacing:.06em;
-            text-transform:uppercase;
-            font-weight:var(--weight-bold);
-          "
-        >
-          Sin datos
-        </span>
+    <section class="server-state server-state--empty">
+      <div class="server-state-copy">
+        <span class="server-state-kicker">Sin datos</span>
 
-        <h3
-          style="
-            margin:0;
-            font-size:clamp(24px, 3vw, 34px);
-            line-height:1.05;
-            color:var(--text-strong);
-            letter-spacing:-.04em;
-          "
-        >
-          No hay servicios para mostrar
-        </h3>
+        <h3 class="server-state-title">No hay servicios para mostrar</h3>
 
-        <p
-          style="
-            margin:0;
-            color:var(--text-dim);
-            font-size:var(--font-base);
-            line-height:1.65;
-            max-width:760px;
-          "
-        >
+        <p class="server-state-text">
           El snapshot técnico no devolvió servicios visibles o todavía no hay
           datos agregados disponibles del health interno y la telemetría.
         </p>
       </div>
 
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <div class="server-state-actions">
         <button
           id="server-refresh-btn"
           type="button"
-          style="
-            min-height:42px;
-            padding:0 14px;
-            border-radius:var(--btn-radius);
-            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-            background:var(--btn-primary-bg, var(--accent, #7c5cff));
-            color:var(--btn-primary-text, #fff);
-            font-weight:var(--weight-bold);
-            cursor:pointer;
-          "
+          class="server-btn server-btn--primary"
+          data-action="refresh"
         >
           Actualizar panel
         </button>
@@ -937,293 +663,18 @@ export function renderEmptyState() {
 }
 
 /* =========================================================
-   CHIPS
+   SERVICE CARD
 ========================================================= */
-
-function getStatusChipStyle(value = "") {
-  const key = safeText(value, "").toLowerCase();
-
-  if (["ok", "up", "healthy", "online", "success", "operativa", "operativo"].includes(key)) {
-    return `
-      color:var(--success-strong, #36c690);
-      background:color-mix(in srgb, var(--success-strong, #36c690) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--success-strong, #36c690) 26%, transparent);
-    `;
-  }
-
-  if (["warning", "pending", "degraded", "slow", "revisar"].includes(key)) {
-    return `
-      color:var(--warning-strong, #ffbc42);
-      background:color-mix(in srgb, var(--warning-strong, #ffbc42) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--warning-strong, #ffbc42) 26%, transparent);
-    `;
-  }
-
-  if (["error", "critical", "down", "offline", "failed", "disabled"].includes(key)) {
-    return `
-      color:var(--danger-strong, #ff6b6b);
-      background:color-mix(in srgb, var(--danger-strong, #ff6b6b) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 26%, transparent);
-    `;
-  }
-
-  return `
-    color:var(--text-soft);
-    background:var(--surface-glass);
-    border:1px solid var(--border-soft);
-  `;
-}
-
-function getTypeChipStyle(value = "") {
-  const key = safeText(value, "").toLowerCase();
-
-  if (["api", "service", "runtime"].includes(key)) {
-    return `
-      color:var(--accent-strong, var(--accent, #7c5cff));
-      background:color-mix(in srgb, var(--accent, #7c5cff) 14%, transparent);
-      border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, transparent);
-    `;
-  }
-
-  if (["db", "system", "environment"].includes(key)) {
-    return `
-      color:#60a5fa;
-      background:color-mix(in srgb, #60a5fa 14%, transparent);
-      border:1px solid color-mix(in srgb, #60a5fa 26%, transparent);
-    `;
-  }
-
-  if (["telemetry", "metric", "health"].includes(key)) {
-    return `
-      color:#b388ff;
-      background:color-mix(in srgb, #b388ff 14%, transparent);
-      border:1px solid color-mix(in srgb, #b388ff 26%, transparent);
-    `;
-  }
-
-  return `
-    color:var(--text-soft);
-    background:var(--surface-glass);
-    border:1px solid var(--border-soft);
-  `;
-}
-
-function renderChip(label = "", style = "") {
-  return `
-    <span
-      style="
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        min-height:30px;
-        padding:0 10px;
-        border-radius:999px;
-        font-size:12px;
-        font-weight:var(--weight-bold);
-        letter-spacing:.05em;
-        text-transform:uppercase;
-        white-space:nowrap;
-        ${style}
-      "
-    >
-      ${escapeHtml(label)}
-    </span>
-  `;
-}
-
-/* =========================================================
-   SERVICE VISUALS
-========================================================= */
-
-function getThemePalette(theme = "violet") {
-  const themeMap = {
-    violet: {
-      bg: "linear-gradient(135deg, rgba(124,92,255,.28), rgba(88,72,200,.12))",
-      border: "rgba(124,92,255,.28)",
-      text: "#efeaff",
-      glow: "rgba(124,92,255,.22)",
-    },
-    emerald: {
-      bg: "linear-gradient(135deg, rgba(54,198,144,.28), rgba(35,131,95,.12))",
-      border: "rgba(54,198,144,.28)",
-      text: "#ddfff1",
-      glow: "rgba(54,198,144,.22)",
-    },
-    blue: {
-      bg: "linear-gradient(135deg, rgba(96,165,250,.28), rgba(37,99,235,.12))",
-      border: "rgba(96,165,250,.28)",
-      text: "#e7f2ff",
-      glow: "rgba(96,165,250,.22)",
-    },
-    amber: {
-      bg: "linear-gradient(135deg, rgba(255,188,66,.28), rgba(217,119,6,.12))",
-      border: "rgba(255,188,66,.28)",
-      text: "#fff4d8",
-      glow: "rgba(255,188,66,.22)",
-    },
-    rose: {
-      bg: "linear-gradient(135deg, rgba(255,107,107,.28), rgba(190,24,93,.12))",
-      border: "rgba(255,107,107,.28)",
-      text: "#ffe4e4",
-      glow: "rgba(255,107,107,.22)",
-    },
-    purple: {
-      bg: "linear-gradient(135deg, rgba(179,136,255,.28), rgba(109,40,217,.12))",
-      border: "rgba(179,136,255,.28)",
-      text: "#f3e8ff",
-      glow: "rgba(179,136,255,.22)",
-    },
-    cyan: {
-      bg: "linear-gradient(135deg, rgba(34,211,238,.28), rgba(8,145,178,.12))",
-      border: "rgba(34,211,238,.28)",
-      text: "#e6fcff",
-      glow: "rgba(34,211,238,.22)",
-    },
-    orange: {
-      bg: "linear-gradient(135deg, rgba(251,146,60,.28), rgba(194,65,12,.12))",
-      border: "rgba(251,146,60,.28)",
-      text: "#fff0e4",
-      glow: "rgba(251,146,60,.22)",
-    },
-  };
-
-  return themeMap[theme] || themeMap.violet;
-}
 
 function renderServiceAvatar(service = {}) {
   const title = safeText(service.title, "Servicio");
   const initials = safeText(service.initials, getInitials(title));
-  const theme = safeText(service.theme, getServerTheme(service.serviceId || title));
-  const palette = getThemePalette(theme);
   const icon = safeText(service.icon, "");
+  const themeClass = getThemeClass(service);
 
   return `
-    <div
-      aria-hidden="true"
-      style="
-        position:relative;
-        flex:0 0 52px;
-        width:52px;
-        height:52px;
-        border-radius:16px;
-        display:grid;
-        place-items:center;
-        background:${palette.bg};
-        border:1px solid ${palette.border};
-        color:${palette.text};
-        box-shadow:0 8px 24px ${palette.glow};
-        font-weight:var(--weight-black);
-        letter-spacing:.03em;
-        font-size:${icon ? "22px" : "16px"};
-      "
-    >
-      ${escapeHtml(icon || initials)}
-    </div>
-  `;
-}
-
-/* =========================================================
-   SERVICE CARD
-========================================================= */
-
-function renderServiceActionButtons(service = {}, state = {}) {
-  const serviceId = safeText(service.serviceId, "");
-  const route = safeText(service.route, "");
-  const isOpening = safeText(state?.openingDetailId, "") === serviceId;
-
-  return `
-    <div
-      style="
-        display:flex;
-        gap:8px;
-        flex-wrap:wrap;
-        margin-top:auto;
-      "
-    >
-      <button
-        type="button"
-        data-action="open-server-detail"
-        data-detail-id="${escapeHtml(serviceId)}"
-        ${isOpening ? "disabled" : ""}
-        style="
-          min-height:38px;
-          min-width:92px;
-          padding:0 12px;
-          border-radius:12px;
-          border:1px solid var(--btn-secondary-border, var(--border-soft));
-          background:var(--btn-secondary-bg, var(--surface-glass));
-          color:var(--btn-secondary-text, var(--text-soft));
-          font-weight:var(--weight-bold);
-          cursor:${isOpening ? "wait" : "pointer"};
-          white-space:nowrap;
-          opacity:${isOpening ? ".82" : "1"};
-        "
-      >
-        ${
-          isOpening
-            ? `
-              <span style="display:inline-flex; align-items:center; gap:8px;">
-                <span
-                  aria-hidden="true"
-                  style="
-                    width:14px;
-                    height:14px;
-                    border-radius:999px;
-                    border:2px solid color-mix(in srgb, var(--text-soft) 22%, transparent);
-                    border-top-color:var(--text-soft);
-                    animation:serverSpin .8s linear infinite;
-                  "
-                ></span>
-                Abriendo...
-              </span>
-            `
-            : "Ver detalle"
-        }
-      </button>
-
-      <button
-        type="button"
-        data-action="copy-server-detail-id"
-        data-detail-id="${escapeHtml(serviceId)}"
-        style="
-          min-height:38px;
-          padding:0 12px;
-          border-radius:12px;
-          border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-          background:var(--btn-primary-bg, var(--accent, #7c5cff));
-          color:var(--btn-primary-text, #fff);
-          font-weight:var(--weight-bold);
-          cursor:pointer;
-          white-space:nowrap;
-        "
-      >
-        Copiar ID
-      </button>
-
-      ${
-        route
-          ? `
-            <button
-              type="button"
-              data-action="navigate-server"
-              data-route="${escapeHtml(route)}"
-              style="
-                min-height:38px;
-                padding:0 12px;
-                border-radius:12px;
-                border:1px solid var(--border-soft);
-                background:var(--surface-glass);
-                color:var(--text-soft);
-                font-weight:var(--weight-bold);
-                cursor:pointer;
-                white-space:nowrap;
-              "
-            >
-              Abrir
-            </button>
-          `
-          : ""
-      }
+    <div class="server-service-avatar server-service-avatar--${escapeHtml(themeClass)}" aria-hidden="true">
+      <span>${escapeHtml(icon || initials)}</span>
     </div>
   `;
 }
@@ -1243,49 +694,25 @@ function renderServicePreview(service = {}) {
     metadata.percent !== null && metadata.percent !== undefined
       ? `Uso: ${Math.round(Number(metadata.percent))}%`
       : "",
-  ].filter(Boolean).slice(0, 2);
+  ]
+    .filter(Boolean)
+    .slice(0, 2);
 
   if (!lines.length) {
     return `
-      <div style="display:grid; gap:8px;">
-        <span
-          style="
-            color:var(--text-dim);
-            font-size:12px;
-            line-height:1.4;
-          "
-        >
-          Sin información adicional.
-        </span>
+      <div class="server-service-preview server-service-preview--empty">
+        <span>Sin información adicional.</span>
       </div>
     `;
   }
 
   return `
-    <div style="display:grid; gap:8px;">
+    <div class="server-service-preview">
       ${lines
         .map(
           (line) => `
-            <div
-              style="
-                display:grid;
-                gap:4px;
-                padding:10px 12px;
-                border-radius:12px;
-                border:1px solid var(--border-soft);
-                background:var(--surface-glass);
-              "
-            >
-              <span
-                style="
-                  color:var(--text-soft);
-                  font-size:12px;
-                  line-height:1.45;
-                  word-break:break-word;
-                "
-              >
-                ${escapeHtml(truncate(line, 96))}
-              </span>
+            <div class="server-service-preview-row">
+              <span>${escapeHtml(truncate(line, 96))}</span>
             </div>
           `
         )
@@ -1294,155 +721,138 @@ function renderServicePreview(service = {}) {
   `;
 }
 
+function renderServiceActionButtons(service = {}, state = {}) {
+  const serviceId = safeText(service.serviceId, "");
+  const route = safeText(service.route, "");
+  const isOpening = safeText(state.openingDetailId, "") === serviceId;
+
+  return `
+    <div class="server-service-actions">
+      <button
+        type="button"
+        class="server-action-btn server-action-btn--secondary ${isOpening ? "is-loading" : ""}"
+        data-action="open-server-detail"
+        data-detail-id="${escapeHtml(serviceId)}"
+        ${isOpening ? 'disabled aria-busy="true"' : ""}
+      >
+        ${isOpening ? renderInlineLoader("Abriendo") : "Ver detalle"}
+      </button>
+
+      <button
+        type="button"
+        class="server-action-btn server-action-btn--primary"
+        data-action="copy-server-detail-id"
+        data-detail-id="${escapeHtml(serviceId)}"
+      >
+        Copiar ID
+      </button>
+
+      ${
+        route
+          ? `
+            <button
+              type="button"
+              class="server-action-btn server-action-btn--ghost"
+              data-action="navigate-server"
+              data-route="${escapeHtml(route)}"
+            >
+              Abrir
+            </button>
+          `
+          : ""
+      }
+    </div>
+  `;
+}
+
 function renderServiceCard(item = {}, state = {}) {
   const service = normalizeServerServiceModel(item);
+
   const serviceId = safeText(service.serviceId, "");
   const title = safeText(service.title, "Servicio");
   const description = safeText(service.description, "Sin descripción.");
   const typeLabel = getServerTypeLabel(service.type);
   const statusLabel = getServerStatusLabel(service.status);
+  const statusClass = getStatusClass(service.status);
+  const typeClass = getTypeClass(service.type);
+  const themeClass = getThemeClass(service);
 
-  const primaryValue =
-    service.hasLatency
-      ? formatMs(service.latencyMs)
-      : service.hasPercent
-        ? `${Math.round(Number(service.percent))}%`
-        : service.numericValue !== null
-          ? String(service.numericValue)
-          : "—";
+  const primaryValue = service.hasLatency
+    ? formatMs(service.latencyMs)
+    : service.hasPercent
+      ? `${Math.round(Number(service.percent))}%`
+      : service.numericValue !== null && service.numericValue !== undefined
+        ? String(service.numericValue)
+        : "—";
+
+  const metricLabel = service.hasLatency
+    ? "Latencia técnica reportada"
+    : service.hasPercent
+      ? "Uso actual reportado"
+      : "Snapshot actual";
 
   const updatedAt = service.updatedAt
     ? formatRelativeDate(service.updatedAt)
     : "Sin fecha";
 
-  const isOpening = safeText(state?.openingDetailId, "") === serviceId;
+  const isOpening = safeText(state.openingDetailId, "") === serviceId;
 
   return `
     <article
-      class="server-service-card panel-surface ${isOpening ? "is-opening" : ""}"
+      class="server-service-card server-service-card--${escapeHtml(statusClass)} server-service-card--theme-${escapeHtml(themeClass)} ${isOpening ? "is-opening" : ""}"
       data-detail-id="${escapeHtml(serviceId)}"
-      style="
-        display:grid;
-        gap:14px;
-        min-height:240px;
-        padding:18px;
-        border-radius:20px;
-        border:1px solid var(--border-soft);
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--surface-2, transparent) 50%, transparent), transparent),
-          var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-        transition:transform .18s ease, border-color .18s ease, box-shadow .18s ease, opacity .18s ease;
-        opacity:${isOpening ? ".74" : "1"};
-      "
+      data-status="${escapeHtml(statusClass)}"
+      data-type="${escapeHtml(typeClass)}"
     >
-      <div
-        style="
-          display:flex;
-          align-items:flex-start;
-          justify-content:space-between;
-          gap:12px;
-        "
-      >
-        <div style="display:flex; gap:12px; min-width:0; flex:1;">
+      <div class="server-service-head">
+        <div class="server-service-identity">
           ${renderServiceAvatar(service)}
 
-          <div style="display:grid; gap:5px; min-width:0;">
+          <div class="server-service-copy">
             <button
               type="button"
+              class="server-service-title-btn"
               data-action="open-server-detail"
               data-detail-id="${escapeHtml(serviceId)}"
               ${isOpening ? "disabled" : ""}
-              style="
-                margin:0;
-                padding:0;
-                border:none;
-                background:transparent;
-                text-align:left;
-                color:var(--text-strong);
-                font-size:16px;
-                font-weight:var(--weight-black);
-                letter-spacing:-.02em;
-                line-height:1.15;
-                cursor:${isOpening ? "wait" : "pointer"};
-              "
             >
               ${escapeHtml(title)}
             </button>
 
-            <span
-              style="
-                color:var(--text-dim);
-                font-size:12px;
-                line-height:1.35;
-              "
-            >
+            <span class="server-service-id">
               Service ${escapeHtml(serviceId || "—")}
             </span>
           </div>
         </div>
 
-        <div style="display:grid; gap:8px; justify-items:end;">
-          ${renderChip(typeLabel, getTypeChipStyle(service.type))}
-          ${renderChip(statusLabel, getStatusChipStyle(service.status))}
+        <div class="server-service-chips">
+          ${renderChip({
+            label: typeLabel,
+            kind: "type",
+            value: typeClass,
+          })}
+
+          ${renderChip({
+            label: statusLabel,
+            kind: "status",
+            value: statusClass,
+          })}
         </div>
       </div>
 
-      <div style="display:grid; gap:6px;">
-        <strong
-          style="
-            color:var(--text-strong);
-            font-size:clamp(24px, 3vw, 30px);
-            line-height:1;
-            letter-spacing:-.04em;
-          "
-        >
-          ${escapeHtml(primaryValue)}
-        </strong>
-
-        <span
-          style="
-            color:var(--text-dim);
-            font-size:12px;
-          "
-        >
-          ${service.hasLatency
-            ? "Latencia técnica reportada"
-            : service.hasPercent
-              ? "Uso actual reportado"
-              : "Snapshot actual"}
-        </span>
+      <div class="server-service-metric">
+        <strong>${escapeHtml(primaryValue)}</strong>
+        <span>${escapeHtml(metricLabel)}</span>
       </div>
 
-      <p
-        style="
-          margin:0;
-          color:var(--text-soft);
-          font-size:13px;
-          line-height:1.55;
-          word-break:break-word;
-        "
-      >
+      <p class="server-service-description">
         ${escapeHtml(truncate(description, 140))}
       </p>
 
       ${renderServicePreview(service)}
 
-      <div
-        style="
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          gap:10px;
-          flex-wrap:wrap;
-        "
-      >
-        <span
-          style="
-            color:var(--text-dim);
-            font-size:12px;
-          "
-        >
+      <div class="server-service-footer">
+        <span class="server-service-updated">
           Actualizado ${escapeHtml(updatedAt)}
         </span>
 
@@ -1453,8 +863,29 @@ function renderServiceCard(item = {}, state = {}) {
 }
 
 /* =========================================================
-   TECH SIDEBAR
+   TECHNICAL SIDEBAR
 ========================================================= */
+
+function renderTechnicalBlock({ title = "", rows = [] } = {}) {
+  return `
+    <article class="server-tech-block">
+      <strong class="server-tech-block-title">${escapeHtml(title)}</strong>
+
+      <div class="server-tech-rows">
+        ${safeArray(rows)
+          .map(
+            ([label, value]) => `
+              <div class="server-tech-row">
+                <span>${escapeHtml(String(label))}</span>
+                <strong>${escapeHtml(String(value))}</strong>
+              </div>
+            `
+          )
+          .join("")}
+      </div>
+    </article>
+  `;
+}
 
 function renderTechnicalSidebar(snapshot = {}) {
   const telemetry = safeObject(snapshot.telemetry);
@@ -1463,7 +894,7 @@ function renderTechnicalSidebar(snapshot = {}) {
   const environment = safeObject(telemetry.environment);
   const browserMetrics = safeObject(snapshot.browserMetrics);
 
-  const cards = [
+  const blocks = [
     {
       title: "Host",
       rows: [
@@ -1479,19 +910,44 @@ function renderTechnicalSidebar(snapshot = {}) {
       rows: [
         ["Version", runtime.nodeVersion || "—"],
         ["PID", runtime.nodePid ?? "—"],
-        ["RSS", runtime.rssMB !== null ? formatMB(runtime.rssMB) : "—"],
-        ["Heap used", runtime.heapUsedMB !== null ? formatMB(runtime.heapUsedMB) : "—"],
-        ["Heap total", runtime.heapTotalMB !== null ? formatMB(runtime.heapTotalMB) : "—"],
+        ["RSS", runtime.rssMB !== null && runtime.rssMB !== undefined ? formatMB(runtime.rssMB) : "—"],
+        ["Heap used", runtime.heapUsedMB !== null && runtime.heapUsedMB !== undefined ? formatMB(runtime.heapUsedMB) : "—"],
+        ["Heap total", runtime.heapTotalMB !== null && runtime.heapTotalMB !== undefined ? formatMB(runtime.heapTotalMB) : "—"],
       ],
     },
     {
       title: "Capacidad",
       rows: [
-        ["RAM", server.ramUsedGB !== null ? `${formatGB(server.ramUsedGB)} / ${formatGB(server.ramTotalGB)}` : "—"],
-        ["Disco", server.diskUsedGB !== null ? `${formatGB(server.diskUsedGB)} / ${formatGB(server.diskTotalGB)}` : "—"],
-        ["CPU", server.cpuPercent !== null ? `${Math.round(server.cpuPercent)}%` : "—"],
-        ["Event loop", server.eventLoopLag !== null ? formatMs(server.eventLoopLag) : "—"],
-        ["TTFB", browserMetrics.ttfb !== null ? formatMs(browserMetrics.ttfb) : "—"],
+        [
+          "RAM",
+          server.ramUsedGB !== null && server.ramUsedGB !== undefined
+            ? `${formatGB(server.ramUsedGB)} / ${formatGB(server.ramTotalGB)}`
+            : "—",
+        ],
+        [
+          "Disco",
+          server.diskUsedGB !== null && server.diskUsedGB !== undefined
+            ? `${formatGB(server.diskUsedGB)} / ${formatGB(server.diskTotalGB)}`
+            : "—",
+        ],
+        [
+          "CPU",
+          server.cpuPercent !== null && server.cpuPercent !== undefined
+            ? `${Math.round(server.cpuPercent)}%`
+            : "—",
+        ],
+        [
+          "Event loop",
+          server.eventLoopLag !== null && server.eventLoopLag !== undefined
+            ? formatMs(server.eventLoopLag)
+            : "—",
+        ],
+        [
+          "TTFB",
+          browserMetrics.ttfb !== null && browserMetrics.ttfb !== undefined
+            ? formatMs(browserMetrics.ttfb)
+            : "—",
+        ],
       ],
     },
     {
@@ -1507,134 +963,20 @@ function renderTechnicalSidebar(snapshot = {}) {
   ];
 
   return `
-    <section
-      class="panel-surface server-tech-sidebar"
-      style="
-        display:grid;
-        gap:14px;
-        padding:18px;
-        border-radius:20px;
-        border:1px solid var(--border-soft);
-        background:var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-      "
-    >
-      <div
-        style="
-          display:flex;
-          align-items:center;
-          justify-content:space-between;
-          gap:10px;
-          flex-wrap:wrap;
-        "
-      >
-        <div style="display:grid; gap:4px;">
-          <strong
-            style="
-              color:var(--text-strong);
-              font-size:18px;
-              letter-spacing:-.02em;
-            "
-          >
-            Resumen técnico
-          </strong>
-
-          <span
-            style="
-              color:var(--text-dim);
-              font-size:13px;
-            "
-          >
-            Vista compacta de host, runtime y entorno.
-          </span>
+    <aside class="server-tech-sidebar">
+      <div class="server-tech-head">
+        <div class="server-tech-copy">
+          <strong>Resumen técnico</strong>
+          <span>Vista compacta de host, runtime y entorno.</span>
         </div>
 
-        <span
-          style="
-            display:inline-flex;
-            align-items:center;
-            min-height:28px;
-            padding:0 10px;
-            border-radius:999px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            color:var(--text-dim);
-            font-size:12px;
-            font-weight:var(--weight-bold);
-            letter-spacing:.04em;
-            text-transform:uppercase;
-          "
-        >
-          4 bloques
-        </span>
+        <span class="server-tech-count">4 bloques</span>
       </div>
 
-      <div style="display:grid; gap:12px;">
-        ${cards
-          .map(
-            (card) => `
-              <article
-                style="
-                  display:grid;
-                  gap:10px;
-                  padding:14px;
-                  border-radius:16px;
-                  border:1px solid var(--border-soft);
-                  background:var(--surface-glass);
-                "
-              >
-                <strong
-                  style="
-                    color:var(--text-strong);
-                    font-size:14px;
-                    letter-spacing:-.02em;
-                  "
-                >
-                  ${escapeHtml(card.title)}
-                </strong>
-
-                <div style="display:grid; gap:8px;">
-                  ${card.rows
-                    .map(
-                      ([label, value]) => `
-                        <div
-                          style="
-                            display:flex;
-                            align-items:flex-start;
-                            justify-content:space-between;
-                            gap:10px;
-                          "
-                        >
-                          <span
-                            style="
-                              color:var(--text-dim);
-                              font-size:12px;
-                            "
-                          >
-                            ${escapeHtml(String(label))}
-                          </span>
-
-                          <strong
-                            style="
-                              color:var(--text-strong);
-                              font-size:12px;
-                              text-align:right;
-                              word-break:break-word;
-                            "
-                          >
-                            ${escapeHtml(String(value))}
-                          </strong>
-                        </div>
-                      `
-                    )
-                    .join("")}
-                </div>
-              </article>
-            `
-          )
-          .join("")}
+      <div class="server-tech-list">
+        ${blocks.map((block) => renderTechnicalBlock(block)).join("")}
       </div>
-    </section>
+    </aside>
   `;
 }
 
@@ -1651,99 +993,24 @@ function renderDashboardToolbar({
   refreshing = false,
 } = {}) {
   return `
-    <div
-      class="server-dashboard-toolbar"
-      style="
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:14px;
-        padding:16px 18px;
-        border-bottom:1px solid var(--border-soft);
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 6%, transparent), transparent),
-          var(--surface-1, var(--surface-glass));
-        flex-wrap:wrap;
-      "
-    >
-      <div style="display:grid; gap:4px;">
-        <strong
-          style="
-            color:var(--text-strong);
-            font-size:var(--font-base);
-            letter-spacing:-.02em;
-          "
-        >
-          Servicios y componentes
-        </strong>
+    <div class="server-dashboard-toolbar">
+      <div class="server-dashboard-toolbar-copy">
+        <strong>Servicios y componentes</strong>
 
-        <span
-          style="
-            color:var(--text-dim);
-            font-size:var(--font-sm);
-          "
-        >
-          Mostrando ${escapeHtml(String(from))}-${escapeHtml(String(to))} de ${escapeHtml(String(total))} · página ${escapeHtml(String(page))} de ${escapeHtml(String(totalPages))}
+        <span>
+          Mostrando ${escapeHtml(String(from))}-${escapeHtml(String(to))} de ${escapeHtml(String(total))}
+          · página ${escapeHtml(String(page))} de ${escapeHtml(String(totalPages))}
         </span>
       </div>
 
-      <div
-        style="
-          display:flex;
-          align-items:center;
-          gap:8px;
-          flex-wrap:wrap;
-        "
-      >
-        <span
-          style="
-            display:inline-flex;
-            align-items:center;
-            min-height:30px;
-            padding:0 10px;
-            border-radius:999px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            color:var(--text-dim);
-            font-size:12px;
-            font-weight:var(--weight-bold);
-            letter-spacing:.04em;
-            text-transform:uppercase;
-          "
-        >
-          Vista técnica
-        </span>
+      <div class="server-dashboard-toolbar-actions">
+        <span class="server-toolbar-pill">Vista técnica</span>
 
         ${
           refreshing
             ? `
-              <span
-                style="
-                  display:inline-flex;
-                  align-items:center;
-                  gap:8px;
-                  min-height:30px;
-                  padding:0 10px;
-                  border-radius:999px;
-                  border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
-                  background:color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-                  color:var(--text-soft);
-                  font-size:12px;
-                  font-weight:var(--weight-bold);
-                  letter-spacing:.04em;
-                  text-transform:uppercase;
-                "
-              >
-                <span
-                  aria-hidden="true"
-                  style="
-                    width:8px;
-                    height:8px;
-                    border-radius:999px;
-                    background:var(--accent, #7c5cff);
-                    animation:serverPulse 1.25s ease-in-out infinite;
-                  "
-                ></span>
+              <span class="server-toolbar-pill server-toolbar-pill--syncing" aria-live="polite">
+                <span class="server-live-dot" aria-hidden="true"></span>
                 Actualizando
               </span>
             `
@@ -1752,38 +1019,22 @@ function renderDashboardToolbar({
 
         <button
           type="button"
+          class="server-pagination-btn"
           data-action="prev-page"
-          ${page <= 1 ? "disabled" : ""}
-          style="
-            min-height:34px;
-            padding:0 12px;
-            border-radius:12px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            color:var(--text-soft);
-            font-weight:var(--weight-bold);
-            cursor:${page <= 1 ? "not-allowed" : "pointer"};
-            opacity:${page <= 1 ? ".55" : "1"};
-          "
+          ${page <= 1 ? 'disabled aria-disabled="true"' : ""}
         >
           Anterior
         </button>
 
+        <span class="server-pagination-status">
+          ${escapeHtml(`${page}/${totalPages}`)}
+        </span>
+
         <button
           type="button"
+          class="server-pagination-btn"
           data-action="next-page"
-          ${page >= totalPages ? "disabled" : ""}
-          style="
-            min-height:34px;
-            padding:0 12px;
-            border-radius:12px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-glass);
-            color:var(--text-soft);
-            font-weight:var(--weight-bold);
-            cursor:${page >= totalPages ? "not-allowed" : "pointer"};
-            opacity:${page >= totalPages ? ".55" : "1"};
-          "
+          ${page >= totalPages ? 'disabled aria-disabled="true"' : ""}
         >
           Siguiente
         </button>
@@ -1794,89 +1045,40 @@ function renderDashboardToolbar({
 
 function renderDashboardLoadingOverlay(message = "Actualizando panel técnico...") {
   return `
-    <div
-      class="server-dashboard-overlay"
-      aria-live="polite"
-      aria-busy="true"
-      style="
-        position:absolute;
-        inset:0;
-        display:grid;
-        place-items:center;
-        padding:18px;
-        background:color-mix(in srgb, var(--surface-1, #0f1115) 74%, transparent);
-        backdrop-filter:blur(4px);
-        z-index:4;
-      "
-    >
-      <div
-        style="
-          display:grid;
-          justify-items:center;
-          gap:12px;
-          min-width:min(100%, 240px);
-          padding:18px 20px;
-          border-radius:18px;
-          border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 22%, var(--border-soft));
-          background:linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent), var(--surface-1, var(--surface-glass));
-          box-shadow:0 20px 40px rgba(0,0,0,.22);
-        "
-      >
-        <span
-          aria-hidden="true"
-          style="
-            width:28px;
-            height:28px;
-            border-radius:999px;
-            border:3px solid color-mix(in srgb, var(--accent, #7c5cff) 16%, transparent);
-            border-top-color:var(--accent, #7c5cff);
-            animation:serverSpin .8s linear infinite;
-          "
-        ></span>
+    <div class="server-dashboard-overlay" aria-live="polite" aria-busy="true">
+      <div class="server-dashboard-overlay-card">
+        <span class="server-dashboard-overlay-spinner" aria-hidden="true"></span>
 
-        <strong
-          style="
-            color:var(--text-strong);
-            font-size:14px;
-            letter-spacing:-.02em;
-          "
-        >
-          ${escapeHtml(message)}
-        </strong>
+        <strong>${escapeHtml(message)}</strong>
 
-        <span
-          style="
-            color:var(--text-dim);
-            font-size:12px;
-          "
-        >
-          Solo se está actualizando la sección principal
-        </span>
+        <span>Solo se está actualizando la sección principal</span>
       </div>
     </div>
   `;
 }
 
 /* =========================================================
-   MAIN
+   MAIN DASHBOARD
 ========================================================= */
 
 export function renderDashboard({ snapshot = {}, state = {} } = {}) {
-  const localState = state || serverState || {};
+  const localState = safeObject(state || serverState || {});
   const resolvedSnapshot = getResolvedSnapshot(snapshot);
+
   const services = sortServerServicesByLatencyDesc(
     safeArray(resolvedSnapshot.services)
   );
 
-  const refreshing = Boolean(localState?.refreshing);
-  const loading = Boolean(localState?.loading);
+  const refreshing = Boolean(localState.refreshing);
+  const loading = Boolean(localState.loading);
+  const error = safeText(localState.error, "");
 
   if (loading && !services.length) {
     return renderLoadingState();
   }
 
-  if (localState.error && !services.length) {
-    return renderErrorState(localState.error);
+  if (error && !services.length) {
+    return renderErrorState(error);
   }
 
   if (!services.length) {
@@ -1886,19 +1088,7 @@ export function renderDashboard({ snapshot = {}, state = {} } = {}) {
   const pagination = getPagination(services, localState);
 
   return `
-    <section
-      class="server-dashboard-wrap panel-surface"
-      style="
-        position:relative;
-        overflow:hidden;
-        border-radius:var(--panel-radius);
-        border:1px solid var(--border-soft);
-        background:
-          linear-gradient(180deg, color-mix(in srgb, var(--surface-2, transparent) 60%, transparent), transparent),
-          var(--surface-1, var(--surface-glass));
-        box-shadow:var(--shadow-sm);
-      "
-    >
+    <section class="server-dashboard-wrap ${refreshing ? "is-refreshing" : ""}">
       ${renderDashboardToolbar({
         total: pagination.totalItems,
         page: pagination.page,
@@ -1908,67 +1098,34 @@ export function renderDashboard({ snapshot = {}, state = {} } = {}) {
         refreshing,
       })}
 
-      <div
-        class="server-dashboard-main-grid"
-        style="
-          display:grid;
-          grid-template-columns:minmax(0, 1.45fr) minmax(320px, .8fr);
-          gap:18px;
-          padding:18px;
-        "
-      >
-        <div
-          class="server-services-grid"
-          style="
-            display:grid;
-            grid-template-columns:repeat(2, minmax(0, 1fr));
-            gap:16px;
-            align-content:start;
-          "
-        >
+      <div class="server-dashboard-main-grid">
+        <div class="server-services-grid">
           ${pagination.items
             .map((item) => renderServiceCard(item, localState))
             .join("")}
         </div>
 
-        <div style="display:grid; gap:18px; align-content:start;">
-          ${renderTechnicalSidebar(resolvedSnapshot)}
-        </div>
+        ${renderTechnicalSidebar(resolvedSnapshot)}
       </div>
 
       ${refreshing ? renderDashboardLoadingOverlay("Actualizando panel técnico...") : ""}
-
-      <style>
-        @keyframes serverSpin {
-          to { transform:rotate(360deg); }
-        }
-
-        .server-service-card:hover {
-          transform: translateY(-2px);
-          border-color: color-mix(in srgb, var(--accent, #7c5cff) 20%, var(--border-soft));
-          box-shadow: var(--shadow-md);
-        }
-
-        .server-service-card.is-opening:hover {
-          transform: none;
-        }
-
-        @media (max-width: 1200px) {
-          .server-dashboard-main-grid {
-            grid-template-columns: 1fr !important;
-          }
-        }
-
-        @media (max-width: 920px) {
-          .server-services-grid {
-            grid-template-columns: 1fr !important;
-          }
-        }
-      </style>
     </section>
   `;
 }
 
+/* =========================================================
+   BACKWARD COMPAT EXPORTS
+========================================================= */
+
 export function renderCards({ snapshot = {}, state = {} } = {}) {
   return renderDashboard({ snapshot, state });
 }
+
+export default {
+  renderHeader,
+  renderLoadingState,
+  renderErrorState,
+  renderEmptyState,
+  renderDashboard,
+  renderCards,
+};

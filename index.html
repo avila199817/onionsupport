@@ -6,9 +6,10 @@
   data-theme="dark"
   data-theme-mode="system"
   data-theme-source="initial"
+  data-app-state="booting"
   data-route-mode="boot"
   data-shell-state="booting"
-  class="app-booting app-loading theme-dark"
+  class="app-booting"
 >
 <head>
   <!-- =========================================================
@@ -17,55 +18,50 @@
 
        PRO SAAS PANEL · PRIVATE SPA · ENTERPRISE BOOT SHELL
        CSP READY · ZERO INLINE JS/CSS · NO EXTERNAL FONTS
-       TOKEN PRO SYSTEM · STATIC LOADER · THEME PREBOOT
+       TOKEN PRO SYSTEM · THEME PREBOOT · STATIC LOADER
        FINAL EXTREME 10/10
 
        OBJETIVOS:
-       - shell SPA privado, no landing pública
-       - sin scripts inline
-       - sin CSS inline
-       - sin Google Fonts / fonts.gstatic / dependencias externas
-       - CSS centralizado desde /src/css/app.css
-       - variables.css como Token Pro System / fuente de verdad
-       - theme system-first con preboot externo
-       - loader estático visible desde refresh
-       - logos del loader theme-aware:
-         · dark  -> /src/media/img/favicon_white.png
-         · light -> /src/media/img/favicon_black.png
-       - sidebar/topbar montados por JS
-       - tablehead dinámico preparado
-       - restore de sesión sin flash visual
-       - URLs SPA resueltas por Azure Static Web Apps
-       - no indexar rutas privadas/auth/técnicas
-       - favicon real sin manifest fantasma
-       - preparado para CSP estricta vía headers
+       - Shell SPA privado, no landing pública.
+       - Sin scripts inline.
+       - Sin CSS inline.
+       - Sin Google Fonts / fonts.gstatic / dependencias externas.
+       - CSS centralizado desde /src/css/app.css.
+       - variables.css como Token Pro System / fuente de verdad.
+       - Tema inicial resuelto por /src/preboot/theme.js antes del CSS.
+       - Loader estático visible desde refresh.
+       - Loader controlado después por JS.
+       - Sidebar y topbar montados por JS.
+       - Tablehead dinámico preparado.
+       - Restore de sesión sin flash visual.
+       - URLs SPA resueltas por Azure Static Web Apps.
+       - Panel privado no indexable.
+       - PWA coherente mediante /site.webmanifest.
+       - Preparado para CSP estricta vía headers.
+
+       CONTRATO DE BOOT:
+       - index.html declara estructura y estado mínimo inicial.
+       - theme.js decide el tema real: dark/light/system/storage.
+       - main.js arranca la aplicación.
+       - loader.js oculta el loader y limpia estados app-booting/app-loading.
+       - Router renderiza en #view-container.
+       - SidebarUI monta en #sidebar-mount.
+       - TopbarUI monta en #topbar-mount.
 
        IMPORTANTE:
-       - /src/preboot/theme.js debe ser JS puro.
-       - /src/preboot/theme.js no debe contener <script>.
-       - /src/preboot/theme.js no debe contener HTML.
-       - /src/css/app.css importa tokens/core/layout/components/views/auth.
-       - index.html debe empezar siempre por <!DOCTYPE html>.
-       - Las fuentes se resuelven desde variables.css con stack system-ui.
-       - La CSP real debe aplicarse preferentemente desde headers,
-         por ejemplo staticwebapp.config.json en Azure Static Web Apps.
-
-       FIX TEMA / LOADER:
        - El tema inicial vive en <html>.
-       - <body> NO debe nacer con data-theme="dark" ni theme-dark.
-       - theme.js sincroniza body cuando document.body existe.
-       - loader.css debe decidir el logo usando html[data-theme].
+       - <body> no nace con data-theme ni theme-dark/theme-light.
+       - No hardcodear clases theme-dark/theme-light en index.html.
+       - theme.js puede sincronizar <body> cuando document.body exista.
+       - loader.css debe decidir logos mediante html[data-theme].
+       - La CSP real debe aplicarse desde headers, por ejemplo
+         staticwebapp.config.json en Azure Static Web Apps.
   ========================================================= -->
 
   <!-- =========================
        META BASE
   ========================= -->
   <meta charset="UTF-8">
-
-  <meta
-    http-equiv="X-UA-Compatible"
-    content="IE=edge"
-  >
 
   <meta
     name="viewport"
@@ -89,14 +85,9 @@
     content="Onion Support · Panel privado SaaS de soporte, incidencias, facturación y gestión interna."
   >
 
-  <meta
-    name="generator"
-    content="Onion Support SPA"
-  >
-
   <!-- =========================
        PRIVACY / INDEXING
-       App privada: no indexar panel/auth/rutas SPA.
+       App privada: no indexar panel, auth ni rutas SPA.
   ========================= -->
   <meta
     name="robots"
@@ -125,7 +116,7 @@
 
   <!-- =========================
        THEME / BROWSER CHROME
-       El valor real se puede actualizar desde theme.js / runtime.
+       theme.js/runtime pueden actualizar theme-color.
   ========================= -->
   <meta
     name="color-scheme"
@@ -166,8 +157,6 @@
 
   <!-- =========================
        FAVICON / APP ICONS
-       Sin manifest hasta crear /site.webmanifest real.
-       Esto evita 404 innecesarios en consola.
   ========================= -->
   <link
     rel="icon"
@@ -184,6 +173,16 @@
   <link
     rel="apple-touch-icon"
     href="/src/media/img/favicon_black_circle.png"
+  >
+
+  <!-- =========================
+       PWA MANIFEST
+       El repo contiene /site.webmanifest.
+       Mantener rutas reales dentro del manifest.
+  ========================= -->
+  <link
+    rel="manifest"
+    href="/site.webmanifest"
   >
 
   <!-- =========================
@@ -219,16 +218,16 @@
   <!-- =========================
        PREBOOT THEME
        CSP READY:
-       - externo
+       - script externo
        - síncrono
        - antes del CSS final
-       - resuelve data-theme real:
-         dark/light según system o storage
+       - actualiza html[data-theme]
+       - evita flash dark/light incorrecto
 
-       NOTA:
-       - En head normalmente document.body aún no existe.
-       - theme.js debe actualizar document.documentElement.
-       - theme.js sincroniza body en DOMContentLoaded si aún no existe.
+       /src/preboot/theme.js debe ser JS puro:
+       - sin <script>
+       - sin HTML
+       - sin CSS inline
   ========================= -->
   <script src="/src/preboot/theme.js"></script>
 
@@ -238,8 +237,8 @@
        - tokens/variables.css
        - tokens/light.css
        - core/reset.css
-       - core/layout.css
        - core/core.css
+       - core/layout.css
        - core/loader.css
        - layout/sidebar.css
        - layout/topbar.css
@@ -283,8 +282,10 @@
 >
   <!-- =========================================================
        ACCESSIBILITY · SKIP LINK
-       Requiere estilos globales tipo .sr-only / .sr-only-focusable.
-       Si no existen, puede añadirse soporte en core.css/layout.css.
+       Requiere soporte global para:
+       - .sr-only
+       - .sr-only-focusable
+       - .app-skip-link
   ========================================================= -->
   <a
     class="sr-only sr-only-focusable app-skip-link"
@@ -296,16 +297,19 @@
 
   <!-- =========================================================
        BOOT LOADER ESTÁTICO
-       - visible desde refresh antes de JS
-       - controlado después por src/app/loader.js / main.js
-       - sin inline script
-       - sin inline style
-       - logos dependientes de html[data-theme]
-       - fallback textual/accesible estable
-       - app-loader__logo--dark:
-         logo blanco para fondos oscuros
-       - app-loader__logo--light:
-         logo negro para fondos claros
+       - Visible desde refresh antes de JS.
+       - Controlado después por src/app/loader.js / main.js.
+       - Sin inline script.
+       - Sin inline style.
+       - Logos dependientes de html[data-theme].
+       - Accesible mediante role="status".
+       - Ocultación esperada por JS:
+         · remove body/html app-booting/app-loading
+         · data-app-loading="false"
+         · data-loader-visible="false"
+         · data-loader-state="hidden"
+         · aria-busy="false"
+         · aria-hidden="true"
   ========================================================= -->
   <div
     id="app-loader"
@@ -392,8 +396,8 @@
   <!-- =========================================================
        NOSCRIPT FALLBACK
        Si JS está desactivado, noscript.css debe:
-       - ocultar loader si procede
-       - mostrar layout noscript de forma usable
+       - ocultar el loader si procede
+       - mostrar layout noscript usable
   ========================================================= -->
   <noscript>
     <div class="layout noscript-layout">
@@ -407,8 +411,8 @@
             <h1>JavaScript es necesario</h1>
 
             <p>
-              Onion Support necesita JavaScript para cargar
-              la navegación SPA, el panel, las vistas y la autenticación.
+              Onion Support necesita JavaScript para cargar la navegación SPA,
+              el panel, las vistas y la autenticación.
             </p>
           </section>
         </div>
@@ -418,22 +422,22 @@
 
   <!-- =========================================================
        APP LAYOUT
-       - Sidebar montado por JS
-       - Topbar montado por JS
-       - Tablehead dinámico preparado
-       - View root estable para Router
-       - Loader inicial ya existe y lo controla JS
-       - El layout debe reservar ancho sidebar desde CSS/tokens
+       - Sidebar montado por JS.
+       - Topbar montado por JS.
+       - Tablehead dinámico preparado.
+       - View root estable para Router.
+       - Loader inicial ya existe y lo controla JS.
+       - Shell no interactivo durante boot.
   ========================================================= -->
   <div
     id="app-shell"
     class="layout app-shell"
     data-app-shell="true"
     data-shell="booting"
-    data-route-mode="boot"
     data-shell-interactive="false"
+    data-route-mode="boot"
     aria-busy="true"
-    aria-hidden="false"
+    aria-hidden="true"
   >
     <!-- =========================
          SIDEBAR MOUNT
@@ -441,7 +445,7 @@
     <div
       id="sidebar-mount"
       data-sidebar-mount="true"
-      aria-hidden="false"
+      aria-hidden="true"
     ></div>
 
     <!-- =========================
@@ -450,7 +454,7 @@
     <div
       id="topbar-mount"
       data-topbar-mount="true"
-      aria-hidden="false"
+      aria-hidden="true"
     ></div>
 
     <!-- =========================
@@ -493,7 +497,6 @@
           id="view-container"
           data-view-root="true"
           data-router-view="true"
-          aria-live="polite"
           aria-busy="true"
         ></div>
       </div>

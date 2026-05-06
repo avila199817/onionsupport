@@ -24,13 +24,9 @@
    - abort in-flight opcional
    - errores consistentes
    - eventos sin tokens reales
-   - compat con registry.hooks como funciones o entradas { handler }
+   - compat con registry.hooks como arrays, funciones o entradas { handler }
    - /api/auth/me recibe Authorization si config lo marca como privado
-
-   NOTA IMPORTANTE:
-   - este módulo NO decide qué endpoints existen.
-   - si aparecen 404 en /facturas, /users, /clients, etc.,
-     el origen está en el caller/vista/servicio que invoca esos paths.
+   - no ReferenceError si fetch/FormData/Blob/Headers no existen
 ========================================================= */
 
 import { config } from "./config.js";
@@ -47,11 +43,18 @@ import {
   isProbablyTimeoutError,
   detectNetworkHints,
   redactTokenInText,
+  safeText as helperSafeText,
+  safeObject as helperSafeObject,
+  safeArray as helperSafeArray,
+  safeClone as helperSafeClone,
 } from "./helpers.js";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
+
+const REQUEST_VERSION =
+  "11.0.0";
 
 const DEFAULT_METHOD =
   "GET";
@@ -59,14 +62,20 @@ const DEFAULT_METHOD =
 const DEFAULT_RESPONSE_TYPE =
   "auto";
 
+const DEFAULT_TIMEOUT_MS =
+  30000;
+
+const DEFAULT_RETRIES =
+  1;
+
 const DEFAULT_RETRY_DELAY_MS =
   300;
 
 const DEFAULT_RETRY_MAX_DELAY_MS =
   4000;
 
-const REQUEST_VERSION =
-  "10.2.0";
+const DEFAULT_DEDUPE =
+  true;
 
 const RETRYABLE_HTTP_STATUSES =
   Object.freeze([
@@ -85,6 +94,13 @@ const BODYLESS_METHODS =
     "HEAD",
   ]);
 
+const DEFAULT_RETRYABLE_METHODS =
+  Object.freeze([
+    "GET",
+    "HEAD",
+    "OPTIONS",
+  ]);
+
 const JSON_CONTENT_TYPES =
   Object.freeze([
     "application/json",
@@ -99,10 +115,48 @@ const TEXT_CONTENT_TYPES =
     "application/csv",
     "application/javascript",
     "application/x-javascript",
+    "application/problem+json",
+  ]);
+
+const BINARY_CONTENT_TYPES =
+  Object.freeze([
+    "application/octet-stream",
+    "application/pdf",
+    "application/zip",
+    "image/",
+    "audio/",
+    "video/",
   ]);
 
 const SENSITIVE_HEADER_RE =
-  /authorization|cookie|set-cookie|token|secret|password|credential|session|jwt|bearer/i;
+  /authorization|cookie|set-cookie|token|secret|password|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code/i;
+
+const SENSITIVE_PAYLOAD_KEY_RE =
+  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code/i;
+
+const REQUEST_EVENTS =
+  Object.freeze({
+    start:
+      "app:request:start",
+
+    success:
+      "app:request:success",
+
+    error:
+      "app:request:error",
+
+    retry:
+      "app:request:retry",
+
+    deduped:
+      "app:request:deduped",
+
+    abort:
+      "app:request:abort",
+
+    clearInFlight:
+      "app:request:clear-in-flight",
+  });
 
 /* =========================================================
    BASICS
@@ -120,16 +174,20 @@ function isObject(value) {
   );
 }
 
-function safeNumber(value, fallback = 0) {
-  const number =
-    Number(value);
-
-  return Number.isFinite(number)
-    ? number
-    : fallback;
+function isAnyObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object"
+  );
 }
 
 function safeText(value, fallback = "") {
+  try {
+    if (typeof helperSafeText === "function") {
+      return helperSafeText(value, fallback);
+    }
+  } catch {}
+
   if (
     value === null ||
     value === undefined
@@ -143,28 +201,90 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
+function safeNumber(value, fallback = 0) {
+  const number =
+    Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : fallback;
+}
+
 function safeBoolean(value, fallback = false) {
   if (value === true) return true;
   if (value === false) return false;
-  if (value === "true") return true;
-  if (value === "false") return false;
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === "string") {
+    const clean =
+      value.trim().toLowerCase();
+
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "si",
+        "sí",
+        "ok",
+        "on",
+        "enabled",
+      ].includes(clean)
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "off",
+        "disabled",
+      ].includes(clean)
+    ) {
+      return false;
+    }
+  }
 
   return Boolean(fallback);
 }
 
 function safeArray(value) {
+  try {
+    if (typeof helperSafeArray === "function") {
+      return helperSafeArray(value);
+    }
+  } catch {}
+
   return Array.isArray(value)
     ? value
     : [];
 }
 
 function safeObject(value, fallback = {}) {
+  try {
+    if (typeof helperSafeObject === "function") {
+      return helperSafeObject(value, fallback);
+    }
+  } catch {}
+
   return isObject(value)
     ? value
     : fallback;
 }
 
 function safeClone(value, fallback = null) {
+  try {
+    if (typeof helperSafeClone === "function") {
+      return helperSafeClone(value, fallback);
+    }
+  } catch {}
+
   try {
     if (typeof structuredClone === "function") {
       return structuredClone(value);
@@ -228,15 +348,29 @@ function safeWarn(utils, ...args) {
 }
 
 function sleep(ms = 0) {
-  return new Promise((resolve) =>
-    setTimeout(
-      resolve,
-      Math.max(
-        0,
-        safeNumber(ms, 0)
-      )
-    )
-  );
+  return new Promise((resolve) => {
+    try {
+      setTimeout(
+        resolve,
+        Math.max(
+          0,
+          safeNumber(ms, 0)
+        )
+      );
+    } catch {
+      resolve();
+    }
+  });
+}
+
+function getFetch() {
+  try {
+    if (typeof globalThis !== "undefined" && isFunction(globalThis.fetch)) {
+      return globalThis.fetch.bind(globalThis);
+    }
+  } catch {}
+
+  return null;
 }
 
 function normalizeMethod(method = DEFAULT_METHOD) {
@@ -249,6 +383,24 @@ function normalizeMethod(method = DEFAULT_METHOD) {
 function isBodyAllowed(method = DEFAULT_METHOD) {
   return !BODYLESS_METHODS.includes(
     normalizeMethod(method)
+  );
+}
+
+function getConfiguredTimeout() {
+  return safeNumber(
+    config?.requestTimeout ??
+      config?.api?.timeout ??
+      DEFAULT_TIMEOUT_MS,
+    DEFAULT_TIMEOUT_MS
+  );
+}
+
+function getConfiguredRetries() {
+  return safeNumber(
+    config?.requestRetries ??
+      config?.api?.retries ??
+      DEFAULT_RETRIES,
+    DEFAULT_RETRIES
   );
 }
 
@@ -287,7 +439,10 @@ function hasHeader(headers, name) {
 function setHeader(headers, name, value) {
   if (
     !headers ||
-    !name
+    !name ||
+    value === undefined ||
+    value === null ||
+    value === ""
   ) {
     return headers;
   }
@@ -329,8 +484,7 @@ function deleteHeader(headers, name) {
 }
 
 function sanitizeHeadersForLog(headers = {}) {
-  const output =
-    {};
+  const output = {};
 
   for (const [key, value] of Object.entries(headers || {})) {
     const lower =
@@ -339,15 +493,14 @@ function sanitizeHeadersForLog(headers = {}) {
     output[key] =
       SENSITIVE_HEADER_RE.test(lower)
         ? "***"
-        : value;
+        : safeRedact(String(value));
   }
 
   return output;
 }
 
 function readResponseHeaders(response = null) {
-  const output =
-    {};
+  const output = {};
 
   try {
     response?.headers?.forEach?.((value, key) => {
@@ -446,6 +599,10 @@ export async function parseResponseBody(response, responseType = DEFAULT_RESPONS
     ).toLowerCase();
 
   try {
+    if (finalType === "response") {
+      return response;
+    }
+
     if (finalType === "blob") {
       return await response.blob();
     }
@@ -457,7 +614,10 @@ export async function parseResponseBody(response, responseType = DEFAULT_RESPONS
       return await response.arrayBuffer();
     }
 
-    if (finalType === "formData") {
+    if (
+      finalType === "formData" ||
+      finalType === "formdata"
+    ) {
       return await response.formData();
     }
 
@@ -507,7 +667,10 @@ export async function parseResponseBody(response, responseType = DEFAULT_RESPONS
     }
 
     if (
-      contentType.includes("application/octet-stream")
+      contentTypeIncludes(
+        contentType,
+        BINARY_CONTENT_TYPES
+      )
     ) {
       return await response.arrayBuffer();
     }
@@ -544,6 +707,11 @@ function extractDataMessage(data = null) {
     return safeText(data, "");
   }
 
+  const errors =
+    Array.isArray(data.errors)
+      ? data.errors
+      : [];
+
   return (
     safeText(data.message, "") ||
     safeText(data.error, "") ||
@@ -551,9 +719,97 @@ function extractDataMessage(data = null) {
     safeText(data.title, "") ||
     safeText(data.reason, "") ||
     safeText(data.description, "") ||
-    safeText(data.errors?.[0]?.message, "") ||
-    safeText(data.errors?.[0], "")
+    safeText(data.msg, "") ||
+    safeText(errors?.[0]?.message, "") ||
+    safeText(errors?.[0]?.detail, "") ||
+    safeText(errors?.[0], "")
   );
+}
+
+function sanitizeValueForEvent(value, depth = 0, keyHint = "") {
+  if (SENSITIVE_PAYLOAD_KEY_RE.test(safeText(keyHint, ""))) {
+    return value
+      ? "***"
+      : null;
+  }
+
+  if (depth > 3) {
+    return "[depth-limit]";
+  }
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return safeRedact(value);
+  }
+
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "bigint") {
+    return String(value);
+  }
+
+  if (typeof value === "function") {
+    return "[function]";
+  }
+
+  if (value instanceof Error) {
+    return {
+      name:
+        value.name || "Error",
+      message:
+        safeRedact(value.message || "Error"),
+      stack:
+        value.stack ? "[stack]" : null,
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 50)
+      .map((item) =>
+        sanitizeValueForEvent(
+          item,
+          depth + 1,
+          keyHint
+        )
+      );
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value).slice(0, 80)) {
+      output[key] =
+        SENSITIVE_PAYLOAD_KEY_RE.test(key)
+          ? item
+            ? "***"
+            : null
+          : sanitizeValueForEvent(
+              item,
+              depth + 1,
+              key
+            );
+    }
+
+    return output;
+  }
+
+  try {
+    return safeRedact(String(value));
+  } catch {
+    return "[unserializable]";
+  }
 }
 
 function sanitizeErrorForEvent(error = {}) {
@@ -592,6 +848,13 @@ function sanitizeErrorForEvent(error = {}) {
     output.headers =
       sanitizeHeadersForLog(
         output.headers
+      );
+  }
+
+  if (output.data) {
+    output.data =
+      sanitizeValueForEvent(
+        output.data
       );
   }
 
@@ -648,59 +911,64 @@ export function buildRequestError({
   const finalMethod =
     normalizeMethod(method);
 
-  return {
-    name:
-      "RequestError",
+  const error = new Error(
+    safeRedact(message)
+  );
 
-    ok:
-      false,
+  error.name =
+    "RequestError";
 
-    status,
+  error.ok =
+    false;
 
-    statusText:
-      safeRedact(statusText),
+  error.status =
+    status;
 
-    url,
+  error.statusText =
+    safeRedact(statusText);
 
-    redactedUrl:
-      safeRedact(url),
+  error.url =
+    url;
 
-    method:
-      finalMethod,
+  error.redactedUrl =
+    safeRedact(url);
 
-    timeout:
-      timeout === true,
+  error.method =
+    finalMethod;
 
-    aborted:
-      aborted === true,
+  error.timeout =
+    timeout === true;
 
-    raw,
+  error.aborted =
+    aborted === true;
 
-    data,
+  error.raw =
+    raw;
 
-    headers:
-      readResponseHeaders(response),
+  error.data =
+    data;
 
-    hints:
-      status === 0
-        ? detectNetworkHints(url)
-        : null,
+  error.headers =
+    readResponseHeaders(response);
 
-    message:
-      safeRedact(message),
+  error.hints =
+    status === 0
+      ? detectNetworkHints(url)
+      : null;
 
-    requestId:
-      safeText(requestId, ""),
+  error.requestId =
+    safeText(requestId, "");
 
-    attempt:
-      safeNumber(attempt, 0),
+  error.attempt =
+    safeNumber(attempt, 0);
 
-    attempts:
-      safeNumber(attempts, 0),
+  error.attempts =
+    safeNumber(attempts, 0);
 
-    at:
-      safeIsoDate(),
-  };
+  error.at =
+    safeIsoDate();
+
+  return error;
 }
 
 /* =========================================================
@@ -738,11 +1006,35 @@ function parseRetryAfterMs(value = "") {
   return 0;
 }
 
+function isRetryableMethod(method = DEFAULT_METHOD, requestConfig = {}) {
+  const finalMethod =
+    normalizeMethod(method);
+
+  if (requestConfig.retryUnsafeMethods === true) {
+    return true;
+  }
+
+  const configuredMethods =
+    safeArray(
+      requestConfig.retryMethods ||
+        config?.requestRetryMethods ||
+        config?.api?.retryMethods
+    );
+
+  const methods =
+    configuredMethods.length
+      ? configuredMethods.map(normalizeMethod)
+      : DEFAULT_RETRYABLE_METHODS;
+
+  return methods.includes(finalMethod);
+}
+
 export function shouldRetryRequest(error, requestConfig = {}) {
   const retries =
     safeNumber(
       requestConfig?.retries ??
-        config.requestRetries,
+        config?.requestRetries ??
+        config?.api?.retries,
       0
     );
 
@@ -755,9 +1047,7 @@ export function shouldRetryRequest(error, requestConfig = {}) {
       requestConfig?.method
     );
 
-  if (
-    !BODYLESS_METHODS.includes(method)
-  ) {
+  if (!isRetryableMethod(method, requestConfig)) {
     return false;
   }
 
@@ -771,6 +1061,12 @@ export function shouldRetryRequest(error, requestConfig = {}) {
 
   if (error?.status === 0) {
     return true;
+  }
+
+  if (safeArray(requestConfig.retryStatuses).length) {
+    return safeArray(requestConfig.retryStatuses)
+      .map((status) => safeNumber(status, -1))
+      .includes(safeNumber(error?.status, 0));
   }
 
   return RETRYABLE_HTTP_STATUSES.some((status) => {
@@ -787,8 +1083,8 @@ function computeRetryDelayMs(error, attempt, requestConfig = {}) {
     safeNumber(
       requestConfig?.retryDelay ??
         requestConfig?.retryDelayMs ??
-        config.requestRetryDelayMs ??
-        DEFAULT_RETRY_DELAY_MS,
+        config?.requestRetryDelayMs ??
+        config?.api?.retryDelayMs,
       DEFAULT_RETRY_DELAY_MS
     );
 
@@ -796,8 +1092,8 @@ function computeRetryDelayMs(error, attempt, requestConfig = {}) {
     safeNumber(
       requestConfig?.retryMaxDelay ??
         requestConfig?.retryMaxDelayMs ??
-        config.requestRetryMaxDelayMs ??
-        DEFAULT_RETRY_MAX_DELAY_MS,
+        config?.requestRetryMaxDelayMs ??
+        config?.api?.retryMaxDelayMs,
       DEFAULT_RETRY_MAX_DELAY_MS
     );
 
@@ -824,7 +1120,7 @@ function computeRetryDelayMs(error, attempt, requestConfig = {}) {
 
   const jitter =
     Math.floor(
-      Math.random() * baseDelay
+      Math.random() * Math.max(1, baseDelay)
     );
 
   return Math.min(
@@ -841,7 +1137,8 @@ export async function executeFetchWithRetry(url, fetchFactory, requestConfig = {
   const retries =
     safeNumber(
       requestConfig?.retries ??
-        config.requestRetries,
+        config?.requestRetries ??
+        config?.api?.retries,
       0
     );
 
@@ -849,11 +1146,8 @@ export async function executeFetchWithRetry(url, fetchFactory, requestConfig = {
     utils?.sleep ||
     sleep;
 
-  let attempt =
-    0;
-
-  let lastError =
-    null;
+  let attempt = 0;
+  let lastError = null;
 
   while (attempt <= retries) {
     try {
@@ -942,9 +1236,71 @@ export async function executeFetchWithRetry(url, fetchFactory, requestConfig = {
    HOOKS
 ========================================================= */
 
+function normalizeHookList(hooks) {
+  if (!hooks) {
+    return [];
+  }
+
+  if (Array.isArray(hooks)) {
+    return hooks;
+  }
+
+  if (isFunction(hooks)) {
+    return [hooks];
+  }
+
+  if (isObject(hooks)) {
+    if (Array.isArray(hooks.handlers)) {
+      return hooks.handlers;
+    }
+
+    if (Array.isArray(hooks.items)) {
+      return hooks.items;
+    }
+
+    if (isFunction(hooks.handler)) {
+      return [hooks];
+    }
+  }
+
+  return [];
+}
+
+function getRegistryHookList(registry, name = "") {
+  const hookName =
+    safeText(name, "");
+
+  if (!hookName) {
+    return [];
+  }
+
+  const registryHooks =
+    registry?.hooks;
+
+  if (!registryHooks) {
+    return [];
+  }
+
+  if (Array.isArray(registryHooks?.[hookName])) {
+    return registryHooks[hookName];
+  }
+
+  if (isFunction(registryHooks?.get)) {
+    try {
+      return normalizeHookList(
+        registryHooks.get(hookName)
+      );
+    } catch {}
+  }
+
+  return normalizeHookList(
+    registryHooks?.[hookName]
+  );
+}
+
 async function safeRunHooks(hooks, payload, context = {}) {
   const list =
-    safeArray(hooks);
+    normalizeHookList(hooks);
 
   if (!list.length) {
     return payload;
@@ -1039,6 +1395,13 @@ function isArrayBufferBody(value) {
   );
 }
 
+function isReadableStreamBody(value) {
+  return (
+    typeof ReadableStream !== "undefined" &&
+    value instanceof ReadableStream
+  );
+}
+
 function serializeBody({
   method,
   body,
@@ -1083,7 +1446,8 @@ function serializeBody({
 
   if (
     isBlobBody(body) ||
-    isArrayBufferBody(body)
+    isArrayBufferBody(body) ||
+    isReadableStreamBody(body)
   ) {
     return body;
   }
@@ -1218,8 +1582,7 @@ export function createRequest({
   utils,
   registry,
 } = {}) {
-  let requestSequence =
-    0;
+  let requestSequence = 0;
 
   const inFlightRequests =
     new Map();
@@ -1252,6 +1615,9 @@ export function createRequest({
     aborted:
       0,
 
+    cleared:
+      0,
+
     lastRequestAt:
       0,
 
@@ -1262,7 +1628,7 @@ export function createRequest({
       null,
   };
 
-  function stableStringify(value) {
+  function stableStringify(value, seen = new WeakSet()) {
     if (
       value === null ||
       value === undefined
@@ -1274,14 +1640,22 @@ export function createRequest({
       return String(value);
     }
 
+    if (seen.has(value)) {
+      return "[circular]";
+    }
+
+    seen.add(value);
+
     if (Array.isArray(value)) {
-      return `[${value.map(stableStringify).join(",")}]`;
+      return `[${value.map((item) =>
+        stableStringify(item, seen)
+      ).join(",")}]`;
     }
 
     return `{${Object.keys(value)
       .sort()
       .map((key) =>
-        `${key}:${stableStringify(value[key])}`
+        `${key}:${stableStringify(value[key], seen)}`
       )
       .join("|")}}`;
   }
@@ -1346,7 +1720,7 @@ export function createRequest({
         false,
 
       timeout:
-        config.requestTimeout,
+        getConfiguredTimeout(),
 
       raw:
         false,
@@ -1369,18 +1743,32 @@ export function createRequest({
         null,
 
       retries:
-        config.requestRetries,
+        getConfiguredRetries(),
 
       retryDelay:
-        config.requestRetryDelayMs ??
+        config?.requestRetryDelayMs ??
+        config?.api?.retryDelayMs ??
         DEFAULT_RETRY_DELAY_MS,
 
       retryMaxDelay:
-        config.requestRetryMaxDelayMs ??
+        config?.requestRetryMaxDelayMs ??
+        config?.api?.retryMaxDelayMs ??
         DEFAULT_RETRY_MAX_DELAY_MS,
 
+      retryUnsafeMethods:
+        false,
+
+      retryStatuses:
+        [],
+
+      retryMethods:
+        [],
+
       dedupe:
-        true,
+        DEFAULT_DEDUPE,
+
+      dedupeKey:
+        "",
 
       silent:
         false,
@@ -1462,20 +1850,21 @@ export function createRequest({
     merged.timeout =
       safeNumber(
         merged.timeout,
-        config.requestTimeout
+        getConfiguredTimeout()
       );
 
     merged.retries =
       safeNumber(
         merged.retries,
-        config.requestRetries
+        getConfiguredRetries()
       );
 
     merged.retryDelay =
       safeNumber(
         merged.retryDelay ??
           merged.retryDelayMs,
-        config.requestRetryDelayMs ??
+        config?.requestRetryDelayMs ??
+          config?.api?.retryDelayMs ??
           DEFAULT_RETRY_DELAY_MS
       );
 
@@ -1483,13 +1872,24 @@ export function createRequest({
       safeNumber(
         merged.retryMaxDelay ??
           merged.retryMaxDelayMs,
-        config.requestRetryMaxDelayMs ??
+        config?.requestRetryMaxDelayMs ??
+          config?.api?.retryMaxDelayMs ??
           DEFAULT_RETRY_MAX_DELAY_MS
       );
 
     merged.expectedStatuses =
       safeArray(
         merged.expectedStatuses
+      );
+
+    merged.retryStatuses =
+      safeArray(
+        merged.retryStatuses
+      );
+
+    merged.retryMethods =
+      safeArray(
+        merged.retryMethods
       );
 
     return merged;
@@ -1510,7 +1910,7 @@ export function createRequest({
 
     let requestConfig =
       await safeRunHooks(
-        registry?.hooks?.beforeRequest,
+        getRegistryHookList(registry, "beforeRequest"),
         baseConfig,
         {
           phase:
@@ -1572,17 +1972,19 @@ export function createRequest({
       BODYLESS_METHODS.includes(method);
 
     const dedupeKey =
-      canDedupe
-        ? buildFingerprint({
-            method,
-            url,
-            headers:
-              finalHeaders,
-            payload,
-            auth:
-              requestConfig.auth,
-          })
-        : null;
+      requestConfig.dedupeKey
+        ? safeText(requestConfig.dedupeKey, "")
+        : canDedupe
+          ? buildFingerprint({
+              method,
+              url,
+              headers:
+                finalHeaders,
+              payload,
+              auth:
+                requestConfig.auth,
+            })
+          : null;
 
     if (
       dedupeKey &&
@@ -1593,7 +1995,7 @@ export function createRequest({
       if (requestConfig.emitEvents !== false) {
         safeEmit(
           events,
-          "app:request:deduped",
+          REQUEST_EVENTS.deduped,
           {
             requestId,
             url:
@@ -1629,7 +2031,7 @@ export function createRequest({
     if (requestConfig.emitEvents !== false) {
       safeEmit(
         events,
-        "app:request:start",
+        REQUEST_EVENTS.start,
         {
           requestId,
           url:
@@ -1686,7 +2088,10 @@ export function createRequest({
                   ]);
 
                 try {
-                  if (!isFunction(fetch)) {
+                  const fetchFn =
+                    getFetch();
+
+                  if (!fetchFn) {
                     throw new Error(
                       "Fetch API no disponible."
                     );
@@ -1715,7 +2120,7 @@ export function createRequest({
                     });
 
                   const currentResponse =
-                    await fetch(
+                    await fetchFn(
                       url,
                       fetchInit
                     );
@@ -1807,7 +2212,7 @@ export function createRequest({
 
                     safeEmit(
                       events,
-                      "app:request:retry",
+                      REQUEST_EVENTS.retry,
                       {
                         requestId,
                         url:
@@ -1840,7 +2245,7 @@ export function createRequest({
             if (requestConfig.emitEvents !== false) {
               safeEmit(
                 events,
-                "app:request:success",
+                REQUEST_EVENTS.success,
                 {
                   requestId,
                   url:
@@ -1888,7 +2293,7 @@ export function createRequest({
 
           const finalData =
             await safeRunHooks(
-              registry?.hooks?.afterResponse,
+              getRegistryHookList(registry, "afterResponse"),
               data,
               {
                 phase:
@@ -1912,7 +2317,7 @@ export function createRequest({
           if (requestConfig.emitEvents !== false) {
             safeEmit(
               events,
-              "app:request:success",
+              REQUEST_EVENTS.success,
               {
                 requestId,
                 url:
@@ -2000,7 +2405,7 @@ export function createRequest({
 
           if (!silent) {
             await safeRunHooks(
-              registry?.hooks?.onRequestError,
+              getRegistryHookList(registry, "onRequestError"),
               normalized,
               {
                 phase:
@@ -2025,7 +2430,7 @@ export function createRequest({
           ) {
             safeEmit(
               events,
-              "app:request:error",
+              REQUEST_EVENTS.error,
               sanitizeErrorForEvent({
                 ...normalized,
                 url:
@@ -2110,6 +2515,9 @@ export function createRequest({
       };
     };
 
+  request.getDebugSnapshot =
+    request.getSnapshot;
+
   request.clearInFlight =
     function clearInFlight(options = {}) {
       const opts =
@@ -2130,14 +2538,30 @@ export function createRequest({
 
       inFlightRequests.clear();
       inFlightMeta.clear();
+      inFlightControllers.clear();
+
+      stats.cleared += count;
+
+      safeEmit(
+        events,
+        REQUEST_EVENTS.clearInFlight,
+        {
+          count,
+          abort:
+            opts.abort === true,
+          reason:
+            opts.reason || "clearInFlight",
+          at:
+            safeIsoDate(),
+        }
+      );
 
       return count;
     };
 
   request.abortInFlight =
     function abortInFlight(reason = "abortInFlight") {
-      let count =
-        0;
+      let count = 0;
 
       for (const controller of inFlightControllers.values()) {
         try {
@@ -2145,6 +2569,17 @@ export function createRequest({
           count += 1;
         } catch {}
       }
+
+      safeEmit(
+        events,
+        REQUEST_EVENTS.abort,
+        {
+          count,
+          reason,
+          at:
+            safeIsoDate(),
+        }
+      );
 
       return count;
     };
@@ -2195,6 +2630,14 @@ export function createApiClient(request) {
       );
     },
 
+    options(path, options = {}) {
+      return withMethod(
+        "OPTIONS",
+        path,
+        options
+      );
+    },
+
     post(path, body = null, options = {}) {
       return withMethod(
         "POST",
@@ -2226,6 +2669,7 @@ export function createApiClient(request) {
       return withMethod(
         "DELETE",
         path,
+        null,
         options
       );
     },
@@ -2234,6 +2678,7 @@ export function createApiClient(request) {
       return withMethod(
         "DELETE",
         path,
+        null,
         options
       );
     },
@@ -2245,6 +2690,16 @@ export function createApiClient(request) {
           options.method || "POST",
         body:
           formData,
+      });
+    },
+
+    download(path, options = {}) {
+      return request(path, {
+        ...options,
+        method:
+          options.method || "GET",
+        responseType:
+          options.responseType || "blob",
       });
     },
 
@@ -2262,6 +2717,10 @@ export function createApiClient(request) {
       return request.getSnapshot?.(options) || null;
     },
 
+    getDebugSnapshot(options = {}) {
+      return request.getDebugSnapshot?.(options) || null;
+    },
+
     clearInFlight(options = {}) {
       return request.clearInFlight?.(options) || 0;
     },
@@ -2273,8 +2732,11 @@ export function createApiClient(request) {
 }
 
 export default {
+  REQUEST_VERSION,
+
   createRequest,
   createApiClient,
+
   parseResponseBody,
   buildRequestError,
   shouldRetryRequest,

@@ -3,7 +3,7 @@
    Archivo: src/app/ui.js
 
    ONION SUPPORT · APP UI SYSTEMS
-   SIDEBAR/TOPBAR/TOAST · LIGHT SYNC · NO EVENT STORM · EXTREME 12/10
+   SIDEBAR/TOPBAR/TOAST · LIGHT SYNC · NO EVENT STORM · EXTREME 13/10
 
    RESPONSABILIDADES:
    - Sincronizar UI usuario global.
@@ -23,6 +23,17 @@
    - AppUI sí puede emitir app:user-ui:sync.
    - AppUI NO debe emitir app:ui:repair-request desde repairUISystems().
    - AppUI NO debe escuchar app:user-ui:sync.
+
+   HARDENING 13/10:
+   - No doble bus + window.
+   - No AppCore.cleanup.event para bus interno.
+   - No repair/rebind salvo flag explícito.
+   - No init repetido de Sidebar/Topbar/Toast.
+   - Dedupes por firma.
+   - Cola de sync segura.
+   - Snapshots robustos.
+   - Toast bridge tolerante a firmas heterogéneas.
+   - i18n/theme/auth/route safe-sync sin loops.
 ========================================================= */
 
 import {
@@ -33,6 +44,8 @@ import {
   APP_SCOPE,
   APP_SCOPES,
   APP_EVENTS,
+  ROUTER_EVENTS,
+  AUTH_EVENTS,
 } from "./constants.js";
 
 /* =========================================================
@@ -40,7 +53,7 @@ import {
 ========================================================= */
 
 const UI_VERSION =
-  "12.0.0";
+  "13.0.0";
 
 const UI_SOURCE =
   "app:ui";
@@ -91,6 +104,9 @@ const UI_EVENTS =
     langChange:
       APP_EVENTS?.langChange || "app:lang:change",
 
+    themeChange:
+      APP_EVENTS?.themeChange || "app:theme:change",
+
     toastBridgeReady:
       "app:ui:toast-bridge:ready",
 
@@ -108,6 +124,36 @@ const UI_EVENTS =
 
     runtimeEventsUnbound:
       "app:ui:runtime-events:unbound",
+
+    routeChange:
+      APP_EVENTS?.routeChange || "app:route:change",
+
+    routerRendered:
+      ROUTER_EVENTS?.rendered || "router:rendered",
+
+    routerAsyncComplete:
+      ROUTER_EVENTS?.asyncComplete || "router:render:async-complete",
+
+    sessionRestored:
+      APP_EVENTS?.sessionRestored || "app:session:restored",
+
+    sessionCleared:
+      "app:session:cleared",
+
+    userChange:
+      APP_EVENTS?.userChange || "app:user:change",
+
+    authSessionRestored:
+      AUTH_EVENTS?.sessionRestored || "auth:session:restored",
+
+    authLoginSuccess:
+      AUTH_EVENTS?.loginSuccess || "auth:login:success",
+
+    authLogout:
+      AUTH_EVENTS?.logout || "auth:logout",
+
+    authLogoutSuccess:
+      "auth:logout:success",
   });
 
 const UI_MODULES =
@@ -169,6 +215,14 @@ const TOPBAR_USER_LIGHT_METHODS =
     "syncUser",
   ]);
 
+const TOPBAR_VISUAL_LIGHT_METHODS =
+  Object.freeze([
+    "syncRoute",
+    "updateRoute",
+    "syncBreadcrumb",
+    "updateBreadcrumb",
+  ]);
+
 const TOPBAR_FALLBACK_LIGHT_METHODS =
   Object.freeze([
     "refresh",
@@ -212,6 +266,12 @@ const REPAIR_REQUEST_DEDUPE_MS =
 const LANG_SYNC_DEDUPE_MS =
   120;
 
+const ROUTE_SYNC_DEDUPE_MS =
+  80;
+
+const MAX_RECENT_EVENTS =
+  40;
+
 /* =========================================================
    INTERNAL STATE
 ========================================================= */
@@ -232,6 +292,15 @@ let languageSyncBound =
   false;
 
 let repairSyncBound =
+  false;
+
+let routeSyncBound =
+  false;
+
+let sessionSyncBound =
+  false;
+
+let themeSyncBound =
   false;
 
 let toastBridgeBound =
@@ -261,7 +330,16 @@ let lastLangSignature =
 let lastLangSignatureAt =
   0;
 
+let lastRouteSignature =
+  "";
+
+let lastRouteSignatureAt =
+  0;
+
 const boundDisposers =
+  [];
+
+const boundEvents =
   [];
 
 const uiState = {
@@ -283,6 +361,12 @@ const uiState = {
   skippedRepairCount:
     0,
 
+  eventCount:
+    0,
+
+  errorCount:
+    0,
+
   lastSyncAt:
     0,
 
@@ -301,8 +385,17 @@ const uiState = {
   lastInitOk:
     false,
 
+  lastEvent:
+    "",
+
+  lastEventAt:
+    0,
+
   lastError:
     null,
+
+  recent:
+    [],
 
   modules: {
     toast:
@@ -558,9 +651,55 @@ function getSafeState(AppCore) {
   return ensureObject(AppCore?.state);
 }
 
+function safeClone(value, fallback = null) {
+  try {
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
+    }
+  } catch {}
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {}
+
+  return fallback;
+}
+
 /* =========================================================
-   LOG / EMIT
+   RECENT / LOG / EMIT
 ========================================================= */
+
+function pushRecent(event = {}) {
+  const atMs =
+    safeNow();
+
+  uiState.recent.unshift({
+    ...event,
+    at:
+      safeIsoDate(atMs),
+    atMs,
+  });
+
+  if (uiState.recent.length > MAX_RECENT_EVENTS) {
+    uiState.recent =
+      uiState.recent.slice(
+        0,
+        MAX_RECENT_EVENTS
+      );
+  }
+}
+
+function rememberBoundEvent(eventName = "") {
+  const clean =
+    safeText(eventName, "");
+
+  if (
+    clean &&
+    !boundEvents.includes(clean)
+  ) {
+    boundEvents.push(clean);
+  }
+}
 
 function safeLog(AppCore, ...args) {
   try {
@@ -768,8 +907,8 @@ function normalizeError(error = null, fallback = "Error UI.") {
     code:
       safeText(
         object.code ||
-        object.status ||
-        object.statusCode,
+          object.status ||
+          object.statusCode,
         "UI_ERROR"
       ),
   };
@@ -786,6 +925,9 @@ function normalizeError(error = null, fallback = "Error UI.") {
 }
 
 function setLastError(AppCore, source = "ui", error = null) {
+  uiState.errorCount +=
+    1;
+
   const snapshot = {
     source:
       safeText(source, "ui"),
@@ -806,6 +948,15 @@ function setLastError(AppCore, source = "ui", error = null) {
   uiState.lastError =
     snapshot;
 
+  pushRecent({
+    event:
+      "error",
+    source:
+      snapshot.source,
+    message:
+      snapshot.message,
+  });
+
   safeEmit(
     AppCore,
     UI_EVENTS.moduleError,
@@ -813,6 +964,27 @@ function setLastError(AppCore, source = "ui", error = null) {
   );
 
   return snapshot;
+}
+
+function recordEvent(eventName = "", payload = {}) {
+  uiState.eventCount +=
+    1;
+
+  uiState.lastEvent =
+    safeText(eventName, "");
+
+  uiState.lastEventAt =
+    safeNow();
+
+  pushRecent({
+    event:
+      safeText(eventName, ""),
+    payload:
+      safeClone(
+        payload,
+        null
+      ),
+  });
 }
 
 /* =========================================================
@@ -875,6 +1047,7 @@ function getRouterCanonicalPath(Router) {
   try {
     return (
       Router?.getCurrentCanonicalPath?.() ||
+      Router?.getCurrentPath?.() ||
       ""
     );
   } catch {}
@@ -1038,7 +1211,18 @@ function registerAppModule(AppCore, name, moduleRef) {
       } else if (isFunction(modules.register)) {
         modules.register(
           cleanName,
-          moduleRef
+          moduleRef,
+          {
+            overwrite:
+              true,
+            aliases:
+              [
+                cleanName,
+                cleanName.toLowerCase(),
+              ],
+            source:
+              UI_SOURCE,
+          }
         );
 
         registered =
@@ -1046,7 +1230,13 @@ function registerAppModule(AppCore, name, moduleRef) {
       } else if (isFunction(modules.set)) {
         modules.set(
           cleanName,
-          moduleRef
+          moduleRef,
+          {
+            overwrite:
+              true,
+            source:
+              UI_SOURCE,
+          }
         );
 
         registered =
@@ -1544,6 +1734,9 @@ function syncTopbarLight(TopbarUI, context = {}) {
       user:
         "",
 
+      visual:
+        [],
+
       fallback:
         "",
     };
@@ -1556,6 +1749,13 @@ function syncTopbarLight(TopbarUI, context = {}) {
       context
     );
 
+  const visualResult =
+    callAllModuleMethods(
+      TopbarUI,
+      TOPBAR_VISUAL_LIGHT_METHODS,
+      context
+    );
+
   let fallbackResult = {
     called:
       false,
@@ -1564,7 +1764,10 @@ function syncTopbarLight(TopbarUI, context = {}) {
       "",
   };
 
-  if (!userResult.called) {
+  if (
+    !userResult.called &&
+    !visualResult.called
+  ) {
     fallbackResult =
       callFirstModuleMethod(
         TopbarUI,
@@ -1577,11 +1780,15 @@ function syncTopbarLight(TopbarUI, context = {}) {
     ok:
       Boolean(
         userResult.called ||
+        visualResult.called ||
         fallbackResult.called
       ),
 
     user:
       userResult.method,
+
+    visual:
+      visualResult.methods,
 
     fallback:
       fallbackResult.method,
@@ -1918,6 +2125,21 @@ export function syncUserUI(first = {}, second = {}) {
     uiState.lastSyncReason =
       context.reason;
 
+    pushRecent({
+      event:
+        "sync",
+      reason:
+        context.reason,
+      authenticated:
+        snapshot.authenticated,
+      username:
+        snapshot.username,
+      route:
+        snapshot.route,
+      publicPath:
+        snapshot.publicPath,
+    });
+
     /*
       Este evento lo emite AppUI. Router no debe escucharlo.
     */
@@ -1982,6 +2204,12 @@ export function syncUserUI(first = {}, second = {}) {
 
         role:
           snapshot.role,
+
+        route:
+          snapshot.route,
+
+        publicPath:
+          snapshot.publicPath,
 
         sidebar:
           sidebarResult,
@@ -2110,6 +2338,29 @@ function bindEvent(AppCore, scope, eventName, handler) {
     return false;
   }
 
+  const wrappedHandler = (eventOrPayload = {}) => {
+    const payload =
+      getPayload(eventOrPayload);
+
+    recordEvent(
+      eventName,
+      payload
+    );
+
+    try {
+      handler(
+        payload,
+        eventOrPayload
+      );
+    } catch (error) {
+      setLastError(
+        AppCore,
+        `event:${eventName}`,
+        error
+      );
+    }
+  };
+
   /*
     Bus interno primero. Window solo si no hay bus.
     No duplicar bus + window.
@@ -2119,7 +2370,7 @@ function bindEvent(AppCore, scope, eventName, handler) {
       const off =
         AppCore.events.on(
           eventName,
-          handler
+          wrappedHandler
         );
 
       if (isFunction(off)) {
@@ -2129,11 +2380,13 @@ function bindEvent(AppCore, scope, eventName, handler) {
           try {
             AppCore.events.off(
               eventName,
-              handler
+              wrappedHandler
             );
           } catch {}
         });
       }
+
+      rememberBoundEvent(eventName);
 
       return true;
     }
@@ -2156,12 +2409,14 @@ function bindEvent(AppCore, scope, eventName, handler) {
           scope,
           window,
           eventName,
-          handler
+          wrappedHandler
         );
 
       if (isFunction(off)) {
         rememberDisposer(off);
       }
+
+      rememberBoundEvent(eventName);
 
       return true;
     }
@@ -2170,17 +2425,19 @@ function bindEvent(AppCore, scope, eventName, handler) {
   try {
     window.addEventListener(
       eventName,
-      handler
+      wrappedHandler
     );
 
     rememberDisposer(() => {
       try {
         window.removeEventListener(
           eventName,
-          handler
+          wrappedHandler
         );
       } catch {}
     });
+
+    rememberBoundEvent(eventName);
 
     return true;
   } catch {}
@@ -2189,7 +2446,7 @@ function bindEvent(AppCore, scope, eventName, handler) {
 }
 
 /* =========================================================
-   LANGUAGE BIND
+   LANGUAGE / ROUTE / THEME DEDUPE
 ========================================================= */
 
 function getLangSignature(detail = {}) {
@@ -2224,6 +2481,42 @@ function shouldDedupeLang(detail = {}) {
   return false;
 }
 
+function getRouteSignature(detail = {}) {
+  return [
+    safeText(detail.route || detail.canonicalPath || detail.path, ""),
+    safeText(detail.publicPath || detail.href || detail.to, ""),
+    safeText(detail.reason || detail.phase || "", ""),
+  ].join("|");
+}
+
+function shouldDedupeRoute(detail = {}) {
+  const signature =
+    getRouteSignature(detail);
+
+  const now =
+    safeNow();
+
+  if (
+    signature &&
+    signature === lastRouteSignature &&
+    now - lastRouteSignatureAt < ROUTE_SYNC_DEDUPE_MS
+  ) {
+    return true;
+  }
+
+  lastRouteSignature =
+    signature;
+
+  lastRouteSignatureAt =
+    now;
+
+  return false;
+}
+
+/* =========================================================
+   LANGUAGE BIND
+========================================================= */
+
 export function bindAppLanguageSync(first = {}, second = {}) {
   const deps =
     normalizeDeps(first, second);
@@ -2251,10 +2544,7 @@ export function bindAppLanguageSync(first = {}, second = {}) {
     return true;
   }
 
-  const handler = (eventOrPayload = {}) => {
-    const detail =
-      getPayload(eventOrPayload);
-
+  const handler = (detail = {}) => {
     if (
       shouldDedupeLang(detail)
     ) {
@@ -2403,10 +2693,7 @@ export function bindUIRepairSync(first = {}, second = {}) {
     return true;
   }
 
-  const handler = (eventOrPayload = {}) => {
-    const detail =
-      getPayload(eventOrPayload);
-
+  const handler = (detail = {}) => {
     uiState.repairRequestCount +=
       1;
 
@@ -2493,6 +2780,281 @@ export function bindUIRepairSync(first = {}, second = {}) {
   return true;
 }
 
+/* =========================================================
+   ROUTE / SESSION / THEME LIGHT SYNC
+========================================================= */
+
+export function bindUIRouteSync(first = {}, second = {}) {
+  const deps =
+    normalizeDeps(first, second);
+
+  const {
+    AppCore,
+    scope = DEFAULT_SCOPE,
+  } = deps;
+
+  if (!AppCore) {
+    return false;
+  }
+
+  if (
+    routeSyncBound ||
+    safeBoolean(AppCore.__appUiRouteSyncBound)
+  ) {
+    return true;
+  }
+
+  const sync = (reason, detail = {}) => {
+    if (shouldDedupeRoute(detail)) {
+      return;
+    }
+
+    syncUserUI({
+      ...deps,
+      reason,
+      payload:
+        detail,
+      rebind:
+        false,
+      hardRepair:
+        false,
+      force:
+        false,
+    });
+  };
+
+  const boundRoute =
+    bindEvent(
+      AppCore,
+      scope,
+      UI_EVENTS.routeChange,
+      (detail) => {
+        sync(
+          "app:route:change",
+          detail
+        );
+      }
+    );
+
+  const boundRendered =
+    bindEvent(
+      AppCore,
+      scope,
+      UI_EVENTS.routerRendered,
+      (detail) => {
+        sync(
+          "router:rendered",
+          detail
+        );
+      }
+    );
+
+  const boundAsync =
+    bindEvent(
+      AppCore,
+      scope,
+      UI_EVENTS.routerAsyncComplete,
+      (detail) => {
+        sync(
+          "router:render:async-complete",
+          detail
+        );
+      }
+    );
+
+  routeSyncBound =
+    Boolean(
+      boundRoute ||
+        boundRendered ||
+        boundAsync
+    );
+
+  safeDefineValue(
+    AppCore,
+    "__appUiRouteSyncBound",
+    routeSyncBound
+  );
+
+  return routeSyncBound;
+}
+
+export function bindUISessionSync(first = {}, second = {}) {
+  const deps =
+    normalizeDeps(first, second);
+
+  const {
+    AppCore,
+    scope = DEFAULT_SCOPE,
+  } = deps;
+
+  if (!AppCore) {
+    return false;
+  }
+
+  if (
+    sessionSyncBound ||
+    safeBoolean(AppCore.__appUiSessionSyncBound)
+  ) {
+    return true;
+  }
+
+  const sync = (reason, detail = {}) => {
+    syncUserUI({
+      ...deps,
+      reason,
+      payload:
+        detail,
+      rebind:
+        false,
+      hardRepair:
+        false,
+      force:
+        true,
+    });
+  };
+
+  const events = [
+    [
+      UI_EVENTS.userChange,
+      "app:user:change",
+    ],
+    [
+      UI_EVENTS.sessionRestored,
+      "app:session:restored",
+    ],
+    [
+      UI_EVENTS.sessionCleared,
+      "app:session:cleared",
+    ],
+    [
+      UI_EVENTS.authSessionRestored,
+      "auth:session:restored",
+    ],
+    [
+      UI_EVENTS.authLoginSuccess,
+      "auth:login:success",
+    ],
+    [
+      UI_EVENTS.authLogout,
+      "auth:logout",
+    ],
+    [
+      UI_EVENTS.authLogoutSuccess,
+      "auth:logout:success",
+    ],
+  ];
+
+  let anyBound =
+    false;
+
+  for (const [eventName, reason] of events) {
+    const bound =
+      bindEvent(
+        AppCore,
+        scope,
+        eventName,
+        (detail) => {
+          sync(
+            reason,
+            detail
+          );
+        }
+      );
+
+    if (bound) {
+      anyBound =
+        true;
+    }
+  }
+
+  sessionSyncBound =
+    anyBound;
+
+  safeDefineValue(
+    AppCore,
+    "__appUiSessionSyncBound",
+    sessionSyncBound
+  );
+
+  return sessionSyncBound;
+}
+
+export function bindUIThemeSync(first = {}, second = {}) {
+  const deps =
+    normalizeDeps(first, second);
+
+  const {
+    AppCore,
+    scope = DEFAULT_SCOPE,
+  } = deps;
+
+  if (!AppCore) {
+    return false;
+  }
+
+  if (
+    themeSyncBound ||
+    safeBoolean(AppCore.__appUiThemeSyncBound)
+  ) {
+    return true;
+  }
+
+  const sync = (reason, detail = {}) => {
+    syncUserUI({
+      ...deps,
+      reason,
+      payload:
+        detail,
+      rebind:
+        false,
+      hardRepair:
+        false,
+      force:
+        true,
+    });
+  };
+
+  const events = [
+    UI_EVENTS.themeChange,
+    "onion:theme:change",
+    "theme:change",
+  ];
+
+  let anyBound =
+    false;
+
+  for (const eventName of events) {
+    const bound =
+      bindEvent(
+        AppCore,
+        scope,
+        eventName,
+        (detail) => {
+          sync(
+            eventName,
+            detail
+          );
+        }
+      );
+
+    if (bound) {
+      anyBound =
+        true;
+    }
+  }
+
+  themeSyncBound =
+    anyBound;
+
+  safeDefineValue(
+    AppCore,
+    "__appUiThemeSyncBound",
+    themeSyncBound
+  );
+
+  return themeSyncBound;
+}
+
 export function bindUIRuntimeEvents(first = {}, second = {}) {
   const deps =
     normalizeDeps(first, second);
@@ -2518,10 +3080,22 @@ export function bindUIRuntimeEvents(first = {}, second = {}) {
   const repairBound =
     bindUIRepairSync(deps);
 
+  const routeBound =
+    bindUIRouteSync(deps);
+
+  const sessionBound =
+    bindUISessionSync(deps);
+
+  const themeBound =
+    bindUIThemeSync(deps);
+
   runtimeEventsBound =
     Boolean(
       langBound ||
-      repairBound
+      repairBound ||
+      routeBound ||
+      sessionBound ||
+      themeBound
     );
 
   safeDefineValue(
@@ -2537,6 +3111,9 @@ export function bindUIRuntimeEvents(first = {}, second = {}) {
       {
         langBound,
         repairBound,
+        routeBound,
+        sessionBound,
+        themeBound,
         at:
           safeIsoDate(),
       }
@@ -3172,10 +3749,21 @@ export function unbindUISystems(AppCore = null) {
     } catch {}
   }
 
+  boundEvents.splice(0);
+
   languageSyncBound =
     false;
 
   repairSyncBound =
+    false;
+
+  routeSyncBound =
+    false;
+
+  sessionSyncBound =
+    false;
+
+  themeSyncBound =
     false;
 
   runtimeEventsBound =
@@ -3194,6 +3782,24 @@ export function unbindUISystems(AppCore = null) {
     safeDefineValue(
       AppCore,
       "__appUiRepairBound",
+      false
+    );
+
+    safeDefineValue(
+      AppCore,
+      "__appUiRouteSyncBound",
+      false
+    );
+
+    safeDefineValue(
+      AppCore,
+      "__appUiSessionSyncBound",
+      false
+    );
+
+    safeDefineValue(
+      AppCore,
+      "__appUiThemeSyncBound",
       false
     );
 
@@ -3264,11 +3870,26 @@ export function getUISystemsSnapshot(first = {}, second = {}) {
     repairSyncBound:
       Boolean(repairSyncBound),
 
+    routeSyncBound:
+      Boolean(routeSyncBound),
+
+    sessionSyncBound:
+      Boolean(sessionSyncBound),
+
+    themeSyncBound:
+      Boolean(themeSyncBound),
+
     runtimeEventsBound:
       Boolean(runtimeEventsBound),
 
     toastBridgeBound:
       Boolean(toastBridgeBound),
+
+    boundEvents:
+      [...boundEvents],
+
+    boundDisposers:
+      boundDisposers.length,
 
     modules: {
       toast:
@@ -3322,6 +3943,23 @@ export function getUISystemsSnapshot(first = {}, second = {}) {
     skippedRepairCount:
       uiState.skippedRepairCount,
 
+    eventCount:
+      uiState.eventCount,
+
+    errorCount:
+      uiState.errorCount,
+
+    lastEvent:
+      uiState.lastEvent,
+
+    lastEventAt:
+      uiState.lastEventAt,
+
+    lastEventAtIso:
+      uiState.lastEventAt
+        ? safeIsoDate(uiState.lastEventAt)
+        : "",
+
     lastSyncAt:
       uiState.lastSyncAt,
 
@@ -3358,6 +3996,12 @@ export function getUISystemsSnapshot(first = {}, second = {}) {
     lastError:
       uiState.lastError,
 
+    recent:
+      safeClone(
+        uiState.recent,
+        []
+      ),
+
     dedupe: {
       lastSyncSignature,
       lastSyncSignatureAt,
@@ -3379,6 +4023,13 @@ export function getUISystemsSnapshot(first = {}, second = {}) {
         lastLangSignatureAt
           ? safeIsoDate(lastLangSignatureAt)
           : "",
+
+      lastRouteSignature,
+      lastRouteSignatureAt,
+      lastRouteSignatureAtIso:
+        lastRouteSignatureAt
+          ? safeIsoDate(lastRouteSignatureAt)
+          : "",
     },
   };
 }
@@ -3389,6 +4040,8 @@ export function resetUIRuntimeState() {
       dispose();
     } catch {}
   }
+
+  boundEvents.splice(0);
 
   syncingUserUI =
     false;
@@ -3406,6 +4059,15 @@ export function resetUIRuntimeState() {
     false;
 
   repairSyncBound =
+    false;
+
+  routeSyncBound =
+    false;
+
+  sessionSyncBound =
+    false;
+
+  themeSyncBound =
     false;
 
   runtimeEventsBound =
@@ -3435,6 +4097,12 @@ export function resetUIRuntimeState() {
   lastLangSignatureAt =
     0;
 
+  lastRouteSignature =
+    "";
+
+  lastRouteSignatureAt =
+    0;
+
   uiState.initialized =
     false;
 
@@ -3451,6 +4119,12 @@ export function resetUIRuntimeState() {
     0;
 
   uiState.skippedRepairCount =
+    0;
+
+  uiState.eventCount =
+    0;
+
+  uiState.errorCount =
     0;
 
   uiState.lastSyncAt =
@@ -3471,8 +4145,17 @@ export function resetUIRuntimeState() {
   uiState.lastInitOk =
     false;
 
+  uiState.lastEvent =
+    "";
+
+  uiState.lastEventAt =
+    0;
+
   uiState.lastError =
     null;
+
+  uiState.recent =
+    [];
 
   uiState.modules = {
     toast:
@@ -3499,6 +4182,9 @@ export default {
 
   bindAppLanguageSync,
   bindUIRepairSync,
+  bindUIRouteSync,
+  bindUISessionSync,
+  bindUIThemeSync,
   bindUIRuntimeEvents,
 
   bindToastBridge,

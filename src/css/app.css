@@ -33,6 +33,9 @@
    - Mantener Usuarios separado en:
      · /src/css/views/usuarios/index.css
 
+   - Mantener Clientes separado en:
+     · /src/css/views/clientes/index.css
+
    ORDEN DE CASCADA:
    tokens < reset < core < layout < components < views < auth
 ========================================================= */
@@ -101,7 +104,7 @@
    - El CSS vive fuera de home.template.js.
    - No usar CSS inline ni estilos inyectados por JS.
    - El template debe emitir solo clases/atributos.
-   - Este CSS debe cargarse antes de Facturas/Incidencias/Cuenta/Usuarios
+   - Este CSS debe cargarse antes de Facturas/Incidencias/Cuenta/Usuarios/Clientes
      para que las vistas específicas puedan especializar patrones
      si comparten nombres/token behavior.
 ========================================================= */
@@ -205,10 +208,39 @@
    - El template debe emitir solo clases/atributos.
    - Este import debe ir después de Cuenta para que Usuarios
      pueda especializar patrones admin sin contaminar vistas anteriores.
-   - Auth sigue al final por prioridad de pantalla pública/técnica.
 ========================================================= */
 
 @import url("./views/usuarios/index.css") layer(views);
+
+
+/* =========================================================
+   VIEWS · CLIENTES
+   Vista Clientes / Administración de cartera:
+   - hero premium de clientes
+   - stats admin
+   - filtros
+   - búsqueda
+   - tabla real blindada
+   - paginación fija visual a 5
+   - acciones de fila
+   - avatar real + fallback
+   - chips de estado y nivel
+   - estados loading/empty/error
+   - acceso restringido / validación de permisos si aplica
+   - responsive
+   - light/dark token aligned
+
+   IMPORTANTE:
+   - El CSS vive fuera de clientes.table.template.js.
+   - No usar renderStyles() dentro del template.
+   - No usar CSS inline ni estilos inyectados por JS.
+   - No usar style="" para avatares o banners.
+   - El template debe emitir solo clases/atributos.
+   - Este import debe ir después de Usuarios para agrupar vistas admin.
+   - Auth sigue al final por prioridad de pantalla pública/técnica.
+========================================================= */
+
+@import url("./views/clientes/index.css") layer(views);
 
 
 /* =========================================================

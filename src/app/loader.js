@@ -50,11 +50,15 @@
    - #main-content aria-busy="false".
    - #view-container aria-busy="false".
 
-   CSP:
-   - Sin inline handlers.
-   - Sin style tag dinámico.
-   - Sin innerHTML.
-   - Sólo creación DOM segura.
+   HARDENING 12/10:
+   - Timer de hide serializado por sequence.
+   - Failsafe serializado por armId.
+   - forceHideLoader limpia siempre timers y failsafe.
+   - prepareBootLoader actualiza lastShowAt para minVisible real.
+   - No se duplican eventos bus/window salvo aliases legacy explícitos.
+   - Eventos y snapshots no filtran tokens.
+   - Payload sanitizer no intenta clonar nodos DOM.
+   - Fallback loader CSP-clean sin innerHTML ni style tag.
 ========================================================= */
 
 import {
@@ -66,6 +70,8 @@ import {
 /* =========================================================
    CONSTANTS
 ========================================================= */
+
+const LOADER_VERSION = "12.0.0";
 
 const LOADER_ID = "app-loader";
 
@@ -122,6 +128,14 @@ const BODY_READY_CLASSES = Object.freeze([
 
 const HTML_READY_CLASSES = Object.freeze([
   "app-ready",
+]);
+
+const BODY_FATAL_CLASSES = Object.freeze([
+  "app-fatal",
+]);
+
+const HTML_FATAL_CLASSES = Object.freeze([
+  "app-fatal",
 ]);
 
 const LOADER_VISIBLE_CLASSES = Object.freeze([
@@ -314,6 +328,14 @@ function epochNow() {
   }
 }
 
+function safeIsoDate(ms = epochNow()) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
+  }
+}
+
 function nextSequence() {
   sequence += 1;
   return sequence;
@@ -361,6 +383,43 @@ function safeGetState(AppCore) {
   }
 }
 
+function safeSetCoreState(AppCore, patch = {}) {
+  const cleanPatch =
+    safeObject(patch);
+
+  try {
+    if (isFunction(AppCore?.setState)) {
+      AppCore.setState(
+        cleanPatch,
+        {
+          source:
+            "app:loader",
+          emit:
+            true,
+        }
+      );
+
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (
+      AppCore?.state &&
+      typeof AppCore.state === "object"
+    ) {
+      Object.assign(
+        AppCore.state,
+        cleanPatch
+      );
+
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
 function safeSetLoading(AppCore, value = false) {
   const next =
     Boolean(value);
@@ -372,34 +431,26 @@ function safeSetLoading(AppCore, value = false) {
     }
   } catch {}
 
-  try {
-    if (
-      AppCore?.state &&
-      typeof AppCore.state === "object"
-    ) {
-      AppCore.state.loading = next;
-      return true;
+  return safeSetCoreState(
+    AppCore,
+    {
+      loading:
+        next,
     }
-  } catch {}
-
-  return false;
+  );
 }
 
 function safeSetBooting(AppCore, value = false) {
   const next =
     Boolean(value);
 
-  try {
-    if (
-      AppCore?.state &&
-      typeof AppCore.state === "object"
-    ) {
-      AppCore.state.booting = next;
-      return true;
+  return safeSetCoreState(
+    AppCore,
+    {
+      booting:
+        next,
     }
-  } catch {}
-
-  return false;
+  );
 }
 
 function safeSetDomRef(AppCore, key, value) {
@@ -459,6 +510,28 @@ function redactSensitiveText(value = "") {
   return output;
 }
 
+function isDomNodeLike(value) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  try {
+    return Boolean(
+      typeof Node !== "undefined" &&
+        value instanceof Node
+    );
+  } catch {}
+
+  try {
+    return Boolean(
+      value.nodeType &&
+        value.nodeName
+    );
+  } catch {}
+
+  return false;
+}
+
 function sanitizePayload(value, depth = 0) {
   if (depth > 4) {
     return "[MaxDepth]";
@@ -477,6 +550,21 @@ function sanitizePayload(value, depth = 0) {
     return value;
   }
 
+  if (typeof value === "function") {
+    return "[Function]";
+  }
+
+  if (isDomNodeLike(value)) {
+    return {
+      node:
+        safeText(value.nodeName, "Node"),
+      id:
+        safeText(value.id, ""),
+      className:
+        safeText(value.className, ""),
+    };
+  }
+
   if (Array.isArray(value)) {
     return value
       .slice(0, 50)
@@ -485,9 +573,7 @@ function sanitizePayload(value, depth = 0) {
       );
   }
 
-  if (
-    value instanceof Error
-  ) {
+  if (value instanceof Error) {
     return {
       name:
         safeText(value.name, "Error"),
@@ -497,6 +583,24 @@ function sanitizePayload(value, depth = 0) {
         value.code || null,
       status:
         value.status || null,
+    };
+  }
+
+  if (value instanceof Map) {
+    return {
+      type:
+        "Map",
+      size:
+        value.size,
+    };
+  }
+
+  if (value instanceof Set) {
+    return {
+      type:
+        "Set",
+      size:
+        value.size,
     };
   }
 
@@ -592,13 +696,21 @@ function safeEmit(AppCore, eventName, payload = {}) {
 }
 
 function emitLoaderEvent(AppCore, eventName, payload = {}, aliases = []) {
+  const finalPayload = {
+    version:
+      LOADER_VERSION,
+    at:
+      safeIsoDate(),
+    ...safeObject(payload),
+  };
+
   let emitted = false;
 
   if (
     safeEmit(
       AppCore,
       eventName,
-      payload
+      finalPayload
     )
   ) {
     emitted = true;
@@ -611,7 +723,7 @@ function emitLoaderEvent(AppCore, eventName, payload = {}, aliases = []) {
       safeEmit(
         AppCore,
         alias,
-        payload
+        finalPayload
       )
     ) {
       emitted = true;
@@ -772,10 +884,6 @@ function clearLegacyInlineLoaderStyles(loader) {
   }
 
   try {
-    /*
-      No escribimos estilos inline nuevos.
-      Sólo limpiamos estilos legacy pegados.
-    */
     loader.style.display = "";
     loader.style.opacity = "";
     loader.style.visibility = "";
@@ -1173,7 +1281,9 @@ function isFatalDocumentState() {
   try {
     return Boolean(
       document.documentElement?.classList?.contains("app-fatal") ||
-        document.body?.classList?.contains("app-fatal")
+        document.body?.classList?.contains("app-fatal") ||
+        document.documentElement?.dataset?.appState === "fatal" ||
+        document.body?.dataset?.shellState === "fatal"
     );
   } catch {
     return false;
@@ -1214,16 +1324,26 @@ function setDocumentLoadingState(enabled = false, {
       false
     );
 
-    if (!isFatal) {
+    if (isFatal) {
+      addClasses(
+        html,
+        HTML_FATAL_CLASSES
+      );
+
+      removeClasses(
+        html,
+        HTML_READY_CLASSES
+      );
+    } else {
+      removeClasses(
+        html,
+        HTML_FATAL_CLASSES
+      );
+
       toggleClasses(
         html,
         HTML_READY_CLASSES,
         !loading
-      );
-    } else if (!loading) {
-      removeClasses(
-        html,
-        HTML_READY_CLASSES
       );
     }
 
@@ -1278,16 +1398,26 @@ function setDocumentLoadingState(enabled = false, {
       false
     );
 
-    if (!isFatal) {
+    if (isFatal) {
+      addClasses(
+        body,
+        BODY_FATAL_CLASSES
+      );
+
+      removeClasses(
+        body,
+        BODY_READY_CLASSES
+      );
+    } else {
+      removeClasses(
+        body,
+        BODY_FATAL_CLASSES
+      );
+
       toggleClasses(
         body,
         BODY_READY_CLASSES,
         !loading
-      );
-    } else if (!loading) {
-      removeClasses(
-        body,
-        BODY_READY_CLASSES
       );
     }
 
@@ -2348,6 +2478,8 @@ export function showLoader(AppCore, options = {}) {
     {
       booting:
         opts.booting === true,
+      fatal:
+        false,
     }
   );
 
@@ -2367,6 +2499,20 @@ export function showLoader(AppCore, options = {}) {
       true
     );
   }
+
+  safeSetCoreState(
+    AppCore,
+    {
+      loaderVisible:
+        true,
+      loaderState:
+        opts.booting === true
+          ? "booting"
+          : "visible",
+      loaderShownAt:
+        epochNow(),
+    }
+  );
 
   emitLoaderEvent(
     AppCore,
@@ -2409,10 +2555,7 @@ export function forceHideLoader(AppCore, options = {}) {
     nextSequence();
 
   clearLoaderTimers();
-
-  if (opts.state) {
-    clearBootFailsafeTimer(opts.state);
-  }
+  clearBootFailsafeTimer(opts.state || null);
 
   const loader =
     getLoaderElement(AppCore);
@@ -2441,6 +2584,20 @@ export function forceHideLoader(AppCore, options = {}) {
     false
   );
 
+  safeSetCoreState(
+    AppCore,
+    {
+      loaderVisible:
+        false,
+      loaderState:
+        Boolean(opts.fatal)
+          ? "fatal"
+          : "hidden",
+      loaderHiddenAt:
+        epochNow(),
+    }
+  );
+
   emitLoaderEvent(
     AppCore,
     EVENT_NAMES.forceHide,
@@ -2451,6 +2608,8 @@ export function forceHideLoader(AppCore, options = {}) {
         true,
       hasLoader:
         Boolean(loader),
+      fatal:
+        Boolean(opts.fatal),
       reason:
         safeText(opts.reason, ""),
     },
@@ -2527,10 +2686,6 @@ export function hideLoader(AppCore, options = {}) {
       getLoaderElement(AppCore) ||
       initialLoader;
 
-    /*
-      Primero liberamos shell/body.
-      El loader puede hacer fade encima mientras aparece la app lista.
-    */
     setAppLoadingState(
       false,
       {
@@ -2560,6 +2715,20 @@ export function hideLoader(AppCore, options = {}) {
       false
     );
 
+    safeSetCoreState(
+      AppCore,
+      {
+        loaderVisible:
+          false,
+        loaderState:
+          Boolean(opts.fatal)
+            ? "fatal"
+            : "hidden",
+        loaderHiddenAt:
+          epochNow(),
+      }
+    );
+
     emitLoaderEvent(
       AppCore,
       EVENT_NAMES.hide,
@@ -2571,6 +2740,8 @@ export function hideLoader(AppCore, options = {}) {
         hasLoader:
           Boolean(loader),
         remaining,
+        fatal:
+          Boolean(opts.fatal),
         reason:
           safeText(opts.reason, ""),
       },
@@ -2606,11 +2777,16 @@ export function takeOverStaticLoader(AppCore) {
   const loader =
     ensureLoaderElement(AppCore);
 
+  lastShowAt =
+    now();
+
   setAppLoadingState(
     true,
     {
       booting:
         true,
+      fatal:
+        false,
     }
   );
 
@@ -2629,6 +2805,18 @@ export function takeOverStaticLoader(AppCore) {
     true
   );
 
+  safeSetCoreState(
+    AppCore,
+    {
+      loaderVisible:
+        true,
+      loaderState:
+        "booting",
+      loaderShownAt:
+        epochNow(),
+    }
+  );
+
   emitLoaderEvent(
     AppCore,
     EVENT_NAMES.takeover,
@@ -2642,7 +2830,8 @@ export function takeOverStaticLoader(AppCore) {
 }
 
 export function prepareBootLoader(AppCore, state = null) {
-  takeOverStaticLoader(AppCore);
+  const hasLoader =
+    takeOverStaticLoader(AppCore);
 
   if (state) {
     try {
@@ -2652,7 +2841,7 @@ export function prepareBootLoader(AppCore, state = null) {
     } catch {}
   }
 
-  return true;
+  return hasLoader;
 }
 
 /* =========================================================
@@ -2753,6 +2942,18 @@ export function armBootFailsafeLoader({
     } catch {}
   }
 
+  safeSetCoreState(
+    AppCore,
+    {
+      bootFailsafeStartedAt:
+        startedAt,
+      bootFailsafeTimeoutMs:
+        timeout,
+      bootFailsafeArmId:
+        armId,
+    }
+  );
+
   const timer =
     window.setTimeout(
       () => {
@@ -2761,6 +2962,17 @@ export function armBootFailsafeLoader({
             state?.bootFailsafeArmId &&
             state.bootFailsafeArmId !== armId
           ) {
+            emitLoaderEvent(
+              AppCore,
+              EVENT_NAMES.failsafeStale,
+              {
+                timeout,
+                armId,
+                reason:
+                  "arm-id-stale",
+              }
+            );
+
             return;
           }
 
@@ -2821,6 +3033,16 @@ export function armBootFailsafeLoader({
             !stillLoading &&
             !loaderVisible
           ) {
+            emitLoaderEvent(
+              AppCore,
+              EVENT_NAMES.failsafeStale,
+              {
+                ...payload,
+                reason:
+                  "already-idle",
+              }
+            );
+
             return;
           }
 
@@ -2888,6 +3110,14 @@ export function armBootFailsafeLoader({
       state.bootFailsafeTimer = timer;
     } catch {}
   }
+
+  safeSetCoreState(
+    AppCore,
+    {
+      bootFailsafeTimer:
+        timer,
+    }
+  );
 
   emitLoaderEvent(
     AppCore,
@@ -3017,6 +3247,9 @@ export function getLoaderSnapshot(AppCore, state = null) {
     "/";
 
   return {
+    version:
+      LOADER_VERSION,
+
     exists:
       Boolean(loader),
 
@@ -3043,6 +3276,9 @@ export function getLoaderSnapshot(AppCore, state = null) {
 
     datasetState:
       safeText(loader?.dataset?.loaderState, ""),
+
+    classList:
+      getClassList(loader),
 
     inlineStyle: {
       display:
@@ -3156,13 +3392,40 @@ export function getLoaderSnapshot(AppCore, state = null) {
       ),
 
     failsafeTimeoutMs:
-      safeNumber(state?.bootFailsafeTimeoutMs, 0),
+      safeNumber(
+        state?.bootFailsafeTimeoutMs ||
+          coreState.bootFailsafeTimeoutMs,
+        0
+      ),
 
     failsafeStartedAt:
-      safeNumber(state?.bootFailsafeStartedAt, 0),
+      safeNumber(
+        state?.bootFailsafeStartedAt ||
+          coreState.bootFailsafeStartedAt,
+        0
+      ),
+
+    failsafeStartedAtIso:
+      safeNumber(
+        state?.bootFailsafeStartedAt ||
+          coreState.bootFailsafeStartedAt,
+        0
+      )
+        ? safeIsoDate(
+            safeNumber(
+              state?.bootFailsafeStartedAt ||
+                coreState.bootFailsafeStartedAt,
+              0
+            )
+          )
+        : "",
 
     failsafeArmId:
-      safeNumber(state?.bootFailsafeArmId, 0),
+      safeNumber(
+        state?.bootFailsafeArmId ||
+          coreState.bootFailsafeArmId,
+        0
+      ),
 
     lastShowAt,
 
@@ -3179,6 +3442,11 @@ export function getLoaderSnapshot(AppCore, state = null) {
       redactSensitiveText(lastFailsafeWarnKey),
 
     lastFailsafeWarnAt,
+
+    lastFailsafeWarnAtIso:
+      lastFailsafeWarnAt
+        ? safeIsoDate(lastFailsafeWarnAt)
+        : "",
 
     theme:
       getCurrentTheme(AppCore),
@@ -3207,6 +3475,8 @@ export {
 ========================================================= */
 
 export default {
+  LOADER_VERSION,
+
   getLoaderElement,
 
   takeOverStaticLoader,

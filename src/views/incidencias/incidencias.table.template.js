@@ -2595,7 +2595,7 @@ export function renderHeader(input = {}) {
           <button
             type="button"
             id="incidencias-create-btn"
-            class="incidencias-btn incidencias-btn--primary incidencias-btn--success incidencias-btn--create${creating ? " is-loading" : ""}"
+            class="incidencias-btn incidencias-btn--create${creating ? " is-loading" : ""}"
             data-incidencias-action="create"
             data-action="create-incidencia"
             ${disabledAttrs(creating, creating)}

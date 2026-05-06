@@ -3,7 +3,7 @@
    Archivo: src/app/warmup.js
 
    ONION SUPPORT · APP WARMUP DIAGNOSTICS
-   RESTORE TRACE · ROUTER/SHELL/LOADER SNAPSHOT · EXTREME 10/10
+   RESTORE TRACE · ROUTER/SHELL/LOADER SNAPSHOT · EXTREME 13/10
 
    RESPONSABILIDADES:
    - Ejecutar diagnóstico inicial seguro.
@@ -14,6 +14,7 @@
    - No exponer tokens en logs/eventos/snapshots.
    - Resolver dependencias desde argumentos, AppCore o registry.
    - Emitir snapshot enterprise útil para depuración.
+   - Exponer API debug opcional.
 
    HARDENING EXTREMO:
    - Compatible con warmup(AppCore) y warmup({ AppCore, ... }).
@@ -24,6 +25,7 @@
    - No exige Router.render si existe navigate/go/push/rerender.
    - No avisa I18N_MISSING si hay state.lang/document.lang/i18nInitialized.
    - Warnings sólo para problemas accionables reales.
+   - Dedupe de warnings/eventos.
    - Cero throws accidentales.
 ========================================================= */
 
@@ -31,223 +33,368 @@
    CONSTANTS
 ========================================================= */
 
-const WARMUP_LABEL = "[AppWarmup]";
+const WARMUP_LABEL =
+  "[AppWarmup]";
 
-const DEFAULT_LANG = "es";
-const DEFAULT_THEME = "dark";
-const DEFAULT_ROUTE = "/";
+const DEFAULT_LANG =
+  "es";
 
-const TOKEN_PARAM_NAMES = Object.freeze([
-  "token",
-  "activationToken",
-  "activateToken",
-  "resetToken",
-  "passwordResetToken",
-  "confirmToken",
-  "code",
-  "t",
-  "access_token",
-  "refresh_token",
-  "id_token",
-]);
+const DEFAULT_THEME =
+  "dark";
 
-const KNOWN_TOKEN_STORAGE_KEYS = Object.freeze([
-  "token",
-  "accessToken",
-  "access_token",
-  "authToken",
-  "refreshToken",
-  "refresh_token",
-  "sessionToken",
-  "tempToken",
-  "onion:token",
-  "onion:accessToken",
-  "onion:refreshToken",
-  "onion:session",
-  "onion:auth",
-  "onion:auth:token",
-  "onion.auth",
-  "onion.session",
-  "auth",
-  "session",
-]);
+const DEFAULT_ROUTE =
+  "/";
 
-const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
+const WARMUP_VERSION =
+  "13.0.0";
+
+const WARMUP_WARNING_DEDUPE_MS =
+  1200;
+
+const WARMUP_LOG_DEDUPE_MS =
+  800;
+
+const MAX_RECENT_SNAPSHOTS =
+  6;
+
+const TOKEN_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
+    "code",
+    "t",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
+  ]);
+
+const KNOWN_TOKEN_STORAGE_KEYS =
+  Object.freeze([
+    "token",
+    "accessToken",
+    "access_token",
+    "authToken",
+    "refreshToken",
+    "refresh_token",
+    "sessionToken",
+    "tempToken",
+
+    "onion:token",
+    "onion:accessToken",
+    "onion:refreshToken",
+    "onion:session",
+    "onion:auth",
+    "onion:auth:token",
+
+    "onion.auth",
+    "onion.session",
+
+    "auth",
+    "session",
+  ]);
+
+const PROTECTED_PUBLIC_TOKEN_ROUTES =
+  Object.freeze([
+    Object.freeze({
+      key:
+        "activation",
+
+      path:
+        "/activate-account",
+
+      windowKeys:
+        Object.freeze([
+          "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+        ]),
+
+      scrubbedFlags:
+        Object.freeze([
+          "scrubbedActivationToken",
+          "activationTokenScrubbed",
+          "scrubbedActivateAccountToken",
+        ]),
+
+      tokenParamNames:
+        Object.freeze([
+          "token",
+          "activationToken",
+          "activateToken",
+          "code",
+          "t",
+        ]),
+    }),
+
+    Object.freeze({
+      key:
+        "resetConfirm",
+
+      path:
+        "/reset-password/confirm",
+
+      windowKeys:
+        Object.freeze([
+          "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+          "__ONION_RESET_CONFIRM_INITIAL_URL__",
+        ]),
+
+      scrubbedFlags:
+        Object.freeze([
+          "scrubbedResetToken",
+          "scrubbedResetPasswordToken",
+          "resetTokenScrubbed",
+          "scrubbedResetConfirmToken",
+          "scrubbedPasswordResetToken",
+        ]),
+
+      tokenParamNames:
+        Object.freeze([
+          "token",
+          "resetToken",
+          "passwordResetToken",
+          "confirmToken",
+          "code",
+          "t",
+        ]),
+    }),
+  ]);
+
+const AUTH_LIKE_PATHS =
+  Object.freeze([
+    "/login",
+    "/signin",
+    "/sign-in",
+    "/register",
+    "/signup",
+    "/sign-up",
+
+    "/forgot-password",
+    "/recover-password",
+    "/password-reset",
+    "/reset-password",
+    "/reset-password/confirm",
+
+    "/activate-account",
+  ]);
+
+const AUTH_LIKE_PREFIXES =
+  Object.freeze([
+    "/activate-account/",
+    "/reset-password/confirm/",
+  ]);
+
+const DOM_IDS =
   Object.freeze({
-    key: "activation",
-    path: "/activate-account",
-    windowKeys: Object.freeze([
-      "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-    ]),
-    scrubbedFlags: Object.freeze([
-      "scrubbedActivationToken",
-    ]),
-    tokenParamNames: Object.freeze([
-      "token",
-      "activationToken",
-      "activateToken",
-      "code",
-      "t",
-    ]),
-  }),
+    app:
+      "app",
 
+    root:
+      "app-root",
+
+    shell:
+      "app-shell",
+
+    main:
+      "main-content",
+
+    appContent:
+      "app-content",
+
+    loader:
+      "app-loader",
+
+    viewContainer:
+      "view-container",
+
+    sidebarMount:
+      "sidebar-mount",
+
+    topbarMount:
+      "topbar-mount",
+
+    sidebar:
+      "app-sidebar",
+
+    topbar:
+      "app-topbar",
+
+    tablehead:
+      "table-head",
+
+    tableheadContainer:
+      "tablehead-container",
+  });
+
+const DOM_SELECTORS =
   Object.freeze({
-    key: "resetConfirm",
-    path: "/reset-password/confirm",
-    windowKeys: Object.freeze([
-      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-      "__ONION_RESET_CONFIRM_INITIAL_URL__",
-    ]),
-    scrubbedFlags: Object.freeze([
-      "scrubbedResetToken",
-      "scrubbedResetPasswordToken",
-    ]),
-    tokenParamNames: Object.freeze([
-      "token",
-      "resetToken",
-      "passwordResetToken",
-      "confirmToken",
-      "code",
-      "t",
-    ]),
-  }),
-]);
+    app:
+      Object.freeze([
+        "#app",
+        "[data-app]",
+        "[data-app-root]",
+      ]),
 
-const AUTH_LIKE_PATHS = Object.freeze([
-  "/login",
-  "/signin",
-  "/sign-in",
-  "/register",
-  "/signup",
-  "/sign-up",
-  "/forgot-password",
-  "/recover-password",
-  "/password-reset",
-  "/reset-password",
-  "/reset-password/confirm",
-  "/activate-account",
-]);
+    root:
+      Object.freeze([
+        "#app-root",
+        "#root",
+        "[data-root]",
+        "[data-app-root]",
+      ]),
 
-const AUTH_LIKE_PREFIXES = Object.freeze([
-  "/activate-account/",
-  "/reset-password/confirm/",
-]);
+    shell:
+      Object.freeze([
+        "#app-shell",
+        ".app-shell",
+        "[data-shell]",
+        "[data-app-shell]",
+        "[data-app-shell='true']",
+      ]),
 
-const DOM_IDS = Object.freeze({
-  app: "app",
-  root: "app-root",
-  shell: "app-shell",
-  main: "main-content",
-  appContent: "app-content",
-  loader: "app-loader",
-  viewContainer: "view-container",
-  sidebarMount: "sidebar-mount",
-  topbarMount: "topbar-mount",
-  sidebar: "app-sidebar",
-  topbar: "app-topbar",
-  tablehead: "table-head",
-  tableheadContainer: "tablehead-container",
-});
+    main:
+      Object.freeze([
+        "#main-content",
+        "main.main-content",
+        ".main-content",
+        "[data-main-content]",
+      ]),
 
-const DOM_SELECTORS = Object.freeze({
-  app: Object.freeze([
-    "#app",
-    "[data-app]",
-    "[data-app-root]",
-  ]),
+    appContent:
+      Object.freeze([
+        "#app-content",
+        ".app-content",
+        "[data-app-content]",
+      ]),
 
-  root: Object.freeze([
-    "#app-root",
-    "#root",
-    "[data-root]",
-    "[data-app-root]",
-  ]),
+    loader:
+      Object.freeze([
+        "#app-loader",
+        "#boot-loader",
+        ".app-loader",
+        "[data-loader]",
+        "[data-app-loader]",
+        "[data-app-loader='true']",
+      ]),
 
-  shell: Object.freeze([
-    "#app-shell",
-    ".app-shell",
-    "[data-shell]",
-    "[data-app-shell]",
-    "[data-app-shell='true']",
-  ]),
+    viewContainer:
+      Object.freeze([
+        "#view-container",
+        "#app-view",
+        "#router-view",
+        "[data-view-container]",
+        "[data-router-view]",
+        "[data-view-root]",
+      ]),
 
-  main: Object.freeze([
-    "#main-content",
-    "main.main-content",
-    ".main-content",
-    "[data-main-content]",
-  ]),
+    sidebarMount:
+      Object.freeze([
+        "#sidebar-mount",
+        "[data-sidebar-mount]",
+        "[data-sidebar-mount='true']",
+      ]),
 
-  appContent: Object.freeze([
-    "#app-content",
-    ".app-content",
-    "[data-app-content]",
-  ]),
+    topbarMount:
+      Object.freeze([
+        "#topbar-mount",
+        "[data-topbar-mount]",
+        "[data-topbar-mount='true']",
+      ]),
 
-  loader: Object.freeze([
-    "#app-loader",
-    "#boot-loader",
-    ".app-loader",
-    "[data-loader]",
-    "[data-app-loader]",
-    "[data-app-loader='true']",
-  ]),
+    sidebar:
+      Object.freeze([
+        "#app-sidebar",
+        "#sidebar",
+        ".sidebar",
+        "[data-sidebar]",
+        "[data-sidebar-root]",
+      ]),
 
-  viewContainer: Object.freeze([
-    "#view-container",
-    "#app-view",
-    "#router-view",
-    "[data-view-container]",
-    "[data-router-view]",
-    "[data-view-root]",
-  ]),
+    topbar:
+      Object.freeze([
+        "#app-topbar",
+        "#topbar",
+        ".topbar",
+        "[data-topbar]",
+        "[data-topbar-root]",
+      ]),
 
-  sidebarMount: Object.freeze([
-    "#sidebar-mount",
-    "[data-sidebar-mount]",
-    "[data-sidebar-mount='true']",
-  ]),
+    tablehead:
+      Object.freeze([
+        "#table-head",
+        ".table-head",
+        "[data-tablehead]",
+      ]),
 
-  topbarMount: Object.freeze([
-    "#topbar-mount",
-    "[data-topbar-mount]",
-    "[data-topbar-mount='true']",
-  ]),
+    tableheadContainer:
+      Object.freeze([
+        "#tablehead-container",
+        ".tablehead-container",
+        "[data-tablehead-container]",
+      ]),
+  });
 
-  sidebar: Object.freeze([
-    "#app-sidebar",
-    "#sidebar",
-    ".sidebar",
-    "[data-sidebar]",
-    "[data-sidebar-root]",
-  ]),
+const WARMUP_EVENTS =
+  Object.freeze({
+    warmup:
+      "app:warmup",
 
-  topbar: Object.freeze([
-    "#app-topbar",
-    "#topbar",
-    ".topbar",
-    "[data-topbar]",
-    "[data-topbar-root]",
-  ]),
+    warning:
+      "app:warmup:warning",
 
-  tablehead: Object.freeze([
-    "#table-head",
-    ".table-head",
-    "[data-tablehead]",
-  ]),
+    ready:
+      "app:warmup:ready",
 
-  tableheadContainer: Object.freeze([
-    "#tablehead-container",
-    ".tablehead-container",
-    "[data-tablehead-container]",
-  ]),
-});
+    summary:
+      "app:warmup:summary",
 
-const WARMUP_EVENTS = Object.freeze({
-  warmup: "app:warmup",
-  warning: "app:warmup:warning",
-  ready: "app:warmup:ready",
-});
+    debugReady:
+      "app:warmup:debug-ready",
+  });
+
+/* =========================================================
+   MODULE STATE
+========================================================= */
+
+let lastWarningKey =
+  "";
+
+let lastWarningAt =
+  0;
+
+let lastLogKey =
+  "";
+
+let lastLogAt =
+  0;
+
+let lastSnapshot =
+  null;
+
+let lastSummary =
+  null;
+
+let warmupCount =
+  0;
+
+let lastWarmupAt =
+  0;
+
+let lastWarmupDurationMs =
+  0;
+
+const recentSnapshots =
+  [];
 
 /* =========================================================
    BASICS
@@ -265,6 +412,16 @@ function isObject(value) {
     value !== null &&
     typeof value === "object" &&
     !Array.isArray(value)
+  );
+}
+
+function isObjectLike(value) {
+  return (
+    value !== null &&
+    (
+      typeof value === "object" ||
+      typeof value === "function"
+    )
   );
 }
 
@@ -286,13 +443,15 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value).trim();
 
   return text || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
-  const number = Number(value);
+  const number =
+    Number(value);
 
   return Number.isFinite(number)
     ? number
@@ -310,7 +469,8 @@ function safeBoolean(value, fallback = false) {
   }
 
   if (typeof value === "string") {
-    const key = value.trim().toLowerCase();
+    const key =
+      value.trim().toLowerCase();
 
     if (
       [
@@ -355,21 +515,6 @@ function safeArray(value) {
     : [];
 }
 
-function toArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return [];
-  }
-
-  return [value];
-}
-
 function safeCall(fn, fallback = null) {
   try {
     if (isFunction(fn)) {
@@ -378,6 +523,79 @@ function safeCall(fn, fallback = null) {
   } catch {}
 
   return fallback;
+}
+
+function nowMs() {
+  try {
+    if (
+      typeof performance !== "undefined" &&
+      typeof performance.now === "function"
+    ) {
+      return performance.now();
+    }
+  } catch {}
+
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+function epochMs() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+function isExtensibleObject(value) {
+  try {
+    return (
+      isObjectLike(value) &&
+      Object.isExtensible(value)
+    );
+  } catch {}
+
+  return false;
+}
+
+function safeDefineValue(target, key, value) {
+  if (
+    !target ||
+    !key ||
+    !isExtensibleObject(target)
+  ) {
+    return false;
+  }
+
+  try {
+    Object.defineProperty(
+      target,
+      key,
+      {
+        value,
+        configurable:
+          true,
+        enumerable:
+          false,
+        writable:
+          true,
+      }
+    );
+
+    return true;
+  } catch {}
+
+  try {
+    target[key] =
+      value;
+
+    return true;
+  } catch {}
+
+  return false;
 }
 
 function normalizeDeps(first = {}, second = {}) {
@@ -401,21 +619,9 @@ function normalizeDeps(first = {}, second = {}) {
 
   return {
     ...ensureObject(second),
-    AppCore: first,
+    AppCore:
+      first,
   };
-}
-
-function nowMs() {
-  try {
-    if (
-      typeof performance !== "undefined" &&
-      typeof performance.now === "function"
-    ) {
-      return performance.now();
-    }
-  } catch {}
-
-  return Date.now();
 }
 
 /* =========================================================
@@ -423,15 +629,17 @@ function nowMs() {
 ========================================================= */
 
 function getModuleFromRegistry(AppCore, names = []) {
-  const modules = AppCore?.modules;
+  const modules =
+    AppCore?.modules;
 
   if (!modules) {
     return null;
   }
 
-  const keys = safeArray(names)
-    .map((name) => safeText(name, ""))
-    .filter(Boolean);
+  const keys =
+    safeArray(names)
+      .map((name) => safeText(name, ""))
+      .filter(Boolean);
 
   for (const key of keys) {
     try {
@@ -464,75 +672,99 @@ function getModuleFromRegistry(AppCore, names = []) {
 }
 
 function resolveRuntimeDeps(first = {}, second = {}) {
-  const deps = normalizeDeps(first, second);
-  const AppCore = deps.AppCore || null;
+  const deps =
+    normalizeDeps(first, second);
+
+  const AppCore =
+    deps.AppCore || null;
 
   const Router =
     deps.Router ||
     AppCore?.Router ||
     AppCore?.router ||
-    getModuleFromRegistry(AppCore, [
-      "Router",
-      "router",
-      "AppRouter",
-      "appRouter",
-    ]);
+    getModuleFromRegistry(
+      AppCore,
+      [
+        "Router",
+        "router",
+        "AppRouter",
+        "appRouter",
+      ]
+    );
 
   const I18n =
     deps.I18n ||
     AppCore?.I18n ||
     AppCore?.i18n ||
-    getModuleFromRegistry(AppCore, [
-      "I18n",
-      "i18n",
-      "Lang",
-      "lang",
-    ]);
+    getModuleFromRegistry(
+      AppCore,
+      [
+        "I18n",
+        "i18n",
+        "Lang",
+        "lang",
+      ]
+    );
 
   const Store =
     deps.Store ||
     AppCore?.Store ||
     AppCore?.store ||
-    getModuleFromRegistry(AppCore, [
-      "Store",
-      "store",
-    ]);
+    getModuleFromRegistry(
+      AppCore,
+      [
+        "Store",
+        "store",
+      ]
+    );
 
   const Auth =
     deps.Auth ||
     AppCore?.Auth ||
     AppCore?.auth ||
-    getModuleFromRegistry(AppCore, [
-      "Auth",
-      "auth",
-    ]);
+    getModuleFromRegistry(
+      AppCore,
+      [
+        "Auth",
+        "auth",
+      ]
+    );
 
   const SidebarUI =
     deps.SidebarUI ||
     AppCore?.SidebarUI ||
     AppCore?.sidebar ||
-    getModuleFromRegistry(AppCore, [
-      "SidebarUI",
-      "sidebar",
-    ]);
+    getModuleFromRegistry(
+      AppCore,
+      [
+        "SidebarUI",
+        "sidebar",
+      ]
+    );
 
   const TopbarUI =
     deps.TopbarUI ||
     AppCore?.TopbarUI ||
     AppCore?.topbar ||
-    getModuleFromRegistry(AppCore, [
-      "TopbarUI",
-      "topbar",
-    ]);
+    getModuleFromRegistry(
+      AppCore,
+      [
+        "TopbarUI",
+        "topbar",
+      ]
+    );
 
   const Toast =
     deps.Toast ||
     AppCore?.Toast ||
     AppCore?.toast ||
-    getModuleFromRegistry(AppCore, [
-      "Toast",
-      "toast",
-    ]);
+    getModuleFromRegistry(
+      AppCore,
+      [
+        "Toast",
+        "toast",
+      ]
+    );
 
   return {
     ...deps,
@@ -552,70 +784,97 @@ function resolveRuntimeDeps(first = {}, second = {}) {
 ========================================================= */
 
 function getLogger(AppCore, level = "log") {
-  const utils = ensureObject(AppCore?.utils);
-
-  const candidate =
-    utils?.[level] ||
-    utils?.log ||
-    console?.[level] ||
-    console?.log;
-
-  if (!isFunction(candidate)) {
-    return null;
-  }
-
   try {
-    if (
-      candidate === console?.log ||
-      candidate === console?.warn ||
-      candidate === console?.error ||
-      candidate === console?.info
-    ) {
-      return candidate.bind(console);
+    const utils =
+      ensureObject(AppCore?.utils);
+
+    if (isFunction(utils?.[level])) {
+      return utils[level].bind(utils);
+    }
+
+    if (isFunction(utils?.log)) {
+      return utils.log.bind(utils);
     }
   } catch {}
 
-  return candidate;
+  try {
+    if (isFunction(console?.[level])) {
+      return console[level].bind(console);
+    }
+
+    if (isFunction(console?.log)) {
+      return console.log.bind(console);
+    }
+  } catch {}
+
+  return null;
 }
 
 function safeLog(AppCore, ...args) {
   try {
-    const log = getLogger(AppCore, "log");
-    log?.(WARMUP_LABEL, ...args);
+    const log =
+      getLogger(AppCore, "log");
+
+    log?.(
+      WARMUP_LABEL,
+      ...args
+    );
   } catch {}
 }
 
 function safeInfo(AppCore, ...args) {
   try {
-    const info = getLogger(AppCore, "info");
-    info?.(WARMUP_LABEL, ...args);
+    const info =
+      getLogger(AppCore, "info");
+
+    info?.(
+      WARMUP_LABEL,
+      ...args
+    );
   } catch {}
 }
 
 function safeWarn(AppCore, ...args) {
   try {
-    const warn = getLogger(AppCore, "warn");
-    warn?.(WARMUP_LABEL, ...args);
+    const warn =
+      getLogger(AppCore, "warn");
+
+    warn?.(
+      WARMUP_LABEL,
+      ...args
+    );
   } catch {}
 }
 
 function safeEmit(AppCore, eventName, payload = {}, options = {}) {
-  const name = safeText(eventName, "");
+  const name =
+    safeText(eventName, "");
 
   if (!name) {
     return false;
   }
 
-  const opts = ensureObject(options);
+  const opts =
+    ensureObject(options);
 
-  let busAvailable = false;
-  let busEmitted = false;
+  let busAvailable =
+    false;
+
+  let busEmitted =
+    false;
 
   try {
     if (isFunction(AppCore?.events?.emit)) {
-      busAvailable = true;
-      AppCore.events.emit(name, payload);
-      busEmitted = true;
+      busAvailable =
+        true;
+
+      AppCore.events.emit(
+        name,
+        payload
+      );
+
+      busEmitted =
+        true;
     }
   } catch {}
 
@@ -630,9 +889,13 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   ) {
     try {
       window.dispatchEvent(
-        new CustomEvent(name, {
-          detail: payload,
-        })
+        new CustomEvent(
+          name,
+          {
+            detail:
+              payload,
+          }
+        )
       );
 
       return true;
@@ -642,12 +905,71 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   return busEmitted;
 }
 
+function shouldLogSnapshot(snapshot = {}) {
+  const key =
+    [
+      snapshot.reason,
+      snapshot.health?.status,
+      snapshot.warningCount,
+      snapshot.app?.route,
+      snapshot.app?.publicPath,
+      snapshot.auth?.authenticated ? "auth" : "anon",
+      snapshot.router?.present ? "router" : "no-router",
+    ].join("|");
+
+  const now =
+    epochMs();
+
+  if (
+    key === lastLogKey &&
+    now - lastLogAt < WARMUP_LOG_DEDUPE_MS
+  ) {
+    return false;
+  }
+
+  lastLogKey =
+    key;
+
+  lastLogAt =
+    now;
+
+  return true;
+}
+
+function shouldEmitWarning(warning = {}) {
+  const key =
+    [
+      warning.code,
+      warning.severity,
+      warning.message,
+    ].join("|");
+
+  const now =
+    epochMs();
+
+  if (
+    key === lastWarningKey &&
+    now - lastWarningAt < WARMUP_WARNING_DEDUPE_MS
+  ) {
+    return false;
+  }
+
+  lastWarningKey =
+    key;
+
+  lastWarningAt =
+    now;
+
+  return true;
+}
+
 /* =========================================================
    REDACTION
 ========================================================= */
 
 function redactTokenInText(value = "") {
-  let output = safeText(value, "");
+  let output =
+    safeText(value, "");
 
   if (!output) {
     return "";
@@ -655,39 +977,47 @@ function redactTokenInText(value = "") {
 
   for (const name of TOKEN_PARAM_NAMES) {
     try {
-      output = output.replace(
-        new RegExp(`([?&#]${name}=)([^&#\\s]+)`, "gi"),
-        "$1***"
-      );
+      const escaped =
+        String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+      output =
+        output.replace(
+          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
     } catch {}
   }
 
   try {
-    output = output.replace(
-      /(\/activate-account\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
+    output =
+      output.replace(
+        /(\/activate-account\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
   } catch {}
 
   try {
-    output = output.replace(
-      /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
+    output =
+      output.replace(
+        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
   } catch {}
 
   try {
-    output = output.replace(
-      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-      "$1***"
-    );
+    output =
+      output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
   } catch {}
 
   try {
-    output = output.replace(
-      /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
-      "$1$2***"
-    );
+    output =
+      output.replace(
+        /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
+        "$1$2***"
+      );
   } catch {}
 
   return output;
@@ -712,43 +1042,68 @@ function sanitizeSnapshotValue(value, depth = 0) {
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) =>
-      sanitizeSnapshotValue(item, depth + 1)
-    );
+    return value
+      .slice(0, 80)
+      .map((item) =>
+        sanitizeSnapshotValue(
+          item,
+          depth + 1
+        )
+      );
+  }
+
+  if (value instanceof Error) {
+    return {
+      name:
+        safeText(value.name, "Error"),
+
+      message:
+        redactTokenInText(
+          safeText(value.message, "")
+        ),
+
+      stack:
+        redactTokenInText(
+          safeText(value.stack, "")
+        ),
+    };
   }
 
   if (isObject(value)) {
     const output = {};
 
     for (const [key, item] of Object.entries(value)) {
-      const cleanKey = safeText(key, "");
+      const cleanKey =
+        safeText(key, "");
 
       if (!cleanKey) {
         continue;
       }
 
       if (
-        /token|secret|password|authorization|credential/i.test(cleanKey)
+        /token|secret|password|authorization|credential|cookie/i.test(cleanKey)
       ) {
-        if (typeof item === "boolean") {
-          output[cleanKey] = item;
-        } else if (
+        if (
+          typeof item === "boolean" ||
           item === null ||
           item === undefined ||
           item === ""
         ) {
-          output[cleanKey] = item;
+          output[cleanKey] =
+            item;
         } else {
-          output[cleanKey] = "***";
+          output[cleanKey] =
+            "***";
         }
 
         continue;
       }
 
-      output[cleanKey] = sanitizeSnapshotValue(
-        item,
-        depth + 1
-      );
+      output[cleanKey] =
+        sanitizeSnapshotValue(
+          item,
+          depth + 1
+        );
     }
 
     return output;
@@ -773,27 +1128,32 @@ function getBaseOrigin() {
 }
 
 function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
-  let value = safeText(pathname, DEFAULT_ROUTE)
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
+  let value =
+    safeText(pathname, DEFAULT_ROUTE)
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
 
   if (!value) {
-    value = DEFAULT_ROUTE;
+    value =
+      DEFAULT_ROUTE;
   }
 
   if (!value.startsWith("/")) {
-    value = `/${value}`;
+    value =
+      `/${value}`;
   }
 
   if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
+    value =
+      value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
   }
 
   return value;
 }
 
 function normalizeSearch(search = "") {
-  const value = safeText(search, "");
+  const value =
+    safeText(search, "");
 
   if (!value) {
     return "";
@@ -805,7 +1165,8 @@ function normalizeSearch(search = "") {
 }
 
 function normalizeHash(hash = "") {
-  const value = safeText(hash, "");
+  const value =
+    safeText(hash, "");
 
   if (!value) {
     return "";
@@ -817,7 +1178,8 @@ function normalizeHash(hash = "") {
 }
 
 function isHashRouterPath(value = "") {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   return (
     raw.startsWith("#/") ||
@@ -826,7 +1188,8 @@ function isHashRouterPath(value = "") {
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return DEFAULT_ROUTE;
@@ -840,7 +1203,8 @@ function normalizeHashRouterPath(value = "") {
 }
 
 function splitFullPath(value = DEFAULT_ROUTE) {
-  const raw = safeText(value, DEFAULT_ROUTE);
+  const raw =
+    safeText(value, DEFAULT_ROUTE);
 
   if (isHashRouterPath(raw)) {
     return splitFullPath(
@@ -848,33 +1212,52 @@ function splitFullPath(value = DEFAULT_ROUTE) {
     );
   }
 
-  let pathname = raw;
-  let search = "";
-  let hash = "";
+  let pathname =
+    raw;
 
-  const hashIndex = pathname.indexOf("#");
+  let search =
+    "";
+
+  let hash =
+    "";
+
+  const hashIndex =
+    pathname.indexOf("#");
 
   if (hashIndex >= 0) {
-    hash = pathname.slice(hashIndex);
-    pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
+    hash =
+      pathname.slice(hashIndex);
+
+    pathname =
+      pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
   }
 
-  const searchIndex = pathname.indexOf("?");
+  const searchIndex =
+    pathname.indexOf("?");
 
   if (searchIndex >= 0) {
-    search = pathname.slice(searchIndex);
-    pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
+    search =
+      pathname.slice(searchIndex);
+
+    pathname =
+      pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
   }
 
   return {
-    pathname: normalizePathnameOnly(pathname),
-    search: normalizeSearch(search),
-    hash: normalizeHash(hash),
+    pathname:
+      normalizePathnameOnly(pathname),
+
+    search:
+      normalizeSearch(search),
+
+    hash:
+      normalizeHash(hash),
   };
 }
 
 function normalizeLocalFullPath(path = DEFAULT_ROUTE) {
-  const raw = safeText(path, DEFAULT_ROUTE);
+  const raw =
+    safeText(path, DEFAULT_ROUTE);
 
   if (!raw) {
     return DEFAULT_ROUTE;
@@ -888,7 +1271,11 @@ function normalizeLocalFullPath(path = DEFAULT_ROUTE) {
 
   try {
     if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
-      const parsed = new URL(raw, getBaseOrigin());
+      const parsed =
+        new URL(
+          raw,
+          getBaseOrigin()
+        );
 
       if (
         parsed.hash &&
@@ -905,13 +1292,19 @@ function normalizeLocalFullPath(path = DEFAULT_ROUTE) {
     }
   } catch {}
 
-  const { pathname, search, hash } = splitFullPath(raw);
+  const {
+    pathname,
+    search,
+    hash,
+  } =
+    splitFullPath(raw);
 
   return `${pathname}${search}${hash}`;
 }
 
 function stripSearchAndHash(path = DEFAULT_ROUTE) {
-  const normalized = normalizeLocalFullPath(path || DEFAULT_ROUTE);
+  const normalized =
+    normalizeLocalFullPath(path || DEFAULT_ROUTE);
 
   return (
     normalized
@@ -927,9 +1320,14 @@ function getBrowserPublicPath() {
   }
 
   try {
-    const pathname = window.location.pathname || DEFAULT_ROUTE;
-    const search = window.location.search || "";
-    const hash = window.location.hash || "";
+    const pathname =
+      window.location.pathname || DEFAULT_ROUTE;
+
+    const search =
+      window.location.search || "";
+
+    const hash =
+      window.location.hash || "";
 
     if (
       hash &&
@@ -949,7 +1347,8 @@ function getBrowserPublicPath() {
 }
 
 function pathFromUrlLike(value = "") {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return "";
@@ -962,7 +1361,11 @@ function pathFromUrlLike(value = "") {
   }
 
   try {
-    const parsed = new URL(raw, getBaseOrigin());
+    const parsed =
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
 
     if (
       parsed.hash &&
@@ -978,13 +1381,16 @@ function pathFromUrlLike(value = "") {
     );
   } catch {
     return normalizeLocalFullPath(
-      raw.startsWith("/") ? raw : `/${raw}`
+      raw.startsWith("/")
+        ? raw
+        : `/${raw}`
     );
   }
 }
 
 function isAuthLikePath(path = DEFAULT_ROUTE) {
-  const clean = stripSearchAndHash(path);
+  const clean =
+    stripSearchAndHash(path);
 
   if (AUTH_LIKE_PATHS.includes(clean)) {
     return true;
@@ -1001,7 +1407,8 @@ function isAuthLikePath(path = DEFAULT_ROUTE) {
 
 function hasTokenInSearch(search = "", names = []) {
   try {
-    const params = new URLSearchParams(search || "");
+    const params =
+      new URLSearchParams(search || "");
 
     return safeArray(names).some((name) =>
       Boolean(
@@ -1021,21 +1428,24 @@ function getPathToken(config = null, value = "") {
     return "";
   }
 
-  const path = pathFromUrlLike(value);
+  const path =
+    pathFromUrlLike(value);
 
   if (!path) {
     return "";
   }
 
-  const clean = stripSearchAndHash(path);
+  const clean =
+    stripSearchAndHash(path);
 
   if (!clean.startsWith(`${config.path}/`)) {
     return "";
   }
 
-  const token = clean
-    .slice(`${config.path}/`.length)
-    .split("/")[0];
+  const token =
+    clean
+      .slice(`${config.path}/`.length)
+      .split("/")[0];
 
   try {
     return safeText(
@@ -1052,7 +1462,8 @@ function hasRouteToken(config = null, value = "") {
     return false;
   }
 
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return false;
@@ -1063,7 +1474,11 @@ function hasRouteToken(config = null, value = "") {
   }
 
   try {
-    const parsed = new URL(raw, getBaseOrigin());
+    const parsed =
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
 
     if (
       hasTokenInSearch(
@@ -1078,13 +1493,15 @@ function hasRouteToken(config = null, value = "") {
       parsed.hash &&
       isHashRouterPath(parsed.hash)
     ) {
-      const hashPath = normalizeHashRouterPath(parsed.hash);
+      const hashPath =
+        normalizeHashRouterPath(parsed.hash);
 
       if (getPathToken(config, hashPath)) {
         return true;
       }
 
-      const hashParts = splitFullPath(hashPath);
+      const hashParts =
+        splitFullPath(hashPath);
 
       if (
         hasTokenInSearch(
@@ -1100,10 +1517,11 @@ function hasRouteToken(config = null, value = "") {
       parsed.hash &&
       parsed.hash.includes("?")
     ) {
-      const query = parsed.hash
-        .split("?")
-        .slice(1)
-        .join("?");
+      const query =
+        parsed.hash
+          .split("?")
+          .slice(1)
+          .join("?");
 
       return hasTokenInSearch(
         query ? `?${query}` : "",
@@ -1113,7 +1531,8 @@ function hasRouteToken(config = null, value = "") {
 
     return false;
   } catch {
-    const parts = splitFullPath(raw);
+    const parts =
+      splitFullPath(raw);
 
     if (
       hasTokenInSearch(
@@ -1128,10 +1547,11 @@ function hasRouteToken(config = null, value = "") {
       parts.hash &&
       parts.hash.includes("?")
     ) {
-      const query = parts.hash
-        .split("?")
-        .slice(1)
-        .join("?");
+      const query =
+        parts.hash
+          .split("?")
+          .slice(1)
+          .join("?");
 
       return hasTokenInSearch(
         query ? `?${query}` : "",
@@ -1178,8 +1598,11 @@ function matchesProtectedTokenRoute(config = null, value = "") {
     return false;
   }
 
-  const path = pathFromUrlLike(value);
-  const clean = stripSearchAndHash(path);
+  const path =
+    pathFromUrlLike(value);
+
+  const clean =
+    stripSearchAndHash(path);
 
   return (
     clean === config.path ||
@@ -1188,63 +1611,103 @@ function matchesProtectedTokenRoute(config = null, value = "") {
 }
 
 function getProtectedTokenRouteSnapshot() {
-  const candidates = [];
+  const candidates =
+    [];
 
   if (isBrowser()) {
     try {
-      candidates.push(window.location.href || "");
+      candidates.push(
+        window.location.href || ""
+      );
     } catch {}
 
     try {
-      candidates.push(getBrowserPublicPath());
+      candidates.push(
+        getBrowserPublicPath()
+      );
     } catch {}
 
     try {
-      candidates.push(getWindowValue("__ONION_INITIAL_URL__"));
+      candidates.push(
+        getWindowValue("__ONION_INITIAL_URL__")
+      );
     } catch {}
   }
 
   for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
     for (const key of config.windowKeys || []) {
-      candidates.push(getWindowValue(key));
+      candidates.push(
+        getWindowValue(key)
+      );
     }
   }
 
-  const cleanCandidates = candidates
-    .map((candidate) => safeText(candidate, ""))
-    .filter(Boolean);
+  const cleanCandidates =
+    candidates
+      .map((candidate) => safeText(candidate, ""))
+      .filter(Boolean);
 
-  const routes = PROTECTED_PUBLIC_TOKEN_ROUTES.map((config) => {
-    const matchedCandidates = cleanCandidates.filter((candidate) =>
-      matchesProtectedTokenRoute(config, candidate)
-    );
+  const routes =
+    PROTECTED_PUBLIC_TOKEN_ROUTES.map((config) => {
+      const matchedCandidates =
+        cleanCandidates.filter((candidate) =>
+          matchesProtectedTokenRoute(
+            config,
+            candidate
+          )
+        );
 
-    const tokenCandidates = matchedCandidates.filter((candidate) =>
-      hasRouteToken(config, candidate)
-    );
+      const tokenCandidates =
+        matchedCandidates.filter((candidate) =>
+          hasRouteToken(
+            config,
+            candidate
+          )
+        );
 
-    const scrubbed = safeArray(config.scrubbedFlags).some((flag) =>
-      getHistoryStateFlag(flag)
-    );
+      const scrubbed =
+        safeArray(config.scrubbedFlags).some((flag) =>
+          getHistoryStateFlag(flag)
+        );
 
-    return {
-      key: config.key,
-      path: config.path,
-      matched: matchedCandidates.length > 0,
-      hasToken: tokenCandidates.length > 0,
-      scrubbed,
-      candidateCount: matchedCandidates.length,
-      tokenCandidateCount: tokenCandidates.length,
-      samples: matchedCandidates
-        .slice(0, 3)
-        .map(redactTokenInText),
-    };
-  });
+      return {
+        key:
+          config.key,
+
+        path:
+          config.path,
+
+        matched:
+          matchedCandidates.length > 0,
+
+        hasToken:
+          tokenCandidates.length > 0,
+
+        scrubbed,
+
+        candidateCount:
+          matchedCandidates.length,
+
+        tokenCandidateCount:
+          tokenCandidates.length,
+
+        samples:
+          matchedCandidates
+            .slice(0, 3)
+            .map(redactTokenInText),
+      };
+    });
 
   return {
-    anyMatched: routes.some((item) => item.matched),
-    anyHasToken: routes.some((item) => item.hasToken),
-    anyScrubbed: routes.some((item) => item.scrubbed),
+    anyMatched:
+      routes.some((item) => item.matched),
+
+    anyHasToken:
+      routes.some((item) => item.hasToken),
+
+    anyScrubbed:
+      routes.some((item) => item.scrubbed),
+
     routes,
   };
 }
@@ -1256,44 +1719,112 @@ function getProtectedTokenRouteSnapshot() {
 function getLocationSnapshot() {
   if (!isBrowser()) {
     return {
-      href: "",
-      origin: "",
-      pathname: "",
-      search: "",
-      hash: "",
-      publicPath: DEFAULT_ROUTE,
-      hashRouterPath: "",
+      href:
+        "",
+
+      origin:
+        "",
+
+      pathname:
+        "",
+
+      search:
+        "",
+
+      hash:
+        "",
+
+      publicPath:
+        DEFAULT_ROUTE,
+
+      normalizedPublicPath:
+        DEFAULT_ROUTE,
+
+      hashRouterPath:
+        "",
+
+      authLike:
+        false,
     };
   }
 
   try {
-    const pathname = window.location?.pathname || DEFAULT_ROUTE;
-    const search = window.location?.search || "";
-    const hash = window.location?.hash || "";
+    const pathname =
+      window.location?.pathname || DEFAULT_ROUTE;
+
+    const search =
+      window.location?.search || "";
+
+    const hash =
+      window.location?.hash || "";
+
+    const publicPath =
+      `${pathname}${search}${hash}` || DEFAULT_ROUTE;
 
     return {
-      href: redactTokenInText(window.location?.href || ""),
-      origin: window.location?.origin || "",
-      pathname: redactTokenInText(pathname),
-      search: redactTokenInText(search),
-      hash: redactTokenInText(hash),
-      publicPath: redactTokenInText(`${pathname}${search}${hash}` || DEFAULT_ROUTE),
-      normalizedPublicPath: redactTokenInText(getBrowserPublicPath()),
+      href:
+        redactTokenInText(
+          window.location?.href || ""
+        ),
+
+      origin:
+        window.location?.origin || "",
+
+      pathname:
+        redactTokenInText(pathname),
+
+      search:
+        redactTokenInText(search),
+
+      hash:
+        redactTokenInText(hash),
+
+      publicPath:
+        redactTokenInText(publicPath),
+
+      normalizedPublicPath:
+        redactTokenInText(
+          getBrowserPublicPath()
+        ),
+
       hashRouterPath:
         hash && isHashRouterPath(hash)
-          ? redactTokenInText(normalizeHashRouterPath(hash))
+          ? redactTokenInText(
+              normalizeHashRouterPath(hash)
+            )
           : "",
-      authLike: isAuthLikePath(`${pathname}${search}${hash}`),
+
+      authLike:
+        isAuthLikePath(publicPath),
     };
   } catch {
     return {
-      href: "",
-      origin: "",
-      pathname: "",
-      search: "",
-      hash: "",
-      publicPath: DEFAULT_ROUTE,
-      hashRouterPath: "",
+      href:
+        "",
+
+      origin:
+        "",
+
+      pathname:
+        "",
+
+      search:
+        "",
+
+      hash:
+        "",
+
+      publicPath:
+        DEFAULT_ROUTE,
+
+      normalizedPublicPath:
+        DEFAULT_ROUTE,
+
+      hashRouterPath:
+        "",
+
+      authLike:
+        false,
     };
   }
 }
@@ -1301,56 +1832,126 @@ function getLocationSnapshot() {
 function getDocumentSnapshot() {
   if (!isBrowser()) {
     return {
-      readyState: "server",
-      title: "",
-      lang: null,
-      visibilityState: null,
-      hidden: null,
-      theme: null,
-      appState: null,
-      appLoading: null,
-      routeMode: null,
-      shell: null,
-      chrome: null,
+      readyState:
+        "server",
+
+      title:
+        "",
+
+      lang:
+        null,
+
+      visibilityState:
+        null,
+
+      hidden:
+        null,
+
+      theme:
+        null,
+
+      appState:
+        null,
+
+      appLoading:
+        null,
+
+      routeMode:
+        null,
+
+      shell:
+        null,
+
+      chrome:
+        null,
+
+      className:
+        "",
     };
   }
 
   try {
-    const html = document.documentElement;
+    const html =
+      document.documentElement;
 
     return {
-      readyState: document.readyState || "",
-      title: document.title || "",
+      readyState:
+        document.readyState || "",
+
+      title:
+        document.title || "",
+
       lang:
         html?.getAttribute?.("lang") ||
         html?.lang ||
         null,
-      visibilityState: document.visibilityState || null,
+
+      visibilityState:
+        document.visibilityState || null,
+
       hidden:
         typeof document.hidden === "boolean"
           ? document.hidden
           : null,
-      theme: html?.dataset?.theme || null,
-      appState: html?.dataset?.appState || null,
-      appLoading: html?.dataset?.appLoading || null,
-      routeMode: html?.dataset?.routeMode || null,
-      shell: html?.dataset?.shell || null,
-      chrome: html?.dataset?.chrome || null,
-      className: safeText(html?.className, ""),
+
+      theme:
+        html?.dataset?.theme || null,
+
+      appState:
+        html?.dataset?.appState || null,
+
+      appLoading:
+        html?.dataset?.appLoading || null,
+
+      routeMode:
+        html?.dataset?.routeMode || null,
+
+      shell:
+        html?.dataset?.shell || null,
+
+      chrome:
+        html?.dataset?.chrome || null,
+
+      className:
+        safeText(html?.className, ""),
     };
   } catch {
     return {
-      readyState: "",
-      title: "",
-      lang: null,
-      visibilityState: null,
-      hidden: null,
-      theme: null,
-      appState: null,
-      appLoading: null,
-      routeMode: null,
-      shell: null,
-      chrome: null,
+      readyState:
+        "",
+
+      title:
+        "",
+
+      lang:
+        null,
+
+      visibilityState:
+        null,
+
+      hidden:
+        null,
+
+      theme:
+        null,
+
+      appState:
+        null,
+
+      appLoading:
+        null,
+
+      routeMode:
+        null,
+
+      shell:
+        null,
+
+      chrome:
+        null,
+
+      className:
+        "",
     };
   }
 }
@@ -1358,10 +1959,17 @@ function getDocumentSnapshot() {
 function getNavigatorSnapshot() {
   if (!isBrowser()) {
     return {
-      online: null,
-      language: null,
-      languages: [],
-      userAgent: "",
+      online:
+        null,
+
+      language:
+        null,
+
+      languages:
+        [],
+
+      userAgent:
+        "",
     };
   }
 
@@ -1371,16 +1979,29 @@ function getNavigatorSnapshot() {
         typeof navigator.onLine === "boolean"
           ? navigator.onLine
           : null,
-      language: navigator.language || null,
-      languages: safeArray(navigator.languages),
-      userAgent: navigator.userAgent || "",
+
+      language:
+        navigator.language || null,
+
+      languages:
+        safeArray(navigator.languages),
+
+      userAgent:
+        navigator.userAgent || "",
     };
   } catch {
     return {
-      online: null,
-      language: null,
-      languages: [],
-      userAgent: "",
+      online:
+        null,
+
+      language:
+        null,
+
+      languages:
+        [],
+
+      userAgent:
+        "",
     };
   }
 }
@@ -1388,39 +2009,67 @@ function getNavigatorSnapshot() {
 function getHistorySnapshot() {
   if (!isBrowser()) {
     return {
-      length: 0,
-      state: null,
+      length:
+        0,
+
+      state:
+        null,
     };
   }
 
   try {
-    const state = ensureObject(window.history?.state);
+    const state =
+      ensureObject(window.history?.state);
 
     return {
-      length: safeNumber(window.history?.length, 0),
-      state: sanitizeSnapshotValue(state),
-      hasScrubbedActivationToken: Boolean(state.scrubbedActivationToken),
-      hasScrubbedResetToken: Boolean(
-        state.scrubbedResetToken ||
-        state.scrubbedResetPasswordToken
-      ),
+      length:
+        safeNumber(
+          window.history?.length,
+          0
+        ),
+
+      state:
+        sanitizeSnapshotValue(state),
+
+      hasScrubbedActivationToken:
+        Boolean(state.scrubbedActivationToken),
+
+      hasScrubbedResetToken:
+        Boolean(
+          state.scrubbedResetToken ||
+            state.scrubbedResetPasswordToken
+        ),
     };
   } catch {
     return {
-      length: 0,
-      state: null,
+      length:
+        0,
+
+      state:
+        null,
     };
   }
 }
 
 function getPerformanceSnapshot() {
   const output = {
-    supported: false,
-    now: 0,
-    navigationType: "",
-    domContentLoadedMs: 0,
-    loadEventMs: 0,
-    memory: null,
+    supported:
+      false,
+
+    now:
+      0,
+
+    navigationType:
+      "",
+
+    domContentLoadedMs:
+      0,
+
+    loadEventMs:
+      0,
+
+    memory:
+      null,
   };
 
   try {
@@ -1431,30 +2080,52 @@ function getPerformanceSnapshot() {
       return output;
     }
 
-    output.supported = true;
-    output.now = Math.round(nowMs());
+    output.supported =
+      true;
+
+    output.now =
+      Math.round(nowMs());
 
     try {
       const nav =
         performance.getEntriesByType?.("navigation")?.[0] || null;
 
       if (nav) {
-        output.navigationType = nav.type || "";
-        output.domContentLoadedMs = Math.round(
-          nav.domContentLoadedEventEnd || 0
-        );
-        output.loadEventMs = Math.round(
-          nav.loadEventEnd || 0
-        );
+        output.navigationType =
+          nav.type || "";
+
+        output.domContentLoadedMs =
+          Math.round(
+            nav.domContentLoadedEventEnd || 0
+          );
+
+        output.loadEventMs =
+          Math.round(
+            nav.loadEventEnd || 0
+          );
       }
     } catch {}
 
     try {
       if (performance.memory) {
         output.memory = {
-          usedJSHeapSize: safeNumber(performance.memory.usedJSHeapSize, 0),
-          totalJSHeapSize: safeNumber(performance.memory.totalJSHeapSize, 0),
-          jsHeapSizeLimit: safeNumber(performance.memory.jsHeapSizeLimit, 0),
+          usedJSHeapSize:
+            safeNumber(
+              performance.memory.usedJSHeapSize,
+              0
+            ),
+
+          totalJSHeapSize:
+            safeNumber(
+              performance.memory.totalJSHeapSize,
+              0
+            ),
+
+          jsHeapSizeLimit:
+            safeNumber(
+              performance.memory.jsHeapSizeLimit,
+              0
+            ),
         };
       }
     } catch {}
@@ -1483,7 +2154,9 @@ function getStorage(type = "localStorage") {
 
 function hasStorageKey(storage, key = "") {
   try {
-    return Boolean(storage?.getItem?.(key));
+    return Boolean(
+      storage?.getItem?.(key)
+    );
   } catch {
     return false;
   }
@@ -1491,7 +2164,10 @@ function hasStorageKey(storage, key = "") {
 
 function getStorageLength(storage) {
   try {
-    return safeNumber(storage?.length, 0);
+    return safeNumber(
+      storage?.length,
+      0
+    );
   } catch {
     return 0;
   }
@@ -1500,40 +2176,73 @@ function getStorageLength(storage) {
 function getStorageTokenHints() {
   if (!isBrowser()) {
     return {
-      localStorage: false,
-      sessionStorage: false,
-      localStorageLength: 0,
-      sessionStorageLength: 0,
-      keys: [],
+      localStorage:
+        false,
+
+      sessionStorage:
+        false,
+
+      localStorageLength:
+        0,
+
+      sessionStorageLength:
+        0,
+
+      keys:
+        [],
     };
   }
 
-  const localStorageRef = getStorage("localStorage");
-  const sessionStorageRef = getStorage("sessionStorage");
+  const localStorageRef =
+    getStorage("localStorage");
 
-  const foundKeys = [];
+  const sessionStorageRef =
+    getStorage("sessionStorage");
 
-  let localHasToken = false;
-  let sessionHasToken = false;
+  const foundKeys =
+    [];
+
+  let localHasToken =
+    false;
+
+  let sessionHasToken =
+    false;
 
   for (const key of KNOWN_TOKEN_STORAGE_KEYS) {
     if (hasStorageKey(localStorageRef, key)) {
-      localHasToken = true;
-      foundKeys.push(`localStorage:${key}`);
+      localHasToken =
+        true;
+
+      foundKeys.push(
+        `localStorage:${key}`
+      );
     }
 
     if (hasStorageKey(sessionStorageRef, key)) {
-      sessionHasToken = true;
-      foundKeys.push(`sessionStorage:${key}`);
+      sessionHasToken =
+        true;
+
+      foundKeys.push(
+        `sessionStorage:${key}`
+      );
     }
   }
 
   return {
-    localStorage: localHasToken,
-    sessionStorage: sessionHasToken,
-    localStorageLength: getStorageLength(localStorageRef),
-    sessionStorageLength: getStorageLength(sessionStorageRef),
-    keys: foundKeys,
+    localStorage:
+      localHasToken,
+
+    sessionStorage:
+      sessionHasToken,
+
+    localStorageLength:
+      getStorageLength(localStorageRef),
+
+    sessionStorageLength:
+      getStorageLength(sessionStorageRef),
+
+    keys:
+      foundKeys,
   };
 }
 
@@ -1547,7 +2256,8 @@ function queryFirst(selectors = []) {
   }
 
   for (const selector of safeArray(selectors)) {
-    const clean = safeText(selector, "");
+    const clean =
+      safeText(selector, "");
 
     if (!clean) {
       continue;
@@ -1577,15 +2287,27 @@ function getComputedSnapshot(element) {
   }
 
   try {
-    const style = window.getComputedStyle(element);
+    const style =
+      window.getComputedStyle(element);
 
     return {
-      display: safeText(style.display, ""),
-      visibility: safeText(style.visibility, ""),
-      opacity: safeText(style.opacity, ""),
-      pointerEvents: safeText(style.pointerEvents, ""),
-      position: safeText(style.position, ""),
-      zIndex: safeText(style.zIndex, ""),
+      display:
+        safeText(style.display, ""),
+
+      visibility:
+        safeText(style.visibility, ""),
+
+      opacity:
+        safeText(style.opacity, ""),
+
+      pointerEvents:
+        safeText(style.pointerEvents, ""),
+
+      position:
+        safeText(style.position, ""),
+
+      zIndex:
+        safeText(style.zIndex, ""),
     };
   } catch {
     return {};
@@ -1603,13 +2325,17 @@ function getClassList(element) {
 function getDomElementSnapshot(id = "", selectors = []) {
   if (!isBrowser()) {
     return {
-      exists: false,
-      id: safeText(id, ""),
+      exists:
+        false,
+
+      id:
+        safeText(id, ""),
     };
   }
 
   try {
-    const cleanId = safeText(id, "");
+    const cleanId =
+      safeText(id, "");
 
     const element =
       (
@@ -1621,46 +2347,81 @@ function getDomElementSnapshot(id = "", selectors = []) {
 
     if (!element) {
       return {
-        exists: false,
-        id: cleanId,
+        exists:
+          false,
+
+        id:
+          cleanId,
       };
     }
 
     return {
-      exists: true,
-      id: element.id || cleanId,
-      tag: element.tagName?.toLowerCase?.() || "",
-      hidden: Boolean(element.hidden),
-      ariaHidden: element.getAttribute?.("aria-hidden") || null,
-      ariaBusy: element.getAttribute?.("aria-busy") || null,
-      role: element.getAttribute?.("role") || null,
+      exists:
+        true,
+
+      id:
+        element.id || cleanId,
+
+      tag:
+        element.tagName?.toLowerCase?.() || "",
+
+      hidden:
+        Boolean(element.hidden),
+
+      ariaHidden:
+        element.getAttribute?.("aria-hidden") || null,
+
+      ariaBusy:
+        element.getAttribute?.("aria-busy") || null,
+
+      role:
+        element.getAttribute?.("role") || null,
 
       dataset: {
-        shell: element.dataset?.shell || null,
-        chrome: element.dataset?.chrome || null,
-        routeMode: element.dataset?.routeMode || null,
-        loaderVisible: element.dataset?.loaderVisible || null,
-        loaderState: element.dataset?.loaderState || null,
-        routerStatus: element.dataset?.routerStatus || null,
-        routerCanonicalPath: redactTokenInText(
-          element.dataset?.routerCanonicalPath || ""
-        ) || null,
-        routerPublicPath: redactTokenInText(
-          element.dataset?.routerPublicPath || ""
-        ) || null,
-        routerRenderId: element.dataset?.routerRenderId || null,
+        shell:
+          element.dataset?.shell || null,
+
+        chrome:
+          element.dataset?.chrome || null,
+
+        routeMode:
+          element.dataset?.routeMode || null,
+
+        loaderVisible:
+          element.dataset?.loaderVisible || null,
+
+        loaderState:
+          element.dataset?.loaderState || null,
+
+        routerStatus:
+          element.dataset?.routerStatus || null,
+
+        routerCanonicalPath:
+          redactTokenInText(
+            element.dataset?.routerCanonicalPath || ""
+          ) || null,
+
+        routerPublicPath:
+          redactTokenInText(
+            element.dataset?.routerPublicPath || ""
+          ) || null,
+
+        routerRenderId:
+          element.dataset?.routerRenderId || null,
       },
 
       className:
         safeText(
           element.className?.baseVal ||
-          element.className,
+            element.className,
           ""
         ),
 
-      classes: getClassList(element),
+      classes:
+        getClassList(element),
 
-      childCount: safeNumber(element.children?.length, 0),
+      childCount:
+        safeNumber(element.children?.length, 0),
 
       hasContent:
         Boolean(
@@ -1670,18 +2431,23 @@ function getDomElementSnapshot(id = "", selectors = []) {
           )
         ),
 
-      computed: getComputedSnapshot(element),
+      computed:
+        getComputedSnapshot(element),
     };
   } catch {
     return {
-      exists: false,
-      id: safeText(id, ""),
+      exists:
+        false,
+
+      id:
+        safeText(id, ""),
     };
   }
 }
 
 function getShellSnapshot(AppCore) {
-  const dom = ensureObject(AppCore?.dom);
+  const dom =
+    ensureObject(AppCore?.dom);
 
   const body =
     isBrowser()
@@ -1773,67 +2539,128 @@ function getShellSnapshot(AppCore) {
       ),
   };
 
-  const loaderVisible = Boolean(
-    elements.loader.exists &&
-      !elements.loader.hidden &&
-      elements.loader.ariaHidden !== "true" &&
-      elements.loader.dataset.loaderVisible !== "false" &&
-      elements.loader.dataset.loaderState !== "hidden" &&
-      !elements.loader.classes?.includes?.("is-hidden") &&
-      !elements.loader.classes?.includes?.("has-hidden")
-  );
+  const loaderVisible =
+    Boolean(
+      elements.loader.exists &&
+        !elements.loader.hidden &&
+        elements.loader.ariaHidden !== "true" &&
+        elements.loader.dataset.loaderVisible !== "false" &&
+        elements.loader.dataset.loaderState !== "hidden" &&
+        !elements.loader.classes?.includes?.("is-hidden") &&
+        !elements.loader.classes?.includes?.("has-hidden")
+    );
 
-  const chromeVisible = !Boolean(
-    elements.sidebarMount.hidden ||
-      elements.topbarMount.hidden ||
-      elements.sidebar.hidden ||
-      elements.topbar.hidden ||
-      body?.classList?.contains?.("route-chrome-hidden") ||
-      html?.classList?.contains?.("route-chrome-hidden")
-  );
+  const chromeVisible =
+    !Boolean(
+      elements.sidebarMount.hidden ||
+        elements.topbarMount.hidden ||
+        elements.sidebar.hidden ||
+        elements.topbar.hidden ||
+        body?.classList?.contains?.("route-chrome-hidden") ||
+        html?.classList?.contains?.("route-chrome-hidden")
+    );
 
   return {
     domCache: {
-      hasApp: Boolean(dom.app),
-      hasRoot: Boolean(dom.root),
-      hasShell: Boolean(dom.shell || dom.appShell),
-      hasMain: Boolean(dom.main || dom.mainContent),
-      hasAppContent: Boolean(dom.appContent),
-      hasLoader: Boolean(dom.loader),
-      hasViewContainer: Boolean(dom.viewContainer),
-      hasSidebarMount: Boolean(dom.sidebarMount),
-      hasTopbarMount: Boolean(dom.topbarMount),
-      hasSidebar: Boolean(dom.sidebar),
-      hasTopbar: Boolean(dom.topbar),
-      hasTablehead: Boolean(dom.tablehead),
-      hasTableheadContainer: Boolean(dom.tableheadContainer),
+      hasApp:
+        Boolean(dom.app),
+
+      hasRoot:
+        Boolean(dom.root),
+
+      hasShell:
+        Boolean(dom.shell || dom.appShell),
+
+      hasMain:
+        Boolean(dom.main || dom.mainContent),
+
+      hasAppContent:
+        Boolean(dom.appContent),
+
+      hasLoader:
+        Boolean(dom.loader),
+
+      hasViewContainer:
+        Boolean(dom.viewContainer),
+
+      hasSidebarMount:
+        Boolean(dom.sidebarMount),
+
+      hasTopbarMount:
+        Boolean(dom.topbarMount),
+
+      hasSidebar:
+        Boolean(dom.sidebar),
+
+      hasTopbar:
+        Boolean(dom.topbar),
+
+      hasTablehead:
+        Boolean(dom.tablehead),
+
+      hasTableheadContainer:
+        Boolean(dom.tableheadContainer),
     },
 
     body: {
-      exists: Boolean(body),
-      className: safeText(body?.className, ""),
-      classes: getClassList(body),
-      datasetShell: body?.dataset?.shell || null,
-      datasetChrome: body?.dataset?.chrome || null,
-      datasetRouteMode: body?.dataset?.routeMode || null,
-      datasetAppLoading: body?.dataset?.appLoading || null,
-      datasetShellState: body?.dataset?.shellState || null,
+      exists:
+        Boolean(body),
+
+      className:
+        safeText(body?.className, ""),
+
+      classes:
+        getClassList(body),
+
+      datasetShell:
+        body?.dataset?.shell || null,
+
+      datasetChrome:
+        body?.dataset?.chrome || null,
+
+      datasetRouteMode:
+        body?.dataset?.routeMode || null,
+
+      datasetAppLoading:
+        body?.dataset?.appLoading || null,
+
+      datasetShellState:
+        body?.dataset?.shellState || null,
     },
 
     html: {
-      exists: Boolean(html),
-      className: safeText(html?.className, ""),
-      classes: getClassList(html),
-      datasetShell: html?.dataset?.shell || null,
-      datasetChrome: html?.dataset?.chrome || null,
-      datasetRouteMode: html?.dataset?.routeMode || null,
-      datasetAppLoading: html?.dataset?.appLoading || null,
-      datasetAppState: html?.dataset?.appState || null,
-      datasetTheme: html?.dataset?.theme || null,
+      exists:
+        Boolean(html),
+
+      className:
+        safeText(html?.className, ""),
+
+      classes:
+        getClassList(html),
+
+      datasetShell:
+        html?.dataset?.shell || null,
+
+      datasetChrome:
+        html?.dataset?.chrome || null,
+
+      datasetRouteMode:
+        html?.dataset?.routeMode || null,
+
+      datasetAppLoading:
+        html?.dataset?.appLoading || null,
+
+      datasetAppState:
+        html?.dataset?.appState || null,
+
+      datasetTheme:
+        html?.dataset?.theme || null,
     },
 
     elements,
+
     loaderVisible,
+
     chromeVisible,
 
     appShellVisible:
@@ -1863,7 +2690,8 @@ function getShellSnapshot(AppCore) {
 ========================================================= */
 
 function getUserSnapshot(AppCore, Auth = null) {
-  const state = ensureObject(AppCore?.state);
+  const state =
+    ensureObject(AppCore?.state);
 
   const authUser =
     safeCall(
@@ -1885,7 +2713,8 @@ function getUserSnapshot(AppCore, Auth = null) {
     null;
 
   return {
-    present: Boolean(user),
+    present:
+      Boolean(user),
 
     id:
       user?.id ||
@@ -1951,10 +2780,12 @@ function getAuthIsAuthenticated(Auth = null) {
 }
 
 function getAuthSnapshot(AppCore, Auth = null) {
-  const state = ensureObject(AppCore?.state);
+  const state =
+    ensureObject(AppCore?.state);
 
   return {
-    present: Boolean(Auth),
+    present:
+      Boolean(Auth),
 
     authenticated:
       Boolean(
@@ -2016,7 +2847,10 @@ function getAuthSnapshot(AppCore, Auth = null) {
       null,
 
     user:
-      getUserSnapshot(AppCore, Auth),
+      getUserSnapshot(
+        AppCore,
+        Auth
+      ),
   };
 }
 
@@ -2041,9 +2875,11 @@ function getRouterCurrentPublicPath(Router = null) {
 }
 
 function getRouterSnapshot(AppCore, Router = null) {
-  const state = ensureObject(AppCore?.state);
+  const state =
+    ensureObject(AppCore?.state);
 
-  let routerSnapshot = null;
+  let routerSnapshot =
+    null;
 
   try {
     routerSnapshot =
@@ -2053,12 +2889,23 @@ function getRouterSnapshot(AppCore, Router = null) {
       null;
   } catch {}
 
-  const hasRender = isFunction(Router?.render);
-  const hasNavigate = isFunction(Router?.navigate);
-  const hasGo = isFunction(Router?.go);
-  const hasPush = isFunction(Router?.push);
-  const hasBind = isFunction(Router?.bind);
-  const hasBack = isFunction(Router?.back);
+  const hasRender =
+    isFunction(Router?.render);
+
+  const hasNavigate =
+    isFunction(Router?.navigate);
+
+  const hasGo =
+    isFunction(Router?.go);
+
+  const hasPush =
+    isFunction(Router?.push);
+
+  const hasBind =
+    isFunction(Router?.bind);
+
+  const hasBack =
+    isFunction(Router?.back);
 
   const hasRerender =
     Boolean(
@@ -2073,7 +2920,8 @@ function getRouterSnapshot(AppCore, Router = null) {
         isFunction(Router?.resolveRoute)
     );
 
-  const present = Boolean(Router);
+  const present =
+    Boolean(Router);
 
   const canRenderOrNavigate =
     Boolean(
@@ -2159,16 +3007,20 @@ function getRouterSnapshot(AppCore, Router = null) {
 }
 
 function getStoreSnapshot(Store = null) {
-  let state = {};
+  let state =
+    {};
 
   try {
-    state = ensureObject(Store?.getState?.());
+    state =
+      ensureObject(Store?.getState?.());
   } catch {}
 
   return {
-    present: Boolean(Store),
+    present:
+      Boolean(Store),
 
-    hasInit: isFunction(Store?.init),
+    hasInit:
+      isFunction(Store?.init),
 
     hasGetState:
       isFunction(Store?.getState),
@@ -2193,16 +3045,24 @@ function getStoreSnapshot(Store = null) {
 
     state:
       sanitizeSnapshotValue({
-        ready: state.ready,
-        booted: state.booted,
-        loading: state.loading,
-        error: state.error,
+        ready:
+          state.ready,
+
+        booted:
+          state.booted,
+
+        loading:
+          state.loading,
+
+        error:
+          state.error,
       }),
   };
 }
 
 function getUiModuleSnapshot(moduleRef = null) {
-  let snapshot = null;
+  let snapshot =
+    null;
 
   try {
     snapshot =
@@ -2212,7 +3072,8 @@ function getUiModuleSnapshot(moduleRef = null) {
   } catch {}
 
   return {
-    present: Boolean(moduleRef),
+    present:
+      Boolean(moduleRef),
 
     initialized:
       Boolean(
@@ -2224,14 +3085,26 @@ function getUiModuleSnapshot(moduleRef = null) {
           snapshot?.mounted
       ),
 
-    hasInit: isFunction(moduleRef?.init),
-    hasBoot: isFunction(moduleRef?.boot),
-    hasMount: isFunction(moduleRef?.mount),
-    hasStart: isFunction(moduleRef?.start),
+    hasInit:
+      isFunction(moduleRef?.init),
 
-    hasRepair: isFunction(moduleRef?.repair),
-    hasRefresh: isFunction(moduleRef?.refresh),
-    hasSync: isFunction(moduleRef?.sync),
+    hasBoot:
+      isFunction(moduleRef?.boot),
+
+    hasMount:
+      isFunction(moduleRef?.mount),
+
+    hasStart:
+      isFunction(moduleRef?.start),
+
+    hasRepair:
+      isFunction(moduleRef?.repair),
+
+    hasRefresh:
+      isFunction(moduleRef?.refresh),
+
+    hasSync:
+      isFunction(moduleRef?.sync),
 
     hasUserSync:
       Boolean(
@@ -2259,20 +3132,26 @@ function getI18nAvailable(I18n = null) {
     const available =
       I18n?.getAvailable?.() ||
       I18n?.getAvailableLangs?.() ||
+      I18n?.getLanguages?.() ||
       I18n?.available ||
       I18n?.langs ||
       [];
 
-    return Array.isArray(available)
-      ? available
-      : [];
+    if (Array.isArray(available)) {
+      return available;
+    }
+
+    if (isObject(available)) {
+      return Object.keys(available);
+    }
   } catch {}
 
   return [];
 }
 
 function getI18nLang(AppCore, I18n = null) {
-  const state = ensureObject(AppCore?.state);
+  const state =
+    ensureObject(AppCore?.state);
 
   const documentLang =
     isBrowser()
@@ -2288,7 +3167,12 @@ function getI18nLang(AppCore, I18n = null) {
       () => I18n?.getLang?.(),
       ""
     ) ||
+      safeCall(
+        () => I18n?.getLanguage?.(),
+        ""
+      ) ||
       I18n?.lang ||
+      I18n?.language ||
       state.lang ||
       documentLang ||
       DEFAULT_LANG,
@@ -2297,41 +3181,63 @@ function getI18nLang(AppCore, I18n = null) {
 }
 
 function getI18nSnapshot(AppCore, I18n = null) {
-  const state = ensureObject(AppCore?.state);
+  const state =
+    ensureObject(AppCore?.state);
 
-  const available = getI18nAvailable(I18n);
+  const documentLang =
+    isBrowser()
+      ? safeText(
+          document.documentElement?.lang ||
+            document.documentElement?.getAttribute?.("lang"),
+          ""
+        )
+      : "";
 
-  const lang = getI18nLang(
-    AppCore,
-    I18n
-  );
+  const available =
+    getI18nAvailable(I18n);
 
-  const modulePresent = Boolean(I18n);
+  const lang =
+    getI18nLang(
+      AppCore,
+      I18n
+    );
+
+  const modulePresent =
+    Boolean(I18n);
 
   const runtimePresent =
     Boolean(
       modulePresent ||
         state.i18nInitialized ||
         state.lang ||
-        lang
+        documentLang
     );
 
   return {
-    present: runtimePresent,
+    present:
+      runtimePresent,
+
     modulePresent,
 
     initialized:
       Boolean(
         state.i18nInitialized ||
           modulePresent ||
-          lang
+          state.lang ||
+          documentLang
       ),
 
     lang,
-    stateLang: state.lang || DEFAULT_LANG,
+    stateLang:
+      state.lang || DEFAULT_LANG,
+
+    documentLang:
+      documentLang || null,
+
     available,
 
-    hasTranslate: isFunction(I18n?.t),
+    hasTranslate:
+      isFunction(I18n?.t),
 
     hasBoot:
       Boolean(
@@ -2353,8 +3259,11 @@ function getI18nSnapshot(AppCore, I18n = null) {
 ========================================================= */
 
 function getAppStateSnapshot(AppCore) {
-  const state = ensureObject(AppCore?.state);
-  const config = ensureObject(AppCore?.config);
+  const state =
+    ensureObject(AppCore?.state);
+
+  const config =
+    ensureObject(AppCore?.config);
 
   return {
     apiBase:
@@ -2469,13 +3378,19 @@ function getAppStateSnapshot(AppCore) {
 ========================================================= */
 
 function buildWarmupWarnings(snapshot = {}) {
-  const warnings = [];
+  const warnings =
+    [];
 
   if (!snapshot.app?.apiBase) {
     warnings.push({
-      code: "API_BASE_MISSING",
-      severity: "medium",
-      message: "apiBase no configurada.",
+      code:
+        "API_BASE_MISSING",
+
+      severity:
+        "medium",
+
+      message:
+        "apiBase no configurada.",
     });
   }
 
@@ -2484,9 +3399,14 @@ function buildWarmupWarnings(snapshot = {}) {
     !snapshot.auth?.user?.username
   ) {
     warnings.push({
-      code: "AUTH_WITHOUT_VISIBLE_USERNAME",
-      severity: "medium",
-      message: "Sesión autenticada sin username visible.",
+      code:
+        "AUTH_WITHOUT_VISIBLE_USERNAME",
+
+      severity:
+        "medium",
+
+      message:
+        "Sesión autenticada sin username visible.",
     });
   }
 
@@ -2496,9 +3416,14 @@ function buildWarmupWarnings(snapshot = {}) {
     !snapshot.auth?.hasAuthHeader
   ) {
     warnings.push({
-      code: "AUTH_WITHOUT_VISIBLE_TOKEN",
-      severity: "medium",
-      message: "Sesión autenticada sin token/header visible en runtime.",
+      code:
+        "AUTH_WITHOUT_VISIBLE_TOKEN",
+
+      severity:
+        "medium",
+
+      message:
+        "Sesión autenticada sin token/header visible en runtime.",
     });
   }
 
@@ -2513,9 +3438,14 @@ function buildWarmupWarnings(snapshot = {}) {
     !snapshot.router?.statePublicPath
   ) {
     warnings.push({
-      code: "ROUTER_UNAVAILABLE",
-      severity: "high",
-      message: "Router no detectable en deps/AppCore.",
+      code:
+        "ROUTER_UNAVAILABLE",
+
+      severity:
+        "high",
+
+      message:
+        "Router no detectable en deps/AppCore.",
     });
   }
 
@@ -2525,25 +3455,40 @@ function buildWarmupWarnings(snapshot = {}) {
     !snapshot.router?.configured
   ) {
     warnings.push({
-      code: "ROUTER_NOT_READY",
-      severity: "high",
-      message: "Router detectado pero sin capacidad de navegación/render aparente.",
+      code:
+        "ROUTER_NOT_READY",
+
+      severity:
+        "high",
+
+      message:
+        "Router detectado pero sin capacidad de navegación/render aparente.",
     });
   }
 
   if (!snapshot.shell?.elements?.viewContainer?.exists) {
     warnings.push({
-      code: "VIEW_CONTAINER_MISSING",
-      severity: "critical",
-      message: "No existe #view-container en el DOM.",
+      code:
+        "VIEW_CONTAINER_MISSING",
+
+      severity:
+        "critical",
+
+      message:
+        "No existe #view-container en el DOM.",
     });
   }
 
   if (!snapshot.shell?.elements?.shell?.exists) {
     warnings.push({
-      code: "APP_SHELL_MISSING",
-      severity: "high",
-      message: "No existe #app-shell en el DOM.",
+      code:
+        "APP_SHELL_MISSING",
+
+      severity:
+        "high",
+
+      message:
+        "No existe #app-shell en el DOM.",
     });
   }
 
@@ -2553,9 +3498,14 @@ function buildWarmupWarnings(snapshot = {}) {
     snapshot.shell?.loaderVisible
   ) {
     warnings.push({
-      code: "LOADER_VISIBLE_AFTER_READY",
-      severity: "medium",
-      message: "El loader parece visible aunque la app está lista.",
+      code:
+        "LOADER_VISIBLE_AFTER_READY",
+
+      severity:
+        "medium",
+
+      message:
+        "El loader parece visible aunque la app está lista.",
     });
   }
 
@@ -2565,9 +3515,14 @@ function buildWarmupWarnings(snapshot = {}) {
     snapshot.shell?.authScreen
   ) {
     warnings.push({
-      code: "AUTH_SCREEN_STALE_ON_PRIVATE_ROUTE",
-      severity: "medium",
-      message: "Quedan clases de auth-screen en una ruta no auth-like.",
+      code:
+        "AUTH_SCREEN_STALE_ON_PRIVATE_ROUTE",
+
+      severity:
+        "medium",
+
+      message:
+        "Quedan clases de auth-screen en una ruta no auth-like.",
     });
   }
 
@@ -2584,9 +3539,14 @@ function buildWarmupWarnings(snapshot = {}) {
     !snapshot.document?.lang
   ) {
     warnings.push({
-      code: "I18N_UNAVAILABLE",
-      severity: "low",
-      message: "No se detecta idioma runtime ni módulo I18n.",
+      code:
+        "I18N_UNAVAILABLE",
+
+      severity:
+        "low",
+
+      message:
+        "No se detecta idioma runtime ni módulo I18n.",
     });
   }
 
@@ -2594,12 +3554,15 @@ function buildWarmupWarnings(snapshot = {}) {
 }
 
 function computeWarmupHealth(snapshot = {}) {
-  const warnings = safeArray(snapshot.warnings);
+  const warnings =
+    safeArray(snapshot.warnings);
 
-  let score = 100;
+  let score =
+    100;
 
   for (const warning of warnings) {
-    const severity = safeText(warning.severity, "low");
+    const severity =
+      safeText(warning.severity, "low");
 
     if (severity === "critical") {
       score -= 35;
@@ -2612,10 +3575,15 @@ function computeWarmupHealth(snapshot = {}) {
     }
   }
 
-  score = Math.max(0, Math.min(100, score));
+  score =
+    Math.max(
+      0,
+      Math.min(100, score)
+    );
 
   return {
     score,
+
     status:
       score >= 90
         ? "excellent"
@@ -2644,7 +3612,8 @@ function computeWarmupHealth(snapshot = {}) {
 ========================================================= */
 
 export function createWarmupSnapshot(first = {}, second = {}) {
-  const deps = resolveRuntimeDeps(first, second);
+  const deps =
+    resolveRuntimeDeps(first, second);
 
   const {
     AppCore,
@@ -2658,29 +3627,51 @@ export function createWarmupSnapshot(first = {}, second = {}) {
     reason = "warmup",
   } = deps;
 
-  const startedAt = Date.now();
+  const startedAt =
+    Date.now();
 
   const rawSnapshot = {
-    ok: Boolean(AppCore),
+    version:
+      WARMUP_VERSION,
 
-    reason: safeText(reason, "warmup"),
+    ok:
+      Boolean(AppCore),
 
-    at: safeIsoDate(startedAt),
-    atMs: startedAt,
+    reason:
+      safeText(reason, "warmup"),
 
-    browser: isBrowser(),
+    at:
+      safeIsoDate(startedAt),
 
-    location: getLocationSnapshot(),
-    document: getDocumentSnapshot(),
-    navigator: getNavigatorSnapshot(),
-    history: getHistorySnapshot(),
-    performance: getPerformanceSnapshot(),
+    atMs:
+      startedAt,
 
-    storage: getStorageTokenHints(),
+    browser:
+      isBrowser(),
 
-    publicTokenRoutes: getProtectedTokenRouteSnapshot(),
+    location:
+      getLocationSnapshot(),
 
-    app: getAppStateSnapshot(AppCore),
+    document:
+      getDocumentSnapshot(),
+
+    navigator:
+      getNavigatorSnapshot(),
+
+    history:
+      getHistorySnapshot(),
+
+    performance:
+      getPerformanceSnapshot(),
+
+    storage:
+      getStorageTokenHints(),
+
+    publicTokenRoutes:
+      getProtectedTokenRouteSnapshot(),
+
+    app:
+      getAppStateSnapshot(AppCore),
 
     auth:
       getAuthSnapshot(
@@ -2718,7 +3709,8 @@ export function createWarmupSnapshot(first = {}, second = {}) {
       getShellSnapshot(AppCore),
   };
 
-  const snapshot = sanitizeSnapshotValue(rawSnapshot);
+  const snapshot =
+    sanitizeSnapshotValue(rawSnapshot);
 
   snapshot.warnings =
     buildWarmupWarnings(snapshot);
@@ -2733,121 +3725,22 @@ export function createWarmupSnapshot(first = {}, second = {}) {
 }
 
 /* =========================================================
-   WARMUP
-========================================================= */
-
-export async function warmup(first = {}, second = {}) {
-  const deps = resolveRuntimeDeps(first, second);
-
-  const {
-    AppCore,
-    emit = true,
-    log = true,
-    reason = "warmup",
-  } = deps;
-
-  const startedAt = Date.now();
-
-  if (!AppCore) {
-    const fallbackSnapshot =
-      createWarmupSnapshot({
-        ...deps,
-        reason,
-      });
-
-    fallbackSnapshot.durationMs = Date.now() - startedAt;
-
-    return fallbackSnapshot;
-  }
-
-  const snapshot =
-    createWarmupSnapshot({
-      ...deps,
-      reason,
-    });
-
-  snapshot.durationMs =
-    Date.now() - startedAt;
-
-  try {
-    if (log) {
-      safeLog(
-        AppCore,
-        "Warmup app iniciado.",
-        {
-          reason: snapshot.reason,
-          health: snapshot.health,
-          warningCount: snapshot.warningCount,
-        }
-      );
-
-      safeLog(
-        AppCore,
-        "Diagnóstico inicial:",
-        snapshot
-      );
-
-      for (const warning of snapshot.warnings || []) {
-        safeWarn(
-          AppCore,
-          "Warmup aviso:",
-          warning.code,
-          warning.severity,
-          warning.message
-        );
-
-        if (emit) {
-          safeEmit(
-            AppCore,
-            WARMUP_EVENTS.warning,
-            {
-              warning,
-              reason: snapshot.reason,
-              at: safeIsoDate(),
-            }
-          );
-        }
-      }
-    }
-
-    if (emit) {
-      safeEmit(
-        AppCore,
-        WARMUP_EVENTS.warmup,
-        snapshot
-      );
-
-      safeEmit(
-        AppCore,
-        WARMUP_EVENTS.ready,
-        {
-          ok: snapshot.ok,
-          reason: snapshot.reason,
-          health: snapshot.health,
-          warningCount: snapshot.warningCount,
-          durationMs: snapshot.durationMs,
-          at: safeIsoDate(),
-        }
-      );
-    }
-
-    return snapshot;
-  } catch {
-    return snapshot;
-  }
-}
-
-/* =========================================================
-   DEBUG
+   SUMMARY / STATE
 ========================================================= */
 
 export function getWarmupSummary(snapshot = {}) {
-  const data = ensureObject(snapshot);
+  const data =
+    ensureObject(snapshot);
 
   return {
-    ok: Boolean(data.ok),
+    ok:
+      Boolean(data.ok),
 
-    at: data.at || "",
+    version:
+      data.version || WARMUP_VERSION,
+
+    at:
+      data.at || "",
 
     durationMs:
       safeNumber(
@@ -2973,8 +3866,183 @@ export function getWarmupSummary(snapshot = {}) {
   };
 }
 
+function rememberSnapshot(snapshot = {}) {
+  lastSnapshot =
+    snapshot;
+
+  lastSummary =
+    getWarmupSummary(snapshot);
+
+  recentSnapshots.unshift({
+    at:
+      snapshot.at,
+
+    reason:
+      snapshot.reason,
+
+    summary:
+      lastSummary,
+  });
+
+  if (recentSnapshots.length > MAX_RECENT_SNAPSHOTS) {
+    recentSnapshots.splice(MAX_RECENT_SNAPSHOTS);
+  }
+
+  return snapshot;
+}
+
+export function getWarmupRuntimeSnapshot() {
+  return {
+    version:
+      WARMUP_VERSION,
+
+    warmupCount,
+
+    lastWarmupAt,
+
+    lastWarmupAtIso:
+      lastWarmupAt
+        ? safeIsoDate(lastWarmupAt)
+        : "",
+
+    lastWarmupDurationMs,
+
+    lastWarningKey,
+    lastWarningAt,
+    lastWarningAtIso:
+      lastWarningAt
+        ? safeIsoDate(lastWarningAt)
+        : "",
+
+    lastLogKey,
+    lastLogAt,
+    lastLogAtIso:
+      lastLogAt
+        ? safeIsoDate(lastLogAt)
+        : "",
+
+    lastSummary,
+
+    recentSnapshots:
+      recentSnapshots.slice(),
+  };
+}
+
+export function resetWarmupRuntimeState() {
+  lastWarningKey =
+    "";
+
+  lastWarningAt =
+    0;
+
+  lastLogKey =
+    "";
+
+  lastLogAt =
+    0;
+
+  lastSnapshot =
+    null;
+
+  lastSummary =
+    null;
+
+  warmupCount =
+    0;
+
+  lastWarmupAt =
+    0;
+
+  lastWarmupDurationMs =
+    0;
+
+  recentSnapshots.splice(0);
+
+  return getWarmupRuntimeSnapshot();
+}
+
+/* =========================================================
+   DEBUG API
+========================================================= */
+
+export function exposeWarmupDebugApi(first = {}, second = {}) {
+  const deps =
+    resolveRuntimeDeps(first, second);
+
+  const {
+    AppCore,
+  } = deps;
+
+  const api = {
+    version:
+      WARMUP_VERSION,
+
+    createSnapshot:
+      (options = {}) =>
+        createWarmupSnapshot({
+          ...deps,
+          ...ensureObject(options),
+        }),
+
+    run:
+      (options = {}) =>
+        warmup({
+          ...deps,
+          ...ensureObject(options),
+        }),
+
+    getLastSnapshot:
+      () =>
+        lastSnapshot,
+
+    getLastSummary:
+      () =>
+        lastSummary,
+
+    getRuntimeSnapshot:
+      getWarmupRuntimeSnapshot,
+
+    reset:
+      resetWarmupRuntimeState,
+  };
+
+  try {
+    if (isBrowser()) {
+      window.__ONION_WARMUP__ =
+        api;
+    }
+  } catch {}
+
+  try {
+    safeDefineValue(
+      AppCore,
+      "Warmup",
+      api
+    );
+  } catch {}
+
+  safeEmit(
+    AppCore,
+    WARMUP_EVENTS.debugReady,
+    {
+      version:
+        WARMUP_VERSION,
+
+      at:
+        safeIsoDate(),
+    }
+  );
+
+  return api;
+}
+
+/* =========================================================
+   PRINT
+========================================================= */
+
 export function printWarmupSummary(snapshot = {}, AppCore = null) {
-  const summary = getWarmupSummary(snapshot);
+  const summary =
+    getWarmupSummary(snapshot);
 
   safeInfo(
     AppCore,
@@ -2984,5 +4052,174 @@ export function printWarmupSummary(snapshot = {}, AppCore = null) {
 
   return summary;
 }
+
+/* =========================================================
+   WARMUP
+========================================================= */
+
+export async function warmup(first = {}, second = {}) {
+  const deps =
+    resolveRuntimeDeps(first, second);
+
+  const {
+    AppCore,
+    emit = true,
+    log = true,
+    exposeDebug = true,
+    reason = "warmup",
+  } = deps;
+
+  const startedAt =
+    Date.now();
+
+  if (!AppCore) {
+    const fallbackSnapshot =
+      createWarmupSnapshot({
+        ...deps,
+        reason,
+      });
+
+    fallbackSnapshot.durationMs =
+      Date.now() - startedAt;
+
+    rememberSnapshot(fallbackSnapshot);
+
+    return fallbackSnapshot;
+  }
+
+  const snapshot =
+    createWarmupSnapshot({
+      ...deps,
+      reason,
+    });
+
+  snapshot.durationMs =
+    Date.now() - startedAt;
+
+  warmupCount += 1;
+  lastWarmupAt = Date.now();
+  lastWarmupDurationMs = snapshot.durationMs;
+
+  rememberSnapshot(snapshot);
+
+  try {
+    if (exposeDebug !== false) {
+      exposeWarmupDebugApi({
+        ...deps,
+        AppCore,
+      });
+    }
+
+    if (
+      log &&
+      shouldLogSnapshot(snapshot)
+    ) {
+      safeLog(
+        AppCore,
+        "Warmup app ejecutado.",
+        {
+          reason:
+            snapshot.reason,
+
+          health:
+            snapshot.health,
+
+          warningCount:
+            snapshot.warningCount,
+
+          durationMs:
+            snapshot.durationMs,
+        }
+      );
+
+      safeLog(
+        AppCore,
+        "Diagnóstico inicial:",
+        snapshot
+      );
+    }
+
+    for (const warning of snapshot.warnings || []) {
+      const shouldEmit =
+        shouldEmitWarning(warning);
+
+      if (
+        log &&
+        shouldEmit
+      ) {
+        safeWarn(
+          AppCore,
+          "Warmup aviso:",
+          warning.code,
+          warning.severity,
+          warning.message
+        );
+      }
+
+      if (
+        emit &&
+        shouldEmit
+      ) {
+        safeEmit(
+          AppCore,
+          WARMUP_EVENTS.warning,
+          {
+            warning,
+            reason:
+              snapshot.reason,
+            at:
+              safeIsoDate(),
+          }
+        );
+      }
+    }
+
+    if (emit) {
+      safeEmit(
+        AppCore,
+        WARMUP_EVENTS.warmup,
+        snapshot
+      );
+
+      safeEmit(
+        AppCore,
+        WARMUP_EVENTS.summary,
+        getWarmupSummary(snapshot)
+      );
+
+      safeEmit(
+        AppCore,
+        WARMUP_EVENTS.ready,
+        {
+          ok:
+            snapshot.ok,
+
+          reason:
+            snapshot.reason,
+
+          health:
+            snapshot.health,
+
+          warningCount:
+            snapshot.warningCount,
+
+          durationMs:
+            snapshot.durationMs,
+
+          at:
+            safeIsoDate(),
+        }
+      );
+    }
+
+    return snapshot;
+  } catch {
+    return snapshot;
+  }
+}
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default warmup;

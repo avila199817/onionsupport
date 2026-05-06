@@ -1,31 +1,23 @@
 /* =========================================================
-   Onion SPA - Login View (FULL PRO SAAS PANEL · GOD MODE)
+   Onion SPA - Login View
    Archivo: src/views/loginView.js
 
-   Responsabilidades:
+   AUTH VIEW · FINAL PRO SYSTEM · CSP CLEAN · HARDENED 10/10
+
+   RESPONSABILIDADES:
    - pintar pantalla de acceso
    - activar modo fullscreen auth
    - validar credenciales en cliente
    - enviar login a Auth
-   - mostrar feedback visual local mediante toast inline
+   - mostrar feedback visual local mediante toast inline si existe
    - soportar login con username o email
    - soportar flujo opcional 2FA
    - redirigir correctamente tras login
    - evitar delays artificiales tras login correcto
    - evitar pérdida de valores al deshabilitar inputs
-   - respetar logo animado
-   - usar el sistema DOM refactorizado de login
-   - integrar password-field compartido
-   - login limpio sin mensajes dentro del card
-   - forzar apagado del loader al renderizar login
-   - usar rutas absolutas coherentes con el shell SPA
-   - evitar reactivar el form tras login correcto
-   - quitar bloques visuales sobrantes
-   - conservar bloque lateral izquierdo de estado
-   - mover el card principal a la derecha
-   - mantener layout estable sin generar scroll
-   - reducir efectos para un resultado más limpio
    - renderizar usando src/views/login/login.template.js
+   - integrar password-field compartido
+   - forzar apagado del loader al renderizar login
    - evitar doble navegación post-login
    - no redirigir por defecto a /usuarios
    - no redirigir por defecto a /@slug
@@ -34,17 +26,19 @@
    HARDENING:
    - guards de browser
    - timers centralizados
-   - toast inline robusto
    - navegación segura post-login
    - sync de sesión estable e idempotente
    - cleanup completo de la vista
-
-   FIX 10/10:
-   - no aceptar como login correcto respuestas sin token + usuario
+   - no aceptar login correcto sin token + usuario
    - no reutilizar AppCore.state.user como fallback tras login
    - limpiar sesión vieja si Auth.login falla o devuelve payload inválido
    - impedir dashboard/avatar cacheado después de un 401
    - cortar navegación si el resultado de login no es una sesión válida
+
+   IMPORTANTE:
+   - Sin CSS inyectado.
+   - Sin animación JS de logo.
+   - El logo por tema lo controla /src/css/auth/login.css.
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -68,34 +62,35 @@ import {
 import {
   normalizeAuthResult,
   syncSession,
-  resolveLoginRedirect,
-  shouldRedirectAfterLogin,
   persistRememberedIdentifier,
 } from "./login/login.helpers.js";
 
 export const LoginView = (() => {
   "use strict";
 
+  /* =========================================================
+     CONSTANTS
+  ========================================================= */
+
   const SCOPE = "view:login";
-
-  const LOGO_ROTATE_INTERVAL = 3000;
-  const LOGO_FADE_DURATION = 1800;
-
-  const TOAST_DEFAULT_DURATION = 3600;
-  const TOAST_MIN_DURATION = 1200;
-  const ERROR_TOAST_DURATION = 4200;
-  const TWO_FA_TOAST_DURATION = 250;
-  const NAVIGATION_BUFFER_MS = 0;
-
-  const LOGIN_LOADING_TOAST_TITLE = "Validando acceso";
-  const LOGIN_LOADING_TOAST_MESSAGE =
-    "Comprobando credenciales y preparando tu sesión...";
 
   const LOGIN_ROUTE_PREFIX = "/login";
   const DEFAULT_POST_LOGIN_PATH = "/";
   const DEFAULT_2FA_PATH = "/2fa";
 
-  let logoIntervalId = null;
+  const TOAST_DEFAULT_DURATION = 3600;
+  const TOAST_MIN_DURATION = 1200;
+  const ERROR_TOAST_DURATION = 4200;
+  const TWO_FA_TOAST_DURATION = 250;
+
+  const LOGIN_LOADING_TOAST_TITLE = "Validando acceso";
+  const LOGIN_LOADING_TOAST_MESSAGE =
+    "Comprobando credenciales y preparando tu sesión...";
+
+  /* =========================================================
+     RUNTIME
+  ========================================================= */
+
   let redirectTimerId = null;
   let toastTimerId = null;
 
@@ -121,16 +116,6 @@ export const LoginView = (() => {
     const text = String(value).trim();
 
     return text || fallback;
-  }
-
-  function normalizeIdentifier(value = "") {
-    return safeText(value, "");
-  }
-
-  function isEmail(value = "") {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
-      String(value || "").trim()
-    );
   }
 
   function isPlainObject(value) {
@@ -163,6 +148,36 @@ export const LoginView = (() => {
     return null;
   }
 
+  function normalizeIdentifier(value = "") {
+    return safeText(value, "");
+  }
+
+  function isEmail(value = "") {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+      String(value || "").trim()
+    );
+  }
+
+  function isTruthyFlag(value) {
+    if (value === true || value === 1) {
+      return true;
+    }
+
+    const text = safeText(value, "").toLowerCase();
+
+    return [
+      "true",
+      "1",
+      "yes",
+      "y",
+      "si",
+      "sí",
+      "required",
+      "enabled",
+      "on",
+    ].includes(text);
+  }
+
   function normalizePath(path = DEFAULT_POST_LOGIN_PATH) {
     const raw =
       safeText(path, DEFAULT_POST_LOGIN_PATH) ||
@@ -190,9 +205,11 @@ export const LoginView = (() => {
   }
 
   function getCleanPath(path = "/") {
-    return normalizePath(path)
-      .split("?")[0]
-      .split("#")[0] || "/";
+    return (
+      normalizePath(path)
+        .split("?")[0]
+        .split("#")[0] || "/"
+    );
   }
 
   function isLoginPath(path = "") {
@@ -222,19 +239,6 @@ export const LoginView = (() => {
     return isLoginPath(getCurrentBrowserPath());
   }
 
-  function escapeHtml(value = "") {
-    if (typeof AppCore?.utils?.escapeHtml === "function") {
-      return AppCore.utils.escapeHtml(String(value ?? ""));
-    }
-
-    return String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
-
   function safeErrorLog(...args) {
     try {
       AppCore?.utils?.error?.("[LoginView]", ...args);
@@ -255,10 +259,33 @@ export const LoginView = (() => {
     } catch {}
   }
 
-  function safeEmit(eventName, payload = {}) {
+  function safeEmit(eventName = "", payload = {}) {
+    const name = safeText(eventName, "");
+
+    if (!name) {
+      return false;
+    }
+
+    let emitted = false;
+
     try {
-      AppCore?.events?.emit?.(eventName, payload);
+      AppCore?.events?.emit?.(name, payload);
+      emitted = true;
     } catch {}
+
+    try {
+      if (isBrowser()) {
+        window.dispatchEvent(
+          new CustomEvent(name, {
+            detail: payload,
+          })
+        );
+
+        emitted = true;
+      }
+    } catch {}
+
+    return emitted;
   }
 
   /* =========================================================
@@ -283,15 +310,6 @@ export const LoginView = (() => {
     toastTimerId = null;
   }
 
-  function stopLogoAnimation() {
-    if (!logoIntervalId || !isBrowser()) {
-      return;
-    }
-
-    window.clearInterval(logoIntervalId);
-    logoIntervalId = null;
-  }
-
   /* =========================================================
      DOM HELPERS
   ========================================================= */
@@ -312,7 +330,9 @@ export const LoginView = (() => {
     if (!isBrowser()) {
       return {
         sidebar: null,
+        sidebarMount: null,
         topbar: null,
+        topbarMount: null,
         topbarViewContainer: null,
         tableheadContainer: null,
       };
@@ -321,20 +341,29 @@ export const LoginView = (() => {
     return {
       sidebar:
         AppCore?.dom?.sidebar ||
-        document.getElementById("sidebar"),
+        document.getElementById("sidebar") ||
+        document.querySelector(".sidebar"),
+
+      sidebarMount:
+        document.getElementById("sidebar-mount"),
 
       topbar:
         AppCore?.dom?.topbar ||
         document.getElementById("topbar") ||
         document.querySelector(".topbar"),
 
+      topbarMount:
+        document.getElementById("topbar-mount"),
+
       topbarViewContainer:
         AppCore?.dom?.topbarViewContainer ||
-        document.getElementById("topbarview-container"),
+        document.getElementById("topbarview-container") ||
+        document.getElementById("topbar-view-container"),
 
       tableheadContainer:
         AppCore?.dom?.tableheadContainer ||
-        document.getElementById("tablehead-container"),
+        document.getElementById("tablehead-container") ||
+        document.querySelector(".table-head"),
     };
   }
 
@@ -401,6 +430,22 @@ export const LoginView = (() => {
     return normalizePath(redirectPath);
   }
 
+  function resolvePostLoginPath(payload = {}) {
+    const forcedRedirect =
+      safeText(payload?.redirect, "") ||
+      getSafeRedirectPath();
+
+    if (
+      forcedRedirect &&
+      !isUnsafeRedirect(forcedRedirect) &&
+      forcedRedirect !== DEFAULT_POST_LOGIN_PATH
+    ) {
+      return normalizePath(forcedRedirect);
+    }
+
+    return DEFAULT_POST_LOGIN_PATH;
+  }
+
   function navigateTo(path = DEFAULT_POST_LOGIN_PATH) {
     if (!isBrowser()) {
       return;
@@ -413,16 +458,16 @@ export const LoginView = (() => {
     forceHideGlobalLoader();
 
     /*
-      CRÍTICO:
-      No usamos Router.goAfterLogin() aquí.
-      goAfterLogin vuelve a leer redirect/fallback y puede provocar
-      una segunda resolución de navegación.
+      No usamos Router.goAfterLogin().
+      Ese helper puede volver a resolver redirect/fallback y provocar
+      doble navegación o destinos no deseados como /usuarios o /@slug.
     */
     if (typeof Router?.navigate === "function") {
       Router.navigate(target, {
         replaceState: true,
         force: true,
       });
+
       return;
     }
 
@@ -441,9 +486,7 @@ export const LoginView = (() => {
 
     clearRedirectTimer();
 
-    const safeDelay =
-      Math.max(0, Number(delay) || 0) +
-      NAVIGATION_BUFFER_MS;
+    const safeDelay = Math.max(0, Number(delay) || 0);
 
     if (safeDelay <= 0) {
       navigateTo(path);
@@ -473,6 +516,7 @@ export const LoginView = (() => {
         replaceState: true,
         force: true,
       });
+
       return;
     }
 
@@ -500,24 +544,28 @@ export const LoginView = (() => {
       AppCore?.dom?.loader ||
       document.getElementById("app-loader");
 
-    if (typeof AppCore?.setLoading === "function") {
-      AppCore.setLoading(false);
-    }
+    try {
+      if (typeof AppCore?.setLoading === "function") {
+        AppCore.setLoading(false);
+      }
+    } catch {}
 
-    if (document?.body) {
-      document.body.classList.remove("loading");
-    }
+    try {
+      document.body?.classList?.remove?.("loading");
+    } catch {}
 
     if (!loader) {
       return;
     }
 
-    loader.hidden = true;
-    loader.setAttribute("aria-hidden", "true");
-    loader.style.display = "none";
-    loader.style.opacity = "0";
-    loader.style.visibility = "hidden";
-    loader.style.pointerEvents = "none";
+    try {
+      loader.hidden = true;
+      loader.setAttribute("aria-hidden", "true");
+      loader.style.display = "none";
+      loader.style.opacity = "0";
+      loader.style.visibility = "hidden";
+      loader.style.pointerEvents = "none";
+    } catch {}
   }
 
   function restoreGlobalLoaderStyles() {
@@ -533,12 +581,14 @@ export const LoginView = (() => {
       return;
     }
 
-    loader.hidden = false;
-    loader.setAttribute("aria-hidden", "true");
-    loader.style.display = "";
-    loader.style.opacity = "";
-    loader.style.visibility = "";
-    loader.style.pointerEvents = "";
+    try {
+      loader.hidden = false;
+      loader.setAttribute("aria-hidden", "true");
+      loader.style.display = "";
+      loader.style.opacity = "";
+      loader.style.visibility = "";
+      loader.style.pointerEvents = "";
+    } catch {}
   }
 
   function setAuthScreen(active) {
@@ -550,38 +600,54 @@ export const LoginView = (() => {
 
     const {
       sidebar,
+      sidebarMount,
       topbar,
+      topbarMount,
       topbarViewContainer,
       tableheadContainer,
     } = getShellElements();
 
-    document.body.classList.toggle("auth-screen", enabled);
-    document.body.classList.toggle("route-auth", enabled);
-    document.body.classList.toggle("route-shell-hidden", enabled);
-    document.body.classList.toggle("login-no-scroll", enabled);
+    try {
+      document.body.classList.toggle("auth-screen", enabled);
+      document.body.classList.toggle("route-auth", enabled);
+      document.body.classList.toggle("route-shell-hidden", enabled);
+      document.body.classList.toggle("login-no-scroll", enabled);
+    } catch {}
 
-    if (enabled) {
-      document.documentElement.style.overflow = "hidden";
-      document.body.style.overflow = "hidden";
-    } else {
-      document.documentElement.style.overflow = "";
-      document.body.style.overflow = "";
-    }
+    try {
+      if (enabled) {
+        document.documentElement.style.overflow = "hidden";
+        document.body.style.overflow = "hidden";
+      } else {
+        document.documentElement.style.overflow = "";
+        document.body.style.overflow = "";
+      }
+    } catch {}
 
-    if (sidebar) sidebar.hidden = enabled;
-    if (topbar) topbar.hidden = enabled;
-    if (topbarViewContainer) topbarViewContainer.hidden = enabled;
-    if (tableheadContainer) tableheadContainer.hidden = enabled;
+    [
+      sidebar,
+      sidebarMount,
+      topbar,
+      topbarMount,
+      topbarViewContainer,
+      tableheadContainer,
+    ].forEach((element) => {
+      try {
+        if (element) {
+          element.hidden = enabled;
+          element.setAttribute("aria-hidden", String(enabled));
+        }
+      } catch {}
+    });
   }
 
   /* =========================================================
-     VIEW STATE
+     VIEW CLEANUP
   ========================================================= */
 
   function destroyViewState({
     preserveToast = false,
   } = {}) {
-    stopLogoAnimation();
     clearRedirectTimer();
     clearToastTimer();
 
@@ -589,51 +655,9 @@ export const LoginView = (() => {
       hideToast();
     }
 
-    AppCore?.cleanup?.run?.(SCOPE);
-  }
-
-  function clampToastDuration(duration) {
-    return Math.max(
-      TOAST_MIN_DURATION,
-      Number(duration) || TOAST_DEFAULT_DURATION
-    );
-  }
-
-  function getErrorMessage(error) {
-    const code =
-      safeText(error?.data?.code, "") ||
-      safeText(error?.data?.error, "") ||
-      safeText(error?.response?.data?.code, "") ||
-      safeText(error?.response?.data?.error, "");
-
-    const message =
-      safeText(error?.data?.message, "") ||
-      safeText(error?.data?.mensaje, "") ||
-      safeText(error?.response?.data?.message, "") ||
-      safeText(error?.response?.data?.mensaje, "") ||
-      safeText(error?.message, "") ||
-      safeText(error?.statusText, "");
-
-    if (message) {
-      return message;
-    }
-
-    switch (code) {
-      case "INVALID_CREDENTIALS":
-        return "Credenciales incorrectas.";
-
-      case "ACCOUNT_TEMPORARILY_LOCKED":
-        return "La cuenta está bloqueada temporalmente. Inténtalo más tarde.";
-
-      case "MISSING_CREDENTIALS":
-        return "Introduce usuario/email y contraseña.";
-
-      case "INVALID_LOGIN_SESSION":
-        return "Login inválido: el servidor no devolvió una sesión válida.";
-
-      default:
-        return "No se pudo iniciar sesión.";
-    }
+    try {
+      AppCore?.cleanup?.run?.(SCOPE);
+    } catch {}
   }
 
   /* =========================================================
@@ -661,14 +685,17 @@ export const LoginView = (() => {
   }
 
   function extractDirectAuthPayload(payload = {}) {
-    const root =
-      isPlainObject(payload)
-        ? payload
+    const root = isPlainObject(payload) ? payload : {};
+    const data = isPlainObject(root.data) ? root.data : {};
+
+    const response =
+      isPlainObject(root.response)
+        ? root.response
         : {};
 
-    const data =
-      isPlainObject(root.data)
-        ? root.data
+    const responseData =
+      isPlainObject(response.data)
+        ? response.data
         : {};
 
     const auth =
@@ -676,7 +703,9 @@ export const LoginView = (() => {
         root.auth,
         root.session,
         data.auth,
-        data.session
+        data.session,
+        responseData.auth,
+        responseData.session
       ) || {};
 
     const nestedData =
@@ -700,6 +729,13 @@ export const LoginView = (() => {
         data.idToken,
         data.id_token,
 
+        responseData.token,
+        responseData.accessToken,
+        responseData.access_token,
+        responseData.jwt,
+        responseData.idToken,
+        responseData.id_token,
+
         auth.token,
         auth.accessToken,
         auth.access_token,
@@ -719,6 +755,8 @@ export const LoginView = (() => {
         root.refresh_token,
         data.refreshToken,
         data.refresh_token,
+        responseData.refreshToken,
+        responseData.refresh_token,
         auth.refreshToken,
         auth.refresh_token,
         nestedData.refreshToken,
@@ -735,6 +773,10 @@ export const LoginView = (() => {
         data.temp_token,
         data.twoFactorToken,
         data.two_factor_token,
+        responseData.tempToken,
+        responseData.temp_token,
+        responseData.twoFactorToken,
+        responseData.two_factor_token,
         auth.tempToken,
         auth.temp_token,
         auth.twoFactorToken,
@@ -752,6 +794,11 @@ export const LoginView = (() => {
         data.usuario,
         data.account,
         data.profile,
+
+        responseData.user,
+        responseData.usuario,
+        responseData.account,
+        responseData.profile,
 
         auth.user,
         auth.usuario,
@@ -772,33 +819,43 @@ export const LoginView = (() => {
         data.redirectTo,
         data.redirect_to,
         data.redirect,
+        responseData.redirectTo,
+        responseData.redirect_to,
+        responseData.redirect,
         auth.redirectTo,
         auth.redirect_to,
         auth.redirect
       );
 
-    const requires2FA = Boolean(
-      root.requires2FA ||
-      root.requiresTwoFactor ||
-      root.twoFactorRequired ||
-      root.require2FA ||
-      root.mfaRequired ||
-      root.requiresMfa ||
+    const requires2FA = [
+      root.requires2FA,
+      root.requiresTwoFactor,
+      root.twoFactorRequired,
+      root.require2FA,
+      root.mfaRequired,
+      root.requiresMfa,
 
-      data.requires2FA ||
-      data.requiresTwoFactor ||
-      data.twoFactorRequired ||
-      data.require2FA ||
-      data.mfaRequired ||
-      data.requiresMfa ||
+      data.requires2FA,
+      data.requiresTwoFactor,
+      data.twoFactorRequired,
+      data.require2FA,
+      data.mfaRequired,
+      data.requiresMfa,
 
-      auth.requires2FA ||
-      auth.requiresTwoFactor ||
-      auth.twoFactorRequired ||
-      auth.require2FA ||
-      auth.mfaRequired ||
-      auth.requiresMfa
-    );
+      responseData.requires2FA,
+      responseData.requiresTwoFactor,
+      responseData.twoFactorRequired,
+      responseData.require2FA,
+      responseData.mfaRequired,
+      responseData.requiresMfa,
+
+      auth.requires2FA,
+      auth.requiresTwoFactor,
+      auth.twoFactorRequired,
+      auth.require2FA,
+      auth.mfaRequired,
+      auth.requiresMfa,
+    ].some(isTruthyFlag);
 
     return {
       token,
@@ -811,25 +868,10 @@ export const LoginView = (() => {
   }
 
   function isExplicitAuthFailure(payload = {}) {
-    const root =
-      isPlainObject(payload)
-        ? payload
-        : {};
-
-    const data =
-      isPlainObject(root.data)
-        ? root.data
-        : {};
-
-    const response =
-      isPlainObject(root.response)
-        ? root.response
-        : {};
-
-    const responseData =
-      isPlainObject(response.data)
-        ? response.data
-        : {};
+    const root = isPlainObject(payload) ? payload : {};
+    const data = isPlainObject(root.data) ? root.data : {};
+    const response = isPlainObject(root.response) ? root.response : {};
+    const responseData = isPlainObject(response.data) ? response.data : {};
 
     const status = Number(
       root.status ||
@@ -843,27 +885,18 @@ export const LoginView = (() => {
       0
     );
 
-    if (status >= 400) {
+    if (Number.isFinite(status) && status >= 400) {
       return true;
     }
 
-    if (root.ok === false) {
-      return true;
-    }
-
-    if (root.success === false) {
-      return true;
-    }
-
-    if (data.ok === false) {
-      return true;
-    }
-
-    if (data.success === false) {
-      return true;
-    }
-
-    return false;
+    return [
+      root.ok,
+      root.success,
+      data.ok,
+      data.success,
+      responseData.ok,
+      responseData.success,
+    ].some((value) => value === false || value === "false" || value === 0 || value === "0");
   }
 
   function createInvalidLoginSessionError() {
@@ -882,14 +915,11 @@ export const LoginView = (() => {
   }
 
   function assertValidLoginResult(result = {}) {
-    const direct =
-      extractDirectAuthPayload(result);
-
-    const auth =
-      normalizeAuthResult(result);
+    const direct = extractDirectAuthPayload(result);
+    const auth = normalizeAuthResult(result);
 
     const requires2FA = Boolean(
-      direct?.requires2FA ||
+      direct.requires2FA ||
       auth?.requires2FA
     );
 
@@ -913,14 +943,15 @@ export const LoginView = (() => {
     }
 
     if (
-      !hasUsableToken(direct?.token) ||
-      !hasUsableUser(direct?.user)
+      !hasUsableToken(direct.token) ||
+      !hasUsableUser(direct.user)
     ) {
       throw createInvalidLoginSessionError();
     }
 
     return {
       ...auth,
+      requires2FA: false,
       token: direct.token,
       refreshToken:
         direct.refreshToken ||
@@ -991,6 +1022,7 @@ export const LoginView = (() => {
         user: null,
         role: null,
         token: null,
+        accessToken: null,
         session: null,
         sessionId: null,
       });
@@ -1001,6 +1033,7 @@ export const LoginView = (() => {
           AppCore.state.user = null;
           AppCore.state.role = null;
           AppCore.state.token = null;
+          AppCore.state.accessToken = null;
           AppCore.state.session = null;
           AppCore.state.sessionId = null;
         }
@@ -1015,9 +1048,53 @@ export const LoginView = (() => {
     });
   }
 
+  function getErrorMessage(error) {
+    const code =
+      safeText(error?.data?.code, "") ||
+      safeText(error?.data?.error, "") ||
+      safeText(error?.response?.data?.code, "") ||
+      safeText(error?.response?.data?.error, "");
+
+    const message =
+      safeText(error?.data?.message, "") ||
+      safeText(error?.data?.mensaje, "") ||
+      safeText(error?.response?.data?.message, "") ||
+      safeText(error?.response?.data?.mensaje, "") ||
+      safeText(error?.message, "") ||
+      safeText(error?.statusText, "");
+
+    if (message) {
+      return message;
+    }
+
+    switch (code) {
+      case "INVALID_CREDENTIALS":
+        return "Credenciales incorrectas.";
+
+      case "ACCOUNT_TEMPORARILY_LOCKED":
+        return "La cuenta está bloqueada temporalmente. Inténtalo más tarde.";
+
+      case "MISSING_CREDENTIALS":
+        return "Introduce usuario/email y contraseña.";
+
+      case "INVALID_LOGIN_SESSION":
+        return "Login inválido: el servidor no devolvió una sesión válida.";
+
+      default:
+        return "No se pudo iniciar sesión.";
+    }
+  }
+
   /* =========================================================
      TOAST INLINE SYSTEM
   ========================================================= */
+
+  function clampToastDuration(duration) {
+    return Math.max(
+      TOAST_MIN_DURATION,
+      Number(duration) || TOAST_DEFAULT_DURATION
+    );
+  }
 
   function getToastGlyph(type = "default") {
     if (type === "success") {
@@ -1063,23 +1140,51 @@ export const LoginView = (() => {
       return;
     }
 
-    toastRoot.classList.remove(
-      "is-visible",
-      "is-success",
-      "is-error",
-      "is-info",
-      "is-warning"
-    );
+    try {
+      toastRoot.classList.remove(
+        "is-visible",
+        "is-success",
+        "is-error",
+        "is-info",
+        "is-warning"
+      );
 
-    toastRoot.hidden = true;
-    toastRoot.setAttribute("aria-hidden", "true");
-    toastRoot.dataset.state = "default";
+      toastRoot.hidden = true;
+      toastRoot.setAttribute("aria-hidden", "true");
+      toastRoot.dataset.state = "default";
 
-    if (toastProgress) {
-      toastProgress.style.animation = "none";
-      toastProgress.style.transform = "";
-      toastProgress.style.opacity = "";
+      if (toastProgress) {
+        toastProgress.style.animation = "none";
+        toastProgress.style.transform = "";
+        toastProgress.style.opacity = "";
+      }
+    } catch {}
+  }
+
+  function fallbackToast({
+    title = "",
+    message = "",
+    type = "info",
+  } = {}) {
+    const text = [title, message]
+      .map((item) => safeText(item, ""))
+      .filter(Boolean)
+      .join(" · ");
+
+    if (!text) {
+      return;
     }
+
+    try {
+      if (typeof AppCore?.toast?.[type] === "function") {
+        AppCore.toast[type](text);
+        return;
+      }
+    } catch {}
+
+    try {
+      AppCore?.toast?.show?.(text, type);
+    } catch {}
   }
 
   function showToast({
@@ -1100,63 +1205,70 @@ export const LoginView = (() => {
     } = getToastElements();
 
     if (!toastRoot || !toastTitle || !toastText) {
+      fallbackToast({
+        title,
+        message,
+        type,
+      });
+
       return;
     }
 
-    const safeDuration =
-      clampToastDuration(duration);
+    const safeDuration = clampToastDuration(duration);
 
     clearToastTimer();
 
-    toastRoot.hidden = false;
-    toastRoot.setAttribute("aria-hidden", "false");
-    toastRoot.dataset.state = type;
+    try {
+      toastRoot.hidden = false;
+      toastRoot.setAttribute("aria-hidden", "false");
+      toastRoot.dataset.state = type;
 
-    toastRoot.classList.remove(
-      "is-success",
-      "is-error",
-      "is-info",
-      "is-warning"
-    );
+      toastRoot.classList.remove(
+        "is-success",
+        "is-error",
+        "is-info",
+        "is-warning"
+      );
 
-    toastRoot.classList.add(
-      "is-visible",
-      `is-${type}`
-    );
+      toastRoot.classList.add(
+        "is-visible",
+        `is-${type}`
+      );
 
-    toastTitle.textContent = title || "Aviso";
-    toastText.textContent = message || "";
+      toastTitle.textContent = title || "Aviso";
+      toastText.textContent = message || "";
 
-    if (toastIcon) {
-      toastIcon.innerHTML = getToastGlyph(type);
-    }
-
-    if (toastClose) {
-      toastClose.hidden = !closable;
-      toastClose.disabled = !closable;
-      toastClose.setAttribute("aria-hidden", String(!closable));
-      toastClose.tabIndex = closable ? 0 : -1;
-      toastClose.style.pointerEvents = closable ? "" : "none";
-      toastClose.style.opacity = closable ? "" : "0";
-    }
-
-    if (toastProgress) {
-      toastProgress.style.animation = "none";
-      toastProgress.style.transform = "";
-      toastProgress.style.opacity = "";
-
-      if (!persistent) {
-        void toastProgress.offsetWidth;
-        toastProgress.style.animation =
-          `loginToastProgress ${safeDuration}ms linear forwards`;
+      if (toastIcon) {
+        toastIcon.innerHTML = getToastGlyph(type);
       }
-    }
 
-    if (!persistent && isBrowser()) {
-      toastTimerId = window.setTimeout(() => {
-        hideToast();
-      }, safeDuration);
-    }
+      if (toastClose) {
+        toastClose.hidden = !closable;
+        toastClose.disabled = !closable;
+        toastClose.setAttribute("aria-hidden", String(!closable));
+        toastClose.tabIndex = closable ? 0 : -1;
+        toastClose.style.pointerEvents = closable ? "" : "none";
+        toastClose.style.opacity = closable ? "" : "0";
+      }
+
+      if (toastProgress) {
+        toastProgress.style.animation = "none";
+        toastProgress.style.transform = "";
+        toastProgress.style.opacity = "";
+
+        if (!persistent) {
+          void toastProgress.offsetWidth;
+          toastProgress.style.animation =
+            `loginToastProgress ${safeDuration}ms linear forwards`;
+        }
+      }
+
+      if (!persistent && isBrowser()) {
+        toastTimerId = window.setTimeout(() => {
+          hideToast();
+        }, safeDuration);
+      }
+    } catch {}
   }
 
   /* =========================================================
@@ -1168,9 +1280,11 @@ export const LoginView = (() => {
       return;
     }
 
-    cardEl.classList.remove("shake");
-    void cardEl.offsetWidth;
-    cardEl.classList.add("shake");
+    try {
+      cardEl.classList.remove("shake");
+      void cardEl.offsetWidth;
+      cardEl.classList.add("shake");
+    } catch {}
   }
 
   function showErrorState({
@@ -1288,50 +1402,6 @@ export const LoginView = (() => {
   }
 
   /* =========================================================
-     LOGO ANIMATION
-  ========================================================= */
-
-  function startLogoAnimation(logoImages = []) {
-    stopLogoAnimation();
-
-    if (
-      !isBrowser() ||
-      !Array.isArray(logoImages) ||
-      logoImages.length <= 1
-    ) {
-      return;
-    }
-
-    let index = 0;
-
-    logoImages.forEach((img, i) => {
-      img.style.opacity = i === 0 ? "1" : "0";
-      img.style.transition =
-        `opacity ${LOGO_FADE_DURATION}ms ease`;
-    });
-
-    logoIntervalId = window.setInterval(() => {
-      const current = logoImages[index];
-      const next = logoImages[index + 1];
-
-      if (!current || !next) {
-        stopLogoAnimation();
-
-        logoImages.forEach((img, i) => {
-          img.style.opacity =
-            i === logoImages.length - 1 ? "1" : "0";
-        });
-
-        return;
-      }
-
-      current.style.opacity = "0";
-      next.style.opacity = "1";
-      index += 1;
-    }, LOGO_ROTATE_INTERVAL);
-  }
-
-  /* =========================================================
      LOGIN FLOW
   ========================================================= */
 
@@ -1351,34 +1421,13 @@ export const LoginView = (() => {
         formState.remember
       ),
 
-      redirect: safeText(
-        refs?.form?.querySelector?.('input[name="redirect"]')?.value,
-        ""
-      ),
+      redirect:
+        safeText(
+          refs?.form?.querySelector?.('input[name="redirect"]')?.value,
+          ""
+        ) ||
+        getCurrentRedirectPath(),
     };
-  }
-
-  function resolvePostLoginPath(result = {}, payload = {}) {
-    const auth =
-      normalizeAuthResult(result);
-
-    const forcedRedirect =
-      payload?.redirect ||
-      getSafeRedirectPath();
-
-    if (
-      forcedRedirect &&
-      forcedRedirect !== DEFAULT_POST_LOGIN_PATH
-    ) {
-      return normalizePath(forcedRedirect);
-    }
-
-    return resolveLoginRedirect(auth, {
-      trustAuthRedirect: false,
-      redirectTo: "",
-      successRedirect: "",
-      redirect: "",
-    });
   }
 
   function persistLegacyUserInfo(result = {}) {
@@ -1387,8 +1436,7 @@ export const LoginView = (() => {
         return;
       }
 
-      const auth =
-        normalizeAuthResult(result);
+      const auth = normalizeAuthResult(result);
 
       if (
         !hasUsableToken(auth?.token) ||
@@ -1397,8 +1445,7 @@ export const LoginView = (() => {
         return;
       }
 
-      const user =
-        auth.user;
+      const user = auth.user;
 
       localStorage.setItem(
         "onion_token",
@@ -1427,8 +1474,7 @@ export const LoginView = (() => {
   }
 
   function syncUserStateAfterLogin(result = {}) {
-    const auth =
-      normalizeAuthResult(result);
+    const auth = normalizeAuthResult(result);
 
     if (
       auth?.requires2FA &&
@@ -1448,8 +1494,7 @@ export const LoginView = (() => {
       throw createInvalidLoginSessionError();
     }
 
-    const session =
-      syncSession(auth);
+    const session = syncSession(auth);
 
     if (!session?.authenticated) {
       clearFailedLoginState("session_sync_failed");
@@ -1467,43 +1512,26 @@ export const LoginView = (() => {
   }
 
   function handleSuccessfulLogin(result, payload, refs) {
-    const auth =
-      normalizeAuthResult(result);
+    const auth = normalizeAuthResult(result);
 
     persistRememberedIdentifier(payload);
     persistLegacyUserInfo(auth);
 
-    const session =
-      syncUserStateAfterLogin(auth);
+    const session = syncUserStateAfterLogin(auth);
 
     setLoginLoading(refs, true, {
       submitLabel: "Acceder",
       loadingLabel: "Accediendo...",
     });
 
-    const redirectTo =
-      resolvePostLoginPath(auth, payload);
+    const redirectTo = resolvePostLoginPath(payload);
 
     isNavigatingAway = true;
 
     /*
-      Si Auth.login ya navegó internamente, no volvemos a navegar.
-      Esto elimina el doble render/parpadeo.
+      Si Auth.login ya navegó internamente, no navegamos otra vez.
     */
     if (!isStillOnLoginRoute()) {
-      setAuthScreen(false);
-      hideToast();
-      forceHideGlobalLoader();
-      return session;
-    }
-
-    const shouldNavigate =
-      shouldRedirectAfterLogin(auth, {
-        redirectTo,
-        trustAuthRedirect: false,
-      });
-
-    if (!shouldNavigate) {
       setAuthScreen(false);
       hideToast();
       forceHideGlobalLoader();
@@ -1516,8 +1544,7 @@ export const LoginView = (() => {
   }
 
   function handle2FARequired(result, refs) {
-    const auth =
-      normalizeAuthResult(result);
+    const auth = normalizeAuthResult(result);
 
     const redirectTo =
       auth?.redirectTo ||
@@ -1545,6 +1572,7 @@ export const LoginView = (() => {
     safeEmit("login:2fa-required", {
       redirectTo,
       tempToken: auth?.tempToken || null,
+      source: "LoginView",
     });
 
     showToast({
@@ -1580,7 +1608,7 @@ export const LoginView = (() => {
       );
 
       forceHideGlobalLoader();
-      return;
+      return null;
     }
 
     isNavigatingAway = false;
@@ -1593,13 +1621,15 @@ export const LoginView = (() => {
     restoreGlobalLoaderStyles();
     setAuthScreen(true);
 
-    AppCore?.clearDynamicContainers?.();
-    AppCore?.setDocumentTitle?.(
-      "Onion Support"
-    );
+    try {
+      AppCore?.clearDynamicContainers?.();
+    } catch {}
 
-    const redirectPath =
-      getCurrentRedirectPath();
+    try {
+      AppCore?.setDocumentTitle?.("Onion Support");
+    } catch {}
+
+    const redirectPath = getCurrentRedirectPath();
 
     const appName =
       AppCore?.config?.appName ||
@@ -1612,54 +1642,52 @@ export const LoginView = (() => {
     const currentYear =
       new Date().getFullYear();
 
-    container.innerHTML =
-      getLoginTemplate({
-        appName: escapeHtml(appName),
-        appVersion: escapeHtml(appVersion),
-        currentYear,
+    container.innerHTML = getLoginTemplate({
+      appName,
+      appVersion,
+      currentYear,
 
-        redirect: escapeHtml(
-          redirectPath || ""
-        ),
+      redirect: redirectPath || "",
 
-        heroEyebrow: "Entorno seguro",
-        heroTitle:
-          "Tu acceso entra en un panel más vivo y con más presencia visual.",
+      heroEyebrow: "Entorno seguro",
+      heroTitle:
+        "Tu acceso entra en un panel más vivo y con más presencia visual.",
 
-        bullets: [
-          "Sesión cifrada",
-          "Controles de acceso activos",
-          "Shell SPA preparado",
-        ],
+      bullets: [
+        "Sesión cifrada",
+        "Controles de acceso activos",
+        "Shell SPA preparado",
+      ],
 
-        title:
-          `Iniciar sesión con la cuenta ${appName}`,
+      title:
+        `Iniciar sesión con la cuenta ${appName}`,
 
-        subtitle:
-          "Accede a tu espacio de soporte, incidencias y gestión interna.",
+      subtitle:
+        "Accede a tu espacio de soporte, incidencias y gestión interna.",
 
-        identifierPlaceholder: "Usuario o email",
-        passwordPlaceholder: "Contraseña",
-        rememberLabel: "Recordarme",
-        secureMeta: "Acceso seguro",
-        submitLabel: "Acceder",
+      identifierPlaceholder: "Usuario o email",
+      passwordPlaceholder: "Contraseña",
+      rememberLabel: "Recordarme",
+      secureMeta: "Acceso seguro",
+      submitLabel: "Acceder",
 
-        forgotLabel:
-          "¿Has olvidado tu contraseña?",
+      forgotLabel:
+        "¿Has olvidado tu contraseña?",
 
-        forgotPasswordHref:
-          "/reset-password",
+      forgotPasswordHref:
+        "/reset-password",
 
-        logos: [
-          "/src/media/img/favicon_black.png",
-          "/src/media/img/favicon_black_circle.png",
-          "/src/media/img/favicon_support.png",
-          "/src/media/img/favicon_white.png",
-        ],
-      });
+      logoDarkSrc:
+        "/src/media/img/favicon_white.png",
+
+      logoLightSrc:
+        "/src/media/img/favicon_black.png",
+    });
 
     forceHideGlobalLoader();
     bind();
+
+    return container;
   }
 
   /* =========================================================
@@ -1671,8 +1699,11 @@ export const LoginView = (() => {
       return;
     }
 
+    const cleanupApi = AppCore?.cleanup;
     const scope =
-      AppCore?.cleanup?.scope?.(SCOPE);
+      typeof cleanupApi?.scope === "function"
+        ? cleanupApi.scope(SCOPE)
+        : SCOPE;
 
     const container = getContainer();
     const refs = getLoginRefs(container);
@@ -1684,18 +1715,7 @@ export const LoginView = (() => {
     const toastClose =
       document.getElementById("loginToastClose");
 
-    const logoContainer =
-      refs?.root?.querySelector?.(".logo-fade") ||
-      document.querySelector(".logo-fade");
-
-    const logoImages = logoContainer
-      ? Array.from(
-          logoContainer.querySelectorAll("img")
-        )
-      : [];
-
     if (
-      !scope ||
       !refs?.form ||
       !refs?.identifierInput ||
       !refs?.passwordInput ||
@@ -1708,8 +1728,6 @@ export const LoginView = (() => {
       forceHideGlobalLoader();
       return;
     }
-
-    startLogoAnimation(logoImages);
 
     focusLoginPrimaryField(refs, {
       rememberedIdentifier: Boolean(
@@ -1728,21 +1746,27 @@ export const LoginView = (() => {
     forceHideGlobalLoader();
 
     if (toastClose) {
-      AppCore.cleanup.on(
-        scope,
-        toastClose,
-        "click",
-        () => {
-          if (
-            isSubmitting &&
-            isNavigatingAway
-          ) {
-            return;
-          }
+      try {
+        if (typeof cleanupApi?.on === "function") {
+          cleanupApi.on(
+            scope,
+            toastClose,
+            "click",
+            () => {
+              if (
+                isSubmitting &&
+                isNavigatingAway
+              ) {
+                return;
+              }
 
-          hideToast();
+              hideToast();
+            }
+          );
+        } else {
+          toastClose.addEventListener("click", hideToast);
         }
-      );
+      } catch {}
     }
 
     const unbindInputClearers =
@@ -1771,8 +1795,7 @@ export const LoginView = (() => {
           return;
         }
 
-        const payload =
-          buildLoginPayload(refs);
+        const payload = buildLoginPayload(refs);
 
         isSubmitting = true;
 
@@ -1790,36 +1813,27 @@ export const LoginView = (() => {
         });
 
         try {
-          const rawResult =
-            await Auth.login({
-              identifier: payload.identifier,
-              password: payload.password,
-              remember: payload.remember,
-            });
+          const rawResult = await Auth.login({
+            identifier: payload.identifier,
+            password: payload.password,
+            remember: payload.remember,
+          });
 
-          const result =
-            assertValidLoginResult(rawResult);
+          const result = assertValidLoginResult(rawResult);
 
           /*
             Microtask:
             deja respirar a Auth.login si internamente emitió navegación.
-            Si la ruta ya salió de /login, NO navegamos otra vez.
+            Si la ruta ya salió de /login, no navegamos otra vez.
           */
           await Promise.resolve();
 
           if (result?.requires2FA) {
-            handle2FARequired(
-              result,
-              refs
-            );
+            handle2FARequired(result, refs);
             return;
           }
 
-          handleSuccessfulLogin(
-            result,
-            payload,
-            refs
-          );
+          handleSuccessfulLogin(result, payload, refs);
         } catch (error) {
           clearFailedLoginState("login_error");
           hideToast();
@@ -1843,7 +1857,7 @@ export const LoginView = (() => {
 
           /*
             Protección extra:
-            si Auth.login hubiera navegado internamente antes de fallar
+            si Auth.login navegó internamente antes de fallar
             o antes de devolver un payload inválido, volvemos a /login.
           */
           if (!isStillOnLoginRoute()) {
@@ -1851,8 +1865,7 @@ export const LoginView = (() => {
             return;
           }
 
-          const message =
-            getErrorMessage(error);
+          const message = getErrorMessage(error);
 
           setGlobalLoginError(
             refs,
@@ -1867,66 +1880,94 @@ export const LoginView = (() => {
         }
       });
 
-    AppCore.cleanup.event(
-      scope,
-      "auth:login:error",
-      () => {
-        if (isNavigatingAway) {
-          return;
-        }
+    try {
+      if (typeof cleanupApi?.event === "function") {
+        cleanupApi.event(
+          scope,
+          "auth:login:error",
+          () => {
+            if (isNavigatingAway) {
+              return;
+            }
 
-        clearFailedLoginState("auth_login_error_event");
+            clearFailedLoginState("auth_login_error_event");
 
-        setLoginLoading(
-          refs,
-          false,
-          {
-            submitLabel: "Acceder",
-            loadingLabel: "Accediendo...",
+            setLoginLoading(
+              refs,
+              false,
+              {
+                submitLabel: "Acceder",
+                loadingLabel: "Accediendo...",
+              }
+            );
+
+            isSubmitting = false;
           }
         );
 
-        isSubmitting = false;
+        cleanupApi.event(
+          scope,
+          "router:before-render",
+          ({ detail }) => {
+            const nextPath =
+              detail?.path ||
+              detail?.canonicalPath ||
+              "";
+
+            if (
+              nextPath &&
+              !String(nextPath).startsWith(LOGIN_ROUTE_PREFIX)
+            ) {
+              setAuthScreen(false);
+            }
+          }
+        );
       }
-    );
+    } catch {}
 
-    AppCore.cleanup.event(
-      scope,
-      "router:before-render",
-      ({ detail }) => {
-        const nextPath =
-          detail?.path ||
-          detail?.canonicalPath ||
-          "";
+    try {
+      cleanupApi?.add?.(scope, () => {
+        unbindInputClearers?.();
+        unbindSubmit?.();
 
-        if (
-          nextPath &&
-          !String(nextPath).startsWith(LOGIN_ROUTE_PREFIX)
-        ) {
-          setAuthScreen(false);
+        clearRedirectTimer();
+        clearToastTimer();
+
+        if (toastClose && typeof cleanupApi?.on !== "function") {
+          try {
+            toastClose.removeEventListener("click", hideToast);
+          } catch {}
         }
-      }
-    );
 
-    AppCore.cleanup.add(scope, () => {
-      unbindInputClearers?.();
-      unbindSubmit?.();
-
-      stopLogoAnimation();
-      clearRedirectTimer();
-      clearToastTimer();
-
-      if (!isNavigatingAway) {
-        hideToast();
-        setAuthScreen(false);
-        restoreGlobalLoaderStyles();
-      }
-    });
+        if (!isNavigatingAway) {
+          hideToast();
+          setAuthScreen(false);
+          restoreGlobalLoaderStyles();
+        }
+      });
+    } catch {
+      /*
+        Fallback defensivo si AppCore.cleanup no está disponible.
+        Los binds principales siguen teniendo unbind propio.
+      */
+    }
   }
 
   /* =========================================================
-     API PÚBLICA
+     API
   ========================================================= */
+
+  function destroy() {
+    isSubmitting = false;
+    isNavigatingAway = false;
+
+    destroyViewState({
+      preserveToast: false,
+    });
+
+    setAuthScreen(false);
+    restoreGlobalLoaderStyles();
+  }
 
   return {
     render,
@@ -1935,17 +1976,7 @@ export const LoginView = (() => {
       return render();
     },
 
-    destroy() {
-      isSubmitting = false;
-      isNavigatingAway = false;
-
-      destroyViewState({
-        preserveToast: false,
-      });
-
-      setAuthScreen(false);
-      restoreGlobalLoaderStyles();
-    },
+    destroy,
   };
 })();
 

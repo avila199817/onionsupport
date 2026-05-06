@@ -2,13 +2,14 @@
    Onion SPA - Server View
    Archivo: src/views/server/serverView.js
 
-   FINAL PRO SYSTEM · VIEW REAL · 10/10
+   FINAL PRO SYSTEM · VIEW REAL · HARDENED · 12/10
+   SERVER OBSERVABILITY · CSP CLEAN · NO INLINE CSS
 
    RESPONSABILIDADES:
-   - punto de entrada real de la vista server
+   - punto de entrada real de la vista Server
    - render principal de header + dashboard técnico
    - paginación fija de servicios por vista
-   - carga inicial robusta
+   - carga inicial robusta con fallback a cache
    - refresh con loader SOLO en dashboard principal
    - apertura de detalle técnico con estado visual de loading
    - bind de eventos de la pantalla
@@ -16,14 +17,28 @@
    - soportar destroy limpio del router
    - permitir reload con rerender seguro
    - coordinar actions y modal sin mezclar responsabilidades
+   - mantener compatibilidad con server.template.js CSP clean
+   - conectar acciones nuevas y legacy:
+     · refresh / refresh-server
+     · refresh-health / load-server-health
+     · toggle-live / toggle-server-live
+     · open-server-detail
+     · copy-server-detail-id
+     · navigate-server
+     · run-server-quick-action
 
    HARDENING PRO:
    - render inicial inmediato
    - carga posterior segura
    - anti-race token
+   - anti doble reload
    - cleanup total
    - click delegation sólida
+   - bridge AppCore + window events
    - fallback elegante si el modal aún no existe
+   - live refresh controlado por key estable
+   - sin CSS inline
+   - sin estilos inyectados
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -73,18 +88,33 @@ import {
 export const ServerView = (() => {
   "use strict";
 
+  /* =========================================================
+     CONSTANTS
+  ========================================================= */
+
   const SCOPE = "view:server";
   const LIVE_KEY = "server:view";
+  const PAGE_SIZE = Number(DEFAULT_PAGE_SIZE || 6) || 6;
+
+  const LIVE_TOAST = Object.freeze({
+    on: "Tiempo real activado.",
+    off: "Tiempo real pausado.",
+  });
+
+  /* =========================================================
+     LOCAL RUNTIME
+  ========================================================= */
 
   let initialized = false;
   let destroyed = false;
   let inflightInit = null;
+  let inflightReload = null;
   let bindingsCleanup = null;
   let renderToken = 0;
 
-  /* =====================================================
-     HELPERS CORE
-  ===================================================== */
+  /* =========================================================
+     SAFE HELPERS
+  ========================================================= */
 
   function safeLog(...args) {
     try {
@@ -98,16 +128,85 @@ export const ServerView = (() => {
     } catch {}
   }
 
-  function safeEmit(event = "", payload = {}) {
-    try {
-      AppCore?.events?.emit?.(event, payload);
-    } catch {}
+  function safeText(value, fallback = "") {
+    if (value === null || value === undefined) return fallback;
+
+    const text = String(value).trim();
+
+    return text || fallback;
+  }
+
+  function safeNumber(value, fallback = 0) {
+    const n = Number(value);
+
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function safeArray(value) {
+    return Array.isArray(value) ? value : [];
   }
 
   function safeObject(value) {
     return value && typeof value === "object" && !Array.isArray(value)
       ? value
       : {};
+  }
+
+  function first(...values) {
+    for (const value of values) {
+      if (value === undefined || value === null) continue;
+      if (typeof value === "string" && value.trim() === "") continue;
+      if (Array.isArray(value) && value.length === 0) continue;
+
+      return value;
+    }
+
+    return null;
+  }
+
+  function normalizeKey(value = "") {
+    return safeText(value, "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[\s-]+/g, "_")
+      .replace(/[^a-z0-9_:.]/g, "")
+      .trim();
+  }
+
+  function getEventPayload(event = null) {
+    return safeObject(
+      first(
+        event?.detail,
+        event?.payload,
+        event
+      )
+    );
+  }
+
+  function safeEmit(event = "", payload = {}) {
+    const eventName = safeText(event, "");
+    if (!eventName) return false;
+
+    let emitted = false;
+
+    try {
+      AppCore?.events?.emit?.(eventName, payload);
+      emitted = true;
+    } catch {}
+
+    try {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent(eventName, {
+            detail: payload,
+          })
+        );
+        emitted = true;
+      }
+    } catch {}
+
+    return emitted;
   }
 
   function getContainer() {
@@ -127,6 +226,67 @@ export const ServerView = (() => {
     return !destroyed && token === renderToken;
   }
 
+  function waitForPaint() {
+    return new Promise((resolve) => {
+      try {
+        if (typeof window === "undefined") {
+          resolve();
+          return;
+        }
+
+        if (typeof window.requestAnimationFrame !== "function") {
+          window.setTimeout(resolve, 0);
+          return;
+        }
+
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(resolve);
+        });
+      } catch {
+        resolve();
+      }
+    });
+  }
+
+  function showToast(message = "", type = "info") {
+    const text = safeText(message, "");
+    if (!text) return;
+
+    try {
+      if (typeof AppCore?.toast?.[type] === "function") {
+        AppCore.toast[type](text);
+        return;
+      }
+    } catch {}
+
+    try {
+      AppCore?.toast?.show?.(text, type);
+      return;
+    } catch {}
+
+    try {
+      AppCore?.ui?.toast?.[type]?.(text);
+    } catch {}
+  }
+
+  function safeErrorMessage(error = null) {
+    return safeText(
+      first(
+        error?.message,
+        error?.response?.message,
+        error?.response?.data?.message,
+        error?.data?.message,
+        error?.error,
+        "No se pudo cargar el panel Server."
+      ),
+      "No se pudo cargar el panel Server."
+    );
+  }
+
+  /* =========================================================
+     CLEANUP
+  ========================================================= */
+
   function cleanupBindings() {
     try {
       bindingsCleanup?.();
@@ -138,6 +298,10 @@ export const ServerView = (() => {
       AppCore?.cleanup?.run?.(SCOPE);
     } catch {}
   }
+
+  /* =========================================================
+     STATE HELPERS
+  ========================================================= */
 
   function setState(patch = {}) {
     if (!patch || typeof patch !== "object") {
@@ -152,14 +316,21 @@ export const ServerView = (() => {
   function ensureBaseState() {
     const pageSize = Math.max(
       1,
-      Number(serverState?.pageSize || DEFAULT_PAGE_SIZE)
+      safeNumber(
+        first(
+          serverState?.pageSize,
+          serverState?.serverPageSize,
+          PAGE_SIZE
+        ),
+        PAGE_SIZE
+      )
     );
 
     if (!Number.isFinite(Number(serverState?.page))) {
       serverState.page = 1;
     }
 
-    serverState.page = Math.max(1, Number(serverState.page || 1));
+    serverState.page = Math.max(1, safeNumber(serverState.page, 1));
     serverState.pageSize = pageSize;
 
     if (typeof serverState.loading !== "boolean") {
@@ -174,25 +345,43 @@ export const ServerView = (() => {
       serverState.autoRefresh = true;
     }
 
-    serverState.openingDetailId =
-      typeof serverState.openingDetailId === "string"
-        ? serverState.openingDetailId
-        : "";
+    serverState.openingDetailId = safeText(serverState.openingDetailId, "");
+    serverState.selectedDetailId = safeText(serverState.selectedDetailId, "");
+    serverState.error = safeText(serverState.error, "");
 
-    serverState.selectedDetailId =
-      typeof serverState.selectedDetailId === "string"
-        ? serverState.selectedDetailId
-        : "";
-
-    serverState.error =
-      typeof serverState.error === "string"
-        ? serverState.error
-        : "";
+    return serverState;
   }
+
+  function markIdle() {
+    setState({
+      loading: false,
+      refreshing: false,
+    });
+  }
+
+  function markLoadedOk() {
+    setState({
+      loading: false,
+      refreshing: false,
+      loaded: true,
+      hydrated: true,
+      error: "",
+      lastSyncAt: new Date().toISOString(),
+      pageSize: PAGE_SIZE,
+    });
+
+    try {
+      setHydrated?.(true);
+    } catch {}
+  }
+
+  /* =========================================================
+     DATA READERS
+  ========================================================= */
 
   function getRawSnapshot() {
     try {
-      return getServerSnapshotStore();
+      return getServerSnapshotStore?.() || {};
     } catch {
       return {};
     }
@@ -200,24 +389,34 @@ export const ServerView = (() => {
 
   function getSnapshot() {
     try {
-      const raw = getRawSnapshot();
-      return normalizeServerSnapshotModel(raw);
+      return normalizeServerSnapshotModel(getRawSnapshot());
     } catch (error) {
       safeWarn("getSnapshot falló:", error);
       return normalizeServerSnapshotModel({});
     }
   }
 
+  function getRawServicesFromStore(snapshot = {}) {
+    try {
+      const fromStore = getServerServices?.();
+
+      if (Array.isArray(fromStore)) {
+        return fromStore;
+      }
+    } catch {}
+
+    const safeSnapshot = safeObject(snapshot);
+
+    return safeArray(safeSnapshot.services);
+  }
+
   function getServices() {
     try {
       const snapshot = getSnapshot();
-      const raw =
-        getServerServices?.() ||
-        safeObject(snapshot).services ||
-        [];
+      const raw = getRawServicesFromStore(snapshot);
 
       return sortServerServicesByLatencyDesc(
-        raw.map((item) => normalizeServerServiceModel(item))
+        safeArray(raw).map((item) => normalizeServerServiceModel(item))
       );
     } catch (error) {
       safeWarn("getServices falló:", error);
@@ -227,63 +426,56 @@ export const ServerView = (() => {
 
   function getPaginationMeta(items = []) {
     return paginateServerServices(
-      items,
+      safeArray(items),
       serverState.page || 1,
-      serverState.pageSize || DEFAULT_PAGE_SIZE
+      serverState.pageSize || PAGE_SIZE
     );
   }
 
   function clampPageAgainstItems(items = []) {
     const pagination = getPaginationMeta(items);
 
-    if (serverState.page !== pagination.page) {
+    if (safeNumber(serverState.page, 1) !== pagination.page) {
       serverState.page = pagination.page;
     }
+
+    serverState.pageSize = PAGE_SIZE;
 
     return pagination;
   }
 
-  function showToast(message = "", type = "info") {
+  function hydrateBestEffort() {
+    let hydrated = false;
+
     try {
-      if (typeof AppCore?.toast?.[type] === "function") {
-        AppCore.toast[type](message);
-        return;
+      hydrateServerFromCache?.();
+    } catch (error) {
+      safeWarn("hydrateServerFromCache falló:", error);
+    }
+
+    try {
+      const services = getServices();
+
+      if (services.length) {
+        setState({
+          hydrated: true,
+          loaded: true,
+        });
+
+        setHydrated?.(true);
+        hydrated = true;
       }
     } catch {}
 
-    try {
-      AppCore?.toast?.show?.(message, type);
-      return;
-    } catch {}
-
-    try {
-      AppCore?.ui?.toast?.[type]?.(message);
-    } catch {}
+    return hydrated;
   }
 
-  function safeErrorMessage(error = null) {
-    if (!error) {
-      return "No se pudo cargar el panel Server.";
-    }
-
-    const message =
-      error?.message ||
-      error?.response?.message ||
-      error?.response?.data?.message ||
-      error?.data?.message ||
-      "No se pudo cargar el panel Server.";
-
-    return String(message).trim() || "No se pudo cargar el panel Server.";
-  }
-
-  /* =====================================================
+  /* =========================================================
      MODAL BRIDGE
-  ===================================================== */
+  ========================================================= */
 
   function openServerModalBridge(detail = null) {
-    if (!detail) {
-      return false;
-    }
+    if (!detail) return false;
 
     let handled = false;
 
@@ -293,17 +485,31 @@ export const ServerView = (() => {
     } catch {}
 
     try {
-      const globalHook =
-        window?.OnionServerModal?.open ||
-        window?.renderServerDetailModal ||
-        window?.renderServerModal;
+      const modal = window?.OnionServerModal;
 
-      if (typeof globalHook === "function") {
-        globalHook(detail);
+      if (modal?.getState?.()?.isOpen && typeof modal.update === "function") {
+        modal.update(detail);
+        handled = true;
+      } else if (typeof modal?.open === "function") {
+        modal.open(detail);
         handled = true;
       }
     } catch (error) {
-      safeWarn("modal bridge hook falló:", error);
+      safeWarn("OnionServerModal hook falló:", error);
+    }
+
+    try {
+      const hook =
+        window?.renderServerDetailModal ||
+        window?.renderServerModal ||
+        window?.openServerDetailModal;
+
+      if (typeof hook === "function") {
+        hook(detail);
+        handled = true;
+      }
+    } catch (error) {
+      safeWarn("server modal hook falló:", error);
     }
 
     if (!handled) {
@@ -316,18 +522,14 @@ export const ServerView = (() => {
     return handled;
   }
 
-  /* =====================================================
+  /* =========================================================
      LIVE REFRESH
-  ===================================================== */
+  ========================================================= */
 
   async function onLiveTick() {
-    if (destroyed) {
-      return;
-    }
-
-    if (serverState.loading || serverState.refreshing) {
-      return;
-    }
+    if (destroyed) return;
+    if (serverState.loading || serverState.refreshing) return;
+    if (inflightReload) return;
 
     await reload({
       force: true,
@@ -369,9 +571,15 @@ export const ServerView = (() => {
     } catch {}
   }
 
-  /* =====================================================
+  function persistLiveState(next = false) {
+    try {
+      setServerAutoRefresh?.(Boolean(next));
+    } catch {}
+  }
+
+  /* =========================================================
      RENDER
-  ===================================================== */
+  ========================================================= */
 
   function buildHtml() {
     const snapshot = getSnapshot();
@@ -380,8 +588,8 @@ export const ServerView = (() => {
     clampPageAgainstItems(services);
 
     return `
-      <section class="panel-content dashboard ready">
-        <div class="content-wrapper">
+      <section class="panel-content dashboard ready" data-view="server">
+        <div class="content-wrapper server-content-wrapper">
           ${renderHeader({
             snapshot,
             state: serverState,
@@ -416,15 +624,19 @@ export const ServerView = (() => {
 
     container.innerHTML = buildHtml();
 
-    setHydrated?.(true);
+    try {
+      setHydrated?.(true);
+    } catch {}
+
+    setState({
+      hydrated: true,
+    });
 
     return container;
   }
 
   function rerender() {
-    if (destroyed) {
-      return null;
-    }
+    if (destroyed) return null;
 
     const container = render();
 
@@ -435,15 +647,17 @@ export const ServerView = (() => {
     return container;
   }
 
-  /* =====================================================
+  /* =========================================================
      DATA LOAD
-  ===================================================== */
+  ========================================================= */
 
   async function loadData({
     force = false,
     silent = false,
     asRefresh = false,
   } = {}) {
+    if (destroyed) return getSnapshot();
+
     const servicesBefore = getServices();
     const hasVisibleData = servicesBefore.length > 0;
 
@@ -451,6 +665,7 @@ export const ServerView = (() => {
       error: "",
       loading: !hasVisibleData && !silent,
       refreshing: hasVisibleData && asRefresh,
+      pageSize: PAGE_SIZE,
     });
 
     render();
@@ -464,18 +679,14 @@ export const ServerView = (() => {
         await loadServerHealth?.({
           silent: true,
         });
-      } catch {}
-
-      setState({
-        loading: false,
-        refreshing: false,
-        error: "",
-        lastSyncAt: new Date().toISOString(),
-      });
+      } catch (healthError) {
+        safeWarn("loadServerHealth parcial falló:", healthError);
+      }
 
       const servicesAfter = getServices();
 
       clampPageAgainstItems(servicesAfter);
+      markLoadedOk();
 
       return getSnapshot();
     } catch (error) {
@@ -484,16 +695,24 @@ export const ServerView = (() => {
       safeWarn("loadServerSnapshot falló:", error);
 
       setState({
+        error: message,
+        loaded: true,
+        hydrated: true,
         loading: false,
         refreshing: false,
-        error: message,
       });
+
+      try {
+        setHydrated?.(true);
+      } catch {}
 
       if (!silent) {
         showToast(message, "error");
       }
 
       return getSnapshot();
+    } finally {
+      markIdle();
     }
   }
 
@@ -504,14 +723,14 @@ export const ServerView = (() => {
   } = {}) {
     const token = nextRenderToken();
 
-    try {
-      hydrateServerFromCache?.();
-    } catch (error) {
-      safeWarn("hydrateServerFromCache falló:", error);
-    }
-
+    hydrateBestEffort();
     ensureBaseState();
+
     render();
+
+    if (!destroyed) {
+      bind();
+    }
 
     await loadData({
       force,
@@ -525,24 +744,33 @@ export const ServerView = (() => {
 
     render();
 
+    if (!destroyed) {
+      bind();
+    }
+
     return api;
   }
 
-  /* =====================================================
+  /* =========================================================
      PAGE ACTIONS
-  ===================================================== */
+  ========================================================= */
 
   function goToPage(page = 1) {
+    if (serverState.loading || serverState.refreshing) {
+      return serverState.page || 1;
+    }
+
     const items = getServices();
 
     const pagination = paginateServerServices(
       items,
       page,
-      serverState.pageSize || DEFAULT_PAGE_SIZE
+      serverState.pageSize || PAGE_SIZE
     );
 
     setState({
       page: pagination.page,
+      pageSize: PAGE_SIZE,
     });
 
     rerender();
@@ -558,15 +786,30 @@ export const ServerView = (() => {
     return goToPage((serverState.page || 1) + 1);
   }
 
-  /* =====================================================
+  function changePageSize() {
+    setState({
+      pageSize: PAGE_SIZE,
+      page: 1,
+    });
+
+    rerender();
+
+    return PAGE_SIZE;
+  }
+
+  /* =========================================================
      ACTION FLOWS
-  ===================================================== */
+  ========================================================= */
 
   async function handleOpenDetail(detailId = "") {
-    const id = String(detailId || "").trim();
+    const id = safeText(detailId, "");
 
     if (!id) {
       showToast("Detalle inválido.", "error");
+      return null;
+    }
+
+    if (serverState.openingDetailId) {
       return null;
     }
 
@@ -576,6 +819,7 @@ export const ServerView = (() => {
     });
 
     rerender();
+    await waitForPaint();
 
     try {
       const detail = await openServerDetailAction({
@@ -608,11 +852,9 @@ export const ServerView = (() => {
   }
 
   async function handleRefreshDetailFromModal(detailId = "") {
-    const id = String(detailId || "").trim();
+    const id = safeText(detailId, "");
 
-    if (!id) {
-      return null;
-    }
+    if (!id) return null;
 
     try {
       await refreshServerSnapshotAction?.({
@@ -644,18 +886,40 @@ export const ServerView = (() => {
   }
 
   async function handleCopyDetailId(detailId = "") {
-    const ok = await copyServerDetailIdAction?.({
-      detailId,
-      silent: false,
-    });
+    const id = safeText(detailId, "");
 
-    return ok;
+    if (!id) {
+      showToast("No hay referencia técnica para copiar.", "error");
+      return false;
+    }
+
+    try {
+      return await copyServerDetailIdAction?.({
+        detailId: id,
+        silent: false,
+      });
+    } catch (error) {
+      safeWarn("handleCopyDetailId falló:", error);
+      showToast("No se pudo copiar la referencia técnica.", "error");
+      return false;
+    }
   }
 
   async function handleRefreshHealth() {
+    if (destroyed) return false;
+
     try {
+      setState({
+        refreshingHealth: true,
+      });
+
       await loadServerHealth?.({
         silent: false,
+      });
+
+      setState({
+        refreshingHealth: false,
+        lastHealthSyncAt: new Date().toISOString(),
       });
 
       if (!destroyed) {
@@ -665,17 +929,25 @@ export const ServerView = (() => {
       return true;
     } catch (error) {
       safeWarn("handleRefreshHealth falló:", error);
+
+      setState({
+        refreshingHealth: false,
+      });
+
       showToast("No se pudo refrescar el health.", "error");
+
+      if (!destroyed) {
+        rerender();
+      }
+
       return false;
     }
   }
 
   async function handleNavigate(route = "") {
-    const target = String(route || "").trim();
+    const target = safeText(route, "");
 
-    if (!target) {
-      return false;
-    }
+    if (!target) return false;
 
     try {
       return await navigateFromServerAction?.({
@@ -694,11 +966,19 @@ export const ServerView = (() => {
     route = "",
     payload = {},
   } = {}) {
+    const finalAction = safeText(action, "");
+    const finalRoute = safeText(route, "");
+
+    if (!finalAction && !finalRoute) {
+      showToast("Acción rápida inválida.", "error");
+      return false;
+    }
+
     try {
       return await runServerQuickAction?.({
-        action,
-        route,
-        payload,
+        action: finalAction,
+        route: finalRoute,
+        payload: safeObject(payload),
         silent: false,
       });
     } catch (error) {
@@ -711,17 +991,18 @@ export const ServerView = (() => {
   async function handleToggleLive() {
     const next = !Boolean(serverState.autoRefresh);
 
-    setServerAutoRefresh?.(next);
+    persistLiveState(next);
+
     setState({
       autoRefresh: next,
     });
 
     if (next) {
       ensureLiveRefresh();
-      showToast("Tiempo real activado.", "success");
+      showToast(LIVE_TOAST.on, "success");
     } else {
       stopLiveRefresh();
-      showToast("Tiempo real pausado.", "info");
+      showToast(LIVE_TOAST.off, "info");
     }
 
     rerender();
@@ -729,9 +1010,74 @@ export const ServerView = (() => {
     return next;
   }
 
-  /* =====================================================
-     CLICK DELEGATION
-  ===================================================== */
+  /* =========================================================
+     DOM HELPERS
+  ========================================================= */
+
+  function closestAction(event, selectors = []) {
+    const list = safeArray(selectors).filter(Boolean);
+    if (!list.length) return null;
+
+    try {
+      return event.target?.closest?.(list.join(",")) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function getDetailIdFromElement(element = null) {
+    if (!element) return "";
+
+    return safeText(
+      first(
+        element.dataset?.detailId,
+        element.dataset?.serviceId,
+        element.dataset?.id,
+        element.getAttribute?.("data-detail-id"),
+        element.getAttribute?.("data-service-id"),
+        element.getAttribute?.("data-id")
+      ),
+      ""
+    );
+  }
+
+  function getRouteFromElement(element = null) {
+    if (!element) return "";
+
+    return safeText(
+      first(
+        element.dataset?.route,
+        element.dataset?.href,
+        element.getAttribute?.("data-route"),
+        element.getAttribute?.("data-href")
+      ),
+      ""
+    );
+  }
+
+  function getQuickActionPayload(element = null) {
+    if (!element) return {};
+
+    const raw = safeText(
+      first(
+        element.dataset?.payload,
+        element.getAttribute?.("data-payload")
+      ),
+      ""
+    );
+
+    if (!raw) return {};
+
+    try {
+      return safeObject(JSON.parse(raw));
+    } catch {
+      return {};
+    }
+  }
+
+  /* =========================================================
+     BINDINGS
+  ========================================================= */
 
   function bindNativeActions(container) {
     if (!container) {
@@ -739,100 +1085,123 @@ export const ServerView = (() => {
     }
 
     const onClick = async (event) => {
-      const openBtn = event.target.closest(
-        '[data-action="open-server-detail"]'
-      );
+      if (destroyed) return;
+
+      const openBtn = closestAction(event, [
+        '[data-action="open-server-detail"]',
+        '[data-server-action="open-detail"]',
+      ]);
 
       if (openBtn) {
         event.preventDefault();
+        event.stopPropagation();
 
-        const detailId = String(
-          openBtn.dataset.detailId ||
-            openBtn.dataset.serviceId ||
-            ""
-        ).trim();
-
-        await handleOpenDetail(detailId);
+        await handleOpenDetail(getDetailIdFromElement(openBtn));
         return;
       }
 
-      const copyBtn = event.target.closest(
-        '[data-action="copy-server-detail-id"]'
-      );
+      const copyBtn = closestAction(event, [
+        '[data-action="copy-server-detail-id"]',
+        '[data-server-action="copy-detail-id"]',
+      ]);
 
       if (copyBtn) {
         event.preventDefault();
+        event.stopPropagation();
 
-        const detailId = String(
-          copyBtn.dataset.detailId ||
-            copyBtn.dataset.serviceId ||
-            ""
-        ).trim();
-
-        if (!detailId) {
-          return;
-        }
-
-        await handleCopyDetailId(detailId);
+        await handleCopyDetailId(getDetailIdFromElement(copyBtn));
         return;
       }
 
-      const quickBtn = event.target.closest(
-        '[data-action="run-server-quick-action"]'
-      );
+      const quickBtn = closestAction(event, [
+        '[data-action="run-server-quick-action"]',
+        '[data-server-action="quick-action"]',
+      ]);
 
       if (quickBtn) {
         event.preventDefault();
+        event.stopPropagation();
 
-        const action = String(
-          quickBtn.dataset.serverAction ||
-            quickBtn.dataset.actionName ||
-            ""
-        ).trim();
-
-        const route = String(
-          quickBtn.dataset.route ||
-            quickBtn.dataset.href ||
-            ""
-        ).trim();
-
-        let payload = {};
-
-        try {
-          payload = quickBtn.dataset.payload
-            ? JSON.parse(quickBtn.dataset.payload)
-            : {};
-        } catch {}
+        const action = safeText(
+          first(
+            quickBtn.dataset?.serverAction,
+            quickBtn.dataset?.actionName,
+            quickBtn.getAttribute?.("data-server-action-name"),
+            quickBtn.getAttribute?.("data-action-name")
+          ),
+          ""
+        );
 
         await handleQuickAction({
           action,
-          route,
-          payload,
+          route: getRouteFromElement(quickBtn),
+          payload: getQuickActionPayload(quickBtn),
         });
 
         return;
       }
 
-      const navBtn = event.target.closest(
-        '[data-action="navigate-server"]'
-      );
+      const navBtn = closestAction(event, [
+        '[data-action="navigate-server"]',
+        '[data-server-action="navigate"]',
+      ]);
 
       if (navBtn) {
         event.preventDefault();
+        event.stopPropagation();
 
-        const route = String(
-          navBtn.dataset.route ||
-            navBtn.dataset.href ||
-            ""
-        ).trim();
-
-        await handleNavigate(route);
+        await handleNavigate(getRouteFromElement(navBtn));
         return;
       }
 
-      const healthBtn = event.target.closest(
-        "#server-health-btn, [data-action='load-server-health']"
-      );
+      const pageBtn = closestAction(event, [
+        '[data-action="page"]',
+        '[data-server-action="page"]',
+      ]);
+
+      if (pageBtn) {
+        event.preventDefault();
+
+        const page = safeNumber(
+          first(
+            pageBtn.dataset?.page,
+            pageBtn.getAttribute?.("data-page")
+          ),
+          serverState.page || 1
+        );
+
+        goToPage(page);
+        return;
+      }
+
+      const prevBtn = closestAction(event, [
+        '[data-action="prev-page"]',
+        '[data-server-action="prev-page"]',
+      ]);
+
+      if (prevBtn) {
+        event.preventDefault();
+        goPrevPage();
+        return;
+      }
+
+      const nextBtn = closestAction(event, [
+        '[data-action="next-page"]',
+        '[data-server-action="next-page"]',
+      ]);
+
+      if (nextBtn) {
+        event.preventDefault();
+        goNextPage();
+        return;
+      }
+
+      const healthBtn = closestAction(event, [
+        "#server-health-btn",
+        '[data-action="refresh-health"]',
+        '[data-action="load-server-health"]',
+        '[data-server-action="refresh-health"]',
+      ]);
 
       if (healthBtn) {
         event.preventDefault();
@@ -840,9 +1209,12 @@ export const ServerView = (() => {
         return;
       }
 
-      const liveBtn = event.target.closest(
-        "#server-toggle-live-btn, [data-action='toggle-server-live']"
-      );
+      const liveBtn = closestAction(event, [
+        "#server-toggle-live-btn",
+        '[data-action="toggle-live"]',
+        '[data-action="toggle-server-live"]',
+        '[data-server-action="toggle-live"]',
+      ]);
 
       if (liveBtn) {
         event.preventDefault();
@@ -850,112 +1222,208 @@ export const ServerView = (() => {
         return;
       }
 
-      const prevBtn = event.target.closest('[data-action="prev-page"]');
-      if (prevBtn) {
-        event.preventDefault();
-        goPrevPage();
-        return;
-      }
+      const retryBtn = closestAction(event, [
+        "#server-retry-btn",
+        '[data-action="retry"]',
+        '[data-server-action="retry"]',
+      ]);
 
-      const nextBtn = event.target.closest('[data-action="next-page"]');
-      if (nextBtn) {
-        event.preventDefault();
-        goNextPage();
-        return;
-      }
-
-      const retryBtn = event.target.closest("#server-retry-btn");
       if (retryBtn) {
         event.preventDefault();
-        await reload({ force: true, asRefresh: false });
+
+        await reload({
+          force: true,
+          asRefresh: false,
+          silent: false,
+        });
+
         return;
       }
 
-      const refreshBtn = event.target.closest(
-        "#server-refresh-btn, [data-action='refresh-server']"
-      );
+      const refreshBtn = closestAction(event, [
+        "#server-refresh-btn",
+        '[data-action="refresh"]',
+        '[data-action="refresh-server"]',
+        '[data-server-action="refresh"]',
+      ]);
+
       if (refreshBtn) {
         event.preventDefault();
-        await reload({ force: true, asRefresh: true });
+
+        await reload({
+          force: true,
+          asRefresh: true,
+          silent: false,
+        });
+      }
+    };
+
+    const onChange = (event) => {
+      if (destroyed) return;
+
+      const pageSizeField = closestAction(event, [
+        '[data-server-field="page-size"]',
+        '[data-field="page-size"]',
+      ]);
+
+      if (pageSizeField) {
+        changePageSize(PAGE_SIZE);
       }
     };
 
     container.addEventListener("click", onClick);
+    container.addEventListener("change", onChange);
 
     return () => {
-      container.removeEventListener("click", onClick);
+      try {
+        container.removeEventListener("click", onClick);
+        container.removeEventListener("change", onChange);
+      } catch {}
     };
   }
 
   function bindModalBridgeEvents() {
-    const onRefresh = async (event) => {
-      const detailId =
-        event?.detail?.detailId ||
-        event?.detail?.serviceId ||
-        event?.detailId ||
-        event?.serviceId ||
-        "";
+    const bus = AppCore?.events;
 
-      if (!detailId) {
-        return;
-      }
-
-      await handleRefreshDetailFromModal(detailId);
-    };
-
-    const onCopy = async (event) => {
-      const detailId =
-        event?.detail?.detailId ||
-        event?.detail?.serviceId ||
-        event?.detailId ||
-        event?.serviceId ||
-        "";
-
-      if (!detailId) {
-        return;
-      }
-
-      await handleCopyDetailId(detailId);
-    };
-
-    const onNavigate = async (event) => {
-      const route =
-        event?.detail?.route ||
-        event?.route ||
-        "";
-
-      if (!route) {
-        return;
-      }
-
-      await handleNavigate(route);
-    };
-
-    const eventBus = AppCore?.events;
-
-    if (!eventBus?.on) {
+    if (!bus?.on) {
       return () => {};
     }
 
+    const onRefresh = async (event) => {
+      const payload = getEventPayload(event);
+
+      await handleRefreshDetailFromModal(
+        payload.detailId ||
+          payload.serviceId ||
+          payload.detail?.detailId ||
+          payload.detail?.serviceId ||
+          payload.detail?.id ||
+          ""
+      );
+    };
+
+    const onCopy = async (event) => {
+      const payload = getEventPayload(event);
+
+      await handleCopyDetailId(
+        payload.detailId ||
+          payload.serviceId ||
+          payload.detail?.detailId ||
+          payload.detail?.serviceId ||
+          payload.detail?.id ||
+          ""
+      );
+    };
+
+    const onNavigate = async (event) => {
+      const payload = getEventPayload(event);
+
+      await handleNavigate(
+        payload.route ||
+          payload.href ||
+          payload.detail?.route ||
+          payload.detail?.href ||
+          ""
+      );
+    };
+
+    const onRefreshAll = async () => {
+      await reload({
+        force: true,
+        asRefresh: true,
+        silent: true,
+      });
+    };
+
     try {
-      eventBus.on("server:modal:refresh", onRefresh);
-      eventBus.on("server:modal:copy", onCopy);
-      eventBus.on("server:modal:navigate", onNavigate);
+      bus.on("server:modal:refresh", onRefresh);
+      bus.on("server:modal:copy", onCopy);
+      bus.on("server:modal:navigate", onNavigate);
+
+      bus.on("server:refresh", onRefreshAll);
+      bus.on("server:snapshot:updated", onRefreshAll);
+      bus.on("server:health:updated", onRefreshAll);
     } catch (error) {
       safeWarn("bind modal bridge error:", error);
     }
 
     return () => {
-      try {
-        eventBus?.off?.("server:modal:refresh", onRefresh);
-      } catch {}
+      try { bus.off("server:modal:refresh", onRefresh); } catch {}
+      try { bus.off("server:modal:copy", onCopy); } catch {}
+      try { bus.off("server:modal:navigate", onNavigate); } catch {}
 
-      try {
-        eventBus?.off?.("server:modal:copy", onCopy);
-      } catch {}
+      try { bus.off("server:refresh", onRefreshAll); } catch {}
+      try { bus.off("server:snapshot:updated", onRefreshAll); } catch {}
+      try { bus.off("server:health:updated", onRefreshAll); } catch {}
+    };
+  }
 
+  function bindWindowEvents() {
+    const onRefresh = async (event) => {
+      const payload = getEventPayload(event);
+
+      await handleRefreshDetailFromModal(
+        payload.detailId ||
+          payload.serviceId ||
+          payload.detail?.detailId ||
+          payload.detail?.serviceId ||
+          payload.detail?.id ||
+          ""
+      );
+    };
+
+    const onCopy = async (event) => {
+      const payload = getEventPayload(event);
+
+      await handleCopyDetailId(
+        payload.detailId ||
+          payload.serviceId ||
+          payload.detail?.detailId ||
+          payload.detail?.serviceId ||
+          payload.detail?.id ||
+          ""
+      );
+    };
+
+    const onNavigate = async (event) => {
+      const payload = getEventPayload(event);
+
+      await handleNavigate(
+        payload.route ||
+          payload.href ||
+          payload.detail?.route ||
+          payload.detail?.href ||
+          ""
+      );
+    };
+
+    const onRefreshAll = async () => {
+      await reload({
+        force: true,
+        asRefresh: true,
+        silent: true,
+      });
+    };
+
+    try {
+      window.addEventListener("server:modal:refresh", onRefresh);
+      window.addEventListener("server:modal:copy", onCopy);
+      window.addEventListener("server:modal:navigate", onNavigate);
+
+      window.addEventListener("server:refresh", onRefreshAll);
+      window.addEventListener("server:snapshot:updated", onRefreshAll);
+      window.addEventListener("server:health:updated", onRefreshAll);
+    } catch {}
+
+    return () => {
       try {
-        eventBus?.off?.("server:modal:navigate", onNavigate);
+        window.removeEventListener("server:modal:refresh", onRefresh);
+        window.removeEventListener("server:modal:copy", onCopy);
+        window.removeEventListener("server:modal:navigate", onNavigate);
+
+        window.removeEventListener("server:refresh", onRefreshAll);
+        window.removeEventListener("server:snapshot:updated", onRefreshAll);
+        window.removeEventListener("server:health:updated", onRefreshAll);
       } catch {}
     };
   }
@@ -963,11 +1431,14 @@ export const ServerView = (() => {
   function bind() {
     cleanupBindings();
 
+    if (destroyed) return;
+
     const container = getContainer();
     const cleanups = [];
 
     cleanups.push(bindNativeActions(container));
     cleanups.push(bindModalBridgeEvents());
+    cleanups.push(bindWindowEvents());
 
     bindingsCleanup = () => {
       for (const cleanup of cleanups) {
@@ -978,13 +1449,17 @@ export const ServerView = (() => {
     };
   }
 
-  /* =====================================================
+  /* =========================================================
      PUBLIC FLOWS
-  ===================================================== */
+  ========================================================= */
 
   async function reload(options = {}) {
     if (destroyed) {
       return api;
+    }
+
+    if (inflightReload) {
+      return inflightReload;
     }
 
     const {
@@ -992,41 +1467,63 @@ export const ServerView = (() => {
       asRefresh = true,
       silent = false,
       keepLiveState = true,
-    } = options || {};
+    } = safeObject(options);
+
+    inflightReload = (async () => {
+      try {
+        await renderAndLoad({
+          force,
+          asRefresh,
+          silent,
+        });
+      } catch (error) {
+        safeWarn("reload falló:", error);
+      }
+
+      if (!destroyed) {
+        bind();
+
+        if (keepLiveState && serverState.autoRefresh) {
+          ensureLiveRefresh();
+        }
+      }
+
+      return api;
+    })();
 
     try {
-      await renderAndLoad({
-        force,
-        asRefresh,
-        silent,
-      });
-    } catch (error) {
-      safeWarn("reload falló:", error);
+      return await inflightReload;
+    } finally {
+      inflightReload = null;
     }
-
-    if (!destroyed) {
-      bind();
-
-      if (keepLiveState && serverState.autoRefresh) {
-        ensureLiveRefresh();
-      }
-    }
-
-    return api;
   }
 
   async function init() {
-    if (initialized && inflightInit) {
+    if (destroyed) {
+      destroyed = false;
+    }
+
+    if (inflightInit) {
       return inflightInit;
     }
 
-    destroyed = false;
-    initialized = true;
+    if (initialized && !destroyed) {
+      ensureBaseState();
+      rerender();
 
-    ensureBaseState();
+      if (serverState.autoRefresh) {
+        ensureLiveRefresh();
+      }
+
+      return api;
+    }
+
+    initialized = true;
 
     inflightInit = (async () => {
       safeLog("init");
+
+      hydrateBestEffort();
 
       await renderAndLoad({
         force: false,
@@ -1036,6 +1533,7 @@ export const ServerView = (() => {
 
       if (!destroyed) {
         bind();
+
         if (serverState.autoRefresh) {
           ensureLiveRefresh();
         }
@@ -1056,7 +1554,6 @@ export const ServerView = (() => {
     initialized = false;
 
     nextRenderToken();
-
     cleanupBindings();
     stopLiveRefresh();
 
@@ -1064,15 +1561,19 @@ export const ServerView = (() => {
       openingDetailId: "",
       selectedDetailId: "",
       refreshing: false,
+      refreshingHealth: false,
       loading: false,
+      pageSize: PAGE_SIZE,
     });
+
+    inflightReload = null;
 
     safeLog("destroy");
   }
 
-  /* =====================================================
+  /* =========================================================
      EXTRAS ÚTILES
-  ===================================================== */
+  ========================================================= */
 
   function getCurrentSnapshot() {
     return getSnapshot();
@@ -1085,17 +1586,29 @@ export const ServerView = (() => {
   function getCurrentPageServices() {
     const items = getServices();
     const pagination = getPaginationMeta(items);
-    return pagination.items;
+
+    return safeArray(pagination.items);
   }
 
   function getCurrentService(detailId = "") {
-    const items = getServices();
-    return findServerServiceById(items, detailId);
+    const id = safeText(detailId, "");
+
+    if (!id) return null;
+
+    try {
+      return (
+        getServerServiceByIdStore?.(id) ||
+        findServerServiceById(getServices(), id) ||
+        null
+      );
+    } catch {
+      return findServerServiceById(getServices(), id);
+    }
   }
 
-  /* =====================================================
+  /* =========================================================
      API
-  ===================================================== */
+  ========================================================= */
 
   const api = {
     init,
@@ -1113,11 +1626,21 @@ export const ServerView = (() => {
     goToPage,
     goPrevPage,
     goNextPage,
+    changePageSize,
 
     getSnapshot: getCurrentSnapshot,
     getServices: getCurrentServices,
     getPageServices: getCurrentPageServices,
     getServiceById: getCurrentService,
+
+    getState: () => ({
+      ...serverState,
+      initialized,
+      destroyed,
+      hasInflightInit: Boolean(inflightInit),
+      hasInflightReload: Boolean(inflightReload),
+      pageSize: PAGE_SIZE,
+    }),
 
     get initialized() {
       return initialized;

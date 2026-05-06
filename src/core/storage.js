@@ -3,11 +3,11 @@
    Archivo: src/core/storage.js
 
    RESPONSABILIDADES:
-   - encapsular acceso localStorage namespaced
+   - encapsular acceso localStorage/sessionStorage namespaced
    - leer / escribir valores serializados y raw
    - borrar claves legacy de sesión
    - limpiar namespace completo app
-   - fallback en memoria si localStorage no está disponible
+   - fallback en memoria si Web Storage no está disponible
    - proteger contra valores corruptos
    - exponer snapshot de diagnóstico
 
@@ -22,6 +22,8 @@
    - no borra claves namespaced actuales al limpiar legacy
    - snapshots con redacción de tokens/secrets
    - cero throws accidentales
+   - soporte local/session/memory
+   - soporte getJson/setJson/getRaw/setRaw
 ========================================================= */
 
 import { config } from "./config.js";
@@ -39,20 +41,84 @@ import {
 ========================================================= */
 
 const STORAGE_VERSION =
-  "10.1.0";
+  "11.0.0";
 
-const CORRUPTED_RAW_VALUES =
-  Object.freeze([
-    "undefined",
-    "null",
-    "[object Object]",
-  ]);
-
-const SENSITIVE_KEY_RE =
-  /(token|authorization|password|secret|session|otp|code|jwt|bearer|credential)/i;
+const DEFAULT_PREFIX =
+  "onion";
 
 const STORAGE_TEST_KEY =
   "__storage_test__";
+
+const DEFAULT_KIND =
+  "local";
+
+const VALID_KINDS =
+  Object.freeze([
+    "local",
+    "session",
+    "memory",
+  ]);
+
+const CORRUPTED_RAW_VALUES =
+  Object.freeze([
+    "",
+    "undefined",
+    "null",
+    "nan",
+    "[object Object]",
+    "{}",
+    "[]",
+    "\"\"",
+    "''",
+  ]);
+
+const SENSITIVE_KEY_RE =
+  /(token|authorization|password|secret|session|otp|code|jwt|bearer|credential|cookie|csrf|xsrf|mfa|2fa)/i;
+
+const SESSIONISH_KEY_RE =
+  /(session|token|auth|user|role|login|otp|mfa|2fa|post_login)/i;
+
+const LEGACY_EXTRA_KEYS =
+  Object.freeze([
+    "onion_token",
+    "onion_access_token",
+    "onion_refresh_token",
+    "onion_temp_token",
+    "onion_user",
+    "onion_user_id",
+    "onion_user_slug",
+    "onion_user_name",
+    "onion_role",
+    "onion_session_id",
+    "onion_session_user_id",
+    "onion_theme",
+    "onion_lang",
+    "onion_post_login_target",
+
+    "onion.token",
+    "onion.accessToken",
+    "onion.refreshToken",
+    "onion.tempToken",
+    "onion.user",
+    "onion.role",
+    "onion.sessionId",
+    "onion.sessionUserId",
+    "onion.postLoginTarget",
+
+    "token",
+    "accessToken",
+    "access_token",
+    "refreshToken",
+    "refresh_token",
+    "tempToken",
+    "temp_token",
+    "user",
+    "role",
+    "sessionId",
+    "sessionUserId",
+    "postLoginTarget",
+    "post_login_target",
+  ]);
 
 /* =========================================================
    MODULE MEMORY FALLBACK
@@ -61,14 +127,20 @@ const STORAGE_TEST_KEY =
 const memoryStorage =
   new Map();
 
-let storageAvailableCache =
-  null;
+const storageAvailabilityCache =
+  {
+    local:
+      null,
+
+    session:
+      null,
+  };
 
 let lastStorageError =
   null;
 
 /* =========================================================
-   HELPERS
+   BASIC HELPERS
 ========================================================= */
 
 function safeText(value, fallback = "") {
@@ -83,6 +155,10 @@ function safeText(value, fallback = "") {
     String(value).trim();
 
   return text || fallback;
+}
+
+function safeLower(value, fallback = "") {
+  return safeText(value, fallback).toLowerCase();
 }
 
 function isObject(value) {
@@ -114,6 +190,32 @@ function safeNumber(value, fallback = 0) {
     : fallback;
 }
 
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
+function unique(values = []) {
+  const result = [];
+  const seen = new Set();
+
+  for (const value of safeArray(values)) {
+    const clean =
+      safeText(value, "");
+
+    if (
+      clean &&
+      !seen.has(clean)
+    ) {
+      seen.add(clean);
+      result.push(clean);
+    }
+  }
+
+  return result;
+}
+
 function safeWarn(utils, ...args) {
   try {
     utils?.warn?.(
@@ -139,10 +241,15 @@ function safeLog(utils, ...args) {
       ...args
     );
   } catch {}
-}
 
-function safeString(value) {
-  return String(value ?? "");
+  try {
+    if (config?.debug) {
+      console.log(
+        "[Storage]",
+        ...args
+      );
+    }
+  } catch {}
 }
 
 function safeJsonStringify(value, fallback = "") {
@@ -162,6 +269,30 @@ function safeJsonStringify(value, fallback = "") {
   }
 }
 
+function safeJsonParse(raw, fallback = null) {
+  if (
+    raw === null ||
+    raw === undefined
+  ) {
+    return fallback;
+  }
+
+  try {
+    if (typeof safeParse === "function") {
+      return safeParse(
+        raw,
+        fallback
+      );
+    }
+  } catch {}
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
 function isCorruptedRawValue(raw) {
   const value =
     String(raw ?? "").trim();
@@ -169,15 +300,43 @@ function isCorruptedRawValue(raw) {
   return CORRUPTED_RAW_VALUES.includes(value);
 }
 
-function getPrefix() {
+function shouldRemoveOnSet(value) {
+  return (
+    value === undefined ||
+    value === null
+  );
+}
+
+function normalizeKind(kind = DEFAULT_KIND) {
+  const clean =
+    safeLower(kind, DEFAULT_KIND);
+
+  return VALID_KINDS.includes(clean)
+    ? clean
+    : DEFAULT_KIND;
+}
+
+/* =========================================================
+   PREFIX / KEYS
+========================================================= */
+
+function getPrefixRaw() {
   const prefix =
     safeText(
-      config?.storagePrefix,
-      "onion"
+      config?.storagePrefix ||
+        config?.appKey ||
+        config?.appId ||
+        DEFAULT_PREFIX,
+      DEFAULT_PREFIX
     )
-      .replace(/:+$/g, "");
+      .replace(/:+$/g, "")
+      .replace(/^\:+/g, "");
 
-  return `${prefix || "onion"}:`;
+  return prefix || DEFAULT_PREFIX;
+}
+
+function getPrefix() {
+  return `${getPrefixRaw()}:`;
 }
 
 function normalizeStorageKey(key = "") {
@@ -208,38 +367,81 @@ function getNamespacedKey(key = "") {
   }
 
   try {
-    return buildStorageKey(cleanKey);
-  } catch {
-    return `${getPrefix()}${cleanKey}`;
-  }
+    const built =
+      buildStorageKey(cleanKey);
+
+    if (safeText(built, "")) {
+      return built;
+    }
+  } catch {}
+
+  return `${getPrefix()}${cleanKey}`;
 }
 
-function getStorage() {
+function getRawLocalStorageKey(key = "") {
+  return safeText(key, "");
+}
+
+function isCurrentNamespacedKey(key = "") {
+  return isNamespacedKey(
+    safeText(key, "")
+  );
+}
+
+/* =========================================================
+   STORAGE BACKENDS
+========================================================= */
+
+function getStorageObject(kind = DEFAULT_KIND) {
   if (!isBrowser()) {
     return null;
   }
 
+  const finalKind =
+    normalizeKind(kind);
+
   try {
-    return window.localStorage || null;
+    if (finalKind === "local") {
+      return window.localStorage || null;
+    }
+
+    if (finalKind === "session") {
+      return window.sessionStorage || null;
+    }
   } catch (error) {
     lastStorageError =
       error;
 
     return null;
   }
+
+  return null;
 }
 
-function testStorageAvailability(storage) {
+function testStorageAvailability(kind = DEFAULT_KIND) {
+  const finalKind =
+    normalizeKind(kind);
+
+  if (finalKind === "memory") {
+    return true;
+  }
+
+  if (storageAvailabilityCache[finalKind] !== null) {
+    return storageAvailabilityCache[finalKind];
+  }
+
+  const storage =
+    getStorageObject(finalKind);
+
   if (!storage) {
+    storageAvailabilityCache[finalKind] =
+      false;
+
     return false;
   }
 
-  if (storageAvailableCache !== null) {
-    return storageAvailableCache;
-  }
-
   const testKey =
-    `${getPrefix()}${STORAGE_TEST_KEY}`;
+    `${getPrefix()}${STORAGE_TEST_KEY}:${finalKind}`;
 
   try {
     storage.setItem(
@@ -251,7 +453,7 @@ function testStorageAvailability(storage) {
       testKey
     );
 
-    storageAvailableCache =
+    storageAvailabilityCache[finalKind] =
       true;
 
     return true;
@@ -259,7 +461,7 @@ function testStorageAvailability(storage) {
     lastStorageError =
       error;
 
-    storageAvailableCache =
+    storageAvailabilityCache[finalKind] =
       false;
 
     return false;
@@ -267,41 +469,107 @@ function testStorageAvailability(storage) {
 }
 
 function resetStorageAvailabilityCache() {
-  storageAvailableCache =
+  storageAvailabilityCache.local =
+    null;
+
+  storageAvailabilityCache.session =
     null;
 
   return true;
 }
 
-function getUsableStorage() {
-  const storage =
-    getStorage();
+function getUsableStorage(kind = DEFAULT_KIND) {
+  const finalKind =
+    normalizeKind(kind);
 
-  if (!testStorageAvailability(storage)) {
+  if (finalKind === "memory") {
     return null;
   }
 
-  return storage;
+  if (!testStorageAvailability(finalKind)) {
+    return null;
+  }
+
+  return getStorageObject(finalKind);
 }
 
-function shouldRemoveOnSet(value) {
-  return (
-    value === undefined ||
-    value === null
-  );
-}
+function readRawFromStorage(kind, namespacedKey, fallback = null) {
+  const storage =
+    getUsableStorage(kind);
 
-function sanitizeSnapshotValue(key = "", value = "") {
-  if (SENSITIVE_KEY_RE.test(key)) {
-    return "***";
+  if (!storage) {
+    return fallback;
   }
 
   try {
-    return redactTokenInText(value);
-  } catch {
-    return value;
+    const raw =
+      storage.getItem(namespacedKey);
+
+    if (
+      raw === null ||
+      raw === undefined ||
+      isCorruptedRawValue(raw)
+    ) {
+      return fallback;
+    }
+
+    return raw;
+  } catch (error) {
+    lastStorageError =
+      error;
+
+    return fallback;
   }
 }
+
+function writeRawToStorage(kind, namespacedKey, raw) {
+  const storage =
+    getUsableStorage(kind);
+
+  if (!storage) {
+    return false;
+  }
+
+  try {
+    storage.setItem(
+      namespacedKey,
+      raw
+    );
+
+    return true;
+  } catch (error) {
+    lastStorageError =
+      error;
+
+    return false;
+  }
+}
+
+function removeFromStorage(kind, namespacedKey) {
+  const storage =
+    getStorageObject(kind);
+
+  if (!storage) {
+    return false;
+  }
+
+  try {
+    storage.removeItem(
+      namespacedKey
+    );
+
+    return true;
+  } catch (error) {
+    lastStorageError =
+      error;
+
+    return false;
+  }
+}
+
+/* =========================================================
+   MEMORY FALLBACK
+========================================================= */
 
 function readRawFromMemory(namespacedKey, fallback = null) {
   if (!memoryStorage.has(namespacedKey)) {
@@ -351,69 +619,87 @@ function removeFromMemory(namespacedKey) {
   return true;
 }
 
-function getRawLocalStorageKey(key = "") {
-  return safeText(key, "");
+/* =========================================================
+   SNAPSHOT / SANITIZE
+========================================================= */
+
+function sanitizeSnapshotValue(key = "", value = "") {
+  if (SENSITIVE_KEY_RE.test(key)) {
+    return value
+      ? "***"
+      : null;
+  }
+
+  try {
+    return redactTokenInText(
+      String(value ?? "")
+    );
+  } catch {
+    return value;
+  }
 }
 
-function isCurrentNamespacedKey(key = "") {
-  return isNamespacedKey(
-    safeText(key, "")
-  );
+function sanitizeError(error = null) {
+  if (!error) {
+    return null;
+  }
+
+  return {
+    name:
+      safeText(error?.name, "StorageError"),
+
+    message:
+      safeText(
+        error?.message ||
+          error,
+        "Storage error"
+      ),
+  };
 }
 
-function getLegacyKeys() {
-  const fromConfig =
-    Object.values(
-      config?.legacyStorageKeys || {}
-    )
-      .map((item) =>
-        safeText(item, "")
-      )
-      .filter(Boolean);
+function parseStoredRaw(raw, fallback = null) {
+  if (
+    raw === null ||
+    raw === undefined ||
+    isCorruptedRawValue(raw)
+  ) {
+    return fallback;
+  }
 
-  /*
-    Importante:
-    Estas claves son legacy NO namespaced.
-    No se añaden onion:token / onion:user porque esas son claves actuales.
-  */
-  const extra =
-    [
-      "onion_token",
-      "onion_access_token",
-      "onion_refresh_token",
-      "onion_temp_token",
-      "onion_user",
-      "onion_user_id",
-      "onion_user_slug",
-      "onion_user_name",
-      "onion_role",
-      "onion_session_id",
-      "onion_session_user_id",
-      "onion_theme",
-      "onion_lang",
-      "onion_post_login_target",
+  const parsed =
+    safeJsonParse(
+      raw,
+      undefined
+    );
 
-      "token",
-      "accessToken",
-      "refreshToken",
-      "tempToken",
-      "user",
-      "role",
-      "sessionId",
-      "sessionUserId",
-      "postLoginTarget",
-    ];
-
-  return Array.from(
-    new Set([
-      ...fromConfig,
-      ...extra,
-    ])
-  ).filter((key) =>
-    key &&
-    !isCurrentNamespacedKey(key)
-  );
+  return parsed === undefined
+    ? fallback
+    : parsed;
 }
+
+function parseStoredValue(raw, fallback = null) {
+  if (
+    raw === null ||
+    raw === undefined ||
+    isCorruptedRawValue(raw)
+  ) {
+    return fallback;
+  }
+
+  const parsed =
+    safeJsonParse(
+      raw,
+      undefined
+    );
+
+  return parsed === undefined
+    ? raw
+    : parsed;
+}
+
+/* =========================================================
+   KEY COLLECTION
+========================================================= */
 
 function getStorageLength(storage) {
   try {
@@ -427,8 +713,7 @@ function getStorageLength(storage) {
 }
 
 function collectStorageKeys(storage, predicate) {
-  const output =
-    [];
+  const output = [];
 
   if (!storage) {
     return output;
@@ -458,18 +743,21 @@ function collectStorageKeys(storage, predicate) {
   return output;
 }
 
-function parseStoredRaw(raw, fallback = null) {
-  if (
-    raw === null ||
-    raw === undefined ||
-    isCorruptedRawValue(raw)
-  ) {
-    return fallback;
+function getAllBackendKeys(kind = DEFAULT_KIND, predicate = () => true) {
+  const finalKind =
+    normalizeKind(kind);
+
+  if (finalKind === "memory") {
+    return Array.from(memoryStorage.keys())
+      .filter(predicate);
   }
 
-  return safeParse(
-    raw,
-    fallback
+  const storage =
+    getStorageObject(finalKind);
+
+  return collectStorageKeys(
+    storage,
+    predicate
   );
 }
 
@@ -477,57 +765,123 @@ function parseStoredRaw(raw, fallback = null) {
    LEGACY CLEANUP
 ========================================================= */
 
-export function removeLegacySessionKeys(utils) {
-  const storage =
-    getStorage();
+function getConfiguredLegacyKeys() {
+  const legacy =
+    config?.legacyStorageKeys;
 
+  if (!legacy) {
+    return [];
+  }
+
+  if (Array.isArray(legacy)) {
+    return legacy
+      .map((item) => safeText(item, ""))
+      .filter(Boolean);
+  }
+
+  if (isObject(legacy)) {
+    return Object.values(legacy)
+      .flat()
+      .map((item) => safeText(item, ""))
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function getLegacyKeys() {
+  /*
+    Importante:
+    Estas claves son legacy NO namespaced.
+    No se añaden onion:token / onion:user porque esas son claves actuales.
+  */
+  return unique([
+    ...getConfiguredLegacyKeys(),
+    ...LEGACY_EXTRA_KEYS,
+  ]).filter((legacyKey) => (
+    legacyKey &&
+    !isCurrentNamespacedKey(legacyKey)
+  ));
+}
+
+function shouldRemoveLegacyKey(key = "") {
+  const clean =
+    safeText(key, "");
+
+  if (!clean) {
+    return false;
+  }
+
+  if (isCurrentNamespacedKey(clean)) {
+    return false;
+  }
+
+  return (
+    getLegacyKeys().includes(clean) ||
+    (
+      SESSIONISH_KEY_RE.test(clean) &&
+      (
+        clean.startsWith("onion_") ||
+        clean.startsWith("onion.") ||
+        !clean.includes(":")
+      )
+    )
+  );
+}
+
+export function removeLegacySessionKeys(utils) {
   const keys =
     getLegacyKeys();
 
-  let removed =
-    0;
+  let removed = 0;
 
-  try {
-    if (storage) {
-      for (const legacyKey of keys) {
-        const key =
-          getRawLocalStorageKey(legacyKey);
+  for (const kind of [
+    "local",
+    "session",
+  ]) {
+    const storage =
+      getStorageObject(kind);
 
-        if (!key) {
-          continue;
-        }
+    if (!storage) {
+      continue;
+    }
 
-        /*
-          No tocar las claves actuales namespaced.
-        */
-        if (isCurrentNamespacedKey(key)) {
-          continue;
-        }
+    for (const legacyKey of keys) {
+      const key =
+        getRawLocalStorageKey(legacyKey);
 
-        try {
-          storage.removeItem(key);
-          removed += 1;
-        } catch {}
+      if (
+        !key ||
+        isCurrentNamespacedKey(key)
+      ) {
+        continue;
+      }
+
+      try {
+        storage.removeItem(key);
+        removed += 1;
+      } catch (error) {
+        lastStorageError =
+          error;
+
+        safeWarn(
+          utils,
+          "No se pudo borrar clave legacy.",
+          key,
+          error
+        );
       }
     }
-
-    for (const key of keys) {
-      memoryStorage.delete(key);
-    }
-
-    return removed;
-  } catch (error) {
-    lastStorageError =
-      error;
-
-    safeWarn(
-      utils,
-      "No se pudieron borrar claves legacy.",
-      error
-    );
-
-    return removed;
   }
+
+  for (const key of Array.from(memoryStorage.keys())) {
+    if (shouldRemoveLegacyKey(key)) {
+      memoryStorage.delete(key);
+      removed += 1;
+    }
+  }
+
+  return removed;
 }
 
 /* =========================================================
@@ -554,6 +908,9 @@ export function createStorage(utils) {
     clear:
       0,
 
+    repair:
+      0,
+
     errors:
       0,
 
@@ -569,28 +926,40 @@ export function createStorage(utils) {
     localStorageReads:
       0,
 
+    sessionStorageWrites:
+      0,
+
+    sessionStorageReads:
+      0,
+
     lastOperation:
       "",
 
     lastKey:
       "",
 
+    lastKind:
+      "",
+
     lastAt:
       "",
   };
 
-  function touch(operation = "", key = "") {
+  function touch(operation = "", key = "", kind = "") {
     stats.lastOperation =
       operation;
 
     stats.lastKey =
       safeText(key, "");
 
+    stats.lastKind =
+      safeText(kind, "");
+
     stats.lastAt =
       safeIsoDate();
   }
 
-  function recordError(error, operation = "", key = "") {
+  function recordError(error, operation = "", key = "", kind = "") {
     stats.errors += 1;
 
     lastStorageError =
@@ -598,13 +967,17 @@ export function createStorage(utils) {
 
     touch(
       operation,
-      key
+      key,
+      kind
     );
 
     safeWarn(
       utils,
       `Storage error en ${operation}: ${key}`,
-      error
+      {
+        kind,
+        error,
+      }
     );
   }
 
@@ -612,50 +985,112 @@ export function createStorage(utils) {
     return getNamespacedKey(name);
   }
 
-  function getRaw(name, fallback = null) {
+  function resolveKindFromOptions(options = {}) {
+    const opts =
+      isObject(options)
+        ? options
+        : {};
+
+    if (opts.memory === true) {
+      return "memory";
+    }
+
+    if (opts.session === true) {
+      return "session";
+    }
+
+    return normalizeKind(
+      opts.kind ||
+        opts.storage ||
+        DEFAULT_KIND
+    );
+  }
+
+  function incrementReadCounter(kind) {
+    if (kind === "local") {
+      stats.localStorageReads += 1;
+    } else if (kind === "session") {
+      stats.sessionStorageReads += 1;
+    } else {
+      stats.memoryFallbackReads += 1;
+    }
+  }
+
+  function incrementWriteCounter(kind) {
+    if (kind === "local") {
+      stats.localStorageWrites += 1;
+    } else if (kind === "session") {
+      stats.sessionStorageWrites += 1;
+    } else {
+      stats.memoryFallbackWrites += 1;
+    }
+  }
+
+  function getRaw(name, fallback = null, options = {}) {
     const namespacedKey =
       key(name);
 
+    const requestedKind =
+      resolveKindFromOptions(options);
+
     stats.get += 1;
-    touch("getRaw", namespacedKey);
+    touch("getRaw", namespacedKey, requestedKind);
 
-    const storage =
-      getUsableStorage();
+    if (requestedKind === "memory") {
+      incrementReadCounter("memory");
 
-    if (storage) {
-      try {
-        const raw =
-          storage.getItem(namespacedKey);
+      return readRawFromMemory(
+        namespacedKey,
+        fallback
+      );
+    }
 
-        stats.localStorageReads += 1;
+    const raw =
+      readRawFromStorage(
+        requestedKind,
+        namespacedKey,
+        undefined
+      );
 
-        if (
-          raw === null ||
-          raw === undefined ||
-          isCorruptedRawValue(raw)
-        ) {
-          return fallback;
-        }
+    incrementReadCounter(requestedKind);
 
-        /*
-          Mantener memoria sincronizada con localStorage válido.
-        */
+    if (raw !== undefined) {
+      writeRawToMemory(
+        namespacedKey,
+        raw
+      );
+
+      return raw;
+    }
+
+    /*
+      Si se pidió local y no existe, permitimos fallback a session
+      sólo cuando options.fallbackSession !== false.
+    */
+    if (
+      requestedKind === "local" &&
+      options?.fallbackSession !== false
+    ) {
+      const sessionRaw =
+        readRawFromStorage(
+          "session",
+          namespacedKey,
+          undefined
+        );
+
+      incrementReadCounter("session");
+
+      if (sessionRaw !== undefined) {
         writeRawToMemory(
           namespacedKey,
-          raw
+          sessionRaw
         );
 
-        return raw;
-      } catch (error) {
-        recordError(
-          error,
-          "getRaw",
-          namespacedKey
-        );
+        return sessionRaw;
       }
     }
 
-    stats.memoryFallbackReads += 1;
+    incrementReadCounter("memory");
 
     return readRawFromMemory(
       namespacedKey,
@@ -663,11 +1098,26 @@ export function createStorage(utils) {
     );
   }
 
-  function get(name, fallback = null) {
+  function get(name, fallback = null, options = {}) {
     const raw =
       getRaw(
         name,
-        null
+        null,
+        options
+      );
+
+    return parseStoredValue(
+      raw,
+      fallback
+    );
+  }
+
+  function getJson(name, fallback = null, options = {}) {
+    const raw =
+      getRaw(
+        name,
+        null,
+        options
       );
 
     return parseStoredRaw(
@@ -676,38 +1126,46 @@ export function createStorage(utils) {
     );
   }
 
-  function setRaw(name, value) {
+  function setRaw(name, value, options = {}) {
     const namespacedKey =
       key(name);
 
+    const requestedKind =
+      resolveKindFromOptions(options);
+
     stats.set += 1;
-    touch("setRaw", namespacedKey);
+    touch("setRaw", namespacedKey, requestedKind);
 
     if (shouldRemoveOnSet(value)) {
-      return remove(name);
+      return remove(
+        name,
+        options
+      );
     }
 
     const raw =
-      safeString(value);
+      String(value ?? "");
 
     if (
       !raw ||
       isCorruptedRawValue(raw)
     ) {
-      return remove(name);
+      return remove(
+        name,
+        options
+      );
     }
 
-    const storage =
-      getUsableStorage();
-
-    if (storage) {
-      try {
-        storage.setItem(
+    if (requestedKind !== "memory") {
+      const ok =
+        writeRawToStorage(
+          requestedKind,
           namespacedKey,
           raw
         );
 
-        stats.localStorageWrites += 1;
+      if (ok) {
+        incrementWriteCounter(requestedKind);
 
         writeRawToMemory(
           namespacedKey,
@@ -715,16 +1173,17 @@ export function createStorage(utils) {
         );
 
         return true;
-      } catch (error) {
-        recordError(
-          error,
-          "setRaw",
-          namespacedKey
-        );
       }
+
+      recordError(
+        lastStorageError,
+        "setRaw",
+        namespacedKey,
+        requestedKind
+      );
     }
 
-    stats.memoryFallbackWrites += 1;
+    incrementWriteCounter("memory");
 
     return writeRawToMemory(
       namespacedKey,
@@ -732,15 +1191,22 @@ export function createStorage(utils) {
     );
   }
 
-  function set(name, value) {
+  function set(name, value, options = {}) {
     const namespacedKey =
       key(name);
 
     stats.set += 1;
-    touch("set", namespacedKey);
+    touch(
+      "set",
+      namespacedKey,
+      resolveKindFromOptions(options)
+    );
 
     if (shouldRemoveOnSet(value)) {
-      return remove(name);
+      return remove(
+        name,
+        options
+      );
     }
 
     const raw =
@@ -756,86 +1222,90 @@ export function createStorage(utils) {
       return false;
     }
 
-    const storage =
-      getUsableStorage();
-
-    if (storage) {
-      try {
-        storage.setItem(
-          namespacedKey,
-          raw
-        );
-
-        stats.localStorageWrites += 1;
-
-        writeRawToMemory(
-          namespacedKey,
-          raw
-        );
-
-        return true;
-      } catch (error) {
-        recordError(
-          error,
-          "set",
-          namespacedKey
-        );
-      }
-    }
-
-    stats.memoryFallbackWrites += 1;
-
-    return writeRawToMemory(
-      namespacedKey,
-      raw
+    return setRaw(
+      name,
+      raw,
+      options
     );
   }
 
-  function remove(name) {
+  function setJson(name, value, options = {}) {
+    return set(
+      name,
+      value,
+      options
+    );
+  }
+
+  function remove(name, options = {}) {
     const namespacedKey =
       key(name);
 
+    const requestedKind =
+      resolveKindFromOptions(options);
+
     stats.remove += 1;
-    touch("remove", namespacedKey);
+    touch("remove", namespacedKey, requestedKind);
 
-    const storage =
-      getStorage();
-
-    try {
-      storage?.removeItem?.(
-        namespacedKey
-      );
-    } catch (error) {
-      recordError(
-        error,
-        "remove",
+    if (
+      requestedKind === "local" ||
+      options?.all === true
+    ) {
+      removeFromStorage(
+        "local",
         namespacedKey
       );
     }
 
-    removeFromMemory(
-      namespacedKey
-    );
+    if (
+      requestedKind === "session" ||
+      options?.all === true ||
+      options?.sessionAlso === true
+    ) {
+      removeFromStorage(
+        "session",
+        namespacedKey
+      );
+    }
+
+    if (
+      requestedKind === "memory" ||
+      options?.all === true ||
+      options?.memoryAlso !== false
+    ) {
+      removeFromMemory(
+        namespacedKey
+      );
+    }
 
     return true;
   }
 
-  function has(name) {
+  function has(name, options = {}) {
     const namespacedKey =
       key(name);
 
+    const requestedKind =
+      resolveKindFromOptions(options);
+
     stats.has += 1;
-    touch("has", namespacedKey);
+    touch("has", namespacedKey, requestedKind);
+
+    if (requestedKind === "memory") {
+      return memoryStorage.has(
+        namespacedKey
+      );
+    }
 
     const storage =
-      getUsableStorage();
+      getUsableStorage(requestedKind);
 
     if (storage) {
       try {
         const raw =
           storage.getItem(namespacedKey);
 
-        stats.localStorageReads += 1;
+        incrementReadCounter(requestedKind);
 
         return (
           raw !== null &&
@@ -846,7 +1316,8 @@ export function createStorage(utils) {
         recordError(
           error,
           "has",
-          namespacedKey
+          namespacedKey,
+          requestedKind
         );
       }
     }
@@ -862,88 +1333,184 @@ export function createStorage(utils) {
         ? options
         : {};
 
-    stats.keys += 1;
+    const requestedKind =
+      resolveKindFromOptions(opts);
+
+    const includeValues =
+      Boolean(opts.includeValues);
 
     const prefix =
       opts.prefix
         ? getNamespacedKey(opts.prefix)
         : getPrefix();
 
-    const includeValues =
-      Boolean(opts.includeValues);
+    stats.keys += 1;
+    touch("keys", prefix, requestedKind);
 
-    const output =
-      [];
+    const output = [];
 
-    const storage =
-      getStorage();
-
-    try {
-      if (storage) {
-        const storageKeys =
-          collectStorageKeys(
-            storage,
-            (currentKey) =>
-              currentKey.startsWith(prefix)
-          );
-
-        for (const currentKey of storageKeys) {
-          if (includeValues) {
-            output.push({
-              key:
-                currentKey,
-
-              value:
-                sanitizeSnapshotValue(
-                  currentKey,
-                  storage.getItem(currentKey)
-                ),
-            });
-          } else {
-            output.push(currentKey);
-          }
-        }
-      }
-    } catch (error) {
-      recordError(
-        error,
-        "keys",
-        prefix
-      );
-    }
-
-    for (const currentKey of memoryStorage.keys()) {
-      if (
-        currentKey.startsWith(prefix) &&
-        !output.some((item) =>
+    function pushKey(currentKey, valueGetter = null) {
+      const exists =
+        output.some((item) =>
           typeof item === "string"
             ? item === currentKey
             : item.key === currentKey
-        )
-      ) {
-        if (includeValues) {
-          output.push({
-            key:
-              currentKey,
+        );
 
-            value:
-              sanitizeSnapshotValue(
-                currentKey,
-                memoryStorage.get(currentKey)
-              ),
-          });
-        } else {
-          output.push(currentKey);
+      if (exists) {
+        return;
+      }
+
+      if (includeValues) {
+        let raw = "";
+
+        try {
+          raw = isFunction(valueGetter)
+            ? valueGetter()
+            : "";
+        } catch {
+          raw = "";
+        }
+
+        output.push({
+          key:
+            currentKey,
+
+          value:
+            sanitizeSnapshotValue(
+              currentKey,
+              raw
+            ),
+        });
+      } else {
+        output.push(currentKey);
+      }
+    }
+
+    const kindsToRead =
+      requestedKind === "memory"
+        ? ["memory"]
+        : opts.all === true
+          ? ["local", "session", "memory"]
+          : [requestedKind, "memory"];
+
+    for (const kind of unique(kindsToRead)) {
+      if (kind === "memory") {
+        for (const currentKey of memoryStorage.keys()) {
+          if (currentKey.startsWith(prefix)) {
+            pushKey(
+              currentKey,
+              () => memoryStorage.get(currentKey)
+            );
+          }
+        }
+
+        continue;
+      }
+
+      const storage =
+        getStorageObject(kind);
+
+      const backendKeys =
+        collectStorageKeys(
+          storage,
+          (currentKey) =>
+            currentKey.startsWith(prefix)
+        );
+
+      for (const currentKey of backendKeys) {
+        pushKey(
+          currentKey,
+          () => storage.getItem(currentKey)
+        );
+      }
+    }
+
+    return output;
+  }
+
+  function entries(options = {}) {
+    return keys({
+      ...options,
+      includeValues:
+        true,
+    });
+  }
+
+  function clearNamespace(namespace = "", options = {}) {
+    const opts =
+      isObject(options)
+        ? options
+        : {};
+
+    const prefix =
+      namespace
+        ? getNamespacedKey(namespace)
+        : getPrefix();
+
+    const requestedKind =
+      resolveKindFromOptions(opts);
+
+    const kindsToClear =
+      opts.all === true
+        ? ["local", "session", "memory"]
+        : requestedKind === "memory"
+          ? ["memory"]
+          : [requestedKind, "memory"];
+
+    let removed = 0;
+
+    stats.clear += 1;
+    touch("clearNamespace", prefix, requestedKind);
+
+    for (const kind of unique(kindsToClear)) {
+      if (kind === "memory") {
+        for (const currentKey of Array.from(memoryStorage.keys())) {
+          if (currentKey.startsWith(prefix)) {
+            memoryStorage.delete(currentKey);
+            removed += 1;
+          }
+        }
+
+        continue;
+      }
+
+      const storage =
+        getStorageObject(kind);
+
+      const keysToRemove =
+        collectStorageKeys(
+          storage,
+          (currentKey) =>
+            currentKey.startsWith(prefix)
+        );
+
+      for (const currentKey of keysToRemove) {
+        try {
+          storage.removeItem(currentKey);
+          removed += 1;
+        } catch (error) {
+          recordError(
+            error,
+            "clearNamespace",
+            currentKey,
+            kind
+          );
         }
       }
     }
 
-    touch(
-      "keys",
-      prefix
-    );
+    return {
+      ok:
+        true,
 
-    return output;
+      removed,
+
+      prefix,
+
+      kind:
+        requestedKind,
+    };
   }
 
   function clearAll(options = {}) {
@@ -955,48 +1522,18 @@ export function createStorage(utils) {
     const includeLegacy =
       opts.includeLegacy !== false;
 
-    const storage =
-      getStorage();
-
-    const prefix =
-      getPrefix();
+    const result =
+      clearNamespace(
+        "",
+        {
+          ...opts,
+          all:
+            opts.all !== false,
+        }
+      );
 
     let removed =
-      0;
-
-    stats.clear += 1;
-
-    try {
-      if (storage) {
-        const keysToRemove =
-          collectStorageKeys(
-            storage,
-            (currentKey) =>
-              currentKey.startsWith(prefix)
-          );
-
-        for (const currentKey of keysToRemove) {
-          storage.removeItem(
-            currentKey
-          );
-
-          removed += 1;
-        }
-      }
-    } catch (error) {
-      recordError(
-        error,
-        "clearAll",
-        prefix
-      );
-    }
-
-    for (const currentKey of Array.from(memoryStorage.keys())) {
-      if (currentKey.startsWith(prefix)) {
-        memoryStorage.delete(currentKey);
-        removed += 1;
-      }
-    }
+      result.removed || 0;
 
     if (includeLegacy) {
       removed += removeLegacySessionKeys(
@@ -1004,86 +1541,10 @@ export function createStorage(utils) {
       );
     }
 
-    touch(
-      "clearAll",
-      prefix
-    );
-
     return {
-      ok:
-        true,
-
+      ...result,
       removed,
-
-      prefix,
-
       includeLegacy,
-    };
-  }
-
-  function clearNamespace(namespace = "") {
-    const cleanNamespace =
-      safeText(namespace, "");
-
-    if (!cleanNamespace) {
-      return clearAll();
-    }
-
-    const prefix =
-      getNamespacedKey(cleanNamespace);
-
-    const storage =
-      getStorage();
-
-    let removed =
-      0;
-
-    stats.clear += 1;
-
-    try {
-      if (storage) {
-        const keysToRemove =
-          collectStorageKeys(
-            storage,
-            (currentKey) =>
-              currentKey.startsWith(prefix)
-          );
-
-        for (const currentKey of keysToRemove) {
-          storage.removeItem(
-            currentKey
-          );
-
-          removed += 1;
-        }
-      }
-    } catch (error) {
-      recordError(
-        error,
-        "clearNamespace",
-        prefix
-      );
-    }
-
-    for (const currentKey of Array.from(memoryStorage.keys())) {
-      if (currentKey.startsWith(prefix)) {
-        memoryStorage.delete(currentKey);
-        removed += 1;
-      }
-    }
-
-    touch(
-      "clearNamespace",
-      prefix
-    );
-
-    return {
-      ok:
-        true,
-
-      removed,
-
-      prefix,
     };
   }
 
@@ -1093,27 +1554,53 @@ export function createStorage(utils) {
         ? options
         : {};
 
+    const requestedKind =
+      resolveKindFromOptions(opts);
+
     const prefix =
       opts.prefix
         ? getNamespacedKey(opts.prefix)
         : getPrefix();
 
-    const storage =
-      getStorage();
+    const kindsToRepair =
+      opts.all === true
+        ? ["local", "session", "memory"]
+        : requestedKind === "memory"
+          ? ["memory"]
+          : [requestedKind, "memory"];
 
-    let repaired =
-      0;
+    let repaired = 0;
 
-    try {
-      if (storage) {
-        const keysToCheck =
-          collectStorageKeys(
-            storage,
-            (currentKey) =>
-              currentKey.startsWith(prefix)
-          );
+    stats.repair += 1;
+    touch("repairCorrupted", prefix, requestedKind);
 
-        for (const currentKey of keysToCheck) {
+    for (const kind of unique(kindsToRepair)) {
+      if (kind === "memory") {
+        for (const [currentKey, raw] of Array.from(memoryStorage.entries())) {
+          if (
+            currentKey.startsWith(prefix) &&
+            isCorruptedRawValue(raw)
+          ) {
+            memoryStorage.delete(currentKey);
+            repaired += 1;
+          }
+        }
+
+        continue;
+      }
+
+      const storage =
+        getStorageObject(kind);
+
+      const keysToCheck =
+        collectStorageKeys(
+          storage,
+          (currentKey) =>
+            currentKey.startsWith(prefix)
+        );
+
+      for (const currentKey of keysToCheck) {
+        try {
           const raw =
             storage.getItem(currentKey);
 
@@ -1121,30 +1608,16 @@ export function createStorage(utils) {
             storage.removeItem(currentKey);
             repaired += 1;
           }
+        } catch (error) {
+          recordError(
+            error,
+            "repairCorrupted",
+            currentKey,
+            kind
+          );
         }
       }
-    } catch (error) {
-      recordError(
-        error,
-        "repairCorrupted",
-        prefix
-      );
     }
-
-    for (const [currentKey, raw] of Array.from(memoryStorage.entries())) {
-      if (
-        currentKey.startsWith(prefix) &&
-        isCorruptedRawValue(raw)
-      ) {
-        memoryStorage.delete(currentKey);
-        repaired += 1;
-      }
-    }
-
-    touch(
-      "repairCorrupted",
-      prefix
-    );
 
     return {
       ok:
@@ -1153,7 +1626,69 @@ export function createStorage(utils) {
       repaired,
 
       prefix,
+
+      kind:
+        requestedKind,
     };
+  }
+
+  function migrateLegacyKey(legacyKey = "", currentKey = "", options = {}) {
+    const fromKey =
+      safeText(legacyKey, "");
+
+    const toKey =
+      safeText(currentKey, "");
+
+    if (
+      !fromKey ||
+      !toKey ||
+      isCurrentNamespacedKey(fromKey)
+    ) {
+      return false;
+    }
+
+    const requestedKind =
+      resolveKindFromOptions(options);
+
+    const storage =
+      getStorageObject(requestedKind);
+
+    let raw = null;
+
+    try {
+      raw =
+        storage?.getItem?.(fromKey) ?? null;
+    } catch (error) {
+      recordError(
+        error,
+        "migrateLegacyKey:read",
+        fromKey,
+        requestedKind
+      );
+    }
+
+    if (
+      raw === null ||
+      raw === undefined ||
+      isCorruptedRawValue(raw)
+    ) {
+      return false;
+    }
+
+    const ok =
+      setRaw(
+        toKey,
+        raw,
+        options
+      );
+
+    if (ok && options?.removeLegacy !== false) {
+      try {
+        storage?.removeItem?.(fromKey);
+      } catch {}
+    }
+
+    return ok;
   }
 
   function getSnapshot(options = {}) {
@@ -1168,9 +1703,6 @@ export function createStorage(utils) {
     const includeValues =
       opts.includeValues === true;
 
-    const storage =
-      getStorage();
-
     return {
       version:
         STORAGE_VERSION,
@@ -1178,11 +1710,17 @@ export function createStorage(utils) {
       browser:
         isBrowser(),
 
-      localStorageAvailable:
-        testStorageAvailability(storage),
-
       prefix:
         getPrefix(),
+
+      prefixRaw:
+        getPrefixRaw(),
+
+      localStorageAvailable:
+        testStorageAvailability("local"),
+
+      sessionStorageAvailable:
+        testStorageAvailability("session"),
 
       memoryFallbackSize:
         memoryStorage.size,
@@ -1190,6 +1728,8 @@ export function createStorage(utils) {
       keys:
         includeKeys
           ? keys({
+              all:
+                true,
               includeValues,
             })
           : [],
@@ -1199,15 +1739,9 @@ export function createStorage(utils) {
       },
 
       lastError:
-        lastStorageError
-          ? {
-              name:
-                lastStorageError.name || "StorageError",
-
-              message:
-                lastStorageError.message || String(lastStorageError),
-            }
-          : null,
+        sanitizeError(
+          lastStorageError
+        ),
 
       at:
         safeIsoDate(),
@@ -1218,21 +1752,37 @@ export function createStorage(utils) {
     utils,
     "Storage ready.",
     {
+      version:
+        STORAGE_VERSION,
+
       prefix:
         getPrefix(),
     }
   );
 
   return {
+    version:
+      STORAGE_VERSION,
+
+    prefix:
+      getPrefix(),
+
+    prefixRaw:
+      getPrefixRaw(),
+
     key,
     getNamespacedKey:
+      key,
+    normalizeKey:
       key,
 
     get,
     getRaw,
+    getJson,
 
     set,
     setRaw,
+    setJson,
 
     remove,
     delete:
@@ -1243,6 +1793,7 @@ export function createStorage(utils) {
     has,
 
     keys,
+    entries,
 
     clearAll,
     clear:
@@ -1251,6 +1802,8 @@ export function createStorage(utils) {
     clearNamespace,
 
     repairCorrupted,
+
+    migrateLegacyKey,
 
     removeLegacySessionKeys() {
       return removeLegacySessionKeys(
@@ -1262,6 +1815,9 @@ export function createStorage(utils) {
 
     getSnapshot,
     getDebugSnapshot:
+      getSnapshot,
+
+    snapshot:
       getSnapshot,
   };
 }

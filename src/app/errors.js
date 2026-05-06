@@ -3,7 +3,7 @@
    Archivo: src/app/errors.js
 
    ONION SUPPORT · APP ERRORS
-   BOOT ERROR UX · GLOBAL ERROR GUARD · TELEMETRY · RECOVERY · EXTREME 10/10
+   BOOT ERROR UX · GLOBAL ERROR GUARD · TELEMETRY · RECOVERY · EXTREME 12/10
 
    RESPONSABILIDADES:
    - Renderizar pantalla de error de boot.
@@ -20,9 +20,21 @@
    REGLAS:
    - Sin inline handlers.
    - Sin CSS inline.
+   - Sin innerHTML.
    - Sin throws accidentales.
    - safeEmit usa bus interno o window, no ambos.
    - Boot error debe funcionar aunque falten Router/Auth/Toast/AppCore.
+
+   HARDENING 12/10:
+   - DOM seguro por createElement/textContent.
+   - Estado app-fatal coherente en html/body/shell/main/view.
+   - Limpieza de loader incluso si loader.js no responde.
+   - Recovery actions blindadas.
+   - Global handlers idempotentes.
+   - Resource errors diferenciados.
+   - Rejection/object/error/string normalization.
+   - Snapshot sin tokens.
+   - Debug API pública segura.
 ========================================================= */
 
 import { escapeHtml } from "./helpers.js";
@@ -36,6 +48,8 @@ import {
 /* =========================================================
    CONSTANTS
 ========================================================= */
+
+const APP_ERRORS_VERSION = "12.0.0";
 
 const DEFAULT_ERROR_SCOPE =
   APP_SCOPES?.errors ||
@@ -58,7 +72,17 @@ const FALLBACK_BOOT_ERROR_MESSAGE =
   "No se pudo iniciar la aplicación correctamente.";
 
 const LOGIN_PATH = "/login";
-const VIEW_CONTAINER_SELECTOR = "#view-container";
+
+const DOM_IDS = Object.freeze({
+  appLoader: "app-loader",
+  appShell: "app-shell",
+  mainContent: "main-content",
+  appContent: "app-content",
+  viewContainer: "view-container",
+});
+
+const VIEW_CONTAINER_SELECTOR =
+  "#view-container,[data-view-root],[data-router-view],[data-view-container='true'],.view-container";
 
 const ERROR_ACTIONS = Object.freeze({
   retry: "retry",
@@ -72,11 +96,20 @@ const TOKEN_PARAM_NAMES = Object.freeze([
   "activateToken",
   "resetToken",
   "passwordResetToken",
+  "confirmToken",
   "code",
   "t",
   "access_token",
   "refresh_token",
   "id_token",
+  "tempToken",
+  "temp_token",
+  "temporaryToken",
+  "temporary_token",
+  "twoFactorToken",
+  "two_factor_token",
+  "mfaToken",
+  "mfa_token",
 ]);
 
 const ERROR_EVENTS = Object.freeze({
@@ -102,6 +135,35 @@ const ERROR_EVENTS = Object.freeze({
     "app:errors:handlers:unbound",
 });
 
+const FATAL_CLASSES = Object.freeze([
+  "app-fatal",
+]);
+
+const LOADING_CLASSES = Object.freeze([
+  "loading",
+  "app-loading",
+  "app-booting",
+  "is-loading",
+  "is-booting",
+]);
+
+const READY_CLASSES = Object.freeze([
+  "app-ready",
+]);
+
+const LOADER_VISIBLE_CLASSES = Object.freeze([
+  "is-visible",
+  "is-entering",
+  "is-leaving",
+  "loader-visible",
+]);
+
+const LOADER_HIDDEN_CLASSES = Object.freeze([
+  "is-hidden",
+  "has-hidden",
+  "loader-hidden",
+]);
+
 /* =========================================================
    INTERNAL STATE
 ========================================================= */
@@ -121,6 +183,7 @@ const errorState = {
   lastRenderAt: 0,
 
   handling: false,
+  rendering: false,
 
   total: 0,
   recent: [],
@@ -153,7 +216,8 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value).trim();
 
   return text || fallback;
 }
@@ -204,11 +268,9 @@ function safeInvoke(fn, thisArg = null, args = []) {
 }
 
 function safeMethod(target, methodName, args = []) {
-  const object = ensureObject(target);
-
   return safeInvoke(
-    object?.[methodName],
-    object,
+    target?.[methodName],
+    target,
     args
   );
 }
@@ -238,9 +300,12 @@ function safeDefineValue(target, key, value) {
       key,
       {
         value,
-        configurable: true,
-        enumerable: false,
-        writable: true,
+        configurable:
+          true,
+        enumerable:
+          false,
+        writable:
+          true,
       }
     );
 
@@ -248,6 +313,15 @@ function safeDefineValue(target, key, value) {
   } catch {}
 
   return false;
+}
+
+function safeNumber(value, fallback = 0) {
+  const number =
+    Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : fallback;
 }
 
 /* =========================================================
@@ -264,7 +338,8 @@ function localEscapeHtml(value = "") {
 }
 
 function safeEscapeHtml(AppCore, value = "") {
-  const text = safeText(value, "");
+  const text =
+    safeText(value, "");
 
   try {
     if (isFunction(escapeHtml)) {
@@ -273,7 +348,8 @@ function safeEscapeHtml(AppCore, value = "") {
           ? escapeHtml(AppCore, text)
           : escapeHtml(text);
 
-      const clean = safeText(result, "");
+      const clean =
+        safeText(result, "");
 
       if (
         clean &&
@@ -350,7 +426,8 @@ function safeWindowDispatch(eventName, payload = {}) {
   try {
     window.dispatchEvent(
       new CustomEvent(eventName, {
-        detail: payload,
+        detail:
+          payload,
       })
     );
 
@@ -361,13 +438,15 @@ function safeWindowDispatch(eventName, payload = {}) {
 }
 
 function safeEmit(AppCore, eventName, payload = {}, options = {}) {
-  const cleanEventName = safeText(eventName, "");
+  const cleanEventName =
+    safeText(eventName, "");
 
   if (!cleanEventName) {
     return false;
   }
 
-  const opts = ensureObject(options);
+  const opts =
+    ensureObject(options);
 
   let busAvailable = false;
   let busEmitted = false;
@@ -375,7 +454,12 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   try {
     if (isFunction(AppCore?.events?.emit)) {
       busAvailable = true;
-      AppCore.events.emit(cleanEventName, payload);
+
+      AppCore.events.emit(
+        cleanEventName,
+        payload
+      );
+
       busEmitted = true;
     }
   } catch {}
@@ -388,7 +472,13 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
     opts.window === true ||
     (!busAvailable && isBrowser())
   ) {
-    return safeWindowDispatch(cleanEventName, payload) || busEmitted;
+    return (
+      safeWindowDispatch(
+        cleanEventName,
+        payload
+      ) ||
+      busEmitted
+    );
   }
 
   return busEmitted;
@@ -396,25 +486,53 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
 
 function safeSetError(AppCore, snapshot = null) {
   const payload = {
-    hasError: Boolean(snapshot),
-    lastError: snapshot,
+    hasError:
+      Boolean(snapshot),
+
+    error:
+      snapshot,
+
+    lastError:
+      snapshot,
   };
 
   try {
     AppCore?.setError?.(snapshot);
   } catch {}
 
-  safeMethod(AppCore, "setState", [payload]);
-  safeMethod(AppCore, "patchState", [payload]);
+  try {
+    AppCore?.setState?.(
+      payload,
+      {
+        source:
+          "app:errors",
+      }
+    );
+  } catch {}
+
+  try {
+    AppCore?.patchState?.(
+      payload,
+      {
+        source:
+          "app:errors",
+      }
+    );
+  } catch {}
 
   try {
     if (
       AppCore?.state &&
       typeof AppCore.state === "object"
     ) {
-      Object.assign(AppCore.state, payload);
+      Object.assign(
+        AppCore.state,
+        payload
+      );
     }
   } catch {}
+
+  return payload;
 }
 
 /* =========================================================
@@ -422,7 +540,8 @@ function safeSetError(AppCore, snapshot = null) {
 ========================================================= */
 
 function redactTokenInText(value = "") {
-  let output = safeText(value, "");
+  let output =
+    safeText(value, "");
 
   if (!output) {
     return "";
@@ -430,32 +549,39 @@ function redactTokenInText(value = "") {
 
   for (const name of TOKEN_PARAM_NAMES) {
     try {
-      output = output.replace(
-        new RegExp(`([?&#]${name}=)([^&#\\s]+)`, "gi"),
-        "$1***"
-      );
+      const escaped =
+        String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+      output =
+        output.replace(
+          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
     } catch {}
   }
 
   try {
-    output = output.replace(
-      /(\/activate-account\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
+    output =
+      output.replace(
+        /(\/activate-account\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
   } catch {}
 
   try {
-    output = output.replace(
-      /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
+    output =
+      output.replace(
+        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
   } catch {}
 
   try {
-    output = output.replace(
-      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-      "$1***"
-    );
+    output =
+      output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
   } catch {}
 
   return output;
@@ -482,7 +608,8 @@ function extractErrorCandidate(error = null) {
 }
 
 function getErrorName(error = null) {
-  const candidate = extractErrorCandidate(error);
+  const candidate =
+    extractErrorCandidate(error);
 
   if (!candidate) {
     return "Error";
@@ -500,7 +627,8 @@ function getErrorName(error = null) {
 }
 
 function getErrorCode(error = null) {
-  const candidate = extractErrorCandidate(error);
+  const candidate =
+    extractErrorCandidate(error);
 
   if (
     !candidate ||
@@ -522,7 +650,8 @@ function getErrorCode(error = null) {
 }
 
 function getRawErrorMessage(error = null, fallback = FALLBACK_ERROR_MESSAGE) {
-  const candidate = extractErrorCandidate(error);
+  const candidate =
+    extractErrorCandidate(error);
 
   if (!candidate) {
     return fallback;
@@ -547,7 +676,8 @@ function getRawErrorMessage(error = null, fallback = FALLBACK_ERROR_MESSAGE) {
 }
 
 function getErrorStack(error = null) {
-  const candidate = extractErrorCandidate(error);
+  const candidate =
+    extractErrorCandidate(error);
 
   if (
     !candidate ||
@@ -562,7 +692,8 @@ function getErrorStack(error = null) {
 }
 
 function getErrorUrl(error = null) {
-  const candidate = extractErrorCandidate(error);
+  const candidate =
+    extractErrorCandidate(error);
 
   if (!candidate) {
     return "";
@@ -579,9 +710,10 @@ function getErrorUrl(error = null) {
 }
 
 function getFriendlyErrorMessage(rawMessage = "", fallback = FALLBACK_ERROR_MESSAGE) {
-  const message = redactTokenInText(
-    safeText(rawMessage, fallback)
-  );
+  const message =
+    redactTokenInText(
+      safeText(rawMessage, fallback)
+    );
 
   if (
     /failed to fetch dynamically imported module/i.test(message) ||
@@ -612,13 +744,27 @@ function getFriendlyErrorMessage(rawMessage = "", fallback = FALLBACK_ERROR_MESS
     return "La sesión no es válida o no tiene permisos suficientes. Inicia sesión de nuevo.";
   }
 
+  if (
+    /quotaexceedederror/i.test(message) ||
+    /quota exceeded/i.test(message)
+  ) {
+    return "El navegador no pudo guardar datos locales. Libera espacio o limpia el almacenamiento del sitio.";
+  }
+
   return message;
 }
 
 export function resolveErrorMessage(error = null, fallback = FALLBACK_ERROR_MESSAGE) {
-  const raw = getRawErrorMessage(error, fallback);
+  const raw =
+    getRawErrorMessage(
+      error,
+      fallback
+    );
 
-  return getFriendlyErrorMessage(raw, fallback);
+  return getFriendlyErrorMessage(
+    raw,
+    fallback
+  );
 }
 
 export function createErrorSnapshot({
@@ -628,43 +774,67 @@ export function createErrorSnapshot({
   boot = false,
   handled = false,
 } = {}) {
-  const atMs = now();
+  const atMs =
+    now();
 
-  const rawMessage = getRawErrorMessage(
-    error,
-    boot
-      ? FALLBACK_BOOT_ERROR_MESSAGE
-      : FALLBACK_ERROR_MESSAGE
-  );
+  const rawMessage =
+    getRawErrorMessage(
+      error,
+      boot
+        ? FALLBACK_BOOT_ERROR_MESSAGE
+        : FALLBACK_ERROR_MESSAGE
+    );
 
-  const message = getFriendlyErrorMessage(
-    rawMessage,
-    boot
-      ? FALLBACK_BOOT_ERROR_MESSAGE
-      : FALLBACK_ERROR_MESSAGE
-  );
+  const message =
+    getFriendlyErrorMessage(
+      rawMessage,
+      boot
+        ? FALLBACK_BOOT_ERROR_MESSAGE
+        : FALLBACK_ERROR_MESSAGE
+    );
 
-  const stack = getErrorStack(error);
+  const stack =
+    getErrorStack(error);
 
   return {
-    source: safeText(source, "runtime"),
-    severity: safeText(severity, "error"),
+    version:
+      APP_ERRORS_VERSION,
 
-    boot: Boolean(boot),
-    handled: Boolean(handled),
+    source:
+      safeText(source, "runtime"),
 
-    name: getErrorName(error),
-    code: getErrorCode(error),
+    severity:
+      safeText(severity, "error"),
 
-    message: redactTokenInText(message),
-    rawMessage: redactTokenInText(rawMessage),
+    boot:
+      Boolean(boot),
 
-    url: getErrorUrl(error),
+    handled:
+      Boolean(handled),
+
+    name:
+      getErrorName(error),
+
+    code:
+      getErrorCode(error),
+
+    message:
+      redactTokenInText(message),
+
+    rawMessage:
+      redactTokenInText(rawMessage),
+
+    url:
+      getErrorUrl(error),
 
     stack,
-    hasStack: Boolean(stack),
 
-    at: safeIsoDate(atMs),
+    hasStack:
+      Boolean(stack),
+
+    at:
+      safeIsoDate(atMs),
+
     atMs,
   };
 }
@@ -674,11 +844,16 @@ function pushRecentError(snapshot = {}) {
 
   errorState.recent.unshift({
     ...snapshot,
-    index: errorState.total,
+    index:
+      errorState.total,
   });
 
   if (errorState.recent.length > MAX_RECENT_ERRORS) {
-    errorState.recent = errorState.recent.slice(0, MAX_RECENT_ERRORS);
+    errorState.recent =
+      errorState.recent.slice(
+        0,
+        MAX_RECENT_ERRORS
+      );
   }
 }
 
@@ -690,13 +865,18 @@ function getThrottleKey(snapshot = {}) {
     snapshot.message,
     snapshot.url,
   ]
-    .map((item) => safeText(item, ""))
+    .map((item) =>
+      safeText(item, "")
+    )
     .join("|");
 }
 
 function shouldThrottleToast(snapshot = {}) {
-  const key = getThrottleKey(snapshot);
-  const time = now();
+  const key =
+    getThrottleKey(snapshot);
+
+  const time =
+    now();
 
   if (
     errorState.lastToastKey === key &&
@@ -712,8 +892,11 @@ function shouldThrottleToast(snapshot = {}) {
 }
 
 function shouldThrottleRender(snapshot = {}) {
-  const key = getThrottleKey(snapshot);
-  const time = now();
+  const key =
+    getThrottleKey(snapshot);
+
+  const time =
+    now();
 
   if (
     errorState.lastRenderKey === key &&
@@ -733,12 +916,14 @@ function shouldThrottleRender(snapshot = {}) {
 ========================================================= */
 
 function safeToastError(Toast, message, options = {}) {
-  const cleanMessage = redactTokenInText(
-    safeText(message, FALLBACK_ERROR_MESSAGE)
-  );
+  const cleanMessage =
+    redactTokenInText(
+      safeText(message, FALLBACK_ERROR_MESSAGE)
+    );
 
   const payload = {
-    title: safeText(options.title, "Error"),
+    title:
+      safeText(options.title, "Error"),
 
     duration:
       Number.isFinite(Number(options.duration))
@@ -747,13 +932,19 @@ function safeToastError(Toast, message, options = {}) {
 
     ...ensureObject(options),
 
-    type: "error",
-    message: cleanMessage,
+    type:
+      "error",
+
+    message:
+      cleanMessage,
   };
 
   try {
     if (isFunction(Toast?.error)) {
-      return Toast.error(cleanMessage, payload);
+      return Toast.error(
+        cleanMessage,
+        payload
+      );
     }
 
     if (isFunction(Toast?.show)) {
@@ -766,6 +957,204 @@ function safeToastError(Toast, message, options = {}) {
   } catch {}
 
   return null;
+}
+
+/* =========================================================
+   DOM HELPERS
+========================================================= */
+
+function getById(id = "") {
+  if (
+    !isBrowser() ||
+    !id
+  ) {
+    return null;
+  }
+
+  try {
+    return document.getElementById(id);
+  } catch {}
+
+  return null;
+}
+
+function query(selector = "") {
+  if (
+    !isBrowser() ||
+    !selector
+  ) {
+    return null;
+  }
+
+  try {
+    return document.querySelector(selector);
+  } catch {}
+
+  return null;
+}
+
+function createElement(tagName = "div", {
+  id = "",
+  className = "",
+  text = "",
+  attrs = {},
+  dataset = {},
+} = {}) {
+  const element =
+    document.createElement(tagName);
+
+  if (id) {
+    element.id = id;
+  }
+
+  if (className) {
+    element.className = className;
+  }
+
+  if (text) {
+    element.textContent = text;
+  }
+
+  for (const [key, value] of Object.entries(ensureObject(attrs))) {
+    setAttribute(
+      element,
+      key,
+      value
+    );
+  }
+
+  for (const [key, value] of Object.entries(ensureObject(dataset))) {
+    setDataset(
+      element,
+      key,
+      value
+    );
+  }
+
+  return element;
+}
+
+function setAttribute(element, name, value) {
+  if (
+    !element ||
+    !name
+  ) {
+    return false;
+  }
+
+  try {
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      element.removeAttribute(name);
+    } else {
+      element.setAttribute(
+        name,
+        String(value)
+      );
+    }
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function setDataset(element, key, value) {
+  if (
+    !element ||
+    !key
+  ) {
+    return false;
+  }
+
+  try {
+    if (
+      value === null ||
+      value === undefined ||
+      value === ""
+    ) {
+      delete element.dataset[key];
+    } else {
+      element.dataset[key] =
+        String(value);
+    }
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function addClasses(element, classNames = []) {
+  if (!element) {
+    return false;
+  }
+
+  try {
+    const clean =
+      safeArray(classNames).filter(Boolean);
+
+    if (clean.length) {
+      element.classList.add(...clean);
+    }
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function removeClasses(element, classNames = []) {
+  if (!element) {
+    return false;
+  }
+
+  try {
+    const clean =
+      safeArray(classNames).filter(Boolean);
+
+    if (clean.length) {
+      element.classList.remove(...clean);
+    }
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function emptyElement(element) {
+  if (!element) {
+    return false;
+  }
+
+  try {
+    while (element.firstChild) {
+      element.removeChild(element.firstChild);
+    }
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function appendAll(parent, children = []) {
+  if (!parent) {
+    return parent;
+  }
+
+  for (const child of safeArray(children)) {
+    try {
+      if (child) {
+        parent.appendChild(child);
+      }
+    } catch {}
+  }
+
+  return parent;
 }
 
 /* =========================================================
@@ -790,7 +1179,8 @@ function safeRedirect(path = LOGIN_PATH) {
     return false;
   }
 
-  const target = safeText(path, LOGIN_PATH);
+  const target =
+    safeText(path, LOGIN_PATH);
 
   try {
     window.location.assign(target);
@@ -810,11 +1200,57 @@ function safeClearViewContainer(AppCore, container) {
     AppCore?.clearDynamicContainers?.();
   } catch {}
 
-  try {
-    if (container) {
-      container.innerHTML = "";
+  emptyElement(container);
+
+  return true;
+}
+
+function clearBrowserAuthStorage() {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  const keys = [
+    "token",
+    "accessToken",
+    "access_token",
+    "refreshToken",
+    "refresh_token",
+    "idToken",
+    "id_token",
+    "tempToken",
+    "temp_token",
+    "session",
+    "sessionId",
+    "session_id",
+    "user",
+    "auth",
+    "onion:token",
+    "onion:accessToken",
+    "onion:refreshToken",
+    "onion:session",
+    "onion:user",
+  ];
+
+  let changed = false;
+
+  for (const storage of [
+    window.localStorage,
+    window.sessionStorage,
+  ]) {
+    if (!storage) {
+      continue;
     }
-  } catch {}
+
+    for (const key of keys) {
+      try {
+        storage.removeItem(key);
+        changed = true;
+      } catch {}
+    }
+  }
+
+  return changed;
 }
 
 function clearAuthSession(Auth, AppCore) {
@@ -822,8 +1258,10 @@ function clearAuthSession(Auth, AppCore) {
 
   try {
     Auth?.clearSessionLocal?.({
-      silent: true,
-      reason: "boot-error-recovery",
+      silent:
+        true,
+      reason:
+        "boot-error-recovery",
     });
 
     cleared = true;
@@ -837,8 +1275,23 @@ function clearAuthSession(Auth, AppCore) {
 
   try {
     Auth?.clear?.({
-      silent: true,
-      reason: "boot-error-recovery",
+      silent:
+        true,
+      reason:
+        "boot-error-recovery",
+    });
+
+    cleared = true;
+  } catch {}
+
+  try {
+    Auth?.logout?.({
+      silent:
+        true,
+      localOnly:
+        true,
+      reason:
+        "boot-error-recovery",
     });
 
     cleared = true;
@@ -846,19 +1299,42 @@ function clearAuthSession(Auth, AppCore) {
 
   try {
     AppCore?.clearSession?.({
-      silent: true,
-      reason: "boot-error-recovery",
+      silent:
+        true,
+      reason:
+        "boot-error-recovery",
     });
 
     cleared = true;
   } catch {}
 
   try {
-    AppCore?.setState?.({
-      authenticated: false,
-      user: null,
-      token: null,
-    });
+    AppCore?.setState?.(
+      {
+        authenticated:
+          false,
+        hasToken:
+          false,
+        user:
+          null,
+        token:
+          null,
+        role:
+          null,
+        username:
+          null,
+        currentResolvedUsername:
+          null,
+        resolvedUsername:
+          null,
+      },
+      {
+        source:
+          "app:errors:clear-session",
+        forceUnauthenticated:
+          true,
+      }
+    );
 
     cleared = true;
   } catch {}
@@ -869,11 +1345,18 @@ function clearAuthSession(Auth, AppCore) {
       typeof AppCore.state === "object"
     ) {
       AppCore.state.authenticated = false;
+      AppCore.state.hasToken = false;
       AppCore.state.user = null;
       AppCore.state.token = null;
+      AppCore.state.role = null;
+      AppCore.state.username = null;
+      AppCore.state.currentResolvedUsername = null;
+      AppCore.state.resolvedUsername = null;
       cleared = true;
     }
   } catch {}
+
+  clearBrowserAuthStorage();
 
   return cleared;
 }
@@ -902,7 +1385,10 @@ function safeHideLoader(hideLoader, AppCore, reason = "boot-error") {
       AppCore,
       {
         reason,
-        minVisibleMs: 0,
+        minVisibleMs:
+          0,
+        fatal:
+          true,
       }
     );
 
@@ -920,20 +1406,48 @@ function safeHideLoader(hideLoader, AppCore, reason = "boot-error") {
 
   try {
     const loader =
-      document.getElementById("app-loader") ||
-      document.querySelector("[data-app-loader='true'],.app-loader");
+      getById(DOM_IDS.appLoader) ||
+      query("[data-app-loader='true'],.app-loader");
 
     if (!loader) {
       return false;
     }
 
     loader.hidden = true;
-    loader.setAttribute("aria-hidden", "true");
-    loader.setAttribute("aria-busy", "false");
-    loader.dataset.loaderVisible = "false";
-    loader.dataset.loaderState = "hidden";
-    loader.classList.remove("is-visible", "is-leaving", "is-entering");
-    loader.classList.add("is-hidden", "has-hidden");
+
+    setAttribute(
+      loader,
+      "aria-hidden",
+      "true"
+    );
+
+    setAttribute(
+      loader,
+      "aria-busy",
+      "false"
+    );
+
+    setDataset(
+      loader,
+      "loaderVisible",
+      "false"
+    );
+
+    setDataset(
+      loader,
+      "loaderState",
+      "hidden"
+    );
+
+    removeClasses(
+      loader,
+      LOADER_VISIBLE_CLASSES
+    );
+
+    addClasses(
+      loader,
+      LOADER_HIDDEN_CLASSES
+    );
 
     return true;
   } catch {}
@@ -943,7 +1457,30 @@ function safeHideLoader(hideLoader, AppCore, reason = "boot-error") {
 
 function safeSetShellVisibility(setShellVisibility, AppCore, visible = false) {
   try {
-    setShellVisibility?.(AppCore, visible);
+    setShellVisibility?.(
+      AppCore,
+      visible,
+      {
+        reason:
+          "boot-error",
+        authLike:
+          true,
+        hideAppShell:
+          false,
+        force:
+          true,
+      }
+    );
+
+    return true;
+  } catch {}
+
+  try {
+    setShellVisibility?.(
+      AppCore,
+      visible
+    );
+
     return true;
   } catch {}
 
@@ -955,17 +1492,14 @@ function getFallbackViewContainer() {
     return null;
   }
 
-  try {
-    return document.querySelector(VIEW_CONTAINER_SELECTOR);
-  } catch {}
-
-  return null;
+  return query(VIEW_CONTAINER_SELECTOR);
 }
 
 function resolveViewContainer(AppCore, getViewContainer) {
   try {
     if (isFunction(getViewContainer)) {
-      const container = getViewContainer(AppCore);
+      const container =
+        getViewContainer(AppCore);
 
       if (container) {
         return container;
@@ -973,114 +1507,464 @@ function resolveViewContainer(AppCore, getViewContainer) {
     }
   } catch {}
 
+  try {
+    if (AppCore?.dom?.viewContainer) {
+      return AppCore.dom.viewContainer;
+    }
+  } catch {}
+
   return getFallbackViewContainer();
 }
 
+function markFatalDomState(AppCore, snapshot = {}) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  const html =
+    document.documentElement;
+
+  const body =
+    document.body;
+
+  const shell =
+    getById(DOM_IDS.appShell);
+
+  const main =
+    getById(DOM_IDS.mainContent);
+
+  const appContent =
+    getById(DOM_IDS.appContent);
+
+  const view =
+    getById(DOM_IDS.viewContainer);
+
+  try {
+    for (const root of [
+      html,
+      body,
+    ]) {
+      if (!root) {
+        continue;
+      }
+
+      addClasses(
+        root,
+        FATAL_CLASSES
+      );
+
+      removeClasses(
+        root,
+        LOADING_CLASSES
+      );
+
+      removeClasses(
+        root,
+        READY_CLASSES
+      );
+
+      setDataset(
+        root,
+        "appLoading",
+        "false"
+      );
+
+      setDataset(
+        root,
+        "appState",
+        "fatal"
+      );
+
+      setDataset(
+        root,
+        "shellState",
+        "fatal"
+      );
+
+      setDataset(
+        root,
+        "routeMode",
+        "fatal"
+      );
+    }
+
+    if (body) {
+      body.removeAttribute("data-auth-screen");
+    }
+
+    for (const element of [
+      shell,
+      main,
+      appContent,
+      view,
+    ]) {
+      if (!element) {
+        continue;
+      }
+
+      element.hidden = false;
+
+      setAttribute(
+        element,
+        "aria-hidden",
+        "false"
+      );
+
+      setAttribute(
+        element,
+        "aria-busy",
+        "false"
+      );
+
+      setDataset(
+        element,
+        "shell",
+        "fatal"
+      );
+
+      setDataset(
+        element,
+        "shellState",
+        "fatal"
+      );
+
+      setDataset(
+        element,
+        "shellInteractive",
+        "true"
+      );
+
+      setDataset(
+        element,
+        "viewState",
+        "boot-error"
+      );
+    }
+
+    try {
+      AppCore?.setState?.(
+        {
+          loading:
+            false,
+          booting:
+            false,
+          appFatal:
+            true,
+          fatal:
+            true,
+          fatalAt:
+            snapshot.at || safeIsoDate(),
+        },
+        {
+          source:
+            "app:errors:fatal-dom",
+        }
+      );
+    } catch {}
+
+    try {
+      if (
+        AppCore?.state &&
+        typeof AppCore.state === "object"
+      ) {
+        AppCore.state.loading = false;
+        AppCore.state.booting = false;
+        AppCore.state.appFatal = true;
+        AppCore.state.fatal = true;
+        AppCore.state.fatalAt = snapshot.at || safeIsoDate();
+      }
+    } catch {}
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
 /* =========================================================
-   ERROR SCREEN MARKUP
+   ERROR SCREEN MARKUP - DOM SAFE
 ========================================================= */
 
-function buildBootErrorHtml(AppCore, snapshot = {}) {
-  const escapedMessage = safeEscapeHtml(AppCore, snapshot.message);
+function createBootErrorMetaRow(label = "", value = "") {
+  const row =
+    createElement("div", {
+      className:
+        "boot-error-card__meta-row",
+    });
 
-  const escapedRawMessage =
-    snapshot.rawMessage &&
-    snapshot.rawMessage !== snapshot.message
-      ? safeEscapeHtml(AppCore, snapshot.rawMessage)
-      : "";
+  const strong =
+    createElement("strong", {
+      text:
+        label,
+    });
 
-  const escapedCode = safeEscapeHtml(
-    AppCore,
-    snapshot.code || snapshot.name || "BOOT_ERROR"
+  const span =
+    createElement("span", {
+      text:
+        value,
+    });
+
+  appendAll(
+    row,
+    [
+      strong,
+      span,
+    ]
   );
 
-  const escapedAt = safeEscapeHtml(AppCore, snapshot.at);
+  return row;
+}
 
-  return `
-    <section
-      class="content-wrapper boot-error-view"
-      data-view="boot-error"
-      data-boot-error-view="true"
-      aria-labelledby="boot-error-title"
-    >
-      <div class="panel-block boot-error-card" data-boot-error-card="true">
-        <div class="boot-error-card__inner">
-          <div
-            class="boot-error-card__icon"
-            aria-hidden="true"
-          >
-            !
-          </div>
+function createBootErrorButton({
+  action,
+  className = "ui-btn ui-btn-secondary",
+  text = "",
+} = {}) {
+  return createElement("button", {
+    className,
+    text,
+    attrs: {
+      type:
+        "button",
+    },
+    dataset: {
+      bootErrorAction:
+        action,
+    },
+  });
+}
 
-          <div class="boot-error-card__header">
-            <p class="boot-error-card__eyebrow">
-              Boot failure
-            </p>
+function createBootErrorDetails(AppCore, snapshot = {}) {
+  if (
+    !snapshot.rawMessage ||
+    snapshot.rawMessage === snapshot.message
+  ) {
+    return null;
+  }
 
-            <h2
-              id="boot-error-title"
-              class="boot-error-card__title"
-            >
-              Error al iniciar la aplicación
-            </h2>
+  const details =
+    createElement("details", {
+      className:
+        "boot-error-card__details",
+    });
 
-            <p class="boot-error-card__message">
-              ${escapedMessage}
-            </p>
-          </div>
+  const summary =
+    createElement("summary", {
+      text:
+        "Detalle técnico",
+    });
 
-          <div class="boot-error-card__meta" data-boot-error-meta="true">
-            <div class="boot-error-card__meta-row">
-              <strong>Código:</strong>
-              <span>${escapedCode}</span>
-            </div>
+  const pre =
+    createElement("pre");
 
-            <div class="boot-error-card__meta-row">
-              <strong>Fecha:</strong>
-              <span>${escapedAt}</span>
-            </div>
+  /*
+    textContent: sin innerHTML.
+    safeEscapeHtml queda disponible por compat si se necesita serializar.
+  */
+  pre.textContent =
+    safeEscapeHtml(
+      AppCore,
+      snapshot.rawMessage
+    )
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, "\"")
+      .replace(/&#039;/g, "'")
+      .replace(/&amp;/g, "&");
 
-            ${
-              escapedRawMessage
-                ? `
-                  <details class="boot-error-card__details">
-                    <summary>Detalle técnico</summary>
-                    <pre>${escapedRawMessage}</pre>
-                  </details>
-                `
-                : ""
-            }
-          </div>
+  appendAll(
+    details,
+    [
+      summary,
+      pre,
+    ]
+  );
 
-          <div class="boot-error-card__actions">
-            <button
-              type="button"
-              class="ui-btn ui-btn-primary"
-              data-boot-error-action="${ERROR_ACTIONS.retry}"
-            >
-              Reintentar
-            </button>
+  return details;
+}
 
-            <button
-              type="button"
-              class="ui-btn ui-btn-secondary"
-              data-boot-error-action="${ERROR_ACTIONS.resetSession}"
-            >
-              Limpiar sesión
-            </button>
+function buildBootErrorNode(AppCore, snapshot = {}) {
+  const section =
+    createElement("section", {
+      className:
+        "content-wrapper boot-error-view",
+      attrs: {
+        "aria-labelledby":
+          "boot-error-title",
+      },
+      dataset: {
+        view:
+          "boot-error",
+        bootErrorView:
+          "true",
+      },
+    });
 
-            <button
-              type="button"
-              class="ui-btn ui-btn-secondary"
-              data-boot-error-action="${ERROR_ACTIONS.goLogin}"
-            >
-              Ir al login
-            </button>
-          </div>
-        </div>
-      </div>
-    </section>
-  `;
+  const card =
+    createElement("div", {
+      className:
+        "panel-block boot-error-card",
+      dataset: {
+        bootErrorCard:
+          "true",
+      },
+    });
+
+  const inner =
+    createElement("div", {
+      className:
+        "boot-error-card__inner",
+    });
+
+  const icon =
+    createElement("div", {
+      className:
+        "boot-error-card__icon",
+      text:
+        "!",
+      attrs: {
+        "aria-hidden":
+          "true",
+      },
+    });
+
+  const header =
+    createElement("div", {
+      className:
+        "boot-error-card__header",
+    });
+
+  const eyebrow =
+    createElement("p", {
+      className:
+        "boot-error-card__eyebrow",
+      text:
+        "Boot failure",
+    });
+
+  const title =
+    createElement("h2", {
+      id:
+        "boot-error-title",
+      className:
+        "boot-error-card__title",
+      text:
+        "Error al iniciar la aplicación",
+    });
+
+  const message =
+    createElement("p", {
+      className:
+        "boot-error-card__message",
+      text:
+        snapshot.message || FALLBACK_BOOT_ERROR_MESSAGE,
+    });
+
+  appendAll(
+    header,
+    [
+      eyebrow,
+      title,
+      message,
+    ]
+  );
+
+  const meta =
+    createElement("div", {
+      className:
+        "boot-error-card__meta",
+      dataset: {
+        bootErrorMeta:
+          "true",
+      },
+    });
+
+  appendAll(
+    meta,
+    [
+      createBootErrorMetaRow(
+        "Código:",
+        snapshot.code || snapshot.name || "BOOT_ERROR"
+      ),
+      createBootErrorMetaRow(
+        "Fecha:",
+        snapshot.at || safeIsoDate()
+      ),
+    ]
+  );
+
+  const details =
+    createBootErrorDetails(
+      AppCore,
+      snapshot
+    );
+
+  if (details) {
+    meta.appendChild(details);
+  }
+
+  const actions =
+    createElement("div", {
+      className:
+        "boot-error-card__actions",
+    });
+
+  const retryButton =
+    createBootErrorButton({
+      action:
+        ERROR_ACTIONS.retry,
+      className:
+        "ui-btn ui-btn-primary",
+      text:
+        "Reintentar",
+    });
+
+  const resetButton =
+    createBootErrorButton({
+      action:
+        ERROR_ACTIONS.resetSession,
+      text:
+        "Limpiar sesión",
+    });
+
+  const loginButton =
+    createBootErrorButton({
+      action:
+        ERROR_ACTIONS.goLogin,
+      text:
+        "Ir al login",
+    });
+
+  appendAll(
+    actions,
+    [
+      retryButton,
+      resetButton,
+      loginButton,
+    ]
+  );
+
+  appendAll(
+    inner,
+    [
+      icon,
+      header,
+      meta,
+      actions,
+    ]
+  );
+
+  card.appendChild(inner);
+  section.appendChild(card);
+
+  return {
+    root:
+      section,
+
+    retryButton,
+    resetButton,
+    loginButton,
+  };
 }
 
 /* =========================================================
@@ -1096,23 +1980,60 @@ export function renderBootError({
   setShellVisibility,
   hideLoader,
 } = {}) {
-  const snapshot = createErrorSnapshot({
-    source: "boot",
-    error,
-    severity: "critical",
-    boot: true,
-    handled: true,
-  });
+  const snapshot =
+    createErrorSnapshot({
+      source:
+        "boot",
+      error,
+      severity:
+        "critical",
+      boot:
+        true,
+      handled:
+        true,
+    });
 
   pushRecentError(snapshot);
   safeSetError(AppCore, snapshot);
 
-  safeEmit(AppCore, ERROR_EVENTS.bootError, snapshot);
-  safeEmit(AppCore, ERROR_EVENTS.render, snapshot);
-
-  const container = resolveViewContainer(
+  safeEmit(
     AppCore,
-    getViewContainer
+    ERROR_EVENTS.bootError,
+    snapshot
+  );
+
+  safeEmit(
+    AppCore,
+    ERROR_EVENTS.render,
+    snapshot
+  );
+
+  const container =
+    resolveViewContainer(
+      AppCore,
+      getViewContainer
+    );
+
+  markFatalDomState(
+    AppCore,
+    snapshot
+  );
+
+  safeHideLoader(
+    hideLoader,
+    AppCore,
+    "boot-error"
+  );
+
+  safeSetDocumentTitle(
+    AppCore,
+    "Error de inicio"
+  );
+
+  safeSetShellVisibility(
+    setShellVisibility,
+    AppCore,
+    false
   );
 
   if (!container) {
@@ -1122,19 +2043,15 @@ export function renderBootError({
       snapshot
     );
 
-    safeHideLoader(
-      hideLoader,
-      AppCore,
-      "boot-error:no-container"
-    );
-
     if (!shouldThrottleToast(snapshot)) {
       safeToastError(
         Toast,
         snapshot.message,
         {
-          title: "Error de arranque",
-          duration: 6000,
+          title:
+            "Error de arranque",
+          duration:
+            6000,
         }
       );
     }
@@ -1146,29 +2063,138 @@ export function renderBootError({
     return true;
   }
 
-  safeSetDocumentTitle(AppCore, "Error de inicio");
+  if (errorState.rendering) {
+    return true;
+  }
 
-  safeClearViewContainer(AppCore, container);
-
-  /*
-    setShellVisibility(false) debe ocultar chrome, no destruir #app-shell.
-  */
-  safeSetShellVisibility(
-    setShellVisibility,
-    AppCore,
-    false
-  );
-
-  safeHideLoader(
-    hideLoader,
-    AppCore,
-    "boot-error"
-  );
+  errorState.rendering = true;
 
   try {
-    container.innerHTML = buildBootErrorHtml(AppCore, snapshot);
+    safeClearViewContainer(
+      AppCore,
+      container
+    );
+
+    const {
+      root,
+      retryButton,
+      resetButton,
+      loginButton,
+    } =
+      buildBootErrorNode(
+        AppCore,
+        snapshot
+      );
+
+    container.appendChild(root);
+
     container.removeAttribute("aria-busy");
-    container.setAttribute("data-view-state", "boot-error");
+
+    container.setAttribute(
+      "aria-hidden",
+      "false"
+    );
+
+    container.setAttribute(
+      "data-view-state",
+      "boot-error"
+    );
+
+    if (retryButton) {
+      retryButton.addEventListener(
+        "click",
+        () => {
+          safeEmit(
+            AppCore,
+            ERROR_EVENTS.recover,
+            {
+              action:
+                ERROR_ACTIONS.retry,
+              error:
+                snapshot,
+            }
+          );
+
+          safeReload();
+        },
+        {
+          once:
+            true,
+        }
+      );
+    }
+
+    if (resetButton) {
+      resetButton.addEventListener(
+        "click",
+        () => {
+          safeEmit(
+            AppCore,
+            ERROR_EVENTS.recover,
+            {
+              action:
+                ERROR_ACTIONS.resetSession,
+              error:
+                snapshot,
+            }
+          );
+
+          clearAuthSession(
+            Auth,
+            AppCore
+          );
+
+          safeRedirect(LOGIN_PATH);
+        },
+        {
+          once:
+            true,
+        }
+      );
+    }
+
+    if (loginButton) {
+      loginButton.addEventListener(
+        "click",
+        () => {
+          safeEmit(
+            AppCore,
+            ERROR_EVENTS.recover,
+            {
+              action:
+                ERROR_ACTIONS.goLogin,
+              error:
+                snapshot,
+            }
+          );
+
+          safeRedirect(LOGIN_PATH);
+        },
+        {
+          once:
+            true,
+        }
+      );
+    }
+
+    try {
+      retryButton?.focus?.();
+    } catch {}
+
+    if (!shouldThrottleToast(snapshot)) {
+      safeToastError(
+        Toast,
+        snapshot.message,
+        {
+          title:
+            "Error de arranque",
+          duration:
+            6000,
+        }
+      );
+    }
+
+    return true;
   } catch (renderError) {
     safeError(
       AppCore,
@@ -1177,100 +2203,9 @@ export function renderBootError({
     );
 
     return false;
+  } finally {
+    errorState.rendering = false;
   }
-
-  const retryBtn = container.querySelector?.(
-    `[data-boot-error-action="${ERROR_ACTIONS.retry}"]`
-  );
-
-  const resetBtn = container.querySelector?.(
-    `[data-boot-error-action="${ERROR_ACTIONS.resetSession}"]`
-  );
-
-  const loginBtn = container.querySelector?.(
-    `[data-boot-error-action="${ERROR_ACTIONS.goLogin}"]`
-  );
-
-  if (retryBtn) {
-    retryBtn.addEventListener(
-      "click",
-      () => {
-        safeEmit(
-          AppCore,
-          ERROR_EVENTS.recover,
-          {
-            action: ERROR_ACTIONS.retry,
-            error: snapshot,
-          }
-        );
-
-        safeReload();
-      },
-      {
-        once: true,
-      }
-    );
-  }
-
-  if (resetBtn) {
-    resetBtn.addEventListener(
-      "click",
-      () => {
-        safeEmit(
-          AppCore,
-          ERROR_EVENTS.recover,
-          {
-            action: ERROR_ACTIONS.resetSession,
-            error: snapshot,
-          }
-        );
-
-        clearAuthSession(Auth, AppCore);
-        safeRedirect(LOGIN_PATH);
-      },
-      {
-        once: true,
-      }
-    );
-  }
-
-  if (loginBtn) {
-    loginBtn.addEventListener(
-      "click",
-      () => {
-        safeEmit(
-          AppCore,
-          ERROR_EVENTS.recover,
-          {
-            action: ERROR_ACTIONS.goLogin,
-            error: snapshot,
-          }
-        );
-
-        safeRedirect(LOGIN_PATH);
-      },
-      {
-        once: true,
-      }
-    );
-  }
-
-  try {
-    retryBtn?.focus?.();
-  } catch {}
-
-  if (!shouldThrottleToast(snapshot)) {
-    safeToastError(
-      Toast,
-      snapshot.message,
-      {
-        title: "Error de arranque",
-        duration: 6000,
-      }
-    );
-  }
-
-  return true;
 }
 
 /* =========================================================
@@ -1293,27 +2228,49 @@ function isResourceErrorEvent(event = null) {
 }
 
 function normalizeResourceError(event = null) {
-  const target = event?.target || {};
+  const target =
+    event?.target || {};
 
-  const tagName = safeText(
-    target.tagName,
-    "resource"
-  ).toLowerCase();
-
-  const url = redactTokenInText(
+  const tagName =
     safeText(
-      target.src ||
-        target.href,
-      ""
-    )
-  );
+      target.tagName,
+      "resource"
+    ).toLowerCase();
+
+  const url =
+    redactTokenInText(
+      safeText(
+        target.src ||
+          target.href,
+        ""
+      )
+    );
 
   return {
-    name: "ResourceLoadError",
-    message: `No se pudo cargar el recurso ${tagName}${url ? `: ${url}` : "."}`,
+    name:
+      "ResourceLoadError",
+
+    message:
+      `No se pudo cargar el recurso ${tagName}${url ? `: ${url}` : "."}`,
+
     url,
+
     target,
   };
+}
+
+function isIgnorableRuntimeError(error = null) {
+  const message =
+    getRawErrorMessage(error, "");
+
+  if (!message) {
+    return false;
+  }
+
+  return Boolean(
+    /ResizeObserver loop limit exceeded/i.test(message) ||
+      /ResizeObserver loop completed with undelivered notifications/i.test(message)
+  );
 }
 
 function processRuntimeError({
@@ -1328,31 +2285,48 @@ function processRuntimeError({
     return null;
   }
 
+  if (isIgnorableRuntimeError(error)) {
+    return null;
+  }
+
   errorState.handling = true;
 
   try {
-    const snapshot = createErrorSnapshot({
-      source,
-      error,
-      severity,
-      boot: false,
-      handled: true,
-    });
+    const snapshot =
+      createErrorSnapshot({
+        source,
+        error,
+        severity,
+        boot:
+          false,
+        handled:
+          true,
+      });
 
     pushRecentError(snapshot);
     safeSetError(AppCore, snapshot);
 
-    safeError(AppCore, source, snapshot);
+    safeError(
+      AppCore,
+      source,
+      snapshot
+    );
 
-    safeEmit(AppCore, ERROR_EVENTS.appError, snapshot);
+    safeEmit(
+      AppCore,
+      ERROR_EVENTS.appError,
+      snapshot
+    );
 
     safeEmit(
       AppCore,
       ERROR_EVENTS.telemetry,
       {
         ...snapshot,
-        recentCount: errorState.recent.length,
-        total: errorState.total,
+        recentCount:
+          errorState.recent.length,
+        total:
+          errorState.total,
       }
     );
 
@@ -1369,7 +2343,8 @@ function processRuntimeError({
               ? "Aviso"
               : "Error",
 
-          duration: 5000,
+          duration:
+            5000,
         }
       );
     }
@@ -1407,20 +2382,22 @@ function bindWithCleanup({
   handler,
   options,
 }) {
-  const cleanup = AppCore?.cleanup;
+  const cleanup =
+    AppCore?.cleanup;
 
   if (
     cleanup &&
     isFunction(cleanup.event)
   ) {
     try {
-      const off = cleanup.event(
-        scope,
-        target,
-        eventName,
-        handler,
-        options
-      );
+      const off =
+        cleanup.event(
+          scope,
+          target,
+          eventName,
+          handler,
+          options
+        );
 
       if (isFunction(off)) {
         rememberDisposer(off);
@@ -1429,12 +2406,13 @@ function bindWithCleanup({
       return true;
     } catch {
       try {
-        const off = cleanup.event(
-          scope,
-          target,
-          eventName,
-          handler
-        );
+        const off =
+          cleanup.event(
+            scope,
+            target,
+            eventName,
+            handler
+          );
 
         if (isFunction(off)) {
           rememberDisposer(off);
@@ -1484,21 +2462,26 @@ export function bindGlobalErrorHandlers({
 
   bindingInFlight = true;
 
-  const finalScope = safeText(
-    scope,
-    DEFAULT_ERROR_SCOPE
-  );
+  const finalScope =
+    safeText(
+      scope,
+      DEFAULT_ERROR_SCOPE
+    );
 
   const onError = (event) => {
     if (isResourceErrorEvent(event)) {
-      const resourceError = normalizeResourceError(event);
+      const resourceError =
+        normalizeResourceError(event);
 
       processRuntimeError({
         AppCore,
         Toast,
-        source: "window.resource-error",
-        error: resourceError,
-        severity: "warning",
+        source:
+          "window.resource-error",
+        error:
+          resourceError,
+        severity:
+          "warning",
         toast:
           /script|link/i.test(
             safeText(
@@ -1513,61 +2496,95 @@ export function bindGlobalErrorHandlers({
 
     const error =
       event?.error || {
-        name: "WindowError",
-        message: event?.message || "Error global no controlado",
-        filename: event?.filename,
-        lineno: event?.lineno,
-        colno: event?.colno,
+        name:
+          "WindowError",
+        message:
+          event?.message || "Error global no controlado",
+        filename:
+          event?.filename,
+        lineno:
+          event?.lineno,
+        colno:
+          event?.colno,
       };
 
     processRuntimeError({
       AppCore,
       Toast,
-      source: "window.error",
+      source:
+        "window.error",
       error,
-      severity: "error",
-      toast: true,
+      severity:
+        "error",
+      toast:
+        true,
     });
   };
 
   const onReject = (event) => {
     const reason =
       event?.reason || {
-        name: "UnhandledRejection",
-        message: "Promise rechazada sin control",
+        name:
+          "UnhandledRejection",
+        message:
+          "Promise rechazada sin control",
       };
 
     processRuntimeError({
       AppCore,
       Toast,
-      source: "unhandledrejection",
-      error: reason,
-      severity: "error",
-      toast: true,
+      source:
+        "unhandledrejection",
+      error:
+        reason,
+      severity:
+        "error",
+      toast:
+        true,
     });
   };
 
   try {
-    const okError = bindWithCleanup({
-      AppCore,
-      scope: finalScope,
-      target: window,
-      eventName: "error",
-      handler: onError,
-      options: true,
-    });
+    const okError =
+      bindWithCleanup({
+        AppCore,
+        scope:
+          finalScope,
+        target:
+          window,
+        eventName:
+          "error",
+        handler:
+          onError,
+        options:
+          true,
+      });
 
-    const okReject = bindWithCleanup({
-      AppCore,
-      scope: finalScope,
-      target: window,
-      eventName: "unhandledrejection",
-      handler: onReject,
-      options: false,
-    });
+    const okReject =
+      bindWithCleanup({
+        AppCore,
+        scope:
+          finalScope,
+        target:
+          window,
+        eventName:
+          "unhandledrejection",
+        handler:
+          onReject,
+        options:
+          false,
+      });
 
-    handlersBound = Boolean(okError || okReject);
-    boundScope = handlersBound ? finalScope : "";
+    handlersBound =
+      Boolean(
+        okError ||
+          okReject
+      );
+
+    boundScope =
+      handlersBound
+        ? finalScope
+        : "";
 
     if (handlersBound) {
       exposeDebugApi(AppCore);
@@ -1576,8 +2593,12 @@ export function bindGlobalErrorHandlers({
         AppCore,
         ERROR_EVENTS.handlersBound,
         {
-          scope: boundScope,
-          at: safeIsoDate(),
+          version:
+            APP_ERRORS_VERSION,
+          scope:
+            boundScope,
+          at:
+            safeIsoDate(),
         }
       );
 
@@ -1585,7 +2606,8 @@ export function bindGlobalErrorHandlers({
         AppCore,
         "Global error handlers activos.",
         {
-          scope: boundScope,
+          scope:
+            boundScope,
         }
       );
 
@@ -1628,7 +2650,10 @@ export function unbindGlobalErrorHandlers(AppCore = null) {
     AppCore,
     ERROR_EVENTS.handlersUnbound,
     {
-      at: safeIsoDate(),
+      version:
+        APP_ERRORS_VERSION,
+      at:
+        safeIsoDate(),
     }
   );
 
@@ -1650,6 +2675,9 @@ function exposeDebugApi(AppCore = null) {
   }
 
   const api = {
+    version:
+      APP_ERRORS_VERSION,
+
     getSnapshot:
       getErrorStateSnapshot,
 
@@ -1668,7 +2696,11 @@ function exposeDebugApi(AppCore = null) {
   } catch {}
 
   try {
-    safeDefineValue(AppCore, "Errors", api);
+    safeDefineValue(
+      AppCore,
+      "Errors",
+      api
+    );
   } catch {}
 
   return true;
@@ -1680,27 +2712,49 @@ function exposeDebugApi(AppCore = null) {
 
 export function getErrorStateSnapshot() {
   return {
-    handlersBound: Boolean(handlersBound),
-    bindingInFlight: Boolean(bindingInFlight),
+    version:
+      APP_ERRORS_VERSION,
+
+    handlersBound:
+      Boolean(handlersBound),
+
+    bindingInFlight:
+      Boolean(bindingInFlight),
 
     boundScope,
 
-    boundListeners: boundListeners.length,
-    boundDisposers: boundDisposers.length,
+    boundListeners:
+      boundListeners.length,
 
-    handling: Boolean(errorState.handling),
+    boundDisposers:
+      boundDisposers.length,
 
-    total: errorState.total,
+    handling:
+      Boolean(errorState.handling),
 
-    lastToastKey: errorState.lastToastKey,
-    lastToastAt: errorState.lastToastAt,
+    rendering:
+      Boolean(errorState.rendering),
+
+    total:
+      errorState.total,
+
+    lastToastKey:
+      redactTokenInText(errorState.lastToastKey),
+
+    lastToastAt:
+      errorState.lastToastAt,
+
     lastToastAtIso:
       errorState.lastToastAt
         ? safeIsoDate(errorState.lastToastAt)
         : "",
 
-    lastRenderKey: errorState.lastRenderKey,
-    lastRenderAt: errorState.lastRenderAt,
+    lastRenderKey:
+      redactTokenInText(errorState.lastRenderKey),
+
+    lastRenderAt:
+      errorState.lastRenderAt,
+
     lastRenderAtIso:
       errorState.lastRenderAt
         ? safeIsoDate(errorState.lastRenderAt)
@@ -1708,17 +2762,38 @@ export function getErrorStateSnapshot() {
 
     recent:
       errorState.recent.map((item) => ({
-        index: item.index,
-        source: item.source,
-        severity: item.severity,
-        boot: Boolean(item.boot),
-        handled: Boolean(item.handled),
-        name: item.name,
-        code: item.code,
-        message: item.message,
-        url: item.url,
-        hasStack: Boolean(item.hasStack),
-        at: item.at,
+        index:
+          item.index,
+
+        source:
+          item.source,
+
+        severity:
+          item.severity,
+
+        boot:
+          Boolean(item.boot),
+
+        handled:
+          Boolean(item.handled),
+
+        name:
+          item.name,
+
+        code:
+          item.code,
+
+        message:
+          item.message,
+
+        url:
+          item.url,
+
+        hasStack:
+          Boolean(item.hasStack),
+
+        at:
+          item.at,
       })),
   };
 }
@@ -1731,6 +2806,7 @@ export function resetErrorState() {
   errorState.lastRenderAt = 0;
 
   errorState.handling = false;
+  errorState.rendering = false;
 
   errorState.total = 0;
   errorState.recent = [];
@@ -1743,6 +2819,8 @@ export function resetErrorState() {
 ========================================================= */
 
 export default {
+  APP_ERRORS_VERSION,
+
   renderBootError,
 
   bindGlobalErrorHandlers,

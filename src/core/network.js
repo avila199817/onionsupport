@@ -16,8 +16,13 @@
    - cleanup scope estable
    - fallback si cleanup no existe
    - soporte navigator.connection
-   - eventos online/offline/visibility/focus
+   - eventos online/offline/visibility/focus/pageshow/pagehide
    - estado online inicial sincronizado
+   - contexto activo actualizable sin rebinder innecesario
+   - handlers no capturan estado obsoleto tras reboot
+   - setState opcional si se inyecta
+   - mutación directa segura si no hay setState
+   - eventos con rate mínimo para señales ruidosas
    - cero throws accidentales
 ========================================================= */
 
@@ -27,8 +32,14 @@ import { isBrowser } from "./helpers.js";
    CONSTANTS
 ========================================================= */
 
+const NETWORK_VERSION =
+  "11.0.0";
+
 const NETWORK_SCOPE =
   "core:network";
+
+const MIN_PASSIVE_SYNC_INTERVAL_MS =
+  350;
 
 const NETWORK_EVENTS =
   Object.freeze({
@@ -50,6 +61,21 @@ const NETWORK_EVENTS =
     unbound:
       "core:network:unbound",
 
+    visibility:
+      "core:network:visibility",
+
+    focus:
+      "core:network:focus",
+
+    pageShow:
+      "core:network:pageshow",
+
+    pageHide:
+      "core:network:pagehide",
+
+    connection:
+      "core:network:connection",
+
     error:
       "core:network:error",
   });
@@ -61,8 +87,14 @@ const NETWORK_EVENTS =
 let bound =
   false;
 
+let bindingId =
+  0;
+
 let lastOnline =
   null;
+
+let lastStatus =
+  "unknown";
 
 let lastReason =
   "";
@@ -70,8 +102,40 @@ let lastReason =
 let lastChangeAt =
   0;
 
+let lastSyncAt =
+  0;
+
+let lastVisibilityState =
+  null;
+
+let lastConnectionFingerprint =
+  "";
+
+let lastError =
+  null;
+
 const manualDisposers =
-  [];
+  new Set();
+
+const activeContext = {
+  state:
+    null,
+
+  events:
+    null,
+
+  cleanup:
+    null,
+
+  utils:
+    null,
+
+  setState:
+    null,
+
+  scope:
+    NETWORK_SCOPE,
+};
 
 /* =========================================================
    HELPERS
@@ -89,6 +153,22 @@ function safeText(value, fallback = "") {
     String(value).trim();
 
   return text || fallback;
+}
+
+function safeNumber(value, fallback = 0) {
+  const number =
+    Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : fallback;
+}
+
+function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object"
+  );
 }
 
 function isFunction(value) {
@@ -126,12 +206,27 @@ function safeLog(utils, ...args) {
 }
 
 function safeWarn(utils, ...args) {
+  let emitted =
+    false;
+
   try {
-    utils?.warn?.(
-      "[Network]",
-      ...args
-    );
-  } catch {}
+    if (isFunction(utils?.warn)) {
+      utils.warn(
+        "[Network]",
+        ...args
+      );
+
+      emitted =
+        true;
+    }
+  } catch {
+    emitted =
+      false;
+  }
+
+  if (emitted) {
+    return;
+  }
 
   try {
     console.warn(
@@ -152,9 +247,18 @@ function safeError(utils, events, error, source = "network") {
         "Network error."
       ),
 
+    name:
+      safeText(
+        error?.name,
+        "Error"
+      ),
+
     at:
       safeIsoDate(),
   };
+
+  lastError =
+    payload;
 
   try {
     utils?.error?.(
@@ -187,6 +291,18 @@ function getNavigatorOnline() {
   return null;
 }
 
+function onlineToStatus(online = null) {
+  if (online === true) {
+    return "online";
+  }
+
+  if (online === false) {
+    return "offline";
+  }
+
+  return "unknown";
+}
+
 function getVisibilityState() {
   if (!isBrowser()) {
     return null;
@@ -199,22 +315,55 @@ function getVisibilityState() {
   return null;
 }
 
-function getConnectionSnapshot() {
+function getDocumentHidden() {
   if (!isBrowser()) {
     return null;
   }
 
   try {
-    const connection =
+    return typeof document.hidden === "boolean"
+      ? document.hidden
+      : null;
+  } catch {}
+
+  return null;
+}
+
+function getConnection() {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    return (
       navigator.connection ||
       navigator.mozConnection ||
       navigator.webkitConnection ||
-      null;
+      null
+    );
+  } catch {}
 
-    if (!connection) {
-      return null;
-    }
+  return null;
+}
 
+function normalizeConnectionValue(value) {
+  const number =
+    Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : null;
+}
+
+function getConnectionSnapshot() {
+  const connection =
+    getConnection();
+
+  if (!connection) {
+    return null;
+  }
+
+  try {
     return {
       effectiveType:
         connection.effectiveType || null,
@@ -223,14 +372,14 @@ function getConnectionSnapshot() {
         connection.type || null,
 
       downlink:
-        Number.isFinite(Number(connection.downlink))
-          ? Number(connection.downlink)
-          : null,
+        normalizeConnectionValue(
+          connection.downlink
+        ),
 
       rtt:
-        Number.isFinite(Number(connection.rtt))
-          ? Number(connection.rtt)
-          : null,
+        normalizeConnectionValue(
+          connection.rtt
+        ),
 
       saveData:
         typeof connection.saveData === "boolean"
@@ -242,6 +391,24 @@ function getConnectionSnapshot() {
   return null;
 }
 
+function connectionFingerprint(connection = null) {
+  if (!connection) {
+    return "";
+  }
+
+  try {
+    return [
+      connection.effectiveType || "",
+      connection.type || "",
+      connection.downlink ?? "",
+      connection.rtt ?? "",
+      connection.saveData ?? "",
+    ].join("|");
+  } catch {
+    return "";
+  }
+}
+
 function getBrowserNetworkSnapshot() {
   return {
     browser:
@@ -250,8 +417,16 @@ function getBrowserNetworkSnapshot() {
     online:
       getNavigatorOnline(),
 
+    status:
+      onlineToStatus(
+        getNavigatorOnline()
+      ),
+
     visibilityState:
       getVisibilityState(),
+
+    hidden:
+      getDocumentHidden(),
 
     connection:
       getConnectionSnapshot(),
@@ -261,57 +436,151 @@ function getBrowserNetworkSnapshot() {
   };
 }
 
-function writeNetworkState(state, {
+function updateActiveContext({
+  state,
+  events,
+  cleanup,
+  utils,
+  setState,
+  scope = NETWORK_SCOPE,
+} = {}) {
+  if (state !== undefined) {
+    activeContext.state =
+      state || null;
+  }
+
+  if (events !== undefined) {
+    activeContext.events =
+      events || null;
+  }
+
+  if (cleanup !== undefined) {
+    activeContext.cleanup =
+      cleanup || null;
+  }
+
+  if (utils !== undefined) {
+    activeContext.utils =
+      utils || null;
+  }
+
+  if (setState !== undefined) {
+    activeContext.setState =
+      isFunction(setState)
+        ? setState
+        : null;
+  }
+
+  activeContext.scope =
+    safeText(
+      scope,
+      NETWORK_SCOPE
+    );
+
+  return activeContext;
+}
+
+function getActiveContext() {
+  return activeContext;
+}
+
+function buildStatePatch({
   online,
   reason = "sync",
   changed = false,
 } = {}) {
+  const atMs =
+    Date.now();
+
+  const status =
+    onlineToStatus(online);
+
+  const connection =
+    getConnectionSnapshot();
+
+  return {
+    online,
+
+    offline:
+      online === null
+        ? null
+        : !online,
+
+    networkOnline:
+      online,
+
+    networkOffline:
+      online === null
+        ? null
+        : !online,
+
+    networkStatus:
+      status,
+
+    networkConnection:
+      connection,
+
+    networkVisibilityState:
+      getVisibilityState(),
+
+    networkHidden:
+      getDocumentHidden(),
+
+    lastNetworkReason:
+      safeText(reason, "sync"),
+
+    lastNetworkSyncAt:
+      safeIsoDate(atMs),
+
+    lastNetworkSyncAtMs:
+      atMs,
+
+    lastNetworkChangeAt:
+      changed
+        ? safeIsoDate(atMs)
+        : undefined,
+
+    lastNetworkChangeAtMs:
+      changed
+        ? atMs
+        : undefined,
+  };
+}
+
+function removeUndefinedKeys(object = {}) {
+  const output =
+    {};
+
+  for (const [key, value] of Object.entries(object || {})) {
+    if (value !== undefined) {
+      output[key] =
+        value;
+    }
+  }
+
+  return output;
+}
+
+function writeNetworkState(state, patch = {}, setState = null) {
   if (!state || typeof state !== "object") {
     return false;
   }
 
-  const atMs =
-    Date.now();
+  const cleanPatch =
+    removeUndefinedKeys(patch);
+
+  if (isFunction(setState)) {
+    try {
+      setState(cleanPatch);
+      return true;
+    } catch {}
+  }
 
   try {
-    state.online =
-      online;
-
-    state.offline =
-      online === null
-        ? null
-        : !online;
-
-    state.networkOnline =
-      online;
-
-    state.networkOffline =
-      online === null
-        ? null
-        : !online;
-
-    state.networkStatus =
-      online === null
-        ? "unknown"
-        : online
-          ? "online"
-          : "offline";
-
-    state.lastNetworkReason =
-      safeText(reason, "sync");
-
-    state.lastNetworkChangeAt =
-      changed
-        ? safeIsoDate(atMs)
-        : state.lastNetworkChangeAt || "";
-
-    state.lastNetworkChangeAtMs =
-      changed
-        ? atMs
-        : state.lastNetworkChangeAtMs || 0;
-
-    state.networkConnection =
-      getConnectionSnapshot();
+    Object.assign(
+      state,
+      cleanPatch
+    );
 
     return true;
   } catch {}
@@ -324,8 +593,15 @@ function buildPayload({
   online,
   reason = "sync",
   changed = false,
+  source = "network",
 } = {}) {
+  const status =
+    onlineToStatus(online);
+
   return {
+    version:
+      NETWORK_VERSION,
+
     online,
 
     offline:
@@ -333,15 +609,13 @@ function buildPayload({
         ? null
         : !online,
 
-    status:
-      online === null
-        ? "unknown"
-        : online
-          ? "online"
-          : "offline",
+    status,
 
     reason:
       safeText(reason, "sync"),
+
+    source:
+      safeText(source, "network"),
 
     changed:
       Boolean(changed),
@@ -349,14 +623,22 @@ function buildPayload({
     bound:
       Boolean(bound),
 
+    bindingId,
+
     visibilityState:
       getVisibilityState(),
+
+    hidden:
+      getDocumentHidden(),
 
     connection:
       getConnectionSnapshot(),
 
     stateOnline:
       state?.online ?? null,
+
+    stateStatus:
+      state?.networkStatus || "",
 
     at:
       safeIsoDate(),
@@ -371,6 +653,7 @@ function emitNetworkState({
   reason = "sync",
   changed = false,
   silent = false,
+  source = "network",
 } = {}) {
   const payload =
     buildPayload({
@@ -378,15 +661,20 @@ function emitNetworkState({
       online,
       reason,
       changed,
+      source,
     });
 
-  if (!silent) {
-    safeEmit(
-      events,
-      NETWORK_EVENTS.state,
-      payload
-    );
+  if (silent) {
+    return payload;
+  }
 
+  safeEmit(
+    events,
+    NETWORK_EVENTS.state,
+    payload
+  );
+
+  if (changed) {
     safeEmit(
       events,
       NETWORK_EVENTS.change,
@@ -423,12 +711,45 @@ function emitNetworkState({
   return payload;
 }
 
+function shouldThrottlePassiveSync(reason = "", force = false) {
+  if (force) {
+    return false;
+  }
+
+  const cleanReason =
+    safeText(reason, "");
+
+  if (
+    cleanReason === "online" ||
+    cleanReason === "offline" ||
+    cleanReason === "connection-change" ||
+    cleanReason === "bind" ||
+    cleanReason === "force"
+  ) {
+    return false;
+  }
+
+  const now =
+    Date.now();
+
+  return (
+    lastSyncAt > 0 &&
+    now - lastSyncAt < MIN_PASSIVE_SYNC_INTERVAL_MS
+  );
+}
+
 function addManualDisposer(disposer) {
   if (isFunction(disposer)) {
-    manualDisposers.push(disposer);
+    manualDisposers.add(disposer);
   }
 
   return disposer;
+}
+
+function removeManualDisposer(disposer) {
+  try {
+    manualDisposers.delete(disposer);
+  } catch {}
 }
 
 function bindDomEvent({
@@ -448,26 +769,36 @@ function bindDomEvent({
   }
 
   try {
-    if (isFunction(cleanup?.on)) {
-      return cleanup.on(
-        scope,
-        target,
-        eventName,
-        handler,
-        options
-      );
+    if (isFunction(cleanup?.event)) {
+      const dispose =
+        cleanup.event(
+          scope,
+          target,
+          eventName,
+          handler,
+          options
+        );
+
+      if (isFunction(dispose)) {
+        return dispose;
+      }
     }
   } catch {}
 
   try {
-    if (isFunction(cleanup?.event)) {
-      return cleanup.event(
-        scope,
-        target,
-        eventName,
-        handler,
-        options
-      );
+    if (isFunction(cleanup?.on)) {
+      const dispose =
+        cleanup.on(
+          scope,
+          target,
+          eventName,
+          handler,
+          options
+        );
+
+      if (isFunction(dispose)) {
+        return dispose;
+      }
     }
   } catch {}
 
@@ -486,6 +817,8 @@ function bindDomEvent({
           options
         );
 
+        removeManualDisposer(off);
+
         return true;
       } catch {
         return false;
@@ -500,6 +833,16 @@ function bindDomEvent({
   return () => false;
 }
 
+function clearManualDisposers() {
+  for (const dispose of Array.from(manualDisposers)) {
+    try {
+      dispose();
+    } catch {}
+  }
+
+  manualDisposers.clear();
+}
+
 /* =========================================================
    STATE SYNC
 ========================================================= */
@@ -508,47 +851,344 @@ export function syncNetworkState({
   state,
   events,
   utils,
+  setState,
   reason = "sync",
   emit = true,
   force = false,
+  source = "network",
 } = {}) {
+  const ctx =
+    updateActiveContext({
+      state,
+      events,
+      utils,
+      setState,
+    });
+
+  if (
+    shouldThrottlePassiveSync(
+      reason,
+      force
+    )
+  ) {
+    return buildPayload({
+      state:
+        ctx.state,
+      online:
+        lastOnline,
+      reason:
+        `${safeText(reason, "sync")}:throttled`,
+      changed:
+        false,
+      source,
+    });
+  }
+
   const online =
     getNavigatorOnline();
 
-  const changed =
-    force ||
-    lastOnline !== online;
+  const status =
+    onlineToStatus(online);
 
-  writeNetworkState(
-    state,
-    {
+  const changed =
+    force === true ||
+    lastOnline !== online ||
+    lastStatus !== status;
+
+  const patch =
+    buildStatePatch({
       online,
       reason,
       changed,
-    }
+    });
+
+  writeNetworkState(
+    ctx.state,
+    patch,
+    ctx.setState
   );
 
   lastOnline =
     online;
 
+  lastStatus =
+    status;
+
   lastReason =
     safeText(reason, "sync");
 
+  lastSyncAt =
+    Date.now();
+
   if (changed) {
     lastChangeAt =
-      Date.now();
+      lastSyncAt;
   }
 
+  const connection =
+    getConnectionSnapshot();
+
+  lastConnectionFingerprint =
+    connectionFingerprint(
+      connection
+    );
+
   return emitNetworkState({
-    state,
-    events,
-    utils,
+    state:
+      ctx.state,
+    events:
+      ctx.events,
+    utils:
+      ctx.utils,
     online,
     reason,
     changed,
     silent:
       emit === false,
+    source,
   });
+}
+
+/* =========================================================
+   EVENT HANDLERS
+========================================================= */
+
+function handleOnline() {
+  const ctx =
+    getActiveContext();
+
+  syncNetworkState({
+    state:
+      ctx.state,
+    events:
+      ctx.events,
+    utils:
+      ctx.utils,
+    setState:
+      ctx.setState,
+    reason:
+      "online",
+    emit:
+      true,
+    force:
+      false,
+    source:
+      "window:online",
+  });
+}
+
+function handleOffline() {
+  const ctx =
+    getActiveContext();
+
+  syncNetworkState({
+    state:
+      ctx.state,
+    events:
+      ctx.events,
+    utils:
+      ctx.utils,
+    setState:
+      ctx.setState,
+    reason:
+      "offline",
+    emit:
+      true,
+    force:
+      false,
+    source:
+      "window:offline",
+  });
+}
+
+function handleVisibilityChange() {
+  const ctx =
+    getActiveContext();
+
+  const nextVisibility =
+    getVisibilityState();
+
+  const changed =
+    lastVisibilityState !== nextVisibility;
+
+  lastVisibilityState =
+    nextVisibility;
+
+  const payload =
+    syncNetworkState({
+      state:
+        ctx.state,
+      events:
+        ctx.events,
+      utils:
+        ctx.utils,
+      setState:
+        ctx.setState,
+      reason:
+        "visibilitychange",
+      emit:
+        false,
+      force:
+        false,
+      source:
+        "document:visibilitychange",
+    });
+
+  if (changed) {
+    safeEmit(
+      ctx.events,
+      NETWORK_EVENTS.visibility,
+      {
+        ...payload,
+        visibilityState:
+          nextVisibility,
+      }
+    );
+  }
+}
+
+function handleFocus() {
+  const ctx =
+    getActiveContext();
+
+  const payload =
+    syncNetworkState({
+      state:
+        ctx.state,
+      events:
+        ctx.events,
+      utils:
+        ctx.utils,
+      setState:
+        ctx.setState,
+      reason:
+        "focus",
+      emit:
+        false,
+      force:
+        false,
+      source:
+        "window:focus",
+    });
+
+  safeEmit(
+    ctx.events,
+    NETWORK_EVENTS.focus,
+    payload
+  );
+}
+
+function handlePageShow(event = null) {
+  const ctx =
+    getActiveContext();
+
+  const payload =
+    syncNetworkState({
+      state:
+        ctx.state,
+      events:
+        ctx.events,
+      utils:
+        ctx.utils,
+      setState:
+        ctx.setState,
+      reason:
+        "pageshow",
+      emit:
+        false,
+      force:
+        false,
+      source:
+        "window:pageshow",
+    });
+
+  safeEmit(
+    ctx.events,
+    NETWORK_EVENTS.pageShow,
+    {
+      ...payload,
+      persisted:
+        Boolean(event?.persisted),
+    }
+  );
+}
+
+function handlePageHide(event = null) {
+  const ctx =
+    getActiveContext();
+
+  const payload =
+    buildPayload({
+      state:
+        ctx.state,
+      online:
+        lastOnline,
+      reason:
+        "pagehide",
+      changed:
+        false,
+      source:
+        "window:pagehide",
+    });
+
+  safeEmit(
+    ctx.events,
+    NETWORK_EVENTS.pageHide,
+    {
+      ...payload,
+      persisted:
+        Boolean(event?.persisted),
+    }
+  );
+}
+
+function handleConnectionChange() {
+  const ctx =
+    getActiveContext();
+
+  const connection =
+    getConnectionSnapshot();
+
+  const fingerprint =
+    connectionFingerprint(
+      connection
+    );
+
+  const changed =
+    fingerprint !== lastConnectionFingerprint;
+
+  lastConnectionFingerprint =
+    fingerprint;
+
+  const payload =
+    syncNetworkState({
+      state:
+        ctx.state,
+      events:
+        ctx.events,
+      utils:
+        ctx.utils,
+      setState:
+        ctx.setState,
+      reason:
+        "connection-change",
+      emit:
+        changed,
+      force:
+        false,
+      source:
+        "navigator:connection",
+    });
+
+  safeEmit(
+    ctx.events,
+    NETWORK_EVENTS.connection,
+    {
+      ...payload,
+      changed,
+      connection,
+    }
+  );
 }
 
 /* =========================================================
@@ -560,20 +1200,34 @@ export function bindNetworkEvents({
   events,
   cleanup,
   utils,
+  setState,
   scope = NETWORK_SCOPE,
   force = false,
 } = {}) {
+  updateActiveContext({
+    state,
+    events,
+    cleanup,
+    utils,
+    setState,
+    scope,
+  });
+
   if (!isBrowser()) {
-    writeNetworkState(
-      state,
-      {
+    const patch =
+      buildStatePatch({
         online:
           null,
         reason:
           "server",
         changed:
           false,
-      }
+      });
+
+    writeNetworkState(
+      state,
+      patch,
+      setState
     );
 
     return false;
@@ -587,10 +1241,15 @@ export function bindNetworkEvents({
       state,
       events,
       utils,
+      setState,
       reason:
         "already-bound",
       emit:
         false,
+      force:
+        false,
+      source:
+        "bindNetworkEvents",
     });
 
     return true;
@@ -601,86 +1260,20 @@ export function bindNetworkEvents({
     force
   ) {
     unbindNetworkEvents({
-      cleanup,
-      events,
-      utils,
-      scope,
+      cleanup:
+        activeContext.cleanup || cleanup,
+      events:
+        activeContext.events || events,
+      utils:
+        activeContext.utils || utils,
+      scope:
+        activeContext.scope || scope,
     });
   }
 
   try {
     cleanup?.scope?.(scope);
   } catch {}
-
-  const handleOnline = () => {
-    syncNetworkState({
-      state,
-      events,
-      utils,
-      reason:
-        "online",
-      emit:
-        true,
-      force:
-        true,
-    });
-  };
-
-  const handleOffline = () => {
-    syncNetworkState({
-      state,
-      events,
-      utils,
-      reason:
-        "offline",
-      emit:
-        true,
-      force:
-        true,
-    });
-  };
-
-  const handleVisibilityChange = () => {
-    syncNetworkState({
-      state,
-      events,
-      utils,
-      reason:
-        "visibilitychange",
-      emit:
-        false,
-      force:
-        false,
-    });
-  };
-
-  const handleFocus = () => {
-    syncNetworkState({
-      state,
-      events,
-      utils,
-      reason:
-        "focus",
-      emit:
-        false,
-      force:
-        false,
-    });
-  };
-
-  const handleConnectionChange = () => {
-    syncNetworkState({
-      state,
-      events,
-      utils,
-      reason:
-        "connection-change",
-      emit:
-        true,
-      force:
-        false,
-    });
-  };
 
   try {
     bindDomEvent({
@@ -727,11 +1320,30 @@ export function bindNetworkEvents({
         handleFocus,
     });
 
+    bindDomEvent({
+      cleanup,
+      scope,
+      target:
+        window,
+      eventName:
+        "pageshow",
+      handler:
+        handlePageShow,
+    });
+
+    bindDomEvent({
+      cleanup,
+      scope,
+      target:
+        window,
+      eventName:
+        "pagehide",
+      handler:
+        handlePageHide,
+    });
+
     const connection =
-      navigator.connection ||
-      navigator.mozConnection ||
-      navigator.webkitConnection ||
-      null;
+      getConnection();
 
     if (
       connection &&
@@ -752,17 +1364,30 @@ export function bindNetworkEvents({
     bound =
       true;
 
+    bindingId += 1;
+
+    lastVisibilityState =
+      getVisibilityState();
+
+    lastConnectionFingerprint =
+      connectionFingerprint(
+        getConnectionSnapshot()
+      );
+
     const payload =
       syncNetworkState({
         state,
         events,
         utils,
+        setState,
         reason:
           "bind",
         emit:
           false,
         force:
           true,
+        source:
+          "bindNetworkEvents",
       });
 
     safeEmit(
@@ -771,6 +1396,7 @@ export function bindNetworkEvents({
       {
         ...payload,
         scope,
+        bindingId,
       }
     );
 
@@ -799,44 +1425,66 @@ export function unbindNetworkEvents({
   utils,
   scope = NETWORK_SCOPE,
 } = {}) {
+  const finalCleanup =
+    cleanup ||
+    activeContext.cleanup;
+
+  const finalEvents =
+    events ||
+    activeContext.events;
+
+  const finalUtils =
+    utils ||
+    activeContext.utils;
+
+  const finalScope =
+    safeText(
+      scope ||
+        activeContext.scope,
+      NETWORK_SCOPE
+    );
+
   try {
-    if (isFunction(cleanup?.run)) {
-      cleanup.run(scope);
-    } else if (isFunction(cleanup?.clear)) {
-      cleanup.clear(scope);
-    } else if (isFunction(cleanup?.dispose)) {
-      cleanup.dispose(scope);
+    if (isFunction(finalCleanup?.run)) {
+      finalCleanup.run(finalScope);
+    } else if (isFunction(finalCleanup?.clear)) {
+      finalCleanup.clear(finalScope);
+    } else if (isFunction(finalCleanup?.dispose)) {
+      finalCleanup.dispose(finalScope);
     }
   } catch (error) {
     safeError(
-      utils,
-      events,
+      finalUtils,
+      finalEvents,
       error,
       "unbindNetworkEvents:cleanup"
     );
   }
 
-  for (const dispose of manualDisposers.splice(0)) {
-    try {
-      dispose();
-    } catch {}
-  }
+  clearManualDisposers();
 
   bound =
     false;
 
   safeEmit(
-    events,
+    finalEvents,
     NETWORK_EVENTS.unbound,
     {
-      scope,
+      version:
+        NETWORK_VERSION,
+
+      scope:
+        finalScope,
+
+      bindingId,
+
       at:
         safeIsoDate(),
     }
   );
 
   safeLog(
-    utils,
+    finalUtils,
     "Network events desactivados."
   );
 
@@ -850,16 +1498,39 @@ export function unbindNetworkEvents({
 export function getNetworkSnapshot({
   state,
 } = {}) {
+  const sourceState =
+    state ||
+    activeContext.state;
+
   return {
+    version:
+      NETWORK_VERSION,
+
     bound:
       Boolean(bound),
+
+    bindingId,
 
     online:
       getNavigatorOnline(),
 
+    status:
+      onlineToStatus(
+        getNavigatorOnline()
+      ),
+
     lastOnline,
 
+    lastStatus,
+
     lastReason,
+
+    lastSyncAt,
+
+    lastSyncAtIso:
+      lastSyncAt
+        ? safeIsoDate(lastSyncAt)
+        : "",
 
     lastChangeAt,
 
@@ -868,25 +1539,55 @@ export function getNetworkSnapshot({
         ? safeIsoDate(lastChangeAt)
         : "",
 
+    lastVisibilityState,
+
+    lastConnectionFingerprint,
+
+    manualDisposerCount:
+      manualDisposers.size,
+
+    activeScope:
+      activeContext.scope,
+
     state: {
       online:
-        state?.online ?? null,
+        sourceState?.online ?? null,
 
       offline:
-        state?.offline ?? null,
+        sourceState?.offline ?? null,
+
+      networkOnline:
+        sourceState?.networkOnline ?? null,
+
+      networkOffline:
+        sourceState?.networkOffline ?? null,
 
       networkStatus:
-        state?.networkStatus || "",
+        sourceState?.networkStatus || "",
 
       lastNetworkReason:
-        state?.lastNetworkReason || "",
+        sourceState?.lastNetworkReason || "",
+
+      lastNetworkSyncAt:
+        sourceState?.lastNetworkSyncAt || "",
 
       lastNetworkChangeAt:
-        state?.lastNetworkChangeAt || "",
+        sourceState?.lastNetworkChangeAt || "",
+
+      visibilityState:
+        sourceState?.networkVisibilityState || "",
+
+      hidden:
+        sourceState?.networkHidden ?? null,
+
+      connection:
+        sourceState?.networkConnection || null,
     },
 
     browser:
       getBrowserNetworkSnapshot(),
+
+    lastError,
   };
 }
 
@@ -894,7 +1595,17 @@ export function getNetworkSnapshot({
    EXPORT
 ========================================================= */
 
+export {
+  NETWORK_VERSION,
+  NETWORK_SCOPE,
+  NETWORK_EVENTS,
+};
+
 export default {
+  NETWORK_VERSION,
+  NETWORK_SCOPE,
+  NETWORK_EVENTS,
+
   bindNetworkEvents,
   unbindNetworkEvents,
   syncNetworkState,

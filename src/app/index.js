@@ -23,6 +23,8 @@
    - Evitar tormentas de eventos UI.
    - Mantener SidebarUI/TopbarUI montados una sola vez.
    - No rebinder SidebarUI/TopbarUI salvo petición explícita.
+   - Exponer Router/Auth/Store/Http/Toast/I18n/UI al Core.
+   - Resincronizar usuario/avatar después del montaje real de UI.
 
    FIX CRÍTICO:
    - NO hacer bindRouter() antes de renderInitialRoute().
@@ -30,6 +32,8 @@
    - No permitir que restore/auth/history limpien token antes de la vista.
    - Si restoreSession navega post-login, NO ejecutar renderInitialRoute() otra vez.
    - bindRouter() ocurre después del primer render/navegación resuelta.
+   - AppCore.syncUserUI() se repite tras montar SidebarUI/TopbarUI.
+   - Core recibe bridges Router/Auth/Store/Http desde fase temprana.
 
    FIX BOOT LOADER:
    - Toma control del loader estático de index.html desde el inicio.
@@ -1447,6 +1451,203 @@ export const App = (() => {
   }
 
   /* =======================================================
+     CORE MODULE BRIDGES
+  ======================================================= */
+
+  function registerCoreModule(name = "", value = null, aliases = []) {
+    const cleanName =
+      safeText(name, "");
+
+    if (
+      !cleanName ||
+      !value
+    ) {
+      return false;
+    }
+
+    const names =
+      Array.from(
+        new Set([
+          cleanName,
+          ...safeArray(aliases)
+            .map((item) => safeText(item, ""))
+            .filter(Boolean),
+        ])
+      );
+
+    for (const moduleName of names) {
+      let registered =
+        false;
+
+      try {
+        if (isFunction(AppCore?.modules?.register)) {
+          const result =
+            AppCore.modules.register(
+              moduleName,
+              value,
+              {
+                overwrite:
+                  true,
+                replace:
+                  true,
+                source:
+                  "app:index",
+              }
+            );
+
+          registered =
+            result !== false;
+        }
+      } catch {
+        registered =
+          false;
+      }
+
+      if (registered) {
+        continue;
+      }
+
+      try {
+        if (isFunction(AppCore?.modules?.set)) {
+          const result =
+            AppCore.modules.set(
+              moduleName,
+              value,
+              {
+                overwrite:
+                  true,
+                replace:
+                  true,
+                source:
+                  "app:index",
+              }
+            );
+
+          registered =
+            result !== false;
+        }
+      } catch {
+        registered =
+          false;
+      }
+
+      if (registered) {
+        continue;
+      }
+
+      try {
+        AppCore?.registry?.modules?.set?.(
+          moduleName,
+          value
+        );
+      } catch {}
+    }
+
+    return true;
+  }
+
+  function exposeRuntimeModulesToCore() {
+    try {
+      AppCore.Router = Router;
+    } catch {}
+
+    try {
+      AppCore.router = Router;
+    } catch {}
+
+    try {
+      AppCore.Auth = Auth;
+    } catch {}
+
+    try {
+      AppCore.auth = Auth;
+    } catch {}
+
+    try {
+      AppCore.Store = Store;
+    } catch {}
+
+    try {
+      AppCore.Http = Http;
+    } catch {}
+
+    registerCoreModule(
+      "Router",
+      Router,
+      [
+        "router",
+      ]
+    );
+
+    registerCoreModule(
+      "Auth",
+      Auth,
+      [
+        "auth",
+      ]
+    );
+
+    registerCoreModule(
+      "Store",
+      Store,
+      [
+        "store",
+      ]
+    );
+
+    registerCoreModule(
+      "Http",
+      Http,
+      [
+        "http",
+      ]
+    );
+
+    registerCoreModule(
+      "Toast",
+      Toast,
+      [
+        "toast",
+      ]
+    );
+
+    registerCoreModule(
+      "I18n",
+      I18n,
+      [
+        "i18n",
+      ]
+    );
+
+    registerCoreModule(
+      "SidebarUI",
+      SidebarUI,
+      [
+        "sidebar",
+        "sidebarUI",
+      ]
+    );
+
+    registerCoreModule(
+      "TopbarUI",
+      TopbarUI,
+      [
+        "topbar",
+        "topbarUI",
+      ]
+    );
+
+    return true;
+  }
+
+  /*
+    Compat legacy: algunos bloques siguen llamando exposeRouterToCore().
+  */
+  function exposeRouterToCore() {
+    return exposeRuntimeModulesToCore();
+  }
+
+  /* =======================================================
      UI FIREBREAK
   ======================================================= */
 
@@ -1726,21 +1927,63 @@ export const App = (() => {
           getUserSnapshot(),
       };
 
-      syncSidebarIdentity(
-        cleanReason,
-        context
-      );
+      /*
+        CRÍTICO:
+        El Core UI sabe respetar #sidebarAvatarImage y
+        #sidebarAvatarFallback. AppCore.init() puede ejecutarlo antes
+        de que SidebarUI monte el DOM, así que aquí lo repetimos
+        después del montaje real.
+      */
+      let coreUserUiPayload =
+        null;
 
-      syncTopbarIdentity(
-        cleanReason,
-        context
-      );
+      try {
+        coreUserUiPayload =
+          AppCore?.syncUserUI?.();
+      } catch (error) {
+        safeWarn(
+          "AppCore.syncUserUI() falló.",
+          {
+            reason:
+              cleanReason,
+            error,
+          }
+        );
+      }
+
+      const sidebarIdentity =
+        syncSidebarIdentity(
+          cleanReason,
+          context
+        );
+
+      const topbarIdentity =
+        syncTopbarIdentity(
+          cleanReason,
+          context
+        );
 
       safeEmit("app:user-ui:sync", {
         source:
           "app:index",
         reason:
           cleanReason,
+
+        coreSynced:
+          Boolean(coreUserUiPayload),
+
+        sidebarSynced:
+          Boolean(sidebarIdentity?.called),
+
+        sidebarMethods:
+          sidebarIdentity?.methods || [],
+
+        topbarSynced:
+          Boolean(topbarIdentity?.called),
+
+        topbarMethod:
+          topbarIdentity?.method || "",
+
         ...context.snapshot,
       });
 
@@ -2321,37 +2564,6 @@ export const App = (() => {
     );
   }
 
-  function exposeRouterToCore() {
-    try {
-      AppCore.Router = Router;
-    } catch {}
-
-    try {
-      AppCore.router = Router;
-    } catch {}
-
-    try {
-      if (
-        AppCore.modules &&
-        isFunction(AppCore.modules.register)
-      ) {
-        AppCore.modules.register("Router", Router);
-        AppCore.modules.register("router", Router);
-      }
-    } catch {}
-
-    try {
-      if (
-        AppCore.modules &&
-        typeof AppCore.modules === "object" &&
-        !isFunction(AppCore.modules.register)
-      ) {
-        AppCore.modules.Router = Router;
-        AppCore.modules.router = Router;
-      }
-    } catch {}
-  }
-
   function exposeBootUrlContextToCore() {
     const context =
       refreshBootUrlContext();
@@ -2772,11 +2984,11 @@ export const App = (() => {
 
   function configureRouterBlock() {
     if (state.routerConfigured) {
-      exposeRouterToCore();
+      exposeRuntimeModulesToCore();
       return;
     }
 
-    exposeRouterToCore();
+    exposeRuntimeModulesToCore();
 
     try {
       configureRouter?.();
@@ -2796,7 +3008,7 @@ export const App = (() => {
       } catch {}
     }
 
-    exposeRouterToCore();
+    exposeRuntimeModulesToCore();
 
     state.routerConfigured = true;
   }
@@ -2819,7 +3031,7 @@ export const App = (() => {
       } catch {}
     }
 
-    exposeRouterToCore();
+    exposeRuntimeModulesToCore();
 
     state.routerBound = true;
 
@@ -2865,6 +3077,14 @@ export const App = (() => {
 
     state.uiReady = true;
     state.uiMounted = true;
+
+    /*
+      Refuerzo directo tras montaje real:
+      Core UI puede haber sincronizado antes de existir sidebar/topbar.
+    */
+    try {
+      AppCore?.syncUserUI?.();
+    } catch {}
 
     repairUISystems(
       "init-ui",
@@ -3296,9 +3516,22 @@ export const App = (() => {
 
       refreshBootUrlContext();
 
+      /*
+        Bridge temprano:
+        Core, hooks, request, Auth y Router pueden necesitar referencias
+        cruzadas durante el boot. No esperamos a configurar Router.
+      */
+      exposeRuntimeModulesToCore();
+
       bindGlobalHandlersBlock();
 
       await AppCore.init();
+
+      /*
+        Refuerzo tras Core.init():
+        Si Core recreó/normalizó módulos, volvemos a exponer runtime.
+      */
+      exposeRuntimeModulesToCore();
 
       if (isStale(cycleId)) {
         return api;
@@ -3309,7 +3542,7 @@ export const App = (() => {
       const bootContext =
         exposeBootUrlContextToCore();
 
-      exposeRouterToCore();
+      exposeRuntimeModulesToCore();
 
       bindAppEventsBlock();
 
@@ -3417,8 +3650,14 @@ export const App = (() => {
     }
   }
 
-  function boot() {
-    if (state.booted) {
+  function boot(options = {}) {
+    const opts =
+      safeObject(options);
+
+    if (
+      state.booted &&
+      opts.force !== true
+    ) {
       repairUISystems(
         "boot-already-booted",
         {
@@ -3440,17 +3679,31 @@ export const App = (() => {
       return Promise.resolve(api);
     }
 
-    if (state.bootPromise) {
+    if (
+      state.bootPromise &&
+      opts.force !== true
+    ) {
       return state.bootPromise;
     }
 
     const cycleId =
       nextCycle();
 
-    state.bootPromise =
+    const promise =
       doBoot(cycleId);
 
-    return state.bootPromise;
+    state.bootPromise =
+      promise;
+
+    void promise
+      .finally(() => {
+        if (state.bootPromise === promise) {
+          state.bootPromise = null;
+        }
+      })
+      .catch(() => {});
+
+    return promise;
   }
 
   async function reboot() {
@@ -3479,7 +3732,10 @@ export const App = (() => {
 
     forceHideBootLoader("reboot-reset");
 
-    return boot();
+    return boot({
+      force:
+        true,
+    });
   }
 
   function getState() {
@@ -3521,6 +3777,9 @@ export const App = (() => {
 
       routerSnapshot:
         Router?.getSnapshot?.() || null,
+
+      coreSnapshot:
+        AppCore?.getSnapshot?.() || null,
 
       uiFirebreak: {
         uiRepairRunning,

@@ -13,18 +13,25 @@
      · sin CSS inline
      · sin estilos inyectados por JS
      · sin Google Fonts
+
    - Mantener Home separado en:
      · /src/css/views/home/index.css
+
    - Mantener Facturas partido en tres archivos:
      · /src/css/views/facturas/index.css
      · /src/css/views/facturas/create.css
      · /src/css/views/facturas/detail.css
+
    - Mantener Incidencias separado en:
      · /src/css/views/incidencias/index.css
      · /src/css/views/incidencias/create.css
      · /src/css/views/incidencias/detail.css
+
    - Mantener Cuenta separado en:
      · /src/css/views/cuenta/index.css
+
+   - Mantener Usuarios separado en:
+     · /src/css/views/usuarios/index.css
 
    ORDEN DE CASCADA:
    tokens < reset < core < layout < components < views < auth
@@ -94,7 +101,7 @@
    - El CSS vive fuera de home.template.js.
    - No usar CSS inline ni estilos inyectados por JS.
    - El template debe emitir solo clases/atributos.
-   - Este CSS debe cargarse antes de Facturas/Incidencias/Cuenta
+   - Este CSS debe cargarse antes de Facturas/Incidencias/Cuenta/Usuarios
      para que las vistas específicas puedan especializar patrones
      si comparten nombres/token behavior.
 ========================================================= */
@@ -172,6 +179,36 @@
 ========================================================= */
 
 @import url("./views/cuenta/index.css") layer(views);
+
+
+/* =========================================================
+   VIEWS · USUARIOS
+   Vista Usuarios / Administración de accesos:
+   - hero premium de usuarios
+   - stats admin
+   - filtros
+   - búsqueda
+   - tabla real blindada
+   - paginación fija visual a 5
+   - acciones de fila
+   - avatar real + fallback
+   - estados loading/empty/error
+   - acceso restringido / validación de permisos
+   - responsive
+   - light/dark token aligned
+
+   IMPORTANTE:
+   - El CSS vive fuera de usuarios.table.template.js.
+   - No usar renderStyles() dentro del template.
+   - No usar CSS inline ni estilos inyectados por JS.
+   - No usar style="" para avatares o banners.
+   - El template debe emitir solo clases/atributos.
+   - Este import debe ir después de Cuenta para que Usuarios
+     pueda especializar patrones admin sin contaminar vistas anteriores.
+   - Auth sigue al final por prioridad de pantalla pública/técnica.
+========================================================= */
+
+@import url("./views/usuarios/index.css") layer(views);
 
 
 /* =========================================================

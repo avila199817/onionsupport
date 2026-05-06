@@ -2,34 +2,38 @@
    Onion SPA - App Events
    Archivo: src/app/events.js
 
-   FINAL PRO SYSTEM · APP EVENTS / NO STORM / NO REBIND · 10/10
+   ONION SUPPORT · APP EVENTS
+   EVENT BUS · NO STORM · NO REBIND · ROUTER/AUTH/LANG SYNC · EXTREME 10/10
 
    RESPONSABILIDADES:
-   - bindear eventos internos de la app
-   - sincronizar UI ligera ante cambios de usuario/sesión/auth
-   - sincronizar idioma ante app:lang:change
-   - coordinar router:rendered con publicPath/UI/loader
-   - deduplicar toasts repetidos
-   - emitir telemetría ligera de lifecycle
-   - tolerar AppCore parcial o cleanup incompleto
+   - Bindear eventos internos de la app.
+   - Sincronizar UI ligera ante cambios de usuario/sesión/auth.
+   - Sincronizar idioma ante app:lang:change.
+   - Coordinar router:rendered con route/publicPath/loader.
+   - Deduplicar toasts repetidos.
+   - Emitir telemetría ligera de lifecycle.
+   - Tolerar AppCore parcial o cleanup incompleto.
 
-   FIX CRÍTICO EVENT STORM:
-   - NO usa AppCore.cleanup.event para eventos globales de app
-   - NO emite AppCore.events + window a la vez
-   - NO llama SidebarUI.repair()
-   - NO llama SidebarUI.rebind()
-   - NO llama SidebarUI.bindEvents()
-   - NO llama TopbarUI.rebind()
-   - NO dispara app:ui:repair-request desde router:rendered
-   - NO emite app:user-ui:sync desde AppEvents
-   - NO emite app:route:change desde router:rendered
-   - router:rendered solo sincroniza route/publicPath/loader
-   - router:shell:state NO dispara sync UI
-   - syncUserUI se llama una sola vez y con firma objeto
-   - fallback directo UI solo usa métodos ligeros
+   REGLAS CRÍTICAS:
+   - NO usa AppCore.cleanup.event para eventos globales de app.
+   - NO emite AppCore.events + window a la vez.
+   - NO llama SidebarUI.repair().
+   - NO llama SidebarUI.rebind().
+   - NO llama SidebarUI.bindEvents().
+   - NO llama TopbarUI.rebind().
+   - NO dispara app:ui:repair-request desde router:rendered.
+   - NO emite app:user-ui:sync desde AppEvents.
+   - NO emite app:route:change desde router:rendered.
+   - router:rendered solo sincroniza state route/publicPath + loader.
+   - router:shell:state es NOOP para evitar bucles.
 ========================================================= */
 
-import { getCurrentPublicPath } from "./helpers.js";
+import {
+  getCurrentPublicPath,
+  getCurrentCanonicalPath,
+  normalizePublicPath,
+  normalizeCanonicalPath,
+} from "./helpers.js";
 
 import {
   APP_SCOPE,
@@ -48,91 +52,86 @@ const DEFAULT_SCOPE =
   APP_SCOPE ||
   "app:events";
 
-const TOAST_DEDUPE_MS =
-  1200;
+const TOAST_DEDUPE_MS = 1200;
+const LANG_RERENDER_DEDUPE_MS = 250;
+const ROUTER_RENDER_SYNC_DEDUPE_MS = 40;
+const UI_SYNC_DEDUPE_MS = 80;
 
-const LANG_RERENDER_DEDUPE_MS =
-  250;
+const EVENT_NAMES = Object.freeze({
+  appReady:
+    APP_EVENTS?.ready || "app:ready",
 
-const ROUTER_RENDER_SYNC_DEDUPE_MS =
-  40;
+  appUiReady:
+    APP_EVENTS?.uiReady || "app:ui:ready",
 
-const EVENT_NAMES =
-  Object.freeze({
-    appReady:
-      APP_EVENTS?.ready || "app:ready",
+  appUiRepair:
+    APP_EVENTS?.uiRepair || "app:ui:repair",
 
-    appUiReady:
-      APP_EVENTS?.uiReady || "app:ui:ready",
+  appUiRepairRequest:
+    APP_EVENTS?.uiRepairRequest || "app:ui:repair-request",
 
-    appUiRepair:
-      APP_EVENTS?.uiRepair || "app:ui:repair",
+  appUserChange:
+    APP_EVENTS?.userChange || "app:user:change",
 
-    appUiRepairRequest:
-      APP_EVENTS?.uiRepairRequest || "app:ui:repair-request",
+  /*
+    Referencia legacy.
+    AppEvents NO debe emitir este evento.
+    Lo emite src/app/ui.js.
+  */
+  appUserUiSync:
+    "app:user-ui:sync",
 
-    appUserChange:
-      APP_EVENTS?.userChange || "app:user:change",
+  appEventsUiSynced:
+    "app:events:ui-synced",
 
-    /*
-      Evento caliente.
-      AppEvents NO debe emitirlo.
-      Lo mantiene como referencia legacy.
-    */
-    appUserUiSync:
-      "app:user-ui:sync",
+  appRouteSynced:
+    "app:events:route-synced",
 
-    appEventsUiSynced:
-      "app:events:ui-synced",
+  appSessionRestored:
+    APP_EVENTS?.sessionRestored || "app:session:restored",
 
-    appRouteSynced:
-      "app:events:route-synced",
+  appSessionCleared:
+    "app:session:cleared",
 
-    appSessionRestored:
-      APP_EVENTS?.sessionRestored || "app:session:restored",
+  appLangChange:
+    APP_EVENTS?.langChange || "app:lang:change",
 
-    appSessionCleared:
-      "app:session:cleared",
+  appRouteChange:
+    APP_EVENTS?.routeChange || "app:route:change",
 
-    appLangChange:
-      APP_EVENTS?.langChange || "app:lang:change",
+  appEventsReady:
+    "app:events:ready",
 
-    appRouteChange:
-      APP_EVENTS?.routeChange || "app:route:change",
+  appEventsBound:
+    "app:events:bound",
 
-    appEventsReady:
-      "app:events:ready",
+  appEventsUnbound:
+    "app:events:unbound",
 
-    appEventsBound:
-      "app:events:bound",
+  appEventsError:
+    "app:events:error",
 
-    appEventsUnbound:
-      "app:events:unbound",
+  authSessionRestored:
+    AUTH_EVENTS?.sessionRestored || "auth:session:restored",
 
-    appEventsError:
-      "app:events:error",
+  authLoginSuccess:
+    AUTH_EVENTS?.loginSuccess || "auth:login:success",
 
-    authSessionRestored:
-      AUTH_EVENTS?.sessionRestored || "auth:session:restored",
+  authLogout:
+    AUTH_EVENTS?.logout || "auth:logout",
 
-    authLoginSuccess:
-      AUTH_EVENTS?.loginSuccess || "auth:login:success",
+  authLogoutSuccess:
+    "auth:logout:success",
 
-    authLogout:
-      AUTH_EVENTS?.logout || "auth:logout",
+  routerRendered:
+    ROUTER_EVENTS?.rendered || "router:rendered",
 
-    authLogoutSuccess:
-      "auth:logout:success",
+  routerAsyncComplete:
+    ROUTER_EVENTS?.asyncComplete || "router:render:async-complete",
 
-    routerRendered:
-      ROUTER_EVENTS?.rendered || "router:rendered",
-
-    routerAsyncComplete:
-      ROUTER_EVENTS?.asyncComplete || "router:render:async-complete",
-
-    routerShellState:
-      ROUTER_EVENTS?.shellState || "router:shell:state",
-  });
+  routerShellState:
+    ROUTER_EVENTS?.shellState || "router:shell:state",
+});
 
 /*
   Métodos permitidos.
@@ -143,41 +142,36 @@ const EVENT_NAMES =
   - rebindEvents
   - init
 */
-const SIDEBAR_LIGHT_USER_METHODS =
-  Object.freeze([
-    "renderUser",
-    "refreshUser",
-    "updateUser",
-    "syncUser",
-  ]);
+const SIDEBAR_LIGHT_USER_METHODS = Object.freeze([
+  "renderUser",
+  "refreshUser",
+  "updateUser",
+  "syncUser",
+]);
 
-const SIDEBAR_LIGHT_VISUAL_METHODS =
-  Object.freeze([
-    "applyRoleVisibility",
-    "syncRouteAndIndicator",
-    "syncIndicator",
-    "updateToggleLabel",
-  ]);
+const SIDEBAR_LIGHT_VISUAL_METHODS = Object.freeze([
+  "applyRoleVisibility",
+  "syncRouteAndIndicator",
+  "syncIndicator",
+  "updateToggleLabel",
+]);
 
-const SIDEBAR_LIGHT_FALLBACK_METHODS =
-  Object.freeze([
-    "refresh",
-    "sync",
-  ]);
+const SIDEBAR_LIGHT_FALLBACK_METHODS = Object.freeze([
+  "refresh",
+  "sync",
+]);
 
-const TOPBAR_LIGHT_USER_METHODS =
-  Object.freeze([
-    "renderUser",
-    "refreshUser",
-    "updateUser",
-    "syncUser",
-  ]);
+const TOPBAR_LIGHT_USER_METHODS = Object.freeze([
+  "renderUser",
+  "refreshUser",
+  "updateUser",
+  "syncUser",
+]);
 
-const TOPBAR_LIGHT_FALLBACK_METHODS =
-  Object.freeze([
-    "refresh",
-    "sync",
-  ]);
+const TOPBAR_LIGHT_FALLBACK_METHODS = Object.freeze([
+  "refresh",
+  "sync",
+]);
 
 /* =========================================================
    INTERNAL STATE
@@ -196,23 +190,21 @@ let lastRouterRenderedAt = 0;
 let lastToastKey = "";
 let lastToastAt = 0;
 
+let lastUiSyncKey = "";
+let lastUiSyncAt = 0;
+
 const boundDisposers = [];
 
 const eventState = {
-  totalHandled:
-    0,
+  totalHandled: 0,
+  totalErrors: 0,
 
-  totalErrors:
-    0,
+  lastEvent: "",
+  lastEventAt: 0,
 
-  lastEvent:
-    "",
+  lastError: null,
 
-  lastEventAt:
-    0,
-
-  lastError:
-    null,
+  boundEvents: [],
 };
 
 /* =========================================================
@@ -234,8 +226,7 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
+  const text = String(value).trim();
 
   return text || fallback;
 }
@@ -243,7 +234,8 @@ function safeText(value, fallback = "") {
 function isObject(value) {
   return (
     value !== null &&
-    typeof value === "object"
+    typeof value === "object" &&
+    !Array.isArray(value)
   );
 }
 
@@ -280,8 +272,7 @@ function safeIsoDate(ms = safeNow()) {
 }
 
 function getEventPayload(eventOrPayload = {}) {
-  const raw =
-    eventOrPayload || {};
+  const raw = eventOrPayload || {};
 
   if (
     raw &&
@@ -305,21 +296,24 @@ function getEventPayload(eventOrPayload = {}) {
 }
 
 function createHandledPayload(eventName = "", payload = {}) {
-  const atMs =
-    safeNow();
+  const atMs = safeNow();
 
   return {
-    event:
-      safeText(eventName, "event"),
-
-    payload:
-      ensureObject(payload),
-
-    at:
-      safeIsoDate(atMs),
-
+    event: safeText(eventName, "event"),
+    payload: ensureObject(payload),
+    at: safeIsoDate(atMs),
     atMs,
   };
+}
+
+function safeMethod(target, methodName, args = []) {
+  try {
+    if (isFunction(target?.[methodName])) {
+      return target[methodName](...(Array.isArray(args) ? args : []));
+    }
+  } catch {}
+
+  return undefined;
 }
 
 /* =========================================================
@@ -328,42 +322,49 @@ function createHandledPayload(eventName = "", payload = {}) {
 
 function safeLog(AppCore, ...args) {
   try {
-    AppCore?.utils?.log?.(
-      "[AppEvents]",
-      ...args
-    );
+    AppCore?.utils?.log?.("[AppEvents]", ...args);
   } catch {}
 }
 
 function safeWarn(AppCore, ...args) {
-  try {
-    AppCore?.utils?.warn?.(
-      "[AppEvents]",
-      ...args
-    );
-  } catch {}
+  let emittedByCore = false;
 
   try {
-    console.warn(
-      "[AppEvents]",
-      ...args
-    );
+    if (isFunction(AppCore?.utils?.warn)) {
+      AppCore.utils.warn("[AppEvents]", ...args);
+      emittedByCore = true;
+    }
+  } catch {
+    emittedByCore = false;
+  }
+
+  if (emittedByCore) {
+    return;
+  }
+
+  try {
+    console.warn("[AppEvents]", ...args);
   } catch {}
 }
 
 function safeError(AppCore, ...args) {
-  try {
-    AppCore?.utils?.error?.(
-      "[AppEvents]",
-      ...args
-    );
-  } catch {}
+  let emittedByCore = false;
 
   try {
-    console.error(
-      "[AppEvents]",
-      ...args
-    );
+    if (isFunction(AppCore?.utils?.error)) {
+      AppCore.utils.error("[AppEvents]", ...args);
+      emittedByCore = true;
+    }
+  } catch {
+    emittedByCore = false;
+  }
+
+  if (emittedByCore) {
+    return;
+  }
+
+  try {
+    console.error("[AppEvents]", ...args);
   } catch {}
 }
 
@@ -378,8 +379,7 @@ function safeWindowDispatch(eventName, payload = {}) {
   try {
     window.dispatchEvent(
       new CustomEvent(eventName, {
-        detail:
-          payload,
+        detail: payload,
       })
     );
 
@@ -390,15 +390,13 @@ function safeWindowDispatch(eventName, payload = {}) {
 }
 
 function safeEmit(AppCore, eventName, payload = {}, options = {}) {
-  const cleanEventName =
-    safeText(eventName, "");
+  const cleanEventName = safeText(eventName, "");
 
   if (!cleanEventName) {
     return false;
   }
 
-  const opts =
-    ensureObject(options);
+  const opts = ensureObject(options);
 
   let busAvailable = false;
   let busEmitted = false;
@@ -406,12 +404,7 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   try {
     if (isFunction(AppCore?.events?.emit)) {
       busAvailable = true;
-
-      AppCore.events.emit(
-        cleanEventName,
-        payload
-      );
-
+      AppCore.events.emit(cleanEventName, payload);
       busEmitted = true;
     }
   } catch (error) {
@@ -430,16 +423,7 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
     opts.window === true ||
     (!busAvailable && isBrowser())
   ) {
-    const windowOk =
-      safeWindowDispatch(
-        cleanEventName,
-        payload
-      );
-
-    return Boolean(
-      busEmitted ||
-      windowOk
-    );
+    return safeWindowDispatch(cleanEventName, payload) || busEmitted;
   }
 
   return busEmitted;
@@ -447,34 +431,68 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
 
 function recordHandled(eventName = "", payload = {}) {
   eventState.totalHandled += 1;
+  eventState.lastEvent = safeText(eventName, "");
+  eventState.lastEventAt = safeNow();
 
-  eventState.lastEvent =
-    safeText(eventName, "");
+  return createHandledPayload(eventName, payload);
+}
 
-  eventState.lastEventAt =
-    safeNow();
+function normalizeError(error = null) {
+  if (!error) {
+    return null;
+  }
 
-  return createHandledPayload(
-    eventName,
-    payload
-  );
+  if (typeof error === "string") {
+    return {
+      name: "AppEventsError",
+      message: error,
+      code: "APP_EVENTS_ERROR",
+    };
+  }
+
+  const object = ensureObject(error);
+
+  const payload = {
+    name:
+      safeText(
+        object.name,
+        "AppEventsError"
+      ),
+
+    message:
+      safeText(
+        object.message || error,
+        "Error en App Events."
+      ),
+
+    code:
+      safeText(
+        object.code ||
+          object.status ||
+          object.statusCode,
+        "APP_EVENTS_ERROR"
+      ),
+  };
+
+  if (object.stack) {
+    payload.stack = safeText(object.stack, "");
+  }
+
+  return payload;
 }
 
 function recordError(AppCore, eventName = "", error = null) {
   eventState.totalErrors += 1;
 
   eventState.lastError = {
-    event:
-      safeText(eventName, ""),
-
+    event: safeText(eventName, ""),
+    error: normalizeError(error),
     message:
       safeText(
         error?.message || error,
         "Error en App Events."
       ),
-
-    at:
-      safeIsoDate(),
+    at: safeIsoDate(),
   };
 
   safeError(
@@ -510,27 +528,30 @@ function getAuthUser(Auth) {
 function getAuthStatus(Auth) {
   try {
     if (isFunction(Auth?.isAuthenticated)) {
-      return Boolean(
-        Auth.isAuthenticated()
-      );
+      return Boolean(Auth.isAuthenticated());
     }
   } catch {}
 
-  return Boolean(
-    Auth?.authenticated
-  );
+  return Boolean(Auth?.authenticated);
 }
 
 /* =========================================================
    TOAST
 ========================================================= */
 
-function safeToast(Toast, type, message, options = {}) {
-  const cleanType =
-    safeText(type, "info");
+function normalizeToastType(type = "info") {
+  const clean = safeText(type, "info").toLowerCase();
 
-  const cleanMessage =
-    safeText(message, "");
+  if (clean === "warn") {
+    return "warning";
+  }
+
+  return clean || "info";
+}
+
+function safeToast(Toast, type, message, options = {}) {
+  const cleanType = normalizeToastType(type);
+  const cleanMessage = safeText(message, "");
 
   if (!cleanMessage) {
     return null;
@@ -538,29 +559,20 @@ function safeToast(Toast, type, message, options = {}) {
 
   const payload = {
     ...ensureObject(options),
-    type:
-      cleanType,
-
-    message:
-      cleanMessage,
+    type: cleanType,
+    message: cleanMessage,
   };
 
   try {
     if (isFunction(Toast?.[cleanType])) {
-      return Toast[cleanType](
-        cleanMessage,
-        payload
-      );
+      return Toast[cleanType](cleanMessage, payload);
     }
 
     if (
       cleanType === "warning" &&
       isFunction(Toast?.warn)
     ) {
-      return Toast.warn(
-        cleanMessage,
-        payload
-      );
+      return Toast.warn(cleanMessage, payload);
     }
 
     if (isFunction(Toast?.show)) {
@@ -582,20 +594,12 @@ function toastOnce(
   options = {},
   dedupeMs = TOAST_DEDUPE_MS
 ) {
-  const cleanType =
-    safeText(type, "info");
+  const cleanType = normalizeToastType(type);
+  const cleanMessage = safeText(message, "");
+  const title = safeText(options?.title, "");
 
-  const cleanMessage =
-    safeText(message, "");
-
-  const title =
-    safeText(options?.title, "");
-
-  const key =
-    `${cleanType}:${title}:${cleanMessage}`;
-
-  const current =
-    safeNow();
+  const key = `${cleanType}:${title}:${cleanMessage}`;
+  const current = safeNow();
 
   if (
     key === lastToastKey &&
@@ -604,11 +608,8 @@ function toastOnce(
     return null;
   }
 
-  lastToastKey =
-    key;
-
-  lastToastAt =
-    current;
+  lastToastKey = key;
+  lastToastAt = current;
 
   return safeToast(
     Toast,
@@ -623,17 +624,14 @@ function toastOnce(
 ========================================================= */
 
 function safeSetLang(lang = "es") {
-  const cleanLang =
-    safeText(lang, "es");
+  const cleanLang = safeText(lang, "es");
 
   if (!isBrowser()) {
     return false;
   }
 
   try {
-    document.documentElement.lang =
-      cleanLang;
-
+    document.documentElement.lang = cleanLang;
     return true;
   } catch {}
 
@@ -658,8 +656,7 @@ async function safeRerenderCurrentRoute({
   rerenderCurrentRoute,
   reason = "lang-change",
 } = {}) {
-  const current =
-    safeNow();
+  const current = safeNow();
 
   if (
     current - lastLangRenderAt < LANG_RERENDER_DEDUPE_MS
@@ -667,8 +664,7 @@ async function safeRerenderCurrentRoute({
     return false;
   }
 
-  lastLangRenderAt =
-    current;
+  lastLangRenderAt = current;
 
   try {
     if (isFunction(rerenderCurrentRoute)) {
@@ -688,12 +684,11 @@ async function safeRerenderCurrentRoute({
     );
   }
 
-  const publicPath =
-    resolvePublicPath(
-      AppCore,
-      Router,
-      {}
-    );
+  const publicPath = resolvePublicPath(
+    AppCore,
+    Router,
+    {}
+  );
 
   try {
     if (isFunction(Router?.rerenderCurrentRoute)) {
@@ -719,10 +714,9 @@ async function safeRerenderCurrentRoute({
         Router.render(
           publicPath,
           {
-            force:
-              true,
-
+            force: true,
             reason,
+            preservePublicPath: true,
           }
         )
       );
@@ -743,12 +737,8 @@ async function safeRerenderCurrentRoute({
         Router.navigate(
           publicPath,
           {
-            replaceState:
-              true,
-
-            force:
-              true,
-
+            replaceState: true,
+            force: true,
             reason,
           }
         )
@@ -771,142 +761,155 @@ async function safeRerenderCurrentRoute({
    PATH / ROUTER
 ========================================================= */
 
-function resolvePublicPath(AppCore, Router, payload = {}) {
-  const data =
-    ensureObject(payload);
+function normalizePublicSafe(AppCore, path = "/") {
+  try {
+    return normalizePublicPath(AppCore, path);
+  } catch {}
+
+  return safeText(path, "/") || "/";
+}
+
+function normalizeCanonicalSafe(AppCore, path = "/") {
+  try {
+    return normalizeCanonicalPath(AppCore, path);
+  } catch {}
+
+  const raw = safeText(path, "/") || "/";
 
   return (
-    safeText(data.publicPath, "") ||
-    safeText(data.path, "") ||
-    safeText(data.href, "") ||
-    safeText(data.to, "") ||
-    safeText(data.route?.publicPath, "") ||
-    safeText(data.route?.path, "") ||
-    safeText(AppCore?.state?.publicPath, "") ||
-    safeText(Router?.getCurrentPublicPath?.(), "") ||
-    safeText(getCurrentPublicPath?.(AppCore), "") ||
+    raw
+      .split("?")[0]
+      .split("#")[0]
+      .replace(/^\/@[^/]+(?=\/|$)/i, "")
+      .replace(/\/+$/g, "") ||
     "/"
   );
+}
+
+function callRouterGetter(Router, methodName = "") {
+  try {
+    if (isFunction(Router?.[methodName])) {
+      return Router[methodName]();
+    }
+  } catch {}
+
+  return "";
+}
+
+function resolvePublicPath(AppCore, Router, payload = {}) {
+  const data = ensureObject(payload);
+
+  const candidate =
+    safeText(data.publicPath, "") ||
+    safeText(data.route?.publicPath, "") ||
+    safeText(data.href, "") ||
+    safeText(data.to, "") ||
+    safeText(data.path, "") ||
+    safeText(data.route?.path, "") ||
+    safeText(AppCore?.state?.publicPath, "") ||
+    safeText(callRouterGetter(Router, "getCurrentPublicPath"), "") ||
+    safeText(getCurrentPublicPath?.(AppCore, Router), "") ||
+    "/";
+
+  return normalizePublicSafe(AppCore, candidate);
 }
 
 function resolveCanonicalPath(AppCore, Router, payload = {}) {
-  const data =
-    ensureObject(payload);
+  const data = ensureObject(payload);
 
-  return (
+  const candidate =
     safeText(data.canonicalPath, "") ||
     safeText(data.route?.canonicalPath, "") ||
+    safeText(AppCore?.state?.route, "") ||
+    safeText(callRouterGetter(Router, "getCurrentCanonicalPath"), "") ||
+    safeText(getCurrentCanonicalPath?.(AppCore, Router), "") ||
     safeText(data.route?.path, "") ||
     safeText(data.path, "") ||
-    safeText(AppCore?.state?.route, "") ||
-    safeText(Router?.getCurrentCanonicalPath?.(), "") ||
-    resolvePublicPath(
-      AppCore,
-      Router,
-      data
-    ) ||
-    "/"
-  );
+    resolvePublicPath(AppCore, Router, data) ||
+    "/";
+
+  return normalizeCanonicalSafe(AppCore, candidate);
 }
 
-function safeSetPublicPath(AppCore, publicPath = "/") {
-  const cleanPath =
-    safeText(publicPath, "/");
+function safePatchRouteState(AppCore, {
+  route = "/",
+  publicPath = "/",
+} = {}) {
+  const cleanRoute = normalizeCanonicalSafe(AppCore, route);
+  const cleanPublicPath = normalizePublicSafe(AppCore, publicPath);
 
-  const current =
-    safeText(AppCore?.state?.publicPath, "");
+  const state = ensureObject(AppCore?.state);
 
-  if (current === cleanPath) {
-    return false;
+  const routeChanged =
+    safeText(state.route, "") !== cleanRoute;
+
+  const publicChanged =
+    safeText(state.publicPath, "") !== cleanPublicPath;
+
+  if (
+    !routeChanged &&
+    !publicChanged
+  ) {
+    return {
+      changed: false,
+      routeChanged: false,
+      publicChanged: false,
+      route: cleanRoute,
+      publicPath: cleanPublicPath,
+    };
   }
 
-  let ok = false;
+  const patch = {};
 
-  try {
-    AppCore?.setPublicPath?.(
-      cleanPath
-    );
+  if (routeChanged) {
+    patch.route = cleanRoute;
+  }
 
-    ok = true;
-  } catch {}
+  if (publicChanged) {
+    patch.publicPath = cleanPublicPath;
+  }
 
-  try {
-    AppCore?.setState?.({
-      publicPath:
-        cleanPath,
-    });
-
-    ok = true;
-  } catch {}
-
+  /*
+    Importante:
+    NO usamos AppCore.setRoute() ni AppCore.setPublicPath() aquí.
+    Esos métodos pueden emitir app:route:change.
+    AppEvents no debe emitir ni inducir app:route:change desde router:rendered.
+  */
   try {
     if (
       AppCore?.state &&
       typeof AppCore.state === "object"
     ) {
-      AppCore.state.publicPath =
-        cleanPath;
-
-      ok = true;
+      Object.assign(AppCore.state, patch);
     }
   } catch {}
 
-  return ok;
-}
+  safeMethod(AppCore, "setState", [patch]);
+  safeMethod(AppCore, "patchState", [patch]);
 
-function safeSetRoute(AppCore, route = "/") {
-  const cleanRoute =
-    safeText(route, "/");
-
-  const current =
-    safeText(AppCore?.state?.route, "");
-
-  if (current === cleanRoute) {
-    return false;
-  }
-
-  let ok = false;
-
-  try {
-    AppCore?.setRoute?.(
-      cleanRoute
-    );
-
-    ok = true;
-  } catch {}
-
-  try {
-    AppCore?.setState?.({
-      route:
-        cleanRoute,
-    });
-
-    ok = true;
-  } catch {}
-
-  try {
-    if (
-      AppCore?.state &&
-      typeof AppCore.state === "object"
-    ) {
-      AppCore.state.route =
-        cleanRoute;
-
-      ok = true;
-    }
-  } catch {}
-
-  return ok;
+  return {
+    changed: true,
+    routeChanged,
+    publicChanged,
+    route: cleanRoute,
+    publicPath: cleanPublicPath,
+  };
 }
 
 function safeApplyPostRenderLoaderPolicy({
   AppCore,
+  Router,
   applyPostRenderLoaderPolicy,
   payload = {},
 } = {}) {
   try {
     if (isFunction(applyPostRenderLoaderPolicy)) {
-      applyPostRenderLoaderPolicy(payload);
+      applyPostRenderLoaderPolicy({
+        AppCore,
+        Router,
+        ...ensureObject(payload),
+      });
+
       return true;
     }
   } catch (error) {
@@ -921,11 +924,8 @@ function safeApplyPostRenderLoaderPolicy({
 }
 
 function shouldSkipRouterRenderedSync(route = "/", publicPath = "/") {
-  const current =
-    safeNow();
-
-  const key =
-    `${safeText(route, "/")}|${safeText(publicPath, "/")}`;
+  const current = safeNow();
+  const key = `${safeText(route, "/")}|${safeText(publicPath, "/")}`;
 
   if (
     key === lastRouterRenderedKey &&
@@ -934,11 +934,8 @@ function shouldSkipRouterRenderedSync(route = "/", publicPath = "/") {
     return true;
   }
 
-  lastRouterRenderedKey =
-    key;
-
-  lastRouterRenderedAt =
-    current;
+  lastRouterRenderedKey = key;
+  lastRouterRenderedAt = current;
 
   return false;
 }
@@ -950,50 +947,33 @@ function shouldSkipRouterRenderedSync(route = "/", publicPath = "/") {
 function callFirstUiMethod(target, methodNames = [], context = {}) {
   if (!target) {
     return {
-      called:
-        false,
-
-      method:
-        "",
+      called: false,
+      method: "",
     };
   }
 
   for (const methodName of safeArray(methodNames)) {
-    const fn =
-      target?.[methodName];
+    const fn = target?.[methodName];
 
     if (!isFunction(fn)) {
       continue;
     }
 
     try {
-      fn.call(
-        target,
-        context.reason || context,
-        context
-      );
+      fn.call(target, context.reason || context, context);
 
       return {
-        called:
-          true,
-
-        method:
-          methodName,
+        called: true,
+        method: methodName,
       };
     } catch {}
 
     try {
-      fn.call(
-        target,
-        context
-      );
+      fn.call(target, context);
 
       return {
-        called:
-          true,
-
-        method:
-          methodName,
+        called: true,
+        method: methodName,
       };
     } catch {}
 
@@ -1001,21 +981,15 @@ function callFirstUiMethod(target, methodNames = [], context = {}) {
       fn.call(target);
 
       return {
-        called:
-          true,
-
-        method:
-          methodName,
+        called: true,
+        method: methodName,
       };
     } catch {}
   }
 
   return {
-    called:
-      false,
-
-    method:
-      "",
+    called: false,
+    method: "",
   };
 }
 
@@ -1024,16 +998,13 @@ function callAllUiMethods(target, methodNames = [], context = {}) {
 
   if (!target) {
     return {
-      called:
-        false,
-
+      called: false,
       methods,
     };
   }
 
   for (const methodName of safeArray(methodNames)) {
-    const fn =
-      target?.[methodName];
+    const fn = target?.[methodName];
 
     if (!isFunction(fn)) {
       continue;
@@ -1042,20 +1013,11 @@ function callAllUiMethods(target, methodNames = [], context = {}) {
     let called = false;
 
     try {
-      fn.call(
-        target,
-        context.reason || context,
-        context
-      );
-
+      fn.call(target, context.reason || context, context);
       called = true;
     } catch {
       try {
-        fn.call(
-          target,
-          context
-        );
-
+        fn.call(target, context);
         called = true;
       } catch {
         try {
@@ -1071,50 +1033,42 @@ function callAllUiMethods(target, methodNames = [], context = {}) {
   }
 
   return {
-    called:
-      methods.length > 0,
-
+    called: methods.length > 0,
     methods,
   };
 }
 
 function syncSidebarLight(SidebarUI, context = {}) {
-  const user =
-    callFirstUiMethod(
-      SidebarUI,
-      SIDEBAR_LIGHT_USER_METHODS,
-      context
-    );
+  const user = callFirstUiMethod(
+    SidebarUI,
+    SIDEBAR_LIGHT_USER_METHODS,
+    context
+  );
 
-  const visual =
-    callAllUiMethods(
-      SidebarUI,
-      SIDEBAR_LIGHT_VISUAL_METHODS,
-      context
-    );
+  const visual = callAllUiMethods(
+    SidebarUI,
+    SIDEBAR_LIGHT_VISUAL_METHODS,
+    context
+  );
 
   let fallback = {
-    called:
-      false,
-
-    method:
-      "",
+    called: false,
+    method: "",
   };
 
   /*
     Fallback solo si no hay métodos ligeros.
-    refresh/sync son aceptables porque SidebarUI ya está blindado.
+    refresh/sync son aceptables; repair/rebind/bind siguen prohibidos.
   */
   if (
     !user.called &&
     !visual.called
   ) {
-    fallback =
-      callFirstUiMethod(
-        SidebarUI,
-        SIDEBAR_LIGHT_FALLBACK_METHODS,
-        context
-      );
+    fallback = callFirstUiMethod(
+      SidebarUI,
+      SIDEBAR_LIGHT_FALLBACK_METHODS,
+      context
+    );
   }
 
   return {
@@ -1125,40 +1079,30 @@ function syncSidebarLight(SidebarUI, context = {}) {
         fallback.called
       ),
 
-    user:
-      user.method,
-
-    visual:
-      visual.methods,
-
-    fallback:
-      fallback.method,
+    user: user.method,
+    visual: visual.methods,
+    fallback: fallback.method,
   };
 }
 
 function syncTopbarLight(TopbarUI, context = {}) {
-  const user =
-    callFirstUiMethod(
-      TopbarUI,
-      TOPBAR_LIGHT_USER_METHODS,
-      context
-    );
+  const user = callFirstUiMethod(
+    TopbarUI,
+    TOPBAR_LIGHT_USER_METHODS,
+    context
+  );
 
   let fallback = {
-    called:
-      false,
-
-    method:
-      "",
+    called: false,
+    method: "",
   };
 
   if (!user.called) {
-    fallback =
-      callFirstUiMethod(
-        TopbarUI,
-        TOPBAR_LIGHT_FALLBACK_METHODS,
-        context
-      );
+    fallback = callFirstUiMethod(
+      TopbarUI,
+      TOPBAR_LIGHT_FALLBACK_METHODS,
+      context
+    );
   }
 
   return {
@@ -1168,12 +1112,36 @@ function syncTopbarLight(TopbarUI, context = {}) {
         fallback.called
       ),
 
-    user:
-      user.method,
-
-    fallback:
-      fallback.method,
+    user: user.method,
+    fallback: fallback.method,
   };
+}
+
+function getUiSyncDedupeKey(context = {}) {
+  return [
+    safeText(context.route, "/"),
+    safeText(context.publicPath, "/"),
+    Boolean(context.authenticated) ? "auth" : "anon",
+    safeText(context.user?.username || context.user?.email || "", ""),
+    safeText(context.user?.role || context.user?.rol || context.role || "", ""),
+  ].join("|");
+}
+
+function shouldSkipUiSync(context = {}) {
+  const current = safeNow();
+  const key = getUiSyncDedupeKey(context);
+
+  if (
+    key === lastUiSyncKey &&
+    current - lastUiSyncAt < UI_SYNC_DEDUPE_MS
+  ) {
+    return true;
+  }
+
+  lastUiSyncKey = key;
+  lastUiSyncAt = current;
+
+  return false;
 }
 
 function safeSyncUI({
@@ -1189,7 +1157,16 @@ function safeSyncUI({
   reason = "sync-ui",
   payload = {},
   emit = true,
+  force = false,
 } = {}) {
+  const publicPath = resolvePublicPath(AppCore, Router, payload);
+  const route = resolveCanonicalPath(AppCore, Router, payload);
+
+  const user =
+    AppCore?.state?.user ||
+    getAuthUser(Auth) ||
+    null;
+
   const context = {
     AppCore,
     Auth,
@@ -1200,30 +1177,13 @@ function safeSyncUI({
     Toast,
     I18n,
 
-    reason:
-      safeText(reason, "sync-ui"),
+    reason: safeText(reason, "sync-ui"),
+    payload: ensureObject(payload),
 
-    payload:
-      ensureObject(payload),
+    route,
+    publicPath,
 
-    route:
-      resolveCanonicalPath(
-        AppCore,
-        Router,
-        payload
-      ),
-
-    publicPath:
-      resolvePublicPath(
-        AppCore,
-        Router,
-        payload
-      ),
-
-    user:
-      AppCore?.state?.user ||
-      getAuthUser(Auth) ||
-      null,
+    user,
 
     authenticated:
       Boolean(
@@ -1232,19 +1192,22 @@ function safeSyncUI({
       ),
   };
 
-  let ok = false;
+  if (
+    force !== true &&
+    shouldSkipUiSync(context)
+  ) {
+    return true;
+  }
 
-  let usedInjectedSync =
-    false;
+  let ok = false;
+  let usedInjectedSync = false;
 
   let sidebarResult = {
-    ok:
-      false,
+    ok: false,
   };
 
   let topbarResult = {
-    ok:
-      false,
+    ok: false,
   };
 
   /*
@@ -1255,11 +1218,8 @@ function safeSyncUI({
     try {
       syncUserUI({
         ...context,
-        rebind:
-          false,
-
-        hardRepair:
-          false,
+        rebind: false,
+        hardRepair: false,
       });
 
       usedInjectedSync = true;
@@ -1274,20 +1234,11 @@ function safeSyncUI({
   }
 
   /*
-    Si no se inyecta syncUserUI, hacemos fallback ligero directo.
+    Fallback ligero directo si no se inyecta syncUserUI.
   */
   if (!usedInjectedSync) {
-    sidebarResult =
-      syncSidebarLight(
-        SidebarUI,
-        context
-      );
-
-    topbarResult =
-      syncTopbarLight(
-        TopbarUI,
-        context
-      );
+    sidebarResult = syncSidebarLight(SidebarUI, context);
+    topbarResult = syncTopbarLight(TopbarUI, context);
 
     ok =
       Boolean(
@@ -1306,29 +1257,18 @@ function safeSyncUI({
       AppCore,
       EVENT_NAMES.appEventsUiSynced,
       {
-        source:
-          "app:events",
+        source: "app:events",
+        reason: context.reason,
 
-        reason:
-          context.reason,
+        route: context.route,
+        publicPath: context.publicPath,
 
-        route:
-          context.route,
+        authenticated: context.authenticated,
 
-        publicPath:
-          context.publicPath,
+        injected: usedInjectedSync,
 
-        authenticated:
-          context.authenticated,
-
-        injected:
-          usedInjectedSync,
-
-        sidebar:
-          sidebarResult,
-
-        topbar:
-          topbarResult,
+        sidebar: sidebarResult,
+        topbar: topbarResult,
       }
     );
   }
@@ -1342,20 +1282,11 @@ function safeRequestUiRepair(AppCore, reason = "event", payload = {}) {
     NO se usa automáticamente desde router:rendered.
   */
   const detail = {
-    reason:
-      safeText(reason, "event"),
-
-    payload:
-      ensureObject(payload),
-
-    hardRepair:
-      false,
-
-    rebind:
-      false,
-
-    at:
-      safeIsoDate(),
+    reason: safeText(reason, "event"),
+    payload: ensureObject(payload),
+    hardRepair: false,
+    rebind: false,
+    at: safeIsoDate(),
   };
 
   safeEmit(
@@ -1377,9 +1308,19 @@ function rememberDisposer(disposer) {
   }
 }
 
+function rememberBoundEvent(eventName = "") {
+  const clean = safeText(eventName, "");
+
+  if (
+    clean &&
+    !eventState.boundEvents.includes(clean)
+  ) {
+    eventState.boundEvents.push(clean);
+  }
+}
+
 function bindViaBus(AppCore, eventName, handler) {
-  const bus =
-    AppCore?.events;
+  const bus = AppCore?.events;
 
   if (
     !bus ||
@@ -1389,24 +1330,19 @@ function bindViaBus(AppCore, eventName, handler) {
   }
 
   try {
-    const maybeOff =
-      bus.on(
-        eventName,
-        handler
-      );
+    const maybeOff = bus.on(eventName, handler);
 
     if (isFunction(maybeOff)) {
       rememberDisposer(maybeOff);
     } else if (isFunction(bus.off)) {
       rememberDisposer(() => {
         try {
-          bus.off(
-            eventName,
-            handler
-          );
+          bus.off(eventName, handler);
         } catch {}
       });
     }
+
+    rememberBoundEvent(eventName);
 
     return true;
   } catch {}
@@ -1420,21 +1356,15 @@ function bindViaWindow(eventName, handler, options = false) {
   }
 
   try {
-    window.addEventListener(
-      eventName,
-      handler,
-      options
-    );
+    window.addEventListener(eventName, handler, options);
 
     rememberDisposer(() => {
       try {
-        window.removeEventListener(
-          eventName,
-          handler,
-          options
-        );
+        window.removeEventListener(eventName, handler, options);
       } catch {}
     });
+
+    rememberBoundEvent(eventName);
 
     return true;
   } catch {}
@@ -1457,20 +1387,13 @@ function bindAppEvent({
   }
 
   const wrappedHandler = async (eventOrPayload = {}) => {
-    const payload =
-      getEventPayload(eventOrPayload);
+    const payload = getEventPayload(eventOrPayload);
 
-    recordHandled(
-      eventName,
-      payload
-    );
+    recordHandled(eventName, payload);
 
     try {
       await Promise.resolve(
-        handler(
-          payload,
-          eventOrPayload
-        )
+        handler(payload, eventOrPayload)
       );
     } catch (error) {
       recordError(
@@ -1484,14 +1407,14 @@ function bindAppEvent({
   /*
     Clave anti-firebreak:
     NO usamos AppCore.cleanup.event aquí.
-    Bus interno primero. Window solo si no hay bus.
+    Bus interno primero.
+    Window solo si no hay bus.
   */
-  const boundToBus =
-    bindViaBus(
-      AppCore,
-      eventName,
-      wrappedHandler
-    );
+  const boundToBus = bindViaBus(
+    AppCore,
+    eventName,
+    wrappedHandler
+  );
 
   if (boundToBus) {
     return true;
@@ -1530,86 +1453,50 @@ function bindUserEvents(context) {
 
   bindAppEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.appUserChange,
-
-    handler:
-      (payload) => {
-        sync(
-          "app:user:change",
-          payload
-        );
-      },
+    eventName: EVENT_NAMES.appUserChange,
+    handler: (payload) => {
+      sync("app:user:change", payload);
+    },
   });
 
   bindAppEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.appSessionRestored,
-
-    handler:
-      (payload) => {
-        sync(
-          "app:session:restored",
-          payload
-        );
-      },
+    eventName: EVENT_NAMES.appSessionRestored,
+    handler: (payload) => {
+      sync("app:session:restored", payload);
+    },
   });
 
   bindAppEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.authSessionRestored,
-
-    handler:
-      (payload) => {
-        sync(
-          "auth:session:restored",
-          payload
-        );
-      },
+    eventName: EVENT_NAMES.authSessionRestored,
+    handler: (payload) => {
+      sync("auth:session:restored", payload);
+    },
   });
 
   bindAppEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.appSessionCleared,
-
-    handler:
-      (payload) => {
-        sync(
-          "app:session:cleared",
-          payload
-        );
-      },
+    eventName: EVENT_NAMES.appSessionCleared,
+    handler: (payload) => {
+      sync("app:session:cleared", payload);
+    },
   });
 
   bindAppEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.appUiReady,
-
-    handler:
-      (payload) => {
-        sync(
-          "app:ui:ready",
-          payload
-        );
-      },
+    eventName: EVENT_NAMES.appUiReady,
+    handler: (payload) => {
+      sync("app:ui:ready", payload);
+    },
   });
 
   bindAppEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.appReady,
-
-    handler:
-      (payload) => {
-        sync(
-          "app:ready",
-          payload
-        );
-      },
+    eventName: EVENT_NAMES.appReady,
+    handler: (payload) => {
+      sync("app:ready", payload);
+    },
   });
 }
 
@@ -1624,60 +1511,53 @@ function bindLanguageEvents(context) {
 
   bindAppEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.appLangChange,
+    eventName: EVENT_NAMES.appLangChange,
+    handler: async (payload) => {
+      const lang = resolveLang(
+        AppCore,
+        I18n,
+        payload
+      );
 
-    handler:
-      async (payload) => {
-        const lang =
-          resolveLang(
-            AppCore,
-            I18n,
-            payload
-          );
+      safeSetLang(lang);
 
-        safeSetLang(lang);
+      if (langChangeInFlight) {
+        return;
+      }
 
-        if (langChangeInFlight) {
-          return;
-        }
+      langChangeInFlight = true;
 
-        langChangeInFlight =
-          true;
-
-        try {
+      try {
+        if (payload?.rerender !== false) {
           await safeRerenderCurrentRoute({
             AppCore,
             Router,
             rerenderCurrentRoute,
-            reason:
-              "app:lang:change",
+            reason: "app:lang:change",
           });
-        } finally {
-          langChangeInFlight =
-            false;
         }
+      } finally {
+        langChangeInFlight = false;
+      }
 
-        /*
-          No forzamos safeSyncUI aquí:
-          src/app/ui.js ya escucha app:lang:change.
-          SidebarEvents también reacciona visualmente.
-          Así evitamos triple commit.
-        */
+      /*
+        No forzamos safeSyncUI aquí:
+        src/app/ui.js ya escucha app:lang:change.
+        Así evitamos triple commit.
+      */
 
+      if (payload?.toast !== false) {
         toastOnce(
           Toast,
           "success",
           "Idioma actualizado",
           {
-            title:
-              "Idioma",
-
-            duration:
-              2200,
+            title: "Idioma",
+            duration: 2200,
           }
         );
-      },
+      }
+    },
   });
 }
 
@@ -1689,76 +1569,61 @@ function bindAuthEvents(context) {
 
   bindAppEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.authLoginSuccess,
+    eventName: EVENT_NAMES.authLoginSuccess,
+    handler: (payload) => {
+      safeSyncUI({
+        ...context,
+        reason: "auth:login:success",
+        payload,
+        force: true,
+      });
 
-    handler:
-      (payload) => {
-        safeSyncUI({
-          ...context,
-          reason:
-            "auth:login:success",
-          payload,
-        });
-
-        toastOnce(
-          Toast,
-          "success",
-          "Sesión iniciada correctamente.",
-          {
-            title:
-              "Bienvenido",
-
-            duration:
-              2600,
-          }
-        );
-      },
+      toastOnce(
+        Toast,
+        "success",
+        "Sesión iniciada correctamente.",
+        {
+          title: "Bienvenido",
+          duration: 2600,
+        }
+      );
+    },
   });
 
   bindAppEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.authLogoutSuccess,
+    eventName: EVENT_NAMES.authLogoutSuccess,
+    handler: (payload) => {
+      safeSyncUI({
+        ...context,
+        reason: "auth:logout:success",
+        payload,
+        force: true,
+      });
 
-    handler:
-      (payload) => {
-        safeSyncUI({
-          ...context,
-          reason:
-            "auth:logout:success",
-          payload,
-        });
-
-        toastOnce(
-          Toast,
-          "info",
-          "Sesión cerrada correctamente.",
-          {
-            title:
-              "Sesión finalizada",
-
-            duration:
-              2600,
-          }
-        );
-      },
+      toastOnce(
+        Toast,
+        "info",
+        "Sesión cerrada correctamente.",
+        {
+          title: "Sesión finalizada",
+          duration: 2600,
+        }
+      );
+    },
   });
 
   bindAppEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.authLogout,
-
-    handler:
-      (payload) => {
-        safeSyncUI({
-          ...context,
-          reason:
-            "auth:logout",
-          payload,
-        });
-      },
+    eventName: EVENT_NAMES.authLogout,
+    handler: (payload) => {
+      safeSyncUI({
+        ...context,
+        reason: "auth:logout",
+        payload,
+        force: true,
+      });
+    },
   });
 }
 
@@ -1770,19 +1635,17 @@ function bindRouterEvents(context) {
   } = context;
 
   const onRouterRendered = (payload = {}) => {
-    const publicPath =
-      resolvePublicPath(
-        AppCore,
-        Router,
-        payload
-      );
+    const publicPath = resolvePublicPath(
+      AppCore,
+      Router,
+      payload
+    );
 
-    const canonicalPath =
-      resolveCanonicalPath(
-        AppCore,
-        Router,
-        payload
-      );
+    const canonicalPath = resolveCanonicalPath(
+      AppCore,
+      Router,
+      payload
+    );
 
     if (
       shouldSkipRouterRenderedSync(
@@ -1793,20 +1656,17 @@ function bindRouterEvents(context) {
       return;
     }
 
-    const publicChanged =
-      safeSetPublicPath(
-        AppCore,
-        publicPath
-      );
-
-    const routeChanged =
-      safeSetRoute(
-        AppCore,
-        canonicalPath
-      );
-
-    safeApplyPostRenderLoaderPolicy({
+    const routePatch = safePatchRouteState(
       AppCore,
+      {
+        route: canonicalPath,
+        publicPath,
+      }
+    );
+
+    const loaderPolicyApplied = safeApplyPostRenderLoaderPolicy({
+      AppCore,
+      Router,
       applyPostRenderLoaderPolicy,
       payload,
     });
@@ -1819,106 +1679,84 @@ function bindRouterEvents(context) {
 
       router:rendered ya lo escuchan:
       - src/app/index.js
-      - src/ui/sidebar/events.js
-      - posiblemente TopbarUI
-
-      Si AppEvents también sincroniza/repara aquí, duplica commits.
+      - SidebarEvents
+      - TopbarUI si aplica
     */
     safeEmit(
       AppCore,
       EVENT_NAMES.appRouteSynced,
       {
-        source:
-          "app:events",
+        source: "app:events",
 
         reason:
           payload?.phase ||
           payload?.reason ||
           "router:rendered",
 
-        route:
-          canonicalPath,
-
+        route: canonicalPath,
         publicPath,
 
-        routeChanged:
-          Boolean(routeChanged),
+        routeChanged: Boolean(routePatch.routeChanged),
+        publicChanged: Boolean(routePatch.publicChanged),
+        changed: Boolean(routePatch.changed),
 
-        publicChanged:
-          Boolean(publicChanged),
+        loaderPolicyApplied,
 
-        silent:
-          true,
+        silent: true,
       }
     );
   };
 
   bindAppEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.routerRendered,
-
-    handler:
-      onRouterRendered,
+    eventName: EVENT_NAMES.routerRendered,
+    handler: onRouterRendered,
   });
 
   bindAppEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.routerAsyncComplete,
+    eventName: EVENT_NAMES.routerAsyncComplete,
+    handler: (payload) => {
+      const publicPath = resolvePublicPath(
+        AppCore,
+        Router,
+        payload
+      );
 
-    handler:
-      (payload) => {
-        const publicPath =
-          resolvePublicPath(
-            AppCore,
-            Router,
-            payload
-          );
+      const canonicalPath = resolveCanonicalPath(
+        AppCore,
+        Router,
+        payload
+      );
 
-        const canonicalPath =
-          resolveCanonicalPath(
-            AppCore,
-            Router,
-            payload
-          );
+      safeEmit(
+        AppCore,
+        EVENT_NAMES.appRouteSynced,
+        {
+          source: "app:events",
+          reason: "router:render:async-complete",
 
-        safeEmit(
-          AppCore,
-          EVENT_NAMES.appRouteSynced,
-          {
-            source:
-              "app:events",
+          route: canonicalPath,
+          publicPath,
 
-            reason:
-              "router:render:async-complete",
-
-            route:
-              canonicalPath,
-
-            publicPath,
-
-            silent:
-              true,
-          }
-        );
-      },
+          silent: true,
+        }
+      );
+    },
   });
 
   bindAppEvent({
     AppCore,
-    eventName:
-      EVENT_NAMES.routerShellState,
+    eventName: EVENT_NAMES.routerShellState,
+    handler: () => {
+      /*
+        NOOP intencionado.
 
-    handler:
-      () => {
-        /*
-          NOOP intencionado.
-          router:shell:state puede venir de Router.repairShell().
-          Si aquí sincronizamos UI, reentramos en el circuito:
-            shell state -> sync UI -> repair shell -> shell state...
-        */
-      },
+        router:shell:state puede venir de Router.repairShell().
+        Si aquí sincronizamos UI, reentramos en:
+          shell state -> sync UI -> repair shell -> shell state...
+      */
+    },
   });
 }
 
@@ -1942,37 +1780,25 @@ export function bindAppEvents({
   rerenderCurrentRoute,
   applyPostRenderLoaderPolicy,
 } = {}) {
-  if (
-    eventsBound ||
-    eventsBindingInFlight
-  ) {
+  if (eventsBound) {
     return true;
   }
 
   if (eventsBindingInFlight) {
     safeWarn(
       AppCore,
-      "bindAppEvents skipped: binding already in progress.",
+      "bindAppEvents omitido: binding ya en curso.",
       {
-        scope:
-          safeText(
-            scope,
-            DEFAULT_SCOPE
-          ),
+        scope: safeText(scope, DEFAULT_SCOPE),
       }
     );
 
-    return false;
+    return true;
   }
 
-  eventsBindingInFlight =
-    true;
+  eventsBindingInFlight = true;
 
-  const finalScope =
-    safeText(
-      scope,
-      DEFAULT_SCOPE
-    );
+  const finalScope = safeText(scope, DEFAULT_SCOPE);
 
   const context = {
     AppCore,
@@ -1984,8 +1810,7 @@ export function bindAppEvents({
     Toast,
     I18n,
 
-    scope:
-      finalScope,
+    scope: finalScope,
 
     syncUserUI,
     rerenderCurrentRoute,
@@ -1998,21 +1823,16 @@ export function bindAppEvents({
     bindAuthEvents(context);
     bindRouterEvents(context);
 
-    eventsBound =
-      true;
-
-    boundScope =
-      finalScope;
+    eventsBound = true;
+    boundScope = finalScope;
 
     safeEmit(
       AppCore,
       EVENT_NAMES.appEventsBound,
       {
-        scope:
-          boundScope,
-
-        at:
-          safeIsoDate(),
+        scope: boundScope,
+        at: safeIsoDate(),
+        boundEvents: [...eventState.boundEvents],
       }
     );
 
@@ -2026,8 +1846,8 @@ export function bindAppEvents({
       AppCore,
       "App events ready.",
       {
-        scope:
-          boundScope,
+        scope: boundScope,
+        boundEvents: [...eventState.boundEvents],
       }
     );
   } catch (error) {
@@ -2037,10 +1857,8 @@ export function bindAppEvents({
       } catch {}
     }
 
-    eventsBound =
-      false;
-    boundScope =
-      "";
+    eventsBound = false;
+    boundScope = "";
 
     recordError(
       AppCore,
@@ -2050,8 +1868,7 @@ export function bindAppEvents({
 
     return false;
   } finally {
-    eventsBindingInFlight =
-      false;
+    eventsBindingInFlight = false;
   }
 
   return true;
@@ -2064,23 +1881,19 @@ export function unbindAppEvents(AppCore = null) {
     } catch {}
   }
 
-  eventsBound =
-    false;
+  eventsBound = false;
+  boundScope = "";
 
-  boundScope =
-    "";
+  langChangeInFlight = false;
+  eventsBindingInFlight = false;
 
-  langChangeInFlight =
-    false;
-  eventsBindingInFlight =
-    false;
+  eventState.boundEvents = [];
 
   safeEmit(
     AppCore,
     EVENT_NAMES.appEventsUnbound,
     {
-      at:
-        safeIsoDate(),
+      at: safeIsoDate(),
     }
   );
 
@@ -2094,75 +1907,76 @@ export function unbindAppEvents(AppCore = null) {
 
 export function getAppEventsSnapshot() {
   return {
-    eventsBound:
-      Boolean(eventsBound),
-
-    eventsBindingInFlight:
-      Boolean(eventsBindingInFlight),
+    eventsBound: Boolean(eventsBound),
+    eventsBindingInFlight: Boolean(eventsBindingInFlight),
 
     boundScope,
 
-    langChangeInFlight:
-      Boolean(langChangeInFlight),
+    boundEvents: [...eventState.boundEvents],
+    boundDisposers: boundDisposers.length,
 
+    langChangeInFlight: Boolean(langChangeInFlight),
     lastLangRenderAt,
+    lastLangRenderAtIso:
+      lastLangRenderAt
+        ? safeIsoDate(lastLangRenderAt)
+        : "",
 
     lastRouterRenderedKey,
     lastRouterRenderedAt,
+    lastRouterRenderedAtIso:
+      lastRouterRenderedAt
+        ? safeIsoDate(lastRouterRenderedAt)
+        : "",
 
     lastToastKey,
     lastToastAt,
+    lastToastAtIso:
+      lastToastAt
+        ? safeIsoDate(lastToastAt)
+        : "",
 
-    totalHandled:
-      eventState.totalHandled,
+    lastUiSyncKey,
+    lastUiSyncAt,
+    lastUiSyncAtIso:
+      lastUiSyncAt
+        ? safeIsoDate(lastUiSyncAt)
+        : "",
 
-    totalErrors:
-      eventState.totalErrors,
+    totalHandled: eventState.totalHandled,
+    totalErrors: eventState.totalErrors,
 
-    lastEvent:
-      eventState.lastEvent,
+    lastEvent: eventState.lastEvent,
+    lastEventAt: eventState.lastEventAt,
+    lastEventAtIso:
+      eventState.lastEventAt
+        ? safeIsoDate(eventState.lastEventAt)
+        : "",
 
-    lastEventAt:
-      eventState.lastEventAt,
-
-    lastError:
-      eventState.lastError,
+    lastError: eventState.lastError,
   };
 }
 
 export function resetAppEventsState() {
-  langChangeInFlight =
-    false;
+  langChangeInFlight = false;
+  lastLangRenderAt = 0;
 
-  lastLangRenderAt =
-    0;
+  lastRouterRenderedKey = "";
+  lastRouterRenderedAt = 0;
 
-  lastRouterRenderedKey =
-    "";
+  lastToastKey = "";
+  lastToastAt = 0;
 
-  lastRouterRenderedAt =
-    0;
+  lastUiSyncKey = "";
+  lastUiSyncAt = 0;
 
-  lastToastKey =
-    "";
+  eventState.totalHandled = 0;
+  eventState.totalErrors = 0;
 
-  lastToastAt =
-    0;
+  eventState.lastEvent = "";
+  eventState.lastEventAt = 0;
 
-  eventState.totalHandled =
-    0;
-
-  eventState.totalErrors =
-    0;
-
-  eventState.lastEvent =
-    "";
-
-  eventState.lastEventAt =
-    0;
-
-  eventState.lastError =
-    null;
+  eventState.lastError = null;
 
   return getAppEventsSnapshot();
 }
@@ -2178,6 +1992,5 @@ export default {
   getAppEventsSnapshot,
   resetAppEventsState,
 
-  requestUiRepair:
-    safeRequestUiRepair,
+  requestUiRepair: safeRequestUiRepair,
 };

@@ -2,7 +2,7 @@
    Onion SPA - Core Events
    Archivo: src/core/events.js
 
-   FINAL PRO SYSTEM · EVENT BUS / FIREBREAK SAFE · 10/10
+   FINAL PRO SYSTEM · EVENT BUS / FIREBREAK SAFE · 11/10
 
    Responsabilidades:
    - centralizar el event bus del core
@@ -27,12 +27,8 @@
    - no congela la SPA si un módulo emite en bucle
    - redacción defensiva de tokens/secrets en snapshots
    - captura errores async de handlers con .catch()
-
-   FIREBREAK:
-   - eventos críticos no se bloquean por rate normal
-   - eventos UI low-priority tienen rate propio
-   - eventos absolutos siguen protegidos por max-absolute-rate
-   - app:state/session/user/token/router/auth/core protegidos
+   - soporte wildcard "*" en memoria para diagnóstico
+   - alias snapshot/getSnapshot/getDebugSnapshot
 ========================================================= */
 
 import {
@@ -47,11 +43,14 @@ import {
 const DEFAULT_TARGET =
   "document";
 
+const WILDCARD_EVENT =
+  "*";
+
 const MAX_RECENT_EVENTS =
-  80;
+  96;
 
 const EVENTS_VERSION =
-  "10.3.0";
+  "11.0.0";
 
 const MAX_SYNC_EMIT_DEPTH =
   12;
@@ -71,6 +70,9 @@ const MAX_LOW_PRIORITY_EMITS_PER_WINDOW =
 const MAX_LOW_PRIORITY_EMITS_PER_EVENT_PER_WINDOW =
   360;
 
+const MAX_CRITICAL_EMITS_PER_EVENT_PER_WINDOW =
+  720;
+
 const MAX_ABSOLUTE_EMITS_PER_WINDOW =
   5000;
 
@@ -80,15 +82,10 @@ const DROP_WARNING_INTERVAL_MS =
 const NOISY_RECENT_SAMPLE_MS =
   160;
 
-/*
-  Eventos críticos exactos.
-
-  Estos no deben quedar bloqueados por ruido de UI, sidebar,
-  topbar, loader, toast o renders repetidos.
-*/
 const CRITICAL_EVENT_NAMES =
   new Set([
     "app:ready",
+    "app:boot:start",
     "app:boot:ready",
     "app:boot:complete",
     "app:boot:error",
@@ -98,6 +95,7 @@ const CRITICAL_EVENT_NAMES =
     "app:core:init:error",
 
     "app:state:change",
+    "app:state:patched",
 
     "app:route:change",
     "app:public-path:change",
@@ -119,6 +117,7 @@ const CRITICAL_EVENT_NAMES =
     "app:theme:change",
 
     "app:module:registered",
+    "app:module:replaced",
 
     "router:before-render",
     "router:rendered",
@@ -137,11 +136,6 @@ const CRITICAL_EVENT_NAMES =
     "app:request:error",
   ]);
 
-/*
-  Prefijos críticos.
-
-  Ojo: no se usa "app:" completo para no convertir todo en crítico.
-*/
 const CRITICAL_EVENT_PREFIXES =
   Object.freeze([
     "router:",
@@ -150,10 +144,6 @@ const CRITICAL_EVENT_PREFIXES =
     "app:session:",
   ]);
 
-/*
-  Eventos UI/telemetría ruidosos.
-  Tienen rate propio y no consumen el contador normal.
-*/
 const LOW_PRIORITY_EVENT_PREFIXES =
   Object.freeze([
     "sidebar:",
@@ -191,10 +181,10 @@ const SILENT_DROP_PREFIXES =
   ]);
 
 const SENSITIVE_KEY_RE =
-  /token|authorization|cookie|password|secret|credential|session|jwt|bearer/i;
+  /token|authorization|cookie|password|secret|credential|session|jwt|bearer|refresh|access|otp|mfa|2fa|code/i;
 
 const TOKENISH_TEXT_RE =
-  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)/i;
+  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|resetToken|access_token|refresh_token|id_token|code|t)=)[^&#\s]+/i;
 
 /* =========================================================
    BASICS
@@ -334,6 +324,16 @@ function getOptionsTarget(options = false) {
     return options.target;
   }
 
+  const normalized =
+    normalizeOptions(options);
+
+  if (
+    isObject(normalized) &&
+    normalized.target
+  ) {
+    return normalized.target;
+  }
+
   return null;
 }
 
@@ -360,10 +360,6 @@ function normalizeDomOptions(options = false) {
     return false;
   }
 
-  /*
-    No pasamos once ni target a addEventListener.
-    once se controla manualmente para poder limpiar activeListeners.
-  */
   return {
     capture:
       Boolean(normalized.capture),
@@ -418,6 +414,27 @@ function wantsFirebreakBypass(options = false) {
     isObject(normalized) &&
     normalized.bypassFirebreak === true
   );
+}
+
+function wantsWindowMirror(options = false, defaultValue = false) {
+  if (
+    isObject(options) &&
+    typeof options.mirrorToWindow === "boolean"
+  ) {
+    return options.mirrorToWindow;
+  }
+
+  const normalized =
+    normalizeOptions(options);
+
+  if (
+    isObject(normalized) &&
+    typeof normalized.mirrorToWindow === "boolean"
+  ) {
+    return normalized.mirrorToWindow;
+  }
+
+  return Boolean(defaultValue);
 }
 
 function isEventTargetLike(target) {
@@ -682,14 +699,25 @@ function redactString(value = "") {
     return text;
   }
 
-  if (TOKENISH_TEXT_RE.test(text)) {
-    return text.replace(
-      TOKENISH_TEXT_RE,
-      "***"
-    );
+  try {
+    return text
+      .replace(
+        /(bearer\s+)([a-z0-9._~+/=-]+)/gi,
+        "$1***"
+      )
+      .replace(
+        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)([^&#\s]+)/gi,
+        "$1***"
+      )
+      .replace(
+        /([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)/gi,
+        "***"
+      );
+  } catch {
+    return TOKENISH_TEXT_RE.test(text)
+      ? "***"
+      : text;
   }
-
-  return text;
 }
 
 function shouldRedactKey(key = "") {
@@ -700,7 +728,9 @@ function shouldRedactKey(key = "") {
 
 function safePreview(value, depth = 0, keyHint = "") {
   if (shouldRedactKey(keyHint)) {
-    return "***";
+    return value
+      ? "***"
+      : null;
   }
 
   if (depth > 2) {
@@ -739,9 +769,11 @@ function safePreview(value, depth = 0, keyHint = "") {
         value.name || "Error",
 
       message:
-        safeText(
-          value.message,
-          "Error"
+        redactString(
+          safeText(
+            value.message,
+            "Error"
+          )
         ),
 
       stack:
@@ -779,7 +811,9 @@ function safePreview(value, depth = 0, keyHint = "") {
     for (const [key, item] of entries) {
       output[key] =
         shouldRedactKey(key)
-          ? "***"
+          ? item
+            ? "***"
+            : null
           : safePreview(
               item,
               depth + 1,
@@ -834,6 +868,8 @@ export function createEvents({
   maxLowPriorityEmitsPerWindow = MAX_LOW_PRIORITY_EMITS_PER_WINDOW,
   maxLowPriorityEmitsPerEventPerWindow = MAX_LOW_PRIORITY_EMITS_PER_EVENT_PER_WINDOW,
 
+  maxCriticalEmitsPerEventPerWindow = MAX_CRITICAL_EMITS_PER_EVENT_PER_WINDOW,
+
   maxAbsoluteEmitsPerWindow = MAX_ABSOLUTE_EMITS_PER_WINDOW,
 
   rateWindowMs = RATE_WINDOW_MS,
@@ -879,10 +915,12 @@ export function createEvents({
       EVENTS_VERSION,
 
     target:
-      safeText(
-        target,
-        DEFAULT_TARGET
-      ),
+      typeof target === "string"
+        ? safeText(
+            target,
+            DEFAULT_TARGET
+          )
+        : "custom",
 
     browser:
       localIsBrowser(),
@@ -906,6 +944,9 @@ export function createEvents({
       0,
 
     dropCount:
+      0,
+
+    wildcardEmitCount:
       0,
 
     lastEvent:
@@ -1021,9 +1062,11 @@ export function createEvents({
         ),
 
       message:
-        safeText(
-          error?.message || error,
-          "Event bus error."
+        redactString(
+          safeText(
+            error?.message || error,
+            "Event bus error."
+          )
         ),
 
       stack:
@@ -1227,6 +1270,26 @@ export function createEvents({
 
     if (eventClass === "critical") {
       criticalEmitsInWindow += 1;
+
+      if (
+        currentEventCount >
+        safeNumber(
+          maxCriticalEmitsPerEventPerWindow,
+          MAX_CRITICAL_EMITS_PER_EVENT_PER_WINDOW
+        )
+      ) {
+        recordDrop(
+          name,
+          "max-critical-event-rate",
+          {
+            currentEventCount,
+            maxCriticalEmitsPerEventPerWindow,
+          }
+        );
+
+        return false;
+      }
+
       return true;
     }
 
@@ -1441,6 +1504,50 @@ export function createEvents({
     }
   }
 
+  function callWildcardSafely({
+    handler,
+    eventName = "",
+    payload = {},
+    event = null,
+  } = {}) {
+    if (!isFunction(handler)) {
+      return false;
+    }
+
+    try {
+      const result =
+        handler(
+          eventName,
+          payload,
+          event
+        );
+
+      if (
+        result &&
+        typeof result === "object" &&
+        isFunction(result.catch)
+      ) {
+        result.catch((error) => {
+          recordError(
+            "wildcard-handler:async",
+            error,
+            eventName
+          );
+        });
+      }
+
+      return true;
+    } catch (error) {
+      recordError(
+        "wildcard-handler",
+        error,
+        eventName
+      );
+
+      return false;
+    }
+  }
+
   function emitMemory(name = "", detail = {}) {
     const eventName =
       normalizeEventName(name);
@@ -1481,6 +1588,46 @@ export function createEvents({
     return true;
   }
 
+  function emitWildcardMemory(name = "", detail = {}, event = null) {
+    const eventName =
+      normalizeEventName(name);
+
+    const set =
+      memoryListeners.get(WILDCARD_EVENT);
+
+    if (
+      !set ||
+      !set.size
+    ) {
+      return false;
+    }
+
+    state.wildcardEmitCount += 1;
+
+    const eventLike =
+      event ||
+      makeEventLike(
+        eventName,
+        detail,
+        null
+      );
+
+    for (const record of Array.from(set)) {
+      callWildcardSafely({
+        handler:
+          record.handler,
+
+        eventName,
+        payload:
+          detail,
+        event:
+          eventLike,
+      });
+    }
+
+    return true;
+  }
+
   function dispatchDomEvent({
     eventName = "",
     payload = {},
@@ -1505,9 +1652,16 @@ export function createEvents({
         return false;
       }
 
-      return Boolean(
-        domTarget.dispatchEvent(event)
+      const result =
+        domTarget.dispatchEvent(event);
+
+      emitWildcardMemory(
+        eventName,
+        payload,
+        event
       );
+
+      return Boolean(result);
     } catch (error) {
       recordError(
         source,
@@ -1576,7 +1730,7 @@ export function createEvents({
           });
 
         if (
-          mirrorToWindow &&
+          wantsWindowMirror(options, mirrorToWindow) &&
           domTarget !== getWindowTarget()
         ) {
           dispatchDomEvent({
@@ -1594,6 +1748,12 @@ export function createEvents({
             eventName,
             payload
           );
+
+        emitWildcardMemory(
+          eventName,
+          payload,
+          null
+        );
       }
 
       return emitted;
@@ -1652,10 +1812,14 @@ export function createEvents({
       getOptionsTarget(options);
 
     const targetRef =
-      optionsTarget || target;
+      eventName === WILDCARD_EVENT
+        ? "memory"
+        : optionsTarget || target;
 
     const domTarget =
-      resolveTarget(targetRef);
+      eventName === WILDCARD_EVENT
+        ? null
+        : resolveTarget(targetRef);
 
     const key =
       makeListenerKey({
@@ -1683,6 +1847,7 @@ export function createEvents({
       null;
 
     if (
+      eventName !== WILDCARD_EVENT &&
       localIsBrowser() &&
       isEventTargetLike(domTarget)
     ) {
@@ -1843,7 +2008,9 @@ export function createEvents({
       getOptionsTarget(options);
 
     const targetRef =
-      optionsTarget || target;
+      eventName === WILDCARD_EVENT
+        ? "memory"
+        : optionsTarget || target;
 
     const key =
       makeListenerKey({
@@ -1873,6 +2040,7 @@ export function createEvents({
 
     try {
       if (
+        eventName !== WILDCARD_EVENT &&
         localIsBrowser() &&
         isEventTargetLike(domTarget)
       ) {
@@ -1930,14 +2098,54 @@ export function createEvents({
     let dispose =
       null;
 
-    const wrappedOnce = (event) => {
+    let called =
+      false;
+
+    const wrappedOnce = (...args) => {
+      if (called) {
+        return;
+      }
+
+      called =
+        true;
+
       try {
         dispose?.();
       } catch {}
 
+      if (eventName === WILDCARD_EVENT) {
+        try {
+          const result =
+            handler(...args);
+
+          if (
+            result &&
+            typeof result === "object" &&
+            isFunction(result.catch)
+          ) {
+            result.catch((error) => {
+              recordError(
+                "once-wildcard-handler:async",
+                error,
+                eventName
+              );
+            });
+          }
+        } catch (error) {
+          recordError(
+            "once-wildcard-handler",
+            error,
+            eventName
+          );
+        }
+
+        return;
+      }
+
       callHandlerSafely({
         handler,
-        event,
+        event:
+          args[0],
         eventName,
         source:
           "once-handler",
@@ -2076,6 +2284,9 @@ export function createEvents({
       dropCount:
         state.dropCount,
 
+      wildcardEmitCount:
+        state.wildcardEmitCount,
+
       lastEvent:
         state.lastEvent,
 
@@ -2112,6 +2323,8 @@ export function createEvents({
 
         maxLowPriorityEmitsPerWindow,
         maxLowPriorityEmitsPerEventPerWindow,
+
+        maxCriticalEmitsPerEventPerWindow,
 
         maxAbsoluteEmitsPerWindow,
 
@@ -2219,6 +2432,9 @@ export function createEvents({
     state.dropCount =
       0;
 
+    state.wildcardEmitCount =
+      0;
+
     state.lastEvent =
       "";
 
@@ -2248,6 +2464,8 @@ export function createEvents({
 
     getSnapshot,
     getDebugSnapshot:
+      getSnapshot,
+    snapshot:
       getSnapshot,
 
     reset,

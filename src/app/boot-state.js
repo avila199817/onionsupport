@@ -3,7 +3,7 @@
    Archivo: src/app/boot-state.js
 
    ONION SUPPORT · APP BOOT STATE
-   BOOT FLAGS · LOADER FLAGS · STORE SYNC · EXTREME 10/10
+   BOOT FLAGS · LOADER FLAGS · STORE SYNC · DOCUMENT SYNC · EXTREME 13/10
 
    RESPONSABILIDADES:
    - Sincronizar estado de boot de AppCore.
@@ -14,6 +14,7 @@
    - Sincronizar clases/datasets de html/body.
    - Emitir eventos de boot consistentes sin duplicar bus + window.
    - Exponer snapshots de diagnóstico seguros.
+   - Mantener compatibilidad con loader.js, shell.js e index.js.
 
    HARDENING:
    - Tolerancia total a módulos parciales.
@@ -23,42 +24,123 @@
    - Cero throws accidentales.
    - Normalización estricta de fases.
    - Firma comparable para evitar tormenta de eventos.
+   - Redacción de tokens en errores, stacks, URLs y snapshots.
+   - No duplica AppCore.events + window.
 ========================================================= */
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-export const BOOT_PHASES = Object.freeze({
-  IDLE: "idle",
-  BOOTING: "booting",
-  READY: "ready",
-  ERROR: "error",
-});
+export const BOOT_PHASES =
+  Object.freeze({
+    IDLE:
+      "idle",
 
-export const BOOT_EVENTS = Object.freeze({
-  APP_STATE: "app:boot:state",
-  APP_START: "app:boot:start",
-  APP_READY: "app:boot:ready",
-  APP_ERROR: "app:boot:error",
+    BOOTING:
+      "booting",
 
-  STORE_STATE: "store:boot:state",
-  STORE_START: "store:boot:start",
-  STORE_READY: "store:boot:ready",
-  STORE_ERROR: "store:boot:error",
+    READY:
+      "ready",
 
-  BOOT_STATE: "boot:state",
-  BOOT_START: "boot:start",
-  BOOT_READY: "boot:ready",
-  BOOT_ERROR: "boot:error",
-  REBOOT: "boot:reboot",
-});
+    ERROR:
+      "error",
+  });
 
-const APP_SIGNATURES = new WeakMap();
-const STORE_SIGNATURES = new WeakMap();
+export const BOOT_EVENTS =
+  Object.freeze({
+    APP_STATE:
+      "app:boot:state",
 
-let fallbackAppSignature = "";
-let fallbackStoreSignature = "";
+    APP_START:
+      "app:boot:start",
+
+    APP_READY:
+      "app:boot:ready",
+
+    APP_ERROR:
+      "app:boot:error",
+
+    STORE_STATE:
+      "store:boot:state",
+
+    STORE_START:
+      "store:boot:start",
+
+    STORE_READY:
+      "store:boot:ready",
+
+    STORE_ERROR:
+      "store:boot:error",
+
+    BOOT_STATE:
+      "boot:state",
+
+    BOOT_START:
+      "boot:start",
+
+    BOOT_READY:
+      "boot:ready",
+
+    BOOT_ERROR:
+      "boot:error",
+
+    REBOOT:
+      "boot:reboot",
+
+    DOCUMENT_STATE:
+      "app:boot:document-state",
+  });
+
+const SENSITIVE_QUERY_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
+    "code",
+    "t",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
+  ]);
+
+const DOCUMENT_BOOT_CLASSES =
+  Object.freeze([
+    "app-booting",
+    "app-loading",
+    "app-ready",
+    "app-error",
+    "app-fatal",
+  ]);
+
+const APP_SIGNATURES =
+  new WeakMap();
+
+const STORE_SIGNATURES =
+  new WeakMap();
+
+const DOCUMENT_SIGNATURES =
+  new WeakMap();
+
+let fallbackAppSignature =
+  "";
+
+let fallbackStoreSignature =
+  "";
+
+let fallbackDocumentSignature =
+  "";
 
 /* =========================================================
    BASICS
@@ -79,11 +161,29 @@ function isObject(value) {
   );
 }
 
-function isWeakMapKey(value) {
+function isObjectLike(value) {
   return (
-    isObject(value) ||
-    typeof value === "function"
+    value !== null &&
+    (
+      typeof value === "object" ||
+      typeof value === "function"
+    )
   );
+}
+
+function isWeakMapKey(value) {
+  return isObjectLike(value);
+}
+
+function isExtensibleObject(value) {
+  try {
+    return (
+      isObjectLike(value) &&
+      Object.isExtensible(value)
+    );
+  } catch {}
+
+  return false;
 }
 
 function ensureObject(value) {
@@ -98,10 +198,13 @@ function isFunction(value) {
 
 function hasOwn(value, key) {
   try {
-    return Object.prototype.hasOwnProperty.call(value, key);
-  } catch {
-    return false;
-  }
+    return Object.prototype.hasOwnProperty.call(
+      value,
+      key
+    );
+  } catch {}
+
+  return false;
 }
 
 function safeBool(value, fallback = false) {
@@ -111,6 +214,41 @@ function safeBool(value, fallback = false) {
 
   if (value === false) {
     return false;
+  }
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === "string") {
+    const key =
+      value.trim().toLowerCase();
+
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "si",
+        "sí",
+        "ok",
+        "on",
+      ].includes(key)
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "off",
+      ].includes(key)
+    ) {
+      return false;
+    }
   }
 
   return Boolean(fallback);
@@ -124,13 +262,15 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value).trim();
 
   return text || fallback;
 }
 
 function safeInteger(value, fallback = 0) {
-  const number = Number(value);
+  const number =
+    Number(value);
 
   if (!Number.isFinite(number)) {
     return fallback;
@@ -140,12 +280,19 @@ function safeInteger(value, fallback = 0) {
 }
 
 function nowPayload() {
-  const ms = Date.now();
+  let ms = 0;
+
+  try {
+    ms = Date.now();
+  } catch {
+    ms = 0;
+  }
 
   let iso = "";
 
   try {
-    iso = new Date(ms).toISOString();
+    iso =
+      new Date(ms).toISOString();
   } catch {
     iso = "";
   }
@@ -172,25 +319,188 @@ function safeInvoke(fn, thisArg = null, args = []) {
 }
 
 function safeMethod(target, methodName, args = []) {
-  const object = ensureObject(target);
+  if (
+    !target ||
+    !methodName
+  ) {
+    return undefined;
+  }
 
   return safeInvoke(
-    object?.[methodName],
-    object,
+    target?.[methodName],
+    target,
     args
   );
 }
 
 function safeAssign(target, payload) {
   try {
-    if (isObject(target)) {
-      Object.assign(target, payload);
+    if (
+      target &&
+      typeof target === "object"
+    ) {
+      Object.assign(
+        target,
+        payload
+      );
+
       return true;
     }
   } catch {}
 
   return false;
 }
+
+function safeDefineValue(target, key, value) {
+  if (
+    !target ||
+    !key ||
+    !isExtensibleObject(target)
+  ) {
+    return false;
+  }
+
+  try {
+    Object.defineProperty(
+      target,
+      key,
+      {
+        value,
+        configurable:
+          true,
+        enumerable:
+          false,
+        writable:
+          true,
+      }
+    );
+
+    return true;
+  } catch {}
+
+  try {
+    target[key] =
+      value;
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function ensureMutableState(target, key = "state") {
+  if (!target) {
+    return {};
+  }
+
+  try {
+    if (
+      target[key] &&
+      typeof target[key] === "object"
+    ) {
+      return target[key];
+    }
+  } catch {}
+
+  try {
+    if (isExtensibleObject(target)) {
+      target[key] = {};
+      return target[key];
+    }
+  } catch {}
+
+  return {};
+}
+
+function safeArrayFromClassList(classList) {
+  try {
+    return Array.from(classList || []);
+  } catch {}
+
+  return [];
+}
+
+/* =========================================================
+   REDACTION
+========================================================= */
+
+function redactSensitiveText(value = "") {
+  let output =
+    safeText(value, "");
+
+  if (!output) {
+    return "";
+  }
+
+  try {
+    for (const name of SENSITIVE_QUERY_PARAM_NAMES) {
+      const escaped =
+        String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+      output =
+        output.replace(
+          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
+    }
+
+    output =
+      output.replace(
+        /(\/activate-account\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
+
+    output =
+      output.replace(
+        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
+
+    output =
+      output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
+  } catch {}
+
+  return output;
+}
+
+function sanitizeErrorForSnapshot(error = null) {
+  if (!error) {
+    return null;
+  }
+
+  const normalized =
+    normalizeError(error);
+
+  if (!normalized) {
+    return null;
+  }
+
+  return {
+    ...normalized,
+
+    message:
+      redactSensitiveText(
+        normalized.message
+      ),
+
+    code:
+      redactSensitiveText(
+        normalized.code
+      ),
+
+    stack:
+      normalized.stack
+        ? redactSensitiveText(normalized.stack)
+        : "",
+  };
+}
+
+/* =========================================================
+   EVENTS
+========================================================= */
 
 function safeWindowDispatch(eventName, detail = {}) {
   if (
@@ -202,9 +512,12 @@ function safeWindowDispatch(eventName, detail = {}) {
 
   try {
     window.dispatchEvent(
-      new CustomEvent(eventName, {
-        detail,
-      })
+      new CustomEvent(
+        eventName,
+        {
+          detail,
+        }
+      )
     );
 
     return true;
@@ -213,27 +526,35 @@ function safeWindowDispatch(eventName, detail = {}) {
   return false;
 }
 
-/* =========================================================
-   EVENTS
-========================================================= */
-
 function emitCoreEvent(AppCore, eventName, detail = {}, options = {}) {
-  const name = safeText(eventName, "");
+  const name =
+    safeText(eventName, "");
 
   if (!name) {
     return false;
   }
 
-  const opts = ensureObject(options);
+  const opts =
+    ensureObject(options);
 
-  let busAvailable = false;
-  let busEmitted = false;
+  let busAvailable =
+    false;
+
+  let busEmitted =
+    false;
 
   try {
     if (isFunction(AppCore?.events?.emit)) {
-      busAvailable = true;
-      AppCore.events.emit(name, detail);
-      busEmitted = true;
+      busAvailable =
+        true;
+
+      AppCore.events.emit(
+        name,
+        detail
+      );
+
+      busEmitted =
+        true;
     }
   } catch {}
 
@@ -245,29 +566,47 @@ function emitCoreEvent(AppCore, eventName, detail = {}, options = {}) {
     opts.window === true ||
     (!busAvailable && isBrowser())
   ) {
-    return safeWindowDispatch(name, detail) || busEmitted;
+    return (
+      safeWindowDispatch(
+        name,
+        detail
+      ) ||
+      busEmitted
+    );
   }
 
   return busEmitted;
 }
 
 function emitStoreEvent(Store, eventName, detail = {}, options = {}) {
-  const name = safeText(eventName, "");
+  const name =
+    safeText(eventName, "");
 
   if (!name) {
     return false;
   }
 
-  const opts = ensureObject(options);
+  const opts =
+    ensureObject(options);
 
-  let busAvailable = false;
-  let busEmitted = false;
+  let busAvailable =
+    false;
+
+  let busEmitted =
+    false;
 
   try {
     if (isFunction(Store?.events?.emit)) {
-      busAvailable = true;
-      Store.events.emit(name, detail);
-      busEmitted = true;
+      busAvailable =
+        true;
+
+      Store.events.emit(
+        name,
+        detail
+      );
+
+      busEmitted =
+        true;
     }
   } catch {}
 
@@ -275,7 +614,13 @@ function emitStoreEvent(Store, eventName, detail = {}, options = {}) {
     opts.window === true ||
     (!busAvailable && isBrowser())
   ) {
-    return safeWindowDispatch(name, detail) || busEmitted;
+    return (
+      safeWindowDispatch(
+        name,
+        detail
+      ) ||
+      busEmitted
+    );
   }
 
   return busEmitted;
@@ -292,13 +637,22 @@ function normalizeError(error) {
 
   if (typeof error === "string") {
     return {
-      name: "BootError",
-      message: error,
-      code: "BOOT_ERROR",
+      name:
+        "BootError",
+
+      message:
+        redactSensitiveText(error),
+
+      code:
+        "BOOT_ERROR",
+
+      stack:
+        "",
     };
   }
 
-  const object = ensureObject(error);
+  const object =
+    ensureObject(error);
 
   const payload = {
     name:
@@ -308,23 +662,39 @@ function normalizeError(error) {
       ),
 
     message:
-      safeText(
-        object.message,
-        "Error durante el boot de la aplicación."
+      redactSensitiveText(
+        safeText(
+          object.message ||
+            object.statusText ||
+            object.detail ||
+            object.reason?.message ||
+            object.reason ||
+            object.error ||
+            "Error durante el boot de la aplicación.",
+          "Error durante el boot de la aplicación."
+        )
       ),
 
     code:
-      safeText(
-        object.code ||
-          object.status ||
-          object.statusCode,
-        "BOOT_ERROR"
+      redactSensitiveText(
+        safeText(
+          object.code ||
+            object.status ||
+            object.statusCode ||
+            object.data?.code ||
+            object.response?.status ||
+            "BOOT_ERROR",
+          "BOOT_ERROR"
+        )
       ),
-  };
 
-  if (object.stack) {
-    payload.stack = safeText(object.stack, "");
-  }
+    stack:
+      object.stack
+        ? redactSensitiveText(
+            safeText(object.stack, "")
+          )
+        : "",
+  };
 
   return payload;
 }
@@ -342,30 +712,92 @@ function getSignatureStore(map, key, fallback) {
 function setSignatureStore(map, key, value, type = "app") {
   try {
     if (isWeakMapKey(key)) {
-      map.set(key, value);
+      map.set(
+        key,
+        value
+      );
+
       return;
     }
   } catch {}
 
   if (type === "store") {
-    fallbackStoreSignature = value;
+    fallbackStoreSignature =
+      value;
+
     return;
   }
 
-  fallbackAppSignature = value;
+  if (type === "document") {
+    fallbackDocumentSignature =
+      value;
+
+    return;
+  }
+
+  fallbackAppSignature =
+    value;
 }
 
 function getComparableSignature(payload = {}) {
   const data = {
-    booted: Boolean(payload.booted),
-    booting: Boolean(payload.booting),
-    ready: Boolean(payload.ready),
-    loading: Boolean(payload.loading),
-    bootPhase: safeText(payload.bootPhase, ""),
-    bootCycleId: safeInteger(payload.bootCycleId, 0),
-    lastBootReason: safeText(payload.lastBootReason, ""),
-    lastBootErrorMessage: safeText(payload.lastBootError?.message, ""),
-    lastBootErrorCode: safeText(payload.lastBootError?.code, ""),
+    booted:
+      Boolean(payload.booted),
+
+    booting:
+      Boolean(payload.booting),
+
+    ready:
+      Boolean(payload.ready),
+
+    loading:
+      Boolean(payload.loading),
+
+    appReady:
+      Boolean(payload.appReady),
+
+    appBooting:
+      Boolean(payload.appBooting),
+
+    bootPhase:
+      safeText(payload.bootPhase, ""),
+
+    bootCycleId:
+      safeInteger(payload.bootCycleId, 0),
+
+    lastBootReason:
+      safeText(payload.lastBootReason, ""),
+
+    lastBootErrorMessage:
+      safeText(payload.lastBootError?.message, ""),
+
+    lastBootErrorCode:
+      safeText(payload.lastBootError?.code, ""),
+  };
+
+  try {
+    return JSON.stringify(data);
+  } catch {
+    return String(Date.now());
+  }
+}
+
+function getDocumentComparableSignature(payload = {}) {
+  const data = {
+    booting:
+      Boolean(payload.booting),
+
+    loading:
+      Boolean(payload.loading),
+
+    ready:
+      Boolean(payload.ready),
+
+    error:
+      Boolean(payload.lastBootError),
+
+    phase:
+      safeText(payload.bootPhase, ""),
   };
 
   try {
@@ -380,13 +812,27 @@ function getComparableSignature(payload = {}) {
 ========================================================= */
 
 function getPreviousAppBootState(AppCore) {
-  const state = ensureObject(AppCore?.state);
+  const state =
+    ensureObject(AppCore?.state);
 
   return {
-    booted: Boolean(state.booted),
-    booting: Boolean(state.booting),
-    ready: Boolean(state.ready),
-    loading: Boolean(state.loading),
+    booted:
+      Boolean(state.booted),
+
+    booting:
+      Boolean(state.booting),
+
+    ready:
+      Boolean(state.ready || state.appReady),
+
+    loading:
+      Boolean(state.loading),
+
+    appReady:
+      Boolean(state.appReady || state.ready),
+
+    appBooting:
+      Boolean(state.appBooting || state.booting),
 
     bootPhase:
       safeText(
@@ -408,15 +854,35 @@ function getPreviousAppBootState(AppCore) {
 
     lastBootError:
       state.lastBootError || null,
+
+    bootStartedAt:
+      safeText(
+        state.bootStartedAt,
+        ""
+      ),
+
+    bootReadyAt:
+      safeText(
+        state.bootReadyAt,
+        ""
+      ),
+
+    bootErrorAt:
+      safeText(
+        state.bootErrorAt,
+        ""
+      ),
   };
 }
 
 function getPreviousStoreBootState(Store) {
-  const stateFromGetter = ensureObject(
-    safeMethod(Store, "getState")
-  );
+  const stateFromGetter =
+    ensureObject(
+      safeMethod(Store, "getState")
+    );
 
-  const directState = ensureObject(Store?.state);
+  const directState =
+    ensureObject(Store?.state);
 
   const state = {
     ...directState,
@@ -424,10 +890,17 @@ function getPreviousStoreBootState(Store) {
   };
 
   return {
-    ready: Boolean(state.ready),
-    booted: Boolean(state.booted),
-    booting: Boolean(state.booting),
-    loading: Boolean(state.loading),
+    ready:
+      Boolean(state.ready),
+
+    booted:
+      Boolean(state.booted),
+
+    booting:
+      Boolean(state.booting),
+
+    loading:
+      Boolean(state.loading),
 
     bootPhase:
       safeText(
@@ -449,6 +922,24 @@ function getPreviousStoreBootState(Store) {
 
     lastBootError:
       state.lastBootError || null,
+
+    bootStartedAt:
+      safeText(
+        state.bootStartedAt,
+        ""
+      ),
+
+    bootReadyAt:
+      safeText(
+        state.bootReadyAt,
+        ""
+      ),
+
+    bootErrorAt:
+      safeText(
+        state.bootErrorAt,
+        ""
+      ),
   };
 }
 
@@ -456,8 +947,9 @@ function getPreviousStoreBootState(Store) {
    NORMALIZERS
 ========================================================= */
 
-function normalizeBootPhase(value = "") {
-  const phase = safeText(value, "").toLowerCase();
+export function normalizeBootPhase(value = "") {
+  const phase =
+    safeText(value, "").toLowerCase();
 
   if (
     phase === BOOT_PHASES.IDLE ||
@@ -471,80 +963,156 @@ function normalizeBootPhase(value = "") {
   return "";
 }
 
+function inferPhaseFromFlags({
+  booted = false,
+  booting = false,
+  ready = false,
+  loading = false,
+  error = null,
+} = {}) {
+  if (error) {
+    return BOOT_PHASES.ERROR;
+  }
+
+  if (booting || loading) {
+    return BOOT_PHASES.BOOTING;
+  }
+
+  if (booted || ready) {
+    return BOOT_PHASES.READY;
+  }
+
+  return BOOT_PHASES.IDLE;
+}
+
 function normalizeAppBootPayload(options = {}, previous = {}) {
-  const input = ensureObject(options);
+  const input =
+    ensureObject(options);
 
-  let booted = hasOwn(input, "booted")
-    ? safeBool(input.booted)
-    : Boolean(previous.booted);
-
-  let booting = hasOwn(input, "booting")
-    ? safeBool(input.booting)
-    : Boolean(previous.booting);
-
-  let ready = hasOwn(input, "ready")
-    ? safeBool(input.ready)
-    : Boolean(previous.ready || booted);
-
-  let loading = hasOwn(input, "loading")
-    ? safeBool(input.loading)
-    : Boolean(previous.loading || booting);
-
-  const requestedPhase = normalizeBootPhase(
-    input.phase || input.bootPhase || ""
-  );
+  const requestedPhase =
+    normalizeBootPhase(
+      input.phase ||
+        input.bootPhase ||
+        ""
+    );
 
   const hasError =
-    hasOwn(input, "error") &&
-    Boolean(input.error);
+    (
+      hasOwn(input, "error") &&
+      Boolean(input.error)
+    ) ||
+    requestedPhase === BOOT_PHASES.ERROR ||
+    input.fatal === true;
+
+  let booted =
+    hasOwn(input, "booted")
+      ? safeBool(input.booted)
+      : Boolean(previous.booted);
+
+  let booting =
+    hasOwn(input, "booting")
+      ? safeBool(input.booting)
+      : Boolean(previous.booting);
+
+  let ready =
+    hasOwn(input, "ready")
+      ? safeBool(input.ready)
+      : Boolean(previous.ready || booted);
+
+  let loading =
+    hasOwn(input, "loading")
+      ? safeBool(input.loading)
+      : Boolean(previous.loading || booting);
 
   let phase =
     requestedPhase ||
-    safeText(previous.bootPhase, BOOT_PHASES.IDLE);
+    inferPhaseFromFlags({
+      booted,
+      booting,
+      ready,
+      loading,
+      error:
+        hasError ? input.error || true : null,
+    });
 
   if (
     hasError ||
-    requestedPhase === BOOT_PHASES.ERROR
+    phase === BOOT_PHASES.ERROR
   ) {
-    booted = false;
-    ready = false;
-    booting = false;
-    loading = false;
-    phase = BOOT_PHASES.ERROR;
-  } else if (booting) {
-    booted = false;
-    ready = false;
-    loading = true;
-    phase = BOOT_PHASES.BOOTING;
+    booted =
+      false;
+
+    ready =
+      false;
+
+    booting =
+      false;
+
+    loading =
+      false;
+
+    phase =
+      BOOT_PHASES.ERROR;
   } else if (
-    booted ||
-    ready ||
-    requestedPhase === BOOT_PHASES.READY
+    phase === BOOT_PHASES.BOOTING ||
+    booting
   ) {
-    booted = true;
-    ready = true;
-    booting = false;
-    loading = false;
-    phase = BOOT_PHASES.READY;
-  } else if (requestedPhase === BOOT_PHASES.IDLE) {
-    booted = false;
-    ready = false;
-    booting = false;
-    loading = false;
-    phase = BOOT_PHASES.IDLE;
+    booted =
+      false;
+
+    ready =
+      false;
+
+    booting =
+      true;
+
+    loading =
+      true;
+
+    phase =
+      BOOT_PHASES.BOOTING;
+  } else if (
+    phase === BOOT_PHASES.READY ||
+    booted ||
+    ready
+  ) {
+    booted =
+      true;
+
+    ready =
+      true;
+
+    booting =
+      false;
+
+    loading =
+      false;
+
+    phase =
+      BOOT_PHASES.READY;
   } else {
-    booted = false;
-    ready = false;
-    booting = false;
-    loading = false;
-    phase = BOOT_PHASES.IDLE;
+    booted =
+      false;
+
+    ready =
+      false;
+
+    booting =
+      false;
+
+    loading =
+      false;
+
+    phase =
+      BOOT_PHASES.IDLE;
   }
 
-  const cycleId = hasOwn(input, "cycleId")
-    ? safeInteger(input.cycleId, 0)
-    : hasOwn(input, "bootCycleId")
-      ? safeInteger(input.bootCycleId, 0)
-      : safeInteger(previous.bootCycleId, 0);
+  const cycleId =
+    hasOwn(input, "cycleId")
+      ? safeInteger(input.cycleId, 0)
+      : hasOwn(input, "bootCycleId")
+        ? safeInteger(input.bootCycleId, 0)
+        : safeInteger(previous.bootCycleId, 0);
 
   const reason =
     safeText(
@@ -555,7 +1123,28 @@ function normalizeAppBootPayload(options = {}, previous = {}) {
       phase
     );
 
-  const clock = nowPayload();
+  const clock =
+    nowPayload();
+
+  const startedAt =
+    phase === BOOT_PHASES.BOOTING
+      ? clock.iso
+      : safeText(previous.bootStartedAt, "");
+
+  const readyAt =
+    phase === BOOT_PHASES.READY
+      ? clock.iso
+      : safeText(previous.bootReadyAt, "");
+
+  const errorAt =
+    phase === BOOT_PHASES.ERROR
+      ? clock.iso
+      : safeText(previous.bootErrorAt, "");
+
+  const error =
+    phase === BOOT_PHASES.ERROR || hasError
+      ? normalizeError(input.error || previous.lastBootError)
+      : null;
 
   return {
     booted,
@@ -563,94 +1152,170 @@ function normalizeAppBootPayload(options = {}, previous = {}) {
     ready,
     loading,
 
-    bootPhase: phase,
-    bootCycleId: cycleId,
+    appReady:
+      ready,
 
-    bootUpdatedAt: clock.iso,
-    bootUpdatedAtMs: clock.ms,
+    appBooting:
+      booting,
 
-    lastBootReason: reason,
+    bootPhase:
+      phase,
+
+    bootCycleId:
+      cycleId,
+
+    bootUpdatedAt:
+      clock.iso,
+
+    bootUpdatedAtMs:
+      clock.ms,
+
+    bootStartedAt:
+      startedAt,
+
+    bootReadyAt:
+      readyAt,
+
+    bootErrorAt:
+      errorAt,
+
+    lastBootReason:
+      reason,
 
     lastBootError:
-      phase === BOOT_PHASES.ERROR || hasError
-        ? normalizeError(input.error)
-        : null,
+      error,
   };
 }
 
 function normalizeStoreBootPayload(options = {}, previous = {}) {
-  const input = ensureObject(options);
+  const input =
+    ensureObject(options);
 
-  let ready = hasOwn(input, "ready")
-    ? safeBool(input.ready)
-    : Boolean(previous.ready);
-
-  let booted = hasOwn(input, "booted")
-    ? safeBool(input.booted)
-    : Boolean(previous.booted || ready);
-
-  let booting = hasOwn(input, "booting")
-    ? safeBool(input.booting)
-    : Boolean(previous.booting);
-
-  let loading = hasOwn(input, "loading")
-    ? safeBool(input.loading)
-    : Boolean(previous.loading || booting);
-
-  const requestedPhase = normalizeBootPhase(
-    input.phase || input.bootPhase || ""
-  );
+  const requestedPhase =
+    normalizeBootPhase(
+      input.phase ||
+        input.bootPhase ||
+        ""
+    );
 
   const hasError =
-    hasOwn(input, "error") &&
-    Boolean(input.error);
+    (
+      hasOwn(input, "error") &&
+      Boolean(input.error)
+    ) ||
+    requestedPhase === BOOT_PHASES.ERROR ||
+    input.fatal === true;
+
+  let ready =
+    hasOwn(input, "ready")
+      ? safeBool(input.ready)
+      : Boolean(previous.ready);
+
+  let booted =
+    hasOwn(input, "booted")
+      ? safeBool(input.booted)
+      : Boolean(previous.booted || ready);
+
+  let booting =
+    hasOwn(input, "booting")
+      ? safeBool(input.booting)
+      : Boolean(previous.booting);
+
+  let loading =
+    hasOwn(input, "loading")
+      ? safeBool(input.loading)
+      : Boolean(previous.loading || booting);
 
   let phase =
     requestedPhase ||
-    safeText(previous.bootPhase, BOOT_PHASES.IDLE);
+    inferPhaseFromFlags({
+      booted,
+      booting,
+      ready,
+      loading,
+      error:
+        hasError ? input.error || true : null,
+    });
 
   if (
     hasError ||
-    requestedPhase === BOOT_PHASES.ERROR
+    phase === BOOT_PHASES.ERROR
   ) {
-    ready = false;
-    booted = false;
-    booting = false;
-    loading = false;
-    phase = BOOT_PHASES.ERROR;
+    ready =
+      false;
+
+    booted =
+      false;
+
+    booting =
+      false;
+
+    loading =
+      false;
+
+    phase =
+      BOOT_PHASES.ERROR;
   } else if (
+    phase === BOOT_PHASES.READY ||
     ready ||
-    booted ||
-    requestedPhase === BOOT_PHASES.READY
+    booted
   ) {
-    ready = true;
-    booted = true;
-    booting = false;
-    loading = false;
-    phase = BOOT_PHASES.READY;
+    ready =
+      true;
+
+    booted =
+      true;
+
+    booting =
+      false;
+
+    loading =
+      false;
+
+    phase =
+      BOOT_PHASES.READY;
   } else if (
+    phase === BOOT_PHASES.BOOTING ||
     booting ||
-    loading ||
-    requestedPhase === BOOT_PHASES.BOOTING
+    loading
   ) {
-    ready = false;
-    booted = false;
-    booting = true;
-    loading = true;
-    phase = BOOT_PHASES.BOOTING;
+    ready =
+      false;
+
+    booted =
+      false;
+
+    booting =
+      true;
+
+    loading =
+      true;
+
+    phase =
+      BOOT_PHASES.BOOTING;
   } else {
-    ready = false;
-    booted = false;
-    booting = false;
-    loading = false;
-    phase = BOOT_PHASES.IDLE;
+    ready =
+      false;
+
+    booted =
+      false;
+
+    booting =
+      false;
+
+    loading =
+      false;
+
+    phase =
+      BOOT_PHASES.IDLE;
   }
 
-  const cycleId = hasOwn(input, "cycleId")
-    ? safeInteger(input.cycleId, 0)
-    : hasOwn(input, "bootCycleId")
-      ? safeInteger(input.bootCycleId, 0)
-      : safeInteger(previous.bootCycleId, 0);
+  const cycleId =
+    hasOwn(input, "cycleId")
+      ? safeInteger(input.cycleId, 0)
+      : hasOwn(input, "bootCycleId")
+        ? safeInteger(input.bootCycleId, 0)
+        : safeInteger(previous.bootCycleId, 0);
 
   const reason =
     safeText(
@@ -661,7 +1326,28 @@ function normalizeStoreBootPayload(options = {}, previous = {}) {
       phase
     );
 
-  const clock = nowPayload();
+  const clock =
+    nowPayload();
+
+  const startedAt =
+    phase === BOOT_PHASES.BOOTING
+      ? clock.iso
+      : safeText(previous.bootStartedAt, "");
+
+  const readyAt =
+    phase === BOOT_PHASES.READY
+      ? clock.iso
+      : safeText(previous.bootReadyAt, "");
+
+  const errorAt =
+    phase === BOOT_PHASES.ERROR
+      ? clock.iso
+      : safeText(previous.bootErrorAt, "");
+
+  const error =
+    phase === BOOT_PHASES.ERROR || hasError
+      ? normalizeError(input.error || previous.lastBootError)
+      : null;
 
   return {
     ready,
@@ -669,18 +1355,32 @@ function normalizeStoreBootPayload(options = {}, previous = {}) {
     booting,
     loading,
 
-    bootPhase: phase,
-    bootCycleId: cycleId,
+    bootPhase:
+      phase,
 
-    bootUpdatedAt: clock.iso,
-    bootUpdatedAtMs: clock.ms,
+    bootCycleId:
+      cycleId,
 
-    lastBootReason: reason,
+    bootUpdatedAt:
+      clock.iso,
+
+    bootUpdatedAtMs:
+      clock.ms,
+
+    bootStartedAt:
+      startedAt,
+
+    bootReadyAt:
+      readyAt,
+
+    bootErrorAt:
+      errorAt,
+
+    lastBootReason:
+      reason,
 
     lastBootError:
-      phase === BOOT_PHASES.ERROR || hasError
-        ? normalizeError(input.error)
-        : null,
+      error,
   };
 }
 
@@ -706,7 +1406,9 @@ function setDataset(el, key, value) {
       return true;
     }
 
-    el.dataset[key] = String(value);
+    el.dataset[key] =
+      String(value);
+
     return true;
   } catch {}
 
@@ -722,52 +1424,167 @@ function toggleClass(el, className, enabled) {
   }
 
   try {
-    el.classList.toggle(className, Boolean(enabled));
+    el.classList.toggle(
+      className,
+      Boolean(enabled)
+    );
+
     return true;
   } catch {}
 
   return false;
 }
 
-function syncDocumentBootState(payload = {}) {
+function removeDocumentBootClasses(root) {
+  if (!root) {
+    return false;
+  }
+
+  try {
+    for (const className of DOCUMENT_BOOT_CLASSES) {
+      root.classList.remove(className);
+    }
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+export function syncDocumentBootState(payload = {}, options = {}) {
   if (!isBrowser()) {
     return false;
   }
 
-  const phase = safeText(payload.bootPhase, BOOT_PHASES.IDLE);
+  const opts =
+    ensureObject(options);
 
-  const booting = phase === BOOT_PHASES.BOOTING || Boolean(payload.booting);
-  const ready = phase === BOOT_PHASES.READY || Boolean(payload.ready);
-  const error = phase === BOOT_PHASES.ERROR || Boolean(payload.lastBootError);
-  const loading = Boolean(payload.loading || booting);
+  const phase =
+    normalizeBootPhase(payload.bootPhase) ||
+    BOOT_PHASES.IDLE;
 
-  const roots = [
-    document.documentElement,
-    document.body,
-  ].filter(Boolean);
+  const booting =
+    phase === BOOT_PHASES.BOOTING ||
+    Boolean(payload.booting);
+
+  const ready =
+    phase === BOOT_PHASES.READY ||
+    Boolean(payload.ready);
+
+  const error =
+    phase === BOOT_PHASES.ERROR ||
+    Boolean(payload.lastBootError);
+
+  const loading =
+    Boolean(payload.loading || booting);
+
+  const fatal =
+    Boolean(error && opts.fatal !== false);
+
+  const appState =
+    booting
+      ? "booting"
+      : error
+        ? "fatal"
+        : ready
+          ? "ready"
+          : "idle";
+
+  const shellState =
+    booting
+      ? "booting"
+      : error
+        ? "fatal"
+        : ready
+          ? "ready"
+          : "idle";
+
+  const roots =
+    [
+      document.documentElement,
+      document.body,
+    ].filter(Boolean);
 
   for (const root of roots) {
-    toggleClass(root, "app-booting", booting);
-    toggleClass(root, "app-loading", loading);
-    toggleClass(root, "app-ready", ready || error);
-    toggleClass(root, "app-error", error);
+    removeDocumentBootClasses(root);
 
-    setDataset(root, "appLoading", loading ? "true" : "false");
-    setDataset(root, "appReady", ready ? "true" : "false");
-    setDataset(root, "appBooting", booting ? "true" : "false");
-    setDataset(root, "bootPhase", phase);
+    toggleClass(
+      root,
+      "app-booting",
+      booting
+    );
 
-    if (root === document.body) {
+    toggleClass(
+      root,
+      "app-loading",
+      loading
+    );
+
+    toggleClass(
+      root,
+      "app-ready",
+      ready || error
+    );
+
+    toggleClass(
+      root,
+      "app-error",
+      error
+    );
+
+    toggleClass(
+      root,
+      "app-fatal",
+      fatal
+    );
+
+    setDataset(
+      root,
+      "appLoading",
+      loading ? "true" : "false"
+    );
+
+    setDataset(
+      root,
+      "appReady",
+      ready ? "true" : "false"
+    );
+
+    setDataset(
+      root,
+      "appBooting",
+      booting ? "true" : "false"
+    );
+
+    setDataset(
+      root,
+      "bootPhase",
+      phase
+    );
+
+    setDataset(
+      root,
+      "appState",
+      appState
+    );
+
+    setDataset(
+      root,
+      "shellState",
+      shellState
+    );
+
+    if (error) {
       setDataset(
         root,
-        "shellState",
-        booting
-          ? "booting"
-          : error
-            ? "error"
-            : ready
-              ? "ready"
-              : "idle"
+        "bootError",
+        "true"
+      );
+    } else {
+      setDataset(
+        root,
+        "bootError",
+        "false"
       );
     }
   }
@@ -775,41 +1592,194 @@ function syncDocumentBootState(payload = {}) {
   return true;
 }
 
+function maybeEmitDocumentState(AppCore, payload = {}, options = {}) {
+  const signature =
+    getDocumentComparableSignature(payload);
+
+  const previousSignature =
+    getSignatureStore(
+      DOCUMENT_SIGNATURES,
+      AppCore,
+      fallbackDocumentSignature
+    );
+
+  const changed =
+    signature !== previousSignature;
+
+  setSignatureStore(
+    DOCUMENT_SIGNATURES,
+    AppCore,
+    signature,
+    "document"
+  );
+
+  if (
+    changed ||
+    safeBool(options?.forceEmit)
+  ) {
+    emitCoreEvent(
+      AppCore,
+      BOOT_EVENTS.DOCUMENT_STATE,
+      {
+        phase:
+          payload.bootPhase,
+
+        booting:
+          Boolean(payload.booting),
+
+        loading:
+          Boolean(payload.loading),
+
+        ready:
+          Boolean(payload.ready),
+
+        error:
+          Boolean(payload.lastBootError),
+
+        changed,
+      }
+    );
+  }
+
+  return changed;
+}
+
 /* =========================================================
    APPLY
 ========================================================= */
 
-function applyAppBootPayload(AppCore, payload) {
+function applyAppBootPayload(AppCore, payload, options = {}) {
+  const state =
+    ensureMutableState(
+      AppCore,
+      "state"
+    );
+
   /*
     Mutación directa primero para que los módulos que leen AppCore.state
     inmediatamente después vean el estado actualizado.
   */
-  safeAssign(AppCore?.state, payload);
+  safeAssign(
+    state,
+    payload
+  );
 
-  safeMethod(AppCore, "setState", [payload]);
-  safeMethod(AppCore, "patchState", [payload]);
+  safeMethod(
+    AppCore,
+    "setState",
+    [payload]
+  );
 
-  syncDocumentBootState(payload);
+  safeMethod(
+    AppCore,
+    "patchState",
+    [payload]
+  );
+
+  try {
+    if (payload.loading !== undefined) {
+      safeMethod(
+        AppCore,
+        "setLoading",
+        [payload.loading]
+      );
+    }
+  } catch {}
+
+  syncDocumentBootState(
+    payload,
+    options
+  );
+
+  maybeEmitDocumentState(
+    AppCore,
+    payload,
+    options
+  );
 
   return payload;
 }
 
 function applyStoreBootPayload(Store, payload) {
-  safeAssign(Store?.state, payload);
+  const state =
+    ensureMutableState(
+      Store,
+      "state"
+    );
 
-  const actions = ensureObject(Store?.actions);
+  safeAssign(
+    state,
+    payload
+  );
 
-  safeMethod(actions, "markReady", [payload.ready]);
-  safeMethod(actions, "markBooted", [payload.booted]);
-  safeMethod(actions, "markBooting", [payload.booting]);
-  safeMethod(actions, "setLoading", [payload.loading]);
-  safeMethod(actions, "markLoading", [payload.loading]);
-  safeMethod(actions, "set", [payload]);
+  const actions =
+    ensureObject(Store?.actions);
 
-  safeMethod(Store, "setState", [payload]);
-  safeMethod(Store, "patchState", [payload]);
-  safeMethod(Store, "set", [payload]);
-  safeMethod(Store, "patch", [payload]);
+  safeMethod(
+    actions,
+    "markReady",
+    [payload.ready, payload]
+  );
+
+  safeMethod(
+    actions,
+    "markBooted",
+    [payload.booted, payload]
+  );
+
+  safeMethod(
+    actions,
+    "markBooting",
+    [payload.booting, payload]
+  );
+
+  safeMethod(
+    actions,
+    "setLoading",
+    [payload.loading, payload]
+  );
+
+  safeMethod(
+    actions,
+    "markLoading",
+    [payload.loading, payload]
+  );
+
+  safeMethod(
+    actions,
+    "set",
+    [payload]
+  );
+
+  safeMethod(
+    actions,
+    "patch",
+    [payload]
+  );
+
+  safeMethod(
+    Store,
+    "setState",
+    [payload]
+  );
+
+  safeMethod(
+    Store,
+    "patchState",
+    [payload]
+  );
+
+  safeMethod(
+    Store,
+    "set",
+    [payload]
+  );
+
+  safeMethod(
+    Store,
+    "patch",
+    [payload]
+  );
 
   return payload;
 }
@@ -819,21 +1789,27 @@ function applyStoreBootPayload(Store, payload) {
 ========================================================= */
 
 export function markAppBootState(AppCore, options = {}) {
-  const previous = getPreviousAppBootState(AppCore);
+  const previous =
+    getPreviousAppBootState(AppCore);
 
-  const payload = normalizeAppBootPayload(
-    options,
-    previous
-  );
+  const payload =
+    normalizeAppBootPayload(
+      options,
+      previous
+    );
 
-  const previousSignature = getSignatureStore(
-    APP_SIGNATURES,
-    AppCore,
-    fallbackAppSignature
-  );
+  const previousSignature =
+    getSignatureStore(
+      APP_SIGNATURES,
+      AppCore,
+      fallbackAppSignature
+    );
 
-  const signature = getComparableSignature(payload);
-  const changed = signature !== previousSignature;
+  const signature =
+    getComparableSignature(payload);
+
+  const changed =
+    signature !== previousSignature;
 
   setSignatureStore(
     APP_SIGNATURES,
@@ -842,7 +1818,11 @@ export function markAppBootState(AppCore, options = {}) {
     "app"
   );
 
-  applyAppBootPayload(AppCore, payload);
+  applyAppBootPayload(
+    AppCore,
+    payload,
+    options
+  );
 
   const eventPayload = {
     ...payload,
@@ -850,16 +1830,17 @@ export function markAppBootState(AppCore, options = {}) {
     previous,
   };
 
-  emitCoreEvent(
-    AppCore,
-    BOOT_EVENTS.APP_STATE,
-    eventPayload
-  );
-
   if (
     changed ||
-    safeBool(options?.forceEmit)
+    safeBool(options?.forceEmit) ||
+    safeBool(options?.emitUnchanged)
   ) {
+    emitCoreEvent(
+      AppCore,
+      BOOT_EVENTS.APP_STATE,
+      eventPayload
+    );
+
     if (payload.bootPhase === BOOT_PHASES.BOOTING) {
       emitCoreEvent(
         AppCore,
@@ -893,21 +1874,27 @@ export function markAppBootState(AppCore, options = {}) {
 ========================================================= */
 
 export function markStoreBootState(Store, options = {}) {
-  const previous = getPreviousStoreBootState(Store);
+  const previous =
+    getPreviousStoreBootState(Store);
 
-  const payload = normalizeStoreBootPayload(
-    options,
-    previous
-  );
+  const payload =
+    normalizeStoreBootPayload(
+      options,
+      previous
+    );
 
-  const previousSignature = getSignatureStore(
-    STORE_SIGNATURES,
-    Store,
-    fallbackStoreSignature
-  );
+  const previousSignature =
+    getSignatureStore(
+      STORE_SIGNATURES,
+      Store,
+      fallbackStoreSignature
+    );
 
-  const signature = getComparableSignature(payload);
-  const changed = signature !== previousSignature;
+  const signature =
+    getComparableSignature(payload);
+
+  const changed =
+    signature !== previousSignature;
 
   setSignatureStore(
     STORE_SIGNATURES,
@@ -916,7 +1903,10 @@ export function markStoreBootState(Store, options = {}) {
     "store"
   );
 
-  applyStoreBootPayload(Store, payload);
+  applyStoreBootPayload(
+    Store,
+    payload
+  );
 
   const eventPayload = {
     ...payload,
@@ -924,16 +1914,17 @@ export function markStoreBootState(Store, options = {}) {
     previous,
   };
 
-  emitStoreEvent(
-    Store,
-    BOOT_EVENTS.STORE_STATE,
-    eventPayload
-  );
-
   if (
     changed ||
-    safeBool(options?.forceEmit)
+    safeBool(options?.forceEmit) ||
+    safeBool(options?.emitUnchanged)
   ) {
+    emitStoreEvent(
+      Store,
+      BOOT_EVENTS.STORE_STATE,
+      eventPayload
+    );
+
     if (payload.bootPhase === BOOT_PHASES.BOOTING) {
       emitStoreEvent(
         Store,
@@ -967,26 +1958,52 @@ export function markStoreBootState(Store, options = {}) {
 ========================================================= */
 
 export function markBootStart(AppCore, Store, options = {}) {
-  const input = ensureObject(options);
+  const input =
+    ensureObject(options);
 
   const payload = {
     ...input,
-    booted: false,
-    booting: true,
-    ready: false,
-    loading: true,
-    phase: BOOT_PHASES.BOOTING,
+
+    booted:
+      false,
+
+    booting:
+      true,
+
+    ready:
+      false,
+
+    loading:
+      true,
+
+    phase:
+      BOOT_PHASES.BOOTING,
+
     reason:
       safeText(
         input.reason,
         "boot-start"
       ),
+
+    forceEmit:
+      input.forceEmit !== false,
   };
 
-  markAppBootState(AppCore, payload);
-  markStoreBootState(Store, payload);
+  markAppBootState(
+    AppCore,
+    payload
+  );
 
-  const snapshot = getBootStateSnapshot(AppCore, Store);
+  markStoreBootState(
+    Store,
+    payload
+  );
+
+  const snapshot =
+    getBootStateSnapshot(
+      AppCore,
+      Store
+    );
 
   emitCoreEvent(
     AppCore,
@@ -1004,26 +2021,52 @@ export function markBootStart(AppCore, Store, options = {}) {
 }
 
 export function markBootReady(AppCore, Store, options = {}) {
-  const input = ensureObject(options);
+  const input =
+    ensureObject(options);
 
   const payload = {
     ...input,
-    booted: true,
-    booting: false,
-    ready: true,
-    loading: false,
-    phase: BOOT_PHASES.READY,
+
+    booted:
+      true,
+
+    booting:
+      false,
+
+    ready:
+      true,
+
+    loading:
+      false,
+
+    phase:
+      BOOT_PHASES.READY,
+
     reason:
       safeText(
         input.reason,
         "boot-ready"
       ),
+
+    forceEmit:
+      input.forceEmit !== false,
   };
 
-  markAppBootState(AppCore, payload);
-  markStoreBootState(Store, payload);
+  markAppBootState(
+    AppCore,
+    payload
+  );
 
-  const snapshot = getBootStateSnapshot(AppCore, Store);
+  markStoreBootState(
+    Store,
+    payload
+  );
+
+  const snapshot =
+    getBootStateSnapshot(
+      AppCore,
+      Store
+    );
 
   emitCoreEvent(
     AppCore,
@@ -1041,27 +2084,57 @@ export function markBootReady(AppCore, Store, options = {}) {
 }
 
 export function markBootError(AppCore, Store, error = null, options = {}) {
-  const input = ensureObject(options);
+  const input =
+    ensureObject(options);
 
   const payload = {
     ...input,
-    booted: false,
-    booting: false,
-    ready: false,
-    loading: false,
-    phase: BOOT_PHASES.ERROR,
+
+    booted:
+      false,
+
+    booting:
+      false,
+
+    ready:
+      false,
+
+    loading:
+      false,
+
+    phase:
+      BOOT_PHASES.ERROR,
+
     error,
+
+    fatal:
+      input.fatal !== false,
+
     reason:
       safeText(
         input.reason,
         "boot-error"
       ),
+
+    forceEmit:
+      input.forceEmit !== false,
   };
 
-  markAppBootState(AppCore, payload);
-  markStoreBootState(Store, payload);
+  markAppBootState(
+    AppCore,
+    payload
+  );
 
-  const snapshot = getBootStateSnapshot(AppCore, Store);
+  markStoreBootState(
+    Store,
+    payload
+  );
+
+  const snapshot =
+    getBootStateSnapshot(
+      AppCore,
+      Store
+    );
 
   emitCoreEvent(
     AppCore,
@@ -1079,26 +2152,61 @@ export function markBootError(AppCore, Store, error = null, options = {}) {
 }
 
 export function markRebootState(AppCore, Store, options = {}) {
-  const input = ensureObject(options);
+  const input =
+    ensureObject(options);
 
   const payload = {
     ...input,
-    booted: false,
-    booting: false,
-    ready: false,
-    loading: false,
-    phase: BOOT_PHASES.IDLE,
+
+    booted:
+      false,
+
+    booting:
+      false,
+
+    ready:
+      false,
+
+    loading:
+      false,
+
+    phase:
+      BOOT_PHASES.IDLE,
+
+    lastBootError:
+      null,
+
+    error:
+      null,
+
+    fatal:
+      false,
+
     reason:
       safeText(
         input.reason,
         "reboot-reset"
       ),
+
+    forceEmit:
+      input.forceEmit !== false,
   };
 
-  markAppBootState(AppCore, payload);
-  markStoreBootState(Store, payload);
+  markAppBootState(
+    AppCore,
+    payload
+  );
 
-  const snapshot = getBootStateSnapshot(AppCore, Store);
+  markStoreBootState(
+    Store,
+    payload
+  );
+
+  const snapshot =
+    getBootStateSnapshot(
+      AppCore,
+      Store
+    );
 
   emitCoreEvent(
     AppCore,
@@ -1116,22 +2224,96 @@ export function markRebootState(AppCore, Store, options = {}) {
 }
 
 /* =========================================================
+   EXTRA HELPERS
+========================================================= */
+
+export function isAppBooting(AppCore) {
+  const state =
+    ensureObject(AppCore?.state);
+
+  return Boolean(
+    state.booting ||
+      state.appBooting ||
+      state.bootPhase === BOOT_PHASES.BOOTING
+  );
+}
+
+export function isAppReady(AppCore) {
+  const state =
+    ensureObject(AppCore?.state);
+
+  return Boolean(
+    state.ready ||
+      state.appReady ||
+      state.booted ||
+      state.bootPhase === BOOT_PHASES.READY
+  );
+}
+
+export function hasBootError(AppCore) {
+  const state =
+    ensureObject(AppCore?.state);
+
+  return Boolean(
+    state.lastBootError ||
+      state.bootPhase === BOOT_PHASES.ERROR
+  );
+}
+
+export function resetBootStateSignatures() {
+  fallbackAppSignature =
+    "";
+
+  fallbackStoreSignature =
+    "";
+
+  fallbackDocumentSignature =
+    "";
+
+  return true;
+}
+
+/* =========================================================
    DEBUG SNAPSHOTS
 ========================================================= */
 
 export function getAppBootStateSnapshot(AppCore) {
-  const state = ensureObject(AppCore?.state);
+  const state =
+    ensureObject(AppCore?.state);
 
   return {
-    hasCore: Boolean(AppCore),
-    hasState: isObject(AppCore?.state),
-    hasSetState: isFunction(AppCore?.setState),
-    hasPatchState: isFunction(AppCore?.patchState),
+    hasCore:
+      Boolean(AppCore),
 
-    booted: Boolean(state.booted),
-    booting: Boolean(state.booting),
-    ready: Boolean(state.ready),
-    loading: Boolean(state.loading),
+    hasState:
+      isObject(AppCore?.state),
+
+    hasSetState:
+      isFunction(AppCore?.setState),
+
+    hasPatchState:
+      isFunction(AppCore?.patchState),
+
+    hasSetLoading:
+      isFunction(AppCore?.setLoading),
+
+    booted:
+      Boolean(state.booted),
+
+    booting:
+      Boolean(state.booting),
+
+    ready:
+      Boolean(state.ready || state.appReady),
+
+    loading:
+      Boolean(state.loading),
+
+    appReady:
+      Boolean(state.appReady || state.ready),
+
+    appBooting:
+      Boolean(state.appBooting || state.booting),
 
     phase:
       safeText(
@@ -1157,6 +2339,24 @@ export function getAppBootStateSnapshot(AppCore) {
         0
       ),
 
+    startedAt:
+      safeText(
+        state.bootStartedAt,
+        ""
+      ),
+
+    readyAt:
+      safeText(
+        state.bootReadyAt,
+        ""
+      ),
+
+    errorAt:
+      safeText(
+        state.bootErrorAt,
+        ""
+      ),
+
     reason:
       safeText(
         state.lastBootReason,
@@ -1167,16 +2367,20 @@ export function getAppBootStateSnapshot(AppCore) {
       Boolean(state.lastBootError),
 
     error:
-      state.lastBootError || null,
+      sanitizeErrorForSnapshot(
+        state.lastBootError
+      ),
   };
 }
 
 export function getStoreBootStateSnapshot(Store) {
-  const getterState = ensureObject(
-    safeMethod(Store, "getState")
-  );
+  const getterState =
+    ensureObject(
+      safeMethod(Store, "getState")
+    );
 
-  const directState = ensureObject(Store?.state);
+  const directState =
+    ensureObject(Store?.state);
 
   const state = {
     ...directState,
@@ -1184,16 +2388,35 @@ export function getStoreBootStateSnapshot(Store) {
   };
 
   return {
-    hasStore: Boolean(Store),
-    hasState: isObject(Store?.state),
-    hasActions: Boolean(Store?.actions),
-    hasSetState: isFunction(Store?.setState),
-    hasPatchState: isFunction(Store?.patchState),
+    hasStore:
+      Boolean(Store),
 
-    ready: Boolean(state.ready),
-    booted: Boolean(state.booted),
-    booting: Boolean(state.booting),
-    loading: Boolean(state.loading),
+    hasState:
+      isObject(Store?.state),
+
+    hasActions:
+      Boolean(Store?.actions),
+
+    hasEvents:
+      Boolean(Store?.events),
+
+    hasSetState:
+      isFunction(Store?.setState),
+
+    hasPatchState:
+      isFunction(Store?.patchState),
+
+    ready:
+      Boolean(state.ready),
+
+    booted:
+      Boolean(state.booted),
+
+    booting:
+      Boolean(state.booting),
+
+    loading:
+      Boolean(state.loading),
 
     phase:
       safeText(
@@ -1219,6 +2442,24 @@ export function getStoreBootStateSnapshot(Store) {
         0
       ),
 
+    startedAt:
+      safeText(
+        state.bootStartedAt,
+        ""
+      ),
+
+    readyAt:
+      safeText(
+        state.bootReadyAt,
+        ""
+      ),
+
+    errorAt:
+      safeText(
+        state.bootErrorAt,
+        ""
+      ),
+
     reason:
       safeText(
         state.lastBootReason,
@@ -1229,49 +2470,88 @@ export function getStoreBootStateSnapshot(Store) {
       Boolean(state.lastBootError),
 
     error:
-      state.lastBootError || null,
+      sanitizeErrorForSnapshot(
+        state.lastBootError
+      ),
   };
 }
 
 export function getDocumentBootStateSnapshot() {
   if (!isBrowser()) {
     return {
-      hasDocument: false,
+      hasDocument:
+        false,
     };
   }
 
-  const html = document.documentElement || null;
-  const body = document.body || null;
+  const html =
+    document.documentElement || null;
+
+  const body =
+    document.body || null;
 
   const read = (el) => {
     if (!el) {
       return {
-        exists: false,
+        exists:
+          false,
       };
     }
 
     return {
-      exists: true,
-      appLoading: safeText(el.dataset?.appLoading, ""),
-      appReady: safeText(el.dataset?.appReady, ""),
-      appBooting: safeText(el.dataset?.appBooting, ""),
-      bootPhase: safeText(el.dataset?.bootPhase, ""),
-      shellState: safeText(el.dataset?.shellState, ""),
-      className: safeText(el.className, ""),
+      exists:
+        true,
+
+      appLoading:
+        safeText(el.dataset?.appLoading, ""),
+
+      appReady:
+        safeText(el.dataset?.appReady, ""),
+
+      appBooting:
+        safeText(el.dataset?.appBooting, ""),
+
+      appState:
+        safeText(el.dataset?.appState, ""),
+
+      bootPhase:
+        safeText(el.dataset?.bootPhase, ""),
+
+      shellState:
+        safeText(el.dataset?.shellState, ""),
+
+      bootError:
+        safeText(el.dataset?.bootError, ""),
+
+      classes:
+        safeArrayFromClassList(el.classList),
+
+      className:
+        safeText(el.className, ""),
     };
   };
 
   return {
-    hasDocument: true,
-    html: read(html),
-    body: read(body),
+    hasDocument:
+      true,
+
+    html:
+      read(html),
+
+    body:
+      read(body),
   };
 }
 
 export function getBootStateSnapshot(AppCore, Store) {
-  const app = getAppBootStateSnapshot(AppCore);
-  const store = getStoreBootStateSnapshot(Store);
-  const documentState = getDocumentBootStateSnapshot();
+  const app =
+    getAppBootStateSnapshot(AppCore);
+
+  const store =
+    getStoreBootStateSnapshot(Store);
+
+  const documentState =
+    getDocumentBootStateSnapshot();
 
   const phase =
     app.phase === BOOT_PHASES.ERROR ||
@@ -1283,25 +2563,53 @@ export function getBootStateSnapshot(AppCore, Store) {
         : app.phase === BOOT_PHASES.READY &&
             store.phase === BOOT_PHASES.READY
           ? BOOT_PHASES.READY
-          : BOOT_PHASES.IDLE;
+          : app.phase === BOOT_PHASES.READY &&
+              !store.hasStore
+            ? BOOT_PHASES.READY
+            : BOOT_PHASES.IDLE;
 
   return {
     app,
     store,
-    document: documentState,
+    document:
+      documentState,
 
     computed: {
       ready:
-        Boolean(app.ready && store.ready),
+        Boolean(
+          app.ready &&
+            (
+              store.ready ||
+              !store.hasStore
+            )
+        ),
 
       booted:
-        Boolean(app.booted && store.booted),
+        Boolean(
+          app.booted &&
+            (
+              store.booted ||
+              !store.hasStore
+            )
+        ),
 
       booting:
-        Boolean(app.booting || store.booting),
+        Boolean(
+          app.booting ||
+            store.booting
+        ),
 
       loading:
-        Boolean(app.loading || store.loading),
+        Boolean(
+          app.loading ||
+            store.loading
+        ),
+
+      hasError:
+        Boolean(
+          app.hasError ||
+            store.hasError
+        ),
 
       phase,
 
@@ -1315,12 +2623,110 @@ export function getBootStateSnapshot(AppCore, Store) {
 }
 
 /* =========================================================
+   DEBUG API
+========================================================= */
+
+export function exposeBootStateDebugApi(AppCore = null, Store = null) {
+  const api = {
+    BOOT_PHASES,
+    BOOT_EVENTS,
+
+    markAppBootState:
+      (options = {}) =>
+        markAppBootState(
+          AppCore,
+          options
+        ),
+
+    markStoreBootState:
+      (options = {}) =>
+        markStoreBootState(
+          Store,
+          options
+        ),
+
+    markBootStart:
+      (options = {}) =>
+        markBootStart(
+          AppCore,
+          Store,
+          options
+        ),
+
+    markBootReady:
+      (options = {}) =>
+        markBootReady(
+          AppCore,
+          Store,
+          options
+        ),
+
+    markBootError:
+      (error = null, options = {}) =>
+        markBootError(
+          AppCore,
+          Store,
+          error,
+          options
+        ),
+
+    markRebootState:
+      (options = {}) =>
+        markRebootState(
+          AppCore,
+          Store,
+          options
+        ),
+
+    getSnapshot:
+      () =>
+        getBootStateSnapshot(
+          AppCore,
+          Store
+        ),
+
+    resetSignatures:
+      resetBootStateSignatures,
+  };
+
+  try {
+    if (isBrowser()) {
+      window.__ONION_BOOT_STATE__ =
+        api;
+    }
+  } catch {}
+
+  try {
+    defineBootApiOnCore(
+      AppCore,
+      api
+    );
+  } catch {}
+
+  return api;
+}
+
+function defineBootApiOnCore(AppCore, api) {
+  if (!AppCore || !api) {
+    return false;
+  }
+
+  return safeDefineValue(
+    AppCore,
+    "BootState",
+    api
+  );
+}
+
+/* =========================================================
    DEFAULT EXPORT
 ========================================================= */
 
 export default {
   BOOT_PHASES,
   BOOT_EVENTS,
+
+  normalizeBootPhase,
 
   markAppBootState,
   markStoreBootState,
@@ -1330,8 +2736,17 @@ export default {
   markBootError,
   markRebootState,
 
+  isAppBooting,
+  isAppReady,
+  hasBootError,
+
+  syncDocumentBootState,
+
   getAppBootStateSnapshot,
   getStoreBootStateSnapshot,
   getDocumentBootStateSnapshot,
   getBootStateSnapshot,
+
+  resetBootStateSignatures,
+  exposeBootStateDebugApi,
 };

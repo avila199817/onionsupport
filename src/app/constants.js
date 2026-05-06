@@ -4,17 +4,17 @@
 
    ONION SUPPORT · APP CONSTANTS
    EXTREME PRO SYSTEM · BOOT CONTRACT · ROUTER/AUTH SAFE
-   FINAL EXTREME 10/10
+   FINAL EXTREME 13/10
 
    RESPONSABILIDADES:
-   - centralizar constantes del bootstrap de la app
-   - definir scope global de cleanup
-   - definir timeouts de boot / restore / render / loader
-   - centralizar claves internas del runtime
-   - centralizar eventos públicos internos
-   - centralizar rutas técnicas públicas con token
-   - centralizar IDs/selectores DOM críticos
-   - mantener contrato estable entre:
+   - Centralizar constantes del bootstrap de la app.
+   - Definir scope global de cleanup.
+   - Definir timeouts de boot / restore / render / loader.
+   - Centralizar claves internas del runtime.
+   - Centralizar eventos públicos internos.
+   - Centralizar rutas técnicas públicas con token.
+   - Centralizar IDs/selectores DOM críticos.
+   - Mantener contrato estable entre:
      · src/main.js
      · src/app/index.js
      · src/app/router.js
@@ -23,19 +23,29 @@
      · src/app/loader.js
      · src/app/shell.js
      · src/app/ui.js
+     · src/app/i18n.js
      · src/app/events.js
      · src/app/errors.js
-   - exponer helpers seguros y snapshots de diagnóstico
+     · src/app/warmup.js
+     · src/app/boot-state.js
+   - Exponer helpers seguros y snapshots de diagnóstico.
 
    REGLAS:
-   - sin dependencias externas
-   - sin DOM access
-   - sin localStorage/sessionStorage
-   - sin mutaciones accidentales
-   - Object.freeze profundo con protección de ciclos
-   - aliases estables para compatibilidad
-   - tolerancia total a claves desconocidas
+   - Sin dependencias externas.
+   - Sin DOM access.
+   - Sin localStorage/sessionStorage.
+   - Sin mutaciones accidentales.
+   - Object.freeze profundo con protección de ciclos.
+   - Aliases estables para compatibilidad.
+   - Tolerancia total a claves desconocidas.
 ========================================================= */
+
+/* =========================================================
+   VERSION
+========================================================= */
+
+export const APP_CONSTANTS_VERSION =
+  "13.0.0";
 
 /* =========================================================
    FREEZE
@@ -57,20 +67,19 @@ function deepFreeze(value, seen = new WeakSet()) {
 
     seen.add(value);
 
-    const keys =
-      Object.getOwnPropertyNames(value);
+    for (const key of Object.getOwnPropertyNames(value)) {
+      try {
+        const child =
+          value[key];
 
-    for (const key of keys) {
-      const child =
-        value[key];
-
-      if (
-        child &&
-        typeof child === "object" &&
-        !Object.isFrozen(child)
-      ) {
-        deepFreeze(child, seen);
-      }
+        if (
+          child &&
+          typeof child === "object" &&
+          !Object.isFrozen(child)
+        ) {
+          deepFreeze(child, seen);
+        }
+      } catch {}
     }
 
     return Object.freeze(value);
@@ -141,6 +150,98 @@ function cloneObject(value) {
   };
 }
 
+function findByKey(collection, key = "") {
+  const cleanKey =
+    safeText(key, "");
+
+  if (!cleanKey) {
+    return null;
+  }
+
+  return (
+    collection.find((item) =>
+      item?.key === cleanKey
+    ) || null
+  );
+}
+
+function normalizeSlashPath(path = "/") {
+  let value =
+    safeText(path, "/")
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+  if (!value) {
+    value = "/";
+  }
+
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
+  }
+
+  if (
+    value.length > 1 &&
+    value.endsWith("/")
+  ) {
+    value = value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
+}
+
+function stripSearchAndHash(path = "/") {
+  const raw =
+    safeText(path, "/");
+
+  const noHash =
+    raw.split("#")[0] || "/";
+
+  const noSearch =
+    noHash.split("?")[0] || "/";
+
+  return normalizeSlashPath(noSearch);
+}
+
+function isHashRouterPath(value = "") {
+  const raw =
+    safeText(value, "");
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (raw.startsWith("#!")) {
+    return normalizeSlashPath(
+      raw.replace(/^#!\/?/, "/")
+    );
+  }
+
+  return normalizeSlashPath(
+    raw.replace(/^#\/?/, "/")
+  );
+}
+
+function normalizeRouteLikePath(path = "/") {
+  const raw =
+    safeText(path, "/");
+
+  if (isHashRouterPath(raw)) {
+    return normalizeHashRouterPath(raw);
+  }
+
+  return stripSearchAndHash(raw);
+}
+
 function clonePublicTokenRoute(config = {}) {
   return freeze({
     ...config,
@@ -158,28 +259,6 @@ function clonePublicTokenRoute(config = {}) {
       cloneArray(config.scrubbedHistoryKeys),
   });
 }
-
-function findByKey(collection, key = "") {
-  const cleanKey =
-    safeText(key, "");
-
-  if (!cleanKey) {
-    return null;
-  }
-
-  return (
-    collection.find((item) =>
-      item?.key === cleanKey
-    ) || null
-  );
-}
-
-/* =========================================================
-   VERSION
-========================================================= */
-
-export const APP_CONSTANTS_VERSION =
-  "10.0.0";
 
 /* =========================================================
    CLEANUP / SCOPES
@@ -244,10 +323,6 @@ export const APP_SCOPES =
 
 /* =========================================================
    BOOT / TIMEOUTS
-
-   IMPORTANTE:
-   - src/app/loader.js ya impone mínimo interno de 8000ms.
-   - aquí dejamos 12000ms para evitar falsos positivos.
 ========================================================= */
 
 export const BOOT_FAILSAFE_LOADER_MS =
@@ -378,6 +453,18 @@ export const BOOT_PHASES =
 
     rebooting:
       "rebooting",
+
+    IDLE:
+      "idle",
+
+    BOOTING:
+      "booting",
+
+    READY:
+      "ready",
+
+    ERROR:
+      "error",
   });
 
 export const BOOT_FLAGS =
@@ -417,6 +504,9 @@ export const BOOT_FLAGS =
 
     uiInitialized:
       "uiInitialized",
+
+    i18nInitialized:
+      "i18nInitialized",
 
     readyEmitted:
       "readyEmitted",
@@ -487,6 +577,12 @@ export const APP_RUNTIME_KEYS =
 
     loader:
       "__ONION_LOADER__",
+
+    warmup:
+      "__ONION_WARMUP__",
+
+    errors:
+      "__ONION_APP_ERRORS__",
 
     setTheme:
       "__ONION_SET_THEME__",
@@ -563,6 +659,9 @@ export const APP_STATE_KEYS =
     route:
       "route",
 
+    canonicalPath:
+      "canonicalPath",
+
     publicPath:
       "publicPath",
 
@@ -596,6 +695,18 @@ export const APP_ROUTES =
 
     signin:
       "/signin",
+
+    signIn:
+      "/sign-in",
+
+    register:
+      "/register",
+
+    signup:
+      "/signup",
+
+    signUp:
+      "/sign-up",
 
     forbidden:
       "/403",
@@ -638,6 +749,10 @@ export const AUTH_LIKE_ROUTES =
   freeze([
     APP_ROUTES.login,
     APP_ROUTES.signin,
+    APP_ROUTES.signIn,
+    APP_ROUTES.register,
+    APP_ROUTES.signup,
+    APP_ROUTES.signUp,
     APP_ROUTES.resetPassword,
     APP_ROUTES.resetPasswordConfirm,
     APP_ROUTES.forgotPassword,
@@ -991,6 +1106,9 @@ export const STORE_EVENTS =
     bootState:
       "store:boot:state",
 
+    bootStart:
+      "store:boot:start",
+
     bootReady:
       "store:boot:ready",
 
@@ -1043,6 +1161,9 @@ export const DOM_EVENTS =
 
 export const UI_CONSTANTS =
   freeze({
+    appName:
+      "Onion Support",
+
     defaultTheme:
       "dark",
 
@@ -1052,11 +1173,24 @@ export const UI_CONSTANTS =
     defaultThemeMode:
       "system",
 
+    themeStorageKey:
+      "theme",
+
     fallbackLang:
       "es",
 
     defaultLang:
       "es",
+
+    langStorageKey:
+      "lang",
+
+    supportedLangs:
+      freeze([
+        "es",
+        "en",
+        "ca",
+      ]),
 
     defaultDensity:
       "default",
@@ -1090,6 +1224,9 @@ export const UI_CONSTANTS =
 
     authScreenClass:
       "auth-screen",
+
+    loginNoScrollClass:
+      "login-no-scroll",
 
     routeAuthClass:
       "route-auth",
@@ -1125,6 +1262,12 @@ export const APP_DOM_IDS =
     shell:
       "app-shell",
 
+    appShell:
+      "app-shell",
+
+    main:
+      "main-content",
+
     mainContent:
       "main-content",
 
@@ -1133,6 +1276,12 @@ export const APP_DOM_IDS =
 
     loader:
       "app-loader",
+
+    appLoader:
+      "app-loader",
+
+    view:
+      "view-container",
 
     viewContainer:
       "view-container",
@@ -1154,6 +1303,9 @@ export const APP_DOM_IDS =
 
     tableheadContainer:
       "tablehead-container",
+
+    mobileSidebarToggle:
+      "toggleSidebarMobile",
   });
 
 export const APP_SELECTORS =
@@ -1167,6 +1319,12 @@ export const APP_SELECTORS =
     shell:
       "#app-shell",
 
+    appShell:
+      "#app-shell",
+
+    main:
+      "#main-content",
+
     mainContent:
       "#main-content",
 
@@ -1175,6 +1333,12 @@ export const APP_SELECTORS =
 
     loader:
       "#app-loader",
+
+    appLoader:
+      "[data-app-loader='true']",
+
+    view:
+      "#view-container",
 
     viewContainer:
       "#view-container",
@@ -1197,10 +1361,13 @@ export const APP_SELECTORS =
     tableheadContainer:
       "#tablehead-container",
 
-    appShell:
+    mobileSidebarToggle:
+      "#toggleSidebarMobile",
+
+    appShellData:
       "[data-app-shell='true']",
 
-    main:
+    mainData:
       "[data-main-content='true']",
 
     viewRoot:
@@ -1208,9 +1375,6 @@ export const APP_SELECTORS =
 
     routerView:
       "[data-router-view='true']",
-
-    appLoader:
-      "[data-app-loader='true']",
 
     spaLink:
       "[data-spa]",
@@ -1257,14 +1421,16 @@ export const APP_MODULES =
 
     shell:
       "Shell",
+
+    warmup:
+      "Warmup",
+
+    errors:
+      "Errors",
   });
 
 /* =========================================================
    UI LIFECYCLE / REPAIR
-
-   Importante:
-   - UI_LIGHT_* no debe incluir repair/rebind/bindEvents.
-   - UI_REBIND_METHODS queda separado y solo para petición explícita.
 ========================================================= */
 
 export const UI_REPAIR_REASONS =
@@ -1709,7 +1875,7 @@ export function getPublicTokenRouteConfigRaw(key = "") {
 
 export function getPublicTokenRouteConfigByPath(path = "") {
   const cleanPath =
-    safeText(path, "");
+    normalizeRouteLikePath(path);
 
   if (!cleanPath) {
     return null;
@@ -1765,10 +1931,7 @@ export function isKnownPublicTokenRouteKey(key = "") {
 
 export function isPublicTechnicalRoute(path = "") {
   const cleanPath =
-    safeText(path, "/")
-      .split("?")[0]
-      .split("#")[0]
-      .replace(/\/+$/g, "") || "/";
+    normalizeRouteLikePath(path);
 
   if (
     PUBLIC_TECHNICAL_ROUTES.includes(cleanPath)
@@ -1778,6 +1941,31 @@ export function isPublicTechnicalRoute(path = "") {
 
   return PUBLIC_TECHNICAL_PREFIXES.some((prefix) =>
     cleanPath.startsWith(prefix)
+  );
+}
+
+export function isAuthLikeRoute(path = "") {
+  const cleanPath =
+    normalizeRouteLikePath(path);
+
+  if (
+    AUTH_LIKE_ROUTES.includes(cleanPath)
+  ) {
+    return true;
+  }
+
+  return PUBLIC_TECHNICAL_PREFIXES.some((prefix) =>
+    cleanPath.startsWith(prefix)
+  );
+}
+
+export function isProtectedPublicTokenRoute(path = "") {
+  const cleanPath =
+    normalizeRouteLikePath(path);
+
+  return PROTECTED_PUBLIC_TOKEN_ROUTES.some((config) =>
+    cleanPath === config.path ||
+    cleanPath.startsWith(`${config.path}/`)
   );
 }
 
@@ -1866,6 +2054,13 @@ export function clampBootTimeoutMs(value, fallback = BOOT_MAIN_TIMEOUT_MS) {
   );
 }
 
+export function isSensitiveParamName(name = "") {
+  const cleanName =
+    safeText(name, "");
+
+  return GENERIC_SENSITIVE_PARAM_NAMES.includes(cleanName);
+}
+
 export function redactSensitiveText(value = "") {
   let output =
     safeText(value, "");
@@ -1908,6 +2103,14 @@ export function redactSensitiveText(value = "") {
       output.replace(
         /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
         "$1***"
+      );
+  } catch {}
+
+  try {
+    output =
+      output.replace(
+        /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
+        "$1$2***"
       );
   } catch {}
 
@@ -2157,6 +2360,8 @@ export default freeze({
   getPublicTechnicalPrefixes,
   isKnownPublicTokenRouteKey,
   isPublicTechnicalRoute,
+  isAuthLikeRoute,
+  isProtectedPublicTokenRoute,
 
   getAppModuleName,
   getUiRepairReason,
@@ -2169,6 +2374,7 @@ export default freeze({
   getUiAfterPaintRepairMethods,
 
   clampBootTimeoutMs,
+  isSensitiveParamName,
   redactSensitiveText,
 
   getAppConstantsSnapshot,

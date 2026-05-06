@@ -22,15 +22,15 @@
    - Reparar shell/auth-screen tras navegación autenticada.
    - Emitir eventos de sesión sin duplicados.
 
-   HARDENING:
-   - Restore serializado real, incluso si state es parcial o inexistente.
+   HARDENING EXTREMO:
+   - Restore serializado real.
    - Anti race conditions.
    - Tolerancia total si Auth falla.
    - No doble navegación durante boot.
    - No contaminar publicPath/canonicalPath.
    - Warmup aislado.
    - Snapshot consistente y con URLs sensibles redacted.
-   - Rutas públicas técnicas con soporte query-token, hash-token y path-token.
+   - Rutas públicas técnicas con query-token, hash-token y path-token.
    - Router.navigate/goAfterLogin esperados si devuelven Promise.
    - Soporte alias legacy reset initial URL.
    - Soporte __ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__.
@@ -39,14 +39,9 @@
    - Canonical seguro para rutas públicas /@username/...
    - Auth fantasma bloqueada: authenticated=true sin user usable NO autentica.
    - Redirect interno seguro anti open-redirect.
-
-   FIX CRÍTICO:
-   - bootNavigationHandled solo se marca cuando Router navega/renderiza.
-   - Las rutas públicas técnicas bloquean navegación, pero NO bloquean render inicial.
-   - syncUserUI se ejecuta una sola vez, con fallback legacy solo si falla modo moderno.
-   - restoreSessionInBackground emite session:restored una sola vez.
-   - emit() no duplica AppCore.events + window event.
-   - No se intenta navegación post-restore si hay login en curso.
+   - syncUserUI una sola vez en restoreSessionInBackground().
+   - session:restored una sola emisión lógica.
+   - bootNavigationHandled solo si Router navega realmente.
 ========================================================= */
 
 import {
@@ -58,93 +53,204 @@ import {
    CONSTANTS
 ========================================================= */
 
-const LOGIN_PATH = "/login";
-const ACTIVATION_PATH = "/activate-account";
-const RESET_PASSWORD_PATH = "/reset-password";
-const RESET_CONFIRM_PATH = "/reset-password/confirm";
+const LOGIN_PATH =
+  "/login";
 
-const SESSION_READY_EVENT_DEDUPE_MS = 160;
+const ACTIVATION_PATH =
+  "/activate-account";
 
-const PUBLIC_TECHNICAL_ROUTES = new Set([
-  ACTIVATION_PATH,
-  RESET_PASSWORD_PATH,
-  RESET_CONFIRM_PATH,
-  "/forgot-password",
-  "/recover-password",
-  "/password-reset",
-]);
+const RESET_PASSWORD_PATH =
+  "/reset-password";
 
-const PUBLIC_TECHNICAL_PREFIXES = [
-  `${ACTIVATION_PATH}/`,
-  `${RESET_CONFIRM_PATH}/`,
-];
+const RESET_CONFIRM_PATH =
+  "/reset-password/confirm";
 
-const AUTH_LIKE_ROUTES = new Set([
-  LOGIN_PATH,
-  RESET_PASSWORD_PATH,
-  RESET_CONFIRM_PATH,
-  "/forgot-password",
-  "/recover-password",
-  "/password-reset",
-  ACTIVATION_PATH,
-]);
+const FORGOT_PASSWORD_PATH =
+  "/forgot-password";
 
-const ACTIVATION_TOKEN_PARAM_NAMES = [
-  "token",
-  "activationToken",
-  "activateToken",
-  "code",
-  "t",
-];
+const RECOVER_PASSWORD_PATH =
+  "/recover-password";
 
-const RESET_TOKEN_PARAM_NAMES = [
-  "token",
-  "resetToken",
-  "passwordResetToken",
-  "confirmToken",
-  "code",
-  "t",
-];
+const PASSWORD_RESET_PATH =
+  "/password-reset";
 
-const TOKEN_ROUTE_CONFIGS = Object.freeze([
+const DEFAULT_HOME_PATH =
+  "/";
+
+const SESSION_READY_EVENT_DEDUPE_MS =
+  160;
+
+const SESSION_VERSION =
+  "12.0.0";
+
+const PUBLIC_TECHNICAL_ROUTES =
+  new Set([
+    ACTIVATION_PATH,
+    RESET_PASSWORD_PATH,
+    RESET_CONFIRM_PATH,
+    FORGOT_PASSWORD_PATH,
+    RECOVER_PASSWORD_PATH,
+    PASSWORD_RESET_PATH,
+  ]);
+
+const PUBLIC_TECHNICAL_PREFIXES =
+  Object.freeze([
+    `${ACTIVATION_PATH}/`,
+    `${RESET_CONFIRM_PATH}/`,
+  ]);
+
+const AUTH_LIKE_ROUTES =
+  new Set([
+    LOGIN_PATH,
+    RESET_PASSWORD_PATH,
+    RESET_CONFIRM_PATH,
+    FORGOT_PASSWORD_PATH,
+    RECOVER_PASSWORD_PATH,
+    PASSWORD_RESET_PATH,
+    ACTIVATION_PATH,
+  ]);
+
+const AUTH_LIKE_PREFIXES =
+  Object.freeze([
+    `${ACTIVATION_PATH}/`,
+    `${RESET_CONFIRM_PATH}/`,
+  ]);
+
+const ACTIVATION_TOKEN_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "code",
+    "t",
+  ]);
+
+const RESET_TOKEN_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
+    "code",
+    "t",
+  ]);
+
+const TOKEN_ROUTE_CONFIGS =
+  Object.freeze([
+    Object.freeze({
+      key:
+        "activation",
+
+      path:
+        ACTIVATION_PATH,
+
+      initialWindowKey:
+        "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+
+      initialWindowKeys:
+        Object.freeze([
+          "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+        ]),
+
+      scrubbedHistoryFlag:
+        "scrubbedActivationToken",
+
+      scrubbedHistoryFlags:
+        Object.freeze([
+          "scrubbedActivationToken",
+        ]),
+
+      tokenParamNames:
+        ACTIVATION_TOKEN_PARAM_NAMES,
+    }),
+
+    Object.freeze({
+      key:
+        "resetConfirm",
+
+      path:
+        RESET_CONFIRM_PATH,
+
+      initialWindowKey:
+        "__ONION_RESET_CONFIRM_INITIAL_URL__",
+
+      initialWindowKeys:
+        Object.freeze([
+          "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+          "__ONION_RESET_CONFIRM_INITIAL_URL__",
+        ]),
+
+      scrubbedHistoryFlag:
+        "scrubbedResetToken",
+
+      scrubbedHistoryFlags:
+        Object.freeze([
+          "scrubbedResetToken",
+          "scrubbedResetPasswordToken",
+        ]),
+
+      tokenParamNames:
+        RESET_TOKEN_PARAM_NAMES,
+    }),
+  ]);
+
+const RUNTIME_WINDOW_KEYS =
   Object.freeze({
-    key: "activation",
-    path: ACTIVATION_PATH,
-    initialWindowKey: "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-    initialWindowKeys: [
+    initialUrl:
+      "__ONION_INITIAL_URL__",
+
+    activationInitialUrl:
       "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-    ],
-    scrubbedHistoryFlag: "scrubbedActivationToken",
-    scrubbedHistoryFlags: [
-      "scrubbedActivationToken",
-    ],
-    tokenParamNames: ACTIVATION_TOKEN_PARAM_NAMES,
-  }),
 
-  Object.freeze({
-    key: "resetConfirm",
-    path: RESET_CONFIRM_PATH,
-    initialWindowKey: "__ONION_RESET_CONFIRM_INITIAL_URL__",
-    initialWindowKeys: [
+    resetPasswordConfirmInitialUrl:
       "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+
+    resetConfirmInitialUrl:
       "__ONION_RESET_CONFIRM_INITIAL_URL__",
-    ],
-    scrubbedHistoryFlag: "scrubbedResetToken",
-    scrubbedHistoryFlags: [
-      "scrubbedResetToken",
-      "scrubbedResetPasswordToken",
-    ],
-    tokenParamNames: RESET_TOKEN_PARAM_NAMES,
-  }),
-]);
+  });
+
+const SESSION_EVENTS =
+  Object.freeze({
+    restoreStart:
+      "app:session:restore:start",
+
+    restoreDone:
+      "app:session:restore:done",
+
+    restoreError:
+      "app:session:restore:error",
+
+    authRestored:
+      "auth:session:restored",
+
+    appRestored:
+      "app:session:restored",
+
+    userChange:
+      "app:user:change",
+
+    uiRepairRequest:
+      "app:ui:repair-request",
+
+    authNavigation:
+      "app:auth:navigation",
+
+    authScreenCleared:
+      "app:shell:auth-screen-cleared",
+  });
 
 /* =========================================================
    MODULE RUNTIME
 ========================================================= */
 
-let lastSessionReadyEmitKey = "";
-let lastSessionReadyEmitAt = 0;
-let moduleSessionRestorePromise = null;
+let lastSessionReadyEmitKey =
+  "";
+
+let lastSessionReadyEmitAt =
+  0;
+
+let moduleSessionRestorePromise =
+  null;
 
 /* =========================================================
    BASICS
@@ -161,6 +267,14 @@ function isFunction(value) {
   return typeof value === "function";
 }
 
+function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
 function safeText(value, fallback = "") {
   if (
     value === null ||
@@ -169,37 +283,102 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value).trim();
 
   return text || fallback;
 }
 
-function safeObject(value) {
-  return (
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-  )
+function safeObject(value, fallback = {}) {
+  return isObject(value)
     ? value
-    : {};
+    : fallback;
+}
+
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
+function safeBool(value, fallback = false) {
+  if (value === true) return true;
+  if (value === false) return false;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  if (value === 1) return true;
+  if (value === 0) return false;
+
+  return Boolean(fallback);
+}
+
+function safeNumber(value, fallback = 0) {
+  const number =
+    Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : fallback;
+}
+
+function safeNow() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+function safeIsoDate(ms = safeNow()) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
+  }
+}
+
+function safeClone(value, fallback = null) {
+  try {
+    if (typeof structuredClone === "function") {
+      return structuredClone(value);
+    }
+  } catch {}
+
+  try {
+    return JSON.parse(
+      JSON.stringify(value)
+    );
+  } catch {
+    return fallback;
+  }
 }
 
 function safeLog(AppCore, ...args) {
   try {
-    AppCore?.utils?.log?.("[AppSession]", ...args);
+    AppCore?.utils?.log?.(
+      "[AppSession]",
+      ...args
+    );
   } catch {}
 }
 
 function safeWarn(AppCore, ...args) {
-  let coreLogged = false;
+  let coreLogged =
+    false;
 
   try {
     if (isFunction(AppCore?.utils?.warn)) {
-      AppCore.utils.warn("[AppSession]", ...args);
-      coreLogged = true;
+      AppCore.utils.warn(
+        "[AppSession]",
+        ...args
+      );
+
+      coreLogged =
+        true;
     }
   } catch {
-    coreLogged = false;
+    coreLogged =
+      false;
   }
 
   if (coreLogged) {
@@ -207,20 +386,30 @@ function safeWarn(AppCore, ...args) {
   }
 
   try {
-    console.warn("[AppSession]", ...args);
+    console.warn(
+      "[AppSession]",
+      ...args
+    );
   } catch {}
 }
 
 function safeError(AppCore, ...args) {
-  let coreLogged = false;
+  let coreLogged =
+    false;
 
   try {
     if (isFunction(AppCore?.utils?.error)) {
-      AppCore.utils.error("[AppSession]", ...args);
-      coreLogged = true;
+      AppCore.utils.error(
+        "[AppSession]",
+        ...args
+      );
+
+      coreLogged =
+        true;
     }
   } catch {
-    coreLogged = false;
+    coreLogged =
+      false;
   }
 
   if (coreLogged) {
@@ -228,166 +417,49 @@ function safeError(AppCore, ...args) {
   }
 
   try {
-    console.error("[AppSession]", ...args);
+    console.error(
+      "[AppSession]",
+      ...args
+    );
   } catch {}
-}
-
-function getState(AppCore) {
-  try {
-    return AppCore?.state || {};
-  } catch {
-    return {};
-  }
-}
-
-function getResolvedSessionUser(AppCore) {
-  const state = getState(AppCore);
-
-  return (
-    state?.user?.username ||
-    state?.user?.email ||
-    state?.user?.id ||
-    state?.user?.userId ||
-    state?.currentUser?.username ||
-    state?.currentUser?.email ||
-    state?.currentUser?.id ||
-    state?.sessionUser?.username ||
-    state?.sessionUser?.email ||
-    state?.sessionUser?.id ||
-    state?.authUser?.username ||
-    state?.authUser?.email ||
-    state?.authUser?.id ||
-    state?.session?.user?.username ||
-    state?.session?.user?.email ||
-    state?.session?.user?.id ||
-    null
-  );
-}
-
-function getResolvedSessionRole(AppCore) {
-  const state = getState(AppCore);
-
-  return (
-    state?.role ||
-    state?.rol ||
-    state?.userRole ||
-    state?.session?.role ||
-    state?.session?.rol ||
-    state?.user?.role ||
-    state?.user?.rol ||
-    state?.currentUser?.role ||
-    state?.currentUser?.rol ||
-    state?.sessionUser?.role ||
-    state?.sessionUser?.rol ||
-    state?.authUser?.role ||
-    state?.authUser?.rol ||
-    null
-  );
-}
-
-function hasUsableSessionUser(user = null) {
-  if (
-    !user ||
-    typeof user !== "object" ||
-    Array.isArray(user)
-  ) {
-    return false;
-  }
-
-  return Boolean(
-    safeText(user.id, "") ||
-      safeText(user.userId, "") ||
-      safeText(user.user_id, "") ||
-      safeText(user._id, "") ||
-      safeText(user.uid, "") ||
-      safeText(user.username, "") ||
-      safeText(user.userName, "") ||
-      safeText(user.user_name, "") ||
-      safeText(user.email, "") ||
-      safeText(user.mail, "") ||
-      safeText(user.phone, "") ||
-      safeText(user.telefono, "") ||
-      safeText(user.mobile, "")
-  );
-}
-
-function isAuthenticated(AppCore) {
-  const state = getState(AppCore);
-
-  if (state.authenticated !== true) {
-    return false;
-  }
-
-  return hasUsableSessionUser(
-    state.user ||
-      state.currentUser ||
-      state.sessionUser ||
-      state.authUser ||
-      state.session?.user ||
-      null
-  );
-}
-
-function isAuthLoginInProgress(Auth, state = {}) {
-  try {
-    if (state?.loginInProgress === true) {
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (state?.authLoginInProgress === true) {
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (state?.isLoggingIn === true) {
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (Auth?.session?.loggingIn === true) {
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (Auth?.session?.loginPromise) {
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (Auth?.loginPromise) {
-      return true;
-    }
-  } catch {}
-
-  return false;
 }
 
 function emit(AppCore, eventName, payload = {}, options = {}) {
-  const name = safeText(eventName, "");
+  const name =
+    safeText(eventName, "");
 
   if (!name) {
     return false;
   }
 
-  const opts = safeObject(options);
+  const opts =
+    safeObject(options);
 
-  let busAvailable = false;
-  let busEmitted = false;
+  let busAvailable =
+    false;
+
+  let busEmitted =
+    false;
 
   try {
     if (isFunction(AppCore?.events?.emit)) {
-      busAvailable = true;
-      AppCore.events.emit(name, payload);
-      busEmitted = true;
+      busAvailable =
+        true;
+
+      AppCore.events.emit(
+        name,
+        payload
+      );
+
+      busEmitted =
+        true;
     }
   } catch {}
 
+  /*
+    No duplicar AppCore.events + window por defecto.
+    Solo espejo a window si se pide explícitamente o no hay bus.
+  */
   if (
     opts.window === true ||
     (!busAvailable && isBrowser())
@@ -395,7 +467,8 @@ function emit(AppCore, eventName, payload = {}, options = {}) {
     try {
       window.dispatchEvent(
         new CustomEvent(name, {
-          detail: payload,
+          detail:
+            payload,
         })
       );
 
@@ -440,53 +513,264 @@ function afterPaint(callback) {
   } catch {}
 }
 
-/* =========================================================
-   PATH HELPERS
-========================================================= */
-
-function normalizePathnameOnly(pathname = "/") {
-  let value = String(pathname || "/")
-    .trim()
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
-
-  if (!value) {
-    value = "/";
-  }
-
-  if (!value.startsWith("/")) {
-    value = `/${value}`;
-  }
-
+async function runMaybePromise(value) {
   if (
-    value.length > 1 &&
-    value.endsWith("/")
+    value &&
+    isFunction(value.then)
   ) {
-    value = value.replace(/\/+$/g, "") || "/";
+    return await value;
   }
 
   return value;
 }
 
-function stripSearchAndHash(path = "/") {
-  const value = safeText(path, "/");
+/* =========================================================
+   STATE HELPERS
+========================================================= */
 
-  return normalizePathnameOnly(
-    value.split("?")[0].split("#")[0] || "/"
+function getState(AppCore) {
+  try {
+    return AppCore?.state || {};
+  } catch {
+    return {};
+  }
+}
+
+function setCoreState(AppCore, patch = {}, options = {}) {
+  if (!AppCore || !isObject(patch)) {
+    return false;
+  }
+
+  try {
+    if (isFunction(AppCore.setState)) {
+      AppCore.setState(
+        patch,
+        {
+          source:
+            "AppSession",
+          ...safeObject(options),
+        }
+      );
+
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (
+      AppCore.state &&
+      typeof AppCore.state === "object"
+    ) {
+      Object.assign(
+        AppCore.state,
+        patch
+      );
+
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function getResolvedUserObject(AppCore) {
+  const state =
+    getState(AppCore);
+
+  return (
+    state.user ||
+    state.currentUser ||
+    state.sessionUser ||
+    state.authUser ||
+    state.session?.user ||
+    null
   );
 }
 
-function normalizeInternalPath(path = "/") {
-  const raw = safeText(path, "/") || "/";
+function getResolvedSessionUser(AppCore) {
+  const user =
+    getResolvedUserObject(AppCore);
 
-  const clean = raw.startsWith("/")
-    ? raw
-    : `/${raw}`;
-
-  return clean
-    .replace(/\/{2,}/g, "/")
-    .replace(/\/+$/g, "") || "/";
+  return (
+    user?.username ||
+    user?.userName ||
+    user?.email ||
+    user?.mail ||
+    user?.id ||
+    user?.userId ||
+    null
+  );
 }
+
+function getResolvedSessionRole(AppCore) {
+  const state =
+    getState(AppCore);
+
+  const user =
+    getResolvedUserObject(AppCore);
+
+  return (
+    state.role ||
+    state.rol ||
+    state.userRole ||
+    state.session?.role ||
+    state.session?.rol ||
+    user?.role ||
+    user?.rol ||
+    user?.type ||
+    user?.userType ||
+    user?.user_type ||
+    user?.profile?.role ||
+    user?.profile?.rol ||
+    user?.raw?.role ||
+    user?.raw?.rol ||
+    null
+  );
+}
+
+function hasUsableSessionUser(user = null) {
+  if (
+    !user ||
+    typeof user !== "object" ||
+    Array.isArray(user)
+  ) {
+    return false;
+  }
+
+  return Boolean(
+    safeText(user.id, "") ||
+    safeText(user.userId, "") ||
+    safeText(user.user_id, "") ||
+    safeText(user._id, "") ||
+    safeText(user.uid, "") ||
+    safeText(user.username, "") ||
+    safeText(user.userName, "") ||
+    safeText(user.user_name, "") ||
+    safeText(user.email, "") ||
+    safeText(user.mail, "") ||
+    safeText(user.phone, "") ||
+    safeText(user.telefono, "") ||
+    safeText(user.mobile, "")
+  );
+}
+
+function isAuthenticated(AppCore) {
+  const state =
+    getState(AppCore);
+
+  if (state.authenticated !== true) {
+    return false;
+  }
+
+  return hasUsableSessionUser(
+    getResolvedUserObject(AppCore)
+  );
+}
+
+function enforceNoGhostAuth(AppCore, reason = "ghost-auth-check") {
+  const state =
+    getState(AppCore);
+
+  if (state.authenticated !== true) {
+    return false;
+  }
+
+  if (
+    hasUsableSessionUser(
+      getResolvedUserObject(AppCore)
+    )
+  ) {
+    return false;
+  }
+
+  setCoreState(
+    AppCore,
+    {
+      authenticated:
+        false,
+
+      role:
+        null,
+
+      username:
+        null,
+
+      currentResolvedUsername:
+        null,
+
+      resolvedUsername:
+        null,
+    },
+    {
+      source:
+        `AppSession:${reason}`,
+      forceUnauthenticated:
+        true,
+    }
+  );
+
+  emit(
+    AppCore,
+    "app:auth:ghost-blocked",
+    {
+      reason,
+      source:
+        "AppSession",
+      at:
+        safeIsoDate(),
+    }
+  );
+
+  return true;
+}
+
+/* =========================================================
+   LOGIN-IN-PROGRESS DETECTION
+========================================================= */
+
+function isAuthLoginInProgress(Auth, state = {}) {
+  try {
+    if (state?.loginInProgress === true) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (state?.authLoginInProgress === true) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (state?.isLoggingIn === true) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (Auth?.session?.loggingIn === true) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (Auth?.session?.loginPromise) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (Auth?.loginPromise) {
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+/* =========================================================
+   PATH HELPERS
+========================================================= */
 
 function getBaseOrigin() {
   if (
@@ -499,8 +783,71 @@ function getBaseOrigin() {
   return "http://localhost";
 }
 
+function normalizePathnameOnly(pathname = "/") {
+  let value =
+    String(pathname || "/")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+  if (!value) {
+    value =
+      "/";
+  }
+
+  if (!value.startsWith("/")) {
+    value =
+      `/${value}`;
+  }
+
+  const segments =
+    value.split("/");
+
+  const output =
+    [];
+
+  for (const segment of segments) {
+    if (
+      !segment ||
+      segment === "."
+    ) {
+      continue;
+    }
+
+    if (segment === "..") {
+      output.pop();
+      continue;
+    }
+
+    output.push(segment);
+  }
+
+  value =
+    `/${output.join("/")}` || "/";
+
+  if (
+    value.length > 1 &&
+    value.endsWith("/")
+  ) {
+    value =
+      value.replace(/\/+$/g, "") || "/";
+  }
+
+  return value;
+}
+
+function stripSearchAndHash(path = "/") {
+  const value =
+    safeText(path, "/");
+
+  return normalizePathnameOnly(
+    value.split("?")[0].split("#")[0] || "/"
+  );
+}
+
 function isHashRouterPath(value = "") {
-  const raw = String(value || "").trim();
+  const raw =
+    safeText(value, "");
 
   return (
     raw.startsWith("#/") ||
@@ -509,7 +856,8 @@ function isHashRouterPath(value = "") {
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw = String(value || "").trim();
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return "/";
@@ -523,7 +871,8 @@ function normalizeHashRouterPath(value = "") {
 }
 
 function pathFromUrlLike(value = "") {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return "";
@@ -534,7 +883,11 @@ function pathFromUrlLike(value = "") {
   }
 
   try {
-    const parsed = new URL(raw, getBaseOrigin());
+    const parsed =
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
 
     if (
       parsed.hash &&
@@ -545,10 +898,12 @@ function pathFromUrlLike(value = "") {
 
     return `${normalizePathnameOnly(parsed.pathname || "/")}${parsed.search || ""}${parsed.hash || ""}`;
   } catch {
-    const hashIndex = raw.indexOf("#");
+    const hashIndex =
+      raw.indexOf("#");
 
     if (hashIndex >= 0) {
-      const hash = raw.slice(hashIndex);
+      const hash =
+        raw.slice(hashIndex);
 
       if (isHashRouterPath(hash)) {
         return normalizeHashRouterPath(hash);
@@ -567,9 +922,14 @@ function getBrowserPublicPath() {
   }
 
   try {
-    const pathname = window.location.pathname || "/";
-    const search = window.location.search || "";
-    const hash = window.location.hash || "";
+    const pathname =
+      window.location.pathname || "/";
+
+    const search =
+      window.location.search || "";
+
+    const hash =
+      window.location.hash || "";
 
     if (
       hash &&
@@ -590,19 +950,19 @@ function getWindowValue(key = "") {
   }
 
   try {
-    return safeText(window[key], "");
+    return safeText(
+      window[key],
+      ""
+    );
   } catch {
     return "";
   }
 }
 
 function getWindowFirstValue(keys = []) {
-  if (!Array.isArray(keys)) {
-    return "";
-  }
-
-  for (const key of keys) {
-    const value = getWindowValue(key);
+  for (const key of safeArray(keys)) {
+    const value =
+      getWindowValue(key);
 
     if (value) {
       return value;
@@ -613,66 +973,231 @@ function getWindowFirstValue(keys = []) {
 }
 
 function getInitialUrl() {
-  return getWindowValue("__ONION_INITIAL_URL__");
+  return getWindowValue(
+    RUNTIME_WINDOW_KEYS.initialUrl
+  );
 }
 
 function getActivationInitialUrl() {
-  return getWindowFirstValue([
-    "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-  ]);
+  return getWindowValue(
+    RUNTIME_WINDOW_KEYS.activationInitialUrl
+  );
 }
 
 function getResetConfirmInitialUrl() {
   return getWindowFirstValue([
-    "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-    "__ONION_RESET_CONFIRM_INITIAL_URL__",
+    RUNTIME_WINDOW_KEYS.resetPasswordConfirmInitialUrl,
+    RUNTIME_WINDOW_KEYS.resetConfirmInitialUrl,
   ]);
 }
 
+function isPublicUsernameSegment(segment = "") {
+  return /^@[A-Za-z0-9._-]{1,80}$/.test(
+    safeText(segment, "")
+  );
+}
+
+function stripPublicUsernamePrefixFromPath(path = "/") {
+  const normalized =
+    pathFromUrlLike(path) ||
+    path ||
+    "/";
+
+  const clean =
+    stripSearchAndHash(normalized);
+
+  const segments =
+    clean
+      .split("/")
+      .filter(Boolean);
+
+  if (
+    segments.length > 0 &&
+    isPublicUsernameSegment(segments[0])
+  ) {
+    const rest =
+      segments
+        .slice(1)
+        .join("/");
+
+    return rest
+      ? normalizePathnameOnly(`/${rest}`)
+      : "/";
+  }
+
+  return clean;
+}
+
+function getCanonicalFromAnyPath(path = "/") {
+  return stripPublicUsernamePrefixFromPath(
+    pathFromUrlLike(path) ||
+    path ||
+    "/"
+  );
+}
+
+function getBootInitialPath(AppCore) {
+  const state =
+    getState(AppCore);
+
+  return (
+    safeText(state.bootProtectedInitialPath, "") ||
+    safeText(state.bootActivationInitialPath, "") ||
+    safeText(state.bootResetConfirmInitialPath, "") ||
+    pathFromUrlLike(getActivationInitialUrl()) ||
+    pathFromUrlLike(getResetConfirmInitialUrl()) ||
+    pathFromUrlLike(safeText(state.bootProtectedInitialUrl, "")) ||
+    pathFromUrlLike(safeText(state.bootInitialUrl, "")) ||
+    pathFromUrlLike(getInitialUrl()) ||
+    getBrowserPublicPath() ||
+    safeText(state.publicPath, "") ||
+    safeText(state.route, "/") ||
+    "/"
+  );
+}
+
+function getCurrentCanonicalSafe(AppCore, Router) {
+  try {
+    const value =
+      getCurrentCanonicalPath(
+        AppCore,
+        Router
+      );
+
+    if (value) {
+      return stripSearchAndHash(
+        getCanonicalFromAnyPath(value)
+      );
+    }
+  } catch {}
+
+  const publicPath =
+    safeText(
+      getState(AppCore).publicPath,
+      ""
+    );
+
+  if (publicPath) {
+    return stripSearchAndHash(
+      getCanonicalFromAnyPath(publicPath)
+    );
+  }
+
+  const route =
+    safeText(
+      getState(AppCore).route,
+      ""
+    );
+
+  if (route) {
+    return stripSearchAndHash(
+      getCanonicalFromAnyPath(route)
+    );
+  }
+
+  return stripSearchAndHash(
+    getCanonicalFromAnyPath(
+      getBootInitialPath(AppCore) || "/"
+    )
+  );
+}
+
+function getCurrentPublicSafe(AppCore, Router) {
+  try {
+    const value =
+      getCurrentPublicPath(
+        AppCore,
+        Router
+      );
+
+    if (value) {
+      return value;
+    }
+  } catch {}
+
+  return (
+    safeText(getState(AppCore).publicPath, "") ||
+    getBootInitialPath(AppCore) ||
+    "/"
+  );
+}
+
 /* =========================================================
-   TOKEN / PUBLIC ROUTE HELPERS
+   TOKEN ROUTE HELPERS
 ========================================================= */
+
+function escapeRegExp(value = "") {
+  return String(value)
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 function hasTokenInSearch(search = "", names = []) {
   try {
-    const params = new URLSearchParams(search || "");
+    const params =
+      new URLSearchParams(search || "");
 
-    return names.some((name) =>
-      Boolean(safeText(params.get(name), ""))
+    return safeArray(names).some((name) =>
+      Boolean(
+        safeText(
+          params.get(name),
+          ""
+        )
+      )
     );
   } catch {
     return false;
   }
 }
 
-function extractPathToken(pathOrUrl = "", basePath = ACTIVATION_PATH) {
-  const normalized = pathFromUrlLike(pathOrUrl) || pathOrUrl || "";
-  const pathname = stripSearchAndHash(normalized);
+function extractPathToken(pathOrUrl = "", basePath = "") {
+  const normalized =
+    pathFromUrlLike(pathOrUrl) ||
+    pathOrUrl ||
+    "";
 
-  const parts = pathname.split("/").filter(Boolean);
-  const baseParts = basePath.split("/").filter(Boolean);
+  const pathname =
+    stripSearchAndHash(normalized);
+
+  const parts =
+    pathname
+      .split("/")
+      .filter(Boolean);
+
+  const baseParts =
+    basePath
+      .split("/")
+      .filter(Boolean);
 
   if (!baseParts.length) {
     return "";
   }
 
-  for (let i = 0; i <= parts.length - baseParts.length; i += 1) {
-    const matches = baseParts.every((part, index) => {
-      return parts[i + index] === part;
-    });
+  for (
+    let i = 0;
+    i <= parts.length - baseParts.length;
+    i += 1
+  ) {
+    const matches =
+      baseParts.every((part, index) =>
+        parts[i + index] === part
+      );
 
     if (!matches) {
       continue;
     }
 
-    const token = parts[i + baseParts.length];
+    const token =
+      parts[i + baseParts.length];
 
     if (!token) {
       return "";
     }
 
     try {
-      return safeText(decodeURIComponent(token), "");
+      return safeText(
+        decodeURIComponent(token),
+        ""
+      );
     } catch {
       return safeText(token, "");
     }
@@ -686,7 +1211,8 @@ function hasRouteToken({
   basePath = "",
   tokenParamNames = [],
 } = {}) {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw || !basePath) {
     return false;
@@ -697,7 +1223,11 @@ function hasRouteToken({
   }
 
   try {
-    const parsed = new URL(raw, getBaseOrigin());
+    const parsed =
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
 
     const parsedPath =
       `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`;
@@ -717,31 +1247,63 @@ function hasRouteToken({
 
     if (
       parsed.hash &&
+      isHashRouterPath(parsed.hash)
+    ) {
+      const hashPath =
+        normalizeHashRouterPath(parsed.hash);
+
+      if (extractPathToken(hashPath, basePath)) {
+        return true;
+      }
+
+      if (hashPath.includes("?")) {
+        const query =
+          hashPath
+            .split("?")
+            .slice(1)
+            .join("?")
+            .split("#")[0];
+
+        return hasTokenInSearch(
+          query ? `?${query}` : "",
+          tokenParamNames
+        );
+      }
+    }
+
+    if (
+      parsed.hash &&
       parsed.hash.includes("?")
     ) {
-      const query = parsed.hash
-        .split("?")
-        .slice(1)
-        .join("?");
+      const query =
+        parsed.hash
+          .split("?")
+          .slice(1)
+          .join("?");
 
       return hasTokenInSearch(
         query ? `?${query}` : "",
         tokenParamNames
       );
     }
+
+    return false;
   } catch {
-    const path = pathFromUrlLike(raw) || raw;
+    const path =
+      pathFromUrlLike(raw) ||
+      raw;
 
     if (extractPathToken(path, basePath)) {
       return true;
     }
 
     if (raw.includes("?")) {
-      const query = raw
-        .split("?")
-        .slice(1)
-        .join("?")
-        .split("#")[0];
+      const query =
+        raw
+          .split("?")
+          .slice(1)
+          .join("?")
+          .split("#")[0];
 
       if (
         hasTokenInSearch(
@@ -757,19 +1319,16 @@ function hasRouteToken({
       raw.includes("#") &&
       raw.includes("?")
     ) {
-      const query = raw
-        .split("?")
-        .slice(1)
-        .join("?");
+      const query =
+        raw
+          .split("?")
+          .slice(1)
+          .join("?");
 
-      if (
-        hasTokenInSearch(
-          query ? `?${query}` : "",
-          tokenParamNames
-        )
-      ) {
-        return true;
-      }
+      return hasTokenInSearch(
+        query ? `?${query}` : "",
+        tokenParamNames
+      );
     }
   }
 
@@ -779,16 +1338,20 @@ function hasRouteToken({
 function hasActivationToken(value = "") {
   return hasRouteToken({
     value,
-    basePath: ACTIVATION_PATH,
-    tokenParamNames: ACTIVATION_TOKEN_PARAM_NAMES,
+    basePath:
+      ACTIVATION_PATH,
+    tokenParamNames:
+      ACTIVATION_TOKEN_PARAM_NAMES,
   });
 }
 
 function hasResetConfirmToken(value = "") {
   return hasRouteToken({
     value,
-    basePath: RESET_CONFIRM_PATH,
-    tokenParamNames: RESET_TOKEN_PARAM_NAMES,
+    basePath:
+      RESET_CONFIRM_PATH,
+    tokenParamNames:
+      RESET_TOKEN_PARAM_NAMES,
   });
 }
 
@@ -798,14 +1361,18 @@ function isHistoryStateFlagEnabled(flag = "") {
   }
 
   try {
-    return Boolean(window.history?.state?.[flag]);
+    return Boolean(
+      window.history?.state?.[flag]
+    );
   } catch {
     return false;
   }
 }
 
 function isActivationTokenScrubbed() {
-  return isHistoryStateFlagEnabled("scrubbedActivationToken");
+  return isHistoryStateFlagEnabled(
+    "scrubbedActivationToken"
+  );
 }
 
 function isResetConfirmTokenScrubbed() {
@@ -815,60 +1382,13 @@ function isResetConfirmTokenScrubbed() {
   );
 }
 
-function isPublicUsernameSegment(segment = "") {
-  return /^@[A-Za-z0-9._-]{1,80}$/.test(
-    safeText(segment, "")
-  );
-}
-
-function stripPublicUsernamePrefixFromPath(path = "/") {
-  const normalized = pathFromUrlLike(path) || path || "/";
-  const clean = stripSearchAndHash(normalized);
-
-  const segments = clean
-    .split("/")
-    .filter(Boolean);
-
-  if (
-    segments.length > 0 &&
-    isPublicUsernameSegment(segments[0])
-  ) {
-    const rest = segments.slice(1).join("/");
-
-    return rest
-      ? normalizePathnameOnly(`/${rest}`)
-      : "/";
-  }
-
-  return clean;
-}
-
-function getBootInitialPath(AppCore) {
-  const state = getState(AppCore);
-
-  return (
-    safeText(state.bootProtectedInitialPath, "") ||
-    safeText(state.bootActivationInitialPath, "") ||
-    safeText(state.bootResetConfirmInitialPath, "") ||
-    pathFromUrlLike(getActivationInitialUrl()) ||
-    pathFromUrlLike(getResetConfirmInitialUrl()) ||
-    pathFromUrlLike(safeText(state.bootProtectedInitialUrl, "")) ||
-    pathFromUrlLike(safeText(state.bootInitialUrl, "")) ||
-    pathFromUrlLike(getInitialUrl()) ||
-    getBrowserPublicPath() ||
-    safeText(state.publicPath, "") ||
-    safeText(state.route, "/")
-  );
-}
-
-function getCanonicalFromAnyPath(path = "/") {
-  return stripPublicUsernamePrefixFromPath(
-    pathFromUrlLike(path) || path || "/"
-  );
-}
+/* =========================================================
+   ROUTE CLASSIFICATION
+========================================================= */
 
 function isPublicTechnicalCanonicalPath(canonicalPath = "/") {
-  const clean = stripSearchAndHash(canonicalPath || "/");
+  const clean =
+    stripSearchAndHash(canonicalPath || "/");
 
   if (PUBLIC_TECHNICAL_ROUTES.has(clean)) {
     return true;
@@ -880,7 +1400,8 @@ function isPublicTechnicalCanonicalPath(canonicalPath = "/") {
 }
 
 function isActivationCanonicalPath(canonicalPath = "/") {
-  const clean = stripSearchAndHash(canonicalPath);
+  const clean =
+    stripSearchAndHash(canonicalPath);
 
   return (
     clean === ACTIVATION_PATH ||
@@ -889,7 +1410,8 @@ function isActivationCanonicalPath(canonicalPath = "/") {
 }
 
 function isResetConfirmCanonicalPath(canonicalPath = "/") {
-  const clean = stripSearchAndHash(canonicalPath);
+  const clean =
+    stripSearchAndHash(canonicalPath);
 
   return (
     clean === RESET_CONFIRM_PATH ||
@@ -902,20 +1424,21 @@ function isLoginCanonicalPath(canonicalPath = "/") {
 }
 
 function isAuthLikeCanonicalPath(canonicalPath = "/") {
-  const clean = stripSearchAndHash(canonicalPath);
+  const clean =
+    stripSearchAndHash(canonicalPath);
 
   if (AUTH_LIKE_ROUTES.has(clean)) {
     return true;
   }
 
-  return (
-    clean.startsWith(`${ACTIVATION_PATH}/`) ||
-    clean.startsWith(`${RESET_CONFIRM_PATH}/`)
+  return AUTH_LIKE_PREFIXES.some((prefix) =>
+    clean.startsWith(prefix)
   );
 }
 
 function isActivationBoot(AppCore) {
-  const state = getState(AppCore);
+  const state =
+    getState(AppCore);
 
   if (
     state.bootIsActivation === true &&
@@ -928,33 +1451,38 @@ function isActivationBoot(AppCore) {
     return false;
   }
 
-  const candidates = [
-    state.bootActivationInitialUrl,
-    state.bootProtectedInitialUrl,
-    getActivationInitialUrl(),
-    state.bootInitialUrl,
-    getInitialUrl(),
-    getBrowserPublicPath(),
-    state.publicPath,
-    state.route,
-  ];
+  const candidates =
+    [
+      state.bootActivationInitialUrl,
+      state.bootProtectedInitialUrl,
+      getActivationInitialUrl(),
+      state.bootInitialUrl,
+      getInitialUrl(),
+      getBrowserPublicPath(),
+      state.publicPath,
+      state.route,
+    ];
 
   return candidates.some((candidate) => {
-    const value = safeText(candidate, "");
+    const value =
+      safeText(candidate, "");
 
     if (!value) {
       return false;
     }
 
     return (
-      isActivationCanonicalPath(getCanonicalFromAnyPath(value)) &&
+      isActivationCanonicalPath(
+        getCanonicalFromAnyPath(value)
+      ) &&
       hasActivationToken(value)
     );
   });
 }
 
 function isResetConfirmBoot(AppCore) {
-  const state = getState(AppCore);
+  const state =
+    getState(AppCore);
 
   if (
     state.bootIsResetConfirm === true &&
@@ -967,34 +1495,41 @@ function isResetConfirmBoot(AppCore) {
     return false;
   }
 
-  const candidates = [
-    state.bootResetConfirmInitialUrl,
-    state.bootProtectedInitialUrl,
-    getResetConfirmInitialUrl(),
-    state.bootInitialUrl,
-    getInitialUrl(),
-    getBrowserPublicPath(),
-    state.publicPath,
-    state.route,
-  ];
+  const candidates =
+    [
+      state.bootResetConfirmInitialUrl,
+      state.bootProtectedInitialUrl,
+      getResetConfirmInitialUrl(),
+      state.bootInitialUrl,
+      getInitialUrl(),
+      getBrowserPublicPath(),
+      state.publicPath,
+      state.route,
+    ];
 
   return candidates.some((candidate) => {
-    const value = safeText(candidate, "");
+    const value =
+      safeText(candidate, "");
 
     if (!value) {
       return false;
     }
 
     return (
-      isResetConfirmCanonicalPath(getCanonicalFromAnyPath(value)) &&
+      isResetConfirmCanonicalPath(
+        getCanonicalFromAnyPath(value)
+      ) &&
       hasResetConfirmToken(value)
     );
   });
 }
 
 function isPublicTechnicalBoot(AppCore) {
-  const bootPath = getBootInitialPath(AppCore);
-  const canonical = getCanonicalFromAnyPath(bootPath || "/");
+  const bootPath =
+    getBootInitialPath(AppCore);
+
+  const canonical =
+    getCanonicalFromAnyPath(bootPath || "/");
 
   return (
     isPublicTechnicalCanonicalPath(canonical) ||
@@ -1003,139 +1538,427 @@ function isPublicTechnicalBoot(AppCore) {
   );
 }
 
-function getCurrentCanonicalSafe(AppCore, Router) {
-  try {
-    const value = getCurrentCanonicalPath(AppCore, Router);
-
-    if (value) {
-      return stripSearchAndHash(
-        getCanonicalFromAnyPath(value)
-      );
-    }
-  } catch {}
-
-  const publicPath = safeText(getState(AppCore).publicPath, "");
-
-  if (publicPath) {
-    return stripSearchAndHash(
-      getCanonicalFromAnyPath(publicPath)
-    );
-  }
-
-  const route = safeText(getState(AppCore).route, "");
-
-  if (route) {
-    return stripSearchAndHash(
-      getCanonicalFromAnyPath(route)
-    );
-  }
-
-  const bootPath = getBootInitialPath(AppCore);
-
-  return getCanonicalFromAnyPath(bootPath || "/");
-}
-
-function getCurrentPublicSafe(AppCore, Router) {
-  try {
-    const value = getCurrentPublicPath(AppCore, Router);
-
-    if (value) {
-      return value;
-    }
-  } catch {}
-
-  return (
-    safeText(getState(AppCore).publicPath, "") ||
-    getBootInitialPath(AppCore) ||
-    "/"
-  );
-}
-
 /* =========================================================
    REDACTION / SNAPSHOTS
 ========================================================= */
 
 function redactTokenInText(value = "") {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return "";
   }
 
-  let output = raw;
+  let output =
+    raw;
 
   for (const config of TOKEN_ROUTE_CONFIGS) {
-    const escapedPath = config.path.replace(/\//g, "\\/");
+    const escapedPath =
+      escapeRegExp(config.path);
 
     try {
-      output = output.replace(
-        new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
-        "$1/***"
-      );
+      output =
+        output.replace(
+          new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
+          "$1/***"
+        );
     } catch {}
 
     for (const name of config.tokenParamNames) {
       try {
-        output = output.replace(
-          new RegExp(`([?&#]${name}=)([^&#\\s]+)`, "gi"),
-          "$1***"
-        );
+        output =
+          output.replace(
+            new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi"),
+            "$1***"
+          );
       } catch {}
     }
+  }
+
+  try {
+    output =
+      output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
+  } catch {}
+
+  try {
+    output =
+      output.replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
+      );
+  } catch {}
+
+  return output;
+}
+
+function sanitizeError(error = null) {
+  if (!error) {
+    return null;
+  }
+
+  const source =
+    error?.error ||
+    error?.reason ||
+    error;
+
+  return {
+    name:
+      safeText(source?.name, "Error"),
+
+    message:
+      redactTokenInText(
+        safeText(
+          source?.message ||
+          source?.reason ||
+          source,
+          "Error"
+        )
+      ),
+
+    status:
+      safeNumber(
+        source?.status ||
+        source?.statusCode,
+        0
+      ),
+
+    code:
+      safeText(
+        source?.code,
+        ""
+      ) || null,
+
+    at:
+      safeIsoDate(),
+  };
+}
+
+function sanitizeRestoreResult(result = {}) {
+  const source =
+    safeObject(result);
+
+  const output =
+    safeClone(source, {}) || {};
+
+  const sensitiveKeys =
+    [
+      "token",
+      "accessToken",
+      "access_token",
+      "refreshToken",
+      "refresh_token",
+      "idToken",
+      "id_token",
+      "jwt",
+      "authorization",
+      "password",
+      "code",
+      "otp",
+    ];
+
+  for (const key of sensitiveKeys) {
+    if (key in output) {
+      output[key] =
+        null;
+    }
+  }
+
+  if (output.error) {
+    output.error =
+      sanitizeError(output.error);
+  }
+
+  if (output.message) {
+    output.message =
+      redactTokenInText(output.message);
   }
 
   return output;
 }
 
 function buildSnapshot(AppCore, extras = {}) {
-  const state = getState(AppCore);
+  const state =
+    getState(AppCore);
 
   return {
-    authenticated: isAuthenticated(AppCore),
-    user: state.user || null,
-    username: getResolvedSessionUser(AppCore),
-    role: getResolvedSessionRole(AppCore),
+    version:
+      SESSION_VERSION,
 
-    route: state.route || "/",
-    publicPath: state.publicPath || "/",
+    authenticated:
+      isAuthenticated(AppCore),
+
+    user:
+      getResolvedUserObject(AppCore),
+
+    username:
+      getResolvedSessionUser(AppCore),
+
+    role:
+      getResolvedSessionRole(AppCore),
+
+    route:
+      state.route || "/",
+
+    publicPath:
+      state.publicPath || "/",
 
     bootInitialUrl:
       redactTokenInText(
         state.bootInitialUrl ||
-          getInitialUrl() ||
-          ""
+        getInitialUrl() ||
+        ""
       ) || null,
 
     bootProtectedInitialUrl:
       redactTokenInText(
         state.bootProtectedInitialUrl ||
-          ""
+        ""
       ) || null,
 
     bootActivationInitialUrl:
       redactTokenInText(
         state.bootActivationInitialUrl ||
-          getActivationInitialUrl() ||
-          ""
+        getActivationInitialUrl() ||
+        ""
       ) || null,
 
     bootResetConfirmInitialUrl:
       redactTokenInText(
         state.bootResetConfirmInitialUrl ||
-          getResetConfirmInitialUrl() ||
-          ""
+        getResetConfirmInitialUrl() ||
+        ""
       ) || null,
 
-    bootIsActivation: Boolean(state.bootIsActivation),
-    bootHasActivationToken: Boolean(state.bootHasActivationToken),
-    bootIsResetConfirm: Boolean(state.bootIsResetConfirm),
-    bootHasResetToken: Boolean(state.bootHasResetToken),
+    bootIsActivation:
+      Boolean(state.bootIsActivation),
 
-    activationTokenScrubbed: isActivationTokenScrubbed(),
-    resetConfirmTokenScrubbed: isResetConfirmTokenScrubbed(),
+    bootHasActivationToken:
+      Boolean(state.bootHasActivationToken),
+
+    bootIsResetConfirm:
+      Boolean(state.bootIsResetConfirm),
+
+    bootHasResetToken:
+      Boolean(state.bootHasResetToken),
+
+    activationTokenScrubbed:
+      isActivationTokenScrubbed(),
+
+    resetConfirmTokenScrubbed:
+      isResetConfirmTokenScrubbed(),
+
+    at:
+      safeIsoDate(),
 
     ...extras,
   };
+}
+
+/* =========================================================
+   RESTORE RESULT EXTRACTION
+========================================================= */
+
+function hasTokenLike(value = "") {
+  const text =
+    safeText(value, "");
+
+  if (!text) {
+    return false;
+  }
+
+  const lower =
+    text.toLowerCase();
+
+  if (
+    [
+      "null",
+      "undefined",
+      "false",
+      "true",
+      "nan",
+      "none",
+      "[object object]",
+    ].includes(lower)
+  ) {
+    return false;
+  }
+
+  if (/[\s\r\n\t]/.test(text)) {
+    return false;
+  }
+
+  return true;
+}
+
+function firstToken(...values) {
+  for (const value of values) {
+    if (hasTokenLike(value)) {
+      return String(value).trim();
+    }
+  }
+
+  return null;
+}
+
+function firstUsableUser(...values) {
+  for (const value of values) {
+    if (hasUsableSessionUser(value)) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function extractSessionPayloadFromResult(result = {}) {
+  const source =
+    safeObject(result);
+
+  const data =
+    safeObject(source.data);
+
+  const payload =
+    safeObject(source.payload);
+
+  const session =
+    safeObject(source.session);
+
+  const dataSession =
+    safeObject(data.session);
+
+  const payloadSession =
+    safeObject(payload.session);
+
+  const user =
+    firstUsableUser(
+      source.user,
+      source.currentUser,
+      source.sessionUser,
+      source.authUser,
+      session.user,
+      data.user,
+      data.currentUser,
+      data.sessionUser,
+      data.authUser,
+      dataSession.user,
+      payload.user,
+      payload.currentUser,
+      payload.sessionUser,
+      payload.authUser,
+      payloadSession.user
+    );
+
+  const token =
+    firstToken(
+      source.token,
+      source.accessToken,
+      source.access_token,
+      source.jwt,
+      source.bearer,
+      session.token,
+      session.accessToken,
+      session.access_token,
+      data.token,
+      data.accessToken,
+      data.access_token,
+      data.jwt,
+      dataSession.token,
+      dataSession.accessToken,
+      dataSession.access_token,
+      payload.token,
+      payload.accessToken,
+      payload.access_token,
+      payload.jwt,
+      payloadSession.token,
+      payloadSession.accessToken,
+      payloadSession.access_token
+    );
+
+  return {
+    user,
+    token,
+  };
+}
+
+function maybeApplyRestoreResultToCore({
+  AppCore,
+  result = {},
+  reason = "restore-result",
+} = {}) {
+  if (!AppCore) {
+    return false;
+  }
+
+  const {
+    user,
+    token,
+  } =
+    extractSessionPayloadFromResult(result);
+
+  const currentState =
+    getState(AppCore);
+
+  const patch =
+    {};
+
+  if (
+    token &&
+    !hasTokenLike(currentState.token)
+  ) {
+    patch.token =
+      token;
+  }
+
+  if (
+    user &&
+    !hasUsableSessionUser(
+      getResolvedUserObject(AppCore)
+    )
+  ) {
+    patch.user =
+      user;
+  }
+
+  if (!Object.keys(patch).length) {
+    return false;
+  }
+
+  try {
+    if (isFunction(AppCore.applySession)) {
+      AppCore.applySession(
+        patch,
+        {
+          source:
+            `AppSession:${reason}`,
+          emit:
+            false,
+        }
+      );
+
+      return true;
+    }
+  } catch {}
+
+  try {
+    setCoreState(
+      AppCore,
+      patch,
+      {
+        source:
+          `AppSession:${reason}`,
+        emit:
+          false,
+      }
+    );
+
+    return true;
+  } catch {}
+
+  return false;
 }
 
 /* =========================================================
@@ -1153,18 +1976,26 @@ async function runSyncUserUI({
     return false;
   }
 
-  const context = {
-    AppCore,
-    Auth,
-    Router,
-    reason,
-  };
+  const context =
+    {
+      AppCore,
+      Auth,
+      Router,
+      reason,
+      source:
+        "AppSession",
+    };
 
-  let synced = false;
+  let synced =
+    false;
 
   try {
-    await Promise.resolve(syncUserUI(context));
-    synced = true;
+    await Promise.resolve(
+      syncUserUI(context)
+    );
+
+    synced =
+      true;
   } catch (error) {
     safeWarn(
       AppCore,
@@ -1173,8 +2004,12 @@ async function runSyncUserUI({
     );
 
     try {
-      await Promise.resolve(syncUserUI(AppCore));
-      synced = true;
+      await Promise.resolve(
+        syncUserUI(AppCore)
+      );
+
+      synced =
+        true;
     } catch (legacyError) {
       safeWarn(
         AppCore,
@@ -1186,16 +2021,23 @@ async function runSyncUserUI({
 
   emit(
     AppCore,
-    "app:ui:repair-request",
+    SESSION_EVENTS.uiRepairRequest,
     {
       reason,
-      authenticated: isAuthenticated(AppCore),
-      user: getState(AppCore).user || null,
-      role: getResolvedSessionRole(AppCore),
-      source: "AppSession",
-      repairShell: false,
-      hardRepair: false,
-      rebind: false,
+      authenticated:
+        isAuthenticated(AppCore),
+      user:
+        getResolvedUserObject(AppCore),
+      role:
+        getResolvedSessionRole(AppCore),
+      source:
+        "AppSession",
+      repairShell:
+        false,
+      hardRepair:
+        false,
+      rebind:
+        false,
     }
   );
 
@@ -1212,9 +2054,17 @@ function clearAuthScreenDomState({
     return false;
   }
 
-  const authenticated = isAuthenticated(AppCore);
-  const canonical = getCurrentCanonicalSafe(AppCore, Router);
-  const authLike = isAuthLikeCanonicalPath(canonical);
+  const authenticated =
+    isAuthenticated(AppCore);
+
+  const canonical =
+    getCurrentCanonicalSafe(
+      AppCore,
+      Router
+    );
+
+  const authLike =
+    isAuthLikeCanonicalPath(canonical);
 
   if (
     !authenticated ||
@@ -1246,7 +2096,9 @@ function clearAuthScreenDomState({
       "route-shell-visible"
     );
 
-    document.body?.removeAttribute?.("data-auth-screen");
+    document.body?.removeAttribute?.(
+      "data-auth-screen"
+    );
 
     document.body?.setAttribute?.(
       "data-authenticated",
@@ -1255,49 +2107,88 @@ function clearAuthScreenDomState({
   } catch {}
 
   try {
-    const shell = document.getElementById("app-shell");
+    const shell =
+      document.getElementById("app-shell");
 
     if (shell) {
-      shell.hidden = false;
-      shell.setAttribute("aria-hidden", "false");
-      shell.setAttribute("aria-busy", "false");
-      shell.dataset.shellInteractive = "true";
+      shell.hidden =
+        false;
+
+      shell.setAttribute(
+        "aria-hidden",
+        "false"
+      );
+
+      shell.setAttribute(
+        "aria-busy",
+        "false"
+      );
+
+      shell.dataset.shellInteractive =
+        "true";
     }
   } catch {}
 
   try {
-    const main = document.getElementById("main-content");
+    const main =
+      document.getElementById("main-content");
 
     if (main) {
-      main.hidden = false;
-      main.setAttribute("aria-hidden", "false");
-      main.setAttribute("aria-busy", "false");
+      main.hidden =
+        false;
+
+      main.setAttribute(
+        "aria-hidden",
+        "false"
+      );
+
+      main.setAttribute(
+        "aria-busy",
+        "false"
+      );
     }
   } catch {}
 
   try {
-    const view = document.getElementById("view-container");
+    const view =
+      document.getElementById("view-container");
 
     if (view) {
-      view.hidden = false;
-      view.setAttribute("aria-hidden", "false");
-      view.setAttribute("aria-busy", "false");
+      view.hidden =
+        false;
+
+      view.setAttribute(
+        "aria-hidden",
+        "false"
+      );
+
+      view.setAttribute(
+        "aria-busy",
+        "false"
+      );
     }
   } catch {}
 
   emit(
     AppCore,
-    "app:shell:auth-screen-cleared",
+    SESSION_EVENTS.authScreenCleared,
     {
       reason,
       canonical,
       authenticated,
-      source: "AppSession",
+      source:
+        "AppSession",
+      at:
+        safeIsoDate(),
     }
   );
 
   return true;
 }
+
+/* =========================================================
+   SESSION READY EVENTS
+========================================================= */
 
 function buildSessionReadyPayload({
   AppCore,
@@ -1305,7 +2196,11 @@ function buildSessionReadyPayload({
   result = {},
 } = {}) {
   return {
+    version:
+      SESSION_VERSION,
+
     reason,
+
     ok:
       Boolean(result?.ok) ||
       isAuthenticated(AppCore),
@@ -1314,7 +2209,7 @@ function buildSessionReadyPayload({
       isAuthenticated(AppCore),
 
     user:
-      getState(AppCore).user || null,
+      getResolvedUserObject(AppCore),
 
     username:
       getResolvedSessionUser(AppCore),
@@ -1331,13 +2226,37 @@ function buildSessionReadyPayload({
     navigationHandled:
       Boolean(
         result?.navigationHandled ||
-          result?.navigated ||
-          result?.didNavigate ||
-          result?.redirected
+        result?.navigated ||
+        result?.didNavigate ||
+        result?.redirected
       ),
+
+    navigated:
+      Boolean(
+        result?.navigated ||
+        result?.navigationHandled
+      ),
+
+    didNavigate:
+      Boolean(
+        result?.didNavigate ||
+        result?.navigationHandled
+      ),
+
+    redirected:
+      Boolean(
+        result?.redirected ||
+        result?.navigationHandled
+      ),
+
+    routeChanged:
+      Boolean(result?.routeChanged),
 
     source:
       "AppSession",
+
+    at:
+      safeIsoDate(),
   };
 }
 
@@ -1347,22 +2266,26 @@ function emitSessionReadyEvents({
   result = {},
   dedupe = true,
 } = {}) {
-  const payload = buildSessionReadyPayload({
-    AppCore,
-    reason,
-    result,
-  });
+  const payload =
+    buildSessionReadyPayload({
+      AppCore,
+      reason,
+      result,
+    });
 
-  const key = [
-    payload.authenticated ? "auth" : "anon",
-    safeText(payload.username, ""),
-    safeText(payload.role, ""),
-    safeText(payload.route, ""),
-    safeText(payload.publicPath, ""),
-    payload.navigationHandled ? "nav" : "no-nav",
-  ].join("|");
+  const key =
+    [
+      payload.authenticated ? "auth" : "anon",
+      safeText(payload.username, ""),
+      safeText(payload.role, ""),
+      safeText(payload.route, ""),
+      safeText(payload.publicPath, ""),
+      payload.navigationHandled ? "nav" : "no-nav",
+      payload.routeChanged ? "changed" : "same",
+    ].join("|");
 
-  const timestamp = Date.now();
+  const timestamp =
+    Date.now();
 
   if (
     dedupe &&
@@ -1372,21 +2295,41 @@ function emitSessionReadyEvents({
     return payload;
   }
 
-  lastSessionReadyEmitKey = key;
-  lastSessionReadyEmitAt = timestamp;
+  lastSessionReadyEmitKey =
+    key;
 
-  emit(AppCore, "auth:session:restored", payload);
-  emit(AppCore, "app:session:restored", payload);
-  emit(AppCore, "app:user:change", payload);
+  lastSessionReadyEmitAt =
+    timestamp;
 
   emit(
     AppCore,
-    "app:ui:repair-request",
+    SESSION_EVENTS.authRestored,
+    payload
+  );
+
+  emit(
+    AppCore,
+    SESSION_EVENTS.appRestored,
+    payload
+  );
+
+  emit(
+    AppCore,
+    SESSION_EVENTS.userChange,
+    payload
+  );
+
+  emit(
+    AppCore,
+    SESSION_EVENTS.uiRepairRequest,
     {
       ...payload,
-      repairShell: false,
-      hardRepair: false,
-      rebind: false,
+      repairShell:
+        false,
+      hardRepair:
+        false,
+      rebind:
+        false,
     }
   );
 
@@ -1394,27 +2337,46 @@ function emitSessionReadyEvents({
 }
 
 /* =========================================================
-   NAVIGATION GUARDS
+   NAVIGATION GUARDS / FLAGS
 ========================================================= */
 
 function shouldSkipNavigation(state, Auth = null) {
   return Boolean(
     state?.bootNavigationHandled ||
-      state?.loginNavigationHandled ||
-      state?.loginInProgress ||
-      isAuthLoginInProgress(Auth, state)
+    state?.loginNavigationHandled ||
+    state?.loginInProgress ||
+    isAuthLoginInProgress(Auth, state)
   );
 }
 
-function markNavigationHandled(state, value = true) {
+function markNavigationHandled({
+  AppCore,
+  state,
+  value = true,
+} = {}) {
   try {
     if (
       state &&
       typeof state === "object"
     ) {
-      state.bootNavigationHandled = Boolean(value);
+      state.bootNavigationHandled =
+        Boolean(value);
     }
   } catch {}
+
+  setCoreState(
+    AppCore,
+    {
+      bootNavigationHandled:
+        Boolean(value),
+    },
+    {
+      source:
+        "AppSession:navigation-handled",
+      emit:
+        false,
+    }
+  );
 }
 
 function markNavigationSkipped(state, reason = "unknown") {
@@ -1423,14 +2385,18 @@ function markNavigationSkipped(state, reason = "unknown") {
       state &&
       typeof state === "object"
     ) {
-      state.postRestoreNavigationSkipped = true;
-      state.postRestoreNavigationSkippedReason = reason;
+      state.postRestoreNavigationSkipped =
+        true;
+
+      state.postRestoreNavigationSkippedReason =
+        reason;
     }
   } catch {}
 }
 
 function isSafeInternalTarget(value = "") {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return false;
@@ -1448,7 +2414,7 @@ function isSafeInternalTarget(value = "") {
     return false;
   }
 
-  if (/[\r\n\t]/.test(raw)) {
+  if (/[\r\n\t\\]/.test(raw)) {
     return false;
   }
 
@@ -1456,19 +2422,44 @@ function isSafeInternalTarget(value = "") {
 }
 
 function normalizeTargetPath(path = "/") {
-  const raw = safeText(path, "/") || "/";
+  const raw =
+    safeText(path, DEFAULT_HOME_PATH) ||
+    DEFAULT_HOME_PATH;
 
   if (!isSafeInternalTarget(raw)) {
-    return "/";
+    return DEFAULT_HOME_PATH;
   }
 
-  const target = normalizeInternalPath(raw);
+  try {
+    const parsed =
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
 
-  if (!isSafeInternalTarget(target)) {
-    return "/";
+    if (parsed.origin !== getBaseOrigin()) {
+      return DEFAULT_HOME_PATH;
+    }
+
+    const pathname =
+      normalizePathnameOnly(
+        parsed.pathname || DEFAULT_HOME_PATH
+      );
+
+    const output =
+      `${pathname}${parsed.search || ""}${parsed.hash || ""}`;
+
+    return isSafeInternalTarget(output)
+      ? output
+      : DEFAULT_HOME_PATH;
+  } catch {
+    const clean =
+      normalizePathnameOnly(raw);
+
+    return isSafeInternalTarget(clean)
+      ? clean
+      : DEFAULT_HOME_PATH;
   }
-
-  return target;
 }
 
 function samePath(a = "/", b = "/") {
@@ -1479,24 +2470,30 @@ function samePath(a = "/", b = "/") {
 }
 
 /* =========================================================
-   TARGET RESOLUTION
+   POST LOGIN TARGET
 ========================================================= */
 
 function resolvePostLoginTarget({
   AppCore,
   Auth,
 } = {}) {
-  const user = getState(AppCore).user || null;
+  const user =
+    getResolvedUserObject(AppCore);
 
   try {
     if (isFunction(Auth?.getPostLoginTarget)) {
-      const next = Auth.getPostLoginTarget(user, {});
+      const next =
+        Auth.getPostLoginTarget(
+          user,
+          {}
+        );
 
       if (
         next &&
         typeof next === "string"
       ) {
-        const normalized = normalizeTargetPath(next);
+        const normalized =
+          normalizeTargetPath(next);
 
         if (
           normalized &&
@@ -1509,23 +2506,27 @@ function resolvePostLoginTarget({
     }
   } catch {}
 
-  const state = getState(AppCore);
+  const state =
+    getState(AppCore);
 
-  const candidates = [
-    state.postLoginTarget,
-    state.redirectAfterLogin,
-    state.returnTo,
-    state.lastPrivatePath,
-  ];
+  const candidates =
+    [
+      state.postLoginTarget,
+      state.redirectAfterLogin,
+      state.returnTo,
+      state.lastPrivatePath,
+    ];
 
   for (const candidate of candidates) {
-    const value = safeText(candidate, "");
+    const value =
+      safeText(candidate, "");
 
     if (!value) {
       continue;
     }
 
-    const normalized = normalizeTargetPath(value);
+    const normalized =
+      normalizeTargetPath(value);
 
     if (
       normalized &&
@@ -1536,28 +2537,17 @@ function resolvePostLoginTarget({
     }
   }
 
-  return "/";
+  return DEFAULT_HOME_PATH;
 }
 
 /* =========================================================
    ROUTER NAVIGATION
 ========================================================= */
 
-async function runMaybePromise(value) {
-  if (
-    value &&
-    isFunction(value.then)
-  ) {
-    await value;
-  }
-
-  return value;
-}
-
 async function runRouterNavigation({
   AppCore,
   Router,
-  target = "/",
+  target = DEFAULT_HOME_PATH,
   replaceState = true,
   force = false,
 } = {}) {
@@ -1565,41 +2555,47 @@ async function runRouterNavigation({
     return false;
   }
 
-  /*
-    Preferimos goAfterLogin si existe porque algunos routers centralizan ahí:
-    - replaceState
-    - limpieza de returnTo
-    - shell/auth-screen
-    - canonical/publicPath sync
-  */
+  const normalizedTarget =
+    normalizeTargetPath(target);
+
   try {
     if (isFunction(Router.goAfterLogin)) {
-      await runMaybePromise(
-        Router.goAfterLogin(target)
-      );
+      const result =
+        await runMaybePromise(
+          Router.goAfterLogin(normalizedTarget)
+        );
 
-      return true;
+      return result !== false;
     }
   } catch (error) {
-    safeWarn(AppCore, "Router.goAfterLogin() falló:", error);
+    safeWarn(
+      AppCore,
+      "Router.goAfterLogin() falló:",
+      error
+    );
   }
 
   try {
     if (isFunction(Router.navigate)) {
-      await runMaybePromise(
-        Router.navigate(
-          target,
-          {
-            replaceState,
-            force,
-          }
-        )
-      );
+      const result =
+        await runMaybePromise(
+          Router.navigate(
+            normalizedTarget,
+            {
+              replaceState,
+              force,
+            }
+          )
+        );
 
-      return true;
+      return result !== false;
     }
   } catch (error) {
-    safeWarn(AppCore, "Router.navigate() falló:", error);
+    safeWarn(
+      AppCore,
+      "Router.navigate() falló:",
+      error
+    );
   }
 
   return false;
@@ -1622,36 +2618,61 @@ export async function navigateAfterSessionRestore({
     return false;
   }
 
+  enforceNoGhostAuth(
+    AppCore,
+    "before-post-restore-navigation"
+  );
+
   if (!isAuthenticated(AppCore)) {
     return false;
   }
 
-  const currentCanonicalPath = getCurrentCanonicalSafe(AppCore, Router);
-  const currentPublicPath = getCurrentPublicSafe(AppCore, Router);
+  const currentCanonicalPath =
+    getCurrentCanonicalSafe(
+      AppCore,
+      Router
+    );
+
+  const currentPublicPath =
+    getCurrentPublicSafe(
+      AppCore,
+      Router
+    );
 
   const publicTechnical =
     isPublicTechnicalCanonicalPath(currentCanonicalPath) ||
     isPublicTechnicalCanonicalPath(currentPublicPath) ||
     isActivationBoot(AppCore) ||
     isResetConfirmBoot(AppCore) ||
+    isActivationCanonicalPath(currentCanonicalPath) ||
     isResetConfirmCanonicalPath(currentCanonicalPath) ||
+    isActivationCanonicalPath(currentPublicPath) ||
     isResetConfirmCanonicalPath(currentPublicPath);
 
   /*
-    No navegar nunca desde rutas públicas técnicas.
-    No marcamos bootNavigationHandled: App.index aún debe poder renderizar.
+    Rutas públicas técnicas:
+    - bloquean navegación post-restore
+    - NO marcan bootNavigationHandled
+    - App.index sigue pudiendo hacer render inicial.
   */
   if (publicTechnical) {
-    markNavigationSkipped(state, "public-technical-route");
+    markNavigationSkipped(
+      state,
+      "public-technical-route"
+    );
 
     safeLog(
       AppCore,
       "navigateAfterSessionRestore(): omitido por ruta pública técnica.",
       {
-        canonical: redactTokenInText(currentCanonicalPath),
-        publicPath: redactTokenInText(currentPublicPath),
-        activationBoot: isActivationBoot(AppCore),
-        resetConfirmBoot: isResetConfirmBoot(AppCore),
+        canonical:
+          redactTokenInText(currentCanonicalPath),
+        publicPath:
+          redactTokenInText(currentPublicPath),
+        activationBoot:
+          isActivationBoot(AppCore),
+        resetConfirmBoot:
+          isResetConfirmBoot(AppCore),
       }
     );
 
@@ -1670,12 +2691,18 @@ export async function navigateAfterSessionRestore({
       AppCore,
       "navigateAfterSessionRestore(): omitido porque ya hay navegación/login en curso.",
       {
-        canonical: currentCanonicalPath,
-        publicPath: currentPublicPath,
-        bootNavigationHandled: Boolean(state?.bootNavigationHandled),
-        loginNavigationHandled: Boolean(state?.loginNavigationHandled),
-        loginInProgress: Boolean(state?.loginInProgress),
-        authLoginInProgress: isAuthLoginInProgress(Auth, state),
+        canonical:
+          currentCanonicalPath,
+        publicPath:
+          currentPublicPath,
+        bootNavigationHandled:
+          Boolean(state?.bootNavigationHandled),
+        loginNavigationHandled:
+          Boolean(state?.loginNavigationHandled),
+        loginInProgress:
+          Boolean(state?.loginInProgress),
+        authLoginInProgress:
+          isAuthLoginInProgress(Auth, state),
       }
     );
 
@@ -1683,30 +2710,37 @@ export async function navigateAfterSessionRestore({
   }
 
   /*
-    Sólo redirigir desde /login.
+    Solo redirigir desde /login.
     Si ya estamos en una ruta privada, no tocar navegación.
   */
   if (!isLoginCanonicalPath(currentCanonicalPath)) {
     clearAuthScreenDomState({
       AppCore,
       Router,
-      reason: "already-authenticated-private-route",
-      force: false,
+      reason:
+        "already-authenticated-private-route",
+      force:
+        false,
     });
 
     return false;
   }
 
-  const target = resolvePostLoginTarget({
-    AppCore,
-    Auth,
-  });
+  const target =
+    resolvePostLoginTarget({
+      AppCore,
+      Auth,
+    });
 
   if (
     !target ||
     samePath(target, currentCanonicalPath)
   ) {
-    markNavigationSkipped(state, "target-empty-or-same");
+    markNavigationSkipped(
+      state,
+      "target-empty-or-same"
+    );
+
     return false;
   }
 
@@ -1714,71 +2748,102 @@ export async function navigateAfterSessionRestore({
     AppCore,
     "navigateAfterSessionRestore(): redirigiendo desde login.",
     {
-      canonical: currentCanonicalPath,
-      publicPath: currentPublicPath,
+      canonical:
+        currentCanonicalPath,
+      publicPath:
+        currentPublicPath,
       target,
-      authenticated: true,
-      user: getResolvedSessionUser(AppCore),
-      role: getResolvedSessionRole(AppCore),
+      authenticated:
+        true,
+      user:
+        getResolvedSessionUser(AppCore),
+      role:
+        getResolvedSessionRole(AppCore),
     }
   );
 
-  const navigated = await runRouterNavigation({
-    AppCore,
-    Router,
-    target,
-    replaceState: true,
-    force: false,
-  });
+  const navigated =
+    await runRouterNavigation({
+      AppCore,
+      Router,
+      target,
+      replaceState:
+        true,
+      force:
+        false,
+    });
 
   if (navigated) {
-    markNavigationHandled(state, true);
+    markNavigationHandled({
+      AppCore,
+      state,
+      value:
+        true,
+    });
 
     clearAuthScreenDomState({
       AppCore,
       Router,
-      reason: "post-restore-login-navigation",
-      force: true,
+      reason:
+        "post-restore-login-navigation",
+      force:
+        true,
     });
 
     afterPaint(() => {
       clearAuthScreenDomState({
         AppCore,
         Router,
-        reason: "post-restore-login-navigation-after-paint",
-        force: true,
+        reason:
+          "post-restore-login-navigation-after-paint",
+        force:
+          true,
       });
 
       emit(
         AppCore,
-        "app:ui:repair-request",
+        SESSION_EVENTS.uiRepairRequest,
         {
-          reason: "post-restore-navigation-after-paint",
+          reason:
+            "post-restore-navigation-after-paint",
           target,
-          authenticated: true,
-          source: "AppSession",
-          repairShell: false,
-          hardRepair: false,
-          rebind: false,
+          authenticated:
+            true,
+          source:
+            "AppSession",
+          repairShell:
+            false,
+          hardRepair:
+            false,
+          rebind:
+            false,
         }
       );
     });
 
     emit(
       AppCore,
-      "app:auth:navigation",
+      SESSION_EVENTS.authNavigation,
       {
-        reason: "post-restore-login-navigation",
+        reason:
+          "post-restore-login-navigation",
         target,
-        authenticated: true,
-        source: "AppSession",
+        authenticated:
+          true,
+        source:
+          "AppSession",
+        at:
+          safeIsoDate(),
       }
     );
 
     return true;
   }
 
-  markNavigationSkipped(state, "router-navigation-failed");
+  markNavigationSkipped(
+    state,
+    "router-navigation-failed"
+  );
 
   return false;
 }
@@ -1796,21 +2861,24 @@ function getSessionRestorePromise(state) {
 }
 
 function setSessionRestorePromise(state, promise) {
-  moduleSessionRestorePromise = promise;
+  moduleSessionRestorePromise =
+    promise;
 
   try {
     if (
       state &&
       typeof state === "object"
     ) {
-      state.sessionRestorePromise = promise;
+      state.sessionRestorePromise =
+        promise;
     }
   } catch {}
 }
 
 function clearSessionRestorePromise(state, promise) {
   if (moduleSessionRestorePromise === promise) {
-    moduleSessionRestorePromise = null;
+    moduleSessionRestorePromise =
+      null;
   }
 
   try {
@@ -1819,9 +2887,72 @@ function clearSessionRestorePromise(state, promise) {
       typeof state === "object" &&
       state.sessionRestorePromise === promise
     ) {
-      state.sessionRestorePromise = null;
+      state.sessionRestorePromise =
+        null;
     }
   } catch {}
+}
+
+/* =========================================================
+   AUTH RESTORE OPTIONS
+========================================================= */
+
+function buildAuthRestoreOptions({
+  publicTechnicalBoot = false,
+  activationBoot = false,
+  resetConfirmBoot = false,
+} = {}) {
+  return {
+    silent:
+      true,
+
+    skipNavigation:
+      true,
+
+    preserveCurrentRoute:
+      publicTechnicalBoot,
+
+    preserveRoute:
+      publicTechnicalBoot,
+
+    publicRoute:
+      publicTechnicalBoot,
+
+    technicalPublicRoute:
+      publicTechnicalBoot,
+
+    activationBoot:
+      Boolean(activationBoot),
+
+    resetConfirmBoot:
+      Boolean(resetConfirmBoot),
+
+    resetPasswordConfirmBoot:
+      Boolean(resetConfirmBoot),
+  };
+}
+
+async function callAuthRestoreSession({
+  Auth,
+  options,
+} = {}) {
+  if (!Auth) {
+    return null;
+  }
+
+  if (isFunction(Auth.restoreSession)) {
+    return await Auth.restoreSession(options);
+  }
+
+  if (isFunction(Auth.restore)) {
+    return await Auth.restore(options);
+  }
+
+  if (isFunction(Auth.session?.restore)) {
+    return await Auth.session.restore(options);
+  }
+
+  return null;
 }
 
 /* =========================================================
@@ -1835,8 +2966,10 @@ export async function restoreAuthSession({
   syncUserUI,
   state,
   emitReadyEvents = true,
+  syncUi = true,
 } = {}) {
-  const existingPromise = getSessionRestorePromise(state);
+  const existingPromise =
+    getSessionRestorePromise(state);
 
   if (existingPromise) {
     return existingPromise;
@@ -1844,120 +2977,226 @@ export async function restoreAuthSession({
 
   if (
     !Auth ||
-    !isFunction(Auth.restoreSession)
+    (
+      !isFunction(Auth.restoreSession) &&
+      !isFunction(Auth.restore) &&
+      !isFunction(Auth.session?.restore)
+    )
   ) {
-    await runSyncUserUI({
-      AppCore,
-      Auth,
-      Router,
-      syncUserUI,
-      reason: "auth-module-missing",
-    });
+    if (syncUi) {
+      await runSyncUserUI({
+        AppCore,
+        Auth,
+        Router,
+        syncUserUI,
+        reason:
+          "auth-module-missing",
+      });
+    }
 
     return buildSnapshot(
       AppCore,
       {
-        ok: false,
-        reason: "auth-module-missing",
+        ok:
+          false,
+        reason:
+          "auth-module-missing",
+        restored:
+          false,
       }
     );
   }
 
-  const promise = (async () => {
-    try {
-      const activationBoot = isActivationBoot(AppCore);
-      const resetConfirmBoot = isResetConfirmBoot(AppCore);
-      const publicTechnicalBoot = isPublicTechnicalBoot(AppCore);
+  const promise =
+    (async () => {
+      const activationBoot =
+        isActivationBoot(AppCore);
 
-      safeLog(
-        AppCore,
-        "Restore session iniciado...",
-        {
-          activationBoot,
-          resetConfirmBoot,
-          publicTechnicalBoot,
-        }
-      );
+      const resetConfirmBoot =
+        isResetConfirmBoot(AppCore);
 
-      const result = await Auth.restoreSession({
-        silent: true,
-        skipNavigation: true,
+      const publicTechnicalBoot =
+        isPublicTechnicalBoot(AppCore);
 
-        publicRoute: publicTechnicalBoot,
-        preserveCurrentRoute: publicTechnicalBoot,
-        preserveRoute: publicTechnicalBoot,
-
-        activationBoot,
-        resetConfirmBoot,
-      });
-
-      await runSyncUserUI({
-        AppCore,
-        Auth,
-        Router,
-        syncUserUI,
-        reason: "restore-auth-session",
-      });
-
-      if (
-        emitReadyEvents &&
-        isAuthenticated(AppCore)
-      ) {
-        emitSessionReadyEvents({
+      try {
+        emit(
           AppCore,
-          reason: "restore-auth-session",
+          SESSION_EVENTS.restoreStart,
+          {
+            activationBoot,
+            resetConfirmBoot,
+            publicTechnicalBoot,
+            source:
+              "AppSession",
+            at:
+              safeIsoDate(),
+          }
+        );
+
+        safeLog(
+          AppCore,
+          "Restore session iniciado...",
+          {
+            activationBoot,
+            resetConfirmBoot,
+            publicTechnicalBoot,
+          }
+        );
+
+        const restoreOptions =
+          buildAuthRestoreOptions({
+            publicTechnicalBoot,
+            activationBoot,
+            resetConfirmBoot,
+          });
+
+        const result =
+          await callAuthRestoreSession({
+            Auth,
+            options:
+              restoreOptions,
+          });
+
+        maybeApplyRestoreResultToCore({
+          AppCore,
           result,
+          reason:
+            "restore-auth-session",
         });
+
+        enforceNoGhostAuth(
+          AppCore,
+          "after-auth-restore"
+        );
+
+        if (syncUi) {
+          await runSyncUserUI({
+            AppCore,
+            Auth,
+            Router,
+            syncUserUI,
+            reason:
+              "restore-auth-session",
+          });
+        }
+
+        const authenticated =
+          isAuthenticated(AppCore);
+
+        if (
+          emitReadyEvents &&
+          authenticated
+        ) {
+          emitSessionReadyEvents({
+            AppCore,
+            reason:
+              "restore-auth-session",
+            result,
+          });
+        }
+
+        const snapshot =
+          buildSnapshot(
+            AppCore,
+            {
+              ok:
+                Boolean(result?.ok) ||
+                authenticated,
+
+              restored:
+                Boolean(result?.ok) ||
+                authenticated,
+
+              activationBoot,
+              resetConfirmBoot,
+              publicTechnicalBoot,
+            }
+          );
+
+        emit(
+          AppCore,
+          SESSION_EVENTS.restoreDone,
+          {
+            ...snapshot,
+            result:
+              sanitizeRestoreResult(result),
+            source:
+              "AppSession",
+          }
+        );
+
+        safeLog(
+          AppCore,
+          "Restore session completado:",
+          snapshot
+        );
+
+        return {
+          ...sanitizeRestoreResult(result),
+          ...snapshot,
+        };
+      } catch (error) {
+        safeWarn(
+          AppCore,
+          "restoreAuthSession() error:",
+          error
+        );
+
+        enforceNoGhostAuth(
+          AppCore,
+          "auth-restore-error"
+        );
+
+        if (syncUi) {
+          await runSyncUserUI({
+            AppCore,
+            Auth,
+            Router,
+            syncUserUI,
+            reason:
+              "restore-auth-session-error",
+          });
+        }
+
+        const snapshot =
+          buildSnapshot(
+            AppCore,
+            {
+              ok:
+                false,
+              restored:
+                false,
+              activationBoot,
+              resetConfirmBoot,
+              publicTechnicalBoot,
+              error:
+                sanitizeError(error),
+            }
+          );
+
+        emit(
+          AppCore,
+          SESSION_EVENTS.restoreError,
+          {
+            ...snapshot,
+            source:
+              "AppSession",
+          }
+        );
+
+        return snapshot;
+      } finally {
+        clearSessionRestorePromise(
+          state,
+          promise
+        );
       }
+    })();
 
-      const snapshot = buildSnapshot(
-        AppCore,
-        {
-          ok: Boolean(result?.ok) || isAuthenticated(AppCore),
-          activationBoot,
-          resetConfirmBoot,
-          publicTechnicalBoot,
-        }
-      );
-
-      safeLog(
-        AppCore,
-        "Restore session completado:",
-        snapshot
-      );
-
-      return {
-        ...(result || {}),
-        ...snapshot,
-      };
-    } catch (error) {
-      safeWarn(
-        AppCore,
-        "restoreAuthSession() error:",
-        error
-      );
-
-      await runSyncUserUI({
-        AppCore,
-        Auth,
-        Router,
-        syncUserUI,
-        reason: "restore-auth-session-error",
-      });
-
-      return buildSnapshot(
-        AppCore,
-        {
-          ok: false,
-          error,
-        }
-      );
-    } finally {
-      clearSessionRestorePromise(state, promise);
-    }
-  })();
-
-  setSessionRestorePromise(state, promise);
+  setSessionRestorePromise(
+    state,
+    promise
+  );
 
   return promise;
 }
@@ -1975,10 +3214,27 @@ export async function restoreSessionInBackground({
   warmup,
   skipPostRestoreNavigation = false,
 } = {}) {
+  const beforeCanonical =
+    getCurrentCanonicalSafe(
+      AppCore,
+      Router
+    );
+
+  const beforePublic =
+    getCurrentPublicSafe(
+      AppCore,
+      Router
+    );
+
   try {
-    const activationBoot = isActivationBoot(AppCore);
-    const resetConfirmBoot = isResetConfirmBoot(AppCore);
-    const publicTechnicalBoot = isPublicTechnicalBoot(AppCore);
+    const activationBoot =
+      isActivationBoot(AppCore);
+
+    const resetConfirmBoot =
+      isResetConfirmBoot(AppCore);
+
+    const publicTechnicalBoot =
+      isPublicTechnicalBoot(AppCore);
 
     if (
       activationBoot ||
@@ -1998,22 +3254,43 @@ export async function restoreSessionInBackground({
       );
     }
 
-    const result = await restoreAuthSession({
-      AppCore,
-      Auth,
-      Router,
-      syncUserUI,
-      state,
-      emitReadyEvents: false,
-    });
+    /*
+      Importante:
+      restoreAuthSession() aquí NO sincroniza UI.
+      La UI se sincroniza una sola vez al final de este flujo.
+    */
+    const result =
+      await restoreAuthSession({
+        AppCore,
+        Auth,
+        Router,
+        syncUserUI,
+        state,
+        emitReadyEvents:
+          false,
+        syncUi:
+          false,
+      });
 
     try {
-      await Promise.resolve(warmup?.(AppCore));
+      await Promise.resolve(
+        warmup?.(AppCore)
+      );
     } catch (error) {
-      safeWarn(AppCore, "warmup() falló:", error);
+      safeWarn(
+        AppCore,
+        "warmup() falló:",
+        error
+      );
     }
 
-    let navigationHandled = false;
+    enforceNoGhostAuth(
+      AppCore,
+      "before-background-navigation"
+    );
+
+    let navigationHandled =
+      false;
 
     if (
       !activationBoot &&
@@ -2021,12 +3298,13 @@ export async function restoreSessionInBackground({
       !publicTechnicalBoot &&
       !skipPostRestoreNavigation
     ) {
-      navigationHandled = await navigateAfterSessionRestore({
-        AppCore,
-        Auth,
-        Router,
-        state,
-      });
+      navigationHandled =
+        await navigateAfterSessionRestore({
+          AppCore,
+          Auth,
+          Router,
+          state,
+        });
     } else {
       safeLog(
         AppCore,
@@ -2040,55 +3318,119 @@ export async function restoreSessionInBackground({
       );
     }
 
+    const afterCanonical =
+      getCurrentCanonicalSafe(
+        AppCore,
+        Router
+      );
+
+    const afterPublic =
+      getCurrentPublicSafe(
+        AppCore,
+        Router
+      );
+
+    const routeChanged =
+      Boolean(
+        navigationHandled &&
+        (
+          !samePath(beforeCanonical, afterCanonical) ||
+          !samePath(beforePublic, afterPublic)
+        )
+      );
+
     await runSyncUserUI({
       AppCore,
       Auth,
       Router,
       syncUserUI,
-      reason: "restore-session-background-final",
+      reason:
+        "restore-session-background-final",
     });
 
-    const finalResult = {
-      ...(result || {}),
-      navigationHandled,
-      navigated: navigationHandled,
-      didNavigate: navigationHandled,
-      redirected: navigationHandled,
-    };
+    const finalResult =
+      {
+        ...sanitizeRestoreResult(result),
+
+        ok:
+          Boolean(result?.ok) ||
+          isAuthenticated(AppCore),
+
+        restored:
+          Boolean(result?.restored) ||
+          Boolean(result?.ok) ||
+          isAuthenticated(AppCore),
+
+        navigationHandled,
+
+        navigated:
+          navigationHandled,
+
+        didNavigate:
+          navigationHandled,
+
+        redirected:
+          navigationHandled,
+
+        routeChanged,
+      };
 
     if (isAuthenticated(AppCore)) {
       clearAuthScreenDomState({
         AppCore,
         Router,
-        reason: "restore-session-background-final",
-        force: false,
+        reason:
+          "restore-session-background-final",
+        force:
+          false,
       });
 
       emitSessionReadyEvents({
         AppCore,
-        reason: "restore-session-background-final",
-        result: finalResult,
+        reason:
+          "restore-session-background-final",
+        result:
+          finalResult,
       });
     }
 
-    const snapshot = buildSnapshot(
-      AppCore,
-      {
-        ok:
-          Boolean(result?.ok) ||
-          isAuthenticated(AppCore),
+    const snapshot =
+      buildSnapshot(
+        AppCore,
+        {
+          ok:
+            Boolean(finalResult.ok),
 
-        activationBoot,
-        resetConfirmBoot,
-        publicTechnicalBoot,
-        skipPostRestoreNavigation,
+          restored:
+            Boolean(finalResult.restored),
 
-        navigationHandled,
-        navigated: navigationHandled,
-        didNavigate: navigationHandled,
-        redirected: navigationHandled,
-      }
-    );
+          activationBoot,
+          resetConfirmBoot,
+          publicTechnicalBoot,
+          skipPostRestoreNavigation,
+
+          beforeCanonical:
+            redactTokenInText(beforeCanonical),
+
+          beforePublic:
+            redactTokenInText(beforePublic),
+
+          afterCanonical:
+            redactTokenInText(afterCanonical),
+
+          afterPublic:
+            redactTokenInText(afterPublic),
+
+          navigationHandled,
+          navigated:
+            navigationHandled,
+          didNavigate:
+            navigationHandled,
+          redirected:
+            navigationHandled,
+          routeChanged,
+        }
+      );
 
     safeLog(
       AppCore,
@@ -2107,23 +3449,39 @@ export async function restoreSessionInBackground({
       error
     );
 
+    enforceNoGhostAuth(
+      AppCore,
+      "background-restore-error"
+    );
+
     await runSyncUserUI({
       AppCore,
       Auth,
       Router,
       syncUserUI,
-      reason: "restore-session-background-error",
+      reason:
+        "restore-session-background-error",
     });
 
     return buildSnapshot(
       AppCore,
       {
-        ok: false,
-        error,
-        navigationHandled: false,
-        navigated: false,
-        didNavigate: false,
-        redirected: false,
+        ok:
+          false,
+        restored:
+          false,
+        error:
+          sanitizeError(error),
+        navigationHandled:
+          false,
+        navigated:
+          false,
+        didNavigate:
+          false,
+        redirected:
+          false,
+        routeChanged:
+          false,
       }
     );
   }
@@ -2142,9 +3500,13 @@ export function getSessionBootstrapSnapshot({
   return {
     ...buildSnapshot(AppCore),
 
-    restoring: Boolean(getSessionRestorePromise(state)),
+    restoring:
+      Boolean(
+        getSessionRestorePromise(state)
+      ),
 
-    bootNavigationHandled: Boolean(state?.bootNavigationHandled),
+    bootNavigationHandled:
+      Boolean(state?.bootNavigationHandled),
 
     postRestoreNavigationSkipped:
       Boolean(state?.postRestoreNavigationSkipped),
@@ -2162,7 +3524,10 @@ export function getSessionBootstrapSnapshot({
       Boolean(state?.loginInProgress),
 
     authLoginInProgress:
-      isAuthLoginInProgress(Auth, state),
+      isAuthLoginInProgress(
+        Auth,
+        state
+      ),
 
     activationBoot:
       isActivationBoot(AppCore),
@@ -2174,12 +3539,44 @@ export function getSessionBootstrapSnapshot({
       isPublicTechnicalBoot(AppCore),
 
     currentCanonicalPath:
-      getCurrentCanonicalSafe(AppCore, Router),
+      redactTokenInText(
+        getCurrentCanonicalSafe(
+          AppCore,
+          Router
+        )
+      ),
 
     currentPublicPath:
-      getCurrentPublicSafe(AppCore, Router),
+      redactTokenInText(
+        getCurrentPublicSafe(
+          AppCore,
+          Router
+        )
+      ),
+
+    browserPublicPath:
+      redactTokenInText(
+        getBrowserPublicPath()
+      ),
+
+    bootInitialPath:
+      redactTokenInText(
+        getBootInitialPath(AppCore)
+      ),
+
+    ghostAuthBlocked:
+      Boolean(
+        getState(AppCore).authenticated === true &&
+        !hasUsableSessionUser(
+          getResolvedUserObject(AppCore)
+        )
+      ),
   };
 }
+
+/* =========================================================
+   EXPORT
+========================================================= */
 
 export default {
   navigateAfterSessionRestore,

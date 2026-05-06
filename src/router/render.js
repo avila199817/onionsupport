@@ -2,15 +2,17 @@
    Onion SPA - Router Render
    Archivo: src/router/render.js
 
-   FINAL EXTREME SYSTEM · RENDER HOST ISOLATED · RACE SAFE · EVENT SAFE · 10/10
-   PATCH 13/10 · ROUTE STATE COMMIT BEFORE/SUCCESS RENDERED
+   FINAL EXTREME SYSTEM · RENDER HOST ISOLATED · RACE SAFE · EVENT SAFE · 14/10
+   PATCH · ROUTE STATE COMMIT BEFORE SUCCESS VIEW RENDER
    PATCH · SIDEBAR ACTIVE ROUTE FIX
    PATCH · CANONICAL/PUBLIC PAYLOAD HARDENED
+   PATCH · NO DOUBLE router:rendered WITH router/index.js
+   PATCH · TOKEN REDACTION SAFE
 
    RESPONSABILIDADES:
    - renderizar vistas internas del router
    - construir payloads de navegación
-   - emitir before-render / rendered cuando el flujo lo requiere
+   - emitir before-render / rendered solo cuando el flujo lo requiere
    - preparar contextos de render
    - flujos success / forbidden / 404 / login / runtime
    - soportar route.render async
@@ -61,7 +63,6 @@
 
    FIX EVENT STORM:
    - safeEmit() NO duplica AppCore.events + window
-   - safeEmit() NO emite también por window.AppCore.events
    - router:shell:repair se deduplica por firma
    - app:ui:repair-request NO se emite automáticamente desde cada shell repair
    - render.js no fuerza repair UI global en cada fase interna
@@ -74,9 +75,8 @@
    - async stale render no puede escribir ni reparar shell
 
    FIX SIDEBAR ACTIVE:
-   - success hace commit real de AppCore.state.route/publicPath antes del render
-   - success emite router:before-render con canonical/public definitivos
-   - success emite router:rendered con canonical/public definitivos
+   - success hace commit real de AppCore.state.route/publicPath ANTES del render
+   - router/index.js emite router:rendered con canonical/public definitivos
    - el sidebar ya no queda activo en la ruta anterior
 ========================================================= */
 
@@ -100,67 +100,117 @@ import {
    CONSTANTS
 ========================================================= */
 
-const ACTIVATION_PATH = "/activate-account";
-const RESET_CONFIRM_PATH = "/reset-password/confirm";
+const ACTIVATION_PATH =
+  "/activate-account";
 
-const RENDER_HOST_ATTR = "data-router-view-host";
-const RENDER_HOST_CLASS = "router-view-host";
-const RENDER_FALLBACK_CLASS = "router-fallback-view";
+const RESET_CONFIRM_PATH =
+  "/reset-password/confirm";
 
-const SHELL_REPAIR_EMIT_DEDUPE_MS = 24;
+const RENDER_HOST_ATTR =
+  "data-router-view-host";
 
-const ACTIVATION_TOKEN_PARAM_NAMES = Object.freeze([
-  "token",
-  "activationToken",
-  "activateToken",
-  "code",
-  "t",
-]);
+const RENDER_HOST_CLASS =
+  "router-view-host";
 
-const RESET_TOKEN_PARAM_NAMES = Object.freeze([
-  "token",
-  "resetToken",
-  "passwordResetToken",
-  "confirmToken",
-  "code",
-  "t",
-]);
+const RENDER_FALLBACK_CLASS =
+  "router-fallback-view";
 
-const AUTH_SCREEN_CANONICAL_PATHS = new Set([
-  "/login",
-  "/forgot-password",
-  "/recover-password",
-  "/password-reset",
-  "/reset-password",
-  "/reset-password/confirm",
-  "/activate-account",
-]);
+const SHELL_REPAIR_EMIT_DEDUPE_MS =
+  24;
 
-const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
-  Object.freeze({
-    path: ACTIVATION_PATH,
-    stateScrubFlags: Object.freeze([
-      "scrubbedActivationToken",
-    ]),
-    windowKeys: Object.freeze([
-      "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-    ]),
-    tokenNames: ACTIVATION_TOKEN_PARAM_NAMES,
-  }),
+const ACTIVATION_TOKEN_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "code",
+    "t",
+  ]);
 
-  Object.freeze({
-    path: RESET_CONFIRM_PATH,
-    stateScrubFlags: Object.freeze([
-      "scrubbedResetToken",
-      "scrubbedResetPasswordToken",
-    ]),
-    windowKeys: Object.freeze([
-      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-      "__ONION_RESET_CONFIRM_INITIAL_URL__",
-    ]),
-    tokenNames: RESET_TOKEN_PARAM_NAMES,
-  }),
-]);
+const RESET_TOKEN_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
+    "code",
+    "t",
+  ]);
+
+const AUTH_SCREEN_CANONICAL_PATHS =
+  new Set([
+    "/login",
+    "/forgot-password",
+    "/recover-password",
+    "/password-reset",
+    "/reset-password",
+    "/reset-password/confirm",
+    "/activate-account",
+    "/2fa",
+    "/otp",
+  ]);
+
+const PROTECTED_PUBLIC_TOKEN_ROUTES =
+  Object.freeze([
+    Object.freeze({
+      key:
+        "activation",
+      path:
+        ACTIVATION_PATH,
+      stateScrubFlags:
+        Object.freeze([
+          "scrubbedActivationToken",
+        ]),
+      windowKeys:
+        Object.freeze([
+          "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+        ]),
+      tokenNames:
+        ACTIVATION_TOKEN_PARAM_NAMES,
+    }),
+
+    Object.freeze({
+      key:
+        "resetConfirm",
+      path:
+        RESET_CONFIRM_PATH,
+      stateScrubFlags:
+        Object.freeze([
+          "scrubbedResetToken",
+          "scrubbedResetPasswordToken",
+        ]),
+      windowKeys:
+        Object.freeze([
+          "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+          "__ONION_RESET_CONFIRM_INITIAL_URL__",
+        ]),
+      tokenNames:
+        RESET_TOKEN_PARAM_NAMES,
+    }),
+  ]);
+
+const SENSITIVE_QUERY_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
+    "code",
+    "t",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
+  ]);
 
 /* =========================================================
    BASICS
@@ -217,7 +267,11 @@ function nowMs() {
     }
   } catch {}
 
-  return Date.now();
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
 }
 
 function nowEpochMs() {
@@ -250,15 +304,32 @@ function safeObject(value) {
     : {};
 }
 
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
 function firstResolved(...values) {
   for (const value of values) {
-    if (value === undefined || value === null) continue;
-
-    if (typeof value === "string" && value.trim() === "") {
+    if (
+      value === undefined ||
+      value === null
+    ) {
       continue;
     }
 
-    if (Array.isArray(value) && value.length === 0) {
+    if (
+      typeof value === "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+    if (
+      Array.isArray(value) &&
+      value.length === 0
+    ) {
       continue;
     }
 
@@ -346,6 +417,132 @@ function microtask(callback) {
 }
 
 /* =========================================================
+   REDACTION / SAFE LOG PAYLOADS
+========================================================= */
+
+function redactTokenInText(value = "") {
+  let output =
+    safeText(value, "");
+
+  if (!output) {
+    return "";
+  }
+
+  try {
+    for (const name of SENSITIVE_QUERY_PARAM_NAMES) {
+      const escaped =
+        String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+      output =
+        output.replace(
+          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
+    }
+
+    output =
+      output.replace(
+        /(\/activate-account\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
+
+    output =
+      output.replace(
+        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
+
+    output =
+      output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
+  } catch {}
+
+  return output;
+}
+
+function redactPayload(value, depth = 0) {
+  if (depth > 4) {
+    return "[MaxDepth]";
+  }
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return redactTokenInText(value);
+  }
+
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (value instanceof Error) {
+    return {
+      name:
+        value.name || "Error",
+      message:
+        redactTokenInText(value.message || ""),
+      code:
+        value.code || value.status || null,
+      stack:
+        redactTokenInText(value.stack || ""),
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) =>
+      redactPayload(
+        item,
+        depth + 1
+      )
+    );
+  }
+
+  if (
+    value &&
+    typeof value === "object"
+  ) {
+    const output =
+      {};
+
+    for (const [key, item] of Object.entries(value)) {
+      const cleanKey =
+        String(key).toLowerCase();
+
+      if (
+        cleanKey.includes("token") ||
+        cleanKey === "authorization" ||
+        cleanKey === "password" ||
+        cleanKey === "secret"
+      ) {
+        output[key] =
+          item ? "***" : item;
+        continue;
+      }
+
+      output[key] =
+        redactPayload(
+          item,
+          depth + 1
+        );
+    }
+
+    return output;
+  }
+
+  return value;
+}
+
+/* =========================================================
    PATH HARDENING
 ========================================================= */
 
@@ -361,12 +558,14 @@ function normalizePathnameOnly(pathname = "/") {
   }
 
   if (!value.startsWith("/")) {
-    value = `/${value}`;
+    value =
+      `/${value}`;
   }
 
   if (value.length > 1) {
     value =
-      value.replace(/\/+$/g, "") || "/";
+      value.replace(/\/+$/g, "") ||
+      "/";
   }
 
   return value;
@@ -417,10 +616,10 @@ function normalizeHashRouterPath(value = "") {
   }
 
   if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/");
+    return raw.replace(/^#!\/?/, "/") || "/";
   }
 
-  return raw.replace(/^#\/?/, "/");
+  return raw.replace(/^#\/?/, "/") || "/";
 }
 
 function splitFullPath(value = "/") {
@@ -433,9 +632,14 @@ function splitFullPath(value = "/") {
     );
   }
 
-  let pathname = raw;
-  let search = "";
-  let hash = "";
+  let pathname =
+    raw;
+
+  let search =
+    "";
+
+  let hash =
+    "";
 
   const hashIndex =
     pathname.indexOf("#");
@@ -445,7 +649,8 @@ function splitFullPath(value = "/") {
       pathname.slice(hashIndex);
 
     pathname =
-      pathname.slice(0, hashIndex) || "/";
+      pathname.slice(0, hashIndex) ||
+      "/";
   }
 
   const searchIndex =
@@ -456,7 +661,8 @@ function splitFullPath(value = "/") {
       pathname.slice(searchIndex);
 
     pathname =
-      pathname.slice(0, searchIndex) || "/";
+      pathname.slice(0, searchIndex) ||
+      "/";
   }
 
   return {
@@ -510,7 +716,8 @@ function normalizeLocalFullPath(path = "/") {
     pathname,
     search,
     hash,
-  } = splitFullPath(raw);
+  } =
+    splitFullPath(raw);
 
   return `${pathname}${search}${hash}`;
 }
@@ -541,7 +748,8 @@ function hasPublicUsernamePrefix(path = "") {
   const first =
     clean
       .split("/")
-      .filter(Boolean)[0] || "";
+      .filter(Boolean)[0] ||
+    "";
 
   return isPublicUsernameSegment(first);
 }
@@ -551,9 +759,10 @@ function stripPublicUsernamePrefix(path = "/") {
     pathname,
     search,
     hash,
-  } = splitFullPath(
-    normalizeLocalFullPath(path || "/")
-  );
+  } =
+    splitFullPath(
+      normalizeLocalFullPath(path || "/")
+    );
 
   const segments =
     pathname
@@ -619,7 +828,8 @@ function safeCanonicalPath(AppCore, path = "/") {
       stripPublicUsernamePrefix(localPublic)
     );
 
-  let externalCanonical = "";
+  let externalCanonical =
+    "";
 
   try {
     externalCanonical =
@@ -806,19 +1016,29 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
   const opts =
     safeObject(options);
 
-  let busAvailable = false;
-  let busEmitted = false;
+  const finalPayload =
+    opts.redact === true
+      ? redactPayload(payload)
+      : payload;
+
+  let busAvailable =
+    false;
+
+  let busEmitted =
+    false;
 
   try {
     if (isFunction(AppCore?.events?.emit)) {
-      busAvailable = true;
+      busAvailable =
+        true;
 
       AppCore.events.emit(
         name,
-        payload
+        finalPayload
       );
 
-      busEmitted = true;
+      busEmitted =
+        true;
     }
   } catch {}
 
@@ -829,7 +1049,8 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
     try {
       window.dispatchEvent(
         new CustomEvent(name, {
-          detail: payload,
+          detail:
+            finalPayload,
         })
       );
 
@@ -841,42 +1062,59 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
 }
 
 function safeWarn(AppCore, ...args) {
+  const safeArgs =
+    args.map((item) =>
+      redactPayload(item)
+    );
+
   try {
     AppCore?.utils?.warn?.(
       "[RouterRender]",
-      ...args
+      ...safeArgs
     );
   } catch {}
 
   try {
-    console.warn(
-      "[RouterRender]",
-      ...args
-    );
+    if (AppCore?.config?.debug) {
+      console.warn(
+        "[RouterRender]",
+        ...safeArgs
+      );
+    }
   } catch {}
 }
 
 function safeError(AppCore, ...args) {
+  const safeArgs =
+    args.map((item) =>
+      redactPayload(item)
+    );
+
   try {
     AppCore?.utils?.error?.(
       "[RouterRender]",
-      ...args
+      ...safeArgs
     );
   } catch {}
 
   try {
     console.error(
       "[RouterRender]",
-      ...args
+      ...safeArgs
     );
   } catch {}
 }
 
 function safeLog(AppCore, ...args) {
+  const safeArgs =
+    args.map((item) =>
+      redactPayload(item)
+    );
+
   try {
     AppCore?.utils?.log?.(
       "[RouterRender]",
-      ...args
+      ...safeArgs
     );
   } catch {}
 }
@@ -934,6 +1172,10 @@ function emitFlowMetric(AppCore, flow = "unknown", payload = {}) {
     {
       flow,
       ...payload,
+    },
+    {
+      redact:
+        true,
     }
   );
 }
@@ -965,7 +1207,8 @@ export function getViewContainer(AppCore) {
 
   try {
     if (el && AppCore?.dom) {
-      AppCore.dom.viewContainer = el;
+      AppCore.dom.viewContainer =
+        el;
     }
   } catch {}
 
@@ -973,7 +1216,10 @@ export function getViewContainer(AppCore) {
 }
 
 function setDataset(el, key, value) {
-  if (!el || !key) {
+  if (
+    !el ||
+    !key
+  ) {
     return false;
   }
 
@@ -987,7 +1233,9 @@ function setDataset(el, key, value) {
       return true;
     }
 
-    el.dataset[key] = String(value);
+    el.dataset[key] =
+      String(value);
+
     return true;
   } catch {
     return false;
@@ -1004,18 +1252,25 @@ function createAbortControllerSafe() {
   return null;
 }
 
-let successRenderSequence = 0;
-let activeRenderController = null;
+let successRenderSequence =
+  0;
 
-let lastShellRepairEmitKey = "";
-let lastShellRepairEmitAt = 0;
+let activeRenderController =
+  null;
+
+let lastShellRepairEmitKey =
+  "";
+
+let lastShellRepairEmitAt =
+  0;
 
 function abortPreviousSuccessRender(reason = "new-render") {
   try {
     activeRenderController?.abort?.(reason);
   } catch {}
 
-  activeRenderController = null;
+  activeRenderController =
+    null;
 }
 
 function beginSuccessRender() {
@@ -1064,13 +1319,17 @@ function isCurrentRender(AppCore, renderId, canonicalPath = "") {
   }
 
   const expectedCanonical =
-    safeText(canonicalPath, "");
+    stripSearchAndHash(
+      safeText(canonicalPath, "")
+    );
 
   if (expectedCanonical) {
     const viewCanonical =
-      safeText(
-        view.dataset?.routerCanonicalPath,
-        ""
+      stripSearchAndHash(
+        safeText(
+          view.dataset?.routerCanonicalPath,
+          ""
+        )
       );
 
     if (
@@ -1115,7 +1374,8 @@ function markViewContainer({
 
   try {
     if (AppCore?.dom) {
-      AppCore.dom.viewContainer = view;
+      AppCore.dom.viewContainer =
+        view;
     }
   } catch {}
 
@@ -1123,7 +1383,10 @@ function markViewContainer({
 }
 
 function markViewReady(AppCore, renderId, canonicalPath = "/") {
-  if (!isCurrentRender(AppCore, renderId, canonicalPath)) {
+  if (
+    renderId &&
+    !isCurrentRender(AppCore, renderId, canonicalPath)
+  ) {
     return false;
   }
 
@@ -1145,7 +1408,10 @@ function markViewReady(AppCore, renderId, canonicalPath = "/") {
 }
 
 function markViewError(AppCore, renderId, canonicalPath = "/") {
-  if (!isCurrentRender(AppCore, renderId, canonicalPath)) {
+  if (
+    renderId &&
+    !isCurrentRender(AppCore, renderId, canonicalPath)
+  ) {
     return false;
   }
 
@@ -1179,8 +1445,10 @@ function prepareRenderHost({
 
   if (!view) {
     return {
-      view: null,
-      host: null,
+      view:
+        null,
+      host:
+        null,
     };
   }
 
@@ -1191,7 +1459,8 @@ function prepareRenderHost({
     route,
     canonicalPath,
     publicPath,
-    status: "pending",
+    status:
+      "pending",
   });
 
   const host =
@@ -1211,11 +1480,6 @@ function prepareRenderHost({
   host.setAttribute("data-router-public-path", publicPath);
 
   try {
-    host.style.minInlineSize = "0";
-    host.style.inlineSize = "100%";
-  } catch {}
-
-  try {
     view.replaceChildren(host);
   } catch {
     try {
@@ -1226,9 +1490,12 @@ function prepareRenderHost({
 
   try {
     if (AppCore?.dom) {
-      AppCore.dom.viewContainer = view;
-      AppCore.dom.routerViewHost = host;
-      AppCore.dom.viewHost = host;
+      AppCore.dom.viewContainer =
+        view;
+      AppCore.dom.routerViewHost =
+        host;
+      AppCore.dom.viewHost =
+        host;
     }
   } catch {}
 
@@ -1267,7 +1534,8 @@ function adoptRenderedResult(target, result) {
 
   if (typeof result === "string") {
     try {
-      target.innerHTML = result;
+      target.innerHTML =
+        result;
     } catch {}
 
     return target;
@@ -1353,17 +1621,26 @@ function getRouteConfigByPath(path = "") {
 
 function getRouteConfigFromUrl(AppCore, pathOrUrl = "") {
   const path =
-    pathFromUrlLike(AppCore, pathOrUrl);
+    pathFromUrlLike(
+      AppCore,
+      pathOrUrl
+    );
 
   const canonical =
-    safeCanonicalPath(AppCore, path || "/");
+    safeCanonicalPath(
+      AppCore,
+      path || "/"
+    );
 
   return getRouteConfigByPath(canonical);
 }
 
 function isProtectedPublicTokenPath(AppCore, path = "") {
   return Boolean(
-    getRouteConfigFromUrl(AppCore, path)
+    getRouteConfigFromUrl(
+      AppCore,
+      path
+    )
   );
 }
 
@@ -1372,7 +1649,7 @@ function hasTokenInSearch(search = "", tokenNames = []) {
     const params =
       new URLSearchParams(search || "");
 
-    return tokenNames.some((name) => {
+    return safeArray(tokenNames).some((name) => {
       return Boolean(
         safeText(
           params.get(name),
@@ -1387,7 +1664,10 @@ function hasTokenInSearch(search = "", tokenNames = []) {
 
 function getPathToken(AppCore, pathOrUrl = "") {
   const path =
-    pathFromUrlLike(AppCore, pathOrUrl);
+    pathFromUrlLike(
+      AppCore,
+      pathOrUrl
+    );
 
   if (!path) {
     return "";
@@ -1430,7 +1710,10 @@ function hasProtectedToken(AppCore, pathOrUrl = "") {
   }
 
   const config =
-    getRouteConfigFromUrl(AppCore, raw);
+    getRouteConfigFromUrl(
+      AppCore,
+      raw
+    );
 
   if (!config) {
     return false;
@@ -1442,10 +1725,16 @@ function hasProtectedToken(AppCore, pathOrUrl = "") {
 
   try {
     const parsed =
-      new URL(raw, getBaseOrigin());
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
 
     if (
-      hasTokenInSearch(parsed.search, config.tokenNames)
+      hasTokenInSearch(
+        parsed.search,
+        config.tokenNames
+      )
     ) {
       return true;
     }
@@ -1461,13 +1750,12 @@ function hasProtectedToken(AppCore, pathOrUrl = "") {
         return true;
       }
 
-      const hashSuffix =
-        getSafeSearchAndHash(AppCore, hashPath);
+      const hashParts =
+        splitFullPath(hashPath);
 
       if (
-        hashSuffix &&
         hasTokenInSearch(
-          hashSuffix.split("#")[0],
+          hashParts.search,
           config.tokenNames
         )
       ) {
@@ -1493,33 +1781,24 @@ function hasProtectedToken(AppCore, pathOrUrl = "") {
 
     return false;
   } catch {
-    const suffix =
-      getSafeSearchAndHash(AppCore, raw);
+    const parts =
+      splitFullPath(raw);
 
     if (
-      suffix &&
-      suffix.includes("?")
+      hasTokenInSearch(
+        parts.search,
+        config.tokenNames
+      )
     ) {
-      const query =
-        suffix.split("#")[0];
-
-      if (
-        hasTokenInSearch(
-          query,
-          config.tokenNames
-        )
-      ) {
-        return true;
-      }
+      return true;
     }
 
     if (
-      suffix &&
-      suffix.includes("#") &&
-      suffix.includes("?")
+      parts.hash &&
+      parts.hash.includes("?")
     ) {
       const query =
-        suffix
+        parts.hash
           .split("?")
           .slice(1)
           .join("?");
@@ -1535,7 +1814,10 @@ function hasProtectedToken(AppCore, pathOrUrl = "") {
 }
 
 function isTokenScrubbedForConfig(config = null) {
-  if (!isBrowser() || !config) {
+  if (
+    !isBrowser() ||
+    !config
+  ) {
     return false;
   }
 
@@ -1565,7 +1847,10 @@ function getInitialUrl() {
 }
 
 function getStoredInitialUrlsByConfig(config = null) {
-  if (!isBrowser() || !config) {
+  if (
+    !isBrowser() ||
+    !config
+  ) {
     return [];
   }
 
@@ -1586,7 +1871,11 @@ function getStoredInitialUrlsByConfig(config = null) {
 }
 
 function setStoredInitialUrlByConfig(config = null, value = "") {
-  if (!isBrowser() || !config) {
+  if (
+    !isBrowser() ||
+    !config ||
+    !value
+  ) {
     return false;
   }
 
@@ -1595,15 +1884,18 @@ function setStoredInitialUrlByConfig(config = null, value = "") {
       ? config.windowKeys
       : [config.windowKey].filter(Boolean);
 
-  let wrote = false;
+  let wrote =
+    false;
 
   for (const key of keys) {
     try {
       if (!window[key]) {
-        window[key] = value;
+        window[key] =
+          value;
       }
 
-      wrote = true;
+      wrote =
+        true;
     } catch {}
   }
 
@@ -1643,11 +1935,15 @@ function captureInitialUrl(AppCore) {
       window.location.href;
 
     if (!window.__ONION_INITIAL_URL__) {
-      window.__ONION_INITIAL_URL__ = href;
+      window.__ONION_INITIAL_URL__ =
+        href;
     }
 
     const path =
-      pathFromUrlLike(AppCore, href);
+      pathFromUrlLike(
+        AppCore,
+        href
+      );
 
     for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
       const matchesRoute =
@@ -1678,7 +1974,8 @@ function captureInitialUrl(AppCore) {
 function getProtectedPublicPath(AppCore) {
   captureInitialUrl(AppCore);
 
-  const candidates = [];
+  const candidates =
+    [];
 
   for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
     if (isTokenScrubbedForConfig(config)) {
@@ -1706,7 +2003,10 @@ function getProtectedPublicPath(AppCore) {
 
   for (const candidate of candidates) {
     const config =
-      getRouteConfigFromUrl(AppCore, candidate);
+      getRouteConfigFromUrl(
+        AppCore,
+        candidate
+      );
 
     if (!config) {
       continue;
@@ -1720,7 +2020,10 @@ function getProtectedPublicPath(AppCore) {
       continue;
     }
 
-    return pathFromUrlLike(AppCore, candidate);
+    return pathFromUrlLike(
+      AppCore,
+      candidate
+    );
   }
 
   return "";
@@ -1752,10 +2055,16 @@ function preservePublicContextForSameRoute(AppCore, candidatePath = "/") {
   }
 
   const candidateSuffix =
-    getSafeSearchAndHash(AppCore, candidate);
+    getSafeSearchAndHash(
+      AppCore,
+      candidate
+    );
 
   const browserSuffix =
-    getSafeSearchAndHash(AppCore, browserPath);
+    getSafeSearchAndHash(
+      AppCore,
+      browserPath
+    );
 
   if (
     browserSuffix &&
@@ -1837,17 +2146,28 @@ function preferRequestedPublicPathIfCompatible(
 function getShellElements(AppCore) {
   if (!isBrowser()) {
     return {
-      html: null,
-      body: null,
-      shell: null,
-      main: null,
-      appContent: null,
-      view: null,
-      sidebar: null,
-      topbar: null,
-      tablehead: null,
-      tableheadContainer: null,
-      loader: null,
+      html:
+        null,
+      body:
+        null,
+      shell:
+        null,
+      main:
+        null,
+      appContent:
+        null,
+      view:
+        null,
+      sidebar:
+        null,
+      topbar:
+        null,
+      tablehead:
+        null,
+      tableheadContainer:
+        null,
+      loader:
+        null,
     };
   }
 
@@ -1882,12 +2202,14 @@ function getShellElements(AppCore) {
 
   const sidebar =
     AppCore?.dom?.sidebar ||
+    document.querySelector("#app-sidebar") ||
     document.querySelector(".sidebar") ||
     document.querySelector("[data-sidebar-root]") ||
     null;
 
   const topbar =
     AppCore?.dom?.topbar ||
+    document.querySelector("#app-topbar") ||
     document.querySelector(".topbar") ||
     document.querySelector("[data-topbar-root]") ||
     null;
@@ -1959,7 +2281,8 @@ function setElementHidden(el, hidden = false) {
   }
 
   try {
-    el.hidden = Boolean(hidden);
+    el.hidden =
+      Boolean(hidden);
   } catch {}
 
   try {
@@ -2032,19 +2355,36 @@ function shouldUseAuthScreenClass(AppCore, route = null, canonicalPath = "/") {
 }
 
 function setCoreShellVisible(AppCore, visible = true) {
+  const patch =
+    {
+      shellVisible:
+        Boolean(visible),
+
+      chromeVisible:
+        Boolean(visible),
+
+      appShellVisible:
+        true,
+
+      routeShellHidden:
+        !Boolean(visible),
+
+      authScreen:
+        !Boolean(visible),
+    };
+
   try {
-    AppCore?.setState?.({
-      shellVisible: Boolean(visible),
-      routeShellHidden: !Boolean(visible),
-    });
-  } catch {
-    try {
-      if (AppCore?.state) {
-        AppCore.state.shellVisible = Boolean(visible);
-        AppCore.state.routeShellHidden = !Boolean(visible);
-      }
-    } catch {}
-  }
+    AppCore?.setState?.(patch);
+  } catch {}
+
+  try {
+    if (AppCore?.state) {
+      Object.assign(
+        AppCore.state,
+        patch
+      );
+    }
+  } catch {}
 }
 
 function hideLoaderSafe(AppCore, reason = "router-render") {
@@ -2052,7 +2392,8 @@ function hideLoaderSafe(AppCore, reason = "router-render") {
     loader,
     body,
     html,
-  } = getShellElements(AppCore);
+  } =
+    getShellElements(AppCore);
 
   try {
     body?.classList?.remove?.("loading");
@@ -2086,8 +2427,11 @@ function hideLoaderSafe(AppCore, reason = "router-render") {
       "false"
     );
 
-    loader.dataset.loaderVisible = "false";
-    loader.hidden = true;
+    loader.dataset.loaderVisible =
+      "false";
+
+    loader.hidden =
+      true;
   } catch {}
 
   safeEmit(
@@ -2095,7 +2439,8 @@ function hideLoaderSafe(AppCore, reason = "router-render") {
     "app:loader:hidden",
     {
       reason,
-      source: "router.render",
+      source:
+        "router.render",
     }
   );
 
@@ -2103,21 +2448,22 @@ function hideLoaderSafe(AppCore, reason = "router-render") {
 }
 
 function emitShellRepair(AppCore, payload = {}) {
-  const key = [
-    safeText(payload.phase, ""),
-    payload.shellHidden ? "hidden" : "visible",
-    safeText(payload.canonicalPath, ""),
-    safeText(payload.publicPath, ""),
-    payload.hasSidebar ? "sidebar" : "no-sidebar",
-    payload.hasTopbar ? "topbar" : "no-topbar",
-  ].join("|");
+  const key =
+    [
+      safeText(payload.phase, ""),
+      payload.shellHidden ? "hidden" : "visible",
+      safeText(payload.canonicalPath, ""),
+      safeText(payload.publicPath, ""),
+      payload.hasSidebar ? "sidebar" : "no-sidebar",
+      payload.hasTopbar ? "topbar" : "no-topbar",
+    ].join("|");
 
-  const now =
+  const current =
     nowEpochMs();
 
   if (
     key === lastShellRepairEmitKey &&
-    now - lastShellRepairEmitAt < SHELL_REPAIR_EMIT_DEDUPE_MS
+    current - lastShellRepairEmitAt < SHELL_REPAIR_EMIT_DEDUPE_MS
   ) {
     return false;
   }
@@ -2126,7 +2472,7 @@ function emitShellRepair(AppCore, payload = {}) {
     key;
 
   lastShellRepairEmitAt =
-    now;
+    current;
 
   return safeEmit(
     AppCore,
@@ -2147,9 +2493,12 @@ function applyRenderShellRepair({
 } = {}) {
   if (!isBrowser()) {
     return {
-      applied: false,
-      shellHidden: false,
-      reason: "not-browser",
+      applied:
+        false,
+      shellHidden:
+        false,
+      reason:
+        "not-browser",
     };
   }
 
@@ -2195,13 +2544,16 @@ function applyRenderShellRepair({
     topbar,
     tablehead,
     tableheadContainer,
-  } = getShellElements(AppCore);
+  } =
+    getShellElements(AppCore);
 
   if (!html || !body) {
     return {
-      applied: false,
+      applied:
+        false,
       shellHidden,
-      reason: "missing-document",
+      reason:
+        "missing-document",
     };
   }
 
@@ -2233,26 +2585,46 @@ function applyRenderShellRepair({
     shellHidden ? "auth" : "app"
   );
 
+  setDataset(
+    html,
+    "chrome",
+    shellHidden ? "hidden" : "visible"
+  );
+
+  setDataset(
+    body,
+    "chrome",
+    shellHidden ? "hidden" : "visible"
+  );
+
   if (shellHidden) {
     try {
       body.classList.add(
         "route-shell-hidden",
+        "route-chrome-hidden",
         "route-auth"
       );
 
       body.classList.remove(
         "route-shell-visible",
+        "route-chrome-visible",
         "route-app",
-        "login-no-scroll"
+        "login-no-scroll",
+        "sidebar-open",
+        "sidebar-collapsed",
+        "sidebar-transitioning",
+        "sidebar-tooltips-active"
       );
 
       html.classList.add(
         "route-shell-hidden",
+        "route-chrome-hidden",
         "route-auth"
       );
 
       html.classList.remove(
         "route-shell-visible",
+        "route-chrome-visible",
         "route-app"
       );
 
@@ -2263,9 +2635,10 @@ function applyRenderShellRepair({
       }
     } catch {}
 
-    setDataset(body, "shell", "hidden");
-    setDataset(html, "shell", "hidden");
-    setDataset(shell, "shell", "hidden");
+    setDataset(body, "shell", "visible");
+    setDataset(html, "shell", "visible");
+    setDataset(shell, "shell", "visible");
+    setDataset(shell, "chrome", "hidden");
     setDataset(shell, "routeMode", "auth");
 
     setCoreShellVisible(AppCore, false);
@@ -2289,28 +2662,33 @@ function applyRenderShellRepair({
         "auth-screen",
         "login-no-scroll",
         "route-auth",
-        "route-shell-hidden"
+        "route-shell-hidden",
+        "route-chrome-hidden"
       );
 
       body.classList.add(
         "route-app",
-        "route-shell-visible"
+        "route-shell-visible",
+        "route-chrome-visible"
       );
 
       html.classList.remove(
         "route-auth",
-        "route-shell-hidden"
+        "route-shell-hidden",
+        "route-chrome-hidden"
       );
 
       html.classList.add(
         "route-app",
-        "route-shell-visible"
+        "route-shell-visible",
+        "route-chrome-visible"
       );
     } catch {}
 
     setDataset(body, "shell", "visible");
     setDataset(html, "shell", "visible");
     setDataset(shell, "shell", "visible");
+    setDataset(shell, "chrome", "visible");
     setDataset(shell, "routeMode", "app");
 
     setCoreShellVisible(AppCore, true);
@@ -2325,7 +2703,10 @@ function applyRenderShellRepair({
     const tableheadHasContent =
       Boolean(
         tableheadContainer &&
-          safeText(tableheadContainer.innerHTML, "")
+          safeText(
+            tableheadContainer.innerHTML,
+            ""
+          )
       );
 
     if (tablehead) {
@@ -2341,25 +2722,10 @@ function applyRenderShellRepair({
     setElementBusy(view, false);
 
     try {
-      shell?.setAttribute?.(
-        "aria-hidden",
-        "false"
-      );
-
-      main?.setAttribute?.(
-        "aria-hidden",
-        "false"
-      );
-
-      appContent?.setAttribute?.(
-        "aria-hidden",
-        "false"
-      );
-
-      view?.setAttribute?.(
-        "aria-hidden",
-        "false"
-      );
+      shell?.setAttribute?.("aria-hidden", "false");
+      main?.setAttribute?.("aria-hidden", "false");
+      appContent?.setAttribute?.("aria-hidden", "false");
+      view?.setAttribute?.("aria-hidden", "false");
     } catch {}
   }
 
@@ -2370,25 +2736,32 @@ function applyRenderShellRepair({
     );
   }
 
-  const repairPayload = {
-    phase,
-    shellHidden,
-    useAuthScreen,
-    canonicalPath: canonical,
-    publicPath: publicRoute,
-    routePath:
-      route?.path || null,
-    routeName:
-      route?.name || null,
-    viewKey:
-      route?.viewKey || null,
-    viewName:
-      route?.viewName || null,
-    hasSidebar: Boolean(sidebar),
-    hasTopbar: Boolean(topbar),
-    hasShell: Boolean(shell),
-    source: "router.render",
-  };
+  const repairPayload =
+    {
+      phase,
+      shellHidden,
+      useAuthScreen,
+      canonicalPath:
+        canonical,
+      publicPath:
+        publicRoute,
+      routePath:
+        route?.path || null,
+      routeName:
+        route?.name || null,
+      viewKey:
+        route?.viewKey || null,
+      viewName:
+        route?.viewName || null,
+      hasSidebar:
+        Boolean(sidebar),
+      hasTopbar:
+        Boolean(topbar),
+      hasShell:
+        Boolean(shell),
+      source:
+        "router.render",
+    };
 
   if (emitRepair !== false) {
     emitShellRepair(
@@ -2406,11 +2779,14 @@ function applyRenderShellRepair({
   }
 
   return {
-    applied: true,
+    applied:
+      true,
     shellHidden,
     useAuthScreen,
-    canonicalPath: canonical,
-    publicPath: publicRoute,
+    canonicalPath:
+      canonical,
+    publicPath:
+      publicRoute,
   };
 }
 
@@ -2472,7 +2848,8 @@ function resolvePublicPathForRoute({
       normalizedRequested || sourceForPublic
     );
 
-  let built = "";
+  let built =
+    "";
 
   try {
     built =
@@ -2482,7 +2859,8 @@ function resolvePublicPathForRoute({
         sourceForPublic,
         {
           username,
-          resolvedUsername: username,
+          resolvedUsername:
+            username,
           fromPath:
             normalizedRequested || sourceForPublic,
           publicPath:
@@ -2534,56 +2912,88 @@ function resolvePublicPathForRoute({
 function resolveRouteRenderer(route = null) {
   if (isFunction(route?.render)) {
     return {
-      source: "route.render",
-      render: route.render,
+      source:
+        "route.render",
+      render:
+        route.render,
+      thisArg:
+        route,
     };
   }
 
   if (isFunction(route?.view)) {
     return {
-      source: "route.view",
-      render: route.view,
+      source:
+        "route.view",
+      render:
+        route.view,
+      thisArg:
+        route,
     };
   }
 
   if (isFunction(route?.component)) {
     return {
-      source: "route.component",
-      render: route.component,
+      source:
+        "route.component",
+      render:
+        route.component,
+      thisArg:
+        route,
     };
   }
 
   if (isFunction(route?.handler)) {
     return {
-      source: "route.handler",
-      render: route.handler,
+      source:
+        "route.handler",
+      render:
+        route.handler,
+      thisArg:
+        route,
     };
   }
 
   if (isFunction(route?.component?.render)) {
     return {
-      source: "route.component.render",
-      render: route.component.render.bind(route.component),
+      source:
+        "route.component.render",
+      render:
+        route.component.render,
+      thisArg:
+        route.component,
     };
   }
 
   if (isFunction(route?.view?.render)) {
     return {
-      source: "route.view.render",
-      render: route.view.render.bind(route.view),
+      source:
+        "route.view.render",
+      render:
+        route.view.render,
+      thisArg:
+        route.view,
     };
   }
 
   if (isFunction(route?.adapter?.render)) {
     return {
-      source: "route.adapter.render",
-      render: route.adapter.render.bind(route.adapter),
+      source:
+        "route.adapter.render",
+      render:
+        route.adapter.render,
+      thisArg:
+        route.adapter,
     };
   }
 
   return {
-    source: "",
-    render: null,
+    source:
+      "",
+    render:
+      null,
+    thisArg:
+      null,
   };
 }
 
@@ -2784,7 +3194,11 @@ export function emitBeforeRender(AppCore, payload = {}) {
   safeEmit(
     AppCore,
     "router:before-render",
-    finalPayload
+    finalPayload,
+    {
+      redact:
+        true,
+    }
   );
 
   return finalPayload;
@@ -2802,7 +3216,11 @@ export function emitRendered(AppCore, payload = {}) {
   safeEmit(
     AppCore,
     "router:rendered",
-    finalPayload
+    finalPayload,
+    {
+      redact:
+        true,
+    }
   );
 
   return finalPayload;
@@ -2860,6 +3278,8 @@ export function syncRouteState(
     AppCore?.setState?.({
       route:
         finalCanonical,
+      canonicalPath:
+        finalCanonical,
       publicPath:
         finalPublic,
       currentResolvedUsername:
@@ -2869,10 +3289,17 @@ export function syncRouteState(
 
   try {
     if (AppCore?.state) {
-      AppCore.state.route = finalCanonical;
-      AppCore.state.canonicalPath = finalCanonical;
-      AppCore.state.publicPath = finalPublic;
-      AppCore.state.currentResolvedUsername = username;
+      AppCore.state.route =
+        finalCanonical;
+
+      AppCore.state.canonicalPath =
+        finalCanonical;
+
+      AppCore.state.publicPath =
+        finalPublic;
+
+      AppCore.state.currentResolvedUsername =
+        username;
     }
   } catch {}
 
@@ -2918,41 +3345,10 @@ function syncRouteStateFromPayload(AppCore, payload = {}) {
   });
 }
 
-function commitRouteStateAndEmitBefore(AppCore, payload = {}) {
-  const finalPayload =
-    syncRouteStateFromPayload(
-      AppCore,
-      {
-        ...safeObject(payload),
-        flow:
-          payload?.flow || "success",
-        status:
-          payload?.status || "before-render",
-      }
-    );
-
-  return emitBeforeRender(
+function commitRouteStateOnly(AppCore, payload = {}) {
+  return syncRouteStateFromPayload(
     AppCore,
-    finalPayload
-  );
-}
-
-function commitRouteStateAndEmitRendered(AppCore, payload = {}) {
-  const finalPayload =
-    syncRouteStateFromPayload(
-      AppCore,
-      {
-        ...safeObject(payload),
-        flow:
-          payload?.flow || "success",
-        status:
-          payload?.status || "rendered",
-      }
-    );
-
-  return emitRendered(
-    AppCore,
-    finalPayload
+    payload
   );
 }
 
@@ -3125,8 +3521,9 @@ function runRouteRender(
   }
 
   try {
-    const result =
-      renderer.render(
+    if (renderer.render.length >= 2) {
+      return renderer.render.call(
+        renderer.thisArg || route,
         renderTarget,
         {
           ...context,
@@ -3134,8 +3531,28 @@ function runRouteRender(
             renderer.source,
         }
       );
+    }
 
-    return result;
+    if (renderer.render.length === 1) {
+      return renderer.render.call(
+        renderer.thisArg || route,
+        {
+          ...context,
+          rendererSource:
+            renderer.source,
+        }
+      );
+    }
+
+    return renderer.render.call(
+      renderer.thisArg || route,
+      renderTarget,
+      {
+        ...context,
+        rendererSource:
+          renderer.source,
+      }
+    );
   } catch (error) {
     return Promise.reject(error);
   }
@@ -3146,8 +3563,11 @@ function createDeferredViewInstance({
   renderId,
   canonicalPath,
 } = {}) {
-  let current = null;
-  let destroyed = false;
+  let current =
+    null;
+
+  let destroyed =
+    false;
 
   return {
     set(view) {
@@ -3166,7 +3586,8 @@ function createDeferredViewInstance({
     },
 
     destroy() {
-      destroyed = true;
+      destroyed =
+        true;
 
       if (
         current &&
@@ -3177,7 +3598,8 @@ function createDeferredViewInstance({
         } catch {}
       }
 
-      current = null;
+      current =
+        null;
 
       if (
         renderId &&
@@ -3217,7 +3639,9 @@ export function renderGenericView(AppCore, route, target = null) {
   }
 
   const canonical =
-    AppCore?.state?.route || route?.path || "/";
+    AppCore?.state?.route ||
+    route?.path ||
+    "/";
 
   const publicPath =
     getCurrentPublicPath(AppCore);
@@ -3225,7 +3649,8 @@ export function renderGenericView(AppCore, route, target = null) {
   const username =
     getCurrentResolvedUsername(AppCore);
 
-  view.innerHTML = `
+  view.innerHTML =
+    `
 <section class="content-wrapper ${RENDER_FALLBACK_CLASS}">
   <div class="panel-block" style="padding:24px;">
     <div style="display:grid;gap:14px;">
@@ -3234,7 +3659,7 @@ export function renderGenericView(AppCore, route, target = null) {
         Vista conectada al router.
       </p>
       <div><strong>Canonical:</strong> ${escapeHtml(AppCore, canonical)}</div>
-      <div><strong>Public:</strong> ${escapeHtml(AppCore, publicPath)}</div>
+      <div><strong>Public:</strong> ${escapeHtml(AppCore, redactTokenInText(publicPath))}</div>
       <div><strong>User:</strong> ${escapeHtml(AppCore, username || "—")}</div>
     </div>
   </div>
@@ -3257,7 +3682,8 @@ export function renderForbiddenView(AppCore, getRoute) {
       getRoute
     );
 
-  view.innerHTML = `
+  view.innerHTML =
+    `
 <section class="content-wrapper ${RENDER_FALLBACK_CLASS}">
   <div class="panel-block" style="padding:24px;">
     <h2 style="margin:0 0 12px 0;">Acceso denegado</h2>
@@ -3285,13 +3711,14 @@ export function renderNotFoundView(AppCore, requestedPath, getRoute) {
       getRoute
     );
 
-  view.innerHTML = `
+  view.innerHTML =
+    `
 <section class="content-wrapper ${RENDER_FALLBACK_CLASS}">
   <div class="panel-block" style="padding:24px;">
     <h2 style="margin:0 0 12px 0;">404</h2>
     <p style="margin:0 0 14px 0;color:var(--text-dim);">
       Ruta no encontrada:
-      ${escapeHtml(AppCore, requestedPath)}
+      ${escapeHtml(AppCore, redactTokenInText(requestedPath))}
     </p>
     <a href="${escapeHtml(AppCore, href)}" data-spa>Inicio</a>
   </div>
@@ -3314,12 +3741,13 @@ export function renderRuntimeErrorView(AppCore, error, getRoute) {
       getRoute
     );
 
-  view.innerHTML = `
+  view.innerHTML =
+    `
 <section class="content-wrapper ${RENDER_FALLBACK_CLASS}">
   <div class="panel-block" style="padding:24px;">
     <h2 style="margin:0 0 12px 0;">Error de navegación</h2>
     <p style="margin:0 0 14px 0;color:var(--text-dim);">
-      ${escapeHtml(AppCore, error?.message || "Error inesperado")}
+      ${escapeHtml(AppCore, redactTokenInText(error?.message || "Error inesperado"))}
     </p>
     <a href="${escapeHtml(AppCore, href)}" data-spa>Recuperar</a>
   </div>
@@ -3381,7 +3809,8 @@ function renderRouteTransitionView(
     route?.label ||
     "Cargando vista";
 
-  view.innerHTML = `
+  view.innerHTML =
+    `
 <section class="content-wrapper">
   <div class="panel-block" style="padding:24px;">
     <div style="display:grid;gap:14px;">
@@ -3456,18 +3885,28 @@ function handleAsyncRouteRenderFailure({
           error?.message,
           "Error de navegación"
         ),
-      route: route || null,
-      routePath: route?.path || null,
-      routeName: route?.name || null,
-      viewKey: route?.viewKey || null,
-      viewName: route?.viewName || null,
+      route:
+        route || null,
+      routePath:
+        route?.path || null,
+      routeName:
+        route?.name || null,
+      viewKey:
+        route?.viewKey || null,
+      viewName:
+        route?.viewName || null,
       requestedPath,
       canonicalPath,
       publicPath,
       username:
         requestedUsername || null,
       renderId,
-      ts: Date.now(),
+      ts:
+        Date.now(),
+    },
+    {
+      redact:
+        true,
     }
   );
 
@@ -3488,8 +3927,10 @@ function handleAsyncRouteRenderFailure({
     route,
     canonicalPath,
     publicPath,
-    phase: "async-error",
-    hideLoader: true,
+    phase:
+      "async-error",
+    hideLoader:
+      true,
   });
 }
 
@@ -3513,7 +3954,8 @@ export async function renderRouteSuccess({
   const {
     renderId,
     signal,
-  } = beginSuccessRender();
+  } =
+    beginSuccessRender();
 
   const resolvedRaw =
     resolvePublicPathForRoute({
@@ -3527,13 +3969,12 @@ export async function renderRouteSuccess({
 
   /*
     FIX CRÍTICO:
-    Antes de pintar nada, el router hace commit de la ruta final real.
-    Esto corrige el caso:
-      vista /facturas cargada
-      sidebar todavía activo en /incidencias
+    Commit real ANTES de pintar vista.
+    Esto corrige sidebar/topbar activos en ruta anterior.
+    No emitimos router:rendered aquí porque src/router/index.js ya emite el evento final.
   */
-  const lifecycleStart =
-    commitRouteStateAndEmitBefore(
+  const lifecycleState =
+    commitRouteStateOnly(
       AppCore,
       {
         path:
@@ -3553,15 +3994,17 @@ export async function renderRouteSuccess({
           resolvedRaw.username,
 
         route,
-        found: true,
-        forbidden: false,
+        found:
+          true,
+        forbidden:
+          false,
         renderId,
 
         flow:
           "success",
 
         status:
-          "before-render",
+          "state-committed",
 
         options: {
           requestedUsername:
@@ -3570,18 +4013,53 @@ export async function renderRouteSuccess({
       }
     );
 
-  const resolved = {
-    canonicalPath:
-      lifecycleStart.canonicalPath,
+  const resolved =
+    {
+      canonicalPath:
+        lifecycleState.canonicalPath,
 
-    publicPath:
-      lifecycleStart.publicPath,
+      publicPath:
+        lifecycleState.publicPath,
 
-    username:
-      lifecycleStart.username ||
-      resolvedRaw.username ||
-      null,
-  };
+      username:
+        lifecycleState.username ||
+        resolvedRaw.username ||
+        null,
+    };
+
+  safeEmit(
+    AppCore,
+    "router:render:state-committed",
+    {
+      path:
+        resolved.publicPath,
+      requestedPath:
+        requestedPath || resolved.publicPath,
+      canonicalPath:
+        resolved.canonicalPath,
+      publicPath:
+        resolved.publicPath,
+      username:
+        resolved.username,
+      route:
+        route || null,
+      routePath:
+        route?.path || null,
+      routeName:
+        route?.name || null,
+      viewKey:
+        route?.viewKey || null,
+      viewName:
+        route?.viewName || null,
+      renderId,
+      source:
+        "router.render",
+    },
+    {
+      redact:
+        true,
+    }
+  );
 
   applyRenderShellRepair({
     AppCore,
@@ -3611,17 +4089,18 @@ export async function renderRouteSuccess({
   const {
     view,
     host,
-  } = prepareRenderHost({
-    AppCore,
-    route,
-    renderId,
-    canonicalPath:
-      resolved.canonicalPath,
-    publicPath:
-      resolved.publicPath,
-    mode:
-      "success",
-  });
+  } =
+    prepareRenderHost({
+      AppCore,
+      route,
+      renderId,
+      canonicalPath:
+        resolved.canonicalPath,
+      publicPath:
+        resolved.publicPath,
+      mode:
+        "success",
+    });
 
   const ctx =
     buildRouteRenderContext({
@@ -3656,71 +4135,14 @@ export async function renderRouteSuccess({
       route
     );
 
-  let viewInstance = null;
+  let viewInstance =
+    null;
 
   const renderer =
     resolveRouteRenderer(route);
 
-  let asyncDispatched = false;
-
-  const commitSuccessRendered = (extra = {}) => {
-    if (
-      !isCurrentRender(
-        AppCore,
-        renderId,
-        resolved.canonicalPath
-      )
-    ) {
-      return null;
-    }
-
-    return commitRouteStateAndEmitRendered(
-      AppCore,
-      {
-        path:
-          resolved.publicPath,
-
-        requestedPath:
-          requestedPath ||
-          resolved.publicPath,
-
-        canonicalPath:
-          resolved.canonicalPath,
-
-        publicPath:
-          resolved.publicPath,
-
-        username:
-          resolved.username,
-
-        route,
-        found: true,
-        forbidden: false,
-        renderId,
-
-        flow:
-          "success",
-
-        status:
-          "rendered",
-
-        options: {
-          renderMode:
-            shouldBlock
-              ? "blocking"
-              : "non-blocking",
-
-          rendererSource:
-            renderer.source || null,
-
-          asyncDispatched:
-            Boolean(asyncDispatched),
-
-          ...safeObject(extra),
-        },
-      }
-    );
-  };
+  let asyncDispatched =
+    false;
 
   if (isFunction(renderer.render)) {
     const transitionView =
@@ -3782,7 +4204,8 @@ export async function renderRouteSuccess({
           true,
       });
     } else if (isPromiseLike(result)) {
-      asyncDispatched = true;
+      asyncDispatched =
+        true;
 
       const deferredView =
         createDeferredViewInstance({
@@ -3905,6 +4328,10 @@ export async function renderRouteSuccess({
                 Math.round(
                   nowMs() - startedAt
                 ),
+            },
+            {
+              redact:
+                true,
             }
           );
         })
@@ -4057,18 +4484,6 @@ export async function renderRouteSuccess({
     });
   });
 
-  /*
-    FIX CLAVE:
-    router:rendered sale DESDE AQUÍ con canonical/public definitivos.
-    El sidebar ya no tiene que adivinar ni tirar de estados stale.
-  */
-  commitSuccessRendered({
-    durationMs:
-      Math.round(
-        nowMs() - startedAt
-      ),
-  });
-
   emitFlowMetric(
     AppCore,
     "success",
@@ -4200,6 +4615,10 @@ export function renderRouteForbidden(args = {}) {
     args.AppCore,
     "forbidden",
     {
+      canonicalPath:
+        args.canonicalPath || args.requestedPath || "/",
+      publicPath:
+        args.requestedPath || args.canonicalPath || "/",
       durationMs:
         Math.round(
           nowMs() - startedAt
@@ -4251,6 +4670,10 @@ export function renderRouteNotFound(args = {}) {
     args.AppCore,
     "not-found",
     {
+      canonicalPath:
+        args.canonicalPath || args.requestedPath || "/",
+      publicPath:
+        args.requestedPath || args.canonicalPath || "/",
       durationMs:
         Math.round(
           nowMs() - startedAt
@@ -4354,8 +4777,13 @@ export async function renderLoginRedirect(args = {}) {
   const renderId =
     ++successRenderSequence;
 
-  emitBeforeRender(
+  /*
+    No emitimos router:rendered aquí.
+    router/index.js emite el evento final del flujo guard:not-authenticated.
+  */
+  safeEmit(
     args.AppCore,
+    "router:render:login-state-committed",
     {
       path:
         publicPath,
@@ -4375,27 +4803,30 @@ export async function renderLoginRedirect(args = {}) {
         args.canonicalPath ||
         null,
       renderId,
-      flow:
-        "login-redirect",
-      status:
-        "before-render",
+      source:
+        "router.render",
+    },
+    {
+      redact:
+        true,
     }
   );
 
   const {
     view,
     host,
-  } = prepareRenderHost({
-    AppCore:
-      args.AppCore,
-    route,
-    renderId,
-    canonicalPath:
-      routeNames.LOGIN,
-    publicPath,
-    mode:
-      "login",
-  });
+  } =
+    prepareRenderHost({
+      AppCore:
+        args.AppCore,
+      route,
+      renderId,
+      canonicalPath:
+        routeNames.LOGIN,
+      publicPath,
+      mode:
+        "login",
+    });
 
   const ctx =
     buildRouteRenderContext({
@@ -4446,6 +4877,12 @@ export async function renderLoginRedirect(args = {}) {
         resolvedResult
       );
     }
+  } else if (host) {
+    renderGenericView(
+      args.AppCore,
+      route,
+      host
+    );
   }
 
   applyRenderShellRepair({
@@ -4465,34 +4902,6 @@ export async function renderLoginRedirect(args = {}) {
     args.AppCore,
     renderId,
     routeNames.LOGIN
-  );
-
-  emitRendered(
-    args.AppCore,
-    {
-      path:
-        publicPath,
-      requestedPath:
-        publicPath,
-      canonicalPath:
-        routeNames.LOGIN,
-      publicPath,
-      route,
-      found:
-        Boolean(route),
-      forbidden:
-        false,
-      redirectedFrom:
-        args.publicPath ||
-        args.requestedPath ||
-        args.canonicalPath ||
-        null,
-      renderId,
-      flow:
-        "login-redirect",
-      status:
-        "rendered",
-    }
   );
 
   emitFlowMetric(
@@ -4585,7 +4994,8 @@ export function getRenderSnapshot(AppCore) {
     topbar,
     tablehead,
     loader,
-  } = getShellElements(AppCore);
+  } =
+    getShellElements(AppCore);
 
   const host =
     getCurrentRenderHost(AppCore);
@@ -4593,7 +5003,7 @@ export function getRenderSnapshot(AppCore) {
   const browserPublicPath =
     getBrowserPublicPath(AppCore);
 
-  return {
+  return redactPayload({
     browserPublicPath,
 
     browserCanonicalPath:
@@ -4656,6 +5066,12 @@ export function getRenderSnapshot(AppCore) {
 
       htmlShell:
         html?.dataset?.shell || null,
+
+      bodyChrome:
+        body?.dataset?.chrome || null,
+
+      htmlChrome:
+        html?.dataset?.chrome || null,
 
       bodyRouteMode:
         body?.dataset?.routeMode || null,
@@ -4747,7 +5163,7 @@ export function getRenderSnapshot(AppCore) {
       hostViewName:
         host?.getAttribute?.("data-router-view-name") || null,
     },
-  };
+  });
 }
 
 /* =========================================================

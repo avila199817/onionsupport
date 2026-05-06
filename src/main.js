@@ -53,15 +53,19 @@ let readyBound = false;
 let readyCallbackCalled = false;
 let fatalRendered = false;
 let globalSafetyNetBound = false;
+let debugBridgeExposed = false;
 
+let bootStartedAt = 0;
+let bootSettledAt = 0;
 let lastBootContext = null;
+let lastFatalError = null;
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
 const MAIN_VERSION =
-  "10.0.0";
+  "10.1.0";
 
 const DEFAULT_BOOT_TIMEOUT_MS =
   45000;
@@ -69,11 +73,17 @@ const DEFAULT_BOOT_TIMEOUT_MS =
 const DEFAULT_FATAL_MESSAGE =
   "No se pudo iniciar la aplicación.";
 
+const DEFAULT_FATAL_TITLE =
+  "Error de arranque";
+
 const ACTIVATION_PATH =
   "/activate-account";
 
 const RESET_CONFIRM_PATH =
   "/reset-password/confirm";
+
+const INITIAL_URL_KEY =
+  "__ONION_INITIAL_URL__";
 
 const ACTIVATION_TOKEN_PARAM_NAMES =
   Object.freeze([
@@ -126,12 +136,6 @@ const PROTECTED_PUBLIC_ROUTES =
       path:
         ACTIVATION_PATH,
 
-      stateFlag:
-        "activationBoot",
-
-      scrubbedStateFlag:
-        "scrubbedActivationToken",
-
       bootIsKey:
         "bootIsActivation",
 
@@ -155,6 +159,10 @@ const PROTECTED_PUBLIC_ROUTES =
       scrubbedFlags:
         Object.freeze([
           "scrubbedActivationToken",
+          "activationTokenScrubbed",
+          "scrubbedActivateAccountToken",
+          "scrubbedPublicTokenRoute",
+          "scrubbedTokenRoute",
         ]),
     }),
 
@@ -164,12 +172,6 @@ const PROTECTED_PUBLIC_ROUTES =
 
       path:
         RESET_CONFIRM_PATH,
-
-      stateFlag:
-        "resetConfirmBoot",
-
-      scrubbedStateFlag:
-        "scrubbedResetToken",
 
       bootIsKey:
         "bootIsResetConfirm",
@@ -195,7 +197,12 @@ const PROTECTED_PUBLIC_ROUTES =
       scrubbedFlags:
         Object.freeze([
           "scrubbedResetToken",
+          "resetTokenScrubbed",
           "scrubbedResetPasswordToken",
+          "scrubbedResetConfirmToken",
+          "scrubbedPasswordResetToken",
+          "scrubbedPublicTokenRoute",
+          "scrubbedTokenRoute",
         ]),
     }),
   ]);
@@ -212,6 +219,48 @@ const BODY_EXTRA_LOADING_CLASSES =
   Object.freeze([
     "loading",
   ]);
+
+const MAIN_EVENTS =
+  Object.freeze({
+    initialUrlCaptured:
+      "main:initial-url:capture",
+
+    booting:
+      "main:booting",
+
+    ready:
+      "main:ready",
+
+    fatal:
+      "main:fatal",
+
+    bootStart:
+      "main:boot:start",
+
+    bootComplete:
+      "main:boot:complete",
+
+    bootError:
+      "main:boot:error",
+
+    bootFatalRendered:
+      "main:boot:fatal-rendered",
+
+    globalError:
+      "main:boot:global-error",
+
+    unhandledRejection:
+      "main:boot:unhandled-rejection",
+
+    loaderVisible:
+      "main:loader:visible",
+
+    loaderHidden:
+      "main:loader:hidden",
+
+    bridgeReady:
+      "main:bridge:ready",
+  });
 
 /* =========================================================
    BASIC HELPERS
@@ -240,6 +289,12 @@ function safeObject(value, fallback = {}) {
   return isObject(value)
     ? value
     : fallback;
+}
+
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 function safeText(value, fallback = "") {
@@ -308,12 +363,6 @@ function safeBool(value, fallback = false) {
   return Boolean(fallback);
 }
 
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
-}
-
 function unique(values = []) {
   return Array.from(
     new Set(
@@ -324,57 +373,39 @@ function unique(values = []) {
   );
 }
 
-function nowIso() {
+function nowMs() {
   try {
-    return new Date().toISOString();
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+function nowIso(ms = nowMs()) {
+  try {
+    return new Date(ms).toISOString();
   } catch {
     return "";
   }
 }
 
+function tryCall(fn, ...args) {
+  try {
+    if (isFunction(fn)) {
+      return fn(...args);
+    }
+  } catch {}
+
+  return undefined;
+}
+
 /* =========================================================
-   LOG / EVENTS
+   TOKEN REDACTION / SANITIZE
 ========================================================= */
 
-function safeLog(...args) {
-  try {
-    AppCore?.utils?.log?.(
-      "[Main]",
-      ...args
-    );
-  } catch {}
-}
-
-function safeWarn(...args) {
-  try {
-    AppCore?.utils?.warn?.(
-      "[Main]",
-      ...args
-    );
-  } catch {}
-
-  try {
-    console.warn(
-      "[Main]",
-      ...args
-    );
-  } catch {}
-}
-
-function safeError(...args) {
-  try {
-    AppCore?.utils?.error?.(
-      "[Main]",
-      ...args
-    );
-  } catch {}
-
-  try {
-    console.error(
-      "[Main]",
-      ...args
-    );
-  } catch {}
+function escapeRegExp(value = "") {
+  return String(value)
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function redactTokenInText(value = "") {
@@ -391,11 +422,11 @@ function redactTokenInText(value = "") {
   try {
     for (const name of SENSITIVE_QUERY_PARAM_NAMES) {
       const escaped =
-        String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        escapeRegExp(name);
 
       output =
         output.replace(
-          new RegExp(`([?&]${escaped}=)([^&#\\s]+)`, "gi"),
+          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
           "$1***"
         );
     }
@@ -427,29 +458,111 @@ function sanitizeError(error = null) {
     return null;
   }
 
+  const candidate =
+    error?.reason ||
+    error?.error ||
+    error;
+
   return {
     name:
-      error?.name || "Error",
-
-    message:
       safeText(
-        error?.message ||
-          error?.reason ||
-          error,
+        candidate?.name,
         "Error"
       ),
 
+    message:
+      redactTokenInText(
+        safeText(
+          candidate?.message ||
+            candidate?.reason ||
+            candidate,
+          "Error"
+        )
+      ),
+
     code:
-      error?.code || null,
+      safeText(
+        candidate?.code ||
+          candidate?.statusCode ||
+          "",
+        ""
+      ),
 
     status:
-      error?.status || 0,
+      safeNumber(
+        candidate?.status,
+        0
+      ),
 
     timeout:
-      Boolean(error?.timeout),
+      Boolean(candidate?.timeout),
 
     at:
       nowIso(),
+  };
+}
+
+function sanitizeBootContext(context = {}) {
+  const ctx =
+    safeObject(context);
+
+  return {
+    version:
+      safeText(ctx.version, MAIN_VERSION),
+
+    reason:
+      safeText(ctx.reason, ""),
+
+    href:
+      redactTokenInText(ctx.href || ""),
+
+    initialUrl:
+      redactTokenInText(ctx.initialUrl || ""),
+
+    publicPath:
+      redactTokenInText(ctx.publicPath || ""),
+
+    canonicalPath:
+      redactTokenInText(ctx.canonicalPath || ""),
+
+    hasProtectedToken:
+      Boolean(ctx.hasProtectedToken),
+
+    protectedRouteKey:
+      safeText(ctx.protectedRouteKey, ""),
+
+    protectedRoutePath:
+      safeText(ctx.protectedRoutePath, ""),
+
+    activationBoot:
+      Boolean(ctx.activationBoot),
+
+    resetConfirmBoot:
+      Boolean(ctx.resetConfirmBoot),
+
+    capturedProtected:
+      Boolean(ctx.capturedProtected),
+
+    synced:
+      Boolean(ctx.synced),
+
+    matchedProtectedRoutes:
+      safeArray(ctx.matchedProtectedRoutes)
+        .map((item) => ({
+          key:
+            safeText(item?.key, ""),
+          path:
+            safeText(item?.path, ""),
+          scrubbed:
+            Boolean(item?.scrubbed),
+          matches:
+            Boolean(item?.matches),
+          hasToken:
+            Boolean(item?.hasToken),
+        })),
+
+    capturedAt:
+      safeText(ctx.capturedAt, ""),
   };
 }
 
@@ -467,6 +580,7 @@ function sanitizePayload(payload = {}) {
     "url",
     "path",
     "publicPath",
+    "canonicalPath",
     "initialUrl",
     "activationInitialUrl",
     "resetConfirmInitialUrl",
@@ -497,15 +611,120 @@ function sanitizePayload(payload = {}) {
       sanitizeBootContext(clean.bootContext);
   }
 
+  if (clean.context) {
+    clean.context =
+      sanitizeBootContext(clean.context);
+  }
+
   if (clean.error) {
     clean.error =
       sanitizeError(clean.error);
   }
 
+  if (clean.appState) {
+    clean.appState =
+      sanitizeAppState(clean.appState);
+  }
+
   return clean;
 }
 
-function safeEmit(name = "", payload = {}) {
+function sanitizeAppState(state = null) {
+  if (!isObject(state)) {
+    return state;
+  }
+
+  const clean = {
+    ...state,
+  };
+
+  for (const key of [
+    "bootInitialUrl",
+    "bootProtectedInitialUrl",
+    "bootActivationInitialUrl",
+    "bootResetConfirmInitialUrl",
+    "publicPath",
+    "route",
+  ]) {
+    if (clean[key]) {
+      clean[key] =
+        redactTokenInText(clean[key]);
+    }
+  }
+
+  return clean;
+}
+
+/* =========================================================
+   LOG / EVENTS
+========================================================= */
+
+function safeLog(...args) {
+  try {
+    AppCore?.utils?.log?.(
+      "[Main]",
+      ...args
+    );
+  } catch {}
+}
+
+function safeWarn(...args) {
+  let emittedByCore = false;
+
+  try {
+    if (isFunction(AppCore?.utils?.warn)) {
+      AppCore.utils.warn(
+        "[Main]",
+        ...args
+      );
+
+      emittedByCore = true;
+    }
+  } catch {
+    emittedByCore = false;
+  }
+
+  if (emittedByCore) {
+    return;
+  }
+
+  try {
+    console.warn(
+      "[Main]",
+      ...args
+    );
+  } catch {}
+}
+
+function safeError(...args) {
+  let emittedByCore = false;
+
+  try {
+    if (isFunction(AppCore?.utils?.error)) {
+      AppCore.utils.error(
+        "[Main]",
+        ...args
+      );
+
+      emittedByCore = true;
+    }
+  } catch {
+    emittedByCore = false;
+  }
+
+  if (emittedByCore) {
+    return;
+  }
+
+  try {
+    console.error(
+      "[Main]",
+      ...args
+    );
+  } catch {}
+}
+
+function safeEmit(name = "", payload = {}, options = {}) {
   const eventName =
     safeText(name, "");
 
@@ -513,22 +732,37 @@ function safeEmit(name = "", payload = {}) {
     return false;
   }
 
+  const opts =
+    safeObject(options);
+
   const cleanPayload =
     sanitizePayload(payload);
 
-  let emitted = false;
+  let busAvailable = false;
+  let busEmitted = false;
 
   try {
-    AppCore?.events?.emit?.(
-      eventName,
-      cleanPayload
-    );
+    if (isFunction(AppCore?.events?.emit)) {
+      busAvailable = true;
 
-    emitted = true;
+      AppCore.events.emit(
+        eventName,
+        cleanPayload
+      );
+
+      busEmitted = true;
+    }
   } catch {}
 
-  try {
-    if (isBrowser()) {
+  /*
+    Evita duplicar AppCore.events + window.
+    Window queda como fallback real o emisión forzada.
+  */
+  if (
+    opts.window === true ||
+    (!busAvailable && isBrowser())
+  ) {
+    try {
       window.dispatchEvent(
         new CustomEvent(eventName, {
           detail:
@@ -536,11 +770,11 @@ function safeEmit(name = "", payload = {}) {
         })
       );
 
-      emitted = true;
-    }
-  } catch {}
+      return true;
+    } catch {}
+  }
 
-  return emitted;
+  return busEmitted;
 }
 
 /* =========================================================
@@ -826,10 +1060,9 @@ function getCurrentPublicPath() {
   }
 
   try {
-    const href =
-      window.location.href;
-
-    return pathFromUrlLike(href) || "/";
+    return pathFromUrlLike(
+      window.location.href || ""
+    ) || "/";
   } catch {
     return "/";
   }
@@ -1015,12 +1248,24 @@ function isProtectedRouteScrubbed(routeConfig = null) {
     const state =
       window.history?.state || {};
 
-    return routeConfig.scrubbedFlags.some((flag) =>
-      Boolean(state?.[flag])
-    );
-  } catch {
-    return false;
-  }
+    for (const flag of routeConfig.scrubbedFlags || []) {
+      if (
+        state?.[flag] === true ||
+        state?.[flag] === routeConfig.key
+      ) {
+        return true;
+      }
+    }
+
+    if (
+      state.scrubbedPublicTokenRoute === routeConfig.key ||
+      state.scrubbedTokenRoute === routeConfig.key
+    ) {
+      return true;
+    }
+  } catch {}
+
+  return false;
 }
 
 /* =========================================================
@@ -1041,9 +1286,27 @@ function setWindowValueOnce(key = "", value = "") {
       window[key] = value;
       return true;
     }
-  } catch {}
 
-  return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setWindowValue(key = "", value = "") {
+  if (
+    !isBrowser() ||
+    !key
+  ) {
+    return false;
+  }
+
+  try {
+    window[key] = value;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function getWindowValue(key = "") {
@@ -1064,53 +1327,112 @@ function getWindowValue(key = "") {
   }
 }
 
+function getProtectedStoredInitialUrls() {
+  const values = [];
+
+  for (const routeConfig of PROTECTED_PUBLIC_ROUTES) {
+    for (const key of routeConfig.windowKeys || []) {
+      const value =
+        getWindowValue(key);
+
+      if (value) {
+        values.push(value);
+      }
+    }
+  }
+
+  return unique(values);
+}
+
 function buildBootContext(reason = "main") {
   const href =
     getCurrentHref();
 
-  const publicPath =
+  const currentPublicPath =
     pathFromUrlLike(href) ||
     getCurrentPublicPath() ||
     "/";
 
-  const canonicalPath =
-    stripSearchAndHash(publicPath);
+  const candidates =
+    unique([
+      href,
+      getWindowValue(INITIAL_URL_KEY),
+      ...getProtectedStoredInitialUrls(),
+      currentPublicPath,
+    ]);
 
-  const matchedProtectedRoutes =
-    PROTECTED_PUBLIC_ROUTES
-      .map((routeConfig) => {
-        const scrubbed =
-          isProtectedRouteScrubbed(routeConfig);
+  const matchedProtectedRoutes = [];
 
-        const matches =
-          isPathOrChild(
-            publicPath,
-            routeConfig.path
-          );
+  let protectedRoute =
+    null;
 
-        const hasToken =
-          !scrubbed &&
-          matches &&
-          hasProtectedRouteToken(
-            href || publicPath,
-            routeConfig
-          );
+  let protectedSource =
+    "";
 
-        return {
-          ...routeConfig,
+  let protectedPublicPath =
+    "";
+
+  for (const candidate of candidates) {
+    const candidatePath =
+      pathFromUrlLike(candidate) ||
+      candidate ||
+      "/";
+
+    for (const routeConfig of PROTECTED_PUBLIC_ROUTES) {
+      const scrubbed =
+        isProtectedRouteScrubbed(routeConfig);
+
+      const matches =
+        isPathOrChild(
+          candidatePath,
+          routeConfig.path
+        );
+
+      const hasToken =
+        !scrubbed &&
+        matches &&
+        hasProtectedRouteToken(
+          candidate,
+          routeConfig
+        );
+
+      if (matches) {
+        matchedProtectedRoutes.push({
+          key:
+            routeConfig.key,
+          path:
+            routeConfig.path,
           scrubbed,
           matches,
           hasToken,
-        };
-      })
-      .filter((item) =>
-        item.matches
-      );
+          source:
+            redactTokenInText(candidate),
+        });
+      }
 
-  const protectedRoute =
-    matchedProtectedRoutes.find((item) =>
-      item.hasToken
-    ) || null;
+      if (
+        hasToken &&
+        !protectedRoute
+      ) {
+        protectedRoute =
+          routeConfig;
+
+        protectedSource =
+          candidate;
+
+        protectedPublicPath =
+          candidatePath;
+      }
+    }
+  }
+
+  const publicPath =
+    protectedPublicPath ||
+    currentPublicPath ||
+    "/";
+
+  const canonicalPath =
+    stripSearchAndHash(publicPath);
 
   return {
     version:
@@ -1119,6 +1441,9 @@ function buildBootContext(reason = "main") {
     reason,
 
     href,
+    initialUrl:
+      href,
+
     publicPath,
     canonicalPath,
 
@@ -1130,6 +1455,8 @@ function buildBootContext(reason = "main") {
 
     protectedRoutePath:
       protectedRoute?.path || "",
+
+    protectedSource,
 
     activationBoot:
       Boolean(
@@ -1160,30 +1487,6 @@ function buildBootContext(reason = "main") {
   };
 }
 
-function sanitizeBootContext(context = {}) {
-  const ctx =
-    safeObject(context);
-
-  return {
-    ...ctx,
-
-    href:
-      redactTokenInText(ctx.href || ""),
-
-    publicPath:
-      redactTokenInText(ctx.publicPath || ""),
-
-    initialUrl:
-      redactTokenInText(ctx.initialUrl || ""),
-
-    activationInitialUrl:
-      redactTokenInText(ctx.activationInitialUrl || ""),
-
-    resetConfirmInitialUrl:
-      redactTokenInText(ctx.resetConfirmInitialUrl || ""),
-  };
-}
-
 function writeProtectedWindowKeys(context = {}) {
   if (!isBrowser()) {
     return false;
@@ -1192,10 +1495,14 @@ function writeProtectedWindowKeys(context = {}) {
   let captured =
     false;
 
-  const href =
-    safeText(context.href, "");
+  const source =
+    safeText(
+      context.protectedSource ||
+        context.href,
+      ""
+    );
 
-  if (!href) {
+  if (!source) {
     return false;
   }
 
@@ -1211,12 +1518,72 @@ function writeProtectedWindowKeys(context = {}) {
       captured =
         setWindowValueOnce(
           key,
-          href
+          source
         ) || captured;
     }
   }
 
   return captured;
+}
+
+function markCoreBootPhase(phase = "booting", extras = {}) {
+  const isBooting =
+    phase === "booting";
+
+  const isReady =
+    phase === "ready";
+
+  const isFatal =
+    phase === "fatal";
+
+  const payload = {
+    booting:
+      isBooting,
+
+    loading:
+      isBooting,
+
+    booted:
+      isReady,
+
+    ready:
+      isReady,
+
+    appReady:
+      isReady,
+
+    appFatal:
+      isFatal,
+
+    bootPhase:
+      phase,
+
+    mainPhase:
+      phase,
+
+    mainUpdatedAt:
+      nowIso(),
+
+    ...safeObject(extras),
+  };
+
+  try {
+    AppCore?.setState?.(payload);
+  } catch {}
+
+  try {
+    if (
+      AppCore?.state &&
+      typeof AppCore.state === "object"
+    ) {
+      Object.assign(
+        AppCore.state,
+        payload
+      );
+    }
+  } catch {}
+
+  return payload;
 }
 
 function syncBootContextToAppCore(context = {}) {
@@ -1235,7 +1602,12 @@ function syncBootContextToAppCore(context = {}) {
 
     bootProtectedInitialUrl:
       ctx.hasProtectedToken
-        ? ctx.href || ""
+        ? ctx.protectedSource || ctx.href || ""
+        : "",
+
+    bootProtectedInitialPath:
+      ctx.hasProtectedToken
+        ? ctx.publicPath || "/"
         : "",
 
     bootProtectedRouteKey:
@@ -1246,6 +1618,9 @@ function syncBootContextToAppCore(context = {}) {
 
     bootCapturedAt:
       ctx.capturedAt || nowIso(),
+
+    mainVersion:
+      MAIN_VERSION,
   };
 
   for (const routeConfig of PROTECTED_PUBLIC_ROUTES) {
@@ -1261,7 +1636,7 @@ function syncBootContextToAppCore(context = {}) {
 
     patch[routeConfig.bootUrlKey] =
       isActive
-        ? ctx.href || ""
+        ? ctx.protectedSource || ctx.href || ""
         : getWindowValue(routeConfig.windowKeys[0]) || "";
 
     patch[routeConfig.bootPathKey] =
@@ -1299,10 +1674,14 @@ function captureInitialUrl(reason = "main") {
       buildBootContext(reason);
 
     setWindowValueOnce(
-      "__ONION_INITIAL_URL__",
+      INITIAL_URL_KEY,
       context.href
     );
 
+    /*
+      Si ya hay una URL inicial protegida capturada, no se pisa.
+      Si estamos justo en la URL protegida con token, se conserva antes del Router.
+    */
     const capturedProtected =
       writeProtectedWindowKeys(context);
 
@@ -1317,7 +1696,7 @@ function captureInitialUrl(reason = "main") {
     };
 
     safeEmit(
-      "main:initial-url:capture",
+      MAIN_EVENTS.initialUrlCaptured,
       {
         reason,
         bootContext:
@@ -1454,26 +1833,6 @@ function removeClass(el, className) {
 
   try {
     el.classList.remove(className);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function toggleClass(el, className, force) {
-  if (
-    !el ||
-    !className
-  ) {
-    return false;
-  }
-
-  try {
-    el.classList.toggle(
-      className,
-      Boolean(force)
-    );
-
     return true;
   } catch {
     return false;
@@ -1716,6 +2075,8 @@ function syncShellState(state = "booting", reason = "main") {
   }
 
   if (main) {
+    main.hidden = false;
+
     setAttr(
       main,
       "aria-hidden",
@@ -1724,10 +2085,20 @@ function syncShellState(state = "booting", reason = "main") {
   }
 
   if (view) {
+    view.hidden = false;
+
+    setAttr(
+      view,
+      "aria-hidden",
+      "false"
+    );
+
     setAttr(
       view,
       "aria-live",
-      "polite"
+      isFatal
+        ? "assertive"
+        : "polite"
     );
   }
 
@@ -1785,13 +2156,21 @@ function markDocumentBooting(reason = "main") {
     reason
   );
 
+  markCoreBootPhase(
+    "booting",
+    {
+      mainReason:
+        reason,
+    }
+  );
+
   syncShellState(
     "booting",
     reason
   );
 
   safeEmit(
-    "main:booting",
+    MAIN_EVENTS.booting,
     {
       reason,
     }
@@ -1835,13 +2214,21 @@ function markDocumentReady(reason = "boot-complete") {
     reason
   );
 
+  markCoreBootPhase(
+    "ready",
+    {
+      mainReason:
+        reason,
+    }
+  );
+
   syncShellState(
     "ready",
     reason
   );
 
   safeEmit(
-    "main:ready",
+    MAIN_EVENTS.ready,
     {
       reason,
     }
@@ -1885,13 +2272,23 @@ function markDocumentFatal(reason = "boot-error") {
     reason
   );
 
+  markCoreBootPhase(
+    "fatal",
+    {
+      mainReason:
+        reason,
+      lastFatalError:
+        sanitizeError(lastFatalError),
+    }
+  );
+
   syncShellState(
     "fatal",
     reason
   );
 
   safeEmit(
-    "main:fatal",
+    MAIN_EVENTS.fatal,
     {
       reason,
     }
@@ -1965,7 +2362,7 @@ function ensureStaticLoaderVisible(reason = "main") {
     );
 
     safeEmit(
-      "main:loader:visible",
+      MAIN_EVENTS.loaderVisible,
       {
         reason,
       }
@@ -2039,7 +2436,7 @@ function forceHideStaticLoader(reason = "main") {
     );
 
     safeEmit(
-      "main:loader:hidden",
+      MAIN_EVENTS.loaderHidden,
       {
         reason,
       }
@@ -2206,6 +2603,9 @@ function showFatalBootError(error) {
     const normalizedError =
       normalizeBootError(error);
 
+    lastFatalError =
+      normalizedError;
+
     markDocumentFatal("boot-error");
     forceHideStaticLoader("boot-error");
 
@@ -2220,9 +2620,11 @@ function showFatalBootError(error) {
     clearNode(root);
 
     const message =
-      safeText(
-        normalizedError?.message,
-        DEFAULT_FATAL_MESSAGE
+      redactTokenInText(
+        safeText(
+          normalizedError?.message,
+          DEFAULT_FATAL_MESSAGE
+        )
       );
 
     const section =
@@ -2258,7 +2660,7 @@ function showFatalBootError(error) {
         className:
           "fatal-boot-title",
         text:
-          "Error de arranque",
+          DEFAULT_FATAL_TITLE,
       });
 
     const paragraph =
@@ -2303,7 +2705,7 @@ function showFatalBootError(error) {
     root.appendChild(section);
 
     safeEmit(
-      "main:boot:fatal-rendered",
+      MAIN_EVENTS.bootFatalRendered,
       {
         message,
         error:
@@ -2510,30 +2912,14 @@ async function executeAppBoot(context = {}) {
     throw error;
   }
 
-  try {
-    return await App.boot({
-      bootContext:
-        context,
-    });
-  } catch (error) {
-    /*
-      Compatibilidad:
-      Si App.boot no acepta argumentos no debería fallar,
-      pero si alguna versión antigua lo hace, reintentamos
-      sin payload sólo cuando el fallo apunta a firma/parámetros.
-    */
-    const message =
-      safeText(error?.message, "");
-
-    if (
-      message.includes("argument") ||
-      message.includes("parameter")
-    ) {
-      return App.boot();
-    }
-
-    throw error;
-  }
+  /*
+    JS permite argumentos extra. Pasamos bootContext para versiones futuras.
+    Las versiones actuales que no lo usen lo ignorarán.
+  */
+  return App.boot({
+    bootContext:
+      context,
+  });
 }
 
 /* =========================================================
@@ -2548,13 +2934,26 @@ async function boot(options = {}) {
     return bootPromise;
   }
 
-  bootStarted = true;
-  bootSettled = false;
-  bootFailed = false;
-  fatalRendered = false;
+  bootStarted =
+    true;
 
-  const startedAt =
-    Date.now();
+  bootSettled =
+    false;
+
+  bootFailed =
+    false;
+
+  fatalRendered =
+    false;
+
+  lastFatalError =
+    null;
+
+  bootStartedAt =
+    nowMs();
+
+  bootSettledAt =
+    0;
 
   const context =
     captureInitialUrl("boot-start") ||
@@ -2592,7 +2991,7 @@ async function boot(options = {}) {
         );
 
         safeEmit(
-          "main:boot:start",
+          MAIN_EVENTS.bootStart,
           {
             readyState:
               isBrowser()
@@ -2617,8 +3016,14 @@ async function boot(options = {}) {
 
         bootTimeout.clear();
 
-        bootSettled = true;
-        bootFailed = false;
+        bootSettled =
+          true;
+
+        bootFailed =
+          false;
+
+        bootSettledAt =
+          nowMs();
 
         /*
           Fallback final:
@@ -2636,10 +3041,10 @@ async function boot(options = {}) {
         );
 
         safeEmit(
-          "main:boot:complete",
+          MAIN_EVENTS.bootComplete,
           {
             durationMs:
-              Date.now() - startedAt,
+              bootSettledAt - bootStartedAt,
             bootContext:
               context,
             appState:
@@ -2653,7 +3058,7 @@ async function boot(options = {}) {
           "Boot completado.",
           {
             durationMs:
-              Date.now() - startedAt,
+              bootSettledAt - bootStartedAt,
           }
         );
 
@@ -2662,11 +3067,20 @@ async function boot(options = {}) {
       .catch((error) => {
         bootTimeout.clear();
 
-        bootSettled = true;
-        bootFailed = true;
+        bootSettled =
+          true;
+
+        bootFailed =
+          true;
+
+        bootSettledAt =
+          nowMs();
 
         const normalizedError =
           normalizeBootError(error);
+
+        lastFatalError =
+          normalizedError;
 
         safeError(
           "Fallo crítico en boot:",
@@ -2674,10 +3088,10 @@ async function boot(options = {}) {
         );
 
         safeEmit(
-          "main:boot:error",
+          MAIN_EVENTS.bootError,
           {
             durationMs:
-              Date.now() - startedAt,
+              bootSettledAt - bootStartedAt,
             message:
               safeText(
                 normalizedError?.message,
@@ -2716,7 +3130,8 @@ function bindGlobalBootSafetyNet() {
     return;
   }
 
-  globalSafetyNetBound = true;
+  globalSafetyNetBound =
+    true;
 
   try {
     window.addEventListener(
@@ -2726,14 +3141,18 @@ function bindGlobalBootSafetyNet() {
           return;
         }
 
+        const error =
+          event?.error ||
+          event?.message ||
+          null;
+
         safeError(
           "Error global durante boot:",
-          event?.error ||
-            event?.message
+          error
         );
 
         safeEmit(
-          "main:boot:global-error",
+          MAIN_EVENTS.globalError,
           {
             message:
               safeText(
@@ -2746,11 +3165,11 @@ function bindGlobalBootSafetyNet() {
               event?.lineno || 0,
             colno:
               event?.colno || 0,
-            error:
-              event?.error || null,
+            error,
           }
         );
-      }
+      },
+      true
     );
   } catch {}
 
@@ -2762,20 +3181,23 @@ function bindGlobalBootSafetyNet() {
           return;
         }
 
+        const reason =
+          event?.reason || null;
+
         safeError(
           "Promise rechazada durante boot:",
-          event?.reason
+          reason
         );
 
         safeEmit(
-          "main:boot:unhandled-rejection",
+          MAIN_EVENTS.unhandledRejection,
           {
             error:
-              event?.reason || null,
+              reason,
             message:
               safeText(
-                event?.reason?.message ||
-                  event?.reason,
+                reason?.message ||
+                  reason,
                 "Unhandled rejection"
               ),
           }
@@ -2794,7 +3216,8 @@ function start() {
     return;
   }
 
-  startCalled = true;
+  startCalled =
+    true;
 
   bindGlobalBootSafetyNet();
 
@@ -2814,16 +3237,7 @@ function start() {
 }
 
 /* =========================================================
-   FIRST TICK
-========================================================= */
-
-captureInitialUrl("module-load");
-markDocumentBooting("module-load");
-ensureStaticLoaderVisible("module-load");
-start();
-
-/* =========================================================
-   DEBUG EXPORT
+   DEBUG SNAPSHOT
 ========================================================= */
 
 function getMainSnapshot() {
@@ -2847,6 +3261,25 @@ function getMainSnapshot() {
     bootSettled,
     bootFailed,
 
+    bootStartedAt,
+    bootStartedAtIso:
+      bootStartedAt
+        ? nowIso(bootStartedAt)
+        : "",
+
+    bootSettledAt,
+    bootSettledAtIso:
+      bootSettledAt
+        ? nowIso(bootSettledAt)
+        : "",
+
+    bootDurationMs:
+      bootStartedAt && bootSettledAt
+        ? bootSettledAt - bootStartedAt
+        : bootStartedAt
+          ? nowMs() - bootStartedAt
+          : 0,
+
     startCalled,
     readyBound,
     readyCallbackCalled,
@@ -2855,7 +3288,11 @@ function getMainSnapshot() {
       Boolean(bootPromise),
 
     fatalRendered,
+    lastFatalError:
+      sanitizeError(lastFatalError),
+
     globalSafetyNetBound,
+    debugBridgeExposed,
 
     bootTimeoutMs:
       getBootTimeoutMs(),
@@ -2885,8 +3322,14 @@ function getMainSnapshot() {
       loaderVisible:
         loader?.dataset?.loaderVisible || null,
 
+      loaderState:
+        loader?.dataset?.loaderState || null,
+
       shellExists:
         Boolean(shell),
+
+      shellHidden:
+        Boolean(shell?.hidden),
 
       mainExists:
         Boolean(main),
@@ -2927,13 +3370,24 @@ function getMainSnapshot() {
 
     appState:
       isFunction(App?.getState)
-        ? App.getState()
+        ? sanitizeAppState(App.getState())
         : null,
   };
 }
 
-try {
-  if (isBrowser()) {
+/* =========================================================
+   DEBUG BRIDGE
+========================================================= */
+
+function exposeDebugBridge() {
+  if (
+    !isBrowser() ||
+    debugBridgeExposed
+  ) {
+    return false;
+  }
+
+  try {
     window.OnionApp =
       window.OnionApp || {};
 
@@ -2965,8 +3419,33 @@ try {
       getSnapshot:
         getMainSnapshot,
     };
+
+    debugBridgeExposed =
+      true;
+
+    safeEmit(
+      MAIN_EVENTS.bridgeReady,
+      {
+        version:
+          MAIN_VERSION,
+      }
+    );
+
+    return true;
+  } catch {
+    return false;
   }
-} catch {}
+}
+
+/* =========================================================
+   FIRST TICK
+========================================================= */
+
+captureInitialUrl("module-load");
+markDocumentBooting("module-load");
+ensureStaticLoaderVisible("module-load");
+exposeDebugBridge();
+start();
 
 /* =========================================================
    EXPORT

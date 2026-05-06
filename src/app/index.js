@@ -3,15 +3,17 @@
    Archivo: src/app/index.js
 
    ONION SUPPORT · APP BOOTSTRAP
-   PRIVATE SPA · ROUTER SAFE · TOKEN ROUTES SAFE · EXTREME 10/10
+   PRIVATE SPA · ROUTER SAFE · TOKEN ROUTES SAFE · EXTREME 12/10
 
    RESPONSABILIDADES:
    - Arrancar la SPA de forma ordenada.
-   - Capturar URL inicial antes de Router/History.
+   - Capturar URL inicial antes de Router/History/Auth.
    - Preservar /activate-account?token=... durante el boot.
    - Preservar /activate-account/<token> durante el boot.
    - Preservar /reset-password/confirm?token=... durante el boot.
    - Preservar /reset-password/confirm/<token> durante el boot.
+   - Preservar hash-router /#/activate-account?token=...
+   - Preservar hash-router /#/reset-password/confirm?token=...
    - Configurar servicios, store, i18n, UI y router.
    - Restaurar sesión sin romper rutas públicas técnicas.
    - Render inicial robusto.
@@ -114,42 +116,108 @@ import {
    EARLY URL CAPTURE
 ========================================================= */
 
-const ACTIVATION_PATH = "/activate-account";
-const RESET_CONFIRM_PATH = "/reset-password/confirm";
+const ACTIVATION_PATH =
+  "/activate-account";
 
-const ACTIVATION_TOKEN_PARAM_NAMES = [
-  "token",
-  "activationToken",
-  "activateToken",
-  "code",
-  "t",
-];
+const RESET_CONFIRM_PATH =
+  "/reset-password/confirm";
 
-const RESET_TOKEN_PARAM_NAMES = [
-  "token",
-  "resetToken",
-  "passwordResetToken",
-  "code",
-  "t",
-];
+const ACTIVATION_TOKEN_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "code",
+    "t",
+  ]);
 
-const PROTECTED_PUBLIC_TOKEN_ROUTES = Object.freeze([
+const RESET_TOKEN_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
+    "code",
+    "t",
+  ]);
+
+const PROTECTED_PUBLIC_TOKEN_ROUTES =
+  Object.freeze([
+    Object.freeze({
+      key:
+        "activation",
+
+      path:
+        ACTIVATION_PATH,
+
+      statePrefix:
+        "Activation",
+
+      windowKeys:
+        Object.freeze([
+          "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+        ]),
+
+      tokenParamNames:
+        ACTIVATION_TOKEN_PARAM_NAMES,
+    }),
+
+    Object.freeze({
+      key:
+        "resetConfirm",
+
+      path:
+        RESET_CONFIRM_PATH,
+
+      statePrefix:
+        "ResetConfirm",
+
+      windowKeys:
+        Object.freeze([
+          "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+          "__ONION_RESET_CONFIRM_INITIAL_URL__",
+        ]),
+
+      tokenParamNames:
+        RESET_TOKEN_PARAM_NAMES,
+    }),
+  ]);
+
+const RUNTIME_KEYS =
   Object.freeze({
-    key: "activation",
-    path: ACTIVATION_PATH,
-    windowKey: "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-    statePrefix: "Activation",
-    tokenParamNames: ACTIVATION_TOKEN_PARAM_NAMES,
-  }),
+    initialUrl:
+      "__ONION_INITIAL_URL__",
 
+    bootContext:
+      "__ONION_BOOT_CONTEXT__",
+
+    appApi:
+      "__ONION_APP__",
+  });
+
+const BOOT_EVENTS =
   Object.freeze({
-    key: "resetConfirm",
-    path: RESET_CONFIRM_PATH,
-    windowKey: "__ONION_RESET_CONFIRM_INITIAL_URL__",
-    statePrefix: "ResetConfirm",
-    tokenParamNames: RESET_TOKEN_PARAM_NAMES,
-  }),
-]);
+    start:
+      "app:boot:start",
+
+    state:
+      "app:boot:state",
+
+    ready:
+      "app:boot:ready",
+
+    error:
+      "app:boot:error",
+
+    loaderShow:
+      "app:boot:loader:show",
+
+    loaderHide:
+      "app:boot:loader:hide",
+
+    loaderForceHide:
+      "app:boot:loader:force-hide",
+  });
 
 /* =========================================================
    BASICS
@@ -170,7 +238,8 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value).trim();
 
   return text || fallback;
 }
@@ -185,8 +254,22 @@ function safeObject(value) {
     : {};
 }
 
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
 function isFunction(value) {
   return typeof value === "function";
+}
+
+function nowEpochMs() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
 }
 
 function getBaseOrigin() {
@@ -201,7 +284,8 @@ function getBaseOrigin() {
 }
 
 function isHashRouterPath(value = "") {
-  const raw = String(value || "").trim();
+  const raw =
+    safeText(value, "");
 
   return (
     raw.startsWith("#/") ||
@@ -210,7 +294,8 @@ function isHashRouterPath(value = "") {
 }
 
 function normalizeHashRouterPath(value = "") {
-  const raw = String(value || "").trim();
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return "/";
@@ -224,10 +309,11 @@ function normalizeHashRouterPath(value = "") {
 }
 
 function normalizePathnameOnly(pathname = "/") {
-  let value = String(pathname || "/")
-    .trim()
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/");
+  let value =
+    String(pathname || "/")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
 
   if (!value) {
     value = "/";
@@ -241,14 +327,50 @@ function normalizePathnameOnly(pathname = "/") {
     value.length > 1 &&
     value.endsWith("/")
   ) {
-    value = value.replace(/\/+$/g, "") || "/";
+    value =
+      value.replace(/\/+$/g, "") || "/";
   }
 
   return value;
 }
 
+function normalizeSearch(search = "") {
+  const value =
+    safeText(search, "");
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value =
+    safeText(hash, "");
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
+}
+
+function buildPath({
+  pathname = "/",
+  search = "",
+  hash = "",
+} = {}) {
+  return `${normalizePathnameOnly(pathname)}${normalizeSearch(search)}${normalizeHash(hash)}`;
+}
+
 function stripSearchAndHash(path = "/") {
-  const raw = safeText(path, "/");
+  const raw =
+    safeText(path, "/");
 
   return normalizePathnameOnly(
     raw.split("?")[0].split("#")[0] || "/"
@@ -256,7 +378,8 @@ function stripSearchAndHash(path = "/") {
 }
 
 function pathFromUrlLike(value = "") {
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return "";
@@ -267,7 +390,8 @@ function pathFromUrlLike(value = "") {
   }
 
   try {
-    const parsed = new URL(raw, getBaseOrigin());
+    const parsed =
+      new URL(raw, getBaseOrigin());
 
     if (
       parsed.hash &&
@@ -276,12 +400,21 @@ function pathFromUrlLike(value = "") {
       return normalizeHashRouterPath(parsed.hash);
     }
 
-    return `${normalizePathnameOnly(parsed.pathname || "/")}${parsed.search || ""}${parsed.hash || ""}`;
+    return buildPath({
+      pathname:
+        parsed.pathname || "/",
+      search:
+        parsed.search || "",
+      hash:
+        parsed.hash || "",
+    });
   } catch {
-    const hashIndex = raw.indexOf("#");
+    const hashIndex =
+      raw.indexOf("#");
 
     if (hashIndex >= 0) {
-      const hash = raw.slice(hashIndex);
+      const hash =
+        raw.slice(hashIndex);
 
       if (isHashRouterPath(hash)) {
         return normalizeHashRouterPath(hash);
@@ -312,9 +445,14 @@ function getBrowserPublicPath() {
   }
 
   try {
-    const pathname = window.location.pathname || "/";
-    const search = window.location.search || "";
-    const hash = window.location.hash || "";
+    const pathname =
+      window.location.pathname || "/";
+
+    const search =
+      window.location.search || "";
+
+    const hash =
+      window.location.hash || "";
 
     if (
       hash &&
@@ -366,11 +504,112 @@ function afterPaint(callback) {
 function wait(ms = 0) {
   return new Promise((resolve) => {
     try {
-      setTimeout(resolve, Math.max(0, Number(ms) || 0));
+      setTimeout(
+        resolve,
+        Math.max(0, Number(ms) || 0)
+      );
     } catch {
       resolve();
     }
   });
+}
+
+/* =========================================================
+   TOKEN REDACTION
+========================================================= */
+
+function redactTokenInText(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  let output =
+    raw;
+
+  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+    const escapedPath =
+      config.path.replace(/\//g, "\\/");
+
+    output =
+      output.replace(
+        new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
+        "$1/***"
+      );
+
+    for (const name of config.tokenParamNames) {
+      const escapedName =
+        String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+      output =
+        output.replace(
+          new RegExp(`([?&#]${escapedName}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
+    }
+  }
+
+  output =
+    output.replace(
+      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+      "$1***"
+    );
+
+  return output;
+}
+
+function sanitizeBootContextForLog(context = {}) {
+  const ctx =
+    safeObject(context);
+
+  return {
+    initialUrl:
+      redactTokenInText(ctx.initialUrl),
+
+    browserPublicPath:
+      redactTokenInText(ctx.browserPublicPath),
+
+    protectedInitialUrl:
+      redactTokenInText(ctx.protectedInitialUrl),
+
+    protectedInitialPath:
+      redactTokenInText(ctx.protectedInitialPath),
+
+    activationInitialUrl:
+      redactTokenInText(ctx.activationInitialUrl),
+
+    activationInitialPath:
+      redactTokenInText(ctx.activationInitialPath),
+
+    isActivation:
+      Boolean(ctx.isActivation),
+
+    hasActivationToken:
+      Boolean(ctx.hasActivationToken),
+
+    resetConfirmInitialUrl:
+      redactTokenInText(ctx.resetConfirmInitialUrl),
+
+    resetConfirmInitialPath:
+      redactTokenInText(ctx.resetConfirmInitialPath),
+
+    isResetConfirm:
+      Boolean(ctx.isResetConfirm),
+
+    hasResetToken:
+      Boolean(ctx.hasResetToken),
+
+    isPublicTokenRoute:
+      Boolean(ctx.isPublicTokenRoute),
+
+    hasPublicToken:
+      Boolean(ctx.hasPublicToken),
+
+    protectedRouteKey:
+      safeText(ctx.protectedRouteKey, ""),
+  };
 }
 
 /* =========================================================
@@ -382,8 +621,11 @@ function matchesRouteConfig(config, pathOrUrl = "") {
     return false;
   }
 
-  const path = pathFromUrlLike(pathOrUrl);
-  const clean = stripSearchAndHash(path);
+  const path =
+    pathFromUrlLike(pathOrUrl);
+
+  const clean =
+    stripSearchAndHash(path);
 
   return (
     clean === config.path ||
@@ -404,19 +646,26 @@ function getPathToken(config, value = "") {
     return "";
   }
 
-  const path = pathFromUrlLike(value);
-  const clean = stripSearchAndHash(path);
+  const path =
+    pathFromUrlLike(value);
+
+  const clean =
+    stripSearchAndHash(path);
 
   if (!clean.startsWith(`${config.path}/`)) {
     return "";
   }
 
-  const token = clean
-    .slice(`${config.path}/`.length)
-    .split("/")[0];
+  const token =
+    clean
+      .slice(`${config.path}/`.length)
+      .split("/")[0];
 
   try {
-    return safeText(decodeURIComponent(token || ""), "");
+    return safeText(
+      decodeURIComponent(token || ""),
+      ""
+    );
   } catch {
     return safeText(token, "");
   }
@@ -424,10 +673,16 @@ function getPathToken(config, value = "") {
 
 function hasTokenInSearch(search = "", names = []) {
   try {
-    const params = new URLSearchParams(search || "");
+    const params =
+      new URLSearchParams(search || "");
 
-    return names.some((name) =>
-      Boolean(safeText(params.get(name), ""))
+    return safeArray(names).some((name) =>
+      Boolean(
+        safeText(
+          params.get(name),
+          ""
+        )
+      )
     );
   } catch {
     return false;
@@ -439,7 +694,8 @@ function hasRouteToken(config, value = "") {
     return false;
   }
 
-  const raw = safeText(value, "");
+  const raw =
+    safeText(value, "");
 
   if (!raw) {
     return false;
@@ -450,7 +706,8 @@ function hasRouteToken(config, value = "") {
   }
 
   try {
-    const parsed = new URL(raw, getBaseOrigin());
+    const parsed =
+      new URL(raw, getBaseOrigin());
 
     if (
       hasTokenInSearch(
@@ -463,12 +720,39 @@ function hasRouteToken(config, value = "") {
 
     if (
       parsed.hash &&
+      isHashRouterPath(parsed.hash)
+    ) {
+      const hashPath =
+        normalizeHashRouterPath(parsed.hash);
+
+      if (getPathToken(config, hashPath)) {
+        return true;
+      }
+
+      if (hashPath.includes("?")) {
+        const query =
+          hashPath
+            .split("?")
+            .slice(1)
+            .join("?")
+            .split("#")[0];
+
+        return hasTokenInSearch(
+          query ? `?${query}` : "",
+          config.tokenParamNames
+        );
+      }
+    }
+
+    if (
+      parsed.hash &&
       parsed.hash.includes("?")
     ) {
-      const query = parsed.hash
-        .split("?")
-        .slice(1)
-        .join("?");
+      const query =
+        parsed.hash
+          .split("?")
+          .slice(1)
+          .join("?");
 
       return hasTokenInSearch(
         query ? `?${query}` : "",
@@ -479,11 +763,12 @@ function hasRouteToken(config, value = "") {
     return false;
   } catch {
     if (raw.includes("?")) {
-      const query = raw
-        .split("?")
-        .slice(1)
-        .join("?")
-        .split("#")[0];
+      const query =
+        raw
+          .split("?")
+          .slice(1)
+          .join("?")
+          .split("#")[0];
 
       if (
         hasTokenInSearch(
@@ -499,10 +784,11 @@ function hasRouteToken(config, value = "") {
       raw.includes("#") &&
       raw.includes("?")
     ) {
-      const query = raw
-        .split("?")
-        .slice(1)
-        .join("?");
+      const query =
+        raw
+          .split("?")
+          .slice(1)
+          .join("?");
 
       if (
         hasTokenInSearch(
@@ -518,51 +804,26 @@ function hasRouteToken(config, value = "") {
   }
 }
 
-function getStoredInitialUrl(config) {
-  if (!isBrowser() || !config?.windowKey) {
+function getWindowValue(key = "") {
+  if (!isBrowser() || !key) {
     return "";
   }
 
   try {
-    return safeText(window[config.windowKey], "");
+    return safeText(window[key], "");
   } catch {
     return "";
   }
 }
 
-function setStoredInitialUrl(config, value = "") {
-  if (!isBrowser() || !config?.windowKey) {
+function setWindowValueIfEmpty(key = "", value = "") {
+  if (!isBrowser() || !key || !value) {
     return false;
   }
 
   try {
-    window[config.windowKey] = value;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function getInitialUrl() {
-  if (!isBrowser()) {
-    return "";
-  }
-
-  try {
-    return safeText(window.__ONION_INITIAL_URL__, "");
-  } catch {
-    return "";
-  }
-}
-
-function setInitialUrl(value = "") {
-  if (!isBrowser()) {
-    return false;
-  }
-
-  try {
-    if (!window.__ONION_INITIAL_URL__) {
-      window.__ONION_INITIAL_URL__ = value;
+    if (!window[key]) {
+      window[key] = value;
     }
 
     return true;
@@ -571,19 +832,80 @@ function setInitialUrl(value = "") {
   }
 }
 
+function setWindowValue(key = "", value = "") {
+  if (!isBrowser() || !key) {
+    return false;
+  }
+
+  try {
+    window[key] = value;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getStoredInitialUrls(config = null) {
+  if (!config) {
+    return [];
+  }
+
+  return safeArray(config.windowKeys)
+    .map((key) => getWindowValue(key))
+    .filter(Boolean);
+}
+
+function setStoredInitialUrl(config = null, value = "") {
+  if (!config || !value) {
+    return false;
+  }
+
+  let wrote = false;
+
+  for (const key of safeArray(config.windowKeys)) {
+    if (
+      setWindowValueIfEmpty(
+        key,
+        value
+      )
+    ) {
+      wrote = true;
+    }
+  }
+
+  return wrote;
+}
+
+function getInitialUrl() {
+  return getWindowValue(RUNTIME_KEYS.initialUrl);
+}
+
+function setInitialUrl(value = "") {
+  if (!value) {
+    return false;
+  }
+
+  return setWindowValueIfEmpty(
+    RUNTIME_KEYS.initialUrl,
+    value
+  );
+}
+
 function resolveProtectedInitialContext(href = "") {
   const candidates = [
     href,
     getInitialUrl(),
-    ...PROTECTED_PUBLIC_TOKEN_ROUTES.map((config) =>
-      getStoredInitialUrl(config)
+    getBrowserPublicPath(),
+    ...PROTECTED_PUBLIC_TOKEN_ROUTES.flatMap((config) =>
+      getStoredInitialUrls(config)
     ),
   ]
     .map((value) => safeText(value, ""))
     .filter(Boolean);
 
   for (const candidate of candidates) {
-    const config = getRouteConfigFromValue(candidate);
+    const config =
+      getRouteConfigFromValue(candidate);
 
     if (!config) {
       continue;
@@ -595,96 +917,68 @@ function resolveProtectedInitialContext(href = "") {
 
     return {
       config,
-      url: candidate,
-      path: pathFromUrlLike(candidate),
-      hasToken: true,
+      url:
+        candidate,
+      path:
+        pathFromUrlLike(candidate),
+      hasToken:
+        true,
     };
   }
 
   return {
-    config: null,
-    url: "",
-    path: "",
-    hasToken: false,
-  };
-}
-
-function redactTokenInText(value = "") {
-  const raw = safeText(value, "");
-
-  if (!raw) {
-    return "";
-  }
-
-  let output = raw;
-
-  for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
-    const escapedPath = config.path.replace(/\//g, "\\/");
-
-    output = output.replace(
-      new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
-      "$1/***"
-    );
-
-    for (const name of config.tokenParamNames) {
-      output = output.replace(
-        new RegExp(`([?&]${name}=)([^&#\\s]+)`, "gi"),
-        "$1***"
-      );
-    }
-  }
-
-  return output;
-}
-
-function sanitizeBootContextForLog(context = {}) {
-  const ctx = safeObject(context);
-
-  return {
-    initialUrl: redactTokenInText(ctx.initialUrl),
-    protectedInitialUrl: redactTokenInText(ctx.protectedInitialUrl),
-    protectedInitialPath: redactTokenInText(ctx.protectedInitialPath),
-
-    activationInitialUrl: redactTokenInText(ctx.activationInitialUrl),
-    activationInitialPath: redactTokenInText(ctx.activationInitialPath),
-    isActivation: Boolean(ctx.isActivation),
-    hasActivationToken: Boolean(ctx.hasActivationToken),
-
-    resetConfirmInitialUrl: redactTokenInText(ctx.resetConfirmInitialUrl),
-    resetConfirmInitialPath: redactTokenInText(ctx.resetConfirmInitialPath),
-    isResetConfirm: Boolean(ctx.isResetConfirm),
-    hasResetToken: Boolean(ctx.hasResetToken),
-
-    isPublicTokenRoute: Boolean(ctx.isPublicTokenRoute),
-    hasPublicToken: Boolean(ctx.hasPublicToken),
-    protectedRouteKey: safeText(ctx.protectedRouteKey, ""),
+    config:
+      null,
+    url:
+      "",
+    path:
+      "",
+    hasToken:
+      false,
   };
 }
 
 function captureInitialUrl() {
   if (!isBrowser()) {
     return {
-      initialUrl: "",
-      protectedInitialUrl: "",
-      protectedInitialPath: "",
+      initialUrl:
+        "",
+      browserPublicPath:
+        "",
+      protectedInitialUrl:
+        "",
+      protectedInitialPath:
+        "",
 
-      activationInitialUrl: "",
-      activationInitialPath: "",
-      isActivation: false,
-      hasActivationToken: false,
+      activationInitialUrl:
+        "",
+      activationInitialPath:
+        "",
+      isActivation:
+        false,
+      hasActivationToken:
+        false,
 
-      resetConfirmInitialUrl: "",
-      resetConfirmInitialPath: "",
-      isResetConfirm: false,
-      hasResetToken: false,
+      resetConfirmInitialUrl:
+        "",
+      resetConfirmInitialPath:
+        "",
+      isResetConfirm:
+        false,
+      hasResetToken:
+        false,
 
-      isPublicTokenRoute: false,
-      hasPublicToken: false,
-      protectedRouteKey: "",
+      isPublicTokenRoute:
+        false,
+      hasPublicToken:
+        false,
+      protectedRouteKey:
+        "",
     };
   }
 
-  const href = getBrowserHref();
+  const href =
+    getBrowserHref();
 
   if (href) {
     setInitialUrl(href);
@@ -694,7 +988,7 @@ function captureInitialUrl() {
         if (
           matchesRouteConfig(config, href) &&
           hasRouteToken(config, href) &&
-          !getStoredInitialUrl(config)
+          getStoredInitialUrls(config).length === 0
         ) {
           setStoredInitialUrl(config, href);
         }
@@ -702,71 +996,106 @@ function captureInitialUrl() {
     }
   }
 
-  const initialUrl = safeText(getInitialUrl(), href);
+  const initialUrl =
+    safeText(getInitialUrl(), href);
 
-  const protectedContext = resolveProtectedInitialContext(href);
+  const browserPublicPath =
+    getBrowserPublicPath();
 
-  const activationConfig = PROTECTED_PUBLIC_TOKEN_ROUTES[0];
-  const resetConfig = PROTECTED_PUBLIC_TOKEN_ROUTES[1];
+  const protectedContext =
+    resolveProtectedInitialContext(href);
 
-  const activationInitialUrl = safeText(
-    getStoredInitialUrl(activationConfig),
-    ""
-  );
+  const activationConfig =
+    PROTECTED_PUBLIC_TOKEN_ROUTES.find((config) =>
+      config.key === "activation"
+    );
 
-  const resetConfirmInitialUrl = safeText(
-    getStoredInitialUrl(resetConfig),
-    ""
-  );
+  const resetConfig =
+    PROTECTED_PUBLIC_TOKEN_ROUTES.find((config) =>
+      config.key === "resetConfirm"
+    );
 
-  const activationInitialPath = activationInitialUrl
-    ? pathFromUrlLike(activationInitialUrl)
-    : "";
+  const activationInitialUrl =
+    safeText(
+      getStoredInitialUrls(activationConfig)[0],
+      ""
+    );
 
-  const resetConfirmInitialPath = resetConfirmInitialUrl
-    ? pathFromUrlLike(resetConfirmInitialUrl)
-    : "";
+  const resetConfirmInitialUrl =
+    safeText(
+      getStoredInitialUrls(resetConfig)[0],
+      ""
+    );
+
+  const activationInitialPath =
+    activationInitialUrl
+      ? pathFromUrlLike(activationInitialUrl)
+      : "";
+
+  const resetConfirmInitialPath =
+    resetConfirmInitialUrl
+      ? pathFromUrlLike(resetConfirmInitialUrl)
+      : "";
 
   const activationCandidate =
     protectedContext.url ||
     activationInitialUrl ||
     initialUrl ||
-    href;
+    href ||
+    browserPublicPath;
 
   const resetCandidate =
     protectedContext.url ||
     resetConfirmInitialUrl ||
     initialUrl ||
-    href;
+    href ||
+    browserPublicPath;
 
-  const isActivation = matchesRouteConfig(
-    activationConfig,
-    activationCandidate
-  );
+  const isActivation =
+    matchesRouteConfig(
+      activationConfig,
+      activationCandidate
+    );
 
-  const isResetConfirm = matchesRouteConfig(
-    resetConfig,
-    resetCandidate
-  );
+  const isResetConfirm =
+    matchesRouteConfig(
+      resetConfig,
+      resetCandidate
+    );
 
-  const hasActivationToken = hasRouteToken(
-    activationConfig,
-    activationInitialUrl || initialUrl || href
-  );
+  const hasActivationToken =
+    hasRouteToken(
+      activationConfig,
+      activationInitialUrl ||
+        initialUrl ||
+        href ||
+        browserPublicPath
+    );
 
-  const hasResetToken = hasRouteToken(
-    resetConfig,
-    resetConfirmInitialUrl || initialUrl || href
-  );
+  const hasResetToken =
+    hasRouteToken(
+      resetConfig,
+      resetConfirmInitialUrl ||
+        initialUrl ||
+        href ||
+        browserPublicPath
+    );
 
-  const isPublicTokenRoute = Boolean(protectedContext.config);
-  const hasPublicToken = Boolean(protectedContext.hasToken);
+  const isPublicTokenRoute =
+    Boolean(protectedContext.config);
 
-  return {
+  const hasPublicToken =
+    Boolean(protectedContext.hasToken);
+
+  const context = {
     initialUrl,
+    browserPublicPath,
 
-    protectedInitialUrl: protectedContext.url || "",
-    protectedInitialPath: protectedContext.path || "",
+    protectedInitialUrl:
+      protectedContext.url || "",
+
+    protectedInitialPath:
+      protectedContext.path || "",
 
     activationInitialUrl,
     activationInitialPath,
@@ -780,14 +1109,24 @@ function captureInitialUrl() {
 
     isPublicTokenRoute,
     hasPublicToken,
-    protectedRouteKey: protectedContext.config?.key || "",
+
+    protectedRouteKey:
+      protectedContext.config?.key || "",
   };
+
+  setWindowValue(
+    RUNTIME_KEYS.bootContext,
+    context
+  );
+
+  return context;
 }
 
-let BOOT_URL_CONTEXT = captureInitialUrl();
+let BOOT_URL_CONTEXT =
+  captureInitialUrl();
 
 /* =========================================================
-   APP
+   APP SINGLETON
 ========================================================= */
 
 export const App = (() => {
@@ -800,38 +1139,62 @@ export const App = (() => {
   const UI_REASON_MAX_LENGTH = 160;
 
   const state = {
-    booted: false,
-    booting: false,
+    booted:
+      false,
+    booting:
+      false,
 
-    servicesReady: false,
-    storeReady: false,
-    routerConfigured: false,
-    routerBound: false,
-    uiReady: false,
+    servicesReady:
+      false,
+    storeReady:
+      false,
+    routerConfigured:
+      false,
+    routerBound:
+      false,
+    uiReady:
+      false,
 
-    uiMounted: false,
-    readyEmitted: false,
+    uiMounted:
+      false,
+    readyEmitted:
+      false,
 
-    handlersBound: false,
-    appEventsBound: false,
-    uiRepairEventsBound: false,
+    handlersBound:
+      false,
+    appEventsBound:
+      false,
+    uiRepairEventsBound:
+      false,
 
-    bootPromise: null,
-    restorePromise: null,
+    bootPromise:
+      null,
+    restorePromise:
+      null,
 
-    bootCycleId: 0,
-    finalizedCycleId: 0,
+    bootCycleId:
+      0,
+    finalizedCycleId:
+      0,
 
-    loaderVisible: false,
-    loaderShownAt: 0,
+    loaderVisible:
+      false,
+    loaderShownAt:
+      0,
 
-    bootFailsafeTimer: null,
-    bootFailsafeStartedAt: 0,
-    bootFailsafeTimeoutMs: 0,
-    bootFailsafeArmId: 0,
+    bootFailsafeTimer:
+      null,
+    bootFailsafeStartedAt:
+      0,
+    bootFailsafeTimeoutMs:
+      0,
+    bootFailsafeArmId:
+      0,
 
-    bootNavigationHandled: false,
-    initialRouteRendered: false,
+    bootNavigationHandled:
+      false,
+    initialRouteRendered:
+      false,
   };
 
   let uiRepairRunning = false;
@@ -848,13 +1211,15 @@ export const App = (() => {
   ======================================================= */
 
   function safeEmit(name, payload = {}, options = {}) {
-    const eventName = safeText(name, "");
+    const eventName =
+      safeText(name, "");
 
     if (!eventName) {
       return false;
     }
 
-    const opts = safeObject(options);
+    const opts =
+      safeObject(options);
 
     let busAvailable = false;
     let busEmitted = false;
@@ -862,7 +1227,12 @@ export const App = (() => {
     try {
       if (isFunction(AppCore?.events?.emit)) {
         busAvailable = true;
-        AppCore.events.emit(eventName, payload);
+
+        AppCore.events.emit(
+          eventName,
+          payload
+        );
+
         busEmitted = true;
       }
     } catch {}
@@ -874,7 +1244,8 @@ export const App = (() => {
       try {
         window.dispatchEvent(
           new CustomEvent(eventName, {
-            detail: payload,
+            detail:
+              payload,
           })
         );
 
@@ -948,7 +1319,11 @@ export const App = (() => {
     }
 
     try {
-      window.addEventListener(eventName, handler);
+      window.addEventListener(
+        eventName,
+        handler
+      );
+
       return true;
     } catch {
       return false;
@@ -1011,7 +1386,8 @@ export const App = (() => {
       AppCore?.state?.authUser ||
       null;
 
-    const route = getCurrentRouteSnapshot();
+    const route =
+      getCurrentRouteSnapshot();
 
     return {
       user,
@@ -1061,9 +1437,12 @@ export const App = (() => {
 
   function safeEmitUIReady() {
     safeEmit("app:ui:ready", {
-      source: "app:index",
-      sidebarSnapshot: getSidebarSnapshot(),
-      topbarSnapshot: getTopbarSnapshot(),
+      source:
+        "app:index",
+      sidebarSnapshot:
+        getSidebarSnapshot(),
+      topbarSnapshot:
+        getTopbarSnapshot(),
     });
   }
 
@@ -1072,31 +1451,36 @@ export const App = (() => {
   ======================================================= */
 
   function normalizeRepairReason(reason = "unknown") {
-    let text = safeText(reason, "unknown")
-      .replace(/\s+/g, " ")
-      .trim();
+    let text =
+      safeText(reason, "unknown")
+        .replace(/\s+/g, " ")
+        .trim();
 
     if (!text) {
       text = "unknown";
     }
 
-    const appPrefixCount = (text.match(/app:/g) || []).length;
+    const appPrefixCount =
+      (text.match(/app:/g) || []).length;
 
     if (appPrefixCount > 3) {
       return "recursive-event-blocked";
     }
 
-    text = text.replace(/^(app:){2,}/, "app:");
+    text =
+      text.replace(/^(app:){2,}/, "app:");
 
     if (text.length > UI_REASON_MAX_LENGTH) {
-      text = text.slice(0, UI_REASON_MAX_LENGTH);
+      text =
+        text.slice(0, UI_REASON_MAX_LENGTH);
     }
 
     return text;
   }
 
   function shouldSkipRepair(reason = "unknown", options = {}) {
-    const cleanReason = normalizeRepairReason(reason);
+    const cleanReason =
+      normalizeRepairReason(reason);
 
     if (cleanReason === "recursive-event-blocked") {
       return true;
@@ -1106,33 +1490,38 @@ export const App = (() => {
       return true;
     }
 
-    const now = Date.now();
-    const routeSnapshot = getCurrentRouteSnapshot();
+    const current =
+      nowEpochMs();
 
-    const key = [
-      cleanReason,
-      routeSnapshot.route,
-      routeSnapshot.publicPath,
-      Boolean(options?.repairShell),
-      Boolean(options?.hardRepair),
-      Boolean(options?.rebind),
-    ].join("|");
+    const routeSnapshot =
+      getCurrentRouteSnapshot();
+
+    const key =
+      [
+        cleanReason,
+        routeSnapshot.route,
+        routeSnapshot.publicPath,
+        Boolean(options?.repairShell),
+        Boolean(options?.hardRepair),
+        Boolean(options?.rebind),
+      ].join("|");
 
     if (
       key === uiRepairLastKey &&
-      now - uiRepairLastAt < UI_REPAIR_THROTTLE_MS
+      current - uiRepairLastAt < UI_REPAIR_THROTTLE_MS
     ) {
       return true;
     }
 
     uiRepairLastKey = key;
-    uiRepairLastAt = now;
+    uiRepairLastAt = current;
 
     return false;
   }
 
   function shouldSkipUserSync(reason = "sync-user-ui") {
-    const cleanReason = normalizeRepairReason(reason);
+    const cleanReason =
+      normalizeRepairReason(reason);
 
     if (cleanReason === "recursive-event-blocked") {
       return true;
@@ -1142,17 +1531,18 @@ export const App = (() => {
       return true;
     }
 
-    const now = Date.now();
+    const current =
+      nowEpochMs();
 
     if (
       uiSyncLastReason === cleanReason &&
-      now - uiSyncLastAt < UI_SYNC_THROTTLE_MS
+      current - uiSyncLastAt < UI_SYNC_THROTTLE_MS
     ) {
       return true;
     }
 
     uiSyncLastReason = cleanReason;
-    uiSyncLastAt = now;
+    uiSyncLastAt = current;
 
     return false;
   }
@@ -1166,7 +1556,8 @@ export const App = (() => {
       return false;
     }
 
-    const fn = target[methodName];
+    const fn =
+      target[methodName];
 
     try {
       fn.call(target, reason, context);
@@ -1189,32 +1580,53 @@ export const App = (() => {
   function callManyUIMethods(target, methodNames = [], reason = "unknown", context = {}) {
     const called = [];
 
-    for (const methodName of methodNames) {
-      if (callUIMethod(target, methodName, reason, context)) {
+    for (const methodName of safeArray(methodNames)) {
+      if (
+        callUIMethod(
+          target,
+          methodName,
+          reason,
+          context
+        )
+      ) {
         called.push(methodName);
       }
     }
 
     return {
-      called: called.length > 0,
-      methods: called,
-      method: called[0] || "",
+      called:
+        called.length > 0,
+      methods:
+        called,
+      method:
+        called[0] || "",
     };
   }
 
   function callFirstUIMethod(target, methodNames = [], reason = "unknown", context = {}) {
-    for (const methodName of methodNames) {
-      if (callUIMethod(target, methodName, reason, context)) {
+    for (const methodName of safeArray(methodNames)) {
+      if (
+        callUIMethod(
+          target,
+          methodName,
+          reason,
+          context
+        )
+      ) {
         return {
-          called: true,
-          method: methodName,
+          called:
+            true,
+          method:
+            methodName,
         };
       }
     }
 
     return {
-      called: false,
-      method: "",
+      called:
+        false,
+      method:
+        "",
     };
   }
 
@@ -1223,6 +1635,9 @@ export const App = (() => {
       SidebarUI,
       [
         "renderUser",
+        "refreshUser",
+        "updateUser",
+        "syncUser",
         "applyRoleVisibility",
       ],
       reason,
@@ -1236,6 +1651,7 @@ export const App = (() => {
       [
         "syncRouteAndIndicator",
         "syncIndicator",
+        "updateToggleLabel",
       ],
       reason,
       context
@@ -1262,10 +1678,10 @@ export const App = (() => {
     return callFirstUIMethod(
       TopbarUI,
       [
-        "sync",
-        "refresh",
         "syncRoute",
         "updateRoute",
+        "sync",
+        "refresh",
       ],
       reason,
       context
@@ -1273,7 +1689,8 @@ export const App = (() => {
   }
 
   function callSyncUserUI(reason = "sync-user-ui") {
-    const cleanReason = normalizeRepairReason(reason);
+    const cleanReason =
+      normalizeRepairReason(reason);
 
     if (shouldSkipUserSync(cleanReason)) {
       return false;
@@ -1282,7 +1699,8 @@ export const App = (() => {
     uiSyncRunning = true;
 
     try {
-      const routeSnapshot = getCurrentRouteSnapshot();
+      const routeSnapshot =
+        getCurrentRouteSnapshot();
 
       const context = {
         AppCore,
@@ -1294,30 +1712,48 @@ export const App = (() => {
         SidebarUI,
         TopbarUI,
 
-        reason: cleanReason,
-        source: "app:index",
+        reason:
+          cleanReason,
+        source:
+          "app:index",
 
-        route: routeSnapshot.route,
-        publicPath: routeSnapshot.publicPath,
+        route:
+          routeSnapshot.route,
+        publicPath:
+          routeSnapshot.publicPath,
 
-        snapshot: getUserSnapshot(),
+        snapshot:
+          getUserSnapshot(),
       };
 
-      syncSidebarIdentity(cleanReason, context);
-      syncTopbarIdentity(cleanReason, context);
+      syncSidebarIdentity(
+        cleanReason,
+        context
+      );
+
+      syncTopbarIdentity(
+        cleanReason,
+        context
+      );
 
       safeEmit("app:user-ui:sync", {
-        source: "app:index",
-        reason: cleanReason,
+        source:
+          "app:index",
+        reason:
+          cleanReason,
         ...context.snapshot,
       });
 
       return true;
     } catch (error) {
-      safeWarn("callSyncUserUI() falló.", {
-        reason: cleanReason,
-        error,
-      });
+      safeWarn(
+        "callSyncUserUI() falló.",
+        {
+          reason:
+            cleanReason,
+          error,
+        }
+      );
 
       return false;
     } finally {
@@ -1380,24 +1816,33 @@ export const App = (() => {
   }
 
   function repairShell(reason = "unknown") {
-    const cleanReason = normalizeRepairReason(reason);
-    const routeSnapshot = getCurrentRouteSnapshot();
+    const cleanReason =
+      normalizeRepairReason(reason);
+
+    const routeSnapshot =
+      getCurrentRouteSnapshot();
 
     try {
-      updateShellVisibilityByRoute(AppCore, Router);
+      updateShellVisibilityByRoute(
+        AppCore,
+        Router
+      );
     } catch {}
 
     try {
       Router?.repairShell?.({
         route:
           Router?.getRoute?.(routeSnapshot.route) || null,
-        canonicalPath: routeSnapshot.route,
-        publicPath: routeSnapshot.publicPath,
+        canonicalPath:
+          routeSnapshot.route,
+        publicPath:
+          routeSnapshot.publicPath,
         phase:
           cleanReason.startsWith("app:")
             ? cleanReason
             : `app:${cleanReason}`,
-        hideLoading: false,
+        hideLoading:
+          false,
       });
     } catch {}
 
@@ -1405,18 +1850,26 @@ export const App = (() => {
   }
 
   function repairUISystems(reason = "unknown", options = {}) {
-    const cleanReason = normalizeRepairReason(reason);
+    const cleanReason =
+      normalizeRepairReason(reason);
 
     const opts = {
-      repairShell: options?.repairShell !== false,
-      syncUser: options?.syncUser !== false,
+      repairShell:
+        options?.repairShell !== false,
+      syncUser:
+        options?.syncUser !== false,
 
-      rebind: options?.rebind === true,
-      hardRepair: options?.hardRepair === true,
+      rebind:
+        options?.rebind === true,
+      hardRepair:
+        options?.hardRepair === true,
 
-      emit: options?.emit !== false,
-      afterPaint: options?.afterPaint === true,
-      source: safeText(options?.source, "app:index"),
+      emit:
+        options?.emit !== false,
+      afterPaint:
+        options?.afterPaint === true,
+      source:
+        safeText(options?.source, "app:index"),
     };
 
     if (shouldSkipRepair(cleanReason, opts)) {
@@ -1426,9 +1879,10 @@ export const App = (() => {
     uiRepairRunning = true;
 
     try {
-      const routeSnapshot = opts.repairShell
-        ? repairShell(cleanReason)
-        : getCurrentRouteSnapshot();
+      const routeSnapshot =
+        opts.repairShell
+          ? repairShell(cleanReason)
+          : getCurrentRouteSnapshot();
 
       const context = {
         AppCore,
@@ -1440,13 +1894,18 @@ export const App = (() => {
         SidebarUI,
         TopbarUI,
 
-        reason: cleanReason,
-        source: opts.source,
+        reason:
+          cleanReason,
+        source:
+          opts.source,
 
-        route: routeSnapshot.route,
-        publicPath: routeSnapshot.publicPath,
+        route:
+          routeSnapshot.route,
+        publicPath:
+          routeSnapshot.publicPath,
 
-        snapshot: getUserSnapshot(),
+        snapshot:
+          getUserSnapshot(),
       };
 
       if (opts.syncUser) {
@@ -1454,52 +1913,95 @@ export const App = (() => {
       }
 
       let sidebarResult = {
-        called: false,
-        method: "",
-        methods: [],
+        called:
+          false,
+        method:
+          "",
+        methods:
+          [],
       };
 
       let topbarResult = {
-        called: false,
-        method: "",
-        methods: [],
+        called:
+          false,
+        method:
+          "",
+        methods:
+          [],
       };
 
       if (opts.hardRepair) {
-        sidebarResult = hardRepairSidebar(cleanReason, context);
-        topbarResult = hardRepairTopbar(cleanReason, context);
+        sidebarResult =
+          hardRepairSidebar(
+            cleanReason,
+            context
+          );
+
+        topbarResult =
+          hardRepairTopbar(
+            cleanReason,
+            context
+          );
       } else {
-        sidebarResult = syncSidebarVisual(cleanReason, context);
-        topbarResult = syncTopbarVisual(cleanReason, context);
+        sidebarResult =
+          syncSidebarVisual(
+            cleanReason,
+            context
+          );
+
+        topbarResult =
+          syncTopbarVisual(
+            cleanReason,
+            context
+          );
       }
 
       if (
         opts.rebind &&
         !opts.hardRepair
       ) {
-        rebindSidebar(cleanReason, context);
-        rebindTopbar(cleanReason, context);
+        rebindSidebar(
+          cleanReason,
+          context
+        );
+
+        rebindTopbar(
+          cleanReason,
+          context
+        );
       }
 
       if (opts.emit) {
         safeEmit("app:ui:repair", {
-          source: opts.source,
-          reason: cleanReason,
+          source:
+            opts.source,
+          reason:
+            cleanReason,
 
-          route: routeSnapshot.route,
-          publicPath: routeSnapshot.publicPath,
+          route:
+            routeSnapshot.route,
+          publicPath:
+            routeSnapshot.publicPath,
 
-          hardRepair: opts.hardRepair,
-          rebind: opts.rebind,
+          hardRepair:
+            opts.hardRepair,
+          rebind:
+            opts.rebind,
 
-          sidebarMethod: sidebarResult.method,
-          sidebarMethods: sidebarResult.methods || [],
+          sidebarMethod:
+            sidebarResult.method,
+          sidebarMethods:
+            sidebarResult.methods || [],
 
-          topbarMethod: topbarResult.method,
-          topbarMethods: topbarResult.methods || [],
+          topbarMethod:
+            topbarResult.method,
+          topbarMethods:
+            topbarResult.methods || [],
 
-          sidebarSnapshot: getSidebarSnapshot(),
-          topbarSnapshot: getTopbarSnapshot(),
+          sidebarSnapshot:
+            getSidebarSnapshot(),
+          topbarSnapshot:
+            getTopbarSnapshot(),
         });
       }
 
@@ -1509,12 +2011,18 @@ export const App = (() => {
             `${cleanReason}:after-paint`,
             {
               ...opts,
-              repairShell: false,
-              hardRepair: false,
-              rebind: false,
-              emit: false,
-              afterPaint: false,
-              source: `${opts.source}:after-paint`,
+              repairShell:
+                false,
+              hardRepair:
+                false,
+              rebind:
+                false,
+              emit:
+                false,
+              afterPaint:
+                false,
+              source:
+                `${opts.source}:after-paint`,
             }
           );
         });
@@ -1527,7 +2035,8 @@ export const App = (() => {
   }
 
   function scheduleUIRepair(reason = "event", options = {}) {
-    const cleanReason = normalizeRepairReason(reason);
+    const cleanReason =
+      normalizeRepairReason(reason);
 
     if (cleanReason === "recursive-event-blocked") {
       return false;
@@ -1541,7 +2050,11 @@ export const App = (() => {
 
     const run = () => {
       uiRepairScheduled = false;
-      repairUISystems(cleanReason, options);
+
+      repairUISystems(
+        cleanReason,
+        options
+      );
     };
 
     if (!isBrowser()) {
@@ -1572,7 +2085,8 @@ export const App = (() => {
     };
 
     const getReason = (payload = {}, fallback = "event") => {
-      const data = getPayload(payload);
+      const data =
+        getPayload(payload);
 
       return normalizeRepairReason(
         data.reason ||
@@ -1585,23 +2099,34 @@ export const App = (() => {
 
     const bindBus = (eventName, handler) => {
       try {
-        AppCore?.events?.on?.(eventName, handler);
+        AppCore?.events?.on?.(
+          eventName,
+          handler
+        );
       } catch {}
     };
 
-    const bus = AppCore?.events;
-    const hasBus = isFunction(bus?.on);
+    const bus =
+      AppCore?.events;
+
+    const hasBus =
+      isFunction(bus?.on);
 
     if (hasBus) {
       bindBus("router:rendered", (payload) => {
         scheduleUIRepair(
           getReason(payload, "router:rendered"),
           {
-            repairShell: false,
-            hardRepair: false,
-            rebind: false,
-            afterPaint: false,
-            source: "router:rendered",
+            repairShell:
+              false,
+            hardRepair:
+              false,
+            rebind:
+              false,
+            afterPaint:
+              false,
+            source:
+              "router:rendered",
           }
         );
       });
@@ -1610,11 +2135,16 @@ export const App = (() => {
         scheduleUIRepair(
           getReason(payload, "router:render:async-complete"),
           {
-            repairShell: false,
-            hardRepair: false,
-            rebind: false,
-            afterPaint: false,
-            source: "router:render:async-complete",
+            repairShell:
+              false,
+            hardRepair:
+              false,
+            rebind:
+              false,
+            afterPaint:
+              false,
+            source:
+              "router:render:async-complete",
           }
         );
       });
@@ -1623,26 +2153,37 @@ export const App = (() => {
         scheduleUIRepair(
           getReason(payload, "app:route:change"),
           {
-            repairShell: false,
-            hardRepair: false,
-            rebind: false,
-            afterPaint: false,
-            source: "app:route:change",
+            repairShell:
+              false,
+            hardRepair:
+              false,
+            rebind:
+              false,
+            afterPaint:
+              false,
+            source:
+              "app:route:change",
           }
         );
       });
 
       bindBus("app:ui:repair-request", (payload) => {
-        const data = getPayload(payload);
+        const data =
+          getPayload(payload);
 
         scheduleUIRepair(
           getReason(payload, "app:ui:repair-request"),
           {
-            repairShell: data.repairShell !== false,
-            hardRepair: data.hardRepair === true,
-            rebind: data.rebind === true,
-            afterPaint: data.afterPaint === true,
-            source: "app:ui:repair-request",
+            repairShell:
+              data.repairShell !== false,
+            hardRepair:
+              data.hardRepair === true,
+            rebind:
+              data.rebind === true,
+            afterPaint:
+              data.afterPaint === true,
+            source:
+              "app:ui:repair-request",
           }
         );
       });
@@ -1663,27 +2204,38 @@ export const App = (() => {
           scheduleUIRepair(
             getReason(payload, eventName),
             {
-              repairShell: false,
-              hardRepair: false,
-              rebind: false,
-              afterPaint: false,
-              source: eventName,
+              repairShell:
+                false,
+              hardRepair:
+                false,
+              rebind:
+                false,
+              afterPaint:
+                false,
+              source:
+                eventName,
             }
           );
         });
       });
     } else {
       safeWindowOn("app:ui:repair-request", (payload) => {
-        const data = getPayload(payload);
+        const data =
+          getPayload(payload);
 
         scheduleUIRepair(
           getReason(payload, "window:app:ui:repair-request"),
           {
-            repairShell: data.repairShell !== false,
-            hardRepair: data.hardRepair === true,
-            rebind: data.rebind === true,
-            afterPaint: data.afterPaint === true,
-            source: "window:app:ui:repair-request",
+            repairShell:
+              data.repairShell !== false,
+            hardRepair:
+              data.hardRepair === true,
+            rebind:
+              data.rebind === true,
+            afterPaint:
+              data.afterPaint === true,
+            source:
+              "window:app:ui:repair-request",
           }
         );
       });
@@ -1692,11 +2244,16 @@ export const App = (() => {
         scheduleUIRepair(
           getReason(payload, "window:app:lang:change"),
           {
-            repairShell: false,
-            hardRepair: false,
-            rebind: false,
-            afterPaint: false,
-            source: "window:app:lang:change",
+            repairShell:
+              false,
+            hardRepair:
+              false,
+            rebind:
+              false,
+            afterPaint:
+              false,
+            source:
+              "window:app:lang:change",
           }
         );
       });
@@ -1705,11 +2262,16 @@ export const App = (() => {
         scheduleUIRepair(
           getReason(payload, "window:onion:theme:change"),
           {
-            repairShell: false,
-            hardRepair: false,
-            rebind: false,
-            afterPaint: false,
-            source: "window:onion:theme:change",
+            repairShell:
+              false,
+            hardRepair:
+              false,
+            rebind:
+              false,
+            afterPaint:
+              false,
+            source:
+              "window:onion:theme:change",
           }
         );
       });
@@ -1723,12 +2285,15 @@ export const App = (() => {
   ======================================================= */
 
   function refreshBootUrlContext() {
-    BOOT_URL_CONTEXT = captureInitialUrl();
+    BOOT_URL_CONTEXT =
+      captureInitialUrl();
+
     return BOOT_URL_CONTEXT;
   }
 
   function isPublicTokenBoot() {
-    const context = refreshBootUrlContext();
+    const context =
+      refreshBootUrlContext();
 
     return Boolean(
       context.isPublicTokenRoute &&
@@ -1737,7 +2302,8 @@ export const App = (() => {
   }
 
   function isActivationBoot() {
-    const context = refreshBootUrlContext();
+    const context =
+      refreshBootUrlContext();
 
     return Boolean(
       context.isActivation &&
@@ -1746,7 +2312,8 @@ export const App = (() => {
   }
 
   function isResetConfirmBoot() {
-    const context = refreshBootUrlContext();
+    const context =
+      refreshBootUrlContext();
 
     return Boolean(
       context.isResetConfirm &&
@@ -1764,34 +2331,111 @@ export const App = (() => {
     } catch {}
 
     try {
-      AppCore.modules = AppCore.modules || {};
-      AppCore.modules.Router = Router;
+      if (
+        AppCore.modules &&
+        isFunction(AppCore.modules.register)
+      ) {
+        AppCore.modules.register("Router", Router);
+        AppCore.modules.register("router", Router);
+      }
+    } catch {}
+
+    try {
+      if (
+        AppCore.modules &&
+        typeof AppCore.modules === "object" &&
+        !isFunction(AppCore.modules.register)
+      ) {
+        AppCore.modules.Router = Router;
+        AppCore.modules.router = Router;
+      }
     } catch {}
   }
 
   function exposeBootUrlContextToCore() {
-    const context = refreshBootUrlContext();
+    const context =
+      refreshBootUrlContext();
 
     try {
       AppCore?.setState?.({
-        bootInitialUrl: context.initialUrl,
+        bootInitialUrl:
+          context.initialUrl,
 
-        bootProtectedInitialUrl: context.protectedInitialUrl,
-        bootProtectedInitialPath: context.protectedInitialPath,
-        bootIsPublicTokenRoute: context.isPublicTokenRoute,
-        bootHasPublicToken: context.hasPublicToken,
-        bootProtectedRouteKey: context.protectedRouteKey,
+        bootProtectedInitialUrl:
+          context.protectedInitialUrl,
+        bootProtectedInitialPath:
+          context.protectedInitialPath,
+        bootIsPublicTokenRoute:
+          context.isPublicTokenRoute,
+        bootHasPublicToken:
+          context.hasPublicToken,
+        bootProtectedRouteKey:
+          context.protectedRouteKey,
 
-        bootActivationInitialUrl: context.activationInitialUrl,
-        bootActivationInitialPath: context.activationInitialPath,
-        bootIsActivation: context.isActivation,
-        bootHasActivationToken: context.hasActivationToken,
+        bootActivationInitialUrl:
+          context.activationInitialUrl,
+        bootActivationInitialPath:
+          context.activationInitialPath,
+        bootIsActivation:
+          context.isActivation,
+        bootHasActivationToken:
+          context.hasActivationToken,
 
-        bootResetConfirmInitialUrl: context.resetConfirmInitialUrl,
-        bootResetConfirmInitialPath: context.resetConfirmInitialPath,
-        bootIsResetConfirm: context.isResetConfirm,
-        bootHasResetToken: context.hasResetToken,
+        bootResetConfirmInitialUrl:
+          context.resetConfirmInitialUrl,
+        bootResetConfirmInitialPath:
+          context.resetConfirmInitialPath,
+        bootIsResetConfirm:
+          context.isResetConfirm,
+        bootHasResetToken:
+          context.hasResetToken,
       });
+    } catch {}
+
+    try {
+      if (
+        AppCore?.state &&
+        typeof AppCore.state === "object"
+      ) {
+        AppCore.state.bootInitialUrl =
+          context.initialUrl;
+
+        AppCore.state.bootProtectedInitialUrl =
+          context.protectedInitialUrl;
+        AppCore.state.bootProtectedInitialPath =
+          context.protectedInitialPath;
+        AppCore.state.bootIsPublicTokenRoute =
+          context.isPublicTokenRoute;
+        AppCore.state.bootHasPublicToken =
+          context.hasPublicToken;
+        AppCore.state.bootProtectedRouteKey =
+          context.protectedRouteKey;
+
+        AppCore.state.bootActivationInitialUrl =
+          context.activationInitialUrl;
+        AppCore.state.bootActivationInitialPath =
+          context.activationInitialPath;
+        AppCore.state.bootIsActivation =
+          context.isActivation;
+        AppCore.state.bootHasActivationToken =
+          context.hasActivationToken;
+
+        AppCore.state.bootResetConfirmInitialUrl =
+          context.resetConfirmInitialUrl;
+        AppCore.state.bootResetConfirmInitialPath =
+          context.resetConfirmInitialPath;
+        AppCore.state.bootIsResetConfirm =
+          context.isResetConfirm;
+        AppCore.state.bootHasResetToken =
+          context.hasResetToken;
+      }
+    } catch {}
+
+    try {
+      setWindowValue(
+        RUNTIME_KEYS.bootContext,
+        context
+      );
     } catch {}
 
     return context;
@@ -1815,36 +2459,112 @@ export const App = (() => {
     state.initialRouteRendered = false;
   }
 
+  function emitBootState(phase = "unknown", extra = {}) {
+    safeEmit(BOOT_EVENTS.state, {
+      phase,
+      booted:
+        state.booted,
+      booting:
+        state.booting,
+      cycleId:
+        state.bootCycleId,
+      finalizedCycleId:
+        state.finalizedCycleId,
+      route:
+        AppCore?.state?.route || "/",
+      publicPath:
+        AppCore?.state?.publicPath || "/",
+      ...safeObject(extra),
+    });
+  }
+
   function markBooting(cycleId) {
     state.booting = true;
 
     try {
       markAppBootState?.(AppCore, {
-        booting: true,
-        booted: false,
-        ready: false,
+        booting:
+          true,
+        booted:
+          false,
+        ready:
+          false,
         cycleId,
       });
     } catch {}
+
+    emitBootState(
+      "booting",
+      {
+        cycleId,
+      }
+    );
   }
 
   function markBooted(cycleId) {
     try {
       markAppBootState?.(AppCore, {
-        booting: false,
-        booted: true,
-        ready: true,
+        booting:
+          false,
+        booted:
+          true,
+        ready:
+          true,
         cycleId,
+      });
+    } catch {}
+
+    emitBootState(
+      "ready",
+      {
+        cycleId,
+      }
+    );
+  }
+
+  function markStaleNavigationHandled(value = true) {
+    state.bootNavigationHandled =
+      Boolean(value);
+
+    try {
+      if (
+        AppCore?.state &&
+        typeof AppCore.state === "object"
+      ) {
+        AppCore.state.bootNavigationHandled =
+          Boolean(value);
+      }
+
+      AppCore?.setState?.({
+        bootNavigationHandled:
+          Boolean(value),
       });
     } catch {}
   }
 
-  function markStaleNavigationHandled(value = true) {
-    state.bootNavigationHandled = Boolean(value);
+  function markInitialRouteRendered(value = true) {
+    state.initialRouteRendered =
+      Boolean(value);
+
+    try {
+      if (
+        AppCore?.state &&
+        typeof AppCore.state === "object"
+      ) {
+        AppCore.state.initialRouteRendered =
+          Boolean(value);
+      }
+
+      AppCore?.setState?.({
+        initialRouteRendered:
+          Boolean(value),
+      });
+    } catch {}
   }
 
   function didRestoreHandleNavigation(restoreResult = null) {
-    const result = safeObject(restoreResult);
+    const result =
+      safeObject(restoreResult);
 
     return Boolean(
       state.bootNavigationHandled === true ||
@@ -1875,7 +2595,8 @@ export const App = (() => {
         showLoader(
           AppCore,
           {
-            booting: true,
+            booting:
+              true,
             reason,
           }
         );
@@ -1886,13 +2607,15 @@ export const App = (() => {
       armBootFailsafeLoader?.({
         AppCore,
         state,
-        hideLoader: forceHideLoader,
+        hideLoader:
+          forceHideLoader,
       });
     } catch {}
 
-    safeEmit("app:boot:loader:show", {
+    safeEmit(BOOT_EVENTS.loaderShow, {
       reason,
-      loaderSnapshot: getBootLoaderSnapshot(),
+      loaderSnapshot:
+        getBootLoaderSnapshot(),
     });
   }
 
@@ -1908,14 +2631,16 @@ export const App = (() => {
         AppCore,
         {
           reason,
-          minVisibleMs: MIN_BOOT_LOADER_MS,
+          minVisibleMs:
+            MIN_BOOT_LOADER_MS,
         }
       );
     } catch {}
 
-    safeEmit("app:boot:loader:hide", {
+    safeEmit(BOOT_EVENTS.loaderHide, {
       reason,
-      loaderSnapshot: getBootLoaderSnapshot(),
+      loaderSnapshot:
+        getBootLoaderSnapshot(),
     });
   }
 
@@ -1927,7 +2652,8 @@ export const App = (() => {
         AppCore,
         {
           reason,
-          minVisibleMs: 0,
+          minVisibleMs:
+            0,
         }
       );
     } catch {
@@ -1936,15 +2662,17 @@ export const App = (() => {
           AppCore,
           {
             reason,
-            minVisibleMs: 0,
+            minVisibleMs:
+              0,
           }
         );
       } catch {}
     }
 
-    safeEmit("app:boot:loader:force-hide", {
+    safeEmit(BOOT_EVENTS.loaderForceHide, {
       reason,
-      loaderSnapshot: getBootLoaderSnapshot(),
+      loaderSnapshot:
+        getBootLoaderSnapshot(),
     });
   }
 
@@ -2000,7 +2728,10 @@ export const App = (() => {
     try {
       Http?.init?.();
     } catch (error) {
-      safeWarn("No se pudo inicializar Http.", error);
+      safeWarn(
+        "No se pudo inicializar Http.",
+        error
+      );
     }
 
     state.servicesReady = true;
@@ -2014,7 +2745,10 @@ export const App = (() => {
     try {
       Store?.init?.();
     } catch (error) {
-      safeWarn("No se pudo inicializar Store.", error);
+      safeWarn(
+        "No se pudo inicializar Store.",
+        error
+      );
     }
 
     state.storeReady = true;
@@ -2047,7 +2781,19 @@ export const App = (() => {
     try {
       configureRouter?.();
     } catch (error) {
-      safeWarn("No se pudo configurar Router.", error);
+      safeWarn(
+        "No se pudo configurar Router.",
+        error
+      );
+
+      try {
+        Router?.configure?.({
+          core:
+            AppCore,
+          auth:
+            Auth,
+        });
+      } catch {}
     }
 
     exposeRouterToCore();
@@ -2063,7 +2809,10 @@ export const App = (() => {
     try {
       bindRouter?.();
     } catch (error) {
-      safeWarn("bindRouter() falló. Intentando Router.bind().", error);
+      safeWarn(
+        "bindRouter() falló. Intentando Router.bind().",
+        error
+      );
 
       try {
         Router?.bind?.();
@@ -2084,12 +2833,18 @@ export const App = (() => {
       repairUISystems(
         "init-ui-already-ready",
         {
-          repairShell: false,
-          syncUser: true,
-          hardRepair: false,
-          rebind: false,
-          afterPaint: false,
-          source: "init-ui-already-ready",
+          repairShell:
+            false,
+          syncUser:
+            true,
+          hardRepair:
+            false,
+          rebind:
+            false,
+          afterPaint:
+            false,
+          source:
+            "init-ui-already-ready",
         }
       );
 
@@ -2101,6 +2856,10 @@ export const App = (() => {
       Toast,
       SidebarUI,
       TopbarUI,
+      Auth,
+      Router,
+      Store,
+      I18n,
       state,
     });
 
@@ -2110,12 +2869,18 @@ export const App = (() => {
     repairUISystems(
       "init-ui",
       {
-        repairShell: true,
-        syncUser: true,
-        hardRepair: false,
-        rebind: false,
-        afterPaint: false,
-        source: "init-ui",
+        repairShell:
+          true,
+        syncUser:
+          true,
+        hardRepair:
+          false,
+        rebind:
+          false,
+        afterPaint:
+          false,
+        source:
+          "init-ui",
       }
     );
 
@@ -2141,20 +2906,27 @@ export const App = (() => {
       return null;
     }
 
-    const result = await renderInitialRoute();
+    const result =
+      await renderInitialRoute();
 
     if (!isStale(cycleId)) {
-      state.initialRouteRendered = true;
+      markInitialRouteRendered(true);
 
       repairUISystems(
         `render-initial-route:${reason}`,
         {
-          repairShell: false,
-          syncUser: true,
-          hardRepair: false,
-          rebind: false,
-          afterPaint: false,
-          source: "render-initial-route",
+          repairShell:
+            false,
+          syncUser:
+            true,
+          hardRepair:
+            false,
+          rebind:
+            false,
+          afterPaint:
+            false,
+          source:
+            "render-initial-route",
         }
       );
     }
@@ -2192,18 +2964,25 @@ export const App = (() => {
       });
 
     try {
-      const result = await state.restorePromise;
+      const result =
+        await state.restorePromise;
 
       if (!isStale(cycleId)) {
         repairUISystems(
           "restore-session",
           {
-            repairShell: false,
-            syncUser: true,
-            hardRepair: false,
-            rebind: false,
-            afterPaint: false,
-            source: "restore-session",
+            repairShell:
+              false,
+            syncUser:
+              true,
+            hardRepair:
+              false,
+            rebind:
+              false,
+            afterPaint:
+              false,
+            source:
+              "restore-session",
           }
         );
       }
@@ -2211,18 +2990,27 @@ export const App = (() => {
       return result;
     } catch (error) {
       if (nonBlocking) {
-        safeWarn("Restore session no bloqueante falló.", error);
+        safeWarn(
+          "Restore session no bloqueante falló.",
+          error
+        );
 
         if (!isStale(cycleId)) {
           repairUISystems(
             "restore-session-error-non-blocking",
             {
-              repairShell: false,
-              syncUser: true,
-              hardRepair: false,
-              rebind: false,
-              afterPaint: false,
-              source: "restore-session-error",
+              repairShell:
+                false,
+              syncUser:
+                true,
+              hardRepair:
+                false,
+              rebind:
+                false,
+              afterPaint:
+                false,
+              source:
+                "restore-session-error",
             }
           );
         }
@@ -2241,27 +3029,40 @@ export const App = (() => {
   function startPublicTokenRestoreAfterInitialRender(cycleId) {
     void restoreSessionBlock({
       cycleId,
-      nonBlocking: true,
-      skipPostRestoreNavigation: true,
-    }).then(() => {
-      if (isStale(cycleId)) {
-        return;
-      }
-
-      repairUISystems(
-        "public-token-background-restore-complete",
-        {
-          repairShell: false,
-          syncUser: true,
-          hardRepair: false,
-          rebind: false,
-          afterPaint: false,
-          source: "public-token-background-restore",
+      nonBlocking:
+        true,
+      skipPostRestoreNavigation:
+        true,
+    })
+      .then(() => {
+        if (isStale(cycleId)) {
+          return;
         }
-      );
-    }).catch((error) => {
-      safeWarn("Restore público en background falló.", error);
-    });
+
+        repairUISystems(
+          "public-token-background-restore-complete",
+          {
+            repairShell:
+              false,
+            syncUser:
+              true,
+            hardRepair:
+              false,
+            rebind:
+              false,
+            afterPaint:
+              false,
+            source:
+              "public-token-background-restore",
+          }
+        );
+      })
+      .catch((error) => {
+        safeWarn(
+          "Restore público en background falló.",
+          error
+        );
+      });
   }
 
   /* =======================================================
@@ -2283,8 +3084,10 @@ export const App = (() => {
 
     try {
       markStoreBootState(Store, {
-        ready: true,
-        booted: true,
+        ready:
+          true,
+        booted:
+          true,
       });
     } catch {}
 
@@ -2298,12 +3101,18 @@ export const App = (() => {
     repairUISystems(
       "finalize-boot",
       {
-        repairShell: false,
-        syncUser: true,
-        hardRepair: false,
-        rebind: false,
-        afterPaint: false,
-        source: "finalize-boot",
+        repairShell:
+          false,
+        syncUser:
+          true,
+        hardRepair:
+          false,
+        rebind:
+          false,
+        afterPaint:
+          false,
+        source:
+          "finalize-boot",
       }
     );
 
@@ -2311,22 +3120,30 @@ export const App = (() => {
       repairUISystems(
         "finalize-boot:after-paint-pre-hide",
         {
-          repairShell: false,
-          syncUser: false,
-          hardRepair: false,
-          rebind: false,
-          afterPaint: false,
-          emit: false,
-          source: "finalize-boot:after-paint-pre-hide",
+          repairShell:
+            false,
+          syncUser:
+            false,
+          hardRepair:
+            false,
+          rebind:
+            false,
+          afterPaint:
+            false,
+          emit:
+            false,
+          source:
+            "finalize-boot:after-paint-pre-hide",
         }
       );
     });
 
-    const remaining = Math.max(
-      0,
-      MIN_BOOT_LOADER_MS -
-        (Date.now() - state.loaderShownAt)
-    );
+    const remaining =
+      Math.max(
+        0,
+        MIN_BOOT_LOADER_MS -
+          (Date.now() - state.loaderShownAt)
+      );
 
     if (remaining > 0) {
       await wait(remaining);
@@ -2334,25 +3151,26 @@ export const App = (() => {
 
     hideBootLoader("finalize-boot");
 
-    /*
-      Importante:
-      loader.hide libera shell/sidebar/topbar de aria-hidden.
-      Después reparamos shell por ruta para que /login/auth
-      no muestre chrome privado si no toca.
-    */
     afterPaint(() => {
       repairShell("finalize-boot:post-loader-hide");
 
       repairUISystems(
         "finalize-boot:post-loader-hide",
         {
-          repairShell: false,
-          syncUser: true,
-          hardRepair: false,
-          rebind: false,
-          afterPaint: false,
-          emit: false,
-          source: "finalize-boot:post-loader-hide",
+          repairShell:
+            false,
+          syncUser:
+            true,
+          hardRepair:
+            false,
+          rebind:
+            false,
+          afterPaint:
+            false,
+          emit:
+            false,
+          source:
+            "finalize-boot:post-loader-hide",
         }
       );
     });
@@ -2360,11 +3178,21 @@ export const App = (() => {
     if (!state.readyEmitted) {
       state.readyEmitted = true;
 
+      safeEmit(BOOT_EVENTS.ready, {
+        source:
+          "app:index",
+        cycleId,
+      });
+
       safeEmit("app:ready", {
-        source: "app:index",
-        sidebarSnapshot: getSidebarSnapshot(),
-        topbarSnapshot: getTopbarSnapshot(),
-        loaderSnapshot: getBootLoaderSnapshot(),
+        source:
+          "app:index",
+        sidebarSnapshot:
+          getSidebarSnapshot(),
+        topbarSnapshot:
+          getTopbarSnapshot(),
+        loaderSnapshot:
+          getBootLoaderSnapshot(),
       });
     }
   }
@@ -2381,24 +3209,30 @@ export const App = (() => {
 
     await renderInitialRouteBlock({
       cycleId,
-      reason: "public-token-first",
+      reason:
+        "public-token-first",
     });
 
     bindRouterBlock("public-token-first");
 
     /*
-      En rutas públicas con token, no bloqueamos el primer paint esperando /me.
-      Tampoco permitimos navegación post-restore, porque podría limpiar el token.
+      En rutas públicas con token:
+      - no bloqueamos el primer paint esperando /me
+      - no permitimos navegación post-restore
+      - no limpiamos query/path-token antes de que la vista capture token
     */
     startPublicTokenRestoreAfterInitialRender(cycleId);
   }
 
   async function doPrivateOrNormalBoot(cycleId) {
-    const restoreResult = await restoreSessionBlock({
-      cycleId,
-      nonBlocking: false,
-      skipPostRestoreNavigation: false,
-    });
+    const restoreResult =
+      await restoreSessionBlock({
+        cycleId,
+        nonBlocking:
+          false,
+        skipPostRestoreNavigation:
+          false,
+      });
 
     if (didRestoreHandleNavigation(restoreResult)) {
       markStaleNavigationHandled(true);
@@ -2406,29 +3240,39 @@ export const App = (() => {
       safeLog(
         "renderInitialRoute omitido: restore ya resolvió navegación.",
         {
-          ok: Boolean(safeObject(restoreResult).ok),
-          route: AppCore?.state?.route || "/",
-          publicPath: AppCore?.state?.publicPath || "/",
+          ok:
+            Boolean(safeObject(restoreResult).ok),
+          route:
+            AppCore?.state?.route || "/",
+          publicPath:
+            AppCore?.state?.publicPath || "/",
         }
       );
 
-      state.initialRouteRendered = true;
+      markInitialRouteRendered(true);
 
       repairUISystems(
         "restore-navigation-handled",
         {
-          repairShell: false,
-          syncUser: true,
-          hardRepair: false,
-          rebind: false,
-          afterPaint: false,
-          source: "restore-navigation-handled",
+          repairShell:
+            false,
+          syncUser:
+            true,
+          hardRepair:
+            false,
+          rebind:
+            false,
+          afterPaint:
+            false,
+          source:
+            "restore-navigation-handled",
         }
       );
     } else {
       await renderInitialRouteBlock({
         cycleId,
-        reason: "after-restore",
+        reason:
+          "after-restore",
       });
     }
 
@@ -2441,6 +3285,12 @@ export const App = (() => {
 
       resetCycleRuntimeState();
       markBooting(cycleId);
+
+      safeEmit(BOOT_EVENTS.start, {
+        cycleId,
+        bootUrlContext:
+          sanitizeBootContextForLog(refreshBootUrlContext()),
+      });
 
       showBootLoader("boot-start");
 
@@ -2456,7 +3306,8 @@ export const App = (() => {
 
       ensureScope(AppCore);
 
-      const bootContext = exposeBootUrlContextToCore();
+      const bootContext =
+        exposeBootUrlContextToCore();
 
       exposeRouterToCore();
 
@@ -2474,7 +3325,10 @@ export const App = (() => {
         bootContext.isPublicTokenRoute &&
         bootContext.hasPublicToken
       ) {
-        await doPublicTokenBoot(cycleId, bootContext);
+        await doPublicTokenBoot(
+          cycleId,
+          bootContext
+        );
       } else {
         await doPrivateOrNormalBoot(cycleId);
       }
@@ -2486,12 +3340,18 @@ export const App = (() => {
       repairUISystems(
         "before-finalize",
         {
-          repairShell: false,
-          syncUser: true,
-          hardRepair: false,
-          rebind: false,
-          afterPaint: false,
-          source: "before-finalize",
+          repairShell:
+            false,
+          syncUser:
+            true,
+          hardRepair:
+            false,
+          rebind:
+            false,
+          afterPaint:
+            false,
+          source:
+            "before-finalize",
         }
       );
 
@@ -2503,18 +3363,35 @@ export const App = (() => {
 
       clearBootFailsafeTimer(state);
 
-      safeError("Boot error.", error);
+      safeError(
+        "Boot error.",
+        error
+      );
+
+      safeEmit(BOOT_EVENTS.error, {
+        cycleId,
+        message:
+          safeText(error?.message || error, "Boot error."),
+        bootUrlContext:
+          sanitizeBootContextForLog(refreshBootUrlContext()),
+      });
 
       try {
         repairUISystems(
           "boot-error",
           {
-            repairShell: false,
-            syncUser: true,
-            hardRepair: false,
-            rebind: false,
-            afterPaint: false,
-            source: "boot-error",
+            repairShell:
+              false,
+            syncUser:
+              true,
+            hardRepair:
+              false,
+            rebind:
+              false,
+            afterPaint:
+              false,
+            source:
+              "boot-error",
           }
         );
       } catch {}
@@ -2531,7 +3408,8 @@ export const App = (() => {
           error,
           getViewContainer,
           setShellVisibility,
-          hideLoader: forceHideLoader,
+          hideLoader:
+            forceHideLoader,
         });
       } catch {}
 
@@ -2544,12 +3422,18 @@ export const App = (() => {
       repairUISystems(
         "boot-already-booted",
         {
-          repairShell: false,
-          syncUser: true,
-          hardRepair: false,
-          rebind: false,
-          afterPaint: false,
-          source: "boot-already-booted",
+          repairShell:
+            false,
+          syncUser:
+            true,
+          hardRepair:
+            false,
+          rebind:
+            false,
+          afterPaint:
+            false,
+          source:
+            "boot-already-booted",
         }
       );
 
@@ -2560,9 +3444,11 @@ export const App = (() => {
       return state.bootPromise;
     }
 
-    const cycleId = nextCycle();
+    const cycleId =
+      nextCycle();
 
-    state.bootPromise = doBoot(cycleId);
+    state.bootPromise =
+      doBoot(cycleId);
 
     return state.bootPromise;
   }
@@ -2597,7 +3483,8 @@ export const App = (() => {
   }
 
   function getState() {
-    const context = refreshBootUrlContext();
+    const context =
+      refreshBootUrlContext();
 
     return {
       ...state,
@@ -2621,7 +3508,7 @@ export const App = (() => {
         AppCore?.state?.publicPath || "/",
 
       browserPublicPath:
-        getBrowserPublicPath(),
+        redactTokenInText(getBrowserPublicPath()),
 
       sidebarSnapshot:
         getSidebarSnapshot(),
@@ -2669,6 +3556,12 @@ export const App = (() => {
     getLoaderSnapshot:
       getBootLoaderSnapshot,
   };
+
+  try {
+    if (isBrowser()) {
+      window[RUNTIME_KEYS.appApi] = api;
+    }
+  } catch {}
 
   return api;
 })();

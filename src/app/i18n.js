@@ -3,7 +3,7 @@
    Archivo: src/app/i18n.js
 
    ONION SUPPORT · APP I18N CONTROLLER
-   LANG SYNC · ROUTER RERENDER SAFE · EXTREME 10/10
+   LANG SYNC · ROUTER RERENDER SAFE · NO DOUBLE RENDER · EXTREME 13/10
 
    RESPONSABILIDADES:
    - Inicializar i18n de la aplicación.
@@ -23,7 +23,8 @@
    - Rerender serializado.
    - Rerender con fallback Router.rerenderCurrentRoute / Router.render / Router.navigate.
    - No destruye publicPath contextualizado.
-   - No toca history salvo necesidad del Router.
+   - No toca history salvo necesidad explícita del Router.
+   - Evita doble rerender con src/app/events.js usando payload.rerender=false.
    - Safe emit sin duplicar AppCore.events + window.
    - Logs seguros.
    - Browser/server safe.
@@ -43,7 +44,10 @@
 import {
   getCurrentPublicPath,
   getCurrentCanonicalPath,
+  normalizePublicPath,
+  normalizeCanonicalPath,
   registerModule,
+  redactTokenInText,
 } from "./helpers.js";
 
 import {
@@ -76,151 +80,217 @@ const LANG_STORAGE_KEY =
   UI_CONSTANTS?.langStorageKey ||
   "lang";
 
-const LANG_STORAGE_KEYS = Object.freeze([
-  LANG_STORAGE_KEY,
-  "onion:lang",
-  "onion.lang",
-  "onion_language",
-  "language",
-]);
+const LANG_STORAGE_KEYS =
+  Object.freeze([
+    LANG_STORAGE_KEY,
+    "onion:lang",
+    "onion.lang",
+    "onion_language",
+    "language",
+  ]);
 
-const KNOWN_LANGS = Object.freeze([
-  "es",
-  "en",
-  "ca",
-]);
+const KNOWN_LANGS =
+  Object.freeze([
+    "es",
+    "en",
+    "ca",
+  ]);
 
-const LANG_ALIASES = Object.freeze({
-  es: "es",
-  spa: "es",
-  spanish: "es",
-  castellano: "es",
-  español: "es",
+const LANG_ALIASES =
+  Object.freeze({
+    es:
+      "es",
+    spa:
+      "es",
+    spanish:
+      "es",
+    castellano:
+      "es",
+    español:
+      "es",
 
-  en: "en",
-  eng: "en",
-  english: "en",
+    en:
+      "en",
+    eng:
+      "en",
+    english:
+      "en",
 
-  ca: "ca",
-  cat: "ca",
-  catalan: "ca",
-  català: "ca",
-  catalán: "ca",
-});
+    ca:
+      "ca",
+    cat:
+      "ca",
+    catalan:
+      "ca",
+    català:
+      "ca",
+    catalán:
+      "ca",
+  });
 
-const I18N_EVENTS = Object.freeze({
-  langChange:
-    APP_EVENTS?.langChange ||
-    "app:lang:change",
+const I18N_EVENTS =
+  Object.freeze({
+    langChange:
+      APP_EVENTS?.langChange ||
+      "app:lang:change",
 
-  i18nReady:
-    "app:i18n:ready",
+    i18nReady:
+      "app:i18n:ready",
 
-  i18nSync:
-    "app:i18n:sync",
+    i18nSync:
+      "app:i18n:sync",
 
-  i18nError:
-    "app:i18n:error",
+    i18nError:
+      "app:i18n:error",
 
-  i18nBridgeReady:
-    "app:i18n:bridge:ready",
+    i18nBridgeReady:
+      "app:i18n:bridge:ready",
 
-  i18nRerenderStart:
-    "app:i18n:rerender:start",
+    i18nRerenderStart:
+      "app:i18n:rerender:start",
 
-  i18nRerenderDone:
-    "app:i18n:rerender:done",
+    i18nRerenderDone:
+      "app:i18n:rerender:done",
 
-  i18nRerenderError:
-    "app:i18n:rerender:error",
-});
+    i18nRerenderError:
+      "app:i18n:rerender:error",
+  });
 
-const INIT_METHODS = Object.freeze([
-  "boot",
-  "init",
-  "initialize",
-  "start",
-]);
+const INIT_METHODS =
+  Object.freeze([
+    "boot",
+    "init",
+    "initialize",
+    "start",
+  ]);
 
-const SET_LANG_METHODS = Object.freeze([
-  "setLang",
-  "setLanguage",
-  "changeLang",
-  "changeLanguage",
-  "use",
-]);
+const SET_LANG_METHODS =
+  Object.freeze([
+    "setLang",
+    "setLanguage",
+    "changeLang",
+    "changeLanguage",
+    "use",
+  ]);
 
-const GET_LANG_METHODS = Object.freeze([
-  "getLang",
-  "getLanguage",
-  "getCurrentLang",
-  "current",
-]);
+const GET_LANG_METHODS =
+  Object.freeze([
+    "getLang",
+    "getLanguage",
+    "getCurrentLang",
+    "current",
+  ]);
 
-const GET_AVAILABLE_METHODS = Object.freeze([
-  "getAvailable",
-  "getAvailableLangs",
-  "getLanguages",
-  "getLocales",
-]);
+const GET_AVAILABLE_METHODS =
+  Object.freeze([
+    "getAvailable",
+    "getAvailableLangs",
+    "getLanguages",
+    "getLocales",
+  ]);
 
-const TRANSLATE_METHODS = Object.freeze([
-  "t",
-  "translate",
-  "get",
-]);
+const TRANSLATE_METHODS =
+  Object.freeze([
+    "t",
+    "translate",
+    "get",
+  ]);
 
-const ROUTER_RERENDER_METHODS = Object.freeze([
-  "rerenderCurrentRoute",
-  "renderCurrentRoute",
-]);
+const ROUTER_RERENDER_METHODS =
+  Object.freeze([
+    "rerenderCurrentRoute",
+    "renderCurrentRoute",
+  ]);
 
-const PUBLIC_PATH_KEYS = Object.freeze([
-  "publicPath",
-  "currentPublicPath",
-  "lastPublicPath",
-]);
+const PUBLIC_PATH_KEYS =
+  Object.freeze([
+    "publicPath",
+    "currentPublicPath",
+    "lastPublicPath",
+  ]);
 
-const CANONICAL_PATH_KEYS = Object.freeze([
-  "route",
-  "canonicalPath",
-  "currentPath",
-  "currentCanonicalPath",
-]);
+const CANONICAL_PATH_KEYS =
+  Object.freeze([
+    "route",
+    "canonicalPath",
+    "currentPath",
+    "currentCanonicalPath",
+  ]);
+
+const DICTIONARY_KEYS =
+  Object.freeze([
+    "dictionaries",
+    "dictionary",
+    "messages",
+    "locales",
+    "translations",
+    "resources",
+  ]);
 
 /* =========================================================
    MODULE STATE
 ========================================================= */
 
-let initialized = false;
-let boundCore = null;
-let currentAppCoreRef = null;
-let currentI18nRef = null;
-let currentRouterRef = null;
+let initialized =
+  false;
 
-let rerenderPromise = null;
-let rerenderQueued = false;
+let boundCore =
+  null;
 
-let changeSequence = 0;
+let currentAppCoreRef =
+  null;
+
+let currentI18nRef =
+  null;
+
+let currentRouterRef =
+  null;
+
+let rerenderPromise =
+  null;
+
+let rerenderQueued =
+  false;
+
+let changeSequence =
+  0;
 
 const i18nState = {
-  initialized: false,
+  initialized:
+    false,
 
-  lastLang: "",
-  lastRequestedLang: "",
-  lastReason: "",
+  lastLang:
+    "",
 
-  lastSyncAt: 0,
-  lastRerenderAt: 0,
+  lastRequestedLang:
+    "",
 
-  rerendering: false,
-  rerenderCount: 0,
-  syncCount: 0,
-  changeCount: 0,
+  lastReason:
+    "",
 
-  bridgeReady: false,
+  lastSyncAt:
+    0,
 
-  errors: [],
+  lastRerenderAt:
+    0,
+
+  rerendering:
+    false,
+
+  rerenderCount:
+    0,
+
+  syncCount:
+    0,
+
+  changeCount:
+    0,
+
+  bridgeReady:
+    false,
+
+  errors:
+    [],
 };
 
 /* =========================================================
@@ -242,6 +312,16 @@ function isObject(value) {
   );
 }
 
+function isObjectLike(value) {
+  return (
+    value !== null &&
+    (
+      typeof value === "object" ||
+      typeof value === "function"
+    )
+  );
+}
+
 function isFunction(value) {
   return typeof value === "function";
 }
@@ -255,12 +335,12 @@ function ensureObject(value) {
 function isExtensibleObject(value) {
   try {
     return (
-      isObject(value) &&
+      isObjectLike(value) &&
       Object.isExtensible(value)
     );
-  } catch {
-    return false;
-  }
+  } catch {}
+
+  return false;
 }
 
 function safeArray(value) {
@@ -284,12 +364,30 @@ function toArray(value) {
   return [value];
 }
 
+function safeText(value, fallback = "") {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text =
+    String(value).trim();
+
+  return text || fallback;
+}
+
 function unique(values = []) {
-  const seen = new Set();
-  const result = [];
+  const seen =
+    new Set();
+
+  const result =
+    [];
 
   for (const value of safeArray(values)) {
-    const text = safeText(value, "");
+    const text =
+      safeText(value, "");
 
     if (
       text &&
@@ -303,20 +401,15 @@ function unique(values = []) {
   return result;
 }
 
-function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
+function safeNow() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
   }
-
-  const text = String(value).trim();
-
-  return text || fallback;
 }
 
-function safeIsoDate(ms = Date.now()) {
+function safeIsoDate(ms = safeNow()) {
   try {
     return new Date(ms).toISOString();
   } catch {
@@ -372,6 +465,43 @@ function safeMethod(target, methodName, args = []) {
   );
 }
 
+function defineValue(target, key, value) {
+  if (
+    !target ||
+    !key ||
+    !isExtensibleObject(target)
+  ) {
+    return false;
+  }
+
+  try {
+    Object.defineProperty(
+      target,
+      key,
+      {
+        value,
+        enumerable:
+          false,
+        configurable:
+          true,
+        writable:
+          true,
+      }
+    );
+
+    return true;
+  } catch {}
+
+  try {
+    target[key] =
+      value;
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
 /* =========================================================
    DEPENDENCY RESOLUTION
 ========================================================= */
@@ -396,14 +526,16 @@ function looksLikeDepsObject(value) {
 }
 
 function getModuleFromRegistry(AppCore, names = []) {
-  const modules = AppCore?.modules;
+  const modules =
+    AppCore?.modules;
 
   if (!modules) {
     return null;
   }
 
   for (const name of safeArray(names)) {
-    const key = safeText(name, "");
+    const key =
+      safeText(name, "");
 
     if (!key) {
       continue;
@@ -449,6 +581,7 @@ function normalizeDeps(first = {}, second = null, extra = {}) {
   if (typeof second === "string") {
     return {
       ...ensureObject(extra),
+
       AppCore:
         first || null,
 
@@ -469,11 +602,12 @@ function normalizeDeps(first = {}, second = null, extra = {}) {
 }
 
 function resolveRuntimeDeps(first = {}, second = null, extra = {}) {
-  const deps = normalizeDeps(
-    first,
-    second,
-    extra
-  );
+  const deps =
+    normalizeDeps(
+      first,
+      second,
+      extra
+    );
 
   const AppCore =
     deps.AppCore ||
@@ -518,6 +652,27 @@ function resolveRuntimeDeps(first = {}, second = null, extra = {}) {
   };
 }
 
+function rememberRuntimeDeps({
+  AppCore,
+  I18n,
+  Router,
+} = {}) {
+  if (AppCore) {
+    currentAppCoreRef =
+      AppCore;
+  }
+
+  if (I18n) {
+    currentI18nRef =
+      I18n;
+  }
+
+  if (Router) {
+    currentRouterRef =
+      Router;
+  }
+}
+
 /* =========================================================
    LOG / EMIT
 ========================================================= */
@@ -541,7 +696,8 @@ function safeLog(AppCore, ...args) {
 }
 
 function safeWarn(AppCore, ...args) {
-  let coreLogged = false;
+  let coreLogged =
+    false;
 
   try {
     if (isFunction(AppCore?.utils?.warn)) {
@@ -550,10 +706,12 @@ function safeWarn(AppCore, ...args) {
         ...args
       );
 
-      coreLogged = true;
+      coreLogged =
+        true;
     }
   } catch {
-    coreLogged = false;
+    coreLogged =
+      false;
   }
 
   if (coreLogged) {
@@ -569,7 +727,8 @@ function safeWarn(AppCore, ...args) {
 }
 
 function safeError(AppCore, ...args) {
-  let coreLogged = false;
+  let coreLogged =
+    false;
 
   try {
     if (isFunction(AppCore?.utils?.error)) {
@@ -578,10 +737,12 @@ function safeError(AppCore, ...args) {
         ...args
       );
 
-      coreLogged = true;
+      coreLogged =
+        true;
     }
   } catch {
-    coreLogged = false;
+    coreLogged =
+      false;
   }
 
   if (coreLogged) {
@@ -606,34 +767,50 @@ function safeWindowDispatch(eventName, payload = {}) {
 
   try {
     window.dispatchEvent(
-      new CustomEvent(eventName, {
-        detail: payload,
-      })
+      new CustomEvent(
+        eventName,
+        {
+          detail:
+            payload,
+        }
+      )
     );
 
     return true;
-  } catch {
-    return false;
-  }
+  } catch {}
+
+  return false;
 }
 
 function safeEmit(AppCore, eventName, payload = {}, options = {}) {
-  const name = safeText(eventName, "");
+  const name =
+    safeText(eventName, "");
 
   if (!name) {
     return false;
   }
 
-  const opts = ensureObject(options);
+  const opts =
+    ensureObject(options);
 
-  let busAvailable = false;
-  let busEmitted = false;
+  let busAvailable =
+    false;
+
+  let busEmitted =
+    false;
 
   try {
     if (isFunction(AppCore?.events?.emit)) {
-      busAvailable = true;
-      AppCore.events.emit(name, payload);
-      busEmitted = true;
+      busAvailable =
+        true;
+
+      AppCore.events.emit(
+        name,
+        payload
+      );
+
+      busEmitted =
+        true;
     }
   } catch {}
 
@@ -645,7 +822,13 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
     opts.window === true ||
     (!busAvailable && isBrowser())
   ) {
-    return safeWindowDispatch(name, payload) || busEmitted;
+    return (
+      safeWindowDispatch(
+        name,
+        payload
+      ) ||
+      busEmitted
+    );
   }
 
   return busEmitted;
@@ -654,17 +837,23 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
 function normalizeError(error, fallback = "Error i18n.") {
   if (!error) {
     return {
-      name: "I18nError",
-      message: fallback,
-      code: "I18N_ERROR",
+      name:
+        "I18nError",
+      message:
+        fallback,
+      code:
+        "I18N_ERROR",
     };
   }
 
   if (typeof error === "string") {
     return {
-      name: "I18nError",
-      message: error,
-      code: "I18N_ERROR",
+      name:
+        "I18nError",
+      message:
+        error,
+      code:
+        "I18N_ERROR",
     };
   }
 
@@ -730,31 +919,49 @@ function pushError(AppCore, error, source = "i18n") {
 ========================================================= */
 
 function safeLang(value, fallback = FALLBACK_LANG) {
-  const raw = safeText(value, fallback)
-    .toLowerCase()
-    .replace(/_/g, "-")
-    .trim();
+  const fallbackText =
+    fallback === ""
+      ? ""
+      : safeText(fallback, FALLBACK_LANG);
+
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallbackText;
+  }
+
+  const raw =
+    String(value)
+      .trim()
+      .toLowerCase()
+      .replace(/_/g, "-");
 
   if (!raw) {
-    return safeText(fallback, FALLBACK_LANG);
+    return fallbackText;
   }
 
   const firstPart =
     raw.split("-")[0] || raw;
 
   const alias =
-    LANG_ALIASES[firstPart] ||
     LANG_ALIASES[raw] ||
+    LANG_ALIASES[firstPart] ||
     firstPart;
 
-  return safeText(alias, fallback);
+  return safeText(
+    alias,
+    fallbackText
+  );
 }
 
 function normalizeLangList(values = []) {
   return unique(
     toArray(values)
       .flat(Infinity)
-      .map((value) => safeLang(value, ""))
+      .map((value) =>
+        safeLang(value, "")
+      )
       .filter(Boolean)
   );
 }
@@ -811,7 +1018,8 @@ function writeStoredLang(lang = "") {
     return false;
   }
 
-  let written = false;
+  let written =
+    false;
 
   for (const key of LANG_STORAGE_KEYS) {
     try {
@@ -820,7 +1028,8 @@ function writeStoredLang(lang = "") {
         cleanLang
       );
 
-      written = true;
+      written =
+        true;
     } catch {}
   }
 
@@ -839,9 +1048,9 @@ function getDocumentLang() {
         "",
       ""
     );
-  } catch {
-    return "";
-  }
+  } catch {}
+
+  return "";
 }
 
 function setDocumentLang(lang = FALLBACK_LANG) {
@@ -850,7 +1059,10 @@ function setDocumentLang(lang = FALLBACK_LANG) {
   }
 
   const cleanLang =
-    safeLang(lang, FALLBACK_LANG);
+    safeLang(
+      lang,
+      FALLBACK_LANG
+    );
 
   try {
     document.documentElement.setAttribute(
@@ -862,9 +1074,9 @@ function setDocumentLang(lang = FALLBACK_LANG) {
       cleanLang;
 
     return true;
-  } catch {
-    return false;
-  }
+  } catch {}
+
+  return false;
 }
 
 /* =========================================================
@@ -885,13 +1097,23 @@ function getAvailableLangs(I18n) {
         );
 
       if (Array.isArray(result)) {
-        return normalizeLangList(result);
+        const langs =
+          normalizeLangList(result);
+
+        if (langs.length) {
+          return langs;
+        }
       }
 
       if (isObject(result)) {
-        return normalizeLangList(
-          Object.keys(result)
-        );
+        const langs =
+          normalizeLangList(
+            Object.keys(result)
+          );
+
+        if (langs.length) {
+          return langs;
+        }
       }
     } catch {}
   }
@@ -902,13 +1124,17 @@ function getAvailableLangs(I18n) {
     I18n?.languages,
     I18n?.locales,
     I18n?.dictionaries,
+    I18n?.dictionary,
     I18n?.messages,
+    I18n?.translations,
+    I18n?.resources,
   ];
 
   for (const candidate of propertyCandidates) {
     try {
       if (Array.isArray(candidate)) {
-        const langs = normalizeLangList(candidate);
+        const langs =
+          normalizeLangList(candidate);
 
         if (langs.length) {
           return langs;
@@ -916,9 +1142,10 @@ function getAvailableLangs(I18n) {
       }
 
       if (isObject(candidate)) {
-        const langs = normalizeLangList(
-          Object.keys(candidate)
-        );
+        const langs =
+          normalizeLangList(
+            Object.keys(candidate)
+          );
 
         if (langs.length) {
           return langs;
@@ -960,7 +1187,7 @@ function normalizeAvailableLang(I18n, value = "", fallback = FALLBACK_LANG) {
   }
 
   const fallbackLang =
-    safeLang(fallback, FALLBACK_LANG);
+    safeLang(fallback, "");
 
   if (
     fallbackLang &&
@@ -970,7 +1197,7 @@ function normalizeAvailableLang(I18n, value = "", fallback = FALLBACK_LANG) {
   }
 
   const defaultLang =
-    safeLang(DEFAULT_LANG, FALLBACK_LANG);
+    safeLang(DEFAULT_LANG, "");
 
   if (
     defaultLang &&
@@ -1022,7 +1249,8 @@ function setI18nLang(I18n, lang = FALLBACK_LANG, options = {}) {
   const cleanLang =
     safeLang(lang, FALLBACK_LANG);
 
-  let ok = false;
+  let ok =
+    false;
 
   for (const methodName of SET_LANG_METHODS) {
     try {
@@ -1043,7 +1271,9 @@ function setI18nLang(I18n, lang = FALLBACK_LANG, options = {}) {
         result.catch(() => {});
       }
 
-      ok = true;
+      ok =
+        true;
+
       break;
     } catch {}
   }
@@ -1053,12 +1283,240 @@ function setI18nLang(I18n, lang = FALLBACK_LANG, options = {}) {
       I18n &&
       typeof I18n === "object"
     ) {
-      I18n.lang = cleanLang;
-      ok = true;
+      I18n.lang =
+        cleanLang;
+
+      ok =
+        true;
     }
   } catch {}
 
   return ok;
+}
+
+async function setI18nLangAsync(I18n, lang = FALLBACK_LANG, options = {}) {
+  const cleanLang =
+    safeLang(lang, FALLBACK_LANG);
+
+  let ok =
+    false;
+
+  for (const methodName of SET_LANG_METHODS) {
+    try {
+      if (!isFunction(I18n?.[methodName])) {
+        continue;
+      }
+
+      const result =
+        I18n[methodName](
+          cleanLang,
+          options
+        );
+
+      if (
+        result &&
+        isFunction(result.then)
+      ) {
+        await result;
+      }
+
+      ok =
+        true;
+
+      break;
+    } catch {}
+  }
+
+  try {
+    if (
+      I18n &&
+      typeof I18n === "object"
+    ) {
+      I18n.lang =
+        cleanLang;
+
+      ok =
+        true;
+    }
+  } catch {}
+
+  return ok;
+}
+
+/* =========================================================
+   DICTIONARY FALLBACK
+========================================================= */
+
+function getNestedValue(source = {}, path = "") {
+  if (!source || !path) {
+    return undefined;
+  }
+
+  const parts =
+    String(path)
+      .split(".")
+      .filter(Boolean);
+
+  let current =
+    source;
+
+  for (const part of parts) {
+    if (
+      current === null ||
+      current === undefined
+    ) {
+      return undefined;
+    }
+
+    try {
+      current =
+        current[part];
+    } catch {
+      return undefined;
+    }
+  }
+
+  return current;
+}
+
+function getDictionaryForLang(I18n, lang = "") {
+  const cleanLang =
+    safeLang(lang, "");
+
+  if (!I18n || !cleanLang) {
+    return null;
+  }
+
+  for (const key of DICTIONARY_KEYS) {
+    try {
+      const collection =
+        I18n?.[key];
+
+      if (
+        collection &&
+        isObject(collection[cleanLang])
+      ) {
+        return collection[cleanLang];
+      }
+    } catch {}
+  }
+
+  try {
+    if (isObject(I18n?.[cleanLang])) {
+      return I18n[cleanLang];
+    }
+  } catch {}
+
+  return null;
+}
+
+function interpolateText(value = "", params = {}) {
+  let output =
+    String(value ?? "");
+
+  const data =
+    ensureObject(params);
+
+  for (const [key, item] of Object.entries(data)) {
+    const safeKey =
+      String(key).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const replacement =
+      item === null ||
+      item === undefined
+        ? ""
+        : String(item);
+
+    try {
+      output =
+        output.replace(
+          new RegExp(`\\{\\{\\s*${safeKey}\\s*\\}\\}`, "g"),
+          replacement
+        );
+
+      output =
+        output.replace(
+          new RegExp(`\\{\\s*${safeKey}\\s*\\}`, "g"),
+          replacement
+        );
+    } catch {}
+  }
+
+  return output;
+}
+
+function resolveDictionaryTranslation(I18n, key = "", params = {}) {
+  const cleanKey =
+    safeText(key, "");
+
+  if (!cleanKey) {
+    return "";
+  }
+
+  const candidates =
+    unique([
+      getI18nLang(I18n),
+      FALLBACK_LANG,
+      DEFAULT_LANG,
+      ...KNOWN_LANGS,
+    ]);
+
+  for (const lang of candidates) {
+    const dict =
+      getDictionaryForLang(
+        I18n,
+        lang
+      );
+
+    if (!dict) {
+      continue;
+    }
+
+    const value =
+      getNestedValue(
+        dict,
+        cleanKey
+      );
+
+    if (
+      value !== undefined &&
+      value !== null &&
+      typeof value !== "object"
+    ) {
+      return interpolateText(
+        String(value),
+        params
+      );
+    }
+  }
+
+  return "";
+}
+
+function isUsableTranslation(result, key = "", fallback = "") {
+  if (
+    result === undefined ||
+    result === null
+  ) {
+    return false;
+  }
+
+  const text =
+    String(result).trim();
+
+  if (!text) {
+    return false;
+  }
+
+  if (
+    fallback &&
+    key &&
+    text === key
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 function translateWithI18n(I18n, key = "", fallback = "", params = {}) {
@@ -1066,12 +1524,19 @@ function translateWithI18n(I18n, key = "", fallback = "", params = {}) {
     safeText(key, "");
 
   const cleanFallback =
-    fallback === undefined || fallback === null
+    fallback === undefined ||
+    fallback === null
       ? cleanKey
       : String(fallback);
 
+  const cleanParams =
+    ensureObject(params);
+
   if (!cleanKey) {
-    return cleanFallback;
+    return interpolateText(
+      cleanFallback,
+      cleanParams
+    );
   }
 
   for (const methodName of TRANSLATE_METHODS) {
@@ -1080,19 +1545,58 @@ function translateWithI18n(I18n, key = "", fallback = "", params = {}) {
         continue;
       }
 
+      /*
+        Firma principal del core i18n actual:
+        I18n.t(key, params, fallback)
+      */
       const result =
         I18n[methodName](
           cleanKey,
-          ensureObject(params),
+          cleanParams,
           cleanFallback
         );
 
       if (
-        result !== undefined &&
-        result !== null &&
-        String(result).trim()
+        isUsableTranslation(
+          result,
+          cleanKey,
+          cleanFallback
+        )
       ) {
-        return result;
+        return interpolateText(
+          String(result),
+          cleanParams
+        );
+      }
+    } catch {}
+
+    try {
+      if (!isFunction(I18n?.[methodName])) {
+        continue;
+      }
+
+      /*
+        Compat legacy:
+        I18n.t(key, fallback, params)
+      */
+      const result =
+        I18n[methodName](
+          cleanKey,
+          cleanFallback,
+          cleanParams
+        );
+
+      if (
+        isUsableTranslation(
+          result,
+          cleanKey,
+          cleanFallback
+        )
+      ) {
+        return interpolateText(
+          String(result),
+          cleanParams
+        );
       }
     } catch {}
 
@@ -1103,22 +1607,39 @@ function translateWithI18n(I18n, key = "", fallback = "", params = {}) {
 
       const result =
         I18n[methodName](
-          cleanKey,
-          cleanFallback,
-          ensureObject(params)
+          cleanKey
         );
 
       if (
-        result !== undefined &&
-        result !== null &&
-        String(result).trim()
+        isUsableTranslation(
+          result,
+          cleanKey,
+          cleanFallback
+        )
       ) {
-        return result;
+        return interpolateText(
+          String(result),
+          cleanParams
+        );
       }
     } catch {}
   }
 
-  return cleanFallback || cleanKey;
+  const dictionaryValue =
+    resolveDictionaryTranslation(
+      I18n,
+      cleanKey,
+      cleanParams
+    );
+
+  if (dictionaryValue) {
+    return dictionaryValue;
+  }
+
+  return interpolateText(
+    cleanFallback || cleanKey,
+    cleanParams
+  );
 }
 
 /* =========================================================
@@ -1150,6 +1671,58 @@ function safeSetState(AppCore, payload = {}) {
   return cleanPayload;
 }
 
+function safePatchRouteState(AppCore, {
+  publicPath = "/",
+  canonicalPath = "/",
+} = {}) {
+  const cleanPublicPath =
+    safeText(publicPath, "/") || "/";
+
+  const cleanCanonicalPath =
+    safeText(canonicalPath, "/") || "/";
+
+  const patch = {
+    publicPath:
+      cleanPublicPath,
+
+    route:
+      cleanCanonicalPath,
+
+    canonicalPath:
+      cleanCanonicalPath,
+  };
+
+  /*
+    No usamos setRoute/setPublicPath aquí para no emitir
+    app:route:change durante rerender de idioma.
+  */
+  try {
+    if (
+      AppCore?.state &&
+      typeof AppCore.state === "object"
+    ) {
+      Object.assign(
+        AppCore.state,
+        patch
+      );
+    }
+  } catch {}
+
+  try {
+    AppCore?.patchState?.(
+      patch
+    );
+  } catch {}
+
+  try {
+    AppCore?.setState?.(
+      patch
+    );
+  } catch {}
+
+  return patch;
+}
+
 function registerI18nModule(AppCore, I18n) {
   if (
     !AppCore ||
@@ -1158,7 +1731,8 @@ function registerI18nModule(AppCore, I18n) {
     return false;
   }
 
-  let registered = false;
+  let registered =
+    false;
 
   try {
     registerModule(
@@ -1167,29 +1741,61 @@ function registerI18nModule(AppCore, I18n) {
       I18n
     );
 
-    registered = true;
+    registered =
+      true;
   } catch {}
 
   try {
-    const modules = AppCore.modules;
+    registerModule(
+      AppCore,
+      "I18n",
+      I18n
+    );
+
+    registered =
+      true;
+  } catch {}
+
+  try {
+    const modules =
+      AppCore.modules;
 
     if (modules) {
-      if (
-        isFunction(modules.register)
-      ) {
-        modules.register("i18n", I18n);
-        modules.register("I18n", I18n);
-        registered = true;
-      } else if (
-        isFunction(modules.set)
-      ) {
-        modules.set("i18n", I18n);
-        modules.set("I18n", I18n);
-        registered = true;
+      if (isFunction(modules.register)) {
+        modules.register(
+          "i18n",
+          I18n
+        );
+
+        modules.register(
+          "I18n",
+          I18n
+        );
+
+        registered =
+          true;
+      } else if (isFunction(modules.set)) {
+        modules.set(
+          "i18n",
+          I18n
+        );
+
+        modules.set(
+          "I18n",
+          I18n
+        );
+
+        registered =
+          true;
       } else if (isExtensibleObject(modules)) {
-        modules.i18n = I18n;
-        modules.I18n = I18n;
-        registered = true;
+        modules.i18n =
+          I18n;
+
+        modules.I18n =
+          I18n;
+
+        registered =
+          true;
       }
     }
   } catch {}
@@ -1200,19 +1806,26 @@ function registerI18nModule(AppCore, I18n) {
       isExtensibleObject(AppCore)
     ) {
       AppCore.modules = {
-        i18n: I18n,
+        i18n:
+          I18n,
         I18n,
       };
 
-      registered = true;
+      registered =
+        true;
     }
   } catch {}
 
   try {
     if (isExtensibleObject(AppCore)) {
-      AppCore.I18n = I18n;
-      AppCore.i18n = I18n;
-      registered = true;
+      AppCore.I18n =
+        I18n;
+
+      AppCore.i18n =
+        I18n;
+
+      registered =
+        true;
     }
   } catch {}
 
@@ -1267,12 +1880,14 @@ function bindCoreToI18n(AppCore, I18n) {
     return true;
   }
 
-  let ok = false;
+  let ok =
+    false;
 
   try {
     if (isFunction(I18n?.bindCore)) {
       I18n.bindCore(AppCore);
-      ok = true;
+      ok =
+        true;
     }
   } catch (error) {
     pushError(
@@ -1291,11 +1906,13 @@ function bindCoreToI18n(AppCore, I18n) {
   try {
     if (isFunction(I18n?.configure)) {
       I18n.configure({
-        core: AppCore,
+        core:
+          AppCore,
         AppCore,
       });
 
-      ok = true;
+      ok =
+        true;
     }
   } catch (error) {
     pushError(
@@ -1305,7 +1922,8 @@ function bindCoreToI18n(AppCore, I18n) {
     );
   }
 
-  boundCore = AppCore;
+  boundCore =
+    AppCore;
 
   return ok;
 }
@@ -1315,54 +1933,86 @@ function attachAppCoreBridge(AppCore, I18n, Router) {
     return false;
   }
 
-  let attached = false;
+  const changeLanguageBridge = (lang, options = {}) => {
+    return changeLanguage({
+      AppCore,
+      I18n,
+      Router,
+      ...ensureObject(options),
+      lang,
+    });
+  };
+
+  const getLanguageBridge = () => {
+    return (
+      safeLang(AppCore?.state?.lang, "") ||
+      getI18nLang(I18n) ||
+      getDocumentLang() ||
+      readStoredLang() ||
+      FALLBACK_LANG
+    );
+  };
+
+  const tBridge = (key, fallback = "", params = {}) => {
+    return translateWithI18n(
+      I18n,
+      key,
+      fallback,
+      params
+    );
+  };
+
+  let attached =
+    false;
+
+  attached =
+    defineValue(
+      AppCore,
+      "changeLanguage",
+      changeLanguageBridge
+    ) || attached;
+
+  attached =
+    defineValue(
+      AppCore,
+      "setLanguage",
+      changeLanguageBridge
+    ) || attached;
+
+  attached =
+    defineValue(
+      AppCore,
+      "getLanguage",
+      getLanguageBridge
+    ) || attached;
+
+  attached =
+    defineValue(
+      AppCore,
+      "t",
+      tBridge
+    ) || attached;
 
   try {
-    AppCore.changeLanguage = (lang, options = {}) => {
-      return changeLanguage({
-        AppCore,
-        I18n,
-        Router,
-        ...ensureObject(options),
-        lang,
-      });
-    };
+    AppCore.changeLanguage =
+      changeLanguageBridge;
 
-    attached = true;
-  } catch {}
+    AppCore.setLanguage =
+      changeLanguageBridge;
 
-  try {
-    AppCore.setLanguage = AppCore.changeLanguage;
-    attached = true;
-  } catch {}
+    AppCore.getLanguage =
+      getLanguageBridge;
 
-  try {
-    AppCore.getLanguage = () => {
-      return (
-        safeLang(AppCore?.state?.lang, "") ||
-        getI18nLang(I18n) ||
-        FALLBACK_LANG
-      );
-    };
+    AppCore.t =
+      tBridge;
 
-    attached = true;
-  } catch {}
-
-  try {
-    AppCore.t = (key, fallback = "", params = {}) => {
-      return translateWithI18n(
-        I18n,
-        key,
-        fallback,
-        params
-      );
-    };
-
-    attached = true;
+    attached =
+      true;
   } catch {}
 
   if (attached) {
-    i18nState.bridgeReady = true;
+    i18nState.bridgeReady =
+      true;
 
     safeEmit(
       AppCore,
@@ -1377,6 +2027,9 @@ function attachAppCoreBridge(AppCore, I18n, Router) {
 
         at:
           safeIsoDate(),
+
+        source:
+          "app:i18n",
       }
     );
   }
@@ -1389,7 +2042,8 @@ function bootI18nModule(AppCore, I18n, lang = FALLBACK_LANG) {
     return false;
   }
 
-  let booted = false;
+  let booted =
+    false;
 
   for (const methodName of INIT_METHODS) {
     try {
@@ -1407,6 +2061,8 @@ function bootI18nModule(AppCore, I18n, lang = FALLBACK_LANG) {
             FALLBACK_LANG,
           defaultLang:
             DEFAULT_LANG,
+          source:
+            "app:i18n",
         });
 
       if (
@@ -1422,7 +2078,9 @@ function bootI18nModule(AppCore, I18n, lang = FALLBACK_LANG) {
         });
       }
 
-      booted = true;
+      booted =
+        true;
+
       break;
     } catch (error) {
       pushError(
@@ -1455,19 +2113,17 @@ export function syncLangState(first = {}, second = null) {
     reason = "sync-lang-state",
     persist = true,
     emit = true,
-  } = resolveRuntimeDeps(
-    first,
-    second
-  );
+  } =
+    resolveRuntimeDeps(
+      first,
+      second
+    );
 
-  currentAppCoreRef =
-    AppCore || currentAppCoreRef;
-
-  currentI18nRef =
-    I18n || currentI18nRef;
-
-  currentRouterRef =
-    Router || currentRouterRef;
+  rememberRuntimeDeps({
+    AppCore,
+    I18n,
+    Router,
+  });
 
   const finalLang =
     resolveInitialLang(
@@ -1519,12 +2175,16 @@ export function syncLangState(first = {}, second = null) {
     finalLang;
 
   i18nState.lastReason =
-    safeText(reason, "sync-lang-state");
+    safeText(
+      reason,
+      "sync-lang-state"
+    );
 
   i18nState.lastSyncAt =
-    Date.now();
+    safeNow();
 
-  i18nState.syncCount += 1;
+  i18nState.syncCount +=
+    1;
 
   const payload = {
     lang:
@@ -1571,19 +2231,17 @@ export function initI18n(first = {}, second = null) {
     state,
     lang: preferredLang,
     force = false,
-  } = resolveRuntimeDeps(
-    first,
-    second
-  );
+  } =
+    resolveRuntimeDeps(
+      first,
+      second
+    );
 
-  currentAppCoreRef =
-    AppCore || currentAppCoreRef;
-
-  currentI18nRef =
-    I18n || currentI18nRef;
-
-  currentRouterRef =
-    Router || currentRouterRef;
+  rememberRuntimeDeps({
+    AppCore,
+    I18n,
+    Router,
+  });
 
   const alreadyInitialized =
     Boolean(
@@ -1649,6 +2307,7 @@ export function initI18n(first = {}, second = null) {
 
       reason:
         "init-i18n",
+
       source:
         "app:i18n:init",
     }
@@ -1679,7 +2338,8 @@ export function initI18n(first = {}, second = null) {
 
   if (state) {
     try {
-      state.i18nInitialized = true;
+      state.i18nInitialized =
+        true;
     } catch {}
   }
 
@@ -1744,19 +2404,17 @@ export async function changeLanguage(first = {}, second = null) {
     persist = true,
     emit = true,
     reason = "change-language",
-  } = resolveRuntimeDeps(
-    first,
-    second
-  );
+  } =
+    resolveRuntimeDeps(
+      first,
+      second
+    );
 
-  currentAppCoreRef =
-    AppCore || currentAppCoreRef;
-
-  currentI18nRef =
-    I18n || currentI18nRef;
-
-  currentRouterRef =
-    Router || currentRouterRef;
+  rememberRuntimeDeps({
+    AppCore,
+    I18n,
+    Router,
+  });
 
   const sequence =
     ++changeSequence;
@@ -1769,20 +2427,30 @@ export async function changeLanguage(first = {}, second = null) {
       ""
     );
 
+  const currentLang =
+    safeLang(
+      AppCore?.state?.lang ||
+        getI18nLang(I18n) ||
+        getDocumentLang() ||
+        readStoredLang() ||
+        DEFAULT_LANG,
+      FALLBACK_LANG
+    );
+
   const finalLang =
     normalizeAvailableLang(
       I18n,
-      requestedLang ||
-        FALLBACK_LANG,
+      requestedLang || currentLang || DEFAULT_LANG,
       FALLBACK_LANG
     );
 
   i18nState.lastRequestedLang =
     requestedLang || finalLang;
 
-  i18nState.changeCount += 1;
+  i18nState.changeCount +=
+    1;
 
-  setI18nLang(
+  await setI18nLangAsync(
     I18n,
     finalLang,
     {
@@ -1812,6 +2480,9 @@ export async function changeLanguage(first = {}, second = null) {
     requestedLang:
       requestedLang || finalLang,
 
+    previousLang:
+      currentLang,
+
     fallbackLang:
       FALLBACK_LANG,
 
@@ -1822,7 +2493,22 @@ export async function changeLanguage(first = {}, second = null) {
       getAvailableLangs(I18n),
 
     reason:
-      safeText(reason, "change-language"),
+      safeText(
+        reason,
+        "change-language"
+      ),
+
+    /*
+      CLAVE:
+      src/app/events.js escucha app:lang:change y rerenderiza
+      si payload.rerender !== false.
+      Aquí el rerender lo gestiona AppI18n, por tanto bloqueamos doble render.
+    */
+    rerender:
+      false,
+
+    rerenderHandledBy:
+      "app:i18n",
 
     sequence,
 
@@ -1876,10 +2562,19 @@ function getBrowserPublicPath() {
     const hash =
       window.location.hash || "";
 
+    if (
+      hash.startsWith("#/") ||
+      hash.startsWith("#!")
+    ) {
+      return hash
+        .replace(/^#!\/?/, "/")
+        .replace(/^#\/?/, "/") || "/";
+    }
+
     return `${pathname}${search}${hash}` || "/";
-  } catch {
-    return "/";
-  }
+  } catch {}
+
+  return "/";
 }
 
 function getPathFromStateByKeys(state = {}, keys = []) {
@@ -1904,13 +2599,19 @@ function resolveCurrentPaths(AppCore, Router) {
 
   const routerPublic =
     safeText(
-      Router?.getCurrentPublicPath?.(),
+      safeMethod(
+        Router,
+        "getCurrentPublicPath"
+      ),
       ""
     );
 
   const routerCanonical =
     safeText(
-      Router?.getCurrentCanonicalPath?.(),
+      safeMethod(
+        Router,
+        "getCurrentCanonicalPath"
+      ),
       ""
     );
 
@@ -1949,7 +2650,7 @@ function resolveCurrentPaths(AppCore, Router) {
   const browserPublic =
     getBrowserPublicPath();
 
-  const publicPath =
+  const rawPublicPath =
     routerPublic ||
     helperPublic ||
     statePublic ||
@@ -1957,18 +2658,44 @@ function resolveCurrentPaths(AppCore, Router) {
     stateCanonical ||
     "/";
 
-  const canonicalPath =
+  const rawCanonicalPath =
     routerCanonical ||
     helperCanonical ||
     stateCanonical ||
-    publicPath ||
+    rawPublicPath ||
     "/";
 
+  let publicPath =
+    rawPublicPath;
+
+  let canonicalPath =
+    rawCanonicalPath;
+
+  try {
+    publicPath =
+      normalizePublicPath(
+        AppCore,
+        rawPublicPath
+      );
+  } catch {}
+
+  try {
+    canonicalPath =
+      normalizeCanonicalPath(
+        AppCore,
+        rawCanonicalPath || rawPublicPath
+      );
+  } catch {}
+
   return {
-    publicPath,
-    canonicalPath,
+    publicPath:
+      publicPath || "/",
+
+    canonicalPath:
+      canonicalPath || "/",
+
     renderPath:
-      canonicalPath || publicPath || "/",
+      publicPath || canonicalPath || "/",
   };
 }
 
@@ -1980,11 +2707,16 @@ async function runRouterRender({
   reason = "i18n-rerender",
   sequence = 0,
 } = {}) {
-  const renderPath =
+  const cleanPublicPath =
     safeText(
-      canonicalPath ||
-        publicPath,
+      publicPath,
       "/"
+    );
+
+  const cleanCanonicalPath =
+    safeText(
+      canonicalPath,
+      cleanPublicPath || "/"
     );
 
   for (const methodName of ROUTER_RERENDER_METHODS) {
@@ -2001,12 +2733,22 @@ async function runRouterRender({
           source:
             "app:i18n",
           sequence,
+          preservePublicPath:
+            true,
+          preserveSearch:
+            true,
+          preserveHash:
+            true,
+          i18nRerender:
+            true,
         })
       );
 
       return {
-        ok: true,
-        method: methodName,
+        ok:
+          true,
+        method:
+          methodName,
       };
     } catch (error) {
       safeWarn(
@@ -2021,15 +2763,18 @@ async function runRouterRender({
     if (isFunction(Router?.render)) {
       await Promise.resolve(
         Router.render(
-          renderPath,
+          cleanPublicPath || cleanCanonicalPath,
           {
             skipHistory:
               true,
 
             replaceState:
-              true,
+              false,
 
             force:
+              true,
+
+            forceRender:
               true,
 
             reason,
@@ -2037,10 +2782,13 @@ async function runRouterRender({
               "app:i18n",
 
             canonicalPath:
-              renderPath,
+              cleanCanonicalPath,
 
             publicPath:
-              publicPath || renderPath,
+              cleanPublicPath || cleanCanonicalPath,
+
+            requestedPath:
+              cleanPublicPath || cleanCanonicalPath,
 
             preservePublicPath:
               true,
@@ -2060,8 +2808,10 @@ async function runRouterRender({
       );
 
       return {
-        ok: true,
-        method: "render",
+        ok:
+          true,
+        method:
+          "render",
       };
     }
   } catch (error) {
@@ -2076,7 +2826,7 @@ async function runRouterRender({
     if (isFunction(Router?.navigate)) {
       await Promise.resolve(
         Router.navigate(
-          publicPath || renderPath,
+          cleanPublicPath || cleanCanonicalPath,
           {
             replaceState:
               true,
@@ -2106,8 +2856,10 @@ async function runRouterRender({
       );
 
       return {
-        ok: true,
-        method: "navigate",
+        ok:
+          true,
+        method:
+          "navigate",
       };
     }
   } catch (error) {
@@ -2119,8 +2871,10 @@ async function runRouterRender({
   }
 
   return {
-    ok: false,
-    method: "",
+    ok:
+      false,
+    method:
+      "",
   };
 }
 
@@ -2133,25 +2887,13 @@ function syncAfterRender({
   syncUserUI,
   reason = "i18n-rerender",
 } = {}) {
-  try {
-    AppCore?.setPublicPath?.(
-      publicPath
-    );
-  } catch {}
-
-  try {
-    AppCore?.setRoute?.(
-      canonicalPath
-    );
-  } catch {}
-
-  safeSetState(
+  safePatchRouteState(
     AppCore,
     {
       publicPath:
         publicPath || canonicalPath || "/",
 
-      route:
+      canonicalPath:
         canonicalPath || publicPath || "/",
     }
   );
@@ -2168,27 +2910,32 @@ function syncAfterRender({
     });
   } catch {}
 
-  try {
-    syncUserUI?.({
-      AppCore,
-      Router,
-      reason,
-      publicPath,
-      canonicalPath,
-      rebind:
-        false,
-      hardRepair:
-        false,
-      force:
-        true,
-    });
-  } catch {}
+  if (isFunction(syncUserUI)) {
+    try {
+      syncUserUI({
+        AppCore,
+        Router,
+        reason,
+        publicPath,
+        canonicalPath,
+        rebind:
+          false,
+        hardRepair:
+          false,
+        force:
+          true,
+      });
 
-  try {
-    syncUserUI?.(
-      AppCore
-    );
-  } catch {}
+      return true;
+    } catch {}
+
+    try {
+      syncUserUI(AppCore);
+      return true;
+    } catch {}
+  }
+
+  return false;
 }
 
 export async function rerenderCurrentRoute(first = {}, second = null) {
@@ -2198,8 +2945,12 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
       second
     );
 
+  rememberRuntimeDeps(deps);
+
   if (rerenderPromise) {
-    rerenderQueued = true;
+    rerenderQueued =
+      true;
+
     return rerenderPromise;
   }
 
@@ -2213,9 +2964,11 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
         syncUserUI,
         reason = "i18n-rerender",
         sequence = changeSequence,
-      } = deps;
+      } =
+        deps;
 
-      i18nState.rerendering = true;
+      i18nState.rerendering =
+        true;
 
       const paths =
         resolveCurrentPaths(
@@ -2236,18 +2989,21 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
 
       const startPayload = {
         publicPath:
-          paths.publicPath,
+          redactTokenInText(paths.publicPath),
 
         canonicalPath:
-          paths.canonicalPath,
+          redactTokenInText(paths.canonicalPath),
 
         renderPath:
-          paths.renderPath,
+          redactTokenInText(paths.renderPath),
 
         lang,
 
         reason:
-          safeText(reason, "i18n-rerender"),
+          safeText(
+            reason,
+            "i18n-rerender"
+          ),
 
         sequence,
 
@@ -2297,16 +3053,21 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
             startPayload.reason,
         });
 
-        i18nState.rerenderCount += 1;
+        i18nState.rerenderCount +=
+          1;
+
         i18nState.lastRerenderAt =
-          Date.now();
+          safeNow();
 
         const donePayload = {
           ...startPayload,
+
           ok:
             Boolean(renderResult.ok),
+
           method:
             renderResult.method || "",
+
           at:
             safeIsoDate(),
         };
@@ -2347,11 +3108,15 @@ export async function rerenderCurrentRoute(first = {}, second = null) {
 
         return false;
       } finally {
-        i18nState.rerendering = false;
-        rerenderPromise = null;
+        i18nState.rerendering =
+          false;
+
+        rerenderPromise =
+          null;
 
         if (rerenderQueued) {
-          rerenderQueued = false;
+          rerenderQueued =
+            false;
 
           safeSetTimeout(() => {
             rerenderCurrentRoute({
@@ -2375,9 +3140,14 @@ export function t(first = {}, second = "", third = {}, fourth = {}) {
   let I18n =
     currentI18nRef;
 
-  let key = "";
-  let fallback = "";
-  let params = {};
+  let key =
+    "";
+
+  let fallback =
+    "";
+
+  let params =
+    {};
 
   if (
     isObject(first) &&
@@ -2393,7 +3163,10 @@ export function t(first = {}, second = "", third = {}, fourth = {}) {
       currentI18nRef;
 
     key =
-      safeText(first.key, "");
+      safeText(
+        first.key,
+        ""
+      );
 
     fallback =
       first.fallback === undefined
@@ -2408,10 +3181,14 @@ export function t(first = {}, second = "", third = {}, fourth = {}) {
       );
   } else {
     key =
-      safeText(first, "");
+      safeText(
+        first,
+        ""
+      );
 
     fallback =
-      second === undefined || second === null
+      second === undefined ||
+      second === null
         ? key
         : safeText(second, key);
 
@@ -2440,10 +3217,11 @@ export function getI18nSnapshot(first = {}, second = null) {
     AppCore,
     I18n,
     Router,
-  } = resolveRuntimeDeps(
-    first,
-    second
-  );
+  } =
+    resolveRuntimeDeps(
+      first,
+      second
+    );
 
   const available =
     getAvailableLangs(I18n);
@@ -2551,7 +3329,7 @@ export function getI18nSnapshot(first = {}, second = null) {
     changeSequence,
 
     storageKeys:
-      LANG_STORAGE_KEYS,
+      [...LANG_STORAGE_KEYS],
 
     events:
       I18N_EVENTS,
@@ -2562,32 +3340,65 @@ export function getI18nSnapshot(first = {}, second = null) {
 }
 
 export function resetI18nRuntimeState() {
-  initialized = false;
-  boundCore = null;
-  currentAppCoreRef = null;
-  currentI18nRef = null;
-  currentRouterRef = null;
+  initialized =
+    false;
 
-  rerenderPromise = null;
-  rerenderQueued = false;
+  boundCore =
+    null;
 
-  changeSequence = 0;
+  currentAppCoreRef =
+    null;
 
-  i18nState.initialized = false;
-  i18nState.lastLang = "";
-  i18nState.lastRequestedLang = "";
-  i18nState.lastReason = "";
+  currentI18nRef =
+    null;
 
-  i18nState.lastSyncAt = 0;
-  i18nState.lastRerenderAt = 0;
+  currentRouterRef =
+    null;
 
-  i18nState.rerendering = false;
-  i18nState.rerenderCount = 0;
-  i18nState.syncCount = 0;
-  i18nState.changeCount = 0;
+  rerenderPromise =
+    null;
 
-  i18nState.bridgeReady = false;
-  i18nState.errors = [];
+  rerenderQueued =
+    false;
+
+  changeSequence =
+    0;
+
+  i18nState.initialized =
+    false;
+
+  i18nState.lastLang =
+    "";
+
+  i18nState.lastRequestedLang =
+    "";
+
+  i18nState.lastReason =
+    "";
+
+  i18nState.lastSyncAt =
+    0;
+
+  i18nState.lastRerenderAt =
+    0;
+
+  i18nState.rerendering =
+    false;
+
+  i18nState.rerenderCount =
+    0;
+
+  i18nState.syncCount =
+    0;
+
+  i18nState.changeCount =
+    0;
+
+  i18nState.bridgeReady =
+    false;
+
+  i18nState.errors =
+    [];
 
   return getI18nSnapshot();
 }

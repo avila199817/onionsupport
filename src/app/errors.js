@@ -2,26 +2,27 @@
    Onion SPA - App Errors
    Archivo: src/app/errors.js
 
-   RESPONSABILIDADES:
-   - renderizar pantalla de error de boot
-   - bind de errores globales window.error
-   - bind de promesas rechazadas sin control
-   - notificar errores críticos con Toast
-   - emitir telemetría interna de errores
-   - evitar loops recursivos de error
-   - ofrecer recuperación UX enterprise
+   ONION SUPPORT · APP ERRORS
+   BOOT ERROR UX · GLOBAL ERROR GUARD · TELEMETRY · RECOVERY · EXTREME 10/10
 
-   HARDENING NIVEL DIOS:
-   - listeners idempotentes
-   - throttling visual de errores repetidos
-   - sanitizado robusto mensajes
-   - redacción de tokens en URLs/mensajes
-   - fallback total si faltan módulos
-   - cero loops recursivos de error
-   - telemetría interna por eventos
-   - recovery UX enterprise
-   - no duplicar binds
-   - no reventar si falta cleanup
+   RESPONSABILIDADES:
+   - Renderizar pantalla de error de boot.
+   - Bindear window.error.
+   - Bindear unhandledrejection.
+   - Notificar errores críticos con Toast.
+   - Emitir telemetría interna.
+   - Evitar loops recursivos de error.
+   - Ofrecer recuperación UX enterprise.
+   - Redactar tokens en mensajes, URLs y stack traces.
+   - No dejar loader infinito.
+   - No dejar pantalla blanca.
+
+   REGLAS:
+   - Sin inline handlers.
+   - Sin CSS inline.
+   - Sin throws accidentales.
+   - safeEmit usa bus interno o window, no ambos.
+   - Boot error debe funcionar aunque falten Router/Auth/Toast/AppCore.
 ========================================================= */
 
 import { escapeHtml } from "./helpers.js";
@@ -42,23 +43,13 @@ const DEFAULT_ERROR_SCOPE =
   APP_SCOPE ||
   "app:errors";
 
-const ERROR_THROTTLE_MS =
-  2500;
+const ERROR_THROTTLE_MS = 2500;
+const MAX_RECENT_ERRORS = 12;
 
-const MAX_RECENT_ERRORS =
-  12;
-
-const BOOT_ERROR_RENDER_EVENT =
-  "app:boot:error:render";
-
-const APP_ERROR_EVENT =
-  "app:error";
-
-const APP_ERROR_TELEMETRY_EVENT =
-  "app:error:telemetry";
-
-const APP_ERROR_RECOVER_EVENT =
-  "app:error:recover";
+const BOOT_ERROR_RENDER_EVENT = "app:boot:error:render";
+const APP_ERROR_EVENT = "app:error";
+const APP_ERROR_TELEMETRY_EVENT = "app:error:telemetry";
+const APP_ERROR_RECOVER_EVENT = "app:error:recover";
 
 const FALLBACK_ERROR_MESSAGE =
   "Se produjo un error inesperado.";
@@ -66,46 +57,61 @@ const FALLBACK_ERROR_MESSAGE =
 const FALLBACK_BOOT_ERROR_MESSAGE =
   "No se pudo iniciar la aplicación correctamente.";
 
-const LOGIN_PATH =
-  "/login";
+const LOGIN_PATH = "/login";
+const VIEW_CONTAINER_SELECTOR = "#view-container";
 
-const VIEW_CONTAINER_SELECTOR =
-  "#view-container";
+const ERROR_ACTIONS = Object.freeze({
+  retry: "retry",
+  resetSession: "reset-session",
+  goLogin: "go-login",
+});
 
-const ERROR_ACTIONS =
-  Object.freeze({
-    retry:
-      "retry",
+const TOKEN_PARAM_NAMES = Object.freeze([
+  "token",
+  "activationToken",
+  "activateToken",
+  "resetToken",
+  "passwordResetToken",
+  "code",
+  "t",
+  "access_token",
+  "refresh_token",
+  "id_token",
+]);
 
-    resetSession:
-      "reset-session",
+const ERROR_EVENTS = Object.freeze({
+  bootError:
+    APP_EVENTS?.bootError || "app:boot:error",
 
-    goLogin:
-      "go-login",
-  });
+  appError:
+    APP_ERROR_EVENT,
 
-const TOKEN_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "resetToken",
-    "passwordResetToken",
-    "code",
-    "t",
-    "access_token",
-    "refresh_token",
-    "id_token",
-  ]);
+  telemetry:
+    APP_ERROR_TELEMETRY_EVENT,
+
+  recover:
+    APP_ERROR_RECOVER_EVENT,
+
+  render:
+    BOOT_ERROR_RENDER_EVENT,
+
+  handlersBound:
+    "app:errors:handlers:bound",
+
+  handlersUnbound:
+    "app:errors:handlers:unbound",
+});
 
 /* =========================================================
    INTERNAL STATE
 ========================================================= */
 
 let handlersBound = false;
+let bindingInFlight = false;
 let boundScope = "";
 
 const boundListeners = [];
+const boundDisposers = [];
 
 const errorState = {
   lastToastKey: "",
@@ -132,7 +138,11 @@ function isBrowser() {
 }
 
 function now() {
-  return Date.now();
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
 }
 
 function safeText(value, fallback = "") {
@@ -143,8 +153,7 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
+  const text = String(value).trim();
 
   return text || fallback;
 }
@@ -152,7 +161,8 @@ function safeText(value, fallback = "") {
 function isObject(value) {
   return (
     value !== null &&
-    typeof value === "object"
+    typeof value === "object" &&
+    !Array.isArray(value)
   );
 }
 
@@ -194,8 +204,7 @@ function safeInvoke(fn, thisArg = null, args = []) {
 }
 
 function safeMethod(target, methodName, args = []) {
-  const object =
-    ensureObject(target);
+  const object = ensureObject(target);
 
   return safeInvoke(
     object?.[methodName],
@@ -203,6 +212,47 @@ function safeMethod(target, methodName, args = []) {
     args
   );
 }
+
+function isExtensibleObject(value) {
+  try {
+    return (
+      isObject(value) &&
+      Object.isExtensible(value)
+    );
+  } catch {}
+
+  return false;
+}
+
+function safeDefineValue(target, key, value) {
+  if (
+    !isExtensibleObject(target) ||
+    !key
+  ) {
+    return false;
+  }
+
+  try {
+    Object.defineProperty(
+      target,
+      key,
+      {
+        value,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+      }
+    );
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+/* =========================================================
+   ESCAPE
+========================================================= */
 
 function localEscapeHtml(value = "") {
   return safeText(value, "")
@@ -214,8 +264,7 @@ function localEscapeHtml(value = "") {
 }
 
 function safeEscapeHtml(AppCore, value = "") {
-  const text =
-    safeText(value, "");
+  const text = safeText(value, "");
 
   try {
     if (isFunction(escapeHtml)) {
@@ -224,8 +273,7 @@ function safeEscapeHtml(AppCore, value = "") {
           ? escapeHtml(AppCore, text)
           : escapeHtml(text);
 
-      const clean =
-        safeText(result, "");
+      const clean = safeText(result, "");
 
       if (
         clean &&
@@ -245,42 +293,49 @@ function safeEscapeHtml(AppCore, value = "") {
 
 function safeLog(AppCore, ...args) {
   try {
-    AppCore?.utils?.log?.(
-      "[AppErrors]",
-      ...args
-    );
+    AppCore?.utils?.log?.("[AppErrors]", ...args);
   } catch {}
 }
 
 function safeWarn(AppCore, ...args) {
-  try {
-    AppCore?.utils?.warn?.(
-      "[AppErrors]",
-      ...args
-    );
-  } catch {}
+  let emittedByCore = false;
 
   try {
-    console.warn(
-      "[AppErrors]",
-      ...args
-    );
+    if (isFunction(AppCore?.utils?.warn)) {
+      AppCore.utils.warn("[AppErrors]", ...args);
+      emittedByCore = true;
+    }
+  } catch {
+    emittedByCore = false;
+  }
+
+  if (emittedByCore) {
+    return;
+  }
+
+  try {
+    console.warn("[AppErrors]", ...args);
   } catch {}
 }
 
 function safeError(AppCore, ...args) {
-  try {
-    AppCore?.utils?.error?.(
-      "[AppErrors]",
-      ...args
-    );
-  } catch {}
+  let emittedByCore = false;
 
   try {
-    console.error(
-      "[AppErrors]",
-      ...args
-    );
+    if (isFunction(AppCore?.utils?.error)) {
+      AppCore.utils.error("[AppErrors]", ...args);
+      emittedByCore = true;
+    }
+  } catch {
+    emittedByCore = false;
+  }
+
+  if (emittedByCore) {
+    return;
+  }
+
+  try {
+    console.error("[AppErrors]", ...args);
   } catch {}
 }
 
@@ -295,8 +350,7 @@ function safeWindowDispatch(eventName, payload = {}) {
   try {
     window.dispatchEvent(
       new CustomEvent(eventName, {
-        detail:
-          payload,
+        detail: payload,
       })
     );
 
@@ -306,61 +360,59 @@ function safeWindowDispatch(eventName, payload = {}) {
   return false;
 }
 
-function safeEmit(AppCore, eventName, payload = {}) {
-  if (!eventName) {
+function safeEmit(AppCore, eventName, payload = {}, options = {}) {
+  const cleanEventName = safeText(eventName, "");
+
+  if (!cleanEventName) {
     return false;
   }
 
-  let emitted = false;
+  const opts = ensureObject(options);
+
+  let busAvailable = false;
+  let busEmitted = false;
 
   try {
-    AppCore?.events?.emit?.(
-      eventName,
-      payload
-    );
-
-    emitted = true;
+    if (isFunction(AppCore?.events?.emit)) {
+      busAvailable = true;
+      AppCore.events.emit(cleanEventName, payload);
+      busEmitted = true;
+    }
   } catch {}
 
+  /*
+    Anti-storm:
+    si hay bus interno, no duplicamos en window.
+  */
   if (
-    safeWindowDispatch(
-      eventName,
-      payload
-    )
+    opts.window === true ||
+    (!busAvailable && isBrowser())
   ) {
-    emitted = true;
+    return safeWindowDispatch(cleanEventName, payload) || busEmitted;
   }
 
-  return emitted;
+  return busEmitted;
 }
 
 function safeSetError(AppCore, snapshot = null) {
-  try {
-    AppCore?.setError?.(
-      snapshot
-    );
-  } catch {}
+  const payload = {
+    hasError: Boolean(snapshot),
+    lastError: snapshot,
+  };
 
   try {
-    AppCore?.setState?.({
-      hasError:
-        Boolean(snapshot),
-
-      lastError:
-        snapshot,
-    });
+    AppCore?.setError?.(snapshot);
   } catch {}
+
+  safeMethod(AppCore, "setState", [payload]);
+  safeMethod(AppCore, "patchState", [payload]);
 
   try {
     if (
       AppCore?.state &&
       typeof AppCore.state === "object"
     ) {
-      AppCore.state.hasError =
-        Boolean(snapshot);
-
-      AppCore.state.lastError =
-        snapshot;
+      Object.assign(AppCore.state, payload);
     }
   } catch {}
 }
@@ -370,8 +422,7 @@ function safeSetError(AppCore, snapshot = null) {
 ========================================================= */
 
 function redactTokenInText(value = "") {
-  let output =
-    safeText(value, "");
+  let output = safeText(value, "");
 
   if (!output) {
     return "";
@@ -431,8 +482,7 @@ function extractErrorCandidate(error = null) {
 }
 
 function getErrorName(error = null) {
-  const candidate =
-    extractErrorCandidate(error);
+  const candidate = extractErrorCandidate(error);
 
   if (!candidate) {
     return "Error";
@@ -450,10 +500,12 @@ function getErrorName(error = null) {
 }
 
 function getErrorCode(error = null) {
-  const candidate =
-    extractErrorCandidate(error);
+  const candidate = extractErrorCandidate(error);
 
-  if (!candidate || typeof candidate === "string") {
+  if (
+    !candidate ||
+    typeof candidate === "string"
+  ) {
     return "";
   }
 
@@ -463,23 +515,21 @@ function getErrorCode(error = null) {
     safeText(candidate?.statusCode, "") ||
     safeText(candidate?.data?.code, "") ||
     safeText(candidate?.data?.status, "") ||
+    safeText(candidate?.response?.status, "") ||
+    safeText(candidate?.response?.statusCode, "") ||
     ""
   );
 }
 
 function getRawErrorMessage(error = null, fallback = FALLBACK_ERROR_MESSAGE) {
-  const candidate =
-    extractErrorCandidate(error);
+  const candidate = extractErrorCandidate(error);
 
   if (!candidate) {
     return fallback;
   }
 
   if (typeof candidate === "string") {
-    return safeText(
-      candidate,
-      fallback
-    );
+    return safeText(candidate, fallback);
   }
 
   return (
@@ -497,8 +547,7 @@ function getRawErrorMessage(error = null, fallback = FALLBACK_ERROR_MESSAGE) {
 }
 
 function getErrorStack(error = null) {
-  const candidate =
-    extractErrorCandidate(error);
+  const candidate = extractErrorCandidate(error);
 
   if (
     !candidate ||
@@ -508,16 +557,12 @@ function getErrorStack(error = null) {
   }
 
   return redactTokenInText(
-    safeText(
-      candidate?.stack,
-      ""
-    )
+    safeText(candidate?.stack, "")
   );
 }
 
 function getErrorUrl(error = null) {
-  const candidate =
-    extractErrorCandidate(error);
+  const candidate = extractErrorCandidate(error);
 
   if (!candidate) {
     return "";
@@ -534,16 +579,16 @@ function getErrorUrl(error = null) {
 }
 
 function getFriendlyErrorMessage(rawMessage = "", fallback = FALLBACK_ERROR_MESSAGE) {
-  const message =
-    redactTokenInText(
-      safeText(rawMessage, fallback)
-    );
+  const message = redactTokenInText(
+    safeText(rawMessage, fallback)
+  );
 
   if (
     /failed to fetch dynamically imported module/i.test(message) ||
     /importing a module script failed/i.test(message) ||
     /loading chunk/i.test(message) ||
-    /chunkloaderror/i.test(message)
+    /chunkloaderror/i.test(message) ||
+    /module script/i.test(message)
   ) {
     return "No se pudo cargar un módulo de la aplicación. Recarga la página para volver a sincronizar los archivos.";
   }
@@ -552,7 +597,8 @@ function getFriendlyErrorMessage(rawMessage = "", fallback = FALLBACK_ERROR_MESS
     /networkerror/i.test(message) ||
     /failed to fetch/i.test(message) ||
     /load failed/i.test(message) ||
-    /network request failed/i.test(message)
+    /network request failed/i.test(message) ||
+    /err_internet_disconnected/i.test(message)
   ) {
     return "No se pudo completar una operación de red. Comprueba la conexión o vuelve a intentarlo.";
   }
@@ -570,16 +616,9 @@ function getFriendlyErrorMessage(rawMessage = "", fallback = FALLBACK_ERROR_MESS
 }
 
 export function resolveErrorMessage(error = null, fallback = FALLBACK_ERROR_MESSAGE) {
-  const raw =
-    getRawErrorMessage(
-      error,
-      fallback
-    );
+  const raw = getRawErrorMessage(error, fallback);
 
-  return getFriendlyErrorMessage(
-    raw,
-    fallback
-  );
+  return getFriendlyErrorMessage(raw, fallback);
 }
 
 export function createErrorSnapshot({
@@ -589,64 +628,43 @@ export function createErrorSnapshot({
   boot = false,
   handled = false,
 } = {}) {
-  const atMs =
-    now();
+  const atMs = now();
 
-  const rawMessage =
-    getRawErrorMessage(
-      error,
-      boot
-        ? FALLBACK_BOOT_ERROR_MESSAGE
-        : FALLBACK_ERROR_MESSAGE
-    );
+  const rawMessage = getRawErrorMessage(
+    error,
+    boot
+      ? FALLBACK_BOOT_ERROR_MESSAGE
+      : FALLBACK_ERROR_MESSAGE
+  );
 
-  const message =
-    getFriendlyErrorMessage(
-      rawMessage,
-      boot
-        ? FALLBACK_BOOT_ERROR_MESSAGE
-        : FALLBACK_ERROR_MESSAGE
-    );
+  const message = getFriendlyErrorMessage(
+    rawMessage,
+    boot
+      ? FALLBACK_BOOT_ERROR_MESSAGE
+      : FALLBACK_ERROR_MESSAGE
+  );
 
-  const stack =
-    getErrorStack(error);
+  const stack = getErrorStack(error);
 
   return {
-    source:
-      safeText(source, "runtime"),
+    source: safeText(source, "runtime"),
+    severity: safeText(severity, "error"),
 
-    severity:
-      safeText(severity, "error"),
+    boot: Boolean(boot),
+    handled: Boolean(handled),
 
-    boot:
-      Boolean(boot),
+    name: getErrorName(error),
+    code: getErrorCode(error),
 
-    handled:
-      Boolean(handled),
+    message: redactTokenInText(message),
+    rawMessage: redactTokenInText(rawMessage),
 
-    name:
-      getErrorName(error),
-
-    code:
-      getErrorCode(error),
-
-    message:
-      redactTokenInText(message),
-
-    rawMessage:
-      redactTokenInText(rawMessage),
-
-    url:
-      getErrorUrl(error),
+    url: getErrorUrl(error),
 
     stack,
+    hasStack: Boolean(stack),
 
-    hasStack:
-      Boolean(stack),
-
-    at:
-      safeIsoDate(atMs),
-
+    at: safeIsoDate(atMs),
     atMs,
   };
 }
@@ -656,16 +674,11 @@ function pushRecentError(snapshot = {}) {
 
   errorState.recent.unshift({
     ...snapshot,
-    index:
-      errorState.total,
+    index: errorState.total,
   });
 
   if (errorState.recent.length > MAX_RECENT_ERRORS) {
-    errorState.recent =
-      errorState.recent.slice(
-        0,
-        MAX_RECENT_ERRORS
-      );
+    errorState.recent = errorState.recent.slice(0, MAX_RECENT_ERRORS);
   }
 }
 
@@ -677,18 +690,13 @@ function getThrottleKey(snapshot = {}) {
     snapshot.message,
     snapshot.url,
   ]
-    .map((item) =>
-      safeText(item, "")
-    )
+    .map((item) => safeText(item, ""))
     .join("|");
 }
 
 function shouldThrottleToast(snapshot = {}) {
-  const key =
-    getThrottleKey(snapshot);
-
-  const time =
-    now();
+  const key = getThrottleKey(snapshot);
+  const time = now();
 
   if (
     errorState.lastToastKey === key &&
@@ -697,21 +705,15 @@ function shouldThrottleToast(snapshot = {}) {
     return true;
   }
 
-  errorState.lastToastKey =
-    key;
-
-  errorState.lastToastAt =
-    time;
+  errorState.lastToastKey = key;
+  errorState.lastToastAt = time;
 
   return false;
 }
 
 function shouldThrottleRender(snapshot = {}) {
-  const key =
-    getThrottleKey(snapshot);
-
-  const time =
-    now();
+  const key = getThrottleKey(snapshot);
+  const time = now();
 
   if (
     errorState.lastRenderKey === key &&
@@ -720,11 +722,8 @@ function shouldThrottleRender(snapshot = {}) {
     return true;
   }
 
-  errorState.lastRenderKey =
-    key;
-
-  errorState.lastRenderAt =
-    time;
+  errorState.lastRenderKey = key;
+  errorState.lastRenderAt = time;
 
   return false;
 }
@@ -734,20 +733,12 @@ function shouldThrottleRender(snapshot = {}) {
 ========================================================= */
 
 function safeToastError(Toast, message, options = {}) {
-  const cleanMessage =
-    redactTokenInText(
-      safeText(
-        message,
-        FALLBACK_ERROR_MESSAGE
-      )
-    );
+  const cleanMessage = redactTokenInText(
+    safeText(message, FALLBACK_ERROR_MESSAGE)
+  );
 
   const payload = {
-    title:
-      safeText(
-        options.title,
-        "Error"
-      ),
+    title: safeText(options.title, "Error"),
 
     duration:
       Number.isFinite(Number(options.duration))
@@ -756,19 +747,13 @@ function safeToastError(Toast, message, options = {}) {
 
     ...ensureObject(options),
 
-    type:
-      "error",
-
-    message:
-      cleanMessage,
+    type: "error",
+    message: cleanMessage,
   };
 
   try {
     if (isFunction(Toast?.error)) {
-      return Toast.error(
-        cleanMessage,
-        payload
-      );
+      return Toast.error(cleanMessage, payload);
     }
 
     if (isFunction(Toast?.show)) {
@@ -805,8 +790,7 @@ function safeRedirect(path = LOGIN_PATH) {
     return false;
   }
 
-  const target =
-    safeText(path, LOGIN_PATH);
+  const target = safeText(path, LOGIN_PATH);
 
   try {
     window.location.assign(target);
@@ -838,11 +822,8 @@ function clearAuthSession(Auth, AppCore) {
 
   try {
     Auth?.clearSessionLocal?.({
-      silent:
-        true,
-
-      reason:
-        "boot-error-recovery",
+      silent: true,
+      reason: "boot-error-recovery",
     });
 
     cleared = true;
@@ -856,11 +837,8 @@ function clearAuthSession(Auth, AppCore) {
 
   try {
     Auth?.clear?.({
-      silent:
-        true,
-
-      reason:
-        "boot-error-recovery",
+      silent: true,
+      reason: "boot-error-recovery",
     });
 
     cleared = true;
@@ -868,14 +846,33 @@ function clearAuthSession(Auth, AppCore) {
 
   try {
     AppCore?.clearSession?.({
-      silent:
-        true,
-
-      reason:
-        "boot-error-recovery",
+      silent: true,
+      reason: "boot-error-recovery",
     });
 
     cleared = true;
+  } catch {}
+
+  try {
+    AppCore?.setState?.({
+      authenticated: false,
+      user: null,
+      token: null,
+    });
+
+    cleared = true;
+  } catch {}
+
+  try {
+    if (
+      AppCore?.state &&
+      typeof AppCore.state === "object"
+    ) {
+      AppCore.state.authenticated = false;
+      AppCore.state.user = null;
+      AppCore.state.token = null;
+      cleared = true;
+    }
   } catch {}
 
   return cleared;
@@ -883,9 +880,7 @@ function clearAuthSession(Auth, AppCore) {
 
 function safeSetDocumentTitle(AppCore, title = "Error de inicio") {
   try {
-    AppCore?.setDocumentTitle?.(
-      title
-    );
+    AppCore?.setDocumentTitle?.(title);
     return true;
   } catch {}
 
@@ -894,8 +889,7 @@ function safeSetDocumentTitle(AppCore, title = "Error de inicio") {
   }
 
   try {
-    document.title =
-      title;
+    document.title = title;
     return true;
   } catch {}
 
@@ -908,8 +902,7 @@ function safeHideLoader(hideLoader, AppCore, reason = "boot-error") {
       AppCore,
       {
         reason,
-        minVisibleMs:
-          0,
+        minVisibleMs: 0,
       }
     );
 
@@ -917,9 +910,30 @@ function safeHideLoader(hideLoader, AppCore, reason = "boot-error") {
   } catch {}
 
   try {
-    hideLoader?.(
-      AppCore
-    );
+    hideLoader?.(AppCore);
+    return true;
+  } catch {}
+
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    const loader =
+      document.getElementById("app-loader") ||
+      document.querySelector("[data-app-loader='true'],.app-loader");
+
+    if (!loader) {
+      return false;
+    }
+
+    loader.hidden = true;
+    loader.setAttribute("aria-hidden", "true");
+    loader.setAttribute("aria-busy", "false");
+    loader.dataset.loaderVisible = "false";
+    loader.dataset.loaderState = "hidden";
+    loader.classList.remove("is-visible", "is-leaving", "is-entering");
+    loader.classList.add("is-hidden", "has-hidden");
 
     return true;
   } catch {}
@@ -929,11 +943,7 @@ function safeHideLoader(hideLoader, AppCore, reason = "boot-error") {
 
 function safeSetShellVisibility(setShellVisibility, AppCore, visible = false) {
   try {
-    setShellVisibility?.(
-      AppCore,
-      visible
-    );
-
+    setShellVisibility?.(AppCore, visible);
     return true;
   } catch {}
 
@@ -946,9 +956,7 @@ function getFallbackViewContainer() {
   }
 
   try {
-    return document.querySelector(
-      VIEW_CONTAINER_SELECTOR
-    );
+    return document.querySelector(VIEW_CONTAINER_SELECTOR);
   } catch {}
 
   return null;
@@ -957,8 +965,7 @@ function getFallbackViewContainer() {
 function resolveViewContainer(AppCore, getViewContainer) {
   try {
     if (isFunction(getViewContainer)) {
-      const container =
-        getViewContainer(AppCore);
+      const container = getViewContainer(AppCore);
 
       if (container) {
         return container;
@@ -967,6 +974,113 @@ function resolveViewContainer(AppCore, getViewContainer) {
   } catch {}
 
   return getFallbackViewContainer();
+}
+
+/* =========================================================
+   ERROR SCREEN MARKUP
+========================================================= */
+
+function buildBootErrorHtml(AppCore, snapshot = {}) {
+  const escapedMessage = safeEscapeHtml(AppCore, snapshot.message);
+
+  const escapedRawMessage =
+    snapshot.rawMessage &&
+    snapshot.rawMessage !== snapshot.message
+      ? safeEscapeHtml(AppCore, snapshot.rawMessage)
+      : "";
+
+  const escapedCode = safeEscapeHtml(
+    AppCore,
+    snapshot.code || snapshot.name || "BOOT_ERROR"
+  );
+
+  const escapedAt = safeEscapeHtml(AppCore, snapshot.at);
+
+  return `
+    <section
+      class="content-wrapper boot-error-view"
+      data-view="boot-error"
+      data-boot-error-view="true"
+      aria-labelledby="boot-error-title"
+    >
+      <div class="panel-block boot-error-card" data-boot-error-card="true">
+        <div class="boot-error-card__inner">
+          <div
+            class="boot-error-card__icon"
+            aria-hidden="true"
+          >
+            !
+          </div>
+
+          <div class="boot-error-card__header">
+            <p class="boot-error-card__eyebrow">
+              Boot failure
+            </p>
+
+            <h2
+              id="boot-error-title"
+              class="boot-error-card__title"
+            >
+              Error al iniciar la aplicación
+            </h2>
+
+            <p class="boot-error-card__message">
+              ${escapedMessage}
+            </p>
+          </div>
+
+          <div class="boot-error-card__meta" data-boot-error-meta="true">
+            <div class="boot-error-card__meta-row">
+              <strong>Código:</strong>
+              <span>${escapedCode}</span>
+            </div>
+
+            <div class="boot-error-card__meta-row">
+              <strong>Fecha:</strong>
+              <span>${escapedAt}</span>
+            </div>
+
+            ${
+              escapedRawMessage
+                ? `
+                  <details class="boot-error-card__details">
+                    <summary>Detalle técnico</summary>
+                    <pre>${escapedRawMessage}</pre>
+                  </details>
+                `
+                : ""
+            }
+          </div>
+
+          <div class="boot-error-card__actions">
+            <button
+              type="button"
+              class="ui-btn ui-btn-primary"
+              data-boot-error-action="${ERROR_ACTIONS.retry}"
+            >
+              Reintentar
+            </button>
+
+            <button
+              type="button"
+              class="ui-btn ui-btn-secondary"
+              data-boot-error-action="${ERROR_ACTIONS.resetSession}"
+            >
+              Limpiar sesión
+            </button>
+
+            <button
+              type="button"
+              class="ui-btn ui-btn-secondary"
+              data-boot-error-action="${ERROR_ACTIONS.goLogin}"
+            >
+              Ir al login
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
 }
 
 /* =========================================================
@@ -982,47 +1096,24 @@ export function renderBootError({
   setShellVisibility,
   hideLoader,
 } = {}) {
-  const snapshot =
-    createErrorSnapshot({
-      source:
-        "boot",
-
-      error,
-
-      severity:
-        "critical",
-
-      boot:
-        true,
-
-      handled:
-        true,
-    });
+  const snapshot = createErrorSnapshot({
+    source: "boot",
+    error,
+    severity: "critical",
+    boot: true,
+    handled: true,
+  });
 
   pushRecentError(snapshot);
+  safeSetError(AppCore, snapshot);
 
-  safeSetError(
+  safeEmit(AppCore, ERROR_EVENTS.bootError, snapshot);
+  safeEmit(AppCore, ERROR_EVENTS.render, snapshot);
+
+  const container = resolveViewContainer(
     AppCore,
-    snapshot
+    getViewContainer
   );
-
-  safeEmit(
-    AppCore,
-    APP_EVENTS?.bootError || "app:boot:error",
-    snapshot
-  );
-
-  safeEmit(
-    AppCore,
-    BOOT_ERROR_RENDER_EVENT,
-    snapshot
-  );
-
-  const container =
-    resolveViewContainer(
-      AppCore,
-      getViewContainer
-    );
 
   if (!container) {
     safeError(
@@ -1042,11 +1133,8 @@ export function renderBootError({
         Toast,
         snapshot.message,
         {
-          title:
-            "Error de arranque",
-
-          duration:
-            6000,
+          title: "Error de arranque",
+          duration: 6000,
         }
       );
     }
@@ -1054,22 +1142,17 @@ export function renderBootError({
     return false;
   }
 
-  if (
-    shouldThrottleRender(snapshot)
-  ) {
+  if (shouldThrottleRender(snapshot)) {
     return true;
   }
 
-  safeSetDocumentTitle(
-    AppCore,
-    "Error de inicio"
-  );
+  safeSetDocumentTitle(AppCore, "Error de inicio");
 
-  safeClearViewContainer(
-    AppCore,
-    container
-  );
+  safeClearViewContainer(AppCore, container);
 
+  /*
+    setShellVisibility(false) debe ocultar chrome, no destruir #app-shell.
+  */
   safeSetShellVisibility(
     setShellVisibility,
     AppCore,
@@ -1082,151 +1165,10 @@ export function renderBootError({
     "boot-error"
   );
 
-  const escapedMessage =
-    safeEscapeHtml(
-      AppCore,
-      snapshot.message
-    );
-
-  const escapedRawMessage =
-    snapshot.rawMessage &&
-    snapshot.rawMessage !== snapshot.message
-      ? safeEscapeHtml(
-          AppCore,
-          snapshot.rawMessage
-        )
-      : "";
-
-  const escapedCode =
-    safeEscapeHtml(
-      AppCore,
-      snapshot.code || snapshot.name || "BOOT_ERROR"
-    );
-
-  const escapedAt =
-    safeEscapeHtml(
-      AppCore,
-      snapshot.at
-    );
-
   try {
-    container.innerHTML = `
-      <section class="content-wrapper boot-error-view" data-view="boot-error">
-        <div class="panel-block boot-error-card" style="padding:24px;">
-          <div style="display:grid;gap:18px;max-width:780px;">
-            <div
-              aria-hidden="true"
-              style="
-                width:56px;
-                height:56px;
-                border-radius:16px;
-                display:grid;
-                place-items:center;
-                border:1px solid rgba(255,255,255,.08);
-                background:rgba(255,255,255,.04);
-                font-size:28px;
-              "
-            >
-              ⚠️
-            </div>
-
-            <div style="display:grid;gap:8px;">
-              <p
-                style="
-                  margin:0;
-                  color:var(--accent, #60a5fa);
-                  font-size:13px;
-                  font-weight:700;
-                  letter-spacing:.08em;
-                  text-transform:uppercase;
-                "
-              >
-                Boot failure
-              </p>
-
-              <h2 style="margin:0;">
-                Error al iniciar la aplicación
-              </h2>
-
-              <p style="margin:0;color:var(--text-dim);line-height:1.6;">
-                ${escapedMessage}
-              </p>
-            </div>
-
-            <div
-              style="
-                display:grid;
-                gap:8px;
-                padding:14px;
-                border-radius:14px;
-                border:1px solid rgba(255,255,255,.08);
-                background:rgba(255,255,255,.03);
-                color:var(--text-dim);
-                font-size:13px;
-              "
-            >
-              <div>
-                <strong style="color:var(--text-main);">Código:</strong>
-                ${escapedCode}
-              </div>
-
-              <div>
-                <strong style="color:var(--text-main);">Fecha:</strong>
-                ${escapedAt}
-              </div>
-
-              ${
-                escapedRawMessage
-                  ? `
-                    <details style="margin-top:4px;">
-                      <summary style="cursor:pointer;color:var(--text-main);">
-                        Detalle técnico
-                      </summary>
-                      <pre
-                        style="
-                          white-space:pre-wrap;
-                          margin:10px 0 0;
-                          overflow:auto;
-                          color:var(--text-dim);
-                          font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
-                          font-size:12px;
-                        "
-                      >${escapedRawMessage}</pre>
-                    </details>
-                  `
-                  : ""
-              }
-            </div>
-
-            <div style="display:flex;gap:12px;flex-wrap:wrap;">
-              <button
-                type="button"
-                class="ui-btn ui-btn-primary"
-                data-boot-error-action="${ERROR_ACTIONS.retry}"
-              >
-                Reintentar
-              </button>
-
-              <button
-                type="button"
-                class="ui-btn ui-btn-secondary"
-                data-boot-error-action="${ERROR_ACTIONS.resetSession}"
-              >
-                Limpiar sesión
-              </button>
-
-              <button
-                type="button"
-                class="ui-btn ui-btn-secondary"
-                data-boot-error-action="${ERROR_ACTIONS.goLogin}"
-              >
-                Ir al login
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-    `;
+    container.innerHTML = buildBootErrorHtml(AppCore, snapshot);
+    container.removeAttribute("aria-busy");
+    container.setAttribute("data-view-state", "boot-error");
   } catch (renderError) {
     safeError(
       AppCore,
@@ -1237,20 +1179,17 @@ export function renderBootError({
     return false;
   }
 
-  const retryBtn =
-    container.querySelector?.(
-      `[data-boot-error-action="${ERROR_ACTIONS.retry}"]`
-    );
+  const retryBtn = container.querySelector?.(
+    `[data-boot-error-action="${ERROR_ACTIONS.retry}"]`
+  );
 
-  const resetBtn =
-    container.querySelector?.(
-      `[data-boot-error-action="${ERROR_ACTIONS.resetSession}"]`
-    );
+  const resetBtn = container.querySelector?.(
+    `[data-boot-error-action="${ERROR_ACTIONS.resetSession}"]`
+  );
 
-  const loginBtn =
-    container.querySelector?.(
-      `[data-boot-error-action="${ERROR_ACTIONS.goLogin}"]`
-    );
+  const loginBtn = container.querySelector?.(
+    `[data-boot-error-action="${ERROR_ACTIONS.goLogin}"]`
+  );
 
   if (retryBtn) {
     retryBtn.addEventListener(
@@ -1258,21 +1197,17 @@ export function renderBootError({
       () => {
         safeEmit(
           AppCore,
-          APP_ERROR_RECOVER_EVENT,
+          ERROR_EVENTS.recover,
           {
-            action:
-              ERROR_ACTIONS.retry,
-
-            error:
-              snapshot,
+            action: ERROR_ACTIONS.retry,
+            error: snapshot,
           }
         );
 
         safeReload();
       },
       {
-        once:
-          true,
+        once: true,
       }
     );
   }
@@ -1283,28 +1218,18 @@ export function renderBootError({
       () => {
         safeEmit(
           AppCore,
-          APP_ERROR_RECOVER_EVENT,
+          ERROR_EVENTS.recover,
           {
-            action:
-              ERROR_ACTIONS.resetSession,
-
-            error:
-              snapshot,
+            action: ERROR_ACTIONS.resetSession,
+            error: snapshot,
           }
         );
 
-        clearAuthSession(
-          Auth,
-          AppCore
-        );
-
-        safeRedirect(
-          LOGIN_PATH
-        );
+        clearAuthSession(Auth, AppCore);
+        safeRedirect(LOGIN_PATH);
       },
       {
-        once:
-          true,
+        once: true,
       }
     );
   }
@@ -1315,39 +1240,32 @@ export function renderBootError({
       () => {
         safeEmit(
           AppCore,
-          APP_ERROR_RECOVER_EVENT,
+          ERROR_EVENTS.recover,
           {
-            action:
-              ERROR_ACTIONS.goLogin,
-
-            error:
-              snapshot,
+            action: ERROR_ACTIONS.goLogin,
+            error: snapshot,
           }
         );
 
-        safeRedirect(
-          LOGIN_PATH
-        );
+        safeRedirect(LOGIN_PATH);
       },
       {
-        once:
-          true,
+        once: true,
       }
     );
   }
 
-  if (
-    !shouldThrottleToast(snapshot)
-  ) {
+  try {
+    retryBtn?.focus?.();
+  } catch {}
+
+  if (!shouldThrottleToast(snapshot)) {
     safeToastError(
       Toast,
       snapshot.message,
       {
-        title:
-          "Error de arranque",
-
-        duration:
-          6000,
+        title: "Error de arranque",
+        duration: 6000,
       }
     );
   }
@@ -1375,33 +1293,25 @@ function isResourceErrorEvent(event = null) {
 }
 
 function normalizeResourceError(event = null) {
-  const target =
-    event?.target || {};
+  const target = event?.target || {};
 
-  const tagName =
+  const tagName = safeText(
+    target.tagName,
+    "resource"
+  ).toLowerCase();
+
+  const url = redactTokenInText(
     safeText(
-      target.tagName,
-      "resource"
-    ).toLowerCase();
-
-  const url =
-    redactTokenInText(
-      safeText(
-        target.src ||
-          target.href,
-        ""
-      )
-    );
+      target.src ||
+        target.href,
+      ""
+    )
+  );
 
   return {
-    name:
-      "ResourceLoadError",
-
-    message:
-      `No se pudo cargar el recurso ${tagName}${url ? `: ${url}` : "."}`,
-
+    name: "ResourceLoadError",
+    message: `No se pudo cargar el recurso ${tagName}${url ? `: ${url}` : "."}`,
     url,
-
     target,
   };
 }
@@ -1421,47 +1331,28 @@ function processRuntimeError({
   errorState.handling = true;
 
   try {
-    const snapshot =
-      createErrorSnapshot({
-        source,
-        error,
-        severity,
-        boot:
-          false,
-
-        handled:
-          true,
-      });
+    const snapshot = createErrorSnapshot({
+      source,
+      error,
+      severity,
+      boot: false,
+      handled: true,
+    });
 
     pushRecentError(snapshot);
+    safeSetError(AppCore, snapshot);
 
-    safeSetError(
-      AppCore,
-      snapshot
-    );
+    safeError(AppCore, source, snapshot);
 
-    safeError(
-      AppCore,
-      source,
-      snapshot
-    );
+    safeEmit(AppCore, ERROR_EVENTS.appError, snapshot);
 
     safeEmit(
       AppCore,
-      APP_ERROR_EVENT,
-      snapshot
-    );
-
-    safeEmit(
-      AppCore,
-      APP_ERROR_TELEMETRY_EVENT,
+      ERROR_EVENTS.telemetry,
       {
         ...snapshot,
-        recentCount:
-          errorState.recent.length,
-
-        total:
-          errorState.total,
+        recentCount: errorState.recent.length,
+        total: errorState.total,
       }
     );
 
@@ -1478,8 +1369,7 @@ function processRuntimeError({
               ? "Aviso"
               : "Error",
 
-          duration:
-            5000,
+          duration: 5000,
         }
       );
     }
@@ -1503,6 +1393,12 @@ function rememberBoundListener(target, eventName, handler, options = undefined) 
   });
 }
 
+function rememberDisposer(disposer) {
+  if (isFunction(disposer)) {
+    boundDisposers.push(disposer);
+  }
+}
+
 function bindWithCleanup({
   AppCore,
   scope,
@@ -1511,15 +1407,14 @@ function bindWithCleanup({
   handler,
   options,
 }) {
-  const cleanup =
-    AppCore?.cleanup;
+  const cleanup = AppCore?.cleanup;
 
   if (
     cleanup &&
     isFunction(cleanup.event)
   ) {
     try {
-      cleanup.event(
+      const off = cleanup.event(
         scope,
         target,
         eventName,
@@ -1527,15 +1422,23 @@ function bindWithCleanup({
         options
       );
 
+      if (isFunction(off)) {
+        rememberDisposer(off);
+      }
+
       return true;
     } catch {
       try {
-        cleanup.event(
+        const off = cleanup.event(
           scope,
           target,
           eventName,
           handler
         );
+
+        if (isFunction(off)) {
+          rememberDisposer(off);
+        }
 
         return true;
       } catch {}
@@ -1571,33 +1474,31 @@ export function bindGlobalErrorHandlers({
     return true;
   }
 
+  if (bindingInFlight) {
+    return true;
+  }
+
   if (!isBrowser()) {
     return false;
   }
 
-  const finalScope =
-    safeText(
-      scope,
-      DEFAULT_ERROR_SCOPE
-    );
+  bindingInFlight = true;
+
+  const finalScope = safeText(
+    scope,
+    DEFAULT_ERROR_SCOPE
+  );
 
   const onError = (event) => {
     if (isResourceErrorEvent(event)) {
-      const resourceError =
-        normalizeResourceError(event);
+      const resourceError = normalizeResourceError(event);
 
       processRuntimeError({
         AppCore,
         Toast,
-        source:
-          "window.resource-error",
-
-        error:
-          resourceError,
-
-        severity:
-          "warning",
-
+        source: "window.resource-error",
+        error: resourceError,
+        severity: "warning",
         toast:
           /script|link/i.test(
             safeText(
@@ -1612,139 +1513,101 @@ export function bindGlobalErrorHandlers({
 
     const error =
       event?.error || {
-        name:
-          "WindowError",
-
-        message:
-          event?.message ||
-          "Error global no controlado",
-
-        filename:
-          event?.filename,
-
-        lineno:
-          event?.lineno,
-
-        colno:
-          event?.colno,
+        name: "WindowError",
+        message: event?.message || "Error global no controlado",
+        filename: event?.filename,
+        lineno: event?.lineno,
+        colno: event?.colno,
       };
 
     processRuntimeError({
       AppCore,
       Toast,
-      source:
-        "window.error",
-
+      source: "window.error",
       error,
-
-      severity:
-        "error",
-
-      toast:
-        true,
+      severity: "error",
+      toast: true,
     });
   };
 
   const onReject = (event) => {
     const reason =
       event?.reason || {
-        name:
-          "UnhandledRejection",
-
-        message:
-          "Promise rechazada sin control",
+        name: "UnhandledRejection",
+        message: "Promise rechazada sin control",
       };
 
     processRuntimeError({
       AppCore,
       Toast,
-      source:
-        "unhandledrejection",
-
-      error:
-        reason,
-
-      severity:
-        "error",
-
-      toast:
-        true,
+      source: "unhandledrejection",
+      error: reason,
+      severity: "error",
+      toast: true,
     });
   };
 
-  const okError =
-    bindWithCleanup({
+  try {
+    const okError = bindWithCleanup({
       AppCore,
-      scope:
-        finalScope,
-
-      target:
-        window,
-
-      eventName:
-        "error",
-
-      handler:
-        onError,
-
-      options:
-        true,
+      scope: finalScope,
+      target: window,
+      eventName: "error",
+      handler: onError,
+      options: true,
     });
 
-  const okReject =
-    bindWithCleanup({
+    const okReject = bindWithCleanup({
       AppCore,
-      scope:
-        finalScope,
-
-      target:
-        window,
-
-      eventName:
-        "unhandledrejection",
-
-      handler:
-        onReject,
-
-      options:
-        false,
+      scope: finalScope,
+      target: window,
+      eventName: "unhandledrejection",
+      handler: onReject,
+      options: false,
     });
 
-  handlersBound =
-    Boolean(
-      okError ||
-      okReject
-    );
+    handlersBound = Boolean(okError || okReject);
+    boundScope = handlersBound ? finalScope : "";
 
-  boundScope =
-    handlersBound
-      ? finalScope
-      : "";
+    if (handlersBound) {
+      exposeDebugApi(AppCore);
 
-  if (handlersBound) {
-    safeLog(
+      safeEmit(
+        AppCore,
+        ERROR_EVENTS.handlersBound,
+        {
+          scope: boundScope,
+          at: safeIsoDate(),
+        }
+      );
+
+      safeLog(
+        AppCore,
+        "Global error handlers activos.",
+        {
+          scope: boundScope,
+        }
+      );
+
+      return true;
+    }
+
+    safeError(
       AppCore,
-      "Global error handlers activos.",
-      {
-        scope:
-          boundScope,
-      }
+      "bindGlobalErrorHandlers() no pudo registrar listeners."
     );
 
-    return true;
+    return false;
+  } finally {
+    bindingInFlight = false;
   }
-
-  safeError(
-    AppCore,
-    "bindGlobalErrorHandlers() no pudo registrar listeners."
-  );
-
-  return false;
 }
 
 export function unbindGlobalErrorHandlers(AppCore = null) {
-  if (!handlersBound) {
-    return true;
+  for (const dispose of boundDisposers.splice(0)) {
+    try {
+      dispose();
+    } catch {}
   }
 
   for (const item of boundListeners.splice(0)) {
@@ -1757,11 +1620,17 @@ export function unbindGlobalErrorHandlers(AppCore = null) {
     } catch {}
   }
 
-  handlersBound =
-    false;
+  handlersBound = false;
+  bindingInFlight = false;
+  boundScope = "";
 
-  boundScope =
-    "";
+  safeEmit(
+    AppCore,
+    ERROR_EVENTS.handlersUnbound,
+    {
+      at: safeIsoDate(),
+    }
+  );
 
   safeLog(
     AppCore,
@@ -1772,72 +1641,99 @@ export function unbindGlobalErrorHandlers(AppCore = null) {
 }
 
 /* =========================================================
+   DEBUG API
+========================================================= */
+
+function exposeDebugApi(AppCore = null) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  const api = {
+    getSnapshot:
+      getErrorStateSnapshot,
+
+    reset:
+      resetErrorState,
+
+    resolveMessage:
+      resolveErrorMessage,
+
+    createSnapshot:
+      createErrorSnapshot,
+  };
+
+  try {
+    window.__ONION_APP_ERRORS__ = api;
+  } catch {}
+
+  try {
+    safeDefineValue(AppCore, "Errors", api);
+  } catch {}
+
+  return true;
+}
+
+/* =========================================================
    DEBUG
 ========================================================= */
 
 export function getErrorStateSnapshot() {
   return {
-    handlersBound:
-      Boolean(handlersBound),
+    handlersBound: Boolean(handlersBound),
+    bindingInFlight: Boolean(bindingInFlight),
 
     boundScope,
 
-    handling:
-      Boolean(errorState.handling),
+    boundListeners: boundListeners.length,
+    boundDisposers: boundDisposers.length,
 
-    total:
-      errorState.total,
+    handling: Boolean(errorState.handling),
+
+    total: errorState.total,
+
+    lastToastKey: errorState.lastToastKey,
+    lastToastAt: errorState.lastToastAt,
+    lastToastAtIso:
+      errorState.lastToastAt
+        ? safeIsoDate(errorState.lastToastAt)
+        : "",
+
+    lastRenderKey: errorState.lastRenderKey,
+    lastRenderAt: errorState.lastRenderAt,
+    lastRenderAtIso:
+      errorState.lastRenderAt
+        ? safeIsoDate(errorState.lastRenderAt)
+        : "",
 
     recent:
       errorState.recent.map((item) => ({
-        index:
-          item.index,
-
-        source:
-          item.source,
-
-        severity:
-          item.severity,
-
-        name:
-          item.name,
-
-        code:
-          item.code,
-
-        message:
-          item.message,
-
-        url:
-          item.url,
-
-        at:
-          item.at,
+        index: item.index,
+        source: item.source,
+        severity: item.severity,
+        boot: Boolean(item.boot),
+        handled: Boolean(item.handled),
+        name: item.name,
+        code: item.code,
+        message: item.message,
+        url: item.url,
+        hasStack: Boolean(item.hasStack),
+        at: item.at,
       })),
   };
 }
 
 export function resetErrorState() {
-  errorState.lastToastKey =
-    "";
+  errorState.lastToastKey = "";
+  errorState.lastToastAt = 0;
 
-  errorState.lastToastAt =
-    0;
+  errorState.lastRenderKey = "";
+  errorState.lastRenderAt = 0;
 
-  errorState.lastRenderKey =
-    "";
+  errorState.handling = false;
 
-  errorState.lastRenderAt =
-    0;
-
-  errorState.handling =
-    false;
-
-  errorState.total =
-    0;
-
-  errorState.recent =
-    [];
+  errorState.total = 0;
+  errorState.recent = [];
 
   return getErrorStateSnapshot();
 }

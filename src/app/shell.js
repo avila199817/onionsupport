@@ -39,6 +39,7 @@
    - Compatibilidad AppCore.dom heterogéneo.
    - Compatibilidad ids antiguos y nuevos.
    - Tablehead auto-hidden si no hay contenido.
+   - Chrome montado tarde se re-sincroniza aunque el estado no cambie.
    - Mobile sidebar toggle coherente.
    - Deduplicación de eventos de shell.
    - Logs y snapshots con tokens redactados.
@@ -291,16 +292,16 @@ function safeEmit(AppCore, name, payload = {}, options = {}) {
   try {
     if (isFunction(AppCore?.events?.emit)) {
       busAvailable = true;
-      AppCore.events.emit(eventName, payload);
+
+      AppCore.events.emit(
+        eventName,
+        payload
+      );
+
       busEmitted = true;
     }
   } catch {}
 
-  /*
-    Evita tormenta de eventos:
-    - si existe AppCore.events, no duplicamos por window
-    - window sólo como fallback o si se fuerza explícitamente
-  */
   if (
     opts.window === true ||
     (!busAvailable && isBrowser())
@@ -355,6 +356,10 @@ function emitShellEvent(AppCore, name, payload = {}, options = {}) {
    TOKEN / PATH HELPERS
 ========================================================= */
 
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function redactTokenInText(value = "") {
   let output = safeText(value, "");
 
@@ -365,7 +370,7 @@ function redactTokenInText(value = "") {
   for (const name of TOKEN_PARAM_NAMES) {
     try {
       output = output.replace(
-        new RegExp(`([?&#]${name}=)([^&#\\s]+)`, "gi"),
+        new RegExp(`([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`, "gi"),
         "$1***"
       );
     } catch {}
@@ -548,13 +553,20 @@ function normalizeLocalFullPath(path = DEFAULT_ROUTE) {
   return `${pathname}${search}${hash}`;
 }
 
+function stripSearchAndHash(path = DEFAULT_ROUTE) {
+  const normalized = normalizeLocalFullPath(path || DEFAULT_ROUTE);
+
+  return (
+    normalized
+      .split("?")[0]
+      .split("#")[0] ||
+    DEFAULT_ROUTE
+  );
+}
+
 function normalizePath(AppCore, path = DEFAULT_ROUTE) {
   const local = normalizeLocalFullPath(path || DEFAULT_ROUTE);
 
-  /*
-    Si AppCore expone normalizador propio, lo usamos sólo si no degrada
-    rutas no-root a "/".
-  */
   try {
     if (isFunction(AppCore?.utils?.normalizePath)) {
       const external = normalizeLocalFullPath(
@@ -576,17 +588,6 @@ function normalizePath(AppCore, path = DEFAULT_ROUTE) {
   } catch {}
 
   return local;
-}
-
-function stripSearchAndHash(path = DEFAULT_ROUTE) {
-  const normalized = normalizeLocalFullPath(path || DEFAULT_ROUTE);
-
-  return (
-    normalized
-      .split("?")[0]
-      .split("#")[0] ||
-    DEFAULT_ROUTE
-  );
 }
 
 function isPublicUsernameSegment(segment = "") {
@@ -692,6 +693,31 @@ function queryFirst(selectors = []) {
   }
 
   return null;
+}
+
+function safeAssignDomCache(AppCore, payload = {}) {
+  try {
+    if (!AppCore) {
+      return false;
+    }
+
+    if (
+      !AppCore.dom &&
+      isExtensibleObject(AppCore)
+    ) {
+      AppCore.dom = {};
+    }
+
+    if (!isObject(AppCore.dom)) {
+      return false;
+    }
+
+    Object.assign(AppCore.dom, payload);
+
+    return true;
+  } catch {}
+
+  return false;
 }
 
 function getCachedDomElement(AppCore, key = "", selectors = []) {
@@ -858,31 +884,6 @@ function applyBusy(el, busy = false) {
   setAttribute(el, "aria-busy", Boolean(busy) ? "true" : "false");
 
   return true;
-}
-
-function safeAssignDomCache(AppCore, payload = {}) {
-  try {
-    if (!AppCore) {
-      return false;
-    }
-
-    if (
-      !AppCore.dom &&
-      isExtensibleObject(AppCore)
-    ) {
-      AppCore.dom = {};
-    }
-
-    if (!isObject(AppCore.dom)) {
-      return false;
-    }
-
-    Object.assign(AppCore.dom, payload);
-
-    return true;
-  } catch {}
-
-  return false;
 }
 
 /* =========================================================
@@ -1336,11 +1337,6 @@ function applyRootShellClasses(root, {
   toggleClass(root, CHROME_HIDDEN_CLASS, !chromeVisible);
   toggleClass(root, CHROME_VISIBLE_CLASS, chromeVisible);
 
-  /*
-    Compat layout.css:
-    route-shell-hidden indica chrome oculto / route auth,
-    no implica destruir #app-shell.
-  */
   toggleClass(root, SHELL_VISIBLE_CLASS, appShellVisible);
   toggleClass(root, SHELL_HIDDEN_CLASS, !chromeVisible);
 
@@ -1434,10 +1430,6 @@ function markShellDomState(AppCore, {
     });
   }
 
-  /*
-    #app-shell NO se oculta en auth/reset/activate.
-    Sólo se oculta si hideAppShell=true desde setShellVisibility().
-  */
   if (!finalAppShellVisible) {
     applyHidden(appShell, true);
   } else if (appShell) {
@@ -1532,7 +1524,10 @@ export function setShellVisibility(AppCore, visible = true, options = {}) {
 
   const prevChromeVisible = readShellVisibility(AppCore);
 
-  const authLike = Boolean(opts.authLike);
+  const inferredAuthLike =
+    opts.authLike !== undefined
+      ? Boolean(opts.authLike)
+      : !nextChromeVisible;
 
   const busy = opts.busy !== undefined
     ? Boolean(opts.busy)
@@ -1557,54 +1552,37 @@ export function setShellVisibility(AppCore, visible = true, options = {}) {
   const hasTableheadContent =
     tableheadHasContent(tableheadContainer);
 
-  if (
-    force ||
-    prevChromeVisible !== nextChromeVisible ||
-    opts.forceChromeSync === true
-  ) {
-    /*
-      Sólo ocultamos chrome:
-      - mounts
-      - sidebar/topbar reales
-      - tablehead
+  /*
+    Importante:
+    sincronizamos chrome SIEMPRE, aunque prevChromeVisible === nextChromeVisible.
+    Motivo: SidebarUI/TopbarUI pueden montarse tarde después de Core.init().
+  */
+  for (const chromeElement of [
+    sidebarMount,
+    topbarMount,
+    sidebar,
+    topbar,
+  ]) {
+    applyHidden(chromeElement, chromeHidden);
+  }
 
-      Nunca ocultamos #app-shell aquí.
-    */
-    for (const chromeElement of [
-      sidebarMount,
-      topbarMount,
-      sidebar,
-      topbar,
-    ]) {
-      applyHidden(chromeElement, chromeHidden);
-    }
+  applyHidden(
+    tablehead,
+    chromeHidden || !hasTableheadContent
+  );
 
-    applyHidden(
-      tablehead,
-      chromeHidden || !hasTableheadContent
-    );
+  applyHidden(
+    tableheadContainer,
+    chromeHidden || !hasTableheadContent
+  );
 
-    applyHidden(
-      tableheadContainer,
-      chromeHidden
-    );
+  if (mobileSidebarToggle) {
+    applyHidden(mobileSidebarToggle, chromeHidden);
 
-    if (mobileSidebarToggle) {
-      applyHidden(mobileSidebarToggle, chromeHidden);
-
-      setAttribute(
-        mobileSidebarToggle,
-        "aria-expanded",
-        chromeHidden ? "false" : "true"
-      );
-    }
-  } else {
-    /*
-      Aunque chrome no cambie, tablehead puede haber cambiado de contenido.
-    */
-    applyHidden(
-      tablehead,
-      chromeHidden || !hasTableheadContent
+    setAttribute(
+      mobileSidebarToggle,
+      "aria-expanded",
+      chromeHidden ? "false" : "true"
     );
   }
 
@@ -1612,7 +1590,7 @@ export function setShellVisibility(AppCore, visible = true, options = {}) {
     AppCore,
     {
       chromeVisible: nextChromeVisible,
-      authLike,
+      authLike: inferredAuthLike,
       busy,
       appShellVisible,
     }
@@ -1621,11 +1599,6 @@ export function setShellVisibility(AppCore, visible = true, options = {}) {
   setCoreState(
     AppCore,
     {
-      /*
-        Compat legacy:
-        shellVisible representa chromeVisible.
-        appShellVisible representa el shell raíz real.
-      */
       shellVisible: nextChromeVisible,
       chromeVisible: nextChromeVisible,
 
@@ -1634,10 +1607,10 @@ export function setShellVisibility(AppCore, visible = true, options = {}) {
 
       appShellVisible: domState.shellVisible,
 
-      shellAuthLike: authLike,
+      shellAuthLike: inferredAuthLike,
       shellBusy: busy,
 
-      routeMode: authLike ? "auth" : "app",
+      routeMode: inferredAuthLike ? "auth" : "app",
 
       shellUpdatedAt: safeIsoDate(),
     }
@@ -1655,9 +1628,12 @@ export function setShellVisibility(AppCore, visible = true, options = {}) {
       chromeVisible: nextChromeVisible,
       appShellVisible: domState.shellVisible,
 
-      changed: prevChromeVisible !== nextChromeVisible,
+      changed:
+        force ||
+        prevChromeVisible !== nextChromeVisible ||
+        opts.forceChromeSync === true,
 
-      authLike,
+      authLike: inferredAuthLike,
       busy,
 
       canonical: snapshot.canonical,
@@ -1750,7 +1726,10 @@ function routeRequestsHiddenChrome(route = null) {
 function getRouterRoute(AppCore, Router, canonicalPath = "") {
   try {
     if (isFunction(Router?.getRoute)) {
-      return Router.getRoute(canonicalPath || getCurrentCanonicalPath(AppCore, Router));
+      return Router.getRoute(
+        canonicalPath ||
+          getCurrentCanonicalPath(AppCore, Router)
+      );
     }
   } catch {}
 
@@ -1833,10 +1812,6 @@ export function updateShellVisibilityByRoute(AppCore, Router, options = {}) {
           isAuthLikeRoute(AppCore, Router)
       );
 
-  /*
-    En auth-like ocultamos chrome.
-    #app-shell sigue visible para login/reset/activate.
-  */
   return setShellVisibility(
     AppCore,
     !authLike,
@@ -1890,11 +1865,6 @@ function hideLoaderSafe(AppCore, hideLoader, options = {}) {
     isBootingOrLoading(AppCore) ||
     hasBodyBootClass();
 
-  /*
-    Regla anti-flicker:
-    durante boot/loading real NO escondemos loader desde shell.js
-    salvo force explícito.
-  */
   if (
     bootBusy &&
     opts.force !== true
@@ -1916,9 +1886,6 @@ function hideLoaderSafe(AppCore, hideLoader, options = {}) {
     }
   } catch {}
 
-  /*
-    Fallback DOM sólo fuera de boot. En boot ya habríamos retornado arriba.
-  */
   return hideLoaderDomFallback(AppCore);
 }
 
@@ -1951,6 +1918,7 @@ export function applyPostRenderLoaderPolicy({
       authLike,
       busy: !hasContent || bootBusy,
       hideAppShell: false,
+      forceChromeSync: true,
       reason: "post-render-policy",
     }
   );

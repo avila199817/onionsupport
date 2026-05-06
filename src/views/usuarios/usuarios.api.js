@@ -2,28 +2,30 @@
    Onion SPA - Usuarios API
    Archivo: src/views/usuarios/usuarios.api.js
 
-   FINAL PRO SYSTEM · API LAYER · ADMIN USERS · 10/10
+   FINAL PRO SYSTEM · API LAYER · ADMIN USERS · EXTREME 10/10
 
    RESPONSABILIDADES:
    - centralizar llamadas HTTP del módulo usuarios
-   - listado + detalle + create
+   - listado completo admin con paginación backend por continuation token
+   - detalle + create + update + delete
    - refresh forzado
    - hidratar store/state/cache
    - normalizar payloads backend heterogéneos
    - soportar adapters múltiples de request
    - anti-race soft para listado
    - deduplicación/coherencia con usuarios.store.js
-   - compatibilidad con envelopes { ok, count, users }
-   - compatibilidad con users / usuarios / items / rows / data / results
-
-   HARDENING PRO:
-   - get detalle devuelve objeto limpio
-   - soporta { ok, data, user, usuario, item, payload, result }
-   - soporta arrays / envelopes / nested envelopes
+   - compatibilidad con envelopes:
+     · { ok, total, totalCount, remoteCount, users }
+     · { ok, count, usuarios }
+     · { items, rows, data, results, records }
    - fallback AppCore.apiClient -> AppCore.request -> Http -> fetch
-   - persistencia coherente en store/state/cache
    - no loading infinito
    - no pisa cache buena con payload vacío accidental
+
+   FIX CRÍTICO:
+   - El backend puede paginar por defecto a 10.
+   - La vista admin necesita traer todas las páginas visibles.
+   - La paginación visual sigue siendo de 5 en el template/model.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -54,7 +56,6 @@ import {
   getUsuarios,
   replaceUsuariosStore,
   upsertUsuarioStore,
-  upsertUsuariosStore,
   getUsuarioByIdStore,
 } from "./usuarios.store.js";
 
@@ -71,6 +72,12 @@ import {
 
 const USUARIOS_ENDPOINT = "/api/users";
 const USUARIOS_TIMEOUT = 15000;
+
+const USUARIOS_FETCH_LIMIT = 250;
+const USUARIOS_MAX_PAGES = 20;
+
+const USUARIOS_DEFAULT_SORT_BY = "updatedAt";
+const USUARIOS_DEFAULT_SORT_DIR = "DESC";
 
 let lastLoadToken = 0;
 
@@ -118,10 +125,15 @@ function first(...values) {
   return null;
 }
 
-function normalizeErrorMessage(
-  error = null,
-  fallback = "Error de API."
-) {
+function readStorage(storage, key = "") {
+  try {
+    return storage?.getItem?.(key);
+  } catch {
+    return "";
+  }
+}
+
+function normalizeErrorMessage(error = null, fallback = "Error de API.") {
   return safeText(
     first(
       error?.message,
@@ -187,6 +199,31 @@ function buildAbsoluteUrl(path = "") {
   return `${base}${cleanPath.startsWith("/") ? "" : "/"}${cleanPath}`;
 }
 
+function appendQueryParams(path = "", params = {}) {
+  const cleanPath = safeText(path, "");
+  const obj = safeObject(params);
+
+  const entries = Object.entries(obj).filter(([, value]) => {
+    if (value === undefined || value === null) return false;
+    if (typeof value === "string" && value.trim() === "") return false;
+    return true;
+  });
+
+  if (!entries.length) {
+    return cleanPath;
+  }
+
+  const query = new URLSearchParams();
+
+  for (const [key, value] of entries) {
+    query.set(key, String(value));
+  }
+
+  const separator = cleanPath.includes("?") ? "&" : "?";
+
+  return `${cleanPath}${separator}${query.toString()}`;
+}
+
 function getAuthToken() {
   return safeText(
     first(
@@ -197,10 +234,14 @@ function getAuthToken() {
       AppCore?.auth?.getToken?.(),
       AppCore?.Auth?.getToken?.(),
       AppCore?.modules?.Auth?.getToken?.(),
-      localStorage.getItem("token"),
-      localStorage.getItem("accessToken"),
-      sessionStorage.getItem("token"),
-      sessionStorage.getItem("accessToken")
+      readStorage(globalThis?.localStorage, "token"),
+      readStorage(globalThis?.localStorage, "accessToken"),
+      readStorage(globalThis?.localStorage, "onion_token"),
+      readStorage(globalThis?.localStorage, "onion_access_token"),
+      readStorage(globalThis?.sessionStorage, "token"),
+      readStorage(globalThis?.sessionStorage, "accessToken"),
+      readStorage(globalThis?.sessionStorage, "onion_token"),
+      readStorage(globalThis?.sessionStorage, "onion_access_token")
     ),
     ""
   );
@@ -235,7 +276,7 @@ function getHttpModule() {
   return (
     AppCore?.modules?.Http ||
     AppCore?.Http ||
-    window?.Http ||
+    globalThis?.Http ||
     null
   );
 }
@@ -336,39 +377,46 @@ function pickTotal(payload = null, fallback = 0) {
   const response = safeObject(obj.response);
   const meta = safeObject(obj.meta);
   const pagination = safeObject(obj.pagination);
+  const pageInfo = safeObject(obj.pageInfo);
 
   const candidates = [
     obj.total,
-    obj.count,
-    obj.remoteCount,
     obj.totalCount,
+    obj.remoteCount,
 
     pagination.total,
-    pagination.count,
     pagination.totalCount,
 
+    pageInfo.total,
+    pageInfo.totalCount,
+
     meta.total,
-    meta.count,
     meta.totalCount,
 
     data.total,
-    data.count,
-    data.remoteCount,
     data.totalCount,
+    data.remoteCount,
     data?.pagination?.total,
+    data?.pagination?.totalCount,
     data?.meta?.total,
+    data?.meta?.totalCount,
 
     payloadObj.total,
-    payloadObj.count,
-    payloadObj.remoteCount,
     payloadObj.totalCount,
+    payloadObj.remoteCount,
     payloadObj?.pagination?.total,
+    payloadObj?.pagination?.totalCount,
     payloadObj?.meta?.total,
+    payloadObj?.meta?.totalCount,
 
     response.total,
-    response.count,
-    response.remoteCount,
     response.totalCount,
+    response.remoteCount,
+
+    obj.count,
+    data.count,
+    payloadObj.count,
+    response.count,
 
     fallback,
   ];
@@ -382,6 +430,80 @@ function pickTotal(payload = null, fallback = 0) {
   }
 
   return Math.max(0, fallback);
+}
+
+function pickContinuationToken(payload = null) {
+  const obj = safeObject(payload);
+  const data = safeObject(obj.data);
+  const payloadObj = safeObject(obj.payload);
+  const response = safeObject(obj.response);
+  const pagination = safeObject(obj.pagination);
+  const pageInfo = safeObject(obj.pageInfo);
+
+  return safeText(
+    first(
+      obj.continuationToken,
+      obj.nextContinuationToken,
+      obj.nextToken,
+      obj.ct,
+
+      pagination.continuationToken,
+      pagination.nextContinuationToken,
+      pagination.nextToken,
+      pagination.ct,
+
+      pageInfo.continuationToken,
+      pageInfo.nextContinuationToken,
+      pageInfo.nextToken,
+      pageInfo.ct,
+
+      data.continuationToken,
+      data.nextContinuationToken,
+      data.nextToken,
+      data.ct,
+      data?.pagination?.continuationToken,
+      data?.pagination?.nextToken,
+
+      payloadObj.continuationToken,
+      payloadObj.nextContinuationToken,
+      payloadObj.nextToken,
+      payloadObj.ct,
+      payloadObj?.pagination?.continuationToken,
+      payloadObj?.pagination?.nextToken,
+
+      response.continuationToken,
+      response.nextContinuationToken,
+      response.nextToken,
+      response.ct
+    ),
+    ""
+  );
+}
+
+function pickHasMore(payload = null) {
+  const obj = safeObject(payload);
+  const data = safeObject(obj.data);
+  const payloadObj = safeObject(obj.payload);
+  const response = safeObject(obj.response);
+  const pagination = safeObject(obj.pagination);
+  const pageInfo = safeObject(obj.pageInfo);
+
+  const explicit = first(
+    obj.hasMore,
+    obj.more,
+    pagination.hasMore,
+    pageInfo.hasMore,
+    data.hasMore,
+    data?.pagination?.hasMore,
+    payloadObj.hasMore,
+    payloadObj?.pagination?.hasMore,
+    response.hasMore
+  );
+
+  if (explicit === true) return true;
+  if (explicit === false) return false;
+
+  return Boolean(pickContinuationToken(payload));
 }
 
 function looksLikeUsuario(value = null) {
@@ -467,6 +589,92 @@ function normalizeDetailForState(payload = null) {
   return normalizeUsuarioModel(detail);
 }
 
+function mergeListResponses(responses = []) {
+  const pages = safeArray(responses).filter(Boolean);
+
+  if (!pages.length) {
+    return {
+      ok: true,
+      total: 0,
+      totalCount: 0,
+      remoteCount: 0,
+      returned: 0,
+      count: 0,
+      usuarios: [],
+      users: [],
+      items: [],
+      data: [],
+      hasMore: false,
+      continuationToken: null,
+    };
+  }
+
+  const merged = [];
+  const seen = new Set();
+
+  for (const page of pages) {
+    const pageItems = pickItems(page);
+
+    for (const item of pageItems) {
+      const normalized = normalizeUsuarioModel(item);
+      const id = safeText(
+        first(
+          normalized.userId,
+          normalized.id,
+          normalized.email,
+          normalized.username,
+          item?.userId,
+          item?.id,
+          item?.email,
+          item?.username
+        ),
+        ""
+      );
+
+      const key = id || JSON.stringify(item);
+
+      if (seen.has(key)) continue;
+
+      seen.add(key);
+      merged.push(normalized);
+    }
+  }
+
+  const last = pages[pages.length - 1];
+  const totals = pages.map((page) => pickTotal(page, 0)).filter((n) => n > 0);
+  const total = Math.max(merged.length, ...totals, 0);
+
+  return {
+    ...safeObject(last),
+
+    ok: true,
+
+    total,
+    totalCount: total,
+    remoteCount: total,
+
+    count: total,
+    returned: merged.length,
+
+    hasMore: pickHasMore(last),
+    continuationToken: pickContinuationToken(last) || null,
+
+    usuarios: merged,
+    users: merged,
+    items: merged,
+    data: merged,
+
+    pagination: {
+      ...safeObject(last?.pagination),
+      total,
+      totalCount: total,
+      returned: merged.length,
+      hasMore: pickHasMore(last),
+      continuationToken: pickContinuationToken(last) || null,
+    },
+  };
+}
+
 /* =========================================================
    REQUEST ADAPTERS
 ========================================================= */
@@ -485,44 +693,31 @@ async function requestViaApiClient(method = "GET", path = "", options = {}) {
       timeout: options.timeout,
       auth: true,
       headers: options.headers,
-      params: options.params,
     });
   }
 
   if (verb === "post" && typeof client.post === "function") {
-    return client.post(
-      path,
-      options.body,
-      {
-        timeout: options.timeout,
-        auth: true,
-        headers: options.headers,
-      }
-    );
+    return client.post(path, options.body, {
+      timeout: options.timeout,
+      auth: true,
+      headers: options.headers,
+    });
   }
 
   if (verb === "put" && typeof client.put === "function") {
-    return client.put(
-      path,
-      options.body,
-      {
-        timeout: options.timeout,
-        auth: true,
-        headers: options.headers,
-      }
-    );
+    return client.put(path, options.body, {
+      timeout: options.timeout,
+      auth: true,
+      headers: options.headers,
+    });
   }
 
   if (verb === "patch" && typeof client.patch === "function") {
-    return client.patch(
-      path,
-      options.body,
-      {
-        timeout: options.timeout,
-        auth: true,
-        headers: options.headers,
-      }
-    );
+    return client.patch(path, options.body, {
+      timeout: options.timeout,
+      auth: true,
+      headers: options.headers,
+    });
   }
 
   if (verb === "delete" && typeof client.delete === "function") {
@@ -540,7 +735,6 @@ async function requestViaApiClient(method = "GET", path = "", options = {}) {
       auth: true,
       headers: options.headers,
       body: options.body,
-      params: options.params,
     });
   }
 
@@ -576,41 +770,28 @@ async function requestViaHttpModule(method = "GET", path = "", options = {}) {
     return Http.get(path, {
       headers: options.headers,
       timeout: options.timeout,
-      params: options.params,
     });
   }
 
   if (verb === "post" && typeof Http.post === "function") {
-    return Http.post(
-      path,
-      options.body,
-      {
-        headers: options.headers,
-        timeout: options.timeout,
-      }
-    );
+    return Http.post(path, options.body, {
+      headers: options.headers,
+      timeout: options.timeout,
+    });
   }
 
   if (verb === "put" && typeof Http.put === "function") {
-    return Http.put(
-      path,
-      options.body,
-      {
-        headers: options.headers,
-        timeout: options.timeout,
-      }
-    );
+    return Http.put(path, options.body, {
+      headers: options.headers,
+      timeout: options.timeout,
+    });
   }
 
   if (verb === "patch" && typeof Http.patch === "function") {
-    return Http.patch(
-      path,
-      options.body,
-      {
-        headers: options.headers,
-        timeout: options.timeout,
-      }
-    );
+    return Http.patch(path, options.body, {
+      headers: options.headers,
+      timeout: options.timeout,
+    });
   }
 
   if (verb === "delete" && typeof Http.delete === "function") {
@@ -626,7 +807,6 @@ async function requestViaHttpModule(method = "GET", path = "", options = {}) {
       headers: options.headers,
       timeout: options.timeout,
       body: options.body,
-      params: options.params,
     });
   }
 
@@ -651,6 +831,7 @@ async function requestViaFetch(method = "GET", path = "", options = {}) {
       headers: options.headers,
       body: hasBody ? JSON.stringify(options.body) : undefined,
       signal: controller.signal,
+      cache: method.toUpperCase() === "GET" ? "no-store" : "default",
     });
 
     const text = await response.text();
@@ -664,12 +845,15 @@ async function requestViaFetch(method = "GET", path = "", options = {}) {
     }
 
     if (!response.ok) {
-      throw new Error(
-        normalizeErrorMessage(
-          data,
-          `HTTP ${response.status}`
-        )
+      const error = new Error(
+        normalizeErrorMessage(data, `HTTP ${response.status}`)
       );
+
+      error.status = response.status;
+      error.statusText = response.statusText;
+      error.data = data;
+
+      throw error;
     }
 
     return data;
@@ -680,11 +864,11 @@ async function requestViaFetch(method = "GET", path = "", options = {}) {
 
 async function request(method = "GET", path = "", options = {}) {
   const hasBody = options.body !== undefined && options.body !== null;
+  const requestPath = appendQueryParams(path, options.params);
 
   const requestOptions = {
     timeout: safeNumber(options.timeout, USUARIOS_TIMEOUT),
     body: options.body,
-    params: options.params,
     headers: getRequestHeaders({
       ...(hasBody
         ? {
@@ -706,7 +890,7 @@ async function request(method = "GET", path = "", options = {}) {
 
   for (const adapter of adapters) {
     try {
-      return await adapter(method, path, requestOptions);
+      return await adapter(method, requestPath, requestOptions);
     } catch (error) {
       lastError = error;
     }
@@ -726,10 +910,7 @@ function syncUsuariosCollection({
   writeCache = true,
 } = {}) {
   const list = normalizeUsuariosCollection(items);
-  const count = Math.max(
-    list.length,
-    safeNumber(remoteCount, list.length)
-  );
+  const count = Math.max(list.length, safeNumber(remoteCount, list.length));
 
   replaceUsuariosStore(list);
 
@@ -785,75 +966,115 @@ function syncUsuarioDetail(detail = null) {
    RAW REQUESTS
 ========================================================= */
 
-export async function fetchUsuariosRequest() {
-  return request(
-    "GET",
-    getUsuariosEndpoint(),
-    {
-      timeout: USUARIOS_TIMEOUT,
-    }
-  );
+function buildUsuariosListParams({
+  limit = USUARIOS_FETCH_LIMIT,
+  ct = "",
+  includeTotal = true,
+  sortBy = USUARIOS_DEFAULT_SORT_BY,
+  sortDir = USUARIOS_DEFAULT_SORT_DIR,
+  role = "",
+  tipo = "",
+  active,
+  emailVerified,
+  hasAvatar,
+  has2fa,
+  search = "",
+} = {}) {
+  return {
+    limit: clampLimit(limit),
+    includeTotal: includeTotal ? "true" : "false",
+    sortBy,
+    sortDir,
+
+    ...(ct ? { ct } : {}),
+    ...(role ? { role } : {}),
+    ...(tipo ? { tipo } : {}),
+    ...(active !== undefined ? { active: String(Boolean(active)) } : {}),
+    ...(emailVerified !== undefined
+      ? { emailVerified: String(Boolean(emailVerified)) }
+      : {}),
+    ...(hasAvatar !== undefined ? { hasAvatar: String(Boolean(hasAvatar)) } : {}),
+    ...(has2fa !== undefined ? { has2fa: String(Boolean(has2fa)) } : {}),
+    ...(search ? { search } : {}),
+  };
+}
+
+function clampLimit(value = USUARIOS_FETCH_LIMIT) {
+  return Math.min(Math.max(safeNumber(value, USUARIOS_FETCH_LIMIT), 1), 500);
+}
+
+async function fetchUsuariosPageRequest(options = {}) {
+  return request("GET", getUsuariosEndpoint(), {
+    timeout: USUARIOS_TIMEOUT,
+    params: buildUsuariosListParams(options),
+  });
+}
+
+export async function fetchUsuariosRequest(options = {}) {
+  const all = options?.all !== false;
+
+  if (!all) {
+    return fetchUsuariosPageRequest(options);
+  }
+
+  const responses = [];
+  let ct = safeText(options?.ct, "");
+  let page = 0;
+
+  do {
+    page += 1;
+
+    const response = await fetchUsuariosPageRequest({
+      ...options,
+      ct,
+      includeTotal: page === 1,
+    });
+
+    responses.push(response);
+
+    ct = pickContinuationToken(response);
+  } while (ct && page < USUARIOS_MAX_PAGES);
+
+  return mergeListResponses(responses);
 }
 
 export async function getUsuarioByIdRequest(id = "") {
-  const response = await request(
-    "GET",
-    getUsuarioEndpoint(id),
-    {
-      timeout: USUARIOS_TIMEOUT,
-    }
-  );
+  const response = await request("GET", getUsuarioEndpoint(id), {
+    timeout: USUARIOS_TIMEOUT,
+  });
 
   return normalizeDetailForState(response);
 }
 
 export async function createUsuarioRequest(payload = {}) {
-  const response = await request(
-    "POST",
-    getUsuariosEndpoint(),
-    {
-      timeout: USUARIOS_TIMEOUT,
-      body: safeObject(payload),
-    }
-  );
+  const response = await request("POST", getUsuariosEndpoint(), {
+    timeout: USUARIOS_TIMEOUT,
+    body: safeObject(payload),
+  });
 
   return normalizeDetailForState(response) || response;
 }
 
-/* =========================================================
-   OPTIONAL REQUESTS
-========================================================= */
-
 export async function updateUsuarioRequest(id = "", payload = {}) {
-  const response = await request(
-    "PATCH",
-    getUsuarioEndpoint(id),
-    {
-      timeout: USUARIOS_TIMEOUT,
-      body: safeObject(payload),
-    }
-  );
+  const response = await request("PATCH", getUsuarioEndpoint(id), {
+    timeout: USUARIOS_TIMEOUT,
+    body: safeObject(payload),
+  });
 
   return normalizeDetailForState(response) || response;
 }
 
 export async function deleteUsuarioRequest(id = "") {
-  return request(
-    "DELETE",
-    getUsuarioEndpoint(id),
-    {
-      timeout: USUARIOS_TIMEOUT,
-    }
-  );
+  return request("DELETE", getUsuarioEndpoint(id), {
+    timeout: USUARIOS_TIMEOUT,
+  });
 }
 
 /* =========================================================
    CACHE HYDRATE
 ========================================================= */
 
-export function hydrateFromCache({
-  freshOnly = true,
-} = {}) {
+export function hydrateFromCache({ freshOnly = true } = {}) {
   try {
     const hydrated = hydrateStateFromCache?.({
       freshOnly,
@@ -904,6 +1125,7 @@ export function hydrateFromCache({
 export async function loadUsuarios({
   force = false,
   silent = false,
+  filters = {},
 } = {}) {
   const existingInflight = getInflightLoad?.();
 
@@ -927,7 +1149,14 @@ export async function loadUsuarios({
         setRefreshing(true);
       }
 
-      const response = await fetchUsuariosRequest();
+      const response = await fetchUsuariosRequest({
+        all: true,
+        limit: USUARIOS_FETCH_LIMIT,
+        includeTotal: true,
+        sortBy: USUARIOS_DEFAULT_SORT_BY,
+        sortDir: USUARIOS_DEFAULT_SORT_DIR,
+        ...safeObject(filters),
+      });
 
       const rawItems = pickItems(response);
       const normalizedItems = normalizeListForState(response);
@@ -1012,9 +1241,7 @@ export async function loadUsuarioDetail(userId = "") {
     throw new Error("USUARIO_ID_REQUIRED");
   }
 
-  const cached =
-    findUsuarioById(getUsuarios(), id) ||
-    getUsuarioByIdStore(id);
+  const cached = findUsuarioById(getUsuarios(), id) || getUsuarioByIdStore(id);
 
   try {
     const detail = await getUsuarioByIdRequest(id);
@@ -1055,7 +1282,7 @@ export async function createUsuario(payload = {}) {
 }
 
 /* =========================================================
-   UPDATE / DELETE OPTIONAL HELPERS
+   UPDATE / DELETE
 ========================================================= */
 
 export async function updateUsuario(id = "", payload = {}) {

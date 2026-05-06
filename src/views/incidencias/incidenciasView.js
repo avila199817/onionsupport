@@ -2,7 +2,7 @@
    Onion SPA - Incidencias View
    Archivo: src/views/incidencias/incidenciasView.js
 
-   EXTREME PRO SYSTEM · INCIDENCIAS VIEW · CSP CLEAN · 16/10
+   EXTREME PRO SYSTEM · INCIDENCIAS VIEW · CSP CLEAN · FINAL 18/10
    PATCH · FACTURAS VIEW PARITY
    PATCH · SINGLE TEMPLATE OWNER
    PATCH · NO INLINE STYLE
@@ -20,14 +20,9 @@
    PATCH · FACTURAS LINKED PRESERVER
    PATCH · RERENDER SAFE
    PATCH · CLEANUP ENTERPRISE
-
-   FIX CLAVE:
-   - La View abre el modal una sola vez con snapshot local.
-   - El detalle remoto solo actualiza el modal.
-   - La View NO emite incidencias:open:success para no reactivar
-     el listener interno del modal.
-   - Se emite incidencias:view:open:success como evento no destructivo.
-   - Anti doble click, anti doble evento, anti doble búsqueda.
+   PATCH · TEMPLATE DOM BIND CONNECTED
+   PATCH · TECHNICIAN AVATAR STATE BRIDGE
+   PATCH · ROW CLICK DOUBLE OPEN GUARD
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -62,7 +57,9 @@ import {
   getIncidencias,
 } from "./incidencias.store.js";
 
-import renderIncidenciasTableTemplate from "./incidencias.table.template.js";
+import renderIncidenciasTableTemplate, {
+  bindIncidenciasTemplateDom,
+} from "./incidencias.table.template.js";
 
 import {
   DEFAULT_PAGE_SIZE as MODEL_DEFAULT_PAGE_SIZE,
@@ -84,10 +81,6 @@ import { OnionIncidenciasModal } from "./incidencias.modal.js";
 
 export const IncidenciasView = (() => {
   "use strict";
-
-  /* =========================================================
-     CONSTANTS
-  ========================================================= */
 
   const SCOPE = "view:incidencias";
 
@@ -274,10 +267,6 @@ export const IncidenciasView = (() => {
     "router:rendered",
   ]);
 
-  /* =========================================================
-     MODULE STATE
-  ========================================================= */
-
   let initialized = false;
   let destroyed = false;
 
@@ -310,10 +299,6 @@ export const IncidenciasView = (() => {
   let activeFilter = DEFAULT_FILTER;
   let filterQuery = "";
   let filterSearchTimer = 0;
-
-  /* =========================================================
-     PRIMITIVES
-  ========================================================= */
 
   function safeText(value, fallback = "") {
     if (value === null || value === undefined) return fallback;
@@ -417,10 +402,6 @@ export const IncidenciasView = (() => {
       .replace(/^_+|_+$/g, "");
   }
 
-  function normalizeWhitespace(value = "") {
-    return safeText(value, "").replace(/\s+/g, " ").trim();
-  }
-
   function normalizeMoney(value, fallback = null) {
     if (value === null || value === undefined || value === "") return fallback;
 
@@ -470,10 +451,6 @@ export const IncidenciasView = (() => {
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
   }
-
-  /* =========================================================
-     CORE / EVENTS
-  ========================================================= */
 
   function safeLog(...args) {
     try {
@@ -613,10 +590,6 @@ export const IncidenciasView = (() => {
     );
   }
 
-  /* =========================================================
-     FRAME / TOKEN
-  ========================================================= */
-
   function nextRenderToken() {
     renderToken += 1;
     return renderToken;
@@ -682,10 +655,6 @@ export const IncidenciasView = (() => {
     });
   }
 
-  /* =========================================================
-     CLEANUP
-  ========================================================= */
-
   function cleanupExternalOpenListener() {
     try {
       externalOpenCleanup?.();
@@ -747,19 +716,13 @@ export const IncidenciasView = (() => {
     } catch {}
   }
 
-  /* =========================================================
-     FILTERS
-  ========================================================= */
-
   function normalizeFilter(value = DEFAULT_FILTER) {
     const key = normalizeKey(value || DEFAULT_FILTER);
-
     return FILTER_ALIASES[key] || DEFAULT_FILTER;
   }
 
   function normalizeStatusKey(value = "") {
     const key = normalizeKey(value || "");
-
     return STATUS_ALIASES[key] || "pending";
   }
 
@@ -1036,10 +999,6 @@ export const IncidenciasView = (() => {
     }, FILTER_SEARCH_DEBOUNCE_MS);
   }
 
-  /* =========================================================
-     TICKET ID HELPERS
-  ========================================================= */
-
   function sameTicketIdentity(a = "", b = "") {
     const left = normalizeText(a);
     const right = normalizeText(b);
@@ -1296,10 +1255,6 @@ export const IncidenciasView = (() => {
     }
   }
 
-  /* =========================================================
-     PAYLOAD HELPERS
-  ========================================================= */
-
   function extractItemsFromPayload(payload = null) {
     if (Array.isArray(payload)) return payload;
 
@@ -1366,10 +1321,6 @@ export const IncidenciasView = (() => {
 
     return map;
   }
-
-  /* =========================================================
-     INVOICE FIELD PRESERVER
-  ========================================================= */
 
   function collectInvoiceObjects(source = {}, raw = {}) {
     const output = [];
@@ -2018,10 +1969,6 @@ export const IncidenciasView = (() => {
     };
   }
 
-  /* =========================================================
-     STORE / DETAIL MERGE
-  ========================================================= */
-
   function getRawItems() {
     try {
       return safeArray(getIncidencias());
@@ -2168,10 +2115,6 @@ export const IncidenciasView = (() => {
     );
   }
 
-  /* =========================================================
-     STATE HELPERS
-  ========================================================= */
-
   function ensureBaseState() {
     try {
       if (!Number.isFinite(Number(incidenciasState.page))) {
@@ -2316,10 +2259,6 @@ export const IncidenciasView = (() => {
     }
   }
 
-  /* =========================================================
-     APP READY
-  ========================================================= */
-
   function isDomReady() {
     return Boolean(
       typeof document !== "undefined" &&
@@ -2359,9 +2298,64 @@ export const IncidenciasView = (() => {
     return true;
   }
 
-  /* =========================================================
-     MODAL BRIDGES
-  ========================================================= */
+  function getCurrentUserSnapshot() {
+    const coreState = safeObject(AppCore?.state);
+    const authState = safeObject(coreState.auth);
+
+    let globalState = {};
+
+    try {
+      globalState = safeObject(window?.AppCore?.state);
+    } catch {}
+
+    return safeObject(
+      first(
+        coreState.user,
+        coreState.currentUser,
+        coreState.sessionUser,
+        authState.user,
+
+        globalState.user,
+        globalState.currentUser,
+        globalState.sessionUser,
+        globalState.auth?.user,
+
+        {}
+      )
+    );
+  }
+
+  function getCurrentUserAvatarSnapshot(user = getCurrentUserSnapshot()) {
+    const source = safeObject(user);
+    const raw = safeObject(source.raw);
+
+    return safeText(
+      first(
+        source.avatar,
+        source.avatarUrl,
+        source.photo,
+        source.photoUrl,
+        source.picture,
+        source.pictureUrl,
+        source.image,
+        source.imageUrl,
+        source.profileImage,
+        source.profileImageUrl,
+
+        raw.avatar,
+        raw.avatarUrl,
+        raw.photo,
+        raw.photoUrl,
+        raw.picture,
+        raw.pictureUrl,
+        raw.image,
+        raw.imageUrl,
+        raw.profileImage,
+        raw.profileImageUrl
+      ),
+      ""
+    );
+  }
 
   function openTicketModalBridge(detail = null, options = {}) {
     const payload = safeObject(detail);
@@ -2539,10 +2533,6 @@ export const IncidenciasView = (() => {
     return true;
   }
 
-  /* =========================================================
-     DOM
-  ========================================================= */
-
   function applyErrorStateToDom(container) {
     if (!container) return;
 
@@ -2577,12 +2567,14 @@ export const IncidenciasView = (() => {
 
     applyErrorStateToDom(container);
 
+    try {
+      bindIncidenciasTemplateDom(container);
+    } catch (error) {
+      safeWarn("bindIncidenciasTemplateDom falló:", error);
+    }
+
     return container;
   }
-
-  /* =========================================================
-     TEMPLATE
-  ========================================================= */
 
   function buildHtml() {
     ensureBaseState();
@@ -2596,6 +2588,9 @@ export const IncidenciasView = (() => {
 
     const currentFilter = getCurrentFilter();
     const currentSearchQuery = getCurrentSearchQuery();
+
+    const currentUser = getCurrentUserSnapshot();
+    const currentUserAvatar = getCurrentUserAvatarSnapshot(currentUser);
 
     const pagination = clampPageAgainstItems(allItems);
 
@@ -2636,20 +2631,33 @@ export const IncidenciasView = (() => {
 
             state: {
               ...incidenciasState,
+
               page: pagination.page,
               pageSize: pagination.pageSize,
               totalPages: pagination.totalPages,
               totalCount,
               remoteCount,
+
               selectedTicketId: safeText(incidenciasState.selectedTicketId, ""),
               openingTicketId: safeText(incidenciasState.openingTicketId, ""),
+
               creating: Boolean(incidenciasState.creating),
               loading: Boolean(incidenciasState.loading),
               refreshing: Boolean(incidenciasState.refreshing),
 
+              user: currentUser,
+              currentUser,
+              sessionUser: currentUser,
+
+              avatar: currentUserAvatar,
+              avatarUrl: currentUserAvatar,
+              userAvatar: currentUserAvatar,
+              userAvatarUrl: currentUserAvatar,
+
               filter: currentFilter,
               activeFilter: currentFilter,
               statusFilter: currentFilter,
+
               search: currentSearchQuery,
               searchQuery: currentSearchQuery,
               filterQuery: currentSearchQuery,
@@ -2719,10 +2727,6 @@ export const IncidenciasView = (() => {
 
     return pendingRenderFrame;
   }
-
-  /* =========================================================
-     DATA
-  ========================================================= */
 
   async function loadData({
     force = false,
@@ -2855,10 +2859,6 @@ export const IncidenciasView = (() => {
 
     return api;
   }
-
-  /* =========================================================
-     ACTIONS
-  ========================================================= */
 
   function goToPage(page = 1) {
     if (incidenciasState.loading || incidenciasState.refreshing) {
@@ -3223,10 +3223,6 @@ export const IncidenciasView = (() => {
     }
   }
 
-  /* =========================================================
-     EXTERNAL OPEN / URL / BRIDGE
-  ========================================================= */
-
   async function openTicketFromExternalRequest(payload = {}) {
     const source = extractExternalOpenPayload(payload);
     const ticketId = getTicketIdFromExternalPayload(source);
@@ -3533,10 +3529,6 @@ export const IncidenciasView = (() => {
     };
   }
 
-  /* =========================================================
-     BINDINGS
-  ========================================================= */
-
   function getActionTarget(event, actions = []) {
     const selectors = actions
       .map((action) => {
@@ -3660,6 +3652,15 @@ export const IncidenciasView = (() => {
       ]);
 
       if (detailBtn) {
+        const isRowClick =
+          detailBtn.matches?.(".incidencias-row") ||
+          detailBtn.matches?.("[data-ticket-row='true']") ||
+          detailBtn.matches?.("[data-detail-target='true']");
+
+        if (isRowClick) {
+          return;
+        }
+
         event.preventDefault();
         event.stopPropagation();
 
@@ -3854,11 +3855,13 @@ export const IncidenciasView = (() => {
     attachMutationListeners();
     attachCreateSuccessListener();
     attachReadyListeners();
-  }
 
-  /* =========================================================
-     PUBLIC LIFECYCLE
-  ========================================================= */
+    try {
+      bindIncidenciasTemplateDom(container);
+    } catch (error) {
+      safeWarn("bindIncidenciasTemplateDom en bind falló:", error);
+    }
+  }
 
   async function reload(options = {}) {
     if (destroyed) return api;
@@ -4002,10 +4005,6 @@ export const IncidenciasView = (() => {
     safeLog("destroy");
   }
 
-  /* =========================================================
-     API
-  ========================================================= */
-
   const api = {
     init,
     mount: init,
@@ -4053,6 +4052,8 @@ export const IncidenciasView = (() => {
       const allItems = getItems();
       const filteredItems = getFilteredItems(allItems);
       const pagination = getPaginationMeta(allItems);
+      const currentUser = getCurrentUserSnapshot();
+      const currentUserAvatar = getCurrentUserAvatarSnapshot(currentUser);
 
       return {
         ...getIncidenciasStateSnapshot?.(),
@@ -4072,6 +4073,14 @@ export const IncidenciasView = (() => {
 
         pendingCreateRequest,
         lastAutoOpenedTicketId,
+
+        user: currentUser,
+        currentUser,
+        sessionUser: currentUser,
+        avatar: currentUserAvatar,
+        avatarUrl: currentUserAvatar,
+        userAvatar: currentUserAvatar,
+        userAvatarUrl: currentUserAvatar,
 
         filter: getCurrentFilter(),
         activeFilter: getCurrentFilter(),

@@ -16,12 +16,22 @@
    - valores normalizados
    - compatibilidad con config legacy
    - rutas públicas/token centralizadas
-   - storage keys namespaced
+   - storage keys namespaced por storage.js, no duplicadas aquí
    - flags enterprise
    - publicApiPaths estrictas: /me NO es público
    - runtime overrides defensivos
    - snapshots seguros
+   - soporte Azure Static Web Apps / history fallback
+   - soporte rutas técnicas con token en query, path y hash-router
+   - compatibilidad con request.js, auth restore, router y app bootstrap
 ========================================================= */
+
+/* =========================================================
+   VERSION
+========================================================= */
+
+const CONFIG_VERSION =
+  "11.0.0";
 
 /* =========================================================
    HELPERS
@@ -39,6 +49,10 @@ function isArray(value) {
   return Array.isArray(value);
 }
 
+function isFunction(value) {
+  return typeof value === "function";
+}
+
 function deepFreeze(value) {
   if (
     !value ||
@@ -49,10 +63,7 @@ function deepFreeze(value) {
   }
 
   try {
-    const keys =
-      Object.getOwnPropertyNames(value);
-
-    for (const key of keys) {
+    for (const key of Object.getOwnPropertyNames(value)) {
       const child =
         value[key];
 
@@ -97,24 +108,73 @@ function safeNumber(value, fallback = 0) {
 function safeBool(value, fallback = false) {
   if (value === true) return true;
   if (value === false) return false;
-  if (value === "true") return true;
-  if (value === "false") return false;
-  if (value === "1") return true;
-  if (value === "0") return false;
-  if (value === 1) return true;
-  if (value === 0) return false;
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === "string") {
+    const normalized =
+      value.trim().toLowerCase();
+
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "si",
+        "sí",
+        "ok",
+        "on",
+        "enabled",
+        "active",
+      ].includes(normalized)
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "off",
+        "disabled",
+        "inactive",
+      ].includes(normalized)
+    ) {
+      return false;
+    }
+  }
 
   return Boolean(fallback);
+}
+
+function safeArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
 }
 
 function uniqueArray(values = []) {
   return Array.from(
     new Set(
-      values.filter((item) =>
-        item !== undefined &&
-        item !== null &&
-        item !== ""
-      )
+      safeArray(values)
+        .filter((item) =>
+          item !== undefined &&
+          item !== null &&
+          item !== ""
+        )
     )
   );
 }
@@ -124,6 +184,10 @@ function normalizePath(path = "/") {
     safeText(path, "/")
       .replace(/\\/g, "/")
       .replace(/\/{2,}/g, "/");
+
+  if (!value) {
+    value = "/";
+  }
 
   if (!value.startsWith("/")) {
     value =
@@ -167,6 +231,28 @@ function normalizeStoragePrefix(value = "onion") {
     "onion";
 }
 
+function normalizeLang(value = "es") {
+  const lang =
+    safeText(value, "es")
+      .toLowerCase();
+
+  return /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(lang)
+    ? lang
+    : "es";
+}
+
+function normalizeTheme(value = "dark") {
+  const theme =
+    safeText(value, "dark")
+      .toLowerCase();
+
+  if (theme === "light") {
+    return "light";
+  }
+
+  return "dark";
+}
+
 function getGlobalObject() {
   try {
     if (typeof globalThis !== "undefined") {
@@ -185,7 +271,7 @@ function getGlobalObject() {
 
 function getImportMetaEnv() {
   try {
-    return import.meta?.env || {};
+    return import.meta.env || {};
   } catch {
     return {};
   }
@@ -258,6 +344,13 @@ function getEnvValue(keys = [], fallback = "") {
 }
 
 function mergeObject(base = {}, override = {}) {
+  if (isArray(base) && isArray(override)) {
+    return uniqueArray([
+      ...base,
+      ...override,
+    ]);
+  }
+
   const output =
     isArray(base)
       ? [...base]
@@ -267,13 +360,6 @@ function mergeObject(base = {}, override = {}) {
 
   if (!isObject(override) && !isArray(override)) {
     return output;
-  }
-
-  if (isArray(base) && isArray(override)) {
-    return uniqueArray([
-      ...base,
-      ...override,
-    ]);
   }
 
   for (const [key, value] of Object.entries(override)) {
@@ -290,6 +376,7 @@ function mergeObject(base = {}, override = {}) {
           output[key],
           value
         );
+
       continue;
     }
 
@@ -302,6 +389,7 @@ function mergeObject(base = {}, override = {}) {
           ...output[key],
           ...value,
         ]);
+
       continue;
     }
 
@@ -314,12 +402,93 @@ function mergeObject(base = {}, override = {}) {
 
 function normalizePathList(list = []) {
   return uniqueArray(
-    (Array.isArray(list) ? list : [])
+    safeArray(list)
       .map((item) =>
         stripSearchAndHash(item)
       )
       .filter(Boolean)
   );
+}
+
+function normalizeApiPathList(list = []) {
+  return normalizePathList(list)
+    .filter((path) => {
+      const clean =
+        stripSearchAndHash(path);
+
+      return (
+        clean !== "/api/auth/me" &&
+        clean !== "/auth/me" &&
+        clean !== "/me"
+      );
+    });
+}
+
+function pickRuntimeOverrides(runtime = {}) {
+  if (!isObject(runtime)) {
+    return {};
+  }
+
+  const allowedKeys =
+    [
+      "appName",
+      "name",
+      "version",
+      "env",
+      "environment",
+      "debug",
+
+      "apiBase",
+      "requestTimeout",
+      "requestRetries",
+      "requestRetryDelayMs",
+      "requestRetryMaxDelayMs",
+      "requestRetryMethods",
+
+      "defaultLang",
+      "fallbackLang",
+      "defaultTheme",
+      "storagePrefix",
+
+      "routes",
+      "publicRoutes",
+      "authLikeRoutes",
+      "protectedPublicTokenRoutes",
+
+      "storageKeys",
+      "legacyStorageKeys",
+
+      "api",
+      "auth",
+      "ui",
+      "i18n",
+      "router",
+      "loader",
+      "events",
+      "featureFlags",
+      "diagnostics",
+      "resources",
+      "security",
+    ];
+
+  const output =
+    {};
+
+  for (const key of allowedKeys) {
+    if (runtime[key] !== undefined) {
+      output[key] =
+        runtime[key];
+    }
+  }
+
+  if (isObject(runtime.override)) {
+    return mergeObject(
+      output,
+      runtime.override
+    );
+  }
+
+  return output;
 }
 
 /* =========================================================
@@ -337,7 +506,9 @@ const APP_NAME =
         "VITE_ONION_APP_NAME",
         "APP_NAME",
       ],
-      runtimeConfig.appName || "Onion Support"
+      runtimeConfig.appName ||
+        runtimeConfig.name ||
+        "Onion Support"
     ),
     "Onion Support"
   );
@@ -362,8 +533,11 @@ const APP_ENV =
         "ONION_ENV",
         "VITE_ONION_ENV",
         "NODE_ENV",
+        "APP_ENV",
       ],
-      runtimeConfig.env || "production"
+      runtimeConfig.env ||
+        runtimeConfig.environment ||
+        "production"
     ),
     "production"
   ).toLowerCase();
@@ -374,6 +548,7 @@ const DEBUG =
       [
         "ONION_DEBUG",
         "VITE_ONION_DEBUG",
+        "APP_DEBUG",
       ],
       runtimeConfig.debug ?? true
     ),
@@ -387,8 +562,12 @@ const API_BASE =
         "ONION_API_BASE",
         "VITE_ONION_API_BASE",
         "API_BASE",
+        "API_URL",
       ],
-      runtimeConfig.apiBase || "https://api.onionit.net"
+      runtimeConfig.apiBase ||
+        runtimeConfig.api?.base ||
+        runtimeConfig.api?.baseUrl ||
+        "https://api.onionit.net"
     )
   );
 
@@ -398,6 +577,7 @@ const STORAGE_PREFIX =
       [
         "ONION_STORAGE_PREFIX",
         "VITE_ONION_STORAGE_PREFIX",
+        "APP_STORAGE_PREFIX",
       ],
       runtimeConfig.storagePrefix || "onion"
     )
@@ -492,8 +672,16 @@ const protectedPublicTokenRoutes = [
     path:
       routes.activateAccount,
 
+    statePrefix:
+      "Activation",
+
     windowKey:
       "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+
+    windowKeys:
+      [
+        "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+      ],
 
     tokenParamNames:
       [
@@ -512,14 +700,24 @@ const protectedPublicTokenRoutes = [
     path:
       routes.resetPasswordConfirm,
 
+    statePrefix:
+      "ResetConfirm",
+
     windowKey:
-      "__ONION_RESET_CONFIRM_INITIAL_URL__",
+      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+
+    windowKeys:
+      [
+        "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+        "__ONION_RESET_CONFIRM_INITIAL_URL__",
+      ],
 
     tokenParamNames:
       [
         "token",
         "resetToken",
         "passwordResetToken",
+        "confirmToken",
         "code",
         "t",
       ],
@@ -530,6 +728,11 @@ const protectedPublicTokenRoutes = [
    STORAGE
 ========================================================= */
 
+/*
+  Estas claves son nombres lógicos.
+  storage.js se encarga de namespacing real:
+  `${storagePrefix}:${key}`.
+*/
 const storageKeys = {
   token:
     "token",
@@ -555,6 +758,12 @@ const storageKeys = {
   theme:
     "theme",
 
+  themeMode:
+    "themeMode",
+
+  appearance:
+    "appearance",
+
   lang:
     "lang",
 
@@ -575,6 +784,12 @@ const storageKeys = {
 
   settings:
     "settings",
+
+  preferences:
+    "preferences",
+
+  ui:
+    "ui",
 };
 
 const legacyStorageKeys = {
@@ -586,6 +801,9 @@ const legacyStorageKeys = {
 
   refreshToken:
     "onion_refresh_token",
+
+  tempToken:
+    "onion_temp_token",
 
   user:
     "onion_user",
@@ -601,9 +819,6 @@ const legacyStorageKeys = {
 
   role:
     "onion_role",
-
-  tempToken:
-    "onion_temp_token",
 
   sessionId:
     "onion_session_id",
@@ -627,11 +842,11 @@ const legacyStorageKeys = {
 
 /*
   IMPORTANTE:
-  /me NO va en publicApiPaths.
-  Si /me es público para request.js, no se inyecta Authorization.
-  Eso puede romper restore/avatar/token tras refresh.
+  /api/auth/me NO va en publicApiPaths.
+  Si /me es público para request.js, no se inyecta Authorization
+  y falla restore/avatar/user tras refresh.
 */
-const publicApiPaths = normalizePathList([
+const publicApiPaths = normalizeApiPathList([
   "/api/auth/login",
   "/api/auth/refresh",
 
@@ -646,6 +861,13 @@ const publicApiPaths = normalizePathList([
   "/api/auth/_health",
   "/api/_health",
   "/health",
+]);
+
+const privateApiPaths = normalizePathList([
+  "/api/auth/me",
+  "/auth/me",
+  "/me",
+  "/api/auth/logout",
 ]);
 
 const auth = {
@@ -716,6 +938,8 @@ const auth = {
 
   publicApiPaths,
 
+  privateApiPaths,
+
   technicalPublicRoutes:
     [
       routes.activateAccount,
@@ -771,6 +995,12 @@ const auth = {
 
     allowTechnicalAuthenticatedWithoutUser:
       true,
+
+    clearGhostUserWithoutToken:
+      true,
+
+    syncUserUiAfterRestore:
+      true,
   },
 };
 
@@ -783,31 +1013,51 @@ const api = {
 
   timeout:
     safeNumber(
-      runtimeConfig.requestTimeout,
+      runtimeConfig.requestTimeout ??
+        runtimeConfig.api?.timeout,
       15000
     ),
 
   retries:
     safeNumber(
-      runtimeConfig.requestRetries,
+      runtimeConfig.requestRetries ??
+        runtimeConfig.api?.retries,
       0
     ),
 
   retryDelayMs:
     safeNumber(
-      runtimeConfig.requestRetryDelayMs,
+      runtimeConfig.requestRetryDelayMs ??
+        runtimeConfig.api?.retryDelayMs,
       350
     ),
 
   retryMaxDelayMs:
     safeNumber(
-      runtimeConfig.requestRetryMaxDelayMs,
+      runtimeConfig.requestRetryMaxDelayMs ??
+        runtimeConfig.api?.retryMaxDelayMs,
       4000
+    ),
+
+  retryMethods:
+    uniqueArray(
+      safeArray(
+        runtimeConfig.requestRetryMethods ??
+          runtimeConfig.api?.retryMethods ??
+          [
+            "GET",
+            "HEAD",
+            "OPTIONS",
+          ]
+      ).map((item) =>
+        safeText(item, "").toUpperCase()
+      )
     ),
 
   withCredentials:
     safeBool(
-      runtimeConfig.withCredentials,
+      runtimeConfig.withCredentials ??
+        runtimeConfig.api?.withCredentials,
       false
     ),
 
@@ -817,6 +1067,101 @@ const api = {
 
     "Content-Type":
       "application/json",
+  },
+};
+
+/* =========================================================
+   RESOURCES / BUSINESS ENDPOINTS
+========================================================= */
+
+const resources = {
+  tickets: {
+    base:
+      "/api/tickets",
+
+    list:
+      "/api/tickets",
+
+    detail:
+      "/api/tickets/:id",
+
+    create:
+      "/api/tickets",
+
+    update:
+      "/api/tickets/:id",
+
+    attachments:
+      "/api/tickets/:id/attachments",
+
+    files:
+      "/api/tickets/:id/files",
+
+    aliases:
+      [
+        "/api/incidencias",
+      ],
+  },
+
+  incidencias: {
+    base:
+      "/api/tickets",
+
+    alias:
+      "/api/incidencias",
+  },
+
+  invoices: {
+    base:
+      "/api/facturas",
+
+    alias:
+      "/api/invoices",
+  },
+
+  facturas: {
+    base:
+      "/api/facturas",
+
+    alias:
+      "/api/invoices",
+  },
+
+  users: {
+    base:
+      "/api/users",
+
+    alias:
+      "/api/usuarios",
+  },
+
+  usuarios: {
+    base:
+      "/api/users",
+
+    alias:
+      "/api/usuarios",
+  },
+
+  clients: {
+    base:
+      "/api/clients",
+
+    alias:
+      "/api/clientes",
+  },
+
+  clientes: {
+    base:
+      "/api/clients",
+
+    alias:
+      "/api/clientes",
+  },
+
+  hardware: {
+    base:
+      "/api/hardware",
   },
 };
 
@@ -837,14 +1182,29 @@ const ui = {
   themeColorLight:
     "#f4f7fb",
 
+  density:
+    "default",
+
   shellId:
     "app-shell",
 
   loaderId:
     "app-loader",
 
+  sidebarMountId:
+    "sidebar-mount",
+
+  topbarMountId:
+    "topbar-mount",
+
   viewContainerId:
     "view-container",
+
+  mainContentId:
+    "main-content",
+
+  appContentId:
+    "app-content",
 
   sidebarId:
     "app-sidebar",
@@ -868,6 +1228,9 @@ const ui = {
     true,
 
   syncUserUIOnLangChange:
+    true,
+
+  syncUserUIOnThemeChange:
     true,
 };
 
@@ -932,6 +1295,12 @@ const router = {
   emitRenderEvents:
     true,
 
+  useHistoryFallback:
+    true,
+
+  safeExternalLinks:
+    true,
+
   events: {
     beforeRender:
       "router:before-render",
@@ -969,22 +1338,81 @@ const loader = {
   readyClass:
     "app-ready",
 
+  fatalClass:
+    "app-fatal",
+
   hiddenClass:
     "is-hidden",
 
   visibleClass:
     "is-visible",
 
+  leavingClass:
+    "is-leaving",
+
   controlledByBootstrap:
     true,
 
   hideOnlyOnFinalize:
     true,
+
+  updateBodyState:
+    true,
+
+  updateHtmlState:
+    true,
 };
 
 /* =========================================================
-   EVENTS / FLAGS
+   SECURITY / EVENTS / FLAGS
 ========================================================= */
+
+const security = {
+  privateSpa:
+    true,
+
+  noIndex:
+    true,
+
+  redactTokens:
+    true,
+
+  preserveTechnicalTokenUrlUntilViewCapture:
+    true,
+
+  allowHashRouterTokenRoutes:
+    true,
+
+  unsafeHrefProtocols:
+    [
+      "javascript:",
+      "data:",
+      "vbscript:",
+    ],
+
+  sensitiveQueryParams:
+    [
+      "token",
+      "activationToken",
+      "activateToken",
+      "resetToken",
+      "passwordResetToken",
+      "confirmToken",
+      "code",
+      "t",
+      "access_token",
+      "refresh_token",
+      "id_token",
+      "tempToken",
+      "temp_token",
+      "temporaryToken",
+      "temporary_token",
+      "twoFactorToken",
+      "two_factor_token",
+      "mfaToken",
+      "mfa_token",
+    ],
+};
 
 const events = {
   ready:
@@ -1002,8 +1430,14 @@ const events = {
   bootError:
     "app:boot:error",
 
+  coreInitStart:
+    "app:core:init:start",
+
   coreReady:
     "app:core:ready",
+
+  coreInitError:
+    "app:core:init:error",
 
   stateChange:
     "app:state:change",
@@ -1078,6 +1512,21 @@ const featureFlags = {
 
   requireAuthorizationForMe:
     true,
+
+  keepMeEndpointPrivate:
+    true,
+
+  enableRequestDedupe:
+    true,
+
+  enableRequestRetry:
+    true,
+
+  enableRequestAbort:
+    true,
+
+  enableRuntimeConfig:
+    true,
 };
 
 const diagnostics = {
@@ -1098,6 +1547,9 @@ const diagnostics = {
 
   maxRecentEvents:
     25,
+
+  exposeDebugBridge:
+    true,
 };
 
 /* =========================================================
@@ -1105,11 +1557,17 @@ const diagnostics = {
 ========================================================= */
 
 const baseConfig = {
+  __version:
+    CONFIG_VERSION,
+
   appName:
     APP_NAME,
 
   name:
     APP_NAME,
+
+  appKey:
+    STORAGE_PREFIX,
 
   version:
     APP_VERSION,
@@ -1137,6 +1595,9 @@ const baseConfig = {
 
   requestRetryMaxDelayMs:
     api.retryMaxDelayMs,
+
+  requestRetryMethods:
+    api.retryMethods,
 
   defaultLang:
     i18n.defaultLang,
@@ -1167,6 +1628,8 @@ const baseConfig = {
   events,
   featureFlags,
   diagnostics,
+  resources,
+  security,
 };
 
 function normalizeFinalConfig(source = {}) {
@@ -1176,35 +1639,81 @@ function normalizeFinalConfig(source = {}) {
       {}
     );
 
+  output.__version =
+    safeText(
+      output.__version,
+      CONFIG_VERSION
+    );
+
+  output.appName =
+    safeText(
+      output.appName || output.name,
+      APP_NAME
+    );
+
+  output.name =
+    output.appName;
+
+  output.version =
+    safeText(
+      output.version,
+      APP_VERSION
+    );
+
+  output.env =
+    safeText(
+      output.env || output.environment,
+      APP_ENV
+    ).toLowerCase();
+
+  output.environment =
+    output.env;
+
+  output.debug =
+    safeBool(
+      output.debug,
+      DEBUG
+    );
+
   output.apiBase =
     normalizeBaseUrl(
-      output.apiBase || output.api?.base || ""
+      output.apiBase ||
+        output.api?.base ||
+        output.api?.baseUrl ||
+        API_BASE
     );
 
   output.storagePrefix =
     normalizeStoragePrefix(
-      output.storagePrefix || "onion"
+      output.storagePrefix ||
+        output.appKey ||
+        STORAGE_PREFIX
     );
 
+  output.appKey =
+    output.storagePrefix;
+
   output.defaultLang =
-    safeText(
-      output.defaultLang,
-      "es"
-    ).toLowerCase();
+    normalizeLang(
+      output.defaultLang ||
+        output.i18n?.defaultLang ||
+        "es"
+    );
 
   output.fallbackLang =
-    safeText(
-      output.fallbackLang,
-      output.defaultLang || "es"
-    ).toLowerCase();
+    normalizeLang(
+      output.fallbackLang ||
+        output.i18n?.fallbackLang ||
+        output.defaultLang ||
+        "es"
+    );
 
   output.defaultTheme =
-    safeText(
-      output.defaultTheme,
-      "dark"
-    ).toLowerCase() === "light"
-      ? "light"
-      : "dark";
+    normalizeTheme(
+      output.defaultTheme ||
+        output.ui?.defaultTheme ||
+        "dark"
+    );
 
   output.publicRoutes =
     normalizePathList(
@@ -1216,19 +1725,62 @@ function normalizeFinalConfig(source = {}) {
       output.authLikeRoutes || []
     );
 
+  output.protectedPublicTokenRoutes =
+    safeArray(
+      output.protectedPublicTokenRoutes || []
+    )
+      .map((item) => {
+        if (!isObject(item)) {
+          return null;
+        }
+
+        const path =
+          stripSearchAndHash(
+            item.path || "/"
+          );
+
+        const windowKeys =
+          uniqueArray([
+            ...safeArray(item.windowKeys),
+            item.windowKey,
+          ]);
+
+        return {
+          ...item,
+
+          path,
+
+          windowKey:
+            item.windowKey || windowKeys[0] || "",
+
+          windowKeys,
+
+          tokenParamNames:
+            uniqueArray(
+              item.tokenParamNames || []
+            ),
+        };
+      })
+      .filter(Boolean);
+
   if (output.auth) {
     output.auth.publicApiPaths =
-      normalizePathList(
+      normalizeApiPathList(
         output.auth.publicApiPaths || []
-      ).filter((path) =>
-        path !== "/api/auth/me" &&
-        path !== "/auth/me"
+      );
+
+    output.auth.privateApiPaths =
+      normalizePathList(
+        output.auth.privateApiPaths || privateApiPaths
       );
 
     output.auth.technicalPublicRoutes =
       normalizePathList(
         output.auth.technicalPublicRoutes || []
       );
+
+    output.auth.protectedPublicTokenRoutes =
+      output.protectedPublicTokenRoutes;
   }
 
   if (output.api) {
@@ -1255,6 +1807,103 @@ function normalizeFinalConfig(source = {}) {
         output.api.retryDelayMs,
         output.requestRetryDelayMs || 350
       );
+
+    output.api.retryMaxDelayMs =
+      safeNumber(
+        output.api.retryMaxDelayMs,
+        output.requestRetryMaxDelayMs || 4000
+      );
+
+    output.api.retryMethods =
+      uniqueArray(
+        safeArray(
+          output.api.retryMethods ||
+            output.requestRetryMethods ||
+            [
+              "GET",
+              "HEAD",
+              "OPTIONS",
+            ]
+        ).map((item) =>
+          safeText(item, "").toUpperCase()
+        )
+      );
+  }
+
+  output.requestTimeout =
+    safeNumber(
+      output.requestTimeout,
+      output.api?.timeout || 15000
+    );
+
+  output.requestRetries =
+    safeNumber(
+      output.requestRetries,
+      output.api?.retries || 0
+    );
+
+  output.requestRetryDelayMs =
+    safeNumber(
+      output.requestRetryDelayMs,
+      output.api?.retryDelayMs || 350
+    );
+
+  output.requestRetryMaxDelayMs =
+    safeNumber(
+      output.requestRetryMaxDelayMs,
+      output.api?.retryMaxDelayMs || 4000
+    );
+
+  output.requestRetryMethods =
+    uniqueArray(
+      safeArray(
+        output.requestRetryMethods ||
+          output.api?.retryMethods ||
+          [
+            "GET",
+            "HEAD",
+            "OPTIONS",
+          ]
+      ).map((item) =>
+        safeText(item, "").toUpperCase()
+      )
+    );
+
+  if (output.ui) {
+    output.ui.defaultTheme =
+      normalizeTheme(
+        output.ui.defaultTheme ||
+          output.defaultTheme
+      );
+
+    output.ui.theme =
+      normalizeTheme(
+        output.ui.theme ||
+          output.ui.defaultTheme
+      );
+  }
+
+  if (output.i18n) {
+    output.i18n.defaultLang =
+      normalizeLang(
+        output.i18n.defaultLang ||
+          output.defaultLang
+      );
+
+    output.i18n.fallbackLang =
+      normalizeLang(
+        output.i18n.fallbackLang ||
+          output.fallbackLang ||
+          output.i18n.defaultLang
+      );
+
+    output.i18n.supported =
+      uniqueArray(
+        safeArray(output.i18n.supported)
+          .map((item) =>
+            normalizeLang(item)
+          )
+      );
   }
 
   return output;
@@ -1265,9 +1914,7 @@ export const config =
     normalizeFinalConfig(
       mergeObject(
         baseConfig,
-        isObject(runtimeConfig.override)
-          ? runtimeConfig.override
-          : {}
+        pickRuntimeOverrides(runtimeConfig)
       )
     )
   );
@@ -1316,11 +1963,80 @@ export function getNamespacedStorageKey(key = "") {
   return `${config.storagePrefix}:${cleanKey}`;
 }
 
+function getBaseOrigin() {
+  try {
+    if (
+      typeof window !== "undefined" &&
+      window.location?.origin
+    ) {
+      return window.location.origin;
+    }
+  } catch {}
+
+  return "http://localhost";
+}
+
+function getApiBasePath() {
+  const apiBase =
+    normalizeBaseUrl(
+      config.apiBase || ""
+    );
+
+  if (!apiBase) {
+    return "";
+  }
+
+  try {
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(apiBase)) {
+      return stripSearchAndHash(
+        new URL(
+          apiBase,
+          getBaseOrigin()
+        ).pathname || ""
+      );
+    }
+
+    return stripSearchAndHash(apiBase);
+  } catch {
+    return "";
+  }
+}
+
+function stripApiBasePrefix(path = "/") {
+  const normalized =
+    stripSearchAndHash(path);
+
+  const apiBasePath =
+    getApiBasePath();
+
+  if (
+    !apiBasePath ||
+    apiBasePath === "/"
+  ) {
+    return normalized;
+  }
+
+  if (normalized === apiBasePath) {
+    return "/";
+  }
+
+  if (normalized.startsWith(`${apiBasePath}/`)) {
+    return stripSearchAndHash(
+      normalized.slice(apiBasePath.length) || "/"
+    );
+  }
+
+  return normalized;
+}
+
 export function isPublicApiPath(path = "") {
   const cleanPath =
     stripSearchAndHash(
       normalizePath(path)
     );
+
+  const withoutApiBase =
+    stripApiBasePrefix(cleanPath);
 
   return config.auth.publicApiPaths.some((publicPath) => {
     const current =
@@ -1328,9 +2044,45 @@ export function isPublicApiPath(path = "") {
         normalizePath(publicPath)
       );
 
+    const currentWithoutApiBase =
+      stripApiBasePrefix(current);
+
     return (
       cleanPath === current ||
-      cleanPath.startsWith(`${current}/`)
+      cleanPath.startsWith(`${current}/`) ||
+      withoutApiBase === current ||
+      withoutApiBase.startsWith(`${current}/`) ||
+      cleanPath === currentWithoutApiBase ||
+      cleanPath.startsWith(`${currentWithoutApiBase}/`)
+    );
+  });
+}
+
+export function isPrivateApiPath(path = "") {
+  const cleanPath =
+    stripSearchAndHash(
+      normalizePath(path)
+    );
+
+  const withoutApiBase =
+    stripApiBasePrefix(cleanPath);
+
+  return safeArray(config.auth.privateApiPaths).some((privatePath) => {
+    const current =
+      stripSearchAndHash(
+        normalizePath(privatePath)
+      );
+
+    const currentWithoutApiBase =
+      stripApiBasePrefix(current);
+
+    return (
+      cleanPath === current ||
+      cleanPath.startsWith(`${current}/`) ||
+      withoutApiBase === current ||
+      withoutApiBase.startsWith(`${current}/`) ||
+      cleanPath === currentWithoutApiBase ||
+      cleanPath.startsWith(`${currentWithoutApiBase}/`)
     );
   });
 }
@@ -1365,12 +2117,25 @@ export function getAuthEndpoint(key = "") {
   return config.auth?.endpoints?.[cleanKey] || "";
 }
 
+export function getResourceEndpoint(resource = "", key = "base") {
+  const resourceKey =
+    safeText(resource, "");
+
+  const endpointKey =
+    safeText(key, "base");
+
+  return config.resources?.[resourceKey]?.[endpointKey] || "";
+}
+
 export function getConfigSnapshot() {
   return {
+    version:
+      config.__version,
+
     appName:
       config.appName,
 
-    version:
+    appVersion:
       config.version,
 
     env:
@@ -1391,8 +2156,17 @@ export function getConfigSnapshot() {
     requestRetryDelayMs:
       config.requestRetryDelayMs,
 
+    requestRetryMaxDelayMs:
+      config.requestRetryMaxDelayMs,
+
+    requestRetryMethods:
+      config.requestRetryMethods,
+
     defaultLang:
       config.defaultLang,
+
+    fallbackLang:
+      config.fallbackLang,
 
     defaultTheme:
       config.defaultTheme,
@@ -1415,11 +2189,23 @@ export function getConfigSnapshot() {
     publicApiPaths:
       config.auth.publicApiPaths,
 
+    privateApiPaths:
+      config.auth.privateApiPaths,
+
     authEndpoints:
       config.auth.endpoints,
 
+    resources:
+      config.resources,
+
     loader:
       config.loader,
+
+    router:
+      config.router,
+
+    ui:
+      config.ui,
 
     featureFlags:
       config.featureFlags,

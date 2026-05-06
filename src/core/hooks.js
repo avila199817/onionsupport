@@ -19,6 +19,10 @@
    - orden estable por prioridad
    - errores aislados por hook
    - compatibilidad con add/on/use/remove/clear
+   - compatibilidad crítica con AppCore.runInitHooks()
+   - registry.hooks[type] mantiene funciones ejecutables
+   - metadatos internos sin romper request.js
+   - once funcional incluso si lo ejecuta otro módulo directamente
 ========================================================= */
 
 /* =========================================================
@@ -26,7 +30,7 @@
 ========================================================= */
 
 const HOOKS_VERSION =
-  "10.0.0";
+  "11.0.0";
 
 const DEFAULT_HOOK_TYPES =
   Object.freeze([
@@ -54,8 +58,44 @@ const DEFAULT_HOOK_TYPES =
     "onError",
   ]);
 
+const HOOK_EVENTS =
+  Object.freeze({
+    ready:
+      "core:hooks:ready",
+
+    add:
+      "core:hook:add",
+
+    remove:
+      "core:hook:remove",
+
+    clear:
+      "core:hook:clear",
+
+    error:
+      "core:hook:error",
+
+    runStart:
+      "core:hook:run:start",
+
+    runDone:
+      "core:hook:run:done",
+
+    runParallelDone:
+      "core:hook:parallel:done",
+
+    typeDefined:
+      "core:hook:type-defined",
+  });
+
 const MAX_RECENT_EVENTS =
-  40;
+  60;
+
+const DEFAULT_TIMEOUT_MS =
+  0;
+
+const HOOK_NAME_CONTROL_RE =
+  /[\u0000-\u001f\u007f]/g;
 
 /* =========================================================
    BASICS
@@ -65,6 +105,14 @@ function isObject(value) {
   return (
     value !== null &&
     typeof value === "object"
+  );
+}
+
+function isPlainObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
   );
 }
 
@@ -81,7 +129,9 @@ function safeText(value, fallback = "") {
   }
 
   const text =
-    String(value).trim();
+    String(value)
+      .replace(HOOK_NAME_CONTROL_RE, "")
+      .trim();
 
   return text || fallback;
 }
@@ -101,8 +151,23 @@ function safeArray(value) {
     : [];
 }
 
+function safeBool(value, fallback = false) {
+  if (value === true) return true;
+  if (value === false) return false;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  if (value === 1) return true;
+  if (value === 0) return false;
+
+  return Boolean(fallback);
+}
+
 function safeNow() {
-  return Date.now();
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
 }
 
 function safeIsoDate(ms = safeNow()) {
@@ -114,6 +179,14 @@ function safeIsoDate(ms = safeNow()) {
 }
 
 function safeClone(value, fallback = null) {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  if (value === null) {
+    return null;
+  }
+
   try {
     if (typeof structuredClone === "function") {
       return structuredClone(value);
@@ -130,12 +203,27 @@ function safeClone(value, fallback = null) {
 }
 
 function safeWarn(utils, ...args) {
+  let done =
+    false;
+
   try {
-    utils?.warn?.(
-      "[Hooks]",
-      ...args
-    );
-  } catch {}
+    if (isFunction(utils?.warn)) {
+      utils.warn(
+        "[Hooks]",
+        ...args
+      );
+
+      done =
+        true;
+    }
+  } catch {
+    done =
+      false;
+  }
+
+  if (done) {
+    return;
+  }
 
   try {
     console.warn(
@@ -155,9 +243,16 @@ function safeLog(utils, ...args) {
 }
 
 function safeEmit(events, name, payload = {}) {
+  const eventName =
+    safeText(name, "");
+
+  if (!eventName) {
+    return false;
+  }
+
   try {
     events?.emit?.(
-      name,
+      eventName,
       payload
     );
 
@@ -168,7 +263,12 @@ function safeEmit(events, name, payload = {}) {
 }
 
 function createNoopDisposer() {
-  return () => false;
+  const noop = () => false;
+
+  noop.__hookNoop =
+    true;
+
+  return noop;
 }
 
 /* =========================================================
@@ -235,146 +335,191 @@ function ensureRegistry(registry) {
   return finalRegistry;
 }
 
-function normalizeHookEntry(type, item, index = 0) {
-  if (isFunction(item)) {
-    return {
-      type,
-      handler:
-        item,
-
-      name:
-        item.name || "",
-
-      priority:
-        0,
-
-      once:
-        false,
-
-      enabled:
-        true,
-
-      key:
-        makeHookKey(
-          type,
-          item,
-          item.name || ""
-        ),
-
-      createdAt:
-        "",
-
-      createdAtMs:
-        0,
-
-      runCount:
-        0,
-
-      lastRunAt:
-        "",
-
-      lastDurationMs:
-        0,
-
-      index,
-    };
-  }
-
-  if (
-    isObject(item) &&
-    isFunction(item.handler)
-  ) {
-    return {
-      type,
-
-      handler:
-        item.handler,
-
-      name:
-        safeText(
-          item.name,
-          item.handler.name || ""
-        ),
-
-      priority:
-        safeNumber(
-          item.priority,
-          0
-        ),
-
-      once:
-        Boolean(item.once),
-
-      enabled:
-        item.enabled !== false,
-
-      key:
-        safeText(
-          item.key,
-          makeHookKey(
-            type,
-            item.handler,
-            item.name || item.handler.name || ""
-          )
-        ),
-
-      createdAt:
-        item.createdAt || "",
-
-      createdAtMs:
-        item.createdAtMs || 0,
-
-      runCount:
-        safeNumber(
-          item.runCount,
-          0
-        ),
-
-      lastRunAt:
-        item.lastRunAt || "",
-
-      lastDurationMs:
-        safeNumber(
-          item.lastDurationMs,
-          0
-        ),
-
-      index,
-    };
-  }
-
-  return null;
+function normalizeTypeName(type = "") {
+  return safeText(type, "");
 }
 
-function normalizeHookList(registry, type) {
-  const list =
-    safeArray(
-      registry.hooks?.[type]
+function normalizeHookName(name = "") {
+  return safeText(name, "");
+}
+
+function getRunnerEntry(runner) {
+  try {
+    return runner?.__hookEntry || null;
+  } catch {
+    return null;
+  }
+}
+
+function isHookRunner(value) {
+  return Boolean(
+    isFunction(value) &&
+    getRunnerEntry(value)
+  );
+}
+
+function buildPublicHookEntry(entry = {}) {
+  return {
+    type:
+      entry.type || "",
+
+    key:
+      entry.key || "",
+
+    name:
+      entry.name || "",
+
+    priority:
+      safeNumber(entry.priority, 0),
+
+    once:
+      Boolean(entry.once),
+
+    enabled:
+      entry.enabled !== false,
+
+    createdAt:
+      entry.createdAt || "",
+
+    createdAtMs:
+      safeNumber(entry.createdAtMs, 0),
+
+    runCount:
+      safeNumber(entry.runCount, 0),
+
+    errorCount:
+      safeNumber(entry.errorCount, 0),
+
+    lastRunAt:
+      entry.lastRunAt || "",
+
+    lastDurationMs:
+      safeNumber(entry.lastDurationMs, 0),
+
+    lastError:
+      entry.lastError
+        ? safeClone(entry.lastError, null)
+        : null,
+
+    index:
+      safeNumber(entry.index, 0),
+  };
+}
+
+function normalizeHookOptions(options = {}) {
+  const opts =
+    isPlainObject(options)
+      ? options
+      : {};
+
+  return {
+    name:
+      normalizeHookName(opts.name),
+
+    priority:
+      safeNumber(opts.priority, 0),
+
+    once:
+      Boolean(opts.once),
+
+    enabled:
+      opts.enabled !== false,
+
+    timeoutMs:
+      Math.max(
+        0,
+        safeNumber(
+          opts.timeoutMs ??
+            opts.timeout,
+          DEFAULT_TIMEOUT_MS
+        )
+      ),
+
+    tags:
+      safeArray(opts.tags)
+        .map((tag) => safeText(tag, ""))
+        .filter(Boolean),
+
+    meta:
+      isPlainObject(opts.meta)
+        ? safeClone(opts.meta, {})
+        : null,
+  };
+}
+
+function sortHookEntries(entries = []) {
+  return safeArray(entries)
+    .slice()
+    .sort((a, b) => {
+      const priorityA =
+        safeNumber(a.priority, 0);
+
+      const priorityB =
+        safeNumber(b.priority, 0);
+
+      if (priorityB !== priorityA) {
+        return priorityB - priorityA;
+      }
+
+      const createdA =
+        safeNumber(a.createdAtMs, 0);
+
+      const createdB =
+        safeNumber(b.createdAtMs, 0);
+
+      if (createdA !== createdB) {
+        return createdA - createdB;
+      }
+
+      return (
+        safeNumber(a.index, 0) -
+        safeNumber(b.index, 0)
+      );
+    });
+}
+
+function createTimeoutPromise(ms, label = "hook") {
+  const timeoutMs =
+    Math.max(
+      0,
+      safeNumber(ms, 0)
     );
 
-  const normalized =
-    list
-      .map((item, index) =>
-        normalizeHookEntry(
-          type,
-          item,
-          index
-        )
-      )
-      .filter(Boolean);
+  if (!timeoutMs) {
+    return null;
+  }
 
-  normalized.sort((a, b) => {
-    if (b.priority !== a.priority) {
-      return b.priority - a.priority;
-    }
+  let timeoutId =
+    null;
 
-    return a.index - b.index;
-  });
+  const promise =
+    new Promise((_, reject) => {
+      timeoutId =
+        setTimeout(() => {
+          const error =
+            new Error(
+              `Timeout ejecutando hook "${label}" tras ${timeoutMs}ms.`
+            );
 
-  registry.hooks[type] =
-    normalized;
+          error.name =
+            "HookTimeoutError";
 
-  return normalized;
+          error.timeout =
+            true;
+
+          reject(error);
+        }, timeoutMs);
+    });
+
+  return {
+    promise,
+
+    clear() {
+      try {
+        clearTimeout(timeoutId);
+      } catch {}
+    },
+  };
 }
 
 /* =========================================================
@@ -398,13 +543,25 @@ export function createHooks({
     addCount:
       0,
 
+    duplicateCount:
+      0,
+
     removeCount:
+      0,
+
+    clearCount:
       0,
 
     runCount:
       0,
 
+    runHookCount:
+      0,
+
     errorCount:
+      0,
+
+    typeDefineCount:
       0,
 
     lastType:
@@ -413,6 +570,9 @@ export function createHooks({
     lastRunAt:
       0,
 
+    lastRunAtIso:
+      "",
+
     lastError:
       null,
 
@@ -420,14 +580,19 @@ export function createHooks({
       [],
   };
 
+  let apiRef =
+    null;
+
   function pushRecent(event = {}) {
     const atMs =
       safeNow();
 
     state.recent.unshift({
-      ...event,
+      ...safeClone(event, {}),
+
       at:
         safeIsoDate(atMs),
+
       atMs,
     });
 
@@ -436,15 +601,28 @@ export function createHooks({
     }
   }
 
-  function recordError(type, error, hook = null) {
-    state.errorCount += 1;
+  function isStrict(options = {}) {
+    return Boolean(
+      strict ||
+      options?.strict === true
+    );
+  }
 
-    state.lastError = {
+  function recordError(type, error, entry = null, options = {}) {
+    const hookName =
+      entry?.name ||
+      entry?.key ||
+      "";
+
+    const payload = {
       type:
         safeText(type, ""),
 
       hook:
-        hook?.name || hook?.key || "",
+        hookName,
+
+      key:
+        entry?.key || "",
 
       message:
         safeText(
@@ -452,22 +630,37 @@ export function createHooks({
           "Hook error."
         ),
 
+      name:
+        safeText(
+          error?.name,
+          "Error"
+        ),
+
+      timeout:
+        Boolean(error?.timeout),
+
       at:
         safeIsoDate(),
     };
+
+    state.errorCount += 1;
+
+    state.lastError =
+      payload;
+
+    if (entry) {
+      entry.errorCount =
+        safeNumber(entry.errorCount, 0) + 1;
+
+      entry.lastError =
+        payload;
+    }
 
     pushRecent({
       event:
         "error",
 
-      type:
-        safeText(type, ""),
-
-      hook:
-        state.lastError.hook,
-
-      message:
-        state.lastError.message,
+      ...payload,
     });
 
     safeWarn(
@@ -478,14 +671,22 @@ export function createHooks({
 
     safeEmit(
       events,
-      "core:hook:error",
-      state.lastError
+      HOOK_EVENTS.error,
+      payload
     );
+
+    if (isStrict(options)) {
+      throw error instanceof Error
+        ? error
+        : new Error(payload.message);
+    }
+
+    return payload;
   }
 
   function hasType(type = "") {
     const cleanType =
-      safeText(type, "");
+      normalizeTypeName(type);
 
     return Boolean(
       cleanType &&
@@ -495,22 +696,45 @@ export function createHooks({
 
   function defineType(type = "") {
     const cleanType =
-      safeText(type, "");
+      normalizeTypeName(type);
 
     if (!cleanType) {
       return false;
     }
 
     if (!Array.isArray(finalRegistry.hooks[cleanType])) {
-      finalRegistry.hooks[cleanType] = [];
+      finalRegistry.hooks[cleanType] =
+        [];
+
+      state.typeDefineCount += 1;
+
+      pushRecent({
+        event:
+          "type-defined",
+
+        type:
+          cleanType,
+      });
+
+      safeEmit(
+        events,
+        HOOK_EVENTS.typeDefined,
+        {
+          type:
+            cleanType,
+
+          at:
+            safeIsoDate(),
+        }
+      );
     }
 
     return true;
   }
 
-  function ensureType(type = "") {
+  function ensureType(type = "", options = {}) {
     const cleanType =
-      safeText(type, "");
+      normalizeTypeName(type);
 
     if (!cleanType) {
       return "";
@@ -520,7 +744,10 @@ export function createHooks({
       return cleanType;
     }
 
-    if (allowDynamicTypes) {
+    if (
+      allowDynamicTypes ||
+      options?.allowDynamicType === true
+    ) {
       defineType(cleanType);
       return cleanType;
     }
@@ -528,7 +755,7 @@ export function createHooks({
     const message =
       `Hook desconocido: ${cleanType}`;
 
-    if (strict) {
+    if (isStrict(options)) {
       throw new Error(message);
     }
 
@@ -540,9 +767,416 @@ export function createHooks({
     return "";
   }
 
+  function createHookEntry(type, handler, options = {}, index = 0) {
+    const cleanType =
+      normalizeTypeName(type);
+
+    const opts =
+      normalizeHookOptions(options);
+
+    const createdAtMs =
+      safeNow();
+
+    const name =
+      opts.name ||
+      normalizeHookName(handler?.name || "");
+
+    const key =
+      safeText(
+        options?.key,
+        makeHookKey(
+          cleanType,
+          handler,
+          name
+        )
+      );
+
+    const entry = {
+      type:
+        cleanType,
+
+      handler,
+
+      runner:
+        null,
+
+      name,
+
+      priority:
+        opts.priority,
+
+      once:
+        opts.once,
+
+      enabled:
+        opts.enabled,
+
+      timeoutMs:
+        opts.timeoutMs,
+
+      tags:
+        opts.tags,
+
+      meta:
+        opts.meta,
+
+      key,
+
+      createdAt:
+        safeIsoDate(createdAtMs),
+
+      createdAtMs,
+
+      runCount:
+        0,
+
+      errorCount:
+        0,
+
+      lastRunAt:
+        "",
+
+      lastRunAtMs:
+        0,
+
+      lastDurationMs:
+        0,
+
+      lastError:
+        null,
+
+      index:
+        safeNumber(index, 0),
+    };
+
+    entry.runner =
+      createHookRunner(entry);
+
+    return entry;
+  }
+
+  function normalizeExistingHookEntry(type, item, index = 0) {
+    const cleanType =
+      normalizeTypeName(type);
+
+    if (isHookRunner(item)) {
+      const existing =
+        getRunnerEntry(item);
+
+      existing.type =
+        existing.type || cleanType;
+
+      existing.index =
+        safeNumber(
+          existing.index,
+          index
+        );
+
+      existing.runner =
+        item;
+
+      return existing;
+    }
+
+    if (isFunction(item)) {
+      return createHookEntry(
+        cleanType,
+        item,
+        {
+          name:
+            item.name || "",
+        },
+        index
+      );
+    }
+
+    if (
+      isObject(item) &&
+      isFunction(item.handler)
+    ) {
+      return createHookEntry(
+        cleanType,
+        item.handler,
+        {
+          key:
+            item.key,
+
+          name:
+            item.name ||
+            item.handler.name ||
+            "",
+
+          priority:
+            item.priority,
+
+          once:
+            item.once,
+
+          enabled:
+            item.enabled,
+
+          timeoutMs:
+            item.timeoutMs ??
+            item.timeout,
+
+          tags:
+            item.tags,
+
+          meta:
+            item.meta,
+        },
+        index
+      );
+    }
+
+    return null;
+  }
+
+  function normalizeHookList(type) {
+    const cleanType =
+      normalizeTypeName(type);
+
+    if (!hasType(cleanType)) {
+      return [];
+    }
+
+    const source =
+      safeArray(
+        finalRegistry.hooks[cleanType]
+      );
+
+    const seen =
+      new Set();
+
+    const entries =
+      [];
+
+    source.forEach((item, index) => {
+      const entry =
+        normalizeExistingHookEntry(
+          cleanType,
+          item,
+          index
+        );
+
+      if (!entry || !entry.key) {
+        return;
+      }
+
+      if (seen.has(entry.key)) {
+        return;
+      }
+
+      seen.add(entry.key);
+
+      if (!entry.runner) {
+        entry.runner =
+          createHookRunner(entry);
+      }
+
+      entries.push(entry);
+    });
+
+    const sorted =
+      sortHookEntries(entries)
+        .map((entry, index) => {
+          entry.index =
+            index;
+
+          return entry;
+        });
+
+    finalRegistry.hooks[cleanType] =
+      sorted.map((entry) =>
+        entry.runner
+      );
+
+    finalRegistry.hookMeta[cleanType] =
+      sorted.map((entry) =>
+        buildPublicHookEntry(entry)
+      );
+
+    return sorted;
+  }
+
+  function createHookRunner(entry) {
+    const runner =
+      async function onionHookRunner(payload, context = {}) {
+        return invokeHookEntry(
+          entry,
+          payload,
+          context,
+          {
+            invokedBy:
+              "direct",
+          }
+        );
+      };
+
+    try {
+      Object.defineProperty(
+        runner,
+        "name",
+        {
+          value:
+            entry.name
+              ? `hook_${entry.name}`
+              : "onionHookRunner",
+          configurable:
+            true,
+        }
+      );
+    } catch {}
+
+    runner.__hookEntry =
+      entry;
+
+    runner.__hookType =
+      entry.type;
+
+    runner.__hookKey =
+      entry.key;
+
+    runner.__hookOriginal =
+      entry.handler;
+
+    runner.__isOnionHook =
+      true;
+
+    return runner;
+  }
+
+  async function invokeHookEntry(entry, payload, context = {}, options = {}) {
+    if (
+      !entry ||
+      !isFunction(entry.handler)
+    ) {
+      return undefined;
+    }
+
+    if (entry.enabled === false) {
+      return undefined;
+    }
+
+    const startedAt =
+      safeNow();
+
+    const type =
+      normalizeTypeName(
+        entry.type
+      );
+
+    const publicEntry =
+      buildPublicHookEntry(entry);
+
+    const hookContext = {
+      ...(isPlainObject(context) ? context : {}),
+
+      type,
+
+      hook:
+        publicEntry,
+
+      key:
+        entry.key,
+
+      name:
+        entry.name,
+
+      registry:
+        finalRegistry,
+
+      hooks:
+        apiRef,
+
+      invokedBy:
+        options.invokedBy || context?.invokedBy || "hooks",
+    };
+
+    let timeout =
+      null;
+
+    try {
+      timeout =
+        createTimeoutPromise(
+          entry.timeoutMs,
+          entry.name || entry.key
+        );
+
+      const execution =
+        Promise.resolve(
+          entry.handler(
+            payload,
+            hookContext
+          )
+        );
+
+      const result =
+        timeout
+          ? await Promise.race([
+              execution,
+              timeout.promise,
+            ])
+          : await execution;
+
+      return result;
+    } catch (error) {
+      recordError(
+        type,
+        error,
+        entry,
+        {
+          strict:
+            options.throwOnError === true,
+        }
+      );
+
+      if (options.throwOnError === true) {
+        throw error;
+      }
+
+      return undefined;
+    } finally {
+      try {
+        timeout?.clear?.();
+      } catch {}
+
+      const endedAt =
+        safeNow();
+
+      entry.runCount =
+        safeNumber(entry.runCount, 0) + 1;
+
+      entry.lastRunAtMs =
+        endedAt;
+
+      entry.lastRunAt =
+        safeIsoDate(endedAt);
+
+      entry.lastDurationMs =
+        Math.max(
+          0,
+          endedAt - startedAt
+        );
+
+      state.runHookCount += 1;
+
+      if (entry.once) {
+        remove(
+          entry.type,
+          entry.key,
+          {
+            reason:
+              "once",
+          }
+        );
+      }
+    }
+  }
+
   function add(type, handler, options = {}) {
     const cleanType =
-      ensureType(type);
+      ensureType(type, options);
 
     if (!cleanType) {
       return createNoopDisposer();
@@ -552,7 +1186,7 @@ export function createHooks({
       const message =
         "El hook debe ser una función.";
 
-      if (strict) {
+      if (isStrict(options)) {
         throw new Error(message);
       }
 
@@ -569,89 +1203,77 @@ export function createHooks({
     }
 
     const opts =
-      isObject(options)
+      isPlainObject(options)
         ? options
         : {};
 
-    const createdAtMs =
-      safeNow();
-
-    const name =
-      safeText(
-        opts.name,
-        handler.name || ""
-      );
-
-    const key =
-      makeHookKey(
-        cleanType,
-        handler,
-        name
-      );
-
     const list =
       normalizeHookList(
-        finalRegistry,
         cleanType
       );
 
+    const normalizedOptions =
+      normalizeHookOptions(opts);
+
+    const hookName =
+      normalizedOptions.name ||
+      handler.name ||
+      "";
+
+    const key =
+      safeText(
+        opts.key,
+        makeHookKey(
+          cleanType,
+          handler,
+          hookName
+        )
+      );
+
     const existing =
-      list.find((item) =>
-        item.key === key
+      list.find((entry) =>
+        entry.key === key
       );
 
     if (existing) {
+      state.duplicateCount += 1;
+
+      pushRecent({
+        event:
+          "duplicate",
+
+        type:
+          cleanType,
+
+        key,
+
+        name:
+          existing.name,
+      });
+
       return () =>
         remove(
           cleanType,
-          existing.key
+          key
         );
     }
 
-    const entry = {
-      type:
+    const entry =
+      createHookEntry(
         cleanType,
+        handler,
+        {
+          ...opts,
+          key,
+        },
+        list.length
+      );
 
-      handler,
-
-      name,
-
-      priority:
-        safeNumber(
-          opts.priority,
-          0
-        ),
-
-      once:
-        Boolean(opts.once),
-
-      enabled:
-        opts.enabled !== false,
-
-      key,
-
-      createdAt:
-        safeIsoDate(createdAtMs),
-
-      createdAtMs,
-
-      runCount:
-        0,
-
-      lastRunAt:
-        "",
-
-      lastDurationMs:
-        0,
-
-      index:
-        list.length,
-    };
-
-    finalRegistry.hooks[cleanType].push(entry);
+    finalRegistry.hooks[cleanType].push(
+      entry.runner
+    );
 
     normalizeHookList(
-      finalRegistry,
       cleanType
     );
 
@@ -664,7 +1286,8 @@ export function createHooks({
       type:
         cleanType,
 
-      key,
+      key:
+        entry.key,
 
       name:
         entry.name,
@@ -674,16 +1297,20 @@ export function createHooks({
 
       once:
         entry.once,
+
+      timeoutMs:
+        entry.timeoutMs,
     });
 
     safeEmit(
       events,
-      "core:hook:add",
+      HOOK_EVENTS.add,
       {
         type:
           cleanType,
 
-        key,
+        key:
+          entry.key,
 
         name:
           entry.name,
@@ -693,13 +1320,19 @@ export function createHooks({
 
         once:
           entry.once,
+
+        timeoutMs:
+          entry.timeoutMs,
+
+        at:
+          safeIsoDate(),
       }
     );
 
     return () =>
       remove(
         cleanType,
-        key
+        entry.key
       );
   }
 
@@ -708,83 +1341,123 @@ export function createHooks({
       type,
       handler,
       {
-        ...(isObject(options) ? options : {}),
+        ...(isPlainObject(options) ? options : {}),
+
         once:
           true,
       }
     );
   }
 
-  function remove(type, handlerOrKey) {
+  function findMatchingEntries(type, handlerOrKey) {
     const cleanType =
-      safeText(type, "");
+      normalizeTypeName(type);
+
+    if (!hasType(cleanType)) {
+      return [];
+    }
+
+    const list =
+      normalizeHookList(cleanType);
+
+    if (isFunction(handlerOrKey)) {
+      return list.filter((entry) =>
+        entry.handler === handlerOrKey ||
+        entry.runner === handlerOrKey
+      );
+    }
+
+    const key =
+      safeText(handlerOrKey, "");
+
+    if (!key) {
+      return [];
+    }
+
+    return list.filter((entry) =>
+      entry.key === key ||
+      entry.name === key
+    );
+  }
+
+  function remove(type, handlerOrKey, options = {}) {
+    const cleanType =
+      normalizeTypeName(type);
 
     if (!hasType(cleanType)) {
       return false;
     }
 
     const list =
-      normalizeHookList(
-        finalRegistry,
-        cleanType
+      normalizeHookList(cleanType);
+
+    const matches =
+      findMatchingEntries(
+        cleanType,
+        handlerOrKey
       );
 
-    const before =
-      list.length;
-
-    const key =
-      isFunction(handlerOrKey)
-        ? getHandlerId(handlerOrKey)
-        : safeText(handlerOrKey, "");
-
-    finalRegistry.hooks[cleanType] =
-      list.filter((entry) => {
-        if (isFunction(handlerOrKey)) {
-          return entry.handler !== handlerOrKey;
-        }
-
-        return (
-          entry.key !== key &&
-          entry.name !== key
-        );
-      });
-
-    const removed =
-      before - finalRegistry.hooks[cleanType].length;
-
-    if (removed > 0) {
-      state.removeCount += removed;
-
-      pushRecent({
-        event:
-          "remove",
-
-        type:
-          cleanType,
-
-        key,
-        removed,
-      });
-
-      safeEmit(
-        events,
-        "core:hook:remove",
-        {
-          type:
-            cleanType,
-
-          key,
-          removed,
-        }
-      );
+    if (!matches.length) {
+      return false;
     }
 
-    return removed > 0;
+    const keys =
+      new Set(
+        matches.map((entry) =>
+          entry.key
+        )
+      );
+
+    finalRegistry.hooks[cleanType] =
+      list
+        .filter((entry) =>
+          !keys.has(entry.key)
+        )
+        .map((entry) =>
+          entry.runner
+        );
+
+    normalizeHookList(cleanType);
+
+    state.removeCount +=
+      keys.size;
+
+    const payload = {
+      type:
+        cleanType,
+
+      removed:
+        keys.size,
+
+      keys:
+        Array.from(keys),
+
+      reason:
+        options?.reason || "remove",
+
+      at:
+        safeIsoDate(),
+    };
+
+    pushRecent({
+      event:
+        "remove",
+
+      ...payload,
+    });
+
+    safeEmit(
+      events,
+      HOOK_EVENTS.remove,
+      payload
+    );
+
+    return true;
   }
 
   function clear(type = "") {
     const cleanType =
-      safeText(type, "");
+      normalizeTypeName(type);
 
     if (cleanType) {
       if (!hasType(cleanType)) {
@@ -792,10 +1465,15 @@ export function createHooks({
       }
 
       const count =
-        finalRegistry.hooks[cleanType].length;
+        normalizeHookList(cleanType).length;
 
       finalRegistry.hooks[cleanType] =
         [];
+
+      finalRegistry.hookMeta[cleanType] =
+        [];
+
+      state.clearCount += 1;
 
       pushRecent({
         event:
@@ -806,6 +1484,20 @@ export function createHooks({
 
         count,
       });
+
+      safeEmit(
+        events,
+        HOOK_EVENTS.clear,
+        {
+          type:
+            cleanType,
+
+          count,
+
+          at:
+            safeIsoDate(),
+        }
+      );
 
       return count;
     }
@@ -822,54 +1514,68 @@ export function createHooks({
 
   function enable(type, handlerOrKey, value = true) {
     const cleanType =
-      safeText(type, "");
+      normalizeTypeName(type);
 
     if (!hasType(cleanType)) {
       return false;
     }
 
-    const key =
-      isFunction(handlerOrKey)
-        ? getHandlerId(handlerOrKey)
-        : safeText(handlerOrKey, "");
-
-    const list =
-      normalizeHookList(
-        finalRegistry,
-        cleanType
+    const matches =
+      findMatchingEntries(
+        cleanType,
+        handlerOrKey
       );
 
-    let changed =
-      false;
-
-    for (const entry of list) {
-      const match =
-        isFunction(handlerOrKey)
-          ? entry.handler === handlerOrKey
-          : entry.key === key || entry.name === key;
-
-      if (match) {
-        entry.enabled =
-          Boolean(value);
-
-        changed =
-          true;
-      }
+    for (const entry of matches) {
+      entry.enabled =
+        Boolean(value);
     }
 
-    return changed;
+    normalizeHookList(cleanType);
+
+    if (matches.length) {
+      pushRecent({
+        event:
+          value ? "enable" : "disable",
+
+        type:
+          cleanType,
+
+        count:
+          matches.length,
+      });
+    }
+
+    return matches.length > 0;
+  }
+
+  function setPriority(type, handlerOrKey, priority = 0) {
+    const cleanType =
+      normalizeTypeName(type);
+
+    if (!hasType(cleanType)) {
+      return false;
+    }
+
+    const matches =
+      findMatchingEntries(
+        cleanType,
+        handlerOrKey
+      );
+
+    for (const entry of matches) {
+      entry.priority =
+        safeNumber(priority, 0);
+    }
+
+    normalizeHookList(cleanType);
+
+    return matches.length > 0;
   }
 
   async function run(type, payload = {}, options = {}) {
-    const cleanType =
-      ensureType(type);
-
-    if (!cleanType) {
-      return payload;
-    }
-
     const opts =
-      isObject(options)
+      isPlainObject(options)
         ? options
         : {};
 
@@ -877,18 +1583,21 @@ export function createHooks({
       safeText(
         opts.mode,
         "series"
-      );
+      ).toLowerCase();
 
-    if (mode === "parallel") {
+    if (
+      mode === "parallel" ||
+      mode === "all"
+    ) {
       return runParallel(
-        cleanType,
+        type,
         payload,
         opts
       );
     }
 
     return runSeries(
-      cleanType,
+      type,
       payload,
       opts
     );
@@ -896,14 +1605,14 @@ export function createHooks({
 
   async function runSeries(type, payload = {}, options = {}) {
     const cleanType =
-      ensureType(type);
+      ensureType(type, options);
 
     if (!cleanType) {
       return payload;
     }
 
     const opts =
-      isObject(options)
+      isPlainObject(options)
         ? options
         : {};
 
@@ -911,22 +1620,22 @@ export function createHooks({
       payload;
 
     const list =
-      normalizeHookList(
-        finalRegistry,
-        cleanType
-      ).filter((entry) =>
-        entry.enabled !== false
-      );
+      normalizeHookList(cleanType)
+        .filter((entry) =>
+          entry.enabled !== false
+        );
 
     state.runCount += 1;
     state.lastType =
       cleanType;
     state.lastRunAt =
       safeNow();
+    state.lastRunAtIso =
+      safeIsoDate(state.lastRunAt);
 
     safeEmit(
       events,
-      "core:hook:run:start",
+      HOOK_EVENTS.runStart,
       {
         type:
           cleanType,
@@ -936,52 +1645,51 @@ export function createHooks({
 
         mode:
           "series",
+
+        at:
+          state.lastRunAtIso,
       }
     );
 
-    for (const entry of list) {
-      const startedAt =
-        safeNow();
+    let executed =
+      0;
 
+    let failed =
+      0;
+
+    for (const entry of list) {
       try {
         const result =
-          await entry.handler(
+          await invokeHookEntry(
+            entry,
             current,
             {
-              type:
-                cleanType,
+              ...(isPlainObject(opts.context) ? opts.context : {}),
 
-              hook:
-                entry,
+              mode:
+                "series",
+            },
+            {
+              invokedBy:
+                "runSeries",
 
-              registry:
-                finalRegistry,
+              throwOnError:
+                opts.throwOnError === true,
             }
           );
 
-        entry.runCount += 1;
-        entry.lastRunAt =
-          safeIsoDate();
-        entry.lastDurationMs =
-          safeNow() - startedAt;
+        executed += 1;
 
         if (result !== undefined) {
           current =
             result;
         }
-
-        if (entry.once) {
-          remove(
-            cleanType,
-            entry.key
-          );
-        }
       } catch (error) {
-        recordError(
-          cleanType,
-          error,
-          entry
-        );
+        failed += 1;
+
+        if (opts.throwOnError === true) {
+          throw error;
+        }
 
         if (opts.stopOnError === true) {
           break;
@@ -989,23 +1697,70 @@ export function createHooks({
       }
     }
 
-    pushRecent({
-      event:
-        "run",
-
+    const payloadDone = {
       type:
         cleanType,
+
+      count:
+        list.length,
+
+      executed,
+
+      failed,
 
       mode:
         "series",
 
-      count:
-        list.length,
+      at:
+        safeIsoDate(),
+    };
+
+    pushRecent({
+      event:
+        "run",
+
+      ...payloadDone,
     });
 
     safeEmit(
       events,
-      "core:hook:run:done",
+      HOOK_EVENTS.runDone,
+      payloadDone
+    );
+
+    return current;
+  }
+
+  async function runParallel(type, payload = {}, options = {}) {
+    const cleanType =
+      ensureType(type, options);
+
+    if (!cleanType) {
+      return [];
+    }
+
+    const opts =
+      isPlainObject(options)
+        ? options
+        : {};
+
+    const list =
+      normalizeHookList(cleanType)
+        .filter((entry) =>
+          entry.enabled !== false
+        );
+
+    state.runCount += 1;
+    state.lastType =
+      cleanType;
+    state.lastRunAt =
+      safeNow();
+    state.lastRunAtIso =
+      safeIsoDate(state.lastRunAt);
+
+    safeEmit(
+      events,
+      HOOK_EVENTS.runStart,
       {
         type:
           cleanType,
@@ -1014,120 +1769,131 @@ export function createHooks({
           list.length,
 
         mode:
-          "series",
+          "parallel",
+
+        at:
+          state.lastRunAtIso,
       }
     );
 
-    return current;
-  }
-
-  async function runParallel(type, payload = {}, options = {}) {
-    const cleanType =
-      ensureType(type);
-
-    if (!cleanType) {
-      return [];
-    }
-
-    const list =
-      normalizeHookList(
-        finalRegistry,
-        cleanType
-      ).filter((entry) =>
-        entry.enabled !== false
-      );
-
-    state.runCount += 1;
-    state.lastType =
-      cleanType;
-    state.lastRunAt =
-      safeNow();
-
-    const results =
+    const settled =
       await Promise.allSettled(
         list.map(async (entry) => {
-          const startedAt =
-            safeNow();
+          return invokeHookEntry(
+            entry,
+            payload,
+            {
+              ...(isPlainObject(opts.context) ? opts.context : {}),
 
-          try {
-            const result =
-              await entry.handler(
-                payload,
-                {
-                  type:
-                    cleanType,
+              mode:
+                "parallel",
+            },
+            {
+              invokedBy:
+                "runParallel",
 
-                  hook:
-                    entry,
-
-                  registry:
-                    finalRegistry,
-                }
-              );
-
-            entry.runCount += 1;
-            entry.lastRunAt =
-              safeIsoDate();
-            entry.lastDurationMs =
-              safeNow() - startedAt;
-
-            if (entry.once) {
-              remove(
-                cleanType,
-                entry.key
-              );
+              throwOnError:
+                opts.throwOnError === true,
             }
-
-            return result;
-          } catch (error) {
-            recordError(
-              cleanType,
-              error,
-              entry
-            );
-
-            if (options.throwOnError === true) {
-              throw error;
-            }
-
-            return undefined;
-          }
+          );
         })
       );
+
+    const failed =
+      settled.filter((item) =>
+        item.status === "rejected"
+      ).length;
+
+    const fulfilled =
+      settled.length - failed;
+
+    const result =
+      opts.settled === false
+        ? settled.map((item) =>
+            item.status === "fulfilled"
+              ? item.value
+              : undefined
+          )
+        : settled;
+
+    const payloadDone = {
+      type:
+        cleanType,
+
+      count:
+        list.length,
+
+      fulfilled,
+
+      failed,
+
+      mode:
+        "parallel",
+
+      at:
+        safeIsoDate(),
+    };
 
     pushRecent({
       event:
         "run",
 
-      type:
-        cleanType,
-
-      mode:
-        "parallel",
-
-      count:
-        list.length,
+      ...payloadDone,
     });
 
-    return results;
+    safeEmit(
+      events,
+      HOOK_EVENTS.runParallelDone,
+      payloadDone
+    );
+
+    safeEmit(
+      events,
+      HOOK_EVENTS.runDone,
+      payloadDone
+    );
+
+    return result;
   }
 
   function get(type = "") {
     const cleanType =
-      safeText(type, "");
+      normalizeTypeName(type);
 
-    if (!cleanType) {
+    if (!cleanType || !hasType(cleanType)) {
       return [];
     }
 
-    if (!hasType(cleanType)) {
+    return normalizeHookList(cleanType)
+      .map((entry) =>
+        entry.runner
+      );
+  }
+
+  function getEntries(type = "") {
+    const cleanType =
+      normalizeTypeName(type);
+
+    if (!cleanType || !hasType(cleanType)) {
       return [];
     }
 
-    return normalizeHookList(
-      finalRegistry,
-      cleanType
-    ).slice();
+    return normalizeHookList(cleanType)
+      .map((entry) =>
+        buildPublicHookEntry(entry)
+      );
+  }
+
+  function getEntry(type = "", handlerOrKey = "") {
+    const matches =
+      findMatchingEntries(
+        type,
+        handlerOrKey
+      );
+
+    return matches[0]
+      ? buildPublicHookEntry(matches[0])
+      : null;
   }
 
   function types() {
@@ -1138,25 +1904,40 @@ export function createHooks({
 
   function count(type = "") {
     const cleanType =
-      safeText(type, "");
+      normalizeTypeName(type);
 
     if (cleanType) {
-      return get(cleanType).length;
+      return normalizeHookList(cleanType).length;
     }
 
     return types().reduce((total, hookType) =>
-      total + get(hookType).length,
+      total + normalizeHookList(hookType).length,
       0
     );
   }
 
-  function getSnapshot() {
+  function getSnapshot(options = {}) {
+    const opts =
+      isPlainObject(options)
+        ? options
+        : {};
+
     const hookTypes =
       types();
 
+    const hooksByType =
+      Object.fromEntries(
+        hookTypes.map((hookType) => [
+          hookType,
+          normalizeHookList(hookType).map((entry) =>
+            buildPublicHookEntry(entry)
+          ),
+        ])
+      );
+
     return {
       version:
-        state.version,
+        HOOKS_VERSION,
 
       types:
         hookTypes,
@@ -1164,99 +1945,113 @@ export function createHooks({
       total:
         count(),
 
-      addCount:
-        state.addCount,
-
-      removeCount:
-        state.removeCount,
-
-      runCount:
-        state.runCount,
-
-      errorCount:
-        state.errorCount,
-
-      lastType:
-        state.lastType,
-
-      lastRunAt:
-        state.lastRunAt,
-
-      lastRunAtIso:
-        state.lastRunAt
-          ? safeIsoDate(state.lastRunAt)
-          : "",
-
-      lastError:
-        state.lastError,
-
       counts:
         Object.fromEntries(
           hookTypes.map((hookType) => [
             hookType,
-            get(hookType).length,
+            normalizeHookList(hookType).length,
           ])
         ),
+
+      stats: {
+        addCount:
+          state.addCount,
+
+        duplicateCount:
+          state.duplicateCount,
+
+        removeCount:
+          state.removeCount,
+
+        clearCount:
+          state.clearCount,
+
+        runCount:
+          state.runCount,
+
+        runHookCount:
+          state.runHookCount,
+
+        errorCount:
+          state.errorCount,
+
+        typeDefineCount:
+          state.typeDefineCount,
+
+        lastType:
+          state.lastType,
+
+        lastRunAt:
+          state.lastRunAt,
+
+        lastRunAtIso:
+          state.lastRunAtIso,
+
+        lastError:
+          safeClone(
+            state.lastError,
+            null
+          ),
+      },
 
       hooks:
-        Object.fromEntries(
-          hookTypes.map((hookType) => [
-            hookType,
-            get(hookType).map((entry) => ({
-              key:
-                entry.key,
-
-              name:
-                entry.name,
-
-              priority:
-                entry.priority,
-
-              once:
-                entry.once,
-
-              enabled:
-                entry.enabled,
-
-              createdAt:
-                entry.createdAt,
-
-              runCount:
-                entry.runCount,
-
-              lastRunAt:
-                entry.lastRunAt,
-
-              lastDurationMs:
-                entry.lastDurationMs,
-            })),
-          ])
-        ),
+        hooksByType,
 
       recent:
-        safeClone(
-          state.recent,
-          []
-        ),
+        opts.includeRecent === false
+          ? []
+          : safeClone(
+              state.recent,
+              []
+            ),
+
+      at:
+        safeIsoDate(),
     };
   }
 
-  function reset() {
+  function reset(options = {}) {
+    const opts =
+      isPlainObject(options)
+        ? options
+        : {};
+
     for (const hookType of types()) {
       finalRegistry.hooks[hookType] =
         [];
+
+      finalRegistry.hookMeta[hookType] =
+        [];
+    }
+
+    if (opts.keepDefaultTypes !== false) {
+      for (const hookType of DEFAULT_HOOK_TYPES) {
+        defineType(hookType);
+      }
     }
 
     state.addCount =
       0;
 
+    state.duplicateCount =
+      0;
+
     state.removeCount =
+      0;
+
+    state.clearCount =
       0;
 
     state.runCount =
       0;
 
+    state.runHookCount =
+      0;
+
     state.errorCount =
+      0;
+
+    state.typeDefineCount =
       0;
 
     state.lastType =
@@ -1264,6 +2059,9 @@ export function createHooks({
 
     state.lastRunAt =
       0;
+
+    state.lastRunAtIso =
+      "";
 
     state.lastError =
       null;
@@ -1274,12 +2072,23 @@ export function createHooks({
     return getSnapshot();
   }
 
-  safeLog(
-    utils,
-    "Hooks ready."
-  );
+  /*
+    Normalización inicial crítica:
+    - convierte hooks legacy en runners ejecutables
+    - mantiene registry.hooks[type] como array de funciones
+    - evita romper AppCore.runInitHooks(), request.js y código legacy
+  */
+  for (const hookType of types()) {
+    normalizeHookList(hookType);
+  }
 
-  return {
+  const api = {
+    version:
+      HOOKS_VERSION,
+
+    events:
+      HOOK_EVENTS,
+
     add,
     on:
       add,
@@ -1291,10 +2100,13 @@ export function createHooks({
     remove,
     off:
       remove,
+    delete:
+      remove,
 
     clear,
 
     enable,
+
     disable(type, handlerOrKey) {
       return enable(
         type,
@@ -1303,14 +2115,29 @@ export function createHooks({
       );
     },
 
+    setPriority,
+
     run,
+    execute:
+      run,
+
     runSeries,
+    runHookSeries:
+      runSeries,
+
     runParallel,
+    runHookParallel:
+      runParallel,
 
     defineType,
     hasType,
+
     types,
     get,
+
+    getEntries,
+    getEntry,
+
     count,
 
     getSnapshot,
@@ -1319,8 +2146,52 @@ export function createHooks({
 
     reset,
   };
+
+  apiRef =
+    api;
+
+  safeEmit(
+    events,
+    HOOK_EVENTS.ready,
+    {
+      version:
+        HOOKS_VERSION,
+
+      total:
+        count(),
+
+      types:
+        types(),
+
+      at:
+        safeIsoDate(),
+    }
+  );
+
+  safeLog(
+    utils,
+    "Hooks ready.",
+    {
+      version:
+        HOOKS_VERSION,
+
+      total:
+        count(),
+    }
+  );
+
+  return api;
 }
 
+export {
+  HOOKS_VERSION,
+  DEFAULT_HOOK_TYPES,
+  HOOK_EVENTS,
+};
+
 export default {
+  HOOKS_VERSION,
+  DEFAULT_HOOK_TYPES,
+  HOOK_EVENTS,
   createHooks,
 };

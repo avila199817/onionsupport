@@ -2,8 +2,10 @@
    Onion SPA - Reset Password Template
    Archivo: src/views/password-reset/reset-password.template.js
 
-   Responsabilidades:
-   - generar el html premium de recuperación de acceso
+   RESET PASSWORD · AUTH TEMPLATE · FINAL PRO SYSTEM · CSP CLEAN · 10/10
+
+   RESPONSABILIDADES:
+   - generar el HTML premium de recuperación de acceso
    - reutilizar el MISMO sistema visual de /src/css/auth/login.css
    - mantener layout auth-screen alineado con login
    - conservar bloque lateral izquierdo de estado
@@ -13,6 +15,12 @@
    - usar logo real de empresa según tema activo
    - exponer ids estables para dom.js e index.js
    - mantener compatibilidad total con flujo SPA
+
+   IMPORTANTE:
+   - Sin CSS inline.
+   - Sin <style> inyectado.
+   - Sin duplicidades visuales.
+   - El CSS vive en /src/css/auth/login.css.
 ========================================================= */
 
 import { escapeHtml } from "./reset-password.helpers.js";
@@ -27,6 +35,7 @@ function safeText(value = "", fallback = "") {
   }
 
   const text = String(value).trim();
+
   return text || fallback;
 }
 
@@ -40,7 +49,7 @@ function safeArray(value) {
 
 function getToastInfoIcon() {
   return `
-    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
       <path
         fill="currentColor"
         d="M11 7h2V5h-2v2Zm0 12h2V9h-2v10Zm1-17C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2Z"
@@ -51,7 +60,7 @@ function getToastInfoIcon() {
 
 function getToastCloseIcon() {
   return `
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
       <path
         fill="currentColor"
         d="M18.3 5.71 12 12.01l-6.3-6.3-1.41 1.41 6.3 6.3-6.3 6.29 1.41 1.41 6.3-6.29 6.29 6.29 1.41-1.41-6.29-6.29 6.29-6.3-1.41-1.41Z"
@@ -62,7 +71,7 @@ function getToastCloseIcon() {
 
 function getBackArrowIcon() {
   return `
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
       <path
         fill="currentColor"
         d="M14.71 6.29a1 1 0 0 1 0 1.41L11.41 11H20a1 1 0 1 1 0 2h-8.59l3.3 3.29a1 1 0 0 1-1.41 1.42l-5-5a1 1 0 0 1 0-1.42l5-5a1 1 0 0 1 1.41 0Z"
@@ -80,21 +89,28 @@ function renderThemeLogo({
   lightSrc = "/src/media/img/favicon_black.png",
   alt = "Onion Support",
 } = {}) {
+  const finalAlt = safeText(alt, "Onion Support");
+
   return `
-    <span class="login-logo-theme" aria-hidden="true">
+    <span
+      class="login-logo-theme"
+      aria-hidden="true"
+      data-login-logo-theme="true"
+    >
       <img
         class="login-logo-theme-dark"
         src="${escapeHtml(darkSrc)}"
-        alt="${escapeHtml(alt)}"
+        alt="${escapeHtml(finalAlt)}"
         width="44"
         height="44"
         loading="eager"
         decoding="async"
       />
+
       <img
         class="login-logo-theme-light"
         src="${escapeHtml(lightSrc)}"
-        alt="${escapeHtml(alt)}"
+        alt="${escapeHtml(finalAlt)}"
         width="44"
         height="44"
         loading="eager"
@@ -104,51 +120,8 @@ function renderThemeLogo({
   `;
 }
 
-function renderScopedThemeLogoStyle() {
-  return `
-    <style>
-      .login-logo-theme{
-        position:relative;
-        display:block;
-        width:44px;
-        height:44px;
-        z-index:1;
-      }
-
-      .login-logo-theme img{
-        position:absolute;
-        inset:0;
-        width:44px;
-        height:44px;
-        object-fit:contain;
-        display:block;
-      }
-
-      .login-logo-theme-dark{
-        opacity:1;
-        visibility:visible;
-      }
-
-      .login-logo-theme-light{
-        opacity:0;
-        visibility:hidden;
-      }
-
-      [data-theme="light"] .login-logo-theme-dark{
-        opacity:0;
-        visibility:hidden;
-      }
-
-      [data-theme="light"] .login-logo-theme-light{
-        opacity:1;
-        visibility:visible;
-      }
-    </style>
-  `;
-}
-
 /* =========================================================
-   PARTIALS
+   TOAST
 ========================================================= */
 
 function renderToast() {
@@ -157,6 +130,7 @@ function renderToast() {
       class="login-toast-stack login-toast-stack--top-right"
       aria-live="polite"
       aria-atomic="true"
+      data-reset-password-toast-stack="true"
     >
       <div
         id="resetPasswordToast"
@@ -197,6 +171,7 @@ function renderToast() {
             class="login-toast-close"
             aria-label="Cerrar aviso"
             title="Cerrar aviso"
+            data-tooltip="Cerrar aviso"
           >
             ${getToastCloseIcon()}
           </button>
@@ -212,11 +187,21 @@ function renderToast() {
   `;
 }
 
+/* =========================================================
+   LEFT PANEL
+========================================================= */
+
 function renderSignalItem(text = "") {
+  const label = safeText(text, "");
+
+  if (!label) {
+    return "";
+  }
+
   return `
     <div class="login-signal-item">
       <span class="dot" aria-hidden="true"></span>
-      <span>${escapeHtml(text)}</span>
+      <span>${escapeHtml(label)}</span>
     </div>
   `;
 }
@@ -257,6 +242,10 @@ function renderLeftPanel({
   `;
 }
 
+/* =========================================================
+   FORM
+========================================================= */
+
 function renderForm({
   appName = "Onion Support",
   title = "Recuperar acceso",
@@ -270,9 +259,11 @@ function renderForm({
   logoDarkSrc = "/src/media/img/favicon_white.png",
   logoLightSrc = "/src/media/img/favicon_black.png",
 } = {}) {
+  const finalAppName = safeText(appName, "Onion Support");
+
   const finalSubtitle = safeText(
     subtitle,
-    `Recuperar acceso a ${appName}`
+    `Recuperar acceso a ${finalAppName}`
   );
 
   return `
@@ -282,15 +273,16 @@ function renderForm({
     >
       <div class="login-card-shell login-card-shell--right">
         <div
-          class="login-card login-card--offset login-card--clean"
+          class="login-card login-card--offset login-card--clean reset-password-card"
           id="resetPasswordCard"
+          data-reset-password-card="true"
         >
           <header class="login-header">
             <div class="logo-fade" aria-hidden="true">
               ${renderThemeLogo({
                 darkSrc: logoDarkSrc,
                 lightSrc: logoLightSrc,
-                alt: appName,
+                alt: finalAppName,
               })}
             </div>
 
@@ -302,8 +294,9 @@ function renderForm({
           </header>
 
           <form
-            class="login-form"
+            class="login-form reset-password-form"
             id="resetPasswordForm"
+            data-reset-password-form="true"
             novalidate
           >
             <div class="login-field" data-field="identifier">
@@ -340,7 +333,7 @@ function renderForm({
 
             <div class="login-reset">
               <a
-                class="login-reset-link"
+                class="login-reset-link reset-password-back-link"
                 href="${escapeHtml(backHref)}"
                 id="backToLoginLink"
                 data-spa
@@ -348,10 +341,10 @@ function renderForm({
                 <span
                   class="login-reset-link-icon"
                   aria-hidden="true"
-                  style="display:inline-flex;align-items:center;justify-content:center;margin-right:8px;vertical-align:middle;"
                 >
                   ${getBackArrowIcon()}
                 </span>
+
                 <span>${escapeHtml(backLabel)}</span>
               </a>
             </div>
@@ -377,8 +370,6 @@ export function getResetPasswordTemplate(options = {}) {
   );
 
   return `
-    ${renderScopedThemeLogoStyle()}
-
     <section
       class="login-view reset-password-view"
       data-view="reset-password"
@@ -387,7 +378,11 @@ export function getResetPasswordTemplate(options = {}) {
       ${renderToast()}
 
       <div class="login-scene">
-        <div class="login-grid" id="resetPasswordGrid">
+        <div
+          class="login-grid"
+          id="resetPasswordGrid"
+          data-reset-password-grid="true"
+        >
           ${renderLeftPanel({
             ...options,
             appName,
@@ -404,4 +399,5 @@ export function getResetPasswordTemplate(options = {}) {
 }
 
 export { getResetPasswordTemplate as ResetPasswordTemplate };
+
 export default getResetPasswordTemplate;

@@ -20,7 +20,7 @@
    - soporte hash-router real: #/ruta y #!/ruta
    - helpers seguros ante inputs raros
    - preserve contexto público/canónico
-   - API base robusta
+   - API base robusta sin doble /api
    - detección public API compatible con /api prefix
    - normalización de usuario backend heterogéneo
    - avatar robusto desde payload /me
@@ -36,11 +36,49 @@ import { config } from "./config.js";
    CONSTANTS
 ========================================================= */
 
+const HELPERS_VERSION =
+  "11.0.0";
+
 const DEFAULT_ROUTE =
   "/";
 
 const LOCAL_ORIGIN =
   "http://localhost";
+
+const DEFAULT_STORAGE_PREFIX =
+  "onion";
+
+const SAFE_USERNAME_MAX =
+  64;
+
+const SAFE_SLUG_MAX =
+  96;
+
+const MAX_SAFE_CLONE_DEPTH =
+  8;
+
+const MAX_SAFE_CLONE_ARRAY =
+  500;
+
+const MAX_SAFE_CLONE_KEYS =
+  300;
+
+const BAD_TOKEN_VALUES =
+  Object.freeze([
+    "",
+    "null",
+    "undefined",
+    "false",
+    "true",
+    "nan",
+    "none",
+    "empty",
+    "[object object]",
+    "{}",
+    "[]",
+    "\"\"",
+    "''",
+  ]);
 
 const TOKEN_PARAM_NAMES =
   Object.freeze([
@@ -49,6 +87,15 @@ const TOKEN_PARAM_NAMES =
     "activateToken",
     "resetToken",
     "passwordResetToken",
+    "confirmToken",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
     "code",
     "t",
     "access_token",
@@ -69,23 +116,35 @@ const TECHNICAL_TOKEN_PATHS =
     "/auth/reset",
   ]);
 
-const SAFE_USERNAME_MAX =
-  64;
-
-const SAFE_SLUG_MAX =
-  96;
-
-const BAD_TOKEN_VALUES =
+const DEFAULT_PUBLIC_API_PATHS =
   Object.freeze([
-    "",
-    "null",
-    "undefined",
-    "false",
-    "true",
-    "nan",
-    "none",
-    "empty",
-    "[object object]",
+    "/auth/login",
+    "/auth/refresh",
+    "/auth/session/refresh",
+    "/auth/otp",
+    "/auth/otp/request",
+    "/auth/otp/verify",
+    "/auth/activate",
+    "/auth/reset",
+    "/auth/reset-password",
+    "/auth/password/reset",
+    "/activate-account",
+    "/reset-password",
+    "/reset-password/confirm",
+
+    "/api/auth/login",
+    "/api/auth/refresh",
+    "/api/auth/session/refresh",
+    "/api/auth/otp",
+    "/api/auth/otp/request",
+    "/api/auth/otp/verify",
+    "/api/auth/activate",
+    "/api/auth/reset",
+    "/api/auth/reset-password",
+    "/api/auth/password/reset",
+    "/api/activate-account",
+    "/api/reset-password",
+    "/api/reset-password/confirm",
   ]);
 
 const JWT_RE =
@@ -93,6 +152,9 @@ const JWT_RE =
 
 const BEARER_RE =
   /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi;
+
+const TOKENISH_TEXT_RE =
+  /(bearer\s+[a-z0-9._~+/=-]+)|([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)|([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|code|t)=)[^&#\s]+/i;
 
 /* =========================================================
    BASE
@@ -106,14 +168,31 @@ export function isBrowser() {
 }
 
 export function isDocumentReady() {
-  return (
-    isBrowser() &&
-    document.readyState !== "loading"
-  );
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    return document.readyState !== "loading";
+  } catch {
+    return false;
+  }
 }
 
 export function now() {
-  return Date.now();
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+export function nowIso(ms = now()) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
+  }
 }
 
 export function isPlainObject(value) {
@@ -121,6 +200,17 @@ export function isPlainObject(value) {
     value !== null &&
     typeof value === "object" &&
     !Array.isArray(value)
+  );
+}
+
+export function isObject(value) {
+  return isPlainObject(value);
+}
+
+export function isAnyObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object"
   );
 }
 
@@ -142,6 +232,10 @@ export function safeText(value, fallback = "") {
   return text || fallback;
 }
 
+export function safeLower(value, fallback = "") {
+  return safeText(value, fallback).toLowerCase();
+}
+
 export function safeNumber(value, fallback = 0) {
   const number =
     Number(value);
@@ -154,10 +248,45 @@ export function safeNumber(value, fallback = 0) {
 export function safeBool(value, fallback = false) {
   if (value === true) return true;
   if (value === false) return false;
-  if (value === "true") return true;
-  if (value === "false") return false;
-  if (value === 1) return true;
-  if (value === 0) return false;
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === "string") {
+    const clean =
+      value.trim().toLowerCase();
+
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "si",
+        "sí",
+        "ok",
+        "on",
+        "enabled",
+        "active",
+      ].includes(clean)
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "off",
+        "disabled",
+        "inactive",
+      ].includes(clean)
+    ) {
+      return false;
+    }
+  }
 
   return Boolean(fallback);
 }
@@ -166,6 +295,56 @@ export function safeArray(value) {
   return Array.isArray(value)
     ? value
     : [];
+}
+
+export function safeObject(value, fallback = {}) {
+  return isPlainObject(value)
+    ? value
+    : fallback;
+}
+
+export function unique(values = []) {
+  const output = [];
+  const seen = new Set();
+
+  for (const value of safeArray(values)) {
+    const clean =
+      safeText(value, "");
+
+    if (
+      clean &&
+      !seen.has(clean)
+    ) {
+      seen.add(clean);
+      output.push(clean);
+    }
+  }
+
+  return output;
+}
+
+export function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text =
+      safeText(value, "");
+
+    if (text) {
+      return text;
+    }
+  }
+
+  return "";
+}
+
+export function hasOwn(obj, key) {
+  try {
+    return Object.prototype.hasOwnProperty.call(
+      obj,
+      key
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function isDomScope(scope) {
@@ -203,27 +382,48 @@ export function normalizeListenerOptions(options = false) {
   return {
     capture:
       false,
+    passive:
+      false,
   };
 }
 
 /* =========================================================
-   SAFE HELPERS
+   STORAGE / JSON / CLONE
 ========================================================= */
 
+export function getStoragePrefix() {
+  return safeText(
+    config?.storagePrefix ||
+      config?.appKey ||
+      config?.appId ||
+      DEFAULT_STORAGE_PREFIX,
+    DEFAULT_STORAGE_PREFIX
+  )
+    .replace(/:+$/g, "")
+    .replace(/^:+/g, "") || DEFAULT_STORAGE_PREFIX;
+}
+
 export function buildStorageKey(key = "") {
-  const cleanKey =
-    safeText(key, "");
-
   const prefix =
-    safeText(
-      config?.storagePrefix ||
-        config?.appKey,
-      "onion"
-    );
+    getStoragePrefix();
 
-  return cleanKey
-    ? `${prefix}:${cleanKey}`
-    : prefix;
+  const cleanKey =
+    safeText(key, "")
+      .replace(/^:+/g, "");
+
+  if (!cleanKey) {
+    return prefix;
+  }
+
+  if (
+    cleanKey.startsWith(`${prefix}:`) ||
+    cleanKey.startsWith(`${prefix}.`) ||
+    cleanKey.startsWith(`${prefix}_`)
+  ) {
+    return cleanKey;
+  }
+
+  return `${prefix}:${cleanKey}`;
 }
 
 export function safeParse(value, fallback = null) {
@@ -246,6 +446,16 @@ export function safeParse(value, fallback = null) {
     return fallback;
   }
 
+  if (
+    [
+      "undefined",
+      "nan",
+      "[object Object]",
+    ].includes(raw)
+  ) {
+    return fallback;
+  }
+
   try {
     return JSON.parse(raw);
   } catch {
@@ -255,10 +465,86 @@ export function safeParse(value, fallback = null) {
 
 export function safeStringify(value, fallback = "") {
   try {
-    return JSON.stringify(value);
+    return JSON.stringify(value, (_key, item) => {
+      if (typeof item === "bigint") {
+        return String(item);
+      }
+
+      if (item instanceof Error) {
+        return cloneError(item);
+      }
+
+      return item;
+    });
   } catch {
     return fallback;
   }
+}
+
+function cloneDeepFallback(value, fallback = null, depth = 0, seen = new WeakMap()) {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  if (
+    value === null ||
+    typeof value !== "object"
+  ) {
+    return value;
+  }
+
+  if (depth > MAX_SAFE_CLONE_DEPTH) {
+    return "[depth-limit]";
+  }
+
+  try {
+    if (seen.has(value)) {
+      return "[circular]";
+    }
+
+    seen.set(value, true);
+  } catch {}
+
+  if (value instanceof Date) {
+    try {
+      return new Date(value.getTime());
+    } catch {
+      return String(value);
+    }
+  }
+
+  if (value instanceof Error) {
+    return cloneError(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, MAX_SAFE_CLONE_ARRAY)
+      .map((item) =>
+        cloneDeepFallback(
+          item,
+          null,
+          depth + 1,
+          seen
+        )
+      );
+  }
+
+  const output = {};
+  const entries =
+    Object.entries(value).slice(0, MAX_SAFE_CLONE_KEYS);
+
+  for (const [key, item] of entries) {
+    output[key] =
+      cloneDeepFallback(
+        item,
+        null,
+        depth + 1,
+        seen
+      );
+  }
+
+  return output;
 }
 
 export function safeClone(value, fallback = null) {
@@ -278,7 +564,14 @@ export function safeClone(value, fallback = null) {
 
   try {
     return JSON.parse(
-      JSON.stringify(value)
+      safeStringify(value)
+    );
+  } catch {}
+
+  try {
+    return cloneDeepFallback(
+      value,
+      fallback
     );
   } catch {
     return fallback;
@@ -296,10 +589,12 @@ export function cloneError(error = null) {
         error.name || "Error",
 
       message:
-        error.message || "",
+        redactTokenInText(
+          error.message || ""
+        ),
 
       stack:
-        error.stack || null,
+        error.stack ? "[stack]" : null,
 
       code:
         error.code || null,
@@ -307,21 +602,40 @@ export function cloneError(error = null) {
       status:
         error.status || error.statusCode || null,
 
+      statusCode:
+        error.statusCode || error.status || null,
+
+      timeout:
+        Boolean(error.timeout),
+
       data:
         safeClone(error.data, null),
 
+      body:
+        safeClone(error.body, null),
+
       cause:
         error.cause
-          ? safeText(error.cause?.message || error.cause, "")
+          ? redactTokenInText(
+              safeText(error.cause?.message || error.cause, "")
+            )
           : null,
     };
   }
 
   if (typeof error === "object") {
-    return safeClone(error, {
-      message:
-        String(error),
-    });
+    const cloned =
+      safeClone(error, {
+        message:
+          redactTokenInText(String(error)),
+      });
+
+    if (cloned?.message) {
+      cloned.message =
+        redactTokenInText(cloned.message);
+    }
+
+    return cloned;
   }
 
   return {
@@ -329,7 +643,7 @@ export function cloneError(error = null) {
       "Error",
 
     message:
-      String(error),
+      redactTokenInText(String(error)),
   };
 }
 
@@ -385,6 +699,20 @@ export function redactTokenInText(value = "") {
     );
   } catch {}
 
+  try {
+    if (TOKENISH_TEXT_RE.test(output)) {
+      output = output
+        .replace(
+          /(bearer\s+)([a-z0-9._~+/=-]+)/gi,
+          "$1***"
+        )
+        .replace(
+          /([a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+)/gi,
+          "***"
+        );
+    }
+  } catch {}
+
   return output;
 }
 
@@ -392,7 +720,7 @@ export function redactTokenInText(value = "") {
    PATH PARTS
 ========================================================= */
 
-function getBaseOrigin() {
+export function getBaseOrigin() {
   if (
     isBrowser() &&
     window.location?.origin
@@ -403,13 +731,13 @@ function getBaseOrigin() {
   return LOCAL_ORIGIN;
 }
 
-function isAbsoluteUrl(value = "") {
+export function isAbsoluteUrl(value = "") {
   return /^[a-z][a-z\d+.-]*:\/\//i.test(
     safeText(value, "")
   );
 }
 
-function isHashRouterPath(value = "") {
+export function isHashRouterPath(value = "") {
   const raw =
     safeText(value, "");
 
@@ -419,7 +747,7 @@ function isHashRouterPath(value = "") {
   );
 }
 
-function normalizeHashRouterPath(value = "") {
+export function normalizeHashRouterPath(value = "") {
   const raw =
     safeText(value, "");
 
@@ -428,13 +756,13 @@ function normalizeHashRouterPath(value = "") {
   }
 
   if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/");
+    return raw.replace(/^#!\/?/, "/") || DEFAULT_ROUTE;
   }
 
-  return raw.replace(/^#\/?/, "/");
+  return raw.replace(/^#\/?/, "/") || DEFAULT_ROUTE;
 }
 
-function normalizeSearch(search = "") {
+export function normalizeSearch(search = "") {
   const raw =
     safeText(search, "");
 
@@ -447,7 +775,7 @@ function normalizeSearch(search = "") {
     : `?${raw.replace(/^\?+/, "")}`;
 }
 
-function normalizeHash(hash = "") {
+export function normalizeHash(hash = "") {
   const raw =
     safeText(hash, "");
 
@@ -460,10 +788,16 @@ function normalizeHash(hash = "") {
     : `#${raw.replace(/^#+/, "")}`;
 }
 
-function splitPathParts(path = DEFAULT_ROUTE) {
+export function splitPathParts(path = DEFAULT_ROUTE) {
   const raw =
     safeText(path, DEFAULT_ROUTE) ||
     DEFAULT_ROUTE;
+
+  if (isHashRouterPath(raw)) {
+    return splitPathParts(
+      normalizeHashRouterPath(raw)
+    );
+  }
 
   let pathname =
     raw;
@@ -539,10 +873,6 @@ export function sanitizeUsername(value = "") {
   raw =
     raw.replace(/^@+/, "");
 
-  /*
-    Si llega un email como username, usamos la parte local.
-    Evita rutas públicas tipo /@correo.comdominio.
-  */
   if (
     raw.includes("@") &&
     /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(raw)
@@ -552,8 +882,11 @@ export function sanitizeUsername(value = "") {
   }
 
   return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, "")
     .replace(/[^a-zA-Z0-9._-]/g, "")
+    .replace(/[._-]{2,}/g, "-")
     .replace(/^[._-]+|[._-]+$/g, "")
     .toLowerCase()
     .slice(0, SAFE_USERNAME_MAX);
@@ -595,8 +928,7 @@ function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
   const segments =
     value.split("/");
 
-  const normalizedSegments =
-    [];
+  const normalizedSegments = [];
 
   for (const segment of segments) {
     if (
@@ -645,11 +977,6 @@ export function normalizePath(path = DEFAULT_ROUTE) {
     return DEFAULT_ROUTE;
   }
 
-  /*
-    Hash-router directo:
-    "#/tickets" -> "/tickets"
-    "#!/tickets" -> "/tickets"
-  */
   if (isHashRouterPath(raw)) {
     return normalizePath(
       normalizeHashRouterPath(raw)
@@ -684,13 +1011,9 @@ export function normalizePath(path = DEFAULT_ROUTE) {
     pathname,
     search,
     hash,
-  } = splitPathParts(raw);
+  } =
+    splitPathParts(raw);
 
-  /*
-    Hash-router combinado:
-    "/index.html#/tickets" -> "/tickets"
-    "/app?x=1#/tickets?y=2" -> "/tickets?y=2"
-  */
   if (
     hash &&
     isHashRouterPath(hash)
@@ -727,12 +1050,6 @@ export function stripUsernamePrefix(path = DEFAULT_ROUTE) {
   );
 }
 
-/*
-  Canonical interno:
-  - sin /@username
-  - sin query
-  - sin hash
-*/
 export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
   const normalized =
     normalizePath(path);
@@ -748,20 +1065,78 @@ export function normalizeCanonicalPath(path = DEFAULT_ROUTE) {
   );
 }
 
-/*
-  Public path:
-  - sin /@username
-  - preserva query/hash
-*/
 export function normalizePublicPath(path = DEFAULT_ROUTE) {
   return stripUsernamePrefix(
     normalizePath(path)
   );
 }
 
+export function buildPublicPath(path = DEFAULT_ROUTE, username = "") {
+  const publicPath =
+    normalizePublicPath(path);
+
+  const cleanUsername =
+    sanitizeUsername(username);
+
+  if (!cleanUsername) {
+    return publicPath;
+  }
+
+  if (publicPath === DEFAULT_ROUTE) {
+    return `/@${cleanUsername}`;
+  }
+
+  return normalizePath(
+    `/@${cleanUsername}${publicPath}`
+  );
+}
+
 /* =========================================================
    URL / REQUEST
 ========================================================= */
+
+function getBasePathFromUrlLike(base = "") {
+  const cleanBase =
+    normalizeApiBase(base);
+
+  if (!cleanBase) {
+    return "";
+  }
+
+  try {
+    if (isAbsoluteUrl(cleanBase)) {
+      return normalizePathnameOnly(
+        new URL(cleanBase, getBaseOrigin()).pathname || ""
+      );
+    }
+
+    return normalizePathnameOnly(cleanBase);
+  } catch {
+    return "";
+  }
+}
+
+function shouldAvoidDoubleBase(base = "", path = "") {
+  const basePath =
+    getBasePathFromUrlLike(base)
+      .replace(/^\/+/, "");
+
+  const cleanPath =
+    safeText(path, "")
+      .replace(/^\/+/, "");
+
+  if (
+    !basePath ||
+    !cleanPath
+  ) {
+    return false;
+  }
+
+  return (
+    cleanPath === basePath ||
+    cleanPath.startsWith(`${basePath}/`)
+  );
+}
 
 export function joinUrl(base = "", path = "") {
   const rawPath =
@@ -786,6 +1161,19 @@ export function joinUrl(base = "", path = "") {
     return `/${cleanPath}`;
   }
 
+  if (shouldAvoidDoubleBase(cleanBase, cleanPath)) {
+    if (isAbsoluteUrl(cleanBase)) {
+      try {
+        const parsed =
+          new URL(cleanBase, getBaseOrigin());
+
+        return `${parsed.origin}/${cleanPath}`;
+      } catch {}
+    }
+
+    return `/${cleanPath}`;
+  }
+
   return `${cleanBase}/${cleanPath}`;
 }
 
@@ -807,6 +1195,9 @@ function appendQueryToUrl(baseUrl = "", query = null) {
   if (!queryEntries.length) {
     return baseUrl;
   }
+
+  const wasAbsolute =
+    isAbsoluteUrl(baseUrl);
 
   let url;
 
@@ -865,7 +1256,7 @@ function appendQueryToUrl(baseUrl = "", query = null) {
     if (typeof value === "object") {
       url.searchParams.set(
         cleanKey,
-        JSON.stringify(value)
+        safeStringify(value, "{}")
       );
 
       continue;
@@ -877,7 +1268,11 @@ function appendQueryToUrl(baseUrl = "", query = null) {
     );
   }
 
-  return url.toString();
+  if (wasAbsolute) {
+    return url.toString();
+  }
+
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 export function buildUrl(path = "", query = null) {
@@ -957,9 +1352,7 @@ function getApiBasePath() {
       );
     }
 
-    return normalizeCanonicalPath(
-      apiBase
-    );
+    return normalizeCanonicalPath(apiBase);
   } catch {
     return "";
   }
@@ -992,6 +1385,18 @@ function stripApiBasePrefix(path = DEFAULT_ROUTE) {
   return normalized;
 }
 
+function getConfiguredPublicApiPaths() {
+  const configured =
+    config?.auth?.publicApiPaths ||
+    config?.publicApiPaths ||
+    [];
+
+  return unique([
+    ...DEFAULT_PUBLIC_API_PATHS,
+    ...safeArray(configured),
+  ]);
+}
+
 export function isPublicApiPath(path = "") {
   const normalized =
     normalizeCanonicalPath(path);
@@ -1000,7 +1405,7 @@ export function isPublicApiPath(path = "") {
     stripApiBasePrefix(normalized);
 
   const list =
-    config?.auth?.publicApiPaths || [];
+    getConfiguredPublicApiPaths();
 
   return list.some((publicPath) => {
     const current =
@@ -1024,55 +1429,108 @@ export function isPublicApiPath(path = "") {
    USER NORMALIZATION
 ========================================================= */
 
-function firstNonEmpty(...values) {
-  for (const value of values) {
-    const text =
-      safeText(value, "");
-
-    if (text) {
-      return text;
-    }
-  }
-
-  return "";
-}
-
 function normalizeRole(value = "") {
   return safeText(value, "")
     .toLowerCase();
 }
 
+function unwrapUserPayload(payload = null) {
+  if (
+    !payload ||
+    typeof payload !== "object"
+  ) {
+    return payload;
+  }
+
+  if (
+    isPlainObject(payload.user) &&
+    (
+      hasOwn(payload, "ok") ||
+      hasOwn(payload, "success") ||
+      hasOwn(payload, "data") ||
+      hasOwn(payload, "token")
+    )
+  ) {
+    return payload.user;
+  }
+
+  if (isPlainObject(payload.data?.user)) {
+    return payload.data.user;
+  }
+
+  if (isPlainObject(payload.data?.me)) {
+    return payload.data.me;
+  }
+
+  if (isPlainObject(payload.currentUser)) {
+    return payload.currentUser;
+  }
+
+  if (isPlainObject(payload.authUser)) {
+    return payload.authUser;
+  }
+
+  if (isPlainObject(payload.sessionUser)) {
+    return payload.sessionUser;
+  }
+
+  return payload;
+}
+
 function normalizeActive(user = {}) {
+  const status =
+    safeText(
+      user.status ||
+        user.estado ||
+        user.state ||
+        user.accountStatus ||
+        "",
+      ""
+    ).toLowerCase();
+
+  if (
+    [
+      "disabled",
+      "inactive",
+      "deleted",
+      "blocked",
+      "suspended",
+      "banned",
+    ].includes(status)
+  ) {
+    return false;
+  }
+
+  if (
+    user.disabled === true ||
+    user.isDisabled === true ||
+    user.deleted === true ||
+    user.isDeleted === true ||
+    user.blocked === true ||
+    user.isBlocked === true
+  ) {
+    return false;
+  }
+
   const candidate =
     user.active ??
     user.is_active ??
     user.isActive ??
     user.enabled ??
-    user.isEnabled ??
-    user.disabled ??
-    user.isDisabled;
+    user.isEnabled;
 
   if (
-    user.disabled === true ||
-    user.isDisabled === true
+    candidate === undefined ||
+    candidate === null ||
+    candidate === ""
   ) {
-    return false;
-  }
-
-  if (candidate === undefined || candidate === null) {
     return true;
   }
 
-  if (
-    candidate === "0" ||
-    candidate === 0 ||
-    candidate === "false" ||
-    candidate === false
-  ) {
-    return false;
-  }
-
-  return true;
+  return safeBool(
+    candidate,
+    true
+  );
 }
 
 function resolveAvatarCandidate(user = {}) {
@@ -1091,6 +1549,16 @@ function resolveAvatarCandidate(user = {}) {
       ? raw.profile
       : {};
 
+  const meta =
+    isPlainObject(user.meta)
+      ? user.meta
+      : {};
+
+  const settings =
+    isPlainObject(user.settings)
+      ? user.settings
+      : {};
+
   return firstNonEmpty(
     user.avatarUrl,
     user.avatar_url,
@@ -1106,6 +1574,9 @@ function resolveAvatarCandidate(user = {}) {
     user.picture,
     user.pictureUrl,
     user.picture_url,
+    user.thumbnail,
+    user.thumbnailUrl,
+    user.thumbnail_url,
 
     profile.avatarUrl,
     profile.avatar_url,
@@ -1119,6 +1590,17 @@ function resolveAvatarCandidate(user = {}) {
     profile.picture,
     profile.pictureUrl,
     profile.picture_url,
+
+    meta.avatarUrl,
+    meta.avatar_url,
+    meta.avatar,
+    meta.picture,
+    meta.pictureUrl,
+    meta.picture_url,
+
+    settings.avatarUrl,
+    settings.avatar_url,
+    settings.avatar,
 
     raw.avatarUrl,
     raw.avatar_url,
@@ -1149,39 +1631,44 @@ function resolveAvatarCandidate(user = {}) {
 }
 
 export function normalizeUser(user = null) {
+  const source =
+    unwrapUserPayload(user);
+
   if (
-    !user ||
-    typeof user !== "object"
+    !source ||
+    typeof source !== "object"
   ) {
     return null;
   }
 
   const profile =
-    isPlainObject(user.profile)
-      ? user.profile
+    isPlainObject(source.profile)
+      ? source.profile
       : {};
 
   const raw =
-    isPlainObject(user.raw)
-      ? user.raw
+    isPlainObject(source.raw)
+      ? source.raw
       : {};
 
   const id =
-    user.id ??
-    user.userId ??
-    user.user_id ??
-    user.uuid ??
-    user._id ??
+    source.id ??
+    source.userId ??
+    source.user_id ??
+    source.uuid ??
+    source._id ??
     profile.id ??
     profile.userId ??
+    profile.user_id ??
     raw.id ??
     raw.userId ??
+    raw.user_id ??
     null;
 
   const email =
     firstNonEmpty(
-      user.email,
-      user.mail,
+      source.email,
+      source.mail,
       profile.email,
       profile.mail,
       raw.email,
@@ -1190,12 +1677,12 @@ export function normalizeUser(user = null) {
 
   const rawName =
     firstNonEmpty(
-      user.name,
-      user.nombre,
-      user.full_name,
-      user.fullName,
-      user.display_name,
-      user.displayName,
+      source.name,
+      source.nombre,
+      source.full_name,
+      source.fullName,
+      source.display_name,
+      source.displayName,
       profile.name,
       profile.nombre,
       profile.full_name,
@@ -1208,7 +1695,7 @@ export function normalizeUser(user = null) {
       raw.fullName,
       raw.display_name,
       raw.displayName,
-      user.username,
+      source.username,
       email,
       "Usuario"
     );
@@ -1216,12 +1703,12 @@ export function normalizeUser(user = null) {
   const username =
     sanitizeUsername(
       firstNonEmpty(
-        user.username,
-        user.userName,
-        user.nick,
-        user.alias,
-        user.login,
-        user.slug,
+        source.username,
+        source.userName,
+        source.nick,
+        source.alias,
+        source.login,
+        source.slug,
         profile.username,
         profile.userName,
         profile.nick,
@@ -1241,7 +1728,7 @@ export function normalizeUser(user = null) {
   const slug =
     sanitizeUsername(
       firstNonEmpty(
-        user.slug,
+        source.slug,
         profile.slug,
         raw.slug,
         username,
@@ -1252,11 +1739,11 @@ export function normalizeUser(user = null) {
   const role =
     normalizeRole(
       firstNonEmpty(
-        user.role,
-        user.rol,
-        user.type,
-        user.user_type,
-        user.userType,
+        source.role,
+        source.rol,
+        source.type,
+        source.user_type,
+        source.userType,
         profile.role,
         profile.rol,
         raw.role,
@@ -1265,29 +1752,29 @@ export function normalizeUser(user = null) {
     );
 
   const hasAvatar =
-    user.hasAvatar ??
-    user.has_avatar ??
-    user.avatarEnabled ??
-    user.avatar_enabled ??
+    source.hasAvatar ??
+    source.has_avatar ??
+    source.avatarEnabled ??
+    source.avatar_enabled ??
     profile.hasAvatar ??
     profile.has_avatar ??
     raw.hasAvatar ??
     raw.has_avatar;
 
   const avatar =
-    resolveAvatarCandidate(user);
+    resolveAvatarCandidate(source);
 
   const active =
-    normalizeActive(user);
+    normalizeActive(source);
 
   return {
-    ...user,
+    ...source,
 
     id,
 
     userId:
-      user.userId ??
-      user.user_id ??
+      source.userId ??
+      source.user_id ??
       id,
 
     username,
@@ -1298,8 +1785,8 @@ export function normalizeUser(user = null) {
 
     displayName:
       firstNonEmpty(
-        user.displayName,
-        user.display_name,
+        source.displayName,
+        source.display_name,
         profile.displayName,
         profile.display_name,
         raw.displayName,
@@ -1327,8 +1814,8 @@ export function normalizeUser(user = null) {
         : Boolean(hasAvatar),
 
     avatarUpdatedAt:
-      user.avatarUpdatedAt ??
-      user.avatar_updated_at ??
+      source.avatarUpdatedAt ??
+      source.avatar_updated_at ??
       profile.avatarUpdatedAt ??
       profile.avatar_updated_at ??
       raw.avatarUpdatedAt ??
@@ -1340,64 +1827,75 @@ export function normalizeUser(user = null) {
 }
 
 export function getUserDisplayName(user = null) {
+  const source =
+    unwrapUserPayload(user);
+
   return firstNonEmpty(
-    user?.displayName,
-    user?.display_name,
-    user?.name,
-    user?.nombre,
-    user?.fullName,
-    user?.full_name,
-    user?.profile?.displayName,
-    user?.profile?.display_name,
-    user?.profile?.name,
-    user?.raw?.displayName,
-    user?.raw?.display_name,
-    user?.raw?.name,
-    user?.username,
-    user?.email,
+    source?.displayName,
+    source?.display_name,
+    source?.name,
+    source?.nombre,
+    source?.fullName,
+    source?.full_name,
+    source?.profile?.displayName,
+    source?.profile?.display_name,
+    source?.profile?.name,
+    source?.raw?.displayName,
+    source?.raw?.display_name,
+    source?.raw?.name,
+    source?.username,
+    source?.email,
     "Usuario"
   );
 }
 
 export function getUserUsername(user = null) {
+  const source =
+    unwrapUserPayload(user);
+
   return sanitizeUsername(
     firstNonEmpty(
-      user?.username,
-      user?.userName,
-      user?.nick,
-      user?.alias,
-      user?.login,
-      user?.slug,
-      user?.profile?.username,
-      user?.profile?.userName,
-      user?.profile?.slug,
-      user?.raw?.username,
-      user?.raw?.userName,
-      user?.raw?.slug,
-      user?.email
+      source?.username,
+      source?.userName,
+      source?.nick,
+      source?.alias,
+      source?.login,
+      source?.slug,
+      source?.profile?.username,
+      source?.profile?.userName,
+      source?.profile?.slug,
+      source?.raw?.username,
+      source?.raw?.userName,
+      source?.raw?.slug,
+      source?.email
     )
   );
 }
 
 export function getUserAvatarUrl(user = null) {
+  const source =
+    unwrapUserPayload(user);
+
   const hasAvatar =
-    user?.hasAvatar ??
-    user?.has_avatar ??
-    user?.profile?.hasAvatar ??
-    user?.profile?.has_avatar ??
-    user?.raw?.hasAvatar ??
-    user?.raw?.has_avatar;
+    source?.hasAvatar ??
+    source?.has_avatar ??
+    source?.profile?.hasAvatar ??
+    source?.profile?.has_avatar ??
+    source?.raw?.hasAvatar ??
+    source?.raw?.has_avatar;
 
   if (hasAvatar === false) {
     return "";
   }
 
-  return resolveAvatarCandidate(user || {});
+  return resolveAvatarCandidate(source || {});
 }
 
 export function getInitials(value = "") {
   const text =
-    safeText(value, "");
+    typeof value === "object"
+      ? getUserDisplayName(value)
+      : safeText(value, "");
 
   if (!text) {
     return "";
@@ -1423,16 +1921,20 @@ export function getCurrentLocationPath() {
     return DEFAULT_ROUTE;
   }
 
-  const hash =
-    window.location.hash || "";
+  try {
+    const hash =
+      window.location.hash || "";
 
-  if (isHashRouterPath(hash)) {
-    return normalizePath(hash);
+    if (isHashRouterPath(hash)) {
+      return normalizePath(hash);
+    }
+
+    return normalizePath(
+      `${window.location.pathname || DEFAULT_ROUTE}${window.location.search || ""}${hash}`
+    );
+  } catch {
+    return DEFAULT_ROUTE;
   }
-
-  return normalizePath(
-    `${window.location.pathname || DEFAULT_ROUTE}${window.location.search || ""}${hash}`
-  );
 }
 
 export function getCurrentLocationCanonicalPath() {
@@ -1440,16 +1942,20 @@ export function getCurrentLocationCanonicalPath() {
     return DEFAULT_ROUTE;
   }
 
-  const hash =
-    window.location.hash || "";
+  try {
+    const hash =
+      window.location.hash || "";
 
-  if (isHashRouterPath(hash)) {
-    return normalizeCanonicalPath(hash);
+    if (isHashRouterPath(hash)) {
+      return normalizeCanonicalPath(hash);
+    }
+
+    return normalizeCanonicalPath(
+      `${window.location.pathname || DEFAULT_ROUTE}${window.location.search || ""}${hash}`
+    );
+  } catch {
+    return DEFAULT_ROUTE;
   }
-
-  return normalizeCanonicalPath(
-    `${window.location.pathname || DEFAULT_ROUTE}${window.location.search || ""}${hash}`
-  );
 }
 
 /* =========================================================
@@ -1610,8 +2116,7 @@ export function createAbortTimeout(ms = config?.requestTimeout) {
 }
 
 export function normalizeHeaders(headers = {}) {
-  let source =
-    [];
+  let source = [];
 
   try {
     if (
@@ -1628,8 +2133,7 @@ export function normalizeHeaders(headers = {}) {
         Object.entries(headers || {});
     }
   } catch {
-    source =
-      [];
+    source = [];
   }
 
   return source.reduce((acc, [key, value]) => {
@@ -1672,8 +2176,7 @@ export function mergeAbortSignals(signals = []) {
   const controller =
     new AbortController();
 
-  const cleanups =
-    [];
+  const cleanups = [];
 
   function teardown() {
     for (const cleanup of cleanups) {
@@ -1682,8 +2185,7 @@ export function mergeAbortSignals(signals = []) {
       } catch {}
     }
 
-    cleanups.length =
-      0;
+    cleanups.length = 0;
   }
 
   function abortFrom(sourceSignal) {
@@ -1770,13 +2272,14 @@ export function isProbablyTimeoutError(error) {
     message.includes("timeout") ||
     raw.includes("timeout") ||
     reason.includes("timeout") ||
-    error?.timeout === true
+    error?.timeout === true ||
+    error?.code === "BOOT_TIMEOUT" ||
+    error?.code === "REQUEST_TIMEOUT"
   );
 }
 
 export function detectNetworkHints(url = "") {
-  const hints =
-    [];
+  const hints = [];
 
   if (!isBrowser()) {
     return hints;
@@ -1798,9 +2301,12 @@ export function detectNetworkHints(url = "") {
   }
 
   try {
+    const currentProtocol =
+      window.location.protocol;
+
     if (
       /^https:\/\//i.test(rawUrl) &&
-      window.location.protocol === "http:"
+      currentProtocol === "http:"
     ) {
       hints.push(
         "Hay mezcla de protocolos: frontend en HTTP y API en HTTPS."
@@ -1809,7 +2315,7 @@ export function detectNetworkHints(url = "") {
 
     if (
       /^http:\/\//i.test(rawUrl) &&
-      window.location.protocol === "https:"
+      currentProtocol === "https:"
     ) {
       hints.push(
         "Hay mezcla de protocolos: frontend en HTTPS y API en HTTP."
@@ -1841,6 +2347,9 @@ export function detectNetworkHints(url = "") {
 
 export function getHelpersSnapshot() {
   return {
+    version:
+      HELPERS_VERSION,
+
     browser:
       isBrowser(),
 
@@ -1865,6 +2374,9 @@ export function getHelpersSnapshot() {
     apiBasePath:
       getApiBasePath(),
 
+    storagePrefix:
+      getStoragePrefix(),
+
     defaultLang:
       config?.defaultLang || "es",
 
@@ -1874,20 +2386,33 @@ export function getHelpersSnapshot() {
 }
 
 export default {
+  HELPERS_VERSION,
+
   isBrowser,
   isDocumentReady,
   now,
+  nowIso,
 
   isPlainObject,
+  isObject,
+  isAnyObject,
   isFunction,
   safeText,
+  safeLower,
   safeNumber,
   safeBool,
   safeArray,
+  safeObject,
+  unique,
+  firstNonEmpty,
+  hasOwn,
+
   isDomScope,
   normalizeListenerOptions,
 
+  getStoragePrefix,
   buildStorageKey,
+
   safeParse,
   safeStringify,
   safeClone,
@@ -1895,6 +2420,13 @@ export default {
 
   redactTokenInText,
 
+  getBaseOrigin,
+  isAbsoluteUrl,
+  isHashRouterPath,
+  normalizeHashRouterPath,
+  normalizeSearch,
+  normalizeHash,
+  splitPathParts,
   stripSearchAndHash,
   getSearchAndHash,
 
@@ -1906,6 +2438,7 @@ export default {
   stripUsernamePrefix,
   normalizeCanonicalPath,
   normalizePublicPath,
+  buildPublicPath,
 
   joinUrl,
   buildUrl,

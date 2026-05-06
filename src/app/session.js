@@ -3,7 +3,7 @@
    Archivo: src/app/session.js
 
    ONION SUPPORT · APP SESSION BOOTSTRAP
-   AUTH RESTORE SAFE · TOKEN ROUTES SAFE · EXTREME 10/10
+   AUTH RESTORE SAFE · TOKEN ROUTES SAFE · EXTREME 12/10
 
    RESPONSABILIDADES:
    - Restaurar sesión durante boot sin romper rutas públicas técnicas.
@@ -32,6 +32,13 @@
    - Snapshot consistente y con URLs sensibles redacted.
    - Rutas públicas técnicas con soporte query-token, hash-token y path-token.
    - Router.navigate/goAfterLogin esperados si devuelven Promise.
+   - Soporte alias legacy reset initial URL.
+   - Soporte __ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__.
+   - Soporte __ONION_RESET_CONFIRM_INITIAL_URL__.
+   - Soporte scrubbedResetToken y scrubbedResetPasswordToken.
+   - Canonical seguro para rutas públicas /@username/...
+   - Auth fantasma bloqueada: authenticated=true sin user usable NO autentica.
+   - Redirect interno seguro anti open-redirect.
 
    FIX CRÍTICO:
    - bootNavigationHandled solo se marca cuando Router navega/renderiza.
@@ -94,6 +101,7 @@ const RESET_TOKEN_PARAM_NAMES = [
   "token",
   "resetToken",
   "passwordResetToken",
+  "confirmToken",
   "code",
   "t",
 ];
@@ -103,7 +111,13 @@ const TOKEN_ROUTE_CONFIGS = Object.freeze([
     key: "activation",
     path: ACTIVATION_PATH,
     initialWindowKey: "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+    initialWindowKeys: [
+      "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+    ],
     scrubbedHistoryFlag: "scrubbedActivationToken",
+    scrubbedHistoryFlags: [
+      "scrubbedActivationToken",
+    ],
     tokenParamNames: ACTIVATION_TOKEN_PARAM_NAMES,
   }),
 
@@ -111,7 +125,15 @@ const TOKEN_ROUTE_CONFIGS = Object.freeze([
     key: "resetConfirm",
     path: RESET_CONFIRM_PATH,
     initialWindowKey: "__ONION_RESET_CONFIRM_INITIAL_URL__",
+    initialWindowKeys: [
+      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+      "__ONION_RESET_CONFIRM_INITIAL_URL__",
+    ],
     scrubbedHistoryFlag: "scrubbedResetToken",
+    scrubbedHistoryFlags: [
+      "scrubbedResetToken",
+      "scrubbedResetPasswordToken",
+    ],
     tokenParamNames: RESET_TOKEN_PARAM_NAMES,
   }),
 ]);
@@ -225,9 +247,19 @@ function getResolvedSessionUser(AppCore) {
     state?.user?.username ||
     state?.user?.email ||
     state?.user?.id ||
+    state?.user?.userId ||
     state?.currentUser?.username ||
     state?.currentUser?.email ||
     state?.currentUser?.id ||
+    state?.sessionUser?.username ||
+    state?.sessionUser?.email ||
+    state?.sessionUser?.id ||
+    state?.authUser?.username ||
+    state?.authUser?.email ||
+    state?.authUser?.id ||
+    state?.session?.user?.username ||
+    state?.session?.user?.email ||
+    state?.session?.user?.id ||
     null
   );
 }
@@ -243,17 +275,74 @@ function getResolvedSessionRole(AppCore) {
     state?.session?.rol ||
     state?.user?.role ||
     state?.user?.rol ||
+    state?.currentUser?.role ||
+    state?.currentUser?.rol ||
+    state?.sessionUser?.role ||
+    state?.sessionUser?.rol ||
+    state?.authUser?.role ||
+    state?.authUser?.rol ||
     null
   );
 }
 
+function hasUsableSessionUser(user = null) {
+  if (
+    !user ||
+    typeof user !== "object" ||
+    Array.isArray(user)
+  ) {
+    return false;
+  }
+
+  return Boolean(
+    safeText(user.id, "") ||
+      safeText(user.userId, "") ||
+      safeText(user.user_id, "") ||
+      safeText(user._id, "") ||
+      safeText(user.uid, "") ||
+      safeText(user.username, "") ||
+      safeText(user.userName, "") ||
+      safeText(user.user_name, "") ||
+      safeText(user.email, "") ||
+      safeText(user.mail, "") ||
+      safeText(user.phone, "") ||
+      safeText(user.telefono, "") ||
+      safeText(user.mobile, "")
+  );
+}
+
 function isAuthenticated(AppCore) {
-  return Boolean(getState(AppCore)?.authenticated);
+  const state = getState(AppCore);
+
+  if (state.authenticated !== true) {
+    return false;
+  }
+
+  return hasUsableSessionUser(
+    state.user ||
+      state.currentUser ||
+      state.sessionUser ||
+      state.authUser ||
+      state.session?.user ||
+      null
+  );
 }
 
 function isAuthLoginInProgress(Auth, state = {}) {
   try {
     if (state?.loginInProgress === true) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (state?.authLoginInProgress === true) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (state?.isLoggingIn === true) {
       return true;
     }
   } catch {}
@@ -507,16 +596,37 @@ function getWindowValue(key = "") {
   }
 }
 
+function getWindowFirstValue(keys = []) {
+  if (!Array.isArray(keys)) {
+    return "";
+  }
+
+  for (const key of keys) {
+    const value = getWindowValue(key);
+
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
 function getInitialUrl() {
   return getWindowValue("__ONION_INITIAL_URL__");
 }
 
 function getActivationInitialUrl() {
-  return getWindowValue("__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__");
+  return getWindowFirstValue([
+    "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+  ]);
 }
 
 function getResetConfirmInitialUrl() {
-  return getWindowValue("__ONION_RESET_CONFIRM_INITIAL_URL__");
+  return getWindowFirstValue([
+    "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+    "__ONION_RESET_CONFIRM_INITIAL_URL__",
+  ]);
 }
 
 /* =========================================================
@@ -699,7 +809,38 @@ function isActivationTokenScrubbed() {
 }
 
 function isResetConfirmTokenScrubbed() {
-  return isHistoryStateFlagEnabled("scrubbedResetToken");
+  return (
+    isHistoryStateFlagEnabled("scrubbedResetToken") ||
+    isHistoryStateFlagEnabled("scrubbedResetPasswordToken")
+  );
+}
+
+function isPublicUsernameSegment(segment = "") {
+  return /^@[A-Za-z0-9._-]{1,80}$/.test(
+    safeText(segment, "")
+  );
+}
+
+function stripPublicUsernamePrefixFromPath(path = "/") {
+  const normalized = pathFromUrlLike(path) || path || "/";
+  const clean = stripSearchAndHash(normalized);
+
+  const segments = clean
+    .split("/")
+    .filter(Boolean);
+
+  if (
+    segments.length > 0 &&
+    isPublicUsernameSegment(segments[0])
+  ) {
+    const rest = segments.slice(1).join("/");
+
+    return rest
+      ? normalizePathnameOnly(`/${rest}`)
+      : "/";
+  }
+
+  return clean;
 }
 
 function getBootInitialPath(AppCore) {
@@ -721,7 +862,7 @@ function getBootInitialPath(AppCore) {
 }
 
 function getCanonicalFromAnyPath(path = "/") {
-  return stripSearchAndHash(
+  return stripPublicUsernamePrefixFromPath(
     pathFromUrlLike(path) || path || "/"
   );
 }
@@ -867,20 +1008,26 @@ function getCurrentCanonicalSafe(AppCore, Router) {
     const value = getCurrentCanonicalPath(AppCore, Router);
 
     if (value) {
-      return stripSearchAndHash(value);
+      return stripSearchAndHash(
+        getCanonicalFromAnyPath(value)
+      );
     }
   } catch {}
 
   const publicPath = safeText(getState(AppCore).publicPath, "");
 
   if (publicPath) {
-    return stripSearchAndHash(publicPath);
+    return stripSearchAndHash(
+      getCanonicalFromAnyPath(publicPath)
+    );
   }
 
   const route = safeText(getState(AppCore).route, "");
 
   if (route) {
-    return stripSearchAndHash(route);
+    return stripSearchAndHash(
+      getCanonicalFromAnyPath(route)
+    );
   }
 
   const bootPath = getBootInitialPath(AppCore);
@@ -920,16 +1067,20 @@ function redactTokenInText(value = "") {
   for (const config of TOKEN_ROUTE_CONFIGS) {
     const escapedPath = config.path.replace(/\//g, "\\/");
 
-    output = output.replace(
-      new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
-      "$1/***"
-    );
+    try {
+      output = output.replace(
+        new RegExp(`(${escapedPath})\\/([^/?#\\s]+)`, "gi"),
+        "$1/***"
+      );
+    } catch {}
 
     for (const name of config.tokenParamNames) {
-      output = output.replace(
-        new RegExp(`([?&]${name}=)([^&#\\s]+)`, "gi"),
-        "$1***"
-      );
+      try {
+        output = output.replace(
+          new RegExp(`([?&#]${name}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
+      } catch {}
     }
   }
 
@@ -940,7 +1091,7 @@ function buildSnapshot(AppCore, extras = {}) {
   const state = getState(AppCore);
 
   return {
-    authenticated: Boolean(state.authenticated),
+    authenticated: isAuthenticated(AppCore),
     user: state.user || null,
     username: getResolvedSessionUser(AppCore),
     role: getResolvedSessionRole(AppCore),
@@ -1249,9 +1400,9 @@ function emitSessionReadyEvents({
 function shouldSkipNavigation(state, Auth = null) {
   return Boolean(
     state?.bootNavigationHandled ||
-    state?.loginNavigationHandled ||
-    state?.loginInProgress ||
-    isAuthLoginInProgress(Auth, state)
+      state?.loginNavigationHandled ||
+      state?.loginInProgress ||
+      isAuthLoginInProgress(Auth, state)
   );
 }
 
@@ -1278,12 +1429,42 @@ function markNavigationSkipped(state, reason = "unknown") {
   } catch {}
 }
 
-function normalizeTargetPath(path = "/") {
-  const target = normalizeInternalPath(
-    safeText(path, "/") || "/"
-  );
+function isSafeInternalTarget(value = "") {
+  const raw = safeText(value, "");
 
-  if (!target.startsWith("/")) {
+  if (!raw) {
+    return false;
+  }
+
+  if (!raw.startsWith("/")) {
+    return false;
+  }
+
+  if (raw.startsWith("//")) {
+    return false;
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+    return false;
+  }
+
+  if (/[\r\n\t]/.test(raw)) {
+    return false;
+  }
+
+  return true;
+}
+
+function normalizeTargetPath(path = "/") {
+  const raw = safeText(path, "/") || "/";
+
+  if (!isSafeInternalTarget(raw)) {
+    return "/";
+  }
+
+  const target = normalizeInternalPath(raw);
+
+  if (!isSafeInternalTarget(target)) {
     return "/";
   }
 
@@ -1467,8 +1648,8 @@ export async function navigateAfterSessionRestore({
       AppCore,
       "navigateAfterSessionRestore(): omitido por ruta pública técnica.",
       {
-        canonical: currentCanonicalPath,
-        publicPath: currentPublicPath,
+        canonical: redactTokenInText(currentCanonicalPath),
+        publicPath: redactTokenInText(currentPublicPath),
         activationBoot: isActivationBoot(AppCore),
         resetConfirmBoot: isResetConfirmBoot(AppCore),
       }

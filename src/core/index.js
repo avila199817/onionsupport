@@ -27,7 +27,8 @@
    - auth alineada con state.computeAuthenticated()
    - fallback si factories parciales fallan
    - no ReferenceError server-side
-   - API congelada estable
+   - API congelada estable con bridges Router/Auth vía accessors
+   - snapshots públicos sin token crudo
 ========================================================= */
 
 import { config } from "./config.js";
@@ -111,11 +112,118 @@ import {
 export const AppCore = (() => {
   "use strict";
 
+  /* =======================================================
+     CONSTANTS
+  ======================================================= */
+
+  const CORE_VERSION = "11.0.0";
+
+  const DEFAULT_APP_NAME = "Onion SPA";
+  const DEFAULT_STORAGE_PREFIX = "onion";
+  const DEFAULT_LANG = "es";
+  const DEFAULT_THEME = "dark";
+
+  const EVENTS = Object.freeze({
+    coreInitStart:
+      "app:core:init:start",
+
+    coreReady:
+      "app:core:ready",
+
+    coreInitError:
+      "app:core:init:error",
+
+    coreReboot:
+      "app:core:reboot",
+
+    stateChange:
+      "app:state:change",
+
+    authChange:
+      "app:auth:change",
+
+    userChange:
+      "app:user:change",
+
+    routeChange:
+      "app:route:change",
+
+    publicPathChange:
+      "app:public-path:change",
+
+    sessionApplied:
+      "app:session:applied",
+
+    sessionCleared:
+      "app:session:cleared",
+
+    moduleRegistered:
+      "app:module:registered",
+
+    moduleReplaced:
+      "app:module:replaced",
+
+    toastBridgeReady:
+      "app:toast:bridge-ready",
+  });
+
+  const SENSITIVE_STATE_KEYS = Object.freeze([
+    "token",
+    "accessToken",
+    "access_token",
+    "refreshToken",
+    "refresh_token",
+    "idToken",
+    "id_token",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "mfaToken",
+    "mfa_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "password",
+    "otp",
+    "code",
+  ]);
+
+  const BRIDGE_MODULE_ALIASES = Object.freeze({
+    Router:
+      Object.freeze(["Router", "router"]),
+
+    router:
+      Object.freeze(["router", "Router"]),
+
+    Auth:
+      Object.freeze(["Auth", "auth"]),
+
+    auth:
+      Object.freeze(["auth", "Auth"]),
+
+    Store:
+      Object.freeze(["Store", "store"]),
+
+    store:
+      Object.freeze(["store", "Store"]),
+
+    Http:
+      Object.freeze(["Http", "http"]),
+
+    http:
+      Object.freeze(["http", "Http"]),
+  });
+
+  /* =======================================================
+     RUNTIME FLAGS
+  ======================================================= */
+
   let initPromise = null;
   let initialized = false;
   let initCycle = 0;
   let networkEventsBound = false;
   let showToastBridge = null;
+  let readyCallbacksFlushed = false;
 
   /* =======================================================
      BASIC SAFE HELPERS
@@ -129,6 +237,14 @@ export const AppCore = (() => {
   }
 
   function isObject(value) {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    );
+  }
+
+  function isAnyObject(value) {
     return (
       value !== null &&
       typeof value === "object"
@@ -159,6 +275,10 @@ export const AppCore = (() => {
     return text || fallback;
   }
 
+  function safeLower(value, fallback = "") {
+    return safeText(value, fallback).toLowerCase();
+  }
+
   function safeBool(value, fallback = false) {
     if (value === true) {
       return true;
@@ -168,7 +288,55 @@ export const AppCore = (() => {
       return false;
     }
 
+    if (typeof value === "number") {
+      if (value === 1) return true;
+      if (value === 0) return false;
+    }
+
+    if (typeof value === "string") {
+      const clean =
+        value.trim().toLowerCase();
+
+      if (
+        [
+          "true",
+          "1",
+          "yes",
+          "si",
+          "sí",
+          "ok",
+          "on",
+          "enabled",
+          "active",
+        ].includes(clean)
+      ) {
+        return true;
+      }
+
+      if (
+        [
+          "false",
+          "0",
+          "no",
+          "off",
+          "disabled",
+          "inactive",
+        ].includes(clean)
+      ) {
+        return false;
+      }
+    }
+
     return Boolean(fallback);
+  }
+
+  function safeNumber(value, fallback = 0) {
+    const number =
+      Number(value);
+
+    return Number.isFinite(number)
+      ? number
+      : fallback;
   }
 
   function safeArray(value) {
@@ -178,7 +346,11 @@ export const AppCore = (() => {
   }
 
   function safeNow() {
-    return Date.now();
+    try {
+      return Date.now();
+    } catch {
+      return 0;
+    }
   }
 
   function safeIsoDate(ms = safeNow()) {
@@ -186,6 +358,17 @@ export const AppCore = (() => {
       return new Date(ms).toISOString();
     } catch {
       return "";
+    }
+  }
+
+  function safeOwn(object, key) {
+    try {
+      return Object.prototype.hasOwnProperty.call(
+        object,
+        key
+      );
+    } catch {
+      return false;
     }
   }
 
@@ -221,7 +404,11 @@ export const AppCore = (() => {
 
   function getDebugEnabled() {
     try {
-      return Boolean(config?.debug);
+      return Boolean(
+        config?.debug ||
+        config?.dev ||
+        config?.environment === "development"
+      );
     } catch {
       return false;
     }
@@ -231,7 +418,7 @@ export const AppCore = (() => {
     return (
       safeText(config?.appName, "") ||
       safeText(config?.name, "") ||
-      "Onion SPA"
+      DEFAULT_APP_NAME
     );
   }
 
@@ -277,6 +464,213 @@ export const AppCore = (() => {
     );
   }
 
+  function unique(values = []) {
+    const result = [];
+    const seen = new Set();
+
+    for (const value of safeArray(values)) {
+      const clean =
+        safeText(value, "");
+
+      if (
+        clean &&
+        !seen.has(clean)
+      ) {
+        seen.add(clean);
+        result.push(clean);
+      }
+    }
+
+    return result;
+  }
+
+  /* =======================================================
+     SANITIZE / SNAPSHOTS
+  ======================================================= */
+
+  function redactTokenInText(value = "") {
+    const raw =
+      safeText(value, "");
+
+    if (!raw) {
+      return "";
+    }
+
+    let output =
+      raw;
+
+    try {
+      output = output.replace(
+        /([?&#](?:token|activationToken|activateToken|resetToken|passwordResetToken|confirmToken|access_token|refresh_token|id_token|tempToken|temp_token|code|t)=)([^&#\s]+)/gi,
+        "$1***"
+      );
+
+      output = output.replace(
+        /(\/activate-account\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
+
+      output = output.replace(
+        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
+
+      output = output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
+    } catch {}
+
+    return output;
+  }
+
+  function sanitizeErrorForSnapshot(error = null) {
+    if (!error) {
+      return null;
+    }
+
+    const candidate =
+      error?.reason ||
+      error?.error ||
+      error;
+
+    return {
+      name:
+        safeText(candidate?.name, "Error"),
+
+      message:
+        redactTokenInText(
+          safeText(
+            candidate?.message ||
+              candidate?.reason ||
+              candidate,
+            "Error"
+          )
+        ),
+
+      code:
+        safeText(
+          candidate?.code ||
+            candidate?.statusCode ||
+            "",
+          ""
+        ),
+
+      status:
+        safeNumber(candidate?.status, 0),
+
+      timeout:
+        Boolean(candidate?.timeout),
+
+      at:
+        safeIsoDate(),
+    };
+  }
+
+  function sanitizeStateForSnapshot(inputState = {}) {
+    const source =
+      ensureObject(inputState);
+
+    let clean = {};
+
+    try {
+      clean = safeClone(source) || {};
+    } catch {
+      clean = {
+        ...source,
+      };
+    }
+
+    for (const key of SENSITIVE_STATE_KEYS) {
+      if (key in clean) {
+        clean[key] = clean[key]
+          ? "***"
+          : null;
+      }
+    }
+
+    for (const key of [
+      "bootInitialUrl",
+      "bootProtectedInitialUrl",
+      "bootActivationInitialUrl",
+      "bootResetConfirmInitialUrl",
+      "publicPath",
+      "route",
+      "lastRoute",
+    ]) {
+      if (clean[key]) {
+        clean[key] =
+          redactTokenInText(clean[key]);
+      }
+    }
+
+    if (clean.error) {
+      clean.error =
+        sanitizeErrorForSnapshot(clean.error);
+    }
+
+    return clean;
+  }
+
+  function selectStateMarkers(root = {}) {
+    return {
+      authenticated:
+        Boolean(root.authenticated),
+
+      hasToken:
+        Boolean(root.hasToken),
+
+      user:
+        root.user || null,
+
+      username:
+        root.username || null,
+
+      role:
+        root.role || null,
+
+      currentResolvedUsername:
+        root.currentResolvedUsername || null,
+
+      route:
+        root.route || "/",
+
+      publicPath:
+        root.publicPath || "/",
+
+      lang:
+        root.lang || DEFAULT_LANG,
+
+      theme:
+        root.theme || DEFAULT_THEME,
+    };
+  }
+
+  function sameMarkerValue(a, b) {
+    if (a === b) {
+      return true;
+    }
+
+    if (
+      isAnyObject(a) ||
+      isAnyObject(b)
+    ) {
+      try {
+        return JSON.stringify(a) === JSON.stringify(b);
+      } catch {
+        return false;
+      }
+    }
+
+    return false;
+  }
+
+  function markerChanged(before = {}, after = {}, keys = []) {
+    return safeArray(keys).some((key) =>
+      !sameMarkerValue(before[key], after[key])
+    );
+  }
+
   /* =======================================================
      FALLBACK EVENTS
   ======================================================= */
@@ -304,15 +698,18 @@ export const AppCore = (() => {
     }
 
     function on(name, handler) {
+      const key =
+        safeText(name, "");
+
       if (
-        !name ||
+        !key ||
         !isFunction(handler)
       ) {
         return () => {};
       }
 
       const set =
-        getSet(name);
+        getSet(key);
 
       if (!set) {
         return () => {};
@@ -322,7 +719,7 @@ export const AppCore = (() => {
 
       return () =>
         off(
-          name,
+          key,
           handler
         );
     }
@@ -335,13 +732,28 @@ export const AppCore = (() => {
         return () => {};
       }
 
+      let disposed = false;
+
       const dispose =
         on(
           name,
           (...args) => {
+            if (disposed) {
+              return;
+            }
+
+            disposed = true;
             dispose();
 
-            handler(...args);
+            try {
+              handler(...args);
+            } catch (error) {
+              safeWarn(
+                "Fallback once handler error:",
+                name,
+                error
+              );
+            }
           }
         );
 
@@ -349,30 +761,76 @@ export const AppCore = (() => {
     }
 
     function off(name, handler) {
-      try {
-        listeners
-          .get(name)
-          ?.delete(handler);
-      } catch {}
+      const key =
+        safeText(name, "");
 
-      return true;
-    }
-
-    function emit(name, payload = {}) {
-      const set =
-        listeners.get(name);
-
-      if (!set) {
+      if (!key) {
         return false;
       }
 
-      for (const handler of Array.from(set)) {
+      try {
+        if (!handler) {
+          listeners.delete(key);
+          return true;
+        }
+
+        listeners
+          .get(key)
+          ?.delete(handler);
+
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    function emit(name, payload = {}) {
+      const key =
+        safeText(name, "");
+
+      if (!key) {
+        return false;
+      }
+
+      const handlers =
+        Array.from(
+          listeners.get(key) || []
+        );
+
+      const wildcardHandlers =
+        Array.from(
+          listeners.get("*") || []
+        );
+
+      if (
+        !handlers.length &&
+        !wildcardHandlers.length
+      ) {
+        return false;
+      }
+
+      for (const handler of handlers) {
         try {
           handler(payload);
         } catch (error) {
           safeWarn(
             "Fallback event handler error:",
-            name,
+            key,
+            error
+          );
+        }
+      }
+
+      for (const handler of wildcardHandlers) {
+        try {
+          handler(
+            key,
+            payload
+          );
+        } catch (error) {
+          safeWarn(
+            "Fallback wildcard handler error:",
+            key,
             error
           );
         }
@@ -382,13 +840,46 @@ export const AppCore = (() => {
     }
 
     function clear(name = "") {
-      if (name) {
-        listeners.delete(name);
+      const key =
+        safeText(name, "");
+
+      if (key) {
+        listeners.delete(key);
         return true;
       }
 
       listeners.clear();
       return true;
+    }
+
+    function listenerCount(name = "") {
+      const key =
+        safeText(name, "");
+
+      if (key) {
+        return listeners.get(key)?.size || 0;
+      }
+
+      let total = 0;
+
+      for (const set of listeners.values()) {
+        total += set.size;
+      }
+
+      return total;
+    }
+
+    function names() {
+      return Array.from(listeners.keys());
+    }
+
+    function snapshot() {
+      return {
+        names:
+          names(),
+        listenerCount:
+          listenerCount(),
+      };
     }
 
     return {
@@ -397,6 +888,9 @@ export const AppCore = (() => {
       off,
       emit,
       clear,
+      listenerCount,
+      names,
+      snapshot,
     };
   }
 
@@ -451,6 +945,30 @@ export const AppCore = (() => {
     ) || {};
 
   /* =======================================================
+     LOW LEVEL EMIT
+  ======================================================= */
+
+  function safeEmit(name, payload = {}) {
+    const eventName =
+      safeText(name, "");
+
+    if (!eventName) {
+      return false;
+    }
+
+    try {
+      events?.emit?.(
+        eventName,
+        payload
+      );
+
+      return true;
+    } catch {}
+
+    return false;
+  }
+
+  /* =======================================================
      UTILS
   ======================================================= */
 
@@ -501,9 +1019,7 @@ export const AppCore = (() => {
       }
 
       try {
-        return document.getElementById(
-          id
-        );
+        return document.getElementById(id);
       } catch {
         return null;
       }
@@ -550,14 +1066,19 @@ export const AppCore = (() => {
     },
 
     sleep(ms = 0) {
-      return new Promise((resolve) =>
-        setTimeout(
-          resolve,
-          Number.isFinite(Number(ms))
-            ? Number(ms)
-            : 0
-        )
-      );
+      return new Promise((resolve) => {
+        try {
+          setTimeout(
+            resolve,
+            Math.max(
+              0,
+              safeNumber(ms, 0)
+            )
+          );
+        } catch {
+          resolve();
+        }
+      });
     },
 
     nextTick(fn) {
@@ -594,11 +1115,13 @@ export const AppCore = (() => {
         return;
       } catch {}
 
-      setTimeout(() => {
-        try {
-          fn?.();
-        } catch {}
-      }, 0);
+      try {
+        setTimeout(() => {
+          try {
+            fn?.();
+          } catch {}
+        }, 0);
+      } catch {}
     },
 
     log:
@@ -609,6 +1132,9 @@ export const AppCore = (() => {
 
     error:
       safeError,
+
+    emit:
+      safeEmit,
 
     safeClone,
     cloneError,
@@ -630,6 +1156,24 @@ export const AppCore = (() => {
     hasValidToken,
     getInitials,
     isPublicApiPath,
+
+    redactTokenInText,
+    sanitizeErrorForSnapshot,
+    sanitizeStateForSnapshot,
+
+    safeText,
+    safeLower,
+    safeBool,
+    safeNumber,
+    safeArray,
+    safeObject:
+      ensureObject,
+    isObject,
+    isFunction,
+    now:
+      safeNow,
+    nowIso:
+      safeIsoDate,
   };
 
   /* =======================================================
@@ -673,53 +1217,26 @@ export const AppCore = (() => {
       const scope =
         ensureScope(scopeName).name;
 
-      let target =
-        null;
-
-      let eventName =
-        "";
-
-      let handler =
-        null;
-
-      let options =
-        false;
+      let target = null;
+      let eventName = "";
+      let handler = null;
+      let options = false;
 
       if (
         targetOrName &&
         isFunction(targetOrName.addEventListener)
       ) {
-        target =
-          targetOrName;
-
-        eventName =
-          safeText(
-            eventNameOrHandler,
-            ""
-          );
-
-        handler =
-          handlerOrOptions;
-
-        options =
-          maybeOptions || false;
+        target = targetOrName;
+        eventName = safeText(eventNameOrHandler, "");
+        handler = handlerOrOptions;
+        options = maybeOptions || false;
       } else {
-        target =
-          isBrowser()
-            ? window
-            : null;
-
-        eventName =
-          safeText(
-            targetOrName,
-            ""
-          );
-
-        handler =
-          eventNameOrHandler;
-
-        options =
-          handlerOrOptions || false;
+        target = isBrowser()
+          ? window
+          : null;
+        eventName = safeText(targetOrName, "");
+        handler = eventNameOrHandler;
+        options = handlerOrOptions || false;
       }
 
       if (
@@ -750,6 +1267,48 @@ export const AppCore = (() => {
         return true;
       } catch {
         return false;
+      }
+    }
+
+    function timer(scopeName, callback, delay = 0) {
+      if (!isFunction(callback)) {
+        return null;
+      }
+
+      try {
+        const id =
+          setTimeout(callback, delay);
+
+        add(scopeName, () => {
+          try {
+            clearTimeout(id);
+          } catch {}
+        });
+
+        return id;
+      } catch {
+        return null;
+      }
+    }
+
+    function interval(scopeName, callback, delay = 0) {
+      if (!isFunction(callback)) {
+        return null;
+      }
+
+      try {
+        const id =
+          setInterval(callback, delay);
+
+        add(scopeName, () => {
+          try {
+            clearInterval(id);
+          } catch {}
+        });
+
+        return id;
+      } catch {
+        return null;
       }
     }
 
@@ -789,18 +1348,32 @@ export const AppCore = (() => {
       return true;
     }
 
+    function snapshot() {
+      return {
+        scopeCount:
+          registry.scopes.size,
+        scopes:
+          Array.from(registry.scopes.entries()).map(([name, disposers]) => ({
+            name,
+            count:
+              disposers?.size || 0,
+          })),
+      };
+    }
+
     return {
       scope:
         ensureScope,
-
       ensureScope,
-
       add,
       event,
+      timer,
+      interval,
       run,
       clear,
       dispose:
         run,
+      snapshot,
     };
   }
 
@@ -816,32 +1389,72 @@ export const AppCore = (() => {
       safeText(
         config?.storagePrefix ||
           config?.appKey ||
-          "onion",
-        "onion"
+          DEFAULT_STORAGE_PREFIX,
+        DEFAULT_STORAGE_PREFIX
       );
 
-    function key(name = "") {
-      return `${prefix}:${safeText(name, "")}`;
+    function normalizeKey(name = "") {
+      const clean =
+        safeText(name, "");
+
+      if (!clean) {
+        return `${prefix}:`;
+      }
+
+      if (
+        clean.startsWith(`${prefix}:`) ||
+        clean.startsWith(`${prefix}.`) ||
+        clean.startsWith(`${prefix}_`)
+      ) {
+        return clean;
+      }
+
+      return `${prefix}:${clean}`;
     }
 
-    function get(name, fallback = null) {
-      const finalKey =
-        key(name);
+    function getStorage(kind = "localStorage") {
+      if (!isBrowser()) {
+        return null;
+      }
 
       try {
-        if (isBrowser()) {
-          const raw =
-            window.localStorage?.getItem?.(
-              finalKey
-            );
+        return window?.[kind] || null;
+      } catch {
+        return null;
+      }
+    }
 
-          if (raw !== null && raw !== undefined) {
-            try {
-              return JSON.parse(raw);
-            } catch {
-              return raw;
-            }
-          }
+    function getRaw(name, fallback = null) {
+      const finalKey =
+        normalizeKey(name);
+
+      try {
+        const local =
+          getStorage("localStorage");
+
+        const localValue =
+          local?.getItem?.(finalKey);
+
+        if (
+          localValue !== null &&
+          localValue !== undefined
+        ) {
+          return localValue;
+        }
+      } catch {}
+
+      try {
+        const session =
+          getStorage("sessionStorage");
+
+        const sessionValue =
+          session?.getItem?.(finalKey);
+
+        if (
+          sessionValue !== null &&
+          sessionValue !== undefined
+        ) {
+          return sessionValue;
         }
       } catch {}
 
@@ -850,53 +1463,153 @@ export const AppCore = (() => {
         : fallback;
     }
 
-    function set(name, value) {
+    function setRaw(name, value, options = {}) {
       const finalKey =
-        key(name);
+        normalizeKey(name);
+
+      const raw =
+        value === null || value === undefined
+          ? ""
+          : String(value);
 
       memory.set(
         finalKey,
-        value
+        raw
       );
 
+      const target =
+        options?.session === true
+          ? getStorage("sessionStorage")
+          : getStorage("localStorage");
+
       try {
-        if (isBrowser()) {
-          window.localStorage?.setItem?.(
-            finalKey,
-            JSON.stringify(value)
-          );
-        }
+        target?.setItem?.(
+          finalKey,
+          raw
+        );
       } catch {}
 
       return true;
+    }
+
+    function parseJson(raw, fallback = null) {
+      if (
+        raw === null ||
+        raw === undefined ||
+        raw === ""
+      ) {
+        return fallback;
+      }
+
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return fallback;
+      }
+    }
+
+    function get(name, fallback = null) {
+      const raw =
+        getRaw(name, undefined);
+
+      if (raw === undefined) {
+        return fallback;
+      }
+
+      const parsed =
+        parseJson(raw, undefined);
+
+      return parsed === undefined
+        ? raw
+        : parsed;
+    }
+
+    function set(name, value, options = {}) {
+      try {
+        return setRaw(
+          name,
+          JSON.stringify(value),
+          options
+        );
+      } catch {
+        return setRaw(
+          name,
+          String(value ?? ""),
+          options
+        );
+      }
+    }
+
+    function getJson(name, fallback = null) {
+      return parseJson(
+        getRaw(name, null),
+        fallback
+      );
+    }
+
+    function setJson(name, value, options = {}) {
+      return set(
+        name,
+        value,
+        options
+      );
     }
 
     function remove(name) {
       const finalKey =
-        key(name);
+        normalizeKey(name);
 
       memory.delete(finalKey);
 
       try {
-        if (isBrowser()) {
-          window.localStorage?.removeItem?.(
-            finalKey
-          );
-        }
+        getStorage("localStorage")?.removeItem?.(finalKey);
+      } catch {}
+
+      try {
+        getStorage("sessionStorage")?.removeItem?.(finalKey);
       } catch {}
 
       return true;
     }
 
+    function has(name) {
+      const value =
+        getRaw(name, undefined);
+
+      return value !== undefined;
+    }
+
+    function keys() {
+      return Array.from(memory.keys());
+    }
+
+    function snapshot() {
+      return {
+        prefix,
+        memoryKeys:
+          keys(),
+      };
+    }
+
     return {
-      key,
+      prefix,
+      key:
+        normalizeKey,
+      normalizeKey,
+      getRaw,
+      setRaw,
       get,
       set,
+      getJson,
+      setJson,
       remove,
       del:
         remove,
       delete:
         remove,
+      has,
+      keys,
+      snapshot,
     };
   }
 
@@ -923,104 +1636,232 @@ export const AppCore = (() => {
     );
 
   function createFallbackModules() {
-    return {
-      has(name) {
-        return registry.modules.has(
-          safeText(name, "")
-        );
-      },
+    function canonical(name = "") {
+      return safeText(name, "");
+    }
 
-      get(name) {
-        return registry.modules.get(
-          safeText(name, "")
-        );
-      },
+    function has(name) {
+      return registry.modules.has(
+        canonical(name)
+      );
+    }
 
-      register(name, moduleRef) {
-        const key =
-          safeText(name, "");
+    function get(name) {
+      return registry.modules.get(
+        canonical(name)
+      ) || null;
+    }
 
-        if (
-          !key ||
-          !moduleRef
-        ) {
-          return false;
-        }
+    function register(name, moduleRef, options = {}) {
+      const key =
+        canonical(name);
 
-        if (!registry.modules.has(key)) {
-          registry.modules.set(
-            key,
-            moduleRef
-          );
+      if (
+        !key ||
+        !moduleRef
+      ) {
+        return false;
+      }
 
-          try {
-            events.emit(
-              "app:module:registered",
-              {
-                name:
-                  key,
-              }
-            );
-          } catch {}
-        }
+      const exists =
+        registry.modules.has(key);
 
+      if (
+        exists &&
+        options?.replace !== true
+      ) {
         return true;
-      },
+      }
 
-      set(name, moduleRef) {
-        return this.register(
-          name,
-          moduleRef
-        );
-      },
+      registry.modules.set(
+        key,
+        moduleRef
+      );
 
-      list() {
-        return Array.from(
-          registry.modules.keys()
-        );
-      },
+      safeEmit(
+        exists
+          ? EVENTS.moduleReplaced
+          : EVENTS.moduleRegistered,
+        {
+          name:
+            key,
+          replaced:
+            exists,
+        }
+      );
+
+      return true;
+    }
+
+    function set(name, moduleRef, options = {}) {
+      return register(
+        name,
+        moduleRef,
+        {
+          ...ensureObject(options),
+          replace:
+            options?.replace !== false,
+        }
+      );
+    }
+
+    function remove(name) {
+      return registry.modules.delete(
+        canonical(name)
+      );
+    }
+
+    function list() {
+      return Array.from(
+        registry.modules.keys()
+      );
+    }
+
+    function snapshot() {
+      return {
+        count:
+          registry.modules.size,
+        modules:
+          list(),
+      };
+    }
+
+    return {
+      has,
+      get,
+      register,
+      set,
+      remove,
+      delete:
+        remove,
+      list,
+      snapshot,
     };
   }
 
   function createFallbackHooks() {
-    function add(name, handler) {
+    function ensureHookList(name = "") {
       const key =
         safeText(name, "");
 
-      if (
-        !key ||
-        !isFunction(handler)
-      ) {
-        return () => {};
+      if (!key) {
+        return null;
       }
 
       if (!Array.isArray(registry.hooks[key])) {
         registry.hooks[key] = [];
       }
 
-      registry.hooks[key].push(handler);
+      return registry.hooks[key];
+    }
+
+    function add(name, handler) {
+      const list =
+        ensureHookList(name);
+
+      if (
+        !list ||
+        !isFunction(handler)
+      ) {
+        return () => {};
+      }
+
+      list.push(handler);
 
       return () => {
+        const key =
+          safeText(name, "");
+
         registry.hooks[key] =
-          registry.hooks[key].filter((item) =>
+          safeArray(registry.hooks[key]).filter((item) =>
             item !== handler
           );
       };
+    }
+
+    async function run(name, payload = {}) {
+      const list =
+        safeArray(
+          registry.hooks[
+            safeText(name, "")
+          ]
+        );
+
+      let current =
+        payload;
+
+      for (const hook of list) {
+        if (!isFunction(hook)) {
+          continue;
+        }
+
+        try {
+          const next =
+            await hook(current);
+
+          if (
+            next &&
+            typeof next === "object"
+          ) {
+            current = next;
+          }
+        } catch (error) {
+          safeWarn(
+            "Hook error:",
+            name,
+            error
+          );
+        }
+      }
+
+      return current;
+    }
+
+    function get(name) {
+      return safeArray(
+        registry.hooks[
+          safeText(name, "")
+        ]
+      );
+    }
+
+    function clear(name = "") {
+      const key =
+        safeText(name, "");
+
+      if (key) {
+        registry.hooks[key] = [];
+        return true;
+      }
+
+      Object.keys(registry.hooks).forEach((hookName) => {
+        registry.hooks[hookName] = [];
+      });
+
+      return true;
+    }
+
+    function snapshot() {
+      return Object.fromEntries(
+        Object.entries(registry.hooks || {}).map(([key, value]) => [
+          key,
+          Array.isArray(value)
+            ? value.length
+            : 0,
+        ])
+      );
     }
 
     return {
       add,
       on:
         add,
-
       use:
         add,
-
-      get(name) {
-        return registry.hooks[
-          safeText(name, "")
-        ] || [];
-      },
+      run,
+      get,
+      clear,
+      snapshot,
     };
   }
 
@@ -1076,12 +1917,12 @@ export const AppCore = (() => {
         user?.role ||
         user?.rol ||
         user?.profile?.role ||
+        user?.profile?.rol ||
         user?.raw?.role ||
         user?.raw?.rol ||
         "",
       ""
-    )
-      .toLowerCase();
+    ).toLowerCase() || null;
   }
 
   function resolveUsernameValue(user = null) {
@@ -1090,6 +1931,10 @@ export const AppCore = (() => {
         getUserUsername(user) ||
           user?.username ||
           user?.userName ||
+          user?.nick ||
+          user?.alias ||
+          user?.slug ||
+          user?.login ||
           user?.email ||
           user?.name ||
           "",
@@ -1130,36 +1975,41 @@ export const AppCore = (() => {
     );
   }
 
+  function computeAuthValue(root, options = {}) {
+    const opts =
+      ensureObject(options);
+
+    if (opts.forceUnauthenticated === true) {
+      return false;
+    }
+
+    try {
+      return Boolean(
+        computeAuthenticated(
+          root.user,
+          root.token
+        )
+      );
+    } catch {}
+
+    return Boolean(
+      hasTokenValue(root.token) &&
+      root.user
+    );
+  }
+
   function syncDerivedAuthState(options = {}) {
     const root =
       ensureState();
 
-    const opts =
-      ensureObject(options);
-
     const tokenValid =
       hasTokenValue(root.token);
 
-    const forceUnauthenticated =
-      opts.forceUnauthenticated === true;
-
-    let authenticated =
-      false;
-
-    if (!forceUnauthenticated) {
-      try {
-        authenticated =
-          Boolean(
-            computeAuthenticated(
-              root.user,
-              root.token
-            )
-          );
-      } catch {
-        authenticated =
-          Boolean(tokenValid);
-      }
-    }
+    const authenticated =
+      computeAuthValue(
+        root,
+        options
+      );
 
     root.authenticated =
       authenticated;
@@ -1172,7 +2022,7 @@ export const AppCore = (() => {
         ? normalizeRoleValue(
             root.user,
             root.role
-          ) || null
+          )
         : null;
 
     root.username =
@@ -1193,40 +2043,188 @@ export const AppCore = (() => {
     return root;
   }
 
-  function clonePublicState() {
+  function clonePublicState({ safe = false } = {}) {
+    let snapshot = null;
+
     try {
-      return cloneState(
+      snapshot = cloneState(
         ensureState()
       );
     } catch {}
 
-    try {
-      return safeClone(
-        ensureState()
-      );
-    } catch {}
+    if (!snapshot) {
+      try {
+        snapshot = safeClone(
+          ensureState()
+        );
+      } catch {}
+    }
 
-    return {
-      ...ensureState(),
-    };
+    if (!snapshot) {
+      snapshot = {
+        ...ensureState(),
+      };
+    }
+
+    return safe
+      ? sanitizeStateForSnapshot(snapshot)
+      : snapshot;
   }
 
-  function safeEmit(name, payload = {}) {
-    try {
-      events?.emit?.(
-        name,
-        payload
+  function emitDerivedStateChanges(before = {}, after = {}, patch = {}, options = {}) {
+    const opts =
+      ensureObject(options);
+
+    if (opts.emit === false) {
+      return false;
+    }
+
+    const changedKeys =
+      Object.keys(
+        ensureObject(patch)
       );
 
-      return true;
-    } catch {}
+    const statePayload = {
+      changedKeys,
+      state:
+        sanitizeStateForSnapshot(after),
+      previous:
+        sanitizeStateForSnapshot(before),
+    };
 
-    return false;
+    if (
+      changedKeys.length > 0 &&
+      opts.emitState !== false
+    ) {
+      safeEmit(
+        EVENTS.stateChange,
+        statePayload
+      );
+    }
+
+    if (
+      markerChanged(before, after, [
+        "authenticated",
+        "hasToken",
+        "role",
+      ])
+    ) {
+      safeEmit(
+        EVENTS.authChange,
+        {
+          authenticated:
+            Boolean(after.authenticated),
+          hasToken:
+            Boolean(after.hasToken),
+          role:
+            after.role || null,
+          username:
+            after.username || null,
+          previousAuthenticated:
+            Boolean(before.authenticated),
+          source:
+            safeText(opts.source, "core:setState"),
+        }
+      );
+    }
+
+    if (
+      markerChanged(before, after, [
+        "user",
+        "username",
+        "currentResolvedUsername",
+        "role",
+      ])
+    ) {
+      safeEmit(
+        EVENTS.userChange,
+        {
+          authenticated:
+            Boolean(after.authenticated),
+          user:
+            after.authenticated
+              ? after.user || null
+              : null,
+          username:
+            after.username || null,
+          currentResolvedUsername:
+            after.currentResolvedUsername || null,
+          role:
+            after.role || null,
+          source:
+            safeText(opts.source, "core:setState"),
+        }
+      );
+    }
+
+    if (
+      markerChanged(before, after, [
+        "route",
+      ])
+    ) {
+      safeEmit(
+        EVENTS.routeChange,
+        {
+          route:
+            after.route || "/",
+          previousRoute:
+            before.route || "/",
+          publicPath:
+            after.publicPath || "/",
+          source:
+            safeText(opts.source, "core:setState"),
+        }
+      );
+    }
+
+    if (
+      markerChanged(before, after, [
+        "publicPath",
+      ])
+    ) {
+      safeEmit(
+        EVENTS.publicPathChange,
+        {
+          publicPath:
+            after.publicPath || "/",
+          previousPublicPath:
+            before.publicPath || "/",
+          route:
+            after.route || "/",
+          source:
+            safeText(opts.source, "core:setState"),
+        }
+      );
+    }
+
+    return true;
   }
 
   async function runInitHooks(type, payload = {}) {
+    const key =
+      safeText(type, "");
+
+    if (!key) {
+      return payload;
+    }
+
+    try {
+      if (isFunction(hooks?.run)) {
+        return await hooks.run(
+          key,
+          payload
+        );
+      }
+    } catch (error) {
+      safeWarn(
+        "hooks.run() falló.",
+        key,
+        error
+      );
+    }
+
     const list =
-      registry?.hooks?.[type];
+      registry?.hooks?.[key];
 
     if (
       !Array.isArray(list) ||
@@ -1251,13 +2249,12 @@ export const AppCore = (() => {
           next &&
           typeof next === "object"
         ) {
-          current =
-            next;
+          current = next;
         }
       } catch (error) {
         safeWarn(
           "Hook error:",
-          type,
+          key,
           error
         );
       }
@@ -1280,6 +2277,12 @@ export const AppCore = (() => {
       !Array.isArray(patch)
         ? patch
         : {};
+
+    const opts =
+      ensureObject(options);
+
+    const before =
+      selectStateMarkers(root);
 
     try {
       setStateBase({
@@ -1307,21 +2310,42 @@ export const AppCore = (() => {
 
     syncDerivedAuthState({
       forceUnauthenticated:
-        options.forceUnauthenticated === true,
+        opts.forceUnauthenticated === true,
     });
+
+    const after =
+      selectStateMarkers(root);
+
+    emitDerivedStateChanges(
+      before,
+      after,
+      cleanPatch,
+      opts
+    );
 
     return clonePublicState();
   }
 
-  function getState() {
+  function getState(options = {}) {
     syncDerivedAuthState();
 
+    const opts =
+      ensureObject(options);
+
     try {
-      return getStateBase(
-        ensureState()
-      );
+      const snapshot =
+        getStateBase(
+          ensureState()
+        );
+
+      return opts.safe
+        ? sanitizeStateForSnapshot(snapshot)
+        : snapshot;
     } catch {
-      return clonePublicState();
+      return clonePublicState({
+        safe:
+          opts.safe === true,
+      });
     }
   }
 
@@ -1330,6 +2354,52 @@ export const AppCore = (() => {
       patch,
       options
     );
+  }
+
+  function isAuthenticated() {
+    syncDerivedAuthState();
+
+    return Boolean(
+      state.authenticated
+    );
+  }
+
+  function getCurrentUser() {
+    syncDerivedAuthState();
+
+    return state.user || null;
+  }
+
+  function getCurrentRole() {
+    syncDerivedAuthState();
+
+    return state.role || null;
+  }
+
+  function hasRole(roleOrRoles = []) {
+    const roles =
+      Array.isArray(roleOrRoles)
+        ? roleOrRoles
+        : [roleOrRoles];
+
+    const current =
+      safeLower(getCurrentRole(), "");
+
+    return roles.some((role) =>
+      safeLower(role, "") === current
+    );
+  }
+
+  function getAuthHeader() {
+    const token =
+      safeText(state.token, "");
+
+    return token
+      ? {
+          Authorization:
+            `Bearer ${token}`,
+        }
+      : {};
   }
 
   /* =======================================================
@@ -1400,6 +2470,14 @@ export const AppCore = (() => {
     showToastBridge =
       fn;
 
+    safeEmit(
+      EVENTS.toastBridgeReady,
+      {
+        ready:
+          true,
+      }
+    );
+
     return true;
   }
 
@@ -1428,13 +2506,15 @@ export const AppCore = (() => {
      SESSION API
   ======================================================= */
 
-  function setRoute(route = "/") {
+  function setRoute(route = "/", options = {}) {
     try {
       return setRouteBase({
         state,
         setState,
         events,
         route,
+        options:
+          ensureObject(options),
       });
     } catch (error) {
       const cleanRoute =
@@ -1442,10 +2522,16 @@ export const AppCore = (() => {
           route || "/"
         );
 
-      setState({
-        route:
-          cleanRoute,
-      });
+      setState(
+        {
+          route:
+            cleanRoute,
+        },
+        {
+          source:
+            "core:setRoute:fallback",
+        }
+      );
 
       safeWarn(
         "setRouteBase falló; aplicado fallback.",
@@ -1456,7 +2542,7 @@ export const AppCore = (() => {
     }
   }
 
-  function setPublicPath(path = "/") {
+  function setPublicPath(path = "/", options = {}) {
     try {
       return setPublicPathBase({
         state,
@@ -1464,6 +2550,8 @@ export const AppCore = (() => {
         setState,
         events,
         path,
+        options:
+          ensureObject(options),
       });
     } catch (error) {
       const cleanPath =
@@ -1471,10 +2559,16 @@ export const AppCore = (() => {
           path || "/"
         );
 
-      setState({
-        publicPath:
-          cleanPath,
-      });
+      setState(
+        {
+          publicPath:
+            cleanPath,
+        },
+        {
+          source:
+            "core:setPublicPath:fallback",
+        }
+      );
 
       safeWarn(
         "setPublicPathBase falló; aplicado fallback.",
@@ -1485,9 +2579,8 @@ export const AppCore = (() => {
     }
   }
 
-  function setUser(user = null) {
-    let result =
-      null;
+  function setUser(user = null, options = {}) {
+    let result = null;
 
     try {
       result =
@@ -1498,14 +2591,24 @@ export const AppCore = (() => {
           setState,
           syncUserUI,
           user,
+          options:
+            ensureObject(options),
         });
     } catch (error) {
-      setState({
-        user:
-          user
-            ? normalizeUser(user)
-            : null,
-      });
+      setState(
+        {
+          user:
+            user
+              ? normalizeUser(user)
+              : null,
+        },
+        {
+          source:
+            "core:setUser:fallback",
+          forceUnauthenticated:
+            !user && !state.token,
+        }
+      );
 
       safeWarn(
         "setUserBase falló; aplicado fallback.",
@@ -1516,14 +2619,16 @@ export const AppCore = (() => {
         state.user;
     }
 
-    syncDerivedAuthState();
+    syncDerivedAuthState({
+      forceUnauthenticated:
+        !user && !state.token,
+    });
 
     return result;
   }
 
-  function setToken(token = null) {
-    let result =
-      null;
+  function setToken(token = null, options = {}) {
+    let result = null;
 
     try {
       result =
@@ -1533,6 +2638,8 @@ export const AppCore = (() => {
           events,
           setState,
           token,
+          options:
+            ensureObject(options),
         });
     } catch (error) {
       setState(
@@ -1541,6 +2648,8 @@ export const AppCore = (() => {
             token || null,
         },
         {
+          source:
+            "core:setToken:fallback",
           forceUnauthenticated:
             !token,
         }
@@ -1563,22 +2672,24 @@ export const AppCore = (() => {
     return result;
   }
 
-  function applySession(session = {}) {
+  function applySession(session = {}, options = {}) {
     const payload =
       ensureObject(session);
 
+    const opts =
+      ensureObject(options);
+
     const token =
-      Object.prototype.hasOwnProperty.call(payload, "token")
+      safeOwn(payload, "token")
         ? payload.token
         : undefined;
 
     const user =
-      Object.prototype.hasOwnProperty.call(payload, "user")
+      safeOwn(payload, "user")
         ? payload.user
         : undefined;
 
-    let result =
-      null;
+    let result = null;
 
     try {
       result =
@@ -1588,22 +2699,52 @@ export const AppCore = (() => {
 
           setUser:
             ({ user: nextUser }) =>
-              setUser(nextUser),
+              setUser(
+                nextUser,
+                {
+                  source:
+                    "core:applySession:setUser",
+                  emit:
+                    opts.emit !== false,
+                }
+              ),
 
           setToken:
             ({ token: nextToken }) =>
-              setToken(nextToken),
+              setToken(
+                nextToken,
+                {
+                  source:
+                    "core:applySession:setToken",
+                  emit:
+                    opts.emit !== false,
+                }
+              ),
 
           token,
           user,
+          options:
+            opts,
         });
     } catch (error) {
       if (token !== undefined) {
-        setToken(token);
+        setToken(
+          token,
+          {
+            source:
+              "core:applySession:fallback-token",
+          }
+        );
       }
 
       if (user !== undefined) {
-        setUser(user);
+        setUser(
+          user,
+          {
+            source:
+              "core:applySession:fallback-user",
+          }
+        );
       }
 
       safeWarn(
@@ -1611,14 +2752,13 @@ export const AppCore = (() => {
         error
       );
 
-      result =
-        {
-          token:
-            state.token,
+      result = {
+        token:
+          state.token,
 
-          user:
-            state.user,
-        };
+        user:
+          state.user,
+      };
     }
 
     syncDerivedAuthState({
@@ -1626,29 +2766,36 @@ export const AppCore = (() => {
         token === null,
     });
 
-    safeEmit(
-      "app:session:applied",
-      {
-        authenticated:
-          Boolean(state.authenticated),
+    if (opts.emit !== false) {
+      safeEmit(
+        EVENTS.sessionApplied,
+        {
+          authenticated:
+            Boolean(state.authenticated),
 
-        hasToken:
-          Boolean(state.hasToken),
+          hasToken:
+            Boolean(state.hasToken),
 
-        username:
-          state.username || null,
+          username:
+            state.username || null,
 
-        currentResolvedUsername:
-          state.currentResolvedUsername || null,
-      }
-    );
+          currentResolvedUsername:
+            state.currentResolvedUsername || null,
+
+          source:
+            safeText(opts.source, "core:applySession"),
+        }
+      );
+    }
 
     return result;
   }
 
   function clearSession(options = {}) {
-    let result =
-      null;
+    const opts =
+      ensureObject(options);
+
+    let result = null;
 
     try {
       result =
@@ -1660,7 +2807,7 @@ export const AppCore = (() => {
           syncUserUI,
           utils,
           options:
-            ensureObject(options),
+            opts,
         });
     } catch (error) {
       setState(
@@ -1690,6 +2837,8 @@ export const AppCore = (() => {
             null,
         },
         {
+          source:
+            "core:clearSession:fallback",
           forceUnauthenticated:
             true,
         }
@@ -1700,8 +2849,7 @@ export const AppCore = (() => {
         error
       );
 
-      result =
-        true;
+      result = true;
     }
 
     syncDerivedAuthState({
@@ -1709,13 +2857,17 @@ export const AppCore = (() => {
         true,
     });
 
-    safeEmit(
-      "app:session:cleared",
-      {
-        silent:
-          Boolean(options?.silent),
-      }
-    );
+    if (opts.emit !== false) {
+      safeEmit(
+        EVENTS.sessionCleared,
+        {
+          silent:
+            Boolean(opts.silent),
+          source:
+            safeText(opts.source, "core:clearSession"),
+        }
+      );
+    }
 
     return result;
   }
@@ -1730,13 +2882,19 @@ export const AppCore = (() => {
         theme,
       });
     } catch {
-      return setState({
-        theme:
-          safeText(
-            theme,
-            "dark"
-          ),
-      });
+      return setState(
+        {
+          theme:
+            safeText(
+              theme,
+              DEFAULT_THEME
+            ),
+        },
+        {
+          source:
+            "core:setTheme:fallback",
+        }
+      );
     }
   }
 
@@ -1753,13 +2911,19 @@ export const AppCore = (() => {
       const cleanLang =
         safeText(
           lang,
-          "es"
+          DEFAULT_LANG
         ).toLowerCase();
 
-      setState({
-        lang:
-          cleanLang,
-      });
+      setState(
+        {
+          lang:
+            cleanLang,
+        },
+        {
+          source:
+            "core:setLang:fallback",
+        }
+      );
 
       try {
         if (isBrowser()) {
@@ -1790,10 +2954,16 @@ export const AppCore = (() => {
         value,
       });
     } catch {
-      return setState({
-        sidebarOpen:
-          Boolean(value),
-      });
+      return setState(
+        {
+          sidebarOpen:
+            Boolean(value),
+        },
+        {
+          source:
+            "core:setSidebarOpen:fallback",
+        }
+      );
     }
   }
 
@@ -1806,10 +2976,16 @@ export const AppCore = (() => {
         value,
       });
     } catch {
-      return setState({
-        loading:
-          Boolean(value),
-      });
+      return setState(
+        {
+          loading:
+            Boolean(value),
+        },
+        {
+          source:
+            "core:setLoading:fallback",
+        }
+      );
     }
   }
 
@@ -1827,13 +3003,19 @@ export const AppCore = (() => {
           ? cloneError(error)
           : null;
 
-      return setState({
-        error:
-          normalized,
+      return setState(
+        {
+          error:
+            normalized,
 
-        hasError:
-          Boolean(normalized),
-      });
+          hasError:
+            Boolean(normalized),
+        },
+        {
+          source:
+            "core:setError:fallback",
+        }
+      );
     }
   }
 
@@ -1855,27 +3037,49 @@ export const AppCore = (() => {
           options
         );
 
+      const contentType =
+        response.headers?.get?.("content-type") || "";
+
+      let body = null;
+
+      if (contentType.includes("application/json")) {
+        try {
+          body = await response.json();
+        } catch {
+          body = null;
+        }
+      } else {
+        try {
+          body = await response.text();
+        } catch {
+          body = "";
+        }
+      }
+
       if (!response.ok) {
         const error =
           new Error(
-            response.statusText ||
+            safeText(
+              body?.message ||
+                body?.error ||
+                response.statusText,
               `HTTP ${response.status}`
+            )
           );
 
         error.status =
           response.status;
 
+        error.response =
+          response;
+
+        error.body =
+          body;
+
         throw error;
       }
 
-      const contentType =
-        response.headers?.get?.("content-type") || "";
-
-      if (contentType.includes("application/json")) {
-        return response.json();
-      }
-
-      return response.text();
+      return body;
     };
   }
 
@@ -1884,11 +3088,16 @@ export const AppCore = (() => {
       createRequest,
       createFallbackRequest,
       {
+        config,
         state,
         events,
+        storage,
         setError,
+        getState,
         utils,
         registry,
+        hooks,
+        modules,
       }
     );
 
@@ -1897,6 +3106,27 @@ export const AppCore = (() => {
       isFunction(req)
         ? req
         : createFallbackRequest();
+
+    function buildJsonOptions(method, body, options = {}) {
+      const opts =
+        ensureObject(options);
+
+      const headers = {
+        "Content-Type":
+          "application/json",
+        ...(opts.headers || {}),
+      };
+
+      return {
+        ...opts,
+        method,
+        body:
+          body === undefined
+            ? undefined
+            : JSON.stringify(body),
+        headers,
+      };
+    }
 
     return {
       request:
@@ -1916,60 +3146,33 @@ export const AppCore = (() => {
       post(url, body = undefined, options = {}) {
         return call(
           url,
-          {
-            ...options,
-            method:
-              "POST",
-            body:
-              body === undefined
-                ? undefined
-                : JSON.stringify(body),
-            headers: {
-              "Content-Type":
-                "application/json",
-              ...(options.headers || {}),
-            },
-          }
+          buildJsonOptions(
+            "POST",
+            body,
+            options
+          )
         );
       },
 
       put(url, body = undefined, options = {}) {
         return call(
           url,
-          {
-            ...options,
-            method:
-              "PUT",
-            body:
-              body === undefined
-                ? undefined
-                : JSON.stringify(body),
-            headers: {
-              "Content-Type":
-                "application/json",
-              ...(options.headers || {}),
-            },
-          }
+          buildJsonOptions(
+            "PUT",
+            body,
+            options
+          )
         );
       },
 
       patch(url, body = undefined, options = {}) {
         return call(
           url,
-          {
-            ...options,
-            method:
-              "PATCH",
-            body:
-              body === undefined
-                ? undefined
-                : JSON.stringify(body),
-            headers: {
-              "Content-Type":
-                "application/json",
-              ...(options.headers || {}),
-            },
-          }
+          buildJsonOptions(
+            "PATCH",
+            body,
+            options
+          )
         );
       },
 
@@ -1998,18 +3201,47 @@ export const AppCore = (() => {
   ======================================================= */
 
   function ready(fn) {
-    if (
-      !isFunction(fn) ||
-      !isBrowser()
-    ) {
+    if (!isFunction(fn)) {
+      return () => {};
+    }
+
+    if (!isBrowser()) {
+      try {
+        fn();
+      } catch (error) {
+        safeError(
+          "ready() server callback error:",
+          error
+        );
+      }
+
       return () => {};
     }
 
     if (!isDocumentReady()) {
+      let disposed = false;
+
+      const handler = () => {
+        if (disposed) {
+          return;
+        }
+
+        disposed = true;
+
+        try {
+          fn();
+        } catch (error) {
+          safeError(
+            "ready() callback error:",
+            error
+          );
+        }
+      };
+
       try {
         document.addEventListener(
           "DOMContentLoaded",
-          fn,
+          handler,
           {
             once:
               true,
@@ -2017,10 +3249,12 @@ export const AppCore = (() => {
         );
 
         return () => {
+          disposed = true;
+
           try {
             document.removeEventListener(
               "DOMContentLoaded",
-              fn
+              handler
             );
           } catch {}
         };
@@ -2031,6 +3265,7 @@ export const AppCore = (() => {
 
     try {
       fn();
+      readyCallbacksFlushed = true;
     } catch (error) {
       safeError(
         "ready() callback error:",
@@ -2046,72 +3281,99 @@ export const AppCore = (() => {
   ======================================================= */
 
   function markCoreBooting(cycleId) {
-    setState({
-      booting:
-        true,
+    setState(
+      {
+        booting:
+          true,
 
-      ready:
-        false,
+        ready:
+          false,
 
-      initialized:
-        false,
+        initialized:
+          false,
 
-      coreInitializing:
-        true,
+        coreInitializing:
+          true,
 
-      coreInitCycle:
-        cycleId,
-    });
+        coreInitCycle:
+          cycleId,
+
+        coreVersion:
+          CORE_VERSION,
+      },
+      {
+        source:
+          "core:init:booting",
+      }
+    );
   }
 
   function markCoreReady(cycleId) {
-    setState({
-      initialized:
-        true,
+    setState(
+      {
+        initialized:
+          true,
 
-      booting:
-        false,
+        booting:
+          false,
 
-      ready:
-        true,
+        ready:
+          true,
 
-      coreInitializing:
-        false,
+        coreInitializing:
+          false,
 
-      coreReady:
-        true,
+        coreReady:
+          true,
 
-      coreInitCycle:
-        cycleId,
+        coreInitCycle:
+          cycleId,
 
-      coreReadyAt:
-        safeIsoDate(),
-    });
+        coreVersion:
+          CORE_VERSION,
+
+        coreReadyAt:
+          safeIsoDate(),
+      },
+      {
+        source:
+          "core:init:ready",
+      }
+    );
   }
 
   function markCoreError(error, cycleId) {
-    setState({
-      initialized:
-        false,
+    setState(
+      {
+        initialized:
+          false,
 
-      ready:
-        false,
+        ready:
+          false,
 
-      booting:
-        false,
+        booting:
+          false,
 
-      coreInitializing:
-        false,
+        coreInitializing:
+          false,
 
-      coreReady:
-        false,
+        coreReady:
+          false,
 
-      coreInitCycle:
-        cycleId,
+        coreInitCycle:
+          cycleId,
 
-      coreErrorAt:
-        safeIsoDate(),
-    });
+        coreVersion:
+          CORE_VERSION,
+
+        coreErrorAt:
+          safeIsoDate(),
+      },
+      {
+        source:
+          "core:init:error",
+      }
+    );
 
     setError(error);
   }
@@ -2250,12 +3512,18 @@ export const AppCore = (() => {
       );
 
       safeEmit(
-        "app:core:init:start",
+        EVENTS.coreInitStart,
         {
           cycleId,
 
+          version:
+            CORE_VERSION,
+
           state:
-            clonePublicState(),
+            clonePublicState({
+              safe:
+                true,
+            }),
         }
       );
 
@@ -2271,7 +3539,11 @@ export const AppCore = (() => {
           cleanup,
           modules,
           hooks,
+          request,
+          apiClient,
           cycleId,
+          version:
+            CORE_VERSION,
         }
       );
 
@@ -2305,17 +3577,27 @@ export const AppCore = (() => {
           cleanup,
           modules,
           hooks,
+          request,
+          apiClient,
           cycleId,
+          version:
+            CORE_VERSION,
         }
       );
 
       safeEmit(
-        "app:core:ready",
+        EVENTS.coreReady,
         {
           cycleId,
 
+          version:
+            CORE_VERSION,
+
           state:
-            clonePublicState(),
+            clonePublicState({
+              safe:
+                true,
+            }),
         }
       );
 
@@ -2330,11 +3612,11 @@ export const AppCore = (() => {
           route:
             state.route || "/",
           publicPath:
-            state.publicPath || "/",
+            redactTokenInText(state.publicPath || "/"),
           lang:
-            state.lang || "es",
+            state.lang || DEFAULT_LANG,
           theme:
-            state.theme || "dark",
+            state.theme || DEFAULT_THEME,
         }
       );
 
@@ -2349,12 +3631,15 @@ export const AppCore = (() => {
       );
 
       safeEmit(
-        "app:core:init:error",
+        EVENTS.coreInitError,
         {
           cycleId,
 
+          version:
+            CORE_VERSION,
+
           error:
-            cloneError(error),
+            sanitizeErrorForSnapshot(error),
         }
       );
 
@@ -2391,7 +3676,7 @@ export const AppCore = (() => {
     return initPromise;
   }
 
-  function rebootCore() {
+  function rebootCore(options = {}) {
     initialized =
       false;
 
@@ -2401,27 +3686,98 @@ export const AppCore = (() => {
     networkEventsBound =
       false;
 
-    setState({
-      initialized:
-        false,
+    setState(
+      {
+        initialized:
+          false,
 
-      ready:
-        false,
+        ready:
+          false,
 
-      booting:
-        false,
+        booting:
+          false,
 
-      coreReady:
-        false,
+        coreReady:
+          false,
 
-      coreInitializing:
-        false,
-    });
+        coreInitializing:
+          false,
+      },
+      {
+        source:
+          "core:reboot",
+      }
+    );
+
+    safeEmit(
+      EVENTS.coreReboot,
+      {
+        at:
+          safeIsoDate(),
+      }
+    );
 
     return init({
+      ...ensureObject(options),
       force:
         true,
     });
+  }
+
+  /* =======================================================
+     MODULE BRIDGES
+  ======================================================= */
+
+  function registerBridgeModule(name = "", value = null) {
+    const aliases =
+      BRIDGE_MODULE_ALIASES[name] ||
+      [name];
+
+    if (!value) {
+      return false;
+    }
+
+    for (const alias of aliases) {
+      try {
+        modules?.register?.(
+          alias,
+          value,
+          {
+            replace:
+              true,
+          }
+        );
+      } catch {
+        try {
+          registry.modules.set(
+            alias,
+            value
+          );
+        } catch {}
+      }
+    }
+
+    return true;
+  }
+
+  function getBridgeModule(name = "") {
+    const aliases =
+      BRIDGE_MODULE_ALIASES[name] ||
+      [name];
+
+    for (const alias of aliases) {
+      try {
+        const value =
+          modules?.get?.(alias) ||
+          registry.modules.get(alias);
+
+        if (value) {
+          return value;
+        }
+      } catch {}
+    }
+
+    return null;
   }
 
   /* =======================================================
@@ -2434,6 +3790,9 @@ export const AppCore = (() => {
     return {
       appName:
         getAppName(),
+
+      version:
+        CORE_VERSION,
 
       debug:
         getDebugEnabled(),
@@ -2448,6 +3807,9 @@ export const AppCore = (() => {
 
       networkEventsBound:
         Boolean(networkEventsBound),
+
+      readyCallbacksFlushed:
+        Boolean(readyCallbacksFlushed),
 
       state: {
         initialized:
@@ -2478,16 +3840,16 @@ export const AppCore = (() => {
           state.currentResolvedUsername || null,
 
         route:
-          state.route || "/",
+          redactTokenInText(state.route || "/"),
 
         publicPath:
-          state.publicPath || "/",
+          redactTokenInText(state.publicPath || "/"),
 
         theme:
-          state.theme || "dark",
+          state.theme || DEFAULT_THEME,
 
         lang:
-          state.lang || "es",
+          state.lang || DEFAULT_LANG,
 
         hasError:
           Boolean(state.error || state.hasError),
@@ -2538,7 +3900,34 @@ export const AppCore = (() => {
       bridges: {
         toast:
           Boolean(showToastBridge),
+
+        Router:
+          Boolean(getBridgeModule("Router")),
+
+        Auth:
+          Boolean(getBridgeModule("Auth")),
+
+        Store:
+          Boolean(getBridgeModule("Store")),
+
+        Http:
+          Boolean(getBridgeModule("Http")),
       },
+
+      events:
+        isFunction(events?.snapshot)
+          ? events.snapshot()
+          : null,
+
+      cleanup:
+        isFunction(cleanup?.snapshot)
+          ? cleanup.snapshot()
+          : null,
+
+      storage:
+        isFunction(storage?.snapshot)
+          ? storage.snapshot()
+          : null,
 
       at:
         safeIsoDate(),
@@ -2549,7 +3938,11 @@ export const AppCore = (() => {
      PUBLIC API
   ======================================================= */
 
-  const api = Object.freeze({
+  const api = {
+    CORE_VERSION,
+    version:
+      CORE_VERSION,
+
     config,
     state,
     dom,
@@ -2573,6 +3966,12 @@ export const AppCore = (() => {
     getState,
     setState,
     patchState,
+
+    isAuthenticated,
+    getCurrentUser,
+    getCurrentRole,
+    hasRole,
+    getAuthHeader,
 
     setRoute,
     setPublicPath,
@@ -2603,9 +4002,113 @@ export const AppCore = (() => {
     getUserUsername,
     getUserAvatarUrl,
     normalizeUser,
-  });
+  };
 
-  return api;
+  try {
+    Object.defineProperties(api, {
+      Router: {
+        enumerable:
+          false,
+        configurable:
+          false,
+        get() {
+          return getBridgeModule("Router");
+        },
+        set(value) {
+          registerBridgeModule(
+            "Router",
+            value
+          );
+        },
+      },
+
+      router: {
+        enumerable:
+          false,
+        configurable:
+          false,
+        get() {
+          return getBridgeModule("router");
+        },
+        set(value) {
+          registerBridgeModule(
+            "router",
+            value
+          );
+        },
+      },
+
+      Auth: {
+        enumerable:
+          false,
+        configurable:
+          false,
+        get() {
+          return getBridgeModule("Auth");
+        },
+        set(value) {
+          registerBridgeModule(
+            "Auth",
+            value
+          );
+        },
+      },
+
+      auth: {
+        enumerable:
+          false,
+        configurable:
+          false,
+        get() {
+          return getBridgeModule("auth");
+        },
+        set(value) {
+          registerBridgeModule(
+            "auth",
+            value
+          );
+        },
+      },
+
+      Store: {
+        enumerable:
+          false,
+        configurable:
+          false,
+        get() {
+          return getBridgeModule("Store");
+        },
+        set(value) {
+          registerBridgeModule(
+            "Store",
+            value
+          );
+        },
+      },
+
+      Http: {
+        enumerable:
+          false,
+        configurable:
+          false,
+        get() {
+          return getBridgeModule("Http");
+        },
+        set(value) {
+          registerBridgeModule(
+            "Http",
+            value
+          );
+        },
+      },
+    });
+  } catch {}
+
+  try {
+    return Object.freeze(api);
+  } catch {
+    return api;
+  }
 })();
 
 export default AppCore;

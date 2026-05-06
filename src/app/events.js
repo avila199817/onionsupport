@@ -3,16 +3,17 @@
    Archivo: src/app/events.js
 
    ONION SUPPORT · APP EVENTS
-   EVENT BUS · NO STORM · NO REBIND · ROUTER/AUTH/LANG SYNC · EXTREME 12/10
+   EVENT BUS · NO STORM · NO REBIND · ROUTER/AUTH/LANG SYNC · EXTREME 13/10
 
    RESPONSABILIDADES:
    - Bindear eventos internos de la app.
    - Sincronizar UI ligera ante cambios de usuario/sesión/auth.
-   - Sincronizar idioma ante app:lang:change.
+   - Sincronizar idioma ante app:lang:change sin doble rerender.
    - Coordinar router:rendered con route/publicPath/loader.
    - Deduplicar toasts repetidos.
    - Emitir telemetría ligera de lifecycle.
    - Tolerar AppCore parcial o cleanup incompleto.
+   - Exponer snapshot de diagnóstico.
 
    REGLAS CRÍTICAS:
    - NO usa AppCore.cleanup.event para eventos globales de app.
@@ -26,8 +27,9 @@
    - NO emite app:route:change desde router:rendered.
    - router:rendered solo sincroniza state route/publicPath + loader.
    - router:shell:state es NOOP para evitar bucles.
+   - app:lang:change no rerenderiza salvo flag explícito.
 
-   HARDENING 12/10:
+   HARDENING:
    - Binding idempotente real.
    - Dedupe de eventos equivalentes si constants aliasan al mismo nombre.
    - State sync silencioso para router:rendered.
@@ -60,7 +62,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-const APP_EVENTS_VERSION = "12.0.0";
+const APP_EVENTS_VERSION = "13.0.0";
 
 const DEFAULT_SCOPE =
   APP_SCOPES?.events ||
@@ -94,19 +96,19 @@ const EVENT_NAMES = Object.freeze({
     Lo emite src/app/ui.js.
   */
   appUserUiSync:
-    "app:user-ui:sync",
+    APP_EVENTS?.userUiSync || "app:user-ui:sync",
 
   appEventsUiSynced:
     "app:events:ui-synced",
 
   appRouteSynced:
-    "app:events:route-synced",
+    APP_EVENTS?.routeSynced || "app:events:route-synced",
 
   appSessionRestored:
     APP_EVENTS?.sessionRestored || "app:session:restored",
 
   appSessionCleared:
-    "app:session:cleared",
+    APP_EVENTS?.sessionCleared || "app:session:cleared",
 
   appLangChange:
     APP_EVENTS?.langChange || "app:lang:change",
@@ -133,7 +135,7 @@ const EVENT_NAMES = Object.freeze({
     "app:events:unbound",
 
   appEventsError:
-    "app:events:error",
+    APP_EVENTS?.error || "app:events:error",
 
   authSessionRestored:
     AUTH_EVENTS?.sessionRestored || "auth:session:restored",
@@ -145,7 +147,7 @@ const EVENT_NAMES = Object.freeze({
     AUTH_EVENTS?.logout || "auth:logout",
 
   authLogoutSuccess:
-    "auth:logout:success",
+    AUTH_EVENTS?.logoutSuccess || "auth:logout:success",
 
   routerRendered:
     ROUTER_EVENTS?.rendered || "router:rendered",
@@ -165,6 +167,9 @@ const EVENT_NAMES = Object.freeze({
   - bindEvents
   - rebindEvents
   - init
+  - boot
+  - mount
+  - start
 */
 const SIDEBAR_LIGHT_USER_METHODS = Object.freeze([
   "renderUser",
@@ -387,21 +392,14 @@ function createHandledPayload(eventName = "", payload = {}) {
   };
 }
 
-function safeMethod(target, methodName, args = []) {
-  try {
-    if (isFunction(target?.[methodName])) {
-      return target[methodName](
-        ...(Array.isArray(args) ? args : [])
-      );
-    }
-  } catch {}
-
-  return undefined;
-}
-
 /* =========================================================
    REDACTION
 ========================================================= */
+
+function escapeRegExp(value = "") {
+  return String(value)
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 function redactSensitiveText(value = "") {
   let output =
@@ -414,7 +412,7 @@ function redactSensitiveText(value = "") {
   try {
     for (const name of SENSITIVE_QUERY_PARAM_NAMES) {
       const escaped =
-        String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        escapeRegExp(name);
 
       output =
         output.replace(
@@ -439,6 +437,12 @@ function redactSensitiveText(value = "") {
       output.replace(
         /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
         "$1***"
+      );
+
+    output =
+      output.replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
       );
   } catch {}
 
@@ -709,6 +713,69 @@ function getAuthStatus(Auth) {
 }
 
 /* =========================================================
+   STATE
+========================================================= */
+
+function assignStateDirectly(AppCore, patch = {}) {
+  const cleanPatch =
+    ensureObject(patch);
+
+  try {
+    if (
+      AppCore?.state &&
+      typeof AppCore.state === "object"
+    ) {
+      Object.assign(
+        AppCore.state,
+        cleanPatch
+      );
+
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function setStateSilent(AppCore, patch = {}) {
+  const cleanPatch =
+    ensureObject(patch);
+
+  /*
+    CRÍTICO:
+    AppEvents no debe inducir app:route:change desde router:rendered.
+    Por eso:
+    1. preferimos mutación directa de state;
+    2. sólo si no hay state mutable, usamos setState con emit:false.
+  */
+  if (assignStateDirectly(AppCore, cleanPatch)) {
+    return true;
+  }
+
+  try {
+    if (isFunction(AppCore?.setState)) {
+      AppCore.setState(
+        cleanPatch,
+        {
+          emit:
+            false,
+          emitState:
+            false,
+          silent:
+            true,
+          source:
+            "app:events:silent-state-sync",
+        }
+      );
+
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+/* =========================================================
    TOAST
 ========================================================= */
 
@@ -789,7 +856,7 @@ function toastOnce(
     safeText(options?.title, "");
 
   const key =
-    `${cleanType}:${title}:${cleanMessage}`;
+    redactSensitiveText(`${cleanType}:${title}:${cleanMessage}`);
 
   const current =
     safeNow();
@@ -816,15 +883,45 @@ function toastOnce(
    LANGUAGE
 ========================================================= */
 
-function safeSetLang(lang = "es") {
+function normalizeLang(value = "", fallback = "es") {
+  const raw =
+    safeText(value, fallback)
+      .toLowerCase()
+      .replace(/_/g, "-")
+      .trim();
+
+  const first =
+    raw.split("-")[0] || raw;
+
+  if (first === "spa" || first === "spanish" || first === "castellano") {
+    return "es";
+  }
+
+  if (first === "eng" || first === "english") {
+    return "en";
+  }
+
+  if (first === "cat" || first === "catalan" || first === "català" || first === "catalán") {
+    return "ca";
+  }
+
+  return first || fallback;
+}
+
+function safeSetDocumentLang(lang = "es") {
   const cleanLang =
-    safeText(lang, "es");
+    normalizeLang(lang, "es");
 
   if (!isBrowser()) {
     return false;
   }
 
   try {
+    document.documentElement.setAttribute(
+      "lang",
+      cleanLang
+    );
+
     document.documentElement.lang =
       cleanLang;
 
@@ -835,14 +932,82 @@ function safeSetLang(lang = "es") {
 }
 
 function resolveLang(AppCore, I18n, payload = {}) {
-  return (
+  return normalizeLang(
     safeText(payload?.lang, "") ||
-    safeText(payload?.language, "") ||
-    safeText(payload?.locale, "") ||
-    safeText(I18n?.getLang?.(), "") ||
-    safeText(I18n?.lang, "") ||
-    safeText(AppCore?.state?.lang, "") ||
+      safeText(payload?.language, "") ||
+      safeText(payload?.locale, "") ||
+      safeText(I18n?.getLang?.(), "") ||
+      safeText(I18n?.getLanguage?.(), "") ||
+      safeText(I18n?.lang, "") ||
+      safeText(I18n?.language, "") ||
+      safeText(AppCore?.state?.lang, "") ||
+      "es",
     "es"
+  );
+}
+
+function setI18nLangSoft(I18n, lang = "es") {
+  const cleanLang =
+    normalizeLang(lang, "es");
+
+  const methods = [
+    "setLang",
+    "setLanguage",
+    "changeLang",
+    "changeLanguage",
+    "use",
+  ];
+
+  for (const methodName of methods) {
+    try {
+      if (isFunction(I18n?.[methodName])) {
+        const result =
+          I18n[methodName](
+            cleanLang,
+            {
+              silent:
+                true,
+              source:
+                "app:events",
+            }
+          );
+
+        if (
+          result &&
+          isFunction(result.catch)
+        ) {
+          result.catch(() => {});
+        }
+
+        return true;
+      }
+    } catch {}
+  }
+
+  try {
+    if (
+      I18n &&
+      typeof I18n === "object"
+    ) {
+      I18n.lang =
+        cleanLang;
+
+      return true;
+    }
+  } catch {}
+
+  return false;
+}
+
+function shouldEventsRerenderOnLangChange(payload = {}) {
+  /*
+    src/app/i18n.js es el controlador principal de rerender por idioma.
+    AppEvents sólo rerenderiza si se pide explícitamente para compat legacy.
+  */
+  return Boolean(
+    payload?.rerenderByEvents === true ||
+      payload?.appEventsRerender === true ||
+      payload?.forceEventsRerender === true
   );
 }
 
@@ -869,7 +1034,11 @@ async function safeRerenderCurrentRoute({
     if (isFunction(rerenderCurrentRoute)) {
       await Promise.resolve(
         rerenderCurrentRoute({
+          AppCore,
+          Router,
           reason,
+          source:
+            "app:events",
         })
       );
 
@@ -878,7 +1047,7 @@ async function safeRerenderCurrentRoute({
   } catch (error) {
     safeWarn(
       AppCore,
-      "rerenderCurrentRoute() falló.",
+      "rerenderCurrentRoute() inyectado falló.",
       error
     );
   }
@@ -890,11 +1059,24 @@ async function safeRerenderCurrentRoute({
       {}
     );
 
+  const canonicalPath =
+    resolveCanonicalPath(
+      AppCore,
+      Router,
+      {
+        publicPath,
+      }
+    );
+
   try {
     if (isFunction(Router?.rerenderCurrentRoute)) {
       await Promise.resolve(
         Router.rerenderCurrentRoute({
           reason,
+          source:
+            "app:events",
+          force:
+            true,
         })
       );
 
@@ -912,13 +1094,23 @@ async function safeRerenderCurrentRoute({
     if (isFunction(Router?.render)) {
       await Promise.resolve(
         Router.render(
-          publicPath,
+          canonicalPath,
           {
             force:
               true,
             reason,
+            source:
+              "app:events",
             preservePublicPath:
               true,
+            publicPath,
+            canonicalPath,
+            i18nRerender:
+              true,
+            skipHistory:
+              true,
+            replaceState:
+              false,
           }
         )
       );
@@ -944,6 +1136,12 @@ async function safeRerenderCurrentRoute({
             force:
               true,
             reason,
+            source:
+              "app:events",
+            preservePublicPath:
+              true,
+            i18nRerender:
+              true,
           }
         )
       );
@@ -965,29 +1163,102 @@ async function safeRerenderCurrentRoute({
    PATH / ROUTER
 ========================================================= */
 
+function localNormalizePublicPath(path = "/") {
+  const raw =
+    safeText(path, "/") || "/";
+
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex =
+    pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash =
+      pathname.slice(hashIndex);
+    pathname =
+      pathname.slice(0, hashIndex) || "/";
+  }
+
+  const searchIndex =
+    pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search =
+      pathname.slice(searchIndex);
+    pathname =
+      pathname.slice(0, searchIndex) || "/";
+  }
+
+  pathname =
+    pathname
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+  if (!pathname.startsWith("/")) {
+    pathname =
+      `/${pathname}`;
+  }
+
+  if (
+    pathname.length > 1 &&
+    pathname.endsWith("/")
+  ) {
+    pathname =
+      pathname.replace(/\/+$/g, "") || "/";
+  }
+
+  if (
+    search &&
+    !search.startsWith("?")
+  ) {
+    search =
+      `?${search.replace(/^\?+/, "")}`;
+  }
+
+  if (
+    hash &&
+    !hash.startsWith("#")
+  ) {
+    hash =
+      `#${hash.replace(/^#+/, "")}`;
+  }
+
+  return `${pathname}${search}${hash}`;
+}
+
+function localNormalizeCanonicalPath(path = "/") {
+  const publicPath =
+    localNormalizePublicPath(path);
+
+  const clean =
+    publicPath
+      .split("?")[0]
+      .split("#")[0]
+      .replace(/^\/@[^/]+(?=\/|$)/i, "")
+      .replace(/\/+$/g, "") || "/";
+
+  return clean || "/";
+}
+
 function normalizePublicSafe(AppCore, path = "/") {
   const raw =
     safeText(path, "/") || "/";
 
   try {
-    const direct =
-      normalizePublicPath(raw);
+    const value =
+      normalizePublicPath(
+        AppCore,
+        raw
+      );
 
-    if (direct) {
-      return direct;
+    if (value) {
+      return value;
     }
   } catch {}
 
-  try {
-    const legacy =
-      normalizePublicPath(AppCore, raw);
-
-    if (legacy) {
-      return legacy;
-    }
-  } catch {}
-
-  return raw || "/";
+  return localNormalizePublicPath(raw);
 }
 
 function normalizeCanonicalSafe(AppCore, path = "/") {
@@ -995,31 +1266,18 @@ function normalizeCanonicalSafe(AppCore, path = "/") {
     safeText(path, "/") || "/";
 
   try {
-    const direct =
-      normalizeCanonicalPath(raw);
+    const value =
+      normalizeCanonicalPath(
+        AppCore,
+        raw
+      );
 
-    if (direct) {
-      return direct;
+    if (value) {
+      return value;
     }
   } catch {}
 
-  try {
-    const legacy =
-      normalizeCanonicalPath(AppCore, raw);
-
-    if (legacy) {
-      return legacy;
-    }
-  } catch {}
-
-  return (
-    raw
-      .split("?")[0]
-      .split("#")[0]
-      .replace(/^\/@[^/]+(?=\/|$)/i, "")
-      .replace(/\/+$/g, "") ||
-    "/"
-  );
+  return localNormalizeCanonicalPath(raw);
 }
 
 function callRouterGetter(Router, methodName = "") {
@@ -1036,13 +1294,22 @@ function resolvePublicPath(AppCore, Router, payload = {}) {
   const data =
     ensureObject(payload);
 
+  const route =
+    ensureObject(data.route);
+
+  const resolved =
+    ensureObject(data.resolved);
+
   const candidate =
     safeText(data.publicPath, "") ||
-    safeText(data.route?.publicPath, "") ||
+    safeText(data.currentPublicPath, "") ||
+    safeText(data.requestedPath, "") ||
     safeText(data.href, "") ||
     safeText(data.to, "") ||
     safeText(data.path, "") ||
-    safeText(data.route?.path, "") ||
+    safeText(route.publicPath, "") ||
+    safeText(route.path, "") ||
+    safeText(resolved.publicPath, "") ||
     safeText(AppCore?.state?.publicPath, "") ||
     safeText(callRouterGetter(Router, "getCurrentPublicPath"), "") ||
     safeText(getCurrentPublicPath?.(AppCore, Router), "") ||
@@ -1058,13 +1325,21 @@ function resolveCanonicalPath(AppCore, Router, payload = {}) {
   const data =
     ensureObject(payload);
 
+  const route =
+    ensureObject(data.route);
+
+  const resolved =
+    ensureObject(data.resolved);
+
   const candidate =
     safeText(data.canonicalPath, "") ||
-    safeText(data.route?.canonicalPath, "") ||
-    safeText(AppCore?.state?.route, "") ||
+    safeText(data.currentCanonicalPath, "") ||
+    safeText(route.canonicalPath, "") ||
+    safeText(resolved.canonicalPath, "") ||
     safeText(callRouterGetter(Router, "getCurrentCanonicalPath"), "") ||
     safeText(getCurrentCanonicalPath?.(AppCore, Router), "") ||
-    safeText(data.route?.path, "") ||
+    safeText(AppCore?.state?.route, "") ||
+    safeText(route.path, "") ||
     safeText(data.path, "") ||
     resolvePublicPath(AppCore, Router, data) ||
     "/";
@@ -1073,63 +1348,6 @@ function resolveCanonicalPath(AppCore, Router, payload = {}) {
     AppCore,
     candidate
   );
-}
-
-function assignStateDirectly(AppCore, patch = {}) {
-  const cleanPatch =
-    ensureObject(patch);
-
-  try {
-    if (
-      AppCore?.state &&
-      typeof AppCore.state === "object"
-    ) {
-      Object.assign(
-        AppCore.state,
-        cleanPatch
-      );
-
-      return true;
-    }
-  } catch {}
-
-  return false;
-}
-
-function setStateSilent(AppCore, patch = {}) {
-  const cleanPatch =
-    ensureObject(patch);
-
-  /*
-    CRÍTICO:
-    AppEvents no debe inducir app:route:change desde router:rendered.
-    Por eso:
-    1. preferimos mutación directa de state;
-    2. sólo si no hay state mutable, usamos setState con emit:false.
-  */
-  if (assignStateDirectly(AppCore, cleanPatch)) {
-    return true;
-  }
-
-  try {
-    if (isFunction(AppCore?.setState)) {
-      AppCore.setState(
-        cleanPatch,
-        {
-          emit:
-            false,
-          emitState:
-            false,
-          source:
-            "app:events:silent-state-sync",
-        }
-      );
-
-      return true;
-    }
-  } catch {}
-
-  return false;
 }
 
 function safePatchRouteState(AppCore, {
@@ -1154,11 +1372,15 @@ function safePatchRouteState(AppCore, {
   const routeChanged =
     safeText(state.route, "") !== cleanRoute;
 
+  const canonicalChanged =
+    safeText(state.canonicalPath, "") !== cleanRoute;
+
   const publicChanged =
     safeText(state.publicPath, "") !== cleanPublicPath;
 
   if (
     !routeChanged &&
+    !canonicalChanged &&
     !publicChanged
   ) {
     return {
@@ -1177,7 +1399,10 @@ function safePatchRouteState(AppCore, {
 
   const patch = {};
 
-  if (routeChanged) {
+  if (
+    routeChanged ||
+    canonicalChanged
+  ) {
     patch.route =
       cleanRoute;
 
@@ -1198,7 +1423,8 @@ function safePatchRouteState(AppCore, {
   return {
     changed:
       true,
-    routeChanged,
+    routeChanged:
+      Boolean(routeChanged || canonicalChanged),
     publicChanged,
     route:
       cleanRoute,
@@ -1244,7 +1470,7 @@ function shouldSkipRouterRenderedSync(route = "/", publicPath = "/") {
     safeNow();
 
   const key =
-    `${safeText(route, "/")}|${safeText(publicPath, "/")}`;
+    `${redactSensitiveText(route)}|${redactSensitiveText(publicPath)}`;
 
   if (
     key === lastRouterRenderedKey &&
@@ -1506,6 +1732,7 @@ function getUiSyncDedupeKey(context = {}) {
     safeText(context.route, "/"),
     safeText(context.publicPath, "/"),
     Boolean(context.authenticated) ? "auth" : "anon",
+    safeText(context.user?.id || context.user?.userId || "", ""),
     safeText(context.user?.username || context.user?.email || "", ""),
     safeText(context.user?.role || context.user?.rol || context.role || "", ""),
   ].join("|");
@@ -1516,7 +1743,9 @@ function shouldSkipUiSync(context = {}) {
     safeNow();
 
   const key =
-    getUiSyncDedupeKey(context);
+    redactSensitiveText(
+      getUiSyncDedupeKey(context)
+    );
 
   if (
     key === lastUiSyncKey &&
@@ -1534,7 +1763,7 @@ function shouldSkipUiSync(context = {}) {
   return false;
 }
 
-function safeSyncUI({
+async function safeSyncUI({
   AppCore,
   Auth,
   Router,
@@ -1565,6 +1794,9 @@ function safeSyncUI({
 
   const user =
     AppCore?.state?.user ||
+    AppCore?.state?.currentUser ||
+    AppCore?.state?.sessionUser ||
+    AppCore?.state?.authUser ||
     getAuthUser(Auth) ||
     null;
 
@@ -1588,6 +1820,12 @@ function safeSyncUI({
     publicPath,
 
     user,
+
+    role:
+      AppCore?.state?.role ||
+      user?.role ||
+      user?.rol ||
+      null,
 
     authenticated:
       Boolean(
@@ -1622,13 +1860,15 @@ function safeSyncUI({
   */
   if (isFunction(syncUserUI)) {
     try {
-      syncUserUI({
-        ...context,
-        rebind:
-          false,
-        hardRepair:
-          false,
-      });
+      await Promise.resolve(
+        syncUserUI({
+          ...context,
+          rebind:
+            false,
+          hardRepair:
+            false,
+        })
+      );
 
       usedInjectedSync = true;
       ok = true;
@@ -1712,6 +1952,9 @@ function safeRequestUiRepair(AppCore, reason = "event", payload = {}) {
     NO se usa automáticamente desde router:rendered.
   */
   const detail = {
+    source:
+      "app:events",
+
     reason:
       safeText(reason, "event"),
 
@@ -1879,7 +2122,16 @@ function bindAppEvent({
       await Promise.resolve(
         handler(
           payload,
-          eventOrPayload
+          {
+            eventName:
+              cleanEventName,
+
+            label:
+              cleanLabel,
+
+            raw:
+              eventOrPayload,
+          }
         )
       );
     } catch (error) {
@@ -1962,14 +2214,6 @@ function bindUserEvents(context) {
     AppCore,
   } = context;
 
-  const sync = (reason, payload = {}) => {
-    safeSyncUI({
-      ...context,
-      reason,
-      payload,
-    });
-  };
-
   bindUniqueEventNames({
     AppCore,
     label:
@@ -1982,20 +2226,16 @@ function bindUserEvents(context) {
       EVENT_NAMES.appUiReady,
       EVENT_NAMES.appReady,
     ],
-    handler: (payload, rawEvent) => {
-      const eventName =
-        safeText(
-          rawEvent?.type ||
-            payload?.event ||
-            payload?.source ||
-            "user-sync",
-          "user-sync"
-        );
-
-      sync(
-        eventName,
-        payload
-      );
+    handler: async (payload, meta) => {
+      await safeSyncUI({
+        ...context,
+        reason:
+          meta?.eventName ||
+          payload?.reason ||
+          payload?.source ||
+          "user-sync",
+        payload,
+      });
     },
   });
 }
@@ -2023,35 +2263,56 @@ function bindLanguageEvents(context) {
           payload
         );
 
-      safeSetLang(lang);
+      safeSetDocumentLang(lang);
 
-      if (langChangeInFlight) {
+      setI18nLangSoft(
+        I18n,
+        lang
+      );
+
+      setStateSilent(
+        AppCore,
+        {
+          lang,
+        }
+      );
+
+      if (
+        langChangeInFlight ||
+        !shouldEventsRerenderOnLangChange(payload)
+      ) {
+        if (payload?.toast === true) {
+          toastOnce(
+            Toast,
+            "success",
+            "Idioma actualizado",
+            {
+              title:
+                "Idioma",
+              duration:
+                2200,
+            }
+          );
+        }
+
         return;
       }
 
       langChangeInFlight = true;
 
       try {
-        if (payload?.rerender !== false) {
-          await safeRerenderCurrentRoute({
-            AppCore,
-            Router,
-            rerenderCurrentRoute,
-            reason:
-              "app:lang:change",
-          });
-        }
+        await safeRerenderCurrentRoute({
+          AppCore,
+          Router,
+          rerenderCurrentRoute,
+          reason:
+            "app:lang:change:events-rerender",
+        });
       } finally {
         langChangeInFlight = false;
       }
 
-      /*
-        No forzamos safeSyncUI aquí:
-        src/app/ui.js ya escucha app:lang:change.
-        Así evitamos triple commit.
-      */
-
-      if (payload?.toast !== false) {
+      if (payload?.toast === true) {
         toastOnce(
           Toast,
           "success",
@@ -2082,8 +2343,26 @@ function bindThemeEvents(context) {
       EVENT_NAMES.onionThemeChange,
       EVENT_NAMES.legacyThemeChange,
     ],
-    handler: (payload) => {
-      safeSyncUI({
+    handler: async (payload) => {
+      const theme =
+        safeText(
+          payload?.theme ||
+            payload?.mode ||
+            payload?.value ||
+            "",
+          ""
+        );
+
+      if (theme) {
+        setStateSilent(
+          AppCore,
+          {
+            theme,
+          }
+        );
+      }
+
+      await safeSyncUI({
         ...context,
         reason:
           "theme-change",
@@ -2105,8 +2384,8 @@ function bindAuthEvents(context) {
       EVENT_NAMES.authLoginSuccess,
     label:
       "auth-login-success",
-    handler: (payload) => {
-      safeSyncUI({
+    handler: async (payload) => {
+      await safeSyncUI({
         ...context,
         reason:
           "auth:login:success",
@@ -2135,8 +2414,8 @@ function bindAuthEvents(context) {
       EVENT_NAMES.authLogoutSuccess,
     label:
       "auth-logout-success",
-    handler: (payload) => {
-      safeSyncUI({
+    handler: async (payload) => {
+      await safeSyncUI({
         ...context,
         reason:
           "auth:logout:success",
@@ -2165,8 +2444,8 @@ function bindAuthEvents(context) {
       EVENT_NAMES.authLogout,
     label:
       "auth-logout",
-    handler: (payload) => {
-      safeSyncUI({
+    handler: async (payload) => {
+      await safeSyncUI({
         ...context,
         reason:
           "auth:logout",
@@ -2189,13 +2468,13 @@ function bindRouteChangeEvents(context) {
       EVENT_NAMES.appRouteChange,
     label:
       "app-route-change-light-sync",
-    handler: (payload) => {
+    handler: async (payload) => {
       /*
         Esto viene de AppCore/Router.
         No lo emitimos desde AppEvents.
         Solo hacemos sync visual ligero.
       */
-      safeSyncUI({
+      await safeSyncUI({
         ...context,
         reason:
           "app:route:change",
@@ -2262,8 +2541,8 @@ function bindRouterEvents(context) {
 
       router:rendered ya lo escuchan:
       - src/app/index.js
-      - SidebarEvents
-      - TopbarUI si aplica
+      - SidebarEvents / Topbar si aplica
+      - Router/Shell según su contrato interno
     */
     safeEmit(
       AppCore,
@@ -2315,7 +2594,7 @@ function bindRouterEvents(context) {
     eventName:
       EVENT_NAMES.routerAsyncComplete,
     label:
-      "router-async-complete-state-sync",
+      "router-async-complete-telemetry",
     handler: (payload) => {
       const publicPath =
         resolvePublicPath(
@@ -2374,6 +2653,60 @@ function bindRouterEvents(context) {
       */
     },
   });
+}
+
+/* =========================================================
+   DEBUG API
+========================================================= */
+
+function exposeDebugApi(AppCore = null) {
+  const api = {
+    getSnapshot:
+      getAppEventsSnapshot,
+
+    reset:
+      resetAppEventsState,
+
+    requestUiRepair:
+      (reason = "debug", payload = {}) =>
+        safeRequestUiRepair(
+          AppCore,
+          reason,
+          payload
+        ),
+  };
+
+  try {
+    if (isBrowser()) {
+      window.__ONION_APP_EVENTS__ =
+        api;
+    }
+  } catch {}
+
+  try {
+    if (
+      AppCore &&
+      typeof AppCore === "object" &&
+      Object.isExtensible(AppCore)
+    ) {
+      Object.defineProperty(
+        AppCore,
+        "AppEvents",
+        {
+          value:
+            api,
+          configurable:
+            true,
+          enumerable:
+            false,
+          writable:
+            true,
+        }
+      );
+    }
+  } catch {}
+
+  return api;
 }
 
 /* =========================================================
@@ -2450,6 +2783,8 @@ export function bindAppEvents({
 
     eventsBound = true;
     boundScope = finalScope;
+
+    exposeDebugApi(AppCore);
 
     safeEmit(
       AppCore,
@@ -2592,7 +2927,7 @@ export function getAppEventsSnapshot() {
         : "",
 
     lastToastKey:
-      lastToastKey,
+      redactKey(lastToastKey),
 
     lastToastAt,
 

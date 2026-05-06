@@ -21,11 +21,26 @@
    - no duplicar eventos DOM
    - no false warning para sidebar/topbar durante Core.init()
    - compatible con index.html estático y mounts dinámicos
+   - compatible con #sidebar-mount / #topbar-mount
+   - compatible con #app-loader estático
+   - compatible con #app-shell / #main-content / #view-container
 
    FIX BOOT / UI DINÁMICA:
-   - sidebar/topbar NO son recommended durante Core.init()
-   - sidebar/topbar son deferred UI nodes porque los monta JS
+   - sidebar/topbar NO son required durante Core.init()
+   - sidebar/topbar reales son deferred UI nodes porque los monta JS
+   - sidebarMount/topbarMount sí son nodos estáticos recomendados
    - validateRequiredDom() permite includeDeferred:true para diagnóstico tardío
+
+   CONTRATO CON index.html:
+   - #app-loader
+   - #app-shell
+   - #sidebar-mount
+   - #topbar-mount
+   - #main-content
+   - #table-head
+   - #tablehead-container
+   - #app-content
+   - #view-container
 ========================================================= */
 
 /* =========================================================
@@ -33,7 +48,7 @@
 ========================================================= */
 
 const DOM_VERSION =
-  "10.2.0";
+  "11.0.0";
 
 const REQUIRED_KEYS =
   Object.freeze([
@@ -53,7 +68,10 @@ const RECOMMENDED_KEYS =
   Object.freeze([
     "html",
     "appShell",
+    "appContent",
     "loader",
+    "sidebarMount",
+    "topbarMount",
   ]);
 
 /*
@@ -64,46 +82,73 @@ const DEFERRED_UI_KEYS =
   Object.freeze([
     "sidebar",
     "topbar",
+    "sidebarMenu",
+    "sidebarRecents",
+    "topbarTitle",
+    "topbarViewContainer",
+    "userToggle",
+    "userDropdown",
+    "logoutBtn",
+    "sidebarAvatar",
+    "sidebarName",
   ]);
 
 const OPTIONAL_KEYS =
   Object.freeze([
     "appRoot",
     "layout",
-    "appContent",
+    "shell",
+    "main",
+    "viewRoot",
+    "routerView",
 
+    "skipLink",
     "themeColorMeta",
-
-    "sidebarMenu",
-    "sidebarRecents",
-    "topbarTitle",
-    "topbarViewContainer",
+    "colorSchemeMeta",
+    "tileColorMeta",
 
     "tablehead",
+    "tableHead",
     "tableheadContainer",
+    "tableHeadContainer",
 
     "searchInput",
     "searchResults",
 
-    "userToggle",
-    "userDropdown",
-    "logoutBtn",
-
     "sidebarToggle",
     "sidebarMobileToggle",
-    "sidebarAvatar",
-    "sidebarName",
 
     "toastRoot",
     "modalRoot",
     "overlayRoot",
+    "tooltipRoot",
+    "drawerRoot",
+    "portalRoot",
   ]);
 
 const DOM_SELECTORS =
   Object.freeze({
+    skipLink: [
+      ".app-skip-link",
+      "[data-skip-link='true']",
+      "[data-skip-link]",
+      "a[href='#main-content']",
+    ],
+
     themeColorMeta: [
       'meta[name="theme-color"]',
+      "meta[data-onion-theme-color='true']",
       "meta[data-theme-color]",
+    ],
+
+    colorSchemeMeta: [
+      'meta[name="color-scheme"]',
+      "meta[data-onion-color-scheme='true']",
+    ],
+
+    tileColorMeta: [
+      'meta[name="msapplication-TileColor"]',
+      "meta[data-onion-tile-color='true']",
     ],
 
     appRoot: [
@@ -120,6 +165,8 @@ const DOM_SELECTORS =
       ".layout",
       "[data-app-layout='true']",
       "[data-app-layout]",
+      "#app-shell",
+      "[data-app-shell]",
       "#app",
       "#root",
     ],
@@ -132,12 +179,25 @@ const DOM_SELECTORS =
       ".shell",
     ],
 
+    sidebarMount: [
+      "#sidebar-mount",
+      "[data-sidebar-mount='true']",
+      "[data-sidebar-mount]",
+    ],
+
+    topbarMount: [
+      "#topbar-mount",
+      "[data-topbar-mount='true']",
+      "[data-topbar-mount]",
+    ],
+
     mainContent: [
       "#main-content",
       "#app-main",
       "main#main-content",
       "main.main-content",
       ".main-content",
+      "[data-main-content='true']",
       "[data-main-content]",
       "[data-app-main]",
       "main",
@@ -145,20 +205,20 @@ const DOM_SELECTORS =
 
     appContent: [
       "#app-content",
+      "[data-app-content='true']",
       "[data-app-content]",
       ".app-content",
-      "#main-content",
-      "main.main-content",
-      ".main-content",
     ],
 
     viewContainer: [
       "#view-container",
       "#router-view",
       "#app-view",
+      "[data-view-root='true']",
       "[data-view-root]",
       "[data-view-container='true']",
       "[data-view-container]",
+      "[data-router-view='true']",
       "[data-router-view]",
       "[data-router-outlet]",
       ".view-container",
@@ -181,6 +241,7 @@ const DOM_SELECTORS =
       "aside#app-sidebar",
       "aside.sidebar",
       ".sidebar",
+      "[data-sidebar-root='true']",
       "[data-sidebar-root]",
       "[data-sidebar='true']",
       "[data-sidebar]",
@@ -197,6 +258,7 @@ const DOM_SELECTORS =
 
     sidebarRecents: [
       "#sidebar-recents",
+      "[data-sidebar-recents='true']",
       "[data-sidebar-recents]",
       ".sidebar-recents",
     ],
@@ -207,6 +269,7 @@ const DOM_SELECTORS =
       "header#app-topbar",
       "header.topbar",
       ".topbar",
+      "[data-topbar-root='true']",
       "[data-topbar-root]",
       "[data-topbar='true']",
       "[data-topbar]",
@@ -232,6 +295,7 @@ const DOM_SELECTORS =
       "#tablehead",
       ".table-head",
       ".tablehead",
+      "[data-tablehead='true']",
       "[data-tablehead]",
       "[data-table-head]",
     ],
@@ -339,6 +403,42 @@ const DOM_SELECTORS =
       "[data-overlay-root]",
       ".overlay-root",
     ],
+
+    tooltipRoot: [
+      "#tooltip-root",
+      "[data-tooltip-root]",
+      ".tooltip-root",
+    ],
+
+    drawerRoot: [
+      "#drawer-root",
+      "[data-drawer-root]",
+      ".drawer-root",
+    ],
+
+    portalRoot: [
+      "#portal-root",
+      "[data-portal-root]",
+      ".portal-root",
+    ],
+  });
+
+const DOM_EVENTS =
+  Object.freeze({
+    cached:
+      "app:core:dom:cached",
+
+    valid:
+      "app:core:dom:valid",
+
+    invalid:
+      "app:core:dom:invalid",
+
+    refreshedStale:
+      "app:core:dom:refreshed-stale",
+
+    cleared:
+      "app:core:dom:cleared",
   });
 
 /* =========================================================
@@ -570,8 +670,7 @@ function queryFirst(utils, selectors = [], root = null) {
 }
 
 function queryAllCandidates(utils, selectors = [], root = null) {
-  const output =
-    [];
+  const output = [];
 
   for (const selector of safeArray(selectors)) {
     const nodes =
@@ -689,21 +788,6 @@ function setAlias(dom, alias, sourceKey) {
   }
 }
 
-function hasElementRole(el, role = "") {
-  if (!el || !role) {
-    return false;
-  }
-
-  try {
-    return safeText(
-      el.getAttribute?.("role"),
-      ""
-    ).toLowerCase() === role.toLowerCase();
-  } catch {
-    return false;
-  }
-}
-
 /* =========================================================
    FACTORY
 ========================================================= */
@@ -728,7 +812,16 @@ export function createDomCache() {
     body:
       null,
 
+    skipLink:
+      null,
+
     themeColorMeta:
+      null,
+
+    colorSchemeMeta:
+      null,
+
+    tileColorMeta:
       null,
 
     appRoot:
@@ -746,6 +839,15 @@ export function createDomCache() {
     loader:
       null,
 
+    appLoader:
+      null,
+
+    sidebarMount:
+      null,
+
+    topbarMount:
+      null,
+
     sidebar:
       null,
 
@@ -755,6 +857,9 @@ export function createDomCache() {
     sidebarRecents:
       null,
 
+    main:
+      null,
+
     mainContent:
       null,
 
@@ -762,6 +867,12 @@ export function createDomCache() {
       null,
 
     viewContainer:
+      null,
+
+    viewRoot:
+      null,
+
+    routerView:
       null,
 
     topbar:
@@ -776,7 +887,13 @@ export function createDomCache() {
     tablehead:
       null,
 
+    tableHead:
+      null,
+
     tableheadContainer:
+      null,
+
+    tableHeadContainer:
       null,
 
     searchInput:
@@ -815,6 +932,15 @@ export function createDomCache() {
     overlayRoot:
       null,
 
+    tooltipRoot:
+      null,
+
+    drawerRoot:
+      null,
+
+    portalRoot:
+      null,
+
     validation:
       {
         ok:
@@ -847,14 +973,6 @@ function applyAliases(dom) {
     return false;
   }
 
-  if (!dom.appShell && dom.shell) {
-    safeSet(
-      dom,
-      "appShell",
-      dom.shell
-    );
-  }
-
   if (!dom.shell && dom.appShell) {
     setAlias(
       dom,
@@ -863,41 +981,128 @@ function applyAliases(dom) {
     );
   }
 
-  if (!dom.mainContent && dom.appContent) {
+  if (!dom.appShell && dom.shell) {
     safeSet(
       dom,
-      "mainContent",
-      dom.appContent
+      "appShell",
+      dom.shell
     );
   }
 
-  if (!dom.appContent && dom.mainContent) {
+  if (!dom.appLoader && dom.loader) {
     setAlias(
       dom,
-      "appContent",
+      "appLoader",
+      "loader"
+    );
+  }
+
+  if (!dom.loader && dom.appLoader) {
+    safeSet(
+      dom,
+      "loader",
+      dom.appLoader
+    );
+  }
+
+  if (!dom.main && dom.mainContent) {
+    setAlias(
+      dom,
+      "main",
       "mainContent"
     );
   }
 
-  if (!dom.layout && dom.appRoot) {
+  if (!dom.mainContent && dom.main) {
     safeSet(
       dom,
-      "layout",
-      dom.appRoot
+      "mainContent",
+      dom.main
     );
   }
 
-  if (!dom.appShell && dom.layout) {
-    safeSet(
-      dom,
-      "appShell",
-      dom.layout
-    );
-
+  if (!dom.viewRoot && dom.viewContainer) {
     setAlias(
       dom,
-      "shell",
-      "appShell"
+      "viewRoot",
+      "viewContainer"
+    );
+  }
+
+  if (!dom.routerView && dom.viewContainer) {
+    setAlias(
+      dom,
+      "routerView",
+      "viewContainer"
+    );
+  }
+
+  if (!dom.viewContainer && dom.viewRoot) {
+    safeSet(
+      dom,
+      "viewContainer",
+      dom.viewRoot
+    );
+  }
+
+  if (!dom.appContent && dom.viewContainer) {
+    try {
+      const parent =
+        dom.viewContainer.parentElement;
+
+      if (
+        parent &&
+        (
+          parent.id === "app-content" ||
+          parent.hasAttribute?.("data-app-content")
+        )
+      ) {
+        safeSet(
+          dom,
+          "appContent",
+          parent
+        );
+      }
+    } catch {}
+  }
+
+  if (!dom.layout && dom.appShell) {
+    safeSet(
+      dom,
+      "layout",
+      dom.appShell
+    );
+  }
+
+  if (!dom.tableHead && dom.tablehead) {
+    setAlias(
+      dom,
+      "tableHead",
+      "tablehead"
+    );
+  }
+
+  if (!dom.tablehead && dom.tableHead) {
+    safeSet(
+      dom,
+      "tablehead",
+      dom.tableHead
+    );
+  }
+
+  if (!dom.tableHeadContainer && dom.tableheadContainer) {
+    setAlias(
+      dom,
+      "tableHeadContainer",
+      "tableheadContainer"
+    );
+  }
+
+  if (!dom.tableheadContainer && dom.tableHeadContainer) {
+    safeSet(
+      dom,
+      "tableheadContainer",
+      dom.tableHeadContainer
     );
   }
 
@@ -970,7 +1175,7 @@ export function cacheDom({
 
   safeEmit(
     events,
-    "core:dom:cached",
+    DOM_EVENTS.cached,
     {
       durationMs:
         cachedAtMs - startedAt,
@@ -1023,8 +1228,20 @@ function buildValidationWarnings({
   includeDeferred = false,
   warnDeferred = false,
 } = {}) {
-  const warnings =
-    [];
+  const warnings = [];
+
+  if (missing.includes("body")) {
+    warnings.push({
+      code:
+        "BODY_MISSING",
+
+      level:
+        "error",
+
+      message:
+        "Falta document.body. El Core se ha ejecutado antes de que el DOM esté listo.",
+    });
+  }
 
   if (missing.includes("viewContainer")) {
     warnings.push({
@@ -1048,7 +1265,7 @@ function buildValidationWarnings({
         "error",
 
       message:
-        "Falta mainContent/appContent. El layout principal puede quedar incompleto.",
+        "Falta #main-content o equivalente. El layout principal puede quedar incompleto.",
     });
   }
 
@@ -1062,6 +1279,45 @@ function buildValidationWarnings({
 
       message:
         "No se encontró #app-loader. loader.js deberá crear fallback si aplica.",
+    });
+  }
+
+  if (recommendedMissing.includes("appShell")) {
+    warnings.push({
+      code:
+        "APP_SHELL_MISSING",
+
+      level:
+        "warning",
+
+      message:
+        "No se encontró #app-shell. El shell puede funcionar, pero shell.js tendrá menos control visual.",
+    });
+  }
+
+  if (recommendedMissing.includes("sidebarMount")) {
+    warnings.push({
+      code:
+        "SIDEBAR_MOUNT_MISSING",
+
+      level:
+        "warning",
+
+      message:
+        "No se encontró #sidebar-mount. SidebarUI puede necesitar crear o localizar un mount alternativo.",
+    });
+  }
+
+  if (recommendedMissing.includes("topbarMount")) {
+    warnings.push({
+      code:
+        "TOPBAR_MOUNT_MISSING",
+
+      level:
+        "warning",
+
+      message:
+        "No se encontró #topbar-mount. TopbarUI puede necesitar crear o localizar un mount alternativo.",
     });
   }
 
@@ -1095,7 +1351,7 @@ function buildValidationWarnings({
         "info",
 
       message:
-        "No se encontró sidebar. Es correcto durante el boot inicial si SidebarUI lo monta dinámicamente.",
+        "No se encontró sidebar real. Es correcto durante el boot inicial si SidebarUI lo monta dinámicamente.",
     });
   }
 
@@ -1112,7 +1368,7 @@ function buildValidationWarnings({
         "info",
 
       message:
-        "No se encontró topbar. Es correcto durante el boot inicial si TopbarUI lo monta dinámicamente.",
+        "No se encontró topbar real. Es correcto durante el boot inicial si TopbarUI lo monta dinámicamente.",
     });
   }
 
@@ -1281,7 +1537,7 @@ export function validateRequiredDom({
   ) {
     safeWarn(
       utils,
-      "Faltan nodos importantes del layout:",
+      "Faltan nodos requeridos del layout:",
       validation.missing
     );
   }
@@ -1314,8 +1570,8 @@ export function validateRequiredDom({
     safeEmit(
       events,
       validation.ok
-        ? "core:dom:valid"
-        : "core:dom:invalid",
+        ? DOM_EVENTS.valid
+        : DOM_EVENTS.invalid,
       {
         validation,
         snapshot:
@@ -1326,7 +1582,9 @@ export function validateRequiredDom({
 
   /*
     Compatibilidad legacy:
-    La versión anterior devolvía solo el array de missing.
+    AppCore.safeValidateRequiredDom() espera que esta función
+    no lance y puede ignorar el retorno. La versión histórica
+    devolvía un array de missing.
   */
   return validation.missing;
 }
@@ -1419,8 +1677,7 @@ export function refreshDomNodes({
   root = null,
   force = true,
 } = {}) {
-  const result =
-    {};
+  const result = {};
 
   for (const key of safeArray(keys)) {
     result[key] =
@@ -1447,6 +1704,24 @@ export function refreshDeferredDomNodes({
     utils,
     keys:
       DEFERRED_UI_KEYS,
+    root,
+    force,
+  });
+}
+
+export function refreshMountDomNodes({
+  dom,
+  utils,
+  root = null,
+  force = true,
+} = {}) {
+  return refreshDomNodes({
+    dom,
+    utils,
+    keys: [
+      "sidebarMount",
+      "topbarMount",
+    ],
     root,
     force,
   });
@@ -1484,8 +1759,18 @@ export function ensureFreshDom({
     return dom;
   }
 
+  const finalKeys =
+    safeArray(keys).length
+      ? safeArray(keys)
+      : uniqueList([
+          ...REQUIRED_KEYS,
+          ...RECOMMENDED_KEYS,
+          ...DEFERRED_UI_KEYS,
+          ...OPTIONAL_KEYS,
+        ]);
+
   const staleKeys =
-    safeArray(keys).filter((key) => {
+    finalKeys.filter((key) => {
       const node =
         dom?.[key];
 
@@ -1511,7 +1796,7 @@ export function ensureFreshDom({
 
   safeEmit(
     events,
-    "core:dom:refreshed-stale",
+    DOM_EVENTS.refreshedStale,
     {
       keys:
         staleKeys,
@@ -1523,7 +1808,7 @@ export function ensureFreshDom({
   return dom;
 }
 
-export function clearDomCache(dom) {
+export function clearDomCache(dom, events = null) {
   if (!dom) {
     return false;
   }
@@ -1577,6 +1862,15 @@ export function clearDomCache(dom) {
       null;
   }
 
+  safeEmit(
+    events,
+    DOM_EVENTS.cleared,
+    {
+      at:
+        safeIsoDate(),
+    }
+  );
+
   return true;
 }
 
@@ -1592,19 +1886,19 @@ function getElementSnapshot(el) {
     };
   }
 
-  let className =
-    "";
+  let className = "";
 
   try {
     className =
-      safeText(
-        el.className,
-        ""
-      );
+      typeof el.className === "string"
+        ? el.className
+        : safeText(
+            el.className?.baseVal,
+            ""
+          );
   } catch {}
 
-  let dataset =
-    {};
+  let dataset = {};
 
   try {
     dataset =
@@ -1615,6 +1909,16 @@ function getElementSnapshot(el) {
     dataset =
       {};
   }
+
+  let text = "";
+
+  try {
+    text =
+      safeText(
+        el.textContent,
+        ""
+      );
+  } catch {}
 
   return {
     exists:
@@ -1664,6 +1968,36 @@ function getElementSnapshot(el) {
         ""
       ),
 
+    dataRouteMode:
+      safeText(
+        el.getAttribute?.("data-route-mode"),
+        ""
+      ),
+
+    dataShell:
+      safeText(
+        el.getAttribute?.("data-shell"),
+        ""
+      ),
+
+    dataShellState:
+      safeText(
+        el.getAttribute?.("data-shell-state"),
+        ""
+      ),
+
+    dataLoaderState:
+      safeText(
+        el.getAttribute?.("data-loader-state"),
+        ""
+      ),
+
+    dataLoaderVisible:
+      safeText(
+        el.getAttribute?.("data-loader-visible"),
+        ""
+      ),
+
     childCount:
       safeNumber(
         el.children?.length,
@@ -1671,12 +2005,12 @@ function getElementSnapshot(el) {
       ),
 
     hasText:
-      Boolean(
-        safeText(
-          el.textContent,
-          ""
-        )
-      ),
+      Boolean(text),
+
+    textPreview:
+      text
+        ? text.slice(0, 80)
+        : "",
 
     datasetKeys:
       Object.keys(dataset),
@@ -1691,10 +2025,12 @@ function buildExistsMap(dom = {}) {
       ...DEFERRED_UI_KEYS,
       ...OPTIONAL_KEYS,
       "shell",
+      "appLoader",
+      "viewRoot",
+      "routerView",
     ]);
 
-  const output =
-    {};
+  const output = {};
 
   for (const key of keys) {
     output[key] =
@@ -1709,23 +2045,34 @@ function buildNodeSnapshots(dom = {}) {
     uniqueList([
       "html",
       "body",
+      "skipLink",
       "themeColorMeta",
+      "colorSchemeMeta",
+      "tileColorMeta",
       "appRoot",
       "layout",
       "shell",
       "appShell",
       "loader",
+      "appLoader",
+      "sidebarMount",
+      "topbarMount",
       "sidebar",
       "sidebarMenu",
       "sidebarRecents",
+      "main",
       "mainContent",
       "appContent",
       "viewContainer",
+      "viewRoot",
+      "routerView",
       "topbar",
       "topbarTitle",
       "topbarViewContainer",
       "tablehead",
+      "tableHead",
       "tableheadContainer",
+      "tableHeadContainer",
       "searchInput",
       "searchResults",
       "userToggle",
@@ -1738,10 +2085,12 @@ function buildNodeSnapshots(dom = {}) {
       "toastRoot",
       "modalRoot",
       "overlayRoot",
+      "tooltipRoot",
+      "drawerRoot",
+      "portalRoot",
     ]);
 
-  const output =
-    {};
+  const output = {};
 
   for (const key of keys) {
     output[key] =
@@ -1860,8 +2209,7 @@ export function findAllDomCandidates({
   utils,
   root = null,
 } = {}) {
-  const output =
-    {};
+  const output = {};
 
   for (const key of Object.keys(DOM_SELECTORS)) {
     output[key] =
@@ -1915,6 +2263,7 @@ export function getDomValidationSnapshot(dom = {}) {
 
 export {
   DOM_VERSION,
+  DOM_EVENTS,
   DOM_SELECTORS,
   REQUIRED_KEYS,
   RECOMMENDED_KEYS,
@@ -1924,6 +2273,7 @@ export {
 
 export default {
   DOM_VERSION,
+  DOM_EVENTS,
   DOM_SELECTORS,
   REQUIRED_KEYS,
   RECOMMENDED_KEYS,
@@ -1938,6 +2288,7 @@ export default {
   setDomNode,
   refreshDomNode,
   refreshDomNodes,
+  refreshMountDomNodes,
   refreshDeferredDomNodes,
   refreshUserDomNodes,
   ensureFreshDom,

@@ -3,7 +3,7 @@
    Archivo: src/app/helpers.js
 
    ONION SUPPORT · APP HELPERS
-   PATH CORE · TOKEN ROUTES SAFE · CLEANUP SAFE · EXTREME 13/10
+   PATH CORE · TOKEN ROUTES SAFE · CLEANUP SAFE · EXTREME 14/10
 
    RESPONSABILIDADES:
    - Resolver paths actuales de la app.
@@ -19,25 +19,39 @@
        publicPath    = URL pública real, puede llevar @usuario/query/hash.
        canonicalPath = ruta interna limpia, sin @usuario/query/hash.
 
-   HARDENING 13/10:
+   HARDENING 14/10:
    - Browser/server safe.
    - Cero throws accidentales.
    - Idempotente.
+   - Compatibilidad de firmas:
+       normalizePublicPath(AppCore, path)
+       normalizePublicPath(path)
+       normalizeCanonicalPath(AppCore, path)
+       normalizeCanonicalPath(path)
    - Hash router compatible:
        /#/activate-account?token=...
        /#!/reset-password/confirm?token=...
    - Token por query/path/hash-query compatible.
    - Alias legacy reset initial URL compatible.
    - Scrub detection por history.state.
-   - No open-redirect helpers.
+   - No open-redirect.
    - Debug snapshot sin tokens reales.
 ========================================================= */
 
-import { APP_SCOPE } from "./constants.js";
+import {
+  APP_SCOPE,
+  APP_RUNTIME_KEYS,
+  APP_STATE_KEYS,
+  PROTECTED_PUBLIC_TOKEN_ROUTES as CONSTANT_PUBLIC_TOKEN_ROUTES,
+  GENERIC_SENSITIVE_PARAM_NAMES,
+} from "./constants.js";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
+
+const HELPERS_VERSION =
+  "14.0.0";
 
 const DEFAULT_ROUTE =
   "/";
@@ -47,9 +61,11 @@ const DEFAULT_SCOPE =
   "app";
 
 const INITIAL_URL_KEY =
+  APP_RUNTIME_KEYS?.initialUrl ||
   "__ONION_INITIAL_URL__";
 
 const BOOT_CONTEXT_KEY =
+  APP_RUNTIME_KEYS?.bootContext ||
   "__ONION_BOOT_CONTEXT__";
 
 const ACTIVATION_PATH =
@@ -78,29 +94,34 @@ const RESET_TOKEN_PARAM_NAMES =
   ]);
 
 const GENERIC_TOKEN_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "resetToken",
-    "passwordResetToken",
-    "confirmToken",
-    "code",
-    "t",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
-  ]);
+  Object.freeze(
+    Array.isArray(GENERIC_SENSITIVE_PARAM_NAMES) &&
+      GENERIC_SENSITIVE_PARAM_NAMES.length
+      ? GENERIC_SENSITIVE_PARAM_NAMES
+      : [
+          "token",
+          "activationToken",
+          "activateToken",
+          "resetToken",
+          "passwordResetToken",
+          "confirmToken",
+          "code",
+          "t",
+          "access_token",
+          "refresh_token",
+          "id_token",
+          "tempToken",
+          "temp_token",
+          "temporaryToken",
+          "temporary_token",
+          "twoFactorToken",
+          "two_factor_token",
+          "mfaToken",
+          "mfa_token",
+        ]
+  );
 
-const PROTECTED_PUBLIC_TOKEN_ROUTES =
+const FALLBACK_PUBLIC_TOKEN_ROUTES =
   Object.freeze([
     Object.freeze({
       key:
@@ -110,23 +131,33 @@ const PROTECTED_PUBLIC_TOKEN_ROUTES =
         ACTIVATION_PATH,
 
       windowKey:
+        APP_RUNTIME_KEYS?.activateAccountInitialUrl ||
         "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
 
       windowKeys:
         Object.freeze([
-          "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+          APP_RUNTIME_KEYS?.activateAccountInitialUrl ||
+            "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
         ]),
 
       stateUrlKey:
+        APP_STATE_KEYS?.bootActivationInitialUrl ||
         "bootActivationInitialUrl",
 
       statePathKey:
+        APP_STATE_KEYS?.bootActivationInitialPath ||
         "bootActivationInitialPath",
 
+      statePublicPathKey:
+        APP_STATE_KEYS?.bootActivationInitialPublicPath ||
+        "bootActivationInitialPublicPath",
+
       stateIsRouteKey:
+        APP_STATE_KEYS?.bootIsActivation ||
         "bootIsActivation",
 
       stateHasTokenKey:
+        APP_STATE_KEYS?.bootHasActivationToken ||
         "bootHasActivationToken",
 
       scrubbedStateKeys:
@@ -134,6 +165,15 @@ const PROTECTED_PUBLIC_TOKEN_ROUTES =
           "scrubbedActivationToken",
           "activationTokenScrubbed",
           "scrubbedActivateAccountToken",
+        ]),
+
+      scrubbedHistoryKeys:
+        Object.freeze([
+          "scrubbedActivationToken",
+          "activationTokenScrubbed",
+          "scrubbedActivateAccountToken",
+          "scrubbedPublicTokenRoute",
+          "scrubbedTokenRoute",
         ]),
 
       tokenParamNames:
@@ -148,24 +188,35 @@ const PROTECTED_PUBLIC_TOKEN_ROUTES =
         RESET_CONFIRM_PATH,
 
       windowKey:
+        APP_RUNTIME_KEYS?.resetConfirmInitialUrl ||
         "__ONION_RESET_CONFIRM_INITIAL_URL__",
 
       windowKeys:
         Object.freeze([
-          "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-          "__ONION_RESET_CONFIRM_INITIAL_URL__",
+          APP_RUNTIME_KEYS?.resetPasswordConfirmInitialUrl ||
+            "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+          APP_RUNTIME_KEYS?.resetConfirmInitialUrl ||
+            "__ONION_RESET_CONFIRM_INITIAL_URL__",
         ]),
 
       stateUrlKey:
+        APP_STATE_KEYS?.bootResetConfirmInitialUrl ||
         "bootResetConfirmInitialUrl",
 
       statePathKey:
+        APP_STATE_KEYS?.bootResetConfirmInitialPath ||
         "bootResetConfirmInitialPath",
 
+      statePublicPathKey:
+        APP_STATE_KEYS?.bootResetConfirmInitialPublicPath ||
+        "bootResetConfirmInitialPublicPath",
+
       stateIsRouteKey:
+        APP_STATE_KEYS?.bootIsResetConfirm ||
         "bootIsResetConfirm",
 
       stateHasTokenKey:
+        APP_STATE_KEYS?.bootHasResetToken ||
         "bootHasResetToken",
 
       scrubbedStateKeys:
@@ -177,10 +228,27 @@ const PROTECTED_PUBLIC_TOKEN_ROUTES =
           "scrubbedResetPasswordToken",
         ]),
 
+      scrubbedHistoryKeys:
+        Object.freeze([
+          "scrubbedResetToken",
+          "resetTokenScrubbed",
+          "scrubbedResetConfirmToken",
+          "scrubbedPasswordResetToken",
+          "scrubbedResetPasswordToken",
+          "scrubbedPublicTokenRoute",
+          "scrubbedTokenRoute",
+        ]),
+
       tokenParamNames:
         RESET_TOKEN_PARAM_NAMES,
     }),
   ]);
+
+const PUBLIC_USERNAME_RE =
+  /^@[A-Za-z0-9._-]{1,80}$/;
+
+const UNSAFE_PROTOCOL_RE =
+  /^[a-z][a-z0-9+.-]*:/i;
 
 /* =========================================================
    BASICS
@@ -330,6 +398,48 @@ function getBaseOrigin() {
   return "http://localhost";
 }
 
+function looksLikeAppCore(value) {
+  if (!isObjectLike(value)) {
+    return false;
+  }
+
+  return Boolean(
+    value.state ||
+      value.utils ||
+      value.events ||
+      value.modules ||
+      value.cleanup ||
+      value.dom ||
+      isFunction(value.setState) ||
+      isFunction(value.setRoute) ||
+      isFunction(value.setPublicPath)
+  );
+}
+
+function resolvePathArgs(first, second, fallback = DEFAULT_ROUTE) {
+  if (looksLikeAppCore(first)) {
+    return {
+      AppCore:
+        first,
+
+      path:
+        second === undefined
+          ? fallback
+          : second,
+    };
+  }
+
+  return {
+    AppCore:
+      null,
+
+    path:
+      first === undefined
+        ? fallback
+        : first,
+  };
+}
+
 /* =========================================================
    HASH ROUTER
 ========================================================= */
@@ -397,11 +507,42 @@ function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
       .replace(/\/{2,}/g, "/");
 
   if (!value) {
-    value = DEFAULT_ROUTE;
+    value =
+      DEFAULT_ROUTE;
   }
 
   if (!value.startsWith("/")) {
-    value = `/${value}`;
+    value =
+      `/${value}`;
+  }
+
+  const rawSegments =
+    value
+      .split("/")
+      .filter(Boolean);
+
+  const segments =
+    [];
+
+  for (const segment of rawSegments) {
+    if (segment === ".") {
+      continue;
+    }
+
+    if (segment === "..") {
+      segments.pop();
+      continue;
+    }
+
+    segments.push(segment);
+  }
+
+  value =
+    `/${segments.join("/")}`;
+
+  if (!value) {
+    value =
+      DEFAULT_ROUTE;
   }
 
   if (
@@ -506,7 +647,17 @@ function fallbackNormalizePath(path = DEFAULT_ROUTE) {
   return `${normalizePathnameOnly(pathname)}${normalizeSearch(search)}${normalizeHash(hash)}`;
 }
 
-export function normalizePublicPath(AppCore, path = DEFAULT_ROUTE) {
+export function normalizePublicPath(first = DEFAULT_ROUTE, second = undefined) {
+  const {
+    AppCore,
+    path,
+  } =
+    resolvePathArgs(
+      first,
+      second,
+      DEFAULT_ROUTE
+    );
+
   const raw =
     safeText(path, DEFAULT_ROUTE) || DEFAULT_ROUTE;
 
@@ -514,8 +665,9 @@ export function normalizePublicPath(AppCore, path = DEFAULT_ROUTE) {
     fallbackNormalizePath(raw);
 
   /*
-    No delegamos a AppCore.utils.normalizePath si hay query/hash.
-    Algunos normalizadores internos devuelven solo pathname y se comen tokens.
+    publicPath conserva query/hash.
+    No delegamos a AppCore.utils.normalizePath si hay query/hash:
+    algunos normalizadores internos devuelven solo pathname y se comen tokens.
   */
   const hasSuffix =
     raw.includes("?") ||
@@ -534,9 +686,6 @@ export function normalizePublicPath(AppCore, path = DEFAULT_ROUTE) {
         const clean =
           fallbackNormalizePath(delegated);
 
-        /*
-          Evita degradar /foo a /.
-        */
         if (
           fallback !== DEFAULT_ROUTE &&
           clean === DEFAULT_ROUTE
@@ -568,7 +717,7 @@ function getSearchAndHash(path = DEFAULT_ROUTE) {
 }
 
 function isUsernameSegment(segment = "") {
-  return /^@[A-Za-z0-9._-]{1,80}$/.test(
+  return PUBLIC_USERNAME_RE.test(
     safeText(segment, "")
   );
 }
@@ -615,7 +764,17 @@ function fallbackNormalizeCanonicalPath(path = DEFAULT_ROUTE) {
   return normalizePathnameOnly(pathname);
 }
 
-export function normalizeCanonicalPath(AppCore, path = DEFAULT_ROUTE) {
+export function normalizeCanonicalPath(first = DEFAULT_ROUTE, second = undefined) {
+  const {
+    AppCore,
+    path,
+  } =
+    resolvePathArgs(
+      first,
+      second,
+      DEFAULT_ROUTE
+    );
+
   const raw =
     safeText(path, DEFAULT_ROUTE) || DEFAULT_ROUTE;
 
@@ -747,6 +906,74 @@ function pathFromUrlLike(value = "") {
 }
 
 /* =========================================================
+   SAFE INTERNAL TARGETS
+========================================================= */
+
+export function isSafeInternalPath(value = "") {
+  const raw =
+    safeText(value, "");
+
+  if (!raw) {
+    return false;
+  }
+
+  if (!raw.startsWith("/")) {
+    return false;
+  }
+
+  if (raw.startsWith("//")) {
+    return false;
+  }
+
+  if (UNSAFE_PROTOCOL_RE.test(raw)) {
+    return false;
+  }
+
+  if (/[\r\n\t\\]/.test(raw)) {
+    return false;
+  }
+
+  return true;
+}
+
+export function normalizeInternalPathTarget(value = DEFAULT_ROUTE, fallback = DEFAULT_ROUTE) {
+  const raw =
+    safeText(value, fallback) || fallback;
+
+  if (!isSafeInternalPath(raw)) {
+    return fallbackNormalizePath(fallback);
+  }
+
+  try {
+    const parsed =
+      new URL(
+        raw,
+        getBaseOrigin()
+      );
+
+    if (parsed.origin !== getBaseOrigin()) {
+      return fallbackNormalizePath(fallback);
+    }
+
+    const path =
+      fallbackNormalizePath(
+        `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`
+      );
+
+    return isSafeInternalPath(path)
+      ? path
+      : fallbackNormalizePath(fallback);
+  } catch {
+    const path =
+      fallbackNormalizePath(raw);
+
+    return isSafeInternalPath(path)
+      ? path
+      : fallbackNormalizePath(fallback);
+  }
+}
+
+/* =========================================================
    TOKEN REDACTION
 ========================================================= */
 
@@ -774,7 +1001,11 @@ export function redactTokenInText(value = "") {
   for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
     try {
       const escapedPath =
-        config.path.replace(/\//g, "\\/");
+        String(config.path || "").replace(/\//g, "\\/");
+
+      if (!escapedPath) {
+        continue;
+      }
 
       output =
         output.replace(
@@ -792,12 +1023,123 @@ export function redactTokenInText(value = "") {
       );
   } catch {}
 
+  try {
+    output =
+      output.replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
+      );
+  } catch {}
+
   return output;
 }
 
 /* =========================================================
    PROTECTED PUBLIC TOKEN ROUTES
 ========================================================= */
+
+function normalizeProtectedRouteConfig(config = {}) {
+  const item =
+    safeObject(config);
+
+  const path =
+    normalizePathnameOnly(
+      item.path ||
+        item.route ||
+        item.canonicalPath ||
+        DEFAULT_ROUTE
+    );
+
+  const key =
+    safeText(
+      item.key ||
+        item.name ||
+        path
+          .replace(/^\/+/, "")
+          .replace(/[/-]/g, "_"),
+      ""
+    );
+
+  const windowKeys =
+    [
+      ...safeArray(item.windowKeys),
+      item.windowKey,
+      item.initialWindowKey,
+      item.runtimeKey,
+    ]
+      .map((value) =>
+        safeText(value, "")
+      )
+      .filter(Boolean);
+
+  const tokenParamNames =
+    safeArray(item.tokenParamNames)
+      .map((value) =>
+        safeText(value, "")
+      )
+      .filter(Boolean);
+
+  const scrubbedStateKeys =
+    [
+      ...safeArray(item.scrubbedStateKeys),
+      ...safeArray(item.scrubbedHistoryKeys),
+    ]
+      .map((value) =>
+        safeText(value, "")
+      )
+      .filter(Boolean);
+
+  return Object.freeze({
+    ...item,
+
+    key,
+    path,
+
+    windowKey:
+      windowKeys[0] || "",
+
+    windowKeys:
+      Object.freeze(windowKeys),
+
+    stateUrlKey:
+      item.stateUrlKey || "",
+
+    statePathKey:
+      item.statePathKey || "",
+
+    statePublicPathKey:
+      item.statePublicPathKey || "",
+
+    stateIsRouteKey:
+      item.stateIsRouteKey || "",
+
+    stateHasTokenKey:
+      item.stateHasTokenKey || "",
+
+    scrubbedStateKeys:
+      Object.freeze(scrubbedStateKeys),
+
+    tokenParamNames:
+      Object.freeze(tokenParamNames),
+  });
+}
+
+const PROTECTED_PUBLIC_TOKEN_ROUTES =
+  Object.freeze(
+    (
+      Array.isArray(CONSTANT_PUBLIC_TOKEN_ROUTES) &&
+      CONSTANT_PUBLIC_TOKEN_ROUTES.length
+        ? CONSTANT_PUBLIC_TOKEN_ROUTES
+        : FALLBACK_PUBLIC_TOKEN_ROUTES
+    )
+      .map((config) =>
+        normalizeProtectedRouteConfig(config)
+      )
+      .filter((config) =>
+        config.path &&
+        config.path !== DEFAULT_ROUTE
+      )
+  );
 
 function matchesProtectedRoute(config, pathOrUrl = "") {
   if (!config?.path) {
@@ -819,7 +1161,10 @@ function matchesProtectedRoute(config, pathOrUrl = "") {
 function getProtectedRouteConfig(value = "") {
   return (
     PROTECTED_PUBLIC_TOKEN_ROUTES.find((config) =>
-      matchesProtectedRoute(config, value)
+      matchesProtectedRoute(
+        config,
+        value
+      )
     ) || null
   );
 }
@@ -884,7 +1229,12 @@ function hasProtectedRouteToken(config, pathOrUrl = "") {
     return false;
   }
 
-  if (extractPathToken(config, raw)) {
+  if (
+    extractPathToken(
+      config,
+      raw
+    )
+  ) {
     return true;
   }
 
@@ -911,7 +1261,12 @@ function hasProtectedRouteToken(config, pathOrUrl = "") {
       const hashPath =
         normalizeHashRouterPath(parsed.hash);
 
-      if (extractPathToken(config, hashPath)) {
+      if (
+        extractPathToken(
+          config,
+          hashPath
+        )
+      ) {
         return true;
       }
 
@@ -1004,15 +1359,27 @@ export function isProtectedPublicTokenPath(pathOrUrl = "") {
 }
 
 export function isActivationPath(path = "") {
+  const config =
+    PROTECTED_PUBLIC_TOKEN_ROUTES.find((item) =>
+      item.key === "activation" ||
+      item.path === ACTIVATION_PATH
+    );
+
   return matchesProtectedRoute(
-    PROTECTED_PUBLIC_TOKEN_ROUTES[0],
+    config,
     path
   );
 }
 
 export function isResetConfirmPath(path = "") {
+  const config =
+    PROTECTED_PUBLIC_TOKEN_ROUTES.find((item) =>
+      item.key === "resetConfirm" ||
+      item.path === RESET_CONFIRM_PATH
+    );
+
   return matchesProtectedRoute(
-    PROTECTED_PUBLIC_TOKEN_ROUTES[1],
+    config,
     path
   );
 }
@@ -1056,7 +1423,8 @@ function setWindowValue(key = "", value = "", onlyIfMissing = true) {
       return true;
     }
 
-    window[key] = value;
+    window[key] =
+      value;
 
     return true;
   } catch {
@@ -1153,7 +1521,44 @@ function setStoredInitialUrl(config, value = "") {
   return wrote;
 }
 
-function captureInitialUrl() {
+function applyBootContextToCore(AppCore, patch = {}) {
+  const cleanPatch =
+    safeObject(patch);
+
+  if (!Object.keys(cleanPatch).length) {
+    return false;
+  }
+
+  try {
+    AppCore?.setState?.(
+      cleanPatch,
+      {
+        source:
+          "app:helpers:boot-context",
+        emit:
+          false,
+        emitState:
+          false,
+      }
+    );
+  } catch {}
+
+  try {
+    if (
+      AppCore?.state &&
+      typeof AppCore.state === "object"
+    ) {
+      Object.assign(
+        AppCore.state,
+        cleanPatch
+      );
+    }
+  } catch {}
+
+  return true;
+}
+
+export function captureInitialUrl(AppCore = null) {
   if (!isBrowser()) {
     return false;
   }
@@ -1172,44 +1577,77 @@ function captureInitialUrl() {
     setInitialUrl(href);
 
     for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
+      if (isProtectedTokenScrubbed(config)) {
+        continue;
+      }
+
       if (
         matchesProtectedRoute(config, href) &&
         hasProtectedRouteToken(config, href) &&
         !getStoredInitialUrl(config)
       ) {
+        const publicPath =
+          pathFromUrlLike(href);
+
+        const canonicalPath =
+          fallbackNormalizeCanonicalPath(publicPath);
+
+        const patch = {
+          [APP_STATE_KEYS?.bootProtectedInitialUrl || "bootProtectedInitialUrl"]:
+            href,
+
+          [APP_STATE_KEYS?.bootProtectedInitialPath || "bootProtectedInitialPath"]:
+            canonicalPath,
+
+          [APP_STATE_KEYS?.bootProtectedInitialPublicPath || "bootProtectedInitialPublicPath"]:
+            publicPath,
+
+          [APP_STATE_KEYS?.bootProtectedRouteKey || "bootProtectedRouteKey"]:
+            config.key,
+
+          [APP_STATE_KEYS?.bootIsPublicTokenRoute || "bootIsPublicTokenRoute"]:
+            true,
+
+          [APP_STATE_KEYS?.bootHasPublicToken || "bootHasPublicToken"]:
+            true,
+        };
+
+        if (config.stateUrlKey) {
+          patch[config.stateUrlKey] =
+            href;
+        }
+
+        if (config.statePathKey) {
+          patch[config.statePathKey] =
+            canonicalPath;
+        }
+
+        if (config.statePublicPathKey) {
+          patch[config.statePublicPathKey] =
+            publicPath;
+        }
+
+        if (config.stateIsRouteKey) {
+          patch[config.stateIsRouteKey] =
+            true;
+        }
+
+        if (config.stateHasTokenKey) {
+          patch[config.stateHasTokenKey] =
+            true;
+        }
+
         setStoredInitialUrl(
           config,
           href
         );
 
-        setBootContextPatch({
-          bootProtectedInitialUrl:
-            href,
+        setBootContextPatch(patch);
 
-          bootProtectedInitialPath:
-            pathFromUrlLike(href),
-
-          bootProtectedRouteKey:
-            config.key,
-
-          bootIsPublicTokenRoute:
-            true,
-
-          bootHasPublicToken:
-            true,
-
-          [config.stateUrlKey]:
-            href,
-
-          [config.statePathKey]:
-            pathFromUrlLike(href),
-
-          [config.stateIsRouteKey]:
-            true,
-
-          [config.stateHasTokenKey]:
-            true,
-        });
+        applyBootContextToCore(
+          AppCore,
+          patch
+        );
       }
     }
 
@@ -1237,13 +1675,15 @@ function getStateProtectedUrlCandidates(AppCore) {
   for (const config of PROTECTED_PUBLIC_TOKEN_ROUTES) {
     values.push(
       state[config.stateUrlKey],
-      state[config.statePathKey]
+      state[config.statePathKey],
+      state[config.statePublicPathKey]
     );
   }
 
   values.push(
-    state.bootProtectedInitialUrl,
-    state.bootProtectedInitialPath
+    state[APP_STATE_KEYS?.bootProtectedInitialUrl || "bootProtectedInitialUrl"],
+    state[APP_STATE_KEYS?.bootProtectedInitialPath || "bootProtectedInitialPath"],
+    state[APP_STATE_KEYS?.bootProtectedInitialPublicPath || "bootProtectedInitialPublicPath"]
   );
 
   const bootContext =
@@ -1252,10 +1692,13 @@ function getStateProtectedUrlCandidates(AppCore) {
   values.push(
     bootContext.bootProtectedInitialUrl,
     bootContext.bootProtectedInitialPath,
+    bootContext.bootProtectedInitialPublicPath,
     bootContext.bootActivationInitialUrl,
     bootContext.bootActivationInitialPath,
+    bootContext.bootActivationInitialPublicPath,
     bootContext.bootResetConfirmInitialUrl,
-    bootContext.bootResetConfirmInitialPath
+    bootContext.bootResetConfirmInitialPath,
+    bootContext.bootResetConfirmInitialPublicPath
   );
 
   return values
@@ -1309,7 +1752,7 @@ function isAnyProtectedTokenScrubbed() {
 ========================================================= */
 
 export function resolveProtectedInitialContext(AppCore = null) {
-  captureInitialUrl();
+  captureInitialUrl(AppCore);
 
   const candidates =
     [
@@ -1350,22 +1793,31 @@ export function resolveProtectedInitialContext(AppCore = null) {
       continue;
     }
 
-    const path =
-      pathFromUrlLike(candidate);
-
     const publicPath =
-      fallbackNormalizePath(path);
+      fallbackNormalizePath(
+        pathFromUrlLike(candidate)
+      );
 
     const canonicalPath =
-      fallbackNormalizeCanonicalPath(path);
+      fallbackNormalizeCanonicalPath(publicPath);
+
+    const token =
+      extractPathToken(
+        config,
+        candidate
+      );
 
     return {
       config,
+
       key:
         config.key || "",
 
-      path,
+      path:
+        canonicalPath,
+
       canonicalPath,
+
       publicPath,
 
       url:
@@ -1375,18 +1827,16 @@ export function resolveProtectedInitialContext(AppCore = null) {
         true,
 
       tokenInPath:
-        Boolean(
-          extractPathToken(
-            config,
-            candidate
-          )
-        ),
+        Boolean(token),
 
       scrubbed:
         false,
 
       redactedPath:
-        redactTokenInText(path),
+        redactTokenInText(canonicalPath),
+
+      redactedPublicPath:
+        redactTokenInText(publicPath),
 
       redactedUrl:
         redactTokenInText(candidate),
@@ -1422,6 +1872,9 @@ export function resolveProtectedInitialContext(AppCore = null) {
       isAnyProtectedTokenScrubbed(),
 
     redactedPath:
+      "",
+
+    redactedPublicPath:
       "",
 
     redactedUrl:
@@ -1499,7 +1952,7 @@ function shouldPreferBrowserPathOverState(AppCore) {
 ========================================================= */
 
 export function getCurrentPath(AppCore, Router = null) {
-  captureInitialUrl();
+  captureInitialUrl(AppCore);
 
   const protectedPath =
     getProtectedInitialPublicPath(AppCore);
@@ -1550,7 +2003,7 @@ export function getCurrentPath(AppCore, Router = null) {
 }
 
 export function getCurrentPublicPath(AppCore, Router = null) {
-  captureInitialUrl();
+  captureInitialUrl(AppCore);
 
   const protectedPath =
     getProtectedInitialPublicPath(AppCore);
@@ -1603,7 +2056,7 @@ export function getCurrentPublicPath(AppCore, Router = null) {
 }
 
 export function getCurrentCanonicalPath(AppCore, Router = null) {
-  captureInitialUrl();
+  captureInitialUrl(AppCore);
 
   const protectedContext =
     resolveProtectedInitialContext(AppCore);
@@ -1676,7 +2129,7 @@ export function escapeHtml(AppCore, value = "") {
 
   if (
     arguments.length === 1 &&
-    !isObject(AppCore)
+    !looksLikeAppCore(AppCore)
   ) {
     core =
       null;
@@ -1721,6 +2174,39 @@ export function ensureScope(AppCore, scope = DEFAULT_SCOPE) {
     }
   } catch {}
 
+  try {
+    if (
+      AppCore?.cleanup &&
+      canExtend(AppCore.cleanup)
+    ) {
+      if (!AppCore.cleanup.scopes) {
+        AppCore.cleanup.scopes = new Map();
+      }
+
+      if (
+        AppCore.cleanup.scopes instanceof Map &&
+        !AppCore.cleanup.scopes.has(finalScope)
+      ) {
+        AppCore.cleanup.scopes.set(
+          finalScope,
+          {
+            name:
+              finalScope,
+            disposers:
+              [],
+          }
+        );
+      }
+
+      return AppCore.cleanup.scopes instanceof Map
+        ? AppCore.cleanup.scopes.get(finalScope)
+        : {
+            name:
+              finalScope,
+          };
+    }
+  } catch {}
+
   return {
     name:
       finalScope,
@@ -1752,6 +2238,30 @@ export function clearScope(AppCore, scope = DEFAULT_SCOPE) {
     }
   } catch {}
 
+  try {
+    const scopes =
+      AppCore?.cleanup?.scopes;
+
+    if (
+      scopes instanceof Map &&
+      scopes.has(finalScope)
+    ) {
+      const scopeRef =
+        scopes.get(finalScope);
+
+      const disposers =
+        safeArray(scopeRef?.disposers);
+
+      for (const dispose of disposers.splice(0)) {
+        try {
+          dispose();
+        } catch {}
+      }
+
+      scopes.delete(finalScope);
+    }
+  } catch {}
+
   return true;
 }
 
@@ -1759,7 +2269,7 @@ export function clearScope(AppCore, scope = DEFAULT_SCOPE) {
    MODULES
 ========================================================= */
 
-export function registerModule(AppCore, name, moduleRef) {
+export function registerModule(AppCore, name, moduleRef, aliases = []) {
   const moduleName =
     safeText(name, "");
 
@@ -1771,7 +2281,19 @@ export function registerModule(AppCore, name, moduleRef) {
     return false;
   }
 
-  let registered =
+  const names =
+    Array.from(
+      new Set([
+        moduleName,
+        ...safeArray(aliases)
+          .map((alias) =>
+            safeText(alias, "")
+          )
+          .filter(Boolean),
+      ])
+    );
+
+  let anyRegistered =
     false;
 
   try {
@@ -1790,40 +2312,14 @@ export function registerModule(AppCore, name, moduleRef) {
     return false;
   }
 
-  try {
-    if (
-      isFunction(modules.has) &&
-      modules.has(moduleName)
-    ) {
-      return true;
-    }
-  } catch {}
+  for (const currentName of names) {
+    let registered =
+      false;
 
-  try {
-    if (isFunction(modules.register)) {
-      modules.register(
-        moduleName,
-        moduleRef,
-        {
-          replace:
-            true,
-          overwrite:
-            true,
-          source:
-            "app:helpers",
-        }
-      );
-
-      registered =
-        true;
-    }
-  } catch {}
-
-  if (!registered) {
     try {
-      if (isFunction(modules.set)) {
-        modules.set(
-          moduleName,
+      if (isFunction(modules.register)) {
+        modules.register(
+          currentName,
           moduleRef,
           {
             replace:
@@ -1839,18 +2335,61 @@ export function registerModule(AppCore, name, moduleRef) {
           true;
       }
     } catch {}
-  }
 
-  if (!registered) {
-    try {
-      if (canExtend(modules)) {
-        modules[moduleName] =
-          moduleRef;
+    if (!registered) {
+      try {
+        if (isFunction(modules.set)) {
+          modules.set(
+            currentName,
+            moduleRef,
+            {
+              replace:
+                true,
+              overwrite:
+                true,
+              source:
+                "app:helpers",
+            }
+          );
 
-        registered =
-          true;
-      }
-    } catch {}
+          registered =
+            true;
+        }
+      } catch {}
+    }
+
+    if (!registered) {
+      try {
+        if (canExtend(modules)) {
+          modules[currentName] =
+            moduleRef;
+
+          registered =
+            true;
+        }
+      } catch {}
+    }
+
+    if (!registered) {
+      try {
+        if (
+          AppCore?.registry?.modules &&
+          isFunction(AppCore.registry.modules.set)
+        ) {
+          AppCore.registry.modules.set(
+            currentName,
+            moduleRef
+          );
+
+          registered =
+            true;
+        }
+      } catch {}
+    }
+
+    anyRegistered =
+      anyRegistered ||
+      registered;
   }
 
   try {
@@ -1859,16 +2398,46 @@ export function registerModule(AppCore, name, moduleRef) {
       {
         name:
           moduleName,
+
+        aliases:
+          names.filter((item) =>
+            item !== moduleName
+          ),
       }
     );
   } catch {}
 
-  return registered;
+  return anyRegistered;
 }
 
 /* =========================================================
    EXTRA DEBUG HELPERS
 ========================================================= */
+
+function sanitizeBootContextForSnapshot(context = {}) {
+  const source =
+    safeObject(context);
+
+  const output =
+    {};
+
+  for (const [key, value] of Object.entries(source)) {
+    if (
+      /token|url|path|href/i.test(key) &&
+      typeof value === "string"
+    ) {
+      output[key] =
+        redactTokenInText(value);
+
+      continue;
+    }
+
+    output[key] =
+      value;
+  }
+
+  return output;
+}
 
 function getInitialUrlSnapshot() {
   const protectedRoutes =
@@ -1908,6 +2477,11 @@ function getInitialUrlSnapshot() {
         getBrowserHref()
       ),
 
+    browserPath:
+      redactTokenInText(
+        buildBrowserPath()
+      ),
+
     bootContext:
       safeClone(
         sanitizeBootContextForSnapshot(
@@ -1920,35 +2494,14 @@ function getInitialUrlSnapshot() {
   };
 }
 
-function sanitizeBootContextForSnapshot(context = {}) {
-  const source =
-    safeObject(context);
-
-  const output =
-    {};
-
-  for (const [key, value] of Object.entries(source)) {
-    if (
-      /token|url|path|href/i.test(key) &&
-      typeof value === "string"
-    ) {
-      output[key] =
-        redactTokenInText(value);
-      continue;
-    }
-
-    output[key] =
-      value;
-  }
-
-  return output;
-}
-
 export function getHelpersSnapshot(AppCore, Router = null) {
   const protectedContext =
     resolveProtectedInitialContext(AppCore);
 
   return {
+    version:
+      HELPERS_VERSION,
+
     path:
       redactTokenInText(
         getCurrentPath(
@@ -2002,18 +2555,16 @@ export function getHelpersSnapshot(AppCore, Router = null) {
       path:
         protectedContext.redactedPath,
 
-      url:
-        protectedContext.redactedUrl,
+      publicPath:
+        protectedContext.redactedPublicPath,
 
       canonicalPath:
         redactTokenInText(
           protectedContext.canonicalPath
         ),
 
-      publicPath:
-        redactTokenInText(
-          protectedContext.publicPath
-        ),
+      url:
+        protectedContext.redactedUrl,
     },
 
     hasCleanup:
@@ -2053,6 +2604,8 @@ try {
 ========================================================= */
 
 export default {
+  HELPERS_VERSION,
+
   getCurrentPath,
   getCurrentPublicPath,
   getCurrentCanonicalPath,
@@ -2061,11 +2614,15 @@ export default {
   normalizeCanonicalPath,
   stripUsernamePrefix,
 
+  isSafeInternalPath,
+  normalizeInternalPathTarget,
+
   isActivationPath,
   isResetConfirmPath,
   isProtectedPublicTokenPath,
   getProtectedInitialPublicPath,
   resolveProtectedInitialContext,
+  captureInitialUrl,
 
   redactTokenInText,
   escapeHtml,

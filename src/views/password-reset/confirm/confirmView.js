@@ -2,9 +2,9 @@
    Onion SPA - Reset Password Confirm View
    Archivo: src/views/password-reset/confirm/confirmView.js
 
-   FINAL PRO SYSTEM · RESET PASSWORD CONFIRM · 10/10
+   FINAL PRO SYSTEM · RESET PASSWORD CONFIRM · HARDENED · 10/10
 
-   Responsabilidades:
+   RESPONSABILIDADES:
    - montar la vista pública de confirmación de reset password
    - leer token desde query, path-token, hash-router, history.state o contexto router
    - capturar token antes de limpiar la URL
@@ -24,10 +24,13 @@
    - endpoint alineado con AUTH_ENDPOINTS.confirmPasswordReset
    - fallback API base a https://api.onionit.net
    - soporte /reset-password/confirm/<token>
+   - soporte hash router #/reset-password/confirm/<token>
+   - soporte tokens en router context/history.state
    - password manual obligatorio
    - sin autosubmit
    - sin token real en inputs hidden
    - navegación login robusta
+   - cleanup local + cleanup AppCore
 ========================================================= */
 
 import { AppCore } from "../../../core/index.js";
@@ -80,32 +83,16 @@ export const ConfirmResetPasswordView = (() => {
 
   const SCOPE = "view:reset-password-confirm";
 
-  const CONFIRM_ROUTE_PREFIX =
-    "/reset-password/confirm";
+  const CONFIRM_ROUTE_PREFIX = "/reset-password/confirm";
+  const DEFAULT_APP_NAME = "Onion Support";
+  const DEFAULT_LOGIN_PATH = "/login";
+  const DEFAULT_API_BASE_URL = "https://api.onionit.net";
+  const FALLBACK_CONFIRM_ENDPOINT = "/api/auth/reset-password-confirm";
 
-  const DEFAULT_APP_NAME =
-    "Onion Support";
+  const SUCCESS_REDIRECT_DELAY = 1800;
+  const SCRUB_TOKEN_FROM_URL_AFTER_CAPTURE = true;
 
-  const DEFAULT_LOGIN_PATH =
-    "/login";
-
-  const DEFAULT_API_BASE_URL =
-    "https://api.onionit.net";
-
-  const DEFAULT_CONFIRM_ENDPOINT =
-    AUTH_ENDPOINTS?.confirmPasswordReset ||
-    AUTH_ENDPOINTS?.resetPasswordConfirm ||
-    getConfirmPasswordResetEndpoint?.() ||
-    "/api/auth/reset-password-confirm";
-
-  const SUCCESS_REDIRECT_DELAY =
-    1800;
-
-  const SCRUB_TOKEN_FROM_URL_AFTER_CAPTURE =
-    true;
-
-  const TEMPLATE_TOKEN_SENTINEL =
-    "__captured_reset_password_token__";
+  const TEMPLATE_TOKEN_SENTINEL = "__captured_reset_password_token__";
 
   const TOKEN_PARAM_NAMES = Object.freeze([
     "token",
@@ -122,11 +109,42 @@ export const ConfirmResetPasswordView = (() => {
     "__token_captured__",
   ]);
 
+  const URL_FIELD_NAMES = Object.freeze([
+    "publicPath",
+    "requestedPath",
+    "path",
+    "href",
+    "url",
+    "redirectedFrom",
+    "redirectFrom",
+    "canonicalPath",
+    "fullPath",
+    "asPath",
+    "pathname",
+    "route",
+  ]);
+
+  const NESTED_CONTEXT_KEYS = Object.freeze([
+    "params",
+    "query",
+    "search",
+    "searchParams",
+    "route",
+    "state",
+    "location",
+    "meta",
+    "data",
+    "payload",
+  ]);
+
   /* =========================================================
      LOCAL STATE
   ========================================================= */
 
+  let mounted = false;
   let redirectTimerId = null;
+  let localBindingsCleanup = null;
+
   let isSubmitting = false;
   let isNavigatingAway = false;
 
@@ -153,11 +171,17 @@ export const ConfirmResetPasswordView = (() => {
   }
 
   function safeObject(value) {
-    return value &&
-      typeof value === "object" &&
-      !Array.isArray(value)
+    return value && typeof value === "object" && !Array.isArray(value)
       ? value
       : {};
+  }
+
+  function isPlainObject(value) {
+    return Boolean(
+      value &&
+        typeof value === "object" &&
+        !Array.isArray(value)
+    );
   }
 
   function isLikelyContainer(value) {
@@ -170,66 +194,50 @@ export const ConfirmResetPasswordView = (() => {
 
   function resolveDeps(arg1, arg2) {
     if (isLikelyContainer(arg1)) {
-      return arg2 &&
-        typeof arg2 === "object"
-        ? arg2
-        : {};
+      return arg2 && typeof arg2 === "object" ? arg2 : {};
     }
 
-    return arg1 &&
-      typeof arg1 === "object"
-      ? arg1
-      : {};
+    return arg1 && typeof arg1 === "object" ? arg1 : {};
   }
 
   function safeEmit(eventName, payload = {}) {
     try {
-      AppCore?.events?.emit?.(
-        eventName,
-        payload
-      );
+      AppCore?.events?.emit?.(eventName, payload);
     } catch {}
   }
 
   function safeLog(...args) {
     try {
-      AppCore?.utils?.log?.(
-        "[ConfirmResetPasswordView]",
-        ...args
-      );
-    } catch {}
-  }
-
-  function safeErrorLog(...args) {
-    try {
-      AppCore?.utils?.error?.(
-        "[ConfirmResetPasswordView]",
-        ...args
-      );
-    } catch {}
-
-    try {
-      console.error(
-        "[ConfirmResetPasswordView]",
-        ...args
-      );
+      AppCore?.utils?.log?.("[ConfirmResetPasswordView]", ...args);
     } catch {}
   }
 
   function safeWarnLog(...args) {
     try {
-      AppCore?.utils?.warn?.(
-        "[ConfirmResetPasswordView]",
-        ...args
-      );
+      AppCore?.utils?.warn?.("[ConfirmResetPasswordView]", ...args);
     } catch {}
 
     try {
-      console.warn(
-        "[ConfirmResetPasswordView]",
-        ...args
-      );
+      console.warn("[ConfirmResetPasswordView]", ...args);
     } catch {}
+  }
+
+  function safeErrorLog(...args) {
+    try {
+      AppCore?.utils?.error?.("[ConfirmResetPasswordView]", ...args);
+    } catch {}
+
+    try {
+      console.error("[ConfirmResetPasswordView]", ...args);
+    } catch {}
+  }
+
+  function getBaseOrigin() {
+    if (isBrowser() && window.location?.origin) {
+      return window.location.origin;
+    }
+
+    return "http://localhost";
   }
 
   function clearRedirectTimer() {
@@ -241,16 +249,36 @@ export const ConfirmResetPasswordView = (() => {
     redirectTimerId = null;
   }
 
-  function getBaseOrigin() {
-    if (
-      isBrowser() &&
-      window.location?.origin
-    ) {
-      return window.location.origin;
-    }
+  function runLocalBindingsCleanup() {
+    const cleanup = localBindingsCleanup;
+    localBindingsCleanup = null;
 
-    return "http://localhost";
+    try {
+      cleanup?.();
+    } catch {}
   }
+
+  function composeCleanup(cleanups = []) {
+    let done = false;
+
+    return () => {
+      if (done) {
+        return;
+      }
+
+      done = true;
+
+      for (const cleanup of cleanups) {
+        try {
+          cleanup?.();
+        } catch {}
+      }
+    };
+  }
+
+  /* =========================================================
+     PATH / REDACTION
+  ========================================================= */
 
   function normalizePathnameOnly(pathname = "/") {
     let value = String(pathname || "/")
@@ -266,27 +294,19 @@ export const ConfirmResetPasswordView = (() => {
       value = `/${value}`;
     }
 
-    if (
-      value.length > 1 &&
-      value.endsWith("/")
-    ) {
-      value =
-        value.replace(/\/+$/g, "") ||
-        "/";
+    if (value.length > 1 && value.endsWith("/")) {
+      value = value.replace(/\/+$/g, "") || "/";
     }
 
     return value;
   }
 
   function isResetConfirmPathname(pathname = "") {
-    const normalized =
-      normalizePathnameOnly(pathname);
+    const normalized = normalizePathnameOnly(pathname);
 
     return (
       normalized === CONFIRM_ROUTE_PREFIX ||
-      normalized.startsWith(
-        `${CONFIRM_ROUTE_PREFIX}/`
-      )
+      normalized.startsWith(`${CONFIRM_ROUTE_PREFIX}/`)
     );
   }
 
@@ -316,18 +336,13 @@ export const ConfirmResetPasswordView = (() => {
     }
 
     return {
-      publicPath:
-        redactResetTokenInText(ctx.publicPath),
-      requestedPath:
-        redactResetTokenInText(ctx.requestedPath),
-      path:
-        redactResetTokenInText(ctx.path),
-      href:
-        redactResetTokenInText(ctx.href),
-      url:
-        redactResetTokenInText(ctx.url),
-      redirectedFrom:
-        redactResetTokenInText(ctx.redirectedFrom),
+      publicPath: redactResetTokenInText(ctx.publicPath),
+      requestedPath: redactResetTokenInText(ctx.requestedPath),
+      path: redactResetTokenInText(ctx.path),
+      href: redactResetTokenInText(ctx.href),
+      url: redactResetTokenInText(ctx.url),
+      redirectedFrom: redactResetTokenInText(ctx.redirectedFrom),
+      canonicalPath: redactResetTokenInText(ctx.canonicalPath),
       hasContext: true,
     };
   }
@@ -336,16 +351,32 @@ export const ConfirmResetPasswordView = (() => {
      TOKEN EXTRACTION
   ========================================================= */
 
+  function isValidTokenCandidate(value = "") {
+    const token = safeText(value, "");
+
+    return Boolean(token && !TOKEN_SENTINELS.has(token));
+  }
+
+  function readTokenFieldsFromObject(value = {}) {
+    const obj = safeObject(value);
+
+    for (const key of TOKEN_PARAM_NAMES) {
+      if (isValidTokenCandidate(obj[key])) {
+        return safeText(obj[key], "");
+      }
+    }
+
+    return "";
+  }
+
   function getTokenFromSearchParams(search = "") {
     try {
-      const params =
-        new URLSearchParams(search || "");
+      const params = new URLSearchParams(search || "");
 
       for (const key of TOKEN_PARAM_NAMES) {
-        const value =
-          safeText(params.get(key), "");
+        const value = safeText(params.get(key), "");
 
-        if (value) {
+        if (isValidTokenCandidate(value)) {
           return value;
         }
       }
@@ -364,24 +395,21 @@ export const ConfirmResetPasswordView = (() => {
 
         if (
           !lower.includes("token") &&
-          !lower.includes("reset-password")
+          !lower.includes("reset-password") &&
+          !lower.includes("reset_password")
         ) {
           continue;
         }
 
-        const nestedToken =
-          extractTokenFromUrlLike(value);
+        const nestedToken = extractTokenFromUrlLike(value);
 
         if (nestedToken) {
           return nestedToken;
         }
 
         try {
-          const decoded =
-            decodeURIComponent(value);
-
-          const decodedToken =
-            extractTokenFromUrlLike(decoded);
+          const decoded = decodeURIComponent(value);
+          const decodedToken = extractTokenFromUrlLike(decoded);
 
           if (decodedToken) {
             return decodedToken;
@@ -395,29 +423,23 @@ export const ConfirmResetPasswordView = (() => {
 
   function extractTokenFromRoutePath(pathname = "") {
     try {
-      const normalized =
-        normalizePathnameOnly(pathname);
+      const normalized = normalizePathnameOnly(pathname);
+      const parts = normalized.split("/").filter(Boolean);
 
-      const parts =
-        normalized.split("/").filter(Boolean);
+      const resetIndex = parts.findIndex((part, index) => {
+        return (
+          String(part || "").toLowerCase() === "reset-password" &&
+          String(parts[index + 1] || "").toLowerCase() === "confirm"
+        );
+      });
 
-      const resetIndex = parts.findIndex(
-        (part, index) => {
-          return (
-            String(part || "").toLowerCase() === "reset-password" &&
-            String(parts[index + 1] || "").toLowerCase() === "confirm"
-          );
-        }
-      );
-
-      if (
-        resetIndex >= 0 &&
-        parts[resetIndex + 2]
-      ) {
-        return safeText(
+      if (resetIndex >= 0 && parts[resetIndex + 2]) {
+        const value = safeText(
           decodeURIComponent(parts[resetIndex + 2]),
           ""
         );
+
+        return isValidTokenCandidate(value) ? value : "";
       }
     } catch {}
 
@@ -432,28 +454,21 @@ export const ConfirmResetPasswordView = (() => {
     }
 
     try {
-      const cleanHash =
-        rawHash.replace(/^#\/?/, "/");
+      const cleanHash = rawHash.replace(/^#\/?/, "/");
 
-      const query =
-        cleanHash.includes("?")
-          ? cleanHash
-              .split("?")
-              .slice(1)
-              .join("?")
-          : "";
+      const query = cleanHash.includes("?")
+        ? cleanHash.split("?").slice(1).join("?")
+        : "";
 
-      const fromQuery =
-        getTokenFromSearchParams(
-          query ? `?${query}` : ""
-        );
+      const fromQuery = getTokenFromSearchParams(
+        query ? `?${query}` : ""
+      );
 
       if (fromQuery) {
         return fromQuery;
       }
 
-      const pathOnly =
-        cleanHash.split("?")[0] || "";
+      const pathOnly = cleanHash.split("?")[0] || "";
 
       return extractTokenFromRoutePath(pathOnly);
     } catch {
@@ -469,53 +484,131 @@ export const ConfirmResetPasswordView = (() => {
     }
 
     try {
-      const parsed =
-        new URL(raw, getBaseOrigin());
+      const parsed = new URL(raw, getBaseOrigin());
 
-      const fromSearch =
-        getTokenFromSearchParams(parsed.search);
+      const fromSearch = getTokenFromSearchParams(parsed.search);
 
       if (fromSearch) {
         return fromSearch;
       }
 
-      const fromHash =
-        extractTokenFromHash(parsed.hash);
+      const fromHash = extractTokenFromHash(parsed.hash);
 
       if (fromHash) {
         return fromHash;
       }
 
-      return extractTokenFromRoutePath(
-        parsed.pathname
-      );
+      return extractTokenFromRoutePath(parsed.pathname);
     } catch {
       try {
-        const query =
-          raw.includes("?")
-            ? raw
-                .split("?")
-                .slice(1)
-                .join("?")
-            : "";
+        const query = raw.includes("?")
+          ? raw.split("?").slice(1).join("?")
+          : "";
 
-        const fromQuery =
-          getTokenFromSearchParams(
-            query ? `?${query}` : ""
-          );
+        const fromQuery = getTokenFromSearchParams(
+          query ? `?${query}` : ""
+        );
 
         if (fromQuery) {
           return fromQuery;
         }
 
-        const pathOnly =
-          raw.split("?")[0]?.split("#")[0] ||
-          raw;
+        const fromHash = raw.includes("#")
+          ? extractTokenFromHash(`#${raw.split("#").slice(1).join("#")}`)
+          : "";
+
+        if (fromHash) {
+          return fromHash;
+        }
+
+        const pathOnly = raw.split("?")[0]?.split("#")[0] || raw;
 
         return extractTokenFromRoutePath(pathOnly);
       } catch {
         return "";
       }
+    }
+  }
+
+  function extractTokenFromStructuredObject(value = null, depth = 0, seen = null) {
+    if (!value || depth > 4) {
+      return "";
+    }
+
+    if (!seen) {
+      seen = new WeakSet();
+    }
+
+    if (typeof URLSearchParams !== "undefined" && value instanceof URLSearchParams) {
+      return getTokenFromSearchParams(`?${value.toString()}`);
+    }
+
+    if (typeof value === "string") {
+      return extractTokenFromUrlLike(value);
+    }
+
+    if (!isPlainObject(value)) {
+      return "";
+    }
+
+    if (seen.has(value)) {
+      return "";
+    }
+
+    seen.add(value);
+
+    const direct = readTokenFieldsFromObject(value);
+
+    if (direct) {
+      return direct;
+    }
+
+    for (const field of URL_FIELD_NAMES) {
+      const candidate = safeText(value[field], "");
+
+      if (!candidate) {
+        continue;
+      }
+
+      const fromUrl = extractTokenFromUrlLike(candidate);
+
+      if (fromUrl) {
+        return fromUrl;
+      }
+    }
+
+    for (const key of NESTED_CONTEXT_KEYS) {
+      const nested = value[key];
+
+      if (!nested) {
+        continue;
+      }
+
+      const nestedToken = extractTokenFromStructuredObject(
+        nested,
+        depth + 1,
+        seen
+      );
+
+      if (nestedToken) {
+        return nestedToken;
+      }
+    }
+
+    return "";
+  }
+
+  function getHistoryStateObject() {
+    if (!isBrowser()) {
+      return null;
+    }
+
+    try {
+      return window.history?.state && typeof window.history.state === "object"
+        ? window.history.state
+        : null;
+    } catch {
+      return null;
     }
   }
 
@@ -529,40 +622,37 @@ export const ConfirmResetPasswordView = (() => {
       ctx.href,
       ctx.url,
       ctx.redirectedFrom,
+      ctx.redirectFrom,
+      ctx.canonicalPath,
+      ctx.fullPath,
+      ctx.asPath,
       ctx.route?.publicPath,
       ctx.route?.path,
+      ctx.route?.fullPath,
+      ctx.route?.asPath,
     ]
       .map((value) => safeText(value, ""))
       .filter(Boolean);
   }
 
   function getHistoryUrlCandidates() {
-    if (!isBrowser()) {
+    const state = getHistoryStateObject();
+
+    if (!state) {
       return [];
     }
 
-    try {
-      const historyState =
-        window.history?.state &&
-        typeof window.history.state === "object"
-          ? window.history.state
-          : null;
-
-      if (!historyState) {
-        return [];
-      }
-
-      return [
-        historyState.publicPath,
-        historyState.path,
-        historyState.requestedPath,
-        historyState.url,
-      ]
-        .map((value) => safeText(value, ""))
-        .filter(Boolean);
-    } catch {
-      return [];
-    }
+    return [
+      state.publicPath,
+      state.path,
+      state.requestedPath,
+      state.url,
+      state.canonicalPath,
+      state.fullPath,
+      state.asPath,
+    ]
+      .map((value) => safeText(value, ""))
+      .filter(Boolean);
   }
 
   function getWindowUrlCandidates() {
@@ -577,9 +667,7 @@ export const ConfirmResetPasswordView = (() => {
     } catch {}
 
     try {
-      urls.push(
-        window.__ONION_RESET_PASSWORD_INITIAL_URL__
-      );
+      urls.push(window.__ONION_RESET_PASSWORD_INITIAL_URL__);
     } catch {}
 
     try {
@@ -606,12 +694,22 @@ export const ConfirmResetPasswordView = (() => {
   }
 
   function extractTokenFromContext(context = null) {
-    const candidates =
-      getInitialResetUrlCandidates(context);
+    const directContextToken = extractTokenFromStructuredObject(context);
+
+    if (directContextToken) {
+      return directContextToken;
+    }
+
+    const historyToken = extractTokenFromStructuredObject(getHistoryStateObject());
+
+    if (historyToken) {
+      return historyToken;
+    }
+
+    const candidates = getInitialResetUrlCandidates(context);
 
     for (const candidate of candidates) {
-      const token =
-        extractTokenFromUrlLike(candidate);
+      const token = extractTokenFromUrlLike(candidate);
 
       if (token) {
         return token;
@@ -621,17 +719,35 @@ export const ConfirmResetPasswordView = (() => {
     return "";
   }
 
+  function captureStableToken(context = {}) {
+    const fromContextToken = safeText(context?.token, "");
+
+    if (isValidTokenCandidate(fromContextToken)) {
+      stableToken = fromContextToken;
+      return stableToken;
+    }
+
+    const extractedToken = extractTokenFromContext(context);
+
+    if (isValidTokenCandidate(extractedToken)) {
+      stableToken = extractedToken;
+    }
+
+    /*
+      Si ya capturamos token y la URL ya fue limpiada,
+      no lo perdemos en rerenders posteriores.
+    */
+    return stableToken;
+  }
+
   function clearSensitiveInitialUrlCache() {
     if (!isBrowser()) {
       return false;
     }
 
     try {
-      if (
-        window.__ONION_RESET_PASSWORD_INITIAL_URL__
-      ) {
-        window.__ONION_RESET_PASSWORD_INITIAL_URL__ =
-          "";
+      if (window.__ONION_RESET_PASSWORD_INITIAL_URL__) {
+        window.__ONION_RESET_PASSWORD_INITIAL_URL__ = "";
       }
 
       if (window.__ONION_INITIAL_URL__) {
@@ -640,9 +756,7 @@ export const ConfirmResetPasswordView = (() => {
           getBaseOrigin()
         );
 
-        if (
-          isResetConfirmPathname(parsed.pathname)
-        ) {
+        if (isResetConfirmPathname(parsed.pathname)) {
           window.__ONION_INITIAL_URL__ =
             `${window.location.origin}${CONFIRM_ROUTE_PREFIX}`;
         }
@@ -651,8 +765,7 @@ export const ConfirmResetPasswordView = (() => {
       return true;
     } catch {
       try {
-        window.__ONION_RESET_PASSWORD_INITIAL_URL__ =
-          "";
+        window.__ONION_RESET_PASSWORD_INITIAL_URL__ = "";
       } catch {}
 
       return false;
@@ -660,11 +773,7 @@ export const ConfirmResetPasswordView = (() => {
   }
 
   function scrubResetTokenFromUrl() {
-    if (!SCRUB_TOKEN_FROM_URL_AFTER_CAPTURE) {
-      return false;
-    }
-
-    if (!isBrowser()) {
+    if (!SCRUB_TOKEN_FROM_URL_AFTER_CAPTURE || !isBrowser()) {
       return false;
     }
 
@@ -676,17 +785,11 @@ export const ConfirmResetPasswordView = (() => {
         return false;
       }
 
-      const currentUrl =
-        new URL(window.location.href);
-
-      const hashPath =
-        safeText(currentUrl.hash, "")
-          .replace(/^#\/?/, "/");
+      const currentUrl = new URL(window.location.href);
+      const hashPath = safeText(currentUrl.hash, "").replace(/^#\/?/, "/");
 
       const isResetUrl =
-        isResetConfirmPathname(
-          currentUrl.pathname
-        ) ||
+        isResetConfirmPathname(currentUrl.pathname) ||
         isResetConfirmPathname(hashPath);
 
       if (!isResetUrl) {
@@ -696,29 +799,34 @@ export const ConfirmResetPasswordView = (() => {
       const cleanPath = CONFIRM_ROUTE_PREFIX;
 
       const currentState =
-        window.history.state &&
-        typeof window.history.state === "object"
+        window.history.state && typeof window.history.state === "object"
           ? {
               ...window.history.state,
               path: cleanPath,
               publicPath: cleanPath,
               canonicalPath: cleanPath,
+              requestedPath: cleanPath,
               searchAndHash: "",
               scrubbedResetPasswordToken: true,
+              hasResetPasswordToken: Boolean(stableToken),
+              token: undefined,
+              resetToken: undefined,
+              passwordResetToken: undefined,
+              reset_password_token: undefined,
+              code: undefined,
+              t: undefined,
             }
           : {
               path: cleanPath,
               publicPath: cleanPath,
               canonicalPath: cleanPath,
+              requestedPath: cleanPath,
               searchAndHash: "",
               scrubbedResetPasswordToken: true,
+              hasResetPasswordToken: Boolean(stableToken),
             };
 
-      window.history.replaceState(
-        currentState,
-        "",
-        cleanPath
-      );
+      window.history.replaceState(currentState, "", cleanPath);
 
       try {
         AppCore?.setRoute?.(cleanPath);
@@ -733,7 +841,14 @@ export const ConfirmResetPasswordView = (() => {
           route: cleanPath,
           publicPath: cleanPath,
         });
-      } catch {}
+      } catch {
+        try {
+          if (AppCore?.state) {
+            AppCore.state.route = cleanPath;
+            AppCore.state.publicPath = cleanPath;
+          }
+        } catch {}
+      }
 
       clearSensitiveInitialUrlCache();
 
@@ -744,17 +859,17 @@ export const ConfirmResetPasswordView = (() => {
   }
 
   function resolveStableToken(formToken = "") {
-    const candidate =
-      safeText(formToken, "");
+    const candidate = safeText(formToken, "");
 
-    if (
-      candidate &&
-      !TOKEN_SENTINELS.has(candidate)
-    ) {
+    if (isValidTokenCandidate(candidate)) {
       return candidate;
     }
 
     return stableToken;
+  }
+
+  function getTemplateToken() {
+    return stableToken ? TEMPLATE_TOKEN_SENTINEL : "";
   }
 
   /* =========================================================
@@ -795,15 +910,11 @@ export const ConfirmResetPasswordView = (() => {
 
       topbarViewContainer:
         AppCore?.dom?.topbarViewContainer ||
-        document.getElementById(
-          "topbarview-container"
-        ),
+        document.getElementById("topbarview-container"),
 
       tableheadContainer:
         AppCore?.dom?.tableheadContainer ||
-        document.getElementById(
-          "tablehead-container"
-        ),
+        document.getElementById("tablehead-container"),
     };
   }
 
@@ -825,48 +936,30 @@ export const ConfirmResetPasswordView = (() => {
       tableheadContainer,
     } = getShellElements();
 
-    document.body.classList.toggle(
-      "auth-screen",
-      enabled
-    );
-
-    document.body.classList.toggle(
-      "route-auth",
-      enabled
-    );
-
-    document.body.classList.toggle(
-      "route-shell-hidden",
-      enabled
-    );
-
-    document.body.classList.toggle(
-      "login-no-scroll",
-      enabled
-    );
-
-    document.body.dataset.authView =
-      enabled ? "reset-password-confirm" : "";
+    document.body.classList.toggle("auth-screen", enabled);
+    document.body.classList.toggle("route-auth", enabled);
+    document.body.classList.toggle("route-shell-hidden", enabled);
+    document.body.classList.toggle("login-no-scroll", enabled);
 
     if (enabled) {
-      document.documentElement.style.overflow =
-        "hidden";
-      document.body.style.overflow =
-        "hidden";
+      document.body.dataset.authView = "reset-password-confirm";
+      document.documentElement.style.overflow = "hidden";
+      document.body.style.overflow = "hidden";
     } else {
-      document.documentElement.style.overflow =
-        "";
+      try {
+        delete document.body.dataset.authView;
+      } catch {
+        document.body.dataset.authView = "";
+      }
+
+      document.documentElement.style.overflow = "";
       document.body.style.overflow = "";
     }
 
     if (sidebar) sidebar.hidden = enabled;
     if (topbar) topbar.hidden = enabled;
-    if (topbarViewContainer) {
-      topbarViewContainer.hidden = enabled;
-    }
-    if (tableheadContainer) {
-      tableheadContainer.hidden = enabled;
-    }
+    if (topbarViewContainer) topbarViewContainer.hidden = enabled;
+    if (tableheadContainer) tableheadContainer.hidden = enabled;
 
     try {
       AppCore?.setShellVisibility?.(!enabled);
@@ -903,6 +996,7 @@ export const ConfirmResetPasswordView = (() => {
     }
 
     loader.hidden = true;
+    loader.setAttribute("aria-hidden", "true");
     loader.style.display = "none";
     loader.style.opacity = "0";
     loader.style.visibility = "hidden";
@@ -923,6 +1017,7 @@ export const ConfirmResetPasswordView = (() => {
     }
 
     loader.hidden = false;
+    loader.setAttribute("aria-hidden", "true");
     loader.style.display = "";
     loader.style.opacity = "";
     loader.style.visibility = "";
@@ -933,16 +1028,34 @@ export const ConfirmResetPasswordView = (() => {
      API URL
   ========================================================= */
 
+  function getDefaultConfirmEndpoint() {
+    let dynamicEndpoint = "";
+
+    try {
+      if (typeof getConfirmPasswordResetEndpoint === "function") {
+        dynamicEndpoint = getConfirmPasswordResetEndpoint();
+      }
+    } catch {}
+
+    return safeText(
+      AUTH_ENDPOINTS?.confirmPasswordReset ||
+        AUTH_ENDPOINTS?.resetPasswordConfirm ||
+        AUTH_ENDPOINTS?.passwordResetConfirm ||
+        dynamicEndpoint ||
+        FALLBACK_CONFIRM_ENDPOINT,
+      FALLBACK_CONFIRM_ENDPOINT
+    );
+  }
+
   function getApiBase() {
-    const globalBase =
-      isBrowser()
-        ? (
-            window.ONION_API_BASE_URL ||
-            window.ONION_API_BASE ||
-            window.API_BASE_URL ||
-            ""
-          )
-        : "";
+    const globalBase = isBrowser()
+      ? (
+          window.ONION_API_BASE_URL ||
+          window.ONION_API_BASE ||
+          window.API_BASE_URL ||
+          ""
+        )
+      : "";
 
     return safeText(
       AppCore?.config?.apiBase ||
@@ -956,47 +1069,40 @@ export const ConfirmResetPasswordView = (() => {
   }
 
   function getConfirmEndpoint() {
-    const globalEndpoint =
-      isBrowser()
-        ? window.ONION_RESET_PASSWORD_CONFIRM_ENDPOINT
-        : "";
+    const globalEndpoint = isBrowser()
+      ? window.ONION_RESET_PASSWORD_CONFIRM_ENDPOINT
+      : "";
 
     return safeText(
       AppCore?.config?.resetPasswordConfirmEndpoint ||
         AppCore?.config?.confirmPasswordResetEndpoint ||
         AppCore?.config?.authResetPasswordConfirmEndpoint ||
         globalEndpoint ||
-        DEFAULT_CONFIRM_ENDPOINT,
-      DEFAULT_CONFIRM_ENDPOINT
+        getDefaultConfirmEndpoint(),
+      FALLBACK_CONFIRM_ENDPOINT
     );
   }
 
   function joinApiUrl(base = "", endpoint = "") {
-    const cleanEndpoint =
-      safeText(endpoint, DEFAULT_CONFIRM_ENDPOINT);
+    const cleanEndpoint = safeText(endpoint, getConfirmEndpoint());
 
     if (/^https?:\/\//i.test(cleanEndpoint)) {
       return cleanEndpoint;
     }
 
-    const cleanBase =
-      safeText(base, DEFAULT_API_BASE_URL)
-        .replace(/\/+$/g, "");
+    const cleanBase = safeText(base, DEFAULT_API_BASE_URL).replace(/\/+$/g, "");
 
-    let path =
-      cleanEndpoint.startsWith("/")
-        ? cleanEndpoint
-        : `/${cleanEndpoint}`;
+    let path = cleanEndpoint.startsWith("/")
+      ? cleanEndpoint
+      : `/${cleanEndpoint}`;
 
     /*
       Soporta apiBase:
       - https://api.onionit.net
       - https://api.onionit.net/api
+      - /api
     */
-    if (
-      cleanBase.endsWith("/api") &&
-      path.startsWith("/api/")
-    ) {
+    if (cleanBase.endsWith("/api") && path.startsWith("/api/")) {
       path = path.replace(/^\/api/i, "");
     }
 
@@ -1015,46 +1121,37 @@ export const ConfirmResetPasswordView = (() => {
   ========================================================= */
 
   async function requestConfirmResetPassword(payload = {}) {
-    const token =
-      safeText(payload?.token, "");
+    const token = safeText(payload?.token, "");
 
-    const password =
-      stringValue(
-        payload?.password ||
-          payload?.newPassword ||
-          "",
-        ""
-      );
+    const password = stringValue(
+      payload?.password ||
+        payload?.newPassword ||
+        "",
+      ""
+    );
 
-    const confirmPassword =
-      stringValue(
-        payload?.confirmPassword ||
-          payload?.passwordConfirm ||
-          payload?.repeatPassword ||
-          "",
-        ""
-      );
+    const confirmPassword = stringValue(
+      payload?.confirmPassword ||
+        payload?.passwordConfirm ||
+        payload?.repeatPassword ||
+        "",
+      ""
+    );
 
     if (!token) {
-      const err = new Error(
-        "El enlace no es válido o falta el token."
-      );
+      const err = new Error("El enlace no es válido o falta el token.");
       err.code = "RESET_TOKEN_MISSING";
       throw err;
     }
 
     if (!password.trim()) {
-      const err = new Error(
-        "Introduce una contraseña nueva."
-      );
+      const err = new Error("Introduce una contraseña nueva.");
       err.code = "RESET_PASSWORD_MISSING";
       throw err;
     }
 
     if (password !== confirmPassword) {
-      const err = new Error(
-        "Las contraseñas no coinciden."
-      );
+      const err = new Error("Las contraseñas no coinciden.");
       err.code = "RESET_PASSWORD_MISMATCH";
       throw err;
     }
@@ -1084,13 +1181,18 @@ export const ConfirmResetPasswordView = (() => {
       hasPassword: Boolean(password),
     });
 
+    if (!isBrowser() || typeof fetch !== "function") {
+      const err = new Error("Fetch no está disponible en este entorno.");
+      err.code = "FETCH_UNAVAILABLE";
+      throw err;
+    }
+
     const response = await fetch(url, {
       method: "POST",
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        "X-Onion-Public-Action":
-          "reset-password-confirm",
+        "X-Onion-Public-Action": "reset-password-confirm",
       },
       credentials: "include",
       cache: "no-store",
@@ -1108,14 +1210,12 @@ export const ConfirmResetPasswordView = (() => {
     }
 
     try {
-      data = rawText
-        ? JSON.parse(rawText)
-        : null;
+      data = rawText ? JSON.parse(rawText) : null;
     } catch {
       data = null;
     }
 
-    if (!response.ok || data?.ok === false) {
+    if (!response.ok || data?.ok === false || data?.success === false) {
       const code =
         data?.code ||
         data?.error ||
@@ -1124,6 +1224,7 @@ export const ConfirmResetPasswordView = (() => {
       const err = new Error(
         safeText(
           data?.message ||
+            data?.mensaje ||
             data?.error ||
             `HTTP_${response.status}`,
           "No se pudo actualizar la contraseña."
@@ -1131,8 +1232,7 @@ export const ConfirmResetPasswordView = (() => {
       );
 
       err.status = response.status;
-      err.statusText =
-        response.statusText || "";
+      err.statusText = response.statusText || "";
       err.code = code;
       err.data = data;
       err.endpoint = url;
@@ -1143,6 +1243,7 @@ export const ConfirmResetPasswordView = (() => {
 
     return data || {
       ok: true,
+      success: true,
       message: DEFAULT_SUCCESS_MESSAGE,
     };
   }
@@ -1150,12 +1251,10 @@ export const ConfirmResetPasswordView = (() => {
   function resolveExecutor(deps = {}) {
     /*
       Por defecto usamos fetch directo.
-      Evitamos AppCore.http/Auth para no heredar interceptores,
-      Authorization headers, baseURL incorrecta o mutaciones de body.
+      Evita interceptores, Authorization headers, baseURL incorrecta
+      o mutaciones de body en AppCore.http/Auth.
     */
-    if (
-      deps.useInjectedExecutor === true
-    ) {
+    if (deps.useInjectedExecutor === true) {
       const candidates = [
         deps.onSubmit,
         deps.submitConfirmReset,
@@ -1178,10 +1277,7 @@ export const ConfirmResetPasswordView = (() => {
   ========================================================= */
 
   function normalizePath(path = DEFAULT_LOGIN_PATH) {
-    if (
-      typeof AppCore?.utils?.normalizePath ===
-      "function"
-    ) {
+    if (typeof AppCore?.utils?.normalizePath === "function") {
       try {
         return AppCore.utils.normalizePath(path);
       } catch {}
@@ -1216,10 +1312,7 @@ export const ConfirmResetPasswordView = (() => {
       return;
     }
 
-    if (
-      typeof AppCore?.router?.navigate ===
-      "function"
-    ) {
+    if (typeof AppCore?.router?.navigate === "function") {
       AppCore.router.navigate(target, {
         replaceState: true,
         force: true,
@@ -1227,9 +1320,7 @@ export const ConfirmResetPasswordView = (() => {
       return;
     }
 
-    if (
-      typeof AppCore?.navigate === "function"
-    ) {
+    if (typeof AppCore?.navigate === "function") {
       AppCore.navigate(target);
       return;
     }
@@ -1246,13 +1337,9 @@ export const ConfirmResetPasswordView = (() => {
       );
 
       try {
-        window.dispatchEvent(
-          new PopStateEvent("popstate")
-        );
+        window.dispatchEvent(new PopStateEvent("popstate"));
       } catch {
-        window.dispatchEvent(
-          new Event("popstate")
-        );
+        window.dispatchEvent(new Event("popstate"));
       }
 
       return;
@@ -1268,22 +1355,25 @@ export const ConfirmResetPasswordView = (() => {
 
     clearRedirectTimer();
 
-    const safeDelay =
-      Math.max(0, Number(delay) || 0);
+    const safeDelay = Math.max(0, Number(delay) || 0);
 
     if (safeDelay <= 0) {
       navigateTo(path);
       return;
     }
 
-    redirectTimerId =
-      window.setTimeout(() => {
-        navigateTo(path);
-      }, safeDelay);
+    redirectTimerId = window.setTimeout(() => {
+      navigateTo(path);
+    }, safeDelay);
   }
 
   function emitRouteRendered() {
     safeEmit("app:route:rendered", {
+      route: CONFIRM_ROUTE_PREFIX,
+      view: "reset-password-confirm",
+    });
+
+    safeEmit("router:rendered", {
       route: CONFIRM_ROUTE_PREFIX,
       view: "reset-password-confirm",
     });
@@ -1295,6 +1385,7 @@ export const ConfirmResetPasswordView = (() => {
 
   function destroyViewState() {
     clearRedirectTimer();
+    runLocalBindingsCleanup();
 
     try {
       AppCore?.cleanup?.run?.(SCOPE);
@@ -1305,20 +1396,11 @@ export const ConfirmResetPasswordView = (() => {
      RENDER
   ========================================================= */
 
-  function getTemplateToken() {
-    return stableToken
-      ? TEMPLATE_TOKEN_SENTINEL
-      : "";
-  }
-
   function runRender(deps = {}) {
     const container = getContainer();
 
     if (!container) {
-      safeWarnLog(
-        "No existe #view-container."
-      );
-
+      safeWarnLog("No existe #view-container.");
       forceHideGlobalLoader();
 
       return {
@@ -1327,6 +1409,7 @@ export const ConfirmResetPasswordView = (() => {
       };
     }
 
+    mounted = true;
     isSubmitting = false;
     isNavigatingAway = false;
 
@@ -1339,13 +1422,10 @@ export const ConfirmResetPasswordView = (() => {
     } catch {}
 
     try {
-      AppCore?.setDocumentTitle?.(
-        "Nueva contraseña"
-      );
+      AppCore?.setDocumentTitle?.("Nueva contraseña");
     } catch {
       if (isBrowser()) {
-        document.title =
-          "Nueva contraseña · Onion Support";
+        document.title = "Nueva contraseña · Onion Support";
       }
     }
 
@@ -1353,14 +1433,9 @@ export const ConfirmResetPasswordView = (() => {
       safeText(AppCore?.config?.appName, "") ||
       DEFAULT_APP_NAME;
 
-    lastContext =
-      sanitizeContextForState(deps);
+    lastContext = sanitizeContextForState(deps);
 
-    const capturedToken =
-      safeText(deps.token, "") ||
-      extractTokenFromContext(deps);
-
-    stableToken = capturedToken;
+    captureStableToken(deps);
 
     const urlScrubbed = stableToken
       ? scrubResetTokenFromUrl()
@@ -1378,18 +1453,15 @@ export const ConfirmResetPasswordView = (() => {
 
       /*
         No pasamos token real al DOM.
-        El submit usa stableToken en memoria.
+        El submit recupera stableToken desde memoria.
       */
       token: getTemplateToken(),
 
       hasToken: Boolean(stableToken),
       tokenCaptured: Boolean(stableToken),
 
-      heroEyebrow:
-        "ONION SUPPORT · NUEVA CONTRASEÑA",
-
-      heroTitle:
-        "Configura una contraseña nueva de forma segura",
+      heroEyebrow: "ONION SUPPORT · NUEVA CONTRASEÑA",
+      heroTitle: "Configura una contraseña nueva de forma segura",
 
       bullets: [
         "Enlace temporal validado para cambio de contraseña",
@@ -1398,21 +1470,17 @@ export const ConfirmResetPasswordView = (() => {
       ],
 
       title: "Crear nueva contraseña",
-
-      subtitle:
-        `Define una contraseña nueva para tu cuenta de ${appName}`,
-
-      submitLabel:
-        "Actualizar contraseña",
-
-      backLabel:
-        "Volver al acceso",
-
-      backHref:
-        DEFAULT_LOGIN_PATH,
+      subtitle: `Define una contraseña nueva para tu cuenta de ${appName}`,
+      submitLabel: "Actualizar contraseña",
+      backLabel: "Volver al acceso",
+      backHref: DEFAULT_LOGIN_PATH,
 
       ...deps,
 
+      /*
+        Blindaje final: aunque deps.token venga con valor real,
+        nunca llega al template.
+      */
       token: getTemplateToken(),
     });
 
@@ -1436,21 +1504,18 @@ export const ConfirmResetPasswordView = (() => {
     }
 
     const scope =
-      AppCore?.cleanup?.scope?.(SCOPE);
+      AppCore?.cleanup?.scope?.(SCOPE) ||
+      SCOPE;
 
     const container = getContainer();
     const refs = getConfirmRefs(container);
 
     if (
-      !scope ||
       !refs?.form ||
       !refs?.passwordInput ||
       !refs?.confirmPasswordInput
     ) {
-      safeWarnLog(
-        "Nodos críticos ausentes."
-      );
-
+      safeWarnLog("Nodos críticos ausentes.");
       forceHideGlobalLoader();
       return;
     }
@@ -1461,8 +1526,7 @@ export const ConfirmResetPasswordView = (() => {
 
     toast.init?.();
 
-    const executeConfirm =
-      resolveExecutor(deps);
+    const executeConfirm = resolveExecutor(deps);
 
     const submitLabel =
       safeText(deps.submitLabel, "") ||
@@ -1481,8 +1545,7 @@ export const ConfirmResetPasswordView = (() => {
     forceHideGlobalLoader();
 
     if (!stableToken) {
-      const message =
-        "El enlace no es válido o falta el token.";
+      const message = "El enlace no es válido o falta el token.";
 
       setGlobalConfirmError(refs, message);
       toast.error?.(message);
@@ -1491,67 +1554,54 @@ export const ConfirmResetPasswordView = (() => {
     const onSubmit = async (event) => {
       event.preventDefault();
 
-      if (
-        isSubmitting ||
-        isNavigatingAway
-      ) {
+      if (isSubmitting || isNavigatingAway) {
         return;
       }
 
       clearConfirmErrors(refs);
       toast.dismiss?.();
 
-      const formState =
-        readConfirmFormState(refs);
+      const formState = readConfirmFormState(refs);
 
-      const submitToken =
-        resolveStableToken(formState.token);
+      const submitToken = resolveStableToken(formState.token);
 
-      const password =
-        stringValue(
-          formState.newPassword ||
-            formState.password ||
-            "",
-          ""
-        );
+      const password = stringValue(
+        formState.newPassword ||
+          formState.password ||
+          "",
+        ""
+      );
 
-      const confirmPassword =
-        stringValue(
-          formState.confirmPassword ||
-            formState.passwordConfirm ||
-            "",
-          ""
-        );
+      const confirmPassword = stringValue(
+        formState.confirmPassword ||
+          formState.passwordConfirm ||
+          "",
+        ""
+      );
 
-      const payload =
-        createConfirmPayload({
-          token: submitToken,
-          password,
-          newPassword: password,
-          confirmPassword,
-          passwordConfirm: confirmPassword,
-        });
+      const payload = createConfirmPayload({
+        token: submitToken,
+        password,
+        newPassword: password,
+        confirmPassword,
+        passwordConfirm: confirmPassword,
+      });
 
-      const errors =
-        validateConfirmPayload(payload);
+      const errors = validateConfirmPayload(payload);
 
       if (!submitToken) {
-        errors.token =
-          "El enlace no es válido o falta el token.";
+        errors.token = "El enlace no es válido o falta el token.";
       }
 
       if (Object.keys(errors).length > 0) {
         const firstError =
-          getFirstConfirmError(errors);
+          getFirstConfirmError(errors) ||
+          "Revisa la nueva contraseña.";
 
         applyConfirmErrors(refs, errors);
-
-        setGlobalConfirmError(
-          refs,
-          firstError
-        );
-
+        setGlobalConfirmError(refs, firstError);
         toast.error?.(firstError);
+
         return;
       }
 
@@ -1565,19 +1615,15 @@ export const ConfirmResetPasswordView = (() => {
       let loadingId = null;
 
       try {
-        loadingId =
-          toast.loading?.(
-            "Actualizando contraseña...",
-            {
-              persist: true,
-            }
-          );
+        loadingId = toast.loading?.(
+          "Actualizando contraseña...",
+          {
+            persist: true,
+          }
+        );
 
-        const rawResult =
-          await executeConfirm(payload);
-
-        const result =
-          normalizeConfirmResult(rawResult);
+        const rawResult = await executeConfirm(payload);
+        const result = normalizeConfirmResult(rawResult);
 
         toast.dismiss?.(loadingId);
 
@@ -1590,43 +1636,41 @@ export const ConfirmResetPasswordView = (() => {
           DEFAULT_SUCCESS_MESSAGE;
 
         /*
-          Token ya no es necesario.
+          Token ya no es necesario tras éxito.
         */
         stableToken = "";
+        clearSensitiveInitialUrlCache();
 
-        setConfirmSuccessState(
-          refs,
-          successMessage
-        );
-
+        setConfirmSuccessState(refs, successMessage);
         toast.success?.(successMessage);
 
-        if (
-          deps.redirectAfterSuccess !== false
-        ) {
+        safeEmit("auth:reset-password-confirm:success", {
+          redirectTo: resolveConfirmRedirect(result, deps),
+          hasToken: false,
+        });
+
+        if (deps.redirectAfterSuccess !== false) {
           isNavigatingAway = true;
 
           navigateSoon(
-            resolveConfirmRedirect(
-              result,
-              deps
-            ),
+            resolveConfirmRedirect(result, deps),
             Number(deps.redirectDelay) ||
               SUCCESS_REDIRECT_DELAY
           );
         }
       } catch (error) {
-        const message =
-          resolveConfirmErrorMessage(error);
+        const message = resolveConfirmErrorMessage(error);
 
         toast.dismiss?.(loadingId);
 
-        setGlobalConfirmError(
-          refs,
-          message
-        );
-
+        setGlobalConfirmError(refs, message);
         toast.error?.(message);
+
+        safeEmit("auth:reset-password-confirm:error", {
+          code: error?.code || error?.error || "",
+          status: error?.status || "",
+          message,
+        });
 
         safeErrorLog("Reset confirm failed:", {
           method: error?.method || "POST",
@@ -1637,12 +1681,9 @@ export const ConfirmResetPasswordView = (() => {
             error?.code ||
             error?.error ||
             "",
-          status:
-            error?.status || "",
-          statusText:
-            error?.statusText || "",
-          message:
-            error?.message || "",
+          status: error?.status || "",
+          statusText: error?.statusText || "",
+          message: error?.message || "",
         });
 
         setConfirmLoading(refs, false, {
@@ -1653,19 +1694,11 @@ export const ConfirmResetPasswordView = (() => {
         if (!isNavigatingAway) {
           isSubmitting = false;
 
-          if (
-            refs?.form?.getAttribute(
-              "data-success"
-            ) !== "true"
-          ) {
-            setConfirmLoading(
-              refs,
-              false,
-              {
-                submitLabel,
-                loadingLabel,
-              }
-            );
+          if (refs?.form?.getAttribute("data-success") !== "true") {
+            setConfirmLoading(refs, false, {
+              submitLabel,
+              loadingLabel,
+            });
           }
         }
       }
@@ -1678,10 +1711,7 @@ export const ConfirmResetPasswordView = (() => {
     const onBack = (event) => {
       event.preventDefault();
 
-      if (
-        isSubmitting ||
-        isNavigatingAway
-      ) {
+      if (isSubmitting || isNavigatingAway) {
         return;
       }
 
@@ -1691,37 +1721,61 @@ export const ConfirmResetPasswordView = (() => {
       );
     };
 
-    const offInputs =
-      bindConfirmInputClearers(
-        refs,
-        onClearErrors
+    const offInputs = bindConfirmInputClearers(
+      refs,
+      onClearErrors
+    );
+
+    const offSubmit = bindConfirmSubmit(
+      refs,
+      onSubmit
+    );
+
+    const offBack = bindConfirmBack(
+      refs,
+      onBack
+    );
+
+    const cleanup = composeCleanup([
+      offInputs,
+      offSubmit,
+      offBack,
+      () => clearRedirectTimer(),
+      () => {
+        if (!isNavigatingAway) {
+          toast.dismiss?.();
+          setAuthScreen(false);
+          restoreGlobalLoaderStyles();
+        }
+      },
+    ]);
+
+    localBindingsCleanup = cleanup;
+
+    try {
+      AppCore?.cleanup?.add?.(scope, cleanup);
+    } catch {}
+
+    try {
+      AppCore?.cleanup?.event?.(
+        scope,
+        "router:before-render",
+        ({ detail } = {}) => {
+          const nextPath =
+            detail?.path ||
+            detail?.canonicalPath ||
+            detail?.publicPath ||
+            "";
+
+          if (
+            nextPath &&
+            !String(nextPath).startsWith(CONFIRM_ROUTE_PREFIX)
+          ) {
+            setAuthScreen(false);
+          }
+        }
       );
-
-    const offSubmit =
-      bindConfirmSubmit(
-        refs,
-        onSubmit
-      );
-
-    const offBack =
-      bindConfirmBack(
-        refs,
-        onBack
-      );
-
-    AppCore.cleanup.add(scope, () => {
-      offInputs?.();
-      offSubmit?.();
-      offBack?.();
-
-      clearRedirectTimer();
-
-      if (!isNavigatingAway) {
-        toast.dismiss?.();
-        setAuthScreen(false);
-        restoreGlobalLoaderStyles();
-      }
-    });
+    } catch {}
 
     emitRouteRendered();
   }
@@ -1743,6 +1797,7 @@ export const ConfirmResetPasswordView = (() => {
   }
 
   function destroy() {
+    mounted = false;
     isSubmitting = false;
     isNavigatingAway = false;
 
@@ -1758,12 +1813,13 @@ export const ConfirmResetPasswordView = (() => {
 
   function getState() {
     return {
-      mounted: true,
+      mounted,
       submitting: isSubmitting,
       navigatingAway: isNavigatingAway,
       hasToken: Boolean(stableToken),
       token: stableToken ? "***" : "",
       context: lastContext,
+      route: CONFIRM_ROUTE_PREFIX,
       endpoint: buildApiUrl(getConfirmEndpoint()),
     };
   }

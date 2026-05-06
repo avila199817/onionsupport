@@ -1,0 +1,1567 @@
+/* =========================================================
+   ONION SUPPORT — SERVIDOR.CSS
+   Archivo: /src/css/views/servidor/index.css
+
+   SERVIDOR VIEW · TOKEN PRO SYSTEM · CSP CLEAN · FULL POWER
+   FINAL EXTREME 12/10 · NO MODALS · NO CSS IN JS · NO INLINE STYLE
+
+   ARQUITECTURA:
+   - variables.css define tokens globales/base/dark.
+   - light.css define overrides [data-theme="light"].
+   - ui.css define componentes globales.
+   - servidor.css define SOLO la vista principal Server/Servidor.
+
+   INCLUYE:
+   - hero premium de observabilidad
+   - stats técnicos
+   - dashboard de servicios
+   - cards de servicios
+   - sidebar técnico
+   - toolbar / paginación
+   - acciones de servicio
+   - loading / skeleton
+   - empty / error states
+   - refresh overlay SOLO en dashboard
+   - live status
+   - responsive extremo
+   - dark/light token aligned
+   - guards contra colisiones con ui.css
+   - compatibilidad con clases server-* y servidor-*
+
+   NO INCLUYE:
+   - modal detalle server
+   - overlays globales de modal
+   - body lock
+   - CSS de server modal
+========================================================= */
+
+
+/* =========================================================
+   ROOT SCOPE
+========================================================= */
+
+:where(
+  .server-view,
+  .server-view-root,
+  .servidor-view,
+  .servidor-view-root,
+  [data-server-scope],
+  [data-servidor-scope],
+  [data-view="server"],
+  [data-view="servidor"]
+) {
+  --srv-accent: var(--accent);
+  --srv-accent-soft: var(--accent-soft);
+  --srv-accent-border: var(--accent-border);
+  --srv-accent-border-strong: var(--accent-border-strong);
+  --srv-accent-active: var(--accent-active);
+
+  --srv-ok: var(--success);
+  --srv-ok-bg: var(--success-bg);
+  --srv-ok-border: var(--border-success);
+
+  --srv-warning: var(--warning);
+  --srv-warning-bg: var(--warning-bg);
+  --srv-warning-border: var(--border-warning);
+
+  --srv-error: var(--error);
+  --srv-error-bg: var(--error-bg);
+  --srv-error-border: var(--border-error);
+
+  --srv-info: var(--info);
+  --srv-info-bg: var(--info-bg);
+  --srv-info-border: var(--border-info);
+
+  --srv-card-min-height: 240px;
+  --srv-tech-min-width: 320px;
+  --srv-avatar-size: 52px;
+  --srv-dashboard-gap: var(--space-lg);
+  --srv-service-grid-min: 300px;
+
+  --srv-control-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent),
+    0 1px 2px color-mix(in srgb, #000 5%, transparent);
+
+  --srv-control-shadow-hover:
+    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent),
+    0 10px 22px color-mix(in srgb, #000 7%, transparent);
+
+  display: grid;
+  gap: var(--view-section-gap, var(--space-lg));
+  inline-size: 100%;
+  min-inline-size: 0;
+  color: var(--text);
+  font-family: var(--font-family);
+  container-type: inline-size;
+}
+
+:where(
+  .server-view,
+  .server-view-root,
+  .servidor-view,
+  .servidor-view-root,
+  [data-server-scope],
+  [data-servidor-scope],
+  [data-view="server"],
+  [data-view="servidor"]
+) *,
+:where(
+  .server-view,
+  .server-view-root,
+  .servidor-view,
+  .servidor-view-root,
+  [data-server-scope],
+  [data-servidor-scope],
+  [data-view="server"],
+  [data-view="servidor"]
+) *::before,
+:where(
+  .server-view,
+  .server-view-root,
+  .servidor-view,
+  .servidor-view-root,
+  [data-server-scope],
+  [data-servidor-scope],
+  [data-view="server"],
+  [data-view="servidor"]
+) *::after {
+  box-sizing: border-box;
+}
+
+.server-content-wrapper,
+.servidor-content-wrapper {
+  display: grid;
+  gap: var(--space-lg);
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.server-hidden,
+.server-visually-hidden,
+.servidor-hidden,
+.servidor-visually-hidden {
+  position: absolute !important;
+  inline-size: 1px !important;
+  block-size: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border: 0 !important;
+  clip: rect(0 0 0 0) !important;
+  white-space: nowrap !important;
+}
+
+
+/* =========================================================
+   BASE INTERACTION
+========================================================= */
+
+.server-btn,
+.servidor-btn,
+.server-action-btn,
+.servidor-action-btn,
+.server-pagination-btn,
+.servidor-pagination-btn,
+.server-service-card button,
+.servidor-service-card button,
+.server-dashboard-toolbar button,
+.servidor-dashboard-toolbar button,
+#server-health-btn,
+#server-refresh-btn,
+#server-toggle-live-btn,
+#server-retry-btn {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.server-btn:focus-visible,
+.servidor-btn:focus-visible,
+.server-action-btn:focus-visible,
+.servidor-action-btn:focus-visible,
+.server-pagination-btn:focus-visible,
+.servidor-pagination-btn:focus-visible,
+.server-service-card button:focus-visible,
+.servidor-service-card button:focus-visible,
+.server-dashboard-toolbar button:focus-visible,
+.servidor-dashboard-toolbar button:focus-visible,
+#server-health-btn:focus-visible,
+#server-refresh-btn:focus-visible,
+#server-toggle-live-btn:focus-visible,
+#server-retry-btn:focus-visible {
+  outline: none;
+  box-shadow:
+    var(--focus-ring),
+    0 0 0 5px color-mix(in srgb, var(--accent) 10%, transparent) !important;
+}
+
+
+/* =========================================================
+   HERO
+========================================================= */
+
+.server-hero,
+.servidor-hero {
+  position: relative !important;
+  overflow: hidden !important;
+  isolation: isolate !important;
+  min-inline-size: 0 !important;
+  border: 1px solid var(--view-hero-border) !important;
+  border-radius: var(--view-hero-radius) !important;
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 38%),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 9%, transparent), transparent 34%),
+    radial-gradient(circle at 68% 110%, color-mix(in srgb, var(--success) 7%, transparent), transparent 36%),
+    var(--glass-shine),
+    var(--view-hero-bg) !important;
+  box-shadow: var(--view-hero-shadow) !important;
+}
+
+.server-hero::after,
+.servidor-hero::after {
+  content: "";
+  position: absolute;
+  inset: auto -8% -38% 48%;
+  z-index: 0;
+  block-size: 230px;
+  pointer-events: none;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 10%, transparent), transparent 68%);
+  filter: blur(10px);
+  opacity: .82;
+}
+
+.server-hero > *,
+.servidor-hero > * {
+  position: relative;
+  z-index: 1;
+}
+
+.server-hero :is(.page-title, .server-page-title, .servidor-page-title),
+.servidor-hero :is(.page-title, .server-page-title, .servidor-page-title) {
+  color: var(--text-strong) !important;
+  font-size: clamp(var(--font-3xl), 4.6vw, var(--font-6xl, 48px)) !important;
+  font-weight: var(--view-title-weight) !important;
+  letter-spacing: var(--view-title-letter) !important;
+  line-height: var(--line-tight) !important;
+}
+
+.server-hero :is(.page-subtitle, .server-page-subtitle, .servidor-page-subtitle),
+.servidor-hero :is(.page-subtitle, .server-page-subtitle, .servidor-page-subtitle) {
+  max-inline-size: 900px !important;
+  color: var(--view-subtitle-color) !important;
+  font-size: var(--font-lg) !important;
+  line-height: var(--line-relaxed) !important;
+}
+
+.server-hero-meta,
+.servidor-hero-meta {
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+  gap: var(--space-xs) !important;
+}
+
+.server-hero-meta > span,
+.servidor-hero-meta > span,
+.server-meta-pill,
+.servidor-meta-pill {
+  min-block-size: calc(30px * var(--ui-scale)) !important;
+  padding-inline: var(--space-sm) !important;
+  border: 1px solid var(--badge-border) !important;
+  border-radius: var(--radius-pill) !important;
+  background: var(--badge-bg) !important;
+  color: var(--badge-text) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+  font-size: var(--font-xs) !important;
+  font-weight: var(--weight-bold) !important;
+  letter-spacing: var(--letter-wider) !important;
+  text-transform: uppercase !important;
+  white-space: nowrap !important;
+}
+
+.server-hero-meta > span[data-status="ok"],
+.servidor-hero-meta > span[data-status="ok"],
+.server-meta-pill--success,
+.servidor-meta-pill--success {
+  color: var(--success) !important;
+  background: var(--success-bg) !important;
+  border-color: var(--border-success) !important;
+}
+
+.server-hero-meta > span[data-status="warning"],
+.servidor-hero-meta > span[data-status="warning"],
+.server-meta-pill--warning,
+.servidor-meta-pill--warning {
+  color: var(--warning) !important;
+  background: var(--warning-bg) !important;
+  border-color: var(--border-warning) !important;
+}
+
+.server-hero-meta > span[data-status="error"],
+.servidor-hero-meta > span[data-status="error"],
+.server-meta-pill--danger,
+.servidor-meta-pill--danger {
+  color: var(--error) !important;
+  background: var(--error-bg) !important;
+  border-color: var(--border-error) !important;
+}
+
+
+/* =========================================================
+   HERO STATS
+========================================================= */
+
+.server-hero-stats,
+.servidor-hero-stats,
+.server-stats,
+.servidor-stats {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: var(--space-md) !important;
+}
+
+.server-stat-card,
+.servidor-stat-card {
+  --srv-stat-color: var(--accent);
+
+  position: relative !important;
+  display: grid !important;
+  gap: var(--space-xs) !important;
+  min-block-size: calc(124px * var(--ui-scale)) !important;
+  padding: var(--space-md) var(--space-lg) !important;
+  overflow: hidden !important;
+  border: 1px solid var(--card-border) !important;
+  border-radius: var(--card-radius) !important;
+  background:
+    var(--glass-shine),
+    var(--card-bg) !important;
+  box-shadow: var(--shadow-card) !important;
+}
+
+.server-stat-card::after,
+.servidor-stat-card::after {
+  content: "";
+  position: absolute;
+  inset: auto -20% -44% auto;
+  inline-size: 120px;
+  block-size: 120px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--srv-stat-color) 16%, transparent);
+  filter: blur(8px);
+}
+
+.server-stat-card:nth-child(1),
+.servidor-stat-card:nth-child(1),
+.server-stat-card--accent,
+.servidor-stat-card--accent {
+  --srv-stat-color: var(--accent);
+  border-color: var(--accent-border) !important;
+}
+
+.server-stat-card:nth-child(2),
+.servidor-stat-card:nth-child(2),
+.server-stat-card--info,
+.servidor-stat-card--info {
+  --srv-stat-color: var(--info);
+  border-color: var(--border-info) !important;
+}
+
+.server-stat-card:nth-child(3),
+.servidor-stat-card:nth-child(3),
+.server-stat-card--warning,
+.servidor-stat-card--warning {
+  --srv-stat-color: var(--warning);
+  border-color: var(--border-warning) !important;
+}
+
+.server-stat-card:nth-child(4),
+.servidor-stat-card:nth-child(4),
+.server-stat-card--success,
+.servidor-stat-card--success {
+  --srv-stat-color: var(--success);
+  border-color: var(--border-success) !important;
+}
+
+.server-stat-card span,
+.servidor-stat-card span,
+.server-stat-label,
+.servidor-stat-label {
+  color: var(--text-dim) !important;
+  font-size: var(--font-xs) !important;
+  font-weight: var(--weight-bold) !important;
+  letter-spacing: var(--letter-wider) !important;
+  text-transform: uppercase !important;
+}
+
+.server-stat-card strong,
+.servidor-stat-card strong,
+.server-stat-value,
+.servidor-stat-value {
+  color: var(--text-strong) !important;
+  font-size: clamp(26px, 3vw, var(--font-5xl)) !important;
+  font-weight: var(--weight-black) !important;
+  letter-spacing: var(--letter-tight) !important;
+  line-height: .95 !important;
+}
+
+.server-stat-card p,
+.servidor-stat-card p,
+.server-stat-text,
+.servidor-stat-text {
+  margin: 0 !important;
+  color: var(--text-muted) !important;
+  font-size: var(--font-base) !important;
+  line-height: var(--line-normal) !important;
+}
+
+
+/* =========================================================
+   BUTTONS
+========================================================= */
+
+.server-btn,
+.servidor-btn,
+.server-dashboard-toolbar button,
+.servidor-dashboard-toolbar button,
+.server-service-card button,
+.servidor-service-card button,
+#server-health-btn,
+#server-toggle-live-btn {
+  appearance: none !important;
+  min-block-size: var(--btn-height-sm, 38px) !important;
+  padding-inline: var(--space-sm) !important;
+  border: 1px solid var(--btn-secondary-border) !important;
+  border-radius: var(--radius-md) !important;
+  background: var(--btn-secondary-bg) !important;
+  color: var(--btn-secondary-text) !important;
+  box-shadow: none !important;
+  cursor: pointer !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: var(--space-xs) !important;
+  font-family: var(--font-family) !important;
+  font-size: var(--font-sm) !important;
+  font-weight: var(--weight-bold) !important;
+  line-height: 1 !important;
+  text-decoration: none !important;
+  white-space: nowrap !important;
+  transition:
+    transform var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard),
+    filter var(--duration-fast) var(--ease-standard) !important;
+}
+
+.server-btn:hover,
+.servidor-btn:hover,
+.server-dashboard-toolbar button:hover,
+.servidor-dashboard-toolbar button:hover,
+.server-service-card button:hover,
+.servidor-service-card button:hover,
+#server-health-btn:hover,
+#server-toggle-live-btn:hover {
+  transform: translateY(-1px) !important;
+  border-color: color-mix(in srgb, var(--btn-secondary-border) 68%, var(--accent-border)) !important;
+  background: var(--btn-secondary-bg-hover, var(--btn-secondary-bg)) !important;
+  color: var(--text-strong) !important;
+  box-shadow: var(--srv-control-shadow-hover) !important;
+}
+
+.server-btn:active,
+.servidor-btn:active,
+.server-dashboard-toolbar button:active,
+.servidor-dashboard-toolbar button:active,
+.server-service-card button:active,
+.servidor-service-card button:active {
+  transform: translateY(0) scale(.985) !important;
+}
+
+#server-refresh-btn,
+#server-retry-btn,
+.server-btn--primary,
+.servidor-btn--primary,
+.server-service-card button[data-action="copy-server-detail-id"],
+.servidor-service-card button[data-action="copy-server-detail-id"] {
+  border-color: var(--btn-primary-border) !important;
+  background: var(--btn-primary-bg) !important;
+  color: var(--btn-primary-text) !important;
+  box-shadow: var(--btn-primary-shadow) !important;
+}
+
+#server-refresh-btn:hover,
+#server-retry-btn:hover,
+.server-btn--primary:hover,
+.servidor-btn--primary:hover,
+.server-service-card button[data-action="copy-server-detail-id"]:hover,
+.servidor-service-card button[data-action="copy-server-detail-id"]:hover {
+  border-color: var(--btn-primary-border) !important;
+  background: var(--btn-primary-bg) !important;
+  color: var(--btn-primary-text) !important;
+  box-shadow:
+    var(--btn-primary-shadow),
+    0 12px 28px color-mix(in srgb, var(--accent) 22%, transparent) !important;
+}
+
+.server-btn:disabled,
+.servidor-btn:disabled,
+.server-dashboard-toolbar button:disabled,
+.servidor-dashboard-toolbar button:disabled,
+.server-service-card button:disabled,
+.servidor-service-card button:disabled,
+.server-btn[aria-disabled="true"],
+.servidor-btn[aria-disabled="true"] {
+  pointer-events: none !important;
+  opacity: .54 !important;
+  cursor: not-allowed !important;
+  filter: saturate(.75) !important;
+  transform: none !important;
+}
+
+
+/* =========================================================
+   DASHBOARD SHELL
+========================================================= */
+
+.server-dashboard-wrap,
+.servidor-dashboard-wrap,
+.server-shell,
+.servidor-shell {
+  position: relative !important;
+  min-inline-size: 0 !important;
+  overflow: hidden !important;
+  border: 1px solid var(--data-table-border) !important;
+  border-radius: var(--data-table-radius) !important;
+  background:
+    var(--glass-shine),
+    var(--data-table-bg) !important;
+  box-shadow: var(--data-table-shadow) !important;
+}
+
+.server-dashboard-toolbar,
+.servidor-dashboard-toolbar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: var(--space-md) !important;
+  flex-wrap: wrap !important;
+  padding: var(--space-md) var(--space-lg) !important;
+  border-bottom: 1px solid var(--data-table-row-border) !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 6%, transparent), transparent),
+    var(--data-table-head-bg) !important;
+}
+
+.server-dashboard-toolbar strong,
+.servidor-dashboard-toolbar strong {
+  color: var(--section-title-color) !important;
+  font-size: var(--section-title-size) !important;
+  font-weight: var(--section-title-weight) !important;
+  letter-spacing: var(--letter-tight) !important;
+  line-height: var(--line-snug) !important;
+}
+
+.server-dashboard-toolbar span,
+.servidor-dashboard-toolbar span {
+  color: var(--section-subtitle-color) !important;
+  font-size: var(--section-subtitle-size) !important;
+  line-height: var(--line-normal) !important;
+}
+
+.server-dashboard-main-grid,
+.servidor-dashboard-main-grid {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1.45fr) minmax(var(--srv-tech-min-width), .8fr) !important;
+  gap: var(--srv-dashboard-gap) !important;
+  padding: var(--space-lg) !important;
+  min-inline-size: 0 !important;
+}
+
+.server-services-grid,
+.servidor-services-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: var(--space-md) !important;
+  align-content: start !important;
+  min-inline-size: 0 !important;
+}
+
+
+/* =========================================================
+   SERVICE CARDS
+========================================================= */
+
+.server-service-card,
+.servidor-service-card {
+  position: relative !important;
+  display: grid !important;
+  gap: var(--space-sm) !important;
+  min-block-size: var(--srv-card-min-height) !important;
+  min-inline-size: 0 !important;
+  padding: var(--space-lg) !important;
+  overflow: hidden !important;
+  border: 1px solid var(--card-border) !important;
+  border-radius: var(--card-radius-lg) !important;
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 36%),
+    var(--glass-shine),
+    var(--card-bg) !important;
+  box-shadow: var(--shadow-card) !important;
+  transform: translateZ(0) !important;
+  transition:
+    transform var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    opacity var(--duration-fast) var(--ease-standard),
+    filter var(--duration-fast) var(--ease-standard) !important;
+}
+
+.server-service-card::before,
+.servidor-service-card::before {
+  content: "";
+  position: absolute;
+  inset-block: 14px;
+  inset-inline-start: 0;
+  inline-size: 3px;
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+  background: var(--srv-card-accent, var(--accent));
+  opacity: .64;
+  transform: scaleY(.76);
+  transform-origin: center;
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+.server-service-card::after,
+.servidor-service-card::after {
+  content: "";
+  position: absolute;
+  inset: auto -18% -48% auto;
+  inline-size: 140px;
+  block-size: 140px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--srv-card-accent, var(--accent)) 12%, transparent);
+  filter: blur(10px);
+  opacity: .82;
+}
+
+.server-service-card:hover,
+.servidor-service-card:hover {
+  transform: translateY(-2px) !important;
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--card-border)) !important;
+  box-shadow:
+    var(--shadow-card),
+    0 18px 42px color-mix(in srgb, #000 8%, transparent) !important;
+}
+
+.server-service-card:hover::before,
+.servidor-service-card:hover::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+.server-service-card.is-opening,
+.servidor-service-card.is-opening {
+  opacity: .72 !important;
+  filter: saturate(.82) !important;
+  cursor: wait !important;
+}
+
+.server-service-card.is-opening:hover,
+.servidor-service-card.is-opening:hover {
+  transform: none !important;
+}
+
+.server-service-card[data-status="ok"],
+.servidor-service-card[data-status="ok"],
+.server-service-card--ok,
+.servidor-service-card--ok,
+.server-service-card--healthy,
+.servidor-service-card--healthy {
+  --srv-card-accent: var(--success);
+}
+
+.server-service-card[data-status="warning"],
+.servidor-service-card[data-status="warning"],
+.server-service-card--warning,
+.servidor-service-card--warning,
+.server-service-card--degraded,
+.servidor-service-card--degraded {
+  --srv-card-accent: var(--warning);
+}
+
+.server-service-card[data-status="error"],
+.servidor-service-card[data-status="error"],
+.server-service-card--error,
+.servidor-service-card--error,
+.server-service-card--down,
+.servidor-service-card--down {
+  --srv-card-accent: var(--error);
+}
+
+.server-service-card h3,
+.servidor-service-card h3,
+.server-service-title,
+.servidor-service-title,
+.server-service-card button[data-action="open-server-detail"],
+.servidor-service-card button[data-action="open-server-detail"] {
+  color: var(--text-strong) !important;
+  font-size: var(--font-xl) !important;
+  font-weight: var(--weight-black) !important;
+  letter-spacing: var(--letter-tight) !important;
+  line-height: var(--line-snug) !important;
+}
+
+.server-service-card button[data-action="open-server-detail"],
+.servidor-service-card button[data-action="open-server-detail"] {
+  min-block-size: auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  justify-content: flex-start !important;
+  text-align: start !important;
+  white-space: normal !important;
+}
+
+.server-service-card button[data-action="open-server-detail"]:hover,
+.servidor-service-card button[data-action="open-server-detail"]:hover {
+  transform: none !important;
+  color: var(--accent-active) !important;
+  box-shadow: none !important;
+}
+
+.server-service-card p,
+.servidor-service-card p,
+.server-service-description,
+.servidor-service-description {
+  margin: 0 !important;
+  color: var(--text-soft) !important;
+  font-size: var(--font-md) !important;
+  line-height: var(--line-relaxed) !important;
+}
+
+.server-service-card :is(strong),
+.servidor-service-card :is(strong) {
+  color: var(--text-strong) !important;
+}
+
+
+/* =========================================================
+   SERVICE AVATAR / ICON
+========================================================= */
+
+.server-service-avatar,
+.servidor-service-avatar,
+.server-service-card [aria-hidden="true"]:first-child:not(svg),
+.servidor-service-card [aria-hidden="true"]:first-child:not(svg) {
+  position: relative;
+  flex: 0 0 var(--srv-avatar-size) !important;
+  inline-size: var(--srv-avatar-size) !important;
+  block-size: var(--srv-avatar-size) !important;
+  border-radius: var(--radius-xl) !important;
+  display: grid !important;
+  place-items: center !important;
+  overflow: hidden !important;
+  background:
+    radial-gradient(circle at 30% 22%, rgba(255,255,255,.28), transparent 34%),
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 34%, transparent), color-mix(in srgb, var(--info) 18%, transparent)) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--card-border)) !important;
+  color: var(--text-on-accent) !important;
+  box-shadow:
+    0 10px 24px color-mix(in srgb, var(--accent) 20%, transparent),
+    var(--shadow-inner) !important;
+  font-size: var(--font-xl) !important;
+  font-weight: var(--weight-black) !important;
+  letter-spacing: var(--letter-tight) !important;
+}
+
+
+/* =========================================================
+   CHIPS
+========================================================= */
+
+.server-chip,
+.servidor-chip,
+.server-service-card :is([data-chip], .chip),
+.servidor-service-card :is([data-chip], .chip) {
+  min-block-size: var(--chip-height) !important;
+  padding-inline: var(--space-sm) !important;
+  border: 1px solid var(--chip-border) !important;
+  border-radius: var(--radius-pill) !important;
+  background: var(--chip-bg) !important;
+  color: var(--chip-text) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 7px !important;
+  box-shadow: var(--shadow-inner) !important;
+  font-size: var(--font-xs) !important;
+  font-weight: var(--weight-bold) !important;
+  letter-spacing: .045em !important;
+  line-height: 1 !important;
+  text-transform: uppercase !important;
+  white-space: nowrap !important;
+}
+
+.server-chip-dot,
+.servidor-chip-dot {
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.server-chip--ok,
+.servidor-chip--ok,
+.server-chip--healthy,
+.servidor-chip--healthy,
+.server-chip--online,
+.servidor-chip--online {
+  color: var(--success) !important;
+  background: var(--success-bg) !important;
+  border-color: var(--border-success) !important;
+}
+
+.server-chip--warning,
+.servidor-chip--warning,
+.server-chip--pending,
+.servidor-chip--pending,
+.server-chip--degraded,
+.servidor-chip--degraded {
+  color: var(--warning) !important;
+  background: var(--warning-bg) !important;
+  border-color: var(--border-warning) !important;
+}
+
+.server-chip--error,
+.servidor-chip--error,
+.server-chip--critical,
+.servidor-chip--critical,
+.server-chip--down,
+.servidor-chip--down,
+.server-chip--offline,
+.servidor-chip--offline {
+  color: var(--error) !important;
+  background: var(--error-bg) !important;
+  border-color: var(--border-error) !important;
+}
+
+.server-chip--api,
+.servidor-chip--api,
+.server-chip--runtime,
+.servidor-chip--runtime,
+.server-chip--service,
+.servidor-chip--service {
+  color: var(--accent-active) !important;
+  background: var(--accent-soft) !important;
+  border-color: var(--accent-border) !important;
+}
+
+.server-chip--db,
+.servidor-chip--db,
+.server-chip--system,
+.servidor-chip--system,
+.server-chip--environment,
+.servidor-chip--environment {
+  color: var(--info) !important;
+  background: var(--info-bg) !important;
+  border-color: var(--border-info) !important;
+}
+
+
+/* =========================================================
+   TECH SIDEBAR
+========================================================= */
+
+.server-tech-sidebar,
+.servidor-tech-sidebar {
+  display: grid !important;
+  gap: var(--space-sm) !important;
+  min-inline-size: 0 !important;
+  padding: var(--space-lg) !important;
+  border: 1px solid var(--card-border) !important;
+  border-radius: var(--card-radius-lg) !important;
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 7%, transparent), transparent 34%),
+    var(--glass-shine),
+    var(--card-bg) !important;
+  box-shadow: var(--shadow-card) !important;
+}
+
+.server-tech-sidebar strong,
+.servidor-tech-sidebar strong {
+  color: var(--text-strong) !important;
+  font-weight: var(--weight-bold) !important;
+}
+
+.server-tech-sidebar span,
+.servidor-tech-sidebar span {
+  color: var(--text-dim) !important;
+}
+
+.server-tech-sidebar article,
+.servidor-tech-sidebar article,
+.server-tech-card,
+.servidor-tech-card {
+  display: grid !important;
+  gap: var(--space-xs) !important;
+  padding: var(--space-md) !important;
+  border: 1px solid var(--border-soft) !important;
+  border-radius: var(--radius-xl) !important;
+  background: var(--surface-glass) !important;
+}
+
+
+/* =========================================================
+   OVERLAY / LOADING
+========================================================= */
+
+.server-dashboard-overlay,
+.servidor-dashboard-overlay {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 4 !important;
+  display: grid !important;
+  place-items: center !important;
+  padding: var(--space-lg) !important;
+  pointer-events: none !important;
+  background: color-mix(in srgb, var(--backdrop-bg) 72%, transparent) !important;
+  backdrop-filter: var(--blur-sm) !important;
+  -webkit-backdrop-filter: var(--blur-sm) !important;
+}
+
+.server-dashboard-overlay > *,
+.servidor-dashboard-overlay > * {
+  display: grid !important;
+  justify-items: center !important;
+  gap: var(--space-sm) !important;
+  min-inline-size: min(100%, 250px) !important;
+  padding: var(--space-lg) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--card-border)) !important;
+  border-radius: var(--card-radius) !important;
+  background:
+    var(--glass-shine),
+    var(--popover-bg) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+
+.server-inline-spinner,
+.servidor-inline-spinner,
+.server-spinner,
+.servidor-spinner {
+  inline-size: 16px;
+  block-size: 16px;
+  border: 2px solid var(--loader-ring);
+  border-top-color: currentColor;
+  border-radius: var(--radius-pill);
+  animation: serverSpin .78s linear infinite;
+  flex: 0 0 auto;
+}
+
+.server-dashboard-overlay [aria-hidden="true"],
+.servidor-dashboard-overlay [aria-hidden="true"] {
+  inline-size: 28px !important;
+  block-size: 28px !important;
+  border: 3px solid color-mix(in srgb, var(--accent) 16%, transparent) !important;
+  border-top-color: var(--accent) !important;
+  border-radius: var(--radius-pill) !important;
+  animation: serverSpin .8s linear infinite !important;
+}
+
+.server-loading-state,
+.servidor-loading-state,
+.server-shell {
+  overflow: hidden !important;
+  border: 1px solid var(--data-table-border) !important;
+  border-radius: var(--data-table-radius) !important;
+  background:
+    var(--glass-shine),
+    var(--data-table-bg) !important;
+  box-shadow: var(--data-table-shadow) !important;
+}
+
+
+/* =========================================================
+   SKELETON
+========================================================= */
+
+.server-skeleton-grid,
+.servidor-skeleton-grid {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: var(--space-md) !important;
+}
+
+.server-skeleton,
+.servidor-skeleton,
+.server-skeleton-grid :is(article, div),
+.servidor-skeleton-grid :is(article, div) {
+  border-color: var(--border-soft);
+}
+
+.server-skeleton-line,
+.servidor-skeleton-line,
+.server-skeleton-block,
+.servidor-skeleton-block {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--skeleton-radius);
+  background: var(--skeleton-bg);
+}
+
+.server-skeleton-line::after,
+.servidor-skeleton-line::after,
+.server-skeleton-block::after,
+.servidor-skeleton-block::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      var(--skeleton-shine),
+      transparent
+    );
+  animation: serverSkeleton 1.2s var(--ease-standard) infinite;
+}
+
+
+/* =========================================================
+   EMPTY / ERROR
+========================================================= */
+
+.server-empty-state,
+.servidor-empty-state,
+.server-error-state,
+.servidor-error-state {
+  display: grid !important;
+  gap: var(--space-md) !important;
+  padding: var(--space-xl) !important;
+  border-radius: var(--card-radius-lg) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+.server-empty-state,
+.servidor-empty-state {
+  border: 1px solid var(--state-empty-border) !important;
+  background:
+    var(--glass-shine),
+    var(--state-empty-bg) !important;
+}
+
+.server-error-state,
+.servidor-error-state {
+  border: 1px solid var(--border-error) !important;
+  background:
+    var(--glass-shine),
+    color-mix(in srgb, var(--error-bg) 46%, var(--card-bg)) !important;
+}
+
+.server-empty-state h3,
+.servidor-empty-state h3,
+.server-error-state h3,
+.servidor-error-state h3 {
+  margin: 0 !important;
+  color: var(--text-strong) !important;
+  font-size: clamp(var(--font-2xl), 3vw, var(--font-4xl)) !important;
+  font-weight: var(--weight-black) !important;
+  letter-spacing: var(--letter-tight) !important;
+  line-height: var(--line-tight) !important;
+}
+
+.server-empty-state p,
+.servidor-empty-state p,
+.server-error-state p,
+.servidor-error-state p {
+  margin: 0 !important;
+  max-inline-size: 78ch !important;
+  color: var(--text-muted) !important;
+  font-size: var(--font-base) !important;
+  line-height: var(--line-relaxed) !important;
+}
+
+.server-error-state > span,
+.servidor-error-state > span {
+  color: var(--error) !important;
+  background: var(--error-bg) !important;
+  border-color: var(--border-error) !important;
+}
+
+
+/* =========================================================
+   LIVE / STATUS PULSE
+========================================================= */
+
+.server-live-dot,
+.servidor-live-dot,
+.server-hero-meta span[aria-hidden="true"],
+.servidor-hero-meta span[aria-hidden="true"] {
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+  box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 30%, transparent);
+  animation: serverPulse 1.35s var(--ease-standard) infinite;
+}
+
+
+/* =========================================================
+   UI.CSS COLLISION GUARD
+========================================================= */
+
+:where(
+  .server-view,
+  .server-view-root,
+  .servidor-view,
+  .servidor-view-root,
+  [data-server-scope],
+  [data-servidor-scope],
+  [data-view="server"],
+  [data-view="servidor"]
+) .ui-btn {
+  font-family: var(--font-family);
+}
+
+:where(
+  .server-view,
+  .server-view-root,
+  .servidor-view,
+  .servidor-view-root,
+  [data-server-scope],
+  [data-servidor-scope],
+  [data-view="server"],
+  [data-view="servidor"]
+) .ui-table-wrap {
+  max-inline-size: 100%;
+}
+
+:where(
+  .server-view,
+  .server-view-root,
+  .servidor-view,
+  .servidor-view-root,
+  [data-server-scope],
+  [data-servidor-scope],
+  [data-view="server"],
+  [data-view="servidor"]
+) :is(.panel-surface, .ui-card) {
+  min-inline-size: 0;
+}
+
+
+/* =========================================================
+   LIGHT THEME FIT
+========================================================= */
+
+[data-theme="light"] :where(
+  .server-view,
+  .server-view-root,
+  .servidor-view,
+  .servidor-view-root,
+  [data-server-scope],
+  [data-servidor-scope],
+  [data-view="server"],
+  [data-view="servidor"]
+) {
+  --srv-control-shadow:
+    inset 0 1px 0 rgba(255,255,255,.82),
+    0 1px 2px rgba(32,43,72,.04);
+
+  --srv-control-shadow-hover:
+    inset 0 1px 0 rgba(255,255,255,.9),
+    0 10px 22px rgba(32,43,72,.07);
+}
+
+[data-theme="light"] .server-hero,
+[data-theme="light"] .servidor-hero,
+[data-theme="light"] .server-dashboard-wrap,
+[data-theme="light"] .servidor-dashboard-wrap,
+[data-theme="light"] .server-tech-sidebar,
+[data-theme="light"] .servidor-tech-sidebar {
+  background:
+    radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 38%),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--info) 7%, transparent), transparent 34%),
+    var(--glass-shine),
+    var(--view-hero-bg) !important;
+}
+
+[data-theme="light"] .server-stat-card,
+[data-theme="light"] .servidor-stat-card,
+[data-theme="light"] .server-service-card,
+[data-theme="light"] .servidor-service-card {
+  background:
+    var(--glass-shine),
+    var(--card-bg) !important;
+}
+
+[data-theme="light"] .server-dashboard-toolbar,
+[data-theme="light"] .servidor-dashboard-toolbar {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, transparent), transparent),
+    var(--data-table-head-bg) !important;
+}
+
+[data-theme="light"] .server-chip--ok,
+[data-theme="light"] .servidor-chip--ok,
+[data-theme="light"] .server-chip--healthy,
+[data-theme="light"] .servidor-chip--healthy {
+  color: var(--success-hover) !important;
+  background: var(--success-soft, var(--success-bg)) !important;
+  border-color: var(--border-success) !important;
+}
+
+[data-theme="light"] .server-chip--warning,
+[data-theme="light"] .servidor-chip--warning,
+[data-theme="light"] .server-chip--pending,
+[data-theme="light"] .servidor-chip--pending,
+[data-theme="light"] .server-chip--degraded,
+[data-theme="light"] .servidor-chip--degraded {
+  color: var(--warning-hover) !important;
+  background: var(--warning-soft, var(--warning-bg)) !important;
+  border-color: var(--border-warning) !important;
+}
+
+[data-theme="light"] .server-chip--error,
+[data-theme="light"] .servidor-chip--error,
+[data-theme="light"] .server-chip--critical,
+[data-theme="light"] .servidor-chip--critical,
+[data-theme="light"] .server-chip--down,
+[data-theme="light"] .servidor-chip--down {
+  color: var(--error-hover) !important;
+  background: var(--error-soft, var(--error-bg)) !important;
+  border-color: var(--border-error) !important;
+}
+
+[data-theme="light"] .server-dashboard-overlay,
+[data-theme="light"] .servidor-dashboard-overlay {
+  background: color-mix(in srgb, rgba(248,250,252,.82) 82%, transparent) !important;
+}
+
+
+/* =========================================================
+   DARK THEME FIT
+========================================================= */
+
+[data-theme="dark"] .server-service-card:hover,
+[data-theme="dark"] .servidor-service-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--card-border)) !important;
+  box-shadow:
+    var(--shadow-card),
+    0 18px 42px color-mix(in srgb, #000 22%, transparent) !important;
+}
+
+[data-theme="dark"] .server-dashboard-overlay,
+[data-theme="dark"] .servidor-dashboard-overlay {
+  background: color-mix(in srgb, var(--backdrop-bg) 76%, transparent) !important;
+}
+
+
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+
+@media (max-width: 1240px) {
+  .server-dashboard-main-grid,
+  .servidor-dashboard-main-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .server-tech-sidebar,
+  .servidor-tech-sidebar {
+    order: 2;
+  }
+}
+
+@media (max-width: 1100px) {
+  .server-hero-stats,
+  .servidor-hero-stats,
+  .server-stats,
+  .servidor-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .server-services-grid,
+  .servidor-services-grid,
+  .server-skeleton-grid,
+  .servidor-skeleton-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 920px) {
+  .server-services-grid,
+  .servidor-services-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 760px) {
+  :where(
+    .server-view,
+    .server-view-root,
+    .servidor-view,
+    .servidor-view-root,
+    [data-server-scope],
+    [data-servidor-scope],
+    [data-view="server"],
+    [data-view="servidor"]
+  ) {
+    gap: var(--space-md);
+  }
+
+  .server-content-wrapper,
+  .servidor-content-wrapper {
+    gap: var(--space-md);
+  }
+
+  .server-hero,
+  .servidor-hero,
+  .server-dashboard-wrap,
+  .servidor-dashboard-wrap,
+  .server-tech-sidebar,
+  .servidor-tech-sidebar {
+    border-radius: var(--radius-xl) !important;
+  }
+
+  .server-dashboard-main-grid,
+  .servidor-dashboard-main-grid {
+    padding: var(--space-md) !important;
+    gap: var(--space-md) !important;
+  }
+
+  .server-dashboard-toolbar,
+  .servidor-dashboard-toolbar {
+    align-items: stretch !important;
+    padding: var(--space-md) !important;
+  }
+
+  .server-dashboard-toolbar > *,
+  .servidor-dashboard-toolbar > * {
+    inline-size: 100%;
+  }
+
+  .server-dashboard-toolbar button,
+  .servidor-dashboard-toolbar button {
+    flex: 1 1 auto !important;
+  }
+
+  .server-hero-stats,
+  .servidor-hero-stats,
+  .server-stats,
+  .servidor-stats,
+  .server-skeleton-grid,
+  .servidor-skeleton-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .server-hero :is(.page-title, .server-page-title, .servidor-page-title),
+  .servidor-hero :is(.page-title, .server-page-title, .servidor-page-title) {
+    font-size: clamp(var(--font-3xl), 8vw, var(--font-4xl)) !important;
+    line-height: 1 !important;
+  }
+
+  .server-hero :is(.page-subtitle, .server-page-subtitle, .servidor-page-subtitle),
+  .servidor-hero :is(.page-subtitle, .server-page-subtitle, .servidor-page-subtitle) {
+    font-size: var(--font-base) !important;
+  }
+
+  .server-service-card,
+  .servidor-service-card {
+    min-block-size: 0 !important;
+    padding: var(--space-md) !important;
+  }
+}
+
+@media (max-width: 520px) {
+  .server-hero-meta > span,
+  .servidor-hero-meta > span,
+  .server-meta-pill,
+  .servidor-meta-pill {
+    inline-size: 100% !important;
+    justify-content: center !important;
+  }
+
+  .server-dashboard-toolbar button,
+  .servidor-dashboard-toolbar button,
+  #server-health-btn,
+  #server-refresh-btn,
+  #server-toggle-live-btn,
+  #server-retry-btn {
+    inline-size: 100% !important;
+  }
+
+  .server-service-card > div:first-child,
+  .servidor-service-card > div:first-child {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
+
+  .server-service-card button,
+  .servidor-service-card button {
+    max-inline-size: 100%;
+  }
+}
+
+
+/* =========================================================
+   CONTAINER QUERIES
+========================================================= */
+
+@container (max-width: 920px) {
+  .server-dashboard-main-grid,
+  .servidor-dashboard-main-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .server-services-grid,
+  .servidor-services-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@container (max-width: 760px) {
+  .server-hero-stats,
+  .servidor-hero-stats,
+  .server-stats,
+  .servidor-stats {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+
+/* =========================================================
+   PRINT
+========================================================= */
+
+@media print {
+  .server-dashboard-toolbar button,
+  .servidor-dashboard-toolbar button,
+  #server-health-btn,
+  #server-refresh-btn,
+  #server-toggle-live-btn,
+  #server-retry-btn,
+  .server-dashboard-overlay,
+  .servidor-dashboard-overlay {
+    display: none !important;
+  }
+
+  .server-hero,
+  .servidor-hero,
+  .server-dashboard-wrap,
+  .servidor-dashboard-wrap,
+  .server-service-card,
+  .servidor-service-card,
+  .server-tech-sidebar,
+  .servidor-tech-sidebar,
+  .server-stat-card,
+  .servidor-stat-card {
+    box-shadow: none !important;
+  }
+
+  .server-dashboard-main-grid,
+  .servidor-dashboard-main-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+
+/* =========================================================
+   MOTION
+========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  :where(
+    .server-view,
+    .server-view-root,
+    .servidor-view,
+    .servidor-view-root,
+    [data-server-scope],
+    [data-servidor-scope],
+    [data-view="server"],
+    [data-view="servidor"]
+  ) *,
+  :where(
+    .server-view,
+    .server-view-root,
+    .servidor-view,
+    .servidor-view-root,
+    [data-server-scope],
+    [data-servidor-scope],
+    [data-view="server"],
+    [data-view="servidor"]
+  ) *::before,
+  :where(
+    .server-view,
+    .server-view-root,
+    .servidor-view,
+    .servidor-view-root,
+    [data-server-scope],
+    [data-servidor-scope],
+    [data-view="server"],
+    [data-view="servidor"]
+  ) *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .server-service-card:hover,
+  .servidor-service-card:hover,
+  .server-btn:hover,
+  .servidor-btn:hover,
+  .server-dashboard-toolbar button:hover,
+  .servidor-dashboard-toolbar button:hover,
+  .server-service-card button:hover,
+  .servidor-service-card button:hover {
+    transform: none !important;
+  }
+}
+
+
+/* =========================================================
+   KEYFRAMES
+========================================================= */
+
+@keyframes serverSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes serverSkeleton {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes serverPulse {
+  0% {
+    transform: scale(.92);
+    opacity: .72;
+  }
+
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(.92);
+    opacity: .72;
+  }
+}

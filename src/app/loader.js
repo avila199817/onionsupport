@@ -2,67 +2,57 @@
    Onion SPA - App Loader
    Archivo: src/app/loader.js
 
+   ONION SUPPORT · APP LOADER CONTROLLER
+   BOOT SAFE · CSP CLEAN · RACE SAFE · EXTREME 10/10
+
    RESPONSABILIDADES:
-   - resolver el loader global de la app
-   - mostrar / ocultar loader de forma robusta
-   - tomar control del loader estático de index.html
-   - crear loader fallback si index.html no lo trae
-   - restaurar estilos inline del loader
-   - aplicar failsafe anti-loader infinito
-   - limpiar timer de failsafe
-   - evitar flicker visual
-   - endurecer DOM access browser/server
+   - Resolver el loader global de la app.
+   - Tomar control del loader estático de index.html.
+   - Mostrar / ocultar loader de forma robusta.
+   - Crear loader fallback si index.html no lo trae.
+   - No usar innerHTML.
+   - No inyectar CSS inline.
+   - No depender de body[data-theme] para decidir logos.
+   - Limpiar estados html/body/shell/main/view.
+   - Aplicar failsafe anti-loader infinito.
+   - Limpiar timer de failsafe.
+   - Evitar flicker visual.
+   - Endurecer DOM access browser/server.
+   - Exponer snapshot útil para debug.
 
-   ALINEADO CON index.js:
-   - respeta AppCore.state.loading
-   - respeta AppCore.state.booting
-   - mínimo riesgo visual en boot
-   - hide idempotente total
-   - show seguro aunque DOM parcial
-   - snapshot útil para debug
+   CONTRATO CON INDEX / THEME / CSS:
+   - index.html deja #app-loader visible desde refresh.
+   - preboot/theme.js resuelve html[data-theme].
+   - loader.css controla:
+     · .is-visible
+     · .is-leaving
+     · .is-hidden
+     · .has-hidden
+     · [data-loader-visible]
+     · [data-loader-state]
+   - Este módulo controla estado; CSS controla presentación.
 
-   HARDENING EXTREMO:
-   - cero throws
-   - race-safe timers
-   - fallback si AppCore parcial
-   - SSR safe
-   - no deja overlay dark pegado
-   - respeta state.bootFailsafeTimer
-   - failsafe no agresivo
-   - warnings deduplicados
+   LIMPIEZA FINAL ESPERADA:
+   - html/body sin app-booting.
+   - html/body sin app-loading.
+   - html/body con app-ready.
+   - html/body data-app-loading="false".
+   - html data-app-state="ready".
+   - body data-shell-state="ready".
+   - #app-loader.is-hidden.has-hidden.
+   - #app-loader data-loader-visible="false".
+   - #app-loader data-loader-state="hidden".
+   - #app-shell data-shell="ready".
+   - #app-shell data-shell-interactive="true".
+   - #app-shell aria-hidden="false".
+   - #main-content aria-busy="false".
+   - #view-container aria-busy="false".
 
-   FIX VISUAL:
-   - html/body reciben clases app-booting/app-loading/app-ready
-   - loader visible desde boot/refresco si existe en index.html
-   - fallback loader con logo si no existe #app-loader
-   - ocultación suave + limpieza final
-   - logo fallback theme-aware:
-     · dark  -> favicon_white.png
-     · light -> favicon_black.png
-
-   FIX CONSOLA:
-   - no duplica warnings por AppCore.utils.warn + console.warn
-   - no dispara failsafe antes de 8s
-   - no marca failsafe como warning si el boot ya terminó
-
-   FIX LOGO:
-   - no usa /assets/logo.svg como fallback principal
-   - usa los assets reales:
-     · ../media/img/favicon_white.png
-     · ../media/img/favicon_black.png
-   - compatible con ESM nativo mediante new URL(..., import.meta.url)
-   - si ya existe #app-loader en index.html, NO inyecta CSS fallback
-
-   FIX CSP:
-   - el fallback generado por JS no usa atributos onerror inline
-   - los errores de imagen se gestionan con addEventListener
-   - el CSS fallback solo se inyecta si falta por completo #app-loader
-
-   FUENTE DE VERDAD DEL TEMA:
-   - html[data-theme] durante preboot
-   - window.__ONION_BOOT_THEME__ como snapshot temprano
-   - AppCore.state.theme como fallback runtime
-   - body[data-theme] NO decide logo para evitar conflictos en boot
+   CSP:
+   - Sin inline handlers.
+   - Sin style tag dinámico.
+   - Sin innerHTML.
+   - Sólo creación DOM segura.
 ========================================================= */
 
 import {
@@ -74,8 +64,15 @@ import {
 ========================================================= */
 
 const LOADER_ID = "app-loader";
+
 const LOADER_SELECTOR =
   "#app-loader,.app-loader,.loader,[data-app-loader='true']";
+
+const SHELL_ID = "app-shell";
+const MAIN_ID = "main-content";
+const VIEW_ID = "view-container";
+const SIDEBAR_MOUNT_ID = "sidebar-mount";
+const TOPBAR_MOUNT_ID = "topbar-mount";
 
 const DEFAULT_HIDE_TRANSITION_MS = 220;
 const DEFAULT_MIN_VISIBLE_MS = 320;
@@ -115,6 +112,23 @@ const HTML_READY_CLASSES = [
   "app-ready",
 ];
 
+const LOADER_VISIBLE_CLASSES = [
+  "is-visible",
+];
+
+const LOADER_ENTERING_CLASSES = [
+  "is-entering",
+];
+
+const LOADER_LEAVING_CLASSES = [
+  "is-leaving",
+];
+
+const LOADER_HIDDEN_CLASSES = [
+  "is-hidden",
+  "has-hidden",
+];
+
 /* =========================================================
    MODULE RUNTIME
 ========================================================= */
@@ -139,15 +153,9 @@ function isBrowser() {
   );
 }
 
-function resolveModuleAssetUrl(
-  relativePath,
-  fallbackPath = ""
-) {
+function resolveModuleAssetUrl(relativePath, fallbackPath = "") {
   try {
-    return new URL(
-      relativePath,
-      import.meta.url
-    ).href;
+    return new URL(relativePath, import.meta.url).href;
   } catch {
     return fallbackPath;
   }
@@ -161,15 +169,13 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text =
-    String(value).trim();
+  const text = String(value).trim();
 
   return text || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
-  const n =
-    Number(value);
+  const n = Number(value);
 
   return Number.isFinite(n)
     ? n
@@ -177,66 +183,21 @@ function safeNumber(value, fallback = 0) {
 }
 
 function safeObject(value) {
-  return value &&
+  return (
+    value &&
     typeof value === "object" &&
     !Array.isArray(value)
+  )
     ? value
     : {};
 }
 
-function safeWarn(
-  AppCore,
-  ...args
-) {
+function safeWarn(AppCore, ...args) {
   let emittedByCore = false;
 
   try {
-    if (
-      typeof AppCore?.utils?.warn === "function"
-    ) {
-      AppCore.utils.warn(
-        "[Loader]",
-        ...args
-      );
-
-      emittedByCore = true;
-    }
-  } catch {
-    emittedByCore = false;
-  }
-
-  /*
-    Evita duplicar:
-    - [Onion Support] [Loader] ...
-    - [Loader] ...
-  */
-  if (emittedByCore) {
-    return;
-  }
-
-  try {
-    console.warn(
-      "[Loader]",
-      ...args
-    );
-  } catch {}
-}
-
-function safeLog(
-  AppCore,
-  ...args
-) {
-  let emittedByCore = false;
-
-  try {
-    if (
-      typeof AppCore?.utils?.log === "function"
-    ) {
-      AppCore.utils.log(
-        "[Loader]",
-        ...args
-      );
-
+    if (typeof AppCore?.utils?.warn === "function") {
+      AppCore.utils.warn("[Loader]", ...args);
       emittedByCore = true;
     }
   } catch {
@@ -248,40 +209,20 @@ function safeLog(
   }
 
   try {
-    console.log(
-      "[Loader]",
-      ...args
-    );
+    console.warn("[Loader]", ...args);
   } catch {}
 }
 
-function safeEmit(
-  AppCore,
-  eventName,
-  payload = {}
-) {
-  let busAvailable = false;
-
+function safeEmit(AppCore, eventName, payload = {}) {
   try {
-    if (
-      typeof AppCore?.events?.emit === "function"
-    ) {
-      busAvailable = true;
-
-      AppCore.events.emit(
-        eventName,
-        payload
-      );
-
+    if (typeof AppCore?.events?.emit === "function") {
+      AppCore.events.emit(eventName, payload);
       return true;
     }
   } catch {}
 
   try {
-    if (
-      !busAvailable &&
-      isBrowser()
-    ) {
+    if (isBrowser()) {
       window.dispatchEvent(
         new CustomEvent(eventName, {
           detail: payload,
@@ -337,18 +278,11 @@ function requestPaint() {
   return new Promise((resolve) => {
     try {
       if (!isBrowser()) {
-        if (typeof setTimeout === "function") {
-          setTimeout(resolve, 0);
-          return;
-        }
-
-        resolve();
+        setTimeout(resolve, 0);
         return;
       }
 
-      if (
-        typeof window.requestAnimationFrame !== "function"
-      ) {
+      if (typeof window.requestAnimationFrame !== "function") {
         window.setTimeout(resolve, 0);
         return;
       }
@@ -362,29 +296,19 @@ function requestPaint() {
   });
 }
 
-function safeGetState(
-  AppCore
-) {
+function safeGetState(AppCore) {
   try {
-    return (
-      AppCore?.state || {}
-    );
+    return AppCore?.state || {};
   } catch {
     return {};
   }
 }
 
-function safeSetLoading(
-  AppCore,
-  value = false
-) {
-  const next =
-    Boolean(value);
+function safeSetLoading(AppCore, value = false) {
+  const next = Boolean(value);
 
   try {
-    if (
-      typeof AppCore?.setLoading === "function"
-    ) {
+    if (typeof AppCore?.setLoading === "function") {
       AppCore.setLoading(next);
       return;
     }
@@ -395,28 +319,197 @@ function safeSetLoading(
       AppCore?.state &&
       typeof AppCore.state === "object"
     ) {
-      AppCore.state.loading =
-        next;
+      AppCore.state.loading = next;
     }
   } catch {}
 }
 
-function safeSetBooting(
-  AppCore,
-  value = false
-) {
-  const next =
-    Boolean(value);
+function safeSetBooting(AppCore, value = false) {
+  const next = Boolean(value);
 
   try {
     if (
       AppCore?.state &&
       typeof AppCore.state === "object"
     ) {
-      AppCore.state.booting =
-        next;
+      AppCore.state.booting = next;
     }
   } catch {}
+}
+
+function safeSetDomRef(AppCore, key, value) {
+  try {
+    if (AppCore?.dom && key) {
+      AppCore.dom[key] = value;
+    }
+  } catch {}
+}
+
+/* =========================================================
+   DOM HELPERS
+========================================================= */
+
+function getById(id = "") {
+  if (!isBrowser() || !id) {
+    return null;
+  }
+
+  try {
+    return document.getElementById(id);
+  } catch {
+    return null;
+  }
+}
+
+function query(selector = "") {
+  if (!isBrowser() || !selector) {
+    return null;
+  }
+
+  try {
+    return document.querySelector(selector);
+  } catch {
+    return null;
+  }
+}
+
+function documentContains(element) {
+  try {
+    return Boolean(
+      element &&
+      document.contains(element)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function setAttr(element, name, value) {
+  if (!element || !name) {
+    return false;
+  }
+
+  try {
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      element.removeAttribute(name);
+    } else {
+      element.setAttribute(name, String(value));
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setDataset(element, key, value) {
+  if (!element || !key) {
+    return false;
+  }
+
+  try {
+    element.dataset[key] = String(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function toggleClasses(element, classNames = [], enabled = false) {
+  if (!element) {
+    return false;
+  }
+
+  try {
+    for (const className of classNames) {
+      element.classList.toggle(className, Boolean(enabled));
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function addClasses(element, classNames = []) {
+  if (!element) {
+    return false;
+  }
+
+  try {
+    element.classList.add(...classNames.filter(Boolean));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeClasses(element, classNames = []) {
+  if (!element) {
+    return false;
+  }
+
+  try {
+    element.classList.remove(...classNames.filter(Boolean));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearLegacyInlineLoaderStyles(loader) {
+  if (!loader) {
+    return false;
+  }
+
+  try {
+    /*
+      No escribimos estilos inline nuevos.
+      Sólo limpiamos posibles estilos legacy que hubieran quedado pegados.
+    */
+    loader.style.display = "";
+    loader.style.opacity = "";
+    loader.style.visibility = "";
+    loader.style.pointerEvents = "";
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createElement(tagName = "div", {
+  id = "",
+  className = "",
+  text = "",
+  attrs = {},
+  dataset = {},
+} = {}) {
+  const element = document.createElement(tagName);
+
+  if (id) {
+    element.id = id;
+  }
+
+  if (className) {
+    element.className = className;
+  }
+
+  if (text) {
+    element.textContent = text;
+  }
+
+  for (const [key, value] of Object.entries(safeObject(attrs))) {
+    setAttr(element, key, value);
+  }
+
+  for (const [key, value] of Object.entries(safeObject(dataset))) {
+    setDataset(element, key, value);
+  }
+
+  return element;
 }
 
 /* =========================================================
@@ -424,9 +517,7 @@ function safeSetBooting(
 ========================================================= */
 
 function normalizeTheme(value) {
-  const theme =
-    safeText(value, "")
-      .toLowerCase();
+  const theme = safeText(value, "").toLowerCase();
 
   if (
     theme === "light" ||
@@ -462,9 +553,7 @@ function getBootThemeSnapshot() {
   }
 
   try {
-    return safeObject(
-      window.__ONION_BOOT_THEME__
-    );
+    return safeObject(window.__ONION_BOOT_THEME__);
   } catch {
     return {};
   }
@@ -475,11 +564,6 @@ function getStoredTheme() {
     return "";
   }
 
-  /*
-    Orden intencional:
-    - themeMode / appearance puede contener "system"
-    - theme suele contener el resultado visual "dark/light"
-  */
   const keys = [
     "onion:themeMode",
     "onion:appearance",
@@ -487,31 +571,21 @@ function getStoredTheme() {
     "onion_appearance",
     "onion.themeMode",
     "onion.appearance",
-
     "themeMode",
     "appearance",
     "theme_mode",
     "colorMode",
     "color_mode",
     "mode",
-
     "onion:theme",
     "onion_theme",
     "onion.theme",
-    "onion-theme",
-    "onionsupport:theme",
-    "app:theme",
-
     "theme",
   ];
 
   for (const key of keys) {
     try {
-      const value =
-        localStorage.getItem(key);
-
-      const theme =
-        normalizeTheme(value);
+      const theme = normalizeTheme(localStorage.getItem(key));
 
       if (theme) {
         return theme;
@@ -519,19 +593,15 @@ function getStoredTheme() {
     } catch {}
   }
 
-  try {
-    for (const key of keys) {
-      const value =
-        sessionStorage.getItem(key);
-
-      const theme =
-        normalizeTheme(value);
+  for (const key of keys) {
+    try {
+      const theme = normalizeTheme(sessionStorage.getItem(key));
 
       if (theme) {
         return theme;
       }
-    }
-  } catch {}
+    } catch {}
+  }
 
   return "";
 }
@@ -554,8 +624,7 @@ function getSystemTheme() {
 }
 
 function resolveThemeValue(theme = "") {
-  const normalized =
-    normalizeTheme(theme);
+  const normalized = normalizeTheme(theme);
 
   if (normalized === "system") {
     return getSystemTheme();
@@ -572,60 +641,39 @@ function resolveThemeValue(theme = "") {
 }
 
 function getCurrentTheme(AppCore) {
-  /*
-    Fuente de verdad principal:
-    - documentElement, porque preboot/theme.js corre en <head>
-      y puede actualizar <html> antes de que exista <body>.
-  */
   try {
-    const htmlTheme =
-      resolveThemeValue(
-        document.documentElement?.dataset?.theme
-      );
+    const htmlTheme = resolveThemeValue(
+      document.documentElement?.dataset?.theme
+    );
 
     if (htmlTheme) {
       return htmlTheme;
     }
   } catch {}
 
-  /*
-    Snapshot temprano del preboot.
-  */
   try {
-    const boot =
-      getBootThemeSnapshot();
+    const boot = getBootThemeSnapshot();
 
-    const bootTheme =
-      resolveThemeValue(
-        boot.theme || boot.mode
-      );
+    const bootTheme = resolveThemeValue(
+      boot.theme || boot.mode
+    );
 
     if (bootTheme) {
       return bootTheme;
     }
   } catch {}
 
-  /*
-    Estado runtime.
-  */
   try {
-    const stateTheme =
-      resolveThemeValue(
-        AppCore?.state?.theme
-      );
+    const stateTheme = resolveThemeValue(
+      AppCore?.state?.theme
+    );
 
     if (stateTheme) {
       return stateTheme;
     }
   } catch {}
 
-  /*
-    Storage como fallback defensivo.
-  */
-  const storedTheme =
-    resolveThemeValue(
-      getStoredTheme()
-    );
+  const storedTheme = resolveThemeValue(getStoredTheme());
 
   if (storedTheme) {
     return storedTheme;
@@ -635,21 +683,15 @@ function getCurrentTheme(AppCore) {
 }
 
 function getDefaultLoaderLogoUrl(AppCore) {
-  const theme =
-    getCurrentTheme(AppCore);
-
-  return theme === "light"
+  return getCurrentTheme(AppCore) === "light"
     ? DEFAULT_LOADER_LOGO_BLACK_URL
     : DEFAULT_LOADER_LOGO_WHITE_URL;
 }
 
 function getDefaultLoaderLogoPair() {
   return {
-    white:
-      DEFAULT_LOADER_LOGO_WHITE_URL,
-
-    black:
-      DEFAULT_LOADER_LOGO_BLACK_URL,
+    white: DEFAULT_LOADER_LOGO_WHITE_URL,
+    black: DEFAULT_LOADER_LOGO_BLACK_URL,
   };
 }
 
@@ -658,31 +700,25 @@ function getDefaultLoaderLogoPair() {
 ========================================================= */
 
 function getLoaderConfig(AppCore) {
-  const cfg =
-    safeObject(AppCore?.config);
+  const cfg = safeObject(AppCore?.config);
 
-  const defaultLogoUrl =
-    getDefaultLoaderLogoUrl(AppCore);
+  const defaultLogoUrl = getDefaultLoaderLogoUrl(AppCore);
+  const defaultLogoPair = getDefaultLoaderLogoPair();
 
-  const defaultLogoPair =
-    getDefaultLoaderLogoPair();
-
-  const explicitLogoUrl =
-    safeText(
-      cfg.loaderLogoUrl ||
-        cfg.logoUrl ||
-        cfg.logo ||
-        cfg.brandLogo ||
-        cfg.appLogo ||
-        "",
-      ""
-    );
+  const explicitLogoUrl = safeText(
+    cfg.loaderLogoUrl ||
+      cfg.logoUrl ||
+      cfg.logo ||
+      cfg.brandLogo ||
+      cfg.appLogo ||
+      "",
+    ""
+  );
 
   return {
     logoUrl:
       safeText(
-        explicitLogoUrl ||
-          defaultLogoUrl,
+        explicitLogoUrl || defaultLogoUrl,
         defaultLogoUrl
       ),
 
@@ -726,8 +762,8 @@ function getLoaderConfig(AppCore) {
     subtext:
       safeText(
         cfg.loaderSubtext ||
-          "",
-        ""
+          "Preparando panel seguro",
+        "Preparando panel seguro"
       ),
 
     minVisibleMs:
@@ -767,430 +803,206 @@ function getFailsafeTimeoutMs(timeoutMs = null) {
 }
 
 /* =========================================================
-   DOM CLASS OPS
+   APP / SHELL STATE
 ========================================================= */
 
-function toggleClasses(
-  element,
-  classNames = [],
-  enabled = false
-) {
-  if (!element) {
-    return;
-  }
-
-  try {
-    for (const className of classNames) {
-      element.classList.toggle(
-        className,
-        Boolean(enabled)
-      );
-    }
-  } catch {}
+function getShellElement() {
+  return getById(SHELL_ID);
 }
 
-function setDocumentLoadingState(
-  enabled = false
-) {
-  if (
-    !isBrowser() ||
-    !document.documentElement ||
-    !document.body
-  ) {
-    return;
-  }
-
-  const loading =
-    Boolean(enabled);
-
-  try {
-    toggleClasses(
-      document.documentElement,
-      HTML_LOADING_CLASSES,
-      loading
-    );
-
-    toggleClasses(
-      document.body,
-      BODY_LOADING_CLASSES,
-      loading
-    );
-
-    toggleClasses(
-      document.documentElement,
-      HTML_READY_CLASSES,
-      !loading
-    );
-
-    toggleClasses(
-      document.body,
-      BODY_READY_CLASSES,
-      !loading
-    );
-
-    document.documentElement.dataset.appLoading =
-      loading ? "true" : "false";
-
-    document.body.dataset.appLoading =
-      loading ? "true" : "false";
-  } catch {}
+function getMainElement() {
+  return getById(MAIN_ID);
 }
 
-function setBodyLoading(
-  enabled = false
-) {
-  setDocumentLoadingState(
-    enabled
-  );
+function getViewElement() {
+  return getById(VIEW_ID);
 }
 
-/* =========================================================
-   FALLBACK MARKUP
-========================================================= */
-
-function escapeHtml(value = "") {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+function getSidebarMountElement() {
+  return getById(SIDEBAR_MOUNT_ID);
 }
 
-function getFallbackLoaderHtml(AppCore) {
-  const cfg =
-    getLoaderConfig(AppCore);
-
-  const logoWhiteUrl =
-    escapeHtml(cfg.logoWhiteUrl);
-
-  const logoBlackUrl =
-    escapeHtml(cfg.logoBlackUrl);
-
-  const appName =
-    escapeHtml(cfg.appName);
-
-  const text =
-    escapeHtml(cfg.text);
-
-  const subtext =
-    escapeHtml(cfg.subtext);
-
-  const fallbackInitial =
-    escapeHtml(
-      cfg.appName.slice(0, 1).toUpperCase() || "O"
-    );
-
-  return `
-    <div class="app-loader__backdrop" data-loader-backdrop="true" aria-hidden="true"></div>
-
-    <div class="app-loader__card" role="status" aria-live="polite" aria-busy="true">
-      <div class="app-loader__brand" aria-hidden="true">
-        <img
-          class="app-loader__logo app-loader__logo--dark"
-          src="${logoWhiteUrl}"
-          alt=""
-          draggable="false"
-          aria-hidden="true"
-          data-loader-logo-dark="true"
-        />
-
-        <img
-          class="app-loader__logo app-loader__logo--light"
-          src="${logoBlackUrl}"
-          alt=""
-          draggable="false"
-          aria-hidden="true"
-          data-loader-logo-light="true"
-        />
-
-        <div
-          class="app-loader__logo-fallback"
-          data-loader-logo-fallback="true"
-          aria-hidden="true"
-        >
-          ${fallbackInitial}
-        </div>
-      </div>
-
-      <div class="app-loader__copy">
-        <strong class="app-loader__title">${appName}</strong>
-        <span class="app-loader__text">${text}</span>
-        ${
-          subtext
-            ? `<small class="app-loader__subtext">${subtext}</small>`
-            : ""
-        }
-      </div>
-
-      <div class="app-loader__bar" aria-hidden="true">
-        <span class="app-loader__bar-fill"></span>
-      </div>
-    </div>
-  `;
+function getTopbarMountElement() {
+  return getById(TOPBAR_MOUNT_ID);
 }
 
-function injectFallbackLoaderStyles() {
+function setDocumentLoadingState(enabled = false, {
+  booting = false,
+} = {}) {
   if (!isBrowser()) {
     return false;
   }
 
+  const html = document.documentElement;
+  const body = document.body;
+
+  if (!html) {
+    return false;
+  }
+
+  const loading = Boolean(enabled);
+  const isBooting = Boolean(booting && loading);
+
   try {
-    if (
-      document.getElementById(
-        "app-loader-fallback-style"
-      )
-    ) {
-      return true;
+    toggleClasses(html, HTML_LOADING_CLASSES, false);
+    toggleClasses(html, HTML_READY_CLASSES, !loading);
+
+    if (loading) {
+      addClasses(html, ["app-loading"]);
+
+      if (isBooting) {
+        addClasses(html, ["app-booting"]);
+      }
     }
 
-    const style =
-      document.createElement("style");
+    html.dataset.appLoading = loading ? "true" : "false";
+    html.dataset.appState = loading
+      ? isBooting
+        ? "booting"
+        : "loading"
+      : "ready";
 
-    style.id =
-      "app-loader-fallback-style";
-
-    style.textContent = `
-      html.app-booting,
-      body.app-booting {
-        min-height: 100%;
+    if (isBooting) {
+      html.dataset.routeMode = "boot";
+      html.dataset.shellState = "booting";
+    } else if (!loading) {
+      if (html.dataset.routeMode === "boot") {
+        html.dataset.routeMode = "ready";
       }
 
-      body.app-booting {
-        overflow: hidden;
+      html.dataset.shellState = "ready";
+    }
+  } catch {}
+
+  if (!body) {
+    return true;
+  }
+
+  try {
+    toggleClasses(body, BODY_LOADING_CLASSES, false);
+    toggleClasses(body, BODY_READY_CLASSES, !loading);
+
+    if (loading) {
+      addClasses(body, ["app-loading"]);
+
+      if (isBooting) {
+        addClasses(body, ["app-booting"]);
+      }
+    }
+
+    body.dataset.appLoading = loading ? "true" : "false";
+    body.dataset.shellState = loading
+      ? isBooting
+        ? "booting"
+        : "loading"
+      : "ready";
+
+    if (isBooting) {
+      body.dataset.routeMode = "boot";
+    } else if (!loading && body.dataset.routeMode === "boot") {
+      body.dataset.routeMode = "ready";
+    }
+  } catch {}
+
+  return true;
+}
+
+function setShellLoadingState(enabled = false, {
+  booting = false,
+} = {}) {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  const loading = Boolean(enabled);
+  const isBooting = Boolean(booting && loading);
+
+  const shell = getShellElement();
+  const main = getMainElement();
+  const view = getViewElement();
+  const sidebar = getSidebarMountElement();
+  const topbar = getTopbarMountElement();
+
+  const shellState = loading
+    ? isBooting
+      ? "booting"
+      : "loading"
+    : "ready";
+
+  try {
+    if (shell) {
+      shell.dataset.shell = shellState;
+      shell.dataset.shellState = shellState;
+      shell.dataset.shellInteractive = loading ? "false" : "true";
+
+      if (shell.dataset.routeMode === "boot" && !loading) {
+        shell.dataset.routeMode = "ready";
       }
 
-      #app-loader,
-      .app-loader {
-        position: fixed;
-        inset: 0;
-        z-index: 2147483000;
-        display: grid;
-        place-items: center;
-        min-height: 100dvh;
-        opacity: 1;
-        visibility: visible;
-        pointer-events: auto;
-        transition:
-          opacity 220ms ease,
-          visibility 220ms ease;
-      }
+      setAttr(shell, "aria-busy", loading ? "true" : "false");
+      setAttr(shell, "aria-hidden", loading ? "true" : "false");
+    }
 
-      #app-loader.is-hidden,
-      .app-loader.is-hidden {
-        opacity: 0;
-        visibility: hidden;
-        pointer-events: none;
-      }
+    if (main) {
+      setAttr(main, "aria-busy", loading ? "true" : "false");
 
-      #app-loader.is-visible,
-      .app-loader.is-visible {
-        opacity: 1;
-        visibility: visible;
-        pointer-events: auto;
+      if (main.dataset.routeMode === "boot" && !loading) {
+        main.dataset.routeMode = "ready";
       }
+    }
 
-      .app-loader__backdrop {
-        position: absolute;
-        inset: 0;
-        background:
-          radial-gradient(circle at 50% 0%, rgba(99, 102, 241, .14), transparent 36%),
-          linear-gradient(180deg, rgba(3, 7, 18, .96), rgba(2, 6, 23, .98));
-      }
+    if (view) {
+      setAttr(view, "aria-busy", loading ? "true" : "false");
+    }
 
-      html[data-theme="light"] .app-loader__backdrop,
-      html.theme-light .app-loader__backdrop {
-        background:
-          radial-gradient(circle at 50% 0%, rgba(111, 89, 217, .16), transparent 38%),
-          linear-gradient(180deg, rgba(248, 250, 252, .98), rgba(241, 245, 249, .98));
-      }
+    if (sidebar) {
+      setAttr(sidebar, "aria-hidden", loading ? "true" : "false");
+    }
 
-      .app-loader__card {
-        position: relative;
-        z-index: 1;
-        width: min(360px, calc(100vw - 48px));
-        display: grid;
-        gap: 18px;
-        justify-items: center;
-        padding: 28px 26px;
-        border-radius: 28px;
-        border: 1px solid rgba(148, 163, 184, .18);
-        background:
-          linear-gradient(180deg, rgba(255, 255, 255, .08), rgba(255, 255, 255, .035));
-        box-shadow:
-          0 26px 80px rgba(0, 0, 0, .42),
-          inset 0 1px 0 rgba(255, 255, 255, .08);
-        backdrop-filter: blur(18px);
-        -webkit-backdrop-filter: blur(18px);
-        color: #f8fafc;
-        text-align: center;
-      }
-
-      html[data-theme="light"] .app-loader__card,
-      html.theme-light .app-loader__card {
-        border-color: rgba(15, 23, 42, .1);
-        background:
-          linear-gradient(180deg, rgba(255, 255, 255, .92), rgba(255, 255, 255, .78));
-        box-shadow:
-          0 26px 80px rgba(15, 23, 42, .14),
-          inset 0 1px 0 rgba(255, 255, 255, .9);
-        color: #0f172a;
-      }
-
-      .app-loader__brand {
-        width: 74px;
-        height: 74px;
-        display: grid;
-        place-items: center;
-        border-radius: 24px;
-        background: rgba(255, 255, 255, .08);
-        box-shadow:
-          inset 0 0 0 1px rgba(255, 255, 255, .12),
-          0 16px 38px rgba(0, 0, 0, .26);
-        overflow: hidden;
-      }
-
-      html[data-theme="light"] .app-loader__brand,
-      html.theme-light .app-loader__brand {
-        background: rgba(15, 23, 42, .035);
-        box-shadow:
-          inset 0 0 0 1px rgba(15, 23, 42, .08),
-          0 16px 38px rgba(15, 23, 42, .12);
-      }
-
-      .app-loader__brand > * {
-        grid-area: 1 / 1;
-      }
-
-      .app-loader__logo {
-        width: 52px;
-        height: 52px;
-        object-fit: contain;
-        display: block;
-      }
-
-      .app-loader__logo--light {
-        display: none !important;
-      }
-
-      .app-loader__logo--dark {
-        display: block !important;
-      }
-
-      html[data-theme="light"] .app-loader__logo--dark,
-      html.theme-light .app-loader__logo--dark {
-        display: none !important;
-      }
-
-      html[data-theme="light"] .app-loader__logo--light,
-      html.theme-light .app-loader__logo--light {
-        display: block !important;
-      }
-
-      html[data-theme="dark"] .app-loader__logo--light,
-      html.theme-dark .app-loader__logo--light {
-        display: none !important;
-      }
-
-      html[data-theme="dark"] .app-loader__logo--dark,
-      html.theme-dark .app-loader__logo--dark {
-        display: block !important;
-      }
-
-      .app-loader__logo.is-broken {
-        display: none !important;
-      }
-
-      .app-loader__logo-fallback {
-        width: 52px;
-        height: 52px;
-        display: none;
-        place-items: center;
-        border-radius: 18px;
-        font-size: 24px;
-        font-weight: 800;
-        letter-spacing: -.04em;
-        color: #f8fafc;
-        background: linear-gradient(135deg, rgba(99,102,241,.8), rgba(14,165,233,.72));
-      }
-
-      .app-loader.has-logo-error .app-loader__logo-fallback {
-        display: grid;
-      }
-
-      .app-loader__copy {
-        display: grid;
-        gap: 5px;
-      }
-
-      .app-loader__title {
-        font-size: 18px;
-        line-height: 1.15;
-        letter-spacing: -.03em;
-      }
-
-      .app-loader__text {
-        font-size: 13px;
-        color: rgba(226, 232, 240, .8);
-      }
-
-      html[data-theme="light"] .app-loader__text,
-      html.theme-light .app-loader__text {
-        color: rgba(51, 65, 85, .82);
-      }
-
-      .app-loader__subtext {
-        font-size: 11px;
-        color: rgba(148, 163, 184, .86);
-      }
-
-      html[data-theme="light"] .app-loader__subtext,
-      html.theme-light .app-loader__subtext {
-        color: rgba(100, 116, 139, .86);
-      }
-
-      .app-loader__bar {
-        width: 100%;
-        height: 7px;
-        border-radius: 999px;
-        overflow: hidden;
-        background: rgba(148, 163, 184, .18);
-      }
-
-      .app-loader__bar-fill {
-        display: block;
-        width: 42%;
-        height: 100%;
-        border-radius: inherit;
-        background: linear-gradient(90deg, rgba(99,102,241,.1), rgba(99,102,241,.85), rgba(14,165,233,.78));
-        animation: onion-loader-bar 1.05s ease-in-out infinite;
-      }
-
-      @keyframes onion-loader-bar {
-        0% {
-          transform: translateX(-105%);
-        }
-        100% {
-          transform: translateX(255%);
-        }
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        #app-loader,
-        .app-loader,
-        .app-loader__bar-fill {
-          transition: none !important;
-          animation: none !important;
-        }
-      }
-    `;
-
-    document.head?.appendChild(style);
+    if (topbar) {
+      setAttr(topbar, "aria-hidden", loading ? "true" : "false");
+    }
 
     return true;
   } catch {
     return false;
   }
+}
+
+function setAppLoadingState(enabled = false, {
+  booting = false,
+} = {}) {
+  setDocumentLoadingState(enabled, { booting });
+  setShellLoadingState(enabled, { booting });
+}
+
+/* =========================================================
+   FALLBACK MARKUP WITHOUT innerHTML
+========================================================= */
+
+function createLoaderImage({
+  className,
+  src,
+  fetchPriority = "auto",
+  dataset = {},
+} = {}) {
+  const img = createElement("img", {
+    className,
+    attrs: {
+      src,
+      alt: "",
+      width: "64",
+      height: "64",
+      loading: "eager",
+      decoding: "async",
+      draggable: "false",
+      "aria-hidden": "true",
+      fetchpriority: fetchPriority,
+    },
+    dataset,
+  });
+
+  return img;
 }
 
 function isElementDisplayed(element) {
@@ -1203,8 +1015,7 @@ function isElementDisplayed(element) {
       return false;
     }
 
-    const style =
-      window.getComputedStyle?.(element);
+    const style = window.getComputedStyle?.(element);
 
     if (!style) {
       return true;
@@ -1221,25 +1032,18 @@ function isElementDisplayed(element) {
 }
 
 function bindFallbackLogoErrorHandlers(loader) {
-  if (
-    !isBrowser() ||
-    !loader
-  ) {
+  if (!isBrowser() || !loader) {
     return false;
   }
 
   try {
-    const logos =
-      Array.from(
-        loader.querySelectorAll(
-          ".app-loader__logo"
-        )
-      );
+    const logos = Array.from(
+      loader.querySelectorAll(".app-loader__logo")
+    );
 
-    const fallback =
-      loader.querySelector(
-        ".app-loader__logo-fallback"
-      );
+    const fallback = loader.querySelector(
+      ".app-loader__logo-fallback"
+    );
 
     if (!logos.length) {
       return false;
@@ -1250,35 +1054,19 @@ function bindFallbackLogoErrorHandlers(loader) {
         "error",
         () => {
           try {
-            const wasVisible =
-              isElementDisplayed(logo);
+            const wasVisible = isElementDisplayed(logo);
 
-            logo.classList.add(
-              "is-broken"
-            );
-
+            logo.classList.add("is-broken");
             logo.hidden = true;
-            logo.setAttribute(
-              "aria-hidden",
-              "true"
-            );
+            logo.setAttribute("aria-hidden", "true");
 
-            if (
-              wasVisible &&
-              fallback
-            ) {
-              loader.classList.add(
-                "has-logo-error"
-              );
-
-              fallback.style.display =
-                "grid";
+            if (wasVisible && fallback) {
+              loader.classList.add("has-logo-error");
             }
           } catch {}
         },
         {
-          once:
-            true,
+          once: true,
         }
       );
     }
@@ -1294,46 +1082,142 @@ function createFallbackLoader(AppCore) {
     return null;
   }
 
-  const cfg =
-    getLoaderConfig(AppCore);
+  const cfg = getLoaderConfig(AppCore);
 
   if (!cfg.createIfMissing) {
     return null;
   }
 
   try {
-    injectFallbackLoaderStyles();
+    const loader = createElement("div", {
+      id: LOADER_ID,
+      className: "app-loader is-visible",
+      attrs: {
+        role: "status",
+        "aria-live": "polite",
+        "aria-busy": "true",
+        "aria-hidden": "false",
+      },
+      dataset: {
+        appLoader: "true",
+        loaderGenerated: "true",
+        loaderVisible: "true",
+        loaderState: "booting",
+      },
+    });
 
-    const loader =
-      document.createElement("div");
+    const backdrop = createElement("div", {
+      className: "app-loader__backdrop",
+      attrs: {
+        "aria-hidden": "true",
+      },
+      dataset: {
+        loaderBackdrop: "true",
+      },
+    });
 
-    loader.id = LOADER_ID;
-    loader.className = "app-loader is-visible";
-    loader.dataset.appLoader = "true";
-    loader.dataset.loaderGenerated = "true";
-    loader.dataset.loaderVisible = "true";
-    loader.dataset.loaderState = "booting";
-    loader.setAttribute("aria-hidden", "false");
-    loader.setAttribute("aria-busy", "true");
+    const card = createElement("div", {
+      className: "app-loader__card",
+      dataset: {
+        loaderCard: "true",
+      },
+    });
 
-    loader.innerHTML =
-      getFallbackLoaderHtml(AppCore);
+    const brand = createElement("div", {
+      className: "app-loader__brand",
+      attrs: {
+        "aria-hidden": "true",
+      },
+      dataset: {
+        loaderBrand: "true",
+      },
+    });
 
-    bindFallbackLogoErrorHandlers(
-      loader
-    );
+    const darkLogo = createLoaderImage({
+      className: "app-loader__logo app-loader__logo--dark",
+      src: cfg.logoWhiteUrl,
+      fetchPriority: "high",
+      dataset: {
+        loaderLogoDark: "true",
+      },
+    });
 
-    const target =
-      document.body ||
-      document.documentElement;
+    const lightLogo = createLoaderImage({
+      className: "app-loader__logo app-loader__logo--light",
+      src: cfg.logoBlackUrl,
+      fetchPriority: "low",
+      dataset: {
+        loaderLogoLight: "true",
+      },
+    });
 
+    const fallbackLogo = createElement("div", {
+      className: "app-loader__logo-fallback",
+      text: cfg.appName.slice(0, 1).toUpperCase() || "O",
+      attrs: {
+        "aria-hidden": "true",
+      },
+      dataset: {
+        loaderLogoFallback: "true",
+      },
+    });
+
+    brand.appendChild(darkLogo);
+    brand.appendChild(lightLogo);
+    brand.appendChild(fallbackLogo);
+
+    const copy = createElement("div", {
+      className: "app-loader__copy",
+    });
+
+    const title = createElement("strong", {
+      className: "app-loader__title",
+      text: cfg.appName,
+    });
+
+    const text = createElement("span", {
+      className: "app-loader__text",
+      text: cfg.text,
+    });
+
+    copy.appendChild(title);
+    copy.appendChild(text);
+
+    if (cfg.subtext) {
+      copy.appendChild(
+        createElement("small", {
+          className: "app-loader__subtext",
+          text: cfg.subtext,
+        })
+      );
+    }
+
+    const bar = createElement("div", {
+      className: "app-loader__bar",
+      attrs: {
+        "aria-hidden": "true",
+      },
+    });
+
+    const fill = createElement("span", {
+      className: "app-loader__bar-fill",
+    });
+
+    bar.appendChild(fill);
+
+    card.appendChild(brand);
+    card.appendChild(copy);
+    card.appendChild(bar);
+
+    loader.appendChild(backdrop);
+    loader.appendChild(card);
+
+    bindFallbackLogoErrorHandlers(loader);
+
+    const target = document.body || document.documentElement;
     target.appendChild(loader);
 
-    try {
-      if (AppCore?.dom) {
-        AppCore.dom.loader = loader;
-      }
-    } catch {}
+    safeSetDomRef(AppCore, "loader", loader);
 
     return loader;
   } catch {
@@ -1345,9 +1229,7 @@ function createFallbackLoader(AppCore) {
    ELEMENT
 ========================================================= */
 
-export function getLoaderElement(
-  AppCore
-) {
+export function getLoaderElement(AppCore) {
   if (!isBrowser()) {
     return null;
   }
@@ -1355,9 +1237,7 @@ export function getLoaderElement(
   try {
     if (
       AppCore?.dom?.loader &&
-      document.contains(
-        AppCore.dom.loader
-      )
+      documentContains(AppCore.dom.loader)
     ) {
       return AppCore.dom.loader;
     }
@@ -1365,16 +1245,12 @@ export function getLoaderElement(
 
   try {
     const el =
-      document.getElementById(
-        LOADER_ID
-      ) ||
-      document.querySelector(
-        LOADER_SELECTOR
-      ) ||
+      getById(LOADER_ID) ||
+      query(LOADER_SELECTOR) ||
       null;
 
-    if (el && AppCore?.dom) {
-      AppCore.dom.loader = el;
+    if (el) {
+      safeSetDomRef(AppCore, "loader", el);
     }
 
     return el;
@@ -1383,27 +1259,15 @@ export function getLoaderElement(
   }
 }
 
-function ensureLoaderElement(
-  AppCore
-) {
-  const existing =
-    getLoaderElement(AppCore);
+function ensureLoaderElement(AppCore) {
+  const existing = getLoaderElement(AppCore);
 
-  /*
-    CRÍTICO:
-    Si index.html ya trae #app-loader, NO inyectamos estilos fallback.
-    El loader real queda controlado por:
-    - index.html
-    - src/css/core/loader.css
-    - variables.css / light.css
-  */
   if (existing) {
+    bindFallbackLogoErrorHandlers(existing);
     return existing;
   }
 
-  return createFallbackLoader(
-    AppCore
-  );
+  return createFallbackLoader(AppCore);
 }
 
 /* =========================================================
@@ -1435,8 +1299,7 @@ function isLoaderActuallyVisible(loader) {
       return false;
     }
 
-    const style =
-      window.getComputedStyle?.(loader);
+    const style = window.getComputedStyle?.(loader);
 
     if (style) {
       if (style.display === "none") {
@@ -1454,73 +1317,13 @@ function isLoaderActuallyVisible(loader) {
 
     return true;
   } catch {
-    return Boolean(
-      loader &&
-        !loader.hidden
-    );
+    return Boolean(loader && !loader.hidden);
   }
 }
 
-function restoreLoaderInlineStyles(
-  AppCore
-) {
-  const loader =
-    ensureLoaderElement(
-      AppCore
-    );
+function restoreLoaderInlineStyles(AppCore) {
+  const loader = ensureLoaderElement(AppCore);
 
-  if (!loader) {
-    return false;
-  }
-
-  try {
-    loader.hidden = false;
-
-    loader.removeAttribute(
-      "hidden"
-    );
-
-    loader.setAttribute(
-      "aria-hidden",
-      "false"
-    );
-
-    loader.setAttribute(
-      "aria-busy",
-      "true"
-    );
-
-    loader.dataset.loaderVisible =
-      "true";
-
-    loader.dataset.loaderState =
-      "visible";
-
-    loader.classList.remove(
-      "is-hidden",
-      "has-hidden",
-      "is-leaving"
-    );
-
-    loader.classList.add(
-      "is-visible",
-      "is-entering"
-    );
-
-    loader.style.display = "";
-    loader.style.opacity = "";
-    loader.style.visibility = "";
-    loader.style.pointerEvents = "";
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function markLoaderVisible(
-  loader
-) {
   if (!loader) {
     return false;
   }
@@ -1529,36 +1332,23 @@ function markLoaderVisible(
     loader.hidden = false;
     loader.removeAttribute("hidden");
 
-    loader.setAttribute(
-      "aria-hidden",
-      "false"
-    );
+    setAttr(loader, "aria-hidden", "false");
+    setAttr(loader, "aria-busy", "true");
 
-    loader.setAttribute(
-      "aria-busy",
-      "true"
-    );
+    loader.dataset.loaderVisible = "true";
+    loader.dataset.loaderState = "visible";
 
-    loader.dataset.loaderVisible =
-      "true";
+    removeClasses(loader, [
+      ...LOADER_HIDDEN_CLASSES,
+      ...LOADER_LEAVING_CLASSES,
+    ]);
 
-    loader.dataset.loaderState =
-      "visible";
+    addClasses(loader, [
+      ...LOADER_VISIBLE_CLASSES,
+      ...LOADER_ENTERING_CLASSES,
+    ]);
 
-    loader.classList.remove(
-      "is-hidden",
-      "has-hidden",
-      "is-leaving"
-    );
-
-    loader.classList.add(
-      "is-visible"
-    );
-
-    loader.style.display = "";
-    loader.style.opacity = "";
-    loader.style.visibility = "";
-    loader.style.pointerEvents = "";
+    clearLegacyInlineLoaderStyles(loader);
 
     return true;
   } catch {
@@ -1566,45 +1356,29 @@ function markLoaderVisible(
   }
 }
 
-function markLoaderLeaving(
-  loader
-) {
+function markLoaderVisible(loader) {
   if (!loader) {
     return false;
   }
 
   try {
-    loader.setAttribute(
-      "aria-hidden",
-      "true"
-    );
+    loader.hidden = false;
+    loader.removeAttribute("hidden");
 
-    loader.setAttribute(
-      "aria-busy",
-      "false"
-    );
+    setAttr(loader, "aria-hidden", "false");
+    setAttr(loader, "aria-busy", "true");
 
-    loader.dataset.loaderVisible =
-      "false";
+    loader.dataset.loaderVisible = "true";
+    loader.dataset.loaderState = "visible";
 
-    loader.dataset.loaderState =
-      "leaving";
+    removeClasses(loader, [
+      ...LOADER_HIDDEN_CLASSES,
+      ...LOADER_LEAVING_CLASSES,
+    ]);
 
-    loader.classList.remove(
-      "is-visible",
-      "is-entering"
-    );
+    addClasses(loader, LOADER_VISIBLE_CLASSES);
 
-    loader.classList.add(
-      "is-leaving",
-      "is-hidden"
-    );
-
-    loader.style.opacity =
-      "0";
-
-    loader.style.pointerEvents =
-      "none";
+    clearLegacyInlineLoaderStyles(loader);
 
     return true;
   } catch {
@@ -1612,9 +1386,38 @@ function markLoaderLeaving(
   }
 }
 
-function markLoaderHidden(
-  loader
-) {
+function markLoaderLeaving(loader) {
+  if (!loader) {
+    return false;
+  }
+
+  try {
+    setAttr(loader, "aria-hidden", "true");
+    setAttr(loader, "aria-busy", "false");
+
+    loader.dataset.loaderVisible = "false";
+    loader.dataset.loaderState = "leaving";
+
+    removeClasses(loader, [
+      ...LOADER_VISIBLE_CLASSES,
+      ...LOADER_ENTERING_CLASSES,
+      "has-hidden",
+    ]);
+
+    addClasses(loader, [
+      "is-leaving",
+      "is-hidden",
+    ]);
+
+    clearLegacyInlineLoaderStyles(loader);
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function markLoaderHidden(loader) {
   if (!loader) {
     return false;
   }
@@ -1622,44 +1425,21 @@ function markLoaderHidden(
   try {
     loader.hidden = true;
 
-    loader.setAttribute(
-      "aria-hidden",
-      "true"
-    );
+    setAttr(loader, "aria-hidden", "true");
+    setAttr(loader, "aria-busy", "false");
 
-    loader.setAttribute(
-      "aria-busy",
-      "false"
-    );
+    loader.dataset.loaderVisible = "false";
+    loader.dataset.loaderState = "hidden";
 
-    loader.dataset.loaderVisible =
-      "false";
+    removeClasses(loader, [
+      ...LOADER_VISIBLE_CLASSES,
+      ...LOADER_ENTERING_CLASSES,
+      ...LOADER_LEAVING_CLASSES,
+    ]);
 
-    loader.dataset.loaderState =
-      "hidden";
+    addClasses(loader, LOADER_HIDDEN_CLASSES);
 
-    loader.classList.remove(
-      "is-visible",
-      "is-entering",
-      "is-leaving"
-    );
-
-    loader.classList.add(
-      "is-hidden",
-      "has-hidden"
-    );
-
-    loader.style.display =
-      "none";
-
-    loader.style.opacity =
-      "0";
-
-    loader.style.visibility =
-      "hidden";
-
-    loader.style.pointerEvents =
-      "none";
+    clearLegacyInlineLoaderStyles(loader);
 
     return true;
   } catch {
@@ -1667,44 +1447,30 @@ function markLoaderHidden(
   }
 }
 
-function setLoaderVisible(
-  loader,
-  visible = true,
-  AppCore = null
-) {
+function setLoaderVisible(loader, visible = true, AppCore = null) {
   if (!loader) {
     return false;
   }
 
-  const show =
-    Boolean(visible);
+  const show = Boolean(visible);
 
   if (show) {
-    return markLoaderVisible(
-      loader
-    );
+    return markLoaderVisible(loader);
   }
 
-  const cfg =
-    getLoaderConfig(AppCore);
+  const cfg = getLoaderConfig(AppCore);
 
-  markLoaderLeaving(
-    loader
-  );
+  markLoaderLeaving(loader);
 
   clearTimer(transitionTimer);
 
-  transitionTimer =
-    window.setTimeout(
-      () => {
-        markLoaderHidden(
-          loader
-        );
-
-        transitionTimer = null;
-      },
-      cfg.hideTransitionMs
-    );
+  transitionTimer = window.setTimeout(
+    () => {
+      markLoaderHidden(loader);
+      transitionTimer = null;
+    },
+    cfg.hideTransitionMs
+  );
 
   return true;
 }
@@ -1713,57 +1479,40 @@ function setLoaderVisible(
    PUBLIC VISIBILITY API
 ========================================================= */
 
-export function showLoader(
-  AppCore,
-  options = {}
-) {
+export function showLoader(AppCore, options = {}) {
+  const opts = safeObject(options);
+
   if (!isBrowser()) {
-    safeSetLoading(
-      AppCore,
-      true
-    );
+    safeSetLoading(AppCore, true);
+
+    if (opts.booting === true) {
+      safeSetBooting(AppCore, true);
+    }
 
     return true;
   }
 
-  const opts =
-    safeObject(options);
-
-  const id =
-    nextSequence();
+  const id = nextSequence();
 
   clearLoaderTimers();
 
-  const loader =
-    ensureLoaderElement(
-      AppCore
-    );
+  const loader = ensureLoaderElement(AppCore);
 
-  lastShowAt =
-    now();
+  lastShowAt = now();
 
-  setBodyLoading(true);
+  setAppLoadingState(true, {
+    booting: opts.booting === true,
+  });
 
   if (loader) {
-    restoreLoaderInlineStyles(
-      AppCore
-    );
-
-    markLoaderVisible(
-      loader
-    );
+    restoreLoaderInlineStyles(AppCore);
+    markLoaderVisible(loader);
   }
 
-  safeSetLoading(
-    AppCore,
-    true
-  );
+  safeSetLoading(AppCore, true);
 
   if (opts.booting === true) {
-    safeSetBooting(
-      AppCore,
-      true
-    );
+    safeSetBooting(AppCore, true);
   }
 
   safeEmit(
@@ -1772,65 +1521,45 @@ export function showLoader(
     {
       sequence: id,
       hasLoader: Boolean(loader),
-      booting:
-        Boolean(opts.booting),
-      reason:
-        safeText(opts.reason, ""),
+      booting: Boolean(opts.booting),
+      reason: safeText(opts.reason, ""),
     }
   );
 
   return true;
 }
 
-export function forceHideLoader(
-  AppCore,
-  options = {}
-) {
-  if (!isBrowser()) {
-    safeSetLoading(
-      AppCore,
-      false
-    );
+export function forceHideLoader(AppCore, options = {}) {
+  const opts = safeObject(options);
 
-    safeSetBooting(
-      AppCore,
-      false
-    );
+  if (!isBrowser()) {
+    safeSetLoading(AppCore, false);
+
+    if (opts.booting !== true) {
+      safeSetBooting(AppCore, false);
+    }
 
     return true;
   }
 
-  const opts =
-    safeObject(options);
-
-  const id =
-    nextSequence();
+  const id = nextSequence();
 
   clearLoaderTimers();
 
-  const loader =
-    getLoaderElement(
-      AppCore
-    );
+  const loader = getLoaderElement(AppCore);
 
-  setBodyLoading(false);
+  setAppLoadingState(false, {
+    booting: false,
+  });
 
   if (loader) {
-    markLoaderHidden(
-      loader
-    );
+    markLoaderHidden(loader);
   }
 
-  safeSetLoading(
-    AppCore,
-    false
-  );
+  safeSetLoading(AppCore, false);
 
   if (opts.booting !== true) {
-    safeSetBooting(
-      AppCore,
-      false
-    );
+    safeSetBooting(AppCore, false);
   }
 
   safeEmit(
@@ -1840,63 +1569,50 @@ export function forceHideLoader(
       sequence: id,
       forced: true,
       hasLoader: Boolean(loader),
-      reason:
-        safeText(opts.reason, ""),
+      reason: safeText(opts.reason, ""),
     }
   );
 
   return true;
 }
 
-export function hideLoader(
-  AppCore,
-  options = {}
-) {
+export function hideLoader(AppCore, options = {}) {
+  const opts = safeObject(options);
+
   if (!isBrowser()) {
-    safeSetLoading(
-      AppCore,
-      false
-    );
+    safeSetLoading(AppCore, false);
+
+    if (opts.booting !== true) {
+      safeSetBooting(AppCore, false);
+    }
 
     return true;
   }
 
-  const opts =
-    safeObject(options);
-
-  const cfg =
-    getLoaderConfig(AppCore);
-
-  const id =
-    nextSequence();
+  const cfg = getLoaderConfig(AppCore);
+  const id = nextSequence();
 
   clearLoaderTimers();
 
-  const initialLoader =
-    getLoaderElement(
-      AppCore
-    );
+  const initialLoader = getLoaderElement(AppCore);
 
-  const minVisibleMs =
-    Math.max(
-      0,
-      safeNumber(
-        opts.minVisibleMs,
-        cfg.minVisibleMs
-      )
-    );
+  const minVisibleMs = Math.max(
+    0,
+    safeNumber(
+      opts.minVisibleMs,
+      cfg.minVisibleMs
+    )
+  );
 
-  const elapsed =
-    Math.max(
-      0,
-      now() - lastShowAt
-    );
+  const elapsed = Math.max(
+    0,
+    now() - lastShowAt
+  );
 
-  const remaining =
-    Math.max(
-      0,
-      minVisibleMs - elapsed
-    );
+  const remaining = Math.max(
+    0,
+    minVisibleMs - elapsed
+  );
 
   const executeHide = async () => {
     if (!isCurrentSequence(id)) {
@@ -1915,26 +1631,22 @@ export function hideLoader(
       getLoaderElement(AppCore) ||
       initialLoader;
 
-    setBodyLoading(false);
+    /*
+      Primero liberamos shell/body.
+      El loader hace fade encima mientras aparece la app lista.
+    */
+    setAppLoadingState(false, {
+      booting: false,
+    });
 
     if (loader) {
-      setLoaderVisible(
-        loader,
-        false,
-        AppCore
-      );
+      setLoaderVisible(loader, false, AppCore);
     }
 
-    safeSetLoading(
-      AppCore,
-      false
-    );
+    safeSetLoading(AppCore, false);
 
     if (opts.booting !== true) {
-      safeSetBooting(
-        AppCore,
-        false
-      );
+      safeSetBooting(AppCore, false);
     }
 
     safeEmit(
@@ -1945,8 +1657,7 @@ export function hideLoader(
         forced: false,
         hasLoader: Boolean(loader),
         remaining,
-        reason:
-          safeText(opts.reason, ""),
+        reason: safeText(opts.reason, ""),
       }
     );
 
@@ -1954,14 +1665,13 @@ export function hideLoader(
   };
 
   if (remaining > 0) {
-    hideTimer =
-      window.setTimeout(
-        () => {
-          hideTimer = null;
-          void executeHide();
-        },
-        remaining
-      );
+    hideTimer = window.setTimeout(
+      () => {
+        hideTimer = null;
+        void executeHide();
+      },
+      remaining
+    );
 
     return true;
   }
@@ -1975,40 +1685,20 @@ export function hideLoader(
    BOOT HELPERS
 ========================================================= */
 
-export function takeOverStaticLoader(
-  AppCore
-) {
-  /*
-    Úsalo al principio del boot si quieres tomar control
-    del loader que viene ya pintado desde index.html.
-  */
+export function takeOverStaticLoader(AppCore) {
+  const loader = ensureLoaderElement(AppCore);
 
-  const loader =
-    ensureLoaderElement(
-      AppCore
-    );
-
-  setBodyLoading(true);
+  setAppLoadingState(true, {
+    booting: true,
+  });
 
   if (loader) {
-    restoreLoaderInlineStyles(
-      AppCore
-    );
-
-    markLoaderVisible(
-      loader
-    );
+    restoreLoaderInlineStyles(AppCore);
+    markLoaderVisible(loader);
   }
 
-  safeSetLoading(
-    AppCore,
-    true
-  );
-
-  safeSetBooting(
-    AppCore,
-    true
-  );
+  safeSetLoading(AppCore, true);
+  safeSetBooting(AppCore, true);
 
   safeEmit(
     AppCore,
@@ -2021,18 +1711,14 @@ export function takeOverStaticLoader(
   return Boolean(loader);
 }
 
-export function prepareBootLoader(
-  AppCore,
-  state = null
-) {
-  takeOverStaticLoader(
-    AppCore
-  );
+export function prepareBootLoader(AppCore, state = null) {
+  takeOverStaticLoader(AppCore);
 
   if (state) {
     try {
       state.loaderVisible = true;
       state.loaderShownAt = Date.now();
+      state.booting = true;
     } catch {}
   }
 
@@ -2043,19 +1729,11 @@ export function prepareBootLoader(
    FAILSAFE TIMER
 ========================================================= */
 
-export function clearBootFailsafeTimer(
-  state
-) {
+export function clearBootFailsafeTimer(state) {
   try {
-    if (
-      state?.bootFailsafeTimer
-    ) {
-      clearTimeout(
-        state.bootFailsafeTimer
-      );
-
-      state.bootFailsafeTimer =
-        null;
+    if (state?.bootFailsafeTimer) {
+      clearTimeout(state.bootFailsafeTimer);
+      state.bootFailsafeTimer = null;
     }
 
     if (state) {
@@ -2068,10 +1746,7 @@ export function clearBootFailsafeTimer(
   return true;
 }
 
-function isBootFinalizedState(
-  state = null,
-  coreState = {}
-) {
+function isBootFinalizedState(state = null, coreState = {}) {
   return Boolean(
     state?.booted ||
       state?.readyEmitted ||
@@ -2097,8 +1772,7 @@ function shouldWarnFailsafe({
     publicPath,
   ].join("|");
 
-  const current =
-    epochNow();
+  const current = epochNow();
 
   if (
     key === lastFailsafeWarnKey &&
@@ -2123,20 +1797,11 @@ export function armBootFailsafeLoader({
     return null;
   }
 
-  clearBootFailsafeTimer(
-    state
-  );
+  clearBootFailsafeTimer(state);
 
-  const timeout =
-    getFailsafeTimeoutMs(
-      timeoutMs
-    );
-
-  const armId =
-    ++failsafeArmSequence;
-
-  const startedAt =
-    epochNow();
+  const timeout = getFailsafeTimeoutMs(timeoutMs);
+  const armId = ++failsafeArmSequence;
+  const startedAt = epochNow();
 
   if (state) {
     try {
@@ -2146,161 +1811,133 @@ export function armBootFailsafeLoader({
     } catch {}
   }
 
-  const timer =
-    window.setTimeout(
-      () => {
-        try {
-          if (
-            state?.bootFailsafeArmId &&
-            state.bootFailsafeArmId !== armId
-          ) {
-            return;
-          }
+  const timer = window.setTimeout(
+    () => {
+      try {
+        if (
+          state?.bootFailsafeArmId &&
+          state.bootFailsafeArmId !== armId
+        ) {
+          return;
+        }
 
-          const coreState =
-            safeGetState(
-              AppCore
-            );
+        const coreState = safeGetState(AppCore);
+        const loader = getLoaderElement(AppCore);
 
-          const loader =
-            getLoaderElement(
-              AppCore
-            );
+        const loaderVisible = isLoaderActuallyVisible(loader);
 
-          const loaderVisible =
-            isLoaderActuallyVisible(
-              loader
-            );
+        const stillBooting = Boolean(
+          state?.booting ||
+            coreState.booting
+        );
 
-          const stillBooting =
-            Boolean(
-              state?.booting ||
-                coreState.booting
-            );
+        const stillLoading = Boolean(
+          state?.loaderVisible ||
+            coreState.loading
+        );
 
-          const stillLoading =
-            Boolean(
-              state?.loaderVisible ||
-                coreState.loading
-            );
+        const finalized = isBootFinalizedState(
+          state,
+          coreState
+        );
 
-          const finalized =
-            isBootFinalizedState(
-              state,
-              coreState
-            );
+        const route =
+          coreState.route ||
+          state?.route ||
+          "/";
 
-          const route =
-            coreState.route ||
-            state?.route ||
-            "/";
+        const publicPath =
+          coreState.publicPath ||
+          state?.publicPath ||
+          "/";
 
-          const publicPath =
-            coreState.publicPath ||
-            state?.publicPath ||
-            "/";
+        if (
+          !stillBooting &&
+          !stillLoading &&
+          !loaderVisible
+        ) {
+          return;
+        }
 
-          /*
-            Si ya no hay boot/loading/loader visible, no hay nada que hacer.
-          */
-          if (
-            !stillBooting &&
-            !stillLoading &&
-            !loaderVisible
-          ) {
-            return;
-          }
-
-          /*
-            Si la app ya finalizó y sólo queda una bandera o loader stale,
-            limpiar silenciosamente. No es un fallo real de boot.
-          */
-          if (
-            finalized &&
-            !stillBooting
-          ) {
-            hideFn(
-              AppCore,
-              {
-                reason:
-                  "failsafe-stale-after-ready",
-              }
-            );
-
-            safeEmit(
-              AppCore,
-              "app:loader:failsafe:stale",
-              {
-                timeout,
-                booting:
-                  stillBooting,
-                loading:
-                  stillLoading,
-                loaderVisible,
-                finalized,
-                route,
-                publicPath,
-              }
-            );
-
-            return;
-          }
-
-          if (
-            shouldWarnFailsafe({
-              phase: "boot",
-              route,
-              publicPath,
-            })
-          ) {
-            safeWarn(
-              AppCore,
-              "Failsafe loader aplicado.",
-              {
-                timeout,
-                booting:
-                  stillBooting,
-                loading:
-                  stillLoading,
-                loaderVisible,
-                finalized,
-                route,
-                publicPath,
-              }
-            );
-          }
-
+        if (
+          finalized &&
+          !stillBooting
+        ) {
           hideFn(
             AppCore,
             {
-              reason:
-                "failsafe",
+              reason: "failsafe-stale-after-ready",
             }
           );
 
           safeEmit(
             AppCore,
-            "app:loader:failsafe",
+            "app:loader:failsafe:stale",
             {
               timeout,
-              booting:
-                stillBooting,
-              loading:
-                stillLoading,
+              booting: stillBooting,
+              loading: stillLoading,
               loaderVisible,
               finalized,
               route,
               publicPath,
             }
           );
-        } catch {}
-      },
-      timeout
-    );
+
+          return;
+        }
+
+        if (
+          shouldWarnFailsafe({
+            phase: "boot",
+            route,
+            publicPath,
+          })
+        ) {
+          safeWarn(
+            AppCore,
+            "Failsafe loader aplicado.",
+            {
+              timeout,
+              booting: stillBooting,
+              loading: stillLoading,
+              loaderVisible,
+              finalized,
+              route,
+              publicPath,
+            }
+          );
+        }
+
+        hideFn(
+          AppCore,
+          {
+            reason: "failsafe",
+          }
+        );
+
+        safeEmit(
+          AppCore,
+          "app:loader:failsafe",
+          {
+            timeout,
+            booting: stillBooting,
+            loading: stillLoading,
+            loaderVisible,
+            finalized,
+            route,
+            publicPath,
+          }
+        );
+      } catch {}
+    },
+    timeout
+  );
 
   if (state) {
-    state.bootFailsafeTimer =
-      timer;
+    try {
+      state.bootFailsafeTimer = timer;
+    } catch {}
   }
 
   safeEmit(
@@ -2316,6 +1953,156 @@ export function armBootFailsafeLoader({
 }
 
 /* =========================================================
+   DEBUG
+========================================================= */
+
+function getClassList(element) {
+  try {
+    return Array.from(element?.classList || []);
+  } catch {
+    return [];
+  }
+}
+
+function getComputedSnapshot(element) {
+  if (!isBrowser() || !element) {
+    return {};
+  }
+
+  try {
+    const style = window.getComputedStyle(element);
+
+    return {
+      display: safeText(style.display, ""),
+      opacity: safeText(style.opacity, ""),
+      visibility: safeText(style.visibility, ""),
+      pointerEvents: safeText(style.pointerEvents, ""),
+    };
+  } catch {
+    return {};
+  }
+}
+
+export function getLoaderSnapshot(AppCore, state = null) {
+  const loader = getLoaderElement(AppCore);
+  const coreState = safeGetState(AppCore);
+  const shell = getShellElement();
+  const main = getMainElement();
+  const view = getViewElement();
+  const bootTheme = getBootThemeSnapshot();
+
+  let htmlTheme = "";
+  let bodyTheme = "";
+  let htmlAppState = "";
+  let bodyAppLoading = "";
+
+  try {
+    htmlTheme = safeText(document.documentElement?.dataset?.theme, "");
+    htmlAppState = safeText(document.documentElement?.dataset?.appState, "");
+  } catch {}
+
+  try {
+    bodyTheme = safeText(document.body?.dataset?.theme, "");
+    bodyAppLoading = safeText(document.body?.dataset?.appLoading, "");
+  } catch {}
+
+  return {
+    exists: Boolean(loader),
+    id: safeText(loader?.id, ""),
+    generated: Boolean(loader?.dataset?.loaderGenerated),
+
+    hidden: Boolean(loader?.hidden),
+    ariaHidden: safeText(loader?.getAttribute?.("aria-hidden"), ""),
+    ariaBusy: safeText(loader?.getAttribute?.("aria-busy"), ""),
+    visible: isLoaderActuallyVisible(loader),
+
+    datasetVisible: safeText(loader?.dataset?.loaderVisible, ""),
+    datasetState: safeText(loader?.dataset?.loaderState, ""),
+
+    inlineStyle: {
+      display: safeText(loader?.style?.display, ""),
+      opacity: safeText(loader?.style?.opacity, ""),
+      visibility: safeText(loader?.style?.visibility, ""),
+      pointerEvents: safeText(loader?.style?.pointerEvents, ""),
+    },
+
+    computedStyle: getComputedSnapshot(loader),
+
+    shell: {
+      exists: Boolean(shell),
+      datasetShell: safeText(shell?.dataset?.shell, ""),
+      datasetShellState: safeText(shell?.dataset?.shellState, ""),
+      datasetShellInteractive: safeText(shell?.dataset?.shellInteractive, ""),
+      ariaBusy: safeText(shell?.getAttribute?.("aria-busy"), ""),
+      ariaHidden: safeText(shell?.getAttribute?.("aria-hidden"), ""),
+      classes: getClassList(shell),
+      computedStyle: getComputedSnapshot(shell),
+    },
+
+    main: {
+      exists: Boolean(main),
+      ariaBusy: safeText(main?.getAttribute?.("aria-busy"), ""),
+      routeMode: safeText(main?.dataset?.routeMode, ""),
+    },
+
+    view: {
+      exists: Boolean(view),
+      ariaBusy: safeText(view?.getAttribute?.("aria-busy"), ""),
+    },
+
+    loading: Boolean(coreState.loading),
+    booting: Boolean(coreState.booting),
+
+    booted: Boolean(
+      coreState.booted ||
+        state?.booted
+    ),
+
+    ready: Boolean(
+      coreState.ready ||
+        coreState.appReady ||
+        state?.readyEmitted
+    ),
+
+    route: coreState.route || state?.route || "/",
+    publicPath: coreState.publicPath || state?.publicPath || "/",
+
+    htmlTheme,
+    bodyTheme,
+    htmlAppState,
+    bodyAppLoading,
+
+    bootTheme,
+
+    bodyClasses: getClassList(document.body),
+    htmlClasses: getClassList(document.documentElement),
+
+    hasFailsafeTimer: Boolean(
+      state?.bootFailsafeTimer ||
+        coreState.bootFailsafeTimer
+    ),
+
+    failsafeTimeoutMs: safeNumber(state?.bootFailsafeTimeoutMs, 0),
+    failsafeStartedAt: safeNumber(state?.bootFailsafeStartedAt, 0),
+    failsafeArmId: safeNumber(state?.bootFailsafeArmId, 0),
+
+    lastShowAt,
+    hasHideTimer: Boolean(hideTimer),
+    hasTransitionTimer: Boolean(transitionTimer),
+
+    sequence,
+    failsafeArmSequence,
+    lastFailsafeWarnKey,
+    lastFailsafeWarnAt,
+
+    theme: getCurrentTheme(AppCore),
+    logoUrl: getDefaultLoaderLogoUrl(AppCore),
+    logoWhiteUrl: DEFAULT_LOADER_LOGO_WHITE_URL,
+    logoBlackUrl: DEFAULT_LOADER_LOGO_BLACK_URL,
+  };
+}
+
+/* =========================================================
    LEGACY COMPAT
 ========================================================= */
 
@@ -2324,216 +2111,8 @@ export {
 };
 
 /* =========================================================
-   DEBUG
+   DEFAULT EXPORT
 ========================================================= */
-
-export function getLoaderSnapshot(
-  AppCore,
-  state = null
-) {
-  const loader =
-    getLoaderElement(
-      AppCore
-    );
-
-  const coreState =
-    safeGetState(
-      AppCore
-    );
-
-  const bootTheme =
-    getBootThemeSnapshot();
-
-  let bodyClasses = [];
-  let htmlClasses = [];
-
-  try {
-    bodyClasses =
-      Array.from(
-        document.body?.classList || []
-      );
-  } catch {}
-
-  try {
-    htmlClasses =
-      Array.from(
-        document.documentElement?.classList || []
-      );
-  } catch {}
-
-  let htmlTheme = "";
-  let bodyTheme = "";
-
-  try {
-    htmlTheme =
-      safeText(
-        document.documentElement?.dataset?.theme,
-        ""
-      );
-  } catch {}
-
-  try {
-    bodyTheme =
-      safeText(
-        document.body?.dataset?.theme,
-        ""
-      );
-  } catch {}
-
-  return {
-    exists:
-      Boolean(loader),
-
-    id:
-      safeText(loader?.id, ""),
-
-    generated:
-      Boolean(
-        loader?.dataset?.loaderGenerated
-      ),
-
-    hidden:
-      Boolean(
-        loader?.hidden
-      ),
-
-    ariaHidden:
-      safeText(
-        loader?.getAttribute?.("aria-hidden"),
-        ""
-      ),
-
-    ariaBusy:
-      safeText(
-        loader?.getAttribute?.("aria-busy"),
-        ""
-      ),
-
-    visible:
-      isLoaderActuallyVisible(
-        loader
-      ),
-
-    datasetVisible:
-      safeText(
-        loader?.dataset?.loaderVisible,
-        ""
-      ),
-
-    datasetState:
-      safeText(
-        loader?.dataset?.loaderState,
-        ""
-      ),
-
-    display:
-      safeText(
-        loader?.style?.display,
-        ""
-      ),
-
-    opacity:
-      safeText(
-        loader?.style?.opacity,
-        ""
-      ),
-
-    visibility:
-      safeText(
-        loader?.style?.visibility,
-        ""
-      ),
-
-    loading:
-      Boolean(
-        coreState.loading
-      ),
-
-    booting:
-      Boolean(
-        coreState.booting
-      ),
-
-    booted:
-      Boolean(
-        coreState.booted ||
-          state?.booted
-      ),
-
-    ready:
-      Boolean(
-        coreState.ready ||
-          coreState.appReady ||
-          state?.readyEmitted
-      ),
-
-    route:
-      coreState.route ||
-      "/",
-
-    publicPath:
-      coreState.publicPath ||
-      "/",
-
-    htmlTheme,
-    bodyTheme,
-
-    bootTheme,
-
-    bodyClasses,
-    htmlClasses,
-
-    hasFailsafeTimer:
-      Boolean(
-        state?.bootFailsafeTimer ||
-          coreState.bootFailsafeTimer
-      ),
-
-    failsafeTimeoutMs:
-      safeNumber(
-        state?.bootFailsafeTimeoutMs,
-        0
-      ),
-
-    failsafeStartedAt:
-      safeNumber(
-        state?.bootFailsafeStartedAt,
-        0
-      ),
-
-    failsafeArmId:
-      safeNumber(
-        state?.bootFailsafeArmId,
-        0
-      ),
-
-    lastShowAt,
-
-    hasHideTimer:
-      Boolean(hideTimer),
-
-    hasTransitionTimer:
-      Boolean(transitionTimer),
-
-    sequence,
-
-    failsafeArmSequence,
-    lastFailsafeWarnKey,
-    lastFailsafeWarnAt,
-
-    theme:
-      getCurrentTheme(AppCore),
-
-    logoUrl:
-      getDefaultLoaderLogoUrl(AppCore),
-
-    logoWhiteUrl:
-      DEFAULT_LOADER_LOGO_WHITE_URL,
-
-    logoBlackUrl:
-      DEFAULT_LOADER_LOGO_BLACK_URL,
-  };
-}
 
 export default {
   getLoaderElement,

@@ -3,42 +3,15 @@
    Archivo: /src/css/views/incidencias/index.css
 
    INCIDENCIAS LIST VIEW · TOKEN PRO SYSTEM · CSP CLEAN
-   FINAL EXTREME 12/10 · NO CSS IN JS · NO INLINE STYLE
+   PRODUCTIVO · FACTURAS PARITY · NO CSS IN JS
 
-   ARQUITECTURA:
-   - variables.css define tokens globales/base/dark.
-   - light.css define overrides [data-theme="light"].
-   - ui.css define componentes globales.
-   - incidencias/index.css define SOLO la vista principal de Incidencias.
-
-   COMPATIBLE CON:
-   - src/views/incidencias/incidencias.table.template.js
-
-   INCLUYE:
-   - vista principal de Incidencias
-   - hero premium 1:1 estilo Facturas
-   - stats
-   - tabla real blindada
-   - filtros/search/paginación
-   - acciones de fila
-   - fila completa clicable
-   - avatar cliente pseudo-RNG
-   - avatar real del técnico actual
-   - loading/error/empty states
-   - refresh overlay
-   - guards contra hovers destructivos
-   - guards contra rayas verticales
-   - guards contra colisión con ui.css
-
-   NO INCLUYE:
-   - create modal
-   - detail modal
-   - overlays globales de modal
-   - body lock modal
-   - CSS de .incidencias-detail-modal
-   - CSS de .incidencias-create-modal
+   OBJETIVO:
+   - Paridad visual con Facturas.
+   - Header con orden de botones tipo Facturas: Exportar · Crear · Actualizar.
+   - Box de filtros en light theme lavanda premium, no gris.
+   - Tabla real blindada.
+   - Sin style inline, sin JS CSS, sin pseudo en <tr>.
 ========================================================= */
-
 
 /* =========================================================
    ROOT SCOPE
@@ -130,7 +103,6 @@
   white-space: nowrap !important;
 }
 
-
 /* =========================================================
    BASE INTERACTION ALIGNMENT
 ========================================================= */
@@ -162,9 +134,8 @@
     0 0 0 5px color-mix(in srgb, var(--accent) 10%, transparent) !important;
 }
 
-
 /* =========================================================
-   HERO
+   HERO · FACTURAS PARITY
 ========================================================= */
 
 .incidencias-hero {
@@ -240,6 +211,19 @@
   flex-wrap: wrap;
 }
 
+/* Orden 1:1 Facturas: Exportar · Crear · Actualizar */
+#incidencias-export-btn {
+  order: 1;
+}
+
+#incidencias-create-btn {
+  order: 2;
+}
+
+#incidencias-refresh-btn {
+  order: 3;
+}
+
 .incidencias-hero-meta {
   display: flex;
   align-items: center;
@@ -247,7 +231,6 @@
   gap: var(--space-xs);
   margin-block-start: var(--space-md);
 }
-
 
 /* =========================================================
    BUTTONS
@@ -309,6 +292,15 @@
   box-shadow: var(--btn-primary-shadow);
 }
 
+/* Actualizar en Incidencias queda morado como Facturas */
+#incidencias-refresh-btn,
+#incidencias-refresh-btn:hover {
+  border-color: var(--btn-primary-border);
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  box-shadow: var(--btn-primary-shadow);
+}
+
 .incidencias-btn--create,
 .incidencias-btn--create:hover {
   border-color: color-mix(in srgb, var(--success) 36%, var(--btn-primary-border));
@@ -340,7 +332,6 @@
   cursor: wait;
   opacity: .94;
 }
-
 
 /* =========================================================
    META PILLS
@@ -392,7 +383,6 @@
   background: var(--info-bg);
   border-color: var(--border-info);
 }
-
 
 /* =========================================================
    STATS
@@ -481,7 +471,6 @@
   line-height: var(--line-normal);
 }
 
-
 /* =========================================================
    HISTORY SHELL
 ========================================================= */
@@ -526,7 +515,6 @@
   font-size: var(--section-subtitle-size);
   line-height: var(--line-normal);
 }
-
 
 /* =========================================================
    FILTERS / SEARCH
@@ -778,7 +766,6 @@
   display: none !important;
 }
 
-
 /* =========================================================
    PAGINATION
 ========================================================= */
@@ -852,7 +839,6 @@
   transform: none;
 }
 
-
 /* =========================================================
    TABLE WRAP
 ========================================================= */
@@ -894,7 +880,6 @@
   background: var(--scrollbar-thumb);
   background-clip: padding-box;
 }
-
 
 /* =========================================================
    TABLE LOCK · NO COLUMN LINES
@@ -1114,7 +1099,6 @@
   white-space: nowrap;
 }
 
-
 /* =========================================================
    MAIN CELL / AVATAR
 ========================================================= */
@@ -1195,65 +1179,16 @@
   display: none !important;
 }
 
-.incidencias-avatar[data-avatar-tone="0"] {
-  --inc-avatar-a: #7c3aed;
-  --inc-avatar-b: #ec4899;
-  --inc-avatar-bg: linear-gradient(135deg, #7c3aed 0%, #ec4899 100%);
-}
-
-.incidencias-avatar[data-avatar-tone="1"] {
-  --inc-avatar-a: #2563eb;
-  --inc-avatar-b: #06b6d4;
-  --inc-avatar-bg: linear-gradient(135deg, #2563eb 0%, #06b6d4 100%);
-}
-
-.incidencias-avatar[data-avatar-tone="2"] {
-  --inc-avatar-a: #f97316;
-  --inc-avatar-b: #ef4444;
-  --inc-avatar-bg: linear-gradient(135deg, #f97316 0%, #ef4444 100%);
-}
-
-.incidencias-avatar[data-avatar-tone="3"] {
-  --inc-avatar-a: #16a34a;
-  --inc-avatar-b: #14b8a6;
-  --inc-avatar-bg: linear-gradient(135deg, #16a34a 0%, #14b8a6 100%);
-}
-
-.incidencias-avatar[data-avatar-tone="4"] {
-  --inc-avatar-a: #db2777;
-  --inc-avatar-b: #9333ea;
-  --inc-avatar-bg: linear-gradient(135deg, #db2777 0%, #9333ea 100%);
-}
-
-.incidencias-avatar[data-avatar-tone="5"] {
-  --inc-avatar-a: #ca8a04;
-  --inc-avatar-b: #ea580c;
-  --inc-avatar-bg: linear-gradient(135deg, #ca8a04 0%, #ea580c 100%);
-}
-
-.incidencias-avatar[data-avatar-tone="6"] {
-  --inc-avatar-a: #0891b2;
-  --inc-avatar-b: #4f46e5;
-  --inc-avatar-bg: linear-gradient(135deg, #0891b2 0%, #4f46e5 100%);
-}
-
-.incidencias-avatar[data-avatar-tone="7"] {
-  --inc-avatar-a: #e11d48;
-  --inc-avatar-b: #f59e0b;
-  --inc-avatar-bg: linear-gradient(135deg, #e11d48 0%, #f59e0b 100%);
-}
-
-.incidencias-avatar[data-avatar-tone="8"] {
-  --inc-avatar-a: #0f766e;
-  --inc-avatar-b: #84cc16;
-  --inc-avatar-bg: linear-gradient(135deg, #0f766e 0%, #84cc16 100%);
-}
-
-.incidencias-avatar[data-avatar-tone="9"] {
-  --inc-avatar-a: #4338ca;
-  --inc-avatar-b: #c026d3;
-  --inc-avatar-bg: linear-gradient(135deg, #4338ca 0%, #c026d3 100%);
-}
+.incidencias-avatar[data-avatar-tone="0"] { --inc-avatar-a: #7c3aed; --inc-avatar-b: #ec4899; --inc-avatar-bg: linear-gradient(135deg, #7c3aed 0%, #ec4899 100%); }
+.incidencias-avatar[data-avatar-tone="1"] { --inc-avatar-a: #2563eb; --inc-avatar-b: #06b6d4; --inc-avatar-bg: linear-gradient(135deg, #2563eb 0%, #06b6d4 100%); }
+.incidencias-avatar[data-avatar-tone="2"] { --inc-avatar-a: #f97316; --inc-avatar-b: #ef4444; --inc-avatar-bg: linear-gradient(135deg, #f97316 0%, #ef4444 100%); }
+.incidencias-avatar[data-avatar-tone="3"] { --inc-avatar-a: #16a34a; --inc-avatar-b: #14b8a6; --inc-avatar-bg: linear-gradient(135deg, #16a34a 0%, #14b8a6 100%); }
+.incidencias-avatar[data-avatar-tone="4"] { --inc-avatar-a: #db2777; --inc-avatar-b: #9333ea; --inc-avatar-bg: linear-gradient(135deg, #db2777 0%, #9333ea 100%); }
+.incidencias-avatar[data-avatar-tone="5"] { --inc-avatar-a: #ca8a04; --inc-avatar-b: #ea580c; --inc-avatar-bg: linear-gradient(135deg, #ca8a04 0%, #ea580c 100%); }
+.incidencias-avatar[data-avatar-tone="6"] { --inc-avatar-a: #0891b2; --inc-avatar-b: #4f46e5; --inc-avatar-bg: linear-gradient(135deg, #0891b2 0%, #4f46e5 100%); }
+.incidencias-avatar[data-avatar-tone="7"] { --inc-avatar-a: #e11d48; --inc-avatar-b: #f59e0b; --inc-avatar-bg: linear-gradient(135deg, #e11d48 0%, #f59e0b 100%); }
+.incidencias-avatar[data-avatar-tone="8"] { --inc-avatar-a: #0f766e; --inc-avatar-b: #84cc16; --inc-avatar-bg: linear-gradient(135deg, #0f766e 0%, #84cc16 100%); }
+.incidencias-avatar[data-avatar-tone="9"] { --inc-avatar-a: #4338ca; --inc-avatar-b: #c026d3; --inc-avatar-bg: linear-gradient(135deg, #4338ca 0%, #c026d3 100%); }
 
 .incidencias-main-copy {
   display: grid;
@@ -1365,7 +1300,6 @@
   margin-block-start: 3px;
 }
 
-
 /* =========================================================
    MINI BADGES / TECH AVATAR / CHIPS
 ========================================================= */
@@ -1427,11 +1361,7 @@
   font-weight: var(--weight-black);
   border-color: color-mix(in srgb, var(--accent-border) 76%, var(--badge-border));
   background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--text-strong) 5%, transparent),
-      transparent 52%
-    ),
+    linear-gradient(180deg, color-mix(in srgb, var(--text-strong) 5%, transparent), transparent 52%),
     color-mix(in srgb, var(--accent-soft) 42%, var(--badge-bg));
 }
 
@@ -1477,6 +1407,16 @@
   background: var(--gradient-accent);
 }
 
+.incidencias-agent-avatar--fallback .incidencias-agent-avatar-fallback,
+.incidencias-agent-avatar[data-fallback="true"] .incidencias-agent-avatar-fallback {
+  display: grid;
+}
+
+.incidencias-agent-avatar--fallback .incidencias-agent-avatar-img,
+.incidencias-agent-avatar[data-fallback="true"] .incidencias-agent-avatar-img {
+  display: none !important;
+}
+
 .incidencias-agent-avatar--icon {
   color: currentColor;
 }
@@ -1494,14 +1434,6 @@
 .incidencias-agent-avatar-img[src=""] + .incidencias-agent-avatar-fallback,
 .incidencias-agent-avatar-img:not([src]) + .incidencias-agent-avatar-fallback {
   display: grid;
-}
-
-.incidencias-cell--status {
-  text-align: center;
-}
-
-.incidencias-cell--status .incidencias-chip {
-  margin-inline: auto;
 }
 
 .incidencias-chip {
@@ -1554,14 +1486,9 @@
   border-color: var(--border-success);
 }
 
-
 /* =========================================================
    DATE / AMOUNT / ATTACHMENTS
 ========================================================= */
-
-.incidencias-cell--date {
-  text-align: center;
-}
 
 .incidencias-date-inline {
   display: inline-block;
@@ -1649,7 +1576,6 @@
   block-size: 13px;
 }
 
-
 /* =========================================================
    ACTION BUTTONS
 ========================================================= */
@@ -1735,7 +1661,6 @@
   filter: saturate(.75);
 }
 
-
 /* =========================================================
    LOADERS
 ========================================================= */
@@ -1798,7 +1723,6 @@
   font-weight: var(--weight-bold);
 }
 
-
 /* =========================================================
    TABLE LOADING / SKELETON
 ========================================================= */
@@ -1841,13 +1765,7 @@
   position: absolute;
   inset: 0;
   transform: translateX(-100%);
-  background:
-    linear-gradient(
-      90deg,
-      transparent,
-      var(--skeleton-shine),
-      transparent
-    );
+  background: linear-gradient(90deg, transparent, var(--skeleton-shine), transparent);
   animation: incidenciasSkeleton 1.2s var(--ease-standard) infinite;
 }
 
@@ -1899,7 +1817,6 @@
   block-size: var(--btn-height-sm);
   border-radius: var(--radius-md);
 }
-
 
 /* =========================================================
    EMPTY / ERROR
@@ -1972,6 +1889,19 @@
   line-height: var(--line-relaxed);
 }
 
+.incidencias-error-banner {
+  margin: var(--space-sm) 0 0;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border-error);
+  border-radius: var(--radius-lg);
+  background:
+    var(--glass-shine),
+    color-mix(in srgb, var(--error-bg) 56%, var(--card-bg));
+  color: var(--error);
+  box-shadow: var(--shadow-sm);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-bold);
+}
 
 /* =========================================================
    UI.CSS COLLISION GUARD
@@ -1995,25 +1925,44 @@
   border-inline: 0 !important;
 }
 
-
 /* =========================================================
-   LIGHT THEME FIT
+   LIGHT THEME FIT · NO GREY FILTER BOX
 ========================================================= */
 
 [data-theme="light"] :where(.incidencias-view, .incidencias-view-root, [data-incidencias-scope]) {
   --inc-segment-bg:
-    color-mix(in srgb, var(--surface-glass, #f7f8fb) 84%, #fff);
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent, #6f59d9) 12%, #ffffff 88%),
+      color-mix(in srgb, var(--accent, #6f59d9) 7%, #ffffff 93%)
+    );
 
   --inc-segment-border:
-    color-mix(in srgb, var(--border-soft, #dfe4ee) 86%, transparent);
+    color-mix(in srgb, var(--accent, #6f59d9) 26%, var(--border-soft, #dfe4ee) 74%);
+
+  --inc-segment-item-text:
+    color-mix(in srgb, var(--text-dim, #667085) 86%, var(--accent, #6f59d9) 14%);
+
+  --inc-segment-item-active-bg:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent, #6f59d9) 20%, #ffffff 80%),
+      color-mix(in srgb, var(--accent, #6f59d9) 13%, #ffffff 87%)
+    );
+
+  --inc-segment-item-active-text: var(--accent-active, var(--accent));
+  --inc-segment-item-active-border:
+    color-mix(in srgb, var(--accent, #6f59d9) 42%, transparent);
 
   --inc-segment-shadow:
-    inset 0 1px 0 rgba(255,255,255,.82),
-    0 1px 2px rgba(32,43,72,.04);
+    inset 0 1px 0 rgba(255,255,255,.92),
+    0 1px 2px rgba(32,43,72,.035),
+    0 10px 28px color-mix(in srgb, var(--accent, #6f59d9) 8%, transparent);
 
   --inc-segment-active-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent),
-    inset 0 1px 0 rgba(255,255,255,.82);
+    inset 0 0 0 1px color-mix(in srgb, var(--accent, #6f59d9) 13%, transparent),
+    inset 0 1px 0 rgba(255,255,255,.88),
+    0 8px 18px color-mix(in srgb, var(--accent, #6f59d9) 13%, transparent);
 }
 
 [data-theme="light"] .incidencias-hero,
@@ -2025,6 +1974,42 @@
     var(--view-hero-bg);
 }
 
+[data-theme="light"] .incidencias-filter-pills {
+  border-color: var(--inc-segment-border);
+  background: var(--inc-segment-bg);
+  box-shadow: var(--inc-segment-shadow);
+}
+
+[data-theme="light"] .incidencias-filter-pill {
+  color: var(--inc-segment-item-text);
+}
+
+[data-theme="light"] .incidencias-filter-pill strong {
+  color: inherit;
+  background: color-mix(in srgb, currentColor 12%, #ffffff 88%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 9%, transparent);
+}
+
+[data-theme="light"] .incidencias-filter-pill:hover {
+  background: color-mix(in srgb, var(--accent, #6f59d9) 6%, transparent);
+  color: var(--text-strong);
+}
+
+[data-theme="light"] .incidencias-filter-pill.is-active,
+[data-theme="light"] .incidencias-filter-pill[aria-pressed="true"] {
+  background: var(--inc-segment-item-active-bg);
+  color: var(--inc-segment-item-active-text);
+  border-color: var(--inc-segment-item-active-border);
+  box-shadow: var(--inc-segment-active-shadow);
+}
+
+[data-theme="light"] .incidencias-filter-pill.is-active strong,
+[data-theme="light"] .incidencias-filter-pill[aria-pressed="true"] strong {
+  color: var(--accent-active, var(--accent));
+  background: color-mix(in srgb, var(--accent, #6f59d9) 14%, #ffffff 86%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #6f59d9) 16%, transparent);
+}
+
 [data-theme="light"] .incidencias-table tbody tr:nth-child(even) > td {
   background: rgba(23,32,51,.012);
 }
@@ -2032,18 +2017,6 @@
 [data-theme="light"] .incidencias-row:hover > td {
   background: var(--data-table-row-hover);
   box-shadow: none !important;
-}
-
-[data-theme="light"] .incidencias-filter-pill:hover {
-  background: transparent;
-  color: var(--text-strong);
-}
-
-[data-theme="light"] .incidencias-filter-pill.is-active,
-[data-theme="light"] .incidencias-filter-pill[aria-pressed="true"] {
-  background: var(--accent-soft);
-  color: var(--accent-active);
-  border-color: var(--accent-border);
 }
 
 [data-theme="light"] .incidencias-chip--pending {
@@ -2138,11 +2111,12 @@
 }
 
 [data-theme="light"] .incidencias-btn--primary,
-[data-theme="light"] .incidencias-btn--primary:hover {
+[data-theme="light"] .incidencias-btn--primary:hover,
+[data-theme="light"] #incidencias-refresh-btn,
+[data-theme="light"] #incidencias-refresh-btn:hover {
   background: var(--btn-primary-bg);
   color: var(--btn-primary-text);
 }
-
 
 /* =========================================================
    DARK THEME FIT
@@ -2169,7 +2143,6 @@
   background: color-mix(in srgb, var(--data-table-row-hover) 88%, var(--inc-row-accent) 4%);
   box-shadow: none !important;
 }
-
 
 /* =========================================================
    RESPONSIVE
@@ -2305,7 +2278,6 @@
   }
 }
 
-
 /* =========================================================
    CONTAINER QUERIES
 ========================================================= */
@@ -2319,7 +2291,6 @@
     justify-content: flex-start;
   }
 }
-
 
 /* =========================================================
    PRINT
@@ -2350,7 +2321,6 @@
   }
 }
 
-
 /* =========================================================
    MOTION
 ========================================================= */
@@ -2371,7 +2341,6 @@
     transform: none !important;
   }
 }
-
 
 /* =========================================================
    KEYFRAMES

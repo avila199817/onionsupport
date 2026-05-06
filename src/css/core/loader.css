@@ -2,26 +2,38 @@
    Onion SPA — Loader CSS
    Archivo: src/css/core/loader.css
 
-   BOOT LOADER · REFRESH SAFE · APPLE STYLE · PRO SAAS · 10/10
+   ONION SUPPORT · BOOT LOADER
+   REFRESH SAFE · APPLE STYLE · PRO SAAS · EXTREME 10/10
 
    ARQUITECTURA:
-   - variables.css = tokens base / dark
-   - light.css     = overrides [data-theme="light"]
-   - loader.css    = estructura + animaciones + estados
+   - variables.css = Token Pro System / dark base.
+   - light.css     = overrides [data-theme="light"].
+   - loader.css    = estructura, estados y animaciones.
 
    REGLAS:
    - Sin :root global.
    - Sin bloque local de paleta light.
-   - Sin duplicar tokens de diseño global.
-   - Todo consume tokens existentes.
+   - Sin duplicar sistema global.
+   - Todo consume tokens existentes con fallback defensivo.
    - Theme switch solo para elegir logo.
-   - Compatible con markup nuevo app-loader__*
-   - Compatible con markup legacy loader-*
+   - Compatible con markup nuevo app-loader__*.
+   - Compatible con markup legacy loader-*.
+
+   CONTRATO CON INDEX / THEME / JS:
+   - index.html deja #app-loader visible desde refresh.
+   - theme.js resuelve html[data-theme] antes de app.css.
+   - loader.js/main.js deben limpiar:
+     · html/body .app-booting
+     · html/body .app-loading
+     · body[data-app-loading="false"]
+     · #app-loader .is-hidden / .has-hidden
+     · #app-shell[data-shell="ready"]
+     · #app-shell[data-shell-interactive="true"]
 
    FIX CRÍTICO LOGO:
    - Durante boot, la fuente de verdad del tema es html[data-theme].
-   - body puede no existir aún cuando corre preboot/theme.js.
-   - body NO debe competir con html para decidir el logo.
+   - body puede no existir cuando corre preboot/theme.js.
+   - body NO participa para decidir logo.
    - dark  -> favicon_white.png
    - light -> favicon_black.png
 ========================================================= */
@@ -44,6 +56,7 @@ body.app-loading,
 body.loading {
   overflow: hidden;
   overscroll-behavior: none;
+  touch-action: none;
 }
 
 html.app-ready,
@@ -51,31 +64,47 @@ body.app-ready {
   min-block-size: 100%;
 }
 
+html.app-ready body,
+body.app-ready {
+  touch-action: auto;
+}
+
 
 /* =========================================================
    SHELL ANTI FLICKER
 ========================================================= */
 
+#app-shell {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+
+  transition:
+    opacity var(--duration-normal, 180ms) var(--ease-standard, ease),
+    visibility var(--duration-normal, 180ms) var(--ease-standard, ease);
+}
+
 html.app-booting #app-shell,
 html.app-loading #app-shell,
 body.app-booting #app-shell,
-body.app-loading #app-shell {
+body.app-loading #app-shell,
+#app-shell[data-shell="booting"],
+#app-shell[data-shell-state="booting"],
+#app-shell[data-shell-interactive="false"],
+#app-shell[aria-busy="true"][aria-hidden="true"] {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
 }
 
-html.app-ready #app-shell,
-body.app-ready #app-shell {
+html.app-ready #app-shell[data-shell-interactive="true"],
+body.app-ready #app-shell[data-shell-interactive="true"],
+html[data-app-state="ready"] #app-shell[data-shell-interactive="true"],
+#app-shell[data-shell="ready"][data-shell-interactive="true"],
+#app-shell[data-shell-state="ready"][data-shell-interactive="true"] {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-}
-
-#app-shell {
-  transition:
-    opacity var(--duration-normal, 180ms) var(--ease-standard, ease),
-    visibility var(--duration-normal, 180ms) var(--ease-standard, ease);
 }
 
 
@@ -88,53 +117,56 @@ body.app-ready #app-shell {
   --loader-z: var(--z-loader, 2147483000);
 
   --loader-overlay-bg:
-    var(--gradient-overlay),
-    var(--app-noise),
-    var(--body-bg);
+    var(--gradient-overlay, linear-gradient(180deg, rgba(10, 12, 17, .96), rgba(10, 12, 17, .98))),
+    var(--app-noise, none),
+    var(--body-bg, var(--main-bg, #0a0c11));
 
   --loader-overlay-aura:
     radial-gradient(
       circle at 50% 0%,
-      color-mix(in srgb, var(--accent), transparent 90%),
+      color-mix(in srgb, var(--accent, #7c5cff), transparent 90%),
       transparent 38%
     ),
     radial-gradient(
       circle at 18% 18%,
-      color-mix(in srgb, var(--accent-3), transparent 92%),
+      color-mix(in srgb, var(--accent-3, #9b7cff), transparent 92%),
       transparent 30%
     ),
     radial-gradient(
       circle at 82% 28%,
-      color-mix(in srgb, var(--accent-2), transparent 92%),
+      color-mix(in srgb, var(--accent-2, #4ea7ff), transparent 92%),
       transparent 32%
     );
 
   --loader-card-surface:
-    var(--glass-shine),
-    var(--card-bg);
+    var(--glass-shine, linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02))),
+    var(--card-bg, var(--surface-elevated, rgba(18, 22, 32, .88)));
 
   --loader-card-surface-strong:
-    var(--panel-noise),
-    var(--surface-elevated-strong);
+    var(--panel-noise, none),
+    var(--surface-elevated-strong, var(--card-bg, rgba(18, 22, 32, .96)));
 
-  --loader-card-border: var(--card-border);
-  --loader-card-border-strong: var(--border-strong);
+  --loader-card-border:
+    var(--card-border, color-mix(in srgb, var(--text-strong, #fff), transparent 88%));
+
+  --loader-card-border-strong:
+    var(--border-strong, color-mix(in srgb, var(--text-strong, #fff), transparent 78%));
 
   --loader-card-shadow:
-    var(--shadow-xl),
-    var(--shadow-inner);
+    var(--shadow-xl, 0 28px 90px rgba(0, 0, 0, .42)),
+    var(--shadow-inner, inset 0 1px 0 rgba(255, 255, 255, .08));
 
   --loader-brand-shadow:
-    var(--shadow-md),
-    var(--shadow-inner);
+    var(--shadow-md, 0 16px 44px rgba(0, 0, 0, .34)),
+    var(--shadow-inner, inset 0 1px 0 rgba(255, 255, 255, .08));
 
   --loader-brand-surface:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--text-strong), transparent 92%),
-      color-mix(in srgb, var(--text-strong), transparent 97%)
+      color-mix(in srgb, var(--text-strong, #fff), transparent 92%),
+      color-mix(in srgb, var(--text-strong, #fff), transparent 97%)
     ),
-    var(--surface-glass-strong);
+    var(--surface-glass-strong, rgba(255, 255, 255, .08));
 
   --loader-brand-core-surface:
     var(--loader-card-surface-strong);
@@ -142,36 +174,36 @@ body.app-ready #app-shell {
   --loader-card-shine:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--text-strong), transparent 94%),
+      color-mix(in srgb, var(--text-strong, #fff), transparent 94%),
       transparent 42%
     ),
     radial-gradient(
       circle at 50% 0%,
-      color-mix(in srgb, var(--text-strong), transparent 94%),
+      color-mix(in srgb, var(--text-strong, #fff), transparent 94%),
       transparent 34%
     );
 
   --loader-progress-track:
-    color-mix(in srgb, var(--text), transparent 90%);
+    color-mix(in srgb, var(--text, #d8dee9), transparent 90%);
 
   --loader-progress-active:
     linear-gradient(
       90deg,
-      color-mix(in srgb, var(--accent), transparent 84%),
-      var(--accent),
-      var(--accent-3)
+      color-mix(in srgb, var(--accent, #7c5cff), transparent 84%),
+      var(--accent, #7c5cff),
+      var(--accent-3, #9b7cff)
     );
 
-  --loader-text-main: var(--text-strong);
-  --loader-text-muted: var(--text-muted);
-  --loader-text-soft: var(--text-dim);
+  --loader-text-main: var(--text-strong, #ffffff);
+  --loader-text-muted: var(--text-muted, #aeb7c6);
+  --loader-text-soft: var(--text-dim, #7f8a99);
 
   --loader-brand-size-final: var(--loader-brand-size, 74px);
   --loader-logo-size-final: var(--loader-logo-size, 52px);
   --loader-card-width-final: var(--loader-card-width, min(360px, calc(100vw - 48px)));
   --loader-card-padding-final: var(--loader-card-padding, 28px 26px 24px);
-  --loader-card-radius-final: var(--loader-card-radius, var(--radius-3xl));
-  --loader-logo-radius-final: var(--loader-logo-radius, var(--radius-2xl));
+  --loader-card-radius-final: var(--loader-card-radius, var(--radius-3xl, 28px));
+  --loader-logo-radius-final: var(--loader-logo-radius, var(--radius-2xl, 22px));
   --loader-progress-height-final: var(--loader-progress-height, 7px);
 
   --loader-ring-size: 3px;
@@ -188,10 +220,16 @@ body.app-ready #app-shell {
   display: grid;
   place-items: center;
 
+  inline-size: 100vw;
+  block-size: 100vh;
   min-block-size: 100vh;
   min-block-size: 100dvh;
 
-  padding: 24px;
+  padding:
+    max(24px, env(safe-area-inset-top))
+    max(24px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom))
+    max(24px, env(safe-area-inset-left));
 
   background: var(--loader-overlay-bg);
 
@@ -208,10 +246,20 @@ body.app-ready #app-shell {
 
   isolation: isolate;
   overflow: hidden;
+  contain: layout paint style;
 }
+
+
+/* =========================================================
+   LOADER VISIBILITY STATES
+========================================================= */
 
 #app-loader.is-visible,
 .app-loader.is-visible,
+#app-loader[data-loader-visible="true"],
+.app-loader[data-loader-visible="true"],
+#app-loader[data-loader-state="booting"],
+.app-loader[data-loader-state="booting"],
 html.app-booting #app-loader,
 html.app-loading #app-loader,
 body.app-booting #app-loader,
@@ -221,14 +269,25 @@ body.app-loading #app-loader {
   pointer-events: auto;
 }
 
-#app-loader[hidden],
+#app-loader.is-leaving,
+.app-loader.is-leaving,
+#app-loader[data-loader-state="leaving"],
+.app-loader[data-loader-state="leaving"] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 #app-loader[aria-hidden="true"],
 #app-loader.is-hidden,
 #app-loader.has-hidden,
-.app-loader[hidden],
+#app-loader[data-loader-visible="false"],
+#app-loader[data-loader-state="hidden"],
 .app-loader[aria-hidden="true"],
 .app-loader.is-hidden,
 .app-loader.has-hidden,
+.app-loader[data-loader-visible="false"],
+.app-loader[data-loader-state="hidden"],
 html.app-ready #app-loader.is-hidden,
 body.app-ready #app-loader.is-hidden {
   opacity: 0;
@@ -244,18 +303,16 @@ body.app-ready #app-loader.is-hidden {
 #app-loader[hidden],
 .app-loader[hidden] {
   display: grid !important;
-}
-
-#app-loader.has-hidden,
-.app-loader.has-hidden {
-  display: none !important;
-}
-
-#app-loader.is-leaving,
-.app-loader.is-leaving {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
+}
+
+#app-loader.has-hidden,
+.app-loader.has-hidden,
+#app-loader[data-loader-state="removed"],
+.app-loader[data-loader-state="removed"] {
+  display: none !important;
 }
 
 
@@ -286,14 +343,19 @@ body.app-ready #app-loader.is-hidden {
   background:
     radial-gradient(
       circle at 50% 50%,
-      color-mix(in srgb, var(--accent), transparent 94%),
+      color-mix(in srgb, var(--accent, #7c5cff), transparent 94%),
       transparent 42%
     );
 
   opacity: .72;
   pointer-events: none;
 
-  animation: loaderBackdropDrift 5.8s var(--ease-standard, ease-in-out) infinite alternate;
+  animation:
+    loaderBackdropDrift
+    5.8s
+    var(--ease-standard, ease-in-out)
+    infinite
+    alternate;
 }
 
 
@@ -329,13 +391,18 @@ body.app-ready #app-loader.is-hidden {
 
   overflow: hidden;
   isolation: isolate;
+  contain: layout paint style;
 
   backdrop-filter: var(--loader-card-blur, blur(18px));
   -webkit-backdrop-filter: var(--loader-card-blur, blur(18px));
 
   transform: translateZ(0);
 
-  animation: loaderCardIn .36s var(--ease-emphasis, ease-out) both;
+  animation:
+    loaderCardIn
+    .36s
+    var(--ease-emphasis, ease-out)
+    both;
 }
 
 #app-loader .app-loader__card::before,
@@ -370,8 +437,8 @@ body.app-ready #app-loader.is-hidden {
     linear-gradient(
       90deg,
       transparent,
-      color-mix(in srgb, var(--accent), transparent 58%),
-      color-mix(in srgb, var(--accent-3), transparent 68%),
+      color-mix(in srgb, var(--accent, #7c5cff), transparent 58%),
+      color-mix(in srgb, var(--accent-3, #9b7cff), transparent 68%),
       transparent
     );
 
@@ -401,7 +468,7 @@ body.app-ready #app-loader.is-hidden {
   display: grid;
   place-items: center;
 
-  border: 1px solid color-mix(in srgb, var(--text-strong), transparent 94%);
+  border: 1px solid color-mix(in srgb, var(--text-strong, #fff), transparent 94%);
   border-radius: var(--loader-logo-radius-final);
 
   background: var(--loader-brand-surface);
@@ -422,15 +489,19 @@ body.app-ready #app-loader.is-hidden {
     conic-gradient(
       from 180deg,
       transparent,
-      color-mix(in srgb, var(--accent), transparent 50%),
-      color-mix(in srgb, var(--accent-3), transparent 56%),
-      color-mix(in srgb, var(--accent-2), transparent 68%),
+      color-mix(in srgb, var(--accent, #7c5cff), transparent 50%),
+      color-mix(in srgb, var(--accent-3, #9b7cff), transparent 56%),
+      color-mix(in srgb, var(--accent-2, #4ea7ff), transparent 68%),
       transparent
     );
 
   opacity: .58;
 
-  animation: loaderSpin var(--loader-orbit-speed-final) linear infinite;
+  animation:
+    loaderSpin
+    var(--loader-orbit-speed-final)
+    linear
+    infinite;
 }
 
 #app-loader .app-loader__brand::after,
@@ -445,7 +516,7 @@ body.app-ready #app-loader.is-hidden {
   background: var(--loader-brand-core-surface);
 
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 94%);
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong, #fff), transparent 94%);
 }
 
 #app-loader .app-loader__brand > *,
@@ -467,31 +538,28 @@ body.app-ready #app-loader.is-hidden {
 
   filter:
     drop-shadow(
-      0 8px 18px color-mix(in srgb, var(--shadow-strong, rgba(0,0,0,.38)), transparent 42%)
+      0 8px 18px color-mix(in srgb, var(--shadow-color, rgba(0, 0, 0, .38)), transparent 42%)
     );
+
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 
 /* =========================================================
    LOADER LOGO THEME SWITCH
+
    dark  -> favicon_white.png
    light -> favicon_black.png
 
    Fuente de verdad durante preboot:
    - html[data-theme]
-   - html.theme-dark / html.theme-light como respaldo de clase.
+   - html.theme-dark / html.theme-light como respaldo.
    - body[data-theme] NO participa para evitar conflicto en boot.
-
-   Nota:
-   - Esto no redefine paleta.
-   - Solo decide qué asset mostrar según theme.
 ========================================================= */
 
 #app-loader .app-loader__logo--default,
-.app-loader .app-loader__logo--default {
-  display: none !important;
-}
-
+.app-loader .app-loader__logo--default,
 #app-loader .app-loader__logo--light,
 .app-loader .app-loader__logo--light {
   display: none !important;
@@ -541,16 +609,16 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   display: none;
   place-items: center;
 
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-lg, 14px);
 
-  color: var(--text-on-accent);
+  color: var(--text-on-accent, #fff);
 
   font-size: 24px;
-  font-weight: var(--weight-black);
+  font-weight: var(--weight-black, 900);
   line-height: 1;
   letter-spacing: -.05em;
 
-  background: var(--gradient-accent);
+  background: var(--gradient-accent, linear-gradient(135deg, var(--accent, #7c5cff), var(--accent-3, #9b7cff)));
 
   opacity: .94;
 }
@@ -583,16 +651,23 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 
 #app-loader .loader-spinner::before,
 .app-loader .loader-spinner::before {
-  border: var(--loader-ring-size) solid color-mix(in srgb, var(--text), transparent 90%);
+  border:
+    var(--loader-ring-size)
+    solid
+    color-mix(in srgb, var(--text, #d8dee9), transparent 90%);
 }
 
 #app-loader .loader-spinner::after,
 .app-loader .loader-spinner::after {
   border: var(--loader-ring-size) solid transparent;
-  border-block-start-color: var(--accent);
-  border-inline-end-color: var(--accent-3);
+  border-block-start-color: var(--accent, #7c5cff);
+  border-inline-end-color: var(--accent-3, #9b7cff);
 
-  animation: loaderSpin var(--loader-spin-speed) linear infinite;
+  animation:
+    loaderSpin
+    var(--loader-spin-speed)
+    linear
+    infinite;
 }
 
 #app-loader .loader-core,
@@ -605,16 +680,20 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   background:
     radial-gradient(
       circle,
-      color-mix(in srgb, var(--text-on-accent), transparent 78%),
+      color-mix(in srgb, var(--text-on-accent, #fff), transparent 78%),
       transparent 62%
     ),
-    var(--gradient-accent);
+    var(--gradient-accent, linear-gradient(135deg, var(--accent, #7c5cff), var(--accent-3, #9b7cff)));
 
   box-shadow:
-    0 0 22px color-mix(in srgb, var(--text), transparent 94%),
-    0 0 28px color-mix(in srgb, var(--accent), transparent 74%);
+    0 0 22px color-mix(in srgb, var(--text, #d8dee9), transparent 94%),
+    0 0 28px color-mix(in srgb, var(--accent, #7c5cff), transparent 74%);
 
-  animation: loaderPulse var(--loader-pulse-speed) var(--ease-standard, ease-in-out) infinite;
+  animation:
+    loaderPulse
+    var(--loader-pulse-speed)
+    var(--ease-standard, ease-in-out)
+    infinite;
 }
 
 
@@ -643,7 +722,7 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 
   font-size: var(--loader-title-size, 18px);
   line-height: 1.15;
-  font-weight: var(--weight-black);
+  font-weight: var(--weight-black, 900);
   letter-spacing: -.035em;
 }
 
@@ -664,7 +743,7 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 
   font-size: var(--loader-text-size, 13px);
   line-height: 1.45;
-  font-weight: var(--weight-medium);
+  font-weight: var(--weight-medium, 500);
 }
 
 #app-loader .app-loader__subtext,
@@ -675,7 +754,7 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 
   font-size: var(--loader-subtext-size, 11px);
   line-height: 1.35;
-  font-weight: var(--weight-medium);
+  font-weight: var(--weight-medium, 500);
 }
 
 #app-loader .loader-dots::after,
@@ -687,7 +766,11 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 
   text-align: start;
 
-  animation: loaderDots 1.4s steps(4, end) infinite;
+  animation:
+    loaderDots
+    1.4s
+    steps(4, end)
+    infinite;
 }
 
 
@@ -707,14 +790,14 @@ html.theme-dark .app-loader .app-loader__logo--dark {
 
   margin-block-start: 2px;
 
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-pill, 999px);
 
   overflow: hidden;
 
   background: var(--loader-progress-track);
 
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 96%);
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong, #fff), transparent 96%);
 }
 
 #app-loader .app-loader__bar-fill,
@@ -731,9 +814,13 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   background: var(--loader-progress-active);
 
   box-shadow:
-    0 0 18px color-mix(in srgb, var(--accent), transparent 68%);
+    0 0 18px color-mix(in srgb, var(--accent, #7c5cff), transparent 68%);
 
-  animation: loaderBar var(--loader-bar-speed-final) var(--ease-standard, ease-in-out) infinite;
+  animation:
+    loaderBar
+    var(--loader-bar-speed-final)
+    var(--ease-standard, ease-in-out)
+    infinite;
 }
 
 
@@ -851,11 +938,15 @@ body.app-ready #app-shell {
   .app-loader {
     --loader-brand-size-final: calc(66px * var(--ui-scale, 1));
     --loader-logo-size-final: calc(48px * var(--ui-scale, 1));
-    --loader-card-radius-final: var(--radius-2xl);
-    --loader-logo-radius-final: var(--radius-xl);
+    --loader-card-radius-final: var(--radius-2xl, 22px);
+    --loader-logo-radius-final: var(--radius-xl, 18px);
     --loader-card-width-final: min(304px, calc(100vw - 32px));
 
-    padding: 16px;
+    padding:
+      max(16px, env(safe-area-inset-top))
+      max(16px, env(safe-area-inset-right))
+      max(16px, env(safe-area-inset-bottom))
+      max(16px, env(safe-area-inset-left));
   }
 
   #app-loader .app-loader__card,
@@ -886,20 +977,95 @@ body.app-ready #app-shell {
 
 
 /* =========================================================
-   FALLBACK SIN BACKDROP FILTER
+   SMALL HEIGHT DEVICES
 ========================================================= */
 
-@supports not ((backdrop-filter: blur(12px)) or (-webkit-backdrop-filter: blur(12px))) {
+@media (max-height: 520px) {
   #app-loader,
   .app-loader {
-    background: var(--body-bg);
+    align-items: center;
+    padding-block: 12px;
   }
 
   #app-loader .app-loader__card,
   #app-loader .loader-card,
   .app-loader .app-loader__card,
   .app-loader .loader-card {
-    background: var(--card-bg);
+    gap: 14px;
+    padding-block: 20px;
+  }
+
+  #app-loader .app-loader__subtext,
+  .app-loader .app-loader__subtext {
+    display: none;
+  }
+}
+
+
+/* =========================================================
+   FALLBACK SIN BACKDROP FILTER
+========================================================= */
+
+@supports not ((backdrop-filter: blur(12px)) or (-webkit-backdrop-filter: blur(12px))) {
+  #app-loader,
+  .app-loader {
+    background: var(--body-bg, var(--main-bg, #0a0c11));
+  }
+
+  #app-loader .app-loader__card,
+  #app-loader .loader-card,
+  .app-loader .app-loader__card,
+  .app-loader .loader-card {
+    background: var(--card-bg, var(--surface-elevated, #121620));
+  }
+}
+
+
+/* =========================================================
+   FORCED COLORS / HIGH CONTRAST
+========================================================= */
+
+@media (forced-colors: active) {
+  #app-loader,
+  .app-loader {
+    background: Canvas;
+    color: CanvasText;
+    forced-color-adjust: auto;
+  }
+
+  #app-loader .app-loader__card,
+  #app-loader .loader-card,
+  .app-loader .app-loader__card,
+  .app-loader .loader-card,
+  #app-loader .app-loader__brand,
+  .app-loader .app-loader__brand,
+  #app-loader .app-loader__bar,
+  #app-loader .loader-progress,
+  .app-loader .app-loader__bar,
+  .app-loader .loader-progress {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+  }
+
+  #app-loader .app-loader__brand::before,
+  #app-loader .app-loader__brand::after,
+  .app-loader .app-loader__brand::before,
+  .app-loader .app-loader__brand::after,
+  #app-loader .app-loader__card::before,
+  #app-loader .app-loader__card::after,
+  .app-loader .app-loader__card::before,
+  .app-loader .app-loader__card::after {
+    display: none;
+  }
+
+  #app-loader .app-loader__bar-fill,
+  #app-loader .loader-progress > span,
+  .app-loader .app-loader__bar-fill,
+  .app-loader .loader-progress > span {
+    background: Highlight;
+    box-shadow: none;
   }
 }
 
@@ -945,6 +1111,27 @@ body.app-ready #app-shell {
   .app-loader .loader-card {
     transform: none;
     opacity: 1;
+  }
+}
+
+
+/* =========================================================
+   REDUCED TRANSPARENCY
+========================================================= */
+
+@media (prefers-reduced-transparency: reduce) {
+  #app-loader,
+  .app-loader {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  #app-loader .app-loader__card,
+  #app-loader .loader-card,
+  .app-loader .app-loader__card,
+  .app-loader .loader-card {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 

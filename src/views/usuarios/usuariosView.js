@@ -2,7 +2,9 @@
    Onion SPA - Usuarios View
    Archivo: src/views/usuarios/usuariosView.js
 
-   ADMIN EXPERIENCE MODE · VIEW REAL · HARDENED · FINAL 10/10
+   ADMIN EXPERIENCE MODE · VIEW REAL · HARDENED · FINAL 14/10
+   CLEAN VIEW · NO INLINE CSS · NO STYLE INJECTION · CSP READY
+   VARIABLES.CSS + UI.CSS + /css/views/usuarios/index.css READY
 
    RESPONSABILIDADES:
    - punto de entrada real de la vista usuarios
@@ -18,6 +20,12 @@
    - permitir reload con rerender seguro
    - coordinar acciones y modales sin mezclar responsabilidades
    - vista solo admin con fail-safe visual y bloqueo de acciones
+   - búsqueda local conectada al template limpio
+   - filtros locales conectados al template limpio
+   - sin CSS inline
+   - sin <style> inyectado por JS
+   - sin estilos creados por JS
+   - sin duplicidad visual de acceso restringido
 
    HARDENING PRO:
    - render inicial inmediato
@@ -35,6 +43,8 @@
    - límite fijo de 5 usuarios por hoja
    - acceso admin robusto sin sticky forbidden
    - una sola pantalla de acceso restringido
+   - CSS externo obligatorio:
+       /src/css/views/usuarios/index.css
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -79,9 +89,15 @@ export const UsuariosView = (() => {
   ========================================================= */
 
   const SCOPE = "view:usuarios";
+  const MODULE = "usuarios";
+  const VIEW_NAME = "UsuariosView";
+  const VERSION = "14.0.0";
+
   const PAGE_SIZE = 5;
   const FALLBACK_MODEL_PAGE_SIZE = Number(MODEL_DEFAULT_PAGE_SIZE || 5) || 5;
+
   const CREATE_CLICK_THROTTLE_MS = 450;
+  const SEARCH_DEBOUNCE_MS = 120;
 
   const ADMIN_ROLE_KEYS = new Set([
     "admin",
@@ -94,27 +110,53 @@ export const UsuariosView = (() => {
     "root",
   ]);
 
+  const FILTER_KEYS = new Set([
+    "all",
+    "active",
+    "pending",
+    "blocked",
+  ]);
+
   /* =========================================================
      LOCAL RUNTIME
   ========================================================= */
 
   let initialized = false;
+  let mounted = false;
   let destroyed = false;
+
   let inflightInit = null;
   let inflightReload = null;
+
   let bindingsCleanup = null;
   let renderToken = 0;
+
   let pendingCreateRequest = false;
   let lastCreateClickAt = 0;
+
   let accessSyncTimer = null;
+  let searchDebounceTimer = null;
 
   /* =========================================================
      SAFE HELPERS
   ========================================================= */
 
+  function isBrowser() {
+    return (
+      typeof window !== "undefined" &&
+      typeof document !== "undefined"
+    );
+  }
+
   function safeLog(...args) {
     try {
       AppCore?.utils?.log?.("[UsuariosView]", ...args);
+    } catch {}
+
+    try {
+      if (process.env?.NODE_ENV !== "production") {
+        console.log("[UsuariosView]", ...args);
+      }
     } catch {}
   }
 
@@ -122,10 +164,15 @@ export const UsuariosView = (() => {
     try {
       AppCore?.utils?.warn?.("[UsuariosView]", ...args);
     } catch {}
+
+    try {
+      console.warn("[UsuariosView]", ...args);
+    } catch {}
   }
 
   function safeEmit(event = "", payload = {}) {
     const eventName = safeText(event, "");
+
     if (!eventName) return false;
 
     let emitted = false;
@@ -136,12 +183,13 @@ export const UsuariosView = (() => {
     } catch {}
 
     try {
-      if (typeof window !== "undefined") {
+      if (isBrowser()) {
         window.dispatchEvent(
           new CustomEvent(eventName, {
             detail: payload,
           })
         );
+
         emitted = true;
       }
     } catch {}
@@ -152,13 +200,21 @@ export const UsuariosView = (() => {
   function safeText(value, fallback = "") {
     if (value === null || value === undefined) return fallback;
 
-    const text = String(value).trim();
+    const text = String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
     return text || fallback;
   }
 
   function safeNumber(value, fallback = 0) {
+    if (value === null || value === undefined || value === "") {
+      return fallback;
+    }
+
     const n = Number(value);
+
     return Number.isFinite(n) ? n : fallback;
   }
 
@@ -175,6 +231,7 @@ export const UsuariosView = (() => {
   function toArray(value) {
     if (Array.isArray(value)) return value;
     if (value === null || value === undefined) return [];
+
     return [value];
   }
 
@@ -207,7 +264,74 @@ export const UsuariosView = (() => {
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[\s-]+/g, "_")
       .replace(/[^a-z0-9_:.]/g, "")
+      .replace(/^_+|_+$/g, "")
       .trim();
+  }
+
+  function normalizeSearch(value = "") {
+    return safeText(value, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function normalizeFilter(value = "all") {
+    const key = normalizeKey(value);
+
+    if (!key || ["all", "todo", "todos", "todas", "total"].includes(key)) {
+      return "all";
+    }
+
+    if (
+      [
+        "active",
+        "activo",
+        "activa",
+        "activos",
+        "activas",
+        "enabled",
+        "habilitado",
+        "habilitada",
+      ].includes(key)
+    ) {
+      return "active";
+    }
+
+    if (
+      [
+        "pending",
+        "pendiente",
+        "pendientes",
+        "invited",
+        "invitado",
+        "invitada",
+      ].includes(key)
+    ) {
+      return "pending";
+    }
+
+    if (
+      [
+        "blocked",
+        "bloqueado",
+        "bloqueada",
+        "bloqueados",
+        "bloqueadas",
+        "inactive",
+        "inactivo",
+        "inactiva",
+        "disabled",
+        "deshabilitado",
+        "deshabilitada",
+        "suspended",
+        "suspendido",
+        "suspendida",
+        "locked",
+      ].includes(key)
+    ) {
+      return "blocked";
+    }
+
+    return FILTER_KEYS.has(key) ? key : "all";
   }
 
   function splitRoles(value = "") {
@@ -237,7 +361,7 @@ export const UsuariosView = (() => {
   function waitForPaint() {
     return new Promise((resolve) => {
       try {
-        if (typeof window === "undefined") {
+        if (!isBrowser()) {
           resolve();
           return;
         }
@@ -257,11 +381,18 @@ export const UsuariosView = (() => {
   }
 
   function getContainer() {
-    return (
-      AppCore?.dom?.viewContainer ||
-      document.getElementById("view-container") ||
-      null
-    );
+    if (!isBrowser()) return null;
+
+    try {
+      return (
+        AppCore?.dom?.viewContainer ||
+        document.getElementById("view-container") ||
+        document.querySelector("[data-view-container]") ||
+        null
+      );
+    } catch {
+      return null;
+    }
   }
 
   function nextRenderToken() {
@@ -275,23 +406,52 @@ export const UsuariosView = (() => {
 
   function showToast(message = "", type = "info") {
     const text = safeText(message, "");
-    if (!text) return;
+    const toastType = normalizeKey(type) || "info";
+
+    if (!text) return false;
 
     try {
-      if (typeof AppCore?.toast?.[type] === "function") {
-        AppCore.toast[type](text);
-        return;
+      if (typeof AppCore?.toast?.[toastType] === "function") {
+        AppCore.toast[toastType](text);
+        return true;
       }
     } catch {}
 
     try {
-      AppCore?.toast?.show?.(text, type);
-      return;
+      if (typeof AppCore?.toast?.show === "function") {
+        AppCore.toast.show(text, toastType);
+        return true;
+      }
     } catch {}
 
     try {
-      AppCore?.ui?.toast?.[type]?.(text);
+      if (typeof AppCore?.ui?.toast?.[toastType] === "function") {
+        AppCore.ui.toast[toastType](text);
+        return true;
+      }
     } catch {}
+
+    try {
+      if (typeof AppCore?.ui?.toast?.show === "function") {
+        AppCore.ui.toast.show({
+          message: text,
+          type: toastType,
+        });
+        return true;
+      }
+    } catch {}
+
+    try {
+      if (isBrowser() && typeof window.Toast?.show === "function") {
+        window.Toast.show({
+          message: text,
+          type: toastType,
+        });
+        return true;
+      }
+    } catch {}
+
+    return false;
   }
 
   function safeErrorMessage(error = null) {
@@ -301,11 +461,26 @@ export const UsuariosView = (() => {
         error?.response?.message,
         error?.response?.data?.message,
         error?.data?.message,
+        error?.response?.error,
+        error?.data?.error,
         error?.error,
+        error?.code,
         "No se pudo cargar la colección de usuarios."
       ),
       "No se pudo cargar la colección de usuarios."
     );
+  }
+
+  function callSafe(fn, ...args) {
+    try {
+      if (typeof fn === "function") {
+        return fn(...args);
+      }
+    } catch (error) {
+      safeWarn("callSafe falló:", error);
+    }
+
+    return undefined;
   }
 
   /* =========================================================
@@ -483,7 +658,9 @@ export const UsuariosView = (() => {
       rawProfile?.superAdmin,
       rawProfile?.canManageUsers,
       rawProfile?.canAccessUsers,
-    ].some((value) => value === true || value === "true" || value === 1 || value === "1");
+    ].some((value) => {
+      return value === true || value === "true" || value === 1 || value === "1";
+    });
   }
 
   function isAuthPending() {
@@ -510,10 +687,6 @@ export const UsuariosView = (() => {
 
     const hasUser = Boolean(Object.keys(user).length);
 
-    /*
-      Pending solo si no sabemos nada aún.
-      Evita pintar "Acceso restringido" durante restore.
-    */
     return !hasKnownAuthFlag && !hasToken && !hasUser;
   }
 
@@ -523,6 +696,7 @@ export const UsuariosView = (() => {
     const hasAdminFlag = hasPositiveAdminFlag();
 
     const authenticated = Boolean(AppCore?.state?.authenticated);
+
     const hasToken = Boolean(
       safeText(
         first(
@@ -536,12 +710,11 @@ export const UsuariosView = (() => {
     );
 
     const pending = isAuthPending();
-
     const allowed = Boolean(hasAdminRole || hasAdminFlag);
 
     /*
-      No usamos usuariosState.forbidden como fuente de verdad.
-      Ese era el bug: se quedaba sticky y bloqueaba para siempre.
+      No se usa usuariosState.forbidden como fuente de verdad.
+      Era sticky y bloqueaba la vista aunque luego el usuario fuese admin.
     */
     const denied = !pending && !allowed;
 
@@ -580,101 +753,23 @@ export const UsuariosView = (() => {
 
   /* =========================================================
      ACCESS STATES UI
+     CSS externo:
+       /src/css/views/usuarios/index.css
   ========================================================= */
-
-  function renderAccessStyles() {
-    return `
-      <style>
-        .usuarios-access-state{
-          min-height:280px;
-          display:grid;
-          place-items:center;
-          border-radius:24px;
-          border:1px solid color-mix(in srgb, var(--border-soft, rgba(15,23,42,.08)) 88%, transparent);
-          background:
-            linear-gradient(180deg, rgba(255,255,255,.72), rgba(255,255,255,.48)),
-            color-mix(in srgb, var(--panel-bg, #ffffff) 94%, transparent);
-          box-shadow:
-            0 10px 30px rgba(15,23,42,.04),
-            0 1px 0 rgba(255,255,255,.5) inset;
-          padding:28px;
-          text-align:center;
-        }
-
-        .usuarios-access-card{
-          display:grid;
-          gap:10px;
-          max-width:560px;
-          justify-items:center;
-        }
-
-        .usuarios-access-title{
-          margin:0;
-          color:var(--text-strong, #111827);
-          font-size:24px;
-          line-height:1.1;
-          letter-spacing:-.035em;
-          font-weight:780;
-        }
-
-        .usuarios-access-text{
-          margin:0;
-          color:var(--text-dim, #7b8494);
-          font-size:15px;
-          line-height:1.55;
-        }
-
-        .usuarios-access-debug{
-          margin-top:8px;
-          display:inline-flex;
-          align-items:center;
-          justify-content:center;
-          min-height:28px;
-          padding:0 10px;
-          border-radius:999px;
-          border:1px solid rgba(15,23,42,.06);
-          background:rgba(255,255,255,.54);
-          color:#8a93a3;
-          font-size:11px;
-          font-weight:720;
-          letter-spacing:.04em;
-          text-transform:uppercase;
-        }
-
-        [data-theme="dark"] .usuarios-access-state{
-          background:
-            radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 7%, transparent), transparent 34%),
-            linear-gradient(180deg, var(--surface-2, #171922), var(--surface-1, #10121a));
-          border-color:var(--border-soft, rgba(255,255,255,.08));
-        }
-
-        [data-theme="dark"] .usuarios-access-title{
-          color:var(--text-strong, #f8fafc);
-        }
-
-        [data-theme="dark"] .usuarios-access-text{
-          color:var(--text-dim, #94a3b8);
-        }
-
-        [data-theme="dark"] .usuarios-access-debug{
-          border-color:rgba(255,255,255,.08);
-          background:rgba(255,255,255,.06);
-          color:var(--text-soft, #cbd5e1);
-        }
-      </style>
-    `;
-  }
 
   function renderAccessPendingHtml() {
     return `
-      ${renderAccessStyles()}
-
-      <section class="usuarios-access-state" data-usuarios-access-state="pending">
+      <section
+        class="usuarios-access-state usuarios-access-state--pending"
+        data-usuarios-access-state="pending"
+      >
         <div class="usuarios-access-card">
           <h1 class="usuarios-access-title">Validando permisos</h1>
+
           <p class="usuarios-access-text">
             Estamos comprobando tu sesión antes de cargar la administración de usuarios.
           </p>
+
           <span class="usuarios-access-debug">auth pending</span>
         </div>
       </section>
@@ -685,20 +780,32 @@ export const UsuariosView = (() => {
     const access = getAdminAccessSnapshot();
 
     return `
-      ${renderAccessStyles()}
-
-      <section class="usuarios-access-state" data-usuarios-access-state="restricted">
+      <section
+        class="usuarios-access-state usuarios-access-state--restricted"
+        data-usuarios-access-state="restricted"
+      >
         <div class="usuarios-access-card">
           <h1 class="usuarios-access-title">Acceso restringido</h1>
+
           <p class="usuarios-access-text">
             La vista de usuarios está reservada para administradores.
           </p>
+
           <span class="usuarios-access-debug">
-            ${safeText(access.roles.join(" · "), "sin rol admin")}
+            ${escapeForText(safeText(access.roles.join(" · "), "sin rol admin"))}
           </span>
         </div>
       </section>
     `;
+  }
+
+  function escapeForText(value = "") {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   /* =========================================================
@@ -727,6 +834,16 @@ export const UsuariosView = (() => {
     accessSyncTimer = null;
   }
 
+  function clearSearchDebounceTimer() {
+    try {
+      if (searchDebounceTimer) {
+        clearTimeout(searchDebounceTimer);
+      }
+    } catch {}
+
+    searchDebounceTimer = null;
+  }
+
   /* =========================================================
      STATE HELPERS
   ========================================================= */
@@ -746,13 +863,14 @@ export const UsuariosView = (() => {
 
     setState({
       pageSize: PAGE_SIZE,
+
       isAdmin: access.allowed,
       canManageUsers: access.allowed,
       canAccessUsers: access.allowed,
 
       /*
         Informativo para template/debug.
-        Nunca vuelve a alimentar isAdminAccessAllowed().
+        No alimenta isAdminAccessAllowed().
       */
       forbidden: access.denied,
       accessDenied: access.denied,
@@ -793,6 +911,30 @@ export const UsuariosView = (() => {
       usuariosState.error,
       ""
     );
+
+    usuariosState.search = normalizeSearch(
+      first(
+        usuariosState.search,
+        usuariosState.searchQuery,
+        usuariosState.query,
+        ""
+      )
+    );
+
+    usuariosState.searchQuery = usuariosState.search;
+    usuariosState.query = usuariosState.search;
+
+    usuariosState.statusFilter = normalizeFilter(
+      first(
+        usuariosState.statusFilter,
+        usuariosState.activeFilter,
+        usuariosState.filter,
+        "all"
+      )
+    );
+
+    usuariosState.activeFilter = usuariosState.statusFilter;
+    usuariosState.filter = usuariosState.statusFilter;
 
     usuariosState.remoteCount = Math.max(
       0,
@@ -855,6 +997,7 @@ export const UsuariosView = (() => {
         item?.username,
         item?.userName,
         item?.email,
+
         item?.raw?.userId,
         item?.raw?.usuarioId,
         item?.raw?.id,
@@ -909,6 +1052,9 @@ export const UsuariosView = (() => {
       status: first(item.status, raw.status, raw.estado, raw.state),
       estado: first(item.estado, raw.estado, raw.status, raw.state),
 
+      role: first(item.role, raw.role, raw.rol, raw.userRole),
+      rol: first(item.rol, raw.rol, raw.role, raw.userRole),
+
       avatar: first(item.avatar, raw.avatar, raw.avatarUrl, raw.photoUrl, raw.imageUrl),
       avatarUrl: first(item.avatarUrl, raw.avatarUrl, raw.avatar, raw.photoUrl, raw.imageUrl),
 
@@ -921,7 +1067,6 @@ export const UsuariosView = (() => {
   function getItems() {
     try {
       const rawItems = safeArray(getRawItems());
-
       const rawById = new Map();
 
       rawItems.forEach((rawItem) => {
@@ -1005,7 +1150,7 @@ export const UsuariosView = (() => {
 
   function isDomReady() {
     return Boolean(
-      typeof document !== "undefined" &&
+      isBrowser() &&
       document.body &&
       document.readyState !== "loading"
     );
@@ -1014,9 +1159,9 @@ export const UsuariosView = (() => {
   function isAppReady() {
     return Boolean(
       AppCore?.state?.ready ||
-      AppCore?.state?.bootCompleted ||
-      AppCore?.state?.appReady ||
-      AppCore?.state?.authenticated !== undefined
+        AppCore?.state?.bootCompleted ||
+        AppCore?.state?.appReady ||
+        AppCore?.state?.authenticated !== undefined
     );
   }
 
@@ -1032,6 +1177,7 @@ export const UsuariosView = (() => {
     }
 
     lastCreateClickAt = now;
+
     return true;
   }
 
@@ -1054,6 +1200,11 @@ export const UsuariosView = (() => {
         modal.open(detail);
         return true;
       }
+
+      if (typeof modal?.show === "function") {
+        modal.show(detail);
+        return true;
+      }
     } catch (error) {
       safeWarn("OnionUsuariosModal hook falló:", error);
     }
@@ -1062,7 +1213,9 @@ export const UsuariosView = (() => {
       const hook =
         window?.renderUsuarioDetailModal ||
         window?.renderUsuarioModal ||
-        window?.renderUsuariosModal;
+        window?.renderUsuariosModal ||
+        window?.openUsuarioModal ||
+        window?.openUsuariosModal;
 
       if (typeof hook === "function") {
         hook(detail);
@@ -1072,7 +1225,11 @@ export const UsuariosView = (() => {
       safeWarn("usuario modal hook falló:", error);
     }
 
-    safeEmit("usuarios:modal:open", { detail });
+    safeEmit("usuarios:modal:open", {
+      detail,
+      source: MODULE,
+      view: VIEW_NAME,
+    });
 
     return true;
   }
@@ -1085,6 +1242,11 @@ export const UsuariosView = (() => {
         modal.open(draft);
         return true;
       }
+
+      if (typeof modal?.show === "function") {
+        modal.show(draft);
+        return true;
+      }
     } catch (error) {
       safeWarn("OnionUsuariosCreateModal hook falló:", error);
     }
@@ -1093,7 +1255,8 @@ export const UsuariosView = (() => {
       const hook =
         window?.renderUsuariosCreateModal ||
         window?.renderUsuarioCreateModal ||
-        window?.openUsuarioCreateModal;
+        window?.openUsuarioCreateModal ||
+        window?.openUsuariosCreateModal;
 
       if (typeof hook === "function") {
         hook(draft);
@@ -1119,7 +1282,11 @@ export const UsuariosView = (() => {
       throw error;
     }
 
-    safeEmit("usuarios:create-modal:open", { draft });
+    safeEmit("usuarios:create-modal:open", {
+      draft,
+      source: MODULE,
+      view: VIEW_NAME,
+    });
 
     return true;
   }
@@ -1145,18 +1312,21 @@ export const UsuariosView = (() => {
 
   /* =========================================================
      DOM POST-RENDER
+     Sin estilos inline: solo clases.
   ========================================================= */
+
+  function removeErrorBanner(container) {
+    try {
+      container
+        ?.querySelector?.("[data-usuarios-error-banner='true']")
+        ?.remove?.();
+    } catch {}
+  }
 
   function applyErrorStateToDom(container) {
     if (!container) return;
 
-    const oldBanner = container.querySelector(
-      "[data-usuarios-error-banner='true']"
-    );
-
-    if (oldBanner) {
-      oldBanner.remove();
-    }
+    removeErrorBanner(container);
 
     const message = safeText(usuariosState.error, "");
     if (!message) return;
@@ -1170,22 +1340,12 @@ export const UsuariosView = (() => {
     if (!historyHead) return;
 
     const banner = document.createElement("div");
+
+    banner.className = "usuarios-error-banner";
     banner.setAttribute("data-usuarios-error-banner", "true");
-
-    Object.assign(banner.style, {
-      margin: "0 18px 14px",
-      padding: "11px 13px",
-      borderRadius: "14px",
-      border:
-        "1px solid color-mix(in srgb, var(--danger-strong, #ff6b6b) 22%, var(--border-soft, rgba(15,23,42,.08)))",
-      background:
-        "linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 6%, transparent), transparent), var(--surface-1, rgba(255,255,255,.78))",
-      color: "var(--text-soft, #4b5563)",
-      fontSize: "12px",
-      lineHeight: "1.5",
-    });
-
+    banner.setAttribute("role", "status");
     banner.textContent = message;
+
     historyHead.insertAdjacentElement("afterend", banner);
   }
 
@@ -1193,6 +1353,11 @@ export const UsuariosView = (() => {
     if (!container) return container;
 
     applyErrorStateToDom(container);
+
+    try {
+      container.setAttribute("data-usuarios-mounted", "true");
+      container.setAttribute("data-usuarios-view-version", VERSION);
+    } catch {}
 
     return container;
   }
@@ -1222,18 +1387,28 @@ export const UsuariosView = (() => {
         items: allItems,
         totalCount: remoteCount,
         remoteCount,
+
         page: pagination.page,
         pageSize: PAGE_SIZE,
         totalPages: pagination.totalPages,
+
+        filter: usuariosState.statusFilter,
+        statusFilter: usuariosState.statusFilter,
+        activeFilter: usuariosState.statusFilter,
+
+        search: usuariosState.search,
+        searchQuery: usuariosState.search,
+        query: usuariosState.search,
+
         lastUpdatedAt: usuariosState.lastSyncAt || "",
+
         title: "Usuarios y accesos",
         subtitle:
           "Consulta usuarios registrados, revisa su estado, ubicación y última conexión desde una vista clara, compacta y alineada con el sistema.",
 
         /*
-          Siempre false aquí para evitar que el template pinte
-          restricciones duplicadas en header + table.
-          El bloqueo visual lo controla esta view.
+          Siempre false aquí para evitar pantalla restringida duplicada.
+          El bloqueo visual lo controla exclusivamente esta view.
         */
         forbidden: false,
         accessDenied: false,
@@ -1247,10 +1422,21 @@ export const UsuariosView = (() => {
 
         state: {
           ...usuariosState,
+
           pageSize: PAGE_SIZE,
+
+          filter: usuariosState.statusFilter,
+          statusFilter: usuariosState.statusFilter,
+          activeFilter: usuariosState.statusFilter,
+
+          search: usuariosState.search,
+          searchQuery: usuariosState.search,
+          query: usuariosState.search,
+
           forbidden: false,
           accessDenied: false,
           accessPending: false,
+
           isAdmin: true,
           canManageUsers: true,
           canAccessUsers: true,
@@ -1259,8 +1445,13 @@ export const UsuariosView = (() => {
     }
 
     return `
-      <section class="panel-content dashboard ready" data-view="usuarios">
-        <div class="content-wrapper" style="display:grid;gap:var(--space-lg);">
+      <section
+        class="panel-content dashboard ready usuarios-panel"
+        data-view="usuarios"
+        data-module="usuarios"
+        data-usuarios-view="true"
+      >
+        <div class="content-wrapper usuarios-content-wrapper">
           ${innerHtml}
         </div>
       </section>
@@ -1268,6 +1459,8 @@ export const UsuariosView = (() => {
   }
 
   function render() {
+    if (destroyed) return null;
+
     const container = getContainer();
 
     if (!container) {
@@ -1285,7 +1478,14 @@ export const UsuariosView = (() => {
       AppCore?.clearDynamicContainers?.();
     } catch {}
 
-    container.innerHTML = buildHtml();
+    try {
+      container.innerHTML = buildHtml();
+      mounted = true;
+    } catch (error) {
+      safeWarn("Render HTML falló:", error);
+      return null;
+    }
+
     decorateDom(container);
 
     try {
@@ -1296,6 +1496,14 @@ export const UsuariosView = (() => {
       hydrated: true,
     });
 
+    safeEmit("usuarios:rendered", {
+      source: MODULE,
+      view: VIEW_NAME,
+      version: VERSION,
+      mounted: true,
+      state: getPublicStateSnapshot(),
+    });
+
     return container;
   }
 
@@ -1304,7 +1512,7 @@ export const UsuariosView = (() => {
 
     const container = render();
 
-    if (!destroyed) {
+    if (!destroyed && container) {
       bind();
     }
 
@@ -1342,7 +1550,7 @@ export const UsuariosView = (() => {
     setState({
       error: "",
       loading: !hasVisibleData && !silent,
-      refreshing: hasVisibleData && asRefresh,
+      refreshing: hasVisibleData && asRefresh && !silent,
       pageSize: PAGE_SIZE,
     });
 
@@ -1363,6 +1571,13 @@ export const UsuariosView = (() => {
       });
 
       clampPageAgainstItems(itemsAfter);
+
+      safeEmit("usuarios:loaded", {
+        items: itemsAfter,
+        count: itemsAfter.length,
+        source: MODULE,
+        view: VIEW_NAME,
+      });
 
       return itemsAfter;
     } catch (error) {
@@ -1385,6 +1600,13 @@ export const UsuariosView = (() => {
       if (!silent) {
         showToast(message, "error");
       }
+
+      safeEmit("usuarios:load:error", {
+        error,
+        message,
+        source: MODULE,
+        view: VIEW_NAME,
+      });
 
       return getItems();
     } finally {
@@ -1459,6 +1681,95 @@ export const UsuariosView = (() => {
         });
       }
     }, 0);
+
+    return accessSyncTimer;
+  }
+
+  /* =========================================================
+     FILTER / SEARCH FLOWS
+  ========================================================= */
+
+  function setSearchQuery(value = "") {
+    const search = normalizeSearch(value);
+
+    setState({
+      search,
+      searchQuery: search,
+      query: search,
+      page: 1,
+      pageSize: PAGE_SIZE,
+    });
+
+    rerender();
+
+    safeEmit("usuarios:search:change", {
+      search,
+      source: MODULE,
+      view: VIEW_NAME,
+    });
+
+    return search;
+  }
+
+  function scheduleSearchQuery(value = "") {
+    clearSearchDebounceTimer();
+
+    searchDebounceTimer = setTimeout(() => {
+      searchDebounceTimer = null;
+
+      if (!destroyed) {
+        setSearchQuery(value);
+      }
+    }, SEARCH_DEBOUNCE_MS);
+
+    return searchDebounceTimer;
+  }
+
+  function setStatusFilter(value = "all") {
+    const statusFilter = normalizeFilter(value);
+
+    setState({
+      filter: statusFilter,
+      statusFilter,
+      activeFilter: statusFilter,
+      page: 1,
+      pageSize: PAGE_SIZE,
+    });
+
+    rerender();
+
+    safeEmit("usuarios:filter:change", {
+      filter: statusFilter,
+      statusFilter,
+      source: MODULE,
+      view: VIEW_NAME,
+    });
+
+    return statusFilter;
+  }
+
+  function clearFilters() {
+    clearSearchDebounceTimer();
+
+    setState({
+      search: "",
+      searchQuery: "",
+      query: "",
+      filter: "all",
+      statusFilter: "all",
+      activeFilter: "all",
+      page: 1,
+      pageSize: PAGE_SIZE,
+    });
+
+    rerender();
+
+    safeEmit("usuarios:filters:clear", {
+      source: MODULE,
+      view: VIEW_NAME,
+    });
+
+    return true;
   }
 
   /* =========================================================
@@ -1566,6 +1877,7 @@ export const UsuariosView = (() => {
     if (!requireAdminAction()) return null;
 
     const id = safeText(userId, "");
+
     if (!id) return null;
 
     try {
@@ -1794,6 +2106,46 @@ export const UsuariosView = (() => {
         return;
       }
 
+      const filterBtn = getActionTarget(event, [
+        "filter",
+        "filter-usuarios",
+      ]);
+
+      if (filterBtn) {
+        event.preventDefault();
+
+        const filter = first(
+          filterBtn.dataset?.filter,
+          filterBtn.dataset?.filterStatus,
+          filterBtn.getAttribute?.("data-filter"),
+          filterBtn.getAttribute?.("data-filter-status"),
+          "all"
+        );
+
+        setStatusFilter(filter);
+        return;
+      }
+
+      const clearSearchBtn = getActionTarget(event, [
+        "clear-search",
+      ]);
+
+      if (clearSearchBtn) {
+        event.preventDefault();
+        setSearchQuery("");
+        return;
+      }
+
+      const clearFiltersBtn = getActionTarget(event, [
+        "clear-filters",
+      ]);
+
+      if (clearFiltersBtn) {
+        event.preventDefault();
+        clearFilters();
+        return;
+      }
+
       const exportBtn =
         getActionTarget(event, [
           "export",
@@ -1860,6 +2212,20 @@ export const UsuariosView = (() => {
       }
     };
 
+    const onInput = (event) => {
+      if (destroyed) return;
+
+      const searchInput =
+        event.target?.closest?.("[data-usuarios-search-input='true']") ||
+        event.target?.closest?.("[data-usuarios-action='search']") ||
+        event.target?.closest?.("[data-action='search-usuarios']") ||
+        event.target?.closest?.("#usuarios-search-input");
+
+      if (searchInput) {
+        scheduleSearchQuery(searchInput.value || "");
+      }
+    };
+
     const onChange = (event) => {
       if (destroyed) return;
 
@@ -1869,15 +2235,28 @@ export const UsuariosView = (() => {
 
       if (pageSizeField) {
         changePageSize(PAGE_SIZE);
+        return;
+      }
+
+      const searchInput =
+        event.target?.closest?.("[data-usuarios-search-input='true']") ||
+        event.target?.closest?.("[data-usuarios-action='search']") ||
+        event.target?.closest?.("[data-action='search-usuarios']") ||
+        event.target?.closest?.("#usuarios-search-input");
+
+      if (searchInput) {
+        setSearchQuery(searchInput.value || "");
       }
     };
 
     container.addEventListener("click", onClick);
+    container.addEventListener("input", onInput);
     container.addEventListener("change", onChange);
 
     return () => {
       try {
         container.removeEventListener("click", onClick);
+        container.removeEventListener("input", onInput);
         container.removeEventListener("change", onChange);
       } catch {}
     };
@@ -1895,11 +2274,11 @@ export const UsuariosView = (() => {
 
       await handleRefreshUsuarioFromModal(
         payload.userId ||
-        payload.usuarioId ||
-        payload.detail?.userId ||
-        payload.detail?.usuarioId ||
-        payload.detail?.id ||
-        ""
+          payload.usuarioId ||
+          payload.detail?.userId ||
+          payload.detail?.usuarioId ||
+          payload.detail?.id ||
+          ""
       );
     };
 
@@ -1908,11 +2287,11 @@ export const UsuariosView = (() => {
 
       await handleCopyUsuarioId(
         payload.userId ||
-        payload.usuarioId ||
-        payload.detail?.userId ||
-        payload.detail?.usuarioId ||
-        payload.detail?.id ||
-        ""
+          payload.usuarioId ||
+          payload.detail?.userId ||
+          payload.detail?.usuarioId ||
+          payload.detail?.id ||
+          ""
       );
     };
 
@@ -1995,6 +2374,10 @@ export const UsuariosView = (() => {
   }
 
   function bindWindowEvents() {
+    if (!isBrowser()) {
+      return () => {};
+    }
+
     const onMutated = async () => {
       await reload({
         force: true,
@@ -2139,6 +2522,7 @@ export const UsuariosView = (() => {
     }
 
     initialized = true;
+    mounted = false;
 
     inflightInit = (async () => {
       safeLog("init");
@@ -2157,6 +2541,13 @@ export const UsuariosView = (() => {
 
       flushPendingCreate();
 
+      safeEmit("usuarios:init:done", {
+        source: MODULE,
+        view: VIEW_NAME,
+        version: VERSION,
+        state: getPublicStateSnapshot(),
+      });
+
       return api;
     })();
 
@@ -2170,10 +2561,13 @@ export const UsuariosView = (() => {
   function destroy() {
     destroyed = true;
     initialized = false;
+    mounted = false;
 
     nextRenderToken();
+
     cleanupBindings();
     clearAccessSyncTimer();
+    clearSearchDebounceTimer();
 
     setState({
       openingUserId: "",
@@ -2184,9 +2578,103 @@ export const UsuariosView = (() => {
     });
 
     pendingCreateRequest = false;
+    inflightInit = null;
     inflightReload = null;
 
+    safeEmit("usuarios:destroyed", {
+      source: MODULE,
+      view: VIEW_NAME,
+      version: VERSION,
+    });
+
     safeLog("destroy");
+
+    return true;
+  }
+
+  function mount() {
+    return init();
+  }
+
+  function bootstrap() {
+    return init();
+  }
+
+  function unmount() {
+    return destroy();
+  }
+
+  function dispose() {
+    return destroy();
+  }
+
+  /* =========================================================
+     SNAPSHOTS / PUBLIC API
+  ========================================================= */
+
+  function getPublicStateSnapshot() {
+    return {
+      initialized,
+      mounted,
+      destroyed,
+
+      loading: Boolean(usuariosState.loading),
+      refreshing: Boolean(usuariosState.refreshing),
+      creating: Boolean(usuariosState.creating),
+      hydrated: Boolean(usuariosState.hydrated),
+      loaded: Boolean(usuariosState.loaded),
+
+      openingUserId: safeText(usuariosState.openingUserId, ""),
+      error: safeText(usuariosState.error, ""),
+
+      page: safeNumber(usuariosState.page, 1),
+      pageSize: PAGE_SIZE,
+
+      search: safeText(usuariosState.search, ""),
+      statusFilter: normalizeFilter(usuariosState.statusFilter),
+
+      hasInflightInit: Boolean(inflightInit),
+      hasInflightReload: Boolean(inflightReload),
+      pendingCreateRequest,
+
+      access: getAdminAccessSnapshot(),
+      isAdmin: isAdminAccessAllowed(),
+    };
+  }
+
+  function getState() {
+    return {
+      ...usuariosState,
+      ...getPublicStateSnapshot(),
+    };
+  }
+
+  function registerPublicBridge() {
+    try {
+      if (!AppCore.modules || typeof AppCore.modules !== "object") {
+        AppCore.modules = {};
+      }
+
+      AppCore.modules.UsuariosView = api;
+      AppCore.modules.Usuarios = api;
+      AppCore.modules.OnionUsuariosView = api;
+    } catch {}
+
+    try {
+      if (isBrowser()) {
+        window.UsuariosView = api;
+        window.OnionUsuariosView = api;
+
+        window.OnionUsuarios = {
+          ...(window.OnionUsuarios && typeof window.OnionUsuarios === "object"
+            ? window.OnionUsuarios
+            : {}),
+          ...api,
+        };
+      }
+    } catch {}
+
+    return api;
   }
 
   /* =========================================================
@@ -2194,10 +2682,24 @@ export const UsuariosView = (() => {
   ========================================================= */
 
   const api = {
+    name: MODULE,
+    viewName: VIEW_NAME,
+    version: VERSION,
+    source: "views:usuarios:usuariosView",
+
     init,
+    mount,
+    bootstrap,
+
     render: rerender,
+    rerender,
+
     reload,
+    refresh: reload,
+
     destroy,
+    unmount,
+    dispose,
 
     openUsuario: handleOpenUsuario,
     copyUsuarioId: handleCopyUsuarioId,
@@ -2209,35 +2711,39 @@ export const UsuariosView = (() => {
     goNextPage,
     changePageSize,
 
+    setSearchQuery,
+    setSearch: setSearchQuery,
+    clearSearch: () => setSearchQuery(""),
+
+    setStatusFilter,
+    setFilter: setStatusFilter,
+    clearFilters,
+
     getItems: () => getItems(),
     getPageItems: () => getPaginationMeta(getItems()).items,
     getPagination: () => getPaginationMeta(getItems()),
-    getUsuarioById: (userId = "") =>
-      findUsuarioById(getItems(), userId),
+    getUsuarioById: (userId = "") => findUsuarioById(getItems(), userId),
 
     isAdmin: () => isAdminAccessAllowed(),
     getAccess: () => getAdminAccessSnapshot(),
 
-    getState: () => ({
-      ...usuariosState,
-      initialized,
-      destroyed,
-      hasInflightInit: Boolean(inflightInit),
-      hasInflightReload: Boolean(inflightReload),
-      pendingCreateRequest,
-      pageSize: PAGE_SIZE,
-      access: getAdminAccessSnapshot(),
-      isAdmin: isAdminAccessAllowed(),
-    }),
+    getState,
+    getPublicStateSnapshot,
 
     get initialized() {
       return initialized;
+    },
+
+    get mounted() {
+      return mounted;
     },
 
     get destroyed() {
       return destroyed;
     },
   };
+
+  registerPublicBridge();
 
   return api;
 })();

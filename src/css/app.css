@@ -36,6 +36,9 @@
    - Mantener Clientes separado en:
      · /src/css/views/clientes/index.css
 
+   - Mantener Ajustes separado en:
+     · /src/css/views/ajustes/index.css
+
    ORDEN DE CASCADA:
    tokens < reset < core < layout < components < views < auth
 ========================================================= */
@@ -104,7 +107,7 @@
    - El CSS vive fuera de home.template.js.
    - No usar CSS inline ni estilos inyectados por JS.
    - El template debe emitir solo clases/atributos.
-   - Este CSS debe cargarse antes de Facturas/Incidencias/Cuenta/Usuarios/Clientes
+   - Este CSS debe cargarse antes de Facturas/Incidencias/Cuenta/Usuarios/Clientes/Ajustes
      para que las vistas específicas puedan especializar patrones
      si comparten nombres/token behavior.
 ========================================================= */
@@ -237,10 +240,33 @@
    - No usar style="" para avatares o banners.
    - El template debe emitir solo clases/atributos.
    - Este import debe ir después de Usuarios para agrupar vistas admin.
-   - Auth sigue al final por prioridad de pantalla pública/técnica.
 ========================================================= */
 
 @import url("./views/clientes/index.css") layer(views);
+
+
+/* =========================================================
+   VIEWS · AJUSTES
+   Vista Ajustes / Configuración:
+   - header premium de ajustes
+   - cards de configuración
+   - grid responsive
+   - estados loading/empty/error
+   - acciones de ajuste
+   - compatibilidad con template provisional
+   - guards contra CSS inline heredado
+   - light/dark token aligned
+
+   IMPORTANTE:
+   - El CSS vive fuera de ajustes.table.template.js.
+   - No usar CSS inline ni estilos inyectados por JS.
+   - No usar renderStyles() dentro del template.
+   - El template debe emitir solo clases/atributos.
+   - Este import debe ir después de Clientes para agrupar vistas privadas/admin.
+   - Auth sigue al final por prioridad de pantalla pública/técnica.
+========================================================= */
+
+@import url("./views/ajustes/index.css") layer(views);
 
 
 /* =========================================================

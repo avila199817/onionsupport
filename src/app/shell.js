@@ -3,7 +3,7 @@
    Archivo: src/app/shell.js
 
    ONION SUPPORT · APP SHELL CONTROLLER
-   NO FLICKER · BOOT LOADER ALIGNED · EXTREME 10/10
+   NO FLICKER · BOOT LOADER ALIGNED · EXTREME 12/10
 
    RESPONSABILIDADES:
    - Resolver elementos principales del shell.
@@ -19,16 +19,29 @@
    ALINEADO CON:
    - src/app/index.js
    - src/app/loader.js
+   - src/css/core/layout.css
    - src/css/core/loader.css
    - index.html con #app-loader estático
    - index.html con #sidebar-mount / #topbar-mount
 
    REGLA:
    - Loader global lo decide App Bootstrap.
-   - shell.js puede pedir hideLoader solo cuando NO hay boot activo.
+   - shell.js puede pedir hideLoader sólo cuando NO hay boot activo.
    - Durante boot, app-booting/app-loading mantiene #app-shell oculto por CSS.
    - setShellVisibility() controla chrome, no destruye #app-shell.
    - Login/reset/activate ocultan chrome, pero mantienen shell principal.
+
+   HARDENING:
+   - Soporte rutas públicas técnicas con token query/path/hash.
+   - Soporte hash-router /#/login, /#/activate-account?token=...
+   - Soporte publicPath con /@usuario.
+   - No degrada /@usuario/incidencias a /.
+   - Compatibilidad AppCore.dom heterogéneo.
+   - Compatibilidad ids antiguos y nuevos.
+   - Tablehead auto-hidden si no hay contenido.
+   - Mobile sidebar toggle coherente.
+   - Deduplicación de eventos de shell.
+   - Logs y snapshots con tokens redactados.
 ========================================================= */
 
 import {
@@ -67,6 +80,8 @@ const DOM_IDS = Object.freeze({
   tablehead: "table-head",
   tableheadContainer: "tablehead-container",
 
+  mobileSidebarToggle: "toggleSidebarMobile",
+
   loader: "app-loader",
 });
 
@@ -77,11 +92,13 @@ const AUTH_LIKE_PATHS = Object.freeze([
   "/register",
   "/signup",
   "/sign-up",
+
   "/forgot-password",
   "/recover-password",
   "/password-reset",
   "/reset-password",
   "/reset-password/confirm",
+
   "/activate-account",
 ]);
 
@@ -96,6 +113,7 @@ const TOKEN_PARAM_NAMES = Object.freeze([
   "activateToken",
   "resetToken",
   "passwordResetToken",
+  "confirmToken",
   "code",
   "t",
   "access_token",
@@ -108,6 +126,7 @@ const BOOT_BODY_CLASSES = Object.freeze([
   "app-loading",
   "is-booting",
   "is-loading",
+  "loading",
 ]);
 
 const HIDDEN_LOADER_CLASSES = Object.freeze([
@@ -125,10 +144,24 @@ const VISIBLE_LOADER_CLASSES = Object.freeze([
 
 const CHROME_HIDDEN_CLASS = "route-chrome-hidden";
 const CHROME_VISIBLE_CLASS = "route-chrome-visible";
+
 const SHELL_HIDDEN_CLASS = "route-shell-hidden";
 const SHELL_VISIBLE_CLASS = "route-shell-visible";
+
 const ROUTE_AUTH_CLASS = "route-auth";
 const ROUTE_APP_CLASS = "route-app";
+
+const AUTH_SCREEN_CLASS = "auth-screen";
+const LOGIN_NO_SCROLL_CLASS = "login-no-scroll";
+
+const SHELL_EVENT_DEDUPE_MS = 40;
+
+/* =========================================================
+   RUNTIME
+========================================================= */
+
+let lastShellEventKey = "";
+let lastShellEventAt = 0;
 
 /* =========================================================
    BASICS
@@ -199,6 +232,14 @@ function safeArrayFromClassList(classList) {
   }
 }
 
+function safeNow() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
 /* =========================================================
    LOG / EMIT
 ========================================================= */
@@ -258,7 +299,7 @@ function safeEmit(AppCore, name, payload = {}, options = {}) {
   /*
     Evita tormenta de eventos:
     - si existe AppCore.events, no duplicamos por window
-    - window solo como fallback o si se fuerza explícitamente
+    - window sólo como fallback o si se fuerza explícitamente
   */
   if (
     opts.window === true ||
@@ -278,8 +319,40 @@ function safeEmit(AppCore, name, payload = {}, options = {}) {
   return busEmitted;
 }
 
+function emitShellEvent(AppCore, name, payload = {}, options = {}) {
+  const opts = safeObject(options);
+
+  if (opts.dedupe === false) {
+    return safeEmit(AppCore, name, payload, opts);
+  }
+
+  const key = [
+    safeText(name, ""),
+    payload?.chromeVisible ? "chrome-visible" : "chrome-hidden",
+    payload?.appShellVisible ? "shell-visible" : "shell-hidden",
+    payload?.authLike ? "auth" : "app",
+    payload?.busy ? "busy" : "idle",
+    safeText(payload?.canonical || payload?.snapshot?.canonical, ""),
+    safeText(payload?.publicPath || payload?.snapshot?.publicPath, ""),
+  ].join("|");
+
+  const now = safeNow();
+
+  if (
+    key === lastShellEventKey &&
+    now - lastShellEventAt < SHELL_EVENT_DEDUPE_MS
+  ) {
+    return false;
+  }
+
+  lastShellEventKey = key;
+  lastShellEventAt = now;
+
+  return safeEmit(AppCore, name, payload, opts);
+}
+
 /* =========================================================
-   PATH / TOKEN HELPERS
+   TOKEN / PATH HELPERS
 ========================================================= */
 
 function redactTokenInText(value = "") {
@@ -322,60 +395,240 @@ function redactTokenInText(value = "") {
   return output;
 }
 
-function normalizePath(AppCore, path = DEFAULT_ROUTE) {
-  try {
-    if (isFunction(AppCore?.utils?.normalizePath)) {
-      return AppCore.utils.normalizePath(path);
-    }
-  } catch {}
+function getBaseOrigin() {
+  if (
+    isBrowser() &&
+    window.location?.origin
+  ) {
+    return window.location.origin;
+  }
 
-  let raw = safeText(path, DEFAULT_ROUTE)
+  return "http://localhost";
+}
+
+function isHashRouterPath(value = "") {
+  const raw = safeText(value, "");
+
+  return (
+    raw.startsWith("#/") ||
+    raw.startsWith("#!")
+  );
+}
+
+function normalizeHashRouterPath(value = "") {
+  const raw = safeText(value, "");
+
+  if (!raw) {
+    return DEFAULT_ROUTE;
+  }
+
+  if (raw.startsWith("#!")) {
+    return raw.replace(/^#!\/?/, "/");
+  }
+
+  return raw.replace(/^#\/?/, "/");
+}
+
+function normalizePathnameOnly(pathname = DEFAULT_ROUTE) {
+  let value = safeText(pathname, DEFAULT_ROUTE)
     .replace(/\\/g, "/")
     .replace(/\/{2,}/g, "/");
 
-  if (!raw.startsWith("/")) {
-    raw = `/${raw}`;
+  if (!value) {
+    value = DEFAULT_ROUTE;
   }
 
-  const hashIndex = raw.indexOf("#");
-  const queryIndex = raw.indexOf("?");
-
-  let cutIndex = -1;
-
-  if (
-    queryIndex >= 0 &&
-    hashIndex >= 0
-  ) {
-    cutIndex = Math.min(queryIndex, hashIndex);
-  } else if (queryIndex >= 0) {
-    cutIndex = queryIndex;
-  } else if (hashIndex >= 0) {
-    cutIndex = hashIndex;
+  if (!value.startsWith("/")) {
+    value = `/${value}`;
   }
 
-  const suffix = cutIndex >= 0
-    ? raw.slice(cutIndex)
-    : "";
+  if (value.length > 1) {
+    value = value.replace(/\/+$/g, "") || DEFAULT_ROUTE;
+  }
 
-  let pathname = cutIndex >= 0
-    ? raw.slice(0, cutIndex)
-    : raw;
-
-  pathname = pathname.replace(/\/+$/g, "") || DEFAULT_ROUTE;
-
-  return `${pathname}${suffix}`;
+  return value;
 }
 
-function pathnameOnly(AppCore, path = DEFAULT_ROUTE) {
-  const normalized = normalizePath(AppCore, path);
+function normalizeSearch(search = "") {
+  const value = safeText(search, "");
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value = safeText(hash, "");
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
+}
+
+function splitFullPath(value = DEFAULT_ROUTE) {
+  const raw = safeText(value, DEFAULT_ROUTE);
+
+  if (isHashRouterPath(raw)) {
+    return splitFullPath(
+      normalizeHashRouterPath(raw)
+    );
+  }
+
+  let pathname = raw;
+  let search = "";
+  let hash = "";
+
+  const hashIndex = pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash = pathname.slice(hashIndex);
+    pathname = pathname.slice(0, hashIndex) || DEFAULT_ROUTE;
+  }
+
+  const searchIndex = pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search = pathname.slice(searchIndex);
+    pathname = pathname.slice(0, searchIndex) || DEFAULT_ROUTE;
+  }
+
+  return {
+    pathname: normalizePathnameOnly(pathname),
+    search: normalizeSearch(search),
+    hash: normalizeHash(hash),
+  };
+}
+
+function normalizeLocalFullPath(path = DEFAULT_ROUTE) {
+  const raw = safeText(path, DEFAULT_ROUTE);
+
+  if (!raw) {
+    return DEFAULT_ROUTE;
+  }
+
+  if (isHashRouterPath(raw)) {
+    return normalizeLocalFullPath(
+      normalizeHashRouterPath(raw)
+    );
+  }
+
+  try {
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
+      const parsed = new URL(raw, getBaseOrigin());
+
+      if (
+        parsed.hash &&
+        isHashRouterPath(parsed.hash)
+      ) {
+        return normalizeLocalFullPath(
+          normalizeHashRouterPath(parsed.hash)
+        );
+      }
+
+      return normalizeLocalFullPath(
+        `${parsed.pathname || DEFAULT_ROUTE}${parsed.search || ""}${parsed.hash || ""}`
+      );
+    }
+  } catch {}
+
+  const {
+    pathname,
+    search,
+    hash,
+  } = splitFullPath(raw);
+
+  return `${pathname}${search}${hash}`;
+}
+
+function normalizePath(AppCore, path = DEFAULT_ROUTE) {
+  const local = normalizeLocalFullPath(path || DEFAULT_ROUTE);
+
+  /*
+    Si AppCore expone normalizador propio, lo usamos sólo si no degrada
+    rutas no-root a "/".
+  */
+  try {
+    if (isFunction(AppCore?.utils?.normalizePath)) {
+      const external = normalizeLocalFullPath(
+        AppCore.utils.normalizePath(path || DEFAULT_ROUTE) || local
+      );
+
+      const localClean = stripSearchAndHash(local);
+      const externalClean = stripSearchAndHash(external);
+
+      if (
+        localClean !== DEFAULT_ROUTE &&
+        externalClean === DEFAULT_ROUTE
+      ) {
+        return local;
+      }
+
+      return external || local;
+    }
+  } catch {}
+
+  return local;
+}
+
+function stripSearchAndHash(path = DEFAULT_ROUTE) {
+  const normalized = normalizeLocalFullPath(path || DEFAULT_ROUTE);
 
   return (
     normalized
       .split("?")[0]
-      .split("#")[0]
-      .replace(/\/+$/g, "") ||
+      .split("#")[0] ||
     DEFAULT_ROUTE
   );
+}
+
+function isPublicUsernameSegment(segment = "") {
+  return /^@[A-Za-z0-9._-]{1,80}$/.test(
+    safeText(segment, "")
+  );
+}
+
+function stripPublicUsernamePrefix(path = DEFAULT_ROUTE) {
+  const {
+    pathname,
+    search,
+    hash,
+  } = splitFullPath(
+    normalizeLocalFullPath(path || DEFAULT_ROUTE)
+  );
+
+  const segments = pathname
+    .split("/")
+    .filter(Boolean);
+
+  if (
+    segments.length > 0 &&
+    isPublicUsernameSegment(segments[0])
+  ) {
+    const rest = segments.slice(1).join("/");
+
+    const cleanPathname = rest
+      ? normalizePathnameOnly(`/${rest}`)
+      : DEFAULT_ROUTE;
+
+    return `${cleanPathname}${search}${hash}`;
+  }
+
+  return `${pathname}${search}${hash}`;
+}
+
+function pathnameOnly(AppCore, path = DEFAULT_ROUTE) {
+  const normalized = normalizePath(AppCore, path || DEFAULT_ROUTE);
+  const canonical = stripPublicUsernamePrefix(normalized);
+
+  return stripSearchAndHash(canonical);
 }
 
 function getBrowserPath() {
@@ -388,7 +641,18 @@ function getBrowserPath() {
     const search = window.location.search || "";
     const hash = window.location.hash || "";
 
-    return `${pathname}${search}${hash}` || DEFAULT_ROUTE;
+    if (
+      hash &&
+      isHashRouterPath(hash)
+    ) {
+      return normalizeLocalFullPath(
+        normalizeHashRouterPath(hash)
+      );
+    }
+
+    return normalizeLocalFullPath(
+      `${pathname}${search}${hash}`
+    );
   } catch {
     return DEFAULT_ROUTE;
   }
@@ -397,6 +661,18 @@ function getBrowserPath() {
 /* =========================================================
    DOM LOW LEVEL
 ========================================================= */
+
+function documentContains(element) {
+  if (!isBrowser() || !element) {
+    return false;
+  }
+
+  try {
+    return document.contains(element);
+  } catch {
+    return false;
+  }
+}
 
 function queryFirst(selectors = []) {
   if (!isBrowser()) {
@@ -416,6 +692,36 @@ function queryFirst(selectors = []) {
   }
 
   return null;
+}
+
+function getCachedDomElement(AppCore, key = "", selectors = []) {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    const cached = AppCore?.dom?.[key];
+
+    if (
+      cached &&
+      documentContains(cached)
+    ) {
+      return cached;
+    }
+  } catch {}
+
+  const found = queryFirst(selectors);
+
+  if (found) {
+    safeAssignDomCache(
+      AppCore,
+      {
+        [key]: found,
+      }
+    );
+  }
+
+  return found;
 }
 
 function setDataset(el, key, value) {
@@ -466,6 +772,25 @@ function toggleClass(el, name, force) {
     }
 
     el.classList.toggle(name, next);
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function removeClass(el, name) {
+  if (
+    !el ||
+    !name
+  ) {
+    return false;
+  }
+
+  try {
+    if (el.classList.contains(name)) {
+      el.classList.remove(name);
+    }
 
     return true;
   } catch {}
@@ -580,6 +905,7 @@ export function getShellElements(AppCore) {
 
       tablehead: null,
       tableheadContainer: null,
+      mobileSidebarToggle: null,
 
       loader: null,
 
@@ -588,101 +914,145 @@ export function getShellElements(AppCore) {
     };
   }
 
-  const dom = safeObject(AppCore?.dom);
-
   const appShell =
-    dom.appShell ||
-    queryFirst([
-      `#${DOM_IDS.appShell}`,
-      "[data-app-shell='true']",
-      "[data-app-shell]",
-      ".app-shell",
-    ]);
+    getCachedDomElement(
+      AppCore,
+      "appShell",
+      [
+        `#${DOM_IDS.appShell}`,
+        "[data-app-shell='true']",
+        "[data-app-shell]",
+        ".app-shell",
+        ".layout",
+      ]
+    );
 
   const mainContent =
-    dom.mainContent ||
-    queryFirst([
-      `#${DOM_IDS.mainContent}`,
-      "main.main-content",
-      "[data-main-content]",
-      ".main-content",
-    ]);
+    getCachedDomElement(
+      AppCore,
+      "mainContent",
+      [
+        `#${DOM_IDS.mainContent}`,
+        "main.main-content",
+        "[data-main-content]",
+        ".main-content",
+      ]
+    );
 
   const appContent =
-    dom.appContent ||
-    queryFirst([
-      `#${DOM_IDS.appContent}`,
-      "[data-app-content]",
-      ".app-content",
-    ]);
+    getCachedDomElement(
+      AppCore,
+      "appContent",
+      [
+        `#${DOM_IDS.appContent}`,
+        "[data-app-content]",
+        ".app-content",
+      ]
+    );
 
   const viewContainer =
-    dom.viewContainer ||
-    queryFirst([
-      `#${DOM_IDS.viewContainer}`,
-      "[data-view-root]",
-      "[data-router-view]",
-      ".view-container",
-    ]);
+    getCachedDomElement(
+      AppCore,
+      "viewContainer",
+      [
+        `#${DOM_IDS.viewContainer}`,
+        "[data-view-root]",
+        "[data-router-view]",
+        "[data-view-container='true']",
+        ".view-container",
+      ]
+    );
 
   const sidebarMount =
-    dom.sidebarMount ||
-    queryFirst([
-      `#${DOM_IDS.sidebarMount}`,
-      "[data-sidebar-mount='true']",
-      "[data-sidebar-mount]",
-    ]);
+    getCachedDomElement(
+      AppCore,
+      "sidebarMount",
+      [
+        `#${DOM_IDS.sidebarMount}`,
+        "[data-sidebar-mount='true']",
+        "[data-sidebar-mount]",
+      ]
+    );
 
   const topbarMount =
-    dom.topbarMount ||
-    queryFirst([
-      `#${DOM_IDS.topbarMount}`,
-      "[data-topbar-mount='true']",
-      "[data-topbar-mount]",
-    ]);
+    getCachedDomElement(
+      AppCore,
+      "topbarMount",
+      [
+        `#${DOM_IDS.topbarMount}`,
+        "[data-topbar-mount='true']",
+        "[data-topbar-mount]",
+      ]
+    );
 
   const sidebar =
-    dom.sidebar ||
-    queryFirst([
-      `#${DOM_IDS.sidebar}`,
-      ".sidebar",
-      "[data-sidebar-root]",
-      "[data-sidebar]",
-    ]);
+    getCachedDomElement(
+      AppCore,
+      "sidebar",
+      [
+        `#${DOM_IDS.sidebar}`,
+        ".sidebar",
+        "[data-sidebar-root]",
+        "[data-sidebar]",
+      ]
+    );
 
   const topbar =
-    dom.topbar ||
-    queryFirst([
-      `#${DOM_IDS.topbar}`,
-      ".topbar",
-      "[data-topbar-root]",
-      "[data-topbar]",
-    ]);
+    getCachedDomElement(
+      AppCore,
+      "topbar",
+      [
+        `#${DOM_IDS.topbar}`,
+        ".topbar",
+        "[data-topbar-root]",
+        "[data-topbar]",
+      ]
+    );
 
   const tablehead =
-    dom.tablehead ||
-    queryFirst([
-      `#${DOM_IDS.tablehead}`,
-      ".table-head",
-      "[data-tablehead]",
-    ]);
+    getCachedDomElement(
+      AppCore,
+      "tablehead",
+      [
+        `#${DOM_IDS.tablehead}`,
+        ".table-head",
+        "[data-tablehead]",
+      ]
+    );
 
   const tableheadContainer =
-    dom.tableheadContainer ||
-    queryFirst([
-      `#${DOM_IDS.tableheadContainer}`,
-      "[data-tablehead-container]",
-      ".tablehead-container",
-    ]);
+    getCachedDomElement(
+      AppCore,
+      "tableheadContainer",
+      [
+        `#${DOM_IDS.tableheadContainer}`,
+        "[data-tablehead-container]",
+        ".tablehead-container",
+      ]
+    );
+
+  const mobileSidebarToggle =
+    getCachedDomElement(
+      AppCore,
+      "sidebarMobileToggle",
+      [
+        `#${DOM_IDS.mobileSidebarToggle}`,
+        "[data-sidebar-mobile-toggle]",
+        "[data-mobile-sidebar-toggle]",
+      ]
+    );
 
   const loader =
-    dom.loader ||
-    queryFirst([
-      `#${DOM_IDS.loader}`,
-      "[data-app-loader='true']",
-      "[data-app-loader]",
-      ".app-loader",
-    ]);
+    getCachedDomElement(
+      AppCore,
+      "loader",
+      [
+        `#${DOM_IDS.loader}`,
+        "[data-app-loader='true']",
+        "[data-app-loader]",
+        ".app-loader",
+      ]
+    );
 
   safeAssignDomCache(
     AppCore,
@@ -700,6 +1070,7 @@ export function getShellElements(AppCore) {
 
       tablehead,
       tableheadContainer,
+      sidebarMobileToggle: mobileSidebarToggle,
 
       loader,
     }
@@ -719,6 +1090,7 @@ export function getShellElements(AppCore) {
 
     tablehead,
     tableheadContainer,
+    mobileSidebarToggle,
 
     loader,
 
@@ -733,13 +1105,17 @@ export function getViewContainer(AppCore) {
   }
 
   const el =
-    AppCore?.dom?.viewContainer ||
-    queryFirst([
-      `#${DOM_IDS.viewContainer}`,
-      "[data-view-root]",
-      "[data-router-view]",
-      ".view-container",
-    ]);
+    getCachedDomElement(
+      AppCore,
+      "viewContainer",
+      [
+        `#${DOM_IDS.viewContainer}`,
+        "[data-view-root]",
+        "[data-router-view]",
+        "[data-view-container='true']",
+        ".view-container",
+      ]
+    );
 
   if (el) {
     safeAssignDomCache(
@@ -802,11 +1178,11 @@ function isBootingOrLoading(AppCore) {
 
   return Boolean(
     state.booting ||
-    state.loading ||
-    state.appBooting ||
-    state.bootInProgress ||
-    state.ready === false ||
-    hasBodyBootClass()
+      state.loading ||
+      state.appBooting ||
+      state.bootInProgress ||
+      state.loaderVisible ||
+      hasBodyBootClass()
   );
 }
 
@@ -901,6 +1277,24 @@ function hasViewContent(viewContainer) {
   return false;
 }
 
+function tableheadHasContent(tableheadContainer) {
+  if (!tableheadContainer) {
+    return false;
+  }
+
+  try {
+    if (tableheadContainer.childElementCount > 0) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    return Boolean(safeText(tableheadContainer.textContent, ""));
+  } catch {}
+
+  return false;
+}
+
 /* =========================================================
    SHELL DOM STATE
 ========================================================= */
@@ -933,15 +1327,27 @@ function applyRootShellClasses(root, {
   toggleClass(root, ROUTE_AUTH_CLASS, authLike);
   toggleClass(root, ROUTE_APP_CLASS, !authLike);
 
+  toggleClass(root, AUTH_SCREEN_CLASS, authLike);
+
+  if (!authLike) {
+    removeClass(root, LOGIN_NO_SCROLL_CLASS);
+  }
+
   toggleClass(root, CHROME_HIDDEN_CLASS, !chromeVisible);
   toggleClass(root, CHROME_VISIBLE_CLASS, chromeVisible);
 
+  /*
+    Compat layout.css:
+    route-shell-hidden indica chrome oculto / route auth,
+    no implica destruir #app-shell.
+  */
   toggleClass(root, SHELL_VISIBLE_CLASS, appShellVisible);
-  toggleClass(root, SHELL_HIDDEN_CLASS, !appShellVisible);
+  toggleClass(root, SHELL_HIDDEN_CLASS, !chromeVisible);
 
   setDataset(root, "shell", appShellVisible ? "visible" : "hidden");
   setDataset(root, "chrome", chromeVisible ? "visible" : "hidden");
   setDataset(root, "routeMode", authLike ? "auth" : "app");
+  setDataset(root, "authScreen", authLike ? "true" : "false");
 
   return true;
 }
@@ -1029,7 +1435,7 @@ function markShellDomState(AppCore, {
   }
 
   /*
-    #app-shell no se oculta en auth/reset/activate.
+    #app-shell NO se oculta en auth/reset/activate.
     Sólo se oculta si hideAppShell=true desde setShellVisibility().
   */
   if (!finalAppShellVisible) {
@@ -1143,13 +1549,18 @@ export function setShellVisibility(AppCore, visible = true, options = {}) {
     topbar,
     tablehead,
     tableheadContainer,
+    mobileSidebarToggle,
   } = getShellElements(AppCore);
 
   const chromeHidden = !nextChromeVisible;
 
+  const hasTableheadContent =
+    tableheadHasContent(tableheadContainer);
+
   if (
     force ||
-    prevChromeVisible !== nextChromeVisible
+    prevChromeVisible !== nextChromeVisible ||
+    opts.forceChromeSync === true
   ) {
     /*
       Sólo ocultamos chrome:
@@ -1164,11 +1575,37 @@ export function setShellVisibility(AppCore, visible = true, options = {}) {
       topbarMount,
       sidebar,
       topbar,
-      tablehead,
-      tableheadContainer,
     ]) {
       applyHidden(chromeElement, chromeHidden);
     }
+
+    applyHidden(
+      tablehead,
+      chromeHidden || !hasTableheadContent
+    );
+
+    applyHidden(
+      tableheadContainer,
+      chromeHidden
+    );
+
+    if (mobileSidebarToggle) {
+      applyHidden(mobileSidebarToggle, chromeHidden);
+
+      setAttribute(
+        mobileSidebarToggle,
+        "aria-expanded",
+        chromeHidden ? "false" : "true"
+      );
+    }
+  } else {
+    /*
+      Aunque chrome no cambie, tablehead puede haber cambiado de contenido.
+    */
+    applyHidden(
+      tablehead,
+      chromeHidden || !hasTableheadContent
+    );
   }
 
   const domState = markShellDomState(
@@ -1186,15 +1623,21 @@ export function setShellVisibility(AppCore, visible = true, options = {}) {
     {
       /*
         Compat legacy:
-        shellVisible se mantiene, pero representa chromeVisible.
+        shellVisible representa chromeVisible.
+        appShellVisible representa el shell raíz real.
       */
       shellVisible: nextChromeVisible,
       chromeVisible: nextChromeVisible,
+
+      routeShellHidden: !nextChromeVisible,
+      shellHidden: !nextChromeVisible,
 
       appShellVisible: domState.shellVisible,
 
       shellAuthLike: authLike,
       shellBusy: busy,
+
+      routeMode: authLike ? "auth" : "app",
 
       shellUpdatedAt: safeIsoDate(),
     }
@@ -1204,6 +1647,8 @@ export function setShellVisibility(AppCore, visible = true, options = {}) {
     const snapshot = getShellSnapshot(AppCore);
 
     const payload = {
+      reason: safeText(opts.reason, "set-shell-visibility"),
+
       hidden: chromeHidden,
       visible: nextChromeVisible,
 
@@ -1215,12 +1660,15 @@ export function setShellVisibility(AppCore, visible = true, options = {}) {
       authLike,
       busy,
 
+      canonical: snapshot.canonical,
+      publicPath: snapshot.publicPath,
+
       snapshot,
     };
 
-    safeEmit(AppCore, SHELL_EVENTS.change, payload);
-    safeEmit(AppCore, SHELL_EVENTS.state, payload);
-    safeEmit(AppCore, SHELL_EVENTS.appState, payload);
+    emitShellEvent(AppCore, SHELL_EVENTS.change, payload);
+    emitShellEvent(AppCore, SHELL_EVENTS.state, payload);
+    emitShellEvent(AppCore, SHELL_EVENTS.appState, payload);
   }
 
   return nextChromeVisible;
@@ -1282,6 +1730,43 @@ export function isAuthLikePath(AppCore, path = "") {
   );
 }
 
+function routeRequestsHiddenChrome(route = null) {
+  const meta = safeObject(route?.meta);
+
+  return Boolean(
+    route?.hideShell === true ||
+      route?.shell === false ||
+      route?.showShell === false ||
+      route?.layout === "auth" ||
+      route?.layout === "public" ||
+      meta.hideShell === true ||
+      meta.shell === false ||
+      meta.showShell === false ||
+      meta.layout === "auth" ||
+      meta.layout === "public"
+  );
+}
+
+function getRouterRoute(AppCore, Router, canonicalPath = "") {
+  try {
+    if (isFunction(Router?.getRoute)) {
+      return Router.getRoute(canonicalPath || getCurrentCanonicalPath(AppCore, Router));
+    }
+  } catch {}
+
+  try {
+    if (isFunction(Router?.currentRoute)) {
+      return Router.currentRoute();
+    }
+  } catch {}
+
+  try {
+    return Router?.route || Router?.current || null;
+  } catch {
+    return null;
+  }
+}
+
 export function isAuthLikeRoute(AppCore, Router) {
   const canonical = normalizePath(
     AppCore,
@@ -1303,6 +1788,16 @@ export function isAuthLikeRoute(AppCore, Router) {
     getBrowserPath()
   );
 
+  const route = getRouterRoute(
+    AppCore,
+    Router,
+    canonical
+  );
+
+  if (routeRequestsHiddenChrome(route)) {
+    return true;
+  }
+
   return [
     canonical,
     publicPath,
@@ -1315,9 +1810,28 @@ export function isAuthLikeRoute(AppCore, Router) {
 export function updateShellVisibilityByRoute(AppCore, Router, options = {}) {
   const opts = safeObject(options);
 
+  const canonical = normalizePath(
+    AppCore,
+    opts.canonicalPath ||
+      getCurrentCanonicalPath(AppCore, Router) ||
+      AppCore?.state?.route ||
+      DEFAULT_ROUTE
+  );
+
+  const route =
+    opts.route ||
+    getRouterRoute(
+      AppCore,
+      Router,
+      canonical
+    );
+
   const authLike = opts.authLike !== undefined
     ? Boolean(opts.authLike)
-    : isAuthLikeRoute(AppCore, Router);
+    : Boolean(
+        routeRequestsHiddenChrome(route) ||
+          isAuthLikeRoute(AppCore, Router)
+      );
 
   /*
     En auth-like ocultamos chrome.
@@ -1330,6 +1844,7 @@ export function updateShellVisibilityByRoute(AppCore, Router, options = {}) {
       ...opts,
       authLike,
       hideAppShell: false,
+      reason: opts.reason || "update-shell-visibility-by-route",
     }
   );
 }
@@ -1436,6 +1951,7 @@ export function applyPostRenderLoaderPolicy({
       authLike,
       busy: !hasContent || bootBusy,
       hideAppShell: false,
+      reason: "post-render-policy",
     }
   );
 
@@ -1464,7 +1980,7 @@ export function applyPostRenderLoaderPolicy({
     Router
   );
 
-  safeEmit(
+  emitShellEvent(
     AppCore,
     SHELL_EVENTS.postRender,
     {
@@ -1480,6 +1996,9 @@ export function applyPostRenderLoaderPolicy({
 
       bootBusy,
 
+      canonical: shellSnapshot.canonical,
+      publicPath: shellSnapshot.publicPath,
+
       snapshot: shellSnapshot,
     }
   );
@@ -1494,9 +2013,11 @@ export function applyPostRenderLoaderPolicy({
 export function markShellReady(AppCore, options = {}) {
   const opts = safeObject(options);
 
+  const Router = opts.Router || null;
+
   const authLike = opts.authLike !== undefined
     ? Boolean(opts.authLike)
-    : isAuthLikeRoute(AppCore, opts.Router || null);
+    : isAuthLikeRoute(AppCore, Router);
 
   setAppShellBusy(AppCore, false);
 
@@ -1521,14 +2042,15 @@ export function markShellReady(AppCore, options = {}) {
       shellBusy: false,
       appShellVisible: opts.appShellVisible !== false,
       shellReady: true,
+      shellReadyAt: safeIsoDate(),
     }
   );
 
-  safeEmit(
+  emitShellEvent(
     AppCore,
     SHELL_EVENTS.ready,
     {
-      snapshot: getShellSnapshot(AppCore, opts.Router || null),
+      snapshot: getShellSnapshot(AppCore, Router),
     }
   );
 
@@ -1563,7 +2085,7 @@ export function markShellBusy(AppCore, options = {}) {
     }
   );
 
-  safeEmit(
+  emitShellEvent(
     AppCore,
     SHELL_EVENTS.busy,
     {
@@ -1597,6 +2119,8 @@ function getElementSnapshot(el) {
     datasetChrome: safeText(el.dataset?.chrome, ""),
     datasetRouteMode: safeText(el.dataset?.routeMode, ""),
     datasetShellInteractive: safeText(el.dataset?.shellInteractive, ""),
+    datasetLoaderVisible: safeText(el.dataset?.loaderVisible, ""),
+    datasetLoaderState: safeText(el.dataset?.loaderState, ""),
 
     className: safeText(el.className, ""),
   };
@@ -1617,6 +2141,7 @@ export function getShellSnapshot(AppCore, Router = null) {
 
     tablehead,
     tableheadContainer,
+    mobileSidebarToggle,
 
     loader,
 
@@ -1655,7 +2180,7 @@ export function getShellSnapshot(AppCore, Router = null) {
 
     booting: Boolean(state.booting),
     loading: Boolean(state.loading),
-    ready: Boolean(state.ready),
+    ready: Boolean(state.ready || state.appReady),
 
     bootBusy: isBootingOrLoading(AppCore),
     bodyBootClass: hasBodyBootClass(),
@@ -1676,6 +2201,7 @@ export function getShellSnapshot(AppCore, Router = null) {
 
       tablehead: getElementSnapshot(tablehead),
       tableheadContainer: getElementSnapshot(tableheadContainer),
+      mobileSidebarToggle: getElementSnapshot(mobileSidebarToggle),
 
       loader: getElementSnapshot(loader),
     },
@@ -1707,6 +2233,10 @@ export function getShellSnapshot(AppCore, Router = null) {
 
     tableheadContainerExists: Boolean(tableheadContainer),
     tableheadContainerHidden: Boolean(tableheadContainer?.hidden),
+    tableheadHasContent: tableheadHasContent(tableheadContainer),
+
+    mobileSidebarToggleExists: Boolean(mobileSidebarToggle),
+    mobileSidebarToggleHidden: Boolean(mobileSidebarToggle?.hidden),
 
     loaderExists: Boolean(loader),
     loaderHidden: Boolean(loader?.hidden),
@@ -1722,6 +2252,9 @@ export function getShellSnapshot(AppCore, Router = null) {
 
     bodyClasses: safeArrayFromClassList(body?.classList),
     htmlClasses: safeArrayFromClassList(html?.classList),
+
+    lastShellEventKey,
+    lastShellEventAt,
   };
 }
 
@@ -1732,11 +2265,14 @@ export function getShellSnapshot(AppCore, Router = null) {
 export function refreshShellElements(AppCore) {
   const elements = getShellElements(AppCore);
 
-  safeEmit(
+  emitShellEvent(
     AppCore,
     SHELL_EVENTS.elements,
     {
       snapshot: getShellSnapshot(AppCore),
+    },
+    {
+      dedupe: false,
     }
   );
 
@@ -1749,6 +2285,9 @@ export function resetShellRuntimeState(AppCore) {
     {
       shellVisible: true,
       chromeVisible: true,
+      routeShellHidden: false,
+      shellHidden: false,
+
       appShellVisible: true,
       shellAuthLike: false,
       shellBusy: false,
@@ -1770,7 +2309,7 @@ export function resetShellRuntimeState(AppCore) {
 }
 
 /* =========================================================
-   EXPORT
+   DEFAULT EXPORT
 ========================================================= */
 
 export default {

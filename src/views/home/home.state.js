@@ -2,37 +2,135 @@
    Onion SPA - Home State
    Archivo: src/views/home/home.state.js
 
-   FINAL PRO SYSTEM · STATE LAYER · 10/10
+   ONION SUPPORT · HOME STATE
+   SINGLE SOURCE OF VIEW STATE · APPCORE SAFE · NO CSS · 10/10
 
    RESPONSABILIDADES:
-   - estado local centralizado del módulo home
-   - loading / refresh dashboard
-   - errores
-   - cache temporal
-   - request inflight
-   - widget seleccionado / abierto
-   - paginación local de widgets
-   - snapshot dashboard
-   - persistencia cache localStorage segura
-   - compatibilidad View / API / Actions / Modal
+   - Centralizar el estado mutable del módulo Home.
+   - Exponer setters estables para home.api.js y HomeView.js.
+   - Mantener dashboard / summary / widgets / recent coherentes.
+   - Mantener flags loading / refreshing / loaded / hydrated.
+   - Mantener requestId / lastSyncAt / health / error.
+   - Emitir eventos seguros sin duplicar bus + window salvo fallback.
+   - Permitir snapshot de diagnóstico sin tokens.
+   - Evitar ciclos con home.api.js y home.store.js.
+   - No renderizar, no tocar CSS, no manipular DOM.
+   - Integrarse con AppCore.modules para debug/control.
 
-   HARDENING PRO:
-   - setters robustos
-   - no loading infinito
-   - snapshots sin referencias vivas
-   - cache helpers completos
-   - selección por widgetId/id/key/slug/code
-   - paginación estable
-   - debug snapshot útil
+   CONTRATO PRINCIPAL:
+   export const homeState
+   export function setLoading()
+   export function setRefreshing()
+   export function setError()
+   export function setDashboard()
+   export function setWidgets()
+   export function setSummary()
+   export function setRecent()
+   export function setLastSyncAt()
+   export function setLoaded()
+   export function setRequestId()
+   export function setHealth()
+   export function setHydrated()
+
+   EXTRA:
+   - patchHomeState()
+   - replaceHomeState()
+   - resetHomeState()
+   - getHomeStateSnapshot()
+   - subscribeHomeState()
 ========================================================= */
 
-export const CACHE_KEY = "home.cache";
-export const CACHE_VERSION = 1;
-export const CACHE_TTL = 1000 * 60 * 3; // 3 min
-export const DEFAULT_PAGE_SIZE = 6;
+import { AppCore } from "../../core/index.js";
 
 /* =========================================================
-   SAFE
+   CONSTANTS
+========================================================= */
+
+export const HOME_STATE_VERSION =
+  "10.0.0";
+
+const SOURCE =
+  "views:home:state";
+
+const DEFAULT_PAGE_SIZE =
+  5;
+
+const MAX_RECENT_STATE_EVENTS =
+  50;
+
+const SENSITIVE_PARAM_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
+    "code",
+    "t",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
+  ]);
+
+export const HOME_STATE_EVENTS =
+  Object.freeze({
+    change:
+      "home:state:change",
+
+    reset:
+      "home:state:reset",
+
+    replace:
+      "home:state:replace",
+
+    patch:
+      "home:state:patch",
+
+    loading:
+      "home:state:loading",
+
+    refreshing:
+      "home:state:refreshing",
+
+    loaded:
+      "home:state:loaded",
+
+    hydrated:
+      "home:state:hydrated",
+
+    error:
+      "home:state:error",
+
+    dashboard:
+      "home:state:dashboard",
+
+    summary:
+      "home:state:summary",
+
+    widgets:
+      "home:state:widgets",
+
+    recent:
+      "home:state:recent",
+
+    request:
+      "home:state:request",
+
+    health:
+      "home:state:health",
+  });
+
+/* =========================================================
+   SAFE HELPERS
 ========================================================= */
 
 function isBrowser() {
@@ -42,10 +140,55 @@ function isBrowser() {
   );
 }
 
+function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function isObjectLike(value) {
+  return (
+    value !== null &&
+    (
+      typeof value === "object" ||
+      typeof value === "function"
+    )
+  );
+}
+
+function isFunction(value) {
+  return typeof value === "function";
+}
+
+function safeObject(value, fallback = {}) {
+  return isObject(value)
+    ? value
+    : fallback;
+}
+
 function safeArray(value) {
   return Array.isArray(value)
     ? value
     : [];
+}
+
+function safeText(value, fallback = "") {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
+
+  const text =
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  return text || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
@@ -57,32 +200,56 @@ function safeNumber(value, fallback = 0) {
     return fallback;
   }
 
-  const n = Number(value);
+  if (typeof value === "string") {
+    let normalized =
+      value
+        .trim()
+        .replace(/€/g, "")
+        .replace(/\$/g, "")
+        .replace(/£/g, "")
+        .replace(/%/g, "")
+        .replace(/[^\d.,+\-\s]/g, "")
+        .replace(/\s/g, "");
 
-  return Number.isFinite(n)
-    ? n
-    : fallback;
-}
+    const hasComma =
+      normalized.includes(",");
 
-function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
+    const hasDot =
+      normalized.includes(".");
+
+    if (
+      hasComma &&
+      hasDot
+    ) {
+      const lastComma =
+        normalized.lastIndexOf(",");
+
+      const lastDot =
+        normalized.lastIndexOf(".");
+
+      normalized =
+        lastComma > lastDot
+          ? normalized.replace(/\./g, "").replace(/,/g, ".")
+          : normalized.replace(/,/g, "");
+    } else if (hasComma) {
+      normalized =
+        normalized.replace(/,/g, ".");
+    }
+
+    const parsed =
+      Number(normalized);
+
+    return Number.isFinite(parsed)
+      ? parsed
+      : fallback;
   }
 
-  const text = String(value).trim();
+  const number =
+    Number(value);
 
-  return text || fallback;
-}
-
-function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
-    ? value
-    : {};
+  return Number.isFinite(number)
+    ? number
+    : fallback;
 }
 
 function safeBoolean(value, fallback = false) {
@@ -90,8 +257,14 @@ function safeBoolean(value, fallback = false) {
     return value;
   }
 
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
   if (typeof value === "string") {
-    const key = value.trim().toLowerCase();
+    const key =
+      value.trim().toLowerCase();
 
     if (
       [
@@ -100,6 +273,8 @@ function safeBoolean(value, fallback = false) {
         "yes",
         "si",
         "sí",
+        "on",
+        "ok",
       ].includes(key)
     ) {
       return true;
@@ -110,54 +285,35 @@ function safeBoolean(value, fallback = false) {
         "false",
         "0",
         "no",
+        "off",
       ].includes(key)
     ) {
       return false;
     }
   }
 
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-
-  return fallback;
+  return Boolean(fallback);
 }
 
-function firstDefined(...values) {
-  for (const value of values) {
-    if (
-      value !== undefined &&
-      value !== null
-    ) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
-function firstText(...values) {
-  for (const value of values) {
-    const text = safeText(value, "");
-
-    if (text) {
-      return text;
-    }
-  }
-
-  return "";
-}
-
-function safeClone(value) {
-  if (value === undefined) {
-    return undefined;
-  }
-
+function nowMs() {
   try {
-    if (
-      typeof structuredClone === "function"
-    ) {
+    return Date.now();
+  } catch {
+    return 0;
+  }
+}
+
+function nowIso() {
+  try {
+    return new Date().toISOString();
+  } catch {
+    return String(nowMs());
+  }
+}
+
+function safeClone(value, fallback = null) {
+  try {
+    if (typeof structuredClone === "function") {
       return structuredClone(value);
     }
   } catch {}
@@ -166,1147 +322,2398 @@ function safeClone(value) {
     return JSON.parse(
       JSON.stringify(value)
     );
-  } catch {
-    return value;
-  }
+  } catch {}
+
+  return fallback;
 }
 
-function now() {
-  return Date.now();
+function safeAssign(target, payload) {
+  try {
+    if (
+      target &&
+      typeof target === "object"
+    ) {
+      Object.assign(
+        target,
+        safeObject(payload)
+      );
+
+      return true;
+    }
+  } catch {}
+
+  return false;
 }
 
-/* =========================================================
-   DEFAULTS
-========================================================= */
+function canExtend(value) {
+  try {
+    return (
+      isObjectLike(value) &&
+      Object.isExtensible(value)
+    );
+  } catch {}
 
-function createDefaultHealthState() {
-  return {
-    ok: false,
-    service: "",
-    status: "",
-    timestamp: "",
-  };
+  return false;
 }
 
-function createInitialHomeState() {
-  return {
-    hydrated: false,
-    loading: false,
-    refreshing: false,
-    loaded: false,
-
-    openingWidgetId: "",
-    selectedWidgetId: "",
-
-    error: "",
-
-    dashboard: {},
-    widgets: [],
-    summary: {},
-    recent: [],
-    health: null,
-
-    widgetsCount: 0,
-    recentCount: 0,
-
-    lastSyncAt: 0,
-    requestId: "",
-
-    page: 1,
-    pageSize: DEFAULT_PAGE_SIZE,
-
-    cacheRestoredAt: 0,
-    cacheSavedAt: 0,
-  };
-}
-
-/* =========================================================
-   STATE
-========================================================= */
-
-export const homeState = createInitialHomeState();
-
-let inflightLoad = null;
-
-/* =========================================================
-   NORMALIZERS
-========================================================= */
-
-function normalizeHealthState(value = null) {
-  if (!value) {
-    return null;
-  }
-
-  const item = safeObject(value);
-  const base = createDefaultHealthState();
-
-  return {
-    ...base,
-    ...safeClone(item),
-
-    ok: safeBoolean(
-      item.ok,
-      base.ok
-    ),
-
-    service: safeText(
-      item.service,
-      base.service
-    ),
-
-    status: safeText(
-      firstDefined(
-        item.status,
-        item.state
-      ),
-      base.status
-    ),
-
-    timestamp: safeText(
-      firstDefined(
-        item.timestamp,
-        item.time,
-        item.date
-      ),
-      base.timestamp
-    ),
-  };
-}
-
-function normalizeDashboardState(value = {}) {
-  return safeClone(
-    safeObject(value)
-  );
-}
-
-function normalizeSummaryState(value = {}) {
-  return safeClone(
-    safeObject(value)
-  );
-}
-
-function normalizeWidgetsState(value = []) {
-  return safeArray(value).map(
-    (item) => safeClone(item)
-  );
-}
-
-function normalizeRecentState(value = []) {
-  return safeArray(value).map(
-    (item) => safeClone(item)
-  );
-}
-
-function normalizePage(value = 1) {
-  return Math.max(
-    1,
-    safeNumber(value, 1)
-  );
-}
-
-function normalizePageSize(value = DEFAULT_PAGE_SIZE) {
-  return Math.max(
-    1,
-    safeNumber(
-      value,
-      DEFAULT_PAGE_SIZE
-    )
-  );
-}
-
-function getWidgetIdentity(item = {}) {
-  const raw = safeObject(item);
-
-  return firstText(
-    raw.widgetId,
-    raw.id,
-    raw.key,
-    raw.slug,
-    raw.code,
-    raw.uuid,
-    raw._id,
-    raw.raw?.widgetId,
-    raw.raw?.id,
-    raw.raw?.key,
-    raw.raw?.slug,
-    raw.raw?.code,
-    raw.raw?.uuid,
-    raw.raw?._id
-  );
-}
-
-function matchesWidgetId(item = {}, widgetId = "") {
-  const target = safeText(widgetId, "");
-
-  if (!target) {
+function defineHiddenValue(target, key, value) {
+  if (
+    !target ||
+    !key ||
+    !canExtend(target)
+  ) {
     return false;
   }
 
-  return getWidgetIdentity(item) === target;
+  try {
+    Object.defineProperty(
+      target,
+      key,
+      {
+        value,
+        enumerable:
+          false,
+        configurable:
+          true,
+        writable:
+          true,
+      }
+    );
+
+    return true;
+  } catch {}
+
+  try {
+    target[key] =
+      value;
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function hasOwnKeys(value = {}) {
+  return Boolean(
+    isObject(value) &&
+    Object.keys(value).length > 0
+  );
+}
+
+function first(...values) {
+  for (const value of values) {
+    if (
+      value === undefined ||
+      value === null
+    ) {
+      continue;
+    }
+
+    if (
+      typeof value === "string" &&
+      value.trim() === ""
+    ) {
+      continue;
+    }
+
+    if (
+      Array.isArray(value) &&
+      value.length === 0
+    ) {
+      continue;
+    }
+
+    if (
+      isObject(value) &&
+      Object.keys(value).length === 0
+    ) {
+      continue;
+    }
+
+    return value;
+  }
+
+  return null;
 }
 
 /* =========================================================
-   INFLIGHT
+   REDACTION / SANITIZE
 ========================================================= */
 
-export function getInflightLoad() {
-  return inflightLoad;
+function redactSensitiveText(value = "") {
+  let output =
+    safeText(value, "");
+
+  if (!output) {
+    return "";
+  }
+
+  for (const name of SENSITIVE_PARAM_NAMES) {
+    try {
+      const escaped =
+        String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+      output =
+        output.replace(
+          new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
+          "$1***"
+        );
+    } catch {}
+  }
+
+  try {
+    output =
+      output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
+  } catch {}
+
+  try {
+    output =
+      output.replace(
+        /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
+        "$1$2***"
+      );
+  } catch {}
+
+  return output;
 }
 
-export function setInflightLoad(value) {
-  inflightLoad = value || null;
-  return inflightLoad;
-}
+function sanitizePayload(value, depth = 0) {
+  if (depth > 6) {
+    return "[MaxDepth]";
+  }
 
-export function clearInflightLoad() {
-  inflightLoad = null;
-  return inflightLoad;
-}
+  if (typeof value === "string") {
+    return redactSensitiveText(value);
+  }
 
-export function hasInflightLoad() {
-  return Boolean(inflightLoad);
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (value instanceof Error) {
+    return {
+      name:
+        safeText(value.name, "Error"),
+
+      message:
+        redactSensitiveText(value.message || ""),
+
+      code:
+        value.code || null,
+
+      status:
+        value.status || value.statusCode || null,
+
+      stack:
+        value.stack
+          ? redactSensitiveText(value.stack)
+          : "",
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 150)
+      .map((item) =>
+        sanitizePayload(item, depth + 1)
+      );
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      if (
+        /token|secret|password|authorization|credential/i.test(key) &&
+        item
+      ) {
+        output[key] =
+          "***";
+        continue;
+      }
+
+      output[key] =
+        sanitizePayload(item, depth + 1);
+    }
+
+    return output;
+  }
+
+  return String(value);
 }
 
 /* =========================================================
-   RESET
+   RUNTIME
 ========================================================= */
 
-export function resetHomeState() {
-  const next = createInitialHomeState();
+const subscribers =
+  new Set();
 
-  Object.keys(homeState).forEach((key) => {
-    delete homeState[key];
-  });
+const runtime = {
+  initialized:
+    false,
 
-  Object.assign(homeState, next);
+  changeCount:
+    0,
 
-  inflightLoad = null;
+  lastEvent:
+    "",
+
+  lastReason:
+    "",
+
+  lastChangedAt:
+    "",
+
+  lastChangedAtMs:
+    0,
+
+  lastSignature:
+    "",
+
+  recent:
+    [],
+};
+
+/* =========================================================
+   INITIAL STATE
+========================================================= */
+
+function createInitialHomeState() {
+  return {
+    hydrated:
+      false,
+
+    loaded:
+      false,
+
+    loading:
+      false,
+
+    refreshing:
+      false,
+
+    creating:
+      false,
+
+    openingTicketId:
+      "",
+
+    selectedTicketId:
+      "",
+
+    navigatingAction:
+      "",
+
+    error:
+      "",
+
+    page:
+      1,
+
+    pageSize:
+      DEFAULT_PAGE_SIZE,
+
+    remoteCount:
+      0,
+
+    ticketsRemoteCount:
+      0,
+
+    invoicesRemoteCount:
+      0,
+
+    usersRemoteCount:
+      0,
+
+    clientsRemoteCount:
+      0,
+
+    requestId:
+      "",
+
+    lastSyncAt:
+      "",
+
+    dashboard:
+      {},
+
+    summary:
+      {},
+
+    stats:
+      {},
+
+    metrics:
+      {},
+
+    totals:
+      {},
+
+    counts:
+      {},
+
+    widgets:
+      [],
+
+    cards:
+      [],
+
+    kpis:
+      [],
+
+    recent:
+      [],
+
+    recentActivity:
+      [],
+
+    activity:
+      [],
+
+    tickets:
+      [],
+
+    incidencias:
+      [],
+
+    invoices:
+      [],
+
+    facturas:
+      [],
+
+    users:
+      [],
+
+    usuarios:
+      [],
+
+    clients:
+      [],
+
+    clientes:
+      [],
+
+    customers:
+      [],
+
+    health:
+      null,
+
+    meta:
+      {},
+
+    updatedAt:
+      "",
+
+    createdAt:
+      nowIso(),
+  };
+}
+
+export const homeState =
+  createInitialHomeState();
+
+/* =========================================================
+   NORMALIZATION
+========================================================= */
+
+function normalizeSummaryAliases(summary = {}) {
+  const input =
+    safeObject(summary);
+
+  const totalTickets =
+    Math.max(
+      0,
+      safeNumber(
+        first(
+          input.totalTickets,
+          input.ticketsTotal,
+          input.incidenciasTotal,
+          input.totalIncidencias,
+          input.ticketsCount,
+          input.incidenciasCount,
+          0
+        ),
+        0
+      )
+    );
+
+  const totalInvoices =
+    Math.max(
+      0,
+      safeNumber(
+        first(
+          input.totalInvoices,
+          input.invoicesTotal,
+          input.facturasTotal,
+          input.totalFacturas,
+          input.invoicesCount,
+          input.facturasCount,
+          0
+        ),
+        0
+      )
+    );
+
+  const usersCount =
+    Math.max(
+      0,
+      safeNumber(
+        first(
+          input.usersCount,
+          input.usuariosCount,
+          input.totalUsers,
+          input.totalUsuarios,
+          input.activeUsers,
+          input.usuariosActivos,
+          0
+        ),
+        0
+      )
+    );
+
+  const clientsCount =
+    Math.max(
+      0,
+      safeNumber(
+        first(
+          input.clientsCount,
+          input.clientesCount,
+          input.customersCount,
+          input.totalClients,
+          input.totalClientes,
+          input.totalCustomers,
+          input.activeClients,
+          input.clientesActivos,
+          0
+        ),
+        0
+      )
+    );
+
+  const pendingInvoices =
+    Math.max(
+      0,
+      safeNumber(
+        first(
+          input.pendingInvoices,
+          input.pendingFacturas,
+          input.facturasPendientes,
+          input.invoicesPending,
+          input.facturasVencidas,
+          input.overdueInvoices,
+          0
+        ),
+        0
+      )
+    );
+
+  const invoiceAmount =
+    Math.max(
+      0,
+      safeNumber(
+        first(
+          input.invoiceAmount,
+          input.billingTotal,
+          input.totalBilling,
+          input.totalFacturado,
+          input.importeFacturas,
+          input.facturacionVisible,
+          input.facturacionTotal,
+          0
+        ),
+        0
+      )
+    );
+
+  return {
+    ...input,
+
+    totalTickets,
+    ticketsTotal:
+      totalTickets,
+
+    incidenciasTotal:
+      totalTickets,
+
+    totalIncidencias:
+      totalTickets,
+
+    ticketsCount:
+      totalTickets,
+
+    incidenciasCount:
+      totalTickets,
+
+    totalInvoices,
+    invoicesTotal:
+      totalInvoices,
+
+    facturasTotal:
+      totalInvoices,
+
+    totalFacturas:
+      totalInvoices,
+
+    invoicesCount:
+      totalInvoices,
+
+    facturasCount:
+      totalInvoices,
+
+    pendingInvoices,
+    pendingFacturas:
+      pendingInvoices,
+
+    facturasPendientes:
+      pendingInvoices,
+
+    invoicesPending:
+      pendingInvoices,
+
+    invoiceAmount,
+    billingTotal:
+      invoiceAmount,
+
+    totalBilling:
+      invoiceAmount,
+
+    totalFacturado:
+      invoiceAmount,
+
+    importeFacturas:
+      invoiceAmount,
+
+    facturacionVisible:
+      invoiceAmount,
+
+    usersCount,
+    usuariosCount:
+      usersCount,
+
+    totalUsers:
+      usersCount,
+
+    totalUsuarios:
+      usersCount,
+
+    activeUsers:
+      Math.max(
+        usersCount,
+        safeNumber(input.activeUsers, 0)
+      ),
+
+    usuariosActivos:
+      Math.max(
+        usersCount,
+        safeNumber(first(input.usuariosActivos, input.activeUsers, 0), 0)
+      ),
+
+    clientsCount,
+    clientesCount:
+      clientsCount,
+
+    customersCount:
+      clientsCount,
+
+    totalClients:
+      clientsCount,
+
+    totalClientes:
+      clientsCount,
+
+    totalCustomers:
+      clientsCount,
+
+    activeClients:
+      Math.max(
+        clientsCount,
+        safeNumber(input.activeClients, 0)
+      ),
+
+    clientesActivos:
+      Math.max(
+        clientsCount,
+        safeNumber(first(input.clientesActivos, input.activeClients, 0), 0)
+      ),
+  };
+}
+
+function normalizeDashboardAliases(dashboard = {}, summary = {}) {
+  const input =
+    safeObject(dashboard);
+
+  const finalSummary =
+    normalizeSummaryAliases(
+      hasOwnKeys(summary)
+        ? summary
+        : first(
+            input.summary,
+            input.stats,
+            input.metrics,
+            input.totals,
+            input.counts,
+            {}
+          )
+    );
+
+  return {
+    ...input,
+
+    summary:
+      finalSummary,
+
+    stats:
+      finalSummary,
+
+    metrics:
+      finalSummary,
+
+    totals:
+      finalSummary,
+
+    counts:
+      finalSummary,
+
+    widgets:
+      safeArray(first(input.widgets, input.cards, input.kpis, [])),
+
+    cards:
+      safeArray(first(input.cards, input.widgets, input.kpis, [])),
+
+    kpis:
+      safeArray(first(input.kpis, input.widgets, input.cards, [])),
+
+    tickets:
+      safeArray(first(input.tickets, input.incidencias, [])),
+
+    incidencias:
+      safeArray(first(input.incidencias, input.tickets, [])),
+
+    invoices:
+      safeArray(first(input.invoices, input.facturas, [])),
+
+    facturas:
+      safeArray(first(input.facturas, input.invoices, [])),
+
+    users:
+      safeArray(first(input.users, input.usuarios, [])),
+
+    usuarios:
+      safeArray(first(input.usuarios, input.users, [])),
+
+    clients:
+      safeArray(first(input.clients, input.clientes, input.customers, [])),
+
+    clientes:
+      safeArray(first(input.clientes, input.clients, input.customers, [])),
+
+    customers:
+      safeArray(first(input.customers, input.clients, input.clientes, [])),
+
+    recent:
+      safeArray(first(input.recent, input.recentActivity, input.activity, [])),
+
+    recentActivity:
+      safeArray(first(input.recentActivity, input.recent, input.activity, [])),
+
+    activity:
+      safeArray(first(input.activity, input.recentActivity, input.recent, [])),
+  };
+}
+
+function ensureHomeStateAliases() {
+  homeState.summary =
+    normalizeSummaryAliases(homeState.summary);
+
+  homeState.stats =
+    homeState.summary;
+
+  homeState.metrics =
+    homeState.summary;
+
+  homeState.totals =
+    homeState.summary;
+
+  homeState.counts =
+    homeState.summary;
+
+  homeState.dashboard =
+    normalizeDashboardAliases(
+      homeState.dashboard,
+      homeState.summary
+    );
+
+  homeState.widgets =
+    safeArray(
+      first(
+        homeState.widgets,
+        homeState.dashboard.widgets,
+        []
+      )
+    );
+
+  homeState.cards =
+    homeState.widgets;
+
+  homeState.kpis =
+    homeState.widgets;
+
+  homeState.tickets =
+    safeArray(
+      first(
+        homeState.tickets,
+        homeState.incidencias,
+        homeState.dashboard.tickets,
+        homeState.dashboard.incidencias,
+        []
+      )
+    );
+
+  homeState.incidencias =
+    homeState.tickets;
+
+  homeState.invoices =
+    safeArray(
+      first(
+        homeState.invoices,
+        homeState.facturas,
+        homeState.dashboard.invoices,
+        homeState.dashboard.facturas,
+        []
+      )
+    );
+
+  homeState.facturas =
+    homeState.invoices;
+
+  homeState.users =
+    safeArray(
+      first(
+        homeState.users,
+        homeState.usuarios,
+        homeState.dashboard.users,
+        homeState.dashboard.usuarios,
+        []
+      )
+    );
+
+  homeState.usuarios =
+    homeState.users;
+
+  homeState.clients =
+    safeArray(
+      first(
+        homeState.clients,
+        homeState.clientes,
+        homeState.customers,
+        homeState.dashboard.clients,
+        homeState.dashboard.clientes,
+        homeState.dashboard.customers,
+        []
+      )
+    );
+
+  homeState.clientes =
+    homeState.clients;
+
+  homeState.customers =
+    homeState.clients;
+
+  homeState.recent =
+    safeArray(
+      first(
+        homeState.recent,
+        homeState.recentActivity,
+        homeState.activity,
+        homeState.dashboard.recent,
+        homeState.dashboard.recentActivity,
+        homeState.dashboard.activity,
+        []
+      )
+    );
+
+  homeState.recentActivity =
+    homeState.recent;
+
+  homeState.activity =
+    safeArray(
+      first(
+        homeState.activity,
+        homeState.recent,
+        homeState.recentActivity,
+        []
+      )
+    );
+
+  homeState.ticketsRemoteCount =
+    Math.max(
+      safeNumber(homeState.ticketsRemoteCount, 0),
+      safeNumber(homeState.summary.totalTickets, 0),
+      homeState.tickets.length
+    );
+
+  homeState.invoicesRemoteCount =
+    Math.max(
+      safeNumber(homeState.invoicesRemoteCount, 0),
+      safeNumber(homeState.summary.totalInvoices, 0),
+      homeState.invoices.length
+    );
+
+  homeState.usersRemoteCount =
+    Math.max(
+      safeNumber(homeState.usersRemoteCount, 0),
+      safeNumber(homeState.summary.usersCount, 0),
+      homeState.users.length
+    );
+
+  homeState.clientsRemoteCount =
+    Math.max(
+      safeNumber(homeState.clientsRemoteCount, 0),
+      safeNumber(homeState.summary.clientsCount, 0),
+      homeState.clients.length
+    );
+
+  homeState.remoteCount =
+    Math.max(
+      safeNumber(homeState.remoteCount, 0),
+      homeState.ticketsRemoteCount,
+      homeState.tickets.length
+    );
+
+  homeState.page =
+    Math.max(
+      1,
+      Math.trunc(
+        safeNumber(homeState.page, 1)
+      )
+    );
+
+  homeState.pageSize =
+    Math.max(
+      1,
+      Math.trunc(
+        safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE)
+      )
+    );
+
+  homeState.loading =
+    Boolean(homeState.loading);
+
+  homeState.refreshing =
+    Boolean(homeState.refreshing);
+
+  homeState.loaded =
+    Boolean(homeState.loaded);
+
+  homeState.hydrated =
+    Boolean(homeState.hydrated);
+
+  homeState.creating =
+    Boolean(homeState.creating);
+
+  homeState.openingTicketId =
+    safeText(homeState.openingTicketId, "");
+
+  homeState.selectedTicketId =
+    safeText(homeState.selectedTicketId, "");
+
+  homeState.navigatingAction =
+    safeText(homeState.navigatingAction, "");
+
+  homeState.error =
+    safeText(homeState.error, "");
+
+  homeState.requestId =
+    safeText(homeState.requestId, "");
+
+  homeState.lastSyncAt =
+    homeState.lastSyncAt || "";
+
+  homeState.meta =
+    safeObject(homeState.meta);
+
+  homeState.updatedAt =
+    safeText(homeState.updatedAt, "");
 
   return homeState;
 }
 
 /* =========================================================
-   FLAGS
+   SIGNATURE / RECENT
 ========================================================= */
 
-export function setLoading(value) {
-  homeState.loading = Boolean(value);
+function getComparableSignature() {
+  const data = {
+    hydrated:
+      Boolean(homeState.hydrated),
 
-  if (homeState.loading) {
-    homeState.error = "";
-  }
+    loaded:
+      Boolean(homeState.loaded),
 
-  return homeState.loading;
-}
+    loading:
+      Boolean(homeState.loading),
 
-export function setRefreshing(value) {
-  homeState.refreshing = Boolean(value);
+    refreshing:
+      Boolean(homeState.refreshing),
 
-  if (homeState.refreshing) {
-    homeState.error = "";
-  }
+    creating:
+      Boolean(homeState.creating),
 
-  return homeState.refreshing;
-}
+    openingTicketId:
+      safeText(homeState.openingTicketId, ""),
 
-export function setLoaded(value) {
-  homeState.loaded = Boolean(value);
-  return homeState.loaded;
-}
+    selectedTicketId:
+      safeText(homeState.selectedTicketId, ""),
 
-export function setHydrated(value) {
-  homeState.hydrated = Boolean(value);
-  return homeState.hydrated;
-}
+    navigatingAction:
+      safeText(homeState.navigatingAction, ""),
 
-export function setOpeningWidgetId(value = "") {
-  homeState.openingWidgetId = safeText(value, "");
-  return homeState.openingWidgetId;
-}
+    error:
+      safeText(homeState.error, ""),
 
-export function setSelectedWidgetId(value = "") {
-  homeState.selectedWidgetId = safeText(value, "");
-  return homeState.selectedWidgetId;
-}
+    page:
+      safeNumber(homeState.page, 1),
 
-/* =========================================================
-   PAGINATION
-========================================================= */
+    pageSize:
+      safeNumber(homeState.pageSize, DEFAULT_PAGE_SIZE),
 
-export function setPage(value = 1) {
-  homeState.page = normalizePage(value);
-  return homeState.page;
-}
+    remoteCount:
+      safeNumber(homeState.remoteCount, 0),
 
-export function setPageSize(value = DEFAULT_PAGE_SIZE) {
-  homeState.pageSize = normalizePageSize(value);
+    ticketsRemoteCount:
+      safeNumber(homeState.ticketsRemoteCount, 0),
 
-  const pagination = getPaginationState();
+    invoicesRemoteCount:
+      safeNumber(homeState.invoicesRemoteCount, 0),
 
-  if (homeState.page > pagination.totalPages) {
-    homeState.page = pagination.totalPages;
-  }
+    usersRemoteCount:
+      safeNumber(homeState.usersRemoteCount, 0),
 
-  return homeState.pageSize;
-}
+    clientsRemoteCount:
+      safeNumber(homeState.clientsRemoteCount, 0),
 
-export function getPaginationState() {
-  const total = safeArray(homeState.widgets).length;
-  const pageSize = normalizePageSize(homeState.pageSize);
+    requestId:
+      safeText(homeState.requestId, ""),
 
-  const totalPages = Math.max(
-    1,
-    Math.ceil(total / pageSize)
-  );
+    lastSyncAt:
+      safeText(homeState.lastSyncAt, ""),
 
-  const page = Math.min(
-    Math.max(
-      1,
-      normalizePage(homeState.page)
-    ),
-    totalPages
-  );
+    widgets:
+      safeArray(homeState.widgets).length,
 
-  const start =
-    (page - 1) * pageSize;
+    recent:
+      safeArray(homeState.recent).length,
 
-  const end =
-    start + pageSize;
+    tickets:
+      safeArray(homeState.tickets).length,
 
-  return {
-    page,
-    pageSize,
-    total,
-    totalPages,
+    invoices:
+      safeArray(homeState.invoices).length,
 
-    hasPrev: page > 1,
-    hasNext: page < totalPages,
+    users:
+      safeArray(homeState.users).length,
 
-    prevPage:
-      page > 1
-        ? page - 1
-        : null,
-
-    nextPage:
-      page < totalPages
-        ? page + 1
-        : null,
-
-    from:
-      total === 0
-        ? 0
-        : start + 1,
-
-    to: Math.min(end, total),
-
-    start,
-    end,
+    clients:
+      safeArray(homeState.clients).length,
   };
-}
-
-export function getPageWidgets() {
-  const {
-    start,
-    end,
-  } = getPaginationState();
-
-  return getWidgets().slice(
-    start,
-    end
-  );
-}
-
-export function goToPage(value = 1) {
-  const pagination = getPaginationState();
-
-  homeState.page = Math.min(
-    Math.max(
-      1,
-      normalizePage(value)
-    ),
-    pagination.totalPages
-  );
-
-  return homeState.page;
-}
-
-export function goPrevPage() {
-  const pagination = getPaginationState();
-
-  if (!pagination.hasPrev) {
-    return homeState.page;
-  }
-
-  homeState.page = pagination.page - 1;
-
-  return homeState.page;
-}
-
-export function goNextPage() {
-  const pagination = getPaginationState();
-
-  if (!pagination.hasNext) {
-    return homeState.page;
-  }
-
-  homeState.page = pagination.page + 1;
-
-  return homeState.page;
-}
-
-/* =========================================================
-   DATA
-========================================================= */
-
-export function setDashboard(value = {}) {
-  const dashboard = normalizeDashboardState(value);
-
-  homeState.dashboard = dashboard;
-  homeState.loaded = true;
-  homeState.error = "";
-
-  return getDashboard();
-}
-
-export function getDashboard() {
-  return normalizeDashboardState(
-    homeState.dashboard
-  );
-}
-
-export function clearDashboard() {
-  homeState.dashboard = {};
-  return getDashboard();
-}
-
-export function setWidgets(items = []) {
-  const list = normalizeWidgetsState(items);
-
-  homeState.widgets = list;
-  homeState.widgetsCount = list.length;
-  homeState.loaded = true;
-  homeState.error = "";
-
-  const pagination = getPaginationState();
-
-  if (homeState.page > pagination.totalPages) {
-    homeState.page = pagination.totalPages;
-  }
-
-  return getWidgets();
-}
-
-export function getWidgets() {
-  return normalizeWidgetsState(
-    homeState.widgets
-  );
-}
-
-export function clearWidgets() {
-  homeState.widgets = [];
-  homeState.widgetsCount = 0;
-  homeState.page = 1;
-
-  return getWidgets();
-}
-
-export function setSummary(value = {}) {
-  homeState.summary = normalizeSummaryState(value);
-  return getSummary();
-}
-
-export function getSummary() {
-  return normalizeSummaryState(
-    homeState.summary
-  );
-}
-
-export function clearSummary() {
-  homeState.summary = {};
-  return getSummary();
-}
-
-export function setRecent(items = []) {
-  const list = normalizeRecentState(items);
-
-  homeState.recent = list;
-  homeState.recentCount = list.length;
-
-  return getRecent();
-}
-
-export function getRecent() {
-  return normalizeRecentState(
-    homeState.recent
-  );
-}
-
-export function clearRecent() {
-  homeState.recent = [];
-  homeState.recentCount = 0;
-
-  return getRecent();
-}
-
-export function setHealth(value = null) {
-  homeState.health = normalizeHealthState(value);
-  return getHealth();
-}
-
-export function getHealth() {
-  return homeState.health
-    ? normalizeHealthState(homeState.health)
-    : null;
-}
-
-export function clearHealth() {
-  homeState.health = null;
-  return getHealth();
-}
-
-/* =========================================================
-   COUNTS / META
-========================================================= */
-
-export function setWidgetsCount(value = 0) {
-  homeState.widgetsCount = Math.max(
-    0,
-    safeNumber(value, 0)
-  );
-
-  return homeState.widgetsCount;
-}
-
-export function setRecentCount(value = 0) {
-  homeState.recentCount = Math.max(
-    0,
-    safeNumber(value, 0)
-  );
-
-  return homeState.recentCount;
-}
-
-export function setRequestId(value = "") {
-  homeState.requestId = safeText(value, "");
-  return homeState.requestId;
-}
-
-export function setError(value = null) {
-  const message =
-    typeof value === "object" && value
-      ? safeText(
-          firstDefined(
-            value.message,
-            value.error,
-            value.detail,
-            value.code
-          ),
-          "Error inesperado."
-        )
-      : safeText(value, "");
-
-  homeState.error = message;
-
-  if (message) {
-    homeState.loading = false;
-    homeState.refreshing = false;
-    homeState.loaded = true;
-  }
-
-  return homeState.error;
-}
-
-export function clearError() {
-  homeState.error = "";
-  return homeState.error;
-}
-
-export function setLastSyncAt(value = 0) {
-  homeState.lastSyncAt = safeNumber(value, 0);
-  return homeState.lastSyncAt;
-}
-
-/* =========================================================
-   PATCHERS
-========================================================= */
-
-export function patchDashboard(patch = {}) {
-  homeState.dashboard = {
-    ...safeObject(homeState.dashboard),
-    ...safeClone(safeObject(patch)),
-  };
-
-  homeState.loaded = true;
-
-  return getDashboard();
-}
-
-export function patchSummary(patch = {}) {
-  homeState.summary = {
-    ...safeObject(homeState.summary),
-    ...safeClone(safeObject(patch)),
-  };
-
-  return getSummary();
-}
-
-export function patchWidget(widgetId = "", patch = {}) {
-  const id = safeText(widgetId, "");
-
-  if (!id) {
-    return null;
-  }
-
-  const list = safeArray(homeState.widgets);
-  const index = list.findIndex((item) =>
-    matchesWidgetId(item, id)
-  );
-
-  if (index < 0) {
-    return null;
-  }
-
-  const nextItem = {
-    ...safeObject(list[index]),
-    ...safeClone(safeObject(patch)),
-  };
-
-  homeState.widgets = list.map((item, itemIndex) =>
-    itemIndex === index
-      ? nextItem
-      : item
-  );
-
-  return safeClone(nextItem);
-}
-
-export function upsertWidget(item = {}) {
-  const nextItem = safeClone(
-    safeObject(item)
-  );
-
-  const id = getWidgetIdentity(nextItem);
-
-  if (!id) {
-    return null;
-  }
-
-  const list = safeArray(homeState.widgets);
-  const index = list.findIndex((current) =>
-    matchesWidgetId(current, id)
-  );
-
-  if (index >= 0) {
-    list[index] = {
-      ...safeObject(list[index]),
-      ...nextItem,
-    };
-  } else {
-    list.push(nextItem);
-  }
-
-  setWidgets(list);
-
-  return safeClone(
-    index >= 0
-      ? list[index]
-      : nextItem
-  );
-}
-
-export function removeWidget(widgetId = "") {
-  const id = safeText(widgetId, "");
-
-  if (!id) {
-    return false;
-  }
-
-  const before = safeArray(homeState.widgets).length;
-
-  homeState.widgets = safeArray(homeState.widgets).filter(
-    (item) => !matchesWidgetId(item, id)
-  );
-
-  homeState.widgetsCount = homeState.widgets.length;
-
-  if (homeState.selectedWidgetId === id) {
-    homeState.selectedWidgetId = "";
-  }
-
-  if (homeState.openingWidgetId === id) {
-    homeState.openingWidgetId = "";
-  }
-
-  const pagination = getPaginationState();
-
-  if (homeState.page > pagination.totalPages) {
-    homeState.page = pagination.totalPages;
-  }
-
-  return homeState.widgets.length !== before;
-}
-
-export function replaceHomeSnapshot({
-  dashboard = {},
-  widgets = [],
-  summary = {},
-  recent = [],
-  health = null,
-  requestId = "",
-  lastSyncAt = 0,
-  page = null,
-  pageSize = null,
-  hydrated = true,
-  loaded = true,
-} = {}) {
-  setDashboard(dashboard);
-  setWidgets(widgets);
-  setSummary(summary);
-  setRecent(recent);
-  setHealth(health);
-  setRequestId(requestId);
-  setLastSyncAt(lastSyncAt || now());
-
-  if (pageSize !== null) {
-    setPageSize(pageSize);
-  }
-
-  if (page !== null) {
-    setPage(page);
-  }
-
-  setHydrated(hydrated);
-  setLoaded(loaded);
-  setLoading(false);
-  setRefreshing(false);
-  clearError();
-
-  return getHomeSnapshot();
-}
-
-/* =========================================================
-   SELECTION HELPERS
-========================================================= */
-
-export function getWidgetById(widgetId = "") {
-  const id = safeText(widgetId, "");
-
-  if (!id) {
-    return null;
-  }
-
-  const item =
-    safeArray(homeState.widgets).find((entry) =>
-      matchesWidgetId(entry, id)
-    ) || null;
-
-  return item
-    ? safeClone(item)
-    : null;
-}
-
-export function getSelectedWidget() {
-  return getWidgetById(
-    homeState.selectedWidgetId
-  );
-}
-
-export function selectWidget(widgetId = "") {
-  const id = safeText(widgetId, "");
-
-  homeState.selectedWidgetId = id;
-
-  return getSelectedWidget();
-}
-
-export function markOpeningWidget(widgetId = "") {
-  homeState.openingWidgetId = safeText(widgetId, "");
-  return homeState.openingWidgetId;
-}
-
-export function clearOpeningWidget() {
-  homeState.openingWidgetId = "";
-  return homeState.openingWidgetId;
-}
-
-export function clearSelection() {
-  homeState.selectedWidgetId = "";
-  homeState.openingWidgetId = "";
-
-  return {
-    selectedWidgetId: homeState.selectedWidgetId,
-    openingWidgetId: homeState.openingWidgetId,
-  };
-}
-
-/* =========================================================
-   CACHE HELPERS
-========================================================= */
-
-export function getCachePayload() {
-  return {
-    version: CACHE_VERSION,
-    savedAt: now(),
-
-    dashboard: getDashboard(),
-    widgets: getWidgets(),
-    summary: getSummary(),
-    recent: getRecent(),
-    health: getHealth(),
-
-    widgetsCount: homeState.widgetsCount,
-    recentCount: homeState.recentCount,
-
-    lastSyncAt: homeState.lastSyncAt,
-    requestId: homeState.requestId,
-
-    page: homeState.page,
-    pageSize: homeState.pageSize,
-  };
-}
-
-export function isCacheFresh(savedAt = 0) {
-  const ts = safeNumber(savedAt, 0);
-
-  if (!ts) {
-    return false;
-  }
-
-  return now() - ts < CACHE_TTL;
-}
-
-export function readHomeCache() {
-  if (!isBrowser()) {
-    return null;
-  }
 
   try {
-    const raw = window.localStorage.getItem(CACHE_KEY);
-
-    if (!raw) {
-      return null;
-    }
-
-    const parsed = JSON.parse(raw);
-
-    if (
-      !parsed ||
-      typeof parsed !== "object"
-    ) {
-      return null;
-    }
-
-    if (
-      Number(parsed.version || 0) !== CACHE_VERSION
-    ) {
-      return null;
-    }
-
-    return parsed;
+    return JSON.stringify(data);
   } catch {
-    return null;
+    return String(nowMs());
   }
 }
 
-export function writeHomeCache(payload = null) {
-  if (!isBrowser()) {
-    return false;
-  }
+function pushRecentStateEvent(entry = {}) {
+  const atMs =
+    nowMs();
 
-  try {
-    const data =
-      payload && typeof payload === "object"
-        ? payload
-        : getCachePayload();
+  runtime.recent.unshift({
+    source:
+      SOURCE,
 
-    window.localStorage.setItem(
-      CACHE_KEY,
-      JSON.stringify(data)
-    );
+    ...safeObject(entry),
 
-    homeState.cacheSavedAt = safeNumber(
-      data.savedAt,
-      now()
-    );
+    at:
+      nowIso(),
 
-    return true;
-  } catch {
-    return false;
+    atMs,
+  });
+
+  if (runtime.recent.length > MAX_RECENT_STATE_EVENTS) {
+    runtime.recent =
+      runtime.recent.slice(
+        0,
+        MAX_RECENT_STATE_EVENTS
+      );
   }
 }
 
-export function clearHomeCache() {
-  if (!isBrowser()) {
-    return false;
-  }
+/* =========================================================
+   EVENTS
+========================================================= */
 
-  try {
-    window.localStorage.removeItem(CACHE_KEY);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function restoreHomeStateFromCache({
-  force = false,
-} = {}) {
-  const cache = readHomeCache();
-
-  if (!cache) {
-    return false;
-  }
-
+function safeWindowDispatch(eventName = "", payload = {}) {
   if (
-    !force &&
-    !isCacheFresh(cache.savedAt)
+    !isBrowser() ||
+    !eventName
   ) {
     return false;
   }
 
-  replaceHomeSnapshot({
-    dashboard: cache.dashboard,
-    widgets: cache.widgets,
-    summary: cache.summary,
-    recent: cache.recent,
-    health: cache.health,
-    requestId: cache.requestId,
-    lastSyncAt: cache.lastSyncAt,
-    page: cache.page,
-    pageSize: cache.pageSize,
-    hydrated: true,
-    loaded: true,
+  try {
+    window.dispatchEvent(
+      new CustomEvent(
+        eventName,
+        {
+          detail:
+            payload,
+        }
+      )
+    );
+
+    return true;
+  } catch {}
+
+  return false;
+}
+
+function safeEmit(eventName = "", payload = {}, options = {}) {
+  const name =
+    safeText(eventName, "");
+
+  if (!name) {
+    return false;
+  }
+
+  const opts =
+    safeObject(options);
+
+  const finalPayload =
+    sanitizePayload({
+      source:
+        SOURCE,
+
+      version:
+        HOME_STATE_VERSION,
+
+      ...safeObject(payload),
+    });
+
+  let busAvailable =
+    false;
+
+  let busEmitted =
+    false;
+
+  try {
+    if (isFunction(AppCore?.events?.emit)) {
+      busAvailable =
+        true;
+
+      AppCore.events.emit(
+        name,
+        finalPayload
+      );
+
+      busEmitted =
+        true;
+    }
+  } catch {}
+
+  if (
+    opts.window === true ||
+    (!busAvailable && isBrowser())
+  ) {
+    return (
+      safeWindowDispatch(
+        name,
+        finalPayload
+      ) ||
+      busEmitted
+    );
+  }
+
+  return busEmitted;
+}
+
+function notifySubscribers(payload = {}) {
+  for (const subscriber of Array.from(subscribers)) {
+    try {
+      subscriber(
+        homeState,
+        payload
+      );
+    } catch {}
+  }
+}
+
+function notifyChange({
+  event =
+    HOME_STATE_EVENTS.change,
+
+  reason =
+    "state-change",
+
+  changedKeys =
+    [],
+
+  force =
+    false,
+
+  emit =
+    true,
+} = {}) {
+  ensureHomeStateAliases();
+
+  const signature =
+    getComparableSignature();
+
+  const changed =
+    force || signature !== runtime.lastSignature;
+
+  if (!changed) {
+    return {
+      changed:
+        false,
+
+      state:
+        homeState,
+    };
+  }
+
+  runtime.lastSignature =
+    signature;
+
+  runtime.changeCount += 1;
+  runtime.lastEvent = event;
+  runtime.lastReason = reason;
+  runtime.lastChangedAt = nowIso();
+  runtime.lastChangedAtMs = nowMs();
+
+  const payload = {
+    changed:
+      true,
+
+    reason,
+
+    event,
+
+    changedKeys:
+      safeArray(changedKeys),
+
+    changeCount:
+      runtime.changeCount,
+
+    state:
+      getHomeStateSnapshot({
+        includeData:
+          false,
+      }),
+  };
+
+  pushRecentStateEvent({
+    event,
+    reason,
+    changedKeys:
+      safeArray(changedKeys),
   });
 
-  homeState.cacheRestoredAt = now();
-  homeState.cacheSavedAt = safeNumber(
-    cache.savedAt,
-    0
-  );
+  notifySubscribers(payload);
+
+  if (emit !== false) {
+    safeEmit(
+      event,
+      payload
+    );
+
+    if (event !== HOME_STATE_EVENTS.change) {
+      safeEmit(
+        HOME_STATE_EVENTS.change,
+        payload
+      );
+    }
+  }
+
+  return {
+    changed:
+      true,
+
+    payload,
+
+    state:
+      homeState,
+  };
+}
+
+/* =========================================================
+   CORE STATE WRITE
+========================================================= */
+
+function syncAppCoreState(patch = {}) {
+  const payload =
+    safeObject(patch);
+
+  if (!hasOwnKeys(payload)) {
+    return false;
+  }
+
+  try {
+    if (isFunction(AppCore?.setState)) {
+      AppCore.setState({
+        home:
+          {
+            ...safeObject(AppCore?.state?.home),
+            ...payload,
+          },
+      });
+    }
+  } catch {}
+
+  try {
+    if (
+      AppCore?.state &&
+      typeof AppCore.state === "object"
+    ) {
+      AppCore.state.home = {
+        ...safeObject(AppCore.state.home),
+        ...payload,
+      };
+    }
+  } catch {}
 
   return true;
 }
 
-export function persistHomeStateToCache() {
-  return writeHomeCache(
-    getCachePayload()
+/* =========================================================
+   PUBLIC MUTATORS
+========================================================= */
+
+export function patchHomeState(patch = {}, options = {}) {
+  const payload =
+    safeObject(patch);
+
+  if (!hasOwnKeys(payload)) {
+    return homeState;
+  }
+
+  safeAssign(
+    homeState,
+    payload
+  );
+
+  ensureHomeStateAliases();
+
+  syncAppCoreState({
+    loaded:
+      homeState.loaded,
+
+    hydrated:
+      homeState.hydrated,
+
+    loading:
+      homeState.loading,
+
+    refreshing:
+      homeState.refreshing,
+
+    error:
+      homeState.error,
+
+    requestId:
+      homeState.requestId,
+
+    lastSyncAt:
+      homeState.lastSyncAt,
+  });
+
+  notifyChange({
+    event:
+      options.event || HOME_STATE_EVENTS.patch,
+
+    reason:
+      options.reason || "patch-home-state",
+
+    changedKeys:
+      Object.keys(payload),
+
+    force:
+      options.force === true,
+
+    emit:
+      options.emit,
+  });
+
+  return homeState;
+}
+
+export function replaceHomeState(nextState = {}, options = {}) {
+  const payload =
+    {
+      ...createInitialHomeState(),
+      ...safeObject(nextState),
+    };
+
+  for (const key of Object.keys(homeState)) {
+    try {
+      delete homeState[key];
+    } catch {}
+  }
+
+  safeAssign(
+    homeState,
+    payload
+  );
+
+  ensureHomeStateAliases();
+
+  syncAppCoreState({
+    loaded:
+      homeState.loaded,
+
+    hydrated:
+      homeState.hydrated,
+
+    loading:
+      homeState.loading,
+
+    refreshing:
+      homeState.refreshing,
+
+    error:
+      homeState.error,
+
+    requestId:
+      homeState.requestId,
+
+    lastSyncAt:
+      homeState.lastSyncAt,
+  });
+
+  notifyChange({
+    event:
+      options.event || HOME_STATE_EVENTS.replace,
+
+    reason:
+      options.reason || "replace-home-state",
+
+    changedKeys:
+      Object.keys(payload),
+
+    force:
+      true,
+
+    emit:
+      options.emit,
+  });
+
+  return homeState;
+}
+
+export function resetHomeState(options = {}) {
+  return replaceHomeState(
+    createInitialHomeState(),
+    {
+      event:
+        HOME_STATE_EVENTS.reset,
+
+      reason:
+        options.reason || "reset-home-state",
+
+      emit:
+        options.emit,
+
+      force:
+        true,
+    }
   );
 }
 
 /* =========================================================
-   SNAPSHOTS
+   REQUIRED SETTERS FOR HOME API
 ========================================================= */
 
-export function getHomeSnapshot() {
-  return {
-    hydrated: homeState.hydrated,
-    loading: homeState.loading,
-    refreshing: homeState.refreshing,
-    loaded: homeState.loaded,
+export function setLoading(value = false, options = {}) {
+  homeState.loading =
+    safeBoolean(value, false);
 
-    openingWidgetId: homeState.openingWidgetId,
-    selectedWidgetId: homeState.selectedWidgetId,
+  if (homeState.loading) {
+    homeState.refreshing =
+      false;
+  }
 
-    error: homeState.error,
+  return patchHomeState(
+    {
+      loading:
+        homeState.loading,
 
-    dashboard: getDashboard(),
-    widgets: getWidgets(),
-    summary: getSummary(),
-    recent: getRecent(),
-    health: getHealth(),
+      refreshing:
+        homeState.refreshing,
+    },
+    {
+      event:
+        HOME_STATE_EVENTS.loading,
 
-    widgetsCount: homeState.widgetsCount,
-    recentCount: homeState.recentCount,
+      reason:
+        options.reason || "set-loading",
 
-    lastSyncAt: homeState.lastSyncAt,
-    requestId: homeState.requestId,
-
-    page: homeState.page,
-    pageSize: homeState.pageSize,
-
-    cacheRestoredAt: homeState.cacheRestoredAt,
-    cacheSavedAt: homeState.cacheSavedAt,
-  };
+      emit:
+        options.emit,
+    }
+  );
 }
 
-/* =========================================================
-   DEBUG
-========================================================= */
+export function setRefreshing(value = false, options = {}) {
+  homeState.refreshing =
+    safeBoolean(value, false);
 
-export function getHomeStateSnapshot() {
-  const dashboard = getDashboard();
-  const widgets = getWidgets();
-  const summary = getSummary();
-  const recent = getRecent();
-  const health = getHealth();
-  const pagination = getPaginationState();
-  const selectedWidget = getSelectedWidget();
+  if (homeState.refreshing) {
+    homeState.loading =
+      false;
+  }
 
-  return {
-    hydrated: homeState.hydrated,
-    loading: homeState.loading,
-    refreshing: homeState.refreshing,
-    loaded: homeState.loaded,
+  return patchHomeState(
+    {
+      refreshing:
+        homeState.refreshing,
 
-    openingWidgetId: homeState.openingWidgetId,
-    selectedWidgetId: homeState.selectedWidgetId,
-
-    error: homeState.error,
-
-    hasDashboard: Boolean(
-      Object.keys(dashboard).length
-    ),
-
-    widgetsCount: widgets.length,
-    recentCount: recent.length,
-    summaryKeys: Object.keys(summary).length,
-
-    hasHealth: Boolean(health),
-    healthStatus: safeText(health?.status, ""),
-    healthService: safeText(health?.service, ""),
-    healthOk: Boolean(health?.ok),
-
-    lastSyncAt: homeState.lastSyncAt,
-    requestId: homeState.requestId,
-
-    page: pagination.page,
-    pageSize: pagination.pageSize,
-    totalPages: pagination.totalPages,
-    hasPrevPage: pagination.hasPrev,
-    hasNextPage: pagination.hasNext,
-
-    hasInflight: Boolean(inflightLoad),
-
-    cache: {
-      key: CACHE_KEY,
-      version: CACHE_VERSION,
-      ttl: CACHE_TTL,
-      restoredAt: homeState.cacheRestoredAt,
-      savedAt: homeState.cacheSavedAt,
-      fresh: isCacheFresh(homeState.cacheSavedAt),
+      loading:
+        homeState.loading,
     },
+    {
+      event:
+        HOME_STATE_EVENTS.refreshing,
 
-    dashboardPreview: {
-      updatedAt: safeText(
-        firstDefined(
-          dashboard.updatedAt,
-          dashboard.lastUpdate,
-          dashboard.generatedAt,
-          dashboard.createdAt
-        ),
-        ""
-      ),
+      reason:
+        options.reason || "set-refreshing",
 
-      rawKeys: Object.keys(
-        safeObject(
-          dashboard.raw || dashboard
+      emit:
+        options.emit,
+      }
+  );
+}
+
+export function setError(value = null, options = {}) {
+  const message =
+    value
+      ? safeText(
+          value?.message || value,
+          "Error del Home."
         )
-      ).length,
-    },
+      : "";
 
-    summaryPreview: {
-      ...summary,
+  return patchHomeState(
+    {
+      error:
+        message,
     },
+    {
+      event:
+        HOME_STATE_EVENTS.error,
 
-    selectedWidgetPreview: selectedWidget
-      ? {
-          widgetId: safeText(
-            getWidgetIdentity(selectedWidget),
-            ""
-          ),
-          title: safeText(selectedWidget.title, ""),
-          type: safeText(selectedWidget.type, ""),
-          status: safeText(selectedWidget.status, ""),
-        }
-      : null,
+      reason:
+        options.reason || "set-error",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+export function setDashboard(value = {}, options = {}) {
+  const dashboard =
+    normalizeDashboardAliases(
+      safeObject(value),
+      first(
+        value?.summary,
+        value?.stats,
+        value?.metrics,
+        value?.totals,
+        value?.counts,
+        homeState.summary,
+        {}
+      )
+    );
+
+  return patchHomeState(
+    {
+      dashboard,
+
+      summary:
+        dashboard.summary,
+
+      stats:
+        dashboard.summary,
+
+      metrics:
+        dashboard.summary,
+
+      totals:
+        dashboard.summary,
+
+      counts:
+        dashboard.summary,
+
+      widgets:
+        safeArray(dashboard.widgets),
+
+      cards:
+        safeArray(dashboard.widgets),
+
+      kpis:
+        safeArray(dashboard.widgets),
+
+      tickets:
+        safeArray(dashboard.tickets),
+
+      incidencias:
+        safeArray(dashboard.tickets),
+
+      invoices:
+        safeArray(dashboard.invoices),
+
+      facturas:
+        safeArray(dashboard.invoices),
+
+      users:
+        safeArray(dashboard.users),
+
+      usuarios:
+        safeArray(dashboard.users),
+
+      clients:
+        safeArray(dashboard.clients),
+
+      clientes:
+        safeArray(dashboard.clients),
+
+      customers:
+        safeArray(dashboard.clients),
+
+      recent:
+        safeArray(dashboard.recent),
+
+      recentActivity:
+        safeArray(dashboard.recent),
+
+      activity:
+        safeArray(dashboard.activity),
+    },
+    {
+      event:
+        HOME_STATE_EVENTS.dashboard,
+
+      reason:
+        options.reason || "set-dashboard",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+export function setWidgets(value = [], options = {}) {
+  const widgets =
+    safeArray(value);
+
+  return patchHomeState(
+    {
+      widgets,
+      cards:
+        widgets,
+
+      kpis:
+        widgets,
+    },
+    {
+      event:
+        HOME_STATE_EVENTS.widgets,
+
+      reason:
+        options.reason || "set-widgets",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+export function setSummary(value = {}, options = {}) {
+  const summary =
+    normalizeSummaryAliases(value);
+
+  return patchHomeState(
+    {
+      summary,
+
+      stats:
+        summary,
+
+      metrics:
+        summary,
+
+      totals:
+        summary,
+
+      counts:
+        summary,
+    },
+    {
+      event:
+        HOME_STATE_EVENTS.summary,
+
+      reason:
+        options.reason || "set-summary",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+export function setRecent(value = [], options = {}) {
+  const recent =
+    safeArray(value);
+
+  return patchHomeState(
+    {
+      recent,
+      recentActivity:
+        recent,
+
+      activity:
+        safeArray(
+          first(
+            options.activity,
+            homeState.activity,
+            recent
+          )
+        ),
+    },
+    {
+      event:
+        HOME_STATE_EVENTS.recent,
+
+      reason:
+        options.reason || "set-recent",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+export function setLastSyncAt(value = null, options = {}) {
+  const lastSyncAt =
+    value
+      ? value
+      : nowIso();
+
+  return patchHomeState(
+    {
+      lastSyncAt,
+      updatedAt:
+        typeof lastSyncAt === "number"
+          ? new Date(lastSyncAt).toISOString()
+          : safeText(lastSyncAt, nowIso()),
+    },
+    {
+      event:
+        HOME_STATE_EVENTS.request,
+
+      reason:
+        options.reason || "set-last-sync-at",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+export function setLoaded(value = true, options = {}) {
+  return patchHomeState(
+    {
+      loaded:
+        safeBoolean(value, true),
+    },
+    {
+      event:
+        HOME_STATE_EVENTS.loaded,
+
+      reason:
+        options.reason || "set-loaded",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+export function setRequestId(value = "", options = {}) {
+  return patchHomeState(
+    {
+      requestId:
+        safeText(value, ""),
+    },
+    {
+      event:
+        HOME_STATE_EVENTS.request,
+
+      reason:
+        options.reason || "set-request-id",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+export function setHealth(value = null, options = {}) {
+  return patchHomeState(
+    {
+      health:
+        value === null
+          ? null
+          : safeObject(value),
+    },
+    {
+      event:
+        HOME_STATE_EVENTS.health,
+
+      reason:
+        options.reason || "set-health",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+export function setHydrated(value = true, options = {}) {
+  return patchHomeState(
+    {
+      hydrated:
+        safeBoolean(value, true),
+    },
+    {
+      event:
+        HOME_STATE_EVENTS.hydrated,
+
+      reason:
+        options.reason || "set-hydrated",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+/* =========================================================
+   EXTRA SETTERS
+========================================================= */
+
+export function setTickets(value = [], options = {}) {
+  const tickets =
+    safeArray(value);
+
+  return patchHomeState(
+    {
+      tickets,
+      incidencias:
+        tickets,
+
+      ticketsRemoteCount:
+        Math.max(
+          safeNumber(homeState.ticketsRemoteCount, 0),
+          tickets.length
+        ),
+
+      remoteCount:
+        Math.max(
+          safeNumber(homeState.remoteCount, 0),
+          tickets.length
+        ),
+    },
+    {
+      event:
+        options.event || HOME_STATE_EVENTS.patch,
+
+      reason:
+        options.reason || "set-tickets",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+export function setInvoices(value = [], options = {}) {
+  const invoices =
+    safeArray(value);
+
+  return patchHomeState(
+    {
+      invoices,
+      facturas:
+        invoices,
+
+      invoicesRemoteCount:
+        Math.max(
+          safeNumber(homeState.invoicesRemoteCount, 0),
+          invoices.length
+        ),
+    },
+    {
+      event:
+        options.event || HOME_STATE_EVENTS.patch,
+
+      reason:
+        options.reason || "set-invoices",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+export function setUsers(value = [], options = {}) {
+  const users =
+    safeArray(value);
+
+  return patchHomeState(
+    {
+      users,
+      usuarios:
+        users,
+
+      usersRemoteCount:
+        Math.max(
+          safeNumber(homeState.usersRemoteCount, 0),
+          users.length
+        ),
+    },
+    {
+      event:
+        options.event || HOME_STATE_EVENTS.patch,
+
+      reason:
+        options.reason || "set-users",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+export function setClients(value = [], options = {}) {
+  const clients =
+    safeArray(value);
+
+  return patchHomeState(
+    {
+      clients,
+      clientes:
+        clients,
+
+      customers:
+        clients,
+
+      clientsRemoteCount:
+        Math.max(
+          safeNumber(homeState.clientsRemoteCount, 0),
+          clients.length
+        ),
+    },
+    {
+      event:
+        options.event || HOME_STATE_EVENTS.patch,
+
+      reason:
+        options.reason || "set-clients",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+export function setActivity(value = [], options = {}) {
+  const activity =
+    safeArray(value);
+
+  return patchHomeState(
+    {
+      activity,
+      recent:
+        safeArray(
+          first(
+            options.recent,
+            homeState.recent,
+            activity
+          )
+        ),
+
+      recentActivity:
+        safeArray(
+          first(
+            options.recentActivity,
+            homeState.recentActivity,
+            homeState.recent,
+            activity
+          )
+        ),
+    },
+    {
+      event:
+        options.event || HOME_STATE_EVENTS.patch,
+
+      reason:
+        options.reason || "set-activity",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+export function setPage(value = 1, options = {}) {
+  return patchHomeState(
+    {
+      page:
+        Math.max(
+          1,
+          Math.trunc(
+            safeNumber(value, 1)
+          )
+        ),
+    },
+    {
+      event:
+        options.event || HOME_STATE_EVENTS.patch,
+
+      reason:
+        options.reason || "set-page",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+export function setPageSize(value = DEFAULT_PAGE_SIZE, options = {}) {
+  return patchHomeState(
+    {
+      pageSize:
+        Math.max(
+          1,
+          Math.trunc(
+            safeNumber(value, DEFAULT_PAGE_SIZE)
+          )
+        ),
+
+      page:
+        1,
+    },
+    {
+      event:
+        options.event || HOME_STATE_EVENTS.patch,
+
+      reason:
+        options.reason || "set-page-size",
+
+      emit:
+        options.emit,
+    }
+  );
+}
+
+/* =========================================================
+   SUBSCRIPTIONS
+========================================================= */
+
+export function subscribeHomeState(handler) {
+  if (!isFunction(handler)) {
+    return () => {};
+  }
+
+  subscribers.add(handler);
+
+  return () => {
+    try {
+      subscribers.delete(handler);
+    } catch {}
   };
 }
 
 /* =========================================================
-   DEFAULT EXPORT
+   SNAPSHOT
 ========================================================= */
 
-export default {
-  CACHE_KEY,
-  CACHE_VERSION,
-  CACHE_TTL,
-  DEFAULT_PAGE_SIZE,
+export function getHomeStateSnapshot(options = {}) {
+  const opts =
+    safeObject(options);
 
-  homeState,
+  ensureHomeStateAliases();
 
-  getInflightLoad,
-  setInflightLoad,
-  clearInflightLoad,
-  hasInflightLoad,
+  const base = {
+    version:
+      HOME_STATE_VERSION,
 
-  resetHomeState,
+    source:
+      SOURCE,
 
-  setLoading,
-  setRefreshing,
-  setLoaded,
-  setHydrated,
-  setOpeningWidgetId,
-  setSelectedWidgetId,
+    initialized:
+      runtime.initialized,
 
-  setPage,
-  setPageSize,
-  getPaginationState,
-  getPageWidgets,
-  goToPage,
-  goPrevPage,
-  goNextPage,
+    changeCount:
+      runtime.changeCount,
 
-  setDashboard,
-  getDashboard,
-  clearDashboard,
+    lastEvent:
+      runtime.lastEvent,
 
-  setWidgets,
-  getWidgets,
-  clearWidgets,
+    lastReason:
+      runtime.lastReason,
 
-  setSummary,
-  getSummary,
-  clearSummary,
+    lastChangedAt:
+      runtime.lastChangedAt,
 
-  setRecent,
-  getRecent,
-  clearRecent,
+    lastChangedAtMs:
+      runtime.lastChangedAtMs,
 
-  setHealth,
-  getHealth,
-  clearHealth,
+    subscribers:
+      subscribers.size,
 
-  setWidgetsCount,
-  setRecentCount,
-  setRequestId,
+    hydrated:
+      Boolean(homeState.hydrated),
 
-  setError,
-  clearError,
-  setLastSyncAt,
+    loaded:
+      Boolean(homeState.loaded),
 
-  patchDashboard,
-  patchSummary,
-  patchWidget,
-  upsertWidget,
-  removeWidget,
+    loading:
+      Boolean(homeState.loading),
 
-  replaceHomeSnapshot,
+    refreshing:
+      Boolean(homeState.refreshing),
 
-  getWidgetById,
-  getSelectedWidget,
-  selectWidget,
-  markOpeningWidget,
-  clearOpeningWidget,
-  clearSelection,
+    creating:
+      Boolean(homeState.creating),
 
-  getCachePayload,
-  isCacheFresh,
-  readHomeCache,
-  writeHomeCache,
-  clearHomeCache,
-  restoreHomeStateFromCache,
-  persistHomeStateToCache,
+    openingTicketId:
+      homeState.openingTicketId,
 
-  getHomeSnapshot,
-  getHomeStateSnapshot,
-};
+    selectedTicketId:
+      homeState.selectedTicketId,
+
+    navigatingAction:
+      homeState.navigatingAction,
+
+    error:
+      homeState.error,
+
+    page:
+      homeState.page,
+
+    pageSize:
+      homeState.pageSize,
+
+    remoteCount:
+      homeState.remoteCount,
+
+    ticketsRemoteCount:
+      homeState.ticketsRemoteCount,
+
+    invoicesRemoteCount:
+      homeState.invoicesRemoteCount,
+
+    usersRemoteCount:
+      homeState.usersRemoteCount,
+
+    clientsRemoteCount:
+      homeState.clientsRemoteCount,
+
+    requestId:
+      homeState.requestId,
+
+    lastSyncAt:
+      homeState.lastSyncAt,
+
+    counts: {
+      widgets:
+        homeState.widgets.length,
+
+      recent:
+        homeState.recent.length,
+
+      activity:
+        homeState.activity.length,
+
+      tickets:
+        homeState.tickets.length,
+
+      invoices:
+        homeState.invoices.length,
+
+      users:
+        homeState.users.length,
+
+      clients:
+        homeState.clients.length,
+    },
+
+    hasDashboard:
+      hasOwnKeys(homeState.dashboard),
+
+    hasSummary:
+      hasOwnKeys(homeState.summary),
+
+    hasHealth:
+      Boolean(homeState.health),
+
+    summary:
+      safeClone(homeState.summary, {}),
+
+    health:
+      safeClone(homeState.health, null),
+
+    meta:
+      safeClone(homeState.meta, {}),
+
+    runtime: {
+      recent:
+        safeClone(runtime.recent, []),
+    },
+  };
+
+  if (opts.includeData === true) {
+    return sanitizePayload({
+      ...base,
+
+      dashboard:
+        homeState.dashboard,
+
+      widgets:
+        homeState.widgets,
+
+      recent:
+        homeState.recent,
+
+      recentActivity:
+        homeState.recentActivity,
+
+      activity:
+        homeState.activity,
+
+      tickets:
+        homeState.tickets,
+
+      incidencias:
+        homeState.incidencias,
+
+      invoices:
+        homeState.invoices,
+
+      facturas:
+        homeState.facturas,
+
+      users:
+        homeState.users,
+
+      usuarios:
+        homeState.usuarios,
+
+      clients:
+        homeState.clients,
+
+      clientes:
+        homeState.clientes,
+
+      customers:
+        homeState.customers,
+    });
+  }
+
+  return sanitizePayload(base);
+}
+
+/* =========================================================
+   APPCORE BRIDGE
+========================================================= */
+
+function registerHomeStateBridge() {
+  const api = {
+    version:
+      HOME_STATE_VERSION,
+
+    state:
+      homeState,
+
+    getState:
+      () => homeState,
+
+    getSnapshot:
+      getHomeStateSnapshot,
+
+    patch:
+      patchHomeState,
+
+    replace:
+      replaceHomeState,
+
+    reset:
+      resetHomeState,
+
+    subscribe:
+      subscribeHomeState,
+
+    setLoading,
+    setRefreshing,
+    setError,
+    setDashboard,
+    setWidgets,
+    setSummary,
+    setRecent,
+    setLastSyncAt,
+    setLoaded,
+    setRequestId,
+    setHealth,
+    setHydrated,
+
+    setTickets,
+    setInvoices,
+    setUsers,
+    setClients,
+    setActivity,
+    setPage,
+    setPageSize,
+  };
+
+  try {
+    if (isFunction(AppCore?.modules?.register)) {
+      AppCore.modules.register(
+        "HomeState",
+        api,
+        {
+          overwrite:
+            true,
+
+          replace:
+            true,
+
+          source:
+            SOURCE,
+        }
+      );
+    } else if (isFunction(AppCore?.modules?.set)) {
+      AppCore.modules.set(
+        "HomeState",
+        api
+      );
+    } else if (
+      AppCore?.modules &&
+      typeof AppCore.modules === "object"
+    ) {
+      AppCore.modules.HomeState =
+        api;
+
+      AppCore.modules.homeState =
+        api;
+    }
+  } catch {}
+
+  try {
+    defineHiddenValue(
+      AppCore,
+      "HomeState",
+      api
+    );
+  } catch {}
+
+  try {
+    if (isBrowser()) {
+      window.OnionHomeState = {
+        ...(window.OnionHomeState || {}),
+        ...api,
+      };
+    }
+  } catch {}
+
+  runtime.initialized =
+    true;
+
+  return api;
+}
+
+/* =========================================================
+   BOOTSTRAP
+========================================================= */
+
+ensureHomeStateAliases();
+registerHomeStateBridge();
+
+/* =========================================================
+   PUBLIC API
+========================================================= */
+
+export const HomeState =
+  Object.freeze({
+    version:
+      HOME_STATE_VERSION,
+
+    events:
+      HOME_STATE_EVENTS,
+
+    state:
+      homeState,
+
+    getState:
+      () => homeState,
+
+    getSnapshot:
+      getHomeStateSnapshot,
+
+    patch:
+      patchHomeState,
+
+    replace:
+      replaceHomeState,
+
+    reset:
+      resetHomeState,
+
+    subscribe:
+      subscribeHomeState,
+
+    setLoading,
+    setRefreshing,
+    setError,
+    setDashboard,
+    setWidgets,
+    setSummary,
+    setRecent,
+    setLastSyncAt,
+    setLoaded,
+    setRequestId,
+    setHealth,
+    setHydrated,
+
+    setTickets,
+    setInvoices,
+    setUsers,
+    setClients,
+    setActivity,
+    setPage,
+    setPageSize,
+  });
+
+export default HomeState;

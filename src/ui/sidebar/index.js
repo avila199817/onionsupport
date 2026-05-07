@@ -2,15 +2,16 @@
    Onion SPA - Sidebar UI
    Archivo: src/ui/sidebar/index.js
 
-   FINAL EXTREME SYSTEM · SIDEBAR UI ORCHESTRATOR · 14/10
+   FINAL EXTREME SYSTEM · SIDEBAR UI ORCHESTRATOR · 15/10
    ORCHESTRATOR ONLY · STATE.JS OWNER · EVENTS.JS OWNER · ACTIONS.JS OWNER
    DESKTOP/MOBILE STABLE · DROPDOWN SAFE · BIND DEDUPE
    ACTIVE ROUTE HARDENED · APPLE INDICATOR · NO STALE ROUTE
    NO DOUBLE TOGGLE · NO DOUBLE NAVIGATION · NO POINTER-EVENTS NONE
+   NO DUPLICATE MODULE REGISTER · NO REBIND STORMS · LIGHT SYNC SAFE
 
    RESPONSABILIDADES:
    - montar sidebar
-   - registrar módulo en AppCore.modules
+   - registrar módulo en AppCore.modules sin duplicidades
    - mantener referencias DOM sincronizadas
    - renderizar usuario/avatar
    - aplicar visibilidad por rol/admin
@@ -26,16 +27,18 @@
    - evitar pointer-events:none colgado en .sidebar-menu
    - no escribir variables CSS del indicador desde index.js
    - no gestionar transición visual propia desde index.js
+   - no registrar módulos si ya existe el mismo objeto
+   - no llamar refresh pesado en sync/render normales
 
    REGLA DE ARQUITECTURA:
-   - template.js  = DOM base
-   - dom.js       = refs / mount / sanitation
-   - state.js     = estado visual sidebar + active item + indicator
-   - dropdown.js  = dropdown usuario
-   - visibility.js= permisos/rol
-   - actions.js   = acciones de negocio
-   - events.js    = listeners DOM/core/router
-   - index.js     = orquestador público
+   - template.js   = DOM base
+   - dom.js        = refs / mount / sanitation
+   - state.js      = estado visual sidebar + active item + indicator
+   - dropdown.js   = dropdown usuario
+   - visibility.js = permisos/rol
+   - actions.js    = acciones de negocio
+   - events.js     = listeners DOM/core/router
+   - index.js      = orquestador público
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -114,38 +117,87 @@ export const SidebarUI = (() => {
      INTERNAL STATE
   ====================================================== */
 
-  const SOURCE = "SidebarUI";
+  const SOURCE =
+    "SidebarUI";
 
-  const BIND_DEDUP_WINDOW_MS = 250;
-  const REPAIR_DEDUP_WINDOW_MS = 180;
+  const BIND_DEDUP_WINDOW_MS =
+    250;
 
-  const INDICATOR_DELAY_INIT_MS = 32;
-  const INDICATOR_DELAY_REFRESH_MS = 40;
-  const INDICATOR_DELAY_REPAIR_MS = 48;
-  const INDICATOR_DELAY_ROUTE_MS = 56;
-  const INDICATOR_DELAY_TRANSITION_MS = 420;
+  const REPAIR_DEDUP_WINDOW_MS =
+    180;
 
-  let initialized = false;
-  let logoutInFlight = false;
+  const SYNC_DEDUP_WINDOW_MS =
+    90;
 
-  let eventsBound = false;
-  let bindingEvents = false;
+  const INDICATOR_DELAY_INIT_MS =
+    32;
 
-  let bindGeneration = 0;
-  let lastBindAt = 0;
-  let lastBindReason = "";
+  const INDICATOR_DELAY_REFRESH_MS =
+    40;
 
-  let lastRepairAt = 0;
-  let lastRepairReason = "";
+  const INDICATOR_DELAY_REPAIR_MS =
+    48;
 
-  let domEventsCleanup = null;
-  let coreEventsCleanup = null;
+  const INDICATOR_DELAY_ROUTE_MS =
+    56;
 
-  let visualSyncTimer = null;
-  let repairTimer = null;
+  const INDICATOR_DELAY_TRANSITION_MS =
+    420;
+
+  const MODULE_NAMES = Object.freeze([
+    "sidebar",
+    "SidebarUI",
+    "sidebarUI",
+  ]);
+
+  let initialized =
+    false;
+
+  let logoutInFlight =
+    false;
+
+  let eventsBound =
+    false;
+
+  let bindingEvents =
+    false;
+
+  let bindGeneration =
+    0;
+
+  let lastBindAt =
+    0;
+
+  let lastBindReason =
+    "";
+
+  let lastRepairAt =
+    0;
+
+  let lastRepairReason =
+    "";
+
+  let lastSyncAt =
+    0;
+
+  let lastSyncReason =
+    "";
+
+  let domEventsCleanup =
+    null;
+
+  let coreEventsCleanup =
+    null;
+
+  let visualSyncTimer =
+    null;
+
+  let repairTimer =
+    null;
 
   const runtimeState = {
-    dropdownOpen: false,
+    dropdownOpen:
+      false,
   };
 
   /* ======================================================
@@ -172,20 +224,28 @@ export const SidebarUI = (() => {
   }
 
   function safeText(value, fallback = "") {
-    if (value === null || value === undefined) {
+    if (
+      value === null ||
+      value === undefined
+    ) {
       return fallback;
     }
 
-    const text = String(value)
-      .replace(/[\r\n\t]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
+    const text =
+      String(value)
+        .replace(/[\r\n\t]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
 
     return text || fallback;
   }
 
   function safeObject(value) {
-    return value && typeof value === "object" && !Array.isArray(value)
+    return (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    )
       ? value
       : {};
   }
@@ -202,13 +262,33 @@ export const SidebarUI = (() => {
     }
 
     if (typeof value === "string") {
-      const key = value.trim().toLowerCase();
+      const key =
+        value
+          .trim()
+          .toLowerCase();
 
-      if (["true", "1", "yes", "si", "sí", "ok", "on"].includes(key)) {
+      if (
+        [
+          "true",
+          "1",
+          "yes",
+          "si",
+          "sí",
+          "ok",
+          "on",
+        ].includes(key)
+      ) {
         return true;
       }
 
-      if (["false", "0", "no", "off"].includes(key)) {
+      if (
+        [
+          "false",
+          "0",
+          "no",
+          "off",
+        ].includes(key)
+      ) {
         return false;
       }
     }
@@ -222,7 +302,8 @@ export const SidebarUI = (() => {
   }
 
   function safeNumber(value, fallback = 0) {
-    const n = Number(value);
+    const n =
+      Number(value);
 
     return Number.isFinite(n)
       ? n
@@ -230,7 +311,8 @@ export const SidebarUI = (() => {
   }
 
   function clampNumber(value, min = 0, max = Number.POSITIVE_INFINITY) {
-    const n = safeNumber(value, min);
+    const n =
+      safeNumber(value, min);
 
     return Math.min(
       Math.max(n, min),
@@ -244,9 +326,26 @@ export const SidebarUI = (() => {
 
   function first(...values) {
     for (const value of values) {
-      if (value === undefined || value === null) continue;
-      if (typeof value === "string" && value.trim() === "") continue;
-      if (Array.isArray(value) && value.length === 0) continue;
+      if (
+        value === undefined ||
+        value === null
+      ) {
+        continue;
+      }
+
+      if (
+        typeof value === "string" &&
+        value.trim() === ""
+      ) {
+        continue;
+      }
+
+      if (
+        Array.isArray(value) &&
+        value.length === 0
+      ) {
+        continue;
+      }
 
       if (
         value &&
@@ -264,18 +363,42 @@ export const SidebarUI = (() => {
   }
 
   function safeWarn(...args) {
-    try {
-      AppCore?.utils?.warn?.("[SidebarUI]", ...args);
-    } catch {}
+    let logged =
+      false;
 
     try {
-      console.warn("[SidebarUI]", ...args);
+      if (isFunction(AppCore?.utils?.warn)) {
+        AppCore.utils.warn(
+          "[SidebarUI]",
+          ...args
+        );
+
+        logged =
+          true;
+      }
+    } catch {
+      logged =
+        false;
+    }
+
+    if (logged) {
+      return;
+    }
+
+    try {
+      console.warn(
+        "[SidebarUI]",
+        ...args
+      );
     } catch {}
   }
 
   function safeLog(...args) {
     try {
-      AppCore?.utils?.log?.("[SidebarUI]", ...args);
+      AppCore?.utils?.log?.(
+        "[SidebarUI]",
+        ...args
+      );
     } catch {}
   }
 
@@ -285,32 +408,49 @@ export const SidebarUI = (() => {
     events.js escucha el bus cuando existe.
   */
   function safeEmit(eventName = "", payload = {}) {
-    const name = safeText(eventName, "");
+    const name =
+      safeText(eventName, "");
 
     if (!name) {
       return false;
     }
 
     const finalPayload = {
-      source: SOURCE,
+      source:
+        SOURCE,
+
       ...safeObject(payload),
     };
 
     try {
       if (isFunction(AppCore?.events?.emit)) {
-        AppCore.events.emit(name, finalPayload);
+        AppCore.events.emit(
+          name,
+          finalPayload
+        );
+
         return true;
       }
     } catch (error) {
-      safeWarn(`AppCore.events.emit("${name}") falló.`, error);
+      safeWarn(
+        `AppCore.events.emit("${name}") falló.`,
+        error
+      );
     }
 
     try {
-      if (isBrowser() && typeof CustomEvent !== "undefined") {
+      if (
+        isBrowser() &&
+        typeof CustomEvent !== "undefined"
+      ) {
         window.dispatchEvent(
-          new CustomEvent(name, {
-            detail: finalPayload,
-          })
+          new CustomEvent(
+            name,
+            {
+              detail:
+                finalPayload,
+            }
+          )
         );
 
         return true;
@@ -325,7 +465,12 @@ export const SidebarUI = (() => {
       return null;
     }
 
-    const delay = clampNumber(ms, 0, 60000);
+    const delay =
+      clampNumber(
+        ms,
+        0,
+        60000
+      );
 
     if (!hasWindow()) {
       try {
@@ -351,7 +496,10 @@ export const SidebarUI = (() => {
   }
 
   function safeClearTimeout(timer) {
-    if (!timer || !hasWindow()) {
+    if (
+      !timer ||
+      !hasWindow()
+    ) {
       return false;
     }
 
@@ -388,28 +536,24 @@ export const SidebarUI = (() => {
       return;
     } catch {}
 
-    safeSetTimeout(callback, 0);
-  }
-
-  function containsElement(parent = null, child = null) {
-    if (!parent || !child) {
-      return false;
-    }
-
-    try {
-      return parent === child || parent.contains(child);
-    } catch {
-      return false;
-    }
+    safeSetTimeout(
+      callback,
+      0
+    );
   }
 
   function queryAll(root = null, selector = "") {
-    if (!root || !selector) {
+    if (
+      !root ||
+      !selector
+    ) {
       return [];
     }
 
     try {
-      return Array.from(root.querySelectorAll(selector));
+      return Array.from(
+        root.querySelectorAll(selector)
+      );
     } catch {
       return [];
     }
@@ -439,39 +583,67 @@ export const SidebarUI = (() => {
 
   function isShellBlocked() {
     try {
-      return Boolean(isRealShellHidden(AppCore));
+      return Boolean(
+        isRealShellHidden(AppCore)
+      );
     } catch {}
 
     try {
-      return Boolean(isShellHidden(AppCore));
+      return Boolean(
+        isShellHidden(AppCore)
+      );
     } catch {
       return false;
     }
   }
 
   function syncSidebarDomIntoAppCore() {
-    const el = getElements(AppCore);
+    const el =
+      getElements(AppCore);
 
     try {
-      if (!AppCore.dom || typeof AppCore.dom !== "object") {
+      if (
+        !AppCore.dom ||
+        typeof AppCore.dom !== "object"
+      ) {
         AppCore.dom = {};
       }
 
-      AppCore.dom.sidebar = el.sidebar || null;
-      AppCore.dom.sidebarMenu = el.sidebarMenu || null;
-      AppCore.dom.sidebarRecents = el.sidebarRecents || null;
+      AppCore.dom.sidebar =
+        el.sidebar || null;
 
-      AppCore.dom.sidebarAvatar = el.avatarEl || null;
-      AppCore.dom.sidebarName = el.nameEl || null;
-      AppCore.dom.sidebarLogo = el.logoEl || null;
+      AppCore.dom.sidebarMenu =
+        el.sidebarMenu || null;
 
-      AppCore.dom.userToggle = el.userToggle || null;
-      AppCore.dom.userDropdown = el.userDropdown || null;
-      AppCore.dom.logoutBtn = el.logoutBtn || null;
+      AppCore.dom.sidebarRecents =
+        el.sidebarRecents || null;
 
-      AppCore.dom.sidebarToggle = el.toggleBtn || null;
-      AppCore.dom.sidebarMobileToggle = el.mobileToggleBtn || null;
-      AppCore.dom.mobileSidebarToggle = el.mobileToggleBtn || null;
+      AppCore.dom.sidebarAvatar =
+        el.avatarEl || null;
+
+      AppCore.dom.sidebarName =
+        el.nameEl || null;
+
+      AppCore.dom.sidebarLogo =
+        el.logoEl || null;
+
+      AppCore.dom.userToggle =
+        el.userToggle || null;
+
+      AppCore.dom.userDropdown =
+        el.userDropdown || null;
+
+      AppCore.dom.logoutBtn =
+        el.logoutBtn || null;
+
+      AppCore.dom.sidebarToggle =
+        el.toggleBtn || null;
+
+      AppCore.dom.sidebarMobileToggle =
+        el.mobileToggleBtn || null;
+
+      AppCore.dom.mobileSidebarToggle =
+        el.mobileToggleBtn || null;
     } catch {}
 
     return el;
@@ -485,59 +657,6 @@ export const SidebarUI = (() => {
     return syncSidebarDomIntoAppCore();
   }
 
-  function mountAndRefresh(reason = "mount") {
-    try {
-      mountSidebar(AppCore);
-    } catch (error) {
-      safeWarn("mountSidebar falló.", error);
-    }
-
-    const elements = refreshSidebarDomRefs();
-
-    ensureMenuInteractive(`mount:${reason}`);
-
-    return {
-      mounted: hasSidebarShell(AppCore),
-      elements,
-    };
-  }
-
-  function ensureRuntimeStateDefaults() {
-    const mobile = isMobileViewport(MOBILE_BREAKPOINT);
-
-    try {
-      if (!AppCore.state || typeof AppCore.state !== "object") {
-        AppCore.state = {};
-      }
-
-      const desiredOpen = getDesiredSidebarOpenState(AppCore);
-
-      if (typeof AppCore.state.sidebarDesktopOpen !== "boolean") {
-        AppCore.state.sidebarDesktopOpen = mobile
-          ? true
-          : Boolean(desiredOpen);
-      }
-
-      if (typeof AppCore.state.sidebarMobileOpen !== "boolean") {
-        AppCore.state.sidebarMobileOpen = false;
-      }
-
-      AppCore.state.sidebarOpen = mobile
-        ? Boolean(AppCore.state.sidebarMobileOpen)
-        : Boolean(AppCore.state.sidebarDesktopOpen);
-
-      AppCore.state.sidebarMode = mobile
-        ? "mobile"
-        : "desktop";
-
-      AppCore.state.sidebarLastMode = AppCore.state.sidebarMode;
-
-      return AppCore.state;
-    } catch {
-      return {};
-    }
-  }
-
   function ensureMenuInteractive(reason = "ensure-menu-interactive") {
     if (!isBrowser()) {
       return false;
@@ -545,19 +664,17 @@ export const SidebarUI = (() => {
 
     const {
       sidebarMenu,
-    } = getElements(AppCore);
+    } =
+      getElements(AppCore);
 
     if (!sidebarMenu) {
       return false;
     }
 
-    let repaired = false;
+    let repaired =
+      false;
 
     try {
-      /*
-        Nunca se debe usar pointer-events:none en el menú.
-        Si quedó de CSS/JS legacy, lo saneamos aquí.
-      */
       if (sidebarMenu.style.pointerEvents === "none") {
         sidebarMenu.style.pointerEvents = "";
         repaired = true;
@@ -579,17 +696,94 @@ export const SidebarUI = (() => {
         repaired = true;
       }
 
-      sidebarMenu.classList?.remove?.("is-visual-syncing");
+      sidebarMenu.classList?.remove?.(
+        "is-visual-syncing"
+      );
     } catch {}
 
     if (repaired) {
-      safeEmit("sidebar:menu:interaction-restored", {
-        reason,
-        snapshot: getSidebarSnapshot(),
-      });
+      safeEmit(
+        "sidebar:menu:interaction-restored",
+        {
+          reason,
+          snapshot:
+            getSidebarSnapshot(),
+        }
+      );
     }
 
     return repaired;
+  }
+
+  function mountAndRefresh(reason = "mount") {
+    try {
+      mountSidebar(AppCore);
+    } catch (error) {
+      safeWarn(
+        "mountSidebar falló.",
+        error
+      );
+    }
+
+    const elements =
+      refreshSidebarDomRefs();
+
+    ensureMenuInteractive(
+      `mount:${reason}`
+    );
+
+    return {
+      mounted:
+        hasSidebarShell(AppCore),
+
+      elements,
+    };
+  }
+
+  function ensureRuntimeStateDefaults() {
+    const mobile =
+      isMobileViewport(MOBILE_BREAKPOINT);
+
+    try {
+      if (
+        !AppCore.state ||
+        typeof AppCore.state !== "object"
+      ) {
+        AppCore.state = {};
+      }
+
+      const desiredOpen =
+        getDesiredSidebarOpenState(AppCore);
+
+      if (typeof AppCore.state.sidebarDesktopOpen !== "boolean") {
+        AppCore.state.sidebarDesktopOpen =
+          mobile
+            ? true
+            : Boolean(desiredOpen);
+      }
+
+      if (typeof AppCore.state.sidebarMobileOpen !== "boolean") {
+        AppCore.state.sidebarMobileOpen =
+          false;
+      }
+
+      AppCore.state.sidebarOpen =
+        mobile
+          ? Boolean(AppCore.state.sidebarMobileOpen)
+          : Boolean(AppCore.state.sidebarDesktopOpen);
+
+      AppCore.state.sidebarMode =
+        mobile
+          ? "mobile"
+          : "desktop";
+
+      AppCore.state.sidebarLastMode =
+        AppCore.state.sidebarMode;
+
+      return AppCore.state;
+    } catch {
+      return {};
+    }
   }
 
   function sanitizeSidebarDom(reason = "sanitize") {
@@ -605,11 +799,11 @@ export const SidebarUI = (() => {
 
   /* ======================================================
      ROUTE HELPERS · LIGHTWEIGHT ONLY
-     state.js/events.js hacen la resolución fuerte.
   ====================================================== */
 
   function normalizeRoutePath(value = "") {
-    const raw = safeText(value, "");
+    const raw =
+      safeText(value, "");
 
     if (!raw) {
       return "";
@@ -617,7 +811,11 @@ export const SidebarUI = (() => {
 
     try {
       if (isBrowser()) {
-        const url = new URL(raw, window.location.origin);
+        const url =
+          new URL(
+            raw,
+            window.location.origin
+          );
 
         if (
           url.hash &&
@@ -626,19 +824,28 @@ export const SidebarUI = (() => {
             url.hash.startsWith("#!")
           )
         ) {
-          return url.hash
-            .replace(/^#!\/?/, "/")
-            .replace(/^#\/?/, "/") || "/";
+          return (
+            url.hash
+              .replace(/^#!\/?/, "/")
+              .replace(/^#\/?/, "/") ||
+            "/"
+          );
         }
 
         return `${url.pathname || "/"}${url.search || ""}`;
       }
     } catch {}
 
-    if (raw.startsWith("#/") || raw.startsWith("#!")) {
-      return raw
-        .replace(/^#!\/?/, "/")
-        .replace(/^#\/?/, "/") || "/";
+    if (
+      raw.startsWith("#/") ||
+      raw.startsWith("#!")
+    ) {
+      return (
+        raw
+          .replace(/^#!\/?/, "/")
+          .replace(/^#\/?/, "/") ||
+        "/"
+      );
     }
 
     if (raw.startsWith("/")) {
@@ -654,7 +861,8 @@ export const SidebarUI = (() => {
     }
 
     try {
-      const hash = window.location.hash || "";
+      const hash =
+        window.location.hash || "";
 
       if (
         hash.startsWith("#/") ||
@@ -663,17 +871,22 @@ export const SidebarUI = (() => {
         return normalizeRoutePath(hash) || "/";
       }
 
-      return normalizeRoutePath(
-        `${window.location.pathname || "/"}${window.location.search || ""}`
-      ) || "/";
+      return (
+        normalizeRoutePath(
+          `${window.location.pathname || "/"}${window.location.search || ""}`
+        ) || "/"
+      );
     } catch {
       return "/";
     }
   }
 
   function resolveRoutePayload(options = {}) {
-    const opts = safeObject(options);
-    const payload = safeObject(opts.payload);
+    const opts =
+      safeObject(options);
+
+    const payload =
+      safeObject(opts.payload);
 
     const route =
       first(
@@ -690,21 +903,31 @@ export const SidebarUI = (() => {
         payload.url,
         payload.route,
 
-        getBrowserPath(),
+        Router?.getCurrentPublicPath?.(),
         AppCore?.state?.publicPath,
         AppCore?.state?.route,
-        AppCore?.state?.canonicalPath
+        AppCore?.state?.canonicalPath,
+        getBrowserPath()
       ) || "/";
 
-    const normalized = normalizeRoutePath(route) || "/";
+    const normalized =
+      normalizeRoutePath(route) || "/";
 
     return {
       ...payload,
       ...opts,
-      route: normalized,
-      publicPath: normalized,
-      path: normalized,
-      currentPublicPath: normalized,
+
+      route:
+        normalized,
+
+      publicPath:
+        normalized,
+
+      path:
+        normalized,
+
+      currentPublicPath:
+        normalized,
     };
   }
 
@@ -730,7 +953,8 @@ export const SidebarUI = (() => {
   function getAllMenuItems() {
     const {
       sidebarMenu,
-    } = getElements(AppCore);
+    } =
+      getElements(AppCore);
 
     if (!sidebarMenu) {
       return [];
@@ -754,40 +978,42 @@ export const SidebarUI = (() => {
      ADMIN ROLE RESOLUTION
   ====================================================== */
 
-  const ADMIN_ROLE_KEYS = new Set([
-    "admin",
-    "administrator",
-    "administrador",
-    "superadmin",
-    "super_admin",
-    "super_administrador",
-    "owner",
-    "root",
-  ]);
+  const ADMIN_ROLE_KEYS =
+    new Set([
+      "admin",
+      "administrator",
+      "administrador",
+      "superadmin",
+      "super_admin",
+      "super_administrador",
+      "owner",
+      "root",
+    ]);
 
-  const ADMIN_PERMISSION_KEYS = new Set([
-    "admin:*",
-    "admin.all",
-    "admin.full",
-    "admin.manage",
+  const ADMIN_PERMISSION_KEYS =
+    new Set([
+      "admin:*",
+      "admin.all",
+      "admin.full",
+      "admin.manage",
 
-    "users.manage",
-    "users:manage",
-    "users.write",
-    "users:write",
-    "users.admin",
+      "users.manage",
+      "users:manage",
+      "users.write",
+      "users:write",
+      "users.admin",
 
-    "usuarios.manage",
-    "usuarios:manage",
-    "usuarios.write",
-    "usuarios:write",
-    "usuarios.admin",
+      "usuarios.manage",
+      "usuarios:manage",
+      "usuarios.write",
+      "usuarios:write",
+      "usuarios.admin",
 
-    "manage_users",
-    "can_manage_users",
-    "access_users",
-    "can_access_users",
-  ]);
+      "manage_users",
+      "can_manage_users",
+      "access_users",
+      "can_access_users",
+    ]);
 
   function normalizeRole(value = "") {
     return safeText(value, "")
@@ -800,12 +1026,17 @@ export const SidebarUI = (() => {
   }
 
   function flattenRoleValue(value) {
-    if (value === null || value === undefined) {
+    if (
+      value === null ||
+      value === undefined
+    ) {
       return [];
     }
 
     if (Array.isArray(value)) {
-      return value.flatMap(flattenRoleValue);
+      return value.flatMap(
+        flattenRoleValue
+      );
     }
 
     if (typeof value === "string") {
@@ -815,16 +1046,23 @@ export const SidebarUI = (() => {
         .filter(Boolean);
     }
 
-    if (typeof value === "number" || typeof value === "boolean") {
+    if (
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
       return [value];
     }
 
     if (typeof value === "object") {
-      const entries = Object.entries(value);
+      const entries =
+        Object.entries(value);
 
-      const truthyKeys = entries
-        .filter(([, entryValue]) => safeBoolean(entryValue, false))
-        .map(([key]) => key);
+      const truthyKeys =
+        entries
+          .filter(([, entryValue]) =>
+            safeBoolean(entryValue, false)
+          )
+          .map(([key]) => key);
 
       return [
         value.role,
@@ -864,11 +1102,14 @@ export const SidebarUI = (() => {
   }
 
   function isAdminRole(value = "") {
-    return ADMIN_ROLE_KEYS.has(normalizeRole(value));
+    return ADMIN_ROLE_KEYS.has(
+      normalizeRole(value)
+    );
   }
 
   function isAdminPermission(value = "") {
-    const key = normalizeRole(value);
+    const key =
+      normalizeRole(value);
 
     if (!key) {
       return false;
@@ -888,19 +1129,19 @@ export const SidebarUI = (() => {
 
   function getAuthUser() {
     try {
-      if (typeof Auth?.getUser === "function") {
+      if (isFunction(Auth?.getUser)) {
         return safeObject(Auth.getUser());
       }
     } catch {}
 
     try {
-      if (typeof Auth?.getCurrentUser === "function") {
+      if (isFunction(Auth?.getCurrentUser)) {
         return safeObject(Auth.getCurrentUser());
       }
     } catch {}
 
     try {
-      if (typeof Auth?.currentUser === "function") {
+      if (isFunction(Auth?.currentUser)) {
         return safeObject(Auth.currentUser());
       }
     } catch {}
@@ -922,16 +1163,32 @@ export const SidebarUI = (() => {
   }
 
   function getRoleCandidates() {
-    const user = getCurrentUser();
-    const raw = safeObject(user?.raw);
-    const profile = safeObject(user?.profile);
-    const account = safeObject(user?.account);
-    const meta = safeObject(user?.meta);
-    const claims = safeObject(user?.claims);
+    const user =
+      getCurrentUser();
 
-    const rawProfile = safeObject(raw?.profile);
-    const rawMeta = safeObject(raw?.meta);
-    const rawClaims = safeObject(raw?.claims);
+    const raw =
+      safeObject(user?.raw);
+
+    const profile =
+      safeObject(user?.profile);
+
+    const account =
+      safeObject(user?.account);
+
+    const meta =
+      safeObject(user?.meta);
+
+    const claims =
+      safeObject(user?.claims);
+
+    const rawProfile =
+      safeObject(raw?.profile);
+
+    const rawMeta =
+      safeObject(raw?.meta);
+
+    const rawClaims =
+      safeObject(raw?.claims);
 
     const roleCandidates = [
       AppCore?.state?.role,
@@ -1005,14 +1262,18 @@ export const SidebarUI = (() => {
     ];
 
     try {
-      if (typeof Auth?.getRole === "function") {
-        roleCandidates.push(Auth.getRole());
+      if (isFunction(Auth?.getRole)) {
+        roleCandidates.push(
+          Auth.getRole()
+        );
       }
     } catch {}
 
     try {
-      if (typeof Auth?.getCurrentRole === "function") {
-        roleCandidates.push(Auth.getCurrentRole());
+      if (isFunction(Auth?.getCurrentRole)) {
+        roleCandidates.push(
+          Auth.getCurrentRole()
+        );
       }
     } catch {}
 
@@ -1087,12 +1348,23 @@ export const SidebarUI = (() => {
   }
 
   function hasAdminFlag() {
-    const user = getCurrentUser();
-    const raw = safeObject(user?.raw);
-    const profile = safeObject(user?.profile);
-    const account = safeObject(user?.account);
-    const meta = safeObject(user?.meta);
-    const claims = safeObject(user?.claims);
+    const user =
+      getCurrentUser();
+
+    const raw =
+      safeObject(user?.raw);
+
+    const profile =
+      safeObject(user?.profile);
+
+    const account =
+      safeObject(user?.account);
+
+    const meta =
+      safeObject(user?.meta);
+
+    const claims =
+      safeObject(user?.claims);
 
     return [
       AppCore?.state?.isAdmin,
@@ -1152,7 +1424,9 @@ export const SidebarUI = (() => {
       raw.can_manage_users,
       raw.canAccessUsers,
       raw.can_access_users,
-    ].some((value) => safeBoolean(value, false));
+    ].some((value) =>
+      safeBoolean(value, false)
+    );
   }
 
   function isAdmin() {
@@ -1162,7 +1436,7 @@ export const SidebarUI = (() => {
 
     try {
       if (
-        typeof Auth?.isCurrentUserAdmin === "function" &&
+        isFunction(Auth?.isCurrentUserAdmin) &&
         Auth.isCurrentUserAdmin()
       ) {
         return true;
@@ -1171,7 +1445,7 @@ export const SidebarUI = (() => {
 
     try {
       if (
-        typeof Auth?.hasRole === "function" &&
+        isFunction(Auth?.hasRole) &&
         Auth.hasRole(
           "admin",
           "administrator",
@@ -1186,11 +1460,15 @@ export const SidebarUI = (() => {
       }
     } catch {}
 
-    const roles = normalizeRoles(getRoleCandidates());
+    const roles =
+      normalizeRoles(
+        getRoleCandidates()
+      );
 
-    return roles.some((role) => {
-      return isAdminRole(role) || isAdminPermission(role);
-    });
+    return roles.some((role) =>
+      isAdminRole(role) ||
+      isAdminPermission(role)
+    );
   }
 
   /* ======================================================
@@ -1205,21 +1483,41 @@ export const SidebarUI = (() => {
       avatarEl,
       userToggle,
       userDropdown,
-    } = getElements(AppCore);
+    } =
+      getElements(AppCore);
 
-    const user = getUser(AppCore);
+    const user =
+      getUser(AppCore);
 
-    const displayName = getDisplayName(AppCore, user);
-    const username = getUsername(AppCore, user);
-    const avatarText = getAvatarText(AppCore, user);
-    const avatarUrl = getAvatarUrl(user);
+    const displayName =
+      getDisplayName(
+        AppCore,
+        user
+      );
+
+    const username =
+      getUsername(
+        AppCore,
+        user
+      );
+
+    const avatarText =
+      getAvatarText(
+        AppCore,
+        user
+      );
+
+    const avatarUrl =
+      getAvatarUrl(user);
 
     if (nameEl) {
       try {
-        nameEl.textContent = displayName;
+        nameEl.textContent =
+          displayName;
 
         if (username) {
-          nameEl.dataset.username = username;
+          nameEl.dataset.username =
+            username;
         } else {
           delete nameEl.dataset.username;
         }
@@ -1245,7 +1543,8 @@ export const SidebarUI = (() => {
         );
 
         if (username) {
-          avatarEl.dataset.username = username;
+          avatarEl.dataset.username =
+            username;
         } else {
           delete avatarEl.dataset.username;
         }
@@ -1263,7 +1562,10 @@ export const SidebarUI = (() => {
           `Abrir menú de usuario de ${displayName}`
         );
 
-        userToggle.setAttribute("aria-haspopup", "menu");
+        userToggle.setAttribute(
+          "aria-haspopup",
+          "menu"
+        );
 
         userToggle.removeAttribute("title");
         userToggle.removeAttribute("data-tooltip");
@@ -1273,7 +1575,10 @@ export const SidebarUI = (() => {
           userDropdown?.id &&
           !userToggle.getAttribute("aria-controls")
         ) {
-          userToggle.setAttribute("aria-controls", userDropdown.id);
+          userToggle.setAttribute(
+            "aria-controls",
+            userDropdown.id
+          );
         }
       } catch {}
     }
@@ -1285,7 +1590,10 @@ export const SidebarUI = (() => {
         userDropdown.removeAttribute("aria-describedby");
 
         if (!userDropdown.getAttribute("role")) {
-          userDropdown.setAttribute("role", "menu");
+          userDropdown.setAttribute(
+            "role",
+            "menu"
+          );
         }
       } catch {}
     }
@@ -1294,12 +1602,16 @@ export const SidebarUI = (() => {
       sanitizeFooterTooltipState(AppCore);
     } catch {}
 
-    safeEmit("sidebar:user:rendered", {
-      user,
-      displayName,
-      username,
-      isAdmin: isAdmin(),
-    });
+    safeEmit(
+      "sidebar:user:rendered",
+      {
+        user,
+        displayName,
+        username,
+        isAdmin:
+          isAdmin(),
+      }
+    );
 
     return true;
   }
@@ -1312,16 +1624,23 @@ export const SidebarUI = (() => {
     refreshSidebarDomRefs();
     ensureMenuInteractive("apply-role-visibility");
 
-    const result = applyRoleVisibilityBase(
-      AppCore,
-      null,
-      isAdmin
-    );
+    const result =
+      applyRoleVisibilityBase(
+        AppCore,
+        null,
+        isAdmin
+      );
 
-    scheduleRouteAndIndicator("apply-role-visibility", {
-      delayMs: INDICATOR_DELAY_REFRESH_MS,
-      force: true,
-    });
+    scheduleRouteAndIndicator(
+      "apply-role-visibility",
+      {
+        delayMs:
+          INDICATOR_DELAY_REFRESH_MS,
+
+        force:
+          true,
+      }
+    );
 
     return result;
   }
@@ -1334,92 +1653,120 @@ export const SidebarUI = (() => {
     refreshSidebarDomRefs();
     ensureMenuInteractive("sync-sidebar-state");
 
-    const result = syncSidebarStateBase(
+    return syncSidebarStateBase(
       AppCore,
       closeDropdown
     );
-
-    return result;
   }
 
   function repairSidebarState(reason = "repair-sidebar-state") {
     refreshSidebarDomRefs();
     ensureMenuInteractive(reason);
 
-    const result = repairSidebarStateBase(
-      AppCore,
-      closeDropdown
-    );
+    const result =
+      repairSidebarStateBase(
+        AppCore,
+        closeDropdown
+      );
 
-    scheduleRouteAndIndicator(reason, {
-      delayMs: INDICATOR_DELAY_REPAIR_MS,
-      force: true,
-    });
+    scheduleRouteAndIndicator(
+      reason,
+      {
+        delayMs:
+          INDICATOR_DELAY_REPAIR_MS,
+
+        force:
+          true,
+      }
+    );
 
     return result;
   }
 
   function syncRouteAndIndicator(reason = "route-sync", options = {}) {
-    const opts = safeObject(options);
-    const payload = resolveRoutePayload(opts);
+    const opts =
+      safeObject(options);
+
+    const payload =
+      resolveRoutePayload(opts);
 
     refreshSidebarDomRefs();
     ensureMenuInteractive(reason);
 
-    const activeItem = syncActiveMenuItem(
-      AppCore,
-      {
-        ...payload,
-        reason,
-        mutate: true,
-        preferExplicitRoute: opts.preferExplicitRoute === true,
-        forceRoute: opts.forceRoute === true,
-      }
-    );
+    const activeItem =
+      syncActiveMenuItem(
+        AppCore,
+        {
+          ...payload,
+
+          reason,
+          mutate:
+            true,
+
+          preferExplicitRoute:
+            opts.preferExplicitRoute === true,
+
+          forceRoute:
+            opts.forceRoute === true,
+        }
+      );
 
     scheduleActiveMenuIndicator(
       AppCore,
       {
         ...payload,
+
         reason,
+
         activeItem,
+
         delayMs:
           typeof opts.delayMs === "number"
             ? opts.delayMs
             : INDICATOR_DELAY_ROUTE_MS,
-        reveal: opts.reveal !== false,
-        force: opts.force === true,
-        preferExplicitRoute: opts.preferExplicitRoute === true,
-        forceRoute: opts.forceRoute === true,
+
+        reveal:
+          opts.reveal !== false,
+
+        force:
+          opts.force === true,
+
+        preferExplicitRoute:
+          opts.preferExplicitRoute === true,
+
+        forceRoute:
+          opts.forceRoute === true,
       }
     );
 
-    safeEmit("sidebar:route-indicator:sync", {
-      reason,
-      route: payload.route,
-      hasActiveItem: Boolean(activeItem),
-    });
+    safeEmit(
+      "sidebar:route-indicator:sync",
+      {
+        reason,
+        route:
+          payload.route,
+        hasActiveItem:
+          Boolean(activeItem),
+      }
+    );
 
     return activeItem;
   }
 
   function scheduleRouteAndIndicator(reason = "scheduled-route-sync", options = {}) {
-    const opts = safeObject(options);
-    const generation = bindGeneration;
+    const opts =
+      safeObject(options);
+
+    const generation =
+      bindGeneration;
 
     clearVisualSyncTimer();
 
-    visualSyncTimer = safeSetTimeout(() => {
-      visualSyncTimer = null;
+    visualSyncTimer =
+      safeSetTimeout(() => {
+        visualSyncTimer =
+          null;
 
-      if (
-        opts.bindGenerationSafe !== false &&
-        generation !== bindGeneration
-      ) {
-        return;
-      }
-
-      afterPaint(() => {
         if (
           opts.bindGenerationSafe !== false &&
           generation !== bindGeneration
@@ -1427,9 +1774,20 @@ export const SidebarUI = (() => {
           return;
         }
 
-        syncRouteAndIndicator(reason, opts);
-      });
-    }, clampNumber(opts.delayMs, 0, 5000));
+        afterPaint(() => {
+          if (
+            opts.bindGenerationSafe !== false &&
+            generation !== bindGeneration
+          ) {
+            return;
+          }
+
+          syncRouteAndIndicator(
+            reason,
+            opts
+          );
+        });
+      }, clampNumber(opts.delayMs, 0, 5000));
 
     return true;
   }
@@ -1443,7 +1801,8 @@ export const SidebarUI = (() => {
       AppCore,
       closeDropdown,
       syncSidebarState,
-      reason: "ensure-sidebar-open-for-user-menu",
+      reason:
+        "ensure-sidebar-open-for-user-menu",
     });
   }
 
@@ -1455,17 +1814,24 @@ export const SidebarUI = (() => {
     refreshSidebarDomRefs();
     ensureMenuInteractive("open-dropdown");
 
-    const result = openDropdownBase(
-      AppCore,
-      runtimeState,
-      ensureSidebarOpenForUserMenu,
-      safeObject(options)
-    );
+    const result =
+      openDropdownBase(
+        AppCore,
+        runtimeState,
+        ensureSidebarOpenForUserMenu,
+        safeObject(options)
+      );
 
-    scheduleRouteAndIndicator("open-dropdown", {
-      delayMs: 32,
-      force: false,
-    });
+    scheduleRouteAndIndicator(
+      "open-dropdown",
+      {
+        delayMs:
+          32,
+
+        force:
+          false,
+      }
+    );
 
     return result;
   }
@@ -1474,16 +1840,23 @@ export const SidebarUI = (() => {
     refreshSidebarDomRefs();
     ensureMenuInteractive("close-dropdown");
 
-    const result = closeDropdownBase(
-      AppCore,
-      runtimeState,
-      safeObject(options)
-    );
+    const result =
+      closeDropdownBase(
+        AppCore,
+        runtimeState,
+        safeObject(options)
+      );
 
-    scheduleRouteAndIndicator("close-dropdown", {
-      delayMs: 24,
-      force: false,
-    });
+    scheduleRouteAndIndicator(
+      "close-dropdown",
+      {
+        delayMs:
+          24,
+
+        force:
+          false,
+      }
+    );
 
     return result;
   }
@@ -1496,17 +1869,24 @@ export const SidebarUI = (() => {
     refreshSidebarDomRefs();
     ensureMenuInteractive("toggle-dropdown");
 
-    const result = toggleDropdownBase(
-      AppCore,
-      runtimeState,
-      ensureSidebarOpenForUserMenu,
-      safeObject(options)
-    );
+    const result =
+      toggleDropdownBase(
+        AppCore,
+        runtimeState,
+        ensureSidebarOpenForUserMenu,
+        safeObject(options)
+      );
 
-    scheduleRouteAndIndicator("toggle-dropdown", {
-      delayMs: 32,
-      force: false,
-    });
+    scheduleRouteAndIndicator(
+      "toggle-dropdown",
+      {
+        delayMs:
+          32,
+
+        force:
+          false,
+      }
+    );
 
     return result;
   }
@@ -1515,16 +1895,16 @@ export const SidebarUI = (() => {
     refreshSidebarDomRefs();
     ensureMenuInteractive(reason);
 
-    const result = repairDropdownBase(
+    return repairDropdownBase(
       AppCore,
       runtimeState,
       {
-        emit: true,
+        emit:
+          true,
+
         reason,
       }
     );
-
-    return result;
   }
 
   /* ======================================================
@@ -1532,152 +1912,258 @@ export const SidebarUI = (() => {
   ====================================================== */
 
   function setSidebarOpen(open, options = {}) {
-    const opts = safeObject(options);
+    const opts =
+      safeObject(options);
 
-    const result = actionSetSidebarOpen({
-      AppCore,
-      open: Boolean(open),
-      closeDropdown,
-      syncSidebarState,
-      reason: safeText(opts.reason || opts.source, "set-sidebar-open"),
-    });
+    const result =
+      actionSetSidebarOpen({
+        AppCore,
+        open:
+          Boolean(open),
+        closeDropdown,
+        syncSidebarState,
+        reason:
+          safeText(
+            opts.reason || opts.source,
+            "set-sidebar-open"
+          ),
+      });
 
-    scheduleRouteAndIndicator("set-sidebar-open", {
-      delayMs: INDICATOR_DELAY_TRANSITION_MS,
-      force: true,
-    });
+    scheduleRouteAndIndicator(
+      "set-sidebar-open",
+      {
+        delayMs:
+          INDICATOR_DELAY_TRANSITION_MS,
+
+        force:
+          true,
+      }
+    );
 
     return result;
   }
 
   function openSidebar(options = {}) {
-    const opts = safeObject(options);
+    const opts =
+      safeObject(options);
 
-    const result = actionOpenSidebar({
-      AppCore,
-      closeDropdown,
-      syncSidebarState,
-      reason: safeText(opts.reason || opts.source, "open-sidebar"),
-    });
+    const result =
+      actionOpenSidebar({
+        AppCore,
+        closeDropdown,
+        syncSidebarState,
+        reason:
+          safeText(
+            opts.reason || opts.source,
+            "open-sidebar"
+          ),
+      });
 
-    scheduleRouteAndIndicator("open-sidebar", {
-      delayMs: INDICATOR_DELAY_TRANSITION_MS,
-      force: true,
-    });
+    scheduleRouteAndIndicator(
+      "open-sidebar",
+      {
+        delayMs:
+          INDICATOR_DELAY_TRANSITION_MS,
+
+        force:
+          true,
+      }
+    );
 
     return result;
   }
 
   function closeSidebar(options = {}) {
-    const opts = safeObject(options);
+    const opts =
+      safeObject(options);
 
-    const result = actionCloseSidebar({
-      AppCore,
-      closeDropdown,
-      syncSidebarState,
-      reason: safeText(opts.reason || opts.source, "close-sidebar"),
-    });
+    const result =
+      actionCloseSidebar({
+        AppCore,
+        closeDropdown,
+        syncSidebarState,
+        reason:
+          safeText(
+            opts.reason || opts.source,
+            "close-sidebar"
+          ),
+      });
 
-    scheduleRouteAndIndicator("close-sidebar", {
-      delayMs: INDICATOR_DELAY_TRANSITION_MS,
-      force: true,
-    });
+    scheduleRouteAndIndicator(
+      "close-sidebar",
+      {
+        delayMs:
+          INDICATOR_DELAY_TRANSITION_MS,
+
+        force:
+          true,
+      }
+    );
 
     return result;
   }
 
   function toggleSidebar(options = {}) {
-    const opts = safeObject(options);
+    const opts =
+      safeObject(options);
 
-    const result = actionToggleSidebar({
-      AppCore,
-      closeDropdown,
-      syncSidebarState,
-      reason: safeText(opts.reason || opts.source, "toggle-sidebar"),
-    });
+    const result =
+      actionToggleSidebar({
+        AppCore,
+        closeDropdown,
+        syncSidebarState,
+        reason:
+          safeText(
+            opts.reason || opts.source,
+            "toggle-sidebar"
+          ),
+      });
 
-    scheduleRouteAndIndicator("toggle-sidebar", {
-      delayMs: INDICATOR_DELAY_TRANSITION_MS,
-      force: true,
-    });
+    scheduleRouteAndIndicator(
+      "toggle-sidebar",
+      {
+        delayMs:
+          INDICATOR_DELAY_TRANSITION_MS,
+
+        force:
+          true,
+      }
+    );
 
     return result;
   }
 
   function collapseSidebar(options = {}) {
-    const opts = safeObject(options);
+    const opts =
+      safeObject(options);
 
-    const result = actionCollapseSidebar({
-      AppCore,
-      closeDropdown,
-      syncSidebarState,
-      reason: safeText(opts.reason || opts.source, "collapse-sidebar"),
-    });
+    const result =
+      actionCollapseSidebar({
+        AppCore,
+        closeDropdown,
+        syncSidebarState,
+        reason:
+          safeText(
+            opts.reason || opts.source,
+            "collapse-sidebar"
+          ),
+      });
 
-    scheduleRouteAndIndicator("collapse-sidebar", {
-      delayMs: INDICATOR_DELAY_TRANSITION_MS,
-      force: true,
-    });
+    scheduleRouteAndIndicator(
+      "collapse-sidebar",
+      {
+        delayMs:
+          INDICATOR_DELAY_TRANSITION_MS,
+
+        force:
+          true,
+      }
+    );
 
     return result;
   }
 
   function expandSidebar(options = {}) {
-    const opts = safeObject(options);
+    const opts =
+      safeObject(options);
 
-    const result = actionExpandSidebar({
-      AppCore,
-      closeDropdown,
-      syncSidebarState,
-      reason: safeText(opts.reason || opts.source, "expand-sidebar"),
-    });
+    const result =
+      actionExpandSidebar({
+        AppCore,
+        closeDropdown,
+        syncSidebarState,
+        reason:
+          safeText(
+            opts.reason || opts.source,
+            "expand-sidebar"
+          ),
+      });
 
-    scheduleRouteAndIndicator("expand-sidebar", {
-      delayMs: INDICATOR_DELAY_TRANSITION_MS,
-      force: true,
-    });
+    scheduleRouteAndIndicator(
+      "expand-sidebar",
+      {
+        delayMs:
+          INDICATOR_DELAY_TRANSITION_MS,
+
+        force:
+          true,
+      }
+    );
 
     return result;
   }
 
   function closeSidebarOnMobileAfterNavigation(options = {}) {
-    const opts = safeObject(options);
+    const opts =
+      safeObject(options);
 
     return actionCloseSidebarOnMobileAfterNavigation({
       AppCore,
       closeDropdown,
       syncSidebarState,
-      reason: safeText(opts.reason || opts.source, "mobile-navigation"),
+      reason:
+        safeText(
+          opts.reason || opts.source,
+          "mobile-navigation"
+        ),
     });
   }
 
   async function navigateTo(route = "", options = {}) {
-    const target = normalizeRoutePath(route);
+    const opts =
+      safeObject(options);
+
+    const target =
+      normalizeRoutePath(route);
 
     if (!target) {
       return false;
     }
 
-    const result = await actionNavigateFromSidebar({
-      AppCore,
-      Router,
-      target,
-      closeDropdown,
-      closeSidebarOnMobile: true,
-      syncSidebarState,
-      replace: options?.replace === true || options?.replaceState === true,
-      source: safeText(options?.source, "sidebar-ui"),
-    });
+    const result =
+      await actionNavigateFromSidebar({
+        AppCore,
+        Router,
+        target,
+        closeDropdown,
+        closeSidebarOnMobile:
+          true,
+        syncSidebarState,
+        replace:
+          opts.replace === true ||
+          opts.replaceState === true,
+        source:
+          safeText(
+            opts.source,
+            "sidebar-ui"
+          ),
+      });
 
-    scheduleRouteAndIndicator("navigate-to", {
-      route: target,
-      publicPath: target,
-      path: target,
-      delayMs: INDICATOR_DELAY_ROUTE_MS,
-      force: true,
-      preferExplicitRoute: true,
-      forceRoute: true,
-    });
+    scheduleRouteAndIndicator(
+      "navigate-to",
+      {
+        route:
+          target,
+
+        publicPath:
+          target,
+
+        path:
+          target,
+
+        delayMs:
+          INDICATOR_DELAY_ROUTE_MS,
+
+        force:
+          true,
+
+        preferExplicitRoute:
+          true,
+
+        forceRoute:
+          true,
+      }
+    );
 
     return result;
   }
@@ -1687,7 +2173,8 @@ export const SidebarUI = (() => {
   ====================================================== */
 
   function setLogoutInFlight(value) {
-    logoutInFlight = Boolean(value);
+    logoutInFlight =
+      Boolean(value);
   }
 
   function isLogoutInFlight() {
@@ -1695,24 +2182,32 @@ export const SidebarUI = (() => {
   }
 
   async function handleLogout() {
-    const result = await handleLogoutBase({
-      AppCore,
-      Auth,
-      Router,
-      closeDropdown,
-      renderUser,
-      applyRoleVisibility,
-      closeSidebarOnMobileAfterNavigation,
-      syncSidebarState,
-      getElements: () => getElements(AppCore),
-      setLogoutInFlight,
-      isLogoutInFlight,
-    });
+    const result =
+      await handleLogoutBase({
+        AppCore,
+        Auth,
+        Router,
+        closeDropdown,
+        renderUser,
+        applyRoleVisibility,
+        closeSidebarOnMobileAfterNavigation,
+        syncSidebarState,
+        getElements:
+          () => getElements(AppCore),
+        setLogoutInFlight,
+        isLogoutInFlight,
+      });
 
-    scheduleRouteAndIndicator("logout", {
-      delayMs: 80,
-      force: true,
-    });
+    scheduleRouteAndIndicator(
+      "logout",
+      {
+        delayMs:
+          80,
+
+        force:
+          true,
+      }
+    );
 
     return result;
   }
@@ -1721,7 +2216,10 @@ export const SidebarUI = (() => {
      CLEANUP / EVENTS
   ====================================================== */
 
-  function cleanupBoundEvents() {
+  function cleanupBoundEvents(options = {}) {
+    const opts =
+      safeObject(options);
+
     clearVisualSyncTimer();
     clearRepairTimer();
 
@@ -1733,11 +2231,19 @@ export const SidebarUI = (() => {
       coreEventsCleanup?.();
     } catch {}
 
-    domEventsCleanup = null;
-    coreEventsCleanup = null;
+    domEventsCleanup =
+      null;
 
-    eventsBound = false;
-    bindingEvents = false;
+    coreEventsCleanup =
+      null;
+
+    eventsBound =
+      false;
+
+    if (opts.preserveBindingFlag !== true) {
+      bindingEvents =
+        false;
+    }
 
     ensureMenuInteractive("cleanup-bound-events");
 
@@ -1749,8 +2255,11 @@ export const SidebarUI = (() => {
 
     try {
       closeDropdown({
-        force: true,
-        reason: "sidebar-cleanup",
+        force:
+          true,
+
+        reason:
+          "sidebar-cleanup",
       });
     } catch {}
 
@@ -1760,52 +2269,91 @@ export const SidebarUI = (() => {
   }
 
   function bindEvents(reason = "bind", options = {}) {
-    const opts = safeObject(options);
-    const cleanReason = safeText(reason, "bind");
-    const ts = nowTs();
+    const opts =
+      safeObject(options);
 
-    lastBindReason = cleanReason;
+    const cleanReason =
+      safeText(reason, "bind");
+
+    const ts =
+      nowTs();
+
+    lastBindReason =
+      cleanReason;
 
     const {
       mounted,
-    } = mountAndRefresh(cleanReason);
+    } =
+      mountAndRefresh(cleanReason);
 
     if (!mounted) {
-      safeWarn("No se pudo bindear sidebar: shell ausente.", {
-        reason: cleanReason,
-      });
+      safeWarn(
+        "No se pudo bindear sidebar: shell ausente.",
+        {
+          reason:
+            cleanReason,
+        }
+      );
 
       return api;
     }
 
-    ensureMenuInteractive(`bind-events:${cleanReason}`);
+    ensureMenuInteractive(
+      `bind-events:${cleanReason}`
+    );
 
     if (
       eventsBound &&
       opts.force !== true
     ) {
-      scheduleRouteAndIndicator(`bind-events:already-bound:${cleanReason}`, {
-        delayMs: INDICATOR_DELAY_REFRESH_MS,
-        force: true,
-      });
+      scheduleRouteAndIndicator(
+        `bind-events:already-bound:${cleanReason}`,
+        {
+          delayMs:
+            INDICATOR_DELAY_REFRESH_MS,
 
-      safeEmit("sidebar:events:bind-skipped", {
-        reason: cleanReason,
-        cause: "already-bound",
-        generation: bindGeneration,
-        sinceLastBindMs: ts - lastBindAt,
-        snapshot: getSidebarSnapshot(),
-      });
+          force:
+            true,
+        }
+      );
+
+      safeEmit(
+        "sidebar:events:bind-skipped",
+        {
+          reason:
+            cleanReason,
+
+          cause:
+            "already-bound",
+
+          generation:
+            bindGeneration,
+
+          sinceLastBindMs:
+            ts - lastBindAt,
+
+          snapshot:
+            getSidebarSnapshot(),
+        }
+      );
 
       return api;
     }
 
     if (bindingEvents) {
-      safeEmit("sidebar:events:bind-ignored", {
-        reason: cleanReason,
-        cause: "binding-in-progress",
-        generation: bindGeneration,
-      });
+      safeEmit(
+        "sidebar:events:bind-ignored",
+        {
+          reason:
+            cleanReason,
+
+          cause:
+            "binding-in-progress",
+
+          generation:
+            bindGeneration,
+        }
+      );
 
       return api;
     }
@@ -1814,234 +2362,485 @@ export const SidebarUI = (() => {
       ts - lastBindAt < BIND_DEDUP_WINDOW_MS &&
       opts.force !== true
     ) {
-      safeEmit("sidebar:events:bind-ignored", {
-        reason: cleanReason,
-        cause: "dedupe-window",
-        sinceLastBindMs: ts - lastBindAt,
-        generation: bindGeneration,
-      });
+      safeEmit(
+        "sidebar:events:bind-ignored",
+        {
+          reason:
+            cleanReason,
+
+          cause:
+            "dedupe-window",
+
+          sinceLastBindMs:
+            ts - lastBindAt,
+
+          generation:
+            bindGeneration,
+        }
+      );
 
       return api;
     }
 
-    bindingEvents = true;
+    bindingEvents =
+      true;
 
     try {
       bindGeneration += 1;
 
-      cleanupBoundEvents();
+      cleanupBoundEvents({
+        preserveBindingFlag:
+          true,
+      });
 
       try {
-        domEventsCleanup = bindDomEvents({
-          AppCore,
-          Router,
-          Auth,
-          state: runtimeState,
-          scope: SCOPE,
-          api,
+        domEventsCleanup =
+          bindDomEvents({
+            AppCore,
+            Router,
+            Auth,
+            state:
+              runtimeState,
+            scope:
+              SCOPE,
+            api,
 
-          handleLogout,
-          toggleSidebar,
-          toggleDropdown,
-          openDropdown,
-          closeDropdown,
-          closeSidebar,
-          closeSidebarOnMobileAfterNavigation,
-          syncSidebarState,
+            handleLogout,
+            toggleSidebar,
+            toggleDropdown,
+            openDropdown,
+            closeDropdown,
+            closeSidebar,
+            closeSidebarOnMobileAfterNavigation,
+            syncSidebarState,
 
-          getElements: () => getElements(AppCore),
-          isMobileViewport: () => isMobileViewport(MOBILE_BREAKPOINT),
-          getDesiredSidebarOpenState: () => getDesiredSidebarOpenState(AppCore),
-        }) || null;
+            getElements:
+              () => getElements(AppCore),
+
+            isMobileViewport:
+              () => isMobileViewport(MOBILE_BREAKPOINT),
+
+            getDesiredSidebarOpenState:
+              () => getDesiredSidebarOpenState(AppCore),
+          }) || null;
       } catch (error) {
-        safeWarn("bindDomEvents falló.", error);
+        safeWarn(
+          "bindDomEvents falló.",
+          error
+        );
       }
 
       try {
-        coreEventsCleanup = bindCoreEvents({
-          AppCore,
-          Router,
-          Auth,
-          state: runtimeState,
-          scope: SCOPE,
-          api,
+        coreEventsCleanup =
+          bindCoreEvents({
+            AppCore,
+            Router,
+            Auth,
+            state:
+              runtimeState,
+            scope:
+              SCOPE,
+            api,
 
-          renderUser,
-          applyRoleVisibility,
-          syncSidebarState,
-          closeDropdown,
-          closeSidebarOnMobileAfterNavigation,
+            renderUser,
+            applyRoleVisibility,
+            syncSidebarState,
+            closeDropdown,
+            closeSidebarOnMobileAfterNavigation,
 
-          getSidebarSnapshot,
-          restoreSidebarState,
-          getElements: () => getElements(AppCore),
-        }) || null;
+            getSidebarSnapshot,
+            restoreSidebarState,
+
+            getElements:
+              () => getElements(AppCore),
+          }) || null;
       } catch (error) {
-        safeWarn("bindCoreEvents falló.", error);
+        safeWarn(
+          "bindCoreEvents falló.",
+          error
+        );
       }
 
-      eventsBound = true;
-      lastBindAt = nowTs();
+      eventsBound =
+        Boolean(
+          domEventsCleanup ||
+          coreEventsCleanup
+        );
 
-      ensureMenuInteractive(`bind-events:${cleanReason}:after`);
+      lastBindAt =
+        nowTs();
 
-      scheduleRouteAndIndicator(`bind-events:${cleanReason}`, {
-        delayMs: 64,
-        force: true,
-      });
+      ensureMenuInteractive(
+        `bind-events:${cleanReason}:after`
+      );
 
-      safeEmit("sidebar:events:bound", {
-        reason: cleanReason,
-        generation: bindGeneration,
-        scope: SCOPE,
-        snapshot: getSidebarSnapshot(),
-      });
+      scheduleRouteAndIndicator(
+        `bind-events:${cleanReason}`,
+        {
+          delayMs:
+            64,
+
+          force:
+            true,
+        }
+      );
+
+      safeEmit(
+        "sidebar:events:bound",
+        {
+          reason:
+            cleanReason,
+
+          generation:
+            bindGeneration,
+
+          scope:
+            SCOPE,
+
+          domBound:
+            Boolean(domEventsCleanup),
+
+          coreBound:
+            Boolean(coreEventsCleanup),
+
+          eventsBound:
+            Boolean(eventsBound),
+
+          snapshot:
+            getSidebarSnapshot(),
+        }
+      );
 
       return api;
     } finally {
-      bindingEvents = false;
+      bindingEvents =
+        false;
     }
   }
 
   function rebindEvents(reason = "rebind") {
-    return bindEvents(reason, {
-      force: true,
-    });
+    return bindEvents(
+      reason,
+      {
+        force:
+          true,
+      }
+    );
   }
 
   /* ======================================================
-     REFRESH / REPAIR
+     REFRESH / SYNC / REPAIR
   ====================================================== */
 
+  function sync(reason = "sync", options = {}) {
+    const opts =
+      safeObject(options);
+
+    const cleanReason =
+      safeText(reason, "sync");
+
+    const ts =
+      nowTs();
+
+    if (
+      opts.force !== true &&
+      cleanReason === lastSyncReason &&
+      ts - lastSyncAt < SYNC_DEDUP_WINDOW_MS
+    ) {
+      scheduleRouteAndIndicator(
+        `sync:deduped:${cleanReason}`,
+        {
+          delayMs:
+            INDICATOR_DELAY_REFRESH_MS,
+
+          force:
+            opts.force === true,
+        }
+      );
+
+      return api;
+    }
+
+    lastSyncAt =
+      ts;
+
+    lastSyncReason =
+      cleanReason;
+
+    mountAndRefresh(cleanReason);
+    sanitizeSidebarDom(`sync:${cleanReason}`);
+
+    syncSidebarState();
+
+    if (opts.user !== false) {
+      renderUser();
+    }
+
+    if (opts.visibility !== false) {
+      applyRoleVisibility();
+    }
+
+    if (opts.dropdownRepair === true) {
+      repairDropdown(`sync:${cleanReason}`);
+    }
+
+    scheduleRouteAndIndicator(
+      `sync:${cleanReason}`,
+      {
+        delayMs:
+          typeof opts.delayMs === "number"
+            ? opts.delayMs
+            : INDICATOR_DELAY_REFRESH_MS,
+
+        force:
+          opts.force === true,
+      }
+    );
+
+    if (opts.emit === true) {
+      safeEmit(
+        "sidebar:synced",
+        {
+          reason:
+            cleanReason,
+
+          snapshot:
+            getSidebarSnapshot(),
+        }
+      );
+    }
+
+    return api;
+  }
+
   function refresh(reason = "refresh") {
-    const cleanReason = safeText(reason, "refresh");
+    const cleanReason =
+      safeText(reason, "refresh");
 
     mountAndRefresh(cleanReason);
     ensureRuntimeStateDefaults();
 
-    sanitizeSidebarDom(`refresh:${cleanReason}`);
+    sanitizeSidebarDom(
+      `refresh:${cleanReason}`
+    );
 
     syncSidebarState();
     renderUser();
     applyRoleVisibility();
-    repairDropdown(`refresh:${cleanReason}`);
+    repairDropdown(
+      `refresh:${cleanReason}`
+    );
 
-    scheduleRouteAndIndicator(`refresh:${cleanReason}`, {
-      delayMs: INDICATOR_DELAY_REFRESH_MS,
-      force: true,
-    });
+    scheduleRouteAndIndicator(
+      `refresh:${cleanReason}`,
+      {
+        delayMs:
+          INDICATOR_DELAY_REFRESH_MS,
 
-    safeEmit("sidebar:refreshed", {
-      reason: cleanReason,
-      snapshot: getSidebarSnapshot(),
-    });
+        force:
+          true,
+      }
+    );
+
+    safeEmit(
+      "sidebar:refreshed",
+      {
+        reason:
+          cleanReason,
+
+        snapshot:
+          getSidebarSnapshot(),
+      }
+    );
 
     return api;
   }
 
   function repair(reason = "repair", options = {}) {
-    const opts = safeObject(options);
-    const cleanReason = safeText(reason, "repair");
-    const ts = nowTs();
+    const opts =
+      safeObject(options);
+
+    const cleanReason =
+      safeText(reason, "repair");
+
+    const ts =
+      nowTs();
 
     if (
       opts.force !== true &&
       ts - lastRepairAt < REPAIR_DEDUP_WINDOW_MS
     ) {
-      scheduleRouteAndIndicator(`repair:deduped:${cleanReason}`, {
-        delayMs: INDICATOR_DELAY_REPAIR_MS,
-        force: true,
-      });
+      scheduleRouteAndIndicator(
+        `repair:deduped:${cleanReason}`,
+        {
+          delayMs:
+            INDICATOR_DELAY_REPAIR_MS,
 
-      safeEmit("sidebar:repair:deduped", {
-        reason: cleanReason,
-        sinceLastRepairMs: ts - lastRepairAt,
-        lastRepairReason,
-        snapshot: getSidebarSnapshot(),
-      });
+          force:
+            true,
+        }
+      );
+
+      safeEmit(
+        "sidebar:repair:deduped",
+        {
+          reason:
+            cleanReason,
+
+          sinceLastRepairMs:
+            ts - lastRepairAt,
+
+          lastRepairReason,
+
+          snapshot:
+            getSidebarSnapshot(),
+        }
+      );
 
       return api;
     }
 
-    lastRepairAt = ts;
-    lastRepairReason = cleanReason;
+    lastRepairAt =
+      ts;
+
+    lastRepairReason =
+      cleanReason;
 
     const {
       mounted,
-    } = mountAndRefresh(cleanReason);
+    } =
+      mountAndRefresh(cleanReason);
 
     if (!mounted) {
-      safeWarn("No se pudo reparar sidebar: shell ausente.", {
-        reason: cleanReason,
-      });
+      safeWarn(
+        "No se pudo reparar sidebar: shell ausente.",
+        {
+          reason:
+            cleanReason,
+        }
+      );
 
       return api;
     }
 
     ensureRuntimeStateDefaults();
-    sanitizeSidebarDom(`repair:${cleanReason}`);
+    sanitizeSidebarDom(
+      `repair:${cleanReason}`
+    );
 
-    repairSidebarState(`repair:${cleanReason}`);
-    repairDropdown(`repair:${cleanReason}`);
+    repairSidebarState(
+      `repair:${cleanReason}`
+    );
+
+    repairDropdown(
+      `repair:${cleanReason}`
+    );
 
     renderUser();
     applyRoleVisibility();
 
     if (opts.rebind === true) {
-      bindEvents(`repair:${cleanReason}`, {
-        force: true,
-      });
+      bindEvents(
+        `repair:${cleanReason}`,
+        {
+          force:
+            true,
+        }
+      );
     } else if (!eventsBound) {
-      bindEvents(`repair:${cleanReason}`);
+      bindEvents(
+        `repair:${cleanReason}`
+      );
     }
 
-    initialized = true;
+    initialized =
+      true;
 
-    scheduleRouteAndIndicator(`repair:${cleanReason}`, {
-      delayMs: INDICATOR_DELAY_REPAIR_MS,
-      force: true,
-    });
+    scheduleRouteAndIndicator(
+      `repair:${cleanReason}`,
+      {
+        delayMs:
+          INDICATOR_DELAY_REPAIR_MS,
+
+        force:
+          true,
+      }
+    );
 
     afterPaint(() => {
-      ensureMenuInteractive(`repair:${cleanReason}:after-paint`);
+      ensureMenuInteractive(
+        `repair:${cleanReason}:after-paint`
+      );
 
-      syncRouteAndIndicator(`repair:${cleanReason}:after-paint`, {
-        delayMs: 0,
-        force: true,
-      });
+      syncRouteAndIndicator(
+        `repair:${cleanReason}:after-paint`,
+        {
+          delayMs:
+            0,
+
+          force:
+            true,
+        }
+      );
     });
 
-    safeEmit("sidebar:repaired", {
-      reason: cleanReason,
-      snapshot: getSidebarSnapshot(),
-      isAdmin: isAdmin(),
-    });
+    safeEmit(
+      "sidebar:repaired",
+      {
+        reason:
+          cleanReason,
+
+        snapshot:
+          getSidebarSnapshot(),
+
+        isAdmin:
+          isAdmin(),
+      }
+    );
 
     return api;
   }
 
   function scheduleRepair(reason = "scheduled-repair", options = {}) {
-    const opts = safeObject(options);
-    const delayMs = clampNumber(opts.delayMs, 0, 1000);
+    const opts =
+      safeObject(options);
+
+    const delayMs =
+      clampNumber(
+        opts.delayMs,
+        0,
+        1000
+      );
 
     clearRepairTimer();
 
-    repairTimer = safeSetTimeout(() => {
-      repairTimer = null;
+    repairTimer =
+      safeSetTimeout(() => {
+        repairTimer =
+          null;
 
-      repair(reason, {
-        ...opts,
-        force: opts.force === true,
-      });
-    }, delayMs);
+        repair(
+          reason,
+          {
+            ...opts,
+
+            force:
+              opts.force === true,
+          }
+        );
+      }, delayMs);
 
     return api;
   }
 
   function restoreSidebarState(snapshot = null) {
-    const data = safeObject(snapshot);
+    const data =
+      safeObject(snapshot);
 
-    if (!data || !Object.keys(data).length) {
+    if (
+      !data ||
+      !Object.keys(data).length
+    ) {
       return false;
     }
 
@@ -2049,33 +2848,53 @@ export const SidebarUI = (() => {
       return false;
     }
 
-    const desiredOpen = Boolean(
-      typeof data.desktopOpen === "boolean"
-        ? data.desktopOpen
-        : data.open
-    );
+    const desiredOpen =
+      Boolean(
+        typeof data.desktopOpen === "boolean"
+          ? data.desktopOpen
+          : data.open
+      );
 
     try {
-      if (AppCore?.state && typeof AppCore.state === "object") {
-        AppCore.state.sidebarDesktopOpen = desiredOpen;
-        AppCore.state.sidebarOpen = desiredOpen;
-        AppCore.state.sidebarMode = "desktop";
-        AppCore.state.sidebarLastMode = "desktop";
+      if (
+        AppCore?.state &&
+        typeof AppCore.state === "object"
+      ) {
+        AppCore.state.sidebarDesktopOpen =
+          desiredOpen;
+
+        AppCore.state.sidebarOpen =
+          desiredOpen;
+
+        AppCore.state.sidebarMode =
+          "desktop";
+
+        AppCore.state.sidebarLastMode =
+          "desktop";
       }
     } catch {}
 
-    const result = actionSetSidebarOpen({
-      AppCore,
-      open: desiredOpen,
-      closeDropdown,
-      syncSidebarState,
-      reason: "restore-sidebar-state",
-    });
+    const result =
+      actionSetSidebarOpen({
+        AppCore,
+        open:
+          desiredOpen,
+        closeDropdown,
+        syncSidebarState,
+        reason:
+          "restore-sidebar-state",
+      });
 
-    scheduleRouteAndIndicator("restore-sidebar-state", {
-      delayMs: INDICATOR_DELAY_TRANSITION_MS,
-      force: true,
-    });
+    scheduleRouteAndIndicator(
+      "restore-sidebar-state",
+      {
+        delayMs:
+          INDICATOR_DELAY_TRANSITION_MS,
+
+        force:
+          true,
+      }
+    );
 
     return result;
   }
@@ -2084,55 +2903,136 @@ export const SidebarUI = (() => {
      MODULE REGISTRATION
   ====================================================== */
 
+  function getRegisteredModule(name = "") {
+    const cleanName =
+      safeText(name, "");
+
+    if (!cleanName) {
+      return null;
+    }
+
+    try {
+      const value =
+        AppCore?.modules?.get?.(cleanName);
+
+      if (value) {
+        return value;
+      }
+    } catch {}
+
+    try {
+      const value =
+        AppCore?.registry?.modules?.get?.(cleanName);
+
+      if (value) {
+        return value;
+      }
+    } catch {}
+
+    return null;
+  }
+
+  function registerSingleModule(name = "") {
+    const cleanName =
+      safeText(name, "");
+
+    if (!cleanName) {
+      return false;
+    }
+
+    const current =
+      getRegisteredModule(cleanName);
+
+    if (current === api) {
+      return false;
+    }
+
+    let changed =
+      false;
+
+    try {
+      if (isFunction(AppCore?.modules?.register)) {
+        const result =
+          AppCore.modules.register(
+            cleanName,
+            api,
+            {
+              replace:
+                true,
+
+              overwrite:
+                true,
+
+              silentDuplicate:
+                true,
+
+              source:
+                SOURCE,
+            }
+          );
+
+        if (result !== false) {
+          changed =
+            true;
+        }
+      }
+    } catch {}
+
+    if (!changed) {
+      try {
+        if (isFunction(AppCore?.modules?.set)) {
+          const result =
+            AppCore.modules.set(
+              cleanName,
+              api,
+              {
+                replace:
+                  true,
+
+                overwrite:
+                  true,
+
+                silentDuplicate:
+                  true,
+
+                source:
+                  SOURCE,
+              }
+            );
+
+          if (result !== false) {
+            changed =
+              true;
+          }
+        }
+      } catch {}
+    }
+
+    try {
+      AppCore?.registry?.modules?.set?.(
+        cleanName,
+        api
+      );
+
+      changed =
+        true;
+    } catch {}
+
+    return changed;
+  }
+
   function registerModule() {
-    try {
-      if (
-        AppCore?.modules &&
-        typeof AppCore.modules.has === "function" &&
-        typeof AppCore.modules.register === "function"
-      ) {
-        if (!AppCore.modules.has("sidebar")) {
-          AppCore.modules.register("sidebar", api);
-        }
+    let changed =
+      false;
 
-        if (!AppCore.modules.has("SidebarUI")) {
-          AppCore.modules.register("SidebarUI", api);
-        }
-
-        return true;
+    for (const name of MODULE_NAMES) {
+      if (registerSingleModule(name)) {
+        changed =
+          true;
       }
-    } catch {}
+    }
 
-    try {
-      if (
-        AppCore?.modules &&
-        typeof AppCore.modules.register === "function"
-      ) {
-        AppCore.modules.register("sidebar", api);
-        AppCore.modules.register("SidebarUI", api);
-        return true;
-      }
-    } catch {}
-
-    try {
-      if (
-        AppCore?.modules &&
-        typeof AppCore.modules.set === "function"
-      ) {
-        AppCore.modules.set("sidebar", api);
-        AppCore.modules.set("SidebarUI", api);
-        return true;
-      }
-    } catch {}
-
-    try {
-      AppCore.modules = AppCore.modules || {};
-      AppCore.modules.sidebar = api;
-      AppCore.modules.SidebarUI = api;
-      return true;
-    } catch {}
-
-    return false;
+    return changed;
   }
 
   function exposeGlobalBridge() {
@@ -2141,8 +3041,16 @@ export const SidebarUI = (() => {
     }
 
     try {
-      window.SidebarUI = api;
-      window.OnionSidebarUI = api;
+      if (window.SidebarUI !== api) {
+        window.SidebarUI =
+          api;
+      }
+
+      if (window.OnionSidebarUI !== api) {
+        window.OnionSidebarUI =
+          api;
+      }
+
       return true;
     } catch {
       return false;
@@ -2153,20 +3061,46 @@ export const SidebarUI = (() => {
      INIT / DESTROY
   ====================================================== */
 
-  function init() {
+  function init(options = {}) {
+    const opts =
+      safeObject(options);
+
     if (initialized) {
       registerModule();
       exposeGlobalBridge();
 
-      return refresh("init-already-initialized");
+      if (!eventsBound) {
+        bindEvents(
+          "init-already-initialized",
+          {
+            force:
+              false,
+          }
+        );
+      }
+
+      return sync(
+        "init-already-initialized",
+        {
+          force:
+            opts.force === true,
+
+          emit:
+            false,
+        }
+      );
     }
 
     const {
       mounted,
-    } = mountAndRefresh("init");
+    } =
+      mountAndRefresh("init");
 
     if (!mounted) {
-      safeWarn("No se pudo montar sidebar.");
+      safeWarn(
+        "No se pudo montar sidebar."
+      );
+
       return api;
     }
 
@@ -2177,39 +3111,67 @@ export const SidebarUI = (() => {
     renderUser();
     applyRoleVisibility();
     repairDropdown("init");
+
     closeDropdown({
-      force: true,
-      reason: "init",
+      force:
+        true,
+
+      reason:
+        "init",
     });
 
-    initialized = true;
+    initialized =
+      true;
 
     registerModule();
     exposeGlobalBridge();
 
     bindEvents("init");
 
-    scheduleRouteAndIndicator("init", {
-      delayMs: INDICATOR_DELAY_INIT_MS,
-      force: true,
-    });
+    scheduleRouteAndIndicator(
+      "init",
+      {
+        delayMs:
+          INDICATOR_DELAY_INIT_MS,
+
+        force:
+          true,
+      }
+    );
 
     afterPaint(() => {
       ensureMenuInteractive("init:after-paint");
 
-      syncRouteAndIndicator("init:after-paint", {
-        delayMs: 0,
-        force: true,
-      });
+      syncRouteAndIndicator(
+        "init:after-paint",
+        {
+          delayMs:
+            0,
+
+          force:
+            true,
+        }
+      );
     });
 
-    safeEmit("sidebar:ready", {
-      initialized: true,
-      isAdmin: isAdmin(),
-      snapshot: getSidebarSnapshot(),
-    });
+    safeEmit(
+      "sidebar:ready",
+      {
+        initialized:
+          true,
 
-    safeLog("ready", getSidebarSnapshot());
+        isAdmin:
+          isAdmin(),
+
+        snapshot:
+          getSidebarSnapshot(),
+      }
+    );
+
+    safeLog(
+      "ready",
+      getSidebarSnapshot()
+    );
 
     return api;
   }
@@ -2217,22 +3179,44 @@ export const SidebarUI = (() => {
   function destroy() {
     cleanup();
 
-    initialized = false;
-    logoutInFlight = false;
-    runtimeState.dropdownOpen = false;
+    initialized =
+      false;
+
+    logoutInFlight =
+      false;
+
+    runtimeState.dropdownOpen =
+      false;
 
     bindGeneration += 1;
-    lastBindAt = 0;
-    lastBindReason = "";
 
-    lastRepairAt = 0;
-    lastRepairReason = "";
+    lastBindAt =
+      0;
+
+    lastBindReason =
+      "";
+
+    lastRepairAt =
+      0;
+
+    lastRepairReason =
+      "";
+
+    lastSyncAt =
+      0;
+
+    lastSyncReason =
+      "";
 
     ensureMenuInteractive("destroy");
 
-    safeEmit("sidebar:destroyed", {
-      initialized: false,
-    });
+    safeEmit(
+      "sidebar:destroyed",
+      {
+        initialized:
+          false,
+      }
+    );
 
     return api;
   }
@@ -2242,38 +3226,57 @@ export const SidebarUI = (() => {
   ====================================================== */
 
   function getSidebarSnapshot() {
-    const elements = getElements(AppCore);
+    const elements =
+      getElements(AppCore);
 
-    let mobile = false;
-    let open = true;
+    let mobile =
+      false;
+
+    let open =
+      true;
 
     try {
-      mobile = isMobileViewport(MOBILE_BREAKPOINT);
+      mobile =
+        isMobileViewport(MOBILE_BREAKPOINT);
     } catch {}
 
     try {
-      open = getDesiredSidebarOpenState(AppCore);
+      open =
+        getDesiredSidebarOpenState(AppCore);
     } catch {}
 
-    const activeItems = getAllMenuItems()
-      .filter((item) => {
-        return Boolean(
-          item.classList?.contains?.("active") ||
-            item.classList?.contains?.("is-active") ||
-            item.classList?.contains?.("router-active") ||
-            item.getAttribute?.("aria-current") === "page" ||
-            item.dataset?.active === "true"
-        );
-      })
-      .map((item) => ({
-        route: normalizeRoutePath(getRouteFromElement(item)),
-        rawRoute: getRouteFromElement(item),
-        text: safeText(item.textContent, ""),
-        hidden: Boolean(
-          item.hidden ||
-            item.closest?.("[hidden],[inert],[aria-hidden='true']")
-        ),
-      }));
+    const activeItems =
+      getAllMenuItems()
+        .filter((item) =>
+          Boolean(
+            item.classList?.contains?.("active") ||
+              item.classList?.contains?.("is-active") ||
+              item.classList?.contains?.("router-active") ||
+              item.getAttribute?.("aria-current") === "page" ||
+              item.dataset?.active === "true"
+          )
+        )
+        .map((item) => ({
+          route:
+            normalizeRoutePath(
+              getRouteFromElement(item)
+            ),
+
+          rawRoute:
+            getRouteFromElement(item),
+
+          text:
+            safeText(
+              item.textContent,
+              ""
+            ),
+
+          hidden:
+            Boolean(
+              item.hidden ||
+                item.closest?.("[hidden],[inert],[aria-hidden='true']")
+            ),
+        }));
 
     return {
       initialized,
@@ -2286,6 +3289,9 @@ export const SidebarUI = (() => {
 
       lastRepairAt,
       lastRepairReason,
+
+      lastSyncAt,
+      lastSyncReason,
 
       logoutInFlight,
 
@@ -2302,68 +3308,116 @@ export const SidebarUI = (() => {
           ? Boolean(AppCore.state.sidebarMobileOpen)
           : null,
 
-      dropdownOpen: Boolean(runtimeState.dropdownOpen),
+      dropdownOpen:
+        Boolean(runtimeState.dropdownOpen),
 
-      isAdmin: isAdmin(),
+      isAdmin:
+        isAdmin(),
 
-      shellHidden: (() => {
-        try {
-          return Boolean(isShellHidden(AppCore));
-        } catch {
-          return false;
-        }
-      })(),
-
-      realShellHidden: (() => {
-        try {
-          return Boolean(isRealShellHidden(AppCore));
-        } catch {
-          return false;
-        }
-      })(),
-
-      hasShell: (() => {
-        try {
-          return Boolean(hasSidebarShell(AppCore));
-        } catch {
-          return false;
-        }
-      })(),
-
-      route: {
-        browser: getBrowserPath(),
-        appRoute: AppCore?.state?.route || "",
-        appPublicPath: AppCore?.state?.publicPath || "",
-        appCanonicalPath: AppCore?.state?.canonicalPath || "",
-        routerPublicPath: (() => {
+      shellHidden:
+        (() => {
           try {
-            return Router?.getCurrentPublicPath?.() || "";
+            return Boolean(
+              isShellHidden(AppCore)
+            );
           } catch {
-            return "";
+            return false;
           }
         })(),
+
+      realShellHidden:
+        (() => {
+          try {
+            return Boolean(
+              isRealShellHidden(AppCore)
+            );
+          } catch {
+            return false;
+          }
+        })(),
+
+      hasShell:
+        (() => {
+          try {
+            return Boolean(
+              hasSidebarShell(AppCore)
+            );
+          } catch {
+            return false;
+          }
+        })(),
+
+      route: {
+        browser:
+          getBrowserPath(),
+
+        appRoute:
+          AppCore?.state?.route || "",
+
+        appPublicPath:
+          AppCore?.state?.publicPath || "",
+
+        appCanonicalPath:
+          AppCore?.state?.canonicalPath || "",
+
+        routerPublicPath:
+          (() => {
+            try {
+              return Router?.getCurrentPublicPath?.() || "";
+            } catch {
+              return "";
+            }
+          })(),
       },
 
       dom: {
-        hasSidebar: Boolean(elements.sidebar),
-        hasSidebarMenu: Boolean(elements.sidebarMenu),
-        hasToggle: Boolean(elements.toggleBtn),
-        hasMobileToggle: Boolean(elements.mobileToggleBtn),
-        hasUserToggle: Boolean(elements.userToggle),
-        hasUserDropdown: Boolean(elements.userDropdown),
-        hasLogout: Boolean(elements.logoutBtn),
+        hasSidebar:
+          Boolean(elements.sidebar),
 
-        sidebarHidden: Boolean(elements.sidebar?.hidden),
-        sidebarAriaHidden: elements.sidebar?.getAttribute?.("aria-hidden") || "",
-        sidebarClassName: elements.sidebar?.className || "",
+        hasSidebarMenu:
+          Boolean(elements.sidebarMenu),
 
-        sidebarMenuPointerEvents: elements.sidebarMenu?.style?.pointerEvents || "",
-        sidebarMenuInert: Boolean(elements.sidebarMenu?.hasAttribute?.("inert")),
-        sidebarMenuAriaDisabled: elements.sidebarMenu?.getAttribute?.("aria-disabled") || "",
+        hasToggle:
+          Boolean(elements.toggleBtn),
+
+        hasMobileToggle:
+          Boolean(elements.mobileToggleBtn),
+
+        hasUserToggle:
+          Boolean(elements.userToggle),
+
+        hasUserDropdown:
+          Boolean(elements.userDropdown),
+
+        hasLogout:
+          Boolean(elements.logoutBtn),
+
+        sidebarHidden:
+          Boolean(elements.sidebar?.hidden),
+
+        sidebarAriaHidden:
+          elements.sidebar?.getAttribute?.("aria-hidden") || "",
+
+        sidebarClassName:
+          elements.sidebar?.className || "",
+
+        sidebarMenuPointerEvents:
+          elements.sidebarMenu?.style?.pointerEvents || "",
+
+        sidebarMenuInert:
+          Boolean(elements.sidebarMenu?.hasAttribute?.("inert")),
+
+        sidebarMenuAriaDisabled:
+          elements.sidebarMenu?.getAttribute?.("aria-disabled") || "",
       },
 
       dropdown: {
-        ...safeObject(getDropdownSnapshot(AppCore, runtimeState)),
+        ...safeObject(
+          getDropdownSnapshot(
+            AppCore,
+            runtimeState
+          )
+        ),
       },
 
       activeRoute: {
@@ -2371,19 +3425,49 @@ export const SidebarUI = (() => {
       },
 
       indicator: {
-        ready: elements.sidebarMenu?.dataset?.indicatorReady || "",
-        reason: elements.sidebarMenu?.dataset?.indicatorReason || "",
-        route: elements.sidebarMenu?.dataset?.indicatorRoute || "",
-        current: elements.sidebarMenu?.dataset?.indicatorCurrent || "",
+        ready:
+          elements.sidebarMenu?.dataset?.indicatorReady || "",
 
-        x: elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
-        y: elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-y") || "",
-        w: elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-w") || "",
-        h: elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-h") || "",
-        opacity: elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-opacity") || "",
+        reason:
+          elements.sidebarMenu?.dataset?.indicatorReason || "",
+
+        route:
+          elements.sidebarMenu?.dataset?.indicatorRoute || "",
+
+        current:
+          elements.sidebarMenu?.dataset?.indicatorCurrent || "",
+
+        x:
+          elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
+
+        y:
+          elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-y") || "",
+
+        w:
+          elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-w") || "",
+
+        h:
+          elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-h") || "",
+
+        opacity:
+          elements.sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-opacity") || "",
       },
 
-      actions: safeObject(getSidebarActionsSnapshot()),
+      modules: {
+        sidebar:
+          getRegisteredModule("sidebar") === api,
+
+        SidebarUI:
+          getRegisteredModule("SidebarUI") === api,
+
+        sidebarUI:
+          getRegisteredModule("sidebarUI") === api,
+      },
+
+      actions:
+        safeObject(
+          getSidebarActionsSnapshot()
+        ),
     };
   }
 
@@ -2391,10 +3475,17 @@ export const SidebarUI = (() => {
     refreshSidebarDomRefs();
     ensureMenuInteractive("debug-dropdown");
 
-    const snapshot = getDropdownSnapshot(AppCore, runtimeState);
+    const snapshot =
+      getDropdownSnapshot(
+        AppCore,
+        runtimeState
+      );
 
     try {
-      console.log("[SidebarUI:dropdown]", snapshot);
+      console.log(
+        "[SidebarUI:dropdown]",
+        snapshot
+      );
     } catch {}
 
     return snapshot;
@@ -2404,66 +3495,121 @@ export const SidebarUI = (() => {
     refreshSidebarDomRefs();
     ensureMenuInteractive("debug-indicator");
 
-    const payload = resolveRoutePayload({
-      reason: "debug-indicator",
-      force: true,
-    });
+    const payload =
+      resolveRoutePayload({
+        reason:
+          "debug-indicator",
 
-    const activeItem = syncActiveMenuItem(
-      AppCore,
-      {
-        ...payload,
-        reason: "debug-indicator",
-        mutate: false,
-      }
-    );
+        force:
+          true,
+      });
+
+    const activeItem =
+      syncActiveMenuItem(
+        AppCore,
+        {
+          ...payload,
+
+          reason:
+            "debug-indicator",
+
+          mutate:
+            false,
+        }
+      );
 
     const {
       sidebarMenu,
-    } = getElements(AppCore);
+    } =
+      getElements(AppCore);
 
     const snapshot = {
-      route: payload.route,
-      browserRoute: getBrowserPath(),
+      route:
+        payload.route,
 
-      hasSidebarMenu: Boolean(sidebarMenu),
-      hasActiveItem: Boolean(activeItem),
+      browserRoute:
+        getBrowserPath(),
 
-      activeRoute: activeItem
-        ? normalizeRoutePath(getRouteFromElement(activeItem))
-        : "",
+      hasSidebarMenu:
+        Boolean(sidebarMenu),
 
-      activeText: safeText(activeItem?.textContent, ""),
+      hasActiveItem:
+        Boolean(activeItem),
 
-      indicatorReady: sidebarMenu?.dataset?.indicatorReady || "",
-      indicatorReason: sidebarMenu?.dataset?.indicatorReason || "",
-      indicatorRoute: sidebarMenu?.dataset?.indicatorRoute || "",
-      indicatorCurrent: sidebarMenu?.dataset?.indicatorCurrent || "",
+      activeRoute:
+        activeItem
+          ? normalizeRoutePath(
+              getRouteFromElement(activeItem)
+            )
+          : "",
+
+      activeText:
+        safeText(
+          activeItem?.textContent,
+          ""
+        ),
+
+      indicatorReady:
+        sidebarMenu?.dataset?.indicatorReady || "",
+
+      indicatorReason:
+        sidebarMenu?.dataset?.indicatorReason || "",
+
+      indicatorRoute:
+        sidebarMenu?.dataset?.indicatorRoute || "",
+
+      indicatorCurrent:
+        sidebarMenu?.dataset?.indicatorCurrent || "",
 
       variables: {
-        x: sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
-        y: sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-y") || "",
-        w: sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-w") || "",
-        h: sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-h") || "",
-        opacity: sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-opacity") || "",
+        x:
+          sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-x") || "",
+
+        y:
+          sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-y") || "",
+
+        w:
+          sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-w") || "",
+
+        h:
+          sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-h") || "",
+
+        opacity:
+          sidebarMenu?.style?.getPropertyValue?.("--sidebar-indicator-opacity") || "",
       },
 
-      menuItems: getAllMenuItems().map((item) => ({
-        route: normalizeRoutePath(getRouteFromElement(item)),
-        rawRoute: getRouteFromElement(item),
-        text: safeText(item.textContent, ""),
-        active: Boolean(
-          item.classList?.contains?.("active") ||
-            item.classList?.contains?.("is-active") ||
-            item.classList?.contains?.("router-active") ||
-            item.getAttribute?.("aria-current") === "page" ||
-            item.dataset?.active === "true"
-        ),
-      })),
+      menuItems:
+        getAllMenuItems().map((item) => ({
+          route:
+            normalizeRoutePath(
+              getRouteFromElement(item)
+            ),
+
+          rawRoute:
+            getRouteFromElement(item),
+
+          text:
+            safeText(
+              item.textContent,
+              ""
+            ),
+
+          active:
+            Boolean(
+              item.classList?.contains?.("active") ||
+                item.classList?.contains?.("is-active") ||
+                item.classList?.contains?.("router-active") ||
+                item.getAttribute?.("aria-current") === "page" ||
+                item.dataset?.active === "true"
+            ),
+        })),
     };
 
     try {
-      console.log("[SidebarUI:indicator]", snapshot);
+      console.log(
+        "[SidebarUI:indicator]",
+        snapshot
+      );
     } catch {}
 
     return snapshot;
@@ -2473,10 +3619,14 @@ export const SidebarUI = (() => {
     refreshSidebarDomRefs();
     ensureMenuInteractive("debug");
 
-    const snapshot = getSidebarSnapshot();
+    const snapshot =
+      getSidebarSnapshot();
 
     try {
-      console.log("[SidebarUI]", snapshot);
+      console.log(
+        "[SidebarUI]",
+        snapshot
+      );
     } catch {}
 
     return snapshot;
@@ -2491,15 +3641,20 @@ export const SidebarUI = (() => {
     destroy,
     cleanup,
 
+    sync,
+    render:
+      sync,
+
     refresh,
     repair,
     scheduleRepair,
 
-    sync: refresh,
-    render: refresh,
+    bind:
+      bindEvents,
 
-    bind: bindEvents,
-    rebind: rebindEvents,
+    rebind:
+      rebindEvents,
+
     bindEvents,
     rebindEvents,
 
@@ -2525,33 +3680,49 @@ export const SidebarUI = (() => {
     closeSidebarOnMobileAfterNavigation,
 
     navigateTo,
-    navigate: navigateTo,
+    navigate:
+      navigateTo,
 
     handleLogout,
 
-    updateToggleLabel: () => updateToggleLabel(AppCore),
+    updateToggleLabel:
+      () => updateToggleLabel(AppCore),
 
     syncRouteAndIndicator,
 
-    syncIndicator: (reason = "api:syncIndicator") =>
-      scheduleRouteAndIndicator(reason, {
-        delayMs: 0,
-        force: true,
-      }),
+    syncIndicator:
+      (reason = "api:syncIndicator") =>
+        scheduleRouteAndIndicator(
+          reason,
+          {
+            delayMs:
+              0,
 
-    scheduleIndicatorSync: scheduleRouteAndIndicator,
+            force:
+              true,
+          }
+        ),
+
+    scheduleIndicatorSync:
+      scheduleRouteAndIndicator,
 
     ensureMenuInteractive,
     sanitizeSidebarDom,
 
     isAdmin,
 
+    registerModule,
+    exposeGlobalBridge,
+
     debug,
     debugDropdown,
     debugIndicator,
 
-    getSnapshot: getSidebarSnapshot,
-    getState: getSidebarSnapshot,
+    getSnapshot:
+      getSidebarSnapshot,
+
+    getState:
+      getSidebarSnapshot,
 
     get initialized() {
       return initialized;
@@ -2559,6 +3730,10 @@ export const SidebarUI = (() => {
 
     get eventsBound() {
       return eventsBound;
+    },
+
+    get bindingEvents() {
+      return bindingEvents;
     },
 
     get logoutInFlight() {

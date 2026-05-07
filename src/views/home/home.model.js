@@ -2,61 +2,78 @@
    Onion SPA - Home Model
    Archivo: src/views/home/home.model.js
 
-   FINAL PRO SYSTEM · DASHBOARD MODEL · 10/10
+   ONION SUPPORT · HOME MODEL
+   DATA NORMALIZATION · VIEW MODEL · PAGINATION · ALIASES · 10/10
 
    RESPONSABILIDADES:
-   - normalizar payloads heterogéneos backend/store del dashboard
-   - exponer modelo consistente Dashboard / Widget
-   - labels de estado / tipo
-   - flags computados
-   - icon / initials / theme
-   - fechas base
-   - collections helpers
-   - sorting helpers
-   - stats helpers
-   - defensive parsing enterprise ready
+   - Normalizar dashboard del Home.
+   - Normalizar tickets/incidencias.
+   - Normalizar facturas/invoices.
+   - Normalizar usuarios.
+   - Normalizar clientes.
+   - Normalizar actividad reciente.
+   - Normalizar widgets/KPIs.
+   - Construir summary estable para user/admin.
+   - Separar total real vs visibleCount.
+   - Mantener aliases backend/frontend.
+   - Preparar payload estable para home.template.js.
+   - Paginación fija/parametrizable.
+   - Buscar tickets/widgets por múltiples IDs.
+   - Ordenar incidencias por fecha reciente.
+   - No tocar DOM.
+   - No hacer HTTP.
+   - No importar AppCore.
+   - No CSS.
+   - No side effects.
 
-   USO:
-   import {
-     normalizeHomeDashboardModel,
-     normalizeHomeWidgetModel,
-     normalizeHomeWidgetsCollection,
-     computeHomeWidgetsStats
-   } from "./home.model.js";
+   REGLA CRÍTICA:
+   - total/count = contador agregado real.
+   - visibleCount = longitud de array renderizable.
+   - Nunca pisar contador real con array vacío.
 ========================================================= */
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
-export const DEFAULT_PAGE_SIZE = 6;
-export const MAX_UNWRAP_DEPTH = 8;
+export const HOME_MODEL_VERSION =
+  "10.0.0";
 
-export const WIDGET_STATUS = Object.freeze({
-  ACTIVE: "active",
-  WARNING: "warning",
-  ERROR: "error",
-  DISABLED: "disabled",
-});
+export const HOME_DEFAULT_PAGE_SIZE =
+  5;
 
-export const WIDGET_TYPE = Object.freeze({
-  KPI: "kpi",
-  METRIC: "metric",
-  LIST: "list",
-  TABLE: "table",
-  ACTIVITY: "activity",
-  SHORTCUT: "shortcut",
-  WIDGET: "widget",
-});
+export const HOME_ROUTES =
+  Object.freeze({
+    HOME:
+      "/",
 
-const EMPTY_DASHBOARD = Object.freeze({
-  summary: {},
-  widgets: [],
-  recent: [],
-});
+    INCIDENCIAS:
+      "/incidencias",
+
+    FACTURAS:
+      "/facturas",
+
+    USUARIOS:
+      "/usuarios",
+
+    CLIENTES:
+      "/clientes",
+
+    CUENTA:
+      "/cuenta",
+
+    AJUSTES:
+      "/ajustes",
+  });
+
+const EMPTY_DASHBOARD =
+  Object.freeze({});
+
+const EMPTY_ARRAY =
+  Object.freeze([]);
 
 /* =========================================================
-   SAFE CORE
+   SAFE HELPERS
 ========================================================= */
 
 function isObject(value) {
@@ -67,23 +84,16 @@ function isObject(value) {
   );
 }
 
-function isBlank(value) {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return true;
-  }
+function safeObject(value, fallback = {}) {
+  return isObject(value)
+    ? value
+    : fallback;
+}
 
-  if (typeof value === "string") {
-    return value.trim() === "";
-  }
-
-  if (Array.isArray(value)) {
-    return value.length === 0;
-  }
-
-  return false;
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
 function safeText(value, fallback = "") {
@@ -94,7 +104,11 @@ function safeText(value, fallback = "") {
     return fallback;
   }
 
-  const text = String(value).trim();
+  const text =
+    String(value)
+      .replace(/[\r\n\t]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
 
   return text || fallback;
 }
@@ -108,556 +122,2858 @@ function safeNumber(value, fallback = 0) {
     return fallback;
   }
 
-  const n = Number(value);
+  if (typeof value === "string") {
+    let normalized =
+      value
+        .trim()
+        .replace(/€/g, "")
+        .replace(/\$/g, "")
+        .replace(/£/g, "")
+        .replace(/%/g, "")
+        .replace(/[^\d.,+\-\s]/g, "")
+        .replace(/\s/g, "");
 
-  return Number.isFinite(n)
-    ? n
-    : fallback;
-}
+    const hasComma =
+      normalized.includes(",");
 
-function safeFiniteNumber(value, fallback = null) {
-  if (
-    value === null ||
-    value === undefined ||
-    value === ""
-  ) {
-    return fallback;
+    const hasDot =
+      normalized.includes(".");
+
+    if (
+      hasComma &&
+      hasDot
+    ) {
+      const lastComma =
+        normalized.lastIndexOf(",");
+
+      const lastDot =
+        normalized.lastIndexOf(".");
+
+      normalized =
+        lastComma > lastDot
+          ? normalized
+              .replace(/\./g, "")
+              .replace(/,/g, ".")
+          : normalized
+              .replace(/,/g, "");
+    } else if (hasComma) {
+      normalized =
+        normalized.replace(/,/g, ".");
+    }
+
+    const parsed =
+      Number(normalized);
+
+    return Number.isFinite(parsed)
+      ? parsed
+      : fallback;
   }
 
-  const n = Number(value);
+  const number =
+    Number(value);
 
-  return Number.isFinite(n)
-    ? n
+  return Number.isFinite(number)
+    ? number
     : fallback;
 }
 
-function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+function toFiniteNumber(value = null) {
+  const number =
+    safeNumber(value, NaN);
+
+  return Number.isFinite(number)
+    ? number
+    : null;
 }
 
-function safeObject(value) {
-  return isObject(value)
-    ? value
-    : {};
+function safeBoolean(value, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === "string") {
+    const key =
+      value.trim().toLowerCase();
+
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "si",
+        "sí",
+        "on",
+        "ok",
+      ].includes(key)
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "off",
+      ].includes(key)
+    ) {
+      return false;
+    }
+  }
+
+  return Boolean(fallback);
+}
+
+function hasOwnKeys(value = {}) {
+  return Boolean(
+    isObject(value) &&
+    Object.keys(value).length > 0
+  );
+}
+
+function isMeaningful(value) {
+  if (
+    value === undefined ||
+    value === null
+  ) {
+    return false;
+  }
+
+  if (
+    typeof value === "string" &&
+    value.trim() === ""
+  ) {
+    return false;
+  }
+
+  if (
+    Array.isArray(value) &&
+    value.length === 0
+  ) {
+    return false;
+  }
+
+  if (
+    isObject(value) &&
+    Object.keys(value).length === 0
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 function first(...values) {
   for (const value of values) {
-    if (isBlank(value)) {
-      continue;
+    if (isMeaningful(value)) {
+      return value;
     }
-
-    return value;
   }
 
   return null;
 }
 
-function unique(values = []) {
-  return Array.from(
-    new Set(
-      safeArray(values)
-        .map((value) => safeText(value, ""))
-        .filter(Boolean)
-    )
-  );
-}
-
-function normalizeKey(value = "") {
+function normalizeText(value = "") {
   return safeText(value, "")
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[\s-]+/g, "_")
-    .replace(/[^a-z0-9_:.]/g, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
-function stableCompareByString(a = "", b = "") {
-  return safeText(a, "").localeCompare(
-    safeText(b, ""),
-    "es",
-    {
-      sensitivity: "base",
-      numeric: true,
-    }
-  );
+function normalizeKey(value = "") {
+  return normalizeText(value)
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_:.]/g, "")
+    .replace(/^_+|_+$/g, "");
 }
 
-/* =========================================================
-   IDS / HASH
-========================================================= */
-
-function hashString(value = "") {
-  const str = safeText(value, "onion");
-  let hash = 0;
-
-  for (let i = 0; i < str.length; i += 1) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0;
-  }
-
-  return Math.abs(hash);
-}
-
-function resolveEntityId(value = {}) {
-  const item = safeObject(value);
-
-  return safeText(
-    first(
-      item.widgetId,
-      item.id,
-      item.key,
-      item.slug,
-      item.code,
-      item.uuid,
-      item._id
+function uniqueStrings(values = []) {
+  return [
+    ...new Set(
+      safeArray(values)
+        .flatMap((value) =>
+          Array.isArray(value)
+            ? value
+            : [value]
+        )
+        .map((value) =>
+          safeText(value, "")
+        )
+        .filter(Boolean)
     ),
-    ""
-  );
+  ];
 }
 
-/* =========================================================
-   LABEL MAPS
-========================================================= */
+function uniqueBy(items = [], picker = (item) => item) {
+  const seen =
+    new Set();
 
-export function normalizeWidgetStatus(value = "") {
-  const key = normalizeKey(value);
+  const output =
+    [];
 
-  switch (key) {
-    case "active":
-    case "ok":
-    case "ready":
-    case "enabled":
-    case "healthy":
-    case "success":
-    case "online":
-    case "up":
-    case "completed":
-    case "complete":
-    case "done":
-      return WIDGET_STATUS.ACTIVE;
+  for (const item of safeArray(items)) {
+    const key =
+      safeText(picker(item), "");
 
-    case "warning":
-    case "warn":
-    case "pending":
-    case "degraded":
-    case "attention":
-    case "review":
-    case "queued":
-    case "in_progress":
-    case "progress":
-      return WIDGET_STATUS.WARNING;
+    if (!key) {
+      output.push(item);
+      continue;
+    }
 
-    case "error":
-    case "critical":
-    case "down":
-    case "failed":
-    case "failure":
-    case "danger":
-    case "offline":
-    case "ko":
-      return WIDGET_STATUS.ERROR;
+    const normalized =
+      normalizeKey(key);
 
-    case "disabled":
-    case "off":
-    case "inactive":
-    case "archived":
-    case "deleted":
-    case "blocked":
-      return WIDGET_STATUS.DISABLED;
+    if (seen.has(normalized)) {
+      continue;
+    }
 
-    default:
-      return WIDGET_STATUS.ACTIVE;
+    seen.add(normalized);
+    output.push(item);
   }
+
+  return output;
 }
 
-export function normalizeWidgetType(value = "") {
-  const key = normalizeKey(value);
+function getPath(object = {}, path = "") {
+  const root =
+    safeObject(object, null);
 
-  switch (key) {
-    case "kpi":
-    case "stat":
-    case "stats":
-    case "counter":
-      return WIDGET_TYPE.KPI;
+  const cleanPath =
+    safeText(path, "");
 
-    case "metric":
-    case "metrics":
-    case "number":
-    case "amount":
-      return WIDGET_TYPE.METRIC;
-
-    case "list":
-    case "collection":
-    case "items":
-      return WIDGET_TYPE.LIST;
-
-    case "table":
-    case "grid":
-    case "rows":
-      return WIDGET_TYPE.TABLE;
-
-    case "activity":
-    case "timeline":
-    case "recent":
-    case "recent_activity":
-    case "log":
-    case "events":
-      return WIDGET_TYPE.ACTIVITY;
-
-    case "shortcut":
-    case "action":
-    case "quick_action":
-    case "quick":
-    case "link":
-    case "cta":
-      return WIDGET_TYPE.SHORTCUT;
-
-    default:
-      return WIDGET_TYPE.WIDGET;
+  if (
+    !root ||
+    !cleanPath
+  ) {
+    return undefined;
   }
+
+  return cleanPath
+    .split(".")
+    .reduce((acc, segment) => {
+      if (
+        acc === null ||
+        acc === undefined
+      ) {
+        return undefined;
+      }
+
+      return acc?.[segment];
+    }, root);
 }
 
-export function getWidgetStatusLabel(value = "") {
-  switch (normalizeWidgetStatus(value)) {
-    case WIDGET_STATUS.ACTIVE:
-      return "Activo";
+function pickFirstFromSources(keys = [], sources = [], fallback = null) {
+  for (const source of safeArray(sources)) {
+    const object =
+      safeObject(source, null);
 
-    case WIDGET_STATUS.WARNING:
-      return "Atención";
+    if (!object) {
+      continue;
+    }
 
-    case WIDGET_STATUS.ERROR:
-      return "Error";
+    for (const key of safeArray(keys)) {
+      const value =
+        key.includes(".")
+          ? getPath(object, key)
+          : object?.[key];
 
-    case WIDGET_STATUS.DISABLED:
-      return "Desactivado";
-
-    default:
-      return "Activo";
+      if (isMeaningful(value)) {
+        return value;
+      }
+    }
   }
+
+  return fallback;
 }
 
-export function getWidgetTypeLabel(value = "") {
-  switch (normalizeWidgetType(value)) {
-    case WIDGET_TYPE.KPI:
-      return "KPI";
+function pickMaxFromSources(keys = [], sources = [], fallback = 0) {
+  let max =
+    null;
 
-    case WIDGET_TYPE.METRIC:
-      return "Métrica";
+  for (const source of safeArray(sources)) {
+    const object =
+      safeObject(source, null);
 
-    case WIDGET_TYPE.LIST:
-      return "Lista";
+    if (!object) {
+      continue;
+    }
 
-    case WIDGET_TYPE.TABLE:
-      return "Tabla";
+    for (const key of safeArray(keys)) {
+      const value =
+        key.includes(".")
+          ? getPath(object, key)
+          : object?.[key];
 
-    case WIDGET_TYPE.ACTIVITY:
-      return "Actividad";
+      const number =
+        toFiniteNumber(value);
 
-    case WIDGET_TYPE.SHORTCUT:
-      return "Acceso rápido";
+      if (number === null) {
+        continue;
+      }
 
-    case WIDGET_TYPE.WIDGET:
-      return "Widget";
-
-    default:
-      return "Widget";
+      max =
+        max === null
+          ? number
+          : Math.max(max, number);
+    }
   }
+
+  return max === null
+    ? fallback
+    : max;
 }
 
-/* =========================================================
-   DATES
-========================================================= */
-
-export function toDate(value = null) {
+function parseDateMs(value = null) {
   if (
     value === null ||
     value === undefined ||
     value === ""
   ) {
+    return 0;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value)
+      ? value
+      : 0;
+  }
+
+  try {
+    const time =
+      new Date(value).getTime();
+
+    return Number.isFinite(time)
+      ? time
+      : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function toIsoDate(value = null) {
+  const ms =
+    parseDateMs(value);
+
+  if (!ms) {
     return null;
   }
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
     return null;
   }
-
-  return date;
 }
 
-export function toTimestamp(value = null) {
-  const date = toDate(value);
-
-  return date
-    ? date.getTime()
-    : 0;
-}
-
-export function normalizeDateValue(...values) {
-  return first(...values);
+function nowIso() {
+  try {
+    return new Date().toISOString();
+  } catch {
+    return String(Date.now());
+  }
 }
 
 /* =========================================================
-   INITIALS / THEME
+   ENVELOPE / DASHBOARD DETECTION
 ========================================================= */
 
-export function getInitials(value = "") {
-  const text = safeText(value, "ON");
-  const parts = text
-    .split(/\s+/)
-    .filter(Boolean);
+function looksLikeDashboard(value = null) {
+  const object =
+    safeObject(value, null);
 
-  if (!parts.length) {
-    return "ON";
+  if (!object) {
+    return false;
   }
 
-  const initials = parts
-    .slice(0, 2)
-    .map((part) => part[0] || "")
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-
-  return initials || "ON";
-}
-
-export function getWidgetTheme(seed = "") {
-  const themes = [
-    "violet",
-    "emerald",
-    "blue",
-    "amber",
-    "rose",
-    "purple",
-    "cyan",
-    "orange",
-  ];
-
-  return themes[
-    hashString(seed) % themes.length
-  ];
-}
-
-/* =========================================================
-   TAGS
-========================================================= */
-
-function normalizeTagEntry(value = "") {
-  if (isObject(value)) {
-    return safeText(
-      first(
-        value.label,
-        value.name,
-        value.title,
-        value.key,
-        value.id
-      ),
-      ""
-    );
-  }
-
-  return safeText(value, "");
-}
-
-function normalizeTags(value = null) {
-  if (Array.isArray(value)) {
-    return unique(
-      value
-        .map(normalizeTagEntry)
-        .filter(Boolean)
-    );
-  }
-
-  if (typeof value === "string") {
-    return unique(
-      value
-        .split(/[,\|]/g)
-        .map((tag) => safeText(tag, ""))
-        .filter(Boolean)
-    );
-  }
-
-  return [];
-}
-
-/* =========================================================
-   RECENT / ACTIVITY
-========================================================= */
-
-function normalizeRecentEntry(row = {}) {
-  const item =
-    isObject(row)
-      ? row
-      : {
-          title: row,
-        };
-
-  const createdAt = normalizeDateValue(
-    item.createdAt,
-    item.updatedAt,
-    item.date,
-    item.timestamp,
-    item.time
+  return Boolean(
+    "summary" in object ||
+      "stats" in object ||
+      "metrics" in object ||
+      "totals" in object ||
+      "counts" in object ||
+      "widgets" in object ||
+      "cards" in object ||
+      "kpis" in object ||
+      "tickets" in object ||
+      "incidencias" in object ||
+      "facturas" in object ||
+      "invoices" in object ||
+      "users" in object ||
+      "usuarios" in object ||
+      "clients" in object ||
+      "clientes" in object ||
+      "customers" in object ||
+      "activity" in object ||
+      "activities" in object ||
+      "recent" in object ||
+      "recentActivity" in object ||
+      "collections" in object ||
+      "resources" in object ||
+      "totalTickets" in object ||
+      "ticketsTotal" in object ||
+      "incidenciasTotal" in object ||
+      "totalInvoices" in object ||
+      "facturasTotal" in object ||
+      "usersCount" in object ||
+      "usuariosCount" in object ||
+      "clientsCount" in object ||
+      "clientesCount" in object
   );
+}
+
+function unwrapEnvelope(payload = null, depth = 0) {
+  if (
+    payload === null ||
+    payload === undefined
+  ) {
+    return null;
+  }
+
+  if (depth > 12) {
+    return payload;
+  }
+
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (looksLikeDashboard(payload)) {
+    return payload;
+  }
+
+  const object =
+    safeObject(payload, null);
+
+  if (!object) {
+    return payload;
+  }
+
+  const candidates = [
+    object.dashboard,
+    object.data,
+    object.result,
+    object.payload,
+    object.body,
+    object.response,
+    object.item,
+    object.content,
+  ];
+
+  for (const candidate of candidates) {
+    if (
+      candidate === undefined ||
+      candidate === null
+    ) {
+      continue;
+    }
+
+    const unwrapped =
+      unwrapEnvelope(
+        candidate,
+        depth + 1
+      );
+
+    if (
+      unwrapped !== undefined &&
+      unwrapped !== null
+    ) {
+      return unwrapped;
+    }
+  }
+
+  return object;
+}
+
+function pickDashboard(payload = null) {
+  if (looksLikeDashboard(payload)) {
+    return safeObject(payload, {});
+  }
+
+  const object =
+    safeObject(payload, null);
+
+  const candidates = [
+    payload,
+
+    object?.dashboard,
+    object?.data?.dashboard,
+    object?.payload?.dashboard,
+    object?.result?.dashboard,
+    object?.response?.dashboard,
+
+    object?.data,
+    object?.payload,
+    object?.result,
+    object?.response,
+    object?.body,
+  ];
+
+  for (const candidate of candidates) {
+    if (looksLikeDashboard(candidate)) {
+      return safeObject(candidate, {});
+    }
+
+    const unwrapped =
+      unwrapEnvelope(candidate);
+
+    if (looksLikeDashboard(unwrapped)) {
+      return safeObject(unwrapped, {});
+    }
+  }
+
+  const fallback =
+    unwrapEnvelope(payload);
+
+  return safeObject(fallback, {});
+}
+
+/* =========================================================
+   COLLECTION NORMALIZATION
+========================================================= */
+
+function normalizeCollectionSource(value = null, fallbackKeys = []) {
+  if (Array.isArray(value)) {
+    return {
+      items:
+        value,
+
+      total:
+        value.length,
+
+      visibleCount:
+        value.length,
+
+      raw:
+        value,
+    };
+  }
+
+  const object =
+    safeObject(value, null);
+
+  if (!object) {
+    return {
+      items:
+        [],
+
+      total:
+        0,
+
+      visibleCount:
+        0,
+
+      raw:
+        value,
+    };
+  }
+
+  const directItems =
+    first(
+      object.items,
+      object.rows,
+      object.records,
+      object.results,
+      object.data,
+      object.docs,
+      object.value,
+      object.documents,
+      object.collection,
+      object.list
+    );
+
+  let items =
+    safeArray(directItems);
+
+  if (!items.length) {
+    for (const key of safeArray(fallbackKeys)) {
+      const candidate =
+        object?.[key];
+
+      if (Array.isArray(candidate)) {
+        items =
+          candidate;
+        break;
+      }
+
+      if (hasOwnKeys(candidate)) {
+        const nested =
+          normalizeCollectionSource(
+            candidate,
+            fallbackKeys
+          );
+
+        if (
+          nested.items.length ||
+          nested.total > 0
+        ) {
+          items =
+            nested.items;
+          break;
+        }
+      }
+    }
+  }
+
+  const total =
+    Math.max(
+      items.length,
+      safeNumber(
+        first(
+          object.total,
+          object.count,
+          object.remoteCount,
+          object.totalCount,
+          object.length,
+
+          object.meta?.total,
+          object.meta?.count,
+          object.meta?.remoteCount,
+          object.meta?.totalCount,
+
+          object.pagination?.total,
+          object.pagination?.count,
+          object.pagination?.remoteCount,
+          object.pagination?.totalCount,
+
+          object.page?.total,
+          object.pageInfo?.total,
+          object.pageInfo?.totalCount,
+
+          items.length
+        ),
+        items.length
+      )
+    );
 
   return {
-    id: safeText(
-      first(
-        item.id,
-        item.eventId,
-        item.code,
-        item.key
-      ),
-      ""
-    ),
+    items,
+    total,
+    visibleCount:
+      items.length,
 
-    title: safeText(
-      first(
-        item.title,
-        item.action,
-        item.message,
-        item.text,
-        item.name,
-        row
-      ),
-      "Evento"
-    ),
+    raw:
+      value,
+  };
+}
 
-    description: safeText(
-      first(
-        item.description,
-        item.subtitle,
-        item.summary,
-        item.preview
-      ),
-      ""
-    ),
+function getCollectionSources(source = {}) {
+  const raw =
+    safeObject(source);
 
-    status: safeText(
-      first(
-        item.status,
-        item.state,
-        item.severity
-      ),
-      ""
-    ),
+  return [
+    raw,
 
-    route: safeText(
-      first(
-        item.route,
-        item.href,
-        item.link,
-        item.to
-      ),
-      ""
+    raw.collections,
+    raw.resources,
+
+    raw.dashboard,
+    raw.summary,
+    raw.stats,
+    raw.metrics,
+    raw.totals,
+    raw.counts,
+
+    raw.data,
+    raw.payload,
+    raw.result,
+    raw.response,
+    raw.body,
+
+    raw.data?.collections,
+    raw.data?.resources,
+
+    raw.payload?.collections,
+    raw.payload?.resources,
+
+    raw.result?.collections,
+    raw.result?.resources,
+
+    raw.response?.collections,
+    raw.response?.resources,
+
+    raw.dashboard?.collections,
+    raw.dashboard?.resources,
+  ].filter(hasOwnKeys);
+}
+
+function pickCollectionBlock(source = {}, keys = []) {
+  const aliases =
+    safeArray(keys);
+
+  const sources =
+    getCollectionSources(source);
+
+  for (const candidateSource of sources) {
+    for (const key of aliases) {
+      const direct =
+        candidateSource?.[key];
+
+      if (Array.isArray(direct)) {
+        return normalizeCollectionSource(
+          direct,
+          aliases
+        );
+      }
+
+      if (hasOwnKeys(direct)) {
+        const normalized =
+          normalizeCollectionSource(
+            direct,
+            aliases
+          );
+
+        if (
+          normalized.items.length ||
+          normalized.total > 0
+        ) {
+          return normalized;
+        }
+      }
+    }
+  }
+
+  return {
+    items:
+      [],
+
+    total:
+      0,
+
+    visibleCount:
+      0,
+
+    raw:
+      null,
+  };
+}
+
+function mergeCollectionBlocks(primary = {}, fallback = {}) {
+  const primaryItems =
+    safeArray(primary.items);
+
+  const fallbackItems =
+    safeArray(fallback.items);
+
+  const items =
+    primaryItems.length
+      ? primaryItems
+      : fallbackItems;
+
+  const total =
+    Math.max(
+      items.length,
+      safeNumber(primary.total, 0),
+      safeNumber(fallback.total, 0)
+    );
+
+  return {
+    items,
+    total,
+    visibleCount:
+      items.length,
+
+    raw:
+      primary.raw || fallback.raw || null,
+  };
+}
+
+export function buildHomeCollectionEnvelope(items = [], total = null) {
+  const rows =
+    safeArray(items);
+
+  const finalTotal =
+    Math.max(
+      rows.length,
+      safeNumber(total, rows.length)
+    );
+
+  return {
+    items:
+      rows,
+
+    rows:
+      rows,
+
+    data:
+      rows,
+
+    results:
+      rows,
+
+    total:
+      finalTotal,
+
+    count:
+      rows.length,
+
+    totalCount:
+      finalTotal,
+
+    remoteCount:
+      finalTotal,
+
+    visibleCount:
+      rows.length,
+  };
+}
+
+/* =========================================================
+   TICKETS / INCIDENCIAS
+========================================================= */
+
+export function getHomeTicketId(item = {}) {
+  if (
+    typeof item === "string" ||
+    typeof item === "number"
+  ) {
+    return safeText(item, "");
+  }
+
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  return safeText(
+    first(
+      raw.ticketId,
+      raw.incidenciaId,
+      raw.id,
+      raw._id,
+      raw.code,
+      raw.numero,
+      raw.ticketCode,
+      raw.entityId,
+
+      base.ticketId,
+      base.incidenciaId,
+      base.id,
+      base._id,
+      base.code,
+      base.numero,
+      base.ticketCode,
+      base.entityId
     ),
+    ""
+  );
+}
+
+export function getHomeTicketAliases(item = {}) {
+  if (
+    typeof item === "string" ||
+    typeof item === "number"
+  ) {
+    return [
+      safeText(item, ""),
+    ].filter(Boolean);
+  }
+
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  return uniqueStrings([
+    raw.ticketId,
+    raw.incidenciaId,
+    raw.id,
+    raw._id,
+    raw.code,
+    raw.numero,
+    raw.ticketCode,
+    raw.entityId,
+
+    base.ticketId,
+    base.incidenciaId,
+    base.id,
+    base._id,
+    base.code,
+    base.numero,
+    base.ticketCode,
+    base.entityId,
+  ]);
+}
+
+export function getHomeTicketSubject(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  return safeText(
+    first(
+      raw.subject,
+      raw.title,
+      raw.asunto,
+      raw.name,
+      raw.preview,
+
+      base.subject,
+      base.title,
+      base.asunto,
+      base.name,
+      base.preview
+    ),
+    "Incidencia sin asunto"
+  );
+}
+
+export function getHomeTicketDescription(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  return safeText(
+    first(
+      raw.description,
+      raw.descripcion,
+      raw.message,
+      raw.preview,
+      raw.body,
+      raw.text,
+
+      base.description,
+      base.descripcion,
+      base.message,
+      base.preview,
+      base.body,
+      base.text
+    ),
+    "Sin descripción."
+  );
+}
+
+export function getHomeTicketStatus(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  return safeText(
+    first(
+      raw.status,
+      raw.estado,
+      raw.state,
+      raw.lifecycle?.status,
+
+      base.status,
+      base.estado,
+      base.state,
+      base.lifecycle?.status,
+
+      "pending"
+    ),
+    "pending"
+  );
+}
+
+export function getHomeTicketStatusKey(valueOrItem = {}) {
+  const rawStatus =
+    isObject(valueOrItem)
+      ? getHomeTicketStatus(valueOrItem)
+      : valueOrItem;
+
+  const key =
+    normalizeKey(rawStatus);
+
+  if (
+    [
+      "pending",
+      "pendiente",
+      "pendientes",
+      "new",
+      "nueva",
+      "nuevo",
+      "created",
+      "creada",
+      "creado",
+    ].includes(key)
+  ) {
+    return "pending";
+  }
+
+  if (
+    [
+      "open",
+      "opened",
+      "abierta",
+      "abierto",
+      "abiertas",
+      "abiertos",
+    ].includes(key)
+  ) {
+    return "open";
+  }
+
+  if (
+    [
+      "progress",
+      "in_progress",
+      "inprogress",
+      "en_proceso",
+      "proceso",
+      "working",
+      "trabajando",
+      "assigned",
+      "asignada",
+      "asignado",
+    ].includes(key)
+  ) {
+    return "progress";
+  }
+
+  if (
+    [
+      "resolved",
+      "resuelta",
+      "resuelto",
+      "solved",
+    ].includes(key)
+  ) {
+    return "resolved";
+  }
+
+  if (
+    [
+      "closed",
+      "close",
+      "cerrada",
+      "cerrado",
+      "cancelled",
+      "cancelada",
+      "cancelado",
+      "archived",
+      "archivada",
+      "archivado",
+    ].includes(key)
+  ) {
+    return "closed";
+  }
+
+  return "pending";
+}
+
+export function getHomeTicketStatusLabel(valueOrItem = {}) {
+  const key =
+    getHomeTicketStatusKey(valueOrItem);
+
+  if (key === "open") return "Abierta";
+  if (key === "pending") return "Pendiente";
+  if (key === "progress") return "En proceso";
+  if (key === "resolved") return "Resuelta";
+  if (key === "closed") return "Cerrada";
+
+  return "Pendiente";
+}
+
+export function getHomeTicketPriority(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  return safeText(
+    first(
+      raw.priority,
+      raw.prioridad,
+      raw.severity,
+      raw.urgency,
+      raw.sla?.priority,
+
+      base.priority,
+      base.prioridad,
+      base.severity,
+      base.urgency,
+      base.sla?.priority,
+
+      "medium"
+    ),
+    "medium"
+  );
+}
+
+export function getHomeTicketPriorityKey(valueOrItem = {}) {
+  const rawPriority =
+    isObject(valueOrItem)
+      ? getHomeTicketPriority(valueOrItem)
+      : valueOrItem;
+
+  const key =
+    normalizeKey(rawPriority);
+
+  if (
+    [
+      "urgent",
+      "urgente",
+      "critical",
+      "critica",
+      "crítica",
+      "critico",
+      "crítico",
+      "p0",
+      "p1",
+    ].includes(key)
+  ) {
+    return "urgent";
+  }
+
+  if (
+    [
+      "high",
+      "alta",
+      "alto",
+      "important",
+      "importante",
+      "p2",
+    ].includes(key)
+  ) {
+    return "high";
+  }
+
+  if (
+    [
+      "low",
+      "baja",
+      "bajo",
+      "minor",
+      "menor",
+      "p4",
+    ].includes(key)
+  ) {
+    return "low";
+  }
+
+  return "medium";
+}
+
+export function getHomeTicketPriorityLabel(valueOrItem = {}) {
+  const key =
+    getHomeTicketPriorityKey(valueOrItem);
+
+  if (key === "urgent") return "Urgente";
+  if (key === "high") return "Alta";
+  if (key === "low") return "Baja";
+
+  return "Media";
+}
+
+export function getHomeTicketCreatedAt(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  return first(
+    raw.createdAt,
+    raw.fechaCreacion,
+    raw.createdAtES,
+    raw.date,
+    raw.fecha,
+    raw.lifecycle?.createdAt,
+
+    base.createdAt,
+    base.fechaCreacion,
+    base.createdAtES,
+    base.date,
+    base.fecha,
+    base.lifecycle?.createdAt
+  );
+}
+
+export function getHomeTicketUpdatedAt(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  return first(
+    raw.updatedAt,
+    raw.lastUpdateAt,
+    raw.ultimaNovedad,
+    raw.modifiedAt,
+    raw.closedAt,
+    raw.createdAt,
+    raw.lifecycle?.updatedAt,
+    raw.lifecycle?.lastUpdateAt,
+    raw.audit?.updatedAt,
+
+    base.updatedAt,
+    base.lastUpdateAt,
+    base.ultimaNovedad,
+    base.modifiedAt,
+    base.closedAt,
+    base.createdAt,
+    base.lifecycle?.updatedAt,
+    base.lifecycle?.lastUpdateAt,
+    base.audit?.updatedAt
+  );
+}
+
+export function getHomeTicketAttachmentsCount(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  const attachments =
+    first(
+      raw.attachments,
+      raw.files,
+      raw.adjuntos,
+      raw.documents,
+
+      base.attachments,
+      base.files,
+      base.adjuntos,
+      base.documents
+    );
+
+  if (Array.isArray(attachments)) {
+    return attachments.length;
+  }
+
+  return Math.max(
+    0,
+    safeNumber(
+      first(
+        raw.attachmentsCount,
+        raw.filesCount,
+        raw.adjuntosCount,
+        raw.documentsCount,
+
+        base.attachmentsCount,
+        base.filesCount,
+        base.adjuntosCount,
+        base.documentsCount,
+
+        0
+      ),
+      0
+    )
+  );
+}
+
+export function getHomeTicketRequesterName(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  return safeText(
+    first(
+      raw.clientName,
+      raw.clienteNombre,
+      raw.customerName,
+      raw.userName,
+      raw.requesterName,
+      raw.createdByName,
+      raw.ownerName,
+      raw.name,
+
+      raw.requesterSnapshot?.name,
+      raw.requesterSnapshot?.displayName,
+      raw.cliente?.nombreContacto,
+      raw.cliente?.nombre,
+      raw.cliente?.name,
+      raw.cliente?.displayName,
+      raw.client?.name,
+      raw.customer?.name,
+      raw.createdBy?.name,
+      raw.user?.name,
+      raw.owner?.name,
+      raw.receptor?.name,
+
+      base.clientName,
+      base.clienteNombre,
+      base.customerName,
+      base.userName,
+      base.requesterName,
+      base.createdByName,
+      base.ownerName,
+      base.name,
+
+      base.requesterSnapshot?.name,
+      base.requesterSnapshot?.displayName,
+      base.cliente?.nombreContacto,
+      base.cliente?.nombre,
+      base.cliente?.name,
+      base.cliente?.displayName,
+      base.client?.name,
+      base.customer?.name,
+      base.createdBy?.name,
+      base.user?.name,
+      base.owner?.name,
+      base.receptor?.name
+    ),
+    ""
+  );
+}
+
+export function getHomeTicketRequesterEmail(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  return safeText(
+    first(
+      raw.clientEmail,
+      raw.clienteEmail,
+      raw.email,
+      raw.emailCliente,
+      raw.requesterSnapshot?.email,
+      raw.createdBy?.email,
+      raw.cliente?.email,
+      raw.cliente?.emailLower,
+      raw.client?.email,
+      raw.customer?.email,
+      raw.receptor?.email,
+
+      base.clientEmail,
+      base.clienteEmail,
+      base.email,
+      base.emailCliente,
+      base.requesterSnapshot?.email,
+      base.createdBy?.email,
+      base.cliente?.email,
+      base.cliente?.emailLower,
+      base.client?.email,
+      base.customer?.email,
+      base.receptor?.email
+    ),
+    ""
+  );
+}
+
+export function getHomeTicketAvatar(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  return safeText(
+    first(
+      raw.clientAvatar,
+      raw.avatar,
+      raw.avatarUrl,
+      raw.avatar_url,
+      raw.userAvatar,
+      raw.createdByAvatar,
+      raw.ownerAvatar,
+
+      raw.requesterSnapshot?.avatar,
+      raw.requesterSnapshot?.avatarUrl,
+
+      raw.cliente?.avatar,
+      raw.cliente?.avatarUrl,
+      raw.client?.avatar,
+      raw.client?.avatarUrl,
+      raw.customer?.avatar,
+      raw.customer?.avatarUrl,
+      raw.createdBy?.avatar,
+      raw.createdBy?.avatarUrl,
+      raw.user?.avatar,
+      raw.user?.avatarUrl,
+      raw.owner?.avatar,
+      raw.owner?.avatarUrl,
+
+      base.clientAvatar,
+      base.avatar,
+      base.avatarUrl,
+      base.avatar_url,
+      base.userAvatar,
+      base.createdByAvatar,
+      base.ownerAvatar,
+
+      base.requesterSnapshot?.avatar,
+      base.requesterSnapshot?.avatarUrl,
+
+      base.cliente?.avatar,
+      base.cliente?.avatarUrl,
+      base.client?.avatar,
+      base.client?.avatarUrl,
+      base.customer?.avatar,
+      base.customer?.avatarUrl,
+      base.createdBy?.avatar,
+      base.createdBy?.avatarUrl,
+      base.user?.avatar,
+      base.user?.avatarUrl,
+      base.owner?.avatar,
+      base.owner?.avatarUrl
+    ),
+    ""
+  );
+}
+
+export function normalizeHomeTicket(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const id =
+    getHomeTicketId(raw);
+
+  const subject =
+    getHomeTicketSubject(raw);
+
+  const description =
+    getHomeTicketDescription(raw);
+
+  const status =
+    getHomeTicketStatus(raw);
+
+  const statusKey =
+    getHomeTicketStatusKey(status);
+
+  const statusLabel =
+    getHomeTicketStatusLabel(status);
+
+  const priority =
+    getHomeTicketPriority(raw);
+
+  const priorityKey =
+    getHomeTicketPriorityKey(priority);
+
+  const priorityLabel =
+    getHomeTicketPriorityLabel(priority);
+
+  const requesterName =
+    getHomeTicketRequesterName(raw);
+
+  const requesterEmail =
+    getHomeTicketRequesterEmail(raw);
+
+  const avatar =
+    getHomeTicketAvatar(raw);
+
+  const createdAt =
+    getHomeTicketCreatedAt(raw);
+
+  const updatedAt =
+    getHomeTicketUpdatedAt(raw) ||
+    createdAt;
+
+  const attachmentsCount =
+    getHomeTicketAttachmentsCount(raw);
+
+  return {
+    ...raw,
+
+    id:
+      safeText(first(raw.id, id), id),
+
+    _id:
+      safeText(first(raw._id, raw.id, id), id),
+
+    ticketId:
+      safeText(first(raw.ticketId, id), id),
+
+    incidenciaId:
+      safeText(first(raw.incidenciaId, id), id),
+
+    code:
+      safeText(first(raw.code, raw.ticketCode, id), id),
+
+    ticketCode:
+      safeText(first(raw.ticketCode, raw.code, id), id),
+
+    entityId:
+      safeText(first(raw.entityId, id), id),
+
+    subject,
+    title:
+      safeText(first(raw.title, raw.subject, subject), subject),
+
+    asunto:
+      safeText(first(raw.asunto, raw.subject, raw.title, subject), subject),
+
+    description,
+    descripcion:
+      safeText(first(raw.descripcion, raw.description, description), description),
+
+    message:
+      safeText(first(raw.message, raw.description, raw.descripcion, description), description),
+
+    preview:
+      safeText(first(raw.preview, description, subject), subject),
+
+    status,
+    estado:
+      safeText(first(raw.estado, raw.status, status), status),
+
+    state:
+      safeText(first(raw.state, raw.status, status), status),
+
+    statusKey,
+    estadoKey:
+      statusKey,
+
+    statusLabel,
+    estadoLabel:
+      statusLabel,
+
+    priority,
+    prioridad:
+      safeText(first(raw.prioridad, raw.priority, priority), priority),
+
+    severity:
+      safeText(first(raw.severity, raw.priority, priority), priority),
+
+    priorityKey,
+    prioridadKey:
+      priorityKey,
+
+    priorityLabel,
+    prioridadLabel:
+      priorityLabel,
+
+    clientName:
+      requesterName,
+
+    clienteNombre:
+      safeText(first(raw.clienteNombre, requesterName), requesterName),
+
+    requesterName,
+
+    clientEmail:
+      requesterEmail,
+
+    clienteEmail:
+      safeText(first(raw.clienteEmail, requesterEmail), requesterEmail),
+
+    email:
+      safeText(first(raw.email, requesterEmail), requesterEmail),
+
+    clientAvatar:
+      avatar,
+
+    avatar:
+      safeText(first(raw.avatar, avatar), avatar),
+
+    avatarUrl:
+      safeText(first(raw.avatarUrl, avatar), avatar),
+
+    category:
+      safeText(first(raw.category, raw.categoria, raw.type, raw.tipo), "Soporte"),
+
+    categoria:
+      safeText(first(raw.categoria, raw.category, raw.type, raw.tipo), "Soporte"),
+
+    type:
+      safeText(first(raw.type, raw.tipo, raw.category, raw.categoria), "Soporte"),
+
+    tipo:
+      safeText(first(raw.tipo, raw.type, raw.category, raw.categoria), "Soporte"),
 
     createdAt,
-    createdAtTs: toTimestamp(createdAt),
+    updatedAt,
 
-    raw: item,
+    lastUpdateAt:
+      first(raw.lastUpdateAt, raw.updatedAt, updatedAt),
+
+    attachmentsCount,
+    filesCount:
+      attachmentsCount,
+
+    adjuntosCount:
+      attachmentsCount,
+
+    hasAttachments:
+      attachmentsCount > 0,
+
+    raw:
+      hasOwnKeys(raw.raw)
+        ? raw.raw
+        : raw,
   };
 }
 
-function normalizeRecentCollection(value) {
-  return safeArray(value).map(
-    normalizeRecentEntry
+export function normalizeHomeTicketsCollection(items = []) {
+  return sortHomeTicketsByUpdatedDesc(
+    uniqueBy(
+      safeArray(items).map((item) =>
+        normalizeHomeTicket(item)
+      ),
+      getHomeTicketId
+    )
+  );
+}
+
+export function sortHomeTicketsByUpdatedDesc(items = []) {
+  return [...safeArray(items)]
+    .sort((a, b) => {
+      const left =
+        parseDateMs(
+          getHomeTicketUpdatedAt(a) ||
+            getHomeTicketCreatedAt(a)
+        );
+
+      const right =
+        parseDateMs(
+          getHomeTicketUpdatedAt(b) ||
+            getHomeTicketCreatedAt(b)
+        );
+
+      return right - left;
+    });
+}
+
+export function isHomeTicketOpenLike(item = {}) {
+  return [
+    "open",
+    "pending",
+    "progress",
+  ].includes(
+    getHomeTicketStatusKey(item)
+  );
+}
+
+export function isHomeTicketClosedLike(item = {}) {
+  return [
+    "closed",
+    "resolved",
+  ].includes(
+    getHomeTicketStatusKey(item)
+  );
+}
+
+export function isHomeTicketUrgentLike(item = {}) {
+  return [
+    "urgent",
+    "high",
+  ].includes(
+    getHomeTicketPriorityKey(item)
+  );
+}
+
+export function findHomeTicketById(items = [], ticketId = "") {
+  const target =
+    safeText(ticketId, "");
+
+  if (!target) {
+    return null;
+  }
+
+  const normalizedTarget =
+    normalizeKey(target);
+
+  return (
+    safeArray(items).find((item) =>
+      getHomeTicketAliases(item).some((candidate) =>
+        normalizeKey(candidate) === normalizedTarget
+      )
+    ) || null
   );
 }
 
 /* =========================================================
-   WIDGET ITEMS
+   FACTURAS / INVOICES
 ========================================================= */
 
-function normalizeWidgetItem(entry = {}) {
-  const item =
-    isObject(entry)
-      ? entry
-      : {
-          title: entry,
-        };
+export function getHomeInvoiceId(item = {}) {
+  const raw =
+    safeObject(item);
 
-  const itemId = safeText(
+  const base =
+    safeObject(raw.raw);
+
+  return safeText(
     first(
-      item.id,
-      item.code,
-      item.key,
-      item.slug,
-      item.uuid,
-      item._id
+      raw.invoiceId,
+      raw.facturaId,
+      raw.number,
+      raw.numeroFacturaLegal,
+      raw.numeroFactura,
+      raw.invoiceNumber,
+      raw.numero,
+      raw.code,
+      raw.id,
+      raw._id,
+
+      base.invoiceId,
+      base.facturaId,
+      base.number,
+      base.numeroFacturaLegal,
+      base.numeroFactura,
+      base.invoiceNumber,
+      base.numero,
+      base.code,
+      base.id,
+      base._id
     ),
     ""
   );
+}
 
-  const title = safeText(
+export function getHomeInvoiceAmount(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  return safeNumber(
     first(
-      item.title,
-      item.name,
-      item.label,
-      item.subject,
-      entry
-    ),
-    itemId || "Elemento"
-  );
+      raw.total,
+      raw.amount,
+      raw.importe,
+      raw.price,
+      raw.subtotal,
+      raw.base,
+      raw.totalFactura,
+      raw.importeTotal,
+      raw.facturaTotal,
+      raw.facturaImporte,
+      raw.invoiceAmount,
 
-  const description = safeText(
+      base.total,
+      base.amount,
+      base.importe,
+      base.price,
+      base.subtotal,
+      base.base,
+      base.totalFactura,
+      base.importeTotal,
+      base.facturaTotal,
+      base.facturaImporte,
+      base.invoiceAmount,
+
+      0
+    ),
+    0
+  );
+}
+
+export function getHomeInvoiceCurrency(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  return safeText(
     first(
-      item.description,
-      item.subtitle,
-      item.summary,
-      item.preview,
-      item.text
+      raw.currency,
+      raw.moneda,
+      base.currency,
+      base.moneda,
+      "EUR"
     ),
-    ""
-  );
+    "EUR"
+  ).toUpperCase();
+}
 
-  const status = safeText(
+export function getHomeInvoiceStatus(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  return safeText(
     first(
-      item.status,
-      item.state,
-      item.estado
-    ),
-    ""
-  );
+      raw.paymentStatus,
+      raw.estadoPago,
+      raw.status,
+      raw.estado,
 
-  const route = safeText(
-    first(
-      item.route,
-      item.href,
-      item.link,
-      item.to
-    ),
-    ""
-  );
+      base.paymentStatus,
+      base.estadoPago,
+      base.status,
+      base.estado,
 
-  const updatedAt = normalizeDateValue(
-    item.updatedAt,
-    item.createdAt,
-    item.date,
-    item.timestamp,
-    item.time
+      "pending"
+    ),
+    "pending"
   );
+}
+
+export function getHomeInvoiceStatusKey(valueOrItem = {}) {
+  const rawStatus =
+    isObject(valueOrItem)
+      ? getHomeInvoiceStatus(valueOrItem)
+      : valueOrItem;
+
+  const key =
+    normalizeKey(rawStatus);
+
+  if (
+    [
+      "paid",
+      "pagada",
+      "pagado",
+      "cobrada",
+      "cobrado",
+    ].includes(key)
+  ) {
+    return "paid";
+  }
+
+  if (
+    [
+      "pending",
+      "pendiente",
+      "unpaid",
+    ].includes(key)
+  ) {
+    return "pending";
+  }
+
+  if (
+    [
+      "overdue",
+      "vencida",
+      "vencido",
+    ].includes(key)
+  ) {
+    return "overdue";
+  }
+
+  if (
+    [
+      "partial",
+      "parcial",
+      "pago_parcial",
+    ].includes(key)
+  ) {
+    return "partial";
+  }
+
+  if (
+    [
+      "cancelled",
+      "cancelada",
+      "cancelado",
+    ].includes(key)
+  ) {
+    return "cancelled";
+  }
+
+  if (
+    [
+      "draft",
+      "borrador",
+    ].includes(key)
+  ) {
+    return "draft";
+  }
+
+  return "pending";
+}
+
+export function isHomeInvoicePendingLike(item = {}) {
+  return [
+    "pending",
+    "overdue",
+    "partial",
+  ].includes(
+    getHomeInvoiceStatusKey(item)
+  );
+}
+
+export function normalizeHomeInvoice(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const id =
+    getHomeInvoiceId(raw);
+
+  const amount =
+    getHomeInvoiceAmount(raw);
+
+  const currency =
+    getHomeInvoiceCurrency(raw);
+
+  const status =
+    getHomeInvoiceStatus(raw);
+
+  const statusKey =
+    getHomeInvoiceStatusKey(status);
 
   return {
-    id: itemId,
-    title,
-    description,
-    status,
-    route,
-    updatedAt,
-    updatedAtTs: toTimestamp(updatedAt),
-    raw: item,
+    ...raw,
+
+    id:
+      safeText(first(raw.id, id), id),
+
+    _id:
+      safeText(first(raw._id, raw.id, id), id),
+
+    invoiceId:
+      safeText(first(raw.invoiceId, id), id),
+
+    facturaId:
+      safeText(first(raw.facturaId, id), id),
+
+    numeroFacturaLegal:
+      safeText(
+        first(
+          raw.numeroFacturaLegal,
+          raw.numeroFactura,
+          raw.invoiceNumber,
+          raw.number,
+          raw.numero,
+          raw.code,
+          id
+        ),
+        id
+      ),
+
+    numeroFactura:
+      safeText(first(raw.numeroFactura, raw.numeroFacturaLegal, raw.number, raw.numero, id), id),
+
+    invoiceNumber:
+      safeText(first(raw.invoiceNumber, raw.numeroFacturaLegal, raw.number, raw.numero, id), id),
+
+    number:
+      safeText(first(raw.number, raw.numero, raw.code, id), id),
+
+    numero:
+      safeText(first(raw.numero, raw.number, raw.code, id), id),
+
+    code:
+      safeText(first(raw.code, raw.numero, raw.number, id), id),
+
+    total:
+      amount,
+
+    amount,
+    importe:
+      amount,
+
+    price:
+      amount,
+
+    totalFactura:
+      amount,
+
+    facturaTotal:
+      amount,
+
+    facturaImporte:
+      amount,
+
+    invoiceAmount:
+      amount,
+
+    currency,
+    moneda:
+      currency,
+
+    paymentStatus:
+      status,
+
+    estadoPago:
+      safeText(first(raw.estadoPago, raw.paymentStatus, status), status),
+
+    status:
+      safeText(first(raw.status, status), status),
+
+    estado:
+      safeText(first(raw.estado, raw.status, status), status),
+
+    statusKey,
+    estadoPagoKey:
+      statusKey,
+
+    createdAt:
+      first(raw.createdAt, raw.fechaCreacion, raw.date, raw.raw?.createdAt, raw.raw?.fechaCreacion, raw.raw?.date),
+
+    updatedAt:
+      first(raw.updatedAt, raw.modifiedAt, raw.date, raw.raw?.updatedAt, raw.raw?.modifiedAt, raw.raw?.date),
+
+    raw:
+      hasOwnKeys(raw.raw)
+        ? raw.raw
+        : raw,
   };
 }
 
-function normalizeWidgetItems(value) {
-  return safeArray(value).map(
-    normalizeWidgetItem
+export function normalizeHomeInvoicesCollection(items = []) {
+  return uniqueBy(
+    safeArray(items).map((item) =>
+      normalizeHomeInvoice(item)
+    ),
+    getHomeInvoiceId
+  );
+}
+
+/* =========================================================
+   USERS
+========================================================= */
+
+export function getHomeUserId(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  return safeText(
+    first(
+      raw.userId,
+      raw.usuarioId,
+      raw.id,
+      raw._id,
+      raw.email,
+      raw.mail,
+      raw.username,
+
+      base.userId,
+      base.usuarioId,
+      base.id,
+      base._id,
+      base.email,
+      base.mail,
+      base.username
+    ),
+    ""
+  );
+}
+
+export function normalizeHomeUser(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const id =
+    getHomeUserId(raw);
+
+  const displayName =
+    safeText(
+      first(
+        raw.displayName,
+        raw.fullName,
+        raw.name,
+        raw.nombre,
+        raw.username,
+        raw.email,
+        raw.raw?.displayName,
+        raw.raw?.fullName,
+        raw.raw?.name,
+        raw.raw?.nombre,
+        raw.raw?.username,
+        raw.raw?.email
+      ),
+      "Usuario"
+    );
+
+  const active =
+    safeBoolean(
+      first(
+        raw.active,
+        raw.isActive,
+        raw.enabled,
+        raw.raw?.active,
+        raw.raw?.isActive,
+        raw.raw?.enabled,
+        true
+      ),
+      true
+    );
+
+  return {
+    ...raw,
+
+    id:
+      safeText(first(raw.id, id), id),
+
+    _id:
+      safeText(first(raw._id, raw.id, id), id),
+
+    userId:
+      safeText(first(raw.userId, id), id),
+
+    usuarioId:
+      safeText(first(raw.usuarioId, id), id),
+
+    displayName,
+
+    fullName:
+      safeText(first(raw.fullName, displayName), displayName),
+
+    name:
+      safeText(first(raw.name, displayName), displayName),
+
+    nombre:
+      safeText(first(raw.nombre, displayName), displayName),
+
+    username:
+      safeText(first(raw.username, raw.email, id), id),
+
+    email:
+      safeText(first(raw.email, raw.mail, raw.raw?.email, raw.raw?.mail), ""),
+
+    role:
+      safeText(first(raw.role, raw.rol, raw.type, raw.raw?.role, raw.raw?.rol, raw.raw?.type), "user"),
+
+    rol:
+      safeText(first(raw.rol, raw.role, raw.type, raw.raw?.rol, raw.raw?.role, raw.raw?.type), "user"),
+
+    active,
+    isActive:
+      active,
+
+    createdAt:
+      first(raw.createdAt, raw.raw?.createdAt),
+
+    updatedAt:
+      first(raw.updatedAt, raw.modifiedAt, raw.raw?.updatedAt, raw.raw?.modifiedAt),
+
+    raw:
+      hasOwnKeys(raw.raw)
+        ? raw.raw
+        : raw,
+  };
+}
+
+export function normalizeHomeUsersCollection(items = []) {
+  return uniqueBy(
+    safeArray(items).map((item) =>
+      normalizeHomeUser(item)
+    ),
+    getHomeUserId
+  );
+}
+
+/* =========================================================
+   CLIENTS
+========================================================= */
+
+export function getHomeClientId(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const base =
+    safeObject(raw.raw);
+
+  return safeText(
+    first(
+      raw.clientId,
+      raw.clienteId,
+      raw.customerId,
+      raw.id,
+      raw._id,
+      raw.email,
+      raw.mail,
+      raw.nif,
+      raw.cif,
+
+      base.clientId,
+      base.clienteId,
+      base.customerId,
+      base.id,
+      base._id,
+      base.email,
+      base.mail,
+      base.nif,
+      base.cif
+    ),
+    ""
+  );
+}
+
+export function normalizeHomeClient(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const id =
+    getHomeClientId(raw);
+
+  const name =
+    safeText(
+      first(
+        raw.name,
+        raw.nombre,
+        raw.razonSocial,
+        raw.company,
+        raw.nombreContacto,
+        raw.email,
+
+        raw.raw?.name,
+        raw.raw?.nombre,
+        raw.raw?.razonSocial,
+        raw.raw?.company,
+        raw.raw?.nombreContacto,
+        raw.raw?.email
+      ),
+      "Cliente"
+    );
+
+  const active =
+    safeBoolean(
+      first(
+        raw.active,
+        raw.isActive,
+        raw.enabled,
+        raw.raw?.active,
+        raw.raw?.isActive,
+        raw.raw?.enabled,
+        true
+      ),
+      true
+    );
+
+  return {
+    ...raw,
+
+    id:
+      safeText(first(raw.id, id), id),
+
+    _id:
+      safeText(first(raw._id, raw.id, id), id),
+
+    clientId:
+      safeText(first(raw.clientId, id), id),
+
+    clienteId:
+      safeText(first(raw.clienteId, id), id),
+
+    customerId:
+      safeText(first(raw.customerId, id), id),
+
+    name,
+    nombre:
+      safeText(first(raw.nombre, name), name),
+
+    displayName:
+      safeText(first(raw.displayName, name), name),
+
+    razonSocial:
+      safeText(first(raw.razonSocial, name), name),
+
+    email:
+      safeText(first(raw.email, raw.mail, raw.raw?.email, raw.raw?.mail), ""),
+
+    phone:
+      safeText(first(raw.phone, raw.telefono, raw.raw?.phone, raw.raw?.telefono), ""),
+
+    telefono:
+      safeText(first(raw.telefono, raw.phone, raw.raw?.telefono, raw.raw?.phone), ""),
+
+    active,
+    isActive:
+      active,
+
+    createdAt:
+      first(raw.createdAt, raw.raw?.createdAt),
+
+    updatedAt:
+      first(raw.updatedAt, raw.modifiedAt, raw.raw?.updatedAt, raw.raw?.modifiedAt),
+
+    raw:
+      hasOwnKeys(raw.raw)
+        ? raw.raw
+        : raw,
+  };
+}
+
+export function normalizeHomeClientsCollection(items = []) {
+  return uniqueBy(
+    safeArray(items).map((item) =>
+      normalizeHomeClient(item)
+    ),
+    getHomeClientId
+  );
+}
+
+/* =========================================================
+   ACTIVITY
+========================================================= */
+
+export function getHomeActivityId(item = {}) {
+  const raw =
+    safeObject(item);
+
+  return safeText(
+    first(
+      raw.activityId,
+      raw.eventId,
+      raw.id,
+      raw._id,
+      raw.entityId,
+      raw.ticketId,
+      raw.incidenciaId,
+      raw.facturaId,
+      raw.invoiceId,
+      raw.userId,
+      raw.clienteId,
+      raw.title
+    ),
+    ""
+  );
+}
+
+export function normalizeHomeActivityItem(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const type =
+    safeText(
+      first(
+        raw.type,
+        raw.kind,
+        raw.category,
+        raw.raw?.type,
+        raw.raw?.kind,
+        raw.raw?.category,
+        "activity"
+      ),
+      "activity"
+    );
+
+  const title =
+    safeText(
+      first(
+        raw.title,
+        raw.name,
+        raw.subject,
+        raw.label,
+        raw.raw?.title,
+        raw.raw?.name,
+        raw.raw?.subject,
+        raw.raw?.label
+      ),
+      "Actividad registrada"
+    );
+
+  const entityId =
+    safeText(
+      first(
+        raw.entityId,
+        raw.id,
+        raw.ticketId,
+        raw.incidenciaId,
+        raw.facturaId,
+        raw.invoiceId,
+        raw.userId,
+        raw.clienteId,
+
+        raw.raw?.entityId,
+        raw.raw?.id,
+        raw.raw?.ticketId,
+        raw.raw?.incidenciaId,
+        raw.raw?.facturaId,
+        raw.raw?.invoiceId,
+        raw.raw?.userId,
+        raw.raw?.clienteId
+      ),
+      ""
+    );
+
+  return {
+    ...raw,
+
+    type,
+
+    kind:
+      safeText(first(raw.kind, type), type),
+
+    category:
+      safeText(first(raw.category, type), type),
+
+    title,
+
+    text:
+      safeText(
+        first(
+          raw.text,
+          raw.description,
+          raw.message,
+          raw.detail,
+          raw.preview,
+
+          raw.raw?.text,
+          raw.raw?.description,
+          raw.raw?.message,
+          raw.raw?.detail,
+          raw.raw?.preview
+        ),
+        "Sin detalle adicional."
+      ),
+
+    date:
+      first(
+        raw.date,
+        raw.createdAt,
+        raw.updatedAt,
+        raw.timestamp,
+
+        raw.raw?.date,
+        raw.raw?.createdAt,
+        raw.raw?.updatedAt,
+        raw.raw?.timestamp
+      ),
+
+    route:
+      safeText(first(raw.route, raw.href, raw.link, raw.to, raw.raw?.route), ""),
+
+    href:
+      safeText(first(raw.href, raw.route, raw.link, raw.to, raw.raw?.href), ""),
+
+    action:
+      safeText(first(raw.action, raw.raw?.action, "open-activity"), "open-activity"),
+
+    entityId,
+
+    id:
+      safeText(first(raw.id, entityId), entityId),
+
+    raw:
+      hasOwnKeys(raw.raw)
+        ? raw.raw
+        : raw,
+  };
+}
+
+export function normalizeHomeActivityCollection(items = []) {
+  return uniqueBy(
+    safeArray(items).map((item) =>
+      normalizeHomeActivityItem(item)
+    ),
+    getHomeActivityId
+  ).sort((a, b) =>
+    parseDateMs(b.date) - parseDateMs(a.date)
+  );
+}
+
+export function buildHomeActivityFromCollections({
+  tickets = [],
+  invoices = [],
+  users = [],
+  clients = [],
+} = {}) {
+  const ticketActivity =
+    safeArray(tickets)
+      .slice(0, 8)
+      .map((item) => {
+        const ticketId =
+          getHomeTicketId(item);
+
+        return {
+          type:
+            "ticket",
+
+          title:
+            getHomeTicketSubject(item),
+
+          text:
+            `Incidencia ${ticketId || "sin ID"} · ${getHomeTicketStatusLabel(item)}`,
+
+          date:
+            getHomeTicketUpdatedAt(item) ||
+            getHomeTicketCreatedAt(item),
+
+          route:
+            HOME_ROUTES.INCIDENCIAS,
+
+          action:
+            "open-ticket",
+
+          entityId:
+            ticketId,
+        };
+      });
+
+  const invoiceActivity =
+    safeArray(invoices)
+      .slice(0, 4)
+      .map((item) => {
+        const invoiceId =
+          getHomeInvoiceId(item);
+
+        const amount =
+          getHomeInvoiceAmount(item);
+
+        const currency =
+          getHomeInvoiceCurrency(item);
+
+        return {
+          type:
+            "invoice",
+
+          title:
+            invoiceId
+              ? `Factura ${invoiceId}`
+              : "Factura registrada",
+
+          text:
+            formatHomeMoney(amount, currency),
+
+          date:
+            first(
+              item.updatedAt,
+              item.modifiedAt,
+              item.createdAt,
+              item.date,
+              item.raw?.updatedAt,
+              item.raw?.modifiedAt,
+              item.raw?.createdAt,
+              item.raw?.date
+            ),
+
+          route:
+            HOME_ROUTES.FACTURAS,
+
+          action:
+            "open-invoice",
+
+          entityId:
+            invoiceId,
+        };
+      });
+
+  const clientActivity =
+    safeArray(clients)
+      .slice(0, 3)
+      .map((item) => ({
+        type:
+          "client",
+
+        title:
+          safeText(
+            first(
+              item.name,
+              item.nombre,
+              item.razonSocial,
+              item.company,
+              item.email
+            ),
+            "Cliente"
+          ),
+
+        text:
+          "Cliente sincronizado en el panel.",
+
+        date:
+          first(
+            item.updatedAt,
+            item.createdAt,
+            item.raw?.updatedAt,
+            item.raw?.createdAt
+          ),
+
+        route:
+          HOME_ROUTES.CLIENTES,
+
+        action:
+          "navigate-home",
+
+        entityId:
+          getHomeClientId(item),
+      }));
+
+  const userActivity =
+    safeArray(users)
+      .slice(0, 3)
+      .map((item) => ({
+        type:
+          "user",
+
+        title:
+          safeText(
+            first(
+              item.name,
+              item.nombre,
+              item.displayName,
+              item.fullName,
+              item.username,
+              item.email
+            ),
+            "Usuario"
+          ),
+
+        text:
+          "Usuario disponible en el sistema.",
+
+        date:
+          first(
+            item.lastLoginAt,
+            item.updatedAt,
+            item.createdAt,
+            item.raw?.lastLoginAt,
+            item.raw?.updatedAt,
+            item.raw?.createdAt
+          ),
+
+        route:
+          HOME_ROUTES.USUARIOS,
+
+        action:
+          "navigate-home",
+
+        entityId:
+          getHomeUserId(item),
+      }));
+
+  return normalizeHomeActivityCollection([
+    ...ticketActivity,
+    ...invoiceActivity,
+    ...clientActivity,
+    ...userActivity,
+  ]);
+}
+
+/* =========================================================
+   WIDGETS
+========================================================= */
+
+export function getHomeWidgetId(item = {}) {
+  const raw =
+    safeObject(item);
+
+  return safeText(
+    first(
+      raw.widgetId,
+      raw.widgetKey,
+      raw.id,
+      raw.key,
+      raw.slug,
+      raw.code
+    ),
+    ""
+  );
+}
+
+export function getHomeWidgetTitle(item = {}) {
+  const raw =
+    safeObject(item);
+
+  return safeText(
+    first(
+      raw.title,
+      raw.name,
+      raw.label,
+      raw.heading
+    ),
+    "Bloque"
+  );
+}
+
+export function getHomeWidgetNumericValue(item = {}) {
+  return toFiniteNumber(
+    first(
+      item.value,
+      item.total,
+      item.amount,
+      item.count,
+      item.metric,
+
+      item.raw?.value,
+      item.raw?.total,
+      item.raw?.amount,
+      item.raw?.count,
+      item.raw?.metric
+    )
+  );
+}
+
+export function getHomeWidgetCorpus(item = {}) {
+  const raw =
+    safeObject(item);
+
+  return normalizeKey(
+    [
+      raw.widgetId,
+      raw.widgetKey,
+      raw.id,
+      raw.key,
+      raw.slug,
+      raw.code,
+      raw.type,
+      raw.kind,
+      raw.variant,
+      raw.category,
+      raw.title,
+      raw.name,
+      raw.label,
+      raw.heading,
+      raw.description,
+      raw.subtitle,
+      raw.text,
+    ]
+      .filter((value) =>
+        value !== undefined &&
+        value !== null
+      )
+      .join(" ")
+  );
+}
+
+export function normalizeHomeWidget(item = {}) {
+  const raw =
+    safeObject(item);
+
+  const id =
+    getHomeWidgetId(raw);
+
+  const title =
+    getHomeWidgetTitle(raw);
+
+  return {
+    ...raw,
+
+    widgetId:
+      id,
+
+    widgetKey:
+      safeText(first(raw.widgetKey, raw.key, id), id),
+
+    id:
+      safeText(first(raw.id, id), id),
+
+    key:
+      safeText(first(raw.key, id), id),
+
+    slug:
+      safeText(first(raw.slug, raw.key, id), id),
+
+    title,
+
+    name:
+      safeText(first(raw.name, title), title),
+
+    label:
+      safeText(first(raw.label, title), title),
+
+    description:
+      safeText(
+        first(
+          raw.description,
+          raw.descripcion,
+          raw.subtitle,
+          raw.summary,
+          raw.text
+        ),
+        ""
+      ),
+
+    subtitle:
+      safeText(first(raw.subtitle, raw.description, raw.text), ""),
+
+    text:
+      safeText(first(raw.text, raw.description, raw.subtitle), ""),
+
+    type:
+      safeText(first(raw.type, raw.kind, raw.variant, raw.category), "widget"),
+
+    kind:
+      safeText(first(raw.kind, raw.type, raw.variant, raw.category), "widget"),
+
+    variant:
+      safeText(first(raw.variant, raw.type, raw.kind, raw.category), "widget"),
+
+    value:
+      first(
+        raw.value,
+        raw.total,
+        raw.amount,
+        raw.count,
+        raw.metric,
+        "—"
+      ),
+
+    trend:
+      first(
+        raw.trend,
+        raw.delta,
+        raw.change,
+        raw.variation,
+        ""
+      ),
+
+    status:
+      safeText(first(raw.status, raw.estado, raw.state), "active"),
+
+    route:
+      safeText(first(raw.route, raw.href, raw.link, raw.to), ""),
+
+    href:
+      safeText(first(raw.href, raw.route, raw.link, raw.to), ""),
+
+    updatedAt:
+      first(
+        raw.updatedAt,
+        raw.lastUpdate,
+        raw.modifiedAt,
+        raw.createdAt
+      ),
+
+    raw:
+      hasOwnKeys(raw.raw)
+        ? raw.raw
+        : raw,
+  };
+}
+
+export function normalizeHomeWidgetsCollection(items = []) {
+  return uniqueBy(
+    safeArray(items)
+      .map((item) =>
+        normalizeHomeWidget(item)
+      )
+      .filter((item) =>
+        Boolean(
+          getHomeWidgetId(item) ||
+            getHomeWidgetTitle(item)
+        )
+      ),
+    (item) =>
+      getHomeWidgetId(item) ||
+      getHomeWidgetTitle(item)
+  );
+}
+
+export function findHomeWidgetById(items = [], widgetId = "") {
+  const target =
+    safeText(widgetId, "");
+
+  if (!target) {
+    return null;
+  }
+
+  const targetKey =
+    normalizeKey(target);
+
+  return (
+    safeArray(items).find((item) => {
+      const aliases =
+        [
+          item.widgetId,
+          item.widgetKey,
+          item.id,
+          item.key,
+          item.slug,
+          item.code,
+          item.title,
+          item.name,
+          item.label,
+        ]
+          .map((value) =>
+            normalizeKey(value)
+          )
+          .filter(Boolean);
+
+      return aliases.includes(targetKey);
+    }) || null
   );
 }
 
@@ -665,935 +2981,2147 @@ function normalizeWidgetItems(value) {
    SUMMARY
 ========================================================= */
 
-function normalizeSummary(summary = {}) {
-  const item = safeObject(summary);
+function buildHomeWidgetSummary(widgets = []) {
+  const summary = {
+    totalTickets:
+      0,
 
-  return {
-    ticketsOpen: safeNumber(
-      first(
-        item.ticketsOpen,
-        item.openTickets,
-        item.open,
-        item.abiertas,
-        item.incidenciasAbiertas
-      ),
-      0
-    ),
+    openTickets:
+      0,
 
-    ticketsPending: safeNumber(
-      first(
-        item.ticketsPending,
-        item.pendingTickets,
-        item.pending,
-        item.pendientes,
-        item.incidenciasPendientes
-      ),
-      0
-    ),
+    urgentTickets:
+      0,
 
-    ticketsTotal: safeNumber(
-      first(
-        item.ticketsTotal,
-        item.totalTickets,
-        item.incidenciasTotal,
-        item.incidencias
-      ),
-      0
-    ),
+    totalInvoices:
+      0,
 
-    invoicesTotal: safeNumber(
-      first(
-        item.invoicesTotal,
-        item.totalFacturas,
-        item.facturasTotal,
-        item.facturas
-      ),
-      0
-    ),
+    pendingInvoices:
+      0,
 
-    clientsTotal: safeNumber(
-      first(
-        item.clientsTotal,
-        item.totalClientes,
-        item.clientesTotal,
-        item.clientes
-      ),
-      0
-    ),
+    invoiceAmount:
+      0,
 
-    usersTotal: safeNumber(
-      first(
-        item.usersTotal,
-        item.totalUsuarios,
-        item.usuariosTotal,
-        item.usuarios
-      ),
-      0
-    ),
+    usersCount:
+      0,
 
-    revenueTotal: safeNumber(
-      first(
-        item.revenueTotal,
-        item.totalRevenue,
-        item.totalImporte,
-        item.importe,
-        item.amount,
-        item.totalAmount
-      ),
-      0
-    ),
+    usuariosCount:
+      0,
 
-    raw: item,
+    clientsCount:
+      0,
+
+    clientesCount:
+      0,
+
+    customersCount:
+      0,
   };
-}
 
-/* =========================================================
-   WIDGET NORMALIZER
-========================================================= */
+  for (const widget of safeArray(widgets)) {
+    const corpus =
+      getHomeWidgetCorpus(widget);
 
-export function normalizeHomeWidgetModel(payload = {}) {
-  const item =
-    isObject(payload)
-      ? payload
-      : {
-          title: payload,
-        };
+    const value =
+      getHomeWidgetNumericValue(widget);
 
-  const widgetId = safeText(
-    first(
-      item.widgetId,
-      item.id,
-      item.key,
-      item.slug,
-      item.code,
-      item.uuid,
-      item._id
-    ),
-    ""
-  );
-
-  const title = safeText(
-    first(
-      item.title,
-      item.name,
-      item.label,
-      item.heading
-    ),
-    "Bloque"
-  );
-
-  const description = safeText(
-    first(
-      item.description,
-      item.descripcion,
-      item.subtitle,
-      item.summary,
-      item.text
-    ),
-    "Sin descripción."
-  );
-
-  const type = normalizeWidgetType(
-    first(
-      item.type,
-      item.kind,
-      item.variant,
-      item.category,
-      item.widgetType
-    )
-  );
-
-  const status = normalizeWidgetStatus(
-    first(
-      item.status,
-      item.estado,
-      item.state,
-      item.health,
-      item.severity,
-      item.enabled === false ? "disabled" : null,
-      item.disabled === true ? "disabled" : null
-    )
-  );
-
-  const value = first(
-    item.value,
-    item.total,
-    item.amount,
-    item.count,
-    item.metric,
-    item.number
-  );
-
-  const trend = first(
-    item.trend,
-    item.delta,
-    item.change,
-    item.variation,
-    item.diff
-  );
-
-  const route = safeText(
-    first(
-      item.route,
-      item.href,
-      item.link,
-      item.to,
-      item.path
-    ),
-    ""
-  );
-
-  const icon = safeText(
-    first(
-      item.icon,
-      item.emoji,
-      item.symbol
-    ),
-    ""
-  );
-
-  const updatedAt = normalizeDateValue(
-    item.updatedAt,
-    item.lastUpdate,
-    item.modifiedAt,
-    item.createdAt,
-    item.date,
-    item.timestamp
-  );
-
-  const tags = normalizeTags(
-    first(
-      item.tags,
-      item.labels,
-      item.badges
-    )
-  );
-
-  const items = normalizeWidgetItems(
-    first(
-      item.items,
-      item.rows,
-      item.list,
-      item.data,
-      item.children
-    )
-  );
-
-  const initials = getInitials(
-    title ||
-      widgetId ||
-      "ON"
-  );
-
-  const theme = getWidgetTheme(
-    widgetId ||
-      title ||
-      route
-  );
-
-  const numericValue =
-    safeFiniteNumber(value, null);
-
-  const numericTrend =
-    safeFiniteNumber(trend, null);
-
-  const hasValue =
-    value !== null &&
-    value !== undefined &&
-    String(value).trim() !== "";
-
-  const hasTrend =
-    trend !== null &&
-    trend !== undefined &&
-    String(trend).trim() !== "";
-
-  const isActive =
-    status === WIDGET_STATUS.ACTIVE;
-
-  const isWarning =
-    status === WIDGET_STATUS.WARNING;
-
-  const isError =
-    status === WIDGET_STATUS.ERROR;
-
-  const isDisabled =
-    status === WIDGET_STATUS.DISABLED;
-
-  const isKpi =
-    type === WIDGET_TYPE.KPI;
-
-  const isMetric =
-    type === WIDGET_TYPE.METRIC;
-
-  const isList =
-    type === WIDGET_TYPE.LIST;
-
-  const isTable =
-    type === WIDGET_TYPE.TABLE;
-
-  const isActivity =
-    type === WIDGET_TYPE.ACTIVITY;
-
-  const isShortcut =
-    type === WIDGET_TYPE.SHORTCUT;
-
-  const hasRoute = Boolean(route);
-  const hasItems = items.length > 0;
-
-  const isPositiveTrend =
-    Number.isFinite(numericTrend) &&
-    numericTrend > 0;
-
-  const isNegativeTrend =
-    Number.isFinite(numericTrend) &&
-    numericTrend < 0;
-
-  return {
-    /* identity */
-    widgetId,
-    id: widgetId,
-
-    key: safeText(
-      first(
-        item.key,
-        widgetId
-      ),
-      widgetId
-    ),
-
-    slug: safeText(
-      first(
-        item.slug,
-        widgetId
-      ),
-      widgetId
-    ),
-
-    code: safeText(
-      first(
-        item.code,
-        widgetId
-      ),
-      widgetId
-    ),
-
-    /* content */
-    title,
-    description,
-    icon,
-
-    /* enums */
-    type,
-    typeLabel: getWidgetTypeLabel(type),
-
-    status,
-    statusLabel: getWidgetStatusLabel(status),
-
-    /* values */
-    value,
-
-    numericValue,
-
-    trend,
-
-    numericTrend,
-
-    /* route */
-    route,
-
-    /* visuals */
-    initials,
-    theme,
-
-    /* collections */
-    tags,
-    tagsCount: tags.length,
-
-    items,
-    itemsCount: items.length,
-
-    /* dates */
-    updatedAt,
-    updatedAtTs: toTimestamp(updatedAt),
-
-    /* flags */
-    hasValue,
-    hasTrend,
-    hasRoute,
-    hasItems,
-
-    isActive,
-    isWarning,
-    isError,
-    isDisabled,
-
-    isKpi,
-    isMetric,
-    isList,
-    isTable,
-    isActivity,
-    isShortcut,
-
-    isPositiveTrend,
-    isNegativeTrend,
-
-    /* raw */
-    raw: item,
-  };
-}
-
-/* =========================================================
-   DASHBOARD UNWRAP
-========================================================= */
-
-function looksLikeDashboard(value = null) {
-  const obj = safeObject(value);
-
-  return Boolean(
-    Array.isArray(obj.widgets) ||
-      Array.isArray(obj.cards) ||
-      Array.isArray(obj.kpis) ||
-      Array.isArray(obj.items) ||
-      Array.isArray(obj.recent) ||
-      Array.isArray(obj.recentActivity) ||
-      Array.isArray(obj.activity) ||
-      Array.isArray(obj.timeline) ||
-      isObject(obj.summary) ||
-      isObject(obj.stats) ||
-      isObject(obj.metrics) ||
-      isObject(obj.totals)
-  );
-}
-
-function unwrapObjectPayload(payload = null, depth = 0) {
-  if (depth > MAX_UNWRAP_DEPTH) {
-    return safeObject(payload);
-  }
-
-  if (!payload) {
-    return {};
-  }
-
-  if (Array.isArray(payload)) {
-    return {
-      widgets: payload,
-    };
-  }
-
-  const obj = safeObject(payload);
-
-  if (!Object.keys(obj).length) {
-    return {};
-  }
-
-  if (looksLikeDashboard(obj)) {
-    return obj;
-  }
-
-  const candidates = [
-    obj.dashboard,
-    obj.data,
-    obj.payload,
-    obj.result,
-  ];
-
-  for (const candidate of candidates) {
-    if (!candidate) {
+    if (value === null) {
       continue;
     }
 
-    const unwrapped =
-      unwrapObjectPayload(
-        candidate,
-        depth + 1
-      );
+    const isTicket =
+      corpus.includes("ticket") ||
+      corpus.includes("incidencia") ||
+      corpus.includes("solicitud") ||
+      corpus.includes("soporte");
+
+    const isInvoice =
+      corpus.includes("factura") ||
+      corpus.includes("invoice") ||
+      corpus.includes("billing") ||
+      corpus.includes("facturacion") ||
+      corpus.includes("facturacin") ||
+      corpus.includes("cobro");
+
+    const isUser =
+      corpus.includes("usuario") ||
+      corpus.includes("user") ||
+      corpus.includes("member") ||
+      corpus.includes("account");
+
+    const isClient =
+      corpus.includes("cliente") ||
+      corpus.includes("client") ||
+      corpus.includes("customer");
+
+    if (isTicket) {
+      if (
+        corpus.includes("abierta") ||
+        corpus.includes("abierto") ||
+        corpus.includes("open") ||
+        corpus.includes("pendiente") ||
+        corpus.includes("pending") ||
+        corpus.includes("proceso")
+      ) {
+        summary.openTickets =
+          Math.max(summary.openTickets, value);
+      } else {
+        summary.totalTickets =
+          Math.max(summary.totalTickets, value);
+      }
+
+      if (
+        corpus.includes("urgente") ||
+        corpus.includes("urgent") ||
+        corpus.includes("critica") ||
+        corpus.includes("critical") ||
+        corpus.includes("alta")
+      ) {
+        summary.urgentTickets =
+          Math.max(summary.urgentTickets, value);
+      }
+    }
+
+    if (isInvoice) {
+      if (
+        corpus.includes("importe") ||
+        corpus.includes("amount") ||
+        corpus.includes("facturacion") ||
+        corpus.includes("billing") ||
+        corpus.includes("total_facturado") ||
+        corpus.includes("facturacion_total") ||
+        corpus.includes("visible")
+      ) {
+        summary.invoiceAmount =
+          Math.max(summary.invoiceAmount, value);
+      } else if (
+        corpus.includes("pendiente") ||
+        corpus.includes("pending") ||
+        corpus.includes("vencida") ||
+        corpus.includes("overdue")
+      ) {
+        summary.pendingInvoices =
+          Math.max(summary.pendingInvoices, value);
+      } else {
+        summary.totalInvoices =
+          Math.max(summary.totalInvoices, value);
+      }
+    }
 
     if (
-      looksLikeDashboard(unwrapped) ||
-      Object.keys(unwrapped).length
+      isUser &&
+      !isClient
     ) {
-      return unwrapped;
+      summary.usersCount =
+        Math.max(summary.usersCount, value);
+
+      summary.usuariosCount =
+        Math.max(summary.usuariosCount, value);
+    }
+
+    if (isClient) {
+      summary.clientsCount =
+        Math.max(summary.clientsCount, value);
+
+      summary.clientesCount =
+        Math.max(summary.clientesCount, value);
+
+      summary.customersCount =
+        Math.max(summary.customersCount, value);
     }
   }
 
-  return obj;
+  return summary;
 }
 
-export function unwrapHomeDashboardPayload(payload = null) {
-  return unwrapObjectPayload(payload, 0);
-}
+function buildHomeDerivedSummary({
+  tickets = [],
+  ticketsTotal = 0,
+  invoices = [],
+  invoicesTotal = 0,
+  users = [],
+  usersTotal = 0,
+  clients = [],
+  clientsTotal = 0,
+} = {}) {
+  const normalizedTickets =
+    safeArray(tickets);
 
-/* =========================================================
-   DASHBOARD NORMALIZER
-========================================================= */
+  const normalizedInvoices =
+    safeArray(invoices);
 
-export function normalizeHomeDashboardModel(payload = {}) {
-  const root = safeObject(
-    unwrapHomeDashboardPayload(payload)
-  );
+  const openTickets =
+    normalizedTickets
+      .filter(isHomeTicketOpenLike)
+      .length;
 
-  const summary = normalizeSummary(
-    first(
-      root.summary,
-      root.stats,
-      root.metrics,
-      root.totals
-    )
-  );
+  const closedTickets =
+    normalizedTickets
+      .filter(isHomeTicketClosedLike)
+      .length;
 
-  const widgets = safeArray(
-    first(
-      root.widgets,
-      root.cards,
-      root.kpis,
-      root.items
-    )
-  ).map(
-    normalizeHomeWidgetModel
-  );
+  const urgentTickets =
+    normalizedTickets
+      .filter(isHomeTicketUrgentLike)
+      .length;
 
-  const recent = normalizeRecentCollection(
-    first(
-      root.recent,
-      root.recentActivity,
-      root.activity,
-      root.timeline
-    )
-  );
+  const pendingInvoices =
+    normalizedInvoices
+      .filter(isHomeInvoicePendingLike)
+      .length;
 
-  const requestId = safeText(
-    first(
-      root.requestId,
-      root.correlationId,
-      root.traceId,
-      root.meta?.requestId,
-      root.meta?.correlationId
-    ),
-    ""
-  );
+  const invoiceAmount =
+    normalizedInvoices
+      .reduce(
+        (sum, item) =>
+          sum + getHomeInvoiceAmount(item),
+        0
+      );
 
-  const updatedAt = normalizeDateValue(
-    root.updatedAt,
-    root.lastUpdate,
-    root.generatedAt,
-    root.createdAt,
-    root.date,
-    root.timestamp
-  );
+  const attachmentsCount =
+    normalizedTickets
+      .reduce(
+        (sum, item) =>
+          sum + getHomeTicketAttachmentsCount(item),
+        0
+      );
+
+  const finalTicketsTotal =
+    Math.max(
+      normalizedTickets.length,
+      safeNumber(ticketsTotal, normalizedTickets.length)
+    );
+
+  const finalInvoicesTotal =
+    Math.max(
+      normalizedInvoices.length,
+      safeNumber(invoicesTotal, normalizedInvoices.length)
+    );
+
+  const finalUsersTotal =
+    Math.max(
+      safeArray(users).length,
+      safeNumber(usersTotal, safeArray(users).length)
+    );
+
+  const finalClientsTotal =
+    Math.max(
+      safeArray(clients).length,
+      safeNumber(clientsTotal, safeArray(clients).length)
+    );
+
+  const latestTicketUpdate =
+    normalizedTickets
+      .map((item) =>
+        parseDateMs(
+          getHomeTicketUpdatedAt(item) ||
+            getHomeTicketCreatedAt(item)
+        )
+      )
+      .filter(Boolean)
+      .sort((a, b) => b - a)[0] || 0;
 
   return {
-    summary,
-    widgets,
-    recent,
+    totalTickets:
+      finalTicketsTotal,
 
-    widgetsCount: widgets.length,
-    recentCount: recent.length,
+    ticketsTotal:
+      finalTicketsTotal,
 
-    requestId,
-    updatedAt,
-    updatedAtTs: toTimestamp(updatedAt),
+    incidenciasTotal:
+      finalTicketsTotal,
 
-    hasWidgets: widgets.length > 0,
-    hasRecent: recent.length > 0,
+    totalIncidencias:
+      finalTicketsTotal,
 
-    raw: root,
+    visibleTickets:
+      normalizedTickets.length,
+
+    visibleTicketsCount:
+      normalizedTickets.length,
+
+    visibleIncidenciasCount:
+      normalizedTickets.length,
+
+    openTickets,
+    pendingTickets:
+      openTickets,
+
+    openIncidencias:
+      openTickets,
+
+    pendingIncidencias:
+      openTickets,
+
+    incidenciasAbiertas:
+      openTickets,
+
+    closedTickets,
+    resolvedTickets:
+      closedTickets,
+
+    closedIncidencias:
+      closedTickets,
+
+    resolvedIncidencias:
+      closedTickets,
+
+    incidenciasCerradas:
+      closedTickets,
+
+    urgentTickets,
+    urgentIncidencias:
+      urgentTickets,
+
+    highPriorityTickets:
+      urgentTickets,
+
+    totalInvoices:
+      finalInvoicesTotal,
+
+    invoicesTotal:
+      finalInvoicesTotal,
+
+    facturasTotal:
+      finalInvoicesTotal,
+
+    totalFacturas:
+      finalInvoicesTotal,
+
+    visibleInvoices:
+      normalizedInvoices.length,
+
+    visibleInvoicesCount:
+      normalizedInvoices.length,
+
+    visibleFacturasCount:
+      normalizedInvoices.length,
+
+    pendingInvoices,
+    pendingFacturas:
+      pendingInvoices,
+
+    facturasPendientes:
+      pendingInvoices,
+
+    invoicesPending:
+      pendingInvoices,
+
+    invoiceAmount,
+    billingTotal:
+      invoiceAmount,
+
+    totalBilling:
+      invoiceAmount,
+
+    totalFacturado:
+      invoiceAmount,
+
+    importeFacturas:
+      invoiceAmount,
+
+    facturacionVisible:
+      invoiceAmount,
+
+    usersCount:
+      finalUsersTotal,
+
+    usuariosCount:
+      finalUsersTotal,
+
+    totalUsers:
+      finalUsersTotal,
+
+    totalUsuarios:
+      finalUsersTotal,
+
+    visibleUsersCount:
+      safeArray(users).length,
+
+    visibleUsuariosCount:
+      safeArray(users).length,
+
+    clientsCount:
+      finalClientsTotal,
+
+    clientesCount:
+      finalClientsTotal,
+
+    customersCount:
+      finalClientsTotal,
+
+    totalClients:
+      finalClientsTotal,
+
+    totalClientes:
+      finalClientsTotal,
+
+    totalCustomers:
+      finalClientsTotal,
+
+    visibleClientsCount:
+      safeArray(clients).length,
+
+    visibleClientesCount:
+      safeArray(clients).length,
+
+    visibleCustomersCount:
+      safeArray(clients).length,
+
+    attachmentsCount,
+    filesCount:
+      attachmentsCount,
+
+    adjuntosCount:
+      attachmentsCount,
+
+    lastTicketUpdate:
+      latestTicketUpdate
+        ? new Date(latestTicketUpdate).toISOString()
+        : null,
+  };
+}
+
+export function normalizeHomeSummary(rawSummary = {}, widgetSummary = {}, derivedSummary = {}) {
+  const raw =
+    safeObject(rawSummary);
+
+  const widget =
+    safeObject(widgetSummary);
+
+  const derived =
+    safeObject(derivedSummary);
+
+  const sources = [
+    raw,
+    widget,
+    derived,
+  ];
+
+  const totalTickets =
+    pickMaxFromSources(
+      [
+        "totalTickets",
+        "ticketsTotal",
+        "incidenciasTotal",
+        "totalIncidencias",
+        "ticketsCount",
+        "incidenciasCount",
+      ],
+      sources,
+      0
+    );
+
+  const openTickets =
+    pickMaxFromSources(
+      [
+        "openTickets",
+        "pendingTickets",
+        "openIncidencias",
+        "pendingIncidencias",
+        "incidenciasAbiertas",
+        "ticketsOpen",
+      ],
+      sources,
+      0
+    );
+
+  const closedTickets =
+    pickMaxFromSources(
+      [
+        "closedTickets",
+        "resolvedTickets",
+        "closedIncidencias",
+        "resolvedIncidencias",
+        "incidenciasCerradas",
+      ],
+      sources,
+      0
+    );
+
+  const urgentTickets =
+    pickMaxFromSources(
+      [
+        "urgentTickets",
+        "urgentIncidencias",
+        "highPriorityTickets",
+        "incidenciasUrgentes",
+      ],
+      sources,
+      0
+    );
+
+  const totalInvoices =
+    pickMaxFromSources(
+      [
+        "totalInvoices",
+        "invoicesTotal",
+        "facturasTotal",
+        "totalFacturas",
+        "invoicesCount",
+        "facturasCount",
+      ],
+      sources,
+      0
+    );
+
+  const pendingInvoices =
+    pickMaxFromSources(
+      [
+        "pendingInvoices",
+        "pendingFacturas",
+        "facturasPendientes",
+        "invoicesPending",
+        "facturasVencidas",
+        "overdueInvoices",
+      ],
+      sources,
+      0
+    );
+
+  const invoiceAmount =
+    pickMaxFromSources(
+      [
+        "invoiceAmount",
+        "billingTotal",
+        "totalBilling",
+        "totalFacturado",
+        "importeFacturas",
+        "facturacionVisible",
+        "facturacionTotal",
+        "facturasImporteTotal",
+      ],
+      sources,
+      0
+    );
+
+  const usersCount =
+    pickMaxFromSources(
+      [
+        "usersCount",
+        "usuariosCount",
+        "totalUsers",
+        "totalUsuarios",
+        "activeUsers",
+        "usuariosActivos",
+      ],
+      sources,
+      0
+    );
+
+  const clientsCount =
+    pickMaxFromSources(
+      [
+        "clientsCount",
+        "clientesCount",
+        "customersCount",
+        "totalClients",
+        "totalClientes",
+        "totalCustomers",
+        "activeClients",
+        "clientesActivos",
+      ],
+      sources,
+      0
+    );
+
+  const attachmentsCount =
+    pickMaxFromSources(
+      [
+        "attachmentsCount",
+        "filesCount",
+        "adjuntosCount",
+      ],
+      sources,
+      0
+    );
+
+  const lastTicketUpdate =
+    pickFirstFromSources(
+      [
+        "lastTicketUpdate",
+        "lastIncidenciaUpdate",
+        "lastUpdate",
+        "updatedAt",
+      ],
+      sources,
+      null
+    );
+
+  const visibleTicketsCount =
+    pickMaxFromSources(
+      [
+        "visibleTickets",
+        "visibleTicketsCount",
+        "visibleIncidenciasCount",
+      ],
+      sources,
+      0
+    );
+
+  const visibleInvoicesCount =
+    pickMaxFromSources(
+      [
+        "visibleInvoices",
+        "visibleInvoicesCount",
+        "visibleFacturasCount",
+      ],
+      sources,
+      0
+    );
+
+  const visibleUsersCount =
+    pickMaxFromSources(
+      [
+        "visibleUsersCount",
+        "visibleUsuariosCount",
+      ],
+      sources,
+      0
+    );
+
+  const visibleClientsCount =
+    pickMaxFromSources(
+      [
+        "visibleClientsCount",
+        "visibleClientesCount",
+        "visibleCustomersCount",
+      ],
+      sources,
+      0
+    );
+
+  return {
+    ...derived,
+    ...widget,
+    ...raw,
+
+    totalTickets,
+    ticketsTotal:
+      totalTickets,
+
+    incidenciasTotal:
+      totalTickets,
+
+    totalIncidencias:
+      totalTickets,
+
+    ticketsCount:
+      totalTickets,
+
+    incidenciasCount:
+      totalTickets,
+
+    openTickets,
+    pendingTickets:
+      openTickets,
+
+    openIncidencias:
+      openTickets,
+
+    pendingIncidencias:
+      openTickets,
+
+    incidenciasAbiertas:
+      openTickets,
+
+    closedTickets,
+    resolvedTickets:
+      closedTickets,
+
+    closedIncidencias:
+      closedTickets,
+
+    resolvedIncidencias:
+      closedTickets,
+
+    incidenciasCerradas:
+      closedTickets,
+
+    urgentTickets,
+    urgentIncidencias:
+      urgentTickets,
+
+    highPriorityTickets:
+      urgentTickets,
+
+    totalInvoices,
+    invoicesTotal:
+      totalInvoices,
+
+    facturasTotal:
+      totalInvoices,
+
+    totalFacturas:
+      totalInvoices,
+
+    invoicesCount:
+      totalInvoices,
+
+    facturasCount:
+      totalInvoices,
+
+    pendingInvoices,
+    pendingFacturas:
+      pendingInvoices,
+
+    facturasPendientes:
+      pendingInvoices,
+
+    invoicesPending:
+      pendingInvoices,
+
+    invoiceAmount,
+    billingTotal:
+      invoiceAmount,
+
+    totalBilling:
+      invoiceAmount,
+
+    totalFacturado:
+      invoiceAmount,
+
+    importeFacturas:
+      invoiceAmount,
+
+    facturacionVisible:
+      invoiceAmount,
+
+    facturacionTotal:
+      invoiceAmount,
+
+    usersCount,
+    usuariosCount:
+      usersCount,
+
+    totalUsers:
+      usersCount,
+
+    totalUsuarios:
+      usersCount,
+
+    activeUsers:
+      Math.max(
+        usersCount,
+        safeNumber(first(raw.activeUsers, raw.usuariosActivos, 0), 0)
+      ),
+
+    usuariosActivos:
+      Math.max(
+        usersCount,
+        safeNumber(first(raw.activeUsers, raw.usuariosActivos, 0), 0)
+      ),
+
+    clientsCount,
+    clientesCount:
+      clientsCount,
+
+    customersCount:
+      clientsCount,
+
+    totalClients:
+      clientsCount,
+
+    totalClientes:
+      clientsCount,
+
+    totalCustomers:
+      clientsCount,
+
+    activeClients:
+      Math.max(
+        clientsCount,
+        safeNumber(first(raw.activeClients, raw.clientesActivos, 0), 0)
+      ),
+
+    clientesActivos:
+      Math.max(
+        clientsCount,
+        safeNumber(first(raw.activeClients, raw.clientesActivos, 0), 0)
+      ),
+
+    attachmentsCount,
+    filesCount:
+      attachmentsCount,
+
+    adjuntosCount:
+      attachmentsCount,
+
+    visibleTicketsCount,
+    visibleIncidenciasCount:
+      visibleTicketsCount,
+
+    visibleInvoicesCount,
+    visibleFacturasCount:
+      visibleInvoicesCount,
+
+    visibleUsersCount,
+    visibleUsuariosCount:
+      visibleUsersCount,
+
+    visibleClientsCount,
+    visibleClientesCount:
+      visibleClientsCount,
+
+    visibleCustomersCount:
+      visibleClientsCount,
+
+    lastTicketUpdate,
   };
 }
 
 /* =========================================================
-   COLLECTION UNWRAP / NORMALIZER
+   DASHBOARD NORMALIZATION
 ========================================================= */
 
-export function unwrapHomeWidgetsPayload(payload = null) {
-  if (!payload) {
-    return [];
-  }
+function getRawSummaryBlock(dashboard = {}) {
+  const raw =
+    safeObject(dashboard);
 
-  if (Array.isArray(payload)) {
-    return payload;
-  }
+  const summary =
+    safeObject(
+      first(
+        raw.summary,
+        raw.stats,
+        raw.metrics,
+        raw.totals,
+        raw.counts,
 
-  const obj = safeObject(payload);
+        raw.dashboard?.summary,
+        raw.data?.summary,
+        raw.payload?.summary,
+        raw.result?.summary,
 
-  const direct = first(
-    obj.widgets,
-    obj.cards,
-    obj.kpis,
-    obj.items
-  );
-
-  if (Array.isArray(direct)) {
-    return direct;
-  }
-
-  const candidates = [
-    obj.data,
-    obj.payload,
-    obj.result,
-    obj.dashboard,
-  ];
-
-  for (const candidate of candidates) {
-    const nested =
-      unwrapHomeWidgetsPayload(candidate);
-
-    if (nested.length) {
-      return nested;
-    }
-  }
-
-  return [];
-}
-
-export function normalizeHomeWidgetsCollection(payload = []) {
-  return unwrapHomeWidgetsPayload(payload).map(
-    normalizeHomeWidgetModel
-  );
-}
-
-/* =========================================================
-   SORT
-========================================================= */
-
-function sortStable(items = [], compareFn) {
-  return safeArray(items)
-    .map((item, index) => ({
-      item,
-      index,
-    }))
-    .sort((a, b) => {
-      const result =
-        compareFn(a.item, b.item);
-
-      return result === 0
-        ? a.index - b.index
-        : result;
-    })
-    .map(({ item }) => item);
-}
-
-export function sortHomeWidgetsByUpdatedDesc(items = []) {
-  return sortStable(
-    items,
-    (a, b) =>
-      safeNumber(b.updatedAtTs, 0) -
-      safeNumber(a.updatedAtTs, 0)
-  );
-}
-
-export function sortHomeWidgetsByValueDesc(items = []) {
-  return sortStable(
-    items,
-    (a, b) =>
-      safeNumber(
-        b.numericValue,
-        Number.NEGATIVE_INFINITY
-      ) -
-      safeNumber(
-        a.numericValue,
-        Number.NEGATIVE_INFINITY
+        {}
       )
+    );
+
+  if (hasOwnKeys(summary)) {
+    return summary;
+  }
+
+  if (
+    "totalTickets" in raw ||
+    "ticketsTotal" in raw ||
+    "incidenciasTotal" in raw ||
+    "openTickets" in raw ||
+    "pendingTickets" in raw ||
+    "totalInvoices" in raw ||
+    "invoicesTotal" in raw ||
+    "facturasTotal" in raw ||
+    "pendingInvoices" in raw ||
+    "invoiceAmount" in raw ||
+    "billingTotal" in raw ||
+    "usersCount" in raw ||
+    "usuariosCount" in raw ||
+    "clientsCount" in raw ||
+    "clientesCount" in raw
+  ) {
+    return raw;
+  }
+
+  return {};
+}
+
+function getWidgetsBlock(dashboard = {}, previous = {}) {
+  const raw =
+    safeObject(dashboard);
+
+  const prev =
+    safeObject(previous);
+
+  const primary =
+    safeArray(
+      first(
+        raw.widgets,
+        raw.cards,
+        raw.kpis,
+        raw.blocks,
+        raw.widgetList,
+        raw.dashboard?.widgets,
+        raw.collections?.widgets,
+        raw.resources?.widgets,
+        []
+      )
+    );
+
+  const fallback =
+    safeArray(
+      first(
+        prev.widgets,
+        prev.cards,
+        prev.kpis,
+        prev.blocks,
+        []
+      )
+    );
+
+  return normalizeHomeWidgetsCollection(
+    primary.length
+      ? primary
+      : fallback
   );
 }
 
-export function sortHomeWidgetsByTrendDesc(items = []) {
-  return sortStable(
-    items,
-    (a, b) =>
-      safeNumber(
-        b.numericTrend,
-        Number.NEGATIVE_INFINITY
-      ) -
-      safeNumber(
-        a.numericTrend,
-        Number.NEGATIVE_INFINITY
-      )
-  );
+function getDashboardCollections(dashboard = {}, previous = {}) {
+  const raw =
+    safeObject(dashboard);
+
+  const prev =
+    safeObject(previous);
+
+  const ticketsBlock =
+    mergeCollectionBlocks(
+      pickCollectionBlock(raw, [
+        "tickets",
+        "incidencias",
+        "incidents",
+        "issues",
+        "supportTickets",
+        "recentTickets",
+        "recentIncidencias",
+        "latestTickets",
+        "latestIncidencias",
+        "ticketItems",
+        "incidenciaItems",
+        "items",
+        "rows",
+      ]),
+      pickCollectionBlock(prev, [
+        "tickets",
+        "incidencias",
+        "incidents",
+        "issues",
+        "supportTickets",
+        "recentTickets",
+        "recentIncidencias",
+        "latestTickets",
+        "latestIncidencias",
+        "ticketItems",
+        "incidenciaItems",
+        "items",
+        "rows",
+      ])
+    );
+
+  const invoicesBlock =
+    mergeCollectionBlocks(
+      pickCollectionBlock(raw, [
+        "facturas",
+        "invoices",
+        "bills",
+        "billing",
+        "payments",
+        "recentFacturas",
+        "recentInvoices",
+        "latestFacturas",
+        "latestInvoices",
+        "invoiceItems",
+        "facturaItems",
+      ]),
+      pickCollectionBlock(prev, [
+        "facturas",
+        "invoices",
+        "bills",
+        "billing",
+        "payments",
+        "recentFacturas",
+        "recentInvoices",
+        "latestFacturas",
+        "latestInvoices",
+        "invoiceItems",
+        "facturaItems",
+      ])
+    );
+
+  const usersBlock =
+    mergeCollectionBlocks(
+      pickCollectionBlock(raw, [
+        "users",
+        "usuarios",
+        "members",
+        "accounts",
+        "userItems",
+        "usuarioItems",
+        "recentUsers",
+        "recentUsuarios",
+      ]),
+      pickCollectionBlock(prev, [
+        "users",
+        "usuarios",
+        "members",
+        "accounts",
+        "userItems",
+        "usuarioItems",
+        "recentUsers",
+        "recentUsuarios",
+      ])
+    );
+
+  const clientsBlock =
+    mergeCollectionBlocks(
+      pickCollectionBlock(raw, [
+        "clients",
+        "clientes",
+        "customers",
+        "accountsClients",
+        "clientItems",
+        "clienteItems",
+        "customerItems",
+        "recentClients",
+        "recentClientes",
+        "recentCustomers",
+      ]),
+      pickCollectionBlock(prev, [
+        "clients",
+        "clientes",
+        "customers",
+        "accountsClients",
+        "clientItems",
+        "clienteItems",
+        "customerItems",
+        "recentClients",
+        "recentClientes",
+        "recentCustomers",
+      ])
+    );
+
+  const activityBlock =
+    mergeCollectionBlocks(
+      pickCollectionBlock(raw, [
+        "activity",
+        "activities",
+        "recentActivity",
+        "recent",
+        "timeline",
+        "logs",
+        "events",
+      ]),
+      pickCollectionBlock(prev, [
+        "activity",
+        "activities",
+        "recentActivity",
+        "recent",
+        "timeline",
+        "logs",
+        "events",
+      ])
+    );
+
+  const tickets =
+    normalizeHomeTicketsCollection(
+      ticketsBlock.items
+    );
+
+  const invoices =
+    normalizeHomeInvoicesCollection(
+      invoicesBlock.items
+    );
+
+  const users =
+    normalizeHomeUsersCollection(
+      usersBlock.items
+    );
+
+  const clients =
+    normalizeHomeClientsCollection(
+      clientsBlock.items
+    );
+
+  const activity =
+    normalizeHomeActivityCollection(
+      activityBlock.items
+    );
+
+  return {
+    tickets,
+    incidencias:
+      tickets,
+
+    ticketsTotal:
+      Math.max(
+        tickets.length,
+        ticketsBlock.total
+      ),
+
+    invoices,
+    facturas:
+      invoices,
+
+    invoicesTotal:
+      Math.max(
+        invoices.length,
+        invoicesBlock.total
+      ),
+
+    users,
+    usuarios:
+      users,
+
+    usersTotal:
+      Math.max(
+        users.length,
+        usersBlock.total
+      ),
+
+    clients,
+    clientes:
+      clients,
+
+    customers:
+      clients,
+
+    clientsTotal:
+      Math.max(
+        clients.length,
+        clientsBlock.total
+      ),
+
+    activity,
+    activities:
+      activity,
+
+    recent:
+      activity,
+
+    recentActivity:
+      activity,
+
+    activityTotal:
+      Math.max(
+        activity.length,
+        activityBlock.total
+      ),
+  };
 }
 
-export function sortHomeWidgetsByTitleAsc(items = []) {
-  return sortStable(
-    items,
-    (a, b) =>
-      stableCompareByString(
-        a.title,
-        b.title
-      )
-  );
+export function normalizeHomeDashboard(payload = null, previousDashboard = {}) {
+  const picked =
+    pickDashboard(payload);
+
+  const previous =
+    safeObject(previousDashboard);
+
+  const raw =
+    {
+      ...previous,
+      ...safeObject(picked),
+    };
+
+  const collections =
+    getDashboardCollections(
+      picked,
+      previous
+    );
+
+  const widgets =
+    getWidgetsBlock(
+      picked,
+      previous
+    );
+
+  const rawSummary =
+    {
+      ...getRawSummaryBlock(previous),
+      ...getRawSummaryBlock(picked),
+    };
+
+  const widgetSummary =
+    buildHomeWidgetSummary(widgets);
+
+  const derivedSummary =
+    buildHomeDerivedSummary({
+      tickets:
+        collections.tickets,
+
+      ticketsTotal:
+        first(
+          rawSummary.totalTickets,
+          rawSummary.ticketsTotal,
+          rawSummary.incidenciasTotal,
+          rawSummary.totalIncidencias,
+          widgetSummary.totalTickets,
+          collections.ticketsTotal
+        ),
+
+      invoices:
+        collections.invoices,
+
+      invoicesTotal:
+        first(
+          rawSummary.totalInvoices,
+          rawSummary.invoicesTotal,
+          rawSummary.facturasTotal,
+          rawSummary.totalFacturas,
+          widgetSummary.totalInvoices,
+          collections.invoicesTotal
+        ),
+
+      users:
+        collections.users,
+
+      usersTotal:
+        first(
+          rawSummary.usersCount,
+          rawSummary.usuariosCount,
+          rawSummary.totalUsers,
+          rawSummary.totalUsuarios,
+          widgetSummary.usersCount,
+          widgetSummary.usuariosCount,
+          collections.usersTotal
+        ),
+
+      clients:
+        collections.clients,
+
+      clientsTotal:
+        first(
+          rawSummary.clientsCount,
+          rawSummary.clientesCount,
+          rawSummary.customersCount,
+          rawSummary.totalClients,
+          rawSummary.totalClientes,
+          widgetSummary.clientsCount,
+          widgetSummary.clientesCount,
+          widgetSummary.customersCount,
+          collections.clientsTotal
+        ),
+    });
+
+  const summary =
+    normalizeHomeSummary(
+      rawSummary,
+      widgetSummary,
+      derivedSummary
+    );
+
+  const activity =
+    collections.activity.length
+      ? collections.activity
+      : buildHomeActivityFromCollections({
+          tickets:
+            collections.tickets,
+          invoices:
+            collections.invoices,
+          users:
+            collections.users,
+          clients:
+            collections.clients,
+        });
+
+  const updatedAt =
+    first(
+      raw.updatedAt,
+      raw.lastUpdate,
+      raw.generatedAt,
+      raw.createdAt,
+      summary.updatedAt,
+      summary.lastUpdate,
+      previous.updatedAt,
+      previous.generatedAt,
+      nowIso()
+    );
+
+  return {
+    ...raw,
+
+    version:
+      HOME_MODEL_VERSION,
+
+    ok:
+      raw.ok !== false,
+
+    summary,
+    stats:
+      summary,
+
+    metrics:
+      summary,
+
+    totals:
+      summary,
+
+    counts:
+      summary,
+
+    widgets,
+    cards:
+      widgets,
+
+    kpis:
+      widgets,
+
+    blocks:
+      widgets,
+
+    tickets:
+      collections.tickets,
+
+    incidencias:
+      collections.incidencias,
+
+    ticketsTotal:
+      summary.totalTickets,
+
+    incidenciasTotal:
+      summary.totalTickets,
+
+    totalTickets:
+      summary.totalTickets,
+
+    totalIncidencias:
+      summary.totalTickets,
+
+    ticketsCount:
+      summary.totalTickets,
+
+    incidenciasCount:
+      summary.totalTickets,
+
+    visibleTicketsCount:
+      collections.tickets.length,
+
+    visibleIncidenciasCount:
+      collections.tickets.length,
+
+    invoices:
+      collections.invoices,
+
+    facturas:
+      collections.facturas,
+
+    invoicesTotal:
+      summary.totalInvoices,
+
+    facturasTotal:
+      summary.totalInvoices,
+
+    totalInvoices:
+      summary.totalInvoices,
+
+    totalFacturas:
+      summary.totalInvoices,
+
+    invoicesCount:
+      summary.totalInvoices,
+
+    facturasCount:
+      summary.totalInvoices,
+
+    visibleInvoicesCount:
+      collections.invoices.length,
+
+    visibleFacturasCount:
+      collections.invoices.length,
+
+    users:
+      collections.users,
+
+    usuarios:
+      collections.usuarios,
+
+    usersTotal:
+      summary.usersCount,
+
+    usuariosTotal:
+      summary.usuariosCount,
+
+    totalUsers:
+      summary.usersCount,
+
+    totalUsuarios:
+      summary.usuariosCount,
+
+    usersCount:
+      summary.usersCount,
+
+    usuariosCount:
+      summary.usuariosCount,
+
+    visibleUsersCount:
+      collections.users.length,
+
+    visibleUsuariosCount:
+      collections.users.length,
+
+    clients:
+      collections.clients,
+
+    clientes:
+      collections.clientes,
+
+    customers:
+      collections.customers,
+
+    clientsTotal:
+      summary.clientsCount,
+
+    clientesTotal:
+      summary.clientesCount,
+
+    customersTotal:
+      summary.customersCount,
+
+    totalClients:
+      summary.clientsCount,
+
+    totalClientes:
+      summary.clientesCount,
+
+    totalCustomers:
+      summary.customersCount,
+
+    clientsCount:
+      summary.clientsCount,
+
+    clientesCount:
+      summary.clientesCount,
+
+    customersCount:
+      summary.customersCount,
+
+    visibleClientsCount:
+      collections.clients.length,
+
+    visibleClientesCount:
+      collections.clients.length,
+
+    visibleCustomersCount:
+      collections.clients.length,
+
+    activity,
+    activities:
+      activity,
+
+    recent:
+      activity,
+
+    recentActivity:
+      activity,
+
+    activityCount:
+      activity.length,
+
+    recentCount:
+      activity.length,
+
+    visibleActivityCount:
+      activity.length,
+
+    updatedAt:
+      updatedAt,
+
+    generatedAt:
+      first(raw.generatedAt, updatedAt),
+
+    meta: {
+      ...safeObject(raw.meta),
+
+      updatedAt,
+      generatedAt:
+        first(raw.generatedAt, updatedAt),
+
+      widgetsCount:
+        widgets.length,
+
+      ticketsCount:
+        summary.totalTickets,
+
+      incidenciasCount:
+        summary.totalTickets,
+
+      visibleTicketsCount:
+        collections.tickets.length,
+
+      visibleIncidenciasCount:
+        collections.tickets.length,
+
+      invoicesCount:
+        summary.totalInvoices,
+
+      facturasCount:
+        summary.totalInvoices,
+
+      visibleInvoicesCount:
+        collections.invoices.length,
+
+      visibleFacturasCount:
+        collections.invoices.length,
+
+      usersCount:
+        summary.usersCount,
+
+      usuariosCount:
+        summary.usuariosCount,
+
+      visibleUsersCount:
+        collections.users.length,
+
+      visibleUsuariosCount:
+        collections.users.length,
+
+      clientsCount:
+        summary.clientsCount,
+
+      clientesCount:
+        summary.clientesCount,
+
+      customersCount:
+        summary.customersCount,
+
+      visibleClientsCount:
+        collections.clients.length,
+
+      visibleClientesCount:
+        collections.clients.length,
+
+      visibleCustomersCount:
+        collections.clients.length,
+
+      activityCount:
+        activity.length,
+
+      recentCount:
+        activity.length,
+
+      visibleActivityCount:
+        activity.length,
+    },
+
+    raw:
+      payload,
+  };
 }
 
 /* =========================================================
    PAGINATION
 ========================================================= */
 
-export function paginateHomeWidgets(
-  items = [],
-  page = 1,
-  pageSize = DEFAULT_PAGE_SIZE
-) {
-  const list = safeArray(items);
+export function paginateHomeItems(items = [], page = 1, pageSize = HOME_DEFAULT_PAGE_SIZE) {
+  const rows =
+    safeArray(items);
 
-  const size = Math.max(
-    1,
-    safeNumber(
-      pageSize,
-      DEFAULT_PAGE_SIZE
-    )
-  );
-
-  const total = list.length;
-
-  const totalPages = Math.max(
-    1,
-    Math.ceil(total / size)
-  );
-
-  const current = Math.min(
+  const size =
     Math.max(
       1,
-      safeNumber(page, 1)
-    ),
-    totalPages
-  );
+      safeNumber(pageSize, HOME_DEFAULT_PAGE_SIZE)
+    );
+
+  const total =
+    rows.length;
+
+  const totalPages =
+    Math.max(
+      1,
+      Math.ceil((total || 1) / size)
+    );
+
+  const currentPage =
+    Math.min(
+      Math.max(
+        1,
+        safeNumber(page, 1)
+      ),
+      totalPages
+    );
 
   const start =
-    (current - 1) * size;
+    (currentPage - 1) * size;
 
-  const end =
-    start + size;
+  const pageItems =
+    rows.slice(
+      start,
+      start + size
+    );
 
   return {
-    page: current,
-    pageSize: size,
+    items:
+      pageItems,
+
+    pageItems,
+
+    rows:
+      pageItems,
+
+    data:
+      pageItems,
+
+    page:
+      currentPage,
+
+    currentPage,
+
+    pageSize:
+      size,
+
+    limit:
+      size,
+
     total,
+    totalCount:
+      total,
+
     totalPages,
 
-    hasPrev: current > 1,
-    hasNext: current < totalPages,
+    hasPrev:
+      currentPage > 1,
+
+    hasNext:
+      currentPage < totalPages,
 
     prevPage:
-      current > 1
-        ? current - 1
+      currentPage > 1
+        ? currentPage - 1
         : null,
 
     nextPage:
-      current < totalPages
-        ? current + 1
+      currentPage < totalPages
+        ? currentPage + 1
         : null,
 
-    items: list.slice(start, end),
-
-    from:
-      total === 0
-        ? 0
-        : start + 1,
-
-    to: Math.min(end, total),
+    start,
+    end:
+      start + pageItems.length,
   };
 }
 
+export function paginateHomeTickets(tickets = [], page = 1, pageSize = HOME_DEFAULT_PAGE_SIZE) {
+  return paginateHomeItems(
+    sortHomeTicketsByUpdatedDesc(tickets),
+    page,
+    pageSize
+  );
+}
+
 /* =========================================================
-   STATS
+   ROLE / FORMAT HELPERS
 ========================================================= */
 
-export function computeHomeWidgetsStats(items = []) {
-  const list = safeArray(items);
+export function normalizeHomeRole(role = "user") {
+  return normalizeKey(role || "user") || "user";
+}
 
-  const numericValues = list
-    .map((item) => item.numericValue)
-    .filter(Number.isFinite);
+export function isHomeAdminRole(role = "") {
+  const key =
+    normalizeHomeRole(role);
 
-  const numericTrends = list
-    .map((item) => item.numericTrend)
-    .filter(Number.isFinite);
+  return [
+    "admin",
+    "administrator",
+    "administrador",
+    "superadmin",
+    "super_admin",
+    "super_administrador",
+    "owner",
+    "root",
+    "staff",
+    "support",
+    "soporte",
+    "tecnico",
+    "técnico",
+  ].includes(key);
+}
 
-  const sumValues = numericValues.reduce(
-    (acc, value) => acc + value,
-    0
-  );
+export function formatHomeMoney(value = 0, currency = "EUR") {
+  const amount =
+    Number(value);
 
-  const sumTrends = numericTrends.reduce(
-    (acc, value) => acc + value,
-    0
-  );
+  if (!Number.isFinite(amount)) {
+    return "—";
+  }
+
+  const code =
+    safeText(currency, "EUR").toUpperCase();
+
+  try {
+    return new Intl.NumberFormat(
+      "es-ES",
+      {
+        style:
+          "currency",
+
+        currency:
+          code,
+
+        maximumFractionDigits:
+          2,
+      }
+    ).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${code}`;
+  }
+}
+
+/* =========================================================
+   VIEW MODEL BUILDER
+========================================================= */
+
+export function buildHomeViewModel({
+  dashboard = EMPTY_DASHBOARD,
+  previousDashboard = EMPTY_DASHBOARD,
+  user = null,
+  role = "user",
+  state = {},
+  page = 1,
+  pageSize = HOME_DEFAULT_PAGE_SIZE,
+} = {}) {
+  const normalizedDashboard =
+    normalizeHomeDashboard(
+      dashboard,
+      previousDashboard
+    );
+
+  const tickets =
+    sortHomeTicketsByUpdatedDesc(
+      normalizedDashboard.tickets
+    );
+
+  const pagination =
+    paginateHomeTickets(
+      tickets,
+      page,
+      pageSize
+    );
+
+  const ticketsInput =
+    buildHomeCollectionEnvelope(
+      tickets,
+      normalizedDashboard.summary.totalTickets
+    );
+
+  const invoicesInput =
+    buildHomeCollectionEnvelope(
+      normalizedDashboard.invoices,
+      normalizedDashboard.summary.totalInvoices
+    );
+
+  const usersInput =
+    buildHomeCollectionEnvelope(
+      normalizedDashboard.users,
+      normalizedDashboard.summary.usersCount
+    );
+
+  const clientsInput =
+    buildHomeCollectionEnvelope(
+      normalizedDashboard.clients,
+      normalizedDashboard.summary.clientsCount
+    );
+
+  const activityInput =
+    buildHomeCollectionEnvelope(
+      normalizedDashboard.activity,
+      normalizedDashboard.activity.length
+    );
+
+  const finalRole =
+    normalizeHomeRole(role);
+
+  const isAdmin =
+    isHomeAdminRole(finalRole);
 
   return {
-    total: list.length,
+    version:
+      HOME_MODEL_VERSION,
 
-    active: list.filter((x) => x.isActive).length,
-    warning: list.filter((x) => x.isWarning).length,
-    error: list.filter((x) => x.isError).length,
-    disabled: list.filter((x) => x.isDisabled).length,
+    user,
+    role:
+      finalRole,
 
-    withRoute: list.filter((x) => x.hasRoute).length,
-    withItems: list.filter((x) => x.hasItems).length,
-    withValue: list.filter((x) => x.hasValue).length,
-    withTrend: list.filter((x) => x.hasTrend).length,
+    isAdmin,
 
-    kpis: list.filter((x) => x.isKpi).length,
-    metrics: list.filter((x) => x.isMetric).length,
-    lists: list.filter((x) => x.isList).length,
-    tables: list.filter((x) => x.isTable).length,
-    activities: list.filter((x) => x.isActivity).length,
-    shortcuts: list.filter((x) => x.isShortcut).length,
+    dashboard:
+      normalizedDashboard,
 
-    positiveTrend: list.filter((x) => x.isPositiveTrend).length,
-    negativeTrend: list.filter((x) => x.isNegativeTrend).length,
+    summary:
+      normalizedDashboard.summary,
 
-    sumValues,
-    averageValue:
-      numericValues.length
-        ? sumValues / numericValues.length
-        : 0,
+    stats:
+      normalizedDashboard.summary,
 
-    sumTrends,
-    averageTrend:
-      numericTrends.length
-        ? sumTrends / numericTrends.length
-        : 0,
+    metrics:
+      normalizedDashboard.summary,
+
+    totals:
+      normalizedDashboard.summary,
+
+    counts:
+      normalizedDashboard.summary,
+
+    widgets:
+      normalizedDashboard.widgets,
+
+    cards:
+      normalizedDashboard.widgets,
+
+    kpis:
+      normalizedDashboard.widgets,
+
+    tickets:
+      ticketsInput,
+
+    incidencias:
+      ticketsInput,
+
+    facturas:
+      invoicesInput,
+
+    invoices:
+      invoicesInput,
+
+    users:
+      usersInput,
+
+    usuarios:
+      usersInput,
+
+    clients:
+      clientsInput,
+
+    clientes:
+      clientsInput,
+
+    customers:
+      clientsInput,
+
+    activity:
+      activityInput,
+
+    activities:
+      activityInput,
+
+    recent:
+      activityInput,
+
+    recentActivity:
+      activityInput,
+
+    items:
+      tickets,
+
+    page:
+      pagination.page,
+
+    pageSize:
+      pagination.pageSize,
+
+    totalPages:
+      pagination.totalPages,
+
+    pagination,
+
+    totalCount:
+      normalizedDashboard.summary.totalTickets,
+
+    remoteCount:
+      normalizedDashboard.summary.totalTickets,
+
+    visibleCount:
+      tickets.length,
+
+    requestId:
+      safeText(
+        first(
+          state.requestId,
+          normalizedDashboard.requestId,
+          normalizedDashboard.meta?.requestId,
+          ""
+        ),
+        ""
+      ),
+
+    lastUpdatedAt:
+      first(
+        state.lastSyncAt,
+        normalizedDashboard.updatedAt,
+        normalizedDashboard.generatedAt,
+        null
+      ),
+
+    state: {
+      ...safeObject(state),
+
+      user,
+      role:
+        finalRole,
+
+      isAdmin,
+
+      dashboard:
+        normalizedDashboard,
+
+      summary:
+        normalizedDashboard.summary,
+
+      stats:
+        normalizedDashboard.summary,
+
+      metrics:
+        normalizedDashboard.summary,
+
+      totals:
+        normalizedDashboard.summary,
+
+      counts:
+        normalizedDashboard.summary,
+
+      widgets:
+        normalizedDashboard.widgets,
+
+      items:
+        tickets,
+
+      tickets:
+        ticketsInput,
+
+      incidencias:
+        ticketsInput,
+
+      facturas:
+        invoicesInput,
+
+      invoices:
+        invoicesInput,
+
+      users:
+        usersInput,
+
+      usuarios:
+        usersInput,
+
+      clients:
+        clientsInput,
+
+      clientes:
+        clientsInput,
+
+      customers:
+        clientsInput,
+
+      activity:
+        activityInput,
+
+      recentActivity:
+        activityInput,
+
+      recent:
+        activityInput,
+
+      page:
+        pagination.page,
+
+      pageSize:
+        pagination.pageSize,
+
+      totalPages:
+        pagination.totalPages,
+
+      pagination,
+
+      totalCount:
+        normalizedDashboard.summary.totalTickets,
+
+      remoteCount:
+        normalizedDashboard.summary.totalTickets,
+
+      visibleCount:
+        tickets.length,
+    },
   };
 }
 
 /* =========================================================
-   FINDERS
+   DEBUG SNAPSHOT
 ========================================================= */
 
-export function findHomeWidgetById(items = [], widgetId = "") {
-  const id = safeText(widgetId, "");
-
-  if (!id) {
-    return null;
-  }
-
-  return (
-    safeArray(items).find((item) => {
-      const candidates = [
-        item.widgetId,
-        item.id,
-        item.key,
-        item.slug,
-        item.code,
-        item.raw?.widgetId,
-        item.raw?.id,
-        item.raw?.key,
-        item.raw?.slug,
-        item.raw?.code,
-      ];
-
-      return candidates.some(
-        (candidate) =>
-          safeText(candidate, "") === id
-      );
-    }) || null
-  );
-}
-
-export function filterHomeWidgetsByStatus(items = [], status = "") {
+export function getHomeModelSnapshot(dashboard = {}) {
   const normalized =
-    normalizeWidgetStatus(status);
+    normalizeHomeDashboard(dashboard);
 
-  return safeArray(items).filter(
-    (item) =>
-      normalizeWidgetStatus(item.status) === normalized
-  );
+  return {
+    version:
+      HOME_MODEL_VERSION,
+
+    hasDashboard:
+      hasOwnKeys(normalized),
+
+    counts: {
+      widgets:
+        normalized.widgets.length,
+
+      tickets:
+        normalized.tickets.length,
+
+      invoices:
+        normalized.invoices.length,
+
+      users:
+        normalized.users.length,
+
+      clients:
+        normalized.clients.length,
+
+      activity:
+        normalized.activity.length,
+    },
+
+    totals: {
+      tickets:
+        normalized.summary.totalTickets,
+
+      invoices:
+        normalized.summary.totalInvoices,
+
+      users:
+        normalized.summary.usersCount,
+
+      clients:
+        normalized.summary.clientsCount,
+
+      pendingInvoices:
+        normalized.summary.pendingInvoices,
+
+      invoiceAmount:
+        normalized.summary.invoiceAmount,
+    },
+
+    updatedAt:
+      normalized.updatedAt || null,
+  };
 }
 
-export function filterHomeWidgetsByType(items = [], type = "") {
-  const normalized =
-    normalizeWidgetType(type);
+/* =========================================================
+   PUBLIC API
+========================================================= */
 
-  return safeArray(items).filter(
-    (item) =>
-      normalizeWidgetType(item.type) === normalized
-  );
-}
+export const HomeModel =
+  Object.freeze({
+    version:
+      HOME_MODEL_VERSION,
 
-export function searchHomeWidgets(items = [], query = "") {
-  const q = safeText(query, "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+    routes:
+      HOME_ROUTES,
 
-  if (!q) {
-    return safeArray(items);
-  }
+    pageSize:
+      HOME_DEFAULT_PAGE_SIZE,
 
-  return safeArray(items).filter((item) => {
-    const haystack = [
-      item.widgetId,
-      item.id,
-      item.key,
-      item.slug,
-      item.code,
-      item.title,
-      item.description,
-      item.type,
-      item.status,
-      item.route,
-      ...safeArray(item.tags),
-    ]
-      .map((value) =>
-        safeText(value, "")
-          .toLowerCase()
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-      )
-      .join(" ");
+    normalizeDashboard:
+      normalizeHomeDashboard,
 
-    return haystack.includes(q);
+    normalizeSummary:
+      normalizeHomeSummary,
+
+    buildViewModel:
+      buildHomeViewModel,
+
+    buildCollectionEnvelope:
+      buildHomeCollectionEnvelope,
+
+    paginateItems:
+      paginateHomeItems,
+
+    paginateTickets:
+      paginateHomeTickets,
+
+    normalizeTicket:
+      normalizeHomeTicket,
+
+    normalizeTickets:
+      normalizeHomeTicketsCollection,
+
+    sortTicketsByUpdatedDesc:
+      sortHomeTicketsByUpdatedDesc,
+
+    findTicketById:
+      findHomeTicketById,
+
+    getTicketId:
+      getHomeTicketId,
+
+    getTicketAliases:
+      getHomeTicketAliases,
+
+    getTicketStatusKey:
+      getHomeTicketStatusKey,
+
+    getTicketStatusLabel:
+      getHomeTicketStatusLabel,
+
+    getTicketPriorityKey:
+      getHomeTicketPriorityKey,
+
+    getTicketPriorityLabel:
+      getHomeTicketPriorityLabel,
+
+    normalizeInvoice:
+      normalizeHomeInvoice,
+
+    normalizeInvoices:
+      normalizeHomeInvoicesCollection,
+
+    getInvoiceId:
+      getHomeInvoiceId,
+
+    getInvoiceAmount:
+      getHomeInvoiceAmount,
+
+    getInvoiceCurrency:
+      getHomeInvoiceCurrency,
+
+    getInvoiceStatusKey:
+      getHomeInvoiceStatusKey,
+
+    normalizeUser:
+      normalizeHomeUser,
+
+    normalizeUsers:
+      normalizeHomeUsersCollection,
+
+    getUserId:
+      getHomeUserId,
+
+    normalizeClient:
+      normalizeHomeClient,
+
+    normalizeClients:
+      normalizeHomeClientsCollection,
+
+    getClientId:
+      getHomeClientId,
+
+    normalizeActivity:
+      normalizeHomeActivityItem,
+
+    normalizeActivityCollection:
+      normalizeHomeActivityCollection,
+
+    buildActivityFromCollections:
+      buildHomeActivityFromCollections,
+
+    normalizeWidget:
+      normalizeHomeWidget,
+
+    normalizeWidgets:
+      normalizeHomeWidgetsCollection,
+
+    findWidgetById:
+      findHomeWidgetById,
+
+    getWidgetId:
+      getHomeWidgetId,
+
+    getWidgetTitle:
+      getHomeWidgetTitle,
+
+    normalizeRole:
+      normalizeHomeRole,
+
+    isAdminRole:
+      isHomeAdminRole,
+
+    formatMoney:
+      formatHomeMoney,
+
+    getSnapshot:
+      getHomeModelSnapshot,
   });
-}
 
-/* =========================================================
-   EMPTY FACTORY
-========================================================= */
-
-export function createEmptyHomeDashboardModel() {
-  return normalizeHomeDashboardModel(
-    EMPTY_DASHBOARD
-  );
-}
-
-/* =========================================================
-   DEFAULT EXPORT
-========================================================= */
-
-export default {
-  DEFAULT_PAGE_SIZE,
-
-  WIDGET_STATUS,
-  WIDGET_TYPE,
-
-  normalizeHomeDashboardModel,
-  normalizeHomeWidgetModel,
-  normalizeHomeWidgetsCollection,
-
-  unwrapHomeDashboardPayload,
-  unwrapHomeWidgetsPayload,
-
-  sortHomeWidgetsByUpdatedDesc,
-  sortHomeWidgetsByValueDesc,
-  sortHomeWidgetsByTrendDesc,
-  sortHomeWidgetsByTitleAsc,
-
-  paginateHomeWidgets,
-  computeHomeWidgetsStats,
-
-  findHomeWidgetById,
-  filterHomeWidgetsByStatus,
-  filterHomeWidgetsByType,
-  searchHomeWidgets,
-
-  getWidgetStatusLabel,
-  getWidgetTypeLabel,
-  normalizeWidgetStatus,
-  normalizeWidgetType,
-
-  getInitials,
-  getWidgetTheme,
-
-  toDate,
-  toTimestamp,
-
-  createEmptyHomeDashboardModel,
-};
+export default HomeModel;

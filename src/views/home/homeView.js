@@ -1,55 +1,37 @@
 /* =========================================================
    Onion SPA - Home View
-   Archivo: src/views/home/HomeView.js
+   Archivo: src/views/home/homeView.js
 
-   HOME EXPERIENCE MODE · USER + ADMIN · DASHBOARD API FIRST
-   EXTREME PRO SYSTEM · CLEAN VIEW · NO CSS · NO DUPLICATES
+   ONION SUPPORT · HOME VIEW
+   DASHBOARD API FIRST · ROUTE SAFE · CLEAN VIEW · 10/10
 
    RESPONSABILIDADES:
-   - punto de entrada real de la vista Home
-   - render principal con template unificado home.template.js
-   - usar home.api.js como fuente principal de datos
-   - consumir /api/dashboard/summary normalizado por HomeApi
-   - fallback fuerte a incidencias/clientes/usuarios/facturas si dashboard viene parcial
-   - Home para user/admin con la misma lógica
-   - paginación visual fija a 5 incidencias por vista
-   - render inicial inmediato
-   - bind inmediato tras primer render
-   - refresh con loader suave
-   - apertura de incidencia con estado visual de loading
-   - apertura de modal de creación de incidencia
-   - navegación por accesos rápidos
-   - bind de eventos de pantalla
-   - evitar doble bind de listeners
-   - soportar destroy limpio del router
-   - permitir reload con rerender seguro
-   - registrar bridge público para topbar/global search
-   - preservar datos de dashboard y fallback de colecciones
-   - evitar que refresh empobrezca el Home si API devuelve parcial
-   - trabajar alineado con el template Home premium
+   - Punto de entrada real de la vista Home.
+   - Render principal con home.template.js.
+   - API-first con home.api.js.
+   - Consumir dashboard summary normalizado.
+   - Fallback fuerte a incidencias/clientes/usuarios/facturas.
+   - Home común para user/admin.
+   - Paginación visual fija a 5 incidencias.
+   - Render inicial inmediato con datos cacheados si existen.
+   - Bind inmediato después del primer render.
+   - Refresh suave sin empobrecer datos existentes.
+   - Apertura de incidencia con estado visual loading.
+   - Apertura de modal de creación de incidencia.
+   - Navegación por accesos rápidos.
+   - Bind de eventos sin duplicidad bus + window.
+   - Destroy limpio para Router.
+   - Reload con cola segura.
+   - Bridge público para topbar/global search.
+   - Protección contra renders stale encima de otras vistas.
 
-   HARDENING:
-   - View = UX, render, eventos, bridges y fallbacks de módulo
-   - API = request, normalización, dashboard summary y collections
-   - estado local autocontenido
-   - anti-race token
-   - cleanup total
-   - click delegation sólida
-   - fallback si /api/dashboard/summary no entrega colecciones completas
-   - anti spam click en crear incidencia
-   - anti spam apertura rápida de tickets
-   - compatible con template data-home-action y data-action
-   - reload con cola segura
-   - eventos AppCore + window
-   - bridge AppCore.modules + window
-   - modal directo por import + fallback global
-
-   CLEAN PATCH:
-   - sin CSS inline
-   - sin <style>
-   - sin Object.assign(style)
-   - sin helpers duplicados con imports
-   - sin imports de selectors que colisionen con helpers locales
+   REGLAS:
+   - Sin CSS inline.
+   - Sin <style>.
+   - Sin Object.assign(style).
+   - Sin listeners duplicados.
+   - Sin render Home si la ruta activa no es Home.
+   - API/model/store externos hacen datos; la vista orquesta UX.
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -86,6 +68,10 @@ import {
 import IncidenciasCreateView from "../incidencias/incidencias.create.modal.js";
 import { OnionIncidenciasModal } from "../incidencias/incidencias.modal.js";
 
+/* =========================================================
+   MODULE
+========================================================= */
+
 export const HomeView = (() => {
   "use strict";
 
@@ -93,13 +79,16 @@ export const HomeView = (() => {
      CONSTANTS
   ========================================================= */
 
+  const SOURCE = "views:home:homeView";
   const SCOPE = "view:home";
+
+  const HOME_PATH = "/";
 
   const PAGE_SIZE = 5;
   const CREATE_CLICK_THROTTLE_MS = 450;
   const OPEN_TICKET_THROTTLE_MS = 350;
 
-  const HOME_CACHE_KEY = "onion.home.view.cache.v5";
+  const HOME_CACHE_KEY = "onion.home.view.cache.v6";
   const HOME_CACHE_TTL_MS = 1000 * 60 * 10;
 
   const OPTIONAL_IMPORT_TIMEOUT_MS = 7000;
@@ -198,8 +187,11 @@ export const HomeView = (() => {
     "router:rendered",
   ]);
 
+  const ACTION_SELECTOR =
+    "[data-home-action],[data-action],#home-create-ticket-btn,#home-retry-btn,#home-refresh-btn";
+
   /* =========================================================
-     LOCAL RUNTIME
+     RUNTIME
   ========================================================= */
 
   let initialized = false;
@@ -266,19 +258,36 @@ export const HomeView = (() => {
   ========================================================= */
 
   function isBrowser() {
-    return typeof window !== "undefined" && typeof document !== "undefined";
+    return (
+      typeof window !== "undefined" &&
+      typeof document !== "undefined"
+    );
   }
 
   function isObject(value) {
-    return value !== null && typeof value === "object" && !Array.isArray(value);
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    );
   }
 
   function isFunction(value) {
     return typeof value === "function";
   }
 
+  function isNodeLike(value) {
+    return Boolean(
+      value &&
+        typeof value === "object" &&
+        typeof value.nodeType === "number"
+    );
+  }
+
   function safeText(value, fallback = "") {
-    if (value === null || value === undefined) return fallback;
+    if (value === null || value === undefined) {
+      return fallback;
+    }
 
     const text = String(value)
       .replace(/[\r\n\t]/g, " ")
@@ -289,7 +298,9 @@ export const HomeView = (() => {
   }
 
   function safeNumber(value, fallback = 0) {
-    if (value === null || value === undefined || value === "") return fallback;
+    if (value === null || value === undefined || value === "") {
+      return fallback;
+    }
 
     if (typeof value === "string") {
       let normalized = value
@@ -317,31 +328,55 @@ export const HomeView = (() => {
       }
 
       const parsed = Number(normalized);
-      return Number.isFinite(parsed) ? parsed : fallback;
+
+      return Number.isFinite(parsed)
+        ? parsed
+        : fallback;
     }
 
     const n = Number(value);
-    return Number.isFinite(n) ? n : fallback;
+
+    return Number.isFinite(n)
+      ? n
+      : fallback;
   }
 
   function safeArray(value) {
-    return Array.isArray(value) ? value : [];
+    return Array.isArray(value)
+      ? value
+      : [];
   }
 
   function safeObject(value, fallback = {}) {
-    return isObject(value) ? value : fallback;
+    return isObject(value)
+      ? value
+      : fallback;
   }
 
   function hasOwnKeys(value = {}) {
-    return Boolean(isObject(value) && Object.keys(value).length);
+    return Boolean(
+      isObject(value) &&
+        Object.keys(value).length
+    );
   }
 
   function first(...values) {
     for (const value of values) {
-      if (value === undefined || value === null) continue;
-      if (typeof value === "string" && value.trim() === "") continue;
-      if (Array.isArray(value) && value.length === 0) continue;
-      if (isObject(value) && Object.keys(value).length === 0) continue;
+      if (value === undefined || value === null) {
+        continue;
+      }
+
+      if (typeof value === "string" && value.trim() === "") {
+        continue;
+      }
+
+      if (Array.isArray(value) && value.length === 0) {
+        continue;
+      }
+
+      if (isObject(value) && Object.keys(value).length === 0) {
+        continue;
+      }
 
       return value;
     }
@@ -369,7 +404,11 @@ export const HomeView = (() => {
     return [
       ...new Set(
         safeArray(values)
-          .flatMap((value) => (Array.isArray(value) ? value : [value]))
+          .flatMap((value) =>
+            Array.isArray(value)
+              ? value
+              : [value]
+          )
           .map((value) => safeText(value, ""))
           .filter(Boolean)
       ),
@@ -389,7 +428,10 @@ export const HomeView = (() => {
       }
 
       const normalized = normalizeText(key);
-      if (seen.has(normalized)) return;
+
+      if (seen.has(normalized)) {
+        return;
+      }
 
       seen.add(normalized);
       output.push(item);
@@ -403,6 +445,14 @@ export const HomeView = (() => {
       return new Date().toISOString();
     } catch {
       return String(Date.now());
+    }
+  }
+
+  function nowMs() {
+    try {
+      return Date.now();
+    } catch {
+      return 0;
     }
   }
 
@@ -443,7 +493,10 @@ export const HomeView = (() => {
   }
 
   function getEventPayload(eventOrPayload = {}) {
-    if (typeof eventOrPayload === "string" || typeof eventOrPayload === "number") {
+    if (
+      typeof eventOrPayload === "string" ||
+      typeof eventOrPayload === "number"
+    ) {
       return {
         ticketId: safeText(eventOrPayload, ""),
       };
@@ -463,7 +516,11 @@ export const HomeView = (() => {
     const left = normalizeText(a);
     const right = normalizeText(b);
 
-    return Boolean(left && right && left === right);
+    return Boolean(
+      left &&
+        right &&
+        left === right
+    );
   }
 
   function timeoutPromise(ms = OPTIONAL_IMPORT_TIMEOUT_MS, label = "timeout") {
@@ -471,119 +528,747 @@ export const HomeView = (() => {
       const timeoutId = setTimeout(() => {
         clearTimeout(timeoutId);
         reject(new Error(label));
-      }, ms);
+      }, Math.max(0, Number(ms) || 0));
     });
   }
 
   async function withTimeout(promise, ms = OPTIONAL_IMPORT_TIMEOUT_MS, label = "timeout") {
-    return Promise.race([promise, timeoutPromise(ms, label)]);
+    return Promise.race([
+      promise,
+      timeoutPromise(ms, label),
+    ]);
+  }
+
+  /* =========================================================
+     PATH / ROUTE GUARD
+  ========================================================= */
+
+  function getBaseOrigin() {
+    if (
+      isBrowser() &&
+      window.location?.origin
+    ) {
+      return window.location.origin;
+    }
+
+    return "http://localhost";
+  }
+
+  function isHashRouterPath(value = "") {
+    const raw = safeText(value, "");
+
+    return (
+      raw.startsWith("#/") ||
+      raw.startsWith("#!")
+    );
+  }
+
+  function normalizeHashRouterPath(value = "") {
+    const raw = safeText(value, "");
+
+    if (!raw) {
+      return HOME_PATH;
+    }
+
+    if (raw.startsWith("#!")) {
+      return raw.replace(/^#!\/?/, "/");
+    }
+
+    return raw.replace(/^#\/?/, "/");
+  }
+
+  function normalizePathnameOnly(pathname = HOME_PATH) {
+    let value = safeText(pathname, HOME_PATH)
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+    if (!value) {
+      value = HOME_PATH;
+    }
+
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
+    }
+
+    if (value.length > 1) {
+      value = value.replace(/\/+$/g, "") || HOME_PATH;
+    }
+
+    return value;
+  }
+
+  function normalizeSearch(search = "") {
+    const value = safeText(search, "");
+
+    if (!value) {
+      return "";
+    }
+
+    return value.startsWith("?")
+      ? value
+      : `?${value.replace(/^\?+/, "")}`;
+  }
+
+  function normalizeHash(hash = "") {
+    const value = safeText(hash, "");
+
+    if (!value) {
+      return "";
+    }
+
+    return value.startsWith("#")
+      ? value
+      : `#${value.replace(/^#+/, "")}`;
+  }
+
+  function splitFullPath(value = HOME_PATH) {
+    const raw = safeText(value, HOME_PATH);
+
+    if (isHashRouterPath(raw)) {
+      return splitFullPath(
+        normalizeHashRouterPath(raw)
+      );
+    }
+
+    let pathname = raw;
+    let search = "";
+    let hash = "";
+
+    const hashIndex = pathname.indexOf("#");
+
+    if (hashIndex >= 0) {
+      hash = pathname.slice(hashIndex);
+      pathname = pathname.slice(0, hashIndex) || HOME_PATH;
+    }
+
+    const searchIndex = pathname.indexOf("?");
+
+    if (searchIndex >= 0) {
+      search = pathname.slice(searchIndex);
+      pathname = pathname.slice(0, searchIndex) || HOME_PATH;
+    }
+
+    return {
+      pathname: normalizePathnameOnly(pathname),
+      search: normalizeSearch(search),
+      hash: normalizeHash(hash),
+    };
+  }
+
+  function normalizeFullPath(path = HOME_PATH) {
+    const raw = safeText(path, HOME_PATH);
+
+    if (!raw) {
+      return HOME_PATH;
+    }
+
+    if (isHashRouterPath(raw)) {
+      return normalizeFullPath(
+        normalizeHashRouterPath(raw)
+      );
+    }
+
+    try {
+      if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
+        const parsed = new URL(raw, getBaseOrigin());
+
+        if (
+          parsed.hash &&
+          isHashRouterPath(parsed.hash)
+        ) {
+          return normalizeFullPath(
+            normalizeHashRouterPath(parsed.hash)
+          );
+        }
+
+        return normalizeFullPath(
+          `${parsed.pathname || HOME_PATH}${parsed.search || ""}${parsed.hash || ""}`
+        );
+      }
+    } catch {}
+
+    const { pathname, search, hash } = splitFullPath(raw);
+
+    return `${pathname}${search}${hash}`;
+  }
+
+  function stripSearchAndHash(path = HOME_PATH) {
+    return (
+      normalizeFullPath(path)
+        .split("?")[0]
+        .split("#")[0] ||
+      HOME_PATH
+    );
+  }
+
+  function isUsernameSegment(segment = "") {
+    return /^@[A-Za-z0-9._-]{1,80}$/.test(
+      safeText(segment, "")
+    );
+  }
+
+  function stripUsernamePrefix(path = HOME_PATH) {
+    const { pathname, search, hash } = splitFullPath(
+      normalizeFullPath(path)
+    );
+
+    const segments = pathname
+      .split("/")
+      .filter(Boolean);
+
+    if (
+      segments.length > 0 &&
+      isUsernameSegment(segments[0])
+    ) {
+      const rest = segments.slice(1).join("/");
+
+      const cleanPathname = rest
+        ? normalizePathnameOnly(`/${rest}`)
+        : HOME_PATH;
+
+      return `${cleanPathname}${search}${hash}`;
+    }
+
+    return `${pathname}${search}${hash}`;
+  }
+
+  function canonicalizePath(path = HOME_PATH) {
+    return normalizeFullPath(
+      stripUsernamePrefix(path || HOME_PATH)
+    );
+  }
+
+  function getCleanCanonicalPath(path = HOME_PATH) {
+    return stripSearchAndHash(
+      canonicalizePath(path || HOME_PATH)
+    );
+  }
+
+  function isHomePath(path = "") {
+    return getCleanCanonicalPath(path || HOME_PATH) === HOME_PATH;
+  }
+
+  function getBrowserPath() {
+    if (!isBrowser()) {
+      return "";
+    }
+
+    try {
+      const pathname = window.location.pathname || HOME_PATH;
+      const search = window.location.search || "";
+      const hash = window.location.hash || "";
+
+      if (
+        hash &&
+        isHashRouterPath(hash)
+      ) {
+        return normalizeFullPath(
+          normalizeHashRouterPath(hash)
+        );
+      }
+
+      return normalizeFullPath(`${pathname}${search}${hash}`);
+    } catch {
+      return "";
+    }
+  }
+
+  function getRouterCandidate() {
+    try {
+      if (isFunction(AppCore?.modules?.get)) {
+        return (
+          AppCore.modules.get("router") ||
+          AppCore.modules.get("Router") ||
+          null
+        );
+      }
+    } catch {}
+
+    try {
+      return (
+        AppCore?.router ||
+        AppCore?.Router ||
+        AppCore?.modules?.router ||
+        AppCore?.modules?.Router ||
+        (isBrowser() ? window.Router : null) ||
+        (isBrowser() ? window.OnionRouter : null) ||
+        null
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  function getAppRoutePath() {
+    const router = getRouterCandidate();
+
+    try {
+      return safeText(
+        first(
+          router?.getCurrentCanonicalPath?.(),
+          AppCore?.state?.route,
+          AppCore?.state?.canonicalPath,
+          ""
+        ),
+        ""
+      );
+    } catch {
+      return safeText(
+        first(
+          AppCore?.state?.route,
+          AppCore?.state?.canonicalPath,
+          ""
+        ),
+        ""
+      );
+    }
+  }
+
+  function getAppPublicPath() {
+    const router = getRouterCandidate();
+
+    try {
+      return safeText(
+        first(
+          router?.getCurrentPublicPath?.(),
+          router?.getCurrentPath?.(),
+          AppCore?.state?.publicPath,
+          ""
+        ),
+        ""
+      );
+    } catch {
+      return safeText(AppCore?.state?.publicPath, "");
+    }
+  }
+
+  function pushPathSignal(signals, label, value, strength = "explicit") {
+    const text = safeText(value, "");
+
+    if (!text) {
+      return;
+    }
+
+    signals.push({
+      type: "path",
+      label,
+      value: text,
+      canonical: getCleanCanonicalPath(text),
+      isHome: isHomePath(text),
+      strength,
+    });
+  }
+
+  function pushViewSignal(signals, label, value, strength = "explicit") {
+    const text = safeText(value, "");
+
+    if (!text) {
+      return;
+    }
+
+    const normalized = normalizeKey(text);
+
+    signals.push({
+      type: "view",
+      label,
+      value: normalized,
+      isHome: normalized === "home",
+      strength,
+    });
+  }
+
+  function collectRouteSignalsFromObject(signals, value, label = "arg") {
+    if (
+      !isObject(value) ||
+      isNodeLike(value)
+    ) {
+      return;
+    }
+
+    pushViewSignal(signals, `${label}.viewKey`, value.viewKey);
+    pushViewSignal(signals, `${label}.name`, value.name);
+    pushViewSignal(signals, `${label}.route.name`, value.route?.name);
+    pushViewSignal(signals, `${label}.route.viewKey`, value.route?.viewKey);
+
+    pushPathSignal(signals, `${label}.canonicalPath`, value.canonicalPath);
+    pushPathSignal(signals, `${label}.routePath`, value.routePath);
+    pushPathSignal(signals, `${label}.path`, value.path);
+    pushPathSignal(signals, `${label}.publicPath`, value.publicPath);
+    pushPathSignal(signals, `${label}.requestedPath`, value.requestedPath);
+    pushPathSignal(signals, `${label}.href`, value.href);
+    pushPathSignal(signals, `${label}.to`, value.to);
+
+    pushPathSignal(signals, `${label}.route.path`, value.route?.path);
+    pushPathSignal(signals, `${label}.route.canonicalPath`, value.route?.canonicalPath);
+    pushPathSignal(signals, `${label}.route.publicPath`, value.route?.publicPath);
+
+    collectRouteSignalsFromObject(signals, value.options, `${label}.options`);
+    collectRouteSignalsFromObject(signals, value.payload, `${label}.payload`);
+    collectRouteSignalsFromObject(signals, value.detail, `${label}.detail`);
+  }
+
+  function collectRouteSignals(args = []) {
+    const signals = [];
+
+    safeArray(args).forEach((arg, index) => {
+      collectRouteSignalsFromObject(
+        signals,
+        arg,
+        `args[${index}]`
+      );
+    });
+
+    const browserPath = getBrowserPath();
+
+    if (browserPath) {
+      pushPathSignal(
+        signals,
+        "window.location",
+        browserPath,
+        "browser"
+      );
+    }
+
+    const appRoute = getAppRoutePath();
+
+    if (appRoute) {
+      pushPathSignal(
+        signals,
+        "AppCore.state.route",
+        appRoute,
+        "ambient"
+      );
+    }
+
+    const appPublicPath = getAppPublicPath();
+
+    if (appPublicPath) {
+      pushPathSignal(
+        signals,
+        "AppCore.state.publicPath",
+        appPublicPath,
+        "ambient"
+      );
+    }
+
+    return signals;
+  }
+
+  function getBlockingRouteSignal(signals = []) {
+    const browserBlock = signals.find(
+      (signal) =>
+        signal.strength === "browser" &&
+        signal.isHome === false
+    );
+
+    if (browserBlock) {
+      return browserBlock;
+    }
+
+    const explicitBlock = signals.find(
+      (signal) =>
+        signal.strength === "explicit" &&
+        signal.isHome === false
+    );
+
+    if (explicitBlock) {
+      return explicitBlock;
+    }
+
+    const ambientBlock = signals.find(
+      (signal) =>
+        signal.strength === "ambient" &&
+        signal.isHome === false
+    );
+
+    return ambientBlock || null;
+  }
+
+  function hasPositiveHomeSignal(signals = []) {
+    return signals.some((signal) => signal.isHome === true);
+  }
+
+  function canRenderHomeForArgs(args = []) {
+    if (!isBrowser()) {
+      return true;
+    }
+
+    const signals = collectRouteSignals(args);
+    const blocking = getBlockingRouteSignal(signals);
+
+    if (blocking) {
+      return false;
+    }
+
+    if (hasPositiveHomeSignal(signals)) {
+      return true;
+    }
+
+    const browserPath = getBrowserPath();
+
+    if (browserPath) {
+      return isHomePath(browserPath);
+    }
+
+    return true;
+  }
+
+  function getRouteDebug(args = []) {
+    const signals = collectRouteSignals(args);
+
+    return {
+      source: SOURCE,
+      allowed: canRenderHomeForArgs(args),
+      browserPath: getBrowserPath(),
+      browserCanonicalPath: getCleanCanonicalPath(getBrowserPath() || HOME_PATH),
+      appRoute: getAppRoutePath(),
+      appPublicPath: getAppPublicPath(),
+      signals,
+      blockingSignal: getBlockingRouteSignal(signals),
+    };
+  }
+
+  function assertHomeRoute(reason = "home-route-guard", args = []) {
+    const allowed = canRenderHomeForArgs(args);
+
+    if (!allowed) {
+      safeWarn("Render Home bloqueado: ruta activa no es Home.", {
+        reason,
+        ...getRouteDebug(args),
+      });
+    }
+
+    return allowed;
   }
 
   /* =========================================================
      LOG / EVENTS
   ========================================================= */
 
+  function sanitizeEventPayload(value, depth = 0) {
+    if (depth > 5) {
+      return "[MaxDepth]";
+    }
+
+    if (
+      value === null ||
+      value === undefined ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      return value;
+    }
+
+    if (typeof value === "string") {
+      return value.replace(
+        /([?&#](token|activationToken|resetToken|passwordResetToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
+        "$1***"
+      );
+    }
+
+    if (typeof value === "function") {
+      return "[Function]";
+    }
+
+    if (isNodeLike(value)) {
+      return {
+        nodeName: safeText(value.nodeName, "Node"),
+        id: safeText(value.id, ""),
+        className: safeText(value.className, ""),
+      };
+    }
+
+    if (Array.isArray(value)) {
+      return value
+        .slice(0, 60)
+        .map((item) => sanitizeEventPayload(item, depth + 1));
+    }
+
+    if (value instanceof Error) {
+      return {
+        name: safeText(value.name, "Error"),
+        message: safeText(value.message, ""),
+        code: value.code || null,
+        status: value.status || value.statusCode || null,
+      };
+    }
+
+    if (isObject(value)) {
+      const output = {};
+
+      for (const [key, item] of Object.entries(value)) {
+        if (/token|secret|password|authorization|credential/i.test(key)) {
+          output[key] = "***";
+          continue;
+        }
+
+        output[key] = sanitizeEventPayload(item, depth + 1);
+      }
+
+      return output;
+    }
+
+    return String(value);
+  }
+
   function safeLog(...args) {
+    const cleanArgs = args.map((item) => sanitizeEventPayload(item));
+
     try {
-      AppCore?.utils?.log?.("[HomeView]", ...args);
+      AppCore?.utils?.log?.("[HomeView]", ...cleanArgs);
+      return;
+    } catch {}
+
+    try {
+      if (AppCore?.config?.debug) {
+        console.log("[HomeView]", ...cleanArgs);
+      }
     } catch {}
   }
 
   function safeWarn(...args) {
-    try {
-      AppCore?.utils?.warn?.("[HomeView]", ...args);
-    } catch {}
+    const cleanArgs = args.map((item) => sanitizeEventPayload(item));
+
+    let logged = false;
 
     try {
-      console.warn("[HomeView]", ...args);
+      if (isFunction(AppCore?.utils?.warn)) {
+        AppCore.utils.warn("[HomeView]", ...cleanArgs);
+        logged = true;
+      }
+    } catch {
+      logged = false;
+    }
+
+    if (logged) {
+      return;
+    }
+
+    try {
+      console.warn("[HomeView]", ...cleanArgs);
     } catch {}
   }
 
-  function safeEmit(event = "", payload = {}) {
+  function safeEmit(event = "", payload = {}, options = {}) {
     const eventName = safeText(event, "");
-    if (!eventName) return false;
 
-    let emitted = false;
+    if (!eventName) {
+      return false;
+    }
+
+    const cleanPayload = sanitizeEventPayload({
+      source: SOURCE,
+      ...safeObject(payload),
+    });
+
+    const opts = safeObject(options);
+
+    let busAvailable = false;
+    let busEmitted = false;
 
     try {
-      AppCore?.events?.emit?.(eventName, payload);
-      emitted = true;
-    } catch {}
+      if (isFunction(AppCore?.events?.emit)) {
+        busAvailable = true;
 
-    try {
-      if (isBrowser()) {
-        window.dispatchEvent(
-          new CustomEvent(eventName, {
-            detail: payload,
-          })
+        AppCore.events.emit(
+          eventName,
+          cleanPayload
         );
 
-        emitted = true;
+        busEmitted = true;
       }
     } catch {}
 
-    return emitted;
+    if (
+      opts.window === true ||
+      (!busAvailable && isBrowser())
+    ) {
+      try {
+        window.dispatchEvent(
+          new CustomEvent(eventName, {
+            detail: cleanPayload,
+          })
+        );
+
+        return true;
+      } catch {}
+    }
+
+    return busEmitted;
   }
 
   function safeOn(event = "", handler = null) {
     const eventName = safeText(event, "");
 
-    if (!eventName || !isFunction(handler)) {
+    if (
+      !eventName ||
+      !isFunction(handler)
+    ) {
       return () => {};
     }
 
-    let busAttached = false;
-    let windowAttached = false;
-    let busCleanup = null;
-
-    const windowHandler = (domEvent) => handler(domEvent);
-
-    try {
-      const maybeCleanup = AppCore?.events?.on?.(eventName, handler);
-
-      if (isFunction(maybeCleanup)) {
-        busCleanup = maybeCleanup;
-      }
-
-      busAttached = true;
-    } catch {}
-
-    try {
-      if (isBrowser()) {
-        window.addEventListener(eventName, windowHandler);
-        windowAttached = true;
-      }
-    } catch {}
-
-    return () => {
-      if (busCleanup) {
-        try {
-          busCleanup();
-        } catch {}
-      } else if (busAttached) {
-        try {
-          AppCore?.events?.off?.(eventName, handler);
-        } catch {}
-      }
-
-      if (windowAttached) {
-        try {
-          window.removeEventListener(eventName, windowHandler);
-        } catch {}
+    const wrapped = (eventOrPayload = {}) => {
+      try {
+        handler(eventOrPayload);
+      } catch (error) {
+        safeWarn(`Handler de evento ${eventName} falló.`, error);
       }
     };
+
+    try {
+      if (isFunction(AppCore?.events?.on)) {
+        const maybeCleanup = AppCore.events.on(
+          eventName,
+          wrapped
+        );
+
+        if (isFunction(maybeCleanup)) {
+          return () => {
+            try {
+              maybeCleanup();
+            } catch {}
+          };
+        }
+
+        return () => {
+          try {
+            AppCore?.events?.off?.(eventName, wrapped);
+          } catch {}
+        };
+      }
+    } catch {}
+
+    if (!isBrowser()) {
+      return () => {};
+    }
+
+    try {
+      window.addEventListener(eventName, wrapped);
+
+      return () => {
+        try {
+          window.removeEventListener(eventName, wrapped);
+        } catch {}
+      };
+    } catch {}
+
+    return () => {};
   }
 
   /* =========================================================
-     TOAST BRIDGE
+     TOAST
   ========================================================= */
 
   function normalizeToastType(type = "info") {
     const key = normalizeKey(type);
 
-    if (key === "warn") return "warning";
+    if (key === "warn") {
+      return "warning";
+    }
 
-    if (["success", "error", "warning", "info", "loading"].includes(key)) {
+    if (
+      ["success", "error", "warning", "info", "loading"].includes(key)
+    ) {
       return key;
     }
 
@@ -601,19 +1286,16 @@ export const HomeView = (() => {
     } catch {}
 
     try {
-      if (AppCore?.toast) candidates.push(AppCore.toast);
+      candidates.push(AppCore?.Toast);
+      candidates.push(AppCore?.toastModule);
+      candidates.push(AppCore?.ui?.toast);
     } catch {}
 
     try {
-      if (AppCore?.ui?.toast) candidates.push(AppCore.ui.toast);
-    } catch {}
-
-    try {
-      if (isBrowser() && window.Toast) candidates.push(window.Toast);
-    } catch {}
-
-    try {
-      if (isBrowser() && window.OnionToast) candidates.push(window.OnionToast);
+      if (isBrowser()) {
+        candidates.push(window.Toast);
+        candidates.push(window.OnionToast);
+      }
     } catch {}
 
     return candidates.filter(Boolean);
@@ -621,7 +1303,10 @@ export const HomeView = (() => {
 
   function showToast(message = "", type = "info", options = {}) {
     const text = safeText(message, "");
-    if (!text) return false;
+
+    if (!text) {
+      return false;
+    }
 
     const toastType = normalizeToastType(type);
     const opts = safeObject(options);
@@ -640,7 +1325,7 @@ export const HomeView = (() => {
             : toast?.[toastType];
 
         if (isFunction(directMethod)) {
-          directMethod.call(toast, text, opts);
+          directMethod.call(toast, text, payload);
           return true;
         }
       } catch {}
@@ -648,6 +1333,13 @@ export const HomeView = (() => {
       try {
         if (isFunction(toast?.show)) {
           toast.show(payload);
+          return true;
+        }
+      } catch {}
+
+      try {
+        if (isFunction(toast?.notify)) {
+          toast.notify(payload);
           return true;
         }
       } catch {}
@@ -659,7 +1351,7 @@ export const HomeView = (() => {
   }
 
   /* =========================================================
-     APP / USER / ROLE
+     USER / ROLE / APP
   ========================================================= */
 
   function getCurrentUser() {
@@ -670,6 +1362,7 @@ export const HomeView = (() => {
         AppCore?.state?.profile,
         AppCore?.state?.session?.user,
         AppCore?.session?.user,
+        AppCore?.Auth?.user,
         AppCore?.auth?.user,
         {}
       )
@@ -750,39 +1443,47 @@ export const HomeView = (() => {
   }
 
   function canInteract() {
-    return !destroyed && isDomReady() && isAppReady();
+    return Boolean(
+      !destroyed &&
+        isDomReady() &&
+        isAppReady()
+    );
   }
 
   function throttleCreateClick() {
-    const current = Date.now();
+    const current = nowMs();
 
     if (current - lastCreateClickAt < CREATE_CLICK_THROTTLE_MS) {
       return false;
     }
 
     lastCreateClickAt = current;
+
     return true;
   }
 
   function throttleOpenTicketClick() {
-    const current = Date.now();
+    const current = nowMs();
 
     if (current - lastOpenTicketClickAt < OPEN_TICKET_THROTTLE_MS) {
       return false;
     }
 
     lastOpenTicketClickAt = current;
+
     return true;
   }
 
   /* =========================================================
-     ROUTES
+     ROUTER / NAVIGATION
   ========================================================= */
 
   function normalizeSpaRoute(route = "") {
     const raw = safeText(route, "");
 
-    if (!raw) return "";
+    if (!raw) {
+      return "";
+    }
 
     const lowered = raw.toLowerCase();
 
@@ -796,25 +1497,31 @@ export const HomeView = (() => {
 
     if (/^https?:\/\//i.test(raw)) {
       try {
+        const url = new URL(raw, getBaseOrigin());
+
         if (
           isBrowser() &&
-          new URL(raw).origin !== window.location.origin
+          url.origin !== window.location.origin
         ) {
           return raw;
         }
 
-        const url = new URL(raw);
-        return normalizeSpaRoute(`${url.pathname}${url.search || ""}${url.hash || ""}`);
+        return normalizeSpaRoute(
+          `${url.pathname}${url.search || ""}${url.hash || ""}`
+        );
       } catch {
         return raw;
       }
     }
 
-    const normalized = raw.startsWith("/") ? raw : `/${raw}`;
+    const normalized = raw.startsWith("/")
+      ? raw
+      : `/${raw}`;
+
     const [pathWithMaybeQuery, hash = ""] = normalized.split("#");
     const [path, query = ""] = pathWithMaybeQuery.split("?");
 
-    const cleanPath = path.replace(/\/{2,}/g, "/") || "/";
+    const cleanPath = normalizePathnameOnly(path || HOME_PATH);
     const mappedPath = ROUTE_ALIASES[cleanPath] || cleanPath;
 
     return [
@@ -824,37 +1531,18 @@ export const HomeView = (() => {
     ].join("");
   }
 
-  function getRouterCandidate() {
-    try {
-      if (isFunction(AppCore?.modules?.get)) {
-        const routerModule =
-          AppCore.modules.get("router") ||
-          AppCore.modules.get("Router");
-
-        if (routerModule) return routerModule;
-      }
-    } catch {}
-
-    try {
-      return (
-        AppCore?.router ||
-        AppCore?.Router ||
-        AppCore?.modules?.router ||
-        AppCore?.modules?.Router ||
-        (isBrowser() ? window.Router : null) ||
-        (isBrowser() ? window.OnionRouter : null) ||
-        null
-      );
-    } catch {
-      return null;
-    }
-  }
-
   async function navigateTo(route = "", options = {}) {
     const target = normalizeSpaRoute(route);
-    if (!target) return false;
 
-    const opts = safeObject(options);
+    if (!target) {
+      return false;
+    }
+
+    const opts = {
+      source: SOURCE,
+      ...safeObject(options),
+    };
+
     const router = getRouterCandidate();
 
     try {
@@ -878,11 +1566,17 @@ export const HomeView = (() => {
         return true;
       }
     } catch (error) {
-      safeWarn("navigateTo vía router falló:", error);
+      safeWarn("navigateTo vía router falló.", {
+        target,
+        error,
+      });
     }
 
     try {
-      if (isBrowser() && target.startsWith("/")) {
+      if (
+        isBrowser() &&
+        target.startsWith("/")
+      ) {
         window.history.pushState({}, "", target);
         window.dispatchEvent(new PopStateEvent("popstate"));
         return true;
@@ -904,16 +1598,24 @@ export const HomeView = (() => {
   ========================================================= */
 
   function readCachePayload() {
-    if (!isBrowser()) return null;
+    if (!isBrowser()) {
+      return null;
+    }
 
     try {
       const raw = window.localStorage.getItem(HOME_CACHE_KEY);
-      if (!raw) return null;
+
+      if (!raw) {
+        return null;
+      }
 
       const payload = JSON.parse(raw);
       const savedAt = safeNumber(payload?.savedAt, 0);
 
-      if (!savedAt || Date.now() - savedAt > HOME_CACHE_TTL_MS) {
+      if (
+        !savedAt ||
+        Date.now() - savedAt > HOME_CACHE_TTL_MS
+      ) {
         return null;
       }
 
@@ -924,7 +1626,9 @@ export const HomeView = (() => {
   }
 
   function writeCachePayload() {
-    if (!isBrowser()) return false;
+    if (!isBrowser()) {
+      return false;
+    }
 
     try {
       const payload = {
@@ -951,7 +1655,10 @@ export const HomeView = (() => {
         },
       };
 
-      window.localStorage.setItem(HOME_CACHE_KEY, JSON.stringify(payload));
+      window.localStorage.setItem(
+        HOME_CACHE_KEY,
+        JSON.stringify(payload)
+      );
 
       return true;
     } catch {
@@ -977,11 +1684,30 @@ export const HomeView = (() => {
     homeState.clients = safeArray(state.clients);
     homeState.activity = safeArray(state.activity);
 
-    homeState.remoteCount = safeNumber(state.remoteCount, homeState.tickets.length);
-    homeState.ticketsRemoteCount = safeNumber(state.ticketsRemoteCount, homeState.tickets.length);
-    homeState.invoicesRemoteCount = safeNumber(state.invoicesRemoteCount, homeState.invoices.length);
-    homeState.usersRemoteCount = safeNumber(state.usersRemoteCount, homeState.users.length);
-    homeState.clientsRemoteCount = safeNumber(state.clientsRemoteCount, homeState.clients.length);
+    homeState.remoteCount = safeNumber(
+      state.remoteCount,
+      homeState.tickets.length
+    );
+
+    homeState.ticketsRemoteCount = safeNumber(
+      state.ticketsRemoteCount,
+      homeState.tickets.length
+    );
+
+    homeState.invoicesRemoteCount = safeNumber(
+      state.invoicesRemoteCount,
+      homeState.invoices.length
+    );
+
+    homeState.usersRemoteCount = safeNumber(
+      state.usersRemoteCount,
+      homeState.users.length
+    );
+
+    homeState.clientsRemoteCount = safeNumber(
+      state.clientsRemoteCount,
+      homeState.clients.length
+    );
 
     homeState.requestId = safeText(state.requestId, "");
     homeState.lastSyncAt = safeText(state.lastSyncAt, "");
@@ -1004,7 +1730,7 @@ export const HomeView = (() => {
   }
 
   /* =========================================================
-     COLLECTION HELPERS
+     COLLECTION NORMALIZATION
   ========================================================= */
 
   function unwrapCollectionPayload(value = null, depth = 0) {
@@ -1087,7 +1813,10 @@ export const HomeView = (() => {
       object.data
     );
 
-    if (isObject(nested) || Array.isArray(nested)) {
+    if (
+      isObject(nested) ||
+      Array.isArray(nested)
+    ) {
       return unwrapCollectionPayload(nested, depth + 1);
     }
 
@@ -1095,9 +1824,13 @@ export const HomeView = (() => {
   }
 
   function normalizeCollection(value) {
-    if (Array.isArray(value)) return value;
+    if (Array.isArray(value)) {
+      return value;
+    }
 
-    const object = safeObject(unwrapCollectionPayload(value));
+    const object = safeObject(
+      unwrapCollectionPayload(value)
+    );
 
     return safeArray(
       first(
@@ -1117,7 +1850,9 @@ export const HomeView = (() => {
   }
 
   function getRemoteCountFromCollection(value, fallback = 0) {
-    const object = safeObject(unwrapCollectionPayload(value));
+    const object = safeObject(
+      unwrapCollectionPayload(value)
+    );
 
     return Math.max(
       fallback,
@@ -1148,7 +1883,10 @@ export const HomeView = (() => {
 
   function buildCollectionInput(items = [], remoteCount = 0) {
     const list = safeArray(items);
-    const total = Math.max(list.length, safeNumber(remoteCount, list.length));
+    const total = Math.max(
+      list.length,
+      safeNumber(remoteCount, list.length)
+    );
 
     return {
       items: list,
@@ -1170,7 +1908,12 @@ export const HomeView = (() => {
     const cacheKey = safeText(key || path, "");
     const modulePath = safeText(path, "");
 
-    if (!cacheKey || !modulePath) return null;
+    if (
+      !cacheKey ||
+      !modulePath
+    ) {
+      return null;
+    }
 
     if (optionalModulesCache.has(cacheKey)) {
       return optionalModulesCache.get(cacheKey);
@@ -1184,10 +1927,13 @@ export const HomeView = (() => {
       );
 
       optionalModulesCache.set(cacheKey, module || null);
+
       return module || null;
     } catch (error) {
       optionalModulesCache.set(cacheKey, null);
+
       safeWarn(`Módulo opcional no disponible: ${cacheKey}`, error);
+
       return null;
     }
   }
@@ -1245,7 +1991,7 @@ export const HomeView = (() => {
         return homeState.users;
       }
     } catch (error) {
-      safeWarn("Fallback usuarios falló:", error);
+      safeWarn("Fallback usuarios falló.", error);
     }
 
     return safeArray(homeState.users);
@@ -1272,6 +2018,7 @@ export const HomeView = (() => {
       if (isFunction(apiModule?.loadClientes)) {
         await apiModule.loadClientes({
           force,
+          silent: true,
         });
       }
 
@@ -1301,7 +2048,7 @@ export const HomeView = (() => {
         return homeState.clients;
       }
     } catch (error) {
-      safeWarn("Fallback clientes falló:", error);
+      safeWarn("Fallback clientes falló.", error);
     }
 
     return safeArray(homeState.clients);
@@ -1366,7 +2113,7 @@ export const HomeView = (() => {
         return homeState.invoices;
       }
     } catch (error) {
-      safeWarn("Fallback facturas falló:", error);
+      safeWarn("Fallback facturas falló.", error);
     }
 
     return safeArray(homeState.invoices);
@@ -1387,15 +2134,13 @@ export const HomeView = (() => {
 
     ensureSummaryAliases();
 
-    const after = {
-      users: homeState.users.length,
-      clients: homeState.clients.length,
-      invoices: homeState.invoices.length,
-    };
-
     safeLog("secondary collections sync", {
       before,
-      after,
+      after: {
+        users: homeState.users.length,
+        clients: homeState.clients.length,
+        invoices: homeState.invoices.length,
+      },
       usersRemoteCount: homeState.usersRemoteCount,
       clientsRemoteCount: homeState.clientsRemoteCount,
       invoicesRemoteCount: homeState.invoicesRemoteCount,
@@ -1409,11 +2154,14 @@ export const HomeView = (() => {
   }
 
   /* =========================================================
-     DATA NORMALIZATION
+     DATA HELPERS
   ========================================================= */
 
   function getStableTicketId(item = {}) {
-    if (typeof item === "string" || typeof item === "number") {
+    if (
+      typeof item === "string" ||
+      typeof item === "number"
+    ) {
       return safeText(item, "");
     }
 
@@ -1442,7 +2190,10 @@ export const HomeView = (() => {
   }
 
   function getTicketIdentityList(item = {}) {
-    if (typeof item === "string" || typeof item === "number") {
+    if (
+      typeof item === "string" ||
+      typeof item === "number"
+    ) {
       return [safeText(item, "")].filter(Boolean);
     }
 
@@ -1546,13 +2297,19 @@ export const HomeView = (() => {
   }
 
   function getTicketStatusKeyLocal(item = {}) {
-    const key = normalizeKey(getTicketStatusLocal(item));
+    const key = normalizeKey(
+      getTicketStatusLocal(item)
+    );
 
-    if (["pending", "pendiente", "new", "nueva", "nuevo", "created"].includes(key)) {
+    if (
+      ["pending", "pendiente", "new", "nueva", "nuevo", "created"].includes(key)
+    ) {
       return "pending";
     }
 
-    if (["open", "opened", "abierta", "abierto"].includes(key)) {
+    if (
+      ["open", "opened", "abierta", "abierto"].includes(key)
+    ) {
       return "open";
     }
 
@@ -1573,7 +2330,9 @@ export const HomeView = (() => {
       return "progress";
     }
 
-    if (["resolved", "resuelta", "resuelto", "solved"].includes(key)) {
+    if (
+      ["resolved", "resuelta", "resuelto", "solved"].includes(key)
+    ) {
       return "resolved";
     }
 
@@ -1606,7 +2365,10 @@ export const HomeView = (() => {
     if (key === "resolved") return "Resuelta";
     if (key === "closed") return "Cerrada";
 
-    return safeText(getTicketStatusLocal(item), "Pendiente");
+    return safeText(
+      getTicketStatusLocal(item),
+      "Pendiente"
+    );
   }
 
   function getInvoiceId(item = {}) {
@@ -1699,18 +2461,51 @@ export const HomeView = (() => {
       )
     );
 
-    if (["paid", "pagada", "pagado", "cobrada", "cobrado"].includes(key)) return "paid";
-    if (["pending", "pendiente", "unpaid"].includes(key)) return "pending";
-    if (["overdue", "vencida", "vencido"].includes(key)) return "overdue";
-    if (["partial", "parcial", "pago_parcial"].includes(key)) return "partial";
-    if (["cancelled", "cancelada", "cancelado"].includes(key)) return "cancelled";
-    if (["draft", "borrador"].includes(key)) return "draft";
+    if (
+      ["paid", "pagada", "pagado", "cobrada", "cobrado"].includes(key)
+    ) {
+      return "paid";
+    }
+
+    if (
+      ["pending", "pendiente", "unpaid"].includes(key)
+    ) {
+      return "pending";
+    }
+
+    if (
+      ["overdue", "vencida", "vencido"].includes(key)
+    ) {
+      return "overdue";
+    }
+
+    if (
+      ["partial", "parcial", "pago_parcial"].includes(key)
+    ) {
+      return "partial";
+    }
+
+    if (
+      ["cancelled", "cancelada", "cancelado"].includes(key)
+    ) {
+      return "cancelled";
+    }
+
+    if (
+      ["draft", "borrador"].includes(key)
+    ) {
+      return "draft";
+    }
 
     return "pending";
   }
 
   function isInvoicePendingLike(item = {}) {
-    return ["pending", "overdue", "partial"].includes(getInvoiceStatusKey(item));
+    return [
+      "pending",
+      "overdue",
+      "partial",
+    ].includes(getInvoiceStatusKey(item));
   }
 
   function getUserId(item = {}) {
@@ -1781,7 +2576,10 @@ export const HomeView = (() => {
 
   function normalizeTickets(items = []) {
     try {
-      const normalized = normalizeIncidenciasCollection(safeArray(items));
+      const normalized = normalizeIncidenciasCollection(
+        safeArray(items)
+      );
+
       return sortIncidenciasByUpdatedDesc(normalized);
     } catch {
       return safeArray(items);
@@ -1790,10 +2588,13 @@ export const HomeView = (() => {
 
   function getTicketsFromStore() {
     try {
-      const rawItems = safeArray(getIncidencias());
+      const rawItems = safeArray(
+        getIncidencias()
+      );
+
       return normalizeTickets(rawItems);
     } catch (error) {
-      safeWarn("getTicketsFromStore falló:", error);
+      safeWarn("getTicketsFromStore falló.", error);
       return safeArray(homeState.tickets);
     }
   }
@@ -1816,7 +2617,9 @@ export const HomeView = (() => {
   function findTicketById(ticketId = "") {
     const id = safeText(ticketId, "");
 
-    if (!id) return null;
+    if (!id) {
+      return null;
+    }
 
     return (
       getTickets().find((item) =>
@@ -1828,7 +2631,10 @@ export const HomeView = (() => {
   }
 
   function getTicketIdFromPayload(payload = {}) {
-    if (typeof payload === "string" || typeof payload === "number") {
+    if (
+      typeof payload === "string" ||
+      typeof payload === "number"
+    ) {
       return safeText(payload, "");
     }
 
@@ -1837,8 +2643,15 @@ export const HomeView = (() => {
     const detail = safeObject(source.detail);
     const ticket = safeObject(source.ticket);
     const incidencia = safeObject(source.incidencia);
+
     const raw = safeObject(
-      first(source.raw, item.raw, detail.raw, ticket.raw, incidencia.raw)
+      first(
+        source.raw,
+        item.raw,
+        detail.raw,
+        ticket.raw,
+        incidencia.raw
+      )
     );
 
     return safeText(
@@ -2049,7 +2862,9 @@ export const HomeView = (() => {
   }
 
   function computePendingInvoices() {
-    return safeArray(homeState.invoices).filter((item) => isInvoicePendingLike(item)).length;
+    return safeArray(homeState.invoices)
+      .filter((item) => isInvoicePendingLike(item))
+      .length;
   }
 
   function ensureSummaryAliases() {
@@ -2154,6 +2969,30 @@ export const HomeView = (() => {
       )
     );
 
+    const activeUsers = Math.max(
+      usersCount,
+      safeNumber(
+        first(
+          summary.activeUsers,
+          summary.usuariosActivos,
+          0
+        ),
+        0
+      )
+    );
+
+    const activeClients = Math.max(
+      clientsCount,
+      safeNumber(
+        first(
+          summary.activeClients,
+          summary.clientesActivos,
+          0
+        ),
+        0
+      )
+    );
+
     homeState.summary = {
       ...summary,
 
@@ -2188,16 +3027,8 @@ export const HomeView = (() => {
       usuariosCount: usersCount,
       totalUsers: usersCount,
       totalUsuarios: usersCount,
-
-      activeUsers: Math.max(
-        usersCount,
-        safeNumber(first(summary.activeUsers, summary.usuariosActivos, 0), 0)
-      ),
-
-      usuariosActivos: Math.max(
-        usersCount,
-        safeNumber(first(summary.activeUsers, summary.usuariosActivos, 0), 0)
-      ),
+      activeUsers,
+      usuariosActivos: activeUsers,
 
       clientsCount,
       clientesCount: clientsCount,
@@ -2205,22 +3036,29 @@ export const HomeView = (() => {
       totalClients: clientsCount,
       totalClientes: clientsCount,
       totalCustomers: clientsCount,
-
-      activeClients: Math.max(
-        clientsCount,
-        safeNumber(first(summary.activeClients, summary.clientesActivos, 0), 0)
-      ),
-
-      clientesActivos: Math.max(
-        clientsCount,
-        safeNumber(first(summary.activeClients, summary.clientesActivos, 0), 0)
-      ),
+      activeClients,
+      clientesActivos: activeClients,
     };
 
-    homeState.ticketsRemoteCount = Math.max(homeState.ticketsRemoteCount, ticketsCount);
-    homeState.invoicesRemoteCount = Math.max(homeState.invoicesRemoteCount, invoicesCount);
-    homeState.usersRemoteCount = Math.max(homeState.usersRemoteCount, usersCount);
-    homeState.clientsRemoteCount = Math.max(homeState.clientsRemoteCount, clientsCount);
+    homeState.ticketsRemoteCount = Math.max(
+      homeState.ticketsRemoteCount,
+      ticketsCount
+    );
+
+    homeState.invoicesRemoteCount = Math.max(
+      homeState.invoicesRemoteCount,
+      invoicesCount
+    );
+
+    homeState.usersRemoteCount = Math.max(
+      homeState.usersRemoteCount,
+      usersCount
+    );
+
+    homeState.clientsRemoteCount = Math.max(
+      homeState.clientsRemoteCount,
+      clientsCount
+    );
 
     homeState.dashboard = {
       ...safeObject(homeState.dashboard),
@@ -2379,11 +3217,25 @@ export const HomeView = (() => {
       []
     );
 
-    const tickets = normalizeTickets(normalizeCollection(ticketsSource));
-    const invoices = safeArray(normalizeCollection(invoicesSource));
-    const users = safeArray(normalizeCollection(usersSource));
-    const clients = safeArray(normalizeCollection(clientsSource));
-    const activity = safeArray(normalizeCollection(activitySource));
+    const tickets = normalizeTickets(
+      normalizeCollection(ticketsSource)
+    );
+
+    const invoices = safeArray(
+      normalizeCollection(invoicesSource)
+    );
+
+    const users = safeArray(
+      normalizeCollection(usersSource)
+    );
+
+    const clients = safeArray(
+      normalizeCollection(clientsSource)
+    );
+
+    const activity = safeArray(
+      normalizeCollection(activitySource)
+    );
 
     const preserveExisting = opts.preserveExisting !== false;
 
@@ -2409,23 +3261,38 @@ export const HomeView = (() => {
       )
     );
 
-    if (widgets.length || !preserveExisting) {
+    if (
+      widgets.length ||
+      !preserveExisting
+    ) {
       homeState.widgets = widgets;
     }
 
-    if (tickets.length || !preserveExisting) {
+    if (
+      tickets.length ||
+      !preserveExisting
+    ) {
       homeState.tickets = tickets;
     }
 
-    if (invoices.length || !preserveExisting) {
+    if (
+      invoices.length ||
+      !preserveExisting
+    ) {
       homeState.invoices = invoices;
     }
 
-    if (users.length || !preserveExisting) {
+    if (
+      users.length ||
+      !preserveExisting
+    ) {
       homeState.users = users;
     }
 
-    if (clients.length || !preserveExisting) {
+    if (
+      clients.length ||
+      !preserveExisting
+    ) {
       homeState.clients = clients;
     }
 
@@ -2533,8 +3400,13 @@ export const HomeView = (() => {
       homeState.tickets.length
     );
 
-    if (activity.length || !preserveExisting) {
-      homeState.activity = activity.length ? activity : buildActivityFromData();
+    if (
+      activity.length ||
+      !preserveExisting
+    ) {
+      homeState.activity = activity.length
+        ? activity
+        : buildActivityFromData();
     } else if (!homeState.activity.length) {
       homeState.activity = buildActivityFromData();
     }
@@ -2594,7 +3466,10 @@ export const HomeView = (() => {
     try {
       const apiCache = hydrateHomeApiFromCache?.();
 
-      if (apiCache?.dashboard || hasOwnKeys(apiCache)) {
+      if (
+        apiCache?.dashboard ||
+        hasOwnKeys(apiCache)
+      ) {
         syncDashboardPayload(
           apiCache.dashboard || apiCache,
           {
@@ -2621,7 +3496,10 @@ export const HomeView = (() => {
     try {
       const tickets = getTicketsFromStore();
 
-      if (tickets.length && !homeState.tickets.length) {
+      if (
+        tickets.length &&
+        !homeState.tickets.length
+      ) {
         homeState.tickets = tickets;
 
         homeState.ticketsRemoteCount = Math.max(
@@ -2651,8 +3529,15 @@ export const HomeView = (() => {
   ========================================================= */
 
   function ensureBaseState() {
-    homeState.page = Math.max(1, safeNumber(homeState.page, 1));
-    homeState.pageSize = Math.max(1, safeNumber(homeState.pageSize, PAGE_SIZE));
+    homeState.page = Math.max(
+      1,
+      safeNumber(homeState.page, 1)
+    );
+
+    homeState.pageSize = Math.max(
+      1,
+      safeNumber(homeState.pageSize, PAGE_SIZE)
+    );
 
     homeState.loading = Boolean(homeState.loading);
     homeState.refreshing = Boolean(homeState.refreshing);
@@ -2673,7 +3558,10 @@ export const HomeView = (() => {
     homeState.clients = safeArray(homeState.clients);
     homeState.activity = safeArray(homeState.activity);
 
-    homeState.remoteCount = Math.max(0, safeNumber(homeState.remoteCount, 0));
+    homeState.remoteCount = Math.max(
+      0,
+      safeNumber(homeState.remoteCount, 0)
+    );
 
     homeState.ticketsRemoteCount = Math.max(
       0,
@@ -2734,6 +3622,8 @@ export const HomeView = (() => {
     homeState.error = "";
 
     markIdle();
+
+    return homeState;
   }
 
   function clearTransientState() {
@@ -2793,7 +3683,10 @@ export const HomeView = (() => {
       )
     );
 
-    const currentPage = Math.min(page, totalPages);
+    const currentPage = Math.min(
+      page,
+      totalPages
+    );
 
     return {
       ...data,
@@ -2819,11 +3712,26 @@ export const HomeView = (() => {
         pageSize || PAGE_SIZE
       );
 
-      return normalizePaginationResult(result, rows);
+      return normalizePaginationResult(
+        result,
+        rows
+      );
     } catch {
-      const size = Math.max(1, pageSize || PAGE_SIZE);
-      const totalPages = Math.max(1, Math.ceil((rows.length || 1) / size));
-      const nextPage = Math.min(Math.max(1, page), totalPages);
+      const size = Math.max(
+        1,
+        pageSize || PAGE_SIZE
+      );
+
+      const totalPages = Math.max(
+        1,
+        Math.ceil((rows.length || 1) / size)
+      );
+
+      const nextPage = Math.min(
+        Math.max(1, page),
+        totalPages
+      );
+
       const start = (nextPage - 1) * size;
 
       return {
@@ -2877,7 +3785,9 @@ export const HomeView = (() => {
   function openTicketModalBridge(detail = null) {
     const payload = safeObject(detail);
 
-    if (!hasOwnKeys(payload)) return false;
+    if (!hasOwnKeys(payload)) {
+      return false;
+    }
 
     try {
       if (isFunction(OnionIncidenciasModal?.getState)) {
@@ -2897,7 +3807,7 @@ export const HomeView = (() => {
         }
       }
     } catch (error) {
-      safeWarn("OnionIncidenciasModal import directo falló:", error);
+      safeWarn("OnionIncidenciasModal import directo falló.", error);
     }
 
     try {
@@ -2918,7 +3828,7 @@ export const HomeView = (() => {
         }
       }
     } catch (error) {
-      safeWarn("OnionIncidenciasModal hook global falló:", error);
+      safeWarn("OnionIncidenciasModal hook global falló.", error);
     }
 
     try {
@@ -2934,7 +3844,7 @@ export const HomeView = (() => {
         }
       }
     } catch (error) {
-      safeWarn("ticket modal hook legacy falló:", error);
+      safeWarn("ticket modal hook legacy falló.", error);
     }
 
     safeEmit("incidencias:modal:open", {
@@ -2957,7 +3867,10 @@ export const HomeView = (() => {
     } catch {}
 
     try {
-      if (isBrowser() && isFunction(window?.OnionIncidenciasModal?.update)) {
+      if (
+        isBrowser() &&
+        isFunction(window?.OnionIncidenciasModal?.update)
+      ) {
         window.OnionIncidenciasModal.update(payload);
         return true;
       }
@@ -2979,7 +3892,7 @@ export const HomeView = (() => {
         }
       }
     } catch (error) {
-      safeWarn("OnionIncidenciasCreateModal hook falló:", error);
+      safeWarn("OnionIncidenciasCreateModal hook falló.", error);
     }
 
     try {
@@ -2994,7 +3907,7 @@ export const HomeView = (() => {
         }
       }
     } catch (error) {
-      safeWarn("create modal global hook falló:", error);
+      safeWarn("create modal global hook falló.", error);
     }
 
     try {
@@ -3003,7 +3916,7 @@ export const HomeView = (() => {
         return true;
       }
     } catch (error) {
-      safeWarn("IncidenciasCreateView.open falló:", error);
+      safeWarn("IncidenciasCreateView.open falló.", error);
     }
 
     safeEmit("incidencias:create-modal:open", {
@@ -3015,8 +3928,13 @@ export const HomeView = (() => {
   }
 
   function flushPendingCreate() {
-    if (!pendingCreateRequest) return false;
-    if (!canInteract()) return false;
+    if (!pendingCreateRequest) {
+      return false;
+    }
+
+    if (!canInteract()) {
+      return false;
+    }
 
     pendingCreateRequest = false;
     lastCreateClickAt = 0;
@@ -3031,21 +3949,27 @@ export const HomeView = (() => {
   }
 
   /* =========================================================
-     DOM POST-RENDER
+     DOM
   ========================================================= */
 
   function getContainer() {
-    if (!isBrowser()) return null;
+    if (!isBrowser()) {
+      return null;
+    }
 
     return (
       AppCore?.dom?.viewContainer ||
       document.getElementById("view-container") ||
+      document.querySelector("[data-view-root]") ||
+      document.querySelector("[data-router-view]") ||
       null
     );
   }
 
   function applyErrorStateToDom(container) {
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     const oldBanner = container.querySelector(
       "[data-home-error-banner='true']"
@@ -3056,7 +3980,10 @@ export const HomeView = (() => {
     }
 
     const message = safeText(homeState.error, "");
-    if (!message) return;
+
+    if (!message) {
+      return;
+    }
 
     const anchor =
       container.querySelector(".home-tickets .home-panel-head") ||
@@ -3064,7 +3991,9 @@ export const HomeView = (() => {
       container.querySelector(".home-view-wrapper") ||
       container.querySelector(".content-wrapper");
 
-    if (!anchor) return;
+    if (!anchor) {
+      return;
+    }
 
     const banner = document.createElement("div");
 
@@ -3077,14 +4006,18 @@ export const HomeView = (() => {
   }
 
   function decorateAvatarFallbacks(container) {
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     const images = container.querySelectorAll(
       "[data-avatar-image='true']"
     );
 
     images.forEach((img) => {
-      if (img.dataset.homeFallbackBound === "true") return;
+      if (img.dataset.homeFallbackBound === "true") {
+        return;
+      }
 
       img.dataset.homeFallbackBound = "true";
 
@@ -3093,7 +4026,10 @@ export const HomeView = (() => {
         () => {
           try {
             img.hidden = true;
-            img.closest("[data-avatar-root='true']")?.setAttribute("data-fallback", "true");
+
+            img
+              .closest("[data-avatar-root='true']")
+              ?.setAttribute("data-fallback", "true");
           } catch {}
         },
         {
@@ -3104,12 +4040,31 @@ export const HomeView = (() => {
   }
 
   function decorateDom(container) {
-    if (!container) return container;
+    if (!container) {
+      return container;
+    }
 
     applyErrorStateToDom(container);
     decorateAvatarFallbacks(container);
 
     return container;
+  }
+
+  function setViewBusy(container, busy = false) {
+    if (!container) {
+      return false;
+    }
+
+    try {
+      container.setAttribute(
+        "aria-busy",
+        busy ? "true" : "false"
+      );
+
+      return true;
+    } catch {}
+
+    return false;
   }
 
   /* =========================================================
@@ -3122,7 +4077,10 @@ export const HomeView = (() => {
   }
 
   function isActiveToken(token) {
-    return !destroyed && token === renderToken;
+    return Boolean(
+      !destroyed &&
+        token === renderToken
+    );
   }
 
   function buildDashboardForTemplate({
@@ -3187,8 +4145,15 @@ export const HomeView = (() => {
       totalClientes: homeState.clientsRemoteCount,
       totalCustomers: homeState.clientsRemoteCount,
 
-      updatedAt: homeState.lastSyncAt || homeState.dashboard?.updatedAt || "",
-      generatedAt: homeState.dashboard?.generatedAt || homeState.lastSyncAt || "",
+      updatedAt:
+        homeState.lastSyncAt ||
+        homeState.dashboard?.updatedAt ||
+        "",
+
+      generatedAt:
+        homeState.dashboard?.generatedAt ||
+        homeState.lastSyncAt ||
+        "",
     };
   }
 
@@ -3217,20 +4182,30 @@ export const HomeView = (() => {
       ? homeState.activity
       : buildActivityFromData();
 
-    const ticketsInput = buildCollectionInput(tickets, remoteCount);
+    const ticketsInput = buildCollectionInput(
+      tickets,
+      remoteCount
+    );
+
     const invoicesInput = buildCollectionInput(
       homeState.invoices,
       homeState.invoicesRemoteCount
     );
+
     const usersInput = buildCollectionInput(
       homeState.users,
       homeState.usersRemoteCount
     );
+
     const clientsInput = buildCollectionInput(
       homeState.clients,
       homeState.clientsRemoteCount
     );
-    const activityInput = buildCollectionInput(activity, activity.length);
+
+    const activityInput = buildCollectionInput(
+      activity,
+      activity.length
+    );
 
     const dashboardForTemplate = buildDashboardForTemplate({
       ticketsInput,
@@ -3327,15 +4302,21 @@ export const HomeView = (() => {
     `;
   }
 
-  function render() {
+  function render(...args) {
+    if (destroyed) {
+      return null;
+    }
+
+    if (!assertHomeRoute("render", args)) {
+      return null;
+    }
+
     const container = getContainer();
 
     if (!container) {
       safeWarn("No existe #view-container para renderizar Home.");
       return null;
     }
-
-    if (destroyed) return null;
 
     ensureBaseState();
 
@@ -3347,20 +4328,45 @@ export const HomeView = (() => {
       AppCore?.clearDynamicContainers?.();
     } catch {}
 
-    container.innerHTML = buildHtml();
-    decorateDom(container);
+    try {
+      setViewBusy(container, Boolean(homeState.loading || homeState.refreshing));
 
-    homeState.hydrated = true;
+      container.innerHTML = buildHtml();
 
-    return container;
+      decorateDom(container);
+
+      homeState.hydrated = true;
+
+      setViewBusy(container, false);
+
+      safeEmit("home:rendered", {
+        route: getAppRoutePath(),
+        publicPath: getAppPublicPath(),
+        itemsCount: getTickets().length,
+        page: homeState.page,
+      });
+
+      return container;
+    } catch (error) {
+      setViewBusy(container, false);
+
+      safeWarn("render() falló.", error);
+
+      throw error;
+    }
   }
 
-  function rerender() {
-    if (destroyed) return null;
+  function rerender(...args) {
+    if (destroyed) {
+      return null;
+    }
 
-    const container = render();
+    const container = render(...args);
 
-    if (!destroyed) {
+    if (
+      container &&
+      !destroyed
+    ) {
       bind();
     }
 
@@ -3368,7 +4374,7 @@ export const HomeView = (() => {
   }
 
   /* =========================================================
-     DATA
+     DATA LOAD
   ========================================================= */
 
   async function loadTicketsFallback({ force = false } = {}) {
@@ -3393,12 +4399,13 @@ export const HomeView = (() => {
         );
 
         homeState.activity = buildActivityFromData();
+
         ensureSummaryAliases();
       }
 
       return tickets;
     } catch (error) {
-      safeWarn("Fallback incidencias falló:", error);
+      safeWarn("Fallback incidencias falló.", error);
       return getTickets();
     }
   }
@@ -3408,23 +4415,29 @@ export const HomeView = (() => {
     silent = false,
     asRefresh = false,
   } = {}) {
-    if (destroyed) return getTickets();
+    if (destroyed) {
+      return getTickets();
+    }
 
     const ticketsBefore = getTickets();
 
-    const hasVisibleData =
+    const hasVisibleData = Boolean(
       ticketsBefore.length ||
-      homeState.invoices.length ||
-      homeState.users.length ||
-      homeState.clients.length ||
-      homeState.activity.length ||
-      hasOwnKeys(homeState.summary) ||
-      hasOwnKeys(homeState.dashboard);
+        homeState.invoices.length ||
+        homeState.users.length ||
+        homeState.clients.length ||
+        homeState.activity.length ||
+        hasOwnKeys(homeState.summary) ||
+        hasOwnKeys(homeState.dashboard)
+    );
 
     try {
       homeState.error = "";
 
-      if (!hasVisibleData && !silent) {
+      if (
+        !hasVisibleData &&
+        !silent
+      ) {
         homeState.loading = true;
       } else if (asRefresh) {
         homeState.refreshing = true;
@@ -3435,7 +4448,12 @@ export const HomeView = (() => {
     }
 
     if (!destroyed) {
-      rerender();
+      rerender({
+        route: HOME_PATH,
+        canonicalPath: HOME_PATH,
+        publicPath: HOME_PATH,
+        reason: "load-data:start",
+      });
     }
 
     try {
@@ -3449,11 +4467,14 @@ export const HomeView = (() => {
             returnStaleOnError: true,
           });
 
-      syncDashboardPayload(dashboard, {
-        lastSyncAt: nowIso(),
-        writeCache: true,
-        preserveExisting: true,
-      });
+      syncDashboardPayload(
+        dashboard,
+        {
+          lastSyncAt: nowIso(),
+          writeCache: true,
+          preserveExisting: true,
+        }
+      );
 
       await loadSecondaryCollections({
         force,
@@ -3479,6 +4500,7 @@ export const HomeView = (() => {
         summary: homeState.summary,
         tickets: getTickets(),
         facturas: homeState.invoices,
+        invoices: homeState.invoices,
         users: homeState.users,
         usuarios: homeState.users,
         clients: homeState.clients,
@@ -3521,9 +4543,11 @@ export const HomeView = (() => {
         homeState.error = "";
         homeState.loaded = true;
         homeState.hydrated = true;
+
         homeState.activity = homeState.activity.length
           ? homeState.activity
           : buildActivityFromData();
+
         homeState.lastSyncAt = homeState.lastSyncAt || nowIso();
 
         markIdle();
@@ -3533,6 +4557,7 @@ export const HomeView = (() => {
         safeEmit("home:loaded:fallback", {
           tickets: recoveredTickets,
           facturas: homeState.invoices,
+          invoices: homeState.invoices,
           users: homeState.users,
           usuarios: homeState.users,
           clients: homeState.clients,
@@ -3569,13 +4594,36 @@ export const HomeView = (() => {
     force = false,
     asRefresh = false,
     silent = false,
+    reason = "render-and-load",
   } = {}) {
+    if (!assertHomeRoute(reason, [
+      {
+        route: {
+          path: HOME_PATH,
+          viewKey: "home",
+        },
+        canonicalPath: HOME_PATH,
+        publicPath: HOME_PATH,
+        reason,
+      },
+    ])) {
+      return api;
+    }
+
     const token = nextRenderToken();
 
     hydrateBestEffort();
     ensureBaseState();
 
-    render();
+    render({
+      route: {
+        path: HOME_PATH,
+        viewKey: "home",
+      },
+      canonicalPath: HOME_PATH,
+      publicPath: HOME_PATH,
+      reason,
+    });
 
     if (!destroyed) {
       bind();
@@ -3593,7 +4641,28 @@ export const HomeView = (() => {
       return api;
     }
 
-    render();
+    if (!assertHomeRoute(`${reason}:after-load`, [
+      {
+        route: {
+          path: HOME_PATH,
+          viewKey: "home",
+        },
+        canonicalPath: HOME_PATH,
+        publicPath: HOME_PATH,
+      },
+    ])) {
+      return api;
+    }
+
+    render({
+      route: {
+        path: HOME_PATH,
+        viewKey: "home",
+      },
+      canonicalPath: HOME_PATH,
+      publicPath: HOME_PATH,
+      reason: `${reason}:final-render`,
+    });
 
     if (!destroyed) {
       bind();
@@ -3609,7 +4678,10 @@ export const HomeView = (() => {
   ========================================================= */
 
   function goToPage(page = 1) {
-    if (homeState.loading || homeState.refreshing) {
+    if (
+      homeState.loading ||
+      homeState.refreshing
+    ) {
       return homeState.page || 1;
     }
 
@@ -3622,21 +4694,36 @@ export const HomeView = (() => {
     );
 
     homeState.page = Math.min(
-      Math.max(1, safeNumber(page, homeState.page || 1)),
+      Math.max(
+        1,
+        safeNumber(page, homeState.page || 1)
+      ),
       totalPages
     );
 
-    rerender();
+    rerender({
+      route: {
+        path: HOME_PATH,
+        viewKey: "home",
+      },
+      canonicalPath: HOME_PATH,
+      publicPath: HOME_PATH,
+      reason: "pagination",
+    });
 
     return homeState.page;
   }
 
   function goPrevPage() {
-    return goToPage((homeState.page || 1) - 1);
+    return goToPage(
+      (homeState.page || 1) - 1
+    );
   }
 
   function goNextPage() {
-    return goToPage((homeState.page || 1) + 1);
+    return goToPage(
+      (homeState.page || 1) + 1
+    );
   }
 
   function changePageSize(value = PAGE_SIZE) {
@@ -3648,7 +4735,15 @@ export const HomeView = (() => {
     homeState.pageSize = nextSize;
     homeState.page = 1;
 
-    rerender();
+    rerender({
+      route: {
+        path: HOME_PATH,
+        viewKey: "home",
+      },
+      canonicalPath: HOME_PATH,
+      publicPath: HOME_PATH,
+      reason: "page-size",
+    });
 
     return nextSize;
   }
@@ -3657,9 +4752,14 @@ export const HomeView = (() => {
     const id = safeText(ticketId, "");
     const opts = safeObject(options);
 
-    if (!id) return null;
+    if (!id) {
+      return null;
+    }
 
-    if (!opts.skipThrottle && !throttleOpenTicketClick()) {
+    if (
+      !opts.skipThrottle &&
+      !throttleOpenTicketClick()
+    ) {
       return null;
     }
 
@@ -3697,7 +4797,10 @@ export const HomeView = (() => {
           )
         );
 
-      if (hasOwnKeys(localSnapshot) && opts.openImmediate !== false) {
+      if (
+        hasOwnKeys(localSnapshot) &&
+        opts.openImmediate !== false
+      ) {
         openTicketModalBridge({
           ...localSnapshot,
           meta: {
@@ -3708,7 +4811,16 @@ export const HomeView = (() => {
         });
       }
 
-      rerender();
+      rerender({
+        route: {
+          path: HOME_PATH,
+          viewKey: "home",
+        },
+        canonicalPath: HOME_PATH,
+        publicPath: HOME_PATH,
+        reason: "open-ticket:start",
+      });
+
       await waitForPaint();
 
       try {
@@ -3718,30 +4830,33 @@ export const HomeView = (() => {
           silent: opts.silent !== false,
         });
 
-        const finalDetail =
-          hasOwnKeys(detail)
-            ? {
-                ...safeObject(localSnapshot),
-                ...safeObject(detail),
-                meta: {
-                  ...safeObject(localSnapshot?.meta),
-                  ...safeObject(detail?.meta),
-                  openingFromHome: false,
-                  detailLoading: false,
-                },
-              }
-            : {
-                ...safeObject(localSnapshot),
-                meta: {
-                  ...safeObject(localSnapshot?.meta),
-                  openingFromHome: false,
-                  detailLoading: false,
-                  detailFallback: true,
-                },
-              };
+        const finalDetail = hasOwnKeys(detail)
+          ? {
+              ...safeObject(localSnapshot),
+              ...safeObject(detail),
+              meta: {
+                ...safeObject(localSnapshot?.meta),
+                ...safeObject(detail?.meta),
+                openingFromHome: false,
+                detailLoading: false,
+              },
+            }
+          : {
+              ...safeObject(localSnapshot),
+              meta: {
+                ...safeObject(localSnapshot?.meta),
+                openingFromHome: false,
+                detailLoading: false,
+                detailFallback: true,
+              },
+            };
 
         if (!hasOwnKeys(finalDetail)) {
-          showToast("No se pudo abrir la incidencia.", "error");
+          showToast(
+            "No se pudo abrir la incidencia.",
+            "error"
+          );
+
           return null;
         }
 
@@ -3756,7 +4871,7 @@ export const HomeView = (() => {
 
         return finalDetail;
       } catch (error) {
-        safeWarn("handleOpenTicket falló:", error);
+        safeWarn("handleOpenTicket falló.", error);
 
         if (hasOwnKeys(localSnapshot)) {
           updateTicketModalBridge({
@@ -3784,7 +4899,10 @@ export const HomeView = (() => {
           return localSnapshot;
         }
 
-        showToast("No se pudo abrir la incidencia.", "error");
+        showToast(
+          "No se pudo abrir la incidencia.",
+          "error"
+        );
 
         safeEmit("home:ticket:open:error", {
           ticketId: id,
@@ -3798,7 +4916,17 @@ export const HomeView = (() => {
         inflightOpenTicket = null;
         inflightOpenTicketId = "";
 
-        if (!destroyed) rerender();
+        if (!destroyed) {
+          rerender({
+            route: {
+              path: HOME_PATH,
+              viewKey: "home",
+            },
+            canonicalPath: HOME_PATH,
+            publicPath: HOME_PATH,
+            reason: "open-ticket:end",
+          });
+        }
       }
     })();
 
@@ -3809,7 +4937,11 @@ export const HomeView = (() => {
     const id = safeText(ticketId, "");
 
     if (!id) {
-      showToast("No hay referencia para copiar.", "error");
+      showToast(
+        "No hay referencia para copiar.",
+        "error"
+      );
+
       return false;
     }
 
@@ -3819,8 +4951,13 @@ export const HomeView = (() => {
         silent: false,
       });
     } catch (error) {
-      safeWarn("handleCopyTicketId falló:", error);
-      showToast("No se pudo copiar la referencia.", "error");
+      safeWarn("handleCopyTicketId falló.", error);
+
+      showToast(
+        "No se pudo copiar la referencia.",
+        "error"
+      );
+
       return false;
     }
   }
@@ -3829,11 +4966,17 @@ export const HomeView = (() => {
     const opts = safeObject(options);
     const skipThrottle = Boolean(opts.skipThrottle);
 
-    if (homeState.creating && !pendingCreateRequest) {
+    if (
+      homeState.creating &&
+      !pendingCreateRequest
+    ) {
       return false;
     }
 
-    if (!skipThrottle && !throttleCreateClick()) {
+    if (
+      !skipThrottle &&
+      !throttleCreateClick()
+    ) {
       return false;
     }
 
@@ -3841,9 +4984,20 @@ export const HomeView = (() => {
       pendingCreateRequest = true;
       homeState.creating = true;
 
-      rerender();
+      rerender({
+        route: {
+          path: HOME_PATH,
+          viewKey: "home",
+        },
+        canonicalPath: HOME_PATH,
+        publicPath: HOME_PATH,
+        reason: "create:pending",
+      });
 
-      showToast("Preparando formulario...", "info");
+      showToast(
+        "Preparando formulario...",
+        "info"
+      );
 
       return false;
     }
@@ -3851,14 +5005,28 @@ export const HomeView = (() => {
     pendingCreateRequest = false;
     homeState.creating = true;
 
-    rerender();
+    rerender({
+      route: {
+        path: HOME_PATH,
+        viewKey: "home",
+      },
+      canonicalPath: HOME_PATH,
+      publicPath: HOME_PATH,
+      reason: "create:start",
+    });
+
     await waitForPaint();
 
     try {
-      const opened = openCreateModalBridge(opts.draft || {});
+      const opened = openCreateModalBridge(
+        opts.draft || {}
+      );
 
       if (!opened) {
-        showToast("No se pudo abrir el formulario.", "error");
+        showToast(
+          "No se pudo abrir el formulario.",
+          "error"
+        );
       }
 
       safeEmit("home:create:open", {
@@ -3870,7 +5038,17 @@ export const HomeView = (() => {
     } finally {
       homeState.creating = false;
 
-      if (!destroyed) rerender();
+      if (!destroyed) {
+        rerender({
+          route: {
+            path: HOME_PATH,
+            viewKey: "home",
+          },
+          canonicalPath: HOME_PATH,
+          publicPath: HOME_PATH,
+          reason: "create:end",
+        });
+      }
     }
   }
 
@@ -3878,7 +5056,9 @@ export const HomeView = (() => {
     const actionName = safeText(action, "navigate");
     const target = normalizeSpaRoute(route);
 
-    if (!target) return false;
+    if (!target) {
+      return false;
+    }
 
     if (homeState.navigatingAction) {
       return false;
@@ -3886,7 +5066,16 @@ export const HomeView = (() => {
 
     homeState.navigatingAction = actionName;
 
-    rerender();
+    rerender({
+      route: {
+        path: HOME_PATH,
+        viewKey: "home",
+      },
+      canonicalPath: HOME_PATH,
+      publicPath: HOME_PATH,
+      reason: "navigate:start",
+    });
+
     await waitForPaint();
 
     try {
@@ -3897,14 +5086,27 @@ export const HomeView = (() => {
     } finally {
       homeState.navigatingAction = "";
 
-      if (!destroyed) rerender();
+      if (!destroyed) {
+        rerender({
+          route: {
+            path: HOME_PATH,
+            viewKey: "home",
+          },
+          canonicalPath: HOME_PATH,
+          publicPath: HOME_PATH,
+          reason: "navigate:end",
+        });
+      }
     }
   }
 
   async function handleOpenInvoice(invoiceId = "") {
     const id = safeText(invoiceId, "");
 
-    await handleNavigateAction("go-facturas", ROUTES.FACTURAS);
+    await handleNavigateAction(
+      "go-facturas",
+      ROUTES.FACTURAS
+    );
 
     if (id) {
       safeEmit("facturas:open-requested", {
@@ -3944,18 +5146,30 @@ export const HomeView = (() => {
       "open-activity"
     );
 
-    if (action === "open-ticket" && entityId) {
-      return handleOpenTicket(entityId, {
-        source: "home:activity",
-      });
+    if (
+      action === "open-ticket" &&
+      entityId
+    ) {
+      return handleOpenTicket(
+        entityId,
+        {
+          source: "home:activity",
+        }
+      );
     }
 
-    if (action === "open-invoice" && entityId) {
+    if (
+      action === "open-invoice" &&
+      entityId
+    ) {
       return handleOpenInvoice(entityId);
     }
 
     if (route) {
-      return handleNavigateAction(action, route);
+      return handleNavigateAction(
+        action,
+        route
+      );
     }
 
     return false;
@@ -3966,11 +5180,18 @@ export const HomeView = (() => {
     const ticketId = getTicketIdFromPayload(source);
 
     if (!ticketId) {
-      showToast("No se pudo identificar la incidencia.", "error");
+      showToast(
+        "No se pudo identificar la incidencia.",
+        "error"
+      );
+
       return null;
     }
 
-    if (!getTickets().length && !homeState.loaded) {
+    if (
+      !getTickets().length &&
+      !homeState.loaded
+    ) {
       await reload({
         force: false,
         silent: true,
@@ -3978,18 +5199,21 @@ export const HomeView = (() => {
       });
     }
 
-    return handleOpenTicket(ticketId, {
-      skipThrottle: true,
-      source: safeText(source.source, "external"),
-      payload: source,
-      detail: first(
-        source.detail,
-        source.ticket,
-        source.incidencia,
-        source.item,
-        source
-      ),
-    });
+    return handleOpenTicket(
+      ticketId,
+      {
+        skipThrottle: true,
+        source: safeText(source.source, "external"),
+        payload: source,
+        detail: first(
+          source.detail,
+          source.ticket,
+          source.incidencia,
+          source.item,
+          source
+        ),
+      }
+    );
   }
 
   /* =========================================================
@@ -3997,22 +5221,37 @@ export const HomeView = (() => {
   ========================================================= */
 
   function getActionTarget(event, actions = []) {
-    const selectors = actions
+    const selectors = safeArray(actions)
       .map((action) => {
+        const clean = safeText(action, "");
+
+        if (!clean) {
+          return "";
+        }
+
         return [
-          `[data-home-action="${action}"]`,
-          `[data-action="${action}"]`,
+          `[data-home-action="${clean}"]`,
+          `[data-action="${clean}"]`,
         ].join(",");
       })
+      .filter(Boolean)
       .join(",");
 
-    if (!selectors) return null;
+    if (!selectors) {
+      return null;
+    }
 
     return event.target?.closest?.(selectors) || null;
   }
 
+  function getAnyActionTarget(event) {
+    return event.target?.closest?.(ACTION_SELECTOR) || null;
+  }
+
   function getTicketIdFromElement(element = null) {
-    if (!element) return "";
+    if (!element) {
+      return "";
+    }
 
     const closestRow =
       element.closest?.("[data-ticket-id]") ||
@@ -4047,7 +5286,9 @@ export const HomeView = (() => {
   }
 
   function getRouteFromElement(element = null) {
-    if (!element) return "";
+    if (!element) {
+      return "";
+    }
 
     return normalizeSpaRoute(
       first(
@@ -4061,7 +5302,9 @@ export const HomeView = (() => {
   }
 
   function getInvoiceIdFromElement(element = null) {
-    if (!element) return "";
+    if (!element) {
+      return "";
+    }
 
     return safeText(
       first(
@@ -4082,7 +5325,15 @@ export const HomeView = (() => {
     }
 
     const onClick = async (event) => {
-      if (destroyed) return;
+      if (destroyed) {
+        return;
+      }
+
+      const anyAction = getAnyActionTarget(event);
+
+      if (!anyAction) {
+        return;
+      }
 
       const ticketBtn = getActionTarget(event, [
         "open-ticket",
@@ -4095,9 +5346,13 @@ export const HomeView = (() => {
         event.preventDefault();
         event.stopPropagation();
 
-        await handleOpenTicket(getTicketIdFromElement(ticketBtn), {
-          source: "home:table",
-        });
+        await handleOpenTicket(
+          getTicketIdFromElement(ticketBtn),
+          {
+            source: "home:table",
+          }
+        );
+
         return;
       }
 
@@ -4110,6 +5365,7 @@ export const HomeView = (() => {
         event.stopPropagation();
 
         await handleActivityAction(activityBtn);
+
         return;
       }
 
@@ -4123,7 +5379,10 @@ export const HomeView = (() => {
         event.preventDefault();
         event.stopPropagation();
 
-        await handleCopyTicketId(getTicketIdFromElement(copyBtn));
+        await handleCopyTicketId(
+          getTicketIdFromElement(copyBtn)
+        );
+
         return;
       }
 
@@ -4144,6 +5403,7 @@ export const HomeView = (() => {
         );
 
         goToPage(page);
+
         return;
       }
 
@@ -4184,6 +5444,7 @@ export const HomeView = (() => {
         event.stopPropagation();
 
         await handleCreateIncidencia();
+
         return;
       }
 
@@ -4203,7 +5464,10 @@ export const HomeView = (() => {
         if (invoiceId) {
           await handleOpenInvoice(invoiceId);
         } else {
-          await handleNavigateAction("go-facturas", route);
+          await handleNavigateAction(
+            "go-facturas",
+            route
+          );
         }
 
         return;
@@ -4240,7 +5504,11 @@ export const HomeView = (() => {
           "navigate"
         );
 
-        await handleNavigateAction(action, route);
+        await handleNavigateAction(
+          action,
+          route
+        );
+
         return;
       }
 
@@ -4254,7 +5522,10 @@ export const HomeView = (() => {
         const route = getRouteFromElement(widgetBtn);
 
         if (route) {
-          await handleNavigateAction("open-widget", route);
+          await handleNavigateAction(
+            "open-widget",
+            route
+          );
         }
 
         return;
@@ -4295,7 +5566,9 @@ export const HomeView = (() => {
     };
 
     const onChange = (event) => {
-      if (destroyed) return;
+      if (destroyed) {
+        return;
+      }
 
       const pageSizeField =
         event.target?.closest?.("[data-home-field='page-size']") ||
@@ -4306,13 +5579,27 @@ export const HomeView = (() => {
       }
     };
 
-    container.addEventListener("click", onClick);
-    container.addEventListener("change", onChange);
+    container.addEventListener(
+      "click",
+      onClick
+    );
+
+    container.addEventListener(
+      "change",
+      onChange
+    );
 
     return () => {
       try {
-        container.removeEventListener("click", onClick);
-        container.removeEventListener("change", onChange);
+        container.removeEventListener(
+          "click",
+          onClick
+        );
+
+        container.removeEventListener(
+          "change",
+          onChange
+        );
       } catch {}
     };
   }
@@ -4321,7 +5608,9 @@ export const HomeView = (() => {
     const cleanups = [];
 
     const onMutated = async (eventOrPayload = {}) => {
-      if (destroyed) return;
+      if (destroyed) {
+        return;
+      }
 
       const payload = getEventPayload(eventOrPayload);
 
@@ -4333,7 +5622,9 @@ export const HomeView = (() => {
     };
 
     const onOpenTicket = async (eventOrPayload = {}) => {
-      if (destroyed) return;
+      if (destroyed) {
+        return;
+      }
 
       const payload = getEventPayload(eventOrPayload);
 
@@ -4348,15 +5639,21 @@ export const HomeView = (() => {
     };
 
     HOME_RELOAD_EVENTS.forEach((eventName) => {
-      cleanups.push(safeOn(eventName, onMutated));
+      cleanups.push(
+        safeOn(eventName, onMutated)
+      );
     });
 
     HOME_OPEN_TICKET_EVENTS.forEach((eventName) => {
-      cleanups.push(safeOn(eventName, onOpenTicket));
+      cleanups.push(
+        safeOn(eventName, onOpenTicket)
+      );
     });
 
     READY_EVENTS.forEach((eventName) => {
-      cleanups.push(safeOn(eventName, onReady));
+      cleanups.push(
+        safeOn(eventName, onReady)
+      );
     });
 
     bridgeCleanup = () => {
@@ -4377,7 +5674,9 @@ export const HomeView = (() => {
       },
 
       openTicketById(ticketId = "") {
-        return openTicketFromExternalRequest({ ticketId });
+        return openTicketFromExternalRequest({
+          ticketId,
+        });
       },
 
       openIncidencia(payload = {}) {
@@ -4385,7 +5684,9 @@ export const HomeView = (() => {
       },
 
       openIncidenciaById(ticketId = "") {
-        return openTicketFromExternalRequest({ ticketId });
+        return openTicketFromExternalRequest({
+          ticketId,
+        });
       },
 
       create(draft = {}) {
@@ -4421,17 +5722,59 @@ export const HomeView = (() => {
       getItems() {
         return api.getItems();
       },
+
+      getTickets() {
+        return api.getTickets();
+      },
+
+      getSnapshot() {
+        return api.getSnapshot();
+      },
     };
 
     try {
-      if (!AppCore.modules || typeof AppCore.modules !== "object") {
-        AppCore.modules = {};
-      }
+      if (
+        AppCore?.modules &&
+        isFunction(AppCore.modules.register)
+      ) {
+        AppCore.modules.register(
+          "Home",
+          api,
+          {
+            overwrite: true,
+            replace: true,
+            source: SOURCE,
+          }
+        );
 
-      AppCore.modules.Home = api;
-      AppCore.modules.HomeView = api;
-      AppCore.modules.OnionHomeView = api;
-      AppCore.modules.OnionHomeBridge = bridge;
+        AppCore.modules.register(
+          "HomeView",
+          api,
+          {
+            overwrite: true,
+            replace: true,
+            source: SOURCE,
+          }
+        );
+
+        AppCore.modules.register(
+          "OnionHomeBridge",
+          bridge,
+          {
+            overwrite: true,
+            replace: true,
+            source: SOURCE,
+          }
+        );
+      } else if (
+        AppCore?.modules &&
+        typeof AppCore.modules === "object"
+      ) {
+        AppCore.modules.Home = api;
+        AppCore.modules.HomeView = api;
+        AppCore.modules.OnionHomeView = api;
+        AppCore.modules.OnionHomeBridge = bridge;
+      }
     } catch {}
 
     try {
@@ -4455,15 +5798,22 @@ export const HomeView = (() => {
   function bind() {
     cleanupBindings();
 
-    if (destroyed) return;
+    if (destroyed) {
+      return false;
+    }
 
     registerHomeBridge();
 
     const container = getContainer();
     const cleanups = [];
 
-    cleanups.push(bindNativeActions(container));
-    cleanups.push(attachExternalListeners());
+    cleanups.push(
+      bindNativeActions(container)
+    );
+
+    cleanups.push(
+      attachExternalListeners()
+    );
 
     bindingsCleanup = () => {
       cleanups.forEach((cleanup) => {
@@ -4472,27 +5822,52 @@ export const HomeView = (() => {
         } catch {}
       });
     };
+
+    return true;
   }
 
   /* =========================================================
-     PUBLIC
+     PUBLIC FLOW
   ========================================================= */
 
   async function reload(options = {}) {
-    if (destroyed) return api;
+    if (destroyed) {
+      return api;
+    }
 
     const incomingOptions = safeObject(options);
+
+    if (
+      !assertHomeRoute("reload", [
+        {
+          route: {
+            path: HOME_PATH,
+            viewKey: "home",
+          },
+          canonicalPath: HOME_PATH,
+          publicPath: HOME_PATH,
+          options: incomingOptions,
+        },
+      ])
+    ) {
+      return api;
+    }
 
     if (inflightReload) {
       queuedReloadOptions = {
         ...(queuedReloadOptions || {}),
         ...incomingOptions,
-        force: Boolean(queuedReloadOptions?.force || incomingOptions.force),
+        force: Boolean(
+          queuedReloadOptions?.force ||
+            incomingOptions.force
+        ),
         asRefresh: Boolean(
-          queuedReloadOptions?.asRefresh || incomingOptions.asRefresh
+          queuedReloadOptions?.asRefresh ||
+            incomingOptions.asRefresh
         ),
         silent: Boolean(
-          queuedReloadOptions?.silent ?? incomingOptions.silent
+          queuedReloadOptions?.silent ??
+            incomingOptions.silent
         ),
       };
 
@@ -4505,14 +5880,22 @@ export const HomeView = (() => {
       do {
         queuedReloadOptions = null;
 
-        await renderAndLoad(currentOptions);
+        await renderAndLoad({
+          ...currentOptions,
+          reason: currentOptions.asRefresh
+            ? "reload:refresh"
+            : "reload",
+        });
 
         if (!destroyed) {
           bind();
         }
 
         currentOptions = queuedReloadOptions;
-      } while (currentOptions && !destroyed);
+      } while (
+        currentOptions &&
+        !destroyed
+      );
 
       return api;
     })();
@@ -4525,22 +5908,44 @@ export const HomeView = (() => {
     }
   }
 
-  async function init() {
+  async function init(...args) {
     if (destroyed) {
       destroyed = false;
+    }
+
+    if (
+      !assertHomeRoute("init", args)
+    ) {
+      return api;
     }
 
     if (inflightInit) {
       return inflightInit;
     }
 
-    if (initialized && !destroyed) {
+    if (
+      initialized &&
+      !destroyed
+    ) {
       registerHomeBridge();
       ensureBaseState();
-      rerender();
+
+      rerender({
+        route: {
+          path: HOME_PATH,
+          viewKey: "home",
+        },
+        canonicalPath: HOME_PATH,
+        publicPath: HOME_PATH,
+        reason: "init:already-initialized",
+      });
+
       flushPendingCreate();
 
-      if (!homeState.loaded && !inflightReload) {
+      if (
+        !homeState.loaded &&
+        !inflightReload
+      ) {
         await reload({
           force: false,
           silent: true,
@@ -4564,6 +5969,7 @@ export const HomeView = (() => {
         force: false,
         asRefresh: false,
         silent: false,
+        reason: "init",
       });
 
       if (!destroyed) {
@@ -4571,6 +5977,12 @@ export const HomeView = (() => {
       }
 
       flushPendingCreate();
+
+      safeEmit("home:init:done", {
+        initialized,
+        destroyed,
+        itemsCount: getTickets().length,
+      });
 
       return api;
     })();
@@ -4600,7 +6012,118 @@ export const HomeView = (() => {
     inflightOpenTicket = null;
     inflightOpenTicketId = "";
 
+    safeEmit("home:destroyed", {
+      source: SOURCE,
+    });
+
     safeLog("destroy");
+
+    return true;
+  }
+
+  /* =========================================================
+     SNAPSHOT
+  ========================================================= */
+
+  function getStateSnapshot() {
+    ensureBaseState();
+
+    const tickets = getTickets();
+    const pagination = getPaginationMeta(tickets);
+    const role = getCurrentRole();
+
+    return {
+      ...homeState,
+
+      user: getCurrentUser(),
+      role,
+      isAdmin: isAdminRoleKey(role),
+
+      initialized,
+      destroyed,
+
+      hasInflightInit: Boolean(inflightInit),
+      hasInflightReload: Boolean(inflightReload),
+      hasQueuedReload: Boolean(queuedReloadOptions),
+      hasInflightOpenTicket: Boolean(inflightOpenTicket),
+      inflightOpenTicketId,
+
+      pendingCreateRequest,
+
+      itemsCount: tickets.length,
+      ticketsCount: tickets.length,
+
+      invoicesCount: homeState.invoices.length,
+      facturasCount: homeState.invoices.length,
+
+      usersCount: homeState.users.length,
+      usuariosCount: homeState.users.length,
+
+      clientsCount: homeState.clients.length,
+      clientesCount: homeState.clients.length,
+
+      ticketsRemoteCount: homeState.ticketsRemoteCount,
+      invoicesRemoteCount: homeState.invoicesRemoteCount,
+      usersRemoteCount: homeState.usersRemoteCount,
+      clientsRemoteCount: homeState.clientsRemoteCount,
+
+      pageItems: pagination.items,
+      pagination,
+
+      routeGuard: getRouteDebug([
+        {
+          route: {
+            path: HOME_PATH,
+            viewKey: "home",
+          },
+          canonicalPath: HOME_PATH,
+          publicPath: HOME_PATH,
+        },
+      ]),
+
+      apiSnapshot: getHomeApiSnapshot?.(),
+    };
+  }
+
+  function getSnapshot() {
+    return {
+      source: SOURCE,
+
+      initialized,
+      destroyed,
+
+      hydrated: Boolean(homeState.hydrated),
+      loaded: Boolean(homeState.loaded),
+      loading: Boolean(homeState.loading),
+      refreshing: Boolean(homeState.refreshing),
+      creating: Boolean(homeState.creating),
+
+      openingTicketId: homeState.openingTicketId,
+      selectedTicketId: homeState.selectedTicketId,
+      navigatingAction: homeState.navigatingAction,
+
+      error: homeState.error,
+
+      itemsCount: getTickets().length,
+      invoicesCount: homeState.invoices.length,
+      usersCount: homeState.users.length,
+      clientsCount: homeState.clients.length,
+      activityCount: homeState.activity.length,
+
+      page: homeState.page,
+      pageSize: homeState.pageSize,
+
+      requestId: homeState.requestId,
+      lastSyncAt: homeState.lastSyncAt,
+
+      hasInflightInit: Boolean(inflightInit),
+      hasInflightReload: Boolean(inflightReload),
+      hasQueuedReload: Boolean(queuedReloadOptions),
+      hasInflightOpenTicket: Boolean(inflightOpenTicket),
+      inflightOpenTicketId,
+
+      routeGuard: getRouteDebug([]),
+    };
   }
 
   /* =========================================================
@@ -4615,6 +6138,8 @@ export const HomeView = (() => {
     scheduleRender: rerender,
 
     reload,
+    refresh: reload,
+
     destroy,
     unmount: destroy,
 
@@ -4629,6 +6154,8 @@ export const HomeView = (() => {
     createIncidencia: handleCreateIncidencia,
 
     navigateTo,
+    navigate: navigateTo,
+
     openInvoice: handleOpenInvoice,
 
     goToPage,
@@ -4638,13 +6165,18 @@ export const HomeView = (() => {
 
     getItems: () => getTickets(),
     getTickets: () => getTickets(),
+
     getInvoices: () => safeArray(homeState.invoices),
     getFacturas: () => safeArray(homeState.invoices),
+
     getUsers: () => safeArray(homeState.users),
     getUsuarios: () => safeArray(homeState.users),
+
     getClients: () => safeArray(homeState.clients),
     getClientes: () => safeArray(homeState.clients),
+
     getActivity: () => safeArray(homeState.activity),
+
     getDashboard: () => safeObject(homeState.dashboard),
     getSummary: () => safeObject(homeState.summary),
     getWidgets: () => safeArray(homeState.widgets),
@@ -4653,53 +6185,23 @@ export const HomeView = (() => {
     getPagination: () => getPaginationMeta(getTickets()),
 
     getTicketById: (ticketId = "") =>
-      findIncidenciaById(getTickets(), ticketId) || findTicketById(ticketId),
+      findIncidenciaById(getTickets(), ticketId) ||
+      findTicketById(ticketId),
 
     findTicketById,
 
+    hydrateBestEffort,
+
+    canRenderHomeNow: (...args) =>
+      canRenderHomeForArgs(args),
+
+    getHomeRouteDebug: (...args) =>
+      getRouteDebug(args),
+
     getHomeApiSnapshot,
 
-    getState: () => {
-      ensureBaseState();
-
-      return {
-        ...homeState,
-
-        user: getCurrentUser(),
-        role: getCurrentRole(),
-        isAdmin: isAdminRoleKey(getCurrentRole()),
-
-        initialized,
-        destroyed,
-
-        hasInflightInit: Boolean(inflightInit),
-        hasInflightReload: Boolean(inflightReload),
-        hasQueuedReload: Boolean(queuedReloadOptions),
-        hasInflightOpenTicket: Boolean(inflightOpenTicket),
-        inflightOpenTicketId,
-
-        pendingCreateRequest,
-
-        itemsCount: getTickets().length,
-        ticketsCount: getTickets().length,
-        invoicesCount: homeState.invoices.length,
-        facturasCount: homeState.invoices.length,
-        usersCount: homeState.users.length,
-        usuariosCount: homeState.users.length,
-        clientsCount: homeState.clients.length,
-        clientesCount: homeState.clients.length,
-
-        ticketsRemoteCount: homeState.ticketsRemoteCount,
-        invoicesRemoteCount: homeState.invoicesRemoteCount,
-        usersRemoteCount: homeState.usersRemoteCount,
-        clientsRemoteCount: homeState.clientsRemoteCount,
-
-        pageItems: getPaginationMeta(getTickets()).items,
-        pagination: getPaginationMeta(getTickets()),
-
-        apiSnapshot: getHomeApiSnapshot?.(),
-      };
-    },
+    getState: getStateSnapshot,
+    getSnapshot,
 
     get initialized() {
       return initialized;
@@ -4707,6 +6209,13 @@ export const HomeView = (() => {
 
     get destroyed() {
       return destroyed;
+    },
+
+    get ready() {
+      return Boolean(
+        initialized &&
+          !destroyed
+      );
     },
   };
 

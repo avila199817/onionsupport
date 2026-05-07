@@ -2,7 +2,10 @@
    Onion SPA - Activate Account View
    Archivo: src/views/activate-account/index.js
 
-   Responsabilidades:
+   ACTIVATE ACCOUNT VIEW · FINAL PRO SYSTEM · CSP CLEAN · 10/10
+   LOGIN/RESET PASSWORD VISUAL CONTRACT ALIGNED · NO CSS · NO STYLE INJECTION
+
+   RESPONSABILIDADES:
    - montar la vista pública de activación de cuenta
    - leer token desde URL normal, path-token, hash-router, history.state o contexto router
    - capturar token antes de limpiar la URL
@@ -31,6 +34,9 @@
    - API base preferente: AppCore.config.apiBase / window.ONION_API_BASE_URL
    - fallback producción: https://api.onionit.net
    - evita llamadas erróneas a onionsupport.com/api/...
+   - sin CSS inline
+   - sin <style>
+   - sin JS visual
 ========================================================= */
 
 import {
@@ -62,40 +68,32 @@ export const ActivateAccountView = (() => {
   ========================================================= */
 
   const SCOPE = "view:activate-account";
+
   const DEFAULT_APP_NAME = "Onion Support";
   const DEFAULT_LOGIN_PATH = "/login";
-
-  /*
-    API real de producción.
-
-    Importante:
-    - El frontend vive en onionsupport.com.
-    - La API vive en api.onionit.net.
-    - Nunca debe resolver /api/auth/activate-account contra onionsupport.com
-      si existe API base configurada o fallback.
-  */
   const DEFAULT_API_BASE_URL = "https://api.onionit.net";
+
+  const CLEAN_ACTIVATION_PUBLIC_PATH = "/activate-account";
+  const TEMPLATE_CAPTURED_TOKEN_SENTINEL = "__captured_activation_token__";
 
   const DEFAULT_ACTIVATION_ENDPOINT =
     AUTH_ENDPOINTS?.activateAccount ||
     getActivateAccountEndpoint?.() ||
     "/api/auth/activate-account";
 
-  const CLEAN_ACTIVATION_PUBLIC_PATH = "/activate-account";
-  const SCRUB_TOKEN_FROM_URL_AFTER_CAPTURE = true;
-  const TEMPLATE_CAPTURED_TOKEN_SENTINEL = "__captured_activation_token__";
-
   const PASSWORD_MIN_LENGTH =
     Number(getActivationPasswordMinLength?.()) ||
     8;
 
-  const TOKEN_PARAM_NAMES = [
+  const SCRUB_TOKEN_FROM_URL_AFTER_CAPTURE = true;
+
+  const TOKEN_PARAM_NAMES = Object.freeze([
     "token",
     "activationToken",
     "activateToken",
     "code",
     "t",
-  ];
+  ]);
 
   /* =========================================================
      LOCAL STATE
@@ -118,7 +116,7 @@ export const ActivateAccountView = (() => {
 
   let cleanupBinding = null;
   let cleanupPasswordFields = null;
-  let autoSubmitTimer = null;
+  let activeRequestController = null;
 
   /* =========================================================
      SAFE HELPERS
@@ -163,6 +161,44 @@ export const ActivateAccountView = (() => {
     return safeText(value, "").replace(/^\/+/g, "");
   }
 
+  function normalizePathnameOnly(pathname = "/") {
+    let value = String(pathname || "/")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/\/{2,}/g, "/");
+
+    if (!value) {
+      value = "/";
+    }
+
+    if (!value.startsWith("/")) {
+      value = `/${value}`;
+    }
+
+    if (value.length > 1 && value.endsWith("/")) {
+      value = value.replace(/\/+$/g, "") || "/";
+    }
+
+    return value;
+  }
+
+  function isActivationPathname(pathname = "") {
+    const normalized = normalizePathnameOnly(pathname);
+
+    return (
+      normalized === CLEAN_ACTIVATION_PUBLIC_PATH ||
+      normalized.startsWith(`${CLEAN_ACTIVATION_PUBLIC_PATH}/`)
+    );
+  }
+
+  function getBaseOrigin() {
+    if (isBrowser() && window.location?.origin) {
+      return window.location.origin;
+    }
+
+    return "http://localhost";
+  }
+
   function redactActivationTokenInText(value = "") {
     const raw = safeText(value, "");
 
@@ -195,6 +231,8 @@ export const ActivateAccountView = (() => {
       href: redactActivationTokenInText(ctx.href),
       url: redactActivationTokenInText(ctx.url),
       redirectedFrom: redactActivationTokenInText(ctx.redirectedFrom),
+      routePublicPath: redactActivationTokenInText(ctx.route?.publicPath),
+      routePath: redactActivationTokenInText(ctx.route?.path),
       hasContext: true,
     };
   }
@@ -225,45 +263,15 @@ export const ActivateAccountView = (() => {
     } catch {}
   }
 
-  function getBaseOrigin() {
-    if (isBrowser() && window.location?.origin) {
-      return window.location.origin;
+  /* =========================================================
+     DOM / CONFIG
+  ========================================================= */
+
+  function getContainer(explicitContainer = null) {
+    if (explicitContainer) {
+      return explicitContainer;
     }
 
-    return "http://localhost";
-  }
-
-  function normalizePathnameOnly(pathname = "/") {
-    let value = String(pathname || "/")
-      .trim()
-      .replace(/\\/g, "/")
-      .replace(/\/{2,}/g, "/");
-
-    if (!value) {
-      value = "/";
-    }
-
-    if (!value.startsWith("/")) {
-      value = `/${value}`;
-    }
-
-    if (value.length > 1 && value.endsWith("/")) {
-      value = value.replace(/\/+$/g, "") || "/";
-    }
-
-    return value;
-  }
-
-  function isActivationPathname(pathname = "") {
-    const normalized = normalizePathnameOnly(pathname);
-
-    return (
-      normalized === CLEAN_ACTIVATION_PUBLIC_PATH ||
-      normalized.startsWith(`${CLEAN_ACTIVATION_PUBLIC_PATH}/`)
-    );
-  }
-
-  function getContainer() {
     if (!isBrowser()) {
       return null;
     }
@@ -291,12 +299,6 @@ export const ActivateAccountView = (() => {
   }
 
   function getApiBase() {
-    /*
-      Orden:
-      1. Config runtime del core.
-      2. Variables globales de window.
-      3. Fallback producción real.
-    */
     return stripTrailingSlashes(
       AppCore?.config?.apiBase ||
         AppCore?.config?.apiBaseUrl ||
@@ -342,33 +344,16 @@ export const ActivateAccountView = (() => {
   function buildApiUrl(endpoint = "") {
     const rawEndpoint = safeText(endpoint, DEFAULT_ACTIVATION_ENDPOINT);
 
-    /*
-      Si ya viene absoluto, respetamos el valor exacto.
-    */
     if (/^https?:\/\//i.test(rawEndpoint)) {
       return rawEndpoint;
     }
 
-    const apiBase = getApiBase();
-    const cleanBase = stripTrailingSlashes(apiBase);
+    const cleanBase = stripTrailingSlashes(getApiBase());
     const endpointWithSlash = rawEndpoint.startsWith("/")
       ? rawEndpoint
       : `/${rawEndpoint}`;
 
-    /*
-      Caso normal producción:
-      base:     https://api.onionit.net
-      endpoint: /api/auth/activate-account
-      result:   https://api.onionit.net/api/auth/activate-account
-    */
     if (cleanBase) {
-      /*
-        Evita duplicar /api:
-
-        base:     https://api.onionit.net/api
-        endpoint: /api/auth/activate-account
-        result:   https://api.onionit.net/api/auth/activate-account
-      */
       if (
         cleanBase.endsWith("/api") &&
         endpointWithSlash.startsWith("/api/")
@@ -376,20 +361,9 @@ export const ActivateAccountView = (() => {
         return `${cleanBase}${endpointWithSlash.replace(/^\/api/i, "")}`;
       }
 
-      /*
-        También soporta:
-
-        base:     https://api.onionit.net/api
-        endpoint: /auth/activate-account
-        result:   https://api.onionit.net/api/auth/activate-account
-      */
       return `${cleanBase}${endpointWithSlash}`;
     }
 
-    /*
-      Último fallback. En práctica no debería usarse porque getApiBase()
-      ya devuelve DEFAULT_API_BASE_URL.
-    */
     return endpointWithSlash.startsWith("/api/")
       ? endpointWithSlash
       : joinUrl("/api", endpointWithSlash);
@@ -411,14 +385,10 @@ export const ActivateAccountView = (() => {
         }
       }
 
-      /*
-        Fallback para enlaces envueltos por trackers/mail clients:
-        algunos proveedores meten la URL real dentro de otro query param.
-      */
       for (const [, rawValue] of params.entries()) {
         const value = safeText(rawValue, "");
 
-        if (!value || !value.toLowerCase().includes("token")) {
+        if (!value) {
           continue;
         }
 
@@ -473,7 +443,9 @@ export const ActivateAccountView = (() => {
         ? cleanHash.split("?").slice(1).join("?")
         : "";
 
-      const fromQuery = getTokenFromSearchParams(query ? `?${query}` : "");
+      const fromQuery = getTokenFromSearchParams(
+        query ? `?${query}` : ""
+      );
 
       if (fromQuery) {
         return fromQuery;
@@ -516,10 +488,22 @@ export const ActivateAccountView = (() => {
           ? raw.split("?").slice(1).join("?")
           : "";
 
-        const fromQuery = getTokenFromSearchParams(query ? `?${query}` : "");
+        const fromQuery = getTokenFromSearchParams(
+          query ? `?${query}` : ""
+        );
 
         if (fromQuery) {
           return fromQuery;
+        }
+
+        const hash = raw.includes("#")
+          ? `#${raw.split("#").slice(1).join("#")}`
+          : "";
+
+        const fromHash = extractTokenFromHash(hash);
+
+        if (fromHash) {
+          return fromHash;
         }
 
         const pathOnly = raw.split("?")[0]?.split("#")[0] || raw;
@@ -569,6 +553,7 @@ export const ActivateAccountView = (() => {
         historyState.path,
         historyState.requestedPath,
         historyState.url,
+        historyState.href,
       ]
         .map((value) => safeText(value, ""))
         .filter(Boolean);
@@ -594,10 +579,6 @@ export const ActivateAccountView = (() => {
 
     try {
       urls.push(window.__ONION_INITIAL_URL__);
-    } catch {}
-
-    try {
-      urls.push(document.referrer);
     } catch {}
 
     return urls
@@ -635,18 +616,18 @@ export const ActivateAccountView = (() => {
     }
 
     try {
-      if (window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__) {
-        window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__ = "";
-      }
+      window.__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__ = "";
 
-      if (
-        window.__ONION_INITIAL_URL__ &&
-        isActivationPathname(
-          new URL(window.__ONION_INITIAL_URL__, getBaseOrigin()).pathname
-        )
-      ) {
-        window.__ONION_INITIAL_URL__ =
-          `${window.location.origin}${CLEAN_ACTIVATION_PUBLIC_PATH}`;
+      if (window.__ONION_INITIAL_URL__) {
+        const initialUrl = new URL(
+          window.__ONION_INITIAL_URL__,
+          getBaseOrigin()
+        );
+
+        if (isActivationPathname(initialUrl.pathname)) {
+          window.__ONION_INITIAL_URL__ =
+            `${window.location.origin}${CLEAN_ACTIVATION_PUBLIC_PATH}`;
+        }
       }
 
       return true;
@@ -660,11 +641,7 @@ export const ActivateAccountView = (() => {
   }
 
   function scrubActivationTokenFromUrl() {
-    if (!SCRUB_TOKEN_FROM_URL_AFTER_CAPTURE) {
-      return false;
-    }
-
-    if (!isBrowser()) {
+    if (!SCRUB_TOKEN_FROM_URL_AFTER_CAPTURE || !isBrowser()) {
       return false;
     }
 
@@ -684,32 +661,22 @@ export const ActivateAccountView = (() => {
         isActivationPathname(hashPath);
 
       if (!isActivateUrl) {
+        clearSensitiveInitialUrlCache();
         return false;
       }
 
       const cleanPath = CLEAN_ACTIVATION_PUBLIC_PATH;
 
-      const currentState =
-        window.history.state &&
-        typeof window.history.state === "object"
-          ? {
-              ...window.history.state,
-              path: cleanPath,
-              publicPath: cleanPath,
-              canonicalPath: cleanPath,
-              searchAndHash: "",
-              scrubbedActivationToken: true,
-            }
-          : {
-              path: cleanPath,
-              publicPath: cleanPath,
-              canonicalPath: cleanPath,
-              searchAndHash: "",
-              scrubbedActivationToken: true,
-            };
+      const cleanState = {
+        path: cleanPath,
+        publicPath: cleanPath,
+        canonicalPath: cleanPath,
+        searchAndHash: "",
+        scrubbedActivationToken: true,
+      };
 
       window.history.replaceState(
-        currentState,
+        cleanState,
         "",
         cleanPath
       );
@@ -768,9 +735,16 @@ export const ActivateAccountView = (() => {
   function applyAuthLayoutMode(enabled = true) {
     if (isBrowser()) {
       try {
+        document.body.classList.toggle("auth-screen", enabled);
         document.body.classList.toggle("auth-view-active", enabled);
         document.body.classList.toggle("login-view-active", enabled);
-        document.body.dataset.authView = enabled ? "activate-account" : "";
+        document.body.classList.toggle("login-no-scroll", enabled);
+
+        if (enabled) {
+          document.body.dataset.authView = "activate-account";
+        } else if (document.body.dataset.authView === "activate-account") {
+          delete document.body.dataset.authView;
+        }
       } catch {}
     }
 
@@ -787,14 +761,12 @@ export const ActivateAccountView = (() => {
     } catch {}
   }
 
-  function clearAutoSubmitTimer() {
-    if (!autoSubmitTimer) return;
-
+  function abortActiveRequest() {
     try {
-      window.clearTimeout(autoSubmitTimer);
+      activeRequestController?.abort?.();
     } catch {}
 
-    autoSubmitTimer = null;
+    activeRequestController = null;
   }
 
   /* =========================================================
@@ -839,10 +811,24 @@ export const ActivateAccountView = (() => {
     }
 
     try {
-      document.getElementById(id)?.focus?.();
+      const element = document.getElementById(id);
+
+      if (!element) {
+        return false;
+      }
+
+      element.focus?.({
+        preventScroll: false,
+      });
+
       return true;
     } catch {
-      return false;
+      try {
+        document.getElementById(id)?.focus?.();
+        return true;
+      } catch {
+        return false;
+      }
     }
   }
 
@@ -985,7 +971,8 @@ export const ActivateAccountView = (() => {
       code.includes("MISSING") ||
       code.includes("USED") ||
       message.includes("no válido") ||
-      message.includes("inval")
+      message.includes("inval") ||
+      message.includes("missing")
     ) {
       return ACTIVATE_ACCOUNT_STATUS.INVALID;
     }
@@ -1002,6 +989,12 @@ export const ActivateAccountView = (() => {
       return endpoint
         ? `La API no acepta POST en ${endpoint}. Revisa el router auth desplegado.`
         : "La API no acepta POST en el endpoint de activación. Revisa el router auth desplegado.";
+    }
+
+    if (statusCode === 404 || code === "HTTP_404") {
+      return endpoint
+        ? `No existe el endpoint de activación en ${endpoint}. Revisa la ruta backend desplegada.`
+        : "No existe el endpoint de activación. Revisa la ruta backend desplegada.";
     }
 
     return safeText(
@@ -1037,21 +1030,35 @@ export const ActivateAccountView = (() => {
      TOAST
   ========================================================= */
 
+  function normalizeToastType(type = "info") {
+    const clean = safeText(type, "info").toLowerCase();
+
+    if (["success", "error", "warning", "info"].includes(clean)) {
+      return clean;
+    }
+
+    return "info";
+  }
+
   function showToast(message = "", type = "info", title = "") {
     const text = safeText(message, "");
 
-    if (!text) return false;
+    if (!text) {
+      return false;
+    }
+
+    const finalType = normalizeToastType(type);
 
     try {
-      if (typeof AppCore?.toast?.[type] === "function") {
-        AppCore.toast[type](text);
+      if (typeof AppCore?.toast?.[finalType] === "function") {
+        AppCore.toast[finalType](text);
         return true;
       }
     } catch {}
 
     try {
       if (typeof AppCore?.toast?.show === "function") {
-        AppCore.toast.show(text, type);
+        AppCore.toast.show(text, finalType);
         return true;
       }
     } catch {}
@@ -1071,28 +1078,41 @@ export const ActivateAccountView = (() => {
 
     try {
       toast.hidden = false;
+      toast.classList.add("is-visible");
+      toast.classList.remove("is-success", "is-error", "is-warning", "is-info");
+      toast.classList.add(`is-${finalType}`);
+
       toast.setAttribute("aria-hidden", "false");
-      toast.dataset.state = type;
+      toast.dataset.state = finalType;
 
       if (toastTitle) {
         toastTitle.textContent = safeText(
           title,
-          type === "error" ? "Error" : "Aviso"
+          finalType === "error"
+            ? "Error"
+            : finalType === "success"
+              ? "Correcto"
+              : finalType === "warning"
+                ? "Aviso"
+                : "Información"
         );
       }
 
       toastText.textContent = text;
 
       const close = () => {
-        toast.hidden = true;
-        toast.setAttribute("aria-hidden", "true");
+        try {
+          toast.classList.remove("is-visible");
+          toast.hidden = true;
+          toast.setAttribute("aria-hidden", "true");
+        } catch {}
       };
 
       toastClose?.addEventListener?.("click", close, {
         once: true,
       });
 
-      window.setTimeout(close, type === "error" ? 6500 : 4200);
+      window.setTimeout(close, finalType === "error" ? 6500 : 4200);
 
       return true;
     } catch {
@@ -1106,6 +1126,12 @@ export const ActivateAccountView = (() => {
 
   async function requestWithFetch(endpoint = "", payload = {}) {
     const url = buildApiUrl(endpoint);
+
+    abortActiveRequest();
+
+    activeRequestController = typeof AbortController !== "undefined"
+      ? new AbortController()
+      : null;
 
     safeLog("activation request", {
       method: "POST",
@@ -1124,6 +1150,7 @@ export const ActivateAccountView = (() => {
       credentials: "include",
       cache: "no-store",
       redirect: "follow",
+      signal: activeRequestController?.signal,
       body: JSON.stringify(payload),
     });
 
@@ -1141,6 +1168,8 @@ export const ActivateAccountView = (() => {
     } catch {
       data = null;
     }
+
+    activeRequestController = null;
 
     if (!response.ok || data?.ok === false) {
       const code =
@@ -1216,12 +1245,6 @@ export const ActivateAccountView = (() => {
       passwordConfirm: cleanConfirmPassword,
     };
 
-    /*
-      Importante:
-      Esta ruta pública NO usa AppCore.http.
-      Se usa fetch directo para evitar interceptores, auth headers,
-      transformaciones de body o fallback de método.
-    */
     return await requestWithFetch(endpoint, payload);
   }
 
@@ -1261,8 +1284,8 @@ export const ActivateAccountView = (() => {
     };
   }
 
-  function render() {
-    const container = getContainer();
+  function render(explicitContainer = null) {
+    const container = getContainer(explicitContainer);
 
     if (!container) {
       safeWarn("No existe #view-container para ActivateAccountView.");
@@ -1293,9 +1316,9 @@ export const ActivateAccountView = (() => {
 
   function setStatus(nextStatus = ACTIVATE_ACCOUNT_STATUS.IDLE, patch = {}) {
     state.status = nextStatus;
-    state.message = safeText(patch.message, state.message);
+    state.message = safeText(patch.message, "");
     state.error = safeText(patch.error, "");
-    state.response = patch.response || state.response || null;
+    state.response = patch.response || null;
 
     if (shouldClearTokenForStatus(nextStatus)) {
       state.token = "";
@@ -1388,18 +1411,16 @@ export const ActivateAccountView = (() => {
     const token = safeText(state.token, "");
 
     if (!token) {
+      const message =
+        "No se ha encontrado un token de activación válido. Abre el enlace completo recibido por correo.";
+
       setStatus(ACTIVATE_ACCOUNT_STATUS.INVALID, {
-        message:
-          "No se ha encontrado un token de activación válido. Abre el enlace completo recibido por correo.",
-        error:
-          "No se ha encontrado un token de activación válido.",
+        message,
+        error: message,
       });
 
       if (!silent) {
-        showToast(
-          "No se ha encontrado un token de activación válido.",
-          "error"
-        );
+        showToast(message, "error", "Token no válido");
       }
 
       return null;
@@ -1477,11 +1498,6 @@ export const ActivateAccountView = (() => {
     }
   }
 
-  function scheduleAutoSubmit() {
-    clearAutoSubmitTimer();
-    return false;
-  }
-
   /* =========================================================
      BINDINGS
   ========================================================= */
@@ -1534,6 +1550,7 @@ export const ActivateAccountView = (() => {
 
     const handlePrimaryAction = async (event) => {
       event?.preventDefault?.();
+      event?.stopPropagation?.();
 
       const action = getButtonAction();
 
@@ -1562,8 +1579,11 @@ export const ActivateAccountView = (() => {
     const onToastClose = () => {
       const toast = document.getElementById("activateAccountToast");
 
-      if (!toast) return;
+      if (!toast) {
+        return;
+      }
 
+      toast.classList.remove("is-visible");
       toast.hidden = true;
       toast.setAttribute("aria-hidden", "true");
     };
@@ -1630,9 +1650,8 @@ export const ActivateAccountView = (() => {
       activationUrl: buildApiUrl(getActivationEndpoint()),
     });
 
-    render();
+    render(viewContainer);
     bind();
-    scheduleAutoSubmit();
 
     return api;
   }
@@ -1640,11 +1659,16 @@ export const ActivateAccountView = (() => {
   function destroy() {
     state.destroyed = true;
     state.mounted = false;
+    state.bindingsAttached = false;
     state.submitting = false;
+    state.status = ACTIVATE_ACCOUNT_STATUS.IDLE;
     state.token = "";
+    state.message = "";
+    state.error = "";
+    state.response = null;
     state.lastContext = null;
 
-    clearAutoSubmitTimer();
+    abortActiveRequest();
     cleanupBindings();
     applyAuthLayoutMode(false);
 
@@ -1658,6 +1682,7 @@ export const ActivateAccountView = (() => {
   const api = {
     init,
     mount: init,
+
     destroy,
     unmount: destroy,
 
@@ -1666,10 +1691,21 @@ export const ActivateAccountView = (() => {
     navigateToLogin,
 
     getState: () => ({
-      ...state,
+      mounted: state.mounted,
+      destroyed: state.destroyed,
+      bindingsAttached: state.bindingsAttached,
+      submitting: state.submitting,
+
+      status: state.status,
       token: state.token ? "***" : "",
       hasToken: Boolean(state.token),
+
+      message: state.message,
+      error: state.error,
+      response: state.response,
+
       lastContext: state.lastContext,
+
       apiBase: getApiBase(),
       activationEndpoint: getActivationEndpoint(),
       activationUrl: buildApiUrl(getActivationEndpoint()),

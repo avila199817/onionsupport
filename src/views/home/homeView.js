@@ -25,12 +25,15 @@
    - Bridge público para topbar/global search.
    - Protección contra renders stale encima de otras vistas.
 
-   REGLAS:
+   PATCH 10/10:
+   - Route guard compatible con public path /username/.
+   - No bloquea Home cuando canonicalPath real es "/".
+   - No trata rutas conocidas como username.
    - Sin CSS inline.
    - Sin <style>.
    - Sin Object.assign(style).
    - Sin listeners duplicados.
-   - Sin render Home si la ruta activa no es Home.
+   - Sin render Home si la ruta activa no es Home real.
    - API/model/store externos hacen datos; la vista orquesta UX.
 ========================================================= */
 
@@ -88,7 +91,7 @@ export const HomeView = (() => {
   const CREATE_CLICK_THROTTLE_MS = 450;
   const OPEN_TICKET_THROTTLE_MS = 350;
 
-  const HOME_CACHE_KEY = "onion.home.view.cache.v6";
+  const HOME_CACHE_KEY = "onion.home.view.cache.v7";
   const HOME_CACHE_TTL_MS = 1000 * 60 * 10;
 
   const OPTIONAL_IMPORT_TIMEOUT_MS = 7000;
@@ -135,6 +138,59 @@ export const HomeView = (() => {
 
     "/settings": "/ajustes",
   });
+
+  const KNOWN_ROOT_ROUTE_SEGMENTS = Object.freeze(
+    new Set([
+      "login",
+      "logout",
+      "2fa",
+      "otp",
+      "mfa",
+
+      "home",
+      "dashboard",
+
+      "incidencias",
+      "tickets",
+      "ticket",
+      "incidents",
+      "incident",
+      "issues",
+      "issue",
+
+      "facturas",
+      "invoices",
+      "invoice",
+      "bills",
+      "bill",
+      "billing",
+
+      "usuarios",
+      "users",
+      "user",
+      "members",
+      "member",
+
+      "clientes",
+      "clients",
+      "client",
+      "customers",
+      "customer",
+
+      "cuenta",
+      "account",
+      "profile",
+
+      "ajustes",
+      "settings",
+
+      "activate-account",
+      "reset-password",
+      "forgot-password",
+      "recover-password",
+      "password-reset",
+    ])
+  );
 
   const HOME_RELOAD_EVENTS = Object.freeze([
     "home:reload",
@@ -701,10 +757,127 @@ export const HomeView = (() => {
     );
   }
 
-  function isUsernameSegment(segment = "") {
-    return /^@[A-Za-z0-9._-]{1,80}$/.test(
-      safeText(segment, "")
+  function normalizeUsernameSegment(value = "") {
+    return safeText(value, "")
+      .replace(/^@+/, "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9._-]/g, "")
+      .trim();
+  }
+
+  function getKnownUsernameCandidates() {
+    const state = safeObject(AppCore?.state);
+
+    const user = safeObject(
+      first(
+        state.user,
+        state.currentUser,
+        state.authUser,
+        state.sessionUser,
+        state.session?.user,
+        AppCore?.session?.user,
+        {}
+      )
     );
+
+    return uniqueStrings([
+      state.currentResolvedUsername,
+      state.resolvedUsername,
+      state.username,
+      state.userName,
+      state.user_name,
+      state.publicUsername,
+      state.slug,
+
+      user.username,
+      user.userName,
+      user.user_name,
+      user.slug,
+      user.alias,
+      user.login,
+      user.email,
+
+      user.raw?.username,
+      user.raw?.userName,
+      user.raw?.user_name,
+      user.raw?.slug,
+      user.raw?.alias,
+      user.raw?.login,
+      user.raw?.email,
+
+      isBrowser() ? window.__ONION_USERNAME__ : "",
+      isBrowser() ? window.__ONION_PUBLIC_USERNAME__ : "",
+      isBrowser() ? window.__ONION_RESOLVED_USERNAME__ : "",
+    ])
+      .map(normalizeUsernameSegment)
+      .filter(Boolean);
+  }
+
+  function getRawAppRouteValue() {
+    try {
+      return safeText(
+        first(
+          AppCore?.state?.route,
+          AppCore?.state?.canonicalPath,
+          ""
+        ),
+        ""
+      );
+    } catch {
+      return "";
+    }
+  }
+
+  function isRawAppRouteHome() {
+    const raw = getRawAppRouteValue();
+
+    if (!raw) {
+      return false;
+    }
+
+    const clean = stripSearchAndHash(raw);
+
+    return clean === HOME_PATH;
+  }
+
+  function isUsernameSegment(segment = "", options = {}) {
+    const raw = safeText(segment, "");
+    const opts = safeObject(options);
+
+    if (!raw) {
+      return false;
+    }
+
+    if (/^@[A-Za-z0-9._-]{1,80}$/.test(raw)) {
+      return true;
+    }
+
+    const clean = normalizeUsernameSegment(raw);
+
+    if (!clean) {
+      return false;
+    }
+
+    if (KNOWN_ROOT_ROUTE_SEGMENTS.has(clean)) {
+      return false;
+    }
+
+    const knownUsernames = getKnownUsernameCandidates();
+
+    if (knownUsernames.some((candidate) => candidate === clean)) {
+      return true;
+    }
+
+    if (
+      opts.allowUnknownSlug === true &&
+      /^[a-z0-9._-]{3,80}$/i.test(clean)
+    ) {
+      return true;
+    }
+
+    return false;
   }
 
   function stripUsernamePrefix(path = HOME_PATH) {
@@ -716,10 +889,20 @@ export const HomeView = (() => {
       .split("/")
       .filter(Boolean);
 
-    if (
-      segments.length > 0 &&
-      isUsernameSegment(segments[0])
-    ) {
+    if (!segments.length) {
+      return `${HOME_PATH}${search}${hash}`;
+    }
+
+    const shouldStrip = isUsernameSegment(
+      segments[0],
+      {
+        allowUnknownSlug:
+          segments.length === 1 &&
+          isRawAppRouteHome(),
+      }
+    );
+
+    if (shouldStrip) {
       const rest = segments.slice(1).join("/");
 
       const cleanPathname = rest
@@ -744,8 +927,35 @@ export const HomeView = (() => {
     );
   }
 
+  function isSinglePublicUsernameRoot(path = "") {
+    const clean = stripSearchAndHash(
+      normalizeFullPath(path || HOME_PATH)
+    );
+
+    const segments = clean
+      .split("/")
+      .filter(Boolean);
+
+    if (segments.length !== 1) {
+      return false;
+    }
+
+    return isUsernameSegment(
+      segments[0],
+      {
+        allowUnknownSlug: isRawAppRouteHome(),
+      }
+    );
+  }
+
   function isHomePath(path = "") {
-    return getCleanCanonicalPath(path || HOME_PATH) === HOME_PATH;
+    const clean = getCleanCanonicalPath(path || HOME_PATH);
+
+    if (clean === HOME_PATH) {
+      return true;
+    }
+
+    return isSinglePublicUsernameRoot(path);
   }
 
   function getBrowserPath() {
@@ -954,38 +1164,59 @@ export const HomeView = (() => {
     return signals;
   }
 
+  function hasPositiveHomeSignal(signals = []) {
+    return signals.some((signal) => signal.isHome === true);
+  }
+
+  function isIgnorableUsernameRootSignal(signal = {}, signals = []) {
+    if (
+      !signal ||
+      signal.isHome !== false
+    ) {
+      return false;
+    }
+
+    if (!isSinglePublicUsernameRoot(signal.value || "")) {
+      return false;
+    }
+
+    return hasPositiveHomeSignal(signals);
+  }
+
   function getBlockingRouteSignal(signals = []) {
-    const browserBlock = signals.find(
-      (signal) =>
+    const browserBlock = signals.find((signal) => {
+      return (
         signal.strength === "browser" &&
-        signal.isHome === false
-    );
+        signal.isHome === false &&
+        !isIgnorableUsernameRootSignal(signal, signals)
+      );
+    });
 
     if (browserBlock) {
       return browserBlock;
     }
 
-    const explicitBlock = signals.find(
-      (signal) =>
+    const explicitBlock = signals.find((signal) => {
+      return (
         signal.strength === "explicit" &&
-        signal.isHome === false
-    );
+        signal.isHome === false &&
+        !isIgnorableUsernameRootSignal(signal, signals)
+      );
+    });
 
     if (explicitBlock) {
       return explicitBlock;
     }
 
-    const ambientBlock = signals.find(
-      (signal) =>
+    const ambientBlock = signals.find((signal) => {
+      return (
         signal.strength === "ambient" &&
-        signal.isHome === false
-    );
+        signal.isHome === false &&
+        !isIgnorableUsernameRootSignal(signal, signals)
+      );
+    });
 
     return ambientBlock || null;
-  }
-
-  function hasPositiveHomeSignal(signals = []) {
-    return signals.some((signal) => signal.isHome === true);
   }
 
   function canRenderHomeForArgs(args = []) {
@@ -3099,7 +3330,11 @@ export const HomeView = (() => {
     return homeState.summary;
   }
 
-  function syncDashboardPayload(payload = null, options = {}) {
+  /* =========================================================
+     CONTINÚA EN PARTE 2/2
+  ========================================================= */
+
+     function syncDashboardPayload(payload = null, options = {}) {
     const opts = safeObject(options);
 
     const normalizedResponse = safeObject(

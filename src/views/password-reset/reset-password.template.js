@@ -3,6 +3,7 @@
    Archivo: src/views/password-reset/reset-password.template.js
 
    RESET PASSWORD · AUTH TEMPLATE · FINAL PRO SYSTEM · CSP CLEAN · 10/10
+   LOGIN.CSS CONTRACT ALIGNED · APPLE STYLE · PRO SAAS AUTH
 
    RESPONSABILIDADES:
    - generar el HTML premium de recuperación de acceso
@@ -13,13 +14,16 @@
    - soportar input de usuario o email
    - incluir toast superior derecho desacoplado
    - usar logo real de empresa según tema activo
+   - alinear contrato de logo con login.template.js
    - exponer ids estables para dom.js e index.js
    - mantener compatibilidad total con flujo SPA
 
    IMPORTANTE:
    - Sin CSS inline.
    - Sin <style> inyectado.
+   - Sin JS visual.
    - Sin duplicidades visuales.
+   - Sin native title tooltip.
    - El CSS vive en /src/css/auth/login.css.
 ========================================================= */
 
@@ -82,6 +86,13 @@ function getBackArrowIcon() {
 
 /* =========================================================
    LOGO
+   Contrato alineado con login.template.js + login.css:
+   - .login-logo-theme
+   - .login-logo-theme-img
+   - .login-logo-theme-dark
+   - .login-logo-theme-light
+   - .logo-dark / .logo-light legacy aliases
+   - .login-logo--dark / .login-logo--light legacy aliases
 ========================================================= */
 
 function renderThemeLogo({
@@ -94,27 +105,30 @@ function renderThemeLogo({
   return `
     <span
       class="login-logo-theme"
-      aria-hidden="true"
+      aria-label="${escapeHtml(finalAlt)}"
+      data-login-logo="true"
       data-login-logo-theme="true"
     >
       <img
-        class="login-logo-theme-dark"
+        class="login-logo-theme-img login-logo-theme-dark logo-dark login-logo--dark"
         src="${escapeHtml(darkSrc)}"
-        alt="${escapeHtml(finalAlt)}"
+        alt=""
         width="44"
         height="44"
         loading="eager"
         decoding="async"
+        aria-hidden="true"
       />
 
       <img
-        class="login-logo-theme-light"
+        class="login-logo-theme-img login-logo-theme-light logo-light login-logo--light"
         src="${escapeHtml(lightSrc)}"
-        alt="${escapeHtml(finalAlt)}"
+        alt=""
         width="44"
         height="44"
         loading="eager"
         decoding="async"
+        aria-hidden="true"
       />
     </span>
   `;
@@ -170,8 +184,8 @@ function renderToast() {
             id="resetPasswordToastClose"
             class="login-toast-close"
             aria-label="Cerrar aviso"
-            title="Cerrar aviso"
             data-tooltip="Cerrar aviso"
+            data-reset-password-toast-close="true"
           >
             ${getToastCloseIcon()}
           </button>
@@ -211,14 +225,17 @@ function renderLeftPanel({
   heroTitle = "Recuperación segura del acceso al panel",
   bullets = [],
 } = {}) {
-  const finalSignals =
-    safeArray(bullets).filter(Boolean).length
-      ? safeArray(bullets).filter(Boolean)
-      : [
-          "Validación segura de usuario o email",
-          "Flujo protegido desacoplado del acceso principal",
-          "Recuperación guiada alineada al entorno operativo",
-        ];
+  const customSignals = safeArray(bullets)
+    .map((item) => safeText(item, ""))
+    .filter(Boolean);
+
+  const finalSignals = customSignals.length
+    ? customSignals
+    : [
+        "Validación segura de usuario o email",
+        "Flujo protegido desacoplado del acceso principal",
+        "Recuperación guiada alineada al entorno operativo",
+      ];
 
   return `
     <aside
@@ -261,9 +278,21 @@ function renderForm({
 } = {}) {
   const finalAppName = safeText(appName, "Onion Support");
 
+  const finalTitle = safeText(title, "Recuperar acceso");
+
   const finalSubtitle = safeText(
     subtitle,
     `Recuperar acceso a ${finalAppName}`
+  );
+
+  const finalIdentifier = safeText(rememberedIdentifier, "");
+  const finalSubmitLabel = safeText(submitLabel, "Enviar enlace");
+  const finalIdentifierPlaceholder = safeText(identifierPlaceholder, "Usuario o email");
+  const finalBackLabel = safeText(backLabel, "Volver al acceso");
+  const finalBackHref = safeText(backHref, "/login");
+  const finalFooterText = safeText(
+    footerText,
+    "Entorno protegido. Usa un identificador válido de tu cuenta corporativa."
   );
 
   return `
@@ -286,7 +315,7 @@ function renderForm({
               })}
             </div>
 
-            <h2>${escapeHtml(title)}</h2>
+            <h2>${escapeHtml(finalTitle)}</h2>
 
             <p class="login-subtitle">
               ${escapeHtml(finalSubtitle)}
@@ -299,7 +328,11 @@ function renderForm({
             data-reset-password-form="true"
             novalidate
           >
-            <div class="login-field" data-field="identifier">
+            <div
+              class="login-field"
+              data-field="identifier"
+              data-reset-password-field="identifier"
+            >
               <input
                 class="input-text"
                 id="resetIdentifier"
@@ -307,9 +340,10 @@ function renderForm({
                 type="text"
                 autocomplete="username"
                 inputmode="email"
-                placeholder="${escapeHtml(identifierPlaceholder)}"
-                value="${escapeHtml(rememberedIdentifier)}"
+                placeholder="${escapeHtml(finalIdentifierPlaceholder)}"
+                value="${escapeHtml(finalIdentifier)}"
                 aria-label="Usuario o email"
+                data-reset-password-identifier="true"
                 required
               />
             </div>
@@ -319,24 +353,27 @@ function renderForm({
               id="resetPasswordError"
               role="alert"
               aria-live="polite"
+              aria-atomic="true"
             ></div>
 
             <button
               class="login-button"
               id="resetPasswordButton"
               type="submit"
+              data-reset-password-submit="true"
             >
               <span class="login-submit-text">
-                ${escapeHtml(submitLabel)}
+                ${escapeHtml(finalSubmitLabel)}
               </span>
             </button>
 
             <div class="login-reset">
               <a
                 class="login-reset-link reset-password-back-link"
-                href="${escapeHtml(backHref)}"
+                href="${escapeHtml(finalBackHref)}"
                 id="backToLoginLink"
                 data-spa
+                data-reset-password-back="true"
               >
                 <span
                   class="login-reset-link-icon"
@@ -345,13 +382,13 @@ function renderForm({
                   ${getBackArrowIcon()}
                 </span>
 
-                <span>${escapeHtml(backLabel)}</span>
+                <span>${escapeHtml(finalBackLabel)}</span>
               </a>
             </div>
           </form>
 
           <footer class="login-footer">
-            <span>${escapeHtml(footerText)}</span>
+            <span>${escapeHtml(finalFooterText)}</span>
           </footer>
         </div>
       </div>
@@ -397,6 +434,10 @@ export function getResetPasswordTemplate(options = {}) {
     </section>
   `;
 }
+
+/* =========================================================
+   EXPORTS
+========================================================= */
 
 export { getResetPasswordTemplate as ResetPasswordTemplate };
 

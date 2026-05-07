@@ -2,31 +2,37 @@
    Onion SPA - i18n Core
    Archivo: src/i18n/index.js
 
+   ONION SUPPORT · I18N CORE
+   DICTIONARY REGISTRY · LIVE LANGUAGE · DOM REFRESH SAFE
+
    Responsabilidades:
-   - registro de idiomas
-   - traducción por key path
-   - fallback robusto a español
-   - cambio live de idioma
-   - persistencia local
-   - sincronización opcional con AppCore
-   - evento global app:lang:change
-   - helpers para refresco de UI
-   - soporte extendido para atributos
-   - evitar dependencia circular con Core
+   - Registro de idiomas.
+   - Traducción por key path.
+   - Fallback robusto a español.
+   - Cambio live de idioma.
+   - Persistencia local.
+   - Sincronización opcional con AppCore.
+   - Evento global app:lang:change.
+   - Helpers para refresco de UI.
+   - Soporte extendido para atributos.
+   - Evitar dependencia circular con Core.
+   - Interpolación segura.
+   - Plural básico.
+   - Refresh parcial por scope.
 
    HARDENING EXTREMO:
-   - sin dependencia directa de AppCore
-   - boot idempotente
-   - storage tolerante a JSON/raw/legacy
-   - fallback multilenguaje estable
-   - interpolación segura
-   - DOM refresh parcial por scope
-   - soporte data-i18n-params
-   - soporte data-i18n-fallback
-   - soporte data-i18n-count / plural básico
-   - no rompe si faltan diccionarios parciales
-   - eventos consistentes
-   - aliases públicos estables
+   - Sin dependencia directa de AppCore.
+   - Boot idempotente.
+   - Storage tolerante a JSON/raw/legacy.
+   - Fallback multilenguaje estable.
+   - DOM refresh seguro por scope.
+   - Soporte data-i18n-params.
+   - Soporte data-i18n-fallback.
+   - Soporte data-i18n-count.
+   - Soporte data-i18n-attr / data-i18n-attrs.
+   - No rompe si faltan diccionarios parciales.
+   - Eventos consistentes por Core/document/window.
+   - Aliases públicos estables.
 ========================================================= */
 
 import es from "./locales/es/index.js";
@@ -40,34 +46,154 @@ import ca from "./locales/ca/index.js";
 export const I18n = (() => {
   "use strict";
 
-  /* =========================================================
-     CONFIG
-  ========================================================= */
+  /* =======================================================
+     CONSTANTS
+  ======================================================= */
 
-  const STORAGE_KEY = "lang";
-  const FALLBACK_LANG = "es";
+  const I18N_VERSION =
+    "12.0.0";
+
+  const STORAGE_KEY =
+    "lang";
+
+  const FALLBACK_LANG =
+    "es";
+
+  const EVENT_LANG_CHANGE =
+    "app:lang:change";
+
+  const DEFAULT_STORAGE_PREFIX =
+    "onion";
+
+  const DEFAULT_SOURCE =
+    "i18n";
+
+  const ATTR_MAP =
+    Object.freeze([
+      [
+        "[data-i18n-placeholder]",
+        "placeholder",
+        "data-i18n-placeholder",
+      ],
+      [
+        "[data-i18n-title]",
+        "title",
+        "data-i18n-title",
+      ],
+      [
+        "[data-i18n-aria-label]",
+        "aria-label",
+        "data-i18n-aria-label",
+      ],
+      [
+        "[data-i18n-data-tooltip]",
+        "data-tooltip",
+        "data-i18n-data-tooltip",
+      ],
+      [
+        "[data-i18n-tooltip]",
+        "data-tooltip",
+        "data-i18n-tooltip",
+      ],
+      [
+        "[data-i18n-alt]",
+        "alt",
+        "data-i18n-alt",
+      ],
+      [
+        "[data-i18n-value]",
+        "value",
+        "data-i18n-value",
+      ],
+      [
+        "[data-i18n-label]",
+        "label",
+        "data-i18n-label",
+      ],
+      [
+        "[data-i18n-aria-description]",
+        "aria-description",
+        "data-i18n-aria-description",
+      ],
+      [
+        "[data-i18n-aria-placeholder]",
+        "aria-placeholder",
+        "data-i18n-aria-placeholder",
+      ],
+    ]);
+
+  /* =======================================================
+     RUNTIME
+  ======================================================= */
 
   const dictionaries = {
-    es: es || {},
-    en: en || {},
-    ca: ca || {},
+    es:
+      es || {},
+
+    en:
+      en || {},
+
+    ca:
+      ca || {},
   };
 
-  let coreRef = null;
-  let currentLang = FALLBACK_LANG;
-  let booted = false;
-  let booting = false;
-  let lastChangeAt = 0;
+  let coreRef =
+    null;
 
-  /* =========================================================
+  let currentLang =
+    FALLBACK_LANG;
+
+  let booted =
+    false;
+
+  let booting =
+    false;
+
+  let lastChangeAt =
+    0;
+
+  let lastDomUpdateAt =
+    0;
+
+  let lastDomUpdateCount =
+    0;
+
+  let lastEventPayload =
+    null;
+
+  /* =======================================================
      BASICS
-  ========================================================= */
+  ======================================================= */
 
   function isBrowser() {
     return (
       typeof window !== "undefined" &&
       typeof document !== "undefined"
     );
+  }
+
+  function isFn(value) {
+    return typeof value === "function";
+  }
+
+  function isPlainObject(value) {
+    return (
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    );
+  }
+
+  function safeObject(value, fallback = {}) {
+    return isPlainObject(value)
+      ? value
+      : fallback;
+  }
+
+  function safeArray(value) {
+    return Array.isArray(value)
+      ? value
+      : [];
   }
 
   function safeText(value, fallback = "") {
@@ -84,26 +210,6 @@ export const I18n = (() => {
     return text || fallback;
   }
 
-  function isPlainObject(value) {
-    return (
-      value !== null &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-    );
-  }
-
-  function safeObject(value) {
-    return isPlainObject(value)
-      ? value
-      : {};
-  }
-
-  function safeArray(value) {
-    return Array.isArray(value)
-      ? value
-      : [];
-  }
-
   function safeNumber(value, fallback = 0) {
     const n =
       Number(value);
@@ -111,6 +217,22 @@ export const I18n = (() => {
     return Number.isFinite(n)
       ? n
       : fallback;
+  }
+
+  function nowMs() {
+    try {
+      return Date.now();
+    } catch {
+      return 0;
+    }
+  }
+
+  function isoNow(ms = nowMs()) {
+    try {
+      return new Date(ms).toISOString();
+    } catch {
+      return "";
+    }
   }
 
   function safeJsonParse(value, fallback = null) {
@@ -139,10 +261,17 @@ export const I18n = (() => {
     }
   }
 
+  function getCore() {
+    return coreRef;
+  }
+
   function safeLog(...args) {
     try {
-      if (getCore()?.config?.debug) {
-        getCore()?.utils?.log?.(
+      const core =
+        getCore();
+
+      if (core?.config?.debug) {
+        core?.utils?.log?.(
           "[I18n]",
           ...args
         );
@@ -151,12 +280,30 @@ export const I18n = (() => {
   }
 
   function safeWarn(...args) {
+    let logged =
+      false;
+
     try {
-      getCore()?.utils?.warn?.(
-        "[I18n]",
-        ...args
-      );
-    } catch {}
+      const core =
+        getCore();
+
+      if (isFn(core?.utils?.warn)) {
+        core.utils.warn(
+          "[I18n]",
+          ...args
+        );
+
+        logged =
+          true;
+      }
+    } catch {
+      logged =
+        false;
+    }
+
+    if (logged) {
+      return;
+    }
 
     try {
       if (getCore()?.config?.debug) {
@@ -168,58 +315,14 @@ export const I18n = (() => {
     } catch {}
   }
 
-  /* =========================================================
-     CORE REF
-  ========================================================= */
-
-  function getCore() {
-    return coreRef;
-  }
-
-  function bindCore(AppCore) {
-    coreRef = AppCore || null;
-
-    try {
-      const lang =
-        normalizeLang(
-          currentLang ||
-            getCore()?.state?.lang ||
-            getDefaultLang()
-        );
-
-      syncLangToState(lang);
-      syncLangToDocument(lang);
-    } catch {}
-
-    return api;
-  }
-
-  function getDefaultLang() {
-    const configured =
-      safeText(
-        getCore()?.config?.defaultLang,
-        FALLBACK_LANG
-      ).toLowerCase();
-
-    return hasLang(configured)
-      ? configured
-      : FALLBACK_LANG;
-  }
-
-  function getStoragePrefix() {
-    return safeText(
-      getCore()?.config?.storagePrefix,
-      "onion"
-    );
-  }
-
-  /* =========================================================
+  /* =======================================================
      LANG HELPERS
-  ========================================================= */
+  ======================================================= */
 
   function hasLang(lang = "") {
     const code =
-      safeText(lang, "").toLowerCase();
+      safeText(lang, "")
+        .toLowerCase();
 
     return Boolean(
       code &&
@@ -230,6 +333,35 @@ export const I18n = (() => {
     );
   }
 
+  function getConfiguredDefaultLang() {
+    const configured =
+      safeText(
+        getCore()?.config?.defaultLang ||
+          getCore()?.config?.lang ||
+          "",
+        ""
+      )
+        .toLowerCase()
+        .replace(/_/g, "-");
+
+    if (configured && hasLang(configured)) {
+      return configured;
+    }
+
+    const short =
+      configured.split("-")[0];
+
+    if (short && hasLang(short)) {
+      return short;
+    }
+
+    return FALLBACK_LANG;
+  }
+
+  function getDefaultLang() {
+    return getConfiguredDefaultLang();
+  }
+
   function normalizeLang(lang = "") {
     const raw =
       safeText(lang, "")
@@ -237,10 +369,7 @@ export const I18n = (() => {
         .replace(/_/g, "-");
 
     const defaultLang =
-      safeText(
-        getDefaultLang(),
-        FALLBACK_LANG
-      ).toLowerCase();
+      getDefaultLang();
 
     if (!raw) {
       return hasLang(defaultLang)
@@ -283,9 +412,9 @@ export const I18n = (() => {
     );
   }
 
-  /* =========================================================
+  /* =======================================================
      OBJECT HELPERS
-  ========================================================= */
+  ======================================================= */
 
   function getNested(obj, path = "") {
     if (!obj || !path) {
@@ -298,7 +427,8 @@ export const I18n = (() => {
         .map((item) => item.trim())
         .filter(Boolean);
 
-    let cursor = obj;
+    let cursor =
+      obj;
 
     for (const key of keys) {
       if (
@@ -308,10 +438,13 @@ export const I18n = (() => {
           key
         )
       ) {
-        cursor = cursor[key];
-      } else {
-        return undefined;
+        cursor =
+          cursor[key];
+
+        continue;
       }
+
+      return undefined;
     }
 
     return cursor;
@@ -325,44 +458,92 @@ export const I18n = (() => {
     const input =
       safeObject(source);
 
-    Object.keys(input).forEach((key) => {
+    for (const [key, next] of Object.entries(input)) {
       const current =
         output[key];
-
-      const next =
-        input[key];
 
       if (
         isPlainObject(current) &&
         isPlainObject(next)
       ) {
         output[key] =
-          deepMerge(current, next);
-        return;
+          deepMerge(
+            current,
+            next
+          );
+
+        continue;
       }
 
-      output[key] = next;
-    });
+      output[key] =
+        next;
+    }
 
     return output;
   }
 
-  /* =========================================================
+  /* =======================================================
+     TRANSLATION ARGS
+  ======================================================= */
+
+  function normalizeTranslationArgs(params = {}, fallback = "") {
+    if (
+      params === null ||
+      params === undefined
+    ) {
+      return {
+        params:
+          {},
+
+        fallback:
+          safeText(fallback, ""),
+      };
+    }
+
+    if (isPlainObject(params)) {
+      return {
+        params,
+
+        fallback:
+          safeText(fallback, ""),
+      };
+    }
+
+    /*
+      Compatibilidad:
+      t("key", "Fallback")
+    */
+    return {
+      params:
+        {},
+
+      fallback:
+        safeText(params, fallback),
+    };
+  }
+
+  /* =======================================================
      INTERPOLATION / PLURAL
-  ========================================================= */
+  ======================================================= */
 
   function interpolate(text = "", params = {}) {
     const data =
       safeObject(params);
 
     return String(text).replace(
-      /\{([a-zA-Z0-9_.$-]+)\}/g,
-      (match, key) => {
+      /\{\{\s*([a-zA-Z0-9_.$-]+)\s*\}\}|\{\s*([a-zA-Z0-9_.$-]+)\s*\}/g,
+      (match, keyA, keyB) => {
+        const key =
+          keyA || keyB;
+
         const direct =
           data[key];
 
         const nested =
-          getNested(data, key);
+          getNested(
+            data,
+            key
+          );
 
         const value =
           direct !== undefined
@@ -390,9 +571,14 @@ export const I18n = (() => {
         NaN
       );
 
-    if (
-      Number.isFinite(count)
-    ) {
+    if (Number.isFinite(count)) {
+      const exactKey =
+        `=${count}`;
+
+      if (value[exactKey] !== undefined) {
+        return value[exactKey];
+      }
+
       if (
         count === 0 &&
         value.zero !== undefined
@@ -405,6 +591,13 @@ export const I18n = (() => {
         value.one !== undefined
       ) {
         return value.one;
+      }
+
+      if (
+        count > 1 &&
+        value.many !== undefined
+      ) {
+        return value.many;
       }
 
       if (value.other !== undefined) {
@@ -421,28 +614,35 @@ export const I18n = (() => {
   }
 
   function resolveValue(key = "", params = {}, fallback = "") {
-    const lang =
-      currentLang;
+    const cleanKey =
+      safeText(key, "");
+
+    if (!cleanKey) {
+      return fallback;
+    }
+
+    const activeLang =
+      normalizeLang(currentLang);
 
     const defaultLang =
       getDefaultLang();
 
     const active =
       getNested(
-        dictionaries[lang],
-        key
+        dictionaries[activeLang],
+        cleanKey
       );
 
     const base =
       getNested(
         dictionaries[defaultLang],
-        key
+        cleanKey
       );
 
     const fallbackBase =
       getNested(
         dictionaries[FALLBACK_LANG],
-        key
+        cleanKey
       );
 
     const resolved =
@@ -450,7 +650,7 @@ export const I18n = (() => {
       base ??
       fallbackBase ??
       fallback ??
-      key;
+      cleanKey;
 
     return resolvePlural(
       resolved,
@@ -462,15 +662,24 @@ export const I18n = (() => {
     const cleanKey =
       safeText(key, "");
 
+    const normalizedArgs =
+      normalizeTranslationArgs(
+        params,
+        fallback
+      );
+
     if (!cleanKey) {
-      return safeText(fallback, "");
+      return safeText(
+        normalizedArgs.fallback,
+        ""
+      );
     }
 
     const resolved =
       resolveValue(
         cleanKey,
-        params,
-        fallback
+        normalizedArgs.params,
+        normalizedArgs.fallback
       );
 
     if (
@@ -487,17 +696,20 @@ export const I18n = (() => {
     ) {
       return interpolate(
         resolved,
-        params
+        normalizedArgs.params
       );
     }
 
     return interpolate(
-      safeText(fallback, cleanKey),
-      params
+      safeText(
+        normalizedArgs.fallback,
+        cleanKey
+      ),
+      normalizedArgs.params
     );
   }
 
-  function exists(key = "") {
+  function exists(key = "", lang = currentLang) {
     const cleanKey =
       safeText(key, "");
 
@@ -505,12 +717,15 @@ export const I18n = (() => {
       return false;
     }
 
+    const code =
+      normalizeLang(lang);
+
     const defaultLang =
       getDefaultLang();
 
     return (
       getNested(
-        dictionaries[currentLang],
+        dictionaries[code],
         cleanKey
       ) !== undefined ||
       getNested(
@@ -524,22 +739,34 @@ export const I18n = (() => {
     );
   }
 
-  /* =========================================================
+  /* =======================================================
      STORAGE
-  ========================================================= */
+  ======================================================= */
+
+  function getStoragePrefix() {
+    return safeText(
+      getCore()?.config?.storagePrefix ||
+        getCore()?.config?.appKey,
+      DEFAULT_STORAGE_PREFIX
+    );
+  }
 
   function getStorageCandidates() {
     const prefix =
       getStoragePrefix();
 
-    return [
-      STORAGE_KEY,
-      `${prefix}:${STORAGE_KEY}`,
-      `${prefix}_${STORAGE_KEY}`,
-      "onion:lang",
-      "onion_lang",
-      "lang",
-    ];
+    return Array.from(
+      new Set([
+        STORAGE_KEY,
+        `${prefix}:${STORAGE_KEY}`,
+        `${prefix}_${STORAGE_KEY}`,
+        `${prefix}.${STORAGE_KEY}`,
+        "onion:lang",
+        "onion_lang",
+        "onion.lang",
+        "lang",
+      ])
+    );
   }
 
   function normalizeStoredLang(value) {
@@ -559,13 +786,34 @@ export const I18n = (() => {
       }
 
       const parsed =
-        safeJsonParse(raw, undefined);
+        safeJsonParse(
+          raw,
+          undefined
+        );
 
       if (typeof parsed === "string") {
         return safeText(parsed, "");
       }
 
+      if (isPlainObject(parsed)) {
+        return safeText(
+          parsed.lang ||
+            parsed.locale ||
+            parsed.value,
+          ""
+        );
+      }
+
       return raw;
+    }
+
+    if (isPlainObject(value)) {
+      return safeText(
+        value.lang ||
+          value.locale ||
+          value.value,
+        ""
+      );
     }
 
     return safeText(value, "");
@@ -579,11 +827,14 @@ export const I18n = (() => {
       getStorageCandidates();
 
     try {
-      if (core?.storage?.getRaw) {
+      if (isFn(core?.storage?.getRaw)) {
         for (const key of candidates) {
           const value =
             normalizeStoredLang(
-              core.storage.getRaw(key, "")
+              core.storage.getRaw(
+                key,
+                ""
+              )
             );
 
           if (value) {
@@ -594,11 +845,14 @@ export const I18n = (() => {
     } catch {}
 
     try {
-      if (core?.storage?.get) {
+      if (isFn(core?.storage?.get)) {
         for (const key of candidates) {
           const value =
             normalizeStoredLang(
-              core.storage.get(key, "")
+              core.storage.get(
+                key,
+                ""
+              )
             );
 
           if (value) {
@@ -609,14 +863,16 @@ export const I18n = (() => {
     } catch {}
 
     if (!isBrowser()) {
-      return null;
+      return "";
     }
 
     try {
       for (const key of candidates) {
         const value =
           normalizeStoredLang(
-            window.localStorage?.getItem?.(key)
+            window.localStorage?.getItem?.(
+              key
+            )
           );
 
         if (value) {
@@ -625,7 +881,7 @@ export const I18n = (() => {
       }
     } catch {}
 
-    return null;
+    return "";
   }
 
   function safeStorageSet(lang) {
@@ -636,12 +892,12 @@ export const I18n = (() => {
       getCore();
 
     try {
-      if (core?.storage?.setRaw) {
+      if (isFn(core?.storage?.setRaw)) {
         core.storage.setRaw(
           STORAGE_KEY,
           normalized
         );
-      } else if (core?.storage?.set) {
+      } else if (isFn(core?.storage?.set)) {
         core.storage.set(
           STORAGE_KEY,
           normalized
@@ -650,7 +906,7 @@ export const I18n = (() => {
     } catch {}
 
     if (!isBrowser()) {
-      return;
+      return true;
     }
 
     try {
@@ -659,11 +915,13 @@ export const I18n = (() => {
         normalized
       );
     } catch {}
+
+    return true;
   }
 
-  /* =========================================================
+  /* =======================================================
      SYNC
-  ========================================================= */
+  ======================================================= */
 
   function syncLangToDocument(lang) {
     if (!isBrowser()) {
@@ -686,25 +944,34 @@ export const I18n = (() => {
     const normalized =
       normalizeLang(lang);
 
-    try {
-      const core =
-        getCore();
+    const core =
+      getCore();
 
-      if (
-        typeof core?.setState === "function"
-      ) {
-        core.setState({
-          lang: normalized,
-        });
+    try {
+      if (isFn(core?.setState)) {
+        core.setState(
+          {
+            lang:
+              normalized,
+          },
+          {
+            source:
+              "i18n:sync-lang",
+          }
+        );
 
         return true;
       }
+    } catch {}
 
+    try {
       if (
         core?.state &&
         typeof core.state === "object"
       ) {
-        core.state.lang = normalized;
+        core.state.lang =
+          normalized;
+
         return true;
       }
     } catch {}
@@ -712,90 +979,186 @@ export const I18n = (() => {
     return false;
   }
 
+  function emitDomEvent(name, payload) {
+    if (!isBrowser()) {
+      return false;
+    }
+
+    let emitted =
+      false;
+
+    try {
+      document.dispatchEvent(
+        new CustomEvent(
+          name,
+          {
+            detail:
+              payload,
+          }
+        )
+      );
+
+      emitted =
+        true;
+    } catch {}
+
+    try {
+      window.dispatchEvent(
+        new CustomEvent(
+          name,
+          {
+            detail:
+              payload,
+          }
+        )
+      );
+
+      emitted =
+        true;
+    } catch {}
+
+    return emitted;
+  }
+
   function emitLangChange(lang, extra = {}) {
     const normalized =
       normalizeLang(lang);
 
     const payload = {
-      lang: normalized,
+      lang:
+        normalized,
+
+      locale:
+        normalized,
+
       previousLang:
         extra.previousLang || null,
+
+      previousLocale:
+        extra.previousLang || null,
+
       changed:
         Boolean(extra.changed),
-      dictionary:
-        getDictionary(normalized),
+
       available:
         getAvailable(),
+
+      dictionary:
+        getDictionary(normalized),
+
       source:
-        extra.source || "i18n",
+        extra.source || DEFAULT_SOURCE,
+
       at:
-        new Date().toISOString(),
+        isoNow(),
     };
 
-    let emittedByCore = false;
+    let emittedByCore =
+      false;
 
     try {
       const core =
         getCore();
 
-      if (core?.events?.emit) {
+      if (isFn(core?.events?.emit)) {
         core.events.emit(
-          "app:lang:change",
+          EVENT_LANG_CHANGE,
           payload
         );
 
-        emittedByCore = true;
+        emittedByCore =
+          true;
       }
     } catch {}
 
-    if (
-      !emittedByCore &&
-      isBrowser()
-    ) {
-      try {
-        document.dispatchEvent(
-          new CustomEvent(
-            "app:lang:change",
-            {
-              detail: payload,
-            }
-          )
-        );
-      } catch {}
-    }
+    emitDomEvent(
+      EVENT_LANG_CHANGE,
+      payload
+    );
+
+    lastEventPayload = {
+      ...payload,
+      emittedByCore,
+    };
 
     return payload;
   }
 
-  /* =========================================================
-     DOM PARAMS
-  ========================================================= */
+  /* =======================================================
+     DOM SCOPE
+  ======================================================= */
+
+  function isNodeLike(value) {
+    if (!value) {
+      return false;
+    }
+
+    try {
+      return Boolean(
+        typeof Node !== "undefined" &&
+          value instanceof Node
+      );
+    } catch {}
+
+    try {
+      return Boolean(
+        value.nodeType &&
+          value.nodeName
+      );
+    } catch {}
+
+    return false;
+  }
 
   function getScope(root = null) {
     if (!isBrowser()) {
       return null;
     }
 
-    try {
-      if (!root) {
+    if (!root) {
+      return document;
+    }
+
+    if (root === window) {
+      return document;
+    }
+
+    if (root === document) {
+      return document;
+    }
+
+    if (isNodeLike(root)) {
+      return root;
+    }
+
+    if (typeof root === "string") {
+      try {
+        return document.querySelector(root) || document;
+      } catch {
         return document;
       }
-
-      if (
-        root === document ||
-        root === window ||
-        root instanceof Element ||
-        root instanceof Document ||
-        root instanceof DocumentFragment
-      ) {
-        return root === window
-          ? document
-          : root;
-      }
-    } catch {}
+    }
 
     return document;
   }
+
+  function queryAll(scope, selector = "") {
+    if (!scope || !selector) {
+      return [];
+    }
+
+    try {
+      return Array.from(
+        scope.querySelectorAll?.(selector) || []
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  /* =======================================================
+     DOM PARAMS
+  ======================================================= */
 
   function readNodeParams(node) {
     if (!node) {
@@ -808,7 +1171,10 @@ export const I18n = (() => {
       );
 
     const parsed =
-      safeJsonParse(raw, {});
+      safeJsonParse(
+        raw,
+        {}
+      );
 
     return safeObject(parsed);
   }
@@ -845,31 +1211,55 @@ export const I18n = (() => {
   }
 
   function buildNodeParams(node) {
-    const params =
-      readNodeParams(node);
+    const params = {
+      ...readNodeParams(node),
+    };
 
     const count =
       readNodeCount(node);
 
     if (count !== undefined) {
-      params.count = count;
+      params.count =
+        count;
     }
 
     return params;
   }
 
+  /* =======================================================
+     DOM APPLY
+  ======================================================= */
+
   function applyNodeText(node, key) {
+    if (!node || !key) {
+      return false;
+    }
+
     const params =
       buildNodeParams(node);
 
     const fallback =
       readNodeFallback(node);
 
-    node.textContent =
-      t(key, params, fallback);
+    try {
+      node.textContent =
+        t(
+          key,
+          params,
+          fallback
+        );
+
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function applyNodeHtml(node, key) {
+    if (!node || !key) {
+      return false;
+    }
+
     const params =
       buildNodeParams(node);
 
@@ -880,8 +1270,18 @@ export const I18n = (() => {
       Uso previsto para HTML controlado del diccionario.
       No usar con contenido generado por usuarios.
     */
-    node.innerHTML =
-      t(key, params, fallback);
+    try {
+      node.innerHTML =
+        t(
+          key,
+          params,
+          fallback
+        );
+
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function applyNodeAttr(node, attr, key) {
@@ -891,7 +1291,11 @@ export const I18n = (() => {
     const cleanKey =
       safeText(key, "");
 
-    if (!node || !cleanAttr || !cleanKey) {
+    if (
+      !node ||
+      !cleanAttr ||
+      !cleanKey
+    ) {
       return false;
     }
 
@@ -902,7 +1306,11 @@ export const I18n = (() => {
       readNodeFallback(node);
 
     const value =
-      t(cleanKey, params, fallback);
+      t(
+        cleanKey,
+        params,
+        fallback
+      );
 
     try {
       node.setAttribute(
@@ -916,64 +1324,96 @@ export const I18n = (() => {
     }
   }
 
-  function translateAttr(scope, selector, targetAttr, dataAttr) {
-    try {
-      scope
-        .querySelectorAll(selector)
-        .forEach((node) => {
-          const key =
-            node.getAttribute(dataAttr);
+  function translateStaticAttr(scope, selector, targetAttr, dataAttr) {
+    let count =
+      0;
 
-          applyNodeAttr(
-            node,
-            targetAttr,
-            key
-          );
-        });
-    } catch {}
+    for (const node of queryAll(scope, selector)) {
+      const key =
+        node.getAttribute?.(
+          dataAttr
+        );
+
+      if (
+        applyNodeAttr(
+          node,
+          targetAttr,
+          key
+        )
+      ) {
+        count += 1;
+      }
+    }
+
+    return count;
+  }
+
+  function parseAttrEntries(raw = "") {
+    return safeText(raw, "")
+      .split(";")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const separatorIndex =
+          entry.indexOf(":");
+
+        if (separatorIndex <= 0) {
+          return null;
+        }
+
+        const attr =
+          entry.slice(0, separatorIndex).trim();
+
+        const key =
+          entry.slice(separatorIndex + 1).trim();
+
+        if (!attr || !key) {
+          return null;
+        }
+
+        return {
+          attr,
+          key,
+        };
+      })
+      .filter(Boolean);
   }
 
   function translateDynamicAttrs(scope) {
-    try {
-      scope
-        .querySelectorAll("[data-i18n-attr]")
-        .forEach((node) => {
-          const raw =
-            safeText(
-              node.getAttribute(
-                "data-i18n-attr"
-              ),
-              ""
-            );
+    let count =
+      0;
 
-          if (!raw) {
-            return;
-          }
+    const nodes = [
+      ...queryAll(scope, "[data-i18n-attr]"),
+      ...queryAll(scope, "[data-i18n-attrs]"),
+    ];
 
-          /*
-            Formatos soportados:
-            - data-i18n-attr="title:common.title"
-            - data-i18n-attr="placeholder:forms.search;aria-label:forms.search"
-          */
-          raw
-            .split(";")
-            .map((item) => item.trim())
-            .filter(Boolean)
-            .forEach((entry) => {
-              const [attr, ...keyParts] =
-                entry.split(":");
+    for (const node of nodes) {
+      const raw =
+        safeText(
+          node.getAttribute?.("data-i18n-attr") ||
+            node.getAttribute?.("data-i18n-attrs"),
+          ""
+        );
 
-              const key =
-                keyParts.join(":");
+      if (!raw) {
+        continue;
+      }
 
-              applyNodeAttr(
-                node,
-                attr,
-                key
-              );
-            });
-        });
-    } catch {}
+      for (const entry of parseAttrEntries(raw)) {
+        if (
+          applyNodeAttr(
+            node,
+            entry.attr,
+            entry.key
+          )
+        ) {
+          count += 1;
+        }
+      }
+    }
+
+    return count;
   }
 
   function updateDOM(root = null) {
@@ -988,107 +1428,58 @@ export const I18n = (() => {
       return false;
     }
 
+    let count =
+      0;
+
     try {
-      scope
-        .querySelectorAll("[data-i18n]")
-        .forEach((node) => {
-          const key =
-            node.getAttribute(
-              "data-i18n"
-            );
+      for (const node of queryAll(scope, "[data-i18n]")) {
+        const key =
+          node.getAttribute?.(
+            "data-i18n"
+          );
 
-          if (!key) {
-            return;
-          }
-
+        if (
           applyNodeText(
             node,
             key
+          )
+        ) {
+          count += 1;
+        }
+      }
+
+      for (const node of queryAll(scope, "[data-i18n-html]")) {
+        const key =
+          node.getAttribute?.(
+            "data-i18n-html"
           );
-        });
 
-      scope
-        .querySelectorAll("[data-i18n-html]")
-        .forEach((node) => {
-          const key =
-            node.getAttribute(
-              "data-i18n-html"
-            );
-
-          if (!key) {
-            return;
-          }
-
+        if (
           applyNodeHtml(
             node,
             key
-          );
-        });
+          )
+        ) {
+          count += 1;
+        }
+      }
 
-      translateAttr(
-        scope,
-        "[data-i18n-placeholder]",
-        "placeholder",
-        "data-i18n-placeholder"
-      );
+      for (const [selector, targetAttr, dataAttr] of ATTR_MAP) {
+        count += translateStaticAttr(
+          scope,
+          selector,
+          targetAttr,
+          dataAttr
+        );
+      }
 
-      translateAttr(
-        scope,
-        "[data-i18n-title]",
-        "title",
-        "data-i18n-title"
-      );
+      count += translateDynamicAttrs(scope);
 
-      translateAttr(
-        scope,
-        "[data-i18n-aria-label]",
-        "aria-label",
-        "data-i18n-aria-label"
-      );
+      lastDomUpdateAt =
+        nowMs();
 
-      translateAttr(
-        scope,
-        "[data-i18n-data-tooltip]",
-        "data-tooltip",
-        "data-i18n-data-tooltip"
-      );
-
-      translateAttr(
-        scope,
-        "[data-i18n-alt]",
-        "alt",
-        "data-i18n-alt"
-      );
-
-      translateAttr(
-        scope,
-        "[data-i18n-value]",
-        "value",
-        "data-i18n-value"
-      );
-
-      translateAttr(
-        scope,
-        "[data-i18n-label]",
-        "label",
-        "data-i18n-label"
-      );
-
-      translateAttr(
-        scope,
-        "[data-i18n-aria-description]",
-        "aria-description",
-        "data-i18n-aria-description"
-      );
-
-      translateAttr(
-        scope,
-        "[data-i18n-aria-placeholder]",
-        "aria-placeholder",
-        "data-i18n-aria-placeholder"
-      );
-
-      translateDynamicAttrs(scope);
+      lastDomUpdateCount =
+        count;
 
       return true;
     } catch (error) {
@@ -1101,9 +1492,9 @@ export const I18n = (() => {
     }
   }
 
-  /* =========================================================
-     LANGUAGE DETECTION
-  ========================================================= */
+  /* =======================================================
+     DETECTION
+  ======================================================= */
 
   function getBrowserLang() {
     if (!isBrowser()) {
@@ -1129,11 +1520,9 @@ export const I18n = (() => {
           return normalized;
         }
       }
+    } catch {}
 
-      return getDefaultLang();
-    } catch {
-      return getDefaultLang();
-    }
+    return getDefaultLang();
   }
 
   function detectInitialLang() {
@@ -1157,26 +1546,13 @@ export const I18n = (() => {
     return getBrowserLang();
   }
 
-  /* =========================================================
-     CORE API
-  ========================================================= */
+  /* =======================================================
+     APPLY LANGUAGE
+  ======================================================= */
 
-  function getLang() {
-    return currentLang;
-  }
-
-  function setLang(lang = getDefaultLang(), options = {}) {
+  function applyLang(lang = getDefaultLang(), options = {}) {
     const opts =
       safeObject(options);
-
-    const {
-      force = false,
-      silent = false,
-      updateUi = true,
-      root = null,
-      persist = true,
-      source = "i18n.setLang",
-    } = opts;
 
     const previousLang =
       currentLang;
@@ -1191,29 +1567,33 @@ export const I18n = (() => {
       nextLang;
 
     lastChangeAt =
-      Date.now();
+      nowMs();
 
-    if (persist !== false) {
+    if (opts.persist !== false) {
       safeStorageSet(nextLang);
     }
 
     syncLangToDocument(nextLang);
     syncLangToState(nextLang);
 
-    if (updateUi !== false) {
-      updateDOM(root);
+    if (opts.updateUi !== false) {
+      updateDOM(opts.root || null);
     }
 
     if (
-      !silent &&
-      (changed || force)
+      opts.silent !== true &&
+      (
+        changed ||
+        opts.force === true
+      )
     ) {
       emitLangChange(
         nextLang,
         {
           previousLang,
           changed,
-          source,
+          source:
+            opts.source || DEFAULT_SOURCE,
         }
       );
     }
@@ -1221,8 +1601,11 @@ export const I18n = (() => {
     safeLog(
       "Idioma activo:",
       {
-        lang: currentLang,
+        lang:
+          currentLang,
+
         previousLang,
+
         changed,
       }
     );
@@ -1230,40 +1613,182 @@ export const I18n = (() => {
     return currentLang;
   }
 
+  /* =======================================================
+     CORE API
+  ======================================================= */
+
+  function bindCore(AppCore) {
+    coreRef =
+      AppCore || null;
+
+    try {
+      applyLang(
+        currentLang ||
+          getCore()?.state?.lang ||
+          getDefaultLang(),
+        {
+          silent:
+            true,
+
+          updateUi:
+            false,
+
+          persist:
+            false,
+
+          source:
+            "i18n.bindCore",
+        }
+      );
+    } catch {}
+
+    return api;
+  }
+
+  function boot(options = {}) {
+    if (booting) {
+      return currentLang;
+    }
+
+    const opts =
+      safeObject(options);
+
+    if (
+      booted &&
+      opts.force !== true
+    ) {
+      if (opts.updateUi !== false) {
+        updateDOM(opts.root || null);
+      }
+
+      return currentLang;
+    }
+
+    booting =
+      true;
+
+    try {
+      const initialLang =
+        detectInitialLang();
+
+      applyLang(
+        initialLang,
+        {
+          silent:
+            opts.emit !== true,
+
+          updateUi:
+            opts.updateUi !== false,
+
+          root:
+            opts.root || null,
+
+          persist:
+            opts.persist !== false,
+
+          force:
+            opts.force === true,
+
+          source:
+            opts.source || "i18n.boot",
+        }
+      );
+
+      booted =
+        true;
+
+      safeLog(
+        "I18n boot.",
+        {
+          lang:
+            currentLang,
+
+          available:
+            getAvailable(),
+        }
+      );
+
+      return currentLang;
+    } finally {
+      booting =
+        false;
+    }
+  }
+
+  function getLang() {
+    return currentLang;
+  }
+
+  function setLang(lang = getDefaultLang(), options = {}) {
+    return applyLang(
+      lang,
+      {
+        ...safeObject(options),
+
+        source:
+          options?.source ||
+          "i18n.setLang",
+      }
+    );
+  }
+
+  function reload(root = null) {
+    return updateDOM(root);
+  }
+
+  function reset(options = {}) {
+    return setLang(
+      getDefaultLang(),
+      {
+        ...safeObject(options),
+
+        force:
+          true,
+
+        source:
+          "i18n.reset",
+      }
+    );
+  }
+
   function register(lang, data = {}, options = {}) {
-    const rawCode =
+    const code =
       safeText(lang, "")
         .toLowerCase()
         .replace(/_/g, "-");
 
     if (
-      !rawCode ||
+      !code ||
       !isPlainObject(data)
     ) {
       return false;
     }
 
-    const {
-      merge = true,
-      refresh = false,
-      root = null,
-    } = safeObject(options);
+    const opts =
+      safeObject(options);
 
-    dictionaries[rawCode] =
-      merge && isPlainObject(dictionaries[rawCode])
+    dictionaries[code] =
+      opts.merge !== false &&
+      isPlainObject(dictionaries[code])
         ? deepMerge(
-            dictionaries[rawCode],
+            dictionaries[code],
             data
           )
         : data;
 
-    if (refresh) {
-      updateDOM(root);
+    if (
+      opts.refresh === true ||
+      (
+        opts.refreshCurrent === true &&
+        normalizeLang(code) === currentLang
+      )
+    ) {
+      updateDOM(opts.root || null);
     }
 
     safeLog(
       "Diccionario registrado:",
-      rawCode
+      code
     );
 
     return true;
@@ -1286,147 +1811,126 @@ export const I18n = (() => {
     delete dictionaries[code];
 
     if (currentLang === code) {
-      setLang(FALLBACK_LANG, {
-        force: true,
-        source: "i18n.unregister",
-      });
+      setLang(
+        FALLBACK_LANG,
+        {
+          force:
+            true,
+
+          source:
+            "i18n.unregister",
+        }
+      );
     }
 
     return true;
   }
 
-  function boot(options = {}) {
-    if (booting) {
-      return currentLang;
-    }
-
-    const opts =
-      safeObject(options);
-
-    const {
-      updateUi = true,
-      emit = false,
-      root = null,
-      force = false,
-      source = "i18n.boot",
-    } = opts;
-
-    if (booted && !force) {
-      if (updateUi !== false) {
-        updateDOM(root);
-      }
-
-      return currentLang;
-    }
-
-    booting = true;
-
-    try {
-      const previousLang =
-        currentLang;
-
-      const initial =
-        detectInitialLang();
-
-      currentLang =
-        normalizeLang(initial);
-
-      safeStorageSet(currentLang);
-      syncLangToDocument(currentLang);
-      syncLangToState(currentLang);
-
-      if (updateUi !== false) {
-        updateDOM(root);
-      }
-
-      booted = true;
-
-      if (emit) {
-        emitLangChange(
-          currentLang,
-          {
-            previousLang,
-            changed:
-              previousLang !== currentLang,
-            source,
-          }
-        );
-      }
-
-      safeLog(
-        "I18n boot.",
-        {
-          lang: currentLang,
-          available:
-            getAvailable(),
-        }
-      );
-
-      return currentLang;
-    } finally {
-      booting = false;
-    }
-  }
-
-  function reload(root = null) {
-    return updateDOM(root);
-  }
-
-  function reset(options = {}) {
-    const opts =
-      safeObject(options);
-
-    return setLang(
-      getDefaultLang(),
-      {
-        ...opts,
-        force: true,
-        source: "i18n.reset",
-      }
-    );
-  }
-
   function getSnapshot() {
     return {
-      lang: currentLang,
+      version:
+        I18N_VERSION,
+
+      lang:
+        currentLang,
+
+      locale:
+        currentLang,
+
       defaultLang:
         getDefaultLang(),
+
       fallbackLang:
         FALLBACK_LANG,
+
       available:
         getAvailable(),
+
       booted,
+
       booting,
+
       lastChangeAt,
+
+      lastChangeAtIso:
+        lastChangeAt
+          ? isoNow(lastChangeAt)
+          : "",
+
+      lastDomUpdateAt,
+
+      lastDomUpdateAtIso:
+        lastDomUpdateAt
+          ? isoNow(lastDomUpdateAt)
+          : "",
+
+      lastDomUpdateCount,
+
       hasCore:
         Boolean(getCore()),
+
       documentLang:
         isBrowser()
           ? document.documentElement.getAttribute("lang")
           : null,
+
+      lastEvent:
+        lastEventPayload
+          ? {
+              lang:
+                lastEventPayload.lang,
+
+              previousLang:
+                lastEventPayload.previousLang,
+
+              changed:
+                lastEventPayload.changed,
+
+              source:
+                lastEventPayload.source,
+
+              at:
+                lastEventPayload.at,
+
+              emittedByCore:
+                Boolean(lastEventPayload.emittedByCore),
+            }
+          : null,
     };
   }
 
-  /* =========================================================
+  /* =======================================================
      PUBLIC API
-  ========================================================= */
+  ======================================================= */
 
   const api = {
+    I18N_VERSION,
+    version:
+      I18N_VERSION,
+
     bindCore,
 
     boot,
     reload,
+    refresh:
+      reload,
     reset,
 
     t,
-    translate: t,
+    translate:
+      t,
 
     setLang,
-    setLocale: setLang,
-    changeLanguage: setLang,
+    setLocale:
+      setLang,
+    changeLanguage:
+      setLang,
 
     getLang,
-    getLocale: getLang,
+    getLocale:
+      getLang,
+    language:
+      getLang,
 
     exists,
 
@@ -1434,6 +1938,9 @@ export const I18n = (() => {
     unregister,
 
     getAvailable,
+    getLanguages:
+      getAvailable,
+
     getDictionary,
 
     updateDOM,
@@ -1442,21 +1949,67 @@ export const I18n = (() => {
     hasLang,
 
     getSnapshot,
+    getDebugSnapshot:
+      getSnapshot,
   };
 
-  /* =========================================================
+  /* =======================================================
      AUTO BOOT
-  ========================================================= */
+  ======================================================= */
 
-  if (isBrowser()) {
-    boot({
-      updateUi: true,
-      emit: false,
-      source: "i18n.autoBoot",
-    });
+  try {
+    if (isBrowser()) {
+      if (document.readyState === "loading") {
+        /*
+          Fijamos lang cuanto antes y refrescamos DOM cuando exista.
+        */
+        currentLang =
+          normalizeLang(
+            safeStorageGet() ||
+              getBrowserLang()
+          );
+
+        syncLangToDocument(currentLang);
+
+        document.addEventListener(
+          "DOMContentLoaded",
+          () => {
+            boot({
+              updateUi:
+                true,
+
+              emit:
+                false,
+
+              source:
+                "i18n.autoBoot",
+            });
+          },
+          {
+            once:
+              true,
+          }
+        );
+      } else {
+        boot({
+          updateUi:
+            true,
+
+          emit:
+            false,
+
+          source:
+            "i18n.autoBoot",
+        });
+      }
+    }
+  } catch {}
+
+  try {
+    return Object.freeze(api);
+  } catch {
+    return api;
   }
-
-  return Object.freeze(api);
 })();
 
 export default I18n;

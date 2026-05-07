@@ -2,25 +2,31 @@
    Onion SPA - HTTP Helpers
    Archivo: src/services/http.helpers.js
 
+   ONION SUPPORT · HTTP HELPERS
+   PURE HELPERS · RETRY SAFE · ERROR SAFE · TOKEN SAFE
+
    Responsabilidades:
-   - config base del servicio HTTP
-   - helpers puros de request / retry / error
-   - detección de endpoints auth
-   - detección de endpoints públicos técnicos
-   - normalización de errores
-   - sanitización de logs/eventos
-   - utilidades de signal / abort
+   - Config base del servicio HTTP.
+   - Helpers puros de request / retry / error.
+   - Detección de endpoints auth.
+   - Detección de endpoints públicos técnicos.
+   - Normalización de errores.
+   - Sanitización de logs/eventos/snapshots.
+   - Utilidades de signal / abort / timeout.
+   - Cálculo de Retry-After y delays.
+   - Construcción de requestConfig por defecto.
 
    HARDENING EXTREMO:
-   - timeouts explícitos
-   - soporte 409/423 opcional
-   - logs consistentes
-   - sanitización robusta de config
-   - no exponer tokens en summaries/errors
-   - retry con status groups
-   - Retry-After compatible
-   - AbortController browser-safe
-   - helpers puros sin dependencias externas
+   - Sin dependencias externas.
+   - Sin acceso obligatorio a window/document.
+   - Sin exposición de tokens en logs/summaries/errors.
+   - Compatibilidad con /api/auth y /auth.
+   - Activation/reset tratados como públicos.
+   - Retry solo seguro por defecto.
+   - Retry unsafe solo si el caller lo pide.
+   - Retry-After compatible con segundos y fecha HTTP.
+   - AbortController browser-safe/server-safe.
+   - Headers normalizados desde Object, Headers o arrays.
 ========================================================= */
 
 /* =========================================================
@@ -28,32 +34,178 @@
 ========================================================= */
 
 export const HTTP_CONFIG = Object.freeze({
-  retries: 1,
-  retryDelay: 400,
-  retryJitter: 120,
-  retryStrategy: "linear",
-  retryMaxDelay: 10_000,
+  retries:
+    1,
 
-  retryOnStatuses: null,
-  retryOnConflict: false,
-  retryOnLocked: false,
+  retryDelay:
+    400,
 
-  timeout: 15_000,
+  retryJitter:
+    120,
 
-  autoRefreshOn401: true,
-  autoLogoutOn401: true,
-  refreshMinIntervalMs: 0,
+  retryStrategy:
+    "linear",
 
-  logRequests: true,
-  logResponses: true,
-  logErrors: true,
+  retryMaxDelay:
+    10_000,
 
-  defaultUseLoader: true,
-  defaultAuth: true,
+  retryOnStatuses:
+    null,
 
-  defaultCredentials: "same-origin",
-  defaultResponseType: "auto",
+  retryOnConflict:
+    false,
+
+  retryOnLocked:
+    false,
+
+  timeout:
+    15_000,
+
+  autoRefreshOn401:
+    true,
+
+  autoLogoutOn401:
+    true,
+
+  refreshMinIntervalMs:
+    0,
+
+  logRequests:
+    true,
+
+  logResponses:
+    true,
+
+  logErrors:
+    true,
+
+  defaultUseLoader:
+    true,
+
+  defaultAuth:
+    true,
+
+  defaultCredentials:
+    "same-origin",
+
+  defaultResponseType:
+    "auto",
+
+  defaultAccept:
+    "application/json",
+
+  defaultContentType:
+    "application/json",
 });
+
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const SENSITIVE_QUERY_NAMES =
+  Object.freeze([
+    "token",
+    "activationToken",
+    "activateToken",
+    "resetToken",
+    "passwordResetToken",
+    "confirmToken",
+    "code",
+    "t",
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "tempToken",
+    "temp_token",
+    "temporaryToken",
+    "temporary_token",
+    "twoFactorToken",
+    "two_factor_token",
+    "mfaToken",
+    "mfa_token",
+  ]);
+
+const SENSITIVE_HEADER_PARTS =
+  Object.freeze([
+    "authorization",
+    "cookie",
+    "set-cookie",
+    "token",
+    "secret",
+    "password",
+    "credential",
+    "apikey",
+    "api-key",
+    "x-api-key",
+  ]);
+
+const AUTH_ENDPOINT_MARKERS =
+  Object.freeze([
+    "/auth/login",
+    "/auth/logout",
+    "/auth/me",
+    "/auth/session",
+    "/auth/refresh",
+
+    "/auth/2fa",
+    "/auth/2fa/login",
+
+    "/auth/activate",
+    "/auth/activate-account",
+    "/auth/account/activate",
+    "/auth/activation",
+    "/auth/activate/first-user",
+
+    "/auth/reset-password",
+    "/auth/reset-password-request",
+    "/auth/reset-password-confirm",
+    "/auth/password-reset",
+    "/auth/forgot-password",
+    "/auth/recover-password",
+
+    "/auth/_health",
+  ]);
+
+const PUBLIC_AUTH_ENDPOINT_MARKERS =
+  Object.freeze([
+    "/auth/login",
+    "/auth/refresh",
+
+    "/auth/2fa/login",
+
+    "/auth/activate",
+    "/auth/activate-account",
+    "/auth/account/activate",
+    "/auth/activation",
+    "/auth/activate/first-user",
+
+    "/auth/reset-password",
+    "/auth/reset-password-request",
+    "/auth/reset-password-confirm",
+    "/auth/password-reset",
+    "/auth/forgot-password",
+    "/auth/recover-password",
+
+    "/auth/_health",
+  ]);
+
+const TECHNICAL_PUBLIC_ROUTES =
+  Object.freeze([
+    "/activate-account",
+    "/reset-password",
+    "/forgot-password",
+    "/reset-password/confirm",
+  ]);
+
+const IDEMPOTENT_METHODS =
+  Object.freeze([
+    "GET",
+    "HEAD",
+    "OPTIONS",
+  ]);
+
+const DEFAULT_ERROR_MESSAGE =
+  "Error en la petición";
 
 /* =========================================================
    BASICS
@@ -71,6 +223,18 @@ function isObject(value) {
   );
 }
 
+function safeObject(value, fallback = {}) {
+  return isObject(value)
+    ? value
+    : fallback;
+}
+
+function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
 function safeText(value, fallback = "") {
   if (
     value === null ||
@@ -85,8 +249,8 @@ function safeText(value, fallback = "") {
   return text || fallback;
 }
 
-function safeLower(value = "") {
-  return safeText(value, "")
+function safeLower(value = "", fallback = "") {
+  return safeText(value, fallback)
     .toLowerCase();
 }
 
@@ -102,26 +266,196 @@ function safeNumber(value, fallback = 0) {
 function safeBoolean(value, fallback = false) {
   if (value === true) return true;
   if (value === false) return false;
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === "string") {
+    const clean =
+      value.trim().toLowerCase();
+
+    if (
+      [
+        "true",
+        "1",
+        "yes",
+        "si",
+        "sí",
+        "on",
+        "enabled",
+        "active",
+      ].includes(clean)
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        "false",
+        "0",
+        "no",
+        "off",
+        "disabled",
+        "inactive",
+      ].includes(clean)
+    ) {
+      return false;
+    }
+  }
+
   return Boolean(fallback);
 }
 
-function safeObject(value, fallback = {}) {
-  return isObject(value)
-    ? value
-    : fallback;
+function nowMs() {
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
 }
 
-function hasAbortController() {
-  return typeof AbortController !== "undefined";
+function isoNow(ms = nowMs()) {
+  try {
+    return new Date(ms).toISOString();
+  } catch {
+    return "";
+  }
 }
 
-function hasAbortSignal(value) {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    "aborted" in value &&
-    isFn(value.addEventListener)
+function getBaseOrigin() {
+  try {
+    if (
+      typeof window !== "undefined" &&
+      window.location?.origin
+    ) {
+      return window.location.origin;
+    }
+  } catch {}
+
+  return "http://localhost";
+}
+
+function escapeRegExp(value = "") {
+  return String(value).replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&"
   );
+}
+
+export function sleep(ms = 0) {
+  return new Promise((resolve) => {
+    try {
+      setTimeout(
+        resolve,
+        Math.max(0, safeNumber(ms, 0))
+      );
+    } catch {
+      resolve();
+    }
+  });
+}
+
+/* =========================================================
+   HEADERS
+========================================================= */
+
+export function headersToPlainObject(headers = {}) {
+  if (!headers) {
+    return {};
+  }
+
+  if (typeof Headers !== "undefined") {
+    try {
+      if (headers instanceof Headers) {
+        const output = {};
+
+        headers.forEach((value, key) => {
+          output[key] = value;
+        });
+
+        return output;
+      }
+    } catch {}
+  }
+
+  if (Array.isArray(headers)) {
+    const output = {};
+
+    for (const item of headers) {
+      if (
+        Array.isArray(item) &&
+        item.length >= 2
+      ) {
+        output[safeText(item[0], "")] =
+          item[1];
+      }
+    }
+
+    return output;
+  }
+
+  if (isObject(headers)) {
+    return {
+      ...headers,
+    };
+  }
+
+  return {};
+}
+
+function getHeaderValue(headers = {}, name = "") {
+  const target =
+    safeLower(name, "");
+
+  if (!target) {
+    return "";
+  }
+
+  if (typeof Headers !== "undefined") {
+    try {
+      if (headers instanceof Headers) {
+        return safeText(headers.get(name), "");
+      }
+    } catch {}
+  }
+
+  const plain =
+    headersToPlainObject(headers);
+
+  const key =
+    Object.keys(plain).find((candidate) =>
+      safeLower(candidate, "") === target
+    );
+
+  return key
+    ? safeText(plain[key], "")
+    : "";
+}
+
+export function sanitizeHeaders(headers = {}) {
+  const source =
+    headersToPlainObject(headers);
+
+  const output = {};
+
+  for (const [key, value] of Object.entries(source)) {
+    const lower =
+      safeLower(key, "");
+
+    const sensitive =
+      SENSITIVE_HEADER_PARTS.some((part) =>
+        lower.includes(part)
+      );
+
+    output[key] =
+      sensitive && value
+        ? "***"
+        : value;
+  }
+
+  return output;
 }
 
 /* =========================================================
@@ -129,68 +463,174 @@ function hasAbortSignal(value) {
 ========================================================= */
 
 export function redactHttpValue(value = "") {
-  const raw =
+  let output =
     safeText(value, "");
 
-  if (!raw) {
+  if (!output) {
     return "";
   }
 
-  let output =
-    raw;
+  for (const name of SENSITIVE_QUERY_NAMES) {
+    try {
+      output =
+        output.replace(
+          new RegExp(
+            `([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`,
+            "gi"
+          ),
+          "$1***"
+        );
+    } catch {}
+  }
 
   try {
-    output = output.replace(
-      /([?&](?:token|activationToken|activateToken|resetToken|passwordResetToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
-      "$1***"
-    );
+    output =
+      output.replace(
+        /(\/activate-account\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
+  } catch {}
 
-    output = output.replace(
-      /(\/activate-account\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
+  try {
+    output =
+      output.replace(
+        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+        "$1***"
+      );
+  } catch {}
 
-    output = output.replace(
-      /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-      "$1***"
-    );
+  try {
+    output =
+      output.replace(
+        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+        "$1***"
+      );
+  } catch {}
 
-    output = output.replace(
-      /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-      "$1***"
-    );
+  try {
+    output =
+      output.replace(
+        /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
+        "$1$2***"
+      );
+  } catch {}
+
+  try {
+    output =
+      output.replace(
+        /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+        "***"
+      );
   } catch {}
 
   return output;
 }
 
-export function sanitizeHeaders(headers = {}) {
-  const source =
-    isObject(headers)
-      ? headers
-      : {};
-
-  const output = {};
-
-  for (const [key, value] of Object.entries(source)) {
-    const lower =
-      safeLower(key);
-
-    if (
-      lower === "authorization" ||
-      lower === "cookie" ||
-      lower === "set-cookie" ||
-      lower.includes("token") ||
-      lower.includes("secret") ||
-      lower.includes("password")
-    ) {
-      output[key] = "***";
-    } else {
-      output[key] = value;
-    }
+function isDomNodeLike(value) {
+  if (
+    !value ||
+    typeof value !== "object"
+  ) {
+    return false;
   }
 
-  return output;
+  try {
+    return Boolean(
+      typeof Node !== "undefined" &&
+        value instanceof Node
+    );
+  } catch {}
+
+  try {
+    return Boolean(
+      value.nodeType &&
+        value.nodeName
+    );
+  } catch {}
+
+  return false;
+}
+
+export function sanitizeData(value, depth = 0) {
+  if (depth > 6) {
+    return "[MaxDepth]";
+  }
+
+  if (typeof value === "string") {
+    return redactHttpValue(value);
+  }
+
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (typeof value === "function") {
+    return "[Function]";
+  }
+
+  if (isDomNodeLike(value)) {
+    return {
+      node:
+        safeText(value.nodeName, "Node"),
+
+      id:
+        safeText(value.id, ""),
+
+      className:
+        safeText(value.className, ""),
+    };
+  }
+
+  if (value instanceof Error) {
+    return {
+      name:
+        safeText(value.name, "Error"),
+
+      message:
+        redactHttpValue(value.message || ""),
+
+      code:
+        value.code || null,
+
+      status:
+        value.status || value.statusCode || null,
+    };
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, 80)
+      .map((item) =>
+        sanitizeData(item, depth + 1)
+      );
+  }
+
+  if (isObject(value)) {
+    const output = {};
+
+    for (const [key, item] of Object.entries(value)) {
+      if (
+        /token|secret|password|authorization|credential|cookie/i.test(key)
+      ) {
+        output[key] =
+          item ? "***" : item;
+
+        continue;
+      }
+
+      output[key] =
+        sanitizeData(item, depth + 1);
+    }
+
+    return output;
+  }
+
+  return redactHttpValue(String(value));
 }
 
 export function sanitizeRequestConfig(requestConfig = {}) {
@@ -210,7 +650,18 @@ export function sanitizeRequestConfig(requestConfig = {}) {
       sanitizeHeaders(cfg.headers),
 
     token:
-      null,
+      cfg.token ? "***" : null,
+
+    accessToken:
+      cfg.accessToken ? "***" : null,
+
+    refreshToken:
+      cfg.refreshToken ? "***" : null,
+
+    signal:
+      cfg.signal
+        ? "[AbortSignal]"
+        : null,
   };
 }
 
@@ -230,136 +681,107 @@ export function normalizeEndpointPath(path = "") {
     const parsed =
       new URL(
         raw,
-        typeof window !== "undefined" &&
-          window.location?.origin
-          ? window.location.origin
-          : "http://localhost"
+        getBaseOrigin()
       );
 
     return safeLower(
       parsed.pathname || raw
-    );
-  } catch {
-    return safeLower(
-      raw.split("?")[0].split("#")[0] || raw
-    );
+    ).replace(/\/{2,}/g, "/");
+  } catch {}
+
+  return safeLower(
+    raw
+      .split("?")[0]
+      .split("#")[0] ||
+      raw
+  ).replace(/\/{2,}/g, "/");
+}
+
+function stripApiPrefix(path = "") {
+  const normalized =
+    normalizeEndpointPath(path);
+
+  if (normalized.startsWith("/api/")) {
+    return normalized.slice(4) || "/";
   }
+
+  if (normalized === "/api") {
+    return "/";
+  }
+
+  return normalized;
+}
+
+function getComparableEndpointPaths(path = "") {
+  const normalized =
+    normalizeEndpointPath(path);
+
+  const noApi =
+    stripApiPrefix(normalized);
+
+  return Array.from(
+    new Set([
+      normalized,
+      noApi,
+    ].filter(Boolean))
+  );
+}
+
+function endpointMatches(path = "", markers = []) {
+  const paths =
+    getComparableEndpointPaths(path);
+
+  return safeArray(markers).some((marker) => {
+    const cleanMarker =
+      normalizeEndpointPath(marker);
+
+    if (!cleanMarker) {
+      return false;
+    }
+
+    return paths.some((candidate) =>
+      candidate.includes(cleanMarker)
+    );
+  });
 }
 
 export function isAuthEndpoint(path = "") {
-  const value =
-    normalizeEndpointPath(path);
-
-  return (
-    value.includes("/api/auth/login") ||
-    value.includes("/auth/login") ||
-
-    value.includes("/api/auth/logout") ||
-    value.includes("/auth/logout") ||
-
-    value.includes("/api/auth/me") ||
-    value.includes("/auth/me") ||
-
-    value.includes("/api/auth/session") ||
-    value.includes("/auth/session") ||
-
-    value.includes("/api/auth/refresh") ||
-    value.includes("/auth/refresh") ||
-
-    value.includes("/api/auth/2fa") ||
-    value.includes("/auth/2fa") ||
-
-    value.includes("/api/auth/activate") ||
-    value.includes("/auth/activate") ||
-
-    value.includes("/api/auth/activate-account") ||
-    value.includes("/auth/activate-account") ||
-
-    value.includes("/api/auth/account/activate") ||
-    value.includes("/auth/account/activate") ||
-
-    value.includes("/api/auth/activation") ||
-    value.includes("/auth/activation") ||
-
-    value.includes("/api/auth/reset-password") ||
-    value.includes("/auth/reset-password") ||
-
-    value.includes("/api/auth/password-reset") ||
-    value.includes("/auth/password-reset") ||
-
-    value.includes("/api/auth/forgot-password") ||
-    value.includes("/auth/forgot-password") ||
-
-    value.includes("/api/auth/recover-password") ||
-    value.includes("/auth/recover-password")
+  return endpointMatches(
+    path,
+    AUTH_ENDPOINT_MARKERS
   );
 }
 
 export function isPublicAuthEndpoint(path = "") {
-  const value =
-    normalizeEndpointPath(path);
-
-  return (
-    value.includes("/api/auth/login") ||
-    value.includes("/auth/login") ||
-
-    value.includes("/api/auth/refresh") ||
-    value.includes("/auth/refresh") ||
-
-    value.includes("/api/auth/2fa/login") ||
-    value.includes("/auth/2fa/login") ||
-
-    value.includes("/api/auth/_health") ||
-    value.includes("/auth/_health") ||
-
-    value.includes("/api/auth/activate") ||
-    value.includes("/auth/activate") ||
-
-    value.includes("/api/auth/activate-account") ||
-    value.includes("/auth/activate-account") ||
-
-    value.includes("/api/auth/account/activate") ||
-    value.includes("/auth/account/activate") ||
-
-    value.includes("/api/auth/activation") ||
-    value.includes("/auth/activation") ||
-
-    value.includes("/api/auth/activate/first-user") ||
-    value.includes("/auth/activate/first-user") ||
-
-    value.includes("/api/auth/reset-password-request") ||
-    value.includes("/auth/reset-password-request") ||
-
-    value.includes("/api/auth/reset-password-confirm") ||
-    value.includes("/auth/reset-password-confirm") ||
-
-    value.includes("/api/auth/reset-password") ||
-    value.includes("/auth/reset-password") ||
-
-    value.includes("/api/auth/password-reset") ||
-    value.includes("/auth/password-reset") ||
-
-    value.includes("/api/auth/forgot-password") ||
-    value.includes("/auth/forgot-password") ||
-
-    value.includes("/api/auth/recover-password") ||
-    value.includes("/auth/recover-password")
+  return endpointMatches(
+    path,
+    PUBLIC_AUTH_ENDPOINT_MARKERS
   );
 }
 
 export function isTechnicalPublicRoute(path = "") {
-  const value =
-    normalizeEndpointPath(path);
+  const paths =
+    getComparableEndpointPaths(path);
 
+  return TECHNICAL_PUBLIC_ROUTES.some((route) => {
+    const clean =
+      normalizeEndpointPath(route);
+
+    return paths.some((candidate) =>
+      candidate === clean ||
+      candidate.startsWith(`${clean}/`)
+    );
+  });
+}
+
+export function isTechnicalPublicSpaEndpoint(path = "") {
+  return isTechnicalPublicRoute(path);
+}
+
+export function isPublicEndpoint(path = "") {
   return (
-    value === "/activate-account" ||
-    value.startsWith("/activate-account/") ||
-
-    value === "/reset-password" ||
-    value === "/forgot-password" ||
-
-    value === "/reset-password/confirm" ||
-    value.startsWith("/reset-password/confirm/")
+    isPublicAuthEndpoint(path) ||
+    isTechnicalPublicRoute(path)
   );
 }
 
@@ -368,7 +790,16 @@ export function isTechnicalPublicRoute(path = "") {
 ========================================================= */
 
 export function shouldToggleGlobalLoader(requestConfig = {}) {
-  return requestConfig.useLoader !== false;
+  const cfg =
+    safeObject(requestConfig);
+
+  if (cfg.useLoader === false) return false;
+  if (cfg.loader === false) return false;
+  if (cfg.noLoader === true) return false;
+  if (cfg.silent === true) return false;
+  if (cfg.background === true) return false;
+
+  return true;
 }
 
 export function shouldLogRequests(config, AppCore) {
@@ -386,42 +817,25 @@ export function shouldLogResponses(config, AppCore) {
 }
 
 export function shouldLogErrors(config) {
-  return Boolean(config?.logErrors);
+  return Boolean(
+    config?.logErrors
+  );
 }
 
 /* =========================================================
    ABORT / TIMEOUT
 ========================================================= */
 
-export function isAbortError(error) {
-  const message =
-    safeLower(error?.message || "");
-
-  const name =
-    safeText(error?.name || "");
-
-  return (
-    name === "AbortError" ||
-    error?.code === "ABORT_ERR" ||
-    error?.code === 20 ||
-    error?.aborted === true ||
-    message.includes("aborted") ||
-    message.includes("abort")
-  );
+function hasAbortController() {
+  return typeof AbortController !== "undefined";
 }
 
-export function isTimeoutError(error) {
-  const message =
-    safeLower(error?.message || "");
-
-  const reason =
-    safeLower(error?.reason || "");
-
-  return (
-    error?.timeout === true ||
-    message.includes("timeout") ||
-    reason.includes("timeout") ||
-    message.includes("timed out")
+function hasAbortSignal(value) {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "aborted" in value &&
+      isFn(value.addEventListener)
   );
 }
 
@@ -448,16 +862,52 @@ export function withSignal(controllerOrSignal) {
   return null;
 }
 
+export function isAbortError(error) {
+  const name =
+    safeText(error?.name || "");
+
+  const message =
+    safeLower(error?.message || "");
+
+  return (
+    name === "AbortError" ||
+    error?.code === "ABORT_ERR" ||
+    error?.code === 20 ||
+    error?.aborted === true ||
+    message.includes("aborted") ||
+    message.includes("abort")
+  );
+}
+
+export function isTimeoutError(error) {
+  const name =
+    safeLower(error?.name || "");
+
+  const message =
+    safeLower(error?.message || "");
+
+  const reason =
+    safeLower(error?.reason || "");
+
+  const code =
+    safeLower(error?.code || "");
+
+  return (
+    error?.timeout === true ||
+    name.includes("timeout") ||
+    code.includes("timeout") ||
+    message.includes("timeout") ||
+    reason.includes("timeout") ||
+    message.includes("timed out")
+  );
+}
+
 /* =========================================================
    RETRY
 ========================================================= */
 
 export function isIdempotentMethod(method = "GET") {
-  return [
-    "GET",
-    "HEAD",
-    "OPTIONS",
-  ].includes(
+  return IDEMPOTENT_METHODS.includes(
     safeText(method, "GET")
       .toUpperCase()
   );
@@ -472,12 +922,16 @@ export function isRetryableError(error, options = {}) {
     return false;
   }
 
-  const status =
-    safeNumber(error?.status, 0);
-
   if (isTimeoutError(error)) {
     return true;
   }
+
+  const status =
+    safeNumber(
+      error?.status ??
+        error?.response?.status,
+      0
+    );
 
   if (!status) {
     return true;
@@ -501,7 +955,7 @@ export function isRetryableError(error, options = {}) {
     return true;
   }
 
-  if (status >= 500) {
+  if (status >= 500 && status <= 599) {
     return true;
   }
 
@@ -516,20 +970,30 @@ function matchesStatusRule(status, retryOnStatuses) {
   const numericStatus =
     Number(status);
 
+  if (!Number.isFinite(numericStatus)) {
+    return false;
+  }
+
   return retryOnStatuses.some((candidate) => {
     if (typeof candidate === "number") {
       return candidate === numericStatus;
     }
 
     const rule =
-      safeLower(candidate);
+      safeLower(candidate, "");
+
+    if (!rule) {
+      return false;
+    }
 
     if (rule === "5xx") {
-      return numericStatus >= 500 && numericStatus <= 599;
+      return numericStatus >= 500 &&
+        numericStatus <= 599;
     }
 
     if (rule === "4xx") {
-      return numericStatus >= 400 && numericStatus <= 499;
+      return numericStatus >= 400 &&
+        numericStatus <= 499;
     }
 
     if (rule.endsWith("xx")) {
@@ -559,50 +1023,47 @@ function parseRetryAfterMs(value = "") {
     Number(raw);
 
   if (Number.isFinite(seconds)) {
-    return Math.max(0, seconds * 1000);
+    return Math.max(
+      0,
+      seconds * 1000
+    );
   }
 
   const dateMs =
     Date.parse(raw);
 
   if (Number.isFinite(dateMs)) {
-    return Math.max(0, dateMs - Date.now());
+    return Math.max(
+      0,
+      dateMs - nowMs()
+    );
   }
 
   return 0;
 }
 
-function getHeaderValue(headers = {}, name = "") {
-  const target =
-    safeLower(name);
-
-  if (!target || !isObject(headers)) {
-    return "";
-  }
-
-  const key =
-    Object.keys(headers).find((candidate) =>
-      safeLower(candidate) === target
-    );
-
-  return key
-    ? headers[key]
-    : "";
-}
-
 export function buildRetryDelay(config, requestConfig = {}, attempt = 0, error = null) {
+  const cfg = {
+    ...HTTP_CONFIG,
+    ...safeObject(config),
+  };
+
+  const req =
+    safeObject(requestConfig);
+
+  const retryAfter =
+    getHeaderValue(error?.headers, "retry-after") ||
+    getHeaderValue(error?.response?.headers, "retry-after");
+
   const retryAfterMs =
-    parseRetryAfterMs(
-      getHeaderValue(error?.headers, "retry-after") ||
-        getHeaderValue(error?.headers, "Retry-After")
-    );
+    parseRetryAfterMs(retryAfter);
 
   const maxDelay =
     Math.max(
       0,
       safeNumber(
-        requestConfig.retryMaxDelay ??
-          config?.retryMaxDelay,
+        req.retryMaxDelay ??
+          cfg.retryMaxDelay,
         HTTP_CONFIG.retryMaxDelay
       )
     );
@@ -615,17 +1076,18 @@ export function buildRetryDelay(config, requestConfig = {}, attempt = 0, error =
 
   const strategy =
     safeLower(
-      requestConfig.retryStrategy ||
-        config?.retryStrategy ||
-        HTTP_CONFIG.retryStrategy
+      req.retryStrategy ||
+        cfg.retryStrategy ||
+        HTTP_CONFIG.retryStrategy,
+      HTTP_CONFIG.retryStrategy
     );
 
   const baseDelay =
     Math.max(
       0,
       safeNumber(
-        requestConfig.retryDelay ??
-          config?.retryDelay,
+        req.retryDelay ??
+          cfg.retryDelay,
         HTTP_CONFIG.retryDelay
       )
     );
@@ -634,8 +1096,8 @@ export function buildRetryDelay(config, requestConfig = {}, attempt = 0, error =
     Math.max(
       0,
       safeNumber(
-        requestConfig.retryJitter ??
-          config?.retryJitter,
+        req.retryJitter ??
+          cfg.retryJitter,
         HTTP_CONFIG.retryJitter
       )
     );
@@ -674,47 +1136,85 @@ export function buildRetryDelay(config, requestConfig = {}, attempt = 0, error =
 }
 
 export function shouldRetry(config, error, requestConfig = {}, attempt = 0) {
+  const cfg = {
+    ...HTTP_CONFIG,
+    ...safeObject(config),
+  };
+
+  const req =
+    safeObject(requestConfig);
+
+  if (req.retry === false) {
+    return false;
+  }
+
+  if (req._skipRetry === true) {
+    return false;
+  }
+
+  if (
+    error?.aborted === true ||
+    isAbortError(error)
+  ) {
+    return false;
+  }
+
   const maxRetries =
-    Number.isFinite(Number(requestConfig.retries))
-      ? Number(requestConfig.retries)
-      : safeNumber(config?.retries, HTTP_CONFIG.retries);
+    Number.isFinite(Number(req.retries))
+      ? Number(req.retries)
+      : safeNumber(cfg.retries, HTTP_CONFIG.retries);
 
   if (attempt >= maxRetries) {
     return false;
   }
 
-  if (requestConfig.retry === false) {
-    return false;
-  }
+  const maxElapsedMs =
+    safeNumber(req.maxElapsedMs, 0);
 
-  if (requestConfig._skipRetry === true) {
-    return false;
-  }
+  const startedAt =
+    safeNumber(
+      req.startedAt ||
+        req._startedAt,
+      0
+    );
 
-  if (error?.aborted === true || isAbortError(error)) {
+  if (
+    maxElapsedMs > 0 &&
+    startedAt > 0 &&
+    nowMs() - startedAt >= maxElapsedMs
+  ) {
     return false;
   }
 
   const status =
-    safeNumber(error?.status, 0);
+    safeNumber(
+      error?.status ??
+        error?.response?.status,
+      0
+    );
 
-  if (Array.isArray(requestConfig.retryOnStatuses)) {
+  const retryOnStatuses =
+    Array.isArray(req.retryOnStatuses)
+      ? req.retryOnStatuses
+      : cfg.retryOnStatuses;
+
+  if (Array.isArray(retryOnStatuses)) {
     return Boolean(
       matchesStatusRule(
         status,
-        requestConfig.retryOnStatuses
+        retryOnStatuses
       )
     );
   }
 
   const method =
     safeText(
-      requestConfig.method,
+      req.method,
       "GET"
     ).toUpperCase();
 
   const allowUnsafeRetry =
-    requestConfig.retryUnsafe === true;
+    req.retryUnsafe === true;
 
   if (
     !isIdempotentMethod(method) &&
@@ -725,12 +1225,12 @@ export function shouldRetry(config, error, requestConfig = {}, attempt = 0) {
 
   return isRetryableError(error, {
     retryOnConflict:
-      requestConfig.retryOnConflict ??
-      config?.retryOnConflict,
+      req.retryOnConflict ??
+      cfg.retryOnConflict,
 
     retryOnLocked:
-      requestConfig.retryOnLocked ??
-      config?.retryOnLocked,
+      req.retryOnLocked ??
+      cfg.retryOnLocked,
   });
 }
 
@@ -738,47 +1238,129 @@ export function shouldRetry(config, error, requestConfig = {}, attempt = 0) {
    ERROR NORMALIZATION
 ========================================================= */
 
-function extractErrorMessage(error, fallback = "Error en la petición") {
+function extractErrorData(error = null) {
+  if (!error) {
+    return null;
+  }
+
+  return (
+    error?.data ||
+    error?.body ||
+    error?.payload ||
+    error?.response?.data ||
+    error?.response?.body ||
+    null
+  );
+}
+
+function extractErrorMessage(error, fallback = DEFAULT_ERROR_MESSAGE) {
   if (!error) {
     return fallback;
   }
 
+  const data =
+    extractErrorData(error);
+
   return (
-    safeText(error?.data?.message, "") ||
-    safeText(error?.data?.error, "") ||
-    safeText(error?.data?.detail, "") ||
-    safeText(error?.data?.title, "") ||
-    safeText(error?.response?.data?.message, "") ||
-    safeText(error?.response?.data?.error, "") ||
+    safeText(data?.message, "") ||
+    safeText(data?.error, "") ||
+    safeText(data?.detail, "") ||
+    safeText(data?.title, "") ||
     safeText(error?.message, "") ||
     safeText(error?.statusText, "") ||
+    safeText(error?.response?.statusText, "") ||
     fallback
   );
 }
 
-export function normalizeError(error, requestConfig = null) {
-  if (
-    error?.name === "HttpErrorNormalized"
-  ) {
-    return {
-      ...error,
-      url:
-        redactHttpValue(error.url || ""),
-      redactedUrl:
-        redactHttpValue(error.redactedUrl || error.url || ""),
-      requestConfig:
-        sanitizeRequestConfig(error.requestConfig || requestConfig || {}),
-    };
+function extractErrorHeaders(error = null) {
+  return (
+    error?.headers ||
+    error?.response?.headers ||
+    null
+  );
+}
+
+function defineRawError(target, raw) {
+  if (!target || !raw) {
+    return target;
   }
 
+  try {
+    Object.defineProperty(
+      target,
+      "raw",
+      {
+        value:
+          raw,
+
+        enumerable:
+          false,
+
+        configurable:
+          true,
+      }
+    );
+  } catch {
+    try {
+      target.raw =
+        raw;
+    } catch {}
+  }
+
+  return target;
+}
+
+export function normalizeError(error, requestConfig = null) {
   const cfg =
     requestConfig
       ? sanitizeRequestConfig(requestConfig)
       : null;
 
+  if (
+    error?.name === "HttpErrorNormalized"
+  ) {
+    const normalizedAgain = {
+      ...error,
+
+      message:
+        redactHttpValue(
+          safeText(error.message, DEFAULT_ERROR_MESSAGE)
+        ),
+
+      url:
+        redactHttpValue(error.url || ""),
+
+      redactedUrl:
+        redactHttpValue(error.redactedUrl || error.url || ""),
+
+      data:
+        sanitizeData(error.data || null),
+
+      headers:
+        sanitizeHeaders(error.headers || {}),
+
+      requestConfig:
+        sanitizeRequestConfig(
+          error.requestConfig ||
+          requestConfig ||
+          {}
+        ),
+
+      at:
+        error.at || isoNow(),
+    };
+
+    return defineRawError(
+      normalizedAgain,
+      error.raw || error
+    );
+  }
+
   const status =
     safeNumber(
       error?.status ??
+        error?.statusCode ??
         error?.response?.status,
       0
     );
@@ -790,14 +1372,6 @@ export function normalizeError(error, requestConfig = null) {
       ""
     );
 
-  const url =
-    redactHttpValue(
-      error?.redactedUrl ||
-        error?.url ||
-        requestConfig?.path ||
-        ""
-    );
-
   const method =
     safeText(
       error?.method ||
@@ -806,21 +1380,40 @@ export function normalizeError(error, requestConfig = null) {
       ""
     ).toUpperCase() || null;
 
-  return {
+  const url =
+    redactHttpValue(
+      error?.redactedUrl ||
+        error?.url ||
+        error?.path ||
+        requestConfig?.url ||
+        requestConfig?.path ||
+        ""
+    );
+
+  const data =
+    extractErrorData(error);
+
+  const headers =
+    extractErrorHeaders(error);
+
+  const normalized = {
     name:
       "HttpErrorNormalized",
 
     message:
-      extractErrorMessage(error),
+      redactHttpValue(
+        extractErrorMessage(error)
+      ),
 
     status,
 
     statusText,
 
     data:
-      error?.data ||
-      error?.response?.data ||
-      null,
+      sanitizeData(data),
+
+    headers:
+      sanitizeHeaders(headers),
 
     url,
 
@@ -840,9 +1433,6 @@ export function normalizeError(error, requestConfig = null) {
     requestConfig:
       cfg,
 
-    raw:
-      error,
-
     aborted:
       isAbortError(error),
 
@@ -858,9 +1448,20 @@ export function normalizeError(error, requestConfig = null) {
           requestConfig?.retryOnLocked,
       }),
 
+    public:
+      requestConfig?.public === true,
+
+    auth:
+      requestConfig?.auth !== false,
+
     at:
-      new Date().toISOString(),
+      isoNow(),
   };
+
+  return defineRawError(
+    normalized,
+    error
+  );
 }
 
 /* =========================================================
@@ -868,78 +1469,125 @@ export function normalizeError(error, requestConfig = null) {
 ========================================================= */
 
 export function buildRequestSummary(requestConfig = {}) {
+  const cfg =
+    safeObject(requestConfig);
+
   return {
     requestId:
-      requestConfig.requestId ||
-      null,
+      cfg.requestId || null,
 
     method:
-      requestConfig.method ||
-      "GET",
+      safeText(cfg.method, "GET").toUpperCase(),
 
     path:
       redactHttpValue(
-        requestConfig.path || ""
+        cfg.path || cfg.url || ""
       ) || null,
 
     query:
-      requestConfig.query ||
-      null,
+      sanitizeData(cfg.query || null),
 
     auth:
-      requestConfig.auth !== false,
+      cfg.auth !== false,
 
     public:
-      requestConfig.public === true,
+      cfg.public === true,
 
     retries:
-      requestConfig.retries,
+      cfg.retries ?? null,
 
     retry:
-      requestConfig.retry !== false,
+      cfg.retry !== false,
 
     retryStrategy:
-      requestConfig.retryStrategy ||
+      cfg.retryStrategy ||
       "linear",
 
     useLoader:
-      requestConfig.useLoader !== false,
+      shouldToggleGlobalLoader(cfg),
 
     responseType:
-      requestConfig.responseType ||
+      cfg.responseType ||
       "auto",
 
     timeout:
-      requestConfig.timeout ||
-      null,
+      cfg.timeout ?? null,
+
+    raw:
+      cfg.raw === true,
+
+    upload:
+      cfg.upload === true,
+
+    skipRetry:
+      cfg._skipRetry === true,
+
+    skipAuthRefresh:
+      cfg._skipAuthRefresh === true,
   };
 }
 
+function resolveDefaultTimeout(baseConfig = {}, AppCore = null) {
+  const fromCore =
+    safeNumber(
+      AppCore?.config?.requestTimeout ??
+        AppCore?.config?.httpTimeout ??
+        AppCore?.config?.timeout,
+      NaN
+    );
+
+  if (Number.isFinite(fromCore)) {
+    return fromCore;
+  }
+
+  return safeNumber(
+    baseConfig.timeout,
+    HTTP_CONFIG.timeout
+  );
+}
+
+function shouldDefaultPublic(path = "", options = {}) {
+  const opts =
+    safeObject(options);
+
+  return Boolean(
+    opts.public === true ||
+      opts.auth === false ||
+      isPublicEndpoint(path)
+  );
+}
+
 export function buildDefaultRequestConfig(config, AppCore, method, path, options = {}) {
-  const cfg =
-    safeObject(config, HTTP_CONFIG);
+  const cfg = {
+    ...HTTP_CONFIG,
+    ...safeObject(config),
+  };
 
   const opts =
     safeObject(options);
 
   const finalMethod =
-    safeText(method, "GET")
-      .toUpperCase();
+    safeText(
+      opts.method || method,
+      "GET"
+    ).toUpperCase();
 
   const finalPath =
-    safeText(path, "");
+    safeText(
+      opts.path || path,
+      ""
+    );
 
   const publicEndpoint =
-    isPublicAuthEndpoint(finalPath) ||
-    isTechnicalPublicRoute(finalPath);
+    shouldDefaultPublic(
+      finalPath,
+      opts
+    );
 
   const defaultTimeout =
-    safeNumber(
-      AppCore?.config?.requestTimeout,
-      safeNumber(
-        cfg.timeout,
-        HTTP_CONFIG.timeout
-      )
+    resolveDefaultTimeout(
+      cfg,
+      AppCore
     );
 
   const defaultAuth =
@@ -947,12 +1595,18 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
       ? false
       : cfg.defaultAuth !== false;
 
-  return {
+  const defaultUseLoader =
+    cfg.defaultUseLoader !== false;
+
+  const base = {
     method:
       finalMethod,
 
     path:
       finalPath,
+
+    url:
+      "",
 
     body:
       null,
@@ -972,25 +1626,37 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
     raw:
       false,
 
+    rawBody:
+      false,
+
+    upload:
+      false,
+
     responseType:
       cfg.defaultResponseType ||
-      "auto",
+      HTTP_CONFIG.defaultResponseType,
 
     query:
       null,
 
     credentials:
       cfg.defaultCredentials ||
-      "same-origin",
+      HTTP_CONFIG.defaultCredentials,
 
     useLoader:
-      cfg.defaultUseLoader !== false,
+      defaultUseLoader,
 
     retries:
       safeNumber(
         cfg.retries,
         HTTP_CONFIG.retries
       ),
+
+    retry:
+      true,
+
+    retryUnsafe:
+      false,
 
     retryStrategy:
       cfg.retryStrategy ||
@@ -1014,12 +1680,6 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
         HTTP_CONFIG.retryMaxDelay
       ),
 
-    retry:
-      true,
-
-    retryUnsafe:
-      false,
-
     retryOnStatuses:
       cfg.retryOnStatuses || null,
 
@@ -1028,6 +1688,9 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
 
     retryOnLocked:
       cfg.retryOnLocked === true,
+
+    maxElapsedMs:
+      0,
 
     signal:
       null,
@@ -1038,7 +1701,10 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
     requestId:
       null,
 
-    maxElapsedMs:
+    startedAt:
+      0,
+
+    _startedAt:
       0,
 
     _skipRetry:
@@ -1050,32 +1716,158 @@ export function buildDefaultRequestConfig(config, AppCore, method, path, options
     _authRefreshAttempted:
       false,
 
-    _authRefreshFailed:
+    _authRefreshSucceeded:
       false,
 
+    _authRefreshFailed:
+      false,
+  };
+
+  const merged = {
+    ...base,
     ...opts,
+  };
+
+  const mergedPublic =
+    shouldDefaultPublic(
+      merged.path || finalPath,
+      merged
+    );
+
+  const mergedAuth =
+    merged.auth === false ||
+    merged.public === true ||
+    mergedPublic
+      ? false
+      : merged.auth ?? defaultAuth;
+
+  const headers =
+    headersToPlainObject(
+      merged.headers
+    );
+
+  return {
+    ...merged,
 
     method:
-      safeText(opts.method || finalMethod, finalMethod).toUpperCase(),
+      safeText(
+        merged.method || finalMethod,
+        finalMethod
+      ).toUpperCase(),
 
     path:
-      safeText(opts.path || finalPath, finalPath),
+      safeText(
+        merged.path || finalPath,
+        finalPath
+      ),
+
+    headers,
+
+    timeout:
+      safeNumber(
+        merged.timeout,
+        defaultTimeout
+      ),
+
+    responseType:
+      safeText(
+        merged.responseType,
+        cfg.defaultResponseType ||
+          HTTP_CONFIG.defaultResponseType
+      ),
+
+    credentials:
+      safeText(
+        merged.credentials,
+        cfg.defaultCredentials ||
+          HTTP_CONFIG.defaultCredentials
+      ),
+
+    retries:
+      safeNumber(
+        merged.retries,
+        safeNumber(cfg.retries, HTTP_CONFIG.retries)
+      ),
+
+    retry:
+      merged.retry !== false,
+
+    retryUnsafe:
+      merged.retryUnsafe === true,
+
+    retryStrategy:
+      safeText(
+        merged.retryStrategy,
+        cfg.retryStrategy ||
+          HTTP_CONFIG.retryStrategy
+      ),
+
+    retryDelay:
+      safeNumber(
+        merged.retryDelay,
+        safeNumber(cfg.retryDelay, HTTP_CONFIG.retryDelay)
+      ),
+
+    retryJitter:
+      safeNumber(
+        merged.retryJitter,
+        safeNumber(cfg.retryJitter, HTTP_CONFIG.retryJitter)
+      ),
+
+    retryMaxDelay:
+      safeNumber(
+        merged.retryMaxDelay,
+        safeNumber(cfg.retryMaxDelay, HTTP_CONFIG.retryMaxDelay)
+      ),
+
+    retryOnStatuses:
+      Array.isArray(merged.retryOnStatuses)
+        ? merged.retryOnStatuses
+        : cfg.retryOnStatuses || null,
+
+    retryOnConflict:
+      safeBoolean(
+        merged.retryOnConflict,
+        cfg.retryOnConflict === true
+      ),
+
+    retryOnLocked:
+      safeBoolean(
+        merged.retryOnLocked,
+        cfg.retryOnLocked === true
+      ),
 
     signal:
-      withSignal(opts.signal),
+      withSignal(merged.signal),
 
     public:
-      opts.public === true || publicEndpoint,
+      mergedPublic,
 
     auth:
-      opts.auth === false || opts.public === true || publicEndpoint
-        ? false
-        : opts.auth ?? defaultAuth,
+      mergedAuth,
+
+    useLoader:
+      shouldToggleGlobalLoader({
+        ...merged,
+        useLoader:
+          merged.useLoader ?? defaultUseLoader,
+      }),
+
+    _skipRetry:
+      merged._skipRetry === true,
 
     _skipAuthRefresh:
-      opts._skipAuthRefresh === true ||
-      opts.public === true ||
-      opts.auth === false ||
-      publicEndpoint,
+      merged._skipAuthRefresh === true ||
+      mergedPublic ||
+      mergedAuth === false,
+
+    _authRefreshAttempted:
+      merged._authRefreshAttempted === true,
+
+    _authRefreshSucceeded:
+      merged._authRefreshSucceeded === true,
+
+    _authRefreshFailed:
+      merged._authRefreshFailed === true,
   };
 }

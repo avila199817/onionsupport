@@ -2,35 +2,42 @@
    Onion SPA - HTTP Interceptors
    Archivo: src/services/http.interceptors.js
 
+   ONION SUPPORT · HTTP INTERCEPTORS
+   FIFO STABLE · PRIORITY SAFE · FAIL OPEN · TIMEOUT SAFE
+
    Responsabilidades:
-   - registrar interceptores request / response / error
-   - ejecutar interceptores en cadena
-   - permitir eject seguro
-   - aislar fallos individuales
-   - mantener orden FIFO por defecto
-   - soportar prioridad, once y timeout
-   - exponer snapshot debug
+   - Registrar interceptores request / response / error.
+   - Ejecutar interceptores en cadena.
+   - Permitir eject seguro.
+   - Aislar fallos individuales.
+   - Mantener orden FIFO por defecto.
+   - Soportar prioridad, once y timeout.
+   - Exponer snapshot debug.
+   - Soportar funciones legacy.
+   - Soportar entradas { handler }.
 
    HARDENING EXTREMO:
-   - register idempotente opcional por id
-   - disposer seguro
-   - buckets autocurables
-   - errores aislados si failOpen !== false
-   - timeout por interceptor
-   - prioridad descendente + FIFO estable
-   - compatible con funciones legacy
-   - compatible con entradas { handler }
-   - sin mutar snapshot durante ejecución
+   - Register idempotente opcional por id.
+   - Disposer seguro.
+   - Buckets autocurables.
+   - Errores aislados si failOpen !== false.
+   - Timeout por interceptor.
+   - Prioridad descendente + FIFO estable.
+   - Snapshot estable durante ejecución.
+   - Runtime stats por interceptor.
+   - Sin mutar la cadena mientras se ejecuta.
 ========================================================= */
 
-import { isFn } from "./http.helpers.js";
+import {
+  isFn,
+} from "./http.helpers.js";
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
 const INTERCEPTORS_VERSION =
-  "10.0.0";
+  "11.0.0";
 
 const INTERCEPTOR_TYPES =
   Object.freeze([
@@ -55,6 +62,12 @@ function isObject(value) {
     typeof value === "object" &&
     !Array.isArray(value)
   );
+}
+
+function safeObject(value, fallback = {}) {
+  return isObject(value)
+    ? value
+    : fallback;
 }
 
 function safeText(value, fallback = "") {
@@ -90,12 +103,16 @@ function toNonNegativeInt(value, fallback = 0) {
 }
 
 function nowMs() {
-  return Date.now();
+  try {
+    return Date.now();
+  } catch {
+    return 0;
+  }
 }
 
-function isoNow() {
+function isoNow(ms = nowMs()) {
   try {
-    return new Date().toISOString();
+    return new Date(ms).toISOString();
   } catch {
     return "";
   }
@@ -106,12 +123,89 @@ function noopDisposer() {
 }
 
 function isValidType(type = "") {
-  return INTERCEPTOR_TYPES.includes(type);
+  return INTERCEPTOR_TYPES.includes(
+    safeText(type, "")
+  );
+}
+
+function nextInterceptorId(type = "interceptor") {
+  interceptorSeq += 1;
+
+  return `${type}_${interceptorSeq}`;
+}
+
+function sanitizeError(error = null) {
+  if (!error) {
+    return null;
+  }
+
+  return {
+    name:
+      safeText(error?.name, "Error"),
+
+    message:
+      safeText(
+        error?.message || error,
+        "Interceptor error."
+      ),
+
+    code:
+      error?.code || null,
+
+    timeout:
+      error?.timeout === true,
+
+    at:
+      isoNow(),
+  };
 }
 
 /* =========================================================
    STATE
 ========================================================= */
+
+function createMeta() {
+  return {
+    version:
+      INTERCEPTORS_VERSION,
+
+    createdAt:
+      isoNow(),
+
+    registered:
+      0,
+
+    replaced:
+      0,
+
+    ejected:
+      0,
+
+    cleared:
+      0,
+
+    executed:
+      0,
+
+    failed:
+      0,
+
+    timedOut:
+      0,
+
+    skipped:
+      0,
+
+    lastRunAt:
+      "",
+
+    lastRunType:
+      "",
+
+    lastError:
+      null,
+  };
+}
 
 export function createInterceptorsState() {
   return {
@@ -124,34 +218,8 @@ export function createInterceptorsState() {
     error:
       [],
 
-    meta: {
-      version:
-        INTERCEPTORS_VERSION,
-
-      createdAt:
-        isoNow(),
-
-      registered:
-        0,
-
-      ejected:
-        0,
-
-      executed:
-        0,
-
-      failed:
-        0,
-
-      timedOut:
-        0,
-
-      lastRunAt:
-        "",
-
-      lastError:
-        null,
-    },
+    meta:
+      createMeta(),
   };
 }
 
@@ -160,75 +228,89 @@ export function createInterceptorsState() {
 ========================================================= */
 
 function ensureState(interceptors) {
-  if (!isObject(interceptors)) {
-    return createInterceptorsState();
-  }
+  const state =
+    isObject(interceptors)
+      ? interceptors
+      : createInterceptorsState();
 
   for (const type of INTERCEPTOR_TYPES) {
-    if (!Array.isArray(interceptors[type])) {
-      interceptors[type] = [];
+    if (!Array.isArray(state[type])) {
+      state[type] = [];
     }
   }
 
-  if (!isObject(interceptors.meta)) {
-    interceptors.meta = {
-      version:
-        INTERCEPTORS_VERSION,
-
-      createdAt:
-        isoNow(),
-
-      registered:
-        0,
-
-      ejected:
-        0,
-
-      executed:
-        0,
-
-      failed:
-        0,
-
-      timedOut:
-        0,
-
-      lastRunAt:
-        "",
-
-      lastError:
-        null,
-    };
+  if (!isObject(state.meta)) {
+    state.meta =
+      createMeta();
   }
 
-  return interceptors;
+  const defaults =
+    createMeta();
+
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!(key in state.meta)) {
+      state.meta[key] = value;
+    }
+  }
+
+  return state;
 }
 
 function ensureBucket(interceptors, type) {
   const state =
     ensureState(interceptors);
 
-  if (!isValidType(type)) {
+  const cleanType =
+    safeText(type, "");
+
+  if (!isValidType(cleanType)) {
     throw new Error(
-      `Tipo de interceptor inválido: ${type}`
+      `Tipo de interceptor inválido: ${cleanType}`
     );
   }
 
-  if (!Array.isArray(state[type])) {
-    state[type] = [];
+  if (!Array.isArray(state[cleanType])) {
+    state[cleanType] = [];
   }
 
-  return state[type];
+  return state[cleanType];
+}
+
+function touchRun(interceptors, type = "") {
+  const state =
+    ensureState(interceptors);
+
+  state.meta.executed =
+    toNonNegativeInt(
+      state.meta.executed,
+      0
+    ) + 1;
+
+  state.meta.lastRunAt =
+    isoNow();
+
+  state.meta.lastRunType =
+    safeText(type, "");
+
+  return state;
 }
 
 function recordError(interceptors, type, entry, error, timedOut = false) {
   const state =
     ensureState(interceptors);
 
-  state.meta.failed += 1;
+  state.meta.failed =
+    toNonNegativeInt(
+      state.meta.failed,
+      0
+    ) + 1;
 
   if (timedOut) {
-    state.meta.timedOut += 1;
+    state.meta.timedOut =
+      toNonNegativeInt(
+        state.meta.timedOut,
+        0
+      ) + 1;
   }
 
   state.meta.lastError = {
@@ -236,47 +318,51 @@ function recordError(interceptors, type, entry, error, timedOut = false) {
       safeText(type, ""),
 
     interceptorId:
-      entry?.id || "",
+      safeText(entry?.id, ""),
 
     interceptorName:
-      entry?.name || "",
+      safeText(entry?.name, ""),
 
-    message:
-      safeText(
-        error?.message || error,
-        "Interceptor error."
-      ),
+    ...sanitizeError(error),
 
     timedOut:
       Boolean(timedOut),
-
-    at:
-      isoNow(),
   };
+
+  return state.meta.lastError;
 }
 
-function touchRun(interceptors) {
+function recordSkipped(interceptors) {
   const state =
     ensureState(interceptors);
 
-  state.meta.executed += 1;
-  state.meta.lastRunAt =
-    isoNow();
+  state.meta.skipped =
+    toNonNegativeInt(
+      state.meta.skipped,
+      0
+    ) + 1;
+
+  return true;
 }
 
 /* =========================================================
-   NORMALIZATION
+   ENTRY NORMALIZATION
 ========================================================= */
 
 function normalizeEntry(candidate, index = 0, type = "request") {
+  const cleanType =
+    isValidType(type)
+      ? type
+      : "request";
+
   if (isFn(candidate)) {
     return {
       id:
-        `legacy_${type}_${index}`,
+        `legacy_${cleanType}_${index}`,
 
       name:
         candidate.name ||
-        `legacy_${type}_${index}`,
+        `legacy_${cleanType}_${index}`,
 
       handler:
         candidate,
@@ -308,11 +394,17 @@ function normalizeEntry(candidate, index = 0, type = "request") {
       errorCount:
         0,
 
+      timeoutCount:
+        0,
+
       lastRunAt:
         "",
 
       lastDurationMs:
         0,
+
+      lastError:
+        null,
 
       ref:
         candidate,
@@ -327,14 +419,14 @@ function normalizeEntry(candidate, index = 0, type = "request") {
       id:
         safeText(
           candidate.id,
-          `itc_${type}_${candidate.order || index}`
+          `itc_${cleanType}_${candidate.order || index}`
         ),
 
       name:
         safeText(
           candidate.name,
           candidate.handler.name ||
-            `interceptor_${type}_${index}`
+            `interceptor_${cleanType}_${index}`
         ),
 
       handler:
@@ -382,6 +474,12 @@ function normalizeEntry(candidate, index = 0, type = "request") {
           0
         ),
 
+      timeoutCount:
+        toNonNegativeInt(
+          candidate.timeoutCount,
+          0
+        ),
+
       lastRunAt:
         candidate.lastRunAt || "",
 
@@ -391,12 +489,50 @@ function normalizeEntry(candidate, index = 0, type = "request") {
           0
         ),
 
+      lastError:
+        candidate.lastError || null,
+
       ref:
         candidate.ref || candidate,
     };
   }
 
   return null;
+}
+
+function normalizeRegistrationInput(handlerOrEntry, options = {}, type = "request") {
+  if (isFn(handlerOrEntry)) {
+    return {
+      handler:
+        handlerOrEntry,
+
+      options:
+        safeObject(options),
+    };
+  }
+
+  if (
+    isObject(handlerOrEntry) &&
+    isFn(handlerOrEntry.handler)
+  ) {
+    return {
+      handler:
+        handlerOrEntry.handler,
+
+      options: {
+        ...handlerOrEntry,
+        ...safeObject(options),
+      },
+    };
+  }
+
+  return {
+    handler:
+      null,
+
+    options:
+      safeObject(options),
+  };
 }
 
 function sortByPriority(entries = []) {
@@ -434,16 +570,22 @@ function snapshotBucket(bucket = [], type = "request") {
 }
 
 function persistEntryRuntime(bucket, entry, patch = {}) {
-  if (!entry?.id) {
+  if (
+    !Array.isArray(bucket) ||
+    !entry?.id
+  ) {
     return false;
   }
 
   const target =
-    bucket.find((item) =>
-      item?.id === entry.id ||
-      item === entry.ref ||
-      item?.handler === entry.handler
-    );
+    bucket.find((item) => {
+      if (item === entry.ref) return true;
+      if (item?.id === entry.id) return true;
+      if (item?.handler === entry.handler) return true;
+      if (item?.ref === entry.ref) return true;
+
+      return false;
+    });
 
   if (
     target &&
@@ -471,25 +613,11 @@ function removeInterceptor(bucket, ref) {
 
   const index =
     bucket.findIndex((item) => {
-      if (item === ref) {
-        return true;
-      }
-
-      if (item?.id === ref) {
-        return true;
-      }
-
-      if (item?.name === ref) {
-        return true;
-      }
-
-      if (item?.handler === ref) {
-        return true;
-      }
-
-      if (item?.ref === ref) {
-        return true;
-      }
+      if (item === ref) return true;
+      if (item?.id === ref) return true;
+      if (item?.name === ref) return true;
+      if (item?.handler === ref) return true;
+      if (item?.ref === ref) return true;
 
       return false;
     });
@@ -502,13 +630,45 @@ function removeInterceptor(bucket, ref) {
   return false;
 }
 
+function setInterceptorEnabled(bucket, ref, enabled) {
+  if (!Array.isArray(bucket)) {
+    return false;
+  }
+
+  const target =
+    bucket.find((item) => {
+      if (item === ref) return true;
+      if (item?.id === ref) return true;
+      if (item?.name === ref) return true;
+      if (item?.handler === ref) return true;
+      if (item?.ref === ref) return true;
+
+      return false;
+    });
+
+  if (
+    target &&
+    isObject(target)
+  ) {
+    target.enabled =
+      Boolean(enabled);
+
+    return true;
+  }
+
+  return false;
+}
+
 /* =========================================================
    TIMEOUT
 ========================================================= */
 
-async function runWithTimeout(promise, timeoutMs, label) {
+async function runWithTimeout(promise, timeoutMs, label = "interceptor") {
   const finalTimeout =
-    toNonNegativeInt(timeoutMs, 0);
+    toNonNegativeInt(
+      timeoutMs,
+      0
+    );
 
   if (finalTimeout <= 0) {
     return promise;
@@ -522,24 +682,28 @@ async function runWithTimeout(promise, timeoutMs, label) {
 
   const timeoutPromise =
     new Promise((_, reject) => {
-      timeoutId =
-        setTimeout(() => {
-          didTimeout =
-            true;
+      try {
+        timeoutId =
+          setTimeout(() => {
+            didTimeout =
+              true;
 
-          const error =
-            new Error(
-              `Interceptor timeout (${label})`
-            );
+            const error =
+              new Error(
+                `Interceptor timeout (${label})`
+              );
 
-          error.name =
-            "InterceptorTimeoutError";
+            error.name =
+              "InterceptorTimeoutError";
 
-          error.timeout =
-            true;
+            error.timeout =
+              true;
 
-          reject(error);
-        }, finalTimeout);
+            reject(error);
+          }, finalTimeout);
+      } catch (error) {
+        reject(error);
+      }
     });
 
   try {
@@ -549,15 +713,19 @@ async function runWithTimeout(promise, timeoutMs, label) {
     ]);
   } catch (error) {
     if (didTimeout) {
-      error.timeout =
-        true;
+      try {
+        error.timeout =
+          true;
+      } catch {}
     }
 
     throw error;
   } finally {
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
+    try {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    } catch {}
   }
 }
 
@@ -565,16 +733,32 @@ async function runWithTimeout(promise, timeoutMs, label) {
    REGISTER
 ========================================================= */
 
-function registerInterceptor(interceptors, type, fn, options = {}) {
-  if (!isValidType(type)) {
+function registerInterceptor(interceptors, type, handlerOrEntry, options = {}) {
+  const cleanType =
+    safeText(type, "");
+
+  if (!isValidType(cleanType)) {
     throw new Error(
-      `Tipo de interceptor inválido: ${type}`
+      `Tipo de interceptor inválido: ${cleanType}`
     );
   }
 
+  const normalizedInput =
+    normalizeRegistrationInput(
+      handlerOrEntry,
+      options,
+      cleanType
+    );
+
+  const fn =
+    normalizedInput.handler;
+
+  const opts =
+    normalizedInput.options;
+
   if (!isFn(fn)) {
     throw new Error(
-      `use${type[0].toUpperCase()}${type.slice(1)}(fn) requiere una función`
+      `use${cleanType[0].toUpperCase()}${cleanType.slice(1)}(fn) requiere una función`
     );
   }
 
@@ -584,39 +768,78 @@ function registerInterceptor(interceptors, type, fn, options = {}) {
   const bucket =
     ensureBucket(
       state,
-      type
+      cleanType
     );
-
-  const opts =
-    isObject(options)
-      ? options
-      : {};
 
   const id =
     safeText(
       opts.id,
-      `${type}_${++interceptorSeq}`
+      nextInterceptorId(cleanType)
     );
 
-  const existing =
-    bucket.find((entry) =>
+  const existingIndex =
+    bucket.findIndex((entry) =>
       entry?.id === id
     );
 
-  if (existing && opts.replace !== true) {
-    return () =>
-      removeInterceptor(
-        bucket,
-        id
-      );
+  if (
+    existingIndex >= 0 &&
+    opts.replace !== true &&
+    opts.overwrite !== true
+  ) {
+    const existing =
+      bucket[existingIndex];
+
+    let disposed =
+      false;
+
+    return () => {
+      if (disposed) {
+        return false;
+      }
+
+      disposed =
+        true;
+
+      const removed =
+        removeInterceptor(
+          bucket,
+          existing?.id || id
+        );
+
+      if (removed) {
+        state.meta.ejected =
+          toNonNegativeInt(
+            state.meta.ejected,
+            0
+          ) + 1;
+      }
+
+      return removed;
+    };
   }
 
-  if (existing && opts.replace === true) {
-    removeInterceptor(
-      bucket,
-      id
+  if (
+    existingIndex >= 0 &&
+    (
+      opts.replace === true ||
+      opts.overwrite === true
+    )
+  ) {
+    bucket.splice(
+      existingIndex,
+      1
     );
+
+    state.meta.replaced =
+      toNonNegativeInt(
+        state.meta.replaced,
+        0
+      ) + 1;
   }
+
+  const order =
+    ++interceptorSeq;
 
   const entry = {
     id,
@@ -651,8 +874,7 @@ function registerInterceptor(interceptors, type, fn, options = {}) {
     enabled:
       opts.enabled !== false,
 
-    order:
-      ++interceptorSeq,
+    order,
 
     createdAt:
       isoNow(),
@@ -663,11 +885,17 @@ function registerInterceptor(interceptors, type, fn, options = {}) {
     errorCount:
       0,
 
+    timeoutCount:
+      0,
+
     lastRunAt:
       "",
 
     lastDurationMs:
       0,
+
+    lastError:
+      null,
 
     ref:
       fn,
@@ -675,7 +903,11 @@ function registerInterceptor(interceptors, type, fn, options = {}) {
 
   bucket.push(entry);
 
-  state.meta.registered += 1;
+  state.meta.registered =
+    toNonNegativeInt(
+      state.meta.registered,
+      0
+    ) + 1;
 
   let disposed =
     false;
@@ -695,7 +927,11 @@ function registerInterceptor(interceptors, type, fn, options = {}) {
       );
 
     if (removed) {
-      state.meta.ejected += 1;
+      state.meta.ejected =
+        toNonNegativeInt(
+          state.meta.ejected,
+          0
+        ) + 1;
     }
 
     return removed;
@@ -750,10 +986,124 @@ export function ejectInterceptor(interceptors, type, ref) {
     );
 
   if (removed) {
-    state.meta.ejected += 1;
+    state.meta.ejected =
+      toNonNegativeInt(
+        state.meta.ejected,
+        0
+      ) + 1;
   }
 
   return removed;
+}
+
+export function enableInterceptor(interceptors, type, ref) {
+  const state =
+    ensureState(interceptors);
+
+  const bucket =
+    ensureBucket(
+      state,
+      type
+    );
+
+  return setInterceptorEnabled(
+    bucket,
+    ref,
+    true
+  );
+}
+
+export function disableInterceptor(interceptors, type, ref) {
+  const state =
+    ensureState(interceptors);
+
+  const bucket =
+    ensureBucket(
+      state,
+      type
+    );
+
+  return setInterceptorEnabled(
+    bucket,
+    ref,
+    false
+  );
+}
+
+/* =========================================================
+   RUNTIME PATCH
+========================================================= */
+
+function patchRunSuccess(bucket, entry, startedAt) {
+  const durationMs =
+    nowMs() - startedAt;
+
+  persistEntryRuntime(
+    bucket,
+    entry,
+    {
+      runCount:
+        toNonNegativeInt(entry.runCount, 0) + 1,
+
+      lastRunAt:
+        isoNow(),
+
+      lastDurationMs:
+        durationMs,
+
+      lastError:
+        null,
+    }
+  );
+
+  return durationMs;
+}
+
+function patchRunError(bucket, entry, startedAt, error) {
+  const durationMs =
+    nowMs() - startedAt;
+
+  const timedOut =
+    error?.timeout === true;
+
+  persistEntryRuntime(
+    bucket,
+    entry,
+    {
+      errorCount:
+        toNonNegativeInt(entry.errorCount, 0) + 1,
+
+      timeoutCount:
+        toNonNegativeInt(entry.timeoutCount, 0) + (timedOut ? 1 : 0),
+
+      lastRunAt:
+        isoNow(),
+
+      lastDurationMs:
+        durationMs,
+
+      lastError:
+        sanitizeError(error),
+    }
+  );
+
+  return durationMs;
+}
+
+function removeOnceIfNeeded(state, type, entry) {
+  if (!entry?.once) {
+    return false;
+  }
+
+  try {
+    return ejectInterceptor(
+      state,
+      type,
+      entry.id
+    );
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -779,7 +1129,15 @@ export async function runRequestInterceptors(interceptors, requestConfig) {
       "request"
     );
 
-  touchRun(state);
+  if (!snapshot.length) {
+    recordSkipped(state);
+    return nextConfig;
+  }
+
+  touchRun(
+    state,
+    "request"
+  );
 
   for (const entry of snapshot) {
     const startedAt =
@@ -804,22 +1162,10 @@ export async function runRequestInterceptors(interceptors, requestConfig) {
           `${entry.name}:request`
         );
 
-      const durationMs =
-        nowMs() - startedAt;
-
-      persistEntryRuntime(
+      patchRunSuccess(
         bucket,
         entry,
-        {
-          runCount:
-            entry.runCount + 1,
-
-          lastRunAt:
-            isoNow(),
-
-          lastDurationMs:
-            durationMs,
-        }
+        startedAt
       );
 
       if (
@@ -830,6 +1176,13 @@ export async function runRequestInterceptors(interceptors, requestConfig) {
           result;
       }
     } catch (interceptorError) {
+      patchRunError(
+        bucket,
+        entry,
+        startedAt,
+        interceptorError
+      );
+
       recordError(
         state,
         "request",
@@ -838,32 +1191,15 @@ export async function runRequestInterceptors(interceptors, requestConfig) {
         interceptorError?.timeout === true
       );
 
-      persistEntryRuntime(
-        bucket,
-        entry,
-        {
-          errorCount:
-            entry.errorCount + 1,
-
-          lastRunAt:
-            isoNow(),
-
-          lastDurationMs:
-            nowMs() - startedAt,
-        }
-      );
-
-      if (!entry.failOpen) {
+      if (entry.failOpen === false) {
         throw interceptorError;
       }
     } finally {
-      if (entry.once) {
-        ejectInterceptor(
-          state,
-          "request",
-          entry.id
-        );
-      }
+      removeOnceIfNeeded(
+        state,
+        "request",
+        entry
+      );
     }
   }
 
@@ -893,7 +1229,15 @@ export async function runResponseInterceptors(interceptors, response, requestCon
       "response"
     );
 
-  touchRun(state);
+  if (!snapshot.length) {
+    recordSkipped(state);
+    return nextResponse;
+  }
+
+  touchRun(
+    state,
+    "response"
+  );
 
   for (const entry of snapshot) {
     const startedAt =
@@ -919,22 +1263,10 @@ export async function runResponseInterceptors(interceptors, response, requestCon
           `${entry.name}:response`
         );
 
-      const durationMs =
-        nowMs() - startedAt;
-
-      persistEntryRuntime(
+      patchRunSuccess(
         bucket,
         entry,
-        {
-          runCount:
-            entry.runCount + 1,
-
-          lastRunAt:
-            isoNow(),
-
-          lastDurationMs:
-            durationMs,
-        }
+        startedAt
       );
 
       if (result !== undefined) {
@@ -942,6 +1274,13 @@ export async function runResponseInterceptors(interceptors, response, requestCon
           result;
       }
     } catch (interceptorError) {
+      patchRunError(
+        bucket,
+        entry,
+        startedAt,
+        interceptorError
+      );
+
       recordError(
         state,
         "response",
@@ -950,32 +1289,15 @@ export async function runResponseInterceptors(interceptors, response, requestCon
         interceptorError?.timeout === true
       );
 
-      persistEntryRuntime(
-        bucket,
-        entry,
-        {
-          errorCount:
-            entry.errorCount + 1,
-
-          lastRunAt:
-            isoNow(),
-
-          lastDurationMs:
-            nowMs() - startedAt,
-        }
-      );
-
-      if (!entry.failOpen) {
+      if (entry.failOpen === false) {
         throw interceptorError;
       }
     } finally {
-      if (entry.once) {
-        ejectInterceptor(
-          state,
-          "response",
-          entry.id
-        );
-      }
+      removeOnceIfNeeded(
+        state,
+        "response",
+        entry
+      );
     }
   }
 
@@ -1005,7 +1327,15 @@ export async function runErrorInterceptors(interceptors, error, requestConfig) {
       "error"
     );
 
-  touchRun(state);
+  if (!snapshot.length) {
+    recordSkipped(state);
+    return nextError;
+  }
+
+  touchRun(
+    state,
+    "error"
+  );
 
   for (const entry of snapshot) {
     const startedAt =
@@ -1031,22 +1361,10 @@ export async function runErrorInterceptors(interceptors, error, requestConfig) {
           `${entry.name}:error`
         );
 
-      const durationMs =
-        nowMs() - startedAt;
-
-      persistEntryRuntime(
+      patchRunSuccess(
         bucket,
         entry,
-        {
-          runCount:
-            entry.runCount + 1,
-
-          lastRunAt:
-            isoNow(),
-
-          lastDurationMs:
-            durationMs,
-        }
+        startedAt
       );
 
       if (result !== undefined) {
@@ -1054,6 +1372,13 @@ export async function runErrorInterceptors(interceptors, error, requestConfig) {
           result;
       }
     } catch (interceptorError) {
+      patchRunError(
+        bucket,
+        entry,
+        startedAt,
+        interceptorError
+      );
+
       recordError(
         state,
         "error",
@@ -1062,37 +1387,19 @@ export async function runErrorInterceptors(interceptors, error, requestConfig) {
         interceptorError?.timeout === true
       );
 
-      persistEntryRuntime(
-        bucket,
-        entry,
-        {
-          errorCount:
-            entry.errorCount + 1,
-
-          lastRunAt:
-            isoNow(),
-
-          lastDurationMs:
-            nowMs() - startedAt,
-        }
-      );
-
       /*
-        Importante:
         En failOpen mantenemos el error original/actual.
         No sustituimos nextError por el error del interceptor.
       */
-      if (!entry.failOpen) {
+      if (entry.failOpen === false) {
         throw interceptorError;
       }
     } finally {
-      if (entry.once) {
-        ejectInterceptor(
-          state,
-          "error",
-          entry.id
-        );
-      }
+      removeOnceIfNeeded(
+        state,
+        "error",
+        entry
+      );
     }
   }
 
@@ -1100,18 +1407,21 @@ export async function runErrorInterceptors(interceptors, error, requestConfig) {
 }
 
 /* =========================================================
-   DEBUG / MANAGEMENT
+   MANAGEMENT
 ========================================================= */
 
 export function clearInterceptors(interceptors, type = "") {
   const state =
     ensureState(interceptors);
 
-  if (type) {
+  const cleanType =
+    safeText(type, "");
+
+  if (cleanType) {
     const bucket =
       ensureBucket(
         state,
-        type
+        cleanType
       );
 
     const count =
@@ -1119,7 +1429,17 @@ export function clearInterceptors(interceptors, type = "") {
 
     bucket.splice(0);
 
-    state.meta.ejected += count;
+    state.meta.ejected =
+      toNonNegativeInt(
+        state.meta.ejected,
+        0
+      ) + count;
+
+    state.meta.cleared =
+      toNonNegativeInt(
+        state.meta.cleared,
+        0
+      ) + count;
 
     return count;
   }
@@ -1137,64 +1457,132 @@ export function clearInterceptors(interceptors, type = "") {
   return total;
 }
 
-export function getInterceptorsSnapshot(interceptors) {
+export function resetInterceptorsRuntime(interceptors) {
   const state =
     ensureState(interceptors);
 
-  function serialize(type) {
-    return ensureBucket(
-      state,
-      type
-    ).map((entry, index) => {
-      const normalized =
-        normalizeEntry(
-          entry,
-          index,
-          type
-        );
+  for (const type of INTERCEPTOR_TYPES) {
+    const bucket =
+      ensureBucket(
+        state,
+        type
+      );
 
-      return {
-        id:
-          normalized?.id || "",
+    for (const entry of bucket) {
+      if (isObject(entry)) {
+        entry.runCount =
+          0;
 
-        name:
-          normalized?.name || "",
+        entry.errorCount =
+          0;
 
-        priority:
-          normalized?.priority || 0,
+        entry.timeoutCount =
+          0;
 
-        timeoutMs:
-          normalized?.timeoutMs || 0,
+        entry.lastRunAt =
+          "";
 
-        failOpen:
-          normalized?.failOpen !== false,
+        entry.lastDurationMs =
+          0;
 
-        once:
-          normalized?.once === true,
-
-        enabled:
-          normalized?.enabled !== false,
-
-        order:
-          normalized?.order || 0,
-
-        createdAt:
-          normalized?.createdAt || "",
-
-        runCount:
-          normalized?.runCount || 0,
-
-        errorCount:
-          normalized?.errorCount || 0,
-
-        lastRunAt:
-          normalized?.lastRunAt || "",
-
-        lastDurationMs:
-          normalized?.lastDurationMs || 0,
-      };
-    });
+        entry.lastError =
+          null;
+      }
+    }
   }
+
+  state.meta.executed =
+    0;
+
+  state.meta.failed =
+    0;
+
+  state.meta.timedOut =
+    0;
+
+  state.meta.skipped =
+    0;
+
+  state.meta.lastRunAt =
+    "";
+
+  state.meta.lastRunType =
+    "";
+
+  state.meta.lastError =
+    null;
+
+  return true;
+}
+
+/* =========================================================
+   SNAPSHOT
+========================================================= */
+
+function serializeBucket(state, type) {
+  return ensureBucket(
+    state,
+    type
+  ).map((entry, index) => {
+    const normalized =
+      normalizeEntry(
+        entry,
+        index,
+        type
+      );
+
+    return {
+      id:
+        normalized?.id || "",
+
+      name:
+        normalized?.name || "",
+
+      priority:
+        normalized?.priority || 0,
+
+      timeoutMs:
+        normalized?.timeoutMs || 0,
+
+      failOpen:
+        normalized?.failOpen !== false,
+
+      once:
+        normalized?.once === true,
+
+      enabled:
+        normalized?.enabled !== false,
+
+      order:
+        normalized?.order || 0,
+
+      createdAt:
+        normalized?.createdAt || "",
+
+      runCount:
+        normalized?.runCount || 0,
+
+      errorCount:
+        normalized?.errorCount || 0,
+
+      timeoutCount:
+        normalized?.timeoutCount || 0,
+
+      lastRunAt:
+        normalized?.lastRunAt || "",
+
+      lastDurationMs:
+        normalized?.lastDurationMs || 0,
+
+      lastError:
+        normalized?.lastError || null,
+    };
+  });
+}
+
+export function getInterceptorsSnapshot(interceptors) {
+  const state =
+    ensureState(interceptors);
 
   return {
     version:
@@ -1211,20 +1599,53 @@ export function getInterceptorsSnapshot(interceptors) {
         state.error.length,
     },
 
+    activeCounts: {
+      request:
+        snapshotBucket(
+          state.request,
+          "request"
+        ).length,
+
+      response:
+        snapshotBucket(
+          state.response,
+          "response"
+        ).length,
+
+      error:
+        snapshotBucket(
+          state.error,
+          "error"
+        ).length,
+    },
+
     request:
-      serialize("request"),
+      serializeBucket(
+        state,
+        "request"
+      ),
 
     response:
-      serialize("response"),
+      serializeBucket(
+        state,
+        "response"
+      ),
 
     error:
-      serialize("error"),
+      serializeBucket(
+        state,
+        "error"
+      ),
 
     meta: {
       ...state.meta,
     },
   };
 }
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default {
   createInterceptorsState,
@@ -1234,7 +1655,10 @@ export default {
   useError,
 
   ejectInterceptor,
+  enableInterceptor,
+  disableInterceptor,
   clearInterceptors,
+  resetInterceptorsRuntime,
 
   runRequestInterceptors,
   runResponseInterceptors,

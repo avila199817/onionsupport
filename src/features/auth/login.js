@@ -2,15 +2,22 @@
    Onion SPA - Auth Login
    Archivo: src/features/auth/login.js
 
-   EXTREME PRO SYSTEM · AUTH LOGIN · CLEAN PATCH 10/10
+   EXTREME PRO SYSTEM · AUTH LOGIN · GOD MODE v12
    NO CSS · NO INLINE STYLE · NO AUTH FANTASMA · NO EVENT DUPLICATION
 
    RESPONSABILIDADES:
    - preparar credenciales login
    - construir payload robusto para backend heterogéneo
    - ejecutar login contra API pública
+   - soportar backend Onion Auth v6:
+       · token / accessToken / access_token
+       · refreshToken / refresh_token
+       · session / sessionData
+       · user / usuario / me / account / profile
+       · data / auth
    - soportar 2FA sin marcar authenticated
    - aplicar sesión sólo con token + user válidos
+   - preservar sessionId/userId/expiresAt para refresh
    - navegación SPA consistente tras login real
    - submit desde formularios HTML
    - mutex real contra login concurrente
@@ -20,6 +27,8 @@
    - no duplicar auth:login:success por defecto
    - limpiar auth-screen tras login real
    - reparar sidebar/topbar vía eventos de UI, sin CSS ni estilos inline
+   - blindar logs/eventos contra tokens, passwords y URLs sensibles
+   - fallback fetch si AppCore apiClient no está disponible
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -60,10 +69,11 @@ import {
    VERSION / RUNTIME
 ========================================================= */
 
-const LOGIN_VERSION = "11.0.0-extreme-clean";
+const LOGIN_VERSION = "12.0.0-god-mode";
 
 let loginPromise = null;
 let loginSequence = 0;
+let loginFingerprint = "";
 
 /* =========================================================
    CONSTANTS
@@ -74,6 +84,8 @@ const LOGIN_SOURCE = "auth.login";
 const DEFAULT_HOME_PATH = "/";
 const DEFAULT_LOGIN_PATH = "/login";
 const DEFAULT_2FA_PATH = "/2fa";
+
+const DEFAULT_LOGIN_TIMEOUT_MS = 30_000;
 
 const ROLE_DEFAULT_REDIRECTS = new Set([
   "/usuarios",
@@ -93,17 +105,23 @@ const AUTH_FAILURE_CODES = new Set([
   "ACCOUNT_TEMPORARILY_LOCKED",
   "ACCOUNT_DISABLED",
   "USER_DISABLED",
+  "USER_NOT_AVAILABLE",
+  "USER_NOT_FOUND",
   "UNAUTHORIZED",
   "FORBIDDEN",
   "TOKEN_INVALID",
   "INVALID_TOKEN",
   "SESSION_EXPIRED",
+  "SESSION_REVOKED",
+  "SESSION_NOT_FOUND",
   "INVALID_LOGIN_SESSION",
   "LOGIN_FAILED",
   "AUTH_FAILED",
   "AUTH_RESTORE_FAILED",
   "ME_INVALID_SESSION",
   "REFRESH_INVALID_SESSION",
+  "TOKEN_VERSION_MISMATCH",
+  "AUTH_RUNTIME_MISCONFIGURED",
 ]);
 
 const KNOWN_AUTH_STORAGE_KEYS = Object.freeze([
@@ -129,9 +147,13 @@ const KNOWN_AUTH_STORAGE_KEYS = Object.freeze([
   "onion:session_id",
   "onion:sessionUserId",
   "onion:session_user_id",
+  "onion:userId",
+  "onion:user_id",
   "onion:userName",
   "onion:user_name",
   "onion:role",
+  "onion:session",
+  "onion:sessionData",
 
   "auth_token",
   "access_token",
@@ -239,6 +261,30 @@ const SESSION_OBJECT_KEYS = Object.freeze([
   "auth",
 ]);
 
+const SESSION_ID_KEYS = Object.freeze([
+  "sessionId",
+  "session_id",
+  "sid",
+  "id",
+]);
+
+const USER_ID_KEYS = Object.freeze([
+  "userId",
+  "user_id",
+  "uid",
+  "sub",
+  "id",
+]);
+
+const SESSION_EXPIRES_KEYS = Object.freeze([
+  "expiresAt",
+  "expires_at",
+  "refreshExpiresAt",
+  "refresh_expires_at",
+  "expiration",
+  "expires",
+]);
+
 const TWO_FACTOR_BOOL_KEYS = Object.freeze([
   "requires2FA",
   "require2FA",
@@ -298,6 +344,10 @@ function isPlainObject(value) {
 
 function safeObject(value, fallback = {}) {
   return isPlainObject(value) ? value : fallback;
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 function isFunction(value) {
@@ -418,6 +468,21 @@ function redactSafe(value = "") {
   }
 }
 
+function redactIdentifier(value = "") {
+  const text = safeText(value, "");
+
+  if (!text) return "";
+
+  if (text.includes("@")) {
+    const [local = "", domain = ""] = text.split("@");
+    return `${local.slice(0, 2)}***@${domain || "***"}`;
+  }
+
+  if (text.length <= 4) return "***";
+
+  return `${text.slice(0, 2)}***${text.slice(-2)}`;
+}
+
 function safeLog(...args) {
   try {
     AppCore?.utils?.log?.("[AuthLogin]", ...args);
@@ -449,8 +514,14 @@ function sanitizeEventPayload(payload = {}) {
     ...AUTH_TOKEN_KEYS,
     ...REFRESH_TOKEN_KEYS,
     ...TEMP_TOKEN_KEYS,
+    "password",
+    "pass",
   ]) {
     if (key in output) output[key] = null;
+  }
+
+  if (output.identifier) {
+    output.identifier = redactIdentifier(output.identifier);
   }
 
   for (const key of [
@@ -461,6 +532,7 @@ function sanitizeEventPayload(payload = {}) {
     "url",
     "currentPath",
     "currentCanonicalPath",
+    "endpoint",
   ]) {
     if (output[key]) output[key] = redactSafe(output[key]);
   }
@@ -552,43 +624,182 @@ function resolveLoginEndpoint() {
   return safeText(AUTH_ENDPOINTS?.login, "") || "/api/auth/login";
 }
 
-async function apiPost(path, body = {}, options = {}) {
-  const apiClient = getApiClient();
+function resolveApiBase() {
+  return safeText(
+    AppCore?.config?.apiBase ||
+      AppCore?.config?.baseUrl ||
+      AppCore?.config?.apiUrl ||
+      "",
+    ""
+  ).replace(/\/+$/, "");
+}
 
-  if (!apiClient) {
+function resolveApiUrl(path = "") {
+  const cleanPath = safeText(path, "");
+
+  if (/^https?:\/\//i.test(cleanPath)) {
+    return cleanPath;
+  }
+
+  const apiBase = resolveApiBase();
+
+  if (!apiBase) {
+    return cleanPath || "/";
+  }
+
+  return `${apiBase}${cleanPath.startsWith("/") ? cleanPath : `/${cleanPath}`}`;
+}
+
+function createLoginAbortController(options = {}) {
+  if (!isBrowser()) return null;
+  if (typeof AbortController !== "function") return null;
+
+  const timeoutMs = safeNumber(
+    options.timeoutMs ||
+      options.loginTimeoutMs ||
+      AUTH_CONSTANTS?.loginTimeoutMs,
+    DEFAULT_LOGIN_TIMEOUT_MS
+  );
+
+  if (!timeoutMs || timeoutMs <= 0) {
+    return {
+      controller: new AbortController(),
+      timer: null,
+    };
+  }
+
+  const controller = new AbortController();
+
+  let timer = null;
+
+  try {
+    timer = window.setTimeout(() => {
+      try {
+        controller.abort();
+      } catch {}
+    }, timeoutMs);
+  } catch {}
+
+  return {
+    controller,
+    timer,
+  };
+}
+
+function clearLoginAbortController(abortCtx = null) {
+  if (!abortCtx) return false;
+
+  try {
+    if (abortCtx.timer && isBrowser()) {
+      window.clearTimeout(abortCtx.timer);
+    }
+  } catch {}
+
+  return true;
+}
+
+async function nativeFetchPost(path, body = {}, options = {}) {
+  if (!isBrowser() || typeof fetch !== "function") {
     throw createAuthError("No hay cliente API disponible para login.", {
       status: 500,
       code: "API_CLIENT_MISSING",
     });
   }
 
-  if (isFunction(apiClient.post)) {
-    return apiClient.post(path, body, options);
+  const url = resolveApiUrl(path);
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...(safeObject(options.headers)),
+  };
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers,
+    credentials: "include",
+    cache: "no-store",
+    signal: options.signal || undefined,
+    body: JSON.stringify(body || {}),
+  });
+
+  let payload = null;
+
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
   }
 
-  if (isFunction(apiClient.request)) {
-    try {
-      return await apiClient.request(path, {
-        ...options,
-        method: "POST",
-        body,
-      });
-    } catch (error) {
+  if (!response.ok) {
+    const message =
+      extractMessage(payload) ||
+      payload?.message ||
+      payload?.error ||
+      `HTTP ${response.status}`;
+
+    const error = createAuthError(message, {
+      status: response.status,
+      code:
+        payload?.code ||
+        payload?.error ||
+        (response.status === 401
+          ? "UNAUTHORIZED"
+          : response.status === 403
+            ? "FORBIDDEN"
+            : "LOGIN_FAILED"),
+      raw: payload || response,
+    });
+
+    error.response = {
+      status: response.status,
+      data: payload,
+    };
+
+    throw error;
+  }
+
+  return payload;
+}
+
+async function apiPost(path, body = {}, options = {}) {
+  const apiClient = getApiClient();
+
+  const abortCtx = createLoginAbortController(options);
+  const signal = abortCtx?.controller?.signal || options.signal;
+
+  const finalOptions = {
+    ...options,
+    signal,
+  };
+
+  try {
+    if (apiClient && isFunction(apiClient.post)) {
+      return await apiClient.post(path, body, finalOptions);
+    }
+
+    if (apiClient && isFunction(apiClient.request)) {
       try {
-        return await apiClient.request("POST", path, {
-          ...options,
+        return await apiClient.request(path, {
+          ...finalOptions,
+          method: "POST",
           body,
         });
-      } catch {
-        throw error;
+      } catch (error) {
+        try {
+          return await apiClient.request("POST", path, {
+            ...finalOptions,
+            body,
+          });
+        } catch {
+          throw error;
+        }
       }
     }
-  }
 
-  throw createAuthError("El cliente API no soporta POST.", {
-    status: 500,
-    code: "API_CLIENT_POST_MISSING",
-  });
+    return await nativeFetchPost(path, body, finalOptions);
+  } finally {
+    clearLoginAbortController(abortCtx);
+  }
 }
 
 /* =========================================================
@@ -796,6 +1007,24 @@ function clearAuthScreenDomState(reason = "login-success") {
   return true;
 }
 
+function setTwoFactorDomState(reason = "login-2fa") {
+  if (!isBrowser()) return false;
+
+  try {
+    document.body?.classList?.add?.("route-auth");
+    document.body?.classList?.remove?.("route-app");
+    document.body?.setAttribute?.("data-authenticated", "false");
+    document.documentElement?.setAttribute?.("data-authenticated", "false");
+  } catch {}
+
+  safeEmit("app:shell:two-factor-pending", {
+    reason,
+    source: LOGIN_SOURCE,
+  });
+
+  return true;
+}
+
 function safeSyncUserUI(reason = "login-sync-user-ui") {
   try {
     AppCore?.syncUserUI?.({
@@ -832,6 +1061,7 @@ function emitLoginSessionCommitted(reason = "login-session-applied", extra = {})
     role: getState().role || null,
     route: getState().route || "/",
     publicPath: getState().publicPath || "/",
+    sessionId: getState().sessionId || getState().session?.sessionId || null,
     ...extra,
   };
 
@@ -1115,10 +1345,8 @@ export function normalizeLoginPayload(credentials = {}) {
     .replace(/\s+/g, " ")
     .slice(0, maxIdentifier);
 
-  const password = String(credentials.password ?? credentials.pass ?? "").slice(
-    0,
-    maxPassword
-  );
+  const password = String(credentials.password ?? credentials.pass ?? "")
+    .slice(0, maxPassword);
 
   return {
     identifier,
@@ -1141,9 +1369,19 @@ export function buildLoginRequestBody(credentials = {}) {
     phone,
     username,
     user: username,
+    login: clean,
     password,
     remember,
   };
+}
+
+function buildLoginFingerprint(credentials = {}) {
+  const payload = normalizeLoginPayload(credentials);
+
+  return [
+    safeText(payload.identifier, "").toLowerCase(),
+    payload.remember ? "1" : "0",
+  ].join("|");
 }
 
 /* =========================================================
@@ -1233,6 +1471,18 @@ export function getPostLoginTarget(user = AppCore?.state?.user, options = {}) {
   const fromUrl = getRedirectFromUrl();
   if (fromUrl) return fromUrl;
 
+  const userHome =
+    user?.homePath ||
+    user?.routing?.homePath ||
+    user?.preferences?.homePath ||
+    "";
+
+  const normalizedUserHome = normalizeRedirectCandidate(userHome);
+
+  if (normalizedUserHome) {
+    return normalizedUserHome;
+  }
+
   return getHomeRoute();
 }
 
@@ -1245,7 +1495,11 @@ function collectAuthObjects(raw = {}) {
   const seen = new Set();
   const queue = [raw];
 
-  while (queue.length) {
+  let guard = 0;
+
+  while (queue.length && guard < 80) {
+    guard += 1;
+
     const current = queue.shift();
 
     if (!isPlainObject(current) || seen.has(current)) continue;
@@ -1264,6 +1518,18 @@ function collectAuthObjects(raw = {}) {
     if (isPlainObject(current.response?.data)) {
       queue.push(current.response.data);
     }
+
+    if (isPlainObject(current.data?.auth)) {
+      queue.push(current.data.auth);
+    }
+
+    if (isPlainObject(current.data?.session)) {
+      queue.push(current.data.session);
+    }
+
+    if (isPlainObject(current.auth?.session)) {
+      queue.push(current.auth.session);
+    }
   }
 
   return output;
@@ -1272,7 +1538,12 @@ function collectAuthObjects(raw = {}) {
 function pickValueFromObjects(objects = [], keys = []) {
   for (const object of objects) {
     for (const key of keys) {
-      if (object && object[key] !== null && object[key] !== undefined && object[key] !== "") {
+      if (
+        object &&
+        object[key] !== null &&
+        object[key] !== undefined &&
+        object[key] !== ""
+      ) {
         return object[key];
       }
     }
@@ -1329,6 +1600,116 @@ function hasUsableToken(token = "") {
   return Boolean(safeText(token, ""));
 }
 
+function resolveAvatar(user = {}) {
+  if (!isPlainObject(user)) return null;
+
+  return (
+    safeText(user.avatar, "") ||
+    safeText(user.avatarUrl, "") ||
+    safeText(user.avatar_url, "") ||
+    safeText(user.photo, "") ||
+    safeText(user.photoUrl, "") ||
+    safeText(user.photo_url, "") ||
+    safeText(user.image, "") ||
+    safeText(user.imageUrl, "") ||
+    safeText(user.image_url, "") ||
+    safeText(user.profileImage, "") ||
+    safeText(user.profile_image, "") ||
+    safeText(user.picture, "") ||
+    safeText(user.pictureUrl, "") ||
+    safeText(user.picture_url, "") ||
+    null
+  );
+}
+
+function normalizeUserForClient(user = {}) {
+  if (!isPlainObject(user)) return null;
+
+  const userId = pickFirstText(
+    user.userId,
+    user.user_id,
+    user.uid,
+    user.id,
+    user._id
+  );
+
+  const username = pickFirstText(
+    user.username,
+    user.userName,
+    user.user_name,
+    user.usernameLower,
+    user.username_lower
+  );
+
+  const role = pickFirstText(
+    user.role,
+    user.rol,
+    user.type,
+    user.tipo,
+    "user"
+  );
+
+  const avatar = resolveAvatar(user);
+
+  return {
+    ...user,
+
+    id: user.id || userId || null,
+    userId: user.userId || userId || null,
+    uid: user.uid || userId || null,
+
+    username: username || null,
+    usernameLower:
+      user.usernameLower ||
+      user.username_lower ||
+      sanitizeUsername(username || "") ||
+      null,
+
+    slug:
+      user.slug ||
+      user.usernameLower ||
+      user.username_lower ||
+      sanitizeUsername(username || "") ||
+      null,
+
+    email:
+      user.email ||
+      user.mail ||
+      null,
+
+    emailLower:
+      user.emailLower ||
+      user.email_lower ||
+      (user.email ? String(user.email).toLowerCase() : null),
+
+    name:
+      user.name ||
+      user.nombre ||
+      user.displayName ||
+      user.fullName ||
+      username ||
+      user.email ||
+      "Usuario",
+
+    role,
+    rol: role,
+
+    permissions:
+      safeArray(user.permissions || user.permisos),
+
+    permisos:
+      safeArray(user.permisos || user.permissions),
+
+    avatar,
+    avatarUrl: avatar,
+    picture: avatar,
+    hasAvatar:
+      user.hasAvatar === true ||
+      user.has_avatar === true ||
+      Boolean(avatar),
+  };
+}
+
 function hasUsableUser(user = {}) {
   if (!isPlainObject(user)) return false;
 
@@ -1349,6 +1730,71 @@ function hasUsableUser(user = {}) {
   );
 }
 
+function normalizeSessionData(session = {}, fallbackUser = {}) {
+  const source = safeObject(session);
+
+  const sessionId = pickFirstText(
+    ...SESSION_ID_KEYS.map((key) => source[key])
+  );
+
+  const userId = pickFirstText(
+    source.userId,
+    source.user_id,
+    source.uid,
+    fallbackUser?.userId,
+    fallbackUser?.user_id,
+    fallbackUser?.uid,
+    fallbackUser?.id
+  );
+
+  const expiresAt = pickFirstText(
+    ...SESSION_EXPIRES_KEYS.map((key) => source[key])
+  );
+
+  if (!sessionId && !userId && !expiresAt && !Object.keys(source).length) {
+    return null;
+  }
+
+  return {
+    ...source,
+
+    id:
+      source.id ||
+      sessionId ||
+      null,
+
+    sessionId:
+      source.sessionId ||
+      source.session_id ||
+      source.sid ||
+      sessionId ||
+      null,
+
+    userId:
+      source.userId ||
+      source.user_id ||
+      source.uid ||
+      userId ||
+      null,
+
+    expiresAt:
+      source.expiresAt ||
+      source.expires_at ||
+      source.refreshExpiresAt ||
+      source.refresh_expires_at ||
+      expiresAt ||
+      null,
+
+    refreshExpiresAt:
+      source.refreshExpiresAt ||
+      source.refresh_expires_at ||
+      source.expiresAt ||
+      source.expires_at ||
+      expiresAt ||
+      null,
+  };
+}
+
 function extractAuthFields(raw = {}) {
   const objects = collectAuthObjects(raw);
 
@@ -1356,7 +1802,9 @@ function extractAuthFields(raw = {}) {
   const refreshToken = pickTextFromObjects(objects, REFRESH_TOKEN_KEYS);
   const tempToken = pickTextFromObjects(objects, TEMP_TOKEN_KEYS);
 
-  const user = pickObjectFromObjects(objects, USER_KEYS);
+  const userRaw = pickObjectFromObjects(objects, USER_KEYS);
+  const user = normalizeUserForClient(userRaw);
+
   const role = pickFirstText(
     pickTextFromObjects(objects, ROLE_KEYS),
     user?.role,
@@ -1372,12 +1820,30 @@ function extractAuthFields(raw = {}) {
   const message = pickTextFromObjects(objects, MESSAGE_KEYS);
   const redirectTo = pickTextFromObjects(objects, REDIRECT_KEYS);
 
-  const sessionData = pickFirstObject(
+  const sessionObject = pickFirstObject(
     pickObjectFromObjects(objects, SESSION_OBJECT_KEYS),
+    pickObjectFromObjects(objects, ["session"]),
+    pickObjectFromObjects(objects, ["sessionData"]),
     null
   );
 
+  const sessionData = normalizeSessionData(sessionObject, user);
+
+  const sessionId = pickFirstText(
+    sessionData?.sessionId,
+    sessionData?.id,
+    pickTextFromObjects(objects, ["sessionId", "session_id", "sid"])
+  );
+
+  const sessionUserId = pickFirstText(
+    sessionData?.userId,
+    user?.userId,
+    user?.id,
+    pickTextFromObjects(objects, ["userId", "user_id", "uid"])
+  );
+
   const statusText = safeText(status, "").toLowerCase();
+
   const requires2FA =
     Boolean(tempToken) ||
     pickBoolFromObjects(objects, TWO_FACTOR_BOOL_KEYS) ||
@@ -1420,6 +1886,8 @@ function extractAuthFields(raw = {}) {
     message,
     redirectTo,
     sessionData,
+    sessionId,
+    sessionUserId,
     requires2FA,
     explicitFailure,
     authenticated,
@@ -1456,6 +1924,11 @@ function normalizeAuthPayload({
     session: {
       ...safeObject(responseObject.session),
       ...safeObject(validatedObject.session),
+    },
+
+    sessionData: {
+      ...safeObject(responseObject.sessionData),
+      ...safeObject(validatedObject.sessionData),
     },
 
     auth: {
@@ -1504,6 +1977,10 @@ function normalizeAuthPayload({
     role: safeText(fields.role, ""),
 
     sessionData: fields.sessionData,
+    session: fields.sessionData,
+
+    sessionId: fields.sessionId,
+    sessionUserId: fields.sessionUserId,
 
     requires2FA: fields.requires2FA,
 
@@ -1556,10 +2033,16 @@ function normalizeThrownLoginError(error) {
       ? "UNAUTHORIZED"
       : status === 403
         ? "FORBIDDEN"
-        : "LOGIN_FAILED"
+        : status === 423
+          ? "ACCOUNT_TEMPORARILY_LOCKED"
+          : "LOGIN_FAILED"
   );
 
-  const message = extractMessage(error) || "No se pudo iniciar sesión.";
+  const message =
+    extractMessage(error) ||
+    error?.response?.data?.message ||
+    error?.data?.message ||
+    "No se pudo iniciar sesión.";
 
   return createAuthError(message, {
     status: status || 500,
@@ -1591,6 +2074,10 @@ function assertValidAuthenticatedPayload(authData = {}) {
       code: "INVALID_LOGIN_SESSION",
       raw: authData.raw,
     });
+  }
+
+  if (!authData.sessionData?.sessionId && !authData.sessionId) {
+    safeWarn("Login autenticado sin sessionId explícito. Refresh puede depender de fallback de applySession.");
   }
 
   return true;
@@ -1695,12 +2182,15 @@ function clearAuthRuntimeState(reason = "login_cleanup", options = {}) {
     accessToken: null,
 
     session: null,
+    sessionData: null,
     sessionId: null,
+    sessionUserId: null,
 
     currentResolvedUsername: null,
     resolvedUsername: null,
 
     twoFactorPending: false,
+    twoFactorUser: null,
     tempToken: null,
 
     loginInProgress: false,
@@ -1731,9 +2221,33 @@ function markLoginInProgress(value = false) {
 ========================================================= */
 
 function enforceAuthenticatedCoreState(snapshot = {}) {
-  const user = snapshot.user || null;
-  const token = snapshot.token || snapshot.accessToken || "";
-  const role = snapshot.role || user?.role || user?.rol || "";
+  const user = normalizeUserForClient(snapshot.user || snapshot.usuario || null);
+  const token = snapshot.token || snapshot.accessToken || snapshot.access_token || "";
+  const role = snapshot.role || snapshot.rol || user?.role || user?.rol || "";
+
+  const session =
+    normalizeSessionData(
+      snapshot.session ||
+        snapshot.sessionData ||
+        snapshot.auth?.session ||
+        snapshot.data?.session ||
+        {},
+      user
+    ) || null;
+
+  const sessionId =
+    session?.sessionId ||
+    snapshot.sessionId ||
+    snapshot.session_id ||
+    null;
+
+  const sessionUserId =
+    session?.userId ||
+    snapshot.sessionUserId ||
+    snapshot.session_user_id ||
+    user?.userId ||
+    user?.id ||
+    null;
 
   safeSetState({
     authenticated: true,
@@ -1746,15 +2260,20 @@ function enforceAuthenticatedCoreState(snapshot = {}) {
 
     role,
     userRole: role,
+    roles: safeArray(user?.roles).length ? safeArray(user.roles) : [role].filter(Boolean),
 
     token,
     accessToken: token,
 
     twoFactorPending: false,
+    twoFactorUser: null,
     tempToken: null,
 
     session: {
       ...safeObject(getState().session),
+      ...safeObject(session),
+      sessionId,
+      userId: sessionUserId,
       user,
       role,
       token,
@@ -1762,6 +2281,27 @@ function enforceAuthenticatedCoreState(snapshot = {}) {
       authenticated: true,
       source: LOGIN_SOURCE,
     },
+
+    sessionData: {
+      ...safeObject(session),
+      sessionId,
+      userId: sessionUserId,
+    },
+
+    sessionId,
+    sessionUserId,
+
+    currentResolvedUsername:
+      user?.slug ||
+      user?.usernameLower ||
+      user?.username ||
+      null,
+
+    resolvedUsername:
+      user?.slug ||
+      user?.usernameLower ||
+      user?.username ||
+      null,
 
     lastLoginAt: isoNow(),
     lastAuthSource: "login",
@@ -1771,10 +2311,17 @@ function enforceAuthenticatedCoreState(snapshot = {}) {
     user,
     token,
     role,
+    session,
+    sessionId,
+    sessionUserId,
   };
 }
 
 function applyAuthenticatedSession(authData = {}) {
+  const sessionData =
+    normalizeSessionData(authData.sessionData || authData.session || {}, authData.user) ||
+    null;
+
   const payload = {
     token: authData.token,
     accessToken: authData.token,
@@ -1782,18 +2329,63 @@ function applyAuthenticatedSession(authData = {}) {
 
     user: authData.user,
     usuario: authData.user,
+    me: authData.user,
+    account: authData.user,
+    profile: authData.user,
 
-    role: authData.role,
-    rol: authData.role,
+    role: authData.role || authData.user?.role || "",
+    rol: authData.role || authData.user?.role || "",
 
     refreshToken: authData.refreshToken || null,
     refresh_token: authData.refreshToken || null,
 
-    sessionData: authData.sessionData || null,
+    session: sessionData,
+    sessionData,
+    sessionId: sessionData?.sessionId || authData.sessionId || null,
+    session_id: sessionData?.sessionId || authData.sessionId || null,
+    sessionUserId:
+      sessionData?.userId ||
+      authData.sessionUserId ||
+      authData.user?.userId ||
+      authData.user?.id ||
+      null,
+    session_user_id:
+      sessionData?.userId ||
+      authData.sessionUserId ||
+      authData.user?.userId ||
+      authData.user?.id ||
+      null,
 
     authenticated: true,
     ok: true,
+    success: true,
     source: LOGIN_SOURCE,
+
+    data: {
+      token: authData.token,
+      accessToken: authData.token,
+      access_token: authData.token,
+      refreshToken: authData.refreshToken || null,
+      refresh_token: authData.refreshToken || null,
+      user: authData.user,
+      usuario: authData.user,
+      session: sessionData,
+      sessionData,
+      authenticated: true,
+    },
+
+    auth: {
+      token: authData.token,
+      accessToken: authData.token,
+      access_token: authData.token,
+      refreshToken: authData.refreshToken || null,
+      refresh_token: authData.refreshToken || null,
+      user: authData.user,
+      usuario: authData.user,
+      session: sessionData,
+      sessionData,
+      authenticated: true,
+    },
   };
 
   let snapshot = null;
@@ -1812,18 +2404,24 @@ function applyAuthenticatedSession(authData = {}) {
 
   snapshot.token = snapshot.token || snapshot.accessToken || authData.token;
   snapshot.accessToken = snapshot.accessToken || snapshot.token;
-  snapshot.user = snapshot.user || authData.user;
+  snapshot.user = normalizeUserForClient(snapshot.user || authData.user);
   snapshot.role =
     snapshot.role ||
     authData.role ||
-    authData.user?.role ||
-    authData.user?.rol ||
+    snapshot.user?.role ||
+    snapshot.user?.rol ||
     "";
+  snapshot.session =
+    normalizeSessionData(snapshot.session || snapshot.sessionData || sessionData, snapshot.user) ||
+    sessionData;
+  snapshot.sessionData = snapshot.session;
 
   try {
     AppCore?.applySession?.({
       token: snapshot.token,
       user: snapshot.user,
+      session: snapshot.session,
+      refreshToken: authData.refreshToken || null,
     });
   } catch {}
 
@@ -1868,6 +2466,7 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
       storeError: false,
       _skipAuthRefresh: true,
       useLoader: options.useLoader !== false,
+      timeoutMs: options.timeoutMs || options.loginTimeoutMs,
     }
   );
 
@@ -1887,6 +2486,8 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
     explicitFailure: authData.explicitFailure,
     hasUser: hasUsableUser(authData.user),
     hasToken: hasUsableToken(authData.token),
+    hasRefreshToken: Boolean(authData.refreshToken),
+    hasSession: Boolean(authData.sessionData?.sessionId || authData.sessionId),
     validationOk: validation.ok,
     source: LOGIN_SOURCE,
   });
@@ -1942,6 +2543,9 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
       persistTempToken(authData.tempToken);
     } catch {}
 
+    const twoFactorUser =
+      normalizeUserForClient(authData.user || null);
+
     safeSetState({
       authenticated: false,
       hasToken: false,
@@ -1957,10 +2561,15 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
       role: null,
       userRole: null,
       session: null,
+      sessionData: null,
+      sessionId: null,
 
       twoFactorPending: true,
+      twoFactorUser,
       tempToken: authData.tempToken,
     });
+
+    setTwoFactorDomState("login-2fa-required");
 
     const redirectTo =
       normalizeRedirectCandidate(authData.redirectTo) || DEFAULT_2FA_PATH;
@@ -1972,6 +2581,7 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
       requires2FA: true,
       authenticated: false,
       tempToken: authData.tempToken,
+      user: twoFactorUser,
       redirectTo,
       response,
       navigation: null,
@@ -1982,6 +2592,7 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
       requires2FA: true,
       authenticated: false,
       redirectTo: result.redirectTo,
+      hasUser: Boolean(twoFactorUser),
       source: LOGIN_SOURCE,
       sequence,
     });
@@ -2054,7 +2665,13 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
     role: snapshot.role || authData.role || "",
 
     refreshToken: authData.refreshToken || "",
-    sessionData: authData.sessionData || null,
+    session: snapshot.session || authData.sessionData || null,
+    sessionData: snapshot.sessionData || snapshot.session || authData.sessionData || null,
+    sessionId:
+      snapshot.session?.sessionId ||
+      snapshot.sessionData?.sessionId ||
+      authData.sessionId ||
+      null,
 
     redirectTo,
     response,
@@ -2069,6 +2686,7 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
       user: result.user,
       role: result.role,
       redirectTo,
+      sessionId: result.sessionId,
       source: LOGIN_SOURCE,
       sequence,
     });
@@ -2098,11 +2716,21 @@ async function executeLogin(credentials = {}, sequence = 0, options = {}) {
 ========================================================= */
 
 export async function login(credentials = {}, options = {}) {
+  const fingerprint = buildLoginFingerprint(credentials);
+
   if (loginPromise) {
-    return loginPromise;
+    if (!loginFingerprint || loginFingerprint === fingerprint) {
+      return loginPromise;
+    }
+
+    throw createAuthError("Ya hay un inicio de sesión en curso.", {
+      status: 409,
+      code: "LOGIN_ALREADY_IN_PROGRESS",
+    });
   }
 
   const sequence = ++loginSequence;
+  loginFingerprint = fingerprint;
 
   loginPromise = (async () => {
     try {
@@ -2145,6 +2773,7 @@ export async function login(credentials = {}, options = {}) {
     } finally {
       markLoginInProgress(false);
       loginPromise = null;
+      loginFingerprint = "";
     }
   })();
 
@@ -2161,6 +2790,10 @@ export async function handleLoginFormSubmit(formElement, options = {}) {
   if (!HTMLForm || !(formElement instanceof HTMLForm)) {
     throw new Error("Se esperaba un formulario HTML válido.");
   }
+
+  try {
+    options.event?.preventDefault?.();
+  } catch {}
 
   const formData = new FormData(formElement);
 
@@ -2204,6 +2837,13 @@ export async function handleLoginFormSubmit(formElement, options = {}) {
 export function getLoginSnapshot() {
   const state = getState();
 
+  const user =
+    state.user ||
+    state.currentUser ||
+    state.authUser ||
+    state.sessionUser ||
+    null;
+
   return {
     version: LOGIN_VERSION,
 
@@ -2219,17 +2859,34 @@ export function getLoginSnapshot() {
     currentCanonicalPath: redactSafe(getBrowserCanonicalPath()),
 
     hasApiClient: Boolean(getApiClient()),
+    hasNativeFetch: Boolean(isBrowser() && typeof fetch === "function"),
 
     authenticated: Boolean(state.authenticated),
     hasToken: Boolean(state.token || state.accessToken),
 
-    hasUser: hasUsableUser(
-      state.user ||
-        state.currentUser ||
-        state.authUser ||
-        state.sessionUser ||
-        null
+    hasUser: hasUsableUser(user),
+
+    userId:
+      user?.userId ||
+      user?.id ||
+      null,
+
+    role:
+      state.role ||
+      user?.role ||
+      null,
+
+    hasSession: Boolean(
+      state.session?.sessionId ||
+        state.sessionData?.sessionId ||
+        state.sessionId
     ),
+
+    sessionId:
+      state.session?.sessionId ||
+      state.sessionData?.sessionId ||
+      state.sessionId ||
+      null,
 
     loginInProgress: Boolean(state.loginInProgress),
     twoFactorPending: Boolean(state.twoFactorPending),

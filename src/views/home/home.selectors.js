@@ -2,10 +2,11 @@
    Onion SPA - Home Selectors / Data Helpers
    Archivo: src/views/home/home.selectors.js
 
-   FINAL PRO SYSTEM · HOME DATA LAYER · TEMPLATE TRIM PATCH
+   ONION SUPPORT · HOME DATA LAYER
+   FINAL PRO SYSTEM · TEMPLATE TRIM PATCH · EXTREME 11/10
 
    RESPONSABILIDADES:
-   - sacar del template toda la lógica pesada de lectura/normalización
+   - sacar del template toda lógica pesada de lectura/normalización
    - centralizar helpers puros de dashboard/home
    - resolver dashboard/summary/widgets/collections
    - calcular métricas home admin/user
@@ -14,14 +15,20 @@
    - paginación visual estable
    - formatters reutilizables
    - evitar que un 0 prematuro tape valores reales de widgets/summary
+   - preservar aliases backend heterogéneos
+   - proteger identidades desconocidas sin colapsar filas
+   - exponer snapshot listo para template
 ========================================================= */
 
 /* =========================================================
    CONSTANTS
 ========================================================= */
 
+export const HOME_SELECTORS_VERSION = "11.0.0-extreme";
+
 export const DEFAULT_PAGE_SIZE = 5;
 export const DEFAULT_CURRENCY = "EUR";
+export const DEFAULT_LOCALE = "es-ES";
 
 export const HOME_ROUTES = Object.freeze({
   HOME: "/",
@@ -47,6 +54,31 @@ export const ADMIN_ROLE_KEYS = Object.freeze([
   "soporte",
   "tecnico",
   "técnico",
+  "technician",
+  "agent",
+  "agente",
+]);
+
+export const SUPPORT_ROLE_KEYS = Object.freeze([
+  "support",
+  "soporte",
+  "staff",
+  "agent",
+  "agente",
+  "helpdesk",
+  "operator",
+  "operador",
+  "tecnico",
+  "técnico",
+  "technician",
+]);
+
+export const CLIENT_ROLE_KEYS = Object.freeze([
+  "client",
+  "cliente",
+  "customer",
+  "usuario",
+  "user",
 ]);
 
 export const TICKET_OPEN_KEYS = Object.freeze([
@@ -58,6 +90,12 @@ export const TICKET_OPEN_KEYS = Object.freeze([
 export const TICKET_CLOSED_KEYS = Object.freeze([
   "resolved",
   "closed",
+]);
+
+export const INVOICE_PENDING_KEYS = Object.freeze([
+  "pending",
+  "overdue",
+  "partial",
 ]);
 
 const AVATAR_PALETTE = Object.freeze([
@@ -73,20 +111,142 @@ const AVATAR_PALETTE = Object.freeze([
   ["#4338ca", "#c026d3"],
 ]);
 
+const DASHBOARD_KEYS = Object.freeze([
+  "dashboard",
+  "home",
+  "data.dashboard",
+  "payload.dashboard",
+  "result.dashboard",
+  "response.dashboard",
+  "body.dashboard",
+  "data.home",
+  "payload.home",
+  "result.home",
+]);
+
+const SUMMARY_KEYS = Object.freeze([
+  "summary",
+  "stats",
+  "metrics",
+  "totals",
+  "counts",
+  "dashboard.summary",
+  "dashboard.stats",
+  "dashboard.metrics",
+  "dashboard.totals",
+  "dashboard.counts",
+  "state.summary",
+  "state.stats",
+  "state.metrics",
+  "state.totals",
+  "state.counts",
+  "raw.summary",
+  "raw.stats",
+  "payload.summary",
+  "payload.stats",
+  "result.summary",
+  "response.summary",
+  "data.summary",
+  "data.stats",
+]);
+
+const COLLECTION_ITEM_KEYS = Object.freeze([
+  "items",
+  "rows",
+  "data",
+  "results",
+  "records",
+  "value",
+  "docs",
+  "documents",
+  "collection",
+  "list",
+]);
+
+const TICKET_COLLECTION_ALIASES = Object.freeze([
+  "tickets",
+  "incidencias",
+  "incidents",
+  "issues",
+  "supportTickets",
+  "support_tickets",
+]);
+
+const INVOICE_COLLECTION_ALIASES = Object.freeze([
+  "facturas",
+  "invoices",
+  "bills",
+  "billing",
+  "payments",
+]);
+
+const USER_COLLECTION_ALIASES = Object.freeze([
+  "users",
+  "usuarios",
+  "members",
+  "accounts",
+]);
+
+const CLIENT_COLLECTION_ALIASES = Object.freeze([
+  "clients",
+  "clientes",
+  "customers",
+  "accountsClients",
+  "accounts_clients",
+]);
+
+const ACTIVITY_COLLECTION_ALIASES = Object.freeze([
+  "activity",
+  "activities",
+  "recentActivity",
+  "recent_activity",
+  "recent",
+  "logs",
+  "timeline",
+  "events",
+]);
+
 /* =========================================================
    SAFE HELPERS
 ========================================================= */
 
 export function safeText(value, fallback = "") {
-  if (value === null || value === undefined) return fallback;
+  if (value === null || value === undefined) {
+    return fallback;
+  }
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
 
+export function isObject(value) {
+  return Boolean(
+    value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+  );
+}
+
+export function safeObject(value, fallback = {}) {
+  return isObject(value)
+    ? value
+    : fallback;
+}
+
+export function safeArray(value) {
+  return Array.isArray(value)
+    ? value
+    : [];
+}
+
 export function safeNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === "") return fallback;
+  if (value === null || value === undefined || value === "") {
+    return fallback;
+  }
 
   if (typeof value === "string") {
     let normalized = value
@@ -98,6 +258,10 @@ export function safeNumber(value, fallback = 0) {
       .replace(/[^\d.,+\-\s]/g, "")
       .replace(/\s/g, "");
 
+    if (!normalized || normalized === "-" || normalized === "+") {
+      return fallback;
+    }
+
     const hasComma = normalized.includes(",");
     const hasDot = normalized.includes(".");
 
@@ -105,42 +269,33 @@ export function safeNumber(value, fallback = 0) {
       const lastComma = normalized.lastIndexOf(",");
       const lastDot = normalized.lastIndexOf(".");
 
-      if (lastComma > lastDot) {
-        normalized = normalized.replace(/\./g, "").replace(/,/g, ".");
-      } else {
-        normalized = normalized.replace(/,/g, "");
-      }
+      normalized =
+        lastComma > lastDot
+          ? normalized.replace(/\./g, "").replace(/,/g, ".")
+          : normalized.replace(/,/g, "");
     } else if (hasComma) {
       normalized = normalized.replace(/,/g, ".");
     }
 
-    const n = Number(normalized);
+    const number = Number(normalized);
 
-    return Number.isFinite(n) ? n : fallback;
+    return Number.isFinite(number)
+      ? number
+      : fallback;
   }
 
-  const n = Number(value);
+  const number = Number(value);
 
-  return Number.isFinite(n) ? n : fallback;
-}
-
-export function safeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-export function safeObject(value, fallback = {}) {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value
+  return Number.isFinite(number)
+    ? number
     : fallback;
-}
-
-export function isObject(value) {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 export function first(...values) {
   for (const value of values) {
-    if (value === undefined || value === null) continue;
+    if (value === undefined || value === null) {
+      continue;
+    }
 
     if (typeof value === "string" && value.trim() === "") {
       continue;
@@ -161,7 +316,9 @@ export function first(...values) {
 }
 
 export function normalizeWhitespace(value = "") {
-  return safeText(value, "").replace(/\s+/g, " ").trim();
+  return safeText(value, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 export function normalizeText(value = "") {
@@ -176,37 +333,52 @@ export function normalizeText(value = "") {
 export function normalizeKey(value = "") {
   return normalizeText(value)
     .replace(/[\s-]+/g, "_")
-    .replace(/[^\w:.]+/g, "_")
+    .replace(/[^a-z0-9_:.]+/g, "_")
     .replace(/^_+|_+$/g, "");
 }
 
 export function clampNumber(value = 0, min = 0, max = Number.POSITIVE_INFINITY) {
-  const n = safeNumber(value, min);
-  return Math.min(Math.max(n, min), max);
+  const number = safeNumber(value, min);
+
+  return Math.min(
+    Math.max(number, min),
+    max
+  );
 }
 
 export function roundMoney(value = 0) {
-  const n = safeNumber(value, NaN);
+  const number = safeNumber(value, NaN);
 
-  if (!Number.isFinite(n)) return 0;
+  if (!Number.isFinite(number)) {
+    return 0;
+  }
 
-  return Math.round((n + Number.EPSILON) * 100) / 100;
+  return Math.round((number + Number.EPSILON) * 100) / 100;
 }
 
 export function getPath(object = {}, path = "") {
   const root = safeObject(object, null);
   const cleanPath = safeText(path, "");
 
-  if (!root || !cleanPath) return undefined;
+  if (!root || !cleanPath) {
+    return undefined;
+  }
 
   return cleanPath.split(".").reduce((acc, segment) => {
-    if (acc === null || acc === undefined) return undefined;
+    if (acc === null || acc === undefined) {
+      return undefined;
+    }
+
     return acc?.[segment];
   }, root);
 }
 
 export function firstPath(object = {}, paths = []) {
-  return first(...safeArray(paths).map((path) => getPath(object, path)));
+  return first(
+    ...safeArray(paths).map((path) =>
+      getPath(object, path)
+    )
+  );
 }
 
 export function uniqueBy(items = [], picker = (item) => item) {
@@ -214,19 +386,22 @@ export function uniqueBy(items = [], picker = (item) => item) {
   const seen = new Set();
   const output = [];
 
-  for (const item of rows) {
-    const key = safeText(picker(item), "");
+  rows.forEach((item, index) => {
+    const rawKey = safeText(picker(item, index), "");
+    const key = rawKey ? normalizeText(rawKey) : "";
 
     if (!key) {
       output.push(item);
-      continue;
+      return;
     }
 
-    if (seen.has(key)) continue;
+    if (seen.has(key)) {
+      return;
+    }
 
     seen.add(key);
     output.push(item);
-  }
+  });
 
   return output;
 }
@@ -249,10 +424,13 @@ export function hashString(value = "") {
 }
 
 export function toTimestamp(value = null) {
-  if (!value) return 0;
+  if (!value) {
+    return 0;
+  }
 
   if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? 0 : value.getTime();
+    const time = value.getTime();
+    return Number.isNaN(time) ? 0 : time;
   }
 
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -261,7 +439,9 @@ export function toTimestamp(value = null) {
 
   const raw = safeText(value, "");
 
-  if (!raw) return 0;
+  if (!raw) {
+    return 0;
+  }
 
   const numeric = Number(raw);
 
@@ -285,25 +465,37 @@ export function toTimestamp(value = null) {
       Number(ss)
     );
 
-    return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+    const time = date.getTime();
+
+    return Number.isNaN(time) ? 0 : time;
   }
 
-  const date = new Date(raw.includes("T") ? raw : `${raw}T00:00:00`);
+  const date = new Date(
+    raw.includes("T") || raw.includes("Z")
+      ? raw
+      : `${raw}T00:00:00`
+  );
 
-  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+  const time = date.getTime();
+
+  return Number.isNaN(time) ? 0 : time;
 }
 
 export function normalizeRoute(route = "") {
   const raw = safeText(route, "");
 
-  if (!raw) return "";
+  if (!raw) {
+    return "";
+  }
 
   const lowered = raw.toLowerCase();
 
   if (
     lowered.startsWith("javascript:") ||
     lowered.startsWith("mailto:") ||
-    lowered.startsWith("tel:")
+    lowered.startsWith("tel:") ||
+    lowered.startsWith("data:") ||
+    lowered.startsWith("vbscript:")
   ) {
     return "";
   }
@@ -312,7 +504,9 @@ export function normalizeRoute(route = "") {
     return raw;
   }
 
-  return raw.startsWith("/") ? raw : `/${raw}`;
+  return raw.startsWith("/")
+    ? raw
+    : `/${raw}`;
 }
 
 export function isSameIdentity(a = "", b = "") {
@@ -330,14 +524,14 @@ const numberFormatterCache = new Map();
 const moneyFormatterCache = new Map();
 const dateFormatterCache = new Map();
 
-export function getNumberFormatter() {
-  const key = "es-ES:number";
+export function getNumberFormatter(locale = DEFAULT_LOCALE) {
+  const key = `${safeText(locale, DEFAULT_LOCALE)}:number`;
 
   if (numberFormatterCache.has(key)) {
     return numberFormatterCache.get(key);
   }
 
-  const formatter = new Intl.NumberFormat("es-ES", {
+  const formatter = new Intl.NumberFormat(locale, {
     maximumFractionDigits: 0,
   });
 
@@ -346,59 +540,71 @@ export function getNumberFormatter() {
   return formatter;
 }
 
-export function formatNumber(value = 0) {
-  const amount = safeNumber(value, NaN);
+export function formatNumber(value = 0, locale = DEFAULT_LOCALE) {
+  const number = safeNumber(value, NaN);
 
-  if (!Number.isFinite(amount)) return "0";
+  if (!Number.isFinite(number)) {
+    return "0";
+  }
 
   try {
-    return getNumberFormatter().format(amount);
+    return getNumberFormatter(locale).format(number);
   } catch {
-    return String(Math.round(amount));
+    return String(Math.round(number));
   }
 }
 
-export function getMoneyFormatter(currency = DEFAULT_CURRENCY) {
+export function getMoneyFormatter(
+  currency = DEFAULT_CURRENCY,
+  locale = DEFAULT_LOCALE
+) {
   const code = safeText(currency, DEFAULT_CURRENCY).toUpperCase();
+  const key = `${safeText(locale, DEFAULT_LOCALE)}:${code}`;
 
-  if (moneyFormatterCache.has(code)) {
-    return moneyFormatterCache.get(code);
+  if (moneyFormatterCache.has(key)) {
+    return moneyFormatterCache.get(key);
   }
 
-  const formatter = new Intl.NumberFormat("es-ES", {
+  const formatter = new Intl.NumberFormat(locale, {
     style: "currency",
     currency: code,
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 
-  moneyFormatterCache.set(code, formatter);
+  moneyFormatterCache.set(key, formatter);
 
   return formatter;
 }
 
-export function formatMoney(value = 0, currency = DEFAULT_CURRENCY) {
+export function formatMoney(
+  value = 0,
+  currency = DEFAULT_CURRENCY,
+  locale = DEFAULT_LOCALE
+) {
   const amount = safeNumber(value, NaN);
 
-  if (!Number.isFinite(amount)) return "—";
+  if (!Number.isFinite(amount)) {
+    return "—";
+  }
 
   const code = safeText(currency, DEFAULT_CURRENCY).toUpperCase();
 
   try {
-    return getMoneyFormatter(code).format(amount);
+    return getMoneyFormatter(code, locale).format(amount);
   } catch {
     return `${amount.toFixed(2).replace(".", ",")} ${code}`;
   }
 }
 
-export function getDateTimeFormatter() {
-  const key = "es-ES:date-time";
+export function getDateTimeFormatter(locale = DEFAULT_LOCALE) {
+  const key = `${safeText(locale, DEFAULT_LOCALE)}:date-time`;
 
   if (dateFormatterCache.has(key)) {
     return dateFormatterCache.get(key);
   }
 
-  const formatter = new Intl.DateTimeFormat("es-ES", {
+  const formatter = new Intl.DateTimeFormat(locale, {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -411,14 +617,14 @@ export function getDateTimeFormatter() {
   return formatter;
 }
 
-export function getDateFormatter() {
-  const key = "es-ES:date";
+export function getDateFormatter(locale = DEFAULT_LOCALE) {
+  const key = `${safeText(locale, DEFAULT_LOCALE)}:date`;
 
   if (dateFormatterCache.has(key)) {
     return dateFormatterCache.get(key);
   }
 
-  const formatter = new Intl.DateTimeFormat("es-ES", {
+  const formatter = new Intl.DateTimeFormat(locale, {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -429,49 +635,61 @@ export function getDateFormatter() {
   return formatter;
 }
 
-export function formatDateTime(value = null) {
-  const ts = toTimestamp(value);
+export function formatDateTime(value = null, locale = DEFAULT_LOCALE) {
+  const timestamp = toTimestamp(value);
 
-  if (!ts) return "—";
+  if (!timestamp) {
+    return "—";
+  }
 
   try {
-    return getDateTimeFormatter().format(new Date(ts));
+    return getDateTimeFormatter(locale).format(new Date(timestamp));
   } catch {
     return "—";
   }
 }
 
-export function formatDateShort(value = null) {
-  const ts = toTimestamp(value);
+export function formatDateShort(value = null, locale = DEFAULT_LOCALE) {
+  const timestamp = toTimestamp(value);
 
-  if (!ts) return "—";
+  if (!timestamp) {
+    return "—";
+  }
 
   try {
-    return getDateFormatter().format(new Date(ts));
+    return getDateFormatter(locale).format(new Date(timestamp));
   } catch {
     return "—";
   }
 }
 
 export function formatRelativeDate(value = null) {
-  const ts = toTimestamp(value);
+  const timestamp = toTimestamp(value);
 
-  if (!ts) return "Sin fecha";
+  if (!timestamp) {
+    return "Sin fecha";
+  }
 
-  const diffMs = ts - Date.now();
+  const diffMs = timestamp - Date.now();
   const diffMin = Math.round(diffMs / 60000);
   const absMin = Math.abs(diffMin);
 
-  if (absMin < 1) return "Ahora mismo";
+  if (absMin < 1) {
+    return "Ahora mismo";
+  }
 
   if (absMin < 60) {
-    return diffMin > 0 ? `En ${absMin} min` : `Hace ${absMin} min`;
+    return diffMin > 0
+      ? `En ${absMin} min`
+      : `Hace ${absMin} min`;
   }
 
   const diffHours = Math.round(absMin / 60);
 
   if (diffHours < 24) {
-    return diffMin > 0 ? `En ${diffHours} h` : `Hace ${diffHours} h`;
+    return diffMin > 0
+      ? `En ${diffHours} h`
+      : `Hace ${diffHours} h`;
   }
 
   const diffDays = Math.round(diffHours / 24);
@@ -486,11 +704,13 @@ export function formatRelativeDate(value = null) {
 }
 
 export function formatLastUpdate(value = null) {
-  const ts = toTimestamp(value);
+  const timestamp = toTimestamp(value);
 
-  if (!ts) return "Sin fecha";
+  if (!timestamp) {
+    return "Sin fecha";
+  }
 
-  const diffHours = Math.abs(Date.now() - ts) / 3600000;
+  const diffHours = Math.abs(Date.now() - timestamp) / 3600000;
 
   if (diffHours <= 72) {
     return formatRelativeDate(value);
@@ -503,22 +723,50 @@ export function formatLastUpdate(value = null) {
    AVATAR HELPERS
 ========================================================= */
 
-export function getAvatarStyle(seed = "") {
-  const [a, b] = AVATAR_PALETTE[hashString(seed) % AVATAR_PALETTE.length];
+export function getAvatarColors(seed = "") {
+  const index = hashString(seed) % AVATAR_PALETTE.length;
+  const [from, to] = AVATAR_PALETTE[index];
 
-  return [
-    `--home-avatar-a:${a}`,
-    `--home-avatar-b:${b}`,
-    `--home-avatar-bg:linear-gradient(135deg, ${a} 0%, ${b} 100%)`,
-  ].join(";");
+  return {
+    from,
+    to,
+    index,
+  };
+}
+
+export function getAvatarVars(seed = "") {
+  const { from, to } = getAvatarColors(seed);
+
+  return {
+    "--home-avatar-a": from,
+    "--home-avatar-b": to,
+    "--home-avatar-bg": `linear-gradient(135deg, ${from} 0%, ${to} 100%)`,
+  };
+}
+
+/*
+  Compat legacy:
+  - Si el template aún usa style="${getAvatarStyle(...)}", seguirá funcionando.
+  - Preferible en templates nuevos: usar getAvatarVars() o clase/token CSS.
+*/
+export function getAvatarStyle(seed = "") {
+  const vars = getAvatarVars(seed);
+
+  return Object.entries(vars)
+    .map(([key, value]) => `${key}:${value}`)
+    .join(";");
 }
 
 export function getInitials(value = "") {
   const text = normalizeWhitespace(value);
 
-  if (!text) return "ON";
+  if (!text) {
+    return "ON";
+  }
 
-  const parts = text.split(" ").filter(Boolean);
+  const parts = text
+    .split(" ")
+    .filter(Boolean);
 
   if (parts.length === 1) {
     return parts[0].slice(0, 2).toUpperCase();
@@ -533,131 +781,159 @@ export function getInitials(value = "") {
 
 export function getDashboard(input = {}) {
   const data = safeObject(input);
-  const state = safeObject(data.state);
 
-  return safeObject(
-    first(
-      data.dashboard,
-      state.dashboard,
-      data.raw?.dashboard,
-      data.payload?.dashboard,
-      data.result?.dashboard,
-      data.response?.dashboard,
-      {}
-    )
+  const direct = first(
+    data.dashboard,
+    data.state?.dashboard,
+    data.raw?.dashboard,
+    data.payload?.dashboard,
+    data.result?.dashboard,
+    data.response?.dashboard,
+    data.body?.dashboard,
+    data.data?.dashboard,
+    data.home,
+    data.state?.home,
+    data.payload?.home,
+    data.result?.home
   );
+
+  if (isObject(direct)) {
+    return direct;
+  }
+
+  for (const path of DASHBOARD_KEYS) {
+    const value = getPath(data, path);
+
+    if (isObject(value)) {
+      return value;
+    }
+  }
+
+  return {};
 }
 
 export function getSummary(input = {}) {
   const data = safeObject(input);
-  const state = safeObject(data.state);
   const dashboard = getDashboard(data);
 
-  return safeObject(
-    first(
-      data.summary,
-      data.stats,
-      data.metrics,
-      data.totals,
-      data.counts,
-      state.summary,
-      state.stats,
-      state.metrics,
-      state.totals,
-      state.counts,
-      dashboard.summary,
-      dashboard.stats,
-      dashboard.metrics,
-      dashboard.totals,
-      dashboard.counts,
-      data.raw?.summary,
-      data.raw?.stats,
-      data.payload?.summary,
-      data.payload?.stats,
-      data.result?.summary,
-      data.response?.summary,
-      {}
-    )
+  const direct = first(
+    data.summary,
+    data.stats,
+    data.metrics,
+    data.totals,
+    data.counts,
+
+    data.state?.summary,
+    data.state?.stats,
+    data.state?.metrics,
+    data.state?.totals,
+    data.state?.counts,
+
+    dashboard.summary,
+    dashboard.stats,
+    dashboard.metrics,
+    dashboard.totals,
+    dashboard.counts,
+
+    data.raw?.summary,
+    data.raw?.stats,
+    data.payload?.summary,
+    data.payload?.stats,
+    data.result?.summary,
+    data.response?.summary,
+    data.data?.summary,
+    data.data?.stats
   );
+
+  if (isObject(direct)) {
+    return direct;
+  }
+
+  for (const path of SUMMARY_KEYS) {
+    const value = getPath(data, path);
+
+    if (isObject(value)) {
+      return value;
+    }
+  }
+
+  return {};
 }
 
 export function getSummaryValue(input = {}, keys = [], fallback = null) {
   const data = safeObject(input);
   const summary = getSummary(data);
   const dashboard = getDashboard(data);
-  const state = safeObject(data.state);
-  const payload = safeObject(data.payload);
-  const raw = safeObject(data.raw);
-  const result = safeObject(data.result);
-  const response = safeObject(data.response);
 
   const sources = [
     summary,
     dashboard,
-    state,
-    payload,
-    raw,
-    result,
-    response,
+    data.state,
+    data.payload,
+    data.raw,
+    data.result,
+    data.response,
+    data.body,
+    data.data,
     data,
-  ];
+  ].filter(Boolean);
 
   const candidates = [];
 
-  for (const key of safeArray(keys)) {
-    for (const source of sources) {
+  safeArray(keys).forEach((key) => {
+    sources.forEach((source) => {
       candidates.push(source?.[key]);
 
-      if (key.includes(".")) {
+      if (String(key).includes(".")) {
         candidates.push(getPath(source, key));
       }
-    }
-  }
+    });
+  });
 
   return first(...candidates, fallback);
 }
 
-/**
- * Variante fuerte para métricas:
- * - lee summary/dashboard/state/raw/data
- * - acepta widgets como candidato extra
- * - si hay valores positivos, prioriza el mayor positivo
- * - evita que un 0 antiguo tape un valor real posterior
- */
-export function getBestSummaryNumber(input = {}, keys = [], fallback = 0, extraCandidates = []) {
+/*
+  Métrica numérica fuerte:
+  - lee summary/dashboard/state/raw/data
+  - acepta widgets como candidato extra
+  - prioriza positivos reales
+  - evita que 0 legacy tape valores válidos
+*/
+export function getBestSummaryNumber(
+  input = {},
+  keys = [],
+  fallback = 0,
+  extraCandidates = []
+) {
   const data = safeObject(input);
   const summary = getSummary(data);
   const dashboard = getDashboard(data);
-  const state = safeObject(data.state);
-  const payload = safeObject(data.payload);
-  const raw = safeObject(data.raw);
-  const result = safeObject(data.result);
-  const response = safeObject(data.response);
 
   const sources = [
     summary,
     dashboard,
-    state,
-    payload,
-    raw,
-    result,
-    response,
+    data.state,
+    data.payload,
+    data.raw,
+    data.result,
+    data.response,
+    data.body,
+    data.data,
     data,
-  ];
+  ].filter(Boolean);
 
   const candidates = [];
 
-  for (const key of safeArray(keys)) {
-    for (const source of sources) {
-      if (!source) continue;
-
+  safeArray(keys).forEach((key) => {
+    sources.forEach((source) => {
       candidates.push(source?.[key]);
 
-      if (key.includes(".")) {
+      if (String(key).includes(".")) {
         candidates.push(getPath(source, key));
       }
-    }
-  }
+    });
+  });
 
   candidates.push(...safeArray(extraCandidates));
   candidates.push(fallback);
@@ -670,10 +946,10 @@ export function getBestSummaryNumber(input = {}, keys = [], fallback = 0, extraC
     return safeNumber(fallback, 0);
   }
 
-  const positiveNumbers = numbers.filter((value) => value > 0);
+  const positives = numbers.filter((value) => value > 0);
 
-  if (positiveNumbers.length) {
-    return Math.max(...positiveNumbers);
+  if (positives.length) {
+    return Math.max(...positives);
   }
 
   return Math.max(...numbers);
@@ -688,7 +964,7 @@ export function unwrapCollectionPayload(value = null, depth = 0) {
     return {};
   }
 
-  if (depth > 10) {
+  if (depth > 12) {
     return value;
   }
 
@@ -707,16 +983,9 @@ export function unwrapCollectionPayload(value = null, depth = 0) {
   }
 
   if (
-    Array.isArray(object.items) ||
-    Array.isArray(object.rows) ||
-    Array.isArray(object.data) ||
-    Array.isArray(object.results) ||
-    Array.isArray(object.records) ||
-    Array.isArray(object.value) ||
-    Array.isArray(object.docs) ||
-    Array.isArray(object.documents) ||
-    Array.isArray(object.collection) ||
-    Array.isArray(object.list)
+    COLLECTION_ITEM_KEYS.some((key) =>
+      Array.isArray(object[key])
+    )
   ) {
     return object;
   }
@@ -724,11 +993,16 @@ export function unwrapCollectionPayload(value = null, depth = 0) {
   const directArray = first(
     object.tickets,
     object.incidencias,
+    object.incidents,
+    object.issues,
+    object.supportTickets,
     object.facturas,
     object.invoices,
     object.bills,
+    object.billing,
     object.users,
     object.usuarios,
+    object.members,
     object.clients,
     object.clientes,
     object.customers,
@@ -737,7 +1011,8 @@ export function unwrapCollectionPayload(value = null, depth = 0) {
     object.recent,
     object.recentActivity,
     object.timeline,
-    object.logs
+    object.logs,
+    object.events
   );
 
   if (Array.isArray(directArray)) {
@@ -771,22 +1046,15 @@ export function unwrapCollectionPayload(value = null, depth = 0) {
 }
 
 export function normalizeCollection(value) {
-  if (Array.isArray(value)) return value;
+  if (Array.isArray(value)) {
+    return value;
+  }
 
   const object = safeObject(unwrapCollectionPayload(value));
 
   return safeArray(
     first(
-      object.items,
-      object.rows,
-      object.data,
-      object.results,
-      object.records,
-      object.value,
-      object.docs,
-      object.documents,
-      object.collection,
-      object.list,
+      ...COLLECTION_ITEM_KEYS.map((key) => object[key]),
       []
     )
   );
@@ -804,17 +1072,22 @@ export function getRemoteCountFromCollection(value, fallback = 0) {
         object.total,
         object.count,
         object.length,
+
         object.meta?.totalCount,
         object.meta?.remoteCount,
         object.meta?.total,
         object.meta?.count,
+
         object.pagination?.totalCount,
         object.pagination?.remoteCount,
         object.pagination?.total,
         object.pagination?.count,
+
         object.page?.total,
+        object.page?.count,
         object.pageInfo?.total,
         object.pageInfo?.totalCount,
+
         fallback
       ),
       fallback
@@ -824,33 +1097,31 @@ export function getRemoteCountFromCollection(value, fallback = 0) {
 
 export function resolveCollectionSource(input = {}, aliases = []) {
   const data = safeObject(input);
-  const state = safeObject(data.state);
   const dashboard = getDashboard(data);
-  const payload = safeObject(data.payload);
-  const raw = safeObject(data.raw);
-  const result = safeObject(data.result);
-  const response = safeObject(data.response);
+
+  const sources = [
+    data,
+    data.state,
+    dashboard,
+    data.payload,
+    data.raw,
+    data.result,
+    data.response,
+    data.body,
+    data.data,
+  ].filter(Boolean);
 
   const candidates = [];
 
-  for (const alias of safeArray(aliases)) {
-    candidates.push(data?.[alias]);
-    candidates.push(state?.[alias]);
-    candidates.push(dashboard?.[alias]);
-    candidates.push(payload?.[alias]);
-    candidates.push(raw?.[alias]);
-    candidates.push(result?.[alias]);
-    candidates.push(response?.[alias]);
-
-    candidates.push(data?.collections?.[alias]);
-    candidates.push(state?.collections?.[alias]);
-    candidates.push(dashboard?.collections?.[alias]);
-    candidates.push(payload?.collections?.[alias]);
-
-    candidates.push(data?.resources?.[alias]);
-    candidates.push(state?.resources?.[alias]);
-    candidates.push(dashboard?.resources?.[alias]);
-  }
+  safeArray(aliases).forEach((alias) => {
+    sources.forEach((source) => {
+      candidates.push(source?.[alias]);
+      candidates.push(source?.collections?.[alias]);
+      candidates.push(source?.resources?.[alias]);
+      candidates.push(source?.lists?.[alias]);
+      candidates.push(source?.tables?.[alias]);
+    });
+  });
 
   return first(...candidates, []);
 }
@@ -861,7 +1132,6 @@ export function resolveCollectionSource(input = {}, aliases = []) {
 
 export function getWidgets(input = {}) {
   const data = safeObject(input);
-  const state = safeObject(data.state);
   const dashboard = getDashboard(data);
 
   return normalizeCollection(
@@ -869,15 +1139,23 @@ export function getWidgets(input = {}) {
       data.widgets,
       data.cards,
       data.kpis,
-      state.widgets,
-      state.cards,
-      state.kpis,
+      data.blocks,
+
+      data.state?.widgets,
+      data.state?.cards,
+      data.state?.kpis,
+      data.state?.blocks,
+
       dashboard.widgets,
       dashboard.cards,
       dashboard.kpis,
       dashboard.blocks,
+
       data.payload?.widgets,
+      data.payload?.cards,
       data.result?.widgets,
+      data.response?.widgets,
+      data.data?.widgets,
       []
     )
   );
@@ -969,6 +1247,7 @@ export function getWidgetRoute(widget = {}) {
 
 export function getWidgetNumericValue(input = {}, matchers = [], fallback = null) {
   const widgets = getWidgets(input);
+
   const aliases = safeArray(matchers)
     .map((item) => normalizeKey(item))
     .filter(Boolean);
@@ -995,9 +1274,13 @@ export function getWidgetNumericValue(input = {}, matchers = [], fallback = null
       .filter(Boolean)
       .join(" ");
 
-    const matches = aliases.some((alias) => searchable.includes(alias));
+    const matches = aliases.some((alias) =>
+      searchable.includes(alias)
+    );
 
-    if (!matches) continue;
+    if (!matches) {
+      continue;
+    }
 
     const value = safeNumber(
       first(
@@ -1024,7 +1307,6 @@ export function getWidgetNumericValue(input = {}, matchers = [], fallback = null
 
 export function getUser(input = {}) {
   const data = safeObject(input);
-  const state = safeObject(data.state);
   const dashboard = getDashboard(data);
 
   return safeObject(
@@ -1032,14 +1314,22 @@ export function getUser(input = {}) {
       data.user,
       data.currentUser,
       data.profile,
-      state.user,
-      state.currentUser,
-      state.profile,
+
+      data.state?.user,
+      data.state?.currentUser,
+      data.state?.profile,
+      data.state?.session?.user,
+
       dashboard.user,
       dashboard.currentUser,
+      dashboard.profile,
+
       data.raw?.user,
       data.raw?.currentUser,
       data.payload?.user,
+      data.result?.user,
+      data.response?.user,
+      data.data?.user,
       {}
     )
   );
@@ -1047,22 +1337,28 @@ export function getUser(input = {}) {
 
 export function getRole(input = {}) {
   const data = safeObject(input);
-  const state = safeObject(data.state);
-  const user = getUser(data);
   const dashboard = getDashboard(data);
+  const user = getUser(data);
 
   return normalizeKey(
     first(
       data.role,
       data.currentRole,
-      state.role,
-      state.currentRole,
+
+      data.state?.role,
+      data.state?.currentRole,
+      data.state?.userRole,
+      data.state?.session?.role,
+
       dashboard.role,
+
       user.role,
       user.rol,
       user.type,
       user.userType,
+      user.user_type,
       user.permissions?.role,
+
       data.raw?.role,
       "user"
     )
@@ -1071,6 +1367,14 @@ export function getRole(input = {}) {
 
 export function isAdminRole(role = "") {
   return ADMIN_ROLE_KEYS.includes(normalizeKey(role));
+}
+
+export function isSupportRole(role = "") {
+  return SUPPORT_ROLE_KEYS.includes(normalizeKey(role));
+}
+
+export function isClientRole(role = "") {
+  return CLIENT_ROLE_KEYS.includes(normalizeKey(role));
 }
 
 export function getDisplayName(input = {}) {
@@ -1083,6 +1387,7 @@ export function getDisplayName(input = {}) {
       user.name,
       user.nombre,
       user.username,
+      user.userName,
       user.email,
       input.name,
       input.displayName
@@ -1118,7 +1423,7 @@ export function getAvatarUrl(input = {}) {
    TICKETS / INCIDENCIAS
 ========================================================= */
 
-export function getTicketId(item = {}) {
+export function getTicketIdentity(item = {}) {
   return safeText(
     first(
       item.ticketId,
@@ -1126,17 +1431,40 @@ export function getTicketId(item = {}) {
       item.code,
       item.numero,
       item.ticketCode,
+      item.entityId,
       item.id,
       item._id,
+
       item.raw?.ticketId,
       item.raw?.incidenciaId,
       item.raw?.code,
       item.raw?.numero,
       item.raw?.ticketCode,
+      item.raw?.entityId,
       item.raw?.id,
       item.raw?._id
     ),
-    "INC-SIN-ID"
+    ""
+  );
+}
+
+export function getTicketId(item = {}) {
+  return getTicketIdentity(item) || "INC-SIN-ID";
+}
+
+export function getTicketUniqueKey(item = {}, index = 0) {
+  return (
+    getTicketIdentity(item) ||
+    [
+      getTicketSubject(item),
+      getTicketOwnerEmail(item),
+      getTicketCreatedAt(item),
+      getTicketUpdatedAt(item),
+      index,
+    ]
+      .map((value) => safeText(value, ""))
+      .filter(Boolean)
+      .join("|")
   );
 }
 
@@ -1148,6 +1476,7 @@ export function getTicketSubject(item = {}) {
       item.asunto,
       item.name,
       item.preview,
+
       item.raw?.subject,
       item.raw?.title,
       item.raw?.asunto,
@@ -1167,6 +1496,7 @@ export function getTicketDescription(item = {}) {
       item.descripcion,
       item.body,
       item.text,
+
       item.raw?.description,
       item.raw?.preview,
       item.raw?.message,
@@ -1240,6 +1570,7 @@ export function getTicketOwnerEmail(item = {}) {
       item.clienteEmail,
       item.email,
       item.emailCliente,
+
       item.requesterSnapshot?.email,
       item.createdBy?.email,
       item.cliente?.email,
@@ -1254,6 +1585,7 @@ export function getTicketOwnerEmail(item = {}) {
       item.raw?.clienteEmail,
       item.raw?.email,
       item.raw?.emailCliente,
+
       item.raw?.requesterSnapshot?.email,
       item.raw?.createdBy?.email,
       item.raw?.cliente?.email,
@@ -1278,6 +1610,7 @@ export function getTicketAvatarUrl(item = {}) {
       item.userAvatar,
       item.createdByAvatar,
       item.ownerAvatar,
+
       item.requesterSnapshot?.avatar,
       item.requesterSnapshot?.avatarUrl,
       item.cliente?.avatar,
@@ -1300,6 +1633,7 @@ export function getTicketAvatarUrl(item = {}) {
       item.raw?.userAvatar,
       item.raw?.createdByAvatar,
       item.raw?.ownerAvatar,
+
       item.raw?.requesterSnapshot?.avatar,
       item.raw?.requesterSnapshot?.avatarUrl,
       item.raw?.cliente?.avatar,
@@ -1325,10 +1659,12 @@ export function getTicketStatus(item = {}) {
     item.estado,
     item.state,
     item.lifecycle?.status,
+
     item.raw?.status,
     item.raw?.estado,
     item.raw?.state,
     item.raw?.lifecycle?.status,
+
     "pending"
   );
 }
@@ -1345,6 +1681,8 @@ export function getTicketStatusKey(value = "") {
       "nueva",
       "nuevo",
       "created",
+      "creada",
+      "creado",
     ].includes(key)
   ) {
     return "pending";
@@ -1434,11 +1772,13 @@ export function getTicketPriorityRaw(item = {}) {
     item.severity,
     item.urgency,
     item.sla?.priority,
+
     item.raw?.priority,
     item.raw?.prioridad,
     item.raw?.severity,
     item.raw?.urgency,
     item.raw?.sla?.priority,
+
     "medium"
   );
 }
@@ -1454,6 +1794,8 @@ export function getTicketPriorityKey(item = {}) {
       "critico",
       "crítico",
       "p0",
+      "blocker",
+      "bloqueante",
     ].includes(key)
   ) {
     return "critical";
@@ -1512,11 +1854,15 @@ export function isTicketUrgent(item = {}) {
 }
 
 export function isTicketClosedLike(item = {}) {
-  return TICKET_CLOSED_KEYS.includes(getTicketStatusKey(getTicketStatus(item)));
+  return TICKET_CLOSED_KEYS.includes(
+    getTicketStatusKey(getTicketStatus(item))
+  );
 }
 
 export function isTicketOpenLike(item = {}) {
-  return TICKET_OPEN_KEYS.includes(getTicketStatusKey(getTicketStatus(item)));
+  return TICKET_OPEN_KEYS.includes(
+    getTicketStatusKey(getTicketStatus(item))
+  );
 }
 
 export function getTicketCategory(item = {}) {
@@ -1528,6 +1874,7 @@ export function getTicketCategory(item = {}) {
       item.tipo,
       item.subcategory,
       item.subcategoria,
+
       item.raw?.category,
       item.raw?.categoria,
       item.raw?.type,
@@ -1540,28 +1887,39 @@ export function getTicketCategory(item = {}) {
 }
 
 export function getTicketAssignedTo(item = {}) {
-  return safeText(
-    first(
-      item.assignedTo?.name,
-      item.assignedTo?.displayName,
-      item.assignment?.agentName,
-      item.assignment?.name,
-      item.tecnico?.name,
-      item.tecnico?.displayName,
-      item.tecnico,
-      item.agent,
+  const tecnico = first(
+    item.assignedTo?.name,
+    item.assignedTo?.displayName,
+    item.assignment?.agentName,
+    item.assignment?.name,
+    item.tecnico?.name,
+    item.tecnico?.displayName,
+    item.tecnico,
+    item.agent,
 
-      item.raw?.assignedTo?.name,
-      item.raw?.assignedTo?.displayName,
-      item.raw?.assignment?.agentName,
-      item.raw?.assignment?.name,
-      item.raw?.tecnico?.name,
-      item.raw?.tecnico?.displayName,
-      item.raw?.tecnico,
-      item.raw?.agent
-    ),
-    "Sin asignar"
+    item.raw?.assignedTo?.name,
+    item.raw?.assignedTo?.displayName,
+    item.raw?.assignment?.agentName,
+    item.raw?.assignment?.name,
+    item.raw?.tecnico?.name,
+    item.raw?.tecnico?.displayName,
+    item.raw?.tecnico,
+    item.raw?.agent
   );
+
+  if (isObject(tecnico)) {
+    return safeText(
+      first(
+        tecnico.name,
+        tecnico.displayName,
+        tecnico.email,
+        tecnico.id
+      ),
+      "Sin asignar"
+    );
+  }
+
+  return safeText(tecnico, "Sin asignar");
 }
 
 export function getTicketCreatedAt(item = {}) {
@@ -1572,6 +1930,7 @@ export function getTicketCreatedAt(item = {}) {
     item.date,
     item.fecha,
     item.lifecycle?.createdAt,
+
     item.raw?.createdAt,
     item.raw?.fechaCreacion,
     item.raw?.createdAtES,
@@ -1611,13 +1970,16 @@ export function getTicketAttachmentsCount(item = {}) {
     item.files,
     item.adjuntos,
     item.documents,
+
     item.raw?.attachments,
     item.raw?.files,
     item.raw?.adjuntos,
     item.raw?.documents
   );
 
-  if (Array.isArray(attachments)) return attachments.length;
+  if (Array.isArray(attachments)) {
+    return attachments.length;
+  }
 
   return safeNumber(
     first(
@@ -1625,10 +1987,12 @@ export function getTicketAttachmentsCount(item = {}) {
       item.filesCount,
       item.adjuntosCount,
       item.documentsCount,
+
       item.raw?.attachmentsCount,
       item.raw?.filesCount,
       item.raw?.adjuntosCount,
       item.raw?.documentsCount,
+
       0
     ),
     0
@@ -1644,6 +2008,7 @@ export function getTicketSortTimestamp(item = {}) {
     toTimestamp(getTicketUpdatedAt(item)) ||
     toTimestamp(getTicketCreatedAt(item)) ||
     toTimestamp(item?.raw?._ts) ||
+    toTimestamp(item?._ts) ||
     0
   );
 }
@@ -1651,11 +2016,13 @@ export function getTicketSortTimestamp(item = {}) {
 export function compareTicketsNewestFirst(a = {}, b = {}) {
   const diff = getTicketSortTimestamp(b) - getTicketSortTimestamp(a);
 
-  if (diff !== 0) return diff;
+  if (diff !== 0) {
+    return diff;
+  }
 
   return safeText(getTicketId(b), "").localeCompare(
     safeText(getTicketId(a), ""),
-    "es",
+    DEFAULT_LOCALE,
     {
       numeric: true,
       sensitivity: "base",
@@ -1671,7 +2038,7 @@ export function sortTicketsNewestFirst(items = []) {
    FACTURAS
 ========================================================= */
 
-export function getInvoiceId(item = {}) {
+export function getInvoiceIdentity(item = {}) {
   return safeText(
     first(
       item.invoiceId,
@@ -1696,7 +2063,27 @@ export function getInvoiceId(item = {}) {
       item.raw?.id,
       item.raw?._id
     ),
-    "FAC-SIN-ID"
+    ""
+  );
+}
+
+export function getInvoiceId(item = {}) {
+  return getInvoiceIdentity(item) || "FAC-SIN-ID";
+}
+
+export function getInvoiceUniqueKey(item = {}, index = 0) {
+  return (
+    getInvoiceIdentity(item) ||
+    [
+      getInvoiceAmount(item),
+      getInvoiceCurrency(item),
+      item.createdAt,
+      item.date,
+      index,
+    ]
+      .map((value) => safeText(value, ""))
+      .filter(Boolean)
+      .join("|")
   );
 }
 
@@ -1726,6 +2113,7 @@ export function getInvoiceAmount(item = {}) {
       item.raw?.invoiceAmount,
       item.raw?.facturaTotal,
       item.raw?.facturaImporte,
+
       0
     ),
     0
@@ -1752,10 +2140,12 @@ export function getInvoiceStatusKey(item = {}) {
       item.estadoPago,
       item.status,
       item.estado,
+
       item.raw?.paymentStatus,
       item.raw?.estadoPago,
       item.raw?.status,
       item.raw?.estado,
+
       "pending"
     )
   );
@@ -1771,7 +2161,7 @@ export function getInvoiceStatusKey(item = {}) {
 }
 
 export function isInvoicePendingLike(item = {}) {
-  return ["pending", "overdue", "partial"].includes(getInvoiceStatusKey(item));
+  return INVOICE_PENDING_KEYS.includes(getInvoiceStatusKey(item));
 }
 
 /* =========================================================
@@ -1786,16 +2176,25 @@ export function getUserId(item = {}) {
       item.id,
       item._id,
       item.email,
+      item.mail,
       item.username,
+      item.userName,
+
       item.raw?.userId,
       item.raw?.usuarioId,
       item.raw?.id,
       item.raw?._id,
       item.raw?.email,
-      item.raw?.username
+      item.raw?.mail,
+      item.raw?.username,
+      item.raw?.userName
     ),
     ""
   );
+}
+
+export function getUserUniqueKey(item = {}, index = 0) {
+  return getUserId(item) || `user:${index}`;
 }
 
 export function isActiveUser(item = {}) {
@@ -1805,6 +2204,7 @@ export function isActiveUser(item = {}) {
     item.enabled,
     item.status,
     item.estado,
+
     item.raw?.active,
     item.raw?.isActive,
     item.raw?.enabled,
@@ -1814,8 +2214,9 @@ export function isActiveUser(item = {}) {
 
   const key = normalizeKey(active);
 
-  if (active === false) return false;
-  if (active === 0) return false;
+  if (active === false || active === 0) {
+    return false;
+  }
 
   if (
     [
@@ -1824,7 +2225,9 @@ export function isActiveUser(item = {}) {
       "inactive",
       "inactivo",
       "bloqueado",
+      "blocked",
       "deleted",
+      "borrado",
     ].includes(key)
   ) {
     return false;
@@ -1842,19 +2245,26 @@ export function getClientId(item = {}) {
       item.id,
       item._id,
       item.email,
+      item.mail,
       item.nif,
       item.cif,
+
       item.raw?.clienteId,
       item.raw?.clientId,
       item.raw?.customerId,
       item.raw?.id,
       item.raw?._id,
       item.raw?.email,
+      item.raw?.mail,
       item.raw?.nif,
       item.raw?.cif
     ),
     ""
   );
+}
+
+export function getClientUniqueKey(item = {}, index = 0) {
+  return getClientId(item) || `client:${index}`;
 }
 
 export function isActiveClient(item = {}) {
@@ -1864,6 +2274,7 @@ export function isActiveClient(item = {}) {
     item.enabled,
     item.status,
     item.estado,
+
     item.raw?.active,
     item.raw?.isActive,
     item.raw?.enabled,
@@ -1873,8 +2284,9 @@ export function isActiveClient(item = {}) {
 
   const key = normalizeKey(active);
 
-  if (active === false) return false;
-  if (active === 0) return false;
+  if (active === false || active === 0) {
+    return false;
+  }
 
   if (
     [
@@ -1883,7 +2295,9 @@ export function isActiveClient(item = {}) {
       "inactive",
       "inactivo",
       "bloqueado",
+      "blocked",
       "deleted",
+      "borrado",
     ].includes(key)
   ) {
     return false;
@@ -1901,55 +2315,53 @@ export function getCollections(input = {}) {
   const dashboard = getDashboard(data);
   const summary = getSummary(data);
 
-  const ticketsSource = resolveCollectionSource(data, [
-    "tickets",
-    "incidencias",
-    "incidents",
-    "issues",
-    "supportTickets",
-    "items",
-    "rows",
-  ]);
-
-  const invoicesSource = resolveCollectionSource(data, [
-    "facturas",
-    "invoices",
-    "bills",
-    "billing",
-    "payments",
-  ]);
-
-  const usersSource = resolveCollectionSource(data, [
-    "users",
-    "usuarios",
-    "members",
-    "accounts",
-  ]);
-
-  const clientsSource = resolveCollectionSource(data, [
-    "clients",
-    "clientes",
-    "customers",
-    "accountsClients",
-  ]);
-
-  const activitySource = resolveCollectionSource(data, [
-    "activity",
-    "activities",
-    "recentActivity",
-    "recent",
-    "logs",
-    "timeline",
-    "events",
-  ]);
-
-  const tickets = sortTicketsNewestFirst(
-    uniqueBy(normalizeCollection(ticketsSource), getTicketId)
+  const ticketsSource = first(
+    resolveCollectionSource(data, TICKET_COLLECTION_ALIASES),
+    []
   );
 
-  const invoices = uniqueBy(normalizeCollection(invoicesSource), getInvoiceId);
-  const users = uniqueBy(normalizeCollection(usersSource), getUserId);
-  const clients = uniqueBy(normalizeCollection(clientsSource), getClientId);
+  const invoicesSource = first(
+    resolveCollectionSource(data, INVOICE_COLLECTION_ALIASES),
+    []
+  );
+
+  const usersSource = first(
+    resolveCollectionSource(data, USER_COLLECTION_ALIASES),
+    []
+  );
+
+  const clientsSource = first(
+    resolveCollectionSource(data, CLIENT_COLLECTION_ALIASES),
+    []
+  );
+
+  const activitySource = first(
+    resolveCollectionSource(data, ACTIVITY_COLLECTION_ALIASES),
+    []
+  );
+
+  const tickets = sortTicketsNewestFirst(
+    uniqueBy(
+      normalizeCollection(ticketsSource),
+      getTicketUniqueKey
+    )
+  );
+
+  const invoices = uniqueBy(
+    normalizeCollection(invoicesSource),
+    getInvoiceUniqueKey
+  );
+
+  const users = uniqueBy(
+    normalizeCollection(usersSource),
+    getUserUniqueKey
+  );
+
+  const clients = uniqueBy(
+    normalizeCollection(clientsSource),
+    getClientUniqueKey
+  );
+
   const activity = normalizeCollection(activitySource);
 
   const ticketsRemoteCount = Math.max(
@@ -1964,12 +2376,14 @@ export function getCollections(input = {}) {
         summary.incidenciasCount,
         summary.tickets?.total,
         summary.incidencias?.total,
+
         dashboard.ticketsTotal,
         dashboard.incidenciasTotal,
         dashboard.totalTickets,
         dashboard.totalIncidencias,
         dashboard.tickets?.total,
         dashboard.incidencias?.total,
+
         getRemoteCountFromCollection(ticketsSource, tickets.length)
       ),
       tickets.length
@@ -1988,12 +2402,14 @@ export function getCollections(input = {}) {
         summary.facturasCount,
         summary.invoices?.total,
         summary.facturas?.total,
+
         dashboard.invoicesTotal,
         dashboard.facturasTotal,
         dashboard.totalInvoices,
         dashboard.totalFacturas,
         dashboard.invoices?.total,
         dashboard.facturas?.total,
+
         getRemoteCountFromCollection(invoicesSource, invoices.length)
       ),
       invoices.length
@@ -2012,6 +2428,7 @@ export function getCollections(input = {}) {
         summary.usuariosActivos,
         summary.users?.total,
         summary.usuarios?.total,
+
         dashboard.usersTotal,
         dashboard.usuariosTotal,
         dashboard.totalUsers,
@@ -2022,6 +2439,7 @@ export function getCollections(input = {}) {
         dashboard.usuarios?.total,
         dashboard.meta?.usersCount,
         dashboard.meta?.usuariosCount,
+
         getRemoteCountFromCollection(usersSource, users.length)
       ),
       users.length
@@ -2042,6 +2460,7 @@ export function getCollections(input = {}) {
         summary.clientesActivos,
         summary.clients?.total,
         summary.clientes?.total,
+
         dashboard.clientsTotal,
         dashboard.clientesTotal,
         dashboard.customersTotal,
@@ -2054,6 +2473,7 @@ export function getCollections(input = {}) {
         dashboard.clientes?.total,
         dashboard.meta?.clientsCount,
         dashboard.meta?.clientesCount,
+
         getRemoteCountFromCollection(clientsSource, clients.length)
       ),
       clients.length
@@ -2095,7 +2515,9 @@ export function getLatestDateFromTickets(tickets = []) {
     })
     .filter(Boolean);
 
-  if (!timestamps.length) return null;
+  if (!timestamps.length) {
+    return null;
+  }
 
   return new Date(Math.max(...timestamps)).toISOString();
 }
@@ -2111,17 +2533,17 @@ export function computeHomeStats(input = {}) {
   const users = collections.users;
   const clients = collections.clients;
 
-  const computedOpenTickets = tickets.filter((item) => isTicketOpenLike(item)).length;
-  const computedClosedTickets = tickets.filter((item) => isTicketClosedLike(item)).length;
-  const computedUrgentTickets = tickets.filter((item) => isTicketUrgent(item)).length;
-  const computedPendingInvoices = invoices.filter((item) => isInvoicePendingLike(item)).length;
+  const computedOpenTickets = tickets.filter(isTicketOpenLike).length;
+  const computedClosedTickets = tickets.filter(isTicketClosedLike).length;
+  const computedUrgentTickets = tickets.filter(isTicketUrgent).length;
+  const computedPendingInvoices = invoices.filter(isInvoicePendingLike).length;
 
   const computedInvoiceAmount = roundMoney(
     invoices.reduce((sum, item) => sum + getInvoiceAmount(item), 0)
   );
 
-  const computedActiveUsers = users.filter((item) => isActiveUser(item)).length;
-  const computedActiveClients = clients.filter((item) => isActiveClient(item)).length;
+  const computedActiveUsers = users.filter(isActiveUser).length;
+  const computedActiveClients = clients.filter(isActiveClient).length;
 
   const attachmentsCount = tickets.reduce(
     (sum, item) => sum + getTicketAttachmentsCount(item),
@@ -2406,7 +2828,7 @@ export function computeHomeStats(input = {}) {
 }
 
 /* =========================================================
-   CARDS / ACTIONS DATA
+   CARDS / QUICK ACTIONS
 ========================================================= */
 
 export function getStatCards(input = {}) {
@@ -2418,6 +2840,7 @@ export function getStatCards(input = {}) {
         iconName: "ticket",
         label: "Incidencias abiertas",
         value: formatNumber(stats.openTickets),
+        rawValue: stats.openTickets,
         text: `${formatNumber(stats.totalTickets)} solicitudes totales registradas.`,
         modifier: "open",
         badge: stats.urgentTickets ? `${formatNumber(stats.urgentTickets)} urg.` : "",
@@ -2426,6 +2849,7 @@ export function getStatCards(input = {}) {
         iconName: "euro",
         label: "Facturación visible",
         value: formatMoney(stats.invoiceAmount, DEFAULT_CURRENCY),
+        rawValue: stats.invoiceAmount,
         text: `${formatNumber(stats.pendingInvoices)} facturas pendientes o vencidas.`,
         modifier: "billing",
       },
@@ -2433,6 +2857,7 @@ export function getStatCards(input = {}) {
         iconName: "client",
         label: "Clientes",
         value: formatNumber(stats.clientsCount),
+        rawValue: stats.clientsCount,
         text: "Cuentas de cliente detectadas en el panel.",
         modifier: "clients",
       },
@@ -2440,6 +2865,7 @@ export function getStatCards(input = {}) {
         iconName: "users",
         label: "Usuarios",
         value: formatNumber(stats.usersCount),
+        rawValue: stats.usersCount,
         text: "Usuarios activos o sincronizados en el sistema.",
         modifier: "users",
       },
@@ -2451,6 +2877,7 @@ export function getStatCards(input = {}) {
       iconName: "ticket",
       label: "Mis incidencias",
       value: formatNumber(stats.totalTickets),
+      rawValue: stats.totalTickets,
       text: `${formatNumber(stats.openTickets)} solicitudes abiertas o en seguimiento.`,
       modifier: "open",
       badge: stats.urgentTickets ? `${formatNumber(stats.urgentTickets)} urg.` : "",
@@ -2459,6 +2886,7 @@ export function getStatCards(input = {}) {
       iconName: "euro",
       label: "Facturas pendientes",
       value: formatNumber(stats.pendingInvoices),
+      rawValue: stats.pendingInvoices,
       text: `${formatMoney(stats.invoiceAmount, DEFAULT_CURRENCY)} en facturación visible.`,
       modifier: "billing",
     },
@@ -2466,13 +2894,17 @@ export function getStatCards(input = {}) {
       iconName: "paperclip",
       label: "Adjuntos",
       value: formatNumber(stats.attachmentsCount),
+      rawValue: stats.attachmentsCount,
       text: "Documentos vinculados a tu historial.",
       modifier: "files",
     },
     {
       iconName: "clock",
       label: "Última actividad",
-      value: stats.lastTicketUpdate ? formatRelativeDate(stats.lastTicketUpdate) : "Sin fecha",
+      value: stats.lastTicketUpdate
+        ? formatRelativeDate(stats.lastTicketUpdate)
+        : "Sin fecha",
+      rawValue: stats.lastTicketUpdate || null,
       text: "Movimiento más reciente en tus solicitudes.",
       modifier: "activity",
     },
@@ -2529,7 +2961,7 @@ export function getQuickActions(input = {}) {
       title: "Crear nueva incidencia",
       text: "Abre una solicitud para que soporte pueda revisarla.",
       action: "create-incidencia",
-      dataAction: "navigate-home",
+      dataAction: "create-incidencia",
       route: HOME_ROUTES.INCIDENCIAS,
       modifier: "primary",
     },
@@ -2583,7 +3015,7 @@ export function buildSyntheticActivity(input = {}) {
   const invoiceActivity = collections.invoices.slice(0, 4).map((item) => ({
     type: "invoice",
     title: `Factura ${getInvoiceId(item)}`,
-    text: `${formatMoney(getInvoiceAmount(item), getInvoiceCurrency(item))}`,
+    text: formatMoney(getInvoiceAmount(item), getInvoiceCurrency(item)),
     date: first(
       item.updatedAt,
       item.modifiedAt,
@@ -2600,9 +3032,28 @@ export function buildSyntheticActivity(input = {}) {
 
   const clientActivity = collections.clients.slice(0, 3).map((item) => ({
     type: "client",
-    title: safeText(first(item.name, item.nombre, item.razonSocial, item.email), "Cliente"),
+    title: safeText(
+      first(
+        item.name,
+        item.nombre,
+        item.razonSocial,
+        item.company,
+        item.email,
+        item.raw?.name,
+        item.raw?.nombre,
+        item.raw?.razonSocial,
+        item.raw?.company,
+        item.raw?.email
+      ),
+      "Cliente"
+    ),
     text: "Cliente sincronizado en el panel.",
-    date: first(item.updatedAt, item.createdAt, item.raw?.updatedAt, item.raw?.createdAt),
+    date: first(
+      item.updatedAt,
+      item.createdAt,
+      item.raw?.updatedAt,
+      item.raw?.createdAt
+    ),
     route: HOME_ROUTES.CLIENTES,
     action: "navigate-home",
     entityId: getClientId(item),
@@ -2610,7 +3061,23 @@ export function buildSyntheticActivity(input = {}) {
 
   const userActivity = collections.users.slice(0, 3).map((item) => ({
     type: "user",
-    title: safeText(first(item.name, item.nombre, item.username, item.email), "Usuario"),
+    title: safeText(
+      first(
+        item.name,
+        item.nombre,
+        item.displayName,
+        item.fullName,
+        item.username,
+        item.email,
+        item.raw?.name,
+        item.raw?.nombre,
+        item.raw?.displayName,
+        item.raw?.fullName,
+        item.raw?.username,
+        item.raw?.email
+      ),
+      "Usuario"
+    ),
     text: "Usuario disponible en el sistema.",
     date: first(
       item.lastLoginAt,
@@ -2778,7 +3245,10 @@ export function getPagination(items = [], input = {}) {
   const startIndex = (currentPage - 1) * pageSize;
   const pageItems = allItems.slice(startIndex, startIndex + pageSize);
 
-  const rangeStart = reportedTotal && pageItems.length ? startIndex + 1 : 0;
+  const rangeStart = reportedTotal && pageItems.length
+    ? startIndex + 1
+    : 0;
+
   const rangeEnd = reportedTotal
     ? Math.min(startIndex + pageItems.length, reportedTotal)
     : 0;
@@ -2786,10 +3256,13 @@ export function getPagination(items = [], input = {}) {
   return {
     allItems,
     pageItems,
-    pageSize,
+    items: pageItems,
+    page: currentPage,
     currentPage,
+    pageSize,
     totalPages,
     totalCount: reportedTotal,
+    total: reportedTotal,
     rangeStart,
     rangeEnd,
     hasPrev: currentPage > 1,
@@ -2798,16 +3271,96 @@ export function getPagination(items = [], input = {}) {
 }
 
 /* =========================================================
+   TEMPLATE SNAPSHOT
+========================================================= */
+
+export function buildHomeTemplateData(input = {}) {
+  const data = safeObject(input);
+  const dashboard = getDashboard(data);
+  const summary = getSummary(data);
+  const collections = getCollections(data);
+  const stats = computeHomeStats(data);
+  const widgets = getWidgets(data);
+  const activity = getActivity(data);
+  const pagination = getPagination(collections.tickets, {
+    ...data,
+    totalCount: collections.ticketsRemoteCount,
+  });
+
+  const user = getUser(data);
+  const role = getRole(data);
+  const displayName = getDisplayName(data);
+  const avatarUrl = getAvatarUrl(data);
+
+  return {
+    version: HOME_SELECTORS_VERSION,
+
+    user,
+    role,
+    displayName,
+    avatarUrl,
+    initials: getInitials(displayName),
+    avatarVars: getAvatarVars(displayName || user?.email || role),
+    avatarStyle: getAvatarStyle(displayName || user?.email || role),
+
+    dashboard,
+    summary,
+    stats,
+
+    widgets,
+    statCards: getStatCards(data),
+    quickActions: getQuickActions(data),
+
+    tickets: collections.tickets,
+    incidencias: collections.tickets,
+    invoices: collections.invoices,
+    facturas: collections.invoices,
+    users: collections.users,
+    usuarios: collections.users,
+    clients: collections.clients,
+    clientes: collections.clients,
+    activity,
+    recentActivity: activity,
+    recent: activity,
+
+    collections,
+
+    pagination,
+    pageItems: pagination.pageItems,
+
+    counts: {
+      tickets: collections.tickets.length,
+      ticketsRemote: collections.ticketsRemoteCount,
+      invoices: collections.invoices.length,
+      invoicesRemote: collections.invoicesRemoteCount,
+      users: collections.users.length,
+      usersRemote: collections.usersRemoteCount,
+      clients: collections.clients.length,
+      clientsRemote: collections.clientsRemoteCount,
+      activity: activity.length,
+      widgets: widgets.length,
+    },
+  };
+}
+
+/* =========================================================
    DEFAULT EXPORT
 ========================================================= */
 
 export default {
+  HOME_SELECTORS_VERSION,
+
   DEFAULT_PAGE_SIZE,
   DEFAULT_CURRENCY,
+  DEFAULT_LOCALE,
+
   HOME_ROUTES,
   ADMIN_ROLE_KEYS,
+  SUPPORT_ROLE_KEYS,
+  CLIENT_ROLE_KEYS,
   TICKET_OPEN_KEYS,
   TICKET_CLOSED_KEYS,
+  INVOICE_PENDING_KEYS,
 
   safeText,
   safeNumber,
@@ -2828,13 +3381,19 @@ export default {
   normalizeRoute,
   isSameIdentity,
 
+  getNumberFormatter,
   formatNumber,
+  getMoneyFormatter,
   formatMoney,
+  getDateTimeFormatter,
+  getDateFormatter,
   formatDateTime,
   formatDateShort,
   formatRelativeDate,
   formatLastUpdate,
 
+  getAvatarColors,
+  getAvatarVars,
   getAvatarStyle,
   getInitials,
 
@@ -2861,10 +3420,14 @@ export default {
   getUser,
   getRole,
   isAdminRole,
+  isSupportRole,
+  isClientRole,
   getDisplayName,
   getAvatarUrl,
 
+  getTicketIdentity,
   getTicketId,
+  getTicketUniqueKey,
   getTicketSubject,
   getTicketDescription,
   getTicketOwnerName,
@@ -2888,15 +3451,19 @@ export default {
   compareTicketsNewestFirst,
   sortTicketsNewestFirst,
 
+  getInvoiceIdentity,
   getInvoiceId,
+  getInvoiceUniqueKey,
   getInvoiceAmount,
   getInvoiceCurrency,
   getInvoiceStatusKey,
   isInvoicePendingLike,
 
   getUserId,
+  getUserUniqueKey,
   isActiveUser,
   getClientId,
+  getClientUniqueKey,
   isActiveClient,
 
   getCollections,
@@ -2913,4 +3480,5 @@ export default {
   getActivityType,
 
   getPagination,
+  buildHomeTemplateData,
 };

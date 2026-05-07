@@ -1,31 +1,37 @@
 /* =========================================================
-   Onion SPA - HTTP Service (FULL PRO SAAS PANEL)
+   Onion SPA - HTTP Service
    Archivo: src/services/index.js
 
-   Encima de AppCore.apiClient:
-   - interceptores request / response / error
-   - retry policy robusta
-   - refresh automático en 401
-   - logout automático si refresh falla
-   - control de loader global
-   - errores normalizados
-   - soporte signal / abort
-   - helpers REST
-   - bridge público estable vía AppCore.http / AppCore.Http
+   ONION SUPPORT · HTTP SERVICE
+   CORE API CLIENT BRIDGE · AUTH SAFE · RETRY SAFE · LOADER SAFE
+
+   Responsabilidades:
+   - Servicio HTTP público de la SPA.
+   - Ejecutar requests sobre AppCore.apiClient/request helpers.
+   - Centralizar interceptores request/response/error.
+   - Normalizar errores.
+   - Aplicar retry policy desde helpers.
+   - Refrescar token automáticamente ante 401 privado.
+   - Reintentar una sola vez tras refresh correcto.
+   - Hacer logout automático solo ante 401 persistente privado.
+   - Evitar refresh/logout en endpoints públicos de auth.
+   - Evitar refresh/logout en activation/reset-password.
+   - Balancear loader global sin dobles incrementos.
+   - Soportar AbortController/signal.
+   - Adjuntar bridge estable a AppCore.Http/AppCore.http y módulos.
+   - Exponer snapshot de diagnóstico sin tokens reales.
 
    HARDENING EXTREMO:
    - init idempotente real
-   - no doble refresh paralelo
-   - no doble loader
-   - no auto logout en endpoints auth
-   - no refresh automático en endpoints públicos auth
-   - activation-account tratado como endpoint público
-   - reset-password confirm tratado como endpoint público
-   - eventos consistentes
-   - rutas/logs sin tokens reales
-   - bridge tolerante si AppCore está congelado
    - interceptores base registrados una sola vez
-   - snapshot enterprise
+   - refresh lock para evitar refresh paralelo
+   - loader con pendingRequests balanceado
+   - eventos consistentes y redactados
+   - cero tokens crudos en logs/eventos/snapshots
+   - compatible con AppCore congelado mediante accessors/modules
+   - sin doble refresh
+   - sin doble logout
+   - sin lógicas duplicadas
 ========================================================= */
 
 import { AppCore } from "../core/index.js";
@@ -75,8 +81,154 @@ import {
 export const Http = (() => {
   "use strict";
 
+  /* =======================================================
+     CONSTANTS
+  ======================================================= */
+
+  const SERVICE_VERSION =
+    "12.0.0";
+
+  const SERVICE_NAME =
+    "http";
+
+  const LOG_PREFIX =
+    "[Http]";
+
+  const EVENTS =
+    Object.freeze({
+      ready:
+        "http:ready",
+
+      bridgeAttached:
+        "http:bridge:attached",
+
+      requestStart:
+        "http:request:start",
+
+      requestSuccess:
+        "http:request:success",
+
+      requestError:
+        "http:request:error",
+
+      requestFinalize:
+        "http:request:finalize",
+
+      refreshStart:
+        "http:auth-refresh:start",
+
+      refreshSuccess:
+        "http:auth-refresh:success",
+
+      refreshError:
+        "http:auth-refresh:error",
+
+      autoLogoutStart:
+        "http:auto-logout:start",
+
+      autoLogoutSuccess:
+        "http:auto-logout:success",
+
+      autoLogoutError:
+        "http:auto-logout:error",
+
+      runtimeReset:
+        "http:runtime:reset",
+    });
+
+  const SENSITIVE_QUERY_NAMES =
+    Object.freeze([
+      "token",
+      "activationToken",
+      "activateToken",
+      "resetToken",
+      "passwordResetToken",
+      "confirmToken",
+      "code",
+      "t",
+      "access_token",
+      "refresh_token",
+      "id_token",
+      "tempToken",
+      "temp_token",
+      "temporaryToken",
+      "temporary_token",
+      "twoFactorToken",
+      "two_factor_token",
+      "mfaToken",
+      "mfa_token",
+    ]);
+
+  const AUTH_ENDPOINT_MARKERS =
+    Object.freeze([
+      "/auth/login",
+      "/auth/logout",
+      "/auth/refresh",
+      "/auth/me",
+      "/auth/session",
+
+      "/auth/activate",
+      "/auth/activate-account",
+      "/auth/account/activate",
+      "/auth/activation",
+      "/auth/activate/first-user",
+
+      "/auth/reset-password",
+      "/auth/reset-password-request",
+      "/auth/reset-password-confirm",
+      "/auth/password-reset",
+      "/auth/forgot-password",
+      "/auth/recover-password",
+
+      "/auth/2fa/login",
+      "/auth/_health",
+    ]);
+
+  const PUBLIC_AUTH_ENDPOINT_MARKERS =
+    Object.freeze([
+      "/auth/login",
+      "/auth/refresh",
+
+      "/auth/activate",
+      "/auth/activate-account",
+      "/auth/account/activate",
+      "/auth/activation",
+      "/auth/activate/first-user",
+
+      "/auth/reset-password",
+      "/auth/reset-password-request",
+      "/auth/reset-password-confirm",
+      "/auth/password-reset",
+      "/auth/forgot-password",
+      "/auth/recover-password",
+
+      "/auth/2fa/login",
+      "/auth/_health",
+    ]);
+
+  const TECHNICAL_PUBLIC_SPA_PATHS =
+    Object.freeze([
+      "/activate-account",
+      "/reset-password",
+      "/forgot-password",
+      "/reset-password/confirm",
+    ]);
+
+  const DEFAULT_REQUEST_TIMEOUT_MS =
+    0;
+
+  /* =======================================================
+     RUNTIME
+  ======================================================= */
+
   let requestSeq =
     0;
+
+  let refreshPromise =
+    null;
+
+  let logoutPromise =
+    null;
 
   /* =======================================================
      CONFIG
@@ -91,8 +243,8 @@ export const Http = (() => {
   ======================================================= */
 
   const state = {
-    pendingRequests:
-      0,
+    version:
+      SERVICE_VERSION,
 
     initialized:
       false,
@@ -105,6 +257,9 @@ export const Http = (() => {
 
     baseInterceptorsRegistered:
       false,
+
+    pendingRequests:
+      0,
 
     requestCount:
       0,
@@ -124,8 +279,14 @@ export const Http = (() => {
     refreshFailureCount:
       0,
 
+    refreshInFlight:
+      false,
+
     autoLogoutCount:
       0,
+
+    autoLogoutInFlight:
+      false,
 
     lastRequestId:
       "",
@@ -141,6 +302,15 @@ export const Http = (() => {
 
     lastError:
       null,
+
+    lastRefreshAt:
+      "",
+
+    lastRefreshErrorAt:
+      "",
+
+    lastAutoLogoutAt:
+      "",
   };
 
   /* =======================================================
@@ -151,26 +321,14 @@ export const Http = (() => {
     createInterceptorsState();
 
   /* =======================================================
-     SAFE HELPERS
+     BASIC HELPERS
   ======================================================= */
 
-  function safeText(value, fallback = "") {
-    if (
-      value === null ||
-      value === undefined
-    ) {
-      return fallback;
-    }
-
-    const text =
-      String(value).trim();
-
-    return text || fallback;
-  }
-
-  function safeLower(value = "") {
-    return safeText(value, "")
-      .toLowerCase();
+  function isBrowser() {
+    return (
+      typeof window !== "undefined" &&
+      typeof document !== "undefined"
+    );
   }
 
   function isFunction(value) {
@@ -191,13 +349,51 @@ export const Http = (() => {
       : fallback;
   }
 
-  function nowMs() {
-    return Date.now();
+  function safeArray(value) {
+    return Array.isArray(value)
+      ? value
+      : [];
   }
 
-  function isoNow() {
+  function safeText(value, fallback = "") {
+    if (
+      value === null ||
+      value === undefined
+    ) {
+      return fallback;
+    }
+
+    const text =
+      String(value).trim();
+
+    return text || fallback;
+  }
+
+  function safeLower(value = "", fallback = "") {
+    return safeText(value, fallback)
+      .toLowerCase();
+  }
+
+  function safeNumber(value, fallback = 0) {
+    const number =
+      Number(value);
+
+    return Number.isFinite(number)
+      ? number
+      : fallback;
+  }
+
+  function nowMs() {
     try {
-      return new Date().toISOString();
+      return Date.now();
+    } catch {
+      return 0;
+    }
+  }
+
+  function isoNow(ms = nowMs()) {
+    try {
+      return new Date(ms).toISOString();
     } catch {
       return "";
     }
@@ -205,14 +401,33 @@ export const Http = (() => {
 
   function nextRequestId() {
     requestSeq += 1;
-    return `http_service_${requestSeq}`;
+
+    return `http_${requestSeq}_${nowMs()}`;
   }
 
-  function safeEmit(eventName, payload = {}) {
+  function getBaseOrigin() {
+    if (
+      isBrowser() &&
+      window.location?.origin
+    ) {
+      return window.location.origin;
+    }
+
+    return "http://localhost";
+  }
+
+  function safeEmit(eventName = "", payload = {}) {
+    const name =
+      safeText(eventName, "");
+
+    if (!name) {
+      return false;
+    }
+
     try {
       AppCore?.events?.emit?.(
-        eventName,
-        payload
+        name,
+        sanitizePayload(payload)
       );
 
       return true;
@@ -224,8 +439,8 @@ export const Http = (() => {
   function safeLog(...args) {
     try {
       AppCore?.utils?.log?.(
-        "[Http]",
-        ...args
+        LOG_PREFIX,
+        ...args.map((item) => sanitizePayload(item))
       );
     } catch {}
   }
@@ -233,69 +448,219 @@ export const Http = (() => {
   function safeWarn(...args) {
     try {
       AppCore?.utils?.warn?.(
-        "[Http]",
-        ...args
+        LOG_PREFIX,
+        ...args.map((item) => sanitizePayload(item))
       );
-    } catch {
-      try {
-        console.warn(
-          "[Http]",
-          ...args
-        );
-      } catch {}
-    }
+
+      return;
+    } catch {}
+
+    try {
+      console.warn(
+        LOG_PREFIX,
+        ...args.map((item) => sanitizePayload(item))
+      );
+    } catch {}
   }
 
   function safeError(...args) {
     try {
       AppCore?.utils?.error?.(
-        "[Http]",
-        ...args
+        LOG_PREFIX,
+        ...args.map((item) => sanitizePayload(item))
       );
-    } catch {
-      try {
-        console.error(
-          "[Http]",
-          ...args
-        );
-      } catch {}
-    }
+
+      return;
+    } catch {}
+
+    try {
+      console.error(
+        LOG_PREFIX,
+        ...args.map((item) => sanitizePayload(item))
+      );
+    } catch {}
   }
 
-  function safeRedact(value = "") {
-    const raw =
+  /* =======================================================
+     REDACTION / SANITIZE
+  ======================================================= */
+
+  function escapeRegExp(value = "") {
+    return String(value).replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
+  }
+
+  function redactTokenInText(value = "") {
+    let output =
       safeText(value, "");
 
-    if (!raw) {
+    if (!output) {
       return "";
     }
 
-    let output =
-      raw;
+    for (const name of SENSITIVE_QUERY_NAMES) {
+      try {
+        output =
+          output.replace(
+            new RegExp(
+              `([?&#]${escapeRegExp(name)}=)([^&#\\s]+)`,
+              "gi"
+            ),
+            "$1***"
+          );
+      } catch {}
+    }
 
     try {
-      output = output.replace(
-        /([?&](?:token|activationToken|activateToken|resetToken|passwordResetToken|code|t|access_token|refresh_token|id_token)=)([^&#\s]+)/gi,
-        "$1***"
-      );
+      output =
+        output.replace(
+          /(\/activate-account\/)([^/?#\s]+)/gi,
+          "$1***"
+        );
+    } catch {}
 
-      output = output.replace(
-        /(\/activate-account\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
+    try {
+      output =
+        output.replace(
+          /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+          "$1***"
+        );
+    } catch {}
 
-      output = output.replace(
-        /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
-        "$1***"
-      );
+    try {
+      output =
+        output.replace(
+          /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+          "$1***"
+        );
+    } catch {}
 
-      output = output.replace(
-        /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
-        "$1***"
-      );
+    try {
+      output =
+        output.replace(
+          /(authorization["'\s:=]+)(Bearer\s+)?([A-Za-z0-9._~+/=-]+)/gi,
+          "$1$2***"
+        );
+    } catch {}
+
+    try {
+      output =
+        output.replace(
+          /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+          "***"
+        );
     } catch {}
 
     return output;
+  }
+
+  function isDomNodeLike(value) {
+    if (
+      !value ||
+      typeof value !== "object"
+    ) {
+      return false;
+    }
+
+    try {
+      return Boolean(
+        typeof Node !== "undefined" &&
+          value instanceof Node
+      );
+    } catch {}
+
+    try {
+      return Boolean(
+        value.nodeType &&
+          value.nodeName
+      );
+    } catch {}
+
+    return false;
+  }
+
+  function sanitizePayload(value, depth = 0) {
+    if (depth > 6) {
+      return "[MaxDepth]";
+    }
+
+    if (typeof value === "string") {
+      return redactTokenInText(value);
+    }
+
+    if (
+      value === null ||
+      value === undefined ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      return value;
+    }
+
+    if (typeof value === "function") {
+      return "[Function]";
+    }
+
+    if (isDomNodeLike(value)) {
+      return {
+        node:
+          safeText(value.nodeName, "Node"),
+
+        id:
+          safeText(value.id, ""),
+
+        className:
+          safeText(value.className, ""),
+      };
+    }
+
+    if (value instanceof Error) {
+      return {
+        name:
+          safeText(value.name, "Error"),
+
+        message:
+          redactTokenInText(value.message || ""),
+
+        code:
+          value.code || null,
+
+        status:
+          value.status || value.statusCode || null,
+      };
+    }
+
+    if (Array.isArray(value)) {
+      return value
+        .slice(0, 80)
+        .map((item) =>
+          sanitizePayload(item, depth + 1)
+        );
+    }
+
+    if (isObject(value)) {
+      const output = {};
+
+      for (const [key, item] of Object.entries(value)) {
+        if (
+          /token|secret|password|authorization|credential/i.test(key)
+        ) {
+          output[key] =
+            item ? "***" : item;
+
+          continue;
+        }
+
+        output[key] =
+          sanitizePayload(item, depth + 1);
+      }
+
+      return output;
+    }
+
+    return redactTokenInText(String(value));
   }
 
   function sanitizeErrorForEvent(error = null) {
@@ -303,27 +668,74 @@ export const Http = (() => {
       return null;
     }
 
+    const source =
+      safeObject(error, {});
+
     return {
-      ...error,
+      name:
+        safeText(source.name, "Error"),
+
+      message:
+        redactTokenInText(
+          safeText(
+            source.message ||
+              source.error ||
+              source.reason ||
+              "Error",
+            "Error"
+          )
+        ),
+
+      status:
+        safeNumber(
+          source.status ||
+            source.statusCode,
+          0
+        ),
+
+      code:
+        safeText(source.code, ""),
+
+      method:
+        safeText(source.method, ""),
 
       url:
-        safeRedact(error.url || ""),
+        redactTokenInText(
+          safeText(source.url, "")
+        ),
+
+      path:
+        redactTokenInText(
+          safeText(source.path, "")
+        ),
 
       redactedUrl:
-        safeRedact(error.redactedUrl || error.url || ""),
+        redactTokenInText(
+          safeText(
+            source.redactedUrl ||
+              source.url ||
+              source.path,
+            ""
+          )
+        ),
 
-      token:
-        null,
+      timeout:
+        Boolean(source.timeout),
 
-      raw:
-        error.raw instanceof Error
-          ? {
-              name:
-                error.raw.name,
-              message:
-                error.raw.message,
-            }
-          : error.raw,
+      aborted:
+        Boolean(source.aborted),
+
+      public:
+        Boolean(source.public),
+
+      auth:
+        source.auth !== false,
+
+      requestId:
+        safeText(source.requestId, ""),
+
+      at:
+        isoNow(),
     };
   }
 
@@ -333,16 +745,20 @@ export const Http = (() => {
 
     return {
       requestId:
-        cfg.requestId || "",
+        safeText(cfg.requestId, ""),
 
       method:
-        cfg.method || "",
+        safeText(cfg.method, ""),
 
       path:
-        safeRedact(cfg.path || ""),
+        redactTokenInText(
+          safeText(cfg.path, "")
+        ),
 
-      query:
-        cfg.query || null,
+      url:
+        redactTokenInText(
+          safeText(cfg.url, "")
+        ),
 
       auth:
         cfg.auth !== false,
@@ -368,13 +784,16 @@ export const Http = (() => {
       authRefreshAttempted:
         cfg._authRefreshAttempted === true,
 
+      authRefreshSucceeded:
+        cfg._authRefreshSucceeded === true,
+
       authRefreshFailed:
         cfg._authRefreshFailed === true,
     };
   }
 
   /* =======================================================
-     ENDPOINT HELPERS
+     PATH / ENDPOINT HELPERS
   ======================================================= */
 
   function normalizeEndpointPath(path = "") {
@@ -389,73 +808,52 @@ export const Http = (() => {
       const parsed =
         new URL(
           raw,
-          typeof window !== "undefined" &&
-            window.location?.origin
-            ? window.location.origin
-            : "http://localhost"
+          getBaseOrigin()
         );
 
       return safeLower(
         parsed.pathname || raw
       );
-    } catch {
-      return safeLower(
-        raw.split("?")[0].split("#")[0] || raw
-      );
-    }
+    } catch {}
+
+    return safeLower(
+      raw
+        .split("?")[0]
+        .split("#")[0] ||
+        raw
+    );
   }
 
-  function isAuthEndpoint(path = "") {
+  function endpointIncludes(path = "", markers = []) {
     const normalized =
       normalizeEndpointPath(path);
 
-    return (
-      normalized.includes("/auth/login") ||
-      normalized.includes("/auth/logout") ||
-      normalized.includes("/auth/refresh") ||
-      normalized.includes("/auth/me") ||
-      normalized.includes("/auth/session") ||
+    if (!normalized) {
+      return false;
+    }
 
-      normalized.includes("/auth/activate") ||
-      normalized.includes("/auth/activate-account") ||
-      normalized.includes("/auth/account/activate") ||
-      normalized.includes("/auth/activation") ||
-      normalized.includes("/auth/activate/first-user") ||
+    return safeArray(markers).some((marker) => {
+      const cleanMarker =
+        safeLower(marker, "");
 
-      normalized.includes("/auth/reset-password") ||
-      normalized.includes("/auth/reset-password-request") ||
-      normalized.includes("/auth/reset-password-confirm") ||
-      normalized.includes("/auth/password-reset") ||
-      normalized.includes("/auth/forgot-password") ||
-      normalized.includes("/auth/recover-password") ||
+      return (
+        cleanMarker &&
+        normalized.includes(cleanMarker)
+      );
+    });
+  }
 
-      normalized.includes("/auth/2fa/login")
+  function isAuthEndpoint(path = "") {
+    return endpointIncludes(
+      path,
+      AUTH_ENDPOINT_MARKERS
     );
   }
 
   function isPublicAuthEndpoint(path = "") {
-    const normalized =
-      normalizeEndpointPath(path);
-
-    return (
-      normalized.includes("/auth/login") ||
-      normalized.includes("/auth/refresh") ||
-
-      normalized.includes("/auth/activate") ||
-      normalized.includes("/auth/activate-account") ||
-      normalized.includes("/auth/account/activate") ||
-      normalized.includes("/auth/activation") ||
-      normalized.includes("/auth/activate/first-user") ||
-
-      normalized.includes("/auth/reset-password") ||
-      normalized.includes("/auth/reset-password-request") ||
-      normalized.includes("/auth/reset-password-confirm") ||
-      normalized.includes("/auth/password-reset") ||
-      normalized.includes("/auth/forgot-password") ||
-      normalized.includes("/auth/recover-password") ||
-
-      normalized.includes("/auth/2fa/login") ||
-      normalized.includes("/auth/_health")
+    return endpointIncludes(
+      path,
+      PUBLIC_AUTH_ENDPOINT_MARKERS
     );
   }
 
@@ -463,117 +861,47 @@ export const Http = (() => {
     const normalized =
       normalizeEndpointPath(path);
 
+    if (!normalized) {
+      return false;
+    }
+
+    return TECHNICAL_PUBLIC_SPA_PATHS.some((publicPath) => {
+      const clean =
+        safeLower(publicPath, "");
+
+      return (
+        normalized === clean ||
+        normalized.startsWith(`${clean}/`)
+      );
+    });
+  }
+
+  function isPublicEndpoint(path = "") {
     return (
-      normalized === "/activate-account" ||
-      normalized.startsWith("/activate-account/") ||
-      normalized === "/reset-password" ||
-      normalized === "/forgot-password" ||
-      normalized === "/reset-password/confirm" ||
-      normalized.startsWith("/reset-password/confirm/")
+      isPublicAuthEndpoint(path) ||
+      isTechnicalPublicSpaEndpoint(path)
     );
-  }
-
-  function shouldAttemptAuthRefresh(error, requestConfig = {}) {
-    if (!config.autoRefreshOn401) {
-      return false;
-    }
-
-    if (error?.status !== 401) {
-      return false;
-    }
-
-    if (requestConfig?._skipAuthRefresh === true) {
-      return false;
-    }
-
-    if (requestConfig?._authRefreshAttempted === true) {
-      return false;
-    }
-
-    if (requestConfig?.auth === false) {
-      return false;
-    }
-
-    if (requestConfig?.public === true) {
-      return false;
-    }
-
-    if (isAuthEndpoint(requestConfig?.path)) {
-      return false;
-    }
-
-    if (isTechnicalPublicSpaEndpoint(requestConfig?.path)) {
-      return false;
-    }
-
-    return true;
-  }
-
-  function shouldAutoLogout(error, requestConfig = {}) {
-    if (!config.autoLogoutOn401) {
-      return false;
-    }
-
-    if (error?.status !== 401) {
-      return false;
-    }
-
-    if (requestConfig?.auth === false) {
-      return false;
-    }
-
-    if (requestConfig?.public === true) {
-      return false;
-    }
-
-    if (isAuthEndpoint(requestConfig?.path)) {
-      return false;
-    }
-
-    if (isTechnicalPublicSpaEndpoint(requestConfig?.path)) {
-      return false;
-    }
-
-    /*
-      Logout automático solo si:
-      - ya se intentó refresh y falló, o
-      - el caller marcó skipAuthRefresh explícito después de refresh.
-    */
-    if (
-      requestConfig?._authRefreshFailed === true ||
-      requestConfig?._skipAuthRefresh === true
-    ) {
-      try {
-        return Boolean(
-          Auth?.isAuthenticated?.() ||
-          AppCore?.state?.authenticated
-        );
-      } catch {
-        return Boolean(AppCore?.state?.authenticated);
-      }
-    }
-
-    return false;
   }
 
   function normalizePublicRequestConfig(requestConfig = {}) {
     const cfg =
       safeObject(requestConfig);
 
+    const path =
+      cfg.path ||
+      cfg.url ||
+      "";
+
     const publicByFlag =
       cfg.public === true ||
       cfg.auth === false;
 
-    const publicByAuthEndpoint =
-      isPublicAuthEndpoint(cfg.path);
-
-    const publicByTechnicalSpaEndpoint =
-      isTechnicalPublicSpaEndpoint(cfg.path);
+    const publicByPath =
+      isPublicEndpoint(path);
 
     if (
       !publicByFlag &&
-      !publicByAuthEndpoint &&
-      !publicByTechnicalSpaEndpoint
+      !publicByPath
     ) {
       return cfg;
     }
@@ -592,88 +920,224 @@ export const Http = (() => {
     };
   }
 
+  function isPrivateAuthenticatedRequest(requestConfig = {}) {
+    const cfg =
+      safeObject(requestConfig);
+
+    if (cfg.auth === false) {
+      return false;
+    }
+
+    if (cfg.public === true) {
+      return false;
+    }
+
+    if (isAuthEndpoint(cfg.path || cfg.url || "")) {
+      return false;
+    }
+
+    if (isTechnicalPublicSpaEndpoint(cfg.path || cfg.url || "")) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function shouldAttemptAuthRefresh(error = null, requestConfig = {}) {
+    if (config.autoRefreshOn401 === false) {
+      return false;
+    }
+
+    if (safeNumber(error?.status, 0) !== 401) {
+      return false;
+    }
+
+    if (!isPrivateAuthenticatedRequest(requestConfig)) {
+      return false;
+    }
+
+    if (requestConfig?._skipAuthRefresh === true) {
+      return false;
+    }
+
+    if (requestConfig?._authRefreshAttempted === true) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function shouldAutoLogout(error = null, requestConfig = {}) {
+    if (config.autoLogoutOn401 === false) {
+      return false;
+    }
+
+    if (safeNumber(error?.status, 0) !== 401) {
+      return false;
+    }
+
+    if (!isPrivateAuthenticatedRequest(requestConfig)) {
+      return false;
+    }
+
+    const refreshFailed =
+      requestConfig?._authRefreshFailed === true;
+
+    const persistentAfterRefresh =
+      requestConfig?._authRefreshAttempted === true &&
+      requestConfig?._authRefreshSucceeded === true &&
+      requestConfig?._skipAuthRefresh === true;
+
+    if (
+      !refreshFailed &&
+      !persistentAfterRefresh
+    ) {
+      return false;
+    }
+
+    try {
+      return Boolean(
+        Auth?.isAuthenticated?.() ||
+          AppCore?.state?.authenticated
+      );
+    } catch {
+      return Boolean(AppCore?.state?.authenticated);
+    }
+  }
+
   /* =======================================================
-     BRIDGE APPCORE
+     APPCORE BRIDGE
   ======================================================= */
+
+  function registerModule(name = "", value = null, aliases = []) {
+    const cleanName =
+      safeText(name, "");
+
+    if (
+      !cleanName ||
+      !value
+    ) {
+      return false;
+    }
+
+    const names =
+      Array.from(
+        new Set([
+          cleanName,
+          ...safeArray(aliases)
+            .map((item) => safeText(item, ""))
+            .filter(Boolean),
+        ])
+      );
+
+    let ok =
+      false;
+
+    for (const moduleName of names) {
+      try {
+        const result =
+          AppCore?.modules?.register?.(
+            moduleName,
+            value,
+            {
+              replace:
+                true,
+
+              overwrite:
+                true,
+
+              source:
+                "http.service",
+            }
+          );
+
+        if (result !== false) {
+          ok = true;
+        }
+      } catch {}
+
+      try {
+        AppCore?.registry?.modules?.set?.(
+          moduleName,
+          value
+        );
+
+        ok = true;
+      } catch {}
+    }
+
+    return ok;
+  }
 
   function attachToAppCore() {
     if (state.bridgeAttached) {
       return true;
     }
 
-    try {
-      AppCore.http =
-        api;
-    } catch {}
+    let attached =
+      false;
 
     try {
       AppCore.Http =
         api;
+
+      attached = true;
+    } catch {}
+
+    try {
+      AppCore.http =
+        api;
+
+      attached = true;
     } catch {}
 
     try {
       if (
-        !AppCore.services ||
-        typeof AppCore.services !== "object"
+        AppCore &&
+        typeof AppCore === "object" &&
+        Object.isExtensible(AppCore)
       ) {
-        AppCore.services = {};
+        if (
+          !AppCore.services ||
+          typeof AppCore.services !== "object"
+        ) {
+          AppCore.services = {};
+        }
+
+        AppCore.services.Http =
+          api;
+
+        AppCore.services.http =
+          api;
+
+        attached = true;
       }
-
-      AppCore.services.http =
-        api;
-
-      AppCore.services.Http =
-        api;
     } catch {}
 
-    try {
-      if (
-        AppCore.modules &&
-        isFunction(AppCore.modules.register)
-      ) {
-        AppCore.modules.register(
+    if (
+      registerModule(
+        "Http",
+        api,
+        [
           "http",
-          api,
-          {
-            aliases:
-              [
-                "Http",
-                "HTTP",
-                "httpService",
-              ],
-            overwrite:
-              true,
-          }
-        );
-      }
-    } catch {
-      try {
-        AppCore.modules?.register?.(
-          "Http",
-          api
-        );
-      } catch {}
-
-      try {
-        AppCore.modules?.register?.(
-          "http",
-          api
-        );
-      } catch {}
+          "HTTP",
+          "httpService",
+          SERVICE_NAME,
+        ]
+      )
+    ) {
+      attached = true;
     }
 
     state.bridgeAttached =
       true;
 
     safeEmit(
-      "http:bridge:attached",
+      EVENTS.bridgeAttached,
       {
+        attached,
         hasAppCoreHttp:
-          Boolean(AppCore?.http),
-
-        hasAppCoreServicesHttp:
-          Boolean(AppCore?.services?.http),
-
+          Boolean(AppCore?.http || AppCore?.Http),
         hasAppCoreModules:
           Boolean(AppCore?.modules),
       }
@@ -708,95 +1172,146 @@ export const Http = (() => {
   }
 
   /* =======================================================
-     LOADER HELPERS
+     LOADER
   ======================================================= */
 
-  function startLoaderIfNeeded(loaderEnabled, requestId) {
+  function startLoaderIfNeeded(loaderEnabled = false, requestId = "") {
     if (!loaderEnabled) {
       return false;
     }
 
-    incrementPendingRequests(
-      AppCore,
-      state,
-      {
-        source:
-          "http.service:request:start",
+    try {
+      incrementPendingRequests(
+        AppCore,
+        state,
+        {
+          source:
+            "http.service:start",
 
-        requestId,
-      }
-    );
+          requestId,
+        }
+      );
+    } catch {
+      state.pendingRequests += 1;
+    }
 
-    if (state.pendingRequests === 1) {
+    if (state.pendingRequests <= 1) {
       try {
-        AppCore.setLoading(true);
+        AppCore?.setLoading?.(true);
       } catch {}
     }
 
     return true;
   }
 
-  function stopLoaderIfNeeded(loaderEnabled, requestId) {
+  function stopLoaderIfNeeded(loaderEnabled = false, requestId = "") {
     if (!loaderEnabled) {
-      return 0;
+      return state.pendingRequests;
     }
 
-    const pending =
-      decrementPendingRequests(
-        AppCore,
-        state,
-        {
-          source:
-            "http.service:request:finalize",
+    let pending =
+      0;
 
-          requestId,
-        }
-      );
+    try {
+      pending =
+        decrementPendingRequests(
+          AppCore,
+          state,
+          {
+            source:
+              "http.service:finalize",
+
+            requestId,
+          }
+        );
+    } catch {
+      state.pendingRequests =
+        Math.max(
+          0,
+          safeNumber(state.pendingRequests, 0) - 1
+        );
+
+      pending =
+        state.pendingRequests;
+    }
 
     if (pending <= 0) {
+      state.pendingRequests =
+        0;
+
       try {
-        AppCore.setLoading(false);
+        AppCore?.setLoading?.(false);
       } catch {}
     }
 
-    return pending;
+    return state.pendingRequests;
   }
 
   /* =======================================================
-     CORE REQUEST
+     REQUEST CONFIG
   ======================================================= */
 
-  async function request(method, path, options = {}) {
-    attachToAppCore();
+  function buildServiceRequestConfig(method = "GET", path = "", options = {}) {
+    const opts =
+      safeObject(options);
 
     const requestId =
-      options?.requestId ||
+      opts.requestId ||
       nextRequestId();
 
-    const startedAt =
-      nowMs();
+    const timeout =
+      opts.timeout ??
+      config.timeout ??
+      DEFAULT_REQUEST_TIMEOUT_MS;
 
-    state.requestCount += 1;
-    state.lastRequestId =
-      requestId;
-    state.lastRequestAt =
-      isoNow();
-
-    let requestConfig =
+    const base =
       buildDefaultRequestConfig(
         config,
         AppCore,
         method,
         path,
         {
-          ...safeObject(options),
+          ...opts,
+
           requestId,
+
+          timeout,
 
           signal:
             withSignal(
-              options?.signal
+              opts.signal
             ),
         }
+      );
+
+    return normalizePublicRequestConfig({
+      ...base,
+
+      requestId,
+
+      method:
+        safeText(base?.method || method, "GET")
+          .toUpperCase(),
+
+      path:
+        base?.path || path,
+
+      timeout,
+    });
+  }
+
+  async function prepareRequestConfig(method = "GET", path = "", options = {}) {
+    let requestConfig =
+      buildServiceRequestConfig(
+        method,
+        path,
+        options
+      );
+
+    requestConfig =
+      await runRequestInterceptors(
+        interceptors,
+        requestConfig
       );
 
     requestConfig =
@@ -804,27 +1319,340 @@ export const Http = (() => {
         requestConfig
       );
 
+    requestConfig.requestId =
+      requestConfig.requestId ||
+      options?.requestId ||
+      nextRequestId();
+
+    requestConfig.method =
+      safeText(
+        requestConfig.method || method,
+        "GET"
+      ).toUpperCase();
+
+    requestConfig.path =
+      requestConfig.path || path;
+
+    return requestConfig;
+  }
+
+  /* =======================================================
+     AUTH REFRESH LOCK
+  ======================================================= */
+
+  async function runRefreshLocked(payload = {}) {
+    if (refreshPromise) {
+      return refreshPromise;
+    }
+
+    state.refreshInFlight =
+      true;
+
+    refreshPromise =
+      Promise.resolve()
+        .then(() =>
+          runAutoRefreshIfNeeded(payload)
+        )
+        .finally(() => {
+          state.refreshInFlight =
+            false;
+
+          refreshPromise =
+            null;
+        });
+
+    return refreshPromise;
+  }
+
+  async function tryRefreshAndReplay({
+    normalizedInitialError,
+    requestConfig,
+  }) {
+    const requestId =
+      requestConfig.requestId;
+
+    const refreshConfig = {
+      ...requestConfig,
+
+      _authRefreshAttempted:
+        true,
+    };
+
+    state.refreshAttemptCount += 1;
+    state.lastRefreshAt =
+      isoNow();
+
+    safeEmit(
+      EVENTS.refreshStart,
+      {
+        requestId,
+
+        method:
+          refreshConfig.method,
+
+        path:
+          redactTokenInText(refreshConfig.path),
+
+        status:
+          normalizedInitialError.status,
+      }
+    );
+
+    let refreshed =
+      false;
+
+    try {
+      refreshed =
+        await runRefreshLocked({
+          AppCore,
+          Auth,
+          config,
+          state,
+          error:
+            normalizedInitialError,
+          requestConfig:
+            refreshConfig,
+        });
+    } catch (refreshError) {
+      refreshed =
+        false;
+
+      state.lastRefreshErrorAt =
+        isoNow();
+
+      safeWarn(
+        "Refresh automático falló.",
+        refreshError
+      );
+    }
+
+    if (!refreshed) {
+      state.refreshFailureCount += 1;
+
+      const failedConfig = {
+        ...refreshConfig,
+
+        _skipAuthRefresh:
+          true,
+
+        _authRefreshFailed:
+          true,
+      };
+
+      safeEmit(
+        EVENTS.refreshError,
+        {
+          requestId,
+
+          path:
+            redactTokenInText(failedConfig.path),
+
+          error:
+            sanitizeErrorForEvent(normalizedInitialError),
+        }
+      );
+
+      return {
+        ok:
+          false,
+
+        requestConfig:
+          failedConfig,
+
+        error:
+          normalizedInitialError,
+      };
+    }
+
+    state.refreshSuccessCount += 1;
+
+    safeEmit(
+      EVENTS.refreshSuccess,
+      {
+        requestId,
+
+        path:
+          redactTokenInText(refreshConfig.path),
+      }
+    );
+
+    const replayConfig =
+      normalizePublicRequestConfig({
+        ...refreshConfig,
+
+        requestId,
+
+        _skipRetry:
+          true,
+
+        _skipAuthRefresh:
+          true,
+
+        _authRefreshSucceeded:
+          true,
+
+        _authRefreshFailed:
+          false,
+      });
+
+    try {
+      const response =
+        await executeBaseRequest(
+          AppCore,
+          replayConfig
+        );
+
+      return {
+        ok:
+          true,
+
+        requestConfig:
+          replayConfig,
+
+        response,
+      };
+    } catch (replayError) {
+      const normalizedReplayError =
+        normalizeError(
+          replayError,
+          replayConfig
+        );
+
+      return {
+        ok:
+          false,
+
+        requestConfig:
+          replayConfig,
+
+        error:
+          normalizedReplayError,
+      };
+    }
+  }
+
+  /* =======================================================
+     AUTO LOGOUT
+  ======================================================= */
+
+  async function runAutoLogoutOnce(error = null, requestConfig = {}) {
+    if (logoutPromise) {
+      return logoutPromise;
+    }
+
+    state.autoLogoutInFlight =
+      true;
+
+    state.autoLogoutCount += 1;
+    state.lastAutoLogoutAt =
+      isoNow();
+
+    safeEmit(
+      EVENTS.autoLogoutStart,
+      {
+        requestId:
+          requestConfig?.requestId || "",
+
+        path:
+          redactTokenInText(
+            requestConfig?.path || ""
+          ),
+
+        error:
+          sanitizeErrorForEvent(error),
+      }
+    );
+
+    logoutPromise =
+      Promise.resolve()
+        .then(async () => {
+          try {
+            await Auth?.logout?.({
+              silent:
+                false,
+
+              notifyServer:
+                false,
+
+              reason:
+                "http-401-after-refresh",
+            });
+
+            safeEmit(
+              EVENTS.autoLogoutSuccess,
+              {
+                requestId:
+                  requestConfig?.requestId || "",
+
+                path:
+                  redactTokenInText(
+                    requestConfig?.path || ""
+                  ),
+              }
+            );
+
+            return true;
+          } catch (logoutError) {
+            safeWarn(
+              "Logout automático falló.",
+              logoutError
+            );
+
+            safeEmit(
+              EVENTS.autoLogoutError,
+              {
+                requestId:
+                  requestConfig?.requestId || "",
+
+                error:
+                  sanitizeErrorForEvent(logoutError),
+              }
+            );
+
+            return false;
+          }
+        })
+        .finally(() => {
+          state.autoLogoutInFlight =
+            false;
+
+          logoutPromise =
+            null;
+        });
+
+    return logoutPromise;
+  }
+
+  /* =======================================================
+     CORE REQUEST
+  ======================================================= */
+
+  async function request(method = "GET", path = "", options = {}) {
+    init();
+
+    const startedAt =
+      nowMs();
+
+    state.requestCount += 1;
+    state.lastRequestAt =
+      isoNow(startedAt);
+
+    let requestConfig =
+      null;
+
     let loaderEnabled =
       false;
 
     try {
-      /* =====================
-         REQUEST INTERCEPTORS
-      ===================== */
-
       requestConfig =
-        await runRequestInterceptors(
-          interceptors,
-          requestConfig
+        await prepareRequestConfig(
+          method,
+          path,
+          options
         );
 
-      requestConfig =
-        normalizePublicRequestConfig(
-          requestConfig
-        );
-
-      requestConfig.requestId =
-        requestId;
+      state.lastRequestId =
+        requestConfig.requestId;
 
       loaderEnabled =
         shouldToggleGlobalLoader(
@@ -841,35 +1669,33 @@ export const Http = (() => {
           "HTTP →",
           {
             ...buildRequestSummary(requestConfig),
+
             path:
-              safeRedact(requestConfig.path),
+              redactTokenInText(requestConfig.path),
           }
         );
       }
 
       startLoaderIfNeeded(
         loaderEnabled,
-        requestId
+        requestConfig.requestId
       );
 
       safeEmit(
-        "http:request:start",
+        EVENTS.requestStart,
         sanitizeRequestConfigForEvent({
           ...requestConfig,
+
           useLoader:
             loaderEnabled,
         })
       );
 
-      /* =====================
-         EXECUTE + AUTH REFRESH
-      ===================== */
-
-      let result =
+      let response =
         null;
 
       try {
-        result =
+        response =
           await executeWithRetry({
             AppCore,
             config,
@@ -882,126 +1708,38 @@ export const Http = (() => {
             requestConfig
           );
 
-        const canRefresh =
-          shouldAttemptAuthRefresh(
+        if (
+          !shouldAttemptAuthRefresh(
             normalizedInitialError,
             requestConfig
-          );
-
-        let refreshed =
-          false;
-
-        if (canRefresh) {
-          state.refreshAttemptCount += 1;
-
-          safeEmit(
-            "http:auth-refresh:start",
-            {
-              requestId,
-              method:
-                requestConfig.method,
-              path:
-                safeRedact(requestConfig.path),
-              status:
-                normalizedInitialError.status,
-            }
-          );
-
-          try {
-            refreshed =
-              await runAutoRefreshIfNeeded({
-                AppCore,
-                Auth,
-                config,
-                state,
-                error:
-                  normalizedInitialError,
-                requestConfig,
-              });
-          } catch (refreshError) {
-            refreshed =
-              false;
-
-            safeWarn(
-              "Refresh automático lanzó error.",
-              refreshError
-            );
-          }
-
-          if (refreshed) {
-            state.refreshSuccessCount += 1;
-
-            safeEmit(
-              "http:auth-refresh:success",
-              {
-                requestId,
-                path:
-                  safeRedact(requestConfig.path),
-              }
-            );
-          } else {
-            state.refreshFailureCount += 1;
-
-            requestConfig = {
-              ...requestConfig,
-              _authRefreshAttempted:
-                true,
-              _authRefreshFailed:
-                true,
-              _skipAuthRefresh:
-                true,
-            };
-
-            safeEmit(
-              "http:auth-refresh:error",
-              {
-                requestId,
-                path:
-                  safeRedact(requestConfig.path),
-                error:
-                  sanitizeErrorForEvent(
-                    normalizedInitialError
-                  ),
-              }
-            );
-          }
+          )
+        ) {
+          throw normalizedInitialError;
         }
 
-        if (refreshed) {
-          const retryConfig =
-            normalizePublicRequestConfig({
-              ...requestConfig,
+        const refreshResult =
+          await tryRefreshAndReplay({
+            normalizedInitialError,
+            requestConfig,
+          });
 
-              _skipRetry:
-                true,
+        requestConfig =
+          refreshResult.requestConfig ||
+          requestConfig;
 
-              _skipAuthRefresh:
-                true,
-
-              _authRefreshAttempted:
-                true,
-
-              requestId,
-            });
-
-          result =
-            await executeBaseRequest(
-              AppCore,
-              retryConfig
-            );
+        if (refreshResult.ok) {
+          response =
+            refreshResult.response;
         } else {
-          throw normalizedInitialError;
+          throw refreshResult.error ||
+            normalizedInitialError;
         }
       }
 
-      /* =====================
-         RESPONSE INTERCEPTORS
-      ===================== */
-
-      const response =
+      const interceptedResponse =
         await runResponseInterceptors(
           interceptors,
-          result,
+          response,
           requestConfig
         );
 
@@ -1010,20 +1748,22 @@ export const Http = (() => {
         isoNow();
 
       safeEmit(
-        "http:request:success",
+        EVENTS.requestSuccess,
         {
-          requestId,
+          requestId:
+            requestConfig.requestId,
 
           method:
             requestConfig.method,
 
           path:
-            safeRedact(requestConfig.path),
-
-          response,
+            redactTokenInText(requestConfig.path),
 
           durationMs:
             nowMs() - startedAt,
+
+          response:
+            interceptedResponse,
         }
       );
 
@@ -1036,70 +1776,92 @@ export const Http = (() => {
         safeLog(
           "HTTP ✓",
           {
-            requestId,
+            requestId:
+              requestConfig.requestId,
 
             method:
               requestConfig.method,
 
             path:
-              safeRedact(requestConfig.path),
+              redactTokenInText(requestConfig.path),
 
             durationMs:
               nowMs() - startedAt,
 
-            response,
+            response:
+              interceptedResponse,
           }
         );
       }
 
-      return response;
+      return interceptedResponse;
     } catch (error) {
-      const normalized =
+      let normalized =
         normalizeError(
           error,
-          requestConfig
+          requestConfig || {
+            method,
+            path,
+          }
         );
 
-      const interceptedError =
-        await runErrorInterceptors(
-          interceptors,
-          normalized,
-          requestConfig
-        );
+      let finalError =
+        normalized;
 
-      const finalError =
-        interceptedError !== undefined
-          ? interceptedError
-          : normalized;
+      try {
+        const intercepted =
+          await runErrorInterceptors(
+            interceptors,
+            normalized,
+            requestConfig || {
+              method,
+              path,
+            }
+          );
+
+        if (intercepted !== undefined) {
+          finalError =
+            intercepted;
+        }
+      } catch (interceptorError) {
+        finalError =
+          normalizeError(
+            interceptorError,
+            requestConfig || {
+              method,
+              path,
+            }
+          );
+      }
 
       state.errorCount += 1;
       state.lastErrorAt =
         isoNow();
+
       state.lastError =
         sanitizeErrorForEvent(
           finalError
         );
 
       safeEmit(
-        "http:request:error",
+        EVENTS.requestError,
         {
-          requestId,
+          requestId:
+            requestConfig?.requestId || "",
 
           method:
             requestConfig?.method || method,
 
           path:
-            safeRedact(
+            redactTokenInText(
               requestConfig?.path || path
-            ),
-
-          error:
-            sanitizeErrorForEvent(
-              finalError
             ),
 
           durationMs:
             nowMs() - startedAt,
+
+          error:
+            sanitizeErrorForEvent(finalError),
         }
       );
 
@@ -1114,76 +1876,36 @@ export const Http = (() => {
         );
       }
 
-      /* =====================
-         AUTO LOGOUT
-      ===================== */
-
       if (
         shouldAutoLogout(
           finalError,
-          requestConfig
+          requestConfig || {}
         )
       ) {
-        state.autoLogoutCount += 1;
-
-        safeWarn(
-          "401 persistente tras refresh → logout automático."
+        await runAutoLogoutOnce(
+          finalError,
+          requestConfig
         );
-
-        safeEmit(
-          "http:auto-logout:start",
-          {
-            requestId,
-            path:
-              safeRedact(requestConfig?.path || path),
-          }
-        );
-
-        try {
-          await Auth.logout({
-            silent:
-              false,
-
-            notifyServer:
-              false,
-
-            reason:
-              "http-401-refresh-failed",
-          });
-        } catch (logoutError) {
-          safeWarn(
-            "Logout automático falló.",
-            logoutError
-          );
-
-          safeEmit(
-            "http:auto-logout:error",
-            {
-              requestId,
-              error:
-                sanitizeErrorForEvent(logoutError),
-            }
-          );
-        }
       }
 
       throw finalError;
     } finally {
       stopLoaderIfNeeded(
         loaderEnabled,
-        requestId
+        requestConfig?.requestId || ""
       );
 
       safeEmit(
-        "http:request:finalize",
+        EVENTS.requestFinalize,
         {
-          requestId,
+          requestId:
+            requestConfig?.requestId || "",
 
           method:
             requestConfig?.method || method,
 
           path:
-            safeRedact(
+            redactTokenInText(
               requestConfig?.path || path
             ),
 
@@ -1264,18 +1986,26 @@ export const Http = (() => {
       path,
       {
         ...safeObject(options),
+
         body:
           formData,
+
+        upload:
+          true,
+
+        rawBody:
+          true,
       }
     );
   }
 
-  function raw(method, path, options = {}) {
+  function raw(method = "GET", path = "", options = {}) {
     return request(
       method,
       path,
       {
         ...safeObject(options),
+
         raw:
           true,
       }
@@ -1283,7 +2013,7 @@ export const Http = (() => {
   }
 
   /* =======================================================
-     DEFAULT INTERCEPTORS
+     BASE INTERCEPTORS
   ======================================================= */
 
   function registerBaseInterceptors() {
@@ -1294,88 +2024,45 @@ export const Http = (() => {
     state.baseInterceptorsRegistered =
       true;
 
-    /* =====================
-       REQUEST INTERCEPTOR
-    ===================== */
-
     useRequest((requestConfig) => {
-      const normalizedConfig =
+      const cfg =
         normalizePublicRequestConfig(
           requestConfig
         );
 
-      const next = {
-        ...normalizedConfig,
-
-        headers: {
-          ...(normalizedConfig.headers || {}),
-          "X-Requested-With":
-            "XMLHttpRequest",
-        },
+      const headers = {
+        ...(cfg.headers || {}),
       };
 
-      if (AppCore?.config?.debug) {
-        safeLog(
-          "HTTP request config",
-          {
-            ...buildRequestSummary(next),
-            path:
-              safeRedact(next.path),
-          }
-        );
+      if (!headers["X-Requested-With"]) {
+        headers["X-Requested-With"] =
+          "XMLHttpRequest";
       }
 
-      return next;
+      if (!headers["X-Request-Id"]) {
+        headers["X-Request-Id"] =
+          cfg.requestId || nextRequestId();
+      }
+
+      if (
+        cfg.acceptJson !== false &&
+        !headers.Accept
+      ) {
+        headers.Accept =
+          "application/json";
+      }
+
+      return {
+        ...cfg,
+        headers,
+      };
     });
 
-    /* =====================
-       RESPONSE INTERCEPTOR
-    ===================== */
-
-    useResponse((response, requestConfig) => {
-      if (AppCore?.config?.debug) {
-        safeLog(
-          "HTTP response interceptada",
-          {
-            method:
-              requestConfig?.method || null,
-
-            path:
-              safeRedact(requestConfig?.path || ""),
-
-            response,
-          }
-        );
-      }
-
+    useResponse((response) => {
       return response;
     });
 
-    /* =====================
-       ERROR INTERCEPTOR
-    ===================== */
-
-    useError((error, requestConfig) => {
-      safeError(
-        "HTTP error interceptado",
-        {
-          method:
-            requestConfig?.method || null,
-
-          path:
-            safeRedact(requestConfig?.path || ""),
-
-          public:
-            requestConfig?.public === true,
-
-          auth:
-            requestConfig?.auth !== false,
-
-          error:
-            sanitizeErrorForEvent(error),
-        }
-      );
-
+    useError((error) => {
       return error;
     });
 
@@ -1387,13 +2074,13 @@ export const Http = (() => {
   ======================================================= */
 
   function init() {
-    attachToAppCore();
-
     if (state.initialized) {
+      attachToAppCore();
       return api;
     }
 
     if (state.initializing) {
+      attachToAppCore();
       return api;
     }
 
@@ -1401,17 +2088,17 @@ export const Http = (() => {
       true;
 
     try {
+      attachToAppCore();
       registerBaseInterceptors();
 
       state.initialized =
         true;
 
       safeEmit(
-        "http:ready",
+        EVENTS.ready,
         {
-          config: {
-            ...config,
-          },
+          version:
+            SERVICE_VERSION,
 
           bridgeAttached:
             state.bridgeAttached,
@@ -1429,11 +2116,17 @@ export const Http = (() => {
   }
 
   /* =======================================================
-     DEBUG
+     SNAPSHOT / DEBUG
   ======================================================= */
 
   function getHttpSnapshot() {
-    return {
+    return sanitizePayload({
+      service:
+        SERVICE_NAME,
+
+      version:
+        SERVICE_VERSION,
+
       initialized:
         state.initialized,
 
@@ -1467,8 +2160,14 @@ export const Http = (() => {
       refreshFailureCount:
         state.refreshFailureCount,
 
+      refreshInFlight:
+        state.refreshInFlight,
+
       autoLogoutCount:
         state.autoLogoutCount,
+
+      autoLogoutInFlight:
+        state.autoLogoutInFlight,
 
       lastRequestId:
         state.lastRequestId,
@@ -1482,28 +2181,66 @@ export const Http = (() => {
       lastErrorAt:
         state.lastErrorAt,
 
+      lastRefreshAt:
+        state.lastRefreshAt,
+
+      lastRefreshErrorAt:
+        state.lastRefreshErrorAt,
+
+      lastAutoLogoutAt:
+        state.lastAutoLogoutAt,
+
       lastError:
         state.lastError,
 
       config: {
-        ...config,
+        autoRefreshOn401:
+          config.autoRefreshOn401 !== false,
+
+        autoLogoutOn401:
+          config.autoLogoutOn401 !== false,
+
+        timeout:
+          config.timeout ?? null,
+
+        retries:
+          config.retries ?? null,
+
+        retry:
+          config.retry ?? null,
+
+        useLoader:
+          config.useLoader ?? null,
       },
 
-      hasAppCoreHttp:
-        Boolean(AppCore?.http),
+      bridges: {
+        hasAppCoreHttp:
+          Boolean(AppCore?.http || AppCore?.Http),
 
-      hasAppCoreServicesHttp:
-        Boolean(AppCore?.services?.http),
+        hasAppCoreApiClient:
+          Boolean(AppCore?.apiClient),
 
-      hasAppCoreApiClient:
-        Boolean(AppCore?.apiClient),
+        hasAppCoreRequest:
+          Boolean(AppCore?.request),
 
-      hasAuth:
-        Boolean(Auth),
+        hasAppCoreModules:
+          Boolean(AppCore?.modules),
 
-      authenticated:
-        Boolean(AppCore?.state?.authenticated),
-    };
+        hasAuth:
+          Boolean(Auth),
+      },
+
+      auth: {
+        authenticated:
+          Boolean(AppCore?.state?.authenticated),
+
+        hasToken:
+          Boolean(AppCore?.state?.hasToken),
+      },
+
+      at:
+        isoNow(),
+    });
   }
 
   function resetRuntimeState() {
@@ -1513,12 +2250,24 @@ export const Http = (() => {
     state.lastError =
       null;
 
+    state.refreshInFlight =
+      false;
+
+    state.autoLogoutInFlight =
+      false;
+
+    refreshPromise =
+      null;
+
+    logoutPromise =
+      null;
+
     try {
       AppCore?.setLoading?.(false);
     } catch {}
 
     safeEmit(
-      "http:runtime:reset",
+      EVENTS.runtimeReset,
       getHttpSnapshot()
     );
 
@@ -1530,6 +2279,10 @@ export const Http = (() => {
   ======================================================= */
 
   const api = {
+    SERVICE_VERSION,
+    version:
+      SERVICE_VERSION,
+
     init,
 
     request,
@@ -1539,8 +2292,10 @@ export const Http = (() => {
     post,
     put,
     patch,
+
     delete:
       del,
+
     del,
 
     upload,
@@ -1556,10 +2311,22 @@ export const Http = (() => {
     attachToAppCore,
 
     getHttpSnapshot,
+
     getSnapshot:
       getHttpSnapshot,
 
+    getDebugSnapshot:
+      getHttpSnapshot,
+
     resetRuntimeState,
+
+    isAuthEndpoint,
+    isPublicAuthEndpoint,
+    isTechnicalPublicSpaEndpoint,
+    isPublicEndpoint,
+
+    normalizeEndpointPath,
+    normalizePublicRequestConfig,
 
     config,
     state,

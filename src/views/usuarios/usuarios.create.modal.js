@@ -2,7 +2,9 @@
    Onion SPA - Usuarios Create Modal
    Archivo: src/views/usuarios/usuarios.create.modal.js
 
-   USERS EXPERIENCE PRO · CREATE MODAL · INCIDENCIAS 1:1 LOADER · FINAL 10/10
+   USERS EXPERIENCE PRO · CREATE MODAL · CLEAN JS · FINAL 15/10
+   NO INLINE CSS · NO STYLE INJECTION · CSP READY
+   VARIABLES.CSS + UI.CSS + /css/views/usuarios/index.css READY
 
    RESPONSABILIDADES:
    - abrir/cerrar modal de creación de usuario
@@ -17,6 +19,14 @@
    - evitar doble submit y doble binding
    - mostrar loader overlay premium al crear usuario
    - puente global compatible con usuariosView.js
+   - no inyectar estilos
+   - no mutar style="" en runtime
+   - no duplicar listeners AppCore/window
+   - no parpadeos innecesarios en input
+   - clase body modal-open para bloqueo visual externo
+
+   CSS EXTERNO OBLIGATORIO:
+   - /src/css/views/usuarios/index.css
 ========================================================= */
 
 import { AppCore } from "../../core/index.js";
@@ -28,11 +38,13 @@ import { usuariosState } from "./usuarios.state.js";
 
 const MODAL_ID = "usuarios-create-modal-root";
 const PANEL_ID = "usuarios-create-modal-panel";
+const FORM_ID = "usuarios-create-form";
 
 const USERS_CREATE_ENDPOINT = "/api/users/create";
 const USERS_FALLBACK_CREATE_ENDPOINT = "/api/users";
 
 const CREATE_TIMEOUT_MS = 90000;
+const AUTO_CLOSE_SUCCESS_MS = 420;
 
 const PHONE_PREFIX = "+34";
 const PHONE_NATIONAL_DIGITS = 9;
@@ -55,6 +67,19 @@ const DEFAULT_FORM = Object.freeze({
   addressCountry: "España",
 });
 
+const FIELD_ORDER = Object.freeze([
+  "name",
+  "email",
+  "phone",
+  "customerType",
+  "nif",
+  "addressStreet",
+  "addressCp",
+  "addressCity",
+  "addressProvince",
+  "addressCountry",
+]);
+
 /* =========================================================
    LOCAL STATE
 ========================================================= */
@@ -62,8 +87,11 @@ const DEFAULT_FORM = Object.freeze({
 const modalState = {
   isOpen: false,
   bindingsAttached: false,
+  busAttached: false,
+
   escHandler: null,
   lastActiveElement: null,
+  successCloseTimer: null,
 
   submitting: false,
 
@@ -77,14 +105,32 @@ const modalState = {
   },
 };
 
+let busCleanup = null;
+
+const eventDedupe = {
+  name: "",
+  key: "",
+  at: 0,
+};
+
 /* =========================================================
    HELPERS CORE
 ========================================================= */
 
+function isBrowser() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined"
+  );
+}
+
 function safeText(value, fallback = "") {
   if (value === null || value === undefined) return fallback;
 
-  const text = String(value).trim();
+  const text = String(value)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return text || fallback;
 }
@@ -118,6 +164,10 @@ function first(...values) {
   return null;
 }
 
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(Object(obj), key);
+}
+
 function escapeHtml(value = "") {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -135,80 +185,141 @@ function safeEmit(event = "", payload = {}) {
   const eventName = safeText(event, "");
   if (!eventName) return false;
 
+  let emitted = false;
+
   try {
     AppCore?.events?.emit?.(eventName, payload);
-    return true;
+    emitted = true;
   } catch {}
 
   try {
-    window.dispatchEvent(
-      new CustomEvent(eventName, {
-        detail: payload,
-      })
-    );
-    return true;
+    if (isBrowser()) {
+      window.dispatchEvent(
+        new CustomEvent(eventName, {
+          detail: payload,
+        })
+      );
+
+      emitted = true;
+    }
   } catch {}
 
-  return false;
+  return emitted;
 }
 
-function safeOn(event = "", handler = null) {
+function addEventBusListener(event = "", handler = null) {
   const eventName = safeText(event, "");
-  if (!eventName || typeof handler !== "function") return false;
+  if (!eventName || typeof handler !== "function") return () => {};
 
-  let attached = false;
-
-  try {
-    AppCore?.events?.on?.(eventName, handler);
-    attached = true;
-  } catch {}
+  const cleanups = [];
 
   try {
-    window.addEventListener(eventName, handler);
-    attached = true;
-  } catch {}
+    if (typeof AppCore?.events?.on === "function") {
+      AppCore.events.on(eventName, handler);
 
-  return attached;
-}
-
-function safeOff(event = "", handler = null) {
-  const eventName = safeText(event, "");
-  if (!eventName || typeof handler !== "function") return false;
-
-  let detached = false;
-
-  try {
-    AppCore?.events?.off?.(eventName, handler);
-    detached = true;
-  } catch {}
-
-  try {
-    window.removeEventListener(eventName, handler);
-    detached = true;
-  } catch {}
-
-  return detached;
-}
-
-function showToast(message = "", type = "info") {
-  const text = safeText(message, "");
-  if (!text) return;
-
-  try {
-    if (typeof AppCore?.toast?.[type] === "function") {
-      AppCore.toast[type](text);
-      return;
+      cleanups.push(() => {
+        try {
+          AppCore?.events?.off?.(eventName, handler);
+        } catch {}
+      });
     }
   } catch {}
 
   try {
-    AppCore?.toast?.show?.(text, type);
-    return;
+    if (isBrowser()) {
+      window.addEventListener(eventName, handler);
+
+      cleanups.push(() => {
+        try {
+          window.removeEventListener(eventName, handler);
+        } catch {}
+      });
+    }
+  } catch {}
+
+  return () => {
+    for (const cleanup of cleanups) {
+      try {
+        cleanup?.();
+      } catch {}
+    }
+  };
+}
+
+function dedupeEvent(eventName = "", payload = {}) {
+  const now = Date.now();
+
+  let key = "";
+
+  try {
+    key = JSON.stringify(payload || {});
+  } catch {
+    key = String(payload || "");
+  }
+
+  if (
+    eventDedupe.name === eventName &&
+    eventDedupe.key === key &&
+    now - eventDedupe.at < 80
+  ) {
+    return true;
+  }
+
+  eventDedupe.name = eventName;
+  eventDedupe.key = key;
+  eventDedupe.at = now;
+
+  return false;
+}
+
+function showToast(message = "", type = "info") {
+  const text = safeText(message, "");
+  if (!text) return false;
+
+  const toastType = safeLower(type, "info") || "info";
+
+  try {
+    if (typeof AppCore?.toast?.[toastType] === "function") {
+      AppCore.toast[toastType](text);
+      return true;
+    }
   } catch {}
 
   try {
-    AppCore?.ui?.toast?.[type]?.(text);
+    if (typeof AppCore?.toast?.show === "function") {
+      AppCore.toast.show(text, toastType);
+      return true;
+    }
   } catch {}
+
+  try {
+    if (typeof AppCore?.ui?.toast?.[toastType] === "function") {
+      AppCore.ui.toast[toastType](text);
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (typeof AppCore?.ui?.toast?.show === "function") {
+      AppCore.ui.toast.show({
+        message: text,
+        type: toastType,
+      });
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (isBrowser() && typeof window.Toast?.show === "function") {
+      window.Toast.show({
+        message: text,
+        type: toastType,
+      });
+      return true;
+    }
+  } catch {}
+
+  return false;
 }
 
 function isAbsoluteUrl(value = "") {
@@ -221,8 +332,8 @@ function getApiBase() {
       AppCore?.config?.apiBase,
       AppCore?.config?.api?.baseUrl,
       AppCore?.state?.apiBase,
-      window?.ONION_API_BASE,
-      window?.API_BASE
+      isBrowser() ? window?.ONION_API_BASE : "",
+      isBrowser() ? window?.API_BASE : ""
     ),
     ""
   );
@@ -256,9 +367,11 @@ function getAuthToken() {
     first(
       AppCore?.state?.token,
       AppCore?.state?.accessToken,
+      AppCore?.state?.session?.token,
+      AppCore?.state?.session?.accessToken,
       AppCore?.auth?.getToken?.(),
       AppCore?.Auth?.getToken?.(),
-      window?.Auth?.getToken?.(),
+      isBrowser() ? window?.Auth?.getToken?.() : "",
       typeof localStorage !== "undefined" ? localStorage.getItem("token") : "",
       typeof localStorage !== "undefined" ? localStorage.getItem("accessToken") : "",
       typeof sessionStorage !== "undefined" ? sessionStorage.getItem("token") : "",
@@ -303,11 +416,31 @@ function getHttpStatus(error = null) {
 }
 
 function shouldTryNextCandidate(error = null) {
+  const code = safeText(error?.message || error?.code || "", "");
+
+  if (
+    [
+      "API_CLIENT_UNAVAILABLE",
+      "API_CLIENT_POST_UNAVAILABLE",
+      "APP_CORE_REQUEST_UNAVAILABLE",
+      "HTTP_MODULE_UNAVAILABLE",
+      "HTTP_POST_UNAVAILABLE",
+    ].includes(code)
+  ) {
+    return true;
+  }
+
   const status = getHttpStatus(error);
 
   if (!status) return true;
 
-  return [404, 405, 409, 415, 422, 500, 502, 503, 504].includes(status);
+  /*
+    No se reintenta 400/401/403/409/422:
+    - 409: email/usuario duplicado.
+    - 422: validación backend.
+    Reintentar contra otro endpoint puede duplicar efectos o ensuciar errores.
+  */
+  return [404, 405, 415, 500, 502, 503, 504].includes(status);
 }
 
 function createTimeoutController(timeoutMs = 15000) {
@@ -325,6 +458,16 @@ function createTimeoutController(timeoutMs = 15000) {
       clearTimeout(timer);
     },
   };
+}
+
+function clearSuccessCloseTimer() {
+  try {
+    if (modalState.successCloseTimer) {
+      clearTimeout(modalState.successCloseTimer);
+    }
+  } catch {}
+
+  modalState.successCloseTimer = null;
 }
 
 /* =========================================================
@@ -350,7 +493,9 @@ function extractSpanishPhoneDigits(value = "") {
 }
 
 function groupSpanishPhoneDigits(digits = "") {
-  const clean = String(digits || "").replace(/\D/g, "").slice(0, PHONE_NATIONAL_DIGITS);
+  const clean = String(digits || "")
+    .replace(/\D/g, "")
+    .slice(0, PHONE_NATIONAL_DIGITS);
 
   return clean
     .replace(/(\d{3})(?=\d)/g, "$1 ")
@@ -414,23 +559,30 @@ function buildUsernameFromForm(form = {}) {
    STATE HELPERS
 ========================================================= */
 
-function getInitialForm() {
-  const draft = safeObject(usuariosState?.createDraft);
-  const direccion = safeObject(draft.direccion);
+function normalizeDraftToForm(draft = {}) {
+  const source = safeObject(draft);
+  const direccion = safeObject(source.direccion || source.address || source.location);
 
   return {
-    name: safeText(first(draft.name, draft.fullName), ""),
-    email: safeText(draft.email, ""),
-    phone: formatSpanishPhoneForInput(first(draft.phone, `${PHONE_PREFIX} `)),
+    name: safeText(first(source.name, source.fullName, source.displayName, source.nombre), ""),
+    email: safeText(first(source.email, source.mail), ""),
+    phone: formatSpanishPhoneForInput(first(source.phone, source.telefono, `${PHONE_PREFIX} `)),
 
-    customerType: normalizeCustomerType(first(draft.customerType, draft.tipo, "particular")),
-    nif: safeText(draft.nif, ""),
+    customerType: normalizeCustomerType(first(source.customerType, source.tipo, "particular")),
+    nif: safeText(first(source.nif, source.cif, source.taxId), ""),
 
-    addressStreet: safeText(first(draft.addressStreet, direccion.calle), ""),
-    addressCp: safeText(first(draft.addressCp, direccion.cp), ""),
-    addressCity: safeText(first(draft.addressCity, direccion.ciudad), ""),
-    addressProvince: safeText(first(draft.addressProvince, direccion.provincia), ""),
-    addressCountry: safeText(first(draft.addressCountry, direccion.pais), "España"),
+    addressStreet: safeText(first(source.addressStreet, direccion.calle, direccion.street), ""),
+    addressCp: safeText(first(source.addressCp, direccion.cp, direccion.postalCode), ""),
+    addressCity: safeText(first(source.addressCity, direccion.ciudad, direccion.city), ""),
+    addressProvince: safeText(first(source.addressProvince, direccion.provincia, direccion.province), ""),
+    addressCountry: safeText(first(source.addressCountry, direccion.pais, direccion.country), "España"),
+  };
+}
+
+function getInitialForm() {
+  return {
+    ...DEFAULT_FORM,
+    ...normalizeDraftToForm(usuariosState?.createDraft || {}),
   };
 }
 
@@ -494,13 +646,19 @@ function clearDraft() {
 }
 
 function setFormPatch(patch = {}) {
-  const nextPatch = safeObject(patch);
+  const nextPatch = {
+    ...safeObject(patch),
+  };
 
-  if (Object.prototype.hasOwnProperty.call(nextPatch, "phone")) {
+  if (hasOwn(nextPatch, "phone")) {
     nextPatch.phone = formatSpanishPhoneForInput(nextPatch.phone);
   }
 
-  if (Object.prototype.hasOwnProperty.call(nextPatch, "customerType")) {
+  if (hasOwn(nextPatch, "email")) {
+    nextPatch.email = safeLower(nextPatch.email, "");
+  }
+
+  if (hasOwn(nextPatch, "customerType")) {
     nextPatch.customerType = normalizeCustomerType(nextPatch.customerType);
   }
 
@@ -698,7 +856,11 @@ async function createViaAppCoreRequest(endpoint = "", payload = null) {
 }
 
 async function createViaHttpModule(endpoint = "", payload = null) {
-  const Http = AppCore?.modules?.Http || AppCore?.Http || window?.Http || null;
+  const Http =
+    AppCore?.modules?.Http ||
+    AppCore?.Http ||
+    (isBrowser() ? window?.Http : null) ||
+    null;
 
   if (!Http) {
     throw new Error("HTTP_MODULE_UNAVAILABLE");
@@ -967,7 +1129,11 @@ function renderAlert(type = "info", title = "", text = "") {
 
 function renderCreateLoadingOverlay(label = "Creando usuario...") {
   return `
-    <div class="usr-create-loading-overlay" aria-live="polite" aria-busy="true">
+    <div
+      class="usr-create-loading-overlay"
+      aria-live="polite"
+      aria-busy="true"
+    >
       <div class="usr-create-loading-card">
         <span class="usr-create-loading-spinner" aria-hidden="true"></span>
         <strong>${escapeHtml(label)}</strong>
@@ -1052,7 +1218,7 @@ function renderModalInner() {
               : ""
           }
 
-          <form id="usuarios-create-form" novalidate class="usr-create-form">
+          <form id="${FORM_ID}" novalidate class="usr-create-form">
             <div class="usr-create-main">
               ${renderInput({
                 label: "Nombre completo",
@@ -1187,394 +1353,6 @@ function renderModalInner() {
             </div>
           </form>
         </div>
-
-        <style>
-          @keyframes usuariosCreateSpin {
-            to { transform: rotate(360deg); }
-          }
-
-          .usr-create-overlay{
-            position:fixed;
-            inset:0;
-            z-index:9999;
-            padding:18px;
-            display:grid;
-            place-items:center;
-            background:rgba(0,0,0,.66);
-            backdrop-filter:blur(10px);
-            -webkit-backdrop-filter:blur(10px);
-          }
-
-          .usr-create-panel{
-            position:relative;
-            width:min(1180px, 100%);
-            max-height:90vh;
-            overflow:auto;
-            border-radius:24px;
-            border:1px solid var(--border-soft, #2b2b2b);
-            background:
-              radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent), transparent 34%),
-              linear-gradient(180deg, var(--surface-2, #151515), var(--surface-1, #121212));
-            box-shadow:0 34px 84px rgba(0,0,0,.42);
-          }
-
-          .usr-create-panel.is-submitting{
-            overflow:hidden;
-          }
-
-          .usr-create-loading-overlay{
-            position:absolute;
-            inset:0;
-            z-index:30;
-            display:grid;
-            place-items:center;
-            padding:22px;
-            background:color-mix(in srgb, var(--surface-1, #f8fafc) 74%, transparent);
-            backdrop-filter:blur(5px);
-            -webkit-backdrop-filter:blur(5px);
-          }
-
-          .usr-create-loading-card{
-            display:grid;
-            justify-items:center;
-            gap:12px;
-            min-width:min(100%, 275px);
-            padding:24px 28px;
-            border-radius:18px;
-            border:1px solid color-mix(in srgb, var(--accent, #7c5cff) 26%, rgba(15,23,42,.08));
-            background:
-              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 100%),
-              rgba(255,255,255,.78);
-            box-shadow:
-              0 30px 70px rgba(15,23,42,.18),
-              0 1px 0 rgba(255,255,255,.72) inset;
-          }
-
-          .usr-create-loading-card strong{
-            color:var(--text-strong, #111827);
-            font-size:14px;
-            line-height:1.35;
-            font-weight:var(--weight-bold, 700);
-            letter-spacing:-.015em;
-          }
-
-          .usr-create-loading-spinner{
-            width:30px;
-            height:30px;
-            border-radius:999px;
-            border:3px solid color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
-            border-top-color:var(--accent, #7c5cff);
-            animation:usuariosCreateSpin .78s linear infinite;
-          }
-
-          .usr-create-header{
-            display:flex;
-            align-items:flex-start;
-            justify-content:space-between;
-            gap:14px;
-            padding:18px 18px 14px;
-            border-bottom:1px solid var(--border-soft);
-          }
-
-          .usr-create-header-copy{
-            display:grid;
-            gap:10px;
-            min-width:0;
-            flex:1 1 auto;
-          }
-
-          .usr-create-header-text{
-            display:grid;
-            gap:6px;
-          }
-
-          .usr-create-header-text h2{
-            margin:0;
-            color:var(--text-strong);
-            font-size:clamp(24px, 3.6vw, 34px);
-            line-height:1;
-            letter-spacing:-.045em;
-          }
-
-          .usr-create-header-text p{
-            margin:0;
-            max-width:860px;
-            color:var(--text-dim);
-            font-size:13px;
-            line-height:1.55;
-          }
-
-          .usr-create-close{
-            width:42px;
-            height:42px;
-            flex:0 0 auto;
-            border:none;
-            border-radius:14px;
-            cursor:pointer;
-            font-size:18px;
-            background:var(--surface-glass);
-            color:var(--text-strong);
-            border:1px solid var(--border-soft);
-            opacity:1;
-          }
-
-          .usr-create-close:disabled{
-            opacity:.7;
-            cursor:not-allowed;
-          }
-
-          .usr-create-body{
-            padding:16px 18px 18px;
-            display:grid;
-            gap:14px;
-          }
-
-          .usr-create-alert{
-            display:grid;
-            gap:4px;
-            padding:12px 14px;
-            border-radius:14px;
-            border:1px solid var(--border-soft);
-            background:var(--surface-1, var(--surface-glass));
-          }
-
-          .usr-create-alert strong{
-            color:var(--text-strong);
-            font-size:13px;
-            line-height:1.35;
-          }
-
-          .usr-create-alert span{
-            color:var(--text-dim);
-            font-size:12px;
-            line-height:1.5;
-          }
-
-          .usr-create-alert.is-success{
-            border-color:color-mix(in srgb, var(--success-strong, #36c690) 28%, var(--border-soft));
-            background:
-              linear-gradient(180deg, color-mix(in srgb, var(--success-strong, #36c690) 10%, transparent), transparent 85%),
-              var(--surface-1, var(--surface-glass));
-          }
-
-          .usr-create-alert.is-error{
-            border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 28%, var(--border-soft));
-            background:
-              linear-gradient(180deg, color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent), transparent 85%),
-              var(--surface-1, var(--surface-glass));
-          }
-
-          .usr-create-form{
-            display:grid;
-            gap:14px;
-          }
-
-          .usr-create-main{
-            display:grid;
-            gap:14px;
-            min-width:0;
-          }
-
-          .usr-create-inline-grid{
-            display:grid;
-            grid-template-columns:repeat(2, minmax(0, 1fr));
-            gap:14px;
-          }
-
-          .usr-create-inline-grid--3{
-            grid-template-columns:1.8fr .7fr 1fr;
-          }
-
-          .usr-create-field{
-            display:grid;
-            gap:8px;
-            min-width:0;
-          }
-
-          .usr-create-label{
-            color:var(--text-soft);
-            font-size:11px;
-            font-weight:var(--weight-bold, 700);
-            letter-spacing:.05em;
-            text-transform:uppercase;
-          }
-
-          .usr-create-input,
-          .usr-create-select{
-            width:100%;
-            outline:none;
-            color:var(--text-strong);
-            background:var(--surface-1, var(--surface-glass));
-            border:1px solid var(--border-soft);
-            transition:
-              border-color .18s ease,
-              box-shadow .18s ease,
-              background .18s ease;
-          }
-
-          .usr-create-input,
-          .usr-create-select{
-            min-height:46px;
-            padding:0 14px;
-            border-radius:14px;
-            font-size:14px;
-          }
-
-          .usr-create-select{
-            appearance:none;
-            -webkit-appearance:none;
-            -moz-appearance:none;
-            cursor:pointer;
-            background-image:
-              linear-gradient(45deg, transparent 50%, currentColor 50%),
-              linear-gradient(135deg, currentColor 50%, transparent 50%);
-            background-position:
-              calc(100% - 18px) calc(50% - 3px),
-              calc(100% - 12px) calc(50% - 3px);
-            background-size:6px 6px, 6px 6px;
-            background-repeat:no-repeat;
-          }
-
-          .usr-create-input::placeholder{
-            color:var(--text-faint);
-          }
-
-          .usr-create-input:focus,
-          .usr-create-select:focus{
-            border-color:color-mix(in srgb, var(--accent, #7c5cff) 30%, var(--border-soft));
-            box-shadow:0 0 0 4px color-mix(in srgb, var(--accent, #7c5cff) 10%, transparent);
-          }
-
-          .usr-create-input.is-error,
-          .usr-create-select.is-error{
-            border-color:color-mix(in srgb, var(--danger-strong, #ff6b6b) 38%, var(--border-soft));
-            box-shadow:0 0 0 4px color-mix(in srgb, var(--danger-strong, #ff6b6b) 10%, transparent);
-          }
-
-          .usr-create-input:disabled,
-          .usr-create-select:disabled{
-            opacity:.78;
-            cursor:not-allowed;
-          }
-
-          .usr-create-error{
-            color:var(--danger-strong, #ff6b6b);
-            font-size:11px;
-            line-height:1.35;
-            font-weight:var(--weight-semibold, 600);
-          }
-
-          .usr-create-actions{
-            display:flex;
-            justify-content:flex-end;
-            gap:12px;
-            padding-top:8px;
-          }
-
-          .usr-create-submit{
-            min-height:42px;
-            padding:0 16px;
-            border-radius:12px;
-            border:1px solid var(--btn-primary-border, color-mix(in srgb, var(--accent, #7c5cff) 28%, transparent));
-            background:var(--btn-primary-bg, var(--accent, #7c5cff));
-            color:var(--btn-primary-text, #fff);
-            font-size:13px;
-            font-weight:var(--weight-bold, 700);
-            cursor:pointer;
-            box-shadow:0 12px 26px color-mix(in srgb, var(--accent, #7c5cff) 18%, transparent);
-          }
-
-          .usr-create-submit:disabled{
-            opacity:.8;
-            cursor:wait;
-          }
-
-          .usr-create-submit-inner{
-            display:inline-flex;
-            align-items:center;
-            gap:8px;
-          }
-
-          .usr-create-spinner{
-            width:14px;
-            height:14px;
-            border-radius:999px;
-            border:2px solid rgba(255,255,255,.28);
-            border-top-color:#fff;
-            animation:usuariosCreateSpin .8s linear infinite;
-          }
-
-          [data-theme="dark"] .usr-create-loading-overlay{
-            background:color-mix(in srgb, var(--surface-1, #111) 78%, transparent);
-          }
-
-          [data-theme="dark"] .usr-create-loading-card{
-            background:
-              linear-gradient(180deg, color-mix(in srgb, var(--accent, #7c5cff) 12%, transparent), transparent 100%),
-              color-mix(in srgb, var(--surface-2, #171717) 92%, transparent);
-            box-shadow:
-              0 30px 70px rgba(0,0,0,.36),
-              0 1px 0 rgba(255,255,255,.06) inset;
-          }
-
-          [data-theme="dark"] .usr-create-loading-card strong{
-            color:var(--text-strong, #fff);
-          }
-
-          [data-theme="light"] .usr-create-panel{
-            background:
-              radial-gradient(circle at top left, color-mix(in srgb, var(--accent, #7c5cff) 8%, transparent), transparent 34%),
-              linear-gradient(180deg, rgba(255,255,255,.96), rgba(248,250,255,.94));
-            box-shadow:
-              0 28px 70px rgba(15,23,42,.14),
-              0 0 0 1px rgba(255,255,255,.65) inset;
-          }
-
-          [data-theme="light"] .usr-create-alert,
-          [data-theme="light"] .usr-create-input,
-          [data-theme="light"] .usr-create-select{
-            box-shadow:0 6px 16px rgba(15,23,42,.04);
-          }
-
-          @media (max-width: 820px){
-            .usr-create-inline-grid,
-            .usr-create-inline-grid--3{
-              grid-template-columns:1fr;
-            }
-          }
-
-          @media (max-width: 640px){
-            .usr-create-overlay{
-              padding:10px;
-            }
-
-            .usr-create-panel{
-              width:100%;
-              max-height:94vh;
-              border-radius:18px;
-            }
-
-            .usr-create-header{
-              padding:14px 14px 12px;
-            }
-
-            .usr-create-body{
-              padding:14px;
-            }
-
-            .usr-create-header-text h2{
-              font-size:28px;
-            }
-
-            .usr-create-actions{
-              justify-content:stretch;
-            }
-
-            .usr-create-submit{
-              width:100%;
-            }
-          }
-        </style>
       </div>
     </div>
   `;
@@ -1585,10 +1363,13 @@ function renderModalInner() {
 ========================================================= */
 
 function getRoot() {
+  if (!isBrowser()) return null;
   return document.getElementById(MODAL_ID);
 }
 
 function ensureRoot() {
+  if (!isBrowser()) return null;
+
   let root = getRoot();
 
   if (root) {
@@ -1597,29 +1378,46 @@ function ensureRoot() {
 
   root = document.createElement("div");
   root.id = MODAL_ID;
+  root.className = "usuarios-create-modal-host";
+  root.setAttribute("data-usuarios-create-modal-root", "true");
+
   document.body.appendChild(root);
 
   return root;
 }
 
 function lockBody() {
-  try {
-    document.body.classList.add("modal-open");
-  } catch {}
+  if (!isBrowser()) return;
 
   try {
-    document.body.style.overflow = "hidden";
+    document.body.classList.add("modal-open", "usuarios-create-modal-open");
   } catch {}
 }
 
 function unlockBody() {
-  try {
-    document.body.classList.remove("modal-open");
-  } catch {}
+  if (!isBrowser()) return;
 
   try {
-    document.body.style.overflow = "";
+    document.body.classList.remove("usuarios-create-modal-open");
   } catch {}
+
+  /*
+    No se elimina modal-open si otros modales siguen abiertos.
+  */
+  try {
+    const hasOtherOpenModal =
+      document.querySelector("[data-usuarios-modal-root='true'] .is-open") ||
+      document.querySelector("[data-modal-root='true'] .is-open") ||
+      document.querySelector("[aria-modal='true']");
+
+    if (!hasOtherOpenModal) {
+      document.body.classList.remove("modal-open");
+    }
+  } catch {
+    try {
+      document.body.classList.remove("modal-open");
+    } catch {}
+  }
 }
 
 function restoreFocus() {
@@ -1633,7 +1431,8 @@ function restoreFocus() {
 ========================================================= */
 
 function detachEscHandler() {
-  if (!modalState.escHandler) {
+  if (!modalState.escHandler || !isBrowser()) {
+    modalState.escHandler = null;
     return;
   }
 
@@ -1645,6 +1444,8 @@ function detachEscHandler() {
 }
 
 function attachEscHandler() {
+  if (!isBrowser()) return;
+
   detachEscHandler();
 
   modalState.escHandler = (event) => {
@@ -1665,14 +1466,20 @@ function attachEscHandler() {
 function renderModal() {
   const root = ensureRoot();
 
+  if (!root) return null;
+
   if (!modalState.isOpen) {
     detachRootBindings();
     root.innerHTML = "";
+    root.classList.remove("is-open");
     return root;
   }
 
   detachRootBindings();
+
+  root.classList.add("is-open");
   root.innerHTML = renderModalInner();
+
   modalState.bindingsAttached = false;
 
   return root;
@@ -1710,16 +1517,11 @@ function focusField(fieldName = "") {
 function focusFirstInvalidField() {
   const errors = safeObject(modalState.errors);
 
-  if (errors.name && focusField("name")) return true;
-  if (errors.email && focusField("email")) return true;
-  if (errors.phone && focusField("phone")) return true;
-  if (errors.customerType && focusField("customerType")) return true;
-  if (errors.nif && focusField("nif")) return true;
-  if (errors.addressStreet && focusField("addressStreet")) return true;
-  if (errors.addressCp && focusField("addressCp")) return true;
-  if (errors.addressCity && focusField("addressCity")) return true;
-  if (errors.addressProvince && focusField("addressProvince")) return true;
-  if (errors.addressCountry && focusField("addressCountry")) return true;
+  for (const field of FIELD_ORDER) {
+    if (errors[field] && focusField(field)) {
+      return true;
+    }
+  }
 
   focusPanel();
   return false;
@@ -1741,6 +1543,10 @@ function focusPreferredField() {
 ========================================================= */
 
 export function openUsuariosCreateModal(draft = {}) {
+  if (!isBrowser()) return false;
+
+  clearSuccessCloseTimer();
+
   modalState.lastActiveElement = document.activeElement || null;
   modalState.isOpen = true;
   modalState.submitting = false;
@@ -1749,7 +1555,7 @@ export function openUsuariosCreateModal(draft = {}) {
 
   modalState.form = {
     ...getInitialForm(),
-    ...safeObject(draft),
+    ...normalizeDraftToForm(draft),
   };
 
   modalState.form.customerType = normalizeCustomerType(
@@ -1780,6 +1586,8 @@ export function closeUsuariosCreateModal() {
     return false;
   }
 
+  clearSuccessCloseTimer();
+
   const root = getRoot();
 
   modalState.isOpen = false;
@@ -1787,11 +1595,13 @@ export function closeUsuariosCreateModal() {
 
   resetFeedbackState();
   resetFormState();
+  clearDraft();
 
   detachRootBindings();
 
   if (root) {
     root.innerHTML = "";
+    root.classList.remove("is-open");
   }
 
   unlockBody();
@@ -1808,9 +1618,11 @@ export function updateUsuariosCreateModal(draft = {}) {
     return openUsuariosCreateModal(draft);
   }
 
+  clearSuccessCloseTimer();
+
   modalState.form = {
     ...safeObject(modalState.form),
-    ...safeObject(draft),
+    ...normalizeDraftToForm(draft),
   };
 
   modalState.form.customerType = normalizeCustomerType(
@@ -1822,6 +1634,7 @@ export function updateUsuariosCreateModal(draft = {}) {
   );
 
   persistDraft();
+
   renderModal();
   attachRootBindings();
   focusPreferredField();
@@ -1838,10 +1651,11 @@ async function handleSubmit() {
     return false;
   }
 
+  clearSuccessCloseTimer();
+
   modalState.successMessage = "";
   modalState.createdUserId = "";
   modalState.serverError = "";
-
   modalState.form.phone = formatSpanishPhoneForInput(modalState.form.phone);
 
   const validation = validateForm(modalState.form);
@@ -1915,11 +1729,11 @@ async function handleSubmit() {
       detail,
     });
 
-    setTimeout(() => {
+    modalState.successCloseTimer = setTimeout(() => {
       if (modalState.isOpen && !modalState.submitting) {
         closeUsuariosCreateModal();
       }
-    }, 380);
+    }, AUTO_CLOSE_SUCCESS_MS);
 
     return true;
   } catch (error) {
@@ -1986,6 +1800,10 @@ function handleFieldChange(target) {
     } catch {}
   }
 
+  if (field === "email") {
+    value = safeLower(value, "");
+  }
+
   if (field === "customerType") {
     value = normalizeCustomerType(value);
   }
@@ -2006,6 +1824,11 @@ function handleFieldChange(target) {
 
   clearTransientFeedback();
 
+  /*
+    Solo se rerenderiza cuando cambia el tipo:
+    - cambia required de NIF/CIF
+    - evita parpadeos por input normal
+  */
   if (field === "customerType") {
     renderModal();
     attachRootBindings();
@@ -2019,9 +1842,10 @@ function attachRootBindings() {
   }
 
   const root = ensureRoot();
+  if (!root) return;
 
   const onInput = (event) => {
-    const field = event.target.closest("[data-field]");
+    const field = event.target?.closest?.("[data-field]");
     if (!field) return;
     if (field.tagName === "SELECT") return;
 
@@ -2029,14 +1853,14 @@ function attachRootBindings() {
   };
 
   const onChange = (event) => {
-    const field = event.target.closest("[data-field]");
+    const field = event.target?.closest?.("[data-field]");
     if (!field) return;
 
     handleFieldChange(field);
   };
 
   const onSubmit = async (event) => {
-    const form = event.target.closest("#usuarios-create-form");
+    const form = event.target?.closest?.(`#${FORM_ID}`);
     if (!form) return;
 
     event.preventDefault();
@@ -2045,7 +1869,7 @@ function attachRootBindings() {
   };
 
   const onClick = (event) => {
-    const closeBtn = event.target.closest("[data-modal-close='true']");
+    const closeBtn = event.target?.closest?.("[data-modal-close='true']");
 
     if (closeBtn) {
       event.preventDefault();
@@ -2057,8 +1881,8 @@ function attachRootBindings() {
       return;
     }
 
-    const overlay = event.target.closest("[data-usuarios-create-modal-overlay='true']");
-    const panel = event.target.closest("[data-usuarios-create-modal-panel='true']");
+    const overlay = event.target?.closest?.("[data-usuarios-create-modal-overlay='true']");
+    const panel = event.target?.closest?.("[data-usuarios-create-modal-panel='true']");
 
     if (
       overlay &&
@@ -2137,38 +1961,71 @@ function unwrapEventDraft(event) {
 
 function handleOpenEvent(event) {
   const draft = unwrapEventDraft(event);
+
+  if (dedupeEvent("usuarios:create-modal:open", draft)) {
+    return;
+  }
+
   openUsuariosCreateModal(draft);
 }
 
-function handleCloseEvent() {
+function handleCloseEvent(event) {
+  const payload = event?.detail ?? event ?? {};
+
+  if (dedupeEvent("usuarios:create-modal:close", payload)) {
+    return;
+  }
+
   closeUsuariosCreateModal();
 }
 
 function handleUpdateEvent(event) {
   const draft = unwrapEventDraft(event);
+
+  if (dedupeEvent("usuarios:create-modal:update", draft)) {
+    return;
+  }
+
   updateUsuariosCreateModal(draft);
 }
 
-let busAttached = false;
-
 function attachBus() {
-  if (busAttached) return;
+  if (modalState.busAttached) return;
 
-  safeOn("usuarios:create-modal:open", handleOpenEvent);
-  safeOn("usuarios:create-modal:close", handleCloseEvent);
-  safeOn("usuarios:create-modal:update", handleUpdateEvent);
+  const cleanups = [];
 
-  busAttached = true;
+  cleanups.push(
+    addEventBusListener("usuarios:create-modal:open", handleOpenEvent)
+  );
+
+  cleanups.push(
+    addEventBusListener("usuarios:create-modal:close", handleCloseEvent)
+  );
+
+  cleanups.push(
+    addEventBusListener("usuarios:create-modal:update", handleUpdateEvent)
+  );
+
+  busCleanup = () => {
+    for (const cleanup of cleanups) {
+      try {
+        cleanup?.();
+      } catch {}
+    }
+  };
+
+  modalState.busAttached = true;
 }
 
 function detachBus() {
-  if (!busAttached) return;
+  if (!modalState.busAttached) return;
 
-  safeOff("usuarios:create-modal:open", handleOpenEvent);
-  safeOff("usuarios:create-modal:close", handleCloseEvent);
-  safeOff("usuarios:create-modal:update", handleUpdateEvent);
+  try {
+    busCleanup?.();
+  } catch {}
 
-  busAttached = false;
+  busCleanup = null;
+  modalState.busAttached = false;
 }
 
 /* =========================================================
@@ -2180,7 +2037,15 @@ export const OnionUsuariosCreateModal = {
     return openUsuariosCreateModal(draft);
   },
 
+  show(draft = {}) {
+    return openUsuariosCreateModal(draft);
+  },
+
   close() {
+    return closeUsuariosCreateModal();
+  },
+
+  hide() {
     return closeUsuariosCreateModal();
   },
 
@@ -2190,17 +2055,30 @@ export const OnionUsuariosCreateModal = {
 
   getState() {
     return {
-      ...modalState,
+      isOpen: Boolean(modalState.isOpen),
+      submitting: Boolean(modalState.submitting),
       errors: { ...safeObject(modalState.errors) },
+      serverError: safeText(modalState.serverError, ""),
+      successMessage: safeText(modalState.successMessage, ""),
+      createdUserId: safeText(modalState.createdUserId, ""),
       form: {
         ...safeObject(modalState.form),
       },
+      bindingsAttached: Boolean(modalState.bindingsAttached),
+      busAttached: Boolean(modalState.busAttached),
     };
   },
 
   destroy() {
+    clearSuccessCloseTimer();
+
     detachRootBindings();
+
+    modalState.submitting = false;
+    modalState.isOpen = false;
+
     closeUsuariosCreateModal();
+
     detachEscHandler();
     detachBus();
 
@@ -2215,11 +2093,14 @@ export const OnionUsuariosCreateModal = {
 };
 
 try {
-  window.OnionUsuariosCreateModal = OnionUsuariosCreateModal;
+  if (isBrowser()) {
+    window.OnionUsuariosCreateModal = OnionUsuariosCreateModal;
 
-  window.renderUsuariosCreateModal = OnionUsuariosCreateModal.open;
-  window.renderUsuarioCreateModal = OnionUsuariosCreateModal.open;
-  window.openUsuarioCreateModal = OnionUsuariosCreateModal.open;
+    window.renderUsuariosCreateModal = OnionUsuariosCreateModal.open;
+    window.renderUsuarioCreateModal = OnionUsuariosCreateModal.open;
+    window.openUsuarioCreateModal = OnionUsuariosCreateModal.open;
+    window.openUsuariosCreateModal = OnionUsuariosCreateModal.open;
+  }
 } catch {}
 
 /* =========================================================

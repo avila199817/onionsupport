@@ -2,21 +2,24 @@
    Onion SPA - Cuenta Template
    Archivo: src/views/cuenta/cuenta.template.js
 
-   EXTREME PRO SYSTEM · ACCOUNT SETTINGS COMMAND CENTER · CLEAN TEMPLATE 10/10
-   NO INLINE CSS · NO STYLE INJECTION · NO INLINE IMG HANDLERS · CSP CLEAN
+   EXTREME PRO SYSTEM · ACCOUNT SETTINGS COMMAND CENTER · 14/10
+   CLEAN TEMPLATE ONLY · NO INLINE CSS · NO STYLE INJECTION
+   NO INLINE IMG HANDLERS · NO NATIVE TITLE TOOLTIP · CSP CLEAN
    VARIABLES.CSS + UI.CSS + CUENTA.CSS EXTERNAL ONLY
 
    RESPONSABILIDADES:
    - render header premium de cuenta
    - render panel productivo de ajustes
-   - render perfil / apariencia / idioma / seguridad / actividad
+   - render perfil / apariencia / idioma / privacidad / seguridad / actividad
    - render loading / error / empty
    - soportar avatar real + fallback por iniciales
    - soportar darkMode / idioma / cambio de contraseña
    - mantener compatibilidad con cuentaView.js
    - mantener compatibilidad con cuenta.bindings.js
-   - acciones compatibles con data-action
-   - inputs compatibles con data-role
+   - acciones compatibles con data-action y data-cuenta-action
+   - inputs compatibles con data-role / data-cuenta-field / name
+   - preservar valores de state.view.form en rerender
+   - evitar IDs duplicados
    - no inyectar CSS desde JS
    - no usar handlers inline
    - no definir :root local
@@ -68,60 +71,14 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function safeBoolean(value, fallback = false) {
-  if (typeof value === "boolean") return value;
-
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-    return value !== 0;
-  }
-
-  if (typeof value === "string") {
-    const key = normalizeKey(value);
-
-    if (
-      [
-        "true",
-        "1",
-        "yes",
-        "y",
-        "si",
-        "sí",
-        "on",
-        "dark",
-        "enabled",
-        "activo",
-        "activa",
-      ].includes(key)
-    ) {
-      return true;
-    }
-
-    if (
-      [
-        "false",
-        "0",
-        "no",
-        "n",
-        "off",
-        "light",
-        "disabled",
-        "inactivo",
-        "inactiva",
-      ].includes(key)
-    ) {
-      return false;
-    }
-  }
-
-  return Boolean(fallback);
-}
-
 function safeObject(value, fallback = {}) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : fallback;
+}
+
+function safeArray(value, fallback = []) {
+  return Array.isArray(value) ? value : fallback;
 }
 
 function first(...values) {
@@ -145,6 +102,10 @@ function escapeHtml(value = "") {
     .replace(/'/g, "&#39;");
 }
 
+function escapeAttr(value = "") {
+  return escapeHtml(value);
+}
+
 function normalizeWhitespace(value = "") {
   return safeText(value, "").replace(/\s+/g, " ").trim();
 }
@@ -160,6 +121,54 @@ function normalizeKey(value = "") {
     .trim();
 }
 
+function safeBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return value !== 0;
+  }
+
+  const key = normalizeKey(value);
+
+  if (
+    [
+      "true",
+      "1",
+      "yes",
+      "y",
+      "si",
+      "sí",
+      "on",
+      "dark",
+      "enabled",
+      "activo",
+      "activa",
+    ].includes(key)
+  ) {
+    return true;
+  }
+
+  if (
+    [
+      "false",
+      "0",
+      "no",
+      "n",
+      "off",
+      "light",
+      "disabled",
+      "inactivo",
+      "inactiva",
+    ].includes(key)
+  ) {
+    return false;
+  }
+
+  return Boolean(fallback);
+}
+
 function truncate(value = "", max = 120) {
   const text = safeText(value, "");
   const limit = Math.max(1, safeNumber(max, 120));
@@ -170,11 +179,45 @@ function truncate(value = "", max = 120) {
   return `${text.slice(0, limit).trim()}…`;
 }
 
+function joinClasses(...values) {
+  return values
+    .flatMap((value) => {
+      if (!value) return [];
+      if (Array.isArray(value)) return value;
+      return String(value).split(/\s+/g);
+    })
+    .map((value) => safeText(value, ""))
+    .filter(Boolean)
+    .join(" ");
+}
+
+function boolAttr(condition, attr = "") {
+  return condition ? attr : "";
+}
+
+function normalizeLangValue(value = "es") {
+  const key = normalizeKey(value);
+
+  if (["en", "eng", "english", "en_us", "en_gb"].includes(key)) return "en";
+  if (["ca", "cat", "catala", "catalan", "ca_es"].includes(key)) return "ca";
+
+  return "es";
+}
+
+function normalizeThemeValue(value = "", fallbackDarkMode = false) {
+  const key = normalizeKey(value);
+
+  if (["dark", "oscuro", "night", "theme_dark"].includes(key)) return "dark";
+  if (["light", "claro", "day", "theme_light"].includes(key)) return "light";
+
+  return safeBoolean(fallbackDarkMode, false) ? "dark" : "light";
+}
+
 function isRenderableImageUrl(value = "") {
   const raw = safeText(value, "");
   if (!raw) return false;
 
-  if (raw.startsWith("data:image/")) return true;
+  if (/^data:image\/(png|jpe?g|gif|webp|avif);base64,/i.test(raw)) return true;
   if (raw.startsWith("blob:")) return true;
   if (raw.startsWith("/")) return true;
   if (raw.startsWith("./")) return true;
@@ -274,16 +317,27 @@ function formatRelativeDate(value = null) {
    DATA RESOLUTION
 ========================================================= */
 
+function normalizeDetailSafe(raw = null) {
+  if (!raw || typeof raw !== "object") return null;
+
+  try {
+    const normalized = normalizeCuentaModel(raw);
+    return normalized || raw;
+  } catch {
+    return raw;
+  }
+}
+
 function resolveCuentaItem(item = null) {
   if (item && typeof item === "object") {
-    return normalizeCuentaModel(item);
+    return normalizeDetailSafe(item);
   }
 
   try {
     const fromStore = getCuentaStore();
 
     if (fromStore) {
-      return normalizeCuentaModel(fromStore);
+      return normalizeDetailSafe(fromStore);
     }
   } catch {}
 
@@ -291,16 +345,158 @@ function resolveCuentaItem(item = null) {
     const fromState = safeObject(cuentaState?.item);
 
     if (Object.keys(fromState).length) {
-      return normalizeCuentaModel(fromState);
+      return normalizeDetailSafe(fromState);
     }
   } catch {}
 
   return null;
 }
 
-function getDisplayName(detail = {}) {
+function resolveLocalState(state = {}) {
+  return {
+    ...safeObject(cuentaState),
+    ...safeObject(state),
+    view: {
+      ...safeObject(cuentaState?.view),
+      ...safeObject(state?.view),
+      form: {
+        ...safeObject(cuentaState?.view?.form),
+        ...safeObject(state?.view?.form),
+      },
+    },
+    action: {
+      ...safeObject(cuentaState?.action),
+      ...safeObject(state?.action),
+    },
+  };
+}
+
+function resolveForm(detail = {}, state = {}) {
+  const localState = resolveLocalState(state);
+  const form = safeObject(localState?.view?.form);
+
+  const rawTheme = first(
+    form.theme,
+    form.mode,
+    form.appearance,
+    detail.theme,
+    detail.mode,
+    detail.appearance,
+    detail.preferences?.theme,
+    detail.preferences?.appearance,
+    detail.raw?.theme,
+    ""
+  );
+
+  const darkMode = safeBoolean(
+    first(
+      form.darkMode,
+      form.isDark,
+      rawTheme === "dark" ? true : null,
+      rawTheme === "light" ? false : null,
+      detail.darkMode,
+      detail.isDark,
+      detail.preferences?.darkMode,
+      detail.settings?.darkMode,
+      detail.raw?.darkMode,
+      false
+    ),
+    false
+  );
+
+  const lang = normalizeLangValue(
+    first(
+      form.lang,
+      form.language,
+      form.locale,
+      detail.lang,
+      detail.language,
+      detail.locale,
+      detail.preferences?.lang,
+      detail.preferences?.language,
+      detail.settings?.lang,
+      detail.raw?.lang,
+      detail.raw?.language,
+      "es"
+    )
+  );
+
+  const privacyMode = safeBoolean(
+    first(
+      form.privacyMode,
+      form.privateMode,
+      detail.privacyMode,
+      detail.privateMode,
+      detail.preferences?.privacyMode,
+      detail.settings?.privacyMode,
+      detail.raw?.privacyMode,
+      false
+    ),
+    false
+  );
+
+  const name = safeText(
+    first(
+      form.name,
+      form.displayName,
+      form.fullName,
+      detail.name,
+      detail.fullName,
+      detail.displayName,
+      detail.nombre,
+      detail.username,
+      detail.email,
+      "Usuario Onion"
+    ),
+    "Usuario Onion"
+  );
+
+  const phone = safeText(
+    first(
+      form.phone,
+      form.telefono,
+      form.mobile,
+      detail.phone,
+      detail.telefono,
+      detail.mobile,
+      detail.profile?.phone,
+      detail.raw?.phone,
+      detail.raw?.telefono,
+      ""
+    ),
+    ""
+  );
+
+  return {
+    name,
+    displayName: name,
+    fullName: name,
+
+    phone,
+    telefono: phone,
+
+    email: safeText(first(form.email, detail.email, detail.emailLower, ""), ""),
+    username: safeText(first(form.username, detail.username, detail.usernameLower, ""), ""),
+
+    darkMode,
+    privacyMode,
+
+    lang,
+    language: lang,
+    locale: lang,
+
+    theme: darkMode ? "dark" : normalizeThemeValue(rawTheme, darkMode),
+    mode: darkMode ? "dark" : normalizeThemeValue(rawTheme, darkMode),
+    appearance: darkMode ? "dark" : normalizeThemeValue(rawTheme, darkMode),
+  };
+}
+
+function getDisplayName(detail = {}, state = {}) {
+  const form = resolveForm(detail, state);
+
   return safeText(
     first(
+      form.name,
       detail.name,
       detail.fullName,
       detail.displayName,
@@ -443,9 +639,13 @@ function getRole(detail = {}) {
   return safeText(role, "Usuario");
 }
 
-function getPhone(detail = {}) {
+function getPhone(detail = {}, state = {}) {
+  const form = resolveForm(detail, state);
+
   return safeText(
     first(
+      form.phone,
+      form.telefono,
       detail.phone,
       detail.telefono,
       detail.mobile,
@@ -516,6 +716,7 @@ function getAvatarUrl(detail = {}) {
       detail.raw?.profile?.photoUrl,
       detail.raw?.profile?.photo,
       detail.raw?.profile?.imageUrl,
+
       detail.raw?.user?.avatarUrl,
       detail.raw?.user?.avatar,
       detail.raw?.user?.photoUrl,
@@ -579,9 +780,14 @@ function getLastLoginAt(detail = {}) {
   );
 }
 
-function getLangValue(detail = {}) {
-  const lang = normalizeKey(
+function getLangValue(detail = {}, state = {}) {
+  const form = resolveForm(detail, state);
+
+  return normalizeLangValue(
     first(
+      form.lang,
+      form.language,
+      form.locale,
       detail.lang,
       detail.language,
       detail.locale,
@@ -603,15 +809,10 @@ function getLangValue(detail = {}) {
       "es"
     )
   );
-
-  if (["en", "eng", "english", "en_us", "en_gb"].includes(lang)) return "en";
-  if (["ca", "cat", "catala", "catalan", "ca_es"].includes(lang)) return "ca";
-
-  return "es";
 }
 
-function getLangLabel(detail = {}) {
-  const lang = getLangValue(detail);
+function getLangLabel(detail = {}, state = {}) {
+  const lang = getLangValue(detail, state);
 
   if (lang === "ca") return "Català";
   if (lang === "en") return "English";
@@ -619,9 +820,14 @@ function getLangLabel(detail = {}) {
   return "Español";
 }
 
-function getThemeValue(detail = {}) {
-  const explicitTheme = normalizeKey(
+function getThemeValue(detail = {}, state = {}) {
+  const form = resolveForm(detail, state);
+
+  const explicitTheme = normalizeThemeValue(
     first(
+      form.theme,
+      form.mode,
+      form.appearance,
       detail.theme,
       detail.mode,
       detail.appearance,
@@ -638,44 +844,45 @@ function getThemeValue(detail = {}) {
       detail.raw?.preferences?.theme,
       detail.raw?.settings?.theme,
       ""
+    ),
+    safeBoolean(
+      first(
+        form.darkMode,
+        detail.darkMode,
+        detail.isDark,
+        detail.preferences?.darkMode,
+        detail.settings?.darkMode,
+        detail.raw?.darkMode,
+        detail.raw?.isDark,
+        detail.raw?.preferences?.darkMode,
+        detail.raw?.settings?.darkMode
+      ),
+      false
     )
   );
 
-  if (["dark", "oscuro", "night", "theme_dark"].includes(explicitTheme)) return "dark";
-  if (["light", "claro", "day", "theme_light"].includes(explicitTheme)) return "light";
+  return explicitTheme;
+}
+
+function isDarkMode(detail = {}, state = {}) {
+  return getThemeValue(detail, state) === "dark";
+}
+
+function getThemeLabel(detail = {}, state = {}) {
+  return isDarkMode(detail, state) ? "Dark mode" : "Light mode";
+}
+
+function getThemeStatusLabel(detail = {}, state = {}) {
+  return isDarkMode(detail, state) ? "Tema oscuro activo" : "Tema claro activo";
+}
+
+function getPrivacyMode(detail = {}, state = {}) {
+  const form = resolveForm(detail, state);
 
   return safeBoolean(
     first(
-      detail.darkMode,
-      detail.isDark,
-      detail.preferences?.darkMode,
-      detail.settings?.darkMode,
-      detail.raw?.darkMode,
-      detail.raw?.isDark,
-      detail.raw?.preferences?.darkMode,
-      detail.raw?.settings?.darkMode
-    ),
-    false
-  )
-    ? "dark"
-    : "light";
-}
-
-function isDarkMode(detail = {}) {
-  return getThemeValue(detail) === "dark";
-}
-
-function getThemeLabel(detail = {}) {
-  return isDarkMode(detail) ? "Dark mode" : "Light mode";
-}
-
-function getThemeStatusLabel(detail = {}) {
-  return isDarkMode(detail) ? "Tema oscuro activo" : "Tema claro activo";
-}
-
-function getPrivacyMode(detail = {}) {
-  return safeBoolean(
-    first(
+      form.privacyMode,
+      form.privateMode,
       detail.privacyMode,
       detail.privateMode,
       detail.preferences?.privacyMode,
@@ -689,8 +896,8 @@ function getPrivacyMode(detail = {}) {
   );
 }
 
-function getPrivacyLabel(detail = {}) {
-  return getPrivacyMode(detail) ? "Privacidad activa" : "Privacidad estándar";
+function getPrivacyLabel(detail = {}, state = {}) {
+  return getPrivacyMode(detail, state) ? "Privacidad activa" : "Privacidad estándar";
 }
 
 function getSecurityStatusLabel(detail = {}) {
@@ -753,9 +960,20 @@ function getInitials(value = "") {
    UI PARTIALS
 ========================================================= */
 
+function actionAttrs(action = "") {
+  const value = safeText(action, "");
+
+  if (!value) return "";
+
+  return `
+    data-action="${escapeAttr(value)}"
+    data-cuenta-action="${escapeAttr(value)}"
+  `;
+}
+
 function renderSpinner(label = "") {
   return `
-    <span class="cuenta-inline-loading">
+    <span class="cuenta-inline-loading" aria-hidden="${label ? "false" : "true"}">
       <span class="cuenta-inline-spinner" aria-hidden="true"></span>
       ${
         label
@@ -767,33 +985,41 @@ function renderSpinner(label = "") {
 }
 
 function renderChip(label = "", tone = "default") {
+  const text = safeText(label, "");
+
+  if (!text) return "";
+
   return `
-    <span class="cuenta-chip cuenta-chip--${escapeHtml(tone)}">
-      ${escapeHtml(label)}
+    <span class="cuenta-chip cuenta-chip--${escapeAttr(normalizeKey(tone) || "default")}">
+      ${escapeHtml(text)}
     </span>
   `;
 }
 
-function renderAvatar(detail = {}, size = "hero") {
-  const name = getDisplayName(detail);
+function renderAvatar(detail = {}, state = {}, size = "hero") {
+  const name = getDisplayName(detail, state);
   const initials = getInitials(name);
   const avatarUrl = getAvatarUrl(detail);
   const hasImage = isRenderableImageUrl(avatarUrl);
 
   return `
     <div
-      class="cuenta-avatar cuenta-avatar--${escapeHtml(size)}${hasImage ? " has-image" : ""}"
-      title="${escapeHtml(name)}"
-      aria-label="${escapeHtml(name)}"
-      data-tooltip="${escapeHtml(name)}"
+      class="${joinClasses(
+        "cuenta-avatar",
+        `cuenta-avatar--${normalizeKey(size) || "hero"}`,
+        hasImage ? "has-image" : ""
+      )}"
+      role="img"
+      aria-label="${escapeAttr(name)}"
+      data-tooltip="${escapeAttr(name)}"
       data-has-avatar="${hasImage ? "true" : "false"}"
     >
       ${
         hasImage
           ? `
             <img
-              src="${escapeHtml(avatarUrl)}"
-              alt="${escapeHtml(name)}"
+              src="${escapeAttr(avatarUrl)}"
+              alt="${escapeAttr(name)}"
               loading="lazy"
               decoding="async"
               referrerpolicy="no-referrer"
@@ -803,14 +1029,16 @@ function renderAvatar(detail = {}, size = "hero") {
           : ""
       }
 
-      <span class="cuenta-avatar-fallback">${escapeHtml(initials)}</span>
+      <span class="cuenta-avatar-fallback" aria-hidden="${hasImage ? "true" : "false"}">
+        ${escapeHtml(initials)}
+      </span>
     </div>
   `;
 }
 
 function renderMetaRow(label = "", value = "", tone = "default") {
   return `
-    <div class="cuenta-meta-row cuenta-meta-row--${escapeHtml(tone)}">
+    <div class="cuenta-meta-row cuenta-meta-row--${escapeAttr(normalizeKey(tone) || "default")}">
       <span class="cuenta-meta-label">${escapeHtml(label)}</span>
       <strong class="cuenta-meta-value">${escapeHtml(safeText(value, "—"))}</strong>
     </div>
@@ -819,10 +1047,41 @@ function renderMetaRow(label = "", value = "", tone = "default") {
 
 function renderMiniStat({ label = "", value = "", tone = "default" } = {}) {
   return `
-    <div class="cuenta-mini-stat cuenta-mini-stat--${escapeHtml(tone)}">
+    <div class="cuenta-mini-stat cuenta-mini-stat--${escapeAttr(normalizeKey(tone) || "default")}">
       <span>${escapeHtml(label)}</span>
       <strong>${escapeHtml(value)}</strong>
     </div>
+  `;
+}
+
+function renderButton({
+  id = "",
+  action = "",
+  label = "",
+  variant = "",
+  loading = false,
+  loadingLabel = "Procesando...",
+  disabled = false,
+  extraClass = "",
+} = {}) {
+  const isBusy = Boolean(loading || disabled);
+  const classes = joinClasses(
+    "cuenta-btn",
+    variant ? `cuenta-btn--${normalizeKey(variant)}` : "",
+    loading ? "is-loading" : "",
+    extraClass
+  );
+
+  return `
+    <button
+      ${id ? `id="${escapeAttr(id)}"` : ""}
+      type="button"
+      class="${escapeAttr(classes)}"
+      ${actionAttrs(action)}
+      ${boolAttr(isBusy, 'disabled aria-busy="true"')}
+    >
+      ${loading ? renderSpinner(loadingLabel) : escapeHtml(label)}
+    </button>
   `;
 }
 
@@ -830,26 +1089,34 @@ function renderField({
   label = "",
   value = "",
   dataRole = "",
+  field = "",
   id = "",
+  name = "",
   type = "text",
   placeholder = "",
   readonly = false,
   disabled = false,
   autocomplete = "",
+  wide = false,
 } = {}) {
+  const fieldName = safeText(field || name || dataRole, "");
+
   return `
-    <label class="cuenta-field">
+    <label class="${joinClasses("cuenta-field", wide ? "cuenta-field--wide" : "")}">
       <span class="cuenta-field-label">${escapeHtml(label)}</span>
 
       <input
-        ${id ? `id="${escapeHtml(id)}"` : ""}
-        data-role="${escapeHtml(dataRole)}"
-        type="${escapeHtml(type)}"
-        value="${escapeHtml(safeText(value, ""))}"
-        placeholder="${escapeHtml(placeholder)}"
-        ${autocomplete ? `autocomplete="${escapeHtml(autocomplete)}"` : ""}
-        ${readonly ? "readonly" : ""}
-        ${disabled ? "disabled" : ""}
+        ${id ? `id="${escapeAttr(id)}"` : ""}
+        ${name ? `name="${escapeAttr(name)}"` : ""}
+        data-role="${escapeAttr(dataRole)}"
+        data-cuenta-field="${escapeAttr(fieldName)}"
+        data-field="${escapeAttr(fieldName)}"
+        type="${escapeAttr(type)}"
+        value="${escapeAttr(safeText(value, ""))}"
+        placeholder="${escapeAttr(placeholder)}"
+        ${autocomplete ? `autocomplete="${escapeAttr(autocomplete)}"` : ""}
+        ${boolAttr(readonly, "readonly")}
+        ${boolAttr(disabled, "disabled")}
       />
     </label>
   `;
@@ -861,12 +1128,18 @@ function renderSwitchRow({
   checked = false,
   inputId = "",
   dataRole = "",
+  field = "",
+  name = "",
   action = "",
   disabled = false,
   checkedLabel = "Activo",
   uncheckedLabel = "Inactivo",
   buttonLabel = "",
+  loadingLabel = "Procesando...",
 } = {}) {
+  const isChecked = Boolean(checked);
+  const normalizedField = safeText(field || name || dataRole, "");
+
   return `
     <div class="cuenta-control-row">
       <div class="cuenta-control-copy">
@@ -876,38 +1149,41 @@ function renderSwitchRow({
 
       <div class="cuenta-switch-area">
         <label
-          for="${escapeHtml(inputId)}"
-          class="cuenta-switch${checked ? " is-checked" : ""}${disabled ? " is-disabled" : ""}"
-          aria-label="${escapeHtml(title)}"
+          for="${escapeAttr(inputId)}"
+          class="${joinClasses("cuenta-switch", isChecked ? "is-checked" : "", disabled ? "is-disabled" : "")}"
+          aria-label="${escapeAttr(title)}"
         >
-          <span class="cuenta-switch-track">
+          <span class="cuenta-switch-track" aria-hidden="true">
             <span class="cuenta-switch-thumb"></span>
           </span>
         </label>
 
         <input
-          id="${escapeHtml(inputId)}"
-          data-role="${escapeHtml(dataRole)}"
+          id="${escapeAttr(inputId)}"
+          name="${escapeAttr(name || normalizedField)}"
+          data-role="${escapeAttr(dataRole)}"
+          data-cuenta-field="${escapeAttr(normalizedField)}"
+          data-field="${escapeAttr(normalizedField)}"
           type="checkbox"
           class="cuenta-native-control"
-          ${checked ? "checked" : ""}
-          ${disabled ? "disabled" : ""}
+          ${boolAttr(isChecked, "checked")}
+          ${boolAttr(disabled, "disabled")}
         />
 
         <span class="cuenta-control-state">
-          ${escapeHtml(checked ? checkedLabel : uncheckedLabel)}
+          ${escapeHtml(isChecked ? checkedLabel : uncheckedLabel)}
         </span>
       </div>
 
       <div class="cuenta-control-actions">
-        <button
-          type="button"
-          class="cuenta-btn cuenta-btn--soft"
-          data-action="${escapeHtml(action)}"
-          ${disabled ? 'disabled aria-busy="true"' : ""}
-        >
-          ${disabled ? renderSpinner("Procesando...") : escapeHtml(buttonLabel || "Cambiar")}
-        </button>
+        ${renderButton({
+          action,
+          label: buttonLabel || "Cambiar",
+          variant: "soft",
+          loading: disabled,
+          loadingLabel,
+          disabled,
+        })}
       </div>
     </div>
   `;
@@ -919,9 +1195,13 @@ function renderSelectRow({
   value = "es",
   inputId = "",
   dataRole = "",
+  field = "lang",
+  name = "lang",
   action = "",
   disabled = false,
 } = {}) {
+  const selectedValue = normalizeLangValue(value);
+
   return `
     <div class="cuenta-control-row cuenta-control-row--select">
       <div class="cuenta-control-copy">
@@ -931,24 +1211,27 @@ function renderSelectRow({
 
       <div class="cuenta-select-line">
         <select
-          id="${escapeHtml(inputId)}"
-          data-role="${escapeHtml(dataRole)}"
+          id="${escapeAttr(inputId)}"
+          name="${escapeAttr(name)}"
+          data-role="${escapeAttr(dataRole)}"
+          data-cuenta-field="${escapeAttr(field)}"
+          data-field="${escapeAttr(field)}"
           class="cuenta-select"
-          ${disabled ? "disabled" : ""}
+          ${boolAttr(disabled, "disabled")}
         >
-          <option value="es" ${value === "es" ? "selected" : ""}>Español</option>
-          <option value="en" ${value === "en" ? "selected" : ""}>English</option>
-          <option value="ca" ${value === "ca" ? "selected" : ""}>Català</option>
+          <option value="es" ${boolAttr(selectedValue === "es", "selected")}>Español</option>
+          <option value="en" ${boolAttr(selectedValue === "en", "selected")}>English</option>
+          <option value="ca" ${boolAttr(selectedValue === "ca", "selected")}>Català</option>
         </select>
 
-        <button
-          type="button"
-          class="cuenta-btn cuenta-btn--soft"
-          data-action="${escapeHtml(action)}"
-          ${disabled ? 'disabled aria-busy="true"' : ""}
-        >
-          ${disabled ? renderSpinner("Aplicando...") : "Aplicar idioma"}
-        </button>
+        ${renderButton({
+          action,
+          label: "Aplicar idioma",
+          variant: "soft",
+          loading: disabled,
+          loadingLabel: "Aplicando...",
+          disabled,
+        })}
       </div>
     </div>
   `;
@@ -965,55 +1248,108 @@ function renderPasswordRow({ disabled = false } = {}) {
       </div>
 
       <div class="cuenta-password-grid">
-        <label class="cuenta-field">
-          <span class="cuenta-field-label">Contraseña actual</span>
-          <input
-            id="cuenta-current-password"
-            data-role="cuenta-current-password"
-            type="password"
-            placeholder="Contraseña actual"
-            autocomplete="current-password"
-            ${disabled ? "disabled" : ""}
-          />
-        </label>
+        ${renderField({
+          id: "cuenta-current-password",
+          name: "currentPassword",
+          dataRole: "cuenta-current-password",
+          field: "currentPassword",
+          label: "Contraseña actual",
+          type: "password",
+          placeholder: "Contraseña actual",
+          autocomplete: "current-password",
+          disabled,
+        })}
 
-        <label class="cuenta-field">
-          <span class="cuenta-field-label">Nueva contraseña</span>
-          <input
-            id="cuenta-new-password"
-            data-role="cuenta-new-password"
-            type="password"
-            placeholder="Nueva contraseña"
-            autocomplete="new-password"
-            ${disabled ? "disabled" : ""}
-          />
-        </label>
+        ${renderField({
+          id: "cuenta-new-password",
+          name: "newPassword",
+          dataRole: "cuenta-new-password",
+          field: "newPassword",
+          label: "Nueva contraseña",
+          type: "password",
+          placeholder: "Nueva contraseña",
+          autocomplete: "new-password",
+          disabled,
+        })}
 
-        <label class="cuenta-field cuenta-field--wide">
-          <span class="cuenta-field-label">Confirmar contraseña</span>
-          <input
-            id="cuenta-confirm-password"
-            data-role="cuenta-confirm-password"
-            type="password"
-            placeholder="Repite la nueva contraseña"
-            autocomplete="new-password"
-            ${disabled ? "disabled" : ""}
-          />
-        </label>
+        ${renderField({
+          id: "cuenta-confirm-password",
+          name: "confirmPassword",
+          dataRole: "cuenta-confirm-password",
+          field: "confirmPassword",
+          label: "Confirmar contraseña",
+          type: "password",
+          placeholder: "Repite la nueva contraseña",
+          autocomplete: "new-password",
+          disabled,
+          wide: true,
+        })}
       </div>
 
       <div class="cuenta-password-actions">
-        <button
-          id="cuenta-password-btn"
-          type="button"
-          class="cuenta-btn cuenta-btn--primary"
-          data-action="change-password"
-          ${disabled ? 'disabled aria-busy="true"' : ""}
-        >
-          ${disabled ? renderSpinner("Procesando...") : "Cambiar contraseña"}
-        </button>
+        ${renderButton({
+          id: "cuenta-password-btn",
+          action: "change-password",
+          label: "Cambiar contraseña",
+          variant: "primary",
+          loading: disabled,
+          loadingLabel: "Procesando...",
+          disabled,
+        })}
       </div>
     </div>
+  `;
+}
+
+function renderFeedback({ state = {}, hasDetail = false } = {}) {
+  const localState = resolveLocalState(state);
+
+  const error = safeText(
+    first(
+      localState.error,
+      localState.view?.serverError,
+      localState.view?.error,
+      ""
+    ),
+    ""
+  );
+
+  const success = safeText(
+    first(
+      localState.view?.successMessage,
+      localState.successMessage,
+      ""
+    ),
+    ""
+  );
+
+  if (!hasDetail && error) return "";
+  if (!error && !success) return "";
+
+  return `
+    <section class="cuenta-feedback" aria-live="polite">
+      ${
+        error
+          ? `
+            <div class="cuenta-feedback-item cuenta-feedback-item--error">
+              <strong>Error</strong>
+              <span>${escapeHtml(error)}</span>
+            </div>
+          `
+          : ""
+      }
+
+      ${
+        success
+          ? `
+            <div class="cuenta-feedback-item cuenta-feedback-item--success">
+              <strong>Correcto</strong>
+              <span>${escapeHtml(success)}</span>
+            </div>
+          `
+          : ""
+      }
+    </section>
   `;
 }
 
@@ -1023,13 +1359,13 @@ function renderPasswordRow({ disabled = false } = {}) {
 
 export function renderHeader({ item = null, state = {} } = {}) {
   const detail = resolveCuentaItem(item);
-  const localState = safeObject(state || cuentaState || {});
+  const localState = resolveLocalState(state);
 
   const loading = Boolean(localState.loading);
   const refreshing = Boolean(localState.refreshing);
   const saving = Boolean(localState.saving);
 
-  const name = detail ? getDisplayName(detail) : "Ajustes de cuenta";
+  const name = detail ? getDisplayName(detail, localState) : "Ajustes de cuenta";
   const email = detail ? getEmail(detail) : "Preferencias del usuario";
   const username = detail ? getUsername(detail) : "sin-usuario";
   const role = detail ? getRole(detail) : "Usuario";
@@ -1042,15 +1378,15 @@ export function renderHeader({ item = null, state = {} } = {}) {
   const status = detail ? getAccountStatus(detail) : "Activa";
   const statusTone = detail ? getAccountStatusTone(detail) : "success";
 
-  const privacyMode = detail ? getPrivacyMode(detail) : false;
+  const privacyMode = detail ? getPrivacyMode(detail, localState) : false;
   const privacyLabel = privacyMode ? "Activa" : "Estándar";
   const privacyTone = privacyMode ? "success" : "default";
 
-  const themeLabel = detail ? getThemeLabel(detail) : "Light mode";
-  const langLabel = detail ? getLangLabel(detail) : "Español";
+  const themeLabel = detail ? getThemeLabel(detail, localState) : "Light mode";
+  const langLabel = detail ? getLangLabel(detail, localState) : "Español";
 
   return `
-    <section class="cuenta-hero">
+    <section class="cuenta-hero" data-cuenta-section="hero">
       <div class="cuenta-hero-inner">
         <div class="cuenta-hero-top">
           <div class="cuenta-hero-copy">
@@ -1059,35 +1395,34 @@ export function renderHeader({ item = null, state = {} } = {}) {
             <h1 class="cuenta-title">Centro de control personal</h1>
 
             <p class="cuenta-subtitle">
-              Gestiona identidad, apariencia, idioma y seguridad desde un panel premium sincronizado con Onion Support.
+              Gestiona identidad, apariencia, idioma y seguridad desde un panel sincronizado con Onion Support.
             </p>
           </div>
 
           <div class="cuenta-hero-actions">
-            <button
-              id="cuenta-refresh-btn"
-              type="button"
-              class="cuenta-btn${refreshing || loading ? " is-loading" : ""}"
-              data-action="refresh-cuenta"
-              ${refreshing || loading ? 'disabled aria-busy="true"' : ""}
-            >
-              ${refreshing || loading ? renderSpinner("Actualizando...") : "Actualizar"}
-            </button>
+            ${renderButton({
+              id: "cuenta-hero-refresh-btn",
+              action: "refresh-cuenta",
+              label: "Actualizar",
+              loading: refreshing || loading,
+              loadingLabel: "Actualizando...",
+              disabled: refreshing || loading,
+            })}
 
-            <button
-              id="cuenta-save-btn"
-              type="button"
-              class="cuenta-btn cuenta-btn--primary${saving ? " is-loading" : ""}"
-              data-action="save-cuenta"
-              ${saving ? 'disabled aria-busy="true"' : ""}
-            >
-              ${saving ? renderSpinner("Guardando...") : "Guardar cambios"}
-            </button>
+            ${renderButton({
+              id: "cuenta-save-btn",
+              action: "save-cuenta",
+              label: "Guardar cambios",
+              variant: "primary",
+              loading: saving,
+              loadingLabel: "Guardando...",
+              disabled: saving,
+            })}
           </div>
         </div>
 
         <div class="cuenta-command-strip cuenta-account-strip">
-          ${renderAvatar(detail || {}, "hero")}
+          ${renderAvatar(detail || {}, localState, "hero")}
 
           <div class="cuenta-account-copy">
             <div class="cuenta-account-name">${escapeHtml(name)}</div>
@@ -1166,14 +1501,12 @@ export function renderErrorState(message = "No se pudo cargar la cuenta.") {
         ${escapeHtml(safeText(message, "Error desconocido al cargar la vista."))}
       </p>
 
-      <button
-        id="cuenta-retry-btn"
-        type="button"
-        class="cuenta-btn cuenta-btn--primary"
-        data-action="refresh-cuenta"
-      >
-        Reintentar
-      </button>
+      ${renderButton({
+        id: "cuenta-retry-btn",
+        action: "refresh-cuenta",
+        label: "Reintentar",
+        variant: "primary",
+      })}
     </section>
   `;
 }
@@ -1187,14 +1520,12 @@ export function renderEmptyState() {
         El recurso no devolvió preferencias utilizables. Puedes forzar una nueva sincronización.
       </p>
 
-      <button
-        id="cuenta-refresh-btn"
-        type="button"
-        class="cuenta-btn cuenta-btn--primary"
-        data-action="refresh-cuenta"
-      >
-        Actualizar cuenta
-      </button>
+      ${renderButton({
+        id: "cuenta-empty-refresh-btn",
+        action: "refresh-cuenta",
+        label: "Actualizar cuenta",
+        variant: "primary",
+      })}
     </section>
   `;
 }
@@ -1203,8 +1534,10 @@ export function renderEmptyState() {
    PANEL CARDS
 ========================================================= */
 
-function renderProfileCard(detail = {}, { disabled = false } = {}) {
-  const phone = getPhone(detail);
+function renderProfileCard(detail = {}, state = {}, { disabled = false } = {}) {
+  const form = resolveForm(detail, state);
+  const phone = getPhone(detail, state);
+  const phoneValue = phone === "No configurado" ? "" : phone;
 
   return `
     <article class="cuenta-card cuenta-card--accent">
@@ -1222,8 +1555,10 @@ function renderProfileCard(detail = {}, { disabled = false } = {}) {
       <div class="cuenta-profile-grid">
         ${renderField({
           id: "cuenta-name-input",
+          name: "name",
+          field: "name",
           label: "Nombre visible",
-          value: getDisplayName(detail),
+          value: form.name,
           dataRole: "cuenta-name-input",
           placeholder: "Nombre visible",
           disabled,
@@ -1232,6 +1567,8 @@ function renderProfileCard(detail = {}, { disabled = false } = {}) {
 
         ${renderField({
           id: "cuenta-username-input",
+          name: "username",
+          field: "username",
           label: "Usuario",
           value: getUsername(detail),
           dataRole: "cuenta-username-input",
@@ -1243,6 +1580,8 @@ function renderProfileCard(detail = {}, { disabled = false } = {}) {
 
         ${renderField({
           id: "cuenta-email-input",
+          name: "email",
+          field: "email",
           label: "Email",
           value: getEmail(detail),
           dataRole: "cuenta-email-input",
@@ -1255,8 +1594,10 @@ function renderProfileCard(detail = {}, { disabled = false } = {}) {
 
         ${renderField({
           id: "cuenta-phone-input",
+          name: "phone",
+          field: "phone",
           label: "Teléfono",
-          value: phone === "No configurado" ? "" : phone,
+          value: phoneValue,
           dataRole: "cuenta-phone-input",
           type: "tel",
           placeholder: "No configurado",
@@ -1275,8 +1616,8 @@ function renderProfileCard(detail = {}, { disabled = false } = {}) {
   `;
 }
 
-function renderAppearanceCard(detail = {}, { disabled = false } = {}) {
-  const dark = isDarkMode(detail);
+function renderAppearanceCard(detail = {}, state = {}, { disabled = false } = {}) {
+  const dark = isDarkMode(detail, state);
 
   return `
     <article class="cuenta-card">
@@ -1284,7 +1625,7 @@ function renderAppearanceCard(detail = {}, { disabled = false } = {}) {
         <div class="cuenta-card-copy">
           <h2 class="cuenta-card-title">Apariencia</h2>
           <p class="cuenta-card-text">
-            Ajusta el modo visual principal. El cambio sincroniza DOM, AppCore, storage y variables CSS.
+            Ajusta el modo visual principal. El cambio sincroniza DOM, AppCore, storage y tokens CSS.
           </p>
         </div>
 
@@ -1297,6 +1638,8 @@ function renderAppearanceCard(detail = {}, { disabled = false } = {}) {
         checked: dark,
         inputId: "cuenta-darkmode-input",
         dataRole: "cuenta-darkmode-input",
+        field: "darkMode",
+        name: "darkMode",
         action: "toggle-theme",
         disabled,
         checkedLabel: "Dark",
@@ -1305,17 +1648,17 @@ function renderAppearanceCard(detail = {}, { disabled = false } = {}) {
       })}
 
       <div class="cuenta-meta-list">
-        ${renderMetaRow("Tema actual", getThemeLabel(detail))}
-        ${renderMetaRow("Valor técnico", getThemeValue(detail))}
-        ${renderMetaRow("Estado", getThemeStatusLabel(detail))}
+        ${renderMetaRow("Tema actual", getThemeLabel(detail, state))}
+        ${renderMetaRow("Valor técnico", getThemeValue(detail, state))}
+        ${renderMetaRow("Estado", getThemeStatusLabel(detail, state))}
       </div>
     </article>
   `;
 }
 
-function renderLanguageCard(detail = {}, { disabled = false } = {}) {
-  const langValue = getLangValue(detail);
-  const langLabel = getLangLabel(detail);
+function renderLanguageCard(detail = {}, state = {}, { disabled = false } = {}) {
+  const langValue = getLangValue(detail, state);
+  const langLabel = getLangLabel(detail, state);
 
   return `
     <article class="cuenta-card">
@@ -1336,6 +1679,8 @@ function renderLanguageCard(detail = {}, { disabled = false } = {}) {
         value: langValue,
         inputId: "cuenta-language-select",
         dataRole: "cuenta-language-select",
+        field: "lang",
+        name: "lang",
         action: "change-language",
         disabled,
       })}
@@ -1349,8 +1694,8 @@ function renderLanguageCard(detail = {}, { disabled = false } = {}) {
   `;
 }
 
-function renderPrivacyCard(detail = {}, { disabled = false } = {}) {
-  const privacy = getPrivacyMode(detail);
+function renderPrivacyCard(detail = {}, state = {}, { disabled = false } = {}) {
+  const privacy = getPrivacyMode(detail, state);
 
   return `
     <article class="cuenta-card">
@@ -1371,6 +1716,8 @@ function renderPrivacyCard(detail = {}, { disabled = false } = {}) {
         checked: privacy,
         inputId: "cuenta-privacymode-input",
         dataRole: "cuenta-privacymode-input",
+        field: "privacyMode",
+        name: "privacyMode",
         action: "save-cuenta",
         disabled,
         checkedLabel: "Activo",
@@ -1379,7 +1726,7 @@ function renderPrivacyCard(detail = {}, { disabled = false } = {}) {
       })}
 
       <div class="cuenta-meta-list">
-        ${renderMetaRow("Privacidad", getPrivacyLabel(detail))}
+        ${renderMetaRow("Privacidad", getPrivacyLabel(detail, state))}
         ${renderMetaRow("Valor técnico", privacy ? "true" : "false")}
       </div>
     </article>
@@ -1413,7 +1760,7 @@ function renderSecurityCard(detail = {}, { disabled = false } = {}) {
   `;
 }
 
-function renderAuditCard(detail = {}) {
+function renderAuditCard(detail = {}, state = {}) {
   const updatedAt = getUpdatedAt(detail);
   const createdAt = getCreatedAt(detail);
   const lastLoginAt = getLastLoginAt(detail);
@@ -1440,6 +1787,8 @@ function renderAuditCard(detail = {}) {
         ${renderMetaRow("Avatar", avatar ? "Imagen detectada" : "Iniciales fallback", avatar ? "success" : "default")}
         ${renderMetaRow("Email", truncate(getEmail(detail), 42))}
         ${renderMetaRow("Username", `@${getUsername(detail)}`)}
+        ${renderMetaRow("Tema", getThemeValue(detail, state))}
+        ${renderMetaRow("Idioma", getLangValue(detail, state))}
       </div>
     </article>
   `;
@@ -1451,7 +1800,7 @@ function renderAuditCard(detail = {}) {
 
 export function renderPanel({ item = null, state = {} } = {}) {
   const detail = resolveCuentaItem(item);
-  const localState = safeObject(state || cuentaState || {});
+  const localState = resolveLocalState(state);
 
   const loading = Boolean(localState.loading);
   const refreshing = Boolean(localState.refreshing);
@@ -1471,26 +1820,32 @@ export function renderPanel({ item = null, state = {} } = {}) {
   }
 
   return `
-    <section class="cuenta-panel">
+    <section
+      class="cuenta-panel"
+      data-cuenta-section="panel"
+      data-cuenta-busy="${busy ? "true" : "false"}"
+      data-cuenta-saving="${saving ? "true" : "false"}"
+      data-cuenta-refreshing="${refreshing ? "true" : "false"}"
+    >
       <div class="cuenta-cards-grid">
         <div class="cuenta-column">
-          ${renderProfileCard(detail, {
+          ${renderProfileCard(detail, localState, {
             disabled: busy,
           })}
 
-          ${renderAuditCard(detail)}
+          ${renderAuditCard(detail, localState)}
         </div>
 
         <div class="cuenta-column">
-          ${renderAppearanceCard(detail, {
+          ${renderAppearanceCard(detail, localState, {
             disabled: busy,
           })}
 
-          ${renderLanguageCard(detail, {
+          ${renderLanguageCard(detail, localState, {
             disabled: busy,
           })}
 
-          ${renderPrivacyCard(detail, {
+          ${renderPrivacyCard(detail, localState, {
             disabled: busy,
           })}
 
@@ -1525,14 +1880,27 @@ export function renderPanel({ item = null, state = {} } = {}) {
 ========================================================= */
 
 export function renderCuentaTemplate({ item = null, state = {} } = {}) {
-  const localState = safeObject(state || cuentaState || {});
+  const localState = resolveLocalState(state);
   const detail = resolveCuentaItem(item);
 
   return `
-    <div class="cuenta-view">
+    <div
+      class="cuenta-view"
+      data-view="cuenta"
+      data-cuenta-template="true"
+      data-cuenta-has-item="${detail ? "true" : "false"}"
+      data-cuenta-loading="${localState.loading ? "true" : "false"}"
+      data-cuenta-refreshing="${localState.refreshing ? "true" : "false"}"
+      data-cuenta-saving="${localState.saving ? "true" : "false"}"
+    >
       ${renderHeader({
         item: detail,
         state: localState,
+      })}
+
+      ${renderFeedback({
+        state: localState,
+        hasDetail: Boolean(detail),
       })}
 
       ${renderPanel({

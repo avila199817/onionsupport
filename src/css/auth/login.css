@@ -14,8 +14,9 @@
 
    REGLAS:
    - Sin paletas externas.
-   - Sin bloque visual [data-theme="light"].
+   - Sin bloque visual [data-theme="light"] para redefinir paleta.
    - Dark/light salen por tokens.
+   - Los selectores html[data-theme] aquí solo alternan asset de logo.
    - Sin duplicidades pesadas con layout/core/ui.
    - Login desktop con side panel + card derecha.
    - Mobile limpio: solo card.
@@ -982,9 +983,13 @@ body.auth-screen.login-no-scroll #view-container {
 
 
 /* =========================================================
-   LOGO
-   Nota: los selectores de theme solo cambian asset visible.
-   No redefinen paleta ni tema visual.
+   LOGO · EXTREME APPLE CARD
+   Template contract:
+   .logo-fade
+   .login-logo-theme
+   .login-logo-theme-img
+   .login-logo-theme-dark
+   .login-logo-theme-light
 ========================================================= */
 
 .logo-fade {
@@ -997,102 +1002,165 @@ body.auth-screen.login-no-scroll #view-container {
   inline-size: 76px;
   block-size: 76px;
 
-  border: 1px solid var(--border-default);
+  margin-inline: auto;
+
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-2xl);
 
   background:
     var(--glass-shine),
-    var(--surface-glass);
+    var(--surface-glass-strong);
 
   box-shadow:
     var(--shadow-md),
     var(--shadow-inner);
 
   overflow: hidden;
+  transform: translateZ(0);
 }
 
 .logo-fade::before {
   content: "";
   position: absolute;
-  inset: -30%;
+  inset: -36%;
   z-index: -1;
 
+  pointer-events: none;
+
   background:
+    radial-gradient(
+      circle at 50% 14%,
+      color-mix(in srgb, var(--text-strong) 8%, transparent),
+      transparent 42%
+    ),
     conic-gradient(
       from 180deg,
       transparent 0deg,
-      color-mix(in srgb, var(--accent) 14%, transparent) 72deg,
-      transparent 144deg,
-      color-mix(in srgb, var(--text-strong) 6%, transparent) 220deg,
+      color-mix(in srgb, var(--accent) 12%, transparent) 72deg,
+      transparent 146deg,
+      color-mix(in srgb, var(--text-strong) 5%, transparent) 230deg,
       transparent 360deg
     );
 
-  filter: blur(14px);
+  filter: blur(16px);
+  opacity: .56;
 
-  opacity: .54;
-
-  animation: logoGlowSpin 10s linear infinite;
+  animation: logoGlowSpin 12s linear infinite;
 }
 
 .logo-fade::after {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: 1px;
+
+  border-radius: calc(var(--radius-2xl) - 1px);
+
+  pointer-events: none;
 
   background:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--text-strong) 8%, transparent),
-      transparent 34%
+      color-mix(in srgb, var(--text-strong) 7%, transparent),
+      transparent 42%
     );
 
-  pointer-events: none;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong) 7%, transparent),
+    inset 0 -1px 0 color-mix(in srgb, var(--text-strong) 2%, transparent);
 }
 
-.logo-fade img {
-  position: absolute;
+.login-logo-theme {
+  position: relative;
   z-index: 1;
 
-  inline-size: 40px;
-  block-size: 40px;
+  display: grid;
+  place-items: center;
+
+  inline-size: 44px;
+  block-size: 44px;
+
+  color: var(--text-strong);
+}
+
+.login-logo-theme-img {
+  position: absolute;
+  inset: 0;
+
+  display: block;
+
+  inline-size: 44px;
+  block-size: 44px;
 
   object-fit: contain;
+  object-position: center;
+
+  opacity: 0;
+
+  transform: scale(.96);
 
   filter:
     drop-shadow(
-      0 4px 12px
-      color-mix(in srgb, var(--shadow-strong) 52%, transparent)
+      0 6px 14px
+      color-mix(in srgb, var(--shadow-strong) 42%, transparent)
     );
+
+  transition:
+    opacity var(--duration-normal) var(--ease-standard),
+    transform var(--duration-normal) var(--ease-standard),
+    filter var(--duration-normal) var(--ease-standard);
 }
 
-.logo-fade .logo-light,
-.logo-fade .login-logo--light {
-  display: none;
-}
-
+/* Fallback dark-first */
+.login-logo-theme-dark,
 .logo-fade .logo-dark,
 .logo-fade .login-logo--dark {
-  display: block;
+  opacity: 1;
+  transform: scale(1);
 }
 
+.login-logo-theme-light,
+.logo-fade .logo-light,
+.logo-fade .login-logo--light {
+  opacity: 0;
+  transform: scale(.96);
+}
+
+/* Light theme: usar logo negro */
+html[data-theme="light"] .login-logo-theme-dark,
 html[data-theme="light"] .logo-fade .logo-dark,
 html[data-theme="light"] .logo-fade .login-logo--dark {
-  display: none;
+  opacity: 0;
+  transform: scale(.96);
 }
 
+html[data-theme="light"] .login-logo-theme-light,
 html[data-theme="light"] .logo-fade .logo-light,
 html[data-theme="light"] .logo-fade .login-logo--light {
-  display: block;
+  opacity: 1;
+  transform: scale(1);
 }
 
-html[data-theme="dark"] .logo-fade .logo-light,
-html[data-theme="dark"] .logo-fade .login-logo--light {
-  display: none;
-}
-
+/* Dark theme: usar logo blanco */
+html[data-theme="dark"] .login-logo-theme-dark,
 html[data-theme="dark"] .logo-fade .logo-dark,
 html[data-theme="dark"] .logo-fade .login-logo--dark {
-  display: block;
+  opacity: 1;
+  transform: scale(1);
+}
+
+html[data-theme="dark"] .login-logo-theme-light,
+html[data-theme="dark"] .logo-fade .logo-light,
+html[data-theme="dark"] .logo-fade .login-logo--light {
+  opacity: 0;
+  transform: scale(.96);
+}
+
+.logo-fade:hover .login-logo-theme-img {
+  filter:
+    drop-shadow(
+      0 8px 18px
+      color-mix(in srgb, var(--shadow-strong) 50%, transparent)
+    );
 }
 
 @keyframes logoGlowSpin {
@@ -1348,7 +1416,7 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
 
 
 /* =========================================================
-   OPTIONS
+   OPTIONS · REMEMBER CUSTOM CHECKBOX · NO NATIVE BLACK
 ========================================================= */
 
 .login-options {
@@ -1363,10 +1431,12 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
 }
 
 .login-check {
+  position: relative;
+
   display: inline-flex;
   align-items: center;
 
-  gap: 10px;
+  min-block-size: 24px;
 
   border: 0 !important;
   outline: none !important;
@@ -1380,7 +1450,7 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
   user-select: none;
 
   font-size: var(--font-md);
-  line-height: 1;
+  line-height: 1.2;
 }
 
 .login-check:hover,
@@ -1393,36 +1463,130 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
 }
 
 .login-check input {
-  inline-size: 16px;
-  block-size: 16px;
+  position: absolute;
 
-  accent-color: var(--accent);
+  inline-size: 1px;
+  block-size: 1px;
 
-  border-color: transparent;
-  outline: none !important;
+  margin: 0;
+  padding: 0;
 
-  background: transparent;
+  opacity: 0;
 
-  box-shadow: none !important;
+  overflow: hidden;
 
-  cursor: pointer;
-}
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
 
-.login-check input:hover,
-.login-check input:active,
-.login-check input:focus,
-.login-check input:focus-visible {
-  outline: none !important;
-  box-shadow: none !important;
-  filter: none !important;
+  white-space: nowrap;
+
+  border: 0;
+
+  pointer-events: none;
 }
 
 .login-check span {
-  transition: color var(--duration-normal) var(--ease-standard);
+  position: relative;
+
+  display: inline-flex;
+  align-items: center;
+
+  gap: 10px;
+
+  color: var(--text-muted);
+
+  transition:
+    color var(--duration-normal) var(--ease-standard),
+    opacity var(--duration-normal) var(--ease-standard);
+}
+
+.login-check span::before {
+  content: "";
+
+  flex: none;
+
+  inline-size: 18px;
+  block-size: 18px;
+
+  border: 1px solid var(--border-default);
+  border-radius: 5px;
+
+  background:
+    var(--glass-shine),
+    var(--surface-glass);
+
+  box-shadow:
+    var(--shadow-inner),
+    0 1px 2px color-mix(in srgb, var(--shadow-strong) 6%, transparent);
+
+  transition:
+    background var(--duration-normal) var(--ease-standard),
+    border-color var(--duration-normal) var(--ease-standard),
+    box-shadow var(--duration-normal) var(--ease-standard),
+    transform .18s var(--ease-standard);
+}
+
+.login-check span::after {
+  content: "";
+
+  position: absolute;
+
+  inset-inline-start: 6px;
+  inset-block-start: 3px;
+
+  inline-size: 5px;
+  block-size: 10px;
+
+  border: solid var(--text-on-accent);
+  border-width: 0 2px 2px 0;
+
+  opacity: 0;
+
+  transform: rotate(45deg) scale(.82);
+
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
 }
 
 .login-check:hover span {
-  color: var(--text-muted);
+  color: var(--text-strong);
+}
+
+.login-check:hover span::before {
+  border-color: var(--accent-border);
+
+  box-shadow:
+    var(--shadow-inner),
+    0 0 0 4px color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.login-check input:checked + span::before {
+  border-color: var(--accent-border-strong, var(--accent-border));
+  background: var(--btn-primary-bg);
+
+  box-shadow:
+    0 8px 18px color-mix(in srgb, var(--accent) 18%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--accent) 10%, transparent),
+    var(--shadow-inner);
+}
+
+.login-check input:checked + span::after {
+  opacity: 1;
+  transform: rotate(45deg) scale(1);
+}
+
+.login-check input:focus-visible + span::before {
+  outline: none;
+
+  box-shadow:
+    var(--focus-ring),
+    0 0 0 5px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.login-check input:disabled + span {
+  opacity: .58;
+  cursor: not-allowed;
 }
 
 .login-meta {
@@ -1738,7 +1902,8 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
   .login-button::after,
   .login-toast,
   .login-toast-progress,
-  .login-card.shake {
+  .login-card.shake,
+  .login-logo-theme-img {
     transition: none !important;
     animation: none !important;
   }
@@ -1983,7 +2148,8 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
     border-radius: 20px;
   }
 
-  .logo-fade img {
+  .login-logo-theme,
+  .login-logo-theme-img {
     inline-size: 38px;
     block-size: 38px;
   }
@@ -2135,7 +2301,8 @@ html[data-theme="dark"] .logo-fade .login-logo--dark {
     block-size: 68px;
   }
 
-  .logo-fade img {
+  .login-logo-theme,
+  .login-logo-theme-img {
     inline-size: 36px;
     block-size: 36px;
   }

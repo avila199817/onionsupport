@@ -3,7 +3,7 @@
    Archivo: src/app/index.js
 
    ONION SUPPORT · APP BOOTSTRAP
-   PRIVATE SPA · ROUTER SAFE · TOKEN ROUTES SAFE · EXTREME 13/10
+   PRIVATE SPA · ROUTER SAFE · TOKEN ROUTES SAFE · EXTREME 14/10
 
    RESPONSABILIDADES:
    - Arrancar la SPA de forma ordenada.
@@ -25,15 +25,19 @@
    - No rebinder SidebarUI/TopbarUI salvo petición explícita.
    - Exponer Router/Auth/Store/Http/Toast/I18n/UI al Core.
    - Resincronizar usuario/avatar después del montaje real de UI.
+   - Autoarrancar la SPA cuando el DOM esté listo.
 
    FIX CRÍTICO:
    - NO hacer bindRouter() antes de renderInitialRoute().
    - Renderizar rutas públicas con token antes de restoreSession.
    - No permitir que restore/auth/history limpien token antes de la vista.
    - Si restoreSession navega post-login, NO ejecutar renderInitialRoute() otra vez.
+   - Detectar navegación real aunque restoreSession no devuelva flag explícito.
    - bindRouter() ocurre después del primer render/navegación resuelta.
    - AppCore.syncUserUI() se repite tras montar SidebarUI/TopbarUI.
    - Core recibe bridges Router/Auth/Store/Http desde fase temprana.
+   - Router configured/bound no se marca true si realmente falla.
+   - UI ready no se marca true si initUISystems() falla.
 
    FIX BOOT LOADER:
    - Toma control del loader estático de index.html desde el inicio.
@@ -85,6 +89,7 @@ import {
 } from "./shell.js";
 
 import {
+  BOOT_PHASES,
   markAppBootState,
   markStoreBootState,
   markBootStart,
@@ -133,7 +138,6 @@ import {
   ROUTER_EVENTS,
   AUTH_EVENTS,
   BOOT_CONSTANTS,
-  BOOT_PHASES,
   APP_RUNTIME_KEYS,
   APP_STATE_KEYS,
   DEFAULT_ROUTE,
@@ -198,6 +202,25 @@ const BOOT_EVENTS =
     loaderForceHide:
       APP_EVENTS?.bootLoaderForceHide ||
       "app:boot:loader:force-hide",
+  });
+
+const BOOT_PHASE_VALUE =
+  Object.freeze({
+    idle:
+      BOOT_PHASES?.IDLE ||
+      "idle",
+
+    booting:
+      BOOT_PHASES?.BOOTING ||
+      "booting",
+
+    ready:
+      BOOT_PHASES?.READY ||
+      "ready",
+
+    error:
+      BOOT_PHASES?.ERROR ||
+      "error",
   });
 
 const MIN_BOOT_LOADER_MS =
@@ -865,6 +888,28 @@ function redactTokenInText(value = "") {
   return output;
 }
 
+function isDomNodeLike(value) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  try {
+    return Boolean(
+      typeof Node !== "undefined" &&
+        value instanceof Node
+    );
+  } catch {}
+
+  try {
+    return Boolean(
+      value.nodeType &&
+        value.nodeName
+    );
+  } catch {}
+
+  return false;
+}
+
 function sanitizePayload(value, depth = 0) {
   if (depth > 6) {
     return "[MaxDepth]";
@@ -881,6 +926,23 @@ function sanitizePayload(value, depth = 0) {
     typeof value === "boolean"
   ) {
     return value;
+  }
+
+  if (typeof value === "function") {
+    return "[Function]";
+  }
+
+  if (isDomNodeLike(value)) {
+    return {
+      node:
+        safeText(value.nodeName, "Node"),
+
+      id:
+        safeText(value.id, ""),
+
+      className:
+        safeText(value.className, ""),
+    };
   }
 
   if (Array.isArray(value)) {
@@ -904,6 +966,11 @@ function sanitizePayload(value, depth = 0) {
 
       status:
         value.status || value.statusCode || null,
+
+      stack:
+        value.stack
+          ? redactTokenInText(value.stack)
+          : "",
     };
   }
 
@@ -1326,6 +1393,7 @@ function resolveProtectedInitialContext(href = "") {
   return {
     config:
       null,
+
     key:
       "",
 
@@ -1354,42 +1422,55 @@ function captureInitialUrl() {
     return {
       initialUrl:
         "",
+
       browserPublicPath:
         DEFAULT_ROUTE || "/",
 
       protectedInitialUrl:
         "",
+
       protectedInitialPath:
         "",
+
       protectedInitialPublicPath:
         "",
 
       isPublicTokenRoute:
         false,
+
       hasPublicToken:
         false,
+
       protectedRouteKey:
         "",
 
       activationInitialUrl:
         "",
+
       activationInitialPath:
         "",
+
       activationInitialPublicPath:
         "",
+
       isActivation:
         false,
+
       hasActivationToken:
         false,
 
       resetConfirmInitialUrl:
         "",
+
       resetConfirmInitialPath:
         "",
+
       resetConfirmInitialPublicPath:
         "",
+
       isResetConfirm:
         false,
+
       hasResetToken:
         false,
     };
@@ -1761,6 +1842,7 @@ export const App = (() => {
       sanitizePayload({
         source:
           BOOT_SOURCE,
+
         ...safeObject(payload),
       });
 
@@ -2096,8 +2178,10 @@ export const App = (() => {
               {
                 overwrite:
                   true,
+
                 replace:
                   true,
+
                 source:
                   BOOT_SOURCE,
               }
@@ -2556,6 +2640,7 @@ export const App = (() => {
           {
             reason:
               cleanReason,
+
             error,
           }
         );
@@ -2573,6 +2658,7 @@ export const App = (() => {
           {
             reason:
               cleanReason,
+
             error,
           }
         );
@@ -2598,6 +2684,7 @@ export const App = (() => {
             cleanReason,
 
           appUiSynced,
+
           coreSynced:
             Boolean(coreUserUiPayload),
 
@@ -2624,6 +2711,7 @@ export const App = (() => {
         {
           reason:
             cleanReason,
+
           error,
         }
       );
@@ -2833,8 +2921,10 @@ export const App = (() => {
       let sidebarResult = {
         called:
           false,
+
         method:
           "",
+
         methods:
           [],
       };
@@ -2842,8 +2932,10 @@ export const App = (() => {
       let topbarResult = {
         called:
           false,
+
         method:
           "",
+
         methods:
           [],
       };
@@ -2936,16 +3028,22 @@ export const App = (() => {
             `${cleanReason}:after-paint`,
             {
               ...opts,
+
               repairShell:
                 false,
+
               hardRepair:
                 false,
+
               rebind:
                 false,
+
               emit:
                 false,
+
               afterPaint:
                 false,
+
               source:
                 `${opts.source}:after-paint`,
             }
@@ -3067,12 +3165,16 @@ export const App = (() => {
             {
               repairShell:
                 false,
+
               hardRepair:
                 false,
+
               rebind:
                 false,
+
               afterPaint:
                 false,
+
               source:
                 "router:rendered",
             }
@@ -3089,12 +3191,16 @@ export const App = (() => {
             {
               repairShell:
                 false,
+
               hardRepair:
                 false,
+
               rebind:
                 false,
+
               afterPaint:
                 false,
+
               source:
                 "router:render:async-complete",
             }
@@ -3111,12 +3217,16 @@ export const App = (() => {
             {
               repairShell:
                 false,
+
               hardRepair:
                 false,
+
               rebind:
                 false,
+
               afterPaint:
                 false,
+
               source:
                 "app:route:change",
             }
@@ -3171,12 +3281,16 @@ export const App = (() => {
             {
               repairShell:
                 false,
+
               hardRepair:
                 false,
+
               rebind:
                 false,
+
               afterPaint:
                 false,
+
               source:
                 eventName,
             }
@@ -3196,12 +3310,16 @@ export const App = (() => {
             {
               repairShell:
                 data.repairShell !== false,
+
               hardRepair:
                 data.hardRepair === true,
+
               rebind:
                 data.rebind === true,
+
               afterPaint:
                 data.afterPaint === true,
+
               source:
                 "window:app:ui:repair-request",
             }
@@ -3218,12 +3336,16 @@ export const App = (() => {
             {
               repairShell:
                 false,
+
               hardRepair:
                 false,
+
               rebind:
                 false,
+
               afterPaint:
                 false,
+
               source:
                 "window:app:lang:change",
             }
@@ -3239,12 +3361,16 @@ export const App = (() => {
             {
               repairShell:
                 false,
+
               hardRepair:
                 false,
+
               rebind:
                 false,
+
               afterPaint:
                 false,
+
               source:
                 "window:onion:theme:change",
             }
@@ -3414,18 +3540,25 @@ export const App = (() => {
       BOOT_EVENTS.state,
       {
         phase,
+
         booted:
           state.booted,
+
         booting:
           state.booting,
+
         cycleId:
           state.bootCycleId,
+
         finalizedCycleId:
           state.finalizedCycleId,
+
         route:
           routeSnapshot.route,
+
         publicPath:
           routeSnapshot.publicPath,
+
         ...safeObject(extra),
       }
     );
@@ -3453,16 +3586,21 @@ export const App = (() => {
         markAppBootState?.(AppCore, {
           booting:
             true,
+
           booted:
             false,
+
           ready:
             false,
+
           loading:
             true,
+
           phase:
-            BOOT_PHASES?.booting ||
-            "booting",
+            BOOT_PHASE_VALUE.booting,
+
           cycleId,
+
           reason:
             "app-index-boot-start",
         });
@@ -3472,16 +3610,21 @@ export const App = (() => {
         markStoreBootState?.(Store, {
           booting:
             true,
+
           booted:
             false,
+
           ready:
             false,
+
           loading:
             true,
+
           phase:
-            BOOT_PHASES?.booting ||
-            "booting",
+            BOOT_PHASE_VALUE.booting,
+
           cycleId,
+
           reason:
             "app-index-boot-start",
         });
@@ -3518,16 +3661,21 @@ export const App = (() => {
         markAppBootState?.(AppCore, {
           booting:
             false,
+
           booted:
             true,
+
           ready:
             true,
+
           loading:
             false,
+
           phase:
-            BOOT_PHASES?.ready ||
-            "ready",
+            BOOT_PHASE_VALUE.ready,
+
           cycleId,
+
           reason:
             "app-index-boot-ready",
         });
@@ -3537,16 +3685,21 @@ export const App = (() => {
         markStoreBootState?.(Store, {
           booting:
             false,
+
           booted:
             true,
+
           ready:
             true,
+
           loading:
             false,
+
           phase:
-            BOOT_PHASES?.ready ||
-            "ready",
+            BOOT_PHASE_VALUE.ready,
+
           cycleId,
+
           reason:
             "app-index-boot-ready",
         });
@@ -3584,18 +3737,24 @@ export const App = (() => {
         markAppBootState?.(AppCore, {
           booting:
             false,
+
           booted:
             false,
+
           ready:
             false,
+
           loading:
             false,
+
           phase:
-            BOOT_PHASES?.error ||
-            "error",
+            BOOT_PHASE_VALUE.error,
+
           cycleId,
+
           reason:
             "app-index-boot-error",
+
           error,
         });
       } catch {}
@@ -3604,18 +3763,24 @@ export const App = (() => {
         markStoreBootState?.(Store, {
           booting:
             false,
+
           booted:
             false,
+
           ready:
             false,
+
           loading:
             false,
+
           phase:
-            BOOT_PHASES?.error ||
-            "error",
+            BOOT_PHASE_VALUE.error,
+
           cycleId,
+
           reason:
             "app-index-boot-error",
+
           error,
         });
       } catch {}
@@ -3625,6 +3790,7 @@ export const App = (() => {
       "error",
       {
         cycleId,
+
         message:
           safeText(error?.message || error, "Boot error."),
       }
@@ -3713,6 +3879,7 @@ export const App = (() => {
           {
             booting:
               true,
+
             reason,
           }
         );
@@ -3732,6 +3899,7 @@ export const App = (() => {
       BOOT_EVENTS.loaderShow,
       {
         reason,
+
         loaderSnapshot:
           getBootLoaderSnapshot(),
       }
@@ -3752,6 +3920,7 @@ export const App = (() => {
         AppCore,
         {
           reason,
+
           minVisibleMs:
             MIN_BOOT_LOADER_MS,
         }
@@ -3762,6 +3931,7 @@ export const App = (() => {
       BOOT_EVENTS.loaderHide,
       {
         reason,
+
         loaderSnapshot:
           getBootLoaderSnapshot(),
       }
@@ -3778,8 +3948,10 @@ export const App = (() => {
         AppCore,
         {
           reason,
+
           minVisibleMs:
             0,
+
           state,
         }
       );
@@ -3789,6 +3961,7 @@ export const App = (() => {
           AppCore,
           {
             reason,
+
             minVisibleMs:
               0,
           }
@@ -3800,6 +3973,7 @@ export const App = (() => {
       BOOT_EVENTS.loaderForceHide,
       {
         reason,
+
         loaderSnapshot:
           getBootLoaderSnapshot(),
       }
@@ -3989,15 +4163,19 @@ export const App = (() => {
       false;
 
     try {
-      configureRouter?.({
-        AppCore,
-        Auth,
-        Router,
-        Store,
-        I18n,
-      });
+      if (isFunction(configureRouter)) {
+        const result =
+          configureRouter({
+            AppCore,
+            Auth,
+            Router,
+            Store,
+            I18n,
+          });
 
-      configured = true;
+        configured =
+          result !== false;
+      }
     } catch (error) {
       safeWarn(
         "configureRouter() falló. Intentando Router.configure().",
@@ -4007,24 +4185,36 @@ export const App = (() => {
 
     if (!configured) {
       try {
-        Router?.configure?.({
-          core:
-            AppCore,
-          AppCore,
-          auth:
-            Auth,
-          Auth,
-          store:
-            Store,
-          Store,
-          i18n:
-            I18n,
-          I18n,
-          app:
-            api,
-        });
+        if (isFunction(Router?.configure)) {
+          const result =
+            Router.configure({
+              core:
+                AppCore,
 
-        configured = true;
+              AppCore,
+
+              auth:
+                Auth,
+
+              Auth,
+
+              store:
+                Store,
+
+              Store,
+
+              i18n:
+                I18n,
+
+              I18n,
+
+              app:
+                api,
+            });
+
+          configured =
+            result !== false;
+        }
       } catch (error) {
         safeWarn(
           "Router.configure() falló.",
@@ -4035,7 +4225,8 @@ export const App = (() => {
 
     exposeRuntimeModulesToCore();
 
-    state.routerConfigured = true;
+    state.routerConfigured =
+      Boolean(configured);
 
     safeEmit(
       "app:router:configured",
@@ -4045,7 +4236,11 @@ export const App = (() => {
       }
     );
 
-    return configured;
+    if (!configured) {
+      throw new Error("Router no pudo configurarse.");
+    }
+
+    return true;
   }
 
   function bindRouterBlock(reason = "bind-router") {
@@ -4057,15 +4252,19 @@ export const App = (() => {
       false;
 
     try {
-      bindRouter?.({
-        AppCore,
-        Auth,
-        Router,
-        Store,
-        I18n,
-      });
+      if (isFunction(bindRouter)) {
+        const result =
+          bindRouter({
+            AppCore,
+            Auth,
+            Router,
+            Store,
+            I18n,
+          });
 
-      bound = true;
+        bound =
+          result !== false;
+      }
     } catch (error) {
       safeWarn(
         "bindRouter() falló. Intentando Router.bind().",
@@ -4075,30 +4274,45 @@ export const App = (() => {
 
     if (!bound) {
       try {
-        Router?.bind?.({
-          AppCore,
-          Auth,
-          Store,
-          I18n,
-        });
+        if (isFunction(Router?.bind)) {
+          const result =
+            Router.bind({
+              AppCore,
+              Auth,
+              Store,
+              I18n,
+            });
 
-        bound = true;
+          bound =
+            result !== false;
+        }
       } catch {}
     }
 
     exposeRuntimeModulesToCore();
 
-    state.routerBound = true;
+    state.routerBound =
+      Boolean(bound);
 
     safeEmit(
       "app:router:bound",
       {
         reason,
-        bound,
+        bound:
+          Boolean(bound),
       }
     );
 
-    return bound;
+    if (!bound) {
+      safeWarn(
+        "Router bind no confirmado.",
+        {
+          reason,
+        }
+      );
+    }
+
+    return Boolean(bound);
   }
 
   function safeEmitUIReady() {
@@ -4123,14 +4337,19 @@ export const App = (() => {
         {
           repairShell:
             false,
+
           syncUser:
             true,
+
           hardRepair:
             false,
+
           rebind:
             false,
+
           afterPaint:
             false,
+
           source:
             "init-ui-already-ready",
         }
@@ -4139,21 +4358,27 @@ export const App = (() => {
       return true;
     }
 
+    let uiOk =
+      false;
+
     try {
-      initUISystems({
-        AppCore,
-        Toast,
-        SidebarUI,
-        TopbarUI,
-        Auth,
-        Router,
-        Store,
-        I18n,
-        state,
-        scope:
-          APP_SCOPES?.ui ||
-          "app:ui",
-      });
+      uiOk =
+        Boolean(
+          initUISystems({
+            AppCore,
+            Toast,
+            SidebarUI,
+            TopbarUI,
+            Auth,
+            Router,
+            Store,
+            I18n,
+            state,
+            scope:
+              APP_SCOPES?.ui ||
+              "app:ui",
+          })
+        );
     } catch (error) {
       safeWarn(
         "initUISystems() falló.",
@@ -4161,14 +4386,25 @@ export const App = (() => {
       );
     }
 
-    state.uiReady = true;
-    state.uiMounted = true;
+    state.uiReady =
+      Boolean(uiOk);
+
+    state.uiMounted =
+      Boolean(uiOk);
 
     try {
-      setCoreBootFlag("uiReady", true);
-      setCoreBootFlag("uiMounted", true);
-      setCoreBootFlag("uiInitialized", true);
+      setCoreBootFlag("uiReady", Boolean(uiOk));
+      setCoreBootFlag("uiMounted", Boolean(uiOk));
+      setCoreBootFlag("uiInitialized", Boolean(uiOk));
     } catch {}
+
+    if (!uiOk) {
+      safeWarn(
+        "UI no quedó inicializada completamente."
+      );
+
+      return false;
+    }
 
     callSyncUserUI("init-ui:post-mount");
 
@@ -4178,14 +4414,19 @@ export const App = (() => {
       {
         repairShell:
           true,
+
         syncUser:
           true,
+
         hardRepair:
           false,
+
         rebind:
           false,
+
         afterPaint:
           true,
+
         source:
           "init-ui",
       }
@@ -4200,49 +4441,54 @@ export const App = (() => {
     const opts =
       safeObject(payload);
 
-    try {
-      return await Promise.resolve(
-        renderInitialRoute?.({
-          AppCore,
-          Auth,
-          Router,
-          Store,
-          I18n,
-          Toast,
+    if (isFunction(renderInitialRoute)) {
+      try {
+        const result =
+          await Promise.resolve(
+            renderInitialRoute({
+              AppCore,
+              Auth,
+              Router,
+              Store,
+              I18n,
+              Toast,
 
-          getViewContainer,
-          setShellVisibility,
-          updateShellVisibilityByRoute,
+              getViewContainer,
+              setShellVisibility,
+              updateShellVisibilityByRoute,
 
-          applyPostRenderLoaderPolicy:
-            (policyPayload = {}) => {
-              return applyPostRenderLoaderPolicy?.({
-                AppCore,
-                Router,
-                hideLoader,
-                ...safeObject(policyPayload),
-              });
-            },
+              applyPostRenderLoaderPolicy:
+                (policyPayload = {}) => {
+                  return applyPostRenderLoaderPolicy?.({
+                    AppCore,
+                    Router,
+                    hideLoader,
+                    ...safeObject(policyPayload),
+                  });
+                },
 
-          ...opts,
-        })
-      );
-    } catch (error) {
-      safeWarn(
-        "renderInitialRoute() con deps falló. Intentando firma legacy.",
-        error
-      );
-    }
+              ...opts,
+            })
+          );
 
-    try {
-      return await Promise.resolve(
-        renderInitialRoute?.()
-      );
-    } catch (error) {
-      safeWarn(
-        "renderInitialRoute() legacy falló. Intentando Router.render().",
-        error
-      );
+        return result;
+      } catch (error) {
+        safeWarn(
+          "renderInitialRoute() con deps falló. Intentando firma legacy.",
+          error
+        );
+      }
+
+      try {
+        return await Promise.resolve(
+          renderInitialRoute()
+        );
+      } catch (error) {
+        safeWarn(
+          "renderInitialRoute() legacy falló. Intentando Router.render().",
+          error
+        );
+      }
     }
 
     const routeSnapshot =
@@ -4258,17 +4504,23 @@ export const App = (() => {
           {
             force:
               true,
+
             replaceState:
               true,
+
             reason:
               opts.reason ||
               "app-index-render-fallback",
+
             source:
               BOOT_SOURCE,
+
             preservePublicPath:
               true,
+
             preserveSearch:
               true,
+
             preserveHash:
               true,
           }
@@ -4279,6 +4531,7 @@ export const App = (() => {
         "Router.render() fallback falló.",
         error
       );
+
       throw error;
     }
   }
@@ -4318,14 +4571,19 @@ export const App = (() => {
         {
           repairShell:
             false,
+
           syncUser:
             true,
+
           hardRepair:
             false,
+
           rebind:
             false,
+
           afterPaint:
             false,
+
           source:
             "render-initial-route",
         }
@@ -4342,6 +4600,23 @@ export const App = (() => {
   } = {}) {
     if (isStale(cycleId)) {
       return null;
+    }
+
+    if (!isFunction(restoreSessionInBackground)) {
+      safeWarn(
+        "restoreSessionInBackground no disponible."
+      );
+
+      return {
+        ok:
+          false,
+
+        skipped:
+          true,
+
+        reason:
+          "restore-session-unavailable",
+      };
     }
 
     if (state.restorePromise) {
@@ -4378,14 +4653,19 @@ export const App = (() => {
           {
             repairShell:
               false,
+
             syncUser:
               true,
+
             hardRepair:
               false,
+
             rebind:
               false,
+
             afterPaint:
               false,
+
             source:
               "restore-session",
           }
@@ -4407,14 +4687,19 @@ export const App = (() => {
             {
               repairShell:
                 false,
+
               syncUser:
                 true,
+
               hardRepair:
                 false,
+
               rebind:
                 false,
+
               afterPaint:
                 false,
+
               source:
                 "restore-session-error",
             }
@@ -4437,6 +4722,7 @@ export const App = (() => {
       cycleId,
       nonBlocking:
         true,
+
       skipPostRestoreNavigation:
         true,
     })
@@ -4450,14 +4736,19 @@ export const App = (() => {
           {
             repairShell:
               false,
+
             syncUser:
               true,
+
             hardRepair:
               false,
+
             rebind:
               false,
+
             afterPaint:
               false,
+
             source:
               "public-token-background-restore",
           }
@@ -4474,8 +4765,12 @@ export const App = (() => {
   }
 
   async function runWarmupBlock(reason = "warmup") {
+    if (!isFunction(warmup)) {
+      return null;
+    }
+
     try {
-      return await warmup?.({
+      return await warmup({
         AppCore,
         Auth,
         Router,
@@ -4518,16 +4813,21 @@ export const App = (() => {
       markStoreBootState(Store, {
         ready:
           true,
+
         booted:
           true,
+
         booting:
           false,
+
         loading:
           false,
+
         phase:
-          BOOT_PHASES?.ready ||
-          "ready",
+          BOOT_PHASE_VALUE.ready,
+
         cycleId,
+
         reason:
           "finalize-boot",
       });
@@ -4543,14 +4843,19 @@ export const App = (() => {
       {
         repairShell:
           false,
+
         syncUser:
           true,
+
         hardRepair:
           false,
+
         rebind:
           false,
+
         afterPaint:
           false,
+
         source:
           "finalize-boot",
       }
@@ -4562,16 +4867,22 @@ export const App = (() => {
         {
           repairShell:
             false,
+
           syncUser:
             false,
+
           hardRepair:
             false,
+
           rebind:
             false,
+
           afterPaint:
             false,
+
           emit:
             false,
+
           source:
             "finalize-boot:after-paint-pre-hide",
         }
@@ -4599,23 +4910,29 @@ export const App = (() => {
         {
           repairShell:
             false,
+
           syncUser:
             true,
+
           hardRepair:
             false,
+
           rebind:
             false,
+
           afterPaint:
             false,
+
           emit:
             false,
+
           source:
             "finalize-boot:post-loader-hide",
         }
       );
     });
 
-    await runWarmupBlock("after-finalize-boot");
+    void runWarmupBlock("after-finalize-boot");
 
     if (!state.readyEmitted) {
       state.readyEmitted = true;
@@ -4674,16 +4991,30 @@ export const App = (() => {
   }
 
   async function doPrivateOrNormalBoot(cycleId) {
+    const beforeRestore =
+      getCurrentRouteSnapshot();
+
     const restoreResult =
       await restoreSessionBlock({
         cycleId,
         nonBlocking:
           false,
+
         skipPostRestoreNavigation:
           false,
       });
 
-    if (didRestoreHandleNavigation(restoreResult)) {
+    const afterRestore =
+      getCurrentRouteSnapshot();
+
+    const routeChangedByRestore =
+      beforeRestore.route !== afterRestore.route ||
+      beforeRestore.publicPath !== afterRestore.publicPath;
+
+    if (
+      didRestoreHandleNavigation(restoreResult) ||
+      routeChangedByRestore
+    ) {
       markBootNavigationHandled(true);
 
       safeLog(
@@ -4691,10 +5022,14 @@ export const App = (() => {
         {
           ok:
             Boolean(safeObject(restoreResult).ok),
+
           route:
-            AppCore?.state?.route || DEFAULT_ROUTE || "/",
+            afterRestore.route,
+
           publicPath:
-            AppCore?.state?.publicPath || DEFAULT_ROUTE || "/",
+            afterRestore.publicPath,
+
+          routeChangedByRestore,
         }
       );
 
@@ -4706,14 +5041,19 @@ export const App = (() => {
         {
           repairShell:
             false,
+
           syncUser:
             true,
+
           hardRepair:
             false,
+
           rebind:
             false,
+
           afterPaint:
             false,
+
           source:
             "restore-navigation-handled",
         }
@@ -4745,6 +5085,7 @@ export const App = (() => {
         BOOT_EVENTS.start,
         {
           cycleId,
+
           bootUrlContext:
             sanitizeBootContextForLog(firstContext),
         }
@@ -4762,6 +5103,7 @@ export const App = (() => {
         AppCore?.init?.({
           source:
             BOOT_SOURCE,
+
           cycleId,
         })
       );
@@ -4790,7 +5132,17 @@ export const App = (() => {
 
       configureRouterBlock();
 
-      initUIBlock();
+      const uiOk =
+        initUIBlock();
+
+      if (!uiOk) {
+        safeWarn(
+          "Boot continúa con UI parcial.",
+          {
+            cycleId,
+          }
+        );
+      }
 
       if (
         bootContext.isPublicTokenRoute &&
@@ -4814,14 +5166,19 @@ export const App = (() => {
         {
           repairShell:
             false,
+
           syncUser:
             true,
+
           hardRepair:
             false,
+
           rebind:
             false,
+
           afterPaint:
             false,
+
           source:
             "before-finalize",
         }
@@ -4849,8 +5206,10 @@ export const App = (() => {
         BOOT_EVENTS.error,
         {
           cycleId,
+
           message:
             safeText(error?.message || error, "Boot error."),
+
           bootUrlContext:
             sanitizeBootContextForLog(refreshBootUrlContext()),
         }
@@ -4863,14 +5222,19 @@ export const App = (() => {
           {
             repairShell:
               false,
+
             syncUser:
               true,
+
             hardRepair:
               false,
+
             rebind:
               false,
+
             afterPaint:
               false,
+
             source:
               "boot-error",
           }
@@ -4916,14 +5280,19 @@ export const App = (() => {
         {
           repairShell:
             false,
+
           syncUser:
             true,
+
           hardRepair:
             false,
+
           rebind:
             false,
+
           afterPaint:
             false,
+
           source:
             "boot-already-booted",
         }
@@ -4968,6 +5337,9 @@ export const App = (() => {
     state.booted = false;
     state.booting = false;
 
+    state.servicesReady = false;
+    state.storeReady = false;
+
     state.uiReady = false;
     state.uiMounted = false;
     state.readyEmitted = false;
@@ -5009,6 +5381,7 @@ export const App = (() => {
     return boot({
       force:
         true,
+
       reason:
         opts.reason ||
         "reboot",
@@ -5139,5 +5512,47 @@ export const App = (() => {
 
   return api;
 })();
+
+/* =========================================================
+   AUTO BOOT
+========================================================= */
+
+function autoBootApp() {
+  try {
+    void App.boot().catch((error) => {
+      try {
+        console.error("[App] Auto boot failed.", error);
+      } catch {}
+    });
+  } catch (error) {
+    try {
+      console.error("[App] Auto boot crashed.", error);
+    } catch {}
+  }
+}
+
+try {
+  if (
+    isBrowser() &&
+    window.__ONION_DISABLE_AUTO_BOOT__ !== true
+  ) {
+    if (document.readyState === "loading") {
+      document.addEventListener(
+        "DOMContentLoaded",
+        autoBootApp,
+        {
+          once:
+            true,
+        }
+      );
+    } else {
+      autoBootApp();
+    }
+  }
+} catch {}
+
+/* =========================================================
+   DEFAULT EXPORT
+========================================================= */
 
 export default App;

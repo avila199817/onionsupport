@@ -3,7 +3,7 @@
    Archivo: src/views/home/home.template.js
 
    FINAL EXTREME PRODUCTION TEMPLATE · HOME VIEW · USER + ADMIN
-   APPLE SAAS MODE · FACTURAS/INCIDENCIAS INSPIRED · 12/10
+   APPLE SAAS MODE · FACTURAS/INCIDENCIAS INSPIRED · 13/10
 
    PATCH · TEMPLATE CLEAN
    PATCH · CSS EXTERNALIZED
@@ -12,6 +12,11 @@
    PATCH · SELECTORS MOVED TO home.selectors.js
    PATCH · HTML ONLY OWNER
    PATCH · SUMMARY/WIDGETS/COUNTERS FIXED THROUGH SELECTORS
+   PATCH · CREATE ACTION DOES NOT COLLIDE WITH NAVIGATE
+   PATCH · ACTION ALIASES COMPATIBLE WITH homeView.js + home.bindings.js
+   PATCH · AVATAR FALLBACK CSP SAFE
+   PATCH · EXTREME EMPTY/LOADING/REFRESH STATES
+   PATCH · FULL DATA ATTR CONTRACT FOR BRIDGES
 
    RESPONSABILIDADES:
    - render del home/dashboard para usuarios y administradores
@@ -29,15 +34,20 @@
 
 import {
   DEFAULT_PAGE_SIZE,
+  DEFAULT_CURRENCY,
   HOME_ROUTES,
 
   safeText,
+  safeNumber,
+  safeArray,
   safeObject,
   first,
   isSameIdentity,
   normalizeRoute,
+  normalizeKey,
 
   formatNumber,
+  formatMoney,
   formatDateTime,
   formatRelativeDate,
   formatLastUpdate,
@@ -74,6 +84,11 @@ import {
   getTicketUpdatedAt,
   getTicketAttachmentsCount,
 
+  getInvoiceId,
+  getInvoiceAmount,
+  getInvoiceCurrency,
+  getInvoiceStatusKey,
+
   getWidgetId,
   getWidgetTitle,
   getWidgetText,
@@ -92,6 +107,40 @@ import {
 } from "./home.selectors.js";
 
 /* =========================================================
+   TEMPLATE CONSTANTS
+========================================================= */
+
+const TEMPLATE_VERSION = "13.0.0-extreme";
+
+const HOME_DATA_SCOPE = "home-dashboard";
+
+const ACTIONS = Object.freeze({
+  REFRESH: "refresh",
+  RETRY: "retry",
+  CREATE_INCIDENCIA: "create-incidencia",
+  OPEN_TICKET: "open-ticket",
+  OPEN_INVOICE: "open-invoice",
+  OPEN_WIDGET: "open-widget",
+  OPEN_ACTIVITY: "open-activity",
+  NAVIGATE: "navigate-home",
+  COPY_TICKET_ID: "copy-ticket-id",
+  PREV_PAGE: "prev-page",
+  NEXT_PAGE: "next-page",
+  GO_PAGE: "page",
+});
+
+const STATUS_ORDER = Object.freeze([
+  "pending",
+  "open",
+  "progress",
+  "resolved",
+  "closed",
+]);
+
+const WIDGET_LIMIT = 4;
+const ACTIVITY_LIMIT = 8;
+
+/* =========================================================
    TEMPLATE SAFE HELPERS
 ========================================================= */
 
@@ -104,12 +153,85 @@ function escapeHtml(value = "") {
     .replace(/'/g, "&#39;");
 }
 
+function attr(value = "") {
+  return escapeHtml(safeText(value, ""));
+}
+
+function boolAttr(condition, text) {
+  return condition ? text : "";
+}
+
+function joinClasses(...values) {
+  return values
+    .flat(Infinity)
+    .map((value) => safeText(value, ""))
+    .filter(Boolean)
+    .join(" ");
+}
+
+function datasetJson(value = {}) {
+  try {
+    return escapeHtml(JSON.stringify(value));
+  } catch {
+    return "{}";
+  }
+}
+
+function getState(input = {}) {
+  return safeObject(input.state);
+}
+
+function getLoadingState(input = {}) {
+  const state = getState(input);
+
+  return {
+    loading: Boolean(state.loading || input.loading),
+    refreshing: Boolean(state.refreshing || input.refreshing),
+    creating: Boolean(state.creating || input.creating),
+    error: safeText(first(state.error, input.error), ""),
+    openingTicketId: safeText(state.openingTicketId, ""),
+    selectedTicketId: safeText(state.selectedTicketId, ""),
+    navigatingAction: safeText(state.navigatingAction, ""),
+  };
+}
+
+function getTemplateMeta(input = {}) {
+  const data = safeObject(input);
+  const state = getState(data);
+  const dashboard = getDashboard(data);
+
+  return {
+    version: TEMPLATE_VERSION,
+    requestId: safeText(first(data.requestId, state.requestId, dashboard.requestId), ""),
+    lastUpdatedAt: first(
+      data.lastUpdatedAt,
+      data.lastSyncAt,
+      state.lastUpdatedAt,
+      state.lastSyncAt,
+      dashboard.updatedAt,
+      dashboard.generatedAt,
+      dashboard.lastSyncAt
+    ),
+  };
+}
+
+function renderSrOnly(text = "") {
+  const label = safeText(text, "");
+
+  if (!label) {
+    return "";
+  }
+
+  return `<span class="sr-only">${escapeHtml(label)}</span>`;
+}
+
 /* =========================================================
    ICONS
 ========================================================= */
 
 function icon(name = "") {
-  const common = `aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+  const common =
+    `aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
 
   const icons = {
     home: `<svg ${common}><path d="m3 10.5 9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>`,
@@ -123,6 +245,7 @@ function icon(name = "") {
     settings: `<svg ${common}><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.72l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>`,
     eye: `<svg ${common}><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>`,
     arrowRight: `<svg ${common}><path d="M5 12h14"/><path d="m13 5 7 7-7 7"/></svg>`,
+    arrowLeft: `<svg ${common}><path d="M19 12H5"/><path d="m11 19-7-7 7-7"/></svg>`,
     paperclip: `<svg ${common}><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.82l8.48-8.49"/></svg>`,
     alert: `<svg ${common}><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>`,
     clock: `<svg ${common}><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`,
@@ -131,9 +254,15 @@ function icon(name = "") {
     shield: `<svg ${common}><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.48 17.01 5 19 5a1 1 0 0 1 1 1z"/></svg>`,
     spark: `<svg ${common}><path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 21l-1.9-7.8L4 11l6.1-2.2Z"/></svg>`,
     search: `<svg ${common}><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>`,
+    copy: `<svg ${common}><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>`,
+    dots: `<svg ${common}><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`,
+    check: `<svg ${common}><path d="M20 6 9 17l-5-5"/></svg>`,
+    x: `<svg ${common}><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`,
+    chevronRight: `<svg ${common}><path d="m9 18 6-6-6-6"/></svg>`,
+    chevronLeft: `<svg ${common}><path d="m15 18-6-6 6-6"/></svg>`,
   };
 
-  return icons[name] || "";
+  return icons[name] || icons.activity;
 }
 
 /* =========================================================
@@ -142,7 +271,7 @@ function icon(name = "") {
 
 function renderSpinner(label = "") {
   return `
-    <span class="home-inline-loading">
+    <span class="home-inline-loading" role="status" aria-label="${attr(label || "Cargando")}">
       <span class="home-inline-spinner" aria-hidden="true"></span>
       ${
         label
@@ -158,47 +287,49 @@ function renderLoaderOnly(label = "Cargando") {
     <span
       class="home-loader-only"
       role="status"
-      aria-label="${escapeHtml(label)}"
-      title="${escapeHtml(label)}"
-      data-tooltip="${escapeHtml(label)}"
+      aria-label="${attr(label)}"
+      title="${attr(label)}"
+      data-tooltip="${attr(label)}"
     >
       <span class="home-inline-spinner" aria-hidden="true"></span>
+      ${renderSrOnly(label)}
     </span>
   `;
 }
 
 function renderUserAvatar(input = {}) {
+  const user = getUser(input);
   const fullName = getDisplayName(input);
   const initials = getInitials(fullName);
   const avatarUrl = getAvatarUrl(input);
-  const user = getUser(input);
 
   const seed = safeText(
-    first(user.userId, user.id, user.email, user.username, fullName, "home-user"),
+    first(user.userId, user.id, user.email, user.username, user.phone, fullName, "home-user"),
     "home-user"
   );
 
   return `
     <div
-      class="home-user-avatar${avatarUrl ? "" : " home-user-avatar--fallback"}"
-      aria-label="${escapeHtml(fullName)}"
-      title="${escapeHtml(fullName)}"
-      data-tooltip="${escapeHtml(fullName)}"
+      class="${joinClasses("home-user-avatar", avatarUrl ? "" : "home-user-avatar--fallback")}"
+      aria-label="${attr(fullName)}"
+      title="${attr(fullName)}"
+      data-tooltip="${attr(fullName)}"
       data-avatar-root="true"
       data-avatar-kind="user"
-      data-avatar-seed="${escapeHtml(seed)}"
-      data-avatar-initials="${escapeHtml(initials)}"
-      ${avatarUrl ? "" : 'data-fallback="true"'}
+      data-avatar-seed="${attr(seed)}"
+      data-avatar-initials="${attr(initials)}"
+      ${boolAttr(!avatarUrl, 'data-fallback="true"')}
     >
-      <span class="home-user-avatar-fallback">${escapeHtml(initials)}</span>
+      <span class="home-user-avatar-fallback" aria-hidden="true">${escapeHtml(initials)}</span>
       ${
         avatarUrl
           ? `
             <img
               class="home-user-avatar-img"
-              src="${escapeHtml(avatarUrl)}"
-              alt="${escapeHtml(fullName)}"
+              src="${attr(avatarUrl)}"
+              alt="${attr(fullName)}"
               loading="lazy"
+              decoding="async"
               referrerpolicy="no-referrer"
               draggable="false"
               data-avatar-image="true"
@@ -218,25 +349,26 @@ function renderTicketAvatar(item = {}) {
 
   return `
     <div
-      class="home-ticket-avatar${avatarUrl ? "" : " home-ticket-avatar--fallback"}"
-      aria-label="${escapeHtml(fullName)}"
-      title="${escapeHtml(fullName)}"
-      data-tooltip="${escapeHtml(fullName)}"
+      class="${joinClasses("home-ticket-avatar", avatarUrl ? "" : "home-ticket-avatar--fallback")}"
+      aria-label="${attr(fullName)}"
+      title="${attr(fullName)}"
+      data-tooltip="${attr(fullName)}"
       data-avatar-root="true"
       data-avatar-kind="ticket"
-      data-avatar-seed="${escapeHtml(seed)}"
-      data-avatar-initials="${escapeHtml(initials)}"
-      ${avatarUrl ? "" : 'data-fallback="true"'}
+      data-avatar-seed="${attr(seed)}"
+      data-avatar-initials="${attr(initials)}"
+      ${boolAttr(!avatarUrl, 'data-fallback="true"')}
     >
-      <span class="home-ticket-avatar-fallback">${escapeHtml(initials)}</span>
+      <span class="home-ticket-avatar-fallback" aria-hidden="true">${escapeHtml(initials)}</span>
       ${
         avatarUrl
           ? `
             <img
               class="home-ticket-avatar-img"
-              src="${escapeHtml(avatarUrl)}"
-              alt="${escapeHtml(fullName)}"
+              src="${attr(avatarUrl)}"
+              alt="${attr(fullName)}"
               loading="lazy"
+              decoding="async"
               referrerpolicy="no-referrer"
               draggable="false"
               data-avatar-image="true"
@@ -254,7 +386,7 @@ function renderStatusChip(item = {}) {
   const label = getTicketStatusLabel(rawStatus);
 
   return `
-    <span class="home-chip home-chip--${escapeHtml(key)}">
+    <span class="home-chip home-chip--${attr(key)}" data-status-key="${attr(key)}">
       <span class="home-chip-dot" aria-hidden="true"></span>
       ${escapeHtml(label)}
     </span>
@@ -264,14 +396,16 @@ function renderStatusChip(item = {}) {
 function renderPriorityBadge(item = {}) {
   const key = getTicketPriorityKey(item);
   const label = getTicketPriorityLabel(item);
+  const urgent = key === "critical" || key === "urgent";
 
   return `
     <span
-      class="home-mini-badge home-mini-badge--${escapeHtml(key)}"
-      title="${escapeHtml(`Prioridad ${label}`)}"
-      data-tooltip="${escapeHtml(`Prioridad ${label}`)}"
+      class="home-mini-badge home-mini-badge--${attr(key)}"
+      title="${attr(`Prioridad ${label}`)}"
+      data-tooltip="${attr(`Prioridad ${label}`)}"
+      data-priority-key="${attr(key)}"
     >
-      ${key === "critical" || key === "urgent" ? icon("alert") : icon("activity")}
+      ${urgent ? icon("alert") : icon("activity")}
       ${escapeHtml(label)}
     </span>
   `;
@@ -283,8 +417,8 @@ function renderCategoryBadge(item = {}) {
   return `
     <span
       class="home-mini-badge home-mini-badge--category"
-      title="${escapeHtml(category)}"
-      data-tooltip="${escapeHtml(category)}"
+      title="${attr(category)}"
+      data-tooltip="${attr(category)}"
     >
       ${escapeHtml(category)}
     </span>
@@ -297,8 +431,8 @@ function renderAssignedBadge(item = {}) {
   return `
     <span
       class="home-mini-badge home-mini-badge--agent"
-      title="${escapeHtml(`Técnico · ${assigned}`)}"
-      data-tooltip="${escapeHtml(`Técnico · ${assigned}`)}"
+      title="${attr(`Técnico · ${assigned}`)}"
+      data-tooltip="${attr(`Técnico · ${assigned}`)}"
     >
       ${icon("users")}
       ${escapeHtml(assigned)}
@@ -306,13 +440,60 @@ function renderAssignedBadge(item = {}) {
   `;
 }
 
-function renderStatCard(card = {}) {
-  const value = safeText(card.value, "0");
-  const iconName = safeText(card.iconName, "activity");
-  const modifier = safeText(card.modifier, "");
+function renderMetricMiniList(stats = {}) {
+  const items = [
+    {
+      label: "Abiertas",
+      value: stats.openTickets,
+      modifier: "open",
+    },
+    {
+      label: "Cerradas",
+      value: stats.closedTickets,
+      modifier: "closed",
+    },
+    {
+      label: "Urgentes",
+      value: stats.urgentTickets,
+      modifier: "urgent",
+    },
+    {
+      label: "Salud",
+      value: `${Math.round(safeNumber(stats.healthRatio, 100))}%`,
+      modifier: "health",
+    },
+  ];
 
   return `
-    <article class="home-stat-card${modifier ? ` home-stat-card--${escapeHtml(modifier)}` : ""}">
+    <div class="home-hero-minimetrics" aria-label="Métricas rápidas">
+      ${items
+        .map(
+          (item) => `
+            <span class="home-minimetric home-minimetric--${attr(item.modifier)}">
+              <strong>${escapeHtml(String(item.value))}</strong>
+              <span>${escapeHtml(item.label)}</span>
+            </span>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderStatCard(card = {}, index = 0) {
+  const value = safeText(card.value, "0");
+  const iconName = safeText(card.iconName, "activity");
+  const modifier = normalizeKey(card.modifier || iconName || `stat-${index + 1}`);
+  const label = safeText(card.label, "Métrica");
+  const text = safeText(card.text, "");
+
+  return `
+    <article
+      class="home-stat-card home-stat-card--${attr(modifier)}"
+      data-home-stat-card="true"
+      data-stat-index="${attr(index + 1)}"
+      data-stat-modifier="${attr(modifier)}"
+    >
       <div class="home-stat-topline">
         <div class="home-stat-icon" aria-hidden="true">
           ${icon(iconName)}
@@ -325,51 +506,94 @@ function renderStatCard(card = {}) {
         }
       </div>
 
-      <div class="home-stat-label">${escapeHtml(card.label)}</div>
-      <div class="home-stat-value" title="${escapeHtml(value)}">${escapeHtml(value)}</div>
-      <div class="home-stat-text">${escapeHtml(card.text)}</div>
+      <div class="home-stat-label">${escapeHtml(label)}</div>
+      <div class="home-stat-value" title="${attr(value)}" data-stat-value="${attr(value)}">
+        ${escapeHtml(value)}
+      </div>
+      ${text ? `<div class="home-stat-text">${escapeHtml(text)}</div>` : ""}
     </article>
   `;
 }
 
+function normalizeQuickAction(action = {}) {
+  const actionName = safeText(action.action, "");
+  const isCreate =
+    actionName === ACTIONS.CREATE_INCIDENCIA ||
+    actionName === "create" ||
+    actionName === "new-ticket" ||
+    actionName === "create-ticket";
+
+  const finalAction = isCreate
+    ? ACTIONS.CREATE_INCIDENCIA
+    : actionName || ACTIONS.NAVIGATE;
+
+  const dataAction = isCreate
+    ? ACTIONS.CREATE_INCIDENCIA
+    : safeText(action.dataAction || ACTIONS.NAVIGATE, ACTIONS.NAVIGATE);
+
+  return {
+    ...safeObject(action),
+    action: finalAction,
+    dataAction,
+    route: normalizeRoute(action.route || ""),
+    modifier: normalizeKey(action.modifier || finalAction || "default"),
+  };
+}
+
 function renderQuickAction(action = {}, state = {}) {
+  const item = normalizeQuickAction(action);
+
   const navigatingAction = safeText(state.navigatingAction, "");
   const creating = Boolean(state.creating);
   const loading = Boolean(state.loading);
   const refreshing = Boolean(state.refreshing);
 
-  const actionName = safeText(action.action, "");
-  const dataAction = safeText(action.dataAction || actionName, actionName);
-  const route = safeText(action.route, "");
-  const modifier = safeText(action.modifier, "default");
+  const actionName = item.action;
+  const dataAction = item.dataAction;
+  const route = item.route;
+  const modifier = item.modifier;
+
+  const isCreate = actionName === ACTIONS.CREATE_INCIDENCIA;
 
   const isBusy =
     navigatingAction === actionName ||
-    (actionName === "create-incidencia" && creating);
+    navigatingAction === dataAction ||
+    (isCreate && creating);
+
+  const disabled = Boolean(isBusy || loading || refreshing);
 
   return `
     <button
       type="button"
-      class="home-action-card home-action-card--${escapeHtml(modifier)}${isBusy ? " is-loading" : ""}"
-      data-home-action="${escapeHtml(actionName)}"
-      data-action="${escapeHtml(dataAction)}"
-      data-route="${escapeHtml(route)}"
-      ${isBusy || loading || refreshing ? 'disabled aria-busy="true"' : ""}
+      class="${joinClasses("home-action-card", `home-action-card--${modifier}`, isBusy ? "is-loading" : "")}"
+      data-home-action="${attr(actionName)}"
+      data-action="${attr(dataAction)}"
+      data-quick-action="${attr(actionName)}"
+      data-route="${attr(route)}"
+      data-href="${attr(route)}"
+      data-payload="${datasetJson({ action: actionName, route })}"
+      ${boolAttr(disabled, 'disabled aria-busy="true"')}
     >
       <span class="home-action-card-icon" aria-hidden="true">
-        ${icon(action.iconName || "arrowRight")}
+        ${icon(item.iconName || (isCreate ? "plus" : "arrowRight"))}
       </span>
 
-      <span class="home-action-card-kicker">${escapeHtml(route || "Onion Support")}</span>
+      <span class="home-action-card-kicker">
+        ${escapeHtml(route || "Onion Support")}
+      </span>
 
       <strong class="home-action-card-title">
-        ${isBusy ? renderSpinner("Abriendo...") : escapeHtml(action.title)}
+        ${
+          isBusy
+            ? renderSpinner(isCreate ? "Abriendo..." : "Navegando...")
+            : escapeHtml(item.title || "Acción")
+        }
       </strong>
 
-      <span class="home-action-card-text">${escapeHtml(action.text)}</span>
+      <span class="home-action-card-text">${escapeHtml(item.text || "")}</span>
 
       <span class="home-action-card-arrow" aria-hidden="true">
-        ${icon("arrowRight")}
+        ${icon(isCreate ? "plus" : "arrowRight")}
       </span>
     </button>
   `;
@@ -385,23 +609,52 @@ function renderWidgetCard(widget = {}, index = 0) {
   const route = getWidgetRoute(widget);
   const status = safeText(first(widget.status, widget.estado, widget.state), "active");
 
+  const action = route
+    ? ACTIONS.NAVIGATE
+    : ACTIONS.OPEN_WIDGET;
+
+  const modifier = normalizeKey(type || "widget");
+
   return `
     <button
       type="button"
-      class="home-widget-card home-widget-card--${escapeHtml(type || "widget")}"
-      data-home-action="${route ? "navigate-home" : "open-widget"}"
-      data-action="${route ? "navigate-home" : "open-widget"}"
-      data-widget-id="${escapeHtml(id)}"
-      data-route="${escapeHtml(route)}"
-      data-status="${escapeHtml(status)}"
-      ${route ? "" : 'aria-disabled="true"'}
+      class="home-widget-card home-widget-card--${attr(modifier)}"
+      data-home-action="${attr(action)}"
+      data-action="${attr(action)}"
+      data-widget-id="${attr(id)}"
+      data-widget-key="${attr(id)}"
+      data-widget-type="${attr(type)}"
+      data-route="${attr(route)}"
+      data-href="${attr(route)}"
+      data-status="${attr(status)}"
+      data-payload="${datasetJson({ widgetId: id, type, route })}"
+      ${boolAttr(!route && action === ACTIONS.NAVIGATE, 'aria-disabled="true"')}
     >
       <span class="home-widget-glow" aria-hidden="true"></span>
-      <span class="home-widget-kicker">${escapeHtml(type || "widget")}</span>
+
+      <span class="home-widget-head">
+        <span class="home-widget-kicker">${escapeHtml(type || "widget")}</span>
+        <span class="home-widget-icon" aria-hidden="true">
+          ${
+            modifier.includes("factur") || modifier.includes("billing") || modifier.includes("invoice")
+              ? icon("invoice")
+              : modifier.includes("user") || modifier.includes("usuario")
+                ? icon("users")
+                : modifier.includes("client") || modifier.includes("cliente")
+                  ? icon("client")
+                  : icon("activity")
+          }
+        </span>
+      </span>
+
       <strong class="home-widget-value">${escapeHtml(String(value ?? "—"))}</strong>
       <span class="home-widget-title">${escapeHtml(title)}</span>
       ${text ? `<span class="home-widget-text">${escapeHtml(text)}</span>` : ""}
-      ${trend ? `<span class="home-widget-trend">${escapeHtml(String(trend))}</span>` : ""}
+      ${
+        trend
+          ? `<span class="home-widget-trend">${escapeHtml(String(trend))}</span>`
+          : ""
+      }
     </button>
   `;
 }
@@ -418,16 +671,28 @@ function renderTicketRow(item = {}, state = {}) {
   const ownerEmail = getTicketOwnerEmail(item) || "Sin email";
   const attachmentsCount = getTicketAttachmentsCount(item);
   const statusKey = getTicketStatusKey(getTicketStatus(item));
+  const priorityKey = getTicketPriorityKey(item);
 
   const openingTicketId = safeText(state.openingTicketId, "");
+  const selectedTicketId = safeText(state.selectedTicketId, "");
   const isOpening = isSameIdentity(openingTicketId, ticketId);
+  const isSelected = isSameIdentity(selectedTicketId, ticketId);
 
   return `
     <tr
-      class="home-ticket-row home-ticket-row--${escapeHtml(statusKey)}"
+      class="${joinClasses(
+        "home-ticket-row",
+        `home-ticket-row--${statusKey}`,
+        `home-ticket-row--priority-${priorityKey}`,
+        isOpening ? "is-opening" : "",
+        isSelected ? "is-selected" : ""
+      )}"
       data-ticket-row="true"
-      data-ticket-id="${escapeHtml(ticketId)}"
-      data-incidencia-id="${escapeHtml(ticketId)}"
+      data-ticket-id="${attr(ticketId)}"
+      data-incidencia-id="${attr(ticketId)}"
+      data-entity-id="${attr(ticketId)}"
+      data-status-key="${attr(statusKey)}"
+      data-priority-key="${attr(priorityKey)}"
     >
       <td class="home-ticket-cell home-ticket-cell--main">
         <div class="home-ticket-main">
@@ -435,11 +700,34 @@ function renderTicketRow(item = {}, state = {}) {
 
           <div class="home-ticket-copy">
             <div class="home-ticket-line">
-              <span class="home-ticket-id">${escapeHtml(ticketId)}</span>
+              <button
+                type="button"
+                class="home-ticket-id"
+                data-home-action="${ACTIONS.COPY_TICKET_ID}"
+                data-action="${ACTIONS.COPY_TICKET_ID}"
+                data-ticket-id="${attr(ticketId)}"
+                title="Copiar ID de incidencia"
+                data-tooltip="Copiar ID de incidencia"
+              >
+                ${escapeHtml(ticketId)}
+              </button>
+
               ${renderCategoryBadge(item)}
             </div>
 
-            <div class="home-ticket-subject">${escapeHtml(subject)}</div>
+            <button
+              type="button"
+              class="home-ticket-subject"
+              data-home-action="${ACTIONS.OPEN_TICKET}"
+              data-action="${ACTIONS.OPEN_TICKET}"
+              data-ticket-id="${attr(ticketId)}"
+              data-entity-id="${attr(ticketId)}"
+              title="${attr(subject)}"
+              data-tooltip="${attr(subject)}"
+            >
+              ${escapeHtml(subject)}
+            </button>
+
             <div class="home-ticket-description">${escapeHtml(description)}</div>
 
             <div class="home-ticket-badges">
@@ -453,8 +741,8 @@ function renderTicketRow(item = {}, state = {}) {
       <td class="home-ticket-cell home-ticket-cell--owner">
         <span
           class="home-ticket-owner"
-          title="${escapeHtml(`${ownerName} · ${ownerEmail}`)}"
-          data-tooltip="${escapeHtml(`${ownerName} · ${ownerEmail}`)}"
+          title="${attr(`${ownerName} · ${ownerEmail}`)}"
+          data-tooltip="${attr(`${ownerName} · ${ownerEmail}`)}"
         >
           <strong>${escapeHtml(ownerName)}</strong>
           <span>${escapeHtml(ownerEmail)}</span>
@@ -468,8 +756,8 @@ function renderTicketRow(item = {}, state = {}) {
       <td class="home-ticket-cell home-ticket-cell--date">
         <span
           class="home-date-inline"
-          title="${escapeHtml(createdAt)}"
-          data-tooltip="${escapeHtml(createdAt)}"
+          title="${attr(createdAt)}"
+          data-tooltip="${attr(createdAt)}"
         >
           ${escapeHtml(createdAt)}
         </span>
@@ -478,8 +766,8 @@ function renderTicketRow(item = {}, state = {}) {
       <td class="home-ticket-cell home-ticket-cell--date">
         <span
           class="home-date-inline"
-          title="${escapeHtml(formatDateTime(updatedAtRaw))}"
-          data-tooltip="${escapeHtml(formatDateTime(updatedAtRaw))}"
+          title="${attr(formatDateTime(updatedAtRaw))}"
+          data-tooltip="${attr(formatDateTime(updatedAtRaw))}"
         >
           ${escapeHtml(updatedAt)}
         </span>
@@ -488,8 +776,8 @@ function renderTicketRow(item = {}, state = {}) {
       <td class="home-ticket-cell home-ticket-cell--attachments">
         <span
           class="home-attachments-pill"
-          title="${escapeHtml(`${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`)}"
-          data-tooltip="${escapeHtml(`${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`)}"
+          title="${attr(`${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`)}"
+          data-tooltip="${attr(`${attachmentsCount} adjunto${attachmentsCount === 1 ? "" : "s"}`)}"
         >
           ${icon("paperclip")}
           ${escapeHtml(String(attachmentsCount))}
@@ -499,15 +787,16 @@ function renderTicketRow(item = {}, state = {}) {
       <td class="home-ticket-cell home-ticket-cell--actions">
         <button
           type="button"
-          class="home-detail-btn${isOpening ? " is-loading" : ""}"
-          data-home-action="open-ticket"
-          data-action="open-ticket"
-          data-ticket-id="${escapeHtml(ticketId)}"
-          data-entity-id="${escapeHtml(ticketId)}"
-          data-route="${escapeHtml(HOME_ROUTES.INCIDENCIAS)}"
+          class="${joinClasses("home-detail-btn", isOpening ? "is-loading" : "")}"
+          data-home-action="${ACTIONS.OPEN_TICKET}"
+          data-action="${ACTIONS.OPEN_TICKET}"
+          data-ticket-id="${attr(ticketId)}"
+          data-incidencia-id="${attr(ticketId)}"
+          data-entity-id="${attr(ticketId)}"
+          data-route="${attr(HOME_ROUTES.INCIDENCIAS)}"
           title="Abrir detalle de incidencia"
           data-tooltip="Abrir detalle de incidencia"
-          ${isOpening ? 'disabled aria-busy="true"' : ""}
+          ${boolAttr(isOpening, 'disabled aria-busy="true"')}
         >
           ${
             isOpening
@@ -528,12 +817,8 @@ function renderActivityItem(item = {}) {
   const title = getActivityTitle(item);
   const text = getActivityText(item);
   const date = getActivityDate(item);
-  const route = normalizeRoute(first(item.route, item.href, item.link, item.raw?.route, ""));
-  const action = safeText(
-    first(item.action, item.raw?.action, route ? "navigate-home" : "open-activity"),
-    "open-activity"
-  );
 
+  const route = normalizeRoute(first(item.route, item.href, item.link, item.raw?.route, ""));
   const entityId = safeText(
     first(
       item.entityId,
@@ -551,14 +836,31 @@ function renderActivityItem(item = {}) {
     ""
   );
 
+  const action = safeText(
+    first(
+      item.action,
+      item.raw?.action,
+      type === "ticket" && entityId ? ACTIONS.OPEN_TICKET : "",
+      type === "invoice" && entityId ? ACTIONS.OPEN_INVOICE : "",
+      route ? ACTIONS.NAVIGATE : "",
+      ACTIONS.OPEN_ACTIVITY
+    ),
+    ACTIONS.OPEN_ACTIVITY
+  );
+
   return `
     <button
       type="button"
-      class="home-activity-item home-activity-item--${escapeHtml(type || "activity")}"
-      data-home-action="${escapeHtml(action)}"
-      data-action="${escapeHtml(action)}"
-      data-route="${escapeHtml(route)}"
-      data-entity-id="${escapeHtml(entityId)}"
+      class="home-activity-item home-activity-item--${attr(type || "activity")}"
+      data-home-action="${attr(action)}"
+      data-action="${attr(action)}"
+      data-route="${attr(route)}"
+      data-href="${attr(route)}"
+      data-entity-id="${attr(entityId)}"
+      data-ticket-id="${type === "ticket" ? attr(entityId) : ""}"
+      data-invoice-id="${type === "invoice" ? attr(entityId) : ""}"
+      data-factura-id="${type === "invoice" ? attr(entityId) : ""}"
+      data-payload="${datasetJson({ type, action, route, entityId })}"
     >
       <span class="home-activity-icon" aria-hidden="true">
         ${
@@ -568,7 +870,9 @@ function renderActivityItem(item = {}) {
               ? icon("client")
               : type === "user"
                 ? icon("users")
-                : icon("ticket")
+                : type === "ticket"
+                  ? icon("ticket")
+                  : icon("activity")
         }
       </span>
 
@@ -577,16 +881,55 @@ function renderActivityItem(item = {}) {
         <span class="home-activity-text">${escapeHtml(text)}</span>
       </span>
 
-      <span class="home-activity-time">${escapeHtml(formatRelativeDate(date))}</span>
+      <span
+        class="home-activity-time"
+        title="${attr(formatDateTime(date))}"
+        data-tooltip="${attr(formatDateTime(date))}"
+      >
+        ${escapeHtml(formatRelativeDate(date))}
+      </span>
     </button>
   `;
 }
 
-function renderEmptyState({ title = "", text = "", action = "", actionLabel = "" } = {}) {
+function renderInvoicePreviewItem(item = {}) {
+  const id = getInvoiceId(item);
+  const amount = getInvoiceAmount(item);
+  const currency = getInvoiceCurrency(item);
+  const status = getInvoiceStatusKey(item);
+
+  return `
+    <button
+      type="button"
+      class="home-invoice-mini home-invoice-mini--${attr(status)}"
+      data-home-action="${ACTIONS.OPEN_INVOICE}"
+      data-action="${ACTIONS.OPEN_INVOICE}"
+      data-invoice-id="${attr(id)}"
+      data-factura-id="${attr(id)}"
+      data-entity-id="${attr(id)}"
+      data-route="${attr(HOME_ROUTES.FACTURAS)}"
+    >
+      <span class="home-invoice-mini-icon" aria-hidden="true">${icon("invoice")}</span>
+      <span class="home-invoice-mini-copy">
+        <strong>${escapeHtml(id)}</strong>
+        <span>${escapeHtml(formatMoney(amount, currency || DEFAULT_CURRENCY))}</span>
+      </span>
+      <span class="home-invoice-mini-status">${escapeHtml(status)}</span>
+    </button>
+  `;
+}
+
+function renderEmptyState({
+  title = "",
+  text = "",
+  action = "",
+  actionLabel = "",
+  iconName = "spark",
+} = {}) {
   return `
     <div class="home-empty">
       <div class="home-empty-icon" aria-hidden="true">
-        ${icon("spark")}
+        ${icon(iconName)}
       </div>
 
       <h3 class="home-empty-title">${escapeHtml(title || "No hay datos para mostrar")}</h3>
@@ -598,8 +941,8 @@ function renderEmptyState({ title = "", text = "", action = "", actionLabel = ""
             <button
               type="button"
               class="home-btn home-btn--primary"
-              data-home-action="${escapeHtml(action)}"
-              data-action="${escapeHtml(action)}"
+              data-home-action="${attr(action)}"
+              data-action="${attr(action)}"
             >
               ${escapeHtml(actionLabel || "Continuar")}
             </button>
@@ -611,9 +954,11 @@ function renderEmptyState({ title = "", text = "", action = "", actionLabel = ""
 }
 
 function renderTableLoading(rows = DEFAULT_PAGE_SIZE) {
+  const count = Math.max(1, safeNumber(rows, DEFAULT_PAGE_SIZE));
+
   return `
     <div class="home-table-loading" aria-hidden="true">
-      ${Array.from({ length: rows })
+      ${Array.from({ length: count })
         .map(
           () => `
             <div class="home-table-loading-row">
@@ -640,9 +985,11 @@ function renderTableLoading(rows = DEFAULT_PAGE_SIZE) {
 }
 
 function renderCardLoading(rows = 4) {
+  const count = Math.max(1, safeNumber(rows, 4));
+
   return `
     <div class="home-cards-loading" aria-hidden="true">
-      ${Array.from({ length: rows })
+      ${Array.from({ length: count })
         .map(
           () => `
             <div class="home-card-skeleton">
@@ -658,12 +1005,35 @@ function renderCardLoading(rows = 4) {
   `;
 }
 
-function renderRefreshOverlay() {
+function renderRefreshOverlay(label = "Actualizando home...") {
   return `
     <div class="home-refresh-overlay" aria-live="polite">
       <div class="home-refresh-card">
-        ${renderSpinner("Actualizando home...")}
+        ${renderSpinner(label)}
       </div>
+    </div>
+  `;
+}
+
+function renderErrorBanner(message = "") {
+  const text = safeText(message, "");
+
+  if (!text) {
+    return "";
+  }
+
+  return `
+    <div class="home-error-banner" role="status" data-home-error-banner="true">
+      <span class="home-error-banner-icon" aria-hidden="true">${icon("alert")}</span>
+      <span class="home-error-banner-text">${escapeHtml(text)}</span>
+      <button
+        type="button"
+        class="home-error-banner-action"
+        data-home-action="${ACTIONS.RETRY}"
+        data-action="${ACTIONS.RETRY}"
+      >
+        Reintentar
+      </button>
     </div>
   `;
 }
@@ -674,54 +1044,50 @@ function renderRefreshOverlay() {
 
 export function renderHomeHeader(input = {}) {
   const data = safeObject(input);
-  const state = safeObject(data.state);
+  const state = getLoadingState(data);
   const stats = computeHomeStats(data);
+  const meta = getTemplateMeta(data);
 
   const displayName = getDisplayName(data);
-  const roleLabel = stats.admin ? "ADMIN" : "USER";
+  const role = getRole(data);
+  const admin = isAdminRole(role);
+  const roleLabel = admin ? "ADMIN" : "USER";
 
   const title = safeText(
     first(
       data.title,
-      state.title,
-      stats.admin ? "Panel de control" : `Hola, ${displayName}`
+      data.state?.title,
+      admin ? "Panel de control" : `Hola, ${displayName}`
     ),
-    stats.admin ? "Panel de control" : "Tu home"
+    admin ? "Panel de control" : "Tu home"
   );
 
   const subtitle = safeText(
     first(
       data.subtitle,
-      state.subtitle,
-      stats.admin
+      data.state?.subtitle,
+      admin
         ? "Resumen operativo de Onion Support: incidencias, facturación, clientes y usuarios desde una vista clara y accionable."
         : "Consulta tus incidencias, revisa tu actividad reciente y accede rápidamente a las zonas principales de tu cuenta."
     ),
     ""
   );
 
-  const loading = Boolean(state.loading);
-  const refreshing = Boolean(state.refreshing);
-  const creating = Boolean(state.creating);
-
-  const lastUpdatedAt = first(
-    data.lastUpdatedAt,
-    state.lastUpdatedAt,
-    state.lastSyncAt,
-    getDashboard(data).updatedAt,
-    getDashboard(data).generatedAt,
-    stats.lastTicketUpdate
-  );
+  const primaryCreateDisabled = state.creating || state.loading || state.refreshing;
 
   return `
-    <section class="home-hero home-hero--${stats.admin ? "admin" : "user"}">
+    <section
+      class="home-hero home-hero--${admin ? "admin" : "user"}"
+      data-home-section="hero"
+      data-home-role="${attr(role || "user")}"
+    >
       <div class="home-hero-top">
         <div class="home-hero-main">
           ${renderUserAvatar(data)}
 
           <div class="home-hero-copy">
             <span class="home-page-kicker">
-              ${icon(stats.admin ? "shield" : "home")}
+              ${icon(admin ? "shield" : "home")}
               ${escapeHtml(`Onion Support · ${roleLabel}`)}
             </span>
 
@@ -734,33 +1100,34 @@ export function renderHomeHeader(input = {}) {
           <button
             type="button"
             id="home-refresh-btn"
-            class="home-btn${refreshing ? " is-loading" : ""}"
-            data-home-action="refresh"
-            data-action="refresh"
+            class="${joinClasses("home-btn", state.refreshing ? "is-loading" : "")}"
+            data-home-action="${ACTIONS.REFRESH}"
+            data-action="${ACTIONS.REFRESH}"
             title="Actualizar home"
             data-tooltip="Actualizar home"
-            ${refreshing || loading ? 'disabled aria-busy="true"' : ""}
+            ${boolAttr(state.refreshing || state.loading, 'disabled aria-busy="true"')}
           >
             ${
-              refreshing
+              state.refreshing
                 ? renderSpinner("Actualizando...")
                 : `${icon("refresh")}<span class="home-btn-text">Actualizar</span>`
             }
           </button>
 
           ${
-            stats.admin
+            admin
               ? `
                 <button
                   type="button"
                   id="home-admin-users-btn"
                   class="home-btn"
                   data-home-action="go-usuarios"
-                  data-action="navigate-home"
-                  data-route="${HOME_ROUTES.USUARIOS}"
+                  data-action="${ACTIONS.NAVIGATE}"
+                  data-route="${attr(HOME_ROUTES.USUARIOS)}"
+                  data-href="${attr(HOME_ROUTES.USUARIOS)}"
                   title="Gestionar usuarios"
                   data-tooltip="Gestionar usuarios"
-                  ${loading || refreshing ? "disabled" : ""}
+                  ${boolAttr(state.loading || state.refreshing, "disabled")}
                 >
                   ${icon("users")}
                   <span class="home-btn-text">Gestionar usuarios</span>
@@ -770,16 +1137,18 @@ export function renderHomeHeader(input = {}) {
                 <button
                   type="button"
                   id="home-create-ticket-btn"
-                  class="home-btn home-btn--primary${creating ? " is-loading" : ""}"
-                  data-home-action="create-incidencia"
-                  data-action="navigate-home"
-                  data-route="${HOME_ROUTES.INCIDENCIAS}"
+                  class="${joinClasses("home-btn home-btn--primary", state.creating ? "is-loading" : "")}"
+                  data-home-action="${ACTIONS.CREATE_INCIDENCIA}"
+                  data-action="${ACTIONS.CREATE_INCIDENCIA}"
+                  data-quick-action="${ACTIONS.CREATE_INCIDENCIA}"
+                  data-route="${attr(HOME_ROUTES.INCIDENCIAS)}"
+                  data-href="${attr(HOME_ROUTES.INCIDENCIAS)}"
                   title="Crear incidencia"
                   data-tooltip="Crear incidencia"
-                  ${creating ? 'disabled aria-busy="true"' : ""}
+                  ${boolAttr(primaryCreateDisabled, 'disabled aria-busy="true"')}
                 >
                   ${
-                    creating
+                    state.creating
                       ? renderSpinner("Abriendo...")
                       : `${icon("plus")}<span class="home-btn-text">Crear incidencia</span>`
                   }
@@ -802,21 +1171,23 @@ export function renderHomeHeader(input = {}) {
 
         <span class="home-meta-pill">
           ${icon("activity")}
-          ${escapeHtml(`Salud operativa · ${Math.round(stats.healthRatio)}%`)}
+          ${escapeHtml(`Salud operativa · ${Math.round(safeNumber(stats.healthRatio, 100))}%`)}
         </span>
 
         <span class="home-meta-pill">
           ${icon("refresh")}
           ${
-            lastUpdatedAt
-              ? escapeHtml(`Última actualización · ${formatRelativeDate(lastUpdatedAt)}`)
+            meta.lastUpdatedAt
+              ? escapeHtml(`Última actualización · ${formatRelativeDate(meta.lastUpdatedAt)}`)
               : "Sin actualizaciones recientes"
           }
         </span>
       </div>
 
-      <div class="home-stats">
-        ${getStatCards(data).map((card) => renderStatCard(card)).join("")}
+      ${renderMetricMiniList(stats)}
+
+      <div class="home-stats" data-home-section="stats">
+        ${getStatCards(data).map((card, index) => renderStatCard(card, index)).join("")}
       </div>
     </section>
   `;
@@ -828,19 +1199,18 @@ export function renderHomeHeader(input = {}) {
 
 export function renderHomeWidgets(input = {}) {
   const data = safeObject(input);
-  const state = safeObject(data.state);
-  const loading = Boolean(state.loading);
-  const widgets = getWidgets(data).slice(0, 4);
+  const state = getLoadingState(data);
+  const widgets = getWidgets(data).slice(0, WIDGET_LIMIT);
 
-  if (!loading && !widgets.length) {
+  if (!state.loading && !widgets.length) {
     return "";
   }
 
   return `
-    <section class="home-widgets" aria-label="Widgets del dashboard">
+    <section class="home-widgets" aria-label="Widgets del dashboard" data-home-section="widgets">
       ${
-        loading && !widgets.length
-          ? renderCardLoading(4)
+        state.loading && !widgets.length
+          ? renderCardLoading(WIDGET_LIMIT)
           : widgets.map((widget, index) => renderWidgetCard(widget, index)).join("")
       }
     </section>
@@ -853,17 +1223,19 @@ export function renderHomeWidgets(input = {}) {
 
 export function renderHomeQuickActions(input = {}) {
   const data = safeObject(input);
-  const state = safeObject(data.state);
-  const loading = Boolean(state.loading);
+  const state = getLoadingState(data);
+  const role = getRole(data);
+  const admin = isAdminRole(role);
+  const actions = getQuickActions(data);
 
   return `
-    <section class="home-panel home-panel--actions">
+    <section class="home-panel home-panel--actions" data-home-section="quick-actions">
       <div class="home-panel-head">
         <div class="home-panel-copy">
           <h2 class="home-panel-title">Accesos rápidos</h2>
           <p class="home-panel-subtitle">
             ${escapeHtml(
-              isAdminRole(getRole(data))
+              admin
                 ? "Atajos principales para operar el panel administrativo."
                 : "Acciones principales para moverte por tu cuenta."
             )}
@@ -872,11 +1244,11 @@ export function renderHomeQuickActions(input = {}) {
       </div>
 
       ${
-        loading
+        state.loading && !actions.length
           ? renderCardLoading(4)
           : `
             <div class="home-actions-grid">
-              ${getQuickActions(data).map((action) => renderQuickAction(action, state)).join("")}
+              ${actions.map((action) => renderQuickAction(action, state)).join("")}
             </div>
           `
       }
@@ -890,32 +1262,42 @@ export function renderHomeQuickActions(input = {}) {
 
 export function renderHomeActivity(input = {}) {
   const data = safeObject(input);
-  const state = safeObject(data.state);
-  const loading = Boolean(state.loading);
-  const refreshing = Boolean(state.refreshing);
+  const state = getLoadingState(data);
 
-  const activity = getActivity(data).slice(0, 8);
+  const activity = getActivity(data).slice(0, ACTIVITY_LIMIT);
 
   return `
-    <section class="home-panel home-panel--activity">
+    <section class="home-panel home-panel--activity" data-home-section="activity">
       <div class="home-panel-head">
         <div class="home-panel-copy">
           <h2 class="home-panel-title">Actividad reciente</h2>
           <p class="home-panel-subtitle">
             ${
-              loading
+              state.loading && !activity.length
                 ? "Cargando actividad..."
                 : escapeHtml(`${formatNumber(activity.length)} movimientos recientes detectados`)
             }
           </p>
         </div>
+
+        <button
+          type="button"
+          class="home-panel-link"
+          data-home-action="${ACTIONS.NAVIGATE}"
+          data-action="${ACTIONS.NAVIGATE}"
+          data-route="${attr(HOME_ROUTES.INCIDENCIAS)}"
+          data-href="${attr(HOME_ROUTES.INCIDENCIAS)}"
+        >
+          Ver incidencias
+          ${icon("arrowRight")}
+        </button>
       </div>
 
-      <div class="home-table-wrap${refreshing ? " is-refreshing" : ""}">
-        ${refreshing && activity.length ? renderRefreshOverlay() : ""}
+      <div class="${joinClasses("home-table-wrap", state.refreshing ? "is-refreshing" : "")}">
+        ${state.refreshing && activity.length ? renderRefreshOverlay("Actualizando actividad...") : ""}
 
         ${
-          loading && !activity.length
+          state.loading && !activity.length
             ? renderCardLoading(4)
             : activity.length
               ? `
@@ -926,6 +1308,7 @@ export function renderHomeActivity(input = {}) {
               : renderEmptyState({
                   title: "Sin actividad reciente",
                   text: "Cuando haya movimientos en incidencias, facturas, clientes o usuarios aparecerán aquí.",
+                  iconName: "clock",
                 })
         }
       </div>
@@ -934,34 +1317,123 @@ export function renderHomeActivity(input = {}) {
 }
 
 /* =========================================================
+   INVOICE PREVIEW
+========================================================= */
+
+export function renderHomeInvoicePreview(input = {}) {
+  const data = safeObject(input);
+  const state = getLoadingState(data);
+  const collections = getCollections(data);
+  const invoices = safeArray(collections.invoices).slice(0, 5);
+
+  if (!state.loading && !invoices.length) {
+    return "";
+  }
+
+  return `
+    <section class="home-panel home-panel--invoice-preview" data-home-section="invoice-preview">
+      <div class="home-panel-head">
+        <div class="home-panel-copy">
+          <h2 class="home-panel-title">Facturación rápida</h2>
+          <p class="home-panel-subtitle">
+            ${
+              state.loading && !invoices.length
+                ? "Cargando facturas..."
+                : escapeHtml(`${formatNumber(collections.invoicesRemoteCount || invoices.length)} facturas detectadas`)
+            }
+          </p>
+        </div>
+
+        <button
+          type="button"
+          class="home-panel-link"
+          data-home-action="${ACTIONS.NAVIGATE}"
+          data-action="${ACTIONS.NAVIGATE}"
+          data-route="${attr(HOME_ROUTES.FACTURAS)}"
+          data-href="${attr(HOME_ROUTES.FACTURAS)}"
+        >
+          Ver facturas
+          ${icon("arrowRight")}
+        </button>
+      </div>
+
+      ${
+        state.loading && !invoices.length
+          ? renderCardLoading(3)
+          : invoices.length
+            ? `
+              <div class="home-invoice-mini-list">
+                ${invoices.map((item) => renderInvoicePreviewItem(item)).join("")}
+              </div>
+            `
+            : renderEmptyState({
+                title: "Sin facturas visibles",
+                text: "Cuando haya facturas disponibles aparecerán en este bloque.",
+                iconName: "invoice",
+              })
+      }
+    </section>
+  `;
+}
+
+/* =========================================================
    TICKETS TABLE
 ========================================================= */
 
+function renderStatusSummary(input = {}) {
+  const collections = getCollections(input);
+  const tickets = safeArray(collections.tickets);
+
+  const counts = STATUS_ORDER.reduce((acc, status) => {
+    acc[status] = 0;
+    return acc;
+  }, {});
+
+  tickets.forEach((item) => {
+    const key = getTicketStatusKey(getTicketStatus(item));
+    counts[key] = safeNumber(counts[key], 0) + 1;
+  });
+
+  return `
+    <div class="home-status-summary" aria-label="Resumen de estados">
+      ${STATUS_ORDER.map(
+        (status) => `
+          <span class="home-status-summary-item home-status-summary-item--${attr(status)}">
+            <span class="home-status-summary-dot" aria-hidden="true"></span>
+            <strong>${escapeHtml(String(counts[status] || 0))}</strong>
+            <span>${escapeHtml(getTicketStatusLabel(status))}</span>
+          </span>
+        `
+      ).join("")}
+    </div>
+  `;
+}
+
 export function renderHomeTicketsTable(input = {}) {
   const data = safeObject(input);
-  const state = safeObject(data.state);
+  const state = getLoadingState(data);
   const collections = getCollections(data);
+  const admin = isAdminRole(getRole(data));
 
   const tickets = collections.tickets;
+
   const pagination = getPagination(tickets, {
     ...data,
     remoteCount: collections.ticketsRemoteCount,
+    totalCount: collections.ticketsRemoteCount,
   });
 
-  const loading = Boolean(state.loading);
-  const refreshing = Boolean(state.refreshing);
-  const hasError = Boolean(safeText(first(state.error, data.error), ""));
-
-  const showInitialLoading = loading && !pagination.pageItems.length;
-  const showRefreshOverlay = refreshing && pagination.pageItems.length;
+  const showInitialLoading = state.loading && !pagination.pageItems.length;
+  const showRefreshOverlay = state.refreshing && pagination.pageItems.length;
 
   return `
-    <section class="home-tickets">
+    <section class="home-tickets" data-home-section="tickets">
       <div class="home-panel-head">
         <div class="home-panel-copy">
           <h2 class="home-panel-title">
-            ${escapeHtml(isAdminRole(getRole(data)) ? "Incidencias recientes" : "Tus últimas incidencias")}
+            ${escapeHtml(admin ? "Incidencias recientes" : "Tus últimas incidencias")}
           </h2>
+
           <p class="home-panel-subtitle">
             ${
               showInitialLoading
@@ -975,32 +1447,38 @@ export function renderHomeTicketsTable(input = {}) {
           </p>
         </div>
 
-        <div class="home-pagination" aria-label="Paginación del home">
-          <button
-            type="button"
-            class="home-pagination-btn"
-            data-home-action="prev-page"
-            data-action="prev-page"
-            data-page="${escapeHtml(String(Math.max(1, pagination.currentPage - 1)))}"
-            ${!pagination.hasPrev || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
-          >
-            Anterior
-          </button>
+        <div class="home-panel-head-actions">
+          ${renderStatusSummary(data)}
 
-          <span class="home-pagination-status">
-            ${escapeHtml(`${pagination.currentPage}/${pagination.totalPages}`)}
-          </span>
+          <div class="home-pagination" aria-label="Paginación del home">
+            <button
+              type="button"
+              class="home-pagination-btn"
+              data-home-action="${ACTIONS.PREV_PAGE}"
+              data-action="${ACTIONS.PREV_PAGE}"
+              data-page="${attr(String(Math.max(1, pagination.currentPage - 1)))}"
+              ${boolAttr(!pagination.hasPrev || state.loading || state.refreshing, 'disabled aria-disabled="true"')}
+            >
+              ${icon("chevronLeft")}
+              <span>Anterior</span>
+            </button>
 
-          <button
-            type="button"
-            class="home-pagination-btn home-pagination-btn--next"
-            data-home-action="next-page"
-            data-action="next-page"
-            data-page="${escapeHtml(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
-            ${!pagination.hasNext || loading || refreshing ? 'disabled aria-disabled="true"' : ""}
-          >
-            Siguiente
-          </button>
+            <span class="home-pagination-status">
+              ${escapeHtml(`${pagination.currentPage}/${pagination.totalPages}`)}
+            </span>
+
+            <button
+              type="button"
+              class="home-pagination-btn home-pagination-btn--next"
+              data-home-action="${ACTIONS.NEXT_PAGE}"
+              data-action="${ACTIONS.NEXT_PAGE}"
+              data-page="${attr(String(Math.min(pagination.totalPages, pagination.currentPage + 1)))}"
+              ${boolAttr(!pagination.hasNext || state.loading || state.refreshing, 'disabled aria-disabled="true"')}
+            >
+              <span>Siguiente</span>
+              ${icon("chevronRight")}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1008,8 +1486,8 @@ export function renderHomeTicketsTable(input = {}) {
         showInitialLoading
           ? renderTableLoading(Math.max(3, pagination.pageSize || DEFAULT_PAGE_SIZE))
           : `
-            <div class="home-table-wrap${refreshing ? " is-refreshing" : ""}">
-              ${showRefreshOverlay ? renderRefreshOverlay() : ""}
+            <div class="${joinClasses("home-table-wrap", state.refreshing ? "is-refreshing" : "")}">
+              ${showRefreshOverlay ? renderRefreshOverlay("Actualizando incidencias...") : ""}
 
               ${
                 pagination.pageItems.length
@@ -1045,14 +1523,15 @@ export function renderHomeTicketsTable(input = {}) {
                     </div>
                   `
                   : renderEmptyState({
-                      title: hasError
+                      title: state.error
                         ? "No se pudieron cargar las incidencias"
                         : "No hay incidencias para mostrar",
-                      text: hasError
+                      text: state.error
                         ? "Puedes reintentar la carga desde el botón de actualizar."
                         : "Cuando haya solicitudes registradas aparecerán aquí.",
-                      action: hasError ? "retry" : "",
+                      action: state.error ? ACTIONS.RETRY : "",
                       actionLabel: "Reintentar",
+                      iconName: state.error ? "alert" : "ticket",
                     })
               }
             </div>
@@ -1068,21 +1547,30 @@ export function renderHomeTicketsTable(input = {}) {
 
 export function renderHomeLoadingState() {
   return `
-    <section class="home-panel">
-      ${renderTableLoading(DEFAULT_PAGE_SIZE)}
+    <section class="home-view-root home-view-root--loading" data-home-scope="true">
+      <section class="home-hero home-hero--loading">
+        ${renderCardLoading(4)}
+      </section>
+
+      <section class="home-panel">
+        ${renderTableLoading(DEFAULT_PAGE_SIZE)}
+      </section>
     </section>
   `;
 }
 
 export function renderHomeErrorState(message = "No se pudo cargar el home.") {
   return `
-    <section class="home-panel">
-      ${renderEmptyState({
-        title: "No se pudo renderizar el home",
-        text: safeText(message, "Error desconocido al cargar la vista."),
-        action: "retry",
-        actionLabel: "Reintentar",
-      })}
+    <section class="home-view-root home-view-root--error" data-home-scope="true">
+      <section class="home-panel">
+        ${renderEmptyState({
+          title: "No se pudo renderizar el home",
+          text: safeText(message, "Error desconocido al cargar la vista."),
+          action: ACTIONS.RETRY,
+          actionLabel: "Reintentar",
+          iconName: "alert",
+        })}
+      </section>
     </section>
   `;
 }
@@ -1093,21 +1581,48 @@ export function renderHomeErrorState(message = "No se pudo cargar el home.") {
 
 export function renderHomeTemplate(input = {}) {
   const data = safeObject(input);
+  const state = getLoadingState(data);
+  const meta = getTemplateMeta(data);
+  const role = getRole(data);
+  const admin = isAdminRole(role);
 
   const payload = {
     ...data,
     includeStyles: false,
-    state: safeObject(data.state),
+    state: {
+      ...safeObject(data.state),
+      ...state,
+    },
   };
 
   return `
-    <section class="home-view-root" data-home-scope="true">
+    <section
+      class="${joinClasses(
+        "home-view-root",
+        admin ? "home-view-root--admin" : "home-view-root--user",
+        state.loading ? "is-loading" : "",
+        state.refreshing ? "is-refreshing" : "",
+        state.creating ? "is-creating" : "",
+        state.error ? "has-error" : ""
+      )}"
+      data-home-scope="true"
+      data-home-data-scope="${attr(HOME_DATA_SCOPE)}"
+      data-home-template-version="${attr(TEMPLATE_VERSION)}"
+      data-home-role="${attr(role || "user")}"
+      data-home-admin="${admin ? "true" : "false"}"
+      data-request-id="${attr(meta.requestId)}"
+      data-last-updated-at="${attr(meta.lastUpdatedAt || "")}"
+      aria-busy="${state.loading || state.refreshing ? "true" : "false"}"
+    >
+      ${renderErrorBanner(state.error)}
+
       ${renderHomeHeader(payload)}
       ${renderHomeWidgets(payload)}
 
-      <section class="home-grid">
+      <section class="home-grid" data-home-section="main-grid">
         ${renderHomeQuickActions(payload)}
         ${renderHomeActivity(payload)}
+        ${admin ? renderHomeInvoicePreview(payload) : ""}
       </section>
 
       ${renderHomeTicketsTable(payload)}

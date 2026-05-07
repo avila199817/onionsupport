@@ -245,6 +245,7 @@
 ========================================================= */
 
 @import url("./views/usuarios/index.css") layer(views);
+@import url("./views/usuarios/create.css") layer(views);
 
 
 /* =========================================================

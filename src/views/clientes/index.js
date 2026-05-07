@@ -32,7 +32,7 @@
 ========================================================= */
 
 import RawClientesView from "./clientesView.js";
-import RawClientesCreateView from "./clientesCreateView.js";
+import RawClientesCreateView from "./clientes.create.modal.js";
 import RawClientesModal from "./clientes.modal.js";
 
 /* =========================================================

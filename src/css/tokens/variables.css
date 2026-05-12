@@ -1,25 +1,30 @@
 /* =========================================================
    ONION SUPPORT — VARIABLES.CSS
-   DESIGN TOKENS · DARK BASE · FINAL EXTREME 10/10
-   APPLE STYLE / PRO SAAS PANEL / GOD MODE
+   Archivo: /src/css/tokens/variables.css
 
-   Archivo:
-   src/css/variables.css
+   DESIGN TOKENS · DARK BASE · TOKEN PRO SYSTEM
+   APPLE STYLE · PRO SAAS PANEL · SPA POWER · GOD MODE
+   FINAL EXTREME 10/10
 
    OBJETIVO:
-   - Tokens base globales
-   - Dark theme por defecto
-   - Sin [data-theme="light"]
-   - Sin overrides light
-   - Light theme debe vivir en su propio CSS
-   - Sidebar, topbar, cards, tablas, inputs, loader, modal
-   - Sistema centralizado para evitar :root locales
-   - Compatible con tokens legacy usados por módulos existentes
+   - Tokens base globales.
+   - Dark theme por defecto.
+   - Sin [data-theme="light"].
+   - Sin overrides light.
+   - Light theme debe vivir en /src/css/tokens/light.css.
+   - Sidebar, topbar, cards, tablas, inputs, loader, modal.
+   - Sistema centralizado para evitar :root locales.
+   - Compatible con tokens legacy usados por módulos existentes.
+   - Compatible con CSP estricta:
+     · sin Google Fonts
+     · sin @import externo
+     · sin CSS inline
+     · sin estilos inyectados por JS
 
    REGLA:
-   - variables.css = base / dark / aliases / estructura global
-   - light.css     = overrides [data-theme="light"]
-   - component.css = consume tokens, no redefine sistema global
+   - variables.css = base / dark / aliases / estructura global.
+   - light.css     = overrides [data-theme="light"].
+   - component.css = consume tokens, no redefine sistema global.
 ========================================================= */
 
 
@@ -31,18 +36,20 @@
   /* =========================================================
      APP IDENTITY
   ========================================================= */
+  color-scheme: dark;
+
   --app-name: "Onion Support";
 
   --app-font-sans:
-    Inter,
     ui-sans-serif,
     system-ui,
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
     Roboto,
-    Helvetica,
+    "Helvetica Neue",
     Arial,
+    "Noto Sans",
     sans-serif;
 
   --app-font-mono:
@@ -67,6 +74,10 @@
   --density-compact-factor: .90;
   --density-normal-factor: .93;
   --density-comfortable-factor: 1;
+
+  --density-ui-scale-compact: .95;
+  --density-ui-scale-default: .97;
+  --density-ui-scale-comfortable: 1.02;
 
 
   /* =========================================================
@@ -94,6 +105,7 @@
   ========================================================= */
   --z-base: 1;
   --z-content: 5;
+  --z-tablehead: 24;
   --z-topbar: 30;
   --z-sidebar: 40;
   --z-dropdown: 50;
@@ -103,7 +115,7 @@
   --z-modal: 80;
   --z-drawer: 85;
   --z-toast: 100;
-  --z-loader: 9999;
+  --z-loader: 2147483000;
 
 
   /* =========================================================
@@ -1247,21 +1259,21 @@
 
   /* =========================================================
      ASSET TOKENS
+     No usar favicon.ico como fuente visual principal.
   ========================================================= */
+  --asset-favicon: url("/src/media/img/favicon_black_circle.png");
+  --asset-logo-support: url("/src/media/img/favicon_support.png");
   --asset-logo-dark: url("/src/media/img/favicon_white.png");
   --asset-logo-light: url("/src/media/img/favicon_black.png");
-  --asset-favicon-ico: url("/src/media/img/Logo_Intro.ico");
+  --asset-logo-circle: url("/src/media/img/favicon_black_circle.png");
 
   --loader-logo-dark: var(--asset-logo-dark);
   --loader-logo-light: var(--asset-logo-light);
-}
 
 
-/* =========================================================
-   INCIDENCIAS MODAL · EXTREME TOKENS
-========================================================= */
-
-:root {
+  /* =========================================================
+     INCIDENCIAS MODAL · EXTREME TOKENS
+  ========================================================= */
   --incidencias-modal-width: min(1160px, calc(100vw - 40px));
   --incidencias-modal-max-height: 92vh;
   --incidencias-modal-radius: var(--modal-radius);
@@ -1409,8 +1421,8 @@
 html[data-density="compact"],
 body[data-density="compact"],
 [data-density="compact"] {
-  --ui-scale: .95;
-  --density-factor: .90;
+  --ui-scale: var(--density-ui-scale-compact);
+  --density-factor: var(--density-compact-factor);
   --content-padding: calc(20px * var(--ui-scale));
   --topbar-height: calc(52px * var(--ui-scale));
   --sidebar-item-height: calc(38px * var(--ui-scale));
@@ -1425,16 +1437,16 @@ html[data-density="normal"],
 body[data-density="normal"],
 [data-density="default"],
 [data-density="normal"] {
-  --ui-scale: .97;
-  --density-factor: .93;
+  --ui-scale: var(--density-ui-scale-default);
+  --density-factor: var(--density-normal-factor);
 }
 
 :root[data-density="comfortable"],
 html[data-density="comfortable"],
 body[data-density="comfortable"],
 [data-density="comfortable"] {
-  --ui-scale: 1.02;
-  --density-factor: 1;
+  --ui-scale: var(--density-ui-scale-comfortable);
+  --density-factor: var(--density-comfortable-factor);
   --content-padding: calc(26px * var(--ui-scale));
   --topbar-height: calc(58px * var(--ui-scale));
   --sidebar-item-height: calc(42px * var(--ui-scale));

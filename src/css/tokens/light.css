@@ -1,26 +1,37 @@
 /* =========================================================
    ONION SUPPORT — LIGHT THEME
-   Archivo: src/css/themes/light.css
+   Archivo: /src/css/tokens/light.css
 
-   PREMIUM WHITE UI · APPLE STYLE · PRO SAAS PANEL · 10/10
+   PREMIUM WHITE UI · APPLE STYLE · PRO SAAS PANEL · GOD MODE
+   TOKEN PRO SYSTEM · LIGHT OVERRIDES ONLY · FINAL EXTREME 10/10
 
    IMPORTANTE:
    - Este archivo se carga DESPUÉS de variables.css.
    - Aquí SOLO viven overrides [data-theme="light"].
    - variables.css mantiene el dark/base.
    - Los componentes consumen tokens, no redefinen sistema global.
+   - No usar :root aquí.
+   - No usar Google Fonts.
+   - No usar CSS inline.
+   - No usar estilos inyectados por JS.
 
    OBJETIVO:
-   - white UI premium
-   - contraste limpio
-   - capas flotantes claras
-   - dropdown sidebar visible y elegante
-   - sombras tipo Apple/SaaS
-   - topbar/sidebar integrados
-   - cards e inputs más nítidos
+   - White UI premium.
+   - Contraste limpio.
+   - Capas flotantes claras.
+   - Dropdown sidebar visible y elegante.
+   - Sombras tipo Apple/SaaS.
+   - Topbar/sidebar integrados.
+   - Cards e inputs más nítidos.
+   - Tablas limpias y legibles.
+   - Loader coherente con tema claro.
+   - Modal/Drawer/Toast premium.
 ========================================================= */
 
 [data-theme="light"] {
+  color-scheme: light;
+
+
   /* =========================================================
      BRAND SYSTEM
   ========================================================= */
@@ -433,8 +444,7 @@
   --sidebar-text-active: #0f172a;
   --sidebar-icon: rgba(23,32,51,.54);
   --sidebar-icon-active: var(--accent);
-   
-  /* Sidebar logo · light mode */
+
   --sidebar-logo-dark-display: none;
   --sidebar-logo-light-display: block;
   --sidebar-logo-opacity: .98;
@@ -621,15 +631,6 @@
 
 
   /* =========================================================
-     BLUR
-  ========================================================= */
-  --blur-sm: blur(8px);
-  --blur-md: blur(12px);
-  --blur-lg: blur(18px);
-  --blur-xl: blur(24px);
-
-
-  /* =========================================================
      FOCUS / ACCESSIBILITY
   ========================================================= */
   --focus-ring:
@@ -738,6 +739,23 @@
 
 
   /* =========================================================
+     MODAL / DRAWER / OVERLAY
+  ========================================================= */
+  --overlay-bg: rgba(15,23,42,.28);
+  --overlay-blur: blur(10px);
+
+  --modal-bg:
+    radial-gradient(circle at 0% 0%, rgba(111,89,217,.050), transparent 30%),
+    linear-gradient(180deg, rgba(255,255,255,.970), rgba(248,250,252,.955)),
+    #ffffff;
+
+  --drawer-bg:
+    radial-gradient(circle at 0% 0%, rgba(111,89,217,.050), transparent 30%),
+    linear-gradient(180deg, rgba(255,255,255,.970), rgba(248,250,252,.955)),
+    #ffffff;
+
+
+  /* =========================================================
      CHARTS
   ========================================================= */
   --chart-1: var(--accent);
@@ -775,6 +793,18 @@
 
 
   /* =========================================================
+     ASSETS · LIGHT
+  ========================================================= */
+  --asset-favicon: url("/src/media/img/favicon_black_circle.png");
+  --asset-logo-dark: url("/src/media/img/favicon_white.png");
+  --asset-logo-light: url("/src/media/img/favicon_black.png");
+  --asset-logo-circle: url("/src/media/img/favicon_black_circle.png");
+
+  --loader-logo-dark: var(--asset-logo-dark);
+  --loader-logo-light: var(--asset-logo-light);
+
+
+  /* =========================================================
      INCIDENCIAS MODAL · LIGHT OVERRIDES
   ========================================================= */
   --incidencias-modal-overlay-bg: rgba(15,23,42,.28);
@@ -783,14 +813,62 @@
     radial-gradient(circle at top left, rgba(111,89,217,.095), transparent 34%),
     linear-gradient(180deg, rgba(255,255,255,.970), rgba(250,251,255,.945));
 
+  --incidencias-modal-border: rgba(23,32,51,.070);
+
   --incidencias-modal-shadow:
     0 30px 70px rgba(15,23,42,.14),
     0 0 0 1px rgba(255,255,255,.65) inset;
+
+  --incidencias-modal-card-bg:
+    linear-gradient(180deg, rgba(255,255,255,.72), transparent 95%),
+    rgba(255,255,255,.78);
+
+  --incidencias-modal-card-border: rgba(23,32,51,.070);
+
+  --incidencias-modal-card-hover-border:
+    color-mix(in srgb, var(--accent) 24%, rgba(23,32,51,.070));
+
+  --incidencias-modal-card-hover-bg:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 95%),
+    rgba(255,255,255,.84);
 
   --incidencias-modal-lift-shadow:
     0 16px 34px rgba(15,23,42,.085),
     0 0 0 1px rgba(255,255,255,.72) inset;
 
+  --incidencias-modal-meta-card-bg: rgba(255,255,255,.82);
+  --incidencias-modal-meta-card-border: rgba(23,32,51,.070);
+
+  --incidencias-modal-composer-border:
+    color-mix(in srgb, var(--accent) 24%, rgba(23,32,51,.075));
+
+  --incidencias-modal-composer-bg:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 92%),
+    rgba(255,255,255,.86);
+
+  --incidencias-modal-upload-border:
+    color-mix(in srgb, var(--accent) 22%, rgba(23,32,51,.075));
+
+  --incidencias-modal-upload-bg:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, transparent), transparent 90%),
+    rgba(255,255,255,.82);
+
+  --incidencias-modal-thumb-bg:
+    linear-gradient(180deg, rgba(255,255,255,.90), rgba(248,250,252,.82)),
+    rgba(255,255,255,.82);
+
+  --incidencias-modal-thumb-border: rgba(23,32,51,.070);
+
+  --incidencias-modal-thumb-hover-border:
+    color-mix(in srgb, var(--accent) 28%, rgba(23,32,51,.070));
+
   --incidencias-modal-thumb-shadow:
     0 14px 28px rgba(15,23,42,.10);
+
+  --incidencias-modal-preview-border:
+    color-mix(in srgb, var(--accent) 22%, rgba(23,32,51,.075));
+
+  --incidencias-modal-preview-bg:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 90%),
+    rgba(255,255,255,.88);
 }

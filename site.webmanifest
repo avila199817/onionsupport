@@ -1,21 +1,50 @@
 {
   "name": "Onion Support",
   "short_name": "Onion",
-  "description": "Onion Support SaaS Panel",
+  "description": "Onion Support · Panel privado SaaS de soporte, incidencias, facturación y gestión interna.",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0b1020",
-  "theme_color": "#6f59d9",
+  "display_override": [
+    "standalone",
+    "minimal-ui",
+    "browser"
+  ],
+  "background_color": "#0a0c11",
+  "theme_color": "#0a0c11",
   "orientation": "any",
   "dir": "ltr",
   "lang": "es",
+  "categories": [
+    "business",
+    "productivity",
+    "utilities"
+  ],
   "icons": [
     {
-      "src": "/favicon.ico?v=2",
-      "sizes": "16x16 32x32 48x48",
-      "type": "image/x-icon",
+      "src": "/src/media/img/favicon_black_circle.png?v=5",
+      "sizes": "192x192",
+      "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "/src/media/img/favicon_black_circle.png?v=5",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/src/media/img/favicon_black_circle.png?v=5",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/src/media/img/favicon_black_circle.png?v=5",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

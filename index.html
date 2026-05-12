@@ -37,7 +37,7 @@
        - URLs SPA resueltas por Azure Static Web Apps.
        - Panel privado no indexable.
        - PWA coherente mediante /site.webmanifest.
-       - Favicon oficial en raíz: /favicon.ico.
+       - Favicons oficiales Onion Support.
        - Preparado para CSP estricta vía headers.
 
        CONTRATO DE BOOT:
@@ -55,7 +55,7 @@
        - No hardcodear clases theme-dark/theme-light en index.html.
        - theme.js puede sincronizar <body> cuando document.body exista.
        - loader.css debe decidir logos mediante html[data-theme].
-       - La CSP real debe aplicarse desde headers, por ejemplo
+       - La CSP real debe aplicarse desde headers, por ejemplo:
          staticwebapp.config.json en Azure Static Web Apps.
   ========================================================= -->
 
@@ -159,35 +159,51 @@
   <!-- =========================
        FAVICON / APP ICONS
 
-       IMPORTANTE:
-       - No existe /favicon.svg.
-       - No apuntar el manifest ni el index a favicon.svg.
-       - Favicon oficial del repo: /favicon.ico.
-       - ?v=2 evita manifest/favicon cacheado del navegador.
+       Set principal Onion Support:
+       - favicon_support.png
+       - favicon_white.png
+       - favicon_black_circle.png
+       - favicon_black.png
+
+       Recomendación:
+       - Mantener /favicon.ico como fallback raíz.
+       - Usar PNGs reales para app icons, loader y PWA.
+       - Evitar referencias a /favicon.svg.
   ========================= -->
   <link
     rel="icon"
-    href="/favicon.ico?v=2"
+    href="/favicon.ico?v=3"
     sizes="any"
     type="image/x-icon"
   >
 
   <link
     rel="shortcut icon"
-    href="/favicon.ico?v=2"
+    href="/favicon.ico?v=3"
     type="image/x-icon"
+  >
+
+  <link
+    rel="icon"
+    href="/src/media/img/favicon_support.png?v=3"
+    type="image/png"
+  >
+
+  <link
+    rel="apple-touch-icon"
+    href="/src/media/img/favicon_black_circle.png?v=3"
   >
 
   <!-- =========================
        PWA MANIFEST
 
        El repo contiene /site.webmanifest.
-       El manifest debe declarar /favicon.ico, nunca /favicon.svg.
-       Cache bust controlado con ?v=2.
+       El manifest debe declarar PNG/ICO reales.
+       No declarar favicon.svg.
   ========================= -->
   <link
     rel="manifest"
-    href="/site.webmanifest?v=2"
+    href="/site.webmanifest?v=3"
   >
 
   <!-- =========================
@@ -199,7 +215,7 @@
   <!-- Loader inicial para tema dark / fondo oscuro -->
   <link
     rel="preload"
-    href="/src/media/img/favicon_white.png"
+    href="/src/media/img/favicon_white.png?v=3"
     as="image"
     type="image/png"
     fetchpriority="high"
@@ -208,7 +224,7 @@
   <!-- Loader inicial para tema light / fondo claro -->
   <link
     rel="preload"
-    href="/src/media/img/favicon_black.png"
+    href="/src/media/img/favicon_black.png?v=3"
     as="image"
     type="image/png"
     fetchpriority="low"
@@ -309,7 +325,7 @@
        - Logos dependientes de html[data-theme].
        - Accesible mediante role="status".
        - Ocultación esperada por JS:
-         · remove body/html app-booting/app-loading
+         · remove html/body app-booting/app-loading
          · data-app-loading="false"
          · data-loader-visible="false"
          · data-loader-state="hidden"
@@ -326,6 +342,8 @@
     aria-live="polite"
     aria-busy="true"
     aria-hidden="false"
+    aria-labelledby="app-loader-title"
+    aria-describedby="app-loader-text app-loader-subtext"
   >
     <div
       class="app-loader__backdrop"
@@ -344,7 +362,7 @@
       >
         <img
           class="app-loader__logo app-loader__logo--dark"
-          src="/src/media/img/favicon_white.png"
+          src="/src/media/img/favicon_white.png?v=3"
           alt=""
           width="64"
           height="64"
@@ -356,7 +374,7 @@
 
         <img
           class="app-loader__logo app-loader__logo--light"
-          src="/src/media/img/favicon_black.png"
+          src="/src/media/img/favicon_black.png?v=3"
           alt=""
           width="64"
           height="64"
@@ -376,15 +394,24 @@
       </div>
 
       <div class="app-loader__copy">
-        <strong class="app-loader__title">
+        <strong
+          id="app-loader-title"
+          class="app-loader__title"
+        >
           Onion Support
         </strong>
 
-        <span class="app-loader__text">
+        <span
+          id="app-loader-text"
+          class="app-loader__text"
+        >
           Cargando sesión...
         </span>
 
-        <small class="app-loader__subtext">
+        <small
+          id="app-loader-subtext"
+          class="app-loader__subtext"
+        >
           Preparando panel seguro
         </small>
       </div>

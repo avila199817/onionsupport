@@ -2,16 +2,16 @@
    Onion SPA - Router
    Archivo: src/router/index.js
 
-   FINAL EXTREME SYSTEM · ROUTER / NAVIGATION / RENDER PIPELINE · 12/10
-   PATCH · CANONICAL/PUBLIC PATH HARD LOCKED
-   PATCH · SIDEBAR ACTIVE ROUTE SAFE
-   PATCH · ROUTE ALIASES SAFE
-   PATCH · LOGIN/RESTORE DEADLOCK SAFE
-   PATCH · RENDER TOKEN RACE SAFE
-   PATCH · SHELL REPAIR DEDUPED
-   PATCH · UI REPAIR LOOP SAFE
-   PATCH · TOKEN ROUTES SAFE
-   PATCH · DEBUG REDACTED
+   FINAL EXTREME SYSTEM · ROUTER / NAVIGATION / RENDER PIPELINE · 13/10
+   CANONICAL/PUBLIC PATH HARD LOCKED
+   SIDEBAR ACTIVE ROUTE SAFE
+   ROUTE ALIASES SAFE
+   LOGIN/RESTORE DEADLOCK SAFE
+   RENDER TOKEN RACE SAFE
+   SHELL REPAIR DEDUPED
+   UI REPAIR LOOP SAFE
+   TOKEN ROUTES SAFE
+   DEBUG REDACTED
 
    RESPONSABILIDADES:
    - coordinar navegación SPA
@@ -128,6 +128,9 @@ export const Router = (() => {
      INTERNAL STATE
   ===================================================== */
 
+  const ROUTER_VERSION =
+    "13.1.0";
+
   const immutableRoutes =
     getImmutableRoutes();
 
@@ -176,6 +179,29 @@ export const Router = (() => {
 
   const SELF_REPAIR_SOURCE =
     "router.index";
+
+  const TOKEN_PARAM_NAMES =
+    Object.freeze([
+      "token",
+      "activationToken",
+      "activateToken",
+      "resetToken",
+      "passwordResetToken",
+      "confirmToken",
+      "code",
+      "t",
+      "access_token",
+      "refresh_token",
+      "id_token",
+      "tempToken",
+      "temp_token",
+      "temporaryToken",
+      "temporary_token",
+      "twoFactorToken",
+      "two_factor_token",
+      "mfaToken",
+      "mfa_token",
+    ]);
 
   let bound =
     false;
@@ -338,6 +364,124 @@ export const Router = (() => {
     return fallback;
   }
 
+  function safeCreateCustomEvent(name = "", detail = {}) {
+    if (!isBrowser()) {
+      return null;
+    }
+
+    const eventName =
+      safeText(name, "");
+
+    if (!eventName) {
+      return null;
+    }
+
+    try {
+      if (typeof CustomEvent === "function") {
+        return new CustomEvent(
+          eventName,
+          {
+            detail,
+          }
+        );
+      }
+    } catch {}
+
+    try {
+      const event =
+        document.createEvent("CustomEvent");
+
+      event.initCustomEvent(
+        eventName,
+        false,
+        false,
+        detail
+      );
+
+      return event;
+    } catch {
+      return null;
+    }
+  }
+
+  function redactGenericTokenParams(value = "") {
+    let output =
+      safeText(value, "");
+
+    if (!output) {
+      return "";
+    }
+
+    for (const name of TOKEN_PARAM_NAMES) {
+      try {
+        const escaped =
+          String(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+        output =
+          output.replace(
+            new RegExp(`([?&#]${escaped}=)([^&#\\s]+)`, "gi"),
+            "$1***"
+          );
+      } catch {}
+    }
+
+    try {
+      output =
+        output.replace(
+          /(\/activate-account\/)([^/?#\s]+)/gi,
+          "$1***"
+        );
+    } catch {}
+
+    try {
+      output =
+        output.replace(
+          /(\/reset-password\/confirm\/)([^/?#\s]+)/gi,
+          "$1***"
+        );
+    } catch {}
+
+    try {
+      output =
+        output.replace(
+          /(Bearer\s+)([A-Za-z0-9._~+/=-]+)/gi,
+          "$1***"
+        );
+    } catch {}
+
+    try {
+      output =
+        output.replace(
+          /\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+          "***"
+        );
+    } catch {}
+
+    return output;
+  }
+
+  function isDomNodeLike(value) {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+
+    try {
+      return Boolean(
+        typeof Node !== "undefined" &&
+          value instanceof Node
+      );
+    } catch {}
+
+    try {
+      return Boolean(
+        value.nodeType &&
+          value.nodeName
+      );
+    } catch {}
+
+    return false;
+  }
+
   function redactForLog(value, depth = 0) {
     if (depth > 4) {
       return "[MaxDepth]";
@@ -351,7 +495,9 @@ export const Router = (() => {
     }
 
     if (typeof value === "string") {
-      return redactTokenInText(value);
+      return redactGenericTokenParams(
+        redactTokenInText(value)
+      );
     }
 
     if (
@@ -361,36 +507,56 @@ export const Router = (() => {
       return value;
     }
 
+    if (typeof value === "function") {
+      return "[Function]";
+    }
+
+    if (isDomNodeLike(value)) {
+      return {
+        node:
+          safeText(value.nodeName, "Node"),
+        id:
+          safeText(value.id, ""),
+        className:
+          safeText(value.className?.baseVal || value.className, ""),
+      };
+    }
+
     if (value instanceof Error) {
       return {
         name:
           value.name || "Error",
         message:
-          redactTokenInText(value.message || ""),
+          redactGenericTokenParams(
+            redactTokenInText(value.message || "")
+          ),
         code:
           value.code || null,
         status:
           value.status || value.statusCode || null,
         stack:
-          redactTokenInText(value.stack || ""),
+          redactGenericTokenParams(
+            redactTokenInText(value.stack || "")
+          ),
       };
     }
 
     if (Array.isArray(value)) {
-      return value.map((item) =>
-        redactForLog(
-          item,
-          depth + 1
-        )
-      );
+      return value
+        .slice(0, 80)
+        .map((item) =>
+          redactForLog(
+            item,
+            depth + 1
+          )
+        );
     }
 
     if (
       value &&
       typeof value === "object"
     ) {
-      const output =
-        {};
+      const output = {};
 
       for (const [key, item] of Object.entries(value)) {
         const lowerKey =
@@ -398,9 +564,14 @@ export const Router = (() => {
 
         if (
           lowerKey.includes("token") ||
-          lowerKey === "authorization" ||
-          lowerKey === "password" ||
-          lowerKey === "secret"
+          lowerKey.includes("secret") ||
+          lowerKey.includes("password") ||
+          lowerKey.includes("authorization") ||
+          lowerKey.includes("credential") ||
+          lowerKey.includes("jwt") ||
+          lowerKey.includes("bearer") ||
+          lowerKey.includes("otp") ||
+          lowerKey === "code"
         ) {
           output[key] =
             item ? "***" : item;
@@ -440,12 +611,27 @@ export const Router = (() => {
         redactForLog(item)
       );
 
+    let logged =
+      false;
+
     try {
-      AppCore?.utils?.warn?.(
-        "[Router]",
-        ...safeArgs
-      );
-    } catch {}
+      if (isFn(AppCore?.utils?.warn)) {
+        AppCore.utils.warn(
+          "[Router]",
+          ...safeArgs
+        );
+
+        logged =
+          true;
+      }
+    } catch {
+      logged =
+        false;
+    }
+
+    if (logged) {
+      return;
+    }
 
     try {
       if (AppCore?.config?.debug) {
@@ -463,19 +649,34 @@ export const Router = (() => {
         redactForLog(item)
       );
 
+    let logged =
+      false;
+
     try {
-      AppCore?.utils?.error?.(
-        "[Router]",
-        ...safeArgs
-      );
-    } catch {
-      try {
-        console.error(
+      if (isFn(AppCore?.utils?.error)) {
+        AppCore.utils.error(
           "[Router]",
           ...safeArgs
         );
-      } catch {}
+
+        logged =
+          true;
+      }
+    } catch {
+      logged =
+        false;
     }
+
+    if (logged) {
+      return;
+    }
+
+    try {
+      console.error(
+        "[Router]",
+        ...safeArgs
+      );
+    } catch {}
   }
 
   function safeEmit(eventName, payload = {}, options = {}) {
@@ -490,9 +691,13 @@ export const Router = (() => {
       safeObject(options);
 
     const finalPayload =
-      opts.redact === true
-        ? redactForLog(payload)
-        : payload;
+      redactForLog({
+        version:
+          ROUTER_VERSION,
+        source:
+          SELF_REPAIR_SOURCE,
+        ...safeObject(payload),
+      });
 
     let busAvailable =
       false;
@@ -525,14 +730,16 @@ export const Router = (() => {
       (!busAvailable && isBrowser())
     ) {
       try {
-        window.dispatchEvent(
-          new CustomEvent(name, {
-            detail:
-              finalPayload,
-          })
-        );
+        const event =
+          safeCreateCustomEvent(
+            name,
+            finalPayload
+          );
 
-        return true;
+        if (event) {
+          window.dispatchEvent(event);
+          return true;
+        }
       } catch {}
     }
 
@@ -651,15 +858,17 @@ export const Router = (() => {
     }
 
     try {
-      window.requestAnimationFrame(() => {
+      if (isFn(window.requestAnimationFrame)) {
         window.requestAnimationFrame(() => {
-          try {
-            callback();
-          } catch {}
+          window.requestAnimationFrame(() => {
+            try {
+              callback();
+            } catch {}
+          });
         });
-      });
 
-      return;
+        return;
+      }
     } catch {}
 
     try {
@@ -1435,9 +1644,35 @@ export const Router = (() => {
   ===================================================== */
 
   function hasUsableToken(token = "") {
-    return Boolean(
-      safeText(token, "")
-    );
+    const text =
+      safeText(token, "");
+
+    if (!text) {
+      return false;
+    }
+
+    const lower =
+      text.toLowerCase();
+
+    if (
+      [
+        "null",
+        "undefined",
+        "false",
+        "true",
+        "nan",
+        "none",
+        "[object object]",
+      ].includes(lower)
+    ) {
+      return false;
+    }
+
+    if (/[\s\r\n\t]/.test(text)) {
+      return false;
+    }
+
+    return true;
   }
 
   function hasUsableUser(user = null) {
@@ -1466,18 +1701,39 @@ export const Router = (() => {
   function isAuthenticated() {
     try {
       if (isFn(Auth?.isAuthenticated)) {
+        const authResult =
+          Boolean(Auth.isAuthenticated());
+
+        if (!authResult) {
+          return false;
+        }
+
+        const state =
+          safeObject(AppCore?.state);
+
+        const user =
+          state.user ||
+          state.session?.user ||
+          state.currentUser ||
+          state.authUser ||
+          null;
+
+        const token =
+          state.token ||
+          state.accessToken ||
+          state.session?.token ||
+          state.session?.accessToken ||
+          "";
+
         return Boolean(
-          Auth.isAuthenticated()
+          hasUsableUser(user) ||
+            hasUsableToken(token)
         );
       }
     } catch {}
 
     const state =
       safeObject(AppCore?.state);
-
-    if (state.authenticated === true) {
-      return true;
-    }
 
     const token =
       state.token ||
@@ -1489,7 +1745,16 @@ export const Router = (() => {
     const user =
       state.user ||
       state.session?.user ||
+      state.currentUser ||
+      state.authUser ||
       null;
+
+    if (state.authenticated === true) {
+      return Boolean(
+        hasUsableUser(user) ||
+          hasUsableToken(token)
+      );
+    }
 
     return Boolean(
       hasUsableToken(token) &&
@@ -1898,6 +2163,9 @@ export const Router = (() => {
       loader.dataset.loaderVisible =
         "false";
 
+      loader.dataset.loaderState =
+        "hidden";
+
       loader.hidden =
         true;
     } catch {}
@@ -1906,8 +2174,6 @@ export const Router = (() => {
       "app:loader:hidden",
       {
         reason,
-        source:
-          SELF_REPAIR_SOURCE,
       }
     );
 
@@ -1919,8 +2185,6 @@ export const Router = (() => {
       "app:ui:repair-request",
       {
         ...safeObject(payload),
-        source:
-          SELF_REPAIR_SOURCE,
       }
     );
   }
@@ -1997,6 +2261,12 @@ export const Router = (() => {
         body.classList.add(
           "app-ready"
         );
+
+        html.dataset.appState =
+          "ready";
+
+        body.dataset.appLoading =
+          "false";
       } catch {}
 
       setDataset(
@@ -2062,6 +2332,7 @@ export const Router = (() => {
         setDataset(shell, "shell", "visible");
         setDataset(shell, "chrome", "hidden");
         setDataset(shell, "routeMode", "auth");
+        setDataset(shell, "shellInteractive", "true");
 
         setHidden(shell, false);
         setHidden(main, false);
@@ -2136,6 +2407,7 @@ export const Router = (() => {
         setDataset(shell, "shell", "visible");
         setDataset(shell, "chrome", "visible");
         setDataset(shell, "routeMode", "app");
+        setDataset(shell, "shellInteractive", "true");
 
         setHidden(shell, false);
         setHidden(main, false);
@@ -2234,8 +2506,6 @@ export const Router = (() => {
             Boolean(topbar),
           hasShell:
             Boolean(shell),
-          source:
-            SELF_REPAIR_SOURCE,
         }
       );
 
@@ -2361,7 +2631,8 @@ export const Router = (() => {
         options.preservePath === true ||
         options.preserveUrl === true ||
         options.protectedInitialUrl === true ||
-        options.initialRender === true
+        options.initialRender === true ||
+        options.skipHistory === true
     );
   }
 
@@ -2502,6 +2773,7 @@ export const Router = (() => {
       publicPath =
         safePublicPath(
           explicitPublicPath ||
+            requestedPath ||
             canonicalPath ||
             publicPath
         );
@@ -2853,8 +3125,6 @@ export const Router = (() => {
           redirectToken,
         options:
           safeObject(options),
-        source:
-          SELF_REPAIR_SOURCE,
       }
     );
 
@@ -3042,8 +3312,6 @@ export const Router = (() => {
             canonicalPath,
           reason,
           token,
-          source:
-            SELF_REPAIR_SOURCE,
         }
       );
 
@@ -3131,13 +3399,6 @@ export const Router = (() => {
       };
     }
 
-    /*
-      Cualquier denial no gestionado se trata como forbidden.
-      Esto evita el bug clásico:
-        access.allowed === false
-        handleDenied no reconoce reason
-        render continúa como permitido.
-    */
     destroyActiveView();
 
     clearDynamicContainers(AppCore);
@@ -3207,8 +3468,6 @@ export const Router = (() => {
           synced.username,
         reason,
         token,
-        source:
-          SELF_REPAIR_SOURCE,
       }
     );
 
@@ -3383,8 +3642,6 @@ export const Router = (() => {
               nowMs() - startedAt
             ),
           token,
-          source:
-            SELF_REPAIR_SOURCE,
         }
       );
 
@@ -3598,8 +3855,6 @@ export const Router = (() => {
               nowMs() - startedAt
             ),
           token,
-          source:
-            SELF_REPAIR_SOURCE,
         }
       );
 
@@ -3679,12 +3934,6 @@ export const Router = (() => {
           publicPath:
             synced.publicPath,
           token,
-          source:
-            SELF_REPAIR_SOURCE,
-        },
-        {
-          redact:
-            true,
         }
       );
 
@@ -3867,7 +4116,10 @@ export const Router = (() => {
     );
   }
 
-  function goAfterLogin(fallback = "/") {
+  function goAfterLogin(fallback = "/", options = {}) {
+    const opts =
+      safeObject(options);
+
     let redirect =
       "";
 
@@ -3890,13 +4142,13 @@ export const Router = (() => {
       target,
       {
         replaceState:
-          true,
+          opts.replaceState !== false,
         force:
-          true,
+          opts.force !== false,
         forceRender:
-          true,
+          opts.forceRender !== false,
         source:
-          "login",
+          opts.source || "login",
         fromLogin:
           true,
       }
@@ -4183,10 +4435,48 @@ export const Router = (() => {
       if (isFn(AppCore?.modules?.register)) {
         AppCore.modules.register(
           "Router",
-          api
+          api,
+          {
+            overwrite:
+              true,
+            replace:
+              true,
+            aliases:
+              [
+                "router",
+              ],
+            source:
+              SELF_REPAIR_SOURCE,
+          }
         );
 
         AppCore.modules.register(
+          "router",
+          api,
+          {
+            overwrite:
+              true,
+            replace:
+              true,
+            aliases:
+              [
+                "Router",
+              ],
+            source:
+              SELF_REPAIR_SOURCE,
+          }
+        );
+      }
+    } catch {}
+
+    try {
+      if (isFn(AppCore?.modules?.set)) {
+        AppCore.modules.set(
+          "Router",
+          api
+        );
+
+        AppCore.modules.set(
           "router",
           api
         );
@@ -4197,7 +4487,8 @@ export const Router = (() => {
       if (
         AppCore?.modules &&
         typeof AppCore.modules === "object" &&
-        !isFn(AppCore.modules.register)
+        !isFn(AppCore.modules.register) &&
+        !isFn(AppCore.modules.set)
       ) {
         AppCore.modules.Router =
           api;
@@ -4294,8 +4585,6 @@ export const Router = (() => {
           immutableRoutes.map(
             (route) => route.path
           ),
-        source:
-          SELF_REPAIR_SOURCE,
       }
     );
 
@@ -4327,10 +4616,7 @@ export const Router = (() => {
 
     safeEmit(
       "router:unbound",
-      {
-        source:
-          SELF_REPAIR_SOURCE,
-      }
+      {}
     );
 
     return api;
@@ -4351,8 +4637,6 @@ export const Router = (() => {
       {
         options:
           safeObject(options),
-        source:
-          SELF_REPAIR_SOURCE,
       }
     );
 
@@ -4413,6 +4697,9 @@ export const Router = (() => {
     }
 
     return redactForLog({
+      version:
+        ROUTER_VERSION,
+
       configured,
       bound,
 
@@ -4639,6 +4926,9 @@ export const Router = (() => {
   ===================================================== */
 
   const api = {
+    version:
+      ROUTER_VERSION,
+
     routes:
       immutableRoutes,
 

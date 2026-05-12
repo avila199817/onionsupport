@@ -74,7 +74,7 @@ import {
    CONSTANTS
 ========================================================= */
 
-const LOADER_VERSION = "13.0.0";
+const LOADER_VERSION = "13.1.0";
 
 const LOADER_ID = "app-loader";
 
@@ -162,6 +162,15 @@ const LOADER_HIDDEN_CLASSES = Object.freeze([
   "is-hidden",
   "has-hidden",
 ]);
+
+const LOADER_DOM_STATES = Object.freeze({
+  booting: "booting",
+  visible: "visible",
+  leaving: "leaving",
+  hidden: "hidden",
+  fatal: "fatal",
+  removed: "removed",
+});
 
 const EVENT_NAMES = Object.freeze({
   takeover:
@@ -365,8 +374,11 @@ function clearTimer(id) {
   try {
     if (id) {
       clearTimeout(id);
+      return true;
     }
   } catch {}
+
+  return false;
 }
 
 function requestPaint() {
@@ -389,6 +401,39 @@ function requestPaint() {
       resolve();
     }
   });
+}
+
+function safeCreateCustomEvent(name, detail = {}) {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  try {
+    if (typeof CustomEvent === "function") {
+      return new CustomEvent(
+        name,
+        {
+          detail,
+        }
+      );
+    }
+  } catch {}
+
+  try {
+    const event =
+      document.createEvent("CustomEvent");
+
+    event.initCustomEvent(
+      name,
+      false,
+      false,
+      detail
+    );
+
+    return event;
+  } catch {
+    return null;
+  }
 }
 
 function safeGetState(AppCore) {
@@ -679,27 +724,6 @@ function normalizeLoaderError(error = null) {
   return sanitizePayload(error);
 }
 
-function recordLoaderError(AppCore, source = "loader", error = null) {
-  lastLoaderError = {
-    source:
-      safeText(source, "loader"),
-
-    error:
-      normalizeLoaderError(error),
-
-    at:
-      safeIsoDate(),
-  };
-
-  safeWarn(
-    AppCore,
-    "Loader error:",
-    lastLoaderError
-  );
-
-  return lastLoaderError;
-}
-
 function safeWarn(AppCore, ...args) {
   const safeArgs =
     args.map((arg) =>
@@ -724,6 +748,27 @@ function safeWarn(AppCore, ...args) {
   try {
     console.warn("[Loader]", ...safeArgs);
   } catch {}
+}
+
+function recordLoaderError(AppCore, source = "loader", error = null) {
+  lastLoaderError = {
+    source:
+      safeText(source, "loader"),
+
+    error:
+      normalizeLoaderError(error),
+
+    at:
+      safeIsoDate(),
+  };
+
+  safeWarn(
+    AppCore,
+    "Loader error:",
+    lastLoaderError
+  );
+
+  return lastLoaderError;
 }
 
 function safeEmit(AppCore, eventName, payload = {}, options = {}) {
@@ -765,14 +810,16 @@ function safeEmit(AppCore, eventName, payload = {}, options = {}) {
     (!busAvailable && isBrowser())
   ) {
     try {
-      window.dispatchEvent(
-        new CustomEvent(name, {
-          detail:
-            cleanPayload,
-        })
-      );
+      const event =
+        safeCreateCustomEvent(
+          name,
+          cleanPayload
+        );
 
-      return true;
+      if (event) {
+        window.dispatchEvent(event);
+        return true;
+      }
     } catch {}
   }
 
@@ -1771,6 +1818,7 @@ function bindFallbackLogoErrorHandlers(loader) {
 
             if (wasVisible && fallback) {
               loader.classList.add("has-logo-error");
+              loader.dataset.logoError = "true";
             }
           } catch {}
         },
@@ -1874,6 +1922,19 @@ function syncExistingLoaderAssets(AppCore, loader) {
       text.textContent = cfg.text;
     }
 
+    const subtext =
+      loader.querySelector?.(
+        ".app-loader__subtext,[data-loader-subtext='true']"
+      );
+
+    if (
+      subtext &&
+      !safeText(subtext.textContent, "") &&
+      cfg.subtext
+    ) {
+      subtext.textContent = cfg.subtext;
+    }
+
     bindFallbackLogoErrorHandlers(loader);
 
     return true;
@@ -1928,7 +1989,7 @@ function createFallbackLoader(AppCore) {
           loaderVisible:
             "true",
           loaderState:
-            "booting",
+            LOADER_DOM_STATES.booting,
         },
       });
 
@@ -2214,6 +2275,8 @@ function clearLoaderTimers() {
 
   hideTimer = null;
   transitionTimer = null;
+
+  return true;
 }
 
 function isLoaderActuallyVisible(loader) {
@@ -2259,7 +2322,7 @@ function isLoaderActuallyVisible(loader) {
   }
 }
 
-function restoreLoaderInlineStyles(AppCore) {
+function restoreLoaderInlineStyles(AppCore, loaderState = LOADER_DOM_STATES.visible) {
   const loader =
     ensureLoaderElement(AppCore);
 
@@ -2292,7 +2355,7 @@ function restoreLoaderInlineStyles(AppCore) {
     setDataset(
       loader,
       "loaderState",
-      "visible"
+      loaderState || LOADER_DOM_STATES.visible
     );
 
     removeClasses(
@@ -2325,7 +2388,7 @@ function restoreLoaderInlineStyles(AppCore) {
   }
 }
 
-function markLoaderVisible(loader) {
+function markLoaderVisible(loader, loaderState = LOADER_DOM_STATES.visible) {
   if (!loader) {
     return false;
   }
@@ -2355,7 +2418,7 @@ function markLoaderVisible(loader) {
     setDataset(
       loader,
       "loaderState",
-      "visible"
+      loaderState || LOADER_DOM_STATES.visible
     );
 
     removeClasses(
@@ -2406,7 +2469,7 @@ function markLoaderLeaving(loader) {
     setDataset(
       loader,
       "loaderState",
-      "leaving"
+      LOADER_DOM_STATES.leaving
     );
 
     removeClasses(
@@ -2434,7 +2497,7 @@ function markLoaderLeaving(loader) {
   }
 }
 
-function markLoaderHidden(loader) {
+function markLoaderHidden(loader, loaderState = LOADER_DOM_STATES.hidden) {
   if (!loader) {
     return false;
   }
@@ -2463,7 +2526,7 @@ function markLoaderHidden(loader) {
     setDataset(
       loader,
       "loaderState",
-      "hidden"
+      loaderState || LOADER_DOM_STATES.hidden
     );
 
     removeClasses(
@@ -2635,6 +2698,11 @@ export function showLoader(AppCore, options = {}) {
   const loader =
     ensureLoaderElement(AppCore);
 
+  const loaderState =
+    opts.booting === true
+      ? LOADER_DOM_STATES.booting
+      : LOADER_DOM_STATES.visible;
+
   lastShowAt =
     now();
 
@@ -2649,8 +2717,15 @@ export function showLoader(AppCore, options = {}) {
   );
 
   if (loader) {
-    restoreLoaderInlineStyles(AppCore);
-    markLoaderVisible(loader);
+    restoreLoaderInlineStyles(
+      AppCore,
+      loaderState
+    );
+
+    markLoaderVisible(
+      loader,
+      loaderState
+    );
   }
 
   safeSetLoading(
@@ -2670,10 +2745,7 @@ export function showLoader(AppCore, options = {}) {
     {
       loaderVisible:
         true,
-      loaderState:
-        opts.booting === true
-          ? "booting"
-          : "visible",
+      loaderState,
       loaderShownAt:
         epochNow(),
     }
@@ -2720,10 +2792,15 @@ export function forceHideLoader(AppCore, options = {}) {
     nextSequence();
 
   clearLoaderTimers();
-  clearBootFailsafeTimer(opts.state || null);
+  clearBootFailsafeTimer(opts.state || null, AppCore);
 
   const loader =
     getLoaderElement(AppCore);
+
+  const finalLoaderState =
+    Boolean(opts.fatal)
+      ? LOADER_DOM_STATES.fatal
+      : LOADER_DOM_STATES.hidden;
 
   setAppLoadingState(
     false,
@@ -2736,7 +2813,10 @@ export function forceHideLoader(AppCore, options = {}) {
   );
 
   if (loader) {
-    markLoaderHidden(loader);
+    markLoaderHidden(
+      loader,
+      finalLoaderState
+    );
   }
 
   safeSetLoading(
@@ -2755,9 +2835,7 @@ export function forceHideLoader(AppCore, options = {}) {
       loaderVisible:
         false,
       loaderState:
-        Boolean(opts.fatal)
-          ? "fatal"
-          : "hidden",
+        finalLoaderState,
       loaderHiddenAt:
         epochNow(),
     }
@@ -2875,6 +2953,11 @@ export function hideLoader(AppCore, options = {}) {
       getLoaderElement(AppCore) ||
       initialLoader;
 
+    const finalLoaderState =
+      Boolean(opts.fatal)
+        ? LOADER_DOM_STATES.fatal
+        : LOADER_DOM_STATES.hidden;
+
     setAppLoadingState(
       false,
       {
@@ -2892,6 +2975,13 @@ export function hideLoader(AppCore, options = {}) {
         AppCore,
         id
       );
+
+      if (Boolean(opts.fatal)) {
+        markLoaderHidden(
+          loader,
+          finalLoaderState
+        );
+      }
     }
 
     safeSetLoading(
@@ -2910,9 +3000,7 @@ export function hideLoader(AppCore, options = {}) {
         loaderVisible:
           false,
         loaderState:
-          Boolean(opts.fatal)
-            ? "fatal"
-            : "hidden",
+          finalLoaderState,
         loaderHiddenAt:
           epochNow(),
       }
@@ -2980,8 +3068,15 @@ export function takeOverStaticLoader(AppCore) {
   );
 
   if (loader) {
-    restoreLoaderInlineStyles(AppCore);
-    markLoaderVisible(loader);
+    restoreLoaderInlineStyles(
+      AppCore,
+      LOADER_DOM_STATES.booting
+    );
+
+    markLoaderVisible(
+      loader,
+      LOADER_DOM_STATES.booting
+    );
   }
 
   safeSetLoading(
@@ -3000,7 +3095,7 @@ export function takeOverStaticLoader(AppCore) {
       loaderVisible:
         true,
       loaderState:
-        "booting",
+        LOADER_DOM_STATES.booting,
       loaderShownAt:
         epochNow(),
     }
@@ -3027,7 +3122,7 @@ export function prepareBootLoader(AppCore, state = null) {
   if (state) {
     try {
       state.loaderVisible = true;
-      state.loaderShownAt = Date.now();
+      state.loaderShownAt = epochNow();
       state.booting = true;
     } catch {}
   }
@@ -3039,7 +3134,7 @@ export function prepareBootLoader(AppCore, state = null) {
    FAILSAFE TIMER
 ========================================================= */
 
-export function clearBootFailsafeTimer(state = null) {
+export function clearBootFailsafeTimer(state = null, AppCore = null) {
   try {
     clearTimer(bootFailsafeTimer);
     bootFailsafeTimer = null;
@@ -3057,6 +3152,20 @@ export function clearBootFailsafeTimer(state = null) {
       state.bootFailsafeArmId = 0;
     }
   } catch {}
+
+  safeSetCoreState(
+    AppCore,
+    {
+      bootFailsafeStartedAt:
+        0,
+      bootFailsafeTimeoutMs:
+        0,
+      bootFailsafeArmId:
+        0,
+      bootFailsafeTimer:
+        null,
+    }
+  );
 
   return true;
 }
@@ -3099,7 +3208,7 @@ export function armBootFailsafeLoader({
     return null;
   }
 
-  clearBootFailsafeTimer(state);
+  clearBootFailsafeTimer(state, AppCore);
 
   const timeout =
     getFailsafeTimeoutMs(timeoutMs);
@@ -3220,6 +3329,8 @@ export function armBootFailsafeLoader({
               }
             );
 
+            clearBootFailsafeTimer(state, AppCore);
+
             return;
           }
 
@@ -3245,6 +3356,8 @@ export function armBootFailsafeLoader({
               EVENT_NAMES.failsafeStale,
               payload
             );
+
+            clearBootFailsafeTimer(state, AppCore);
 
             return;
           }
@@ -3282,6 +3395,8 @@ export function armBootFailsafeLoader({
             EVENT_NAMES.failsafe,
             payload
           );
+
+          clearBootFailsafeTimer(state, AppCore);
         } catch (error) {
           recordLoaderError(
             AppCore,
@@ -3740,7 +3855,7 @@ function installLoaderDebugApi(AppCore = null) {
 
     clearFailsafe:
       () =>
-        clearBootFailsafeTimer(),
+        clearBootFailsafeTimer(null, AppCore),
   };
 
   try {

@@ -53,7 +53,7 @@
      VERSION
   ========================================================= */
 
-  const PREBOOT_THEME_VERSION = "10.1.0";
+  const PREBOOT_THEME_VERSION = "10.2.0";
 
   /* =========================================================
      CONSTANTS
@@ -80,6 +80,7 @@
   const MAX_ARRAY_ITEMS = 24;
   const MAX_STORAGE_READS = 160;
   const MAX_RAW_VALUE_LENGTH = 20000;
+  const MAX_STORAGE_PREFIX_LENGTH = 64;
 
   const THEME_COLORS = Object.freeze({
     dark: "#0a0c11",
@@ -212,7 +213,7 @@
   const BOOL_DARK_FIELD_NAMES = Object.freeze([
     /*
       Boolean explícito.
-      Sólo se usa si existe la propiedad.
+      Sólo se usa si existe la propiedad y su valor es booleano reconocible.
     */
     "darkMode",
     "dark_mode",
@@ -232,6 +233,7 @@
     "user",
     "theme",
     "appearance",
+    "data",
   ]);
 
   /* =========================================================
@@ -297,6 +299,14 @@
     return safeText(value, fallback).toLowerCase();
   }
 
+  function safeFiniteNumber(value, fallback = 0) {
+    const number = Number(value);
+
+    return Number.isFinite(number)
+      ? number
+      : fallback;
+  }
+
   function hasOwn(obj, key) {
     return Boolean(
       obj &&
@@ -346,6 +356,17 @@
     return text;
   }
 
+  function normalizeStoragePrefix(value = DEFAULT_STORAGE_PREFIX) {
+    const raw = safeText(value, DEFAULT_STORAGE_PREFIX)
+      .slice(0, MAX_STORAGE_PREFIX_LENGTH);
+
+    const clean = raw
+      .replace(/[^\w.-]/g, "")
+      .replace(/^[._-]+|[._-]+$/g, "");
+
+    return clean || DEFAULT_STORAGE_PREFIX;
+  }
+
   function isValidResolvedTheme(value) {
     return VALID_RESOLVED_THEMES.includes(value);
   }
@@ -370,7 +391,7 @@
     );
   }
 
-  function safeBoolean(value, fallback = false) {
+  function parseStrictBoolean(value) {
     if (typeof value === "boolean") {
       return value;
     }
@@ -378,6 +399,7 @@
     if (typeof value === "number") {
       if (value === 1) return true;
       if (value === 0) return false;
+      return null;
     }
 
     if (typeof value === "string") {
@@ -413,7 +435,7 @@
       }
     }
 
-    return Boolean(fallback);
+    return null;
   }
 
   /* =========================================================
@@ -456,7 +478,7 @@
 
     return {
       storagePrefix:
-        safeText(
+        normalizeStoragePrefix(
           config.storagePrefix ??
           config.storage_prefix ??
           ui.storagePrefix ??
@@ -465,7 +487,6 @@
           theme.storage_prefix ??
           settings.storagePrefix ??
           settings.storage_prefix ??
-          DEFAULT_STORAGE_PREFIX,
           DEFAULT_STORAGE_PREFIX
         ),
 
@@ -535,10 +556,10 @@
     }
 
     cachedStoragePrefix =
-      safeText(
-        getRuntimeThemeConfig().storagePrefix,
+      normalizeStoragePrefix(
+        getRuntimeThemeConfig().storagePrefix ||
         DEFAULT_STORAGE_PREFIX
-      ) || DEFAULT_STORAGE_PREFIX;
+      );
 
     return cachedStoragePrefix;
   }
@@ -611,7 +632,16 @@
     }
 
     try {
-      return clampRawValue(storage.getItem(finalKey) || "");
+      const raw = storage.getItem(finalKey);
+
+      if (
+        raw === null ||
+        raw === undefined
+      ) {
+        return "";
+      }
+
+      return clampRawValue(raw);
     } catch {
       return "";
     }
@@ -768,7 +798,10 @@
   }
 
   function getObjectStorageKeys() {
-    return buildStorageKeyPlan(OBJECT_THEME_KEYS);
+    return unique([
+      ...buildStorageKeyPlan(OBJECT_THEME_KEYS),
+      ...OBJECT_THEME_KEYS,
+    ]);
   }
 
   function isThemeStorageKey(key = "") {
@@ -792,7 +825,8 @@
       normalized.endsWith("_preferences") ||
       normalized.endsWith("_ui") ||
       normalized.endsWith("_user") ||
-      normalized.endsWith("_profile")
+      normalized.endsWith("_profile") ||
+      normalized.endsWith("_account")
     );
   }
 
@@ -817,12 +851,12 @@
   }
 
   function getSystemTheme() {
-    const media = getSystemMediaQuery();
+    const darkMedia = getSystemMediaQuery();
 
     try {
       if (
-        media &&
-        media.matches
+        darkMedia &&
+        darkMedia.matches
       ) {
         return "dark";
       }
@@ -877,6 +911,7 @@
         "browser",
         "os",
         "device",
+        "default",
         "system-preference",
         "system_preference",
         "prefers-color-scheme",
@@ -894,6 +929,7 @@
         "dark",
         "black",
         "night",
+        "nightly",
         "nocturno",
         "oscuro",
         "dark-mode",
@@ -910,6 +946,7 @@
         "light",
         "white",
         "day",
+        "daily",
         "diurno",
         "claro",
         "light-mode",
@@ -985,13 +1022,19 @@
     }
 
     if (typeof value === "number") {
-      return allowBoolean
-        ? value === 1
-          ? "dark"
-          : value === 0
-            ? "light"
-            : ""
-        : "";
+      if (!allowBoolean) {
+        return "";
+      }
+
+      if (value === 1) {
+        return "dark";
+      }
+
+      if (value === 0) {
+        return "light";
+      }
+
+      return "";
     }
 
     if (typeof value === "string") {
@@ -1008,6 +1051,18 @@
 
       if (isValidThemeMode(directMode)) {
         return directMode;
+      }
+
+      if (allowBoolean) {
+        const booleanValue = parseStrictBoolean(raw);
+
+        if (booleanValue === true) {
+          return "dark";
+        }
+
+        if (booleanValue === false) {
+          return "light";
+        }
       }
 
       const parsed = parseJsonRecursive(raw, depth + 1);
@@ -1116,12 +1171,14 @@
           continue;
         }
 
-        const mode = safeBoolean(node[field], false)
-          ? "dark"
-          : "light";
+        const booleanValue = parseStrictBoolean(node[field]);
 
-        if (isValidThemeMode(mode)) {
-          return mode;
+        if (booleanValue === true) {
+          return "dark";
+        }
+
+        if (booleanValue === false) {
+          return "light";
         }
       }
 
@@ -1168,6 +1225,16 @@
      THEME RESOLUTION
   ========================================================= */
 
+  function emptyResolution() {
+    return {
+      mode: "",
+      source: "",
+      key: "",
+      priority: 0,
+      exhausted: false,
+    };
+  }
+
   function resolveRuntimeForcedThemeMode() {
     const config = getRuntimeThemeConfig();
 
@@ -1183,13 +1250,7 @@
       };
     }
 
-    return {
-      mode: "",
-      source: "",
-      key: "",
-      priority: 0,
-      exhausted: false,
-    };
+    return emptyResolution();
   }
 
   function resolveRuntimeDefaultThemeMode() {
@@ -1207,13 +1268,7 @@
       };
     }
 
-    return {
-      mode: "",
-      source: "",
-      key: "",
-      priority: 0,
-      exhausted: false,
-    };
+    return emptyResolution();
   }
 
   function resolveStoredThemeMode() {
@@ -1282,13 +1337,7 @@
       return objectResult;
     }
 
-    return {
-      mode: "",
-      source: "",
-      key: "",
-      priority: 0,
-      exhausted: false,
-    };
+    return emptyResolution();
   }
 
   function resolveInitialThemeMode() {
@@ -1606,7 +1655,6 @@
       : DEFAULT_MODE;
 
     const systemTheme = getSystemTheme();
-
     const resolvedTheme = resolveThemeFromMode(finalMode);
 
     const finalTheme = isValidResolvedTheme(resolvedTheme)
@@ -1621,10 +1669,9 @@
       persistedKey: safeText(persistedKey, ""),
       systemTheme,
       fallbackTheme: FALLBACK_THEME,
-      priority: Number.isFinite(Number(priority))
-        ? Number(priority)
-        : 0,
+      priority: safeFiniteNumber(priority, 0),
       storageExhausted: Boolean(exhausted),
+      storagePrefix: getStoragePrefix(),
       at: nowIso(),
     };
   }
@@ -1681,14 +1728,29 @@
     }
 
     try {
-      window.dispatchEvent(
-        new CustomEvent(
-          "onion:theme:change",
-          {
-            detail: payload,
-          }
-        )
+      if (typeof CustomEvent === "function") {
+        window.dispatchEvent(
+          new CustomEvent(
+            "onion:theme:change",
+            {
+              detail: payload,
+            }
+          )
+        );
+
+        return true;
+      }
+
+      const event = document.createEvent("CustomEvent");
+
+      event.initCustomEvent(
+        "onion:theme:change",
+        false,
+        false,
+        payload
       );
+
+      window.dispatchEvent(event);
 
       return true;
     } catch {
@@ -1834,22 +1896,39 @@
 
     const keys = unique([
       ...buildStorageKeyPlan(DIRECT_THEME_KEYS),
+      ...LEGACY_THEME_KEYS,
+
       `${prefix}:theme`,
       `${prefix}:themeMode`,
       `${prefix}:theme_mode`,
       `${prefix}:appearance`,
+      `${prefix}:colorMode`,
+      `${prefix}:color_mode`,
+      `${prefix}:mode`,
+
       `${prefix}_theme`,
       `${prefix}_themeMode`,
       `${prefix}_theme_mode`,
       `${prefix}_appearance`,
+      `${prefix}_colorMode`,
+      `${prefix}_color_mode`,
+      `${prefix}_mode`,
+
       `${prefix}.theme`,
       `${prefix}.themeMode`,
       `${prefix}.theme_mode`,
       `${prefix}.appearance`,
+      `${prefix}.colorMode`,
+      `${prefix}.color_mode`,
+      `${prefix}.mode`,
+
       "theme",
       "themeMode",
       "theme_mode",
       "appearance",
+      "colorMode",
+      "color_mode",
+      "mode",
     ]);
 
     const local = getLocalStorage();
@@ -1902,7 +1981,10 @@
         return applyTheme({
           mode: finalMode,
           source: safeText(opts.source, "manual"),
-          persistedKey: `${getStoragePrefix()}:themeMode`,
+          persistedKey: safeText(
+            opts.persistedKey,
+            `${getStoragePrefix()}:themeMode`
+          ),
           persist: opts.persist !== false,
           emit: opts.emit !== false,
           priority: SOURCE_PRIORITY.storage,
@@ -1932,11 +2014,17 @@
           mode: resolved.mode || DEFAULT_MODE,
           source: safeText(opts.source, resolved.source || "reapply"),
           persistedKey: resolved.key || "",
-          persist: false,
+          persist: opts.persist === true,
           emit: opts.emit === true,
           priority: resolved.priority || 0,
           exhausted: Boolean(resolved.exhausted),
         });
+      },
+
+      persist() {
+        const current = getBootSnapshot();
+
+        return persistThemePayload(current);
       },
     });
 
@@ -1960,6 +2048,11 @@
     definePublicProperty(
       "__ONION_CLEAR_THEME__",
       api.clear
+    );
+
+    definePublicProperty(
+      "__ONION_REAPPLY_THEME__",
+      api.reapply
     );
 
     return true;
@@ -2025,6 +2118,57 @@
      STORAGE CHANGE LISTENER
   ========================================================= */
 
+  function reapplyThemeFromCurrentSources(source = "storage-event") {
+    /*
+      Si hay forcedTheme runtime, siempre gana.
+    */
+    const forced = resolveRuntimeForcedThemeMode();
+
+    if (isValidThemeMode(forced.mode)) {
+      applyTheme({
+        mode: forced.mode,
+        source: `${source}:runtime-forced`,
+        persistedKey: forced.key || "",
+        persist: false,
+        emit: true,
+        priority: forced.priority,
+      });
+
+      return true;
+    }
+
+    const stored = resolveStoredThemeMode();
+
+    if (isValidThemeMode(stored.mode)) {
+      applyTheme({
+        mode: stored.mode,
+        source,
+        persistedKey: stored.key || "",
+        persist: false,
+        emit: true,
+        priority: stored.priority,
+        exhausted: Boolean(stored.exhausted),
+      });
+
+      return true;
+    }
+
+    const runtimeDefault = resolveRuntimeDefaultThemeMode();
+
+    applyTheme({
+      mode: runtimeDefault.mode || DEFAULT_MODE,
+      source: runtimeDefault.mode
+        ? `${source}:runtime-default`
+        : `${source}:system`,
+      persistedKey: "",
+      persist: false,
+      emit: true,
+      priority: runtimeDefault.priority || SOURCE_PRIORITY.system,
+    });
+
+    return true;
+  }
+
   function bindStorageThemeListener() {
     if (
       !isBrowser() ||
@@ -2040,56 +2184,23 @@
         "storage",
         (event) => {
           try {
-            if (!event || !isThemeStorageKey(event.key || "")) {
+            if (!event) {
               return;
             }
 
             /*
-              Si hay forcedTheme runtime, siempre gana.
+              event.key === null ocurre con storage.clear().
+              No hacemos clear desde aquí, pero otra pestaña podría hacerlo.
+              En ese caso re-resolvemos desde todas las fuentes.
             */
-            const forced = resolveRuntimeForcedThemeMode();
-
-            if (isValidThemeMode(forced.mode)) {
-              applyTheme({
-                mode: forced.mode,
-                source: "storage-event:runtime-forced",
-                persistedKey: forced.key || "",
-                persist: false,
-                emit: true,
-                priority: forced.priority,
-              });
-
+            if (
+              event.key !== null &&
+              !isThemeStorageKey(event.key || "")
+            ) {
               return;
             }
 
-            const stored = resolveStoredThemeMode();
-
-            if (isValidThemeMode(stored.mode)) {
-              applyTheme({
-                mode: stored.mode,
-                source: "storage-event",
-                persistedKey: stored.key || "",
-                persist: false,
-                emit: true,
-                priority: stored.priority,
-                exhausted: Boolean(stored.exhausted),
-              });
-
-              return;
-            }
-
-            const runtimeDefault = resolveRuntimeDefaultThemeMode();
-
-            applyTheme({
-              mode: runtimeDefault.mode || DEFAULT_MODE,
-              source: runtimeDefault.mode
-                ? "storage-event:runtime-default"
-                : "storage-event:system",
-              persistedKey: "",
-              persist: false,
-              emit: true,
-              priority: runtimeDefault.priority || SOURCE_PRIORITY.system,
-            });
+            reapplyThemeFromCurrentSources("storage-event");
           } catch {}
         }
       );
@@ -2145,6 +2256,20 @@
 
       applyThemeClassList(html, FALLBACK_THEME);
       syncMeta(FALLBACK_THEME);
+
+      setBootSnapshot({
+        version: PREBOOT_THEME_VERSION,
+        theme: FALLBACK_THEME,
+        mode: FALLBACK_THEME,
+        source: "fallback-hard",
+        persistedKey: "",
+        systemTheme: FALLBACK_THEME,
+        fallbackTheme: FALLBACK_THEME,
+        priority: SOURCE_PRIORITY.fallback,
+        storageExhausted: false,
+        storagePrefix: DEFAULT_STORAGE_PREFIX,
+        at: nowIso(),
+      });
 
       return true;
     } catch {

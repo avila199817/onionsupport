@@ -150,6 +150,9 @@ import {
    CONSTANTS
 ========================================================= */
 
+const APP_BOOTSTRAP_VERSION =
+  "14.1.0";
+
 const BOOT_SOURCE =
   "app:index";
 
@@ -520,15 +523,17 @@ function afterPaint(callback) {
   }
 
   try {
-    window.requestAnimationFrame(() => {
+    if (isFunction(window.requestAnimationFrame)) {
       window.requestAnimationFrame(() => {
-        try {
-          callback();
-        } catch {}
+        window.requestAnimationFrame(() => {
+          try {
+            callback();
+          } catch {}
+        });
       });
-    });
 
-    return;
+      return;
+    }
   } catch {}
 
   try {
@@ -538,6 +543,46 @@ function afterPaint(callback) {
       } catch {}
     }, 0);
   } catch {}
+}
+
+function safeCreateCustomEvent(name = "", detail = {}) {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  const eventName =
+    safeText(name, "");
+
+  if (!eventName) {
+    return null;
+  }
+
+  try {
+    if (typeof CustomEvent === "function") {
+      return new CustomEvent(
+        eventName,
+        {
+          detail,
+        }
+      );
+    }
+  } catch {}
+
+  try {
+    const event =
+      document.createEvent("CustomEvent");
+
+    event.initCustomEvent(
+      eventName,
+      false,
+      false,
+      detail
+    );
+
+    return event;
+  } catch {
+    return null;
+  }
 }
 
 /* =========================================================
@@ -941,7 +986,7 @@ function sanitizePayload(value, depth = 0) {
         safeText(value.id, ""),
 
       className:
-        safeText(value.className, ""),
+        safeText(value.className?.baseVal || value.className, ""),
     };
   }
 
@@ -1720,6 +1765,9 @@ export const App = (() => {
   "use strict";
 
   const state = {
+    version:
+      APP_BOOTSTRAP_VERSION,
+
     booted:
       false,
 
@@ -1843,6 +1891,9 @@ export const App = (() => {
         source:
           BOOT_SOURCE,
 
+        version:
+          APP_BOOTSTRAP_VERSION,
+
         ...safeObject(payload),
       });
 
@@ -1873,14 +1924,16 @@ export const App = (() => {
       (!busAvailable && isBrowser())
     ) {
       try {
-        window.dispatchEvent(
-          new CustomEvent(eventName, {
-            detail:
-              cleanPayload,
-          })
-        );
+        const event =
+          safeCreateCustomEvent(
+            eventName,
+            cleanPayload
+          );
 
-        return true;
+        if (event) {
+          window.dispatchEvent(event);
+          return true;
+        }
       } catch {}
     }
 
@@ -3921,8 +3974,16 @@ export const App = (() => {
         {
           reason,
 
+          state,
+
           minVisibleMs:
             MIN_BOOT_LOADER_MS,
+
+          finalize:
+            true,
+
+          allowDuringBoot:
+            true,
         }
       );
     } catch {}
@@ -3953,6 +4014,9 @@ export const App = (() => {
             0,
 
           state,
+
+          force:
+            true,
         }
       );
     } catch {
@@ -3962,8 +4026,16 @@ export const App = (() => {
           {
             reason,
 
+            state,
+
             minVisibleMs:
               0,
+
+            force:
+              true,
+
+            allowDuringBoot:
+              true,
           }
         );
       } catch {}
@@ -4362,24 +4434,33 @@ export const App = (() => {
       false;
 
     try {
+      const result =
+        initUISystems({
+          AppCore,
+          Toast,
+          SidebarUI,
+          TopbarUI,
+          Auth,
+          Router,
+          Store,
+          I18n,
+          state,
+          scope:
+            APP_SCOPES?.ui ||
+            "app:ui",
+        });
+
+      /*
+        Importante:
+        - Muchos init() legacy no devuelven true explícito.
+        - Sólo tratamos como fallo si devuelve false o lanza excepción.
+      */
       uiOk =
-        Boolean(
-          initUISystems({
-            AppCore,
-            Toast,
-            SidebarUI,
-            TopbarUI,
-            Auth,
-            Router,
-            Store,
-            I18n,
-            state,
-            scope:
-              APP_SCOPES?.ui ||
-              "app:ui",
-          })
-        );
+        result !== false;
     } catch (error) {
+      uiOk =
+        false;
+
       safeWarn(
         "initUISystems() falló.",
         error
@@ -4807,7 +4888,7 @@ export const App = (() => {
     state.finalizedCycleId =
       cycleId;
 
-    clearBootFailsafeTimer(state);
+    clearBootFailsafeTimer(state, AppCore);
 
     try {
       markStoreBootState(Store, {
@@ -5190,7 +5271,7 @@ export const App = (() => {
     } catch (error) {
       state.booting = false;
 
-      clearBootFailsafeTimer(state);
+      clearBootFailsafeTimer(state, AppCore);
 
       markBootFailed(
         cycleId,
@@ -5354,7 +5435,7 @@ export const App = (() => {
     resetCycleRuntimeState();
 
     try {
-      clearBootFailsafeTimer(state);
+      clearBootFailsafeTimer(state, AppCore);
     } catch {}
 
     try {
@@ -5415,6 +5496,9 @@ export const App = (() => {
     return sanitizePayload({
       ...state,
 
+      version:
+        APP_BOOTSTRAP_VERSION,
+
       bootUrlContext:
         sanitizeBootContextForLog(context),
 
@@ -5467,6 +5551,9 @@ export const App = (() => {
   }
 
   const api = {
+    version:
+      APP_BOOTSTRAP_VERSION,
+
     boot,
     reboot,
     getState,
@@ -5521,12 +5608,12 @@ function autoBootApp() {
   try {
     void App.boot().catch((error) => {
       try {
-        console.error("[App] Auto boot failed.", error);
+        console.error("[App] Auto boot failed.", sanitizePayload(error));
       } catch {}
     });
   } catch (error) {
     try {
-      console.error("[App] Auto boot crashed.", error);
+      console.error("[App] Auto boot crashed.", sanitizePayload(error));
     } catch {}
   }
 }

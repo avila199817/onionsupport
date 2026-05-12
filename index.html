@@ -37,7 +37,7 @@
        - URLs SPA resueltas por Azure Static Web Apps.
        - Panel privado no indexable.
        - PWA coherente mediante /site.webmanifest.
-       - Favicons oficiales Onion Support.
+       - Favicon principal: favicon_black_circle.png.
        - Preparado para CSP estricta vía headers.
 
        CONTRATO DE BOOT:
@@ -165,33 +165,30 @@
        - favicon_black_circle.png
        - favicon_black.png
 
-       Recomendación:
-       - Mantener /favicon.ico como fallback raíz.
-       - Usar PNGs reales para app icons, loader y PWA.
-       - Evitar referencias a /favicon.svg.
+       Favicon principal deseado:
+       - /src/media/img/favicon_black_circle.png
+
+       IMPORTANTE:
+       - No usar favicon_support.png como rel="icon".
+       - No apuntar a favicon.svg.
+       - ?v=5 rompe caché agresiva del navegador.
+       - El loader NO usa este icono; el loader usa white/black según tema.
   ========================= -->
   <link
     rel="icon"
-    href="/favicon.ico?v=3"
-    sizes="any"
-    type="image/x-icon"
+    href="/src/media/img/favicon_black_circle.png?v=5"
+    type="image/png"
   >
 
   <link
     rel="shortcut icon"
-    href="/favicon.ico?v=3"
-    type="image/x-icon"
-  >
-
-  <link
-    rel="icon"
-    href="/src/media/img/favicon_support.png?v=3"
+    href="/src/media/img/favicon_black_circle.png?v=5"
     type="image/png"
   >
 
   <link
     rel="apple-touch-icon"
-    href="/src/media/img/favicon_black_circle.png?v=3"
+    href="/src/media/img/favicon_black_circle.png?v=5"
   >
 
   <!-- =========================
@@ -200,10 +197,11 @@
        El repo contiene /site.webmanifest.
        El manifest debe declarar PNG/ICO reales.
        No declarar favicon.svg.
+       Recomendado: usar favicon_black_circle.png también en manifest.
   ========================= -->
   <link
     rel="manifest"
-    href="/site.webmanifest?v=3"
+    href="/site.webmanifest?v=5"
   >
 
   <!-- =========================
@@ -215,7 +213,7 @@
   <!-- Loader inicial para tema dark / fondo oscuro -->
   <link
     rel="preload"
-    href="/src/media/img/favicon_white.png?v=3"
+    href="/src/media/img/favicon_white.png?v=5"
     as="image"
     type="image/png"
     fetchpriority="high"
@@ -224,7 +222,7 @@
   <!-- Loader inicial para tema light / fondo claro -->
   <link
     rel="preload"
-    href="/src/media/img/favicon_black.png?v=3"
+    href="/src/media/img/favicon_black.png?v=5"
     as="image"
     type="image/png"
     fetchpriority="low"
@@ -362,7 +360,7 @@
       >
         <img
           class="app-loader__logo app-loader__logo--dark"
-          src="/src/media/img/favicon_white.png?v=3"
+          src="/src/media/img/favicon_white.png?v=5"
           alt=""
           width="64"
           height="64"
@@ -374,7 +372,7 @@
 
         <img
           class="app-loader__logo app-loader__logo--light"
-          src="/src/media/img/favicon_black.png?v=3"
+          src="/src/media/img/favicon_black.png?v=5"
           alt=""
           width="64"
           height="64"

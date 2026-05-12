@@ -3,6 +3,7 @@
    Archivo: src/ui/topbar/topbar.helpers.js
 
    FINAL PRO SYSTEM · TOPBAR HELPERS · PATH SAFE · SEARCH SAFE · 10/10
+   TOKEN PRO SYSTEM ALIGNED · COMMAND PALETTE READY
 
    Responsabilidades:
    - constantes base del topbar
@@ -16,34 +17,61 @@
    - agrupación profesional de resultados
    - utilidades puras de resultados
 
+   REGLAS:
+   - Sin CSS inline.
+   - Sin DOM mutation.
+   - Sin overlays.
+   - Sin side effects visuales.
+   - Sólo funciones puras/utilitarias.
+
    FIXES:
-   - isHashOnlyHref ya no confunde #/ruta con ancla
+   - isHashOnlyHref no confunde #/ruta con ancla
    - getCurrentPublicPath soporta hash-router
    - safeNormalizeCanonicalPath elimina query/hash y prefijo /@usuario
    - safeNormalizePath no rompe URLs absolutas del mismo origen
    - normalizeResultType tolera aliases backend heterogéneos
    - highlight marca múltiples apariciones de forma segura
+   - scoring favorece ids exactos, entidades reales y coincidencias por intención
 ========================================================= */
 
 /* =========================================================
    SCOPES
 ========================================================= */
 
-export const TOPBAR_SCOPE = "ui:topbar";
-export const TOPBAR_SEARCH_SCOPE = "ui:topbar:search";
+export const TOPBAR_SCOPE =
+  "ui:topbar";
+
+export const TOPBAR_SEARCH_SCOPE =
+  "ui:topbar:search";
 
 /* =========================================================
    SEARCH CONFIG
 ========================================================= */
 
 export const TOPBAR_SEARCH_CONFIG = Object.freeze({
-  debounceMs: 220,
-  minQueryLength: 1,
-  maxQueryLength: 120,
-  maxResultsTotal: 24,
-  maxResultsPerGroup: 6,
-  cacheTtlMs: 20 * 1000,
-  mobileBreakpoint: 900,
+  debounceMs:
+    220,
+
+  minQueryLength:
+    1,
+
+  maxQueryLength:
+    120,
+
+  maxResultsTotal:
+    24,
+
+  maxResultsPerGroup:
+    6,
+
+  cacheTtlMs:
+    20 * 1000,
+
+  timeoutMs:
+    12000,
+
+  mobileBreakpoint:
+    900,
 });
 
 /* =========================================================
@@ -51,116 +79,253 @@ export const TOPBAR_SEARCH_CONFIG = Object.freeze({
 ========================================================= */
 
 export const TOPBAR_RESULT_TYPES = Object.freeze({
-  INCIDENCIA: "incidencia",
-  FACTURA: "factura",
-  CLIENTE: "cliente",
-  USUARIO: "user",
-  NAV: "nav",
-  SETTINGS: "settings",
-  RECENT: "recent",
-  GENERAL: "general",
+  INCIDENCIA:
+    "incidencia",
+
+  FACTURA:
+    "factura",
+
+  CLIENTE:
+    "cliente",
+
+  USUARIO:
+    "usuario",
+
+  NAV:
+    "nav",
+
+  SETTINGS:
+    "settings",
+
+  RECENT:
+    "recent",
+
+  GENERAL:
+    "general",
 });
 
 const TYPE_ALIASES = Object.freeze({
-  incidencia: TOPBAR_RESULT_TYPES.INCIDENCIA,
-  incidencias: TOPBAR_RESULT_TYPES.INCIDENCIA,
-  ticket: TOPBAR_RESULT_TYPES.INCIDENCIA,
-  tickets: TOPBAR_RESULT_TYPES.INCIDENCIA,
-  issue: TOPBAR_RESULT_TYPES.INCIDENCIA,
-  issues: TOPBAR_RESULT_TYPES.INCIDENCIA,
-  soporte: TOPBAR_RESULT_TYPES.INCIDENCIA,
-  averia: TOPBAR_RESULT_TYPES.INCIDENCIA,
-  averias: TOPBAR_RESULT_TYPES.INCIDENCIA,
-  incidenciaid: TOPBAR_RESULT_TYPES.INCIDENCIA,
-  ticketid: TOPBAR_RESULT_TYPES.INCIDENCIA,
+  incidencia:
+    TOPBAR_RESULT_TYPES.INCIDENCIA,
+  incidencias:
+    TOPBAR_RESULT_TYPES.INCIDENCIA,
+  ticket:
+    TOPBAR_RESULT_TYPES.INCIDENCIA,
+  tickets:
+    TOPBAR_RESULT_TYPES.INCIDENCIA,
+  issue:
+    TOPBAR_RESULT_TYPES.INCIDENCIA,
+  issues:
+    TOPBAR_RESULT_TYPES.INCIDENCIA,
+  soporte:
+    TOPBAR_RESULT_TYPES.INCIDENCIA,
+  support:
+    TOPBAR_RESULT_TYPES.INCIDENCIA,
+  averia:
+    TOPBAR_RESULT_TYPES.INCIDENCIA,
+  averias:
+    TOPBAR_RESULT_TYPES.INCIDENCIA,
+  incidenciaid:
+    TOPBAR_RESULT_TYPES.INCIDENCIA,
+  ticketid:
+    TOPBAR_RESULT_TYPES.INCIDENCIA,
+  issueid:
+    TOPBAR_RESULT_TYPES.INCIDENCIA,
 
-  factura: TOPBAR_RESULT_TYPES.FACTURA,
-  facturas: TOPBAR_RESULT_TYPES.FACTURA,
-  invoice: TOPBAR_RESULT_TYPES.FACTURA,
-  invoices: TOPBAR_RESULT_TYPES.FACTURA,
-  bill: TOPBAR_RESULT_TYPES.FACTURA,
-  billing: TOPBAR_RESULT_TYPES.FACTURA,
-  recibo: TOPBAR_RESULT_TYPES.FACTURA,
-  recibos: TOPBAR_RESULT_TYPES.FACTURA,
-  facturaid: TOPBAR_RESULT_TYPES.FACTURA,
-  invoiceid: TOPBAR_RESULT_TYPES.FACTURA,
+  factura:
+    TOPBAR_RESULT_TYPES.FACTURA,
+  facturas:
+    TOPBAR_RESULT_TYPES.FACTURA,
+  invoice:
+    TOPBAR_RESULT_TYPES.FACTURA,
+  invoices:
+    TOPBAR_RESULT_TYPES.FACTURA,
+  bill:
+    TOPBAR_RESULT_TYPES.FACTURA,
+  bills:
+    TOPBAR_RESULT_TYPES.FACTURA,
+  billing:
+    TOPBAR_RESULT_TYPES.FACTURA,
+  recibo:
+    TOPBAR_RESULT_TYPES.FACTURA,
+  recibos:
+    TOPBAR_RESULT_TYPES.FACTURA,
+  facturaid:
+    TOPBAR_RESULT_TYPES.FACTURA,
+  invoiceid:
+    TOPBAR_RESULT_TYPES.FACTURA,
+  numeroFactura:
+    TOPBAR_RESULT_TYPES.FACTURA,
+  numerofactura:
+    TOPBAR_RESULT_TYPES.FACTURA,
 
-  cliente: TOPBAR_RESULT_TYPES.CLIENTE,
-  clientes: TOPBAR_RESULT_TYPES.CLIENTE,
-  client: TOPBAR_RESULT_TYPES.CLIENTE,
-  clients: TOPBAR_RESULT_TYPES.CLIENTE,
-  customer: TOPBAR_RESULT_TYPES.CLIENTE,
-  customers: TOPBAR_RESULT_TYPES.CLIENTE,
-  empresa: TOPBAR_RESULT_TYPES.CLIENTE,
-  empresas: TOPBAR_RESULT_TYPES.CLIENTE,
-  clienteid: TOPBAR_RESULT_TYPES.CLIENTE,
-  clientid: TOPBAR_RESULT_TYPES.CLIENTE,
-  customerid: TOPBAR_RESULT_TYPES.CLIENTE,
+  cliente:
+    TOPBAR_RESULT_TYPES.CLIENTE,
+  clientes:
+    TOPBAR_RESULT_TYPES.CLIENTE,
+  client:
+    TOPBAR_RESULT_TYPES.CLIENTE,
+  clients:
+    TOPBAR_RESULT_TYPES.CLIENTE,
+  customer:
+    TOPBAR_RESULT_TYPES.CLIENTE,
+  customers:
+    TOPBAR_RESULT_TYPES.CLIENTE,
+  empresa:
+    TOPBAR_RESULT_TYPES.CLIENTE,
+  empresas:
+    TOPBAR_RESULT_TYPES.CLIENTE,
+  clienteid:
+    TOPBAR_RESULT_TYPES.CLIENTE,
+  clientid:
+    TOPBAR_RESULT_TYPES.CLIENTE,
+  customerid:
+    TOPBAR_RESULT_TYPES.CLIENTE,
 
-  user: TOPBAR_RESULT_TYPES.USUARIO,
-  users: TOPBAR_RESULT_TYPES.USUARIO,
-  usuario: TOPBAR_RESULT_TYPES.USUARIO,
-  usuarios: TOPBAR_RESULT_TYPES.USUARIO,
-  profile: TOPBAR_RESULT_TYPES.USUARIO,
-  perfil: TOPBAR_RESULT_TYPES.USUARIO,
-  account: TOPBAR_RESULT_TYPES.USUARIO,
-  cuenta: TOPBAR_RESULT_TYPES.USUARIO,
-  userid: TOPBAR_RESULT_TYPES.USUARIO,
-  usuarioid: TOPBAR_RESULT_TYPES.USUARIO,
+  user:
+    TOPBAR_RESULT_TYPES.USUARIO,
+  users:
+    TOPBAR_RESULT_TYPES.USUARIO,
+  usuario:
+    TOPBAR_RESULT_TYPES.USUARIO,
+  usuarios:
+    TOPBAR_RESULT_TYPES.USUARIO,
+  profile:
+    TOPBAR_RESULT_TYPES.USUARIO,
+  perfil:
+    TOPBAR_RESULT_TYPES.USUARIO,
+  account:
+    TOPBAR_RESULT_TYPES.USUARIO,
+  cuenta:
+    TOPBAR_RESULT_TYPES.USUARIO,
+  userid:
+    TOPBAR_RESULT_TYPES.USUARIO,
+  usuarioid:
+    TOPBAR_RESULT_TYPES.USUARIO,
 
-  nav: TOPBAR_RESULT_TYPES.NAV,
-  route: TOPBAR_RESULT_TYPES.NAV,
-  routes: TOPBAR_RESULT_TYPES.NAV,
-  ruta: TOPBAR_RESULT_TYPES.NAV,
-  rutas: TOPBAR_RESULT_TYPES.NAV,
-  navegacion: TOPBAR_RESULT_TYPES.NAV,
-  navigation: TOPBAR_RESULT_TYPES.NAV,
-  page: TOPBAR_RESULT_TYPES.NAV,
-  pagina: TOPBAR_RESULT_TYPES.NAV,
+  nav:
+    TOPBAR_RESULT_TYPES.NAV,
+  route:
+    TOPBAR_RESULT_TYPES.NAV,
+  routes:
+    TOPBAR_RESULT_TYPES.NAV,
+  ruta:
+    TOPBAR_RESULT_TYPES.NAV,
+  rutas:
+    TOPBAR_RESULT_TYPES.NAV,
+  navegacion:
+    TOPBAR_RESULT_TYPES.NAV,
+  navigation:
+    TOPBAR_RESULT_TYPES.NAV,
+  page:
+    TOPBAR_RESULT_TYPES.NAV,
+  pagina:
+    TOPBAR_RESULT_TYPES.NAV,
+  paginas:
+    TOPBAR_RESULT_TYPES.NAV,
+  view:
+    TOPBAR_RESULT_TYPES.NAV,
+  vista:
+    TOPBAR_RESULT_TYPES.NAV,
+  vistas:
+    TOPBAR_RESULT_TYPES.NAV,
 
-  settings: TOPBAR_RESULT_TYPES.SETTINGS,
-  setting: TOPBAR_RESULT_TYPES.SETTINGS,
-  ajustes: TOPBAR_RESULT_TYPES.SETTINGS,
-  ajuste: TOPBAR_RESULT_TYPES.SETTINGS,
-  config: TOPBAR_RESULT_TYPES.SETTINGS,
-  configuracion: TOPBAR_RESULT_TYPES.SETTINGS,
-  preferencias: TOPBAR_RESULT_TYPES.SETTINGS,
-  preference: TOPBAR_RESULT_TYPES.SETTINGS,
-  preferences: TOPBAR_RESULT_TYPES.SETTINGS,
+  settings:
+    TOPBAR_RESULT_TYPES.SETTINGS,
+  setting:
+    TOPBAR_RESULT_TYPES.SETTINGS,
+  ajustes:
+    TOPBAR_RESULT_TYPES.SETTINGS,
+  ajuste:
+    TOPBAR_RESULT_TYPES.SETTINGS,
+  config:
+    TOPBAR_RESULT_TYPES.SETTINGS,
+  configuration:
+    TOPBAR_RESULT_TYPES.SETTINGS,
+  configuracion:
+    TOPBAR_RESULT_TYPES.SETTINGS,
+  preferencias:
+    TOPBAR_RESULT_TYPES.SETTINGS,
+  preference:
+    TOPBAR_RESULT_TYPES.SETTINGS,
+  preferences:
+    TOPBAR_RESULT_TYPES.SETTINGS,
 
-  recent: TOPBAR_RESULT_TYPES.RECENT,
-  recientes: TOPBAR_RESULT_TYPES.RECENT,
-  recents: TOPBAR_RESULT_TYPES.RECENT,
-  history: TOPBAR_RESULT_TYPES.RECENT,
-  historial: TOPBAR_RESULT_TYPES.RECENT,
+  recent:
+    TOPBAR_RESULT_TYPES.RECENT,
+  recientes:
+    TOPBAR_RESULT_TYPES.RECENT,
+  recentes:
+    TOPBAR_RESULT_TYPES.RECENT,
+  recents:
+    TOPBAR_RESULT_TYPES.RECENT,
+  history:
+    TOPBAR_RESULT_TYPES.RECENT,
+  historial:
+    TOPBAR_RESULT_TYPES.RECENT,
 
-  general: TOPBAR_RESULT_TYPES.GENERAL,
-  result: TOPBAR_RESULT_TYPES.GENERAL,
-  results: TOPBAR_RESULT_TYPES.GENERAL,
-  resultado: TOPBAR_RESULT_TYPES.GENERAL,
-  resultados: TOPBAR_RESULT_TYPES.GENERAL,
+  general:
+    TOPBAR_RESULT_TYPES.GENERAL,
+  result:
+    TOPBAR_RESULT_TYPES.GENERAL,
+  results:
+    TOPBAR_RESULT_TYPES.GENERAL,
+  resultado:
+    TOPBAR_RESULT_TYPES.GENERAL,
+  resultados:
+    TOPBAR_RESULT_TYPES.GENERAL,
 });
 
 const TYPE_LABELS = Object.freeze({
-  [TOPBAR_RESULT_TYPES.INCIDENCIA]: "Incidencias",
-  [TOPBAR_RESULT_TYPES.FACTURA]: "Facturas",
-  [TOPBAR_RESULT_TYPES.CLIENTE]: "Clientes",
-  [TOPBAR_RESULT_TYPES.USUARIO]: "Usuarios",
-  [TOPBAR_RESULT_TYPES.NAV]: "Navegación",
-  [TOPBAR_RESULT_TYPES.SETTINGS]: "Ajustes",
-  [TOPBAR_RESULT_TYPES.RECENT]: "Recientes",
-  [TOPBAR_RESULT_TYPES.GENERAL]: "Resultados",
+  [TOPBAR_RESULT_TYPES.INCIDENCIA]:
+    "Incidencias",
+
+  [TOPBAR_RESULT_TYPES.FACTURA]:
+    "Facturas",
+
+  [TOPBAR_RESULT_TYPES.CLIENTE]:
+    "Clientes",
+
+  [TOPBAR_RESULT_TYPES.USUARIO]:
+    "Usuarios",
+
+  [TOPBAR_RESULT_TYPES.NAV]:
+    "Navegación",
+
+  [TOPBAR_RESULT_TYPES.SETTINGS]:
+    "Ajustes",
+
+  [TOPBAR_RESULT_TYPES.RECENT]:
+    "Recientes",
+
+  [TOPBAR_RESULT_TYPES.GENERAL]:
+    "Resultados",
 });
 
 const TYPE_ICONS = Object.freeze({
-  [TOPBAR_RESULT_TYPES.INCIDENCIA]: "🎫",
-  [TOPBAR_RESULT_TYPES.FACTURA]: "🧾",
-  [TOPBAR_RESULT_TYPES.CLIENTE]: "🏢",
-  [TOPBAR_RESULT_TYPES.USUARIO]: "👤",
-  [TOPBAR_RESULT_TYPES.NAV]: "📂",
-  [TOPBAR_RESULT_TYPES.SETTINGS]: "⚙️",
-  [TOPBAR_RESULT_TYPES.RECENT]: "🕘",
-  [TOPBAR_RESULT_TYPES.GENERAL]: "🔎",
+  [TOPBAR_RESULT_TYPES.INCIDENCIA]:
+    "🎫",
+
+  [TOPBAR_RESULT_TYPES.FACTURA]:
+    "🧾",
+
+  [TOPBAR_RESULT_TYPES.CLIENTE]:
+    "🏢",
+
+  [TOPBAR_RESULT_TYPES.USUARIO]:
+    "👤",
+
+  [TOPBAR_RESULT_TYPES.NAV]:
+    "📂",
+
+  [TOPBAR_RESULT_TYPES.SETTINGS]:
+    "⚙️",
+
+  [TOPBAR_RESULT_TYPES.RECENT]:
+    "🕘",
+
+  [TOPBAR_RESULT_TYPES.GENERAL]:
+    "🔎",
 });
 
 const TYPE_GROUP_ORDER = Object.freeze([
@@ -175,14 +340,29 @@ const TYPE_GROUP_ORDER = Object.freeze([
 ]);
 
 const TYPE_BASE_BOOST = Object.freeze({
-  [TOPBAR_RESULT_TYPES.INCIDENCIA]: 14,
-  [TOPBAR_RESULT_TYPES.FACTURA]: 13,
-  [TOPBAR_RESULT_TYPES.CLIENTE]: 12,
-  [TOPBAR_RESULT_TYPES.USUARIO]: 11,
-  [TOPBAR_RESULT_TYPES.SETTINGS]: 7,
-  [TOPBAR_RESULT_TYPES.NAV]: 5,
-  [TOPBAR_RESULT_TYPES.RECENT]: 4,
-  [TOPBAR_RESULT_TYPES.GENERAL]: 1,
+  [TOPBAR_RESULT_TYPES.INCIDENCIA]:
+    14,
+
+  [TOPBAR_RESULT_TYPES.FACTURA]:
+    13,
+
+  [TOPBAR_RESULT_TYPES.CLIENTE]:
+    12,
+
+  [TOPBAR_RESULT_TYPES.USUARIO]:
+    11,
+
+  [TOPBAR_RESULT_TYPES.SETTINGS]:
+    7,
+
+  [TOPBAR_RESULT_TYPES.NAV]:
+    5,
+
+  [TOPBAR_RESULT_TYPES.RECENT]:
+    4,
+
+  [TOPBAR_RESULT_TYPES.GENERAL]:
+    1,
 });
 
 const STOP_WORDS = new Set([
@@ -208,6 +388,8 @@ const STOP_WORDS = new Set([
   "mis",
   "su",
   "sus",
+  "al",
+  "lo",
   "the",
   "of",
   "and",
@@ -288,7 +470,9 @@ export function first(...values) {
 export function escapeHtml(AppCore, value = "") {
   try {
     if (typeof AppCore?.utils?.escapeHtml === "function") {
-      return AppCore.utils.escapeHtml(String(value ?? ""));
+      return AppCore.utils.escapeHtml(
+        String(value ?? "")
+      );
     }
   } catch {}
 
@@ -311,14 +495,14 @@ export function normalizeText(value = "") {
 
 export function normalizeLooseText(value = "") {
   return normalizeText(value)
-    .replace(/[^\p{L}\p{N}@._\-/#\s]/gu, " ")
+    .replace(/[^\p{L}\p{N}@._\-/#:\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 export function normalizeCompactText(value = "") {
   return normalizeLooseText(value)
-    .replace(/[^\p{L}\p{N}@._\-/#]/gu, "");
+    .replace(/[^\p{L}\p{N}@._\-/#:]/gu, "");
 }
 
 export function normalizeQuery(value = "") {
@@ -340,8 +524,11 @@ export function tokenize(value = "", options = {}) {
 }
 
 export function uniqBy(items = [], keyGetter) {
-  const seen = new Set();
-  const result = [];
+  const seen =
+    new Set();
+
+  const result =
+    [];
 
   for (const item of safeArray(items)) {
     const key =
@@ -349,7 +536,10 @@ export function uniqBy(items = [], keyGetter) {
         ? safeText(keyGetter(item), "")
         : "";
 
-    if (!key || seen.has(key)) {
+    if (
+      !key ||
+      seen.has(key)
+    ) {
       continue;
     }
 
@@ -533,17 +723,21 @@ function stripSearchAndHash(path = "/") {
   const hashIndex =
     raw.indexOf("#");
 
-  let cutIndex = -1;
+  let cutIndex =
+    -1;
 
   if (
     queryIndex >= 0 &&
     hashIndex >= 0
   ) {
-    cutIndex = Math.min(queryIndex, hashIndex);
+    cutIndex =
+      Math.min(queryIndex, hashIndex);
   } else if (queryIndex >= 0) {
-    cutIndex = queryIndex;
+    cutIndex =
+      queryIndex;
   } else if (hashIndex >= 0) {
-    cutIndex = hashIndex;
+    cutIndex =
+      hashIndex;
   }
 
   return cutIndex >= 0
@@ -574,17 +768,47 @@ function normalizePathname(pathname = "/") {
   }
 
   if (value.length > 1) {
-    value = value.replace(/\/+$/g, "") || "/";
+    value =
+      value.replace(/\/+$/g, "") || "/";
   }
 
   return value;
+}
+
+function normalizeSearch(search = "") {
+  const raw =
+    safeText(search, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  return raw.startsWith("?")
+    ? raw
+    : `?${raw}`;
+}
+
+function normalizeHash(hash = "") {
+  const raw =
+    safeText(hash, "");
+
+  if (!raw) {
+    return "";
+  }
+
+  return raw.startsWith("#")
+    ? raw
+    : `#${raw}`;
 }
 
 export function safeNormalizePath(AppCore, path = "/") {
   const raw =
     safeText(path, "/");
 
-  if (!raw || isUnsafeHref(raw)) {
+  if (
+    !raw ||
+    isUnsafeHref(raw)
+  ) {
     return "/";
   }
 
@@ -603,7 +827,8 @@ export function safeNormalizePath(AppCore, path = "/") {
     if (
       typeof AppCore?.utils?.normalizePath === "function" &&
       !hasAbsoluteScheme(raw) &&
-      !raw.startsWith("//")
+      !raw.startsWith("//") &&
+      !raw.includes("#/")
     ) {
       const normalized =
         AppCore.utils.normalizePath(raw || "/");
@@ -679,10 +904,10 @@ export function safeNormalizePath(AppCore, path = "/") {
     normalizePathname(pathnameRaw || "/");
 
   const search =
-    searchPart ? `?${searchPart}` : "";
+    normalizeSearch(searchPart);
 
   const hash =
-    hashPart ? `#${hashPart}` : "";
+    normalizeHash(hashPart);
 
   return `${pathname}${search}${hash}`;
 }
@@ -691,7 +916,8 @@ export function safeNormalizeCanonicalPath(AppCore, path = "/") {
   const raw =
     safeText(path, "/");
 
-  let normalized = "";
+  let normalized =
+    "";
 
   try {
     if (typeof AppCore?.utils?.normalizeCanonicalPath === "function") {
@@ -722,7 +948,10 @@ export function getCurrentPublicPath(AppCore) {
     const hash =
       window.location.hash || "";
 
-    if (hash && isHashRouterPath(hash)) {
+    if (
+      hash &&
+      isHashRouterPath(hash)
+    ) {
       return safeNormalizePath(
         AppCore,
         normalizeHashRouterPath(hash)
@@ -761,11 +990,17 @@ function boundedLevenshtein(a = "", b = "", maxDistance = 2) {
   const y =
     normalizeCompactText(b);
 
-  if (!x && !y) {
+  if (
+    !x &&
+    !y
+  ) {
     return 0;
   }
 
-  if (!x || !y) {
+  if (
+    !x ||
+    !y
+  ) {
     return maxDistance + 1;
   }
 
@@ -787,11 +1022,13 @@ function boundedLevenshtein(a = "", b = "", maxDistance = 2) {
     new Array(y.length + 1);
 
   for (let j = 0; j <= y.length; j += 1) {
-    previous[j] = j;
+    previous[j] =
+      j;
   }
 
   for (let i = 1; i <= x.length; i += 1) {
-    current[0] = i;
+    current[0] =
+      i;
 
     let rowMin =
       current[0];
@@ -818,7 +1055,8 @@ function boundedLevenshtein(a = "", b = "", maxDistance = 2) {
     }
 
     for (let j = 0; j <= y.length; j += 1) {
-      previous[j] = current[j];
+      previous[j] =
+        current[j];
     }
   }
 
@@ -832,7 +1070,10 @@ function scoreTokenMatch(fieldToken = "", queryToken = "") {
   const query =
     normalizeLooseText(queryToken);
 
-  if (!field || !query) {
+  if (
+    !field ||
+    !query
+  ) {
     return 0;
   }
 
@@ -881,11 +1122,15 @@ export function scoreTextMatch(text = "", query = "") {
   const q =
     normalizeLooseText(query);
 
-  if (!t || !q) {
+  if (
+    !t ||
+    !q
+  ) {
     return 0;
   }
 
-  let score = 0;
+  let score =
+    0;
 
   if (t === q) {
     score += 260;
@@ -909,7 +1154,10 @@ export function scoreTextMatch(text = "", query = "") {
   const compactQuery =
     normalizeCompactText(q);
 
-  if (compactText && compactQuery) {
+  if (
+    compactText &&
+    compactQuery
+  ) {
     if (compactText === compactQuery) {
       score += 190;
     }
@@ -925,16 +1173,19 @@ export function scoreTextMatch(text = "", query = "") {
 
   const textTokens =
     tokenize(t, {
-      includeStopWords: true,
+      includeStopWords:
+        true,
     });
 
   const queryTokens =
     tokenize(q, {
-      includeStopWords: true,
+      includeStopWords:
+        true,
     });
 
   for (const qToken of queryTokens) {
-    let bestTokenScore = 0;
+    let bestTokenScore =
+      0;
 
     for (const tToken of textTokens) {
       bestTokenScore =
@@ -944,7 +1195,8 @@ export function scoreTextMatch(text = "", query = "") {
         );
     }
 
-    score += bestTokenScore;
+    score +=
+      bestTokenScore;
   }
 
   return Math.round(score);
@@ -980,6 +1232,7 @@ function extractSearchableValues(item = {}) {
     raw.rol,
     raw.displayName,
     raw.fullName,
+    raw.nombreCompleto,
 
     raw.clienteId,
     raw.clientId,
@@ -991,6 +1244,8 @@ function extractSearchableValues(item = {}) {
     raw.nombreComercial,
     raw.nif,
     raw.cif,
+    raw.phone,
+    raw.telefono,
 
     raw.ticketId,
     raw.incidenciaId,
@@ -1003,6 +1258,8 @@ function extractSearchableValues(item = {}) {
     raw.estado,
     raw.priority,
     raw.prioridad,
+    raw.category,
+    raw.categoria,
 
     raw.facturaId,
     raw.invoiceId,
@@ -1014,9 +1271,11 @@ function extractSearchableValues(item = {}) {
     raw.invoiceNumber,
     raw.total,
     raw.amount,
+    raw.importe,
 
     ...safeArray(item.keywords),
     ...safeArray(raw.keywords),
+    ...safeArray(raw.tags),
   ].filter((value) => {
     return (
       value !== null &&
@@ -1032,7 +1291,8 @@ function getQueryIntentTypes(query = "") {
 
   const tokens =
     tokenize(q, {
-      includeStopWords: true,
+      includeStopWords:
+        true,
     });
 
   const types =
@@ -1061,11 +1321,11 @@ function getQueryIntentTypes(query = "") {
     types.add(TOPBAR_RESULT_TYPES.CLIENTE);
   }
 
-  if (/\b(ticket|tickets|incidencia|incidencias|soporte|averia|averias|issue|issues)\b/.test(q)) {
+  if (/\b(ticket|tickets|incidencia|incidencias|soporte|support|averia|averias|issue|issues)\b/.test(q)) {
     types.add(TOPBAR_RESULT_TYPES.INCIDENCIA);
   }
 
-  if (/\b(factura|facturas|invoice|invoices|billing|recibo|recibos)\b/.test(q)) {
+  if (/\b(factura|facturas|invoice|invoices|billing|bill|bills|recibo|recibos)\b/.test(q)) {
     types.add(TOPBAR_RESULT_TYPES.FACTURA);
   }
 
@@ -1077,7 +1337,7 @@ function getQueryIntentTypes(query = "") {
     types.add(TOPBAR_RESULT_TYPES.USUARIO);
   }
 
-  if (/\b(ajustes|settings|configuracion|config|preferencias|preferences)\b/.test(q)) {
+  if (/\b(ajustes|settings|configuracion|configuration|config|preferencias|preferences)\b/.test(q)) {
     types.add(TOPBAR_RESULT_TYPES.SETTINGS);
   }
 
@@ -1132,7 +1392,10 @@ function getHeuristicBoost(item = {}, query = "") {
   const compactQuery =
     normalizeCompactText(q);
 
-  if (!q || !compactQuery) {
+  if (
+    !q ||
+    !compactQuery
+  ) {
     return 0;
   }
 
@@ -1150,14 +1413,20 @@ function getHeuristicBoost(item = {}, query = "") {
         raw.usuarioId,
         raw.clienteId,
         raw.clientId,
+        raw.customerId,
         raw.ticketId,
         raw.incidenciaId,
         raw.facturaId,
-        raw.invoiceId
+        raw.invoiceId,
+        raw.numeroFacturaLegal,
+        raw.numeroFacturaSistema,
+        raw.numeroFactura,
+        raw.invoiceNumber
       ) || ""
     );
 
-  let boost = 0;
+  let boost =
+    0;
 
   if (entityId) {
     if (entityId === compactQuery) {
@@ -1195,6 +1464,20 @@ function getHeuristicBoost(item = {}, query = "") {
     type === TOPBAR_RESULT_TYPES.INCIDENCIA
   ) {
     boost += 34;
+  }
+
+  if (
+    /^inc[-_a-z0-9]*/i.test(compactQuery) &&
+    type === TOPBAR_RESULT_TYPES.INCIDENCIA
+  ) {
+    boost += 44;
+  }
+
+  if (
+    /^fac[-_a-z0-9]*/i.test(compactQuery) &&
+    type === TOPBAR_RESULT_TYPES.FACTURA
+  ) {
+    boost += 44;
   }
 
   if (
@@ -1236,13 +1519,16 @@ export function scoreResult(item, query = "") {
   const entityScore =
     scoreTextMatch(item?.entityId, q) * 2.6;
 
-  let keywordScore = 0;
+  let keywordScore =
+    0;
 
   for (const value of values) {
-    keywordScore += scoreTextMatch(value, q) * 0.24;
+    keywordScore +=
+      scoreTextMatch(value, q) * 0.24;
   }
 
-  let navPenalty = 0;
+  let navPenalty =
+    0;
 
   if (
     type === TOPBAR_RESULT_TYPES.NAV &&
@@ -1255,7 +1541,8 @@ export function scoreResult(item, query = "") {
       ].includes(intent)
     )
   ) {
-    navPenalty = 26;
+    navPenalty =
+      26;
   }
 
   const finalScore =
@@ -1281,9 +1568,11 @@ function buildNormalizedIndexMap(value = "") {
   const source =
     String(value ?? "");
 
-  let normalized = "";
+  let normalized =
+    "";
 
-  const map = [];
+  const map =
+    [];
 
   for (let i = 0; i < source.length; i += 1) {
     const originalChar =
@@ -1296,7 +1585,9 @@ function buildNormalizedIndexMap(value = "") {
         .toLowerCase();
 
     for (let j = 0; j < normalizedChar.length; j += 1) {
-      normalized += normalizedChar[j];
+      normalized +=
+        normalizedChar[j];
+
       map.push(i);
     }
   }
@@ -1315,7 +1606,8 @@ function addHighlightRanges(ranges = [], normalized = "", map = [], needle = "")
     return ranges;
   }
 
-  let startAt = 0;
+  let startAt =
+    0;
 
   while (startAt < normalized.length) {
     const foundAt =
@@ -1356,7 +1648,8 @@ function mergeRanges(ranges = []) {
       })
       .sort((a, b) => a[0] - b[0]);
 
-  const merged = [];
+  const merged =
+    [];
 
   for (const range of sorted) {
     const last =
@@ -1366,7 +1659,9 @@ function mergeRanges(ranges = []) {
       last &&
       range[0] <= last[1]
     ) {
-      last[1] = Math.max(last[1], range[1]);
+      last[1] =
+        Math.max(last[1], range[1]);
+
       continue;
     }
 
@@ -1383,23 +1678,31 @@ export function highlight(AppCore, text = "", query = "") {
   const needle =
     normalizeQuery(query);
 
-  if (!source || !needle) {
+  if (
+    !source ||
+    !needle
+  ) {
     return escapeHtml(AppCore, source);
   }
 
   const {
     normalized,
     map,
-  } = buildNormalizedIndexMap(source);
+  } =
+    buildNormalizedIndexMap(source);
 
   const normalizedNeedle =
     normalizeText(needle);
 
-  if (!normalized || !normalizedNeedle) {
+  if (
+    !normalized ||
+    !normalizedNeedle
+  ) {
     return escapeHtml(AppCore, source);
   }
 
-  const ranges = [];
+  const ranges =
+    [];
 
   addHighlightRanges(
     ranges,
@@ -1410,7 +1713,8 @@ export function highlight(AppCore, text = "", query = "") {
 
   const queryTokens =
     tokenize(needle, {
-      includeStopWords: false,
+      includeStopWords:
+        false,
     }).filter((token) => token.length >= 2);
 
   if (
@@ -1434,27 +1738,33 @@ export function highlight(AppCore, text = "", query = "") {
     return escapeHtml(AppCore, source);
   }
 
-  let output = "";
-  let cursor = 0;
+  let output =
+    "";
+
+  let cursor =
+    0;
 
   for (const [start, end] of merged) {
-    output += escapeHtml(
-      AppCore,
-      source.slice(cursor, start)
-    );
+    output +=
+      escapeHtml(
+        AppCore,
+        source.slice(cursor, start)
+      );
 
     output += `<mark>${escapeHtml(
       AppCore,
       source.slice(start, end)
     )}</mark>`;
 
-    cursor = end;
+    cursor =
+      end;
   }
 
-  output += escapeHtml(
-    AppCore,
-    source.slice(cursor)
-  );
+  output +=
+    escapeHtml(
+      AppCore,
+      source.slice(cursor)
+    );
 
   return output;
 }
@@ -1464,7 +1774,8 @@ export function highlight(AppCore, text = "", query = "") {
 ========================================================= */
 
 export function groupResults(results = []) {
-  const groups = new Map();
+  const groups =
+    new Map();
 
   safeArray(results).forEach((item) => {
     const key =
@@ -1479,7 +1790,8 @@ export function groupResults(results = []) {
 
     groups.get(key).push({
       ...item,
-      type: key,
+      type:
+        key,
     });
   });
 
@@ -1499,7 +1811,8 @@ export function groupResults(results = []) {
         String(typeB),
         "es",
         {
-          sensitivity: "base",
+          sensitivity:
+            "base",
         }
       );
     })
@@ -1520,7 +1833,8 @@ export function groupResults(results = []) {
           String(b?.title || ""),
           "es",
           {
-            sensitivity: "base",
+            sensitivity:
+              "base",
           }
         );
       }),

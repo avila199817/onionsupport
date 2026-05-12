@@ -117,6 +117,10 @@
   --z-toast: 100;
   --z-loader: 2147483000;
 
+  --z-search-glass: calc(var(--z-topbar) - 1);
+  --z-search-focus: var(--z-topbar);
+  --z-search-palette: calc(var(--z-modal) + 9);
+
 
   /* =========================================================
      LAYOUT SYSTEM
@@ -509,6 +513,9 @@
   --blur-lg: blur(18px);
   --blur-xl: blur(24px);
 
+  --saturate-soft: saturate(1.04);
+  --saturate-strong: saturate(1.12);
+
   --ease-out: cubic-bezier(.22,1,.36,1);
   --ease-in: cubic-bezier(.4,0,1,1);
   --ease-standard: cubic-bezier(.2,.8,.2,1);
@@ -534,6 +541,7 @@
      SCROLLBAR
   ========================================================= */
   --scrollbar-size: 10px;
+  --scrollbar-size-sm: 6px;
   --scrollbar-track: transparent;
   --scrollbar-thumb: rgba(255,255,255,.12);
   --scrollbar-thumb-hover: rgba(255,255,255,.18);
@@ -836,13 +844,64 @@
   --topbar-search-border: rgba(255,255,255,.075);
 
   --topbar-search-results-offset: calc(8px * var(--ui-scale));
-  --topbar-search-results-max-height: calc(300px * var(--ui-scale));
+  --topbar-search-results-max-height: calc(360px * var(--ui-scale));
   --topbar-search-result-bg: var(--dropdown-bg);
   --topbar-search-result-border: var(--border-default);
   --topbar-search-result-shadow: var(--shadow-xl);
 
   --topbar-overlay-accent: rgba(255,255,255,.018);
   --topbar-overlay-shine: rgba(255,255,255,.030);
+
+
+  /* =========================================================
+     TOPBAR SEARCH · COMMAND PALETTE TOKENS
+     Glass sólo sobre contenido. Sidebar/topbar quedan nítidos.
+  ========================================================= */
+  --topbar-search-glass-z: var(--z-search-glass);
+  --topbar-search-focus-z: var(--z-search-focus);
+  --topbar-search-results-z: var(--z-search-palette);
+
+  --topbar-search-glass-bg:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--main-bg), transparent 18%),
+      color-mix(in srgb, var(--main-bg), transparent 8%)
+    );
+
+  --topbar-search-glass-aura:
+    radial-gradient(
+      circle at 50% 0%,
+      color-mix(in srgb, var(--accent), transparent 84%),
+      transparent 34%
+    ),
+    radial-gradient(
+      circle at 18% 22%,
+      color-mix(in srgb, var(--info), transparent 90%),
+      transparent 28%
+    ),
+    radial-gradient(
+      circle at 82% 22%,
+      color-mix(in srgb, var(--accent-3), transparent 91%),
+      transparent 30%
+    );
+
+  --topbar-search-glass-blur: blur(18px) saturate(1.08);
+
+  --topbar-search-palette-width: min(720px, calc(100vw - 48px));
+  --topbar-search-palette-max-height:
+    min(
+      var(--topbar-search-results-max-height),
+      calc(100dvh - var(--app-offset-topbar) - 40px)
+    );
+
+  --topbar-search-palette-radius: var(--dropdown-radius);
+  --topbar-search-palette-padding: 8px;
+  --topbar-search-palette-scrollbar-size: var(--scrollbar-size-sm);
+
+  --topbar-search-command-width: min(760px, calc(100vw - 48px));
+  --topbar-search-command-offset-top: max(calc(var(--topbar-safe-top) + 8px), 8px);
+
+  --topbar-search-muted-opacity: .24;
 
 
   /* =========================================================
@@ -1480,6 +1539,8 @@ body[data-route-mode="app"],
 
 @media (max-width: 980px) {
   :root {
+    --topbar-search-palette-width: min(680px, calc(100vw - 28px));
+
     --incidencias-modal-width: min(100vw - 24px, 1160px);
     --incidencias-modal-thumb-width: 82px;
     --incidencias-modal-thumb-height: 68px;
@@ -1499,6 +1560,11 @@ body[data-route-mode="app"],
 
     --topbar-height: calc(52px * var(--ui-scale));
     --tablehead-height: 0px;
+
+    --topbar-search-command-width: calc(100vw - 24px);
+    --topbar-search-palette-width: calc(100vw - 24px);
+    --topbar-search-palette-max-height:
+      min(360px, calc(100dvh - var(--app-offset-topbar) - 24px));
 
     --view-radius: calc(18px * var(--ui-scale));
     --panel-radius: calc(16px * var(--ui-scale));
@@ -1539,6 +1605,9 @@ body[data-route-mode="app"],
     --content-padding: var(--space-sm);
     --sidebar-mobile-width: min(92vw, 300px);
 
+    --topbar-search-command-width: calc(100vw - 20px);
+    --topbar-search-palette-width: calc(100vw - 20px);
+
     --font-4xl: calc(28px * var(--ui-scale));
     --font-5xl: calc(34px * var(--ui-scale));
 
@@ -1568,6 +1637,9 @@ body[data-route-mode="app"],
 
     --focus-ring-strong:
       0 0 0 4px color-mix(in srgb, var(--accent), transparent 34%);
+
+    --topbar-search-glass-bg:
+      color-mix(in srgb, var(--main-bg), transparent 4%);
   }
 }
 
@@ -1581,6 +1653,9 @@ body[data-route-mode="app"],
     --drawer-bg: var(--surface-2);
     --topbar-bg: var(--surface-1);
     --sidebar-bg: var(--surface-1);
+
+    --topbar-search-glass-blur: none;
+    --topbar-search-glass-bg: color-mix(in srgb, var(--main-bg), transparent 4%);
 
     --incidencias-modal-card-bg: var(--surface-2);
     --incidencias-modal-upload-bg: var(--surface-2);

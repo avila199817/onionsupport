@@ -1,6 +1,6 @@
 /* =========================================================
    ONION SUPPORT — RESET
-   Archivo: src/css/core/reset.css
+   Archivo: /src/css/core/reset.css
 
    CLEAN FOUNDATION · EXTREME LEVEL · PRO SAAS PANEL · 10/10
 
@@ -19,6 +19,9 @@
    - Sin scrollbars visuales globales.
    - Sin layout de app.
    - Sin decisiones visuales fuertes.
+   - Sin romper tablas reales.
+   - Sin convertir table/tr/td en block.
+   - Sin estilos de componentes.
 ========================================================= */
 
 
@@ -249,6 +252,10 @@ iframe {
 
 /* =========================================================
    TABLES
+   IMPORTANTE:
+   - No cambiar display de table/tr/td.
+   - No convertir tablas en grids/bloques.
+   - Las vistas definen su propia presentación.
 ========================================================= */
 
 table {
@@ -394,7 +401,7 @@ meter {
 
 [type="number"]::-webkit-outer-spin-button,
 [type="number"]::-webkit-inner-spin-button {
-  height: auto;
+  block-size: auto;
 }
 
 
@@ -468,6 +475,7 @@ template {
 
 /* =========================================================
    HR
+   Reset mínimo. El estilo visual real vive en core.css/ui.css.
 ========================================================= */
 
 hr {
@@ -478,14 +486,12 @@ hr {
   color: inherit;
 
   border: 0;
-  border-block-start: 1px solid currentColor;
-
-  opacity: .12;
 }
 
 
 /* =========================================================
    MONOSPACE / CODE
+   Base genérica. Tokens tipográficos viven en core.css.
 ========================================================= */
 
 code,
@@ -514,6 +520,7 @@ pre {
 
 /* =========================================================
    DIALOG
+   Reset estructural mínimo. Backdrop visual vive en UI/modal CSS.
 ========================================================= */
 
 dialog {
@@ -526,10 +533,6 @@ dialog {
 
 dialog:not([open]) {
   display: none;
-}
-
-dialog::backdrop {
-  background: rgba(0, 0, 0, .4);
 }
 
 
@@ -616,6 +619,7 @@ summary {
 
 /* =========================================================
    FORM AUTOFILL NORMALIZE
+   Neutraliza autofill sin definir paleta propia.
 ========================================================= */
 
 input:-webkit-autofill,
@@ -641,6 +645,7 @@ select:-webkit-autofill:focus {
 
 /* =========================================================
    MOBILE TEXT SIZE / TAP POLISH
+   Evita zoom automático en iOS sin imponer diseño visual desktop.
 ========================================================= */
 
 @media (hover: none) and (pointer: coarse) {
@@ -655,21 +660,13 @@ select:-webkit-autofill:focus {
 
 /* =========================================================
    REDUCED MOTION BASE
+   Reset mínimo. La política visual completa vive en core.css.
 ========================================================= */
 
 @media (prefers-reduced-motion: reduce) {
   html,
   html:focus-within {
     scroll-behavior: auto;
-  }
-
-  *,
-  *::before,
-  *::after {
-    animation-duration: .01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: .01ms !important;
-    scroll-behavior: auto !important;
   }
 }
 

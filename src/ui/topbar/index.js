@@ -3,6 +3,7 @@
    Archivo: src/ui/topbar/index.js
 
    FINAL PRO SAAS PANEL · TOPBAR NO-STORM · NO REBIND DEFAULT · 10/10
+   TOKEN PRO SYSTEM ALIGNED · COMMAND PALETTE SAFE · VIEW GLASS SAFE
 
    Responsabilidades:
    - montar el HTML del topbar desde JS
@@ -11,16 +12,22 @@
    - gestionar toggle mobile de sidebar
    - integrar buscador global del topbar
    - debounce + abort de peticiones
-   - renderizar resultados agrupados
+   - renderizar resultados agrupados vía topbar.search.js/topbar.events.js
    - soportar navegación por teclado
    - soportar click outside
-   - mezclar resultados remotos + fallback local
    - tolerar distintos formatos del backend search
    - cleanup sólido anti duplicados
    - integrarse de forma robusta con SidebarUI
    - alinearse con layout controlado por CSS
    - NO pisar offsets del shell con inline styles
    - registrar API pública en AppCore.modules y window
+
+   CONTRATO SEARCH:
+   - index.js NO crea overlays.
+   - index.js NO pinta glass.
+   - index.js NO toca style="".
+   - topbar.search.js sólo activa clases/data attrs.
+   - topbar.css pinta el command palette y el glass sobre .main-content.
 
    FIX CRÍTICO EVENT STORM:
    - init() repetido NO rebindea si ya está bound
@@ -58,6 +65,7 @@ import {
 import {
   clearSearchState,
   hideResultsContainer,
+  isSearchFocusActive,
 } from "./topbar.search.js";
 
 import {
@@ -111,8 +119,14 @@ export const TopbarUI = (() => {
      LOCAL STATE
   ========================================================= */
 
-  let initialized = false;
-  let handlers = null;
+  let initialized =
+    false;
+
+  let handlers =
+    null;
+
+  let publicApiRegistered =
+    false;
 
   const runtime = {
     searchController:
@@ -180,6 +194,9 @@ export const TopbarUI = (() => {
 
     cleanupCount:
       0,
+
+    lastError:
+      null,
   };
 
   /* =========================================================
@@ -235,6 +252,39 @@ export const TopbarUI = (() => {
     return {
       reason:
         safeText(value, fallbackReason),
+    };
+  }
+
+  function normalizeQueueArgs(delayOrOptions = SOFT_REBIND_DELAY_MS, options = {}) {
+    if (
+      delayOrOptions &&
+      typeof delayOrOptions === "object" &&
+      !Array.isArray(delayOrOptions)
+    ) {
+      return {
+        delay:
+          SOFT_REBIND_DELAY_MS,
+
+        options:
+          normalizeOptions(
+            delayOrOptions,
+            "queue-rebind"
+          ),
+      };
+    }
+
+    return {
+      delay:
+        Math.max(
+          0,
+          Number(delayOrOptions) || 0
+        ),
+
+      options:
+        normalizeOptions(
+          options,
+          "queue-rebind"
+        ),
     };
   }
 
@@ -297,11 +347,17 @@ export const TopbarUI = (() => {
         () => {
           try {
             callback();
-          } catch {}
+          } catch (error) {
+            runtime.lastError =
+              error;
+          }
         },
         Math.max(0, Number(ms) || 0)
       );
-    } catch {
+    } catch (error) {
+      runtime.lastError =
+        error;
+
       try {
         callback();
       } catch {}
@@ -324,7 +380,8 @@ export const TopbarUI = (() => {
       }
     } catch {}
 
-    runtime[key] = null;
+    runtime[key] =
+      null;
 
     return true;
   }
@@ -337,7 +394,10 @@ export const TopbarUI = (() => {
     try {
       controller.abort();
       return true;
-    } catch {
+    } catch (error) {
+      runtime.lastError =
+        error;
+
       return false;
     }
   }
@@ -377,7 +437,10 @@ export const TopbarUI = (() => {
       runtime.cleanupCount += 1;
 
       return true;
-    } catch {
+    } catch (error) {
+      runtime.lastError =
+        error;
+
       return false;
     }
   }
@@ -441,11 +504,18 @@ export const TopbarUI = (() => {
       return false;
     }
 
+    const detail = {
+      source:
+        "TopbarUI",
+
+      ...safeObject(payload),
+    };
+
     try {
       if (isFunction(AppCore?.events?.emit)) {
         AppCore.events.emit(
           name,
-          payload
+          detail
         );
 
         return true;
@@ -455,10 +525,12 @@ export const TopbarUI = (() => {
     try {
       if (isBrowser()) {
         window.dispatchEvent(
-          new CustomEvent(name, {
-            detail:
-              payload,
-          })
+          new CustomEvent(
+            name,
+            {
+              detail,
+            }
+          )
         );
 
         return true;
@@ -488,7 +560,10 @@ export const TopbarUI = (() => {
       runtime.mountedAt =
         nowMs();
 
-      prepareTopbarDom(topbar);
+      prepareTopbarDom(
+        topbar
+      );
+
       syncDomCache();
     }
 
@@ -526,11 +601,15 @@ export const TopbarUI = (() => {
   ========================================================= */
 
   function syncFixedTopbarOffsetSafe() {
-    return syncFixedTopbarOffset(getDom);
+    return syncFixedTopbarOffset(
+      getDom
+    );
   }
 
   function setMobileToggleStateSafe() {
-    return setMobileToggleState(getDom);
+    return setMobileToggleState(
+      getDom
+    );
   }
 
   function openSidebarMobileSafe() {
@@ -761,7 +840,8 @@ export const TopbarUI = (() => {
   function syncTitle(path = "") {
     const {
       title,
-    } = getDom();
+    } =
+      getDom();
 
     if (!title) {
       return false;
@@ -794,7 +874,10 @@ export const TopbarUI = (() => {
         "data-route-title",
         nextTitle
       );
-    } catch {}
+    } catch (error) {
+      runtime.lastError =
+        error;
+    }
 
     runtime.lastTitle =
       nextTitle;
@@ -818,19 +901,27 @@ export const TopbarUI = (() => {
 
   function clearSearch(options = {}) {
     const opts =
-      normalizeOptions(options, "clear-search");
+      normalizeOptions(
+        options,
+        "clear-search"
+      );
 
     const {
       searchInput,
-    } = getDom();
+    } =
+      getDom();
 
     if (
       opts.clearInput &&
       searchInput
     ) {
       try {
-        searchInput.value = "";
-      } catch {}
+        searchInput.value =
+          "";
+      } catch (error) {
+        runtime.lastError =
+          error;
+      }
     }
 
     if (
@@ -839,7 +930,10 @@ export const TopbarUI = (() => {
     ) {
       try {
         searchInput.blur();
-      } catch {}
+      } catch (error) {
+        runtime.lastError =
+          error;
+      }
     }
 
     cancelSearchRuntime();
@@ -858,11 +952,15 @@ export const TopbarUI = (() => {
 
   function focusSearch(options = {}) {
     const opts =
-      normalizeOptions(options, "focus-search");
+      normalizeOptions(
+        options,
+        "focus-search"
+      );
 
     const {
       searchInput,
-    } = getDom();
+    } =
+      getDom();
 
     if (!searchInput) {
       return false;
@@ -883,7 +981,10 @@ export const TopbarUI = (() => {
       try {
         searchInput.focus();
         return true;
-      } catch {
+      } catch (error) {
+        runtime.lastError =
+          error;
+
         return false;
       }
     }
@@ -905,14 +1006,19 @@ export const TopbarUI = (() => {
         runtime,
         getDom,
         syncTitle,
+
         setMobileToggleState:
           setMobileToggleStateSafe,
+
         syncFixedTopbarOffset:
           syncFixedTopbarOffsetSafe,
+
         closeSidebarMobile:
           closeSidebarMobileSafe,
+
         toggleSidebarMobile:
           toggleSidebarMobileSafe,
+
         syncDomCache,
       });
 
@@ -920,7 +1026,9 @@ export const TopbarUI = (() => {
   }
 
   function resetHandlers() {
-    handlers = null;
+    handlers =
+      null;
+
     return true;
   }
 
@@ -954,7 +1062,13 @@ export const TopbarUI = (() => {
         AppCore.modules[MODULE_ALIAS] =
           api;
       }
-    } catch {}
+
+      publicApiRegistered =
+        true;
+    } catch (error) {
+      runtime.lastError =
+        error;
+    }
 
     try {
       if (isBrowser()) {
@@ -964,7 +1078,10 @@ export const TopbarUI = (() => {
         window.TopbarUI =
           api;
       }
-    } catch {}
+    } catch (error) {
+      runtime.lastError =
+        error;
+    }
 
     return true;
   }
@@ -975,7 +1092,10 @@ export const TopbarUI = (() => {
 
   function unbind(options = {}) {
     const opts =
-      normalizeOptions(options, "unbind");
+      normalizeOptions(
+        options,
+        "unbind"
+      );
 
     clearTimer("rebindTimer");
     clearTimer("retryTimer");
@@ -983,7 +1103,7 @@ export const TopbarUI = (() => {
     cancelSearchRuntime();
 
     /*
-      Solo aquí se ejecuta cleanup.run().
+      Sólo aquí se ejecuta cleanup.run().
       Nunca desde refresh/render/sync.
     */
     runCleanup(SCOPE);
@@ -1000,9 +1120,6 @@ export const TopbarUI = (() => {
     runtime.binding =
       false;
 
-    runtime.rebinding =
-      false;
-
     runtime.openingSearchResult =
       false;
 
@@ -1016,9 +1133,6 @@ export const TopbarUI = (() => {
     safeEmit(
       "topbar:unbound",
       {
-        source:
-          "TopbarUI",
-
         reason:
           opts.reason || "unbind",
 
@@ -1032,7 +1146,10 @@ export const TopbarUI = (() => {
 
   function syncVisualState(options = {}) {
     const opts =
-      normalizeOptions(options, "sync-visual-state");
+      normalizeOptions(
+        options,
+        "sync-visual-state"
+      );
 
     const topbar =
       ensureMounted();
@@ -1042,7 +1159,10 @@ export const TopbarUI = (() => {
     }
 
     syncDomCache();
-    prepareTopbarDom(topbar);
+
+    prepareTopbarDom(
+      topbar
+    );
 
     syncTitle(
       opts.path ||
@@ -1087,7 +1207,10 @@ export const TopbarUI = (() => {
 
   function bind(options = {}) {
     const opts =
-      normalizeOptions(options, "bind");
+      normalizeOptions(
+        options,
+        "bind"
+      );
 
     const reason =
       opts.reason || "bind";
@@ -1160,7 +1283,10 @@ export const TopbarUI = (() => {
       }
 
       syncDomCache();
-      prepareTopbarDom(topbar);
+
+      prepareTopbarDom(
+        topbar
+      );
 
       const boundHandlers =
         getHandlers();
@@ -1197,19 +1323,25 @@ export const TopbarUI = (() => {
           getDom,
           handlers:
             boundHandlers,
+
           hideResults:
             hideSearchResults,
+
           syncTitle,
+
           setMobileToggleState:
             setMobileToggleStateSafe,
+
           syncFixedTopbarOffset:
             syncFixedTopbarOffsetSafe,
+
           closeSidebarMobile:
             closeSidebarMobileSafe,
+
           syncDomCache,
 
           /*
-            Este callback puede ser llamado por eventos de app/router.
+            Este callback puede ser llamado por eventos app/router/auth/lang.
             Por defecto queda convertido en refresh ligero.
           */
           rebind:
@@ -1245,9 +1377,6 @@ export const TopbarUI = (() => {
       safeEmit(
         "topbar:events:bound",
         {
-          source:
-            "TopbarUI",
-
           reason,
 
           bound:
@@ -1272,6 +1401,9 @@ export const TopbarUI = (() => {
       runtime.bound =
         false;
 
+      runtime.lastError =
+        error;
+
       debugWarn(
         "Error en bind.",
         error
@@ -1286,7 +1418,10 @@ export const TopbarUI = (() => {
 
   function softRefresh(options = {}) {
     const opts =
-      normalizeOptions(options, "soft-refresh");
+      normalizeOptions(
+        options,
+        "soft-refresh"
+      );
 
     const topbar =
       ensureMounted();
@@ -1309,7 +1444,10 @@ export const TopbarUI = (() => {
 
   function hardRebind(options = {}) {
     const opts =
-      normalizeOptions(options, "hard-rebind");
+      normalizeOptions(
+        options,
+        "hard-rebind"
+      );
 
     if (runtime.rebinding) {
       return runtime.bound;
@@ -1354,6 +1492,9 @@ export const TopbarUI = (() => {
           opts.resetSearch !== false,
       });
     } catch (error) {
+      runtime.lastError =
+        error;
+
       debugWarn(
         "Error en hardRebind.",
         error
@@ -1368,7 +1509,10 @@ export const TopbarUI = (() => {
 
   function rebind(options = {}) {
     const opts =
-      normalizeOptions(options, "rebind");
+      normalizeOptions(
+        options,
+        "rebind"
+      );
 
     /*
       Protección anti-storm:
@@ -1392,9 +1536,15 @@ export const TopbarUI = (() => {
     });
   }
 
-  function queueRebind(delay = SOFT_REBIND_DELAY_MS, options = {}) {
-    const opts =
-      normalizeOptions(options, "queue-rebind");
+  function queueRebind(delayOrOptions = SOFT_REBIND_DELAY_MS, maybeOptions = {}) {
+    const {
+      delay,
+      options,
+    } =
+      normalizeQueueArgs(
+        delayOrOptions,
+        maybeOptions
+      );
 
     clearTimer("rebindTimer");
 
@@ -1405,23 +1555,23 @@ export const TopbarUI = (() => {
             null;
 
           if (
-            opts.force === true ||
-            opts.hard === true ||
-            opts.explicit === true
+            options.force === true ||
+            options.hard === true ||
+            options.explicit === true
           ) {
             hardRebind({
-              ...opts,
+              ...options,
               reason:
-                opts.reason || "queue-hard-rebind",
+                options.reason || "queue-hard-rebind",
             });
 
             return;
           }
 
           softRefresh({
-            ...opts,
+            ...options,
             reason:
-              opts.reason || "queue-soft-refresh",
+              options.reason || "queue-soft-refresh",
           });
         },
         delay
@@ -1432,7 +1582,10 @@ export const TopbarUI = (() => {
 
   function retryBind(options = {}) {
     const opts =
-      normalizeOptions(options, "retry-bind");
+      normalizeOptions(
+        options,
+        "retry-bind"
+      );
 
     clearTimer("retryTimer");
 
@@ -1475,7 +1628,10 @@ export const TopbarUI = (() => {
 
   function init(options = {}) {
     const opts =
-      normalizeOptions(options, "init");
+      normalizeOptions(
+        options,
+        "init"
+      );
 
     registerPublicApi();
 
@@ -1546,7 +1702,10 @@ export const TopbarUI = (() => {
 
   function render(options = {}) {
     const opts =
-      normalizeOptions(options, "render");
+      normalizeOptions(
+        options,
+        "render"
+      );
 
     const topbar =
       ensureMounted();
@@ -1561,7 +1720,11 @@ export const TopbarUI = (() => {
     }
 
     syncDomCache();
-    prepareTopbarDom(topbar);
+
+    prepareTopbarDom(
+      topbar
+    );
+
     syncVisualState({
       ...opts,
       reason:
@@ -1585,7 +1748,10 @@ export const TopbarUI = (() => {
 
   function refresh(options = {}) {
     const opts =
-      normalizeOptions(options, "refresh");
+      normalizeOptions(
+        options,
+        "refresh"
+      );
 
     const ok =
       softRefresh({
@@ -1611,7 +1777,10 @@ export const TopbarUI = (() => {
 
   function sync(options = {}) {
     const opts =
-      normalizeOptions(options, "sync");
+      normalizeOptions(
+        options,
+        "sync"
+      );
 
     return refresh({
       ...opts,
@@ -1624,7 +1793,10 @@ export const TopbarUI = (() => {
 
   function renderUser(options = {}) {
     const opts =
-      normalizeOptions(options, "render-user");
+      normalizeOptions(
+        options,
+        "render-user"
+      );
 
     return sync({
       ...opts,
@@ -1635,7 +1807,10 @@ export const TopbarUI = (() => {
 
   function refreshUser(options = {}) {
     const opts =
-      normalizeOptions(options, "refresh-user");
+      normalizeOptions(
+        options,
+        "refresh-user"
+      );
 
     return sync({
       ...opts,
@@ -1646,7 +1821,10 @@ export const TopbarUI = (() => {
 
   function updateUser(options = {}) {
     const opts =
-      normalizeOptions(options, "update-user");
+      normalizeOptions(
+        options,
+        "update-user"
+      );
 
     return sync({
       ...opts,
@@ -1657,7 +1835,10 @@ export const TopbarUI = (() => {
 
   function syncUser(options = {}) {
     const opts =
-      normalizeOptions(options, "sync-user");
+      normalizeOptions(
+        options,
+        "sync-user"
+      );
 
     return sync({
       ...opts,
@@ -1668,7 +1849,10 @@ export const TopbarUI = (() => {
 
   function destroy(options = {}) {
     const opts =
-      normalizeOptions(options, "destroy");
+      normalizeOptions(
+        options,
+        "destroy"
+      );
 
     unbind({
       clearCache:
@@ -1688,6 +1872,9 @@ export const TopbarUI = (() => {
         false;
     }
 
+    publicApiRegistered =
+      false;
+
     try {
       if (
         isBrowser() &&
@@ -1702,14 +1889,14 @@ export const TopbarUI = (() => {
       ) {
         delete window.TopbarUI;
       }
-    } catch {}
+    } catch (error) {
+      runtime.lastError =
+        error;
+    }
 
     safeEmit(
       "topbar:destroyed",
       {
-        source:
-          "TopbarUI",
-
         reason:
           opts.reason || "destroy",
       }
@@ -1729,6 +1916,9 @@ export const TopbarUI = (() => {
     return {
       initialized:
         Boolean(initialized),
+
+      publicApiRegistered:
+        Boolean(publicApiRegistered),
 
       bound:
         Boolean(runtime.bound),
@@ -1763,7 +1953,13 @@ export const TopbarUI = (() => {
       cleanupCount:
         runtime.cleanupCount,
 
+      lastError:
+        runtime.lastError,
+
       search: {
+        focusActive:
+          isSearchFocusActive(),
+
         activeIndex:
           runtime.activeIndex,
 
@@ -1822,6 +2018,9 @@ export const TopbarUI = (() => {
 
         appContent:
           Boolean(dom.appContent),
+
+        viewContainer:
+          Boolean(dom.viewContainer),
       },
     };
   }
@@ -1862,7 +2061,10 @@ export const TopbarUI = (() => {
     unmountTopbar:
       (options = {}) => {
         const opts =
-          normalizeOptions(options, "unmount-topbar");
+          normalizeOptions(
+            options,
+            "unmount-topbar"
+          );
 
         unbind({
           clearCache:
@@ -1874,6 +2076,9 @@ export const TopbarUI = (() => {
         resetHandlers();
 
         initialized =
+          false;
+
+        publicApiRegistered =
           false;
 
         return unmountTopbar(AppCore);

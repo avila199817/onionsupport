@@ -54,226 +54,151 @@ import {
    CONSTANTS
 ========================================================= */
 
-const LOGIN_PATH =
-  "/login";
+const SESSION_VERSION = "13.1.0";
 
-const ACTIVATION_PATH =
-  "/activate-account";
+const LOGIN_PATH = "/login";
+const ACTIVATION_PATH = "/activate-account";
+const RESET_PASSWORD_PATH = "/reset-password";
+const RESET_CONFIRM_PATH = "/reset-password/confirm";
+const FORGOT_PASSWORD_PATH = "/forgot-password";
+const RECOVER_PASSWORD_PATH = "/recover-password";
+const PASSWORD_RESET_PATH = "/password-reset";
+const DEFAULT_HOME_PATH = "/";
 
-const RESET_PASSWORD_PATH =
-  "/reset-password";
+const SESSION_READY_EVENT_DEDUPE_MS = 160;
 
-const RESET_CONFIRM_PATH =
-  "/reset-password/confirm";
+const PUBLIC_TECHNICAL_ROUTES = Object.freeze([
+  ACTIVATION_PATH,
+  RESET_PASSWORD_PATH,
+  RESET_CONFIRM_PATH,
+  FORGOT_PASSWORD_PATH,
+  RECOVER_PASSWORD_PATH,
+  PASSWORD_RESET_PATH,
+]);
 
-const FORGOT_PASSWORD_PATH =
-  "/forgot-password";
+const PUBLIC_TECHNICAL_PREFIXES = Object.freeze([
+  `${ACTIVATION_PATH}/`,
+  `${RESET_CONFIRM_PATH}/`,
+]);
 
-const RECOVER_PASSWORD_PATH =
-  "/recover-password";
+const AUTH_LIKE_ROUTES = Object.freeze([
+  LOGIN_PATH,
+  RESET_PASSWORD_PATH,
+  RESET_CONFIRM_PATH,
+  FORGOT_PASSWORD_PATH,
+  RECOVER_PASSWORD_PATH,
+  PASSWORD_RESET_PATH,
+  ACTIVATION_PATH,
+]);
 
-const PASSWORD_RESET_PATH =
-  "/password-reset";
+const AUTH_LIKE_PREFIXES = Object.freeze([
+  `${ACTIVATION_PATH}/`,
+  `${RESET_CONFIRM_PATH}/`,
+]);
 
-const DEFAULT_HOME_PATH =
-  "/";
+const ACTIVATION_TOKEN_PARAM_NAMES = Object.freeze([
+  "token",
+  "activationToken",
+  "activateToken",
+  "code",
+  "t",
+]);
 
-const SESSION_READY_EVENT_DEDUPE_MS =
-  160;
+const RESET_TOKEN_PARAM_NAMES = Object.freeze([
+  "token",
+  "resetToken",
+  "passwordResetToken",
+  "confirmToken",
+  "code",
+  "t",
+]);
 
-const SESSION_VERSION =
-  "13.0.0";
+const GENERIC_SENSITIVE_PARAM_NAMES = Object.freeze([
+  "token",
+  "activationToken",
+  "activateToken",
+  "resetToken",
+  "passwordResetToken",
+  "confirmToken",
+  "code",
+  "t",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "tempToken",
+  "temp_token",
+  "temporaryToken",
+  "temporary_token",
+  "twoFactorToken",
+  "two_factor_token",
+  "mfaToken",
+  "mfa_token",
+]);
 
-const PUBLIC_TECHNICAL_ROUTES =
-  Object.freeze([
-    ACTIVATION_PATH,
-    RESET_PASSWORD_PATH,
-    RESET_CONFIRM_PATH,
-    FORGOT_PASSWORD_PATH,
-    RECOVER_PASSWORD_PATH,
-    PASSWORD_RESET_PATH,
-  ]);
-
-const PUBLIC_TECHNICAL_PREFIXES =
-  Object.freeze([
-    `${ACTIVATION_PATH}/`,
-    `${RESET_CONFIRM_PATH}/`,
-  ]);
-
-const AUTH_LIKE_ROUTES =
-  Object.freeze([
-    LOGIN_PATH,
-    RESET_PASSWORD_PATH,
-    RESET_CONFIRM_PATH,
-    FORGOT_PASSWORD_PATH,
-    RECOVER_PASSWORD_PATH,
-    PASSWORD_RESET_PATH,
-    ACTIVATION_PATH,
-  ]);
-
-const AUTH_LIKE_PREFIXES =
-  Object.freeze([
-    `${ACTIVATION_PATH}/`,
-    `${RESET_CONFIRM_PATH}/`,
-  ]);
-
-const ACTIVATION_TOKEN_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "code",
-    "t",
-  ]);
-
-const RESET_TOKEN_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "resetToken",
-    "passwordResetToken",
-    "confirmToken",
-    "code",
-    "t",
-  ]);
-
-const GENERIC_SENSITIVE_PARAM_NAMES =
-  Object.freeze([
-    "token",
-    "activationToken",
-    "activateToken",
-    "resetToken",
-    "passwordResetToken",
-    "confirmToken",
-    "code",
-    "t",
-    "access_token",
-    "refresh_token",
-    "id_token",
-    "tempToken",
-    "temp_token",
-    "temporaryToken",
-    "temporary_token",
-    "twoFactorToken",
-    "two_factor_token",
-    "mfaToken",
-    "mfa_token",
-  ]);
-
-const TOKEN_ROUTE_CONFIGS =
-  Object.freeze([
-    Object.freeze({
-      key:
-        "activation",
-
-      path:
-        ACTIVATION_PATH,
-
-      initialWindowKey:
-        "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-
-      initialWindowKeys:
-        Object.freeze([
-          "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
-        ]),
-
-      scrubbedHistoryFlag:
-        "scrubbedActivationToken",
-
-      scrubbedHistoryFlags:
-        Object.freeze([
-          "scrubbedActivationToken",
-          "activationTokenScrubbed",
-          "scrubbedActivateAccountToken",
-          "scrubbedPublicTokenRoute",
-          "scrubbedTokenRoute",
-        ]),
-
-      tokenParamNames:
-        ACTIVATION_TOKEN_PARAM_NAMES,
-    }),
-
-    Object.freeze({
-      key:
-        "resetConfirm",
-
-      path:
-        RESET_CONFIRM_PATH,
-
-      initialWindowKey:
-        "__ONION_RESET_CONFIRM_INITIAL_URL__",
-
-      initialWindowKeys:
-        Object.freeze([
-          "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
-          "__ONION_RESET_CONFIRM_INITIAL_URL__",
-        ]),
-
-      scrubbedHistoryFlag:
-        "scrubbedResetToken",
-
-      scrubbedHistoryFlags:
-        Object.freeze([
-          "scrubbedResetToken",
-          "resetTokenScrubbed",
-          "scrubbedResetConfirmToken",
-          "scrubbedPasswordResetToken",
-          "scrubbedResetPasswordToken",
-          "scrubbedPublicTokenRoute",
-          "scrubbedTokenRoute",
-        ]),
-
-      tokenParamNames:
-        RESET_TOKEN_PARAM_NAMES,
-    }),
-  ]);
-
-const RUNTIME_WINDOW_KEYS =
+const TOKEN_ROUTE_CONFIGS = Object.freeze([
   Object.freeze({
-    initialUrl:
-      "__ONION_INITIAL_URL__",
+    key: "activation",
+    path: ACTIVATION_PATH,
 
-    activationInitialUrl:
+    initialWindowKeys: Object.freeze([
       "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+    ]),
 
-    resetPasswordConfirmInitialUrl:
-      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+    scrubbedHistoryFlags: Object.freeze([
+      "scrubbedActivationToken",
+      "activationTokenScrubbed",
+      "scrubbedActivateAccountToken",
+      "scrubbedPublicTokenRoute",
+      "scrubbedTokenRoute",
+    ]),
 
-    resetConfirmInitialUrl:
-      "__ONION_RESET_CONFIRM_INITIAL_URL__",
-  });
+    tokenParamNames: ACTIVATION_TOKEN_PARAM_NAMES,
+  }),
 
-const SESSION_EVENTS =
   Object.freeze({
-    restoreStart:
-      "app:session:restore:start",
+    key: "resetConfirm",
+    path: RESET_CONFIRM_PATH,
 
-    restoreDone:
-      "app:session:restore:done",
+    initialWindowKeys: Object.freeze([
+      "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+      "__ONION_RESET_CONFIRM_INITIAL_URL__",
+    ]),
 
-    restoreError:
-      "app:session:restore:error",
+    scrubbedHistoryFlags: Object.freeze([
+      "scrubbedResetToken",
+      "resetTokenScrubbed",
+      "scrubbedResetConfirmToken",
+      "scrubbedPasswordResetToken",
+      "scrubbedResetPasswordToken",
+      "scrubbedPublicTokenRoute",
+      "scrubbedTokenRoute",
+    ]),
 
-    authRestored:
-      "auth:session:restored",
+    tokenParamNames: RESET_TOKEN_PARAM_NAMES,
+  }),
+]);
 
-    appRestored:
-      "app:session:restored",
+const RUNTIME_WINDOW_KEYS = Object.freeze({
+  initialUrl: "__ONION_INITIAL_URL__",
+  activationInitialUrl: "__ONION_ACTIVATE_ACCOUNT_INITIAL_URL__",
+  resetPasswordConfirmInitialUrl: "__ONION_RESET_PASSWORD_CONFIRM_INITIAL_URL__",
+  resetConfirmInitialUrl: "__ONION_RESET_CONFIRM_INITIAL_URL__",
+});
 
-    userChange:
-      "app:user:change",
+const SESSION_EVENTS = Object.freeze({
+  restoreStart: "app:session:restore:start",
+  restoreDone: "app:session:restore:done",
+  restoreError: "app:session:restore:error",
 
-    uiRepairRequest:
-      "app:ui:repair-request",
+  authRestored: "auth:session:restored",
+  appRestored: "app:session:restored",
+  userChange: "app:user:change",
 
-    authNavigation:
-      "app:auth:navigation",
-
-    authScreenCleared:
-      "app:shell:auth-screen-cleared",
-
-    ghostAuthBlocked:
-      "app:auth:ghost-blocked",
-  });
+  uiRepairRequest: "app:ui:repair-request",
+  authNavigation: "app:auth:navigation",
+  authScreenCleared: "app:shell:auth-screen-cleared",
+  ghostAuthBlocked: "app:auth:ghost-blocked",
+});
 
 const SENSITIVE_OBJECT_KEY_RE =
   /token|secret|password|authorization|credential|jwt|bearer|otp|code/i;
@@ -282,14 +207,9 @@ const SENSITIVE_OBJECT_KEY_RE =
    MODULE RUNTIME
 ========================================================= */
 
-let lastSessionReadyEmitKey =
-  "";
-
-let lastSessionReadyEmitAt =
-  0;
-
-let moduleSessionRestorePromise =
-  null;
+let lastSessionReadyEmitKey = "";
+let lastSessionReadyEmitAt = 0;
+let moduleSessionRestorePromise = null;
 
 /* =========================================================
    BASICS
@@ -314,20 +234,6 @@ function isObject(value) {
   );
 }
 
-function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value).trim();
-
-  return text || fallback;
-}
-
 function safeObject(value, fallback = {}) {
   return isObject(value)
     ? value
@@ -340,15 +246,18 @@ function safeArray(value) {
     : [];
 }
 
-function safeBool(value, fallback = false) {
-  if (value === true) return true;
-  if (value === false) return false;
-  if (value === "true") return true;
-  if (value === "false") return false;
-  if (value === 1) return true;
-  if (value === 0) return false;
+function safeText(value, fallback = "") {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return fallback;
+  }
 
-  return Boolean(fallback);
+  const text =
+    String(value).trim();
+
+  return text || fallback;
 }
 
 function safeNumber(value, fallback = 0) {
@@ -392,145 +301,66 @@ function safeClone(value, fallback = null) {
   }
 }
 
-function safeLog(AppCore, ...args) {
-  try {
-    AppCore?.utils?.log?.(
-      "[AppSession]",
-      ...args.map((item) =>
-        sanitizePayload(item)
-      )
-    );
-  } catch {}
-}
-
-function safeWarn(AppCore, ...args) {
-  const cleanArgs =
-    args.map((item) =>
-      sanitizePayload(item)
-    );
-
-  let coreLogged =
-    false;
-
-  try {
-    if (isFunction(AppCore?.utils?.warn)) {
-      AppCore.utils.warn(
-        "[AppSession]",
-        ...cleanArgs
-      );
-
-      coreLogged =
-        true;
-    }
-  } catch {
-    coreLogged =
-      false;
-  }
-
-  if (coreLogged) {
-    return;
-  }
-
-  try {
-    console.warn(
-      "[AppSession]",
-      ...cleanArgs
-    );
-  } catch {}
-}
-
-function safeError(AppCore, ...args) {
-  const cleanArgs =
-    args.map((item) =>
-      sanitizePayload(item)
-    );
-
-  let coreLogged =
-    false;
-
-  try {
-    if (isFunction(AppCore?.utils?.error)) {
-      AppCore.utils.error(
-        "[AppSession]",
-        ...cleanArgs
-      );
-
-      coreLogged =
-        true;
-    }
-  } catch {
-    coreLogged =
-      false;
-  }
-
-  if (coreLogged) {
-    return;
-  }
-
-  try {
-    console.error(
-      "[AppSession]",
-      ...cleanArgs
-    );
-  } catch {}
-}
-
-function emit(AppCore, eventName, payload = {}, options = {}) {
-  const name =
-    safeText(eventName, "");
-
-  if (!name) {
-    return false;
-  }
-
-  const opts =
-    safeObject(options);
-
-  const cleanPayload =
-    sanitizePayload(payload);
-
-  let busAvailable =
-    false;
-
-  let busEmitted =
-    false;
-
-  try {
-    if (isFunction(AppCore?.events?.emit)) {
-      busAvailable =
-        true;
-
-      AppCore.events.emit(
-        name,
-        cleanPayload
-      );
-
-      busEmitted =
-        true;
-    }
-  } catch {}
-
-  /*
-    No duplicar AppCore.events + window por defecto.
-    Solo espejo a window si se pide explícitamente o no hay bus.
-  */
+function getBaseOrigin() {
   if (
-    opts.window === true ||
-    (!busAvailable && isBrowser())
+    isBrowser() &&
+    window.location?.origin
   ) {
-    try {
-      window.dispatchEvent(
-        new CustomEvent(name, {
-          detail:
-            cleanPayload,
-        })
-      );
-
-      return true;
-    } catch {}
+    return window.location.origin;
   }
 
-  return busEmitted;
+  return "http://localhost";
+}
+
+function safeCreateCustomEvent(name = "", detail = {}) {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  const eventName =
+    safeText(name, "");
+
+  if (!eventName) {
+    return null;
+  }
+
+  try {
+    if (typeof CustomEvent === "function") {
+      return new CustomEvent(
+        eventName,
+        {
+          detail,
+        }
+      );
+    }
+  } catch {}
+
+  try {
+    const event =
+      document.createEvent("CustomEvent");
+
+    event.initCustomEvent(
+      eventName,
+      false,
+      false,
+      detail
+    );
+
+    return event;
+  } catch {
+    return null;
+  }
+}
+
+async function runMaybePromise(value) {
+  if (
+    value &&
+    isFunction(value.then)
+  ) {
+    return await value;
+  }
+
+  return value;
 }
 
 function afterPaint(callback) {
@@ -547,15 +377,17 @@ function afterPaint(callback) {
   }
 
   try {
-    window.requestAnimationFrame(() => {
+    if (isFunction(window.requestAnimationFrame)) {
       window.requestAnimationFrame(() => {
-        try {
-          callback();
-        } catch {}
+        window.requestAnimationFrame(() => {
+          try {
+            callback();
+          } catch {}
+        });
       });
-    });
 
-    return;
+      return;
+    }
   } catch {}
 
   try {
@@ -565,17 +397,6 @@ function afterPaint(callback) {
       } catch {}
     }, 0);
   } catch {}
-}
-
-async function runMaybePromise(value) {
-  if (
-    value &&
-    isFunction(value.then)
-  ) {
-    return await value;
-  }
-
-  return value;
 }
 
 /* =========================================================
@@ -650,6 +471,67 @@ function redactTokenInText(value = "") {
   return output;
 }
 
+function isDomNodeLike(value) {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  try {
+    return Boolean(
+      typeof Node !== "undefined" &&
+        value instanceof Node
+    );
+  } catch {}
+
+  try {
+    return Boolean(
+      value.nodeType &&
+        value.nodeName
+    );
+  } catch {}
+
+  return false;
+}
+
+function sanitizeError(error = null) {
+  if (!error) {
+    return null;
+  }
+
+  const source =
+    error?.error ||
+    error?.reason ||
+    error;
+
+  return {
+    name:
+      safeText(source?.name, "Error"),
+
+    message:
+      redactTokenInText(
+        safeText(
+          source?.message ||
+            source?.reason ||
+            source,
+          "Error"
+        )
+      ),
+
+    status:
+      safeNumber(
+        source?.status ||
+          source?.statusCode,
+        0
+      ),
+
+    code:
+      safeText(source?.code, "") || null,
+
+    at:
+      safeIsoDate(),
+  };
+}
+
 function sanitizePayload(value, depth = 0) {
   if (depth > 8) {
     return "[MaxDepth]";
@@ -666,6 +548,21 @@ function sanitizePayload(value, depth = 0) {
     typeof value === "boolean"
   ) {
     return value;
+  }
+
+  if (typeof value === "function") {
+    return "[Function]";
+  }
+
+  if (isDomNodeLike(value)) {
+    return {
+      node:
+        safeText(value.nodeName, "Node"),
+      id:
+        safeText(value.id, ""),
+      className:
+        safeText(value.className?.baseVal || value.className, ""),
+    };
   }
 
   if (value instanceof Error) {
@@ -712,48 +609,6 @@ function sanitizePayload(value, depth = 0) {
   return String(value);
 }
 
-function sanitizeError(error = null) {
-  if (!error) {
-    return null;
-  }
-
-  const source =
-    error?.error ||
-    error?.reason ||
-    error;
-
-  return {
-    name:
-      safeText(source?.name, "Error"),
-
-    message:
-      redactTokenInText(
-        safeText(
-          source?.message ||
-            source?.reason ||
-            source,
-          "Error"
-        )
-      ),
-
-    status:
-      safeNumber(
-        source?.status ||
-          source?.statusCode,
-        0
-      ),
-
-    code:
-      safeText(
-        source?.code,
-        ""
-      ) || null,
-
-    at:
-      safeIsoDate(),
-  };
-}
-
 function sanitizeRestoreResult(result = {}) {
   const source =
     safeObject(result);
@@ -761,26 +616,24 @@ function sanitizeRestoreResult(result = {}) {
   const output =
     safeClone(source, {}) || {};
 
-  const sensitiveKeys =
-    [
-      "token",
-      "accessToken",
-      "access_token",
-      "refreshToken",
-      "refresh_token",
-      "idToken",
-      "id_token",
-      "jwt",
-      "authorization",
-      "password",
-      "code",
-      "otp",
-    ];
+  const sensitiveKeys = [
+    "token",
+    "accessToken",
+    "access_token",
+    "refreshToken",
+    "refresh_token",
+    "idToken",
+    "id_token",
+    "jwt",
+    "authorization",
+    "password",
+    "code",
+    "otp",
+  ];
 
   for (const key of sensitiveKeys) {
     if (key in output) {
-      output[key] =
-        null;
+      output[key] = null;
     }
   }
 
@@ -798,315 +651,170 @@ function sanitizeRestoreResult(result = {}) {
 }
 
 /* =========================================================
-   STATE HELPERS
+   LOG / EMIT
 ========================================================= */
 
-function getState(AppCore) {
+function safeLog(AppCore, ...args) {
   try {
-    return AppCore?.state || {};
-  } catch {
-    return {};
-  }
+    AppCore?.utils?.log?.(
+      "[AppSession]",
+      ...args.map((item) =>
+        sanitizePayload(item)
+      )
+    );
+  } catch {}
 }
 
-function setCoreState(AppCore, patch = {}, options = {}) {
-  if (!AppCore || !isObject(patch)) {
-    return false;
-  }
+function safeWarn(AppCore, ...args) {
+  const cleanArgs =
+    args.map((item) =>
+      sanitizePayload(item)
+    );
 
-  let changed =
+  let coreLogged =
     false;
 
-  /*
-    Mutación directa primero:
-    los módulos de boot suelen leer AppCore.state inmediatamente.
-  */
   try {
-    if (
-      AppCore.state &&
-      typeof AppCore.state === "object"
-    ) {
-      Object.assign(
-        AppCore.state,
-        patch
+    if (isFunction(AppCore?.utils?.warn)) {
+      AppCore.utils.warn(
+        "[AppSession]",
+        ...cleanArgs
       );
 
-      changed =
-        true;
+      coreLogged = true;
     }
-  } catch {}
+  } catch {
+    coreLogged = false;
+  }
+
+  if (coreLogged) {
+    return;
+  }
 
   try {
-    if (isFunction(AppCore.setState)) {
-      AppCore.setState(
-        patch,
-        {
-          source:
-            "AppSession",
-          ...safeObject(options),
-        }
-      );
-
-      changed =
-        true;
-    }
+    console.warn(
+      "[AppSession]",
+      ...cleanArgs
+    );
   } catch {}
+}
+
+function safeError(AppCore, ...args) {
+  const cleanArgs =
+    args.map((item) =>
+      sanitizePayload(item)
+    );
+
+  let coreLogged =
+    false;
 
   try {
-    if (isFunction(AppCore.patchState)) {
-      AppCore.patchState(
-        patch,
-        {
-          source:
-            "AppSession",
-          ...safeObject(options),
-        }
+    if (isFunction(AppCore?.utils?.error)) {
+      AppCore.utils.error(
+        "[AppSession]",
+        ...cleanArgs
       );
 
-      changed =
-        true;
+      coreLogged = true;
     }
+  } catch {
+    coreLogged = false;
+  }
+
+  if (coreLogged) {
+    return;
+  }
+
+  try {
+    console.error(
+      "[AppSession]",
+      ...cleanArgs
+    );
   } catch {}
-
-  return changed;
 }
 
-function getResolvedUserObject(AppCore) {
-  const state =
-    getState(AppCore);
+function emit(AppCore, eventName, payload = {}, options = {}) {
+  const name =
+    safeText(eventName, "");
 
-  return (
-    state.user ||
-    state.currentUser ||
-    state.sessionUser ||
-    state.authUser ||
-    state.session?.user ||
-    null
-  );
-}
-
-function getResolvedSessionUser(AppCore) {
-  const user =
-    getResolvedUserObject(AppCore);
-
-  return (
-    user?.username ||
-    user?.userName ||
-    user?.user_name ||
-    user?.email ||
-    user?.mail ||
-    user?.id ||
-    user?.userId ||
-    user?.user_id ||
-    null
-  );
-}
-
-function getResolvedSessionRole(AppCore) {
-  const state =
-    getState(AppCore);
-
-  const user =
-    getResolvedUserObject(AppCore);
-
-  return (
-    state.role ||
-    state.rol ||
-    state.userRole ||
-    state.session?.role ||
-    state.session?.rol ||
-    user?.role ||
-    user?.rol ||
-    user?.type ||
-    user?.userType ||
-    user?.user_type ||
-    user?.profile?.role ||
-    user?.profile?.rol ||
-    user?.raw?.role ||
-    user?.raw?.rol ||
-    null
-  );
-}
-
-function hasUsableSessionUser(user = null) {
-  if (
-    !user ||
-    typeof user !== "object" ||
-    Array.isArray(user)
-  ) {
+  if (!name) {
     return false;
   }
 
-  return Boolean(
-    safeText(user.id, "") ||
-    safeText(user.userId, "") ||
-    safeText(user.user_id, "") ||
-    safeText(user._id, "") ||
-    safeText(user.uid, "") ||
-    safeText(user.username, "") ||
-    safeText(user.userName, "") ||
-    safeText(user.user_name, "") ||
-    safeText(user.email, "") ||
-    safeText(user.mail, "") ||
-    safeText(user.phone, "") ||
-    safeText(user.telefono, "") ||
-    safeText(user.mobile, "")
-  );
-}
+  const opts =
+    safeObject(options);
 
-function isAuthenticated(AppCore) {
-  const state =
-    getState(AppCore);
-
-  if (state.authenticated !== true) {
-    return false;
-  }
-
-  return hasUsableSessionUser(
-    getResolvedUserObject(AppCore)
-  );
-}
-
-function enforceNoGhostAuth(AppCore, reason = "ghost-auth-check") {
-  const state =
-    getState(AppCore);
-
-  if (state.authenticated !== true) {
-    return false;
-  }
-
-  if (
-    hasUsableSessionUser(
-      getResolvedUserObject(AppCore)
-    )
-  ) {
-    return false;
-  }
-
-  setCoreState(
-    AppCore,
-    {
-      authenticated:
-        false,
-
-      role:
-        null,
-
-      username:
-        null,
-
-      currentResolvedUsername:
-        null,
-
-      resolvedUsername:
-        null,
-    },
-    {
-      source:
-        `AppSession:${reason}`,
-      forceUnauthenticated:
-        true,
-      emit:
-        false,
-    }
-  );
-
-  emit(
-    AppCore,
-    SESSION_EVENTS.ghostAuthBlocked,
-    {
-      reason,
+  const cleanPayload =
+    sanitizePayload({
+      version:
+        SESSION_VERSION,
       source:
         "AppSession",
-      at:
-        safeIsoDate(),
-    }
-  );
+      ...safeObject(payload),
+    });
 
-  return true;
-}
+  let busAvailable =
+    false;
 
-/* =========================================================
-   LOGIN-IN-PROGRESS DETECTION
-========================================================= */
+  let busEmitted =
+    false;
 
-function isAuthLoginInProgress(Auth, state = {}) {
   try {
-    if (state?.loginInProgress === true) {
-      return true;
+    if (isFunction(AppCore?.events?.emit)) {
+      busAvailable = true;
+
+      AppCore.events.emit(
+        name,
+        cleanPayload
+      );
+
+      busEmitted = true;
     }
   } catch {}
 
-  try {
-    if (state?.authLoginInProgress === true) {
-      return true;
-    }
-  } catch {}
+  if (
+    opts.window === true ||
+    (!busAvailable && isBrowser())
+  ) {
+    try {
+      const event =
+        safeCreateCustomEvent(
+          name,
+          cleanPayload
+        );
 
-  try {
-    if (state?.isLoggingIn === true) {
-      return true;
-    }
-  } catch {}
+      if (event) {
+        window.dispatchEvent(event);
+        return true;
+      }
+    } catch {}
+  }
 
-  try {
-    if (Auth?.session?.loggingIn === true) {
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (Auth?.session?.loginPromise) {
-      return true;
-    }
-  } catch {}
-
-  try {
-    if (Auth?.loginPromise) {
-      return true;
-    }
-  } catch {}
-
-  return false;
+  return busEmitted;
 }
 
 /* =========================================================
    PATH HELPERS
 ========================================================= */
 
-function getBaseOrigin() {
-  if (
-    isBrowser() &&
-    window.location?.origin
-  ) {
-    return window.location.origin;
-  }
-
-  return "http://localhost";
-}
-
 function normalizePathnameOnly(pathname = "/") {
   let value =
-    String(pathname || "/")
-      .trim()
+    safeText(pathname, "/")
       .replace(/\\/g, "/")
       .replace(/\/{2,}/g, "/");
 
   if (!value) {
-    value =
-      "/";
+    value = "/";
   }
 
   if (!value.startsWith("/")) {
-    value =
-      `/${value}`;
+    value = `/${value}`;
   }
 
   const segments =
     value.split("/");
 
-  const output =
-    [];
+  const output = [];
 
   for (const segment of segments) {
     if (
@@ -1138,13 +846,30 @@ function normalizePathnameOnly(pathname = "/") {
   return value;
 }
 
-function stripSearchAndHash(path = "/") {
+function normalizeSearch(search = "") {
   const value =
-    safeText(path, "/");
+    safeText(search, "");
 
-  return normalizePathnameOnly(
-    value.split("?")[0].split("#")[0] || "/"
-  );
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("?")
+    ? value
+    : `?${value.replace(/^\?+/, "")}`;
+}
+
+function normalizeHash(hash = "") {
+  const value =
+    safeText(hash, "");
+
+  if (!value) {
+    return "";
+  }
+
+  return value.startsWith("#")
+    ? value
+    : `#${value.replace(/^#+/, "")}`;
 }
 
 function isHashRouterPath(value = "") {
@@ -1166,10 +891,98 @@ function normalizeHashRouterPath(value = "") {
   }
 
   if (raw.startsWith("#!")) {
-    return raw.replace(/^#!\/?/, "/");
+    return normalizeLocalFullPath(
+      raw.replace(/^#!\/?/, "/")
+    );
   }
 
-  return raw.replace(/^#\/?/, "/");
+  return normalizeLocalFullPath(
+    raw.replace(/^#\/?/, "/")
+  );
+}
+
+function splitFullPath(value = "/") {
+  const raw =
+    safeText(value, "/");
+
+  if (isHashRouterPath(raw)) {
+    return splitFullPath(
+      normalizeHashRouterPath(raw)
+    );
+  }
+
+  let pathname =
+    raw;
+
+  let search = "";
+  let hash = "";
+
+  const hashIndex =
+    pathname.indexOf("#");
+
+  if (hashIndex >= 0) {
+    hash =
+      pathname.slice(hashIndex);
+
+    pathname =
+      pathname.slice(0, hashIndex) || "/";
+  }
+
+  const searchIndex =
+    pathname.indexOf("?");
+
+  if (searchIndex >= 0) {
+    search =
+      pathname.slice(searchIndex);
+
+    pathname =
+      pathname.slice(0, searchIndex) || "/";
+  }
+
+  return {
+    pathname:
+      normalizePathnameOnly(pathname),
+    search:
+      normalizeSearch(search),
+    hash:
+      normalizeHash(hash),
+  };
+}
+
+function normalizeLocalFullPath(path = "/") {
+  const raw =
+    safeText(path, "/");
+
+  if (!raw) {
+    return "/";
+  }
+
+  if (isHashRouterPath(raw)) {
+    return normalizeHashRouterPath(raw);
+  }
+
+  try {
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(raw)) {
+      const parsed =
+        new URL(raw, getBaseOrigin());
+
+      if (
+        parsed.hash &&
+        isHashRouterPath(parsed.hash)
+      ) {
+        return normalizeHashRouterPath(parsed.hash);
+      }
+
+      return normalizeLocalFullPath(
+        `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
+      );
+    }
+  } catch {}
+
+  const parts =
+    splitFullPath(raw);
+
+  return `${parts.pathname}${parts.search}${parts.hash}`;
 }
 
 function pathFromUrlLike(value = "") {
@@ -1198,7 +1011,9 @@ function pathFromUrlLike(value = "") {
       return normalizeHashRouterPath(parsed.hash);
     }
 
-    return `${normalizePathnameOnly(parsed.pathname || "/")}${parsed.search || ""}${parsed.hash || ""}`;
+    return normalizeLocalFullPath(
+      `${parsed.pathname || "/"}${parsed.search || ""}${parsed.hash || ""}`
+    );
   } catch {
     const hashIndex =
       raw.indexOf("#");
@@ -1212,10 +1027,24 @@ function pathFromUrlLike(value = "") {
       }
     }
 
-    return raw.startsWith("/")
-      ? raw
-      : `/${raw}`;
+    return normalizeLocalFullPath(
+      raw.startsWith("/") ||
+      raw.startsWith("#")
+        ? raw
+        : `/${raw}`
+    );
   }
+}
+
+function stripSearchAndHash(path = "/") {
+  const normalized =
+    normalizeLocalFullPath(path || "/");
+
+  return normalizePathnameOnly(
+    normalized
+      .split("?")[0]
+      .split("#")[0] || "/"
+  );
 }
 
 function getBrowserPublicPath() {
@@ -1240,7 +1069,9 @@ function getBrowserPublicPath() {
       return normalizeHashRouterPath(hash);
     }
 
-    return `${pathname}${search}${hash}`;
+    return normalizeLocalFullPath(
+      `${pathname}${search}${hash}`
+    );
   } catch {
     return "";
   }
@@ -1478,7 +1309,9 @@ function extractPathToken(pathOrUrl = "", basePath = "") {
       Permitido:
       /activate-account/<token>
       /@usuario/activate-account/<token>
-      Evita falsos positivos tipo /foo/activate-account/<token>.
+
+      Bloqueado:
+      /foo/activate-account/<token>
     */
     if (
       i > 1 ||
@@ -1680,20 +1513,6 @@ function getHistoryState() {
   }
 }
 
-function isHistoryStateFlagEnabled(flag = "") {
-  if (!flag) {
-    return false;
-  }
-
-  try {
-    return Boolean(
-      getHistoryState()[flag]
-    );
-  } catch {
-    return false;
-  }
-}
-
 function isRouteScrubbedByConfig(config = null) {
   if (!config) {
     return false;
@@ -1820,17 +1639,16 @@ function isActivationBoot(AppCore) {
     return false;
   }
 
-  const candidates =
-    [
-      state.bootActivationInitialUrl,
-      state.bootProtectedInitialUrl,
-      getActivationInitialUrl(),
-      state.bootInitialUrl,
-      getInitialUrl(),
-      getBrowserPublicPath(),
-      state.publicPath,
-      state.route,
-    ];
+  const candidates = [
+    state.bootActivationInitialUrl,
+    state.bootProtectedInitialUrl,
+    getActivationInitialUrl(),
+    state.bootInitialUrl,
+    getInitialUrl(),
+    getBrowserPublicPath(),
+    state.publicPath,
+    state.route,
+  ];
 
   return candidates.some((candidate) => {
     const value =
@@ -1862,17 +1680,16 @@ function isResetConfirmBoot(AppCore) {
     return false;
   }
 
-  const candidates =
-    [
-      state.bootResetConfirmInitialUrl,
-      state.bootProtectedInitialUrl,
-      getResetConfirmInitialUrl(),
-      state.bootInitialUrl,
-      getInitialUrl(),
-      getBrowserPublicPath(),
-      state.publicPath,
-      state.route,
-    ];
+  const candidates = [
+    state.bootResetConfirmInitialUrl,
+    state.bootProtectedInitialUrl,
+    getResetConfirmInitialUrl(),
+    state.bootInitialUrl,
+    getInitialUrl(),
+    getBrowserPublicPath(),
+    state.publicPath,
+    state.route,
+  ];
 
   return candidates.some((candidate) => {
     const value =
@@ -1901,6 +1718,302 @@ function isPublicTechnicalBoot(AppCore) {
     isActivationBoot(AppCore) ||
     isResetConfirmBoot(AppCore)
   );
+}
+
+/* =========================================================
+   STATE HELPERS
+========================================================= */
+
+function getState(AppCore) {
+  try {
+    return AppCore?.state || {};
+  } catch {
+    return {};
+  }
+}
+
+function setCoreState(AppCore, patch = {}, options = {}) {
+  if (!AppCore || !isObject(patch)) {
+    return false;
+  }
+
+  let changed =
+    false;
+
+  try {
+    if (
+      AppCore.state &&
+      typeof AppCore.state === "object"
+    ) {
+      Object.assign(
+        AppCore.state,
+        patch
+      );
+
+      changed = true;
+    }
+  } catch {}
+
+  try {
+    if (isFunction(AppCore.setState)) {
+      AppCore.setState(
+        patch,
+        {
+          source:
+            "AppSession",
+          ...safeObject(options),
+        }
+      );
+
+      changed = true;
+    }
+  } catch {}
+
+  try {
+    if (isFunction(AppCore.patchState)) {
+      AppCore.patchState(
+        patch,
+        {
+          source:
+            "AppSession",
+          ...safeObject(options),
+        }
+      );
+
+      changed = true;
+    }
+  } catch {}
+
+  return changed;
+}
+
+function getResolvedUserObject(AppCore) {
+  const state =
+    getState(AppCore);
+
+  return (
+    state.user ||
+    state.currentUser ||
+    state.sessionUser ||
+    state.authUser ||
+    state.session?.user ||
+    null
+  );
+}
+
+function getResolvedSessionUser(AppCore) {
+  const user =
+    getResolvedUserObject(AppCore);
+
+  return (
+    user?.username ||
+    user?.userName ||
+    user?.user_name ||
+    user?.email ||
+    user?.mail ||
+    user?.id ||
+    user?.userId ||
+    user?.user_id ||
+    null
+  );
+}
+
+function getResolvedSessionRole(AppCore) {
+  const state =
+    getState(AppCore);
+
+  const user =
+    getResolvedUserObject(AppCore);
+
+  return (
+    state.role ||
+    state.rol ||
+    state.userRole ||
+    state.session?.role ||
+    state.session?.rol ||
+    user?.role ||
+    user?.rol ||
+    user?.type ||
+    user?.userType ||
+    user?.user_type ||
+    user?.profile?.role ||
+    user?.profile?.rol ||
+    user?.raw?.role ||
+    user?.raw?.rol ||
+    null
+  );
+}
+
+function hasUsableSessionUser(user = null) {
+  if (
+    !user ||
+    typeof user !== "object" ||
+    Array.isArray(user)
+  ) {
+    return false;
+  }
+
+  return Boolean(
+    safeText(user.id, "") ||
+    safeText(user.userId, "") ||
+    safeText(user.user_id, "") ||
+    safeText(user._id, "") ||
+    safeText(user.uid, "") ||
+    safeText(user.username, "") ||
+    safeText(user.userName, "") ||
+    safeText(user.user_name, "") ||
+    safeText(user.email, "") ||
+    safeText(user.mail, "") ||
+    safeText(user.phone, "") ||
+    safeText(user.telefono, "") ||
+    safeText(user.mobile, "")
+  );
+}
+
+function hasTokenLike(value = "") {
+  const text =
+    safeText(value, "");
+
+  if (!text) {
+    return false;
+  }
+
+  const lower =
+    text.toLowerCase();
+
+  if (
+    [
+      "null",
+      "undefined",
+      "false",
+      "true",
+      "nan",
+      "none",
+      "[object object]",
+    ].includes(lower)
+  ) {
+    return false;
+  }
+
+  if (/[\s\r\n\t]/.test(text)) {
+    return false;
+  }
+
+  return true;
+}
+
+function isAuthenticated(AppCore) {
+  const state =
+    getState(AppCore);
+
+  if (state.authenticated !== true) {
+    return false;
+  }
+
+  return hasUsableSessionUser(
+    getResolvedUserObject(AppCore)
+  );
+}
+
+function enforceNoGhostAuth(AppCore, reason = "ghost-auth-check") {
+  const state =
+    getState(AppCore);
+
+  if (state.authenticated !== true) {
+    return false;
+  }
+
+  if (
+    hasUsableSessionUser(
+      getResolvedUserObject(AppCore)
+    )
+  ) {
+    return false;
+  }
+
+  setCoreState(
+    AppCore,
+    {
+      authenticated:
+        false,
+
+      role:
+        null,
+
+      username:
+        null,
+
+      currentResolvedUsername:
+        null,
+
+      resolvedUsername:
+        null,
+    },
+    {
+      source:
+        `AppSession:${reason}`,
+      forceUnauthenticated:
+        true,
+      emit:
+        false,
+    }
+  );
+
+  emit(
+    AppCore,
+    SESSION_EVENTS.ghostAuthBlocked,
+    {
+      reason,
+      at:
+        safeIsoDate(),
+    }
+  );
+
+  return true;
+}
+
+/* =========================================================
+   LOGIN-IN-PROGRESS DETECTION
+========================================================= */
+
+function isAuthLoginInProgress(Auth, state = {}) {
+  try {
+    if (state?.loginInProgress === true) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (state?.authLoginInProgress === true) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (state?.isLoggingIn === true) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (Auth?.session?.loggingIn === true) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (Auth?.session?.loginPromise) {
+      return true;
+    }
+  } catch {}
+
+  try {
+    if (Auth?.loginPromise) {
+      return true;
+    }
+  } catch {}
+
+  return false;
 }
 
 /* =========================================================
@@ -1988,38 +2101,6 @@ function buildSnapshot(AppCore, extras = {}) {
 /* =========================================================
    RESTORE RESULT EXTRACTION
 ========================================================= */
-
-function hasTokenLike(value = "") {
-  const text =
-    safeText(value, "");
-
-  if (!text) {
-    return false;
-  }
-
-  const lower =
-    text.toLowerCase();
-
-  if (
-    [
-      "null",
-      "undefined",
-      "false",
-      "true",
-      "nan",
-      "none",
-      "[object object]",
-    ].includes(lower)
-  ) {
-    return false;
-  }
-
-  if (/[\s\r\n\t]/.test(text)) {
-    return false;
-  }
-
-  return true;
-}
 
 function firstToken(...values) {
   for (const value of values) {
@@ -2129,8 +2210,7 @@ function maybeApplyRestoreResultToCore({
   const currentState =
     getState(AppCore);
 
-  const patch =
-    {};
+  const patch = {};
 
   if (
     token &&
@@ -2138,6 +2218,9 @@ function maybeApplyRestoreResultToCore({
     !hasTokenLike(currentState.accessToken)
   ) {
     patch.token =
+      token;
+
+    patch.accessToken =
       token;
   }
 
@@ -2149,6 +2232,25 @@ function maybeApplyRestoreResultToCore({
   ) {
     patch.user =
       user;
+  }
+
+  const resolvedUser =
+    patch.user ||
+    getResolvedUserObject(AppCore);
+
+  if (
+    token &&
+    hasUsableSessionUser(resolvedUser)
+  ) {
+    patch.authenticated =
+      true;
+
+    patch.role =
+      patch.role ||
+      getResolvedSessionRole(AppCore) ||
+      resolvedUser?.role ||
+      resolvedUser?.rol ||
+      null;
   }
 
   if (!Object.keys(patch).length) {
@@ -2204,15 +2306,14 @@ async function runSyncUserUI({
     return false;
   }
 
-  const context =
-    {
-      AppCore,
-      Auth,
-      Router,
-      reason,
-      source:
-        "AppSession",
-    };
+  const context = {
+    AppCore,
+    Auth,
+    Router,
+    reason,
+    source:
+      "AppSession",
+  };
 
   let synced =
     false;
@@ -2222,8 +2323,7 @@ async function runSyncUserUI({
       syncUserUI(context)
     );
 
-    synced =
-      true;
+    synced = true;
   } catch (error) {
     safeWarn(
       AppCore,
@@ -2236,8 +2336,7 @@ async function runSyncUserUI({
         syncUserUI(AppCore)
       );
 
-      synced =
-        true;
+      synced = true;
     } catch (legacyError) {
       safeWarn(
         AppCore,
@@ -2258,8 +2357,6 @@ async function runSyncUserUI({
         getResolvedUserObject(AppCore),
       role:
         getResolvedSessionRole(AppCore),
-      source:
-        "AppSession",
       repairShell:
         false,
       hardRepair:
@@ -2339,8 +2436,7 @@ function clearAuthScreenDomState({
       document.getElementById("app-shell");
 
     if (shell) {
-      shell.hidden =
-        false;
+      shell.hidden = false;
 
       shell.setAttribute(
         "aria-hidden",
@@ -2362,8 +2458,7 @@ function clearAuthScreenDomState({
       document.getElementById("main-content");
 
     if (main) {
-      main.hidden =
-        false;
+      main.hidden = false;
 
       main.setAttribute(
         "aria-hidden",
@@ -2382,8 +2477,7 @@ function clearAuthScreenDomState({
       document.getElementById("view-container");
 
     if (view) {
-      view.hidden =
-        false;
+      view.hidden = false;
 
       view.setAttribute(
         "aria-hidden",
@@ -2404,8 +2498,6 @@ function clearAuthScreenDomState({
       reason,
       canonical,
       authenticated,
-      source:
-        "AppSession",
       at:
         safeIsoDate(),
     }
@@ -2480,9 +2572,6 @@ function buildSessionReadyPayload({
     routeChanged:
       Boolean(result?.routeChanged),
 
-    source:
-      "AppSession",
-
     at:
       safeIsoDate(),
   };
@@ -2513,7 +2602,7 @@ function emitSessionReadyEvents({
     ].join("|");
 
   const timestamp =
-    Date.now();
+    safeNow();
 
   if (
     dedupe &&
@@ -2737,13 +2826,12 @@ function resolvePostLoginTarget({
   const state =
     getState(AppCore);
 
-  const candidates =
-    [
-      state.postLoginTarget,
-      state.redirectAfterLogin,
-      state.returnTo,
-      state.lastPrivatePath,
-    ];
+  const candidates = [
+    state.postLoginTarget,
+    state.redirectAfterLogin,
+    state.returnTo,
+    state.lastPrivatePath,
+  ];
 
   for (const candidate of candidates) {
     const value =
@@ -2889,12 +2977,6 @@ export async function navigateAfterSessionRestore({
     isActivationCanonicalPath(currentPublicPath) ||
     isResetConfirmCanonicalPath(currentPublicPath);
 
-  /*
-    Rutas públicas técnicas:
-    - bloquean navegación post-restore.
-    - NO marcan bootNavigationHandled.
-    - App.index sigue pudiendo hacer render inicial.
-  */
   if (publicTechnical) {
     markNavigationSkipped(
       state,
@@ -2949,10 +3031,6 @@ export async function navigateAfterSessionRestore({
     return false;
   }
 
-  /*
-    Solo redirigir desde /login.
-    Si ya estamos en una ruta privada, no tocar navegación.
-  */
   if (!isLoginCanonicalPath(currentCanonicalPath)) {
     clearAuthScreenDomState({
       AppCore,
@@ -3049,8 +3127,6 @@ export async function navigateAfterSessionRestore({
           target,
           authenticated:
             true,
-          source:
-            "AppSession",
           repairShell:
             false,
           hardRepair:
@@ -3070,8 +3146,6 @@ export async function navigateAfterSessionRestore({
         target,
         authenticated:
           true,
-        source:
-          "AppSession",
         at:
           safeIsoDate(),
       }
@@ -3289,8 +3363,6 @@ export async function restoreAuthSession({
             activationBoot,
             resetConfirmBoot,
             publicTechnicalBoot,
-            source:
-              "AppSession",
             at:
               safeIsoDate(),
           }
@@ -3383,8 +3455,6 @@ export async function restoreAuthSession({
             ...snapshot,
             result:
               sanitizeRestoreResult(result),
-            source:
-              "AppSession",
           }
         );
 
@@ -3442,8 +3512,6 @@ export async function restoreAuthSession({
           SESSION_EVENTS.restoreError,
           {
             ...snapshot,
-            source:
-              "AppSession",
           }
         );
 
@@ -3535,11 +3603,6 @@ export async function restoreSessionInBackground({
       );
     }
 
-    /*
-      Importante:
-      restoreAuthSession() aquí NO sincroniza UI.
-      La UI se sincroniza una sola vez al final de este flujo.
-    */
     const result =
       await restoreAuthSession({
         AppCore,
@@ -3640,32 +3703,31 @@ export async function restoreSessionInBackground({
         "restore-session-background-final",
     });
 
-    const finalResult =
-      {
-        ...sanitizeRestoreResult(result),
+    const finalResult = {
+      ...sanitizeRestoreResult(result),
 
-        ok:
-          Boolean(result?.ok) ||
-          isAuthenticated(AppCore),
+      ok:
+        Boolean(result?.ok) ||
+        isAuthenticated(AppCore),
 
-        restored:
-          Boolean(result?.restored) ||
-          Boolean(result?.ok) ||
-          isAuthenticated(AppCore),
+      restored:
+        Boolean(result?.restored) ||
+        Boolean(result?.ok) ||
+        isAuthenticated(AppCore),
 
+      navigationHandled,
+
+      navigated:
         navigationHandled,
 
-        navigated:
-          navigationHandled,
+      didNavigate:
+        navigationHandled,
 
-        didNavigate:
-          navigationHandled,
+      redirected:
+        navigationHandled,
 
-        redirected:
-          navigationHandled,
-
-        routeChanged,
-      };
+      routeChanged,
+    };
 
     if (isAuthenticated(AppCore)) {
       clearAuthScreenDomState({
@@ -3872,6 +3934,8 @@ export function getSessionBootstrapSnapshot({
 ========================================================= */
 
 export default {
+  SESSION_VERSION,
+
   navigateAfterSessionRestore,
   restoreAuthSession,
   restoreSessionInBackground,

@@ -33,7 +33,14 @@
 ========================================================= */
 
 .topbar {
-  --topbar-search-visible-height: max(var(--topbar-search-height), 44px);
+  --topbar-search-visible-height:
+    clamp(42px, var(--topbar-search-height, 44px), 46px);
+
+  --topbar-search-command-height:
+    clamp(44px, var(--topbar-search-height, 46px), 48px);
+
+  --topbar-search-results-gap:
+    var(--topbar-search-results-gap-token, 6px);
 
   --topbar-search-shell-radius: var(--topbar-search-radius);
   --topbar-search-shell-padding: 2px;
@@ -48,34 +55,46 @@
     color-mix(in srgb, var(--input-border-hover), var(--accent) 12%);
 
   --topbar-search-field-border-focus:
-    color-mix(in srgb, var(--input-border-focus), var(--accent) 18%);
+    color-mix(in srgb, var(--input-border-focus), var(--accent) 20%);
 
   --topbar-search-field-shadow:
-    0 10px 24px color-mix(in srgb, var(--text), transparent 90%),
+    0 8px 22px color-mix(in srgb, var(--text), transparent 91%),
     inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 95%);
 
   --topbar-search-field-shadow-hover:
-    0 14px 30px color-mix(in srgb, var(--text), transparent 88%),
+    0 12px 28px color-mix(in srgb, var(--text), transparent 89%),
     inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 94%);
 
   --topbar-search-field-shadow-focus:
-    0 0 0 4px color-mix(in srgb, var(--accent), transparent 84%),
-    0 18px 40px color-mix(in srgb, var(--text), transparent 86%),
+    0 0 0 3px color-mix(in srgb, var(--accent), transparent 86%),
+    0 15px 34px color-mix(in srgb, var(--text), transparent 87%),
     inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 92%);
 
   --topbar-search-halo:
     linear-gradient(
       135deg,
-      color-mix(in srgb, var(--accent), transparent 80%),
-      color-mix(in srgb, var(--accent-3), transparent 86%),
-      transparent 68%
+      color-mix(in srgb, var(--accent), transparent 82%),
+      color-mix(in srgb, var(--accent-3), transparent 88%),
+      transparent 70%
     );
 
   --topbar-search-placeholder:
-    color-mix(in srgb, var(--input-placeholder), var(--text) 18%);
+    color-mix(in srgb, var(--input-placeholder), var(--text) 20%);
+
+  --topbar-search-icon-color:
+    color-mix(in srgb, var(--text-strong) 68%, var(--accent) 32%);
+
+  --topbar-search-icon-color-hover:
+    color-mix(in srgb, var(--text-strong) 76%, var(--accent) 24%);
+
+  --topbar-search-icon-color-focus:
+    color-mix(in srgb, var(--accent) 84%, var(--text-strong) 16%);
 
   --topbar-search-command-top:
-    var(--topbar-search-command-offset-top, max(calc(var(--topbar-safe-top) + 7px), 9px));
+    var(
+      --topbar-search-command-offset-top,
+      calc(var(--topbar-safe-top) + 8px)
+    );
 
   --topbar-search-command-width:
     var(--topbar-search-command-width, min(720px, calc(100vw - 48px)));
@@ -86,8 +105,8 @@
   --topbar-search-results-top:
     calc(
       var(--topbar-search-command-top) +
-      max(var(--topbar-search-visible-height), 50px) +
-      10px
+      var(--topbar-search-command-height) +
+      var(--topbar-search-results-gap)
     );
 
   --topbar-search-palette-width-local:
@@ -98,7 +117,7 @@
       --topbar-search-palette-max-height,
       min(
         var(--topbar-search-results-max-height, 420px),
-        calc(100dvh - var(--topbar-search-results-top) - 22px)
+        calc(100dvh - var(--topbar-search-results-top) - 18px)
       )
     );
 
@@ -228,10 +247,6 @@ body.auth-screen .topbar {
 
 /* =========================================================
    SEARCH ACTIVE · SCROLL LOCK + STACKING
-   IMPORTANTE:
-   - El glass se pinta debajo de topbar/sidebar.
-   - Topbar y sidebar quedan nítidos.
-   - La vista queda no interactiva.
 ========================================================= */
 
 html.topbar-search-active,
@@ -255,7 +270,6 @@ body[data-topbar-search-open="true"] #app-shell {
   isolation: isolate;
 }
 
-/* Glass sólo sobre contenido/vista: queda bajo sidebar/topbar. */
 body.topbar-search-active::before,
 body.search-active::before,
 body.search-open::before,
@@ -338,7 +352,6 @@ body[data-topbar-search-open="true"]::after {
   opacity: .16;
 }
 
-/* Bloqueo real del scroll de página. */
 body.topbar-search-active .main-content,
 body.search-active .main-content,
 body.search-open .main-content,
@@ -350,7 +363,6 @@ body[data-topbar-search-open="true"] .main-content {
   scrollbar-gutter: stable;
 }
 
-/* La vista no recibe interacción mientras search está activo. */
 body.topbar-search-active #app-content,
 body.search-active #app-content,
 body.search-open #app-content,
@@ -367,7 +379,6 @@ body[data-topbar-search-open="true"] #view-container {
   user-select: none;
 }
 
-/* Tablehead pertenece a la zona de contenido: se apaga en search. */
 body.topbar-search-active .table-head,
 body.search-active .table-head,
 body.search-open .table-head,
@@ -378,7 +389,6 @@ body[data-topbar-search-open="true"] .table-head {
   pointer-events: none;
 }
 
-/* Sidebar NO recibe glass visual. Sólo se sube de capa y queda nítido. */
 body.topbar-search-active #sidebar-mount,
 body.search-active #sidebar-mount,
 body.search-open #sidebar-mount,
@@ -406,7 +416,6 @@ body[data-topbar-search-open="true"] .sidebar {
   -webkit-backdrop-filter: var(--blur-md);
 }
 
-/* Topbar NO recibe glass visual. Se mantiene nítido y por encima del glass. */
 body.topbar-search-active #topbar-mount,
 body.search-active #topbar-mount,
 body.search-open #topbar-mount,
@@ -447,7 +456,7 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
     color-mix(in srgb, var(--topbar-bg), transparent 10%);
 
   box-shadow:
-    0 16px 34px color-mix(in srgb, var(--text), transparent 88%),
+    0 14px 30px color-mix(in srgb, var(--text), transparent 89%),
     inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 95%);
 }
 
@@ -599,6 +608,13 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
   max-inline-size: min(520px, 48vw);
   min-inline-size: 220px;
 
+  block-size: var(--topbar-search-visible-height);
+
+  display: flex;
+  align-items: center;
+
+  align-self: center;
+
   margin-inline-start: auto;
 
   z-index: 2;
@@ -609,6 +625,7 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
   transition:
     max-inline-size var(--duration-normal) var(--ease-emphasis),
     inline-size var(--duration-normal) var(--ease-emphasis),
+    block-size var(--duration-normal) var(--ease-emphasis),
     filter var(--duration-normal) var(--ease-standard),
     transform var(--duration-normal) var(--ease-emphasis);
 }
@@ -616,21 +633,22 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
 .topbar-search-wrap::before {
   content: "";
   position: absolute;
-  inset: -3px;
+  inset: -2px;
   z-index: -1;
 
-  border-radius: calc(var(--topbar-search-shell-radius) + 3px);
+  border-radius: calc(var(--topbar-search-shell-radius) + 2px);
 
   background: var(--topbar-search-halo);
 
-  opacity: .62;
+  opacity: .58;
   pointer-events: none;
 
-  filter: blur(.2px);
+  filter: blur(.1px);
 
   transition:
     opacity var(--duration-normal) var(--ease-standard),
-    transform var(--duration-normal) var(--ease-standard);
+    transform var(--duration-normal) var(--ease-standard),
+    inset var(--duration-normal) var(--ease-standard);
 }
 
 .topbar-search-wrap:hover::before,
@@ -639,7 +657,7 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
 .topbar-search-wrap[data-search-open="true"]::before,
 .topbar-search-wrap.is-search-focused::before,
 .topbar-search-wrap.is-search-open::before {
-  opacity: 1;
+  opacity: .92;
 }
 
 .topbar-search-wrap[data-search-focus="true"],
@@ -656,6 +674,8 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
   max-inline-size: calc(100vw - 48px);
   min-inline-size: min(360px, calc(100vw - 48px));
 
+  block-size: var(--topbar-search-command-height);
+
   margin: 0;
 
   z-index: calc(var(--z-modal) + 8);
@@ -667,14 +687,14 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
 .topbar-search-wrap[data-search-open="true"]::before,
 .topbar-search-wrap.is-search-focused::before,
 .topbar-search-wrap.is-search-open::before {
-  inset: -5px;
+  inset: -3px;
 
-  border-radius: calc(var(--topbar-search-shell-radius) + 5px);
+  border-radius: calc(var(--topbar-search-shell-radius) + 3px);
 
-  filter: blur(1px);
-  opacity: 1;
+  filter: blur(.45px);
+  opacity: .98;
 
-  transform: scale(1.01);
+  transform: scale(1.006);
 }
 
 
@@ -712,6 +732,7 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
   caret-color: var(--accent);
 
   transition:
+    block-size var(--duration-normal) var(--ease-emphasis),
     border-color var(--duration-normal) var(--ease-standard),
     background var(--duration-normal) var(--ease-standard),
     box-shadow var(--duration-normal) var(--ease-standard),
@@ -746,7 +767,7 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
 .topbar-search-wrap[data-search-open="true"] .topbar-search,
 .topbar-search-wrap.is-search-focused .topbar-search,
 .topbar-search-wrap.is-search-open .topbar-search {
-  block-size: max(var(--topbar-search-visible-height), 50px);
+  block-size: var(--topbar-search-command-height);
 
   padding-inline-start: 46px;
   padding-inline-end: 18px;
@@ -772,25 +793,39 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
   inset-inline-start: 16px;
   inset-block-start: 50%;
 
-  inline-size: 17px;
-  block-size: 17px;
+  inline-size: 18px;
+  block-size: 18px;
 
-  color: color-mix(in srgb, var(--input-icon), var(--text) 22%);
+  color: var(--topbar-search-icon-color);
 
   pointer-events: none;
 
-  opacity: .94;
+  opacity: 1;
 
   transform: translateY(-50%);
+
+  filter:
+    drop-shadow(0 1px 2px color-mix(in srgb, var(--main-bg), transparent 36%));
 
   transition:
     color var(--duration-normal) var(--ease-standard),
     opacity var(--duration-normal) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-out);
+    transform var(--duration-fast) var(--ease-out),
+    filter var(--duration-normal) var(--ease-standard);
+}
+
+.topbar-search-icon svg {
+  inline-size: 100%;
+  block-size: 100%;
+
+  stroke: currentColor;
+  stroke-width: 2.25;
+
+  opacity: 1;
 }
 
 .topbar-search-wrap:hover .topbar-search-icon {
-  color: var(--text-muted);
+  color: var(--topbar-search-icon-color-hover);
   opacity: 1;
 }
 
@@ -799,9 +834,13 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
 .topbar-search-wrap[data-search-open="true"] .topbar-search-icon,
 .topbar-search-wrap.is-search-focused .topbar-search-icon,
 .topbar-search-wrap.is-search-open .topbar-search-icon {
-  color: var(--accent);
+  color: var(--topbar-search-icon-color-focus);
   opacity: 1;
+
   transform: translateY(-50%) scale(1.04);
+
+  filter:
+    drop-shadow(0 0 8px color-mix(in srgb, var(--accent), transparent 62%));
 }
 
 .topbar-search-wrap[data-search-focus="true"] .topbar-search-icon,
@@ -810,8 +849,8 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
 .topbar-search-wrap.is-search-open .topbar-search-icon {
   inset-inline-start: 17px;
 
-  inline-size: 18px;
-  block-size: 18px;
+  inline-size: 19px;
+  block-size: 19px;
 }
 
 
@@ -859,7 +898,7 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
 
   pointer-events: none;
 
-  transform: translateX(-50%) translateY(8px) scale(.985);
+  transform: translateX(-50%) translateY(4px) scale(.992);
   transform-origin: top center;
 
   transition:
@@ -1421,6 +1460,14 @@ mark,
 
 @media (max-width: 900px) {
   .topbar {
+    --topbar-search-command-height: 46px;
+
+    --topbar-search-command-top:
+      var(
+        --topbar-search-command-offset-top,
+        calc(var(--topbar-safe-top) + 7px)
+      );
+
     --topbar-search-command-width:
       min(680px, calc(100vw - 28px));
 
@@ -1483,8 +1530,14 @@ mark,
 
 @media (max-width: 768px) {
   .topbar {
+    --topbar-search-visible-height: 42px;
+    --topbar-search-command-height: 46px;
+
     --topbar-search-command-top:
-      max(calc(var(--topbar-safe-top) + 7px), 8px);
+      var(
+        --topbar-search-command-offset-top,
+        calc(var(--topbar-safe-top) + 7px)
+      );
 
     --topbar-search-command-width:
       calc(100vw - 24px);
@@ -1519,7 +1572,7 @@ mark,
   }
 
   .topbar-search {
-    block-size: 42px;
+    block-size: var(--topbar-search-visible-height);
     font-size: var(--font-md);
   }
 
@@ -1527,7 +1580,7 @@ mark,
   .topbar-search-wrap[data-search-open="true"] .topbar-search,
   .topbar-search-wrap.is-search-focused .topbar-search,
   .topbar-search-wrap.is-search-open .topbar-search {
-    block-size: 46px;
+    block-size: var(--topbar-search-command-height);
   }
 
   .topbar-search-results {
@@ -1546,6 +1599,9 @@ mark,
 
 @media (max-width: 640px) {
   .topbar {
+    --topbar-search-visible-height: 40px;
+    --topbar-search-command-height: 44px;
+
     --topbar-search-command-width:
       calc(100vw - 20px);
 
@@ -1587,6 +1643,8 @@ mark,
 
   .topbar-search-icon {
     inset-inline-start: 15px;
+    inline-size: 17px;
+    block-size: 17px;
   }
 
   .topbar-search-results {
@@ -1620,6 +1678,9 @@ mark,
 
 @media (max-width: 420px) {
   .topbar {
+    --topbar-search-visible-height: 40px;
+    --topbar-search-command-height: 44px;
+
     --topbar-search-command-width:
       calc(100vw - 16px);
 
@@ -1639,7 +1700,7 @@ mark,
   }
 
   .topbar-search {
-    block-size: 40px;
+    block-size: var(--topbar-search-visible-height);
     padding-inline-start: 38px;
     font-size: var(--font-sm);
   }
@@ -1648,13 +1709,13 @@ mark,
   .topbar-search-wrap[data-search-open="true"] .topbar-search,
   .topbar-search-wrap.is-search-focused .topbar-search,
   .topbar-search-wrap.is-search-open .topbar-search {
-    block-size: 44px;
+    block-size: var(--topbar-search-command-height);
     padding-inline-start: 39px;
   }
 
   .topbar-search-icon {
-    inline-size: 15px;
-    block-size: 15px;
+    inline-size: 16px;
+    block-size: 16px;
     inset-inline-start: 14px;
   }
 

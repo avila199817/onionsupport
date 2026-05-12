@@ -1,6 +1,6 @@
 /* =========================================================
    ONION SUPPORT — CORE SYSTEM
-   Archivo: src/css/core/core.css
+   Archivo: /src/css/core/core.css
 
    FINAL EXTREME SYSTEM · APPLE STYLE · PRO SAAS PANEL · 10/10
 
@@ -19,6 +19,14 @@
    - Sin controlar layout principal.
    - Sin invadir componentes.
    - Sin transition global salvaje.
+   - Sin Google Fonts.
+   - Sin CSS inline.
+   - Sin estilos inyectados por JS.
+
+   NOTA:
+   - .main-content, #app-content, topbar/sidebar offsets y scroll principal
+     pertenecen a layout.css.
+   - Este archivo sólo define comportamiento base, utilities y estados UX.
 ========================================================= */
 
 
@@ -368,6 +376,8 @@ select,
 textarea,
 summary,
 .interactive,
+.interactive-soft,
+.interactive-flat,
 .menu-item,
 .search-result,
 .dropdown-item,
@@ -448,6 +458,7 @@ a.disabled,
   overscroll-behavior: contain;
 
   scrollbar-width: thin;
+  scrollbar-gutter: stable;
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
@@ -808,11 +819,13 @@ a.disabled,
 .sr-only-focusable:focus,
 .sr-only-focusable:focus-visible,
 .visually-hidden-focusable:focus,
-.visually-hidden-focusable:focus-visible {
+.visually-hidden-focusable:focus-visible,
+.app-skip-link:focus,
+.app-skip-link:focus-visible {
   position: fixed !important;
   inset-block-start: max(12px, var(--app-safe-top)) !important;
   inset-inline-start: max(12px, var(--app-safe-left)) !important;
-  z-index: var(--z-loader);
+  z-index: calc(var(--z-loader) + 1);
 
   inline-size: auto !important;
   block-size: auto !important;
@@ -870,6 +883,7 @@ a.disabled,
 
 /* =========================================================
    LAYOUT HELPERS
+   No controlan el shell principal.
 ========================================================= */
 
 .w-full {
@@ -1097,6 +1111,10 @@ a.disabled,
 
 .z-base {
   z-index: var(--z-base);
+}
+
+.z-content {
+  z-index: var(--z-content);
 }
 
 .z-sidebar {

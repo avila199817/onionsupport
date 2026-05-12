@@ -25,6 +25,14 @@
    - variables.css = base / dark / aliases / estructura global.
    - light.css     = overrides [data-theme="light"].
    - component.css = consume tokens, no redefine sistema global.
+
+   TOPBAR SEARCH CONTRACT:
+   - El search NO cambia de alto al abrir.
+   - El search NO baja al abrir.
+   - El search se centra y se alarga desde topbar.css.
+   - El dropdown usa el mismo ancho visual del search.
+   - El glass se pinta sólo sobre .main-content.
+   - Sidebar/topbar quedan nítidos.
 ========================================================= */
 
 
@@ -117,8 +125,9 @@
   --z-toast: 100;
   --z-loader: 2147483000;
 
-  --z-search-glass: calc(var(--z-topbar) - 1);
-  --z-search-focus: var(--z-topbar);
+  --z-search-glass: calc(var(--z-topbar) - 10);
+  --z-search-texture: calc(var(--z-topbar) - 9);
+  --z-search-focus: calc(var(--z-modal) + 8);
   --z-search-palette: calc(var(--z-modal) + 9);
 
 
@@ -138,7 +147,7 @@
 
   --page-offset: calc(20px * var(--ui-scale));
 
-  --topbar-height: calc(54px * var(--ui-scale));
+  --topbar-height: calc(56px * var(--ui-scale));
   --tablehead-height: calc(42px * var(--ui-scale));
 
   --sidebar-width: calc(252px * var(--ui-scale));
@@ -834,17 +843,18 @@
   --topbar-title-weight: var(--weight-bold);
   --topbar-subtitle-size: var(--font-xs);
 
-  --topbar-search-height: calc(38px * var(--ui-scale));
-  --topbar-search-max-width: calc(440px * var(--ui-scale));
+  --topbar-search-height: 46px;
+  --topbar-search-max-width: calc(560px * var(--ui-scale));
   --topbar-search-radius: 999px;
 
-  --topbar-search-bg: rgba(255,255,255,.030);
-  --topbar-search-bg-hover: rgba(255,255,255,.044);
-  --topbar-search-bg-focus: rgba(255,255,255,.052);
-  --topbar-search-border: rgba(255,255,255,.075);
+  --topbar-search-bg: rgba(255,255,255,.032);
+  --topbar-search-bg-hover: rgba(255,255,255,.046);
+  --topbar-search-bg-focus: rgba(255,255,255,.054);
+  --topbar-search-border: rgba(255,255,255,.082);
 
-  --topbar-search-results-offset: calc(8px * var(--ui-scale));
-  --topbar-search-results-max-height: calc(360px * var(--ui-scale));
+  --topbar-search-results-gap-token: 5px;
+  --topbar-search-results-offset: var(--topbar-search-results-gap-token);
+  --topbar-search-results-max-height: calc(380px * var(--ui-scale));
   --topbar-search-result-bg: var(--dropdown-bg);
   --topbar-search-result-border: var(--border-default);
   --topbar-search-result-shadow: var(--shadow-xl);
@@ -858,6 +868,7 @@
      Glass sólo sobre contenido. Sidebar/topbar quedan nítidos.
   ========================================================= */
   --topbar-search-glass-z: var(--z-search-glass);
+  --topbar-search-texture-z: var(--z-search-texture);
   --topbar-search-focus-z: var(--z-search-focus);
   --topbar-search-results-z: var(--z-search-palette);
 
@@ -887,19 +898,29 @@
 
   --topbar-search-glass-blur: blur(18px) saturate(1.08);
 
-  --topbar-search-palette-width: min(720px, calc(100vw - 48px));
+  --topbar-search-command-width: min(860px, calc(100vw - 56px));
+  --topbar-search-command-offset-top:
+    calc(
+      var(--topbar-safe-top) +
+      ((var(--topbar-height) - var(--topbar-search-height)) / 2)
+    );
+
+  --topbar-search-palette-width: var(--topbar-search-command-width);
   --topbar-search-palette-max-height:
     min(
       var(--topbar-search-results-max-height),
-      calc(100dvh - var(--app-offset-topbar) - 40px)
+      calc(
+        100dvh -
+        var(--topbar-search-command-offset-top) -
+        var(--topbar-search-height) -
+        var(--topbar-search-results-gap-token) -
+        18px
+      )
     );
 
   --topbar-search-palette-radius: var(--dropdown-radius);
   --topbar-search-palette-padding: 8px;
   --topbar-search-palette-scrollbar-size: var(--scrollbar-size-sm);
-
-  --topbar-search-command-width: min(760px, calc(100vw - 48px));
-  --topbar-search-command-offset-top: max(calc(var(--topbar-safe-top) + 8px), 8px);
 
   --topbar-search-muted-opacity: .24;
 
@@ -1483,7 +1504,7 @@ body[data-density="compact"],
   --ui-scale: var(--density-ui-scale-compact);
   --density-factor: var(--density-compact-factor);
   --content-padding: calc(20px * var(--ui-scale));
-  --topbar-height: calc(52px * var(--ui-scale));
+  --topbar-height: calc(54px * var(--ui-scale));
   --sidebar-item-height: calc(38px * var(--ui-scale));
   --tablehead-height: calc(40px * var(--ui-scale));
 }
@@ -1507,7 +1528,7 @@ body[data-density="comfortable"],
   --ui-scale: var(--density-ui-scale-comfortable);
   --density-factor: var(--density-comfortable-factor);
   --content-padding: calc(26px * var(--ui-scale));
-  --topbar-height: calc(58px * var(--ui-scale));
+  --topbar-height: calc(60px * var(--ui-scale));
   --sidebar-item-height: calc(42px * var(--ui-scale));
   --tablehead-height: calc(46px * var(--ui-scale));
 }
@@ -1539,7 +1560,8 @@ body[data-route-mode="app"],
 
 @media (max-width: 980px) {
   :root {
-    --topbar-search-palette-width: min(680px, calc(100vw - 28px));
+    --topbar-search-command-width: min(680px, calc(100vw - 28px));
+    --topbar-search-palette-width: var(--topbar-search-command-width);
 
     --incidencias-modal-width: min(100vw - 24px, 1160px);
     --incidencias-modal-thumb-width: 82px;
@@ -1559,12 +1581,28 @@ body[data-route-mode="app"],
     --app-sidebar-current-width: 0px;
 
     --topbar-height: calc(52px * var(--ui-scale));
+    --topbar-search-height: 42px;
     --tablehead-height: 0px;
 
     --topbar-search-command-width: calc(100vw - 24px);
-    --topbar-search-palette-width: calc(100vw - 24px);
+    --topbar-search-palette-width: var(--topbar-search-command-width);
+    --topbar-search-command-offset-top:
+      calc(
+        var(--topbar-safe-top) +
+        ((var(--topbar-height) - var(--topbar-search-height)) / 2)
+      );
+
     --topbar-search-palette-max-height:
-      min(360px, calc(100dvh - var(--app-offset-topbar) - 24px));
+      min(
+        360px,
+        calc(
+          100dvh -
+          var(--topbar-search-command-offset-top) -
+          var(--topbar-search-height) -
+          var(--topbar-search-results-gap-token) -
+          18px
+        )
+      );
 
     --view-radius: calc(18px * var(--ui-scale));
     --panel-radius: calc(16px * var(--ui-scale));
@@ -1597,6 +1635,19 @@ body[data-route-mode="app"],
   }
 }
 
+@media (max-width: 640px) {
+  :root {
+    --topbar-search-height: 40px;
+    --topbar-search-command-width: calc(100vw - 20px);
+    --topbar-search-palette-width: var(--topbar-search-command-width);
+    --topbar-search-command-offset-top:
+      calc(
+        var(--topbar-safe-top) +
+        ((var(--topbar-height) - var(--topbar-search-height)) / 2)
+      );
+  }
+}
+
 @media (max-width: 420px) {
   :root {
     --ui-scale: .94;
@@ -1605,8 +1656,14 @@ body[data-route-mode="app"],
     --content-padding: var(--space-sm);
     --sidebar-mobile-width: min(92vw, 300px);
 
-    --topbar-search-command-width: calc(100vw - 20px);
-    --topbar-search-palette-width: calc(100vw - 20px);
+    --topbar-search-height: 40px;
+    --topbar-search-command-width: calc(100vw - 16px);
+    --topbar-search-palette-width: var(--topbar-search-command-width);
+    --topbar-search-command-offset-top:
+      calc(
+        var(--topbar-safe-top) +
+        ((var(--topbar-height) - var(--topbar-search-height)) / 2)
+      );
 
     --font-4xl: calc(28px * var(--ui-scale));
     --font-5xl: calc(34px * var(--ui-scale));
@@ -1638,6 +1695,7 @@ body[data-route-mode="app"],
     --focus-ring-strong:
       0 0 0 4px color-mix(in srgb, var(--accent), transparent 34%);
 
+    --topbar-search-border: color-mix(in srgb, var(--text), transparent 62%);
     --topbar-search-glass-bg:
       color-mix(in srgb, var(--main-bg), transparent 4%);
   }

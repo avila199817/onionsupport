@@ -1,14 +1,16 @@
 /* =========================================================
    ONION SUPPORT — TOPBAR
-   Archivo: src/css/layout/topbar.css
+   Archivo: /src/css/layout/topbar.css
 
    FINAL EXTREME SYSTEM · APPLE STYLE · PRO SAAS PANEL · 10/10
+   SEARCH COMMAND PALETTE · FULL VIEW GLASS · SCROLL LOCK SAFE
 
    ARQUITECTURA:
    - variables.css = tokens base / dark
    - light.css     = overrides [data-theme="light"]
+   - layout.css    = shell, stacking, scroll, mounts
    - ui.css        = componentes globales
-   - topbar.css    = estructura + estados del topbar
+   - topbar.css    = estructura + estados del topbar/search
 
    REGLAS:
    - Sin :root.
@@ -17,6 +19,8 @@
    - Sin tokens globales duplicados.
    - Search consume tokens topbar/input/dropdown.
    - Resultados consumen popover/dropdown/surface tokens.
+   - El glass de búsqueda ocupa toda la vista.
+   - Durante búsqueda activa no hay scroll de página.
 ========================================================= */
 
 
@@ -63,6 +67,37 @@
 
   --topbar-search-placeholder:
     color-mix(in srgb, var(--input-placeholder), var(--text) 18%);
+
+  --topbar-search-glass-bg:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--main-bg), transparent 20%),
+      color-mix(in srgb, var(--main-bg), transparent 12%)
+    );
+
+  --topbar-search-glass-aura:
+    radial-gradient(
+      circle at 50% 0%,
+      color-mix(in srgb, var(--accent), transparent 84%),
+      transparent 34%
+    ),
+    radial-gradient(
+      circle at 18% 22%,
+      color-mix(in srgb, var(--info), transparent 90%),
+      transparent 28%
+    ),
+    radial-gradient(
+      circle at 82% 22%,
+      color-mix(in srgb, var(--accent-3), transparent 91%),
+      transparent 30%
+    );
+
+  --topbar-search-palette-width: min(720px, calc(100vw - 48px));
+  --topbar-search-palette-max-height:
+    min(
+      var(--topbar-search-results-max-height, 420px),
+      calc(100dvh - var(--app-offset-topbar) - 40px)
+    );
 
   position: fixed;
   inset-block-start: 0;
@@ -189,10 +224,15 @@ body.auth-screen .topbar {
 
 
 /* =========================================================
-   JS SEARCH FOCUS MODE
+   SEARCH FULL VIEW GLASS + SCROLL LOCK
+   Requiere que JS active:
+   - .topbar[data-search-focus="true"]
+   - .topbar-search-wrap[data-search-focus="true"]
 ========================================================= */
 
 .topbar[data-search-focus="true"] {
+  z-index: calc(var(--z-modal) + 4);
+
   border-color:
     color-mix(
       in srgb,
@@ -209,18 +249,83 @@ body.auth-screen .topbar {
   opacity: 1;
 }
 
-.topbar-search-wrap[data-search-focus="true"] {
+.topbar[data-search-focus="true"] .topbar-search-wrap {
+  z-index: calc(var(--z-modal) + 6);
   max-inline-size: min(620px, 100%);
 }
 
-.topbar-search-wrap[data-search-focus="true"]::before {
+.topbar[data-search-focus="true"] .topbar-search-wrap::after,
+.topbar-search-wrap[data-search-focus="true"]::after {
+  content: "";
+
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+
+  background:
+    var(--topbar-search-glass-aura),
+    var(--topbar-search-glass-bg);
+
+  backdrop-filter: blur(18px) saturate(1.08);
+  -webkit-backdrop-filter: blur(18px) saturate(1.08);
+
+  pointer-events: none;
+
   opacity: 1;
+
+  transform: translateZ(0);
 }
 
-.topbar-search-wrap[data-search-focus="true"] .topbar-search {
-  border-color: var(--topbar-search-field-border-focus);
-  background: var(--topbar-search-field-bg-focus);
-  box-shadow: var(--topbar-search-field-shadow-focus);
+/* Scroll lock moderno. */
+body:has(.topbar[data-search-focus="true"]),
+body:has(.topbar-search-wrap[data-search-focus="true"]) {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+}
+
+body:has(.topbar[data-search-focus="true"]) .main-content,
+body:has(.topbar-search-wrap[data-search-focus="true"]) .main-content {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+}
+
+body:has(.topbar[data-search-focus="true"]) #app-content,
+body:has(.topbar-search-wrap[data-search-focus="true"]) #app-content,
+body:has(.topbar[data-search-focus="true"]) #view-container,
+body:has(.topbar-search-wrap[data-search-focus="true"]) #view-container {
+  pointer-events: none;
+}
+
+/* Fallback por si JS añade clases/atributos al body. */
+body.topbar-search-active,
+body.search-active,
+body.search-open,
+body[data-search-active="true"],
+body[data-topbar-search-open="true"] {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+}
+
+body.topbar-search-active .main-content,
+body.search-active .main-content,
+body.search-open .main-content,
+body[data-search-active="true"] .main-content,
+body[data-topbar-search-open="true"] .main-content {
+  overflow: hidden !important;
+  overscroll-behavior: none;
+}
+
+body.topbar-search-active #app-content,
+body.search-active #app-content,
+body.search-open #app-content,
+body[data-search-active="true"] #app-content,
+body[data-topbar-search-open="true"] #app-content,
+body.topbar-search-active #view-container,
+body.search-active #view-container,
+body.search-open #view-container,
+body[data-search-active="true"] #view-container,
+body[data-topbar-search-open="true"] #view-container {
+  pointer-events: none;
 }
 
 
@@ -381,8 +486,13 @@ body.auth-screen .topbar {
 }
 
 .topbar-search-wrap:hover::before,
-.topbar-search-wrap:focus-within::before {
+.topbar-search-wrap:focus-within::before,
+.topbar-search-wrap[data-search-focus="true"]::before {
   opacity: 1;
+}
+
+.topbar-search-wrap[data-search-focus="true"] {
+  max-inline-size: min(620px, 100%);
 }
 
 
@@ -440,7 +550,8 @@ body.auth-screen .topbar {
 }
 
 .topbar-search:focus,
-.topbar-search-wrap:focus-within .topbar-search {
+.topbar-search-wrap:focus-within .topbar-search,
+.topbar-search-wrap[data-search-focus="true"] .topbar-search {
   background: var(--topbar-search-field-bg-focus);
   border-color: var(--topbar-search-field-border-focus);
   box-shadow: var(--topbar-search-field-shadow-focus);
@@ -484,7 +595,8 @@ body.auth-screen .topbar {
   opacity: 1;
 }
 
-.topbar-search-wrap:focus-within .topbar-search-icon {
+.topbar-search-wrap:focus-within .topbar-search-icon,
+.topbar-search-wrap[data-search-focus="true"] .topbar-search-icon {
   color: var(--accent);
   opacity: 1;
   transform: translateY(-50%) scale(1.04);
@@ -492,16 +604,18 @@ body.auth-screen .topbar {
 
 
 /* =========================================================
-   SEARCH RESULTS ROOT
+   SEARCH RESULTS ROOT · CENTERED COMMAND PALETTE
 ========================================================= */
 
 .topbar-search-results {
-  position: absolute;
-  inset-block-start: calc(100% + var(--topbar-search-results-offset));
-  inset-inline-start: 0;
+  position: fixed;
 
-  inline-size: 100%;
+  inset-block-start: calc(var(--app-offset-topbar) + 10px);
+  inset-inline-start: 50%;
+
+  inline-size: var(--topbar-search-palette-width);
   min-inline-size: min(calc(100vw - 24px), 390px);
+  max-inline-size: calc(100vw - 32px);
 
   padding: 8px;
 
@@ -523,7 +637,7 @@ body.auth-screen .topbar {
   backdrop-filter: var(--blur-lg);
   -webkit-backdrop-filter: var(--blur-lg);
 
-  max-block-size: var(--topbar-search-results-max-height);
+  max-block-size: var(--topbar-search-palette-max-height);
 
   overflow-y: auto;
   overflow-x: hidden;
@@ -533,7 +647,7 @@ body.auth-screen .topbar {
 
   pointer-events: none;
 
-  transform: translateY(8px) scale(.985);
+  transform: translateX(-50%) translateY(8px) scale(.985);
   transform-origin: top center;
 
   transition:
@@ -543,11 +657,12 @@ body.auth-screen .topbar {
     border-color var(--duration-fast) var(--ease-standard),
     box-shadow var(--duration-fast) var(--ease-standard);
 
-  z-index: var(--z-dropdown);
+  z-index: calc(var(--z-modal) + 8);
 
   isolation: isolate;
 
   scrollbar-width: thin;
+  scrollbar-gutter: stable;
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
@@ -614,7 +729,7 @@ body.auth-screen .topbar {
 
   pointer-events: auto;
 
-  transform: translateY(0) scale(1);
+  transform: translateX(-50%) translateY(0) scale(1);
 }
 
 
@@ -1070,7 +1185,8 @@ mark,
     flex: 0 1 min(520px, 48vw);
   }
 
-  .topbar-search-wrap:focus-within {
+  .topbar-search-wrap:focus-within,
+  .topbar-search-wrap[data-search-focus="true"] {
     max-inline-size: min(620px, 52vw);
   }
 }
@@ -1122,6 +1238,10 @@ mark,
   .topbar-search-wrap[data-search-focus="true"] {
     max-inline-size: 100%;
   }
+
+  .topbar-search-results {
+    --topbar-search-palette-width: min(680px, calc(100vw - 28px));
+  }
 }
 
 
@@ -1152,14 +1272,11 @@ mark,
   }
 
   .topbar-search-results {
-    position: fixed;
-
     inset-block-start: calc(var(--app-offset-topbar) + 8px);
-    inset-inline-start: 12px;
-    inset-inline-end: 12px;
 
-    inline-size: auto;
+    inline-size: calc(100vw - 24px);
     min-inline-size: 0;
+    max-inline-size: calc(100vw - 24px);
 
     max-block-size: min(360px, calc(100dvh - var(--app-offset-topbar) - 24px));
 
@@ -1202,8 +1319,8 @@ mark,
   }
 
   .topbar-search-results {
-    inset-inline-start: 10px;
-    inset-inline-end: 10px;
+    inline-size: calc(100vw - 20px);
+    max-inline-size: calc(100vw - 20px);
 
     padding: 7px;
   }
@@ -1275,8 +1392,65 @@ mark,
     background: var(--topbar-bg);
   }
 
+  .topbar[data-search-focus="true"] .topbar-search-wrap::after,
+  .topbar-search-wrap[data-search-focus="true"]::after {
+    background:
+      var(--topbar-search-glass-aura),
+      color-mix(in srgb, var(--main-bg), transparent 8%);
+  }
+
   .topbar-search-results {
     background: var(--dropdown-bg, var(--surface-2));
+  }
+}
+
+
+/* =========================================================
+   FORCED COLORS
+========================================================= */
+
+@media (forced-colors: active) {
+  .topbar,
+  .topbar-search,
+  .topbar-search-results,
+  .search-result,
+  .topbar-mobile-toggle {
+    forced-color-adjust: auto;
+  }
+
+  .topbar,
+  .topbar-search-results {
+    background: Canvas;
+    color: CanvasText;
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+
+  .topbar-search {
+    background: Field;
+    color: FieldText;
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+
+  .search-result.active,
+  .search-result[aria-selected="true"] {
+    outline: 1px solid Highlight;
+  }
+}
+
+
+/* =========================================================
+   REDUCED TRANSPARENCY
+========================================================= */
+
+@media (prefers-reduced-transparency: reduce) {
+  .topbar,
+  .topbar-search-results,
+  .topbar[data-search-focus="true"] .topbar-search-wrap::after,
+  .topbar-search-wrap[data-search-focus="true"]::after {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }
 
@@ -1294,6 +1468,7 @@ mark,
   .topbar-mobile-toggle,
   .topbar-search-wrap,
   .topbar-search-wrap::before,
+  .topbar-search-wrap::after,
   .topbar-search,
   .topbar-search-icon,
   .topbar-search-results,
@@ -1318,7 +1493,7 @@ mark,
   }
 
   .topbar-search-results {
-    transform: none !important;
+    transform: translateX(-50%) !important;
   }
 }
 

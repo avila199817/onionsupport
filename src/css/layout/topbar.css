@@ -2,8 +2,9 @@
    ONION SUPPORT — TOPBAR
    Archivo: /src/css/layout/topbar.css
 
-   FINAL EXTREME SYSTEM · APPLE STYLE · PRO SAAS PANEL · 10/10
+   FINAL EXTREME SYSTEM · APPLE STYLE · PRO SAAS PANEL · 11/10
    SEARCH COMMAND PALETTE · FULL VIEW GLASS · SCROLL LOCK SAFE
+   NO CSS IN JS CONTRACT · TOKEN DRIVEN
 
    ARQUITECTURA:
    - variables.css = tokens base / dark
@@ -17,10 +18,12 @@
    - Sin [data-theme="light"].
    - Sin paleta light local.
    - Sin tokens globales duplicados.
+   - Sin depender de style="" desde JS.
    - Search consume tokens topbar/input/dropdown.
    - Resultados consumen popover/dropdown/surface tokens.
    - El glass de búsqueda ocupa toda la vista.
    - Durante búsqueda activa no hay scroll de página.
+   - El input se convierte en command palette centrada.
 ========================================================= */
 
 
@@ -39,8 +42,10 @@
   --topbar-search-field-bg-focus: var(--topbar-search-bg-focus, var(--input-bg-focus));
 
   --topbar-search-field-border: var(--topbar-search-border, var(--input-border));
+
   --topbar-search-field-border-hover:
     color-mix(in srgb, var(--input-border-hover), var(--accent) 12%);
+
   --topbar-search-field-border-focus:
     color-mix(in srgb, var(--input-border-focus), var(--accent) 18%);
 
@@ -68,17 +73,42 @@
   --topbar-search-placeholder:
     color-mix(in srgb, var(--input-placeholder), var(--text) 18%);
 
+  --topbar-search-command-top:
+    max(calc(var(--topbar-safe-top) + 7px), 9px);
+
+  --topbar-search-command-width:
+    min(720px, calc(100vw - 48px));
+
+  --topbar-search-command-width-focused:
+    min(760px, calc(100vw - 48px));
+
+  --topbar-search-results-top:
+    calc(
+      var(--topbar-search-command-top) +
+      var(--topbar-search-visible-height) +
+      10px
+    );
+
+  --topbar-search-palette-width:
+    var(--topbar-search-command-width-focused);
+
+  --topbar-search-palette-max-height:
+    min(
+      var(--topbar-search-results-max-height, 420px),
+      calc(100dvh - var(--topbar-search-results-top) - 22px)
+    );
+
   --topbar-search-glass-bg:
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--main-bg), transparent 20%),
-      color-mix(in srgb, var(--main-bg), transparent 12%)
+      color-mix(in srgb, var(--main-bg), transparent 18%),
+      color-mix(in srgb, var(--main-bg), transparent 8%)
     );
 
   --topbar-search-glass-aura:
     radial-gradient(
       circle at 50% 0%,
-      color-mix(in srgb, var(--accent), transparent 84%),
+      color-mix(in srgb, var(--accent), transparent 82%),
       transparent 34%
     ),
     radial-gradient(
@@ -90,13 +120,22 @@
       circle at 82% 22%,
       color-mix(in srgb, var(--accent-3), transparent 91%),
       transparent 30%
+    ),
+    radial-gradient(
+      circle at 50% 100%,
+      color-mix(in srgb, var(--text-strong), transparent 96%),
+      transparent 36%
     );
 
-  --topbar-search-palette-width: min(720px, calc(100vw - 48px));
-  --topbar-search-palette-max-height:
-    min(
-      var(--topbar-search-results-max-height, 420px),
-      calc(100dvh - var(--app-offset-topbar) - 40px)
+  --topbar-search-glass-noise:
+    linear-gradient(
+      color-mix(in srgb, var(--text-strong), transparent 98.8%) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--text-strong), transparent 98.8%) 1px,
+      transparent 1px
     );
 
   position: fixed;
@@ -224,86 +263,79 @@ body.auth-screen .topbar {
 
 
 /* =========================================================
-   SEARCH FULL VIEW GLASS + SCROLL LOCK
-   Requiere que JS active:
+   FULL VIEW SEARCH GLASS · CSS ONLY
+   JS debe activar:
+   - html/body.topbar-search-active
+   - body.search-active / body.search-open
+   - html/body[data-topbar-search-open="true"]
+   - body[data-search-active="true"]
    - .topbar[data-search-focus="true"]
    - .topbar-search-wrap[data-search-focus="true"]
+   - [data-search-muted="true"]
 ========================================================= */
 
-.topbar[data-search-focus="true"] {
-  z-index: calc(var(--z-modal) + 4);
-
-  border-color:
-    color-mix(
-      in srgb,
-      var(--accent-border, var(--border-accent)) 70%,
-      var(--topbar-border)
-    );
-
-  box-shadow:
-    0 16px 34px color-mix(in srgb, var(--text), transparent 88%),
-    inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 95%);
-}
-
-.topbar[data-search-focus="true"]::before {
-  opacity: 1;
-}
-
-.topbar[data-search-focus="true"] .topbar-search-wrap {
-  z-index: calc(var(--z-modal) + 6);
-  max-inline-size: min(620px, 100%);
-}
-
-.topbar[data-search-focus="true"] .topbar-search-wrap::after,
-.topbar-search-wrap[data-search-focus="true"]::after {
-  content: "";
-
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-
-  background:
-    var(--topbar-search-glass-aura),
-    var(--topbar-search-glass-bg);
-
-  backdrop-filter: blur(18px) saturate(1.08);
-  -webkit-backdrop-filter: blur(18px) saturate(1.08);
-
-  pointer-events: none;
-
-  opacity: 1;
-
-  transform: translateZ(0);
-}
-
-/* Scroll lock moderno. */
-body:has(.topbar[data-search-focus="true"]),
-body:has(.topbar-search-wrap[data-search-focus="true"]) {
-  overflow: hidden !important;
-  overscroll-behavior: none;
-}
-
-body:has(.topbar[data-search-focus="true"]) .main-content,
-body:has(.topbar-search-wrap[data-search-focus="true"]) .main-content {
-  overflow: hidden !important;
-  overscroll-behavior: none;
-}
-
-body:has(.topbar[data-search-focus="true"]) #app-content,
-body:has(.topbar-search-wrap[data-search-focus="true"]) #app-content,
-body:has(.topbar[data-search-focus="true"]) #view-container,
-body:has(.topbar-search-wrap[data-search-focus="true"]) #view-container {
-  pointer-events: none;
-}
-
-/* Fallback por si JS añade clases/atributos al body. */
+html.topbar-search-active,
+html[data-topbar-search-open="true"],
 body.topbar-search-active,
 body.search-active,
 body.search-open,
 body[data-search-active="true"],
 body[data-topbar-search-open="true"] {
   overflow: hidden !important;
-  overscroll-behavior: none;
+  overscroll-behavior: none !important;
+}
+
+body.topbar-search-active,
+body.search-active,
+body.search-open,
+body[data-search-active="true"],
+body[data-topbar-search-open="true"] {
+  touch-action: none;
+}
+
+body.topbar-search-active::before,
+body.search-active::before,
+body.search-open::before,
+body[data-search-active="true"]::before,
+body[data-topbar-search-open="true"]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-modal) + 1);
+
+  pointer-events: none;
+
+  background:
+    var(--topbar-search-glass-aura),
+    var(--topbar-search-glass-bg);
+
+  backdrop-filter: blur(20px) saturate(1.08);
+  -webkit-backdrop-filter: blur(20px) saturate(1.08);
+
+  opacity: 1;
+
+  transform: translateZ(0);
+}
+
+body.topbar-search-active::after,
+body.search-active::after,
+body.search-open::after,
+body[data-search-active="true"]::after,
+body[data-topbar-search-open="true"]::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-modal) + 2);
+
+  pointer-events: none;
+
+  background: var(--topbar-search-glass-noise);
+  background-size: 42px 42px;
+
+  mask-image: linear-gradient(180deg, rgba(0,0,0,.18), transparent 86%);
+  -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,.18), transparent 86%);
+
+  opacity: .16;
 }
 
 body.topbar-search-active .main-content,
@@ -312,7 +344,8 @@ body.search-open .main-content,
 body[data-search-active="true"] .main-content,
 body[data-topbar-search-open="true"] .main-content {
   overflow: hidden !important;
-  overscroll-behavior: none;
+  overscroll-behavior: none !important;
+  scrollbar-gutter: stable;
 }
 
 body.topbar-search-active #app-content,
@@ -326,6 +359,93 @@ body.search-open #view-container,
 body[data-search-active="true"] #view-container,
 body[data-topbar-search-open="true"] #view-container {
   pointer-events: none;
+  user-select: none;
+}
+
+body.topbar-search-active #app-content *,
+body.search-active #app-content *,
+body.search-open #app-content *,
+body[data-search-active="true"] #app-content *,
+body[data-topbar-search-open="true"] #app-content * {
+  pointer-events: none;
+}
+
+body.topbar-search-active #sidebar-mount,
+body.search-active #sidebar-mount,
+body.search-open #sidebar-mount,
+body[data-search-active="true"] #sidebar-mount,
+body[data-topbar-search-open="true"] #sidebar-mount,
+body.topbar-search-active [data-sidebar-mount],
+body.search-active [data-sidebar-mount],
+body.search-open [data-sidebar-mount],
+body[data-search-active="true"] [data-sidebar-mount],
+body[data-topbar-search-open="true"] [data-sidebar-mount] {
+  pointer-events: none;
+}
+
+body.topbar-search-active .sidebar,
+body.search-active .sidebar,
+body.search-open .sidebar,
+body[data-search-active="true"] .sidebar,
+body[data-topbar-search-open="true"] .sidebar {
+  filter: blur(2px);
+  opacity: .32;
+}
+
+body.topbar-search-active .table-head,
+body.search-active .table-head,
+body.search-open .table-head,
+body[data-search-active="true"] .table-head,
+body[data-topbar-search-open="true"] .table-head {
+  opacity: 0;
+  pointer-events: none;
+}
+
+
+/* =========================================================
+   TOPBAR SEARCH FOCUS STATE
+========================================================= */
+
+.topbar[data-search-focus="true"] {
+  z-index: calc(var(--z-modal) + 6);
+
+  border-color:
+    color-mix(
+      in srgb,
+      var(--accent-border, var(--border-accent)) 70%,
+      var(--topbar-border)
+    );
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--text-strong), transparent 97%),
+      transparent 70%
+    ),
+    color-mix(in srgb, var(--topbar-bg), transparent 16%);
+
+  box-shadow:
+    0 16px 34px color-mix(in srgb, var(--text), transparent 88%),
+    inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 95%);
+}
+
+.topbar[data-search-focus="true"]::before {
+  opacity: 1;
+}
+
+.topbar[data-search-focus="true"]::after {
+  opacity: .36;
+}
+
+.topbar [data-search-muted="true"],
+[data-search-muted="true"] {
+  opacity: .24;
+  pointer-events: none;
+  user-select: none;
+
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    filter var(--duration-fast) var(--ease-standard);
 }
 
 
@@ -462,7 +582,9 @@ body[data-topbar-search-open="true"] #view-container {
 
   transition:
     max-inline-size var(--duration-normal) var(--ease-emphasis),
-    filter var(--duration-normal) var(--ease-standard);
+    inline-size var(--duration-normal) var(--ease-emphasis),
+    filter var(--duration-normal) var(--ease-standard),
+    transform var(--duration-normal) var(--ease-emphasis);
 }
 
 .topbar-search-wrap::before {
@@ -487,12 +609,40 @@ body[data-topbar-search-open="true"] #view-container {
 
 .topbar-search-wrap:hover::before,
 .topbar-search-wrap:focus-within::before,
-.topbar-search-wrap[data-search-focus="true"]::before {
+.topbar-search-wrap[data-search-focus="true"]::before,
+.topbar-search-wrap[data-search-open="true"]::before {
   opacity: 1;
 }
 
-.topbar-search-wrap[data-search-focus="true"] {
-  max-inline-size: min(620px, 100%);
+.topbar-search-wrap[data-search-focus="true"],
+.topbar-search-wrap[data-search-open="true"] {
+  position: fixed;
+
+  inset-block-start: var(--topbar-search-command-top);
+  inset-inline-start: 50%;
+  inset-inline-end: auto;
+
+  inline-size: var(--topbar-search-command-width-focused);
+  max-inline-size: calc(100vw - 48px);
+  min-inline-size: min(360px, calc(100vw - 48px));
+
+  margin: 0;
+
+  z-index: calc(var(--z-modal) + 8);
+
+  transform: translateX(-50%);
+}
+
+.topbar-search-wrap[data-search-focus="true"]::before,
+.topbar-search-wrap[data-search-open="true"]::before {
+  inset: -5px;
+
+  border-radius: calc(var(--topbar-search-shell-radius) + 5px);
+
+  filter: blur(1px);
+  opacity: 1;
+
+  transform: scale(1.01);
 }
 
 
@@ -551,10 +701,23 @@ body[data-topbar-search-open="true"] #view-container {
 
 .topbar-search:focus,
 .topbar-search-wrap:focus-within .topbar-search,
-.topbar-search-wrap[data-search-focus="true"] .topbar-search {
+.topbar-search-wrap[data-search-focus="true"] .topbar-search,
+.topbar-search-wrap[data-search-open="true"] .topbar-search {
   background: var(--topbar-search-field-bg-focus);
   border-color: var(--topbar-search-field-border-focus);
   box-shadow: var(--topbar-search-field-shadow-focus);
+}
+
+.topbar-search-wrap[data-search-focus="true"] .topbar-search,
+.topbar-search-wrap[data-search-open="true"] .topbar-search {
+  block-size: max(var(--topbar-search-visible-height), 50px);
+
+  padding-inline-start: 46px;
+  padding-inline-end: 18px;
+
+  font-size: var(--font-base);
+
+  border-radius: var(--radius-pill);
 }
 
 .topbar-search:disabled {
@@ -596,10 +759,19 @@ body[data-topbar-search-open="true"] #view-container {
 }
 
 .topbar-search-wrap:focus-within .topbar-search-icon,
-.topbar-search-wrap[data-search-focus="true"] .topbar-search-icon {
+.topbar-search-wrap[data-search-focus="true"] .topbar-search-icon,
+.topbar-search-wrap[data-search-open="true"] .topbar-search-icon {
   color: var(--accent);
   opacity: 1;
   transform: translateY(-50%) scale(1.04);
+}
+
+.topbar-search-wrap[data-search-focus="true"] .topbar-search-icon,
+.topbar-search-wrap[data-search-open="true"] .topbar-search-icon {
+  inset-inline-start: 17px;
+
+  inline-size: 18px;
+  block-size: 18px;
 }
 
 
@@ -610,7 +782,7 @@ body[data-topbar-search-open="true"] #view-container {
 .topbar-search-results {
   position: fixed;
 
-  inset-block-start: calc(var(--app-offset-topbar) + 10px);
+  inset-block-start: var(--topbar-search-results-top);
   inset-inline-start: 50%;
 
   inline-size: var(--topbar-search-palette-width);
@@ -655,9 +827,10 @@ body[data-topbar-search-open="true"] #view-container {
     visibility var(--duration-fast) var(--ease-out),
     transform var(--duration-fast) var(--ease-out),
     border-color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard);
+    box-shadow var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
 
-  z-index: calc(var(--z-modal) + 8);
+  z-index: calc(var(--z-modal) + 9);
 
   isolation: isolate;
 
@@ -723,7 +896,8 @@ body[data-topbar-search-open="true"] #view-container {
 }
 
 .topbar-search-results.active,
-.topbar-search-results:not([hidden]) {
+.topbar-search-results:not([hidden]),
+.topbar-search-results[data-search-open="true"] {
   opacity: 1;
   visibility: visible;
 
@@ -978,6 +1152,7 @@ body[data-topbar-search-open="true"] #view-container {
   white-space: nowrap;
 }
 
+.search-title-main,
 .search-title > span:first-child {
   min-inline-size: 0;
 
@@ -1185,9 +1360,14 @@ mark,
     flex: 0 1 min(520px, 48vw);
   }
 
-  .topbar-search-wrap:focus-within,
-  .topbar-search-wrap[data-search-focus="true"] {
+  .topbar-search-wrap:focus-within {
     max-inline-size: min(620px, 52vw);
+  }
+
+  .topbar-search-wrap[data-search-focus="true"],
+  .topbar-search-wrap[data-search-open="true"] {
+    flex: none;
+    max-inline-size: calc(100vw - 48px);
   }
 }
 
@@ -1198,6 +1378,15 @@ mark,
 
 @media (max-width: 900px) {
   .topbar {
+    --topbar-search-command-width:
+      min(680px, calc(100vw - 28px));
+
+    --topbar-search-command-width-focused:
+      min(680px, calc(100vw - 28px));
+
+    --topbar-search-palette-width:
+      min(680px, calc(100vw - 28px));
+
     inset-inline-start: 0;
     inset-inline-end: 0;
 
@@ -1235,12 +1424,10 @@ mark,
     flex: 1 1 auto;
   }
 
-  .topbar-search-wrap[data-search-focus="true"] {
-    max-inline-size: 100%;
-  }
-
-  .topbar-search-results {
-    --topbar-search-palette-width: min(680px, calc(100vw - 28px));
+  .topbar-search-wrap[data-search-focus="true"],
+  .topbar-search-wrap[data-search-open="true"] {
+    max-inline-size: calc(100vw - 28px);
+    min-inline-size: min(320px, calc(100vw - 28px));
   }
 }
 
@@ -1250,6 +1437,26 @@ mark,
 ========================================================= */
 
 @media (max-width: 768px) {
+  .topbar {
+    --topbar-search-command-top:
+      max(calc(var(--topbar-safe-top) + 7px), 8px);
+
+    --topbar-search-command-width:
+      calc(100vw - 24px);
+
+    --topbar-search-command-width-focused:
+      calc(100vw - 24px);
+
+    --topbar-search-palette-width:
+      calc(100vw - 24px);
+
+    --topbar-search-palette-max-height:
+      min(
+        360px,
+        calc(100dvh - var(--topbar-search-results-top) - 18px)
+      );
+  }
+
   .topbar-title {
     display: none;
   }
@@ -1271,14 +1478,15 @@ mark,
     font-size: var(--font-md);
   }
 
-  .topbar-search-results {
-    inset-block-start: calc(var(--app-offset-topbar) + 8px);
+  .topbar-search-wrap[data-search-focus="true"] .topbar-search,
+  .topbar-search-wrap[data-search-open="true"] .topbar-search {
+    block-size: 46px;
+  }
 
-    inline-size: calc(100vw - 24px);
+  .topbar-search-results {
+    inline-size: var(--topbar-search-palette-width);
     min-inline-size: 0;
     max-inline-size: calc(100vw - 24px);
-
-    max-block-size: min(360px, calc(100dvh - var(--app-offset-topbar) - 24px));
 
     border-radius: var(--radius-xl);
   }
@@ -1291,6 +1499,15 @@ mark,
 
 @media (max-width: 640px) {
   .topbar {
+    --topbar-search-command-width:
+      calc(100vw - 20px);
+
+    --topbar-search-command-width-focused:
+      calc(100vw - 20px);
+
+    --topbar-search-palette-width:
+      calc(100vw - 20px);
+
     gap: var(--space-xs);
 
     padding-inline-end: calc(var(--space-sm) + var(--topbar-safe-right));
@@ -1314,14 +1531,16 @@ mark,
     padding-inline-end: 13px;
   }
 
+  .topbar-search-wrap[data-search-focus="true"] .topbar-search,
+  .topbar-search-wrap[data-search-open="true"] .topbar-search {
+    padding-inline-start: 41px;
+  }
+
   .topbar-search-icon {
     inset-inline-start: 15px;
   }
 
   .topbar-search-results {
-    inline-size: calc(100vw - 20px);
-    max-inline-size: calc(100vw - 20px);
-
     padding: 7px;
   }
 
@@ -1352,6 +1571,15 @@ mark,
 
 @media (max-width: 420px) {
   .topbar {
+    --topbar-search-command-width:
+      calc(100vw - 16px);
+
+    --topbar-search-command-width-focused:
+      calc(100vw - 16px);
+
+    --topbar-search-palette-width:
+      calc(100vw - 16px);
+
     padding-inline-end: calc(10px + var(--topbar-safe-right));
     padding-inline-start: calc(10px + var(--topbar-safe-left));
   }
@@ -1365,6 +1593,12 @@ mark,
     block-size: 40px;
     padding-inline-start: 38px;
     font-size: var(--font-sm);
+  }
+
+  .topbar-search-wrap[data-search-focus="true"] .topbar-search,
+  .topbar-search-wrap[data-search-open="true"] .topbar-search {
+    block-size: 44px;
+    padding-inline-start: 39px;
   }
 
   .topbar-search-icon {
@@ -1384,6 +1618,39 @@ mark,
 
 
 /* =========================================================
+   FALLBACK SIN :has()
+   Nota:
+   - El modo principal usa clases/datasets que activa JS.
+   - :has sólo queda como refuerzo cuando el DOM ya tenga estado.
+========================================================= */
+
+@supports selector(:has(*)) {
+  body:has(.topbar[data-search-focus="true"]),
+  body:has(.topbar-search-wrap[data-search-focus="true"]),
+  body:has(.topbar-search-wrap[data-search-open="true"]) {
+    overflow: hidden !important;
+    overscroll-behavior: none !important;
+  }
+
+  body:has(.topbar[data-search-focus="true"]) .main-content,
+  body:has(.topbar-search-wrap[data-search-focus="true"]) .main-content,
+  body:has(.topbar-search-wrap[data-search-open="true"]) .main-content {
+    overflow: hidden !important;
+    overscroll-behavior: none !important;
+  }
+
+  body:has(.topbar[data-search-focus="true"]) #app-content,
+  body:has(.topbar-search-wrap[data-search-focus="true"]) #app-content,
+  body:has(.topbar-search-wrap[data-search-open="true"]) #app-content,
+  body:has(.topbar[data-search-focus="true"]) #view-container,
+  body:has(.topbar-search-wrap[data-search-focus="true"]) #view-container,
+  body:has(.topbar-search-wrap[data-search-open="true"]) #view-container {
+    pointer-events: none;
+  }
+}
+
+
+/* =========================================================
    FALLBACK SIN BACKDROP FILTER
 ========================================================= */
 
@@ -1392,11 +1659,14 @@ mark,
     background: var(--topbar-bg);
   }
 
-  .topbar[data-search-focus="true"] .topbar-search-wrap::after,
-  .topbar-search-wrap[data-search-focus="true"]::after {
+  body.topbar-search-active::before,
+  body.search-active::before,
+  body.search-open::before,
+  body[data-search-active="true"]::before,
+  body[data-topbar-search-open="true"]::before {
     background:
       var(--topbar-search-glass-aura),
-      color-mix(in srgb, var(--main-bg), transparent 8%);
+      color-mix(in srgb, var(--main-bg), transparent 6%);
   }
 
   .topbar-search-results {
@@ -1416,6 +1686,19 @@ mark,
   .search-result,
   .topbar-mobile-toggle {
     forced-color-adjust: auto;
+  }
+
+  body.topbar-search-active::before,
+  body.search-active::before,
+  body.search-open::before,
+  body[data-search-active="true"]::before,
+  body[data-topbar-search-open="true"]::before,
+  body.topbar-search-active::after,
+  body.search-active::after,
+  body.search-open::after,
+  body[data-search-active="true"]::after,
+  body[data-topbar-search-open="true"]::after {
+    display: none;
   }
 
   .topbar,
@@ -1447,10 +1730,21 @@ mark,
 @media (prefers-reduced-transparency: reduce) {
   .topbar,
   .topbar-search-results,
-  .topbar[data-search-focus="true"] .topbar-search-wrap::after,
-  .topbar-search-wrap[data-search-focus="true"]::after {
+  body.topbar-search-active::before,
+  body.search-active::before,
+  body.search-open::before,
+  body[data-search-active="true"]::before,
+  body[data-topbar-search-open="true"]::before {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+  }
+
+  body.topbar-search-active::before,
+  body.search-active::before,
+  body.search-open::before,
+  body[data-search-active="true"]::before,
+  body[data-topbar-search-open="true"]::before {
+    background: color-mix(in srgb, var(--main-bg), transparent 4%);
   }
 }
 
@@ -1468,7 +1762,6 @@ mark,
   .topbar-mobile-toggle,
   .topbar-search-wrap,
   .topbar-search-wrap::before,
-  .topbar-search-wrap::after,
   .topbar-search,
   .topbar-search-icon,
   .topbar-search-results,
@@ -1492,6 +1785,11 @@ mark,
     transform: none !important;
   }
 
+  .topbar-search-wrap[data-search-focus="true"],
+  .topbar-search-wrap[data-search-open="true"] {
+    transform: translateX(-50%) !important;
+  }
+
   .topbar-search-results {
     transform: translateX(-50%) !important;
   }
@@ -1504,6 +1802,19 @@ mark,
 
 @media print {
   .topbar {
+    display: none !important;
+  }
+
+  body.topbar-search-active::before,
+  body.search-active::before,
+  body.search-open::before,
+  body[data-search-active="true"]::before,
+  body[data-topbar-search-open="true"]::before,
+  body.topbar-search-active::after,
+  body.search-active::after,
+  body.search-open::after,
+  body[data-search-active="true"]::after,
+  body[data-topbar-search-open="true"]::after {
     display: none !important;
   }
 }

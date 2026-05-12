@@ -18,10 +18,9 @@
    - abrir modal de incidencia desde search
    - abrir factura desde search
    - actualizar estados visuales del panel search
-   - activar overlay glass global por clases/data-attrs
-   - montar glass dentro de #app-content/#view-container/#main-content
+   - activar overlay glass por clases/data-attrs
+   - NO crear nodos glass ni estilos inline
    - bloquear scroll mientras search está activo
-   - centrar la atención visual en el buscador
    - mantener topbar y sidebar nítidos
 
    REGLAS:
@@ -30,7 +29,8 @@
    - Sin style tags.
    - Sin importarse a sí mismo.
    - CSS vive en /src/css/layout/topbar.css.
-   - JS solo emite clases, atributos, nodos y datos.
+   - JS solo emite clases, atributos, nodos semánticos y datos.
+   - El glass lo pinta CSS mediante .main-content::before/::after.
 ========================================================= */
 
 import {
@@ -52,24 +52,12 @@ import {
    SEARCH FOCUS RUNTIME
 ========================================================= */
 
-const SEARCH_GLASS_ID =
-  "topbar-search-glass-overlay";
-
-const SEARCH_SOURCE =
-  "topbar-search";
+const SEARCH_SOURCE = "topbar-search";
 
 const searchFocusRuntime = {
-  runtime:
-    null,
-
-  getDom:
-    null,
-
-  active:
-    false,
-
-  glass:
-    null,
+  runtime: null,
+  getDom: null,
+  active: false,
 };
 
 /* =========================================================
@@ -77,123 +65,65 @@ const searchFocusRuntime = {
 ========================================================= */
 
 const SEARCH_ACTIONS = Object.freeze({
-  NAVIGATE:
-    "navigate",
-
-  OPEN_USUARIO:
-    "open_usuario",
-
-  OPEN_CLIENTE:
-    "open_cliente",
-
-  OPEN_INCIDENCIA:
-    "open_incidencia",
-
-  OPEN_FACTURA:
-    "open_factura",
+  NAVIGATE: "navigate",
+  OPEN_USUARIO: "open_usuario",
+  OPEN_CLIENTE: "open_cliente",
+  OPEN_INCIDENCIA: "open_incidencia",
+  OPEN_FACTURA: "open_factura",
 });
 
 const ENTITY_TYPES = Object.freeze({
-  NAV:
-    "nav",
-
-  USUARIO:
-    "usuario",
-
-  CLIENTE:
-    "cliente",
-
-  INCIDENCIA:
-    "incidencia",
-
-  FACTURA:
-    "factura",
-
-  GENERAL:
-    "general",
+  NAV: "nav",
+  USUARIO: "usuario",
+  CLIENTE: "cliente",
+  INCIDENCIA: "incidencia",
+  FACTURA: "factura",
+  GENERAL: "general",
 });
 
 const TYPE_ALIASES = Object.freeze({
-  nav:
-    ENTITY_TYPES.NAV,
-  route:
-    ENTITY_TYPES.NAV,
-  routes:
-    ENTITY_TYPES.NAV,
-  ruta:
-    ENTITY_TYPES.NAV,
-  rutas:
-    ENTITY_TYPES.NAV,
-  navigation:
-    ENTITY_TYPES.NAV,
-  navegacion:
-    ENTITY_TYPES.NAV,
+  nav: ENTITY_TYPES.NAV,
+  route: ENTITY_TYPES.NAV,
+  routes: ENTITY_TYPES.NAV,
+  ruta: ENTITY_TYPES.NAV,
+  rutas: ENTITY_TYPES.NAV,
+  navigation: ENTITY_TYPES.NAV,
+  navegacion: ENTITY_TYPES.NAV,
 
-  user:
-    ENTITY_TYPES.USUARIO,
-  users:
-    ENTITY_TYPES.USUARIO,
-  usuario:
-    ENTITY_TYPES.USUARIO,
-  usuarios:
-    ENTITY_TYPES.USUARIO,
-  account:
-    ENTITY_TYPES.USUARIO,
-  accounts:
-    ENTITY_TYPES.USUARIO,
-  profile:
-    ENTITY_TYPES.USUARIO,
-  perfil:
-    ENTITY_TYPES.USUARIO,
-  cuenta:
-    ENTITY_TYPES.USUARIO,
+  user: ENTITY_TYPES.USUARIO,
+  users: ENTITY_TYPES.USUARIO,
+  usuario: ENTITY_TYPES.USUARIO,
+  usuarios: ENTITY_TYPES.USUARIO,
+  account: ENTITY_TYPES.USUARIO,
+  accounts: ENTITY_TYPES.USUARIO,
+  profile: ENTITY_TYPES.USUARIO,
+  perfil: ENTITY_TYPES.USUARIO,
+  cuenta: ENTITY_TYPES.USUARIO,
 
-  client:
-    ENTITY_TYPES.CLIENTE,
-  clients:
-    ENTITY_TYPES.CLIENTE,
-  cliente:
-    ENTITY_TYPES.CLIENTE,
-  clientes:
-    ENTITY_TYPES.CLIENTE,
-  customer:
-    ENTITY_TYPES.CLIENTE,
-  customers:
-    ENTITY_TYPES.CLIENTE,
+  client: ENTITY_TYPES.CLIENTE,
+  clients: ENTITY_TYPES.CLIENTE,
+  cliente: ENTITY_TYPES.CLIENTE,
+  clientes: ENTITY_TYPES.CLIENTE,
+  customer: ENTITY_TYPES.CLIENTE,
+  customers: ENTITY_TYPES.CLIENTE,
 
-  ticket:
-    ENTITY_TYPES.INCIDENCIA,
-  tickets:
-    ENTITY_TYPES.INCIDENCIA,
-  incidencia:
-    ENTITY_TYPES.INCIDENCIA,
-  incidencias:
-    ENTITY_TYPES.INCIDENCIA,
-  issue:
-    ENTITY_TYPES.INCIDENCIA,
-  issues:
-    ENTITY_TYPES.INCIDENCIA,
-  support:
-    ENTITY_TYPES.INCIDENCIA,
-  soporte:
-    ENTITY_TYPES.INCIDENCIA,
+  ticket: ENTITY_TYPES.INCIDENCIA,
+  tickets: ENTITY_TYPES.INCIDENCIA,
+  incidencia: ENTITY_TYPES.INCIDENCIA,
+  incidencias: ENTITY_TYPES.INCIDENCIA,
+  issue: ENTITY_TYPES.INCIDENCIA,
+  issues: ENTITY_TYPES.INCIDENCIA,
+  support: ENTITY_TYPES.INCIDENCIA,
+  soporte: ENTITY_TYPES.INCIDENCIA,
 
-  factura:
-    ENTITY_TYPES.FACTURA,
-  facturas:
-    ENTITY_TYPES.FACTURA,
-  invoice:
-    ENTITY_TYPES.FACTURA,
-  invoices:
-    ENTITY_TYPES.FACTURA,
-  bill:
-    ENTITY_TYPES.FACTURA,
-  billing:
-    ENTITY_TYPES.FACTURA,
-  recibo:
-    ENTITY_TYPES.FACTURA,
-  recibos:
-    ENTITY_TYPES.FACTURA,
+  factura: ENTITY_TYPES.FACTURA,
+  facturas: ENTITY_TYPES.FACTURA,
+  invoice: ENTITY_TYPES.FACTURA,
+  invoices: ENTITY_TYPES.FACTURA,
+  bill: ENTITY_TYPES.FACTURA,
+  billing: ENTITY_TYPES.FACTURA,
+  recibo: ENTITY_TYPES.FACTURA,
+  recibos: ENTITY_TYPES.FACTURA,
 });
 
 /* =========================================================
@@ -201,10 +131,7 @@ const TYPE_ALIASES = Object.freeze({
 ========================================================= */
 
 function isBrowser() {
-  return (
-    typeof window !== "undefined" &&
-    typeof document !== "undefined"
-  );
+  return typeof window !== "undefined" && typeof document !== "undefined";
 }
 
 function isFunction(value) {
@@ -212,56 +139,26 @@ function isFunction(value) {
 }
 
 function safeText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
-
-  const text =
-    String(value).trim();
-
+  if (value === null || value === undefined) return fallback;
+  const text = String(value).trim();
   return text || fallback;
 }
 
 function safeObject(value) {
-  return value &&
-    typeof value === "object" &&
-    !Array.isArray(value)
+  return value && typeof value === "object" && !Array.isArray(value)
     ? value
     : {};
 }
 
 function safeArray(value) {
-  return Array.isArray(value)
-    ? value
-    : [];
+  return Array.isArray(value) ? value : [];
 }
 
 function first(...values) {
   for (const value of values) {
-    if (
-      value === undefined ||
-      value === null
-    ) {
-      continue;
-    }
-
-    if (
-      typeof value === "string" &&
-      value.trim() === ""
-    ) {
-      continue;
-    }
-
-    if (
-      Array.isArray(value) &&
-      value.length === 0
-    ) {
-      continue;
-    }
-
+    if (value === undefined || value === null) continue;
+    if (typeof value === "string" && value.trim() === "") continue;
+    if (Array.isArray(value) && value.length === 0) continue;
     return value;
   }
 
@@ -270,8 +167,7 @@ function first(...values) {
 
 function sleep(ms = 0) {
   return new Promise((resolve) => {
-    const delay =
-      Math.max(0, Number(ms) || 0);
+    const delay = Math.max(0, Number(ms) || 0);
 
     try {
       if (isBrowser()) {
@@ -285,54 +181,34 @@ function sleep(ms = 0) {
 }
 
 function encodePathSegment(value = "") {
-  return encodeURIComponent(
-    safeText(value, "")
-  );
+  return encodeURIComponent(safeText(value, ""));
 }
 
 function hasOwnKeys(value = {}) {
   return Boolean(
     value &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    Object.keys(value).length
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length
   );
 }
 
 function normalizeSearchType(value = "") {
-  const raw =
-    safeText(value, "general").toLowerCase();
+  const raw = safeText(value, "general").toLowerCase();
 
-  const compact =
-    normalizeText(raw)
-      .replace(/[^a-z0-9_-]/gi, "");
+  const compact = normalizeText(raw).replace(/[^a-z0-9_-]/gi, "");
 
-  return (
-    TYPE_ALIASES[compact] ||
-    compact ||
-    ENTITY_TYPES.GENERAL
-  );
+  return TYPE_ALIASES[compact] || compact || ENTITY_TYPES.GENERAL;
 }
 
 function coerceDisplayText(value, fallback = "") {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return fallback;
-  }
+  if (value === null || value === undefined) return fallback;
 
-  if (
-    typeof value === "string" ||
-    typeof value === "number"
-  ) {
+  if (typeof value === "string" || typeof value === "number") {
     return safeText(value, fallback);
   }
 
-  if (
-    typeof value === "object" &&
-    !Array.isArray(value)
-  ) {
+  if (typeof value === "object" && !Array.isArray(value)) {
     return safeText(
       first(
         value.title,
@@ -358,8 +234,7 @@ function coerceDisplayText(value, fallback = "") {
 }
 
 function isUnsafeHref(value = "") {
-  const href =
-    safeText(value, "").toLowerCase();
+  const href = safeText(value, "").toLowerCase();
 
   return (
     href.startsWith("javascript:") ||
@@ -370,29 +245,17 @@ function isUnsafeHref(value = "") {
 }
 
 function normalizeResultUrl(AppCore, value = "") {
-  const raw =
-    safeText(value, "");
+  const raw = safeText(value, "");
 
-  if (
-    !raw ||
-    isUnsafeHref(raw)
-  ) {
-    return null;
-  }
+  if (!raw || isUnsafeHref(raw)) return null;
 
   if (/^https?:\/\//i.test(raw)) {
-    if (!isBrowser()) {
-      return null;
-    }
+    if (!isBrowser()) return null;
 
     try {
-      const url =
-        new URL(raw);
+      const url = new URL(raw);
 
-      if (
-        window.location?.origin &&
-        url.origin !== window.location.origin
-      ) {
+      if (window.location?.origin && url.origin !== window.location.origin) {
         return null;
       }
 
@@ -406,28 +269,17 @@ function normalizeResultUrl(AppCore, value = "") {
   }
 
   if (!raw.startsWith("/")) {
-    return safeNormalizePath(
-      AppCore,
-      `/${raw}`
-    );
+    return safeNormalizePath(AppCore, `/${raw}`);
   }
 
-  return safeNormalizePath(
-    AppCore,
-    raw
-  );
+  return safeNormalizePath(AppCore, raw);
 }
 
 function showToast(AppCore, message = "", type = "info") {
-  const text =
-    safeText(message, "");
+  const text = safeText(message, "");
+  const level = safeText(type, "info");
 
-  const level =
-    safeText(type, "info");
-
-  if (!text) {
-    return false;
-  }
+  if (!text) return false;
 
   try {
     if (isFunction(AppCore?.toast?.[level])) {
@@ -479,28 +331,15 @@ function safeAbortController() {
 ========================================================= */
 
 function setAttr(element, name = "", value = "") {
-  if (
-    !element ||
-    !name
-  ) {
-    return false;
-  }
+  if (!element || !name) return false;
 
   try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === false
-    ) {
+    if (value === null || value === undefined || value === false) {
       element.removeAttribute(name);
       return true;
     }
 
-    element.setAttribute(
-      name,
-      String(value)
-    );
-
+    element.setAttribute(name, String(value));
     return true;
   } catch {
     return false;
@@ -508,12 +347,7 @@ function setAttr(element, name = "", value = "") {
 }
 
 function setDataset(element, key = "", value = "") {
-  if (
-    !element ||
-    !key
-  ) {
-    return false;
-  }
+  if (!element || !key) return false;
 
   try {
     if (
@@ -526,9 +360,7 @@ function setDataset(element, key = "", value = "") {
       return true;
     }
 
-    element.dataset[key] =
-      String(value);
-
+    element.dataset[key] = String(value);
     return true;
   } catch {
     return false;
@@ -536,19 +368,10 @@ function setDataset(element, key = "", value = "") {
 }
 
 function toggleClass(element, className = "", enabled = false) {
-  if (
-    !element ||
-    !className
-  ) {
-    return false;
-  }
+  if (!element || !className) return false;
 
   try {
-    element.classList.toggle(
-      className,
-      Boolean(enabled)
-    );
-
+    element.classList.toggle(className, Boolean(enabled));
     return true;
   } catch {
     return false;
@@ -556,25 +379,51 @@ function toggleClass(element, className = "", enabled = false) {
 }
 
 /* =========================================================
+   LEGACY GLASS CLEANUP
+   Importante:
+   - Versiones anteriores creaban #topbar-search-glass-overlay.
+   - Este sistema NO necesita ese nodo.
+   - Si existe, se elimina para evitar overlays full-screen.
+========================================================= */
+
+function cleanupLegacySearchGlass() {
+  if (!isBrowser()) return false;
+
+  let removed = false;
+
+  const selectors = [
+    "#topbar-search-glass-overlay",
+    ".topbar-search-glass",
+    "[data-topbar-search-glass]",
+  ];
+
+  selectors.forEach((selector) => {
+    try {
+      document.querySelectorAll(selector).forEach((node) => {
+        try {
+          node.remove();
+          removed = true;
+        } catch {}
+      });
+    } catch {}
+  });
+
+  return removed;
+}
+
+/* =========================================================
    MODULE RESOLUTION
 ========================================================= */
 
 function getModuleCandidate(AppCore, name = "") {
-  const key =
-    safeText(name, "");
+  const key = safeText(name, "");
 
-  if (!key) {
-    return null;
-  }
+  if (!key) return null;
 
   try {
     if (isFunction(AppCore?.modules?.get)) {
-      const found =
-        AppCore.modules.get(key);
-
-      if (found) {
-        return found;
-      }
+      const found = AppCore.modules.get(key);
+      if (found) return found;
     }
   } catch {}
 
@@ -589,18 +438,11 @@ function getModuleCandidate(AppCore, name = "") {
   } catch {}
 
   try {
-    if (AppCore?.[key]) {
-      return AppCore[key];
-    }
+    if (AppCore?.[key]) return AppCore[key];
   } catch {}
 
   try {
-    if (
-      isBrowser() &&
-      window?.[key]
-    ) {
-      return window[key];
-    }
+    if (isBrowser() && window?.[key]) return window[key];
   } catch {}
 
   return null;
@@ -608,29 +450,22 @@ function getModuleCandidate(AppCore, name = "") {
 
 function getFirstModule(AppCore, names = []) {
   for (const name of safeArray(names)) {
-    const found =
-      getModuleCandidate(AppCore, name);
-
-    if (found) {
-      return found;
-    }
+    const found = getModuleCandidate(AppCore, name);
+    if (found) return found;
   }
 
   return null;
 }
 
 function getFacturasModule(AppCore) {
-  return getFirstModule(
-    AppCore,
-    [
-      "Facturas",
-      "FacturasView",
-      "OnionFacturas",
-      "OnionFacturasView",
-      "facturas",
-      "facturasView",
-    ]
-  );
+  return getFirstModule(AppCore, [
+    "Facturas",
+    "FacturasView",
+    "OnionFacturas",
+    "OnionFacturasView",
+    "facturas",
+    "facturasView",
+  ]);
 }
 
 /* =========================================================
@@ -638,8 +473,7 @@ function getFacturasModule(AppCore) {
 ========================================================= */
 
 function getRawType(raw = {}) {
-  const item =
-    safeObject(raw);
+  const item = safeObject(raw);
 
   return first(
     item.type,
@@ -656,8 +490,7 @@ function getRawType(raw = {}) {
 }
 
 function getRawTitle(raw = {}) {
-  const item =
-    safeObject(raw);
+  const item = safeObject(raw);
 
   return coerceDisplayText(
     first(
@@ -697,21 +530,19 @@ function getRawTitle(raw = {}) {
 }
 
 function getRawSubtitle(raw = {}) {
-  const item =
-    safeObject(raw);
+  const item = safeObject(raw);
 
-  const clienteText =
-    coerceDisplayText(
-      first(
-        item.cliente,
-        item.client,
-        item.customer,
-        item.clienteNombre,
-        item.clientName,
-        item.customerName
-      ),
-      ""
-    );
+  const clienteText = coerceDisplayText(
+    first(
+      item.cliente,
+      item.client,
+      item.customer,
+      item.clienteNombre,
+      item.clientName,
+      item.customerName
+    ),
+    ""
+  );
 
   return coerceDisplayText(
     first(
@@ -741,8 +572,7 @@ function getRawSubtitle(raw = {}) {
 }
 
 function getRawUrl(raw = {}) {
-  const item =
-    safeObject(raw);
+  const item = safeObject(raw);
 
   return safeText(
     first(
@@ -761,11 +591,8 @@ function getRawUrl(raw = {}) {
 }
 
 function getEntityIdByType(type = "", raw = {}, fallback = "") {
-  const item =
-    safeObject(raw);
-
-  const normalizedType =
-    normalizeSearchType(type);
+  const item = safeObject(raw);
+  const normalizedType = normalizeSearchType(type);
 
   if (normalizedType === ENTITY_TYPES.USUARIO) {
     return safeText(
@@ -849,14 +676,7 @@ function getEntityIdByType(type = "", raw = {}, fallback = "") {
   }
 
   return safeText(
-    first(
-      item.entityId,
-      item.id,
-      item._id,
-      item.uuid,
-      item.key,
-      fallback
-    ),
+    first(item.entityId, item.id, item._id, item.uuid, item.key, fallback),
     ""
   );
 }
@@ -866,58 +686,30 @@ function getEntityIdByType(type = "", raw = {}, fallback = "") {
 ========================================================= */
 
 function getFallbackUrlForEntity(AppCore, type = "", entityId = "", raw = {}) {
-  const normalizedType =
-    normalizeSearchType(type);
+  const normalizedType = normalizeSearchType(type);
+  const id = safeText(entityId, "");
 
-  const id =
-    safeText(entityId, "");
+  const normalizedRawUrl = normalizeResultUrl(AppCore, getRawUrl(raw));
 
-  const rawUrl =
-    getRawUrl(raw);
+  if (normalizedRawUrl) return normalizedRawUrl;
+  if (!id) return null;
 
-  const normalizedRawUrl =
-    normalizeResultUrl(
-      AppCore,
-      rawUrl
-    );
-
-  if (normalizedRawUrl) {
-    return normalizedRawUrl;
-  }
-
-  if (!id) {
-    return null;
-  }
-
-  const encoded =
-    encodePathSegment(id);
+  const encoded = encodePathSegment(id);
 
   if (normalizedType === ENTITY_TYPES.USUARIO) {
-    return safeNormalizePath(
-      AppCore,
-      `/usuarios?id=${encoded}`
-    );
+    return safeNormalizePath(AppCore, `/usuarios?id=${encoded}`);
   }
 
   if (normalizedType === ENTITY_TYPES.CLIENTE) {
-    return safeNormalizePath(
-      AppCore,
-      `/clientes?id=${encoded}`
-    );
+    return safeNormalizePath(AppCore, `/clientes?id=${encoded}`);
   }
 
   if (normalizedType === ENTITY_TYPES.INCIDENCIA) {
-    return safeNormalizePath(
-      AppCore,
-      `/incidencias?id=${encoded}`
-    );
+    return safeNormalizePath(AppCore, `/incidencias?id=${encoded}`);
   }
 
   if (normalizedType === ENTITY_TYPES.FACTURA) {
-    return safeNormalizePath(
-      AppCore,
-      `/facturas?id=${encoded}`
-    );
+    return safeNormalizePath(AppCore, `/facturas?id=${encoded}`);
   }
 
   return null;
@@ -928,18 +720,12 @@ function getFallbackUrlForEntity(AppCore, type = "", entityId = "", raw = {}) {
 ========================================================= */
 
 function getActionForType(type = "", raw = {}) {
-  const item =
-    safeObject(raw);
+  const item = safeObject(raw);
 
-  const explicit =
-    safeText(
-      first(
-        item.action,
-        item.openAction,
-        item.searchAction
-      ),
-      ""
-    ).toLowerCase();
+  const explicit = safeText(
+    first(item.action, item.openAction, item.searchAction),
+    ""
+  ).toLowerCase();
 
   if (explicit) {
     if (
@@ -1000,62 +786,28 @@ function getActionForType(type = "", raw = {}) {
       return SEARCH_ACTIONS.OPEN_FACTURA;
     }
 
-    if (
-      [
-        "navigate",
-        "nav",
-        "route",
-        "go",
-      ].includes(explicit)
-    ) {
+    if (["navigate", "nav", "route", "go"].includes(explicit)) {
       return SEARCH_ACTIONS.NAVIGATE;
     }
   }
 
-  const normalizedType =
-    normalizeSearchType(type);
+  const normalizedType = normalizeSearchType(type);
 
-  if (normalizedType === ENTITY_TYPES.USUARIO) {
-    return SEARCH_ACTIONS.OPEN_USUARIO;
-  }
-
-  if (normalizedType === ENTITY_TYPES.CLIENTE) {
-    return SEARCH_ACTIONS.OPEN_CLIENTE;
-  }
-
-  if (normalizedType === ENTITY_TYPES.INCIDENCIA) {
-    return SEARCH_ACTIONS.OPEN_INCIDENCIA;
-  }
-
-  if (normalizedType === ENTITY_TYPES.FACTURA) {
-    return SEARCH_ACTIONS.OPEN_FACTURA;
-  }
+  if (normalizedType === ENTITY_TYPES.USUARIO) return SEARCH_ACTIONS.OPEN_USUARIO;
+  if (normalizedType === ENTITY_TYPES.CLIENTE) return SEARCH_ACTIONS.OPEN_CLIENTE;
+  if (normalizedType === ENTITY_TYPES.INCIDENCIA) return SEARCH_ACTIONS.OPEN_INCIDENCIA;
+  if (normalizedType === ENTITY_TYPES.FACTURA) return SEARCH_ACTIONS.OPEN_FACTURA;
 
   return SEARCH_ACTIONS.NAVIGATE;
 }
 
 function getActionLabel(item = {}) {
-  const action =
-    safeText(
-      item.action,
-      SEARCH_ACTIONS.NAVIGATE
-    );
+  const action = safeText(item.action, SEARCH_ACTIONS.NAVIGATE);
 
-  if (action === SEARCH_ACTIONS.OPEN_USUARIO) {
-    return "Abrir ficha";
-  }
-
-  if (action === SEARCH_ACTIONS.OPEN_CLIENTE) {
-    return "Abrir cliente";
-  }
-
-  if (action === SEARCH_ACTIONS.OPEN_INCIDENCIA) {
-    return "Abrir modal";
-  }
-
-  if (action === SEARCH_ACTIONS.OPEN_FACTURA) {
-    return "Abrir factura";
-  }
+  if (action === SEARCH_ACTIONS.OPEN_USUARIO) return "Abrir ficha";
+  if (action === SEARCH_ACTIONS.OPEN_CLIENTE) return "Abrir cliente";
+  if (action === SEARCH_ACTIONS.OPEN_INCIDENCIA) return "Abrir modal";
+  if (action === SEARCH_ACTIONS.OPEN_FACTURA) return "Abrir factura";
 
   return "";
 }
@@ -1065,138 +817,99 @@ function getActionLabel(item = {}) {
 ========================================================= */
 
 function buildSearchPayload(item = {}, detail = null) {
-  const raw =
-    safeObject(item.raw);
-
-  const normalizedType =
-    normalizeSearchType(item.type);
-
-  const entityId =
-    safeText(item.entityId, "");
-
-  const detailObject =
-    safeObject(detail);
+  const raw = safeObject(item.raw);
+  const normalizedType = normalizeSearchType(item.type);
+  const entityId = safeText(item.entityId, "");
+  const detailObject = safeObject(detail);
 
   const mergedDetail = {
     ...raw,
     ...detailObject,
 
-    id:
-      first(
-        detailObject.id,
-        raw.id,
-        entityId
-      ),
-
-    _id:
-      first(
-        detailObject._id,
-        raw._id,
-        entityId
-      ),
+    id: first(detailObject.id, raw.id, entityId),
+    _id: first(detailObject._id, raw._id, entityId),
 
     entityId,
-    type:
-      normalizedType,
+    type: normalizedType,
 
     raw: {
       ...raw,
-      ...safeObject(
-        detailObject.raw ||
-        detailObject
-      ),
+      ...safeObject(detailObject.raw || detailObject),
 
       searchItem: {
-        id:
-          item.id,
-        type:
-          item.type,
-        title:
-          item.title,
-        subtitle:
-          item.subtitle,
-        url:
-          item.url,
-        action:
-          item.action,
-        entityId:
-          item.entityId,
-        source:
-          item.source,
+        id: item.id,
+        type: item.type,
+        title: item.title,
+        subtitle: item.subtitle,
+        url: item.url,
+        action: item.action,
+        entityId: item.entityId,
+        source: item.source,
       },
     },
   };
 
   if (normalizedType === ENTITY_TYPES.USUARIO) {
-    mergedDetail.userId =
-      first(
-        detailObject.userId,
-        detailObject.usuarioId,
-        raw.userId,
-        raw.usuarioId,
-        entityId
-      );
+    mergedDetail.userId = first(
+      detailObject.userId,
+      detailObject.usuarioId,
+      raw.userId,
+      raw.usuarioId,
+      entityId
+    );
 
-    mergedDetail.usuarioId =
-      mergedDetail.userId;
+    mergedDetail.usuarioId = mergedDetail.userId;
   }
 
   if (normalizedType === ENTITY_TYPES.CLIENTE) {
-    mergedDetail.clienteId =
-      first(
-        detailObject.clienteId,
-        detailObject.clientId,
-        raw.clienteId,
-        raw.clientId,
-        entityId
-      );
+    mergedDetail.clienteId = first(
+      detailObject.clienteId,
+      detailObject.clientId,
+      raw.clienteId,
+      raw.clientId,
+      entityId
+    );
 
-    mergedDetail.clientId =
-      mergedDetail.clienteId;
+    mergedDetail.clientId = mergedDetail.clienteId;
   }
 
   if (normalizedType === ENTITY_TYPES.INCIDENCIA) {
-    mergedDetail.ticketId =
-      first(
-        detailObject.ticketId,
-        detailObject.incidenciaId,
-        detailObject.id,
-        raw.ticketId,
-        raw.incidenciaId,
-        raw.id,
-        entityId
-      );
+    mergedDetail.ticketId = first(
+      detailObject.ticketId,
+      detailObject.incidenciaId,
+      detailObject.id,
+      raw.ticketId,
+      raw.incidenciaId,
+      raw.id,
+      entityId
+    );
 
-    mergedDetail.incidenciaId =
-      mergedDetail.ticketId;
+    mergedDetail.incidenciaId = mergedDetail.ticketId;
   }
 
   if (normalizedType === ENTITY_TYPES.FACTURA) {
-    mergedDetail.facturaId =
-      first(
-        detailObject.facturaId,
-        detailObject.invoiceId,
-        detailObject.id,
-        raw.facturaId,
-        raw.invoiceId,
-        raw.id,
-        entityId
-      );
+    mergedDetail.facturaId = first(
+      detailObject.facturaId,
+      detailObject.invoiceId,
+      detailObject.id,
+      raw.facturaId,
+      raw.invoiceId,
+      raw.id,
+      entityId
+    );
 
-    mergedDetail.invoiceId =
-      mergedDetail.facturaId;
+    mergedDetail.invoiceId = mergedDetail.facturaId;
 
-    mergedDetail.numeroFacturaLegal =
-      first(
-        detailObject.numeroFacturaLegal,
-        raw.numeroFacturaLegal,
-        detailObject.numeroFactura,
-        raw.numeroFactura,
-        detailObject.numero,
-        raw.numero,
-        detailObject.invoiceNumber,
-        raw.invoiceNumber
-      );
+    mergedDetail.numeroFacturaLegal = first(
+      detailObject.numeroFacturaLegal,
+      raw.numeroFacturaLegal,
+      detailObject.numeroFactura,
+      raw.numeroFactura,
+      detailObject.numero,
+      raw.numero,
+      detailObject.invoiceNumber,
+      raw.invoiceNumber
+    );
   }
 
   return mergedDetail;
@@ -1208,67 +921,44 @@ function buildEntityOpenPayload({
   entityId = "",
   type = "",
 } = {}) {
-  const normalizedType =
-    normalizeSearchType(type || item.type);
-
-  const id =
-    safeText(entityId, "");
+  const normalizedType = normalizeSearchType(type || item.type);
+  const id = safeText(entityId, "");
 
   const payload = {
-    source:
-      SEARCH_SOURCE,
-
+    source: SEARCH_SOURCE,
     item,
     detail,
-    entityId:
-      id,
+    entityId: id,
     id,
-    type:
-      normalizedType,
+    type: normalizedType,
   };
 
   if (normalizedType === ENTITY_TYPES.USUARIO) {
-    payload.user =
-      detail;
-    payload.usuario =
-      detail;
-    payload.userId =
-      id;
-    payload.usuarioId =
-      id;
+    payload.user = detail;
+    payload.usuario = detail;
+    payload.userId = id;
+    payload.usuarioId = id;
   }
 
   if (normalizedType === ENTITY_TYPES.CLIENTE) {
-    payload.client =
-      detail;
-    payload.cliente =
-      detail;
-    payload.clientId =
-      id;
-    payload.clienteId =
-      id;
+    payload.client = detail;
+    payload.cliente = detail;
+    payload.clientId = id;
+    payload.clienteId = id;
   }
 
   if (normalizedType === ENTITY_TYPES.INCIDENCIA) {
-    payload.ticket =
-      detail;
-    payload.incidencia =
-      detail;
-    payload.ticketId =
-      id;
-    payload.incidenciaId =
-      id;
+    payload.ticket = detail;
+    payload.incidencia = detail;
+    payload.ticketId = id;
+    payload.incidenciaId = id;
   }
 
   if (normalizedType === ENTITY_TYPES.FACTURA) {
-    payload.factura =
-      detail;
-    payload.invoice =
-      detail;
-    payload.facturaId =
-      id;
-    payload.invoiceId =
-      id;
+    payload.factura = detail;
+    payload.invoice = detail;
+    payload.facturaId = id;
+    payload.invoiceId = id;
   }
 
   return payload;
@@ -1279,15 +969,10 @@ function buildEntityOpenPayload({
 ========================================================= */
 
 function pickEntityPayloadFromResponse(response = null, type = "") {
-  const obj =
-    safeObject(response);
+  const obj = safeObject(response);
+  const normalizedType = normalizeSearchType(type);
 
-  const normalizedType =
-    normalizeSearchType(type);
-
-  if (!hasOwnKeys(obj)) {
-    return null;
-  }
+  if (!hasOwnKeys(obj)) return null;
 
   if (normalizedType === ENTITY_TYPES.INCIDENCIA) {
     return first(
@@ -1376,144 +1061,79 @@ function pickEntityPayloadFromResponse(response = null, type = "") {
     );
   }
 
-  return first(
-    obj.detail,
-    obj.item,
-    obj.data,
-    obj.result,
-    obj.payload,
-    obj
-  );
+  return first(obj.detail, obj.item, obj.data, obj.result, obj.payload, obj);
 }
 
 function getDetailApiCandidates(type = "", entityId = "") {
-  const normalizedType =
-    normalizeSearchType(type);
+  const normalizedType = normalizeSearchType(type);
+  const id = encodePathSegment(entityId);
 
-  const id =
-    encodePathSegment(entityId);
-
-  if (!id) {
-    return [];
-  }
+  if (!id) return [];
 
   if (normalizedType === ENTITY_TYPES.INCIDENCIA) {
-    return [
-      `/api/tickets/${id}`,
-      `/api/incidencias/${id}`,
-    ];
+    return [`/api/tickets/${id}`, `/api/incidencias/${id}`];
   }
 
   if (normalizedType === ENTITY_TYPES.USUARIO) {
-    return [
-      `/api/usuarios/${id}`,
-      `/api/users/${id}`,
-    ];
+    return [`/api/usuarios/${id}`, `/api/users/${id}`];
   }
 
   if (normalizedType === ENTITY_TYPES.CLIENTE) {
-    return [
-      `/api/clientes/${id}`,
-      `/api/clients/${id}`,
-    ];
+    return [`/api/clientes/${id}`, `/api/clients/${id}`];
   }
 
   if (normalizedType === ENTITY_TYPES.FACTURA) {
-    return [
-      `/api/facturas/${id}`,
-      `/api/invoices/${id}`,
-    ];
+    return [`/api/facturas/${id}`, `/api/invoices/${id}`];
   }
 
   return [];
 }
 
 async function fetchEntityDetail(AppCore, item = {}) {
-  const entityId =
-    safeText(item.entityId, "");
+  const entityId = safeText(item.entityId, "");
+  const type = normalizeSearchType(item.type);
 
-  const type =
-    normalizeSearchType(item.type);
+  if (!entityId || !isFunction(AppCore?.apiClient?.get)) return null;
 
-  if (
-    !entityId ||
-    !isFunction(AppCore?.apiClient?.get)
-  ) {
-    return null;
-  }
+  const candidates = getDetailApiCandidates(type, entityId);
 
-  const candidates =
-    getDetailApiCandidates(
-      type,
-      entityId
-    );
+  if (!candidates.length) return null;
 
-  if (!candidates.length) {
-    return null;
-  }
-
-  let lastError =
-    null;
+  let lastError = null;
 
   for (const path of candidates) {
     try {
-      const response =
-        await AppCore.apiClient.get(
-          path,
-          {
-            auth:
-              true,
-            timeout:
-              12000,
-          }
-        );
+      const response = await AppCore.apiClient.get(path, {
+        auth: true,
+        timeout: 12000,
+      });
 
-      const payload =
-        pickEntityPayloadFromResponse(
-          response,
-          type
-        );
+      const payload = pickEntityPayloadFromResponse(response, type);
+      const payloadObject = safeObject(payload);
 
-      const payloadObject =
-        safeObject(payload);
-
-      if (hasOwnKeys(payloadObject)) {
-        return payloadObject;
-      }
+      if (hasOwnKeys(payloadObject)) return payloadObject;
     } catch (error) {
-      lastError =
-        error;
+      lastError = error;
 
-      const status =
-        Number(
-          first(
-            error?.status,
-            error?.statusCode,
-            error?.response?.status,
-            error?.data?.status
-          ) || 0
-        );
+      const status = Number(
+        first(
+          error?.status,
+          error?.statusCode,
+          error?.response?.status,
+          error?.data?.status
+        ) || 0
+      );
 
-      if (
-        status &&
-        ![404, 405].includes(status)
-      ) {
-        break;
-      }
+      if (status && ![404, 405].includes(status)) break;
     }
   }
 
   if (lastError) {
-    warn(
-      AppCore,
-      "No se pudo precargar detalle de search.",
-      {
-        type,
-        entityId,
-        error:
-          lastError,
-      }
-    );
+    warn(AppCore, "No se pudo precargar detalle de search.", {
+      type,
+      entityId,
+      error: lastError,
+    });
   }
 
   return null;
@@ -1524,43 +1144,25 @@ async function fetchEntityDetail(AppCore, item = {}) {
 ========================================================= */
 
 function emitSearchEvent(AppCore, eventName = "", payload = {}) {
-  const name =
-    safeText(eventName, "");
+  const name = safeText(eventName, "");
 
-  if (!name) {
-    return false;
-  }
+  if (!name) return false;
 
   const finalPayload = {
-    source:
-      SEARCH_SOURCE,
-
+    source: SEARCH_SOURCE,
     ...safeObject(payload),
   };
 
   try {
     if (isFunction(AppCore?.events?.emit)) {
-      AppCore.events.emit(
-        name,
-        finalPayload
-      );
-
+      AppCore.events.emit(name, finalPayload);
       return true;
     }
   } catch {}
 
   try {
     if (isBrowser()) {
-      window.dispatchEvent(
-        new CustomEvent(
-          name,
-          {
-            detail:
-              finalPayload,
-          }
-        )
-      );
-
+      window.dispatchEvent(new CustomEvent(name, { detail: finalPayload }));
       return true;
     }
   } catch {}
@@ -1570,98 +1172,53 @@ function emitSearchEvent(AppCore, eventName = "", payload = {}) {
 
 function emitSearchEvents(AppCore, eventNames = [], payload = {}) {
   for (const eventName of safeArray(eventNames)) {
-    emitSearchEvent(
-      AppCore,
-      eventName,
-      payload
-    );
+    emitSearchEvent(AppCore, eventName, payload);
   }
 }
 
 function addBridgeCall(calls = [], fn = null, options = {}) {
-  if (!isFunction(fn)) {
-    return;
-  }
+  if (!isFunction(fn)) return;
 
   calls.push({
     fn,
-
-    accept:
-      isFunction(options.accept)
-        ? options.accept
-        : (result) => result !== false,
-
-    label:
-      safeText(options.label, ""),
+    accept: isFunction(options.accept)
+      ? options.accept
+      : (result) => result !== false,
+    label: safeText(options.label, ""),
   });
 }
 
 function addMethodCall(calls = [], target = null, method = "", arg = null, options = {}) {
-  if (
-    !target ||
-    !isFunction(target?.[method])
-  ) {
-    return;
-  }
+  if (!target || !isFunction(target?.[method])) return;
 
-  addBridgeCall(
-    calls,
-    () => target[method](arg),
-    {
-      ...options,
-      label:
-        options.label || method,
-    }
-  );
+  addBridgeCall(calls, () => target[method](arg), {
+    ...options,
+    label: options.label || method,
+  });
 }
 
 function addMethodCallArgs(calls = [], target = null, method = "", args = [], options = {}) {
-  if (
-    !target ||
-    !isFunction(target?.[method])
-  ) {
-    return;
-  }
+  if (!target || !isFunction(target?.[method])) return;
 
-  addBridgeCall(
-    calls,
-    () => target[method](...safeArray(args)),
-    {
-      ...options,
-      label:
-        options.label || method,
-    }
-  );
+  addBridgeCall(calls, () => target[method](...safeArray(args)), {
+    ...options,
+    label: options.label || method,
+  });
 }
 
 function addFunctionCall(calls = [], fn = null, arg = null, options = {}) {
-  if (!isFunction(fn)) {
-    return;
-  }
-
-  addBridgeCall(
-    calls,
-    () => fn(arg),
-    options
-  );
+  if (!isFunction(fn)) return;
+  addBridgeCall(calls, () => fn(arg), options);
 }
 
 async function callFirstBridge(calls = []) {
   for (const call of safeArray(calls)) {
-    if (
-      !call ||
-      !isFunction(call.fn)
-    ) {
-      continue;
-    }
+    if (!call || !isFunction(call.fn)) continue;
 
     try {
-      const result =
-        await call.fn();
+      const result = await call.fn();
 
-      if (call.accept(result)) {
-        return true;
-      }
+      if (call.accept(result)) return true;
     } catch {}
   }
 
@@ -1669,46 +1226,24 @@ async function callFirstBridge(calls = []) {
 }
 
 async function navigateToPath(AppCore, Router, path = "", options = {}) {
-  const target =
-    normalizeResultUrl(
-      AppCore,
-      path || "/"
-    );
+  const target = normalizeResultUrl(AppCore, path || "/");
 
-  if (!target) {
-    return false;
-  }
+  if (!target) return false;
 
   if (isFunction(Router?.navigate)) {
-    const result =
-      Router.navigate(
-        target,
-        {
-          force:
-            options.force !== false,
+    const result = Router.navigate(target, {
+      force: options.force !== false,
+      replaceState: Boolean(options.replaceState),
+      source: options.source || SEARCH_SOURCE,
+    });
 
-          replaceState:
-            Boolean(options.replaceState),
-
-          source:
-            options.source || SEARCH_SOURCE,
-        }
-      );
-
-    if (
-      result &&
-      isFunction(result.then)
-    ) {
-      await result;
-    }
+    if (result && isFunction(result.then)) await result;
 
     return true;
   }
 
   if (isBrowser()) {
-    window.location.href =
-      target;
-
+    window.location.href = target;
     return true;
   }
 
@@ -1723,41 +1258,22 @@ async function navigateFallbackAndEmit({
   eventNames = [],
   payload = {},
 }) {
-  const target =
-    safeText(
-      fallbackUrl ||
-        item.url ||
-        getFallbackUrlForEntity(
-          AppCore,
-          item.type,
-          item.entityId,
-          item.raw
-        ),
-      ""
-    );
+  const target = safeText(
+    fallbackUrl ||
+      item.url ||
+      getFallbackUrlForEntity(AppCore, item.type, item.entityId, item.raw),
+    ""
+  );
 
   if (target) {
-    await navigateToPath(
-      AppCore,
-      Router,
-      target,
-      {
-        force:
-          true,
-      }
-    );
+    await navigateToPath(AppCore, Router, target, {
+      force: true,
+    });
   }
 
-  emitSearchEvents(
-    AppCore,
-    eventNames,
-    payload
-  );
+  emitSearchEvents(AppCore, eventNames, payload);
 
-  return Boolean(
-    target ||
-    eventNames.length
-  );
+  return Boolean(target || eventNames.length);
 }
 
 /* =========================================================
@@ -1774,12 +1290,7 @@ async function getIncidenciasModalBridge(AppCore) {
   ];
 
   for (const candidate of candidates) {
-    if (
-      candidate &&
-      isFunction(candidate.open)
-    ) {
-      return candidate;
-    }
+    if (candidate && isFunction(candidate.open)) return candidate;
   }
 
   const dynamicImports = [
@@ -1789,8 +1300,7 @@ async function getIncidenciasModalBridge(AppCore) {
 
   for (const path of dynamicImports) {
     try {
-      const module =
-        await import(path);
+      const module = await import(path);
 
       return (
         module?.OnionIncidenciasModal ||
@@ -1801,78 +1311,42 @@ async function getIncidenciasModalBridge(AppCore) {
     } catch {}
   }
 
-  warn(
-    AppCore,
-    "No se pudo importar incidencias.modal.js"
-  );
+  warn(AppCore, "No se pudo importar incidencias.modal.js");
 
   return null;
 }
 
-async function openIncidenciaFromSearch({
-  AppCore,
-  Router,
-  item = {},
-}) {
-  const detailResponse =
-    await fetchEntityDetail(
-      AppCore,
-      item
-    );
+async function openIncidenciaFromSearch({ AppCore, Router, item = {} }) {
+  const detailResponse = await fetchEntityDetail(AppCore, item);
+  const detail = buildSearchPayload(item, detailResponse);
 
-  const detail =
-    buildSearchPayload(
-      item,
-      detailResponse
-    );
+  const ticketId = safeText(
+    first(detail.ticketId, detail.incidenciaId, detail.id, item.entityId),
+    ""
+  );
 
-  const ticketId =
-    safeText(
-      first(
-        detail.ticketId,
-        detail.incidenciaId,
-        detail.id,
-        item.entityId
-      ),
-      ""
-    );
+  const payload = buildEntityOpenPayload({
+    item,
+    detail,
+    entityId: ticketId,
+    type: ENTITY_TYPES.INCIDENCIA,
+  });
 
-  const payload =
-    buildEntityOpenPayload({
-      item,
-      detail,
-      entityId:
-        ticketId,
-      type:
-        ENTITY_TYPES.INCIDENCIA,
-    });
+  const modal = await getIncidenciasModalBridge(AppCore);
 
-  const modal =
-    await getIncidenciasModalBridge(AppCore);
-
-  if (
-    modal &&
-    isFunction(modal.open)
-  ) {
+  if (modal && isFunction(modal.open)) {
     modal.open(detail);
 
     emitSearchEvents(
       AppCore,
-      [
-        "topbar:search:open-incidencia",
-        "incidencias:modal:opened-from-search",
-      ],
+      ["topbar:search:open-incidencia", "incidencias:modal:opened-from-search"],
       payload
     );
 
     return true;
   }
 
-  emitSearchEvent(
-    AppCore,
-    "incidencias:modal:open",
-    payload
-  );
+  emitSearchEvent(AppCore, "incidencias:modal:open", payload);
 
   return navigateFallbackAndEmit({
     AppCore,
@@ -1886,11 +1360,7 @@ async function openIncidenciaFromSearch({
         ticketId,
         item.raw
       ),
-    eventNames:
-      [
-        "topbar:search:open-incidencia",
-        "incidencias:detail:open",
-      ],
+    eventNames: ["topbar:search:open-incidencia", "incidencias:detail:open"],
     payload,
   });
 }
@@ -1899,43 +1369,21 @@ async function openIncidenciaFromSearch({
    USUARIOS / CLIENTES BRIDGES
 ========================================================= */
 
-async function openUsuarioFromSearch({
-  AppCore,
-  Router,
-  item = {},
-}) {
-  const detailResponse =
-    await fetchEntityDetail(
-      AppCore,
-      item
-    );
+async function openUsuarioFromSearch({ AppCore, Router, item = {} }) {
+  const detailResponse = await fetchEntityDetail(AppCore, item);
+  const detail = buildSearchPayload(item, detailResponse);
 
-  const detail =
-    buildSearchPayload(
-      item,
-      detailResponse
-    );
+  const userId = safeText(
+    first(detail.userId, detail.usuarioId, detail.id, item.entityId),
+    ""
+  );
 
-  const userId =
-    safeText(
-      first(
-        detail.userId,
-        detail.usuarioId,
-        detail.id,
-        item.entityId
-      ),
-      ""
-    );
-
-  const payload =
-    buildEntityOpenPayload({
-      item,
-      detail,
-      entityId:
-        userId,
-      type:
-        ENTITY_TYPES.USUARIO,
-    });
+  const payload = buildEntityOpenPayload({
+    item,
+    detail,
+    entityId: userId,
+    type: ENTITY_TYPES.USUARIO,
+  });
 
   const calls = [];
 
@@ -1960,10 +1408,7 @@ async function openUsuarioFromSearch({
   if (await callFirstBridge(calls)) {
     emitSearchEvents(
       AppCore,
-      [
-        "topbar:search:open-usuario",
-        "usuarios:ficha:opened-from-search",
-      ],
+      ["topbar:search:open-usuario", "usuarios:ficha:opened-from-search"],
       payload
     );
 
@@ -1976,61 +1421,33 @@ async function openUsuarioFromSearch({
     item,
     fallbackUrl:
       item.url ||
-      getFallbackUrlForEntity(
-        AppCore,
-        ENTITY_TYPES.USUARIO,
-        userId,
-        item.raw
-      ),
-    eventNames:
-      [
-        "topbar:search:open-usuario",
-        "usuarios:ficha:open",
-        "usuarios:modal:open",
-        "users:ficha:open",
-        "user:profile:open",
-      ],
+      getFallbackUrlForEntity(AppCore, ENTITY_TYPES.USUARIO, userId, item.raw),
+    eventNames: [
+      "topbar:search:open-usuario",
+      "usuarios:ficha:open",
+      "usuarios:modal:open",
+      "users:ficha:open",
+      "user:profile:open",
+    ],
     payload,
   });
 }
 
-async function openClienteFromSearch({
-  AppCore,
-  Router,
-  item = {},
-}) {
-  const detailResponse =
-    await fetchEntityDetail(
-      AppCore,
-      item
-    );
+async function openClienteFromSearch({ AppCore, Router, item = {} }) {
+  const detailResponse = await fetchEntityDetail(AppCore, item);
+  const detail = buildSearchPayload(item, detailResponse);
 
-  const detail =
-    buildSearchPayload(
-      item,
-      detailResponse
-    );
+  const clienteId = safeText(
+    first(detail.clienteId, detail.clientId, detail.id, item.entityId),
+    ""
+  );
 
-  const clienteId =
-    safeText(
-      first(
-        detail.clienteId,
-        detail.clientId,
-        detail.id,
-        item.entityId
-      ),
-      ""
-    );
-
-  const payload =
-    buildEntityOpenPayload({
-      item,
-      detail,
-      entityId:
-        clienteId,
-      type:
-        ENTITY_TYPES.CLIENTE,
-    });
+  const payload = buildEntityOpenPayload({
+    item,
+    detail,
+    entityId: clienteId,
+    type: ENTITY_TYPES.CLIENTE,
+  });
 
   const calls = [];
 
@@ -2055,10 +1472,7 @@ async function openClienteFromSearch({
   if (await callFirstBridge(calls)) {
     emitSearchEvents(
       AppCore,
-      [
-        "topbar:search:open-cliente",
-        "clientes:ficha:opened-from-search",
-      ],
+      ["topbar:search:open-cliente", "clientes:ficha:opened-from-search"],
       payload
     );
 
@@ -2071,20 +1485,14 @@ async function openClienteFromSearch({
     item,
     fallbackUrl:
       item.url ||
-      getFallbackUrlForEntity(
-        AppCore,
-        ENTITY_TYPES.CLIENTE,
-        clienteId,
-        item.raw
-      ),
-    eventNames:
-      [
-        "topbar:search:open-cliente",
-        "clientes:ficha:open",
-        "clientes:modal:open",
-        "clients:ficha:open",
-        "client:profile:open",
-      ],
+      getFallbackUrlForEntity(AppCore, ENTITY_TYPES.CLIENTE, clienteId, item.raw),
+    eventNames: [
+      "topbar:search:open-cliente",
+      "clientes:ficha:open",
+      "clientes:modal:open",
+      "clients:ficha:open",
+      "client:profile:open",
+    ],
     payload,
   });
 }
@@ -2115,22 +1523,11 @@ function getFacturaIdFromDetail(detail = {}, item = {}) {
 }
 
 function getFacturaFallbackUrl(AppCore, item = {}, facturaId = "") {
-  const fromItem =
-    normalizeResultUrl(
-      AppCore,
-      item.url || ""
-    );
+  const fromItem = normalizeResultUrl(AppCore, item.url || "");
 
-  if (fromItem) {
-    return fromItem;
-  }
+  if (fromItem) return fromItem;
 
-  return getFallbackUrlForEntity(
-    AppCore,
-    ENTITY_TYPES.FACTURA,
-    facturaId,
-    item.raw
-  );
+  return getFallbackUrlForEntity(AppCore, ENTITY_TYPES.FACTURA, facturaId, item.raw);
 }
 
 function addFacturasModuleCalls({
@@ -2140,70 +1537,50 @@ function addFacturasModuleCalls({
   detail,
   facturaId,
 }) {
-  if (!facturasModule) {
-    return;
-  }
+  if (!facturasModule) return;
 
-  const acceptDetailResult =
-    (result) => (
-      result !== false &&
-      result !== null
-    );
+  const acceptDetailResult = (result) => result !== false && result !== null;
 
   addMethodCall(calls, facturasModule, "openFacturaFromExternalRequest", payload, {
-    accept:
-      acceptDetailResult,
+    accept: acceptDetailResult,
   });
 
   addMethodCall(calls, facturasModule, "openFromSearch", payload, {
-    accept:
-      acceptDetailResult,
+    accept: acceptDetailResult,
   });
 
   addMethodCall(calls, facturasModule, "openSearchResult", payload, {
-    accept:
-      acceptDetailResult,
+    accept: acceptDetailResult,
   });
 
   addMethodCall(calls, facturasModule, "openDetail", payload, {
-    accept:
-      acceptDetailResult,
+    accept: acceptDetailResult,
   });
 
   addMethodCall(calls, facturasModule, "open", payload, {
-    accept:
-      acceptDetailResult,
+    accept: acceptDetailResult,
   });
 
   if (facturaId) {
     addMethodCall(calls, facturasModule, "openFactura", facturaId, {
-      accept:
-        acceptDetailResult,
+      accept: acceptDetailResult,
     });
 
     addMethodCall(calls, facturasModule, "loadFacturaDetail", facturaId, {
-      accept:
-        acceptDetailResult,
+      accept: acceptDetailResult,
     });
 
     addMethodCallArgs(calls, facturasModule, "openFactura", [facturaId, payload], {
-      accept:
-        acceptDetailResult,
+      accept: acceptDetailResult,
     });
   }
 
   addMethodCall(calls, facturasModule, "openDetail", detail, {
-    accept:
-      acceptDetailResult,
+    accept: acceptDetailResult,
   });
 }
 
-async function tryOpenFacturaBridge({
-  AppCore,
-  payload,
-  detail,
-  facturaId,
-}) {
+async function tryOpenFacturaBridge({ AppCore, payload, detail, facturaId }) {
   const calls = [];
 
   if (isBrowser()) {
@@ -2228,8 +1605,7 @@ async function tryOpenFacturaBridge({
 
   addFacturasModuleCalls({
     calls,
-    facturasModule:
-      getFacturasModule(AppCore),
+    facturasModule: getFacturasModule(AppCore),
     payload,
     detail,
     facturaId,
@@ -2244,111 +1620,64 @@ async function retryOpenFacturaAfterNavigation({
   detail,
   facturaId,
 }) {
-  const delays =
-    [80, 180, 360, 700];
+  const delays = [80, 180, 360, 700];
 
   for (const delay of delays) {
     await sleep(delay);
 
-    const opened =
-      await tryOpenFacturaBridge({
-        AppCore,
-        payload,
-        detail,
-        facturaId,
-      });
-
-    if (opened) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-async function openFacturaFromSearch({
-  AppCore,
-  Router,
-  item = {},
-}) {
-  const detailResponse =
-    await fetchEntityDetail(
-      AppCore,
-      item
-    );
-
-  const detail =
-    buildSearchPayload(
-      item,
-      detailResponse
-    );
-
-  const facturaId =
-    getFacturaIdFromDetail(
-      detail,
-      item
-    );
-
-  const payload =
-    buildEntityOpenPayload({
-      item,
-      detail,
-      entityId:
-        facturaId,
-      type:
-        ENTITY_TYPES.FACTURA,
-    });
-
-  payload.facturaId =
-    facturaId;
-
-  payload.invoiceId =
-    facturaId;
-
-  payload.factura =
-    detail;
-
-  payload.invoice =
-    detail;
-
-  const openedDirect =
-    await tryOpenFacturaBridge({
+    const opened = await tryOpenFacturaBridge({
       AppCore,
       payload,
       detail,
       facturaId,
     });
 
+    if (opened) return true;
+  }
+
+  return false;
+}
+
+async function openFacturaFromSearch({ AppCore, Router, item = {} }) {
+  const detailResponse = await fetchEntityDetail(AppCore, item);
+  const detail = buildSearchPayload(item, detailResponse);
+  const facturaId = getFacturaIdFromDetail(detail, item);
+
+  const payload = buildEntityOpenPayload({
+    item,
+    detail,
+    entityId: facturaId,
+    type: ENTITY_TYPES.FACTURA,
+  });
+
+  payload.facturaId = facturaId;
+  payload.invoiceId = facturaId;
+  payload.factura = detail;
+  payload.invoice = detail;
+
+  const openedDirect = await tryOpenFacturaBridge({
+    AppCore,
+    payload,
+    detail,
+    facturaId,
+  });
+
   if (openedDirect) {
     emitSearchEvents(
       AppCore,
-      [
-        "topbar:search:open-factura",
-        "facturas:modal:opened-from-search",
-      ],
+      ["topbar:search:open-factura", "facturas:modal:opened-from-search"],
       payload
     );
 
     return true;
   }
 
-  const fallbackUrl =
-    getFacturaFallbackUrl(
-      AppCore,
-      item,
-      facturaId
-    );
+  const fallbackUrl = getFacturaFallbackUrl(AppCore, item, facturaId);
 
   if (fallbackUrl) {
-    await navigateToPath(
-      AppCore,
-      Router,
-      fallbackUrl,
-      {
-        force:
-          true,
-      }
-    );
+    await navigateToPath(AppCore, Router, fallbackUrl, {
+      force: true,
+    });
 
     emitSearchEvents(
       AppCore,
@@ -2360,18 +1689,14 @@ async function openFacturaFromSearch({
       payload
     );
 
-    const openedAfterNavigation =
-      await retryOpenFacturaAfterNavigation({
-        AppCore,
-        payload,
-        detail,
-        facturaId,
-      });
+    const openedAfterNavigation = await retryOpenFacturaAfterNavigation({
+      AppCore,
+      payload,
+      detail,
+      facturaId,
+    });
 
-    return Boolean(
-      openedAfterNavigation ||
-      fallbackUrl
-    );
+    return Boolean(openedAfterNavigation || fallbackUrl);
   }
 
   emitSearchEvents(
@@ -2388,206 +1713,29 @@ async function openFacturaFromSearch({
 }
 
 /* =========================================================
-   SEARCH GLASS · VIEW ONLY · NO CSS IN JS
-========================================================= */
-
-function getSearchGlassHost() {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  return (
-    document.getElementById("app-content") ||
-    document.getElementById("view-container") ||
-    document.getElementById("main-content") ||
-    null
-  );
-}
-
-function getSearchGlass() {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  return document.getElementById(
-    SEARCH_GLASS_ID
-  );
-}
-
-function closeSearchFromGlass() {
-  const runtime =
-    searchFocusRuntime.runtime;
-
-  const getDom =
-    searchFocusRuntime.getDom;
-
-  if (
-    !runtime ||
-    !isFunction(getDom)
-  ) {
-    clearSearchFocusMode(getDom);
-    return;
-  }
-
-  hideResultsContainer(
-    runtime,
-    getDom
-  );
-
-  try {
-    const {
-      searchInput,
-    } =
-      getDom();
-
-    searchInput?.blur?.();
-  } catch {}
-}
-
-function ensureSearchGlass() {
-  if (!isBrowser()) {
-    return null;
-  }
-
-  const host =
-    getSearchGlassHost();
-
-  if (!host) {
-    return null;
-  }
-
-  let glass =
-    getSearchGlass();
-
-  if (!glass) {
-    glass =
-      document.createElement("div");
-
-    glass.id =
-      SEARCH_GLASS_ID;
-
-    glass.className =
-      "topbar-search-glass";
-
-    glass.hidden =
-      true;
-
-    glass.setAttribute(
-      "aria-hidden",
-      "true"
-    );
-
-    glass.setAttribute(
-      "data-topbar-search-glass",
-      "true"
-    );
-  }
-
-  if (glass.dataset.bound !== "true") {
-    try {
-      glass.addEventListener(
-        "pointerdown",
-        (event) => {
-          try {
-            event.preventDefault();
-          } catch {}
-
-          closeSearchFromGlass();
-        }
-      );
-
-      glass.dataset.bound =
-        "true";
-    } catch {}
-  }
-
-  if (glass.parentNode !== host) {
-    try {
-      host.appendChild(glass);
-    } catch {}
-  }
-
-  searchFocusRuntime.glass =
-    glass;
-
-  return glass;
-}
-
-function setSearchGlassActive(active = false) {
-  const glass =
-    ensureSearchGlass();
-
-  if (!glass) {
-    return false;
-  }
-
-  const enabled =
-    Boolean(active);
-
-  try {
-    glass.hidden =
-      !enabled;
-
-    glass.classList.toggle(
-      "is-active",
-      enabled
-    );
-
-    glass.classList.toggle(
-      "active",
-      enabled
-    );
-
-    setDataset(
-      glass,
-      "active",
-      enabled ? "true" : false
-    );
-
-    setAttr(
-      glass,
-      "aria-hidden",
-      enabled ? "false" : "true"
-    );
-  } catch {}
-
-  return true;
-}
-
-/* =========================================================
    SEARCH FOCUS MODE · CLASSES / DATA ONLY
 ========================================================= */
 
 function getSearchFocusNodes(getDom) {
   if (!isFunction(getDom)) {
     return {
-      topbar:
-        null,
-      searchWrap:
-        null,
-      searchInput:
-        null,
-      searchResults:
-        null,
-      topbarLeft:
-        null,
-      topbarRight:
-        null,
-      mutedNodes:
-        [],
+      topbar: null,
+      searchWrap: null,
+      searchInput: null,
+      searchResults: null,
+      topbarLeft: null,
+      topbarRight: null,
+      mainContent: null,
+      appContent: null,
+      viewContainer: null,
+      mutedNodes: [],
     };
   }
 
-  const dom =
-    safeObject(getDom());
+  const dom = safeObject(getDom());
 
-  const searchInput =
-    dom.searchInput ||
-    null;
-
-  const searchResults =
-    dom.searchResults ||
-    null;
+  const searchInput = dom.searchInput || null;
+  const searchResults = dom.searchResults || null;
 
   const searchWrap =
     dom.searchWrap ||
@@ -2612,10 +1760,25 @@ function getSearchFocusNodes(getDom) {
     topbar?.querySelector?.(".topbar-right") ||
     null;
 
-  const mutedNodes =
-    topbarRight
-      ? Array.from(topbarRight.children).filter((node) => node !== searchWrap)
-      : [];
+  const mainContent =
+    dom.mainContent ||
+    document.querySelector?.(".main-content") ||
+    document.getElementById?.("main-content") ||
+    null;
+
+  const appContent =
+    dom.appContent ||
+    document.getElementById?.("app-content") ||
+    null;
+
+  const viewContainer =
+    dom.viewContainer ||
+    document.getElementById?.("view-container") ||
+    null;
+
+  const mutedNodes = topbarRight
+    ? Array.from(topbarRight.children).filter((node) => node !== searchWrap)
+    : [];
 
   return {
     topbar,
@@ -2624,117 +1787,75 @@ function getSearchFocusNodes(getDom) {
     searchResults,
     topbarLeft,
     topbarRight,
+    mainContent,
+    appContent,
+    viewContainer,
     mutedNodes,
   };
 }
 
 function setGlobalSearchLock(active = false) {
-  if (!isBrowser()) {
-    return false;
-  }
+  if (!isBrowser()) return false;
 
-  const enabled =
-    Boolean(active);
+  const enabled = Boolean(active);
+  const html = document.documentElement;
+  const body = document.body;
 
-  const html =
-    document.documentElement;
+  toggleClass(html, "topbar-search-active", enabled);
+  toggleClass(html, "search-active", enabled);
 
-  const body =
-    document.body;
+  toggleClass(body, "topbar-search-active", enabled);
+  toggleClass(body, "search-active", enabled);
+  toggleClass(body, "search-open", enabled);
+  toggleClass(body, "has-topbar-search-glass", enabled);
 
-  toggleClass(
-    html,
-    "topbar-search-active",
-    enabled
-  );
+  setDataset(html, "topbarSearchOpen", enabled ? "true" : false);
+  setDataset(html, "searchActive", enabled ? "true" : false);
 
-  toggleClass(
-    html,
-    "search-active",
-    enabled
-  );
+  setDataset(body, "topbarSearchOpen", enabled ? "true" : false);
+  setDataset(body, "searchActive", enabled ? "true" : false);
 
-  toggleClass(
-    body,
-    "topbar-search-active",
-    enabled
-  );
+  return true;
+}
 
-  toggleClass(
-    body,
-    "search-active",
-    enabled
-  );
+function setContentSearchState(nodes = {}, active = false) {
+  const enabled = Boolean(active);
 
-  toggleClass(
-    body,
-    "search-open",
-    enabled
-  );
+  const targets = [
+    nodes.mainContent,
+    nodes.appContent,
+    nodes.viewContainer,
+  ].filter(Boolean);
 
-  toggleClass(
-    body,
-    "has-topbar-search-glass",
-    enabled
-  );
+  targets.forEach((node) => {
+    toggleClass(node, "topbar-search-active", enabled);
+    toggleClass(node, "search-active", enabled);
+    toggleClass(node, "has-topbar-search-glass", enabled);
 
-  setDataset(
-    html,
-    "topbarSearchOpen",
-    enabled ? "true" : false
-  );
-
-  setDataset(
-    html,
-    "searchActive",
-    enabled ? "true" : false
-  );
-
-  setDataset(
-    body,
-    "topbarSearchOpen",
-    enabled ? "true" : false
-  );
-
-  setDataset(
-    body,
-    "searchActive",
-    enabled ? "true" : false
-  );
+    setDataset(node, "topbarSearchOpen", enabled ? "true" : false);
+    setDataset(node, "searchActive", enabled ? "true" : false);
+  });
 
   return true;
 }
 
 function setNodeMuted(node, active = false) {
-  if (!node) {
-    return false;
-  }
+  if (!node) return false;
 
-  const enabled =
-    Boolean(active);
+  const enabled = Boolean(active);
 
-  toggleClass(
-    node,
-    "is-search-muted",
-    enabled
-  );
-
-  setDataset(
-    node,
-    "searchMuted",
-    enabled ? "true" : false
-  );
-
-  setAttr(
-    node,
-    "aria-hidden",
-    enabled ? "true" : false
-  );
+  toggleClass(node, "is-search-muted", enabled);
+  setDataset(node, "searchMuted", enabled ? "true" : false);
+  setAttr(node, "aria-hidden", enabled ? "true" : false);
 
   return true;
 }
 
 function applySearchFocusMode(runtime, getDom) {
+  cleanupLegacySearchGlass();
+
+  const nodes = getSearchFocusNodes(getDom);
+
   const {
     topbar,
     searchWrap,
@@ -2742,107 +1863,47 @@ function applySearchFocusMode(runtime, getDom) {
     searchResults,
     topbarLeft,
     mutedNodes,
-  } = getSearchFocusNodes(getDom);
+  } = nodes;
 
-  searchFocusRuntime.runtime =
-    runtime || null;
-
-  searchFocusRuntime.getDom =
-    isFunction(getDom)
-      ? getDom
-      : null;
-
-  searchFocusRuntime.active =
-    true;
+  searchFocusRuntime.runtime = runtime || null;
+  searchFocusRuntime.getDom = isFunction(getDom) ? getDom : null;
+  searchFocusRuntime.active = true;
 
   setGlobalSearchLock(true);
-  setSearchGlassActive(true);
+  setContentSearchState(nodes, true);
 
-  toggleClass(
-    topbar,
-    "is-search-focused",
-    true
-  );
+  toggleClass(topbar, "is-search-focused", true);
+  toggleClass(searchWrap, "is-search-focused", true);
+  toggleClass(searchWrap, "is-search-open", true);
+  toggleClass(searchResults, "is-search-open", true);
 
-  toggleClass(
-    searchWrap,
-    "is-search-focused",
-    true
-  );
+  setDataset(topbar, "searchFocus", "true");
+  setDataset(topbar, "searchOpen", "true");
 
-  toggleClass(
-    searchResults,
-    "is-search-open",
-    true
-  );
+  setDataset(searchWrap, "searchFocus", "true");
+  setDataset(searchWrap, "searchOpen", "true");
 
-  setDataset(
-    topbar,
-    "searchFocus",
-    "true"
-  );
+  setDataset(searchResults, "searchOpen", "true");
+  setDataset(searchInput, "searchOpen", "true");
 
-  setDataset(
-    topbar,
-    "searchOpen",
-    "true"
-  );
+  setAttr(searchInput, "aria-expanded", "true");
 
-  setDataset(
-    searchWrap,
-    "searchFocus",
-    "true"
-  );
-
-  setDataset(
-    searchWrap,
-    "searchOpen",
-    "true"
-  );
-
-  setDataset(
-    searchResults,
-    "searchOpen",
-    "true"
-  );
-
-  setDataset(
-    searchInput,
-    "searchOpen",
-    "true"
-  );
-
-  setAttr(
-    searchInput,
-    "aria-expanded",
-    "true"
-  );
-
-  setNodeMuted(
-    topbarLeft,
-    true
-  );
+  setNodeMuted(topbarLeft, true);
 
   mutedNodes.forEach((node) => {
-    setNodeMuted(
-      node,
-      true
-    );
+    setNodeMuted(node, true);
   });
 
-  emitSearchEvent(
-    runtime?.AppCore || null,
-    "topbar:search:focus-open",
-    {
-      active:
-        true,
-    }
-  );
+  emitSearchEvent(runtime?.AppCore || null, "topbar:search:focus-open", {
+    active: true,
+  });
 
   return true;
 }
 
 function clearSearchFocusMode(getDom) {
+  const nodes = getSearchFocusNodes(getDom);
+
   const {
     topbar,
     searchWrap,
@@ -2850,90 +1911,36 @@ function clearSearchFocusMode(getDom) {
     searchResults,
     topbarLeft,
     mutedNodes,
-  } = getSearchFocusNodes(getDom);
+  } = nodes;
 
-  searchFocusRuntime.runtime =
-    null;
-
-  searchFocusRuntime.getDom =
-    null;
-
-  searchFocusRuntime.active =
-    false;
+  searchFocusRuntime.runtime = null;
+  searchFocusRuntime.getDom = null;
+  searchFocusRuntime.active = false;
 
   setGlobalSearchLock(false);
-  setSearchGlassActive(false);
+  setContentSearchState(nodes, false);
+  cleanupLegacySearchGlass();
 
-  toggleClass(
-    topbar,
-    "is-search-focused",
-    false
-  );
+  toggleClass(topbar, "is-search-focused", false);
+  toggleClass(searchWrap, "is-search-focused", false);
+  toggleClass(searchWrap, "is-search-open", false);
+  toggleClass(searchResults, "is-search-open", false);
 
-  toggleClass(
-    searchWrap,
-    "is-search-focused",
-    false
-  );
+  setDataset(topbar, "searchFocus", false);
+  setDataset(topbar, "searchOpen", false);
 
-  toggleClass(
-    searchResults,
-    "is-search-open",
-    false
-  );
+  setDataset(searchWrap, "searchFocus", false);
+  setDataset(searchWrap, "searchOpen", false);
 
-  setDataset(
-    topbar,
-    "searchFocus",
-    false
-  );
+  setDataset(searchResults, "searchOpen", false);
+  setDataset(searchInput, "searchOpen", false);
 
-  setDataset(
-    topbar,
-    "searchOpen",
-    false
-  );
+  setAttr(searchInput, "aria-expanded", "false");
 
-  setDataset(
-    searchWrap,
-    "searchFocus",
-    false
-  );
-
-  setDataset(
-    searchWrap,
-    "searchOpen",
-    false
-  );
-
-  setDataset(
-    searchResults,
-    "searchOpen",
-    false
-  );
-
-  setDataset(
-    searchInput,
-    "searchOpen",
-    false
-  );
-
-  setAttr(
-    searchInput,
-    "aria-expanded",
-    "false"
-  );
-
-  setNodeMuted(
-    topbarLeft,
-    false
-  );
+  setNodeMuted(topbarLeft, false);
 
   mutedNodes.forEach((node) => {
-    setNodeMuted(
-      node,
-      false
-    );
+    setNodeMuted(node, false);
   });
 
   return true;
@@ -2948,9 +1955,7 @@ export function isSearchFocusActive() {
 ========================================================= */
 
 export function clearSearchDebounce(runtime) {
-  if (!runtime) {
-    return false;
-  }
+  if (!runtime) return false;
 
   if (runtime.searchDebounceTimer) {
     try {
@@ -2961,9 +1966,7 @@ export function clearSearchDebounce(runtime) {
       }
     } catch {}
 
-    runtime.searchDebounceTimer =
-      null;
-
+    runtime.searchDebounceTimer = null;
     return true;
   }
 
@@ -2971,18 +1974,14 @@ export function clearSearchDebounce(runtime) {
 }
 
 export function abortSearch(runtime) {
-  if (!runtime) {
-    return false;
-  }
+  if (!runtime) return false;
 
   if (runtime.searchController) {
     try {
       runtime.searchController.abort();
     } catch {}
 
-    runtime.searchController =
-      null;
-
+    runtime.searchController = null;
     return true;
   }
 
@@ -2990,24 +1989,15 @@ export function abortSearch(runtime) {
 }
 
 export function clearSearchState(runtime, getDom = searchFocusRuntime.getDom) {
-  if (!runtime) {
-    return false;
-  }
+  if (!runtime) return false;
 
   clearSearchDebounce(runtime);
   abortSearch(runtime);
 
-  runtime.activeIndex =
-    -1;
-
-  runtime.currentItems =
-    [];
-
-  runtime.currentQuery =
-    "";
-
-  runtime.searchSeq =
-    Number(runtime.searchSeq || 0) + 1;
+  runtime.activeIndex = -1;
+  runtime.currentItems = [];
+  runtime.currentQuery = "";
+  runtime.searchSeq = Number(runtime.searchSeq || 0) + 1;
 
   clearSearchFocusMode(getDom);
 
@@ -3019,24 +2009,14 @@ export function getCacheKey(query = "") {
 }
 
 export function getCached(runtime, query = "") {
-  if (!runtime?.cache) {
-    return null;
-  }
+  if (!runtime?.cache) return null;
 
-  const key =
-    getCacheKey(query);
+  const key = getCacheKey(query);
+  const found = runtime.cache.get(key);
 
-  const found =
-    runtime.cache.get(key);
+  if (!found) return null;
 
-  if (!found) {
-    return null;
-  }
-
-  if (
-    Date.now() - found.createdAt >
-    TOPBAR_SEARCH_CONFIG.cacheTtlMs
-  ) {
+  if (Date.now() - found.createdAt > TOPBAR_SEARCH_CONFIG.cacheTtlMs) {
     runtime.cache.delete(key);
     return null;
   }
@@ -3045,25 +2025,14 @@ export function getCached(runtime, query = "") {
 }
 
 export function setCached(runtime, query = "", value = []) {
-  if (!runtime) {
-    return false;
-  }
+  if (!runtime) return false;
 
-  if (!runtime.cache) {
-    runtime.cache = new Map();
-  }
+  if (!runtime.cache) runtime.cache = new Map();
 
-  const key =
-    getCacheKey(query);
-
-  runtime.cache.set(
-    key,
-    {
-      value,
-      createdAt:
-        Date.now(),
-    }
-  );
+  runtime.cache.set(getCacheKey(query), {
+    value,
+    createdAt: Date.now(),
+  });
 
   return true;
 }
@@ -3075,127 +2044,76 @@ export function setCached(runtime, query = "", value = []) {
 export function getLocalIndex() {
   return [
     {
-      id:
-        "nav:/",
-      type:
-        ENTITY_TYPES.NAV,
-      title:
-        "Inicio",
-      subtitle:
-        "Panel principal",
-      url:
-        "/",
-      action:
-        SEARCH_ACTIONS.NAVIGATE,
+      id: "nav:/",
+      type: ENTITY_TYPES.NAV,
+      title: "Inicio",
+      subtitle: "Panel principal",
+      url: "/",
+      action: SEARCH_ACTIONS.NAVIGATE,
     },
     {
-      id:
-        "nav:/incidencias",
-      type:
-        ENTITY_TYPES.NAV,
-      title:
-        "Incidencias",
-      subtitle:
-        "Gestión de tickets e incidencias",
-      url:
-        "/incidencias",
-      action:
-        SEARCH_ACTIONS.NAVIGATE,
+      id: "nav:/incidencias",
+      type: ENTITY_TYPES.NAV,
+      title: "Incidencias",
+      subtitle: "Gestión de tickets e incidencias",
+      url: "/incidencias",
+      action: SEARCH_ACTIONS.NAVIGATE,
     },
     {
-      id:
-        "nav:/facturas",
-      type:
-        ENTITY_TYPES.NAV,
-      title:
-        "Facturas",
-      subtitle:
-        "Facturación y documentos",
-      url:
-        "/facturas",
-      action:
-        SEARCH_ACTIONS.NAVIGATE,
+      id: "nav:/facturas",
+      type: ENTITY_TYPES.NAV,
+      title: "Facturas",
+      subtitle: "Facturación y documentos",
+      url: "/facturas",
+      action: SEARCH_ACTIONS.NAVIGATE,
     },
     {
-      id:
-        "nav:/usuarios",
-      type:
-        ENTITY_TYPES.NAV,
-      title:
-        "Usuarios",
-      subtitle:
-        "Gestión de usuarios",
-      url:
-        "/usuarios",
-      action:
-        SEARCH_ACTIONS.NAVIGATE,
+      id: "nav:/usuarios",
+      type: ENTITY_TYPES.NAV,
+      title: "Usuarios",
+      subtitle: "Gestión de usuarios",
+      url: "/usuarios",
+      action: SEARCH_ACTIONS.NAVIGATE,
     },
     {
-      id:
-        "nav:/clientes",
-      type:
-        ENTITY_TYPES.NAV,
-      title:
-        "Clientes",
-      subtitle:
-        "Gestión de clientes",
-      url:
-        "/clientes",
-      action:
-        SEARCH_ACTIONS.NAVIGATE,
+      id: "nav:/clientes",
+      type: ENTITY_TYPES.NAV,
+      title: "Clientes",
+      subtitle: "Gestión de clientes",
+      url: "/clientes",
+      action: SEARCH_ACTIONS.NAVIGATE,
     },
     {
-      id:
-        "nav:/cuenta",
-      type:
-        ENTITY_TYPES.NAV,
-      title:
-        "Cuenta",
-      subtitle:
-        "Perfil y datos personales",
-      url:
-        "/cuenta",
-      action:
-        SEARCH_ACTIONS.NAVIGATE,
+      id: "nav:/cuenta",
+      type: ENTITY_TYPES.NAV,
+      title: "Cuenta",
+      subtitle: "Perfil y seguridad",
+      url: "/cuenta",
+      action: SEARCH_ACTIONS.NAVIGATE,
     },
     {
-      id:
-        "nav:/ajustes",
-      type:
-        ENTITY_TYPES.NAV,
-      title:
-        "Ajustes",
-      subtitle:
-        "Configuración del sistema",
-      url:
-        "/ajustes",
-      action:
-        SEARCH_ACTIONS.NAVIGATE,
+      id: "nav:/ajustes",
+      type: ENTITY_TYPES.NAV,
+      title: "Ajustes",
+      subtitle: "Configuración general",
+      url: "/ajustes",
+      action: SEARCH_ACTIONS.NAVIGATE,
     },
     {
-      id:
-        "nav:/servidor",
-      type:
-        ENTITY_TYPES.NAV,
-      title:
-        "Servidor",
-      subtitle:
-        "Estado del servidor",
-      url:
-        "/servidor",
-      action:
-        SEARCH_ACTIONS.NAVIGATE,
+      id: "nav:/servidor",
+      type: ENTITY_TYPES.NAV,
+      title: "Servidor",
+      subtitle: "Estado del servidor",
+      url: "/servidor",
+      action: SEARCH_ACTIONS.NAVIGATE,
     },
   ];
 }
 
 export function searchLocal(query = "") {
-  const q =
-    normalizeQuery(query);
+  const q = normalizeQuery(query);
 
-  if (!q) {
-    return [];
-  }
+  if (!q) return [];
 
   return getLocalIndex()
     .map((item) => {
@@ -3206,13 +2124,10 @@ export function searchLocal(query = "") {
 
       return {
         ...item,
-        entityId:
-          "",
-        raw:
-          item,
+        entityId: "",
+        raw: item,
         score,
-        source:
-          "local",
+        source: "local",
       };
     })
     .filter((item) => item.score > 0)
@@ -3224,129 +2139,67 @@ export function searchLocal(query = "") {
 ========================================================= */
 
 export function normalizeApiItem(AppCore, raw, index = 0) {
-  if (
-    !raw ||
-    typeof raw !== "object"
-  ) {
-    return null;
-  }
+  if (!raw || typeof raw !== "object") return null;
 
-  const rawType =
-    getRawType(raw);
+  const type = normalizeSearchType(getRawType(raw));
+  const title = getRawTitle(raw);
+  const subtitle = getRawSubtitle(raw);
+  const entityId = getEntityIdByType(type, raw, "");
+  const rawUrl = getRawUrl(raw);
+  const action = getActionForType(type, raw);
 
-  const type =
-    normalizeSearchType(rawType);
+  const url = rawUrl
+    ? normalizeResultUrl(AppCore, rawUrl)
+    : getFallbackUrlForEntity(AppCore, type, entityId, raw);
 
-  const title =
-    getRawTitle(raw);
+  const id = safeText(
+    first(
+      raw.searchId,
+      raw.resultId,
+      raw.id,
+      raw._id,
+      raw.uuid,
+      entityId ? `${type}:${entityId}` : "",
+      `${String(type)}:${String(url || title)}:${index}`
+    ),
+    `${String(type)}:${index}`
+  );
 
-  const subtitle =
-    getRawSubtitle(raw);
-
-  const entityId =
-    getEntityIdByType(
-      type,
-      raw,
-      ""
-    );
-
-  const rawUrl =
-    getRawUrl(raw);
-
-  const action =
-    getActionForType(
-      type,
-      raw
-    );
-
-  const url =
-    rawUrl
-      ? normalizeResultUrl(
-          AppCore,
-          rawUrl
-        )
-      : getFallbackUrlForEntity(
-          AppCore,
-          type,
-          entityId,
-          raw
-        );
-
-  const id =
-    safeText(
-      first(
-        raw.searchId,
-        raw.resultId,
-        raw.id,
-        raw._id,
-        raw.uuid,
-        entityId ? `${type}:${entityId}` : "",
-        `${String(type)}:${String(url || title)}:${index}`
-      ),
-      `${String(type)}:${index}`
-    );
-
-  if (
-    !title &&
-    !url &&
-    !entityId
-  ) {
-    return null;
-  }
+  if (!title && !url && !entityId) return null;
 
   return {
-    id:
-      String(id),
-
-    entityId:
-      String(entityId || ""),
-
+    id: String(id),
+    entityId: String(entityId || ""),
     type,
-    title:
-      String(title || "Resultado"),
-
-    subtitle:
-      String(subtitle || ""),
-
-    url:
-      url || null,
-
+    title: String(title || "Resultado"),
+    subtitle: String(subtitle || ""),
+    url: url || null,
     action,
     raw,
-    source:
-      "api",
+    source: "api",
   };
 }
 
 export function normalizeApiPayload(AppCore, data) {
-  if (!data) {
-    return [];
-  }
+  if (!data) return [];
 
-  const directArray =
-    Array.isArray(data)
-      ? data
-      : Array.isArray(data?.results)
-        ? data.results
-        : Array.isArray(data?.items)
-          ? data.items
-          : Array.isArray(data?.data)
-            ? data.data
-            : Array.isArray(data?.payload)
-              ? data.payload
-              : Array.isArray(data?.searchResults)
-                ? data.searchResults
-                : null;
+  const directArray = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.results)
+      ? data.results
+      : Array.isArray(data?.items)
+        ? data.items
+        : Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data?.payload)
+            ? data.payload
+            : Array.isArray(data?.searchResults)
+              ? data.searchResults
+              : null;
 
   if (directArray) {
     return directArray
-      .map((item, index) =>
-        normalizeApiItem(
-          AppCore,
-          item,
-          index
-        )
-      )
+      .map((item, index) => normalizeApiItem(AppCore, item, index))
       .filter(Boolean);
   }
 
@@ -3371,20 +2224,16 @@ export function normalizeApiPayload(AppCore, data) {
   groupedKeys.forEach((key) => {
     if (Array.isArray(data?.[key])) {
       data[key].forEach((item, index) => {
-        const normalized =
-          normalizeApiItem(
-            AppCore,
-            {
-              ...safeObject(item),
-              type:
-                item?.type || key,
-            },
-            index
-          );
+        const normalized = normalizeApiItem(
+          AppCore,
+          {
+            ...safeObject(item),
+            type: item?.type || key,
+          },
+          index
+        );
 
-        if (normalized) {
-          collected.push(normalized);
-        }
+        if (normalized) collected.push(normalized);
       });
     }
   });
@@ -3396,94 +2245,44 @@ export function normalizeApiPayload(AppCore, data) {
    API SEARCH
 ========================================================= */
 
-export async function searchAPI({
-  AppCore,
-  runtime,
-  query = "",
-}) {
-  const cached =
-    getCached(
-      runtime,
-      query
-    );
+export async function searchAPI({ AppCore, runtime, query = "" }) {
+  const cached = getCached(runtime, query);
 
-  if (cached) {
-    return cached;
-  }
+  if (cached) return cached;
 
-  if (!isFunction(AppCore?.apiClient?.get)) {
-    return [];
-  }
+  if (!isFunction(AppCore?.apiClient?.get)) return [];
 
   abortSearch(runtime);
 
-  const controller =
-    safeAbortController();
-
-  runtime.searchController =
-    controller;
+  const controller = safeAbortController();
+  runtime.searchController = controller;
 
   try {
     const requestOptions = {
-      query:
-        {
-          q:
-            query,
-        },
-
-      auth:
-        true,
-
-      timeout:
-        TOPBAR_SEARCH_CONFIG.timeoutMs ||
-        12000,
+      query: {
+        q: query,
+      },
+      auth: true,
+      timeout: TOPBAR_SEARCH_CONFIG.timeoutMs || 12000,
     };
 
-    if (controller?.signal) {
-      requestOptions.signal =
-        controller.signal;
-    }
+    if (controller?.signal) requestOptions.signal = controller.signal;
 
-    const data =
-      await AppCore.apiClient.get(
-        "/api/search",
-        requestOptions
-      );
+    const data = await AppCore.apiClient.get("/api/search", requestOptions);
+    const normalized = normalizeApiPayload(AppCore, data);
 
-    const normalized =
-      normalizeApiPayload(
-        AppCore,
-        data
-      );
-
-    setCached(
-      runtime,
-      query,
-      normalized
-    );
+    setCached(runtime, query, normalized);
 
     return normalized;
   } catch (error) {
-    if (
-      error?.aborted ||
-      error?.name === "AbortError"
-    ) {
-      return [];
-    }
+    if (error?.aborted || error?.name === "AbortError") return [];
 
-    warn(
-      AppCore,
-      "Fallo búsqueda API.",
-      error
-    );
+    warn(AppCore, "Fallo búsqueda API.", error);
 
     throw error;
   } finally {
-    if (
-      runtime.searchController === controller
-    ) {
-      runtime.searchController =
-        null;
+    if (runtime.searchController === controller) {
+      runtime.searchController = null;
     }
   }
 }
@@ -3493,25 +2292,20 @@ export async function searchAPI({
 ========================================================= */
 
 export function mergeResults(apiResults = [], localResults = [], query = "") {
-  const merged =
-    uniqBy(
-      [...apiResults, ...localResults].map((item) => ({
-        ...item,
-        score:
-          scoreResult(
-            item,
-            query
-          ),
-      })),
-      (item) =>
-        [
-          item.type || "",
-          item.entityId || "",
-          item.url || "",
-          item.title || "",
-          item.subtitle || "",
-        ].join("|")
-    );
+  const merged = uniqBy(
+    [...apiResults, ...localResults].map((item) => ({
+      ...item,
+      score: scoreResult(item, query),
+    })),
+    (item) =>
+      [
+        item.type || "",
+        item.entityId || "",
+        item.url || "",
+        item.title || "",
+        item.subtitle || "",
+      ].join("|")
+  );
 
   return merged
     .filter((item) => item.score > 0 || item.source === "api")
@@ -3524,121 +2318,68 @@ export function mergeResults(apiResults = [], localResults = [], query = "") {
 ========================================================= */
 
 export function setSearchExpanded(input, expanded = false) {
-  if (!input) {
-    return;
-  }
+  if (!input) return;
 
   try {
-    input.setAttribute(
-      "aria-expanded",
-      String(Boolean(expanded))
-    );
+    input.setAttribute("aria-expanded", String(Boolean(expanded)));
   } catch {}
 }
 
 export function showResultsContainer(runtime, getDom) {
-  const {
-    searchResults,
-    searchInput,
-  } = getDom();
+  const { searchResults, searchInput } = getDom();
 
-  if (!searchResults) {
-    return;
-  }
+  if (!searchResults) return;
 
   try {
-    searchResults.hidden =
-      false;
+    searchResults.hidden = false;
+    searchResults.classList.add("active");
+    searchResults.classList.add("is-open");
+    searchResults.classList.add("is-search-open");
 
-    searchResults.classList.add(
-      "active"
-    );
-
-    searchResults.classList.add(
-      "is-open"
-    );
-
-    searchResults.setAttribute(
-      "aria-hidden",
-      "false"
-    );
-
-    searchResults.setAttribute(
-      "role",
-      "listbox"
-    );
+    searchResults.setAttribute("aria-hidden", "false");
+    searchResults.setAttribute("role", "listbox");
+    searchResults.dataset.searchOpen = "true";
   } catch {}
 
-  setSearchExpanded(
-    searchInput,
-    true
-  );
-
-  applySearchFocusMode(
-    runtime,
-    getDom
-  );
+  setSearchExpanded(searchInput, true);
+  applySearchFocusMode(runtime, getDom);
 }
 
 export function hideResultsContainer(runtime, getDom) {
-  if (!runtime) {
-    return;
-  }
+  if (!runtime) return;
 
-  const {
-    searchResults,
-    searchInput,
-  } = isFunction(getDom)
+  const { searchResults, searchInput } = isFunction(getDom)
     ? getDom()
     : {
-        searchResults:
-          null,
-        searchInput:
-          null,
+        searchResults: null,
+        searchInput: null,
       };
 
   if (searchResults) {
     try {
-      searchResults.classList.remove(
-        "active"
-      );
+      searchResults.classList.remove("active");
+      searchResults.classList.remove("is-open");
+      searchResults.classList.remove("is-search-open");
 
-      searchResults.classList.remove(
-        "is-open"
-      );
+      searchResults.hidden = true;
 
-      searchResults.hidden =
-        true;
+      searchResults.setAttribute("aria-hidden", "true");
+      searchResults.removeAttribute("data-search-open");
 
-      searchResults.setAttribute(
-        "aria-hidden",
-        "true"
-      );
-
-      searchResults.innerHTML =
-        "";
+      searchResults.innerHTML = "";
     } catch {}
   }
 
   if (searchInput) {
     try {
-      searchInput.removeAttribute(
-        "aria-activedescendant"
-      );
+      searchInput.removeAttribute("aria-activedescendant");
     } catch {}
   }
 
-  runtime.activeIndex =
-    -1;
+  runtime.activeIndex = -1;
+  runtime.currentItems = [];
 
-  runtime.currentItems =
-    [];
-
-  setSearchExpanded(
-    searchInput,
-    false
-  );
-
+  setSearchExpanded(searchInput, false);
   clearSearchFocusMode(getDom);
 }
 
@@ -3651,60 +2392,32 @@ function renderSearchState({
   text = "",
   query = "",
 }) {
-  const {
-    searchResults,
-  } = getDom();
+  const { searchResults } = getDom();
 
-  if (!searchResults) {
-    return;
-  }
+  if (!searchResults) return;
 
-  searchResults.innerHTML =
-    "";
+  searchResults.innerHTML = "";
 
-  const wrapper =
-    document.createElement("div");
+  const wrapper = document.createElement("div");
+  wrapper.className = `search-state search-state-${state}`;
+  wrapper.setAttribute("aria-live", "polite");
 
-  wrapper.className =
-    `search-state search-state-${state}`;
+  const titleEl = document.createElement("div");
+  titleEl.className = "search-state-title";
+  titleEl.textContent = title;
 
-  wrapper.setAttribute(
-    "aria-live",
-    "polite"
-  );
-
-  const titleEl =
-    document.createElement("div");
-
-  titleEl.className =
-    "search-state-title";
-
-  titleEl.textContent =
-    title;
-
-  const textEl =
-    document.createElement("div");
-
-  textEl.className =
-    "search-state-text";
-
-  textEl.textContent =
-    text;
+  const textEl = document.createElement("div");
+  textEl.className = "search-state-text";
+  textEl.textContent = text;
 
   wrapper.appendChild(titleEl);
   wrapper.appendChild(textEl);
 
-  if (query) {
-    wrapper.dataset.query =
-      query;
-  }
+  if (query) wrapper.dataset.query = query;
 
   searchResults.appendChild(wrapper);
 
-  showResultsContainer(
-    runtime,
-    getDom
-  );
+  showResultsContainer(runtime, getDom);
 
   return AppCore;
 }
@@ -3714,14 +2427,9 @@ export function setLoadingState(AppCore, runtime, getDom, query = "") {
     AppCore,
     runtime,
     getDom,
-    state:
-      "loading",
-    title:
-      "Buscando",
-    text:
-      query
-        ? `Buscando “${query}”...`
-        : "Buscando...",
+    state: "loading",
+    title: "Buscando",
+    text: query ? `Buscando “${query}”...` : "Buscando...",
     query,
   });
 }
@@ -3731,30 +2439,23 @@ export function setEmptyState(AppCore, runtime, getDom, query = "") {
     AppCore,
     runtime,
     getDom,
-    state:
-      "empty",
-    title:
-      "Sin resultados",
-    text:
-      query
-        ? `No encontramos coincidencias para “${query}”.`
-        : "No hay resultados.",
+    state: "empty",
+    title: "Sin resultados",
+    text: query
+      ? `No encontramos coincidencias para “${query}”.`
+      : "No hay resultados.",
     query,
   });
 }
 
 export function setErrorState(runtime, getDom) {
   renderSearchState({
-    AppCore:
-      null,
+    AppCore: null,
     runtime,
     getDom,
-    state:
-      "error",
-    title:
-      "No se pudo completar la búsqueda",
-    text:
-      "Revisa la conexión o inténtalo de nuevo.",
+    state: "error",
+    title: "No se pudo completar la búsqueda",
+    text: "Revisa la conexión o inténtalo de nuevo.",
   });
 }
 
@@ -3765,80 +2466,47 @@ export function updateActiveItem(runtime, items = []) {
     } catch {}
   });
 
-  if (
-    runtime.activeIndex >= 0 &&
-    items[runtime.activeIndex]
-  ) {
+  if (runtime.activeIndex >= 0 && items[runtime.activeIndex]) {
     try {
       items[runtime.activeIndex].classList.add("active");
       items[runtime.activeIndex].scrollIntoView({
-        block:
-          "nearest",
+        block: "nearest",
       });
     } catch {}
   }
 }
 
 export function updateActiveVisuals(runtime, getDom) {
-  const {
-    searchResults,
-    searchInput,
-  } = getDom();
+  const { searchResults, searchInput } = getDom();
 
-  if (!searchResults) {
-    return;
-  }
+  if (!searchResults) return;
 
-  const items =
-    Array.from(
-      searchResults.querySelectorAll(".search-result")
-    );
+  const items = Array.from(searchResults.querySelectorAll(".search-result"));
 
   items.forEach((el, index) => {
-    const isActive =
-      index === runtime.activeIndex;
+    const isActive = index === runtime.activeIndex;
 
     try {
-      el.classList.toggle(
-        "active",
-        isActive
-      );
+      el.classList.toggle("active", isActive);
 
-      el.setAttribute(
-        "aria-selected",
-        String(isActive)
-      );
+      el.setAttribute("aria-selected", String(isActive));
 
-      if (
-        isActive &&
-        searchInput &&
-        el.id
-      ) {
-        searchInput.setAttribute(
-          "aria-activedescendant",
-          el.id
-        );
+      if (isActive && searchInput && el.id) {
+        searchInput.setAttribute("aria-activedescendant", el.id);
       }
     } catch {}
   });
 
-  if (
-    runtime.activeIndex < 0 &&
-    searchInput
-  ) {
+  if (runtime.activeIndex < 0 && searchInput) {
     try {
       searchInput.removeAttribute("aria-activedescendant");
     } catch {}
   }
 
-  if (
-    runtime.activeIndex >= 0 &&
-    items[runtime.activeIndex]
-  ) {
+  if (runtime.activeIndex >= 0 && items[runtime.activeIndex]) {
     try {
       items[runtime.activeIndex].scrollIntoView({
-        block:
-          "nearest",
+        block: "nearest",
       });
     } catch {}
   }
@@ -3856,18 +2524,11 @@ export async function goToResult({
   closeSidebarMobile,
   item = null,
 }) {
-  if (!item) {
-    return false;
-  }
+  if (!item) return false;
 
-  const {
-    searchInput,
-  } = getDom();
+  const { searchInput } = getDom();
 
-  hideResultsContainer(
-    runtime,
-    getDom
-  );
+  hideResultsContainer(runtime, getDom);
 
   try {
     searchInput?.blur?.();
@@ -3877,15 +2538,10 @@ export async function goToResult({
     closeSidebarMobile?.();
   } catch {}
 
-  const action =
-    safeText(
-      item.action ||
-        getActionForType(
-          item.type,
-          item.raw
-        ),
-      SEARCH_ACTIONS.NAVIGATE
-    );
+  const action = safeText(
+    item.action || getActionForType(item.type, item.raw),
+    SEARCH_ACTIONS.NAVIGATE
+  );
 
   try {
     if (action === SEARCH_ACTIONS.OPEN_INCIDENCIA) {
@@ -3920,40 +2576,22 @@ export async function goToResult({
       });
     }
 
-    const target =
-      safeText(
-        item.url ||
-          getFallbackUrlForEntity(
-            AppCore,
-            item.type,
-            item.entityId,
-            item.raw
-          ),
-        ""
-      );
-
-    if (!target) {
-      return false;
-    }
-
-    return await navigateToPath(
-      AppCore,
-      Router,
-      target,
-      {
-        force:
-          true,
-      }
+    const target = safeText(
+      item.url ||
+        getFallbackUrlForEntity(AppCore, item.type, item.entityId, item.raw),
+      ""
     );
+
+    if (!target) return false;
+
+    return await navigateToPath(AppCore, Router, target, {
+      force: true,
+    });
   } catch (error) {
-    warn(
-      AppCore,
-      "No se pudo abrir resultado de búsqueda.",
-      {
-        item,
-        error,
-      }
-    );
+    warn(AppCore, "No se pudo abrir resultado de búsqueda.", {
+      item,
+      error,
+    });
 
     showToast(
       AppCore,
@@ -3961,28 +2599,16 @@ export async function goToResult({
       "error"
     );
 
-    const fallback =
-      safeText(
-        item.url ||
-          getFallbackUrlForEntity(
-            AppCore,
-            item.type,
-            item.entityId,
-            item.raw
-          ),
-        ""
-      );
+    const fallback = safeText(
+      item.url ||
+        getFallbackUrlForEntity(AppCore, item.type, item.entityId, item.raw),
+      ""
+    );
 
     if (fallback) {
-      return navigateToPath(
-        AppCore,
-        Router,
-        fallback,
-        {
-          force:
-            true,
-        }
-      );
+      return navigateToPath(AppCore, Router, fallback, {
+        force: true,
+      });
     }
 
     return false;
@@ -3994,12 +2620,9 @@ export async function goToResult({
 ========================================================= */
 
 function renderActionPill(AppCore, item = {}) {
-  const label =
-    getActionLabel(item);
+  const label = getActionLabel(item);
 
-  if (!label) {
-    return "";
-  }
+  if (!label) return "";
 
   return `
     <span
@@ -4020,180 +2643,111 @@ export function renderResults({
   results = [],
   query = "",
 }) {
-  const {
-    searchResults,
-  } = getDom();
+  const { searchResults } = getDom();
 
-  if (!searchResults) {
-    return;
-  }
+  if (!searchResults) return;
 
-  searchResults.innerHTML =
-    "";
+  searchResults.innerHTML = "";
 
-  runtime.activeIndex =
-    -1;
-
-  runtime.currentItems =
-    [];
+  runtime.activeIndex = -1;
+  runtime.currentItems = [];
 
   if (!results.length) {
-    setEmptyState(
-      AppCore,
-      runtime,
-      getDom,
-      query
-    );
-
+    setEmptyState(AppCore, runtime, getDom, query);
     return;
   }
 
-  const groups =
-    groupResults(results);
-
-  const fragment =
-    document.createDocumentFragment();
+  const groups = groupResults(results);
+  const fragment = document.createDocumentFragment();
 
   groups.forEach(([type, items]) => {
-    const groupEl =
-      document.createElement("section");
+    const groupEl = document.createElement("section");
+    groupEl.className = "search-group-block";
+    groupEl.dataset.group = type;
 
-    groupEl.className =
-      "search-group-block";
-
-    groupEl.dataset.group =
-      type;
-
-    const header =
-      document.createElement("div");
-
-    header.className =
-      "search-group";
-
-    header.textContent =
-      getTypeLabel(type);
+    const header = document.createElement("div");
+    header.className = "search-group";
+    header.textContent = getTypeLabel(type);
 
     groupEl.appendChild(header);
 
-    items
-      .slice(0, TOPBAR_SEARCH_CONFIG.maxResultsPerGroup)
-      .forEach((item) => {
-        const index =
-          runtime.currentItems.length;
+    items.slice(0, TOPBAR_SEARCH_CONFIG.maxResultsPerGroup).forEach((item) => {
+      const index = runtime.currentItems.length;
+      const resultEl = document.createElement("button");
 
-        const resultEl =
-          document.createElement("button");
+      resultEl.type = "button";
+      resultEl.id = `topbar-search-result-${index}`;
+      resultEl.className = "search-result";
 
-        resultEl.type =
-          "button";
+      resultEl.dataset.type = item.type || ENTITY_TYPES.GENERAL;
+      resultEl.dataset.url = item.url || "";
+      resultEl.dataset.action = item.action || SEARCH_ACTIONS.NAVIGATE;
+      resultEl.dataset.entityId = item.entityId || "";
+      resultEl.dataset.index = String(index);
 
-        resultEl.id =
-          `topbar-search-result-${index}`;
+      resultEl.setAttribute("role", "option");
+      resultEl.setAttribute("aria-selected", "false");
+      resultEl.setAttribute(
+        "aria-label",
+        `${item.title || "Resultado"}${item.subtitle ? `, ${item.subtitle}` : ""}`
+      );
 
-        resultEl.className =
-          "search-result";
+      resultEl.innerHTML = `
+        <span class="search-icon" aria-hidden="true">${escapeHtml(
+          AppCore,
+          getTypeIcon(item.type)
+        )}</span>
 
-        resultEl.dataset.type =
-          item.type || ENTITY_TYPES.GENERAL;
-
-        resultEl.dataset.url =
-          item.url || "";
-
-        resultEl.dataset.action =
-          item.action || SEARCH_ACTIONS.NAVIGATE;
-
-        resultEl.dataset.entityId =
-          item.entityId || "";
-
-        resultEl.dataset.index =
-          String(index);
-
-        resultEl.setAttribute(
-          "role",
-          "option"
-        );
-
-        resultEl.setAttribute(
-          "aria-selected",
-          "false"
-        );
-
-        resultEl.setAttribute(
-          "aria-label",
-          `${item.title || "Resultado"}${item.subtitle ? `, ${item.subtitle}` : ""}`
-        );
-
-        resultEl.innerHTML = `
-          <span class="search-icon" aria-hidden="true">${escapeHtml(
-            AppCore,
-            getTypeIcon(item.type)
-          )}</span>
-
-          <span class="search-text">
-            <span class="search-title">
-              <span class="search-title-main">
-                ${highlight(AppCore, item.title || "", query)}
-              </span>
-              ${renderActionPill(AppCore, item)}
+        <span class="search-text">
+          <span class="search-title">
+            <span class="search-title-main">
+              ${highlight(AppCore, item.title || "", query)}
             </span>
-
-            ${
-              item.subtitle
-                ? `<span class="search-subtitle">${highlight(
-                    AppCore,
-                    item.subtitle || "",
-                    query
-                  )}</span>`
-                : ""
-            }
+            ${renderActionPill(AppCore, item)}
           </span>
-        `;
 
-        resultEl.addEventListener(
-          "click",
-          async () => {
-            await goToResult({
-              AppCore,
-              Router,
-              runtime,
-              getDom,
-              closeSidebarMobile,
-              item,
-            });
+          ${
+            item.subtitle
+              ? `<span class="search-subtitle">${highlight(
+                  AppCore,
+                  item.subtitle || "",
+                  query
+                )}</span>`
+              : ""
           }
-        );
+        </span>
+      `;
 
-        resultEl.addEventListener(
-          "mouseenter",
-          () => {
-            const idx =
-              Number(resultEl.dataset.index);
-
-            if (!Number.isNaN(idx)) {
-              runtime.activeIndex =
-                idx;
-
-              updateActiveVisuals(
-                runtime,
-                getDom
-              );
-            }
-          }
-        );
-
-        runtime.currentItems.push(item);
-        groupEl.appendChild(resultEl);
+      resultEl.addEventListener("click", async () => {
+        await goToResult({
+          AppCore,
+          Router,
+          runtime,
+          getDom,
+          closeSidebarMobile,
+          item,
+        });
       });
+
+      resultEl.addEventListener("mouseenter", () => {
+        const idx = Number(resultEl.dataset.index);
+
+        if (!Number.isNaN(idx)) {
+          runtime.activeIndex = idx;
+          updateActiveVisuals(runtime, getDom);
+        }
+      });
+
+      runtime.currentItems.push(item);
+      groupEl.appendChild(resultEl);
+    });
 
     fragment.appendChild(groupEl);
   });
 
   searchResults.appendChild(fragment);
 
-  showResultsContainer(
-    runtime,
-    getDom
-  );
+  showResultsContainer(runtime, getDom);
 }
 
 /* =========================================================
@@ -4208,87 +2762,47 @@ export async function runSearch({
   closeSidebarMobile,
   query = "",
 }) {
-  if (!runtime) {
+  if (!runtime) return;
+
+  const q = normalizeQuery(query);
+
+  runtime.AppCore = AppCore;
+  runtime.currentQuery = q;
+  runtime.searchSeq = Number(runtime.searchSeq || 0) + 1;
+
+  const seq = runtime.searchSeq;
+
+  if (!q || q.length < TOPBAR_SEARCH_CONFIG.minQueryLength) {
+    hideResultsContainer(runtime, getDom);
     return;
   }
 
-  const q =
-    normalizeQuery(query);
-
-  runtime.AppCore =
-    AppCore;
-
-  runtime.currentQuery =
-    q;
-
-  runtime.searchSeq =
-    Number(runtime.searchSeq || 0) + 1;
-
-  const seq =
-    runtime.searchSeq;
-
-  if (
-    !q ||
-    q.length < TOPBAR_SEARCH_CONFIG.minQueryLength
-  ) {
-    hideResultsContainer(
-      runtime,
-      getDom
-    );
-
-    return;
-  }
-
-  setLoadingState(
-    AppCore,
-    runtime,
-    getDom,
-    q
-  );
+  setLoadingState(AppCore, runtime, getDom, q);
 
   try {
-    const local =
-      searchLocal(q);
+    const local = searchLocal(q);
 
-    if (
-      local.length &&
-      runtime.currentQuery === q &&
-      runtime.searchSeq === seq
-    ) {
+    if (local.length && runtime.currentQuery === q && runtime.searchSeq === seq) {
       renderResults({
         AppCore,
         Router,
         runtime,
         getDom,
         closeSidebarMobile,
-        results:
-          local,
-        query:
-          q,
+        results: local,
+        query: q,
       });
     }
 
-    const remote =
-      await searchAPI({
-        AppCore,
-        runtime,
-        query:
-          q,
-      });
+    const remote = await searchAPI({
+      AppCore,
+      runtime,
+      query: q,
+    });
 
-    if (
-      runtime.currentQuery !== q ||
-      runtime.searchSeq !== seq
-    ) {
-      return;
-    }
+    if (runtime.currentQuery !== q || runtime.searchSeq !== seq) return;
 
-    const merged =
-      mergeResults(
-        remote,
-        local,
-        q
-      );
+    const merged = mergeResults(remote, local, q);
 
     renderResults({
       AppCore,
@@ -4296,21 +2810,13 @@ export async function runSearch({
       runtime,
       getDom,
       closeSidebarMobile,
-      results:
-        merged,
-      query:
-        q,
+      results: merged,
+      query: q,
     });
   } catch {
-    if (
-      runtime.currentQuery !== q ||
-      runtime.searchSeq !== seq
-    ) {
-      return;
-    }
+    if (runtime.currentQuery !== q || runtime.searchSeq !== seq) return;
 
-    const local =
-      searchLocal(q);
+    const local = searchLocal(q);
 
     if (local.length) {
       renderResults({
@@ -4319,19 +2825,14 @@ export async function runSearch({
         runtime,
         getDom,
         closeSidebarMobile,
-        results:
-          local,
-        query:
-          q,
+        results: local,
+        query: q,
       });
 
       return;
     }
 
-    setErrorState(
-      runtime,
-      getDom
-    );
+    setErrorState(runtime, getDom);
   }
 }
 

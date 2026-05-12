@@ -1,6 +1,6 @@
 /* =========================================================
    ONION SUPPORT — SIDEBAR
-   Archivo: src/css/layout/sidebar.css
+   Archivo: /src/css/layout/sidebar.css
 
    FINAL EXTREME SYSTEM · APPLE STYLE · PRO SAAS PANEL · 11/10
    TOKEN DRIVEN · ROUTER SAFE · DROPDOWN SAFE · TOOLTIP SAFE
@@ -15,7 +15,7 @@
    REGLAS:
    - Sin :root.
    - Sin [data-theme="light"].
-   - Sin paleta local de light.
+   - Sin paleta local light/dark.
    - No toca main-content / app-content / view-container.
    - El dropdown usa --sidebar-dropdown-*.
    - El avatar usa --sidebar-avatar-* / --avatar-*.
@@ -48,7 +48,7 @@
   --sidebar-footer-avatar-size-collapsed: 30px;
 
   --sidebar-tooltip-z: var(--z-tooltip, 70);
-  --sidebar-dropdown-z: var(--z-dropdown, 50);
+  --sidebar-dropdown-z: calc(var(--z-dropdown, 50) + 2);
 
   --sidebar-dropdown-width-collapsed: 236px;
   --sidebar-dropdown-offset-collapsed: 12px;
@@ -78,7 +78,7 @@
   --sidebar-indicator-opacity: 0;
 
   --sidebar-mobile-shadow:
-    0 24px 80px rgba(0, 0, 0, .34),
+    0 24px 80px color-mix(in srgb, var(--text), transparent 66%),
     0 0 0 1px color-mix(in srgb, var(--text-strong), transparent 97%);
 
   position: fixed;
@@ -87,6 +87,7 @@
   inset-inline-end: auto;
 
   inline-size: var(--sidebar-width);
+  block-size: 100vh;
   block-size: 100dvh;
   max-inline-size: 100vw;
 
@@ -157,6 +158,7 @@
   position: absolute;
   inset: 0;
   z-index: 0;
+
   pointer-events: none;
 
   background:
@@ -178,7 +180,9 @@
   inset-block: 0;
   inset-inline-end: 0;
   z-index: 0;
+
   inline-size: 1px;
+
   pointer-events: none;
 
   background:
@@ -1327,6 +1331,7 @@ body.sidebar-collapsed .sidebar .menu-item[data-active="true"]::before {
   overflow-x: visible;
 
   scrollbar-width: thin;
+  scrollbar-gutter: stable;
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
@@ -1993,7 +1998,7 @@ body.sidebar-collapsed .sidebar .user-dropdown {
 
   z-index: calc(var(--z-overlay) - 1);
 
-  background: var(--backdrop-bg);
+  background: var(--sidebar-mobile-backdrop, var(--backdrop-bg));
 
   opacity: 0;
   visibility: hidden;
@@ -2035,6 +2040,10 @@ body.sidebar-open [data-sidebar-overlay] {
     z-index: var(--z-overlay);
 
     will-change: transform;
+
+    scrollbar-width: thin;
+    scrollbar-gutter: stable;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
 
     transition:
       transform var(--duration-slow) var(--ease-emphasis),
@@ -2302,13 +2311,48 @@ body:not(.sidebar-collapsed) .sidebar:not(.collapsed):not(.is-collapsed):not([da
 .sidebar .chat-item {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  text-box-trim: none;
 }
 
 .sidebar .menu-label,
 .sidebar .menu-item-label {
   block-size: auto;
   min-block-size: calc(1em * var(--sidebar-item-text-line-height));
+}
+
+
+/* =========================================================
+   FORCED COLORS
+========================================================= */
+
+@media (forced-colors: active) {
+  .sidebar,
+  .user-dropdown,
+  .logo[data-tooltip]::after,
+  .sidebar-toggle[data-tooltip]::after,
+  .menu-item[data-tooltip]::after {
+    forced-color-adjust: auto;
+  }
+
+  .sidebar,
+  .user-dropdown {
+    border-color: CanvasText;
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+  }
+
+  .menu-item,
+  .user,
+  .dropdown-item,
+  .sidebar-toggle,
+  .logo {
+    color: CanvasText;
+  }
+
+  .menu-item[aria-current="page"],
+  .menu-item[data-active="true"] {
+    outline: 1px solid Highlight;
+  }
 }
 
 

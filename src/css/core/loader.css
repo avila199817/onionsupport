@@ -60,12 +60,17 @@ body.loading {
 }
 
 html.app-ready,
-body.app-ready {
+body.app-ready,
+html[data-app-state="ready"],
+body[data-app-loading="false"] {
   min-block-size: 100%;
 }
 
 html.app-ready body,
-body.app-ready {
+body.app-ready,
+html[data-app-state="ready"] body,
+body[data-app-loading="false"] {
+  overscroll-behavior: auto;
   touch-action: auto;
 }
 
@@ -100,6 +105,7 @@ body.app-loading #app-shell,
 html.app-ready #app-shell[data-shell-interactive="true"],
 body.app-ready #app-shell[data-shell-interactive="true"],
 html[data-app-state="ready"] #app-shell[data-shell-interactive="true"],
+body[data-app-loading="false"] #app-shell[data-shell-interactive="true"],
 #app-shell[data-shell="ready"][data-shell-interactive="true"],
 #app-shell[data-shell-state="ready"][data-shell-interactive="true"] {
   opacity: 1;
@@ -223,6 +229,7 @@ html[data-app-state="ready"] #app-shell[data-shell-interactive="true"],
   inline-size: 100vw;
   block-size: 100vh;
   min-block-size: 100vh;
+  min-block-size: 100svh;
   min-block-size: 100dvh;
 
   padding:
@@ -290,6 +297,20 @@ body.app-loading #app-loader {
 .app-loader[data-loader-state="hidden"],
 html.app-ready #app-loader.is-hidden,
 body.app-ready #app-loader.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/*
+   Hard-off de seguridad:
+   si la app ya está ready, el loader no debe seguir aplicando
+   el overlay oscuro por un atributo legacy olvidado.
+*/
+html.app-ready #app-loader:not([data-loader-force="true"]),
+body.app-ready #app-loader:not([data-loader-force="true"]),
+html[data-app-state="ready"] #app-loader:not([data-loader-force="true"]),
+body[data-app-loading="false"] #app-loader:not([data-loader-force="true"]) {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -623,6 +644,20 @@ html.theme-dark .app-loader .app-loader__logo--dark {
   opacity: .94;
 }
 
+#app-loader.has-logo-error .app-loader__logo,
+.app-loader.has-logo-error .app-loader__logo,
+#app-loader[data-logo-error="true"] .app-loader__logo,
+.app-loader[data-logo-error="true"] .app-loader__logo {
+  display: none !important;
+}
+
+#app-loader.has-logo-error .app-loader__logo-fallback,
+.app-loader.has-logo-error .app-loader__logo-fallback,
+#app-loader[data-logo-error="true"] .app-loader__logo-fallback,
+.app-loader[data-logo-error="true"] .app-loader__logo-fallback {
+  display: grid !important;
+}
+
 
 /* =========================================================
    LEGACY SPINNER SUPPORT
@@ -844,7 +879,10 @@ body.app-ready #view-container,
 html.app-ready #main-content,
 body.app-ready #main-content,
 html.app-ready #app-shell,
-body.app-ready #app-shell {
+body.app-ready #app-shell,
+html[data-app-state="ready"] #view-container,
+html[data-app-state="ready"] #main-content,
+html[data-app-state="ready"] #app-shell {
   cursor: auto;
 }
 

@@ -6,21 +6,12 @@
    SEARCH COMMAND PALETTE · CONTENT-ONLY GLASS · SCROLL LOCK SAFE
    NO CSS IN JS CONTRACT · TOKEN DRIVEN
 
-   FIX DEFINITIVO SEARCH:
-   - El search NO cambia de alto al abrir.
-   - El search NO baja al abrir.
-   - El search se centra horizontalmente.
-   - El search se alarga al abrir.
-   - El dropdown queda pegado al search.
-   - El dropdown usa el mismo ancho visual del search.
-   - La lupa en dark queda más visible.
-
    ARQUITECTURA:
-   - variables.css = tokens base / dark
-   - light.css     = overrides [data-theme="light"]
-   - layout.css    = shell, stacking, scroll, mounts
-   - ui.css        = componentes globales
-   - topbar.css    = estructura + estados del topbar/search
+   - variables.css = tokens base / dark.
+   - light.css     = overrides [data-theme="light"].
+   - layout.css    = shell, stacking, scroll y mounts.
+   - ui.css        = componentes globales.
+   - topbar.css    = topbar + search command palette.
 
    REGLAS:
    - Sin :root.
@@ -28,9 +19,11 @@
    - Sin paleta light local.
    - Sin tokens globales duplicados.
    - Sin depender de style="" desde JS.
-   - Search consume tokens topbar/input/dropdown.
-   - Resultados consumen popover/dropdown/surface tokens.
-   - El glass de búsqueda afecta SOLO a contenido/vista.
+   - El search NO cambia de alto al abrir.
+   - El search NO baja al abrir.
+   - El search sólo se centra y se alarga al abrir.
+   - El dropdown queda pegado y con el mismo ancho visual.
+   - El glass de búsqueda afecta SOLO a .main-content.
    - Sidebar y topbar permanecen nítidos.
    - Durante búsqueda activa no hay scroll de página.
 ========================================================= */
@@ -47,8 +40,8 @@
   --topbar-search-command-height:
     var(--topbar-search-visible-height);
 
-  --topbar-search-shell-radius: var(--topbar-search-radius, var(--radius-pill));
-  --topbar-search-shell-padding: 2px;
+  --topbar-search-shell-radius:
+    var(--topbar-search-radius, var(--radius-pill));
 
   --topbar-search-results-gap:
     var(--topbar-search-results-gap-token, 5px);
@@ -104,7 +97,6 @@
   --topbar-search-icon-color-focus:
     color-mix(in srgb, var(--accent) 82%, var(--text-strong) 18%);
 
-  /* Clave: top fijo centrado dentro del alto real del topbar. */
   --topbar-search-command-top:
     var(
       --topbar-search-command-offset-top,
@@ -264,7 +256,7 @@ body.auth-screen .topbar {
 
 
 /* =========================================================
-   SEARCH ACTIVE · SCROLL LOCK + STACKING
+   SEARCH ACTIVE · SCROLL LOCK + CONTENT-ONLY GLASS
 ========================================================= */
 
 html.topbar-search-active,
@@ -279,6 +271,32 @@ body[data-topbar-search-open="true"] {
   overscroll-behavior: none !important;
 }
 
+body.topbar-search-active,
+body.search-active,
+body.search-open,
+body.has-topbar-search-glass,
+body[data-search-active="true"],
+body[data-topbar-search-open="true"] {
+  touch-action: none;
+}
+
+/* Seguridad: nunca pintar glass full-screen sobre body. */
+html body.topbar-search-active::before,
+html body.search-active::before,
+html body.search-open::before,
+html body.has-topbar-search-glass::before,
+html body[data-search-active="true"]::before,
+html body[data-topbar-search-open="true"]::before,
+html body.topbar-search-active::after,
+html body.search-active::after,
+html body.search-open::after,
+html body.has-topbar-search-glass::after,
+html body[data-search-active="true"]::after,
+html body[data-topbar-search-open="true"]::after {
+  content: none !important;
+  display: none !important;
+}
+
 body.topbar-search-active #app-shell,
 body.search-active #app-shell,
 body.search-open #app-shell,
@@ -288,17 +306,34 @@ body[data-topbar-search-open="true"] #app-shell {
   isolation: isolate;
 }
 
-body.topbar-search-active::before,
-body.search-active::before,
-body.search-open::before,
-body.has-topbar-search-glass::before,
-body[data-search-active="true"]::before,
-body[data-topbar-search-open="true"]::before {
-  content: "";
-  position: fixed;
-  inset: 0;
+body.topbar-search-active .main-content,
+body.search-active .main-content,
+body.search-open .main-content,
+body.has-topbar-search-glass .main-content,
+body[data-search-active="true"] .main-content,
+body[data-topbar-search-open="true"] .main-content {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+  scrollbar-gutter: stable;
+}
 
-  z-index: calc(var(--z-modal) + 1);
+/* Glass sólo sobre contenido. No toca topbar ni sidebar. */
+body.topbar-search-active .main-content::before,
+body.search-active .main-content::before,
+body.search-open .main-content::before,
+body.has-topbar-search-glass .main-content::before,
+body[data-search-active="true"] .main-content::before,
+body[data-topbar-search-open="true"] .main-content::before {
+  content: "";
+
+  position: fixed;
+
+  inset-block-start: var(--app-offset-topbar);
+  inset-inline-start: var(--app-sidebar-current-width);
+  inset-inline-end: 0;
+  inset-block-end: 0;
+
+  z-index: 20;
 
   pointer-events: none;
 
@@ -337,17 +372,23 @@ body[data-topbar-search-open="true"]::before {
   transform: translateZ(0);
 }
 
-body.topbar-search-active::after,
-body.search-active::after,
-body.search-open::after,
-body.has-topbar-search-glass::after,
-body[data-search-active="true"]::after,
-body[data-topbar-search-open="true"]::after {
+/* Textura fina sólo sobre contenido. */
+body.topbar-search-active .main-content::after,
+body.search-active .main-content::after,
+body.search-open .main-content::after,
+body.has-topbar-search-glass .main-content::after,
+body[data-search-active="true"] .main-content::after,
+body[data-topbar-search-open="true"] .main-content::after {
   content: "";
-  position: fixed;
-  inset: 0;
 
-  z-index: calc(var(--z-modal) + 2);
+  position: fixed;
+
+  inset-block-start: var(--app-offset-topbar);
+  inset-inline-start: var(--app-sidebar-current-width);
+  inset-inline-end: 0;
+  inset-block-end: 0;
+
+  z-index: 21;
 
   pointer-events: none;
 
@@ -364,21 +405,10 @@ body[data-topbar-search-open="true"]::after {
 
   background-size: 42px 42px;
 
-  mask-image: linear-gradient(180deg, rgba(0,0,0,.18), transparent 86%);
-  -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,.18), transparent 86%);
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, .18), transparent 86%);
+  -webkit-mask-image: linear-gradient(180deg, rgba(0, 0, 0, .18), transparent 86%);
 
   opacity: .16;
-}
-
-body.topbar-search-active .main-content,
-body.search-active .main-content,
-body.search-open .main-content,
-body.has-topbar-search-glass .main-content,
-body[data-search-active="true"] .main-content,
-body[data-topbar-search-open="true"] .main-content {
-  overflow: hidden !important;
-  overscroll-behavior: none !important;
-  scrollbar-gutter: stable;
 }
 
 body.topbar-search-active #app-content,
@@ -419,7 +449,7 @@ body.search-open [data-sidebar-mount],
 body.has-topbar-search-glass [data-sidebar-mount],
 body[data-search-active="true"] [data-sidebar-mount],
 body[data-topbar-search-open="true"] [data-sidebar-mount] {
-  z-index: calc(var(--z-modal) + 5);
+  z-index: var(--z-sidebar);
 }
 
 body.topbar-search-active .sidebar,
@@ -430,8 +460,6 @@ body[data-search-active="true"] .sidebar,
 body[data-topbar-search-open="true"] .sidebar {
   filter: none !important;
   opacity: 1 !important;
-  backdrop-filter: var(--blur-md);
-  -webkit-backdrop-filter: var(--blur-md);
 }
 
 body.topbar-search-active #topbar-mount,
@@ -678,7 +706,6 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
   opacity: .95;
 }
 
-/* Estado abierto: centrado y alargado, pero SIN bajar y SIN crecer de alto. */
 .topbar-search-wrap[data-search-focus="true"],
 .topbar-search-wrap[data-search-open="true"],
 .topbar-search-wrap.is-search-focused,
@@ -786,7 +813,6 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
   box-shadow: var(--topbar-search-field-shadow-focus);
 }
 
-/* Clave: NO cambia altura al abrir. Sólo se alarga el wrapper. */
 .topbar-search-wrap[data-search-focus="true"] .topbar-search,
 .topbar-search-wrap[data-search-open="true"] .topbar-search,
 .topbar-search-wrap.is-search-focused .topbar-search,
@@ -867,16 +893,6 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
 
   filter:
     drop-shadow(0 0 8px color-mix(in srgb, var(--accent), transparent 62%));
-}
-
-.topbar-search-wrap[data-search-focus="true"] .topbar-search-icon,
-.topbar-search-wrap[data-search-open="true"] .topbar-search-icon,
-.topbar-search-wrap.is-search-focused .topbar-search-icon,
-.topbar-search-wrap.is-search-open .topbar-search-icon {
-  inset-inline-start: 17px;
-
-  inline-size: 19px;
-  block-size: 19px;
 }
 
 
@@ -1555,6 +1571,21 @@ mark,
   .topbar-search-results {
     max-inline-size: calc(100vw - 28px);
   }
+
+  body.topbar-search-active .main-content::before,
+  body.search-active .main-content::before,
+  body.search-open .main-content::before,
+  body.has-topbar-search-glass .main-content::before,
+  body[data-search-active="true"] .main-content::before,
+  body[data-topbar-search-open="true"] .main-content::before,
+  body.topbar-search-active .main-content::after,
+  body.search-active .main-content::after,
+  body.search-open .main-content::after,
+  body.has-topbar-search-glass .main-content::after,
+  body[data-search-active="true"] .main-content::after,
+  body[data-topbar-search-open="true"] .main-content::after {
+    inset-inline-start: 0;
+  }
 }
 
 
@@ -1599,10 +1630,7 @@ mark,
     max-inline-size: 100%;
   }
 
-  .topbar-search {
-    font-size: var(--font-md);
-  }
-
+  .topbar-search,
   .topbar-search-wrap[data-search-focus="true"] .topbar-search,
   .topbar-search-wrap[data-search-open="true"] .topbar-search,
   .topbar-search-wrap.is-search-focused .topbar-search,
@@ -1756,48 +1784,6 @@ mark,
 
 
 /* =========================================================
-   :HAS() REINFORCEMENT
-========================================================= */
-
-@supports selector(:has(*)) {
-  body:has(.topbar[data-search-focus="true"]),
-  body:has(.topbar.is-search-focused),
-  body:has(.topbar-search-wrap[data-search-focus="true"]),
-  body:has(.topbar-search-wrap[data-search-open="true"]),
-  body:has(.topbar-search-wrap.is-search-focused),
-  body:has(.topbar-search-wrap.is-search-open) {
-    overflow: hidden !important;
-    overscroll-behavior: none !important;
-  }
-
-  body:has(.topbar[data-search-focus="true"]) .main-content,
-  body:has(.topbar.is-search-focused) .main-content,
-  body:has(.topbar-search-wrap[data-search-focus="true"]) .main-content,
-  body:has(.topbar-search-wrap[data-search-open="true"]) .main-content,
-  body:has(.topbar-search-wrap.is-search-focused) .main-content,
-  body:has(.topbar-search-wrap.is-search-open) .main-content {
-    overflow: hidden !important;
-    overscroll-behavior: none !important;
-  }
-
-  body:has(.topbar[data-search-focus="true"]) #app-content,
-  body:has(.topbar.is-search-focused) #app-content,
-  body:has(.topbar-search-wrap[data-search-focus="true"]) #app-content,
-  body:has(.topbar-search-wrap[data-search-open="true"]) #app-content,
-  body:has(.topbar-search-wrap.is-search-focused) #app-content,
-  body:has(.topbar-search-wrap.is-search-open) #app-content,
-  body:has(.topbar[data-search-focus="true"]) #view-container,
-  body:has(.topbar.is-search-focused) #view-container,
-  body:has(.topbar-search-wrap[data-search-focus="true"]) #view-container,
-  body:has(.topbar-search-wrap[data-search-open="true"]) #view-container,
-  body:has(.topbar-search-wrap.is-search-focused) #view-container,
-  body:has(.topbar-search-wrap.is-search-open) #view-container {
-    pointer-events: none;
-  }
-}
-
-
-/* =========================================================
    FALLBACK SIN BACKDROP FILTER
 ========================================================= */
 
@@ -1806,12 +1792,12 @@ mark,
     background: var(--topbar-bg);
   }
 
-  body.topbar-search-active::before,
-  body.search-active::before,
-  body.search-open::before,
-  body.has-topbar-search-glass::before,
-  body[data-search-active="true"]::before,
-  body[data-topbar-search-open="true"]::before {
+  body.topbar-search-active .main-content::before,
+  body.search-active .main-content::before,
+  body.search-open .main-content::before,
+  body.has-topbar-search-glass .main-content::before,
+  body[data-search-active="true"] .main-content::before,
+  body[data-topbar-search-open="true"] .main-content::before {
     background:
       var(
         --topbar-search-glass-aura,
@@ -1831,78 +1817,28 @@ mark,
 
 
 /* =========================================================
-   FORCED COLORS
-========================================================= */
-
-@media (forced-colors: active) {
-  .topbar,
-  .topbar-search,
-  .topbar-search-results,
-  .search-result,
-  .topbar-mobile-toggle {
-    forced-color-adjust: auto;
-  }
-
-  body.topbar-search-active::before,
-  body.search-active::before,
-  body.search-open::before,
-  body.has-topbar-search-glass::before,
-  body[data-search-active="true"]::before,
-  body[data-topbar-search-open="true"]::before,
-  body.topbar-search-active::after,
-  body.search-active::after,
-  body.search-open::after,
-  body.has-topbar-search-glass::after,
-  body[data-search-active="true"]::after,
-  body[data-topbar-search-open="true"]::after {
-    display: none;
-  }
-
-  .topbar,
-  .topbar-search-results {
-    background: Canvas;
-    color: CanvasText;
-    border-color: CanvasText;
-    box-shadow: none;
-  }
-
-  .topbar-search {
-    background: Field;
-    color: FieldText;
-    border-color: CanvasText;
-    box-shadow: none;
-  }
-
-  .search-result.active,
-  .search-result[aria-selected="true"] {
-    outline: 1px solid Highlight;
-  }
-}
-
-
-/* =========================================================
    REDUCED TRANSPARENCY
 ========================================================= */
 
 @media (prefers-reduced-transparency: reduce) {
   .topbar,
   .topbar-search-results,
-  body.topbar-search-active::before,
-  body.search-active::before,
-  body.search-open::before,
-  body.has-topbar-search-glass::before,
-  body[data-search-active="true"]::before,
-  body[data-topbar-search-open="true"]::before {
+  body.topbar-search-active .main-content::before,
+  body.search-active .main-content::before,
+  body.search-open .main-content::before,
+  body.has-topbar-search-glass .main-content::before,
+  body[data-search-active="true"] .main-content::before,
+  body[data-topbar-search-open="true"] .main-content::before {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
 
-  body.topbar-search-active::before,
-  body.search-active::before,
-  body.search-open::before,
-  body.has-topbar-search-glass::before,
-  body[data-search-active="true"]::before,
-  body[data-topbar-search-open="true"]::before {
+  body.topbar-search-active .main-content::before,
+  body.search-active .main-content::before,
+  body.search-open .main-content::before,
+  body.has-topbar-search-glass .main-content::before,
+  body[data-search-active="true"] .main-content::before,
+  body[data-topbar-search-open="true"] .main-content::before {
     background: color-mix(in srgb, var(--main-bg), transparent 4%);
   }
 }
@@ -1958,6 +1894,56 @@ mark,
 
 
 /* =========================================================
+   FORCED COLORS
+========================================================= */
+
+@media (forced-colors: active) {
+  .topbar,
+  .topbar-search,
+  .topbar-search-results,
+  .search-result,
+  .topbar-mobile-toggle {
+    forced-color-adjust: auto;
+  }
+
+  body.topbar-search-active .main-content::before,
+  body.search-active .main-content::before,
+  body.search-open .main-content::before,
+  body.has-topbar-search-glass .main-content::before,
+  body[data-search-active="true"] .main-content::before,
+  body[data-topbar-search-open="true"] .main-content::before,
+  body.topbar-search-active .main-content::after,
+  body.search-active .main-content::after,
+  body.search-open .main-content::after,
+  body.has-topbar-search-glass .main-content::after,
+  body[data-search-active="true"] .main-content::after,
+  body[data-topbar-search-open="true"] .main-content::after {
+    display: none !important;
+  }
+
+  .topbar,
+  .topbar-search-results {
+    background: Canvas;
+    color: CanvasText;
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+
+  .topbar-search {
+    background: Field;
+    color: FieldText;
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+
+  .search-result.active,
+  .search-result[aria-selected="true"] {
+    outline: 1px solid Highlight;
+  }
+}
+
+
+/* =========================================================
    PRINT
 ========================================================= */
 
@@ -1966,18 +1952,18 @@ mark,
     display: none !important;
   }
 
-  body.topbar-search-active::before,
-  body.search-active::before,
-  body.search-open::before,
-  body.has-topbar-search-glass::before,
-  body[data-search-active="true"]::before,
-  body[data-topbar-search-open="true"]::before,
-  body.topbar-search-active::after,
-  body.search-active::after,
-  body.search-open::after,
-  body.has-topbar-search-glass::after,
-  body[data-search-active="true"]::after,
-  body[data-topbar-search-open="true"]::after {
+  body.topbar-search-active .main-content::before,
+  body.search-active .main-content::before,
+  body.search-open .main-content::before,
+  body.has-topbar-search-glass .main-content::before,
+  body[data-search-active="true"] .main-content::before,
+  body[data-topbar-search-open="true"] .main-content::before,
+  body.topbar-search-active .main-content::after,
+  body.search-active .main-content::after,
+  body.search-open .main-content::after,
+  body.has-topbar-search-glass .main-content::after,
+  body[data-search-active="true"] .main-content::after,
+  body[data-topbar-search-open="true"] .main-content::after {
     display: none !important;
   }
 }

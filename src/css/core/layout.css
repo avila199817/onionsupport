@@ -1,13 +1,13 @@
 /* =========================================================
    ONION SUPPORT — LAYOUT SYSTEM
-   Archivo: src/css/core/layout.css
+   Archivo: /src/css/core/layout.css
 
    FINAL EXTREME SYSTEM · APPLE STYLE · PRO SAAS PANEL · 10/10
 
    ARQUITECTURA:
-   - variables.css = tokens base / dark
-   - light.css     = overrides [data-theme="light"]
-   - layout.css    = layout, stacking, scroll, shell y responsive
+   - variables.css = tokens base / dark.
+   - light.css     = overrides [data-theme="light"].
+   - layout.css    = layout, stacking, scroll, shell y responsive.
 
    REGLAS:
    - Sin :root.
@@ -16,7 +16,14 @@
    - Sin z-index plano para todos los hijos.
    - Sidebar/topbar tienen mounts propios.
    - Main queda por debajo de sidebar/topbar.
+   - El scroll NO empieza debajo/por detrás del topbar.
    - Tooltips/dropdowns no quedan tapados por vistas/hero.
+
+   FIX CRÍTICO SCROLL:
+   - .main-content es el scroll container real.
+   - .main-content empieza en var(--app-offset-topbar).
+   - #app-content sólo compensa tablehead si existe.
+   - El scrollbar ya no se mete debajo del topbar.
 ========================================================= */
 
 
@@ -41,7 +48,7 @@ html {
 body {
   --layout-bg-z: 0;
   --layout-main-z: 1;
-  --layout-tablehead-z: calc(var(--z-topbar) - 2);
+  --layout-tablehead-z: var(--z-tablehead, calc(var(--z-topbar) - 2));
   --layout-topbar-mount-z: var(--z-topbar);
   --layout-sidebar-mount-z: var(--z-sidebar);
   --layout-sidebar-tooltip-safe-z: calc(var(--z-tooltip) + 20);
@@ -281,14 +288,21 @@ body.auth-screen [data-topbar-mount] {
 html.app-booting #app-shell,
 html.app-loading #app-shell,
 body.app-booting #app-shell,
-body.app-loading #app-shell {
+body.app-loading #app-shell,
+#app-shell[data-shell="booting"],
+#app-shell[data-shell-state="booting"],
+#app-shell[data-shell-interactive="false"][aria-busy="true"] {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
 }
 
 html.app-ready #app-shell,
-body.app-ready #app-shell {
+body.app-ready #app-shell,
+html[data-app-state="ready"] #app-shell,
+#app-shell[data-shell="ready"],
+#app-shell[data-shell-state="ready"],
+#app-shell[data-shell-interactive="true"] {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
@@ -326,9 +340,21 @@ body.route-shell-hidden .main-content,
 html[data-route-mode="auth"] .main-content,
 body[data-route-mode="auth"] .main-content,
 body.auth-screen .main-content {
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  inset-inline-end: 0;
+  inset-block-end: 0;
+
   margin-inline-start: 0;
+
   inline-size: 100%;
   max-inline-size: 100%;
+
+  block-size: 100vh;
+  block-size: 100dvh;
+
+  min-block-size: 100vh;
+  min-block-size: 100dvh;
 }
 
 body.route-shell-hidden .table-head,
@@ -340,7 +366,8 @@ body.auth-screen .table-head {
 
 body.route-shell-hidden #app-content,
 html[data-route-mode="auth"] #app-content,
-body[data-route-mode="auth"] #app-content {
+body[data-route-mode="auth"] #app-content,
+body.auth-screen #app-content {
   padding-block-start: 0;
 }
 
@@ -379,34 +406,37 @@ body[data-route-mode="auth"] #app-content {
 
 /* =========================================================
    MAIN CONTENT AREA
+   FIX:
+   - Scroll container empieza debajo del topbar.
+   - Scrollbar no queda tapado por topbar.
 ========================================================= */
 
 .main-content {
-  position: relative;
+  position: fixed;
   z-index: var(--layout-main-z);
+
+  inset-block-start: var(--app-offset-topbar);
+  inset-block-end: 0;
+  inset-inline-start: var(--app-sidebar-current-width);
+  inset-inline-end: 0;
 
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
 
   min-inline-size: 0;
-  min-block-size: 100vh;
-  min-block-size: 100dvh;
+  min-block-size: 0;
 
-  block-size: 100vh;
-  block-size: 100dvh;
+  inline-size: auto;
+  max-inline-size: none;
+  block-size: auto;
 
-  margin-inline-start: var(--app-sidebar-current-width);
-  inline-size: calc(100% - var(--app-sidebar-current-width));
-  max-inline-size: calc(100% - var(--app-sidebar-current-width));
+  margin: 0;
 
   background: transparent;
   color: var(--text);
 
   transition:
-    margin-inline-start var(--duration-slow) var(--ease-emphasis),
-    inline-size var(--duration-slow) var(--ease-emphasis),
-    max-inline-size var(--duration-slow) var(--ease-emphasis),
+    inset-inline-start var(--duration-slow) var(--ease-emphasis),
     opacity var(--duration-normal) var(--ease-standard);
 
   overflow-y: auto;
@@ -416,6 +446,7 @@ body[data-route-mode="auth"] #app-content {
   -webkit-overflow-scrolling: touch;
 
   scrollbar-width: thin;
+  scrollbar-gutter: stable;
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
@@ -451,6 +482,9 @@ body.sidebar-open {
 
 /* =========================================================
    APP CONTENT ROOT
+   FIX:
+   - Ya NO compensa topbar.
+   - Sólo compensa tablehead dinámico.
 ========================================================= */
 
 #app-content {
@@ -462,11 +496,9 @@ body.sidebar-open {
   flex: 1 1 auto;
 
   min-inline-size: 0;
-  min-block-size: 0;
+  min-block-size: 100%;
 
-  padding-block-start: calc(
-    var(--app-offset-topbar) + var(--app-offset-tablehead)
-  );
+  padding-block-start: var(--app-offset-tablehead);
 
   padding-inline-end: var(--app-safe-right);
   padding-block-end: var(--app-safe-bottom);
@@ -574,11 +606,16 @@ body.sidebar-open {
   display: none !important;
 }
 
-.main-content:has(.table-head:not(:has(#tablehead-container:empty))) #app-content {
+/*
+   El offset de tablehead vive en .main-content para que #app-content
+   lo herede correctamente.
+*/
+.main-content:has(> .table-head:not([hidden]) #tablehead-container:not(:empty)) {
   --app-offset-tablehead: var(--tablehead-height);
 }
 
-.main-content:has(.table-head:has(#tablehead-container:empty)) #app-content {
+.main-content:has(> .table-head[hidden]),
+.main-content:has(> .table-head #tablehead-container:empty) {
   --app-offset-tablehead: 0px;
 }
 
@@ -709,7 +746,7 @@ body.app-ready #view-container {
 
 .panel-content[data-view] {
   scroll-margin-block-start: calc(
-    var(--app-offset-topbar) + var(--app-offset-tablehead) + var(--space-md)
+    var(--app-offset-tablehead) + var(--space-md)
   );
 }
 
@@ -769,6 +806,7 @@ body.app-ready #view-container {
 .panel-content.table-mode .table-container,
 .table-container {
   scrollbar-width: thin;
+  scrollbar-gutter: stable;
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
@@ -1139,6 +1177,36 @@ body.app-ready #view-container {
   border: 0 !important;
 }
 
+.sr-only-focusable:focus,
+.sr-only-focusable:focus-visible,
+.app-skip-link:focus,
+.app-skip-link:focus-visible {
+  position: fixed !important;
+  inset-block-start: calc(var(--app-safe-top) + 10px);
+  inset-inline-start: calc(var(--app-safe-left) + 10px);
+
+  z-index: calc(var(--z-loader) + 1);
+
+  inline-size: auto !important;
+  block-size: auto !important;
+
+  padding: 10px 14px !important;
+  margin: 0 !important;
+
+  overflow: visible !important;
+
+  clip: auto !important;
+  white-space: normal !important;
+
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+
+  background: var(--surface-elevated-strong);
+  color: var(--text-strong);
+
+  box-shadow: var(--shadow-lg);
+}
+
 
 /* =========================================================
    AUTH / FULLSCREEN LOGIN MODE
@@ -1167,7 +1235,11 @@ body.auth-screen .app-shell {
 }
 
 body.auth-screen .main-content {
-  margin-inline-start: 0;
+  position: fixed;
+
+  inset: 0;
+
+  margin: 0;
 
   inline-size: 100%;
   max-inline-size: 100%;
@@ -1308,16 +1380,13 @@ body.auth-screen .content-wrapper {
   .main-content,
   body.sidebar-collapsed .main-content,
   body.sidebar-open .main-content {
-    margin-inline-start: 0;
+    inset-inline-start: 0;
+    inset-inline-end: 0;
 
-    inline-size: 100%;
-    max-inline-size: 100%;
+    margin: 0;
 
-    min-block-size: 100vh;
-    min-block-size: 100dvh;
-
-    block-size: 100vh;
-    block-size: 100dvh;
+    inline-size: auto;
+    max-inline-size: none;
   }
 
   .table-head,
@@ -1462,7 +1531,11 @@ body.auth-screen .content-wrapper {
   #app-content,
   #view-container,
   .content-wrapper {
+    position: static !important;
+
     display: block !important;
+
+    inset: auto !important;
 
     block-size: auto !important;
     min-block-size: 0 !important;

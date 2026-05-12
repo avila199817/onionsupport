@@ -6,6 +6,15 @@
    SEARCH COMMAND PALETTE · CONTENT-ONLY GLASS · SCROLL LOCK SAFE
    NO CSS IN JS CONTRACT · TOKEN DRIVEN
 
+   FIX DEFINITIVO SEARCH:
+   - El search NO cambia de alto al abrir.
+   - El search NO baja al abrir.
+   - El search se centra horizontalmente.
+   - El search se alarga al abrir.
+   - El dropdown queda pegado al search.
+   - El dropdown usa el mismo ancho visual del search.
+   - La lupa en dark queda más visible.
+
    ARQUITECTURA:
    - variables.css = tokens base / dark
    - light.css     = overrides [data-theme="light"]
@@ -24,7 +33,6 @@
    - El glass de búsqueda afecta SOLO a contenido/vista.
    - Sidebar y topbar permanecen nítidos.
    - Durante búsqueda activa no hay scroll de página.
-   - El input se convierte en command palette centrada.
 ========================================================= */
 
 
@@ -34,47 +42,53 @@
 
 .topbar {
   --topbar-search-visible-height:
-    clamp(42px, var(--topbar-search-height, 44px), 46px);
+    clamp(46px, var(--topbar-search-height, 48px), 52px);
 
   --topbar-search-command-height:
-    clamp(44px, var(--topbar-search-height, 46px), 48px);
+    var(--topbar-search-visible-height);
 
-  --topbar-search-results-gap:
-    var(--topbar-search-results-gap-token, 6px);
-
-  --topbar-search-shell-radius: var(--topbar-search-radius);
+  --topbar-search-shell-radius: var(--topbar-search-radius, var(--radius-pill));
   --topbar-search-shell-padding: 2px;
 
-  --topbar-search-field-bg: var(--topbar-search-bg, var(--input-bg));
-  --topbar-search-field-bg-hover: var(--topbar-search-bg-hover, var(--input-bg-hover));
-  --topbar-search-field-bg-focus: var(--topbar-search-bg-focus, var(--input-bg-focus));
+  --topbar-search-results-gap:
+    var(--topbar-search-results-gap-token, 5px);
 
-  --topbar-search-field-border: var(--topbar-search-border, var(--input-border));
+  --topbar-search-field-bg:
+    var(--topbar-search-bg, var(--input-bg));
+
+  --topbar-search-field-bg-hover:
+    var(--topbar-search-bg-hover, var(--input-bg-hover));
+
+  --topbar-search-field-bg-focus:
+    var(--topbar-search-bg-focus, var(--input-bg-focus));
+
+  --topbar-search-field-border:
+    var(--topbar-search-border, var(--input-border));
 
   --topbar-search-field-border-hover:
-    color-mix(in srgb, var(--input-border-hover), var(--accent) 12%);
+    color-mix(in srgb, var(--input-border-hover), var(--accent) 14%);
 
   --topbar-search-field-border-focus:
-    color-mix(in srgb, var(--input-border-focus), var(--accent) 20%);
+    color-mix(in srgb, var(--input-border-focus), var(--accent) 22%);
 
   --topbar-search-field-shadow:
     0 8px 22px color-mix(in srgb, var(--text), transparent 91%),
     inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 95%);
 
   --topbar-search-field-shadow-hover:
-    0 12px 28px color-mix(in srgb, var(--text), transparent 89%),
+    0 11px 28px color-mix(in srgb, var(--text), transparent 89%),
     inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 94%);
 
   --topbar-search-field-shadow-focus:
     0 0 0 3px color-mix(in srgb, var(--accent), transparent 86%),
-    0 15px 34px color-mix(in srgb, var(--text), transparent 87%),
+    0 14px 34px color-mix(in srgb, var(--text), transparent 87%),
     inset 0 1px 0 color-mix(in srgb, var(--text-strong), transparent 92%);
 
   --topbar-search-halo:
     linear-gradient(
       135deg,
-      color-mix(in srgb, var(--accent), transparent 82%),
-      color-mix(in srgb, var(--accent-3), transparent 88%),
+      color-mix(in srgb, var(--accent), transparent 84%),
+      color-mix(in srgb, var(--accent-3), transparent 89%),
       transparent 70%
     );
 
@@ -82,35 +96,39 @@
     color-mix(in srgb, var(--input-placeholder), var(--text) 20%);
 
   --topbar-search-icon-color:
-    color-mix(in srgb, var(--text-strong) 68%, var(--accent) 32%);
+    color-mix(in srgb, var(--text-strong) 74%, var(--accent) 26%);
 
   --topbar-search-icon-color-hover:
-    color-mix(in srgb, var(--text-strong) 76%, var(--accent) 24%);
+    color-mix(in srgb, var(--text-strong) 82%, var(--accent) 18%);
 
   --topbar-search-icon-color-focus:
-    color-mix(in srgb, var(--accent) 84%, var(--text-strong) 16%);
+    color-mix(in srgb, var(--accent) 82%, var(--text-strong) 18%);
 
+  /* Clave: top fijo centrado dentro del alto real del topbar. */
   --topbar-search-command-top:
     var(
       --topbar-search-command-offset-top,
-      calc(var(--topbar-safe-top) + 8px)
+      calc(
+        var(--topbar-safe-top, 0px) +
+        ((var(--topbar-height, 64px) - var(--topbar-search-visible-height)) / 2)
+      )
     );
 
   --topbar-search-command-width:
     var(--topbar-search-command-width, min(720px, calc(100vw - 48px)));
 
   --topbar-search-command-width-focused:
-    min(760px, calc(100vw - 48px));
+    min(860px, calc(100vw - 56px));
 
   --topbar-search-results-top:
     calc(
       var(--topbar-search-command-top) +
-      var(--topbar-search-command-height) +
+      var(--topbar-search-visible-height) +
       var(--topbar-search-results-gap)
     );
 
   --topbar-search-palette-width-local:
-    var(--topbar-search-palette-width, var(--topbar-search-command-width-focused));
+    var(--topbar-search-command-width-focused);
 
   --topbar-search-palette-max-height-local:
     var(
@@ -443,7 +461,7 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
   border-color:
     color-mix(
       in srgb,
-      var(--accent-border, var(--border-accent)) 70%,
+      var(--accent-border, var(--border-accent)) 68%,
       var(--topbar-border)
     );
 
@@ -605,10 +623,12 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
   position: relative;
 
   inline-size: 100%;
-  max-inline-size: min(520px, 48vw);
-  min-inline-size: 220px;
+  max-inline-size: min(560px, 52vw);
+  min-inline-size: 240px;
 
   block-size: var(--topbar-search-visible-height);
+  min-block-size: var(--topbar-search-visible-height);
+  max-block-size: var(--topbar-search-visible-height);
 
   display: flex;
   align-items: center;
@@ -625,7 +645,6 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
   transition:
     max-inline-size var(--duration-normal) var(--ease-emphasis),
     inline-size var(--duration-normal) var(--ease-emphasis),
-    block-size var(--duration-normal) var(--ease-emphasis),
     filter var(--duration-normal) var(--ease-standard),
     transform var(--duration-normal) var(--ease-emphasis);
 }
@@ -640,15 +659,14 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
 
   background: var(--topbar-search-halo);
 
-  opacity: .58;
+  opacity: .56;
   pointer-events: none;
 
   filter: blur(.1px);
 
   transition:
     opacity var(--duration-normal) var(--ease-standard),
-    transform var(--duration-normal) var(--ease-standard),
-    inset var(--duration-normal) var(--ease-standard);
+    transform var(--duration-normal) var(--ease-standard);
 }
 
 .topbar-search-wrap:hover::before,
@@ -657,9 +675,10 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
 .topbar-search-wrap[data-search-open="true"]::before,
 .topbar-search-wrap.is-search-focused::before,
 .topbar-search-wrap.is-search-open::before {
-  opacity: .92;
+  opacity: .95;
 }
 
+/* Estado abierto: centrado y alargado, pero SIN bajar y SIN crecer de alto. */
 .topbar-search-wrap[data-search-focus="true"],
 .topbar-search-wrap[data-search-open="true"],
 .topbar-search-wrap.is-search-focused,
@@ -671,10 +690,12 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
   inset-inline-end: auto;
 
   inline-size: var(--topbar-search-command-width-focused);
-  max-inline-size: calc(100vw - 48px);
-  min-inline-size: min(360px, calc(100vw - 48px));
+  max-inline-size: calc(100vw - 56px);
+  min-inline-size: min(360px, calc(100vw - 56px));
 
-  block-size: var(--topbar-search-command-height);
+  block-size: var(--topbar-search-visible-height);
+  min-block-size: var(--topbar-search-visible-height);
+  max-block-size: var(--topbar-search-visible-height);
 
   margin: 0;
 
@@ -691,10 +712,10 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
 
   border-radius: calc(var(--topbar-search-shell-radius) + 3px);
 
-  filter: blur(.45px);
+  filter: blur(.35px);
   opacity: .98;
 
-  transform: scale(1.006);
+  transform: scale(1.004);
 }
 
 
@@ -704,11 +725,14 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
 
 .topbar-search {
   inline-size: 100%;
+
   block-size: var(--topbar-search-visible-height);
+  min-block-size: var(--topbar-search-visible-height);
+  max-block-size: var(--topbar-search-visible-height);
 
   padding-block: 0;
   padding-inline: 16px 16px;
-  padding-inline-start: 43px;
+  padding-inline-start: 44px;
 
   appearance: none;
   -webkit-appearance: none;
@@ -732,7 +756,6 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
   caret-color: var(--accent);
 
   transition:
-    block-size var(--duration-normal) var(--ease-emphasis),
     border-color var(--duration-normal) var(--ease-standard),
     background var(--duration-normal) var(--ease-standard),
     box-shadow var(--duration-normal) var(--ease-standard),
@@ -763,18 +786,21 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
   box-shadow: var(--topbar-search-field-shadow-focus);
 }
 
+/* Clave: NO cambia altura al abrir. Sólo se alarga el wrapper. */
 .topbar-search-wrap[data-search-focus="true"] .topbar-search,
 .topbar-search-wrap[data-search-open="true"] .topbar-search,
 .topbar-search-wrap.is-search-focused .topbar-search,
 .topbar-search-wrap.is-search-open .topbar-search {
-  block-size: var(--topbar-search-command-height);
+  block-size: var(--topbar-search-visible-height);
+  min-block-size: var(--topbar-search-visible-height);
+  max-block-size: var(--topbar-search-visible-height);
 
   padding-inline-start: 46px;
   padding-inline-end: 18px;
 
-  font-size: var(--font-base);
+  font-size: var(--font-md);
 
-  border-radius: var(--radius-pill);
+  border-radius: var(--topbar-search-radius);
 }
 
 .topbar-search:disabled {
@@ -790,11 +816,11 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
 
 .topbar-search-icon {
   position: absolute;
-  inset-inline-start: 16px;
+  inset-inline-start: 17px;
   inset-block-start: 50%;
 
-  inline-size: 18px;
-  block-size: 18px;
+  inline-size: 19px;
+  block-size: 19px;
 
   color: var(--topbar-search-icon-color);
 
@@ -805,7 +831,7 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
   transform: translateY(-50%);
 
   filter:
-    drop-shadow(0 1px 2px color-mix(in srgb, var(--main-bg), transparent 36%));
+    drop-shadow(0 1px 2px color-mix(in srgb, var(--main-bg), transparent 30%));
 
   transition:
     color var(--duration-normal) var(--ease-standard),
@@ -819,7 +845,7 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
   block-size: 100%;
 
   stroke: currentColor;
-  stroke-width: 2.25;
+  stroke-width: 2.3;
 
   opacity: 1;
 }
@@ -837,7 +863,7 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
   color: var(--topbar-search-icon-color-focus);
   opacity: 1;
 
-  transform: translateY(-50%) scale(1.04);
+  transform: translateY(-50%) scale(1.035);
 
   filter:
     drop-shadow(0 0 8px color-mix(in srgb, var(--accent), transparent 62%));
@@ -866,7 +892,7 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
 
   inline-size: var(--topbar-search-palette-width-local);
   min-inline-size: min(calc(100vw - 24px), 390px);
-  max-inline-size: calc(100vw - 32px);
+  max-inline-size: calc(100vw - 56px);
 
   padding: 8px;
 
@@ -898,7 +924,7 @@ body[data-topbar-search-open="true"] [data-topbar-mount] {
 
   pointer-events: none;
 
-  transform: translateX(-50%) translateY(4px) scale(.992);
+  transform: translateX(-50%) translateY(3px) scale(.994);
   transform-origin: top center;
 
   transition:
@@ -1437,11 +1463,11 @@ mark,
 
 @media (min-width: 901px) {
   .topbar-search-wrap {
-    flex: 0 1 min(520px, 48vw);
+    flex: 0 1 min(560px, 52vw);
   }
 
   .topbar-search-wrap:focus-within {
-    max-inline-size: min(620px, 52vw);
+    max-inline-size: min(640px, 56vw);
   }
 
   .topbar-search-wrap[data-search-focus="true"],
@@ -1449,7 +1475,7 @@ mark,
   .topbar-search-wrap.is-search-focused,
   .topbar-search-wrap.is-search-open {
     flex: none;
-    max-inline-size: calc(100vw - 48px);
+    max-inline-size: calc(100vw - 56px);
   }
 }
 
@@ -1460,12 +1486,16 @@ mark,
 
 @media (max-width: 900px) {
   .topbar {
-    --topbar-search-command-height: 46px;
+    --topbar-search-visible-height: 46px;
+    --topbar-search-command-height: var(--topbar-search-visible-height);
 
     --topbar-search-command-top:
       var(
         --topbar-search-command-offset-top,
-        calc(var(--topbar-safe-top) + 7px)
+        calc(
+          var(--topbar-safe-top, 0px) +
+          ((var(--topbar-height, 64px) - var(--topbar-search-visible-height)) / 2)
+        )
       );
 
     --topbar-search-command-width:
@@ -1475,7 +1505,7 @@ mark,
       min(680px, calc(100vw - 28px));
 
     --topbar-search-palette-width-local:
-      min(680px, calc(100vw - 28px));
+      var(--topbar-search-command-width-focused);
 
     inset-inline-start: 0;
     inset-inline-end: 0;
@@ -1521,6 +1551,10 @@ mark,
     max-inline-size: calc(100vw - 28px);
     min-inline-size: min(320px, calc(100vw - 28px));
   }
+
+  .topbar-search-results {
+    max-inline-size: calc(100vw - 28px);
+  }
 }
 
 
@@ -1531,13 +1565,7 @@ mark,
 @media (max-width: 768px) {
   .topbar {
     --topbar-search-visible-height: 42px;
-    --topbar-search-command-height: 46px;
-
-    --topbar-search-command-top:
-      var(
-        --topbar-search-command-offset-top,
-        calc(var(--topbar-safe-top) + 7px)
-      );
+    --topbar-search-command-height: var(--topbar-search-visible-height);
 
     --topbar-search-command-width:
       calc(100vw - 24px);
@@ -1546,7 +1574,7 @@ mark,
       calc(100vw - 24px);
 
     --topbar-search-palette-width-local:
-      calc(100vw - 24px);
+      var(--topbar-search-command-width-focused);
 
     --topbar-search-palette-max-height-local:
       min(
@@ -1572,7 +1600,6 @@ mark,
   }
 
   .topbar-search {
-    block-size: var(--topbar-search-visible-height);
     font-size: var(--font-md);
   }
 
@@ -1580,7 +1607,7 @@ mark,
   .topbar-search-wrap[data-search-open="true"] .topbar-search,
   .topbar-search-wrap.is-search-focused .topbar-search,
   .topbar-search-wrap.is-search-open .topbar-search {
-    block-size: var(--topbar-search-command-height);
+    font-size: var(--font-md);
   }
 
   .topbar-search-results {
@@ -1600,7 +1627,7 @@ mark,
 @media (max-width: 640px) {
   .topbar {
     --topbar-search-visible-height: 40px;
-    --topbar-search-command-height: 44px;
+    --topbar-search-command-height: var(--topbar-search-visible-height);
 
     --topbar-search-command-width:
       calc(100vw - 20px);
@@ -1609,7 +1636,7 @@ mark,
       calc(100vw - 20px);
 
     --topbar-search-palette-width-local:
-      calc(100vw - 20px);
+      var(--topbar-search-command-width-focused);
 
     gap: var(--space-xs);
 
@@ -1679,7 +1706,7 @@ mark,
 @media (max-width: 420px) {
   .topbar {
     --topbar-search-visible-height: 40px;
-    --topbar-search-command-height: 44px;
+    --topbar-search-command-height: var(--topbar-search-visible-height);
 
     --topbar-search-command-width:
       calc(100vw - 16px);
@@ -1688,7 +1715,7 @@ mark,
       calc(100vw - 16px);
 
     --topbar-search-palette-width-local:
-      calc(100vw - 16px);
+      var(--topbar-search-command-width-focused);
 
     padding-inline-end: calc(10px + var(--topbar-safe-right));
     padding-inline-start: calc(10px + var(--topbar-safe-left));
@@ -1700,7 +1727,6 @@ mark,
   }
 
   .topbar-search {
-    block-size: var(--topbar-search-visible-height);
     padding-inline-start: 38px;
     font-size: var(--font-sm);
   }
@@ -1709,8 +1735,8 @@ mark,
   .topbar-search-wrap[data-search-open="true"] .topbar-search,
   .topbar-search-wrap.is-search-focused .topbar-search,
   .topbar-search-wrap.is-search-open .topbar-search {
-    block-size: var(--topbar-search-command-height);
     padding-inline-start: 39px;
+    font-size: var(--font-sm);
   }
 
   .topbar-search-icon {

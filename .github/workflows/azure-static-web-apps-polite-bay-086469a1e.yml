@@ -141,6 +141,9 @@ jobs:
           def warning(path, message):
               print(f"::warning file={path}::{message}")
 
+          def notice(path, message):
+              print(f"::notice file={path}::{message}")
+
           def read_text(path):
               return path.read_text(encoding="utf-8", errors="replace")
 
@@ -150,10 +153,33 @@ jobs:
               except Exception as exc:
                   error(path, f"No es JSON válido: {exc}")
 
+          def strip_html_comments(text):
+              return re.sub(
+                  r"<!--.*?-->",
+                  "",
+                  text,
+                  flags=re.DOTALL
+              )
+
+          def get_attr(tag, attr):
+              match = re.search(
+                  rf'\b{re.escape(attr)}\s*=\s*["\']([^"\']+)["\']',
+                  tag,
+                  flags=re.IGNORECASE
+              )
+              return match.group(1).strip() if match else ""
+
+          def normalize_url_path(value):
+              value = str(value or "").strip()
+              return value.split("?", 1)[0].split("#", 1)[0]
+
           config = load_json(config_path)
           manifest = load_json(manifest_path)
+
           index_text = read_text(index_path)
           robots_text = read_text(robots_path)
+
+          index_without_comments = strip_html_comments(index_text)
 
           # =====================================================
           # staticwebapp.config.json
@@ -195,22 +221,14 @@ jobs:
                   + ", ".join(missing_excludes)
               )
 
-          forbidden_excludes = [
-              "/favicon.svg"
-          ]
-
-          present_forbidden_excludes = [
-              item for item in forbidden_excludes
-              if item in excludes
-          ]
-
-          if present_forbidden_excludes:
+          if "/favicon.svg" in excludes:
               error(
                   config_path,
-                  "No declares favicon.svg en navigationFallback.exclude porque no existe ni se usa."
+                  "No declares /favicon.svg en navigationFallback.exclude porque no existe ni se usa."
               )
 
           routes = config.get("routes") or []
+
           if not isinstance(routes, list):
               error(config_path, "routes debe ser un array.")
 
@@ -282,6 +300,7 @@ jobs:
               )
 
           mime_types = config.get("mimeTypes") or {}
+
           required_mimes = {
               ".html": "text/html",
               ".css": "text/css",
@@ -305,44 +324,67 @@ jobs:
           # index.html
           # =====================================================
 
-          if "<!DOCTYPE html>" not in index_text[:120].upper():
+          if not index_text.lstrip().lower().startswith("<!doctype html>"):
               warning(index_path, "index.html debería empezar con <!DOCTYPE html>.")
 
-          if 'type="module"' not in index_text and "type='module'" not in index_text:
+          if 'type="module"' not in index_without_comments and "type='module'" not in index_without_comments:
               error(index_path, "No se detectó script type=module. /src/main.js debe cargar como módulo.")
 
-          if "/src/preboot/theme.js" not in index_text:
+          if "/src/preboot/theme.js" not in index_without_comments:
               error(index_path, "No se detectó /src/preboot/theme.js antes del boot.")
 
-          if "/src/css/app.css" not in index_text:
+          if "/src/css/app.css" not in index_without_comments:
               error(index_path, "No se detectó /src/css/app.css como CSS entrypoint.")
 
-          if "/src/main.js" not in index_text:
+          if "/src/main.js" not in index_without_comments:
               error(index_path, "No se detectó /src/main.js como entrada principal.")
 
-          if "fonts.googleapis.com" in index_text or "fonts.gstatic.com" in index_text:
+          if "fonts.googleapis.com" in index_without_comments or "fonts.gstatic.com" in index_without_comments:
               error(index_path, "index.html no debe referenciar Google Fonts.")
 
-          if "favicon.svg" in index_text:
-              error(index_path, "index.html no debe referenciar favicon.svg.")
-
-          if "favicon_support.png" in index_text:
-              error(index_path, "index.html no debe usar favicon_support.png como favicon del SPA.")
-
-          if 'rel="icon"' not in index_text and "rel='icon'" not in index_text:
-              error(index_path, "index.html debe declarar rel=icon.")
-
-          if "/src/media/img/favicon_black_circle.png" not in index_text:
-              error(index_path, "El favicon real del SPA debe ser /src/media/img/favicon_black_circle.png.")
-
-          favicon_ico_declared = re.search(
-              r'<link[^>]+rel=["\'](?:shortcut icon|icon)["\'][^>]+href=["\']/favicon\.ico',
-              index_text,
+          html_asset_refs = re.findall(
+              r'\b(?:href|src)\s*=\s*["\']([^"\']+)["\']',
+              index_without_comments,
               flags=re.IGNORECASE
           )
 
-          if favicon_ico_declared:
-              error(index_path, "No declares /favicon.ico en index.html. Queda sólo como fallback físico pasivo.")
+          if any("favicon.svg" in ref for ref in html_asset_refs):
+              error(index_path, "index.html no debe referenciar favicon.svg en href/src.")
+
+          link_tags = re.findall(
+              r"<link\b[^>]*>",
+              index_without_comments,
+              flags=re.IGNORECASE
+          )
+
+          standard_icon_links = []
+          all_icon_links = []
+
+          for tag in link_tags:
+              rel_value = get_attr(tag, "rel").lower()
+              href_value = get_attr(tag, "href")
+              href_path = normalize_url_path(href_value)
+
+              rel_tokens = set(rel_value.split())
+              is_icon_link = "icon" in rel_tokens or "apple-touch-icon" in rel_value
+
+              if is_icon_link:
+                  all_icon_links.append((tag, rel_value, href_value, href_path))
+
+              if "icon" in rel_tokens and "apple-touch-icon" not in rel_value:
+                  standard_icon_links.append((tag, rel_value, href_value, href_path))
+
+              if is_icon_link and href_path == "/favicon.ico":
+                  error(index_path, "No declares /favicon.ico en index.html. Queda sólo como fallback físico pasivo.")
+
+              if is_icon_link and "favicon_support.png" in href_value:
+                  error(index_path, "index.html no debe usar favicon_support.png como favicon del SPA.")
+
+          if not standard_icon_links:
+              error(index_path, "index.html debe declarar al menos un rel=icon estándar.")
+
+          if not any("/src/media/img/favicon_black_circle.png" in href for _, _, href, _ in all_icon_links):
+              error(index_path, "El favicon real del SPA debe ser /src/media/img/favicon_black_circle.png en un link rel=icon/apple-touch-icon.")
 
           required_index_assets = [
               "/src/media/img/favicon_black_circle.png",
@@ -352,21 +394,21 @@ jobs:
 
           missing_assets = [
               asset for asset in required_index_assets
-              if asset not in index_text
+              if not any(asset in ref for ref in html_asset_refs)
           ]
 
           if missing_assets:
               error(
                   index_path,
-                  "Faltan assets de icono/loader en index.html: " + ", ".join(missing_assets)
+                  "Faltan assets de icono/loader en href/src de index.html: " + ", ".join(missing_assets)
               )
 
-          if "<style" in index_text.lower():
+          if "<style" in index_without_comments.lower():
               error(index_path, "index.html no debe contener <style> inline.")
 
           inline_handler = re.search(
               r"\s(onclick|onload|onerror|onchange|onsubmit)\s*=",
-              index_text,
+              index_without_comments,
               flags=re.IGNORECASE
           )
 
@@ -420,22 +462,40 @@ jobs:
           # robots.txt
           # =====================================================
 
-          if "User-agent: *" not in robots_text:
+          robots_lines = []
+
+          for raw_line in robots_text.splitlines():
+              line = raw_line.strip()
+
+              if not line:
+                  continue
+
+              if line.startswith("#"):
+                  continue
+
+              robots_lines.append(line)
+
+          robots_lines_lower = [
+              line.lower()
+              for line in robots_lines
+          ]
+
+          if not any(line == "user-agent: *" for line in robots_lines_lower):
               error(robots_path, "robots.txt debe contener User-agent: *.")
 
-          if "Disallow: /" not in robots_text:
+          if not any(line == "disallow: /" for line in robots_lines_lower):
               error(robots_path, "robots.txt debe bloquear todo el panel privado con Disallow: /.")
 
-          if "Allow: /" in robots_text:
+          if any(line == "allow: /" for line in robots_lines_lower):
               error(robots_path, "robots.txt no debe contener Allow: / porque la SPA es privada.")
 
-          if "Sitemap:" in robots_text:
+          if any(line.startswith("sitemap:") for line in robots_lines_lower):
               error(robots_path, "robots.txt no debe declarar Sitemap mientras /sitemap.xml responda 404.")
 
-          if "favicon.svg" in robots_text:
+          if any("favicon.svg" in line for line in robots_lines_lower):
               error(robots_path, "robots.txt no debe declarar favicon.svg.")
 
-          if "/src/media/img/favicon_black_circle.png" not in robots_text:
+          if not any("/src/media/img/favicon_black_circle.png" in line for line in robots_lines):
               warning(robots_path, "robots.txt debería permitir favicon_black_circle.png.")
 
           # =====================================================
@@ -458,7 +518,10 @@ jobs:
                       "sitemap.xml debe estar vacío de URLs mientras Onion Support sea SPA privada."
                   )
           else:
-              print("::notice file=sitemap.xml::No existe sitemap.xml físico. Correcto si /sitemap.xml responde 404 desde staticwebapp.config.json.")
+              notice(
+                  sitemap_path,
+                  "No existe sitemap.xml físico. Correcto si /sitemap.xml responde 404 desde staticwebapp.config.json."
+              )
 
           print("Onion SPA package validated.")
           PY

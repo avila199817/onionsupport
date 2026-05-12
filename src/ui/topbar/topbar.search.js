@@ -3,6 +3,7 @@
    Archivo: src/ui/topbar/topbar.search.js
 
    FINAL PRO SYSTEM · SEARCH GOD MODE · NO CSS IN JS · 10/10
+   TOKEN PRO SYSTEM ALIGNED · COMMAND PALETTE SAFE · VIEW GLASS SAFE
 
    Responsabilidades:
    - gestionar cache de búsqueda
@@ -18,8 +19,10 @@
    - abrir factura desde search
    - actualizar estados visuales del panel search
    - activar overlay glass global por clases/data-attrs
+   - montar glass dentro de #app-content/#view-container/#main-content
    - bloquear scroll mientras search está activo
    - centrar la atención visual en el buscador
+   - mantener topbar y sidebar nítidos
 
    REGLAS:
    - Sin CSS inline.
@@ -27,7 +30,7 @@
    - Sin style tags.
    - Sin importarse a sí mismo.
    - CSS vive en /src/css/layout/topbar.css.
-   - JS solo emite clases, atributos y datos.
+   - JS solo emite clases, atributos, nodos y datos.
 ========================================================= */
 
 import {
@@ -49,6 +52,12 @@ import {
    SEARCH FOCUS RUNTIME
 ========================================================= */
 
+const SEARCH_GLASS_ID =
+  "topbar-search-glass-overlay";
+
+const SEARCH_SOURCE =
+  "topbar-search";
+
 const searchFocusRuntime = {
   runtime:
     null,
@@ -58,6 +67,9 @@ const searchFocusRuntime = {
 
   active:
     false,
+
+  glass:
+    null,
 };
 
 /* =========================================================
@@ -460,6 +472,87 @@ function safeAbortController() {
   } catch {}
 
   return null;
+}
+
+/* =========================================================
+   DOM ATTRIBUTE HELPERS · NO CSS IN JS
+========================================================= */
+
+function setAttr(element, name = "", value = "") {
+  if (
+    !element ||
+    !name
+  ) {
+    return false;
+  }
+
+  try {
+    if (
+      value === null ||
+      value === undefined ||
+      value === false
+    ) {
+      element.removeAttribute(name);
+      return true;
+    }
+
+    element.setAttribute(
+      name,
+      String(value)
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setDataset(element, key = "", value = "") {
+  if (
+    !element ||
+    !key
+  ) {
+    return false;
+  }
+
+  try {
+    if (
+      value === null ||
+      value === undefined ||
+      value === false ||
+      value === ""
+    ) {
+      delete element.dataset[key];
+      return true;
+    }
+
+    element.dataset[key] =
+      String(value);
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function toggleClass(element, className = "", enabled = false) {
+  if (
+    !element ||
+    !className
+  ) {
+    return false;
+  }
+
+  try {
+    element.classList.toggle(
+      className,
+      Boolean(enabled)
+    );
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* =========================================================
@@ -1123,7 +1216,7 @@ function buildEntityOpenPayload({
 
   const payload = {
     source:
-      "topbar-search",
+      SEARCH_SOURCE,
 
     item,
     detail,
@@ -1438,11 +1531,18 @@ function emitSearchEvent(AppCore, eventName = "", payload = {}) {
     return false;
   }
 
+  const finalPayload = {
+    source:
+      SEARCH_SOURCE,
+
+    ...safeObject(payload),
+  };
+
   try {
     if (isFunction(AppCore?.events?.emit)) {
       AppCore.events.emit(
         name,
-        payload
+        finalPayload
       );
 
       return true;
@@ -1456,7 +1556,7 @@ function emitSearchEvent(AppCore, eventName = "", payload = {}) {
           name,
           {
             detail:
-              payload,
+              finalPayload,
           }
         )
       );
@@ -1591,7 +1691,7 @@ async function navigateToPath(AppCore, Router, path = "", options = {}) {
             Boolean(options.replaceState),
 
           source:
-            options.source || "topbar-search",
+            options.source || SEARCH_SOURCE,
         }
       );
 
@@ -2288,85 +2388,175 @@ async function openFacturaFromSearch({
 }
 
 /* =========================================================
-   SEARCH FOCUS MODE · NO CSS IN JS
+   SEARCH GLASS · VIEW ONLY · NO CSS IN JS
 ========================================================= */
 
-function setAttr(element, name = "", value = "") {
-  if (
-    !element ||
-    !name
-  ) {
-    return false;
+function getSearchGlassHost() {
+  if (!isBrowser()) {
+    return null;
   }
 
-  try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === false
-    ) {
-      element.removeAttribute(name);
-      return true;
-    }
+  return (
+    document.getElementById("app-content") ||
+    document.getElementById("view-container") ||
+    document.getElementById("main-content") ||
+    null
+  );
+}
 
-    element.setAttribute(
-      name,
-      String(value)
+function getSearchGlass() {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  return document.getElementById(
+    SEARCH_GLASS_ID
+  );
+}
+
+function closeSearchFromGlass() {
+  const runtime =
+    searchFocusRuntime.runtime;
+
+  const getDom =
+    searchFocusRuntime.getDom;
+
+  if (
+    !runtime ||
+    !isFunction(getDom)
+  ) {
+    clearSearchFocusMode(getDom);
+    return;
+  }
+
+  hideResultsContainer(
+    runtime,
+    getDom
+  );
+
+  try {
+    const {
+      searchInput,
+    } =
+      getDom();
+
+    searchInput?.blur?.();
+  } catch {}
+}
+
+function ensureSearchGlass() {
+  if (!isBrowser()) {
+    return null;
+  }
+
+  const host =
+    getSearchGlassHost();
+
+  if (!host) {
+    return null;
+  }
+
+  let glass =
+    getSearchGlass();
+
+  if (!glass) {
+    glass =
+      document.createElement("div");
+
+    glass.id =
+      SEARCH_GLASS_ID;
+
+    glass.className =
+      "topbar-search-glass";
+
+    glass.hidden =
+      true;
+
+    glass.setAttribute(
+      "aria-hidden",
+      "true"
     );
 
-    return true;
-  } catch {
-    return false;
+    glass.setAttribute(
+      "data-topbar-search-glass",
+      "true"
+    );
   }
+
+  if (glass.dataset.bound !== "true") {
+    try {
+      glass.addEventListener(
+        "pointerdown",
+        (event) => {
+          try {
+            event.preventDefault();
+          } catch {}
+
+          closeSearchFromGlass();
+        }
+      );
+
+      glass.dataset.bound =
+        "true";
+    } catch {}
+  }
+
+  if (glass.parentNode !== host) {
+    try {
+      host.appendChild(glass);
+    } catch {}
+  }
+
+  searchFocusRuntime.glass =
+    glass;
+
+  return glass;
 }
 
-function setDataset(element, key = "", value = "") {
-  if (
-    !element ||
-    !key
-  ) {
+function setSearchGlassActive(active = false) {
+  const glass =
+    ensureSearchGlass();
+
+  if (!glass) {
     return false;
   }
+
+  const enabled =
+    Boolean(active);
 
   try {
-    if (
-      value === null ||
-      value === undefined ||
-      value === false ||
-      value === ""
-    ) {
-      delete element.dataset[key];
-      return true;
-    }
+    glass.hidden =
+      !enabled;
 
-    element.dataset[key] =
-      String(value);
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function toggleClass(element, className = "", enabled = false) {
-  if (
-    !element ||
-    !className
-  ) {
-    return false;
-  }
-
-  try {
-    element.classList.toggle(
-      className,
-      Boolean(enabled)
+    glass.classList.toggle(
+      "is-active",
+      enabled
     );
 
-    return true;
-  } catch {
-    return false;
-  }
+    glass.classList.toggle(
+      "active",
+      enabled
+    );
+
+    setDataset(
+      glass,
+      "active",
+      enabled ? "true" : false
+    );
+
+    setAttr(
+      glass,
+      "aria-hidden",
+      enabled ? "false" : "true"
+    );
+  } catch {}
+
+  return true;
 }
+
+/* =========================================================
+   SEARCH FOCUS MODE · CLASSES / DATA ONLY
+========================================================= */
 
 function getSearchFocusNodes(getDom) {
   if (!isFunction(getDom)) {
@@ -2459,6 +2649,12 @@ function setGlobalSearchLock(active = false) {
   );
 
   toggleClass(
+    html,
+    "search-active",
+    enabled
+  );
+
+  toggleClass(
     body,
     "topbar-search-active",
     enabled
@@ -2476,9 +2672,21 @@ function setGlobalSearchLock(active = false) {
     enabled
   );
 
+  toggleClass(
+    body,
+    "has-topbar-search-glass",
+    enabled
+  );
+
   setDataset(
     html,
     "topbarSearchOpen",
+    enabled ? "true" : false
+  );
+
+  setDataset(
+    html,
+    "searchActive",
     enabled ? "true" : false
   );
 
@@ -2504,6 +2712,12 @@ function setNodeMuted(node, active = false) {
 
   const enabled =
     Boolean(active);
+
+  toggleClass(
+    node,
+    "is-search-muted",
+    enabled
+  );
 
   setDataset(
     node,
@@ -2542,6 +2756,25 @@ function applySearchFocusMode(runtime, getDom) {
     true;
 
   setGlobalSearchLock(true);
+  setSearchGlassActive(true);
+
+  toggleClass(
+    topbar,
+    "is-search-focused",
+    true
+  );
+
+  toggleClass(
+    searchWrap,
+    "is-search-focused",
+    true
+  );
+
+  toggleClass(
+    searchResults,
+    "is-search-open",
+    true
+  );
 
   setDataset(
     topbar,
@@ -2601,8 +2834,6 @@ function applySearchFocusMode(runtime, getDom) {
     runtime?.AppCore || null,
     "topbar:search:focus-open",
     {
-      source:
-        "topbar-search",
       active:
         true,
     }
@@ -2631,6 +2862,25 @@ function clearSearchFocusMode(getDom) {
     false;
 
   setGlobalSearchLock(false);
+  setSearchGlassActive(false);
+
+  toggleClass(
+    topbar,
+    "is-search-focused",
+    false
+  );
+
+  toggleClass(
+    searchWrap,
+    "is-search-focused",
+    false
+  );
+
+  toggleClass(
+    searchResults,
+    "is-search-open",
+    false
+  );
 
   setDataset(
     topbar,
@@ -3304,6 +3554,10 @@ export function showResultsContainer(runtime, getDom) {
       "active"
     );
 
+    searchResults.classList.add(
+      "is-open"
+    );
+
     searchResults.setAttribute(
       "aria-hidden",
       "false"
@@ -3347,6 +3601,10 @@ export function hideResultsContainer(runtime, getDom) {
     try {
       searchResults.classList.remove(
         "active"
+      );
+
+      searchResults.classList.remove(
+        "is-open"
       );
 
       searchResults.hidden =
@@ -3950,6 +4208,10 @@ export async function runSearch({
   closeSidebarMobile,
   query = "",
 }) {
+  if (!runtime) {
+    return;
+  }
+
   const q =
     normalizeQuery(query);
 
@@ -3988,7 +4250,11 @@ export async function runSearch({
     const local =
       searchLocal(q);
 
-    if (local.length) {
+    if (
+      local.length &&
+      runtime.currentQuery === q &&
+      runtime.searchSeq === seq
+    ) {
       renderResults({
         AppCore,
         Router,

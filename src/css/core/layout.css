@@ -18,12 +18,21 @@
    - Main queda por debajo de sidebar/topbar.
    - El scroll NO empieza debajo/por detrás del topbar.
    - Tooltips/dropdowns no quedan tapados por vistas/hero.
+   - El glass de búsqueda afecta sólo al contenido.
+   - Sidebar y topbar quedan nítidos durante búsqueda.
 
    FIX CRÍTICO SCROLL:
    - .main-content es el scroll container real.
    - .main-content empieza en var(--app-offset-topbar).
    - #app-content sólo compensa tablehead si existe.
    - El scrollbar ya no se mete debajo del topbar.
+
+   FIX CRÍTICO SEARCH GLASS:
+   - El glass NO se pinta en body.
+   - El glass se pinta en .main-content::before/::after.
+   - No toca sidebar.
+   - No toca topbar.
+   - Bloquea scroll mientras search está activo.
 ========================================================= */
 
 
@@ -619,6 +628,17 @@ body.sidebar-open {
   --app-offset-tablehead: 0px;
 }
 
+/* Fallback si JS decide marcar estado sin :has(). */
+.main-content[data-tablehead-active="true"],
+body[data-tablehead-active="true"] .main-content {
+  --app-offset-tablehead: var(--tablehead-height);
+}
+
+.main-content[data-tablehead-active="false"],
+body[data-tablehead-active="false"] .main-content {
+  --app-offset-tablehead: 0px;
+}
+
 
 /* =========================================================
    TABLE HEAD SLOT CONTAINER
@@ -843,6 +863,249 @@ body.app-ready #view-container {
 .table-container::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
   background-clip: padding-box;
+}
+
+
+/* =========================================================
+   TOPBAR SEARCH GLASS · CONTENT ONLY
+   REGLA:
+   - Glass sólo en .main-content.
+   - No afecta sidebar.
+   - No afecta topbar.
+   - No afecta command palette.
+   - Bloquea scroll durante búsqueda.
+========================================================= */
+
+/*
+   KILLER:
+   Si topbar.css o una versión anterior siguen pintando body::before/body::after,
+   esto lo neutraliza con más especificidad.
+*/
+html body.topbar-search-active::before,
+html body.search-active::before,
+html body.search-open::before,
+html body.has-topbar-search-glass::before,
+html body[data-search-active="true"]::before,
+html body[data-topbar-search-open="true"]::before,
+html body.topbar-search-active::after,
+html body.search-active::after,
+html body.search-open::after,
+html body.has-topbar-search-glass::after,
+html body[data-search-active="true"]::after,
+html body[data-topbar-search-open="true"]::after {
+  content: none !important;
+  display: none !important;
+}
+
+html.topbar-search-active,
+html[data-topbar-search-open="true"],
+body.topbar-search-active,
+body.search-active,
+body.search-open,
+body.has-topbar-search-glass,
+body[data-search-active="true"],
+body[data-topbar-search-open="true"] {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+}
+
+body.topbar-search-active,
+body.search-active,
+body.search-open,
+body.has-topbar-search-glass,
+body[data-search-active="true"],
+body[data-topbar-search-open="true"] {
+  touch-action: none;
+}
+
+body.topbar-search-active .main-content,
+body.search-active .main-content,
+body.search-open .main-content,
+body.has-topbar-search-glass .main-content,
+body[data-search-active="true"] .main-content,
+body[data-topbar-search-open="true"] .main-content {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+  scrollbar-gutter: stable;
+}
+
+body.topbar-search-active .main-content::before,
+body.search-active .main-content::before,
+body.search-open .main-content::before,
+body.has-topbar-search-glass .main-content::before,
+body[data-search-active="true"] .main-content::before,
+body[data-topbar-search-open="true"] .main-content::before {
+  content: "";
+
+  position: fixed;
+
+  inset-block-start: var(--app-offset-topbar);
+  inset-inline-start: var(--app-sidebar-current-width);
+  inset-inline-end: 0;
+  inset-block-end: 0;
+
+  z-index: calc(var(--z-topbar) - 8);
+
+  pointer-events: none;
+
+  background:
+    var(
+      --topbar-search-glass-aura,
+      radial-gradient(
+        circle at 50% 0%,
+        color-mix(in srgb, var(--accent), transparent 82%),
+        transparent 34%
+      ),
+      radial-gradient(
+        circle at 18% 22%,
+        color-mix(in srgb, var(--info), transparent 90%),
+        transparent 28%
+      ),
+      radial-gradient(
+        circle at 82% 22%,
+        color-mix(in srgb, var(--accent-3), transparent 91%),
+        transparent 30%
+      )
+    ),
+    var(
+      --topbar-search-glass-bg,
+      linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--main-bg), transparent 18%),
+        color-mix(in srgb, var(--main-bg), transparent 8%)
+      )
+    );
+
+  backdrop-filter: var(--topbar-search-glass-blur, blur(20px) saturate(1.08));
+  -webkit-backdrop-filter: var(--topbar-search-glass-blur, blur(20px) saturate(1.08));
+
+  opacity: 1;
+
+  transform: translateZ(0);
+}
+
+body.topbar-search-active .main-content::after,
+body.search-active .main-content::after,
+body.search-open .main-content::after,
+body.has-topbar-search-glass .main-content::after,
+body[data-search-active="true"] .main-content::after,
+body[data-topbar-search-open="true"] .main-content::after {
+  content: "";
+
+  position: fixed;
+
+  inset-block-start: var(--app-offset-topbar);
+  inset-inline-start: var(--app-sidebar-current-width);
+  inset-inline-end: 0;
+  inset-block-end: 0;
+
+  z-index: calc(var(--z-topbar) - 7);
+
+  pointer-events: none;
+
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--text-strong), transparent 98.8%) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--text-strong), transparent 98.8%) 1px,
+      transparent 1px
+    );
+
+  background-size: 42px 42px;
+
+  mask-image: linear-gradient(180deg, rgba(0,0,0,.18), transparent 86%);
+  -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,.18), transparent 86%);
+
+  opacity: .16;
+}
+
+body.topbar-search-active #app-content,
+body.search-active #app-content,
+body.search-open #app-content,
+body.has-topbar-search-glass #app-content,
+body[data-search-active="true"] #app-content,
+body[data-topbar-search-open="true"] #app-content,
+body.topbar-search-active #view-container,
+body.search-active #view-container,
+body.search-open #view-container,
+body.has-topbar-search-glass #view-container,
+body[data-search-active="true"] #view-container,
+body[data-topbar-search-open="true"] #view-container {
+  pointer-events: none;
+  user-select: none;
+}
+
+body.topbar-search-active #app-content *,
+body.search-active #app-content *,
+body.search-open #app-content *,
+body.has-topbar-search-glass #app-content *,
+body[data-search-active="true"] #app-content *,
+body[data-topbar-search-open="true"] #app-content * {
+  pointer-events: none;
+}
+
+body.topbar-search-active .table-head,
+body.search-active .table-head,
+body.search-open .table-head,
+body.has-topbar-search-glass .table-head,
+body[data-search-active="true"] .table-head,
+body[data-topbar-search-open="true"] .table-head {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Sidebar siempre nítido y por encima del glass de contenido. */
+html body.topbar-search-active #sidebar-mount,
+html body.search-active #sidebar-mount,
+html body.search-open #sidebar-mount,
+html body.has-topbar-search-glass #sidebar-mount,
+html body[data-search-active="true"] #sidebar-mount,
+html body[data-topbar-search-open="true"] #sidebar-mount,
+html body.topbar-search-active [data-sidebar-mount],
+html body.search-active [data-sidebar-mount],
+html body.search-open [data-sidebar-mount],
+html body.has-topbar-search-glass [data-sidebar-mount],
+html body[data-search-active="true"] [data-sidebar-mount],
+html body[data-topbar-search-open="true"] [data-sidebar-mount] {
+  z-index: var(--z-sidebar);
+}
+
+html body.topbar-search-active .sidebar,
+html body.search-active .sidebar,
+html body.search-open .sidebar,
+html body.has-topbar-search-glass .sidebar,
+html body[data-search-active="true"] .sidebar,
+html body[data-topbar-search-open="true"] .sidebar {
+  filter: none !important;
+  opacity: 1 !important;
+}
+
+/* Topbar siempre nítido y por encima del glass de contenido. */
+html body.topbar-search-active #topbar-mount,
+html body.search-active #topbar-mount,
+html body.search-open #topbar-mount,
+html body.has-topbar-search-glass #topbar-mount,
+html body[data-search-active="true"] #topbar-mount,
+html body[data-topbar-search-open="true"] #topbar-mount,
+html body.topbar-search-active [data-topbar-mount],
+html body.search-active [data-topbar-mount],
+html body.search-open [data-topbar-mount],
+html body.has-topbar-search-glass [data-topbar-mount],
+html body[data-search-active="true"] [data-topbar-mount],
+html body[data-topbar-search-open="true"] [data-topbar-mount] {
+  z-index: var(--z-topbar);
+}
+
+html body.topbar-search-active .topbar,
+html body.search-active .topbar,
+html body.search-open .topbar,
+html body.has-topbar-search-glass .topbar,
+html body[data-search-active="true"] .topbar,
+html body[data-topbar-search-open="true"] .topbar {
+  filter: none !important;
 }
 
 
@@ -1395,6 +1658,21 @@ body.auth-screen .content-wrapper {
     inset-inline-start: 0;
   }
 
+  body.topbar-search-active .main-content::before,
+  body.search-active .main-content::before,
+  body.search-open .main-content::before,
+  body.has-topbar-search-glass .main-content::before,
+  body[data-search-active="true"] .main-content::before,
+  body[data-topbar-search-open="true"] .main-content::before,
+  body.topbar-search-active .main-content::after,
+  body.search-active .main-content::after,
+  body.search-open .main-content::after,
+  body.has-topbar-search-glass .main-content::after,
+  body[data-search-active="true"] .main-content::after,
+  body[data-topbar-search-open="true"] .main-content::after {
+    inset-inline-start: 0;
+  }
+
   .content-wrapper {
     padding: var(--space-sm);
     gap: var(--space-sm);
@@ -1479,6 +1757,25 @@ body.auth-screen .content-wrapper {
 
 
 /* =========================================================
+   REDUCED TRANSPARENCY
+========================================================= */
+
+@media (prefers-reduced-transparency: reduce) {
+  body.topbar-search-active .main-content::before,
+  body.search-active .main-content::before,
+  body.search-open .main-content::before,
+  body.has-topbar-search-glass .main-content::before,
+  body[data-search-active="true"] .main-content::before,
+  body[data-topbar-search-open="true"] .main-content::before {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+
+    background: color-mix(in srgb, var(--main-bg), transparent 4%);
+  }
+}
+
+
+/* =========================================================
    REDUCED MOTION
 ========================================================= */
 
@@ -1490,6 +1787,8 @@ body.auth-screen .content-wrapper {
   .layout,
   .app-shell,
   .main-content,
+  .main-content::before,
+  .main-content::after,
   .table-head,
   .panel-content,
   .sidebar,
@@ -1510,6 +1809,28 @@ body.auth-screen .content-wrapper {
 
   .panel-content.table-mode .table-container {
     scroll-behavior: auto;
+  }
+}
+
+
+/* =========================================================
+   FORCED COLORS
+========================================================= */
+
+@media (forced-colors: active) {
+  body.topbar-search-active .main-content::before,
+  body.search-active .main-content::before,
+  body.search-open .main-content::before,
+  body.has-topbar-search-glass .main-content::before,
+  body[data-search-active="true"] .main-content::before,
+  body[data-topbar-search-open="true"] .main-content::before,
+  body.topbar-search-active .main-content::after,
+  body.search-active .main-content::after,
+  body.search-open .main-content::after,
+  body.has-topbar-search-glass .main-content::after,
+  body[data-search-active="true"] .main-content::after,
+  body[data-topbar-search-open="true"] .main-content::after {
+    display: none !important;
   }
 }
 
@@ -1547,6 +1868,21 @@ body.auth-screen .content-wrapper {
 
     background: transparent !important;
     color: #000000 !important;
+  }
+
+  body.topbar-search-active .main-content::before,
+  body.search-active .main-content::before,
+  body.search-open .main-content::before,
+  body.has-topbar-search-glass .main-content::before,
+  body[data-search-active="true"] .main-content::before,
+  body[data-topbar-search-open="true"] .main-content::before,
+  body.topbar-search-active .main-content::after,
+  body.search-active .main-content::after,
+  body.search-open .main-content::after,
+  body.has-topbar-search-glass .main-content::after,
+  body[data-search-active="true"] .main-content::after,
+  body[data-topbar-search-open="true"] .main-content::after {
+    display: none !important;
   }
 
   #sidebar-mount,

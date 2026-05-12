@@ -1,8 +1,9 @@
 /* =========================================================
    ONION SUPPORT — UI COMPONENTS
-   Archivo: src/css/components/ui.css
+   Archivo: /src/css/components/ui.css
 
    FINAL PRO SYSTEM · APPLE STYLE · EXTREME 10/10
+   TOKEN PRO SYSTEM · GLOBAL COMPONENTS · GOD MODE
 
    REGLA DE ARQUITECTURA:
    - Este archivo NO define paletas globales.
@@ -10,7 +11,9 @@
    - Este archivo NO contiene [data-theme="light"].
    - variables.css define dark/base.
    - light.css define overrides [data-theme="light"].
-   - ui.css consume tokens y pinta componentes.
+   - ui.css consume tokens y pinta componentes globales.
+   - Las vistas especializan sólo dentro de /src/css/views/.
+   - Los templates JS emiten clases/atributos; no estilos.
 
    COMPONENTES:
    - panels / cards
@@ -43,6 +46,7 @@
 .ui-page-btn,
 .toast-close,
 .ui-modal-close,
+.ui-drawer-close,
 .error-actions button {
   -webkit-tap-highlight-color: transparent;
 }
@@ -53,6 +57,7 @@
 .ui-page-btn,
 .toast-close,
 .ui-modal-close,
+.ui-drawer-close,
 .error-actions button {
   user-select: none;
 }
@@ -65,6 +70,7 @@
 .ui-page-btn:focus-visible,
 .toast-close:focus-visible,
 .ui-modal-close:focus-visible,
+.ui-drawer-close:focus-visible,
 .error-actions button:focus-visible,
 .ui-dropdown .dropdown-item:focus-visible {
   outline: none;
@@ -84,9 +90,10 @@
 
   overflow: hidden;
 
-  background: var(--panel-bg);
   border: 1px solid var(--panel-border);
   border-radius: var(--panel-radius);
+
+  background: var(--panel-bg);
   box-shadow: var(--panel-shadow);
 
   color: var(--text);
@@ -98,7 +105,8 @@
     transform var(--duration-fast) var(--ease-out),
     box-shadow var(--duration-normal) var(--ease-standard),
     border-color var(--duration-normal) var(--ease-standard),
-    background var(--duration-normal) var(--ease-standard);
+    background var(--duration-normal) var(--ease-standard),
+    opacity var(--duration-normal) var(--ease-standard);
 }
 
 .panel-block::before {
@@ -157,9 +165,10 @@
 
   overflow: hidden;
 
-  background: var(--card-bg);
   border: 1px solid var(--card-border);
   border-radius: var(--card-radius);
+
+  background: var(--card-bg);
   box-shadow: var(--card-shadow);
 
   color: var(--text);
@@ -171,7 +180,8 @@
     transform var(--duration-fast) var(--ease-out),
     box-shadow var(--duration-normal) var(--ease-standard),
     border-color var(--duration-normal) var(--ease-standard),
-    background var(--duration-normal) var(--ease-standard);
+    background var(--duration-normal) var(--ease-standard),
+    opacity var(--duration-normal) var(--ease-standard);
 }
 
 .ui-card::before {
@@ -398,8 +408,23 @@
     var(--shadow-inner);
 }
 
+.ui-btn-info {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--info), var(--text-on-accent) 14%),
+      var(--info)
+    );
+  color: var(--text-on-accent);
+  border-color: color-mix(in srgb, var(--info), transparent 68%);
+  box-shadow:
+    0 10px 22px color-mix(in srgb, var(--info), transparent 84%),
+    var(--shadow-inner);
+}
+
 .ui-btn-success:hover,
-.ui-btn-warning:hover {
+.ui-btn-warning:hover,
+.ui-btn-info:hover {
   filter: brightness(1.02);
 }
 
@@ -582,14 +607,16 @@
 .ui-select.is-error,
 .ui-textarea.is-error {
   border-color: var(--input-border-error);
-  box-shadow: var(--ui-ring-error, 0 0 0 4px color-mix(in srgb, var(--error), transparent 88%));
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--error), transparent 88%);
 }
 
 .ui-input.is-success,
 .ui-select.is-success,
 .ui-textarea.is-success {
   border-color: var(--input-border-success);
-  box-shadow: var(--ui-ring-success, 0 0 0 4px color-mix(in srgb, var(--success), transparent 88%));
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--success), transparent 88%);
 }
 
 .ui-help {
@@ -1427,7 +1454,12 @@
   inset: 0;
   z-index: var(--z-modal);
 
-  background: var(--backdrop-bg);
+  display: grid;
+  place-items: center;
+
+  padding: var(--space-lg);
+
+  background: var(--overlay-bg, var(--backdrop-bg));
 
   backdrop-filter: var(--overlay-blur, blur(10px));
   -webkit-backdrop-filter: var(--overlay-blur, blur(10px));
@@ -1435,6 +1467,7 @@
 
 .ui-modal {
   inline-size: var(--modal-width-md);
+  max-inline-size: 100%;
   max-block-size: min(85dvh, 900px);
 
   overflow: auto;
@@ -1451,6 +1484,7 @@
   color: var(--text);
 
   scrollbar-width: thin;
+  scrollbar-gutter: stable;
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
@@ -1504,7 +1538,8 @@
   line-height: var(--line-snug);
 }
 
-.ui-modal-close {
+.ui-modal-close,
+.ui-drawer-close {
   display: grid;
   place-items: center;
 
@@ -1525,12 +1560,14 @@
     transform var(--duration-fast) var(--ease-out);
 }
 
-.ui-modal-close:hover {
+.ui-modal-close:hover,
+.ui-drawer-close:hover {
   background: var(--surface-hover);
   color: var(--text-strong);
 }
 
-.ui-modal-close:active {
+.ui-modal-close:active,
+.ui-drawer-close:active {
   transform: scale(.96);
 }
 
@@ -1552,6 +1589,10 @@
   box-shadow: var(--shadow-xl);
 
   overflow: auto;
+
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 
@@ -1561,6 +1602,7 @@
 
 .ui-table-wrap {
   inline-size: 100%;
+  min-inline-size: 0;
 
   overflow: hidden;
 
@@ -1574,11 +1616,18 @@
 
 .ui-table-scroll {
   inline-size: 100%;
+  min-inline-size: 0;
+
   overflow: auto;
+
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 .ui-table {
   inline-size: 100%;
+  min-inline-size: 720px;
 
   border-collapse: collapse;
   border-spacing: 0;
@@ -1727,7 +1776,8 @@
     background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-out);
+    transform var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .ui-page-btn:hover {
@@ -2128,6 +2178,10 @@
     max-inline-size: none;
   }
 
+  .ui-overlay {
+    padding: var(--space-sm);
+  }
+
   .ui-modal {
     inline-size: calc(100vw - 20px);
     max-block-size: 88dvh;
@@ -2240,6 +2294,7 @@
   .ui-page-btn,
   .ui-tab,
   .ui-modal-close,
+  .ui-drawer-close,
   .toast-close {
     transition: none !important;
     animation: none !important;
